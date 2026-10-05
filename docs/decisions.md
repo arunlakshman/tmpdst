@@ -15,6 +15,8 @@
 | F | Throttling is admission control inside `Step`: soft limit means Produce `ThrottleTimeMs` + mute the connection (KIP-219); hard limit means pause reads on all client connections; hysteresis on resume. Never drop admitted requests. Details: `flow-control.md`. |
 | G | Two inboxes per node. **Control** (`Started`, `TimerFired`, all `Obj*Done`, `CPDone`, `SendDone`) is strict priority and bounded by construction. **Data** (`ConnOpened`, `BytesReceived`, `ConnClosed`, one ordered stream per connection) is bounded. Classification is a fixed table `core.ClassOf`. |
 | H | The priority policy is a pure function (`core.InboxPolicy`) shared by the production loop and the simulator. The simulator models per-node inboxes and a seeded CPU `CostModel`, so priority, head-of-line blocking and metastability are deterministic and simulation-tested. |
+| I | Deterministic packages (`core/`, `sim/`) use an **exact-path import allow-list** (fail closed), not a banned list, enforced by `tools/detcheck`. detcheck also bans goroutines, channels, `select`, map iteration, reflect map iteration and package-level vars (`//detcheck:ok <reason>` to suppress). A third-party module needs an audit record at `docs/dep-audits/<module>@<version>.md` (so a version bump forces a re-audit). CI: `scripts/ci-determinism.sh` (plus `.github/workflows/determinism.yml`). Audits: `scripts/audit-dep.sh` and the `audit-go-dependency` skill. |
+| J | Go 1.24 (required by kmsg v1.14.0). kmsg rules: the framer gives each frame a fresh buffer that is never reused (decoded byte fields alias it); `ReadFrom` only, never `UnsafeReadFrom`; we compute CRC/lengths/timestamps ourselves. See `docs/dep-audits/github.com/twmb/franz-go/pkg/kmsg@v1.14.0.md`. |
 
 ## Threading model
 

@@ -54,6 +54,36 @@
 // kernel's view of the file is unknowable ("fsyncgate"), so the server should
 // fail-stop with Halt rather than keep serving possibly-lost state.
 //
+// # Errors: 500, or 500 + Halt
+//
+// The danger is not the 500 itself (a 500 promises nothing) but what later
+// reads observe. If a failed mutation may have changed obj/ visibly but not
+// durably, a later GET can observe the change and a crash can then undo it:
+// the client saw a value appear and vanish, which no linearization explains
+// ("crashes erase nothing"). The per-key lock only protects reads while the
+// mutation is in flight; once it has replied, the next GET on that key runs.
+// So the rule is: any error at or after the first step that can touch obj/
+// halts, and errors before it are a plain 500.
+//
+//	FSRead (GET, COPY src)    ENOENT → 404; EIO → 500. Nothing changed.
+//	FSWrite(tmp)              any error → 500. Only a temp file changed;
+//	                          the next recovery deletes it.
+//	FSFsync(tmp)              any error → 500 + Halt (fsyncgate).
+//	FSRename(tmp→obj)         any error → 500 + Halt: it may have applied.
+//	FSUnlink(obj) (DELETE)    ENOENT → 404; EIO → 500 + Halt: it may have applied.
+//	FSFsyncDir(obj)           any error → 500 + Halt (fsyncgate, and the
+//	                          rename/unlink above it is visible but not durable).
+//	recovery (list, unlink,   any error (except unlink ENOENT) → Halt; the
+//	fsync tmp/)               next boot retries recovery from scratch.
+//
+// Halt is always the last action of its Step; the 500 Reply (if any)
+// precedes it, and the server ignores every event after it. Corrupt object
+// files are a plain 500 plus a CorruptObject fact, not a Halt: the file is
+// already durable, restarting would not fix it.
+//
+// Every successful mutation emits Emit{Committed} immediately followed by its
+// 200 Reply, in the same Step, right after FSFsyncDirDone(obj) returns OK.
+//
 // # Concurrency
 //
 // Operations on the same key are serialized by a per-key FIFO queue inside the
@@ -62,11 +92,19 @@
 // and runs once it is at the head of all of them. Because every queue is
 // ordered by the same arrival sequence, no cycle (deadlock) is possible.
 //
+// In the code the queues are implicit: the server keeps one slice of
+// unfinished requests in arrival order, and the queue of a key is the
+// subsequence of that slice touching the key. Invalid requests (bad key,
+// oversize PUT) get 400 at once and never enter it.
+//
 // # Recovery
 //
 // Memory is disposable. On Started the server lists <dir>/tmp, unlinks every
-// leftover temp file, fsyncs the tmp directory, and only then serves requests.
-// Requests that arrive during recovery are queued, not rejected. Committed
+// leftover temp file, fsyncs the tmp directory (even if nothing was removed),
+// emits Recovered, and only then serves requests, starting the queued ones in
+// arrival order. Requests that arrive during recovery are queued, not
+// rejected. Completions with an unknown IOID (or of the wrong kind for the
+// step the owner is on) are ignored. Committed
 // objects need no recovery: the rename protocol means obj/ only ever holds
 // complete files.
 package core

@@ -9,18 +9,54 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
+
+	"manifester/toys3/core"
+	"manifester/toys3/prod"
 )
 
 func main() {
 	dir := flag.String("dir", "./toys3-data", "data directory (obj/ and tmp/ are created inside)")
 	addr := flag.String("addr", ":8080", "HTTP listen address")
+	maxObj := flag.Int("max-object", 64<<20, "largest object in bytes (0 = unlimited)")
 	flag.Parse()
 
-	log.Printf("toys3: dir=%s addr=%s", *dir, *addr)
-	// Phase 2: prod.PrepareDir(*dir); loop := prod.NewLoop(core.Config{Dir: *dir},
-	// core.NewMachine, prod.OSExecutor{}, 1024); go loop.Run(ctx);
-	// http.ListenAndServe(*addr, &prod.Handler{Loop: loop}).
-	log.Fatal("toys3: not implemented yet (phase 2)")
+	root, err := filepath.Abs(*dir)
+	if err != nil {
+		log.Fatalf("toys3: %v", err)
+	}
+	root = filepath.ToSlash(root)
+	log.Printf("toys3: dir=%s addr=%s", root, *addr)
+	if err := prod.PrepareDir(root); err != nil {
+		log.Fatalf("toys3: prepare %s: %v", root, err)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	loop := prod.NewLoop(core.Config{Dir: root, MaxObjectSize: *maxObj}, core.NewMachine, prod.OSExecutor{}, 1024)
+	srv := &http.Server{Addr: *addr, Handler: &prod.Handler{Loop: loop, MaxBody: int64(*maxObj)}}
+
+	go func() {
+		err := loop.Run(ctx)
+		if errors.Is(err, prod.ErrHalted) {
+			// Fail-stop: in-memory state is untrusted. A supervisor restarts us
+			// and recovery runs on boot.
+			log.Fatalf("toys3: exiting: %v", err)
+		}
+		srv.Close()
+	}()
+
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalf("toys3: %v", err)
+	}
+	log.Printf("toys3: stopped")
 }

@@ -2,11 +2,20 @@ package prod
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"log"
 	"sync"
 	"time"
 
 	"manifester/toys3/core"
 )
+
+// ErrHalted wraps the reason of a core.Halt returned by Run.
+var ErrHalted = errors.New("toys3: server halted")
+
+// ErrStopped is returned by Submit when the loop is not (or no longer) running.
+var ErrStopped = errors.New("toys3: loop stopped")
 
 // Loop owns one core.Machine and is the only goroutine that calls Step.
 type Loop struct {
@@ -14,7 +23,11 @@ type Loop struct {
 	factory core.Factory
 	exec    Executor
 	inbox   chan core.EventBody
-	start   time.Time // At = time.Since(start), monotonic
+	start   time.Time     // At = time.Since(start), monotonic
+	stopped chan struct{} // closed when Run returns
+
+	// Log receives facts and lifecycle lines; nil means log.Default().
+	Log *log.Logger
 
 	mu      sync.Mutex
 	nextReq core.ClientReq
@@ -29,6 +42,8 @@ func NewLoop(cfg core.Config, factory core.Factory, exec Executor, inboxSize int
 		factory: factory,
 		exec:    exec,
 		inbox:   make(chan core.EventBody, inboxSize),
+		start:   time.Now(),
+		stopped: make(chan struct{}),
 		waiters: map[core.ClientReq]chan core.Reply{},
 	}
 }
@@ -41,14 +56,99 @@ func NewLoop(cfg core.Config, factory core.Factory, exec Executor, inboxSize int
 //	Emit      → structured log line
 //	Halt      → return an error; the process exits and a supervisor restarts it
 //
-// It returns when ctx is cancelled or on Halt.
+// It returns when ctx is cancelled or on Halt. Run may be called once.
 func (l *Loop) Run(ctx context.Context) error {
-	panic("toys3/prod: Loop.Run unimplemented (phase 2)")
+	defer close(l.stopped)
+	m := l.factory(Env{}, l.cfg)
+	var ev core.EventBody = core.Started{}
+	for {
+		at := core.Time(time.Since(l.start)) // monotonic clock reading
+		if err := l.dispatch(m.Step(core.Event{At: at, Body: ev})); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case ev = <-l.inbox:
+		}
+	}
+}
+
+// dispatch executes the actions of one Step in order.
+func (l *Loop) dispatch(acts []core.Action) error {
+	for _, a := range acts {
+		switch a := a.(type) {
+		case core.Reply:
+			l.mu.Lock()
+			ch := l.waiters[a.Client]
+			delete(l.waiters, a.Client)
+			l.mu.Unlock()
+			if ch != nil {
+				ch <- a // buffered(1); exactly one reply per request
+			}
+		case core.Emit:
+			l.logf("toys3: fact %T %+v", a.Fact, a.Fact)
+		case core.Halt:
+			l.logf("toys3: HALT: %s", a.Reason)
+			return fmt.Errorf("%w: %s", ErrHalted, a.Reason)
+		default:
+			l.exec.Execute(a, l.post)
+		}
+	}
+	return nil
+}
+
+// post delivers a completion to the inbox, or drops it if Run has returned
+// (a completion addressed to a dead incarnation).
+func (l *Loop) post(b core.EventBody) {
+	select {
+	case l.inbox <- b:
+	case <-l.stopped:
+	}
+}
+
+func (l *Loop) logf(format string, args ...any) {
+	lg := l.Log
+	if lg == nil {
+		lg = log.Default()
+	}
+	lg.Printf(format, args...)
 }
 
 // Submit sends op to the server as a core.Request with a fresh ClientReq and
 // waits for its Reply. If ctx ends first the reply is discarded on arrival;
 // the operation itself may still complete (the client just never learns).
 func (l *Loop) Submit(ctx context.Context, op core.Op) (core.Reply, error) {
-	panic("toys3/prod: Loop.Submit unimplemented (phase 2)")
+	ch := make(chan core.Reply, 1)
+	l.mu.Lock()
+	l.nextReq++
+	id := l.nextReq
+	l.waiters[id] = ch
+	l.mu.Unlock()
+	defer func() {
+		l.mu.Lock()
+		delete(l.waiters, id)
+		l.mu.Unlock()
+	}()
+
+	select {
+	case l.inbox <- core.Request{Client: id, Op: op}:
+	case <-ctx.Done():
+		return core.Reply{}, ctx.Err()
+	case <-l.stopped:
+		return core.Reply{}, ErrStopped
+	}
+	select {
+	case rep := <-ch:
+		return rep, nil
+	case <-ctx.Done():
+		return core.Reply{}, ctx.Err()
+	case <-l.stopped:
+		select { // a Reply dispatched just before a Halt still counts
+		case rep := <-ch:
+			return rep, nil
+		default:
+			return core.Reply{}, ErrStopped
+		}
+	}
 }

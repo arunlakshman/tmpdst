@@ -1,0 +1,72 @@
+// Package core is the deterministic heart of toys3, a toy single-node S3-style
+// object server whose only job is to be a small, honest target for
+// deterministic simulation testing (DST). See ../DESIGN.md and ../../loop.md.
+//
+// The server is a StateMachine: Step(Event) []Action. It never performs I/O.
+// Client requests and filesystem completions arrive as Events; replies and
+// filesystem operations leave as Actions. A runtime (../prod for real disks,
+// ../sim for the simulator) executes the actions and feeds results back in.
+//
+// Rules (enforced by tools/detcheck in CI):
+//   - imports only from tools/detcheck/allow.txt (no time, os, math/rand, sync);
+//   - no goroutines, channels, select, or package-level variables;
+//   - never let map iteration order decide behavior;
+//   - Events and Actions are plain data; byte slices are immutable once sent.
+//
+// # On-disk layout
+//
+// Everything lives under Config.Dir (the runtime creates both subdirectories,
+// durably, before delivering Started):
+//
+//	<dir>/obj/<EscapeKey(key)>   one file per committed object
+//	<dir>/tmp/<id>               in-progress writes; garbage after a crash
+//
+// An object file is a fixed header followed by the payload (see EncodeObject):
+//
+//	offset size  field
+//	0      4     magic "TOY3"
+//	4      4     CRC-32 (IEEE) of the payload, little endian
+//	8      8     payload length in bytes, little endian
+//	16     n     payload
+//
+// A torn or truncated file fails the length or CRC check, so corruption is
+// detected and reported as 500, never served as 200. With the protocol below a
+// correct server never produces a torn object file; the CRC is the safety net
+// that turns a protocol bug into a visible failure instead of silent garbage.
+//
+// # Durable write protocol
+//
+// A 200 for a mutation is sent only after every byte and directory entry it
+// depends on has been fsynced:
+//
+//	PUT    FSWrite(tmp) → FSFsync(tmp) → FSRename(tmp→obj) → FSFsyncDir(obj/) → Reply 200
+//	DELETE FSUnlink(obj) → FSFsyncDir(obj/) → Reply 200     (ErrNotFound → Reply 404)
+//	COPY   FSRead(src) → verify CRC → then exactly the PUT path for dst
+//	                                           (src ErrNotFound → 404, corrupt → 500)
+//	GET    FSRead(obj) → verify CRC → Reply 200 / 404 / 500 (corrupt)
+//
+// Why each step: the file fsync makes the bytes durable; the rename makes the
+// switch from old to new contents atomic (readers see old or new, never a mix);
+// the directory fsync makes the rename itself durable. Skipping any one of them
+// is a bug the simulator's crash model is designed to find.
+//
+// Any filesystem error replies 500 and is never acked. After an fsync error the
+// kernel's view of the file is unknowable ("fsyncgate"), so the server should
+// fail-stop with Halt rather than keep serving possibly-lost state.
+//
+// # Concurrency
+//
+// Operations on the same key are serialized by a per-key FIFO queue inside the
+// state machine; different keys proceed concurrently. COPY occupies both src
+// and dst: a request joins the queue of every key it touches in arrival order
+// and runs once it is at the head of all of them. Because every queue is
+// ordered by the same arrival sequence, no cycle (deadlock) is possible.
+//
+// # Recovery
+//
+// Memory is disposable. On Started the server lists <dir>/tmp, unlinks every
+// leftover temp file, fsyncs the tmp directory, and only then serves requests.
+// Requests that arrive during recovery are queued, not rejected. Committed
+// objects need no recovery: the rename protocol means obj/ only ever holds
+// complete files.
+package core

@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-pkgs=(./core/... ./sim/...)
+pkgs=(./core/... ./sim/... ./toys3/core/... ./toys3/sim/...)
 
 echo "== detcheck"
 go run ./tools/detcheck "${pkgs[@]}"

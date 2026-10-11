@@ -92,6 +92,11 @@ func loadAllow() (allowList, error) {
 }
 
 func run(pass *analysis.Pass) (any, error) {
+	// The go-tool-generated test main (package path "x.test") imports os and
+	// testing by construction; it is not our code.
+	if strings.HasSuffix(pass.Pkg.Path(), ".test") {
+		return nil, nil
+	}
 	al, err := loadAllow()
 	if err != nil {
 		return nil, err

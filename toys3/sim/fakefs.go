@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"manifester/toys3/core"
+	"manifester/toys3/format"
 )
 
 // FSFaults configures the fake filesystem's adversary. Zero value: an honest,
@@ -93,7 +94,7 @@ type fdir struct {
 // or (TornWriteProb) keeps a random prefix of volatile. Afterwards current ==
 // durable everywhere. A correct server survives every such outcome.
 //
-// Directories are fixed at construction (core.ObjDir and core.TmpDir of the
+// Directories are fixed at construction (format.ObjDir and format.TmpDir of the
 // root); there is no mkdir.
 type FakeFS struct {
 	rng     *Rand
@@ -614,8 +615,8 @@ func (fs *FakeFS) hashInode(h uint64, id InodeID) uint64 {
 	if !ok {
 		return Fold(h, 0)
 	}
-	h = Fold(h, uint64(len(in.durable))<<32|uint64(core.Checksum(in.durable)))
-	h = Fold(h, uint64(len(in.volatile))<<32|uint64(core.Checksum(in.volatile)))
+	h = Fold(h, uint64(len(in.durable))<<32|uint64(format.Checksum(in.durable)))
+	h = Fold(h, uint64(len(in.volatile))<<32|uint64(format.Checksum(in.volatile)))
 	var flags uint64
 	if in.dirty {
 		flags |= 1

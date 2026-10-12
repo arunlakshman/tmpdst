@@ -15,24 +15,10 @@
 //
 // # On-disk layout
 //
-// Everything lives under Config.Dir (the runtime creates both subdirectories,
-// durably, before delivering Started):
-//
-//	<dir>/obj/<EscapeKey(key)>   one file per committed object
-//	<dir>/tmp/<id>               in-progress writes; garbage after a crash
-//
-// An object file is a fixed header followed by the payload (see EncodeObject):
-//
-//	offset size  field
-//	0      4     magic "TOY3"
-//	4      4     CRC-32 (IEEE) of the payload, little endian
-//	8      8     payload length in bytes, little endian
-//	16     n     payload
-//
-// A torn or truncated file fails the length or CRC check, so corruption is
-// detected and reported as 500, never served as 200. With the protocol below a
-// correct server never produces a torn object file; the CRC is the safety net
-// that turns a protocol bug into a visible failure instead of silent garbage.
+// Object files and their paths are defined by package ../format: committed
+// objects live in <dir>/obj/, in-progress writes in <dir>/tmp/, and every
+// object file carries a header with a CRC so a torn file is detected (500),
+// never served (200).
 //
 // # Durable write protocol
 //

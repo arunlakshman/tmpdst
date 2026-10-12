@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"manifester/toys3/core"
+	"manifester/toys3/format"
 )
 
 // Deliberately broken servers. Each wraps the real core.Server and rewrites
@@ -78,7 +79,7 @@ func (m *skipper) StateHash() uint64 { return m.inner.StateHash() }
 func isObjFsyncDir(dir string) func(core.Action) bool {
 	return func(a core.Action) bool {
 		d, ok := a.(core.FSFsyncDir)
-		return ok && d.Dir == core.ObjDir(dir)
+		return ok && d.Dir == format.ObjDir(dir)
 	}
 }
 
@@ -290,11 +291,11 @@ func (m *eventRewriter) StateHash() uint64 { return m.inner.StateHash() }
 func mutSkipCRC(env core.Env, cfg core.Config) core.Machine {
 	return &eventRewriter{inner: core.New(env, cfg), rewrite: func(b core.EventBody) core.EventBody {
 		d, ok := b.(core.FSReadDone)
-		if !ok || d.Err != core.OK || len(d.Data) < core.HeaderSize || string(d.Data[:4]) != core.Magic ||
-			binary.LittleEndian.Uint64(d.Data[8:]) != uint64(len(d.Data)-core.HeaderSize) {
+		if !ok || d.Err != core.OK || len(d.Data) < format.HeaderSize || string(d.Data[:4]) != format.Magic ||
+			binary.LittleEndian.Uint64(d.Data[8:]) != uint64(len(d.Data)-format.HeaderSize) {
 			return b
 		}
-		d.Data = core.EncodeObject(d.Data[core.HeaderSize:]) // "verified"
+		d.Data = format.EncodeObject(d.Data[format.HeaderSize:]) // "verified"
 		return d
 	}}
 }

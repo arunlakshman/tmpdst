@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"manifester/toys3/core"
+	"manifester/toys3/format"
 )
 
 // DescribeOp renders a client operation compactly.
@@ -30,7 +31,7 @@ func describePayload(b []byte) string {
 	if b == nil {
 		return "nil"
 	}
-	if p, ok := core.DecodeObject(b); ok {
+	if p, ok := format.DecodeObject(b); ok {
 		if w, ok := ValueWriter(p); ok {
 			return fmt.Sprintf("obj(value-of-%d)", w)
 		}

@@ -1,5 +1,7 @@
 package core
 
+import "manifester/toys3/format"
+
 // Config is the server's static configuration.
 type Config struct {
 	// Dir is the data root; obj/ and tmp/ live under it and must already exist.
@@ -155,7 +157,7 @@ func (s *Server) onStarted() []Action {
 	s.rec = recListing
 	io := s.newIO()
 	s.recIO = []IOID{io}
-	return []Action{FSList{IO: io, Dir: TmpDir(s.cfg.Dir)}}
+	return []Action{FSList{IO: io, Dir: format.TmpDir(s.cfg.Dir)}}
 }
 
 // onRecoveryDone advances recovery. Any error halts: recovery must finish
@@ -175,7 +177,7 @@ func (s *Server) onRecoveryDone(io IOID, body EventBody) []Action {
 		for _, name := range d.Names {
 			uio := s.newIO()
 			s.recIO = append(s.recIO, uio)
-			acts = append(acts, FSUnlink{IO: uio, Path: TmpDir(s.cfg.Dir) + "/" + name})
+			acts = append(acts, FSUnlink{IO: uio, Path: format.TmpDir(s.cfg.Dir) + "/" + name})
 		}
 		if len(acts) == 0 {
 			return s.fsyncTmpDir()
@@ -222,7 +224,7 @@ func (s *Server) fsyncTmpDir() []Action {
 	s.rec = recFsyncingTmp
 	io := s.newIO()
 	s.recIO = []IOID{io}
-	return []Action{FSFsyncDir{IO: io, Dir: TmpDir(s.cfg.Dir)}}
+	return []Action{FSFsyncDir{IO: io, Dir: format.TmpDir(s.cfg.Dir)}}
 }
 
 func indexIO(ios []IOID, io IOID) int {
@@ -240,22 +242,22 @@ func (s *Server) onRequest(req Request) []Action {
 	r := &request{client: req.Client}
 	switch op := req.Op.(type) {
 	case Put:
-		if !ValidKey(op.Key) || (s.cfg.MaxObjectSize > 0 && len(op.Data) > s.cfg.MaxObjectSize) {
+		if !format.ValidKey(op.Key) || (s.cfg.MaxObjectSize > 0 && len(op.Data) > s.cfg.MaxObjectSize) {
 			return badRequest(req.Client)
 		}
 		r.kind, r.key, r.data = kindPut, op.Key, op.Data
 	case Get:
-		if !ValidKey(op.Key) {
+		if !format.ValidKey(op.Key) {
 			return badRequest(req.Client)
 		}
 		r.kind, r.key = kindGet, op.Key
 	case Delete:
-		if !ValidKey(op.Key) {
+		if !format.ValidKey(op.Key) {
 			return badRequest(req.Client)
 		}
 		r.kind, r.key = kindDelete, op.Key
 	case Copy:
-		if !ValidKey(op.Src) || !ValidKey(op.Dst) {
+		if !format.ValidKey(op.Src) || !format.ValidKey(op.Dst) {
 			return badRequest(req.Client)
 		}
 		r.kind, r.key, r.src = kindCopy, op.Dst, op.Src
@@ -304,11 +306,11 @@ func (s *Server) startRunnable() []Action {
 func (s *Server) start(r *request) []Action {
 	switch r.kind {
 	case kindGet:
-		return s.issue(r, stepReading, FSRead{IO: s.newIO(), Path: ObjPath(s.cfg.Dir, r.key)})
+		return s.issue(r, stepReading, FSRead{IO: s.newIO(), Path: format.ObjPath(s.cfg.Dir, r.key)})
 	case kindCopy:
-		return s.issue(r, stepReading, FSRead{IO: s.newIO(), Path: ObjPath(s.cfg.Dir, r.src)})
+		return s.issue(r, stepReading, FSRead{IO: s.newIO(), Path: format.ObjPath(s.cfg.Dir, r.src)})
 	case kindDelete:
-		return s.issue(r, stepUnlinking, FSUnlink{IO: s.newIO(), Path: ObjPath(s.cfg.Dir, r.key)})
+		return s.issue(r, stepUnlinking, FSUnlink{IO: s.newIO(), Path: format.ObjPath(s.cfg.Dir, r.key)})
 	default: // kindPut
 		return s.writeTmp(r)
 	}
@@ -316,8 +318,8 @@ func (s *Server) start(r *request) []Action {
 
 func (s *Server) writeTmp(r *request) []Action {
 	io := s.newIO()
-	r.tmp = TmpPath(s.cfg.Dir, io)
-	return s.issue(r, stepWritingTmp, FSWrite{IO: io, Path: r.tmp, Data: EncodeObject(r.data)})
+	r.tmp = format.TmpPath(s.cfg.Dir, uint64(io))
+	return s.issue(r, stepWritingTmp, FSWrite{IO: io, Path: r.tmp, Data: format.EncodeObject(r.data)})
 }
 
 // issue records that r now waits on a's completion.
@@ -344,7 +346,7 @@ func (s *Server) finish(r *request, status Status, body []byte, before ...Action
 func (s *Server) commit(r *request) []Action {
 	c := Committed{Client: r.client, Key: r.key, Deleted: r.kind == kindDelete}
 	if !c.Deleted {
-		c.Sum = Checksum(r.data)
+		c.Sum = format.Checksum(r.data)
 	}
 	return s.finish(r, StatusOK, nil, Emit{Fact: c})
 }
@@ -374,7 +376,7 @@ func (s *Server) onRequestIO(r *request, body EventBody) []Action {
 		case d.Err != OK:
 			return s.finish(r, StatusServerError, nil) // a failed read changed nothing
 		}
-		payload, valid := DecodeObject(d.Data)
+		payload, valid := format.DecodeObject(d.Data)
 		if !valid {
 			return s.finish(r, StatusServerError, nil, Emit{Fact: CorruptObject{Key: readKey}})
 		}
@@ -404,7 +406,7 @@ func (s *Server) onRequestIO(r *request, body EventBody) []Action {
 		if d.Err != OK {
 			return s.failHalt(r, "fsync temp", d.Err) // fsyncgate
 		}
-		return s.issue(r, stepRenaming, FSRename{IO: s.newIO(), From: r.tmp, To: ObjPath(s.cfg.Dir, r.key)})
+		return s.issue(r, stepRenaming, FSRename{IO: s.newIO(), From: r.tmp, To: format.ObjPath(s.cfg.Dir, r.key)})
 
 	case stepRenaming:
 		d, ok := body.(FSRenameDone)
@@ -414,7 +416,7 @@ func (s *Server) onRequestIO(r *request, body EventBody) []Action {
 		if d.Err != OK {
 			return s.failHalt(r, "rename", d.Err) // may have applied, visibly but not durably
 		}
-		return s.issue(r, stepFsyncObj, FSFsyncDir{IO: s.newIO(), Dir: ObjDir(s.cfg.Dir)})
+		return s.issue(r, stepFsyncObj, FSFsyncDir{IO: s.newIO(), Dir: format.ObjDir(s.cfg.Dir)})
 
 	case stepUnlinking:
 		d, ok := body.(FSUnlinkDone)
@@ -423,7 +425,7 @@ func (s *Server) onRequestIO(r *request, body EventBody) []Action {
 		}
 		switch d.Err {
 		case OK:
-			return s.issue(r, stepFsyncObj, FSFsyncDir{IO: s.newIO(), Dir: ObjDir(s.cfg.Dir)})
+			return s.issue(r, stepFsyncObj, FSFsyncDir{IO: s.newIO(), Dir: format.ObjDir(s.cfg.Dir)})
 		case ErrNotFound:
 			return s.finish(r, StatusNotFound, nil)
 		default:
@@ -466,7 +468,7 @@ func (s *Server) StateHash() uint64 {
 		h.str(r.key)
 		h.str(r.src)
 		h.u64(uint64(len(r.data)))
-		h.u64(uint64(Checksum(r.data)))
+		h.u64(uint64(format.Checksum(r.data)))
 		h.u64(uint64(r.step))
 		h.u64(uint64(r.io))
 		h.str(r.tmp)

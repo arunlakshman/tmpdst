@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"manifester/toys3/core"
+	"manifester/toys3/format"
 )
 
 // Executor performs filesystem actions. Execute must not block the loop: it
@@ -115,7 +116,7 @@ func code(err error) core.ErrCode {
 // directories are durable before the server's first Started (the core has no
 // mkdir action).
 func PrepareDir(root string) error {
-	for _, d := range []string{core.ObjDir(root), core.TmpDir(root)} {
+	for _, d := range []string{format.ObjDir(root), format.TmpDir(root)} {
 		if err := os.MkdirAll(osPath(d), 0o755); err != nil {
 			return err
 		}

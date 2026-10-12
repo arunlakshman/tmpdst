@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# CI gate for the deterministic packages (core/, sim/). See docs/decisions.md (I).
+# CI gate for the deterministic packages (core/, sim/, and every toys3 package
+# except prod and cmd). See docs/decisions.md (I).
 #   1. detcheck: exact-path import allow-list plus banned constructs.
 #   2. Every third-party module they depend on has a reviewed audit record
 #      for the exact version in go.mod (so a version bump forces a re-audit).
@@ -8,7 +9,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-pkgs=(./core/... ./sim/... ./toys3/core/... ./toys3/sim/...)
+# toys3: every package is deterministic except the production runtime and the
+# commands. Derived, so a new pure package cannot be left out of the gate.
+pkgs=(./core/... ./sim/...)
+while read -r p; do
+  pkgs+=("$p")
+done < <(go list ./toys3/... | grep -v -e '/toys3/prod$' -e '/toys3/cmd/')
 
 echo "== detcheck"
 go run ./tools/detcheck "${pkgs[@]}"

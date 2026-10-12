@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"manifester/toys3/core"
+	"manifester/toys3/format"
 )
 
 // Simulator is one run in progress. It implements View for invariants.
@@ -55,7 +56,7 @@ func New(cfg Config) *Simulator {
 	s := &Simulator{
 		cfg:      cfg,
 		rng:      rng,
-		fs:       NewFakeFS(rng, cfg.FS, core.ObjDir(cfg.Server.Dir), core.TmpDir(cfg.Server.Dir)),
+		fs:       NewFakeFS(rng, cfg.FS, format.ObjDir(cfg.Server.Dir), format.TmpDir(cfg.Server.Dir)),
 		workload: NewWorkload(cfg.Workload, rng),
 		oracle:   NewOracle(),
 		env:      &env{rng: rng, buggify: true},

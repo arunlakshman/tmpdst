@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"manifester/toys3/format"
 )
 
 const root = "/d"
@@ -227,7 +229,7 @@ func TestCommittedSum(t *testing.T) {
 	h.boot()
 	for _, a := range h.do(1, Put{Key: "k", Data: []byte("abc")}) {
 		if e, ok := a.(Emit); ok {
-			if c := e.Fact.(Committed); c.Sum != Checksum([]byte("abc")) {
+			if c := e.Fact.(Committed); c.Sum != format.Checksum([]byte("abc")) {
 				t.Fatalf("Committed.Sum = %x", c.Sum)
 			}
 			return
@@ -242,7 +244,7 @@ func TestNotFound(t *testing.T) {
 	expect(t, "GET", h.do(1, Get{Key: "x"}), "read /d/obj/x; reply c1 404")
 	expect(t, "DELETE", h.do(2, Delete{Key: "x"}), "unlink /d/obj/x; reply c2 404")
 	expect(t, "COPY", h.do(3, Copy{Src: "x", Dst: "y"}), "read /d/obj/x; reply c3 404")
-	if _, ok := h.files[ObjPath(root, "y")]; ok {
+	if _, ok := h.files[format.ObjPath(root, "y")]; ok {
 		t.Fatal("COPY of absent src created dst")
 	}
 }
@@ -310,7 +312,7 @@ func TestRecovery(t *testing.T) {
 	h := newHarness(t)
 	h.files[root+"/tmp/0000000000000007"] = []byte("junk")
 	h.files[root+"/tmp/0000000000000009"] = []byte("junk")
-	h.files[ObjPath(root, "k")] = EncodeObject([]byte("kept"))
+	h.files[format.ObjPath(root, "k")] = format.EncodeObject([]byte("kept"))
 
 	expect(t, "Started", h.step(Started{}), "list /d/tmp")
 	expect(t, "request during recovery", h.step(Request{Client: 1, Op: Get{Key: "k"}}), "")
@@ -347,12 +349,12 @@ func TestRecoveryEmptyAndErrors(t *testing.T) {
 func TestCorruptObject(t *testing.T) {
 	h := newHarness(t)
 	h.boot()
-	bad := EncodeObject([]byte("payload"))
+	bad := format.EncodeObject([]byte("payload"))
 	bad[len(bad)-1] ^= 1
-	h.files[ObjPath(root, "k")] = bad
+	h.files[format.ObjPath(root, "k")] = bad
 	expect(t, "GET", h.do(1, Get{Key: "k"}), "read /d/obj/k; corrupt k; reply c1 500")
 	expect(t, "COPY", h.do(2, Copy{Src: "k", Dst: "d"}), "read /d/obj/k; corrupt k; reply c2 500")
-	h.files[ObjPath(root, "t")] = []byte("TOY") // torn header
+	h.files[format.ObjPath(root, "t")] = []byte("TOY") // torn header
 	expect(t, "torn", h.do(3, Get{Key: "t"}), "read /d/obj/t; corrupt t; reply c3 500")
 }
 
@@ -390,7 +392,7 @@ func TestErrorPolicy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
 			h.boot()
-			h.files[ObjPath(root, "k")] = EncodeObject([]byte("old"))
+			h.files[format.ObjPath(root, "k")] = format.EncodeObject([]byte("old"))
 			h.fail = tc.fail
 			expect(t, "op", h.do(1, tc.op), tc.want)
 			if strings.HasSuffix(tc.want, "halt") {

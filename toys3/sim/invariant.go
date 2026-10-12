@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"manifester/toys3/core"
+	"manifester/toys3/format"
 )
 
 // TimedFact is a core.Fact stamped by the simulator.
@@ -120,7 +121,7 @@ func (a *AckedIsDurable) AfterStep(v View) []Failure {
 		if !ok {
 			continue
 		}
-		path := core.ObjPath(v.Root(), c.Key)
+		path := format.ObjPath(v.Root(), c.Key)
 		data, present := v.FS().DurableFile(path)
 		switch {
 		case c.Deleted && present:
@@ -129,10 +130,10 @@ func (a *AckedIsDurable) AfterStep(v View) []Failure {
 		case !present:
 			fails = append(fails, Failure{Msg: fmt.Sprintf("c%d: write of %q acked but %s has no durable entry", c.Client, c.Key, path)})
 		default:
-			payload, valid := core.DecodeObject(data)
+			payload, valid := format.DecodeObject(data)
 			if !valid {
 				fails = append(fails, Failure{Msg: fmt.Sprintf("c%d: write of %q acked but durable %s is torn (%d bytes)", c.Client, c.Key, path, len(data))})
-			} else if core.Checksum(payload) != c.Sum {
+			} else if format.Checksum(payload) != c.Sum {
 				fails = append(fails, Failure{Msg: fmt.Sprintf("c%d: write of %q acked but durable %s holds %s", c.Client, c.Key, path, describePayload(data))})
 			}
 		}
@@ -148,13 +149,13 @@ func (o *ObjNeverTorn) AfterStep(v View) []Failure {
 		return nil // nothing durable changed since the last check
 	}
 	o.gen = g
-	prefix := core.ObjDir(v.Root()) + "/"
+	prefix := format.ObjDir(v.Root()) + "/"
 	var fails []Failure
 	for _, f := range v.FS().Durable().Files {
 		if !strings.HasPrefix(f.Path, prefix) {
 			continue
 		}
-		if _, ok := core.DecodeObject(f.Data); !ok {
+		if _, ok := format.DecodeObject(f.Data); !ok {
 			fails = append(fails, Failure{Msg: fmt.Sprintf("durable %s is torn or corrupt (%d bytes)", f.Path, len(f.Data))})
 		}
 	}

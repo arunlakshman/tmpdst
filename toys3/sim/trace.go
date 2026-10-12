@@ -74,8 +74,8 @@ func hashAction(h uint64, a control.Action) uint64 {
 		return Fold(Fold(Fold(h, 36), uint64(x.IO)), hashString(x.Path))
 	case control.FSList:
 		return Fold(Fold(Fold(h, 37), uint64(x.IO)), hashString(x.Dir))
-	case control.Halt:
-		return Fold(Fold(h, 38), hashString(x.Reason))
+	case control.Trip:
+		return Fold(Fold(h, 38), hashString(x.Cause))
 	case control.Emit:
 		return Fold(Fold(h, 39), hashString(factHashKey(x.Fact)))
 	}

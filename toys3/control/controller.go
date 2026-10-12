@@ -11,7 +11,7 @@ type Config struct {
 }
 
 // mode is the controller's operating mode within one incarnation: startup,
-// recovering, automatic (closed-loop serving), or halted. The numeric values
+// recovering, automatic (closed-loop serving), or tripped. The numeric values
 // are folded into StateHash: append new modes, never reorder them.
 type mode uint8
 
@@ -19,7 +19,7 @@ const (
 	modeStartup    mode = iota // before Started; requests are queued
 	modeRecovering             // listing and unlinking temp files; requests are queued
 	modeAuto                   // normal operation
-	modeHalted                 // Halt was returned; every later event is ignored
+	modeTripped                // Trip was returned; every later event is ignored
 )
 
 // opKind is the kind of a client request. Hashed by StateHash: append only.
@@ -107,7 +107,7 @@ func New(env Env, cfg Config) *Controller {
 
 // Step consumes one event and returns the actions to execute.
 func (s *Controller) Step(ev Event) []Action {
-	if s.mode == modeHalted {
+	if s.mode == modeTripped {
 		return nil
 	}
 	switch b := ev.Body.(type) {
@@ -137,12 +137,12 @@ func (s *Controller) newIO() IOID {
 	return s.nextIO
 }
 
-// halt fail-stops: nothing after it in this incarnation is trusted. The
+// trip fail-stops: nothing after it in this incarnation is trusted. The
 // runtime executes the actions before it (here: the 500, if any) and then
 // kills the incarnation.
-func (s *Controller) halt(reason string, before ...Action) []Action {
-	s.mode = modeHalted
-	return append(before, Halt{Reason: reason})
+func (s *Controller) trip(cause string, before ...Action) []Action {
+	s.mode = modeTripped
+	return append(before, Trip{Cause: cause})
 }
 
 // ---- requests ----
@@ -261,10 +261,10 @@ func (s *Controller) commit(r *request) []Action {
 	return s.finish(r, StatusOK, nil, Emit{Fact: c})
 }
 
-// failHalt replies 500 to r and halts. Used for every error after which
+// failTrip replies 500 to r and trips. Used for every error after which
 // obj/ may hold a change that is visible but not durable (see package doc).
-func (s *Controller) failHalt(r *request, what string, err ErrCode) []Action {
-	return s.halt(what+": "+err.String(), Reply{Client: r.client, Status: StatusServerError})
+func (s *Controller) failTrip(r *request, what string, err ErrCode) []Action {
+	return s.trip(what+": "+err.String(), Reply{Client: r.client, Status: StatusServerError})
 }
 
 // onRequestIO advances r by one protocol step. A completion of the wrong type
@@ -314,7 +314,7 @@ func (s *Controller) onRequestIO(r *request, body EventBody) []Action {
 			return nil
 		}
 		if d.Err != OK {
-			return s.failHalt(r, "fsync temp", d.Err) // fsyncgate
+			return s.failTrip(r, "fsync temp", d.Err) // fsyncgate
 		}
 		return s.issue(r, stepRenaming, FSRename{IO: s.newIO(), From: r.tmp, To: format.ObjPath(s.cfg.Dir, r.key)})
 
@@ -324,7 +324,7 @@ func (s *Controller) onRequestIO(r *request, body EventBody) []Action {
 			return nil
 		}
 		if d.Err != OK {
-			return s.failHalt(r, "rename", d.Err) // may have applied, visibly but not durably
+			return s.failTrip(r, "rename", d.Err) // may have applied, visibly but not durably
 		}
 		return s.issue(r, stepFsyncObj, FSFsyncDir{IO: s.newIO(), Dir: format.ObjDir(s.cfg.Dir)})
 
@@ -339,7 +339,7 @@ func (s *Controller) onRequestIO(r *request, body EventBody) []Action {
 		case ErrNotFound:
 			return s.finish(r, StatusNotFound, nil)
 		default:
-			return s.failHalt(r, "unlink", d.Err) // may have applied, visibly but not durably
+			return s.failTrip(r, "unlink", d.Err) // may have applied, visibly but not durably
 		}
 
 	case stepFsyncObj:
@@ -348,7 +348,7 @@ func (s *Controller) onRequestIO(r *request, body EventBody) []Action {
 			return nil
 		}
 		if d.Err != OK {
-			return s.failHalt(r, "fsync obj dir", d.Err) // fsyncgate
+			return s.failTrip(r, "fsync obj dir", d.Err) // fsyncgate
 		}
 		return s.commit(r)
 	}

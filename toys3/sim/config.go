@@ -65,8 +65,8 @@ type Stats struct {
 	TornFiles    int // files left torn by a crash
 	LostChanges  int // un-fsynced changes discarded by a crash
 
-	Crashes         int // crashes, including Halts
-	Halts           int // crashes requested by the server (Halt)
+	Crashes         int // crashes, including Trips
+	Trips           int // crashes requested by the server (Trip)
 	CrashesMidPut   int // crashes with a PUT or COPY outstanding
 	KeptChanges     int // un-fsynced changes a crash made durable anyway
 	ReadCorruptions int // FSReads returned with a flipped bit
@@ -89,7 +89,7 @@ func (s *Stats) Add(o Stats) {
 	s.TornFiles += o.TornFiles
 	s.LostChanges += o.LostChanges
 	s.Crashes += o.Crashes
-	s.Halts += o.Halts
+	s.Trips += o.Trips
 	s.CrashesMidPut += o.CrashesMidPut
 	s.KeptChanges += o.KeptChanges
 	s.ReadCorruptions += o.ReadCorruptions
@@ -103,10 +103,10 @@ func (s *Stats) Add(o Stats) {
 // String renders the stats on one line.
 func (s Stats) String() string {
 	return fmt.Sprintf("reqs=%d 200=%d 400=%d 404=%d 500=%d indet=%d fsops=%d eio=%d "+
-		"crashes=%d halts=%d midput=%d torn=%d lost=%d kept=%d readcorrupt=%d corruptobj=%d "+
+		"crashes=%d trips=%d midput=%d torn=%d lost=%d kept=%d readcorrupt=%d corruptobj=%d "+
 		"tempsrm=%d windows=%d maxwin=%d widened=%d",
 		s.Requests, s.ByStatus[0], s.ByStatus[1], s.ByStatus[2], s.ByStatus[3], s.Indetermined,
-		s.FSOps, s.EIOs, s.Crashes, s.Halts, s.CrashesMidPut, s.TornFiles, s.LostChanges,
+		s.FSOps, s.EIOs, s.Crashes, s.Trips, s.CrashesMidPut, s.TornFiles, s.LostChanges,
 		s.KeptChanges, s.ReadCorruptions, s.CorruptObjects, s.TempsRemoved, s.Windows, s.MaxWindowOps, s.Widenings)
 }
 

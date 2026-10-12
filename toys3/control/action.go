@@ -18,11 +18,12 @@ type Reply struct {
 
 // ---- process control ----
 
-// Halt asks the runtime to kill this incarnation and restart it (fail-stop),
-// after executing the actions that precede it in the same slice. Use it when
-// in-memory state can no longer be trusted, e.g. after an fsync error. In
-// simulation it is an ordinary crash; in production the process exits.
-type Halt struct{ Reason string }
+// Trip is a safety trip: it asks the runtime to kill this incarnation and
+// restart it (fail-stop), after executing the actions that precede it in the
+// same slice. Use it when in-memory state can no longer be trusted, e.g. after
+// an fsync error. Cause says why. In simulation it is an ordinary crash; in
+// production the process exits and a supervisor restarts it.
+type Trip struct{ Cause string }
 
 // ---- observability ----
 
@@ -31,5 +32,5 @@ type Halt struct{ Reason string }
 type Emit struct{ Fact Fact }
 
 func (Reply) isAction() {}
-func (Halt) isAction()  {}
+func (Trip) isAction()  {}
 func (Emit) isAction()  {}

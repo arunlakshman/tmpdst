@@ -172,8 +172,8 @@ func describe(acts []Action) string {
 			s = "unlink " + tmpGlob(a.Path)
 		case FSList:
 			s = "list " + a.Dir
-		case Halt:
-			s = "halt"
+		case Trip:
+			s = "trip"
 		case Emit:
 			switch f := a.Fact.(type) {
 			case Committed:
@@ -343,7 +343,7 @@ func TestRecoveryEmptyAndErrors(t *testing.T) {
 		return OK
 	}
 	h.step(Started{})
-	expect(t, "list error", h.completeNext(), "halt")
+	expect(t, "list error", h.completeNext(), "trip")
 }
 
 func TestCorruptObject(t *testing.T) {
@@ -377,16 +377,16 @@ func TestErrorPolicy(t *testing.T) {
 	}{
 		{"write tmp: plain 500", failKind[FSWrite](), Put{Key: "k", Data: []byte("v")},
 			"write tmp/*; reply c1 500"},
-		{"fsync tmp: halt", failKind[FSFsync](), Put{Key: "k", Data: []byte("v")},
-			"write tmp/*; fsync tmp/*; reply c1 500; halt"},
-		{"rename: halt", failKind[FSRename](), Put{Key: "k", Data: []byte("v")},
-			"write tmp/*; fsync tmp/*; rename tmp/* /d/obj/k; reply c1 500; halt"},
-		{"fsyncdir: halt", failKind[FSFsyncDir](), Put{Key: "k", Data: []byte("v")},
-			"write tmp/*; fsync tmp/*; rename tmp/* /d/obj/k; fsyncdir /d/obj; reply c1 500; halt"},
+		{"fsync tmp: trip", failKind[FSFsync](), Put{Key: "k", Data: []byte("v")},
+			"write tmp/*; fsync tmp/*; reply c1 500; trip"},
+		{"rename: trip", failKind[FSRename](), Put{Key: "k", Data: []byte("v")},
+			"write tmp/*; fsync tmp/*; rename tmp/* /d/obj/k; reply c1 500; trip"},
+		{"fsyncdir: trip", failKind[FSFsyncDir](), Put{Key: "k", Data: []byte("v")},
+			"write tmp/*; fsync tmp/*; rename tmp/* /d/obj/k; fsyncdir /d/obj; reply c1 500; trip"},
 		{"read: plain 500", failKind[FSRead](), Get{Key: "k"},
 			"read /d/obj/k; reply c1 500"},
-		{"unlink: halt", failKind[FSUnlink](), Delete{Key: "k"},
-			"unlink /d/obj/k; reply c1 500; halt"},
+		{"unlink: trip", failKind[FSUnlink](), Delete{Key: "k"},
+			"unlink /d/obj/k; reply c1 500; trip"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -395,10 +395,10 @@ func TestErrorPolicy(t *testing.T) {
 			h.files[format.ObjPath(root, "k")] = format.EncodeObject([]byte("old"))
 			h.fail = tc.fail
 			expect(t, "op", h.do(1, tc.op), tc.want)
-			if strings.HasSuffix(tc.want, "halt") {
-				// Halted: everything afterwards is ignored.
+			if strings.HasSuffix(tc.want, "trip") {
+				// Tripped: everything afterwards is ignored.
 				h.fail = nil
-				expect(t, "after halt", h.step(Request{Client: 2, Op: Get{Key: "k"}}), "")
+				expect(t, "after trip", h.step(Request{Client: 2, Op: Get{Key: "k"}}), "")
 			} else {
 				h.fail = nil
 				expect(t, "still serving", h.do(2, Get{Key: "k"}), "read /d/obj/k; reply c2 200 old")

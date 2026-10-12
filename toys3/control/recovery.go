@@ -25,7 +25,7 @@ func (s *Controller) onStarted() []Action {
 	return []Action{FSList{IO: io, Dir: format.TmpDir(s.cfg.Dir)}}
 }
 
-// onRecoveryDone advances recovery. Any error halts: recovery must finish
+// onRecoveryDone advances recovery. Any error trips: recovery must finish
 // before serving, and restarting retries it from scratch.
 func (s *Controller) onRecoveryDone(io IOID, body EventBody) []Action {
 	switch s.rec {
@@ -35,7 +35,7 @@ func (s *Controller) onRecoveryDone(io IOID, body EventBody) []Action {
 			return nil
 		}
 		if d.Err != OK {
-			return s.halt("recovery: list tmp: " + d.Err.String())
+			return s.trip("recovery: list tmp: " + d.Err.String())
 		}
 		s.recIO = nil
 		var acts []Action
@@ -60,7 +60,7 @@ func (s *Controller) onRecoveryDone(io IOID, body EventBody) []Action {
 			s.recRemoved++
 		case ErrNotFound: // already gone: fine
 		default:
-			return s.halt("recovery: unlink temp: " + d.Err.String())
+			return s.trip("recovery: unlink temp: " + d.Err.String())
 		}
 		i := indexIO(s.recIO, io)
 		s.recIO = append(s.recIO[:i], s.recIO[i+1:]...)
@@ -75,7 +75,7 @@ func (s *Controller) onRecoveryDone(io IOID, body EventBody) []Action {
 			return nil
 		}
 		if d.Err != OK {
-			return s.halt("recovery: fsync tmp dir: " + d.Err.String())
+			return s.trip("recovery: fsync tmp dir: " + d.Err.String())
 		}
 		s.mode = modeAuto
 		s.recIO = nil

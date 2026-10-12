@@ -118,11 +118,11 @@ func (f failFsync) Execute(a control.Action, done func(control.EventBody)) {
 	f.OSExecutor.Execute(a, done)
 }
 
-func TestHaltStopsLoop(t *testing.T) {
+func TestTripStopsLoop(t *testing.T) {
 	s := startServer(t, t.TempDir(), failFsync{})
 	s.expect("PUT", "/b/k", []byte("v"), nil, 500, "")
-	if err := <-s.done; !errors.Is(err, ErrHalted) {
-		t.Fatalf("Run returned %v, want ErrHalted", err)
+	if err := <-s.done; !errors.Is(err, ErrTripped) {
+		t.Fatalf("Run returned %v, want ErrTripped", err)
 	}
 	s.done <- nil // let stop() return
 	s.expect("GET", "/b/k", nil, nil, 503, "")

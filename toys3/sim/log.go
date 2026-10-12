@@ -91,8 +91,8 @@ func DescribeAction(a control.Action) string {
 		return fmt.Sprintf("FSUnlink{io%d %s}", x.IO, x.Path)
 	case control.FSList:
 		return fmt.Sprintf("FSList{io%d %s}", x.IO, x.Dir)
-	case control.Halt:
-		return fmt.Sprintf("Halt{%s}", x.Reason)
+	case control.Trip:
+		return fmt.Sprintf("Trip{%s}", x.Cause)
 	case control.Emit:
 		return "Emit{" + DescribeFact(x.Fact) + "}"
 	}

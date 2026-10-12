@@ -16,7 +16,7 @@ const (
 	Pending   Outcome = iota // no reply yet
 	Definite                 // 200, 400 or 404: the op happened exactly as replied
 	Failed                   // 500: the op may or may not have taken effect
-	Abandoned                // the server crashed (or halted) before replying
+	Abandoned                // the server crashed (or tripped) before replying
 )
 
 // HistOp is one client request as the client saw it.
@@ -38,7 +38,7 @@ type HistOp struct {
 // History is the complete client-visible history of a run.
 type History struct {
 	Ops     []HistOp       // in Invoke order
-	Crashes []control.Time // crash (and Halt) instants, ascending
+	Crashes []control.Time // crash (and Trip) instants, ascending
 	// Completed lists indices into Ops in reply order (Definite and Failed).
 	Completed []int
 }
@@ -66,7 +66,7 @@ type Value struct {
 //   - Crashes erase nothing. So an acked mutation that disappears after a
 //     restart, or an unacked one that a read observed and that later
 //     vanishes, has no valid linearization and fails the check. (The latter
-//     is why the server should Halt after an fsync error.)
+//     is why the server should Trip after an fsync error.)
 //
 // Checking is a Wing-Gong-Lowe search over each window between quiescent
 // points (no op Pending), memoized on (set of linearized ops, model state).

@@ -141,7 +141,7 @@ func TestOracleFailedMutationMayOrMayNotApply(t *testing.T) {
 
 func TestOracleRejectsObservedThenVanished(t *testing.T) {
 	// A 500 PUT that a read observed must not disappear later: crashes
-	// erase nothing (this is why the server halts after an fsync error).
+	// erase nothing (this is why the server trips after an fsync error).
 	h := newHist()
 	h.inv(1, put("a", 1))
 	h.ret(1, control.StatusOK, nil)

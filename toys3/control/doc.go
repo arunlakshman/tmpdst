@@ -38,9 +38,9 @@
 //
 // Any filesystem error replies 500 and is never acked. After an fsync error the
 // kernel's view of the file is unknowable ("fsyncgate"), so the server should
-// fail-stop with Halt rather than keep serving possibly-lost state.
+// fail-stop with Trip rather than keep serving possibly-lost state.
 //
-// # Errors: 500, or 500 + Halt
+// # Errors: 500, or 500 + Trip
 //
 // The danger is not the 500 itself (a 500 promises nothing) but what later
 // reads observe. If a failed mutation may have changed obj/ visibly but not
@@ -49,22 +49,22 @@
 // ("crashes erase nothing"). The per-key lock only protects reads while the
 // mutation is in flight; once it has replied, the next GET on that key runs.
 // So the rule is: any error at or after the first step that can touch obj/
-// halts, and errors before it are a plain 500.
+// trips, and errors before it are a plain 500.
 //
 //	FSRead (GET, COPY src)    ENOENT → 404; EIO → 500. Nothing changed.
 //	FSWrite(tmp)              any error → 500. Only a temp file changed;
 //	                          the next recovery deletes it.
-//	FSFsync(tmp)              any error → 500 + Halt (fsyncgate).
-//	FSRename(tmp→obj)         any error → 500 + Halt: it may have applied.
-//	FSUnlink(obj) (DELETE)    ENOENT → 404; EIO → 500 + Halt: it may have applied.
-//	FSFsyncDir(obj)           any error → 500 + Halt (fsyncgate, and the
+//	FSFsync(tmp)              any error → 500 + Trip (fsyncgate).
+//	FSRename(tmp→obj)         any error → 500 + Trip: it may have applied.
+//	FSUnlink(obj) (DELETE)    ENOENT → 404; EIO → 500 + Trip: it may have applied.
+//	FSFsyncDir(obj)           any error → 500 + Trip (fsyncgate, and the
 //	                          rename/unlink above it is visible but not durable).
-//	recovery (list, unlink,   any error (except unlink ENOENT) → Halt; the
+//	recovery (list, unlink,   any error (except unlink ENOENT) → Trip; the
 //	fsync tmp/)               next boot retries recovery from scratch.
 //
-// Halt is always the last action of its Step; the 500 Reply (if any)
+// Trip is always the last action of its Step; the 500 Reply (if any)
 // precedes it, and the server ignores every event after it. Corrupt object
-// files are a plain 500 plus a CorruptObject fact, not a Halt: the file is
+// files are a plain 500 plus a CorruptObject fact, not a Trip: the file is
 // already durable, restarting would not fix it.
 //
 // Every successful mutation emits Emit{Committed} immediately followed by its

@@ -11,8 +11,8 @@ import (
 	"manifester/toys3/control"
 )
 
-// ErrHalted wraps the reason of a control.Halt returned by Run.
-var ErrHalted = errors.New("toys3: server halted")
+// ErrTripped wraps the cause of a control.Trip returned by Run.
+var ErrTripped = errors.New("toys3: server tripped")
 
 // ErrStopped is returned by Submit when the loop is not (or no longer) running.
 var ErrStopped = errors.New("toys3: loop stopped")
@@ -54,9 +54,9 @@ func NewLoop(cfg control.Config, factory control.Factory, exec Executor, inboxSi
 //	Reply     → the waiter registered by Submit (dropped if it gave up)
 //	FS*       → exec.Execute, whose done callback posts to the inbox
 //	Emit      → structured log line
-//	Halt      → return an error; the process exits and a supervisor restarts it
+//	Trip      → return an error; the process exits and a supervisor restarts it
 //
-// It returns when ctx is cancelled or on Halt. Run may be called once.
+// It returns when ctx is cancelled or on Trip. Run may be called once.
 func (l *Loop) Run(ctx context.Context) error {
 	defer close(l.stopped)
 	m := l.factory(Env{}, l.cfg)
@@ -88,9 +88,9 @@ func (l *Loop) dispatch(acts []control.Action) error {
 			}
 		case control.Emit:
 			l.logf("toys3: fact %T %+v", a.Fact, a.Fact)
-		case control.Halt:
-			l.logf("toys3: HALT: %s", a.Reason)
-			return fmt.Errorf("%w: %s", ErrHalted, a.Reason)
+		case control.Trip:
+			l.logf("toys3: TRIP: %s", a.Cause)
+			return fmt.Errorf("%w: %s", ErrTripped, a.Cause)
 		default:
 			l.exec.Execute(a, l.post)
 		}
@@ -144,7 +144,7 @@ func (l *Loop) Submit(ctx context.Context, op control.Op) (control.Reply, error)
 	case <-ctx.Done():
 		return control.Reply{}, ctx.Err()
 	case <-l.stopped:
-		select { // a Reply dispatched just before a Halt still counts
+		select { // a Reply dispatched just before a Trip still counts
 		case rep := <-ch:
 			return rep, nil
 		default:

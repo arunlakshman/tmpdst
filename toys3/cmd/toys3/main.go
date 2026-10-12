@@ -4,7 +4,7 @@
 //
 // It wires the production runtime: prepare the data directory, start the
 // event loop around control.NewMachine with an OSExecutor, and serve the S3
-// handler. On Halt the process exits non-zero; run it under a supervisor that
+// handler. On Trip the process exits non-zero; run it under a supervisor that
 // restarts it (recovery happens on boot).
 package main
 
@@ -47,7 +47,7 @@ func main() {
 
 	go func() {
 		err := loop.Run(ctx)
-		if errors.Is(err, prod.ErrHalted) {
+		if errors.Is(err, prod.ErrTripped) {
 			// Fail-stop: in-memory state is untrusted. A supervisor restarts us
 			// and recovery runs on boot.
 			log.Fatalf("toys3: exiting: %v", err)

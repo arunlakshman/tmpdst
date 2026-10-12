@@ -32,10 +32,10 @@ func fakeOK(a control.Action) control.EventBody {
 	panic(fmt.Sprintf("fakeOK: %T", a))
 }
 
-// truncAfterHalt drops anything after a Halt (the runtime contract).
-func truncAfterHalt(acts []control.Action) []control.Action {
+// truncAfterTrip drops anything after a Trip (the runtime contract).
+func truncAfterTrip(acts []control.Action) []control.Action {
 	for i, a := range acts {
-		if _, ok := a.(control.Halt); ok {
+		if _, ok := a.(control.Trip); ok {
 			return acts[:i+1]
 		}
 	}
@@ -56,7 +56,7 @@ type skipper struct {
 func (m *skipper) Step(ev control.Event) []control.Action {
 	m.deferred = nil
 	out := m.expand(ev.At, m.inner.Step(ev))
-	return truncAfterHalt(append(out, m.deferred...))
+	return truncAfterTrip(append(out, m.deferred...))
 }
 
 func (m *skipper) expand(at control.Time, acts []control.Action) []control.Action {
@@ -106,29 +106,29 @@ func mutAckBeforeRename(env control.Env, cfg control.Config) control.Machine {
 	}}
 }
 
-// (d) An error after obj/ may have changed replies 500 but does not Halt:
+// (d) An error after obj/ may have changed replies 500 but does not Trip:
 // the server keeps serving a page cache that a crash can undo. Implemented by
 // hiding the error from the inner server (it continues as if OK) and turning
 // its eventual 200 into a 500.
-type noHalt struct {
+type noTrip struct {
 	inner   control.Machine
-	serving bool           // inner emitted Recovered (errors before it still halt)
+	serving bool           // inner emitted Recovered (errors before it still trip)
 	dirOnly bool           // only swallow FSFsyncDir errors
 	doomed  []control.IOID // IOs of requests that already saw an error
 	clients []control.ClientReq
 }
 
-func mutNoHaltOnError(env control.Env, cfg control.Config) control.Machine {
-	return &noHalt{inner: control.New(env, cfg)}
+func mutNoTripOnError(env control.Env, cfg control.Config) control.Machine {
+	return &noTrip{inner: control.New(env, cfg)}
 }
 
 // (d2) Like (d), but only for a failed FSFsyncDir(obj/): the rename is
 // visible, not durable, and the server keeps serving it.
-func mutNoHaltOnDirFsyncError(env control.Env, cfg control.Config) control.Machine {
-	return &noHalt{inner: control.New(env, cfg), dirOnly: true}
+func mutNoTripOnDirFsyncError(env control.Env, cfg control.Config) control.Machine {
+	return &noTrip{inner: control.New(env, cfg), dirOnly: true}
 }
 
-func (m *noHalt) Step(ev control.Event) []control.Action {
+func (m *noTrip) Step(ev control.Event) []control.Action {
 	io, isErr, doomed := control.IOID(0), false, false
 	if _, dir := ev.Body.(control.FSFsyncDirDone); m.dirOnly && !dir {
 		return m.stepDoomedOnly(ev)
@@ -156,7 +156,7 @@ func (m *noHalt) Step(ev control.Event) []control.Action {
 		}
 	}
 	if !m.serving && isErr {
-		ev = control.Event{At: ev.At, Body: restoreErr(ev.Body)} // recovery errors still halt
+		ev = control.Event{At: ev.At, Body: restoreErr(ev.Body)} // recovery errors still trip
 		isErr = false
 	}
 	for i, d := range m.doomed {
@@ -195,7 +195,7 @@ func (m *noHalt) Step(ev control.Event) []control.Action {
 }
 
 // stepDoomedOnly passes ev through unchanged, but still tracks doomed IOs.
-func (m *noHalt) stepDoomedOnly(ev control.Event) []control.Action {
+func (m *noTrip) stepDoomedOnly(ev control.Event) []control.Action {
 	acts := m.inner.Step(ev)
 	for _, a := range acts {
 		if e, ok := a.(control.Emit); ok {
@@ -208,7 +208,7 @@ func (m *noHalt) stepDoomedOnly(ev control.Event) []control.Action {
 }
 
 // rewrite drops the Committed of doomed clients and turns their 200 into 500.
-func (m *noHalt) rewrite(acts []control.Action) []control.Action {
+func (m *noTrip) rewrite(acts []control.Action) []control.Action {
 	var out []control.Action
 	for _, a := range acts {
 		switch x := a.(type) {
@@ -228,7 +228,7 @@ func (m *noHalt) rewrite(acts []control.Action) []control.Action {
 	return out
 }
 
-func (m *noHalt) isDoomed(c control.ClientReq) bool {
+func (m *noTrip) isDoomed(c control.ClientReq) bool {
 	for _, d := range m.clients {
 		if d == c {
 			return true
@@ -237,7 +237,7 @@ func (m *noHalt) isDoomed(c control.ClientReq) bool {
 	return false
 }
 
-func (m *noHalt) forget(c control.ClientReq) {
+func (m *noTrip) forget(c control.ClientReq) {
 	for i, d := range m.clients {
 		if d == c {
 			m.clients = append(m.clients[:i], m.clients[i+1:]...)
@@ -246,7 +246,7 @@ func (m *noHalt) forget(c control.ClientReq) {
 	}
 }
 
-func (m *noHalt) StateHash() uint64 { return m.inner.StateHash() }
+func (m *noTrip) StateHash() uint64 { return m.inner.StateHash() }
 
 func restoreErr(b control.EventBody) control.EventBody {
 	switch x := b.(type) {
@@ -320,8 +320,8 @@ var mutants = []mutant{
 	{"a-skip-dir-fsync", mutSkipDirFsync},
 	{"b-skip-file-fsync", mutSkipFileFsync},
 	{"c-ack-before-rename", mutAckBeforeRename},
-	{"d-no-halt-on-error", mutNoHaltOnError},
-	{"d2-no-halt-on-dir-fsync-error", mutNoHaltOnDirFsyncError},
+	{"d-no-halt-on-error", mutNoTripOnError},
+	{"d2-no-halt-on-dir-fsync-error", mutNoTripOnDirFsyncError},
 	{"e-skip-crc", mutSkipCRC},
 	{"f-skip-temp-cleanup", mutSkipTempCleanup},
 }

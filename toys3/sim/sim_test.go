@@ -105,7 +105,7 @@ func TestCoverage(t *testing.T) {
 		{"400 replies", agg.ByStatus[1]},
 		{"404 replies", agg.ByStatus[2]},
 		{"500 replies", agg.ByStatus[3]},
-		{"Halts", agg.Halts},
+		{"Trips", agg.Trips},
 		{"CorruptObject facts", agg.CorruptObjects},
 		{"temps removed by recovery", agg.TempsRemoved},
 		{"linearizability windows", agg.Windows},

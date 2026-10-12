@@ -197,13 +197,13 @@ func (s *Simulator) deliver(body control.EventBody) {
 			case control.Recovered:
 				s.res.Stats.TempsRemoved += f.TempsRemoved
 			}
-		case control.Halt:
+		case control.Trip:
 			if i != len(acts)-1 {
-				s.fail(Failure{Invariant: "protocol", Msg: "Halt is not the last action of its step"})
+				s.fail(Failure{Invariant: "protocol", Msg: "Trip is not the last action of its step"})
 				return
 			}
-			s.res.Stats.Halts++
-			s.crash("halt: " + x.Reason)
+			s.res.Stats.Trips++
+			s.crash("trip: " + x.Cause)
 			return
 		default:
 			s.fail(Failure{Invariant: "protocol", Msg: fmt.Sprintf("unknown action %T", a)})

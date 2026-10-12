@@ -24,8 +24,8 @@ type View interface {
 	Now() control.Time
 	Alive() bool // server is booted (it may still be recovering)
 	Inc() Incarnation
-	Quiet() bool // in QuietTail: no faults, no crashes
-	FS() *FakeFS
+	Settling() bool // in Settling: no new faults, no crashes
+	FS() *PlantModel
 	Root() string // the server's data directory (control.Config.Dir)
 	Oracle() *Oracle
 	History() *History
@@ -48,7 +48,7 @@ func DefaultInvariants() []Invariant {
 }
 
 // BlackBoxInvariants returns only the invariants that judge what clients
-// see (no peeking at the fake filesystem's durable state). Useful to learn
+// see (no peeking at the plant model's durable state). Useful to learn
 // which bugs are visible end to end, and which only to a ground-truth check.
 func BlackBoxInvariants() []Invariant {
 	return []Invariant{&NoCorruptReads{}, &Linearizable{}, &Liveness{}}
@@ -59,14 +59,14 @@ func BlackBoxInvariants() []Invariant {
 // fails here immediately, even before the linearizability check.
 type NoCorruptReads struct{ next int }
 
-// AckedIsDurable checks each control.Committed sample against FakeFS.Durable() on
+// AckedIsDurable checks each control.Committed sample against PlantModel.Durable() on
 // the step it is emitted: the key's durable file must exist and decode to a
 // payload with the committed checksum (or be absent for a delete). This is
 // (b) checked eagerly: a missing fsync fails here without needing a crash.
 type AckedIsDurable struct{ next int }
 
 // ObjNeverTorn checks, after every step, that every file under obj/ in
-// FakeFS.Durable() is a complete object (header, length and CRC valid). The
+// PlantModel.Durable() is a complete object (header, length and CRC valid). The
 // protocol renames only fsynced files into obj/, so even the most adversarial
 // crash leaves obj/ clean; the object CRC is a safety net, not a mechanism.
 type ObjNeverTorn struct{ gen uint64 }
@@ -75,15 +75,15 @@ type ObjNeverTorn struct{ gen uint64 }
 // every quiescent point and at the end.
 type Linearizable struct{}
 
-// Liveness is invariant (d): at the end of QuietTail (server alive, no
+// Liveness is invariant (d): at the end of Settling (server alive, no
 // faults) no op is Pending, and every boot reached control.Recovered.
-// Additionally, a request issued during QuietTail never gets a 500: with no
+// Additionally, a request issued during Settling never gets a 500: with no
 // faults injected a correct server has no reason to fail (this is what makes
 // a lost-but-acked object visible to clients: it reads back as 500 forever).
 type Liveness struct {
-	next      int
-	quietFrom int // index of the first op invoked in QuietTail (once quietSeen)
-	quietSeen bool
+	next         int
+	settlingFrom int // index of the first op invoked in Settling (once settlingSeen)
+	settlingSeen bool
 }
 
 func (*NoCorruptReads) Name() string { return "no-corrupt-reads" }
@@ -177,15 +177,15 @@ func (*Linearizable) AtEnd(v View) []Failure { return v.Oracle().CheckFinal() }
 func (*Liveness) Name() string { return "liveness" }
 func (l *Liveness) AfterStep(v View) []Failure {
 	h := v.History()
-	if v.Quiet() && !l.quietSeen {
-		l.quietSeen, l.quietFrom = true, len(h.Ops)
+	if v.Settling() && !l.settlingSeen {
+		l.settlingSeen, l.settlingFrom = true, len(h.Ops)
 	}
 	var fails []Failure
 	for ; l.next < len(h.Completed); l.next++ {
 		i := h.Completed[l.next]
 		op := &h.Ops[i]
-		if l.quietSeen && i >= l.quietFrom && op.Status == control.StatusServerError {
-			fails = append(fails, Failure{Msg: "500 with no fault injected (QuietTail): " + describeOp(op)})
+		if l.settlingSeen && i >= l.settlingFrom && op.Status == control.StatusServerError {
+			fails = append(fails, Failure{Msg: "500 with no fault injected (Settling): " + describeOp(op)})
 		}
 	}
 	return fails
@@ -207,7 +207,7 @@ func (*Liveness) AtEnd(v View) []Failure {
 	h := v.History()
 	for i := range h.Ops {
 		if h.Ops[i].Outcome == Pending {
-			fails = append(fails, Failure{Msg: "no reply by the end of QuietTail: " + describeOp(&h.Ops[i])})
+			fails = append(fails, Failure{Msg: "no reply by the end of Settling: " + describeOp(&h.Ops[i])})
 		}
 	}
 	return fails

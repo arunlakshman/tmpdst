@@ -124,7 +124,7 @@ func TestCoverage(t *testing.T) {
 func TestCorruptObjectUnreachableWithoutBitFlips(t *testing.T) {
 	for seed := uint64(1); seed <= 200; seed++ {
 		cfg := DefaultConfig(seed)
-		cfg.FS.ReadCorruptProb = 0
+		cfg.Disturbances.ReadCorruptProb = 0
 		r := Run(cfg)
 		if len(r.Failures) > 0 || r.Stats.CorruptionsDetected > 0 {
 			t.Fatalf("seed %d: failures=%v corrupt=%d", seed, r.Failures, r.Stats.CorruptionsDetected)

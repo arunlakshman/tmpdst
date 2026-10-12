@@ -16,11 +16,11 @@ type Simulator struct {
 	step int
 	q    Queue
 
-	fs     *FakeFS
-	server control.Machine // nil while crashed
-	inc    Incarnation     // current (or last) incarnation; 0 before first boot
-	alive  bool
-	quiet  bool
+	plant    *PlantModel
+	server   control.Machine // nil while crashed
+	inc      Incarnation     // current (or last) incarnation; 0 before first boot
+	alive    bool
+	settling bool
 
 	workload *Workload
 	oracle   *Oracle
@@ -29,14 +29,14 @@ type Simulator struct {
 	env       *env
 	parked    []bool // idle clients waiting for a restart or the end of a quiesce
 	quiescing bool   // clients hold new requests until every request replied
-	stopped   bool   // QuietTail is over: clients issue nothing more
+	stopped   bool   // Settling is over: clients issue nothing more
 	halted    bool   // a failure stops the run
 
 	trace uint64 // running trace hash
 	res   Result
 }
 
-// New prepares a run: seeds the Rand, builds the FakeFS with the obj/ and tmp/
+// New prepares a run: seeds the Rand, builds the PlantModel with the obj/ and tmp/
 // directories of cfg.Server.Dir, the workload and the oracle, and schedules
 // the first boot, the clients' first wakeups and the end of Chaos.
 func New(cfg Config) *Simulator {
@@ -56,7 +56,7 @@ func New(cfg Config) *Simulator {
 	s := &Simulator{
 		cfg:      cfg,
 		rng:      rng,
-		fs:       NewFakeFS(rng, cfg.FS, format.ObjDir(cfg.Server.Dir), format.TmpDir(cfg.Server.Dir)),
+		plant:    NewPlantModel(rng, cfg.Disturbances, format.ObjDir(cfg.Server.Dir), format.TmpDir(cfg.Server.Dir)),
 		workload: NewWorkload(cfg.Workload, rng),
 		oracle:   NewOracle(),
 		env:      &env{rng: rng, buggify: true},
@@ -71,8 +71,8 @@ func New(cfg Config) *Simulator {
 	if cfg.Workload.QuiesceEvery > 0 {
 		s.schedule(Entry{At: control.Time(cfg.Workload.QuiesceEvery), Kind: KindQuiesce})
 	}
-	s.schedule(Entry{At: control.Time(cfg.Chaos), Kind: KindQuiet})
-	s.schedule(Entry{At: control.Time(cfg.Chaos + cfg.QuietTail), Kind: KindTailEnd})
+	s.schedule(Entry{At: control.Time(cfg.Chaos), Kind: KindSettle})
+	s.schedule(Entry{At: control.Time(cfg.Chaos + cfg.Settling), Kind: KindSettlingEnd})
 	return s
 }
 
@@ -94,7 +94,7 @@ func (s *Simulator) Run() Result {
 		s.now = e.At
 		s.trace = Fold(Fold(Fold(Fold(s.trace, uint64(s.step)), uint64(s.now)), uint64(e.Kind)), uint64(e.Inc))
 		s.handle(e)
-		s.trace = Fold(s.trace, s.fs.Hash())
+		s.trace = Fold(s.trace, s.plant.Hash())
 		if s.halted {
 			break
 		}
@@ -111,7 +111,7 @@ func (s *Simulator) Run() Result {
 	s.res.EndTime = s.now
 	s.res.TraceHash = s.trace
 	s.res.RandCalls = s.rng.Calls()
-	fc := s.fs.Counters()
+	fc := s.plant.Counters()
 	s.res.Stats.FSOps = fc.Landed
 	s.res.Stats.EIOs = fc.EIOs
 	s.res.Stats.ReadCorruptions = fc.ReadCorruptions
@@ -136,12 +136,12 @@ func (s *Simulator) handle(e Entry) {
 			s.note(e, "dropped: dead incarnation")
 			return
 		}
-		body := s.fs.Land(e.Action, e.Plan)
+		body := s.plant.Land(e.Action, e.Plan)
 		s.trace = hashEvent(Fold(s.trace, 1), body)
 		if s.cfg.Log {
 			s.note(e, "land "+DescribeAction(e.Action)+" -> "+DescribeEvent(body))
 		}
-		s.schedule(Entry{At: s.now + control.Time(e.Plan.Reply), Kind: KindDeliver, Inc: s.inc, Event: body})
+		s.schedule(Entry{At: s.now + control.Time(e.Plan.FeedbackDelay), Kind: KindDeliver, Inc: s.inc, Event: body})
 		s.maybeCrash()
 	case KindClientWake:
 		s.wake(e.Client)
@@ -156,14 +156,14 @@ func (s *Simulator) handle(e Entry) {
 			s.quiescing = true
 			s.note(e, "quiesce")
 		}
-	case KindQuiet:
-		s.quiet = true
-		s.fs.SetQuiet(true)
+	case KindSettle:
+		s.settling = true
+		s.plant.SetQuiet(true)
 		s.env.buggify = false
-		s.note(e, "chaos over: no more faults or crashes")
-	case KindTailEnd:
+		s.note(e, "chaos over: settling (no new faults or crashes)")
+	case KindSettlingEnd:
 		s.stopped = true
-		s.note(e, "quiet tail over: clients stop")
+		s.note(e, "settling over: clients stop")
 	}
 }
 
@@ -185,8 +185,8 @@ func (s *Simulator) deliver(body control.EventBody) {
 	for i, a := range acts {
 		switch x := a.(type) {
 		case control.Actuation:
-			plan := s.fs.Plan(a)
-			s.schedule(Entry{At: s.now + control.Time(plan.Land), Kind: KindFSLand, Inc: s.inc, Action: a, Plan: plan})
+			plan := s.plant.Plan(a)
+			s.schedule(Entry{At: s.now + control.Time(plan.DeadTime), Kind: KindFSLand, Inc: s.inc, Action: a, Plan: plan})
 		case control.Reply:
 			s.reply(x)
 		case control.Emit:
@@ -264,7 +264,7 @@ func (s *Simulator) wakeParked() {
 
 // maybeCrash injects a crash during Chaos with probability CrashProb.
 func (s *Simulator) maybeCrash() {
-	if s.alive && !s.quiet && s.rng.Chance(s.cfg.CrashProb) {
+	if s.alive && !s.settling && s.rng.Chance(s.cfg.CrashProb) {
 		s.crash("injected crash")
 	}
 }
@@ -274,7 +274,7 @@ func (s *Simulator) maybeCrash() {
 // never happen), outstanding requests are abandoned, and a restart is
 // scheduled.
 func (s *Simulator) crash(why string) {
-	rep := s.fs.Crash()
+	rep := s.plant.Crash()
 	s.res.Stats.TornFiles += rep.Torn
 	s.res.Stats.LostChanges += rep.Lost
 	s.res.Stats.KeptChanges += rep.Kept
@@ -387,8 +387,8 @@ func (s *Simulator) Step() int           { return s.step }
 func (s *Simulator) Now() control.Time   { return s.now }
 func (s *Simulator) Alive() bool         { return s.alive }
 func (s *Simulator) Inc() Incarnation    { return s.inc }
-func (s *Simulator) Quiet() bool         { return s.quiet }
-func (s *Simulator) FS() *FakeFS         { return s.fs }
+func (s *Simulator) Settling() bool      { return s.settling }
+func (s *Simulator) FS() *PlantModel     { return s.plant }
 func (s *Simulator) Root() string        { return s.cfg.Server.Dir }
 func (s *Simulator) Oracle() *Oracle     { return s.oracle }
 func (s *Simulator) History() *History   { return s.oracle.History() }
@@ -400,7 +400,7 @@ var _ View = (*Simulator)(nil)
 // run's single Rand, so the server's random choices replay with the seed.
 type env struct {
 	rng     *Rand
-	buggify bool // false during QuietTail
+	buggify bool // false during Settling
 }
 
 func (e *env) Uint64() uint64          { return e.rng.Uint64() }

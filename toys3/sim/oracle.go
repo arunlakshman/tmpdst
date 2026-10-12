@@ -9,40 +9,6 @@ import (
 	"manifester/toys3/control"
 )
 
-// Outcome is what the client learned about one request.
-type Outcome uint8
-
-const (
-	Pending   Outcome = iota // no reply yet
-	Definite                 // 200, 400 or 404: the op happened exactly as replied
-	Failed                   // 500: the op may or may not have taken effect
-	Abandoned                // the server crashed (or tripped) before replying
-)
-
-// HistOp is one client request as the client saw it.
-type HistOp struct {
-	Req    control.ClientReq
-	Client int
-	Op     control.Op
-	Invoke control.Time // when the Request was delivered
-	// Return is the reply time (Definite, Failed) or the crash time (Abandoned).
-	Return  control.Time
-	Outcome Outcome
-	Status  control.Status
-	Body    []byte // 200 GET only
-	// InvSeq and RetSeq order Invoke, Return and crash events exactly
-	// (several can share one virtual instant); the checker uses these.
-	InvSeq, RetSeq uint64
-}
-
-// History is the complete client-visible history of a run.
-type History struct {
-	Ops     []HistOp       // in Invoke order
-	Crashes []control.Time // crash (and Trip) instants, ascending
-	// Completed lists indices into Ops in reply order (Definite and Failed).
-	Completed []int
-}
-
 // Value is the model's view of one key: absent, or the bytes written by PUT
 // Writer (COPY preserves Writer, since the bytes are identical).
 type Value struct {
@@ -77,12 +43,12 @@ type Oracle struct {
 	// checked is the index of the first op not yet in a checked window.
 	checked int
 	clock   uint64 // logical time for InvSeq / RetSeq
-	// groups are the possible model states at the end of the last window,
-	// factored into independent groups of keys: the possible states are
-	// every combination of one state per group. A key in no group is
-	// certainly absent.
-	groups []group
-	stats  OracleStats
+	// estimate is the set of possible reference-model states at the end of
+	// the last window (a set-membership state estimate), factored into
+	// independent groups of keys: the possible states are every combination
+	// of one state per group. A key in no group is certainly absent.
+	estimate []group
+	stats    OracleStats
 	// Budget bounds the memo size of one window search (0: default).
 	Budget int
 }
@@ -195,11 +161,12 @@ type kv struct {
 	writer control.ClientReq
 }
 
-// modelState is the sequential model: the present keys, sorted. It is
+// refState is a state of the reference model (the sequential
+// specification the closed loop must track): the present keys, sorted. It is
 // immutable once built (apply returns a new one).
-type modelState []kv
+type refState []kv
 
-func (st modelState) get(key string) (control.ClientReq, bool) {
+func (st refState) get(key string) (control.ClientReq, bool) {
 	i, found := slices.BinarySearchFunc(st, key, func(e kv, k string) int { return strings.Compare(e.key, k) })
 	if !found {
 		return 0, false
@@ -207,9 +174,9 @@ func (st modelState) get(key string) (control.ClientReq, bool) {
 	return st[i].writer, true
 }
 
-func (st modelState) set(key string, w control.ClientReq, present bool) modelState {
+func (st refState) set(key string, w control.ClientReq, present bool) refState {
 	i, found := slices.BinarySearchFunc(st, key, func(e kv, k string) int { return strings.Compare(e.key, k) })
-	out := make(modelState, 0, len(st)+1)
+	out := make(refState, 0, len(st)+1)
 	out = append(out, st[:i]...)
 	if present {
 		out = append(out, kv{key, w})
@@ -220,7 +187,7 @@ func (st modelState) set(key string, w control.ClientReq, present bool) modelSta
 	return append(out, st[i:]...)
 }
 
-func (st modelState) String() string {
+func (st refState) String() string {
 	var b strings.Builder
 	b.WriteByte('{')
 	for i, e := range st {
@@ -244,7 +211,7 @@ type wop struct {
 }
 
 // apply runs w on st. ok is false if w's replied result contradicts st.
-func (w *wop) apply(st modelState) (modelState, bool) {
+func (w *wop) apply(st refState) (refState, bool) {
 	status := w.h.Status
 	switch op := w.h.Op.(type) {
 	case control.Get:
@@ -340,15 +307,15 @@ type search struct {
 	visited map[string]struct{}
 	budget  int
 	over    bool
-	finals  []modelState
+	finals  []refState
 	seen    map[string]struct{}
 }
 
 // group is a set of keys whose possible states are carried jointly
 // (because a COPY tied them together, or a crash left correlated outcomes).
 type group struct {
-	keys   []string     // sorted
-	states []modelState // restricted to keys; distinct
+	keys   []string   // sorted
+	states []refState // restricted to keys; distinct
 }
 
 // opKeys returns the keys op touches, sorted.
@@ -424,10 +391,10 @@ func (o *Oracle) check() []Failure {
 	for i := range ws {
 		add(opKeys(ws[i].h.Op))
 	}
-	pulled := make([]bool, len(o.groups))
+	pulled := make([]bool, len(o.estimate))
 	for changed := true; changed; {
 		changed = false
-		for i, g := range o.groups {
+		for i, g := range o.estimate {
 			if pulled[i] {
 				continue
 			}
@@ -444,14 +411,14 @@ func (o *Oracle) check() []Failure {
 
 	for _, comp := range comps {
 		// Start states: the product of the carried groups inside comp.
-		start := []modelState{nil}
+		start := []refState{nil}
 		var rest []group
-		for _, g := range o.groups {
+		for _, g := range o.estimate {
 			if !intersects(g.keys, comp) {
 				rest = append(rest, g)
 				continue
 			}
-			var next []modelState
+			var next []refState
 			for _, a := range start {
 				for _, b := range g.states {
 					st := append(slices.Clone(a), b...)
@@ -479,8 +446,8 @@ func (o *Oracle) check() []Failure {
 			finals = widenStates(comp, finals)
 			o.stats.Widenings++
 		}
-		o.groups = append(rest, factor(comp, finals)...)
-		slices.SortFunc(o.groups, func(a, b group) int { return strings.Compare(a.keys[0], b.keys[0]) })
+		o.estimate = append(rest, factor(comp, finals)...)
+		slices.SortFunc(o.estimate, func(a, b group) int { return strings.Compare(a.keys[0], b.keys[0]) })
 		o.stats.MaxStates = max(o.stats.MaxStates, len(finals))
 	}
 	return nil
@@ -489,8 +456,8 @@ func (o *Oracle) check() []Failure {
 // widenStates over-approximates a too-large set of states over keys by one
 // state: each key keeps its value if all states agree on it, else becomes
 // unknown. Correlations between keys are forgotten.
-func widenStates(keys []string, states []modelState) []modelState {
-	var out modelState
+func widenStates(keys []string, states []refState) []refState {
+	var out refState
 	for _, k := range keys {
 		w0, p0 := states[0].get(k)
 		same := true
@@ -507,14 +474,14 @@ func widenStates(keys []string, states []modelState) []modelState {
 			out = append(out, kv{k, w0})
 		}
 	}
-	return []modelState{out}
+	return []refState{out}
 }
 
 // factor turns the possible end states of one component into groups: one
 // group per key when the set is exactly the product of its per-key values
 // (independent uncertainty, the common case), else one joint group. Keys
 // that are certainly absent need no group.
-func factor(keys []string, finals []modelState) []group {
+func factor(keys []string, finals []refState) []group {
 	vals := make([][]control.ClientReq, len(keys)) // 0 = absent
 	prod := 1
 	for i, k := range keys {
@@ -542,7 +509,7 @@ func factor(keys []string, finals []modelState) []group {
 			if w == 0 {
 				g.states = append(g.states, nil)
 			} else {
-				g.states = append(g.states, modelState{{k, w}})
+				g.states = append(g.states, refState{{k, w}})
 			}
 		}
 		gs = append(gs, g)
@@ -552,7 +519,7 @@ func factor(keys []string, finals []modelState) []group {
 
 // search runs one WGL search from every start state and returns the
 // distinct possible end states.
-func (o *Oracle) search(start []modelState, ws []wop) ([]modelState, []Failure) {
+func (o *Oracle) search(start []refState, ws []wop) ([]refState, []Failure) {
 	budget := o.Budget
 	if budget <= 0 {
 		budget = 1 << 20
@@ -577,7 +544,7 @@ func (o *Oracle) search(start []modelState, ws []wop) ([]modelState, []Failure) 
 
 // dfs explores linearizations extending set (the linearized ops), whose last
 // linearization point is at logical time at, with model state st.
-func (s *search) dfs(set []uint64, at uint64, st modelState) {
+func (s *search) dfs(set []uint64, at uint64, st refState) {
 	if s.over {
 		return
 	}
@@ -638,7 +605,7 @@ func (s *search) dfs(set []uint64, at uint64, st modelState) {
 	}
 }
 
-func memoKey(set []uint64, st modelState) string {
+func memoKey(set []uint64, st refState) string {
 	var b strings.Builder
 	for _, w := range set {
 		b.WriteString(strconv.FormatUint(w, 36))
@@ -648,7 +615,7 @@ func memoKey(set []uint64, st modelState) string {
 	return b.String()
 }
 
-func describeWindow(start []modelState, ws []wop) string {
+func describeWindow(start []refState, ws []wop) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "no linearization of %d ops from any of %d possible start states", len(ws), len(start))
 	for i, st := range start {
@@ -668,33 +635,4 @@ func describeWindow(start []modelState, ws []wop) string {
 		b.WriteString(describeOp(ws[i].h))
 	}
 	return b.String()
-}
-
-func (o Outcome) String() string {
-	switch o {
-	case Pending:
-		return "pending"
-	case Definite:
-		return "definite"
-	case Failed:
-		return "failed"
-	case Abandoned:
-		return "abandoned"
-	}
-	return "outcome(?)"
-}
-
-// describeOp renders one history op for failure messages and logs.
-func describeOp(h *HistOp) string {
-	res := h.Outcome.String()
-	if h.Outcome == Definite || h.Outcome == Failed {
-		res = strconv.Itoa(int(h.Status))
-	}
-	if w, ok := ValueWriter(h.Body); ok {
-		res += fmt.Sprintf(" value-of-%d", w)
-	} else if h.Body != nil {
-		res += fmt.Sprintf(" garbage(%d bytes)", len(h.Body))
-	}
-	return fmt.Sprintf("req %d client %d %s [%d..%d @%v..%v] -> %s",
-		h.Req, h.Client, DescribeOp(h.Op), h.InvSeq, h.RetSeq, h.Invoke, h.Return, res)
 }

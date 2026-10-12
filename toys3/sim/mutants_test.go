@@ -345,7 +345,7 @@ func firstCatch(factory control.Factory, invs func() []Invariant, n int) (uint64
 // TestCatchesBugs is the proof that the simulator has teeth: every mutant
 // must fail some seed within -mutant-seeds seeds. It also reports, for
 // learning, whether the bug is visible to clients alone (BlackBoxInvariants:
-// no peeking at the fake disk's durable state).
+// no peeking at the plant model's durable state).
 func TestCatchesBugs(t *testing.T) {
 	for _, m := range mutants {
 		t.Run(m.name, func(t *testing.T) {

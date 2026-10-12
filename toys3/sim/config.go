@@ -10,17 +10,19 @@ import (
 type Config struct {
 	Seed uint64
 
-	// Chaos is how long clients issue requests while faults and crashes are
-	// injected. QuietTail follows it: no new faults or crashes, the server is
-	// (re)started and alive, clients keep issuing, and every outstanding
-	// request must get a reply (liveness). The run then drains the queue.
-	Chaos     control.Duration
-	QuietTail control.Duration
+	// Chaos is how long clients issue requests while disturbances (faults)
+	// and crashes are injected. Settling follows it: no new faults or crashes,
+	// the server is (re)started and alive, clients keep issuing, and the
+	// closed loop must settle: every outstanding request gets a reply and no
+	// request issued in Settling gets a 500 (liveness). The run then drains
+	// the queue.
+	Chaos    control.Duration
+	Settling control.Duration
 	// MaxSteps aborts a run that never drains (reported as a failure).
 	MaxSteps int
 
-	Workload WorkloadConfig
-	FS       FSFaults
+	Workload     WorkloadConfig
+	Disturbances Disturbances
 
 	// CrashProb is the probability, evaluated after each server step during
 	// Chaos, of crashing the server at that instant.
@@ -28,7 +30,7 @@ type Config struct {
 	// RestartDelay is the [min, max] downtime between crash and Started.
 	RestartDelay [2]control.Duration
 
-	// Server is passed to Factory; Dir is the fake filesystem's root.
+	// Server is passed to Factory; Dir is the plant model's root.
 	Server control.Config
 	// Factory builds the server under test; nil means control.NewMachine.
 	// Learners can plug in a deliberately broken variant to watch DST catch it.
@@ -125,7 +127,7 @@ func statusIndex(st control.Status) int {
 
 // DefaultConfig is the configuration used by the tests and the campaign
 // runner: few clients and keys (contention), frequent crashes and faults
-// during a short Chaos phase, then a QuietTail for liveness.
+// during a short Chaos phase, then a Settling phase for liveness.
 //
 // It is "swarm" tested: the key count, client count, crash rate and EIO rate
 // are drawn per seed (from a stream separate from the run's), because no
@@ -138,17 +140,17 @@ func DefaultConfig(seed uint64) Config {
 	cfg.Workload.Keys = []int{1, 2, 3, 3, 4, 8, 16, 32}[r.Intn(8)]
 	cfg.Workload.Clients = []int{2, 4, 4, 6}[r.Intn(4)]
 	cfg.CrashProb = []float64{0.001, 0.004, 0.004, 0.01}[r.Intn(4)]
-	cfg.FS.EIOProb = []float64{0.002, 0.01, 0.01, 0.03}[r.Intn(4)]
+	cfg.Disturbances.EIOProb = []float64{0.002, 0.01, 0.01, 0.03}[r.Intn(4)]
 	return cfg
 }
 
 // BaseConfig is DefaultConfig without the per-seed swarm variation.
 func BaseConfig(seed uint64) Config {
 	return Config{
-		Seed:      seed,
-		Chaos:     300 * control.Millisecond,
-		QuietTail: 60 * control.Millisecond,
-		MaxSteps:  2_000_000,
+		Seed:     seed,
+		Chaos:    300 * control.Millisecond,
+		Settling: 60 * control.Millisecond,
+		MaxSteps: 2_000_000,
 		Workload: WorkloadConfig{
 			Clients:      4,
 			Keys:         3,
@@ -157,13 +159,13 @@ func BaseConfig(seed uint64) Config {
 			Think:        [2]control.Duration{0, 1 * control.Millisecond},
 			QuiesceEvery: 8 * control.Millisecond,
 		},
-		FS: FSFaults{
+		Disturbances: Disturbances{
 			EIOProb:         0.01,
 			TornWriteProb:   0.3,
 			ReadCorruptProb: 0.005,
 			WritebackProb:   0.05,
-			Latency:         [2]control.Duration{20 * control.Microsecond, 1500 * control.Microsecond},
-			ReplyDelay:      [2]control.Duration{0, 500 * control.Microsecond},
+			DeadTime:        [2]control.Duration{20 * control.Microsecond, 1500 * control.Microsecond},
+			FeedbackDelay:   [2]control.Duration{0, 500 * control.Microsecond},
 			FsyncGate:       true,
 		},
 		CrashProb:    0.004,

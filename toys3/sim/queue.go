@@ -12,14 +12,14 @@ type Incarnation uint64
 type EntryKind uint8
 
 const (
-	KindDeliver    EntryKind = iota // deliver Event to the server (Inc must be current)
-	KindFSLand                      // a filesystem action takes effect in the FakeFS
-	KindClientWake                  // an idle client issues its next request
-	KindCrash                       // kill the server now
-	KindRestart                     // boot a new incarnation and deliver Started
-	KindQuiesce                     // clients stop issuing until every request has replied
-	KindQuiet                       // Chaos ends: no new faults or crashes (QuietTail begins)
-	KindTailEnd                     // QuietTail ends: clients stop for good; the queue drains
+	KindDeliver     EntryKind = iota // deliver Event to the server (Inc must be current)
+	KindFSLand                       // a filesystem action takes effect in the PlantModel
+	KindClientWake                   // an idle client issues its next request
+	KindCrash                        // kill the server now
+	KindRestart                      // boot a new incarnation and deliver Started
+	KindQuiesce                      // clients stop issuing until every request has replied
+	KindSettle                       // Chaos ends: no new faults or crashes (Settling begins)
+	KindSettlingEnd                  // Settling ends: clients stop for good; the queue drains
 )
 
 func (k EntryKind) String() string {
@@ -36,10 +36,10 @@ func (k EntryKind) String() string {
 		return "restart"
 	case KindQuiesce:
 		return "quiesce"
-	case KindQuiet:
-		return "quiet"
-	case KindTailEnd:
-		return "tail-end"
+	case KindSettle:
+		return "settle"
+	case KindSettlingEnd:
+		return "settling-end"
 	}
 	return "kind(?)"
 }
@@ -54,7 +54,7 @@ type Entry struct {
 
 	Event  control.EventBody // KindDeliver
 	Action control.Action    // KindFSLand: the FS action to apply
-	Plan   FSPlan            // KindFSLand: fault and latency decided at issue time
+	Plan   ActuationPlan     // KindFSLand: fault, dead time and feedback delay decided at issue time
 	Client int               // KindClientWake
 }
 

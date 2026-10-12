@@ -12,12 +12,14 @@ const (
 	tTmp = "/d/tmp"
 )
 
-func newTestFS(seed uint64, f FSFaults) *FakeFS { return NewFakeFS(NewRand(seed), f, tObj, tTmp) }
+func newTestFS(seed uint64, f Disturbances) *PlantModel {
+	return NewPlantModel(NewRand(seed), f, tObj, tTmp)
+}
 
 // do lands a on fs with no injected failure and returns its error.
-func do(t *testing.T, fs *FakeFS, a control.Action) control.ErrCode {
+func do(t *testing.T, fs *PlantModel, a control.Action) control.ErrCode {
 	t.Helper()
-	return errOf(fs.Land(a, FSPlan{}))
+	return errOf(fs.Land(a, ActuationPlan{}))
 }
 
 func errOf(b control.EventBody) control.ErrCode {
@@ -40,11 +42,11 @@ func errOf(b control.EventBody) control.ErrCode {
 	return 255
 }
 
-func TestFakeFSUnsyncedWriteMayVanish(t *testing.T) {
+func TestPlantModelUnsyncedWriteMayVanish(t *testing.T) {
 	data := []byte("hello world")
 	survived, vanished := 0, 0
 	for seed := uint64(1); seed <= 64; seed++ {
-		fs := newTestFS(seed, FSFaults{})
+		fs := newTestFS(seed, Disturbances{})
 		do(t, fs, control.FSWrite{IO: 1, Path: tObj + "/a", Data: data})
 		if got, ok := fs.CurrentFile(tObj + "/a"); !ok || !bytes.Equal(got, data) {
 			t.Fatal("write not visible before the crash")
@@ -64,11 +66,11 @@ func TestFakeFSUnsyncedWriteMayVanish(t *testing.T) {
 	}
 }
 
-func TestFakeFSRenameWithoutDirFsyncMayVanish(t *testing.T) {
+func TestPlantModelRenameWithoutDirFsyncMayVanish(t *testing.T) {
 	data := []byte("payload")
 	present, absent, both := 0, 0, 0
 	for seed := uint64(1); seed <= 128; seed++ {
-		fs := newTestFS(seed, FSFaults{})
+		fs := newTestFS(seed, Disturbances{})
 		do(t, fs, control.FSWrite{IO: 1, Path: tTmp + "/t", Data: data})
 		do(t, fs, control.FSFsync{IO: 2, Path: tTmp + "/t"})
 		do(t, fs, control.FSFsyncDir{IO: 3, Dir: tTmp})
@@ -90,10 +92,10 @@ func TestFakeFSRenameWithoutDirFsyncMayVanish(t *testing.T) {
 	}
 }
 
-func TestFakeFSFullySyncedSurvives(t *testing.T) {
+func TestPlantModelFullySyncedSurvives(t *testing.T) {
 	data := []byte("durable bytes")
 	for seed := uint64(1); seed <= 100; seed++ {
-		fs := newTestFS(seed, FSFaults{TornWriteProb: 1})
+		fs := newTestFS(seed, Disturbances{TornWriteProb: 1})
 		do(t, fs, control.FSWrite{IO: 1, Path: tTmp + "/t", Data: data})
 		do(t, fs, control.FSFsync{IO: 2, Path: tTmp + "/t"})
 		do(t, fs, control.FSRename{IO: 3, From: tTmp + "/t", To: tObj + "/k"})
@@ -112,10 +114,10 @@ func TestFakeFSFullySyncedSurvives(t *testing.T) {
 	}
 }
 
-func TestFakeFSTornPrefix(t *testing.T) {
+func TestPlantModelTornPrefix(t *testing.T) {
 	data := []byte("0123456789abcdef")
 	for seed := uint64(1); seed <= 50; seed++ {
-		fs := newTestFS(seed, FSFaults{TornWriteProb: 1})
+		fs := newTestFS(seed, Disturbances{TornWriteProb: 1})
 		do(t, fs, control.FSWrite{IO: 1, Path: tObj + "/k", Data: data})
 		do(t, fs, control.FSFsyncDir{IO: 2, Dir: tObj}) // the name is durable, the bytes are not
 		rep := fs.Crash()
@@ -129,12 +131,12 @@ func TestFakeFSTornPrefix(t *testing.T) {
 	}
 }
 
-func TestFakeFSEIOMayOrMayNotApply(t *testing.T) {
+func TestPlantModelEIOMayOrMayNotApply(t *testing.T) {
 	applied, notApplied := 0, 0
 	for seed := uint64(1); seed <= 64; seed++ {
-		fs := newTestFS(seed, FSFaults{})
+		fs := newTestFS(seed, Disturbances{})
 		do(t, fs, control.FSWrite{IO: 1, Path: tTmp + "/t", Data: []byte("x")})
-		if err := errOf(fs.Land(control.FSRename{IO: 2, From: tTmp + "/t", To: tObj + "/k"}, FSPlan{Fail: true})); err != control.ErrIO {
+		if err := errOf(fs.Land(control.FSRename{IO: 2, From: tTmp + "/t", To: tObj + "/k"}, ActuationPlan{Fail: true})); err != control.ErrIO {
 			t.Fatalf("got %v, want EIO", err)
 		}
 		if _, ok := fs.CurrentFile(tObj + "/k"); ok {
@@ -146,17 +148,17 @@ func TestFakeFSEIOMayOrMayNotApply(t *testing.T) {
 	if applied == 0 || notApplied == 0 {
 		t.Fatalf("failed rename: applied=%d not=%d", applied, notApplied)
 	}
-	fs := newTestFS(1, FSFaults{})
-	if err := errOf(fs.Land(control.FSRead{IO: 1, Path: tObj + "/missing"}, FSPlan{Fail: true})); err != control.ErrNotFound {
+	fs := newTestFS(1, Disturbances{})
+	if err := errOf(fs.Land(control.FSRead{IO: 1, Path: tObj + "/missing"}, ActuationPlan{Fail: true})); err != control.ErrNotFound {
 		t.Fatalf("missing path with a planned failure: got %v, want ENOENT", err)
 	}
 }
 
-func TestFakeFSFsyncGateLies(t *testing.T) {
-	fs := newTestFS(1, FSFaults{FsyncGate: true})
+func TestPlantModelFsyncGateLies(t *testing.T) {
+	fs := newTestFS(1, Disturbances{FsyncGate: true})
 	do(t, fs, control.FSWrite{IO: 1, Path: tObj + "/k", Data: []byte("data")})
 	do(t, fs, control.FSFsyncDir{IO: 2, Dir: tObj})
-	if err := errOf(fs.Land(control.FSFsync{IO: 3, Path: tObj + "/k"}, FSPlan{Fail: true})); err != control.ErrIO {
+	if err := errOf(fs.Land(control.FSFsync{IO: 3, Path: tObj + "/k"}, ActuationPlan{Fail: true})); err != control.ErrIO {
 		t.Fatal("want EIO")
 	}
 	if err := do(t, fs, control.FSFsync{IO: 4, Path: tObj + "/k"}); err != control.OK {
@@ -168,17 +170,17 @@ func TestFakeFSFsyncGateLies(t *testing.T) {
 	}
 }
 
-func TestFakeFSNeverAliasesHandedOutSlices(t *testing.T) {
-	fs := newTestFS(1, FSFaults{})
+func TestPlantModelNeverAliasesHandedOutSlices(t *testing.T) {
+	fs := newTestFS(1, Disturbances{})
 	in := []byte("abc")
 	do(t, fs, control.FSWrite{IO: 1, Path: tObj + "/k", Data: in})
 	in[0] = 'X'
-	r := fs.Land(control.FSRead{IO: 2, Path: tObj + "/k"}, FSPlan{}).(control.FSReadDone)
+	r := fs.Land(control.FSRead{IO: 2, Path: tObj + "/k"}, ActuationPlan{}).(control.FSReadDone)
 	if string(r.Data) != "abc" {
 		t.Fatalf("write did not copy: %q", r.Data)
 	}
 	r.Data[1] = 'Y'
-	r2 := fs.Land(control.FSRead{IO: 3, Path: tObj + "/k"}, FSPlan{}).(control.FSReadDone)
+	r2 := fs.Land(control.FSRead{IO: 3, Path: tObj + "/k"}, ActuationPlan{}).(control.FSReadDone)
 	if string(r2.Data) != "abc" {
 		t.Fatalf("read did not copy: %q", r2.Data)
 	}

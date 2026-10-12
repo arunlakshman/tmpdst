@@ -9,22 +9,26 @@ import (
 	"manifester/toys3/format"
 )
 
-// FSFaults configures the fake filesystem's adversary. Zero value: an honest,
-// instant filesystem that still loses un-synced changes on crash.
-type FSFaults struct {
+// Disturbances configures the plant model: its dynamics (dead time and
+// feedback delay) and the disturbances it injects, the exogenous inputs the
+// controller cannot command (EIO, torn writes, bit flips, background
+// writeback, fsyncgate). Zero value: an honest, instant filesystem that still
+// loses un-synced changes on crash.
+type Disturbances struct {
 	// EIOProb is the per-operation probability that an operation fails with
 	// ErrIO. What a failed operation did is itself chosen adversarially (see
-	// FakeFS.Land).
+	// PlantModel.Land).
 	EIOProb float64
 	// TornWriteProb is the probability, per file with un-fsynced content at a
 	// crash, that the file survives holding a random prefix of its volatile
 	// content (instead of all of it or none of it).
 	TornWriteProb float64
-	// Latency is the [min, max] delay from issuing an action to its effect
-	// landing; ReplyDelay is the further [min, max] delay until the completion
-	// is delivered. A crash in between leaves the effect applied but unacked.
-	Latency    [2]control.Duration
-	ReplyDelay [2]control.Duration
+	// DeadTime is the [min, max] delay from issuing an actuation to its effect
+	// landing on the plant; FeedbackDelay is the further [min, max] delay until
+	// the completion (feedback) is delivered. A crash in between leaves the
+	// effect applied but unacked.
+	DeadTime      [2]control.Duration
+	FeedbackDelay [2]control.Duration
 	// ReadCorruptProb is the per-FSRead probability that the returned bytes
 	// have one bit flipped (a transient media or bus error: the stored data
 	// is unchanged). This is what makes the object CRC reachable for a
@@ -44,12 +48,13 @@ type FSFaults struct {
 	FsyncGate bool
 }
 
-// FSPlan is decided when an action is issued, so the decision consumes RNG
-// draws in issue order (deterministic) regardless of when it lands.
-type FSPlan struct {
-	Fail  bool             // complete with ErrIO
-	Land  control.Duration // issue → effect
-	Reply control.Duration // effect → completion delivered
+// ActuationPlan is decided when an actuation is issued, so the decision
+// consumes RNG draws in issue order (deterministic) regardless of when it
+// lands.
+type ActuationPlan struct {
+	Fail          bool             // complete with ErrIO
+	DeadTime      control.Duration // issue → effect (the actuation lands)
+	FeedbackDelay control.Duration // effect → completion delivered
 }
 
 // InodeID names a file's content independently of its names, so a rename can
@@ -78,8 +83,10 @@ type fdir struct {
 	sorted  []string // cached sorted names; nil when stale
 }
 
-// FakeFS is an in-memory filesystem with crash semantics. Every file and every
-// directory entry has a durable and a volatile (current) version:
+// PlantModel is the model of the plant (the disk and its page cache) that
+// stands in for the real filesystem in simulation: an in-memory filesystem
+// with crash semantics. Every file and every directory entry has a durable
+// and a volatile (current) version:
 //
 //   - FSWrite updates an inode's volatile content; FSFsync copies volatile to
 //     durable.
@@ -92,14 +99,16 @@ type fdir struct {
 // adversary would: every dirent with cur != durable either becomes durable or
 // reverts; every dirty inode keeps its volatile content, reverts to durable,
 // or (TornWriteProb) keeps a random prefix of volatile. Afterwards current ==
-// durable everywhere. A correct server survives every such outcome.
+// durable everywhere. A correct controller survives every such outcome.
+// Durable() is the plant's true state, against which the monitors check the
+// controller's claims (Committed telemetry).
 //
 // Directories are fixed at construction (format.ObjDir and format.TmpDir of the
 // root); there is no mkdir.
-type FakeFS struct {
+type PlantModel struct {
 	rng     *Rand
-	faults  FSFaults
-	quiet   bool // no new faults (QuietTail); crash resolution still applies
+	faults  Disturbances
+	quiet   bool // no new disturbances (Settling); crash resolution still applies
 	dirs    map[string]*fdir
 	inodes  map[InodeID]*inode
 	nextIno InodeID
@@ -116,9 +125,9 @@ type FSCounters struct {
 	Writebacks      int // background writebacks that made a change durable
 }
 
-// NewFakeFS returns an empty filesystem with the given (durable) directories.
-func NewFakeFS(r *Rand, faults FSFaults, dirs ...string) *FakeFS {
-	fs := &FakeFS{
+// NewPlantModel returns an empty filesystem with the given (durable) directories.
+func NewPlantModel(r *Rand, faults Disturbances, dirs ...string) *PlantModel {
+	fs := &PlantModel{
 		rng:    r,
 		faults: faults,
 		dirs:   map[string]*fdir{},
@@ -134,11 +143,11 @@ func NewFakeFS(r *Rand, faults FSFaults, dirs ...string) *FakeFS {
 }
 
 // Plan draws the fault decision and latencies for a filesystem action.
-func (fs *FakeFS) Plan(a control.Action) FSPlan {
-	var p FSPlan
+func (fs *PlantModel) Plan(a control.Action) ActuationPlan {
+	var p ActuationPlan
 	p.Fail = !fs.quiet && fs.rng.Chance(fs.faults.EIOProb)
-	p.Land = control.Duration(fs.rng.Between(int64(fs.faults.Latency[0]), int64(fs.faults.Latency[1])))
-	p.Reply = control.Duration(fs.rng.Between(int64(fs.faults.ReplyDelay[0]), int64(fs.faults.ReplyDelay[1])))
+	p.DeadTime = control.Duration(fs.rng.Between(int64(fs.faults.DeadTime[0]), int64(fs.faults.DeadTime[1])))
+	p.FeedbackDelay = control.Duration(fs.rng.Between(int64(fs.faults.FeedbackDelay[0]), int64(fs.faults.FeedbackDelay[1])))
 	return p
 }
 
@@ -153,7 +162,7 @@ func (fs *FakeFS) Plan(a control.Action) FSPlan {
 //	FSRead, FSList  no effect
 //
 // Missing paths complete with ErrNotFound (never by chance).
-func (fs *FakeFS) Land(a control.Action, p FSPlan) control.EventBody {
+func (fs *PlantModel) Land(a control.Action, p ActuationPlan) control.EventBody {
 	fs.count.Landed++
 	var body control.EventBody
 	var err control.ErrCode
@@ -182,7 +191,7 @@ func (fs *FakeFS) Land(a control.Action, p FSPlan) control.EventBody {
 		names, err = fs.list(a.Dir, p.Fail)
 		body = control.FSListDone{IO: a.IO, Names: names, Err: err}
 	default:
-		panic("toys3/sim: FakeFS.Land: not a filesystem action")
+		panic("toys3/sim: PlantModel.Land: not a filesystem action")
 	}
 	if err == control.ErrIO {
 		fs.count.EIOs++
@@ -194,7 +203,7 @@ func (fs *FakeFS) Land(a control.Action, p FSPlan) control.EventBody {
 }
 
 // writeback makes one random un-synced change durable.
-func (fs *FakeFS) writeback() {
+func (fs *PlantModel) writeback() {
 	type change struct {
 		d    *fdir
 		name string
@@ -233,10 +242,10 @@ func (fs *FakeFS) writeback() {
 }
 
 // Counters returns the fault counters so far.
-func (fs *FakeFS) Counters() FSCounters { return fs.count }
+func (fs *PlantModel) Counters() FSCounters { return fs.count }
 
 // split returns the directory of path and the base name in it.
-func (fs *FakeFS) split(path string) (*fdir, string, bool) {
+func (fs *PlantModel) split(path string) (*fdir, string, bool) {
 	i := strings.LastIndexByte(path, '/')
 	if i < 0 {
 		return nil, "", false
@@ -249,7 +258,7 @@ func (fs *FakeFS) split(path string) (*fdir, string, bool) {
 }
 
 // lookup returns the inode currently named path.
-func (fs *FakeFS) lookup(path string) (*inode, bool) {
+func (fs *PlantModel) lookup(path string) (*inode, bool) {
 	d, name, ok := fs.split(path)
 	if !ok {
 		return nil, false
@@ -277,7 +286,7 @@ func (d *fdir) setEntry(name string, e dirent) {
 	}
 }
 
-func (fs *FakeFS) write(path string, data []byte, fail bool) control.ErrCode {
+func (fs *PlantModel) write(path string, data []byte, fail bool) control.ErrCode {
 	d, name, ok := fs.split(path)
 	if !ok {
 		return control.ErrNotFound
@@ -313,7 +322,7 @@ func (fs *FakeFS) write(path string, data []byte, fail bool) control.ErrCode {
 	return control.OK
 }
 
-func (fs *FakeFS) fsync(path string, fail bool) control.ErrCode {
+func (fs *PlantModel) fsync(path string, fail bool) control.ErrCode {
 	in, ok := fs.lookup(path)
 	if !ok {
 		return control.ErrNotFound
@@ -333,7 +342,7 @@ func (fs *FakeFS) fsync(path string, fail bool) control.ErrCode {
 	return control.OK
 }
 
-func (fs *FakeFS) rename(from, to string, fail bool) control.ErrCode {
+func (fs *PlantModel) rename(from, to string, fail bool) control.ErrCode {
 	fd, fname, ok1 := fs.split(from)
 	td, tname, ok2 := fs.split(to)
 	if !ok1 || !ok2 || fd.entries[fname].cur == 0 {
@@ -357,7 +366,7 @@ func (fs *FakeFS) rename(from, to string, fail bool) control.ErrCode {
 	return control.OK
 }
 
-func (fs *FakeFS) fsyncDir(dir string, fail bool) control.ErrCode {
+func (fs *PlantModel) fsyncDir(dir string, fail bool) control.ErrCode {
 	d, ok := fs.dirs[dir]
 	if !ok {
 		return control.ErrNotFound
@@ -374,7 +383,7 @@ func (fs *FakeFS) fsyncDir(dir string, fail bool) control.ErrCode {
 	return control.OK
 }
 
-func (fs *FakeFS) read(path string, fail bool) ([]byte, control.ErrCode) {
+func (fs *PlantModel) read(path string, fail bool) ([]byte, control.ErrCode) {
 	in, ok := fs.lookup(path)
 	if !ok {
 		return nil, control.ErrNotFound
@@ -394,7 +403,7 @@ func (fs *FakeFS) read(path string, fail bool) ([]byte, control.ErrCode) {
 	return data, control.OK
 }
 
-func (fs *FakeFS) unlink(path string, fail bool) control.ErrCode {
+func (fs *PlantModel) unlink(path string, fail bool) control.ErrCode {
 	d, name, ok := fs.split(path)
 	if !ok || d.entries[name].cur == 0 {
 		return control.ErrNotFound
@@ -411,7 +420,7 @@ func (fs *FakeFS) unlink(path string, fail bool) control.ErrCode {
 	return control.OK
 }
 
-func (fs *FakeFS) list(dir string, fail bool) ([]string, control.ErrCode) {
+func (fs *PlantModel) list(dir string, fail bool) ([]string, control.ErrCode) {
 	d, ok := fs.dirs[dir]
 	if !ok {
 		return nil, control.ErrNotFound
@@ -444,19 +453,19 @@ func (d *fdir) names() []string {
 }
 
 // dirNames returns the directory paths, sorted.
-func (fs *FakeFS) dirNames() []string { return fs.dirList }
+func (fs *PlantModel) dirNames() []string { return fs.dirList }
 
 // DurableGen changes whenever the durable view may have changed, so
 // invariants over Durable() can skip unchanged steps.
-func (fs *FakeFS) DurableGen() uint64 { return fs.durGen }
+func (fs *PlantModel) DurableGen() uint64 { return fs.durGen }
 
 // CrashReport counts how the adversary resolved volatile state.
 type CrashReport struct {
 	Kept, Lost, Torn int
 }
 
-// Crash resolves all volatile state (see FakeFS) and returns what happened.
-func (fs *FakeFS) Crash() CrashReport {
+// Crash resolves all volatile state (see PlantModel) and returns what happened.
+func (fs *PlantModel) Crash() CrashReport {
 	var rep CrashReport
 	fs.durGen++
 	// 1. Directory entries: each un-synced change is kept or reverted.
@@ -519,8 +528,8 @@ func (fs *FakeFS) Crash() CrashReport {
 	return rep
 }
 
-// SetQuiet stops (true) or resumes (false) fault injection.
-func (fs *FakeFS) SetQuiet(quiet bool) { fs.quiet = quiet }
+// SetQuiet stops (true) or resumes (false) injecting disturbances.
+func (fs *PlantModel) SetQuiet(quiet bool) { fs.quiet = quiet }
 
 // FileState is one path and its content in a Snapshot.
 type FileState struct {
@@ -537,12 +546,12 @@ type Snapshot struct {
 // Durable returns what would be on disk after a crash in which the adversary
 // loses everything volatile: the durable entries pointing at durable content.
 // "Acked implies durable" is checked against this view.
-func (fs *FakeFS) Durable() Snapshot { return fs.snapshot(true) }
+func (fs *PlantModel) Durable() Snapshot { return fs.snapshot(true) }
 
 // Current returns the view reads see right now.
-func (fs *FakeFS) Current() Snapshot { return fs.snapshot(false) }
+func (fs *PlantModel) Current() Snapshot { return fs.snapshot(false) }
 
-func (fs *FakeFS) snapshot(durable bool) Snapshot {
+func (fs *PlantModel) snapshot(durable bool) Snapshot {
 	var snap Snapshot
 	for _, dn := range fs.dirNames() {
 		d := fs.dirs[dn]
@@ -556,7 +565,7 @@ func (fs *FakeFS) snapshot(durable bool) Snapshot {
 }
 
 // DurableFile returns path's content in the Durable view.
-func (fs *FakeFS) DurableFile(path string) ([]byte, bool) {
+func (fs *PlantModel) DurableFile(path string) ([]byte, bool) {
 	d, name, ok := fs.split(path)
 	if !ok {
 		return nil, false
@@ -565,7 +574,7 @@ func (fs *FakeFS) DurableFile(path string) ([]byte, bool) {
 }
 
 // CurrentFile returns path's content in the Current view.
-func (fs *FakeFS) CurrentFile(path string) ([]byte, bool) {
+func (fs *PlantModel) CurrentFile(path string) ([]byte, bool) {
 	d, name, ok := fs.split(path)
 	if !ok {
 		return nil, false
@@ -573,7 +582,7 @@ func (fs *FakeFS) CurrentFile(path string) ([]byte, bool) {
 	return fs.file(d, name, false)
 }
 
-func (fs *FakeFS) file(d *fdir, name string, durable bool) ([]byte, bool) {
+func (fs *PlantModel) file(d *fdir, name string, durable bool) ([]byte, bool) {
 	e, ok := d.entries[name]
 	if !ok {
 		return nil, false
@@ -591,7 +600,7 @@ func (fs *FakeFS) file(d *fdir, name string, durable bool) ([]byte, bool) {
 }
 
 // Hash summarizes the full state (both versions), folded into the trace hash.
-func (fs *FakeFS) Hash() uint64 {
+func (fs *PlantModel) Hash() uint64 {
 	h := uint64(fs.nextIno)
 	for _, dn := range fs.dirNames() {
 		d := fs.dirs[dn]
@@ -610,7 +619,7 @@ func (fs *FakeFS) Hash() uint64 {
 	return h
 }
 
-func (fs *FakeFS) hashInode(h uint64, id InodeID) uint64 {
+func (fs *PlantModel) hashInode(h uint64, id InodeID) uint64 {
 	in, ok := fs.inodes[id]
 	if !ok {
 		return Fold(h, 0)

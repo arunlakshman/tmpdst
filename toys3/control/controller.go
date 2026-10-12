@@ -2,7 +2,7 @@ package control
 
 import "manifester/toys3/format"
 
-// Config is the server's static configuration.
+// Config is the controller's static configuration.
 type Config struct {
 	// Dir is the data root; obj/ and tmp/ live under it and must already exist.
 	Dir string
@@ -10,26 +10,19 @@ type Config struct {
 	MaxObjectSize int
 }
 
-// phase is the server's lifecycle stage within one incarnation.
-type phase uint8
+// mode is the controller's operating mode within one incarnation: startup,
+// recovering, automatic (closed-loop serving), or halted. The numeric values
+// are folded into StateHash: append new modes, never reorder them.
+type mode uint8
 
 const (
-	phaseBooting    phase = iota // before Started; requests are queued
-	phaseRecovering              // listing and unlinking temp files; requests are queued
-	phaseServing                 // normal operation
-	phaseHalted                  // Halt was returned; every later event is ignored
+	modeStartup    mode = iota // before Started; requests are queued
+	modeRecovering             // listing and unlinking temp files; requests are queued
+	modeAuto                   // normal operation
+	modeHalted                 // Halt was returned; every later event is ignored
 )
 
-// recStep is where recovery is (only meaningful while phaseRecovering).
-type recStep uint8
-
-const (
-	recListing     recStep = iota // waiting for FSListDone(tmp)
-	recUnlinking                  // waiting for the FSUnlinkDone of every leftover
-	recFsyncingTmp                // waiting for FSFsyncDirDone(tmp)
-)
-
-// opKind is the kind of a client request.
+// opKind is the kind of a client request. Hashed by StateHash: append only.
 type opKind uint8
 
 const (
@@ -41,11 +34,11 @@ const (
 
 // reqStep is the protocol step a request is on. Each step except
 // stepWaiting has exactly one filesystem action outstanding (request.io), and
-// names the completion it waits for.
+// names the completion it waits for. Hashed by StateHash: append only.
 type reqStep uint8
 
 const (
-	stepWaiting    reqStep = iota // queued behind an earlier request on one of its keys (or recovery)
+	stepWaiting    reqStep = iota // start permissive false: an earlier request holds one of its keys (or recovery runs)
 	stepReading                   // GET: FSRead(obj/key); COPY: FSRead(obj/src)
 	stepWritingTmp                // PUT/COPY: FSWrite(tmp)
 	stepFsyncTmp                  // PUT/COPY: FSFsync(tmp)
@@ -72,29 +65,34 @@ func (r *request) touches(key string) bool {
 	return r.key == key || (r.kind == kindCopy && r.src == key)
 }
 
-// conflicts reports whether a and b share a key.
-func conflicts(a, b *request) bool {
+// interlocked reports whether a and b share a key, so they must not run at
+// the same time (the key interlock).
+func interlocked(a, b *request) bool {
 	return a.touches(b.key) || (b.kind == kindCopy && a.touches(b.src))
 }
 
-// Server is the toys3 state machine. All of its state is plain data, rebuilt
-// from nothing on every boot.
+// Controller is the toys3 state machine: the control law of the object
+// server. It turns client requests and plant feedback (filesystem
+// completions) into actuations (filesystem commands), replies and telemetry.
+// All of its state is plain data, rebuilt from nothing on every boot. It is
+// the single aggregate of the domain: one Step is its consistency boundary.
 //
-// Per-key FIFO queues are implicit: reqs holds every accepted, unfinished
-// request in arrival order, and the queue of key k is the subsequence of reqs
-// that touches k. A request may run when no earlier request in reqs touches
-// any of its keys, i.e. it is at the head of every queue it is in. This is
-// O(in-flight²) per step, which is fine for a toy and keeps the state small
-// and obviously deterministic (no maps at all).
-type Server struct {
-	env   Env
-	cfg   Config
-	phase phase
+// Key interlock: per-key FIFO queues are implicit. reqs holds every accepted,
+// unfinished request in arrival order, and the queue of key k is the
+// subsequence of reqs that touches k. A request's start permissive holds when
+// no earlier request in reqs is interlocked with it (shares a key), i.e. it is
+// at the head of every queue it is in. This is O(in-flight²) per step, which
+// is fine for a toy and keeps the state small and obviously deterministic (no
+// maps at all).
+type Controller struct {
+	env  Env
+	cfg  Config
+	mode mode
 
 	nextIO  IOID   // last IOID issued
 	nextSeq uint64 // last arrival sequence issued
 
-	// Recovery bookkeeping (phaseRecovering only).
+	// Recovery bookkeeping (modeRecovering only).
 	rec        recStep
 	recIO      []IOID // outstanding recovery IOs (one, or one per leftover temp)
 	recRemoved int    // temps unlinked successfully
@@ -103,13 +101,13 @@ type Server struct {
 }
 
 // New returns a server for one boot. It does nothing until Started.
-func New(env Env, cfg Config) *Server {
-	return &Server{env: env, cfg: cfg, phase: phaseBooting}
+func New(env Env, cfg Config) *Controller {
+	return &Controller{env: env, cfg: cfg, mode: modeStartup}
 }
 
 // Step consumes one event and returns the actions to execute.
-func (s *Server) Step(ev Event) []Action {
-	if s.phase == phaseHalted {
+func (s *Controller) Step(ev Event) []Action {
+	if s.mode == modeHalted {
 		return nil
 	}
 	switch b := ev.Body.(type) {
@@ -123,7 +121,7 @@ func (s *Server) Step(ev Event) []Action {
 		return nil
 	}
 	io := fb.ID()
-	if s.phase == phaseRecovering && indexIO(s.recIO, io) >= 0 {
+	if s.mode == modeRecovering && indexIO(s.recIO, io) >= 0 {
 		return s.onRecoveryDone(io, ev.Body)
 	}
 	for _, r := range s.reqs {
@@ -134,7 +132,7 @@ func (s *Server) Step(ev Event) []Action {
 	return nil // unknown or stale IOID: ignore
 }
 
-func (s *Server) newIO() IOID {
+func (s *Controller) newIO() IOID {
 	s.nextIO++
 	return s.nextIO
 }
@@ -142,103 +140,14 @@ func (s *Server) newIO() IOID {
 // halt fail-stops: nothing after it in this incarnation is trusted. The
 // runtime executes the actions before it (here: the 500, if any) and then
 // kills the incarnation.
-func (s *Server) halt(reason string, before ...Action) []Action {
-	s.phase = phaseHalted
+func (s *Controller) halt(reason string, before ...Action) []Action {
+	s.mode = modeHalted
 	return append(before, Halt{Reason: reason})
-}
-
-// ---- recovery ----
-
-func (s *Server) onStarted() []Action {
-	if s.phase != phaseBooting {
-		return nil // a second Started in one incarnation: ignore
-	}
-	s.phase = phaseRecovering
-	s.rec = recListing
-	io := s.newIO()
-	s.recIO = []IOID{io}
-	return []Action{FSList{IO: io, Dir: format.TmpDir(s.cfg.Dir)}}
-}
-
-// onRecoveryDone advances recovery. Any error halts: recovery must finish
-// before serving, and restarting retries it from scratch.
-func (s *Server) onRecoveryDone(io IOID, body EventBody) []Action {
-	switch s.rec {
-	case recListing:
-		d, ok := body.(FSListDone)
-		if !ok {
-			return nil
-		}
-		if d.Err != OK {
-			return s.halt("recovery: list tmp: " + d.Err.String())
-		}
-		s.recIO = nil
-		var acts []Action
-		for _, name := range d.Names {
-			uio := s.newIO()
-			s.recIO = append(s.recIO, uio)
-			acts = append(acts, FSUnlink{IO: uio, Path: format.TmpDir(s.cfg.Dir) + "/" + name})
-		}
-		if len(acts) == 0 {
-			return s.fsyncTmpDir()
-		}
-		s.rec = recUnlinking
-		return acts
-
-	case recUnlinking:
-		d, ok := body.(FSUnlinkDone)
-		if !ok {
-			return nil
-		}
-		switch d.Err {
-		case OK:
-			s.recRemoved++
-		case ErrNotFound: // already gone: fine
-		default:
-			return s.halt("recovery: unlink temp: " + d.Err.String())
-		}
-		i := indexIO(s.recIO, io)
-		s.recIO = append(s.recIO[:i], s.recIO[i+1:]...)
-		if len(s.recIO) > 0 {
-			return nil
-		}
-		return s.fsyncTmpDir()
-
-	case recFsyncingTmp:
-		d, ok := body.(FSFsyncDirDone)
-		if !ok {
-			return nil
-		}
-		if d.Err != OK {
-			return s.halt("recovery: fsync tmp dir: " + d.Err.String())
-		}
-		s.phase = phaseServing
-		s.recIO = nil
-		acts := []Action{Emit{Fact: Recovered{TempsRemoved: s.recRemoved}}}
-		return append(acts, s.startRunnable()...)
-	}
-	return nil
-}
-
-func (s *Server) fsyncTmpDir() []Action {
-	s.rec = recFsyncingTmp
-	io := s.newIO()
-	s.recIO = []IOID{io}
-	return []Action{FSFsyncDir{IO: io, Dir: format.TmpDir(s.cfg.Dir)}}
-}
-
-func indexIO(ios []IOID, io IOID) int {
-	for i, x := range ios {
-		if x == io {
-			return i
-		}
-	}
-	return -1
 }
 
 // ---- requests ----
 
-func (s *Server) onRequest(req Request) []Action {
+func (s *Controller) onRequest(req Request) []Action {
 	r := &request{client: req.Client}
 	switch op := req.Op.(type) {
 	case Put:
@@ -267,7 +176,7 @@ func (s *Server) onRequest(req Request) []Action {
 	s.nextSeq++
 	r.seq = s.nextSeq
 	s.reqs = append(s.reqs, r)
-	if s.phase == phaseServing && s.canRun(r) {
+	if s.mode == modeAuto && s.permitted(r) {
 		return s.start(r)
 	}
 	return nil // queued behind recovery or an earlier request on the same key
@@ -277,25 +186,26 @@ func badRequest(c ClientReq) []Action {
 	return []Action{Reply{Client: c, Status: StatusBadRequest}}
 }
 
-// canRun reports whether r is at the head of every key queue it is in.
-func (s *Server) canRun(r *request) bool {
+// permitted reports whether r's start permissive holds: r is at the head of
+// every key queue it is in (no earlier request is interlocked with it).
+func (s *Controller) permitted(r *request) bool {
 	for _, o := range s.reqs {
 		if o.seq >= r.seq {
 			return true
 		}
-		if conflicts(o, r) {
+		if interlocked(o, r) {
 			return false
 		}
 	}
 	return true
 }
 
-// startRunnable starts every waiting request that is now at the head of all
-// its queues, in arrival order.
-func (s *Server) startRunnable() []Action {
+// startPermitted starts every waiting request whose start permissive now
+// holds, in arrival order.
+func (s *Controller) startPermitted() []Action {
 	var acts []Action
 	for _, r := range s.reqs {
-		if r.step == stepWaiting && s.canRun(r) {
+		if r.step == stepWaiting && s.permitted(r) {
 			acts = append(acts, s.start(r)...)
 		}
 	}
@@ -303,7 +213,7 @@ func (s *Server) startRunnable() []Action {
 }
 
 // start issues the first FS action of r.
-func (s *Server) start(r *request) []Action {
+func (s *Controller) start(r *request) []Action {
 	switch r.kind {
 	case kindGet:
 		return s.issue(r, stepReading, FSRead{IO: s.newIO(), Path: format.ObjPath(s.cfg.Dir, r.key)})
@@ -316,14 +226,14 @@ func (s *Server) start(r *request) []Action {
 	}
 }
 
-func (s *Server) writeTmp(r *request) []Action {
+func (s *Controller) writeTmp(r *request) []Action {
 	io := s.newIO()
 	r.tmp = format.TmpPath(s.cfg.Dir, uint64(io))
 	return s.issue(r, stepWritingTmp, FSWrite{IO: io, Path: r.tmp, Data: format.EncodeObject(r.data)})
 }
 
 // issue records that r now waits on a's completion.
-func (s *Server) issue(r *request, step reqStep, a Actuation) []Action {
+func (s *Controller) issue(r *request, step reqStep, a Actuation) []Action {
 	r.step = step
 	r.io = a.ID()
 	return []Action{a}
@@ -331,7 +241,7 @@ func (s *Server) issue(r *request, step reqStep, a Actuation) []Action {
 
 // finish removes r, sends its final actions (ending with the Reply), and
 // starts whatever r was blocking.
-func (s *Server) finish(r *request, status Status, body []byte, before ...Action) []Action {
+func (s *Controller) finish(r *request, status Status, body []byte, before ...Action) []Action {
 	for i, o := range s.reqs {
 		if o == r {
 			s.reqs = append(s.reqs[:i], s.reqs[i+1:]...)
@@ -339,11 +249,11 @@ func (s *Server) finish(r *request, status Status, body []byte, before ...Action
 		}
 	}
 	acts := append(before, Reply{Client: r.client, Status: status, Body: body})
-	return append(acts, s.startRunnable()...)
+	return append(acts, s.startPermitted()...)
 }
 
 // commit emits Committed and replies 200 to a mutation.
-func (s *Server) commit(r *request) []Action {
+func (s *Controller) commit(r *request) []Action {
 	c := Committed{Client: r.client, Key: r.key, Deleted: r.kind == kindDelete}
 	if !c.Deleted {
 		c.Sum = format.Checksum(r.data)
@@ -353,13 +263,13 @@ func (s *Server) commit(r *request) []Action {
 
 // failHalt replies 500 to r and halts. Used for every error after which
 // obj/ may hold a change that is visible but not durable (see package doc).
-func (s *Server) failHalt(r *request, what string, err ErrCode) []Action {
+func (s *Controller) failHalt(r *request, what string, err ErrCode) []Action {
 	return s.halt(what+": "+err.String(), Reply{Client: r.client, Status: StatusServerError})
 }
 
 // onRequestIO advances r by one protocol step. A completion of the wrong type
 // for r's step is ignored like a stale one.
-func (s *Server) onRequestIO(r *request, body EventBody) []Action {
+func (s *Controller) onRequestIO(r *request, body EventBody) []Action {
 	switch r.step {
 	case stepReading:
 		d, ok := body.(FSReadDone)
@@ -443,59 +353,4 @@ func (s *Server) onRequestIO(r *request, body EventBody) []Action {
 		return s.commit(r)
 	}
 	return nil
-}
-
-// ---- hashing ----
-
-// StateHash summarizes the server's entire state (FNV-1a over a fixed
-// field order; reqs and recIO are slices, so the order is deterministic).
-func (s *Server) StateHash() uint64 {
-	h := newHasher()
-	h.u64(uint64(s.phase))
-	h.u64(uint64(s.nextIO))
-	h.u64(s.nextSeq)
-	h.u64(uint64(s.rec))
-	h.u64(uint64(s.recRemoved))
-	h.u64(uint64(len(s.recIO)))
-	for _, io := range s.recIO {
-		h.u64(uint64(io))
-	}
-	h.u64(uint64(len(s.reqs)))
-	for _, r := range s.reqs {
-		h.u64(r.seq)
-		h.u64(uint64(r.client))
-		h.u64(uint64(r.kind))
-		h.str(r.key)
-		h.str(r.src)
-		h.u64(uint64(len(r.data)))
-		h.u64(uint64(format.Checksum(r.data)))
-		h.u64(uint64(r.step))
-		h.u64(uint64(r.io))
-		h.str(r.tmp)
-	}
-	return h.sum
-}
-
-// hasher is 64-bit FNV-1a, written out by hand (hash/fnv is not on the
-// determinism allow-list, and it is four lines).
-type hasher struct{ sum uint64 }
-
-func newHasher() hasher { return hasher{sum: 14695981039346656037} }
-
-func (h *hasher) byte(b byte) {
-	h.sum ^= uint64(b)
-	h.sum *= 1099511628211
-}
-
-func (h *hasher) u64(x uint64) {
-	for i := 0; i < 8; i++ {
-		h.byte(byte(x >> (8 * i)))
-	}
-}
-
-func (h *hasher) str(s string) {
-	h.u64(uint64(len(s)))
-	for i := 0; i < len(s); i++ {
-		h.byte(s[i])
-	}
 }

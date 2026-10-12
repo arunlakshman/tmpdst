@@ -18,12 +18,12 @@ func (testEnv) Uint64() uint64  { return 4 }
 func (testEnv) Intn(n int) int  { return 0 }
 func (testEnv) Maybe(Site) bool { return false }
 
-// harness drives a Server by hand. FS actions are answered from an in-memory
+// harness drives a Controller by hand. FS actions are answered from an in-memory
 // map (no crash semantics: every change is immediately "durable"). Issued FS
 // actions wait in pending until the test completes them.
 type harness struct {
 	t       *testing.T
-	s       *Server
+	s       *Controller
 	files   map[string][]byte // full path → raw file content
 	pending []Action          // issued FS actions, not yet completed
 	// fail, if set, decides the error an FS action completes with (OK = run it).

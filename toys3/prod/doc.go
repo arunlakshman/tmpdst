@@ -8,7 +8,7 @@
 //	                    │ (chan)  │          └──────────┘                           │
 //	                    └─────────┘ ◄────────── FS...Done completions ──────────────┘
 //
-// One goroutine (Loop.Run) owns the control.Server and calls Step one event at a
+// One goroutine (Loop.Run) owns the control.Controller and calls Step one event at a
 // time; filesystem actions run concurrently in Executor goroutines and come
 // back through the inbox. This package may import os, net/http, time, etc.; it
 // is deliberately not checked by detcheck and not run in simulation.

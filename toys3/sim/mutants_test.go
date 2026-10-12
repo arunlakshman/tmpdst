@@ -10,7 +10,7 @@ import (
 	"manifester/toys3/format"
 )
 
-// Deliberately broken servers. Each wraps the real control.Server and rewrites
+// Deliberately broken servers. Each wraps the real control.Controller and rewrites
 // its actions or the events it sees, so the bug is exactly one protocol step.
 // TestCatchesBugs proves the simulator finds every one of them.
 

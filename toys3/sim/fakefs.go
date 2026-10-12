@@ -1,6 +1,12 @@
 package sim
 
-import "manifester/toys3/core"
+import (
+	"bytes"
+	"slices"
+	"strings"
+
+	"manifester/toys3/core"
+)
 
 // FSFaults configures the fake filesystem's adversary. Zero value: an honest,
 // instant filesystem that still loses un-synced changes on crash.
@@ -18,6 +24,19 @@ type FSFaults struct {
 	// is delivered. A crash in between leaves the effect applied but unacked.
 	Latency    [2]core.Duration
 	ReplyDelay [2]core.Duration
+	// ReadCorruptProb is the per-FSRead probability that the returned bytes
+	// have one bit flipped (a transient media or bus error: the stored data
+	// is unchanged). This is what makes the object CRC reachable for a
+	// correct server; without it the CRC check is dead code (see DESIGN.md).
+	ReadCorruptProb float64
+	// WritebackProb is the probability, after each landed action, that the
+	// kernel's background writeback makes one random un-synced change durable
+	// on its own (a directory entry, or a dirty file's content), as a journal
+	// commit or the flusher thread would. Without it, un-synced changes become
+	// durable only by luck at a crash; with it, e.g. a temp file's name can be
+	// durable by the time it is renamed away, so a crash resurrects it as a
+	// second name for the committed object's inode.
+	WritebackProb float64
 	// FsyncGate models Linux after a failed fsync: the dirty data is marked
 	// clean, later fsyncs of that file return OK, and the data still never
 	// reaches disk. Only a fresh FSWrite clears it.
@@ -55,6 +74,7 @@ type dirent struct {
 // ranging over maps; determinism requires it anyway).
 type fdir struct {
 	entries map[string]dirent
+	sorted  []string // cached sorted names; nil when stale
 }
 
 // FakeFS is an in-memory filesystem with crash semantics. Every file and every
@@ -82,16 +102,43 @@ type FakeFS struct {
 	dirs    map[string]*fdir
 	inodes  map[InodeID]*inode
 	nextIno InodeID
+	count   FSCounters
+	dirList []string // sorted directory paths (fixed at construction)
+	durGen  uint64   // bumped whenever anything durable may have changed
+}
+
+// FSCounters counts injected faults, for coverage.
+type FSCounters struct {
+	Landed          int // actions applied
+	EIOs            int // actions completed with an injected ErrIO
+	ReadCorruptions int // FSReads returned with a flipped bit
+	Writebacks      int // background writebacks that made a change durable
 }
 
 // NewFakeFS returns an empty filesystem with the given (durable) directories.
 func NewFakeFS(r *Rand, faults FSFaults, dirs ...string) *FakeFS {
-	panic("toys3/sim: NewFakeFS unimplemented (phase 2)")
+	fs := &FakeFS{
+		rng:    r,
+		faults: faults,
+		dirs:   map[string]*fdir{},
+		inodes: map[InodeID]*inode{},
+	}
+	for _, d := range dirs {
+		fs.dirs[d] = &fdir{entries: map[string]dirent{}}
+		fs.dirList = append(fs.dirList, d)
+	}
+	slices.Sort(fs.dirList)
+	fs.dirList = slices.Compact(fs.dirList)
+	return fs
 }
 
 // Plan draws the fault decision and latencies for a filesystem action.
 func (fs *FakeFS) Plan(a core.Action) FSPlan {
-	panic("toys3/sim: FakeFS.Plan unimplemented (phase 2)")
+	var p FSPlan
+	p.Fail = !fs.quiet && fs.rng.Chance(fs.faults.EIOProb)
+	p.Land = core.Duration(fs.rng.Between(int64(fs.faults.Latency[0]), int64(fs.faults.Latency[1])))
+	p.Reply = core.Duration(fs.rng.Between(int64(fs.faults.ReplyDelay[0]), int64(fs.faults.ReplyDelay[1])))
+	return p
 }
 
 // Land applies a filesystem action and returns its completion event. With
@@ -106,8 +153,301 @@ func (fs *FakeFS) Plan(a core.Action) FSPlan {
 //
 // Missing paths complete with ErrNotFound (never by chance).
 func (fs *FakeFS) Land(a core.Action, p FSPlan) core.EventBody {
-	panic("toys3/sim: FakeFS.Land unimplemented (phase 2)")
+	fs.count.Landed++
+	var body core.EventBody
+	var err core.ErrCode
+	switch a := a.(type) {
+	case core.FSWrite:
+		err = fs.write(a.Path, a.Data, p.Fail)
+		body = core.FSWriteDone{IO: a.IO, Err: err}
+	case core.FSFsync:
+		err = fs.fsync(a.Path, p.Fail)
+		body = core.FSFsyncDone{IO: a.IO, Err: err}
+	case core.FSRename:
+		err = fs.rename(a.From, a.To, p.Fail)
+		body = core.FSRenameDone{IO: a.IO, Err: err}
+	case core.FSFsyncDir:
+		err = fs.fsyncDir(a.Dir, p.Fail)
+		body = core.FSFsyncDirDone{IO: a.IO, Err: err}
+	case core.FSRead:
+		var data []byte
+		data, err = fs.read(a.Path, p.Fail)
+		body = core.FSReadDone{IO: a.IO, Data: data, Err: err}
+	case core.FSUnlink:
+		err = fs.unlink(a.Path, p.Fail)
+		body = core.FSUnlinkDone{IO: a.IO, Err: err}
+	case core.FSList:
+		var names []string
+		names, err = fs.list(a.Dir, p.Fail)
+		body = core.FSListDone{IO: a.IO, Names: names, Err: err}
+	default:
+		panic("toys3/sim: FakeFS.Land: not a filesystem action")
+	}
+	if err == core.ErrIO {
+		fs.count.EIOs++
+	}
+	if fs.rng.Chance(fs.faults.WritebackProb) {
+		fs.writeback()
+	}
+	return body
 }
+
+// writeback makes one random un-synced change durable.
+func (fs *FakeFS) writeback() {
+	type change struct {
+		d    *fdir
+		name string
+		ino  InodeID
+	}
+	var cands []change
+	for _, dn := range fs.dirNames() {
+		d := fs.dirs[dn]
+		for _, name := range d.names() {
+			e := d.entries[name]
+			if e.cur != e.durable {
+				cands = append(cands, change{d: d, name: name})
+			}
+			if e.cur != 0 {
+				if in := fs.inodes[e.cur]; in.dirty && !in.poisoned {
+					cands = append(cands, change{ino: e.cur})
+				}
+			}
+		}
+	}
+	if len(cands) == 0 {
+		return
+	}
+	fs.count.Writebacks++
+	fs.durGen++
+	c := cands[fs.rng.Intn(len(cands))]
+	if c.d != nil {
+		e := c.d.entries[c.name]
+		e.durable = e.cur
+		c.d.setEntry(c.name, e)
+		return
+	}
+	in := fs.inodes[c.ino]
+	in.durable = in.volatile
+	in.dirty = false
+}
+
+// Counters returns the fault counters so far.
+func (fs *FakeFS) Counters() FSCounters { return fs.count }
+
+// split returns the directory of path and the base name in it.
+func (fs *FakeFS) split(path string) (*fdir, string, bool) {
+	i := strings.LastIndexByte(path, '/')
+	if i < 0 {
+		return nil, "", false
+	}
+	d, ok := fs.dirs[path[:i]]
+	if !ok || path[i+1:] == "" {
+		return nil, "", false
+	}
+	return d, path[i+1:], true
+}
+
+// lookup returns the inode currently named path.
+func (fs *FakeFS) lookup(path string) (*inode, bool) {
+	d, name, ok := fs.split(path)
+	if !ok {
+		return nil, false
+	}
+	e := d.entries[name]
+	if e.cur == 0 {
+		return nil, false
+	}
+	return fs.inodes[e.cur], true
+}
+
+// setEntry stores e, dropping entries that are absent in both versions.
+func (d *fdir) setEntry(name string, e dirent) {
+	_, existed := d.entries[name]
+	if e.cur == 0 && e.durable == 0 {
+		delete(d.entries, name)
+		if existed {
+			d.sorted = nil
+		}
+		return
+	}
+	d.entries[name] = e
+	if !existed {
+		d.sorted = nil
+	}
+}
+
+func (fs *FakeFS) write(path string, data []byte, fail bool) core.ErrCode {
+	d, name, ok := fs.split(path)
+	if !ok {
+		return core.ErrNotFound
+	}
+	content := bytes.Clone(data)
+	if content == nil {
+		content = []byte{}
+	}
+	if fail {
+		switch fs.rng.Intn(3) {
+		case 0: // nothing happened
+			return core.ErrIO
+		case 1: // created / truncated, nothing written
+			content = []byte{}
+		default: // a prefix was written
+			content = content[:fs.rng.Intn(len(content)+1)]
+		}
+	}
+	e := d.entries[name]
+	if e.cur == 0 {
+		fs.nextIno++
+		e.cur = fs.nextIno
+		fs.inodes[e.cur] = &inode{}
+		d.setEntry(name, e)
+	}
+	in := fs.inodes[e.cur]
+	in.volatile = content
+	in.dirty = !bytes.Equal(in.volatile, in.durable)
+	in.poisoned = false
+	if fail {
+		return core.ErrIO
+	}
+	return core.OK
+}
+
+func (fs *FakeFS) fsync(path string, fail bool) core.ErrCode {
+	in, ok := fs.lookup(path)
+	if !ok {
+		return core.ErrNotFound
+	}
+	if fail {
+		if fs.faults.FsyncGate && in.dirty {
+			in.poisoned = true // the kernel drops the dirty pages' error state
+		}
+		return core.ErrIO
+	}
+	if in.poisoned {
+		return core.OK // fsyncgate: the lie
+	}
+	in.durable = in.volatile
+	in.dirty = false
+	fs.durGen++
+	return core.OK
+}
+
+func (fs *FakeFS) rename(from, to string, fail bool) core.ErrCode {
+	fd, fname, ok1 := fs.split(from)
+	td, tname, ok2 := fs.split(to)
+	if !ok1 || !ok2 || fd.entries[fname].cur == 0 {
+		return core.ErrNotFound
+	}
+	if fail && fs.rng.Intn(2) == 0 {
+		return core.ErrIO // not applied
+	}
+	if from != to {
+		src := fd.entries[fname]
+		ino := src.cur
+		src.cur = 0
+		fd.setEntry(fname, src)
+		dst := td.entries[tname]
+		dst.cur = ino
+		td.setEntry(tname, dst)
+	}
+	if fail {
+		return core.ErrIO // applied, but reported as failed
+	}
+	return core.OK
+}
+
+func (fs *FakeFS) fsyncDir(dir string, fail bool) core.ErrCode {
+	d, ok := fs.dirs[dir]
+	if !ok {
+		return core.ErrNotFound
+	}
+	if fail {
+		return core.ErrIO
+	}
+	for _, name := range d.names() {
+		e := d.entries[name]
+		e.durable = e.cur
+		d.setEntry(name, e)
+	}
+	fs.durGen++
+	return core.OK
+}
+
+func (fs *FakeFS) read(path string, fail bool) ([]byte, core.ErrCode) {
+	in, ok := fs.lookup(path)
+	if !ok {
+		return nil, core.ErrNotFound
+	}
+	if fail {
+		return nil, core.ErrIO
+	}
+	data := bytes.Clone(in.volatile)
+	if data == nil {
+		data = []byte{}
+	}
+	if len(data) > 0 && !fs.quiet && fs.rng.Chance(fs.faults.ReadCorruptProb) {
+		bit := fs.rng.Intn(len(data) * 8)
+		data[bit/8] ^= 1 << (bit % 8)
+		fs.count.ReadCorruptions++
+	}
+	return data, core.OK
+}
+
+func (fs *FakeFS) unlink(path string, fail bool) core.ErrCode {
+	d, name, ok := fs.split(path)
+	if !ok || d.entries[name].cur == 0 {
+		return core.ErrNotFound
+	}
+	if fail && fs.rng.Intn(2) == 0 {
+		return core.ErrIO // not applied
+	}
+	e := d.entries[name]
+	e.cur = 0
+	d.setEntry(name, e)
+	if fail {
+		return core.ErrIO
+	}
+	return core.OK
+}
+
+func (fs *FakeFS) list(dir string, fail bool) ([]string, core.ErrCode) {
+	d, ok := fs.dirs[dir]
+	if !ok {
+		return nil, core.ErrNotFound
+	}
+	if fail {
+		return nil, core.ErrIO
+	}
+	var names []string
+	for _, name := range d.names() {
+		if d.entries[name].cur != 0 {
+			names = append(names, name)
+		}
+	}
+	return names, core.OK
+}
+
+// names returns the directory's entry names, sorted. The slice is cached
+// and must not be modified; it stays valid while the caller iterates even if
+// entries are added or removed (a new slice is built next time).
+func (d *fdir) names() []string {
+	if d.sorted == nil {
+		names := make([]string, 0, len(d.entries))
+		for name := range d.entries { //detcheck:ok keys are sorted before use
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		d.sorted = names
+	}
+	return d.sorted
+}
+
+// dirNames returns the directory paths, sorted.
+func (fs *FakeFS) dirNames() []string { return fs.dirList }
+
+// DurableGen changes whenever the durable view may have changed, so
+// invariants over Durable() can skip unchanged steps.
+func (fs *FakeFS) DurableGen() uint64 { return fs.durGen }
 
 // CrashReport counts how the adversary resolved volatile state.
 type CrashReport struct {
@@ -116,7 +456,66 @@ type CrashReport struct {
 
 // Crash resolves all volatile state (see FakeFS) and returns what happened.
 func (fs *FakeFS) Crash() CrashReport {
-	panic("toys3/sim: FakeFS.Crash unimplemented (phase 2)")
+	var rep CrashReport
+	fs.durGen++
+	// 1. Directory entries: each un-synced change is kept or reverted.
+	for _, dn := range fs.dirNames() {
+		d := fs.dirs[dn]
+		for _, name := range d.names() {
+			e := d.entries[name]
+			if e.cur == e.durable {
+				continue
+			}
+			if fs.rng.Intn(2) == 0 {
+				e.durable = e.cur
+				rep.Kept++
+			} else {
+				e.cur = e.durable
+				rep.Lost++
+			}
+			d.setEntry(name, e)
+		}
+	}
+	// 2. File contents of every inode that still has a name.
+	var live []InodeID
+	for _, dn := range fs.dirNames() {
+		d := fs.dirs[dn]
+		for _, name := range d.names() {
+			live = append(live, d.entries[name].cur)
+		}
+	}
+	slices.Sort(live)
+	live = slices.Compact(live)
+	for _, id := range live {
+		in := fs.inodes[id]
+		switch {
+		case in.poisoned:
+			rep.Lost++ // fsyncgate: the "clean" pages never reach the disk
+		case !in.dirty:
+		case len(in.volatile) > 0 && fs.rng.Chance(fs.faults.TornWriteProb):
+			in.durable = in.volatile[:fs.rng.Intn(len(in.volatile))] // a strict prefix
+			rep.Torn++
+		case fs.rng.Intn(2) == 0:
+			in.durable = in.volatile
+			rep.Kept++
+		default:
+			rep.Lost++
+		}
+		in.volatile = in.durable
+		in.dirty = false
+		in.poisoned = false
+	}
+	// 3. Forget inodes without a name.
+	var dead []InodeID
+	for id := range fs.inodes { //detcheck:ok only collects ids; deletion order is irrelevant
+		if _, found := slices.BinarySearch(live, id); !found {
+			dead = append(dead, id)
+		}
+	}
+	for _, id := range dead {
+		delete(fs.inodes, id)
+	}
+	return rep
 }
 
 // SetQuiet stops (true) or resumes (false) fault injection.
@@ -128,7 +527,8 @@ type FileState struct {
 	Data []byte
 }
 
-// Snapshot is a sorted view of every file, for invariants and logs.
+// Snapshot is a sorted view of every file, for invariants and logs. Data
+// slices are shared with the filesystem and must not be modified.
 type Snapshot struct {
 	Files []FileState // sorted by Path
 }
@@ -136,16 +536,92 @@ type Snapshot struct {
 // Durable returns what would be on disk after a crash in which the adversary
 // loses everything volatile: the durable entries pointing at durable content.
 // "Acked implies durable" is checked against this view.
-func (fs *FakeFS) Durable() Snapshot {
-	panic("toys3/sim: FakeFS.Durable unimplemented (phase 2)")
-}
+func (fs *FakeFS) Durable() Snapshot { return fs.snapshot(true) }
 
 // Current returns the view reads see right now.
-func (fs *FakeFS) Current() Snapshot {
-	panic("toys3/sim: FakeFS.Current unimplemented (phase 2)")
+func (fs *FakeFS) Current() Snapshot { return fs.snapshot(false) }
+
+func (fs *FakeFS) snapshot(durable bool) Snapshot {
+	var snap Snapshot
+	for _, dn := range fs.dirNames() {
+		d := fs.dirs[dn]
+		for _, name := range d.names() {
+			if data, ok := fs.file(d, name, durable); ok {
+				snap.Files = append(snap.Files, FileState{Path: dn + "/" + name, Data: data})
+			}
+		}
+	}
+	return snap
+}
+
+// DurableFile returns path's content in the Durable view.
+func (fs *FakeFS) DurableFile(path string) ([]byte, bool) {
+	d, name, ok := fs.split(path)
+	if !ok {
+		return nil, false
+	}
+	return fs.file(d, name, true)
+}
+
+// CurrentFile returns path's content in the Current view.
+func (fs *FakeFS) CurrentFile(path string) ([]byte, bool) {
+	d, name, ok := fs.split(path)
+	if !ok {
+		return nil, false
+	}
+	return fs.file(d, name, false)
+}
+
+func (fs *FakeFS) file(d *fdir, name string, durable bool) ([]byte, bool) {
+	e, ok := d.entries[name]
+	if !ok {
+		return nil, false
+	}
+	if durable {
+		if e.durable == 0 {
+			return nil, false
+		}
+		return fs.inodes[e.durable].durable, true
+	}
+	if e.cur == 0 {
+		return nil, false
+	}
+	return fs.inodes[e.cur].volatile, true
 }
 
 // Hash summarizes the full state (both versions), folded into the trace hash.
 func (fs *FakeFS) Hash() uint64 {
-	panic("toys3/sim: FakeFS.Hash unimplemented (phase 2)")
+	h := uint64(fs.nextIno)
+	for _, dn := range fs.dirNames() {
+		d := fs.dirs[dn]
+		h = Fold(h, hashString(dn))
+		for _, name := range d.names() {
+			e := d.entries[name]
+			h = Fold(h, hashString(name))
+			h = Fold(h, uint64(e.cur))
+			h = Fold(h, uint64(e.durable))
+			h = fs.hashInode(h, e.cur)
+			if e.durable != e.cur {
+				h = fs.hashInode(h, e.durable)
+			}
+		}
+	}
+	return h
+}
+
+func (fs *FakeFS) hashInode(h uint64, id InodeID) uint64 {
+	in, ok := fs.inodes[id]
+	if !ok {
+		return Fold(h, 0)
+	}
+	h = Fold(h, uint64(len(in.durable))<<32|uint64(core.Checksum(in.durable)))
+	h = Fold(h, uint64(len(in.volatile))<<32|uint64(core.Checksum(in.volatile)))
+	var flags uint64
+	if in.dirty {
+		flags |= 1
+	}
+	if in.poisoned {
+		flags |= 2
+	}
+	return Fold(h, flags)
 }

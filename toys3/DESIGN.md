@@ -108,6 +108,30 @@ and a failed rename or unlink may or may not have applied. Latency is drawn per
 op. `FsyncGate` makes fsync lie after a failure. Faults stop during
 `QuietTail`.
 
+Two more behaviours turned out to matter:
+
+- **Background writeback** (`WritebackProb`). After any op the kernel may make
+  one random un-synced change durable on its own, the way a journal commit
+  does. Without it, a temp file's name is durable only if a crash happens to
+  keep it. With it, the name can already be durable when the file is renamed
+  into `obj/`, so a later crash brings it back as a second hard link to the
+  committed object.
+- **Read corruption** (`ReadCorruptProb`). A read may come back with one bit
+  flipped, while the stored data stays intact. With the correct protocol,
+  `obj/` never holds a torn file, so without this fault the CRC check would be
+  dead code (`TestCorruptObjectUnreachableWithoutBitFlips` checks this).
+
+**Crash model.** A crash, including `Halt`, is a power loss. The FakeFS resolves
+all volatile state at that instant. Queued entries for the dead incarnation are
+dropped: FS actions that have not landed yet never happen, and completions
+that have not been delivered are lost. An action that landed before the crash
+stays applied but is never acknowledged.
+
+**Swarm.** `DefaultConfig(seed)` draws the number of keys (1 to 32), clients,
+crash rate and EIO rate per seed, from a stream separate from the run's. A few
+keys produce same-key races. Many keys leave objects untouched long enough for
+slow damage (like the aliasing above) to become visible.
+
 ## Invariants
 
 The workload writes self-describing values: each value encodes the PUT that
@@ -118,23 +142,66 @@ therefore name their writer exactly.
 |---|---|---|
 | a | Every 200 GET is linearizable against a per-key register model (COPY reads src and writes dst atomically) | at quiescent points (Oracle, WGL search) |
 | b | Acked mutations survive crashes unless superseded. Crashes erase nothing in the model. | same search; also eagerly: `Committed` fact ⇒ FakeFS durable state matches, on the same step |
-| c | No torn or corrupt bytes are ever returned with 200 | every step |
-| d | Every request gets a reply while the server is alive | end of QuietTail |
+| c | No torn or corrupt bytes are ever returned with 200 (`NoCorruptReads`) | every step |
+| d | Every request gets a reply while the server is alive, every boot recovers, and no request issued in QuietTail gets a 500 | 500s: every step; the rest: end of run |
+| e | Every file under `obj/` in the *durable* view is a complete object (`ObjNeverTorn`) | whenever durable state changes |
 
 **In-flight at crash (and 500s):** the outcome is indeterminate. The mutation
 may take effect at one instant in `[invoke, crash or reply time]`, or never.
-Reads with no reply constrain nothing. The run's state is folded into a trace
+Reads with no reply constrain nothing. By locality, each window is split into
+connected components of keys (a COPY links its src and dst), and each component
+is searched on its own. The possible end states are carried into the next
+window, factored per key. If a component would start from more than 4096
+possible states, the oracle *widens* the keys involved to "unknown": any read
+of such a key is accepted and fixes its value. This weakens the check for a
+moment but never causes a false failure, and the `widened` stat counts it.
+Ops are ordered by logical
+invoke and return sequence numbers, not by virtual time, so several events
+that share one instant keep their exact order. The run's state is folded into a trace
 hash after every step: the server's `StateHash`, the FakeFS hash, the step
 number and the time. Two runs of one seed must produce identical hashes.
 
-## Running DST (phase 2)
+## How to run DST
 
 ```
-go test ./toys3/sim -run TestSim -seeds=10000      # many seeds
-go test ./toys3/sim -run TestSim -seed=81237 -v    # replay one, print event log
-scripts/ci-determinism.sh                          # detcheck + determinism canary
+go test ./toys3/sim                                   # unit tests, canary, 200 seeds, coverage, mutants
+go test ./toys3/sim -run TestSeeds -seeds=5000 -v     # more seeds (prints aggregated stats)
+go test ./toys3/sim -run TestSeeds -duration=2m -v    # seeds 1,2,... for two minutes
+go test ./toys3/sim -run TestSeeds -seed=81237 -v     # replay one seed; event log printed on failure
+go test ./toys3/sim -run TestCatchesBugs -v           # which invariant catches each broken server
+go run ./toys3/cmd/toys3sim -duration 10m -check-determinism   # parallel campaign
+scripts/ci-determinism.sh                             # detcheck + audits + both canaries
 ```
 
-Useful experiments: drop the `FSFsyncDir` after a rename, skip the tmp fsync,
-remove `Halt` after an fsync error, or skip CRC verification on COPY. Then
-watch which invariant catches each change, and at which step.
+A failing seed prints its own repro command. The campaign runner runs each seed
+on its own goroutine (no shared state), prints progress every 10s, replays
+every 10th seed to compare traces with `-check-determinism`, and exits non-zero
+with the repro commands. Plug in your own broken server through
+`Config.Factory` (see `mutants_test.go`).
+
+## Bugs DST catches
+
+`TestCatchesBugs` wraps the real server in deliberately broken variants (one
+protocol step each) and runs seeds 1..500 until one fails. The "black-box"
+column uses only the client-visible invariants (no peeking at durable state).
+
+| Variant | Caught by (all invariants) | First seed | Black-box only |
+|---|---|---|---|
+| a. skip `FSFsyncDir(obj/)` | acked-is-durable | 1 | linearizable, seed 1 |
+| b. skip the temp file's `FSFsync` | obj-never-torn | 1 | liveness (500s in QuietTail), seed 2 |
+| c. reply 200, then rename and fsync | acked-is-durable | 1 | linearizable, seed 1 |
+| d. 500 without `Halt` after any post-write error | obj-never-torn | 1 | liveness, seed 20 |
+| d2. same, only for a failed `FSFsyncDir(obj/)` | linearizable (a read saw the value, then a crash erased it) | 132 | linearizable, seed 132 |
+| e. skip the CRC check on read | no-corrupt-reads | 18 | no-corrupt-reads, seed 18 |
+| f. recovery skips temp cleanup | linearizable (resurrected temp aliases an object; a reused temp name overwrites it) | 20 | linearizable, seed 20 |
+
+Lessons from building this table:
+
+- (b) is invisible to the linearizability oracle. The CRC turns a lost object
+  into a 500, and a 500 promises nothing. Only a ground-truth check, or
+  "no 500s once faults stop", catches it.
+- (e) is unreachable without read corruption, because a correct protocol never
+  leaves a torn object to read.
+- (f) took seed 429 with neither background writeback nor swarm, seed 36 with
+  writeback alone, and seed 20 with both. Whether a bug gets caught depends on
+  how realistic the fault model is and how varied the workload is.

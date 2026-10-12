@@ -1,0 +1,377 @@
+package sim
+
+import (
+	"encoding/binary"
+	"flag"
+	"fmt"
+	"testing"
+
+	"manifester/toys3/core"
+)
+
+// Deliberately broken servers. Each wraps the real core.Server and rewrites
+// its actions or the events it sees, so the bug is exactly one protocol step.
+// TestCatchesBugs proves the simulator finds every one of them.
+
+// fakeOK is the OK completion of a filesystem action, for a mutant that
+// pretends it ran.
+func fakeOK(a core.Action) core.EventBody {
+	switch x := a.(type) {
+	case core.FSWrite:
+		return core.FSWriteDone{IO: x.IO}
+	case core.FSFsync:
+		return core.FSFsyncDone{IO: x.IO}
+	case core.FSRename:
+		return core.FSRenameDone{IO: x.IO}
+	case core.FSFsyncDir:
+		return core.FSFsyncDirDone{IO: x.IO}
+	case core.FSUnlink:
+		return core.FSUnlinkDone{IO: x.IO}
+	}
+	panic(fmt.Sprintf("fakeOK: %T", a))
+}
+
+// truncAfterHalt drops anything after a Halt (the runtime contract).
+func truncAfterHalt(acts []core.Action) []core.Action {
+	for i, a := range acts {
+		if _, ok := a.(core.Halt); ok {
+			return acts[:i+1]
+		}
+	}
+	return acts
+}
+
+// skipper never issues the actions skip selects: it feeds the inner server
+// an immediate OK completion instead. With deferReal, the real action is
+// still issued, but only after everything else the step produced (i.e.
+// after the reply).
+type skipper struct {
+	inner     core.Machine
+	skip      func(core.Action) bool
+	deferReal bool
+	deferred  []core.Action
+}
+
+func (m *skipper) Step(ev core.Event) []core.Action {
+	m.deferred = nil
+	out := m.expand(ev.At, m.inner.Step(ev))
+	return truncAfterHalt(append(out, m.deferred...))
+}
+
+func (m *skipper) expand(at core.Time, acts []core.Action) []core.Action {
+	var out []core.Action
+	for _, a := range acts {
+		if !m.skip(a) {
+			out = append(out, a)
+			continue
+		}
+		if m.deferReal {
+			m.deferred = append(m.deferred, a)
+		}
+		out = append(out, m.expand(at, m.inner.Step(core.Event{At: at, Body: fakeOK(a)}))...)
+	}
+	return out
+}
+
+func (m *skipper) StateHash() uint64 { return m.inner.StateHash() }
+
+func isObjFsyncDir(dir string) func(core.Action) bool {
+	return func(a core.Action) bool {
+		d, ok := a.(core.FSFsyncDir)
+		return ok && d.Dir == core.ObjDir(dir)
+	}
+}
+
+// (a) Rename is never made durable: no FSFsyncDir(obj/).
+func mutSkipDirFsync(env core.Env, cfg core.Config) core.Machine {
+	return &skipper{inner: core.New(env, cfg), skip: isObjFsyncDir(cfg.Dir)}
+}
+
+// (b) The temp file's bytes are never fsynced before the rename.
+func mutSkipFileFsync(env core.Env, cfg core.Config) core.Machine {
+	return &skipper{inner: core.New(env, cfg), skip: func(a core.Action) bool {
+		_, ok := a.(core.FSFsync)
+		return ok
+	}}
+}
+
+// (c) Reply 200 first, then rename and fsync the directory (ack before
+// durable, and even before visible).
+func mutAckBeforeRename(env core.Env, cfg core.Config) core.Machine {
+	obj := isObjFsyncDir(cfg.Dir)
+	return &skipper{inner: core.New(env, cfg), deferReal: true, skip: func(a core.Action) bool {
+		_, ren := a.(core.FSRename)
+		return ren || obj(a)
+	}}
+}
+
+// (d) An error after obj/ may have changed replies 500 but does not Halt:
+// the server keeps serving a page cache that a crash can undo. Implemented by
+// hiding the error from the inner server (it continues as if OK) and turning
+// its eventual 200 into a 500.
+type noHalt struct {
+	inner   core.Machine
+	serving bool        // inner emitted Recovered (errors before it still halt)
+	dirOnly bool        // only swallow FSFsyncDir errors
+	doomed  []core.IOID // IOs of requests that already saw an error
+	clients []core.ClientReq
+}
+
+func mutNoHaltOnError(env core.Env, cfg core.Config) core.Machine {
+	return &noHalt{inner: core.New(env, cfg)}
+}
+
+// (d2) Like (d), but only for a failed FSFsyncDir(obj/): the rename is
+// visible, not durable, and the server keeps serving it.
+func mutNoHaltOnDirFsyncError(env core.Env, cfg core.Config) core.Machine {
+	return &noHalt{inner: core.New(env, cfg), dirOnly: true}
+}
+
+func (m *noHalt) Step(ev core.Event) []core.Action {
+	io, isErr, doomed := core.IOID(0), false, false
+	if _, dir := ev.Body.(core.FSFsyncDirDone); m.dirOnly && !dir {
+		return m.stepDoomedOnly(ev)
+	}
+	switch b := ev.Body.(type) {
+	case core.FSFsyncDone:
+		io, isErr = b.IO, b.Err == core.ErrIO
+		if isErr {
+			ev.Body = core.FSFsyncDone{IO: b.IO}
+		}
+	case core.FSFsyncDirDone:
+		io, isErr = b.IO, b.Err == core.ErrIO
+		if isErr {
+			ev.Body = core.FSFsyncDirDone{IO: b.IO}
+		}
+	case core.FSRenameDone:
+		io, isErr = b.IO, b.Err == core.ErrIO
+		if isErr {
+			ev.Body = core.FSRenameDone{IO: b.IO}
+		}
+	case core.FSUnlinkDone:
+		io, isErr = b.IO, b.Err == core.ErrIO
+		if isErr {
+			ev.Body = core.FSUnlinkDone{IO: b.IO}
+		}
+	}
+	if !m.serving && isErr {
+		ev = core.Event{At: ev.At, Body: restoreErr(ev.Body)} // recovery errors still halt
+		isErr = false
+	}
+	for i, d := range m.doomed {
+		if d == io && io != 0 {
+			doomed = true
+			m.doomed = append(m.doomed[:i], m.doomed[i+1:]...)
+			break
+		}
+	}
+	acts := m.inner.Step(ev)
+	for _, a := range acts {
+		if e, ok := a.(core.Emit); ok {
+			if _, ok := e.Fact.(core.Recovered); ok {
+				m.serving = true
+			}
+		}
+	}
+	if !isErr && !doomed {
+		return m.rewrite(acts)
+	}
+	// This request is doomed: follow its next IO, or fail its final reply.
+	for _, a := range acts {
+		if e, ok := a.(core.Emit); ok {
+			if c, ok := e.Fact.(core.Committed); ok {
+				m.clients = append(m.clients, c.Client)
+				return m.rewrite(acts)
+			}
+		}
+	}
+	if len(acts) == 1 {
+		if next, ok := ioOfAction(acts[0]); ok {
+			m.doomed = append(m.doomed, next)
+		}
+	}
+	return m.rewrite(acts)
+}
+
+// stepDoomedOnly passes ev through unchanged, but still tracks doomed IOs.
+func (m *noHalt) stepDoomedOnly(ev core.Event) []core.Action {
+	acts := m.inner.Step(ev)
+	for _, a := range acts {
+		if e, ok := a.(core.Emit); ok {
+			if _, ok := e.Fact.(core.Recovered); ok {
+				m.serving = true
+			}
+		}
+	}
+	return m.rewrite(acts)
+}
+
+// rewrite drops the Committed of doomed clients and turns their 200 into 500.
+func (m *noHalt) rewrite(acts []core.Action) []core.Action {
+	var out []core.Action
+	for _, a := range acts {
+		switch x := a.(type) {
+		case core.Emit:
+			if c, ok := x.Fact.(core.Committed); ok && m.isDoomed(c.Client) {
+				continue
+			}
+		case core.Reply:
+			if m.isDoomed(x.Client) {
+				m.forget(x.Client)
+				x.Status = core.StatusServerError
+				a = x
+			}
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+func (m *noHalt) isDoomed(c core.ClientReq) bool {
+	for _, d := range m.clients {
+		if d == c {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *noHalt) forget(c core.ClientReq) {
+	for i, d := range m.clients {
+		if d == c {
+			m.clients = append(m.clients[:i], m.clients[i+1:]...)
+			return
+		}
+	}
+}
+
+func (m *noHalt) StateHash() uint64 { return m.inner.StateHash() }
+
+func restoreErr(b core.EventBody) core.EventBody {
+	switch x := b.(type) {
+	case core.FSFsyncDone:
+		x.Err = core.ErrIO
+		return x
+	case core.FSFsyncDirDone:
+		x.Err = core.ErrIO
+		return x
+	case core.FSRenameDone:
+		x.Err = core.ErrIO
+		return x
+	case core.FSUnlinkDone:
+		x.Err = core.ErrIO
+		return x
+	}
+	return b
+}
+
+func ioOfAction(a core.Action) (core.IOID, bool) {
+	switch x := a.(type) {
+	case core.FSWrite:
+		return x.IO, true
+	case core.FSFsync:
+		return x.IO, true
+	case core.FSRename:
+		return x.IO, true
+	case core.FSFsyncDir:
+		return x.IO, true
+	case core.FSRead:
+		return x.IO, true
+	case core.FSUnlink:
+		return x.IO, true
+	case core.FSList:
+		return x.IO, true
+	}
+	return 0, false
+}
+
+// eventRewriter rewrites events before the inner server sees them.
+type eventRewriter struct {
+	inner   core.Machine
+	rewrite func(core.EventBody) core.EventBody
+}
+
+func (m *eventRewriter) Step(ev core.Event) []core.Action {
+	ev.Body = m.rewrite(ev.Body)
+	return m.inner.Step(ev)
+}
+
+func (m *eventRewriter) StateHash() uint64 { return m.inner.StateHash() }
+
+// (e) The CRC is not verified on read: a file with an intact header and
+// length but a bad checksum is served (GET) or copied (COPY).
+func mutSkipCRC(env core.Env, cfg core.Config) core.Machine {
+	return &eventRewriter{inner: core.New(env, cfg), rewrite: func(b core.EventBody) core.EventBody {
+		d, ok := b.(core.FSReadDone)
+		if !ok || d.Err != core.OK || len(d.Data) < core.HeaderSize || string(d.Data[:4]) != core.Magic ||
+			binary.LittleEndian.Uint64(d.Data[8:]) != uint64(len(d.Data)-core.HeaderSize) {
+			return b
+		}
+		d.Data = core.EncodeObject(d.Data[core.HeaderSize:]) // "verified"
+		return d
+	}}
+}
+
+// (f) Recovery does not remove leftover temp files.
+func mutSkipTempCleanup(env core.Env, cfg core.Config) core.Machine {
+	return &eventRewriter{inner: core.New(env, cfg), rewrite: func(b core.EventBody) core.EventBody {
+		if d, ok := b.(core.FSListDone); ok && d.Err == core.OK {
+			d.Names = nil
+			return d
+		}
+		return b
+	}}
+}
+
+type mutant struct {
+	name    string
+	factory core.Factory
+}
+
+var mutants = []mutant{
+	{"a-skip-dir-fsync", mutSkipDirFsync},
+	{"b-skip-file-fsync", mutSkipFileFsync},
+	{"c-ack-before-rename", mutAckBeforeRename},
+	{"d-no-halt-on-error", mutNoHaltOnError},
+	{"d2-no-halt-on-dir-fsync-error", mutNoHaltOnDirFsyncError},
+	{"e-skip-crc", mutSkipCRC},
+	{"f-skip-temp-cleanup", mutSkipTempCleanup},
+}
+
+var mutantSeeds = flag.Int("mutant-seeds", 500, "TestCatchesBugs: seeds to try per mutant")
+
+// firstCatch runs seeds 1..n against factory and returns the first failing
+// seed (0 if none) and its failure.
+func firstCatch(factory core.Factory, invs func() []Invariant, n int) (uint64, Failure) {
+	for seed := uint64(1); seed <= uint64(n); seed++ {
+		cfg := DefaultConfig(seed)
+		cfg.Factory = factory
+		cfg.Invariants = invs()
+		if r := Run(cfg); len(r.Failures) > 0 {
+			return seed, r.Failures[0]
+		}
+	}
+	return 0, Failure{}
+}
+
+// TestCatchesBugs is the proof that the simulator has teeth: every mutant
+// must fail some seed within -mutant-seeds seeds. It also reports, for
+// learning, whether the bug is visible to clients alone (BlackBoxInvariants:
+// no peeking at the fake disk's durable state).
+func TestCatchesBugs(t *testing.T) {
+	for _, m := range mutants {
+		t.Run(m.name, func(t *testing.T) {
+			seed, f := firstCatch(m.factory, DefaultInvariants, *mutantSeeds)
+			if seed == 0 {
+				t.Fatalf("not caught in %d seeds", *mutantSeeds)
+			}
+			t.Logf("caught at seed %d by %s (step %d): %.200s", seed, f.Invariant, f.Step, f.Msg)
+			bseed, bf := firstCatch(m.factory, BlackBoxInvariants, *mutantSeeds)
+			if bseed == 0 {
+				t.Logf("black-box invariants only: not caught in %d seeds", *mutantSeeds)
+			} else {
+				t.Logf("black-box invariants only: caught at seed %d by %s", bseed, bf.Invariant)
+			}
+		})
+	}
+}

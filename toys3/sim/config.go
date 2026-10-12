@@ -1,6 +1,10 @@
 package sim
 
-import "manifester/toys3/core"
+import (
+	"fmt"
+
+	"manifester/toys3/core"
+)
 
 // Config is one simulation run. Everything random derives from Seed.
 type Config struct {
@@ -60,6 +64,112 @@ type Stats struct {
 	EIOs         int
 	TornFiles    int // files left torn by a crash
 	LostChanges  int // un-fsynced changes discarded by a crash
+
+	Crashes         int // crashes, including Halts
+	Halts           int // crashes requested by the server (Halt)
+	CrashesMidPut   int // crashes with a PUT or COPY outstanding
+	KeptChanges     int // un-fsynced changes a crash made durable anyway
+	ReadCorruptions int // FSReads returned with a flipped bit
+	CorruptObjects  int // core.CorruptObject facts (GET/COPY 500 on a bad file)
+	TempsRemoved    int // sum of Recovered.TempsRemoved
+	Windows         int // linearizability windows checked
+	MaxWindowOps    int // largest window (max, not sum, when aggregated)
+	Widenings       int // oracle gave up precision on some keys (see Oracle)
+}
+
+// Add accumulates o into s (MaxWindowOps takes the maximum).
+func (s *Stats) Add(o Stats) {
+	s.Requests += o.Requests
+	for i := range s.ByStatus {
+		s.ByStatus[i] += o.ByStatus[i]
+	}
+	s.Indetermined += o.Indetermined
+	s.FSOps += o.FSOps
+	s.EIOs += o.EIOs
+	s.TornFiles += o.TornFiles
+	s.LostChanges += o.LostChanges
+	s.Crashes += o.Crashes
+	s.Halts += o.Halts
+	s.CrashesMidPut += o.CrashesMidPut
+	s.KeptChanges += o.KeptChanges
+	s.ReadCorruptions += o.ReadCorruptions
+	s.CorruptObjects += o.CorruptObjects
+	s.TempsRemoved += o.TempsRemoved
+	s.Windows += o.Windows
+	s.MaxWindowOps = max(s.MaxWindowOps, o.MaxWindowOps)
+	s.Widenings += o.Widenings
+}
+
+// String renders the stats on one line.
+func (s Stats) String() string {
+	return fmt.Sprintf("reqs=%d 200=%d 400=%d 404=%d 500=%d indet=%d fsops=%d eio=%d "+
+		"crashes=%d halts=%d midput=%d torn=%d lost=%d kept=%d readcorrupt=%d corruptobj=%d "+
+		"tempsrm=%d windows=%d maxwin=%d widened=%d",
+		s.Requests, s.ByStatus[0], s.ByStatus[1], s.ByStatus[2], s.ByStatus[3], s.Indetermined,
+		s.FSOps, s.EIOs, s.Crashes, s.Halts, s.CrashesMidPut, s.TornFiles, s.LostChanges,
+		s.KeptChanges, s.ReadCorruptions, s.CorruptObjects, s.TempsRemoved, s.Windows, s.MaxWindowOps, s.Widenings)
+}
+
+// statusIndex maps a reply status to its ByStatus slot.
+func statusIndex(st core.Status) int {
+	switch st {
+	case core.StatusOK:
+		return 0
+	case core.StatusBadRequest:
+		return 1
+	case core.StatusNotFound:
+		return 2
+	}
+	return 3
+}
+
+// DefaultConfig is the configuration used by the tests and the campaign
+// runner: few clients and keys (contention), frequent crashes and faults
+// during a short Chaos phase, then a QuietTail for liveness.
+//
+// It is "swarm" tested: the key count, client count, crash rate and EIO rate
+// are drawn per seed (from a stream separate from the run's), because no
+// single setting finds every bug. Few keys maximize same-key races; many
+// keys leave objects untouched for long enough that slow-burning damage
+// (e.g. a resurrected temp file aliasing a committed object) becomes visible.
+func DefaultConfig(seed uint64) Config {
+	cfg := BaseConfig(seed)
+	r := NewRand(seed ^ 0x5a5a_c0ff_ee00_1234)
+	cfg.Workload.Keys = []int{1, 2, 3, 3, 4, 8, 16, 32}[r.Intn(8)]
+	cfg.Workload.Clients = []int{2, 4, 4, 6}[r.Intn(4)]
+	cfg.CrashProb = []float64{0.001, 0.004, 0.004, 0.01}[r.Intn(4)]
+	cfg.FS.EIOProb = []float64{0.002, 0.01, 0.01, 0.03}[r.Intn(4)]
+	return cfg
+}
+
+// BaseConfig is DefaultConfig without the per-seed swarm variation.
+func BaseConfig(seed uint64) Config {
+	return Config{
+		Seed:      seed,
+		Chaos:     300 * core.Millisecond,
+		QuietTail: 60 * core.Millisecond,
+		MaxSteps:  2_000_000,
+		Workload: WorkloadConfig{
+			Clients:      4,
+			Keys:         3,
+			MaxValueSize: 40,
+			Mix:          OpMix{Put: 40, Get: 40, Delete: 10, Copy: 15, Invalid: 2},
+			Think:        [2]core.Duration{0, 1 * core.Millisecond},
+			QuiesceEvery: 8 * core.Millisecond,
+		},
+		FS: FSFaults{
+			EIOProb:         0.01,
+			TornWriteProb:   0.3,
+			ReadCorruptProb: 0.005,
+			WritebackProb:   0.05,
+			Latency:         [2]core.Duration{20 * core.Microsecond, 1500 * core.Microsecond},
+			ReplyDelay:      [2]core.Duration{0, 500 * core.Microsecond},
+			FsyncGate:       true,
+		},
+		CrashProb:    0.004,
+		RestartDelay: [2]core.Duration{100 * core.Microsecond, 5 * core.Millisecond},
+		Server:       core.Config{Dir: "/data", MaxObjectSize: 64},
+	}
 }
 
 // Failure is one invariant violation.

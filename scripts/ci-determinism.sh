@@ -3,8 +3,8 @@
 #   1. detcheck: exact-path import allow-list plus banned constructs.
 #   2. Every third-party module they depend on has a reviewed audit record
 #      for the exact version in go.mod (so a version bump forces a re-audit).
-#   3. Determinism canary: each seed runs twice and must match (enabled once
-#      the simulator is implemented).
+#   3. Determinism canary: each seed runs twice and must match, in every
+#      simulator package that implements TestDeterminismCanary (sim/, toys3/sim/).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -28,10 +28,14 @@ done < <(go list -deps -f '{{if and .Module (not .Module.Main)}}{{.Module.Path}}
 [[ $missing == 0 ]]
 
 echo "== determinism canary"
-if go list ./sim/... 2>/dev/null | xargs -r go test -list 'TestDeterminismCanary' 2>/dev/null | grep -q '^TestDeterminismCanary$'; then
-  go test ./sim/... -run '^TestDeterminismCanary$' -count=1
-else
-  echo "skipped: TestDeterminismCanary not implemented yet"
-fi
+for simpkg in ./sim/... ./toys3/sim/...; do
+  # Capture first: piping into grep -q would SIGPIPE go test under pipefail.
+  tests=$(go list "$simpkg" 2>/dev/null | xargs -r go test -list 'TestDeterminismCanary' 2>/dev/null || true)
+  if grep -q '^TestDeterminismCanary$' <<<"$tests"; then
+    go test "$simpkg" -run '^TestDeterminismCanary$' -count=1
+  else
+    echo "skipped $simpkg: TestDeterminismCanary not implemented yet"
+  fi
+done
 
 echo "determinism gate passed"

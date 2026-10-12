@@ -17,7 +17,32 @@ const (
 	KindClientWake                  // an idle client issues its next request
 	KindCrash                       // kill the server now
 	KindRestart                     // boot a new incarnation and deliver Started
+	KindQuiesce                     // clients stop issuing until every request has replied
+	KindQuiet                       // Chaos ends: no new faults or crashes (QuietTail begins)
+	KindTailEnd                     // QuietTail ends: clients stop for good; the queue drains
 )
+
+func (k EntryKind) String() string {
+	switch k {
+	case KindDeliver:
+		return "deliver"
+	case KindFSLand:
+		return "fs-land"
+	case KindClientWake:
+		return "client-wake"
+	case KindCrash:
+		return "crash"
+	case KindRestart:
+		return "restart"
+	case KindQuiesce:
+		return "quiesce"
+	case KindQuiet:
+		return "quiet"
+	case KindTailEnd:
+		return "tail-end"
+	}
+	return "kind(?)"
+}
 
 // Entry is one item in the global queue. Plain data, like events.
 type Entry struct {
@@ -45,20 +70,95 @@ type Queue struct {
 // Schedule enqueues e, assigning Tie (from r) and Seq. Scheduling in the past
 // clamps At to now.
 func (q *Queue) Schedule(r *Rand, now core.Time, e Entry) {
-	panic("toys3/sim: Queue.Schedule unimplemented (phase 2)")
+	if e.At < now {
+		e.At = now
+	}
+	e.Tie = r.Uint64()
+	q.seq++
+	e.Seq = q.seq
+	q.items = append(q.items, e)
+	q.up(len(q.items) - 1)
 }
 
 // Pop removes and returns the earliest entry; ok is false when empty.
 func (q *Queue) Pop() (e Entry, ok bool) {
-	panic("toys3/sim: Queue.Pop unimplemented (phase 2)")
+	n := len(q.items)
+	if n == 0 {
+		return Entry{}, false
+	}
+	e = q.items[0]
+	q.items[0] = q.items[n-1]
+	q.items[n-1] = Entry{}
+	q.items = q.items[:n-1]
+	if len(q.items) > 0 {
+		q.down(0)
+	}
+	return e, true
 }
 
 // DropIncarnation removes every entry addressed to inc (KindDeliver and
 // KindFSLand). Called on crash: un-landed FS operations never happen and
-// pending completions are lost.
-func (q *Queue) DropIncarnation(inc Incarnation) {
-	panic("toys3/sim: Queue.DropIncarnation unimplemented (phase 2)")
+// pending completions are lost. It returns how many entries were dropped.
+func (q *Queue) DropIncarnation(inc Incarnation) int {
+	kept := q.items[:0]
+	dropped := 0
+	for _, e := range q.items {
+		if (e.Kind == KindDeliver || e.Kind == KindFSLand) && e.Inc == inc {
+			dropped++
+			continue
+		}
+		kept = append(kept, e)
+	}
+	for i := len(kept); i < len(q.items); i++ {
+		q.items[i] = Entry{}
+	}
+	q.items = kept
+	for i := len(q.items)/2 - 1; i >= 0; i-- {
+		q.down(i)
+	}
+	return dropped
 }
 
 // Len is the number of pending entries.
 func (q *Queue) Len() int { return len(q.items) }
+
+func (q *Queue) less(i, j int) bool {
+	a, b := &q.items[i], &q.items[j]
+	if a.At != b.At {
+		return a.At < b.At
+	}
+	if a.Tie != b.Tie {
+		return a.Tie < b.Tie
+	}
+	return a.Seq < b.Seq
+}
+
+func (q *Queue) up(i int) {
+	for i > 0 {
+		p := (i - 1) / 2
+		if !q.less(i, p) {
+			return
+		}
+		q.items[i], q.items[p] = q.items[p], q.items[i]
+		i = p
+	}
+}
+
+func (q *Queue) down(i int) {
+	n := len(q.items)
+	for {
+		l := 2*i + 1
+		if l >= n {
+			return
+		}
+		m := l
+		if r := l + 1; r < n && q.less(r, l) {
+			m = r
+		}
+		if !q.less(m, i) {
+			return
+		}
+		q.items[i], q.items[m] = q.items[m], q.items[i]
+		i = m
+	}
+}

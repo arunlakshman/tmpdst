@@ -25,13 +25,30 @@ type View interface {
 	Alive() bool // server is booted (it may still be recovering)
 	Inc() Incarnation
 	Settling() bool // in Settling: no new faults, no crashes
-	FS() *PlantModel
+	// GroundTruth is the plant's true durable state, for white-box monitors.
+	GroundTruth() GroundTruth
 	Root() string // the server's data directory (control.Config.Dir)
 	Oracle() *Oracle
 	History() *History
 	// Telemetry emitted so far, in order. Invariants remember how far they read.
 	Telemetry() []Sample
 }
+
+// GroundTruth is the anti-corruption interface between verification and the
+// plant model: the only things a monitor may read of the plant are its true
+// durable state and a generation counter. It uses only builtin types, so the
+// plant model never depends on verification and monitors never reach into
+// the plant model's internals. *PlantModel implements it.
+type GroundTruth interface {
+	// DurableFile returns path's content in the durable view.
+	DurableFile(path string) ([]byte, bool)
+	// EachDurable calls fn for every durable file, sorted by path.
+	EachDurable(fn func(path string, data []byte))
+	// DurableGen changes whenever the durable view may have changed.
+	DurableGen() uint64
+}
+
+var _ GroundTruth = (*PlantModel)(nil)
 
 // Invariant is checked after every simulator step and once at the end of the
 // run. Checking every step (not just at the end) reports a bug at the step
@@ -59,16 +76,19 @@ func BlackBoxInvariants() []Invariant {
 // fails here immediately, even before the linearizability check.
 type NoCorruptReads struct{ next int }
 
-// AckedIsDurable checks each control.Committed sample against PlantModel.Durable() on
-// the step it is emitted: the key's durable file must exist and decode to a
-// payload with the committed checksum (or be absent for a delete). This is
-// (b) checked eagerly: a missing fsync fails here without needing a crash.
+// AckedIsDurable checks each control.Committed sample against the plant's
+// durable view (GroundTruth) on the step it is emitted: Committed is the
+// controller's claim, the durable view is the true state. The key's durable
+// file must exist and decode to a payload with the committed checksum (or be
+// absent for a delete). This is (b) checked eagerly: a missing fsync fails
+// here without needing a crash.
 type AckedIsDurable struct{ next int }
 
-// ObjNeverTorn checks, after every step, that every file under obj/ in
-// PlantModel.Durable() is a complete object (header, length and CRC valid). The
-// protocol renames only fsynced files into obj/, so even the most adversarial
-// crash leaves obj/ clean; the object CRC is a safety net, not a mechanism.
+// ObjNeverTorn checks, after every step, that every file under obj/ in the
+// durable view (GroundTruth) is a complete object (header, length and CRC
+// valid). The protocol renames only fsynced files into obj/, so even the most
+// adversarial crash leaves obj/ clean; the object CRC is a safety net, not a
+// mechanism.
 type ObjNeverTorn struct{ gen uint64 }
 
 // Linearizable is invariants (a) and (b): it runs Oracle.CheckQuiescent at
@@ -123,7 +143,7 @@ func (a *AckedIsDurable) AfterStep(v View) []Failure {
 			continue
 		}
 		path := format.ObjPath(v.Root(), c.Key)
-		data, present := v.FS().DurableFile(path)
+		data, present := v.GroundTruth().DurableFile(path)
 		switch {
 		case c.Deleted && present:
 			fails = append(fails, Failure{Msg: fmt.Sprintf("c%d: DELETE %q acked but %s is still durable (%s)", c.Client, c.Key, path, describePayload(data))})
@@ -145,21 +165,21 @@ func (*AckedIsDurable) AtEnd(v View) []Failure { return nil }
 
 func (*ObjNeverTorn) Name() string { return "obj-never-torn" }
 func (o *ObjNeverTorn) AfterStep(v View) []Failure {
-	g := v.FS().DurableGen()
+	g := v.GroundTruth().DurableGen()
 	if g == o.gen {
 		return nil // nothing durable changed since the last check
 	}
 	o.gen = g
 	prefix := format.ObjDir(v.Root()) + "/"
 	var fails []Failure
-	for _, f := range v.FS().Durable().Files {
-		if !strings.HasPrefix(f.Path, prefix) {
-			continue
+	v.GroundTruth().EachDurable(func(path string, data []byte) {
+		if !strings.HasPrefix(path, prefix) {
+			return
 		}
-		if _, ok := format.DecodeObject(f.Data); !ok {
-			fails = append(fails, Failure{Msg: fmt.Sprintf("durable %s is torn or corrupt (%d bytes)", f.Path, len(f.Data))})
+		if _, ok := format.DecodeObject(data); !ok {
+			fails = append(fails, Failure{Msg: fmt.Sprintf("durable %s is torn or corrupt (%d bytes)", path, len(data))})
 		}
-	}
+	})
 	return fails
 }
 func (*ObjNeverTorn) AtEnd(v View) []Failure { return nil }

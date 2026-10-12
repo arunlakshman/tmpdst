@@ -383,16 +383,16 @@ func (s *Simulator) note(e Entry, msg string) {
 
 // View implementation.
 
-func (s *Simulator) Step() int           { return s.step }
-func (s *Simulator) Now() control.Time   { return s.now }
-func (s *Simulator) Alive() bool         { return s.alive }
-func (s *Simulator) Inc() Incarnation    { return s.inc }
-func (s *Simulator) Settling() bool      { return s.settling }
-func (s *Simulator) FS() *PlantModel     { return s.plant }
-func (s *Simulator) Root() string        { return s.cfg.Server.Dir }
-func (s *Simulator) Oracle() *Oracle     { return s.oracle }
-func (s *Simulator) History() *History   { return s.oracle.History() }
-func (s *Simulator) Telemetry() []Sample { return s.samples }
+func (s *Simulator) Step() int                { return s.step }
+func (s *Simulator) Now() control.Time        { return s.now }
+func (s *Simulator) Alive() bool              { return s.alive }
+func (s *Simulator) Inc() Incarnation         { return s.inc }
+func (s *Simulator) Settling() bool           { return s.settling }
+func (s *Simulator) GroundTruth() GroundTruth { return s.plant }
+func (s *Simulator) Root() string             { return s.cfg.Server.Dir }
+func (s *Simulator) Oracle() *Oracle          { return s.oracle }
+func (s *Simulator) History() *History        { return s.oracle.History() }
+func (s *Simulator) Telemetry() []Sample      { return s.samples }
 
 var _ View = (*Simulator)(nil)
 

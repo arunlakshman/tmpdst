@@ -564,6 +564,20 @@ func (fs *PlantModel) snapshot(durable bool) Snapshot {
 	return snap
 }
 
+// EachDurable calls fn for every file in the Durable view, sorted by path
+// (the same order as Durable().Files). data is shared with the plant model
+// and must not be modified.
+func (fs *PlantModel) EachDurable(fn func(path string, data []byte)) {
+	for _, dn := range fs.dirNames() {
+		d := fs.dirs[dn]
+		for _, name := range d.names() {
+			if data, ok := fs.file(d, name, true); ok {
+				fn(dn+"/"+name, data)
+			}
+		}
+	}
+}
+
 // DurableFile returns path's content in the Durable view.
 func (fs *PlantModel) DurableFile(path string) ([]byte, bool) {
 	d, name, ok := fs.split(path)

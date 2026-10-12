@@ -183,7 +183,7 @@ func (s *Simulator) deliver(body core.EventBody) {
 	s.trace = Fold(s.trace, s.server.StateHash())
 	for i, a := range acts {
 		switch x := a.(type) {
-		case core.FSWrite, core.FSFsync, core.FSRename, core.FSFsyncDir, core.FSRead, core.FSUnlink, core.FSList:
+		case core.Actuation:
 			plan := s.fs.Plan(a)
 			s.schedule(Entry{At: s.now + core.Time(plan.Land), Kind: KindFSLand, Inc: s.inc, Action: a, Plan: plan})
 		case core.Reply:

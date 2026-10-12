@@ -266,21 +266,8 @@ func restoreErr(b core.EventBody) core.EventBody {
 }
 
 func ioOfAction(a core.Action) (core.IOID, bool) {
-	switch x := a.(type) {
-	case core.FSWrite:
-		return x.IO, true
-	case core.FSFsync:
-		return x.IO, true
-	case core.FSRename:
-		return x.IO, true
-	case core.FSFsyncDir:
-		return x.IO, true
-	case core.FSRead:
-		return x.IO, true
-	case core.FSUnlink:
-		return x.IO, true
-	case core.FSList:
-		return x.IO, true
+	if x, ok := a.(core.Actuation); ok {
+		return x.ID(), true
 	}
 	return 0, false
 }

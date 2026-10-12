@@ -143,21 +143,8 @@ func (h *harness) exec(a Action) EventBody {
 }
 
 func ioOfAction(a Action) (IOID, bool) {
-	switch a := a.(type) {
-	case FSWrite:
-		return a.IO, true
-	case FSFsync:
-		return a.IO, true
-	case FSRename:
-		return a.IO, true
-	case FSFsyncDir:
-		return a.IO, true
-	case FSRead:
-		return a.IO, true
-	case FSUnlink:
-		return a.IO, true
-	case FSList:
-		return a.IO, true
+	if x, ok := a.(Actuation); ok {
+		return x.ID(), true
 	}
 	return 0, false
 }

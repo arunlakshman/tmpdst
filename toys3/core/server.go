@@ -116,10 +116,11 @@ func (s *Server) Step(ev Event) []Action {
 	case Request:
 		return s.onRequest(b)
 	}
-	io, ok := ioOf(ev.Body)
+	fb, ok := ev.Body.(Feedback)
 	if !ok {
 		return nil
 	}
+	io := fb.ID()
 	if s.phase == phaseRecovering && indexIO(s.recIO, io) >= 0 {
 		return s.onRecoveryDone(io, ev.Body)
 	}
@@ -129,27 +130,6 @@ func (s *Server) Step(ev Event) []Action {
 		}
 	}
 	return nil // unknown or stale IOID: ignore
-}
-
-// ioOf extracts the IOID of a filesystem completion.
-func ioOf(b EventBody) (IOID, bool) {
-	switch d := b.(type) {
-	case FSWriteDone:
-		return d.IO, true
-	case FSFsyncDone:
-		return d.IO, true
-	case FSRenameDone:
-		return d.IO, true
-	case FSFsyncDirDone:
-		return d.IO, true
-	case FSReadDone:
-		return d.IO, true
-	case FSUnlinkDone:
-		return d.IO, true
-	case FSListDone:
-		return d.IO, true
-	}
-	return 0, false
 }
 
 func (s *Server) newIO() IOID {
@@ -341,22 +321,9 @@ func (s *Server) writeTmp(r *request) []Action {
 }
 
 // issue records that r now waits on a's completion.
-func (s *Server) issue(r *request, step reqStep, a Action) []Action {
+func (s *Server) issue(r *request, step reqStep, a Actuation) []Action {
 	r.step = step
-	switch a := a.(type) {
-	case FSRead:
-		r.io = a.IO
-	case FSWrite:
-		r.io = a.IO
-	case FSFsync:
-		r.io = a.IO
-	case FSRename:
-		r.io = a.IO
-	case FSFsyncDir:
-		r.io = a.IO
-	case FSUnlink:
-		r.io = a.IO
-	}
+	r.io = a.ID()
 	return []Action{a}
 }
 

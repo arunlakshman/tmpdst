@@ -1,4 +1,4 @@
-package core
+package control
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ import (
 
 const root = "/d"
 
-// testEnv is a fixed core.Env (the server does not draw randomness today).
+// testEnv is a fixed control.Env (the server does not draw randomness today).
 type testEnv struct{}
 
 func (testEnv) Uint64() uint64  { return 4 }

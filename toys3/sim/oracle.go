@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"manifester/toys3/core"
+	"manifester/toys3/control"
 )
 
 // Outcome is what the client learned about one request.
@@ -21,14 +21,14 @@ const (
 
 // HistOp is one client request as the client saw it.
 type HistOp struct {
-	Req    core.ClientReq
+	Req    control.ClientReq
 	Client int
-	Op     core.Op
-	Invoke core.Time // when the Request was delivered
+	Op     control.Op
+	Invoke control.Time // when the Request was delivered
 	// Return is the reply time (Definite, Failed) or the crash time (Abandoned).
-	Return  core.Time
+	Return  control.Time
 	Outcome Outcome
-	Status  core.Status
+	Status  control.Status
 	Body    []byte // 200 GET only
 	// InvSeq and RetSeq order Invoke, Return and crash events exactly
 	// (several can share one virtual instant); the checker uses these.
@@ -37,8 +37,8 @@ type HistOp struct {
 
 // History is the complete client-visible history of a run.
 type History struct {
-	Ops     []HistOp    // in Invoke order
-	Crashes []core.Time // crash (and Halt) instants, ascending
+	Ops     []HistOp       // in Invoke order
+	Crashes []control.Time // crash (and Halt) instants, ascending
 	// Completed lists indices into Ops in reply order (Definite and Failed).
 	Completed []int
 }
@@ -47,7 +47,7 @@ type History struct {
 // Writer (COPY preserves Writer, since the bytes are identical).
 type Value struct {
 	Present bool
-	Writer  core.ClientReq
+	Writer  control.ClientReq
 }
 
 // Oracle records the history and decides whether it is linearizable against a
@@ -73,7 +73,7 @@ type Value struct {
 // Windows are small because Workload.QuiesceEvery and crashes bound them.
 type Oracle struct {
 	hist History
-	open map[core.ClientReq]int // Req → index into hist.Ops while Pending
+	open map[control.ClientReq]int // Req → index into hist.Ops while Pending
 	// checked is the index of the first op not yet in a checked window.
 	checked int
 	clock   uint64 // logical time for InvSeq / RetSeq
@@ -98,7 +98,7 @@ type OracleStats struct {
 
 // NewOracle returns an oracle with an empty history.
 func NewOracle() *Oracle {
-	return &Oracle{open: map[core.ClientReq]int{}}
+	return &Oracle{open: map[control.ClientReq]int{}}
 }
 
 func (o *Oracle) tick() uint64 {
@@ -107,7 +107,7 @@ func (o *Oracle) tick() uint64 {
 }
 
 // Invoke records a request delivered to the server at time at.
-func (o *Oracle) Invoke(at core.Time, client int, req core.Request) {
+func (o *Oracle) Invoke(at control.Time, client int, req control.Request) {
 	o.open[req.Client] = len(o.hist.Ops)
 	o.hist.Ops = append(o.hist.Ops, HistOp{
 		Req: req.Client, Client: client, Op: req.Op, Invoke: at, InvSeq: o.tick(),
@@ -115,7 +115,7 @@ func (o *Oracle) Invoke(at core.Time, client int, req core.Request) {
 }
 
 // Return records a reply. ok is false for an unknown or duplicate reply.
-func (o *Oracle) Return(at core.Time, rep core.Reply) (ok bool) {
+func (o *Oracle) Return(at control.Time, rep control.Reply) (ok bool) {
 	i, ok := o.open[rep.Client]
 	if !ok {
 		return false
@@ -123,12 +123,12 @@ func (o *Oracle) Return(at core.Time, rep core.Reply) (ok bool) {
 	delete(o.open, rep.Client)
 	op := &o.hist.Ops[i]
 	op.Return, op.RetSeq, op.Status = at, o.tick(), rep.Status
-	if rep.Status == core.StatusServerError {
+	if rep.Status == control.StatusServerError {
 		op.Outcome = Failed
 	} else {
 		op.Outcome = Definite
 	}
-	if _, isGet := op.Op.(core.Get); isGet && rep.Status == core.StatusOK {
+	if _, isGet := op.Op.(control.Get); isGet && rep.Status == control.StatusOK {
 		op.Body = slices.Clone(rep.Body)
 		if op.Body == nil {
 			op.Body = []byte{}
@@ -139,7 +139,7 @@ func (o *Oracle) Return(at core.Time, rep core.Reply) (ok bool) {
 }
 
 // Crash marks every Pending op Abandoned with Return = at.
-func (o *Oracle) Crash(at core.Time) {
+func (o *Oracle) Crash(at control.Time) {
 	seq := o.tick()
 	for i := o.checked; i < len(o.hist.Ops); i++ {
 		op := &o.hist.Ops[i]
@@ -152,7 +152,7 @@ func (o *Oracle) Crash(at core.Time) {
 }
 
 // op returns the Pending op with id req, or nil.
-func (o *Oracle) op(req core.ClientReq) *HistOp {
+func (o *Oracle) op(req control.ClientReq) *HistOp {
 	i, ok := o.open[req]
 	if !ok {
 		return nil
@@ -192,14 +192,14 @@ func (o *Oracle) History() *History { return &o.hist }
 // kv is one present key in a model state.
 type kv struct {
 	key    string
-	writer core.ClientReq
+	writer control.ClientReq
 }
 
 // modelState is the sequential model: the present keys, sorted. It is
 // immutable once built (apply returns a new one).
 type modelState []kv
 
-func (st modelState) get(key string) (core.ClientReq, bool) {
+func (st modelState) get(key string) (control.ClientReq, bool) {
 	i, found := slices.BinarySearchFunc(st, key, func(e kv, k string) int { return strings.Compare(e.key, k) })
 	if !found {
 		return 0, false
@@ -207,7 +207,7 @@ func (st modelState) get(key string) (core.ClientReq, bool) {
 	return st[i].writer, true
 }
 
-func (st modelState) set(key string, w core.ClientReq, present bool) modelState {
+func (st modelState) set(key string, w control.ClientReq, present bool) modelState {
 	i, found := slices.BinarySearchFunc(st, key, func(e kv, k string) int { return strings.Compare(e.key, k) })
 	out := make(modelState, 0, len(st)+1)
 	out = append(out, st[:i]...)
@@ -239,42 +239,42 @@ func (st modelState) String() string {
 type wop struct {
 	h        *HistOp
 	inv, ret uint64
-	required bool           // Definite: must be linearized; else at most once
-	reads    core.ClientReq // GET 200: the writer named by the body
+	required bool              // Definite: must be linearized; else at most once
+	reads    control.ClientReq // GET 200: the writer named by the body
 }
 
 // apply runs w on st. ok is false if w's replied result contradicts st.
 func (w *wop) apply(st modelState) (modelState, bool) {
 	status := w.h.Status
 	switch op := w.h.Op.(type) {
-	case core.Get:
+	case control.Get:
 		got, present := st.get(op.Key)
 		if present && got == unknown {
-			if status == core.StatusOK {
+			if status == control.StatusOK {
 				return st.set(op.Key, w.reads, true), true // learned it
 			}
 			return st.set(op.Key, 0, false), true
 		}
-		if status == core.StatusOK {
+		if status == control.StatusOK {
 			return st, present && got == w.reads
 		}
 		return st, !present // 404
-	case core.Put:
+	case control.Put:
 		return st.set(op.Key, w.h.Req, true), true
-	case core.Delete:
+	case control.Delete:
 		got, present := st.get(op.Key)
 		if !w.required || got == unknown {
 			// Optional, or the key is unknown (it may have been either way).
 			return st.set(op.Key, 0, false), true
 		}
-		if status == core.StatusOK {
+		if status == control.StatusOK {
 			return st.set(op.Key, 0, false), present
 		}
 		return st, !present // 404
-	case core.Copy:
+	case control.Copy:
 		src, present := st.get(op.Src)
 		if present && src == unknown {
-			if !w.required || status == core.StatusOK {
+			if !w.required || status == control.StatusOK {
 				return st.set(op.Dst, unknown, true), true
 			}
 			return st.set(op.Src, 0, false), true // 404: src was absent
@@ -285,7 +285,7 @@ func (w *wop) apply(st modelState) (modelState, bool) {
 			}
 			return st.set(op.Dst, src, true), true
 		}
-		if status == core.StatusOK {
+		if status == control.StatusOK {
 			return st.set(op.Dst, src, true), present
 		}
 		return st, !present // 404
@@ -299,7 +299,7 @@ const never = ^uint64(0)
 // result of widening (see Oracle.widen). Any read of it is accepted, and the
 // read's result then becomes the key's value. It only weakens the check, so
 // it never causes a false failure.
-const unknown = ^core.ClientReq(0)
+const unknown = ^control.ClientReq(0)
 
 // window builds the ops of the unchecked window. It returns a failure for a
 // GET 200 whose bytes no PUT wrote (NoCorruptReads reports it too; the model
@@ -308,18 +308,18 @@ func (o *Oracle) window() ([]wop, []Failure) {
 	var ws []wop
 	for i := o.checked; i < len(o.hist.Ops); i++ {
 		h := &o.hist.Ops[i]
-		if h.Outcome == Definite && h.Status == core.StatusBadRequest {
+		if h.Outcome == Definite && h.Status == control.StatusBadRequest {
 			continue // rejected before touching anything
 		}
 		w := wop{h: h, inv: h.InvSeq, ret: h.RetSeq, required: h.Outcome == Definite}
 		if h.Outcome == Pending {
 			w.ret = never
 		}
-		if _, isGet := h.Op.(core.Get); isGet {
+		if _, isGet := h.Op.(control.Get); isGet {
 			if !w.required {
 				continue // a failed or abandoned read constrains nothing
 			}
-			if h.Status == core.StatusOK {
+			if h.Status == control.StatusOK {
 				writer, ok := ValueWriter(h.Body)
 				if !ok {
 					return nil, []Failure{{Invariant: "linearizable", Msg: "GET " + describeOp(h) + " returned bytes no PUT wrote"}}
@@ -352,15 +352,15 @@ type group struct {
 }
 
 // opKeys returns the keys op touches, sorted.
-func opKeys(op core.Op) []string {
+func opKeys(op control.Op) []string {
 	switch o := op.(type) {
-	case core.Put:
+	case control.Put:
 		return []string{o.Key}
-	case core.Get:
+	case control.Get:
 		return []string{o.Key}
-	case core.Delete:
+	case control.Delete:
 		return []string{o.Key}
-	case core.Copy:
+	case control.Copy:
 		if o.Src == o.Dst {
 			return []string{o.Src}
 		}
@@ -515,7 +515,7 @@ func widenStates(keys []string, states []modelState) []modelState {
 // (independent uncertainty, the common case), else one joint group. Keys
 // that are certainly absent need no group.
 func factor(keys []string, finals []modelState) []group {
-	vals := make([][]core.ClientReq, len(keys)) // 0 = absent
+	vals := make([][]control.ClientReq, len(keys)) // 0 = absent
 	prod := 1
 	for i, k := range keys {
 		for _, st := range finals {

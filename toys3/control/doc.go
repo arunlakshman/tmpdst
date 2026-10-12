@@ -1,4 +1,4 @@
-// Package core is the deterministic heart of toys3, a toy single-node S3-style
+// Package control is the deterministic heart of toys3, a toy single-node S3-style
 // object server whose only job is to be a small, honest target for
 // deterministic simulation testing (DST). See ../DESIGN.md and ../../loop.md.
 //
@@ -93,4 +93,4 @@
 // step the owner is on) are ignored. Committed
 // objects need no recovery: the rename protocol means obj/ only ever holds
 // complete files.
-package core
+package control

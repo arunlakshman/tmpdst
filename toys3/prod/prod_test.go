@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"manifester/toys3/core"
+	"manifester/toys3/control"
 )
 
 // server is one process lifetime: a Loop on dir behind an httptest server.
@@ -28,7 +28,7 @@ func startServer(t *testing.T, dir string, exec Executor) *server {
 	if err := PrepareDir(dir); err != nil {
 		t.Fatal(err)
 	}
-	loop := NewLoop(core.Config{Dir: filepath.ToSlash(dir), MaxObjectSize: 1 << 20}, core.NewMachine, exec, 64)
+	loop := NewLoop(control.Config{Dir: filepath.ToSlash(dir), MaxObjectSize: 1 << 20}, control.NewMachine, exec, 64)
 	loop.Log = log.New(io.Discard, "", 0)
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &server{t: t, http: httptest.NewServer(&Handler{Loop: loop, MaxBody: 1 << 20}), cancel: cancel, done: make(chan error, 1)}
@@ -110,9 +110,9 @@ func TestEndToEnd(t *testing.T) {
 // failFsync wraps OSExecutor and fails every file fsync with EIO.
 type failFsync struct{ OSExecutor }
 
-func (f failFsync) Execute(a core.Action, done func(core.EventBody)) {
-	if a, ok := a.(core.FSFsync); ok {
-		go done(core.FSFsyncDone{IO: a.IO, Err: core.ErrIO})
+func (f failFsync) Execute(a control.Action, done func(control.EventBody)) {
+	if a, ok := a.(control.FSFsync); ok {
+		go done(control.FSFsyncDone{IO: a.IO, Err: control.ErrIO})
 		return
 	}
 	f.OSExecutor.Execute(a, done)

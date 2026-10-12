@@ -1,6 +1,6 @@
 package sim
 
-import "manifester/toys3/core"
+import "manifester/toys3/control"
 
 // Incarnation numbers server boots: 1 for the first, +1 after each crash.
 // Every server-bound entry carries the incarnation it was scheduled for;
@@ -46,16 +46,16 @@ func (k EntryKind) String() string {
 
 // Entry is one item in the global queue. Plain data, like events.
 type Entry struct {
-	At   core.Time
+	At   control.Time
 	Tie  uint64 // drawn from the run's Rand at Schedule time; orders same-At entries
 	Seq  uint64 // assigned by Schedule; final tie-break, makes the order total
 	Kind EntryKind
 	Inc  Incarnation // for KindDeliver and KindFSLand; 0 otherwise
 
-	Event  core.EventBody // KindDeliver
-	Action core.Action    // KindFSLand: the FS action to apply
-	Plan   FSPlan         // KindFSLand: fault and latency decided at issue time
-	Client int            // KindClientWake
+	Event  control.EventBody // KindDeliver
+	Action control.Action    // KindFSLand: the FS action to apply
+	Plan   FSPlan            // KindFSLand: fault and latency decided at issue time
+	Client int               // KindClientWake
 }
 
 // Queue is the global priority queue ordered by (At, Tie, Seq): time first,
@@ -69,7 +69,7 @@ type Queue struct {
 
 // Schedule enqueues e, assigning Tie (from r) and Seq. Scheduling in the past
 // clamps At to now.
-func (q *Queue) Schedule(r *Rand, now core.Time, e Entry) {
+func (q *Queue) Schedule(r *Rand, now control.Time, e Entry) {
 	if e.At < now {
 		e.At = now
 	}

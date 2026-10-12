@@ -3,7 +3,7 @@
 //	toys3 -dir /var/lib/toys3 -addr :8080
 //
 // It wires the production runtime: prepare the data directory, start the
-// event loop around core.NewMachine with an OSExecutor, and serve the S3
+// event loop around control.NewMachine with an OSExecutor, and serve the S3
 // handler. On Halt the process exits non-zero; run it under a supervisor that
 // restarts it (recovery happens on boot).
 package main
@@ -19,7 +19,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"manifester/toys3/core"
+	"manifester/toys3/control"
 	"manifester/toys3/prod"
 )
 
@@ -42,7 +42,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	loop := prod.NewLoop(core.Config{Dir: root, MaxObjectSize: *maxObj}, core.NewMachine, prod.OSExecutor{}, 1024)
+	loop := prod.NewLoop(control.Config{Dir: root, MaxObjectSize: *maxObj}, control.NewMachine, prod.OSExecutor{}, 1024)
 	srv := &http.Server{Addr: *addr, Handler: &prod.Handler{Loop: loop, MaxBody: int64(*maxObj)}}
 
 	go func() {

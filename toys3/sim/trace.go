@@ -3,7 +3,7 @@ package sim
 import (
 	"fmt"
 
-	"manifester/toys3/core"
+	"manifester/toys3/control"
 )
 
 // Trace hashing: every event, action and fact is folded into the run's trace
@@ -12,40 +12,40 @@ import (
 // never change a TraceHash.
 
 // hashOp folds a client op into h.
-func hashOp(h uint64, op core.Op) uint64 {
+func hashOp(h uint64, op control.Op) uint64 {
 	switch o := op.(type) {
-	case core.Put:
+	case control.Put:
 		return Fold(Fold(Fold(h, 1), hashString(o.Key)), hashBytes(o.Data))
-	case core.Get:
+	case control.Get:
 		return Fold(Fold(h, 2), hashString(o.Key))
-	case core.Delete:
+	case control.Delete:
 		return Fold(Fold(h, 3), hashString(o.Key))
-	case core.Copy:
+	case control.Copy:
 		return Fold(Fold(Fold(h, 4), hashString(o.Src)), hashString(o.Dst))
 	}
 	return Fold(h, 5)
 }
 
 // hashEvent folds an event body into h.
-func hashEvent(h uint64, b core.EventBody) uint64 {
+func hashEvent(h uint64, b control.EventBody) uint64 {
 	switch e := b.(type) {
-	case core.Started:
+	case control.Started:
 		return Fold(h, 10)
-	case core.Request:
+	case control.Request:
 		return hashOp(Fold(Fold(h, 11), uint64(e.Client)), e.Op)
-	case core.FSWriteDone:
+	case control.FSWriteDone:
 		return Fold(Fold(Fold(h, 12), uint64(e.IO)), uint64(e.Err))
-	case core.FSFsyncDone:
+	case control.FSFsyncDone:
 		return Fold(Fold(Fold(h, 13), uint64(e.IO)), uint64(e.Err))
-	case core.FSRenameDone:
+	case control.FSRenameDone:
 		return Fold(Fold(Fold(h, 14), uint64(e.IO)), uint64(e.Err))
-	case core.FSFsyncDirDone:
+	case control.FSFsyncDirDone:
 		return Fold(Fold(Fold(h, 15), uint64(e.IO)), uint64(e.Err))
-	case core.FSReadDone:
+	case control.FSReadDone:
 		return Fold(Fold(Fold(Fold(h, 16), uint64(e.IO)), uint64(e.Err)), hashBytes(e.Data))
-	case core.FSUnlinkDone:
+	case control.FSUnlinkDone:
 		return Fold(Fold(Fold(h, 17), uint64(e.IO)), uint64(e.Err))
-	case core.FSListDone:
+	case control.FSListDone:
 		h = Fold(Fold(Fold(h, 18), uint64(e.IO)), uint64(e.Err))
 		for _, n := range e.Names {
 			h = Fold(h, hashString(n))
@@ -56,27 +56,27 @@ func hashEvent(h uint64, b core.EventBody) uint64 {
 }
 
 // hashAction folds an action into h.
-func hashAction(h uint64, a core.Action) uint64 {
+func hashAction(h uint64, a control.Action) uint64 {
 	switch x := a.(type) {
-	case core.Reply:
+	case control.Reply:
 		return Fold(Fold(Fold(Fold(h, 30), uint64(x.Client)), uint64(x.Status)), hashBytes(x.Body))
-	case core.FSWrite:
+	case control.FSWrite:
 		return Fold(Fold(Fold(Fold(h, 31), uint64(x.IO)), hashString(x.Path)), hashBytes(x.Data))
-	case core.FSFsync:
+	case control.FSFsync:
 		return Fold(Fold(Fold(h, 32), uint64(x.IO)), hashString(x.Path))
-	case core.FSRename:
+	case control.FSRename:
 		return Fold(Fold(Fold(Fold(h, 33), uint64(x.IO)), hashString(x.From)), hashString(x.To))
-	case core.FSFsyncDir:
+	case control.FSFsyncDir:
 		return Fold(Fold(Fold(h, 34), uint64(x.IO)), hashString(x.Dir))
-	case core.FSRead:
+	case control.FSRead:
 		return Fold(Fold(Fold(h, 35), uint64(x.IO)), hashString(x.Path))
-	case core.FSUnlink:
+	case control.FSUnlink:
 		return Fold(Fold(Fold(h, 36), uint64(x.IO)), hashString(x.Path))
-	case core.FSList:
+	case control.FSList:
 		return Fold(Fold(Fold(h, 37), uint64(x.IO)), hashString(x.Dir))
-	case core.Halt:
+	case control.Halt:
 		return Fold(Fold(h, 38), hashString(x.Reason))
-	case core.Emit:
+	case control.Emit:
 		return Fold(Fold(h, 39), hashString(factHashKey(x.Fact)))
 	}
 	return Fold(h, 40)
@@ -88,16 +88,16 @@ func hashAction(h uint64, a core.Action) uint64 {
 // TraceHash. Changing this function is a deliberate re-baseline: regenerate
 // testdata/golden-v1.txt and update every trace hash quoted in the docs in the
 // same commit.
-func factHashKey(f core.Fact) string {
+func factHashKey(f control.Fact) string {
 	switch x := f.(type) {
-	case core.Committed:
+	case control.Committed:
 		if x.Deleted {
 			return fmt.Sprintf("Committed{c%d delete %q}", x.Client, x.Key)
 		}
 		return fmt.Sprintf("Committed{c%d %q crc=%08x}", x.Client, x.Key, x.Sum)
-	case core.Recovered:
+	case control.Recovered:
 		return fmt.Sprintf("Recovered{temps=%d}", x.TempsRemoved)
-	case core.CorruptObject:
+	case control.CorruptObject:
 		return fmt.Sprintf("CorruptObject{%q}", x.Key) // legacy spelling, on purpose
 	}
 	return fmt.Sprintf("%T", f)

@@ -1,4 +1,4 @@
-package core
+package control
 
 // The plant interface: the commands the server sends to the filesystem
 // (actuations) and the completions that come back (feedback). The server owns

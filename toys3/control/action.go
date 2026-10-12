@@ -1,4 +1,4 @@
-package core
+package control
 
 // Action is an output of Step: a request for the runtime to do something.
 // Every filesystem action carries an IOID; its result returns as the matching

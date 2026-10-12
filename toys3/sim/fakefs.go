@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"manifester/toys3/core"
+	"manifester/toys3/control"
 	"manifester/toys3/format"
 )
 
@@ -23,8 +23,8 @@ type FSFaults struct {
 	// Latency is the [min, max] delay from issuing an action to its effect
 	// landing; ReplyDelay is the further [min, max] delay until the completion
 	// is delivered. A crash in between leaves the effect applied but unacked.
-	Latency    [2]core.Duration
-	ReplyDelay [2]core.Duration
+	Latency    [2]control.Duration
+	ReplyDelay [2]control.Duration
 	// ReadCorruptProb is the per-FSRead probability that the returned bytes
 	// have one bit flipped (a transient media or bus error: the stored data
 	// is unchanged). This is what makes the object CRC reachable for a
@@ -47,9 +47,9 @@ type FSFaults struct {
 // FSPlan is decided when an action is issued, so the decision consumes RNG
 // draws in issue order (deterministic) regardless of when it lands.
 type FSPlan struct {
-	Fail  bool          // complete with ErrIO
-	Land  core.Duration // issue → effect
-	Reply core.Duration // effect → completion delivered
+	Fail  bool             // complete with ErrIO
+	Land  control.Duration // issue → effect
+	Reply control.Duration // effect → completion delivered
 }
 
 // InodeID names a file's content independently of its names, so a rename can
@@ -134,11 +134,11 @@ func NewFakeFS(r *Rand, faults FSFaults, dirs ...string) *FakeFS {
 }
 
 // Plan draws the fault decision and latencies for a filesystem action.
-func (fs *FakeFS) Plan(a core.Action) FSPlan {
+func (fs *FakeFS) Plan(a control.Action) FSPlan {
 	var p FSPlan
 	p.Fail = !fs.quiet && fs.rng.Chance(fs.faults.EIOProb)
-	p.Land = core.Duration(fs.rng.Between(int64(fs.faults.Latency[0]), int64(fs.faults.Latency[1])))
-	p.Reply = core.Duration(fs.rng.Between(int64(fs.faults.ReplyDelay[0]), int64(fs.faults.ReplyDelay[1])))
+	p.Land = control.Duration(fs.rng.Between(int64(fs.faults.Latency[0]), int64(fs.faults.Latency[1])))
+	p.Reply = control.Duration(fs.rng.Between(int64(fs.faults.ReplyDelay[0]), int64(fs.faults.ReplyDelay[1])))
 	return p
 }
 
@@ -153,38 +153,38 @@ func (fs *FakeFS) Plan(a core.Action) FSPlan {
 //	FSRead, FSList  no effect
 //
 // Missing paths complete with ErrNotFound (never by chance).
-func (fs *FakeFS) Land(a core.Action, p FSPlan) core.EventBody {
+func (fs *FakeFS) Land(a control.Action, p FSPlan) control.EventBody {
 	fs.count.Landed++
-	var body core.EventBody
-	var err core.ErrCode
+	var body control.EventBody
+	var err control.ErrCode
 	switch a := a.(type) {
-	case core.FSWrite:
+	case control.FSWrite:
 		err = fs.write(a.Path, a.Data, p.Fail)
-		body = core.FSWriteDone{IO: a.IO, Err: err}
-	case core.FSFsync:
+		body = control.FSWriteDone{IO: a.IO, Err: err}
+	case control.FSFsync:
 		err = fs.fsync(a.Path, p.Fail)
-		body = core.FSFsyncDone{IO: a.IO, Err: err}
-	case core.FSRename:
+		body = control.FSFsyncDone{IO: a.IO, Err: err}
+	case control.FSRename:
 		err = fs.rename(a.From, a.To, p.Fail)
-		body = core.FSRenameDone{IO: a.IO, Err: err}
-	case core.FSFsyncDir:
+		body = control.FSRenameDone{IO: a.IO, Err: err}
+	case control.FSFsyncDir:
 		err = fs.fsyncDir(a.Dir, p.Fail)
-		body = core.FSFsyncDirDone{IO: a.IO, Err: err}
-	case core.FSRead:
+		body = control.FSFsyncDirDone{IO: a.IO, Err: err}
+	case control.FSRead:
 		var data []byte
 		data, err = fs.read(a.Path, p.Fail)
-		body = core.FSReadDone{IO: a.IO, Data: data, Err: err}
-	case core.FSUnlink:
+		body = control.FSReadDone{IO: a.IO, Data: data, Err: err}
+	case control.FSUnlink:
 		err = fs.unlink(a.Path, p.Fail)
-		body = core.FSUnlinkDone{IO: a.IO, Err: err}
-	case core.FSList:
+		body = control.FSUnlinkDone{IO: a.IO, Err: err}
+	case control.FSList:
 		var names []string
 		names, err = fs.list(a.Dir, p.Fail)
-		body = core.FSListDone{IO: a.IO, Names: names, Err: err}
+		body = control.FSListDone{IO: a.IO, Names: names, Err: err}
 	default:
 		panic("toys3/sim: FakeFS.Land: not a filesystem action")
 	}
-	if err == core.ErrIO {
+	if err == control.ErrIO {
 		fs.count.EIOs++
 	}
 	if fs.rng.Chance(fs.faults.WritebackProb) {
@@ -277,10 +277,10 @@ func (d *fdir) setEntry(name string, e dirent) {
 	}
 }
 
-func (fs *FakeFS) write(path string, data []byte, fail bool) core.ErrCode {
+func (fs *FakeFS) write(path string, data []byte, fail bool) control.ErrCode {
 	d, name, ok := fs.split(path)
 	if !ok {
-		return core.ErrNotFound
+		return control.ErrNotFound
 	}
 	content := bytes.Clone(data)
 	if content == nil {
@@ -289,7 +289,7 @@ func (fs *FakeFS) write(path string, data []byte, fail bool) core.ErrCode {
 	if fail {
 		switch fs.rng.Intn(3) {
 		case 0: // nothing happened
-			return core.ErrIO
+			return control.ErrIO
 		case 1: // created / truncated, nothing written
 			content = []byte{}
 		default: // a prefix was written
@@ -308,39 +308,39 @@ func (fs *FakeFS) write(path string, data []byte, fail bool) core.ErrCode {
 	in.dirty = !bytes.Equal(in.volatile, in.durable)
 	in.poisoned = false
 	if fail {
-		return core.ErrIO
+		return control.ErrIO
 	}
-	return core.OK
+	return control.OK
 }
 
-func (fs *FakeFS) fsync(path string, fail bool) core.ErrCode {
+func (fs *FakeFS) fsync(path string, fail bool) control.ErrCode {
 	in, ok := fs.lookup(path)
 	if !ok {
-		return core.ErrNotFound
+		return control.ErrNotFound
 	}
 	if fail {
 		if fs.faults.FsyncGate && in.dirty {
 			in.poisoned = true // the kernel drops the dirty pages' error state
 		}
-		return core.ErrIO
+		return control.ErrIO
 	}
 	if in.poisoned {
-		return core.OK // fsyncgate: the lie
+		return control.OK // fsyncgate: the lie
 	}
 	in.durable = in.volatile
 	in.dirty = false
 	fs.durGen++
-	return core.OK
+	return control.OK
 }
 
-func (fs *FakeFS) rename(from, to string, fail bool) core.ErrCode {
+func (fs *FakeFS) rename(from, to string, fail bool) control.ErrCode {
 	fd, fname, ok1 := fs.split(from)
 	td, tname, ok2 := fs.split(to)
 	if !ok1 || !ok2 || fd.entries[fname].cur == 0 {
-		return core.ErrNotFound
+		return control.ErrNotFound
 	}
 	if fail && fs.rng.Intn(2) == 0 {
-		return core.ErrIO // not applied
+		return control.ErrIO // not applied
 	}
 	if from != to {
 		src := fd.entries[fname]
@@ -352,18 +352,18 @@ func (fs *FakeFS) rename(from, to string, fail bool) core.ErrCode {
 		td.setEntry(tname, dst)
 	}
 	if fail {
-		return core.ErrIO // applied, but reported as failed
+		return control.ErrIO // applied, but reported as failed
 	}
-	return core.OK
+	return control.OK
 }
 
-func (fs *FakeFS) fsyncDir(dir string, fail bool) core.ErrCode {
+func (fs *FakeFS) fsyncDir(dir string, fail bool) control.ErrCode {
 	d, ok := fs.dirs[dir]
 	if !ok {
-		return core.ErrNotFound
+		return control.ErrNotFound
 	}
 	if fail {
-		return core.ErrIO
+		return control.ErrIO
 	}
 	for _, name := range d.names() {
 		e := d.entries[name]
@@ -371,16 +371,16 @@ func (fs *FakeFS) fsyncDir(dir string, fail bool) core.ErrCode {
 		d.setEntry(name, e)
 	}
 	fs.durGen++
-	return core.OK
+	return control.OK
 }
 
-func (fs *FakeFS) read(path string, fail bool) ([]byte, core.ErrCode) {
+func (fs *FakeFS) read(path string, fail bool) ([]byte, control.ErrCode) {
 	in, ok := fs.lookup(path)
 	if !ok {
-		return nil, core.ErrNotFound
+		return nil, control.ErrNotFound
 	}
 	if fail {
-		return nil, core.ErrIO
+		return nil, control.ErrIO
 	}
 	data := bytes.Clone(in.volatile)
 	if data == nil {
@@ -391,33 +391,33 @@ func (fs *FakeFS) read(path string, fail bool) ([]byte, core.ErrCode) {
 		data[bit/8] ^= 1 << (bit % 8)
 		fs.count.ReadCorruptions++
 	}
-	return data, core.OK
+	return data, control.OK
 }
 
-func (fs *FakeFS) unlink(path string, fail bool) core.ErrCode {
+func (fs *FakeFS) unlink(path string, fail bool) control.ErrCode {
 	d, name, ok := fs.split(path)
 	if !ok || d.entries[name].cur == 0 {
-		return core.ErrNotFound
+		return control.ErrNotFound
 	}
 	if fail && fs.rng.Intn(2) == 0 {
-		return core.ErrIO // not applied
+		return control.ErrIO // not applied
 	}
 	e := d.entries[name]
 	e.cur = 0
 	d.setEntry(name, e)
 	if fail {
-		return core.ErrIO
+		return control.ErrIO
 	}
-	return core.OK
+	return control.OK
 }
 
-func (fs *FakeFS) list(dir string, fail bool) ([]string, core.ErrCode) {
+func (fs *FakeFS) list(dir string, fail bool) ([]string, control.ErrCode) {
 	d, ok := fs.dirs[dir]
 	if !ok {
-		return nil, core.ErrNotFound
+		return nil, control.ErrNotFound
 	}
 	if fail {
-		return nil, core.ErrIO
+		return nil, control.ErrIO
 	}
 	var names []string
 	for _, name := range d.names() {
@@ -425,7 +425,7 @@ func (fs *FakeFS) list(dir string, fail bool) ([]string, core.ErrCode) {
 			names = append(names, name)
 		}
 	}
-	return names, core.OK
+	return names, control.OK
 }
 
 // names returns the directory's entry names, sorted. The slice is cached

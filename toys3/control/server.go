@@ -1,4 +1,4 @@
-package core
+package control
 
 import "manifester/toys3/format"
 

@@ -3,13 +3,13 @@ package sim
 import (
 	"testing"
 
-	"manifester/toys3/core"
+	"manifester/toys3/control"
 )
 
 func TestQueueOrdersByTimeThenTieThenSeq(t *testing.T) {
 	r := NewRand(1)
 	var q Queue
-	times := []core.Time{50, 10, 30, 10, 20, 10, 40, 30}
+	times := []control.Time{50, 10, 30, 10, 20, 10, 40, 30}
 	for i, at := range times {
 		q.Schedule(r, 0, Entry{At: at, Client: i})
 	}
@@ -77,7 +77,7 @@ func TestQueueClampsPastAndDropsIncarnation(t *testing.T) {
 		t.Fatalf("dropped %d, want 2", n)
 	}
 	var kinds []EntryKind
-	var ats []core.Time
+	var ats []control.Time
 	for q.Len() > 0 {
 		e, _ := q.Pop()
 		kinds = append(kinds, e.Kind)

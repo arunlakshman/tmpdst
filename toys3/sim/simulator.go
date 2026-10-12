@@ -3,7 +3,7 @@ package sim
 import (
 	"fmt"
 
-	"manifester/toys3/core"
+	"manifester/toys3/control"
 	"manifester/toys3/format"
 )
 
@@ -12,13 +12,13 @@ import (
 type Simulator struct {
 	cfg  Config
 	rng  *Rand
-	now  core.Time
+	now  control.Time
 	step int
 	q    Queue
 
 	fs     *FakeFS
-	server core.Machine // nil while crashed
-	inc    Incarnation  // current (or last) incarnation; 0 before first boot
+	server control.Machine // nil while crashed
+	inc    Incarnation     // current (or last) incarnation; 0 before first boot
 	alive  bool
 	quiet  bool
 
@@ -41,7 +41,7 @@ type Simulator struct {
 // the first boot, the clients' first wakeups and the end of Chaos.
 func New(cfg Config) *Simulator {
 	if cfg.Factory == nil {
-		cfg.Factory = core.NewMachine
+		cfg.Factory = control.NewMachine
 	}
 	if cfg.Invariants == nil {
 		cfg.Invariants = DefaultInvariants()
@@ -66,13 +66,13 @@ func New(cfg Config) *Simulator {
 	s.res.Seed = cfg.Seed
 	s.schedule(Entry{At: 0, Kind: KindRestart})
 	for c := range s.parked {
-		s.schedule(Entry{At: core.Time(s.workload.Think()), Kind: KindClientWake, Client: c})
+		s.schedule(Entry{At: control.Time(s.workload.Think()), Kind: KindClientWake, Client: c})
 	}
 	if cfg.Workload.QuiesceEvery > 0 {
-		s.schedule(Entry{At: core.Time(cfg.Workload.QuiesceEvery), Kind: KindQuiesce})
+		s.schedule(Entry{At: control.Time(cfg.Workload.QuiesceEvery), Kind: KindQuiesce})
 	}
-	s.schedule(Entry{At: core.Time(cfg.Chaos), Kind: KindQuiet})
-	s.schedule(Entry{At: core.Time(cfg.Chaos + cfg.QuietTail), Kind: KindTailEnd})
+	s.schedule(Entry{At: control.Time(cfg.Chaos), Kind: KindQuiet})
+	s.schedule(Entry{At: control.Time(cfg.Chaos + cfg.QuietTail), Kind: KindTailEnd})
 	return s
 }
 
@@ -141,7 +141,7 @@ func (s *Simulator) handle(e Entry) {
 		if s.cfg.Log {
 			s.note(e, "land "+DescribeAction(e.Action)+" -> "+DescribeEvent(body))
 		}
-		s.schedule(Entry{At: s.now + core.Time(e.Plan.Reply), Kind: KindDeliver, Inc: s.inc, Event: body})
+		s.schedule(Entry{At: s.now + control.Time(e.Plan.Reply), Kind: KindDeliver, Inc: s.inc, Event: body})
 		s.maybeCrash()
 	case KindClientWake:
 		s.wake(e.Client)
@@ -168,7 +168,7 @@ func (s *Simulator) handle(e Entry) {
 }
 
 // deliver steps the server with one event and executes its actions.
-func (s *Simulator) deliver(body core.EventBody) {
+func (s *Simulator) deliver(body control.EventBody) {
 	acts, panicMsg := s.callStep(body)
 	s.trace = hashEvent(s.trace, body)
 	if s.cfg.Log {
@@ -184,20 +184,20 @@ func (s *Simulator) deliver(body core.EventBody) {
 	s.trace = Fold(s.trace, s.server.StateHash())
 	for i, a := range acts {
 		switch x := a.(type) {
-		case core.Actuation:
+		case control.Actuation:
 			plan := s.fs.Plan(a)
-			s.schedule(Entry{At: s.now + core.Time(plan.Land), Kind: KindFSLand, Inc: s.inc, Action: a, Plan: plan})
-		case core.Reply:
+			s.schedule(Entry{At: s.now + control.Time(plan.Land), Kind: KindFSLand, Inc: s.inc, Action: a, Plan: plan})
+		case control.Reply:
 			s.reply(x)
-		case core.Emit:
+		case control.Emit:
 			s.facts = append(s.facts, TimedFact{Step: s.step, At: s.now, Inc: s.inc, Fact: x.Fact})
 			switch f := x.Fact.(type) {
-			case core.CorruptObject:
+			case control.CorruptObject:
 				s.res.Stats.CorruptObjects++
-			case core.Recovered:
+			case control.Recovered:
 				s.res.Stats.TempsRemoved += f.TempsRemoved
 			}
-		case core.Halt:
+		case control.Halt:
 			if i != len(acts)-1 {
 				s.fail(Failure{Invariant: "protocol", Msg: "Halt is not the last action of its step"})
 				return
@@ -217,16 +217,16 @@ func (s *Simulator) deliver(body core.EventBody) {
 }
 
 // callStep runs server.Step, turning a panic into a message.
-func (s *Simulator) callStep(body core.EventBody) (acts []core.Action, panicMsg string) {
+func (s *Simulator) callStep(body control.EventBody) (acts []control.Action, panicMsg string) {
 	defer func() {
 		if r := recover(); r != nil {
 			acts, panicMsg = nil, fmt.Sprint(r)
 		}
 	}()
-	return s.server.Step(core.Event{At: s.now, Body: body}), ""
+	return s.server.Step(control.Event{At: s.now, Body: body}), ""
 }
 
-func (s *Simulator) reply(r core.Reply) {
+func (s *Simulator) reply(r control.Reply) {
 	okOracle := s.oracle.Return(s.now, r)
 	client, okClient := s.workload.Complete(r)
 	if !okOracle || !okClient {
@@ -234,7 +234,7 @@ func (s *Simulator) reply(r core.Reply) {
 		return
 	}
 	s.res.Stats.ByStatus[statusIndex(r.Status)]++
-	s.schedule(Entry{At: s.now + core.Time(s.workload.Think()), Kind: KindClientWake, Client: client})
+	s.schedule(Entry{At: s.now + control.Time(s.workload.Think()), Kind: KindClientWake, Client: client})
 }
 
 // wake lets an idle client issue its next request, or parks it.
@@ -257,7 +257,7 @@ func (s *Simulator) wakeParked() {
 	for c, p := range s.parked {
 		if p {
 			s.parked[c] = false
-			s.schedule(Entry{At: s.now + core.Time(s.workload.Think()), Kind: KindClientWake, Client: c})
+			s.schedule(Entry{At: s.now + control.Time(s.workload.Think()), Kind: KindClientWake, Client: c})
 		}
 	}
 }
@@ -284,7 +284,7 @@ func (s *Simulator) crash(why string) {
 		s.res.Stats.Indetermined++
 		if op := s.oracle.op(id); op != nil {
 			switch op.Op.(type) {
-			case core.Put, core.Copy:
+			case control.Put, control.Copy:
 				midPut = true
 			}
 			s.parked[op.Client] = true
@@ -303,7 +303,7 @@ func (s *Simulator) crash(why string) {
 			Note: fmt.Sprintf("CRASH (%s): kept=%d lost=%d torn=%d, dropped %d queued entries", why, rep.Kept, rep.Lost, rep.Torn, dropped)})
 	}
 	delay := s.rng.Between(int64(s.cfg.RestartDelay[0]), int64(s.cfg.RestartDelay[1]))
-	s.schedule(Entry{At: s.now + core.Time(delay), Kind: KindRestart})
+	s.schedule(Entry{At: s.now + control.Time(delay), Kind: KindRestart})
 }
 
 // restart boots a new incarnation and delivers Started.
@@ -319,13 +319,13 @@ func (s *Simulator) restart() {
 	if s.cfg.Log {
 		s.res.Log = append(s.res.Log, LogEntry{Step: s.step, At: s.now, Inc: s.inc, Kind: KindRestart, Note: "boot"})
 	}
-	s.schedule(Entry{At: s.now, Kind: KindDeliver, Inc: s.inc, Event: core.Started{}})
+	s.schedule(Entry{At: s.now, Kind: KindDeliver, Inc: s.inc, Event: control.Started{}})
 	if !s.quiescing {
 		s.wakeParked()
 	}
 }
 
-func (s *Simulator) build() (m core.Machine, panicMsg string) {
+func (s *Simulator) build() (m control.Machine, panicMsg string) {
 	defer func() {
 		if r := recover(); r != nil {
 			m, panicMsg = nil, fmt.Sprint(r)
@@ -340,7 +340,7 @@ func (s *Simulator) afterStep() {
 	if s.quiescing && s.workload.Idle() {
 		s.quiescing = false
 		if !s.stopped {
-			s.schedule(Entry{At: s.now + core.Time(s.cfg.Workload.QuiesceEvery), Kind: KindQuiesce})
+			s.schedule(Entry{At: s.now + control.Time(s.cfg.Workload.QuiesceEvery), Kind: KindQuiesce})
 		}
 		if s.alive {
 			s.wakeParked()
@@ -384,7 +384,7 @@ func (s *Simulator) note(e Entry, msg string) {
 // View implementation.
 
 func (s *Simulator) Step() int          { return s.step }
-func (s *Simulator) Now() core.Time     { return s.now }
+func (s *Simulator) Now() control.Time  { return s.now }
 func (s *Simulator) Alive() bool        { return s.alive }
 func (s *Simulator) Inc() Incarnation   { return s.inc }
 func (s *Simulator) Quiet() bool        { return s.quiet }
@@ -396,15 +396,15 @@ func (s *Simulator) Facts() []TimedFact { return s.facts }
 
 var _ View = (*Simulator)(nil)
 
-// env is the core.Env handed to each server incarnation. It draws from the
+// env is the control.Env handed to each server incarnation. It draws from the
 // run's single Rand, so the server's random choices replay with the seed.
 type env struct {
 	rng     *Rand
 	buggify bool // false during QuietTail
 }
 
-func (e *env) Uint64() uint64       { return e.rng.Uint64() }
-func (e *env) Intn(n int) int       { return e.rng.Intn(n) }
-func (e *env) Maybe(core.Site) bool { return e.buggify && e.rng.Chance(0.05) }
+func (e *env) Uint64() uint64          { return e.rng.Uint64() }
+func (e *env) Intn(n int) int          { return e.rng.Intn(n) }
+func (e *env) Maybe(control.Site) bool { return e.buggify && e.rng.Chance(0.05) }
 
-var _ core.Env = (*env)(nil)
+var _ control.Env = (*env)(nil)

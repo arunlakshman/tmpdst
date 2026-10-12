@@ -1,4 +1,4 @@
-package core
+package control
 
 // Event is the input to Step. The runtime stamps At when it dequeues the event,
 // so At never decreases across successive Steps of one incarnation.

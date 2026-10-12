@@ -30,5 +30,5 @@
 // same kind of crash. Clients do not issue requests while the server is down,
 // and they pause at every QuiesceEvery until all requests have replied.
 //
-// Like package core, this package is checked by tools/detcheck.
+// Like packages control and format, this package is checked by tools/detcheck.
 package sim

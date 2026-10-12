@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"manifester/toys3/core"
+	"manifester/toys3/control"
 )
 
 // CopySourceHeader names the source of a CopyObject, as in S3:
@@ -18,14 +18,14 @@ const CopySourceHeader = "X-Amz-Copy-Source"
 // ErrMethodNotAllowed is returned by ParseRequest for unsupported methods.
 var ErrMethodNotAllowed = errors.New("method not allowed")
 
-// Handler maps the S3 REST subset onto core.Request events:
+// Handler maps the S3 REST subset onto control.Request events:
 //
-//	PUT    /{bucket}/{key}                          → core.Put{Key, Data: body}
-//	PUT    /{bucket}/{key} + x-amz-copy-source      → core.Copy{Src, Dst}
-//	GET    /{bucket}/{key}                          → core.Get
-//	DELETE /{bucket}/{key}                          → core.Delete
+//	PUT    /{bucket}/{key}                          → control.Put{Key, Data: body}
+//	PUT    /{bucket}/{key} + x-amz-copy-source      → control.Copy{Src, Dst}
+//	GET    /{bucket}/{key}                          → control.Get
+//	DELETE /{bucket}/{key}                          → control.Delete
 //
-// Buckets are not first-class: the core key is "bucket/key", so there is one
+// Buckets are not first-class: the object key is "bucket/key", so there is one
 // flat namespace and no CreateBucket. Replies map Status straight to the HTTP
 // status code; a 200 GET writes Body. S3 returns 204 for DELETE; toys3 keeps
 // 200 for simplicity.
@@ -65,7 +65,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
-	if rep.Status == core.StatusOK && rep.Body != nil {
+	if rep.Status == control.StatusOK && rep.Body != nil {
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Content-Length", strconv.Itoa(len(rep.Body)))
 		w.WriteHeader(http.StatusOK)
@@ -75,23 +75,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(int(rep.Status))
 }
 
-// ParseRequest decodes an HTTP request (body already read) into a core.Op.
+// ParseRequest decodes an HTTP request (body already read) into a control.Op.
 // Malformed requests (no key, bad copy source, unsupported method) return an
-// error and become 400/405 without reaching the core.
-func ParseRequest(r *http.Request, body []byte) (core.Op, error) {
+// error and become 400/405 without reaching the control.
+func ParseRequest(r *http.Request, body []byte) (control.Op, error) {
 	key, err := splitKey(r.URL.Path)
 	if err != nil {
 		return nil, err
 	}
 	switch r.Method {
 	case http.MethodGet:
-		return core.Get{Key: key}, nil
+		return control.Get{Key: key}, nil
 	case http.MethodDelete:
-		return core.Delete{Key: key}, nil
+		return control.Delete{Key: key}, nil
 	case http.MethodPut:
 		src := r.Header.Get(CopySourceHeader)
 		if src == "" {
-			return core.Put{Key: key, Data: body}, nil
+			return control.Put{Key: key, Data: body}, nil
 		}
 		unesc, err := url.PathUnescape(src)
 		if err != nil {
@@ -101,7 +101,7 @@ func ParseRequest(r *http.Request, body []byte) (core.Op, error) {
 		if err != nil {
 			return nil, errors.New("bad " + CopySourceHeader + ": " + err.Error())
 		}
-		return core.Copy{Src: srcKey, Dst: key}, nil
+		return control.Copy{Src: srcKey, Dst: key}, nil
 	}
 	return nil, ErrMethodNotAllowed
 }

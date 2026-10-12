@@ -1,4 +1,4 @@
-package core
+package control
 
 // Fact is a closed set of structured observations the server emits for
 // invariants and tracing. Facts describe what the server believes; the

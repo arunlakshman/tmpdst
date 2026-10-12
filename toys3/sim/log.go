@@ -4,23 +4,23 @@ import (
 	"fmt"
 	"strings"
 
-	"manifester/toys3/core"
+	"manifester/toys3/control"
 	"manifester/toys3/format"
 )
 
 // DescribeOp renders a client operation compactly.
-func DescribeOp(op core.Op) string {
+func DescribeOp(op control.Op) string {
 	switch o := op.(type) {
-	case core.Put:
+	case control.Put:
 		if w, ok := ValueWriter(o.Data); ok {
 			return fmt.Sprintf("PUT %q value-of-%d", o.Key, w)
 		}
 		return fmt.Sprintf("PUT %q (%d bytes)", o.Key, len(o.Data))
-	case core.Get:
+	case control.Get:
 		return fmt.Sprintf("GET %q", o.Key)
-	case core.Delete:
+	case control.Delete:
 		return fmt.Sprintf("DELETE %q", o.Key)
-	case core.Copy:
+	case control.Copy:
 		return fmt.Sprintf("COPY %q -> %q", o.Src, o.Dst)
 	}
 	return fmt.Sprintf("%T", op)
@@ -44,72 +44,72 @@ func describePayload(b []byte) string {
 }
 
 // DescribeEvent renders an event body for the log.
-func DescribeEvent(b core.EventBody) string {
+func DescribeEvent(b control.EventBody) string {
 	switch e := b.(type) {
-	case core.Started:
+	case control.Started:
 		return "Started"
-	case core.Request:
+	case control.Request:
 		return fmt.Sprintf("Request{c%d %s}", e.Client, DescribeOp(e.Op))
-	case core.FSWriteDone:
+	case control.FSWriteDone:
 		return fmt.Sprintf("FSWriteDone{io%d %v}", e.IO, e.Err)
-	case core.FSFsyncDone:
+	case control.FSFsyncDone:
 		return fmt.Sprintf("FSFsyncDone{io%d %v}", e.IO, e.Err)
-	case core.FSRenameDone:
+	case control.FSRenameDone:
 		return fmt.Sprintf("FSRenameDone{io%d %v}", e.IO, e.Err)
-	case core.FSFsyncDirDone:
+	case control.FSFsyncDirDone:
 		return fmt.Sprintf("FSFsyncDirDone{io%d %v}", e.IO, e.Err)
-	case core.FSReadDone:
+	case control.FSReadDone:
 		return fmt.Sprintf("FSReadDone{io%d %v %s}", e.IO, e.Err, describePayload(e.Data))
-	case core.FSUnlinkDone:
+	case control.FSUnlinkDone:
 		return fmt.Sprintf("FSUnlinkDone{io%d %v}", e.IO, e.Err)
-	case core.FSListDone:
+	case control.FSListDone:
 		return fmt.Sprintf("FSListDone{io%d %v %v}", e.IO, e.Err, e.Names)
 	}
 	return fmt.Sprintf("%T", b)
 }
 
 // DescribeAction renders an action for the log.
-func DescribeAction(a core.Action) string {
+func DescribeAction(a control.Action) string {
 	switch x := a.(type) {
-	case core.Reply:
+	case control.Reply:
 		s := fmt.Sprintf("Reply{c%d %d", x.Client, x.Status)
 		if x.Body != nil {
 			s += " " + describePayload(x.Body)
 		}
 		return s + "}"
-	case core.FSWrite:
+	case control.FSWrite:
 		return fmt.Sprintf("FSWrite{io%d %s %s}", x.IO, x.Path, describePayload(x.Data))
-	case core.FSFsync:
+	case control.FSFsync:
 		return fmt.Sprintf("FSFsync{io%d %s}", x.IO, x.Path)
-	case core.FSRename:
+	case control.FSRename:
 		return fmt.Sprintf("FSRename{io%d %s -> %s}", x.IO, x.From, x.To)
-	case core.FSFsyncDir:
+	case control.FSFsyncDir:
 		return fmt.Sprintf("FSFsyncDir{io%d %s}", x.IO, x.Dir)
-	case core.FSRead:
+	case control.FSRead:
 		return fmt.Sprintf("FSRead{io%d %s}", x.IO, x.Path)
-	case core.FSUnlink:
+	case control.FSUnlink:
 		return fmt.Sprintf("FSUnlink{io%d %s}", x.IO, x.Path)
-	case core.FSList:
+	case control.FSList:
 		return fmt.Sprintf("FSList{io%d %s}", x.IO, x.Dir)
-	case core.Halt:
+	case control.Halt:
 		return fmt.Sprintf("Halt{%s}", x.Reason)
-	case core.Emit:
+	case control.Emit:
 		return "Emit{" + DescribeFact(x.Fact) + "}"
 	}
 	return fmt.Sprintf("%T", a)
 }
 
 // DescribeFact renders a fact.
-func DescribeFact(f core.Fact) string {
+func DescribeFact(f control.Fact) string {
 	switch x := f.(type) {
-	case core.Committed:
+	case control.Committed:
 		if x.Deleted {
 			return fmt.Sprintf("Committed{c%d delete %q}", x.Client, x.Key)
 		}
 		return fmt.Sprintf("Committed{c%d %q crc=%08x}", x.Client, x.Key, x.Sum)
-	case core.Recovered:
+	case control.Recovered:
 		return fmt.Sprintf("Recovered{temps=%d}", x.TempsRemoved)
-	case core.CorruptObject:
+	case control.CorruptObject:
 		return fmt.Sprintf("CorruptObject{%q}", x.Key)
 	}
 	return fmt.Sprintf("%T", f)
@@ -148,6 +148,6 @@ func FormatLog(log []LogEntry) string {
 }
 
 // fmtTime renders virtual time as milliseconds with microsecond precision.
-func fmtTime(t core.Time) string {
-	return fmt.Sprintf("%d.%06dms", int64(t)/int64(core.Millisecond), int64(t)%int64(core.Millisecond))
+func fmtTime(t control.Time) string {
+	return fmt.Sprintf("%d.%06dms", int64(t)/int64(control.Millisecond), int64(t)%int64(control.Millisecond))
 }

@@ -1,4 +1,4 @@
-package core
+package control
 
 // StateMachine is the shape of the server: Step is the only place state
 // changes. It never blocks and never does I/O.

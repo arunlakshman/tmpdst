@@ -5,27 +5,27 @@ import (
 	"sort"
 	"strings"
 
-	"manifester/toys3/core"
+	"manifester/toys3/control"
 	"manifester/toys3/format"
 )
 
-// TimedFact is a core.Fact stamped by the simulator.
+// TimedFact is a control.Fact stamped by the simulator.
 type TimedFact struct {
 	Step int
-	At   core.Time
+	At   control.Time
 	Inc  Incarnation
-	Fact core.Fact
+	Fact control.Fact
 }
 
 // View is the read-only window invariants get onto a running simulation.
 type View interface {
 	Step() int
-	Now() core.Time
+	Now() control.Time
 	Alive() bool // server is booted (it may still be recovering)
 	Inc() Incarnation
 	Quiet() bool // in QuietTail: no faults, no crashes
 	FS() *FakeFS
-	Root() string // the server's data directory (core.Config.Dir)
+	Root() string // the server's data directory (control.Config.Dir)
 	Oracle() *Oracle
 	History() *History
 	// Facts emitted so far, in order. Invariants remember how far they read.
@@ -58,7 +58,7 @@ func BlackBoxInvariants() []Invariant {
 // fails here immediately, even before the linearizability check.
 type NoCorruptReads struct{ next int }
 
-// AckedIsDurable checks each core.Committed fact against FakeFS.Durable() on
+// AckedIsDurable checks each control.Committed fact against FakeFS.Durable() on
 // the step it is emitted: the key's durable file must exist and decode to a
 // payload with the committed checksum (or be absent for a delete). This is
 // (b) checked eagerly: a missing fsync fails here without needing a crash.
@@ -75,7 +75,7 @@ type ObjNeverTorn struct{ gen uint64 }
 type Linearizable struct{}
 
 // Liveness is invariant (d): at the end of QuietTail (server alive, no
-// faults) no op is Pending, and every boot reached core.Recovered.
+// faults) no op is Pending, and every boot reached control.Recovered.
 // Additionally, a request issued during QuietTail never gets a 500: with no
 // faults injected a correct server has no reason to fail (this is what makes
 // a lost-but-acked object visible to clients: it reads back as 500 forever).
@@ -91,7 +91,7 @@ func (n *NoCorruptReads) AfterStep(v View) []Failure {
 	var fails []Failure
 	for ; n.next < len(h.Completed); n.next++ {
 		op := &h.Ops[h.Completed[n.next]]
-		if _, isGet := op.Op.(core.Get); !isGet || op.Status != core.StatusOK {
+		if _, isGet := op.Op.(control.Get); !isGet || op.Status != control.StatusOK {
 			continue
 		}
 		w, ok := ValueWriter(op.Body)
@@ -104,7 +104,7 @@ func (n *NoCorruptReads) AfterStep(v View) []Failure {
 			fails = append(fails, Failure{Msg: fmt.Sprintf("200 GET returned the value of unknown request %d: %s", w, describeOp(op))})
 			continue
 		}
-		if _, isPut := h.Ops[i].Op.(core.Put); !isPut {
+		if _, isPut := h.Ops[i].Op.(control.Put); !isPut {
 			fails = append(fails, Failure{Msg: fmt.Sprintf("200 GET returned a value attributed to non-PUT %s", describeOp(&h.Ops[i]))})
 		}
 	}
@@ -117,7 +117,7 @@ func (a *AckedIsDurable) AfterStep(v View) []Failure {
 	facts := v.Facts()
 	var fails []Failure
 	for ; a.next < len(facts); a.next++ {
-		c, ok := facts[a.next].Fact.(core.Committed)
+		c, ok := facts[a.next].Fact.(control.Committed)
 		if !ok {
 			continue
 		}
@@ -183,7 +183,7 @@ func (l *Liveness) AfterStep(v View) []Failure {
 	for ; l.next < len(h.Completed); l.next++ {
 		i := h.Completed[l.next]
 		op := &h.Ops[i]
-		if l.quietSeen && i >= l.quietFrom && op.Status == core.StatusServerError {
+		if l.quietSeen && i >= l.quietFrom && op.Status == control.StatusServerError {
 			fails = append(fails, Failure{Msg: "500 with no fault injected (QuietTail): " + describeOp(op)})
 		}
 	}
@@ -196,7 +196,7 @@ func (*Liveness) AtEnd(v View) []Failure {
 	}
 	recovered := false
 	for _, f := range v.Facts() {
-		if _, ok := f.Fact.(core.Recovered); ok && f.Inc == v.Inc() {
+		if _, ok := f.Fact.(control.Recovered); ok && f.Inc == v.Inc() {
 			recovered = true
 		}
 	}

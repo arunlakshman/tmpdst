@@ -1,4 +1,4 @@
-package core
+package control
 
 // Time is a monotonic instant in nanoseconds, stamped on each Event by the
 // runtime. In simulation it is the virtual clock.

@@ -3,7 +3,7 @@ package sim
 import (
 	"fmt"
 
-	"manifester/toys3/core"
+	"manifester/toys3/control"
 )
 
 // Config is one simulation run. Everything random derives from Seed.
@@ -14,8 +14,8 @@ type Config struct {
 	// injected. QuietTail follows it: no new faults or crashes, the server is
 	// (re)started and alive, clients keep issuing, and every outstanding
 	// request must get a reply (liveness). The run then drains the queue.
-	Chaos     core.Duration
-	QuietTail core.Duration
+	Chaos     control.Duration
+	QuietTail control.Duration
 	// MaxSteps aborts a run that never drains (reported as a failure).
 	MaxSteps int
 
@@ -26,13 +26,13 @@ type Config struct {
 	// Chaos, of crashing the server at that instant.
 	CrashProb float64
 	// RestartDelay is the [min, max] downtime between crash and Started.
-	RestartDelay [2]core.Duration
+	RestartDelay [2]control.Duration
 
 	// Server is passed to Factory; Dir is the fake filesystem's root.
-	Server core.Config
-	// Factory builds the server under test; nil means core.NewMachine.
+	Server control.Config
+	// Factory builds the server under test; nil means control.NewMachine.
 	// Learners can plug in a deliberately broken variant to watch DST catch it.
-	Factory core.Factory
+	Factory control.Factory
 	// Invariants run after every step and at the end; nil means DefaultInvariants().
 	Invariants []Invariant
 
@@ -45,7 +45,7 @@ type Config struct {
 type Result struct {
 	Seed      uint64
 	Steps     int
-	EndTime   core.Time
+	EndTime   control.Time
 	Crashes   int
 	TraceHash uint64 // identical for two runs of one Config, or nondeterminism leaked
 	RandCalls uint64
@@ -70,7 +70,7 @@ type Stats struct {
 	CrashesMidPut   int // crashes with a PUT or COPY outstanding
 	KeptChanges     int // un-fsynced changes a crash made durable anyway
 	ReadCorruptions int // FSReads returned with a flipped bit
-	CorruptObjects  int // core.CorruptObject facts (GET/COPY 500 on a bad file)
+	CorruptObjects  int // control.CorruptObject facts (GET/COPY 500 on a bad file)
 	TempsRemoved    int // sum of Recovered.TempsRemoved
 	Windows         int // linearizability windows checked
 	MaxWindowOps    int // largest window (max, not sum, when aggregated)
@@ -111,13 +111,13 @@ func (s Stats) String() string {
 }
 
 // statusIndex maps a reply status to its ByStatus slot.
-func statusIndex(st core.Status) int {
+func statusIndex(st control.Status) int {
 	switch st {
-	case core.StatusOK:
+	case control.StatusOK:
 		return 0
-	case core.StatusBadRequest:
+	case control.StatusBadRequest:
 		return 1
-	case core.StatusNotFound:
+	case control.StatusNotFound:
 		return 2
 	}
 	return 3
@@ -146,29 +146,29 @@ func DefaultConfig(seed uint64) Config {
 func BaseConfig(seed uint64) Config {
 	return Config{
 		Seed:      seed,
-		Chaos:     300 * core.Millisecond,
-		QuietTail: 60 * core.Millisecond,
+		Chaos:     300 * control.Millisecond,
+		QuietTail: 60 * control.Millisecond,
 		MaxSteps:  2_000_000,
 		Workload: WorkloadConfig{
 			Clients:      4,
 			Keys:         3,
 			MaxValueSize: 40,
 			Mix:          OpMix{Put: 40, Get: 40, Delete: 10, Copy: 15, Invalid: 2},
-			Think:        [2]core.Duration{0, 1 * core.Millisecond},
-			QuiesceEvery: 8 * core.Millisecond,
+			Think:        [2]control.Duration{0, 1 * control.Millisecond},
+			QuiesceEvery: 8 * control.Millisecond,
 		},
 		FS: FSFaults{
 			EIOProb:         0.01,
 			TornWriteProb:   0.3,
 			ReadCorruptProb: 0.005,
 			WritebackProb:   0.05,
-			Latency:         [2]core.Duration{20 * core.Microsecond, 1500 * core.Microsecond},
-			ReplyDelay:      [2]core.Duration{0, 500 * core.Microsecond},
+			Latency:         [2]control.Duration{20 * control.Microsecond, 1500 * control.Microsecond},
+			ReplyDelay:      [2]control.Duration{0, 500 * control.Microsecond},
 			FsyncGate:       true,
 		},
 		CrashProb:    0.004,
-		RestartDelay: [2]core.Duration{100 * core.Microsecond, 5 * core.Millisecond},
-		Server:       core.Config{Dir: "/data", MaxObjectSize: 64},
+		RestartDelay: [2]control.Duration{100 * control.Microsecond, 5 * control.Millisecond},
+		Server:       control.Config{Dir: "/data", MaxObjectSize: 64},
 	}
 }
 
@@ -176,19 +176,19 @@ func BaseConfig(seed uint64) Config {
 type Failure struct {
 	Invariant string
 	Step      int
-	At        core.Time
+	At        control.Time
 	Msg       string
 }
 
 // LogEntry is one step of the run: what was delivered and what came out.
 type LogEntry struct {
 	Step    int
-	At      core.Time
+	At      control.Time
 	Inc     Incarnation
 	Kind    EntryKind
-	Event   core.EventBody // for KindDeliver: what the server consumed
-	Actions []core.Action  // for KindDeliver: what it returned
-	Note    string         // for other kinds: e.g. "crash", "fs land FSRename io=7 EIO"
+	Event   control.EventBody // for KindDeliver: what the server consumed
+	Actions []control.Action  // for KindDeliver: what it returned
+	Note    string            // for other kinds: e.g. "crash", "fs land FSRename io=7 EIO"
 }
 
 // Run executes one simulation. It never panics on server misbehavior: a panic

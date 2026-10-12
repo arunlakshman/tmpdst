@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"strconv"
 
-	"manifester/toys3/core"
+	"manifester/toys3/control"
 )
 
 // OpMix weights the operations clients issue. Zero weights disable an op.
@@ -26,22 +26,22 @@ type WorkloadConfig struct {
 	MaxValueSize int
 	Mix          OpMix
 	// Think is the [min, max] delay between a reply and the client's next request.
-	Think [2]core.Duration
+	Think [2]control.Duration
 	// QuiesceEvery, if > 0, periodically stops clients from issuing until all
 	// outstanding requests have replied. Quiescent points split the history
 	// into independent windows for the linearizability checker, bounding its
 	// search. A crash is also a quiescent point.
-	QuiesceEvery core.Duration
+	QuiesceEvery control.Duration
 }
 
 // clientState is one simulated client.
 type clientState struct {
-	busy bool           // a request is outstanding
-	req  core.ClientReq // the outstanding request, if busy
+	busy bool              // a request is outstanding
+	req  control.ClientReq // the outstanding request, if busy
 }
 
 // Workload is the set of simulated clients. It is driven by the simulator
-// (not a core.StateMachine: it never crashes and needs no runtime).
+// (not a control.StateMachine: it never crashes and needs no runtime).
 //
 // Every PUT carries a fresh, self-describing value (see MakeValue), so any
 // bytes returned by a GET identify the PUT that wrote them, and COPY
@@ -50,7 +50,7 @@ type clientState struct {
 type Workload struct {
 	cfg     WorkloadConfig
 	rng     *Rand
-	nextReq core.ClientReq
+	nextReq control.ClientReq
 	clients []clientState
 	keys    []string
 }
@@ -83,45 +83,45 @@ func (w *Workload) Clients() int { return len(w.clients) }
 func (w *Workload) Busy(client int) bool { return w.clients[client].busy }
 
 // Think draws a think time.
-func (w *Workload) Think() core.Duration {
-	return core.Duration(w.rng.Between(int64(w.cfg.Think[0]), int64(w.cfg.Think[1])))
+func (w *Workload) Think() control.Duration {
+	return control.Duration(w.rng.Between(int64(w.cfg.Think[0]), int64(w.cfg.Think[1])))
 }
 
 func (w *Workload) key() string { return w.keys[w.rng.Intn(len(w.keys))] }
 
 // Issue builds the next request of an idle client and marks it busy.
-func (w *Workload) Issue(client int, now core.Time) core.Request {
+func (w *Workload) Issue(client int, now control.Time) control.Request {
 	w.nextReq++
 	req := w.nextReq
 	m := w.cfg.Mix
 	total := m.Put + m.Get + m.Delete + m.Copy + m.Invalid
 	x := w.rng.Intn(total)
-	var op core.Op
+	var op control.Op
 	switch {
 	case x < m.Put:
 		size := int(w.rng.Between(ValueHeader, int64(w.cfg.MaxValueSize)))
-		op = core.Put{Key: w.key(), Data: MakeValue(req, size)}
+		op = control.Put{Key: w.key(), Data: MakeValue(req, size)}
 	case x < m.Put+m.Get:
-		op = core.Get{Key: w.key()}
+		op = control.Get{Key: w.key()}
 	case x < m.Put+m.Get+m.Delete:
-		op = core.Delete{Key: w.key()}
+		op = control.Delete{Key: w.key()}
 	case x < m.Put+m.Get+m.Delete+m.Copy:
-		op = core.Copy{Src: w.key(), Dst: w.key()}
+		op = control.Copy{Src: w.key(), Dst: w.key()}
 	default:
 		if w.rng.Intn(2) == 0 {
-			op = core.Get{Key: ""}
+			op = control.Get{Key: ""}
 		} else {
-			op = core.Put{Key: "", Data: MakeValue(req, ValueHeader)}
+			op = control.Put{Key: "", Data: MakeValue(req, ValueHeader)}
 		}
 	}
 	w.clients[client] = clientState{busy: true, req: req}
-	return core.Request{Client: req, Op: op}
+	return control.Request{Client: req, Op: op}
 }
 
 // Complete marks the client that owns rep.Client idle and returns it. ok is
 // false for an unknown or already completed request (a duplicate reply: an
 // invariant failure the simulator reports).
-func (w *Workload) Complete(rep core.Reply) (client int, ok bool) {
+func (w *Workload) Complete(rep control.Reply) (client int, ok bool) {
 	for i, c := range w.clients {
 		if c.busy && c.req == rep.Client {
 			w.clients[i] = clientState{}
@@ -133,8 +133,8 @@ func (w *Workload) Complete(rep core.Reply) (client int, ok bool) {
 
 // Crash abandons every outstanding request (their clients become idle and
 // wait for the restart) and returns the abandoned ids.
-func (w *Workload) Crash() []core.ClientReq {
-	var ids []core.ClientReq
+func (w *Workload) Crash() []control.ClientReq {
+	var ids []control.ClientReq
 	for i, c := range w.clients {
 		if c.busy {
 			ids = append(ids, c.req)
@@ -160,7 +160,7 @@ const ValueHeader = 12
 
 // MakeValue returns the unique value written by PUT req: ValueHeader followed
 // by filler that is a pure function of (req, size). size >= ValueHeader.
-func MakeValue(req core.ClientReq, size int) []byte {
+func MakeValue(req control.ClientReq, size int) []byte {
 	if size < ValueHeader {
 		size = ValueHeader
 	}
@@ -178,11 +178,11 @@ func MakeValue(req core.ClientReq, size int) []byte {
 // ValueWriter parses b's header and returns the PUT that wrote it. ok is
 // false unless b is byte-for-byte equal to MakeValue(writer, len(b)), so a
 // torn or mixed value is always rejected.
-func ValueWriter(b []byte) (writer core.ClientReq, ok bool) {
+func ValueWriter(b []byte) (writer control.ClientReq, ok bool) {
 	if len(b) < ValueHeader || int(binary.LittleEndian.Uint32(b[8:])) != len(b) {
 		return 0, false
 	}
-	writer = core.ClientReq(binary.LittleEndian.Uint64(b))
+	writer = control.ClientReq(binary.LittleEndian.Uint64(b))
 	want := MakeValue(writer, len(b))
 	for i := range b {
 		if b[i] != want[i] {

@@ -94,13 +94,13 @@ func DescribeAction(a control.Action) string {
 	case control.Trip:
 		return fmt.Sprintf("Trip{%s}", x.Cause)
 	case control.Emit:
-		return "Emit{" + DescribeFact(x.Fact) + "}"
+		return "Emit{" + DescribeTelemetry(x.Telemetry) + "}"
 	}
 	return fmt.Sprintf("%T", a)
 }
 
-// DescribeFact renders a fact.
-func DescribeFact(f control.Fact) string {
+// DescribeTelemetry renders a telemetry value.
+func DescribeTelemetry(f control.Telemetry) string {
 	switch x := f.(type) {
 	case control.Committed:
 		if x.Deleted {
@@ -109,8 +109,8 @@ func DescribeFact(f control.Fact) string {
 		return fmt.Sprintf("Committed{c%d %q crc=%08x}", x.Client, x.Key, x.Sum)
 	case control.Recovered:
 		return fmt.Sprintf("Recovered{temps=%d}", x.TempsRemoved)
-	case control.CorruptObject:
-		return fmt.Sprintf("CorruptObject{%q}", x.Key)
+	case control.CorruptionDetected:
+		return fmt.Sprintf("CorruptionDetected{%q}", x.Key)
 	}
 	return fmt.Sprintf("%T", f)
 }

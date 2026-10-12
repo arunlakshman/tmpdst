@@ -9,12 +9,13 @@ import (
 	"manifester/toys3/format"
 )
 
-// TimedFact is a control.Fact stamped by the simulator.
-type TimedFact struct {
-	Step int
-	At   control.Time
-	Inc  Incarnation
-	Fact control.Fact
+// Sample is one control.Telemetry value stamped by the simulator with its
+// sample index (Step), time and incarnation.
+type Sample struct {
+	Step      int
+	At        control.Time
+	Inc       Incarnation
+	Telemetry control.Telemetry
 }
 
 // View is the read-only window invariants get onto a running simulation.
@@ -28,8 +29,8 @@ type View interface {
 	Root() string // the server's data directory (control.Config.Dir)
 	Oracle() *Oracle
 	History() *History
-	// Facts emitted so far, in order. Invariants remember how far they read.
-	Facts() []TimedFact
+	// Telemetry emitted so far, in order. Invariants remember how far they read.
+	Telemetry() []Sample
 }
 
 // Invariant is checked after every simulator step and once at the end of the
@@ -58,7 +59,7 @@ func BlackBoxInvariants() []Invariant {
 // fails here immediately, even before the linearizability check.
 type NoCorruptReads struct{ next int }
 
-// AckedIsDurable checks each control.Committed fact against FakeFS.Durable() on
+// AckedIsDurable checks each control.Committed sample against FakeFS.Durable() on
 // the step it is emitted: the key's durable file must exist and decode to a
 // payload with the committed checksum (or be absent for a delete). This is
 // (b) checked eagerly: a missing fsync fails here without needing a crash.
@@ -114,10 +115,10 @@ func (*NoCorruptReads) AtEnd(v View) []Failure { return nil }
 
 func (*AckedIsDurable) Name() string { return "acked-is-durable" }
 func (a *AckedIsDurable) AfterStep(v View) []Failure {
-	facts := v.Facts()
+	samples := v.Telemetry()
 	var fails []Failure
-	for ; a.next < len(facts); a.next++ {
-		c, ok := facts[a.next].Fact.(control.Committed)
+	for ; a.next < len(samples); a.next++ {
+		c, ok := samples[a.next].Telemetry.(control.Committed)
 		if !ok {
 			continue
 		}
@@ -195,8 +196,8 @@ func (*Liveness) AtEnd(v View) []Failure {
 		fails = append(fails, Failure{Msg: "server not alive at the end of the run"})
 	}
 	recovered := false
-	for _, f := range v.Facts() {
-		if _, ok := f.Fact.(control.Recovered); ok && f.Inc == v.Inc() {
+	for _, f := range v.Telemetry() {
+		if _, ok := f.Telemetry.(control.Recovered); ok && f.Inc == v.Inc() {
 			recovered = true
 		}
 	}

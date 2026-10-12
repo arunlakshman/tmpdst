@@ -64,7 +64,7 @@
 //
 // Trip is always the last action of its Step; the 500 Reply (if any)
 // precedes it, and the server ignores every event after it. Corrupt object
-// files are a plain 500 plus a CorruptObject fact, not a Trip: the file is
+// files are a plain 500 plus CorruptionDetected telemetry, not a Trip: the file is
 // already durable, restarting would not fix it.
 //
 // Every successful mutation emits Emit{Committed} immediately followed by its

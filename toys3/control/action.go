@@ -27,9 +27,9 @@ type Trip struct{ Cause string }
 
 // ---- observability ----
 
-// Emit records a Fact. The simulator's invariants read facts; production logs
-// them. Emit has no effect on behavior.
-type Emit struct{ Fact Fact }
+// Emit publishes Telemetry. The simulator's invariants read it; production
+// logs it. Emit has no effect on behavior.
+type Emit struct{ Telemetry Telemetry }
 
 func (Reply) isAction() {}
 func (Trip) isAction()  {}

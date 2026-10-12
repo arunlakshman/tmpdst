@@ -15,7 +15,7 @@
 //	             for a in actions:
 //	               FS*   → plan := fs.Plan(a); schedule fsLand at clock+plan.Land
 //	               Reply → oracle.Return; workload.Complete; schedule clientWake
-//	               Emit  → record fact          Trip → crash now
+//	               Emit  → record telemetry     Trip → crash now
 //	             during Chaos: crash now with probability CrashProb
 //	  fsLand   → body := fs.Land(a, plan); schedule deliver(body) at clock+plan.Reply
 //	             during Chaos: crash now with probability CrashProb

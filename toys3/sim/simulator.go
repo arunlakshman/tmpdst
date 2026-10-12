@@ -24,7 +24,7 @@ type Simulator struct {
 
 	workload *Workload
 	oracle   *Oracle
-	facts    []TimedFact
+	samples  []Sample
 
 	env       *env
 	parked    []bool // idle clients waiting for a restart or the end of a quiesce
@@ -190,10 +190,10 @@ func (s *Simulator) deliver(body control.EventBody) {
 		case control.Reply:
 			s.reply(x)
 		case control.Emit:
-			s.facts = append(s.facts, TimedFact{Step: s.step, At: s.now, Inc: s.inc, Fact: x.Fact})
-			switch f := x.Fact.(type) {
-			case control.CorruptObject:
-				s.res.Stats.CorruptObjects++
+			s.samples = append(s.samples, Sample{Step: s.step, At: s.now, Inc: s.inc, Telemetry: x.Telemetry})
+			switch f := x.Telemetry.(type) {
+			case control.CorruptionDetected:
+				s.res.Stats.CorruptionsDetected++
 			case control.Recovered:
 				s.res.Stats.TempsRemoved += f.TempsRemoved
 			}
@@ -281,7 +281,7 @@ func (s *Simulator) crash(why string) {
 	dropped := s.q.DropIncarnation(s.inc)
 	midPut := false
 	for _, id := range s.workload.Crash() {
-		s.res.Stats.Indetermined++
+		s.res.Stats.Indeterminate++
 		if op := s.oracle.op(id); op != nil {
 			switch op.Op.(type) {
 			case control.Put, control.Copy:
@@ -383,16 +383,16 @@ func (s *Simulator) note(e Entry, msg string) {
 
 // View implementation.
 
-func (s *Simulator) Step() int          { return s.step }
-func (s *Simulator) Now() control.Time  { return s.now }
-func (s *Simulator) Alive() bool        { return s.alive }
-func (s *Simulator) Inc() Incarnation   { return s.inc }
-func (s *Simulator) Quiet() bool        { return s.quiet }
-func (s *Simulator) FS() *FakeFS        { return s.fs }
-func (s *Simulator) Root() string       { return s.cfg.Server.Dir }
-func (s *Simulator) Oracle() *Oracle    { return s.oracle }
-func (s *Simulator) History() *History  { return s.oracle.History() }
-func (s *Simulator) Facts() []TimedFact { return s.facts }
+func (s *Simulator) Step() int           { return s.step }
+func (s *Simulator) Now() control.Time   { return s.now }
+func (s *Simulator) Alive() bool         { return s.alive }
+func (s *Simulator) Inc() Incarnation    { return s.inc }
+func (s *Simulator) Quiet() bool         { return s.quiet }
+func (s *Simulator) FS() *FakeFS         { return s.fs }
+func (s *Simulator) Root() string        { return s.cfg.Server.Dir }
+func (s *Simulator) Oracle() *Oracle     { return s.oracle }
+func (s *Simulator) History() *History   { return s.oracle.History() }
+func (s *Simulator) Telemetry() []Sample { return s.samples }
 
 var _ View = (*Simulator)(nil)
 

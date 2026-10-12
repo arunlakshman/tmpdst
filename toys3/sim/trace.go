@@ -6,7 +6,7 @@ import (
 	"manifester/toys3/control"
 )
 
-// Trace hashing: every event, action and fact is folded into the run's trace
+// Trace hashing: every event, action and telemetry value is folded into the run's trace
 // hash as stable numeric tags and field values, never as Go type names or
 // log renderings, so renaming a type or changing how the log prints it can
 // never change a TraceHash.
@@ -77,19 +77,19 @@ func hashAction(h uint64, a control.Action) uint64 {
 	case control.Trip:
 		return Fold(Fold(h, 38), hashString(x.Cause))
 	case control.Emit:
-		return Fold(Fold(h, 39), hashString(factHashKey(x.Fact)))
+		return Fold(Fold(h, 39), hashString(telemetryHashKey(x.Telemetry)))
 	}
 	return Fold(h, 40)
 }
 
-// factHashKey is the FROZEN hash encoding of a fact (trace-hash epoch 1). It
-// reproduces, byte for byte, how facts were rendered when the trace hash was
-// defined, so renaming fact types or changing DescribeFact never changes a
-// TraceHash. Changing this function is a deliberate re-baseline: regenerate
-// testdata/golden-v1.txt and update every trace hash quoted in the docs in the
-// same commit.
-func factHashKey(f control.Fact) string {
-	switch x := f.(type) {
+// telemetryHashKey is the FROZEN hash encoding of telemetry (trace-hash
+// epoch 1). It reproduces, byte for byte, how telemetry (then called facts)
+// was rendered when the trace hash was defined, so renaming telemetry types
+// or changing DescribeTelemetry never changes a TraceHash. Changing this
+// function is a deliberate re-baseline: regenerate testdata/golden-v1.txt and
+// update every trace hash quoted in the docs in the same commit.
+func telemetryHashKey(t control.Telemetry) string {
+	switch x := t.(type) {
 	case control.Committed:
 		if x.Deleted {
 			return fmt.Sprintf("Committed{c%d delete %q}", x.Client, x.Key)
@@ -97,8 +97,8 @@ func factHashKey(f control.Fact) string {
 		return fmt.Sprintf("Committed{c%d %q crc=%08x}", x.Client, x.Key, x.Sum)
 	case control.Recovered:
 		return fmt.Sprintf("Recovered{temps=%d}", x.TempsRemoved)
-	case control.CorruptObject:
+	case control.CorruptionDetected:
 		return fmt.Sprintf("CorruptObject{%q}", x.Key) // legacy spelling, on purpose
 	}
-	return fmt.Sprintf("%T", f)
+	return fmt.Sprintf("%T", t)
 }

@@ -175,12 +175,12 @@ func describe(acts []Action) string {
 		case Trip:
 			s = "trip"
 		case Emit:
-			switch f := a.Fact.(type) {
+			switch f := a.Telemetry.(type) {
 			case Committed:
 				s = fmt.Sprintf("committed c%d %s del=%v", f.Client, f.Key, f.Deleted)
 			case Recovered:
 				s = fmt.Sprintf("recovered %d", f.TempsRemoved)
-			case CorruptObject:
+			case CorruptionDetected:
 				s = "corrupt " + f.Key
 			}
 		case Reply:
@@ -229,7 +229,7 @@ func TestCommittedSum(t *testing.T) {
 	h.boot()
 	for _, a := range h.do(1, Put{Key: "k", Data: []byte("abc")}) {
 		if e, ok := a.(Emit); ok {
-			if c := e.Fact.(Committed); c.Sum != format.Checksum([]byte("abc")) {
+			if c := e.Telemetry.(Committed); c.Sum != format.Checksum([]byte("abc")) {
 				t.Fatalf("Committed.Sum = %x", c.Sum)
 			}
 			return

@@ -95,7 +95,7 @@ func TestCoverage(t *testing.T) {
 	}{
 		{"crashes", agg.Crashes},
 		{"crashes mid-PUT/COPY", agg.CrashesMidPut},
-		{"indeterminate (abandoned) requests", agg.Indetermined},
+		{"indeterminate (abandoned) requests", agg.Indeterminate},
 		{"torn files", agg.TornFiles},
 		{"lost un-synced changes", agg.LostChanges},
 		{"kept un-synced changes", agg.KeptChanges},
@@ -106,7 +106,7 @@ func TestCoverage(t *testing.T) {
 		{"404 replies", agg.ByStatus[2]},
 		{"500 replies", agg.ByStatus[3]},
 		{"Trips", agg.Trips},
-		{"CorruptObject facts", agg.CorruptObjects},
+		{"CorruptionDetected telemetry", agg.CorruptionsDetected},
 		{"temps removed by recovery", agg.TempsRemoved},
 		{"linearizability windows", agg.Windows},
 	}
@@ -126,8 +126,8 @@ func TestCorruptObjectUnreachableWithoutBitFlips(t *testing.T) {
 		cfg := DefaultConfig(seed)
 		cfg.FS.ReadCorruptProb = 0
 		r := Run(cfg)
-		if len(r.Failures) > 0 || r.Stats.CorruptObjects > 0 {
-			t.Fatalf("seed %d: failures=%v corrupt=%d", seed, r.Failures, r.Stats.CorruptObjects)
+		if len(r.Failures) > 0 || r.Stats.CorruptionsDetected > 0 {
+			t.Fatalf("seed %d: failures=%v corrupt=%d", seed, r.Failures, r.Stats.CorruptionsDetected)
 		}
 	}
 }

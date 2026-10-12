@@ -57,24 +57,24 @@ type Result struct {
 // Stats counts what happened, so a passing run can be checked for coverage
 // (did any crash land mid-PUT? did any torn write happen?).
 type Stats struct {
-	Requests     int
-	ByStatus     [4]int // 200, 400, 404, 500
-	Indetermined int    // requests outstanding at a crash
-	FSOps        int
-	EIOs         int
-	TornFiles    int // files left torn by a crash
-	LostChanges  int // un-fsynced changes discarded by a crash
+	Requests      int
+	ByStatus      [4]int // 200, 400, 404, 500
+	Indeterminate int    // requests outstanding at a crash
+	FSOps         int
+	EIOs          int
+	TornFiles     int // files left torn by a crash
+	LostChanges   int // un-fsynced changes discarded by a crash
 
-	Crashes         int // crashes, including Trips
-	Trips           int // crashes requested by the server (Trip)
-	CrashesMidPut   int // crashes with a PUT or COPY outstanding
-	KeptChanges     int // un-fsynced changes a crash made durable anyway
-	ReadCorruptions int // FSReads returned with a flipped bit
-	CorruptObjects  int // control.CorruptObject facts (GET/COPY 500 on a bad file)
-	TempsRemoved    int // sum of Recovered.TempsRemoved
-	Windows         int // linearizability windows checked
-	MaxWindowOps    int // largest window (max, not sum, when aggregated)
-	Widenings       int // oracle gave up precision on some keys (see Oracle)
+	Crashes             int // crashes, including Trips
+	Trips               int // crashes requested by the server (Trip)
+	CrashesMidPut       int // crashes with a PUT or COPY outstanding
+	KeptChanges         int // un-fsynced changes a crash made durable anyway
+	ReadCorruptions     int // FSReads returned with a flipped bit
+	CorruptionsDetected int // control.CorruptionDetected samples (GET/COPY 500 on a bad file)
+	TempsRemoved        int // sum of Recovered.TempsRemoved
+	Windows             int // linearizability windows checked
+	MaxWindowOps        int // largest window (max, not sum, when aggregated)
+	Widenings           int // oracle gave up precision on some keys (see Oracle)
 }
 
 // Add accumulates o into s (MaxWindowOps takes the maximum).
@@ -83,7 +83,7 @@ func (s *Stats) Add(o Stats) {
 	for i := range s.ByStatus {
 		s.ByStatus[i] += o.ByStatus[i]
 	}
-	s.Indetermined += o.Indetermined
+	s.Indeterminate += o.Indeterminate
 	s.FSOps += o.FSOps
 	s.EIOs += o.EIOs
 	s.TornFiles += o.TornFiles
@@ -93,7 +93,7 @@ func (s *Stats) Add(o Stats) {
 	s.CrashesMidPut += o.CrashesMidPut
 	s.KeptChanges += o.KeptChanges
 	s.ReadCorruptions += o.ReadCorruptions
-	s.CorruptObjects += o.CorruptObjects
+	s.CorruptionsDetected += o.CorruptionsDetected
 	s.TempsRemoved += o.TempsRemoved
 	s.Windows += o.Windows
 	s.MaxWindowOps = max(s.MaxWindowOps, o.MaxWindowOps)
@@ -103,11 +103,11 @@ func (s *Stats) Add(o Stats) {
 // String renders the stats on one line.
 func (s Stats) String() string {
 	return fmt.Sprintf("reqs=%d 200=%d 400=%d 404=%d 500=%d indet=%d fsops=%d eio=%d "+
-		"crashes=%d trips=%d midput=%d torn=%d lost=%d kept=%d readcorrupt=%d corruptobj=%d "+
+		"crashes=%d trips=%d midput=%d torn=%d lost=%d kept=%d readcorrupt=%d corruptdet=%d "+
 		"tempsrm=%d windows=%d maxwin=%d widened=%d",
-		s.Requests, s.ByStatus[0], s.ByStatus[1], s.ByStatus[2], s.ByStatus[3], s.Indetermined,
+		s.Requests, s.ByStatus[0], s.ByStatus[1], s.ByStatus[2], s.ByStatus[3], s.Indeterminate,
 		s.FSOps, s.EIOs, s.Crashes, s.Trips, s.CrashesMidPut, s.TornFiles, s.LostChanges,
-		s.KeptChanges, s.ReadCorruptions, s.CorruptObjects, s.TempsRemoved, s.Windows, s.MaxWindowOps, s.Widenings)
+		s.KeptChanges, s.ReadCorruptions, s.CorruptionsDetected, s.TempsRemoved, s.Windows, s.MaxWindowOps, s.Widenings)
 }
 
 // statusIndex maps a reply status to its ByStatus slot.

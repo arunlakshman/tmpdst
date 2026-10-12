@@ -169,7 +169,7 @@ func (m *noTrip) Step(ev control.Event) []control.Action {
 	acts := m.inner.Step(ev)
 	for _, a := range acts {
 		if e, ok := a.(control.Emit); ok {
-			if _, ok := e.Fact.(control.Recovered); ok {
+			if _, ok := e.Telemetry.(control.Recovered); ok {
 				m.serving = true
 			}
 		}
@@ -180,7 +180,7 @@ func (m *noTrip) Step(ev control.Event) []control.Action {
 	// This request is doomed: follow its next IO, or fail its final reply.
 	for _, a := range acts {
 		if e, ok := a.(control.Emit); ok {
-			if c, ok := e.Fact.(control.Committed); ok {
+			if c, ok := e.Telemetry.(control.Committed); ok {
 				m.clients = append(m.clients, c.Client)
 				return m.rewrite(acts)
 			}
@@ -199,7 +199,7 @@ func (m *noTrip) stepDoomedOnly(ev control.Event) []control.Action {
 	acts := m.inner.Step(ev)
 	for _, a := range acts {
 		if e, ok := a.(control.Emit); ok {
-			if _, ok := e.Fact.(control.Recovered); ok {
+			if _, ok := e.Telemetry.(control.Recovered); ok {
 				m.serving = true
 			}
 		}
@@ -213,7 +213,7 @@ func (m *noTrip) rewrite(acts []control.Action) []control.Action {
 	for _, a := range acts {
 		switch x := a.(type) {
 		case control.Emit:
-			if c, ok := x.Fact.(control.Committed); ok && m.isDoomed(c.Client) {
+			if c, ok := x.Telemetry.(control.Committed); ok && m.isDoomed(c.Client) {
 				continue
 			}
 		case control.Reply:

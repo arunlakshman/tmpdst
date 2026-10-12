@@ -258,7 +258,7 @@ func (s *Controller) commit(r *request) []Action {
 	if !c.Deleted {
 		c.Sum = format.Checksum(r.data)
 	}
-	return s.finish(r, StatusOK, nil, Emit{Fact: c})
+	return s.finish(r, StatusOK, nil, Emit{Telemetry: c})
 }
 
 // failTrip replies 500 to r and trips. Used for every error after which
@@ -288,7 +288,7 @@ func (s *Controller) onRequestIO(r *request, body EventBody) []Action {
 		}
 		payload, valid := format.DecodeObject(d.Data)
 		if !valid {
-			return s.finish(r, StatusServerError, nil, Emit{Fact: CorruptObject{Key: readKey}})
+			return s.finish(r, StatusServerError, nil, Emit{Telemetry: CorruptionDetected{Key: readKey}})
 		}
 		if r.kind == kindGet {
 			return s.finish(r, StatusOK, payload)

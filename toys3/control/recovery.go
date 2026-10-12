@@ -79,7 +79,7 @@ func (s *Controller) onRecoveryDone(io IOID, body EventBody) []Action {
 		}
 		s.mode = modeAuto
 		s.recIO = nil
-		acts := []Action{Emit{Fact: Recovered{TempsRemoved: s.recRemoved}}}
+		acts := []Action{Emit{Telemetry: Recovered{TempsRemoved: s.recRemoved}}}
 		return append(acts, s.startPermitted()...)
 	}
 	return nil

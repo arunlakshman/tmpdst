@@ -26,7 +26,7 @@ type Loop struct {
 	start   time.Time     // At = time.Since(start), monotonic
 	stopped chan struct{} // closed when Run returns
 
-	// Log receives facts and lifecycle lines; nil means log.Default().
+	// Log receives telemetry and lifecycle lines; nil means log.Default().
 	Log *log.Logger
 
 	mu      sync.Mutex
@@ -87,7 +87,7 @@ func (l *Loop) dispatch(acts []control.Action) error {
 				ch <- a // buffered(1); exactly one reply per request
 			}
 		case control.Emit:
-			l.logf("toys3: fact %T %+v", a.Fact, a.Fact)
+			l.logf("toys3: telemetry %T %+v", a.Telemetry, a.Telemetry)
 		case control.Trip:
 			l.logf("toys3: TRIP: %s", a.Cause)
 			return fmt.Errorf("%w: %s", ErrTripped, a.Cause)

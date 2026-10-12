@@ -27,9 +27,9 @@ const goldenPath = "testdata/golden-v1.txt"
 func statsVector(s Stats) []int {
 	return []int{
 		s.Requests, s.ByStatus[0], s.ByStatus[1], s.ByStatus[2], s.ByStatus[3],
-		s.Indetermined, s.FSOps, s.EIOs, s.TornFiles, s.LostChanges,
+		s.Indeterminate, s.FSOps, s.EIOs, s.TornFiles, s.LostChanges,
 		s.Crashes, s.Trips, s.CrashesMidPut, s.KeptChanges, s.ReadCorruptions,
-		s.CorruptObjects, s.TempsRemoved, s.Windows, s.MaxWindowOps, s.Widenings,
+		s.CorruptionsDetected, s.TempsRemoved, s.Windows, s.MaxWindowOps, s.Widenings,
 	}
 }
 

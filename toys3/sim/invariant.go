@@ -95,8 +95,10 @@ type ObjNeverTorn struct{ gen uint64 }
 // every quiescent point and at the end.
 type Linearizable struct{}
 
-// Liveness is invariant (d): at the end of Settling (server alive, no
-// faults) no op is Pending, and every boot reached control.Recovered.
+// Liveness is invariant (d), "the closed loop settles": at the end of
+// Settling (server alive, no faults) no op is Pending, and the final boot
+// reached control.Recovered (earlier incarnations may crash or trip
+// mid-recovery by design).
 // Additionally, a request issued during Settling never gets a 500: with no
 // faults injected a correct server has no reason to fail (this is what makes
 // a lost-but-acked object visible to clients: it reads back as 500 forever).

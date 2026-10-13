@@ -1,11 +1,25 @@
-// Package control is the deterministic heart of toys3, a toy single-node S3-style
-// object server whose only job is to be a small, honest target for
+// Package control is the deterministic heart of toys3, a toy single-node
+// S3-style object server whose only job is to be a small, honest target for
 // deterministic simulation testing (DST). See ../DESIGN.md and ../../loop.md.
 //
-// The server is a StateMachine: Step(Event) []Action. It never performs I/O.
-// Client requests and filesystem completions arrive as Events; replies and
-// filesystem operations leave as Actions. A runtime (../prod for real disks,
-// ../sim for the simulator) executes the actions and feeds results back in.
+// It is written as a controller in a feedback loop around a plant (the disk):
+//
+//	requests (operator) ──► ┌────────────┐ ── actuations (FS* commands) ──► ┌───────┐
+//	                        │ Controller │                                  │ plant │
+//	replies, telemetry  ◄── │ Step(Event)│ ◄── feedback (FS*Done events) ── │ (disk)│
+//	Trip (fail-stop)    ◄── └────────────┘                                  └───────┘
+//
+// The Controller is a StateMachine: Step(Event) []Action. It never performs
+// I/O. Client requests and plant feedback arrive as Events (Event.At is the
+// sampling instant); replies, actuations (Actuation), telemetry (Emit) and
+// Trip leave as Actions. A runtime (../prod for real disks, ../sim for the
+// simulator's plant model) executes the actuations and feeds the feedback
+// back in. The actuation and feedback vocabulary (plant.go) is the plant
+// port: the controller owns it, the runtimes implement it.
+//
+// Operating modes: startup (before Started) → recovering → auto (closed-loop
+// serving) → tripped (after a Trip, every event is ignored until the runtime
+// restarts the incarnation).
 //
 // Rules (enforced by tools/detcheck in CI):
 //   - imports only from tools/detcheck/allow.txt (no time, os, math/rand, sync);
@@ -38,7 +52,8 @@
 //
 // Any filesystem error replies 500 and is never acked. After an fsync error the
 // kernel's view of the file is unknowable ("fsyncgate"), so the server should
-// fail-stop with Trip rather than keep serving possibly-lost state.
+// fail-stop with a Trip (a safety trip) rather than keep serving
+// possibly-lost state.
 //
 // # Errors: 500, or 500 + Trip
 //
@@ -46,7 +61,7 @@
 // reads observe. If a failed mutation may have changed obj/ visibly but not
 // durably, a later GET can observe the change and a crash can then undo it:
 // the client saw a value appear and vanish, which no linearization explains
-// ("crashes erase nothing"). The per-key lock only protects reads while the
+// ("crashes erase nothing"). The key interlock only protects reads while the
 // mutation is in flight; once it has replied, the next GET on that key runs.
 // So the rule is: any error at or after the first step that can touch obj/
 // trips, and errors before it are a plain 500.
@@ -63,34 +78,36 @@
 //	fsync tmp/)               next boot retries recovery from scratch.
 //
 // Trip is always the last action of its Step; the 500 Reply (if any)
-// precedes it, and the server ignores every event after it. Corrupt object
-// files are a plain 500 plus CorruptionDetected telemetry, not a Trip: the file is
-// already durable, restarting would not fix it.
+// precedes it, and the controller ignores every event after it. Corrupt
+// object files are a plain 500 plus CorruptionDetected telemetry, not a Trip:
+// the file is already durable, restarting would not fix it.
 //
 // Every successful mutation emits Emit{Committed} immediately followed by its
 // 200 Reply, in the same Step, right after FSFsyncDirDone(obj) returns OK.
 //
-// # Concurrency
+// # Concurrency: the key interlock
 //
 // Operations on the same key are serialized by a per-key FIFO queue inside the
 // state machine; different keys proceed concurrently. COPY occupies both src
 // and dst: a request joins the queue of every key it touches in arrival order
-// and runs once it is at the head of all of them. Because every queue is
+// and runs once its start permissive holds, i.e. it is at the head of all of
+// them (no earlier request is interlocked with it). Because every queue is
 // ordered by the same arrival sequence, no cycle (deadlock) is possible.
 //
-// In the code the queues are implicit: the server keeps one slice of
+// In the code the queues are implicit: the controller keeps one slice of
 // unfinished requests in arrival order, and the queue of a key is the
-// subsequence of that slice touching the key. Invalid requests (bad key,
-// oversize PUT) get 400 at once and never enter it.
+// subsequence of that slice touching the key (see permitted and
+// interlocked). Invalid requests (bad key, oversize PUT) get 400 at once and
+// never enter it. The Controller is the single aggregate: one Step is its
+// consistency boundary.
 //
 // # Recovery
 //
-// Memory is disposable. On Started the server lists <dir>/tmp, unlinks every
+// Memory is disposable. On Started the controller lists <dir>/tmp, unlinks every
 // leftover temp file, fsyncs the tmp directory (even if nothing was removed),
 // emits Recovered, and only then serves requests, starting the queued ones in
 // arrival order. Requests that arrive during recovery are queued, not
 // rejected. Completions with an unknown IOID (or of the wrong kind for the
-// step the owner is on) are ignored. Committed
-// objects need no recovery: the rename protocol means obj/ only ever holds
-// complete files.
+// step the owner is on) are ignored. Committed objects need no recovery: the
+// rename protocol means obj/ only ever holds complete files.
 package control

@@ -4,8 +4,10 @@ import "manifester/toys3/control"
 
 // Incarnation numbers server boots: 1 for the first, +1 after each crash.
 // Every server-bound entry carries the incarnation it was scheduled for;
-// entries for a dead incarnation are dropped on Pop (a crashed process never
-// sees a completion meant for its previous life).
+// entries for a dead incarnation are dropped eagerly at crash time by
+// Queue.DropIncarnation (a crashed process never sees a completion meant for
+// its previous life). Simulator.handle also checks the incarnation on pop, as
+// a defensive backstop.
 type Incarnation uint64
 
 // EntryKind says what an Entry does when popped.

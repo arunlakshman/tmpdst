@@ -7,15 +7,68 @@ real durability bugs to make, so that a deterministic simulator can catch them.
 It follows [`../loop.md`](../loop.md) strictly.
 
 ```
-toys3/core   pure state machine + on-disk format       (detcheck-clean)
-toys3/sim    simulator, fake FS, workload, oracle      (detcheck-clean)
-toys3/prod   real runtime: os calls, HTTP, event loop
-toys3/cmd/toys3   main (-dir, -addr)
+toys3/control   the controller: pure state machine + plant port   (detcheck-clean)
+toys3/format    on-disk object format and layout                  (detcheck-clean)
+toys3/sim       SIL testbench: simulator, plant model, workload,
+                oracle, invariants                                (detcheck-clean)
+toys3/prod      real runtime: os calls, HTTP, event loop
+toys3/cmd/toys3      main (-dir, -addr)
+toys3/cmd/toys3sim   parallel DST campaign runner
 ```
+
+Every toys3 package except `prod` and `cmd/*` is gated by `tools/detcheck`;
+`scripts/ci-determinism.sh` derives that list with `go list`.
+
+## Domain model and vocabulary
+
+The code is organized with domain-driven design, and its vocabulary comes
+from control theory where the fit is genuine (see `REFACTOR-PROPOSAL.md` for
+the full analysis). The server is a **controller** in a feedback loop around a
+**plant**, the disk and its page cache:
+
+```
+     requests (operator)                            disturbances: EIO, torn writes,
+              │                                     bit flips, writeback, power loss
+              ▼                                                   │
+     ┌──────────────────┐   actuations (FS* commands)  ┌─────────▼──────────┐
+     │   Controller     │ ────────────────────────────►│       plant        │
+     │ Step(Event)      │ ◄────────────────────────────│ (disk + page cache)│
+     │  []Action        │   feedback (FS*Done events)  └────────────────────┘
+     └──┬────────┬──────┘   dead time: actuation → effect; feedback delay: effect → completion
+        │        └──► telemetry (Committed, Recovered, CorruptionDetected)
+        └──► replies, or Trip (fail-stop) when its own state can't be trusted
+```
+
+| Term | In code | Meaning |
+|---|---|---|
+| Controller | `control.Controller` | The state machine: the control law. The single aggregate; one `Step` is its consistency boundary. |
+| Actuation / Feedback | `control.Actuation` (FS* actions), `control.Feedback` (FS*Done events) | The plant port. The controller owns it; `prod.OSExecutor` (real disk) and `sim.PlantModel` (simulated) implement it. |
+| Trip | `control.Trip{Cause}` | Safety trip: fail-stop when in-memory state can't be trusted (fsyncgate); restart re-arms. |
+| Mode | `modeStartup → modeRecovering → modeAuto → modeTripped` | Operating mode of one incarnation. |
+| Key interlock, start permissive | `interlocked`, `permitted` | Per-key FIFO: a request starts only when no earlier request shares a key. |
+| Telemetry | `control.Telemetry` via `Emit` | Domain events the controller publishes: logged by prod, checked by the simulator's monitors. |
+| Plant model | `sim.PlantModel` | The simulated filesystem with crash semantics. Its durable view is the true state. |
+| Disturbances | `sim.Disturbances` | Faults the controller cannot command, plus the plant's dead time and feedback delay. |
+| Chaos, Settling | `Config.Chaos`, `Config.Settling` | Disturbed phase, then the phase in which the closed loop must settle (every request answered, no 500s). |
+| Sample | `sim.Sample` | Telemetry stamped with step, time and incarnation. |
+| Reference model, estimate | oracle's `refState`, `estimate` | The sequential spec the history must match; the oracle's set of possible states. |
+| Ground truth | `sim.GroundTruth` | The only view of the plant the monitors get (durable files). |
+
+Plain names are kept where a control metaphor would be forced: requests and
+the S3 ops, `Committed`, `Linearizable` (linearizability, not linearization),
+`Oracle`, `Invariant`, the CRC and the format.
+
+Bounded contexts: **storage control** (`control`, the core domain),
+**object format** (`format`, a shared kernel between the controller, the
+monitors, the plant model and prod), **plant** (the port in `control`; adapters
+`prod.OSExecutor` and `sim.PlantModel`), **verification** (`sim`: oracle,
+history, invariants), **testbench** (`sim`: simulator, queue, RNG, trace hash,
+workload) and **production runtime/transport** (`prod`, with `Handler` as the
+anti-corruption layer from S3 REST to `control.Op`).
 
 ## The state machine
 
-The server never does I/O. It turns Events into Actions:
+The controller never does I/O. It turns Events into Actions:
 
 ```
 Event  = Started | Request{Client, Put|Get|Delete|Copy}
@@ -23,10 +76,10 @@ Event  = Started | Request{Client, Put|Get|Delete|Copy}
        | FSReadDone | FSUnlinkDone | FSListDone            (each carries IOID, Err)
 Action = Reply{Client, Status, Body}
        | FSWrite | FSFsync | FSRename | FSFsyncDir | FSRead | FSUnlink | FSList
-       | Halt{Reason} | Emit{Fact}
+       | Trip{Cause} | Emit{Telemetry}
 ```
 
-Every FS action carries an `IOID`. Its completion comes back as a separate
+Every FS action (an `Actuation`) carries an `IOID`. Its completion comes back as a separate
 event, so the server never blocks and many operations on different keys can be
 in flight at once. Time arrives as `Event.At`. Randomness and buggify come from
 the injected `Env`. No timers are needed: every wait is on an FS completion.
@@ -52,17 +105,18 @@ FSFsyncDirDone{io4}   ──► Step ──► [Emit{Committed}, Reply{c7, 200}]
 
 On-disk object file: `"TOY3" | crc32(payload) | len(payload) | payload`. A
 correct protocol never leaves a torn file under `obj/`. The checksum turns a
-protocol bug into a visible 500 (and a `CorruptObject` fact) instead of silent
+protocol bug into a visible 500 (and `CorruptionDetected` telemetry) instead of silent
 garbage.
 
 **Errors.** Any FS error replies 500 and is never acked. A 500 tells the client
 nothing: the rename may have landed. After an fsync error the page cache can no
-longer be trusted (Linux "fsyncgate"), so the server should `Halt`, which
+longer be trusted (Linux "fsyncgate"), so the server should `Trip`, which
 means fail-stop and recover from disk. If it kept serving instead, it could
 expose a value that a later crash erases. The oracle flags that.
 
-**Per-key serialization.** Each key has a FIFO queue, and a request runs when it
-is at the head of every queue it touches (COPY touches src and dst). All
+**Per-key serialization (the key interlock).** Each key has a FIFO queue, and a
+request runs when its start permissive holds: it is at the head of every queue
+it touches (COPY touches src and dst). All
 queues share one arrival order, so a cycle and therefore a deadlock is
 impossible. Different keys run concurrently.
 
@@ -80,17 +134,17 @@ prod:  HTTP ─► inbox(chan) ─► Loop.Run: Step ─► OSExecutor goroutine
 sim:   one goroutine, Queue ordered by (At, seeded Tie, Seq), virtual clock
        t=3ms  deliver  Request{c4, Put k1}              (inc 2)
        t=3ms  deliver  FSFsyncDone{io9}                 (inc 2)   ◄─ tie broken by seed
-       t=5ms  fsLand   FSRename{io10}  (plan: OK)       ◄─ effect lands in FakeFS
-       t=6ms  ⚡ crash → FakeFS resolves volatile state, entries for inc 2 dropped
+       t=5ms  fsLand   FSRename{io10}  (plan: OK)       ◄─ effect lands in the PlantModel
+       t=6ms  ⚡ crash → PlantModel resolves volatile state, entries for inc 2 dropped
        t=9ms  restart  inc 3, deliver Started
 ```
 
 An FS action lands (its effect is applied) and its completion is delivered at
-two separate times. A crash in between gives "it happened, but nobody was
+two separate times (after the dead time, then after the feedback delay). A crash in between gives "it happened, but nobody was
 told". Entries carry the server incarnation, and anything addressed to a dead
 incarnation is dropped.
 
-## Fault model (FakeFS)
+## Fault model (PlantModel and its Disturbances)
 
 Every inode has *durable* and *volatile* content, and every directory entry has
 *durable* and *current* versions. `FSFsync` makes content durable. `FSFsyncDir`
@@ -104,9 +158,8 @@ an adversary would:
   `TornWriteProb`, cut to a random prefix.
 
 Each op can also fail with EIO (`EIOProb`). A failed write may leave a prefix,
-and a failed rename or unlink may or may not have applied. Latency is drawn per
-op. `FsyncGate` makes fsync lie after a failure. Faults stop during
-`QuietTail`.
+and a failed rename or unlink may or may not have applied. Dead time and feedback delay are drawn per op. `FsyncGate` makes fsync lie
+after a failure. New faults stop during `Settling`.
 
 Two more behaviours turned out to matter:
 
@@ -119,9 +172,9 @@ Two more behaviours turned out to matter:
 - **Read corruption** (`ReadCorruptProb`). A read may come back with one bit
   flipped, while the stored data stays intact. With the correct protocol,
   `obj/` never holds a torn file, so without this fault the CRC check would be
-  dead code (`TestCorruptObjectUnreachableWithoutBitFlips` checks this).
+  dead code (`TestCorruptionUnreachableWithoutBitFlips` checks this).
 
-**Crash model.** A crash, including `Halt`, is a power loss. The FakeFS resolves
+**Crash model.** A crash, including a `Trip`, is a power loss. The PlantModel resolves
 all volatile state at that instant. Queued entries for the dead incarnation are
 dropped: FS actions that have not landed yet never happen, and completions
 that have not been delivered are lost. An action that landed before the crash
@@ -141,9 +194,9 @@ therefore name their writer exactly.
 | | Invariant | Checked |
 |---|---|---|
 | a | Every 200 GET is linearizable against a per-key register model (COPY reads src and writes dst atomically) | at quiescent points (Oracle, WGL search) |
-| b | Acked mutations survive crashes unless superseded. Crashes erase nothing in the model. | same search; also eagerly: `Committed` fact ⇒ FakeFS durable state matches, on the same step |
+| b | Acked mutations survive crashes unless superseded. Crashes erase nothing in the model. | same search; also eagerly: `Committed` telemetry ⇒ the plant model's durable state (ground truth) matches, on the same step |
 | c | No torn or corrupt bytes are ever returned with 200 (`NoCorruptReads`) | every step |
-| d | Every request gets a reply while the server is alive, every boot recovers, and no request issued in QuietTail gets a 500 | 500s: every step; the rest: end of run |
+| d | Every request gets a reply while the server is alive, the final boot recovers, and no request issued in Settling gets a 500 | 500s: every step; the rest: end of run |
 | e | Every file under `obj/` in the *durable* view is a complete object (`ObjNeverTorn`) | whenever durable state changes |
 
 **In-flight at crash (and 500s):** the outcome is indeterminate. The mutation
@@ -158,8 +211,12 @@ moment but never causes a false failure, and the `widened` stat counts it.
 Ops are ordered by logical
 invoke and return sequence numbers, not by virtual time, so several events
 that share one instant keep their exact order. The run's state is folded into a trace
-hash after every step: the server's `StateHash`, the FakeFS hash, the step
-number and the time. Two runs of one seed must produce identical hashes.
+hash after every step: the controller's `StateHash`, the plant model's hash, the step
+number and the time. Events, actions and telemetry are folded as stable
+numeric tags and field values, never as Go type names; telemetry goes through
+a frozen encoding (`telemetryHashKey`), so renames cannot change a trace hash.
+`TestGolden` pins steps, random draws, trace hashes and stats for 550 seeds and
+where each mutant is caught. Two runs of one seed must produce identical hashes.
 
 ## How to run DST
 
@@ -188,9 +245,9 @@ column uses only the client-visible invariants (no peeking at durable state).
 | Variant | Caught by (all invariants) | First seed | Black-box only |
 |---|---|---|---|
 | a. skip `FSFsyncDir(obj/)` | acked-is-durable | 1 | linearizable, seed 1 |
-| b. skip the temp file's `FSFsync` | obj-never-torn | 1 | liveness (500s in QuietTail), seed 2 |
+| b. skip the temp file's `FSFsync` | obj-never-torn | 1 | liveness (500s in Settling), seed 2 |
 | c. reply 200, then rename and fsync | acked-is-durable | 1 | linearizable, seed 1 |
-| d. 500 without `Halt` after any post-write error | obj-never-torn | 1 | liveness, seed 20 |
+| d. 500 without `Trip` after any post-write error | obj-never-torn | 1 | liveness, seed 20 |
 | d2. same, only for a failed `FSFsyncDir(obj/)` | linearizable (a read saw the value, then a crash erased it) | 132 | linearizable, seed 132 |
 | e. skip the CRC check on read | no-corrupt-reads | 18 | no-corrupt-reads, seed 18 |
 | f. recovery skips temp cleanup | linearizable (resurrected temp aliases an object; a reused temp name overwrites it) | 20 | linearizable, seed 20 |

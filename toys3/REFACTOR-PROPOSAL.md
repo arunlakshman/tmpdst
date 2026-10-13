@@ -1,6 +1,7 @@
 # toys3 refactor proposal: Domain-Driven Design with a control-theory vocabulary
 
-Status: **proposal only.** No code or existing docs have been changed.
+Status: **Implemented in `9b65410..HEAD` on branch `toys3`** (steps 0–10; steps 11 and 12 skipped by
+decision). See "Implementation notes" at the end for decisions and deviations.
 Baseline: branch `toys3` @ `0f0aad9`. Seed 1 is `steps=1628 crashes=10 trace=1ca97eb77a9044e1`, and the 7 mutants
 are caught at seeds 1, 1, 1, 1, 132, 18 and 20 (details in §6).
 
@@ -735,3 +736,47 @@ Chapters 02, 03, 07 and 18, where the *concepts* change and not just the names.
 | Domain events | 6/10: they exist, are unnamed as a concept, and one is not past tense | 9/10 |
 | ACLs at boundaries | 7/10: the HTTP ACL is good; monitors use the concrete fake FS | 8/10 (9/10 with the step 9 ACL) |
 | **Overall** | **≈ 6/10** | **≈ 8.5/10** (Full: about 9/10, at a cost this toy does not need yet) |
+
+---
+
+## Implementation notes
+
+Implemented as migration steps 0–10, one commit each (step 10 also carries these notes). Every commit
+passes `go build`, `go vet`, `gofmt`, `go test ./toys3/... ./tools/...` and `scripts/ci-determinism.sh`.
+`sim/testdata/golden-v1.txt` was generated once on the pre-refactor code and **never re-baselined**.
+Seed 1 is still `trace=1ca97eb77a9044e1`, and mutant f at seed 1 is still `f9a6442332345f03`. The event
+logs of 9 runs (seeds 1, 18, 20, 132; mutants b@1, d@1, d2@132, e@18, f@20) are identical before and after,
+modulo the rename map (`Halt{`→`Trip{`, `CorruptObject{`→`CorruptionDetected{`, `halts=`→`trips=`,
+`corruptobj=`→`corruptdet=`, `quiet`/`tail-end` entry kinds →`settle`/`settling-end`, and the two
+Chaos/Settling notes).
+
+Answers applied to §8:
+
+1. Strong-fit renames only. None of the OPT rows (`ColdStart`, `procedure`/`procStep`, `KindLand`,
+   `Counters`) were applied.
+2. Minimal layout, including the ground-truth ACL inside `sim` (step 9).
+3. The trace hash is bit-identical (frozen `telemetryHashKey`). There is no epoch 2.
+4. `Oracle` is kept.
+5. Only the comment-only Chapter 17 fixes (§3, §4, §16).
+6. Printed output is renamed too (`trips=`, `corruptdet=`, the `settle` and `settling-end` log kinds, prod
+   `toys3: TRIP:` and `toys3: telemetry …`).
+
+Deviations from the proposal:
+
+- **Field placement.** Step 2 put the plant port into `control/plant.go` when it was introduced, rather than
+  in step 5.
+- **Port method name.** The port method is `ID() IOID`, as recommended in §4.4 (a).
+- **Mutant labels kept.** The mutant labels (`d-no-halt-on-error`, `d2-no-halt-on-dir-fsync-error`) are
+  test names quoted in the golden file and the book. They were kept, while their Go identifiers became
+  `mutNoTripOnError` and `noTrip`.
+- **Names the glossary did not cover.** `Config.Server` (the controller's config in `sim.Config`) and
+  `Simulator.halted` (the run stopping after a failure, not a Trip) keep their names.
+- **Extra test rename.** `TestCorruptObjectUnreachableWithoutBitFlips` became
+  `TestCorruptionUnreachableWithoutBitFlips`.
+- **Extra plant-model method.** `PlantModel` gained `EachDurable`, and `View.FS()` became
+  `View.GroundTruth()`.
+- **New files and tests.**
+  - `format/format_test.go` and `sim/trace_test.go` (which pins the frozen telemetry hash key) are new.
+  - `sim/describe.go` is split into `trace.go` and `log.go`.
+  - `oracle.go` lost the history types to `history.go`.
+  - `workload.go` lost the value encoding to `value.go`.

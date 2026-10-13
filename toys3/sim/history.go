@@ -25,7 +25,12 @@ type HistOp struct {
 	Req    control.ClientReq
 	Client int
 	Op     control.Op
-	Invoke control.Time // when the Request was delivered
+	// Invoke is when the client issued the request (Simulator.wake). Delivery
+	// to the server is a separate queue entry at the same virtual instant, so
+	// other same-instant entries may run in between, and a crash may drop the
+	// delivery entirely. An earlier invocation point only widens the window,
+	// which is conservative for the linearizability check.
+	Invoke control.Time
 	// Return is the reply time (Definite, Failed) or the crash time (Abandoned).
 	Return  control.Time
 	Outcome Outcome

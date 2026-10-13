@@ -117,11 +117,11 @@ func TestCoverage(t *testing.T) {
 	}
 }
 
-// TestCorruptObjectUnreachableWithoutBitFlips documents that for the
+// TestCorruptionUnreachableWithoutBitFlips documents that for the
 // correct server the CRC check is only a safety net: with no read
 // corruption injected, torn temp files never reach obj/, so no read ever
 // fails its CRC.
-func TestCorruptObjectUnreachableWithoutBitFlips(t *testing.T) {
+func TestCorruptionUnreachableWithoutBitFlips(t *testing.T) {
 	for seed := uint64(1); seed <= 200; seed++ {
 		cfg := DefaultConfig(seed)
 		cfg.Disturbances.ReadCorruptProb = 0

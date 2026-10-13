@@ -77,7 +77,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // ParseRequest decodes an HTTP request (body already read) into a control.Op.
 // Malformed requests (no key, bad copy source, unsupported method) return an
-// error and become 400/405 without reaching the control.
+// error and become 400/405 without reaching the controller.
 func ParseRequest(r *http.Request, body []byte) (control.Op, error) {
 	key, err := splitKey(r.URL.Path)
 	if err != nil {

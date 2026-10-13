@@ -74,6 +74,6 @@ func ObjPath(root, key string) string { return ObjDir(root) + "/" + EscapeKey(ke
 // (16 hex digits). Names are unique within an incarnation, and recovery clears
 // tmp/ before a new incarnation writes anything, so they never collide.
 func TmpPath(root string, id uint64) string {
-	s := strconv.FormatUint(uint64(id), 16)
+	s := strconv.FormatUint(id, 16)
 	return TmpDir(root) + "/" + strings.Repeat("0", 16-len(s)) + s
 }

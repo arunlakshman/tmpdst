@@ -91,8 +91,10 @@ func (l *Loop) dispatch(acts []control.Action) error {
 		case control.Trip:
 			l.logf("toys3: TRIP: %s", a.Cause)
 			return fmt.Errorf("%w: %s", ErrTripped, a.Cause)
-		default:
+		case control.Actuation:
 			l.exec.Execute(a, l.post)
+		default:
+			panic(fmt.Sprintf("toys3/prod: unknown action %T", a))
 		}
 	}
 	return nil

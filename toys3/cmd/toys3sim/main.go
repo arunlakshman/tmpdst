@@ -3,7 +3,7 @@
 //
 //	go run ./toys3/cmd/toys3sim -duration 10m -check-determinism
 //
-// Every seed is an independent sim.Run (its own Rand, queue, fake filesystem
+// Every seed is an independent sim.Run (its own Rand, queue, storage model
 // and server), so seeds run on separate goroutines with no shared state;
 // only the seed counter and the result tallies are shared, outside the
 // simulation. Any failure prints the one-line repro command and makes the

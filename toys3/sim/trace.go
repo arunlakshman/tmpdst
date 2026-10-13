@@ -100,5 +100,7 @@ func telemetryHashKey(t control.Telemetry) string {
 	case control.CorruptionDetected:
 		return fmt.Sprintf("CorruptObject{%q}", x.Key) // legacy spelling, on purpose
 	}
-	return fmt.Sprintf("%T", t)
+	// Unreachable for the current telemetry types (TestTelemetryHashKeyCoversAllTypes).
+	// A fixed string, not %T, so no Go type name is ever a hash input.
+	return "?"
 }

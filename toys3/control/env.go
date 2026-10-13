@@ -1,7 +1,7 @@
 package control
 
 // Env is injected into the server at construction. It is the only way
-// nondeterminism enters the control. Time is NOT here: it arrives on each Event.
+// nondeterminism enters the controller. Time is NOT here: it arrives on each Event.
 type Env interface {
 	Rand
 	Buggify

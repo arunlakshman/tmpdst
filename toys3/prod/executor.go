@@ -11,12 +11,12 @@ import (
 	"manifester/toys3/format"
 )
 
-// Executor performs filesystem actions. Execute must not block the loop: it
-// starts the operation and, when it finishes, calls done exactly once with
-// the matching completion (control.FSWriteDone for control.FSWrite, and so on),
-// from any goroutine.
+// Executor is a storage adapter: it performs actuations (filesystem actions).
+// Execute must not block the loop: it starts the operation and, when it
+// finishes, calls done exactly once with the matching feedback
+// (control.FSWriteDone for control.FSWrite, and so on), from any goroutine.
 type Executor interface {
-	Execute(a control.Action, done func(control.EventBody))
+	Execute(a control.Actuation, done func(control.EventBody))
 }
 
 // OSExecutor runs each action in its own goroutine with real os calls:
@@ -34,12 +34,12 @@ type Executor interface {
 type OSExecutor struct{}
 
 // Execute implements Executor.
-func (OSExecutor) Execute(a control.Action, done func(control.EventBody)) {
+func (OSExecutor) Execute(a control.Actuation, done func(control.EventBody)) {
 	go func() { done(run(a)) }()
 }
 
 // run performs a synchronously and returns its completion.
-func run(a control.Action) control.EventBody {
+func run(a control.Actuation) control.EventBody {
 	switch a := a.(type) {
 	case control.FSWrite:
 		return control.FSWriteDone{IO: a.IO, Err: code(writeFile(a.Path, a.Data))}
@@ -98,8 +98,8 @@ func syncPath(path string) error {
 	return err
 }
 
-// code maps an os error to a control.ErrCode, logging real I/O errors (the core
-// only sees the code).
+// code maps an os error to a control.ErrCode, logging real I/O errors (the
+// controller only sees the code).
 func code(err error) control.ErrCode {
 	switch {
 	case err == nil:

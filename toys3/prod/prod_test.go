@@ -110,7 +110,7 @@ func TestEndToEnd(t *testing.T) {
 // failFsync wraps OSExecutor and fails every file fsync with EIO.
 type failFsync struct{ OSExecutor }
 
-func (f failFsync) Execute(a control.Action, done func(control.EventBody)) {
+func (f failFsync) Execute(a control.Actuation, done func(control.EventBody)) {
 	if a, ok := a.(control.FSFsync); ok {
 		go done(control.FSFsyncDone{IO: a.IO, Err: control.ErrIO})
 		return

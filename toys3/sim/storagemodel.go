@@ -142,7 +142,8 @@ func NewStorageModel(r *Rand, faults Disturbances, dirs ...string) *StorageModel
 	return fs
 }
 
-// Plan draws the fault decision and latencies for a filesystem action.
+// Plan draws the fault decision, dead time and feedback delay for a
+// filesystem action.
 func (fs *StorageModel) Plan(a control.Action) ActuationPlan {
 	var p ActuationPlan
 	p.Fail = !fs.quiet && fs.rng.Chance(fs.faults.EIOProb)
@@ -456,7 +457,7 @@ func (d *fdir) names() []string {
 func (fs *StorageModel) dirNames() []string { return fs.dirList }
 
 // DurableGen changes whenever the durable view may have changed, so
-// invariants over Durable() can skip unchanged steps.
+// monitors (through GroundTruth) can skip unchanged steps.
 func (fs *StorageModel) DurableGen() uint64 { return fs.durGen }
 
 // CrashReport counts how the adversary resolved volatile state.

@@ -3,7 +3,7 @@ package control
 // The Storage port: the commands the server sends to the filesystem
 // (actuations) and the completions that come back (feedback). The server owns
 // this vocabulary; the runtimes implement it (prod.OSExecutor on real disks,
-// the simulator's fake filesystem in sim).
+// the simulator's storage model in sim).
 
 // Actuation is a filesystem Action: a command to storage. Its result
 // returns as the Feedback event with the same ID.

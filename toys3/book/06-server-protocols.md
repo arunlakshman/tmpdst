@@ -42,7 +42,7 @@ type request struct {
 
 Walk the fields:
 
-- `seq` is a per-incarnation arrival counter, assigned in `onRequest` (`controller.go:176-177`). It is the only thing that defines order. Note that it is *not* the client's `ClientReq`: the runtime assigns `ClientReq` (prod: per HTTP request, `toys3/prod/loop.go:123-125`; sim: per workload operation, `toys3/sim/workload.go:93-94`), and the server must not assume anything about its ordering. In the simulator, `ClientReq` happens to increase with issue time, but a request's arrival at `Step` can be reordered relative to its issue by same-instant tie-breaking in the queue (Chapter 10). `seq` is what the server actually saw.
+- `seq` is a per-incarnation arrival counter, assigned in `onRequest` (`controller.go:176-177`). It is the only thing that defines order. Note that it is *not* the client's `ClientReq`: the runtime assigns `ClientReq` (prod: per HTTP request, `toys3/prod/loop.go:125-127`; sim: per workload operation, `toys3/sim/workload.go:93-94`), and the server must not assume anything about its ordering. In the simulator, `ClientReq` happens to increase with issue time, but a request's arrival at `Step` can be reordered relative to its issue by same-instant tie-breaking in the queue (Chapter 10). `seq` is what the server actually saw.
 - `client` is echoed on the `Reply`, so the runtime can route the answer.
 - `kind` is one of `kindPut`, `kindGet`, `kindDelete`, `kindCopy` (`controller.go:26-33`).
 - `key` is "the key this request is about". For COPY it is the **destination**. This choice makes `commit` (which reports the changed key) and the PUT half of COPY share code paths: after reading the source, COPY *is* a PUT of `r.data` to `r.key`.
@@ -116,7 +116,7 @@ The `Controller` struct holds all requests in one slice:
 ```go
 // toys3/control/controller.go:74-101
 // Controller is the toys3 state machine: the control law of the object
-// server. It turns client requests and plant feedback (filesystem
+// server. It turns client requests and storage feedback (filesystem
 // completions) into actuations (filesystem commands), replies and telemetry.
 // All of its state is plain data, rebuilt from nothing on every boot. It is
 // the single aggregate of the domain: one Step is its consistency boundary.
@@ -204,9 +204,9 @@ The control vocabulary also makes the boundary with the error policy crisp. An i
 
 Why not make each key's queue an object of its own, an aggregate in DDD terms? Chapter 3a (§3a.6) answers in detail. In short: COPY spans two keys, the queues are derived rather than stored, recovery and trips are controller-wide, and the order in which newly permitted requests start is observable. The per-key queue is therefore not an aggregate but a named invariant of the one aggregate, the `Controller`, enforced in exactly one function: `permitted`.
 
-Compare with the lock-based design: there, deadlock freedom comes from a *convention* (always lock in sorted key order), which every code path must follow. Here it comes from a *structure*: there is only one order, the arrival order, and every per-key queue is a subsequence of it. All queues agree on the relative order of any two requests they share, so no two queues can disagree in a way that produces a cycle. `toys3/control/doc.go:90-95` states the same argument in one sentence: "Because every queue is ordered by the same arrival sequence, no cycle (deadlock) is possible."
+Compare with the lock-based design: there, deadlock freedom comes from a *convention* (always lock in sorted key order), which every code path must follow. Here it comes from a *structure*: there is only one order, the arrival order, and every per-key queue is a subsequence of it. All queues agree on the relative order of any two requests they share, so no two queues can disagree in a way that produces a cycle. `toys3/control/doc.go:91-96` states the same argument in one sentence: "Because every queue is ordered by the same arrival sequence, no cycle (deadlock) is possible."
 
-**Liveness caveat.** "Every running request has exactly one outstanding filesystem action, and every filesystem action completes" is an assumption about the runtime. In production, `OSExecutor` calls `done` exactly once per action (`toys3/prod/executor.go:14-20`). In simulation, every FS action becomes an `fs-land` entry followed by a `deliver` entry, unless the incarnation dies, in which case the requests die with it. If either runtime ever silently dropped a completion for a live incarnation, the request would wait forever and so would everything behind it on its keys. The simulator's `Liveness` invariant (Chapter 14) would then fail at the end of the run with "no reply by the end of Settling". This is one reason the simulator never drops completions for the *current* incarnation, even though dropping them would be a tempting "fault" to inject: the server has no timers (`toys3/DESIGN.md:84-85`: "No timers are needed: every wait is on an FS completion"), so a lost completion is a liveness bug in the *environment*, not one the server is designed to tolerate. Chapter 17 discusses what adding timeouts would involve.
+**Liveness caveat.** "Every running request has exactly one outstanding filesystem action, and every filesystem action completes" is an assumption about the runtime. In production, `OSExecutor` calls `done` exactly once per action (`toys3/prod/executor.go:14-20`). In simulation, every FS action becomes an `fs-land` entry followed by a `deliver` entry, unless the incarnation dies, in which case the requests die with it. If either runtime ever silently dropped a completion for a live incarnation, the request would wait forever and so would everything behind it on its keys. The simulator's `Liveness` invariant (Chapter 14) would then fail at the end of the run with "no reply by the end of Settling". This is one reason the simulator never drops completions for the *current* incarnation, even though dropping them would be a tempting "fault" to inject: the server has no timers (`toys3/DESIGN.md:86-87`: "No timers are needed: every wait is on an FS completion"), so a lost completion is a liveness bug in the *environment*, not one the server is designed to tolerate. Chapter 17 discusses what adding timeouts would involve.
 
 ## 6.6 Accepting a request: onRequest
 
@@ -254,7 +254,7 @@ func badRequest(c ClientReq) []Action {
 
 Three things to notice.
 
-**Validation happens first, and invalid requests never enter `reqs`.** `ValidKey` (`toys3/format/layout.go:58-62`) rejects the empty key and any key whose escaped name exceeds 255 bytes (Chapter 4 covers the escaping). A PUT larger than `MaxObjectSize` is rejected. A nil or unknown `Op` is rejected (the `default` branch; the closed `Op` interface makes this unreachable from well-typed code, except for a nil `Op`, which TestBadRequest exercises). A 400 is returned *immediately, in the same Step*, even during recovery: it touches no state, so there is nothing to wait for. `control/doc.go:99-102` states this: "Invalid requests (bad key, oversize PUT) get 400 at once and never enter it."
+**Validation happens first, and invalid requests never enter `reqs`.** `ValidKey` (`toys3/format/layout.go:58-62`) rejects the empty key and any key whose escaped name exceeds 255 bytes (Chapter 4 covers the escaping). A PUT larger than `MaxObjectSize` is rejected. A nil or unknown `Op` is rejected (the `default` branch; the closed `Op` interface makes this unreachable from well-typed code, except for a nil `Op`, which TestBadRequest exercises). A 400 is returned *immediately, in the same Step*, even during recovery: it touches no state, so there is nothing to wait for. `control/doc.go:100-103` states this: "Invalid requests (bad key, oversize PUT) get 400 at once and never enter it."
 
 This matters for the oracle. A 400 is a *Definite* outcome that "touched nothing", and the oracle skips it entirely (`toys3/sim/oracle.go:278-280`). If the server ever put a 400 request in a queue and later did something with it, that skip would be wrong.
 
@@ -311,7 +311,7 @@ func (s *Controller) issue(r *request, step reqStep, a Actuation) []Action {
 
 `issue` is the one place where the "one outstanding action per step" invariant is enforced: it sets the step and the IOID together, and returns a one-element action slice.
 
-Its parameter type tells a small story. In the first edition of this code, `issue` took a plain `Action` and recovered the IOID with a seven-case type switch, because Go has no common field access across struct types. This book's first edition noted the alternative ("add an `IOOf() IOID` method to every action") and that the authors had kept Actions as dumb as possible. The refactor took the alternative, in its smallest form: every filesystem action got a one-line `ID()` method, and the interface `Actuation` (Chapter 3, §3.5) names the set of actions that have one. The actions are still dumb plain structs; the method only reads a field. What changed is that `issue` now *says* in its signature that it only ever records a command to the plant, and the compiler rejects an attempt to `issue` a `Reply`.
+Its parameter type tells a small story. In the first edition of this code, `issue` took a plain `Action` and recovered the IOID with a seven-case type switch, because Go has no common field access across struct types. This book's first edition noted the alternative ("add an `IOOf() IOID` method to every action") and that the authors had kept Actions as dumb as possible. The refactor took the alternative, in its smallest form: every filesystem action got a one-line `ID()` method, and the interface `Actuation` (Chapter 3, §3.5) names the set of actions that have one. The actions are still dumb plain structs; the method only reads a field. What changed is that `issue` now *says* in its signature that it only ever records a command to storage, and the compiler rejects an attempt to `issue` a `Reply`.
 
 `newIO` is a counter:
 
@@ -409,9 +409,9 @@ FSReadDone{io, OK, bad bytes}     ─► [Emit{CorruptionDetected{k}}, Reply{c, 
 FSReadDone{io, OK, good bytes}    ─► [Reply{c, 200, payload}, ...]
 ```
 
-`DecodeObject` (`toys3/format/object.go:30-44`) checks the magic, the length field against the actual length, and the CRC. Only if all three pass does the payload reach the client. `payload` *aliases* `d.Data` (it is `file[HeaderSize:]`), which is fine because events are immutable once sent: the PlantModel clones bytes on read (`toys3/sim/plantmodel.go:394`), and in production `os.ReadFile` returns a fresh slice.
+`DecodeObject` (`toys3/format/object.go:30-44`) checks the magic, the length field against the actual length, and the CRC. Only if all three pass does the payload reach the client. `payload` *aliases* `d.Data` (it is `file[HeaderSize:]`), which is fine because events are immutable once sent: the StorageModel clones bytes on read (`toys3/sim/storagemodel.go:395`), and in production `os.ReadFile` returns a fresh slice.
 
-A corrupt object produces a plain 500 and a `CorruptionDetected` telemetry, **not** a Trip. The reasoning is in `toys3/control/doc.go:81-83`: the file is already durable, so restarting would not fix it. Chapter 7 contrasts this with the cases that do trip.
+A corrupt object produces a plain 500 and a `CorruptionDetected` telemetry, **not** a Trip. The reasoning is in `toys3/control/doc.go:82-84`: the file is already durable, so restarting would not fix it. Chapter 7 contrasts this with the cases that do trip.
 
 ### 6.9.2 PUT
 
@@ -448,7 +448,7 @@ and the shared final step:
 		return s.commit(r)
 ```
 
-So a PUT is five steps, exactly as `DESIGN.md:89-95` draws it:
+So a PUT is five steps, exactly as `DESIGN.md:91-97` draws it:
 
 ```
 Request{c7, Put k}    ──► Step ──► [FSWrite{io1, tmp/01, hdr+data}]
@@ -460,7 +460,7 @@ FSFsyncDirDone{io4}   ──► Step ──► [Emit{Committed}, Reply{c7, 200}]
 
 Chapter 4 justified each step: the file fsync makes the bytes durable, the rename makes the switch atomic, the directory fsync makes the rename durable. Here what matters is the *shape*: one action out, one completion in, one step forward. The state machine never has two actions outstanding for one request, so it never has to reason about their relative order.
 
-Notice what PUT does *not* do: it does not fsync `tmp/` after the write (the temp file's *name* is never made durable by the server), and it does not fsync `tmp/` after the rename (the *removal* of the temp name is never made durable). Neither is needed for correctness of the committed object. The first means a crash before the rename may or may not leave a temp file behind (recovery deletes it either way). The second means a crash *after* the rename may resurrect the temp name as a second hard link to the committed object's inode, if some background writeback had made the temp name durable in the meantime. Recovery then unlinks the temp name, which removes one link and leaves the object alone. This is the "aliasing" story from `DESIGN.md:166-171`; you will see it happen in a real trace in Chapter 11, and see it become a real bug when recovery is broken in Chapter 15.
+Notice what PUT does *not* do: it does not fsync `tmp/` after the write (the temp file's *name* is never made durable by the server), and it does not fsync `tmp/` after the rename (the *removal* of the temp name is never made durable). Neither is needed for correctness of the committed object. The first means a crash before the rename may or may not leave a temp file behind (recovery deletes it either way). The second means a crash *after* the rename may resurrect the temp name as a second hard link to the committed object's inode, if some background writeback had made the temp name durable in the meantime. Recovery then unlinks the temp name, which removes one link and leaves the object alone. This is the "aliasing" story from `DESIGN.md:168-173`; you will see it happen in a real trace in Chapter 11, and see it become a real bug when recovery is broken in Chapter 15.
 
 ### 6.9.3 commit and finish
 
@@ -497,7 +497,7 @@ func (s *Controller) commit(r *request) []Action {
 
 The order inside the returned slice is a contract with the runtime and the simulator:
 
-- **Telemetry before Reply.** `Committed` is emitted immediately before the 200 (`toys3/control/doc.go:85-86`). The simulator's `AckedIsDurable` invariant reads the telemetry after the step and checks the durable state of the PlantModel *at that step* (Chapter 14). The fact describes what the server believes at the moment it acks.
+- **Telemetry before Reply.** `Committed` is emitted immediately before the 200 (`toys3/control/doc.go:86-87`). The simulator's `AckedIsDurable` invariant reads the telemetry after the step and checks the durable state of the StorageModel *at that step* (Chapter 14). The fact describes what the server believes at the moment it acks.
 - **Reply before successors.** The next request on the key is started in the *same* step that replies to its predecessor, but after the reply in the action list. TestSameKeySerialized pins this: `"committed c1 k del=false; reply c1 200; write tmp/*"`. There is no window in which the key is idle while a request is waiting for it, and no successor action appears before the reply it depends on.
 
 `commit` computes `Sum` from `r.data`, the *payload*, not the encoded file. For COPY, `r.data` is the source payload after decoding, so a COPY's `Committed.Sum` equals the source object's checksum. You can see this in the seed-1 trace: `Committed{c12 "k1" crc=1ce854a5}` at step 88 has the same CRC as `Committed{c10 "k0" crc=1ce854a5}` at step 54, because c12 was `COPY "k0" -> "k1"` and k0 held c10's value.
@@ -548,7 +548,7 @@ FSFsyncDirDone{io2}    ─► [Emit{Committed{c, k, Deleted}}, Reply{c, 200}]
 FSUnlinkDone{io1, ENOENT} ─► [Reply{c, 404}]
 ```
 
-DELETE shares `stepFsyncObj` with PUT, and therefore shares `commit`. With `Deleted: true`, `commit` leaves `Sum` at 0. Without the directory fsync, a crash could bring the object back: the unlink is a directory-entry change, and it is volatile until `obj/` is fsynced (`DESIGN.md:102`). The 404 path does not fsync anything, because nothing changed. (One subtle question: could the key have been deleted *visibly but not durably* by an earlier failed DELETE, so that this 404 is reporting a state a crash can undo? Only if the earlier DELETE's error did not trip. It does, and that is exactly the subject of Chapter 7.)
+DELETE shares `stepFsyncObj` with PUT, and therefore shares `commit`. With `Deleted: true`, `commit` leaves `Sum` at 0. Without the directory fsync, a crash could bring the object back: the unlink is a directory-entry change, and it is volatile until `obj/` is fsynced (`DESIGN.md:104`). The 404 path does not fsync anything, because nothing changed. (One subtle question: could the key have been deleted *visibly but not durably* by an earlier failed DELETE, so that this 404 is reporting a state a crash can undo? Only if the earlier DELETE's error did not trip. It does, and that is exactly the subject of Chapter 7.)
 
 ### 6.9.5 COPY
 
@@ -574,7 +574,7 @@ FSReadDone{io1, OK, corrupt}   ─► [Emit{CorruptionDetected{a}}, Reply{c, 500
 
 Three design points:
 
-- **COPY re-encodes.** It does not copy the file bytes; it decodes the source (verifying its CRC) and re-encodes the payload. "Never copy garbage" (`DESIGN.md:103`). A corrupt source becomes a 500 and a `CorruptionDetected{Key: src}` fact (note `readKey`, `controller.go:279-282`: the fact names the key whose file was bad, not the destination).
+- **COPY re-encodes.** It does not copy the file bytes; it decodes the source (verifying its CRC) and re-encodes the payload. "Never copy garbage" (`DESIGN.md:105`). A corrupt source becomes a 500 and a `CorruptionDetected{Key: src}` fact (note `readKey`, `controller.go:279-282`: the fact names the key whose file was bad, not the destination).
 - **COPY gets exactly PUT's durability.** Because after the read it literally *is* the PUT path, every argument about PUT's durability applies to COPY with no extra reasoning. This is a nice property of the "one step per completion" state machine: reuse is just "jump to a step".
 - **COPY with `Src == Dst` is allowed** (`toys3/control/event.go:46-48`: "Src == Dst is allowed (it rewrites the object)"). `touches` returns true for one key, `interlocked` works as usual, and the protocol reads `obj/a`, writes a temp file, and renames it over `obj/a`. The result is a byte-identical object with a new inode. The oracle models it as `set(a, get(a))`, a no-op on the value (`oracle.go:241-259`; `opKeys` collapses the key set to `{src}` when `Src == Dst`, `oracle.go:330-333`).
 
@@ -653,7 +653,7 @@ Then c6 `PUT k2` arrives at step 21. It goes to the back: blocked by seq 1 and s
 
 **The temp file name is the IOID.** c6's write is IO 7, so its temp file is `tmp/0000000000000007`. Later, at step 37, c10's write is IO 9 → `tmp/0000000000000009`. (If you look further into the seed-1 log, IO 17 writes `tmp/0000000000000011`: names are hex.)
 
-**Steps 30–54: two PUTs in flight on different keys.** c8 `GET k0` runs at once (step 30, nothing ahead of it on `k0` now that c5 has finished). c9 `PUT k2` arrives at step 32 and queues behind c6 and c7. c10 `PUT k0` arrives at step 37 and starts immediately. From step 37 to step 54, c6's PUT (on `k2`) and c10's PUT (on `k0`) progress concurrently, interleaving their completions: write, write, fsync, fsync, rename, rename, fsyncdir, fsyncdir. Neither waits for the other. This is cross-key parallelism, and it is the reason the simulator's PlantModel has to model many outstanding operations rather than one at a time.
+**Steps 30–54: two PUTs in flight on different keys.** c8 `GET k0` runs at once (step 30, nothing ahead of it on `k0` now that c5 has finished). c9 `PUT k2` arrives at step 32 and queues behind c6 and c7. c10 `PUT k0` arrives at step 37 and starts immediately. From step 37 to step 54, c6's PUT (on `k2`) and c10's PUT (on `k0`) progress concurrently, interleaving their completions: write, write, fsync, fsync, rename, rename, fsyncdir, fsyncdir. Neither waits for the other. This is cross-key parallelism, and it is the reason the simulator's StorageModel has to model many outstanding operations rather than one at a time.
 
 Also notice the virtual-time quiesce marker at step 48 (`inc=0 quiesce`): the simulator has stopped clients from issuing new requests until all outstanding ones have replied (Chapter 12). From here until the window drains, no new requests appear; only completions.
 

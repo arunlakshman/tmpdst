@@ -20,7 +20,7 @@ The package doc draws the whole runtime:
 // toys3/prod/doc.go:1-19
 // Package prod is the production runtime for toys3: the thin shell that does
 // the real I/O the controller (package control) only asks for. It contains no
-// business logic: OSExecutor is the real plant adapter (actuations in,
+// business logic: OSExecutor is the real storage adapter (actuations in,
 // feedback out) and Handler is the anti-corruption layer from S3 REST to
 // control.Op.
 //
@@ -58,7 +58,7 @@ Compare this with the simulator's main loop (Chapter 10). They have exactly the 
   inbox            buffered Go channel                     the same Queue
   time stamp       time.Since(start), monotonic            virtual clock = Entry.At
   Step caller      Loop.Run goroutine                      Simulator.deliver
-  FS actions       OSExecutor: goroutine + os.*            PlantModel.Plan + fs-land entry
+  FS actions       OSExecutor: goroutine + os.*            StorageModel.Plan + fs-land entry
   Reply            channel to a waiting HTTP handler       Oracle.Return + Workload.Complete
   Emit             log line                                telemetry timeline for invariants
   Trip             Run returns ErrTripped; process exits   crash + scheduled restart
@@ -69,7 +69,7 @@ The controller cannot tell which column it is in. That is the entire point of th
 
 The refactor of Chapter 3a rewrote this package's doc comment in the domain model's terms, and each phrase names a role:
 
-- **"OSExecutor is the real plant adapter (actuations in, feedback out)."** The controller owns the plant port (`Actuation`, `Feedback`, Chapter 3 §3.5); `OSExecutor` is one of its adapters, the one attached to a real disk. The simulator's `PlantModel` is the other. Both *conform* to the controller's vocabulary: neither introduces a word of its own.
+- **"OSExecutor is the real storage adapter (actuations in, feedback out)."** The controller owns the Storage port (`Actuation`, `Feedback`, Chapter 3 §3.5); `OSExecutor` is one of its adapters, the one attached to a real disk. The simulator's `StorageModel` is the other. Both *conform* to the controller's vocabulary: neither introduces a word of its own.
 - **"Handler is the anti-corruption layer from S3 REST to control.Op."** In DDD an anti-corruption layer translates a foreign model into yours so that the foreign one never leaks in. Nothing about HTTP (methods, headers, URL escaping, buckets) crosses into the controller; it receives `Put`, `Get`, `Delete` and `Copy` values (§9.6).
 - **"The event loop is the control loop."** In control engineering a digital controller runs a loop: sample the inputs, compute, write the outputs, wait for the next sample. `Loop.Run` is exactly that: take the next event, stamp its sampling instant, `Step`, dispatch the actions. Here the two meanings of "loop" coincide, which is why `Loop` kept its name.
 
@@ -99,12 +99,12 @@ var _ control.Env = Env{}
 
 ```go
 // toys3/prod/executor.go:14-20
-// Executor performs filesystem actions. Execute must not block the loop: it
-// starts the operation and, when it finishes, calls done exactly once with
-// the matching completion (control.FSWriteDone for control.FSWrite, and so on),
-// from any goroutine.
+// Executor is a storage adapter: it performs actuations (filesystem actions).
+// Execute must not block the loop: it starts the operation and, when it
+// finishes, calls done exactly once with the matching feedback
+// (control.FSWriteDone for control.FSWrite, and so on), from any goroutine.
 type Executor interface {
-	Execute(a control.Action, done func(control.EventBody))
+	Execute(a control.Actuation, done func(control.EventBody))
 }
 ```
 
@@ -112,7 +112,7 @@ Three obligations, each one essential:
 
 1. **Must not block the loop.** `Execute` is called from the loop goroutine, inside `dispatch`. If it did the `fsync` inline, every other request would wait behind it. The whole point of the async action/completion split (`loop.md` rule 6) is that the loop never waits.
 2. **Exactly once.** The controller's request record waits for exactly one completion with its IOID (Chapter 6). Zero completions means a request that hangs forever. Two completions would be harmless in the toys3 core (the second is a stale IOID and is ignored, `toys3/control/controller.go:132`), but "exactly once" is the clean contract.
-3. **The matching completion.** An `FSWrite` must complete with an `FSWriteDone` carrying the same IOID. The controller ignores a completion "of the wrong kind for the step the owner is on" (`toys3/control/doc.go:110-111`), so a mismatched type would also hang the request.
+3. **The matching completion.** An `FSWrite` must complete with an `FSWriteDone` carrying the same IOID. The controller ignores a completion "of the wrong kind for the step the owner is on" (`toys3/control/doc.go:111-112`), so a mismatched type would also hang the request.
 
 Making `Executor` an interface (rather than calling `OSExecutor` directly) buys one thing: tests can substitute a faulty executor. `prod_test.go` does exactly that to exercise `Trip` (§9.8).
 
@@ -135,7 +135,7 @@ Making `Executor` an interface (rather than calling `OSExecutor` directly) buys 
 type OSExecutor struct{}
 
 // Execute implements Executor.
-func (OSExecutor) Execute(a control.Action, done func(control.EventBody)) {
+func (OSExecutor) Execute(a control.Actuation, done func(control.EventBody)) {
 	go func() { done(run(a)) }()
 }
 ```
@@ -147,7 +147,7 @@ The work itself is a type switch that mirrors the vocabulary one-to-one:
 ```go
 // toys3/prod/executor.go:41-72
 // run performs a synchronously and returns its completion.
-func run(a control.Action) control.EventBody {
+func run(a control.Actuation) control.EventBody {
 	switch a := a.(type) {
 	case control.FSWrite:
 		return control.FSWriteDone{IO: a.IO, Err: code(writeFile(a.Path, a.Data))}
@@ -182,17 +182,17 @@ func run(a control.Action) control.EventBody {
 
 Read it against the action definitions in `toys3/control/action.go` (Chapter 3) and check each correspondence:
 
-- **`FSWrite`** must "create Path, or truncate it if it exists, and write Data as the whole file content" (`toys3/control/plant.go:56-58`). That is exactly `O_WRONLY|O_CREATE|O_TRUNC`. It does **not** fsync; that is a separate action. The controller decides when durability is needed.
+- **`FSWrite`** must "create Path, or truncate it if it exists, and write Data as the whole file content" (`toys3/control/storage.go:56-58`). That is exactly `O_WRONLY|O_CREATE|O_TRUNC`. It does **not** fsync; that is a separate action. The controller decides when durability is needed.
 - **`FSFsync`** reopens the file by path and calls `Sync`. Opening read-only (`os.Open`) is sufficient: `fsync` flushes the *inode's* dirty data, not data written through a particular file descriptor, so any descriptor for the file works on Linux.
 - **`FSFsyncDir`** is the same `syncPath` applied to a directory. Opening a directory with `os.Open` and calling `Sync` is how you fsync a directory in Go. This is the call that makes renames, creates and unlinks in that directory durable (Chapter 4).
 - **`FSRename`** is `os.Rename`, which is `rename(2)`: atomically replaces the destination.
-- **`FSRead`** returns the *whole raw file*, header included (`toys3/control/plant.go:130-131`). The CRC check is done by the controller, not here. If the executor validated the CRC, that logic would escape the simulator.
+- **`FSRead`** returns the *whole raw file*, header included (`toys3/control/storage.go:130-131`). The CRC check is done by the controller, not here. If the executor validated the CRC, that logic would escape the simulator.
 - **`FSUnlink`** is `os.Remove`, which is `unlink(2)` for a file.
-- **`FSList`** returns base names in ascending order. `os.ReadDir` already sorts by file name. The controller relies on this sorting for determinism of recovery (`toys3/control/plant.go:144`): in simulation the PlantModel sorts too (`toys3/sim/plantmodel.go:423-438`), so recovery issues its unlinks in the same order in both worlds.
+- **`FSList`** returns base names in ascending order. `os.ReadDir` already sorts by file name. The controller relies on this sorting for determinism of recovery (`toys3/control/storage.go:144`): in simulation the StorageModel sorts too (`toys3/sim/storagemodel.go:424-439`), so recovery issues its unlinks in the same order in both worlds.
 
-The panic at the end is for actions that are not filesystem actions. `Loop.dispatch` handles `Reply`, `Emit` and `Trip` itself and passes everything else to the executor, so if a new action type were added to the controller and forgotten here, the server would panic loudly rather than silently drop it.
+The panic at the end is for an `Actuation` that is not one of the seven filesystem actions. `Loop.dispatch` handles `Reply`, `Emit` and `Trip` itself, passes every `Actuation` to the executor, and panics on any other action, so if a new action type were added to the controller and forgotten here, the server would panic loudly rather than silently drop it.
 
-A small asymmetry remains after the refactor: `Executor.Execute` still takes a plain `control.Action`, not a `control.Actuation`, so the type system does not say that only actuations reach it; the `default` panic says it at run time instead. Narrowing the parameter to `Actuation` would be a behaviour-neutral improvement (`dispatch` already routes every non-`Reply`, non-`Emit`, non-`Trip` action there), and a good small exercise.
+Since commit `10777a2`, `Executor.Execute` takes a `control.Actuation`, not a plain `control.Action`, so the type system says that only actuations reach the storage adapter. Before that it took any `Action`, and `dispatch` sent it everything that was not a `Reply`, `Emit` or `Trip` through a `default:` branch; narrowing the parameter was behaviour-neutral, because those three are exactly the actions that do not implement `Actuation`.
 
 Two small helpers do the system-call plumbing:
 
@@ -228,7 +228,7 @@ func syncPath(path string) error {
 
 Note the error handling on `Close`: the first error wins, but a `Close` error is not ignored when the operation itself succeeded. On some filesystems (notably network filesystems) `close` is where a deferred write error surfaces; dropping it would turn an I/O error into a silent success. This is the kind of detail that the simulator *cannot* check, because the simulator does not run this code. It has to be right by inspection.
 
-On paths: the controller speaks slash-separated paths (`toys3/control/plant.go:51-54`), as plain data, so that event logs and hashes look the same on every OS. `osPath` converts at the boundary. On Unix, `filepath.FromSlash` is the identity.
+On paths: the controller speaks slash-separated paths (`toys3/control/storage.go:51-54`), as plain data, so that event logs and hashes look the same on every OS. `osPath` converts at the boundary. On Unix, `filepath.FromSlash` is the identity.
 
 On macOS, it is worth knowing that Go's `(*os.File).Sync` issues `fcntl(F_FULLFSYNC)` rather than plain `fsync`, because plain `fsync` on macOS does not ask the drive to flush its write cache. The toys3 code does not need to do anything special for this; it is one more reason to use `File.Sync` rather than a raw syscall.
 
@@ -236,8 +236,8 @@ On macOS, it is worth knowing that Go's `(*os.File).Sync` issues `fcntl(F_FULLFS
 
 ```go
 // toys3/prod/executor.go:101-113
-// code maps an os error to a control.ErrCode, logging real I/O errors (the core
-// only sees the code).
+// code maps an os error to a control.ErrCode, logging real I/O errors (the
+// controller only sees the code).
 func code(err error) control.ErrCode {
 	switch {
 	case err == nil:
@@ -251,13 +251,13 @@ func code(err error) control.ErrCode {
 }
 ```
 
-The controller's error vocabulary has three values (`toys3/control/plant.go:31-35`): `OK`, `ErrNotFound` (ENOENT), and `ErrIO` ("EIO or anything else; the operation may or may not have taken effect"). `code` is the *only* place that classifies real errors, which is the pattern `docs/lessons.md` lesson 1 asks for ("Adapters classify SDK and HTTP errors ... in exactly one place").
+The controller's error vocabulary has three values (`toys3/control/storage.go:31-35`): `OK`, `ErrNotFound` (ENOENT), and `ErrIO` ("EIO or anything else; the operation may or may not have taken effect"). `code` is the *only* place that classifies real errors, which is the pattern `docs/lessons.md` lesson 1 asks for ("Adapters classify SDK and HTTP errors ... in exactly one place").
 
 The mapping is deliberately pessimistic. `EACCES`, `ENOSPC`, `EROFS`, `EIO`, `EINVAL`: everything other than "not found" is `ErrIO`, which the controller treats as "may or may not have taken effect" and, for any step at or after the first one that can touch `obj/`, answers with 500 and `Trip` (Chapter 7). A disk-full during the temp-file write is a plain 500 (`toys3/control/controller.go:304-308`); a disk-full during the directory fsync trips the server. That is conservative but correct: the controller cannot know whether `ENOSPC` from an `fsync` means the data is safe.
 
 The original error message is logged here, because the controller only ever sees the code. That is the price of plain-data events: `control.ErrCode` is a `uint8`, comparable and hashable; a Go `error` is an interface value that is neither. Operators need the message; the state machine does not.
 
-There is one subtle classification worth checking against the controller's expectations. For `FSRename`, `ErrNotFound` means "the rename source does not exist" (`toys3/control/plant.go:33`). `os.Rename` returns an error satisfying `fs.ErrNotExist` when the source is missing, so this maps correctly. The controller's `stepRenaming` handler treats *any* non-OK rename as `failTrip` (`toys3/control/controller.go:326-328`), so even a misclassification here would not cause a wrong 200.
+There is one subtle classification worth checking against the controller's expectations. For `FSRename`, `ErrNotFound` means "the rename source does not exist" (`toys3/control/storage.go:33`). `os.Rename` returns an error satisfying `fs.ErrNotExist` when the source is missing, so this maps correctly. The controller's `stepRenaming` handler treats *any* non-OK rename as `failTrip` (`toys3/control/controller.go:326-328`), so even a misclassification here would not cause a wrong 200.
 
 ### PrepareDir: the step the controller cannot take
 
@@ -276,7 +276,7 @@ func PrepareDir(root string) error {
 }
 ```
 
-The controller's vocabulary has no `FSMkdir`, and `control.Config.Dir`'s doc says `obj/` and `tmp/` "must already exist" (`toys3/control/controller.go:7`). The simulator's PlantModel creates both directories as durable at construction (`toys3/sim/plantmodel.go:128-143`). In production, `PrepareDir` runs once before the loop starts, creates them, and fsyncs `root` so that the two new directory entries survive a power cut.
+The controller's vocabulary has no `FSMkdir`, and `control.Config.Dir`'s doc says `obj/` and `tmp/` "must already exist" (`toys3/control/controller.go:7`). The simulator's StorageModel creates both directories as durable at construction (`toys3/sim/storagemodel.go:128-143`). In production, `PrepareDir` runs once before the loop starts, creates them, and fsyncs `root` so that the two new directory entries survive a power cut.
 
 This is a small piece of logic outside the controller, and therefore outside the simulator. It is tolerable because it is tiny, idempotent, and runs before anything else. It is also a known gap, discussed in §9.10: if `root` itself is newly created, its own entry in its parent directory is not fsynced.
 
@@ -378,7 +378,7 @@ The `select` is the only place where nondeterminism enters the loop. If the cont
 ### dispatch
 
 ```go
-// toys3/prod/loop.go:77-99
+// toys3/prod/loop.go:77-101
 // dispatch executes the actions of one Step in order.
 func (l *Loop) dispatch(acts []control.Action) error {
 	for _, a := range acts {
@@ -396,8 +396,10 @@ func (l *Loop) dispatch(acts []control.Action) error {
 		case control.Trip:
 			l.logf("toys3: TRIP: %s", a.Cause)
 			return fmt.Errorf("%w: %s", ErrTripped, a.Cause)
-		default:
+		case control.Actuation:
 			l.exec.Execute(a, l.post)
+		default:
+			panic(fmt.Sprintf("toys3/prod: unknown action %T", a))
 		}
 	}
 	return nil
@@ -418,7 +420,7 @@ FS actions are handed to the executor with `l.post` as the completion callback. 
 ### post: dropping completions for a dead incarnation
 
 ```go
-// toys3/prod/loop.go:101-108
+// toys3/prod/loop.go:103-110
 // post delivers a completion to the inbox, or drops it if Run has returned
 // (a completion addressed to a dead incarnation).
 func (l *Loop) post(b control.EventBody) {
@@ -438,7 +440,7 @@ The inbox is bounded (`inboxSize`), and `post` blocks while it is full. That is 
 ### Submit: the client side
 
 ```go
-// toys3/prod/loop.go:118-154
+// toys3/prod/loop.go:120-156
 // Submit sends op to the server as a control.Request with a fresh ClientReq and
 // waits for its Reply. If ctx ends first the reply is discarded on arrival;
 // the operation itself may still complete (the client just never learns).
@@ -823,7 +825,7 @@ What it is *not*: a crash test. `s.stop()` cancels the context; it does not lose
 // failFsync wraps OSExecutor and fails every file fsync with EIO.
 type failFsync struct{ OSExecutor }
 
-func (f failFsync) Execute(a control.Action, done func(control.EventBody)) {
+func (f failFsync) Execute(a control.Actuation, done func(control.EventBody)) {
 	if a, ok := a.(control.FSFsync); ok {
 		go done(control.FSFsyncDone{IO: a.IO, Err: control.ErrIO})
 		return
@@ -876,7 +878,7 @@ The completions arrive in whatever order the kernel finishes them. A read of `k2
 - **Same-key requests are serialized by the controller**, not by the runtime. The second `PUT k1` from goroutine C is accepted into `reqs` but does not start until the first `PUT k1` has replied (Chapter 6). The runtime does not need to know anything about keys.
 - **Every completion carries its IOID**, so arrival order does not matter. The controller finds the owning request by IOID (`toys3/control/controller.go:127-131`).
 
-The simulator explores completion orders deliberately: each FS action gets a random dead time (until it lands) and a random feedback delay (until its completion is delivered) (`toys3/sim/plantmodel.go:145-152`), and same-instant ties are broken by a seeded random draw (Chapter 10). So the space of orders that production can produce is (a superset of what is) explored in simulation, which is why we can trust the controller under real concurrency without running the real concurrency.
+The simulator explores completion orders deliberately: each FS action gets a random dead time (until it lands) and a random feedback delay (until its completion is delivered) (`toys3/sim/storagemodel.go:145-153`), and same-instant ties are broken by a seeded random draw (Chapter 10). So the space of orders that production can produce is (a superset of what is) explored in simulation, which is why we can trust the controller under real concurrency without running the real concurrency.
 
 ## 9.10 Gaps between the model and production
 
@@ -884,11 +886,11 @@ The simulator's model of the world and the production runtime disagree in a few 
 
 **1. No supervisor is included.** `main.go` says "A supervisor restarts us and recovery runs on boot." There is no supervisor in the repository. Under systemd you would use `Restart=on-failure`; under Kubernetes the pod restarts. Until something restarts the process, a tripped server is simply down. In the simulator, restart is automatic after a random delay of 100 µs to 5 ms (`toys3/sim/config.go:172`).
 
-**2. A production Trip is a process exit, not a power loss.** This is the important one. The simulator treats `Trip` exactly like a crash: the PlantModel resolves all volatile state at that instant, as if the power went out (`toys3/sim/simulator.go:200-207`, `275-306`). In production, `log.Fatalf` kills the process, but **the kernel's page cache and directory cache survive**. After a restart, recovery and subsequent reads see the *volatile* view of the filesystem, not the durable one.
+**2. A production Trip is a process exit, not a power loss.** This is the important one. The simulator treats `Trip` exactly like a crash: the StorageModel resolves all volatile state at that instant, as if the power went out (`toys3/sim/simulator.go:200-207`, `275-306`). In production, `log.Fatalf` kills the process, but **the kernel's page cache and directory cache survive**. After a restart, recovery and subsequent reads see the *volatile* view of the filesystem, not the durable one.
 
 Consider the scenario from Chapter 1 against the *correct* server in production: `FSFsyncDir(obj/)` fails, the server replies 500 and trips. The supervisor restarts it within a second. Recovery lists and cleans `tmp/`, fsyncs `tmp/`, and starts serving. A `GET` of the key reads the renamed file, which is still visible through the kernel's caches, and returns `200 v2`. Then the power fails, the un-persisted rename is lost, and the key reads back as `v1`. That is the very "observed then vanished" history that Trip was supposed to prevent (Chapter 7), and the simulator cannot see it, because in the simulator a Trip *is* a power loss, which resolves the volatile state before anyone can read it.
 
-The defence would have to be in the controller's recovery protocol, since only the controller is simulated: for example, recovery could `FSFsyncDir(obj/)` (and fsync the object files it might serve) before emitting `Recovered`, so that whatever is visible at boot is also durable, or trip again if it cannot be made so. After a real fsync error on Linux, even that is not a complete answer for file *contents* (the "fsyncgate" behaviour means a later fsync may report success for pages that were already dropped; Chapter 11 models this as `FsyncGate`). To make the simulator expose the gap, it would need to model a trip as "process exit without power loss" (volatile state survives) as a distinct event from a crash. Chapter 17 (Part I, §2) lists this gap. It is still open at commit `a4018d5`: the refactor renamed `Halt` to `Trip` and, by design, changed no behaviour, so this finding ("Halt after restart" in the first edition, "Trip after restart" now) is exactly as true as it was. Note that the control vocabulary makes the gap easier to state: the simulator models a *trip* as if it were a *crash* (a power-loss disturbance), and in production it is not one.
+The defence would have to be in the controller's recovery protocol, since only the controller is simulated: for example, recovery could `FSFsyncDir(obj/)` (and fsync the object files it might serve) before emitting `Recovered`, so that whatever is visible at boot is also durable, or trip again if it cannot be made so. After a real fsync error on Linux, even that is not a complete answer for file *contents* (the "fsyncgate" behaviour means a later fsync may report success for pages that were already dropped; Chapter 11 models this as `FsyncGate`). To make the simulator expose the gap, it would need to model a trip as "process exit without power loss" (volatile state survives) as a distinct event from a crash. Chapter 17 (Part I, §2) lists this gap. It is still open at commit `10777a2`: the refactor renamed `Halt` to `Trip` and, by design, changed no behaviour, so this finding ("Halt after restart" in the first edition, "Trip after restart" now) is exactly as true as it was. Note that the control vocabulary makes the gap easier to state: the simulator models a *trip* as if it were a *crash* (a power-loss disturbance), and in production it is not one.
 
 **3. In-flight operations at a Trip.** When the process exits, executor goroutines die mid-syscall. From the kernel's perspective, the syscall either completed or did not; `rename` is atomic, `write` may be partial. That matches the simulator's "landed but not delivered" model reasonably well. In tests (where `Run` returns instead of the process exiting), those goroutines run to completion after the loop stopped, and `post` drops their completions. Their *effects* stay. This is again the "it happened, but nobody was told" case.
 
@@ -898,7 +900,7 @@ The defence would have to be in the controller's recovery protocol, since only t
 
 **6. One inbox for control and data.** Completions and new requests share the inbox channel. Under overload, HTTP handlers can fill the inbox and delay the completions that would free resources. `docs/lessons.md` lesson 13 and `docs/decisions.md` decision G describe the fix used in the bigger design: separate control and data inboxes, control first.
 
-**7. Real filesystems are not the PlantModel.** The PlantModel is in some ways *more* adversarial than ext4 or APFS: for example, it can resolve the two directory-entry changes of one cross-directory rename independently at a crash, leaving both names or neither (Chapter 11), whereas a journaling filesystem typically commits a rename atomically. In other ways it is *less* adversarial: it has no metadata-only journaling quirks, no delayed allocation, no reordering between files beyond what its per-entry resolution allows. The protocol is designed for the more adversarial model, which is the safe direction.
+**7. Real filesystems are not the StorageModel.** The StorageModel is in some ways *more* adversarial than ext4 or APFS: for example, it can resolve the two directory-entry changes of one cross-directory rename independently at a crash, leaving both names or neither (Chapter 11), whereas a journaling filesystem typically commits a rename atomically. In other ways it is *less* adversarial: it has no metadata-only journaling quirks, no delayed allocation, no reordering between files beyond what its per-entry resolution allows. The protocol is designed for the more adversarial model, which is the safe direction.
 
 ## Key takeaways
 
@@ -913,8 +915,8 @@ The defence would have to be in the controller's recovery protocol, since only t
 
 1. **Run it and read the telemetry.** Build `cmd/toys3`, run it with your own `-dir` and a free port, and replay the curl session from §9.7. Compare your log lines with the ones above. Then `od -A d -t x1 -c` one object file and compute its CRC with a tool of your choice (`python3 -c 'import zlib; print(hex(zlib.crc32(b"hello world")))'`). Kill the server when done.
 2. **Recovery in production.** With the server stopped, create two files in `<dir>/tmp/`, one of them named like a real temp file (`000000000000002a`) and one not (`junk`). Start the server and read the `Recovered` telemetry. Predict `TempsRemoved` first. Does recovery care what the names look like? Find the line in `onRecoveryDone` that answers this.
-3. **Fail-stop by hand.** Write a variant of `TestTripStopsLoop` (in a scratch copy of the package, or as an extra test you delete afterwards) whose executor fails `FSFsyncDir` instead of `FSFsync`. Predict the HTTP status of the PUT and the error `Run` returns. Then make it fail `FSRead` instead. Predict again; explain the difference using the error table in `toys3/control/doc.go:69-78`.
-4. **The Reply-versus-Trip race.** Temporarily replace the nested `select` in `Submit` (`toys3/prod/loop.go:146-152`) with a plain `return control.Reply{}, ErrStopped`. Run `go test ./toys3/prod -run TestTripStopsLoop -count=200`. Does it ever fail? How often? Explain the failure rate from Go's `select` semantics. Revert.
+3. **Fail-stop by hand.** Write a variant of `TestTripStopsLoop` (in a scratch copy of the package, or as an extra test you delete afterwards) whose executor fails `FSFsyncDir` instead of `FSFsync`. Predict the HTTP status of the PUT and the error `Run` returns. Then make it fail `FSRead` instead. Predict again; explain the difference using the error table in `toys3/control/doc.go:70-79`.
+4. **The Reply-versus-Trip race.** Temporarily replace the nested `select` in `Submit` (`toys3/prod/loop.go:148-154`) with a plain `return control.Reply{}, ErrStopped`. Run `go test ./toys3/prod -run TestTripStopsLoop -count=200`. Does it ever fail? How often? Explain the failure rate from Go's `select` semantics. Revert.
 5. **Model gap, on paper.** Write out, step by step, the production scenario of §9.10 point 2 (fsync-dir error, trip, restart, GET, power loss). Then propose a change to `onStarted`/`onRecoveryDone` that closes the directory half of the gap, and predict whether the simulator's existing invariants would accept your change (they should: it only adds an fsync). Implement it in a scratch branch and run `go test ./toys3/control ./toys3/sim -count=1`. Which unit tests in `controller_test.go` need updating, and why (hint: they assert exact action sequences)?
 6. **Concurrency without fear.** Using `curl` in a shell loop (or `xargs -P 16`), fire 100 concurrent PUTs at the same key with different bodies, then GET it. Is the result one of the bodies you sent? Which one, and can you predict it? Relate your answer to the per-key FIFO in Chapter 6 and to the order in which requests enter the inbox.
 7. **Grep for business logic.** Read every line of `toys3/prod` and list any decision it makes that depends on the *meaning* of a request (not just its encoding). You should find very few. For each, argue whether it belongs in the controller.

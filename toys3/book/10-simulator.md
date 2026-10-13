@@ -2,7 +2,7 @@
 
 > *"A simulator is a universe with exactly one law of physics: the next thing that happens is whatever is at the front of the queue."*
 
-Chapters 2 through 9 were about the thing being tested: a server that never does I/O, only describes it. This chapter is about the thing doing the testing. `toys3/sim/simulator.go` is 410 lines long, and it is the beating heart of everything that follows. The plant model (Chapter 11), the workload (Chapter 12), the oracle (Chapter 13) and the invariants (Chapter 14) are all plugged into it, and all of them are driven by the one loop described here.
+Chapters 2 through 9 were about the thing being tested: a server that never does I/O, only describes it. This chapter is about the thing doing the testing. `toys3/sim/simulator.go` is 410 lines long, and it is the beating heart of everything that follows. The storage model (Chapter 11), the workload (Chapter 12), the oracle (Chapter 13) and the invariants (Chapter 14) are all plugged into it, and all of them are driven by the one loop described here.
 
 We will go through it in the order you would build it: the queue first (because the queue *is* time), then the `Simulator` struct, then `New`, `Run`, and every handler. Along the way we will look at real event logs produced by seed 1 and see how each piece of code shows up as a line in the log.
 
@@ -16,11 +16,11 @@ The package doc of `toys3/sim` opens by saying what the simulator is, in the voc
 // toys3/sim/doc.go:1-4
 // Package sim is the deterministic simulator for toys3: a software-in-the-loop
 // testbench that runs the real controller (package control) against a model
-// of the plant, on one goroutine, with one seeded RNG, one priority queue and
+// of storage, on one goroutine, with one seeded RNG, one priority queue and
 // a virtual clock. It drives client traffic and checks every reply.
 ```
 
-*Software-in-the-loop* (SIL) is the control engineer's name for exactly this setup: the real controller code, unmodified, closed around a simulated plant (the plant model, Chapter 11), driven by a stimulus generator (the workload, Chapter 12) and watched by monitors (the oracle and invariants, Chapters 13 and 14). The package holds four of the bounded contexts of Chapter 3a, separated by file (`toys3/sim/doc.go:6-12`); this chapter is about the testbench itself.
+*Software-in-the-loop* (SIL) is the control engineer's name for exactly this setup: the real controller code, unmodified, closed around simulated storage (the storage model, Chapter 11), driven by a stimulus generator (the workload, Chapter 12) and watched by monitors (the oracle and invariants, Chapters 13 and 14). The package holds four of the bounded contexts of Chapter 3a, separated by file (`toys3/sim/doc.go:6-12`); this chapter is about the testbench itself.
 
 The same doc then contains the whole simulator in pseudocode. It is worth memorizing:
 
@@ -33,14 +33,14 @@ The same doc then contains the whole simulator in pseudocode. It is worth memori
 //	switch e.Kind:
 //	  deliver  → actions := server.Step(Event{clock, e.Event}); trace ← fold(StateHash)
 //	             for a in actions:
-//	               FS*   → plan := plant.Plan(a); schedule fsLand at clock+plan.DeadTime
+//	               FS*   → plan := storage.Plan(a); schedule fsLand at clock+plan.DeadTime
 //	               Reply → oracle.Return; workload.Complete; schedule clientWake
 //	               Emit  → record telemetry     Trip → crash now
 //	             during Chaos: crash now with probability CrashProb
-//	  fsLand   → body := plant.Land(a, plan); schedule deliver(body) at clock+plan.FeedbackDelay
+//	  fsLand   → body := storage.Land(a, plan); schedule deliver(body) at clock+plan.FeedbackDelay
 //	             during Chaos: crash now with probability CrashProb
 //	  clientWake → req := workload.Issue; oracle.Invoke; schedule deliver(Request)
-//	  crash    → plant.Crash(); queue.DropIncarnation; oracle.Crash; schedule restart
+//	  crash    → storage.Crash(); queue.DropIncarnation; oracle.Crash; schedule restart
 //	  restart  → inc++; server = Factory(...); schedule deliver(Started)
 //	run invariants (per-step checks); the first failure stops the run
 ```
@@ -49,7 +49,7 @@ Everything in this chapter is an elaboration of these lines. Notice three things
 
 First, **there is exactly one source of "what happens next"**: the queue. Clients, the filesystem, the server, crashes and restarts all communicate by scheduling queue entries. Nobody calls anybody "later"; they schedule an entry for later.
 
-Second, **filesystem operations take two queue entries**, not one: a *land* (the effect is applied to the PlantModel) and a *deliver* (the completion event reaches the server). The gap between them is where "it happened, but nobody was told" lives. This is the single most important modelling decision in the simulator, and §10.7 is devoted to it.
+Second, **filesystem operations take two queue entries**, not one: a *land* (the effect is applied to the StorageModel) and a *deliver* (the completion event reaches the server). The gap between them is where "it happened, but nobody was told" lives. This is the single most important modelling decision in the simulator, and §10.7 is devoted to it.
 
 Third, **invariants run after every step**, and the first failure stops the run. The step at which a failure is reported is therefore (for the eager invariants) the step at which the bug became observable, which is what makes the event log readable.
 
@@ -84,7 +84,7 @@ The kinds:
 // toys3/sim/queue.go:16-25
 const (
 	KindDeliver     EntryKind = iota // deliver Event to the server (Inc must be current)
-	KindFSLand                       // a filesystem action takes effect in the PlantModel
+	KindFSLand                       // a filesystem action takes effect in the StorageModel
 	KindClientWake                   // an idle client issues its next request
 	KindCrash                        // kill the server now
 	KindRestart                      // boot a new incarnation and deliver Started
@@ -218,7 +218,7 @@ type Simulator struct {
 	step int
 	q    Queue
 
-	plant    *PlantModel
+	storage  *StorageModel
 	server   control.Machine // nil while crashed
 	inc      Incarnation     // current (or last) incarnation; 0 before first boot
 	alive    bool
@@ -244,11 +244,11 @@ Field by field:
 | Field | Meaning |
 |---|---|
 | `cfg` | The run's `Config` (Chapter 12 covers `DefaultConfig`/`BaseConfig`), with defaults filled in by `New`. |
-| `rng` | The one `*Rand`. Shared by the queue, the PlantModel, the workload and the server's `env`. |
+| `rng` | The one `*Rand`. Shared by the queue, the StorageModel, the workload and the server's `env`. |
 | `now` | Virtual time: the `At` of the entry being processed. |
 | `step` | Count of entries popped and processed so far. Log lines are numbered by it. |
 | `q` | The global queue. |
-| `plant` | The plant model, a `*PlantModel` (Chapter 11). Survives crashes: it *is* the disk. |
+| `storage` | The storage model, a `*StorageModel` (Chapter 11). Survives crashes: it *is* the disk. |
 | `server` | The current `control.Machine`, or `nil` while crashed. Built by `cfg.Factory`. |
 | `inc` | Current incarnation number. 0 before the first boot, 1 after it, +1 per restart. |
 | `alive` | True between a restart and the next crash. |
@@ -272,7 +272,7 @@ Look at what is *not* a field: there is no list of "in-flight FS operations" and
 
 ```go
 // toys3/sim/simulator.go:39-77
-// New prepares a run: seeds the Rand, builds the PlantModel with the obj/ and tmp/
+// New prepares a run: seeds the Rand, builds the StorageModel with the obj/ and tmp/
 // directories of cfg.Server.Dir, the workload and the oracle, and schedules
 // the first boot, the clients' first wakeups and the end of Chaos.
 func New(cfg Config) *Simulator {
@@ -292,7 +292,7 @@ func New(cfg Config) *Simulator {
 	s := &Simulator{
 		cfg:      cfg,
 		rng:      rng,
-		plant:    NewPlantModel(rng, cfg.Disturbances, format.ObjDir(cfg.Server.Dir), format.TmpDir(cfg.Server.Dir)),
+		storage:  NewStorageModel(rng, cfg.Disturbances, format.ObjDir(cfg.Server.Dir), format.TmpDir(cfg.Server.Dir)),
 		workload: NewWorkload(cfg.Workload, rng),
 		oracle:   NewOracle(),
 		env:      &env{rng: rng, buggify: true},
@@ -316,8 +316,8 @@ func New(cfg Config) *Simulator {
 Walk through it:
 
 1. **Defaults.** No factory means the real server (`control.NewMachine`). No invariants means all five (`DefaultInvariants`, Chapter 14). `Dir` defaults to `/data`, which is why every path in the logs starts with `/data/`.
-2. **One RNG.** `NewRand(cfg.Seed)` is created once and passed by pointer to the PlantModel, the workload and the `env`. There is no second generator. (`DefaultConfig` *does* use a second, separate `Rand` to choose the swarm parameters, but that happens before `New` and does not touch the run's stream: `toys3/sim/config.go:139`. Chapter 12 explains why.)
-3. **The PlantModel starts with exactly two directories**, `obj/` and `tmp/`, both durable and empty. This matches what `prod.PrepareDir` guarantees in production (`toys3/prod/executor.go:115-125`): the controller has no mkdir action, so the runtime must create both directories durably before the first `Started`.
+2. **One RNG.** `NewRand(cfg.Seed)` is created once and passed by pointer to the StorageModel, the workload and the `env`. There is no second generator. (`DefaultConfig` *does* use a second, separate `Rand` to choose the swarm parameters, but that happens before `New` and does not touch the run's stream: `toys3/sim/config.go:139`. Chapter 12 explains why.)
+3. **The StorageModel starts with exactly two directories**, `obj/` and `tmp/`, both durable and empty. This matches what `prod.PrepareDir` guarantees in production (`toys3/prod/executor.go:115-125`): the controller has no mkdir action, so the runtime must create both directories durably before the first `Started`.
 4. **The trace hash starts at the seed.** Two different seeds therefore have different traces from step zero, even if their first steps happen to be identical.
 5. **The initial schedule**, in this order (each `schedule` draws one `Tie` from the RNG):
    - `KindRestart` at t=0: the first boot.
@@ -366,7 +366,7 @@ func (s *Simulator) Run() Result {
 		s.now = e.At
 		s.trace = Fold(Fold(Fold(Fold(s.trace, uint64(s.step)), uint64(s.now)), uint64(e.Kind)), uint64(e.Inc))
 		s.handle(e)
-		s.trace = Fold(s.trace, s.plant.Hash())
+		s.trace = Fold(s.trace, s.storage.Hash())
 		if s.halted {
 			break
 		}
@@ -383,7 +383,7 @@ func (s *Simulator) Run() Result {
 	s.res.EndTime = s.now
 	s.res.TraceHash = s.trace
 	s.res.RandCalls = s.rng.Calls()
-	fc := s.plant.Counters()
+	fc := s.storage.Counters()
 	s.res.Stats.FSOps = fc.Landed
 	s.res.Stats.EIOs = fc.EIOs
 	s.res.Stats.ReadCorruptions = fc.ReadCorruptions
@@ -402,11 +402,11 @@ Line by line:
 - **`MaxSteps`.** A run that never drains (a livelock, a server that keeps scheduling work forever, a client that retries forever) would loop until the heat death of the laptop. After 2,000,000 steps the run fails with invariant `"max-steps"`. Note the check happens *after* popping and *before* incrementing: the run executes exactly `MaxSteps` entries and fails on the attempt to execute one more. A typical passing seed takes 1,000 to 3,000 steps (seed 1: 1,628), so the limit is three orders of magnitude of headroom.
 - **Advance time.** `s.now = e.At`. This is the entire implementation of virtual time. There is no clock that ticks; time is whatever the current entry says it is. If the next entry is 5 ms away, time jumps 5 ms in one assignment. That is why a run covering 360 ms of simulated time finishes in a few milliseconds of wall time.
 - **Fold the step header into the trace**: the step number, the time, the entry kind and the incarnation. Every step contributes these four numbers, so two runs agree on their trace hash only if they process the same kinds of entries at the same times in the same incarnations in the same order.
-- **`handle(e)`**: dispatch on kind (§10.6). This is where the server steps, the PlantModel changes, clients act, and crashes happen. Several handlers fold more into the trace.
-- **Fold the PlantModel hash.** After every step, the entire filesystem state (both durable and volatile versions of everything, Chapter 11 §11.11) is folded in. This catches a class of nondeterminism the server's own `StateHash` would miss: a difference in what the *disk* looks like.
+- **`handle(e)`**: dispatch on kind (§10.6). This is where the server steps, the StorageModel changes, clients act, and crashes happen. Several handlers fold more into the trace.
+- **Fold the StorageModel hash.** After every step, the entire filesystem state (both durable and volatile versions of everything, Chapter 11 §11.11) is folded in. This catches a class of nondeterminism the server's own `StateHash` would miss: a difference in what the *disk* looks like.
 - **`afterStep()`**: end a quiesce if possible, then run every invariant's `AfterStep` (§10.10).
 
-When the loop ends without a failure, each invariant's `AtEnd` runs once. Then the `Result` is filled in: steps, end time, trace hash, number of RNG draws, and the stats gathered from the PlantModel counters and the oracle.
+When the loop ends without a failure, each invariant's `AtEnd` runs once. Then the `Result` is filled in: steps, end time, trace hash, number of RNG draws, and the stats gathered from the StorageModel counters and the oracle.
 
 `RandCalls` deserves a mention. The determinism canary (`toys3/sim/sim_test.go:24-42`) compares three numbers between two runs of a seed: `TraceHash`, `RandCalls` and `Steps`. `RandCalls` is cheap, robust, and tells you *where* to look: if two runs agree on steps but disagree on draws, some code path drew a different number of random values, which narrows the search enormously.
 
@@ -427,7 +427,7 @@ func (s *Simulator) handle(e Entry) {
 			s.note(e, "dropped: dead incarnation")
 			return
 		}
-		body := s.plant.Land(e.Action, e.Plan)
+		body := s.storage.Land(e.Action, e.Plan)
 		s.trace = hashEvent(Fold(s.trace, 1), body)
 		if s.cfg.Log {
 			s.note(e, "land "+DescribeAction(e.Action)+" -> "+DescribeEvent(body))
@@ -449,7 +449,7 @@ func (s *Simulator) handle(e Entry) {
 		}
 	case KindSettle:
 		s.settling = true
-		s.plant.SetQuiet(true)
+		s.storage.SetQuiet(true)
 		s.env.buggify = false
 		s.note(e, "chaos over: settling (no new faults or crashes)")
 	case KindSettlingEnd:
@@ -470,7 +470,7 @@ So the guard is a belt to `DropIncarnation`'s braces. It costs nothing, and it w
 `KindQuiesce`, `KindSettle` and `KindSettlingEnd` are not about the server at all; they change the *simulator's* behaviour:
 
 - **`KindQuiesce`** sets `quiescing = true` (unless clients are already stopped). From then on, idle clients park instead of issuing. When every outstanding request has replied, `afterStep` ends the quiesce and schedules the next one (§10.10). Quiescent points split the history into windows the oracle can check independently (Chapter 13). In seed 1 there are 27 quiesce lines; the first few are at 8.000 ms, 21.09 ms, 35.37 ms, 49.67 ms and 61.11 ms. The first is exactly `QuiesceEvery`; each later one is 8 ms after the previous quiesce *ended* (for example, the quiesce at 8.000 ms ended around 13.09 ms, and the next began at 21.09 ms).
-- **`KindSettle`** ends Chaos. Three switches flip: the simulator stops injecting crashes (`maybeCrash` checks `!s.settling`), the PlantModel stops injecting new faults (`SetQuiet(true)`: no new EIO plans, no read bit-flips), and buggify turns off. Seed 1's log shows it at exactly 300 ms: `#1257 t=300.000000ms inc=0 settle chaos over: settling (no new faults or crashes)`. Note `inc=0`: phase entries are not addressed to an incarnation.
+- **`KindSettle`** ends Chaos. Three switches flip: the simulator stops injecting crashes (`maybeCrash` checks `!s.settling`), the StorageModel stops injecting new faults (`SetQuiet(true)`: no new EIO plans, no read bit-flips), and buggify turns off. Seed 1's log shows it at exactly 300 ms: `#1257 t=300.000000ms inc=0 settle chaos over: settling (no new faults or crashes)`. Note `inc=0`: phase entries are not addressed to an incarnation.
 - **`KindSettlingEnd`** sets `stopped = true`. Clients park and never wake again. The queue drains: in-flight FS operations land and deliver, the last replies go out, and the run ends.
 
 ## 10.7 deliver: stepping the server
@@ -497,7 +497,7 @@ func (s *Simulator) deliver(body control.EventBody) {
 	for i, a := range acts {
 		switch x := a.(type) {
 		case control.Actuation:
-			plan := s.plant.Plan(a)
+			plan := s.storage.Plan(a)
 			s.schedule(Entry{At: s.now + control.Time(plan.DeadTime), Kind: KindFSLand, Inc: s.inc, Action: a, Plan: plan})
 		case control.Reply:
 			s.reply(x)
@@ -557,10 +557,10 @@ Note the panic path returns before `s.server.StateHash()` is folded: after a pan
 
 Actions are processed in the order the server returned them. This matters, because the controller's contract (`toys3/control/action.go:3-6`) says "Actions in one returned slice are started in order", and several behaviours depend on it:
 
-- **Filesystem actions** (anything that implements `control.Actuation`, the plant port of Chapter 3) are not executed now. `s.plant.Plan(a)` decides, *at issue time*, whether the operation will fail, how long until its effect lands on the plant (its **dead time**) and how long after that until the controller hears about it (its **feedback delay**) (Chapter 11 §11.3), and a `KindFSLand` entry is scheduled at `now + plan.DeadTime`. Deciding at issue time means the RNG is consumed in issue order, independent of landing order, which keeps the run deterministic regardless of how delays shuffle completions. Before the refactor this `case` listed the seven filesystem action types one by one; one interface now names them, and the order of the cases is unchanged (`Reply`, `Emit` and `Trip` do not implement `Actuation`, so no action changed branch).
+- **Filesystem actions** (anything that implements `control.Actuation`, the Storage port of Chapter 3) are not executed now. `s.storage.Plan(a)` decides, *at issue time*, whether the operation will fail, how long until its effect lands in storage (its **dead time**) and how long after that until the controller hears about it (its **feedback delay**) (Chapter 11 §11.3), and a `KindFSLand` entry is scheduled at `now + plan.DeadTime`. Deciding at issue time means the RNG is consumed in issue order, independent of landing order, which keeps the run deterministic regardless of how delays shuffle completions. Before the refactor this `case` listed the seven filesystem action types one by one; one interface now names them, and the order of the cases is unchanged (`Reply`, `Emit` and `Trip` do not implement `Actuation`, so no action changed branch).
 - **`Reply`** goes to the oracle and the workload immediately (§10.8).
 - **`Emit`** appends a `Sample` (the telemetry value stamped with the current step, time and incarnation) to the telemetry timeline. Two kinds of telemetry also update stats: `CorruptionDetected` (coverage for the CRC path) and `Recovered` (sum of temps removed).
-- **`Trip`** must be the last action of the slice. If it is not, that is a `"protocol"` failure: the controller's contract (`toys3/control/doc.go:80-83`) says Trip is always last, and a runtime cannot know what to do with actions after a fail-stop. If it is last, the simulator counts it and crashes the server *right now*, with all the preceding actions already processed. That ordering is what gives the server's "500 then Trip" its meaning: the 500 reply has already reached the oracle when the crash happens.
+- **`Trip`** must be the last action of the slice. If it is not, that is a `"protocol"` failure: the controller's contract (`toys3/control/doc.go:81-84`) says Trip is always last, and a runtime cannot know what to do with actions after a fail-stop. If it is last, the simulator counts it and crashes the server *right now*, with all the preceding actions already processed. That ordering is what gives the server's "500 then Trip" its meaning: the 500 reply has already reached the oracle when the crash happens.
 - **Anything else** is a `"protocol"` failure. The `Action` interface is closed (Chapter 3), so this can only happen if a mutant or a future change invents a new action type without teaching the simulator about it.
 
 After each action, `if s.halted { return }`: if dispatching a `Reply` triggered a failure (a reply to an unknown request), processing stops.
@@ -598,19 +598,19 @@ The simulator models this with two entries, and the two delays between them have
                       │ ActuationPlan: DeadTime=+0.36ms, FeedbackDelay=+0.37ms, Fail=false
                       ▼
  t0                       schedule KindFSLand  at t0+DeadTime
- t0+DeadTime              ── fs-land ──►  PlantModel.Land(FSRename)  (the effect happens HERE)
+ t0+DeadTime              ── fs-land ──►  StorageModel.Land(FSRename)  (the effect happens HERE)
                                │      schedule KindDeliver(FSRenameDone{io53}) at +FeedbackDelay
                                │      maybeCrash()  ◄── a crash here: effect applied, nobody told
                                ▼
  t0+DeadTime+FeedbackDelay ── deliver ──► server.Step(FSRenameDone{io53})
 ```
 
-- **Dead time** (also called transport delay) is the time between a controller issuing a command and the command having any effect on the plant. A valve does not move the instant the controller decides to open it.
-- **Feedback delay** (measurement delay) is the time between the plant changing and the controller *seeing* the change. A thermometer reports the temperature of a moment ago.
+- **Dead time** (also called transport delay) is the time between a controller issuing a command and the command having any effect on the controlled system (here, storage). A valve does not move the instant the controller decides to open it.
+- **Feedback delay** (measurement delay) is the time between storage changing and the controller *seeing* the change. A thermometer reports the temperature of a moment ago.
 
-Before the refactor these were called `Latency` and `ReplyDelay`, and the plan's fields `Land` and `Reply`. The new names make the window this section is about precise: "it happened, but nobody was told" is exactly **a crash inside the feedback delay**. A crash inside the dead time is the other, simpler case: the command never reached the plant at all, so it never happened.
+Before the refactor these were called `Latency` and `ReplyDelay`, and the plan's fields `Land` and `Reply`. The new names make the window this section is about precise: "it happened, but nobody was told" is exactly **a crash inside the feedback delay**. A crash inside the dead time is the other, simpler case: the command never reached storage at all, so it never happened.
 
-The `KindFSLand` handler (§10.6) applies the action to the PlantModel, folds the resulting completion into the trace, logs `land <action> -> <completion>`, schedules the completion's delivery `Plan.FeedbackDelay` later, and then calls `maybeCrash()`. That last call is deliberate: a crash *immediately* after a landing is exactly the dangerous case.
+The `KindFSLand` handler (§10.6) applies the action to the StorageModel, folds the resulting completion into the trace, logs `land <action> -> <completion>`, schedules the completion's delivery `Plan.FeedbackDelay` later, and then calls `maybeCrash()`. That last call is deliberate: a crash *immediately* after a landing is exactly the dangerous case.
 
 Seed 1 contains a clean example. At step 824, an injected crash fires in the very step where an unlink lands:
 
@@ -734,7 +734,7 @@ A small detail about RNG consumption: `Chance(p)` returns `false` *without drawi
 ```go
 // toys3/sim/simulator.go:272-307
 func (s *Simulator) crash(why string) {
-	rep := s.plant.Crash()
+	rep := s.storage.Crash()
 	s.res.Stats.TornFiles += rep.Torn
 	s.res.Stats.LostChanges += rep.Lost
 	s.res.Stats.KeptChanges += rep.Kept
@@ -766,7 +766,7 @@ func (s *Simulator) crash(why string) {
 
 A crash is a power loss. In order:
 
-1. **The disk resolves.** `s.plant.Crash()` decides, change by change, what survives (Chapter 11 §11.9) and reports how many changes were kept, lost and torn. These become `KeptChanges`, `LostChanges` and `TornFiles` in the stats.
+1. **The disk resolves.** `s.storage.Crash()` decides, change by change, what survives (Chapter 11 §11.9) and reports how many changes were kept, lost and torn. These become `KeptChanges`, `LostChanges` and `TornFiles` in the stats.
 2. **The queue forgets the dead incarnation**: un-landed FS operations and undelivered completions are dropped (§10.2.4).
 3. **Clients learn nothing.** `workload.Crash()` marks every busy client idle and returns the abandoned request ids. Each counts as `Indeterminate`. For each, the simulator looks up the pending history op *before* telling the oracle about the crash (order matters: `oracle.op` only finds ops that are still open, and `oracle.Crash` closes them all). If any abandoned op was a PUT or COPY, this crash counts as `CrashesMidPut`, one of the coverage numbers `TestCoverage` requires to be non-zero (`toys3/sim/sim_test.go:86-118`): a simulator that never crashes in the middle of a write is not testing durability. The client that owned each abandoned op is parked so the restart will wake it.
 4. **The oracle records the crash**: every pending op becomes `Abandoned` with return time `now` (Chapter 13).
@@ -774,7 +774,7 @@ A crash is a power loss. In order:
 6. **Fold and log.** The crash report goes into the trace (tag 3), and the log line records why: `injected crash`, or `trip: <cause>`.
 7. **Schedule the restart** after a random downtime in `RestartDelay` (100 µs to 5 ms by default).
 
-A `Trip` takes exactly the same path (`deliver` calls `s.crash("trip: " + x.Cause)`). From the disk's point of view there is no difference between the controller choosing to stop and the power failing; in both cases un-synced state is at the mercy of the adversary. The vocabulary nevertheless keeps the two apart, because their *causes* are different: a **crash** is a disturbance (power loss) that the controller cannot command and does not see coming, while a **trip** is the controller's own safety action. That is why the stats count them separately as well as together: `crashes` counts both, and `trips` counts the subset the controller asked for. `DESIGN.md:177-181` states this as the crash model, and Chapter 7 explains why it is the right model for fail-stop.
+A `Trip` takes exactly the same path (`deliver` calls `s.crash("trip: " + x.Cause)`). From the disk's point of view there is no difference between the controller choosing to stop and the power failing; in both cases un-synced state is at the mercy of the adversary. The vocabulary nevertheless keeps the two apart, because their *causes* are different: a **crash** is a disturbance (power loss) that the controller cannot command and does not see coming, while a **trip** is the controller's own safety action. That is why the stats count them separately as well as together: `crashes` counts both, and `trips` counts the subset the controller asked for. `DESIGN.md:179-183` states this as the crash model, and Chapter 7 explains why it is the right model for fail-stop.
 
 Seed 1 shows both kinds back to back:
 
@@ -941,13 +941,13 @@ When a disturbance hits a feedback loop, the loop goes through a **transient**: 
 - *Zero steady-state error.* Once disturbances stop, a correct controller has no reason to fail anything: no request *issued* in Settling may get a 500. That is the `AfterStep` half of `Liveness`.
 - *Settling time.* The 60 ms window is the budget. It has to cover one restart (up to 5 ms) plus the protocol steps of whatever was in flight; the run's drain after the window shows how much was left.
 
-The rename also removed one of three near-homonyms that used to collide in the code and the book: *quiet* (no new faults), *quiesce* (clients pause so the oracle can check a window) and *quiescent* (no pending ops). The last two keep their meaning, because they are linearizability-checker terms (Chapter 13). Only the plant model keeps the word "quiet", in `PlantModel.SetQuiet`: "a quiet plant injects no new disturbances" is a statement about the plant, and it is accurate.
+The rename also removed one of three near-homonyms that used to collide in the code and the book: *quiet* (no new faults), *quiesce* (clients pause so the oracle can check a window) and *quiescent* (no pending ops). The last two keep their meaning, because they are linearizability-checker terms (Chapter 13). Only the storage model keeps the word "quiet", in `StorageModel.SetQuiet`: "quiet storage injects no new disturbances" is a statement about storage, and it is accurate.
 
 ### A subtlety: faults planned in Chaos can land in Settling
 
-`PlantModel.Plan` decides `Fail` at *issue* time, using the plant's `quiet` flag ("no new disturbances") at that moment (`toys3/sim/plantmodel.go:146-152`, Chapter 11). An FS action issued at 299.9 ms with a planned EIO lands after 300 ms, in Settling, and still fails. If it is an fsync, the server trips, and the simulator crashes it, during Settling. `maybeCrash` does not fire in Settling, but a `Trip` is not an injected crash; it is the server's own decision, and the simulator honours it.
+`StorageModel.Plan` decides `Fail` at *issue* time, using the storage model's `quiet` flag ("no new disturbances") at that moment (`toys3/sim/storagemodel.go:147-153`, Chapter 11). An FS action issued at 299.9 ms with a planned EIO lands after 300 ms, in Settling, and still fails. If it is an fsync, the server trips, and the simulator crashes it, during Settling. `maybeCrash` does not fire in Settling, but a `Trip` is not an injected crash; it is the server's own decision, and the simulator honours it.
 
-Is this a problem for the Liveness invariant (Chapter 14), which requires no 500s in Settling? No, by construction. `Liveness` only flags 500s for ops *invoked* after Settling began (`toys3/sim/invariant.go:200-214`), and every FS action of such an op is planned in quiet mode and cannot fail. A leftover failure from Chaos can only hit an op that was invoked in Chaos. It can, however, cause a crash in Settling that abandons a Settling op; the run then needs the restart (at most 5 ms later) and the rest of the Settling window to finish, which the 60 ms window accommodates. Read corruption, by contrast, is decided at *land* time (`toys3/sim/plantmodel.go:398`), so it stops exactly at 300 ms.
+Is this a problem for the Liveness invariant (Chapter 14), which requires no 500s in Settling? No, by construction. `Liveness` only flags 500s for ops *invoked* after Settling began (`toys3/sim/invariant.go:200-214`), and every FS action of such an op is planned in quiet mode and cannot fail. A leftover failure from Chaos can only hit an op that was invoked in Chaos. It can, however, cause a crash in Settling that abandons a Settling op; the run then needs the restart (at most 5 ms later) and the rest of the Settling window to finish, which the 60 ms window accommodates. Read corruption, by contrast, is decided at *land* time (`toys3/sim/storagemodel.go:399`), so it stops exactly at 300 ms.
 
 ## 10.15 Why the simulator is shaped like this
 
@@ -963,7 +963,7 @@ It is worth stepping back and asking what properties the design buys.
 ## Key takeaways
 
 - The queue *is* time. Entries are ordered by `(At, Tie, Seq)`: virtual time, then a seeded random tie-break that lets different seeds explore different same-instant orders, then insertion order to make the order total. (`loop.md` lists `(time, seq, rngTie)`, which would never consult the random tie; the code's order is the right one.)
-- `Run` pops, advances `now`, folds the step header into the trace, handles the entry, folds the PlantModel hash, and runs invariants. A run ends when the queue drains; `MaxSteps` turns non-termination into a failure.
+- `Run` pops, advances `now`, folds the step header into the trace, handles the entry, folds the StorageModel hash, and runs invariants. A run ends when the queue drains; `MaxSteps` turns non-termination into a failure.
 - FS actions are planned at issue, applied at *land*, and their completions *delivered* later. A crash between land and deliver gives "it happened, but nobody was told", the most important state a storage system must survive.
 - A crash (injected or `Trip`) resolves the disk, drops the dead incarnation's queued entries, abandons outstanding requests, discards the server, and schedules a restart. A restart builds a fresh server and delivers `Started` at the same instant; requests may arrive first.
 - Crashes are injected only right after a server step or an FS landing; those two hook points cover every distinct crash position.

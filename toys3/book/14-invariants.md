@@ -46,7 +46,7 @@ type View interface {
 	Alive() bool // server is booted (it may still be recovering)
 	Inc() Incarnation
 	Settling() bool // in Settling: no new faults, no crashes
-	// GroundTruth is the plant's true durable state, for white-box monitors.
+	// GroundTruth is the true durable state of storage, for white-box monitors.
 	GroundTruth() GroundTruth
 	Root() string // the server's data directory (control.Config.Dir)
 	Oracle() *Oracle
@@ -58,9 +58,9 @@ type View interface {
 
 The `Simulator` implements it with one-line accessors (`toys3/sim/simulator.go:384-397`). Notice what is on this list and what is not:
 
-- **On the list:** the plant's *durable* state, through `GroundTruth()`; the client-visible history; the oracle; and the *telemetry* the controller has emitted, as `Sample`s.
+- **On the list:** the *durable* state of storage, through `GroundTruth()`; the client-visible history; the oracle; and the *telemetry* the controller has emitted, as `Sample`s.
 - **Not on the list:** the controller itself. There is no `Controller()` method. An invariant cannot reach into `control.Controller` and inspect `reqs` or `mode`.
-- **Not on the list either:** the plant model itself, and in particular its *current* (volatile) view.
+- **Not on the list either:** the storage model itself, and in particular its *current* (volatile) view.
 
 The first omission is deliberate. The controller is treated as a black box whose only outputs are Actions. Invariants judge it by what it *did* (replies, filesystem effects) and what it *said it believed* (telemetry), never by its private state.
 
@@ -69,10 +69,10 @@ The second omission is newer, and it is the anti-corruption layer of Chapter 3a.
 ```go
 // toys3/sim/invariant.go:37-51
 // GroundTruth is the anti-corruption interface between verification and the
-// plant model: the only things a monitor may read of the plant are its true
+// storage model: the only things a monitor may read of storage are its true
 // durable state and a generation counter. It uses only builtin types, so the
-// plant model never depends on verification and monitors never reach into
-// the plant model's internals. *PlantModel implements it.
+// storage model never depends on verification and monitors never reach into
+// the storage model's internals. *StorageModel implements it.
 type GroundTruth interface {
 	// DurableFile returns path's content in the durable view.
 	DurableFile(path string) ([]byte, bool)
@@ -82,10 +82,10 @@ type GroundTruth interface {
 	DurableGen() uint64
 }
 
-var _ GroundTruth = (*PlantModel)(nil)
+var _ GroundTruth = (*StorageModel)(nil)
 ```
 
-"Ground truth" is the control-theory phrase for the plant's *true state*, which a controller can only estimate and a testbench can see. The white-box invariants are exactly the checks that compare the controller's claims with it. This keeps invariants valid for any `control.Factory`, including the broken wrappers in `mutants_test.go`, which have quite different internals.
+"Ground truth" is the control-theory phrase for the *true state* of the controlled system (here, storage), which a controller can only estimate and a testbench can see. The white-box invariants are exactly the checks that compare the controller's claims with it. This keeps invariants valid for any `control.Factory`, including the broken wrappers in `mutants_test.go`, which have quite different internals.
 
 ### Telemetry: the server's beliefs, on a timeline
 
@@ -144,7 +144,7 @@ func DefaultInvariants() []Invariant {
 }
 
 // BlackBoxInvariants returns only the invariants that judge what clients
-// see (no peeking at the plant model's durable state). Useful to learn
+// see (no peeking at the storage model's durable state). Useful to learn
 // which bugs are visible end to end, and which only to a ground-truth check.
 func BlackBoxInvariants() []Invariant {
 	return []Invariant{&NoCorruptReads{}, &Linearizable{}, &Liveness{}}
@@ -156,12 +156,12 @@ The split is the most important conceptual distinction in the chapter:
 | Invariant | Looks at | Kind |
 |---|---|---|
 | `NoCorruptReads` | history (GET bodies) | black-box |
-| `AckedIsDurable` | telemetry (`Committed`) + the plant's durable view (`GroundTruth`) | **white-box** |
-| `ObjNeverTorn` | the plant's durable view (`GroundTruth`) | **white-box** |
+| `AckedIsDurable` | telemetry (`Committed`) + the durable view of storage (`GroundTruth`) | **white-box** |
+| `ObjNeverTorn` | the durable view of storage (`GroundTruth`) | **white-box** |
 | `Linearizable` | history + oracle model | black-box |
 | `Liveness` | history, telemetry (`Recovered`), `Alive()` | black-box (mostly; see §14.7) |
 
-A **black-box** invariant could, in principle, be checked against a real deployed toys3 by a client that records requests and replies. A **white-box** invariant needs *ground truth*: it asks the plant model "what would survive a crash right now?", which no real client could ever ask a real disk.
+A **black-box** invariant could, in principle, be checked against a real deployed toys3 by a client that records requests and replies. A **white-box** invariant needs *ground truth*: it asks the storage model "what would survive a crash right now?", which no real client could ever ask a real disk.
 
 Why keep both? Because they answer different questions:
 
@@ -239,7 +239,7 @@ Two invariants, same step. How can two fire if "the first failure stops the run"
 
 ### What the correct server does at the same moment
 
-The same seed against the correct server is instructive. `PlantModel.read` flips one bit with probability `ReadCorruptProb` (`toys3/sim/plantmodel.go:398-402`), and at seed 18 that coin comes up on exactly the same read (the RNG stream is identical up to this point, because the mutant only rewrites an event *after* the read has landed). From the correct server's log (`s18.log` in the book's scratch directory):
+The same seed against the correct server is instructive. `StorageModel.read` flips one bit with probability `ReadCorruptProb` (`toys3/sim/storagemodel.go:399-403`), and at seed 18 that coin comes up on exactly the same read (the RNG stream is identical up to this point, because the mutant only rewrites an event *after* the read has landed). From the correct server's log (`s18.log` in the book's scratch directory):
 
 ```
 #656    t=153.982439ms inc=7 fs-land     land FSRead{io87 /data/obj/k3} -> FSReadDone{io87 OK raw(29 bytes)}
@@ -291,7 +291,7 @@ The mechanism is a contract between the server and the simulator, spelled out in
 // toys3/control/telemetry.go:14-24
 // Committed is emitted immediately before the 200 Reply of a PUT, COPY or
 // DELETE, at the moment the controller believes the mutation is durable. The
-// simulator checks it against the plant model's durable state on the same
+// simulator checks it against the storage model's durable state on the same
 // step ("acked implies durable"), which catches a missing fsync without
 // waiting for a crash to expose it.
 type Committed struct {
@@ -302,7 +302,7 @@ type Committed struct {
 }
 ```
 
-The server emits `Committed` in the same `Step` as the 200 (`toys3/control/controller.go:256-262`). The simulator processes the step's actions, then runs invariants. At that moment, `DurableFile` (`toys3/sim/plantmodel.go:581-588`) answers the question "if the power went out *right now*, and the adversary threw away every un-synced change, what would `obj/<key>` contain?" The four cases:
+The server emits `Committed` in the same `Step` as the 200 (`toys3/control/controller.go:256-262`). The simulator processes the step's actions, then runs invariants. At that moment, `DurableFile` (`toys3/sim/storagemodel.go:582-589`) answers the question "if the power went out *right now*, and the adversary threw away every un-synced change, what would `obj/<key>` contain?" The four cases:
 
 | Committed says | Durable view shows | Verdict |
 |---|---|---|
@@ -326,7 +326,7 @@ Compare two ways of catching mutant a (skip `FSFsyncDir(obj/)`):
   #46     t=7.377477ms   inc=1 crash       FAILURE acked-is-durable: c6: write of "k2" acked but /data/obj/k2 has no durable entry
   ```
 
-- **Lazy (the oracle):** wait for a crash, hope the adversary chooses to revert that particular directory entry (50/50 per entry in `PlantModel.Crash`, `toys3/sim/plantmodel.go:479-485`), hope no background writeback persisted it first, and then hope a later GET of `k2` happens before another PUT overwrites it. The black-box column in `DESIGN.md` says that also happens at seed 1 for this mutant, because a is a blatant bug. For subtler bugs the gap between "eager" and "lazy" is the gap between seed 1 and seed several hundred.
+- **Lazy (the oracle):** wait for a crash, hope the adversary chooses to revert that particular directory entry (50/50 per entry in `StorageModel.Crash`, `toys3/sim/storagemodel.go:480-486`), hope no background writeback persisted it first, and then hope a later GET of `k2` happens before another PUT overwrites it. The black-box column in `DESIGN.md` says that also happens at seed 1 for this mutant, because a is a blatant bug. For subtler bugs the gap between "eager" and "lazy" is the gap between seed 1 and seed several hundred.
 
 There is a second, quieter benefit. `AckedIsDurable` checks *every* ack, including the vast majority that are never followed by a crash. The oracle can only ever check acks whose loss is subsequently observed. Over the 200 seeds in the preface there were 1,691 crashes but about 33,000 200-replies; perhaps a few thousand of them were mutations. `AckedIsDurable` checked each one at the moment it was made.
 
@@ -362,24 +362,24 @@ func (o *ObjNeverTorn) AfterStep(v View) []Failure {
 func (*ObjNeverTorn) AtEnd(v View) []Failure { return nil }
 ```
 
-The invariant walks the durable view with `GroundTruth().EachDurable`, which visits every durable file in sorted path order. Before the refactor it ranged over `v.FS().Durable().Files`, a full snapshot of the concrete fake filesystem; `EachDurable` was added to the plant model so that the monitor could do the same walk through the narrow ground-truth interface, in the same order, so that a failure with two torn files reports them in the same order as before (the golden test of Chapter 8 would have noticed otherwise).
+The invariant walks the durable view with `GroundTruth().EachDurable`, which visits every durable file in sorted path order. Before the refactor it ranged over `v.FS().Durable().Files`, a full snapshot of the concrete fake filesystem; `EachDurable` was added to the storage model so that the monitor could do the same walk through the narrow ground-truth interface, in the same order, so that a failure with two torn files reports them in the same order as before (the golden test of Chapter 8 would have noticed otherwise).
 
 The claim it checks is stronger than "acked writes are durable". It says: *no matter what has or has not been acked, if the power went out now, every file the adversary might leave in `obj/` would decode.* The rename protocol is designed to guarantee exactly that: only a file whose content has been fsynced is ever renamed into `obj/`, so any directory entry under `obj/` that could survive a crash points at content that is already durable. The `DESIGN.md` phrasing is "a correct protocol never leaves a torn file under `obj/`", and the comment on the type adds "the object CRC is a safety net, not a mechanism" (`toys3/sim/invariant.go:87-92`).
 
 ### The DurableGen optimization
 
-Scanning the whole durable snapshot every step would be wasteful; most steps (a client wake, a read landing, a reply being delivered) change nothing durable. So the PlantModel keeps a generation counter that is bumped whenever the durable view *may* have changed:
+Scanning the whole durable snapshot every step would be wasteful; most steps (a client wake, a read landing, a reply being delivered) change nothing durable. So the StorageModel keeps a generation counter that is bumped whenever the durable view *may* have changed:
 
 ```go
-// toys3/sim/plantmodel.go:458-460
+// toys3/sim/storagemodel.go:459-461
 // DurableGen changes whenever the durable view may have changed, so
-// invariants over Durable() can skip unchanged steps.
-func (fs *PlantModel) DurableGen() uint64 { return fs.durGen }
+// monitors (through GroundTruth) can skip unchanged steps.
+func (fs *StorageModel) DurableGen() uint64 { return fs.durGen }
 ```
 
-`durGen++` appears in exactly four places: a successful `fsync` (`plantmodel.go:341`), a successful `fsyncDir` (`plantmodel.go:382`), a background `writeback` that found something to persist (`plantmodel.go:231`), and `Crash` (`plantmodel.go:470`). Writes, renames and unlinks only touch the *volatile* versions, so they do not bump it. The invariant remembers the last generation it checked (`o.gen`) and returns immediately if nothing moved.
+`durGen++` appears in exactly four places: a successful `fsync` (`storagemodel.go:342`), a successful `fsyncDir` (`storagemodel.go:383`), a background `writeback` that found something to persist (`storagemodel.go:232`), and `Crash` (`storagemodel.go:471`). Writes, renames and unlinks only touch the *volatile* versions, so they do not bump it. The invariant remembers the last generation it checked (`o.gen`) and returns immediately if nothing moved.
 
-The optimization is conservative in the right direction: a spurious bump only costs a redundant scan; a missing bump would be a real hole. If you ever add a new way for durable state to change in the PlantModel (say, a "disk firmware writes back on its own schedule" fault), you must bump `durGen` there too, or this invariant goes blind to it. That is a good example of a coupling that a code reviewer would miss and a mutation test (Chapter 15) would find.
+The optimization is conservative in the right direction: a spurious bump only costs a redundant scan; a missing bump would be a real hole. If you ever add a new way for durable state to change in the StorageModel (say, a "disk firmware writes back on its own schedule" fault), you must bump `durGen` there too, or this invariant goes blind to it. That is a good example of a coupling that a code reviewer would miss and a mutation test (Chapter 15) would find.
 
 ### What it catches that nothing else does
 
@@ -446,7 +446,7 @@ When you read a linearizability failure, always look *backward* from the reporte
 
 ### Black-box, but carrying memory
 
-`Linearizable` is black-box: the oracle never consults the PlantModel or the server. But it is not memoryless. The oracle carries the *set of possible reference-model states* from one window to the next (its state estimate, `Oracle.estimate`; Chapter 13 §13.11 reads this as a set-membership observer), which is how "acked then lost across a crash" is detected: the ack in window N pins the key's value; the crash adds no possibility of erasure; the read in window N+1 contradicts it. `TestOracleRejectsAckedThenLost` (`toys3/sim/oracle_test.go:96-107`) is the minimal example.
+`Linearizable` is black-box: the oracle never consults the StorageModel or the server. But it is not memoryless. The oracle carries the *set of possible reference-model states* from one window to the next (its state estimate, `Oracle.estimate`; Chapter 13 §13.11 reads this as a set-membership observer), which is how "acked then lost across a crash" is detected: the ack in window N pins the key's value; the crash adds no possibility of erasure; the read in window N+1 contradicts it. `TestOracleRejectsAckedThenLost` (`toys3/sim/oracle_test.go:96-107`) is the minimal example.
 
 ## 14.7 Liveness: the closed loop settles
 
@@ -494,7 +494,7 @@ func (l *Liveness) AfterStep(v View) []Failure {
 
 On the first step at which `v.Settling()` is true (the `KindSettle` entry at `Chaos` time, `simulator.go:159-163`), it records `settlingFrom = len(h.Ops)`: the index of the first op that will be *invoked* in Settling. From then on, any completed op with index ≥ `settlingFrom` and status 500 is a failure.
 
-Why "invoked in Settling" rather than "replied in Settling"? Because an op invoked during Chaos may legitimately fail in Settling: its filesystem operations were *planned* during Chaos, and `PlantModel.Plan` decides at issue time whether an action will fail (`plantmodel.go:146-152`), so an EIO can land after the Settling boundary. An op invoked after the boundary has all of its filesystem actions planned while the plant model is quiet (`fs.quiet == true`, set by `SetQuiet` at `KindSettle`), so none of them can fail with EIO, and `read` will not flip bits (`plantmodel.go:398`). For a correct server, such an op has no reason to return 500.
+Why "invoked in Settling" rather than "replied in Settling"? Because an op invoked during Chaos may legitimately fail in Settling: its filesystem operations were *planned* during Chaos, and `StorageModel.Plan` decides at issue time whether an action will fail (`storagemodel.go:147-153`), so an EIO can land after the Settling boundary. An op invoked after the boundary has all of its filesystem actions planned while the storage model is quiet (`fs.quiet == true`, set by `SetQuiet` at `KindSettle`), so none of them can fail with EIO, and `read` will not flip bits (`storagemodel.go:399`). For a correct server, such an op has no reason to return 500.
 
 Except one: a corrupt object that is *already on disk*. And that is the subtle point the comment makes. If a bug has left a torn file in `obj/` (mutant b) or lost the content behind an acked write (mutant d), then in Settling every GET of that key returns 500 forever. The linearizability oracle cannot see this, because 500s are `Failed` outcomes that constrain nothing. `Liveness` turns "the server can no longer serve this key, even though nothing is going wrong" into a failure. Mutant b's black-box catch is exactly this:
 
@@ -540,11 +540,11 @@ Three checks:
 2. **The final incarnation emitted `Recovered`.** A recovery that hangs forever (waiting for a completion that never comes) would leave the last incarnation without this telemetry. Requests queue behind recovery (Chapter 5), so a stuck recovery would also leave them pending.
 3. **No op is `Pending`.** Every request issued must have received a reply or been abandoned by a crash. After `KindSettlingEnd`, clients stop issuing (`simulator.go:164-166`) and the queue drains, so any op still pending at the end is waiting on something that will never happen.
 
-**A documentation discrepancy, since fixed.** In the first edition of the code the doc comment said "every boot reached core.Recovered", and `DESIGN.md`'s table said "every boot recovers". The code checks only the *final* incarnation (`f.Inc == v.Inc()`). Commit `a4018d5` corrected both (the comment now says "the final boot reached control.Recovered (earlier incarnations may crash or trip mid-recovery by design)", and `DESIGN.md:199` says "the final boot recovers"); Chapter 17, Part II §3 has the history. Earlier incarnations frequently do *not* recover, legitimately: in seed 1, incarnation 2 tripped in the middle of recovery after an EIO on unlinking a temp file (`Trip{recovery: unlink temp: EIO}`, step 252 of `seed1.log`), and incarnation 5 did the same. Checking "every boot" literally would fail every seed with a recovery-time EIO. The code's behaviour is the right one; the old comment overstated it. A fully precise wording would be "the last boot recovered, and no earlier boot was stuck in recovery when it died", but the second half is not checked at all: a recovery that hangs in incarnation N is only detected if the run *ends* in incarnation N, or indirectly via pending requests.
+**A documentation discrepancy, since fixed.** In the first edition of the code the doc comment said "every boot reached core.Recovered", and `DESIGN.md`'s table said "every boot recovers". The code checks only the *final* incarnation (`f.Inc == v.Inc()`). Commit `a4018d5` corrected both (the comment now says "the final boot reached control.Recovered (earlier incarnations may crash or trip mid-recovery by design)", and `DESIGN.md:201` says "the final boot recovers"); Chapter 17, Part II §3 has the history. Earlier incarnations frequently do *not* recover, legitimately: in seed 1, incarnation 2 tripped in the middle of recovery after an EIO on unlinking a temp file (`Trip{recovery: unlink temp: EIO}`, step 252 of `seed1.log`), and incarnation 5 did the same. Checking "every boot" literally would fail every seed with a recovery-time EIO. The code's behaviour is the right one; the old comment overstated it. A fully precise wording would be "the last boot recovered, and no earlier boot was stuck in recovery when it died", but the second half is not checked at all: a recovery that hangs in incarnation N is only detected if the run *ends* in incarnation N, or indirectly via pending requests.
 
 ### Is Liveness black-box?
 
-Mostly. It reads `Alive()`, which a real client could approximate by "the server answers", and the `Recovered` telemetry, which is a server belief rather than ground truth. A purist would call the telemetry check grey-box. It is in `BlackBoxInvariants` because it never consults the plant's ground truth (`View.GroundTruth()`), and that is the line the code draws.
+Mostly. It reads `Alive()`, which a real client could approximate by "the server answers", and the `Recovered` telemetry, which is a server belief rather than ground truth. A purist would call the telemetry check grey-box. It is in `BlackBoxInvariants` because it never consults the ground truth of storage (`View.GroundTruth()`), and that is the line the code draws.
 
 ## 14.8 The pseudo-invariants in the main loop
 
@@ -620,9 +620,9 @@ func TestCoverage(t *testing.T) {
 
 Every counter in `Stats` (`toys3/sim/config.go:59-80`) that represents a fault or an interesting path must be non-zero over 200 seeds. This is the "Sometimes" assertion idea from `docs/lessons.md` §11 ("A `Sometimes` that never fires means the simulation isn't reaching that code. Add faults, not excuses."), implemented in the bluntest possible way.
 
-Why does this matter? Imagine a refactor of `PlantModel.Crash` that accidentally makes `TornWriteProb` never fire. Every seed would still pass. The invariants would still run. Nothing would look wrong. But the simulator would have silently stopped testing torn writes, and mutant b's white-box catch might still happen while some future torn-write bug would not. `TestCoverage` turns that silent degradation into a red test.
+Why does this matter? Imagine a refactor of `StorageModel.Crash` that accidentally makes `TornWriteProb` never fire. Every seed would still pass. The invariants would still run. Nothing would look wrong. But the simulator would have silently stopped testing torn writes, and mutant b's white-box catch might still happen while some future torn-write bug would not. `TestCoverage` turns that silent degradation into a red test.
 
-It is worth noticing what it does *not* check. It does not require `widened` to be non-zero (widening is a precision loss in the oracle, which we would rather never happen), nor `MaxWindowOps`. And it does not check `Writebacks`, which `PlantModel` counts (`plantmodel.go:125`) but `Stats` does not export. Given that background writeback is what made mutant f catchable in a reasonable number of seeds (Chapter 15), that is a gap worth closing; see the exercises.
+It is worth noticing what it does *not* check. It does not require `widened` to be non-zero (widening is a precision loss in the oracle, which we would rather never happen), nor `MaxWindowOps`. And it does not check `Writebacks`, which `StorageModel` counts (`storagemodel.go:125`) but `Stats` does not export. Given that background writeback is what made mutant f catchable in a reasonable number of seeds (Chapter 15), that is a gap worth closing; see the exercises.
 
 ### TestCorruptionUnreachableWithoutBitFlips: proving the safety net is a safety net
 
@@ -653,7 +653,7 @@ This is an invariant *about an invariant's reachability*. It asserts a negative:
 
 The 200-seed run in the preface reported `readcorrupt=71 corruptdet=70`. If every flipped read makes the correct server emit `CorruptionDetected`, why is one missing?
 
-Because a read *lands* and its completion is *delivered* at two different times (Chapter 10). `PlantModel.read` flips the bit and bumps `count.ReadCorruptions` when the `FSRead` lands. The completion is then scheduled for delivery one feedback delay (`Plan.FeedbackDelay`) later. If a crash happens in between, `Queue.DropIncarnation` removes the pending delivery (`queue.go:101-122`): the server never sees the corrupted bytes, so it never emits the telemetry. The counters are measuring two different points in the pipeline, and the gap between them is exactly the "it happened, but nobody was told" window. A difference of one in 71 is a nice sanity check that the window exists and is rare.
+Because a read *lands* and its completion is *delivered* at two different times (Chapter 10). `StorageModel.read` flips the bit and bumps `count.ReadCorruptions` when the `FSRead` lands. The completion is then scheduled for delivery one feedback delay (`Plan.FeedbackDelay`) later. If a crash happens in between, `Queue.DropIncarnation` removes the pending delivery (`queue.go:101-122`): the server never sees the corrupted bytes, so it never emits the telemetry. The counters are measuring two different points in the pipeline, and the gap between them is exactly the "it happened, but nobody was told" window. A difference of one in 71 is a nice sanity check that the window exists and is rare.
 
 If you ever see `corruptdet > readcorrupt` for the correct server, on the other hand, something is very wrong: either a bad file reached `obj/` (and `ObjNeverTorn` should have fired), or the CRC check is rejecting good files.
 
@@ -661,7 +661,7 @@ If you ever see `corruptdet > readcorrupt` for the correct server, on the other 
 
 The pattern is mechanical once you have seen five examples:
 
-1. Decide what promise you are checking and whether it is black-box (history, replies) or white-box (the plant's ground truth via `GroundTruth()`, the controller's telemetry).
+1. Decide what promise you are checking and whether it is black-box (history, replies) or white-box (storage's ground truth via `GroundTruth()`, the controller's telemetry).
 2. Decide when it can be checked: every step (cheap, incremental), when something changed (use a generation counter), at quiescent points, or only at the end.
 3. Keep a cursor for anything append-only you read.
 4. Return `Failure{Msg: ...}`; leave `Invariant`, `Step` and `At` empty, and `addFailure`/`fail` will fill them in (`simulator.go:356-368`).
@@ -710,12 +710,12 @@ The server promises per-key serialization (Chapter 6). This is invisible to ever
 type Started struct{ Client ClientReq; Keys []string }   // name it ReqStarted to avoid clashing with the Started event
 ```
 
-and an invariant that keeps a `map[string]control.ClientReq` of "key → request currently running" and fails on overlap. Note the map: iteration over it would be banned by `detcheck` (Chapter 8), but lookups and deletes are fine, and that is all this invariant needs. Note also that adding telemetry is a change to `control`, and every action (including `Emit`) feeds the trace hash (`trace.go:79-80`), so every seed's trace hash changes: there are new actions in every run. That is expected; determinism is about *same code, same seed*, not about stability across code changes. One more thing to do when you add a telemetry type: give it a case in `telemetryHashKey` (`trace.go:91-104`). Without one it falls through to the `%T` fallback, which hashes the Go type *name*, and Chapter 8 (§8.12) explains why a hash input that depends on a name is a trap.
+and an invariant that keeps a `map[string]control.ClientReq` of "key → request currently running" and fails on overlap. Note the map: iteration over it would be banned by `detcheck` (Chapter 8), but lookups and deletes are fine, and that is all this invariant needs. Note also that adding telemetry is a change to `control`, and every action (including `Emit`) feeds the trace hash (`trace.go:79-80`), so every seed's trace hash changes: there are new actions in every run. That is expected; determinism is about *same code, same seed*, not about stability across code changes. One more thing to do when you add a telemetry type: give it a case in `telemetryHashKey` (`trace.go:91-106`). Without one, `TestTelemetryHashKeyCoversAllTypes` fails: it reads the telemetry types from the source of package `control` and requires an explicit case for each, so the fixed `"?"` fallback stays unreachable. (Before commit `10777a2` the fallback was `%T`, which hashes the Go type *name*; Chapter 8 (§8.12) explains why a hash input that depends on a name is a trap.)
 
 ## Key takeaways
 
 - An invariant is an object with `AfterStep` and `AtEnd`. Checking after every step puts the failure next to its cause in the log.
-- Invariants see the world through a read-only `View` that deliberately excludes the controller's internals and the plant model's volatile state. They judge outputs (replies, filesystem effects), beliefs (telemetry `Sample`s) and ground truth (`GroundTruth`, the plant's durable view), never private state.
+- Invariants see the world through a read-only `View` that deliberately excludes the controller's internals and the storage model's volatile state. They judge outputs (replies, filesystem effects), beliefs (telemetry `Sample`s) and ground truth (`GroundTruth`, the durable view of storage), never private state.
 - **White-box** invariants (`AckedIsDurable`, `ObjNeverTorn`) compare the server's beliefs with ground truth and fire early, often with no crash needed. **Black-box** invariants (`NoCorruptReads`, `Linearizable`, `Liveness`) judge only what clients see and tell you whether a bug is observable.
 - `Liveness`'s "no 500 for an op invoked in Settling" is what makes *lost* data visible to a black-box checker, because a 500 otherwise promises nothing.
 - The run stops after the first step with any failure, but every invariant reports on that step, so you can see several at once.
@@ -725,7 +725,7 @@ and an invariant that keeps a `map[string]control.ClientReq` of "key → request
 ## Exercises
 
 1. **Delete one invariant and see who notices.** Comment out `&AckedIsDurable{}` in `DefaultInvariants` (`toys3/sim/invariant.go:64`) and run `go test ./toys3/sim -run TestCatchesBugs -v`. Before running, predict for mutants a and c which invariant will catch them and at which seed. Compare with the black-box column of the `DESIGN.md` table. Restore the line afterwards.
-2. **Break the DurableGen optimization.** In a scratch copy, remove the `fs.durGen++` from `PlantModel.fsyncDir` (`toys3/sim/plantmodel.go:382`). Predict: does mutant b still get caught by `obj-never-torn` at seed 1 step 44? (Hint: what else bumps `durGen` around that step?) Run `go test ./toys3/sim -run 'TestCatchesBugs/b-skip-file-fsync' -v`. Explain the result.
+2. **Break the DurableGen optimization.** In a scratch copy, remove the `fs.durGen++` from `StorageModel.fsyncDir` (`toys3/sim/storagemodel.go:383`). Predict: does mutant b still get caught by `obj-never-torn` at seed 1 step 44? (Hint: what else bumps `durGen` around that step?) Run `go test ./toys3/sim -run 'TestCatchesBugs/b-skip-file-fsync' -v`. Explain the result.
 3. **Implement `TmpCleanAfterRecovery`** from §14.11, add it to `DefaultInvariants`, and run `go test ./toys3/sim -run 'TestSeeds$' -seeds=200`. It should pass. Then run `go test ./toys3/sim -run 'TestCatchesBugs/f-skip-temp-cleanup' -v` and compare the seed and step with the default result (seed 20, step 1750).
 4. **Coverage for writeback.** Add a `Writebacks int` field to `Stats`, fill it from `fc.Writebacks` in `Simulator.Run` next to the other FS counters (`toys3/sim/simulator.go:114-117`), add it to `Stats.Add` and `String`, and add a line to `TestCoverage`. Then set `WritebackProb: 0` in `BaseConfig` and confirm `TestCoverage` goes red.
 5. **Make Liveness say what it means.** Compare the doc comment on `Liveness` before and after the fix (`git show 0f0aad9:toys3/sim/invariant.go` against `toys3/sim/invariant.go:98-104`). Is the new one fully accurate? Then decide whether you want a stronger check: "no incarnation was still recovering when the run ended *or* when it was killed by an injected crash longer than X ms after boot". Is that a real promise the server makes?

@@ -104,12 +104,12 @@ The term "sans-I/O" comes from the Python networking community (the `sans-io` do
          | Trip{Cause} | Emit{Telemetry}
 ```
 
-(This is `toys3/DESIGN.md:71-80`, redrawn.) The server does not *call* the filesystem. It *asks* for a filesystem operation by returning an `FSWrite` value, and it later *learns* the outcome when an `FSWriteDone` value is fed back in. Every one of the four problems from §2.1 dissolves:
+(This is `toys3/DESIGN.md:73-82`, redrawn.) The server does not *call* the filesystem. It *asks* for a filesystem operation by returning an `FSWrite` value, and it later *learns* the outcome when an `FSWriteDone` value is fed back in. Every one of the four problems from §2.1 dissolves:
 
-1. **I/O is separated from logic.** `Step` can be called from a unit test with hand-made events (`toys3/control/controller_test.go` does exactly this, with no filesystem at all), from the simulator with completions produced by a plant model, and from production with completions produced by real `os` calls.
+1. **I/O is separated from logic.** `Step` can be called from a unit test with hand-made events (`toys3/control/controller_test.go` does exactly this, with no filesystem at all), from the simulator with completions produced by a storage model, and from production with completions produced by real `os` calls.
 2. **Concurrency is in the data.** Many requests are in flight at once, but each in-flight request is a record (`*request`, `toys3/control/controller.go:51-61`) holding the IOID it is waiting for. The order in which completions arrive is decided by whoever calls `Step`, which in simulation is a seeded priority queue.
 3. **Time is explicit.** Each `Event` carries `At` (`toys3/control/event.go:5-8`). The server never reads a clock.
-4. **A crash is a value.** In the simulator, a crash is simply: stop calling `Step` on this server object, throw it away, drop every queued event addressed to it, resolve the plant model's volatile state, and later build a new server with the `Factory`. "Applied at t1, response lost at t2" is just two separate queue entries, an `fs-land` at t1 and a `deliver` at t2, with a crash scheduled in between (Chapter 10).
+4. **A crash is a value.** In the simulator, a crash is simply: stop calling `Step` on this server object, throw it away, drop every queued event addressed to it, resolve the storage model's volatile state, and later build a new server with the `Factory`. "Applied at t1, response lost at t2" is just two separate queue entries, an `fs-land` at t1 and a `deliver` at t2, with a crash scheduled in between (Chapter 10).
 
 Here is the PUT protocol as the server experiences it, one step per completion:
 
@@ -121,7 +121,7 @@ FSRenameDone{io3}     ──► Step ──► [FSFsyncDir{io4, obj}]
 FSFsyncDirDone{io4}   ──► Step ──► [Emit{Committed}, Reply{c7, 200}]
 ```
 
-(`toys3/DESIGN.md:89-95`.) And here is the same thing as it actually appeared in the event log of seed 1 (captured with the scratch tracer described in Chapter 16; trimmed to the lines that concern request `c6`):
+(`toys3/DESIGN.md:91-97`.) And here is the same thing as it actually appeared in the event log of seed 1 (captured with the scratch tracer described in Chapter 16; trimmed to the lines that concern request `c6`):
 
 ```
 #21  t=3.397177ms  inc=1 deliver  Request{c6 PUT "k2" value-of-6}
@@ -157,7 +157,7 @@ Three things to notice already:
 There is one subtlety: `[]byte` *is* a reference type in Go. `FSWrite.Data`, `FSReadDone.Data` and `Reply.Body` are slices, and two parties holding the same slice can see each other's writes. toys3 handles this by convention plus defensive copying at the boundaries:
 
 ```go
-// toys3/control/doc.go:24-28
+// toys3/control/doc.go:25-29
 // Rules (enforced by tools/detcheck in CI):
 //   - imports only from tools/detcheck/allow.txt (no time, os, math/rand, sync);
 //   - no goroutines, channels, select, or package-level variables;
@@ -165,7 +165,7 @@ There is one subtlety: `[]byte` *is* a reference type in Go. `FSWrite.Data`, `FS
 //   - Events and Actions are plain data; byte slices are immutable once sent.
 ```
 
-"Byte slices are immutable once sent" is a convention: detcheck cannot enforce it. The PlantModel backs it up by cloning on the way in and on the way out (`content := bytes.Clone(data)` at `toys3/sim/plantmodel.go:294`, `data := bytes.Clone(in.volatile)` at `toys3/sim/plantmodel.go:394`), and there is a test that the fake never aliases a slice it handed out (`TestPlantModelNeverAliasesHandedOutSlices`, `toys3/sim/plantmodel_test.go:173-187`). The oracle clones reply bodies before keeping them (`op.Body = slices.Clone(rep.Body)`, `toys3/sim/oracle.go:98`). The server itself aliases in one place, deliberately: `DecodeObject` returns a payload that aliases the file buffer (`toys3/format/object.go:27-30`), which is safe precisely because nobody writes to a received buffer.
+"Byte slices are immutable once sent" is a convention: detcheck cannot enforce it. The StorageModel backs it up by cloning on the way in and on the way out (`content := bytes.Clone(data)` at `toys3/sim/storagemodel.go:295`, `data := bytes.Clone(in.volatile)` at `toys3/sim/storagemodel.go:395`), and there is a test that the fake never aliases a slice it handed out (`TestStorageModelNeverAliasesHandedOutSlices`, `toys3/sim/storagemodel_test.go:173-187`). The oracle clones reply bodies before keeping them (`op.Body = slices.Clone(rep.Body)`, `toys3/sim/oracle.go:98`). The server itself aliases in one place, deliberately: `DecodeObject` returns a payload that aliases the file buffer (`toys3/format/object.go:27-30`), which is safe precisely because nobody writes to a received buffer.
 
 ## 2.6 What the shape costs
 
@@ -175,7 +175,7 @@ It would be dishonest to present the sans-I/O shape as free. It costs three thin
 
 **Explicit bookkeeping of what you are waiting for.** Each request records exactly one outstanding IOID, and `Step` must route each completion to its owner by searching (`toys3/control/controller.go:119-132`). Completions that match nothing (stale ones from before a restart, or duplicates) must be ignored rather than crash the server.
 
-**Discipline in the runtime.** The production runtime must preserve the illusion: one goroutine calls `Step`, completions come back through one inbox, and actions are executed in order (`toys3/prod/loop.go:60-99`). If someone calls `Step` from two goroutines, every guarantee evaporates, and nothing in the type system prevents it.
+**Discipline in the runtime.** The production runtime must preserve the illusion: one goroutine calls `Step`, completions come back through one inbox, and actions are executed in order (`toys3/prod/loop.go:60-101`). If someone calls `Step` from two goroutines, every guarantee evaporates, and nothing in the type system prevents it.
 
 In exchange you get a server that can run, unchanged, in a simulator that controls every input. For a storage system whose correctness depends on behaviour under crashes, that is a very good trade.
 
@@ -230,7 +230,7 @@ Here is the whole point of the architecture in one diagram. The box in the middl
    acts := m.Step(Event{at, ev})   ◄── SAME ──►       acts := server.Step(Event{now, body})
    for a in acts:                                     for a in acts:
      Reply ─► waiting handler                           Reply ─► Oracle.Return, Workload.Complete
-     FS*   ─► OSExecutor: goroutine + os call           FS*   ─► PlantModel.Plan ─► schedule fs-land
+     FS*   ─► OSExecutor: goroutine + os call           FS*   ─► StorageModel.Plan ─► schedule fs-land
               ─► done ─► inbox                                     ─► Land ─► schedule deliver
      Emit  ─► log line                                  Emit  ─► telemetry timeline (invariants)
      Trip  ─► Run returns ErrTripped; exit               Trip  ─► crash ─► restart via Factory
@@ -276,7 +276,7 @@ Note that the allow-list contains `hash/crc32` but not `hash/fnv`. That is why t
 
 **In toys3:** `control.StateMachine` (`toys3/control/machine.go:5-7`) and `Controller.Step` (`toys3/control/controller.go:109-133`). Every mutation of `Controller` fields happens in a function reachable only from `Step` (the constructor `New` sets the initial phase, and that is all). `StateHash` reads but never writes.
 
-Note what is *not* a state machine in toys3: the simulated clients (`sim.Workload`) and the plant model (`sim.PlantModel`) are ordinary objects with methods, driven directly by the simulator. `docs/lessons.md` §10 argues that in the larger system the workload should itself be a sans-I/O machine, because it will speak Kafka bytes; toys3's workload never crashes and needs no runtime, so it does not bother (the comment at `toys3/sim/workload.go:42-43` says exactly that).
+Note what is *not* a state machine in toys3: the simulated clients (`sim.Workload`) and the storage model (`sim.StorageModel`) are ordinary objects with methods, driven directly by the simulator. `docs/lessons.md` §10 argues that in the larger system the workload should itself be a sans-I/O machine, because it will speak Kafka bytes; toys3's workload never crashes and needs no runtime, so it does not bother (the comment at `toys3/sim/workload.go:42-43` says exactly that).
 
 ### Rule 3: Events and Actions are plain data
 
@@ -295,7 +295,7 @@ Note what is *not* a state machine in toys3: the simulated clients (`sim.Workloa
 ```go
 // toys3/control/env.go:3-8
 // Env is injected into the server at construction. It is the only way
-// nondeterminism enters the control. Time is NOT here: it arrives on each Event.
+// nondeterminism enters the controller. Time is NOT here: it arrives on each Event.
 type Env interface {
 	Rand
 	Buggify
@@ -312,36 +312,36 @@ A surprise worth recording now (Chapter 3 returns to it): **the server never use
 > **Wrap external systems in narrow interfaces you own,** such as `ObjectStore{Put, Get, List, Delete}` ... Never let SDK types leak outside the adapter.
 > (`loop.md:73-75`)
 
-**In toys3:** the "narrow interface you own" is the **plant port**: the set of FS actions `FSWrite`, `FSFsync`, `FSRename`, `FSFsyncDir`, `FSRead`, `FSUnlink`, `FSList` (`toys3/control/plant.go:56-101`), their completions, and the two interfaces that name the groups, `Actuation` and `Feedback` (`toys3/control/plant.go:8-20`). The port is defined in package `control` and owned by the controller; the adapters conform to it. That ownership is the point of rule 5: the controller's language is not dictated by whichever filesystem API happens to implement it. Seven operations, each with whole-file semantics: there is no `open`, no file descriptor, no offset, no partial write. That narrowness is a design choice with consequences (Chapter 17 discusses what it cannot model, like interleaved torn writes within a file). Errors cross the boundary as a three-value `ErrCode` (`OK`, `ErrNotFound`, `ErrIO`, `toys3/control/plant.go:29-35`), never as a Go `error`; the production adapter does the classification in one place (`code`, `toys3/prod/executor.go:103-113`).
+**In toys3:** the "narrow interface you own" is the **Storage port**: the set of FS actions `FSWrite`, `FSFsync`, `FSRename`, `FSFsyncDir`, `FSRead`, `FSUnlink`, `FSList` (`toys3/control/storage.go:56-101`), their completions, and the two interfaces that name the groups, `Actuation` and `Feedback` (`toys3/control/storage.go:8-20`). The port is defined in package `control` and owned by the controller; the adapters conform to it. That ownership is the point of rule 5: the controller's language is not dictated by whichever filesystem API happens to implement it. Seven operations, each with whole-file semantics: there is no `open`, no file descriptor, no offset, no partial write. That narrowness is a design choice with consequences (Chapter 17 discusses what it cannot model, like interleaved torn writes within a file). Errors cross the boundary as a three-value `ErrCode` (`OK`, `ErrNotFound`, `ErrIO`, `toys3/control/storage.go:29-35`), never as a Go `error`; the production adapter does the classification in one place (`code`, `toys3/prod/executor.go:103-113`).
 
 In production, the Go-level interface is `prod.Executor`:
 
 ```go
 // toys3/prod/executor.go:14-20
-// Executor performs filesystem actions. Execute must not block the loop: it
-// starts the operation and, when it finishes, calls done exactly once with
-// the matching completion (control.FSWriteDone for control.FSWrite, and so on),
-// from any goroutine.
+// Executor is a storage adapter: it performs actuations (filesystem actions).
+// Execute must not block the loop: it starts the operation and, when it
+// finishes, calls done exactly once with the matching feedback
+// (control.FSWriteDone for control.FSWrite, and so on), from any goroutine.
 type Executor interface {
-	Execute(a control.Action, done func(control.EventBody))
+	Execute(a control.Actuation, done func(control.EventBody))
 }
 ```
 
-Note that this interface lives in `prod`, not in `control`. The simulator does *not* implement `Executor`; it interprets the same actions with `PlantModel.Plan` and `PlantModel.Land`. This matches `docs/lessons.md` §0: "The simulator does **not** implement them. It implements *engines* that own state, draw from the single seeded RNG, and schedule completions on one global queue."
+Note that this interface lives in `prod`, not in `control`. The simulator does *not* implement `Executor`; it interprets the same actions with `StorageModel.Plan` and `StorageModel.Land`. This matches `docs/lessons.md` §0: "The simulator does **not** implement them. It implements *engines* that own state, draw from the single seeded RNG, and schedule completions on one global queue."
 
 ### Rule 6: Make every I/O operation asynchronous
 
 > **Make every I/O operation asynchronous:** an action goes out and a `...Done{id, result, err}` event comes back. Nothing in the logic ever blocks.
 > (`loop.md:76-77`)
 
-**In toys3:** every FS action has a matching completion: `FSWrite` → `FSWriteDone`, ..., `FSList` → `FSListDone` (`toys3/control/plant.go:103-149`). The `Action` doc spells out the contract: "Actions in one returned slice are started in order, but the filesystem actions among them may complete in any order" (`toys3/control/action.go:3-6`). In the seed-1 trace above, step 16 emitted two `FSRead`s (`io3` for `k2`, `io4` for `k0`) and `io4` landed first (step 17) even though it was issued second.
+**In toys3:** every FS action has a matching completion: `FSWrite` → `FSWriteDone`, ..., `FSList` → `FSListDone` (`toys3/control/storage.go:103-149`). The `Action` doc spells out the contract: "Actions in one returned slice are started in order, but the filesystem actions among them may complete in any order" (`toys3/control/action.go:3-6`). In the seed-1 trace above, step 16 emitted two `FSRead`s (`io3` for `k2`, `io4` for `k0`) and `io4` landed first (step 17) even though it was issued second.
 
 ### Rule 7: Timers are actions too
 
 > **Timers are actions too:** `SetTimer{id, d}` goes out and `TimerFired{id}` comes back.
 > (`loop.md:78-79`)
 
-**In toys3: not needed, and therefore absent.** There is no `SetTimer` action and no `TimerFired` event. `toys3/DESIGN.md:84-85` explains: "No timers are needed: every wait is on an FS completion." The server has no timeouts, no retries and no batching windows. If an FS operation never completes, the request never completes; that is a liveness bug, and the simulator would catch it with the `Liveness` invariant (Chapter 14), because the PlantModel always completes every operation that is not dropped by a crash.
+**In toys3: not needed, and therefore absent.** There is no `SetTimer` action and no `TimerFired` event. `toys3/DESIGN.md:86-87` explains: "No timers are needed: every wait is on an FS completion." The server has no timeouts, no retries and no batching windows. If an FS operation never completes, the request never completes; that is a liveness bug, and the simulator would catch it with the `Liveness` invariant (Chapter 14), because the StorageModel always completes every operation that is not dropped by a crash.
 
 Adding a timeout would be the first place this rule bites. Exercise 5 at the end of the chapter asks you to sketch it.
 
@@ -352,7 +352,7 @@ Adding a timeout would be the first place this rule bites. Exercise 5 at the end
 
 **In toys3:** two kinds of correlation ID.
 
-- `IOID` correlates an FS action with its completion (`toys3/control/plant.go:22-25`). Every completion is routed by IOID, and anything unrecognized is dropped:
+- `IOID` correlates an FS action with its completion (`toys3/control/storage.go:22-25`). Every completion is routed by IOID, and anything unrecognized is dropped:
 
 ```go
 // toys3/control/controller.go:119-132
@@ -375,9 +375,9 @@ Adding a timeout would be the first place this rule bites. Exercise 5 at the end
   Even a completion with the right IOID but the wrong *kind* is ignored: each step checks the body type with `d, ok := body.(FSWriteDone); if !ok { return nil }` (for example `toys3/control/controller.go:300-303`). `TestStaleIOIgnored` (`toys3/control/controller_test.go:410-432`) feeds five kinds of bogus completion and asserts the state hash is unchanged.
 - `ClientReq` correlates a `Request` with its `Reply` (`toys3/control/types.go:17-20`). The server echoes it.
 
-A subtle point: IOIDs are unique only *within one incarnation* (each new `Controller` starts `nextIO` at 0). That is safe because the runtime never delivers a completion to a later incarnation: the simulator drops every queued entry of a dead incarnation (`Queue.DropIncarnation`, `toys3/sim/queue.go:101-122`), and in production a tripped loop's `post` discards completions after `Run` returns (`toys3/prod/loop.go:101-108`). It also has a consequence for temp-file names, which are derived from IOIDs; Chapters 5 and 15 show what goes wrong when recovery does not clean up.
+A subtle point: IOIDs are unique only *within one incarnation* (each new `Controller` starts `nextIO` at 0). That is safe because the runtime never delivers a completion to a later incarnation: the simulator drops every queued entry of a dead incarnation (`Queue.DropIncarnation`, `toys3/sim/queue.go:101-122`), and in production a tripped loop's `post` discards completions after `Run` returns (`toys3/prod/loop.go:103-110`). It also has a consequence for temp-file names, which are derived from IOIDs; Chapters 5 and 15 show what goes wrong when recovery does not clean up.
 
-Does the simulation actually "deliver these" late or duplicate completions, as the rule says? Late, yes: an FS action's completion can be delivered long after others issued later. Duplicates, no: the PlantModel delivers each completion exactly once (or never, after a crash). Chapter 17 lists duplicate delivery as a possible extension.
+Does the simulation actually "deliver these" late or duplicate completions, as the rule says? Late, yes: an FS action's completion can be delivered long after others issued later. Duplicates, no: the StorageModel delivers each completion exactly once (or never, after a crash). Chapter 17 lists duplicate delivery as a possible extension.
 
 ### Rule 9: Put all durable state in the store
 
@@ -389,17 +389,17 @@ Does the simulation actually "deliver these" late or duplicate completions, as t
 ```go
 // toys3/control/controller.go:74-75
 // Controller is the toys3 state machine: the control law of the object
-// server. It turns client requests and plant feedback (filesystem
+// server. It turns client requests and storage feedback (filesystem
 ```
 
-Recovery (`onStarted` and `onRecoveryDone`, `toys3/control/recovery.go:17-86`) lists `tmp/`, unlinks everything, fsyncs `tmp/`, and starts serving. `obj/` needs no recovery because the protocol only ever renames complete, fsynced files into it (`toys3/control/doc.go:104-113`). Chapter 5 covers recovery in depth.
+Recovery (`onStarted` and `onRecoveryDone`, `toys3/control/recovery.go:17-86`) lists `tmp/`, unlinks everything, fsyncs `tmp/`, and starts serving. `obj/` needs no recovery because the protocol only ever renames complete, fsynced files into it (`toys3/control/doc.go:105-114`). Chapter 5 covers recovery in depth.
 
 ### Rule 10: Keep the production runtime thin
 
 > **Keep the production runtime thin** (`cmd/broker`): accept on TCP → decode → inbox channel → `Step` → execute actions in goroutines → feed results back into the inbox. It shouldn't contain any business logic.
 > (`loop.md:85-87`)
 
-**In toys3:** `toys3/prod` is about 430 lines of non-test code (560 with its tests). `Loop.Run` (`toys3/prod/loop.go:60-75`) is a fifteen-line loop; `dispatch` (`toys3/prod/loop.go:78-99`) is a type switch with four cases; `OSExecutor.run` (`toys3/prod/executor.go:42-72`) maps each action to one or two `os` calls. The HTTP handler translates paths and headers into `control.Op` values (`ParseRequest`, `toys3/prod/http.go:81-107`) and does nothing else.
+**In toys3:** `toys3/prod` is about 430 lines of non-test code (560 with its tests). `Loop.Run` (`toys3/prod/loop.go:60-75`) is a fifteen-line loop; `dispatch` (`toys3/prod/loop.go:78-101`) is a type switch with four cases; `OSExecutor.run` (`toys3/prod/executor.go:42-72`) maps each action to one or two `os` calls. The HTTP handler translates paths and headers into `control.Op` values (`ParseRequest`, `toys3/prod/http.go:81-107`) and does nothing else.
 
 Is there *any* business logic in `prod`? Two borderline items: `ParseRequest` rejects malformed paths with 400 before the controller sees them, and `PrepareDir` creates `obj/` and `tmp/` (`toys3/prod/executor.go:115-125`), because the controller has no `mkdir` action. Both are input/environment adaptation rather than protocol logic. Chapter 9 walks through the whole package.
 
@@ -424,7 +424,7 @@ func (q *Queue) less(i, j int) bool {
 }
 ```
 
-The order matters. With `(time, seq, rngTie)`, the insertion sequence number would decide every same-instant pair, and the random tie would never be consulted (sequence numbers are unique). With `(At, Tie, Seq)`, the seeded random tie decides same-instant order, so different seeds explore different orders, and `Seq` is only a final tie-break in the astronomically unlikely case of two equal 64-bit ties. `TestQueueTieBreakDependsOnSeed` (`toys3/sim/queue_test.go:34-66`) checks that same-instant order actually varies across seeds. Record this as a small discrepancy between `loop.md` and the code; `toys3/DESIGN.md:134` gets it right.
+The order matters. With `(time, seq, rngTie)`, the insertion sequence number would decide every same-instant pair, and the random tie would never be consulted (sequence numbers are unique). With `(At, Tie, Seq)`, the seeded random tie decides same-instant order, so different seeds explore different orders, and `Seq` is only a final tie-break in the astronomically unlikely case of two equal 64-bit ties. `TestQueueTieBreakDependsOnSeed` (`toys3/sim/queue_test.go:34-66`) checks that same-instant order actually varies across seeds. Record this as a small discrepancy between `loop.md` and the code; `toys3/DESIGN.md:136` gets it right.
 
 The RNG is not `*rand.Rand` (which detcheck forbids) but `sim.Rand`, a hand-written SplitMix64 with a draw counter (`toys3/sim/rand.go`). It is seeded from `Config.Seed`, which `TestSeeds` takes from the `-seed` flag (`toys3/sim/sim_test.go:13`). The virtual clock is `Simulator.now`, set from each popped entry (`toys3/sim/simulator.go:94`). Chapter 10 covers all of this.
 
@@ -433,18 +433,18 @@ The RNG is not `*rand.Rand` (which detcheck forbids) but `sim.Rand`, a hand-writ
 > **Make the fakes adversarial:** random latency, 503s, timeouts, a PUT that succeeds but whose response is lost, duplicated responses, reordering, network partitions between AZs, and crash plus restart at any event.
 > (`loop.md:91-93`)
 
-**In toys3** the "fake" is the plant model, `sim.PlantModel`, and its adversarial behaviours are configured by `sim.Disturbances`: in control vocabulary, a *disturbance* is an input that acts on the plant and that the controller cannot command. They are translated from object-store faults into filesystem faults (`toys3/sim/plantmodel.go:12-49`):
+**In toys3** the "fake" is the storage model, `sim.StorageModel`, and its adversarial behaviours are configured by `sim.Disturbances`: in control vocabulary, a *disturbance* is an input that acts on storage (the controlled system) and that the controller cannot command. They are translated from object-store faults into filesystem faults (`toys3/sim/storagemodel.go:12-49`):
 
 | `loop.md` fault | toys3 equivalent |
 |---|---|
-| random latency | dead time (command → effect) and feedback delay (effect → completion), drawn per op as `DeadTime` and `FeedbackDelay` (`PlantModel.Plan`, `toys3/sim/plantmodel.go:146-152`) |
+| random latency | dead time (command → effect) and feedback delay (effect → completion), drawn per op as `DeadTime` and `FeedbackDelay` (`StorageModel.Plan`, `toys3/sim/storagemodel.go:147-153`) |
 | 503s | `EIOProb`: any op fails with `ErrIO`; a failed write may leave a prefix, a failed rename or unlink may or may not have applied |
 | succeeds but response lost | a crash between `fs-land` and `deliver` (Chapter 10) |
 | reordering | independent delays per op; completions arrive in any order |
 | crash plus restart at any event | `CrashProb` after every server step and every landing (`maybeCrash`, `toys3/sim/simulator.go:266-270`), plus `Trip` |
 | (filesystem-specific) | torn writes (`TornWriteProb`), un-synced loss, background writeback (`WritebackProb`), read bit flips (`ReadCorruptProb`), fsyncgate (`FsyncGate`) |
 
-Not modelled: duplicated responses, timeouts (there are no timers to time out) and partitions (there is no network). Chapter 11 is entirely about the PlantModel.
+Not modelled: duplicated responses, timeouts (there are no timers to time out) and partitions (there is no network). Chapter 11 is entirely about the StorageModel.
 
 ### Rule 13: Check invariants after every step
 
@@ -472,7 +472,7 @@ Two invariants deserve a footnote: `Linearizable` only does real work at quiesce
 > **Hash the state after every step** into a running trace hash, and run each seed twice in CI. If the hashes differ, nondeterminism has leaked in.
 > (`loop.md:97-98`)
 
-**In toys3:** the trace hash folds the step number, time, entry kind and incarnation before each step, every event and action, the server's `StateHash` after each delivery, and the PlantModel hash after every step (`toys3/sim/simulator.go:95-97`, `172-183`). `TestDeterminismCanary` runs seeds 1 to 12 twice each and compares trace hash, RNG draw count and step count (`toys3/sim/sim_test.go:24-42`); `scripts/ci-determinism.sh:36-45` runs it in CI; and the campaign runner replays every tenth seed with `-check-determinism` (`toys3/cmd/toys3sim/main.go:76-83`). Chapter 8.
+**In toys3:** the trace hash folds the step number, time, entry kind and incarnation before each step, every event and action, the server's `StateHash` after each delivery, and the StorageModel hash after every step (`toys3/sim/simulator.go:95-97`, `172-183`). `TestDeterminismCanary` runs seeds 1 to 12 twice each and compares trace hash, RNG draw count and step count (`toys3/sim/sim_test.go:24-42`); `scripts/ci-determinism.sh:36-45` runs it in CI; and the campaign runner replays every tenth seed with `-check-determinism` (`toys3/cmd/toys3sim/main.go:76-83`). Chapter 8.
 
 ### Rule 15: Make failures one command
 
@@ -488,18 +488,18 @@ Two parts of the rule are not implemented: CI runs 200 seeds (the default of `-s
 ```
 rule  topic                              toys3
  1    logic/IO separation, CI lint       YES (stricter: allow-list detcheck)
- 2    Step(Event) []Action               YES (server only; workload/plant model are plain objects)
+ 2    Step(Event) []Action               YES (server only; workload/storage model are plain objects)
  3    plain-data events/actions          YES (+ "byte slices immutable once sent" convention)
  4    Env for nondeterminism             PARTIAL by design: time on Event, IDs from counters;
                                          Env exists but the server never uses it
- 5    narrow owned interfaces            YES (plant port: 7 actuations, 7 feedbacks, 3 ErrCodes)
+ 5    narrow owned interfaces            YES (Storage port: 7 actuations, 7 feedbacks, 3 ErrCodes)
  6    async I/O with ...Done events      YES
  7    timers as actions                  N/A (no timers needed)
  8    correlation IDs                    YES (IOID per incarnation, ClientReq); no duplicate injection
  9    durable state only in the store    YES (memory rebuilt from nothing)
 10    thin production runtime            YES
 11    one-goroutine sim, PQ, seeded RNG  YES, but ordered (At, Tie, Seq), not (time, seq, rngTie)
-12    adversarial fakes                  YES (plant model + disturbances), no duplicates/partitions
+12    adversarial fakes                  YES (storage model + disturbances), no duplicates/partitions
 13    invariants every step              YES
 14    trace hash, run seeds twice        YES
 15    one-command repro                  YES; 200 seeds in CI, no pinned regression seeds
@@ -541,7 +541,7 @@ func (s *Controller) Step(ev Event) []Action {
 
 - Line 110: once tripped, the server is deaf. A runtime should never deliver anything after `Trip`, but if it does, nothing happens.
 - Lines 113-118: the two non-I/O events. `Started` begins recovery; `Request` is validated and queued.
-- Lines 119-123: everything else must be **feedback from the plant**, an FS completion implementing `control.Feedback`, whose `ID()` is the IOID of the command it answers. Anything that is not is ignored (there is nothing else in the closed set, so this branch is defensive).
+- Lines 119-123: everything else must be **feedback from storage**, an FS completion implementing `control.Feedback`, whose `ID()` is the IOID of the command it answers. Anything that is not is ignored (there is nothing else in the closed set, so this branch is defensive).
 - Lines 124-126: recovery completions are routed to the recovery sub-machine.
 - Lines 127-131: request completions are routed to the request waiting on that IOID. Note `r.step != stepWaiting`: a queued request's `io` field is 0 and must not match anything.
 - Line 132: no owner, no effect.
@@ -552,7 +552,7 @@ Notice what is absent: `At` is never read. The server's behaviour does not depen
 
 Everything in this chapter was argued from software-engineering first principles: separate logic from I/O, make I/O asynchronous, make the scheduler a seeded queue. There is an older discipline that arrived at the same shape for its own reasons, and toys3's names come from it.
 
-A *feedback control loop* has a **controller** that computes commands, a **plant** (the physical process being controlled) that receives them through **actuators**, and **sensors** that report the plant's state back as **feedback**. The controller runs as a *discrete-time* update: at each sampling instant `k` it reads its inputs and computes `x[k+1] = f(x[k], u[k])` and its outputs. That is `Step(Event) []Action`, letter for letter: the controller's state is the `Controller` struct, the input `u[k]` is the event, `Event.At` is the sampling instant, and the outputs are the actions.
+A *feedback control loop* has a **controller** that computes commands, a **plant** (the physical process being controlled) that receives them through **actuators**, and **sensors** that report the plant's state back as **feedback**. In toys3 the plant is the disk and its page cache, and the code calls it plainly **storage** (Chapter 3a explains why it does not say "plant"). The controller runs as a *discrete-time* update: at each sampling instant `k` it reads its inputs and computes `x[k+1] = f(x[k], u[k])` and its outputs. That is `Step(Event) []Action`, letter for letter: the controller's state is the `Controller` struct, the input `u[k]` is the event, `Event.At` is the sampling instant, and the outputs are the actions.
 
 ```
    requests (operator) ─────┐            disturbances: EIO, torn writes, bit flips,
@@ -560,18 +560,18 @@ A *feedback control loop* has a **controller** that computes commands, a **plant
                  ┌──────────────────────┐            │
                  │      CONTROLLER      │ actuations ▼
                  │  control.Controller  │──(FS*)────────►┌───────────────────────┐
-                 │  Step(Event)[]Action │                │         PLANT         │
+                 │  Step(Event)[]Action │                │        STORAGE        │
                  │                      │◄──(FS*Done)────│  disk + page cache    │
                  └──┬────────────┬──────┘  feedback      │  prod: OSExecutor     │
-                    │            │                       │  sim:  PlantModel     │
+                    │            │                       │  sim:  StorageModel   │
      replies, or    │            │ telemetry             └───────────────────────┘
      Trip (fail-    ▼            ▼ (Committed, Recovered, CorruptionDetected)
      stop)       clients      log (prod) / monitors (sim)
 ```
 
-Read the sans-I/O argument again with this picture: the controller "never does I/O" because no controller does; it commands actuators and reads feedback. The "land/deliver split" of §2.4 is the plant's **dead time** (command to effect) followed by its **feedback delay** (effect to report). A crash is a **disturbance**. And the simulator is what control engineers call a *software-in-the-loop* (SIL) testbench: the real controller code, closed around a *model* of the plant instead of the real one.
+Read the sans-I/O argument again with this picture: the controller "never does I/O" because no controller does; it commands actuators and reads feedback. The "land/deliver split" of §2.4 is storage's **dead time** (command to effect) followed by its **feedback delay** (effect to report). A crash is a **disturbance**. And the simulator is what control engineers call a *software-in-the-loop* (SIL) testbench: the real controller code, closed around a *model* of storage instead of the real thing.
 
-This is not a coat of paint. Each of those names now appears in the code (`control.Controller`, `control.Actuation`, `control.Feedback`, `sim.PlantModel`, `sim.Disturbances`, `DeadTime`, `FeedbackDelay`, `control.Trip`, `control.Telemetry`), and each one was chosen because the concept was already there, unnamed. Equally important are the places where a control name was considered and *rejected*: requests are not "setpoints" (a GET does not set anything), linearizability has nothing to do with linearization, and the CRC is not an "integrity sensor". Chapter 3a, after the vocabulary chapter, works through the whole domain model: subdomains, bounded contexts, the aggregate, the ports, and the metaphor, end to end, including where and why it stops.
+This is not a coat of paint. Each of those names now appears in the code (`control.Controller`, `control.Actuation`, `control.Feedback`, `sim.StorageModel`, `sim.Disturbances`, `DeadTime`, `FeedbackDelay`, `control.Trip`, `control.Telemetry`), and each one was chosen because the concept was already there, unnamed. Equally important are the places where a control name was considered and *rejected*: requests are not "setpoints" (a GET does not set anything), linearizability has nothing to do with linearization, and the CRC is not an "integrity sensor". Chapter 3a, after the vocabulary chapter, works through the whole domain model: subdomains, bounded contexts, the aggregate, the ports, and the metaphor, end to end, including where and why it stops.
 
 ## Key takeaways
 
@@ -579,7 +579,7 @@ This is not a coat of paint. Each of those names now appears in the code (`contr
 - In the sans-I/O shape, concurrency lives in data (records of in-flight requests keyed by IOID), not in threads. Whoever calls `Step` decides the interleaving.
 - Events and Actions are plain data so they can be logged, hashed, compared, replayed and rewritten by mutants. Byte slices are a reference type, so "immutable once sent" is a convention backed by copying at the fake's boundary.
 - `Factory` makes "memory is disposable" structural: a crash throws the object away.
-- The vocabulary between the controller and the disk is a port the controller owns (`Actuation`, `Feedback`), with two adapters: the real `OSExecutor` and the simulated `PlantModel`.
+- The vocabulary between the controller and the disk is a port the controller owns (`Actuation`, `Feedback`), with two adapters: the real `OSExecutor` and the simulated `StorageModel`.
 - toys3 follows `loop.md` closely. Its deviations (time on events instead of `Now()`, counters instead of `NewID()`, no timers, `(At, Tie, Seq)` ordering) are each either simplifications or improvements.
 
 ## Exercises

@@ -31,13 +31,13 @@ By the end of the book you should be able to:
 
 1. **Explain why DST finds bugs that unit tests, integration tests and even randomized stress tests do not**, and what the three ingredients are (a single thread of control, simulated I/O, and one seeded source of randomness) (Chapter 1).
 2. **Design a component as a pure `Step(Event) []Action` state machine**, the "sans-I/O" shape that makes simulation possible, and explain each rule in `loop.md` (Chapters 2 and 3).
-2a. **Name the parts of a system with a domain model**: subdomains, bounded contexts, a context map, an aggregate, ports and adapters, and a ubiquitous language drawn from control theory (controller, plant, actuation, feedback, disturbance, dead time, settling, trip, interlock), including where a metaphor should *not* be applied (Chapter 3a).
+2a. **Name the parts of a system with a domain model**: subdomains, bounded contexts, a context map, an aggregate, ports and adapters, and a ubiquitous language drawn from control theory (controller, storage (the textbook *plant*), actuation, feedback, disturbance, dead time, settling, trip, interlock), including where a metaphor should *not* be applied (Chapter 3a).
 3. **Reason precisely about how bytes become durable on a POSIX filesystem**: page cache, `fsync` of a file versus its directory, atomic `rename`, torn writes, and why the temp-file → fsync → rename → fsync-dir sequence is the minimum correct protocol (Chapter 4).
 4. **Read and modify the toys3 controller** (`toys3/control/controller.go` and `recovery.go`) with confidence, including its operating modes, its recovery protocol, its key interlock (per-key FIFO queues), and its error policy and safety trip (Chapters 5 to 7).
 5. **Understand how determinism is enforced and verified**: state hashing, trace hashes, the `detcheck` static analyzer and its allow-list, two instructive bugs in the tooling itself, and how a golden file of trace hashes turns the simulator into a safety net for refactoring (Chapter 8).
 6. **See how the same controller runs in production** with real goroutines, real `os` calls and real HTTP, and why the production shell contains no business logic (Chapter 9).
 7. **Build a simulator**: a priority queue ordered by `(At, Tie, Seq)`, virtual time, server incarnations, crash and restart, and the separation between an I/O *landing* and its completion being *delivered* (Chapter 10).
-8. **Build an adversarial plant model** with durable and volatile versions of every inode and directory entry, crash resolution, EIO semantics, background writeback, read corruption, and the Linux "fsyncgate" behaviour (Chapter 11).
+8. **Build an adversarial storage model** with durable and volatile versions of every inode and directory entry, crash resolution, EIO semantics, background writeback, read corruption, and the Linux "fsyncgate" behaviour (Chapter 11).
 9. **Design workloads that make bugs visible**: self-describing values, quiescent points, and swarm testing (Chapter 12).
 10. **Check linearizability** of a history containing crashes, 500s and abandoned requests, using a memoized Wing–Gong–Lowe search with per-key decomposition and carried uncertainty (Chapter 13).
 11. **Write invariants that have teeth**, and tell black-box from white-box checks (Chapter 14).
@@ -58,9 +58,9 @@ func (s *Controller) Step(ev Event) []Action {
 	...
 ```
 
-Line numbers refer to the tree at commit `a4018d5` ("toys3: document the domain model and control-theory vocabulary"). If you are reading a later version and the numbers have drifted, search for the function name.
+Line numbers refer to the tree at commit `10777a2` ("toys3: fix comment drift and tighten the storage adapter signature"). If you are reading a later version and the numbers have drifted, search for the function name.
 
-**A note on names, for readers of an earlier edition.** The first edition of this book was written against commit `210c1fa`. Since then, commits `9b65410..a4018d5` refactored toys3 with domain-driven design and a vocabulary borrowed from control theory, without changing its behaviour: every trace hash, step count and "caught at seed N" number in this book is the same before and after, and Chapter 8 (§8.12) shows how that was proven. The package `toys3/core` became `toys3/control`, `Server` became `Controller`, `Halt` became `Trip`, `Fact` became `Telemetry`, the fake filesystem became the `PlantModel`, and the quiet tail became the Settling phase, among others. Chapter 3a teaches the domain model behind the new names, and the appendix of Chapter 18 has a complete old-name → new-name table.
+**A note on names, for readers of an earlier edition.** The first edition of this book was written against commit `210c1fa`. Since then, commits `9b65410..a4018d5` refactored toys3 with domain-driven design and a vocabulary borrowed from control theory, without changing its behaviour: every trace hash, step count and "caught at seed N" number in this book is the same before and after, and Chapter 8 (§8.12) shows how that was proven. The package `toys3/core` became `toys3/control`, `Server` became `Controller`, `Halt` became `Trip`, `Fact` became `Telemetry`, the fake filesystem became the `StorageModel` (briefly `PlantModel`, until commit `56b0d2e` replaced the textbook word *plant* with *storage*), and the quiet tail became the Settling phase, among others. Chapter 3a teaches the domain model behind the new names, and the appendix of Chapter 18 has a complete old-name → new-name table.
 
 There are three reading paths, described in more detail in `README.md`:
 
@@ -101,7 +101,7 @@ tmpdst/                         module "manifester", Go 1.24
     │   ├── types.go            Time, Duration, ClientReq, Status
     │   ├── event.go            Event, Started, Request and the Op set
     │   ├── action.go           Reply, Trip, Emit
-    │   ├── plant.go            the plant port: Actuation, Feedback, FS* commands,
+    │   ├── storage.go          the Storage port: Actuation, Feedback, FS* commands,
     │   │                       FS*Done completions, IOID, ErrCode
     │   ├── telemetry.go        Telemetry: Committed, Recovered, CorruptionDetected
     │   ├── env.go              Env = Rand + Buggify
@@ -124,7 +124,7 @@ tmpdst/                         module "manifester", Go 1.24
     │   ├── simulator.go        the main loop, crash, restart, env
     │   ├── trace.go            trace hashing (and the frozen telemetry hash key)
     │   ├── log.go              log rendering (Describe*, FormatLog)
-    │   ├── plantmodel.go       PlantModel: the adversarial in-memory filesystem
+    │   ├── storagemodel.go     StorageModel: the adversarial in-memory filesystem
     │   ├── workload.go         clients and the op mix (the stimulus)
     │   ├── value.go            self-describing values
     │   ├── history.go          History, HistOp, Outcome
@@ -133,7 +133,8 @@ tmpdst/                         module "manifester", Go 1.24
     │   ├── sim_test.go         canary, TestSeeds, coverage, CRC reachability
     │   ├── golden_test.go      pins every run's behaviour (testdata/golden-v1.txt)
     │   ├── trace_test.go       pins the frozen telemetry hash key
-    │   ├── plantmodel_test.go  crash-semantics tests of the plant model
+    │   ├── storagemodel_test.go
+    │   │                       crash-semantics tests of the storage model
     │   ├── oracle_test.go      hand-built histories, accepted and rejected
     │   ├── queue_test.go       queue ordering and incarnation dropping
     │   └── mutants_test.go     seven deliberately broken servers
@@ -203,7 +204,7 @@ By Chapter 15 you will be able to read each of those messages and tell the full 
 
 ## 0.6 Conventions
 
-- **"The server"** and **"the controller"** both mean `control.Controller` in `toys3/control/controller.go` ("server" when we look at it from the outside, as an S3 server; "controller" when we look at it as the control law of Chapter 3a). **"The simulator"** means `sim.Simulator` in `toys3/sim/simulator.go`. **"The PlantModel"** means `sim.PlantModel`.
+- **"The server"** and **"the controller"** both mean `control.Controller` in `toys3/control/controller.go` ("server" when we look at it from the outside, as an S3 server; "controller" when we look at it as the control law of Chapter 3a). **"The simulator"** means `sim.Simulator` in `toys3/sim/simulator.go`. **"The StorageModel"** means `sim.StorageModel`.
 - **Event / Action / Telemetry** with a capital letter mean the Go interfaces in `toys3/control` (`control.Event`, `control.Action`, `control.Telemetry`).
 - **Incarnation** means one boot of the server, from `Started` until a crash or `Trip`. Incarnations are numbered from 1 (`toys3/sim/queue.go:5-11`).
 - Times in logs are virtual. `t=53.112270ms` means 53,112,270 simulated nanoseconds since the start of the run.
@@ -219,7 +220,7 @@ Every claim in this book about what the code does was checked against the code. 
 - toys3 is a deliberately small, deliberately *honest* target: it has real durability requirements, so it can have real durability bugs.
 - The simulator is bigger than the server. That is normal for DST and is where the leverage is.
 - Everything is reproducible from a seed. A failing seed is a complete bug report.
-- The book is grounded in the actual code at commit `a4018d5` and in artifacts produced by running it.
+- The book is grounded in the actual code at commit `10777a2` and in artifacts produced by running it.
 
 ## Exercises
 

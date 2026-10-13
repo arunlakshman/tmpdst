@@ -2,7 +2,7 @@
 
 > *"A concurrent object is correct if every history it produces could have been produced by some sequential execution that respects real time."* (Herlihy and Wing, paraphrased)
 
-The invariants of Chapter 14 that peek at the plant model's durable state (`AckedIsDurable`, `ObjNeverTorn`) are powerful but *white-box*: they know where the server keeps its files and what a correct file looks like. This chapter is about the one check that knows nothing about the server at all. The **oracle** (`toys3/sim/oracle.go`) sees only what clients saw: which requests were sent, when, and what came back. From that alone it decides whether the server behaved like a correct key-value store that never loses acknowledged data.
+The invariants of Chapter 14 that peek at the storage model's durable state (`AckedIsDurable`, `ObjNeverTorn`) are powerful but *white-box*: they know where the server keeps its files and what a correct file looks like. This chapter is about the one check that knows nothing about the server at all. The **oracle** (`toys3/sim/oracle.go`) sees only what clients saw: which requests were sent, when, and what came back. From that alone it decides whether the server behaved like a correct key-value store that never loses acknowledged data.
 
 That decision is a linearizability check, and it is the hardest piece of code in the repository. We will build it up from first principles, walk through the implementation line by line, work every test in `oracle_test.go` by hand, and then dissect three real failures from the mutation suite.
 
@@ -86,7 +86,7 @@ and the rules, from the `Oracle` doc comment:
 
 Three things in these rules deserve emphasis.
 
-**1. "Crashes erase nothing."** The model has no crash operation. A crash is just an instant at which some operations stop (become Abandoned). The model state after the crash is whatever it was before. So if PUT k=v1 returned 200, and after a crash a GET returns 404, there is no sequential explanation: the history is rejected. This one sentence is the black-box statement of durability: *acknowledged means durable* (invariant (b) in `DESIGN.md:197`).
+**1. "Crashes erase nothing."** The model has no crash operation. A crash is just an instant at which some operations stop (become Abandoned). The model state after the crash is whatever it was before. So if PUT k=v1 returned 200, and after a crash a GET returns 404, there is no sequential explanation: the history is rejected. This one sentence is the black-box statement of durability: *acknowledged means durable* (invariant (b) in `DESIGN.md:199`).
 
 **2. Indeterminate mutations are optional, but bounded.** A Failed or Abandoned PUT may or may not have happened, but if it happened, it happened *inside its interval*. For an Abandoned op, the interval ends at the crash. It cannot take effect after the crash, because the process that would have done it is dead. For a Failed op (500), the interval ends at the reply.
 
@@ -208,7 +208,7 @@ Details:
 
 ## 13.4 The reference model and how operations apply
 
-The sequential specification is the oracle's **reference model**: the model whose behaviour the whole closed loop (controller plus disk) must reproduce, in the sense of Chapter 3a. One state of it is a `refState`, a sorted slice. The type was called `modelState` before the refactor; "model" alone had become ambiguous, because the simulator also has a *plant model* (Chapter 11), and the rule now is to always say which model you mean.
+The sequential specification is the oracle's **reference model**: the model whose behaviour the whole closed loop (controller plus disk) must reproduce, in the sense of Chapter 3a. One state of it is a `refState`, a sorted slice. The type was called `modelState` before the refactor; "model" alone had become ambiguous, because the simulator also has a *storage model* (Chapter 11), and the rule now is to always say which model you mean.
 
 ```go
 // toys3/sim/oracle.go:158-188
@@ -1036,7 +1036,7 @@ In model terms:
  finals: {}  (k1 absent)
 ```
 
-Window 1 is accepted, but only by linearizing c45's failed DELETE (otherwise c47's 404 is impossible). The model now says "k1 is gone". Window 2 is consistent with that. The crash reverts the PlantModel's un-synced unlink, so the server reads `value-of-26` again in window 3. The model cannot un-delete. The client saw a key disappear (two 404s) and then reappear with its old value. That is the d2 bug, and note what was needed to see it: an EIO on exactly the dir fsync, two subsequent reads of the same key observing the visible-but-not-durable state, and a crash before anything else made the unlink durable. With 2 keys (seed 132's swarm shape), the reads land on `k1` quickly.
+Window 1 is accepted, but only by linearizing c45's failed DELETE (otherwise c47's 404 is impossible). The model now says "k1 is gone". Window 2 is consistent with that. The crash reverts the StorageModel's un-synced unlink, so the server reads `value-of-26` again in window 3. The model cannot un-delete. The client saw a key disappear (two 404s) and then reappear with its old value. That is the d2 bug, and note what was needed to see it: an EIO on exactly the dir fsync, two subsequent reads of the same key observing the visible-but-not-durable state, and a crash before anything else made the unlink durable. With 2 keys (seed 132's swarm shape), the reads land on `k1` quickly.
 
 Also note *when* it was reported: the bad GET replied at step 365, but the failure is at step 380, the next quiescent point. The oracle only checks complete windows; per-step invariants (Chapter 14) report at the exact step, the oracle at the end of the window.
 
@@ -1065,7 +1065,7 @@ Here the model is certain: `k5` holds request 221's value (one start state). The
 #1669  inc=13  Request{c248 GET "k5"} ... FSReadDone{io52 OK obj(value-of-231)}   ← k5 now holds k25's value
 ```
 
-Black-box, the oracle sees only: `k5` was acked as 221, nothing wrote `k5` since, and a GET of `k5` returned the value of a PUT to `k25`. No COPY moved 231 into `k5`. Unexplainable. `NoCorruptReads` cannot see this: the bytes are a perfectly valid value, just from the wrong key. Only a model-based check can. Chapter 11 explains the PlantModel mechanics (durable vs current directory entries) that make the hard link possible, and Chapter 15 discusses why this mutant needs many keys to be visible.
+Black-box, the oracle sees only: `k5` was acked as 221, nothing wrote `k5` since, and a GET of `k5` returned the value of a PUT to `k25`. No COPY moved 231 into `k5`. Unexplainable. `NoCorruptReads` cannot see this: the bytes are a perfectly valid value, just from the wrong key. Only a model-based check can. Chapter 11 explains the StorageModel mechanics (durable vs current directory entries) that make the hard link possible, and Chapter 15 discusses why this mutant needs many keys to be visible.
 
 ### Mutant e, seed 18: garbage
 
@@ -1074,7 +1074,7 @@ FAIL no-corrupt-reads step 657: 200 GET returned bytes no PUT wrote: req 98 clie
 FAIL linearizable step 657: GET req 98 client 0 GET "k3" [184..185 @153865676..154136154] -> 200 garbage(13 bytes) returned bytes no PUT wrote
 ```
 
-Two invariants fire at the same step. `NoCorruptReads` checks every completed GET immediately. The step also happened to complete a window (`[184..185]`: invoked and returned back to back, nothing else pending), so `Linearizable` ran too, and `window()` rejected the body before searching. The run stops after the step (both failures are recorded because the simulator finishes running the remaining invariants of the step before it checks `halted`). The 13 bytes are the payload of a 29-byte object file (16-byte header + 13) in which the PlantModel flipped one bit on read; the mutant skipped the CRC check, so the server served it.
+Two invariants fire at the same step. `NoCorruptReads` checks every completed GET immediately. The step also happened to complete a window (`[184..185]`: invoked and returned back to back, nothing else pending), so `Linearizable` ran too, and `window()` rejected the body before searching. The run stops after the step (both failures are recorded because the simulator finishes running the remaining invariants of the step before it checks `halted`). The 13 bytes are the payload of a 29-byte object file (16-byte header + 13) in which the StorageModel flipped one bit on read; the mutant skipped the CRC check, so the server served it.
 
 ## 13.10 Statistics: windows, maxwin, widened
 

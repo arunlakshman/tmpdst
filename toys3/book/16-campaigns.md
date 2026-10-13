@@ -2,7 +2,7 @@
 
 > *"A seed that passed is a fact about one universe. A campaign is a census."*
 
-Everything up to this chapter has been about building the machine: the state machine, the plant model, the workload, the oracle, the invariants, the mutants. This chapter is about *driving* it. How do you run one seed, a thousand seeds, ten minutes of seeds on every core? How do you read what comes back? When something fails, what is the shortest path from "red" to "I understand the bug"? And how does all of this fit into CI so that determinism and correctness are defended on every push?
+Everything up to this chapter has been about building the machine: the state machine, the storage model, the workload, the oracle, the invariants, the mutants. This chapter is about *driving* it. How do you run one seed, a thousand seeds, ten minutes of seeds on every core? How do you read what comes back? When something fails, what is the shortest path from "red" to "I understand the bug"? And how does all of this fit into CI so that determinism and correctness are defended on every push?
 
 There are exactly two entry points, and it is worth knowing both intimately:
 
@@ -254,7 +254,7 @@ d2 is first caught at seed 132, so 50 seeds is not enough. Raise it when you add
 
 ### How long does `go test ./toys3/sim` take?
 
-All of the above together (canary, 200-seed sweep, 200-seed coverage, 200-seed CRC check, the plant model, queue and oracle unit tests, all seven mutants twice, and, since the refactor, the golden test of Chapter 8 §8.12 with its 550 seeds and 14 mutant searches):
+All of the above together (canary, 200-seed sweep, 200-seed coverage, 200-seed CRC check, the storage model, queue and oracle unit tests, all seven mutants twice, and, since the refactor, the golden test of Chapter 8 §8.12 with its 550 seeds and 14 mutant searches):
 
 ```
 $ time go test ./toys3/sim -count=1
@@ -275,7 +275,7 @@ The package doc states the design in one paragraph:
 //
 //	go run ./toys3/cmd/toys3sim -duration 10m -check-determinism
 //
-// Every seed is an independent sim.Run (its own Rand, queue, fake filesystem
+// Every seed is an independent sim.Run (its own Rand, queue, storage model
 // and server), so seeds run on separate goroutines with no shared state;
 // only the seed counter and the result tallies are shared, outside the
 // simulation. Any failure prints the one-line repro command and makes the
@@ -472,9 +472,9 @@ The struct is at `toys3/sim/config.go:61-80`; each field is incremented in a spe
 
 **`indet=5060`**: `Stats.Indeterminate` (spelled `Indetermined` before the refactor), incremented in `Simulator.crash` once per request that was outstanding at the crash (`toys3/sim/simulator.go:283-284`). These are the oracle's `Abandoned` ops: the client never learned what happened. Check: `200+400+404+500 + indet = 42210 + 5060 = 47270 = reqs`. Every issued request either got exactly one reply or was abandoned by exactly one crash. That identity is a cheap sanity check on the simulator itself; if it ever fails, requests are leaking or being double-counted.
 
-**`fsops=113656`**: `FSCounters.Landed` (`toys3/sim/plantmodel.go:166`), copied into `Stats.FSOps` at the end of the run (`toys3/sim/simulator.go:115`). It counts filesystem actions that *landed* (took effect in the PlantModel). Actions issued but dropped by a crash before landing are not counted. About 2.4 FS operations per request: a GET is one, a PUT is four, recovery adds a list, some unlinks and an fsync per boot.
+**`fsops=113656`**: `FSCounters.Landed` (`toys3/sim/storagemodel.go:167`), copied into `Stats.FSOps` at the end of the run (`toys3/sim/simulator.go:115`). It counts filesystem actions that *landed* (took effect in the StorageModel). Actions issued but dropped by a crash before landing are not counted. About 2.4 FS operations per request: a GET is one, a PUT is four, recovery adds a list, some unlinks and an fsync per boot.
 
-**`eio=1061`**: `FSCounters.EIOs` (`toys3/sim/plantmodel.go:196-198`): landed actions that completed with `ErrIO`. Around 0.9% of landed actions, consistent with a swarm mix of EIO rates between 0.2% and 3%. EIOs are only *planned* during Chaos (`PlantModel.Plan`, `toys3/sim/plantmodel.go:148`), but a planned failure can land just after Chaos ends; see Chapter 17.
+**`eio=1061`**: `FSCounters.EIOs` (`toys3/sim/storagemodel.go:197-199`): landed actions that completed with `ErrIO`. Around 0.9% of landed actions, consistent with a swarm mix of EIO rates between 0.2% and 3%. EIOs are only *planned* during Chaos (`StorageModel.Plan`, `toys3/sim/storagemodel.go:149`), but a planned failure can land just after Chaos ends; see Chapter 17.
 
 **`crashes=1691`**: `Result.Crashes`, incremented in `Simulator.crash` (`toys3/sim/simulator.go:299`), copied to `Stats.Crashes`. Includes Trips. About 8.5 per seed.
 
@@ -482,11 +482,11 @@ The struct is at `toys3/sim/config.go:61-80`; each field is incremented in a spe
 
 **`midput=1473`**: `Stats.CrashesMidPut`, incremented once per crash during which at least one PUT or COPY was outstanding (`toys3/sim/simulator.go:282-295`). This is the single most important coverage number for a storage system: it says how often the adversary cut the power in the middle of a write. 87% of crashes here hit a write in progress, because writes are the long-running operations (four FS steps each).
 
-**`torn=87`**: `CrashReport.Torn` summed (`toys3/sim/simulator.go:278`): files whose un-synced content a crash cut to a strict prefix (`toys3/sim/plantmodel.go:505-507`). Only files with dirty content and a name can tear, and only with probability `TornWriteProb` (0.3). Low in absolute terms because a correct server keeps dirty files short-lived; these are almost all temp files that recovery then deletes.
+**`torn=87`**: `CrashReport.Torn` summed (`toys3/sim/simulator.go:278`): files whose un-synced content a crash cut to a strict prefix (`toys3/sim/storagemodel.go:506-508`). Only files with dirty content and a name can tear, and only with probability `TornWriteProb` (0.3). Low in absolute terms because a correct server keeps dirty files short-lived; these are almost all temp files that recovery then deletes.
 
-**`lost=1539`** and **`kept=1350`**: un-synced changes that a crash discarded (`lost`) or happened to make durable anyway (`kept`) (`toys3/sim/plantmodel.go:471-513`). They include both directory-entry changes and file contents. `lost` also counts every fsyncgate-poisoned inode (`toys3/sim/plantmodel.go:502-503`). Roughly a 50/50 split, as expected from `rng.Intn(2)`. Both must be non-zero for the fault model to be adversarial in both directions; `TestCoverage` enforces that.
+**`lost=1539`** and **`kept=1350`**: un-synced changes that a crash discarded (`lost`) or happened to make durable anyway (`kept`) (`toys3/sim/storagemodel.go:472-514`). They include both directory-entry changes and file contents. `lost` also counts every fsyncgate-poisoned inode (`toys3/sim/storagemodel.go:503-504`). Roughly a 50/50 split, as expected from `rng.Intn(2)`. Both must be non-zero for the fault model to be adversarial in both directions; `TestCoverage` enforces that.
 
-**`readcorrupt=71`**: `FSCounters.ReadCorruptions` (`toys3/sim/plantmodel.go:398-401`): FSReads that returned one flipped bit.
+**`readcorrupt=71`**: `FSCounters.ReadCorruptions` (`toys3/sim/storagemodel.go:399-402`): FSReads that returned one flipped bit.
 
 **`corruptdet=70`**: `Stats.CorruptionsDetected` (printed as `corruptobj=` and named `Stats.CorruptObjects` before the refactor), incremented when the server emits a `CorruptionDetected` telemetry (`toys3/sim/simulator.go:195-196`). Why 70 and not 71? A read corruption is counted when the read *lands*; the server only sees it when the completion is *delivered*. If a crash happens in between, the corrupted completion is dropped and the server never emits the fact. One of the 71 was in that window. In the 15-second campaign the gap was 2,318 versus 2,294. With the correct server, `corruptdet` can never exceed `readcorrupt`; `TestCorruptionUnreachableWithoutBitFlips` checks the extreme case (with zero bit flips, zero corrupt objects).
 
@@ -572,7 +572,7 @@ func main() {
 
 Copy `go.sum` from the repository, then `go build -o tracer . && ./tracer -seed 1 > seed1.log`. Seed 1's log is 1,338 lines.
 
-The external module can only use exported API: `sim.Run`, `sim.DefaultConfig`, `sim.BaseConfig`, `Config.Factory`, `Config.Invariants`, `sim.BlackBoxInvariants`, `sim.FormatLog`. That is enough for nearly everything, including plugging in your own broken server through `Config.Factory`, which is exactly what `DESIGN.md:236-237` invites. (The mutants themselves live in a `_test.go` file and cannot be imported; to replay a mutant externally you copy its code into your module. That is how the mutant traces in Chapter 15 were made.)
+The external module can only use exported API: `sim.Run`, `sim.DefaultConfig`, `sim.BaseConfig`, `Config.Factory`, `Config.Invariants`, `sim.BlackBoxInvariants`, `sim.FormatLog`. That is enough for nearly everything, including plugging in your own broken server through `Config.Factory`, which is exactly what `DESIGN.md:238-239` invites. (The mutants themselves live in a `_test.go` file and cannot be imported; to replay a mutant externally you copy its code into your module. That is how the mutant traces in Chapter 15 were made.)
 
 ## 16.6 Reading an event log
 
@@ -600,7 +600,7 @@ How to read it:
 
 - **Step numbers skip.** Steps 3, 5 and 8 are missing. Every popped queue entry is a step, but only some kinds log a line: `client-wake` entries never log (`Simulator.wake` writes nothing), so a request shows up only when its `deliver` step runs. Seed 1 has 1,628 steps but its log's last line is step 1,627; the final step was a client wake.
 - **`deliver` lines** show the event the server consumed and, after `=>`, every action it returned, in order. `Request{c1 GET "k2"}` with nothing after it means the request was *queued* (here, behind recovery). Steps 4 and 6 are requests arriving during recovery; step 16 shows them starting the moment recovery ends.
-- **`fs-land` lines** show an FS action taking effect in the PlantModel and the completion it produced (`land X -> Y`). The completion is delivered later, as a separate `deliver` line. The gap between them is the feedback delay, `ActuationPlan.FeedbackDelay` (Chapter 10).
+- **`fs-land` lines** show an FS action taking effect in the StorageModel and the completion it produced (`land X -> Y`). The completion is delivered later, as a separate `deliver` line. The gap between them is the feedback delay, `ActuationPlan.FeedbackDelay` (Chapter 10).
 - **`crash` lines** carry the crash report: `CRASH (trip: fsync temp: EIO): kept=2 lost=2 torn=0, dropped 1 queued entries`. The reason in parentheses is either `injected crash` or `trip: <cause>`.
 - **`restart` lines** say `boot` and carry the new incarnation number. The next line is always the `Started` delivery for that incarnation.
 - **`quiesce`, `settle`, `settling-end`** have `inc=0` because they are not addressed to a server incarnation.
@@ -718,7 +718,7 @@ Using a time-derived `-start-seed` for the nightly job means each night explores
 
 ## 16.9 The ten-minute campaign
 
-The orchestrating session for this book ran the campaign recommended by `DESIGN.md:229`:
+The orchestrating session for this book ran the campaign recommended by `DESIGN.md:231`:
 
 ```sh
 go run ./toys3/cmd/toys3sim -duration 10m -check-determinism

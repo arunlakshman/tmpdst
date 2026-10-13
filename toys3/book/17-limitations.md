@@ -21,9 +21,9 @@ A useful way to frame this is to ask, for every component of the real system, "w
   ┌────────────────────────────────────────┐   ┌──────────────────────────────────────┐
   │ HTTP clients, TCP, net/http            │   │ (nothing: requests appear as Events) │
   │ prod.Handler, prod.Loop, goroutines    │   │ (nothing)                            │
-  │ control.Controller.Step         │   │ control.Controller.Step  ◄── the real code  │
-  │ prod.OSExecutor → os.* → syscalls  │   │ PlantModel (a model of POSIX + crashes)  │
-  │ kernel page cache, journaling FS, disk │   │ PlantModel durable/volatile versions │
+  │ control.Controller.Step                │   │ control.Controller.Step ◄─ real code │
+  │ prod.OSExecutor → os.* → syscalls      │   │ StorageModel (POSIX + crash model)   │
+  │ kernel page cache, journaling FS, disk │   │ StorageModel durable/volatile state  │
   │ wall clock, monotonic clock            │   │ virtual clock (Event.At)             │
   │ process supervisor, restarts           │   │ KindRestart after RestartDelay       │
   └────────────────────────────────────────┘   └──────────────────────────────────────┘
@@ -46,21 +46,21 @@ Consequences:
 `prod.Loop` (`toys3/prod/loop.go`) and `prod.OSExecutor` (`toys3/prod/executor.go`) are not executed by the simulator. The design accepts that by keeping them thin (`loop.md` rule 10), but "thin" is not "empty". Things DST cannot see:
 
 - **Error mapping.** `code` (`toys3/prod/executor.go:103-113`) maps `fs.ErrNotExist` to `ErrNotFound` and everything else to `ErrIO`. If someone changed it to map `ENOENT` from `os.Rename` to `ErrIO` (or the reverse), every seed would still pass.
-- **The Submit/Reply handshake.** `Loop.Submit` (`toys3/prod/loop.go:121-154`) has a three-way select and a special case for "a Reply dispatched just before a Trip still counts". It is tested by `TestTripStopsLoop`, not by simulation.
+- **The Submit/Reply handshake.** `Loop.Submit` (`toys3/prod/loop.go:123-156`) has a three-way select and a special case for "a Reply dispatched just before a Trip still counts". It is tested by `TestTripStopsLoop`, not by simulation.
 - **Backpressure.** The inbox is a bounded channel (`NewLoop`, `inboxSize`); a full inbox blocks HTTP handlers and executor callbacks. The simulator has no inbox at all. `docs/flow-control.md` describes the much more careful design intended for the bigger system; toys3 does not attempt it.
-- **Trip after restart.** In the simulator a `Trip` is processed exactly like a power loss: the plant model resolves all volatile state at that instant. In production a trip is a process exit, and the kernel's page cache survives it. So a change that was visible but not durable when the controller tripped (a rename whose directory fsync failed) is still visible after the supervisor restarts the process; recovery does not make `obj/` durable, a GET can serve the value, and a later power loss can take it away: the "observed, then vanished" history of Chapter 1, against the *correct* controller. Chapter 9 (§9.10, item 2) works through it. The fix would be in recovery (for example, `FSFsyncDir(obj/)` before emitting `Recovered`), and the simulator would need a separate "process exit without power loss" event to expose the bug first. Neither exists at commit `a4018d5`; the first edition called this "Halt after restart".
-- **`PrepareDir`** (`toys3/prod/executor.go:118-125`) creates `obj/` and `tmp/` with `MkdirAll` and fsyncs `root`. It does not fsync `root`'s parent, so on a brand-new data directory the directory `root` itself may not be durable after the first power cut. The PlantModel starts with both directories already durable (`NewPlantModel`, `toys3/sim/plantmodel.go:129-143`) and has no mkdir, so this is outside the model.
+- **Trip after restart.** In the simulator a `Trip` is processed exactly like a power loss: the storage model resolves all volatile state at that instant. In production a trip is a process exit, and the kernel's page cache survives it. So a change that was visible but not durable when the controller tripped (a rename whose directory fsync failed) is still visible after the supervisor restarts the process; recovery does not make `obj/` durable, a GET can serve the value, and a later power loss can take it away: the "observed, then vanished" history of Chapter 1, against the *correct* controller. Chapter 9 (§9.10, item 2) works through it. The fix would be in recovery (for example, `FSFsyncDir(obj/)` before emitting `Recovered`), and the simulator would need a separate "process exit without power loss" event to expose the bug first. Neither exists at commit `10777a2`; the first edition called this "Halt after restart".
+- **`PrepareDir`** (`toys3/prod/executor.go:118-125`) creates `obj/` and `tmp/` with `MkdirAll` and fsyncs `root`. It does not fsync `root`'s parent, so on a brand-new data directory the directory `root` itself may not be durable after the first power cut. The StorageModel starts with both directories already durable (`NewStorageModel`, `toys3/sim/storagemodel.go:129-143`) and has no mkdir, so this is outside the model.
 
-### 3. Filesystem operations and faults that do not exist in the PlantModel
+### 3. Filesystem operations and faults that do not exist in the StorageModel
 
-The PlantModel is unusually adversarial for a teaching tool (Chapter 11), but it has a fixed vocabulary:
+The StorageModel is unusually adversarial for a teaching tool (Chapter 11), but it has a fixed vocabulary:
 
-- **No mkdir, rmdir, or nested directories.** Directories are fixed at construction (`toys3/sim/plantmodel.go:106-107`). A design that sharded objects into subdirectories (`obj/ab/abcdef`) would need directory creation durability (fsync the parent after mkdir), which is a classic source of bugs and is not modelled.
-- **No partial reads or short writes that report success.** `FSRead` returns the whole file or an error. `FSWrite` writes all of `Data` or fails (a failed write may leave a prefix, `toys3/sim/plantmodel.go:298-307`, but a *successful* write is always complete). Real `write(2)` can return a short count; Go's `File.Write` loops until done or error, so for toys3's production path this is mostly fine, but a lower-level implementation would need it.
-- **Torn writes are per file, at crash time, and only as a prefix.** `Crash` cuts dirty content to a random strict prefix (`toys3/sim/plantmodel.go:505-507`). Real disks can tear at sector granularity in the *middle* of a file, reorder sector writes within a file, or persist a later sector and not an earlier one. Because toys3 writes whole files and checks a CRC, prefix tearing is enough to exercise its defences; a log-structured design that appends to one file would need richer tearing.
-- **No interleaved tearing across files beyond independence.** Each un-synced change is resolved independently (`rng.Intn(2)` per dirent and per inode). Real journaling filesystems impose *orderings* (for example, ext4 in `data=ordered` mode writes data blocks before the metadata that references them), so some combinations the PlantModel produces cannot happen on ext4, and conversely the PlantModel never produces a few correlated failures (a whole journal transaction lost at once) that can.
+- **No mkdir, rmdir, or nested directories.** Directories are fixed at construction (`toys3/sim/storagemodel.go:106-107`). A design that sharded objects into subdirectories (`obj/ab/abcdef`) would need directory creation durability (fsync the parent after mkdir), which is a classic source of bugs and is not modelled.
+- **No partial reads or short writes that report success.** `FSRead` returns the whole file or an error. `FSWrite` writes all of `Data` or fails (a failed write may leave a prefix, `toys3/sim/storagemodel.go:299-308`, but a *successful* write is always complete). Real `write(2)` can return a short count; Go's `File.Write` loops until done or error, so for toys3's production path this is mostly fine, but a lower-level implementation would need it.
+- **Torn writes are per file, at crash time, and only as a prefix.** `Crash` cuts dirty content to a random strict prefix (`toys3/sim/storagemodel.go:506-508`). Real disks can tear at sector granularity in the *middle* of a file, reorder sector writes within a file, or persist a later sector and not an earlier one. Because toys3 writes whole files and checks a CRC, prefix tearing is enough to exercise its defences; a log-structured design that appends to one file would need richer tearing.
+- **No interleaved tearing across files beyond independence.** Each un-synced change is resolved independently (`rng.Intn(2)` per dirent and per inode). Real journaling filesystems impose *orderings* (for example, ext4 in `data=ordered` mode writes data blocks before the metadata that references them), so some combinations the StorageModel produces cannot happen on ext4, and conversely the StorageModel never produces a few correlated failures (a whole journal transaction lost at once) that can.
 - **No metadata operations.** No `stat`, no sizes, no mtimes, no permissions, no `fsync` returning data about the device. No hard links created on purpose (they only appear as a crash artifact).
-- **No ENOSPC, EDQUOT, EROFS.** Every error is `ErrIO` or `ErrNotFound` (`toys3/control/plant.go:31-35`). "Disk full" is a common and important production failure with its own semantics (a write that fails partway; a rename that cannot allocate a directory block). In production, `code` would map ENOSPC to `ErrIO`, which the server handles; the simulator just never produces the case where *every* write fails for a long time.
+- **No ENOSPC, EDQUOT, EROFS.** Every error is `ErrIO` or `ErrNotFound` (`toys3/control/storage.go:31-35`). "Disk full" is a common and important production failure with its own semantics (a write that fails partway; a rename that cannot allocate a directory block). In production, `code` would map ENOSPC to `ErrIO`, which the server handles; the simulator just never produces the case where *every* write fails for a long time.
 - **No slow disk.** Dead time is uniform in `[20µs, 1.5ms]` plus a uniform feedback delay in `[0, 500µs]` (`toys3/sim/config.go:167-168`). There is no two-speed latency (mostly fast, a heavy tail), no stall, no "fsync takes 30 seconds". `docs/lessons.md` §9 argues that correlated slowness finds bugs that independent latency never does. toys3 has no timeouts, so slowness cannot currently *break* it, but it would change which interleavings are likely.
 - **No reads that see stale data.** Reads always see the volatile (current) version. A filesystem bug or a cache-coherence problem that made a read return an older version is not modelled (and would not be the server's fault).
 
@@ -88,13 +88,13 @@ The server never looks at `Event.At`. It has no timers, timeouts, leases or TTLs
 
 `Liveness.AtEnd` (`toys3/sim/invariant.go:215-235`) checks that the server is alive, that *the final incarnation* emitted `Recovered`, and that no op is still `Pending`. It does not check that every earlier boot recovered (most did not: they crashed or tripped during recovery, which is legitimate), and it does not bound *how long* a request may wait. A server that took 59 ms of the 60 ms Settling to answer a request would pass. A bounded-latency liveness check ("every request issued in Settling replies within X ms of virtual time") would be a cheap and meaningful strengthening.
 
-### 9. PlantModel versus ext4: in which direction does the model err?
+### 9. StorageModel versus ext4: in which direction does the model err?
 
 It errs in both directions, and you should know which is which.
 
 **More adversarial than a typical Linux journaling filesystem:**
 
-- A cross-directory rename can be resolved *independently* in its two directories at a crash: both names survive, or neither (`TestPlantModelRenameWithoutDirFsyncMayVanish`, `toys3/sim/plantmodel_test.go:69-93`). On ext4, a rename is one journal transaction; its two halves commit together. The "resurrected temp file aliases a committed object" scenario behind mutant f relies on this independence (plus background writeback making the temp name durable first). Defending against it costs nothing for a correct server, and it is legal POSIX behaviour, so it is a good default.
+- A cross-directory rename can be resolved *independently* in its two directories at a crash: both names survive, or neither (`TestStorageModelRenameWithoutDirFsyncMayVanish`, `toys3/sim/storagemodel_test.go:69-93`). On ext4, a rename is one journal transaction; its two halves commit together. The "resurrected temp file aliases a committed object" scenario behind mutant f relies on this independence (plus background writeback making the temp name durable first). Defending against it costs nothing for a correct server, and it is legal POSIX behaviour, so it is a good default.
 - Every un-synced change is a coin flip at every crash, with no ordering between them.
 - `FsyncGate` is always on in `BaseConfig` (`toys3/sim/config.go:169`). Linux behaved this way for years; newer kernels report the error more reliably, but the safe assumption remains "after an fsync error, the page cache is unknowable".
 
@@ -103,9 +103,9 @@ It errs in both directions, and you should know which is which.
 - No mid-file tearing, no sector reordering (see §3).
 - No metadata corruption, no lost directories, no `fsck` moving files to `lost+found`.
 - No persistent device failure. A seed's EIOs are independent per operation.
-- No "fsync returned success but the disk lied" (a drive with a volatile write cache and no barrier support). The PlantModel's fsync, when it says OK and the inode is not poisoned, really is durable.
+- No "fsync returned success but the disk lied" (a drive with a volatile write cache and no barrier support). The StorageModel's fsync, when it says OK and the inode is not poisoned, really is durable.
 
-The rule of thumb: the PlantModel is strict about **what POSIX permits** and lenient about **what hardware does**. That is a reasonable place to be for an application-level protocol, and a poor place to be for a filesystem or a database that does its own block management.
+The rule of thumb: the StorageModel is strict about **what POSIX permits** and lenient about **what hardware does**. That is a reasonable place to be for an application-level protocol, and a poor place to be for a filesystem or a database that does its own block management.
 
 ---
 
@@ -115,7 +115,7 @@ These were found by reading every file and running the code while writing the fi
 
 ### 1. The server never uses its `Env`
 
-*Claim.* `DESIGN.md:84-85`: "Randomness and buggify come from the injected `Env`." `control.Env` is documented as "the only way nondeterminism enters the control" (`toys3/control/env.go:3-4`; the odd phrase "enters the control" is a mechanical leftover of renaming "the core" when the package `core` became `control`).
+*Claim.* `DESIGN.md:86-87`: "Randomness and buggify come from the injected `Env`." `control.Env` is documented as "the only way nondeterminism enters the controller" (`toys3/control/env.go:3-4`; until commit `10777a2` it said "enters the control", a mechanical leftover of renaming "the core" when the package `core` became `control`).
 
 *Code.* `control.Controller` stores `env` (`toys3/control/controller.go:88`) and never reads it. No call to `Uint64`, `Intn` or `Maybe` exists in `toys3/control`. The test harness even says so: "a fixed control.Env (the server does not draw randomness today)" (`toys3/control/controller_test.go:14`).
 
@@ -125,7 +125,7 @@ These were found by reading every file and running the code while writing the fi
 
 *Claim.* `loop.md:88-89`: "a priority queue ordered by `(time, seq, rngTie)`".
 
-*Code.* `Queue.less` orders by `(At, Tie, Seq)` (`toys3/sim/queue.go:127-136`): the random tie-break comes *before* the insertion sequence. `DESIGN.md:134` agrees with the code.
+*Code.* `Queue.less` orders by `(At, Tie, Seq)` (`toys3/sim/queue.go:127-136`): the random tie-break comes *before* the insertion sequence. `DESIGN.md:136` agrees with the code.
 
 *Does it matter?* Yes, conceptually, and the code is right. With `(time, seq, tie)` the tie-break would never be used (seq is unique), and same-instant events would always be processed in insertion order, which is exactly the exploration the random tie is supposed to add. `loop.md` should be updated. (The bigger system's design, `docs/decisions.md` decision C, refines this further: random across lanes, FIFO within a lane.)
 
@@ -137,7 +137,7 @@ These were found by reading every file and running the code while writing the fi
 
 *Does it matter?* The code is the right check: earlier incarnations are allowed to crash or trip mid-recovery (recovery trips on any error, by design). The docs should have said "the final boot recovered".
 
-*Fix.* The comment now reads "the final boot reached control.Recovered (earlier incarnations may crash or trip mid-recovery by design)" (`toys3/sim/invariant.go:98-101`), and `DESIGN.md:199` says "the final boot recovers". As noted in Part I §8, there is still room for a stronger *bounded* liveness check; that one would change behaviour, and is not done.
+*Fix.* The comment now reads "the final boot reached control.Recovered (earlier incarnations may crash or trip mid-recovery by design)" (`toys3/sim/invariant.go:98-101`), and `DESIGN.md:201` says "the final boot recovers". As noted in Part I §8, there is still room for a stronger *bounded* liveness check; that one would change behaviour, and is not done.
 
 ### 4. `HistOp.Invoke` is not "when the Request was delivered" (**Fixed** in `a4018d5`)
 
@@ -161,11 +161,11 @@ No crash happened at step 380. *Does it matter?* Cosmetic, but it trips up reade
 
 ### 6. Recovery's `FSFsyncDir(tmp)` does not appear to be load-bearing
 
-*Claim.* The package doc lists it as a recovery step "even if nothing was removed" (`toys3/control/doc.go:106-108`), and the server does it (`fsyncTmpDir`, `toys3/control/recovery.go:88-93`).
+*Claim.* The package doc lists it as a recovery step "even if nothing was removed" (`toys3/control/doc.go:107-109`), and the server does it (`fsyncTmpDir`, `toys3/control/recovery.go:88-93`).
 
 *Experiment.* A mutant that skips only `FSFsyncDir(<dir>/tmp)` (built with the same `skipper` wrapper as mutant a, feeding the inner server a fake OK) was run against seeds 1..2000 of `DefaultConfig` with all invariants. **No seed failed.**
 
-*Why?* After a crash, every directory entry has `cur == durable` (Chapter 11). Recovery's unlinks make `cur = 0` for each leftover temp name, not durable. If the tmp fsync is skipped and another crash happens, some of those names come back; the next recovery unlinks them again. Within an incarnation, a new `FSWrite` to a temp name whose entry is `cur = 0` creates a *fresh* inode (`toys3/sim/plantmodel.go:308-314`), so a resurrected old inode can never be overwritten through it. Temp names are only read by recovery. So the fsync's durability is never observed.
+*Why?* After a crash, every directory entry has `cur == durable` (Chapter 11). Recovery's unlinks make `cur = 0` for each leftover temp name, not durable. If the tmp fsync is skipped and another crash happens, some of those names come back; the next recovery unlinks them again. Within an incarnation, a new `FSWrite` to a temp name whose entry is `cur = 0` creates a *fresh* inode (`toys3/sim/storagemodel.go:309-315`), so a resurrected old inode can never be overwritten through it. Temp names are only read by recovery. So the fsync's durability is never observed.
 
 *Does it matter?* It is a belt-and-braces step that costs one fsync per boot, and keeping it is defensible: it means "tmp/ is durably clean when serving starts" is an invariant you can reason about, and it would become necessary if temp names were ever reused in a way that reached a stale inode. But it is a nice example of what DST can tell you that review cannot: **this step is not justified by any failure the model can produce.** Either the model is missing a failure (possible), or the step is optional. Write that down in the design doc either way.
 
@@ -181,7 +181,7 @@ No crash happened at step 380. *Does it matter?* Cosmetic, but it trips up reade
 
 *Observation.* The 200-seed aggregate has `readcorrupt=71 corruptdet=70`; the 15-second campaign has 2,318 versus 2,294.
 
-*Explanation.* `ReadCorruptions` counts at *land* time (`toys3/sim/plantmodel.go:398-401`), `CorruptionsDetected` at *delivery* time, when the server emits the telemetry (`toys3/sim/simulator.go:195-196`). A crash between the two drops the completion (`Queue.DropIncarnation`), so the server never sees the corrupt bytes. Not a bug; a concrete demonstration of the "landed but never told" window from Chapter 10.
+*Explanation.* `ReadCorruptions` counts at *land* time (`toys3/sim/storagemodel.go:399-402`), `CorruptionsDetected` at *delivery* time, when the server emits the telemetry (`toys3/sim/simulator.go:195-196`). A crash between the two drops the completion (`Queue.DropIncarnation`), so the server never sees the corrupt bytes. Not a bug; a concrete demonstration of the "landed but never told" window from Chapter 10.
 
 ### 9. The "dropped: dead incarnation" branch is defensive
 
@@ -191,7 +191,7 @@ No crash happened at step 380. *Does it matter?* Cosmetic, but it trips up reade
 
 ### 10. Faults planned in Chaos can land in Settling; writeback never stops
 
-*Code.* `PlantModel.Plan` decides `Fail` at *issue* time, gated on `!fs.quiet` (`toys3/sim/plantmodel.go:148`). An action issued at 299.9 ms with `Fail = true` lands, as an EIO, after `KindSettle` at 300 ms. If it is an fsync, the server trips, and a crash happens in Settling. `WritebackProb` is not gated on `fs.quiet` at all (`toys3/sim/plantmodel.go:199-201`). `Crash` resolution, of course, still applies to any crash.
+*Code.* `StorageModel.Plan` decides `Fail` at *issue* time, gated on `!fs.quiet` (`toys3/sim/storagemodel.go:149`). An action issued at 299.9 ms with `Fail = true` lands, as an EIO, after `KindSettle` at 300 ms. If it is an fsync, the server trips, and a crash happens in Settling. `WritebackProb` is not gated on `fs.quiet` at all (`toys3/sim/storagemodel.go:200-202`). `Crash` resolution, of course, still applies to any crash.
 
 *Does it matter?* The Liveness "no 500 in Settling" rule only looks at ops *invoked* during Settling (`toys3/sim/invariant.go:202-211`), and those ops' FS actions are planned in quiet mode, so they never fail. The rule is therefore sound. But "no new faults or crashes" in the `KindSettle` log note (`simulator.go:163`) is slightly too strong: one more Trip, and its crash, can still happen early in Settling. (The note was reworded by the refactor, from "chaos over: no more faults or crashes" to "chaos over: settling (no new faults or crashes)", but the claim is the same.) Worth a sentence in `DESIGN.md`.
 
@@ -209,7 +209,7 @@ No crash happened at step 380. *Does it matter?* Cosmetic, but it trips up reade
 
 ### 13. A fourth data point for the mutant f ablation
 
-*Claim.* `DESIGN.md:262-264`: mutant f "took seed 429 with neither background writeback nor swarm, seed 36 with writeback alone, and seed 20 with both."
+*Claim.* `DESIGN.md:264-266`: mutant f "took seed 429 with neither background writeback nor swarm, seed 36 with writeback alone, and seed 20 with both."
 
 *Experiment.* All three were reproduced exactly (base config without writeback: 429; base with writeback: 36; swarm with writeback, i.e. `DefaultConfig`: 20). The missing corner of the 2×2, **swarm without writeback, is 24**.
 
@@ -279,7 +279,7 @@ Remember Part II §1: the first site changes every seed's universe. Re-record th
 
 **Sketch.**
 
-- Two `control.Controller` instances, each with its own PlantModel (two disks), identified by node id. The simulator's queue entries gain a target node (the bigger system's skeleton already has this: `sim.Target` with a `Node core.NodeRef`, `sim/scheduler.go:18-22`).
+- Two `control.Controller` instances, each with its own StorageModel (two disks), identified by node id. The simulator's queue entries gain a target node (the bigger system's skeleton already has this: `sim.Target` with a `Node core.NodeRef`, `sim/scheduler.go:18-22`).
 - A new action/event pair for node-to-node messages: `Send{To, Msg}` and `Received{From, Msg}`. The simulator delivers them with latency, drops, duplicates and reordering; a partition is a period during which messages between two nodes are dropped (or, better, held and re-timed on heal, `docs/lessons.md` §6).
 - Protocol: the primary performs the local durable write, sends the object to the backup, and replies 200 only after the backup acknowledges *its* durable write. The backup's write uses the same temp → fsync → rename → fsync-dir dance.
 - Failover: when the primary crashes, the backup becomes primary. Now you need epochs (an incarnation number in every message, `docs/lessons.md` §4) so a resurrected old primary cannot accept writes. That is where the first real bugs will be.
@@ -317,7 +317,7 @@ Remember Part II §1: the first site changes every seed's universe. Re-record th
 
 ### III.7 ENOSPC and a persistent fault mode (an afternoon)
 
-**Sketch.** Add `ErrNoSpace` to `control.ErrCode` (it is plain data; adding a value is cheap). Give the PlantModel a capacity in bytes and make `write` fail with `ErrNoSpace` (possibly after a prefix) when it would exceed it. Decide the server's policy: is ENOSPC on a temp write a plain 500 (yes: only a temp changed), and does it change anything about recovery? Add a fault mode in which the disk stays full for a long stretch of Chaos, so that recovery itself sees ENOSPC… except recovery only unlinks and fsyncs, which do not allocate. Is that true on your real filesystem? (Unlinking can require journal space.)
+**Sketch.** Add `ErrNoSpace` to `control.ErrCode` (it is plain data; adding a value is cheap). Give the StorageModel a capacity in bytes and make `write` fail with `ErrNoSpace` (possibly after a prefix) when it would exceed it. Decide the server's policy: is ENOSPC on a temp write a plain 500 (yes: only a temp changed), and does it change anything about recovery? Add a fault mode in which the disk stays full for a long stretch of Chaos, so that recovery itself sees ENOSPC… except recovery only unlinks and fsyncs, which do not allocate. Is that true on your real filesystem? (Unlinking can require journal space.)
 
 **Exercise.** Implement capacity, run the campaign, and add a Settling rule: during Settling the disk has space, so no 500s. Is that rule still sound?
 
@@ -331,7 +331,7 @@ Remember Part II §1: the first site changes every seed's universe. Re-record th
 
 ### III.9 Large objects and streaming (a week)
 
-**Sketch.** Today a PUT's whole payload is one `FSWrite`. For large objects you would write in chunks (`FSWriteAt{Offset}`), fsync once, then rename. The PlantModel then needs chunk-granular tearing (Part I §3), and the CRC needs to become incremental or per-chunk. GET would stream chunks into the reply, which means the core needs a way to send a partial reply, which means the HTTP layer becomes part of the protocol, which means Part I §1 becomes urgent. This is a good exercise in discovering how one feature pulls a whole layer into the deterministic core.
+**Sketch.** Today a PUT's whole payload is one `FSWrite`. For large objects you would write in chunks (`FSWriteAt{Offset}`), fsync once, then rename. The StorageModel then needs chunk-granular tearing (Part I §3), and the CRC needs to become incremental or per-chunk. GET would stream chunks into the reply, which means the core needs a way to send a partial reply, which means the HTTP layer becomes part of the protocol, which means Part I §1 becomes urgent. This is a good exercise in discovering how one feature pulls a whole layer into the deterministic core.
 
 ### III.10 Apply it to Manifester (a new project)
 
@@ -343,7 +343,7 @@ The top-level `core/`, `sim/` and `sys/` directories are interfaces for a WarpSt
 | `control.Env{Rand, Buggify}` | `core.Env{Rand, Buggify, Assertions}` (`core/env.go`) | The bigger Env adds `NewID`, `MaybeP`, `Fault`, and record-and-continue assertions. |
 | `sim.Queue (At, Tie, Seq)` | `sim.Scheduler` with lanes (`sim/scheduler.go`) | Lanes give FIFO within a connection and random ties across lanes (decision C). |
 | `Incarnation` + `DropIncarnation` | `Scheduler.DropNode(core.NodeRef)` | Same idea, per node. |
-| `PlantModel` (one plant model) | `sim.Engine`s (object store, control plane, network) | Each engine owns state and schedules completions on the one queue (`docs/lessons.md` §0). |
+| `StorageModel` (one storage model) | `sim.Engine`s (object store, control plane, network) | Each engine owns state and schedules completions on the one queue (`docs/lessons.md` §0). |
 | `Invariant.AfterStep(View)` | `sim.Invariant.Observe(Timeline, now)` (`sim/roles.go`) | Telemetry samples become an append-only timeline with cursors. |
 | `Workload` (plain struct) | `sim.Workload`, itself a sans-I/O `StateMachine` | The Kafka client model must be a state machine because `kgo` cannot run in the simulator. |
 | `Oracle` (register per key) | reference model of acked offsets | Different model, same discipline: decide what a client may observe, check every observation. |
@@ -356,7 +356,7 @@ The lessons that transfer best are not the interfaces but the habits: decide wha
 ## Key takeaways
 
 - A passing campaign covers only what the simulator can produce. In toys3 that excludes the network, the production runtime, mkdir, ENOSPC, slow disks, mid-file tearing, timers, multiple processes and multiple nodes.
-- The PlantModel errs toward strict POSIX (more adversarial than ext4 about rename and ordering) and toward kind hardware (no lying caches, no persistent failures). Know which side a bug you care about falls on.
+- The StorageModel errs toward strict POSIX (more adversarial than ext4 about rename and ordering) and toward kind hardware (no lying caches, no persistent failures). Know which side a bug you care about falls on.
 - Running the code found sixteen discrepancies or surprises, none a server bug, several worth fixing: the unused `Env`, `loop.md`'s queue order, liveness wording, the `Invoke` comment, failure log kinds, an fsync with no observable justification, faults that land after Chaos ends. The three comment-only ones (liveness wording, the `Invoke` comment, the queue's drop-on-pop comment) were fixed in `a4018d5`; the rest change behaviour or logs and are still open.
 - The trip-after-restart gap (Part I §2, Chapter 9 §9.10) is the one finding that matters for durability in production. It is still open.
 - The cheapest high-value extensions are buggify sites, sometimes-assertions and swarm over fault families. The most valuable expensive one is a second node, for which the oracle needs no change at all.
@@ -364,9 +364,9 @@ The lessons that transfer best are not the interfaces but the habits: decide wha
 ## Exercises
 
 1. **Fix a discrepancy.** Pick item 1, 2 or 5 from Part II and make the documentation or code consistent (3, 4 and 16 were fixed in `a4018d5`; compare your approach with theirs using `git show a4018d5`). Run `go test ./toys3/sim -run TestGolden` afterwards: a comment fix must leave it green, and item 5 (a new log kind) must too, because log text is not in the golden file. Which item would turn it red? For item 5, make sure `TestDeterminismCanary` still passes (logging must not change the trace).
-2. **Justify or remove the tmp fsync.** Reproduce Part II §6 yourself: write mutant g (skip `FSFsyncDir` of `tmp/`) in a copy of `mutants_test.go`, run it for 2,000 seeds, and confirm it survives. Then either (a) find a change to the PlantModel or the server's temp naming under which it *is* caught, or (b) write a paragraph for `DESIGN.md` explaining why it is safe to remove. Both are good outcomes.
+2. **Justify or remove the tmp fsync.** Reproduce Part II §6 yourself: write mutant g (skip `FSFsyncDir` of `tmp/`) in a copy of `mutants_test.go`, run it for 2,000 seeds, and confirm it survives. Then either (a) find a change to the StorageModel or the server's temp naming under which it *is* caught, or (b) write a paragraph for `DESIGN.md` explaining why it is safe to remove. Both are good outcomes.
 3. **Bounded liveness.** Strengthen `Liveness` so that every request invoked in Settling must reply within 10 ms of virtual time. Run 1,000 seeds on the correct server. If anything fails, is it the server or the bound?
-4. **Measure the ext4 gap.** Change `PlantModel.Crash` so that a rename's two directory halves are resolved *together* (both kept or both reverted), as a journaling filesystem would. Re-run mutant f. Is it still caught? At which seed? What does that tell you about whether toys3's defence against f matters on ext4?
+4. **Measure the ext4 gap.** Change `StorageModel.Crash` so that a rename's two directory halves are resolved *together* (both kept or both reverted), as a journaling filesystem would. Re-run mutant f. Is it still caught? At which seed? What does that tell you about whether toys3's defence against f matters on ext4?
 5. **Persistent EIO.** Add a config flag that, for one stretch of Chaos, makes every `FSList` fail. Watch the server trip on every boot. What does the Liveness invariant report if the stretch extends into Settling? Is the server's behaviour (trip forever) the right one? What would you want instead?
 
 ## Further reading

@@ -2,7 +2,7 @@
 
 > *"A simulator is only as good as the questions its clients ask."*
 
-The previous chapters built a hostile world: a plant model that loses, tears and lies (Chapter 11), and a simulator that crashes the server at random and drops every completion addressed to a dead incarnation (Chapter 10). None of that hostility matters unless something *uses* the system while the world misbehaves, and records what it saw in a form that an oracle can judge. That something is the **workload**: the simulated clients. In the control-theory vocabulary of Chapter 3a it is the testbench's **stimulus generator**: it produces the inputs the controller is tested against. (It is not a "reference generator": a reference is a setpoint the controller should track, and most of what clients send, GETs included, is not that.)
+The previous chapters built a hostile world: a storage model that loses, tears and lies (Chapter 11), and a simulator that crashes the server at random and drops every completion addressed to a dead incarnation (Chapter 10). None of that hostility matters unless something *uses* the system while the world misbehaves, and records what it saw in a form that an oracle can judge. That something is the **workload**: the simulated clients. In the control-theory vocabulary of Chapter 3a it is the testbench's **stimulus generator**: it produces the inputs the controller is tested against. (It is not a "reference generator": a reference is a setpoint the controller should track, and most of what clients send, GETs included, is not that.)
 
 This chapter covers three things:
 
@@ -345,7 +345,7 @@ It reconstructs the value the claimed writer *would* have written at this length
 
 The server has its own integrity check: every object file carries a CRC-32 of the payload (`object.go:18-44`, Chapter 4). Why does the workload need a second one?
 
-Because the two checks answer different questions. The server's CRC answers "is this file what *some* PUT wrote?" The workload's value check answers "is this payload what *the PUT named in it* wrote?" More importantly, the simulator must not trust the server: the server's CRC check is *part of the system under test*. Mutant **e** (`mutSkipCRC`, `mutants_test.go:291-301`) disables it. If the workload relied on the server's CRC, a server that skipped it would go undetected. The value check is outside the server and survives any mutation of it. In seed 18 with mutant e, the PlantModel flipped one bit on a read of `k3`'s 29-byte file (16 header + 13 payload), the mutant re-stamped a valid CRC over the corrupted payload, and the GET returned:
+Because the two checks answer different questions. The server's CRC answers "is this file what *some* PUT wrote?" The workload's value check answers "is this payload what *the PUT named in it* wrote?" More importantly, the simulator must not trust the server: the server's CRC check is *part of the system under test*. Mutant **e** (`mutSkipCRC`, `mutants_test.go:291-301`) disables it. If the workload relied on the server's CRC, a server that skipped it would go undetected. The value check is outside the server and survives any mutation of it. In seed 18 with mutant e, the StorageModel flipped one bit on a read of `k3`'s 29-byte file (16 header + 13 payload), the mutant re-stamped a valid CRC over the corrupted payload, and the GET returned:
 
 ```
 FAIL no-corrupt-reads step 657: 200 GET returned bytes no PUT wrote: req 98 client 0 GET "k3" [184..185 @153865676..154136154] -> 200 garbage(13 bytes)
@@ -446,7 +446,7 @@ Two more scheduled entries shape the workload's life:
 // toys3/sim/simulator.go:159-167
 	case KindSettle:
 		s.settling = true
-		s.plant.SetQuiet(true)
+		s.storage.SetQuiet(true)
 		s.env.buggify = false
 		s.note(e, "chaos over: settling (no new faults or crashes)")
 	case KindSettlingEnd:
@@ -538,7 +538,7 @@ These are five quite different universes. A bug that needs "high EIO and few key
 
 ## 12.7 The ablation: does swarm actually matter?
 
-`DESIGN.md:262-264` makes a strong claim about mutant f (recovery skips temp-file cleanup):
+`DESIGN.md:264-266` makes a strong claim about mutant f (recovery skips temp-file cleanup):
 
 > (f) took seed 429 with neither background writeback nor swarm, seed 36 with writeback alone, and seed 20 with both. Whether a bug gets caught depends on how realistic the fault model is and how varied the workload is.
 
@@ -555,7 +555,7 @@ The three numbers DESIGN.md reports reproduce exactly. The fourth row ("swarm wi
 
 First-catch seed is a noisy statistic (one sample per configuration). A more rigorous version would measure the *fraction* of seeds that catch the mutant in each configuration over, say, 2,000 seeds. But the order-of-magnitude story is robust, and the mechanism explains it:
 
-- Mutant f's damage is a temp file name that survives a crash as a **second hard link** to a committed object's inode (Chapter 11 explains how the PlantModel produces it; Chapter 15 walks through the run). It only becomes visible if (1) a later incarnation writes a new temp file *with the same name* (temp names are IOIDs, which restart at 1 every incarnation, so name reuse is common), which truncates and overwrites the shared inode, and (2) a client then *reads the original key* before anyone overwrites it legitimately.
+- Mutant f's damage is a temp file name that survives a crash as a **second hard link** to a committed object's inode (Chapter 11 explains how the StorageModel produces it; Chapter 15 walks through the run). It only becomes visible if (1) a later incarnation writes a new temp file *with the same name* (temp names are IOIDs, which restart at 1 every incarnation, so name reuse is common), which truncates and overwrites the shared inode, and (2) a client then *reads the original key* before anyone overwrites it legitimately.
 - With 3 keys, step (2) almost never happens: some PUT overwrites the aliased key within milliseconds, replacing the shared inode in `obj/` with a fresh one, and the damage is erased before anyone sees it.
 - With 32 keys (seed 20's swarm shape), a key can sit untouched for tens of milliseconds, long enough for the alias to be overwritten through the temp name and then read through the object name.
 - Writeback makes step (0) (the temp name becoming durable before the rename) happen far more often, so there are more aliases to begin with.
@@ -620,7 +620,7 @@ Two observations from the 200-seed aggregate in the preface are worth decoding:
 readcorrupt=71 corruptdet=70
 ```
 
-71 reads were corrupted, but only 70 `CorruptionDetected` telemetry were emitted. The missing one is not a bug. A read is corrupted when it *lands* in the PlantModel (`plantmodel.go:398-402`); the `CorruptionDetected` telemetry is emitted when the completion is *delivered* to the server. A crash between landing and delivery drops the completion (`Queue.DropIncarnation`), so the server never sees the corrupted bytes. That is the "it happened, but nobody was told" gap from Chapter 10, visible in two aggregate counters.
+71 reads were corrupted, but only 70 `CorruptionDetected` telemetry were emitted. The missing one is not a bug. A read is corrupted when it *lands* in the StorageModel (`storagemodel.go:399-403`); the `CorruptionDetected` telemetry is emitted when the completion is *delivered* to the server. A crash between landing and delivery drops the completion (`Queue.DropIncarnation`), so the server never sees the corrupted bytes. That is the "it happened, but nobody was told" gap from Chapter 10, visible in two aggregate counters.
 
 ```
 tempsrm=1006 trips=673 crashes=1691 midput=1473
@@ -628,7 +628,7 @@ tempsrm=1006 trips=673 crashes=1691 midput=1473
 
 Recovery removed 1,006 temp files over 1,691 crashes. Most crashes mid-PUT leave a temp file behind (it was created by the `FSWrite` and never renamed), and the coverage check `temps removed by recovery` proves that recovery's unlink loop actually runs.
 
-What `TestCoverage` does *not* check is just as informative. There is no entry for `widened` (in the default campaign the oracle never needs to widen; `widened=0` in every stats line above) and none for `Writebacks` (the PlantModel counts them in `FSCounters.Writebacks`, but `Stats` does not surface it). Adding a coverage line is cheap and is an exercise below.
+What `TestCoverage` does *not* check is just as informative. There is no entry for `widened` (in the default campaign the oracle never needs to widen; `widened=0` in every stats line above) and none for `Writebacks` (the StorageModel counts them in `FSCounters.Writebacks`, but `Stats` does not surface it). Adding a coverage line is cheap and is an exercise below.
 
 ## 12.9 What the workload does not do
 
@@ -637,8 +637,8 @@ For completeness, the things this workload leaves untested, each of which could 
 - **Large values and the size limit.** Values are at most 40 bytes; the 64-byte server limit is never hit in simulation.
 - **Key escaping.** All keys are `k<n>`; the `%XX` escaping path and the 255-byte name limit are tested only by unit and production tests.
 - **Client retries.** A client whose request was abandoned or failed just moves on to a new random request. Real S3 clients retry, and retries interact with idempotency (`docs/lessons.md` §1). A retrying client would also need the oracle to understand that two invocations may be the same logical operation.
-- **Reads of values written in a previous run.** Every run starts from an empty disk. Upgrade and format-compatibility testing would need a pre-populated PlantModel.
-- **Timeouts.** Simulated clients wait forever for a reply (until a crash). The production `Submit` honours context cancellation (`prod/loop.go:121-154`), which the simulator never exercises.
+- **Reads of values written in a previous run.** Every run starts from an empty disk. Upgrade and format-compatibility testing would need a pre-populated StorageModel.
+- **Timeouts.** Simulated clients wait forever for a reply (until a crash). The production `Submit` honours context cancellation (`prod/loop.go:123-156`), which the simulator never exercises.
 
 ## Key takeaways
 
@@ -655,7 +655,7 @@ For completeness, the things this workload leaves untested, each of which could 
 3. **Make windows explode.** Set `QuiesceEvery: 0` in `BaseConfig` (in a scratch branch) and run `go test ./toys3/sim -run TestSeeds -seed=1 -v`. Before running, predict: will the oracle still check anything? (Hint: crashes are quiescent points, and so is the end of the run via `CheckFinal`.) Then try `Clients: 16`. Watch `maxwin` and wall time, and look for the `checker budget exceeded` message.
 4. **Detect a spliced value.** Add a test to `toys3/sim` that builds `a := MakeValue(5, 20)` and `b := MakeValue(6, 20)`, splices `a[:12]` with `b[12:]`, and asserts `ValueWriter` rejects it. Then construct the nastiest splice you can think of that `ValueWriter` *accepts* but which is not a value any PUT wrote. (You should fail; explain why.)
 5. **Cover the oversize branch.** The server's `MaxObjectSize` check is never reached in simulation (§12.2). Change `MaxValueSize` to 80 in `BaseConfig` and predict what happens to the `400=` count and to the oracle. Does the oracle handle a 400 PUT correctly? (Read `oracle.go:278-280`.) Run 50 seeds to confirm.
-6. **Add a coverage line.** Surface `FSCounters.Writebacks` in `Stats` (it is already counted in `plantmodel.go:230`) and add a `{"writebacks", ...}` entry to `TestCoverage`. Then run the mutant-f ablation with `WritebackProb = 0` and confirm your new coverage check would have flagged that configuration.
+6. **Add a coverage line.** Surface `FSCounters.Writebacks` in `Stats` (it is already counted in `storagemodel.go:231`) and add a `{"writebacks", ...}` entry to `TestCoverage`. Then run the mutant-f ablation with `WritebackProb = 0` and confirm your new coverage check would have flagged that configuration.
 7. **Swarm a new knob.** Add `TornWriteProb` to the swarm (menu: `0, 0.3, 0.3, 0.9`). Re-run `TestCatchesBugs`. Does mutant b get caught earlier or later? Explain using what b needs (Chapter 15).
 
 ## Further reading

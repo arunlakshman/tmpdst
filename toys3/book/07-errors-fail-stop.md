@@ -1,7 +1,7 @@
 # Chapter 7: Errors, Fail-Stop and the Safety Trip
 
 > *"The danger is not the 500 itself (a 500 promises nothing) but what later reads observe."*
-> (`toys3/control/doc.go:60-61`)
+> (`toys3/control/doc.go:61-62`)
 
 Chapter 6 followed the happy paths and the 404s. This chapter is about every other branch of `onRequestIO` and `onRecoveryDone`: what the server does when the filesystem says `EIO`. It is the most important chapter in the book for anyone who builds storage, because the error policy is where intuition fails most often, and where DST earns its keep most visibly.
 
@@ -63,7 +63,7 @@ Until the refactor of Chapter 3a this action was called `Halt{Reason}`. The beha
 
 In a process plant, a **safety-instrumented system** watches for conditions under which normal control can no longer be trusted to keep the process safe: a pressure beyond its limit, a sensor that disagrees with its twin, a lost heartbeat. When one occurs, it **trips**: it drives the process to a predefined safe state (close the feed valve, open the vent, drop the control rods; a nuclear reactor's SCRAM is the canonical trip) and holds it there. Three properties define a trip, and toys3's `Trip` has all three:
 
-1. **It is triggered by a loss of trust, not by a failed operation as such.** A trip does not mean "something went wrong"; it means "the controller's model of the plant can no longer be relied on". toys3 trips after an fsync error not because the fsync failed (a failed read does not trip), but because after it the controller's belief about what is durable is unknowable (fsyncgate, §7.5), and after a failed rename or dir fsync because a change may be visible without being durable.
+1. **It is triggered by a loss of trust, not by a failed operation as such.** A trip does not mean "something went wrong"; it means "the controller's model of the process it controls (for toys3, storage) can no longer be relied on". toys3 trips after an fsync error not because the fsync failed (a failed read does not trip), but because after it the controller's belief about what is durable is unknowable (fsyncgate, §7.5), and after a failed rename or dir fsync because a change may be visible without being durable.
 2. **It drives to a safe state, and the safe state is "stopped".** No partial service, no "degraded mode". `modeTripped` ignores every event (`toys3/control/controller.go:110-112`).
 3. **Recovery from a trip is a deliberate restart, not a retry.** A tripped plant is restarted through its normal startup sequence, which re-establishes known conditions before control resumes. A tripped toys3 incarnation is replaced by a new one, whose recovery re-establishes a known `tmp/` and whose state is rebuilt from the disk, the only thing that can be trusted.
 
@@ -71,7 +71,7 @@ In a process plant, a **safety-instrumented system** watches for conditions unde
 
 ## 7.2 The policy table
 
-`toys3/control/doc.go:58-83` states the whole policy. Here it is with the code that implements each row:
+`toys3/control/doc.go:59-84` states the whole policy. Here it is with the code that implements each row:
 
 | Error | Response | Code |
 |---|---|---|
@@ -88,7 +88,7 @@ In a process plant, a **safety-instrumented system** watches for conditions unde
 | recovery `FSUnlink(tmp/x)`: EIO | Trip (ENOENT is fine) | `recovery.go:58-64` |
 | recovery `FSFsyncDir(tmp)`: any error | Trip | `recovery.go:77-79` |
 
-The rule that generates this table is stated in one sentence at `toys3/control/doc.go:66-67`:
+The rule that generates this table is stated in one sentence at `toys3/control/doc.go:67-68`:
 
 > So the rule is: any error at or after the first step that can touch obj/ trips, and errors before it are a plain 500.
 
@@ -100,13 +100,13 @@ A failed read changed nothing. The object file is still whatever it was. The cli
 
 ### FSWrite of the temp file: plain 500
 
-A failed write may have left anything in the temp file: nothing, an empty file, or a prefix of the data (the PlantModel chooses among these, `toys3/sim/plantmodel.go:298-307`). But the temp file is private. No GET reads `tmp/`, no COPY reads `tmp/`, and `obj/` is untouched. The request is finished with a 500, the garbage temp file stays where it is, and the *next recovery* deletes it (`controller.go:304-307`: "Only a temp file was touched; obj/ is unchanged. The garbage temp file is removed by the next recovery.").
+A failed write may have left anything in the temp file: nothing, an empty file, or a prefix of the data (the StorageModel chooses among these, `toys3/sim/storagemodel.go:299-308`). But the temp file is private. No GET reads `tmp/`, no COPY reads `tmp/`, and `obj/` is untouched. The request is finished with a 500, the garbage temp file stays where it is, and the *next recovery* deletes it (`controller.go:304-307`: "Only a temp file was touched; obj/ is unchanged. The garbage temp file is removed by the next recovery.").
 
 One consequence worth noting: garbage temp files accumulate in `tmp/` until the next restart. In the simulator, restarts are frequent. In production, a long-running server that hits many write errors would grow `tmp/` without bound. Chapter 17 lists this among the limitations.
 
 ### FSRename into obj/: 500 + Trip
 
-Here is the first row where `obj/` may have changed. On EIO, the rename "may or may not have happened" (`toys3/control/plant.go:117-118`). The PlantModel models this literally: with probability 1/2 a failed rename is applied anyway (`plantmodel.go:351-366`).
+Here is the first row where `obj/` may have changed. On EIO, the rename "may or may not have happened" (`toys3/control/storage.go:117-118`). The StorageModel models this literally: with probability 1/2 a failed rename is applied anyway (`storagemodel.go:352-367`).
 
 Suppose the server replied 500 and kept serving. Two things can go wrong.
 
@@ -118,7 +118,7 @@ The server cannot tell which case it is in. It could try to find out (stat `obj/
 
 ### FSUnlink in DELETE: ENOENT is 404, EIO is 500 + Trip
 
-ENOENT means the key was absent and nothing changed: 404, exactly as in Chapter 6. EIO means the unlink "may or may not have applied" (the PlantModel again applies it with probability 1/2, `plantmodel.go:411-420`). If it applied, the key is visibly gone but not durably gone. A later GET would see 404, and a crash could bring the object back. Same pattern as the rename; same response.
+ENOENT means the key was absent and nothing changed: 404, exactly as in Chapter 6. EIO means the unlink "may or may not have applied" (the StorageModel again applies it with probability 1/2, `storagemodel.go:412-421`). If it applied, the key is visibly gone but not durably gone. A later GET would see 404, and a crash could bring the object back. Same pattern as the rename; same response.
 
 ### FSFsyncDir of obj/: 500 + Trip
 
@@ -130,9 +130,9 @@ There is a second reason, which applies to every fsync: after an fsync error you
 
 This row is the one that does not follow from "touches obj/". At the time the temp file's fsync fails, `obj/` has not changed. The temp file is private. Why trip?
 
-The package doc answers with one word, "fsyncgate" (`toys3/control/doc.go:72`), and the comment in the code says the same (`controller.go:317`). The reasoning is about what the failure *means*: an fsync error is the kernel telling you that some writeback to this file failed, and on Linux it may also be telling you that dirty data has been dropped. The safe, conservative response to "my storage stack lost data I gave it" is to stop trusting anything in memory and restart from what is durable. That is a policy decision about the *environment*, not a consequence of the toys3 protocol.
+The package doc answers with one word, "fsyncgate" (`toys3/control/doc.go:73`), and the comment in the code says the same (`controller.go:317`). The reasoning is about what the failure *means*: an fsync error is the kernel telling you that some writeback to this file failed, and on Linux it may also be telling you that dirty data has been dropped. The safe, conservative response to "my storage stack lost data I gave it" is to stop trusting anything in memory and restart from what is durable. That is a policy decision about the *environment*, not a consequence of the toys3 protocol.
 
-It is worth being precise about what the simulator can and cannot show here. In the PlantModel, a failed fsync poisons only that one inode (`plantmodel.go:330-335`), and the poisoned temp file would never be renamed if the server simply replied 500 and dropped the request. So in the *model*, a plain 500 on temp-fsync failure is arguably safe, and the Trip here is belt and braces. Exercise 4 asks you to test that hypothesis by building a mutant. What the simulator *does* show, decisively, is that **continuing the protocol** after a temp-fsync failure is a bug: that is mutant **d** in §7.9, and it is caught at seed 1.
+It is worth being precise about what the simulator can and cannot show here. In the StorageModel, a failed fsync poisons only that one inode (`storagemodel.go:331-336`), and the poisoned temp file would never be renamed if the server simply replied 500 and dropped the request. So in the *model*, a plain 500 on temp-fsync failure is arguably safe, and the Trip here is belt and braces. Exercise 4 asks you to test that hypothesis by building a mutant. What the simulator *does* show, decisively, is that **continuing the protocol** after a temp-fsync failure is a bug: that is mutant **d** in §7.9, and it is caught at seed 1.
 
 ### Recovery errors: Trip, retry from scratch on the next boot
 
@@ -168,7 +168,7 @@ Incarnation 2 failed to unlink `tmp/…31` and tripped. Incarnation 3 found `…
 		}
 ```
 
-A read that returns bytes failing the magic, length or CRC check means either the stored file is damaged or the read itself was corrupted in transit. Neither is fixed by restarting: a damaged stored file is *already durable*, and a transient read corruption will most likely not recur on the next read. The doc says it in one line: "Corrupt object files are a plain 500 plus a CorruptionDetected fact, not a Trip: the file is already durable, restarting would not fix it" (`toys3/control/doc.go:81-83`).
+A read that returns bytes failing the magic, length or CRC check means either the stored file is damaged or the read itself was corrupted in transit. Neither is fixed by restarting: a damaged stored file is *already durable*, and a transient read corruption will most likely not recur on the next read. The doc says it in one line: "Corrupt object files are a plain 500 plus a CorruptionDetected fact, not a Trip: the file is already durable, restarting would not fix it" (`toys3/control/doc.go:82-84`).
 
 Here is the correct server handling an injected bit flip, from seed 18:
 
@@ -177,14 +177,14 @@ Here is the correct server handling an injected bit flip, from seed 18:
 #657    t=154.136154ms inc=7 deliver     FSReadDone{io87 OK raw(29 bytes)} => Emit{CorruptionDetected{"k3"}} Reply{c98 500}
 ```
 
-`raw(29 bytes)` is how the log renders bytes that do not decode as an object (`toys3/sim/log.go:29-44`): a 16-byte header plus a 13-byte payload, with one bit flipped by the PlantModel (`plantmodel.go:398-402`). The server emits the fact and replies 500. The run passes. Mutant **e** in Chapter 15 runs the same seed without the CRC check and serves the garbage with a 200.
+`raw(29 bytes)` is how the log renders bytes that do not decode as an object (`toys3/sim/log.go:29-44`): a 16-byte header plus a 13-byte payload, with one bit flipped by the StorageModel (`storagemodel.go:399-403`). The server emits the fact and replies 500. The run passes. Mutant **e** in Chapter 15 runs the same seed without the CRC check and serves the garbage with a 200.
 
 ## 7.3 The principle: a read must never see a value a crash can erase
 
 Underneath the table is one principle. The package doc states it in the negative:
 
 ```
-// toys3/control/doc.go:60-67
+// toys3/control/doc.go:61-68
 // The danger is not the 500 itself (a 500 promises nothing) but what later
 // reads observe. If a failed mutation may have changed obj/ visibly but not
 // durably, a later GET can observe the change and a crash can then undo it:
@@ -262,21 +262,21 @@ The lesson that the PostgreSQL project (and others) drew is that **an fsync fail
 
 Rebello et al.'s *"Can Applications Recover from fsync Failures?"* (USENIX ATC 2020) studied the question systematically across file systems (ext4, XFS, Btrfs) and applications, and found that the behaviour after an `fsync` failure varies by file system and mode, that many widely used applications handled it incorrectly, and that the only generally safe application strategy is not to trust the page cache after the failure.
 
-### How the PlantModel models fsyncgate
+### How the StorageModel models fsyncgate
 
 ```go
-// toys3/sim/plantmodel.go:45-48
+// toys3/sim/storagemodel.go:45-48
 	// FsyncGate models Linux after a failed fsync: the dirty data is marked
 	// clean, later fsyncs of that file return OK, and the data still never
 	// reaches disk. Only a fresh FSWrite clears it.
 	FsyncGate bool
 ```
 
-`BaseConfig` turns it on (`toys3/sim/config.go:169`). The mechanism is a `poisoned` flag on each inode (`plantmodel.go:66-71`):
+`BaseConfig` turns it on (`toys3/sim/config.go:169`). The mechanism is a `poisoned` flag on each inode (`storagemodel.go:66-71`):
 
 ```go
-// toys3/sim/plantmodel.go:325-343
-func (fs *PlantModel) fsync(path string, fail bool) control.ErrCode {
+// toys3/sim/storagemodel.go:326-344
+func (fs *StorageModel) fsync(path string, fail bool) control.ErrCode {
 	in, ok := fs.lookup(path)
 	if !ok {
 		return control.ErrNotFound
@@ -297,9 +297,9 @@ func (fs *PlantModel) fsync(path string, fail bool) control.ErrCode {
 }
 ```
 
-A failed fsync of a dirty inode poisons it. Every later fsync of a poisoned inode returns OK **without making anything durable**. Reads still see the volatile content (the page cache is still there, for now). At a crash, a poisoned inode's volatile content is discarded: `case in.poisoned: rep.Lost++` (`plantmodel.go:502-503`) leaves `durable` alone and then sets `volatile = durable`. Background writeback never picks a poisoned inode either (`plantmodel.go:221`). Only a fresh `FSWrite` clears the poison (`plantmodel.go:318`). `TestPlantModelFsyncGateLies` (`toys3/sim/plantmodel_test.go:157-171`) pins the behaviour: fail an fsync, retry it (OK), crash, and the data is gone.
+A failed fsync of a dirty inode poisons it. Every later fsync of a poisoned inode returns OK **without making anything durable**. Reads still see the volatile content (the page cache is still there, for now). At a crash, a poisoned inode's volatile content is discarded: `case in.poisoned: rep.Lost++` (`storagemodel.go:503-504`) leaves `durable` alone and then sets `volatile = durable`. Background writeback never picks a poisoned inode either (`storagemodel.go:222`). Only a fresh `FSWrite` clears the poison (`storagemodel.go:319`). `TestStorageModelFsyncGateLies` (`toys3/sim/storagemodel_test.go:157-171`) pins the behaviour: fail an fsync, retry it (OK), crash, and the data is gone.
 
-This is the PlantModel being deliberately adversarial (Chapter 11). Real file systems differ in details; the model takes the worst plausible behaviour so that a server correct against the model is correct against the kernels that behave this way.
+This is the StorageModel being deliberately adversarial (Chapter 11). Real file systems differ in details; the model takes the worst plausible behaviour so that a server correct against the model is correct against the kernels that behave this way.
 
 ## 7.6 How Trip works in the two runtimes
 
@@ -317,11 +317,11 @@ This is the PlantModel being deliberately adversarial (Chapter 11). Real file sy
 			return
 ```
 
-When the simulator executes a step's actions in order (Chapter 10) and reaches a `Trip`, it first checks the contract that `Trip` is the **last** action of its step. The controller guarantees this by construction (`trip` appends it last, and `control/doc.go:80-81` states it: "Trip is always the last action of its Step; the 500 Reply (if any) precedes it"), and a server that violated it would fail the "protocol" invariant. The reason for the contract: anything after a `Trip` would be executed by a runtime that has already decided the incarnation is dead. The mutant wrappers in `mutants_test.go` must respect it too; `truncAfterTrip` (`mutants_test.go:35-43`) exists so that a wrapper which appends deferred actions after its inner server's output never places anything after a `Trip`.
+When the simulator executes a step's actions in order (Chapter 10) and reaches a `Trip`, it first checks the contract that `Trip` is the **last** action of its step. The controller guarantees this by construction (`trip` appends it last, and `control/doc.go:81-82` states it: "Trip is always the last action of its Step; the 500 Reply (if any) precedes it"), and a server that violated it would fail the "protocol" invariant. The reason for the contract: anything after a `Trip` would be executed by a runtime that has already decided the incarnation is dead. The mutant wrappers in `mutants_test.go` must respect it too; `truncAfterTrip` (`mutants_test.go:35-43`) exists so that a wrapper which appends deferred actions after its inner server's output never places anything after a `Trip`.
 
-Then `crash` runs, which is exactly the same function as an injected power loss (`simulator.go:276-307`): the PlantModel resolves all volatile state adversarially, every queued entry for the dead incarnation is dropped (FS actions that have not landed never happen; completions that have not been delivered are lost), every outstanding client request is marked Abandoned in the oracle, and a restart is scheduled after a random delay. Because the 500 `Reply` precedes the `Trip` in the action list, it has already been delivered to the oracle and the workload by the time the crash happens. The client whose request caused the trip sees a definite 500; everyone else in flight sees "abandoned".
+Then `crash` runs, which is exactly the same function as an injected power loss (`simulator.go:276-307`): the StorageModel resolves all volatile state adversarially, every queued entry for the dead incarnation is dropped (FS actions that have not landed never happen; completions that have not been delivered are lost), every outstanding client request is marked Abandoned in the oracle, and a restart is scheduled after a random delay. Because the 500 `Reply` precedes the `Trip` in the action list, it has already been delivered to the oracle and the workload by the time the crash happens. The client whose request caused the trip sees a definite 500; everyone else in flight sees "abandoned".
 
-"A Trip is a power loss" is a modelling choice worth pausing on (`toys3/DESIGN.md:177-181`: "A crash, including `Trip`, is a power loss"). A real process exit is gentler than a power loss: the page cache survives a process exit. Modelling Trip as a power loss is strictly more adversarial, which is the safe direction. It also means a server that trips after an fsync error is tested against the worst case: everything un-synced may vanish, *and* the next incarnation starts immediately.
+"A Trip is a power loss" is a modelling choice worth pausing on (`toys3/DESIGN.md:179-183`: "A crash, including `Trip`, is a power loss"). A real process exit is gentler than a power loss: the page cache survives a process exit. Modelling Trip as a power loss is strictly more adversarial, which is the safe direction. It also means a server that trips after an fsync error is tested against the worst case: everything un-synced may vanish, *and* the next incarnation starts immediately.
 
 ### In production: the process exits
 
@@ -332,7 +332,7 @@ Then `crash` runs, which is exactly the same function as an injected power loss 
 			return fmt.Errorf("%w: %s", ErrTripped, a.Cause)
 ```
 
-`Loop.dispatch` executes actions in order. The 500 `Reply` before the `Trip` is delivered to its waiting HTTP handler; then `dispatch` returns `ErrTripped`, `Run` returns, and `stopped` is closed (`loop.go:61`). Any HTTP request still waiting gets `ErrStopped` from `Submit` and a 503 from the handler (`http.go:63-67`). `Submit` has a careful special case so that a 500 dispatched just before the Trip is not lost in the race with `stopped` (`loop.go:146-152`: "a Reply dispatched just before a Trip still counts").
+`Loop.dispatch` executes actions in order. The 500 `Reply` before the `Trip` is delivered to its waiting HTTP handler; then `dispatch` returns `ErrTripped`, `Run` returns, and `stopped` is closed (`loop.go:61`). Any HTTP request still waiting gets `ErrStopped` from `Submit` and a 503 from the handler (`http.go:63-67`). `Submit` has a careful special case so that a 500 dispatched just before the Trip is not lost in the race with `stopped` (`loop.go:148-154`: "a Reply dispatched just before a Trip still counts").
 
 The binary turns `ErrTripped` into a process exit:
 
@@ -483,7 +483,7 @@ Seed 132 has 2 keys and 4 clients, crash probability 0.001, EIO probability 0.03
 #324    t=75.326928ms  inc=2 deliver     FSFsyncDirDone{io70 EIO} => Reply{c45 500} FSUnlink{io71 /data/obj/k1}
 ```
 
-At step 317 the unlink lands: in the PlantModel, the directory entry `obj/k1` now has `cur = 0` (gone) but `durable` still points at the inode holding c26's value (Chapter 11). At step 323 the directory fsync fails, so nothing becomes durable (`plantmodel.go:374-376`).
+At step 317 the unlink lands: in the StorageModel, the directory entry `obj/k1` now has `cur = 0` (gone) but `durable` still points at the inode holding c26's value (Chapter 11). At step 323 the directory fsync fails, so nothing becomes durable (`storagemodel.go:375-377`).
 
 At step 324, compare what the correct server would do with what the mutant did. The correct server would return `Reply{c45 500} Trip{fsync obj dir: EIO}` and crash. The mutant fed the inner server `FSFsyncDirDone{io70 OK}`; the inner server committed c45 (`Emit{Committed{c45 delete "k1"}}`, `Reply{c45 200}`) and started the next request on `k1`, `c47 DELETE "k1"` (`FSUnlink{io71}`). The wrapper dropped the `Committed` and turned the 200 into a 500. The log shows the result: `Reply{c45 500} FSUnlink{io71 /data/obj/k1}`.
 
@@ -512,7 +512,7 @@ At step 324, compare what the correct server would do with what the mutant did. 
 #343    t=78.234970ms  inc=2 crash       CRASH (trip: fsync temp: EIO): kept=1 lost=2 torn=0, dropped 1 queued entries
 ```
 
-`c48 PUT "k0"` hits an fsync error on its temp file. d2 only swallows *directory* fsync errors, so this one reaches the inner server unchanged, and the inner server trips correctly. The simulator crashes the incarnation. The PlantModel resolves every un-synced change independently (`plantmodel.go:468-529`): it reports one change kept and two lost. One of the lost changes is the un-durable unlink of `obj/k1`, which reverts to its durable version: the entry points at c26's inode again. (The other two changes concern c48's temp file: its directory entry was kept, which is why the next recovery finds `tmp/…48`, and its content was poisoned by the failed fsync, which counts as lost.)
+`c48 PUT "k0"` hits an fsync error on its temp file. d2 only swallows *directory* fsync errors, so this one reaches the inner server unchanged, and the inner server trips correctly. The simulator crashes the incarnation. The StorageModel resolves every un-synced change independently (`storagemodel.go:469-530`): it reports one change kept and two lost. One of the lost changes is the un-durable unlink of `obj/k1`, which reverts to its durable version: the entry points at c26's inode again. (The other two changes concern c48's temp file: its directory entry was kept, which is why the next recovery finds `tmp/…48`, and its content was poisoned by the failed fsync, which counts as lost.)
 
 At the moment of the crash, three of the four clients are mid-request:
 
@@ -576,7 +576,7 @@ oracle: after the crash k1 ∈ { absent, v52 }.  v26 is impossible.
 
 ### Why it took 132 seeds
 
-Each ingredient has to line up: an EIO specifically on an `FSFsyncDir(obj)` (one of several FS operations per request, each failing with probability between 0.002 and 0.03 depending on the seed's swarm draw); a *later* definite read or 404 of the affected key in the same incarnation (so the oracle is forced to conclude the change happened); a crash before any successful directory fsync makes the change durable (any later successful `FSFsyncDir(obj)` for *any* key would make *all* current `obj/` entries durable, `plantmodel.go:377-381`, healing the bug); the crash resolving that particular entry as "reverted" (probability 1/2); and a read of the key after the restart. In seed 132 the crash came from an unrelated Trip only about 3 ms of virtual time after the fault, before another directory fsync could heal it. The mutant is real, it is black-box visible, and it is *rare*. That is exactly the profile of a bug that ships.
+Each ingredient has to line up: an EIO specifically on an `FSFsyncDir(obj)` (one of several FS operations per request, each failing with probability between 0.002 and 0.03 depending on the seed's swarm draw); a *later* definite read or 404 of the affected key in the same incarnation (so the oracle is forced to conclude the change happened); a crash before any successful directory fsync makes the change durable (any later successful `FSFsyncDir(obj)` for *any* key would make *all* current `obj/` entries durable, `storagemodel.go:378-382`, healing the bug); the crash resolving that particular entry as "reverted" (probability 1/2); and a read of the key after the restart. In seed 132 the crash came from an unrelated Trip only about 3 ms of virtual time after the fault, before another directory fsync could heal it. The mutant is real, it is black-box visible, and it is *rare*. That is exactly the profile of a bug that ships.
 
 Note also which invariants did *not* fire. `AckedIsDurable` is silent because the wrapper dropped c45's `Committed` telemetry (there was no ack). `ObjNeverTorn` is silent because every durable file under `obj/` is a valid object. `NoCorruptReads` is silent because every read returned bytes that some PUT really wrote. Only the oracle, reasoning about the *history*, sees the problem. That is why the d2 row in `DESIGN.md`'s table says "linearizable (a read saw the value, then a crash erased it)" for both columns.
 
@@ -607,7 +607,7 @@ Here is the end of seed 1 with mutant d. Compare it with the correct server's se
 
 Step by step:
 
-- **#232.** The fsync of `tmp/…4c` (a PUT to `k2` by client c30; IO 0x4c = 76 is its write) fails. With `FsyncGate` on and the inode dirty, the PlantModel **poisons** the inode. The temp file's durable content is still nil: it was never successfully synced.
+- **#232.** The fsync of `tmp/…4c` (a PUT to `k2` by client c30; IO 0x4c = 76 is its write) fails. With `FsyncGate` on and the inode dirty, the StorageModel **poisons** the inode. The temp file's durable content is still nil: it was never successfully synced.
 - **#233.** The correct server would reply `500` and `Trip{fsync temp: EIO}` here; in the correct seed-1 run, this is exactly what happens at step 233 (`Reply{c30 500} Trip{fsync temp: EIO}`). The mutant hides the error, so the inner server proceeds to the next step: `FSRename{io80 tmp/…4c -> obj/k2}`.
 - **#236–237.** Meanwhile, a different PUT (c28, to `k0`) has its *directory* fsync fail. The mutant hides that too; the inner server commits c28, and the wrapper drops the telemetry and rewrites the reply to 500.
 - **#238.** c30's rename lands. `obj/k2` now names the poisoned inode.
@@ -636,7 +636,7 @@ What toys3 does not do is distinguish *transient* from *persistent* failures, ra
 - toys3 never retries. Errors before anything visible can change are a plain 500; errors at or after the first step that can change `obj/`, and every `fsync` error, are 500 + `Trip`. Recovery errors trip without a reply. A corrupt object is a 500 plus a `CorruptionDetected` telemetry, without a trip.
 - The principle is "a read must never see a value a crash can erase". The oracle encodes it as "crashes erase nothing": a failed mutation may or may not take effect, but once observed, it must stay.
 - Per-key FIFO protects reads only while the mutation is in flight. The moment it replies, the next request on the key runs. Trip is what prevents that request from observing visible-but-not-durable state.
-- After an `fsync` error, the page cache cannot be trusted and a later `fsync` may lie (fsyncgate). The PlantModel models this with poisoned inodes.
+- After an `fsync` error, the page cache cannot be trusted and a later `fsync` may lie (fsyncgate). The StorageModel models this with poisoned inodes.
 - `Trip` must be the last action of its step. In simulation it is a power-loss crash; in production the process exits and a supervisor restarts it.
 - Mutant d2 (no Trip on directory-fsync error) needs a precise conjunction of fault, read, crash and resolution, and is caught at seed 132 by the linearizability oracle alone. Mutant d (no Trip on any error) is caught at seed 1 by `ObjNeverTorn`: continuing after a poisoned fsync puts an empty file durably into `obj/`.
 
@@ -644,13 +644,13 @@ What toys3 does not do is distinguish *transient* from *persistent* failures, ra
 
 1. **Read the d2 failure yourself.** Run `go test ./toys3/sim -run 'TestCatchesBugs/d2' -v`. Then, in a scratch module that copies `mutNoTripOnDirFsyncError` and its helpers out of `toys3/sim/mutants_test.go` (they only use exported `control` and `sim` APIs), run seed 132 with `cfg.Log = true` and print `sim.FormatLog(r.Log)`. Find steps 317, 323, 339, 343 and 365 and confirm the story of §7.8.
 
-2. **Heal the bug by accident.** In d2's run, the bug is only visible because no successful `FSFsyncDir(obj)` happened between step 323 and the crash at 343. Predict what happens to the first failing seed if you make the PlantModel's background writeback much more aggressive (`cfg.Disturbances.WritebackProb = 0.5` in the scratch program). Will d2 be caught earlier, later, or never? Run `firstCatch`-style search over seeds 1–500 and check.
+2. **Heal the bug by accident.** In d2's run, the bug is only visible because no successful `FSFsyncDir(obj)` happened between step 323 and the crash at 343. Predict what happens to the first failing seed if you make the StorageModel's background writeback much more aggressive (`cfg.Disturbances.WritebackProb = 0.5` in the scratch program). Will d2 be caught earlier, later, or never? Run `firstCatch`-style search over seeds 1–500 and check.
 
-3. **Plain 500 on rename error.** Write a mutant that replies 500 without tripping *only* on `FSRenameDone` errors (copy `noTrip` and add a `renameOnly` flag analogous to `dirOnly`). Predict: which invariant catches it, and is it black-box visible? Remember the PlantModel applies a failed rename with probability 1/2.
+3. **Plain 500 on rename error.** Write a mutant that replies 500 without tripping *only* on `FSRenameDone` errors (copy `noTrip` and add a `renameOnly` flag analogous to `dirOnly`). Predict: which invariant catches it, and is it black-box visible? Remember the StorageModel applies a failed rename with probability 1/2.
 
 4. **Is the temp-fsync Trip necessary?** §7.2 argued that tripping on a temp-file fsync error is conservative policy rather than something the protocol strictly needs, because the poisoned temp file never reaches `obj/` if the request simply ends with a 500. Test the hypothesis. You cannot do it with an event-rewriting wrapper (the inner server trips as soon as it sees the error). Instead, copy `controller.go` into a scratch package, change `stepFsyncTmp`'s error branch to `return s.finish(r, StatusServerError, nil)`, and run several thousand seeds with `DefaultInvariants()`. If nothing fails, write a paragraph on whether you would keep the Trip anyway, and why.
 
-5. **fsyncgate off.** Set `cfg.Disturbances.FsyncGate = false` and re-run mutant d for seeds 1–500. Does it still get caught at seed 1? By which invariant? Explain the difference in terms of `plantmodel.go:325-343`.
+5. **fsyncgate off.** Set `cfg.Disturbances.FsyncGate = false` and re-run mutant d for seeds 1–500. Does it still get caught at seed 1? By which invariant? Explain the difference in terms of `storagemodel.go:326-344`.
 
 6. **The protocol check.** Write a mutant whose `Step` appends a harmless `Emit{Telemetry: control.Recovered{}}` *after* any `Trip` its inner server returns. Run one seed in which a Trip occurs (seed 1 has nine). Which invariant name appears in the failure, and at which step? Why is it important that this is checked by the simulator rather than trusted?
 

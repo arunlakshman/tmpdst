@@ -9,11 +9,11 @@ That might sound like a question about taste. It is not. toys3 was refactored, a
 Two bodies of ideas were used to do it:
 
 - **Domain-driven design** (DDD), Eric Evans's method for organizing software around the concepts of its problem domain. DDD gives you tools for drawing boundaries: subdomains, bounded contexts, context maps, aggregates, domain events, ports and adapters.
-- **Control theory**, the engineering discipline of feedback loops. toys3's architecture, `Step(Event) []Action` driven by completions from a disk, turns out to be a discrete-time controller in a feedback loop around a plant. Control engineering has had precise words for every part of such a loop for eighty years, and toys3 borrows them where they fit.
+- **Control theory**, the engineering discipline of feedback loops. toys3's architecture, `Step(Event) []Action` driven by completions from a disk, turns out to be a discrete-time controller in a feedback loop around the disk (what control textbooks call the *plant*, and what toys3 calls *storage*). Control engineering has had precise words for every part of such a loop for eighty years, and toys3 borrows them where they fit.
 
 The chapter is organized in that order. §3a.1 to §3a.8 apply DDD: what the subdomains are, how the code splits into bounded contexts, how those contexts relate, what the aggregate is, what the domain events are, and where the ports are. §3a.9 to §3a.11 develop the control-theory reading end to end, with a block diagram mapped onto the code, and then, just as carefully, show where the metaphor was *not* applied and why. §3a.12 lists what the refactor deliberately left alone.
 
-The source documents for this chapter are `toys3/REFACTOR-PROPOSAL.md` (the full analysis, including a glossary with a verdict and a reason for every name) and the "Domain model and vocabulary" section of `toys3/DESIGN.md` (`toys3/DESIGN.md:22-67`). Read them alongside; this chapter explains them.
+The source documents for this chapter are `toys3/REFACTOR-PROPOSAL.md` (the full analysis, including a glossary with a verdict and a reason for every name) and the "Domain model and vocabulary" section of `toys3/DESIGN.md` (`toys3/DESIGN.md:22-69`). Read them alongside; this chapter explains them.
 
 ---
 
@@ -23,11 +23,11 @@ A fair objection: toys3 is under 5,000 lines of non-test Go. Its author knows wh
 
 Three answers.
 
-**First, names are the interface between code and reader.** This book is about learning DST from a working system. A reader meets `FakeFS`, `Fact` and `QuietTail` and has to build their own mental model of what those are. A reader who meets `PlantModel`, `Telemetry` and `Settling` is handed one. If the names are drawn from a coherent model, every name the reader learns makes the next one easier: once you know there is a *plant*, a *plant model* explains itself, and so do *disturbances*, *dead time* and *feedback delay*.
+**First, names are the interface between code and reader.** This book is about learning DST from a working system. A reader meets `FakeFS`, `Fact` and `QuietTail` and has to build their own mental model of what those are. A reader who meets `StorageModel`, `Telemetry` and `Settling` is handed one. If the names are drawn from a coherent model, every name the reader learns makes the next one easier: once you know the controller drives *storage* through actuations, a *storage model* explains itself, and so do *disturbances*, *dead time* and *feedback delay*.
 
-**Second, names expose design decisions that were made implicitly.** Before the refactor, the per-key FIFO queue was a correct, carefully reasoned mechanism with no name except "per-key FIFO". It is now the **key interlock**, and the condition under which a request may start is its **start permissive**. Those are not cosmetic synonyms: the words come from industrial control, where an interlock is a mechanism that *prevents* two conflicting operations from running at once. That sentence is exactly the specification of the mechanism. Similarly, `Halt` did the right thing, but `Trip` tells you *why* it is the right thing: it is a safety trip, the controller driving itself to a safe state because it can no longer trust its own view of the plant.
+**Second, names expose design decisions that were made implicitly.** Before the refactor, the per-key FIFO queue was a correct, carefully reasoned mechanism with no name except "per-key FIFO". It is now the **key interlock**, and the condition under which a request may start is its **start permissive**. Those are not cosmetic synonyms: the words come from industrial control, where an interlock is a mechanism that *prevents* two conflicting operations from running at once. That sentence is exactly the specification of the mechanism. Similarly, `Halt` did the right thing, but `Trip` tells you *why* it is the right thing: it is a safety trip, the controller driving itself to a safe state because it can no longer trust its own view of storage.
 
-**Third, boundaries let you reason about change.** The old `toys3/sim` package mixed four different jobs in one namespace (running the simulation, modelling the disk, generating traffic, judging the results), and nothing stopped an invariant from reaching into the fake disk's internals. After the refactor you can tell, from the types alone, which invariants look only at what clients saw (black-box) and which also look at the disk's true state (white-box), and the white-box ones see the disk only through a three-method interface. That matters the day you add a second plant (a simulated network) or a second controller (a replica): the boundaries tell you what has to change and what does not.
+**Third, boundaries let you reason about change.** The old `toys3/sim` package mixed four different jobs in one namespace (running the simulation, modelling the disk, generating traffic, judging the results), and nothing stopped an invariant from reaching into the fake disk's internals. After the refactor you can tell, from the types alone, which invariants look only at what clients saw (black-box) and which also look at the disk's true state (white-box), and the white-box ones see the disk only through a three-method interface. That matters the day you add a second controlled system (a simulated network) or a second controller (a replica): the boundaries tell you what has to change and what does not.
 
 A domain model is not a framework. Nothing in toys3 imports a DDD library, inherits from an `AggregateRoot` base class or registers a repository. DDD here is a way of *thinking about* what is already there, and then naming it.
 
@@ -41,7 +41,7 @@ DDD has a strategic half and a tactical half.
 
 - A **domain** is the problem space the software serves. For toys3 it is "durable object storage, and the testing of it".
 - A **subdomain** is one part of that problem space. Subdomains are classified as **core** (where the system's distinctive value lies, and where the best people and the most care should go), **supporting** (necessary and specific to this system, but not where it competes) and **generic** (necessary, but a solved problem; buy it or copy it).
-- A **bounded context** is a part of the *solution* (the code) inside which every term has one precise meaning. The same word can mean different things in different contexts, and that is fine, as long as each context is explicit about its own meaning. "Model" means one thing inside the plant model and another inside the oracle; each context should say which.
+- A **bounded context** is a part of the *solution* (the code) inside which every term has one precise meaning. The same word can mean different things in different contexts, and that is fine, as long as each context is explicit about its own meaning. "Model" means one thing inside the storage model and another inside the oracle; each context should say which.
 - The **ubiquitous language** is the vocabulary shared by the people and the code within a context. The rule is that the code, the documentation and the conversation use the *same* words. A ubiquitous language is not a glossary that lives in a wiki: it is the identifiers.
 - A **context map** draws the bounded contexts and the relationships between them. DDD names a handful of relationship patterns: **Shared Kernel** (two contexts share a small model and change it together), **Customer/Supplier** (the downstream context's needs drive the upstream's design), **Conformist** (the downstream simply adopts the upstream's model), **Anti-Corruption Layer** (ACL: the downstream translates the upstream's model into its own so it does not leak), **Open Host Service** and **Published Language** (the upstream offers a well-documented protocol for anyone to use), and **Separate Ways** (two contexts deliberately do not integrate).
 
@@ -63,7 +63,7 @@ Hold on to those definitions. The rest of the DDD half of this chapter applies t
 |---|---|---|---|
 | **Durable object control**: the write protocol, the key interlock, the trip policy, recovery | **Core** | It is the system under test. Every interesting decision is here: the order of fsync and rename, when to trip, which requests may run together. | `toys3/control` |
 | **Verification**: the reference model, the linearizability search, the invariants, the coverage checks | **Core** (for *this* repository) | toys3 exists to learn DST. The oracle and the invariants are where the learning value is, and they are modelled as carefully as the controller. | `toys3/sim`: `oracle.go`, `history.go`, `invariant.go` |
-| **Plant model**: a filesystem with crash and fault semantics | Supporting | It must be realistic (Chapter 11 and Chapter 17 show that its realism decides which bugs are found), but it models POSIX; it invents nothing. | `toys3/sim/plantmodel.go` |
+| **Storage model**: a filesystem with crash and fault semantics | Supporting | It must be realistic (Chapter 11 and Chapter 17 show that its realism decides which bugs are found), but it models POSIX; it invents nothing. | `toys3/sim/storagemodel.go` |
 | **Simulation testbench**: event queue, virtual clock, seeded RNG, incarnations, trace hash | Supporting | Necessary, but the same machinery would drive any `Step` machine. | `toys3/sim`: `simulator.go`, `queue.go`, `rand.go`, `hash.go`, `trace.go`, `log.go`, `config.go` |
 | **Object format**: header, CRC, key escaping, directory layout | Supporting | A small, stable contract between incarnations and between the controller and the monitors. | `toys3/format` |
 | **Stimulus**: the simulated clients and their self-describing values | Supporting | Its value encoding is what lets the oracle check reads exactly (Chapter 12). | `toys3/sim`: `workload.go`, `value.go` |
@@ -82,11 +82,11 @@ The subdomains are the problem. The bounded contexts are how the solution is cut
 
 | | Context | Responsibility | Package / files |
 |---|---|---|---|
-| A | **Storage Control** | Turns requests and plant feedback into actuations, replies and telemetry. Owns the durability protocol, the key interlock, the trip policy and recovery. | `toys3/control` |
-| B | **Durable Medium (the plant)** | The thing being controlled: files, directory entries, fsync, crash. Two implementations, one real and one modelled. | the port in `control/plant.go`; adapters `prod.OSExecutor` and `sim.PlantModel` |
+| A | **Storage Control** | Turns requests and storage feedback into actuations, replies and telemetry. Owns the durability protocol, the key interlock, the trip policy and recovery. | `toys3/control` |
+| B | **Durable Medium (storage)** | The thing being controlled: files, directory entries, fsync, crash. Two implementations, one real and one modelled. | the port in `control/storage.go`; adapters `prod.OSExecutor` and `sim.StorageModel` |
 | C | **Object Format** | Byte layout of an object file, key-to-name escaping, `obj/` and `tmp/` paths. The only thing that survives a crash. | `toys3/format` |
-| D | **Verification** | Judges a run: the client-visible history against a sequential reference model (black box), and controller telemetry against the plant's true state (white box). | `sim/oracle.go`, `sim/history.go`, `sim/invariant.go` |
-| E | **Simulation Testbench** | Runs the controller against the plant model under a seeded schedule, injects crashes, folds the trace hash; includes the stimulus. | `sim/simulator.go`, `queue.go`, `rand.go`, `hash.go`, `trace.go`, `log.go`, `config.go`, `workload.go`, `value.go` |
+| D | **Verification** | Judges a run: the client-visible history against a sequential reference model (black box), and controller telemetry against the true state of storage (white box). | `sim/oracle.go`, `sim/history.go`, `sim/invariant.go` |
+| E | **Simulation Testbench** | Runs the controller against the storage model under a seeded schedule, injects crashes, folds the trace hash; includes the stimulus. | `sim/simulator.go`, `queue.go`, `rand.go`, `hash.go`, `trace.go`, `log.go`, `config.go`, `workload.go`, `value.go` |
 | F | **Production Runtime and Transport** | Real I/O, goroutines, and the HTTP mapping to S3. | `toys3/prod`, `toys3/cmd/toys3` |
 
 Contexts B, D and E all live in package `sim` and are separated by *file* and by *naming*, not by package. The package doc says so explicitly:
@@ -96,9 +96,9 @@ Contexts B, D and E all live in package `sim` and are separated by *file* and by
 // The package holds four bounded contexts, grouped by file:
 //
 //	testbench     simulator.go queue.go rand.go config.go hash.go trace.go log.go
-//	plant model   plantmodel.go (PlantModel, Disturbances, ActuationPlan)
+//	storage model storagemodel.go (StorageModel, Disturbances, ActuationPlan)
 //	stimulus      workload.go value.go (self-describing values, shared with verification)
-//	verification  oracle.go history.go invariant.go (monitors read the plant only
+//	verification  oracle.go history.go invariant.go (monitors read storage only
 //	              through the GroundTruth interface)
 ```
 
@@ -108,15 +108,15 @@ Contexts B, D and E all live in package `sim` and are separated by *file* and by
 
 The proposal catalogues ten places where the old code mixed contexts (`toys3/REFACTOR-PROPOSAL.md`, §1.3). Four of them are worth knowing because they show what a boundary buys:
 
-1. **The format lived inside the controller.** `core/format.go` held the object header, the CRC and the path functions. Everyone who only needed to read bytes (the invariants, the log renderer, the plant model's hash, the production `PrepareDir`) had to import the whole controller package. The package doc spent twenty lines on byte offsets in the middle of the description of the control law. Now `toys3/format` is its own package with its own doc (`toys3/format/doc.go:1-31`) and, for the first time, its own unit tests (`toys3/format/format_test.go`): round-trip, damage detection, escaping injectivity, key validity and paths. Before the refactor, no test referenced `EscapeKey` at all.
+1. **The format lived inside the controller.** `core/format.go` held the object header, the CRC and the path functions. Everyone who only needed to read bytes (the invariants, the log renderer, the storage model's hash, the production `PrepareDir`) had to import the whole controller package. The package doc spent twenty lines on byte offsets in the middle of the description of the control law. Now `toys3/format` is its own package with its own doc (`toys3/format/doc.go:1-31`) and, for the first time, its own unit tests (`toys3/format/format_test.go`): round-trip, damage detection, escaping injectivity, key validity and paths. Before the refactor, no test referenced `EscapeKey` at all.
 
 2. **Facts served two masters, and said so in terms of one.** The controller's beliefs (`Committed`, `Recovered`, the corruption signal) were read by production (as log lines) and by the simulator (as invariant input and coverage counters). That is legitimate: one published signal with two subscribers. But the doc comments described them as things "the simulator checks", and the type was called `Fact`. The rename to `Telemetry` (§3a.6) names the published signal from the publisher's side.
 
-3. **The plant's vocabulary was decoded by type switches in five places.** Chapter 3 (§3.5) told this story: adding a filesystem operation meant editing five switches. The port types `Actuation` and `Feedback` replaced them.
+3. **The storage vocabulary was decoded by type switches in five places.** Chapter 3 (§3.5) told this story: adding a filesystem operation meant editing five switches. The port types `Actuation` and `Feedback` replaced them.
 
-4. **One `sim` package held four contexts, and nothing kept monitors out of the plant.** `View` handed every invariant a concrete `*FakeFS`, so a monitor could call anything on the fake disk, including methods that described its *volatile* state, which no real observer could see. Now `View.GroundTruth()` returns an interface with exactly three methods (§3a.5).
+4. **One `sim` package held four contexts, and nothing kept monitors out of the disk model.** `View` handed every invariant a concrete `*FakeFS`, so a monitor could call anything on the fake disk, including methods that described its *volatile* state, which no real observer could see. Now `View.GroundTruth()` returns an interface with exactly three methods (§3a.5).
 
-The other six findings were smaller: the test seams (`Hashable`, `Factory`) were documented in terms of their one customer; `Stats` is a single struct fed by four contexts (left as is, but grouped by comment); the plant model knows the controller's directory layout (acceptable once the format is a shared kernel); the workload builds controller requests directly (a deliberate Conformist relationship); the testbench checks a controller contract ("Trip is the last action of its step"); and a handful of comment-level language drifts recorded in Chapter 17.
+The other six findings were smaller: the test seams (`Hashable`, `Factory`) were documented in terms of their one customer; `Stats` is a single struct fed by four contexts (left as is, but grouped by comment); the storage model knows the controller's directory layout (acceptable once the format is a shared kernel); the workload builds controller requests directly (a deliberate Conformist relationship); the testbench checks a controller contract ("Trip is the last action of its step"); and a handful of comment-level language drifts recorded in Chapter 17.
 
 ---
 
@@ -143,14 +143,14 @@ Here is how the six contexts relate. Arrows point from upstream (the side whose 
    ║    Controller aggregate · key interlock · trip · recovery           ║
    ║    OPEN HOST SERVICE + PUBLISHED LANGUAGE:                          ║
    ║      Step(Event) []Action  (shared with loop.md)                    ║
-   ║      Actuation / Feedback  (outbound port: the plant interface)     ║
+   ║      Actuation / Feedback  (outbound port: the Storage port)        ║
    ║      Telemetry             (outbound signal: any subscriber)        ║
    ╚══════╤═══════════════════════════╤══════════════════════════════════╝
           │ uses                      │ CUSTOMER/SUPPLIER (Hashable, Factory)
           ▼                           ▼
    ┌───────────────┐       ┌────────────────────────┐  owns   ┌─────────────────────────┐
-   │ C OBJECT      │◄──SK──│ E TESTBENCH  sim/      │────────►│ B PLANT MODEL           │
-   │   FORMAT      │       │ Simulator·Queue·Rand   │         │ sim/plantmodel.go       │
+   │ C OBJECT      │◄──SK──│ E TESTBENCH  sim/      │────────►│ B STORAGE MODEL         │
+   │   FORMAT      │       │ Simulator·Queue·Rand   │         │ sim/storagemodel.go     │
    │   format/     │       │ Workload (stimulus)    │         │ CONFORMIST: to control's│
    │ SHARED KERNEL │◄──SK──│ trace hash · log       │         │ actuation PL + to POSIX │
    │               │       └───────────┬────────────┘         └────────────▲────────────┘
@@ -169,23 +169,23 @@ Here is how the six contexts relate. Arrows point from upstream (the side whose 
 
 **A → F2 and A → E: Open Host Service with a Published Language.** The controller's interface, `Step(Event) []Action` with its closed sets of events and actions, is a protocol anyone can drive: the production loop, the simulator, the unit-test harness and the mutant decorators all do. It is also *published* in the DDD sense: it is the same shape that `loop.md` prescribes for the larger Manifester system, which is why the refactor kept the names `Event`, `Action` and `Step` even where a control-flavoured name was available (§3a.10).
 
-**A → B: Published Language, Conformist adapters.** The plant port (`control/plant.go`) is owned by the controller. Both plant adapters conform to it exactly: `prod.OSExecutor.Execute` maps each `FS*` command onto an `os` call and each result back onto the matching `FS*Done` (`toys3/prod/executor.go:37-72`), and `sim.PlantModel.Land` does the same against its in-memory model. This is hexagonal architecture in its pure form: the port lives in the core, not in a shared "plant vocabulary" package. The proposal considered a separate package for the plant vocabulary and rejected it: with the port owned by the core, the dependency arrows already point the right way (§3a.8).
+**A → B: Published Language, Conformist adapters.** The Storage port (`control/storage.go`) is owned by the controller. Both storage adapters conform to it exactly: `prod.OSExecutor.Execute` maps each `FS*` command onto an `os` call and each result back onto the matching `FS*Done` (`toys3/prod/executor.go:37-72`), and `sim.StorageModel.Land` does the same against its in-memory model. This is hexagonal architecture in its pure form: the port lives in the core, not in a shared "storage vocabulary" package. The proposal considered a separate package for that vocabulary and rejected it: with the port owned by the core, the dependency arrows already point the right way (§3a.8).
 
 **A → E: Customer/Supplier.** `Hashable` and `Factory` exist because the testbench needs them (`toys3/control/machine.go:9-25`): the simulator folds `StateHash()` into the trace after every step, and it builds every incarnation through a `Factory` so it can substitute a mutant. The downstream (the testbench) drives what the upstream (the controller) provides. Mutants are decorators on the `Machine` port: each wraps a real controller and rewrites its inputs or outputs (Chapter 15).
 
 **A → D: Published Language, and Separate Ways from internals.** The black-box invariants judge only the client-visible history: requests (`Op`), replies (`Reply`, `Status`). The white-box ones add the controller's published telemetry. None of them reads the controller's private state. "Nothing about the server's internals is consulted," says the oracle's doc comment (`toys3/sim/oracle.go:19-21`). That is Separate Ways: the verification context could judge any controller that speaks the published language, including a completely different implementation.
 
-**C → A, B, D, F2: Shared Kernel.** The object format is used by the controller (to write and validate object files), by the plant model (to fold content checksums into its state hash), by the monitors (to decode durable files) and by production (to create the directories). It is small, stable and versioned by its magic number `"TOY3"`. Above all, it is the contract between incarnation *N* and incarnation *N+1*: the only thing that crosses a crash. That is why it deserves its own package, and why changes to it must be made with every user in mind. The shared kernel is the one relationship in DDD where two teams agree to change a model *together*.
+**C → A, B, D, F2: Shared Kernel.** The object format is used by the controller (to write and validate object files), by the storage model (to fold content checksums into its state hash), by the monitors (to decode durable files) and by production (to create the directories). It is small, stable and versioned by its magic number `"TOY3"`. Above all, it is the contract between incarnation *N* and incarnation *N+1*: the only thing that crosses a crash. That is why it deserves its own package, and why changes to it must be made with every user in mind. The shared kernel is the one relationship in DDD where two teams agree to change a model *together*.
 
-**B → D: Anti-Corruption Layer.** This one is new. Monitors need to read the plant's true durable state; they do not need anything else, and they must not see the plant's volatile state (no real-world observer could). So verification declares exactly what it needs, using only builtin types:
+**B → D: Anti-Corruption Layer.** This one is new. Monitors need to read the true durable state of storage; they do not need anything else, and they must not see its volatile state (no real-world observer could). So verification declares exactly what it needs, using only builtin types:
 
 ```go
 // toys3/sim/invariant.go:37-51
 // GroundTruth is the anti-corruption interface between verification and the
-// plant model: the only things a monitor may read of the plant are its true
+// storage model: the only things a monitor may read of storage are its true
 // durable state and a generation counter. It uses only builtin types, so the
-// plant model never depends on verification and monitors never reach into
-// the plant model's internals. *PlantModel implements it.
+// storage model never depends on verification and monitors never reach into
+// the storage model's internals. *StorageModel implements it.
 type GroundTruth interface {
 	// DurableFile returns path's content in the durable view.
 	DurableFile(path string) ([]byte, bool)
@@ -195,16 +195,16 @@ type GroundTruth interface {
 	DurableGen() uint64
 }
 
-var _ GroundTruth = (*PlantModel)(nil)
+var _ GroundTruth = (*StorageModel)(nil)
 ```
 
-`View.GroundTruth()` returns this interface, not the plant model (`toys3/sim/invariant.go:28-29`, implemented at `toys3/sim/simulator.go:391`). The interface uses no plant types, so a future refactor that moves the plant model and the monitors into separate packages (the "Full" layout, §3a.12) needs no change to either side. Note the cost discipline: to support it, `PlantModel` gained one method, `EachDurable` (`toys3/sim/plantmodel.go:567-578`), which iterates in exactly the order the old code's `Durable().Files` did, so `ObjNeverTorn` reports failures in the same order.
+`View.GroundTruth()` returns this interface, not the storage model (`toys3/sim/invariant.go:28-29`, implemented at `toys3/sim/simulator.go:391`). The interface uses no storage-model types, so a future refactor that moves the storage model and the monitors into separate packages (the "Full" layout, §3a.12) needs no change to either side. Note the cost discipline: to support it, `StorageModel` gained one method, `EachDurable` (`toys3/sim/storagemodel.go:568-579`), which iterates in exactly the order the old code's `Durable().Files` did, so `ObjNeverTorn` reports failures in the same order.
 
 **Stimulus ↔ D: Shared Kernel.** The workload writes self-describing values; the oracle and `NoCorruptReads` read them. The encoding (`MakeValue`, `ValueWriter`, `ValueHeader`) was split out of `workload.go` into its own file, `value.go`, whose comment names the relationship: "the shared kernel between the stimulus (Workload, which writes them) and verification (the oracle and NoCorruptReads, which read them)" (`toys3/sim/value.go:9-11`).
 
 **Clients → F1: Anti-Corruption Layer.** `prod.Handler` and `ParseRequest` translate S3 REST (methods, paths, the copy-source header) into `control.Op` (`toys3/prod/http.go:81-107`). Buckets are flattened into keys. Nothing of HTTP crosses into the controller.
 
-**POSIX → F2, B: Conformist.** Both plant adapters accept POSIX semantics as given. toys3 does not wrap the kernel in a model of its own; it conforms, and the plant model imitates what it conforms to.
+**POSIX → F2, B: Conformist.** Both storage adapters accept POSIX semantics as given. toys3 does not wrap the kernel in a model of its own; it conforms, and the storage model imitates what it conforms to.
 
 **Dependency direction.** Imports always point toward `control` and `format`:
 
@@ -263,14 +263,14 @@ Before the refactor this function was called `canRun`, and `interlocked` was `co
 | Aggregate root | `Controller`. Its identity is one incarnation; it is rebuilt from nothing on every cold start. |
 | Entity inside the aggregate | `request` (identity: its arrival `seq`). Its lifecycle is: waiting (start permissive false) → protocol steps → finished. |
 | Value objects | `Event`, `Action` and all their bodies; the ops `Put`, `Get`, `Delete`, `Copy`; every `Telemetry`; `IOID`; `ClientReq`; `ErrCode`; `Status`; `Time`; `Duration`; `Config`; keys; object file bytes |
-| Plant-model entities (context B) | inodes (`InodeID`) and directory entries |
+| Storage-model entities (context B) | inodes (`InodeID`) and directory entries |
 | Verification entities (context D) | `HistOp` (identity: its `Req`), and the carried estimate groups |
 
 The proposal considered renaming `request` to `procedure` (an ISA-88 term for an ordered sequence of steps, each waiting on a transition) and `reqStep` to `procStep`. It fits, and it would have freed the overloaded word "step" (§3a.11). It was not done: the gain was small and "request" is what every storage engineer calls it.
 
 ### No repository, on purpose
 
-A DDD reader will look for the repository that loads and saves the `Controller`. There is none, and the absence is a design statement. Memory is disposable (`toys3/control/doc.go:106`). The controller is never saved; on every boot it starts empty. **Recovery reconstitutes nothing**: `obj/` needs no recovery, because the rename protocol only ever puts complete files there, and the controller does not need to know what is in `obj/` to serve requests (it reads it on demand). Recovery's only job is to empty `tmp/`. In control terms recovery is *homing* (establishing a known initial condition), not reconstitution. The plant is the source of truth, and the plant is not inside the aggregate.
+A DDD reader will look for the repository that loads and saves the `Controller`. There is none, and the absence is a design statement. Memory is disposable (`toys3/control/doc.go:107`). The controller is never saved; on every boot it starts empty. **Recovery reconstitutes nothing**: `obj/` needs no recovery, because the rename protocol only ever puts complete files there, and the controller does not need to know what is in `obj/` to serve requests (it reads it on demand). Recovery's only job is to empty `tmp/`. In control terms recovery is *homing* (establishing a known initial condition), not reconstitution. Storage is the source of truth, and storage is not inside the aggregate.
 
 ---
 
@@ -282,8 +282,8 @@ DDD distinguishes things that *ask for* something to happen (commands) from thin
 |---|---|---|
 | in | operator command | `Request{Client, Op}` |
 | in | lifecycle | `Started` |
-| in | feedback from the plant | `FS…Done`, each implementing `Feedback` |
-| out | actuation commands to the plant | `FS…`, each implementing `Actuation` |
+| in | feedback from storage | `FS…Done`, each implementing `Feedback` |
+| out | actuation commands to storage | `FS…`, each implementing `Actuation` |
 | out | reply to the operator | `Reply` |
 | out | safety | `Trip{Cause}`, always the last action of its step |
 | out | **domain events** | `Telemetry`: `Committed`, `Recovered`, `CorruptionDetected` |
@@ -292,7 +292,7 @@ The last row is where the naming changed. In DDD a domain event is past tense: i
 
 The package doc of `telemetry.go` now states the rule: "Every type is a domain event, named in the past tense" (`toys3/control/telemetry.go:11`).
 
-There is no event sourcing, and none is needed. Telemetry is published for observers; it is not the system of record. The plant is.
+There is no event sourcing, and none is needed. Telemetry is published for observers; it is not the system of record. Storage is.
 
 ---
 
@@ -303,7 +303,7 @@ Put the context map and the vocabulary together and you get toys3's hexagon:
 | Port | Direction | Defined in | Adapters |
 |---|---|---|---|
 | `Machine.Step(Event) []Action` | driving (inbound) | `control/machine.go` | `prod.Loop`, `sim.Simulator`, the harness in `controller_test.go`, the mutant decorators |
-| `Actuation` / `Feedback` (the plant port) | driven (outbound) | `control/plant.go` | `prod.OSExecutor` (the real plant), `sim.PlantModel` via the simulator (the plant model), the map-backed harness in `controller_test.go` |
+| `Actuation` / `Feedback` (the Storage port) | driven (outbound) | `control/storage.go` | `prod.OSExecutor` (real storage), `sim.StorageModel` via the simulator (the storage model), the map-backed harness in `controller_test.go` |
 | `Env` (`Rand`, `Buggify`) | driven | `control/env.go` | `prod.Env`, `sim.env`, `testEnv` |
 | `Telemetry` (via `Emit`) | output signal | `control/telemetry.go` | the production log line; the simulator's `Sample` stream, feeding monitors and stats |
 | `Reply` | output | `control/action.go` | the production waiter (the HTTP handler); the simulator's oracle and workload |
@@ -313,13 +313,13 @@ Two things about this table are worth dwelling on.
 
 **The driven port is data, not an interface with methods.** In the textbook hexagon, a driven port is an interface like `type Disk interface { Write(path, data) error }`, and the domain calls it. In toys3 the domain never calls anything; it *returns* commands. The "port" is a vocabulary of values, and the adapter is whatever interprets those values. Chapter 2 explained why that is strictly more powerful for simulation (an asynchronous vocabulary can express "the effect landed but the caller never learned"). DDD does not need the port to be a Go interface; it needs it to be owned by the domain and expressed in the domain's language. `Actuation` and `Feedback` are Go interfaces, but only as *category markers* over the values; nothing implements them except the plain structs.
 
-**There are three adapters for the plant, not two.** The unit-test harness in `controller_test.go` is a third: a map from path to bytes that executes each actuation synchronously and returns its feedback. It is the simplest possible plant, with no crashes and no faults, and it is enough to pin down exact action sequences (Chapter 6). The simulator is the most adversarial. Production is the real thing. All three conform to the same port, and the controller cannot tell them apart.
+**There are three storage adapters, not two.** The unit-test harness in `controller_test.go` is a third: a map from path to bytes that executes each actuation synchronously and returns its feedback. It is the simplest possible storage, with no crashes and no faults, and it is enough to pin down exact action sequences (Chapter 6). The simulator is the most adversarial. Production is the real thing. All three conform to the same port, and the controller cannot tell them apart.
 
 ---
 
 ## 3a.9 The control-theory reading, end to end
 
-Now the second body of ideas. Here is the claim, stated precisely: **toys3's controller is a discrete-time controller in a feedback loop around a plant, and the simulator is a software-in-the-loop testbench for it.** The names in the code follow from that claim. This section builds the picture term by term and maps each term onto code.
+Now the second body of ideas. Here is the claim, stated precisely: **toys3's controller is a discrete-time controller in a feedback loop around storage (the textbook's *plant*), and the simulator is a software-in-the-loop testbench for it.** The names in the code follow from that claim. This section builds the picture term by term and maps each term onto code.
 
 ### The block diagram
 
@@ -328,10 +328,10 @@ Now the second body of ideas. Here is the claim, stated precisely: **toys3's con
               │                                          bit flips, writeback, power loss
               ▼                                                    │
      ┌──────────────────┐   actuation (FS* commands)      ┌────────▼────────────┐
-     │   CONTROLLER     │ ───────────────────────────────►│        PLANT        │
+     │   CONTROLLER     │ ───────────────────────────────►│       STORAGE       │
      │ control.         │   dead time: command → effect   │ (disk + page cache) │
      │  Controller      │                                 │ prod: OSExecutor    │
-     │ Step(Event)      │ ◄───────────────────────────────│ sim:  PlantModel    │
+     │ Step(Event)      │ ◄───────────────────────────────│ sim:  StorageModel  │
      │  []Action        │   feedback (FS*Done events)     └─────────────────────┘
      └──┬────────┬──────┘   feedback delay: effect → completion
         │        └──► telemetry (Committed, Recovered, CorruptionDetected)
@@ -339,8 +339,20 @@ Now the second body of ideas. Here is the claim, stated precisely: **toys3's con
         │                 └──► sim: Sample stream ──► monitors (invariants), stats
         └──► Reply to the operator, or Trip (fail-stop) when its own state is untrustworthy
 
-  testbench (sim) = software-in-the-loop: real controller + plant model + stimulus + monitors
+  testbench (sim) = software-in-the-loop: real controller + storage model + stimulus + monitors
 ```
+
+### Why the code says "storage", not "plant"
+
+Every control textbook calls the controlled process the **plant**. The word comes from process control, where the thing being controlled really was a plant: a boiler, a distillation column, a paper machine. The first version of this refactor used it too: the port was "the plant port" in `control/plant.go`, and the simulator's model of the disk was `sim.PlantModel` in `sim/plantmodel.go`.
+
+It did not last. A later commit (`56b0d2e`, "toys3: rename plant to storage") replaced it with plain **storage** everywhere: `sim.StorageModel` in `sim/storagemodel.go`, the **Storage port** in `control/storage.go`, `Simulator.storage`, and "storage model" in every comment. The reason is honest and simple: the project's owner found "plant" confusing, and on reflection it was the one control term that *cost* more than it bought.
+
+- **It has to be translated every time.** A reader who comes from storage systems (which is the reader this book is written for) sees "plant" and has to stop and think "the disk". Nothing about the word suggests a disk, a page cache or fsync. Every other control term in this chapter names something a storage engineer has no precise word for (dead time versus feedback delay, a trip versus an error, an interlock, a permissive, settling). "Plant" named something that already had a perfectly good name.
+- **It collides with nothing, and that is no defence.** "Plant" was never ambiguous in the code: no other identifier used it. But a ubiquitous language is supposed to be the language of the people who work in the domain, and storage people say "storage" and "the disk". A word that is unambiguous but foreign is still a cost.
+- **The metaphor survives the rename.** The loop is still a controller, actuations, feedback, dead time, feedback delay and disturbances; only the name of the box on the right changed. When you read a control textbook, read "plant" as "storage" and every sentence still holds.
+
+The rename was guarded exactly like the refactor before it (Chapter 8, §8.12): no hash input depended on any of the renamed names, the golden file was not touched, and seed 1 is still `trace=1ca97eb77a9044e1`. The historical proposal (`toys3/REFACTOR-PROPOSAL.md`) still says "plant" and carries an addendum recording the rename.
 
 And the same picture with the code locations filled in:
 
@@ -351,14 +363,14 @@ And the same picture with the code locations filled in:
 | Sampling instant | the time `k` at which a discrete controller reads its inputs | `Event.At` (`toys3/control/event.go:3-8`) |
 | Controller state `x[k]` | everything the controller remembers between samples | the `Controller` fields, fingerprinted by `StateHash` (`toys3/control/hash.go:7-32`) |
 | Reference / operator input | what the controller is asked to achieve | `Request{Client, Op}` |
-| Plant | the process being controlled | the disk and the page cache |
-| Actuator, actuation | the device and the command that act on the plant | the `FS*` commands (`Actuation`, `toys3/control/plant.go:8-13`) |
-| Sensor, feedback | what the plant reports back | the `FS*Done` completions (`Feedback`, `toys3/control/plant.go:15-20`) |
-| Dead time | delay from command to effect | `Disturbances.DeadTime`, drawn per op into `ActuationPlan.DeadTime` (`toys3/sim/plantmodel.go:26-31`, `146-152`) |
+| Plant (toys3: **storage**) | the process being controlled | the disk and the page cache, behind the Storage port (`toys3/control/storage.go`) |
+| Actuator, actuation | the device and the command that act on the process | the `FS*` commands (`Actuation`, `toys3/control/storage.go:8-13`) |
+| Sensor, feedback | what the process reports back | the `FS*Done` completions (`Feedback`, `toys3/control/storage.go:15-20`) |
+| Dead time | delay from command to effect | `Disturbances.DeadTime`, drawn per op into `ActuationPlan.DeadTime` (`toys3/sim/storagemodel.go:26-31`, `147-153`) |
 | Feedback (measurement) delay | delay from effect to the controller seeing it | `Disturbances.FeedbackDelay`, `ActuationPlan.FeedbackDelay` |
 | Disturbance | an input the controller cannot command | `sim.Disturbances`: `EIOProb`, `TornWriteProb`, `ReadCorruptProb`, `WritebackProb`, `FsyncGate`; plus crashes (power loss) |
-| Plant model | a simulation of the plant used in place of the real one | `sim.PlantModel` (`toys3/sim/plantmodel.go:86-118`) |
-| True state | the plant's actual state, which the controller cannot see directly | the plant model's durable view, exposed to monitors as `GroundTruth` |
+| Storage model | a simulation of the process used in place of the real one (textbook: *plant model*) | `sim.StorageModel` (`toys3/sim/storagemodel.go:86-118`) |
+| True state | the process's actual state, which the controller cannot see directly | the storage model's durable view, exposed to monitors as `GroundTruth` |
 | Telemetry | signals the controller publishes for supervision | `control.Telemetry` via `Emit` |
 | Monitors | supervisory checks on telemetry and outputs | the invariants (`toys3/sim/invariant.go`) |
 | Safety trip | drive to a safe state when the controller cannot trust itself | `control.Trip{Cause}`, `modeTripped` |
@@ -366,14 +378,14 @@ And the same picture with the code locations filled in:
 | Start permissive | all conditions required to start are true | `permitted(r)`, `startPermitted()` |
 | Operating modes | Startup / Auto / Tripped, etc. | `modeStartup`, `modeRecovering`, `modeAuto`, `modeTripped` |
 | Settling | the closed loop converges after a disturbance | the Settling phase of a run (`Config.Settling`, `KindSettle`, `KindSettlingEnd`) |
-| Software-in-the-loop (SIL) | test the real controller code against a plant model | the simulator (`toys3/sim/doc.go:1-4`) |
+| Software-in-the-loop (SIL) | test the real controller code against a storage model | the simulator (`toys3/sim/doc.go:1-4`) |
 | Stimulus generator | produces test inputs | the `Workload` |
 
 ### Walking one PUT around the loop
 
-Seed 1, request `c6`, a PUT of `"k2"` (the same lines Chapter 2 showed, read now as a control engineer would). Each row is one sample of the controller, and between rows the plant has its dead time and its feedback delay:
+Seed 1, request `c6`, a PUT of `"k2"` (the same lines Chapter 2 showed, read now as a control engineer would). Each row is one sample of the controller, and between rows storage has its dead time and its feedback delay:
 
-| Actuation issued | at | lands on the plant | dead time | feedback delivered | feedback delay |
+| Actuation issued | at | lands in storage | dead time | feedback delivered | feedback delay |
 |---|---|---|---|---|---|
 | `FSWrite{io7 tmp/…07}` | 4.822820 ms (#26) | 6.109640 ms (#33) | 1.287 ms | 6.531543 ms (#38) | 0.422 ms |
 | `FSFsync{io10 tmp/…07}` | 6.531543 ms (#38) | 6.676498 ms (#40) | 0.145 ms | 6.871157 ms (#42) | 0.195 ms |
@@ -383,41 +395,41 @@ Seed 1, request `c6`, a PUT of `"k2"` (the same lines Chapter 2 showed, read now
 At #50 the controller emits `Emit{Committed{c6 "k2" crc=9b35c638}}` and `Reply{c6 200}`. Three things are visible in this table that the old names hid:
 
 - **Every actuation is issued at the instant the previous feedback is delivered.** The controller is purely reactive: no timers, no polling. Its "sampling" is event-driven; a sample happens whenever there is something to sample.
-- **The dangerous window is the feedback delay.** If power fails at 7.3 ms, between the rename landing (7.233) and its feedback arriving (7.377), the rename has *happened* on the plant but the controller never learned. That is the "it happened, but nobody was told" case of Chapter 10, and it now has a precise name: a crash inside the feedback delay. A crash inside the dead time is the benign case: the command never reached the plant.
-- **`Committed` is a claim about the plant's true state.** At #50 the controller believes `obj/k2` durably holds a payload with CRC `9b35c638`. The monitor `AckedIsDurable` checks that claim against the plant model's durable view on the same step. In control language, it is an **estimate-versus-true-state check**: the controller's internal estimate of the plant compared with ground truth that only the testbench can see.
+- **The dangerous window is the feedback delay.** If power fails at 7.3 ms, between the rename landing (7.233) and its feedback arriving (7.377), the rename has *happened* in storage but the controller never learned. That is the "it happened, but nobody was told" case of Chapter 10, and it now has a precise name: a crash inside the feedback delay. A crash inside the dead time is the benign case: the command never reached storage.
+- **`Committed` is a claim about the true state of storage.** At #50 the controller believes `obj/k2` durably holds a payload with CRC `9b35c638`. The monitor `AckedIsDurable` checks that claim against the storage model's durable view on the same step. In control language, it is an **estimate-versus-true-state check**: the controller's internal estimate of storage compared with ground truth that only the testbench can see.
 
-### Controller, plant, and why the controller never does I/O
+### Controller, storage, and why the controller never does I/O
 
-The first sentence of the `control` package doc used to say "the server never performs I/O". It now says the package "is written as a controller in a feedback loop around a plant (the disk)" (`toys3/control/doc.go:5-10`). These say the same thing, but the second explains it. A controller does not reach into the plant; it has no hands. It emits commands, and actuators carry them out. If you have ever wondered why the sans-I/O pattern feels so natural once you have used it, this is why: it is how every physical control system has always been built, because a physical controller *cannot* do anything else.
+The first sentence of the `control` package doc used to say "the server never performs I/O". It now says the package "is written as a controller in a feedback loop around storage (the disk and its page cache)" (`toys3/control/doc.go:5-11`). These say the same thing, but the second explains it. A controller does not reach into the process it controls; it has no hands. It emits commands, and actuators carry them out. If you have ever wondered why the sans-I/O pattern feels so natural once you have used it, this is why: it is how every physical control system has always been built, because a physical controller *cannot* do anything else.
 
 ### Dead time and feedback delay
 
 These two used to be `Latency` and `ReplyDelay`. "Latency" was ambiguous (latency of what, measured from where to where?), and "reply" collided with `control.Reply`, the controller's answer to a client, which is a completely different thing. The new names are standard, and each one measures one specific interval:
 
 ```go
-// toys3/sim/plantmodel.go:26-31
+// toys3/sim/storagemodel.go:26-31
 	// DeadTime is the [min, max] delay from issuing an actuation to its effect
-	// landing on the plant; FeedbackDelay is the further [min, max] delay until
+	// landing in storage; FeedbackDelay is the further [min, max] delay until
 	// the completion (feedback) is delivered. A crash in between leaves the
 	// effect applied but unacked.
 	DeadTime      [2]control.Duration
 	FeedbackDelay [2]control.Duration
 ```
 
-### Disturbances, and the plant model
+### Disturbances, and the storage model
 
-A **disturbance** is an exogenous input: it acts on the plant, and the controller can neither command nor prevent it. Wind on an aircraft. A cold draft on a thermostat. An EIO from a failing disk, a torn write, a bit flip on read, the kernel's background writeback, the fsyncgate lie, and power loss. Every one of these is something the toys3 controller must be robust to and cannot cause. The struct that configures them was called `FSFaults`; it is now `Disturbances`, and its doc says what it is:
+A **disturbance** is an exogenous input: it acts on storage, and the controller can neither command nor prevent it. Wind on an aircraft. A cold draft on a thermostat. An EIO from a failing disk, a torn write, a bit flip on read, the kernel's background writeback, the fsyncgate lie, and power loss. Every one of these is something the toys3 controller must be robust to and cannot cause. The struct that configures them was called `FSFaults`; it is now `Disturbances`, and its doc says what it is:
 
 ```go
-// toys3/sim/plantmodel.go:12-16
-// Disturbances configures the plant model: its dynamics (dead time and
+// toys3/sim/storagemodel.go:12-16
+// Disturbances configures the storage model: its dynamics (dead time and
 // feedback delay) and the disturbances it injects, the exogenous inputs the
 // controller cannot command (EIO, torn writes, bit flips, background
 // writeback, fsyncgate). Zero value: an honest, instant filesystem that still
 // loses un-synced changes on crash.
 ```
 
-The **plant model** is the simulation of the plant that stands in for the real one. In model-in-the-loop and software-in-the-loop testing it is always called that, and the rename from `FakeFS` makes the simulator's structure read like the textbook: real controller code, plant model, stimulus, monitors. "Fake" also undersold it. A fake, in testing vocabulary, is a simplified working implementation; the plant model is *more* adversarial than the real thing, on purpose (Chapter 11).
+The **storage model** is the simulation of storage that stands in for the real disk. In model-in-the-loop and software-in-the-loop testing the textbook name is *plant model* (and the refactor first called it `PlantModel`; see above for why it became `StorageModel`). The rename from `FakeFS` makes the simulator's structure read like the textbook: real controller code, storage model, stimulus, monitors. "Fake" also undersold it. A fake, in testing vocabulary, is a simplified working implementation; the storage model is *more* adversarial than the real thing, on purpose (Chapter 11).
 
 Note that the crash, too, is a disturbance: a power-loss disturbance. It is configured in the testbench (`Config.CrashProb`), not in `Disturbances`, because the testbench has to coordinate it with the queue and the oracle; but conceptually it belongs with the others.
 
@@ -441,9 +453,9 @@ When a disturbance hits a feedback loop, the loop's output goes through a transi
 
 The control vocabulary extends, carefully, into the oracle.
 
-- **Reference model.** The sequential specification that the closed loop's behaviour must match is, in control language, a *reference model*: the model whose behaviour the system should track (the term is from model-reference adaptive control). The oracle's internal type for one state of that model was `modelState`; it is now `refState` (`toys3/sim/oracle.go:164-167`). This also resolved an ambiguity: "model" had come to mean both the plant model and the reference model, and the rule now is to always qualify the word.
+- **Reference model.** The sequential specification that the closed loop's behaviour must match is, in control language, a *reference model*: the model whose behaviour the system should track (the term is from model-reference adaptive control). The oracle's internal type for one state of that model was `modelState`; it is now `refState` (`toys3/sim/oracle.go:164-167`). This also resolved an ambiguity: "model" had come to mean both the storage model and the reference model, and the rule now is to always qualify the word.
 - **State estimate.** The oracle cannot see the system's true state; it reconstructs the *set of states* the reference model could be in, given everything clients have observed. In estimation theory that is a *set-membership state estimate*. The oracle's field that holds it was `groups`; it is now `estimate` (`toys3/sim/oracle.go:46-50`). The oracle widens the set when it gets too large, like an interval observer that over-approximates; an empty set means a fault has been detected (the history is not linearizable).
-- **True state.** The plant model's durable view, `GroundTruth`.
+- **True state.** The storage model's durable view, `GroundTruth`.
 
 Put together, the oracle is a *set-membership state observer* for the reference model, and `AckedIsDurable` is an estimate-versus-true-state check for the controller. Chapter 13 develops the observer reading of the oracle in more depth. The type itself is still called `Oracle`, for reasons in the next section.
 
@@ -453,7 +465,7 @@ Put together, the oracle is a *set-membership state observer* for the reference 
 
 A metaphor applied everywhere stops being a model and becomes a costume. The proposal that drove the refactor classified every candidate name as RENAME (the control term fits and is clearer), OPT (it fits, but the gain is marginal) or KEEP (the current name is better, or it belongs to a language shared with something outside toys3). The KEEP decisions are as instructive as the renames.
 
-**Requests are not setpoints.** In control theory, the reference signal is the *setpoint*: the value the controller should drive the plant toward. A PUT is, arguably, a setpoint change ("make `k` hold `v`"); so are DELETE and COPY. But a GET is not: it asks for a reading and changes nothing. Calling a quarter of the operations "setpoints" would be wrong, and calling the rest "setpoints" and GET something else would split one concept in two. `Request`, `Op`, `Put`, `Get`, `Delete`, `Copy`, `Reply` and `Status` are also the S3 vocabulary that the HTTP adapter translates, a published language toys3 does not own. They stayed.
+**Requests are not setpoints.** In control theory, the reference signal is the *setpoint*: the value the controller should drive the process toward. A PUT is, arguably, a setpoint change ("make `k` hold `v`"); so are DELETE and COPY. But a GET is not: it asks for a reading and changes nothing. Calling a quarter of the operations "setpoints" would be wrong, and calling the rest "setpoints" and GET something else would split one concept in two. `Request`, `Op`, `Put`, `Get`, `Delete`, `Copy`, `Reply` and `Status` are also the S3 vocabulary that the HTTP adapter translates, a published language toys3 does not own. They stayed.
 
 **`Linearizable` is about linearizability, not linearization.** In control theory, *linearization* means approximating a nonlinear system by a linear one around an operating point. *Linearizability* is a correctness condition for concurrent objects (Herlihy and Wing). The words are close and the concepts unrelated. The rule adopted is: write "linearizability (concurrency)" in docs when there is any doubt, and never coin a control-flavoured name containing "linear".
 
@@ -465,7 +477,9 @@ A metaphor applied everywhere stops being a model and becomes a costume. The pro
 
 **The format keeps plain names.** The CRC is not an "integrity sensor" and the magic number is not a "calibration constant". Context C has no control analogue, and none is needed; forcing one would only obscure.
 
-**The POSIX names stay.** `FSWrite`, `FSFsync`, `FSRename`: these are the plant's own language. Actuation is the category; `FSFsync` is the command.
+**The POSIX names stay.** `FSWrite`, `FSFsync`, `FSRename`: these are storage's own language. Actuation is the category; `FSFsync` is the command.
+
+**"Plant" did not stay.** The one textbook term that was adopted and then dropped. It named nothing a storage engineer lacked a word for, so the code now says *storage* (see *Why the code says "storage", not "plant"* in §3a.9).
 
 **Crashes stay crashes.** A crash is a power-loss disturbance; a trip is a controller action. They have the same effect on the disk, and the simulator handles them with the same code path, but they are different *concepts*, and the vocabulary keeps them apart. (`Stats.Crashes` counts both, documented as "crashes, including Trips"; `Stats.Trips` counts the controller's own.)
 
@@ -484,11 +498,11 @@ Even a careful vocabulary has words that mean two things. The useful move is to 
 | Term | Meanings | Resolution |
 |---|---|---|
 | linearizability / linearization | concurrency correctness / small-signal approximation | Keep `Linearizable`; never use "linearize" for anything else. |
-| model | the plant model / the reference model | Always qualify: `PlantModel`, `refState`. |
+| model | the storage model / the reference model | Always qualify: `StorageModel`, `refState`. |
 | step | `Step()` / the simulator's step counter (`Result.Steps`, `Failure.Step`, log `#N`) / a request's protocol step (`reqStep`) / "step response" | Prose says "sim step #N" and "protocol step". |
 | phase | (formerly) the server lifecycle / the testbench timeline / ISA-88 phase | The controller has *modes*; "phase" is reserved for Chaos and Settling. |
 | loop | event loop / control loop / `loop.md` | Aligned: in `prod`, the event loop *is* the control loop (`toys3/prod/doc.go:14-15`). |
-| quiet / quiesce / quiescent | no new faults / clients pause / no pending ops | `QuietTail` became `Settling`; the other two keep their meanings; `PlantModel.SetQuiet` keeps "quiet" as a plant-side word. |
+| quiet / quiesce / quiescent | no new faults / clients pause / no pending ops | `QuietTail` became `Settling`; the other two keep their meanings; `StorageModel.SetQuiet` keeps "quiet" as a storage-side word. |
 | observer | state observer / GoF Observer | That is why `Oracle` was kept. |
 | trip / crash | self-initiated fail-stop / external power loss | Different words, same disk effect; `Stats.Crashes` counts both. |
 | seq | arrival seq (`request.seq`) / `Entry.Seq` / `InvSeq`, `RetSeq` | Prose qualifies each one. |
@@ -500,7 +514,7 @@ Even a careful vocabulary has words that mean two things. The useful move is to 
 
 **Behaviour.** Not one run changed. The trace hash of seed 1 is `1ca97eb77a9044e1` before and after; every one of 500 `DefaultConfig` seeds, 50 `BaseConfig` seeds and 14 mutant catches reproduces the same step count, random-draw count, trace hash and statistics. How that was proven (a golden file, a frozen hash encoding for telemetry, and a log comparison through a rename map) is a DST lesson in its own right, and Chapter 8 tells it in §8.12.
 
-**The package count, almost.** The proposal offered two layouts. The **Minimal** layout, which was implemented, has four packages: `control`, `format`, `sim`, `prod`. The **Full** layout would split `sim` further into `plant/`, `verify/` and `internal/mix` (for the shared hash helpers), making the contexts compiler-enforced. It was not done, for a reason worth remembering: in the Full layout three of the seven packages exist only to break import cycles that a single package does not have. The proposal's recommendation is to move to Full when a **second plant** (a simulated network, Chapter 17) or a **second controller** (a replica) arrives. Then `plant/` and `verify/` will each have two users, and the boundaries will pay for themselves. The `GroundTruth` ACL was built now precisely because it is the cheap first step toward that split.
+**The package count, almost.** The proposal offered two layouts. The **Minimal** layout, which was implemented, has four packages: `control`, `format`, `sim`, `prod`. The **Full** layout would split `sim` further into a storage-model package (`plant/` in the proposal), `verify/` and `internal/mix` (for the shared hash helpers), making the contexts compiler-enforced. It was not done, for a reason worth remembering: in the Full layout three of the seven packages exist only to break import cycles that a single package does not have. The proposal's recommendation is to move to Full when a **second controlled system** (a simulated network, Chapter 17) or a **second controller** (a replica) arrives. Then the storage-model package and `verify/` will each have two users, and the boundaries will pay for themselves. The `GroundTruth` ACL was built now precisely because it is the cheap first step toward that split.
 
 **Stats layout.** `Stats` is still one flat struct fed by four contexts. Its fields were renamed (`Halts` → `Trips`, `CorruptObjects` → `CorruptionsDetected`, the misspelt `Indetermined` → `Indeterminate`), and so were the printed keys (`trips=`, `corruptdet=`), so that the ubiquitous language reaches the output too.
 
@@ -513,7 +527,7 @@ The proposal ends with a self-assessment, reproduced here because it shows where
 | Ubiquitous language in code | 6/10: good protocol words; "core", "Fact" and "FakeFS" are technical | 9/10 |
 | Explicit bounded contexts | 4/10: four contexts in `sim`; format inside core | 7/10 (file-level in `sim`) |
 | Aggregate design | 8/10: a single-Step consistency boundary, already clean | 9/10: the interlock invariant is named |
-| Ports and adapters | 7/10: the Step port is excellent; the plant port is implicit | 9/10 |
+| Ports and adapters | 7/10: the Step port is excellent; the Storage port is implicit | 9/10 |
 | Domain events | 6/10: exist, unnamed as a concept, one not past tense | 9/10 |
 | ACLs at boundaries | 7/10: the HTTP ACL is good; monitors use the concrete fake FS | 9/10 with the `GroundTruth` ACL |
 
@@ -525,17 +539,17 @@ The highest "before" score is aggregate design. The architecture was right from 
 
 - A domain model is a set of names with homes and boundaries. Choosing them well is design work, and in toys3 it was done without changing a single behaviour.
 - toys3 has two core subdomains: durable object control (the controller) and, because the repository exists to teach DST, verification (the oracle and invariants).
-- Six bounded contexts: storage control (`control`), the plant (a port in `control`, two adapters), the object format (`format`, a shared kernel), verification, the testbench (both in `sim`, separated by file), and production (`prod`).
-- The context map names real relationships: Open Host Service and Published Language for `Step`, Conformist adapters for the plant, Customer/Supplier for the test seams, Shared Kernels for the format and the value encoding, ACLs for HTTP and for the monitors' view of the plant (`GroundTruth`).
+- Six bounded contexts: storage control (`control`), storage (a port in `control`, two adapters), the object format (`format`, a shared kernel), verification, the testbench (both in `sim`, separated by file), and production (`prod`).
+- The context map names real relationships: Open Host Service and Published Language for `Step`, Conformist adapters for storage, Customer/Supplier for the test seams, Shared Kernels for the format and the value encoding, ACLs for HTTP and for the monitors' view of storage (`GroundTruth`).
 - The `Controller` is the only aggregate, and one `Step` is its consistency boundary. The per-key queue is not an aggregate but a named invariant of it: the key interlock, enforced by the start permissive in `permitted`.
 - Telemetry is the controller's domain events, named in the past tense, published to any subscriber.
-- The control-theory reading is genuine: controller, plant, actuation, feedback, dead time, feedback delay, disturbances, plant model, telemetry, monitors, trip, interlock, permissive, modes, settling, reference model and state estimate all map onto existing code.
-- The metaphor stops where it would mislead: requests are not setpoints, linearizability is not linearization, `Oracle` and `Committed` keep their names, the format and POSIX names stay plain, and the published language shared with `loop.md` is untouched.
+- The control-theory reading is genuine: controller, storage (the textbook's plant), actuation, feedback, dead time, feedback delay, disturbances, storage model, telemetry, monitors, trip, interlock, permissive, modes, settling, reference model and state estimate all map onto existing code.
+- The metaphor stops where it would mislead: requests are not setpoints, linearizability is not linearization, `Oracle` and `Committed` keep their names, the format and POSIX names stay plain, and the published language shared with `loop.md` is untouched. One textbook word was dropped after the fact: "plant" became "storage", because a storage reader should not have to translate the name of the disk.
 
 ## Exercises
 
 1. **Draw your own context map.** Without looking at §3a.5, list every `import` of every non-test file in `toys3/control`, `toys3/format`, `toys3/sim` and `toys3/prod` (`go list -f '{{.ImportPath}}: {{.Imports}}' ./toys3/...`). Draw the package graph. Then mark which arrows are Shared Kernel, Conformist or Customer/Supplier relationships. Which relationships of §3a.5 are *not* visible as imports at all, and why? (Hint: three of the contexts share one package.)
-2. **Find the boundary violations the compiler cannot see.** Contexts B, D and E share package `sim`, so an invariant *could* call `v.(*Simulator).plant.Current()`. Write a short `go vet`-style check, or just a `grep`, that would flag any use of `PlantModel` methods from `invariant.go` or `oracle.go` other than through `GroundTruth`. Run it. Then explain what it would take to make the compiler enforce the same rule (the Full layout).
+2. **Find the boundary violations the compiler cannot see.** Contexts B, D and E share package `sim`, so an invariant *could* call `v.(*Simulator).storage.Current()`. Write a short `go vet`-style check, or just a `grep`, that would flag any use of `StorageModel` methods from `invariant.go` or `oracle.go` other than through `GroundTruth`. Run it. Then explain what it would take to make the compiler enforce the same rule (the Full layout).
 3. **Per-key aggregates, on paper.** Design the "ObjectLoop per key" alternative of §3a.6 in enough detail to handle COPY: what does a COPY of `a` to `b` do when `a`'s loop is busy and `b`'s is idle? Write down the messages between the two loops. Then identify the exact point where your design produces a different *action order* from the current controller for some input. That difference is why the refactor could not take this path while keeping the trace hash.
 4. **Name a missing concept.** The controller's `request` struct has a lifecycle (waiting → protocol steps → finished) but its "finished" state is implicit: the request is simply removed from `reqs`. Is there a control-theory or DDD name for the moment a request finishes? Would naming it (for example as a domain event) change anything observable? Argue both sides.
 5. **Try the forced metaphor.** Rename, in a scratch copy, `Request` to `Setpoint` and `Op` to `SetpointChange`. Read `onRequest` (`toys3/control/controller.go:150-183`) and the oracle's `apply` (`toys3/sim/oracle.go`) with the new names. Write down every sentence in the code or this book that becomes false or awkward. That list is the argument for KEEP.

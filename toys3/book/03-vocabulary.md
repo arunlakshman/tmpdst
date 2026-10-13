@@ -9,12 +9,12 @@ This chapter is a careful tour of every type in package `toys3/control` outside 
 - `types.go`: the scalar types of the controller (`Time`, `Duration`, `ClientReq`, `Status`)
 - `event.go`: `Event` and the controller's own `EventBody`s (`Started`, `Request`), including the `Op` set
 - `action.go`: the controller's own `Action`s (`Reply`, `Trip`, `Emit`)
-- `plant.go`: the **plant port**: the `Actuation` and `Feedback` interfaces, the seven filesystem commands (`FS*`), their seven completions (`FS*Done`), and the two scalars that belong to the plant (`IOID`, `ErrCode`)
+- `storage.go`: the **Storage port**: the `Actuation` and `Feedback` interfaces, the seven filesystem commands (`FS*`), their seven completions (`FS*Done`), and the two scalars that belong to storage (`IOID`, `ErrCode`)
 - `telemetry.go`: the three kinds of `Telemetry`
 - `env.go`: `Env`, `Rand`, `Site`, `Buggify`
 - `machine.go`: briefly, since Chapter 2 covered it
 
-The on-disk format (`Magic`, `Checksum`, `EncodeObject`, `EscapeKey`, `ObjPath`, ...) is not in this package at all any more. It lives in its own package, `toys3/format`, and Chapter 4 covers it. Chapter 3a explains why the split into `control`, `format` and a separate plant port is the right one; this chapter only needs the result. The file split itself teaches something: `event.go` and `action.go` now hold only what the *controller* talks about with its clients and its supervisor, while `plant.go` holds everything it says to, and hears from, the disk. When you want to know "what can the disk tell the controller?", you read one file.
+The on-disk format (`Magic`, `Checksum`, `EncodeObject`, `EscapeKey`, `ObjPath`, ...) is not in this package at all any more. It lives in its own package, `toys3/format`, and Chapter 4 covers it. Chapter 3a explains why the split into `control`, `format` and a separate Storage port is the right one; this chapter only needs the result. The file split itself teaches something: `event.go` and `action.go` now hold only what the *controller* talks about with its clients and its supervisor, while `storage.go` holds everything it says to, and hears from, the disk. When you want to know "what can the disk tell the controller?", you read one file.
 
 For each type we ask three questions: what does it mean, what does the server do with it, and how does it look in a simulator log. The logs are real: they come from replaying seed 1 (and, for one example, seed 18) of the default configuration with logging enabled. Chapter 16 shows how to produce such logs yourself.
 
@@ -38,7 +38,7 @@ func (Request) isEvent() {}
 ```
 
 ```go
-// toys3/control/plant.go:167-173
+// toys3/control/storage.go:167-173
 func (FSWriteDone) isEvent()    {}
 func (FSFsyncDone) isEvent()    {}
 func (FSRenameDone) isEvent()   {}
@@ -48,13 +48,13 @@ func (FSUnlinkDone) isEvent()   {}
 func (FSListDone) isEvent()     {}
 ```
 
-Because `isEvent` is unexported, no type outside package `control` can implement `EventBody`. The set is *closed*: there are exactly nine event bodies, and every one of them is listed in these two places (two in `event.go`, seven in `plant.go`). The same pattern defines `Op` (`isOp`, `toys3/control/event.go:30-53`), `Action` (`isAction`, `toys3/control/action.go:7`, `34-36` and `toys3/control/plant.go:151-157`) and `Telemetry` (`isTelemetry`, `toys3/control/telemetry.go:12` and `40-42`).
+Because `isEvent` is unexported, no type outside package `control` can implement `EventBody`. The set is *closed*: there are exactly nine event bodies, and every one of them is listed in these two places (two in `event.go`, seven in `storage.go`). The same pattern defines `Op` (`isOp`, `toys3/control/event.go:30-53`), `Action` (`isAction`, `toys3/control/action.go:7`, `34-36` and `toys3/control/storage.go:151-157`) and `Telemetry` (`isTelemetry`, `toys3/control/telemetry.go:12` and `40-42`).
 
 What the idiom gives you:
 
 - **A single place to read the whole vocabulary.** When you want to know everything that can happen to the server, you read `event.go`.
 - **Type switches as pattern matching.** `switch b := ev.Body.(type) { case Started: ... case Request: ... }` is how `Step` dispatches (`toys3/control/controller.go:113-118`).
-- **Sub-interfaces as categories.** A closed set can be carved into named subsets by a second interface that embeds the first. `plant.go` does exactly that: `Actuation` is "an `Action` that also has an `ID() IOID`", and `Feedback` is "an `EventBody` that also has an `ID() IOID`" (§3.4). A single type assertion, `ev.Body.(Feedback)`, then replaces a seven-way type switch.
+- **Sub-interfaces as categories.** A closed set can be carved into named subsets by a second interface that embeds the first. `storage.go` does exactly that: `Actuation` is "an `Action` that also has an `ID() IOID`", and `Feedback` is "an `EventBody` that also has an `ID() IOID`" (§3.4). A single type assertion, `ev.Body.(Feedback)`, then replaces a seven-way type switch.
 - **Value receivers.** All marker methods have value receivers, and all bodies are passed by value. An `FSWriteDone` is copied into and out of the interface; there are no pointers to share.
 
 What it does *not* give you: **exhaustiveness checking**. The Go compiler will not complain if a type switch forgets a case. toys3 compensates with defensive defaults. In the controller, a body that is neither `Started`, `Request` nor `Feedback` falls through to "ignore" (`toys3/control/controller.go:119-122`); an unrecognized `Op` gets a 400 (`toys3/control/controller.go:173-174`, exercised by `TestBadRequest` with a nil `Op`, `toys3/control/controller_test.go:259`). In the simulator, an unrecognized action is a protocol failure:
@@ -70,9 +70,9 @@ If you add a new action to `action.go` and forget to teach the simulator about i
 
 ---
 
-## 3.2 Scalar types (`types.go`, and two in `plant.go`)
+## 3.2 Scalar types (`types.go`, and two in `storage.go`)
 
-Four scalars live in `types.go`. Two more, `IOID` and `ErrCode`, live in `plant.go`, because they are part of the plant's vocabulary rather than the controller's: an `IOID` names one command to the disk, and an `ErrCode` is the disk's status word. We cover all six here, since they are all small.
+Four scalars live in `types.go`. Two more, `IOID` and `ErrCode`, live in `storage.go`, because they are part of storage's vocabulary rather than the controller's: an `IOID` names one command to the disk, and an `ErrCode` is the disk's status word. We cover all six here, since they are all small.
 
 ### `Time` and `Duration`
 
@@ -111,7 +111,7 @@ In logs, `fmtTime` renders it as milliseconds with six fractional digits (`toys3
 type ClientReq uint64
 ```
 
-The server never invents a `ClientReq`; it receives one on each `Request` and copies it onto the matching `Reply` and, for mutations, onto the `Committed` telemetry. In production, `Loop.Submit` assigns them from a mutex-protected counter starting at 1 (`toys3/prod/loop.go:123-126`). In simulation, `Workload.Issue` assigns them from `nextReq` (`toys3/sim/workload.go:93-94`).
+The server never invents a `ClientReq`; it receives one on each `Request` and copies it onto the matching `Reply` and, for mutations, onto the `Committed` telemetry. In production, `Loop.Submit` assigns them from a mutex-protected counter starting at 1 (`toys3/prod/loop.go:125-128`). In simulation, `Workload.Issue` assigns them from `nextReq` (`toys3/sim/workload.go:93-94`).
 
 "Unique within one runtime lifetime" matters in the simulator: the workload's counter is *not* reset when the server crashes, so request numbers are unique across all incarnations of one run. That is what lets the oracle use `ClientReq` as a key for the whole history (`Oracle.open`, `toys3/sim/oracle.go:42`), and what lets a value's bytes name the PUT that wrote it (Chapter 12): `value-of-26` means "written by request 26", unambiguously, for the whole run.
 
@@ -120,7 +120,7 @@ In logs: `c6` is `ClientReq(6)`.
 ### `IOID`
 
 ```go
-// toys3/control/plant.go:22-25
+// toys3/control/storage.go:22-25
 // IOID correlates a filesystem Action with its ...Done completion. The server
 // assigns IOIDs from a counter; they are unique within one incarnation, which
 // is enough because completions addressed to a dead incarnation are dropped.
@@ -147,7 +147,7 @@ The reuse is safe because a completion for incarnation 2's `io1` can never be de
 ### `ErrCode`
 
 ```go
-// toys3/control/plant.go:27-35
+// toys3/control/storage.go:27-35
 // ErrCode is a filesystem error as plain data, so events stay comparable and
 // hashable.
 type ErrCode uint8
@@ -163,7 +163,7 @@ Three values, deliberately. Why not use Go's `error`?
 
 - **`error` is an interface holding arbitrary values**, often pointers (`*fs.PathError`), often wrapping other errors. Two `error`s describing the same failure are not `==`. They cannot be hashed deterministically. They carry strings with paths and errno numbers that differ between platforms.
 - **The server only needs to distinguish what it acts on differently.** `ErrNotFound` drives 404s (GET, DELETE, COPY of a missing source) and is tolerated during recovery's unlinks. Everything else gets the same treatment: a 500, and possibly a `Trip` (Chapter 7). A richer error type would invite the server to make distinctions it has no basis for.
-- **`ErrIO` is pessimistic by definition.** The comment says "the operation may or may not have taken effect". That one phrase is the whole philosophy of the error policy. The PlantModel honours it adversarially: a failed rename is applied or not with probability ½ each (`toys3/sim/plantmodel.go:351-366`).
+- **`ErrIO` is pessimistic by definition.** The comment says "the operation may or may not have taken effect". That one phrase is the whole philosophy of the error policy. The StorageModel honours it adversarially: a failed rename is applied or not with probability ½ each (`toys3/sim/storagemodel.go:352-367`).
 
 Note that `OK` is the zero value. A completion constructed without an `Err` field, like `FSWriteDone{IO: x.IO}`, is a success. The mutants rely on this to fabricate successes (`fakeOK`, `toys3/sim/mutants_test.go:19-33`).
 
@@ -171,8 +171,8 @@ The production adapter maps OS errors onto these three values in exactly one pla
 
 ```go
 // toys3/prod/executor.go:101-113
-// code maps an os error to a control.ErrCode, logging real I/O errors (the core
-// only sees the code).
+// code maps an os error to a control.ErrCode, logging real I/O errors (the
+// controller only sees the code).
 func code(err error) control.ErrCode {
 	switch {
 	case err == nil:
@@ -186,7 +186,7 @@ func code(err error) control.ErrCode {
 }
 ```
 
-`String()` renders the codes as `OK`, `ENOENT`, `EIO` (`toys3/control/plant.go:37-47`), which is what you see in logs: `FSReadDone{io4 ENOENT nil}`, `FSFsyncDone{io78 EIO}`.
+`String()` renders the codes as `OK`, `ENOENT`, `EIO` (`toys3/control/storage.go:37-47`), which is what you see in logs: `FSReadDone{io4 ENOENT nil}`, `FSFsyncDone{io78 EIO}`.
 
 ### `Status`
 
@@ -216,7 +216,7 @@ The HTTP handler maps `Status` straight onto the HTTP status code (`w.WriteHeade
 
 ---
 
-## 3.3 Events (`event.go`, plus the completions in `plant.go`)
+## 3.3 Events (`event.go`, plus the completions in `storage.go`)
 
 ### The envelope: `Event`
 
@@ -305,12 +305,12 @@ In logs, `DescribeOp` (`toys3/sim/log.go:11-27`) renders each op; for a PUT whos
 
 Step 9 is the workload's deliberate invalid request (an empty key, `toys3/sim/workload.go:109-114`), answered with 400 in the same step, before the server has even finished recovery. Validation needs no I/O, so the server does it immediately (`toys3/control/controller.go:150-175`); invalid requests never enter the queue.
 
-### The seven completions (feedback from the plant)
+### The seven completions (feedback from storage)
 
-Every FS action has exactly one completion type, carrying the same `IO` and an `Err`. They are defined in `plant.go`, because each one is the plant's answer to one command; §3.5 shows the interface, `Feedback`, that names them as a group:
+Every FS action has exactly one completion type, carrying the same `IO` and an `Err`. They are defined in `storage.go`, because each one is storage's answer to one command; §3.5 shows the interface, `Feedback`, that names them as a group:
 
 ```go
-// toys3/control/plant.go:103-149 (abridged to the doc comments and fields)
+// toys3/control/storage.go:103-149 (abridged to the doc comments and fields)
 // FSWriteDone completes FSWrite. On ErrIO the file may hold any prefix of Data.
 type FSWriteDone struct { IO IOID; Err ErrCode }
 
@@ -335,24 +335,24 @@ type FSUnlinkDone struct { IO IOID; Err ErrCode }
 type FSListDone struct { IO IOID; Names []string; Err ErrCode }
 ```
 
-Each doc comment is a statement about **what the server may assume after an error**, and each is matched by what the PlantModel actually does (Chapter 11):
+Each doc comment is a statement about **what the server may assume after an error**, and each is matched by what the StorageModel actually does (Chapter 11):
 
-| Completion | On `ErrIO` the server may assume... | PlantModel behaviour on a planned failure |
+| Completion | On `ErrIO` the server may assume... | StorageModel behaviour on a planned failure |
 |---|---|---|
-| `FSWriteDone` | the file holds *any prefix* of the data (including nothing, or not existing) | one of: nothing happened; file created/truncated empty; a random prefix written (`toys3/sim/plantmodel.go:298-307`) |
-| `FSFsyncDone` | *nothing* is known to be durable | nothing becomes durable; with `FsyncGate`, the inode is poisoned so later fsyncs lie (`toys3/sim/plantmodel.go:330-335`) |
-| `FSRenameDone` | the rename *may or may not* have happened | applied or not, 50/50 (`toys3/sim/plantmodel.go:351-366`) |
-| `FSFsyncDirDone` | nothing about the directory is durable | nothing becomes durable (`toys3/sim/plantmodel.go:374-376`) |
-| `FSReadDone` | nothing (no data) | no effect (`toys3/sim/plantmodel.go:391-393`) |
-| `FSUnlinkDone` | the unlink *may or may not* have happened | applied or not, 50/50 (`toys3/sim/plantmodel.go:411-420`) |
-| `FSListDone` | nothing (no names) | no effect (`toys3/sim/plantmodel.go:428-430`) |
+| `FSWriteDone` | the file holds *any prefix* of the data (including nothing, or not existing) | one of: nothing happened; file created/truncated empty; a random prefix written (`toys3/sim/storagemodel.go:299-308`) |
+| `FSFsyncDone` | *nothing* is known to be durable | nothing becomes durable; with `FsyncGate`, the inode is poisoned so later fsyncs lie (`toys3/sim/storagemodel.go:331-336`) |
+| `FSRenameDone` | the rename *may or may not* have happened | applied or not, 50/50 (`toys3/sim/storagemodel.go:352-367`) |
+| `FSFsyncDirDone` | nothing about the directory is durable | nothing becomes durable (`toys3/sim/storagemodel.go:375-377`) |
+| `FSReadDone` | nothing (no data) | no effect (`toys3/sim/storagemodel.go:392-394`) |
+| `FSUnlinkDone` | the unlink *may or may not* have happened | applied or not, 50/50 (`toys3/sim/storagemodel.go:412-421`) |
+| `FSListDone` | nothing (no names) | no effect (`toys3/sim/storagemodel.go:429-431`) |
 
-`ErrNotFound`, by contrast, is never injected by chance: "Missing paths complete with ErrNotFound (never by chance)" (`toys3/sim/plantmodel.go:164`). The PlantModel returns it only when the path really is absent in the current view, even when the plan said to fail (`TestPlantModelEIOMayOrMayNotApply` checks this at `toys3/sim/plantmodel_test.go:151-154`). That asymmetry matters: the server treats `ErrNotFound` as a *definite* answer (404), so it must be truthful.
+`ErrNotFound`, by contrast, is never injected by chance: "Missing paths complete with ErrNotFound (never by chance)" (`toys3/sim/storagemodel.go:165`). The StorageModel returns it only when the path really is absent in the current view, even when the plan said to fail (`TestStorageModelEIOMayOrMayNotApply` checks this at `toys3/sim/storagemodel_test.go:151-154`). That asymmetry matters: the server treats `ErrNotFound` as a *definite* answer (404), so it must be truthful.
 
 Two details about the data-carrying completions:
 
-- **`FSReadDone.Data` is the raw file, header included.** The server, not the filesystem, validates the header and CRC with `DecodeObject` (`toys3/control/controller.go:289-292`). The PlantModel's read may flip one bit in the returned copy (`ReadCorruptProb`), which only the CRC can detect. The doc says `nil` on error; on success with an empty file, the PlantModel returns `[]byte{}`, not `nil` (`toys3/sim/plantmodel.go:394-397`), and `DecodeObject` rejects it as too short.
-- **`FSListDone.Names` are sorted.** Sorting is part of the contract so that recovery's unlinks are issued in a deterministic order. The PlantModel lists via its sorted name cache (`toys3/sim/plantmodel.go:431-437`); production relies on `os.ReadDir`, which returns entries sorted by file name (`toys3/prod/executor.go:61`).
+- **`FSReadDone.Data` is the raw file, header included.** The server, not the filesystem, validates the header and CRC with `DecodeObject` (`toys3/control/controller.go:289-292`). The StorageModel's read may flip one bit in the returned copy (`ReadCorruptProb`), which only the CRC can detect. The doc says `nil` on error; on success with an empty file, the StorageModel returns `[]byte{}`, not `nil` (`toys3/sim/storagemodel.go:395-398`), and `DecodeObject` rejects it as too short.
+- **`FSListDone.Names` are sorted.** Sorting is part of the contract so that recovery's unlinks are issued in a deterministic order. The StorageModel lists via its sorted name cache (`toys3/sim/storagemodel.go:432-438`); production relies on `os.ReadDir`, which returns entries sorted by file name (`toys3/prod/executor.go:61`).
 
 In logs, `DescribeEvent` (`toys3/sim/log.go:47-69`) renders completions compactly. A selection from seed 1:
 
@@ -376,7 +376,7 @@ In logs, `DescribeEvent` (`toys3/sim/log.go:47-69`) renders completions compactl
 
 ---
 
-## 3.4 Actions (`action.go`, plus the filesystem commands in `plant.go`)
+## 3.4 Actions (`action.go`, plus the filesystem commands in `storage.go`)
 
 ```go
 // toys3/control/action.go:3-7
@@ -408,10 +408,10 @@ In logs, a reply with a body shows the writer: `Reply{c7 200 value-of-6}`.
 
 ### The seven filesystem actions (actuations)
 
-These are defined in `plant.go` too; §3.5 introduces `Actuation`, the interface they share. The paragraph that introduces them is a compact statement of POSIX durability, and Chapter 4 is an extended commentary on it:
+These are defined in `storage.go` too; §3.5 introduces `Actuation`, the interface they share. The paragraph that introduces them is a compact statement of POSIX durability, and Chapter 4 is an extended commentary on it:
 
 ```go
-// toys3/control/plant.go:49-54
+// toys3/control/storage.go:49-54
 // ---- filesystem ----
 //
 // Paths are slash-separated and absolute under Config.Dir (see ObjPath,
@@ -423,7 +423,7 @@ These are defined in `plant.go` too; §3.5 introduces `Actuation`, the interface
 Two separate durability domains: **file contents** (made durable by `FSFsync` of the file) and **directory entries** (made durable by `FSFsyncDir` of the directory containing them). Every action's doc comment says which domain it touches:
 
 ```go
-// toys3/control/plant.go:56-101 (abridged)
+// toys3/control/storage.go:56-101 (abridged)
 // FSWrite creates Path, or truncates it if it exists, and writes Data as the
 // whole file content. Creating the entry is a directory change (needs
 // FSFsyncDir to be durable); the content needs FSFsync.
@@ -465,7 +465,7 @@ Some observations that matter later:
   ```
 
   This is harmless for the correct server (recovery unlinks the extra name, which leaves `obj/k1` intact) and fatal for mutant (f). Chapters 5, 11 and 15 return to it.
-- **`FSFsyncDir` applies to every entry in the directory**, not just the one you care about. In the PlantModel it copies the current version of every entry to durable (`toys3/sim/plantmodel.go:377-381`). On real filesystems this is the semantics of `fsync` on a directory file descriptor.
+- **`FSFsyncDir` applies to every entry in the directory**, not just the one you care about. In the StorageModel it copies the current version of every entry to durable (`toys3/sim/storagemodel.go:378-382`). On real filesystems this is the semantics of `fsync` on a directory file descriptor.
 - **`FSList` exists only for recovery.** No client operation lists anything (there is no ListObjects).
 
 In logs, paths appear in full: `FSRename{io12 /data/tmp/0000000000000007 -> /data/obj/k2}`. The simulator's data directory is `/data` (`toys3/sim/config.go:173`).
@@ -517,22 +517,22 @@ In the simulator, each telemetry value is appended to a timeline, stamped with t
 
 ---
 
-## 3.5 The plant port (`plant.go`)
+## 3.5 The Storage port (`storage.go`)
 
 The fourteen filesystem types above have something in common that the type system, until the refactor, did not say: every one of them has an `IO IOID` field, and every command is paired with exactly one completion carrying the same `IO`. Before the refactor, code that needed "the IOID of this thing, if it is a filesystem thing" had to spell out a seven-way type switch. There were five such switches: one in the controller (`ioOf`), one inside the controller's `issue` helper, one in each of two test harnesses (`ioOfAction`), and one in the simulator's `deliver` that listed all seven command types in a `case`. Adding an eighth filesystem operation meant finding and editing all five.
 
-`plant.go` now names the two groups:
+`storage.go` now names the two groups:
 
 ```go
-// toys3/control/plant.go:8-20
-// Actuation is a filesystem Action: a command to the plant. Its result
+// toys3/control/storage.go:8-20
+// Actuation is a filesystem Action: a command to storage. Its result
 // returns as the Feedback event with the same ID.
 type Actuation interface {
 	Action
 	ID() IOID
 }
 
-// Feedback is a filesystem completion event: the plant's answer to the
+// Feedback is a filesystem completion event: storage's answer to the
 // Actuation with the same ID.
 type Feedback interface {
 	EventBody
@@ -543,7 +543,7 @@ type Feedback interface {
 and gives every filesystem type a one-line `ID()` method:
 
 ```go
-// toys3/control/plant.go:159-165
+// toys3/control/storage.go:159-165
 func (a FSWrite) ID() IOID    { return a.IO }
 func (a FSFsync) ID() IOID    { return a.IO }
 func (a FSRename) ID() IOID   { return a.IO }
@@ -553,7 +553,7 @@ func (a FSUnlink) ID() IOID   { return a.IO }
 func (a FSList) ID() IOID     { return a.IO }
 ```
 
-(and the same seven lines for the `...Done` types at `toys3/control/plant.go:175-181`). Two compile-time assertions at the end of the file (`toys3/control/plant.go:183-186`) make sure at least one type of each kind satisfies its interface, so a typo in a method signature fails the build rather than silently dropping a type out of the group.
+(and the same seven lines for the `...Done` types at `toys3/control/storage.go:175-181`). Two compile-time assertions at the end of the file (`toys3/control/storage.go:183-186`) make sure at least one type of each kind satisfies its interface, so a typo in a method signature fails the build rather than silently dropping a type out of the group.
 
 Why a method called `ID` and not `IO`? Because the field is already called `IO`, and Go does not allow a field and a method with the same name on one type. Renaming the field to `ID` would have changed every struct literal in the book, the tests and the logs (`FSWrite{IO: ...}`); naming the method `ID()` changed nothing that already existed. That is a small example of a principle the refactor followed throughout: *add names, do not move data*.
 
@@ -566,9 +566,9 @@ Where the port is used:
 | `case control.FSWrite, control.FSFsync, ... , control.FSList:` in the simulator | `case control.Actuation:` (`toys3/sim/simulator.go:187`) |
 | `ioOfAction` in two test harnesses | a three-line type assertion to `Actuation` (`toys3/control/controller_test.go:147-152`, `toys3/sim/mutants_test.go:269-274`) |
 
-Why "actuation" and "feedback"? Chapter 3a develops the metaphor in full; the short version is that the controller never touches the disk, it only *commands* it, and the disk *reports back*. In control engineering the commands a controller sends to the thing it controls are actuations, the thing being controlled is the plant, and what comes back is feedback. The word "port" is from hexagonal architecture (ports and adapters): the controller owns the interface, and two adapters implement it, `prod.OSExecutor` on a real disk (Chapter 9) and `sim.PlantModel` in simulation (Chapter 11). Note who owns what: the port is defined in package `control`, not in the packages that implement it. The adapters conform to the controller's language, not the other way round.
+Why "actuation" and "feedback"? Chapter 3a develops the metaphor in full; the short version is that the controller never touches the disk, it only *commands* it, and the disk *reports back*. In control engineering the commands a controller sends to the thing it controls are actuations, the thing being controlled is the *plant* (in toys3, storage), and what comes back is feedback. The word "port" is from hexagonal architecture (ports and adapters): the controller owns the interface, and two adapters implement it, `prod.OSExecutor` on a real disk (Chapter 9) and `sim.StorageModel` in simulation (Chapter 11). Note who owns what: the port is defined in package `control`, not in the packages that implement it. The adapters conform to the controller's language, not the other way round.
 
-The POSIX names (`FSWrite`, `FSFsync`, `FSRename`, ...) were deliberately *not* renamed. They are the plant's own language; "actuation" is the category, `FSFsync` is the command. A control engineer does not rename a valve's "open" command to "actuate".
+The POSIX names (`FSWrite`, `FSFsync`, `FSRename`, ...) were deliberately *not* renamed. They are storage's own language; "actuation" is the category, `FSFsync` is the command. A control engineer does not rename a valve's "open" command to "actuate".
 
 ---
 
@@ -580,7 +580,7 @@ The POSIX names (`FSWrite`, `FSFsync`, `FSRename`, ...) were deliberately *not* 
 // for supervisory monitoring. They describe what the controller believes and
 // have no effect on behavior. Any number of subscribers may read them:
 // production logs them; the simulator's monitors (invariants) check those
-// beliefs against ground truth (the plant model's durable state and the
+// beliefs against ground truth (the storage model's durable state and the
 // client-visible history), and its coverage stats count them. A telemetry
 // value may carry fields only a monitor needs (Committed.Sum).
 //
@@ -602,7 +602,7 @@ Three phrases in that comment were added by the refactor, and each one carries a
 // toys3/control/telemetry.go:14-24
 // Committed is emitted immediately before the 200 Reply of a PUT, COPY or
 // DELETE, at the moment the controller believes the mutation is durable. The
-// simulator checks it against the plant model's durable state on the same
+// simulator checks it against the storage model's durable state on the same
 // step ("acked implies durable"), which catches a missing fsync without
 // waiting for a crash to expose it.
 type Committed struct {
@@ -613,7 +613,7 @@ type Committed struct {
 }
 ```
 
-This is the most powerful telemetry signal in the system. Without it, the only way to detect "acked but not durable" would be to wait for a crash that happens to lose the change and a later read that happens to notice. With it, the `AckedIsDurable` invariant can look at the PlantModel's *durable* view at the instant of the ack (`toys3/sim/invariant.go:139-165`): if `obj/k2` has no durable entry, or its durable content does not decode to a payload with CRC `Sum`, the server lied, and the run fails *on that step*, without any crash at all. That is why mutants (a) and (c) are caught at seed 1, step 46 and 42 respectively (Chapter 15).
+This is the most powerful telemetry signal in the system. Without it, the only way to detect "acked but not durable" would be to wait for a crash that happens to lose the change and a later read that happens to notice. With it, the `AckedIsDurable` invariant can look at the StorageModel's *durable* view at the instant of the ack (`toys3/sim/invariant.go:139-165`): if `obj/k2` has no durable entry, or its durable content does not decode to a payload with CRC `Sum`, the server lied, and the run fails *on that step*, without any crash at all. That is why mutants (a) and (c) are caught at seed 1, step 46 and 42 respectively (Chapter 15).
 
 The server emits it in `commit`, right before the reply, in the same `Step` (`toys3/control/controller.go:255-262`). In logs: `Emit{Committed{c6 "k2" crc=9b35c638}} Reply{c6 200}`; for a delete, `Committed{c56 delete "k0"}` (`DescribeTelemetry`, `toys3/sim/log.go:102-116`).
 
@@ -660,7 +660,7 @@ Emitted by GET or COPY when `DecodeObject` rejects the file (`toys3/control/cont
 ```go
 // toys3/control/env.go:3-26
 // Env is injected into the server at construction. It is the only way
-// nondeterminism enters the control. Time is NOT here: it arrives on each Event.
+// nondeterminism enters the controller. Time is NOT here: it arrives on each Event.
 type Env interface {
 	Rand
 	Buggify
@@ -704,7 +704,7 @@ Because `&&` short-circuits, **it consumes a random draw only when buggify is en
 
 ### The surprise: the server never uses `Env`
 
-`Controller.env` is assigned in `New` (`toys3/control/controller.go:104-106`) and never read. There is no `s.env.` anywhere in `controller.go`, no call to `Maybe` anywhere in `toys3/control`, and no `Uint64`/`Intn` either. The unit-test environment admits it: "a fixed control.Env (the server does not draw randomness today)" (`toys3/control/controller_test.go:14`). `DESIGN.md` says "Randomness and buggify come from the injected `Env`" (`toys3/DESIGN.md:84`), which is true of the plumbing and not yet of the behaviour.
+`Controller.env` is assigned in `New` (`toys3/control/controller.go:104-106`) and never read. There is no `s.env.` anywhere in `controller.go`, no call to `Maybe` anywhere in `toys3/control`, and no `Uint64`/`Intn` either. The unit-test environment admits it: "a fixed control.Env (the server does not draw randomness today)" (`toys3/control/controller_test.go:14`). `DESIGN.md` says "Randomness and buggify come from the injected `Env`" (`toys3/DESIGN.md:86`), which is true of the plumbing and not yet of the behaviour.
 
 Why keep it? Because adding a buggify site later should be cheap and should not require changing every runtime. And it is a good exercise to think about *where* one would go. The `Buggify` doc suggests an example: "process the queue in a different legal order". In toys3, `startPermitted` starts every runnable request in arrival order (`toys3/control/controller.go:205-213`); a buggify point could start them in reverse order, which is equally legal because runnable requests touch disjoint keys. Exercise 5 asks you to add exactly that and see what it does to the trace hashes.
 
@@ -756,17 +756,17 @@ Anything outside the vocabulary (a slow `Step`, a server that allocates unbounde
 
 - The vocabulary is closed (unexported marker methods) so the whole interface can be read in three files; Go does not check type switches for exhaustiveness, so both server and simulator have defensive defaults, and the simulator's default is to fail loudly.
 - `ClientReq` is unique for a whole run and names writers; `IOID` is unique only within an incarnation, which is safe for routing but leaks into temp file names.
-- `ErrCode` has three values on purpose. `ErrIO` always means "may or may not have taken effect", and the PlantModel realizes both possibilities. `ErrNotFound` is never injected by chance.
+- `ErrCode` has three values on purpose. `ErrIO` always means "may or may not have taken effect", and the StorageModel realizes both possibilities. `ErrNotFound` is never injected by chance.
 - File contents and directory entries are separate durability domains, made durable by `FSFsync` and `FSFsyncDir` respectively. The server never fsyncs `tmp/` after a rename, so temp names can resurrect after a crash.
 - `Trip` is an action, ordered after the 500 it accompanies, and must be last.
-- The filesystem commands and completions are the plant port: `Actuation` and `Feedback`, each with an `ID() IOID`. The port is owned by the controller and implemented by two adapters, one real and one simulated.
+- The filesystem commands and completions are the Storage port: `Actuation` and `Feedback`, each with an `ID() IOID`. The port is owned by the controller and implemented by two adapters, one real and one simulated.
 - Telemetry is the controller's published beliefs (domain events, past tense); `Committed` lets the simulator check "acked implies durable" at the moment of the ack, without waiting for a crash.
 - `Env` is plumbed through but unused by the server today; adding the first buggify site will change every trace.
 
 ## Exercises
 
-1. **Exhaustiveness by hand.** Add a new action `FSTruncate{IO IOID; Path string}` to `toys3/control/plant.go` (with its `isAction` marker but *without* an `ID()` method) in a scratch copy, make the server emit it at the start of every PUT, and run `go test ./toys3/sim -run TestSeeds -seed=1 -v`. Predict which invariant fails and with what message before running. (Answer: the `protocol` default in `deliver`, because without `ID()` the action is not an `Actuation`.) Now add the `ID()` method and run again. What changes? (Now `deliver` hands it to the plant model, and `PlantModel.Land` panics with "not a filesystem action": the plant adapter, not the port, is where an unimplemented command is discovered.) Revert.
-2. **ErrNotFound must be honest.** In a scratch copy, change `PlantModel.read` so that a planned failure on an existing file returns `ErrNotFound` instead of `ErrIO`. Predict which invariant catches this (think about what a 404 means to the oracle), then run `go test ./toys3/sim -run 'TestSeeds$' -seeds=50`. Revert.
+1. **Exhaustiveness by hand.** Add a new action `FSTruncate{IO IOID; Path string}` to `toys3/control/storage.go` (with its `isAction` marker but *without* an `ID()` method) in a scratch copy, make the server emit it at the start of every PUT, and run `go test ./toys3/sim -run TestSeeds -seed=1 -v`. Predict which invariant fails and with what message before running. (Answer: the `protocol` default in `deliver`, because without `ID()` the action is not an `Actuation`.) Now add the `ID()` method and run again. What changes? (Now `deliver` hands it to the storage model, and `StorageModel.Land` panics with "not a filesystem action": the storage adapter, not the port, is where an unimplemented command is discovered.) Revert.
+2. **ErrNotFound must be honest.** In a scratch copy, change `StorageModel.read` so that a planned failure on an existing file returns `ErrNotFound` instead of `ErrIO`. Predict which invariant catches this (think about what a 404 means to the oracle), then run `go test ./toys3/sim -run 'TestSeeds$' -seeds=50`. Revert.
 3. **Read the log fluently.** `TestSeeds -seed=N` prints the event log only when the seed fails, so to read a passing seed's log you need a few lines of Go that set `cfg.Log = true` and print `sim.FormatLog(r.Log)` (Chapter 16 shows a ready-made program; any package that imports `manifester/toys3/sim` will do). Produce the log for seed 1. Find the first `Trip` in the log. Write down: the request that got the 500, the IOID that failed, which protocol step it was, and how many queued entries the crash dropped.
 4. **The missing corruption.** In the 200-seed run, `readcorrupt=71` but `corruptdet=70`. Using the simulator's code (`KindFSLand` handling at `toys3/sim/simulator.go:134-145` and `crash` at `toys3/sim/simulator.go:276-307`), explain how a corrupted read can be counted without the server ever seeing it. Then find a seed where it happens: loop over seeds with the scratch tracer and compare the two counters per seed.
 5. **Your first buggify site.** In a scratch copy, change `startPermitted` (`toys3/control/controller.go:205-213`) to iterate `s.reqs` in reverse when `s.env.Maybe("startPermitted/reverse")` is true. (You will need to collect runnable requests first, since `start` does not change membership of `s.reqs`.) Run `go test ./toys3/sim -run TestDeterminismCanary` and `go test ./toys3/sim -run 'TestSeeds$' -seeds=200`. Does determinism still hold? Do any seeds fail? Did the trace hash of seed 1 change? Explain why it must have.

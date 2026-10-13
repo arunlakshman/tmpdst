@@ -98,7 +98,7 @@ This does not mean the system under test cannot be concurrent. toys3's server ha
 
 ### Ingredient 2: simulated I/O and time
 
-Every interaction with the outside world (disk, network, clock) goes through an interface the simulator can implement. In toys3 this interface is not a Go interface like `type FS interface { Write(...) }`. It is the **vocabulary of Actions and Events**: the server returns `FSWrite{IO: 7, Path: ..., Data: ...}` as a plain value and later receives `FSWriteDone{IO: 7, Err: OK}` as a plain value. Who actually performs the write (the real `os` package in production, the `PlantModel` in simulation) is invisible to the server. Chapter 2 explains why this "sans-I/O" shape is more powerful than a mocked interface.
+Every interaction with the outside world (disk, network, clock) goes through an interface the simulator can implement. In toys3 this interface is not a Go interface like `type FS interface { Write(...) }`. It is the **vocabulary of Actions and Events**: the server returns `FSWrite{IO: 7, Path: ..., Data: ...}` as a plain value and later receives `FSWriteDone{IO: 7, Err: OK}` as a plain value. Who actually performs the write (the real `os` package in production, the `StorageModel` in simulation) is invisible to the server. Chapter 2 explains why this "sans-I/O" shape is more powerful than a mocked interface.
 
 Time is simulated the same way: the server never calls `time.Now()`. Every event arrives stamped with a time (`control.Event.At`, `toys3/control/event.go:5-8`), and in simulation that time is the virtual clock.
 
@@ -108,11 +108,11 @@ Every random choice in a run (how long an fsync takes to land and to be reported
 
 ```
 seed ──► Rand ──┬──► queue tie-breaks         (Queue.Schedule)
-                ├──► FS dead time, feedback   (PlantModel.Plan)
+                ├──► FS dead time, feedback   (StorageModel.Plan)
                 │    delay, EIO plan
                 ├──► crash coin                (Simulator.maybeCrash)
-                ├──► crash resolution          (PlantModel.Crash)
-                ├──► writeback, read bit-flips (PlantModel.Land / read)
+                ├──► crash resolution          (StorageModel.Crash)
+                ├──► writeback, read bit-flips (StorageModel.Land / read)
                 ├──► client think time, ops    (Workload)
                 └──► server Env                (env.Uint64 / Intn / Maybe)
 ```
@@ -129,7 +129,7 @@ If the three ingredients hold, then **the run is a pure function of the seed** (
 It is worth being precise about the limits, because over-claiming is the fastest way to lose trust in a test suite.
 
 - **DST does not test your real I/O layer.** The production executor (`toys3/prod/executor.go`) is not exercised by the simulator. If `OSExecutor` mapped `ENOENT` to `ErrIO` by mistake, no seed would notice. That is why the production layer must be *thin* (loop.md, rule 10) and separately tested (`toys3/prod/prod_test.go`).
-- **DST tests against a model of the world, not the world.** If the PlantModel is more forgiving than ext4, bugs that ext4 would expose go unnoticed. If it is *less* forgiving than ext4 (and toys3's PlantModel is deliberately less forgiving in some respects, see Chapter 11), you may defend against failures that real systems do not exhibit. That is usually the right trade.
+- **DST tests against a model of the world, not the world.** If the StorageModel is more forgiving than ext4, bugs that ext4 would expose go unnoticed. If it is *less* forgiving than ext4 (and toys3's StorageModel is deliberately less forgiving in some respects, see Chapter 11), you may defend against failures that real systems do not exhibit. That is usually the right trade.
 - **DST finds bugs; it does not prove their absence.** A million passing seeds is strong evidence, not proof. Mutation testing (Chapter 15) is how you measure how strong.
 - **DST needs invariants.** A simulator without a good oracle just generates very fast, very reproducible runs that nobody checks. Half of the value in toys3 is in `oracle.go` and `invariant.go`.
 
@@ -145,15 +145,15 @@ Here is the whole picture, which the rest of the book fills in.
                         │   ▼                                                                             │
                         │  KindClientWake ──► Workload.Issue ──► Oracle.Invoke ──► schedule Deliver(Req)  │
                         │  KindDeliver ─────► control.Controller.Step(Event) ──► []Action                 │
-                        │                        │ FS*   ──► PlantModel.Plan ──► schedule FSLand          │
+                        │                        │ FS*   ──► StorageModel.Plan ──► schedule FSLand        │
                         │                        │ Reply ──► Oracle.Return, Workload.Complete             │
                         │                        │ Emit  ──► telemetry timeline                           │
                         │                        │ Trip  ──► crash                                        │
-                        │  KindFSLand ──────► PlantModel.Land ──► schedule Deliver(...Done)               │
-                        │  KindCrash/Trip ──► PlantModel.Crash, Queue.DropIncarnation, Oracle.Crash       │
+                        │  KindFSLand ──────► StorageModel.Land ──► schedule Deliver(...Done)             │
+                        │  KindCrash/Trip ──► StorageModel.Crash, Queue.DropIncarnation, Oracle.Crash     │
                         │  KindRestart ─────► Factory(env, cfg) ──► schedule Deliver(Started)             │
                         │                                                                                 │
-                        │  after every step: trace = Fold(trace, StateHash, plant hash, ...)              │
+                        │  after every step: trace = Fold(trace, StateHash, storage hash, ...)            │
                         │                    invariants: no-corrupt-reads, acked-is-durable,              │
                         │                                obj-never-torn, linearizable, liveness           │
                         └─────────────────────────────────────────────────────────────────────────────────┘
@@ -161,7 +161,7 @@ Here is the whole picture, which the rest of the book fills in.
 
 The same `control.Controller` runs in production inside `prod.Loop` (Chapter 9), with real goroutines executing real `os` calls and an HTTP handler feeding requests in. The server cannot tell the difference, because the only things it ever sees are Events.
 
-If you have a background in control engineering, this picture will look familiar, and it is meant to: the server is a *controller* in a feedback loop around a *plant* (the disk), the simulator is a *software-in-the-loop testbench* that replaces the real plant with a *plant model* and injects *disturbances*, and the invariants are *monitors*. Chapter 3a develops that reading carefully, and the code uses its names.
+If you have a background in control engineering, this picture will look familiar, and it is meant to: the server is a *controller* in a feedback loop around the disk (what a control textbook calls the *plant*, and what toys3 simply calls *storage*), the simulator is a *software-in-the-loop testbench* that replaces real storage with a *storage model* and injects *disturbances*, and the invariants are *monitors*. Chapter 3a develops that reading carefully, and the code uses its names.
 
 ## 1.8 Why a toy?
 

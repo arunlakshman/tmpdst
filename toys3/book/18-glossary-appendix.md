@@ -2,7 +2,7 @@
 
 This chapter is reference material. The glossary defines every term the book uses with a specific meaning, with pointers into the code, including the domain-model and control-theory vocabulary of Chapter 3a. The appendices collect the tables you will want open while working: commands, a file index with key symbols and line numbers, the invariant and mutation tables cross-referenced to chapters, the error policy, the `Stats` fields, the log format, and a table of every name the domain-driven-design refactor changed.
 
-Line numbers refer to commit `a4018d5`. Appendix G maps every name the refactor of Chapter 3a changed from its old spelling to its new one.
+Line numbers refer to commit `10777a2`. Appendix G maps every name the refactor of Chapter 3a (and the later plant → storage rename) changed from its old spelling to its new one.
 
 ---
 
@@ -10,15 +10,15 @@ Line numbers refer to commit `a4018d5`. Appendix G maps every name the refactor 
 
 **Abandoned.** The `Outcome` of a request that was outstanding when the server crashed or tripped (`toys3/sim/history.go:20`). The client never learned what happened. For the oracle, an abandoned mutation may take effect at one instant in `[Invoke, crash]` or never; an abandoned read constrains nothing. Set by `Oracle.Crash` (`oracle.go:108-118`). Counted in `Stats.Indeterminate`. Chapters 10, 13.
 
-**Acked-is-durable.** Invariant (b), checked eagerly by `AckedIsDurable` (`toys3/sim/invariant.go:79-85, 138-166`): on the step a `Committed` telemetry is emitted, the key's file in the plant's *durable* view (read through `GroundTruth`) must exist and carry the committed checksum (or be absent, for a delete). An estimate-versus-true-state check: the controller's claim against ground truth. Catches a missing fsync without waiting for a crash. Chapter 14.
+**Acked-is-durable.** Invariant (b), checked eagerly by `AckedIsDurable` (`toys3/sim/invariant.go:79-85, 138-166`): on the step a `Committed` telemetry is emitted, the key's file in the *durable* view of storage (read through `GroundTruth`) must exist and carry the committed checksum (or be absent, for a delete). An estimate-versus-true-state check: the controller's claim against ground truth. Catches a missing fsync without waiting for a crash. Chapter 14.
 
-**Action.** An output of `Step`: a request for the runtime to do something (`toys3/control/action.go:7`). A closed set: `Reply`, the seven filesystem commands (the `Actuation`s, `toys3/control/plant.go`), `Trip`, `Emit`. Plain data. Chapter 3.
+**Action.** An output of `Step`: a request for the runtime to do something (`toys3/control/action.go:7`). A closed set: `Reply`, the seven filesystem commands (the `Actuation`s, `toys3/control/storage.go`), `Trip`, `Emit`. Plain data. Chapter 3.
 
-**Actuation.** A command from the controller to the plant: one of the seven `FS*` actions, each implementing `control.Actuation` (an `Action` with an `ID() IOID`) (`toys3/control/plant.go:8-13`). Its result returns as the `Feedback` with the same ID. Chapters 3, 3a.
+**Actuation.** A command from the controller to storage: one of the seven `FS*` actions, each implementing `control.Actuation` (an `Action` with an `ID() IOID`) (`toys3/control/storage.go:8-13`). Its result returns as the `Feedback` with the same ID. Chapters 3, 3a.
 
-**ActuationPlan.** The fault decision, dead time and feedback delay for one actuation, drawn when it is *issued* (`toys3/sim/plantmodel.go:51-58`), so RNG consumption follows issue order. Fields `Fail`, `DeadTime`, `FeedbackDelay`. Was `FSPlan{Fail, Land, Reply}`. Chapter 11.
+**ActuationPlan.** The fault decision, dead time and feedback delay for one actuation, drawn when it is *issued* (`toys3/sim/storagemodel.go:51-58`), so RNG consumption follows issue order. Fields `Fail`, `DeadTime`, `FeedbackDelay`. Was `FSPlan{Fail, Land, Reply}`. Chapter 11.
 
-**Adversary.** The role the PlantModel plays at a crash: each un-synced change is resolved independently by the RNG, as if chosen by someone trying to break the server (`PlantModel.Crash`, `toys3/sim/plantmodel.go:468-529`). Chapter 11.
+**Adversary.** The role the StorageModel plays at a crash: each un-synced change is resolved independently by the RNG, as if chosen by someone trying to break the server (`StorageModel.Crash`, `toys3/sim/storagemodel.go:469-530`). Chapter 11.
 
 **Aggregate.** In DDD, a cluster of objects treated as one consistency unit. toys3 has one: the `Controller`, whose consistency boundary is one `Step`. The per-key queues are not aggregates but an invariant of it (the key interlock). Chapter 3a.
 
@@ -26,15 +26,15 @@ Line numbers refer to commit `a4018d5`. Appendix G maps every name the refactor 
 
 **Allow-list.** `tools/detcheck/allow.txt`: the exact import paths the deterministic packages may import. Fail-closed: anything not listed is an error. A trailing `/...` allows subpackages. Chapter 8.
 
-**Anti-corruption layer (ACL).** A translation layer that keeps a foreign model from leaking into yours. In toys3: `prod.Handler`/`ParseRequest` (S3 REST to `control.Op`) and `GroundTruth` (the monitors' only view of the plant model). Chapter 3a.
+**Anti-corruption layer (ACL).** A translation layer that keeps a foreign model from leaking into yours. In toys3: `prod.Handler`/`ParseRequest` (S3 REST to `control.Op`) and `GroundTruth` (the monitors' only view of the storage model). Chapter 3a.
 
 **Arrival order / seq.** Each accepted request gets `seq` from `Controller.nextSeq` (`toys3/control/controller.go:176-178`). Every per-key queue of the key interlock is ordered by it, which is why COPY's two-queue membership cannot deadlock. Not to be confused with `Entry.Seq` (queue) or `InvSeq`/`RetSeq` (oracle). Chapter 6.
 
 **BaseConfig.** The fixed simulation configuration (`toys3/sim/config.go:148-175`): 300 ms Chaos, 60 ms Settling, 4 clients, 3 keys, the default fault probabilities. `DefaultConfig` is `BaseConfig` plus swarm variation. Chapter 12.
 
-**Black-box invariant.** An invariant that judges only what clients observed, never the plant's ground truth: `NoCorruptReads`, `Linearizable`, `Liveness` (`BlackBoxInvariants`, `toys3/sim/invariant.go:70-72`). Contrast white-box. Chapters 14, 15.
+**Black-box invariant.** An invariant that judges only what clients observed, never the ground truth of storage: `NoCorruptReads`, `Linearizable`, `Liveness` (`BlackBoxInvariants`, `toys3/sim/invariant.go:70-72`). Contrast white-box. Chapters 14, 15.
 
-**Bounded context.** A part of the code inside which every term has one meaning. toys3 has six: storage control, the plant, the object format, verification, the testbench, production. Chapter 3a.
+**Bounded context.** A part of the code inside which every term has one meaning. toys3 has six: storage control, storage (the port and its adapters), the object format, verification, the testbench, production. Chapter 3a.
 
 **Budget (oracle).** The cap on memo entries in one WGL search, 2^20 by default (`toys3/sim/oracle.go:523-526`). Exceeding it is reported as a `linearizable` failure suggesting a smaller `QuiesceEvery`. Chapter 13.
 
@@ -50,25 +50,25 @@ Line numbers refer to commit `a4018d5`. Appendix G maps every name the refactor 
 
 **Committed.** The telemetry (a domain event) emitted immediately before the 200 reply to a successful PUT, COPY or DELETE, at the moment the controller believes the mutation is durable (`toys3/control/telemetry.go:14-24`). Its `Sum` field exists only for monitors. Checked by acked-is-durable. Deliberately *not* renamed "Settled" (Chapter 3a §3a.10). Chapter 3.
 
-**Completion.** A `...Done` event (`FSWriteDone`, etc.) that reports the result of a filesystem action, matched to it by `IOID`. In the domain model, *feedback* from the plant (`control.Feedback`). Chapter 3.
+**Completion.** A `...Done` event (`FSWriteDone`, etc.) that reports the result of a filesystem action, matched to it by `IOID`. In the domain model, *feedback* from storage (`control.Feedback`). Chapter 3.
 
 **Component.** In the oracle, a connected set of keys in one window: keys are linked if one op touches both (COPY) or a carried group contains both. Each component is searched independently (`Oracle.check`, `toys3/sim/oracle.go:363-454`). Chapter 13.
 
 **Context map.** The diagram of bounded contexts and their relationships (shared kernel, conformist, customer/supplier, ACL, open host service, separate ways). Chapter 3a §3a.5.
 
-**Controller.** `control.Controller`, the toys3 state machine: the control law that turns requests and plant feedback into actuations, replies, telemetry and trips (`toys3/control/controller.go:74-101`). "The server" in most of this book. Was `core.Server`. Chapters 3a, 5, 6.
+**Controller.** `control.Controller`, the toys3 state machine: the control law that turns requests and storage feedback into actuations, replies, telemetry and trips (`toys3/control/controller.go:74-101`). "The server" in most of this book. Was `core.Server`. Chapters 3a, 5, 6.
 
 **Correlation ID.** `loop.md` rule 8: every request carries an id so late or duplicate completions can be recognized. In toys3: `IOID` for FS actions, `ClientReq` for client requests. Chapter 2.
 
 **CorruptionDetected.** The telemetry emitted when an object file fails its header, length or CRC check on read (`toys3/control/telemetry.go:32-38`); fault detection, in control terms. The reply is 500, not Trip. Counted in `Stats.CorruptionsDetected` (printed `corruptdet=`). Was `CorruptObject` (and still is, inside the frozen trace-hash key). Chapters 3, 7, 14.
 
-**Crash.** A simulated power loss, a *disturbance* the controller cannot command: the plant model resolves volatile state, every queued entry of the dead incarnation is dropped, outstanding requests are abandoned, and a restart is scheduled (`Simulator.crash`, `toys3/sim/simulator.go:276-307`). A `Trip` takes the same code path but is a different concept (the controller's own action); `Stats.Crashes` counts both. Chapters 7, 10.
+**Crash.** A simulated power loss, a *disturbance* the controller cannot command: the storage model resolves volatile state, every queued entry of the dead incarnation is dropped, outstanding requests are abandoned, and a restart is scheduled (`Simulator.crash`, `toys3/sim/simulator.go:276-307`). A `Trip` takes the same code path but is a different concept (the controller's own action); `Stats.Crashes` counts both. Chapters 7, 10.
 
-**CrashReport.** What `PlantModel.Crash` returns: counts of kept, lost and torn changes (`toys3/sim/plantmodel.go:463-465`). Logged on the crash line. Chapter 11.
+**CrashReport.** What `StorageModel.Crash` returns: counts of kept, lost and torn changes (`toys3/sim/storagemodel.go:464-466`). Logged on the crash line. Chapter 11.
 
-**Current view.** What reads see now: `dirent.cur` pointing at `inode.volatile` (`PlantModel.Current`, `toys3/sim/plantmodel.go:552`). Not visible to monitors (they get only `GroundTruth`). Chapter 11.
+**Current view.** What reads see now: `dirent.cur` pointing at `inode.volatile` (`StorageModel.Current`, `toys3/sim/storagemodel.go:553`). Not visible to monitors (they get only `GroundTruth`). Chapter 11.
 
-**Dead time.** The delay between issuing an actuation and its effect landing on the plant (transport delay). `Disturbances.DeadTime`, 20 µs to 1.5 ms by default; drawn per op into `ActuationPlan.DeadTime`. Was `Latency`. Chapters 10, 11.
+**Dead time.** The delay between issuing an actuation and its effect landing in storage (transport delay). `Disturbances.DeadTime`, 20 µs to 1.5 ms by default; drawn per op into `ActuationPlan.DeadTime`. Was `Latency`. Chapters 10, 11.
 
 **DefaultConfig.** `BaseConfig` plus per-seed swarm choices of key count, client count, crash rate and EIO rate drawn from a stream separate from the run's (`toys3/sim/config.go:137-145`). What every test and campaign uses. Chapter 12.
 
@@ -78,19 +78,19 @@ Line numbers refer to commit `a4018d5`. Appendix G maps every name the refactor 
 
 **detcheck.** The go/analysis checker in `tools/detcheck/detcheck.go` that enforces the determinism rules on `core/`, `sim/` and every toys3 package except `prod` and `cmd` (`toys3/control`, `toys3/format`, `toys3/sim`): import allow-list; no goroutines, channels, select, map range, reflect map iteration, or package-level variables (except error sentinels and `_`). Suppress with `//detcheck:ok <reason>`. Chapter 8.
 
-**Dirent.** A directory entry in the PlantModel with two versions: `cur` (visible) and `durable` (survives a crash) (`toys3/sim/plantmodel.go:73-77`). 0 means absent. Chapter 11.
+**Dirent.** A directory entry in the StorageModel with two versions: `cur` (visible) and `durable` (survives a crash) (`toys3/sim/storagemodel.go:73-77`). 0 means absent. Chapter 11.
 
-**Dirty.** An inode whose volatile content differs from its durable content (`toys3/sim/plantmodel.go:69`). Only dirty inodes can lose or tear content at a crash. Chapter 11.
+**Dirty.** An inode whose volatile content differs from its durable content (`toys3/sim/storagemodel.go:69`). Only dirty inodes can lose or tear content at a crash. Chapter 11.
 
-**Disturbances.** `sim.Disturbances`: the plant model's configuration: its dynamics (`DeadTime`, `FeedbackDelay`) and the exogenous faults the controller cannot command (`EIOProb`, `TornWriteProb`, `ReadCorruptProb`, `WritebackProb`, `FsyncGate`) (`toys3/sim/plantmodel.go:13-49`). `Config.Disturbances`. Was `FSFaults` / `Config.FS`. Chapter 11.
+**Disturbances.** `sim.Disturbances`: the storage model's configuration: its dynamics (`DeadTime`, `FeedbackDelay`) and the exogenous faults the controller cannot command (`EIOProb`, `TornWriteProb`, `ReadCorruptProb`, `WritebackProb`, `FsyncGate`) (`toys3/sim/storagemodel.go:13-49`). `Config.Disturbances`. Was `FSFaults` / `Config.FS`. Chapter 11.
 
 **Domain event.** In DDD, a record of something that happened, named in the past tense. toys3's telemetry types are its domain events. Chapter 3a.
 
-**DurableGen.** A counter bumped whenever durable state may have changed (`toys3/sim/plantmodel.go:458-460`), so `ObjNeverTorn` can skip steps where nothing durable changed. Chapter 14.
+**DurableGen.** A counter bumped whenever durable state may have changed (`toys3/sim/storagemodel.go:459-461`), so `ObjNeverTorn` can skip steps where nothing durable changed. Chapter 14.
 
-**Durable view.** What would survive a crash in which the adversary loses everything volatile: durable entries pointing at durable content (`PlantModel.Durable`, `toys3/sim/plantmodel.go:546-549`). The plant's *true state*; monitors read it through `GroundTruth`. Invariants (b) and (e) check it. Chapter 11.
+**Durable view.** What would survive a crash in which the adversary loses everything volatile: durable entries pointing at durable content (`StorageModel.Durable`, `toys3/sim/storagemodel.go:547-550`). The *true state* of storage; monitors read it through `GroundTruth`. Invariants (b) and (e) check it. Chapter 11.
 
-**EIO / ErrIO.** The catch-all I/O error code: "the operation may or may not have taken effect" (`toys3/control/plant.go:34`). Injected per operation with `EIOProb`. Chapters 4, 7, 11.
+**EIO / ErrIO.** The catch-all I/O error code: "the operation may or may not have taken effect" (`toys3/control/storage.go:34`). Injected per operation with `EIOProb`. Chapters 4, 7, 11.
 
 **Emit.** The action that records a `Telemetry` (`toys3/control/action.go:30-32`). No effect on behaviour. Chapter 3.
 
@@ -108,19 +108,19 @@ Line numbers refer to commit `a4018d5`. Appendix G maps every name the refactor 
 
 **Fail-stop.** The policy of tripping (and recovering from disk) when in-memory state can no longer be trusted, rather than continuing to serve. Implemented with `Trip`. Chapter 7.
 
-**Feedback.** The plant's answer to an actuation: one of the seven `FS*Done` completions, each implementing `control.Feedback` (an `EventBody` with an `ID() IOID`) (`toys3/control/plant.go:15-20`). `Step` routes feedback by `ID()`. Chapters 3, 3a.
+**Feedback.** Storage's answer to an actuation: one of the seven `FS*Done` completions, each implementing `control.Feedback` (an `EventBody` with an `ID() IOID`) (`toys3/control/storage.go:15-20`). `Step` routes feedback by `ID()`. Chapters 3, 3a.
 
-**Feedback delay.** The delay between an actuation's effect landing on the plant and its completion being delivered to the controller (measurement delay). `Disturbances.FeedbackDelay`, 0 to 500 µs by default. A crash inside it is "it happened, but nobody was told". Was `ReplyDelay`. Chapters 10, 11.
+**Feedback delay.** The delay between an actuation's effect landing in storage and its completion being delivered to the controller (measurement delay). `Disturbances.FeedbackDelay`, 0 to 500 µs by default. A crash inside it is "it happened, but nobody was told". Was `ReplyDelay`. Chapters 10, 11.
 
 **Fold.** The mixing function for the running trace hash (`toys3/sim/hash.go:7-11`). Chapter 8.
 
-**fs-land.** `KindFSLand`: the queue entry at which an FS action's effect is applied to the plant model, one dead time after it was issued (`toys3/sim/queue.go:18`). Its completion is delivered one feedback delay later (`ActuationPlan.FeedbackDelay`). A crash in between gives "it happened, but nobody was told". Chapter 10.
+**fs-land.** `KindFSLand`: the queue entry at which an FS action's effect is applied to the storage model, one dead time after it was issued (`toys3/sim/queue.go:18`). Its completion is delivered one feedback delay later (`ActuationPlan.FeedbackDelay`). A crash in between gives "it happened, but nobody was told". Chapter 10.
 
-**FsyncGate.** A PlantModel mode modelling Linux after a failed fsync: the inode is "poisoned", later fsyncs return OK, and the data never reaches disk until a fresh write (`toys3/sim/plantmodel.go:45-48, 315-333`). Named after the 2018 PostgreSQL incident. Chapters 7, 11.
+**FsyncGate.** A StorageModel mode modelling Linux after a failed fsync: the inode is "poisoned", later fsyncs return OK, and the data never reaches disk until a fresh write (`toys3/sim/storagemodel.go:45-48, 316-334`). Named after the 2018 PostgreSQL incident. Chapters 7, 11.
 
 **Golden test.** `TestGolden` (`toys3/sim/golden_test.go:73-101`): pins steps, random draws, trace hash, end time, failure count and every stat for seeds 1..500 (`DefaultConfig`) and 1..50 (`BaseConfig`), plus every mutant's first catch, against `testdata/golden-v1.txt`. Proved the DDD refactor behaviour-preserving. Chapter 8 §8.12.
 
-**GroundTruth.** The anti-corruption interface through which monitors read the plant model's true durable state: `DurableFile`, `EachDurable`, `DurableGen` (`toys3/sim/invariant.go:37-51`). Returned by `View.GroundTruth()`; replaced `View.FS()`. Chapters 3a, 14.
+**GroundTruth.** The anti-corruption interface through which monitors read the storage model's true durable state: `DurableFile`, `EachDurable`, `DurableGen` (`toys3/sim/invariant.go:37-51`). Returned by `View.GroundTruth()`; replaced `View.FS()`. Chapters 3a, 14.
 
 **Group.** In the oracle, a set of keys whose possible states are carried jointly between windows (`toys3/sim/oracle.go:314-319`). The oracle's state estimate (`Oracle.estimate`) is a list of groups. Usually one key per group; COPY or correlated crash outcomes can tie keys together. Chapter 13.
 
@@ -128,11 +128,11 @@ Line numbers refer to commit `a4018d5`. Appendix G maps every name the refactor 
 
 **Indeterminate.** `Stats.Indeterminate` (printed `indet=`): requests outstanding at a crash, i.e. abandoned (`toys3/sim/simulator.go:283-284`). Was spelled `Indetermined`. Chapter 16.
 
-**Inode.** A file's content in the plant model, independent of its names, with `durable`, `volatile`, `dirty` and `poisoned` (`toys3/sim/plantmodel.go:65-71`). Two names can point at one inode. Chapter 11.
+**Inode.** A file's content in the storage model, independent of its names, with `durable`, `volatile`, `dirty` and `poisoned` (`toys3/sim/storagemodel.go:65-71`). Two names can point at one inode. Chapter 11.
 
 **Invariant.** A check run after every simulator step and once at the end (`toys3/sim/invariant.go:56-60`). Five by default. Chapter 14.
 
-**IOID.** Correlates a filesystem action with its completion; unique within one incarnation, assigned by `Controller.newIO` (`toys3/control/plant.go:22-25`, `controller.go:135-138`). Also names the temp file. Logged as `io42`. Chapter 3.
+**IOID.** Correlates a filesystem action with its completion; unique within one incarnation, assigned by `Controller.newIO` (`toys3/control/storage.go:22-25`, `controller.go:135-138`). Also names the temp file. Logged as `io42`. Chapter 3.
 
 **Key interlock.** The controller's per-key FIFO discipline: two requests that share a key are *interlocked* (`interlocked`, `toys3/control/controller.go:68-72`) and may not run together; a request starts only when its start permissive holds. Chapter 6.
 
@@ -152,11 +152,7 @@ Line numbers refer to commit `a4018d5`. Appendix G maps every name the refactor 
 
 **Phase.** Since the refactor, only the testbench's timeline: Chaos, then Settling (then the drain). The controller has *modes*, not phases. Chapter 10.
 
-**Plant.** In control theory, the system being controlled. In toys3, the disk and its page cache: real in production (`prod.OSExecutor`), modelled in simulation (`sim.PlantModel`). Chapter 3a.
-
-**PlantModel.** The plant model: the simulator's in-memory filesystem with crash semantics, standing in for the disk and its page cache (`toys3/sim/plantmodel.go:86-118`). Configured by `Disturbances`. Was `FakeFS`. Chapter 11.
-
-**Plant port.** The controller-owned interface to the plant: `Actuation`, `Feedback`, the `FS*` and `FS*Done` types, `IOID`, `ErrCode` (`toys3/control/plant.go`). Adapters: `prod.OSExecutor`, `sim.PlantModel` (via the simulator), the unit-test harness. Chapters 3, 3a.
+**Plant.** The control-theory textbook's word for the system being controlled. toys3 does not use it: the code says **storage** (the disk and its page cache), because "plant" had to be translated every time by a storage-minded reader. It was used briefly (`PlantModel`, `control/plant.go`, "the plant port") and renamed in `56b0d2e`. See Storage, Storage port, StorageModel. Chapter 3a.
 
 **Poisoned.** See FsyncGate.
 
@@ -170,7 +166,7 @@ Line numbers refer to commit `a4018d5`. Appendix G maps every name the refactor 
 
 **Recovery.** On `Started`: list `tmp/`, unlink every leftover, fsync `tmp/`, emit `Recovered`, then start queued requests (`toys3/control/recovery.go:17-93`). Any error trips. Establishes a known initial condition (homing, in control terms); reconstitutes nothing. Chapter 5.
 
-**Reference model.** The sequential specification the closed loop must reproduce: a map from key to writer. One state is a `refState` (`toys3/sim/oracle.go:164-167`; was `modelState`). Always qualify "model": reference model versus plant model. Chapter 13.
+**Reference model.** The sequential specification the closed loop must reproduce: a map from key to writer. One state is a `refState` (`toys3/sim/oracle.go:164-167`; was `modelState`). Always qualify "model": reference model versus storage model. Chapter 13.
 
 **Sample.** One telemetry value stamped by the simulator with its sample index (`Step`), time and incarnation (`toys3/sim/invariant.go:12-19`). `View.Telemetry()` returns them in order. Was `TimedFact`. Chapter 14.
 
@@ -184,7 +180,7 @@ Line numbers refer to commit `a4018d5`. Appendix G maps every name the refactor 
 
 **Shared kernel.** A small model shared, and changed together, by several contexts. In toys3: the object format (`toys3/format`) and the self-describing value encoding (`toys3/sim/value.go`). Chapter 3a.
 
-**SIL testbench.** Software-in-the-loop: the real controller code run against a plant model, with a stimulus generator and monitors. What `toys3/sim` is (`toys3/sim/doc.go:1-4`). Chapters 3a, 10.
+**SIL testbench.** Software-in-the-loop: the real controller code run against a storage model, with a stimulus generator and monitors. What `toys3/sim` is (`toys3/sim/doc.go:1-4`). Chapters 3a, 10.
 
 **Skipper.** The mutant wrapper that hides selected actions from the runtime and feeds the inner server an immediate OK completion instead (`toys3/sim/mutants_test.go:45-75`). Chapter 15.
 
@@ -196,19 +192,25 @@ Line numbers refer to commit `a4018d5`. Appendix G maps every name the refactor 
 
 **Stimulus.** The testbench's input generator: the `Workload` and its self-describing values. Chapter 12.
 
+**Storage.** What the controller controls: the disk and its page cache (the textbook *plant*). Real in production (`prod.OSExecutor`), modelled in simulation (`sim.StorageModel`). Chapters 3a, 11.
+
+**Storage port.** The controller-owned interface to storage: `Actuation`, `Feedback`, the `FS*` and `FS*Done` types, `IOID`, `ErrCode` (`toys3/control/storage.go`). Adapters: `prod.OSExecutor` (whose `Execute` takes a `control.Actuation`), `sim.StorageModel` (via the simulator), the unit-test harness. Was "the plant port" in `control/plant.go`. Chapters 3, 3a.
+
+**StorageModel.** The storage model: the simulator's in-memory filesystem with crash semantics, standing in for the disk and its page cache (`toys3/sim/storagemodel.go:86-118`). Configured by `Disturbances`. Was `FakeFS`, then briefly `PlantModel`. Chapter 11.
+
 **Swarm testing.** Varying the test configuration per seed (which features and faults are on, how many keys, etc.) rather than running every seed with one "balanced" configuration. Chapter 12.
 
 **Telemetry.** The closed set of signals the controller publishes for supervisory monitoring, via `Emit`: `Committed`, `Recovered`, `CorruptionDetected` (`toys3/control/telemetry.go:3-12`). Domain events, named in the past tense, with any number of subscribers: the production log and the simulator's monitors and stats. No effect on behaviour. Was `Fact`. Chapters 3, 3a, 14.
 
-**telemetryHashKey.** The frozen encoding of telemetry in the trace hash (`toys3/sim/trace.go:85-104`): it reproduces the pre-refactor rendering byte for byte (including the legacy spelling `CorruptObject{...}`), so renaming telemetry or changing the log never changes a trace hash. Pinned by `TestTelemetryHashKeyFrozen`. Chapter 8 §8.12.
+**telemetryHashKey.** The frozen encoding of telemetry in the trace hash (`toys3/sim/trace.go:85-106`): it reproduces the pre-refactor rendering byte for byte (including the legacy spelling `CorruptObject{...}`), so renaming telemetry or changing the log never changes a trace hash. Pinned by `TestTelemetryHashKeyFrozen`; its fallback for an unknown type is the fixed string `"?"` (since `10777a2`; it used to be `%T`), and `TestTelemetryHashKeyCoversAllTypes` checks that no current type reaches it. Chapter 8 §8.12.
 
 **Tie.** A random number drawn when an entry is scheduled (`toys3/sim/queue.go:74-83`), used to order entries with the same `At`. Chapter 10.
 
-**Torn write.** A file that a crash leaves holding a strict prefix of its un-synced content (`TornWriteProb`, `toys3/sim/plantmodel.go:505-507`). Chapters 4, 11.
+**Torn write.** A file that a crash leaves holding a strict prefix of its un-synced content (`TornWriteProb`, `toys3/sim/storagemodel.go:506-508`). Chapters 4, 11.
 
-**Trace hash.** The running hash of a run: step number, time, entry kind and incarnation, every event and action (telemetry through the frozen `telemetryHashKey`), the controller's `StateHash`, and the plant model hash, folded after every step (`toys3/sim/simulator.go:95-97, 173-184`). Two runs of one seed must agree; and a pure refactor must leave it unchanged. Chapter 8.
+**Trace hash.** The running hash of a run: step number, time, entry kind and incarnation, every event and action (telemetry through the frozen `telemetryHashKey`), the controller's `StateHash`, and the storage model hash, folded after every step (`toys3/sim/simulator.go:95-97, 173-184`). Two runs of one seed must agree; and a pure refactor must leave it unchanged. Chapter 8.
 
-**Trip.** A safety trip: the action by which the controller fail-stops because it can no longer trust its own view of the plant (after an fsync error, or an error that may have left a change visible but not durable) (`toys3/control/action.go:21-26`). Always the last action of its step; the controller then enters `modeTripped` and ignores everything. In simulation it is processed as a crash; in production the process exits and a supervisor restarts it. Was `Halt{Reason}`; now `Trip{Cause}`. Chapter 7.
+**Trip.** A safety trip: the action by which the controller fail-stops because it can no longer trust its own view of storage (after an fsync error, or an error that may have left a change visible but not durable) (`toys3/control/action.go:21-26`). Always the last action of its step; the controller then enters `modeTripped` and ignores everything. In simulation it is processed as a crash; in production the process exits and a supervisor restarts it. Was `Halt{Reason}`; now `Trip{Cause}`. Chapter 7.
 
 **Ubiquitous language.** In DDD, the vocabulary shared by the people and the code of a context: the identifiers, the docs and the conversation use the same words. toys3's comes partly from control theory. Chapter 3a.
 
@@ -218,13 +220,13 @@ Line numbers refer to commit `a4018d5`. Appendix G maps every name the refactor 
 
 **WGL.** Wing–Gong–Lowe: a depth-first search for a linearization, with Lowe's memoization of (set of linearized ops, reference-model state). `search.dfs` (`toys3/sim/oracle.go:547-606`). Chapter 13.
 
-**White-box invariant.** An invariant that inspects ground truth the clients cannot see, here the plant's durable view through `GroundTruth`: `AckedIsDurable`, `ObjNeverTorn`. Chapter 14.
+**White-box invariant.** An invariant that inspects ground truth the clients cannot see, here the durable view of storage through `GroundTruth`: `AckedIsDurable`, `ObjNeverTorn`. Chapter 14.
 
 **Widening.** Replacing a too-large set of possible states with one state in which disagreeing keys are `unknown` (`widenStates`, `toys3/sim/oracle.go:456-478`). Sound, not complete. Counted in `Stats.Widenings`. Chapter 13.
 
 **Window.** The ops between two quiescent points, checked together by the oracle. Chapter 13.
 
-**Writeback.** The PlantModel's model of the kernel flushing one random un-synced change on its own (`WritebackProb`, `PlantModel.writeback`, `toys3/sim/plantmodel.go:205-242`). Chapter 11.
+**Writeback.** The StorageModel's model of the kernel flushing one random un-synced change on its own (`WritebackProb`, `StorageModel.writeback`, `toys3/sim/storagemodel.go:206-243`). Chapter 11.
 
 ---
 
@@ -249,7 +251,7 @@ go test ./toys3/sim -run TestCatchesBugs -v              # all seven mutants, al
 go test ./toys3/sim -run 'TestCatchesBugs/d2' -v         # one mutant
 go test ./toys3/sim -run TestCatchesBugs -mutant-seeds=2000 -v
 go test ./toys3/sim -run 'TestOracle' -v                 # hand-built histories
-go test ./toys3/sim -run 'TestPlantModel' -v             # crash semantics of the plant model
+go test ./toys3/sim -run 'TestStorageModel' -v           # crash semantics of the storage model
 go test ./toys3/sim -run 'TestGolden|TestTelemetryHashKeyFrozen' -v   # the behaviour pin (~3 s)
 go test ./toys3/sim -run TestGolden -update-golden        # re-baseline: ONLY for a deliberate behaviour change
 go test ./toys3/format -v                                # object format round trips and escaping
@@ -298,17 +300,17 @@ git bisect run sh -c 'go test ./toys3/sim -run TestSeeds -seed=4711 >/dev/null'
 
 ## Appendix B: File index
 
-Line numbers are those of the declaration, at commit `a4018d5`.
+Line numbers are those of the declaration, at commit `10777a2`.
 
 ### `toys3/control` (the controller; deterministic, detcheck-clean)
 
 | File | Purpose | Key symbols (line) |
 |---|---|---|
-| `doc.go` | Package doc: the controller/plant loop, operating modes, durable write protocol, error table, key interlock, recovery | the whole file is documentation (1-113) |
+| `doc.go` | Package doc: the controller/storage loop, operating modes, durable write protocol, error table, key interlock, recovery | the whole file is documentation (1-114) |
 | `types.go` | Controller scalars | `Time` 5, `Duration` 8, `ClientReq` 20, `Status` 23 (200/400/404/500, 25-30) |
 | `event.go` | Inputs to `Step` (lifecycle and client) | `Event` 5, `EventBody` 12, `Started` 18, `Request` 25, `Op` 32, `Put` 35, `Get` 41, `Delete` 44, `Copy` 48 |
 | `action.go` | Outputs of `Step` (client and supervisor) | `Action` 7, `Reply` 13, `Trip` 26, `Emit` 32 |
-| `plant.go` | The plant port | `Actuation` 10, `Feedback` 17, `IOID` 25, `ErrCode` 29 (`OK`, `ErrNotFound`, `ErrIO` 31-35), `FSWrite` 59, `FSFsync` 66, `FSRename` 74, `FSFsyncDir` 80, `FSRead` 86, `FSUnlink` 92, `FSList` 98, `FSWriteDone` 106, `FSFsyncDone` 112, `FSRenameDone` 119, `FSFsyncDirDone` 125, `FSReadDone` 132, `FSUnlinkDone` 139, `FSListDone` 145, `ID()` methods 159-165 and 175-181 |
+| `storage.go` | The Storage port | `Actuation` 10, `Feedback` 17, `IOID` 25, `ErrCode` 29 (`OK`, `ErrNotFound`, `ErrIO` 31-35), `FSWrite` 59, `FSFsync` 66, `FSRename` 74, `FSFsyncDir` 80, `FSRead` 86, `FSUnlink` 92, `FSList` 98, `FSWriteDone` 106, `FSFsyncDone` 112, `FSRenameDone` 119, `FSFsyncDirDone` 125, `FSReadDone` 132, `FSUnlinkDone` 139, `FSListDone` 145, `ID()` methods 159-165 and 175-181 |
 | `telemetry.go` | Published domain events | `Telemetry` 12, `Committed` 19, `Recovered` 28, `CorruptionDetected` 36 |
 | `env.go` | Injected nondeterminism | `Env` 5, `Rand` 12, `Site` 19, `Buggify` 24 |
 | `machine.go` | Shapes runtimes drive | `StateMachine` 5, `Hashable` 12, `Machine` 17, `Factory` 25, `NewMachine` 28 |
@@ -338,7 +340,7 @@ Line numbers are those of the declaration, at commit `a4018d5`.
 | `simulator.go` | testbench | The main loop | `Simulator` 12, `New` 42, `Run` 83, `handle` 126, `deliver` 171, `callStep` 220, `reply` 229, `wake` 241, `wakeParked` 256, `maybeCrash` 266, `crash` 276, `restart` 310, `build` 328, `afterStep` 339, `fail` 365, `note` 378, View methods 386-395, `env` 401 |
 | `trace.go` | testbench | Trace hashing | `hashOp` 15, `hashEvent` 30, `hashAction` 59, `telemetryHashKey` 91 |
 | `log.go` | testbench | Log rendering | `DescribeOp` 12, `describePayload` 30, `DescribeEvent` 47, `DescribeAction` 72, `DescribeTelemetry` 103, `LogEntry.String` 119, `FormatLog` 141, `fmtTime` 151 |
-| `plantmodel.go` | plant model | The adversarial filesystem | `Disturbances` 17, `ActuationPlan` 54, `InodeID` 63, `inode` 66, `dirent` 74, `fdir` 81, `PlantModel` 108, `FSCounters` 121, `NewPlantModel` 129, `Plan` 146, `Land` 165, `writeback` 206, `split` 248, `lookup` 261, `setEntry` 274, `write` 289, `fsync` 325, `rename` 345, `fsyncDir` 369, `read` 386, `unlink` 406, `list` 423, `names` 443, `DurableGen` 460, `CrashReport` 463, `Crash` 468, `SetQuiet` 532, `Snapshot` 542, `Durable` 549, `Current` 552, `EachDurable` 570, `DurableFile` 582, `CurrentFile` 591, `Hash` 617 |
+| `storagemodel.go` | storage model | The adversarial filesystem | `Disturbances` 17, `ActuationPlan` 54, `InodeID` 63, `inode` 66, `dirent` 74, `fdir` 81, `StorageModel` 108, `FSCounters` 121, `NewStorageModel` 129, `Plan` 147, `Land` 166, `writeback` 207, `split` 249, `lookup` 262, `setEntry` 275, `write` 290, `fsync` 326, `rename` 346, `fsyncDir` 370, `read` 387, `unlink` 407, `list` 424, `names` 444, `DurableGen` 461, `CrashReport` 464, `Crash` 469, `SetQuiet` 533, `Snapshot` 543, `Durable` 550, `Current` 553, `EachDurable` 571, `DurableFile` 583, `CurrentFile` 592, `Hash` 618 |
 | `workload.go` | stimulus | Simulated clients | `OpMix` 10, `WorkloadConfig` 17, `Workload` 49, `NewWorkload` 58, `Think` 85, `Issue` 92, `Complete` 123, `Crash` 135, `Idle` 147 |
 | `value.go` | stimulus / verification (shared kernel) | Self-describing values | `ValueHeader` 15, `MakeValue` 19, `ValueWriter` 37 |
 | `history.go` | verification | The client-visible history | `Outcome` 14, `HistOp` 24, `History` 45, `describeOp` 67 |
@@ -346,8 +348,8 @@ Line numbers are those of the declaration, at commit `a4018d5`.
 | `invariant.go` | verification | Samples, the View, the ground-truth ACL and the five invariants | `Sample` 14, `View` 22, `GroundTruth` 42, `Invariant` 56, `DefaultInvariants` 63, `BlackBoxInvariants` 70, `NoCorruptReads` 77/112, `AckedIsDurable` 85/139, `ObjNeverTorn` 92/169, `Linearizable` 96/190, `Liveness` 105/200 |
 | `sim_test.go` | tests | Drivers and canaries | flags 11-15, `repro` 17, `TestDeterminismCanary` 24, `TestSeeds` 46, `TestCoverage` 86, `TestCorruptionUnreachableWithoutBitFlips` 124 |
 | `golden_test.go` | tests | The behaviour pin | `updateGolden` 21, `statsVector` 27, `goldenRow` 36, `goldenText` 41, `TestGolden` 73; data in `testdata/golden-v1.txt` (571 lines) |
-| `trace_test.go` | tests | Pins the frozen telemetry hash key | `TestTelemetryHashKeyFrozen` 11 |
-| `plantmodel_test.go` | tests | Plant model semantics | `newTestFS` 15, `TestPlantModelUnsyncedWriteMayVanish` 45, `TestPlantModelRenameWithoutDirFsyncMayVanish` 69, `TestPlantModelFullySyncedSurvives` 95, `TestPlantModelTornPrefix` 117, `TestPlantModelEIOMayOrMayNotApply` 134, `TestPlantModelFsyncGateLies` 157, `TestPlantModelNeverAliasesHandedOutSlices` 173 |
+| `trace_test.go` | tests | Pins the frozen telemetry hash key | `TestTelemetryHashKeyFrozen` 17, `TestTelemetryHashKeyCoversAllTypes` 38 |
+| `storagemodel_test.go` | tests | Storage model semantics | `newTestFS` 15, `TestStorageModelUnsyncedWriteMayVanish` 45, `TestStorageModelRenameWithoutDirFsyncMayVanish` 69, `TestStorageModelFullySyncedSurvives` 95, `TestStorageModelTornPrefix` 117, `TestStorageModelEIOMayOrMayNotApply` 134, `TestStorageModelFsyncGateLies` 157, `TestStorageModelNeverAliasesHandedOutSlices` 173 |
 | `oracle_test.go` | tests | Hand-built histories | `TestOracleAcceptsLinearizableConcurrency` 53, `TestOracleRejectsReadNotYetPossible` 72, `TestOracleRejectsStaleRead` 85, `TestOracleRejectsAckedThenLost` 96, `TestOracleFailedMutationMayOrMayNotApply` 109, `TestOracleRejectsObservedThenVanished` 142, `TestOracleRejectsGarbageAndMustRespectRealTime` 158, `TestOracleCarriesUncertaintyAcrossWindows` 173, `TestOracleWidensInsteadOfGivingUp` 193 |
 | `queue_test.go` | tests | Queue | `TestQueueOrdersByTimeThenTieThenSeq` 9, `TestQueueTieBreakDependsOnSeed` 34, `TestQueueClampsPastAndDropsIncarnation` 68 |
 | `mutants_test.go` | tests | Broken servers | `fakeOK` 19, `truncAfterTrip` 36, `skipper` 49, `isObjFsyncDir` 79, `mutSkipDirFsync` 87, `mutSkipFileFsync` 92, `mutAckBeforeRename` 101, `noTrip` 113, `mutNoTripOnError` 121, `mutNoTripOnDirFsyncError` 127, `noTrip.Step` 131, `rewrite` 211, `restoreErr` 251, `ioOfAction` 269, `eventRewriter` 277, `mutSkipCRC` 291, `mutSkipTempCleanup` 304, `mutants` 319, `mutantSeeds` 329, `firstCatch` 333, `TestCatchesBugs` 349 |
@@ -356,10 +358,10 @@ Line numbers are those of the declaration, at commit `a4018d5`.
 
 | File | Purpose | Key symbols (line) |
 |---|---|---|
-| `doc.go` | Runtime diagram; the plant adapter and the ACL | (1-19) |
+| `doc.go` | Runtime diagram; the storage adapter and the ACL | (1-19) |
 | `env.go` | Production `Env`: real randomness, buggify off | `Env` 10 |
-| `executor.go` | The real plant adapter (`os` calls) | `Executor` 18, `OSExecutor` 34, `Execute` 37, `run` 42, `writeFile` 76, `syncPath` 89, `code` 103, `PrepareDir` 118 |
-| `loop.go` | The event loop (the control loop) | `ErrTripped` 15, `ErrStopped` 18, `Loop` 21, `NewLoop` 39, `Run` 60, `dispatch` 78, `post` 103, `Submit` 121 |
+| `executor.go` | The real storage adapter (`os` calls) | `Executor` 18, `OSExecutor` 34, `Execute` 37, `run` 42, `writeFile` 76, `syncPath` 89, `code` 103, `PrepareDir` 118 |
+| `loop.go` | The event loop (the control loop) | `ErrTripped` 15, `ErrStopped` 18, `Loop` 21, `NewLoop` 39, `Run` 60, `dispatch` 78, `post` 105, `Submit` 123 |
 | `http.go` | S3 subset over HTTP (the ACL) | `CopySourceHeader` 16, `ErrMethodNotAllowed` 19, `Handler` 32, `ServeHTTP` 39, `ParseRequest` 81, `splitKey` 110 |
 | `prod_test.go` | End-to-end tests | `startServer` 26, `TestEndToEnd` 71, `failFsync` 111, `TestTripStopsLoop` 121 |
 
@@ -387,7 +389,7 @@ Line numbers are those of the declaration, at commit `a4018d5`.
 
 ## Appendix C: Invariants and mutants, cross-referenced
 
-### Invariants (`toys3/DESIGN.md:194-200`, `toys3/sim/invariant.go`)
+### Invariants (`toys3/DESIGN.md:196-202`, `toys3/sim/invariant.go`)
 
 | | Invariant | Type | Implementation | When checked | Chapters |
 |---|---|---|---|---|---|
@@ -397,7 +399,7 @@ Line numbers are those of the declaration, at commit `a4018d5`.
 | d | Every request replies while alive; the final boot recovers; no 500 for a request issued in Settling | black-box | `Liveness` | 500s every step; rest at end | 14 |
 | e | Every file under `obj/` in the durable view is a complete object | white-box | `ObjNeverTorn` | whenever `DurableGen` changes | 11, 14 |
 
-### Mutants (`toys3/DESIGN.md:245-253`, re-run for this book; all matched)
+### Mutants (`toys3/DESIGN.md:247-255`, re-run for this book; all matched)
 
 | Mutant | Broken step | Wrapper | Caught by (all invariants) | First seed | Black-box only | Chapters |
 |---|---|---|---|---|---|---|
@@ -415,7 +417,7 @@ Ablation for f (first catching seed; Chapter 17 Part II §13): fixed config with
 
 ## Appendix D: The error policy
 
-From `toys3/control/doc.go:69-83` and `toys3/control/controller.go:272-356`; verified by `TestErrorPolicy` (`toys3/control/controller_test.go:371-408`) and `TestRecoveryEmptyAndErrors`.
+From `toys3/control/doc.go:70-84` and `toys3/control/controller.go:272-356`; verified by `TestErrorPolicy` (`toys3/control/controller_test.go:371-408`) and `TestRecoveryEmptyAndErrors`.
 
 | Step | ENOENT | EIO | Why | Code |
 |---|---|---|---|---|
@@ -446,15 +448,15 @@ Defined at `toys3/sim/config.go:61-80`, rendered by `Stats.String` (`config.go:1
 | `reqs` | `Requests` | `simulator.go:250` (`wake`) | sum | Requests issued by clients |
 | `200` `400` `404` `500` | `ByStatus[0..3]` | `simulator.go:236` (`reply`) | sum | Replies by status; any other status counts as 500 |
 | `indet` | `Indeterminate` | `simulator.go:284` (`crash`) | sum | Requests abandoned by a crash |
-| `fsops` | `FSOps` ← `FSCounters.Landed` | `plantmodel.go:166`; copied `simulator.go:115` | sum | FS actions that landed |
-| `eio` | `EIOs` ← `FSCounters.EIOs` | `plantmodel.go:196-198` | sum | Landed actions completed with ErrIO |
+| `fsops` | `FSOps` ← `FSCounters.Landed` | `storagemodel.go:167`; copied `simulator.go:115` | sum | FS actions that landed |
+| `eio` | `EIOs` ← `FSCounters.EIOs` | `storagemodel.go:197-199` | sum | Landed actions completed with ErrIO |
 | `crashes` | `Crashes` ← `Result.Crashes` | `simulator.go:299`; copied 121 | sum | All crashes, including Trips |
 | `trips` | `Trips` | `simulator.go:205` | sum | Crashes requested by the server |
 | `midput` | `CrashesMidPut` | `simulator.go:293-295` | sum | Crashes with a PUT or COPY outstanding |
 | `torn` | `TornFiles` | `simulator.go:278` | sum | Files cut to a prefix by a crash |
 | `lost` | `LostChanges` | `simulator.go:279` | sum | Un-synced changes discarded (incl. poisoned inodes) |
 | `kept` | `KeptChanges` | `simulator.go:280` | sum | Un-synced changes a crash kept anyway |
-| `readcorrupt` | `ReadCorruptions` ← `FSCounters` | `plantmodel.go:398-401`; copied `simulator.go:117` | sum | Reads returned with a flipped bit (counted at land) |
+| `readcorrupt` | `ReadCorruptions` ← `FSCounters` | `storagemodel.go:399-402`; copied `simulator.go:117` | sum | Reads returned with a flipped bit (counted at land) |
 | `corruptdet` | `CorruptionsDetected` | `simulator.go:195-196` | sum | `CorruptionDetected` telemetry (counted at delivery) |
 | `tempsrm` | `TempsRemoved` | `simulator.go:197-198` | sum | Temp files removed by recovery |
 | `windows` | `Windows` ← `OracleStats` | `oracle.go:369`; copied `simulator.go:119` | sum | Linearizability windows checked |
@@ -463,7 +465,7 @@ Defined at `toys3/sim/config.go:61-80`, rendered by `Stats.String` (`config.go:1
 
 Identities that hold for the correct server: `200 + 400 + 404 + 500 + indet == reqs`; `corruptdet ≤ readcorrupt`; `trips ≤ crashes`; `midput ≤ crashes`.
 
-Not printed: `FSCounters.Writebacks` (`plantmodel.go:125`), `OracleStats.MaxVisited` and `MaxStates` (`oracle.go:60-61`). They are available programmatically.
+Not printed: `FSCounters.Writebacks` (`storagemodel.go:125`), `OracleStats.MaxVisited` and `MaxStates` (`oracle.go:60-61`). They are available programmatically.
 
 ---
 
@@ -474,7 +476,7 @@ Not printed: `FSCounters.Writebacks` (`plantmodel.go:125`), `OracleStats.MaxVisi
 | Kind | Printed | `Inc` set? | Scheduled by | Handled by | Logged? |
 |---|---|---|---|---|---|
 | `KindDeliver` | `deliver` | yes | `wake` (Request), `restart` (Started), fs-land (completion) | `deliver` → `Step` | yes: event `=>` actions |
-| `KindFSLand` | `fs-land` | yes | `deliver` for each FS action | `PlantModel.Land`, schedules the completion | yes (Log mode): `land A -> E` |
+| `KindFSLand` | `fs-land` | yes | `deliver` for each FS action | `StorageModel.Land`, schedules the completion | yes (Log mode): `land A -> E` |
 | `KindClientWake` | `client-wake` | no | `New`, `reply`, `wakeParked` | `wake`: issue or park | no |
 | `KindCrash` | `crash` | no | not scheduled in the current code; crashes are performed directly by `maybeCrash` and `Trip` | `crash` if alive | crash lines are written by `crash` itself |
 | `KindRestart` | `restart` | no | `New` (t=0), `crash` | `restart` | yes: `boot` |
@@ -523,7 +525,7 @@ Rendering vocabulary (`log.go`):
 
 ---
 
-## Appendix G: Old names → new names (the refactor of `9b65410..a4018d5`)
+## Appendix G: Old names → new names (the refactor of `9b65410..a4018d5`, and the storage rename of `56b0d2e`)
 
 For readers with an older checkout, an older copy of this book, or old logs. The refactor changed no behaviour: every trace hash, step count, random-draw count and "caught at seed N" is the same before and after (Chapter 8, §8.12). Chapter 3a explains why each new name was chosen.
 
@@ -537,10 +539,10 @@ For readers with an older checkout, an older copy of this book, or old logs. The
 | `core/format.go` | `toys3/format/object.go`, `toys3/format/layout.go` | new package `format`; `core.ObjPath` → `format.ObjPath`, etc. |
 | `core/doc.go` "On-disk layout" | `format/doc.go` | |
 | `core/fact.go` | `control/telemetry.go` | |
-| FS actions, completions, `IOID`, `ErrCode` in `action.go`, `event.go`, `types.go` | `control/plant.go` | plus the new `Actuation` and `Feedback` interfaces |
+| FS actions, completions, `IOID`, `ErrCode` in `action.go`, `event.go`, `types.go` | `control/storage.go` | plus the new `Actuation` and `Feedback` interfaces; `control/plant.go` in `5c5899e..4855552` |
 | — | `format/format_test.go` | new tests |
 | `sim/describe.go` | `sim/log.go` (rendering) + `sim/trace.go` (hashing) | |
-| `sim/fakefs.go`, `sim/fakefs_test.go` | `sim/plantmodel.go`, `sim/plantmodel_test.go` | |
+| `sim/fakefs.go`, `sim/fakefs_test.go` | `sim/storagemodel.go`, `sim/storagemodel_test.go` | `sim/plantmodel.go`, `sim/plantmodel_test.go` in `edc610c..4855552` |
 | `Outcome`, `HistOp`, `History` in `oracle.go` | `sim/history.go` | |
 | `MakeValue`, `ValueWriter`, `ValueHeader` in `workload.go` | `sim/value.go` | |
 | — | `sim/golden_test.go`, `sim/testdata/golden-v1.txt`, `sim/trace_test.go` | new tests |
@@ -565,7 +567,7 @@ For readers with an older checkout, an older copy of this book, or old logs. The
 | `View.FS()` (a `*FakeFS`) | `View.GroundTruth()` (a `GroundTruth` interface) |
 | `DescribeFact` | `DescribeTelemetry` |
 | (hash input `DescribeFact(f)`) | `telemetryHashKey(t)` (frozen) |
-| `FakeFS`, `NewFakeFS` | `PlantModel`, `NewPlantModel` |
+| `FakeFS`, `NewFakeFS` | `StorageModel`, `NewStorageModel` (via `PlantModel`, `NewPlantModel`) |
 | `FSFaults`, `Config.FS` | `Disturbances`, `Config.Disturbances` |
 | `FSPlan{Fail, Land, Reply}` | `ActuationPlan{Fail, DeadTime, FeedbackDelay}` |
 | `FSFaults.Latency` | `Disturbances.DeadTime` |
@@ -573,7 +575,7 @@ For readers with an older checkout, an older copy of this book, or old logs. The
 | `Config.QuietTail` | `Config.Settling` |
 | `KindQuiet`, `KindTailEnd` | `KindSettle`, `KindSettlingEnd` (same numeric values) |
 | `View.Quiet()`, `Simulator.quiet` | `View.Settling()`, `Simulator.settling` |
-| `Simulator.fs`, `Simulator.facts` | `Simulator.plant`, `Simulator.samples` |
+| `Simulator.fs`, `Simulator.facts` | `Simulator.storage` (via `Simulator.plant`), `Simulator.samples` |
 | `Liveness.quietFrom`, `quietSeen` | `Liveness.settlingFrom`, `settlingSeen` |
 | `modelState` | `refState` |
 | `Oracle.groups` | `Oracle.estimate` |
@@ -582,10 +584,25 @@ For readers with an older checkout, an older copy of this book, or old logs. The
 | `Stats.Indetermined` | `Stats.Indeterminate` |
 | `noHalt`, `mutNoHaltOnError`, `mutNoHaltOnDirFsyncError`, `truncAfterHalt` | `noTrip`, `mutNoTripOnError`, `mutNoTripOnDirFsyncError`, `truncAfterTrip` |
 | `TestHaltStopsLoop` | `TestTripStopsLoop` |
-| `TestFakeFS*` | `TestPlantModel*` |
+| `TestFakeFS*` | `TestStorageModel*` (via `TestPlantModel*`) |
 | `TestCorruptObjectUnreachableWithoutBitFlips` | `TestCorruptionUnreachableWithoutBitFlips` |
 | `core.TmpPath(root string, id IOID)` | `format.TmpPath(root string, id uint64)` |
-| — (new) | `PlantModel.EachDurable`, `GroundTruth`, `Actuation`, `Feedback` |
+| — (new) | `StorageModel.EachDurable`, `GroundTruth`, `Actuation`, `Feedback` |
+
+### The storage rename (`56b0d2e`) and the drift fixes (`10777a2`)
+
+After the refactor, the textbook word *plant* was replaced by plain *storage* (Chapter 3a, *Why the code says "storage", not "plant"*). Behaviour-preserving, golden-guarded, and no printed output changed.
+
+| Old (`edc610c..4855552`) | New |
+|---|---|
+| `sim.PlantModel`, `NewPlantModel` | `sim.StorageModel`, `NewStorageModel` |
+| `sim/plantmodel.go`, `sim/plantmodel_test.go` | `sim/storagemodel.go`, `sim/storagemodel_test.go` |
+| `TestPlantModel*` | `TestStorageModel*` |
+| `control/plant.go`, "the plant port" | `control/storage.go`, "the Storage port" (`Actuation`, `Feedback` unchanged) |
+| `Simulator.plant` | `Simulator.storage` |
+| "plant", "plant model", "plant adapter" in comments and docs | "storage", "storage model", "storage adapter" |
+| `prod.Executor.Execute(a control.Action, ...)` | `Execute(a control.Actuation, ...)`; `Loop.dispatch` routes `case control.Actuation` and panics on an unknown action (`10777a2`) |
+| `telemetryHashKey` fallback `fmt.Sprintf("%T", t)` | `"?"`, unreachable, checked by `TestTelemetryHashKeyCoversAllTypes` (`10777a2`) |
 
 ### Printed output
 
@@ -616,7 +633,7 @@ A five-line `sed` script built from the "event log" rows of this table turns any
 | `Committed`, `Recovered` | already past tense; a commit is not a settling |
 | `Oracle`, `Linearizable`, `Invariant` | DST and formal-methods terms (`Observer` would collide with GoF) |
 | `Started`, `request`, `reqStep`, `KindFSLand`, `FSCounters` | proposed optional renames (`ColdStart`, `procedure`, `procStep`, `KindLand`, `Counters`) not taken |
-| `Quiesce`, `QuiesceEvery`, `KindQuiesce`, `PlantModel.SetQuiet` | linearizability-checker terms; "a quiet plant" is a plant-side word |
+| `Quiesce`, `QuiesceEvery`, `KindQuiesce`, `StorageModel.SetQuiet` | linearizability-checker terms; "quiet storage" is a storage-side word |
 | trace hashes, `RandCalls`, step counts, catch seeds | behaviour did not change |
 
 ## Key takeaways
@@ -631,7 +648,7 @@ A five-line `sed` script built from the "event log" rows of this table turns any
 3. Using Appendix E, compute the identities for the 15-second campaign in Chapter 16. Do they hold?
 4. Using Appendix F, write a `grep` or `awk` one-liner that extracts, from a seed's log, every crash line together with the line immediately before it. What fraction of crashes in seed 1 immediately follow an `fs-land`? Why is that fraction high? (Hint: where does `maybeCrash` get called?)
 5. Add a `KindCrash` scheduler: a `Config.CrashAt []control.Duration` that schedules `KindCrash` entries at fixed virtual times. Use it to write a test that crashes exactly once, at a time you choose, during a PUT.
-6. Using Appendix G, rewrite one paragraph of your own notes (or of a first-edition chapter) into the new vocabulary. Which renames changed only a word, and which changed what the sentence *claims*? (Hint: compare "the server halted" with "the controller tripped", and "the fake FS" with "the plant model's ground truth".)
+6. Using Appendix G, rewrite one paragraph of your own notes (or of a first-edition chapter) into the new vocabulary. Which renames changed only a word, and which changed what the sentence *claims*? (Hint: compare "the server halted" with "the controller tripped", and "the fake FS" with "the storage model's ground truth".)
 
 ## Further reading
 

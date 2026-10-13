@@ -1,6 +1,6 @@
 # Chapter 5: The controller, part 1: operating modes, recovery, and queuing
 
-> *"Memory is disposable."* (`toys3/control/doc.go:106`)
+> *"Memory is disposable."* (`toys3/control/doc.go:107`)
 
 We now open the controller, `control.Controller`, and read it. It is the S3 server's state machine: in this book "the server" and "the controller" name the same thing, the first from the outside (it serves S3 requests) and the second from the inside (it controls a disk; Chapter 3a). This chapter covers the controller's state, how `Step` dispatches an event, the operating modes of one incarnation (startup, recovering, auto, tripped), and the recovery protocol that runs on every boot. Chapter 6 covers the request protocols (PUT, GET, DELETE, COPY) and the key interlock, and Chapter 7 the error policy and the trip.
 
@@ -280,7 +280,7 @@ Several properties are worth calling out.
 
 **It never blocks and never does I/O.** It looks at memory, changes memory, and returns a slice of plain values. In production this takes microseconds.
 
-**`ev.At` is ignored.** The server does not use time at all. Every wait in toys3 is a wait for an FS completion, so there are no timers and no timeouts (`DESIGN.md:84-85`: "No timers are needed: every wait is on an FS completion"). The `At` field is still stamped on every event by the runtime, so a future version that needs deadlines can read it without any change to the interfaces.
+**`ev.At` is ignored.** The server does not use time at all. Every wait in toys3 is a wait for an FS completion, so there are no timers and no timeouts (`DESIGN.md:86-87`: "No timers are needed: every wait is on an FS completion"). The `At` field is still stamped on every event by the runtime, so a future version that needs deadlines can read it without any change to the interfaces.
 
 **Unknown completions are ignored, not panicked on.** A completion whose IOID matches no outstanding operation, or matches one but is of the wrong kind, does nothing. This is rule 8 of loop.md ("Give every request a correlation ID so late or duplicate completions can be recognized and ignored"). In the current simulator, stale completions cannot actually arrive (they are dropped with their incarnation), but a server that tolerates them is robust against a runtime that does deliver them, and `TestStaleIOIgnored` pins that behaviour down (§5.12).
 
@@ -288,9 +288,9 @@ Several properties are worth calling out.
 
 ### Feedback.ID() and newIO
 
-`Step` does not need a helper to find the IOID of a completion: it asks the completion. Every filesystem completion implements the `Feedback` interface of the plant port (Chapter 3, §3.5), whose one method is `ID() IOID`. The single type assertion `ev.Body.(Feedback)` both answers "is this a completion at all?" and, when it is, yields the IOID.
+`Step` does not need a helper to find the IOID of a completion: it asks the completion. Every filesystem completion implements the `Feedback` interface of the Storage port (Chapter 3, §3.5), whose one method is `ID() IOID`. The single type assertion `ev.Body.(Feedback)` both answers "is this a completion at all?" and, when it is, yields the IOID.
 
-Before the refactor this was a helper, `ioOf`, a seven-case type switch over the completion types. The switch and the interface are equivalent here, and the refactor's golden test (Chapter 8) confirms that replacing one with the other changed no run, but the interface has two advantages. It is *declared* next to the types, so adding an eighth completion type without an `ID()` method fails to compile at the assertion `var _ Feedback = FSWriteDone{}` pattern in `plant.go` rather than silently being ignored by a switch somewhere else. And the same concept, with the same name, is used by every consumer: the controller, the simulator and both test harnesses.
+Before the refactor this was a helper, `ioOf`, a seven-case type switch over the completion types. The switch and the interface are equivalent here, and the refactor's golden test (Chapter 8) confirms that replacing one with the other changed no run, but the interface has two advantages. It is *declared* next to the types, so adding an eighth completion type without an `ID()` method fails to compile at the assertion `var _ Feedback = FSWriteDone{}` pattern in `storage.go` rather than silently being ignored by a switch somewhere else. And the same concept, with the same name, is used by every consumer: the controller, the simulator and both test harnesses.
 
 ```go
 // toys3/control/controller.go:135-138
@@ -377,9 +377,9 @@ Recovery has one goal: **make `tmp/` empty, durably, before serving.** After a c
 - temp files whose `FSWrite` failed partway (mutations that replied 500, `toys3/control/controller.go:304-307`),
 - resurrected temp names that are hard-link aliases of committed objects (Chapter 4, §4.4).
 
-None of these mean anything to a new incarnation, and the last kind is actively dangerous if a temp name is ever reused (Chapter 15, mutant f). `obj/` needs no recovery at all: "obj/ only ever holds complete files" (`toys3/control/doc.go:111-113`).
+None of these mean anything to a new incarnation, and the last kind is actively dangerous if a temp name is ever reused (Chapter 15, mutant f). `obj/` needs no recovery at all: "obj/ only ever holds complete files" (`toys3/control/doc.go:112-114`).
 
-The recovery protocol is three steps (`toys3/control/doc.go:104-113`):
+The recovery protocol is three steps (`toys3/control/doc.go:105-114`):
 
 ```
 Started ──► FSList(tmp) ──► FSUnlink(each leftover) ──► FSFsyncDir(tmp) ──► Emit{Recovered}, serve
@@ -436,7 +436,7 @@ func (s *Controller) onRecoveryDone(io IOID, body EventBody) []Action {
 - The type assertion `body.(FSListDone)` guards against a completion of the wrong kind that happens to carry the right IOID. It is ignored like a stale one.
 - An error trips. There is nothing sensible to do if you cannot even list `tmp/`; the next boot will try again.
 - On success, issue **one `FSUnlink` per leftover, all at once**. They run concurrently; the server waits for all of them. `recIO` becomes the list of their IOIDs.
-- `FSListDone.Names` are base names, sorted ascending (`toys3/control/plant.go:144`). Both runtimes sort: the PlantModel lists from its sorted name cache (`toys3/sim/plantmodel.go:423-438`) and `os.ReadDir` returns entries sorted by name (`toys3/prod/executor.go:61`). Sorted output is not cosmetic: it makes the order of the unlink actions, and therefore of their IOIDs, a deterministic function of the directory contents.
+- `FSListDone.Names` are base names, sorted ascending (`toys3/control/storage.go:144`). Both runtimes sort: the StorageModel lists from its sorted name cache (`toys3/sim/storagemodel.go:424-439`) and `os.ReadDir` returns entries sorted by name (`toys3/prod/executor.go:61`). Sorted output is not cosmetic: it makes the order of the unlink actions, and therefore of their IOIDs, a deterministic function of the directory contents.
 - If there were no leftovers, skip straight to the tmp fsync.
 
 ### onRecoveryDone: unlinking
@@ -500,7 +500,7 @@ The tmp fsync makes the unlinks durable. Its success is the moment the incarnati
 
 The telemetry is emitted *before* the first request actions in the same slice. The simulator's liveness invariant uses it: at the end of a run, the current incarnation must have emitted `Recovered` (`toys3/sim/invariant.go:220-228`).
 
-Note that the fsync is issued **even when nothing was removed** (`toys3/control/doc.go:107`: "fsyncs the tmp directory (even if nothing was removed)"). §5.14 looks at whether this step is actually necessary.
+Note that the fsync is issued **even when nothing was removed** (`toys3/control/doc.go:108`: "fsyncs the tmp directory (even if nothing was removed)"). §5.14 looks at whether this step is actually necessary.
 
 ## 5.11 Recovery in a real run
 
@@ -559,7 +559,7 @@ Then incarnation 3 tries again:
 Things to notice:
 
 - The listing now has **two** names, not three. `...4b` was unlinked successfully by incarnation 2, and that unlink survived the crash (either a writeback made it durable, or the crash-time coin kept it: the crash report says `kept=1 lost=1`). `...4c` was also unlinked by incarnation 2, but that change was lost at the crash, so the name is back. Recovery is **idempotent**: it does not care how much of the previous attempt survived; it lists whatever is there and removes it.
-- `...31` is still there, because incarnation 2's unlink of it failed (the PlantModel chose "EIO, not applied", or "applied" and then the crash reverted it).
+- `...31` is still there, because incarnation 2's unlink of it failed (the StorageModel chose "EIO, not applied", or "applied" and then the crash reverted it).
 - **#271**: the fsync of `tmp/` succeeds, and in one step the server emits `Recovered{temps=2}` and starts three queued requests: c35's PUT (an `FSWrite` to `tmp/0000000000000005`, a name that is safe to reuse now that `tmp/` is durably empty), c36's GET of `k1`, and c37's GET of `k2`. c38's GET of `k2` stays queued behind c37's (same key).
 - **#272–#273**: c36 reads `obj/k1` and gets `value-of-23`. That is the object c23 committed at step 167 of incarnation 1, through the very temp name `...31` that recovery just unlinked. Unlinking the alias did not touch the object, exactly as Chapter 4 predicted.
 
@@ -698,7 +698,7 @@ Run against seeds 1 to 2,000 with all default invariants: **not caught once.**
 Here is an argument for why, under the current model, that is the right answer rather than a weakness of the invariants:
 
 1. Without the fsync, recovery's unlinks may be volatile: a temp name `t` has `cur = ∅` but `durable = I` (some old inode).
-2. The new incarnation may then write a temp file of the same name `t` (IOIDs restart at 1). In the PlantModel, `write` to a name whose `cur` is empty **creates a fresh inode** (`toys3/sim/plantmodel.go:308-314`): it does not resurrect `I`. So the write cannot overwrite whatever `I` is (possibly a committed object's inode).
+2. The new incarnation may then write a temp file of the same name `t` (IOIDs restart at 1). In the StorageModel, `write` to a name whose `cur` is empty **creates a fresh inode** (`toys3/sim/storagemodel.go:309-315`): it does not resurrect `I`. So the write cannot overwrite whatever `I` is (possibly a committed object's inode).
 3. If the server then crashes, the un-synced unlink may be reverted and `t` may again name `I`. But that is just another leftover, and the *next* recovery removes it before any write.
 
 So the only dangerous thing, writing through a name that aliases a committed object, cannot happen within the incarnation, durable unlink or not. The fsync protects against a hazard the protocol already rules out by other means.
@@ -725,7 +725,7 @@ Treat this as the first of several places in the book where DST is used not just
 1. **Trace a boot by hand.** Using only `controller.go`, write the exact action list the server returns for: `Started`; `Request{c1 GET k}`; `FSListDone{io1, [a b]}`; `FSUnlinkDone{io3}`; `FSUnlinkDone{io2, ENOENT}`; `FSFsyncDirDone{io4}`. Then encode it as a test in the style of `TestRecovery` (in a scratch file you delete afterwards) and run `go test ./toys3/control -run YourTest -v`.
 2. **Make the tripped server talk.** Change `Step` so that a tripped server replies 503 to new requests instead of ignoring them. Predict: does any controller unit test fail? Does any simulation seed fail (`go test ./toys3/sim -run TestSeeds -seeds=50`)? Which simulator check would object, and why? (Hint: read `toys3/sim/simulator.go:200-207` and ask whether a tripped incarnation ever receives another event.) Revert.
 3. **Recovery without the type assertion.** Remove the `d, ok := body.(FSUnlinkDone); if !ok { return nil }` guard in the `recUnlinking` case and replace it with an unchecked assertion. Which existing test, if any, catches this? Write one that does. (Hint: what can a recovery IOID collide with?)
-4. **Try to break §5.14's argument.** Build the "skip tmp fsync" mutant yourself (copy `skipper` and its helpers out of `toys3/sim/mutants_test.go` into a small program in a scratch module that `replace`s `manifester` with this repository, or add it temporarily to `mutants_test.go` and to the `mutants` list). Run 500 seeds. Then look for a change to the *PlantModel* (not the server) that is still faithful to POSIX and under which the mutant *is* caught. If you find one, decide whether the PlantModel should adopt it.
+4. **Try to break §5.14's argument.** Build the "skip tmp fsync" mutant yourself (copy `skipper` and its helpers out of `toys3/sim/mutants_test.go` into a small program in a scratch module that `replace`s `manifester` with this repository, or add it temporarily to `mutants_test.go` and to the `mutants` list). Run 500 seeds. Then look for a change to the *StorageModel* (not the server) that is still faithful to POSIX and under which the mutant *is* caught. If you find one, decide whether the StorageModel should adopt it.
 5. **Make recovery partial.** Change the `recUnlinking` case so that an `ErrIO` is treated like `ErrNotFound` (skip it, keep going). Predict which mutant from Chapter 15 this most resembles and which invariant will catch it, then run 500 seeds (`go test ./toys3/sim -run 'TestSeeds$' -seeds=500`). Did your prediction hold? If it was not caught, explain why a single leftover is less dangerous than skipping cleanup entirely.
 6. **Find a boot-time race.** Write a small program (or a temporary test in `toys3/sim`) that runs seeds with `Config.Log = true` and searches `Result.Log` for a `Request` delivered to an incarnation before that incarnation's `Started`. How many of the first 200 seeds contain one? (This tells you how often the `modeStartup` queuing path is exercised.)
 

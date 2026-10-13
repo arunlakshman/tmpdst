@@ -2,7 +2,7 @@
 
 > *"Who tests the tests? You break the code on purpose and see whether they notice."*
 
-Two hundred passing seeds feel good. A million passing seeds feel better. But a passing run is evidence of only one thing: that the invariants did not fire. It says nothing, on its own, about whether they *could* have fired. A simulator whose plant model never actually loses un-synced data, or whose oracle accepts everything, or whose crash injection is silently switched off, will pass every seed forever.
+Two hundred passing seeds feel good. A million passing seeds feel better. But a passing run is evidence of only one thing: that the invariants did not fire. It says nothing, on its own, about whether they *could* have fired. A simulator whose storage model never actually loses un-synced data, or whose oracle accepts everything, or whose crash injection is silently switched off, will pass every seed forever.
 
 This chapter is about the discipline that answers "would we have noticed?": **mutation testing**. toys3 ships seven deliberately broken servers in `toys3/sim/mutants_test.go`, each differing from the real server in exactly one protocol step, and a test (`TestCatchesBugs`) that fails unless the simulator catches every one of them. We will look at how the mutants are built (there is real craft in making a bug that is *only* one bug), dissect each one's failing run line by line using logs produced for this book, reproduce the table in `DESIGN.md`, look at an ablation that shows how much a fault model's realism matters, and then talk about the uncomfortable cases: mutants that are silently dead, and mutants that survive.
 
@@ -109,7 +109,7 @@ Note the **IO number**. The rename is `io11`, not `io10`. The inner server alloc
 #42     t=6.871157ms   inc=1 deliver     FSFsyncDone{io10 OK} => FSRename{io12 /data/tmp/0000000000000007 -> /data/obj/k2}
 ```
 
-Gaps in IO numbers in a log are a tell-tale sign of a skipper at work. They are also harmless: IOIDs only need to be unique within an incarnation (`toys3/control/plant.go:22-25`).
+Gaps in IO numbers in a log are a tell-tale sign of a skipper at work. They are also harmless: IOIDs only need to be unique within an incarnation (`toys3/control/storage.go:22-25`).
 
 **`deferReal`** adds a twist used by mutant c: the skipped action is still issued, but *after* everything else the step produced. Because the skip happens inside `expand`, the inner server has already advanced past it (and may already have emitted its `Reply`) by the time the deferred action is appended. When the real action's completion eventually arrives, the inner server is no longer waiting for that IO, so `Step` treats it as stale and ignores it (`toys3/control/controller.go:127-132`). That is the stale-completion handling from Chapter 5 earning its keep in an unexpected place.
 
@@ -297,7 +297,7 @@ func mutSkipDirFsync(env control.Env, cfg control.Config) control.Machine {
 #46     t=7.377477ms   inc=1 crash       FAILURE acked-is-durable: c6: write of "k2" acked but /data/obj/k2 has no durable entry
 ```
 
-On the step where the rename completes, the skipper swallows `FSFsyncDir{io14}`, feeds back a fake OK, and the inner server commits. `AckedIsDurable` asks the PlantModel for `obj/k2`'s durable entry and finds none: the rename only changed `dirent.cur` (`toys3/sim/plantmodel.go:354-362`). No crash was needed. (The `FSRead{io15}` in the same step is a queued GET on `k2` that becomes runnable as soon as the PUT finishes.)
+On the step where the rename completes, the skipper swallows `FSFsyncDir{io14}`, feeds back a fake OK, and the inner server commits. `AckedIsDurable` asks the StorageModel for `obj/k2`'s durable entry and finds none: the rename only changed `dirent.cur` (`toys3/sim/storagemodel.go:355-363`). No crash was needed. (The `FSRead{io15}` in the same step is a queued GET on `k2` that becomes runnable as soon as the PUT finishes.)
 
 Notice the timestamps: up to step 44 they are identical to the correct server's log. The same seed drives the same RNG through the same sequence of draws until the first point where the mutant behaves differently, which here is the swallowed fsync. This is one of the most useful properties of DST for debugging mutants and real bugs alike: **diff the log of the broken run against the log of the fixed run, same seed, and the first differing line is where behaviour diverged.**
 
@@ -398,7 +398,7 @@ func mutNoTripOnError(env control.Env, cfg control.Config) control.Machine {
 #241    t=55.831528ms  inc=1 crash       FAILURE obj-never-torn: durable /data/obj/k2 is torn or corrupt (0 bytes)
 ```
 
-Compare this with the correct server at the same seed. In `seed1.log`, step 233 reads `FSFsyncDone{io78 EIO} => Reply{c30 500} Trip{fsync temp: EIO}` and the server crashes on the spot. Here, the wrapper hides the EIO, and the inner server carries on to rename `tmp/…4c` into `obj/k2` (step 233). Now the PlantModel's fsyncgate model bites: the failed fsync *poisoned* the inode (`toys3/sim/plantmodel.go:330-335`, `FsyncGate: true` in `BaseConfig`), so its dirty pages are marked clean but will never reach the disk. When the next directory fsync lands at step 241, `obj/k2` durably names an inode whose durable content is empty. `obj-never-torn` fires.
+Compare this with the correct server at the same seed. In `seed1.log`, step 233 reads `FSFsyncDone{io78 EIO} => Reply{c30 500} Trip{fsync temp: EIO}` and the server crashes on the spot. Here, the wrapper hides the EIO, and the inner server carries on to rename `tmp/…4c` into `obj/k2` (step 233). Now the StorageModel's fsyncgate model bites: the failed fsync *poisoned* the inode (`toys3/sim/storagemodel.go:331-336`, `FsyncGate: true` in `BaseConfig`), so its dirty pages are marked clean but will never reach the disk. When the next directory fsync lands at step 241, `obj/k2` durably names an inode whose durable content is empty. `obj-never-torn` fires.
 
 This is *exactly* the PostgreSQL fsyncgate story from Chapter 7: retrying or continuing after a failed fsync is unsafe because the kernel may have dropped the error state along with the data. The mutant did not need a crash to be caught because the white-box invariant can see the durable view directly. Notice too, at step 237, a different request (`c28`) whose own `FSFsyncDir` failed got its 200 turned into a 500, also without a Trip; that error alone would not have tripped `obj-never-torn`, because the file content was fine.
 
@@ -471,7 +471,7 @@ The rewrite is clever. Rather than editing `DecodeObject` (which lives in the re
 #657    ...                                FAILURE linearizable: GET req 98 client 0 GET "k3" ... -> 200 garbage(13 bytes) returned bytes no PUT wrote
 ```
 
-`raw(29 bytes)` is a 16-byte header plus a 13-byte payload, with one bit flipped by `PlantModel.read`'s `ReadCorruptProb` coin (`toys3/sim/plantmodel.go:398-402`). The correct server at the same seed and step emits `CorruptionDetected{"k3"}` and replies 500 (Chapter 14 shows both lines). The mutant serves `garbage(13 bytes)` with a 200.
+`raw(29 bytes)` is a 16-byte header plus a 13-byte payload, with one bit flipped by `StorageModel.read`'s `ReadCorruptProb` coin (`toys3/sim/storagemodel.go:399-403`). The correct server at the same seed and step emits `CorruptionDetected{"k3"}` and replies 500 (Chapter 14 shows both lines). The mutant serves `garbage(13 bytes)` with a 200.
 
 Why seed 18 and not seed 1? Because seed 1 has `readcorrupt=0`: at 0.5% per read with a few hundred reads per seed, many seeds see no bit flip at all, and the bit flip must also land on a GET (not a COPY whose garbage then has to be read back) and on an object rather than a `ENOENT`. And as Chapter 14 noted, with `ReadCorruptProb = 0` mutant e survives 1,000 seeds: the protocol never puts a damaged file in `obj/`, so the check is unreachable. A mutation that survives only because its code is unreachable is a strong hint that the fault model is missing something.
 
@@ -498,7 +498,7 @@ If the recovery listing of `tmp/` comes back empty, recovery skips straight to `
 This is the most beautiful failure in the set, so let us follow it from the log of seed 20 (1,750 steps, 13 crashes). The key facts:
 
 - **Temp names repeat across incarnations.** `TmpPath` names a temp file after the IOID of its `FSWrite`, in 16 hex digits (`toys3/format/layout.go:73-79`), and IOIDs restart from 1 in every incarnation (`toys3/control/controller.go:92`, `155-158`). The comment on `TmpPath` states the safety argument: names "never collide" *because* "recovery clears tmp/ before a new incarnation writes anything". The mutant breaks the premise.
-- **FSWrite on an existing name reuses the inode.** `PlantModel.write` creates a new inode only if the name is absent; otherwise it truncates and overwrites the existing inode (`toys3/sim/plantmodel.go:308-317`). That is the semantics of `open(O_WRONLY|O_CREAT|O_TRUNC)` (which is what `prod.writeFile` does, `toys3/prod/executor.go:76-86`).
+- **FSWrite on an existing name reuses the inode.** `StorageModel.write` creates a new inode only if the name is absent; otherwise it truncates and overwrites the existing inode (`toys3/sim/storagemodel.go:309-318`). That is the semantics of `open(O_WRONLY|O_CREAT|O_TRUNC)` (which is what `prod.writeFile` does, `toys3/prod/executor.go:76-86`).
 - **A rename leaves the old name un-durably removed.** The server fsyncs `obj/` after a rename but never fsyncs `tmp/`. So after `rename(tmp/X → obj/k)`, the `tmp/X` entry's *current* version is absent but its *durable* version may still be the inode, if the temp's name had become durable (via a crash that kept it, or background writeback).
 
 Now the story. `tmp/0000000000000004` is a leftover from a much earlier incarnation; it is already in the recovery listing of incarnation 9 (step 1184) and stays there, because this mutant never removes anything. Its name is durable.
@@ -522,7 +522,7 @@ Now the story. `tmp/0000000000000004` is a leftover from a much earlier incarnat
 #1518   inc=12 crash    CRASH (injected crash): kept=0 lost=3 torn=0, dropped 3 queued entries
 ```
 
-`PlantModel.Crash` resolves every un-synced directory entry change with a coin (`toys3/sim/plantmodel.go:471-488`). For `tmp/…04` the coin says *revert*: `cur = durable = I`. Now **two names point at inode I**: `obj/k5` and `tmp/0000000000000004`. A hard link has been conjured out of a crash.
+`StorageModel.Crash` resolves every un-synced directory entry change with a coin (`toys3/sim/storagemodel.go:472-489`). For `tmp/…04` the coin says *revert*: `cur = durable = I`. Now **two names point at inode I**: `obj/k5` and `tmp/0000000000000004`. A hard link has been conjured out of a crash.
 
 ```
    after crash:   obj/k5 ──────┐
@@ -576,7 +576,7 @@ This book re-ran it, adding the fourth combination:
 
 Why does each ingredient help?
 
-- **Background writeback** (`toys3/sim/plantmodel.go:199-201`, `195-232`) makes temp *names* durable on their own, the way a journal commit would. Without it, a temp name becomes durable only if a crash happens to keep it, which then makes it a leftover to begin with; the alias in §15.10 needs a durable temp name *and then* a later rename and a crash that reverts the rename's removal. Writeback makes the first condition common.
+- **Background writeback** (`toys3/sim/storagemodel.go:200-202`, `206-243`) makes temp *names* durable on their own, the way a journal commit would. Without it, a temp name becomes durable only if a crash happens to keep it, which then makes it a leftover to begin with; the alias in §15.10 needs a durable temp name *and then* a later rename and a crash that reverts the rename's removal. Writeback makes the first condition common.
 - **Swarm testing** (`toys3/sim/config.go:137-145`) varies the number of keys per seed from 1 to 32. Mutant f's damage is slow: it needs an object to be written through an alias and then read *before* any PUT to that key overwrites it. With `BaseConfig`'s 3 keys, every key is overwritten constantly, healing the damage before anyone looks. Seed 20 has `keys=32`: most objects sit untouched long enough for a GET to catch the corruption. Chapter 12 explains swarm testing in general.
 
 The lesson, in `DESIGN.md`'s words: *whether a bug gets caught depends on how realistic the fault model is and how varied the workload is.* A twenty-fold difference in time-to-catch on a bug this simple should make you nervous about every bug you have *not* written a mutant for. It is also why mutation testing is the right tool for *evaluating changes to the simulator itself*: if you change the fault model, rerun the mutants and compare first-catch seeds. A change that makes them all slower made the simulator weaker.
@@ -604,13 +604,13 @@ A mutant that survives is either an **equivalent mutant** (it changes the code b
 
 Here is a concrete one. While writing this book, a mutant "g" was tried in an out-of-tree harness: skip recovery's `FSFsyncDir(tmp)` (a `skipper` whose predicate matches `FSFsyncDir` on `format.TmpDir(cfg.Dir)`). Recovery unlinks the leftovers but never makes the unlinks durable. Run against seeds 1..2000 with the default invariants: **not caught**.
 
-Is that a weak test, or is g equivalent? Reason it through with the PlantModel's model:
+Is that a weak test, or is g equivalent? Reason it through with the StorageModel's model:
 
-- After recovery's unlinks, each leftover `tmp/X` is `{cur: absent, durable: I}`. If the server later writes `tmp/X` in this incarnation (IO X), `PlantModel.write` sees the name absent in the *current* view and creates a **fresh** inode J (`plantmodel.go:308-314`). There is no aliasing within the incarnation.
+- After recovery's unlinks, each leftover `tmp/X` is `{cur: absent, durable: I}`. If the server later writes `tmp/X` in this incarnation (IO X), `StorageModel.write` sees the name absent in the *current* view and creates a **fresh** inode J (`storagemodel.go:309-315`). There is no aliasing within the incarnation.
 - If a crash happens, `tmp/X` may revert to I (the old leftover, possibly an alias of a committed object). The next recovery lists and unlinks it again *before* any write is issued, because requests queue behind recovery.
 - So the un-synced unlinks can resurrect garbage, but garbage is always cleaned before it can be written through.
 
-Under this model, g appears to be an **equivalent mutant**: the recovery fsync of `tmp/` is belt-and-braces. That is itself a finding (Chapter 17 lists it among the surprises), and it raises a design question rather than answering one: is the fsync there because a *real* filesystem has some behaviour the PlantModel lacks (say, an `fsync` of a directory being needed before a create in the same directory is ordered after the unlink), or is it simply cheap insurance? Either answer is defensible. What is not defensible is not knowing.
+Under this model, g appears to be an **equivalent mutant**: the recovery fsync of `tmp/` is belt-and-braces. That is itself a finding (Chapter 17 lists it among the surprises), and it raises a design question rather than answering one: is the fsync there because a *real* filesystem has some behaviour the StorageModel lacks (say, an `fsync` of a directory being needed before a create in the same directory is ordered after the unlink), or is it simply cheap insurance? Either answer is defensible. What is not defensible is not knowing.
 
 And a white-box invariant *can* kill g: Chapter 14's sketched `TmpCleanAfterRecovery` ("when `Recovered` is emitted, nothing under `tmp/` is durable") fires immediately. Whether you want that invariant is the same design question in another form: invariants define what the system promises, and a promise nobody depends on is a cost.
 
@@ -632,7 +632,7 @@ Some practical habits that fall out of this chapter:
 - Every row of the `DESIGN.md` table reproduces. White-box invariants catch most mutants at seed 1 and without a crash; black-box invariants catch all of them eventually, b and d only through liveness, d2 and f only through linearizability.
 - Mutant f's 20-seed catch depends on both background writeback and swarm testing; without either it takes 429 seeds. Fault-model realism and workload variety are first-class concerns.
 - A mutant can be dead or wrong. Guard with one-step discipline, liveness counters (`tempsrm=0`), trace-hash diffs against the real server, and by checking *which* invariant caught it.
-- A surviving mutant is either equivalent or a gap. The recovery `FSFsyncDir(tmp)` appears to be equivalent under the current PlantModel model.
+- A surviving mutant is either equivalent or a gap. The recovery `FSFsyncDir(tmp)` appears to be equivalent under the current StorageModel model.
 
 ## Exercises
 
@@ -670,7 +670,7 @@ Some practical habits that fall out of this chapter:
 
 7. **Re-run the ablation.** Write a test that copies `firstCatch` but builds configs with `BaseConfig(seed)` and `cfg.Disturbances.WritebackProb = 0`, and confirm mutant f's first catch is seed 429. Then try `QuiesceEvery` halved and doubled, and record how the first-catch seed of d2 moves. Explain the direction.
 
-8. **Equivalent or not?** Make the case, in writing, for or against the claim in §15.13 that skipping recovery's `FSFsyncDir(tmp)` is an equivalent mutant. Then change the PlantModel in some realistic way that would make it *not* equivalent (for example, make `PlantModel.write` to a name whose current entry is absent but whose durable entry is present reuse the durable inode, as a buggy filesystem might) and see whether the default invariants now catch g. Revert afterwards.
+8. **Equivalent or not?** Make the case, in writing, for or against the claim in §15.13 that skipping recovery's `FSFsyncDir(tmp)` is an equivalent mutant. Then change the StorageModel in some realistic way that would make it *not* equivalent (for example, make `StorageModel.write` to a name whose current entry is absent but whose durable entry is present reuse the durable inode, as a buggy filesystem might) and see whether the default invariants now catch g. Revert afterwards.
 
 ## Further reading
 

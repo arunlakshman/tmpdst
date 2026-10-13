@@ -50,7 +50,7 @@ toys3's controller avoids maps entirely. The comment on `Controller` says so exp
 // maps at all).
 ```
 
-The simulator does use maps (`PlantModel.dirs`, `PlantModel.inodes`, `Oracle.open`, the WGL memo tables), but it only ever *looks things up* in them, or iterates over keys that it sorts first. We will see the two places where that needs a suppression comment in §8.7.
+The simulator does use maps (`StorageModel.dirs`, `StorageModel.inodes`, `Oracle.open`, the WGL memo tables), but it only ever *looks things up* in them, or iterates over keys that it sorts first. We will see the two places where that needs a suppression comment in §8.7.
 
 ## 8.2 The server's StateHash
 
@@ -189,7 +189,7 @@ The simulator has its own small set of hash functions in `toys3/sim/hash.go`:
 // toys3/sim/hash.go:3-11
 // Fold mixes x into the running trace hash h. The simulator folds the step
 // number, the event time and the server's StateHash after every step (and the
-// plant model's hash), so two runs of one seed agree only if their entire
+// storage model's hash), so two runs of one seed agree only if their entire
 // histories agree.
 func Fold(h, x uint64) uint64 {
 	h ^= x + 0x9e3779b97f4a7c15 + (h << 6) + (h >> 2)
@@ -261,13 +261,13 @@ The tags (10..19 for events, 30..40 for actions, 1..5 for ops) make the encoding
 
 One action is hashed differently: `Emit` folds in a *string*, `hashString(telemetryHashKey(x.Telemetry))` (`toys3/sim/trace.go:79-80`), and that string is a rendering of the telemetry value (`Committed{c6 "k2" crc=9b35c638}`, and so on). `fmt.Sprintf` with `%q` and `%08x` is deterministic, so this is safe for determinism. It is not safe for *renaming*: in the first edition of the code the string was the log rendering itself (`DescribeFact`), so changing how the log printed a telemetry value, or renaming the type it printed, would have changed every trace hash from the first such value onwards. `telemetryHashKey` is a frozen copy of that rendering, deliberately kept apart from the log's `DescribeTelemetry`. Why it exists, and the day it earned its keep, is the story of §8.12.
 
-### Hashing the plant model
+### Hashing the storage model
 
-The PlantModel hashes its full state, both the durable and the volatile versions:
+The StorageModel hashes its full state, both the durable and the volatile versions:
 
 ```go
-// toys3/sim/plantmodel.go:616-651
-func (fs *PlantModel) Hash() uint64 {
+// toys3/sim/storagemodel.go:617-652
+func (fs *StorageModel) Hash() uint64 {
 	h := uint64(fs.nextIno)
 	for _, dn := range fs.dirNames() {
 		d := fs.dirs[dn]
@@ -286,7 +286,7 @@ func (fs *PlantModel) Hash() uint64 {
 	return h
 }
 
-func (fs *PlantModel) hashInode(h uint64, id InodeID) uint64 {
+func (fs *StorageModel) hashInode(h uint64, id InodeID) uint64 {
 	in, ok := fs.inodes[id]
 	if !ok {
 		return Fold(h, 0)
@@ -304,7 +304,7 @@ func (fs *PlantModel) hashInode(h uint64, id InodeID) uint64 {
 }
 ```
 
-Notice the two ordered iterations: `fs.dirNames()` returns the directory list that was sorted once at construction (`toys3/sim/plantmodel.go:140-141`, `446`), and `d.names()` returns the entry names sorted (`toys3/sim/plantmodel.go:443-453`). `fs.dirs` and `d.entries` are maps, but they are only *indexed* here, never ranged over. Contents are again summarized as `len<<32 | crc32`, with the same reasoning as the server. The `dirty` and `poisoned` flags are included because they determine future behaviour (whether a crash may lose the content, whether fsync lies; Chapter 11) even when the bytes are identical.
+Notice the two ordered iterations: `fs.dirNames()` returns the directory list that was sorted once at construction (`toys3/sim/storagemodel.go:140-141`, `457`), and `d.names()` returns the entry names sorted (`toys3/sim/storagemodel.go:444-454`). `fs.dirs` and `d.entries` are maps, but they are only *indexed* here, never ranged over. Contents are again summarized as `len<<32 | crc32`, with the same reasoning as the server. The `dirty` and `poisoned` flags are included because they determine future behaviour (whether a crash may lose the content, whether fsync lies; Chapter 11) even when the bytes are identical.
 
 Inodes that have no name are not hashed directly. They matter only if some entry refers to them, and those are reached through the entries.
 
@@ -315,7 +315,7 @@ The trace hash is `Simulator.trace`, initialised to the seed (`trace: cfg.Seed`,
 ```
 toys3/sim/simulator.go
   Run, every step (line 95):  trace = Fold(Fold(Fold(Fold(trace, step), now), kind), inc)
-  Run, every step (line 97):  trace = Fold(trace, plant.Hash())       after handle(e)
+  Run, every step (line 97):  trace = Fold(trace, storage.Hash())     after handle(e)
 
   deliver (line 173):          trace = hashEvent(trace, body)          the event delivered
   deliver (line 182):          trace = hashAction(trace, a)            each action returned
@@ -339,7 +339,7 @@ Read as a timeline for a single `KindDeliver` step:
              ─► invariants
 ```
 
-The small tags `1`, `2`, `3` in fs-land, wake and crash keep those contributions from being confused with each other or with a delivery. The crash fold includes the `CrashReport` counts (how many un-synced changes were kept, lost and torn), which captures the adversary's resolution choices even before the PlantModel hash at the end of the step captures their *result*.
+The small tags `1`, `2`, `3` in fs-land, wake and crash keep those contributions from being confused with each other or with a delivery. The crash fold includes the `CrashReport` counts (how many un-synced changes were kept, lost and torn), which captures the adversary's resolution choices even before the StorageModel hash at the end of the step captures their *result*.
 
 What is deliberately **not** in the trace hash:
 
@@ -416,7 +416,7 @@ type Result struct {
 
 ### Running seeds in parallel without breaking determinism
 
-The canary runs in one goroutine. The campaign runner, `toys3/cmd/toys3sim`, runs many seeds in parallel on `-workers` goroutines (default `GOMAXPROCS`). Is that safe? It is, because of the *no package-level variables* rule (§8.6): every seed's `sim.Run` creates its own `Rand`, `Queue`, `PlantModel`, `Workload`, `Oracle` and server. Nothing is shared except what the runner itself shares (a seed counter, atomic step counters, and the aggregated `Stats` under a mutex), and none of that is visible to a run.
+The canary runs in one goroutine. The campaign runner, `toys3/cmd/toys3sim`, runs many seeds in parallel on `-workers` goroutines (default `GOMAXPROCS`). Is that safe? It is, because of the *no package-level variables* rule (§8.6): every seed's `sim.Run` creates its own `Rand`, `Queue`, `StorageModel`, `Workload`, `Oracle` and server. Nothing is shared except what the runner itself shares (a seed counter, atomic step counters, and the aggregated `Stats` under a mutex), and none of that is visible to a run.
 
 With `-check-determinism`, the runner replays every `-det-every`th seed (default 10) and compares the same three numbers:
 
@@ -710,10 +710,10 @@ Sometimes a flagged construct is fine. The escape hatch is a comment `//detcheck
 
 A suppression *without* a reason does not suppress anything, and is itself reported. This forces the reasoning into the code where a reviewer will see it. (Note, with some amusement, that the detcheck source itself ranges over a map, `for line, reason := range sup`, with a comment explaining why the order is irrelevant. detcheck does not check itself; it is a tool, not a deterministic package.)
 
-toys3 has exactly two suppressions, both in the PlantModel:
+toys3 has exactly two suppressions, both in the StorageModel:
 
 ```go
-// toys3/sim/plantmodel.go:443-453
+// toys3/sim/storagemodel.go:444-454
 func (d *fdir) names() []string {
 	if d.sorted == nil {
 		names := make([]string, 0, len(d.entries))
@@ -730,7 +730,7 @@ func (d *fdir) names() []string {
 This is the canonical safe map iteration: collect keys, sort them, use the sorted slice. The randomized order never escapes the function.
 
 ```go
-// toys3/sim/plantmodel.go:518-528
+// toys3/sim/storagemodel.go:519-529
 	// 3. Forget inodes without a name.
 	var dead []InodeID
 	for id := range fs.inodes { //detcheck:ok only collects ids; deletion order is irrelevant
@@ -1014,7 +1014,7 @@ The refactor (commits `9b65410..a4018d5`) touched 51 files, with about 3,800 ins
 A refactor is behaviour-preserving if every observable output is the same. For toys3 the observable outputs of a simulated run are:
 
 - the number of steps, and the virtual time at which the run ended;
-- the trace hash (which folds every popped entry, every event, every action, the controller's `StateHash` after every step, and the plant model's hash after every step);
+- the trace hash (which folds every popped entry, every event, every action, the controller's `StateHash` after every step, and the storage model's hash after every step);
 - the number of random draws (`RandCalls`), which pins *where* in the code randomness was consumed;
 - the statistics (crashes, trips, torn files, windows checked, ...);
 - the failures, and for a mutant, the first seed and step at which it is caught.
@@ -1059,7 +1059,7 @@ mutant-seed1 f-skip-temp-cleanup seed=1 steps=1552 rand=5467 trace=f9a6442332345
 Three design choices in that test are worth copying:
 
 1. **Stats as a vector of numbers, not `Stats.String()`.** The refactor was going to rename `Stats.Halts` to `Stats.Trips` and its printed key from `halts=` to `trips=`. If the golden file stored the printed line, that rename would have "changed behaviour" by the test's definition. Storing a fixed-order vector of integers means a field can be renamed in the same commit as its position in `statsVector`, and the golden file does not move. The comment says so: "When a field is renamed, rename it here too, keeping its position."
-2. **Mutants are part of the golden.** A mutant's catching seed and step depend on the *interaction* between the controller, the plant model, the oracle and the invariants. If any of them changed behaviour, even in a way that left the correct controller's runs identical, the mutant rows would likely move. The mutants make the golden file sharper.
+2. **Mutants are part of the golden.** A mutant's catching seed and step depend on the *interaction* between the controller, the storage model, the oracle and the invariants. If any of them changed behaviour, even in a way that left the correct controller's runs identical, the mutant rows would likely move. The mutants make the golden file sharper.
 3. **The hashes the book quotes are in it.** Seed 1's `1ca97eb77a9044e1` and mutant f's `f9a6442332345f03` are rows of the file. If the golden passes, every hash quoted in this book is still true.
 
 ### Is the trace hash rename-sensitive?
@@ -1073,9 +1073,9 @@ Before renaming anything, the refactor asked a precise question: *which inputs t
 | action tags 30–40 and their fields | `toys3/sim/trace.go:58-83` | the same, **except `Emit`** |
 | `Emit` → a rendered string | `toys3/sim/trace.go:79-80` | **the text of the rendering**: type names and format |
 | `Trip.Cause` | `toys3/sim/trace.go:77-78` | the *text* of the causes (`"fsync temp: EIO"`, ...) |
-| paths in actions; directory names in the plant hash | `trace.go`, `plantmodel.go` | the layout (`/obj`, `/tmp`, 16-hex temp names, `%XX` escaping) |
+| paths in actions; directory names in the storage hash | `trace.go`, `storagemodel.go` | the layout (`/obj`, `/tmp`, 16-hex temp names, `%XX` escaping) |
 | `StateHash` | `toys3/control/hash.go:7-32` | field order and the **numeric** values of `mode`, `recStep`, `opKind`, `reqStep` |
-| plant hash | `toys3/sim/plantmodel.go:616-651` | uses `Checksum`; moving it from `core` to `format` changes nothing |
+| storage hash | `toys3/sim/storagemodel.go:617-652` | uses `Checksum`; moving it from `core` to `format` changes nothing |
 | `RandCalls` and every later draw | `toys3/sim/rand.go` | **the order of draws**: any "tidy-up" that moves an `rng` call breaks every later decision |
 
 Two rows needed action. The `Trip.Cause` row is easy: the rename from `Halt{Reason}` to `Trip{Cause}` changes a field name, not the strings, and none of the cause strings contains the word "halt". The `Emit` row is the trap.
@@ -1094,7 +1094,7 @@ In the pre-refactor code, `hashAction` folded a telemetry value like this:
 The second commit, `db1b837`, removed the trap *before* any rename. It split `describe.go` into two files with different rules: `log.go` (rendering, free to change) and `trace.go` (hashing, frozen), and it gave the hash its own copy of the rendering:
 
 ```go
-// toys3/sim/trace.go:85-104
+// toys3/sim/trace.go:85-106
 // telemetryHashKey is the FROZEN hash encoding of telemetry (trace-hash
 // epoch 1). It reproduces, byte for byte, how telemetry (then called facts)
 // was rendered when the trace hash was defined, so renaming telemetry types
@@ -1113,14 +1113,16 @@ func telemetryHashKey(t control.Telemetry) string {
 	case control.CorruptionDetected:
 		return fmt.Sprintf("CorruptObject{%q}", x.Key) // legacy spelling, on purpose
 	}
-	return fmt.Sprintf("%T", t)
+	// Unreachable for the current telemetry types (TestTelemetryHashKeyCoversAllTypes).
+	// A fixed string, not %T, so no Go type name is ever a hash input.
+	return "?"
 }
 ```
 
 (In `db1b837` it was called `factHashKey` and switched on `core.Fact`; commit `91ab309` renamed it along with the types. Its *output* never changed.) Note the comment on the `CorruptionDetected` case: the hash key still spells the old name, on purpose, and the log renderer right next to it in `log.go` spells the new one (`toys3/sim/log.go:112-113`). A test pins the frozen encoding independently of the golden file, so that a well-meaning cleanup of `telemetryHashKey` fails with a message that explains itself:
 
 ```go
-// toys3/sim/trace_test.go:9-25
+// toys3/sim/trace_test.go:15-31
 // TestTelemetryHashKeyFrozen pins the hash encoding of telemetry. If this fails, a
 // change altered every trace hash: see telemetryHashKey.
 func TestTelemetryHashKeyFrozen(t *testing.T) {
@@ -1142,26 +1144,28 @@ func TestTelemetryHashKeyFrozen(t *testing.T) {
 
 The lesson generalizes far beyond toys3: **hash inputs must be stable codes, not rendered names.** Every event and action was already hashed as a numeric tag plus fields; telemetry was the one exception, because hashing its description "saved writing a third type switch" (this book's first edition said exactly that, approvingly). The shortcut was harmless for determinism and expensive for evolution. The cleaner fix would be numeric tags for telemetry too (41, 42, 43, ...). The refactor deliberately did *not* do that, because it would change every hash: it is recorded as an optional "epoch 2" for some later commit that announces itself as a re-baseline. Freezing first, renaming second, kept the epoch at 1.
 
-One small residue: the fallback `fmt.Sprintf("%T", t)` at the end of `telemetryHashKey` prints a package-qualified type name (`control.Something`), which *is* rename-sensitive. It is unreachable for the closed set of three telemetry types, so it never contributes to a hash; but it is the one line of the frozen encoding that would not survive a package rename if it were ever reached.
+One small residue survived the refactor: the fallback at the end of `telemetryHashKey` was `fmt.Sprintf("%T", t)`, a package-qualified type name (`control.Something`), which *is* rename-sensitive. It was unreachable for the closed set of three telemetry types, so it never contributed to a hash; but it was the one line of the frozen encoding that would not have survived a rename if it were ever reached. Commit `10777a2` replaced it with the fixed string `"?"` (shown above) and added `TestTelemetryHashKeyCoversAllTypes`, which reads every `isTelemetry` receiver from the source of package `control` and fails if one has no explicit case. The golden file did not move, which is the proof that the fallback really was unreachable.
 
 ### The commit sequence
 
-Each commit after that was one step of the migration plan in `toys3/REFACTOR-PROPOSAL.md` §7. Each compiled, passed `go vet`, `gofmt`, `go test ./toys3/... ./tools/...` and `scripts/ci-determinism.sh`, and left the golden file byte-for-byte unchanged. Every commit message ends with the same two words: "Golden unchanged."
+Each commit after that was one step of the migration plan in `toys3/REFACTOR-PROPOSAL.md` §7. Each compiled, passed `go vet`, `gofmt`, `go test ./toys3/... ./tools/...` and `scripts/ci-determinism.sh`, and left the golden file byte-for-byte unchanged. Every commit message ends with the same two words: "Golden unchanged." The last two rows are later, smaller commits held to the same rule.
 
 | Commit | Step | What it did | What could have broken the golden, and why it did not |
 |---|---|---|---|
 | `b234444` | — | The proposal (`toys3/REFACTOR-PROPOSAL.md`). | Documentation only. |
 | `9b65410` | 0 | `TestGolden` and `golden-v1.txt`, generated on the old code. | Test only. |
 | `db1b837` | 1 | Freeze the telemetry hash key; split `describe.go` into `trace.go` and `log.go`. | The frozen key had to reproduce `DescribeFact` byte for byte; the golden proved it did. |
-| `5c5899e` | 2 | The plant port: FS types move to `plant.go`, gain `ID()`, and implement `Actuation`/`Feedback`; five type switches replaced. | The simulator's `deliver` switch changed from seven listed types to `case control.Actuation`. If `Reply`, `Emit` or `Halt` had implemented `Actuation`, an action would have changed branch. None does. |
+| `5c5899e` | 2 | The plant port (now the Storage port): FS types move to `plant.go` (now `storage.go`), gain `ID()`, and implement `Actuation`/`Feedback`; five type switches replaced. | The simulator's `deliver` switch changed from seven listed types to `case control.Actuation`. If `Reply`, `Emit` or `Halt` had implemented `Actuation`, an action would have changed branch. None does. |
 | `1ef4dcb` | 3 | Extract `toys3/format`; `TmpPath` takes `uint64`; new format tests; CI derives its package list. | A pure move. `TmpPath(root, uint64(io))` formats the same 16 hex digits. |
 | `907990e` | 4 | Rename package `core` to `control`. | Mechanical; Go package names never reach the hash. (The `%T` fallbacks would have, had they been reachable.) |
 | `401d317` | 5 | Split `server.go` into `controller.go`, `recovery.go`, `hash.go`; `Server` → `Controller`, `phase` → `mode`, `canRun` → `permitted`, `conflicts` → `interlocked`, `startRunnable` → `startPermitted`. | `StateHash` folds the enums numerically: reordering an `iota` would have broken it. None was reordered, and each enum now says "append only". (`phaseHalted` was briefly `modeHalted`, until the next commit.) |
 | `020f09c` | 6 | `Halt{Reason}` → `Trip{Cause}`, `halt`/`failHalt` → `trip`/`failTrip`, `modeTripped`, `ErrHalted` → `ErrTripped`, `Stats.Halts` → `Trips`. | The cause strings are hashed; they were kept verbatim. The printed `halts=` became `trips=`, which the golden's numeric vector does not see. |
 | `91ab309` | 7 | `Fact` → `Telemetry`, `CorruptObject` → `CorruptionDetected`, `TimedFact` → `Sample`, `View.Facts` → `View.Telemetry`, `DescribeFact` → `DescribeTelemetry`, `CorruptObjects` → `CorruptionsDetected`, `Indetermined` → `Indeterminate`. | **This is the step that proves step 1 was needed.** Without the frozen key, renaming the log output here would have changed the hash of every run with a corruption. |
-| `edc610c` | 8 | `FakeFS` → `PlantModel`, `FSFaults` → `Disturbances`, `FSPlan` → `ActuationPlan{Fail, DeadTime, FeedbackDelay}`, `QuietTail` → `Settling`, `KindQuiet`/`KindTailEnd` → `KindSettle`/`KindSettlingEnd`, `modelState` → `refState`, `groups` → `estimate`; `value.go` and `history.go` split out. | `EntryKind` values are folded into the hash at every pop: the new names kept the old numeric positions. Every `rng` call stayed exactly where it was. |
+| `edc610c` | 8 | `FakeFS` → `PlantModel` (now `StorageModel`), `FSFaults` → `Disturbances`, `FSPlan` → `ActuationPlan{Fail, DeadTime, FeedbackDelay}`, `QuietTail` → `Settling`, `KindQuiet`/`KindTailEnd` → `KindSettle`/`KindSettlingEnd`, `modelState` → `refState`, `groups` → `estimate`; `value.go` and `history.go` split out. | `EntryKind` values are folded into the hash at every pop: the new names kept the old numeric positions. Every `rng` call stayed exactly where it was. |
 | `2787f65` | 9 | The `GroundTruth` ACL: `View.FS()` → `View.GroundTruth()`; `PlantModel.EachDurable`. | Invariant failures are not hashed, but their *order* is observable in the golden's failure counts and messages; `EachDurable` iterates in the same sorted order as the old `Durable().Files`. |
 | `a4018d5` | 10 | Docs and comments: package docs, `DESIGN.md`, the comment-only fixes from Chapter 17. | Zero code. |
+| `56b0d2e` | — | After the refactor: rename *plant* to *storage*. `PlantModel` → `StorageModel`, `plantmodel.go` → `storagemodel.go`, `control/plant.go` → `control/storage.go` (the Storage port), `Simulator.plant` → `Simulator.storage`, `TestPlantModel*` → `TestStorageModel*`, and every "plant" in comments and docs. | The only string that changed and is ever printed is a `panic` message. Before renaming, the commit checked that no hash input depends on a Go name; the one candidate, the `%T` fallback of `telemetryHashKey`, is unreachable. Seed 1 still `1ca97eb77a9044e1`; every mutant caught at the same seed and step. |
+| `10777a2` | — | Comment drift left by the mechanical renames ("enters the control", "the core only sees the code", "fake filesystem", "latencies"); `telemetryHashKey`'s fallback `%T` → `"?"` plus a coverage test; `prod.Executor.Execute` takes `control.Actuation`; a redundant `uint64` conversion in `format.TmpPath`. | The fallback change is the only one that touches the hash function, and the golden proves it unreachable. The `Execute` signature is production-only (not in the simulator). |
 
 The rows show a pattern. The risky steps were never the big mechanical ones (renaming a package across 32 files is boring and safe); they were the small ones where a *value* that feeds the hash could move without anyone noticing: an enum position, a rendered string, an iteration order, a random draw. The golden file turns each of those into a test failure at the commit that caused it, with a seed number attached.
 
@@ -1207,7 +1211,7 @@ The order is the lesson: **pin, then make the pin robust, then change.** Writing
 
 ## Key takeaways
 
-- The trace hash is a fingerprint of the *whole history*: it folds the step number, time, entry kind and incarnation of every step, every event and action, the server's `StateHash` after every delivery, every FS completion, every issued request, every crash resolution, and the PlantModel hash after every step.
+- The trace hash is a fingerprint of the *whole history*: it folds the step number, time, entry kind and incarnation of every step, every event and action, the server's `StateHash` after every delivery, every FS completion, every issued request, every crash resolution, and the StorageModel hash after every step.
 - `StateHash` must be injective over behaviour-relevant state: fixed field order, length prefixes, no pointers, no map order. Hashing a payload's length and CRC instead of its bytes is a performance trade.
 - The canary compares trace hash, random draw count and step count; checks that logging does not perturb the run; and checks that the seed actually matters.
 - SplitMix64 and Lemire's bounded integers are written out in `rand.go` so that a seed's meaning never changes with a Go release. `Calls()` gives every random decision a coordinate.
@@ -1224,7 +1228,7 @@ The order is the lesson: **pin, then make the pin robust, then change.** Writing
 4. **Find a divergence by draw number.** Add `fmt.Fprintf(os.Stderr, "%d %d\n", s.step, s.rng.Calls())` temporarily at the end of `Simulator.Run`'s loop body (you will need to exempt it from detcheck mentally; it is a debugging hack). Run seed 1 twice and diff. Then introduce the map bug from Exercise 1 and find the first step where the draw counts differ. Revert everything.
 5. **Break the gate, not the code.** Check out the old canary pipeline from commit `011144f` into a scratch copy of `scripts/ci-determinism.sh` (outside the repo), point it at `./toys3/sim/...`, and introduce a deliberate nondeterminism in `toys3/sim` (for example, in `Simulator.New`, XOR the seed with `uint64(time.Now().UnixNano())` before calling `NewRand`; detcheck will flag the `time` import, which is the point of a different exercise, so ignore it here). Confirm the old script reports "skipped" and "determinism gate passed". Run the current script and confirm it fails. Revert.
 6. **Allow-list exactness.** Add `hash/fnv` to a scratch copy of `allow.txt`, pass it with `-allow`, and rewrite the server's `hasher` to use `hash/fnv`. Does the trace hash for seed 1 change? (It should not, if the hand-written FNV-1a is correct. This is a nice end-to-end test of the hasher.) Revert.
-7. **The `Chance(0)` trap.** Set `cfg.Disturbances.ReadCorruptProb = 0` in a scratch program and run seed 1. Compare the trace hash and `RandCalls` with the default. Explain the difference in the number of draws from the code of `Chance` and `PlantModel.read`.
+7. **The `Chance(0)` trap.** Set `cfg.Disturbances.ReadCorruptProb = 0` in a scratch program and run seed 1. Compare the trace hash and `RandCalls` with the default. Explain the difference in the number of draws from the code of `Chance` and `StorageModel.read`.
 8. **Feel the frozen key.** In a scratch copy, change the `CorruptionDetected` case of `telemetryHashKey` to print `CorruptionDetected{%q}` (the "obvious cleanup"). Run `go test ./toys3/sim -run 'TestGolden|TestTelemetryHashKeyFrozen' -v`. Which test fails first, and on which line of the golden file? Find the first `default` row that changed and check, with `go test ./toys3/sim -run TestSeeds -seed=N -v`, that its `corruptdet` is non-zero. Explain why every row with `corruptdet=0` is unaffected. Revert.
 9. **Reorder an enum.** Swap `modeRecovering` and `modeStartup` in the `mode` const block (keep the names, change their values). Which tests fail? Does `TestStateHash` notice? Does `TestGolden`? Explain the difference in what each test pins. Revert.
 10. **Replay the log comparison.** Build the tracer of Chapter 16 twice, once with a `replace` directive pointing at a checkout of `0f0aad9` and once at `a4018d5`. Dump seed 132 with both, apply the rename map of §8.12 to the old log, and `diff`. Then add one line to the rename map that is *wrong* (for example, rewrite `Committed{` to `Commit{`) and observe how quickly the comparison tells you.

@@ -2,14 +2,14 @@
 
 > *"A seed that passed is a fact about one universe. A campaign is a census."*
 
-Everything up to this chapter has been about building the machine: the state machine, the fake filesystem, the workload, the oracle, the invariants, the mutants. This chapter is about *driving* it. How do you run one seed, a thousand seeds, ten minutes of seeds on every core? How do you read what comes back? When something fails, what is the shortest path from "red" to "I understand the bug"? And how does all of this fit into CI so that determinism and correctness are defended on every push?
+Everything up to this chapter has been about building the machine: the state machine, the plant model, the workload, the oracle, the invariants, the mutants. This chapter is about *driving* it. How do you run one seed, a thousand seeds, ten minutes of seeds on every core? How do you read what comes back? When something fails, what is the shortest path from "red" to "I understand the bug"? And how does all of this fit into CI so that determinism and correctness are defended on every push?
 
 There are exactly two entry points, and it is worth knowing both intimately:
 
 1. **`go test ./toys3/sim`** and its flags, defined in `toys3/sim/sim_test.go` and `toys3/sim/mutants_test.go`. This is the developer's loop: replay one seed, run N seeds, run for D seconds, run the mutants.
 2. **`go run ./toys3/cmd/toys3sim`**, the parallel campaign runner in `toys3/cmd/toys3sim/main.go`. This is the "burn CPU for ten minutes and tell me what you found" tool.
 
-Both are thin. All of the interesting work happens in `sim.Run(cfg)` (`toys3/sim/config.go:196`), which takes a `Config` and returns a `Result`. Every entry point is a different way of choosing configs and summarizing results.
+Both are thin. All of the interesting work happens in `sim.Run(cfg)` (`toys3/sim/config.go:198`), which takes a `Config` and returns a `Result`. Every entry point is a different way of choosing configs and summarizing results.
 
 ---
 
@@ -18,7 +18,7 @@ Both are thin. All of the interesting work happens in `sim.Run(cfg)` (`toys3/sim
 Before looking at the drivers, fix the atom in your head:
 
 ```go
-// toys3/sim/config.go:194-196
+// toys3/sim/config.go:196-198
 // Run executes one simulation. It never panics on server misbehavior: a panic
 // inside Step is recovered and reported as a Failure.
 func Run(cfg Config) Result { return New(cfg).Run() }
@@ -27,21 +27,21 @@ func Run(cfg Config) Result { return New(cfg).Run() }
 and
 
 ```go
-// toys3/sim/config.go:135-143
+// toys3/sim/config.go:137-145
 func DefaultConfig(seed uint64) Config {
 	cfg := BaseConfig(seed)
 	r := NewRand(seed ^ 0x5a5a_c0ff_ee00_1234)
 	cfg.Workload.Keys = []int{1, 2, 3, 3, 4, 8, 16, 32}[r.Intn(8)]
 	cfg.Workload.Clients = []int{2, 4, 4, 6}[r.Intn(4)]
 	cfg.CrashProb = []float64{0.001, 0.004, 0.004, 0.01}[r.Intn(4)]
-	cfg.FS.EIOProb = []float64{0.002, 0.01, 0.01, 0.03}[r.Intn(4)]
+	cfg.Disturbances.EIOProb = []float64{0.002, 0.01, 0.01, 0.03}[r.Intn(4)]
 	return cfg
 }
 ```
 
 A seed is therefore *two* things: the seed of the run's `Rand` (everything that happens inside the run), and, via a separate stream (`seed ^ 0x5a5a_c0ff_ee00_1234`), the swarm parameters of the run (how many keys, clients, how crashy, how EIO-prone). Chapter 12 explains why those must be separate streams. For campaigns the consequence is simple: **"seed 132" fully names a universe**, including its shape. Two people running seed 132 at the same commit get the same keys, clients, crash rate, EIO rate, event log and trace hash.
 
-The `Result` (`toys3/sim/config.go:45-55`) carries `Failures` (empty means pass), `Stats` (counters), `TraceHash` and `RandCalls` (determinism fingerprints), `Steps`, `Crashes`, `EndTime`, and, only if `cfg.Log` is set, the full `Log`.
+The `Result` (`toys3/sim/config.go:47-57`) carries `Failures` (empty means pass), `Stats` (counters), `TraceHash` and `RandCalls` (determinism fingerprints), `Steps`, `Crashes`, `EndTime`, and, only if `cfg.Log` is set, the full `Log`.
 
 ## 16.2 The test entry points (`toys3/sim/sim_test.go`)
 
@@ -59,7 +59,7 @@ var (
 and in `mutants_test.go`:
 
 ```go
-// toys3/sim/mutants_test.go:341
+// toys3/sim/mutants_test.go:329
 var mutantSeeds = flag.Int("mutant-seeds", 500, "TestCatchesBugs: seeds to try per mutant")
 ```
 
@@ -127,7 +127,7 @@ A few details are worth pausing on.
 
 **The sweep reports every failing seed, not just the first.** `t.Errorf` does not stop the test. A broken change usually fails many seeds; the list of failing seeds and their invariant names is itself diagnostic ("all failures are `acked-is-durable`" points at a very different bug from "a mix of `linearizable` and `liveness`").
 
-**Only `r.Failures[0]` is reported per seed.** A run stops at the first step with a failure (`toys3/sim/simulator.go:364-374` sets `halted`), but the invariant loop in `afterStep` (`toys3/sim/simulator.go:348-352`) keeps calling the remaining invariants for that same step, so several can be recorded at one step. Mutant e at seed 18 produces two (`no-corrupt-reads` and `linearizable`, both at step 657). The sweep shows only the first; the replay shows all.
+**Only `r.Failures[0]` is reported per seed.** A run stops at the first step with a failure (`toys3/sim/simulator.go:365-375` sets `halted`), but the invariant loop in `afterStep` (`toys3/sim/simulator.go:349-353`) keeps calling the remaining invariants for that same step, so several can be recorded at one step. Mutant e at seed 18 produces two (`no-corrupt-reads` and `linearizable`, both at step 657). The sweep shows only the first; the replay shows all.
 
 **The `repro` helper** is a one-liner:
 
@@ -206,28 +206,28 @@ func TestCoverage(t *testing.T) {
 }
 ```
 
-This is the "a passing run that never crashed mid-PUT proves nothing" test. It fails if, across the first 200 seeds, any one of sixteen interesting things *never happened*: no crash in the middle of a PUT, no torn file, no read corruption, no 400, no Halt, no `CorruptObject` fact, no temp removed by recovery, and so on. It is a crude, binary form of what the DST literature calls **"sometimes" assertions** (Antithesis's `Sometimes`, the "Reachable" assertions in `docs/lessons.md` §11): properties that must hold *at least once* across a campaign, as evidence that the fault model reaches the code it claims to.
+This is the "a passing run that never crashed mid-PUT proves nothing" test. It fails if, across the first 200 seeds, any one of sixteen interesting things *never happened*: no crash in the middle of a PUT, no torn file, no read corruption, no 400, no Trip, no `CorruptionDetected` telemetry, no temp removed by recovery, and so on. It is a crude, binary form of what the DST literature calls **"sometimes" assertions** (Antithesis's `Sometimes`, the "Reachable" assertions in `docs/lessons.md` §11): properties that must hold *at least once* across a campaign, as evidence that the fault model reaches the code it claims to.
 
 When it ran for this chapter:
 
 ```
 $ go test ./toys3/sim -run TestCoverage -v
-    sim_test.go:91: reqs=47270 200=33446 400=887 404=6842 500=1035 indet=5060 fsops=113656 eio=1061 crashes=1691 halts=673 midput=1473 torn=87 lost=1539 kept=1350 readcorrupt=71 corruptobj=70 tempsrm=1006 windows=6708 maxwin=23 widened=0
+    sim_test.go:91: reqs=47270 200=33446 400=887 404=6842 500=1035 indet=5060 fsops=113656 eio=1061 crashes=1691 trips=673 midput=1473 torn=87 lost=1539 kept=1350 readcorrupt=71 corruptdet=70 tempsrm=1006 windows=6708 maxwin=23 widened=0
 --- PASS: TestCoverage (0.87s)
 ```
 
 Notice that this is the *same* aggregate as `TestSeeds -seeds=200`. Of course it is: the same 200 configs, the same 200 universes.
 
-### `TestCorruptObjectUnreachableWithoutBitFlips`
+### `TestCorruptionUnreachableWithoutBitFlips`
 
 ```go
 // toys3/sim/sim_test.go:124-133
-func TestCorruptObjectUnreachableWithoutBitFlips(t *testing.T) {
+func TestCorruptionUnreachableWithoutBitFlips(t *testing.T) {
 	for seed := uint64(1); seed <= 200; seed++ {
 		cfg := DefaultConfig(seed)
-		cfg.FS.ReadCorruptProb = 0
+		cfg.Disturbances.ReadCorruptProb = 0
 		r := Run(cfg)
-		if len(r.Failures) > 0 || r.Stats.CorruptObjects > 0 {
+		if len(r.Failures) > 0 || r.Stats.CorruptionsDetected > 0 {
 			t.Fatalf(...)
 		}
 	}
@@ -254,15 +254,15 @@ d2 is first caught at seed 132, so 50 seeds is not enough. Raise it when you add
 
 ### How long does `go test ./toys3/sim` take?
 
-All of the above together (canary, 200-seed sweep, 200-seed coverage, 200-seed CRC check, the fake FS, queue and oracle unit tests, and all seven mutants twice):
+All of the above together (canary, 200-seed sweep, 200-seed coverage, 200-seed CRC check, the plant model, queue and oracle unit tests, all seven mutants twice, and, since the refactor, the golden test of Chapter 8 §8.12 with its 550 seeds and 14 mutant searches):
 
 ```
 $ time go test ./toys3/sim -count=1
-ok  	manifester/toys3/sim	4.475s
-go test ./toys3/sim -count=1  4.19s user 0.49s system 88% cpu 5.271 total
+ok  	manifester/toys3/sim	7.669s
+go test ./toys3/sim -count=1  7.57s user 0.55s system 98% cpu 8.277 total
 ```
 
-About five seconds. That is the budget to defend. A DST suite that takes five seconds runs on every save; one that takes five minutes runs before lunch; one that takes an hour runs never. Long campaigns belong in the campaign runner.
+About eight seconds, of which the golden test is roughly three (the first edition measured about five seconds before it existed). That is the budget to defend. A DST suite that takes five seconds runs on every save; one that takes five minutes runs before lunch; one that takes an hour runs never. Long campaigns belong in the campaign runner.
 
 ## 16.3 The campaign runner, line by line (`toys3/cmd/toys3sim/main.go`)
 
@@ -290,12 +290,12 @@ The crucial sentence is "no shared state". A simulation is single-threaded *insi
 
 ```go
 // toys3/cmd/toys3sim/main.go:31-36
-duration := flag.Duration("duration", time.Minute, "wall-clock budget")
-workers := flag.Int("workers", runtime.GOMAXPROCS(0), "parallel seeds")
-startSeed := flag.Uint64("start-seed", 1, "first seed")
-checkDet := flag.Bool("check-determinism", false, "run every -det-every'th seed twice and compare traces")
-detEvery := flag.Uint64("det-every", 10, "with -check-determinism: replay every K-th seed")
-maxFailures := flag.Int("max-failures", 20, "stop early after this many failing seeds")
+	duration := flag.Duration("duration", time.Minute, "wall-clock budget")
+	workers := flag.Int("workers", runtime.GOMAXPROCS(0), "parallel seeds")
+	startSeed := flag.Uint64("start-seed", 1, "first seed")
+	checkDet := flag.Bool("check-determinism", false, "run every -det-every'th seed twice and compare traces")
+	detEvery := flag.Uint64("det-every", 10, "with -check-determinism: replay every K-th seed")
+	maxFailures := flag.Int("max-failures", 20, "stop early after this many failing seeds")
 ```
 
 | Flag | Default | Meaning |
@@ -334,15 +334,15 @@ deadline := start.Add(*duration)
 
 ```go
 // toys3/cmd/toys3sim/main.go:53-61
-record := func(f failure) {
-	mu.Lock()
-	defer mu.Unlock()
-	failures = append(failures, f)
-	fmt.Printf("FAIL seed %d: %s\n  repro: go test ./toys3/sim -run TestSeeds -seed=%d -v\n", f.seed, f.msg, f.seed)
-	if len(failures) >= *maxFailures {
-		stop.Store(true)
+	record := func(f failure) {
+		mu.Lock()
+		defer mu.Unlock()
+		failures = append(failures, f)
+		fmt.Printf("FAIL seed %d: %s\n  repro: go test ./toys3/sim -run TestSeeds -seed=%d -v\n", f.seed, f.msg, f.seed)
+		if len(failures) >= *maxFailures {
+			stop.Store(true)
+		}
 	}
-}
 ```
 
 Failures print immediately, with the repro command, so you can start debugging while the campaign keeps running.
@@ -392,59 +392,59 @@ Line by line:
 
 ```go
 // toys3/cmd/toys3sim/main.go:92-103
-progress := func(final bool) {
-	mu.Lock()
-	defer mu.Unlock()
-	el := time.Since(start)
-	n := done.Load()
-	label := "progress"
-	if final {
-		label = "SUMMARY"
+	progress := func(final bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		el := time.Since(start)
+		n := done.Load()
+		label := "progress"
+		if final {
+			label = "SUMMARY"
+		}
+		fmt.Printf("%s %v: seeds=%d (%.0f/s) steps=%d determinism-replays=%d failures=%d workers=%d\n  %s\n",
+			label, el.Round(time.Second), n, float64(n)/el.Seconds(), steps.Load(), detRuns.Load(), len(failures), *workers, agg)
 	}
-	fmt.Printf("%s %v: seeds=%d (%.0f/s) steps=%d determinism-replays=%d failures=%d workers=%d\n  %s\n",
-		label, el.Round(time.Second), n, float64(n)/el.Seconds(), steps.Load(), detRuns.Load(), len(failures), *workers, agg)
-}
 ```
 
 A ticker prints `progress` every ten seconds (`toys3/cmd/toys3sim/main.go:104-115`); when all workers finish, a final `SUMMARY` line is printed (`toys3/cmd/toys3sim/main.go:117`). Then:
 
 ```go
 // toys3/cmd/toys3sim/main.go:118-125
-if len(failures) > 0 {
-	fmt.Printf("%d failing seed(s); reproduce with:\n", len(failures))
-	for _, f := range failures {
-		fmt.Printf("  go test ./toys3/sim -run TestSeeds -seed=%d -v\n", f.seed)
+	if len(failures) > 0 {
+		fmt.Printf("%d failing seed(s); reproduce with:\n", len(failures))
+		for _, f := range failures {
+			fmt.Printf("  go test ./toys3/sim -run TestSeeds -seed=%d -v\n", f.seed)
+		}
+		os.Exit(1)
 	}
-	os.Exit(1)
-}
-fmt.Println("all seeds passed")
+	fmt.Println("all seeds passed")
 ```
 
 Exit status 1 on any failure (including nondeterminism), 0 otherwise. That is what makes it usable in a scheduled CI job.
 
 ### A real short run
 
-This was run once while writing this chapter (two workers, 15 seconds):
+This was run once while updating this chapter for commit `a4018d5` (two workers, 15 seconds; the first edition's run, against `210c1fa`, got through 7,240 seeds and printed the same kind of line under the old key names `halts=` and `corruptobj=`):
 
 ```
 $ go run ./toys3/cmd/toys3sim -duration 15s -workers 2 -check-determinism
-progress 10s: seeds=4885 (488/s) steps=8391969 determinism-replays=488 failures=0 workers=2
-  reqs=1142832 200=812789 400=21431 404=163408 500=25708 indet=119496 fsops=2765158 eio=26239 crashes=42228 halts=16850 midput=36115 torn=2126 lost=35899 kept=33318 readcorrupt=1562 corruptobj=1542 tempsrm=25145 windows=171807 maxwin=28 widened=4
-SUMMARY 15s: seeds=7240 (482/s) steps=12453061 determinism-replays=724 failures=0 workers=2
-  reqs=1695954 200=1206319 400=31636 404=242424 500=38254 indet=177321 fsops=4103152 eio=39068 crashes=62653 halts=25084 midput=53491 torn=3201 lost=53402 kept=49629 readcorrupt=2318 corruptobj=2294 tempsrm=37442 windows=254516 maxwin=28 widened=9
+progress 10s: seeds=4961 (496/s) steps=8524197 determinism-replays=496 failures=0 workers=2
+  reqs=1160932 200=825531 400=21780 404=166206 500=26142 indet=121273 fsops=2808841 eio=26695 crashes=42881 trips=17143 midput=36667 torn=2168 lost=36463 kept=33893 readcorrupt=1588 corruptdet=1568 tempsrm=25530 windows=174680 maxwin=28 widened=5
+SUMMARY 15s: seeds=7428 (495/s) steps=12771088 determinism-replays=742 failures=0 workers=2
+  reqs=1739198 200=1237219 400=32452 404=248474 500=39270 indet=181783 fsops=4207767 eio=40101 crashes=64230 trips=25710 midput=54834 torn=3274 lost=54753 kept=50889 readcorrupt=2368 corruptdet=2344 tempsrm=38423 windows=260865 maxwin=28 widened=9
 all seeds passed
 ```
 
-62,653 simulated power losses in fifteen seconds on two cores.
+64,230 simulated power losses in fifteen seconds on two cores.
 
-Two things are visible here that the 200-seed runs never showed. First, `maxwin=28` (the 200-seed sweep peaked at 23): bigger campaigns find bigger windows, and the WGL search cost grows with window size, so keep an eye on this number. Second, `widened=9`: over 7,240 seeds, the oracle had to widen keys to "unknown" nine times (Chapter 13). Widening is rare but real, and each one is a moment where the check was weaker. If `widened` ever grows into the thousands, the quiesce interval or the key-group cap needs tuning.
+Two things are visible here that the 200-seed runs never showed. First, `maxwin=28` (the 200-seed sweep peaked at 23): bigger campaigns find bigger windows, and the WGL search cost grows with window size, so keep an eye on this number. Second, `widened=9`: over 7,428 seeds, the oracle had to widen keys to "unknown" nine times (Chapter 13). Widening is rare but real, and each one is a moment where the check was weaker. If `widened` ever grows into the thousands, the quiesce interval or the key-group cap needs tuning.
 
 ## 16.4 Reading the summary line, field by field
 
-The summary line has two parts: the campaign header (from `toys3sim`) and the aggregated `Stats` (from `Stats.String`, `toys3/sim/config.go:104-111`). We will use the 200-seed aggregate from the preface as the running example, because you can reproduce it exactly with `go test ./toys3/sim -run 'TestSeeds$' -seeds=200 -v`:
+The summary line has two parts: the campaign header (from `toys3sim`) and the aggregated `Stats` (from `Stats.String`, `toys3/sim/config.go:106-113`). We will use the 200-seed aggregate from the preface as the running example, because you can reproduce it exactly with `go test ./toys3/sim -run 'TestSeeds$' -seeds=200 -v`:
 
 ```
-reqs=47270 200=33446 400=887 404=6842 500=1035 indet=5060 fsops=113656 eio=1061 crashes=1691 halts=673 midput=1473 torn=87 lost=1539 kept=1350 readcorrupt=71 corruptobj=70 tempsrm=1006 windows=6708 maxwin=23 widened=0
+reqs=47270 200=33446 400=887 404=6842 500=1035 indet=5060 fsops=113656 eio=1061 crashes=1691 trips=673 midput=1473 torn=87 lost=1539 kept=1350 readcorrupt=71 corruptdet=70 tempsrm=1006 windows=6708 maxwin=23 widened=0
 ```
 
 ### The header (campaign runner only)
@@ -461,42 +461,42 @@ reqs=47270 200=33446 400=887 404=6842 500=1035 indet=5060 fsops=113656 eio=1061 
 
 ### The `Stats` fields
 
-The struct is at `toys3/sim/config.go:59-78`; each field is incremented in a specific place, listed below so you can trust what the number means.
+The struct is at `toys3/sim/config.go:61-80`; each field is incremented in a specific place, listed below so you can trust what the number means.
 
-**`reqs=47270`**: `Stats.Requests`, incremented in `Simulator.wake` each time a client issues a request (`toys3/sim/simulator.go:249`). It counts *issued* requests, including those that will be abandoned by a crash and those that will get a 400. About 236 per seed.
+**`reqs=47270`**: `Stats.Requests`, incremented in `Simulator.wake` each time a client issues a request (`toys3/sim/simulator.go:250`). It counts *issued* requests, including those that will be abandoned by a crash and those that will get a 400. About 236 per seed.
 
-**`200=33446 400=887 404=6842 500=1035`**: `Stats.ByStatus`, indexed by `statusIndex` (`toys3/sim/config.go:114-124`), incremented in `Simulator.reply` (`toys3/sim/simulator.go:235`) for every reply delivered to a client. Note `statusIndex` maps *any* status that is not 200, 400 or 404 into the "500" bucket. The four buckets sum to 42,210, which is `reqs` minus the requests that never got a reply.
-- `400` comes from the workload's `Invalid` mix weight (`OpMix.Invalid`, empty keys; `toys3/sim/workload.go:110-116`). About 2% of requests, matching weight 2 of a total 107.
+**`200=33446 400=887 404=6842 500=1035`**: `Stats.ByStatus`, indexed by `statusIndex` (`toys3/sim/config.go:116-126`), incremented in `Simulator.reply` (`toys3/sim/simulator.go:236`) for every reply delivered to a client. Note `statusIndex` maps *any* status that is not 200, 400 or 404 into the "500" bucket. The four buckets sum to 42,210, which is `reqs` minus the requests that never got a reply.
+- `400` comes from the workload's `Invalid` mix weight (`OpMix.Invalid`, empty keys; `toys3/sim/workload.go:109-115`). About 2% of requests, matching weight 2 of a total 107.
 - `404` comes from GETs, DELETEs and COPYs of absent keys. It is high because keys are often absent: deletes, lost un-synced creates, and the start of every run.
-- `500` comes from injected EIOs, from corrupt reads (`CorruptObject`), and, importantly, never from anything in the QuietTail (the `liveness` invariant enforces that).
+- `500` comes from injected EIOs, from corrupt reads (`CorruptionDetected`), and, importantly, never from anything issued in the Settling phase (the `liveness` invariant enforces that).
 
-**`indet=5060`**: `Stats.Indetermined`, incremented in `Simulator.crash` once per request that was outstanding at the crash (`toys3/sim/simulator.go:282-283`). These are the oracle's `Abandoned` ops: the client never learned what happened. Check: `200+400+404+500 + indet = 42210 + 5060 = 47270 = reqs`. Every issued request either got exactly one reply or was abandoned by exactly one crash. That identity is a cheap sanity check on the simulator itself; if it ever fails, requests are leaking or being double-counted.
+**`indet=5060`**: `Stats.Indeterminate` (spelled `Indetermined` before the refactor), incremented in `Simulator.crash` once per request that was outstanding at the crash (`toys3/sim/simulator.go:283-284`). These are the oracle's `Abandoned` ops: the client never learned what happened. Check: `200+400+404+500 + indet = 42210 + 5060 = 47270 = reqs`. Every issued request either got exactly one reply or was abandoned by exactly one crash. That identity is a cheap sanity check on the simulator itself; if it ever fails, requests are leaking or being double-counted.
 
-**`fsops=113656`**: `FSCounters.Landed` (`toys3/sim/fakefs.go:156`), copied into `Stats.FSOps` at the end of the run (`toys3/sim/simulator.go:114`). It counts filesystem actions that *landed* (took effect in the FakeFS). Actions issued but dropped by a crash before landing are not counted. About 2.4 FS operations per request: a GET is one, a PUT is four, recovery adds a list, some unlinks and an fsync per boot.
+**`fsops=113656`**: `FSCounters.Landed` (`toys3/sim/plantmodel.go:166`), copied into `Stats.FSOps` at the end of the run (`toys3/sim/simulator.go:115`). It counts filesystem actions that *landed* (took effect in the PlantModel). Actions issued but dropped by a crash before landing are not counted. About 2.4 FS operations per request: a GET is one, a PUT is four, recovery adds a list, some unlinks and an fsync per boot.
 
-**`eio=1061`**: `FSCounters.EIOs` (`toys3/sim/fakefs.go:186-188`): landed actions that completed with `ErrIO`. Around 0.9% of landed actions, consistent with a swarm mix of EIO rates between 0.2% and 3%. EIOs are only *planned* during Chaos (`FakeFS.Plan`, `toys3/sim/fakefs.go:138`), but a planned failure can land just after Chaos ends; see Chapter 17.
+**`eio=1061`**: `FSCounters.EIOs` (`toys3/sim/plantmodel.go:196-198`): landed actions that completed with `ErrIO`. Around 0.9% of landed actions, consistent with a swarm mix of EIO rates between 0.2% and 3%. EIOs are only *planned* during Chaos (`PlantModel.Plan`, `toys3/sim/plantmodel.go:148`), but a planned failure can land just after Chaos ends; see Chapter 17.
 
-**`crashes=1691`**: `Result.Crashes`, incremented in `Simulator.crash` (`toys3/sim/simulator.go:298`), copied to `Stats.Crashes`. Includes Halts. About 8.5 per seed.
+**`crashes=1691`**: `Result.Crashes`, incremented in `Simulator.crash` (`toys3/sim/simulator.go:299`), copied to `Stats.Crashes`. Includes Trips. About 8.5 per seed.
 
-**`halts=673`**: `Stats.Halts`, incremented when the server returns a `Halt` action (`toys3/sim/simulator.go:204`). A subset of `crashes`. 40% of all crashes here were the server choosing to fail-stop after an error (Chapter 7); the rest were injected by `maybeCrash`.
+**`trips=673`**: `Stats.Trips` (printed as `halts=` and named `Stats.Halts` before the refactor), incremented when the server returns a `Trip` action (`toys3/sim/simulator.go:205`). A subset of `crashes`. 40% of all crashes here were the server choosing to fail-stop after an error (Chapter 7); the rest were injected by `maybeCrash`.
 
-**`midput=1473`**: `Stats.CrashesMidPut`, incremented once per crash during which at least one PUT or COPY was outstanding (`toys3/sim/simulator.go:281-294`). This is the single most important coverage number for a storage system: it says how often the adversary cut the power in the middle of a write. 87% of crashes here hit a write in progress, because writes are the long-running operations (four FS steps each).
+**`midput=1473`**: `Stats.CrashesMidPut`, incremented once per crash during which at least one PUT or COPY was outstanding (`toys3/sim/simulator.go:282-295`). This is the single most important coverage number for a storage system: it says how often the adversary cut the power in the middle of a write. 87% of crashes here hit a write in progress, because writes are the long-running operations (four FS steps each).
 
-**`torn=87`**: `CrashReport.Torn` summed (`toys3/sim/simulator.go:277`): files whose un-synced content a crash cut to a strict prefix (`toys3/sim/fakefs.go:495-497`). Only files with dirty content and a name can tear, and only with probability `TornWriteProb` (0.3). Low in absolute terms because a correct server keeps dirty files short-lived; these are almost all temp files that recovery then deletes.
+**`torn=87`**: `CrashReport.Torn` summed (`toys3/sim/simulator.go:278`): files whose un-synced content a crash cut to a strict prefix (`toys3/sim/plantmodel.go:505-507`). Only files with dirty content and a name can tear, and only with probability `TornWriteProb` (0.3). Low in absolute terms because a correct server keeps dirty files short-lived; these are almost all temp files that recovery then deletes.
 
-**`lost=1539`** and **`kept=1350`**: un-synced changes that a crash discarded (`lost`) or happened to make durable anyway (`kept`) (`toys3/sim/fakefs.go:461-503`). They include both directory-entry changes and file contents. `lost` also counts every fsyncgate-poisoned inode (`toys3/sim/fakefs.go:492-493`). Roughly a 50/50 split, as expected from `rng.Intn(2)`. Both must be non-zero for the fault model to be adversarial in both directions; `TestCoverage` enforces that.
+**`lost=1539`** and **`kept=1350`**: un-synced changes that a crash discarded (`lost`) or happened to make durable anyway (`kept`) (`toys3/sim/plantmodel.go:471-513`). They include both directory-entry changes and file contents. `lost` also counts every fsyncgate-poisoned inode (`toys3/sim/plantmodel.go:502-503`). Roughly a 50/50 split, as expected from `rng.Intn(2)`. Both must be non-zero for the fault model to be adversarial in both directions; `TestCoverage` enforces that.
 
-**`readcorrupt=71`**: `FSCounters.ReadCorruptions` (`toys3/sim/fakefs.go:388-391`): FSReads that returned one flipped bit.
+**`readcorrupt=71`**: `FSCounters.ReadCorruptions` (`toys3/sim/plantmodel.go:398-401`): FSReads that returned one flipped bit.
 
-**`corruptobj=70`**: `Stats.CorruptObjects`, incremented when the server emits a `CorruptObject` fact (`toys3/sim/simulator.go:194-195`). Why 70 and not 71? A read corruption is counted when the read *lands*; the server only sees it when the completion is *delivered*. If a crash happens in between, the corrupted completion is dropped and the server never emits the fact. One of the 71 was in that window. In the 15-second campaign the gap was 2,318 versus 2,294. With the correct server, `corruptobj` can never exceed `readcorrupt`; `TestCorruptObjectUnreachableWithoutBitFlips` checks the extreme case (with zero bit flips, zero corrupt objects).
+**`corruptdet=70`**: `Stats.CorruptionsDetected` (printed as `corruptobj=` and named `Stats.CorruptObjects` before the refactor), incremented when the server emits a `CorruptionDetected` telemetry (`toys3/sim/simulator.go:195-196`). Why 70 and not 71? A read corruption is counted when the read *lands*; the server only sees it when the completion is *delivered*. If a crash happens in between, the corrupted completion is dropped and the server never emits the fact. One of the 71 was in that window. In the 15-second campaign the gap was 2,318 versus 2,294. With the correct server, `corruptdet` can never exceed `readcorrupt`; `TestCorruptionUnreachableWithoutBitFlips` checks the extreme case (with zero bit flips, zero corrupt objects).
 
-**`tempsrm=1006`**: sum of `Recovered.TempsRemoved` (`toys3/sim/simulator.go:196-197`): leftover temp files that recovery unlinked successfully. Notice it is *less* than `crashes` (1,691): many crashes leave no temp file behind (a crash during a GET, or after a temp was already renamed, or one whose temp create was itself lost). Notice also that mutant f (skip temp cleanup) produces `tempsrm=0` in every run, which is a handy way to confirm the mutant is actually active (Chapter 15).
+**`tempsrm=1006`**: sum of `Recovered.TempsRemoved` (`toys3/sim/simulator.go:197-198`): leftover temp files that recovery unlinked successfully. Notice it is *less* than `crashes` (1,691): many crashes leave no temp file behind (a crash during a GET, or after a temp was already renamed, or one whose temp create was itself lost). Notice also that mutant f (skip temp cleanup) produces `tempsrm=0` in every run, which is a handy way to confirm the mutant is actually active (Chapter 15).
 
-**`windows=6708`**: `OracleStats.Windows`: how many linearizability windows the oracle searched (`toys3/sim/oracle.go:402`). A window is checked at each quiescent point and each crash. About 34 per seed.
+**`windows=6708`**: `OracleStats.Windows`: how many linearizability windows the oracle searched (`toys3/sim/oracle.go:369`). A window is checked at each quiescent point and each crash. About 34 per seed.
 
-**`maxwin=23`**: `OracleStats.MaxWindowOps`, the most operations in any single window. **This one is a max, not a sum**: `Stats.Add` uses `max` for it (`toys3/sim/config.go:99`). It is the number to watch for oracle cost, because WGL search is exponential in the worst case.
+**`maxwin=23`**: `OracleStats.MaxWindowOps`, the most operations in any single window. **This one is a max, not a sum**: `Stats.Add` uses `max` for it (`toys3/sim/config.go:101`). It is the number to watch for oracle cost, because WGL search is exponential in the worst case.
 
-**`widened=0`**: `OracleStats.Widenings` (`toys3/sim/oracle.go:465,480`): times the oracle gave up precision on some keys because a component would have started from more than 4,096 possible states. Zero in the first 200 seeds, nine in 7,240. Widening never causes a false failure, but it can hide a real one for a moment.
+**`widened=0`**: `OracleStats.Widenings` (`toys3/sim/oracle.go:432,480`): times the oracle gave up precision on some keys because a component would have started from more than 4,096 possible states. Zero in the first 200 seeds, nine in 7,428. Widening never causes a false failure, but it can hide a real one for a moment.
 
 ## 16.5 Getting the full event log of any seed
 
@@ -521,7 +521,7 @@ func TestDumpSeed(t *testing.T) {
 	cfg.Log = true
 	r := Run(cfg)
 	fmt.Fprintf(os.Stderr, "keys=%d clients=%d crash=%v eio=%v\n%s\n",
-		cfg.Workload.Keys, cfg.Workload.Clients, cfg.CrashProb, cfg.FS.EIOProb, r.Stats)
+		cfg.Workload.Keys, cfg.Workload.Clients, cfg.CrashProb, cfg.Disturbances.EIOProb, r.Stats)
 	fmt.Print(FormatLog(r.Log))
 }
 ```
@@ -572,17 +572,17 @@ func main() {
 
 Copy `go.sum` from the repository, then `go build -o tracer . && ./tracer -seed 1 > seed1.log`. Seed 1's log is 1,338 lines.
 
-The external module can only use exported API: `sim.Run`, `sim.DefaultConfig`, `sim.BaseConfig`, `Config.Factory`, `Config.Invariants`, `sim.BlackBoxInvariants`, `sim.FormatLog`. That is enough for nearly everything, including plugging in your own broken server through `Config.Factory`, which is exactly what `DESIGN.md:179-180` invites. (The mutants themselves live in a `_test.go` file and cannot be imported; to replay a mutant externally you copy its code into your module. That is how the mutant traces in Chapter 15 were made.)
+The external module can only use exported API: `sim.Run`, `sim.DefaultConfig`, `sim.BaseConfig`, `Config.Factory`, `Config.Invariants`, `sim.BlackBoxInvariants`, `sim.FormatLog`. That is enough for nearly everything, including plugging in your own broken server through `Config.Factory`, which is exactly what `DESIGN.md:236-237` invites. (The mutants themselves live in a `_test.go` file and cannot be imported; to replay a mutant externally you copy its code into your module. That is how the mutant traces in Chapter 15 were made.)
 
 ## 16.6 Reading an event log
 
-`LogEntry.String` (`toys3/sim/describe.go:118-137`) renders each entry as
+`LogEntry.String` (`toys3/sim/log.go:119-138`) renders each entry as
 
 ```
 #<step> t=<virtual time> inc=<incarnation> <kind> [<event>] [=> <actions>] [<note>]
 ```
 
-with the time printed by `fmtTime` (`toys3/sim/describe.go:150-152`) as milliseconds with six decimal places, i.e. nanosecond precision. A real excerpt from seed 1:
+with the time printed by `fmtTime` (`toys3/sim/log.go:151-153`) as milliseconds with six decimal places, i.e. nanosecond precision. A real excerpt from seed 1:
 
 ```
 #1      t=0.000000ms   inc=1 restart     boot
@@ -600,12 +600,12 @@ How to read it:
 
 - **Step numbers skip.** Steps 3, 5 and 8 are missing. Every popped queue entry is a step, but only some kinds log a line: `client-wake` entries never log (`Simulator.wake` writes nothing), so a request shows up only when its `deliver` step runs. Seed 1 has 1,628 steps but its log's last line is step 1,627; the final step was a client wake.
 - **`deliver` lines** show the event the server consumed and, after `=>`, every action it returned, in order. `Request{c1 GET "k2"}` with nothing after it means the request was *queued* (here, behind recovery). Steps 4 and 6 are requests arriving during recovery; step 16 shows them starting the moment recovery ends.
-- **`fs-land` lines** show an FS action taking effect in the FakeFS and the completion it produced (`land X -> Y`). The completion is delivered later, as a separate `deliver` line. The gap between them is `FSPlan.Reply` (Chapter 10).
-- **`crash` lines** carry the crash report: `CRASH (halt: fsync temp: EIO): kept=2 lost=2 torn=0, dropped 1 queued entries`. The reason in parentheses is either `injected crash` or `halt: <reason>`.
+- **`fs-land` lines** show an FS action taking effect in the PlantModel and the completion it produced (`land X -> Y`). The completion is delivered later, as a separate `deliver` line. The gap between them is the feedback delay, `ActuationPlan.FeedbackDelay` (Chapter 10).
+- **`crash` lines** carry the crash report: `CRASH (trip: fsync temp: EIO): kept=2 lost=2 torn=0, dropped 1 queued entries`. The reason in parentheses is either `injected crash` or `trip: <cause>`.
 - **`restart` lines** say `boot` and carry the new incarnation number. The next line is always the `Started` delivery for that incarnation.
-- **`quiesce`, `quiet`, `tail-end`** have `inc=0` because they are not addressed to a server incarnation.
-- **Failures** are appended to the log with kind `crash` and a note starting `FAILURE` (`toys3/sim/simulator.go:370-373`), because `fail` reuses `KindCrash` for its log entry. So the last line of a failing log reads `inc=3 crash FAILURE linearizable: ...` even though no crash happened at that step. Chapter 17 lists this as a cosmetic wart.
-- **Payloads are named, not dumped.** `obj(value-of-26)` is an object file whose payload is the value written by PUT request 26. `raw(29 bytes)` is something that failed to decode as an object (for example, a bit-flipped read). `garbage(13 bytes)` in a history op means a body no PUT wrote. These come from `describePayload` (`toys3/sim/describe.go:29-43`) and `ValueWriter`; Chapter 12 explains why self-describing values make this possible.
+- **`quiesce`, `settle`, `settling-end`** have `inc=0` because they are not addressed to a server incarnation.
+- **Failures** are appended to the log with kind `crash` and a note starting `FAILURE` (`toys3/sim/simulator.go:371-374`), because `fail` reuses `KindCrash` for its log entry. So the last line of a failing log reads `inc=3 crash FAILURE linearizable: ...` even though no crash happened at that step. Chapter 17 lists this as a cosmetic wart.
+- **Payloads are named, not dumped.** `obj(value-of-26)` is an object file whose payload is the value written by PUT request 26. `raw(29 bytes)` is something that failed to decode as an object (for example, a bit-flipped read). `garbage(13 bytes)` in a history op means a body no PUT wrote. These come from `describePayload` (`toys3/sim/log.go:30-44`) and `ValueWriter`; Chapter 12 explains why self-describing values make this possible.
 - **IOIDs restart per incarnation.** `io1` in inc 2 is unrelated to `io1` in inc 1. Temp file names are the IOID in 16 hex digits, so `/data/tmp/0000000000000031` was written by `io49` (0x31) of some incarnation. Chapter 15's mutant f story turns on exactly this reuse.
 
 ### A reading technique that works
@@ -641,7 +641,7 @@ toys3 has no automatic shrinker (property-testing frameworks call it shrinking; 
 
 - `cfg := sim.BaseConfig(seed)` instead of `DefaultConfig` removes the swarm variation.
 - `cfg.Workload.Clients = 1` removes concurrency. If the bug survives, it is not a concurrency bug.
-- `cfg.CrashProb = 0` and `cfg.FS.EIOProb = 0` remove a fault family. If the bug disappears, that family is necessary.
+- `cfg.CrashProb = 0` and `cfg.Disturbances.EIOProb = 0` remove a fault family. If the bug disappears, that family is necessary.
 - `cfg.Invariants = sim.BlackBoxInvariants()` tells you whether a client could ever notice.
 
 Caveat as above: each knob changes RNG consumption, so the *same* seed is now a different universe. What you are looking for is "does the bug still happen *somewhere* in the first few hundred seeds under this restriction", which you can answer with a small loop that calls `sim.Run` for seeds 1..N. That is how the mutant f ablation in Chapter 15 was measured.
@@ -690,8 +690,8 @@ jobs:
 Three steps:
 
 1. **`go vet ./...`**: ordinary hygiene.
-2. **`go test ./...`**: every test in the module, which for toys3 includes the full `go test ./toys3/sim` (canary, 200-seed sweep, coverage, CRC reachability, all mutants), `toys3/core`'s exact-sequence tests, and `toys3/prod`'s end-to-end HTTP tests on a real temp directory. Also `tools/detcheck`'s own analyzer test.
-3. **`scripts/ci-determinism.sh`**: the determinism gate, covered in Chapter 8. It runs detcheck over `./core/... ./sim/... ./toys3/core/... ./toys3/sim/...`, checks that every third-party module those packages depend on has an audit record, and runs `TestDeterminismCanary` in every simulator package that has one. A run while writing this chapter:
+2. **`go test ./...`**: every test in the module, which for toys3 includes the full `go test ./toys3/sim` (canary, 200-seed sweep, coverage, CRC reachability, all mutants), `toys3/control`'s exact-sequence tests, and `toys3/prod`'s end-to-end HTTP tests on a real temp directory. Also `tools/detcheck`'s own analyzer test.
+3. **`scripts/ci-determinism.sh`**: the determinism gate, covered in Chapter 8. It runs detcheck over `./core/... ./sim/...` and every toys3 package except `prod` and the commands (derived with `go list`, so today `toys3/control`, `toys3/format` and `toys3/sim`), checks that every third-party module those packages depend on has an audit record, and runs `TestDeterminismCanary` in every simulator package that has one. A run while writing this chapter:
 
 ```
 $ scripts/ci-determinism.sh
@@ -718,22 +718,24 @@ Using a time-derived `-start-seed` for the nightly job means each night explores
 
 ## 16.9 The ten-minute campaign
 
-The orchestrating session for this book ran the campaign recommended by `DESIGN.md:172`:
+The orchestrating session for this book ran the campaign recommended by `DESIGN.md:229`:
 
 ```sh
 go run ./toys3/cmd/toys3sim -duration 10m -check-determinism
 ```
 
-on the author's machine (all cores, `-det-every 10`). Its final output is pasted below. When you read it, apply section 16.4 field by field, and ask three questions: did any seed fail; did any determinism replay disagree; and did every fault family fire (are `torn`, `readcorrupt`, `halts`, `midput`, `tempsrm` all non-zero)? Then compare `maxwin` and `widened` with the 15-second run above: a larger campaign should push both upward, and that is where you learn how much headroom the oracle has.
+on the author's machine (all cores, `-det-every 10`). Its final output is pasted below. When you read it, apply section 16.4 field by field, and ask three questions: did any seed fail; did any determinism replay disagree; and did every fault family fire (are `torn`, `readcorrupt`, `trips`, `midput`, `tempsrm` all non-zero)? Then compare `maxwin` and `widened` with the 15-second run above: a larger campaign should push both upward, and that is where you learn how much headroom the oracle has.
 
 <!-- CAMPAIGN-RESULTS -->
 ### The 10-minute campaign (2026-10-12)
 
 Command: `go run ./toys3/cmd/toys3sim -duration 10m -check-determinism -start-seed 1000000` on 8 workers, against commit `210c1fa`.
 
+*A note on this output.* This campaign was run before the domain-driven-design refactor of Chapter 3a, so the line it actually printed said `halts=950432` and `corruptobj=88992`. The keys below have been rewritten to their current names (`trips=`, `corruptdet=`), and nothing else has been changed. The values are still valid for the current code: the refactor changed no behaviour (Chapter 8, §8.12, including a golden test that pins the stats of 550 seeds), so the same command against `a4018d5` would explore exactly the same seeds with exactly the same results, up to how many seeds fit in ten minutes on a given machine. The 10-minute campaign was not re-run for this edition.
+
 ```
 SUMMARY 10m0s: seeds=272755 (455/s) steps=471589953 determinism-replays=27276 failures=0 workers=8
-  reqs=64239570 200=45638953 400=1198872 404=9282926 500=1454896 indet=6663923 fsops=155434729 eio=1482376 crashes=2358979 halts=950432 midput=2008744 torn=117706 lost=2020518 kept=1881167 readcorrupt=89856 corruptobj=88992 tempsrm=1411446 windows=9634731 maxwin=34 widened=375
+  reqs=64239570 200=45638953 400=1198872 404=9282926 500=1454896 indet=6663923 fsops=155434729 eio=1482376 crashes=2358979 trips=950432 midput=2008744 torn=117706 lost=2020518 kept=1881167 readcorrupt=89856 corruptdet=88992 tempsrm=1411446 windows=9634731 maxwin=34 widened=375
 all seeds passed
 ```
 
@@ -745,13 +747,13 @@ Every seed passed, and all 27,276 determinism replays reproduced their trace has
 - There are two drivers and one atom. `TestSeeds` (replay, sweep, timed sweep) and `toys3sim` (parallel campaign) both call exactly `sim.Run(sim.DefaultConfig(seed))`; that is what makes every campaign failure reproducible with one `go test` command.
 - Parallelism is across seeds, never within a seed. Nothing is shared between concurrent seeds, which is why detcheck bans package globals in the simulator.
 - Determinism is checked three ways: the canary (12 seeds, sequential, plus "logging does not perturb" and "different seeds differ"), sampled replays in campaigns (every K-th seed, concurrent), and the trace hash itself.
-- Read the stats line as a coverage report, not just a pass/fail. `midput`, `torn`, `lost`/`kept`, `readcorrupt`, `halts` and `tempsrm` tell you the adversary reached the places it claims to; `maxwin` and `widened` tell you how hard the oracle is working.
-- `reqs = 200 + 400 + 404 + 500 + indet` is an identity worth checking; `corruptobj ≤ readcorrupt` is another.
+- Read the stats line as a coverage report, not just a pass/fail. `midput`, `torn`, `lost`/`kept`, `readcorrupt`, `trips` and `tempsrm` tell you the adversary reached the places it claims to; `maxwin` and `widened` tell you how hard the oracle is working.
+- `reqs = 200 + 400 + 404 + 500 + indet` is an identity worth checking; `corruptdet ≤ readcorrupt` is another.
 - Seeds bisect, but RNG-consumption changes reshuffle universes. Keep durable regressions as mutants, not just as seed numbers.
 
 ## Exercises
 
-1. **Verify the identity.** Run `go test ./toys3/sim -run 'TestSeeds$' -seeds=500 -v` and check that the four status buckets plus `indet` equal `reqs`. Then explain, from the code, why a request can never be counted in both a status bucket and `indet`. (Look at `Workload.Crash`, `toys3/sim/workload.go:136-145`, and `Oracle.Return`.)
+1. **Verify the identity.** Run `go test ./toys3/sim -run 'TestSeeds$' -seeds=500 -v` and check that the four status buckets plus `indet` equal `reqs`. Then explain, from the code, why a request can never be counted in both a status bucket and `indet`. (Look at `Workload.Crash`, `toys3/sim/workload.go:135-144`, and `Oracle.Return`.)
 2. **Make the canary fire.** In a scratch copy (or a branch you will throw away), make `Simulator.note` draw one random number when `cfg.Log` is true. Predict which assertion of `TestDeterminismCanary` fires. Run it. Revert.
 3. **Make the other canary fire.** Change `New` to use `NewRand(1)` instead of `NewRand(cfg.Seed)`. Predict which assertion fires first and why the first assertion (same seed, same run) still passes. Revert.
 4. **Dump a passing seed.** Using option 1 or option 2 of section 16.5, dump the log of seed 2. Find the first `crash` line. Using only the log, list every request that was outstanding at that crash, and check your count against the `dropped N queued entries` note. (They measure different things; explain the difference.)

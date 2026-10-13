@@ -1,16 +1,18 @@
-# Chapter 11: The Fake Filesystem
+# Chapter 11: The Plant Model
 
 > *"The disk is not your friend. It is a sullen, adversarial witness that will testify to whatever it last wrote down, and it writes things down when it feels like it."*
 
-Chapter 4 explained, in terms of a real POSIX system, how bytes become durable: the page cache, `fsync` on files and on directories, atomic `rename`, torn writes. This chapter is about turning that understanding into **code that lies to the server in every way a real disk might**, deterministically, from a seed. `toys3/sim/fakefs.go` is 627 lines, and it is the reason the simulator can catch durability bugs at all. Without it, a crash would be a non-event: every write would survive, every rename would stick, and the server's careful fsync protocol would be indistinguishable from no protocol at all.
+Chapter 4 explained, in terms of a real POSIX system, how bytes become durable: the page cache, `fsync` on files and on directories, atomic `rename`, torn writes. This chapter is about turning that understanding into **code that lies to the server in every way a real disk might**, deterministically, from a seed. `toys3/sim/plantmodel.go` is 651 lines, and it is the reason the simulator can catch durability bugs at all. Without it, a crash would be a non-event: every write would survive, every rename would stick, and the server's careful fsync protocol would be indistinguishable from no protocol at all.
 
-The design goal is stated in one sentence of the type's doc comment: **"A correct server survives every such outcome."** (`toys3/sim/fakefs.go:94`). The FakeFS is not a model of ext4 or XFS. It is a model of *what POSIX permits*, resolved by an adversary. Anything the server is not entitled to assume, the FakeFS may do.
+The type is `sim.PlantModel`. Until the refactor of Chapter 3a it was called `FakeFS`, and its configuration `FSFaults`; the new names come from the control-theory reading of the system. In a feedback loop the thing being controlled is the **plant**, and the disk (with its page cache) is toys3's plant. A software-in-the-loop testbench replaces the real plant with a **plant model**. The inputs that act on the plant without the controller's consent (an EIO, a torn write, a flipped bit, the kernel's background writeback, the fsyncgate lie, a power cut) are **disturbances**. The word "fake" undersold the thing: a test fake is usually a *simplified* working implementation, and this one is deliberately *more* hostile than the real thing.
+
+The design goal is stated in one sentence of the type's doc comment: **"A correct controller survives every such outcome."** (`toys3/sim/plantmodel.go:102`). The doc goes on to name the plant model's role for the monitors: "Durable() is the plant's true state, against which the monitors check the controller's claims (Committed telemetry)" (`toys3/sim/plantmodel.go:103-104`). The PlantModel is not a model of ext4 or XFS. It is a model of *what POSIX permits*, resolved by an adversary. Anything the server is not entitled to assume, the PlantModel may do.
 
 ---
 
 ## 11.1 The two-version idea
 
-Everything in the FakeFS rests on one idea: **every piece of state exists in two versions**, the one you can see now and the one that survives a crash.
+Everything in the PlantModel rests on one idea: **every piece of state exists in two versions**, the one you can see now and the one that survives a crash.
 
 - Every **file** (inode) has `volatile` content (what reads return now) and `durable` content (what is on the platter).
 - Every **directory entry** (name → inode) has a `cur` version (what lookups see now) and a `durable` version (what the directory block on disk says).
@@ -31,17 +33,17 @@ The operations move state between versions in exactly the ways POSIX promises:
 
 And a crash is the moment of truth: each difference between the two versions is resolved, one at a time, by the RNG. The new state is then "all durable": `cur == durable` for every entry and `volatile == durable` for every inode.
 
-This two-version model is, in miniature, what Pillai et al. call the "persistence properties" of a filesystem: which operations are atomic, and which orderings are preserved across a crash. The FakeFS chooses the *weakest* reasonable answers on purpose: content and directory entries are persisted independently, no ordering between them is promised without an explicit fsync, and a write is not atomic across a crash.
+This two-version model is, in miniature, what Pillai et al. call the "persistence properties" of a filesystem: which operations are atomic, and which orderings are preserved across a crash. The PlantModel chooses the *weakest* reasonable answers on purpose: content and directory entries are persisted independently, no ordering between them is promised without an explicit fsync, and a write is not atomic across a crash.
 
-## 11.2 The knobs: FSFaults
+## 11.2 The knobs: Disturbances
 
 ```go
-// toys3/sim/fakefs.go:11-44
-type FSFaults struct {
+// toys3/sim/plantmodel.go:12-49
+type Disturbances struct {
 	EIOProb float64
 	TornWriteProb float64
-	Latency    [2]core.Duration
-	ReplyDelay [2]core.Duration
+	DeadTime    [2]control.Duration
+	FeedbackDelay [2]control.Duration
 	ReadCorruptProb float64
 	WritebackProb float64
 	FsyncGate bool
@@ -50,49 +52,53 @@ type FSFaults struct {
 
 (Comments elided; each field's comment is quoted where the behaviour is discussed below.)
 
+The struct mixes two kinds of parameter, and its doc comment says so: "the plant model: its dynamics (dead time and feedback delay) and the disturbances it injects" (`toys3/sim/plantmodel.go:12-16`). `DeadTime` and `FeedbackDelay` are *dynamics*: every real plant has them, even a perfect one, and they are what lets operations overlap and complete out of order. The other five are *disturbances* in the strict sense: exogenous inputs that make the plant misbehave, which the controller can neither command nor prevent. Power loss is a disturbance too, but it is injected by the testbench (`Config.CrashProb`, Chapter 10) because it has to be coordinated with the queue and the oracle.
+
 | Field | Default (`BaseConfig`) | What it does |
 |---|---|---|
 | `EIOProb` | 0.01 (swarm: 0.002 / 0.01 / 0.01 / 0.03) | Per-operation chance of completing with `ErrIO`. What the failed op *did* is chosen adversarially. |
 | `TornWriteProb` | 0.3 | Per dirty file at a crash: chance it survives holding a random strict prefix of its volatile content. |
-| `Latency` | 20 µs .. 1.5 ms | Issue → effect lands. |
-| `ReplyDelay` | 0 .. 500 µs | Effect lands → completion delivered. A crash in between: applied but unacked. |
+| `DeadTime` | 20 µs .. 1.5 ms | Dead time: issue → effect lands. (Was `Latency`.) |
+| `FeedbackDelay` | 0 .. 500 µs | Feedback delay: effect lands → completion delivered. A crash in between: applied but unacked. (Was `ReplyDelay`.) |
 | `ReadCorruptProb` | 0.005 | Per `FSRead`: one bit flipped in the returned bytes; the stored data is unchanged. |
 | `WritebackProb` | 0.05 | After each landed action: make one random un-synced change durable. |
 | `FsyncGate` | true | After a failed fsync on a dirty file, later fsyncs lie. |
 
-The defaults are in `toys3/sim/config.go:160-168`; the per-seed swarm variation of `EIOProb` is at `toys3/sim/config.go:141` (Chapter 12).
+The defaults are in `toys3/sim/config.go:162-170`; the per-seed swarm variation of `EIOProb` is at `toys3/sim/config.go:143` (Chapter 12).
 
-The zero value is documented as "an honest, instant filesystem that still loses un-synced changes on crash" (`toys3/sim/fakefs.go:11-12`). That is worth dwelling on: even with *every* fault knob at zero, the crash model is still adversarial. Un-synced changes are kept or lost by coin flip. The knobs add *more* hostility on top of that baseline, but the baseline is already enough to catch most protocol bugs (mutants a, b and c in Chapter 15 need nothing more).
+The zero value is documented as "an honest, instant filesystem that still loses un-synced changes on crash" (`toys3/sim/plantmodel.go:12-16`). That is worth dwelling on: even with *every* fault knob at zero, the crash model is still adversarial. Un-synced changes are kept or lost by coin flip. The knobs add *more* hostility on top of that baseline, but the baseline is already enough to catch most protocol bugs (mutants a, b and c in Chapter 15 need nothing more).
 
-## 11.3 FSPlan: deciding the future at issue time
+## 11.3 ActuationPlan: deciding the future at issue time
 
 ```go
-// toys3/sim/fakefs.go:46-52
-// FSPlan is decided when an action is issued, so the decision consumes RNG
-// draws in issue order (deterministic) regardless of when it lands.
-type FSPlan struct {
-	Fail  bool          // complete with ErrIO
-	Land  core.Duration // issue → effect
-	Reply core.Duration // effect → completion delivered
+// toys3/sim/plantmodel.go:51-58
+// ActuationPlan is decided when an actuation is issued, so the decision
+// consumes RNG draws in issue order (deterministic) regardless of when it
+// lands.
+type ActuationPlan struct {
+	Fail          bool             // complete with ErrIO
+	DeadTime      control.Duration // issue → effect (the actuation lands)
+	FeedbackDelay control.Duration // effect → completion delivered
 }
 ```
 
 ```go
-// toys3/sim/fakefs.go:135-142
-func (fs *FakeFS) Plan(a core.Action) FSPlan {
-	var p FSPlan
+// toys3/sim/plantmodel.go:145-152
+// Plan draws the fault decision and latencies for a filesystem action.
+func (fs *PlantModel) Plan(a control.Action) ActuationPlan {
+	var p ActuationPlan
 	p.Fail = !fs.quiet && fs.rng.Chance(fs.faults.EIOProb)
-	p.Land = core.Duration(fs.rng.Between(int64(fs.faults.Latency[0]), int64(fs.faults.Latency[1])))
-	p.Reply = core.Duration(fs.rng.Between(int64(fs.faults.ReplyDelay[0]), int64(fs.faults.ReplyDelay[1])))
+	p.DeadTime = control.Duration(fs.rng.Between(int64(fs.faults.DeadTime[0]), int64(fs.faults.DeadTime[1])))
+	p.FeedbackDelay = control.Duration(fs.rng.Between(int64(fs.faults.FeedbackDelay[0]), int64(fs.faults.FeedbackDelay[1])))
 	return p
 }
 ```
 
-The simulator calls `Plan` when the server *issues* an FS action (`toys3/sim/simulator.go:187-188`, Chapter 10) and stores the plan in the `KindFSLand` queue entry. Three draws (or two, when quiet: `!fs.quiet &&` short-circuits the EIO coin), always in the order the server issued its actions.
+The simulator calls `Plan` when the server *issues* an FS action (`toys3/sim/simulator.go:188-189`, Chapter 10) and stores the plan in the `KindFSLand` queue entry. Three draws (or two, when the plant is quiet, i.e. in the Settling phase: `!fs.quiet &&` short-circuits the EIO coin), always in the order the server issued its actions. The plan's two durations were called `Land` and `Reply` in the first edition; `Reply` in particular was easy to confuse with `control.Reply`, the controller's answer to a client, which has nothing to do with it.
 
-Why decide at issue rather than at land? Because landing order is itself a product of random latencies. If the fault coin were tossed at land time, then the order of RNG draws would depend on the order of landings, which depends on earlier draws. That is still deterministic, strictly speaking, but it makes the run fragile: a change to latency ranges would reshuffle *which* operations fail, not just *when* they finish. Deciding at issue time pins "the 47th FS action of this run fails" to the action itself.
+Why decide at issue rather than at land? Because landing order is itself a product of random dead times. If the fault coin were tossed at land time, then the order of RNG draws would depend on the order of landings, which depends on earlier draws. That is still deterministic, strictly speaking, but it makes the run fragile: a change to the dead-time ranges would reshuffle *which* operations fail, not just *when* they finish. Deciding at issue time pins "the 47th FS action of this run fails" to the action itself.
 
-One consequence, noted in Chapter 10 §10.14: a failure planned during Chaos stays planned even if the action lands in QuietTail.
+One consequence, noted in Chapter 10 §10.14: a failure planned during Chaos stays planned even if the action lands in Settling.
 
 Note what `Plan` does *not* decide: *how* a failed operation fails (applied or not, which prefix was written). Those are decided at land time by further draws, because they depend on the filesystem state at that moment (how long the data is, whether the source exists).
 
@@ -101,7 +107,7 @@ Note what `Plan` does *not* decide: *how* a failed operation fails (applied or n
 ### inode
 
 ```go
-// toys3/sim/fakefs.go:54-65
+// toys3/sim/plantmodel.go:60-71
 // InodeID names a file's content independently of its names, so a rename can
 // leave two names for one inode after a crash (both the old and the new
 // directory entry survived) without duplicating data.
@@ -116,14 +122,14 @@ type inode struct {
 }
 ```
 
-The separation of inodes from names is essential and is the source of the most interesting bug in this book (§11.13). A rename does not copy data; it moves a name. If a crash then keeps the new name *and* reverts the removal of the old one, both names point to the same inode: a hard link that nobody created on purpose. On a real filesystem the same thing is conceivable (rename is two directory changes, and if they are in different directories and neither is fsynced, each could independently persist or not on a filesystem without cross-directory atomicity); in the FakeFS it is routine.
+The separation of inodes from names is essential and is the source of the most interesting bug in this book (§11.13). A rename does not copy data; it moves a name. If a crash then keeps the new name *and* reverts the removal of the old one, both names point to the same inode: a hard link that nobody created on purpose. On a real filesystem the same thing is conceivable (rename is two directory changes, and if they are in different directories and neither is fsynced, each could independently persist or not on a filesystem without cross-directory atomicity); in the PlantModel it is routine.
 
 `dirty` is a cached `!bytes.Equal(volatile, durable)`. `poisoned` is the fsyncgate state (§11.6).
 
 ### dirent
 
 ```go
-// toys3/sim/fakefs.go:67-71
+// toys3/sim/plantmodel.go:73-77
 // dirent is one name in a directory, in two versions. 0 means absent.
 type dirent struct {
 	cur     InodeID // visible now (after creates/renames/unlinks)
@@ -143,7 +149,7 @@ InodeID 0 means "no file". So a dirent can encode four situations:
 ### fdir
 
 ```go
-// toys3/sim/fakefs.go:73-78
+// toys3/sim/plantmodel.go:79-84
 // fdir is a directory. Iterate names in sorted order only (detcheck bans
 // ranging over maps; determinism requires it anyway).
 type fdir struct {
@@ -155,7 +161,7 @@ type fdir struct {
 The entries are in a Go map for O(1) lookup by name, but **every iteration goes through `names()`**, which returns a cached sorted slice:
 
 ```go
-// toys3/sim/fakefs.go:430-443
+// toys3/sim/plantmodel.go:440-453
 func (d *fdir) names() []string {
 	if d.sorted == nil {
 		names := make([]string, 0, len(d.entries))
@@ -169,12 +175,12 @@ func (d *fdir) names() []string {
 }
 ```
 
-This is the canonical way to iterate a map deterministically in Go: collect the keys (in random order), sort them, iterate the sorted slice. `detcheck` (Chapter 8) flags every `range` over a map; the `//detcheck:ok` comment on line 436 is the suppression, with the mandatory reason. Every crash resolution, every writeback candidate list, every snapshot and every hash goes through `names()`, so the RNG is always consumed in name order.
+This is the canonical way to iterate a map deterministically in Go: collect the keys (in random order), sort them, iterate the sorted slice. `detcheck` (Chapter 8) flags every `range` over a map; the `//detcheck:ok` comment on line 446 is the suppression, with the mandatory reason. Every crash resolution, every writeback candidate list, every snapshot and every hash goes through `names()`, so the RNG is always consumed in name order.
 
 The cache is invalidated by `setEntry` only when the *set of names* changes, not when an entry's versions change:
 
 ```go
-// toys3/sim/fakefs.go:263-277
+// toys3/sim/plantmodel.go:273-287
 func (d *fdir) setEntry(name string, e dirent) {
 	_, existed := d.entries[name]
 	if e.cur == 0 && e.durable == 0 {
@@ -193,14 +199,14 @@ func (d *fdir) setEntry(name string, e dirent) {
 
 The comment on `names()` adds a subtle guarantee: "it stays valid while the caller iterates even if entries are added or removed (a new slice is built next time)". `Crash` relies on this: it iterates `d.names()` while calling `setEntry`, which may delete entries and nil out the cache, but the slice being iterated is not modified, only replaced for the next caller.
 
-### FakeFS
+### PlantModel
 
 ```go
-// toys3/sim/fakefs.go:98-108
-type FakeFS struct {
+// toys3/sim/plantmodel.go:108-118
+type PlantModel struct {
 	rng     *Rand
-	faults  FSFaults
-	quiet   bool // no new faults (QuietTail); crash resolution still applies
+	faults  Disturbances
+	quiet   bool // no new disturbances (Settling); crash resolution still applies
 	dirs    map[string]*fdir
 	inodes  map[InodeID]*inode
 	nextIno InodeID
@@ -210,14 +216,14 @@ type FakeFS struct {
 }
 ```
 
-Directories are fixed at construction (`NewFakeFS`, lines 118-133): the simulator passes `/data/obj` and `/data/tmp`, both durable and empty. "There is no mkdir" (line 96-97): the core has no mkdir action either, so this is a faithful mirror of the server's capabilities. Inode numbers come from `nextIno`, starting at 1 so that 0 can mean "absent".
+Directories are fixed at construction (`NewPlantModel`, lines 128-143): the simulator passes `/data/obj` and `/data/tmp`, both durable and empty. "there is no mkdir" (lines 106-107): the controller has no mkdir action either, so this is a faithful mirror of the server's capabilities. Inode numbers come from `nextIno`, starting at 1 so that 0 can mean "absent".
 
-Paths are split by `split` (lines 237-248) at the last `/` into a known directory and a non-empty base name; an unknown directory or empty name yields "not ok", which every operation turns into `ErrNotFound`. `lookup` (lines 250-261) resolves a path to the inode its `cur` entry names.
+Paths are split by `split` (lines 247-258) at the last `/` into a known directory and a non-empty base name; an unknown directory or empty name yields "not ok", which every operation turns into `ErrNotFound`. `lookup` (lines 260-271) resolves a path to the inode its `cur` entry names.
 
 ## 11.5 Land: applying an action
 
 ```go
-// toys3/sim/fakefs.go:144-193
+// toys3/sim/plantmodel.go:154-203
 // Land applies a filesystem action and returns its completion event. With
 // p.Fail the completion carries ErrIO and the effect is adversarial:
 //
@@ -229,16 +235,16 @@ Paths are split by `split` (lines 237-248) at the last `/` into a known director
 //	FSRead, FSList  no effect
 //
 // Missing paths complete with ErrNotFound (never by chance).
-func (fs *FakeFS) Land(a core.Action, p FSPlan) core.EventBody {
+func (fs *PlantModel) Land(a control.Action, p ActuationPlan) control.EventBody {
 	fs.count.Landed++
 	...
 	switch a := a.(type) {
-	case core.FSWrite:
+	case control.FSWrite:
 		err = fs.write(a.Path, a.Data, p.Fail)
-		body = core.FSWriteDone{IO: a.IO, Err: err}
+		body = control.FSWriteDone{IO: a.IO, Err: err}
 	...
 	}
-	if err == core.ErrIO {
+	if err == control.ErrIO {
 		fs.count.EIOs++
 	}
 	if fs.rng.Chance(fs.faults.WritebackProb) {
@@ -248,7 +254,7 @@ func (fs *FakeFS) Land(a core.Action, p FSPlan) core.EventBody {
 }
 ```
 
-The doc comment's table is the contract for failed operations. Note the last line: **"Missing paths complete with ErrNotFound (never by chance)."** If the path does not exist, the operation returns ENOENT even if the plan said fail. ENOENT is information the server acts on (404 for GET and DELETE, a COPY of an absent source), so it must be truthful; EIO is reserved for "something went wrong and you cannot know what". `TestFakeFSEIOMayOrMayNotApply` checks this explicitly: a planned failure on a missing path returns ENOENT (`toys3/sim/fakefs_test.go:149-152`).
+The doc comment's table is the contract for failed operations. Note the last line: **"Missing paths complete with ErrNotFound (never by chance)."** If the path does not exist, the operation returns ENOENT even if the plan said fail. ENOENT is information the server acts on (404 for GET and DELETE, a COPY of an absent source), so it must be truthful; EIO is reserved for "something went wrong and you cannot know what". `TestPlantModelEIOMayOrMayNotApply` checks this explicitly: a planned failure on a missing path returns ENOENT (`toys3/sim/plantmodel_test.go:151-154`).
 
 After every landed action, a writeback coin is tossed (§11.8). Note the counters: `Landed` becomes `fsops` in the stats line, `EIOs` becomes `eio`.
 
@@ -257,11 +263,11 @@ Now each operation.
 ### 11.5.1 write
 
 ```go
-// toys3/sim/fakefs.go:279-313
-func (fs *FakeFS) write(path string, data []byte, fail bool) core.ErrCode {
+// toys3/sim/plantmodel.go:289-323
+func (fs *PlantModel) write(path string, data []byte, fail bool) control.ErrCode {
 	d, name, ok := fs.split(path)
 	if !ok {
-		return core.ErrNotFound
+		return control.ErrNotFound
 	}
 	content := bytes.Clone(data)
 	if content == nil {
@@ -270,7 +276,7 @@ func (fs *FakeFS) write(path string, data []byte, fail bool) core.ErrCode {
 	if fail {
 		switch fs.rng.Intn(3) {
 		case 0: // nothing happened
-			return core.ErrIO
+			return control.ErrIO
 		case 1: // created / truncated, nothing written
 			content = []byte{}
 		default: // a prefix was written
@@ -289,43 +295,43 @@ func (fs *FakeFS) write(path string, data []byte, fail bool) core.ErrCode {
 	in.dirty = !bytes.Equal(in.volatile, in.durable)
 	in.poisoned = false
 	if fail {
-		return core.ErrIO
+		return control.ErrIO
 	}
-	return core.OK
+	return control.OK
 }
 ```
 
-This models `open(O_WRONLY|O_CREAT|O_TRUNC)` + `write` + `close`, which is exactly what production does (`toys3/prod/executor.go:75-85`).
+This models `open(O_WRONLY|O_CREAT|O_TRUNC)` + `write` + `close`, which is exactly what production does (`toys3/prod/executor.go:76-86`).
 
-- **`bytes.Clone`**: the FakeFS never keeps a reference to the server's slice. Events and actions are supposed to be immutable once sent (Chapter 3), but the FakeFS does not trust that. `TestFakeFSNeverAliasesHandedOutSlices` (`toys3/sim/fakefs_test.go:171-185`) mutates the input after the write and the output after a read, and checks the stored content is unaffected.
+- **`bytes.Clone`**: the PlantModel never keeps a reference to the server's slice. Events and actions are supposed to be immutable once sent (Chapter 3), but the PlantModel does not trust that. `TestPlantModelNeverAliasesHandedOutSlices` (`toys3/sim/plantmodel_test.go:173-187`) mutates the input after the write and the output after a read, and checks the stored content is unaffected.
 - **Failure modes**, chosen uniformly: (0) nothing happened at all, not even the create; (1) the file was created or truncated but no data written; (2) a prefix was written, possibly all of it (`Intn(len+1)` includes the full length). All three return EIO. The server's response (Chapter 7) must be correct for all three: it replies 500 and leaves the temp file for recovery to clean up.
 - **Create if absent**: a new inode and a dirent with `cur` set. The dirent's `durable` stays as it was (usually 0), so the *name* is not durable until the directory is fsynced, and the *content* is not durable until the file is fsynced. Two independent fsyncs are needed, which is the whole point of Chapter 4.
-- **If the name already exists, the existing inode is overwritten.** Read that again, because it is the hinge of §11.13. `O_TRUNC` does not create a new file; it truncates the file the name currently points at. If that inode also has another name (a hard link), the other name sees the new content too. The FakeFS models this faithfully: `in := fs.inodes[e.cur]` and then `in.volatile = content`.
+- **If the name already exists, the existing inode is overwritten.** Read that again, because it is the hinge of §11.13. `O_TRUNC` does not create a new file; it truncates the file the name currently points at. If that inode also has another name (a hard link), the other name sees the new content too. The PlantModel models this faithfully: `in := fs.inodes[e.cur]` and then `in.volatile = content`.
 - **`dirty`** is recomputed: writing identical bytes to a synced file leaves it clean.
 - **`poisoned = false`**: a fresh write clears the fsyncgate state (§11.6). This mirrors Linux, where new dirty pages get a fresh chance to be written back.
 
 ### 11.5.2 fsync
 
 ```go
-// toys3/sim/fakefs.go:315-333
-func (fs *FakeFS) fsync(path string, fail bool) core.ErrCode {
+// toys3/sim/plantmodel.go:325-343
+func (fs *PlantModel) fsync(path string, fail bool) control.ErrCode {
 	in, ok := fs.lookup(path)
 	if !ok {
-		return core.ErrNotFound
+		return control.ErrNotFound
 	}
 	if fail {
 		if fs.faults.FsyncGate && in.dirty {
 			in.poisoned = true // the kernel drops the dirty pages' error state
 		}
-		return core.ErrIO
+		return control.ErrIO
 	}
 	if in.poisoned {
-		return core.OK // fsyncgate: the lie
+		return control.OK // fsyncgate: the lie
 	}
 	in.durable = in.volatile
 	in.dirty = false
 	fs.durGen++
-	return core.OK
+	return control.OK
 }
 ```
 
@@ -336,15 +342,15 @@ Note that a failed fsync *without* `FsyncGate` (or on a clean inode) leaves the 
 ### 11.5.3 rename
 
 ```go
-// toys3/sim/fakefs.go:335-357
-func (fs *FakeFS) rename(from, to string, fail bool) core.ErrCode {
+// toys3/sim/plantmodel.go:345-367
+func (fs *PlantModel) rename(from, to string, fail bool) control.ErrCode {
 	fd, fname, ok1 := fs.split(from)
 	td, tname, ok2 := fs.split(to)
 	if !ok1 || !ok2 || fd.entries[fname].cur == 0 {
-		return core.ErrNotFound
+		return control.ErrNotFound
 	}
 	if fail && fs.rng.Intn(2) == 0 {
-		return core.ErrIO // not applied
+		return control.ErrIO // not applied
 	}
 	if from != to {
 		src := fd.entries[fname]
@@ -356,29 +362,29 @@ func (fs *FakeFS) rename(from, to string, fail bool) core.ErrCode {
 		td.setEntry(tname, dst)
 	}
 	if fail {
-		return core.ErrIO // applied, but reported as failed
+		return control.ErrIO // applied, but reported as failed
 	}
-	return core.OK
+	return control.OK
 }
 ```
 
 The visible effect of a rename is two `cur` changes: the source name's `cur` becomes 0, the destination name's `cur` becomes the moved inode (replacing whatever it named; the replaced inode keeps existing as long as some `durable` still names it, which matters for crash resolution). Neither `durable` changes. **Atomicity is modelled for visibility only**: no reader can see a state where the destination is half-replaced, because the change is a single assignment. **Durability is per-entry**: the two halves of the rename can independently persist or not at a crash.
 
-A failed rename is applied or not with equal probability, and in both cases returns EIO. This is what makes the server's "rename EIO → 500 + Halt" rule necessary (Chapter 7): after an EIO from rename, the server cannot know whether the object is now visible under the new name.
+A failed rename is applied or not with equal probability, and in both cases returns EIO. This is what makes the server's "rename EIO → 500 + Trip" rule necessary (Chapter 7): after an EIO from rename, the server cannot know whether the object is now visible under the new name.
 
-`from == to` is a no-op, as in POSIX (`rename(2)`: "If oldpath and newpath are existing hard links referring to the same file, then rename() does nothing"). The server never issues such a rename (temp names and object names live in different directories), but the FakeFS handles it correctly anyway.
+`from == to` is a no-op, as in POSIX (`rename(2)`: "If oldpath and newpath are existing hard links referring to the same file, then rename() does nothing"). The server never issues such a rename (temp names and object names live in different directories), but the PlantModel handles it correctly anyway.
 
 ### 11.5.4 fsyncDir
 
 ```go
-// toys3/sim/fakefs.go:359-374
-func (fs *FakeFS) fsyncDir(dir string, fail bool) core.ErrCode {
+// toys3/sim/plantmodel.go:369-384
+func (fs *PlantModel) fsyncDir(dir string, fail bool) control.ErrCode {
 	d, ok := fs.dirs[dir]
 	if !ok {
-		return core.ErrNotFound
+		return control.ErrNotFound
 	}
 	if fail {
-		return core.ErrIO
+		return control.ErrIO
 	}
 	for _, name := range d.names() {
 		e := d.entries[name]
@@ -386,7 +392,7 @@ func (fs *FakeFS) fsyncDir(dir string, fail bool) core.ErrCode {
 		d.setEntry(name, e)
 	}
 	fs.durGen++
-	return core.OK
+	return control.OK
 }
 ```
 
@@ -409,14 +415,14 @@ No crash was needed. The durable view after #44 *already* contains two zero-byte
 ### 11.5.5 read
 
 ```go
-// toys3/sim/fakefs.go:376-394
-func (fs *FakeFS) read(path string, fail bool) ([]byte, core.ErrCode) {
+// toys3/sim/plantmodel.go:386-404
+func (fs *PlantModel) read(path string, fail bool) ([]byte, control.ErrCode) {
 	in, ok := fs.lookup(path)
 	if !ok {
-		return nil, core.ErrNotFound
+		return nil, control.ErrNotFound
 	}
 	if fail {
-		return nil, core.ErrIO
+		return nil, control.ErrIO
 	}
 	data := bytes.Clone(in.volatile)
 	if data == nil {
@@ -427,54 +433,54 @@ func (fs *FakeFS) read(path string, fail bool) ([]byte, core.ErrCode) {
 		data[bit/8] ^= 1 << (bit % 8)
 		fs.count.ReadCorruptions++
 	}
-	return data, core.OK
+	return data, control.OK
 }
 ```
 
 Reads see `volatile`, through `cur`. A read failure returns EIO with no data and no effect. And with probability `ReadCorruptProb`, one uniformly random bit of the *returned copy* is flipped; the stored data is untouched (it was cloned first). This models a transient media, controller or bus error: the next read of the same file is fine.
 
-Why does this fault exist? Because without it, **the server's CRC check would be dead code**. A correct protocol never puts a torn or corrupt file under `obj/`, so every read of an object decodes cleanly, so the "corrupt → 500" branch never runs, so mutant e (skip the CRC check) would be indistinguishable from the correct server. `DESIGN.md:119-122` makes this point, and `TestCorruptObjectUnreachableWithoutBitFlips` (`toys3/sim/sim_test.go:120-133`) proves the first half: with `ReadCorruptProb = 0`, 200 seeds never produce a single `CorruptObject` fact. (While writing this book, mutant e was also run for 1,000 seeds with read corruption disabled: it was never caught.)
+Why does this fault exist? Because without it, **the server's CRC check would be dead code**. A correct protocol never puts a torn or corrupt file under `obj/`, so every read of an object decodes cleanly, so the "corrupt → 500" branch never runs, so mutant e (skip the CRC check) would be indistinguishable from the correct server. `DESIGN.md:172-175` makes this point, and `TestCorruptionUnreachableWithoutBitFlips` (`toys3/sim/sim_test.go:120-133`) proves the first half: with `ReadCorruptProb = 0`, 200 seeds never produce a single `CorruptionDetected` telemetry. (While writing this book, mutant e was also run for 1,000 seeds with read corruption disabled: it was never caught.)
 
 Seed 18 shows the fault reaching the server and the server doing the right thing:
 
 ```
 #656    t=153.982439ms inc=7 fs-land     land FSRead{io87 /data/obj/k3} -> FSReadDone{io87 OK raw(29 bytes)}
-#657    t=154.136154ms inc=7 deliver     FSReadDone{io87 OK raw(29 bytes)} => Emit{CorruptObject{"k3"}} Reply{c98 500}
+#657    t=154.136154ms inc=7 deliver     FSReadDone{io87 OK raw(29 bytes)} => Emit{CorruptionDetected{"k3"}} Reply{c98 500}
 ```
 
-`raw(29 bytes)` is how `describePayload` (`toys3/sim/describe.go:28-43`) renders bytes that do not decode as an object: 16 bytes of header plus 13 of payload, one bit wrong. The server emits `CorruptObject` and replies 500. Under mutant e, the same seed at the same step serves the 13 corrupt bytes with a 200, and two invariants fire (Chapter 15).
+`raw(29 bytes)` is how `describePayload` (`toys3/sim/log.go:29-44`) renders bytes that do not decode as an object: 16 bytes of header plus 13 of payload, one bit wrong. The server emits `CorruptionDetected` and replies 500. Under mutant e, the same seed at the same step serves the 13 corrupt bytes with a 200, and two invariants fire (Chapter 15).
 
 Corruption is gated on `!fs.quiet` at *land* time, so it stops exactly when Chaos ends. Also note `len(data) > 0`: an empty file cannot have a bit flipped, and `Intn(0)` would panic.
 
-A subtle statistic from the 200-seed run in the preface: `readcorrupt=71 corruptobj=70`. One flipped read did not produce a `CorruptObject` fact. The most likely explanation is the land/deliver split (Chapter 10 §10.8): the read landed (and was counted), and the server crashed before the completion was delivered.
+A subtle statistic from the 200-seed run in the preface: `readcorrupt=71 corruptdet=70`. One flipped read did not produce a `CorruptionDetected` telemetry. The most likely explanation is the land/deliver split (Chapter 10 §10.8): the read landed (and was counted), and the server crashed before the completion was delivered.
 
 ### 11.5.6 unlink and list
 
 ```go
-// toys3/sim/fakefs.go:396-411
-func (fs *FakeFS) unlink(path string, fail bool) core.ErrCode {
+// toys3/sim/plantmodel.go:406-421
+func (fs *PlantModel) unlink(path string, fail bool) control.ErrCode {
 	d, name, ok := fs.split(path)
 	if !ok || d.entries[name].cur == 0 {
-		return core.ErrNotFound
+		return control.ErrNotFound
 	}
 	if fail && fs.rng.Intn(2) == 0 {
-		return core.ErrIO // not applied
+		return control.ErrIO // not applied
 	}
 	e := d.entries[name]
 	e.cur = 0
 	d.setEntry(name, e)
 	if fail {
-		return core.ErrIO
+		return control.ErrIO
 	}
-	return core.OK
+	return control.OK
 }
 ```
 
 Unlink sets `cur = 0`; the name stays durable until the directory is fsynced. Like rename, a failed unlink is applied or not with equal probability. The inode is not freed: it stays in `fs.inodes` until a crash garbage-collects unnamed inodes (§11.9, phase 3). That is necessary, because a crash may *revert* the unlink, and the inode must still be there to come back.
 
 ```go
-// toys3/sim/fakefs.go:413-428
-func (fs *FakeFS) list(dir string, fail bool) ([]string, core.ErrCode) {
+// toys3/sim/plantmodel.go:423-438
+func (fs *PlantModel) list(dir string, fail bool) ([]string, control.ErrCode) {
 	...
 	var names []string
 	for _, name := range d.names() {
@@ -482,51 +488,51 @@ func (fs *FakeFS) list(dir string, fail bool) ([]string, core.ErrCode) {
 			names = append(names, name)
 		}
 	}
-	return names, core.OK
+	return names, control.OK
 }
 ```
 
-Listing returns the names that are currently visible, sorted (matching the contract in `toys3/core/event.go:96` and production's `os.ReadDir`, which also sorts). Names that are unlinked but not yet durably so are invisible, as they would be on a real system.
+Listing returns the names that are currently visible, sorted (matching the contract in `toys3/control/plant.go:144` and production's `os.ReadDir`, which also sorts). Names that are unlinked but not yet durably so are invisible, as they would be on a real system.
 
 ## 11.6 FsyncGate: the lie
 
 In 2018, PostgreSQL developers discovered that their assumption about `fsync` failures on Linux was wrong. They assumed that if `fsync` returned EIO, the dirty data was still dirty, and a later `fsync` would retry writing it. On Linux, after a writeback error, the kernel could mark the affected pages clean (and, depending on kernel version and timing, report the error to only one of the file descriptors that asked). A later `fsync` would return success, because there was nothing dirty left to write. The data was simply gone. The episode became known as "fsyncgate".
 
-The FakeFS models the essential consequence in three lines:
+The PlantModel models the essential consequence in three lines:
 
 ```go
-// toys3/sim/fakefs.go:320-328
+// toys3/sim/plantmodel.go:330-338
 	if fail {
 		if fs.faults.FsyncGate && in.dirty {
 			in.poisoned = true // the kernel drops the dirty pages' error state
 		}
-		return core.ErrIO
+		return control.ErrIO
 	}
 	if in.poisoned {
-		return core.OK // fsyncgate: the lie
+		return control.OK // fsyncgate: the lie
 	}
 ```
 
 and in the crash resolution:
 
 ```go
-// toys3/sim/fakefs.go:492-493
+// toys3/sim/plantmodel.go:502-503
 		case in.poisoned:
 			rep.Lost++ // fsyncgate: the "clean" pages never reach the disk
 ```
 
 A poisoned inode's volatile content will never become durable by fsync, and at a crash it reverts to whatever was durable before. Writeback also skips poisoned inodes (§11.8). Only a fresh `FSWrite` clears the poison.
 
-`TestFakeFSFsyncGateLies` (`toys3/sim/fakefs_test.go:155-169`) is the whole story in fifteen lines:
+`TestPlantModelFsyncGateLies` (`toys3/sim/plantmodel_test.go:157-171`) is the whole story in fifteen lines:
 
 ```go
-	fs := newTestFS(1, FSFaults{FsyncGate: true})
-	do(t, fs, core.FSWrite{IO: 1, Path: tObj + "/k", Data: []byte("data")})
-	do(t, fs, core.FSFsyncDir{IO: 2, Dir: tObj})
-	if err := errOf(fs.Land(core.FSFsync{IO: 3, Path: tObj + "/k"}, FSPlan{Fail: true})); err != core.ErrIO {
+	fs := newTestFS(1, Disturbances{FsyncGate: true})
+	do(t, fs, control.FSWrite{IO: 1, Path: tObj + "/k", Data: []byte("data")})
+	do(t, fs, control.FSFsyncDir{IO: 2, Dir: tObj})
+	if err := errOf(fs.Land(control.FSFsync{IO: 3, Path: tObj + "/k"}, ActuationPlan{Fail: true})); err != control.ErrIO {
 		t.Fatal("want EIO")
 	}
-	if err := do(t, fs, core.FSFsync{IO: 4, Path: tObj + "/k"}); err != core.OK {
+	if err := do(t, fs, control.FSFsync{IO: 4, Path: tObj + "/k"}); err != control.OK {
 		t.Fatal("the retry should claim success")
 	}
 	fs.Crash()
@@ -535,23 +541,23 @@ A poisoned inode's volatile content will never become durable by fsync, and at a
 	}
 ```
 
-Write, make the name durable, fsync fails, retry "succeeds", crash: the file exists (its name was durable) and is empty. A server that "handles" the EIO by retrying the fsync would ack data that is gone. This is why the server halts on any fsync error (Chapter 7), and why mutant d (keep going after the error) is caught at seed 1 by `obj-never-torn`: it renames the poisoned temp file into `obj/`, fsyncs the directory, and the durable view now holds an empty object.
+Write, make the name durable, fsync fails, retry "succeeds", crash: the file exists (its name was durable) and is empty. A server that "handles" the EIO by retrying the fsync would ack data that is gone. This is why the server trips on any fsync error (Chapter 7), and why mutant d (keep going after the error) is caught at seed 1 by `obj-never-torn`: it renames the poisoned temp file into `obj/`, fsyncs the directory, and the durable view now holds an empty object.
 
-## 11.7 What the FakeFS does not model
+## 11.7 What the PlantModel does not model
 
 Before the crash machinery, a list of deliberate omissions, so you know what the adversary *cannot* do:
 
 - **No mkdir, no directory renames.** The two directories exist and are durable from the start.
 - **No interleaved torn writes.** A torn file holds a *prefix of the new content*. Real disks can tear at sector or page granularity and leave a mixture of old and new blocks (for an overwrite in place), or new blocks with garbage between them. toys3 never overwrites a file in place (it always writes a fresh temp file), so for the correct server a prefix is a reasonable model; Chapter 17 lists "interleaved torn writes" as a model extension.
-- **No metadata corruption, no lost directories, no misdirected writes.** The FakeFS never corrupts *durable* state on its own; read corruption is transient.
+- **No metadata corruption, no lost directories, no misdirected writes.** The PlantModel never corrupts *durable* state on its own; read corruption is transient.
 - **No space exhaustion (ENOSPC), no permissions, no partial reads.** Every failure is EIO or ENOENT.
 - **No ordering promises beyond fsync.** This one is *more* adversarial than real filesystems, see §11.14.
 
 ## 11.8 Background writeback
 
 ```go
-// toys3/sim/fakefs.go:195-232
-func (fs *FakeFS) writeback() {
+// toys3/sim/plantmodel.go:205-242
+func (fs *PlantModel) writeback() {
 	type change struct {
 		d    *fdir
 		name string
@@ -597,7 +603,7 @@ After each landed action, with probability `WritebackProb` (5%), one candidate c
 - **An inode with two current names is listed twice** (the loop appends a candidate per name), so it is twice as likely to be chosen. This is a harmless bias; real writeback does not care about names at all.
 - Inodes that are only reachable via a `durable` name (unlinked but not yet durably) are not candidates for content writeback, though their dirent change is.
 
-`DESIGN.md:113-118` explains why this fault "turned out to matter":
+`DESIGN.md:166-171` explains why this fault "turned out to matter":
 
 > Without it, a temp file's name is durable only if a crash happens to keep it. With it, the name can already be durable when the file is renamed into `obj/`, so a later crash brings it back as a second hard link to the committed object.
 
@@ -606,12 +612,12 @@ That second hard link is the subject of §11.13, and Chapter 15 quantifies the e
 ## 11.9 Crash: three phases
 
 ```go
-// toys3/sim/fakefs.go:452-519
+// toys3/sim/plantmodel.go:462-529
 type CrashReport struct {
 	Kept, Lost, Torn int
 }
 
-func (fs *FakeFS) Crash() CrashReport {
+func (fs *PlantModel) Crash() CrashReport {
 	var rep CrashReport
 	fs.durGen++
 	// 1. Directory entries: each un-synced change is kept or reverted.
@@ -693,7 +699,7 @@ Each entry is resolved **independently**. This is the crucial adversarial choice
                   tmp/t gone,  obj/k gone    → NEITHER: inode I unnamed, garbage collected
 ```
 
-Real filesystems that journal metadata typically commit a rename as one transaction, so on them the "both" and "neither" outcomes are not expected after a crash (§11.14). The FakeFS allows them because POSIX does not forbid them, and because a protocol that is correct under independent resolution is correct under any coarser one.
+Real filesystems that journal metadata typically commit a rename as one transaction, so on them the "both" and "neither" outcomes are not expected after a crash (§11.14). The PlantModel allows them because POSIX does not forbid them, and because a protocol that is correct under independent resolution is correct under any coarser one.
 
 ### Phase 2: file contents
 
@@ -719,11 +725,11 @@ Note that the torn prefix is a prefix of the *new* content, not a mixture with t
 
 ### Phase 3: garbage collection
 
-Inodes that no entry names are deleted. They were kept alive until now precisely so that phase 1 could revert an unlink or a rename and bring them back. The map iteration on line 510 is suppressed for detcheck with a reason: it only collects ids, and deleting map keys in any order produces the same map.
+Inodes that no entry names are deleted. They were kept alive until now precisely so that phase 1 could revert an unlink or a rename and bring them back. The map iteration on line 520 is suppressed for detcheck with a reason: it only collects ids, and deleting map keys in any order produces the same map.
 
 ### The report and the stats
 
-`CrashReport` counts kept, lost and torn changes across both phases. The simulator adds them to `KeptChanges`, `LostChanges` and `TornFiles` and folds them into the trace (Chapter 10 §10.10). In the event log, every crash line shows them: `CRASH (halt: fsync temp: EIO): kept=2 lost=2 torn=0, dropped 1 queued entries`. `TestCoverage` requires all three to be non-zero across 200 seeds (`toys3/sim/sim_test.go:99-101`): a crash model that never tears a file or never keeps an un-synced change is not exploring.
+`CrashReport` counts kept, lost and torn changes across both phases. The simulator adds them to `KeptChanges`, `LostChanges` and `TornFiles` and folds them into the trace (Chapter 10 §10.10). In the event log, every crash line shows them: `CRASH (trip: fsync temp: EIO): kept=2 lost=2 torn=0, dropped 1 queued entries`. `TestCoverage` requires all three to be non-zero across 200 seeds (`toys3/sim/sim_test.go:99-101`): a crash model that never tears a file or never keeps an un-synced change is not exploring.
 
 ### RNG consumption at a crash
 
@@ -732,19 +738,19 @@ Every un-synced dirent draws one `Intn(2)`. Every dirty, unpoisoned live inode d
 ## 11.10 Views: Durable, Current, and DurableGen
 
 ```go
-// toys3/sim/fakefs.go:536-542
+// toys3/sim/plantmodel.go:546-552
 // Durable returns what would be on disk after a crash in which the adversary
 // loses everything volatile: the durable entries pointing at durable content.
 // "Acked implies durable" is checked against this view.
-func (fs *FakeFS) Durable() Snapshot { return fs.snapshot(true) }
+func (fs *PlantModel) Durable() Snapshot { return fs.snapshot(true) }
 
 // Current returns the view reads see right now.
-func (fs *FakeFS) Current() Snapshot { return fs.snapshot(false) }
+func (fs *PlantModel) Current() Snapshot { return fs.snapshot(false) }
 ```
 
 ```go
-// toys3/sim/fakefs.go:575-590
-func (fs *FakeFS) file(d *fdir, name string, durable bool) ([]byte, bool) {
+// toys3/sim/plantmodel.go:599-614
+func (fs *PlantModel) file(d *fdir, name string, durable bool) ([]byte, bool) {
 	e, ok := d.entries[name]
 	if !ok {
 		return nil, false
@@ -764,18 +770,20 @@ func (fs *FakeFS) file(d *fdir, name string, durable bool) ([]byte, bool) {
 
 The **durable view** is the pessimistic future: durable names pointing at durable content. It is exactly what a crash would leave if the adversary lost *every* un-synced change. Because every crash outcome keeps a superset of it (some un-synced changes may be kept, but nothing durable is ever lost), checking an invariant against the durable view is a check against the worst case, without having to crash. Two invariants use it (Chapter 14):
 
-- **`AckedIsDurable`** looks up the committed key's file in the durable view the moment the server emits `Committed` (via `DurableFile`, lines 557-564). If the rename or the file content is not durable yet, the server acked too early. This is how mutants a and c are caught at seed 1 in the first ~45 steps, without a single crash.
-- **`ObjNeverTorn`** decodes every durable file under `obj/`.
+- **`AckedIsDurable`** looks up the committed key's file in the durable view the moment the server emits `Committed` (via `DurableFile`, lines 581-588, which the monitors reach through the `GroundTruth` interface of Chapter 14). If the rename or the file content is not durable yet, the server acked too early. This is how mutants a and c are caught at seed 1 in the first ~45 steps, without a single crash.
+- **`ObjNeverTorn`** decodes every durable file under `obj/`, iterating them with `EachDurable` (`toys3/sim/plantmodel.go:567-578`), which visits the durable view in sorted path order without building a `Snapshot`.
+
+Neither invariant sees the `PlantModel` itself. They see a three-method interface, `GroundTruth` (`DurableFile`, `EachDurable`, `DurableGen`; `toys3/sim/invariant.go:37-51`), which `*PlantModel` implements. In the vocabulary of Chapter 3a this is an *anti-corruption layer* between the verification context and the plant model: the monitors may read the plant's true durable state and nothing else. In particular they cannot call `Current()`, the volatile view, which no real observer of a disk could see either. Before the refactor, `View.FS()` handed every invariant the whole `*FakeFS`.
 
 The phrase "a superset of it" needs a qualification. Phase 1 either reverts `cur` to `durable` or replaces `durable` with the newer `cur`. Phase 2 either keeps `durable` or replaces it with newer content, and the torn case replaces it with a *prefix* of the newer content. So a crash never resurrects anything older than the durable view, but it can replace durable state with newer un-synced state, including a torn prefix of a file that was overwritten in place. The durable view is therefore precisely "what the disk holds if nothing un-synced survives". That is what the invariants need: in a correct server, every file under `obj/` was fully fsynced before it got its name and is never written again (overwrites go through a fresh temp inode), so nothing can tear it.
 
-`DurableGen` (lines 448-450) is a counter bumped whenever the durable view may have changed: a successful fsync, a successful directory fsync, a writeback, and a crash. Writes, renames, unlinks and failed fsyncs never change the durable view, so they do not bump it. `ObjNeverTorn` remembers the last generation it checked and skips steps where nothing durable changed (`toys3/sim/invariant.go:145-150`), turning an O(files) check per step into one that runs only after the few operations that matter.
+`DurableGen` (lines 458-460) is a counter bumped whenever the durable view may have changed: a successful fsync, a successful directory fsync, a writeback, and a crash. Writes, renames, unlinks and failed fsyncs never change the durable view, so they do not bump it. `ObjNeverTorn` remembers the last generation it checked and skips steps where nothing durable changed (`toys3/sim/invariant.go:169-174`), turning an O(files) check per step into one that runs only after the few operations that matter.
 
 ## 11.11 Hash
 
 ```go
-// toys3/sim/fakefs.go:592-627
-func (fs *FakeFS) Hash() uint64 {
+// toys3/sim/plantmodel.go:616-651
+func (fs *PlantModel) Hash() uint64 {
 	h := uint64(fs.nextIno)
 	for _, dn := range fs.dirNames() {
 		d := fs.dirs[dn]
@@ -794,13 +802,13 @@ func (fs *FakeFS) Hash() uint64 {
 	return h
 }
 
-func (fs *FakeFS) hashInode(h uint64, id InodeID) uint64 {
+func (fs *PlantModel) hashInode(h uint64, id InodeID) uint64 {
 	in, ok := fs.inodes[id]
 	if !ok {
 		return Fold(h, 0)
 	}
-	h = Fold(h, uint64(len(in.durable))<<32|uint64(core.Checksum(in.durable)))
-	h = Fold(h, uint64(len(in.volatile))<<32|uint64(core.Checksum(in.volatile)))
+	h = Fold(h, uint64(len(in.durable))<<32|uint64(format.Checksum(in.durable)))
+	h = Fold(h, uint64(len(in.volatile))<<32|uint64(format.Checksum(in.volatile)))
 	var flags uint64
 	if in.dirty { flags |= 1 }
 	if in.poisoned { flags |= 2 }
@@ -810,23 +818,23 @@ func (fs *FakeFS) hashInode(h uint64, id InodeID) uint64 {
 
 Folded into the trace after every step (Chapter 10 §10.5). It covers both versions of every entry and every reachable inode's both versions (as length plus CRC-32, rather than every byte, for speed) and flags. The inode *numbers* are included too (`nextIno`, `e.cur`, `e.durable`), so two runs that produce the same file contents through different sequences of creates would hash differently. That is intended: determinism means *the same history*, not merely the same outcome. Note that the hash does not include inodes reachable only through nothing (there are none outside a crash's phase 3) or the fault counters.
 
-## 11.12 The FakeFS tests, one by one
+## 11.12 The PlantModel tests, one by one
 
-`toys3/sim/fakefs_test.go` tests the FakeFS in isolation. Each test pins one sentence of the model. Helpers: `newTestFS(seed, faults)` builds a FakeFS with directories `/d/obj` and `/d/tmp`; `do` lands an action with an empty plan (no failure); `errOf` extracts the error code from a completion.
+`toys3/sim/plantmodel_test.go` tests the PlantModel in isolation. Each test pins one sentence of the model. Helpers: `newTestFS(seed, faults)` builds a PlantModel with directories `/d/obj` and `/d/tmp`; `do` lands an action with an empty plan (no failure); `errOf` extracts the error code from a completion.
 
-**`TestFakeFSUnsyncedWriteMayVanish`** (lines 43-65). Over 64 seeds: write `obj/a` with no fsync of anything, check it is visible now but absent from the durable view, crash, and count whether it survived. Both outcomes must occur. This is the baseline adversary: an un-synced create is a coin flip (two coin flips, actually: one for the name, one for the content).
+**`TestPlantModelUnsyncedWriteMayVanish`** (lines 45-67). Over 64 seeds: write `obj/a` with no fsync of anything, check it is visible now but absent from the durable view, crash, and count whether it survived. Both outcomes must occur. This is the baseline adversary: an un-synced create is a coin flip (two coin flips, actually: one for the name, one for the content).
 
-**`TestFakeFSRenameWithoutDirFsyncMayVanish`** (lines 67-91). Over 128 seeds: write a temp file, fsync it, fsync `tmp/` (so the temp *name* is durable), rename it to `obj/k`, and crash without fsyncing `obj/`. All three outcomes must occur: only the new name ("present"), neither visible under `obj/` ("absent"), and **both names** ("both"). That third outcome is the hard-link resurrection of §11.13, tested directly. The test's "absent" bucket lumps together two outcomes: the rename was lost (the temp name survives, `obj/k` does not), and "neither" (both entry changes resolved against the file, so the inode has no name left and is garbage-collected).
+**`TestPlantModelRenameWithoutDirFsyncMayVanish`** (lines 69-93). Over 128 seeds: write a temp file, fsync it, fsync `tmp/` (so the temp *name* is durable), rename it to `obj/k`, and crash without fsyncing `obj/`. All three outcomes must occur: only the new name ("present"), neither visible under `obj/` ("absent"), and **both names** ("both"). That third outcome is the hard-link resurrection of §11.13, tested directly. The test's "absent" bucket lumps together two outcomes: the rename was lost (the temp name survives, `obj/k` does not), and "neither" (both entry changes resolved against the file, so the inode has no name left and is garbage-collected).
 
-**`TestFakeFSFullySyncedSurvives`** (lines 93-113). Over 100 seeds, with `TornWriteProb: 1` (every dirty file would tear): write, fsync, rename, fsync `obj/`, fsync `tmp/`, then crash. The file must survive intact under its new name and the temp name must be gone. This is the *positive* half of the contract: the correct protocol defeats even the maximum-hostility adversary.
+**`TestPlantModelFullySyncedSurvives`** (lines 95-115). Over 100 seeds, with `TornWriteProb: 1` (every dirty file would tear): write, fsync, rename, fsync `obj/`, fsync `tmp/`, then crash. The file must survive intact under its new name and the temp name must be gone. This is the *positive* half of the contract: the correct protocol defeats even the maximum-hostility adversary.
 
-**`TestFakeFSTornPrefix`** (lines 115-130). Write `obj/k`, fsync only the directory (name durable, bytes not), crash with `TornWriteProb: 1`. The file must exist (its name was durable), the report must say `Torn == 1`, and the content must be a *strict* prefix of what was written.
+**`TestPlantModelTornPrefix`** (lines 117-132). Write `obj/k`, fsync only the directory (name durable, bytes not), crash with `TornWriteProb: 1`. The file must exist (its name was durable), the report must say `Torn == 1`, and the content must be a *strict* prefix of what was written.
 
-**`TestFakeFSEIOMayOrMayNotApply`** (lines 132-153). Over 64 seeds: a failed rename must sometimes have applied and sometimes not. And a planned failure on a missing path returns ENOENT, not EIO.
+**`TestPlantModelEIOMayOrMayNotApply`** (lines 134-155). Over 64 seeds: a failed rename must sometimes have applied and sometimes not. And a planned failure on a missing path returns ENOENT, not EIO.
 
-**`TestFakeFSFsyncGateLies`** (lines 155-169). Covered in §11.6.
+**`TestPlantModelFsyncGateLies`** (lines 157-171). Covered in §11.6.
 
-**`TestFakeFSNeverAliasesHandedOutSlices`** (lines 171-185). Writes copy their input; reads return copies.
+**`TestPlantModelNeverAliasesHandedOutSlices`** (lines 173-187). Writes copy their input; reads return copies.
 
 Notice the shape of the first, second and fifth tests: **"over N seeds, every outcome must occur"**. A fault model is only useful if it actually produces the outcomes it claims to. Testing that an adversary is adversarial, rather than merely that it is *allowed* to be, is a habit worth stealing.
 
@@ -836,7 +844,7 @@ This is the most instructive interaction in the whole simulator, and it appears 
 
 ### The harmless version (seed 1, correct server)
 
-At step #150, client request 23 starts a PUT of `k1`. The server's IOID counter is at 49, so the temp file is `tmp/0000000000000031` (0x31 = 49; `TmpPath` names temp files by the IOID of their write in 16 hex digits, `toys3/core/format.go:112-118`):
+At step #150, client request 23 starts a PUT of `k1`. The server's IOID counter is at 49, so the temp file is `tmp/0000000000000031` (0x31 = 49; `TmpPath` names temp files by the IOID of their write in 16 hex digits, `toys3/format/layout.go:73-79`):
 
 ```
 #150    t=35.285919ms  inc=1 deliver     Request{c23 PUT "k1" value-of-23} => FSWrite{io49 /data/tmp/0000000000000031 obj(value-of-23)}
@@ -862,22 +870,22 @@ The textbook protocol: write, fsync file, rename, fsync `obj/`. Committed and ac
 
 The server never fsyncs `tmp/` after a rename. Why would it? The temp name is garbage once the rename has happened. So the removal of `tmp/…31` stays un-synced. The writeback step is inferred, not logged: for the name to come back after the crash, the entry's `durable` must have been *I*; the only fsync of `tmp/` in incarnation 1 happened during recovery at #10, long before io49; and a writeback *after* the rename would have persisted the removal instead. So a background writeback (5% per landed action) persisted the temp name somewhere between the write landing at #154 and the rename landing at #160.
 
-Seventy steps later, at #233, the server halts after an fsync error, and the crash resolves every pending change. The `tmp/…31` entry has `cur: 0, durable: I`, a pending removal. The coin says *revert*. The name comes back, pointing at inode *I*, which is also the durable content of `obj/k1`. **Two names, one inode.** Incarnation 2's recovery lists `tmp/`:
+Seventy steps later, at #233, the server trips after an fsync error, and the crash resolves every pending change. The `tmp/…31` entry has `cur: 0, durable: I`, a pending removal. The coin says *revert*. The name comes back, pointing at inode *I*, which is also the durable content of `obj/k1`. **Two names, one inode.** Incarnation 2's recovery lists `tmp/`:
 
 ```
 #245    t=56.901846ms  inc=2 fs-land     land FSList{io1 /data/tmp} -> FSListDone{io1 OK [0000000000000031 000000000000004b 000000000000004c]}
 #246    t=57.400810ms  inc=2 deliver     FSListDone{io1 OK [0000000000000031 000000000000004b 000000000000004c]} => FSUnlink{io2 /data/tmp/0000000000000031} FSUnlink{io3 /data/tmp/000000000000004b} FSUnlink{io4 /data/tmp/000000000000004c}
 ```
 
-`…31` is back from the dead. Recovery unlinks it, which is completely safe: unlinking one name of a hard link does not touch the inode's content or its other name. (`…4b` and `…4c` are ordinary leftovers of the PUTs interrupted by the halt.) In this run the unlink of `…31` happens to fail with EIO at #251, the server halts again, and incarnation 3 finds `…31` still there and removes it successfully at #268. Belt, braces, and a second belt.
+`…31` is back from the dead. Recovery unlinks it, which is completely safe: unlinking one name of a hard link does not touch the inode's content or its other name. (`…4b` and `…4c` are ordinary leftovers of the PUTs interrupted by the trip.) In this run the unlink of `…31` happens to fail with EIO at #251, the server trips again, and incarnation 3 finds `…31` still there and removes it successfully at #268. Belt, braces, and a second belt.
 
 This is a beautiful example of why **recovery must clean up temp files**, and why "clean up" means "unlink every name in `tmp/`", not "unlink names that look incomplete". The server cannot tell, from a name, whether a temp file is an interrupted write or an alias of a committed object. It does not need to: unlinking is safe in both cases. What it must *never* do is write to an existing temp name.
 
 ### The harmful version (seed 20, mutant f)
 
-Mutant f (`toys3/sim/mutants_test.go:315-324`) makes recovery skip the cleanup: it rewrites every successful `FSListDone` to have no names, so the server lists `tmp/`, sees nothing, fsyncs `tmp/`, and starts serving. Temp files accumulate. In seed 20's stats line: `tempsrm=0`.
+Mutant f (`toys3/sim/mutants_test.go:303-312`) makes recovery skip the cleanup: it rewrites every successful `FSListDone` to have no names, so the server lists `tmp/`, sees nothing, fsyncs `tmp/`, and starts serving. Temp files accumulate. In seed 20's stats line: `tempsrm=0`.
 
-The other ingredient is in `TmpPath`'s doc comment: temp names are "unique within an incarnation, and recovery clears tmp/ before a new incarnation writes anything, so they never collide" (`toys3/core/format.go:112-114`). IOIDs restart at 1 in every incarnation (the counter lives in memory). So `tmp/0000000000000004` is the temp name of the fourth IO of *every* incarnation. With recovery doing its job, that is fine. Without it, the new incarnation's `FSWrite` of `tmp/…04` lands on an *existing* name, and `write` (§11.5.1) truncates and overwrites **the existing inode**.
+The other ingredient is in `TmpPath`'s doc comment: temp names are "unique within an incarnation, and recovery clears tmp/ before a new incarnation writes anything, so they never collide" (`toys3/format/layout.go:73-75`). IOIDs restart at 1 in every incarnation (the counter lives in memory). So `tmp/0000000000000004` is the temp name of the fourth IO of *every* incarnation. With recovery doing its job, that is fine. Without it, the new incarnation's `FSWrite` of `tmp/…04` lands on an *existing* name, and `write` (§11.5.1) truncates and overwrites **the existing inode**.
 
 Here is seed 20 under mutant f. Incarnation 12 boots; `tmp/` holds ten leftovers, including `…04`; recovery ignores them:
 
@@ -959,20 +967,20 @@ No human-written test would assemble that sequence. A simulator with a hostile d
 
 ## 11.14 How this compares with real filesystems
 
-The FakeFS is deliberately *more* adversarial than common real filesystems in some respects, and less in others.
+The PlantModel is deliberately *more* adversarial than common real filesystems in some respects, and less in others.
 
 **More adversarial:**
 
-- **Cross-directory renames are not atomic across a crash.** On ext4 and XFS, directory operations are journaled, and a rename is committed as one transaction: after a crash you see the old state or the new state, not both names or neither. The FakeFS resolves the two halves independently. A protocol that survives the FakeFS survives the journaled case, because the journaled outcomes are a subset.
-- **No implicit ordering between data and metadata.** ext4's default `data=ordered` mode writes a file's data blocks before committing the metadata that references them, and ext4 has heuristics (the `auto_da_alloc` behaviour) that flush data early when a file is replaced via rename or truncate, to protect applications that skip `fsync`. The FakeFS promises none of this: a durable name can point at non-durable content (mutant b's zero-byte objects). This is the POSIX-guaranteed floor, and it is what other filesystems, other mount options, and other operating systems may give you.
+- **Cross-directory renames are not atomic across a crash.** On ext4 and XFS, directory operations are journaled, and a rename is committed as one transaction: after a crash you see the old state or the new state, not both names or neither. The PlantModel resolves the two halves independently. A protocol that survives the PlantModel survives the journaled case, because the journaled outcomes are a subset.
+- **No implicit ordering between data and metadata.** ext4's default `data=ordered` mode writes a file's data blocks before committing the metadata that references them, and ext4 has heuristics (the `auto_da_alloc` behaviour) that flush data early when a file is replaced via rename or truncate, to protect applications that skip `fsync`. The PlantModel promises none of this: a durable name can point at non-durable content (mutant b's zero-byte objects). This is the POSIX-guaranteed floor, and it is what other filesystems, other mount options, and other operating systems may give you.
 - **Every un-synced change is a coin flip.** Real systems are usually "mostly kept" or "mostly lost" depending on how long ago the change was and when the last journal commit happened. A uniform coin explores the space more evenly.
 
 **Less adversarial:**
 
 - No interleaved or block-granular tearing, no corruption of durable data at rest, no misdirected or lost writes, no ENOSPC, no directory corruption (§11.7).
-- No reordering of *successful* fsyncs: once `fsync` returns OK (and the inode is not poisoned), the data is durable forever. Real disks with volatile write caches and no flush support can violate this; that is a hardware lie the FakeFS does not model.
+- No reordering of *successful* fsyncs: once `fsync` returns OK (and the inode is not poisoned), the data is durable forever. Real disks with volatile write caches and no flush support can violate this; that is a hardware lie the PlantModel does not model.
 
-The ALICE study (Pillai et al., OSDI 2014) is the definitive treatment of how real filesystems differ in these "persistence properties" and how real applications (databases, version control systems, key-value stores) accidentally depend on the stronger ones. Its central lesson is the FakeFS's design principle: **program against the weakest guarantees you might get, and test against an adversary that gives you exactly those.**
+The ALICE study (Pillai et al., OSDI 2014) is the definitive treatment of how real filesystems differ in these "persistence properties" and how real applications (databases, version control systems, key-value stores) accidentally depend on the stronger ones. Its central lesson is the PlantModel's design principle: **program against the weakest guarantees you might get, and test against an adversary that gives you exactly those.**
 
 ## Key takeaways
 
@@ -983,17 +991,17 @@ The ALICE study (Pillai et al., OSDI 2014) is the definitive treatment of how re
 - FsyncGate models Linux's post-error behaviour: a failed fsync can poison a dirty inode, after which fsyncs lie and the data never reaches disk.
 - Read corruption exists to make the CRC check reachable; without it, the CRC is dead code in a correct server.
 - The durable view is the worst-case crash outcome; `AckedIsDurable` and `ObjNeverTorn` check against it without crashing. `DurableGen` lets them skip steps where nothing durable changed.
-- The FakeFS is more hostile than journaled filesystems on purpose. Surviving it implies surviving them.
+- The PlantModel is more hostile than journaled filesystems on purpose. Surviving it implies surviving them.
 
 ## Exercises
 
-1. **Run the FakeFS tests and read them.** `go test ./toys3/sim -run TestFakeFS -v`. For each test, write one sentence of the model it pins down.
+1. **Run the PlantModel tests and read them.** `go test ./toys3/sim -run TestPlantModel -v`. For each test, write one sentence of the model it pins down.
 2. **Make renames atomic.** Change `Crash` phase 1 so that, when a `tmp/` entry's pending removal and an `obj/` entry's pending creation involve the same inode, they are resolved with *one* coin. (You will need to pair them up; a first approximation is to resolve every pending dirent with the same coin per crash.) Predict: does mutant f become harder to catch? Run `go test ./toys3/sim -run 'TestCatchesBugs/f' -v` before and after. Revert.
-3. **Turn off writeback.** Set `WritebackProb: 0` in `BaseConfig` (`toys3/sim/config.go:164`). Predict the first-catch seed for mutant f, then run `go test ./toys3/sim -run 'TestCatchesBugs/f' -v`. (When this book was written, swarm with writeback found it at seed 20; swarm without writeback at seed 24; Chapter 15 has the full ablation.) Revert.
-4. **Remove the lie.** Set `FsyncGate: false` in `BaseConfig`. Predict which mutants are caught later or not at all. Run `TestCatchesBugs`. Then explain, using §11.6, why the real server's behaviour (halt on any fsync error) is still correct when the lie is off.
+3. **Turn off writeback.** Set `WritebackProb: 0` in `BaseConfig` (`toys3/sim/config.go:166`). Predict the first-catch seed for mutant f, then run `go test ./toys3/sim -run 'TestCatchesBugs/f' -v`. (When this book was written, swarm with writeback found it at seed 20; swarm without writeback at seed 24; Chapter 15 has the full ablation.) Revert.
+4. **Remove the lie.** Set `FsyncGate: false` in `BaseConfig`. Predict which mutants are caught later or not at all. Run `TestCatchesBugs`. Then explain, using §11.6, why the real server's behaviour (trip on any fsync error) is still correct when the lie is off.
 5. **A gentler tear.** Change the torn case in phase 2 to keep the *old* durable content plus a prefix of the new content's tail (a crude "interleaved" tear for overwrites). Does any test in the package fail? Does any mutant's first-catch seed change? Why is this change nearly invisible to a correct toys3 server? (Hint: does toys3 ever overwrite a durable file in place?)
 6. **Count resurrections.** Add a counter to `Crash` for entries in `tmp/` whose pending removal was reverted while their inode is also named under `obj/` (an alias). Run 200 seeds of the correct server and print the total. Then run the same 200 seeds with mutant f's factory. Are aliases common? How often do they end in a failure?
-7. **ENOSPC.** Sketch (on paper or in code) a new fault: `FSWrite` fails with a new `ErrNoSpace` code. What would need to change in `core.ErrCode`, the server's error table (Chapter 7) and the oracle? Is a write that fails with ENOSPC "applied or not"?
+7. **ENOSPC.** Sketch (on paper or in code) a new fault: `FSWrite` fails with a new `ErrNoSpace` code. What would need to change in `control.ErrCode`, the server's error table (Chapter 7) and the oracle? Is a write that fails with ENOSPC "applied or not"?
 
 ## Further reading
 

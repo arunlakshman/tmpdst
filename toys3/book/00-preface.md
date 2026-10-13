@@ -4,9 +4,9 @@
 
 This book is about a small program and a big idea.
 
-The small program is **toys3**: a single-node, S3-flavoured object server that supports exactly four operations (PUT, GET, DELETE, COPY), stores every object as one file on a local disk, and promises that once it has said "200 OK" to a mutation, that mutation survives a power cut. It is about 530 lines of state machine (`toys3/core/server.go`), 120 lines of on-disk format (`toys3/core/format.go`), and a few hundred lines of production glue (`toys3/prod`). You could read the whole server in an afternoon.
+The small program is **toys3**: a single-node, S3-flavoured object server that supports exactly four operations (PUT, GET, DELETE, COPY), stores every object as one file on a local disk, and promises that once it has said "200 OK" to a mutation, that mutation survives a power cut. It is about 510 lines of state machine (`toys3/control/controller.go`, `recovery.go` and `hash.go`), 120 lines of on-disk format (`toys3/format`), and a few hundred lines of production glue (`toys3/prod`). You could read the whole server in an afternoon.
 
-The big idea is **deterministic simulation testing** (DST): the practice of running your real system code inside a simulated world (simulated disk, simulated clock, simulated clients, simulated crashes) that is driven by a single seeded random number generator. Same seed, same universe, same bug, every time. The simulator in `toys3/sim` is much larger than the server it tests (roughly 2,850 lines of non-test Go, about 3,850 with its tests, against roughly 1,100 lines for all of `toys3/core` including its long package documentation), and that ratio is not an accident. It is the whole point.
+The big idea is **deterministic simulation testing** (DST): the practice of running your real system code inside a simulated world (simulated disk, simulated clock, simulated clients, simulated crashes) that is driven by a single seeded random number generator. Same seed, same universe, same bug, every time. The simulator in `toys3/sim` is much larger than the server it tests (roughly 2,970 lines of non-test Go, about 4,100 with its tests, against roughly 1,030 lines for all of `toys3/control` including its long package documentation, plus about 150 for `toys3/format`), and that ratio is not an accident. It is the whole point.
 
 The reason toys3 exists is stated plainly in its own design document:
 
@@ -31,12 +31,13 @@ By the end of the book you should be able to:
 
 1. **Explain why DST finds bugs that unit tests, integration tests and even randomized stress tests do not**, and what the three ingredients are (a single thread of control, simulated I/O, and one seeded source of randomness) (Chapter 1).
 2. **Design a component as a pure `Step(Event) []Action` state machine**, the "sans-I/O" shape that makes simulation possible, and explain each rule in `loop.md` (Chapters 2 and 3).
+2a. **Name the parts of a system with a domain model**: subdomains, bounded contexts, a context map, an aggregate, ports and adapters, and a ubiquitous language drawn from control theory (controller, plant, actuation, feedback, disturbance, dead time, settling, trip, interlock), including where a metaphor should *not* be applied (Chapter 3a).
 3. **Reason precisely about how bytes become durable on a POSIX filesystem**: page cache, `fsync` of a file versus its directory, atomic `rename`, torn writes, and why the temp-file → fsync → rename → fsync-dir sequence is the minimum correct protocol (Chapter 4).
-4. **Read and modify the toys3 server** (`toys3/core/server.go`) with confidence, including its recovery protocol, its per-key FIFO queues, and its error policy (Chapters 5 to 7).
-5. **Understand how determinism is enforced and verified**: state hashing, trace hashes, the `detcheck` static analyzer and its allow-list, and two instructive bugs in the tooling itself (Chapter 8).
-6. **See how the same core runs in production** with real goroutines, real `os` calls and real HTTP, and why the production shell contains no business logic (Chapter 9).
+4. **Read and modify the toys3 controller** (`toys3/control/controller.go` and `recovery.go`) with confidence, including its operating modes, its recovery protocol, its key interlock (per-key FIFO queues), and its error policy and safety trip (Chapters 5 to 7).
+5. **Understand how determinism is enforced and verified**: state hashing, trace hashes, the `detcheck` static analyzer and its allow-list, two instructive bugs in the tooling itself, and how a golden file of trace hashes turns the simulator into a safety net for refactoring (Chapter 8).
+6. **See how the same controller runs in production** with real goroutines, real `os` calls and real HTTP, and why the production shell contains no business logic (Chapter 9).
 7. **Build a simulator**: a priority queue ordered by `(At, Tie, Seq)`, virtual time, server incarnations, crash and restart, and the separation between an I/O *landing* and its completion being *delivered* (Chapter 10).
-8. **Build an adversarial fake filesystem** with durable and volatile versions of every inode and directory entry, crash resolution, EIO semantics, background writeback, read corruption, and the Linux "fsyncgate" behaviour (Chapter 11).
+8. **Build an adversarial plant model** with durable and volatile versions of every inode and directory entry, crash resolution, EIO semantics, background writeback, read corruption, and the Linux "fsyncgate" behaviour (Chapter 11).
 9. **Design workloads that make bugs visible**: self-describing values, quiescent points, and swarm testing (Chapter 12).
 10. **Check linearizability** of a history containing crashes, 500s and abandoned requests, using a memoized Wing–Gong–Lowe search with per-key decomposition and carried uncertainty (Chapter 13).
 11. **Write invariants that have teeth**, and tell black-box from white-box checks (Chapter 14).
@@ -49,15 +50,17 @@ By the end of the book you should be able to:
 The chapters are written to be read in order, but they are also meant to be read *with the code open*. Each code excerpt carries its location, for example:
 
 ```go
-// toys3/core/server.go:109-132
-func (s *Server) Step(ev Event) []Action {
-	if s.phase == phaseHalted {
+// toys3/control/controller.go:109-133
+func (s *Controller) Step(ev Event) []Action {
+	if s.mode == modeTripped {
 		return nil
 	}
 	...
 ```
 
-Line numbers refer to the tree at commit `210c1fa` ("toys3: deterministic simulator, fake FS, oracle, and DST campaigns"). If you are reading a later version and the numbers have drifted, search for the function name.
+Line numbers refer to the tree at commit `a4018d5` ("toys3: document the domain model and control-theory vocabulary"). If you are reading a later version and the numbers have drifted, search for the function name.
+
+**A note on names, for readers of an earlier edition.** The first edition of this book was written against commit `210c1fa`. Since then, commits `9b65410..a4018d5` refactored toys3 with domain-driven design and a vocabulary borrowed from control theory, without changing its behaviour: every trace hash, step count and "caught at seed N" number in this book is the same before and after, and Chapter 8 (§8.12) shows how that was proven. The package `toys3/core` became `toys3/control`, `Server` became `Controller`, `Halt` became `Trip`, `Fact` became `Telemetry`, the fake filesystem became the `PlantModel`, and the quiet tail became the Settling phase, among others. Chapter 3a teaches the domain model behind the new names, and the appendix of Chapter 18 has a complete old-name → new-name table.
 
 There are three reading paths, described in more detail in `README.md`:
 
@@ -91,32 +94,46 @@ tmpdst/                         module "manifester", Go 1.24
 │   └── audit-dep.sh            audit a third-party module before allowing it
 ├── .github/workflows/determinism.yml
 └── toys3/                      ◄── the subject of this book
-    ├── DESIGN.md               the design document (207 lines; read it twice)
-    ├── core/                   pure state machine + on-disk format
-    │   ├── doc.go              package doc: layout, protocol, error table
-    │   ├── types.go            Time, Duration, ClientReq, IOID, ErrCode, Status
-    │   ├── event.go            Event and every EventBody
-    │   ├── action.go           every Action
-    │   ├── fact.go             Committed, Recovered, CorruptObject
+    ├── DESIGN.md               the design document (264 lines; read it twice)
+    ├── REFACTOR-PROPOSAL.md    the domain-driven design analysis behind the names
+    ├── control/                the controller: pure state machine (was core/)
+    │   ├── doc.go              package doc: protocol, error table, key interlock
+    │   ├── types.go            Time, Duration, ClientReq, Status
+    │   ├── event.go            Event, Started, Request and the Op set
+    │   ├── action.go           Reply, Trip, Emit
+    │   ├── plant.go            the plant port: Actuation, Feedback, FS* commands,
+    │   │                       FS*Done completions, IOID, ErrCode
+    │   ├── telemetry.go        Telemetry: Committed, Recovered, CorruptionDetected
     │   ├── env.go              Env = Rand + Buggify
     │   ├── machine.go          StateMachine, Hashable, Machine, Factory
-    │   ├── format.go           object header, CRC, key escaping, paths
-    │   ├── server.go           THE SERVER (Step and everything it calls)
-    │   └── server_test.go      hand-driven harness, exact action sequences
-    ├── sim/                    the deterministic simulator
-    │   ├── doc.go              main loop in pseudocode
+    │   ├── controller.go       THE SERVER: Controller, modes, key interlock, protocols
+    │   ├── recovery.go         recovery (onStarted, onRecoveryDone)
+    │   ├── hash.go             StateHash and its FNV-1a hasher
+    │   └── controller_test.go  hand-driven harness, exact action sequences
+    ├── format/                 the on-disk contract (shared kernel)
+    │   ├── doc.go              byte layout and directory layout
+    │   ├── object.go           Magic, HeaderSize, Checksum, Encode/DecodeObject
+    │   ├── layout.go           EscapeKey, ValidKey, ObjDir, TmpDir, ObjPath, TmpPath
+    │   └── format_test.go      round-trip and injectivity tests
+    ├── sim/                    the deterministic simulator (a SIL testbench)
+    │   ├── doc.go              the four contexts in the package; main loop in pseudocode
     │   ├── rand.go             SplitMix64 + Lemire bounded ints
     │   ├── hash.go             Fold, FNV helpers
     │   ├── queue.go            Entry, EntryKind, Queue (binary heap)
     │   ├── config.go           Config, Stats, DefaultConfig (swarm), Result
     │   ├── simulator.go        the main loop, crash, restart, env
-    │   ├── fakefs.go           adversarial in-memory filesystem
-    │   ├── workload.go         clients, op mix, self-describing values
-    │   ├── oracle.go           history recording + WGL linearizability checker
-    │   ├── invariant.go        the five invariants
-    │   ├── describe.go         log rendering and event/action hashing
+    │   ├── trace.go            trace hashing (and the frozen telemetry hash key)
+    │   ├── log.go              log rendering (Describe*, FormatLog)
+    │   ├── plantmodel.go       PlantModel: the adversarial in-memory filesystem
+    │   ├── workload.go         clients and the op mix (the stimulus)
+    │   ├── value.go            self-describing values
+    │   ├── history.go          History, HistOp, Outcome
+    │   ├── oracle.go           the WGL linearizability checker
+    │   ├── invariant.go        Sample, View, GroundTruth and the five invariants
     │   ├── sim_test.go         canary, TestSeeds, coverage, CRC reachability
-    │   ├── fakefs_test.go      crash-semantics tests of the fake FS
+    │   ├── golden_test.go      pins every run's behaviour (testdata/golden-v1.txt)
+    │   ├── trace_test.go       pins the frozen telemetry hash key
+    │   ├── plantmodel_test.go  crash-semantics tests of the plant model
     │   ├── oracle_test.go      hand-built histories, accepted and rejected
     │   ├── queue_test.go       queue ordering and incarnation dropping
     │   └── mutants_test.go     seven deliberately broken servers
@@ -126,7 +143,7 @@ tmpdst/                         module "manifester", Go 1.24
     └── cmd/toys3sim/main.go    the parallel DST campaign runner
 ```
 
-The top-level `core/`, `sim/` and `sys/` directories are the *interface skeleton* of a larger project (a Kafka-compatible engine in the style of WarpStream, called Manifester). They contain contracts and no implementations, and they are not the subject of this book. They matter here for one reason: toys3 was built as a **rehearsal**. Every design rule it follows comes from `loop.md` and `docs/lessons.md`, which were written for the bigger system. toys3 is the place where those rules were tried end to end on something small enough to finish. Chapter 17 discusses what carries over.
+The top-level `core/`, `sim/` and `sys/` directories (not to be confused with `toys3/control` and `toys3/sim`) are the *interface skeleton* of a larger project (a Kafka-compatible engine in the style of WarpStream, called Manifester). They contain contracts and no implementations, and they are not the subject of this book. They matter here for one reason: toys3 was built as a **rehearsal**. Every design rule it follows comes from `loop.md` and `docs/lessons.md`, which were written for the bigger system. toys3 is the place where those rules were tried end to end on something small enough to finish. Chapter 17 discusses what carries over.
 
 ## 0.5 Five-minute tour: run it
 
@@ -134,7 +151,7 @@ Before reading further, run these from the repository root. They are all cheap.
 
 ```sh
 # 1. The server's own unit tests: exact action sequences for every protocol.
-go test ./toys3/core -v -run TestHappyPath
+go test ./toys3/control -v -run TestHappyPath
 
 # 2. Replay one simulation seed. It prints the seed's stats line.
 go test ./toys3/sim -run TestSeeds -seed=1 -v
@@ -154,16 +171,16 @@ When this book was written, step 2 printed:
 ```
 === RUN   TestSeeds
     sim_test.go:52: seed 1: steps=1628 crashes=10 trace=1ca97eb77a9044e1
-        reqs=225 200=154 400=3 404=36 500=7 indet=25 fsops=527 eio=10 crashes=10 halts=9 midput=8 torn=1 lost=9 kept=12 readcorrupt=0 corruptobj=0 tempsrm=7 windows=30 maxwin=13 widened=0
+        reqs=225 200=154 400=3 404=36 500=7 indet=25 fsops=527 eio=10 crashes=10 trips=9 midput=8 torn=1 lost=9 kept=12 readcorrupt=0 corruptdet=0 tempsrm=7 windows=30 maxwin=13 widened=0
 --- PASS: TestSeeds (0.00s)
 ```
 
-Read that line slowly. In 360 milliseconds of *simulated* time (and a few milliseconds of real time), seed 1 issued 225 requests from 4 clients against 3 keys, executed 527 filesystem operations of which 10 failed with EIO, crashed the server 10 times (9 of which were the server deliberately halting itself after an I/O error), caught 8 of those crashes in the middle of a PUT or COPY, tore 1 file, lost 9 un-synced changes and kept 12, cleaned up 7 temp files during recovery, and checked 30 windows of history for linearizability, the largest containing 13 operations. And the trace hash `1ca97eb77a9044e1` will be identical on your machine, because nothing in that run depended on anything except the number 1.
+Read that line slowly. In 360 milliseconds of *simulated* time (and a few milliseconds of real time), seed 1 issued 225 requests from 4 clients against 3 keys, executed 527 filesystem operations of which 10 failed with EIO, crashed the server 10 times (9 of which were the server deliberately tripping itself after an I/O error), caught 8 of those crashes in the middle of a PUT or COPY, tore 1 file, lost 9 un-synced changes and kept 12, cleaned up 7 temp files during recovery, and checked 30 windows of history for linearizability, the largest containing 13 operations. And the trace hash `1ca97eb77a9044e1` will be identical on your machine, because nothing in that run depended on anything except the number 1.
 
 Step 3 printed, for 200 seeds:
 
 ```
-reqs=47270 200=33446 400=887 404=6842 500=1035 indet=5060 fsops=113656 eio=1061 crashes=1691 halts=673 midput=1473 torn=87 lost=1539 kept=1350 readcorrupt=71 corruptobj=70 tempsrm=1006 windows=6708 maxwin=23 widened=0
+reqs=47270 200=33446 400=887 404=6842 500=1035 indet=5060 fsops=113656 eio=1061 crashes=1691 trips=673 midput=1473 torn=87 lost=1539 kept=1350 readcorrupt=71 corruptdet=70 tempsrm=1006 windows=6708 maxwin=23 widened=0
 --- PASS: TestSeeds (1.74s)
 ```
 
@@ -186,11 +203,11 @@ By Chapter 15 you will be able to read each of those messages and tell the full 
 
 ## 0.6 Conventions
 
-- **"The server"** means `core.Server` in `toys3/core/server.go`. **"The simulator"** means `sim.Simulator` in `toys3/sim/simulator.go`. **"The FakeFS"** means `sim.FakeFS`.
-- **Event / Action / Fact** with a capital letter mean the Go interfaces in `toys3/core` (`core.Event`, `core.Action`, `core.Fact`).
-- **Incarnation** means one boot of the server, from `Started` until a crash or `Halt`. Incarnations are numbered from 1 (`toys3/sim/queue.go:5-9`).
+- **"The server"** and **"the controller"** both mean `control.Controller` in `toys3/control/controller.go` ("server" when we look at it from the outside, as an S3 server; "controller" when we look at it as the control law of Chapter 3a). **"The simulator"** means `sim.Simulator` in `toys3/sim/simulator.go`. **"The PlantModel"** means `sim.PlantModel`.
+- **Event / Action / Telemetry** with a capital letter mean the Go interfaces in `toys3/control` (`control.Event`, `control.Action`, `control.Telemetry`).
+- **Incarnation** means one boot of the server, from `Started` until a crash or `Trip`. Incarnations are numbered from 1 (`toys3/sim/queue.go:5-11`).
 - Times in logs are virtual. `t=53.112270ms` means 53,112,270 simulated nanoseconds since the start of the run.
-- In event logs, `c17` is client request 17 (a `core.ClientReq`), `io42` is filesystem operation 42 *within the current incarnation* (a `core.IOID`), and `value-of-26` means "the exact bytes written by PUT request 26" (Chapter 12 explains how the simulator can tell).
+- In event logs, `c17` is client request 17 (a `control.ClientReq`), `io42` is filesystem operation 42 *within the current incarnation* (a `control.IOID`), and `value-of-26` means "the exact bytes written by PUT request 26" (Chapter 12 explains how the simulator can tell).
 - ASCII diagrams use `──►` for data flow and `⚡` for a crash.
 
 ## 0.7 A note on honesty
@@ -202,13 +219,13 @@ Every claim in this book about what the code does was checked against the code. 
 - toys3 is a deliberately small, deliberately *honest* target: it has real durability requirements, so it can have real durability bugs.
 - The simulator is bigger than the server. That is normal for DST and is where the leverage is.
 - Everything is reproducible from a seed. A failing seed is a complete bug report.
-- The book is grounded in the actual code at commit `210c1fa` and in artifacts produced by running it.
+- The book is grounded in the actual code at commit `a4018d5` and in artifacts produced by running it.
 
 ## Exercises
 
 1. Run the five commands in §0.5. Confirm that `go test ./toys3/sim -run TestSeeds -seed=1 -v` prints `trace=1ca97eb77a9044e1` on your machine. If it does not, stop: either the code has changed or determinism is broken, and Chapter 8 will help you find out which.
 2. Open `toys3/DESIGN.md` and `loop.md` side by side. For each of the 15 instructions in `loop.md`, write one sentence about where toys3 implements it (a file name is enough). Keep the list; Chapter 2 walks through the same exercise and you can compare.
-3. Count lines: `wc -l toys3/core/*.go toys3/sim/*.go`. Compute the ratio of simulator-plus-tests to server. Then guess what that ratio is for FoundationDB or TigerBeetle, and look it up after reading Chapter 1's further reading.
+3. Count lines: `wc -l toys3/control/*.go toys3/sim/*.go`. Compute the ratio of simulator-plus-tests to server. Then guess what that ratio is for FoundationDB or TigerBeetle, and look it up after reading Chapter 1's further reading.
 4. Run `go test ./toys3/sim -run TestSeeds -seed=2 -v` and `-seed=3`. Compare the stats lines. Which numbers vary most between seeds? Hypothesize why before reading Chapter 12 on swarm testing.
 
 ## Further reading

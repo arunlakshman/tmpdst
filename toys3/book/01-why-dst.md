@@ -22,7 +22,7 @@ Here is a story that is entirely possible with a plausible-looking version of to
 
 Look at what the clients saw, in real-time order: `PUT v2 → 500`, then `GET → v2`, then (after the outage) `GET → v1`. No one deleted or overwrote `v2`. A value appeared, was observed, and then vanished. There is no sequential execution of these operations that explains this history. The system is not linearizable, and the bug is not in any one line of code: every individual step above is "reasonable". The bug is in a *policy* (step 5: keep serving after an `fsync` error) interacting with a *fault* (step 3) and a *crash* (step 7) at a *specific time* (after step 6, before any later `fsync` happened to persist the directory).
 
-This is not a hypothetical shape. It is mutant **d2** in `toys3/sim/mutants_test.go:124-128`, and the simulator finds it at seed 132. Chapter 7 dissects the exact run. For now, ask yourself: how would you write a test that catches this?
+This is not a hypothetical shape. It is mutant **d2** in `toys3/sim/mutants_test.go:125-129`, and the simulator finds it at seed 132. Chapter 7 dissects the exact run. For now, ask yourself: how would you write a test that catches this?
 
 - A **unit test** of the error path would check "on `fsync` EIO, reply 500". It would pass. The bug is not in the reply.
 - An **integration test** against a real disk cannot make `fsync` return EIO on demand, and cannot cut power between step 6 and step 8.
@@ -71,10 +71,10 @@ The FoundationDB team (as described in Will Wilson's 2014 Strange Loop talk and 
 
 The results were remarkable enough to become folklore: a database whose correctness reputation came primarily from simulation rather than from field experience, and a team that reported finding bugs in the simulator faster than the real world could produce them. Their key cultural practices map directly onto things you will see in toys3:
 
-- **Run the real code.** The simulator does not test a model of the database; it tests the database. In toys3, the simulator drives `core.Server` itself (`toys3/sim/simulator.go:309-325` builds it through `cfg.Factory`).
-- **Make the world hostile.** Faults are not rare in simulation; they are common. In toys3, `BaseConfig` gives every filesystem operation a 1% chance of EIO and every un-synced file a 30% chance of being torn at a crash (`toys3/sim/config.go:160-168`).
-- **Buggify.** FoundationDB's code contains `BUGGIFY` points: places where, in simulation only, the code deliberately takes a rare-but-legal path (a smaller buffer, an extra delay, an early timeout). toys3 has the interface for this (`toys3/core/env.go:18-26`) but, as Chapter 3 points out, no call sites yet.
-- **Check invariants continuously.** Not just at the end of a run, but after every step, so the failure is reported at the step that caused it. toys3 does exactly this (`toys3/sim/simulator.go:338-353`).
+- **Run the real code.** The simulator does not test a model of the database; it tests the database. In toys3, the simulator drives `control.Controller` itself (`toys3/sim/simulator.go:310-326` builds it through `cfg.Factory`).
+- **Make the world hostile.** Faults are not rare in simulation; they are common. In toys3, `BaseConfig` gives every filesystem operation a 1% chance of EIO and every un-synced file a 30% chance of being torn at a crash (`toys3/sim/config.go:162-170`).
+- **Buggify.** FoundationDB's code contains `BUGGIFY` points: places where, in simulation only, the code deliberately takes a rare-but-legal path (a smaller buffer, an extra delay, an early timeout). toys3 has the interface for this (`toys3/control/env.go:18-26`) but, as Chapter 3 points out, no call sites yet.
+- **Check invariants continuously.** Not just at the end of a run, but after every step, so the failure is reported at the step that caused it. toys3 does exactly this (`toys3/sim/simulator.go:339-354`).
 
 ## 1.5 The three ingredients
 
@@ -98,20 +98,21 @@ This does not mean the system under test cannot be concurrent. toys3's server ha
 
 ### Ingredient 2: simulated I/O and time
 
-Every interaction with the outside world (disk, network, clock) goes through an interface the simulator can implement. In toys3 this interface is not a Go interface like `type FS interface { Write(...) }`. It is the **vocabulary of Actions and Events**: the server returns `FSWrite{IO: 7, Path: ..., Data: ...}` as a plain value and later receives `FSWriteDone{IO: 7, Err: OK}` as a plain value. Who actually performs the write (the real `os` package in production, the `FakeFS` in simulation) is invisible to the server. Chapter 2 explains why this "sans-I/O" shape is more powerful than a mocked interface.
+Every interaction with the outside world (disk, network, clock) goes through an interface the simulator can implement. In toys3 this interface is not a Go interface like `type FS interface { Write(...) }`. It is the **vocabulary of Actions and Events**: the server returns `FSWrite{IO: 7, Path: ..., Data: ...}` as a plain value and later receives `FSWriteDone{IO: 7, Err: OK}` as a plain value. Who actually performs the write (the real `os` package in production, the `PlantModel` in simulation) is invisible to the server. Chapter 2 explains why this "sans-I/O" shape is more powerful than a mocked interface.
 
-Time is simulated the same way: the server never calls `time.Now()`. Every event arrives stamped with a time (`core.Event.At`, `toys3/core/event.go:5-8`), and in simulation that time is the virtual clock.
+Time is simulated the same way: the server never calls `time.Now()`. Every event arrives stamped with a time (`control.Event.At`, `toys3/control/event.go:5-8`), and in simulation that time is the virtual clock.
 
 ### Ingredient 3: one seeded source of randomness
 
-Every random choice in a run (how long an fsync takes, whether it fails, whether a crash happens now, which client issues what, which of two same-instant events goes first, how a crash resolves each un-synced change) is drawn from **one** random number generator, seeded from **one** number. In toys3 that generator is `sim.Rand`, a SplitMix64 stream (`toys3/sim/rand.go:10-26`), and it counts its own draws (`Calls()`), which turns "the runs diverged" into "the runs diverged after draw 1,234".
+Every random choice in a run (how long an fsync takes to land and to be reported, whether it fails, whether a crash happens now, which client issues what, which of two same-instant events goes first, how a crash resolves each un-synced change) is drawn from **one** random number generator, seeded from **one** number. In toys3 that generator is `sim.Rand`, a SplitMix64 stream (`toys3/sim/rand.go:10-26`), and it counts its own draws (`Calls()`), which turns "the runs diverged" into "the runs diverged after draw 1,234".
 
 ```
 seed ──► Rand ──┬──► queue tie-breaks         (Queue.Schedule)
-                ├──► FS latency + EIO plan    (FakeFS.Plan)
+                ├──► FS dead time, feedback   (PlantModel.Plan)
+                │    delay, EIO plan
                 ├──► crash coin                (Simulator.maybeCrash)
-                ├──► crash resolution          (FakeFS.Crash)
-                ├──► writeback, read bit-flips (FakeFS.Land / read)
+                ├──► crash resolution          (PlantModel.Crash)
+                ├──► writeback, read bit-flips (PlantModel.Land / read)
                 ├──► client think time, ops    (Workload)
                 └──► server Env                (env.Uint64 / Intn / Maybe)
 ```
@@ -128,7 +129,7 @@ If the three ingredients hold, then **the run is a pure function of the seed** (
 It is worth being precise about the limits, because over-claiming is the fastest way to lose trust in a test suite.
 
 - **DST does not test your real I/O layer.** The production executor (`toys3/prod/executor.go`) is not exercised by the simulator. If `OSExecutor` mapped `ENOENT` to `ErrIO` by mistake, no seed would notice. That is why the production layer must be *thin* (loop.md, rule 10) and separately tested (`toys3/prod/prod_test.go`).
-- **DST tests against a model of the world, not the world.** If the FakeFS is more forgiving than ext4, bugs that ext4 would expose go unnoticed. If it is *less* forgiving than ext4 (and toys3's FakeFS is deliberately less forgiving in some respects, see Chapter 11), you may defend against failures that real systems do not exhibit. That is usually the right trade.
+- **DST tests against a model of the world, not the world.** If the PlantModel is more forgiving than ext4, bugs that ext4 would expose go unnoticed. If it is *less* forgiving than ext4 (and toys3's PlantModel is deliberately less forgiving in some respects, see Chapter 11), you may defend against failures that real systems do not exhibit. That is usually the right trade.
 - **DST finds bugs; it does not prove their absence.** A million passing seeds is strong evidence, not proof. Mutation testing (Chapter 15) is how you measure how strong.
 - **DST needs invariants.** A simulator without a good oracle just generates very fast, very reproducible runs that nobody checks. Half of the value in toys3 is in `oracle.go` and `invariant.go`.
 
@@ -143,22 +144,24 @@ Here is the whole picture, which the rest of the book fills in.
                         │   │ pop                                                                         │
                         │   ▼                                                                             │
                         │  KindClientWake ──► Workload.Issue ──► Oracle.Invoke ──► schedule Deliver(Req)  │
-                        │  KindDeliver ─────► core.Server.Step(Event) ──► []Action                        │
-                        │                        │ FS*   ──► FakeFS.Plan ──► schedule FSLand              │
+                        │  KindDeliver ─────► control.Controller.Step(Event) ──► []Action                 │
+                        │                        │ FS*   ──► PlantModel.Plan ──► schedule FSLand          │
                         │                        │ Reply ──► Oracle.Return, Workload.Complete             │
-                        │                        │ Emit  ──► facts timeline                               │
-                        │                        │ Halt  ──► crash                                        │
-                        │  KindFSLand ──────► FakeFS.Land ──► schedule Deliver(...Done)                   │
-                        │  KindCrash/Halt ──► FakeFS.Crash, Queue.DropIncarnation, Oracle.Crash           │
+                        │                        │ Emit  ──► telemetry timeline                           │
+                        │                        │ Trip  ──► crash                                        │
+                        │  KindFSLand ──────► PlantModel.Land ──► schedule Deliver(...Done)               │
+                        │  KindCrash/Trip ──► PlantModel.Crash, Queue.DropIncarnation, Oracle.Crash       │
                         │  KindRestart ─────► Factory(env, cfg) ──► schedule Deliver(Started)             │
                         │                                                                                 │
-                        │  after every step: trace = Fold(trace, StateHash, FS hash, ...)                 │
+                        │  after every step: trace = Fold(trace, StateHash, plant hash, ...)              │
                         │                    invariants: no-corrupt-reads, acked-is-durable,              │
                         │                                obj-never-torn, linearizable, liveness           │
                         └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-The same `core.Server` runs in production inside `prod.Loop` (Chapter 9), with real goroutines executing real `os` calls and an HTTP handler feeding requests in. The server cannot tell the difference, because the only things it ever sees are Events.
+The same `control.Controller` runs in production inside `prod.Loop` (Chapter 9), with real goroutines executing real `os` calls and an HTTP handler feeding requests in. The server cannot tell the difference, because the only things it ever sees are Events.
+
+If you have a background in control engineering, this picture will look familiar, and it is meant to: the server is a *controller* in a feedback loop around a *plant* (the disk), the simulator is a *software-in-the-loop testbench* that replaces the real plant with a *plant model* and injects *disturbances*, and the invariants are *monitors*. Chapter 3a develops that reading carefully, and the code uses its names.
 
 ## 1.8 Why a toy?
 
@@ -176,10 +179,10 @@ Because DST has a learning curve, and the steep part of the curve is not the sim
 
 ## Exercises
 
-1. **Write the d2 story as a test you could not write.** Using only `toys3/core/server_test.go`'s harness (an in-memory map with no crash semantics), try to write a test that exposes the "observed then vanished" bug from §1.1. Explain precisely which part of the scenario the harness cannot express. (Hint: look at what `harness.exec` does for `FSFsyncDir`, `toys3/core/server_test.go:98-99`.)
+1. **Write the d2 story as a test you could not write.** Using only `toys3/control/controller_test.go`'s harness (an in-memory map with no crash semantics), try to write a test that exposes the "observed then vanished" bug from §1.1. Explain precisely which part of the scenario the harness cannot express. (Hint: look at what `harness.exec` does for `FSFsyncDir`, `toys3/control/controller_test.go:100-101`.)
 2. **Count the randomness.** Run `go test ./toys3/sim -run TestSeeds -seed=1 -v` and note the trace hash. Now read `toys3/sim/simulator.go` and list every call to `s.rng` or to something that draws from it. For each, write down what would happen to determinism if that call used `math/rand` instead.
-3. **Simulated time.** In `toys3/sim/config.go:146-173`, Chaos lasts 300 ms and QuietTail 60 ms of virtual time. Time a 200-seed run (`time go test ./toys3/sim -run 'TestSeeds$' -seeds=200`). Compute the ratio of simulated time to wall time. What dominates the wall time? (Hint: Chapter 13.)
-4. **Stress test thought experiment.** Suppose you ran the real `cmd/toys3` binary on a real disk, with a script that issues random requests and `kill -9`s the process every few seconds. Which of the seven mutants in `toys3/sim/mutants_test.go:331-339` could that rig ever catch? Which could it never catch, and why? (Hint: `kill -9` is not a power loss. The page cache survives a process kill.)
+3. **Simulated time.** In `toys3/sim/config.go:148-175`, Chaos lasts 300 ms and Settling 60 ms of virtual time. Time a 200-seed run (`time go test ./toys3/sim -run 'TestSeeds$' -seeds=200`). Compute the ratio of simulated time to wall time. What dominates the wall time? (Hint: Chapter 13.)
+4. **Stress test thought experiment.** Suppose you ran the real `cmd/toys3` binary on a real disk, with a script that issues random requests and `kill -9`s the process every few seconds. Which of the seven mutants in `toys3/sim/mutants_test.go:319-327` could that rig ever catch? Which could it never catch, and why? (Hint: `kill -9` is not a power loss. The page cache survives a process kill.)
 
 ## Further reading
 

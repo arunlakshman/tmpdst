@@ -2,7 +2,7 @@
 
 > *"A concurrent object is correct if every history it produces could have been produced by some sequential execution that respects real time."* (Herlihy and Wing, paraphrased)
 
-The invariants of Chapter 14 that peek at the fake disk (`AckedIsDurable`, `ObjNeverTorn`) are powerful but *white-box*: they know where the server keeps its files and what a correct file looks like. This chapter is about the one check that knows nothing about the server at all. The **oracle** (`toys3/sim/oracle.go`) sees only what clients saw: which requests were sent, when, and what came back. From that alone it decides whether the server behaved like a correct key-value store that never loses acknowledged data.
+The invariants of Chapter 14 that peek at the plant model's durable state (`AckedIsDurable`, `ObjNeverTorn`) are powerful but *white-box*: they know where the server keeps its files and what a correct file looks like. This chapter is about the one check that knows nothing about the server at all. The **oracle** (`toys3/sim/oracle.go`) sees only what clients saw: which requests were sent, when, and what came back. From that alone it decides whether the server behaved like a correct key-value store that never loses acknowledged data.
 
 That decision is a linearizability check, and it is the hardest piece of code in the repository. We will build it up from first principles, walk through the implementation line by line, work every test in `oracle_test.go` by hand, and then dissect three real failures from the mutation suite.
 
@@ -43,7 +43,7 @@ The model is a map from key to value, starting empty. Operations:
 | `DELETE k` | `delete(m, k)` if present | 200 if it was present, else 404 |
 | `COPY s → d` | `m[d] = m[s]` if `s` present | 200 if `s` present, else 404 (and `d` untouched) |
 
-Thanks to self-describing values (Chapter 12), "value" never means bytes. A value is identified by the **writer**: the request id of the PUT whose bytes they are. COPY moves the writer id from `s` to `d` unchanged. So the model state is a map from key to `core.ClientReq`.
+Thanks to self-describing values (Chapter 12), "value" never means bytes. A value is identified by the **writer**: the request id of the PUT whose bytes they are. COPY moves the writer id from `s` to `d` unchanged. So the model state is a map from key to `control.ClientReq`.
 
 ### Locality
 
@@ -54,21 +54,21 @@ Herlihy and Wing proved that linearizability is **local** (compositional): a his
 Classical linearizability assumes every operation eventually responds. A storage server under DST has three other possibilities, and each must be given a precise meaning. This is the most important design decision in the oracle, so here it is in full:
 
 ```go
-// toys3/sim/oracle.go:12-20
+// toys3/sim/history.go:13-21
 type Outcome uint8
 
 const (
 	Pending   Outcome = iota // no reply yet
 	Definite                 // 200, 400 or 404: the op happened exactly as replied
 	Failed                   // 500: the op may or may not have taken effect
-	Abandoned                // the server crashed (or halted) before replying
+	Abandoned                // the server crashed (or tripped) before replying
 )
 ```
 
 and the rules, from the `Oracle` doc comment:
 
 ```go
-// toys3/sim/oracle.go:57-69
+// toys3/sim/oracle.go:23-35
 // The rules, which encode invariants (a) and (b) of DESIGN.md:
 //
 //   - A Definite op takes effect exactly once, at some instant in
@@ -81,16 +81,16 @@ and the rules, from the `Oracle` doc comment:
 //   - Crashes erase nothing. So an acked mutation that disappears after a
 //     restart, or an unacked one that a read observed and that later
 //     vanishes, has no valid linearization and fails the check. (The latter
-//     is why the server should Halt after an fsync error.)
+//     is why the server should Trip after an fsync error.)
 ```
 
 Three things in these rules deserve emphasis.
 
-**1. "Crashes erase nothing."** The model has no crash operation. A crash is just an instant at which some operations stop (become Abandoned). The model state after the crash is whatever it was before. So if PUT k=v1 returned 200, and after a crash a GET returns 404, there is no sequential explanation: the history is rejected. This one sentence is the black-box statement of durability: *acknowledged means durable* (invariant (b) in `DESIGN.md:144`).
+**1. "Crashes erase nothing."** The model has no crash operation. A crash is just an instant at which some operations stop (become Abandoned). The model state after the crash is whatever it was before. So if PUT k=v1 returned 200, and after a crash a GET returns 404, there is no sequential explanation: the history is rejected. This one sentence is the black-box statement of durability: *acknowledged means durable* (invariant (b) in `DESIGN.md:197`).
 
 **2. Indeterminate mutations are optional, but bounded.** A Failed or Abandoned PUT may or may not have happened, but if it happened, it happened *inside its interval*. For an Abandoned op, the interval ends at the crash. It cannot take effect after the crash, because the process that would have done it is dead. For a Failed op (500), the interval ends at the reply.
 
-That second bound is a strong assumption, and it is not the one Jepsen makes. In Jepsen, an indeterminate (`:info`) operation is treated as possibly taking effect at *any* time after its invocation, forever, because a timed-out network request may still be sitting in a queue somewhere. toys3 can afford the stronger assumption because of its error policy (Chapter 7): every error after which a mutation may have touched `obj/` is a 500 **plus Halt**, and the simulator processes the Halt as a crash *in the same step* as the 500. So the effect, if any, is resolved at the instant of the reply. Errors before anything can touch `obj/` are a plain 500 with nothing changed. In both cases, "at most once, within [Invoke, Return]" is exactly right for a correct server.
+That second bound is a strong assumption, and it is not the one Jepsen makes. In Jepsen, an indeterminate (`:info`) operation is treated as possibly taking effect at *any* time after its invocation, forever, because a timed-out network request may still be sitting in a queue somewhere. toys3 can afford the stronger assumption because of its error policy (Chapter 7): every error after which a mutation may have touched `obj/` is a 500 **plus Trip**, and the simulator processes the Trip as a crash *in the same step* as the 500. So the effect, if any, is resolved at the instant of the reply. Errors before anything can touch `obj/` are a plain 500 with nothing changed. In both cases, "at most once, within [Invoke, Return]" is exactly right for a correct server.
 
 And that is what lets the oracle catch mutant d2 (§13.9): a server that replies 500 but *keeps running* lets the half-applied change stay visible after the reply and then be undone by a later crash. In model terms, the effect would have to happen inside the interval (because a read saw it) and then un-happen later (because a later read did not). Neither "applied" nor "never" explains the history.
 
@@ -101,43 +101,52 @@ And that is what lets the oracle catch mutant d2 (§13.9): a server that replies
 The oracle records every operation as a `HistOp`:
 
 ```go
-// toys3/sim/oracle.go:22-44
+// toys3/sim/history.go:23-50
+// HistOp is one client request as the client saw it.
 type HistOp struct {
-	Req    core.ClientReq
+	Req    control.ClientReq
 	Client int
-	Op     core.Op
-	Invoke core.Time // when the Request was delivered
+	Op     control.Op
+	// Invoke is when the client issued the request (Simulator.wake). Delivery
+	// to the server is a separate queue entry at the same virtual instant, so
+	// other same-instant entries may run in between, and a crash may drop the
+	// delivery entirely. An earlier invocation point only widens the window,
+	// which is conservative for the linearizability check.
+	Invoke control.Time
 	// Return is the reply time (Definite, Failed) or the crash time (Abandoned).
-	Return  core.Time
+	Return  control.Time
 	Outcome Outcome
-	Status  core.Status
+	Status  control.Status
 	Body    []byte // 200 GET only
 	// InvSeq and RetSeq order Invoke, Return and crash events exactly
 	// (several can share one virtual instant); the checker uses these.
 	InvSeq, RetSeq uint64
 }
 
+// History is the complete client-visible history of a run.
 type History struct {
-	Ops     []HistOp    // in Invoke order
-	Crashes []core.Time // crash (and Halt) instants, ascending
+	Ops     []HistOp       // in Invoke order
+	Crashes []control.Time // crash (and Trip) instants, ascending
 	// Completed lists indices into Ops in reply order (Definite and Failed).
 	Completed []int
 }
 ```
+
+The history types live in their own file, `toys3/sim/history.go`, split out of `oracle.go` by the refactor of Chapter 3a: the history is what the oracle *records* and what the black-box invariants *read*, so it is shared by more of the verification context than the checker alone. The comment on `Invoke` was also corrected in the same refactor (commit `a4018d5`). It used to say "when the Request was delivered", which was not true; Chapter 17 (Part II, §4) explains the difference, and why it is harmless.
 
 ### Logical time, not virtual time
 
 Look at `InvSeq` and `RetSeq`. The simulator has a virtual clock, but many events can happen at the same virtual instant (a reply, a client wake with zero think time, a request delivery, a crash). If the checker used `Invoke` and `Return` times, two operations that share an instant would be ambiguous: did X return before Y was invoked? So the oracle keeps its own logical clock, ticked on every invocation, return and crash:
 
 ```go
-// toys3/sim/oracle.go:104-115
+// toys3/sim/oracle.go:70-81
 func (o *Oracle) tick() uint64 {
 	o.clock++
 	return o.clock
 }
 
 // Invoke records a request delivered to the server at time at.
-func (o *Oracle) Invoke(at core.Time, client int, req core.Request) {
+func (o *Oracle) Invoke(at control.Time, client int, req control.Request) {
 	o.open[req.Client] = len(o.hist.Ops)
 	o.hist.Ops = append(o.hist.Ops, HistOp{
 		Req: req.Client, Client: client, Op: req.Op, Invoke: at, InvSeq: o.tick(),
@@ -147,13 +156,13 @@ func (o *Oracle) Invoke(at core.Time, client int, req core.Request) {
 
 The sequence numbers order events exactly as the single-threaded simulator processed them, which is the real-time order of the simulated world. The virtual times are kept only for humans (they appear in failure messages as `@82642556..84991187`).
 
-A small documentation inaccuracy worth knowing: the comments say "when the Request was delivered", but `Simulator.wake` calls `oracle.Invoke` when the client *issues* the request, and only then schedules its delivery (`simulator.go:248-252`). The delivery may happen later in the same instant, or never (if a crash intervenes). Recording the invocation early only *widens* the operation's interval, which can only make more histories acceptable, never fewer. It is safe, but the comment is slightly off.
+A small documentation inaccuracy worth knowing: the comments say "when the Request was delivered", but `Simulator.wake` calls `oracle.Invoke` when the client *issues* the request, and only then schedules its delivery (`simulator.go:249-253`). The delivery may happen later in the same instant, or never (if a crash intervenes). Recording the invocation early only *widens* the operation's interval, which can only make more histories acceptable, never fewer. It is safe, but the comment is slightly off.
 
 ### Returns and crashes
 
 ```go
-// toys3/sim/oracle.go:117-152
-func (o *Oracle) Return(at core.Time, rep core.Reply) (ok bool) {
+// toys3/sim/oracle.go:83-118
+func (o *Oracle) Return(at control.Time, rep control.Reply) (ok bool) {
 	i, ok := o.open[rep.Client]
 	if !ok {
 		return false
@@ -161,12 +170,12 @@ func (o *Oracle) Return(at core.Time, rep core.Reply) (ok bool) {
 	delete(o.open, rep.Client)
 	op := &o.hist.Ops[i]
 	op.Return, op.RetSeq, op.Status = at, o.tick(), rep.Status
-	if rep.Status == core.StatusServerError {
+	if rep.Status == control.StatusServerError {
 		op.Outcome = Failed
 	} else {
 		op.Outcome = Definite
 	}
-	if _, isGet := op.Op.(core.Get); isGet && rep.Status == core.StatusOK {
+	if _, isGet := op.Op.(control.Get); isGet && rep.Status == control.StatusOK {
 		op.Body = slices.Clone(rep.Body)
 		if op.Body == nil {
 			op.Body = []byte{}
@@ -176,7 +185,7 @@ func (o *Oracle) Return(at core.Time, rep core.Reply) (ok bool) {
 	return true
 }
 
-func (o *Oracle) Crash(at core.Time) {
+func (o *Oracle) Crash(at control.Time) {
 	seq := o.tick()
 	for i := o.checked; i < len(o.hist.Ops); i++ {
 		op := &o.hist.Ops[i]
@@ -197,24 +206,24 @@ Details:
 - A crash ticks the clock **once** and gives every abandoned operation the same `RetSeq`. All of them "returned" at the crash instant.
 - The loop starts at `o.checked`: operations in already-checked windows cannot be pending (windows are checked only at quiescence).
 
-## 13.4 The model and how operations apply
+## 13.4 The reference model and how operations apply
 
-The model state is a sorted slice:
+The sequential specification is the oracle's **reference model**: the model whose behaviour the whole closed loop (controller plus disk) must reproduce, in the sense of Chapter 3a. One state of it is a `refState`, a sorted slice. The type was called `modelState` before the refactor; "model" alone had become ambiguous, because the simulator also has a *plant model* (Chapter 11), and the rule now is to always say which model you mean.
 
 ```go
-// toys3/sim/oracle.go:192-221
+// toys3/sim/oracle.go:158-188
 type kv struct {
 	key    string
-	writer core.ClientReq
+	writer control.ClientReq
 }
 
-type modelState []kv
+type refState []kv
 
-func (st modelState) get(key string) (core.ClientReq, bool) { ...binary search... }
+func (st refState) get(key string) (control.ClientReq, bool) { ...binary search... }
 
-func (st modelState) set(key string, w core.ClientReq, present bool) modelState {
+func (st refState) set(key string, w control.ClientReq, present bool) refState {
 	i, found := slices.BinarySearchFunc(st, key, ...)
-	out := make(modelState, 0, len(st)+1)
+	out := make(refState, 0, len(st)+1)
 	out = append(out, st[:i]...)
 	if present {
 		out = append(out, kv{key, w})
@@ -234,14 +243,14 @@ Two design choices:
 ### The special value `unknown`
 
 ```go
-// toys3/sim/oracle.go:296-302
+// toys3/sim/oracle.go:263-269
 const never = ^uint64(0)
 
 // unknown is a model value meaning "present or absent, with any value": the
 // result of widening (see Oracle.widen). Any read of it is accepted, and the
 // read's result then becomes the key's value. It only weakens the check, so
 // it never causes a false failure.
-const unknown = ^core.ClientReq(0)
+const unknown = ^control.ClientReq(0)
 ```
 
 `unknown` is the oracle's escape valve when it is tracking too many possibilities (§13.6). A key whose value is `unknown` is "present" in the slice but stands for "anything, including absent". (The comment mentions `Oracle.widen`; the function is actually named `widenStates`.)
@@ -251,50 +260,50 @@ const unknown = ^core.ClientReq(0)
 Each operation in a window is prepared as a `wop`:
 
 ```go
-// toys3/sim/oracle.go:238-244
+// toys3/sim/oracle.go:205-211
 type wop struct {
 	h        *HistOp
 	inv, ret uint64
 	required bool           // Definite: must be linearized; else at most once
-	reads    core.ClientReq // GET 200: the writer named by the body
+	reads    control.ClientReq // GET 200: the writer named by the body
 }
 ```
 
 and `apply` runs one against a state, returning the new state and whether the operation's observed result is consistent with it:
 
 ```go
-// toys3/sim/oracle.go:246-294
-func (w *wop) apply(st modelState) (modelState, bool) {
+// toys3/sim/oracle.go:213-261
+func (w *wop) apply(st refState) (refState, bool) {
 	status := w.h.Status
 	switch op := w.h.Op.(type) {
-	case core.Get:
+	case control.Get:
 		got, present := st.get(op.Key)
 		if present && got == unknown {
-			if status == core.StatusOK {
+			if status == control.StatusOK {
 				return st.set(op.Key, w.reads, true), true // learned it
 			}
 			return st.set(op.Key, 0, false), true
 		}
-		if status == core.StatusOK {
+		if status == control.StatusOK {
 			return st, present && got == w.reads
 		}
 		return st, !present // 404
-	case core.Put:
+	case control.Put:
 		return st.set(op.Key, w.h.Req, true), true
-	case core.Delete:
+	case control.Delete:
 		got, present := st.get(op.Key)
 		if !w.required || got == unknown {
 			// Optional, or the key is unknown (it may have been either way).
 			return st.set(op.Key, 0, false), true
 		}
-		if status == core.StatusOK {
+		if status == control.StatusOK {
 			return st.set(op.Key, 0, false), present
 		}
 		return st, !present // 404
-	case core.Copy:
+	case control.Copy:
 		src, present := st.get(op.Src)
 		if present && src == unknown {
-			if !w.required || status == core.StatusOK {
+			if !w.required || status == control.StatusOK {
 				return st.set(op.Dst, unknown, true), true
 			}
 			return st.set(op.Src, 0, false), true // 404: src was absent
@@ -305,7 +314,7 @@ func (w *wop) apply(st modelState) (modelState, bool) {
 			}
 			return st.set(op.Dst, src, true), true
 		}
-		if status == core.StatusOK {
+		if status == control.StatusOK {
 			return st.set(op.Dst, src, true), present
 		}
 		return st, !present // 404
@@ -352,23 +361,23 @@ A few non-obvious points:
 ### window(): which operations count
 
 ```go
-// toys3/sim/oracle.go:304-333
+// toys3/sim/oracle.go:271-300
 func (o *Oracle) window() ([]wop, []Failure) {
 	var ws []wop
 	for i := o.checked; i < len(o.hist.Ops); i++ {
 		h := &o.hist.Ops[i]
-		if h.Outcome == Definite && h.Status == core.StatusBadRequest {
+		if h.Outcome == Definite && h.Status == control.StatusBadRequest {
 			continue // rejected before touching anything
 		}
 		w := wop{h: h, inv: h.InvSeq, ret: h.RetSeq, required: h.Outcome == Definite}
 		if h.Outcome == Pending {
 			w.ret = never
 		}
-		if _, isGet := h.Op.(core.Get); isGet {
+		if _, isGet := h.Op.(control.Get); isGet {
 			if !w.required {
 				continue // a failed or abandoned read constrains nothing
 			}
-			if h.Status == core.StatusOK {
+			if h.Status == control.StatusOK {
 				writer, ok := ValueWriter(h.Body)
 				if !ok {
 					return nil, []Failure{{Invariant: "linearizable", Msg: "GET " + describeOp(h) + " returned bytes no PUT wrote"}}
@@ -384,7 +393,7 @@ func (o *Oracle) window() ([]wop, []Failure) {
 
 The window is every operation invoked since the last check. Filtering:
 
-- **400s are dropped.** They were rejected before touching any state (the server validates before queuing, `server.go:259-284`).
+- **400s are dropped.** They were rejected before touching any state (the server validates before queuing, `controller.go:150-175`).
 - **Pending ops** can only appear here through `CheckFinal` (end of run). They get `ret = never`: they may take effect at any time after invocation. Pending GETs are dropped by the next rule.
 - **Failed and Abandoned (and Pending) GETs are dropped.**
 - **A 200 GET whose body is not a valid value** (per `ValueWriter`) fails immediately: the model cannot place bytes that no PUT wrote. This duplicates `NoCorruptReads` (Chapter 14), which is why mutant e's failure reports both invariants at once (§13.9).
@@ -394,7 +403,7 @@ The window is every operation invoked since the last check. Filtering:
 The heart of the oracle is `check`, called at quiescent points (`CheckQuiescent`) and at the end (`CheckFinal`).
 
 ```go
-// toys3/sim/oracle.go:392-404
+// toys3/sim/oracle.go:359-371
 func (o *Oracle) check() []Failure {
 	ws, fails := o.window()
 	o.checked = len(o.hist.Ops)
@@ -412,7 +421,7 @@ Note that `o.checked` advances *before* searching. Whatever the outcome, these o
 Two operations interact only if they touch a common key. COPY touches two keys. So the operations of a window form a graph, and its connected components are independent sub-histories. Horn and Kroening (FORTE 2015) called this property **P-compositionality**: if a specification can be partitioned so that each part is checked independently, the expensive search runs on small pieces. Porcupine (a Go linearizability checker by Anish Athalye) exposes it as a user-supplied partition function. toys3 computes the partition itself:
 
 ```go
-// toys3/sim/oracle.go:405-426
+// toys3/sim/oracle.go:372-393
 	var comps [][]string
 	add := func(ks []string) {
 		for {
@@ -440,28 +449,28 @@ Two operations interact only if they touch a common key. COPY touches two keys. 
 
 #### Step 2: pull in carried groups
 
-The state at the start of this window is not a single map. It is a *set* of possible maps, because previous windows contained optional operations (and crashes) whose effects are uncertain. That set is stored compactly as **groups**:
+The state at the start of this window is not a single map. It is a *set* of possible maps, because previous windows contained optional operations (and crashes) whose effects are uncertain. That set is the oracle's **state estimate**, held in the field `Oracle.estimate` (`toys3/sim/oracle.go:46-50`; it was called `groups` before the refactor), and it is stored compactly as a list of **groups**:
 
 ```go
-// toys3/sim/oracle.go:347-352
+// toys3/sim/oracle.go:314-319
 // group is a set of keys whose possible states are carried jointly
 // (because a COPY tied them together, or a crash left correlated outcomes).
 type group struct {
-	keys   []string     // sorted
-	states []modelState // restricted to keys; distinct
+	keys   []string   // sorted
+	states []refState // restricted to keys; distinct
 }
 ```
 
-The possible full states are the Cartesian product of one state per group. A key in no group is certainly absent. So if `o.groups` is `[{keys:[a], states:[{}, {a=1}]}, {keys:[b], states:[{}, {b=2}]}]`, the possible states are the four combinations.
+The possible full states are the Cartesian product of one state per group. A key in no group is certainly absent. So if `o.estimate` is `[{keys:[a], states:[{}, {a=1}]}, {keys:[b], states:[{}, {b=2}]}]`, the possible states are the four combinations.
 
 A group that shares a key with a component must be searched with it (the component needs to know that key's possible values), and a group can *connect* two components (if it ties `a` and `b` together from a previous COPY, then this window's ops on `a` and on `b` are no longer independent). So:
 
 ```go
-// toys3/sim/oracle.go:427-443
-	pulled := make([]bool, len(o.groups))
+// toys3/sim/oracle.go:394-410
+	pulled := make([]bool, len(o.estimate))
 	for changed := true; changed; {
 		changed = false
-		for i, g := range o.groups {
+		for i, g := range o.estimate {
 			if pulled[i] {
 				continue
 			}
@@ -482,17 +491,17 @@ Fixpoint: keep merging groups' key sets into components until nothing changes. T
 #### Step 3: per component, build start states and search
 
 ```go
-// toys3/sim/oracle.go:445-486
+// toys3/sim/oracle.go:412-453
 	for _, comp := range comps {
 		// Start states: the product of the carried groups inside comp.
-		start := []modelState{nil}
+		start := []refState{nil}
 		var rest []group
-		for _, g := range o.groups {
+		for _, g := range o.estimate {
 			if !intersects(g.keys, comp) {
 				rest = append(rest, g)
 				continue
 			}
-			var next []modelState
+			var next []refState
 			for _, a := range start {
 				for _, b := range g.states {
 					st := append(slices.Clone(a), b...)
@@ -520,8 +529,8 @@ Fixpoint: keep merging groups' key sets into components until nothing changes. T
 			finals = widenStates(comp, finals)
 			o.stats.Widenings++
 		}
-		o.groups = append(rest, factor(comp, finals)...)
-		slices.SortFunc(o.groups, ...)
+		o.estimate = append(rest, factor(comp, finals)...)
+		slices.SortFunc(o.estimate, ...)
 		o.stats.MaxStates = max(o.stats.MaxStates, len(finals))
 	}
 	return nil
@@ -530,13 +539,13 @@ Fixpoint: keep merging groups' key sets into components until nothing changes. T
 
 For each component:
 
-1. **Start states** are the product of the groups inside it, starting from `[nil]` (the empty map, meaning every key of the component is absent unless a group says otherwise). If the product exceeds `maxStartStates = 1 << 12 = 4096` (`oracle.go:390`), widen.
+1. **Start states** are the product of the groups inside it, starting from `[nil]` (the empty map, meaning every key of the component is absent unless a group says otherwise). If the product exceeds `maxStartStates = 1 << 12 = 4096` (`oracle.go:357`), widen.
 2. **Select the operations** touching the component.
 3. **Search** from every start state; collect every possible **end state** (`finals`). Zero end states means no linearization exists: return the failure.
 4. Widen the end states if there are too many.
 5. **Factor** the end states back into groups, replacing the groups that were consumed (the others are kept in `rest`).
 
-Note that the first failing component returns immediately; later components are not checked. That is fine because the simulator stops the run at the first failure (`simulator.go:364-374`).
+Note that the first failing component returns immediately; later components are not checked. That is fine because the simulator stops the run at the first failure (`simulator.go:365-375`).
 
 ## 13.6 Keeping uncertainty small: factor and widen
 
@@ -545,9 +554,9 @@ Note that the first failing component returns immediately; later components are 
 After a crash that abandons PUTs on `a` and `b`, the end states are `{}`, `{a=1}`, `{b=2}`, `{a=1 b=2}`. Carrying them as one joint group of 4 states would be wasteful: the uncertainty about `a` is independent of the uncertainty about `b`. `factor` detects that:
 
 ```go
-// toys3/sim/oracle.go:513-551
-func factor(keys []string, finals []modelState) []group {
-	vals := make([][]core.ClientReq, len(keys)) // 0 = absent
+// toys3/sim/oracle.go:480-518
+func factor(keys []string, finals []refState) []group {
+	vals := make([][]control.ClientReq, len(keys)) // 0 = absent
 	prod := 1
 	for i, k := range keys {
 		for _, st := range finals {
@@ -574,7 +583,7 @@ func factor(keys []string, finals []modelState) []group {
 			if w == 0 {
 				g.states = append(g.states, nil)
 			} else {
-				g.states = append(g.states, modelState{{k, w}})
+				g.states = append(g.states, refState{{k, w}})
 			}
 		}
 		gs = append(gs, g)
@@ -592,9 +601,9 @@ Keys that are absent in every end state need no group at all ("a key in no group
 If a component would start from more than 4096 states (or end with more than 4096), the oracle **widens**:
 
 ```go
-// toys3/sim/oracle.go:489-511
-func widenStates(keys []string, states []modelState) []modelState {
-	var out modelState
+// toys3/sim/oracle.go:456-478
+func widenStates(keys []string, states []refState) []refState {
+	var out refState
 	for _, k := range keys {
 		w0, p0 := states[0].get(k)
 		same := true
@@ -611,7 +620,7 @@ func widenStates(keys []string, states []modelState) []modelState {
 			out = append(out, kv{k, w0})
 		}
 	}
-	return []modelState{out}
+	return []refState{out}
 }
 ```
 
@@ -619,7 +628,7 @@ One state replaces many: each key that all states agree on keeps its value; each
 
 ### The memo budget
 
-The search itself has a separate safety limit, `Budget` (default `1 << 20` memo entries, `oracle.go:556-559`). Exceeding it is reported as a `linearizable` failure with the message `checker budget exceeded (N memo entries) on M ops: shrink QuiesceEvery`. Unlike widening, this is a *tooling* failure that could be a false alarm: it says "I could not decide", not "this history is wrong". The message is distinct, so you can tell them apart; in the default configuration it does not occur.
+The search itself has a separate safety limit, `Budget` (default `1 << 20` memo entries, `oracle.go:523-526`). Exceeding it is reported as a `linearizable` failure with the message `checker budget exceeded (N memo entries) on M ops: shrink QuiesceEvery`. Unlike widening, this is a *tooling* failure that could be a false alarm: it says "I could not decide", not "this history is wrong". The message is distinct, so you can tell them apart; in the default configuration it does not occur.
 
 ## 13.7 The search: Wing–Gong–Lowe, line by line
 
@@ -628,8 +637,8 @@ Wing and Gong (1993) gave the basic algorithm for testing linearizability: depth
 ### The entry point
 
 ```go
-// toys3/sim/oracle.go:553-576
-func (o *Oracle) search(start []modelState, ws []wop) ([]modelState, []Failure) {
+// toys3/sim/oracle.go:520-543
+func (o *Oracle) search(start []refState, ws []wop) ([]refState, []Failure) {
 	budget := o.Budget
 	if budget <= 0 {
 		budget = 1 << 20
@@ -657,8 +666,8 @@ The set of linearized operations is a bitset (`[]uint64`, one bit per op in the 
 ### The DFS
 
 ```go
-// toys3/sim/oracle.go:578-639
-func (s *search) dfs(set []uint64, at uint64, st modelState) {
+// toys3/sim/oracle.go:545-606
+func (s *search) dfs(set []uint64, at uint64, st refState) {
 	if s.over {
 		return
 	}
@@ -763,15 +772,15 @@ The tests build histories by hand with a small helper (`toys3/sim/oracle_test.go
 ```go
 // toys3/sim/oracle_test.go:53-70
 h.inv(1, put("a", 1))
-h.inv(2, core.Get{Key: "a"}) // overlaps the PUT: may see absent...
-h.inv(3, core.Get{Key: "a"}) // ...or the new value
-h.ret(2, core.StatusOK, val(1))
-h.ret(3, core.StatusNotFound, nil)
-h.ret(1, core.StatusOK, nil)
-h.inv(4, core.Copy{Src: "a", Dst: "b"}); h.ret(4, core.StatusOK, nil)
-h.inv(5, core.Get{Key: "b"});            h.ret(5, core.StatusOK, val(1))
-h.inv(6, core.Delete{Key: "a"});         h.ret(6, core.StatusOK, nil)
-h.inv(7, core.Delete{Key: "a"});         h.ret(7, core.StatusNotFound, nil)
+h.inv(2, control.Get{Key: "a"}) // overlaps the PUT: may see absent...
+h.inv(3, control.Get{Key: "a"}) // ...or the new value
+h.ret(2, control.StatusOK, val(1))
+h.ret(3, control.StatusNotFound, nil)
+h.ret(1, control.StatusOK, nil)
+h.inv(4, control.Copy{Src: "a", Dst: "b"}); h.ret(4, control.StatusOK, nil)
+h.inv(5, control.Get{Key: "b"});            h.ret(5, control.StatusOK, val(1))
+h.inv(6, control.Delete{Key: "a"});         h.ret(6, control.StatusOK, nil)
+h.inv(7, control.Delete{Key: "a"});         h.ret(7, control.StatusNotFound, nil)
 ```
 
 ```
@@ -799,9 +808,9 @@ Linearization: GET3, PUT1, GET2, COPY4, GET5, DEL6, DEL7. Notice that GET2 *retu
 
 ```go
 // toys3/sim/oracle_test.go:72-83
-h.inv(1, put("a", 1)); h.ret(1, core.StatusOK, nil)
-h.inv(2, core.Get{Key: "a"}); h.ret(2, core.StatusOK, val(1))
-h.inv(3, core.Get{Key: "a"}); h.ret(3, core.StatusNotFound, nil)
+h.inv(1, put("a", 1)); h.ret(1, control.StatusOK, nil)
+h.inv(2, control.Get{Key: "a"}); h.ret(2, control.StatusOK, val(1))
+h.inv(3, control.Get{Key: "a"}); h.ret(3, control.StatusNotFound, nil)
 ```
 
 ```
@@ -828,11 +837,11 @@ Sequential order forced; GET3 on `{a=2}` expects writer 2, observed writer 1. **
 
 ```go
 // toys3/sim/oracle_test.go:96-107
-h.inv(1, put("a", 1)); h.ret(1, core.StatusOK, nil)
+h.inv(1, put("a", 1)); h.ret(1, control.StatusOK, nil)
 h.crash()
 if f := h.o.CheckQuiescent(); f != nil { t.Fatal(f[0].Msg) }
-h.inv(2, core.Get{Key: "a"}) // after the restart, in the next window
-h.ret(2, core.StatusNotFound, nil)
+h.inv(2, control.Get{Key: "a"}) // after the restart, in the next window
+h.ret(2, control.StatusNotFound, nil)
 h.check(t, false)
 ```
 
@@ -853,10 +862,10 @@ First variant family:
 
 ```go
 // toys3/sim/oracle_test.go:110-124
-h.inv(1, put("a", 1)); h.ret(1, core.StatusOK, nil)
-h.inv(2, put("a", 2)); h.ret(2, core.StatusServerError, nil)
+h.inv(1, put("a", 1)); h.ret(1, control.StatusOK, nil)
+h.inv(2, put("a", 2)); h.ret(2, control.StatusServerError, nil)
 h.crash()
-h.inv(3, core.Get{Key: "a"})
+h.inv(3, control.Get{Key: "a"})
 // applied:  h.ret(3, 200, val(2));  not applied: h.ret(3, 200, val(1))
 ```
 
@@ -886,11 +895,11 @@ Second family: an **abandoned** DELETE.
 
 ```go
 // toys3/sim/oracle_test.go:142-156
-h.inv(1, put("a", 1)); h.ret(1, core.StatusOK, nil)
-h.inv(2, put("a", 2)); h.ret(2, core.StatusServerError, nil)
-h.inv(3, core.Get{Key: "a"}); h.ret(3, core.StatusOK, val(2))
+h.inv(1, put("a", 1)); h.ret(1, control.StatusOK, nil)
+h.inv(2, put("a", 2)); h.ret(2, control.StatusServerError, nil)
+h.inv(3, control.Get{Key: "a"}); h.ret(3, control.StatusOK, val(2))
 h.crash()
-h.inv(4, core.Get{Key: "a"}); h.ret(4, core.StatusOK, val(1))
+h.inv(4, control.Get{Key: "a"}); h.ret(4, control.StatusOK, val(1))
 ```
 
 ```
@@ -926,9 +935,9 @@ h.inv(1, put("a", 1))
 h.inv(2, put("b", 2))
 h.crash()
 h.check(t, true)
-h.inv(3, core.Get{Key: "a"}); h.ret(3, core.StatusOK, val(1)); h.check(t, true)
-h.inv(4, core.Get{Key: "b"}); h.ret(4, core.StatusNotFound, nil); h.check(t, true)
-h.inv(5, core.Get{Key: "a"}); h.ret(5, core.StatusNotFound, nil); h.check(t, false)
+h.inv(3, control.Get{Key: "a"}); h.ret(3, control.StatusOK, val(1)); h.check(t, true)
+h.inv(4, control.Get{Key: "b"}); h.ret(4, control.StatusNotFound, nil); h.check(t, true)
+h.inv(5, control.Get{Key: "a"}); h.ret(5, control.StatusNotFound, nil); h.check(t, false)
 ```
 
 Trace the carried groups through each window:
@@ -963,8 +972,8 @@ This test is the clearest demonstration of *carried uncertainty*: after a crash,
 for _, k := range keys { req++; h.inv(req, put(k, req)) }
 h.crash(); h.check(t, true)
 // 13 COPYs chaining a→b→c→...→n, all invoked, then all return 200
-for i := 1; i < len(keys); i++ { req++; h.inv(req, core.Copy{Src: keys[i-1], Dst: keys[i]}) }
-for i := 1; i < len(keys); i++ { h.ret(core.ClientReq(len(keys)+i), core.StatusOK, nil) }
+for i := 1; i < len(keys); i++ { req++; h.inv(req, control.Copy{Src: keys[i-1], Dst: keys[i]}) }
+for i := 1; i < len(keys); i++ { h.ret(control.ClientReq(len(keys)+i), control.StatusOK, nil) }
 h.check(t, true)                             // must widen, must not fail
 if h.o.Stats().Widenings == 0 { t.Fatal("expected a widening") }
 // then: PUT a=28 (200), PUT a=29 (200), GET a → value-of-28  ✗
@@ -976,7 +985,7 @@ The final part checks that widening is temporary: two fresh 200 PUTs on `a` give
 
 ## 13.9 Dissecting real failures
 
-Now the payoff: three failure messages from the mutation suite (Chapter 15), decoded with everything above. The failure message format comes from `describeWindow` (`oracle.go:651-671`) and `describeOp` (`oracle.go:687-700`):
+Now the payoff: three failure messages from the mutation suite (Chapter 15), decoded with everything above. The failure message format comes from `describeWindow` (`oracle.go:618-638`) and `describeOp` (`history.go:66-79`):
 
 ```
 req <id> client <n> <OP> [<InvSeq>..<RetSeq> @<Invoke ns>..<Return ns>] -> <status or outcome> [value-of-<w> | garbage(<n> bytes)]
@@ -1001,14 +1010,14 @@ Now reconstruct *why* those were the start states, using the event log of the ru
 #317  land FSUnlink{io68 /data/obj/k1} -> OK              ← c45's unlink: k1 gone (visibly)
 #323  land FSFsyncDir{io70 /data/obj} -> EIO              ← the dir fsync fails
 #324  FSFsyncDirDone{io70 EIO} => Reply{c45 500} FSUnlink{io71 /data/obj/k1}
-                                                          ← mutant: 500 but NO Halt; c47 starts
+                                                          ← mutant: 500 but NO Trip; c47 starts
 #327  FSUnlinkDone{io71 ENOENT} => Reply{c47 404}         ← window 1 closes here (all idle)
 #332  Request{c49 GET "k1"}
 #337  Request{c51 GET "k1"}
 #339  FSReadDone{io73 ENOENT} => Reply{c49 404}
 #342  Request{c52 PUT "k1" value-of-52}
-#343  FSFsyncDone{io74 EIO} => Reply{c48 500} Halt{fsync temp: EIO}
-#343  CRASH (halt: fsync temp: EIO): kept=1 lost=2 ...    ← window 2 closes (c51, c52 abandoned)
+#343  FSFsyncDone{io74 EIO} => Reply{c48 500} Trip{fsync temp: EIO}
+#343  CRASH (trip: fsync temp: EIO): kept=1 lost=2 ...    ← window 2 closes (c51, c52 abandoned)
                                                           ← crash REVERTS the un-synced unlink of k1
 #356  Request{c55 GET "k1"}
 #365  FSReadDone{io5 OK obj(value-of-26)} => Reply{c55 200 value-of-26}
@@ -1027,7 +1036,7 @@ In model terms:
  finals: {}  (k1 absent)
 ```
 
-Window 1 is accepted, but only by linearizing c45's failed DELETE (otherwise c47's 404 is impossible). The model now says "k1 is gone". Window 2 is consistent with that. The crash reverts the FakeFS's un-synced unlink, so the server reads `value-of-26` again in window 3. The model cannot un-delete. The client saw a key disappear (two 404s) and then reappear with its old value. That is the d2 bug, and note what was needed to see it: an EIO on exactly the dir fsync, two subsequent reads of the same key observing the visible-but-not-durable state, and a crash before anything else made the unlink durable. With 2 keys (seed 132's swarm shape), the reads land on `k1` quickly.
+Window 1 is accepted, but only by linearizing c45's failed DELETE (otherwise c47's 404 is impossible). The model now says "k1 is gone". Window 2 is consistent with that. The crash reverts the PlantModel's un-synced unlink, so the server reads `value-of-26` again in window 3. The model cannot un-delete. The client saw a key disappear (two 404s) and then reappear with its old value. That is the d2 bug, and note what was needed to see it: an EIO on exactly the dir fsync, two subsequent reads of the same key observing the visible-but-not-durable state, and a crash before anything else made the unlink durable. With 2 keys (seed 132's swarm shape), the reads land on `k1` quickly.
 
 Also note *when* it was reported: the bad GET replied at step 365, but the failure is at step 380, the next quiescent point. The oracle only checks complete windows; per-step invariants (Chapter 14) report at the exact step, the oracle at the end of the window.
 
@@ -1056,7 +1065,7 @@ Here the model is certain: `k5` holds request 221's value (one start state). The
 #1669  inc=13  Request{c248 GET "k5"} ... FSReadDone{io52 OK obj(value-of-231)}   ← k5 now holds k25's value
 ```
 
-Black-box, the oracle sees only: `k5` was acked as 221, nothing wrote `k5` since, and a GET of `k5` returned the value of a PUT to `k25`. No COPY moved 231 into `k5`. Unexplainable. `NoCorruptReads` cannot see this: the bytes are a perfectly valid value, just from the wrong key. Only a model-based check can. Chapter 11 explains the FakeFS mechanics (durable vs current directory entries) that make the hard link possible, and Chapter 15 discusses why this mutant needs many keys to be visible.
+Black-box, the oracle sees only: `k5` was acked as 221, nothing wrote `k5` since, and a GET of `k5` returned the value of a PUT to `k25`. No COPY moved 231 into `k5`. Unexplainable. `NoCorruptReads` cannot see this: the bytes are a perfectly valid value, just from the wrong key. Only a model-based check can. Chapter 11 explains the PlantModel mechanics (durable vs current directory entries) that make the hard link possible, and Chapter 15 discusses why this mutant needs many keys to be visible.
 
 ### Mutant e, seed 18: garbage
 
@@ -1065,14 +1074,14 @@ FAIL no-corrupt-reads step 657: 200 GET returned bytes no PUT wrote: req 98 clie
 FAIL linearizable step 657: GET req 98 client 0 GET "k3" [184..185 @153865676..154136154] -> 200 garbage(13 bytes) returned bytes no PUT wrote
 ```
 
-Two invariants fire at the same step. `NoCorruptReads` checks every completed GET immediately. The step also happened to complete a window (`[184..185]`: invoked and returned back to back, nothing else pending), so `Linearizable` ran too, and `window()` rejected the body before searching. The run stops after the step (both failures are recorded because the simulator finishes running the remaining invariants of the step before it checks `halted`). The 13 bytes are the payload of a 29-byte object file (16-byte header + 13) in which the FakeFS flipped one bit on read; the mutant skipped the CRC check, so the server served it.
+Two invariants fire at the same step. `NoCorruptReads` checks every completed GET immediately. The step also happened to complete a window (`[184..185]`: invoked and returned back to back, nothing else pending), so `Linearizable` ran too, and `window()` rejected the body before searching. The run stops after the step (both failures are recorded because the simulator finishes running the remaining invariants of the step before it checks `halted`). The 13 bytes are the payload of a 29-byte object file (16-byte header + 13) in which the PlantModel flipped one bit on read; the mutant skipped the CRC check, so the server served it.
 
 ## 13.10 Statistics: windows, maxwin, widened
 
 Three oracle statistics appear in every stats line:
 
 ```go
-// toys3/sim/oracle.go:90-97
+// toys3/sim/oracle.go:56-63
 type OracleStats struct {
 	Windows      int
 	MaxWindowOps int // ops in the largest window searched
@@ -1082,7 +1091,7 @@ type OracleStats struct {
 }
 ```
 
-The simulator copies `Windows`, `MaxWindowOps` and `Widenings` into `Stats` (`simulator.go:117-120`) as `windows=`, `maxwin=` and `widened=`. `MaxVisited` and `MaxStates` are kept by the oracle but not surfaced in the stats line; they are useful when tuning (an exercise below surfaces them).
+The simulator copies `Windows`, `MaxWindowOps` and `Widenings` into `Stats` (`simulator.go:118-121`) as `windows=`, `maxwin=` and `widened=`. `MaxVisited` and `MaxStates` are kept by the oracle but not surfaced in the stats line; they are useful when tuning (an exercise below surfaces them).
 
 How to read them:
 
@@ -1090,7 +1099,30 @@ How to read them:
 - **`maxwin`** is the best predictor of oracle cost. In the 200-seed run, `maxwin=23`. If you change the workload and it climbs past ~40, expect slowdowns and eventually `checker budget exceeded`.
 - **`widened`** should be 0 in normal campaigns. A nonzero value means the check was weakened somewhere. Not wrong, but worth knowing: a bug on a widened key could slip through until the key is rewritten.
 
-## 13.11 How this compares to other checkers
+## 13.11 The oracle as a state observer
+
+Everything in this chapter was explained in the language of concurrency theory: histories, linearization points, windows. There is a second reading, from control and estimation theory, and the refactor of Chapter 3a chose the oracle's internal names (`refState`, `estimate`) to make it visible. It is worth spelling out, because it explains *why* the design has the shape it has.
+
+In control engineering, an **observer** is an algorithm that reconstructs the internal state of a system it cannot see directly, from the system's inputs and outputs. A Kalman filter is the famous example: it keeps a *probability distribution* over the state and updates it with each measurement. A **set-membership observer** is the worst-case cousin: instead of a distribution it keeps the *set* of all states consistent with everything observed so far. When a measurement arrives, it intersects the set with the states that could have produced that measurement. If the set becomes empty, no state explains the observations, and the observer has detected a fault.
+
+Map the oracle onto that:
+
+| Observer concept | In the oracle |
+|---|---|
+| the hidden system | the key-value store that the controller plus the disk are supposed to implement |
+| its state model | the reference model: a `refState`, one map from key to writer |
+| inputs | client operations (`HistOp.Op`) with their real-time intervals |
+| measurements | replies: status and, for a GET, the writer named by the body |
+| the state estimate | `Oracle.estimate`: the set of reference-model states consistent with every reply so far |
+| the update | `check()`: the WGL search over one window computes the set of end states reachable by some valid linearization from some start state in the estimate |
+| fault detection | an empty set of end states: no linearization exists, the history is rejected |
+| over-approximation | widening: when the set is too large, replace part of it with `unknown`, a superset that is cheaper to carry (an interval observer does exactly this with boxes) |
+
+Several design decisions in this chapter read naturally in observer terms. **Carrying the estimate across windows** (§13.5) is the observer's recursion: the end set of one window is the start set of the next. **Factoring into independent key groups** (§13.6) is a structured representation of the set, like a product of intervals, which keeps the estimate small as long as keys stay independent. **Widening** (§13.6) trades precision for size, and is sound because it only ever *adds* states: a larger estimate can hide a fault, never invent one. And the oracle's insistence on looking only at client-visible outputs is what makes it an observer at all: it reconstructs the state from *outputs*, without access to the controller's internals.
+
+So why is the type still called `Oracle` and not `Observer`? Because in Go (and most of software engineering) "Observer" first means the Gang-of-Four publish/subscribe pattern, which would mislead every reader who meets the name cold; and because "test oracle" is the established DST term for "the component that decides whether a run was correct". The refactor kept the familiar name on the outside and used the precise vocabulary on the inside. (One more collision to avoid: linearizability, the property this observer checks, has nothing to do with *linearization*, the control-theory technique of approximating a nonlinear system around an operating point.)
+
+## 13.12 How this compares to other checkers
 
 - **Knossos** (Clojure, used by Jepsen) implements WGL-style search and a "linear" algorithm over configurations, with indeterminate (`:info`) operations that may linearize any time after invocation. It is general (any model with a step function) and has to be, because Jepsen tests systems it cannot pause or observe internally.
 - **Porcupine** (Go, Anish Athalye) implements the P-compositional WGL search with bitsets and a state cache, and is fast enough to check large histories. It requires the user to supply the partition function and the model.
@@ -1107,17 +1139,19 @@ toys3's oracle is specialized in three ways that the general tools are not: it c
 - The WGL DFS places each op at the earliest point `max(at, inv)`, prunes with the earliest required return, and memoizes on (set, state), which is sound because `at` is the max invocation over the set.
 - Widening to `unknown` trades precision for tractability and never causes false failures; the memo budget is a separate, tooling-level failure.
 - The oracle sees bugs that no per-response check can: values that vanish (d2) and values from the wrong key (f).
+- Read through control theory, the oracle is a set-membership state observer for the reference model: `estimate` is the set of possible `refState`s, each window's search is the update, widening is over-approximation, and an empty set is a detected fault. The type keeps the DST name `Oracle`.
 
 ## Exercises
 
 1. **Predict, then test.** Add to `toys3/sim/oracle_test.go` a history where two overlapping PUTs (`a=1`, `a=2`) both return 200, followed by two sequential GETs that see 2 then 1. Predict accept or reject, then run `go test ./toys3/sim -run TestOracle -v`. Then make the second GET *overlap* the first. Does your answer change? Why not?
 2. **A failed COPY.** Write a history: `PUT a=1` (200), `COPY a→b` (500), crash, `GET b` → `value-of-1`. Predict. Then change the GET's result to 404. Predict again. Use the `apply` table in §13.4 to justify both.
 3. **Break the memo.** Change `memoKey` to ignore `st` (key only on the set). Find a history in `oracle_test.go` that is now wrongly accepted or rejected, and explain why using §13.7.
-4. **Break the bound.** Delete the `if p > bound { continue }` check (`oracle.go:628-630`). Which test fails? (Prediction first. Hint: think about real-time order with no overlap.) Is the oracle now unsound (accepting bad histories) or incomplete (rejecting good ones)?
+4. **Break the bound.** Delete the `if p > bound { continue }` check (`oracle.go:595-597`). Which test fails? (Prediction first. Hint: think about real-time order with no overlap.) Is the oracle now unsound (accepting bad histories) or incomplete (rejecting good ones)?
 5. **Relax Failed to Jepsen semantics.** In `window()`, set `w.ret = never` for Failed ops (as if a 500 could take effect at any later time). Re-run `go test ./toys3/sim -run 'TestCatchesBugs/d2' -v`. Predict whether d2 is still caught, and explain in terms of §13.2.
 6. **Surface the hidden stats.** Add `MaxVisited` and `MaxStates` to `sim.Stats` and its `String()`. Run `go test ./toys3/sim -run 'TestSeeds$' -seeds=200 -v` and report the largest memo size. How close is it to the `1 << 20` budget?
 7. **Force widening in a real run.** Find a configuration (more keys, more crashes, more clients) under which `widened` becomes nonzero in some seed. Then check whether the mutants are still caught at the same seeds.
-8. **Fix the comments.** The comments at `oracle.go:27` ("when the Request was delivered") and `oracle.go:299` (`Oracle.widen`) are slightly inaccurate (§13.3, §13.4). Write the corrected comments (do this on a branch).
+8. **Fix the comments.** The comments at `history.go:33` ("when the Request was delivered") and `oracle.go:266` (`Oracle.widen`) are slightly inaccurate (§13.3, §13.4). Write the corrected comments (do this on a branch).
+9. **Observer vocabulary.** Using §13.11, explain to a control engineer why widening can hide a bug but can never report a false one, in terms of sets. Then find the line in `check` where an empty set of end states becomes a `Failure`, and the line where `estimate` is replaced by the factored end states (`toys3/sim/oracle.go`).
 
 ## Further reading
 

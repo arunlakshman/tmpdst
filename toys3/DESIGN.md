@@ -7,9 +7,9 @@ real durability bugs to make, so that a deterministic simulator can catch them.
 It follows [`../loop.md`](../loop.md) strictly.
 
 ```
-toys3/control   the controller: pure state machine + plant port   (detcheck-clean)
+toys3/control   the controller: pure state machine + Storage port (detcheck-clean)
 toys3/format    on-disk object format and layout                  (detcheck-clean)
-toys3/sim       SIL testbench: simulator, plant model, workload,
+toys3/sim       SIL testbench: simulator, storage model, workload,
                 oracle, invariants                                (detcheck-clean)
 toys3/prod      real runtime: os calls, HTTP, event loop
 toys3/cmd/toys3      main (-dir, -addr)
@@ -23,15 +23,17 @@ Every toys3 package except `prod` and `cmd/*` is gated by `tools/detcheck`;
 
 The code is organized with domain-driven design, and its vocabulary comes
 from control theory where the fit is genuine (see `REFACTOR-PROPOSAL.md` for
-the full analysis). The server is a **controller** in a feedback loop around a
-**plant**, the disk and its page cache:
+the full analysis). The server is a **controller** in a feedback loop around
+**storage**, the disk and its page cache. (Control theory calls the controlled
+system the *plant*; toys3 says *storage*, because that is what it is.) The
+controller drives storage with actuations and reads its feedback:
 
 ```
      requests (operator)                            disturbances: EIO, torn writes,
               │                                     bit flips, writeback, power loss
               ▼                                                   │
      ┌──────────────────┐   actuations (FS* commands)  ┌─────────▼──────────┐
-     │   Controller     │ ────────────────────────────►│       plant        │
+     │   Controller     │ ────────────────────────────►│      storage       │
      │ Step(Event)      │ ◄────────────────────────────│ (disk + page cache)│
      │  []Action        │   feedback (FS*Done events)  └────────────────────┘
      └──┬────────┬──────┘   dead time: actuation → effect; feedback delay: effect → completion
@@ -42,17 +44,17 @@ the full analysis). The server is a **controller** in a feedback loop around a
 | Term | In code | Meaning |
 |---|---|---|
 | Controller | `control.Controller` | The state machine: the control law. The single aggregate; one `Step` is its consistency boundary. |
-| Actuation / Feedback | `control.Actuation` (FS* actions), `control.Feedback` (FS*Done events) | The plant port. The controller owns it; `prod.OSExecutor` (real disk) and `sim.PlantModel` (simulated) implement it. |
+| Actuation / Feedback | `control.Actuation` (FS* actions), `control.Feedback` (FS*Done events) | The Storage port. The controller owns it; `prod.OSExecutor` (real disk) and `sim.StorageModel` (simulated) implement it. |
 | Trip | `control.Trip{Cause}` | Safety trip: fail-stop when in-memory state can't be trusted (fsyncgate); restart re-arms. |
 | Mode | `modeStartup → modeRecovering → modeAuto → modeTripped` | Operating mode of one incarnation. |
 | Key interlock, start permissive | `interlocked`, `permitted` | Per-key FIFO: a request starts only when no earlier request shares a key. |
 | Telemetry | `control.Telemetry` via `Emit` | Domain events the controller publishes: logged by prod, checked by the simulator's monitors. |
-| Plant model | `sim.PlantModel` | The simulated filesystem with crash semantics. Its durable view is the true state. |
-| Disturbances | `sim.Disturbances` | Faults the controller cannot command, plus the plant's dead time and feedback delay. |
+| Storage model | `sim.StorageModel` | The simulated filesystem with crash semantics. Its durable view is the true state. |
+| Disturbances | `sim.Disturbances` | Faults the controller cannot command, plus storage's dead time and feedback delay. |
 | Chaos, Settling | `Config.Chaos`, `Config.Settling` | Disturbed phase, then the phase in which the closed loop must settle (every request answered, no 500s). |
 | Sample | `sim.Sample` | Telemetry stamped with step, time and incarnation. |
 | Reference model, estimate | oracle's `refState`, `estimate` | The sequential spec the history must match; the oracle's set of possible states. |
-| Ground truth | `sim.GroundTruth` | The only view of the plant the monitors get (durable files). |
+| Ground truth | `sim.GroundTruth` | The only view of storage the monitors get (durable files). |
 
 Plain names are kept where a control metaphor would be forced: requests and
 the S3 ops, `Committed`, `Linearizable` (linearizability, not linearization),
@@ -60,8 +62,8 @@ the S3 ops, `Committed`, `Linearizable` (linearizability, not linearization),
 
 Bounded contexts: **storage control** (`control`, the core domain),
 **object format** (`format`, a shared kernel between the controller, the
-monitors, the plant model and prod), **plant** (the port in `control`; adapters
-`prod.OSExecutor` and `sim.PlantModel`), **verification** (`sim`: oracle,
+monitors, the storage model and prod), **storage** (the port in `control`; adapters
+`prod.OSExecutor` and `sim.StorageModel`), **verification** (`sim`: oracle,
 history, invariants), **testbench** (`sim`: simulator, queue, RNG, trace hash,
 workload) and **production runtime/transport** (`prod`, with `Handler` as the
 anti-corruption layer from S3 REST to `control.Op`).
@@ -134,8 +136,8 @@ prod:  HTTP ─► inbox(chan) ─► Loop.Run: Step ─► OSExecutor goroutine
 sim:   one goroutine, Queue ordered by (At, seeded Tie, Seq), virtual clock
        t=3ms  deliver  Request{c4, Put k1}              (inc 2)
        t=3ms  deliver  FSFsyncDone{io9}                 (inc 2)   ◄─ tie broken by seed
-       t=5ms  fsLand   FSRename{io10}  (plan: OK)       ◄─ effect lands in the PlantModel
-       t=6ms  ⚡ crash → PlantModel resolves volatile state, entries for inc 2 dropped
+       t=5ms  fsLand   FSRename{io10}  (plan: OK)       ◄─ effect lands in the StorageModel
+       t=6ms  ⚡ crash → StorageModel resolves volatile state, entries for inc 2 dropped
        t=9ms  restart  inc 3, deliver Started
 ```
 
@@ -144,7 +146,7 @@ two separate times (after the dead time, then after the feedback delay). A crash
 told". Entries carry the server incarnation, and anything addressed to a dead
 incarnation is dropped.
 
-## Fault model (PlantModel and its Disturbances)
+## Fault model (StorageModel and its Disturbances)
 
 Every inode has *durable* and *volatile* content, and every directory entry has
 *durable* and *current* versions. `FSFsync` makes content durable. `FSFsyncDir`
@@ -174,7 +176,7 @@ Two more behaviours turned out to matter:
   `obj/` never holds a torn file, so without this fault the CRC check would be
   dead code (`TestCorruptionUnreachableWithoutBitFlips` checks this).
 
-**Crash model.** A crash, including a `Trip`, is a power loss. The PlantModel resolves
+**Crash model.** A crash, including a `Trip`, is a power loss. The StorageModel resolves
 all volatile state at that instant. Queued entries for the dead incarnation are
 dropped: FS actions that have not landed yet never happen, and completions
 that have not been delivered are lost. An action that landed before the crash
@@ -194,7 +196,7 @@ therefore name their writer exactly.
 | | Invariant | Checked |
 |---|---|---|
 | a | Every 200 GET is linearizable against a per-key register model (COPY reads src and writes dst atomically) | at quiescent points (Oracle, WGL search) |
-| b | Acked mutations survive crashes unless superseded. Crashes erase nothing in the model. | same search; also eagerly: `Committed` telemetry ⇒ the plant model's durable state (ground truth) matches, on the same step |
+| b | Acked mutations survive crashes unless superseded. Crashes erase nothing in the model. | same search; also eagerly: `Committed` telemetry ⇒ the storage model's durable state (ground truth) matches, on the same step |
 | c | No torn or corrupt bytes are ever returned with 200 (`NoCorruptReads`) | every step |
 | d | Every request gets a reply while the server is alive, the final boot recovers, and no request issued in Settling gets a 500 | 500s: every step; the rest: end of run |
 | e | Every file under `obj/` in the *durable* view is a complete object (`ObjNeverTorn`) | whenever durable state changes |
@@ -211,7 +213,7 @@ moment but never causes a false failure, and the `widened` stat counts it.
 Ops are ordered by logical
 invoke and return sequence numbers, not by virtual time, so several events
 that share one instant keep their exact order. The run's state is folded into a trace
-hash after every step: the controller's `StateHash`, the plant model's hash, the step
+hash after every step: the controller's `StateHash`, the storage model's hash, the step
 number and the time. Events, actions and telemetry are folded as stable
 numeric tags and field values, never as Go type names; telemetry goes through
 a frozen encoding (`telemetryHashKey`), so renames cannot change a trace hash.

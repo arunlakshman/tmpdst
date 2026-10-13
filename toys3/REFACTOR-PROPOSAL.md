@@ -5,6 +5,12 @@ decision). See "Implementation notes" at the end for decisions and deviations.
 Baseline: branch `toys3` @ `0f0aad9`. Seed 1 is `steps=1628 crashes=10 trace=1ca97eb77a9044e1`, and the 7 mutants
 are caught at seeds 1, 1, 1, 1, 132, 18 and 20 (details in §6).
 
+> **Later rename: "plant" is now "storage".** After this proposal was implemented, the term *plant* was
+> replaced by *storage* throughout the code and docs, because the project's owner found it confusing (see
+> "Addendum: plant renamed to storage" at the end). The text below is the historical proposal and still says
+> "plant"; read `PlantModel` as `sim.StorageModel`, `plantmodel.go` as `sim/storagemodel.go`,
+> `control/plant.go` as `control/storage.go`, and "the plant port" as "the Storage port".
+
 **Summary.**
 
 - toys3 already has an architecture that fits control theory: `Step(Event) []Action` is a
@@ -780,3 +786,23 @@ Deviations from the proposal:
   - `sim/describe.go` is split into `trace.go` and `log.go`.
   - `oracle.go` lost the history types to `history.go`.
   - `workload.go` lost the value encoding to `value.go`.
+
+## Addendum: plant renamed to storage
+
+*Plant* is the textbook control-theory name for the system a controller drives. It fits toys3 exactly, but
+the project's owner found it confusing: a reader who comes from storage systems has to translate it every
+time, and it suggests nothing about disks. So, after the steps above, it was renamed to plain **storage**,
+behaviour-preserving and guarded by the same golden test (`sim/testdata/golden-v1.txt` unchanged, seed 1
+still `trace=1ca97eb77a9044e1`). The other control-theory terms (Controller, Actuation, Feedback, Trip,
+Disturbances, DeadTime, FeedbackDelay, Settling, interlock, permissive, modes) are kept.
+
+| Before | After |
+|---|---|
+| `sim.PlantModel`, `NewPlantModel` | `sim.StorageModel`, `NewStorageModel` |
+| `sim/plantmodel.go`, `sim/plantmodel_test.go` | `sim/storagemodel.go`, `sim/storagemodel_test.go` |
+| `TestPlantModel*` | `TestStorageModel*` |
+| `control/plant.go`, "the plant port" | `control/storage.go`, "the Storage port" (`Actuation` and `Feedback` keep their names) |
+| `Simulator.plant` | `Simulator.storage` |
+| "plant", "plant model" in comments and docs | "storage", "storage model" |
+
+No hash input depended on any of these names, so the trace hashes did not move.

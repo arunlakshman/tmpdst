@@ -12,12 +12,12 @@ const (
 	tTmp = "/d/tmp"
 )
 
-func newTestFS(seed uint64, f Disturbances) *PlantModel {
-	return NewPlantModel(NewRand(seed), f, tObj, tTmp)
+func newTestFS(seed uint64, f Disturbances) *StorageModel {
+	return NewStorageModel(NewRand(seed), f, tObj, tTmp)
 }
 
 // do lands a on fs with no injected failure and returns its error.
-func do(t *testing.T, fs *PlantModel, a control.Action) control.ErrCode {
+func do(t *testing.T, fs *StorageModel, a control.Action) control.ErrCode {
 	t.Helper()
 	return errOf(fs.Land(a, ActuationPlan{}))
 }
@@ -42,7 +42,7 @@ func errOf(b control.EventBody) control.ErrCode {
 	return 255
 }
 
-func TestPlantModelUnsyncedWriteMayVanish(t *testing.T) {
+func TestStorageModelUnsyncedWriteMayVanish(t *testing.T) {
 	data := []byte("hello world")
 	survived, vanished := 0, 0
 	for seed := uint64(1); seed <= 64; seed++ {
@@ -66,7 +66,7 @@ func TestPlantModelUnsyncedWriteMayVanish(t *testing.T) {
 	}
 }
 
-func TestPlantModelRenameWithoutDirFsyncMayVanish(t *testing.T) {
+func TestStorageModelRenameWithoutDirFsyncMayVanish(t *testing.T) {
 	data := []byte("payload")
 	present, absent, both := 0, 0, 0
 	for seed := uint64(1); seed <= 128; seed++ {
@@ -92,7 +92,7 @@ func TestPlantModelRenameWithoutDirFsyncMayVanish(t *testing.T) {
 	}
 }
 
-func TestPlantModelFullySyncedSurvives(t *testing.T) {
+func TestStorageModelFullySyncedSurvives(t *testing.T) {
 	data := []byte("durable bytes")
 	for seed := uint64(1); seed <= 100; seed++ {
 		fs := newTestFS(seed, Disturbances{TornWriteProb: 1})
@@ -114,7 +114,7 @@ func TestPlantModelFullySyncedSurvives(t *testing.T) {
 	}
 }
 
-func TestPlantModelTornPrefix(t *testing.T) {
+func TestStorageModelTornPrefix(t *testing.T) {
 	data := []byte("0123456789abcdef")
 	for seed := uint64(1); seed <= 50; seed++ {
 		fs := newTestFS(seed, Disturbances{TornWriteProb: 1})
@@ -131,7 +131,7 @@ func TestPlantModelTornPrefix(t *testing.T) {
 	}
 }
 
-func TestPlantModelEIOMayOrMayNotApply(t *testing.T) {
+func TestStorageModelEIOMayOrMayNotApply(t *testing.T) {
 	applied, notApplied := 0, 0
 	for seed := uint64(1); seed <= 64; seed++ {
 		fs := newTestFS(seed, Disturbances{})
@@ -154,7 +154,7 @@ func TestPlantModelEIOMayOrMayNotApply(t *testing.T) {
 	}
 }
 
-func TestPlantModelFsyncGateLies(t *testing.T) {
+func TestStorageModelFsyncGateLies(t *testing.T) {
 	fs := newTestFS(1, Disturbances{FsyncGate: true})
 	do(t, fs, control.FSWrite{IO: 1, Path: tObj + "/k", Data: []byte("data")})
 	do(t, fs, control.FSFsyncDir{IO: 2, Dir: tObj})
@@ -170,7 +170,7 @@ func TestPlantModelFsyncGateLies(t *testing.T) {
 	}
 }
 
-func TestPlantModelNeverAliasesHandedOutSlices(t *testing.T) {
+func TestStorageModelNeverAliasesHandedOutSlices(t *testing.T) {
 	fs := newTestFS(1, Disturbances{})
 	in := []byte("abc")
 	do(t, fs, control.FSWrite{IO: 1, Path: tObj + "/k", Data: in})

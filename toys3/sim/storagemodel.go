@@ -9,7 +9,7 @@ import (
 	"manifester/toys3/format"
 )
 
-// Disturbances configures the plant model: its dynamics (dead time and
+// Disturbances configures the storage model: its dynamics (dead time and
 // feedback delay) and the disturbances it injects, the exogenous inputs the
 // controller cannot command (EIO, torn writes, bit flips, background
 // writeback, fsyncgate). Zero value: an honest, instant filesystem that still
@@ -17,14 +17,14 @@ import (
 type Disturbances struct {
 	// EIOProb is the per-operation probability that an operation fails with
 	// ErrIO. What a failed operation did is itself chosen adversarially (see
-	// PlantModel.Land).
+	// StorageModel.Land).
 	EIOProb float64
 	// TornWriteProb is the probability, per file with un-fsynced content at a
 	// crash, that the file survives holding a random prefix of its volatile
 	// content (instead of all of it or none of it).
 	TornWriteProb float64
 	// DeadTime is the [min, max] delay from issuing an actuation to its effect
-	// landing on the plant; FeedbackDelay is the further [min, max] delay until
+	// landing in storage; FeedbackDelay is the further [min, max] delay until
 	// the completion (feedback) is delivered. A crash in between leaves the
 	// effect applied but unacked.
 	DeadTime      [2]control.Duration
@@ -83,7 +83,7 @@ type fdir struct {
 	sorted  []string // cached sorted names; nil when stale
 }
 
-// PlantModel is the model of the plant (the disk and its page cache) that
+// StorageModel is the model of storage (the disk and its page cache) that
 // stands in for the real filesystem in simulation: an in-memory filesystem
 // with crash semantics. Every file and every directory entry has a durable
 // and a volatile (current) version:
@@ -100,12 +100,12 @@ type fdir struct {
 // reverts; every dirty inode keeps its volatile content, reverts to durable,
 // or (TornWriteProb) keeps a random prefix of volatile. Afterwards current ==
 // durable everywhere. A correct controller survives every such outcome.
-// Durable() is the plant's true state, against which the monitors check the
+// Durable() is the true state of storage, against which the monitors check the
 // controller's claims (Committed telemetry).
 //
 // Directories are fixed at construction (format.ObjDir and format.TmpDir of the
 // root); there is no mkdir.
-type PlantModel struct {
+type StorageModel struct {
 	rng     *Rand
 	faults  Disturbances
 	quiet   bool // no new disturbances (Settling); crash resolution still applies
@@ -125,9 +125,9 @@ type FSCounters struct {
 	Writebacks      int // background writebacks that made a change durable
 }
 
-// NewPlantModel returns an empty filesystem with the given (durable) directories.
-func NewPlantModel(r *Rand, faults Disturbances, dirs ...string) *PlantModel {
-	fs := &PlantModel{
+// NewStorageModel returns an empty filesystem with the given (durable) directories.
+func NewStorageModel(r *Rand, faults Disturbances, dirs ...string) *StorageModel {
+	fs := &StorageModel{
 		rng:    r,
 		faults: faults,
 		dirs:   map[string]*fdir{},
@@ -143,7 +143,7 @@ func NewPlantModel(r *Rand, faults Disturbances, dirs ...string) *PlantModel {
 }
 
 // Plan draws the fault decision and latencies for a filesystem action.
-func (fs *PlantModel) Plan(a control.Action) ActuationPlan {
+func (fs *StorageModel) Plan(a control.Action) ActuationPlan {
 	var p ActuationPlan
 	p.Fail = !fs.quiet && fs.rng.Chance(fs.faults.EIOProb)
 	p.DeadTime = control.Duration(fs.rng.Between(int64(fs.faults.DeadTime[0]), int64(fs.faults.DeadTime[1])))
@@ -162,7 +162,7 @@ func (fs *PlantModel) Plan(a control.Action) ActuationPlan {
 //	FSRead, FSList  no effect
 //
 // Missing paths complete with ErrNotFound (never by chance).
-func (fs *PlantModel) Land(a control.Action, p ActuationPlan) control.EventBody {
+func (fs *StorageModel) Land(a control.Action, p ActuationPlan) control.EventBody {
 	fs.count.Landed++
 	var body control.EventBody
 	var err control.ErrCode
@@ -191,7 +191,7 @@ func (fs *PlantModel) Land(a control.Action, p ActuationPlan) control.EventBody 
 		names, err = fs.list(a.Dir, p.Fail)
 		body = control.FSListDone{IO: a.IO, Names: names, Err: err}
 	default:
-		panic("toys3/sim: PlantModel.Land: not a filesystem action")
+		panic("toys3/sim: StorageModel.Land: not a filesystem action")
 	}
 	if err == control.ErrIO {
 		fs.count.EIOs++
@@ -203,7 +203,7 @@ func (fs *PlantModel) Land(a control.Action, p ActuationPlan) control.EventBody 
 }
 
 // writeback makes one random un-synced change durable.
-func (fs *PlantModel) writeback() {
+func (fs *StorageModel) writeback() {
 	type change struct {
 		d    *fdir
 		name string
@@ -242,10 +242,10 @@ func (fs *PlantModel) writeback() {
 }
 
 // Counters returns the fault counters so far.
-func (fs *PlantModel) Counters() FSCounters { return fs.count }
+func (fs *StorageModel) Counters() FSCounters { return fs.count }
 
 // split returns the directory of path and the base name in it.
-func (fs *PlantModel) split(path string) (*fdir, string, bool) {
+func (fs *StorageModel) split(path string) (*fdir, string, bool) {
 	i := strings.LastIndexByte(path, '/')
 	if i < 0 {
 		return nil, "", false
@@ -258,7 +258,7 @@ func (fs *PlantModel) split(path string) (*fdir, string, bool) {
 }
 
 // lookup returns the inode currently named path.
-func (fs *PlantModel) lookup(path string) (*inode, bool) {
+func (fs *StorageModel) lookup(path string) (*inode, bool) {
 	d, name, ok := fs.split(path)
 	if !ok {
 		return nil, false
@@ -286,7 +286,7 @@ func (d *fdir) setEntry(name string, e dirent) {
 	}
 }
 
-func (fs *PlantModel) write(path string, data []byte, fail bool) control.ErrCode {
+func (fs *StorageModel) write(path string, data []byte, fail bool) control.ErrCode {
 	d, name, ok := fs.split(path)
 	if !ok {
 		return control.ErrNotFound
@@ -322,7 +322,7 @@ func (fs *PlantModel) write(path string, data []byte, fail bool) control.ErrCode
 	return control.OK
 }
 
-func (fs *PlantModel) fsync(path string, fail bool) control.ErrCode {
+func (fs *StorageModel) fsync(path string, fail bool) control.ErrCode {
 	in, ok := fs.lookup(path)
 	if !ok {
 		return control.ErrNotFound
@@ -342,7 +342,7 @@ func (fs *PlantModel) fsync(path string, fail bool) control.ErrCode {
 	return control.OK
 }
 
-func (fs *PlantModel) rename(from, to string, fail bool) control.ErrCode {
+func (fs *StorageModel) rename(from, to string, fail bool) control.ErrCode {
 	fd, fname, ok1 := fs.split(from)
 	td, tname, ok2 := fs.split(to)
 	if !ok1 || !ok2 || fd.entries[fname].cur == 0 {
@@ -366,7 +366,7 @@ func (fs *PlantModel) rename(from, to string, fail bool) control.ErrCode {
 	return control.OK
 }
 
-func (fs *PlantModel) fsyncDir(dir string, fail bool) control.ErrCode {
+func (fs *StorageModel) fsyncDir(dir string, fail bool) control.ErrCode {
 	d, ok := fs.dirs[dir]
 	if !ok {
 		return control.ErrNotFound
@@ -383,7 +383,7 @@ func (fs *PlantModel) fsyncDir(dir string, fail bool) control.ErrCode {
 	return control.OK
 }
 
-func (fs *PlantModel) read(path string, fail bool) ([]byte, control.ErrCode) {
+func (fs *StorageModel) read(path string, fail bool) ([]byte, control.ErrCode) {
 	in, ok := fs.lookup(path)
 	if !ok {
 		return nil, control.ErrNotFound
@@ -403,7 +403,7 @@ func (fs *PlantModel) read(path string, fail bool) ([]byte, control.ErrCode) {
 	return data, control.OK
 }
 
-func (fs *PlantModel) unlink(path string, fail bool) control.ErrCode {
+func (fs *StorageModel) unlink(path string, fail bool) control.ErrCode {
 	d, name, ok := fs.split(path)
 	if !ok || d.entries[name].cur == 0 {
 		return control.ErrNotFound
@@ -420,7 +420,7 @@ func (fs *PlantModel) unlink(path string, fail bool) control.ErrCode {
 	return control.OK
 }
 
-func (fs *PlantModel) list(dir string, fail bool) ([]string, control.ErrCode) {
+func (fs *StorageModel) list(dir string, fail bool) ([]string, control.ErrCode) {
 	d, ok := fs.dirs[dir]
 	if !ok {
 		return nil, control.ErrNotFound
@@ -453,19 +453,19 @@ func (d *fdir) names() []string {
 }
 
 // dirNames returns the directory paths, sorted.
-func (fs *PlantModel) dirNames() []string { return fs.dirList }
+func (fs *StorageModel) dirNames() []string { return fs.dirList }
 
 // DurableGen changes whenever the durable view may have changed, so
 // invariants over Durable() can skip unchanged steps.
-func (fs *PlantModel) DurableGen() uint64 { return fs.durGen }
+func (fs *StorageModel) DurableGen() uint64 { return fs.durGen }
 
 // CrashReport counts how the adversary resolved volatile state.
 type CrashReport struct {
 	Kept, Lost, Torn int
 }
 
-// Crash resolves all volatile state (see PlantModel) and returns what happened.
-func (fs *PlantModel) Crash() CrashReport {
+// Crash resolves all volatile state (see StorageModel) and returns what happened.
+func (fs *StorageModel) Crash() CrashReport {
 	var rep CrashReport
 	fs.durGen++
 	// 1. Directory entries: each un-synced change is kept or reverted.
@@ -529,7 +529,7 @@ func (fs *PlantModel) Crash() CrashReport {
 }
 
 // SetQuiet stops (true) or resumes (false) injecting disturbances.
-func (fs *PlantModel) SetQuiet(quiet bool) { fs.quiet = quiet }
+func (fs *StorageModel) SetQuiet(quiet bool) { fs.quiet = quiet }
 
 // FileState is one path and its content in a Snapshot.
 type FileState struct {
@@ -546,12 +546,12 @@ type Snapshot struct {
 // Durable returns what would be on disk after a crash in which the adversary
 // loses everything volatile: the durable entries pointing at durable content.
 // "Acked implies durable" is checked against this view.
-func (fs *PlantModel) Durable() Snapshot { return fs.snapshot(true) }
+func (fs *StorageModel) Durable() Snapshot { return fs.snapshot(true) }
 
 // Current returns the view reads see right now.
-func (fs *PlantModel) Current() Snapshot { return fs.snapshot(false) }
+func (fs *StorageModel) Current() Snapshot { return fs.snapshot(false) }
 
-func (fs *PlantModel) snapshot(durable bool) Snapshot {
+func (fs *StorageModel) snapshot(durable bool) Snapshot {
 	var snap Snapshot
 	for _, dn := range fs.dirNames() {
 		d := fs.dirs[dn]
@@ -565,9 +565,9 @@ func (fs *PlantModel) snapshot(durable bool) Snapshot {
 }
 
 // EachDurable calls fn for every file in the Durable view, sorted by path
-// (the same order as Durable().Files). data is shared with the plant model
+// (the same order as Durable().Files). data is shared with the storage model
 // and must not be modified.
-func (fs *PlantModel) EachDurable(fn func(path string, data []byte)) {
+func (fs *StorageModel) EachDurable(fn func(path string, data []byte)) {
 	for _, dn := range fs.dirNames() {
 		d := fs.dirs[dn]
 		for _, name := range d.names() {
@@ -579,7 +579,7 @@ func (fs *PlantModel) EachDurable(fn func(path string, data []byte)) {
 }
 
 // DurableFile returns path's content in the Durable view.
-func (fs *PlantModel) DurableFile(path string) ([]byte, bool) {
+func (fs *StorageModel) DurableFile(path string) ([]byte, bool) {
 	d, name, ok := fs.split(path)
 	if !ok {
 		return nil, false
@@ -588,7 +588,7 @@ func (fs *PlantModel) DurableFile(path string) ([]byte, bool) {
 }
 
 // CurrentFile returns path's content in the Current view.
-func (fs *PlantModel) CurrentFile(path string) ([]byte, bool) {
+func (fs *StorageModel) CurrentFile(path string) ([]byte, bool) {
 	d, name, ok := fs.split(path)
 	if !ok {
 		return nil, false
@@ -596,7 +596,7 @@ func (fs *PlantModel) CurrentFile(path string) ([]byte, bool) {
 	return fs.file(d, name, false)
 }
 
-func (fs *PlantModel) file(d *fdir, name string, durable bool) ([]byte, bool) {
+func (fs *StorageModel) file(d *fdir, name string, durable bool) ([]byte, bool) {
 	e, ok := d.entries[name]
 	if !ok {
 		return nil, false
@@ -614,7 +614,7 @@ func (fs *PlantModel) file(d *fdir, name string, durable bool) ([]byte, bool) {
 }
 
 // Hash summarizes the full state (both versions), folded into the trace hash.
-func (fs *PlantModel) Hash() uint64 {
+func (fs *StorageModel) Hash() uint64 {
 	h := uint64(fs.nextIno)
 	for _, dn := range fs.dirNames() {
 		d := fs.dirs[dn]
@@ -633,7 +633,7 @@ func (fs *PlantModel) Hash() uint64 {
 	return h
 }
 
-func (fs *PlantModel) hashInode(h uint64, id InodeID) uint64 {
+func (fs *StorageModel) hashInode(h uint64, id InodeID) uint64 {
 	in, ok := fs.inodes[id]
 	if !ok {
 		return Fold(h, 0)

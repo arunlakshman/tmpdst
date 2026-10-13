@@ -30,7 +30,7 @@ type Config struct {
 	// RestartDelay is the [min, max] downtime between crash and Started.
 	RestartDelay [2]control.Duration
 
-	// Server is passed to Factory; Dir is the plant model's root.
+	// Server is passed to Factory; Dir is the storage model's root.
 	Server control.Config
 	// Factory builds the server under test; nil means control.NewMachine.
 	// Learners can plug in a deliberately broken variant to watch DST catch it.

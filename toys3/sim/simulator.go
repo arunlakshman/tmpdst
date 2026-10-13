@@ -16,7 +16,7 @@ type Simulator struct {
 	step int
 	q    Queue
 
-	plant    *PlantModel
+	storage  *StorageModel
 	server   control.Machine // nil while crashed
 	inc      Incarnation     // current (or last) incarnation; 0 before first boot
 	alive    bool
@@ -36,7 +36,7 @@ type Simulator struct {
 	res   Result
 }
 
-// New prepares a run: seeds the Rand, builds the PlantModel with the obj/ and tmp/
+// New prepares a run: seeds the Rand, builds the StorageModel with the obj/ and tmp/
 // directories of cfg.Server.Dir, the workload and the oracle, and schedules
 // the first boot, the clients' first wakeups and the end of Chaos.
 func New(cfg Config) *Simulator {
@@ -56,7 +56,7 @@ func New(cfg Config) *Simulator {
 	s := &Simulator{
 		cfg:      cfg,
 		rng:      rng,
-		plant:    NewPlantModel(rng, cfg.Disturbances, format.ObjDir(cfg.Server.Dir), format.TmpDir(cfg.Server.Dir)),
+		storage:  NewStorageModel(rng, cfg.Disturbances, format.ObjDir(cfg.Server.Dir), format.TmpDir(cfg.Server.Dir)),
 		workload: NewWorkload(cfg.Workload, rng),
 		oracle:   NewOracle(),
 		env:      &env{rng: rng, buggify: true},
@@ -94,7 +94,7 @@ func (s *Simulator) Run() Result {
 		s.now = e.At
 		s.trace = Fold(Fold(Fold(Fold(s.trace, uint64(s.step)), uint64(s.now)), uint64(e.Kind)), uint64(e.Inc))
 		s.handle(e)
-		s.trace = Fold(s.trace, s.plant.Hash())
+		s.trace = Fold(s.trace, s.storage.Hash())
 		if s.halted {
 			break
 		}
@@ -111,7 +111,7 @@ func (s *Simulator) Run() Result {
 	s.res.EndTime = s.now
 	s.res.TraceHash = s.trace
 	s.res.RandCalls = s.rng.Calls()
-	fc := s.plant.Counters()
+	fc := s.storage.Counters()
 	s.res.Stats.FSOps = fc.Landed
 	s.res.Stats.EIOs = fc.EIOs
 	s.res.Stats.ReadCorruptions = fc.ReadCorruptions
@@ -136,7 +136,7 @@ func (s *Simulator) handle(e Entry) {
 			s.note(e, "dropped: dead incarnation")
 			return
 		}
-		body := s.plant.Land(e.Action, e.Plan)
+		body := s.storage.Land(e.Action, e.Plan)
 		s.trace = hashEvent(Fold(s.trace, 1), body)
 		if s.cfg.Log {
 			s.note(e, "land "+DescribeAction(e.Action)+" -> "+DescribeEvent(body))
@@ -158,7 +158,7 @@ func (s *Simulator) handle(e Entry) {
 		}
 	case KindSettle:
 		s.settling = true
-		s.plant.SetQuiet(true)
+		s.storage.SetQuiet(true)
 		s.env.buggify = false
 		s.note(e, "chaos over: settling (no new faults or crashes)")
 	case KindSettlingEnd:
@@ -185,7 +185,7 @@ func (s *Simulator) deliver(body control.EventBody) {
 	for i, a := range acts {
 		switch x := a.(type) {
 		case control.Actuation:
-			plan := s.plant.Plan(a)
+			plan := s.storage.Plan(a)
 			s.schedule(Entry{At: s.now + control.Time(plan.DeadTime), Kind: KindFSLand, Inc: s.inc, Action: a, Plan: plan})
 		case control.Reply:
 			s.reply(x)
@@ -274,7 +274,7 @@ func (s *Simulator) maybeCrash() {
 // never happen), outstanding requests are abandoned, and a restart is
 // scheduled.
 func (s *Simulator) crash(why string) {
-	rep := s.plant.Crash()
+	rep := s.storage.Crash()
 	s.res.Stats.TornFiles += rep.Torn
 	s.res.Stats.LostChanges += rep.Lost
 	s.res.Stats.KeptChanges += rep.Kept
@@ -388,7 +388,7 @@ func (s *Simulator) Now() control.Time        { return s.now }
 func (s *Simulator) Alive() bool              { return s.alive }
 func (s *Simulator) Inc() Incarnation         { return s.inc }
 func (s *Simulator) Settling() bool           { return s.settling }
-func (s *Simulator) GroundTruth() GroundTruth { return s.plant }
+func (s *Simulator) GroundTruth() GroundTruth { return s.storage }
 func (s *Simulator) Root() string             { return s.cfg.Server.Dir }
 func (s *Simulator) Oracle() *Oracle          { return s.oracle }
 func (s *Simulator) History() *History        { return s.oracle.History() }

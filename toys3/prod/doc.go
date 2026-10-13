@@ -1,6 +1,6 @@
 // Package prod is the production runtime for toys3: the thin shell that does
 // the real I/O the controller (package control) only asks for. It contains no
-// business logic: OSExecutor is the real plant adapter (actuations in,
+// business logic: OSExecutor is the real storage adapter (actuations in,
 // feedback out) and Handler is the anti-corruption layer from S3 REST to
 // control.Op.
 //

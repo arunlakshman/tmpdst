@@ -2,7 +2,7 @@
 // object file, how keys become file names, and where files live. It is the
 // only thing that survives a crash, so it is the contract between one
 // incarnation of the server and the next. It is shared by the controller
-// (../control), the simulator's monitors and plant model (../sim), and the
+// (../control), the simulator's monitors and storage model (../sim), and the
 // production runtime (../prod). Like control and sim, it is checked by
 // tools/detcheck.
 //

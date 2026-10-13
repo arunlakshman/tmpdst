@@ -25,7 +25,7 @@ type View interface {
 	Alive() bool // server is booted (it may still be recovering)
 	Inc() Incarnation
 	Settling() bool // in Settling: no new faults, no crashes
-	// GroundTruth is the plant's true durable state, for white-box monitors.
+	// GroundTruth is the true durable state of storage, for white-box monitors.
 	GroundTruth() GroundTruth
 	Root() string // the server's data directory (control.Config.Dir)
 	Oracle() *Oracle
@@ -35,10 +35,10 @@ type View interface {
 }
 
 // GroundTruth is the anti-corruption interface between verification and the
-// plant model: the only things a monitor may read of the plant are its true
+// storage model: the only things a monitor may read of storage are its true
 // durable state and a generation counter. It uses only builtin types, so the
-// plant model never depends on verification and monitors never reach into
-// the plant model's internals. *PlantModel implements it.
+// storage model never depends on verification and monitors never reach into
+// the storage model's internals. *StorageModel implements it.
 type GroundTruth interface {
 	// DurableFile returns path's content in the durable view.
 	DurableFile(path string) ([]byte, bool)
@@ -48,7 +48,7 @@ type GroundTruth interface {
 	DurableGen() uint64
 }
 
-var _ GroundTruth = (*PlantModel)(nil)
+var _ GroundTruth = (*StorageModel)(nil)
 
 // Invariant is checked after every simulator step and once at the end of the
 // run. Checking every step (not just at the end) reports a bug at the step
@@ -65,7 +65,7 @@ func DefaultInvariants() []Invariant {
 }
 
 // BlackBoxInvariants returns only the invariants that judge what clients
-// see (no peeking at the plant model's durable state). Useful to learn
+// see (no peeking at the storage model's durable state). Useful to learn
 // which bugs are visible end to end, and which only to a ground-truth check.
 func BlackBoxInvariants() []Invariant {
 	return []Invariant{&NoCorruptReads{}, &Linearizable{}, &Liveness{}}
@@ -76,8 +76,8 @@ func BlackBoxInvariants() []Invariant {
 // fails here immediately, even before the linearizability check.
 type NoCorruptReads struct{ next int }
 
-// AckedIsDurable checks each control.Committed sample against the plant's
-// durable view (GroundTruth) on the step it is emitted: Committed is the
+// AckedIsDurable checks each control.Committed sample against the durable
+// view of storage (GroundTruth) on the step it is emitted: Committed is the
 // controller's claim, the durable view is the true state. The key's durable
 // file must exist and decode to a payload with the committed checksum (or be
 // absent for a delete). This is (b) checked eagerly: a missing fsync fails

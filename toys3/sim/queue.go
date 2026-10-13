@@ -15,7 +15,7 @@ type EntryKind uint8
 
 const (
 	KindDeliver     EntryKind = iota // deliver Event to the server (Inc must be current)
-	KindFSLand                       // a filesystem action takes effect in the PlantModel
+	KindFSLand                       // a filesystem action takes effect in the StorageModel
 	KindClientWake                   // an idle client issues its next request
 	KindCrash                        // kill the server now
 	KindRestart                      // boot a new incarnation and deliver Started

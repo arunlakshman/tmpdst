@@ -72,7 +72,7 @@ func interlocked(a, b *request) bool {
 }
 
 // Controller is the toys3 state machine: the control law of the object
-// server. It turns client requests and plant feedback (filesystem
+// server. It turns client requests and storage feedback (filesystem
 // completions) into actuations (filesystem commands), replies and telemetry.
 // All of its state is plain data, rebuilt from nothing on every boot. It is
 // the single aggregate of the domain: one Step is its consistency boundary.

@@ -1,18 +1,18 @@
 package control
 
-// The plant interface: the commands the server sends to the filesystem
+// The Storage port: the commands the server sends to the filesystem
 // (actuations) and the completions that come back (feedback). The server owns
 // this vocabulary; the runtimes implement it (prod.OSExecutor on real disks,
 // the simulator's fake filesystem in sim).
 
-// Actuation is a filesystem Action: a command to the plant. Its result
+// Actuation is a filesystem Action: a command to storage. Its result
 // returns as the Feedback event with the same ID.
 type Actuation interface {
 	Action
 	ID() IOID
 }
 
-// Feedback is a filesystem completion event: the plant's answer to the
+// Feedback is a filesystem completion event: storage's answer to the
 // Actuation with the same ID.
 type Feedback interface {
 	EventBody

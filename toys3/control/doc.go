@@ -2,19 +2,20 @@
 // S3-style object server whose only job is to be a small, honest target for
 // deterministic simulation testing (DST). See ../DESIGN.md and ../../loop.md.
 //
-// It is written as a controller in a feedback loop around a plant (the disk):
+// It is written as a controller in a feedback loop around storage (the disk
+// and its page cache):
 //
-//	requests (operator) ──► ┌────────────┐ ── actuations (FS* commands) ──► ┌───────┐
-//	                        │ Controller │                                  │ plant │
-//	replies, telemetry  ◄── │ Step(Event)│ ◄── feedback (FS*Done events) ── │ (disk)│
-//	Trip (fail-stop)    ◄── └────────────┘                                  └───────┘
+//	requests (operator) ──► ┌────────────┐ ── actuations (FS* commands) ──► ┌─────────┐
+//	                        │ Controller │                                  │ storage │
+//	replies, telemetry  ◄── │ Step(Event)│ ◄── feedback (FS*Done events) ── │ (disk)  │
+//	Trip (fail-stop)    ◄── └────────────┘                                  └─────────┘
 //
 // The Controller is a StateMachine: Step(Event) []Action. It never performs
-// I/O. Client requests and plant feedback arrive as Events (Event.At is the
+// I/O. Client requests and storage feedback arrive as Events (Event.At is the
 // sampling instant); replies, actuations (Actuation), telemetry (Emit) and
 // Trip leave as Actions. A runtime (../prod for real disks, ../sim for the
-// simulator's plant model) executes the actuations and feeds the feedback
-// back in. The actuation and feedback vocabulary (plant.go) is the plant
+// simulator's storage model) executes the actuations and feeds the feedback
+// back in. The actuation and feedback vocabulary (storage.go) is the Storage
 // port: the controller owns it, the runtimes implement it.
 //
 // Operating modes: startup (before Started) → recovering → auto (closed-loop

@@ -18,8 +18,10 @@
 //
 // The veritases:
 //
-//	FS   the Storage port (control.Actuation → control.Feedback), with every
-//	     change immediately durable
+//	Store  the object store (control.Op → Status and body): a map from key
+//	       to payload, with the controller's 400 and 404 rules
+//	FS     the Storage port (control.Actuation → control.Feedback), with every
+//	       change immediately durable
 //
 // Like control and sim, this package is checked by tools/detcheck.
 package veritas

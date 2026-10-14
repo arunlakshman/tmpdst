@@ -10,7 +10,11 @@ It follows [`../loop.md`](../loop.md) strictly.
 toys3/control   the controller: pure state machine + Storage port (detcheck-clean)
 toys3/format    on-disk object format and layout                  (detcheck-clean)
 toys3/sim       SIL testbench: simulator, storage model, workload,
-                oracle, invariants                                (detcheck-clean)
+                oracle, invariants; conformance checks C1, C2, C4 (detcheck-clean)
+toys3/veritas   the veritases: Store (object store), FS (Storage port);
+                also the test fake for controller and HTTP tests  (detcheck-clean)
+toys3/veritas/veritastest   conformance-check kit: seeded generator,
+                lockstep runner, shrinker, the FS check          (detcheck-clean)
 toys3/prod      real runtime: os calls, HTTP, event loop
 toys3/cmd/toys3      main (-dir, -addr)
 toys3/cmd/toys3sim   parallel DST campaign runner
@@ -53,7 +57,9 @@ controller drives storage with actuations and reads its feedback:
 | Disturbances | `sim.Disturbances` | Faults the controller cannot command, plus storage's dead time and feedback delay. |
 | Chaos, Settling | `Config.Chaos`, `Config.Settling` | Disturbed phase, then the phase in which the closed loop must settle (every request answered, no 500s). |
 | Sample | `sim.Sample` | Telemetry stamped with step, time and incarnation. |
-| Reference model, estimate | oracle's `refState`, `estimate` | The sequential spec the history must match; the oracle's set of possible states. |
+| Veritas | `veritas.Store`, `veritas.FS` | The executable truth for one component; also its test fake. Sequential, no faults, no crashes, short enough to check by reading. |
+| Conformance check | `TestC1`..`TestC4` | Random operations run on an implementation and its veritas in lockstep; every result is compared, and a failure is shrunk to a minimal sequence. |
+| Register model, estimate | oracle's `refState`, `estimate` | The oracle's own sequential spec of one key (kept independent of `veritas.Store`; C4 checks they agree); the oracle's set of possible states. |
 | Ground truth | `sim.GroundTruth` | The only view of storage the monitors get (durable files). |
 
 Plain names are kept where a control metaphor would be forced: requests and
@@ -220,14 +226,65 @@ a frozen encoding (`telemetryHashKey`), so renames cannot change a trace hash.
 `TestGolden` pins steps, random draws, trace hashes and stats for 550 seeds and
 where each mutant is caught. Two runs of one seed must produce identical hashes.
 
+## Conformance checks
+
+DST asks "does the system survive faults?" against a spec (the oracle) that
+must tolerate indeterminate outcomes. Conformance checks ask the narrower
+question first: with no faults, no crashes and one operation at a time, does
+each component do exactly what its veritas does? The veritas is exact, so the
+comparison is exact: status, body, bytes, error codes. Each check generates a
+seeded random sequence (biased toward collisions and edges), runs it on both
+in lockstep, checks invariants after every operation, and on failure shrinks
+it (drop chunks, then single ops, then simplify each op and rename keys) and
+prints the seed, a replay command and the shrunk sequence as a Go literal.
+
+| | Implementation vs veritas | Where | Backends | Invariants after each op | Found |
+|---|---|---|---|---|---|
+| C1 | `control.Controller` vs `veritas.Store` (Get, Put, Delete, Copy, restart, restart with leftover temps) | `sim/storecheck_test.go` | `veritas.FS`; `StorageModel` with `Disturbances{}` | `obj/` decodes to exactly the veritas's map (current and durable views); `tmp/` empty; no `Trip` | nothing (~600k seeds; 100k per backend since leftover-temp restarts) |
+| C2 | `sim.StorageModel`, no disturbances, vs `veritas.FS` (every storage command, few colliding paths) | `sim/conformance_test.go` | — | — | nothing (57k seeds) |
+| C3 | `prod.OSExecutor` on `t.TempDir()` vs `veritas.FS` (C2's generator) | `prod/conformance_test.go` | real disk | — | case folding (below); 1742 seeds otherwise clean on APFS |
+| C4 | `sim.Oracle` vs `veritas.Store` (C1's histories, fed sequentially) | `sim/oraclecheck_test.go` | as C1 | the oracle accepts the history and its one state is the veritas's map | nothing |
+
+C2 and C3 together tie the simulator's storage to a real disk on the no-fault
+path: rename over an existing file, ENOENT for a missing rename or unlink,
+write truncating, list order (which matches only because `os.ReadDir`
+sorts). C1's input bias: Get, Delete and Copy mostly target keys already Put;
+Put sizes cluster at 0, `MaxObjectSize` and `MaxObjectSize+1` (the limit is
+64, so the 400 path runs); a Copy is sometimes onto itself; one key in 20 is
+invalid; half the restarts first plant leftover temp files.
+
+**Coverage.** `go test ./toys3/sim -run TestC1 -coverpkg=manifester/toys3/control
+-coverprofile=c1.out` measures what C1 reaches. Before the leftover-temp
+restarts it covered 70.8% of the statements in `controller.go` and
+`recovery.go` (recovery's unlink path never ran: without crashes, `tmp/` was
+always empty, and mutant (f) was invisible to it); now 78.7%. What remains is
+unreachable by design: every error, `Trip` and corrupt-read branch (C1 is
+fault-free), stale or wrong-type completions (crash leftovers), and the key
+interlock queueing (C1 has one request in flight). DST covers those.
+
+**Open items.**
+
+- *Case folding.* `format.EscapeKey` does not escape upper case, so on a
+  case-insensitive filesystem (the macOS default) keys `K` and `k` share one
+  file. `TestC3CaseSensitive` pins it and skips on such volumes; C1 uses lower
+  case keys only. Fixing it changes the on-disk format, so it is left open.
+- *Copy has no size check.* Neither the controller nor `veritas.Store` checks
+  `MaxObjectSize` on Copy: the source got in through Put. It matters only if
+  the limit is lowered across a restart.
+
 ## How to run DST
 
 ```
-go test ./toys3/sim                                   # unit tests, canary, 200 seeds, coverage, mutants
+go test ./toys3/sim                                   # unit tests, canary, 200 seeds, coverage, mutants, C1/C2/C4
 go test ./toys3/sim -run TestSeeds -seeds=5000 -v     # more seeds (prints aggregated stats)
 go test ./toys3/sim -run TestSeeds -duration=2m -v    # seeds 1,2,... for two minutes
 go test ./toys3/sim -run TestSeeds -seed=81237 -v     # replay one seed; event log printed on failure
 go test ./toys3/sim -run TestCatchesBugs -v           # which invariant catches each broken server
+go test ./toys3/sim -run TestMutantTable -v           # DST and C1 catches of every mutant, shrunk sequences
+go test ./toys3/sim -run 'TestC[124]' -seeds=20000    # conformance checks C1, C2, C4
+go test ./toys3/sim -run TestC1 -duration=5m -v       # C1 for five minutes per backend
+go test ./toys3/sim -run 'TestC1ControllerMatchesVeritasStore/veritasFS$' -seed=42 -v   # replay one seed
+go test ./toys3/prod -run TestC3 -seeds=500           # C3 on a real disk (t.TempDir())
 go run ./toys3/cmd/toys3sim -duration 10m -check-determinism   # parallel campaign
 scripts/ci-determinism.sh                             # detcheck + audits + both canaries
 ```
@@ -243,16 +300,25 @@ with the repro commands. Plug in your own broken server through
 `TestCatchesBugs` wraps the real server in deliberately broken variants (one
 protocol step each) and runs seeds 1..500 until one fails. The "black-box"
 column uses only the client-visible invariants (no peeking at durable state).
+The C1 column (`TestMutantTable`, seeds 1..200) gives C1's first seed and the
+length of its shrunk sequence, on `veritas.FS` / on `StorageModel`. C2 and C3
+check storage, not the controller, so no mutant reaches them; C4 is C1 plus
+the oracle. Mutants g to j are functional (what a request does, not how it
+survives faults); they sit in `functionalMutants`, outside `TestGolden`.
 
-| Variant | Caught by (all invariants) | First seed | Black-box only |
-|---|---|---|---|
-| a. skip `FSFsyncDir(obj/)` | acked-is-durable | 1 | linearizable, seed 1 |
-| b. skip the temp file's `FSFsync` | obj-never-torn | 1 | liveness (500s in Settling), seed 2 |
-| c. reply 200, then rename and fsync | acked-is-durable | 1 | linearizable, seed 1 |
-| d. 500 without `Trip` after any post-write error | obj-never-torn | 1 | liveness, seed 20 |
-| d2. same, only for a failed `FSFsyncDir(obj/)` | linearizable (a read saw the value, then a crash erased it) | 132 | linearizable, seed 132 |
-| e. skip the CRC check on read | no-corrupt-reads | 18 | no-corrupt-reads, seed 18 |
-| f. recovery skips temp cleanup | linearizable (resurrected temp aliases an object; a reused temp name overwrites it) | 20 | linearizable, seed 20 |
+| Variant | Caught by (all invariants) | First seed | Black-box only | C1: seed, shrunk ops |
+|---|---|---|---|---|
+| a. skip `FSFsyncDir(obj/)` | acked-is-durable | 1 | linearizable, seed 1 | — / 1, 1 |
+| b. skip the temp file's `FSFsync` | obj-never-torn | 1 | liveness (500s in Settling), seed 2 | — / 1, 1 |
+| c. reply 200, then rename and fsync | acked-is-durable | 1 | linearizable, seed 1 | — (by design) |
+| d. 500 without `Trip` after any post-write error | obj-never-torn | 1 | liveness, seed 20 | — (by design) |
+| d2. same, only for a failed `FSFsyncDir(obj/)` | linearizable (a read saw the value, then a crash erased it) | 132 | linearizable, seed 132 | — (by design) |
+| e. skip the CRC check on read | no-corrupt-reads | 18 | no-corrupt-reads, seed 18 | — (by design) |
+| f. recovery skips temp cleanup | linearizable (resurrected temp aliases an object; a reused temp name overwrites it) | 20 | linearizable, seed 20 | 1, 1 |
+| g. Copy writes to its source key | linearizable | 1 | linearizable, seed 1 | 1, 2 |
+| h. Delete of a missing key replies 200 | linearizable | 1 | linearizable, seed 1 | 1, 1 |
+| i. size check off by one (`MaxObjectSize+1` accepted) | not caught in 500 seeds | — | — | 1, 1 |
+| j. recovery also unlinks everything in `obj/` | linearizable | 1 | linearizable, seed 1 | 1, 2 |
 
 Lessons from building this table:
 
@@ -264,3 +330,16 @@ Lessons from building this table:
 - (f) took seed 429 with neither background writeback nor swarm, seed 36 with
   writeback alone, and seed 20 with both. Whether a bug gets caught depends on
   how realistic the fault model is and how varied the workload is.
+- (i) is invisible to DST: the workload's Puts are at most 40 bytes, under the
+  64-byte limit, so the 400 path never runs. It is the ShardStore paper's
+  missed cache bug in miniature (a limit the tests never reached; see
+  `VERITAS-PROPOSAL.md`). C1 finds it in one operation, `stPut("a", 65)`,
+  because its sizes are biased to the edges.
+- The two kinds of check cover each other's blind spots. C1 cannot see
+  faults, crashes or concurrency (c, d, d2, e; a and b only through
+  `StorageModel`'s durable view, since `veritas.FS` has none). DST can, but
+  its shrunk failure is a long event log, where C1's is one or two
+  operations (`stPut("b", 0), stCopy("b", "a")` for g; `stPut("a", 0),
+  stRestart()` for j).
+- (f) was invisible to C1 until the coverage pass: with no crashes, `tmp/`
+  was always empty at restart. Planting leftover temp files fixed both.

@@ -1,4 +1,7 @@
-package control
+// External test package: veritas imports control, so an internal test could
+// not import veritas. The dot import keeps the tests reading as if they were
+// inside the package (the use the Go FAQ gives for dot imports).
+package control_test
 
 import (
 	"fmt"
@@ -6,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	. "manifester/toys3/control"
 	"manifester/toys3/format"
+	"manifester/toys3/veritas"
 )
 
 const root = "/d"
@@ -18,20 +23,24 @@ func (testEnv) Uint64() uint64  { return 4 }
 func (testEnv) Intn(n int) int  { return 0 }
 func (testEnv) Maybe(Site) bool { return false }
 
-// harness drives a Controller by hand. FS actions are answered from an in-memory
-// map (no crash semantics: every change is immediately "durable"). Issued FS
+// harness drives a Controller by hand. FS actions are answered by veritas.FS
+// (no crash semantics: every change is immediately durable). Issued FS
 // actions wait in pending until the test completes them.
 type harness struct {
 	t       *testing.T
 	s       *Controller
-	files   map[string][]byte // full path → raw file content
-	pending []Action          // issued FS actions, not yet completed
+	fs      *veritas.FS
+	pending []Action // issued FS actions, not yet completed
 	// fail, if set, decides the error an FS action completes with (OK = run it).
 	fail func(Action) ErrCode
 }
 
 func newHarness(t *testing.T) *harness {
-	return &harness{t: t, s: New(testEnv{}, Config{Dir: root, MaxObjectSize: 64}), files: map[string][]byte{}}
+	return &harness{
+		t:  t,
+		s:  New(testEnv{}, Config{Dir: root, MaxObjectSize: 64}),
+		fs: veritas.NewFS(format.ObjDir(root), format.TmpDir(root)),
+	}
 }
 
 // boot delivers Started and runs recovery to completion.
@@ -83,65 +92,40 @@ func (h *harness) do(c ClientReq, op Op) []Action {
 	return append(acts, h.drain()...)
 }
 
-// exec runs an FS action against the map and returns its completion.
+// exec runs an FS action on the veritas and returns its completion, or fails
+// it with h.fail's error (and no effect).
 func (h *harness) exec(a Action) EventBody {
-	errc := OK
-	if h.fail != nil {
-		errc = h.fail(a)
+	act, ok := a.(Actuation)
+	if !ok {
+		h.t.Fatalf("exec: not an FS action: %#v", a)
 	}
+	if h.fail != nil {
+		if errc := h.fail(a); errc != OK {
+			return failed(act, errc)
+		}
+	}
+	return h.fs.Exec(act)
+}
+
+// failed is a's completion carrying errc.
+func failed(a Actuation, errc ErrCode) EventBody {
 	switch a := a.(type) {
 	case FSWrite:
-		if errc == OK {
-			h.files[a.Path] = slices.Clone(a.Data)
-		}
 		return FSWriteDone{IO: a.IO, Err: errc}
 	case FSFsync:
 		return FSFsyncDone{IO: a.IO, Err: errc}
 	case FSFsyncDir:
 		return FSFsyncDirDone{IO: a.IO, Err: errc}
 	case FSRename:
-		if errc == OK {
-			d, ok := h.files[a.From]
-			if !ok {
-				return FSRenameDone{IO: a.IO, Err: ErrNotFound}
-			}
-			h.files[a.To] = d
-			delete(h.files, a.From)
-		}
 		return FSRenameDone{IO: a.IO, Err: errc}
 	case FSRead:
-		if errc != OK {
-			return FSReadDone{IO: a.IO, Err: errc}
-		}
-		d, ok := h.files[a.Path]
-		if !ok {
-			return FSReadDone{IO: a.IO, Err: ErrNotFound}
-		}
-		return FSReadDone{IO: a.IO, Data: d}
+		return FSReadDone{IO: a.IO, Err: errc}
 	case FSUnlink:
-		if errc != OK {
-			return FSUnlinkDone{IO: a.IO, Err: errc}
-		}
-		if _, ok := h.files[a.Path]; !ok {
-			return FSUnlinkDone{IO: a.IO, Err: ErrNotFound}
-		}
-		delete(h.files, a.Path)
-		return FSUnlinkDone{IO: a.IO}
+		return FSUnlinkDone{IO: a.IO, Err: errc}
 	case FSList:
-		if errc != OK {
-			return FSListDone{IO: a.IO, Err: errc}
-		}
-		var names []string
-		for p := range h.files {
-			if rest, ok := strings.CutPrefix(p, a.Dir+"/"); ok {
-				names = append(names, rest)
-			}
-		}
-		slices.Sort(names)
-		return FSListDone{IO: a.IO, Names: names}
+		return FSListDone{IO: a.IO, Err: errc}
 	}
-	h.t.Fatalf("exec: not an FS action: %#v", a)
-	return nil
+	panic("failed: not an FS action")
 }
 
 func ioOfAction(a Action) (IOID, bool) {
@@ -244,7 +228,7 @@ func TestNotFound(t *testing.T) {
 	expect(t, "GET", h.do(1, Get{Key: "x"}), "read /d/obj/x; reply c1 404")
 	expect(t, "DELETE", h.do(2, Delete{Key: "x"}), "unlink /d/obj/x; reply c2 404")
 	expect(t, "COPY", h.do(3, Copy{Src: "x", Dst: "y"}), "read /d/obj/x; reply c3 404")
-	if _, ok := h.files[format.ObjPath(root, "y")]; ok {
+	if _, ok := h.fs.ReadFile(format.ObjPath(root, "y")); ok {
 		t.Fatal("COPY of absent src created dst")
 	}
 }
@@ -310,9 +294,9 @@ func TestCopySameKey(t *testing.T) {
 
 func TestRecovery(t *testing.T) {
 	h := newHarness(t)
-	h.files[root+"/tmp/0000000000000007"] = []byte("junk")
-	h.files[root+"/tmp/0000000000000009"] = []byte("junk")
-	h.files[format.ObjPath(root, "k")] = format.EncodeObject([]byte("kept"))
+	h.fs.WriteFile(root+"/tmp/0000000000000007", []byte("junk"))
+	h.fs.WriteFile(root+"/tmp/0000000000000009", []byte("junk"))
+	h.fs.WriteFile(format.ObjPath(root, "k"), format.EncodeObject([]byte("kept")))
 
 	expect(t, "Started", h.step(Started{}), "list /d/tmp")
 	expect(t, "request during recovery", h.step(Request{Client: 1, Op: Get{Key: "k"}}), "")
@@ -322,7 +306,7 @@ func TestRecovery(t *testing.T) {
 	expect(t, "unlink 2", h.completeNext(), "fsyncdir /d/tmp")
 	expect(t, "fsync tmp", h.completeNext(), "recovered 2; read /d/obj/k; write tmp/*")
 	h.drain()
-	for p := range h.files {
+	for _, p := range h.fs.Paths() {
 		if p == root+"/tmp/0000000000000007" || p == root+"/tmp/0000000000000009" {
 			t.Fatalf("leftover %s survived recovery", p)
 		}
@@ -351,10 +335,10 @@ func TestCorruptObject(t *testing.T) {
 	h.boot()
 	bad := format.EncodeObject([]byte("payload"))
 	bad[len(bad)-1] ^= 1
-	h.files[format.ObjPath(root, "k")] = bad
+	h.fs.WriteFile(format.ObjPath(root, "k"), bad)
 	expect(t, "GET", h.do(1, Get{Key: "k"}), "read /d/obj/k; corrupt k; reply c1 500")
 	expect(t, "COPY", h.do(2, Copy{Src: "k", Dst: "d"}), "read /d/obj/k; corrupt k; reply c2 500")
-	h.files[format.ObjPath(root, "t")] = []byte("TOY") // torn header
+	h.fs.WriteFile(format.ObjPath(root, "t"), []byte("TOY")) // torn header
 	expect(t, "torn", h.do(3, Get{Key: "t"}), "read /d/obj/t; corrupt t; reply c3 500")
 }
 
@@ -392,7 +376,7 @@ func TestErrorPolicy(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
 			h.boot()
-			h.files[format.ObjPath(root, "k")] = format.EncodeObject([]byte("old"))
+			h.fs.WriteFile(format.ObjPath(root, "k"), format.EncodeObject([]byte("old")))
 			h.fail = tc.fail
 			expect(t, "op", h.do(1, tc.op), tc.want)
 			if strings.HasSuffix(tc.want, "trip") {

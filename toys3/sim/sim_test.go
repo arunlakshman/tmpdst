@@ -12,6 +12,7 @@ var (
 	flagSeeds    = flag.Int("seeds", 200, "TestSeeds: number of seeds to run (from 1)")
 	flagSeed     = flag.Int64("seed", -1, "TestSeeds: replay this one seed with the event log printed on failure")
 	flagDuration = flag.Duration("duration", 0, "TestSeeds: run seeds 1, 2, ... until this much wall-clock time has passed (overrides -seeds)")
+	flagLog      = flag.Bool("log", false, "TestSeeds: with -seed, print the full event log even when the seed passes")
 )
 
 func repro(seed uint64) string {
@@ -50,8 +51,10 @@ func TestSeeds(t *testing.T) {
 		cfg.Log = true
 		r := Run(cfg)
 		t.Logf("seed %d: steps=%d crashes=%d trace=%016x\n%s", seed, r.Steps, r.Crashes, r.TraceHash, r.Stats)
-		if len(r.Failures) > 0 {
+		if *flagLog || len(r.Failures) > 0 {
 			fmt.Fprint(os.Stderr, FormatLog(r.Log))
+		}
+		if len(r.Failures) > 0 {
 			for _, f := range r.Failures {
 				t.Errorf("FAIL %s at step %d (t=%s): %s", f.Invariant, f.Step, fmtTime(f.At), f.Msg)
 			}

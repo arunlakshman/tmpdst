@@ -20,7 +20,8 @@ import (
 // StorageModel, and the controller; sim already imports control and
 // veritastest, and nothing imports sim's tests, so there is no cycle.
 //
-// One operation is one request (or a clean restart). The check delivers it,
+// One operation is one request, or a clean restart, possibly after planting
+// leftover temp files (what a crashed incarnation leaves in tmp/). The check delivers it,
 // runs every storage command it causes to completion (oldest first, on the
 // backend) until nothing is pending, and compares the single reply with the
 // veritas. Then, at quiescence, it checks the storage: decoding every object
@@ -59,7 +60,7 @@ const (
 type storeOp struct {
 	Kind     storeKind
 	Key, Src string // Key is Dst for a Copy
-	Size     int    // Put only
+	Size     int    // Put: payload size; Restart: leftover temp files to plant
 }
 
 // Constructors, used by Format and by pasted regression sequences.
@@ -68,6 +69,11 @@ func stPut(k string, n int) storeOp  { return storeOp{Kind: kPut, Key: k, Size: 
 func stDelete(k string) storeOp      { return storeOp{Kind: kDelete, Key: k} }
 func stCopy(src, dst string) storeOp { return storeOp{Kind: kCopy, Src: src, Key: dst} }
 func stRestart() storeOp             { return storeOp{Kind: kRestart} }
+
+// stRestartLeftovers plants n leftover temp files, as a crash between a
+// Put's temp write and its rename leaves, then restarts. Recovery must
+// remove them and touch nothing else.
+func stRestartLeftovers(n int) storeOp { return storeOp{Kind: kRestart, Size: n} }
 
 // storePayload is the payload of a Put by request c of n bytes: a
 // self-describing value (MakeValue) when it fits, else a short pattern.
@@ -122,13 +128,14 @@ func (storeEnv) Maybe(control.Site) bool { return false }
 
 // storePair is the controller on its storage, and the veritas.
 type storePair struct {
-	factory control.Factory
-	backend storeBackend
-	ctl     control.Machine
-	ver     *veritas.Store
-	now     control.Time
-	next    control.ClientReq // last ClientReq issued; unique across restarts
-	oracle  *Oracle           // C4 only: records the history if set
+	factory   control.Factory
+	backend   storeBackend
+	ctl       control.Machine
+	ver       *veritas.Store
+	now       control.Time
+	next      control.ClientReq // last ClientReq issued; unique across restarts
+	leftovers uint64            // temp files planted so far (names them)
+	oracle    *Oracle           // C4 only: records the history if set
 }
 
 func (p *storePair) cfg() control.Config {
@@ -179,6 +186,40 @@ func (p *storePair) deliver(b control.EventBody) (replies []control.Reply, err e
 	}
 }
 
+// plantLeftovers writes n durable temp files straight to the backend: a
+// torn object, like the temp of a Put whose incarnation died before the
+// rename. Their names are outside any IOID a controller issues early on.
+func (p *storePair) plantLeftovers(n int) error {
+	for i := 0; i < n; i++ {
+		p.leftovers++
+		path := format.TmpPath(storeRoot, 1<<40+p.leftovers)
+		obj := format.EncodeObject(veritastest.Pattern(10, 'z'))
+		for _, a := range []control.Actuation{
+			control.FSWrite{IO: 1, Path: path, Data: obj[:len(obj)-3]},
+			control.FSFsync{IO: 2, Path: path},
+			control.FSFsyncDir{IO: 3, Dir: format.TmpDir(storeRoot)},
+		} {
+			if err := feedbackErr(p.backend.Exec(a)); err != control.OK {
+				return fmt.Errorf("planting %s: %T failed: %s", path, a, err)
+			}
+		}
+	}
+	return nil
+}
+
+// feedbackErr is the error code of a write, fsync or fsync-dir completion.
+func feedbackErr(fb control.Feedback) control.ErrCode {
+	switch d := fb.(type) {
+	case control.FSWriteDone:
+		return d.Err
+	case control.FSFsyncDone:
+		return d.Err
+	case control.FSFsyncDirDone:
+		return d.Err
+	}
+	return control.ErrIO
+}
+
 // request returns op as the control.Op that request c sends.
 func (op storeOp) request(c control.ClientReq) control.Op {
 	switch op.Kind {
@@ -196,6 +237,9 @@ func (op storeOp) request(c control.ClientReq) control.Op {
 
 func (p *storePair) step(op storeOp) error {
 	if op.Kind == kRestart {
+		if err := p.plantLeftovers(op.Size); err != nil {
+			return err
+		}
 		return p.boot() // the veritas has no restarts
 	}
 	p.next++
@@ -312,7 +356,8 @@ func storeCheck(factory control.Factory, newBackend func() storeBackend, minSize
 // genStoreOp returns a random operation. Get, Delete and Copy mostly target
 // keys already Put (written); sizes cluster at 0, storeMaxSize and
 // storeMaxSize+1; a Copy is sometimes onto its own source; one key in 20 is
-// invalid.
+// invalid; half the restarts first plant one or two leftover temp files, so
+// recovery has something to remove (without them its unlink path never runs).
 func genStoreOp(r *veritastest.Rand, written *[]string, minSize int) storeOp {
 	key := func() string {
 		switch k := r.Intn(20); {
@@ -354,7 +399,7 @@ func genStoreOp(r *veritastest.Rand, written *[]string, minSize int) storeOp {
 		}
 		return stCopy(src, key())
 	default:
-		return stRestart()
+		return stRestartLeftovers([]int{0, 0, 1, 2}[r.Intn(4)])
 	}
 }
 
@@ -371,6 +416,10 @@ func shrinkStoreOp(op storeOp, minSize int) []storeOp {
 		}
 		for _, k := range earlierKey(op.Key) {
 			out = append(out, stPut(k, op.Size))
+		}
+	case kRestart:
+		if op.Size > 0 {
+			out = append(out, stRestart())
 		}
 	case kGet, kDelete:
 		for _, k := range earlierKey(op.Key) {
@@ -438,6 +487,9 @@ func formatStoreOp(op storeOp) string {
 	case kCopy:
 		return fmt.Sprintf("stCopy(%s, %s)", q(op.Src), q(op.Key))
 	case kRestart:
+		if op.Size > 0 {
+			return fmt.Sprintf("stRestartLeftovers(%d)", op.Size)
+		}
 		return "stRestart()"
 	}
 	return fmt.Sprintf("%#v", op)
@@ -484,13 +536,15 @@ func TestC1ControllerMatchesVeritasStore(t *testing.T) {
 }
 
 // TestC1Sequences pins sequences worth keeping: the edges of the size limit,
-// Copy onto itself, invalid keys, and restarts between mutations.
+// Copy onto itself, invalid keys, restarts between mutations, and restarts
+// with leftover temp files.
 func TestC1Sequences(t *testing.T) {
 	seqs := [][]storeOp{
 		{stPut("a", 0), stGet("a"), stPut("a", storeMaxSize), stPut("a", storeMaxSize+1), stGet("a")},
 		{stCopy("a", "a"), stPut("a", 20), stCopy("a", "a"), stCopy("a", "b"), stDelete("a"), stGet("b")},
 		{stPut("", 1), stPut(storeLongKey, 1), stGet(""), stDelete(storeLongKey), stCopy("a", ""), stCopy("", "a")},
 		{stPut("a/b", 30), stRestart(), stGet("a/b"), stDelete("a/b"), stRestart(), stRestart(), stGet("a/b")},
+		{stPut("a", 20), stRestartLeftovers(1), stGet("a"), stRestartLeftovers(2), stPut("b", 1), stRestartLeftovers(2), stGet("b")},
 	}
 	for _, b := range storeBackends {
 		c := storeCheck(control.NewMachine, b.new, 0)

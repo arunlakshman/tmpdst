@@ -206,9 +206,9 @@ Details:
 - A crash ticks the clock **once** and gives every abandoned operation the same `RetSeq`. All of them "returned" at the crash instant.
 - The loop starts at `o.checked`: operations in already-checked windows cannot be pending (windows are checked only at quiescence).
 
-## 13.4 The reference model and how operations apply
+## 13.4 The register model and how operations apply
 
-The sequential specification is the oracle's **reference model**: the model whose behaviour the whole closed loop (controller plus disk) must reproduce, in the sense of Chapter 3a. One state of it is a `refState`, a sorted slice. The type was called `modelState` before the refactor; "model" alone had become ambiguous, because the simulator also has a *storage model* (Chapter 11), and the rule now is to always say which model you mean.
+The sequential specification is the oracle's **register model**: one register per key, the model whose behaviour the whole closed loop (controller plus disk) must reproduce, in the sense of Chapter 3a. (Earlier printings called it the *reference model*, the control-theory term. The book changed the name when the ShardStore paper's "reference model" arrived in toys3 as the *veritas* of Chapter 13a, a different thing.) One state of it is a `refState`, a sorted slice; the `ref` is left over from the old name. The type was called `modelState` before the refactor; "model" alone had become ambiguous, because the simulator also has a *storage model* (Chapter 11), and the rule now is to always say which model you mean.
 
 ```go
 // toys3/sim/oracle.go:158-188
@@ -1110,10 +1110,10 @@ Map the oracle onto that:
 | Observer concept | In the oracle |
 |---|---|
 | the hidden system | the key-value store that the controller plus the disk are supposed to implement |
-| its state model | the reference model: a `refState`, one map from key to writer |
+| its state model | the register model: a `refState`, one map from key to writer |
 | inputs | client operations (`HistOp.Op`) with their real-time intervals |
 | measurements | replies: status and, for a GET, the writer named by the body |
-| the state estimate | `Oracle.estimate`: the set of reference-model states consistent with every reply so far |
+| the state estimate | `Oracle.estimate`: the set of register-model states consistent with every reply so far |
 | the update | `check()`: the WGL search over one window computes the set of end states reachable by some valid linearization from some start state in the estimate |
 | fault detection | an empty set of end states: no linearization exists, the history is rejected |
 | over-approximation | widening: when the set is too large, replace part of it with `unknown`, a superset that is cheaper to carry (an interval observer does exactly this with boxes) |
@@ -1130,6 +1130,22 @@ So why is the type still called `Oracle` and not `Observer`? Because in Go (and 
 
 toys3's oracle is specialized in three ways that the general tools are not: it controls the workload (so it can force quiescence and make every value self-describing), it knows exactly when crashes happen (so indeterminate operations have a bounded interval, and "crashes erase nothing" is a model rule), and it carries possible states across windows, factored per key. Those specializations are what make a few hundred lines sufficient.
 
+## 13.13 A second spec of the same store, and the test that keeps them honest
+
+Everything in this chapter rests on one small piece of code that nothing checked: `apply` (§13.4), the oracle's statement of what PUT, GET, DELETE and COPY do. If `apply` said that `COPY a → a` of a missing key is a 200, the oracle would demand that of the controller, and every seed of a correct controller would fail, or worse, a wrong controller that agreed with it would pass.
+
+Since commits `0f46dfe..3ff1385`, toys3 has a second, independent spec of the same store: `veritas.Store` (Chapter 13a), a mutable `map[string][]byte` with an `Apply(control.Op)` that returns the status and body a correct controller must reply with, exactly, when nothing goes wrong. It was deliberately *not* used to replace `apply`. The two are written for different jobs: `apply` works on immutable sorted slices of `(key, writer)` pairs so that the WGL search can share states across branches, with an `unknown` writer for widened keys; the veritas holds bytes, and has no notion of "possible". Making one call the other would make one of them worse at its job.
+
+Instead, conformance check **C4** (`TestC4OracleAgreesWithVeritasStore`, `toys3/sim/oraclecheck_test.go`) makes them agree. It drives the real controller with C1's random sequences (Chapter 13a, §13a.7), one request at a time and fault-free, records each request in an `Oracle` with `Invoke` and `Return`, and after every operation:
+
+1. calls `CheckQuiescent`, which must accept the history;
+2. reads `Oracle.estimate`, which must hold exactly one possible state with no `unknown` writer (a sequential, fault-free history leaves no uncertainty, so anything else is an oracle bug);
+3. compares that `refState` with `veritas.Store`'s map, translating each stored payload to its writer with `ValueWriter`.
+
+Because the oracle names values by their writer, C4's Puts are all self-describing values (at least `ValueHeader` bytes). Clean restarts are not crashes and are not shown to the oracle; "crashes erase nothing" then predicts exactly what the veritas, which ignores restarts, already says.
+
+C4 has found no disagreement (about 175,000 seeds in a minute when it was added). What it buys is that the two specs can no longer drift apart silently: a change to `apply` that is not matched in `veritas.Store`, or the reverse, fails C4 on the first sequence that exercises it, with a message naming the state on each side. Two specs written in different styles, kept in agreement by a test, check each other; Chapter 13a, §13a.14 develops the argument.
+
 ## Key takeaways
 
 - Linearizability: every operation takes effect at one instant inside its interval, and the resulting sequential execution explains every observed result. Real-time order is respected by construction.
@@ -1139,7 +1155,8 @@ toys3's oracle is specialized in three ways that the general tools are not: it c
 - The WGL DFS places each op at the earliest point `max(at, inv)`, prunes with the earliest required return, and memoizes on (set, state), which is sound because `at` is the max invocation over the set.
 - Widening to `unknown` trades precision for tractability and never causes false failures; the memo budget is a separate, tooling-level failure.
 - The oracle sees bugs that no per-response check can: values that vanish (d2) and values from the wrong key (f).
-- Read through control theory, the oracle is a set-membership state observer for the reference model: `estimate` is the set of possible `refState`s, each window's search is the update, widening is over-approximation, and an empty set is a detected fault. The type keeps the DST name `Oracle`.
+- Read through control theory, the oracle is a set-membership state observer for the register model: `estimate` is the set of possible `refState`s, each window's search is the update, widening is over-approximation, and an empty set is a detected fault. The type keeps the DST name `Oracle`.
+- The oracle's register model is independent of `veritas.Store`, the exact spec of Chapter 13a, on purpose; conformance check C4 feeds C1's sequential histories to the oracle and requires its single state to equal the veritas's map after every operation.
 
 ## Exercises
 
@@ -1152,6 +1169,7 @@ toys3's oracle is specialized in three ways that the general tools are not: it c
 7. **Force widening in a real run.** Find a configuration (more keys, more crashes, more clients) under which `widened` becomes nonzero in some seed. Then check whether the mutants are still caught at the same seeds.
 8. **Fix the comments.** The comments at `history.go:33` ("when the Request was delivered") and `oracle.go:266` (`Oracle.widen`) are slightly inaccurate (§13.3, §13.4). Write the corrected comments (do this on a branch).
 9. **Observer vocabulary.** Using §13.11, explain to a control engineer why widening can hide a bug but can never report a false one, in terms of sets. Then find the line in `check` where an empty set of end states becomes a `Failure`, and the line where `estimate` is replaced by the factored end states (`toys3/sim/oracle.go`).
+10. **Make the specs disagree.** In a scratch copy, change `apply`'s COPY case so that a COPY whose source is absent deletes the destination. Run `go test ./toys3/sim -run 'TestC4' -v` and read the shrunk sequence and message. Then run `go test ./toys3/sim -run 'TestSeeds$' -seeds=200`. Which notices first, and which message tells you more directly which spec is wrong? Revert.
 
 ## Further reading
 
@@ -1162,3 +1180,4 @@ toys3's oracle is specialized in three ways that the general tools are not: it c
 - Knossos (https://github.com/jepsen-io/knossos), Jepsen's linearizability checker.
 - Porcupine (https://github.com/anishathalye/porcupine), a fast linearizability checker in Go.
 - Kyle Kingsbury and Peter Alvaro, *"Elle: Inferring Isolation Anomalies from Experimental Observations"*, VLDB 2020.
+- James Bornholt et al., *"Using Lightweight Formal Methods to Validate a Key-Value Storage Node in Amazon S3"*, SOSP 2021. Reference models (toys3's veritases) and conformance checks: the exact, sequential complement to this chapter's tolerant oracle (Chapter 13a).

@@ -780,7 +780,7 @@ kill %1; echo junk > /tmp/my-toys3-data/tmp/00000000000000ff
 
 ## 9.8 How prod is tested
 
-The simulator never runs `prod`. So `prod` has its own tests, in `toys3/prod/prod_test.go`. They are integration tests against a real temporary directory and an `httptest.Server`.
+The simulator never runs `prod`. So `prod` has its own tests, in `toys3/prod/prod_test.go`. They are integration tests against a real temporary directory and an `httptest.Server`. Since commit `f719a3e` there is a third, in `toys3/prod/conformance_test.go`: conformance check C3, which drives `OSExecutor` alone with random sequences of storage commands on a real directory and compares every completion with `veritas.FS`, the executable spec of the Storage port (Chapter 13a, §13a.7).
 
 ### TestEndToEnd
 
@@ -851,7 +851,7 @@ This is where the `Executor` interface earns its keep: a three-line wrapper make
 
 Be explicit about the gaps. The following are not exercised by the simulator, and only partly or not at all by `prod_test.go`:
 
-- **Error classification in `code`.** No test forces a real `ENOENT` versus `EIO` versus `ENOSPC` through `OSExecutor`.
+- **Error classification in `code`.** Until C3, no test forced a real `ENOENT` through `OSExecutor`; now its random sequences do so constantly (rename, unlink, read and fsync of missing paths), and any change to how `ENOENT` is classified fails it. Nothing forces a real `EIO` or `ENOSPC`.
 - **`Close` errors** in `writeFile` and `syncPath`.
 - **Actual durability.** No test cuts power. `fsync` is called; whether the platform honours it is taken on trust.
 - **Concurrency of the executor under load.** Many goroutines doing I/O at once, completions arriving in arbitrary order. The *controller*'s handling of arbitrary completion order is tested heavily by the simulator (its queue explores orders); the runtime's plumbing is simple enough to trust.

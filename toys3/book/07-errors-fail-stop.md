@@ -404,7 +404,7 @@ For tripping cases, a further request produces nothing (the server is in `modeTr
 
 Two observations about what this test can and cannot show:
 
-- It shows the *policy* is implemented as written. It cannot show the policy is *right*. Note the `fsyncdir: trip` case: in the harness, the failed fsyncdir happens after a rename that already changed the map, so `obj/k` holds the new value. If the policy were "plain 500" here, the follow-up GET in the test would return `v`, and the test would be just as happy to assert that. Nothing in the harness has a notion of "this is visible but a crash would undo it": the harness's filesystem has no crash semantics (`controller_test.go:21-23`). This is Exercise 1 of Chapter 1 made concrete.
+- It shows the *policy* is implemented as written. It cannot show the policy is *right*. Note the `fsyncdir: trip` case: in the harness, the failed fsyncdir happens after a rename that already changed the harness's filesystem (`veritas.FS`, a plain map underneath), so `obj/k` holds the new value. If the policy were "plain 500" here, the follow-up GET in the test would return `v`, and the test would be just as happy to assert that. Nothing in the harness has a notion of "this is visible but a crash would undo it": the harness's filesystem has no crash semantics (`controller_test.go:21-23`). This is Exercise 1 of Chapter 1 made concrete.
 - It shows each error in isolation. It cannot show interactions: an EIO on one request followed by a crash caused by an EIO on another. That is the simulator's job.
 
 ## 7.8 Mutant d2: the vanishing read, dissected

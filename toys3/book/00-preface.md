@@ -40,6 +40,7 @@ By the end of the book you should be able to:
 8. **Build an adversarial storage model** with durable and volatile versions of every inode and directory entry, crash resolution, EIO semantics, background writeback, read corruption, and the Linux "fsyncgate" behaviour (Chapter 11).
 9. **Design workloads that make bugs visible**: self-describing values, quiescent points, and swarm testing (Chapter 12).
 10. **Check linearizability** of a history containing crashes, 500s and abandoned requests, using a memoized Wing–Gong–Lowe search with per-key decomposition and carried uncertainty (Chapter 13).
+10a. **Write a veritas and a conformance check**: an executable spec of one component that doubles as its test fake, a lockstep runner with biased inputs, and a shrinker that turns a failing seed into a few-line regression test; and know which bugs this catches that DST cannot, and the reverse (Chapter 13a).
 11. **Write invariants that have teeth**, and tell black-box from white-box checks (Chapter 14).
 12. **Prove your tests have teeth with mutation testing** and interpret ablation results (Chapter 15).
 13. **Run and read DST campaigns**, reproduce any failing seed with one command, and wire determinism checks into CI (Chapter 16).
@@ -94,8 +95,9 @@ tmpdst/                         module "manifester", Go 1.24
 │   └── audit-dep.sh            audit a third-party module before allowing it
 ├── .github/workflows/determinism.yml
 └── toys3/                      ◄── the subject of this book
-    ├── DESIGN.md               the design document (264 lines; read it twice)
+    ├── DESIGN.md               the design document (345 lines; read it twice)
     ├── REFACTOR-PROPOSAL.md    the domain-driven design analysis behind the names
+    ├── VERITAS-PROPOSAL.md     the veritas and conformance-check proposal (Chapter 13a)
     ├── control/                the controller: pure state machine (was core/)
     │   ├── doc.go              package doc: protocol, error table, key interlock
     │   ├── types.go            Time, Duration, ClientReq, Status
@@ -109,7 +111,7 @@ tmpdst/                         module "manifester", Go 1.24
     │   ├── controller.go       THE SERVER: Controller, modes, key interlock, protocols
     │   ├── recovery.go         recovery (onStarted, onRecoveryDone)
     │   ├── hash.go             StateHash and its FNV-1a hasher
-    │   └── controller_test.go  hand-driven harness, exact action sequences
+    │   └── controller_test.go  hand-driven harness on veritas.FS, exact action sequences
     ├── format/                 the on-disk contract (shared kernel)
     │   ├── doc.go              byte layout and directory layout
     │   ├── object.go           Magic, HeaderSize, Checksum, Encode/DecodeObject
@@ -137,9 +139,18 @@ tmpdst/                         module "manifester", Go 1.24
     │   │                       crash-semantics tests of the storage model
     │   ├── oracle_test.go      hand-built histories, accepted and rejected
     │   ├── queue_test.go       queue ordering and incarnation dropping
-    │   └── mutants_test.go     seven deliberately broken servers
+    │   ├── mutants_test.go     eleven deliberately broken servers (seven durability, four functional)
+    │   ├── mutanttable_test.go which of DST and C1 catches each mutant
+    │   ├── storecheck_test.go  conformance check C1: controller vs veritas.Store
+    │   ├── conformance_test.go conformance check C2: storage model vs veritas.FS
+    │   └── oraclecheck_test.go conformance check C4: oracle vs veritas.Store
+    ├── veritas/                executable specs, also test fakes (Chapter 13a)
+    │   ├── store.go            veritas.Store: the object store as a map
+    │   ├── fs.go               veritas.FS: the Storage port as a map
+    │   └── veritastest/        conformance-check kit: generator, lockstep runner, shrinker
     ├── prod/                   production runtime (not deterministic)
     │   ├── doc.go  env.go  executor.go  loop.go  http.go  prod_test.go
+    │   └── conformance_test.go conformance check C3: OSExecutor on a real disk vs veritas.FS
     ├── cmd/toys3/main.go       the server binary (-dir, -addr, -max-object)
     └── cmd/toys3sim/main.go    the parallel DST campaign runner
 ```

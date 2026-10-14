@@ -565,7 +565,7 @@ Things to notice:
 
 ## 5.12 The unit tests for recovery
 
-`toys3/control/controller_test.go` drives the server by hand through a `harness` (`toys3/control/controller_test.go:21-145`): an in-memory map of files, a list of pending FS actions, and helpers to complete them one at a time, in order. Every FS change is immediately "durable" in this harness; there are no crash semantics. That is fine for testing the server's *logic*: what actions it emits, in what order, in response to which completions. Crash behaviour is the simulator's job.
+`toys3/control/controller_test.go` drives the server by hand through a `harness` (`toys3/control/controller_test.go:21-145`): an in-memory filesystem, a list of pending FS actions, and helpers to complete them one at a time, in order. The filesystem was a private map until commit `0f46dfe`; it is now `veritas.FS`, the executable spec of the Storage port (Chapter 13a). Every FS change is immediately durable in it; there are no crash semantics. That is fine for testing the server's *logic*: what actions it emits, in what order, in response to which completions. Crash behaviour is the simulator's job.
 
 The harness's `describe` function renders actions compactly so that tests can assert exact sequences as strings, replacing temp names with `tmp/*` because their hex digits are noise.
 

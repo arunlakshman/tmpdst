@@ -566,7 +566,7 @@ Where the port is used:
 | `case control.FSWrite, control.FSFsync, ... , control.FSList:` in the simulator | `case control.Actuation:` (`toys3/sim/simulator.go:187`) |
 | `ioOfAction` in two test harnesses | a three-line type assertion to `Actuation` (`toys3/control/controller_test.go:147-152`, `toys3/sim/mutants_test.go:269-274`) |
 
-Why "actuation" and "feedback"? Chapter 3a develops the metaphor in full; the short version is that the controller never touches the disk, it only *commands* it, and the disk *reports back*. In control engineering the commands a controller sends to the thing it controls are actuations, the thing being controlled is the *plant* (in toys3, storage), and what comes back is feedback. The word "port" is from hexagonal architecture (ports and adapters): the controller owns the interface, and two adapters implement it, `prod.OSExecutor` on a real disk (Chapter 9) and `sim.StorageModel` in simulation (Chapter 11). Note who owns what: the port is defined in package `control`, not in the packages that implement it. The adapters conform to the controller's language, not the other way round.
+Why "actuation" and "feedback"? Chapter 3a develops the metaphor in full; the short version is that the controller never touches the disk, it only *commands* it, and the disk *reports back*. In control engineering the commands a controller sends to the thing it controls are actuations, the thing being controlled is the *plant* (in toys3, storage), and what comes back is feedback. The word "port" is from hexagonal architecture (ports and adapters): the controller owns the interface, and two adapters implement it, `prod.OSExecutor` on a real disk (Chapter 9) and `sim.StorageModel` in simulation (Chapter 11). A third implementation, `veritas.FS`, is the port's executable spec rather than an adapter (§3.10). Note who owns what: the port is defined in package `control`, not in the packages that implement it. The adapters conform to the controller's language, not the other way round.
 
 The POSIX names (`FSWrite`, `FSFsync`, `FSRename`, ...) were deliberately *not* renamed. They are storage's own language; "actuation" is the category, `FSFsync` is the command. A control engineer does not rename a valve's "open" command to "actuate".
 
@@ -752,6 +752,30 @@ Anything outside the vocabulary (a slow `Step`, a server that allocates unbounde
                                                       (FS* commands = Actuation)
 ```
 
+---
+
+## 3.10 Four words from the verification side
+
+Everything above is the controller's own vocabulary. Four more words appear throughout the later chapters and name things *about* that vocabulary. They were added with the `veritas` packages (commits `0f46dfe..3ff1385`), and Chapter 13a is about them; they are defined here because they are defined in terms of the types above.
+
+**Veritas.** The small, executable, obviously correct version of one component: sequential, fault-free, short enough to check by reading. toys3 has two. `veritas.Store` is the object store as a client sees it: `Apply(control.Op) (control.Status, []byte)` over a map from key to payload, with the controller's 400 and 404 rules and no 500 (`toys3/veritas/store.go`). `veritas.FS` is the Storage port: `Exec(control.Actuation) control.Feedback` over a map from path to bytes, every change immediately durable, `ENOENT` the only error, and a panic for an actuation it does not know (`toys3/veritas/fs.go`). Each is also a test fake: the controller's unit tests run on `veritas.FS`, so adding an eighth storage command to `storage.go` breaks them until the veritas learns it. That is the same closed-vocabulary argument as §3.1, carried one step further: the compiler cannot make a type switch exhaustive, but a test that every developer runs can. The word replaces "reference model" (the ShardStore paper's term), because "model" already means the storage model and the oracle's register model.
+
+**Conformance check.** A test that runs a seeded random sequence of operations against an implementation and its veritas, compares every result exactly (status and body for `Op`s; error code, data and names for `Feedback`), and checks invariants after every operation. toys3 has four: C1 (the controller against `veritas.Store`), C2 (`StorageModel` against `veritas.FS`), C3 (`OSExecutor` on a real disk against `veritas.FS`) and C4 (the oracle against `veritas.Store`).
+
+**Lockstep.** How a conformance check drives the two sides: one operation to the implementation and the same operation to the veritas, then compare, then the next. Nothing is concurrent and nothing is indeterminate, which is what makes an exact comparison possible. The runner is `veritastest.Check` (`toys3/veritas/veritastest/lockstep.go`).
+
+**Shrinking.** Turning a failing sequence into a shorter, simpler one that still fails: drop chunks of operations, simplify each remaining operation (smaller sizes, earlier keys), and rename a key or path everywhere at once. The result is printed as a Go literal built from the same constructors a regression test uses, for example
+
+```go
+[]storeOp{
+	stDelete("a"),
+}
+```
+
+for a controller that answers DELETE of a missing key with 200 (mutant h, Chapter 15).
+
+The relationship to this chapter's vocabulary is direct. A conformance check's alphabet *is* a slice of this vocabulary: C1's operations are the four `Op`s plus a restart, and C2's and C3's are the seven `Actuation`s. Anything the vocabulary cannot say, no conformance check can generate, which is §3.9's point applied to a second kind of test.
+
 ## Key takeaways
 
 - The vocabulary is closed (unexported marker methods) so the whole interface can be read in three files; Go does not check type switches for exhaustiveness, so both server and simulator have defensive defaults, and the simulator's default is to fail loudly.
@@ -759,9 +783,10 @@ Anything outside the vocabulary (a slow `Step`, a server that allocates unbounde
 - `ErrCode` has three values on purpose. `ErrIO` always means "may or may not have taken effect", and the StorageModel realizes both possibilities. `ErrNotFound` is never injected by chance.
 - File contents and directory entries are separate durability domains, made durable by `FSFsync` and `FSFsyncDir` respectively. The server never fsyncs `tmp/` after a rename, so temp names can resurrect after a crash.
 - `Trip` is an action, ordered after the 500 it accompanies, and must be last.
-- The filesystem commands and completions are the Storage port: `Actuation` and `Feedback`, each with an `ID() IOID`. The port is owned by the controller and implemented by two adapters, one real and one simulated.
+- The filesystem commands and completions are the Storage port: `Actuation` and `Feedback`, each with an `ID() IOID`. The port is owned by the controller and implemented by two adapters, one real and one simulated, and specified by `veritas.FS`.
 - Telemetry is the controller's published beliefs (domain events, past tense); `Committed` lets the simulator check "acked implies durable" at the moment of the ack, without waiting for a crash.
 - `Env` is plumbed through but unused by the server today; adding the first buggify site will change every trace.
+- A *veritas* is the executable spec of one component (`veritas.Store`, `veritas.FS`); a *conformance check* runs it in *lockstep* with the implementation and *shrinks* any failure to a short Go literal (§3.10, Chapter 13a).
 
 ## Exercises
 

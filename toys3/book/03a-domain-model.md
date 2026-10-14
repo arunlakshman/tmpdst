@@ -62,7 +62,7 @@ Hold on to those definitions. The rest of the DDD half of this chapter applies t
 | Subdomain | Type | Why | Where it lives |
 |---|---|---|---|
 | **Durable object control**: the write protocol, the key interlock, the trip policy, recovery | **Core** | It is the system under test. Every interesting decision is here: the order of fsync and rename, when to trip, which requests may run together. | `toys3/control` |
-| **Verification**: the reference model, the linearizability search, the invariants, the coverage checks | **Core** (for *this* repository) | toys3 exists to learn DST. The oracle and the invariants are where the learning value is, and they are modelled as carefully as the controller. | `toys3/sim`: `oracle.go`, `history.go`, `invariant.go` |
+| **Verification**: the register model, the linearizability search, the invariants, the coverage checks, and (since `0f46dfe..3ff1385`) the veritases and conformance checks | **Core** (for *this* repository) | toys3 exists to learn DST. The oracle and the invariants are where the learning value is, and they are modelled as carefully as the controller. | `toys3/sim`: `oracle.go`, `history.go`, `invariant.go` |
 | **Storage model**: a filesystem with crash and fault semantics | Supporting | It must be realistic (Chapter 11 and Chapter 17 show that its realism decides which bugs are found), but it models POSIX; it invents nothing. | `toys3/sim/storagemodel.go` |
 | **Simulation testbench**: event queue, virtual clock, seeded RNG, incarnations, trace hash | Supporting | Necessary, but the same machinery would drive any `Step` machine. | `toys3/sim`: `simulator.go`, `queue.go`, `rand.go`, `hash.go`, `trace.go`, `log.go`, `config.go` |
 | **Object format**: header, CRC, key escaping, directory layout | Supporting | A small, stable contract between incarnations and between the controller and the monitors. | `toys3/format` |
@@ -85,7 +85,7 @@ The subdomains are the problem. The bounded contexts are how the solution is cut
 | A | **Storage Control** | Turns requests and storage feedback into actuations, replies and telemetry. Owns the durability protocol, the key interlock, the trip policy and recovery. | `toys3/control` |
 | B | **Durable Medium (storage)** | The thing being controlled: files, directory entries, fsync, crash. Two implementations, one real and one modelled. | the port in `control/storage.go`; adapters `prod.OSExecutor` and `sim.StorageModel` |
 | C | **Object Format** | Byte layout of an object file, key-to-name escaping, `obj/` and `tmp/` paths. The only thing that survives a crash. | `toys3/format` |
-| D | **Verification** | Judges a run: the client-visible history against a sequential reference model (black box), and controller telemetry against the true state of storage (white box). | `sim/oracle.go`, `sim/history.go`, `sim/invariant.go` |
+| D | **Verification** | Judges a run: the client-visible history against a sequential register model (black box), and controller telemetry against the true state of storage (white box). Also, outside any run, each component against its veritas (conformance checks, Chapter 13a). | `sim/oracle.go`, `sim/history.go`, `sim/invariant.go`; `veritas/`, `veritas/veritastest/` |
 | E | **Simulation Testbench** | Runs the controller against the storage model under a seeded schedule, injects crashes, folds the trace hash; includes the stimulus. | `sim/simulator.go`, `queue.go`, `rand.go`, `hash.go`, `trace.go`, `log.go`, `config.go`, `workload.go`, `value.go` |
 | F | **Production Runtime and Transport** | Real I/O, goroutines, and the HTTP mapping to S3. | `toys3/prod`, `toys3/cmd/toys3` |
 
@@ -302,8 +302,8 @@ Put the context map and the vocabulary together and you get toys3's hexagon:
 
 | Port | Direction | Defined in | Adapters |
 |---|---|---|---|
-| `Machine.Step(Event) []Action` | driving (inbound) | `control/machine.go` | `prod.Loop`, `sim.Simulator`, the harness in `controller_test.go`, the mutant decorators |
-| `Actuation` / `Feedback` (the Storage port) | driven (outbound) | `control/storage.go` | `prod.OSExecutor` (real storage), `sim.StorageModel` via the simulator (the storage model), the map-backed harness in `controller_test.go` |
+| `Machine.Step(Event) []Action` | driving (inbound) | `control/machine.go` | `prod.Loop`, `sim.Simulator`, the harness in `controller_test.go`, conformance checks C1 and C4 (`storePair`, Chapter 13a), the mutant decorators |
+| `Actuation` / `Feedback` (the Storage port) | driven (outbound) | `control/storage.go` | `prod.OSExecutor` (real storage), `sim.StorageModel` via the simulator (the storage model), `veritas.FS` (the port's executable spec, used by the harness in `controller_test.go`) |
 | `Env` (`Rand`, `Buggify`) | driven | `control/env.go` | `prod.Env`, `sim.env`, `testEnv` |
 | `Telemetry` (via `Emit`) | output signal | `control/telemetry.go` | the production log line; the simulator's `Sample` stream, feeding monitors and stats |
 | `Reply` | output | `control/action.go` | the production waiter (the HTTP handler); the simulator's oracle and workload |
@@ -313,7 +313,7 @@ Two things about this table are worth dwelling on.
 
 **The driven port is data, not an interface with methods.** In the textbook hexagon, a driven port is an interface like `type Disk interface { Write(path, data) error }`, and the domain calls it. In toys3 the domain never calls anything; it *returns* commands. The "port" is a vocabulary of values, and the adapter is whatever interprets those values. Chapter 2 explained why that is strictly more powerful for simulation (an asynchronous vocabulary can express "the effect landed but the caller never learned"). DDD does not need the port to be a Go interface; it needs it to be owned by the domain and expressed in the domain's language. `Actuation` and `Feedback` are Go interfaces, but only as *category markers* over the values; nothing implements them except the plain structs.
 
-**There are three storage adapters, not two.** The unit-test harness in `controller_test.go` is a third: a map from path to bytes that executes each actuation synchronously and returns its feedback. It is the simplest possible storage, with no crashes and no faults, and it is enough to pin down exact action sequences (Chapter 6). The simulator is the most adversarial. Production is the real thing. All three conform to the same port, and the controller cannot tell them apart.
+**There are three storage adapters, not two.** The unit-test harness in `controller_test.go` uses a third: a map from path to bytes that executes each actuation synchronously and returns its feedback. It is the simplest possible storage, with no crashes and no faults, and it is enough to pin down exact action sequences (Chapter 6). The simulator is the most adversarial. Production is the real thing. All three conform to the same port, and the controller cannot tell them apart. Since commit `0f46dfe` the simplest one has a name and a package of its own, `veritas.FS`, and a second job: it is the *veritas* of the port, the executable spec that the other two are checked against by conformance checks C2 and C3 (Chapter 13a). It used to be a private map in a test file; promoting it to the spec is what made those checks possible.
 
 ---
 
@@ -449,15 +449,15 @@ These four come from industrial process control and safety engineering, and they
 
 When a disturbance hits a feedback loop, the loop's output goes through a transient and then, if the loop is stable, *settles* into a tolerance band. Engineers specify loops by their settling time and their steady-state error. The simulator's run is shaped the same way: a Chaos phase full of disturbances, then a Settling phase in which no new disturbances arrive and the closed loop must settle: every outstanding request gets a reply (the transient dies out), and no request issued during Settling gets a 500 (zero steady-state error). The `Liveness` invariant checks both; its doc calls it "the closed loop settles" (`toys3/sim/invariant.go:98-104`). This used to be the "quiet tail", which described what the simulator did (nothing) rather than what the system under test had to achieve.
 
-### The verification side: reference model, estimate, observer
+### The verification side: register model, estimate, observer
 
 The control vocabulary extends, carefully, into the oracle.
 
-- **Reference model.** The sequential specification that the closed loop's behaviour must match is, in control language, a *reference model*: the model whose behaviour the system should track (the term is from model-reference adaptive control). The oracle's internal type for one state of that model was `modelState`; it is now `refState` (`toys3/sim/oracle.go:164-167`). This also resolved an ambiguity: "model" had come to mean both the storage model and the reference model, and the rule now is to always qualify the word.
-- **State estimate.** The oracle cannot see the system's true state; it reconstructs the *set of states* the reference model could be in, given everything clients have observed. In estimation theory that is a *set-membership state estimate*. The oracle's field that holds it was `groups`; it is now `estimate` (`toys3/sim/oracle.go:46-50`). The oracle widens the set when it gets too large, like an interval observer that over-approximates; an empty set means a fault has been detected (the history is not linearizable).
+- **Register model.** The sequential specification that the closed loop's behaviour must match is, in control language, a *reference model*: the model whose behaviour the system should track (the term is from model-reference adaptive control), and earlier printings of this book used that name. The book now calls it the **register model**, after what it is (one register per key, as `DESIGN.md`'s invariant (a) has always said), because "reference model" is also the ShardStore paper's word for something else: the small executable spec of a component that toys3 calls a *veritas* (Chapter 13a). The oracle's internal type for one state of the register model was `modelState`; it is now `refState` (`toys3/sim/oracle.go:164-167`; the `ref` survives from the old name). This also resolved an ambiguity: "model" had come to mean both the storage model and the oracle's model, and the rule now is to always qualify the word.
+- **State estimate.** The oracle cannot see the system's true state; it reconstructs the *set of states* the register model could be in, given everything clients have observed. In estimation theory that is a *set-membership state estimate*. The oracle's field that holds it was `groups`; it is now `estimate` (`toys3/sim/oracle.go:46-50`). The oracle widens the set when it gets too large, like an interval observer that over-approximates; an empty set means a fault has been detected (the history is not linearizable).
 - **True state.** The storage model's durable view, `GroundTruth`.
 
-Put together, the oracle is a *set-membership state observer* for the reference model, and `AckedIsDurable` is an estimate-versus-true-state check for the controller. Chapter 13 develops the observer reading of the oracle in more depth. The type itself is still called `Oracle`, for reasons in the next section.
+Put together, the oracle is a *set-membership state observer* for the register model, and `AckedIsDurable` is an estimate-versus-true-state check for the controller. Chapter 13 develops the observer reading of the oracle in more depth. The type itself is still called `Oracle`, for reasons in the next section.
 
 ---
 
@@ -498,7 +498,8 @@ Even a careful vocabulary has words that mean two things. The useful move is to 
 | Term | Meanings | Resolution |
 |---|---|---|
 | linearizability / linearization | concurrency correctness / small-signal approximation | Keep `Linearizable`; never use "linearize" for anything else. |
-| model | the storage model / the reference model | Always qualify: `StorageModel`, `refState`. |
+| model | the storage model / the oracle's register model (once "reference model") | Always qualify: `StorageModel`, `refState`. The paper's "reference model" is a *veritas* here. |
+| veritas / oracle | the exact, sequential spec of one component (`veritas.Store`, `veritas.FS`) / the tolerant judge of a faulty concurrent history (`Oracle`) | Both specify the store; they are kept independent on purpose, and conformance check C4 keeps them in agreement (Chapter 13a). |
 | step | `Step()` / the simulator's step counter (`Result.Steps`, `Failure.Step`, log `#N`) / a request's protocol step (`reqStep`) / "step response" | Prose says "sim step #N" and "protocol step". |
 | phase | (formerly) the server lifecycle / the testbench timeline / ISA-88 phase | The controller has *modes*; "phase" is reserved for Chaos and Settling. |
 | loop | event loop / control loop / `loop.md` | Aligned: in `prod`, the event loop *is* the control loop (`toys3/prod/doc.go:14-15`). |
@@ -543,7 +544,7 @@ The highest "before" score is aggregate design. The architecture was right from 
 - The context map names real relationships: Open Host Service and Published Language for `Step`, Conformist adapters for storage, Customer/Supplier for the test seams, Shared Kernels for the format and the value encoding, ACLs for HTTP and for the monitors' view of storage (`GroundTruth`).
 - The `Controller` is the only aggregate, and one `Step` is its consistency boundary. The per-key queue is not an aggregate but a named invariant of it: the key interlock, enforced by the start permissive in `permitted`.
 - Telemetry is the controller's domain events, named in the past tense, published to any subscriber.
-- The control-theory reading is genuine: controller, storage (the textbook's plant), actuation, feedback, dead time, feedback delay, disturbances, storage model, telemetry, monitors, trip, interlock, permissive, modes, settling, reference model and state estimate all map onto existing code.
+- The control-theory reading is genuine: controller, storage (the textbook's plant), actuation, feedback, dead time, feedback delay, disturbances, storage model, telemetry, monitors, trip, interlock, permissive, modes, settling, register (reference) model and state estimate all map onto existing code.
 - The metaphor stops where it would mislead: requests are not setpoints, linearizability is not linearization, `Oracle` and `Committed` keep their names, the format and POSIX names stay plain, and the published language shared with `loop.md` is untouched. One textbook word was dropped after the fact: "plant" became "storage", because a storage reader should not have to translate the name of the disk.
 
 ## Exercises

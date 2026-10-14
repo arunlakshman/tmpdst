@@ -45,7 +45,7 @@ Consequences:
 
 `prod.Loop` (`toys3/prod/loop.go`) and `prod.OSExecutor` (`toys3/prod/executor.go`) are not executed by the simulator. The design accepts that by keeping them thin (`loop.md` rule 10), but "thin" is not "empty". Things DST cannot see:
 
-- **Error mapping.** `code` (`toys3/prod/executor.go:103-113`) maps `fs.ErrNotExist` to `ErrNotFound` and everything else to `ErrIO`. If someone changed it to map `ENOENT` from `os.Rename` to `ErrIO` (or the reverse), every seed would still pass.
+- **Error mapping.** `code` (`toys3/prod/executor.go:103-113`) maps `fs.ErrNotExist` to `ErrNotFound` and everything else to `ErrIO`. If someone changed it to map `ENOENT` from `os.Rename` to `ErrIO` (or the reverse), every DST seed would still pass. Since commit `f719a3e` conformance check C3 would not: it runs `OSExecutor` on a real directory against `veritas.FS`, and its random sequences rename and unlink missing paths constantly (Chapter 13a, §13a.7). C3 covers `OSExecutor` only on the no-fault path; how it classifies a real EIO is still untested.
 - **The Submit/Reply handshake.** `Loop.Submit` (`toys3/prod/loop.go:123-156`) has a three-way select and a special case for "a Reply dispatched just before a Trip still counts". It is tested by `TestTripStopsLoop`, not by simulation.
 - **Backpressure.** The inbox is a bounded channel (`NewLoop`, `inboxSize`); a full inbox blocks HTTP handlers and executor callbacks. The simulator has no inbox at all. `docs/flow-control.md` describes the much more careful design intended for the bigger system; toys3 does not attempt it.
 - **Trip after restart.** In the simulator a `Trip` is processed exactly like a power loss: the storage model resolves all volatile state at that instant. In production a trip is a process exit, and the kernel's page cache survives it. So a change that was visible but not durable when the controller tripped (a rename whose directory fsync failed) is still visible after the supervisor restarts the process; recovery does not make `obj/` durable, a GET can serve the value, and a later power loss can take it away: the "observed, then vanished" history of Chapter 1, against the *correct* controller. Chapter 9 (§9.10, item 2) works through it. The fix would be in recovery (for example, `FSFsyncDir(obj/)` before emitting `Recovered`), and the simulator would need a separate "process exit without power loss" event to expose the bug first. Neither exists at commit `10777a2`; the first edition called this "Halt after restart".
@@ -107,11 +107,22 @@ It errs in both directions, and you should know which is which.
 
 The rule of thumb: the StorageModel is strict about **what POSIX permits** and lenient about **what hardware does**. That is a reasonable place to be for an application-level protocol, and a poor place to be for a filesystem or a database that does its own block management.
 
+### 10. What the conformance checks do not cover
+
+The conformance checks of Chapter 13a close two of the gaps above (the storage model and the production storage adapter are now checked against a spec and against each other) and open a clear boundary of their own. Every check is sequential, fault-free and crash-free by construction, because that is what makes an exact comparison with a veritas possible. So:
+
+- **No faults.** C1 never sees an EIO, a torn file or a flipped bit; its coverage report shows `trip`, `failTrip` and every error branch at 0% (Chapter 13a, §13a.11). The ShardStore paper extends conformance checking to injected I/O errors with a "has failed" flag that relaxes the comparison afterwards: an operation may fail, but may never return wrong data (paper §4.4). toys3 has not built that; the proposal lists it as future work (a "C1 phase 2"), on the grounds that the DST oracle already checks it, with crashes too. It would still turn a fault bug's report from an event-log window into a few operations. Section III.10 sketches it.
+- **No concurrency.** One request is in flight at a time, so the key interlock (`touches`, `interlocked`) is never exercised and a reply sent before its effects (mutant c) looks correct.
+- **No crashes.** A `CleanRestart` is a clean restart. C1 imitates one crash artifact, leftover temp files (`stRestartLeftovers`), and nothing else: no resurrected names, no lost renames. Crash consistency is DST's job (Chapters 10, 11 and 13); the paper's own crash-consistency checks (§5) are coarser than what toys3's storage model already does.
+- **Only the alphabet.** Each check explores the keys, paths and sizes its generator can produce. C1 and C3 use lower-case names only, which is how the case-folding gap (Part II §17) stayed outside both; C3's sizes stop at 4,097 bytes.
+- **Only what the veritas says.** A veritas can be wrong in the same way as the code it checks. C4 checks `veritas.Store` against the oracle's independent register model, but `veritas.FS` has no second spec except the real disk (C3), and only on one operating system at a time. The Copy size gap (Part II §18) is an example of both specs agreeing on a questionable rule.
+- **Not the HTTP layer.** The proposal planned a `veritas.FS`-backed `prod.Executor` so that the HTTP handler tests would need no disk; it was not built (Part II §19).
+
 ---
 
 ## Part II: Discrepancies and surprises
 
-These were found by reading every file and running the code while writing the first edition of this book (against commit `210c1fa`). Each item says what the documentation claims, what the code does, and whether it matters. The book's rule was not to modify code, so none was fixed by the book itself. Since then, the domain-driven-design refactor of Chapter 3a fixed the three that were *comment-only* (§3, §4 and §16) in its documentation commit, `a4018d5`; they are marked **Fixed** below and kept for the record, because the way each was found is still instructive. The refactor deliberately did not touch the others, because each of them changes behaviour, the event log or the trace hash, and a behaviour-preserving refactor must be provably that and nothing more (Chapter 8, §8.12). They remain good first patches.
+Items 1 to 16 were found by reading every file and running the code while writing the first edition of this book (against commit `210c1fa`); items 17 to 19 came with the veritas work of Chapter 13a (`0f46dfe..3ff1385`). Each item says what the documentation claims, what the code does, and whether it matters. The book's rule was not to modify code, so none was fixed by the book itself. Since then, the domain-driven-design refactor of Chapter 3a fixed the three that were *comment-only* (§3, §4 and §16) in its documentation commit, `a4018d5`; they are marked **Fixed** below and kept for the record, because the way each was found is still instructive. The refactor deliberately did not touch the others, because each of them changes behaviour, the event log or the trace hash, and a behaviour-preserving refactor must be provably that and nothing more (Chapter 8, §8.12). They remain good first patches.
 
 ### 1. The server never uses its `Env`
 
@@ -240,6 +251,28 @@ The brief for this book mentions that mutant f was at first *not caught*, becaus
 
 *Fix.* The comment now says: "entries for a dead incarnation are dropped eagerly at crash time by Queue.DropIncarnation (a crashed process never sees a completion meant for its previous life). Simulator.handle also checks the incarnation on pop, as a defensive backstop." (`toys3/sim/queue.go:5-11`.)
 
+### 17. Keys that differ only in case alias each other on macOS
+
+*Found by.* Building conformance check C3 (`f719a3e`), which runs the production storage adapter on a real directory against `veritas.FS`.
+
+*Code.* `format.EscapeKey` percent-escapes every byte that is not unreserved but passes ASCII letters through unchanged, so keys `K` and `k` become `obj/K` and `obj/k` (Chapter 4, §4.6). `veritas.FS` and the StorageModel treat those as two files, as POSIX does. On a case-insensitive volume, the default for macOS APFS, they are one file: PUT `K`, PUT `k`, GET `K` returns the second value. `TestC3CaseSensitive` (`toys3/prod/conformance_test.go:113-137`, at `3ff1385`) pins the assumption and skips on such volumes; C1 and C3's generators use lower-case names only.
+
+*Does it matter?* For anyone running `cmd/toys3` on a Mac's default volume, yes: two distinct S3 keys can silently share one object. It is listed as an open item in `DESIGN.md`. The fix (escape upper-case letters, or reject them) changes the on-disk name of every existing object with a capital letter, so it needs a migration, which is why it was not done in the same commit. Note what the test does *not* do: teach the veritas to fold case. That would make the checks pass by making the spec agree with a behaviour the controller must not rely on.
+
+### 18. Neither spec checks the size limit on Copy
+
+*Code.* The controller's `onRequest` checks `MaxObjectSize` for a Put only (`toys3/control/controller.go:154`), and `veritas.Store` agrees, with the reasoning "Copy needs no size check: Src got in through Put" (`toys3/veritas/store.go:22`).
+
+*Does it matter?* Only if the limit changes across a restart. Start `cmd/toys3` with `-max-object 1048576`, Put a 1 MiB object, restart with `-max-object 1024`, and a Copy creates a new object over the current limit. Because both specs agree, no conformance check can see it; it was found by reading them side by side. Whether it is a bug depends on whether the limit is about request bodies (Copy has none) or about what may be stored. It is an open item in `DESIGN.md`.
+
+### 19. `DESIGN.md` says the veritas is the HTTP tests' fake; it is not yet
+
+*Claim.* The package table in `DESIGN.md` describes `toys3/veritas` as "also the test fake for controller and HTTP tests", following the proposal ("`prod` gets a `veritas.FS`-backed `Executor`, so the HTTP handler tests need no disk").
+
+*Code.* Nothing in `toys3/prod` uses `veritas` outside `conformance_test.go`. `prod_test.go` still runs its end-to-end HTTP tests on a real temp directory with `OSExecutor` (Chapter 9).
+
+*Does it matter?* Not for correctness; the real-disk tests are, if anything, stronger. It is a small doc-versus-code drift of the kind Part II has recorded from the start, and either half is a good first patch: write the adapter (an `Executor` whose `Execute` calls `veritas.FS.Exec` and then `done` on a goroutine), or change the table.
+
 ---
 
 ## Part III: Roadmap
@@ -333,7 +366,15 @@ Remember Part II §1: the first site changes every seed's universe. Re-record th
 
 **Sketch.** Today a PUT's whole payload is one `FSWrite`. For large objects you would write in chunks (`FSWriteAt{Offset}`), fsync once, then rename. The StorageModel then needs chunk-granular tearing (Part I §3), and the CRC needs to become incremental or per-chunk. GET would stream chunks into the reply, which means the core needs a way to send a partial reply, which means the HTTP layer becomes part of the protocol, which means Part I §1 becomes urgent. This is a good exercise in discovering how one feature pulls a whole layer into the deterministic core.
 
-### III.10 Apply it to Manifester (a new project)
+### III.10 Conformance under faults: C1 phase 2 (days)
+
+**Motivation.** Part I §10. The conformance checks catch functional bugs in one or two operations and fault-handling bugs not at all; DST catches fault-handling bugs with a long report. The ShardStore paper's §4.4 shows the middle ground.
+
+**Sketch.** Add a third C1 backend: `StorageModel` with `EIOProb` above zero, driven synchronously, with each command's plan drawn from the check's own seeded stream so that the sequence still replays and shrinks. Give `storePair` a "has failed" flag, set when any command in the current request was planned to fail. While it is set, relax the comparison: a 500 is allowed where the veritas says 200 or 404, and after a 500 the veritas must be allowed to be in either the before or the after state for that request's key (two possible maps, not one). Never relax two things: a 200 must carry exactly the veritas's body, and `obj/` must decode to *some* allowed map. A `Trip` ends the incarnation: restart, and keep checking. Then add a fault to the alphabet as an operation of its own (`stFailNext(kind)`), as the paper does with `FailDiskOnce`, so the shrinker can remove faults that do not matter.
+
+**Exercise.** Implement the backend and the relaxed comparison, and run mutants d and d2 through it. Predict the shrunk sequences. Which of the two possible-maps rules is d2's failure about?
+
+### III.11 Apply it to Manifester (a new project)
 
 The top-level `core/`, `sim/` and `sys/` directories are interfaces for a WarpStream-like Kafka engine, written *before* toys3, and toys3 was the rehearsal. What carries over directly:
 
@@ -346,7 +387,8 @@ The top-level `core/`, `sim/` and `sys/` directories are interfaces for a WarpSt
 | `StorageModel` (one storage model) | `sim.Engine`s (object store, control plane, network) | Each engine owns state and schedules completions on the one queue (`docs/lessons.md` §0). |
 | `Invariant.AfterStep(View)` | `sim.Invariant.Observe(Timeline, now)` (`sim/roles.go`) | Telemetry samples become an append-only timeline with cursors. |
 | `Workload` (plain struct) | `sim.Workload`, itself a sans-I/O `StateMachine` | The Kafka client model must be a state machine because `kgo` cannot run in the simulator. |
-| `Oracle` (register per key) | reference model of acked offsets | Different model, same discipline: decide what a client may observe, check every observation. |
+| `Oracle` (register per key) | a model of acked offsets | Different model, same discipline: decide what a client may observe, check every observation. |
+| `veritas.Store`, `veritas.FS`, C1 to C4 | a veritas per component (an offset log as a slice; the object store as a map) | Write them early: they double as the unit tests' fakes, and they make the bigger system's storage model checkable against a real object store. |
 | mutants | — | Write them from day one. |
 
 The lessons that transfer best are not the interfaces but the habits: decide what each error *proves* (`docs/lessons.md` §1's NotApplied / MaybeApplied / Applied is the generalization of toys3's "500 promises nothing"), separate *landing* from *delivery* for every external effect, check a ground-truth invariant eagerly *and* a black-box invariant at quiescence, and never trust a simulator until a mutant has bitten.
@@ -357,14 +399,15 @@ The lessons that transfer best are not the interfaces but the habits: decide wha
 
 - A passing campaign covers only what the simulator can produce. In toys3 that excludes the network, the production runtime, mkdir, ENOSPC, slow disks, mid-file tearing, timers, multiple processes and multiple nodes.
 - The StorageModel errs toward strict POSIX (more adversarial than ext4 about rename and ordering) and toward kind hardware (no lying caches, no persistent failures). Know which side a bug you care about falls on.
+- Conformance checks are sequential, fault-free and crash-free by construction. They do not replace DST for faults, concurrency or crashes; the paper's fault-tolerant comparison (§4.4) is future work here (III.10).
 - Running the code found sixteen discrepancies or surprises, none a server bug, several worth fixing: the unused `Env`, `loop.md`'s queue order, liveness wording, the `Invoke` comment, failure log kinds, an fsync with no observable justification, faults that land after Chaos ends. The three comment-only ones (liveness wording, the `Invoke` comment, the queue's drop-on-pop comment) were fixed in `a4018d5`; the rest change behaviour or logs and are still open.
-- The trip-after-restart gap (Part I §2, Chapter 9 §9.10) is the one finding that matters for durability in production. It is still open.
+- The trip-after-restart gap (Part I §2, Chapter 9 §9.10) is the one finding that matters for durability in production. It is still open. The conformance checks added three more (Part II §17 to §19): case-folding aliasing on macOS, the Copy size gap, and a doc claim ahead of the code; the first is the one that can lose data.
 - The cheapest high-value extensions are buggify sites, sometimes-assertions and swarm over fault families. The most valuable expensive one is a second node, for which the oracle needs no change at all.
 
 ## Exercises
 
 1. **Fix a discrepancy.** Pick item 1, 2 or 5 from Part II and make the documentation or code consistent (3, 4 and 16 were fixed in `a4018d5`; compare your approach with theirs using `git show a4018d5`). Run `go test ./toys3/sim -run TestGolden` afterwards: a comment fix must leave it green, and item 5 (a new log kind) must too, because log text is not in the golden file. Which item would turn it red? For item 5, make sure `TestDeterminismCanary` still passes (logging must not change the trace).
-2. **Justify or remove the tmp fsync.** Reproduce Part II §6 yourself: write mutant g (skip `FSFsyncDir` of `tmp/`) in a copy of `mutants_test.go`, run it for 2,000 seeds, and confirm it survives. Then either (a) find a change to the StorageModel or the server's temp naming under which it *is* caught, or (b) write a paragraph for `DESIGN.md` explaining why it is safe to remove. Both are good outcomes.
+2. **Justify or remove the tmp fsync.** Reproduce Part II §6 yourself: write mutant x (skip `FSFsyncDir` of `tmp/`; Chapter 15 §15.13) in a copy of `mutants_test.go`, run it for 2,000 seeds, and confirm it survives. Then either (a) find a change to the StorageModel or the server's temp naming under which it *is* caught, or (b) write a paragraph for `DESIGN.md` explaining why it is safe to remove. Both are good outcomes.
 3. **Bounded liveness.** Strengthen `Liveness` so that every request invoked in Settling must reply within 10 ms of virtual time. Run 1,000 seeds on the correct server. If anything fails, is it the server or the bound?
 4. **Measure the ext4 gap.** Change `StorageModel.Crash` so that a rename's two directory halves are resolved *together* (both kept or both reverted), as a journaling filesystem would. Re-run mutant f. Is it still caught? At which seed? What does that tell you about whether toys3's defence against f matters on ext4?
 5. **Persistent EIO.** Add a config flag that, for one stretch of Chaos, makes every `FSList` fail. Watch the server trip on every boot. What does the Liveness invariant report if the stretch extends into Settling? Is the server's behaviour (trip forever) the right one? What would you want instead?

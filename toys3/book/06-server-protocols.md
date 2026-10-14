@@ -678,24 +678,27 @@ legend: ····· waiting in reqs      [x] FS action outstanding      ┤ reply
 
 ## 6.11 The unit tests as worked examples
 
-The unit tests in `toys3/control/controller_test.go` drive the server by hand. Understanding their harness makes them easy to read.
+The unit tests in `toys3/control/controller_test.go` drive the server by hand. Understanding their harness makes them easy to read. This is the harness as it is today, at commit `3ff1385`:
 
 ```go
-// toys3/control/controller_test.go:21-31
-// harness drives a Controller by hand. FS actions are answered from an in-memory
-// map (no crash semantics: every change is immediately "durable"). Issued FS
+// toys3/control/controller_test.go:26-36 (at 3ff1385)
+// harness drives a Controller by hand. FS actions are answered by veritas.FS
+// (no crash semantics: every change is immediately durable). Issued FS
 // actions wait in pending until the test completes them.
 type harness struct {
 	t       *testing.T
 	s       *Controller
-	files   map[string][]byte // full path → raw file content
-	pending []Action          // issued FS actions, not yet completed
+	fs      *veritas.FS
+	pending []Action // issued FS actions, not yet completed
+	// fail, if set, decides the error an FS action completes with (OK = run it).
 	fail func(Action) ErrCode
 }
 ```
 
+At `10777a2`, the commit the rest of this chapter's line numbers refer to, the harness kept its own `files map[string][]byte` and executed each action against it in a private `exec`. Commit `0f46dfe` replaced that map with `veritas.FS`, the executable spec of the Storage port (Chapter 13a, §13a.5), and moved the file to the external test package `control_test` with a dot import, because `veritas` imports `control`. No test changed. The line numbers below are those of `10777a2`; add about six to find them today.
+
 - `step(b)` delivers one event and appends every FS action it returns to `pending` (`controller_test.go:48-56`).
-- `completeNext()` pops the **oldest** pending action, executes it against the map, and delivers its completion (`controller_test.go:60-68`). So the harness completes actions in FIFO issue order, which is one particular (and boring) interleaving. The simulator explores the others.
+- `completeNext()` pops the **oldest** pending action, executes it against `veritas.FS` (or fails it, if the test's `fail` hook says so), and delivers its completion (`controller_test.go:60-68`). So the harness completes actions in FIFO issue order, which is one particular (and boring) interleaving. The simulator explores the others.
 - `drain()` completes until nothing is pending, returning every action produced along the way.
 - `do(c, op)` = `step(Request)` + `drain()`.
 - `describe(acts)` renders actions compactly: temp paths become `tmp/*` (because their exact names are IOIDs, which tests should not depend on), and the server's root is `/d` (`controller_test.go:12`).
@@ -721,7 +724,7 @@ The server under test is built with `MaxObjectSize: 64` (`controller_test.go:34`
 Each expected string is the concatenation of all actions produced from the request through every completion. Read them against §6.9:
 
 - PUT: the five-step protocol, with the `/` in the key escaped as `%2F` in the object file name (`EscapeKey`, Chapter 4).
-- GET: one read, then the payload `hello` in the reply. The harness stores the *encoded* file; `DecodeObject` strips the header.
+- GET: one read, then the payload `hello` in the reply. The harness's filesystem stores the *encoded* file; `DecodeObject` strips the header.
 - COPY: GET's read followed by PUT's four steps, committing the **destination** `b/k2`.
 - DELETE: unlink, fsyncdir, `committed ... del=true`, 200.
 - GET after DELETE: 404.

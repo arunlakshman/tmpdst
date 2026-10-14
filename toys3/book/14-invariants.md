@@ -699,7 +699,7 @@ func (t *TmpCleanAfterRecovery) AfterStep(v View) []Failure {
 func (*TmpCleanAfterRecovery) AtEnd(View) []Failure { return nil }
 ```
 
-Two things to think about before you trust it. First, `Recovered` is emitted in the same step as the first requests start, and some of those may already issue `FSWrite` to new temp files; but an `FSWrite` only changes the *current* view, and the action has not even landed yet when invariants run, so the durable view of `tmp/` is unaffected at that step. Second, predict which mutant it catches. Mutant f (skip temp cleanup) is the obvious one, and it would catch f at the *first* recovery that finds a leftover, rather than waiting for the alias to be overwritten and read. Does it catch the "g" mutant from Chapter 15 (skip the recovery `FSFsyncDir(tmp)`)? Work it out: the unlinks change the current view only, so without the fsync the durable entries are still present. It should catch g immediately, which makes it a white-box invariant that kills a mutant the black-box ones cannot (Chapter 15 explains why g survives 2,000 seeds of the default invariants). Whether g is a *bug* is a different question, also discussed there.
+Two things to think about before you trust it. First, `Recovered` is emitted in the same step as the first requests start, and some of those may already issue `FSWrite` to new temp files; but an `FSWrite` only changes the *current* view, and the action has not even landed yet when invariants run, so the durable view of `tmp/` is unaffected at that step. Second, predict which mutant it catches. Mutant f (skip temp cleanup) is the obvious one, and it would catch f at the *first* recovery that finds a leftover, rather than waiting for the alias to be overwritten and read. Does it catch the "x" mutant from Chapter 15 (skip the recovery `FSFsyncDir(tmp)`; earlier printings called it "g")? Work it out: the unlinks change the current view only, so without the fsync the durable entries are still present. It should catch x immediately, which makes it a white-box invariant that kills a mutant the black-box ones cannot (Chapter 15 explains why x survives 2,000 seeds of the default invariants). Whether x is a *bug* is a different question, also discussed there.
 
 ### Example 2: no two requests on one key in flight
 
@@ -712,6 +712,12 @@ type Started struct{ Client ClientReq; Keys []string }   // name it ReqStarted t
 
 and an invariant that keeps a `map[string]control.ClientReq` of "key → request currently running" and fails on overlap. Note the map: iteration over it would be banned by `detcheck` (Chapter 8), but lookups and deletes are fine, and that is all this invariant needs. Note also that adding telemetry is a change to `control`, and every action (including `Emit`) feeds the trace hash (`trace.go:79-80`), so every seed's trace hash changes: there are new actions in every run. That is expected; determinism is about *same code, same seed*, not about stability across code changes. One more thing to do when you add a telemetry type: give it a case in `telemetryHashKey` (`trace.go:91-106`). Without one, `TestTelemetryHashKeyCoversAllTypes` fails: it reads the telemetry types from the source of package `control` and requires an explicit case for each, so the fixed `"?"` fallback stays unreachable. (Before commit `10777a2` the fallback was `%T`, which hashes the Go type *name*; Chapter 8 (§8.12) explains why a hash input that depends on a name is a trap.)
 
+## 14.12 Invariants outside the simulator
+
+The conformance checks of Chapter 13a have invariants too, with the same shape (a check after every operation, not only at the end) but a much simpler world to judge. C1 runs the controller one request at a time on fault-free storage, so after each operation it can demand *equality* where the simulator's invariants can only demand consistency: every file under `obj/`, decoded, must be exactly the payload `veritas.Store` holds for that key, in the current view and in the durable view; `tmp/` must be empty; and the controller must not have tripped (`invariant`, `toys3/sim/storecheck_test.go:280-292`, at `3ff1385`). Compare `ObjNeverTorn` (§14.5), which can only say "whatever is durable under `obj/` is a complete object", because under faults the simulator cannot know *which* object should be there.
+
+That difference is the whole trade. An exact invariant is cheap to write and gives a sharp message (`durable obj/ holds keys [], veritas ["a"]`), but it only exists where outcomes are determinate. The simulator's invariants are harder to write because they must be sound under every outcome a fault can cause. Each kind catches mutants the other cannot (Chapter 15, §15.15).
+
 ## Key takeaways
 
 - An invariant is an object with `AfterStep` and `AtEnd`. Checking after every step puts the failure next to its cause in the log.
@@ -720,6 +726,7 @@ and an invariant that keeps a `map[string]control.ClientReq` of "key → request
 - `Liveness`'s "no 500 for an op invoked in Settling" is what makes *lost* data visible to a black-box checker, because a 500 otherwise promises nothing.
 - The run stops after the first step with any failure, but every invariant reports on that step, so you can see several at once.
 - `TestCoverage` and `TestCorruptionUnreachableWithoutBitFlips` are invariants about the simulation itself: if the faults stop happening, the tests must go red.
+- Outside the simulator, the conformance checks' invariants demand exact equality with a veritas after every operation; they are sharper and only exist where nothing is indeterminate.
 - Documentation drift happens even here: `Liveness` checks that the *final* incarnation recovered, not every boot, and until commit `a4018d5` its comment and `DESIGN.md` said otherwise.
 
 ## Exercises

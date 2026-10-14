@@ -6,7 +6,7 @@ Everything up to this chapter has been about building the machine: the state mac
 
 There are exactly two entry points, and it is worth knowing both intimately:
 
-1. **`go test ./toys3/sim`** and its flags, defined in `toys3/sim/sim_test.go` and `toys3/sim/mutants_test.go`. This is the developer's loop: replay one seed, run N seeds, run for D seconds, run the mutants.
+1. **`go test ./toys3/sim`** and its flags, defined in `toys3/sim/sim_test.go` and `toys3/sim/mutants_test.go`. This is the developer's loop: replay one seed, run N seeds, run for D seconds, run the mutants. The same flags also drive the conformance checks of Chapter 13a (§16.2, *The conformance checks: same flags, different atom*).
 2. **`go run ./toys3/cmd/toys3sim`**, the parallel campaign runner in `toys3/cmd/toys3sim/main.go`. This is the "burn CPU for ten minutes and tell me what you found" tool.
 
 Both are thin. All of the interesting work happens in `sim.Run(cfg)` (`toys3/sim/config.go:198`), which takes a `Config` and returns a `Result`. Every entry point is a different way of choosing configs and summarizing results.
@@ -48,13 +48,16 @@ The `Result` (`toys3/sim/config.go:47-57`) carries `Failures` (empty means pass)
 ### The flags
 
 ```go
-// toys3/sim/sim_test.go:11-15
+// toys3/sim/sim_test.go:11-16 (at 3ff1385)
 var (
-	flagSeeds    = flag.Int("seeds", 200, "TestSeeds: number of seeds to run (from 1)")
-	flagSeed     = flag.Int64("seed", -1, "TestSeeds: replay this one seed with the event log printed on failure")
-	flagDuration = flag.Duration("duration", 0, "TestSeeds: run seeds 1, 2, ... until this much wall-clock time has passed (overrides -seeds)")
+	flagSeeds    = flag.Int("seeds", 200, "TestSeeds, TestC1, TestC2...: number of seeds to run (from 1)")
+	flagSeed     = flag.Int64("seed", -1, "TestSeeds, TestC1, TestC2...: replay this one seed (TestSeeds prints the event log on failure)")
+	flagDuration = flag.Duration("duration", 0, "TestSeeds, TestC1, TestC2...: run seeds 1, 2, ... until this much wall-clock time has passed (overrides -seeds)")
+	flagLog      = flag.Bool("log", false, "TestSeeds: with -seed, print the full event log even when the seed passes")
 )
 ```
+
+At `10777a2` the help strings said only "TestSeeds"; the conformance checks of Chapter 13a reuse the first three flags (below). The fourth, `-log`, was added in commit `93f0983`: `go test ./toys3/sim -run TestSeeds -seed=1 -log -v` prints the event log of a seed that *passes*, which removes most of the need for the throwaway programs of §16.5.
 
 and in `mutants_test.go`:
 
@@ -236,6 +239,35 @@ func TestCorruptionUnreachableWithoutBitFlips(t *testing.T) {
 
 The inverse of a coverage check: something that must *never* happen under a given configuration. With bit flips off, the correct protocol never leaves a torn file under `obj/`, so the CRC check never fires. This documents a fact about the design (the CRC is a safety net, not a mechanism) and it would fail loudly if a future change to the protocol started producing torn objects that the CRC happened to mask. Chapter 14 and Chapter 15 (mutant e) build on it.
 
+### The conformance checks: same flags, different atom
+
+The conformance checks C1, C2 and C4 (Chapter 13a) live in the same test binary and read the same three flags, through one helper that maps them onto the lockstep runner's `veritastest.Options` (`conformanceOptions`, `toys3/sim/storecheck_test.go:507-524` at `3ff1385`). C3 lives in `toys3/prod`, which declares its own copies of the flags with a default of 20 seeds, because each of its operations touches a real disk (`toys3/prod/conformance_test.go:16-20`).
+
+The atom is different. A DST seed is one run of `sim.Run(DefaultConfig(seed))`: thousands of steps, crashes, faults, a concurrent workload. A conformance seed is one sequence of 100 operations generated from the seed and run in lockstep against an implementation and its veritas, sequential and fault-free. Seed 132 of C1 has nothing to do with seed 132 of `TestSeeds`. But the operational rules carry over unchanged: one number names one input, it replays exactly, and a failure prints its own replay command.
+
+```sh
+go test ./toys3/sim -run 'TestC[124]' -seeds=2000 -v      # C1, C2, C4 on seeds 1..2000 (about 3 s)
+go test ./toys3/sim -run TestC1 -duration=5s -v           # C1 for five seconds, per backend
+go test ./toys3/sim -run 'TestC1ControllerMatchesVeritasStore/veritasFS$' -seed=42 -v   # replay one seed
+go test ./toys3/prod -run TestC3 -seeds=50 -v             # C3 on a real disk
+```
+
+Three things to know when running them:
+
+- **`-duration` applies per subtest.** C1 and C4 run once per storage backend (`veritasFS` and `StorageModel`), so `-duration=5s` takes ten seconds and reports two seed counts:
+
+  ```
+  $ go test ./toys3/sim -run TestC1 -duration=5s -v
+      storecheck_test.go:533: 26024 seeds × 100 operations passed
+      storecheck_test.go:533: 24293 seeds × 100 operations passed
+  --- PASS: TestC1ControllerMatchesVeritasStore (10.00s)
+  ```
+
+- **Replay names the backend.** A failing C1 or C4 seed prints a `-run` pattern ending in `/veritasFS$` or `/StorageModel$`, so the replay runs only the backend that failed. A passing replay says `seed 42: 100 operations passed`.
+- **`-run TestC1` also matches `TestC1Sequences`,** the pinned regression sequences. That is harmless (they take no time) and intended: whenever you run C1, its old failures run too.
+
+A conformance failure is shrunk before it is reported, so the report is already the short sequence you want; §16.7 contrasts that with shrinking a DST seed by hand.
+
 ### `TestCatchesBugs` and `-mutant-seeds`
 
 Covered in depth in Chapter 15. The operational facts for campaigns: each mutant runs seeds 1..`-mutant-seeds` (default 500) twice, once with `DefaultInvariants` and once with `BlackBoxInvariants`, stopping at the first failing seed each time. A mutant that survives every seed *fails the test*: the simulator is supposed to have teeth.
@@ -254,7 +286,7 @@ d2 is first caught at seed 132, so 50 seeds is not enough. Raise it when you add
 
 ### How long does `go test ./toys3/sim` take?
 
-All of the above together (canary, 200-seed sweep, 200-seed coverage, 200-seed CRC check, the storage model, queue and oracle unit tests, all seven mutants twice, and, since the refactor, the golden test of Chapter 8 §8.12 with its 550 seeds and 14 mutant searches):
+All of the above together (canary, 200-seed sweep, 200-seed coverage, 200-seed CRC check, the storage model, queue and oracle unit tests, all seven mutants twice, and, since the refactor, the golden test of Chapter 8 §8.12 with its 550 seeds and 14 mutant searches) took about eight seconds at `10777a2`:
 
 ```
 $ time go test ./toys3/sim -count=1
@@ -262,7 +294,18 @@ ok  	manifester/toys3/sim	7.669s
 go test ./toys3/sim -count=1  7.57s user 0.55s system 98% cpu 8.277 total
 ```
 
-About eight seconds, of which the golden test is roughly three (the first edition measured about five seconds before it existed). That is the budget to defend. A DST suite that takes five seconds runs on every save; one that takes five minutes runs before lunch; one that takes an hour runs never. Long campaigns belong in the campaign runner.
+of which the golden test is roughly three (the first edition measured about five seconds before it existed). At `3ff1385` the package also runs conformance checks C1, C2 and C4 at the default 200 seeds (well under a second) and `TestMutantTable`, which searches DST and C1 for all eleven mutants (about three seconds, most of it the 500 DST seeds that fail to catch mutant i). The whole module's toys3 tests now take about twelve seconds:
+
+```
+$ time go test ./toys3/... -count=1
+ok  	manifester/toys3/control	0.539s
+ok  	manifester/toys3/format	1.006s
+ok  	manifester/toys3/prod	2.410s
+ok  	manifester/toys3/sim	11.374s
+ok  	manifester/toys3/veritas	1.150s
+ok  	manifester/toys3/veritas/veritastest	1.508s
+go test ./toys3/... -count=1  11.40s user 1.25s system 106% cpu 11.910 total
+``` That is the budget to defend. A DST suite that takes five seconds runs on every save; one that takes five minutes runs before lunch; one that takes an hour runs never. Long campaigns belong in the campaign runner.
 
 ## 16.3 The campaign runner, line by line (`toys3/cmd/toys3sim/main.go`)
 
@@ -637,7 +680,9 @@ This sensitivity is also why the trace hash is a fingerprint of a commit's *beha
 
 ### Shrinking by hand
 
-toys3 has no automatic shrinker (property-testing frameworks call it shrinking; FoundationDB and others reduce failing runs by re-running with fewer clients or fewer faults). You can still shrink manually, by holding the seed fixed and turning knobs in a throwaway config:
+DST seeds have no automatic shrinker (property-testing frameworks call it shrinking; FoundationDB and others reduce failing runs by re-running with fewer clients or fewer faults). The conformance checks of Chapter 13a do have one, and the contrast is instructive: a conformance failure is a *sequence of operations*, so the shrinker can delete operations and simplify their arguments and replay the rest, because nothing else depends on how the sequence was generated. A DST failure is a *seed*, and everything in the run (which client issues what, when each fault fires, when each crash comes) is drawn from one stream; delete one request and every later draw shifts, so the "shrunk" run is a different universe, not a smaller version of the same one. That is why the first thing to try when a DST seed fails is often to find the same bug with a conformance check, if it is a bug a conformance check can see (Chapter 15, §15.15).
+
+You can still shrink a DST failure manually, by holding the seed fixed and turning knobs in a throwaway config:
 
 - `cfg := sim.BaseConfig(seed)` instead of `DefaultConfig` removes the swarm variation.
 - `cfg.Workload.Clients = 1` removes concurrency. If the bug survives, it is not a concurrency bug.
@@ -690,7 +735,7 @@ jobs:
 Three steps:
 
 1. **`go vet ./...`**: ordinary hygiene.
-2. **`go test ./...`**: every test in the module, which for toys3 includes the full `go test ./toys3/sim` (canary, 200-seed sweep, coverage, CRC reachability, all mutants), `toys3/control`'s exact-sequence tests, and `toys3/prod`'s end-to-end HTTP tests on a real temp directory. Also `tools/detcheck`'s own analyzer test.
+2. **`go test ./...`**: every test in the module, which for toys3 includes the full `go test ./toys3/sim` (canary, 200-seed sweep, coverage, CRC reachability, all mutants, the mutant table, and conformance checks C1, C2 and C4 at 200 seeds), `toys3/control`'s exact-sequence tests, `toys3/veritas`'s tests and the conformance kit's own tests, and `toys3/prod`'s end-to-end HTTP tests and conformance check C3 (20 seeds) on a real temp directory. Also `tools/detcheck`'s own analyzer test. One consequence for C3: CI runs on Linux, where `TestC3CaseSensitive` runs instead of skipping (Chapter 13a, §13a.13).
 3. **`scripts/ci-determinism.sh`**: the determinism gate, covered in Chapter 8. It runs detcheck over `./core/... ./sim/...` and every toys3 package except `prod` and the commands (derived with `go list`, so today `toys3/control`, `toys3/format` and `toys3/sim`), checks that every third-party module those packages depend on has an audit record, and runs `TestDeterminismCanary` in every simulator package that has one. A run while writing this chapter:
 
 ```
@@ -709,9 +754,10 @@ What CI does *not* do is run a long campaign. A campaign is open-ended by nature
 
 | When | What | Budget |
 |---|---|---|
-| Every save | `go test ./toys3/sim` | ~5 s |
+| Every save | `go test ./toys3/sim` | ~11 s |
 | Every push | the workflow above | ~1 min |
 | Nightly | `toys3sim -duration 30m -check-determinism -start-seed $(date +%s)` | 30 min × cores |
+| Nightly | `go test ./toys3/sim -run 'TestC[124]' -duration=10m` and `go test ./toys3/prod -run TestC3 -duration=10m` | 10 min per backend (C1 and C4 have two) |
 | Before a release | a long campaign from seed 1 plus the mutants at `-mutant-seeds=5000` | hours |
 
 Using a time-derived `-start-seed` for the nightly job means each night explores fresh universes instead of re-running the same ones; the printed repro line still contains the absolute seed, so nothing is lost.
@@ -750,6 +796,7 @@ Every seed passed, and all 27,276 determinism replays reproduced their trace has
 - Read the stats line as a coverage report, not just a pass/fail. `midput`, `torn`, `lost`/`kept`, `readcorrupt`, `trips` and `tempsrm` tell you the adversary reached the places it claims to; `maxwin` and `widened` tell you how hard the oracle is working.
 - `reqs = 200 + 400 + 404 + 500 + indet` is an identity worth checking; `corruptdet ≤ readcorrupt` is another.
 - Seeds bisect, but RNG-consumption changes reshuffle universes. Keep durable regressions as mutants, not just as seed numbers.
+- The conformance checks reuse `-seeds`, `-seed` and `-duration` (per backend), but their atom is a 100-operation sequence, not a run. Their failures arrive already shrunk, as a Go literal that survives any change to the generator.
 
 ## Exercises
 
@@ -760,6 +807,7 @@ Every seed passed, and all 27,276 determinism replays reproduced their trace has
 5. **Profile the oracle.** Run `toys3sim -duration 30s -workers 1` twice: once as is, once after changing `QuiesceEvery` in `BaseConfig` from 8 ms to 32 ms. Compare `seeds/s`, `maxwin` and `widened`. Explain the trade-off you just measured.
 6. **Shard a campaign.** Run two `toys3sim` processes at once with `-start-seed 1` and `-start-seed 1000000` and `-workers` set to half your cores each. Why is it safe to add their `seeds` counts but not to compare their `maxwin` values as if they came from the same population?
 7. **Bisect a planted bug.** On a throwaway branch, make three commits: an innocent refactor, the mutant-a change applied to the real server (drop the `FSFsyncDir(obj)` step), another innocent change. Use `git bisect run` with `go test ./toys3/sim -run TestSeeds -seed=1` to find the bad commit.
+8. **A conformance campaign.** Run `go test ./toys3/sim -run 'TestC1ControllerMatchesVeritasStore' -duration=1m -v` and `go test ./toys3/sim -run 'TestSeeds$' -duration=1m -v`. Compare seeds per second. Then plant an off-by-one in the size check directly in `onRequest`, the other way round from mutant i (change `>` to `>=`, so a Put of exactly `MaxObjectSize` bytes is rejected) and run both again for ten seconds. Which finds it, and how long is the report? Revert.
 
 ## Further reading
 

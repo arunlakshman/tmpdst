@@ -106,7 +106,7 @@ The term "sans-I/O" comes from the Python networking community (the `sans-io` do
 
 (This is `toys3/DESIGN.md:73-82`, redrawn.) The server does not *call* the filesystem. It *asks* for a filesystem operation by returning an `FSWrite` value, and it later *learns* the outcome when an `FSWriteDone` value is fed back in. Every one of the four problems from §2.1 dissolves:
 
-1. **I/O is separated from logic.** `Step` can be called from a unit test with hand-made events (`toys3/control/controller_test.go` does exactly this, with no filesystem at all), from the simulator with completions produced by a storage model, and from production with completions produced by real `os` calls.
+1. **I/O is separated from logic.** `Step` can be called from a unit test with hand-made events (`toys3/control/controller_test.go` does exactly this, with no real filesystem at all: a map from path to bytes, `veritas.FS`, answers its actions; Chapter 13a), from the simulator with completions produced by a storage model, and from production with completions produced by real `os` calls.
 2. **Concurrency is in the data.** Many requests are in flight at once, but each in-flight request is a record (`*request`, `toys3/control/controller.go:51-61`) holding the IOID it is waiting for. The order in which completions arrive is decided by whoever calls `Step`, which in simulation is a seeded priority queue.
 3. **Time is explicit.** Each `Event` carries `At` (`toys3/control/event.go:5-8`). The server never reads a clock.
 4. **A crash is a value.** In the simulator, a crash is simply: stop calling `Step` on this server object, throw it away, drop every queued event addressed to it, resolve the storage model's volatile state, and later build a new server with the `Factory`. "Applied at t1, response lost at t2" is just two separate queue entries, an `fs-land` at t1 and a `deliver` at t2, with a crash scheduled in between (Chapter 10).
@@ -265,7 +265,21 @@ import (
 )
 ```
 
-`controller.go`, `recovery.go` and `hash.go` import exactly one package, `manifester/toys3/format` (the on-disk contract). The enforcement is stronger than the rule asks for: instead of `depguard` with a *deny* list, the repository uses its own analyzer, `tools/detcheck`, with an *allow* list (`tools/detcheck/allow.txt`), which fails closed: a new import is rejected until someone adds it deliberately. The decision is recorded as decision I in `docs/decisions.md`. `scripts/ci-determinism.sh:12-20` runs it on every toys3 package except `prod` and the commands (today `toys3/control`, `toys3/format` and `toys3/sim`); the list is derived with `go list`, so a new pure package cannot be forgotten. Chapter 8 covers detcheck in detail, including an amusing bug it had with Go's generated test mains.
+`controller.go`, `recovery.go` and `hash.go` import exactly one package, `manifester/toys3/format` (the on-disk contract). The enforcement is stronger than the rule asks for: instead of `depguard` with a *deny* list, the repository uses its own analyzer, `tools/detcheck`, with an *allow* list (`tools/detcheck/allow.txt`), which fails closed: a new import is rejected until someone adds it deliberately. The decision is recorded as decision I in `docs/decisions.md`. `scripts/ci-determinism.sh:12-20` runs it on every toys3 package except `prod` and the commands (today `toys3/control`, `toys3/format`, `toys3/sim`, `toys3/veritas` and `toys3/veritas/veritastest`); the list is derived with `go list`, so a new pure package cannot be forgotten. The last two are the proof: they were added in commits `0f46dfe` and `7fe8e4f`, and the gate picked them up with no change to the script. Chapter 8 covers detcheck in detail, including an amusing bug it had with Go's generated test mains.
+
+The whole package map, with each package's side of that line:
+
+| Package | What it is | Deterministic (detcheck) | Chapters |
+|---|---|---|---|
+| `toys3/control` | the controller: pure state machine and the Storage port it owns | yes | 3, 5, 6, 7 |
+| `toys3/format` | the on-disk object format and layout (a shared kernel) | yes | 4 |
+| `toys3/sim` | the SIL testbench: simulator, storage model, workload, oracle, invariants; in its tests, conformance checks C1, C2 and C4 | yes | 10 to 16, 13a |
+| `toys3/veritas` | the veritases: `Store` (the object store) and `FS` (the Storage port); also the controller tests' fake | yes | 13a |
+| `toys3/veritas/veritastest` | the conformance-check kit: seeded generator, lockstep runner, shrinker, the shared Storage-port check | yes | 13a |
+| `toys3/prod` | the real runtime: `os` calls, HTTP, the event loop; in its tests, conformance check C3 on a real disk | no | 9, 13a |
+| `toys3/cmd/toys3`, `toys3/cmd/toys3sim` | the server binary and the parallel campaign runner | no | 9, 16 |
+
+The arrows point one way. `veritas` imports `control` and `format`, because a veritas speaks the controller's language (`Op`, `Status`, `Actuation`, `Feedback`); `control` imports neither `veritas` nor `sim`. That direction is why the controller's own tests had to move to an external test package when they started using `veritas.FS` (Chapter 13a, §13a.5).
 
 Note that the allow-list contains `hash/crc32` but not `hash/fnv`. That is why the controller carries its own four-line FNV-1a (`toys3/control/hash.go:34-56`, with the comment "hash/fnv is not on the determinism allow-list, and it is four lines").
 
@@ -326,6 +340,8 @@ type Executor interface {
 	Execute(a control.Actuation, done func(control.EventBody))
 }
 ```
+
+The port has a third implementation that is neither real nor adversarial: `veritas.FS` (`toys3/veritas/fs.go`), a map from path to bytes that answers each actuation synchronously and never fails. It is the spec the other two are checked against on the happy path (conformance checks C2 and C3, Chapter 13a), and the fake the controller's unit tests run on.
 
 Note that this interface lives in `prod`, not in `control`. The simulator does *not* implement `Executor`; it interprets the same actions with `StorageModel.Plan` and `StorageModel.Land`. This matches `docs/lessons.md` §0: "The simulator does **not** implement them. It implements *engines* that own state, draw from the single seeded RNG, and schedule completions on one global queue."
 
@@ -445,6 +461,8 @@ The RNG is not `*rand.Rand` (which detcheck forbids) but `sim.Rand`, a hand-writ
 | (filesystem-specific) | torn writes (`TornWriteProb`), un-synced loss, background writeback (`WritebackProb`), read bit flips (`ReadCorruptProb`), fsyncgate (`FsyncGate`) |
 
 Not modelled: duplicated responses, timeouts (there are no timers to time out) and partitions (there is no network). Chapter 11 is entirely about the StorageModel.
+
+The rule has one deliberate exception. `veritas.FS` is a fake of the same port that is as *un*-adversarial as possible: no faults, no crashes, every change durable at once. It does not contradict rule 12, because it is not used for simulation. It is a spec: the conformance checks of Chapter 13a use it to ask whether the adversarial fake and the real disk agree on what should happen when nothing goes wrong, which is a question an adversarial fake cannot answer about itself.
 
 ### Rule 13: Check invariants after every step
 
@@ -579,7 +597,7 @@ This is not a coat of paint. Each of those names now appears in the code (`contr
 - In the sans-I/O shape, concurrency lives in data (records of in-flight requests keyed by IOID), not in threads. Whoever calls `Step` decides the interleaving.
 - Events and Actions are plain data so they can be logged, hashed, compared, replayed and rewritten by mutants. Byte slices are a reference type, so "immutable once sent" is a convention backed by copying at the fake's boundary.
 - `Factory` makes "memory is disposable" structural: a crash throws the object away.
-- The vocabulary between the controller and the disk is a port the controller owns (`Actuation`, `Feedback`), with two adapters: the real `OSExecutor` and the simulated `StorageModel`.
+- The vocabulary between the controller and the disk is a port the controller owns (`Actuation`, `Feedback`), with two adapters, the real `OSExecutor` and the simulated `StorageModel`, and one executable spec, `veritas.FS`, that both are checked against.
 - toys3 follows `loop.md` closely. Its deviations (time on events instead of `Now()`, counters instead of `NewID()`, no timers, `(At, Tie, Seq)` ordering) are each either simplifications or improvements.
 
 ## Exercises

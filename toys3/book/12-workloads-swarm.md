@@ -78,7 +78,7 @@ The defaults live in `BaseConfig`:
 Some arithmetic worth having in your head:
 
 - The mix weights sum to 107. So each issued request is a PUT with probability 40/107 ≈ 37%, a GET 37%, a DELETE 9%, a COPY 14%, and an invalid request about 1.9%. In seed 1 (225 requests) we observed `400=3`, about 1.3%: the right order of magnitude for a 2/107 coin.
-- `MaxValueSize` is 40 and the server's `MaxObjectSize` is 64 (`config.go:173`). So **no valid PUT is ever oversize**. The only 400s in a simulation come from the `Invalid` slot. The oversize branch of `onRequest` (`controller.go:154`) is covered by the unit test `TestBadRequest` in `controller_test.go`, not by the simulator. (That is an exercise below.)
+- `MaxValueSize` is 40 and the server's `MaxObjectSize` is 64 (`config.go:173`). So **no valid PUT is ever oversize**. The only 400s in a simulation come from the `Invalid` slot. The oversize branch of `onRequest` (`controller.go:154`) is covered by the unit test `TestBadRequest` in `controller_test.go`, not by the simulator. (That is an exercise below.) It is also covered by conformance check C1 (Chapter 13a), whose Put sizes are deliberately biased to 0, 64 and 65 bytes, and the gap has a measured cost: mutant i, an off-by-one in this very check, is never caught by DST and is caught by C1 in one operation (Chapter 15, §15.15).
 - Think time is uniform in [0, 1 ms]. DeadTime of a single FS action is 20 µs to 1.5 ms to land plus 0 to 0.5 ms to deliver (`config.go:167-168`). A PUT takes five FS round trips, so typically several milliseconds. With four clients and sub-millisecond think times, there are usually two to four requests in flight at any instant, and on a 3-key set they frequently collide.
 
 ### Defensive normalization
@@ -634,7 +634,7 @@ What `TestCoverage` does *not* check is just as informative. There is no entry f
 
 For completeness, the things this workload leaves untested, each of which could be an extension (Chapter 17):
 
-- **Large values and the size limit.** Values are at most 40 bytes; the 64-byte server limit is never hit in simulation.
+- **Large values and the size limit.** Values are at most 40 bytes; the 64-byte server limit is never hit in simulation. Conformance check C1 covers the boundary (Chapter 13a, §13a.8), which is a division of labour, not a fix: the boundary is still never hit *under faults*.
 - **Key escaping.** All keys are `k<n>`; the `%XX` escaping path and the 255-byte name limit are tested only by unit and production tests.
 - **Client retries.** A client whose request was abandoned or failed just moves on to a new random request. Real S3 clients retry, and retries interact with idempotency (`docs/lessons.md` §1). A retrying client would also need the oracle to understand that two invocations may be the same logical operation.
 - **Reads of values written in a previous run.** Every run starts from an empty disk. Upgrade and format-compatibility testing would need a pre-populated StorageModel.

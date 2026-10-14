@@ -4,7 +4,7 @@
 
 Two hundred passing seeds feel good. A million passing seeds feel better. But a passing run is evidence of only one thing: that the invariants did not fire. It says nothing, on its own, about whether they *could* have fired. A simulator whose storage model never actually loses un-synced data, or whose oracle accepts everything, or whose crash injection is silently switched off, will pass every seed forever.
 
-This chapter is about the discipline that answers "would we have noticed?": **mutation testing**. toys3 ships seven deliberately broken servers in `toys3/sim/mutants_test.go`, each differing from the real server in exactly one protocol step, and a test (`TestCatchesBugs`) that fails unless the simulator catches every one of them. We will look at how the mutants are built (there is real craft in making a bug that is *only* one bug), dissect each one's failing run line by line using logs produced for this book, reproduce the table in `DESIGN.md`, look at an ablation that shows how much a fault model's realism matters, and then talk about the uncomfortable cases: mutants that are silently dead, and mutants that survive.
+This chapter is about the discipline that answers "would we have noticed?": **mutation testing**. toys3 ships seven deliberately broken servers in `toys3/sim/mutants_test.go`, each differing from the real server in exactly one protocol step, and a test (`TestCatchesBugs`) that fails unless the simulator catches every one of them. Four more, functional rather than durability bugs, arrived with the conformance checks of Chapter 13a; §15.15 adds them and a second column to the table. We will look at how the mutants are built (there is real craft in making a bug that is *only* one bug), dissect each one's failing run line by line using logs produced for this book, reproduce the table in `DESIGN.md`, look at an ablation that shows how much a fault model's realism matters, and then talk about the uncomfortable cases: mutants that are silently dead, and mutants that survive.
 
 ---
 
@@ -595,24 +595,24 @@ So, the guards. In rough order of cost:
 
 1. **One protocol step per mutant.** Each wrapper changes one kind of event or action. If you find yourself writing a mutant that changes two, write two mutants.
 2. **A liveness stat.** Pick a counter the mutant must move and check it. For f, `tempsrm=0` across every seed (under the correct server it is positive in nearly every seed with a crash). For a skipper, count how many actions it swallowed. For `noTrip`, count doomed requests. A mutant whose counter stays at zero over 200 seeds is dead.
-3. **A trace-hash diff against the real server.** Run seed 1 with the real factory and with the mutant. If the trace hashes are equal, the mutant never changed anything observable. For this book: correct server seed 1 is `trace=1ca97eb77a9044e1`; mutant f at seed 1 passes (not caught) but its trace is `f9a6442332345f03`, with `tempsrm=0`; the "g" mutant below is `c4f18946dc209c4e`. Both alive. This could be an automated test (see exercise 3).
+3. **A trace-hash diff against the real server.** Run seed 1 with the real factory and with the mutant. If the trace hashes are equal, the mutant never changed anything observable. For this book: correct server seed 1 is `trace=1ca97eb77a9044e1`; mutant f at seed 1 passes (not caught) but its trace is `f9a6442332345f03`, with `tempsrm=0`; the "x" mutant below is `c4f18946dc209c4e`. Both alive. This could be an automated test (see exercise 3).
 4. **Check *what* caught it.** `TestCatchesBugs` logs the invariant and the message. If mutant c were caught by `panic` or `protocol`, that would be a mutant bug, not a success.
 
 ## 15.13 Surviving mutants: equivalent, or weak tests?
 
 A mutant that survives is either an **equivalent mutant** (it changes the code but not the observable behaviour, so no test *could* kill it) or evidence of a **weak test suite** (it is a real bug, and the invariants or the fault model cannot see it). Distinguishing the two is the famous hard problem of mutation testing; there is no algorithm for it in general.
 
-Here is a concrete one. While writing this book, a mutant "g" was tried in an out-of-tree harness: skip recovery's `FSFsyncDir(tmp)` (a `skipper` whose predicate matches `FSFsyncDir` on `format.TmpDir(cfg.Dir)`). Recovery unlinks the leftovers but never makes the unlinks durable. Run against seeds 1..2000 with the default invariants: **not caught**.
+Here is a concrete one. While writing this book, a mutant "x" was tried in an out-of-tree harness (earlier printings called it "g"; that letter now names a functional mutant in the code, §15.15): skip recovery's `FSFsyncDir(tmp)` (a `skipper` whose predicate matches `FSFsyncDir` on `format.TmpDir(cfg.Dir)`). Recovery unlinks the leftovers but never makes the unlinks durable. Run against seeds 1..2000 with the default invariants: **not caught**.
 
-Is that a weak test, or is g equivalent? Reason it through with the StorageModel's model:
+Is that a weak test, or is x equivalent? Reason it through with the StorageModel's model:
 
 - After recovery's unlinks, each leftover `tmp/X` is `{cur: absent, durable: I}`. If the server later writes `tmp/X` in this incarnation (IO X), `StorageModel.write` sees the name absent in the *current* view and creates a **fresh** inode J (`storagemodel.go:309-315`). There is no aliasing within the incarnation.
 - If a crash happens, `tmp/X` may revert to I (the old leftover, possibly an alias of a committed object). The next recovery lists and unlinks it again *before* any write is issued, because requests queue behind recovery.
 - So the un-synced unlinks can resurrect garbage, but garbage is always cleaned before it can be written through.
 
-Under this model, g appears to be an **equivalent mutant**: the recovery fsync of `tmp/` is belt-and-braces. That is itself a finding (Chapter 17 lists it among the surprises), and it raises a design question rather than answering one: is the fsync there because a *real* filesystem has some behaviour the StorageModel lacks (say, an `fsync` of a directory being needed before a create in the same directory is ordered after the unlink), or is it simply cheap insurance? Either answer is defensible. What is not defensible is not knowing.
+Under this model, x appears to be an **equivalent mutant**: the recovery fsync of `tmp/` is belt-and-braces. That is itself a finding (Chapter 17 lists it among the surprises), and it raises a design question rather than answering one: is the fsync there because a *real* filesystem has some behaviour the StorageModel lacks (say, an `fsync` of a directory being needed before a create in the same directory is ordered after the unlink), or is it simply cheap insurance? Either answer is defensible. What is not defensible is not knowing.
 
-And a white-box invariant *can* kill g: Chapter 14's sketched `TmpCleanAfterRecovery` ("when `Recovered` is emitted, nothing under `tmp/` is durable") fires immediately. Whether you want that invariant is the same design question in another form: invariants define what the system promises, and a promise nobody depends on is a cost.
+And a white-box invariant *can* kill x: Chapter 14's sketched `TmpCleanAfterRecovery` ("when `Recovered` is emitted, nothing under `tmp/` is durable") fires immediately. Whether you want that invariant is the same design question in another form: invariants define what the system promises, and a promise nobody depends on is a cost.
 
 ## 15.14 Mutation testing as a habit
 
@@ -622,7 +622,69 @@ Some practical habits that fall out of this chapter:
 - **Every change to the fault model reruns the mutants**, and you compare first-catch seeds before and after. `TestCatchesBugs` is cheap (2.25 s here).
 - **Every real bug you fix becomes a mutant.** Reintroduce it as a wrapper; confirm the simulator catches it; keep it in the list. That is how the table grows from seven rows to seventy.
 - **Record the black-box column.** It tells you which bugs a real user would see, and how soon.
-- **Treat survivors as research questions**, not as failures to hide. g taught us something about the recovery protocol.
+- **Treat survivors as research questions**, not as failures to hide. x taught us something about the recovery protocol, and i (§15.15) taught us something about the workload.
+- **Ask which *kind* of check should catch each mutant.** A durability bug belongs to DST; a functional bug should also be caught by a conformance check, in one or two operations. A mutant that only one kind can see marks the boundary between them.
+
+## 15.15 Functional mutants and a second column
+
+The seven mutants above are all durability bugs: each breaks *how* a request survives faults. None of them changes *what* a request does when nothing goes wrong, and that is no accident: the oracle and the white-box invariants were built to catch durability bugs, so those were the bugs written to test them. When toys3 gained conformance checks (Chapter 13a), the mutant list gained four bugs of the other kind, in a separate list so that `TestCatchesBugs` and the golden file of Chapter 8 are unchanged:
+
+```go
+// toys3/sim/mutants_test.go:503-508 (at 3ff1385)
+var functionalMutants = []mutant{
+	{"g-copy-to-src", mutCopyToSrc},
+	{"h-delete-missing-ok", mutDeleteMissingOK},
+	{"i-size-off-by-one", mutSizeOffByOne},
+	{"j-recovery-deletes-obj", mutRecoveryDeletesObj},
+}
+```
+
+They use the same techniques as §15.2, plus one new wrapper:
+
+- **g, Copy writes to its source key**, is a `requestRewriter`: it rewrites the *incoming* `Request` so that `Copy(src, dst)` becomes `Copy(src, src)`. The controller then does a perfectly correct self-copy and replies 200, and `dst` is untouched.
+- **h, Delete of a missing key replies 200**, watches the Delete requests it has seen and rewrites a 404 `Reply` to one of them into a 200.
+- **i, the size check is off by one**, needs no wrapper at all: its factory builds the real controller with `MaxObjectSize + 1`, which is exactly the behaviour of `len(data) > max+1` in place of `len(data) > max`.
+- **j, recovery also unlinks everything in `obj/`**, holds back the controller's first recovery action, issues its own `FSList(obj)` and one `FSUnlink` per name (with IOIDs far above any the controller uses, so their completions can be swallowed), and only then releases the real recovery.
+
+`TestMutantTable` (`toys3/sim/mutanttable_test.go`) runs all eleven mutants through DST (seeds 1..500, default invariants) and through conformance check C1 on both of its storage backends (seeds 1..200), and fails if anything differs from a pinned table, which is the one in `DESIGN.md`:
+
+| Variant | DST: caught by | First seed | Black-box only | C1: seed, shrunk ops |
+|---|---|---|---|---|
+| a. skip `FSFsyncDir(obj/)` | acked-is-durable | 1 | linearizable, seed 1 | — / 1, 1 |
+| b. skip the temp file's `FSFsync` | obj-never-torn | 1 | liveness, seed 2 | — / 1, 1 |
+| c. reply 200, then rename and fsync | acked-is-durable | 1 | linearizable, seed 1 | — (by design) |
+| d. 500 without `Trip` after any post-write error | obj-never-torn | 1 | liveness, seed 20 | — (by design) |
+| d2. same, only for a failed `FSFsyncDir(obj/)` | linearizable | 132 | linearizable, seed 132 | — (by design) |
+| e. skip the CRC check on read | no-corrupt-reads | 18 | no-corrupt-reads, seed 18 | — (by design) |
+| f. recovery skips temp cleanup | linearizable | 20 | linearizable, seed 20 | 1, 1 |
+| g. Copy writes to its source key | linearizable | 1 | linearizable, seed 1 | 1, 2 |
+| h. Delete of a missing key replies 200 | linearizable | 1 | linearizable, seed 1 | 1, 1 |
+| i. size check off by one (`MaxObjectSize+1` accepted) | **not caught in 500 seeds** | — | — | 1, 1 |
+| j. recovery also unlinks everything in `obj/` | linearizable | 1 | linearizable, seed 1 | 1, 2 |
+
+The C1 column reads "seed, length of the shrunk sequence"; where the two backends differ it is written `veritas.FS / StorageModel`. Running `go test ./toys3/sim -run TestMutantTable -v` logs every shrunk sequence; the C1 catches are:
+
+```
+f   stRestartLeftovers(1)              invariant: tmp/ not empty at quiescence: /d/tmp/0000010000000001
+g   stPut("b", 0), stCopy("b", "a")    invariant: current obj/ holds keys ["b"], veritas ["a" "b"]
+h   stDelete("a")                      replied 200 "", want 404 ""
+i   stPut("a", 65)                     replied 200 "", want 400 ""
+j   stPut("a", 0), stRestart()         invariant: current obj/ holds keys [], veritas ["a"]
+a   stPut("a", 0)                      invariant: durable obj/ holds keys [], veritas ["a"]   (StorageModel only)
+b   stPut("a", 0)                      invariant: durable obj/: "a" is torn or corrupt        (StorageModel only)
+```
+
+Four things stand out.
+
+**i is the first mutant DST cannot catch.** Not slowly: never. The simulator's clients write values of 12 to 40 bytes (`MaxValueSize: 40`, `toys3/sim/config.go:157`) and the controller's limit is 64, so no Put ever reaches the size check's boundary and mutant i behaves identically to the real server in every seed. It is the ShardStore paper's missed cache bug in miniature (Chapter 13a, §13a.11): a limit the tests never reached. C1 finds it in one operation, `stPut("a", 65)`, because its sizes are biased to exactly the edges of the limit. Notice that `TestMutantTable` *accepts* this miss: unlike `TestCatchesBugs`, it pins what each check catches rather than requiring every check to catch everything.
+
+**C1 cannot see c, d, d2 and e, by design.** It runs every storage command to completion before it compares anything, so an ack sent before the rename (c) looks exactly like a correct one; and it has no I/O errors (d, d2) and no bit flips (e). Each row carries its reason in the table's `why` field, and the test fails if C1 misses a mutant without one.
+
+**a and b are caught only on `StorageModel`.** On `veritas.FS` every change is durable at once, so a skipped fsync is invisible. `StorageModel` with no disturbances still keeps durable and current state apart, and C1's invariant checks `obj/` in *both* views, so the first Put exposes the skipped fsync without any crash.
+
+**f went from invisible to one operation.** When C1 was first written it could not see f at all: with no crashes, `tmp/` was always empty at a restart, so recovery's cleanup had nothing to do. A coverage report showed the unlink path never ran; planting leftover temp files before half the restarts (`stRestartLeftovers`) fixed the coverage and the mutant together (Chapter 13a, §13a.11). Compare that with §15.10's thirteen-crash, two-incarnation story behind DST's catch at seed 20.
+
+The lesson extends §15.14: a mutant table with only one kind of check in it tells you what that check can see, not what your tests can see. The column that matters most is the one that says "—".
 
 ## Key takeaways
 
@@ -632,7 +694,8 @@ Some practical habits that fall out of this chapter:
 - Every row of the `DESIGN.md` table reproduces. White-box invariants catch most mutants at seed 1 and without a crash; black-box invariants catch all of them eventually, b and d only through liveness, d2 and f only through linearizability.
 - Mutant f's 20-seed catch depends on both background writeback and swarm testing; without either it takes 429 seeds. Fault-model realism and workload variety are first-class concerns.
 - A mutant can be dead or wrong. Guard with one-step discipline, liveness counters (`tempsrm=0`), trace-hash diffs against the real server, and by checking *which* invariant caught it.
-- A surviving mutant is either equivalent or a gap. The recovery `FSFsyncDir(tmp)` appears to be equivalent under the current StorageModel model.
+- A surviving mutant is either equivalent or a gap. The recovery `FSFsyncDir(tmp)` (mutant x) appears to be equivalent under the current StorageModel model; mutant i is a real gap in DST's workload, which never Puts more than 40 bytes against a 64-byte limit.
+- The functional mutants g to j are caught by C1 in one or two shrunk operations. C1 cannot see c, d, d2 or e (they need a fault, a crash or a concurrent reader), and sees a and b only through `StorageModel`'s durable view. DST and the conformance checks cover each other's blind spots.
 
 ## Exercises
 
@@ -653,12 +716,12 @@ Some practical habits that fall out of this chapter:
 2. **Reply before the directory fsync only.** Add to the `mutants` list:
 
    ```go
-   {"h-ack-before-dir-fsync", func(env control.Env, cfg control.Config) control.Machine {
+   {"k-ack-before-dir-fsync", func(env control.Env, cfg control.Config) control.Machine {
        return &skipper{inner: control.New(env, cfg), deferReal: true, skip: isObjFsyncDir(cfg.Dir)}
    }},
    ```
 
-   Predict, before running: which invariant catches it, at which seed, and does the black-box suite catch it at seed 1 like c, or later? Unlike c, the rename has happened before the ack, so the value is *visible*. Run `go test ./toys3/sim -run 'TestCatchesBugs/h-ack-before-dir-fsync' -v`.
+   Predict, before running: which invariant catches it, at which seed, and does the black-box suite catch it at seed 1 like c, or later? Unlike c, the rename has happened before the ack, so the value is *visible*. Run `go test ./toys3/sim -run 'TestCatchesBugs/k-ack-before-dir-fsync' -v`. (Earlier printings called it `h-ack-before-dir-fsync`; the letters g to j now belong to the functional mutants of §15.15. Adding it to `mutants` will also make `TestGolden` fail, because the golden file pins the mutant list: run it with `-update-golden` on a scratch branch only.)
 
 3. **Automate the liveness guard.** Write `TestMutantsAreAlive`: for each mutant, run seed 1 with the real factory and with the mutant, and fail if the two `TraceHash` values are equal. Then deliberately break one mutant (change the condition in `mutSkipTempCleanup` from `d.Err == control.OK` to `d.Err == control.ErrIO`, so it only rewrites failed listings, whose `Names` are already empty) and confirm the new test fails while `TestCatchesBugs` reports "not caught".
 
@@ -670,7 +733,9 @@ Some practical habits that fall out of this chapter:
 
 7. **Re-run the ablation.** Write a test that copies `firstCatch` but builds configs with `BaseConfig(seed)` and `cfg.Disturbances.WritebackProb = 0`, and confirm mutant f's first catch is seed 429. Then try `QuiesceEvery` halved and doubled, and record how the first-catch seed of d2 moves. Explain the direction.
 
-8. **Equivalent or not?** Make the case, in writing, for or against the claim in §15.13 that skipping recovery's `FSFsyncDir(tmp)` is an equivalent mutant. Then change the StorageModel in some realistic way that would make it *not* equivalent (for example, make `StorageModel.write` to a name whose current entry is absent but whose durable entry is present reuse the durable inode, as a buggy filesystem might) and see whether the default invariants now catch g. Revert afterwards.
+8. **Equivalent or not?** Make the case, in writing, for or against the claim in §15.13 that skipping recovery's `FSFsyncDir(tmp)` is an equivalent mutant. Then change the StorageModel in some realistic way that would make it *not* equivalent (for example, make `StorageModel.write` to a name whose current entry is absent but whose durable entry is present reuse the durable inode, as a buggy filesystem might) and see whether the default invariants now catch x. Revert afterwards.
+
+9. **A functional mutant of your own.** Write mutant `l-get-after-copy-404`: a GET of a key that was the destination of the most recent COPY replies 404. Add it to `functionalMutants` and a row to `mutantTable`, and predict both columns before running `go test ./toys3/sim -run TestMutantTable -v`: DST's first seed and invariant, and C1's shrunk sequence. Then make DST miss it: what is the smallest change to the mutant that hides it from a workload whose values are self-describing but leaves it visible to C1?
 
 ## Further reading
 

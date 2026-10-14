@@ -553,6 +553,7 @@ Before the crash machinery, a list of deliberate omissions, so you know what the
 - **No metadata corruption, no lost directories, no misdirected writes.** The StorageModel never corrupts *durable* state on its own; read corruption is transient.
 - **No space exhaustion (ENOSPC), no permissions, no partial reads.** Every failure is EIO or ENOENT.
 - **No ordering promises beyond fsync.** This one is *more* adversarial than real filesystems, see §11.14.
+- **No case folding.** Names that differ only in case are different files, as POSIX says. macOS's default APFS volume disagrees, and toys3's key escaping depends on it; §11.15 explains how that was found.
 
 ## 11.8 Background writeback
 
@@ -983,6 +984,21 @@ The StorageModel is deliberately *more* adversarial than common real filesystems
 
 The ALICE study (Pillai et al., OSDI 2014) is the definitive treatment of how real filesystems differ in these "persistence properties" and how real applications (databases, version control systems, key-value stores) accidentally depend on the stronger ones. Its central lesson is the StorageModel's design principle: **program against the weakest guarantees you might get, and test against an adversary that gives you exactly those.**
 
+## 11.15 Checked against a veritas and a real disk
+
+Everything in this chapter is about what the StorageModel does *wrong on purpose*. There is a prior question, which the first edition of this book did not ask: does it do *right* what it should do right? With no disturbances, no crash and no failed plan, a storage model is just a filesystem, and it had better be the same filesystem as the one on the disk. If `StorageModel.rename` onto an existing name kept the old file, or `list` returned names in insertion order where Linux returns something else, every DST seed would be testing the controller against a filesystem that does not exist, and passing for the wrong reason.
+
+Two conformance checks (Chapter 13a) close that gap. Both compare against `veritas.FS` (`toys3/veritas/fs.go`), a 162-line map from path to bytes that states what a filesystem promises on the happy path: a write creates or truncates, a rename replaces its target atomically and is a no-op onto itself, a missing path is ENOENT for fsync, rename, read and unlink, and a listing is the sorted base names.
+
+- **C2** (`TestC2StorageModelMatchesVeritasFS`, `toys3/sim/conformance_test.go`) drives the StorageModel synchronously with `Disturbances{}` and an empty `ActuationPlan` for every command (`s.fs.Land(a, ActuationPlan{})`), and runs random sequences of all seven storage commands over five colliding paths in `obj/` and `tmp/`. After each command it compares the completions (error code, read data, listed names) and then every listing and every read.
+- **C3** (`TestC3OSExecutorMatchesVeritasFS`, `toys3/prod/conformance_test.go`) runs the same check against `prod.OSExecutor` on a fresh directory under `t.TempDir()`: real `os` calls, real fsyncs.
+
+Neither found a disagreement inside its alphabet: 57,000 seeds for C2 and 1,742 seeds (on macOS APFS) for C3 when they were added. Together they say that the StorageModel and a real disk agree with each other on the no-fault, no-crash path: rename over an existing file, ENOENT for a missing rename or unlink, a write truncating, and list order. (The last one holds only because Go's `os.ReadDir` sorts by name; the StorageModel's `list` sorts too, through `fdir.names`, `toys3/sim/storagemodel.go:424-454`.) So when a DST seed fails, the failure is about faults and crashes, not about a model that gets the basics wrong.
+
+C1, the controller's own conformance check, also runs on the StorageModel with no disturbances, as one of its two backends. That turns the durable view of §11.10 into a check even without a crash: after every operation, the files under `obj/` in the *durable* view must decode to exactly what the controller acknowledged. Mutants a and b (a skipped fsync) pass every check on `veritas.FS`, which has no durable view, and fail on the first Put on the StorageModel (Chapter 15, §15.15).
+
+Building C3 also surfaced the one way a common real filesystem disagrees with both the StorageModel and `veritas.FS`: **case folding**. Both models treat `obj/K` and `obj/k` as different files. On a case-insensitive volume (the macOS default) they are one file, and because `format.EscapeKey` passes letters through unchanged (Chapter 4, §4.6), keys `K` and `k` silently alias each other there. `TestC3CaseSensitive` pins the assumption and skips on such volumes rather than teach the veritas to fold case. The StorageModel is right by POSIX; the gap is in the format, and it is an open item (Chapter 17, Part II §17).
+
 ## Key takeaways
 
 - Every inode has `volatile` and `durable` content; every directory entry has `cur` and `durable` versions. Fsync of a file persists content; fsync of a directory persists *all* of that directory's entry changes; nothing else persists anything, except background writeback.
@@ -993,6 +1009,7 @@ The ALICE study (Pillai et al., OSDI 2014) is the definitive treatment of how re
 - Read corruption exists to make the CRC check reachable; without it, the CRC is dead code in a correct server.
 - The durable view is the worst-case crash outcome; `AckedIsDurable` and `ObjNeverTorn` check against it without crashing. `DurableGen` lets them skip steps where nothing durable changed.
 - The StorageModel is more hostile than journaled filesystems on purpose. Surviving it implies surviving them.
+- With no disturbances it is just a filesystem, and conformance checks C2 and C3 show it agrees with `veritas.FS` and with a real disk on that path. The one real-disk difference found is case folding on macOS, a gap in the key format rather than in the model.
 
 ## Exercises
 
@@ -1002,7 +1019,8 @@ The ALICE study (Pillai et al., OSDI 2014) is the definitive treatment of how re
 4. **Remove the lie.** Set `FsyncGate: false` in `BaseConfig`. Predict which mutants are caught later or not at all. Run `TestCatchesBugs`. Then explain, using §11.6, why the real server's behaviour (trip on any fsync error) is still correct when the lie is off.
 5. **A gentler tear.** Change the torn case in phase 2 to keep the *old* durable content plus a prefix of the new content's tail (a crude "interleaved" tear for overwrites). Does any test in the package fail? Does any mutant's first-catch seed change? Why is this change nearly invisible to a correct toys3 server? (Hint: does toys3 ever overwrite a durable file in place?)
 6. **Count resurrections.** Add a counter to `Crash` for entries in `tmp/` whose pending removal was reverted while their inode is also named under `obj/` (an alias). Run 200 seeds of the correct server and print the total. Then run the same 200 seeds with mutant f's factory. Are aliases common? How often do they end in a failure?
-7. **ENOSPC.** Sketch (on paper or in code) a new fault: `FSWrite` fails with a new `ErrNoSpace` code. What would need to change in `control.ErrCode`, the server's error table (Chapter 7) and the oracle? Is a write that fails with ENOSPC "applied or not"?
+7. **Break C2.** In a scratch copy, make `StorageModel.rename` onto an existing name fail with `ErrNotFound` when there are no disturbances. Run `go test ./toys3/sim -run TestC2 -v` and read the shrunk sequence. How many operations is it? Then run `go test ./toys3/sim -run 'TestSeeds$' -seeds=200`: does DST notice? Revert.
+8. **ENOSPC.** Sketch (on paper or in code) a new fault: `FSWrite` fails with a new `ErrNoSpace` code. What would need to change in `control.ErrCode`, the server's error table (Chapter 7) and the oracle? Is a write that fails with ENOSPC "applied or not"?
 
 ## Further reading
 

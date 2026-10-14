@@ -1,8 +1,8 @@
 # Chapter 18: Glossary and Appendix
 
-This chapter is reference material. The glossary defines every term the book uses with a specific meaning, with pointers into the code, including the domain-model and control-theory vocabulary of Chapter 3a. The appendices collect the tables you will want open while working: commands, a file index with key symbols and line numbers, the invariant and mutation tables cross-referenced to chapters, the error policy, the `Stats` fields, the log format, and a table of every name the domain-driven-design refactor changed.
+This chapter is reference material. The glossary defines every term the book uses with a specific meaning, with pointers into the code, including the domain-model and control-theory vocabulary of Chapter 3a and the conformance-check vocabulary of Chapter 13a. The appendices collect the tables you will want open while working: commands, a file index with key symbols and line numbers, the invariant and mutation tables cross-referenced to chapters, the error policy, the `Stats` fields, the log format, and a table of every name the domain-driven-design refactor changed.
 
-Line numbers refer to commit `10777a2`. Appendix G maps every name the refactor of Chapter 3a (and the later plant → storage rename) changed from its old spelling to its new one.
+Line numbers refer to commit `10777a2`, except for the `veritas` packages and the conformance-check files added in `0f46dfe..3ff1385`, whose line numbers refer to `3ff1385`. Appendix G maps every name the refactor of Chapter 3a (and the later plant → storage rename) changed from its old spelling to its new one.
 
 ---
 
@@ -54,6 +54,8 @@ Line numbers refer to commit `10777a2`. Appendix G maps every name the refactor 
 
 **Component.** In the oracle, a connected set of keys in one window: keys are linked if one op touches both (COPY) or a carried group contains both. Each component is searched independently (`Oracle.check`, `toys3/sim/oracle.go:363-454`). Chapter 13.
 
+**Conformance check.** A test that runs a seeded random sequence of operations against an implementation and its *veritas* in *lockstep*, compares every result exactly, checks invariants after every operation, and *shrinks* any failure. toys3 has four: C1 controller vs `veritas.Store` (`toys3/sim/storecheck_test.go`), C2 `StorageModel` vs `veritas.FS` (`toys3/sim/conformance_test.go`), C3 `OSExecutor` on a real disk vs `veritas.FS` (`toys3/prod/conformance_test.go`), C4 oracle vs `veritas.Store` (`toys3/sim/oraclecheck_test.go`). Fault-free and sequential by design; the paper's term is the same (Bornholt et al., SOSP 2021, §4). Chapter 13a.
+
 **Context map.** The diagram of bounded contexts and their relationships (shared kernel, conformist, customer/supplier, ACL, open host service, separate ways). Chapter 3a §3a.5.
 
 **Controller.** `control.Controller`, the toys3 state machine: the control law that turns requests and storage feedback into actuations, replies, telemetry and trips (`toys3/control/controller.go:74-101`). "The server" in most of this book. Was `core.Server`. Chapters 3a, 5, 6.
@@ -98,7 +100,7 @@ Line numbers refer to commit `10777a2`. Appendix G maps every name the refactor 
 
 **Env.** The interface through which nondeterminism enters the controller: `Rand` and `Buggify` (`toys3/control/env.go:5-8`). Time is *not* in it; it arrives on each event. The controller does not use it yet. Chapter 3.
 
-**Estimate (state estimate).** `Oracle.estimate`: the set of reference-model states consistent with every reply so far, carried between windows as key groups (`toys3/sim/oracle.go:46-50`). Was `groups`. Chapter 13.
+**Estimate (state estimate).** `Oracle.estimate`: the set of register-model states consistent with every reply so far, carried between windows as key groups (`toys3/sim/oracle.go:46-50`). Was `groups`. Chapter 13.
 
 **Event.** An input to `Step`: `At` plus a `Body` from a closed set (`toys3/control/event.go:5-12`). Chapter 3.
 
@@ -140,15 +142,17 @@ Line numbers refer to commit `10777a2`. Appendix G maps every name the refactor 
 
 **Liveness.** Invariant (d), "the closed loop settles": every request issued in Settling never gets a 500 (checked every step), and at the end the server is alive, its final incarnation recovered, and no op is pending (`toys3/sim/invariant.go:98-109, 199-235`). Chapter 14.
 
+**Lockstep.** How a conformance check drives its two sides: each operation is applied to the implementation and to the veritas, the results are compared, and only then does the next operation run. One operation in flight, no faults, so the comparison can be exact. `veritastest.Check.Replay` (`toys3/veritas/veritastest/lockstep.go:64-92`). Chapter 13a.
+
 **LogEntry.** One line of the event log (`toys3/sim/config.go:185-194`), rendered by `LogEntry.String` (`toys3/sim/log.go:119-138`). Appendix F.
 
 **Machine.** A hashable state machine: `StateMachine` + `Hashable` (`toys3/control/machine.go:16-20`). What a runtime drives. Chapter 3.
 
 **Mode.** The controller's operating mode within one incarnation: `modeStartup`, `modeRecovering`, `modeAuto`, `modeTripped` (`toys3/control/controller.go:13-23`). Enum values are hashed; append only. Was `phase` (`phaseBooting`, `phaseRecovering`, `phaseServing`, `phaseHalted`). Chapter 5.
 
-**Mutant.** A deliberately broken variant of the server, built by wrapping the real one so that exactly one protocol step is wrong (`toys3/sim/mutants_test.go`). Chapter 15.
+**Mutant.** A deliberately broken variant of the server, built by wrapping the real one so that exactly one protocol step is wrong (`toys3/sim/mutants_test.go`). The seven durability mutants a to f and d2 are in `mutants` (checked by `TestCatchesBugs` and the golden test); the four functional mutants g to j (what a request does, not how it survives faults) are in `functionalMutants`. `TestMutantTable` records which of DST and C1 catches each. Chapters 13a, 15.
 
-**Oracle.** The component that records the client-visible history and checks it for linearizability against a sequential reference model (`toys3/sim/oracle.go:19-54`). In control terms a set-membership state observer (its state estimate is `Oracle.estimate`); the DST name was kept. Chapter 13.
+**Oracle.** The component that records the client-visible history and checks it for linearizability against a sequential register model (`toys3/sim/oracle.go:19-54`). Deliberately independent of `veritas.Store`; conformance check C4 keeps the two specs in agreement. In control terms a set-membership state observer (its state estimate is `Oracle.estimate`); the DST name was kept. Chapter 13.
 
 **Phase.** Since the refactor, only the testbench's timeline: Chaos, then Settling (then the drain). The controller has *modes*, not phases. Chapter 10.
 
@@ -166,7 +170,9 @@ Line numbers refer to commit `10777a2`. Appendix G maps every name the refactor 
 
 **Recovery.** On `Started`: list `tmp/`, unlink every leftover, fsync `tmp/`, emit `Recovered`, then start queued requests (`toys3/control/recovery.go:17-93`). Any error trips. Establishes a known initial condition (homing, in control terms); reconstitutes nothing. Chapter 5.
 
-**Reference model.** The sequential specification the closed loop must reproduce: a map from key to writer. One state is a `refState` (`toys3/sim/oracle.go:164-167`; was `modelState`). Always qualify "model": reference model versus storage model. Chapter 13.
+**Reference model.** The ShardStore paper's word for what toys3 calls a *veritas*. Earlier printings of this book also used it for the oracle's sequential spec, now called the *register model*. No longer used, because "model" was overloaded. Chapters 3a, 13a.
+
+**Register model.** The oracle's sequential specification of the store, one register per key: a map from key to writer. One state is a `refState` (`toys3/sim/oracle.go:164-167`; was `modelState`). Called the *reference model* in earlier printings. Always qualify "model": register model versus storage model. Chapter 13.
 
 **Sample.** One telemetry value stamped by the simulator with its sample index (`Step`), time and incarnation (`toys3/sim/invariant.go:12-19`). `View.Telemetry()` returns them in order. Was `TimedFact`. Chapter 14.
 
@@ -177,6 +183,8 @@ Line numbers refer to commit `10777a2`. Appendix G maps every name the refactor 
 **Self-describing value.** A PUT payload whose first 12 bytes encode the writer's `ClientReq` and length, and whose remaining bytes are a pure function of those (`MakeValue`, `toys3/sim/value.go:13-32`). Any bytes read back name their writer, or are rejected as garbage by `ValueWriter`. Chapter 12.
 
 **Settling.** The phase after Chaos (`Config.Settling`, 60 ms by default): no new disturbances planned, no injected crashes, clients keep issuing, and the closed loop must settle: every outstanding request is answered and nothing issued in it gets a 500. Begins at `KindSettle`, ends at `KindSettlingEnd`. Was the *quiet tail* (`QuietTail`, `KindQuiet`, `KindTailEnd`). Chapters 10, 14.
+
+**Shrinking.** Reducing a failing operation sequence to a shorter, simpler one that still fails (the paper's *minimization*, §4.3). `veritastest`'s shrinker repeats three passes until none makes progress: drop chunks of operations (halves down to single operations), replace each operation with a simpler one (`Check.Shrink`: smaller sizes, earlier keys or paths), and rewrite the whole sequence (`Check.ShrinkAll`: rename one key or path to an earlier one *everywhere at once*, the only rename that can keep a failure that links several operations). Deterministic; any failure counts; the result is printed as a Go literal (`toys3/veritas/veritastest/lockstep.go:107-175`). DST has no automatic shrinker. Chapter 13a.
 
 **Shared kernel.** A small model shared, and changed together, by several contexts. In toys3: the object format (`toys3/format`) and the self-describing value encoding (`toys3/sim/value.go`). Chapter 3a.
 
@@ -216,6 +224,8 @@ Line numbers refer to commit `10777a2`. Appendix G maps every name the refactor 
 
 **Unknown.** The oracle's widened value for a key: "present or absent, with any value" (`toys3/sim/oracle.go:265-269`). Any read is accepted and fixes the value. Chapter 13.
 
+**Veritas** (plural *veritases*). The small, executable, obviously correct version of one component: sequential, no faults, no crashes, short enough to check by reading. `veritas.Store` is the object store (`Apply(control.Op) (control.Status, []byte)`, `toys3/veritas/store.go`); `veritas.FS` is the Storage port (`Exec(control.Actuation) control.Feedback`, `toys3/veritas/fs.go`). Each is both the spec a conformance check compares against and a test fake: the controller's unit tests run on `veritas.FS`. Replaces the paper's "reference model". Chapter 13a.
+
 **Volatile.** The version of a file's content that reads see now (`inode.volatile`). Becomes durable only by fsync, writeback, or luck at a crash. Chapter 11.
 
 **WGL.** Wing–Gong–Lowe: a depth-first search for a linearization, with Lowe's memoization of (set of linearized ops, reference-model state). `search.dfs` (`toys3/sim/oracle.go:547-606`). Chapter 13.
@@ -237,10 +247,10 @@ All commands are run from the repository root. Each was run while writing this b
 ### Tests
 
 ```sh
-go test ./toys3/control -v                               # controller unit tests (exact action sequences)
+go test ./toys3/control -v                               # controller unit tests (exact action sequences, on veritas.FS)
 go test ./toys3/control -run TestErrorPolicy -v          # the error table, one subtest per row
 go test ./toys3/prod -v                                  # end-to-end HTTP on a temp dir; Trip stops the loop
-go test ./toys3/sim                                      # everything in the simulator package (~8 s)
+go test ./toys3/sim                                      # everything in the simulator package (~11 s)
 go test ./toys3/sim -run TestSeeds -seed=132 -v          # replay one seed; event log printed on failure
 go test ./toys3/sim -run 'TestSeeds$' -seeds=500 -v      # seeds 1..500, aggregate stats line
 go test ./toys3/sim -run TestSeeds -duration=2m -v       # seeds 1,2,... for two minutes
@@ -257,6 +267,19 @@ go test ./toys3/sim -run TestGolden -update-golden        # re-baseline: ONLY fo
 go test ./toys3/format -v                                # object format round trips and escaping
 go test ./toys3/sim -run 'TestQueue' -v                  # queue ordering and dropping
 go test ./tools/detcheck                                 # the analyzer's own test
+```
+
+### Conformance checks (Chapter 13a)
+
+```sh
+go test ./toys3/veritas/...                              # the veritases and the kit (generator, runner, shrinker)
+go test ./toys3/sim -run 'TestC[124]' -seeds=2000 -v     # C1, C2, C4 on seeds 1..2000
+go test ./toys3/sim -run TestC1 -duration=5s -v          # C1 for five seconds per backend
+go test ./toys3/sim -run 'TestC1ControllerMatchesVeritasStore/veritasFS$' -seed=42 -v   # replay one C1 seed
+go test ./toys3/sim -run TestC1Sequences -v              # pinned regression sequences
+go test ./toys3/prod -run TestC3 -seeds=50 -v            # C3 on a real disk (default 20 seeds), plus the case-folding probe
+go test ./toys3/sim -run TestMutantTable -v              # DST and C1 against all eleven mutants, with shrunk sequences
+go test ./toys3/sim -run TestC1 -coverpkg=manifester/toys3/control -coverprofile=c1.out && go tool cover -func=c1.out
 ```
 
 ### Campaigns
@@ -296,6 +319,8 @@ git bisect start <bad> <good>
 git bisect run sh -c 'go test ./toys3/sim -run TestSeeds -seed=4711 >/dev/null'
 ```
 
+DST seeds are shrunk by hand (Chapter 16, §16.7). Conformance-check failures are shrunk automatically and print a replay command and a Go literal; paste the literal into `TestC1Sequences` or a `veritastest.ReplayFS` call (Chapter 13a, §13a.16).
+
 ---
 
 ## Appendix B: File index
@@ -317,7 +342,7 @@ Line numbers are those of the declaration, at commit `10777a2`.
 | `controller.go` | The control law | `Config` 6, `mode` 16, `opKind` 26, `reqStep` 38, `request` 51, `touches` 64, `interlocked` 70, `Controller` 87, `New` 104, `Step` 109, `newIO` 135, `trip` 143, `onRequest` 150, `badRequest` 185, `permitted` 191, `startPermitted` 205, `start` 216, `writeTmp` 229, `issue` 236, `finish` 244, `commit` 256, `failTrip` 266, `onRequestIO` 272 |
 | `recovery.go` | Recovery | `recStep` 9, `onStarted` 17, `onRecoveryDone` 30, `fsyncTmpDir` 88, `indexIO` 95 |
 | `hash.go` | State fingerprint | `StateHash` 7, `hasher` 36, `newHasher` 38 |
-| `controller_test.go` | Hand-driven harness with exact expected action strings | `harness` 24, `newHarness` 33, `ioOfAction` 147, `describe` 156, `TestHappyPath` 211, `TestCommittedSum` 227, `TestNotFound` 241, `TestBadRequest` 252, `TestSameKeySerialized` 262, `TestDifferentKeysConcurrent` 280, `TestCopyHoldsBothKeys` 287, `TestCopySameKey` 302, `TestRecovery` 311, `TestRecoveryEmptyAndErrors` 332, `TestCorruptObject` 349, `TestErrorPolicy` 371, `TestStaleIOIgnored` 410, `TestStateHash` 434 |
+| `controller_test.go` | Hand-driven harness with exact expected action strings; package `control_test` since `0f46dfe`, FS actions answered by `veritas.FS` (line numbers below are at `10777a2`) | `harness` 24, `newHarness` 33, `ioOfAction` 147, `describe` 156, `TestHappyPath` 211, `TestCommittedSum` 227, `TestNotFound` 241, `TestBadRequest` 252, `TestSameKeySerialized` 262, `TestDifferentKeysConcurrent` 280, `TestCopyHoldsBothKeys` 287, `TestCopySameKey` 302, `TestRecovery` 311, `TestRecoveryEmptyAndErrors` 332, `TestCorruptObject` 349, `TestErrorPolicy` 371, `TestStaleIOIgnored` 410, `TestStateHash` 434 |
 
 ### `toys3/format` (the on-disk contract; deterministic, detcheck-clean)
 
@@ -354,6 +379,30 @@ Line numbers are those of the declaration, at commit `10777a2`.
 | `queue_test.go` | tests | Queue | `TestQueueOrdersByTimeThenTieThenSeq` 9, `TestQueueTieBreakDependsOnSeed` 34, `TestQueueClampsPastAndDropsIncarnation` 68 |
 | `mutants_test.go` | tests | Broken servers | `fakeOK` 19, `truncAfterTrip` 36, `skipper` 49, `isObjFsyncDir` 79, `mutSkipDirFsync` 87, `mutSkipFileFsync` 92, `mutAckBeforeRename` 101, `noTrip` 113, `mutNoTripOnError` 121, `mutNoTripOnDirFsyncError` 127, `noTrip.Step` 131, `rewrite` 211, `restoreErr` 251, `ioOfAction` 269, `eventRewriter` 277, `mutSkipCRC` 291, `mutSkipTempCleanup` 304, `mutants` 319, `mutantSeeds` 329, `firstCatch` 333, `TestCatchesBugs` 349 |
 
+### `toys3/veritas` and `toys3/veritas/veritastest` (the veritases and the conformance-check kit; deterministic, detcheck-clean; lines at `3ff1385`)
+
+| File | Purpose | Key symbols (line) |
+|---|---|---|
+| `veritas/doc.go` | What a veritas is; why the word replaces "reference model" | (1-27) |
+| `veritas/store.go` | V1, the object store | `Store` 24, `NewStore` 32, `Apply` 38, `Keys` 79, `Value` 89 |
+| `veritas/fs.go` | V2, the Storage port | `FS` 31, `NewFS` 37, `Exec` 47, `ReadFile` 98, `WriteFile` 108, `Paths` 116, `Dirs` 126, `split` 149, `clone` 158 |
+| `veritas/store_test.go`, `veritas/fs_test.go` | The veritases' own rules | `TestStore` 11, `TestStoreNeverAliases` 49, `TestFS` 10, `TestFSNeverAliases` 65 |
+| `veritastest/doc.go` | The kit; why it takes a `TB` and has its own RNG | (1-18) |
+| `veritastest/lockstep.go` | Generic runner and shrinker | `TB` 9, `Check` 18, `Failure` 46, `Generate` 55, `Replay` 67, `RunSeed` 96, `shrink` 121, `Literal` 178, `Report` 189, `Options` 201, `Run` 214 |
+| `veritastest/rand.go` | SplitMix64 + Lemire, a copy of `sim.Rand`'s algorithm | `Rand` 6, `NewRand` 9, `Uint64` 12, `Intn` 22 |
+| `veritastest/fs.go` | The shared Storage-port check (C2, C3) | `FSUnderTest` 14, `FSRoot` 23, `FSDirs` 26, `FSPaths` 29, `Pattern` 36, `genFS` 51, `shrinkFS` 83, `shrinkFSAll` 133, `formatFS` 208, `FSCheck` 247, `CheckFS` 278, `ReplayFS` 285, `diffFeedback` 294 |
+| `veritastest/veritastest_test.go` | Tests of the kit itself | `TestShrinkFindsMinimal` 40, `TestFSCheckShrinksPlantedBug` 69, `TestFSCheckVeritasAgainstItself` 89, `TestReplayFS` 107 |
+
+Conformance checks in `toys3/sim` (tests; lines at `3ff1385`):
+
+| File | Purpose | Key symbols (line) |
+|---|---|---|
+| `storecheck_test.go` | C1: controller vs `veritas.Store` | `storeMaxSize` 33, `storeOp` 60, `stGet`..`stRestart` 67-71, `stRestartLeftovers` 76, `storeBackend` 90, `storePair` 130, `deliver` 162, `plantLeftovers` 192, `step` 238, `invariant` 281, `objMatches` 296, `storeCheck` 330, `genStoreOp` 361, `shrinkStoreOp` 408, `shrinkStoreAll` 450, `storeBackends` 499, `conformanceOptions` 509, `TestC1ControllerMatchesVeritasStore` 529, `TestC1Sequences` 541 |
+| `conformance_test.go` | C2: `StorageModel` vs `veritas.FS` | `syncStorage` 12, `TestC2StorageModelMatchesVeritasFS` 26 |
+| `oraclecheck_test.go` | C4: oracle vs `veritas.Store` | `oracleCheck` 25, `oracleAgrees` 44, `Oracle.state` 70, `TestC4OracleAgreesWithVeritasStore` 89 |
+| `mutanttable_test.go` | DST and C1 catches of all eleven mutants | `mutantTable` 40, `firstC1Catch` 63, `TestMutantTable` 74 |
+| `mutants_test.go` (additions) | Functional mutants g to j | `requestRewriter` 375, `mutCopyToSrc` 392, `deleteMissingOK` 404, `mutSizeOffByOne` 443, `recoverObj` 455, `functionalMutants` 503 |
+
 ### `toys3/prod` (production; not checked by detcheck)
 
 | File | Purpose | Key symbols (line) |
@@ -364,6 +413,7 @@ Line numbers are those of the declaration, at commit `10777a2`.
 | `loop.go` | The event loop (the control loop) | `ErrTripped` 15, `ErrStopped` 18, `Loop` 21, `NewLoop` 39, `Run` 60, `dispatch` 78, `post` 105, `Submit` 123 |
 | `http.go` | S3 subset over HTTP (the ACL) | `CopySourceHeader` 16, `ErrMethodNotAllowed` 19, `Handler` 32, `ServeHTTP` 39, `ParseRequest` 81, `splitKey` 110 |
 | `prod_test.go` | End-to-end tests | `startServer` 26, `TestEndToEnd` 71, `failFsync` 111, `TestTripStopsLoop` 121 |
+| `conformance_test.go` (at `3ff1385`) | C3: `OSExecutor` on `t.TempDir()` vs `veritas.FS`; the case-folding probe | flags 16-20, `diskFS` 26, `newDiskFS` 73, `TestC3OSExecutorMatchesVeritasFS` 98, `TestC3CaseSensitive` 122 |
 
 ### `toys3/cmd`
 
@@ -378,6 +428,8 @@ Line numbers are those of the declaration, at commit `10777a2`.
 |---|---|
 | `toys3/DESIGN.md` | The design document; domain model and vocabulary 22-67, invariant table 194-200, mutation table 245-253 |
 | `toys3/REFACTOR-PROPOSAL.md` | The DDD and control-theory analysis: glossary with verdicts, context map, migration plan, implementation notes |
+| `toys3/VERITAS-PROPOSAL.md` | The veritas and conformance-check proposal: decisions, V1/V2, C1-C4, the kit, mutants and coverage, the book update |
+| `papers/s3-shardstore-lightweight-formal-methods.txt` | Bornholt et al., SOSP 2021, the paper the veritas work follows |
 | `loop.md` | The 15 DST design rules |
 | `tools/detcheck/detcheck.go` | The analyzer; test-main skip 95-99, file loop 106-184, `suppressions` 189 |
 | `tools/detcheck/allow.txt` | Import allow-list |
@@ -399,17 +451,23 @@ Line numbers are those of the declaration, at commit `10777a2`.
 | d | Every request replies while alive; the final boot recovers; no 500 for a request issued in Settling | black-box | `Liveness` | 500s every step; rest at end | 14 |
 | e | Every file under `obj/` in the durable view is a complete object | white-box | `ObjNeverTorn` | whenever `DurableGen` changes | 11, 14 |
 
-### Mutants (`toys3/DESIGN.md:247-255`, re-run for this book; all matched)
+### Mutants (`toys3/DESIGN.md`, "Bugs DST catches"; re-run for this book; all matched)
 
-| Mutant | Broken step | Wrapper | Caught by (all invariants) | First seed | Black-box only | Chapters |
-|---|---|---|---|---|---|---|
-| a `a-skip-dir-fsync` | no `FSFsyncDir(obj/)` | `skipper` | acked-is-durable (step 46) | 1 | linearizable, 1 | 4, 15 |
-| b `b-skip-file-fsync` | no `FSFsync(tmp)` | `skipper` | obj-never-torn (step 44) | 1 | liveness, 2 | 4, 15 |
-| c `c-ack-before-rename` | reply 200, then rename and fsync | `skipper` with `deferReal` | acked-is-durable (step 42) | 1 | linearizable, 1 | 4, 15 |
-| d `d-no-halt-on-error` | 500 without Trip after any post-write error | `noTrip` | obj-never-torn (step 241) | 1 | liveness, 20 | 7, 15 |
-| d2 `d2-no-halt-on-dir-fsync-error` | same, only for failed `FSFsyncDir(obj/)` | `noTrip{dirOnly}` | linearizable (step 380) | 132 | linearizable, 132 | 7, 15 |
-| e `e-skip-crc` | CRC not verified on read | `eventRewriter` | no-corrupt-reads (step 657) | 18 | no-corrupt-reads, 18 | 4, 14, 15 |
-| f `f-skip-temp-cleanup` | recovery ignores leftover temps | `eventRewriter` | linearizable (step 1750) | 20 | linearizable, 20 | 5, 11, 15 |
+| Mutant | Broken step | Wrapper | Caught by (all invariants) | First seed | Black-box only | C1: seed, shrunk ops (`veritas.FS` / `StorageModel`) | Chapters |
+|---|---|---|---|---|---|---|---|
+| a `a-skip-dir-fsync` | no `FSFsyncDir(obj/)` | `skipper` | acked-is-durable (step 46) | 1 | linearizable, 1 | — / 1, 1 | 4, 15 |
+| b `b-skip-file-fsync` | no `FSFsync(tmp)` | `skipper` | obj-never-torn (step 44) | 1 | liveness, 2 | — / 1, 1 | 4, 15 |
+| c `c-ack-before-rename` | reply 200, then rename and fsync | `skipper` with `deferReal` | acked-is-durable (step 42) | 1 | linearizable, 1 | — (by design) | 4, 15 |
+| d `d-no-halt-on-error` | 500 without Trip after any post-write error | `noTrip` | obj-never-torn (step 241) | 1 | liveness, 20 | — (by design) | 7, 15 |
+| d2 `d2-no-halt-on-dir-fsync-error` | same, only for failed `FSFsyncDir(obj/)` | `noTrip{dirOnly}` | linearizable (step 380) | 132 | linearizable, 132 | — (by design) | 7, 15 |
+| e `e-skip-crc` | CRC not verified on read | `eventRewriter` | no-corrupt-reads (step 657) | 18 | no-corrupt-reads, 18 | — (by design) | 4, 14, 15 |
+| f `f-skip-temp-cleanup` | recovery ignores leftover temps | `eventRewriter` | linearizable (step 1750) | 20 | linearizable, 20 | 1, 1 | 5, 11, 13a, 15 |
+| g `g-copy-to-src` | Copy writes to its source key | `requestRewriter` | linearizable | 1 | linearizable, 1 | 1, 2 | 13a, 15 |
+| h `h-delete-missing-ok` | Delete of a missing key replies 200 | `deleteMissingOK` | linearizable | 1 | linearizable, 1 | 1, 1 | 13a, 15 |
+| i `i-size-off-by-one` | a Put of `MaxObjectSize+1` bytes is accepted | factory (`MaxObjectSize+1`) | **not caught in 500 seeds** | — | — | 1, 1 | 13a, 15 |
+| j `j-recovery-deletes-obj` | recovery also unlinks everything in `obj/` | `recoverObj` | linearizable | 1 | linearizable, 1 | 1, 2 | 13a, 15 |
+
+The first seven are in `mutants` and are checked by `TestCatchesBugs` and pinned by the golden test; g to j are in `functionalMutants`, outside both. The C1 column comes from `TestMutantTable` (seeds 1..200; "by design" means C1 cannot see the bug: it needs a fault, a crash or a concurrent reader). C2 and C3 check storage, not the controller, so no mutant reaches them; C4 is C1 plus the oracle.
 
 Ablation for f (first catching seed; Chapter 17 Part II §13): fixed config without writeback 429, fixed with writeback 36, swarm without writeback 24, swarm with writeback 20. Mutant e without read corruption: not caught in 1,000 seeds.
 
@@ -604,6 +662,19 @@ After the refactor, the textbook word *plant* was replaced by plain *storage* (C
 | `prod.Executor.Execute(a control.Action, ...)` | `Execute(a control.Actuation, ...)`; `Loop.dispatch` routes `case control.Actuation` and panics on an unknown action (`10777a2`) |
 | `telemetryHashKey` fallback `fmt.Sprintf("%T", t)` | `"?"`, unreachable, checked by `TestTelemetryHashKeyCoversAllTypes` (`10777a2`) |
 
+### The veritas commits (`0f46dfe..3ff1385`) and the words in this book
+
+These commits added code rather than renaming it, so almost nothing in the code moved. What changed is two descriptions, and the book's own vocabulary.
+
+| Old | New | Notes |
+|---|---|---|
+| `controller_test.go` in package `control`, with a private `map[string][]byte` in `harness` and a map-backed `harness.exec` | package `control_test` with a dot import of `control`; `harness.fs` is a `*veritas.FS`, and `exec` applies the `fail` hook, then `h.fs.Exec` | `0f46dfe`; every test unchanged |
+| the "reference model" (book prose, for the oracle's sequential spec) | the *register model* | `refState` and `estimate` keep their names; the proposal leaves renaming them to a later commit |
+| "reference model" (the ShardStore paper's term) | *veritas* | `veritas.Store`, `veritas.FS` |
+| "toys3 has no automatic shrinker" (Chapter 16, first printings) | true of DST seeds only; conformance checks shrink automatically | Chapter 13a, §13a.9 |
+| mutants "g" (skip recovery's `FSFsyncDir(tmp)`) and "h" (`h-ack-before-dir-fsync`) in Chapter 15's text and exercises | mutant x and `k-ack-before-dir-fsync` | g and h now name functional mutants in the code |
+| `sim_test.go` flags documented as "TestSeeds: ..." | "TestSeeds, TestC1, TestC2...: ..." | the same `-seeds`, `-seed`, `-duration` drive the conformance checks |
+
 ### Printed output
 
 | Where | Old | New |
@@ -639,6 +710,7 @@ A five-line `sed` script built from the "event log" rows of this table turns any
 ## Key takeaways
 
 - The glossary terms with the most precise and least obvious meanings are: *landed* vs *delivered*, *durable* vs *current/volatile*, *abandoned* vs *failed* vs *definite*, *incarnation*, and *widening*. If those five are sharp, the rest of the book reads easily.
+- The newest terms, *veritas*, *conformance check*, *lockstep* and *shrinking*, name a second kind of test that sits beside DST: exact, sequential and fault-free, with failures that shrink to a few operations (Chapter 13a).
 - The appendices are designed to be kept open: A for commands, B for "where is that function", D when reasoning about errors, E when reading a campaign summary, F when reading a log, G when an old name or an old log gets in your way.
 
 ## Exercises

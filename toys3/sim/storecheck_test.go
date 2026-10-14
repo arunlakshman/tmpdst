@@ -128,6 +128,7 @@ type storePair struct {
 	ver     *veritas.Store
 	now     control.Time
 	next    control.ClientReq // last ClientReq issued; unique across restarts
+	oracle  *Oracle           // C4 only: records the history if set
 }
 
 func (p *storePair) cfg() control.Config {
@@ -201,6 +202,9 @@ func (p *storePair) step(op storeOp) error {
 	c := p.next
 	req := op.request(c)
 	wantStatus, wantBody := p.ver.Apply(req)
+	if p.oracle != nil {
+		p.oracle.Invoke(p.now, 0, control.Request{Client: c, Op: req})
+	}
 	replies, err := p.deliver(control.Request{Client: c, Op: req})
 	if err != nil {
 		return err
@@ -209,6 +213,9 @@ func (p *storePair) step(op storeOp) error {
 		return fmt.Errorf("want one reply to c%d, got %#v", c, replies)
 	}
 	got := replies[0]
+	if p.oracle != nil {
+		p.oracle.Return(p.now, got)
+	}
 	if got.Status != wantStatus || !bytes.Equal(got.Body, wantBody) {
 		return fmt.Errorf("replied %d %s, want %d %s", got.Status, describeBody(got.Body), wantStatus, describeBody(wantBody))
 	}

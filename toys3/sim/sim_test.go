@@ -9,9 +9,9 @@ import (
 )
 
 var (
-	flagSeeds    = flag.Int("seeds", 200, "TestSeeds: number of seeds to run (from 1)")
-	flagSeed     = flag.Int64("seed", -1, "TestSeeds: replay this one seed with the event log printed on failure")
-	flagDuration = flag.Duration("duration", 0, "TestSeeds: run seeds 1, 2, ... until this much wall-clock time has passed (overrides -seeds)")
+	flagSeeds    = flag.Int("seeds", 200, "TestSeeds, TestC2...: number of seeds to run (from 1)")
+	flagSeed     = flag.Int64("seed", -1, "TestSeeds, TestC2...: replay this one seed (TestSeeds prints the event log on failure)")
+	flagDuration = flag.Duration("duration", 0, "TestSeeds, TestC2...: run seeds 1, 2, ... until this much wall-clock time has passed (overrides -seeds)")
 	flagLog      = flag.Bool("log", false, "TestSeeds: with -seed, print the full event log even when the seed passes")
 )
 

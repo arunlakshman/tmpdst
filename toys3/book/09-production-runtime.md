@@ -114,7 +114,7 @@ Three obligations, each one essential:
 2. **Exactly once.** The controller's request record waits for exactly one completion with its IOID (Chapter 6). Zero completions means a request that hangs forever. Two completions would be harmless in the toys3 core (the second is a stale IOID and is ignored, `toys3/control/controller.go:132`), but "exactly once" is the clean contract.
 3. **The matching completion.** An `FSWrite` must complete with an `FSWriteDone` carrying the same IOID. The controller ignores a completion "of the wrong kind for the step the owner is on" (`toys3/control/doc.go:111-112`), so a mismatched type would also hang the request.
 
-Making `Executor` an interface (rather than calling `OSExecutor` directly) buys one thing: tests can substitute a faulty executor. `prod_test.go` does exactly that to exercise `Trip` (§9.8).
+Making `Executor` an interface (rather than calling `OSExecutor` directly) buys tests the right to substitute their own. `prod_test.go` does that twice (§9.8): a faulty executor to exercise `Trip`, and one backed by `veritas.FS` so the HTTP tests also run with no disk.
 
 ### OSExecutor
 
@@ -780,15 +780,46 @@ kill %1; echo junk > /tmp/my-toys3-data/tmp/00000000000000ff
 
 ## 9.8 How prod is tested
 
-The simulator never runs `prod`. So `prod` has its own tests, in `toys3/prod/prod_test.go`. They are integration tests against a real temporary directory and an `httptest.Server`. Since commit `f719a3e` there is a third, in `toys3/prod/conformance_test.go`: conformance check C3, which drives `OSExecutor` alone with random sequences of storage commands on a real directory and compares every completion with `veritas.FS`, the executable spec of the Storage port (Chapter 13a, §13a.7).
+The simulator never runs `prod`. So `prod` has its own tests, in `toys3/prod/prod_test.go`. They are integration tests behind an `httptest.Server`, and since commit `be18e50` each runs twice, as subtests: once on `veritasDisk`, an `Executor` over a mutex-guarded `veritas.FS` (Chapter 13a) that needs no disk, and once on a real temporary directory with `OSExecutor`, which stays the only end-to-end test of real I/O. Since commit `f719a3e` there is a third, in `toys3/prod/conformance_test.go`: conformance check C3, which drives `OSExecutor` alone with random sequences of storage commands on a real directory and compares every completion with `veritas.FS`, the executable spec of the Storage port (Chapter 13a, §13a.7).
+
+### The two disks
+
+```go
+// toys3/prod/prod_test.go:66-108 (abridged)
+// veritasDisk is an Executor over veritas.FS: no disk at all. veritas.FS is
+// sequential, so a mutex serializes Exec; the completion is delivered on a
+// fresh goroutine because Execute is called from the loop goroutine and done
+// posts to the loop's inbox, which may be full.
+type veritasDisk struct {
+	mu sync.Mutex
+	fs *veritas.FS
+}
+
+func (d *veritasDisk) Execute(a control.Actuation, done func(control.EventBody)) {
+	d.mu.Lock()
+	fb := d.fs.Exec(a)
+	d.mu.Unlock()
+	go done(fb)
+}
+...
+// disks runs f once on each storage backend: veritas.FS (no disk) and a real
+// directory (the only end-to-end test of real I/O).
+func disks(t *testing.T, f func(t *testing.T, d disk)) {
+	t.Run("veritas", func(t *testing.T) { f(t, newVeritasDisk()) })
+	t.Run("os", func(t *testing.T) { f(t, newOSDisk(t)) })
+}
+```
+
+A `disk` is an `Executor` plus its data root and two test hooks (`Plant` a file behind the server's back, list a directory's `Names`). `osDisk` embeds `OSExecutor` on a `t.TempDir()` prepared with `PrepareDir`; `veritasDisk` is the adapter above, with `veritas.FS`'s directories fixed at construction to `/d`, `/d/obj` and `/d/tmp`. The `go done(fb)` is not decoration: `post` blocks while the inbox is full, and the loop goroutine is the only one that drains it, so an inline `done` from inside `dispatch` could deadlock. The veritas run is fast and needs no filesystem; the `os` run is kept because nothing else drives real I/O through the whole stack.
 
 ### TestEndToEnd
 
 ```go
-// toys3/prod/prod_test.go:71-108 (abridged)
-func TestEndToEnd(t *testing.T) {
-	dir := t.TempDir()
-	s := startServer(t, dir, OSExecutor{})
+// toys3/prod/prod_test.go:160-192 (abridged)
+func TestEndToEnd(t *testing.T) { disks(t, testEndToEnd) }
+
+func testEndToEnd(t *testing.T, d disk) {
+	s := startServer(t, d.Root(), d)
 	s.expect("PUT", "/b/k1", []byte("hello"), nil, 200, "")
 	s.expect("GET", "/b/k1", nil, nil, 200, "hello")
 	s.expect("PUT", "/b/k2", nil, map[string]string{CopySourceHeader: "/b/k1"}, 200, "")
@@ -802,16 +833,17 @@ func TestEndToEnd(t *testing.T) {
 	}
 
 	// A crash mid-PUT leaves a temp file behind.
-	leftover := filepath.Join(dir, "tmp", "00000000000000ff")
-	...
-	s = startServer(t, dir, OSExecutor{})
+	d.Plant(format.TmpPath(d.Root(), 0xff), []byte("junk"))
+
+	s = startServer(t, d.Root(), d) // the next process, on the same storage
 	defer s.stop()
 	// Requests queue behind recovery, so this reply proves recovery finished.
 	s.expect("GET", "/b/k2", nil, nil, 200, "hello")
-	...
-	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
-		t.Fatalf("leftover temp file survived recovery: %v", err)
+	s.expect("GET", "/b/k1", nil, nil, 404, "")
+	if names := d.Names(format.TmpDir(d.Root())); len(names) != 0 {
+		t.Fatalf("tmp/ not empty after recovery (leftover temp file survived?): %v", names)
 	}
+}
 ```
 
 It covers every operation and status code, the copy-source header with and without its leading slash, URL-escaped keys, the 400 and 405 paths, graceful stop (`context.Canceled`), and a restart that recovers a planted temp file. The comment "Requests queue behind recovery, so this reply proves recovery finished" uses the controller's queuing semantics as a synchronization barrier. That is neat: no sleeps.
@@ -821,31 +853,33 @@ What it is *not*: a crash test. `s.stop()` cancels the context; it does not lose
 ### TestTripStopsLoop
 
 ```go
-// toys3/prod/prod_test.go:110-130
-// failFsync wraps OSExecutor and fails every file fsync with EIO.
-type failFsync struct{ OSExecutor }
+// toys3/prod/prod_test.go:193-215
+// failFsync wraps an Executor and fails every file fsync with EIO.
+type failFsync struct{ Executor }
 
 func (f failFsync) Execute(a control.Actuation, done func(control.EventBody)) {
 	if a, ok := a.(control.FSFsync); ok {
 		go done(control.FSFsyncDone{IO: a.IO, Err: control.ErrIO})
 		return
 	}
-	f.OSExecutor.Execute(a, done)
+	f.Executor.Execute(a, done)
 }
 
 func TestTripStopsLoop(t *testing.T) {
-	s := startServer(t, t.TempDir(), failFsync{})
-	s.expect("PUT", "/b/k", []byte("v"), nil, 500, "")
-	if err := <-s.done; !errors.Is(err, ErrTripped) {
-		t.Fatalf("Run returned %v, want ErrTripped", err)
-	}
-	s.done <- nil // let stop() return
-	s.expect("GET", "/b/k", nil, nil, 503, "")
-	s.stop()
+	disks(t, func(t *testing.T, d disk) {
+		s := startServer(t, d.Root(), failFsync{d})
+		s.expect("PUT", "/b/k", []byte("v"), nil, 500, "")
+		if err := <-s.done; !errors.Is(err, ErrTripped) {
+			t.Fatalf("Run returned %v, want ErrTripped", err)
+		}
+		s.done <- nil // let stop() return
+		s.expect("GET", "/b/k", nil, nil, 503, "")
+		s.stop()
+	})
 }
 ```
 
-This is where the `Executor` interface earns its keep: a three-line wrapper makes every file fsync fail. The test checks the end-to-end fail-stop path: the PUT gets its 500 (not a 503, thanks to the nested select in `Submit`), `Run` returns `ErrTripped`, and a later request gets 503 because the loop has stopped. Note that `failFsync` still calls `done` from a goroutine (`go done(...)`), honouring the "must not block the loop" contract even in a test double.
+This is where the `Executor` interface earns its keep: a three-line wrapper makes every file fsync fail, over either disk. The test checks the end-to-end fail-stop path: the PUT gets its 500 (not a 503, thanks to the nested select in `Submit`), `Run` returns `ErrTripped`, and a later request gets 503 because the loop has stopped. Note that `failFsync` still calls `done` from a goroutine (`go done(...)`), honouring the "must not block the loop" contract even in a test double.
 
 ### What nothing tests
 

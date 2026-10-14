@@ -116,7 +116,7 @@ The conformance checks of Chapter 13a close two of the gaps above (the storage m
 - **No crashes.** A `CleanRestart` is a clean restart. C1 imitates one crash artifact, leftover temp files (`stRestartLeftovers`), and nothing else: no resurrected names, no lost renames. Crash consistency is DST's job (Chapters 10, 11 and 13); the paper's own crash-consistency checks (§5) are coarser than what toys3's storage model already does.
 - **Only the alphabet.** Each check explores the keys, paths and sizes its generator can produce. C1 and C3 use lower-case names only, which is how the case-folding gap (Part II §17) stayed outside both; C3's sizes stop at 4,097 bytes.
 - **Only what the veritas says.** A veritas can be wrong in the same way as the code it checks. C4 checks `veritas.Store` against the oracle's independent register model, but `veritas.FS` has no second spec except the real disk (C3), and only on one operating system at a time. The Copy size gap (Part II §18) is an example of both specs agreeing on a questionable rule.
-- **Not the HTTP layer.** The proposal planned a `veritas.FS`-backed `prod.Executor` so that the HTTP handler tests would need no disk; it was not built (Part II §19).
+- **Not the HTTP layer.** No conformance check drives the HTTP handlers. Since `be18e50` they do run on a `veritas.FS`-backed `prod.Executor` as well as on a real disk (Part II §19), but those are example-based tests, not random sequences compared with `veritas.Store`.
 
 ---
 
@@ -265,13 +265,15 @@ The brief for this book mentions that mutant f was at first *not caught*, becaus
 
 *Does it matter?* Only if the limit changes across a restart. Start `cmd/toys3` with `-max-object 1048576`, Put a 1 MiB object, restart with `-max-object 1024`, and a Copy creates a new object over the current limit. Because both specs agree, no conformance check can see it; it was found by reading them side by side. Whether it is a bug depends on whether the limit is about request bodies (Copy has none) or about what may be stored. It is an open item in `DESIGN.md`.
 
-### 19. `DESIGN.md` says the veritas is the HTTP tests' fake; it is not yet
+### 19. `DESIGN.md` says the veritas is the HTTP tests' fake; it was not yet (**Fixed** in `be18e50`)
 
-*Claim.* The package table in `DESIGN.md` describes `toys3/veritas` as "also the test fake for controller and HTTP tests", following the proposal ("`prod` gets a `veritas.FS`-backed `Executor`, so the HTTP handler tests need no disk").
+*Claim (at `3ff1385`).* The package table in `DESIGN.md` describes `toys3/veritas` as "also the test fake for controller and HTTP tests", following the proposal ("`prod` gets a `veritas.FS`-backed `Executor`, so the HTTP handler tests need no disk").
 
-*Code.* Nothing in `toys3/prod` uses `veritas` outside `conformance_test.go`. `prod_test.go` still runs its end-to-end HTTP tests on a real temp directory with `OSExecutor` (Chapter 9).
+*Code (at `3ff1385`).* Nothing in `toys3/prod` used `veritas` outside `conformance_test.go`. `prod_test.go` ran its end-to-end HTTP tests on a real temp directory with `OSExecutor` (Chapter 9).
 
 *Does it matter?* Not for correctness; the real-disk tests are, if anything, stronger. It is a small doc-versus-code drift of the kind Part II has recorded from the start, and either half is a good first patch: write the adapter (an `Executor` whose `Execute` calls `veritas.FS.Exec` and then `done` on a goroutine), or change the table.
+
+*Fix.* The adapter was written. `prod_test.go` now has `veritasDisk`, an `Executor` over a mutex-guarded `veritas.FS` rooted at `/d`, whose `Execute` runs `Exec` under the lock and then calls `go done(...)` (the loop goroutine calls `Execute`, and `done` posts to the loop's inbox, so completing inline could deadlock on a full inbox). `TestEndToEnd` and `TestTripStopsLoop` run as subtests on both `veritas` and `os`; the restart half of `TestEndToEnd` reuses the same storage, and `failFsync` wraps either executor. The `os` run stays, because it is the only end-to-end test of real I/O. `DESIGN.md`'s claim is now true as written.
 
 ---
 
@@ -401,7 +403,7 @@ The lessons that transfer best are not the interfaces but the habits: decide wha
 - The StorageModel errs toward strict POSIX (more adversarial than ext4 about rename and ordering) and toward kind hardware (no lying caches, no persistent failures). Know which side a bug you care about falls on.
 - Conformance checks are sequential, fault-free and crash-free by construction. They do not replace DST for faults, concurrency or crashes; the paper's fault-tolerant comparison (§4.4) is future work here (III.10).
 - Running the code found sixteen discrepancies or surprises, none a server bug, several worth fixing: the unused `Env`, `loop.md`'s queue order, liveness wording, the `Invoke` comment, failure log kinds, an fsync with no observable justification, faults that land after Chaos ends. The three comment-only ones (liveness wording, the `Invoke` comment, the queue's drop-on-pop comment) were fixed in `a4018d5`; the rest change behaviour or logs and are still open.
-- The trip-after-restart gap (Part I §2, Chapter 9 §9.10) is the one finding that matters for durability in production. It is still open. The conformance checks added three more (Part II §17 to §19): case-folding aliasing on macOS, the Copy size gap, and a doc claim ahead of the code; the first is the one that can lose data.
+- The trip-after-restart gap (Part I §2, Chapter 9 §9.10) is the one finding that matters for durability in production. It is still open. The conformance checks added three more (Part II §17 to §19): case-folding aliasing on macOS, the Copy size gap, and a doc claim ahead of the code (since fixed by building the HTTP tests' veritas executor); the first is the one that can lose data.
 - The cheapest high-value extensions are buggify sites, sometimes-assertions and swarm over fault families. The most valuable expensive one is a second node, for which the oracle needs no change at all.
 
 ## Exercises

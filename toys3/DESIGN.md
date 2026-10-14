@@ -48,7 +48,7 @@ controller drives storage with actuations and reads its feedback:
 | Term | In code | Meaning |
 |---|---|---|
 | Controller | `control.Controller` | The state machine: the control law. The single aggregate; one `Step` is its consistency boundary. |
-| Actuation / Feedback | `control.Actuation` (FS* actions), `control.Feedback` (FS*Done events) | The Storage port. The controller owns it; `prod.OSExecutor` (real disk) and `sim.StorageModel` (simulated) implement it. |
+| Actuation / Feedback | `control.Actuation` (FS* actions), `control.Feedback` (FS*Done events) | The Storage port. The controller owns it; `prod.OSExecutor` (real disk) and `sim.StorageModel` (simulated) implement it; the HTTP tests also run on a `veritas.FS`-backed executor (`prod/prod_test.go`). |
 | Trip | `control.Trip{Cause}` | Safety trip: fail-stop when in-memory state can't be trusted (fsyncgate); restart re-arms. |
 | Mode | `modeStartup → modeRecovering → modeAuto → modeTripped` | Operating mode of one incarnation. |
 | Key interlock, start permissive | `interlocked`, `permitted` | Per-key FIFO: a request starts only when no earlier request shares a key. |

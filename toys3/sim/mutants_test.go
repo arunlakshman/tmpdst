@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"slices"
 	"testing"
 
 	"manifester/toys3/control"
@@ -362,4 +363,146 @@ func TestCatchesBugs(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Functional mutants: bugs in what a request does, not in how it survives
+// faults or crashes. They are kept out of mutants (and so out of TestGolden
+// and TestCatchesBugs) because DST is not required to catch them: its
+// workload never sends an oversized Put, for one. TestMutantTable records
+// who catches each.
+
+// requestRewriter rewrites client requests before the inner server sees them.
+type requestRewriter struct {
+	inner   control.Machine
+	rewrite func(control.Op) control.Op
+}
+
+func (m *requestRewriter) Step(ev control.Event) []control.Action {
+	if r, ok := ev.Body.(control.Request); ok {
+		r.Op = m.rewrite(r.Op)
+		ev.Body = r
+	}
+	return m.inner.Step(ev)
+}
+
+func (m *requestRewriter) StateHash() uint64 { return m.inner.StateHash() }
+
+// (g) Copy writes to its source key: Copy(src, dst) copies src onto itself
+// and leaves dst alone, yet replies 200.
+func mutCopyToSrc(env control.Env, cfg control.Config) control.Machine {
+	return &requestRewriter{inner: control.New(env, cfg), rewrite: func(op control.Op) control.Op {
+		if c, ok := op.(control.Copy); ok {
+			c.Dst = c.Src
+			return c
+		}
+		return op
+	}}
+}
+
+// deleteMissingOK is mutant (h): a Delete of a missing key replies 200, not
+// 404.
+type deleteMissingOK struct {
+	inner   control.Machine
+	deletes []control.ClientReq // Delete requests not yet replied to
+}
+
+func mutDeleteMissingOK(env control.Env, cfg control.Config) control.Machine {
+	return &deleteMissingOK{inner: control.New(env, cfg)}
+}
+
+func (m *deleteMissingOK) Step(ev control.Event) []control.Action {
+	if r, ok := ev.Body.(control.Request); ok {
+		if _, del := r.Op.(control.Delete); del {
+			m.deletes = append(m.deletes, r.Client)
+		}
+	}
+	acts := m.inner.Step(ev)
+	for i, a := range acts {
+		rep, ok := a.(control.Reply)
+		if !ok {
+			continue
+		}
+		for j, c := range m.deletes {
+			if c == rep.Client {
+				m.deletes = append(m.deletes[:j], m.deletes[j+1:]...)
+				if rep.Status == control.StatusNotFound {
+					rep.Status = control.StatusOK
+					acts[i] = rep
+				}
+				break
+			}
+		}
+	}
+	return acts
+}
+
+func (m *deleteMissingOK) StateHash() uint64 { return m.inner.StateHash() }
+
+// (i) Off by one in the size check: a Put of MaxObjectSize+1 bytes is
+// accepted (as if the check were len > MaxObjectSize+1).
+func mutSizeOffByOne(env control.Env, cfg control.Config) control.Machine {
+	if cfg.MaxObjectSize > 0 {
+		cfg.MaxObjectSize++
+	}
+	return control.New(env, cfg)
+}
+
+// recoverObj is mutant (j): recovery also clears obj/. Before the real
+// recovery lists tmp/, it lists obj/ and unlinks every committed object, as
+// a recovery that loops over both directories would. Its own storage
+// commands use IOIDs far above any the controller issues, and their
+// completions never reach the controller; their errors are ignored.
+type recoverObj struct {
+	inner   control.Machine
+	obj     string
+	held    []control.Action // the controller's FSList(tmp), until obj/ is clear
+	pending []control.IOID   // the mutant's outstanding commands
+	nextIO  control.IOID
+}
+
+func mutRecoveryDeletesObj(env control.Env, cfg control.Config) control.Machine {
+	return &recoverObj{inner: control.New(env, cfg), obj: format.ObjDir(cfg.Dir), nextIO: 1 << 62}
+}
+
+func (m *recoverObj) issue(a func(control.IOID) control.Action) control.Action {
+	m.nextIO++
+	m.pending = append(m.pending, m.nextIO)
+	return a(m.nextIO)
+}
+
+func (m *recoverObj) Step(ev control.Event) []control.Action {
+	if fb, ok := ev.Body.(control.Feedback); ok {
+		if i := slices.Index(m.pending, fb.ID()); i >= 0 {
+			m.pending = slices.Delete(m.pending, i, i+1)
+			var out []control.Action
+			if d, ok := ev.Body.(control.FSListDone); ok {
+				for _, name := range d.Names {
+					out = append(out, m.issue(func(io control.IOID) control.Action {
+						return control.FSUnlink{IO: io, Path: m.obj + "/" + name}
+					}))
+				}
+			}
+			if len(m.pending) == 0 {
+				out, m.held = append(out, m.held...), nil
+			}
+			return out
+		}
+	}
+	acts := m.inner.Step(ev)
+	if _, ok := ev.Body.(control.Started); ok && len(acts) == 1 {
+		m.held = acts
+		return []control.Action{m.issue(func(io control.IOID) control.Action {
+			return control.FSList{IO: io, Dir: m.obj}
+		})}
+	}
+	return acts
+}
+
+func (m *recoverObj) StateHash() uint64 { return m.inner.StateHash() }
+
+var functionalMutants = []mutant{
+	{"g-copy-to-src", mutCopyToSrc},
+	{"h-delete-missing-ok", mutDeleteMissingOK},
+	{"i-size-off-by-one", mutSizeOffByOne},
+	{"j-recovery-deletes-obj", mutRecoveryDeletesObj},
 }

@@ -10,7 +10,8 @@ It follows [`../loop.md`](../loop.md) strictly.
 toys3/control   the controller: pure state machine + Storage port (detcheck-clean)
 toys3/format    on-disk object format and layout                  (detcheck-clean)
 toys3/sim       SIL testbench: simulator, storage model, workload,
-                oracle, invariants; conformance checks C1, C2, C4 (detcheck-clean)
+                oracle, invariants; conformance checks C1, C2, C4, C5
+                (C5 is test-only: porcupine)                      (detcheck-clean)
 toys3/veritas   the veritases: Store (object store), FS (Storage port);
                 also the test fake for controller and HTTP tests  (detcheck-clean)
 toys3/veritas/veritastest   conformance-check kit: seeded generator,
@@ -59,7 +60,7 @@ controller drives storage with actuations and reads its feedback:
 | Sample | `sim.Sample` | Telemetry stamped with step, time and incarnation. |
 | Veritas | `veritas.Store`, `veritas.FS` | The executable truth for one component; also its test fake. Sequential, no faults, no crashes, short enough to check by reading. |
 | Conformance check | `TestC1`..`TestC4` | Random operations run on an implementation and its veritas in lockstep; every result is compared, and a failure is shrunk to a minimal sequence. |
-| Register model, estimate | oracle's `refState`, `estimate` | The oracle's own sequential spec of one key (kept independent of `veritas.Store`; C4 checks they agree); the oracle's set of possible states. |
+| Register model, estimate | oracle's `refState`, `estimate` | The oracle's own sequential spec of one key (kept independent of `veritas.Store`; C4 checks they agree, and C5 checks the oracle's verdicts against porcupine's); the oracle's set of possible states. |
 | Ground truth | `sim.GroundTruth` | The only view of storage the monitors get (durable files). |
 
 Plain names are kept where a control metaphor would be forced: requests and
@@ -216,6 +217,9 @@ window, factored per key. If a component would start from more than 4096
 possible states, the oracle *widens* the keys involved to "unknown": any read
 of such a key is accepted and fixes its value. This weakens the check for a
 moment but never causes a false failure, and the `widened` stat counts it.
+The oracle is hand-written, and conformance check C5 (below) keeps a second
+opinion on it: the standard Go linearizability checker, porcupine, re-checks
+every DST history it is given and must reach the same verdict.
 Ops are ordered by logical
 invoke and return sequence numbers, not by virtual time, so several events
 that share one instant keep their exact order. The run's state is folded into a trace
@@ -244,6 +248,7 @@ prints the seed, a replay command and the shrunk sequence as a Go literal.
 | C2 | `sim.StorageModel`, no disturbances, vs `veritas.FS` (every storage command, few colliding paths) | `sim/conformance_test.go` | — | — | nothing (57k seeds) |
 | C3 | `prod.OSExecutor` on `t.TempDir()` vs `veritas.FS` (C2's generator) | `prod/conformance_test.go` | real disk | — | case folding (below); 1742 seeds otherwise clean on APFS |
 | C4 | `sim.Oracle` vs `veritas.Store` (C1's histories, fed sequentially) | `sim/oraclecheck_test.go` | as C1 | the oracle accepts the history and its one state is the veritas's map | nothing |
+| C5 | `sim.Oracle` vs porcupine v1.3.1 (whole DST histories, concurrent, with crashes and 500s) | `sim/porcupine_test.go` | DST runs | none: the two verdicts (Ok / Illegal) must agree | nothing (582 seeds, correct server; 11 mutants × 200 seeds) |
 
 C2 and C3 together tie the simulator's storage to a real disk on the no-fault
 path: rename over an existing file, ENOENT for a missing rename or unlink,
@@ -252,6 +257,52 @@ sorts). C1's input bias: Get, Delete and Copy mostly target keys already Put;
 Put sizes cluster at 0, `MaxObjectSize` and `MaxObjectSize+1` (the limit is
 64, so the 400 path runs); a Copy is sometimes onto itself; one key in 20 is
 invalid; half the restarts first plant leftover temp files.
+
+**C5: porcupine cross-checks the oracle.** C5 is not a lockstep check and has
+no veritas: it compares two *checkers* on the same history. The oracle is
+hand-written (about 640 lines), which is a maintenance burden for a
+contributor who has to change it, and
+[porcupine](https://github.com/anishathalye/porcupine) is the standard Go
+linearizability checker. Stage 1, a cross-check, is what C5 is. Stage 2,
+replacing the oracle with porcupine, was evaluated on the data below and not
+done.
+
+- *Translation* (~230 lines, plus ~87 for partitioning, timing and the HTML
+  output): Call/Return are the history's `InvSeq`/`RetSeq`. A 500,
+  crash-abandoned or still-pending mutation may or may not apply (the model
+  step offers both "applied" and "unchanged"; pending returns at +inf).
+  Unanswered reads, 400s and GET bodies that do not decode are dropped. A Put
+  writes the value named by its own request id. Crashes erase nothing, so the
+  model has no crash step. Keys are partitioned by union-find, linked by
+  Copy's src and dst (P-compositionality). Porcupine's own
+  `NondeterministicModel.ToModel` merges states pairwise and was too slow (5
+  of 100 seeds Unknown at 20s), so `pcModel` builds the power set with hash
+  deduplication.
+- *Results*, correct server, `-duration=120s`, 30s per partition: 582 seeds,
+  579 Ok, 0 Illegal, 3 Unknown (seeds 25, 181, 404). Check time p50 321µs,
+  p99 1.6s, max over 30s; largest partition 481 ops; up to ~2M possible states
+  (8M on seed 25 at 300s, still Unknown). The oracle widened 0 times. On the
+  mutants (seeds 1..200 each) the two never disagree when both give a verdict,
+  and on the table's catch seeds for d2 (132), f (20), g, h and j (1) both say
+  Illegal (table in "Bugs DST catches").
+- *Why not replace the oracle.* Porcupine checks a partition's whole history
+  at once. It cannot restart from quiescent points with per-key states carried
+  forward, and it has no widening, so the uncertainty from every crash and 500
+  accumulates into millions of possible states. About 0.5% of seeds never
+  finish, and whether a check returns Unknown depends on wall-clock time, so
+  it is not deterministic: unacceptable for a DST verdict or for `TestGolden`.
+  Fixing that means per-key sets of possible values in the model, which is the
+  oracle's design copied, and the independence is lost. The oracle stays the
+  checker of record; porcupine is the independent second opinion that makes
+  changing the oracle safer.
+- *Determinism.* Porcupine runs partitions on goroutines against a
+  `time.After` timeout, so it is test-only: imported only from
+  `porcupine_test.go`, not on the detcheck allow-list (audit record
+  `docs/dep-audits/github.com/anishathalye/porcupine@v1.3.1.md`). Unknown is
+  counted and logged, never failed and never golden. On a disagreement C5
+  writes porcupine's HTML visualization of the offending partition to
+  `-porcupine-out` (default: a new `toys3-c5-*` temp directory) and prints
+  its path.
 
 **Coverage.** `go test ./toys3/sim -run TestC1 -coverpkg=manifester/toys3/control
 -coverprofile=c1.out` measures what C1 reaches. Before the leftover-temp
@@ -275,7 +326,7 @@ interlock queueing (C1 has one request in flight). DST covers those.
 ## How to run DST
 
 ```
-go test ./toys3/sim                                   # unit tests, canary, 200 seeds, coverage, mutants, C1/C2/C4
+go test ./toys3/sim                                   # unit tests, canary, 200 seeds, coverage, mutants, C1/C2/C4/C5
 go test ./toys3/sim -run TestSeeds -seeds=5000 -v     # more seeds (prints aggregated stats)
 go test ./toys3/sim -run TestSeeds -duration=2m -v    # seeds 1,2,... for two minutes
 go test ./toys3/sim -run TestSeeds -seed=81237 -v     # replay one seed; event log printed on failure
@@ -285,6 +336,11 @@ go test ./toys3/sim -run 'TestC[124]' -seeds=20000    # conformance checks C1, C
 go test ./toys3/sim -run TestC1 -duration=5m -v       # C1 for five minutes per backend
 go test ./toys3/sim -run 'TestC1ControllerMatchesVeritasStore/veritasFS$' -seed=42 -v   # replay one seed
 go test ./toys3/prod -run TestC3 -seeds=500           # C3 on a real disk (t.TempDir())
+go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -v                 # C5 on seeds 1..20 (-c5-seeds)
+go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -duration=2m -porcupine-timeout=30s -v
+go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -seed=25 -porcupine-timeout=5s -v   # one seed
+go test ./toys3/sim -run TestC5PorcupineAgreesOnMutants -c5-mutant-seeds=200 -porcupine-timeout=30s -v
+                                                      # add -porcupine-out=DIR to keep the HTML of a disagreement
 go run ./toys3/cmd/toys3sim -duration 10m -check-determinism   # parallel campaign
 scripts/ci-determinism.sh                             # detcheck + audits + both canaries
 ```
@@ -341,5 +397,12 @@ Lessons from building this table:
   its shrunk failure is a long event log, where C1's is one or two
   operations (`stPut("b", 0), stCopy("b", "a")` for g; `stPut("a", 0),
   stRestart()` for j).
+- C5 agrees with the oracle on every mutant. Seeds 1..200 of each
+  (`TestC5PorcupineAgreesOnMutants -c5-mutant-seeds=200`), counted as
+  both Illegal / both Ok / porcupine Unknown / other: a 168/32, b 0/196/4
+  Unknown, c 193/7, d 1/199, d2 2/197/1 Unknown, e 1/167/1 Unknown/31
+  garbage reads (the oracle fails those outright; C5 drops them), f 12/188,
+  g 154/44/2 Unknown, h 171/29, i 0/198/2 Unknown, j 187/13. Not one seed
+  where both gave a verdict and the verdicts differed.
 - (f) was invisible to C1 until the coverage pass: with no crashes, `tmp/`
   was always empty at restart. Planting leftover temp files fixed both.

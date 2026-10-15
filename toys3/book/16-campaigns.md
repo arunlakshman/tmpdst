@@ -268,6 +268,28 @@ Three things to know when running them:
 
 A conformance failure is shrunk before it is reported, so the report is already the short sequence you want; §16.7 contrasts that with shrinking a DST seed by hand.
 
+**C5 is the exception to "different atom".** Its seed *is* a DST seed: `TestC5PorcupineAgreesWithOracle` runs `DefaultConfig(seed)` exactly as `TestSeeds` does, then checks the recorded history with both the oracle and porcupine (Chapter 13a, §13a.15). It reads `-seed`, `-seeds` and `-duration` with `TestSeeds`'s meanings, but defaults to seeds 1..20 (`-c5-seeds`), because a porcupine search can take seconds where a DST seed takes milliseconds. Its own flags are `-porcupine-timeout` (per partition, default 60s), `-c5-mutant-seeds` (seeds per mutant for `TestC5PorcupineAgreesOnMutants`, default 4) and `-porcupine-out` (where the HTML visualization of a disagreement goes; default a new `toys3-c5-*` temp directory).
+
+```sh
+go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -v                              # seeds 1..20, ~2 s
+go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -duration=2m -porcupine-timeout=30s -v
+go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -seed=25 -porcupine-timeout=5s -v   # one seed
+go test ./toys3/sim -run TestC5PorcupineAgreesOnMutants -c5-mutant-seeds=200 -porcupine-timeout=30s -v
+```
+
+Two things differ from every other check in this chapter. **Unknown is not a failure:** a partition that exceeds `-porcupine-timeout` is logged with its seed and counted in the summary line, and the test still passes; on the correct server about 0.5% of seeds are Unknown even at 30 seconds (seeds 25, 181 and 404 in a two-minute run). **The result depends on the machine:** whether a slow seed finishes in time is a wall-clock question, so two runs of C5 can report different Unknown counts. Ok and Illegal repeat exactly. That is why C5 is a test, not part of the campaign runner or the golden file.
+
+The summary line reports porcupine's verdict counts, the distribution of check time, the largest partition and possible-state set, and the oracle's widenings. A five-second run with a two-second limit shows an Unknown quickly:
+
+```
+$ go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -duration=5s -porcupine-timeout=2s -v
+    porcupine_test.go:530: seed 25: porcupine Unknown after 2.002214334s (380 ops, largest partition 368)
+    porcupine_test.go:545: C5: 25 seeds in 5.052s (0 not accepted by the oracle): porcupine Ok=24 Illegal=0 Unknown=1; check time p50=208µs p99=2.002214334s max=2.002214s (seed 25); largest partition 451 ops; most partitions 4; largest possible-state set 884736; oracle widenings 0
+--- PASS: TestC5PorcupineAgreesWithOracle (5.05s)
+```
+
+The two-minute run with a 30-second limit gave 582 seeds, 579 Ok, 0 Illegal and 3 Unknown, check time p50 321µs and p99 1.6s, a largest partition of 481 operations, and no widening.
+
 ### `TestCatchesBugs` and `-mutant-seeds`
 
 Covered in depth in Chapter 15. The operational facts for campaigns: each mutant runs seeds 1..`-mutant-seeds` (default 500) twice, once with `DefaultInvariants` and once with `BlackBoxInvariants`, stopping at the first failing seed each time. A mutant that survives every seed *fails the test*: the simulator is supposed to have teeth.
@@ -305,7 +327,9 @@ ok  	manifester/toys3/sim	11.374s
 ok  	manifester/toys3/veritas	1.150s
 ok  	manifester/toys3/veritas/veritastest	1.508s
 go test ./toys3/... -count=1  11.40s user 1.25s system 106% cpu 11.910 total
-``` That is the budget to defend. A DST suite that takes five seconds runs on every save; one that takes five minutes runs before lunch; one that takes an hour runs never. Long campaigns belong in the campaign runner.
+```
+
+At `d4974d4`, C5 adds about two seconds to `toys3/sim` (20 correct-server seeds and 4 per mutant, each a DST run plus a porcupine search); the same command took about sixteen seconds when C5 was documented. That is the budget to defend. A DST suite that takes five seconds runs on every save; one that takes five minutes runs before lunch; one that takes an hour runs never. Long campaigns belong in the campaign runner.
 
 ## 16.3 The campaign runner, line by line (`toys3/cmd/toys3sim/main.go`)
 

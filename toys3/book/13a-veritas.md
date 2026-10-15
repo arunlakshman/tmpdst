@@ -6,9 +6,9 @@ Chapter 13 built the oracle: a black-box judge that takes a concurrent history, 
 
 This chapter is about a much less clever kind of check, and about why toys3 needed it anyway. A **veritas** is the small, executable, obviously correct version of one component: a map where the real thing has a protocol, a map where the real thing has a disk. A **conformance check** runs random operations against the real component and its veritas in lockstep, one at a time, with no faults and no crashes, and compares every result exactly. When the two disagree, the check **shrinks** the failing sequence until only the operations that matter are left, and prints them as a Go literal you can paste into a regression test.
 
-None of this replaces deterministic simulation. It asks an earlier, narrower question (*on the happy path, does each component do exactly what it should?*) and answers it in a few lines instead of a few thousand log lines. It also catches a class of bug DST is structurally blind to, and it is what finally tied the simulator's storage model to a real disk. The idea, and most of the design, comes from the ShardStore paper quoted above; §13a.15 maps each section of the paper onto the code.
+None of this replaces deterministic simulation. It asks an earlier, narrower question (*on the happy path, does each component do exactly what it should?*) and answers it in a few lines instead of a few thousand log lines. It also catches a class of bug DST is structurally blind to, and it is what finally tied the simulator's storage model to a real disk. The idea, and most of the design, comes from the ShardStore paper quoted above; §13a.16 maps each section of the paper onto the code.
 
-The code in this chapter was added after the rest of the book was written, in commits `0f46dfe..3ff1385`. Line references in this chapter are against `3ff1385`, not `10777a2`.
+The code in this chapter was added after the rest of the book was written, in commits `0f46dfe..3ff1385`. Line references in this chapter are against `3ff1385`, not `10777a2`, except in §13a.15, which covers conformance check C5 (commit `d4974d4`) and is referenced against that commit.
 
 ---
 
@@ -369,7 +369,7 @@ Three design choices in this package are worth noticing.
 
 The proposal's decision on dependencies is recorded at the top: "hand-written, using the repo's seeded RNG. No new dependency and no dependency audit, failing seeds replay exactly like DST seeds, and the shrinking the paper relies on (§4.3) is simple enough to write." Go's standard `testing/quick` has no shrinking, and adding a third-party property-testing library to a detcheck-gated package would have meant an audit record (Chapter 8) for a few hundred lines of benefit.
 
-## 13a.7 The four conformance checks
+## 13a.7 The conformance checks
 
 With the kit in place, each check is a `Check` value plus a test function.
 
@@ -584,6 +584,10 @@ This is the check that ties the simulator to reality. C2 says `StorageModel` agr
 ### C4: the oracle against `veritas.Store`
 
 C4 is C1 with an oracle attached. §13a.14 is about why it exists.
+
+### C5: the oracle against porcupine
+
+C5 came later (commit `d4974d4`) and is a different kind of check: no veritas and no lockstep. It hands the history of a whole DST run, crashes and all, to porcupine, a standard Go linearizability checker, and requires the same verdict as the oracle's. §13a.15 covers it.
 
 ## 13a.8 Input bias, and when not to bias
 
@@ -1037,7 +1041,113 @@ C4 found no disagreement: 89,300 seeds on `veritas.FS` and 85,355 on `StorageMod
 
 This is an old idea in a small form. N-version programming wrote several independent implementations and compared their outputs, with the well-known weakness that independent teams make correlated mistakes (Knight and Leveson, 1986). Two specs written in different styles for different purposes (one a search over sets of states, one a map) are less likely to share a mistake than two of the same shape, and a mistake they do share is at least a mistake in the *spec*, which is the cheapest place to find one.
 
-## 13a.15 How this maps onto the paper
+## 13a.15 C5: a second checker for the oracle
+
+C4 checks the oracle's *register model* against `veritas.Store`, but only on sequential, fault-free histories, where the oracle's hard parts (outcomes, windows, carried states, widening, the WGL search) have nothing to do. Those hard parts are about 640 lines of hand-written Go in `toys3/sim/oracle.go`, and the concern that prompted C5 was a practical one: a hand-written linearizability checker is a maintenance burden. A contributor who changes it has only the nine `oracle_test.go` histories and the golden file to tell them they have not broken it, and the golden file only says that *something* changed.
+
+There is a standard Go linearizability checker: [porcupine](https://github.com/anishathalye/porcupine) (Anish Athalye), a P-compositional WGL search with bitsets and a state cache (§13.12). So the question was asked in two stages. **Stage 1:** can porcupine check toys3's histories at all, and does it agree with the oracle? **Stage 2:** if it does, could it *replace* the oracle? Commit `d4974d4` is stage 1, conformance check **C5**. Stage 2 was evaluated on C5's numbers and not done; the reasons are the second half of this section.
+
+C5 is not a lockstep check and there is no veritas in it. It takes the history a whole DST run recorded (concurrent clients, crashes, 500s, abandoned requests), gives it to both checkers, and requires the same verdict. It lives in `toys3/sim/porcupine_test.go` and nothing in it feeds back into a run, so `TestGolden` is unchanged.
+
+### Translating a history into porcupine operations
+
+Porcupine wants a list of operations, each with a client, an input, an output and a `Call`/`Return` interval, plus a model with a step function. The translation (`toOperations`, `porcupine_test.go:285-319`) follows the oracle's rules from §13.2 and §13.4 one by one:
+
+| Oracle (Chapter 13) | C5's porcupine operation |
+|---|---|
+| Logical time: `InvSeq`, `RetSeq` (§13.3) | `Call = InvSeq`, `Return = RetSeq`; a still-`Pending` op returns at `math.MaxInt64`, as `CheckFinal` treats it |
+| Definite op: happens once, exactly as replied | one possible next state, checked against the reply |
+| Failed (500), Abandoned (crash) or Pending mutation: at most once, inside its interval | `Optional` input; the model step returns *two* states, "applied" and "unchanged" |
+| A read with no Definite reply constrains nothing | dropped |
+| 400: rejected before touching anything | dropped |
+| A GET 200 whose body names no writer (garbage) | dropped; `NoCorruptReads` reports it, and the oracle fails it outright |
+| A PUT's value names its writer (`MakeValue`) | the state maps key → the PUT's own request id |
+| Crashes erase nothing | no crash step in the model at all |
+| Locality: components of keys linked by COPY | `partition`: union-find over keys, linked by COPY's src and dst, over the whole history |
+
+The model's step is a direct mirror of `wop.apply` for known values. A PUT, for example:
+
+```go
+// toys3/sim/porcupine_test.go:139-144
+	case control.Put:
+		next := st.with(op.Key, in.Req)
+		if in.Optional {
+			return []any{st, next}
+		}
+		return one(next)
+```
+
+A step that returns two states makes the model *nondeterministic*, and porcupine handles that with `NondeterministicModel.ToModel`, which turns it into a deterministic model over *sets* of states (the power-set construction). The first version of C5 used it, and 5 of 100 seeds came back Unknown after 20 seconds: `ToModel` merges states by comparing each new state with every one already kept, which is quadratic, and after a few crashes a set holds tens of thousands of states. `pcModel` (`porcupine_test.go:214-282`) does the same construction with hash deduplication (each `pcState` carries an order-independent hash of its map, updated incrementally), and polls the context every 1,024 states so a timeout can stop a long step.
+
+The whole translation is about 230 lines; partitioning, timing and the HTML output add about 87 more. It is code that reads the oracle's history types and mirrors its rules, so it is not free: it is a third statement of what PUT, GET, DELETE and COPY do (after `apply` and `veritas.Store`), and the hand-written oracle tests run through it too (`porcupineAgreesOnHist`, called from `oracle_test.go:51`).
+
+One rule is deliberately *not* mirrored: widening. Porcupine keeps every possible state, so where the oracle widens a key to `unknown` and accepts any read of it, porcupine is the stricter of the two. That makes the comparison one-sided in a useful way: if the oracle accepts a history only because it widened, porcupine can still reject it, and C5 reports that as a disagreement.
+
+### What C5 found
+
+On the correct server, `-duration=120s` with a 30-second limit per partition:
+
+- 582 seeds: porcupine Ok on 579, Illegal on 0, Unknown on 3 (seeds 25, 181 and 404);
+- check time p50 321µs, p99 1.6s, maximum over 30s (the Unknowns);
+- largest partition 481 operations; largest set of possible states about 2 million;
+- oracle widenings: 0.
+
+No disagreement. The oracle did not widen once in those 582 seeds, so on every one of them it and porcupine were answering the same question, and they agreed. Seed 25 was then given 300 seconds: porcupine's state set reached about 8 million states and the answer was still Unknown.
+
+On the mutants, `TestC5PorcupineAgreesOnMutants` runs each of the eleven at its mutant-table seed and on seeds 1..`-c5-mutant-seeds` with black-box invariants. At 200 seeds each:
+
+| Mutant | Both Illegal | Both Ok | Porcupine Unknown | Other |
+|---|---|---|---|---|
+| a | 168 | 32 | | |
+| b | 0 | 196 | 4 | |
+| c | 193 | 7 | | |
+| d | 1 | 199 | | |
+| d2 | 2 | 197 | 1 | |
+| e | 1 | 167 | 1 | 31 garbage reads |
+| f | 12 | 188 | | |
+| g | 154 | 44 | 2 | |
+| h | 171 | 29 | | |
+| i | 0 | 198 | 2 | |
+| j | 187 | 13 | | |
+
+Wherever both gave a verdict, it was the same verdict. On the table's catch seeds (d2 at 132, f at 20, g, h and j at 1), both say Illegal; d2's partition is 53 operations and porcupine rejects it in under a millisecond. The "other" column for e is the 31 seeds on which the oracle failed a garbage read outright, which C5 drops rather than compares. b and i are Ok everywhere, as Chapter 15 predicts: b is invisible to linearizability (a lost object becomes a 500, which promises nothing), and i never runs in DST.
+
+### Why the oracle stays the checker of record
+
+Stage 2 would delete `oracle.go`'s search and keep C5's translation. The numbers above say no, for one structural reason and one about determinism.
+
+**Porcupine checks a whole history at once.** A partition is every operation on its keys from the first request to the last. The oracle checks one *window* at a time, between quiescent points, and carries the possible end states forward, factored per key (§13.5, §13.6); if they still grow past 4,096, it widens. Porcupine has neither: it cannot restart from a quiescent point with a carried-forward state set, and it has no widening, so the uncertainty from every crash and every 500 in a partition multiplies with the next one's, all the way through the run. That is where the 2 million (and, on seed 25, 8 million) possible states come from, and why about 0.5% of seeds never finish.
+
+**Unknown is a wall-clock answer.** Porcupine's timeout is `time.After` (the audit record's one "Yes" finding). Whether seed 404 comes back Ok or Unknown depends on how fast the machine is and what else it is doing. A DST verdict must be a function of the seed: the same seed must fail the same way on a laptop and in CI, and `TestGolden` pins the verdict of 550 seeds. A checker whose answer depends on load cannot be the one that decides.
+
+Fixing the first problem means giving porcupine's model per-key sets of possible values and a way to restart from them, which is exactly the oracle's design (§13.6), copied into the model. At that point the two checkers are no longer independent, and the second opinion is worth much less.
+
+So the conclusion inverts the original question. The oracle stays the checker of record, deterministic and widening when it must. Porcupine is the independent second opinion, and that is what answers the maintenance concern: a contributor who changes the oracle (a new operation, a different window rule, a faster search) now has a widely used checker that re-checks the change on every history `go test ./toys3/sim` produces, and that writes a visualization of any disagreement. That is the argument of §13a.14 one level up: there, two specs of the store keep each other honest; here, two checkers of the history do.
+
+### Running it, and reading a disagreement
+
+```sh
+go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -v                       # seeds 1..20 (-c5-seeds), ~2 s
+go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -duration=2m -porcupine-timeout=30s -v
+go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -seed=25 -porcupine-timeout=5s -v   # one seed
+go test ./toys3/sim -run TestC5PorcupineAgreesOnMutants -v                        # table seeds + seeds 1..4 per mutant
+go test ./toys3/sim -run TestC5PorcupineAgreesOnMutants -c5-mutant-seeds=200 -porcupine-timeout=30s -v
+```
+
+`-seed`, `-seeds` and `-duration` mean what they mean for `TestSeeds` (Chapter 16); without them the test runs seeds 1..20. `-porcupine-timeout` is the limit per partition (default 60s). Unknown is logged with the seed and counted in the summary line, never failed: rule 2 of the audit record says it is not a verdict. A short timeout makes the Unknowns visible quickly:
+
+```
+$ go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -duration=5s -porcupine-timeout=2s -v
+    porcupine_test.go:530: seed 25: porcupine Unknown after 2.002214334s (380 ops, largest partition 368)
+    porcupine_test.go:545: C5: 25 seeds in 5.052s (0 not accepted by the oracle): porcupine Ok=24 Illegal=0 Unknown=1; check time p50=208µs p99=2.002214334s max=2.002214s (seed 25); largest partition 451 ops; most partitions 4; largest possible-state set 884736; oracle widenings 0
+--- PASS: TestC5PorcupineAgreesWithOracle (5.05s)
+```
+
+On a disagreement, C5 fails with the seed, a repro command, and the path of an HTML file: porcupine's visualization of the offending partition, which draws each client's operations on a timeline and lets you step through the longest partial linearizations it found, with the model state after each. The file goes into the directory named by `-porcupine-out`, or, if that flag is not given, into a fresh `toys3-c5-*` directory under the system temp directory; the failure message prints the full path. Open it in a browser next to the oracle's window message (§13.9), which names the same operations by request id.
+
+Porcupine itself is a test-only dependency. Its audit record (`docs/dep-audits/github.com/anishathalye/porcupine@v1.3.1.md`, Chapter 8) accepts it with rules: it runs partitions on goroutines against a wall-clock timeout, so it may be imported only from `_test.go` files, and it is *not* on detcheck's allow-list (adding it would let non-test code import it). Its Ok/Illegal verdicts were checked to repeat: 396 histories checked twice gave the same verdict both times.
+
+## 13a.16 How this maps onto the paper
 
 | Paper (Bornholt et al., SOSP '21) | toys3 |
 |---|---|
@@ -1058,15 +1168,16 @@ This is an old idea in a small form. N-version programming wrote several indepen
 | §4.4 failure injection with a "has failed" flag that relaxes the comparison | **not done**: future work (Chapter 17); the DST oracle covers it |
 | §5 crash consistency with a coarse `DirtyReboot` | **not needed**: the storage model and the oracle go further (Chapters 11, 13) |
 | (one spec per component) | two independent specs of the store, kept in agreement by C4 |
+| (no equivalent: ShardStore's checks are lockstep, not history checkers) | C5: the hand-written oracle re-checked by porcupine on every DST history |
 | (the model is trusted to match the platform) | C2 and C3: the storage model and a real disk both checked against `veritas.FS` |
 
 The last two rows are where toys3 adds something the paper does not do, and both come from toys3's particular situation. It already had an independent spec (the oracle), so C4 was nearly free. And its whole test strategy rests on a simulated disk, so a check that the simulation agrees with a real disk on the easy cases was worth more to toys3 than to a system whose tests run on its own in-memory disk.
 
 The §4.4 row deserves a sentence more. The paper extends conformance checking to injected I/O errors by relaxing the comparison after a failure: a Get that saw an injected error may return no data, but never wrong data. In toys3 that would be a C1 phase 2: let the backend inject `ErrIO`, allow 500s after an injection, never allow a wrong body or a wrong object under `obj/`. The proposal lists it as out of scope because the DST oracle already checks exactly that, with crashes too. It would still be valuable for the same reason C1 is: a three-operation failure instead of a window.
 
-## 13a.16 Running the checks
+## 13a.17 Running the checks
 
-All of these were run while writing this chapter. The flags are the same as `TestSeeds`'s (Chapter 16, §16.2); in `toys3/sim` the defaults are 200 seeds, and in `toys3/prod`, where every operation touches a real disk, 20.
+All of these were run while writing this chapter. The flags are the same as `TestSeeds`'s (Chapter 16, §16.2); in `toys3/sim` the defaults are 200 seeds, and in `toys3/prod`, where every operation touches a real disk, 20. C5 is the exception: each of its seeds is a whole DST run plus a porcupine search, so it defaults to 20 seeds (`-c5-seeds`) and 4 per mutant (`-c5-mutant-seeds`); §13a.15 has its own commands.
 
 ```sh
 go test ./toys3/veritas/...                                    # the veritases and the kit (incl. shrinker tests)
@@ -1077,6 +1188,7 @@ go test ./toys3/sim -run TestC1Sequences -v                    # the pinned regr
 go test ./toys3/sim -run TestC2 -seed=7 -v                     # replay one C2 seed
 go test ./toys3/prod -run TestC3 -seeds=50 -v                  # C3 on a real disk, plus the case-folding probe
 go test ./toys3/sim -run TestMutantTable -v                    # DST and C1 against all eleven mutants
+go test ./toys3/sim -run TestC5 -v                             # C5: porcupine vs the oracle, seeds 1..20 + mutants (~2 s)
 go test ./toys3/sim -run TestC1 -coverpkg=manifester/toys3/control -coverprofile=c1.out
 go tool cover -func=c1.out                                     # what C1 reaches
 ```
@@ -1126,6 +1238,7 @@ A failing check prints its own replay command, as in §13a.10. To keep a failure
 - C1 catches the functional mutants (f to j) in one or two operations and cannot see fault, crash or concurrency bugs (c, d, d2, e) by design; DST is the reverse. They cover each other's blind spots.
 - C2 and C3 together tie the simulator to a real disk on the no-fault path. Building C3 surfaced the case-folding gap (keys `K` and `k` alias on macOS's default filesystem), an open item because the fix changes the on-disk format.
 - The oracle stays independent of `veritas.Store`, and C4 keeps them in agreement: two specs written differently check each other.
+- **C5** gives the oracle itself a second opinion: porcupine re-checks each DST history and must reach the same verdict. On 582 correct-server seeds and 11 mutants × 200 seeds they never disagreed when both gave a verdict. Porcupine did not replace the oracle: it checks a whole history at once with no windows and no widening, so about 0.5% of seeds end Unknown, and Unknown depends on the wall clock. The oracle stays the checker of record; C5 makes changing it safer.
 
 ## Exercises
 
@@ -1136,7 +1249,9 @@ A failing check prints its own replay command, as in §13a.10. To keep a failure
 5. **Coverage regression.** Change `genStoreOp` so restarts never plant leftovers, and re-run the coverage command of §13a.11. Which function's coverage drops, and by how much? Run `TestMutantTable/f` and read its failure message.
 6. **C1 phase 2 (paper §4.4).** Add a third C1 backend: `StorageModel` with `EIOProb: 0.05`, driven synchronously with planned failures, and a "has failed" flag in `storePair` that relaxes the comparison after the first injected error: a 500 is allowed, but a 200 with a body different from the veritas's is never allowed, and neither is an object under `obj/` that the veritas does not hold *or* held at some earlier point. What do you have to do about `Trip`? Which of mutants d and d2 does your check catch?
 7. **Break C4 on purpose.** In a scratch copy, change `veritas.Store`'s Copy so that `Copy(a, a)` on a missing key returns 200. Which checks fail, and which message names the disagreement most directly?
-8. **The Copy gap.** Write a C1 sequence that would demonstrate the Copy size gap of §13a.13 if `storePair` supported changing `MaxObjectSize` across a restart. Add that support (a restart operation with a new limit) and decide what the veritas should say. Is your decision about storage, or about requests?
+8. **Make C5 disagree.** In a scratch copy, weaken the oracle's `apply` so that a GET may return 404 even when the key is present. Predict which mutant's row of `TestC5PorcupineAgreesOnMutants` fails first (hint: which mutant makes objects disappear?), then run `go test ./toys3/sim -run 'TestOracle|TestC5' -porcupine-out=/tmp/c5 -v`. Which hand-written oracle tests fail too? Open the HTML file and find the GET that porcupine could not place. Then put the same bug in `pcStep` instead of `apply` and predict which direction the disagreement goes. Revert.
+9. **Window-sized porcupine.** Seed 25 is Unknown because its partition is the whole run. Write a variant of `porcupineCheck` that cuts each partition at the oracle's quiescent points and starts each piece from the previous piece's possible end states. How much of the oracle's §13.5 did you just rewrite? Does it still count as an independent check?
+10. **The Copy gap.** Write a C1 sequence that would demonstrate the Copy size gap of §13a.13 if `storePair` supported changing `MaxObjectSize` across a restart. Add that support (a restart operation with a new limit) and decide what the veritas should say. Is your decision about storage, or about requests?
 
 ## Further reading
 

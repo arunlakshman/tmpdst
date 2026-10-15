@@ -48,6 +48,7 @@ func (h *hist) check(t *testing.T, wantOK bool) {
 	if !wantOK {
 		t.Logf("rejected as expected: %.300s", f[0].Msg)
 	}
+	porcupineAgreesOnHist(t, h.o.History(), wantOK) // C5
 }
 
 func TestOracleAcceptsLinearizableConcurrency(t *testing.T) {

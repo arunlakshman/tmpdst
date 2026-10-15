@@ -54,7 +54,7 @@ Line numbers refer to commit `10777a2`, except for the `veritas` packages and th
 
 **Component.** In the oracle, a connected set of keys in one window: keys are linked if one op touches both (COPY) or a carried group contains both. Each component is searched independently (`Oracle.check`, `toys3/sim/oracle.go:363-454`). Chapter 13.
 
-**Conformance check.** A test that runs a seeded random sequence of operations against an implementation and its *veritas* in *lockstep*, compares every result exactly, checks invariants after every operation, and *shrinks* any failure. toys3 has four: C1 controller vs `veritas.Store` (`toys3/sim/storecheck_test.go`), C2 `StorageModel` vs `veritas.FS` (`toys3/sim/conformance_test.go`), C3 `OSExecutor` on a real disk vs `veritas.FS` (`toys3/prod/conformance_test.go`), C4 oracle vs `veritas.Store` (`toys3/sim/oraclecheck_test.go`). Fault-free and sequential by design; the paper's term is the same (Bornholt et al., SOSP 2021, §4). A fifth, C5, is a different kind: it compares the oracle's verdict with *porcupine*'s on whole DST histories (`toys3/sim/porcupine_test.go`), with no veritas and no lockstep. Chapter 13a.
+**Conformance check.** A test that runs a seeded random sequence of operations against an implementation and its *veritas* in *lockstep*, compares every result exactly, checks invariants after every operation, and *shrinks* any failure. toys3 has four: C1 controller vs `veritas.Store` (`toys3/sim/storecheck_test.go`), C2 `StorageModel` vs `veritas.FS` (`toys3/sim/conformance_test.go`), C3 `OSExecutor` on a real disk vs `veritas.FS` (`toys3/prod/conformance_test.go`), C4 oracle vs `veritas.Store` (`toys3/sim/oraclecheck_test.go`). Fault-free and sequential by design; the paper's term is the same (Bornholt et al., SOSP 2021, §4). Chapter 13a.
 
 **Context map.** The diagram of bounded contexts and their relationships (shared kernel, conformist, customer/supplier, ACL, open host service, separate ways). Chapter 3a §3a.5.
 
@@ -152,17 +152,13 @@ Line numbers refer to commit `10777a2`, except for the `veritas` packages and th
 
 **Mutant.** A deliberately broken variant of the server, built by wrapping the real one so that exactly one protocol step is wrong (`toys3/sim/mutants_test.go`). The seven durability mutants a to f and d2 are in `mutants` (checked by `TestCatchesBugs` and the golden test); the four functional mutants g to j (what a request does, not how it survives faults) are in `functionalMutants`. `TestMutantTable` records which of DST and C1 catches each. Chapters 13a, 15.
 
-**Oracle.** The component that records the client-visible history and checks it for linearizability against a sequential register model (`toys3/sim/oracle.go:19-54`). Deliberately independent of `veritas.Store`; conformance check C4 keeps the two specs in agreement, and C5 checks its verdicts against *porcupine*'s. The checker of record. In control terms a set-membership state observer (its state estimate is `Oracle.estimate`); the DST name was kept. Chapter 13.
+**Oracle.** The component that records the client-visible history and checks it for linearizability against a sequential register model (`toys3/sim/oracle.go:19-54`). Deliberately independent of `veritas.Store`; conformance check C4 keeps the two specs in agreement. In control terms a set-membership state observer (its state estimate is `Oracle.estimate`); the DST name was kept. Chapter 13.
 
 **Phase.** Since the refactor, only the testbench's timeline: Chaos, then Settling (then the drain). The controller has *modes*, not phases. Chapter 10.
-
-**P-compositionality (partition).** Linearizability is local (Herlihy and Wing): a history is linearizable if and only if each object's sub-history is, so a checker may split a history into independent parts and search each alone (Horn and Kroening, FORTE 2015). The oracle splits each window into components of keys linked by COPY (see Component); C5's `partition` (`toys3/sim/porcupine_test.go:323-358`) does the same with union-find, but once over the whole run, because porcupine has no windows. Chapters 13, 13a.
 
 **Plant.** The control-theory textbook's word for the system being controlled. toys3 does not use it: the code says **storage** (the disk and its page cache), because "plant" had to be translated every time by a storage-minded reader. It was used briefly (`PlantModel`, `control/plant.go`, "the plant port") and renamed in `56b0d2e`. See Storage, Storage port, StorageModel. Chapter 3a.
 
 **Poisoned.** See FsyncGate.
-
-**Porcupine.** `github.com/anishathalye/porcupine` v1.3.1, a linearizability checker for Go (P-compositional WGL with bitsets and a state cache). A test-only dependency of toys3, imported only from `toys3/sim/porcupine_test.go` and not on the detcheck allow-list, because it runs partitions on goroutines against a wall-clock timeout (audit record `docs/dep-audits/github.com/anishathalye/porcupine@v1.3.1.md`). Conformance check C5 translates each DST history into porcupine operations and requires its verdict to match the oracle's. It was evaluated as a replacement for the oracle and rejected: no windows, no widening, and about 0.5% of seeds Unknown. Chapters 13 (§13.14), 13a (§13a.15).
 
 **QuiesceEvery.** The interval at which clients pause until every request has replied, creating quiescent points that bound oracle windows (`toys3/sim/workload.go:29-33`). 8 ms by default. Chapter 12.
 
@@ -226,7 +222,7 @@ Line numbers refer to commit `10777a2`, except for the `veritas` packages and th
 
 **Ubiquitous language.** In DDD, the vocabulary shared by the people and the code of a context: the identifiers, the docs and the conversation use the same words. toys3's comes partly from control theory. Chapter 3a.
 
-**Unknown.** (1) The oracle's widened value for a key: "present or absent, with any value" (`toys3/sim/oracle.go:265-269`). Any read is accepted and fixes the value. Chapter 13. (2) Porcupine's third result, beside Ok and Illegal: the search did not finish within its time limit (`-porcupine-timeout`, per partition). Not a verdict: it depends on wall-clock time, so C5 counts and logs it but never fails on it, and it may never go into a golden file. About 0.5% of correct-server seeds are Unknown at 30 seconds. Chapter 13a, §13a.15.
+**Unknown.** The oracle's widened value for a key: "present or absent, with any value" (`toys3/sim/oracle.go:265-269`). Any read is accepted and fixes the value. Chapter 13.
 
 **Veritas** (plural *veritases*). The small, executable, obviously correct version of one component: sequential, no faults, no crashes, short enough to check by reading. `veritas.Store` is the object store (`Apply(control.Op) (control.Status, []byte)`, `toys3/veritas/store.go`); `veritas.FS` is the Storage port (`Exec(control.Actuation) control.Feedback`, `toys3/veritas/fs.go`). Each is both the spec a conformance check compares against and a test fake: the controller's unit tests run on `veritas.FS`. Replaces the paper's "reference model". Chapter 13a.
 
@@ -284,11 +280,6 @@ go test ./toys3/sim -run TestC1Sequences -v              # pinned regression seq
 go test ./toys3/prod -run TestC3 -seeds=50 -v            # C3 on a real disk (default 20 seeds), plus the case-folding probe
 go test ./toys3/sim -run TestMutantTable -v              # DST and C1 against all eleven mutants, with shrunk sequences
 go test ./toys3/sim -run TestC1 -coverpkg=manifester/toys3/control -coverprofile=c1.out && go tool cover -func=c1.out
-go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -v              # C5: porcupine vs the oracle, seeds 1..20
-go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -duration=2m -porcupine-timeout=30s -v
-go test ./toys3/sim -run TestC5PorcupineAgreesWithOracle -seed=25 -porcupine-timeout=5s -v   # one seed (Unknown at 5 s)
-go test ./toys3/sim -run TestC5PorcupineAgreesOnMutants -c5-mutant-seeds=200 -porcupine-timeout=30s -v
-go test ./toys3/sim -run TestC5 -porcupine-out=/tmp/c5 -v                # keep the HTML of any disagreement in /tmp/c5
 ```
 
 ### Campaigns
@@ -328,7 +319,7 @@ git bisect start <bad> <good>
 git bisect run sh -c 'go test ./toys3/sim -run TestSeeds -seed=4711 >/dev/null'
 ```
 
-DST seeds are shrunk by hand (Chapter 16, §16.7). Conformance-check failures are shrunk automatically and print a replay command and a Go literal; paste the literal into `TestC1Sequences` or a `veritastest.ReplayFS` call (Chapter 13a, §13a.17).
+DST seeds are shrunk by hand (Chapter 16, §16.7). Conformance-check failures are shrunk automatically and print a replay command and a Go literal; paste the literal into `TestC1Sequences` or a `veritastest.ReplayFS` call (Chapter 13a, §13a.16).
 
 ---
 
@@ -409,7 +400,6 @@ Conformance checks in `toys3/sim` (tests; lines at `3ff1385`):
 | `storecheck_test.go` | C1: controller vs `veritas.Store` | `storeMaxSize` 33, `storeOp` 60, `stGet`..`stRestart` 67-71, `stRestartLeftovers` 76, `storeBackend` 90, `storePair` 130, `deliver` 162, `plantLeftovers` 192, `step` 238, `invariant` 281, `objMatches` 296, `storeCheck` 330, `genStoreOp` 361, `shrinkStoreOp` 408, `shrinkStoreAll` 450, `storeBackends` 499, `conformanceOptions` 509, `TestC1ControllerMatchesVeritasStore` 529, `TestC1Sequences` 541 |
 | `conformance_test.go` | C2: `StorageModel` vs `veritas.FS` | `syncStorage` 12, `TestC2StorageModelMatchesVeritasFS` 26 |
 | `oraclecheck_test.go` | C4: oracle vs `veritas.Store` | `oracleCheck` 25, `oracleAgrees` 44, `Oracle.state` 70, `TestC4OracleAgreesWithVeritasStore` 89 |
-| `porcupine_test.go` (at `d4974d4`) | C5: porcupine vs the oracle, on DST histories | flags 53, `pcInput` 63, `pcState` 79, `pcStep` 124, `pcSpec` 183, `pcModel` 219, `toOperations` 285, `partition` 323, `porcupineCheck` 371, `visualize` 396, `c5Run` 438, `TestC5PorcupineAgreesWithOracle` 483, `TestC5PorcupineAgreesOnMutants` 565, `porcupineAgreesOnHist` 614 |
 | `mutanttable_test.go` | DST and C1 catches of all eleven mutants | `mutantTable` 40, `firstC1Catch` 63, `TestMutantTable` 74 |
 | `mutants_test.go` (additions) | Functional mutants g to j | `requestRewriter` 375, `mutCopyToSrc` 392, `deleteMissingOK` 404, `mutSizeOffByOne` 443, `recoverObj` 455, `functionalMutants` 503 |
 
@@ -438,7 +428,6 @@ Conformance checks in `toys3/sim` (tests; lines at `3ff1385`):
 |---|---|
 | `toys3/DESIGN.md` | The design document; domain model and vocabulary 22-67, invariant table 194-200, mutation table 245-253 |
 | `toys3/REFACTOR-PROPOSAL.md` | The DDD and control-theory analysis: glossary with verdicts, context map, migration plan, implementation notes |
-| `docs/dep-audits/github.com/anishathalye/porcupine@v1.3.1.md` | Audit record for porcupine: test-only, not on the allow-list, Unknown is wall-clock dependent |
 | `toys3/VERITAS-PROPOSAL.md` | The veritas and conformance-check proposal: decisions, V1/V2, C1-C4, the kit, mutants and coverage, the book update |
 | `papers/s3-shardstore-lightweight-formal-methods.txt` | Bornholt et al., SOSP 2021, the paper the veritas work follows |
 | `loop.md` | The 15 DST design rules |

@@ -1125,7 +1125,7 @@ So why is the type still called `Oracle` and not `Observer`? Because in Go (and 
 ## 13.12 How this compares to other checkers
 
 - **Knossos** (Clojure, used by Jepsen) implements WGL-style search and a "linear" algorithm over configurations, with indeterminate (`:info`) operations that may linearize any time after invocation. It is general (any model with a step function) and has to be, because Jepsen tests systems it cannot pause or observe internally.
-- **Porcupine** (Go, Anish Athalye) implements the P-compositional WGL search with bitsets and a state cache, and is fast enough to check large histories. It requires the user to supply the partition function and the model. Since commit `d4974d4` it re-checks toys3's own histories: conformance check C5 (§13.14, Chapter 13a §13a.15).
+- **Porcupine** (Go, Anish Athalye) implements the P-compositional WGL search with bitsets and a state cache, and is fast enough to check large histories. It requires the user to supply the partition function and the model.
 - **Elle** (Kingsbury and Alvaro, VLDB 2020) takes a different approach for transactional systems: rather than searching orders, it infers dependency graphs from carefully designed workloads (append-only lists, unique values) and finds cycles. Its insistence on values that reveal their history is a cousin of `MakeValue`.
 
 toys3's oracle is specialized in three ways that the general tools are not: it controls the workload (so it can force quiescence and make every value self-describing), it knows exactly when crashes happen (so indeterminate operations have a bounded interval, and "crashes erase nothing" is a model rule), and it carries possible states across windows, factored per key. Those specializations are what make a few hundred lines sufficient.
@@ -1146,21 +1146,6 @@ Because the oracle names values by their writer, C4's Puts are all self-describi
 
 C4 has found no disagreement (about 175,000 seeds in a minute when it was added). What it buys is that the two specs can no longer drift apart silently: a change to `apply` that is not matched in `veritas.Store`, or the reverse, fails C4 on the first sequence that exercises it, with a message naming the state on each side. Two specs written in different styles, kept in agreement by a test, check each other; Chapter 13a, §13a.14 develops the argument.
 
-## 13.14 Could we just use porcupine?
-
-C4 checks `apply`, but not the rest of this chapter: windows, carried states, factoring, widening and the search, about 640 lines that a contributor has to understand before changing any of them. Porcupine (§13.12) is a well-known Go checker that does the search part for any model. So why does toys3 keep its own?
-
-The question was tested rather than argued. Conformance check **C5** (`toys3/sim/porcupine_test.go`, commit `d4974d4`) translates each recorded history into porcupine operations, using this chapter's rules: `InvSeq`/`RetSeq` as the interval, a Failed, Abandoned or Pending mutation as a model step with two outcomes (applied or unchanged), unanswered reads and 400s dropped, a PUT's value named by its own request id, no crash step at all (crashes erase nothing), and keys partitioned by COPY with union-find, which is §13.5's locality over the whole run instead of per window. Porcupine and the oracle must then reach the same verdict.
-
-They do. On 582 correct-server seeds porcupine said Ok 579 times and Unknown (timed out) 3 times; on the eleven mutants at 200 seeds each, the two never disagreed when both gave a verdict, and both reject d2 at seed 132 and f at seed 20 (§13.9).
-
-But the same run shows why porcupine cannot be the checker of record:
-
-- **No windows, no widening.** Porcupine checks each partition from its first operation to its last. It cannot stop at a quiescent point and carry a factored set of states forward (§13.5, §13.6), so every crash and every 500 multiplies the possible states of everything after it. The largest sets reached about 2 million states (8 million on seed 25, after five minutes, still unfinished), where the oracle, on the same seeds, never needed to widen once.
-- **Unknown is not deterministic.** About 0.5% of seeds never finish, and porcupine's timeout is wall-clock time, so whether a seed is Unknown depends on the machine. A DST verdict has to be a function of the seed (Chapter 8).
-
-Making porcupine fit would mean per-key sets of possible values inside its model, restarted at quiescent points: this chapter's design, rebuilt inside porcupine, and no longer an independent check. So the oracle stays, and porcupine became what C4's veritas is for `apply`: an independent second opinion, run on every `go test ./toys3/sim`, that makes changing the oracle safer. Chapter 13a, §13a.15 has the translation, the full numbers and the commands.
-
 ## Key takeaways
 
 - Linearizability: every operation takes effect at one instant inside its interval, and the resulting sequential execution explains every observed result. Real-time order is respected by construction.
@@ -1172,7 +1157,6 @@ Making porcupine fit would mean per-key sets of possible values inside its model
 - The oracle sees bugs that no per-response check can: values that vanish (d2) and values from the wrong key (f).
 - Read through control theory, the oracle is a set-membership state observer for the register model: `estimate` is the set of possible `refState`s, each window's search is the update, widening is over-approximation, and an empty set is a detected fault. The type keeps the DST name `Oracle`.
 - The oracle's register model is independent of `veritas.Store`, the exact spec of Chapter 13a, on purpose; conformance check C4 feeds C1's sequential histories to the oracle and requires its single state to equal the veritas's map after every operation.
-- Conformance check C5 re-checks DST histories with porcupine and requires the same verdict. They agree, but porcupine cannot replace the oracle: with no windows and no widening its state sets grow into the millions, and about 0.5% of seeds time out, nondeterministically. The oracle is the checker of record; porcupine is its second opinion.
 
 ## Exercises
 

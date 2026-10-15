@@ -684,13 +684,6 @@ Four things stand out.
 
 **f went from invisible to one operation.** When C1 was first written it could not see f at all: with no crashes, `tmp/` was always empty at a restart, so recovery's cleanup had nothing to do. A coverage report showed the unlink path never ran; planting leftover temp files before half the restarts (`stRestartLeftovers`) fixed the coverage and the mutant together (Chapter 13a, §13a.11). Compare that with §15.10's thirteen-crash, two-incarnation story behind DST's catch at seed 20.
 
-**The mutants also test the oracle.** Every "linearizable" in the table is a verdict of the hand-written oracle of Chapter 13. Conformance check C5 (Chapter 13a, §13a.15) gives each of those verdicts a second opinion from porcupine, an independent linearizability checker: `TestC5PorcupineAgreesOnMutants` requires porcupine to say Illegal at every table seed where the oracle catches a mutant (d2 at 132, f at 20, g, h and j at 1), and the same verdict as the oracle on seeds 1..`-c5-mutant-seeds` of every mutant. At 200 seeds per mutant there was no seed on which both gave a verdict and the verdicts differed; porcupine timed out (Unknown) on 10 of the 2,200 histories, and e's 31 garbage reads are the oracle's alone, because C5 leaves them to `NoCorruptReads`.
-
-```sh
-go test ./toys3/sim -run TestC5PorcupineAgreesOnMutants -v                         # table seeds + seeds 1..4 (~1 s)
-go test ./toys3/sim -run TestC5PorcupineAgreesOnMutants -c5-mutant-seeds=200 -porcupine-timeout=30s -v
-```
-
 The lesson extends §15.14: a mutant table with only one kind of check in it tells you what that check can see, not what your tests can see. The column that matters most is the one that says "—".
 
 ## Key takeaways
@@ -703,7 +696,6 @@ The lesson extends §15.14: a mutant table with only one kind of check in it tel
 - A mutant can be dead or wrong. Guard with one-step discipline, liveness counters (`tempsrm=0`), trace-hash diffs against the real server, and by checking *which* invariant caught it.
 - A surviving mutant is either equivalent or a gap. The recovery `FSFsyncDir(tmp)` (mutant x) appears to be equivalent under the current StorageModel model; mutant i is a real gap in DST's workload, which never Puts more than 40 bytes against a 64-byte limit.
 - The functional mutants g to j are caught by C1 in one or two shrunk operations. C1 cannot see c, d, d2 or e (they need a fault, a crash or a concurrent reader), and sees a and b only through `StorageModel`'s durable view. DST and the conformance checks cover each other's blind spots.
-- Conformance check C5 re-checks the oracle's verdicts on the mutants with porcupine: both say Illegal at every table seed the oracle catches, and on 200 seeds per mutant they never disagree where both give a verdict.
 
 ## Exercises
 

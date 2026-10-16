@@ -48,6 +48,7 @@ Rows 7–22 come from building toys3 end to end. The signatures and evidence are
 | 30 | **Fetch rewrites offsets.** Segments store the producer's RecordBatch bytes verbatim. Fetch patches `baseOffset` (bytes 0–7) and `partitionLeaderEpoch` (12–15) to the committed values; both lie outside the batch CRC, so the CRC stays valid. |
 | 31 | **Milestone 2 layout.** `kwire/` (kmsg framer and codec, pure), `broker/` (the Kafka broker state machine, pure, used by `sim` and `sys.Run`), `sim/kafka/` (sans-I/O Kafka clients, oracle and invariants), `cp/` (the CP HTTP service, DynamoDB store, `sys` client). `manisim -scenario kafka` is the default. |
 | 32 | **Commit size limit is part of the CP contract.** The DynamoDB CP runs a commit as one `TransactWriteItems` (100 items), so a commit may be refused with `ErrTooLarge` (about 30 idempotent partitions or 48 plain ones per segment). The spec (`veritas`) does not model it; brokers stay below it with `broker.Config.MaxSegmentPartitions` (default 24). Accepted. |
+| 33 | **Production wiring.** `sys/s3store` (S3 adapter + Obj* classifier, C3 against `veritas.ObjectStore`), `sys/prod` (clock, env, executor, TCP `Net`, `Start` wiring shared by `cmd/manibroker` and the tests), `it/` (real franz-go clients). Not in the determinism gate. Brokers store uncompressed batches only, so clients must set no compression (open issue). Metadata lists only the answering broker; failover relies on the client keeping its seed list. |
 
 ## Threading model
 

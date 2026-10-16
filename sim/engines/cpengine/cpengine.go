@@ -36,7 +36,7 @@ func New(f sim.ControlPlaneFaults) *Engine {
 		Spec: func(a core.IOAction) core.Completion { return e.spec.Exec(a) },
 		Mutating: func(a core.IOAction) bool {
 			switch a.(core.CPCall).Op.(type) {
-			case core.Register, core.CommitSegment:
+			case core.Register, core.InitProducer, core.CommitSegment:
 				return true
 			}
 			return false

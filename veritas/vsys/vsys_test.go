@@ -63,7 +63,7 @@ func TestControlPlaneConcurrent(t *testing.T) {
 			defer wg.Done()
 			_, err := c.Call(ctx, core.CommitSegment{
 				SegmentKey: string(rune('a' + i)), Owner: core.NodeRef{Node: "n"}, Epoch: e,
-				Batches: []core.PendingBatch{{TP: core.TopicPartition{Topic: "t"}, Records: 2}},
+				Batches: []core.PendingBatch{{TP: core.TopicPartition{Topic: "t"}, Records: 2, Producer: core.NoProducer}},
 			})
 			if err != nil {
 				t.Error(err)
@@ -76,7 +76,7 @@ func TestControlPlaneConcurrent(t *testing.T) {
 		t.Fatalf("hwm %d", hwm)
 	}
 	_, err = c.Call(ctx, core.CommitSegment{SegmentKey: "x", Owner: core.NodeRef{Node: "n"}, Epoch: e + 1,
-		Batches: []core.PendingBatch{{TP: core.TopicPartition{Topic: "t"}, Records: 1}}})
+		Batches: []core.PendingBatch{{TP: core.TopicPartition{Topic: "t"}, Records: 1, Producer: core.NoProducer}}})
 	if code(err) != core.ErrFenced {
 		t.Fatalf("fenced: %v", err)
 	}

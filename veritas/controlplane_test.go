@@ -31,7 +31,7 @@ func commit(c *ControlPlane, n string, e core.Epoch, key string, bs ...core.Pend
 }
 
 func pb(t string, p int32, recs int64) core.PendingBatch {
-	return core.PendingBatch{TP: tp(t, p), Records: recs, Loc: core.SegmentRef{Key: "o", Off: 0, Len: recs * 10}}
+	return core.PendingBatch{TP: tp(t, p), Records: recs, Loc: core.SegmentRef{Key: "o", Off: 0, Len: recs * 10}, Producer: core.NoProducer}
 }
 
 func assigned(t *testing.T, d core.CPDone) []core.BatchRange {
@@ -412,4 +412,232 @@ func TestControlPlaneCheckShrinksPlantedBug(t *testing.T) {
 		t.Fatalf("not minimal (want register, commit):\n%s", c.Report(f, ""))
 	}
 	t.Logf("example report:\n%s", c.Report(f, "go test ./veritas -run TestControlPlaneCheckShrinksPlantedBug"))
+}
+
+func initProducer(t *testing.T, c *ControlPlane) core.ProducerID {
+	t.Helper()
+	d := call(c, core.InitProducer{})
+	r := d.Resp.(core.InitProducerResp)
+	if d.Err != core.OK || d.Outcome != core.Applied || r.PEpoch != 0 {
+		t.Fatalf("init: %+v", d)
+	}
+	return r.Producer
+}
+
+func ib(t string, p int32, recs int64, pid core.ProducerID, pe int16, seq int32) core.PendingBatch {
+	b := pb(t, p, recs)
+	b.Producer, b.PEpoch, b.BaseSeq = pid, pe, seq
+	return b
+}
+
+func nop(t string, p int32, recs int64) core.PendingBatch {
+	b := pb(t, p, recs)
+	b.Producer = core.NoProducer
+	return b
+}
+
+func TestInitProducer(t *testing.T) {
+	c := NewControlPlane()
+	for i := 0; i < 3; i++ {
+		if p := initProducer(t, c); p != core.ProducerID(1000+i) {
+			t.Fatalf("producer %d", p)
+		}
+	}
+}
+
+func TestIdempotentCommit(t *testing.T) {
+	type res struct {
+		base core.Offset
+		err  core.ErrCode
+		dup  bool
+	}
+	ok := func(b core.Offset) res { return res{base: b} }
+	dup := func(b core.Offset) res { return res{base: b, dup: true} }
+	rej := func(e core.ErrCode) res { return res{base: -1, err: e} }
+	// Each case is a list of segments; each segment a list of batches on
+	// ("t",0) as producer 1000 (p1), 1001 (p2) or none.
+	type bt struct {
+		pid     int // 0 none, 1 p1, 2 p2
+		pe      int16
+		seq     int32
+		records int64
+	}
+	cases := []struct {
+		name string
+		segs [][]bt
+		want [][]res
+		hwm  core.Offset
+	}{
+		{"sequential", [][]bt{{{1, 0, 0, 3}}, {{1, 0, 3, 2}}}, [][]res{{ok(0)}, {ok(3)}}, 5},
+		{"dup in window", [][]bt{{{1, 0, 0, 3}}, {{1, 0, 3, 2}}, {{1, 0, 0, 3}}}, [][]res{{ok(0)}, {ok(3)}, {dup(0)}}, 5},
+		{"same seq different records", [][]bt{{{1, 0, 0, 3}}, {{1, 0, 0, 2}}}, [][]res{{ok(0)}, {rej(core.ErrOutOfOrder)}}, 3},
+		{"dup evicted", [][]bt{{{1, 0, 0, 1}}, {{1, 0, 1, 1}}, {{1, 0, 2, 1}}, {{1, 0, 3, 1}}, {{1, 0, 4, 1}}, {{1, 0, 5, 1}}, {{1, 0, 1, 1}}, {{1, 0, 0, 1}}},
+			[][]res{{ok(0)}, {ok(1)}, {ok(2)}, {ok(3)}, {ok(4)}, {ok(5)}, {dup(1)}, {rej(core.ErrOutOfOrder)}}, 6},
+		{"gap", [][]bt{{{1, 0, 0, 1}}, {{1, 0, 5, 1}}}, [][]res{{ok(0)}, {rej(core.ErrOutOfOrder)}}, 1},
+		{"first not zero", [][]bt{{{1, 0, 4, 1}}}, [][]res{{rej(core.ErrOutOfOrder)}}, 0},
+		{"stale epoch fenced", [][]bt{{{1, 1, 0, 1}}, {{1, 0, 1, 1}}}, [][]res{{ok(0)}, {rej(core.ErrFenced)}}, 1},
+		{"epoch bump", [][]bt{{{1, 0, 0, 2}}, {{1, 1, 0, 1}}, {{1, 1, 1, 1}}, {{1, 0, 2, 1}}},
+			[][]res{{ok(0)}, {ok(2)}, {ok(3)}, {rej(core.ErrFenced)}}, 4},
+		{"epoch bump needs seq 0", [][]bt{{{1, 0, 0, 2}}, {{1, 1, 2, 1}}}, [][]res{{ok(0)}, {rej(core.ErrOutOfOrder)}}, 2},
+		{"same producer twice in one segment", [][]bt{{{1, 0, 0, 2}, {1, 0, 2, 3}, {1, 0, 0, 2}}}, [][]res{{ok(0), ok(2), dup(0)}}, 5},
+		{"mixed", [][]bt{{{0, 0, 0, 1}, {1, 0, 0, 2}, {0, 0, 0, 1}, {2, 0, 0, 1}, {1, 0, 2, 1}, {1, 0, 9, 1}}},
+			[][]res{{ok(0), ok(1), ok(3), ok(4), ok(5), rej(core.ErrOutOfOrder)}}, 6},
+		{"producers independent", [][]bt{{{1, 0, 0, 1}, {2, 0, 0, 1}}, {{2, 0, 1, 1}, {1, 0, 1, 1}}}, [][]res{{ok(0), ok(1)}, {ok(2), ok(3)}}, 4},
+		{"only rejects", [][]bt{{{1, 0, 3, 1}}}, [][]res{{rej(core.ErrOutOfOrder)}}, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewControlPlane()
+			e := register(t, c, "n")
+			pids := []core.ProducerID{core.NoProducer, initProducer(t, c), initProducer(t, c)}
+			var got [][]core.BatchRange
+			for i, seg := range tc.segs {
+				var bs []core.PendingBatch
+				for _, b := range seg {
+					x := ib("t", 0, b.records, pids[b.pid], b.pe, b.seq)
+					x.Loc.Key = fmt.Sprintf("seg%d", i)
+					bs = append(bs, x)
+				}
+				rs := assigned(t, commit(c, "n", e, fmt.Sprintf("s%d", i), bs...))
+				if len(rs) != len(seg) {
+					t.Fatalf("seg %d: %d ranges", i, len(rs))
+				}
+				for j, r := range rs {
+					w := tc.want[i][j]
+					if r.Base != w.base || r.Err != w.err || r.Dup != w.dup || r.Count != seg[j].records || r.TP != tp("t", 0) {
+						t.Fatalf("seg %d batch %d: %+v, want %+v", i, j, r, w)
+					}
+					if w.base < 0 && r.Loc != bs[j].Loc {
+						t.Fatalf("seg %d batch %d: loc %+v", i, j, r.Loc)
+					}
+				}
+				got = append(got, rs)
+			}
+			if c.HighWatermark(tp("t", 0)) != tc.hwm {
+				t.Fatalf("hwm %d, want %d", c.HighWatermark(tp("t", 0)), tc.hwm)
+			}
+			// Lookup holds exactly the assigned ranges, contiguous.
+			l := call(c, core.Lookup{TP: tp("t", 0)}).Resp.(core.LookupResp)
+			next := core.Offset(0)
+			for _, r := range l.Ranges {
+				if r.Dup || r.Err != core.OK || r.Base != next {
+					t.Fatalf("lookup: %+v", l.Ranges)
+				}
+				next += core.Offset(r.Count)
+			}
+			if next != tc.hwm {
+				t.Fatalf("lookup ends at %d", next)
+			}
+			// Replaying every segment returns the original results, changing nothing.
+			h := c.StateHash()
+			for i, seg := range tc.segs {
+				var bs []core.PendingBatch
+				for _, b := range seg {
+					x := ib("t", 0, b.records, pids[b.pid], b.pe, b.seq)
+					x.Loc.Key = fmt.Sprintf("seg%d", i)
+					bs = append(bs, x)
+				}
+				d := commit(c, "n", e+7, fmt.Sprintf("s%d", i), bs...)
+				if d.Outcome != core.Applied || !slices.Equal(assigned(t, d), got[i]) {
+					t.Fatalf("replay %d: %+v, want %+v", i, d, got[i])
+				}
+			}
+			if c.StateHash() != h {
+				t.Fatal("replay changed state")
+			}
+		})
+	}
+}
+
+func TestIdempotentInvalid(t *testing.T) {
+	c := NewControlPlane()
+	e := register(t, c, "n")
+	p := initProducer(t, c)
+	h := c.StateHash()
+	for i, b := range []core.PendingBatch{
+		ib("t", 0, 1, 1005, 0, 0),
+		ib("t", 0, 1, 999, 0, 0),
+		ib("t", 0, 1, -2, 0, 0),
+		ib("t", 0, 1, p, -1, 0),
+		ib("t", 0, 1, p, 0, -1),
+	} {
+		if d := commit(c, "n", e, "bad", nop("t", 0, 1), b); d.Err != core.ErrInvalid {
+			t.Fatalf("case %d: %+v", i, d)
+		}
+	}
+	if c.StateHash() != h || c.HighWatermark(tp("t", 0)) != 0 {
+		t.Fatal("invalid commit changed state")
+	}
+	if d := commit(c, "n", e, "bad", ib("t", 0, 1, p, 0, 0)); d.Err != core.OK {
+		t.Fatalf("key reusable after invalid: %+v", d)
+	}
+}
+
+func TestIdempotentConflictAndFence(t *testing.T) {
+	c := NewControlPlane()
+	e := register(t, c, "n")
+	p := initProducer(t, c)
+	assigned(t, commit(c, "n", e, "s", ib("t", 0, 2, p, 0, 0)))
+	if d := commit(c, "n", e, "s", ib("t", 0, 2, p, 0, 1)); d.Err != core.ErrConflict {
+		t.Fatalf("%+v", d)
+	}
+	h := c.StateHash()
+	if d := commit(c, "n", e+1, "s2", ib("t", 0, 2, p, 0, 2)); d.Err != core.ErrFenced || c.StateHash() != h {
+		t.Fatalf("%+v", d)
+	}
+}
+
+// TestIdempotentRandom drives random idempotent traffic and checks that
+// Lookup stays contiguous and holds only assigned ranges, and that replays
+// repeat the original answer.
+func TestIdempotentRandom(t *testing.T) {
+	for seed := uint64(1); seed <= 200; seed++ {
+		r := veritastest.NewRand(seed)
+		c := NewControlPlane()
+		e := register(t, c, "n")
+		var pids []core.ProducerID
+		type sent struct {
+			key string
+			bs  []core.PendingBatch
+			rs  []core.BatchRange
+		}
+		var log []sent
+		for i := 0; i < 120; i++ {
+			switch k := r.Intn(8); {
+			case k == 0 || len(pids) == 0:
+				pids = append(pids, initProducer(t, c))
+			case k == 1 && len(log) > 0:
+				s := log[r.Intn(len(log))]
+				if d := commit(c, "n", e, s.key, s.bs...); !slices.Equal(assigned(t, d), s.rs) {
+					t.Fatalf("seed %d: replay differs", seed)
+				}
+			default:
+				var bs []core.PendingBatch
+				for n := 0; n <= r.Intn(3); n++ {
+					p := cpTPs[r.Intn(3)]
+					if r.Intn(4) == 0 {
+						bs = append(bs, nop(p.Topic, p.Partition, int64(1+r.Intn(3))))
+						continue
+					}
+					bs = append(bs, ib(p.Topic, p.Partition, int64(1+r.Intn(2)), pids[r.Intn(len(pids))], int16(r.Intn(2)), int32(r.Intn(6))))
+				}
+				key := fmt.Sprintf("k%d", i)
+				rs := assigned(t, commit(c, "n", e, key, bs...))
+				log = append(log, sent{key, bs, rs})
+			}
+			for _, p := range cpTPs {
+				l := call(c, core.Lookup{TP: p}).Resp.(core.LookupResp)
+				next := core.Offset(0)
+				for _, x := range l.Ranges {
+					if x.Dup || x.Err != core.OK || x.Base != next {
+						t.Fatalf("seed %d %v: %+v", seed, p, l.Ranges)
+					}
+					next += core.Offset(x.Count)
+				}
+				if next != l.HighWatermark {
+					t.Fatalf("seed %d: hwm", seed)
+				}
+			}
+		}
+	}
 }

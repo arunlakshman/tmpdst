@@ -30,7 +30,7 @@ func call(e *cpengine.Engine, c *enginetest.Ctx, from core.NodeRef, req core.Req
 
 func commit(key string, ep core.Epoch, from core.NodeRef) core.CommitSegment {
 	return core.CommitSegment{SegmentKey: key, Owner: from, Epoch: ep,
-		Batches: []core.PendingBatch{{TP: tp, Records: 5, Loc: core.SegmentRef{Key: key, Len: 10}}}}
+		Batches: []core.PendingBatch{{TP: tp, Records: 5, Loc: core.SegmentRef{Key: key, Len: 10}, Producer: core.NoProducer}}}
 }
 
 func last(c *enginetest.Ctx) core.CPDone { return c.Delivered[len(c.Delivered)-1].Body.(core.CPDone) }
@@ -243,5 +243,15 @@ func TestDeterminism(t *testing.T) {
 	}
 	if m1 == h1 {
 		t.Fatal("pending plans not hashed")
+	}
+}
+
+func TestInitProducerMutates(t *testing.T) {
+	e, c, a := setup(base(), 1)
+	call(e, c, a, 1, core.InitProducer{})
+	call(e, c, a, 2, core.InitProducer{})
+	c.Run()
+	if r := c.Find(2).(core.CPDone).Resp.(core.InitProducerResp); r.Producer != 1001 || r.PEpoch != 0 || e.Gen() != 2 {
+		t.Fatal(r, e.Gen())
 	}
 }

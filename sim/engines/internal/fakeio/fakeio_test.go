@@ -133,7 +133,7 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 			// Epoch guesses: often stale (fenced), sometimes right; keys repeat (replays).
 			c.Execute(ctx, n, core.CPCall{Req: req, Op: core.CommitSegment{
 				SegmentKey: string(rune('a' + r.Between(0, 8))), Owner: n, Epoch: core.Epoch(r.Between(0, 6)),
-				Batches: []core.PendingBatch{{TP: tps[r.Between(0, 2)], Records: 1 + r.Between(0, 3)}},
+				Batches: []core.PendingBatch{{TP: tps[r.Between(0, 2)], Records: 1 + r.Between(0, 3), Producer: core.NoProducer}},
 			}})
 		default:
 			c.Execute(ctx, n, core.CPCall{Req: req, Op: core.Lookup{TP: tps[0]}})

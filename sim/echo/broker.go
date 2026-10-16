@@ -389,7 +389,7 @@ func (b *Broker) commit(o *op) []core.Action {
 		SegmentKey: o.key,
 		Owner:      b.self,
 		Epoch:      b.epoch,
-		Batches:    []core.PendingBatch{{TP: tp(), Records: 1, Loc: o.ref}},
+		Batches:    []core.PendingBatch{{TP: tp(), Records: 1, Loc: o.ref, Producer: core.NoProducer}},
 	}}}
 }
 

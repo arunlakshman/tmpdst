@@ -69,11 +69,11 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		"ObjList": core.ObjList{}, "CPCall": core.CPCall{}, "Emit": core.Emit{}, "Trip": core.Trip{}, "Exit": core.Exit{},
 	}
 	ops := map[string]core.CPOp{
-		"Register": core.Register{}, "CommitSegment": core.CommitSegment{}, "Lookup": core.Lookup{},
+		"Register": core.Register{}, "InitProducer": core.InitProducer{}, "CommitSegment": core.CommitSegment{}, "Lookup": core.Lookup{},
 		"DescribeTopics": core.DescribeTopics{},
 	}
 	resps := map[string]core.CPResp{
-		"RegisterResp": core.RegisterResp{}, "CommitSegmentResp": core.CommitSegmentResp{},
+		"RegisterResp": core.RegisterResp{}, "InitProducerResp": core.InitProducerResp{}, "CommitSegmentResp": core.CommitSegmentResp{},
 		"LookupResp": core.LookupResp{}, "DescribeTopicsResp": core.DescribeTopicsResp{},
 	}
 	fields := map[string]core.FieldValue{

@@ -42,7 +42,9 @@ type Conns interface {
 // Classifier is the single place SDK/HTTP/net errors become plain data
 // (lesson 1). Getting Outcome right here is what makes acks honest.
 type Classifier interface {
-	Classify(err error) (core.ErrCode, core.Outcome)
+	// Classify reduces err to plain data. It logs err; the core only sees the
+	// code. The Outcome depends on which operation failed, not only on err.
+	Classify(a core.IOAction, err error) (core.ErrCode, core.Outcome)
 }
 
 // Sink is the node's pair of inboxes (docs/flow-control.md §3). Callers route
@@ -55,12 +57,17 @@ type Sink interface {
 	// DeliverData is used by connection reader goroutines. It blocks when the
 	// data queue is full (a safety net; real backpressure is PauseReads).
 	DeliverData(body core.EventBody)
+	// Closed is closed when the incarnation ends. Later deliveries are dropped,
+	// never block, and never reach the next incarnation.
+	Closed() <-chan struct{}
 }
 
-// Executor turns Actions into I/O. Execute MUST NOT block the loop goroutine:
-// it hands work to goroutines/queues whose completions go to the Sink.
+// Executor runs I/O only. The loop handles Emit, timers, Trip, Exit and
+// panics on an unknown action. Exactly one Completion per IOAction, with the
+// same ReqID, delivered to the Sink and never on the caller's goroutine.
+// Execute MUST NOT block: it hands work to goroutines/queues.
 type Executor interface {
-	Execute(a core.Action)
+	Execute(a core.IOAction)
 }
 
 // Bundle is everything nondeterministic a production broker process needs.
@@ -70,5 +77,9 @@ type Bundle struct {
 	ControlPlane ControlPlane
 	Conns        Conns
 	Classifier   Classifier
-	Env          core.Env // crypto-seeded Rand, inert Buggify, logging Assertions
+	Env          core.Env        // crypto-seeded Rand, inert Buggify, logging Assertions
+	Inbox        *Inbox          // shared with the Executor and readers; Run closes it on return
+	Facts        func(core.Fact) // optional: receives Emit facts (tracing)
+	Shutdown     <-chan struct{} // optional: closing it asks Run for a graceful stop (see ShutdownOnSignal)
+	StopGrace    core.Duration   // time the machine gets after Shutdown to emit Exit
 }

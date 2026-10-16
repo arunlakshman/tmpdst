@@ -85,6 +85,10 @@ type Core struct {
 	until    sim.Time
 	recovery bool
 	gen      uint64
+	// specHash caches h.SpecHash(). It is valid only while specOK; every path
+	// that can change the spec clears specOK (landing a mutating op, Bump).
+	specHash uint64
+	specOK   bool
 }
 
 // New returns a Core.
@@ -92,7 +96,17 @@ func New(h Hooks) *Core { return &Core{h: h} }
 
 // Gen is the applied-change counter; Bump adds an out-of-band change.
 func (c *Core) Gen() uint64 { return c.gen }
-func (c *Core) Bump()       { c.gen++ }
+
+// Bump records an out-of-band spec change (and invalidates the spec hash cache).
+func (c *Core) Bump() { c.gen++; c.specOK = false }
+
+// specStateHash is the spec's StateHash, recomputed only after a mutation.
+func (c *Core) specStateHash() uint64 {
+	if !c.specOK {
+		c.specHash, c.specOK = c.h.SpecHash(), true
+	}
+	return c.specHash
+}
 
 func (c *Core) Name() string { return c.h.Name }
 
@@ -205,6 +219,9 @@ func (c *Core) OnInternal(ctx sim.EngineCtx, body any) {
 		return
 	}
 	comp := c.h.Spec(pl.Act)
+	if c.h.Mutating(pl.Act) {
+		c.specOK = false // whatever Changed says, the cache must not outlive a mutating call
+	}
 	if c.h.Changed(comp) {
 		c.gen++
 	}
@@ -233,7 +250,7 @@ func (c *Core) StateHash() uint64 {
 			h = (h ^ (v >> (8 * i) & 0xff)) * 1099511628211
 		}
 	}
-	mix(c.h.SpecHash())
+	mix(c.specStateHash())
 	mix(uint64(c.until))
 	if c.recovery {
 		mix(1)

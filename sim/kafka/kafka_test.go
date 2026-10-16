@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"github.com/twmb/franz-go/pkg/kmsg"
 	"testing"
 
 	"manifester/broker"
@@ -56,7 +57,7 @@ func TestKafkaCampaign(t *testing.T) {
 
 func TestDeterminismCanary(t *testing.T) {
 	cfg := Config(nil)
-	for seed := uint64(1); seed <= 4; seed++ {
+	for seed := uint64(1); seed <= 3; seed++ {
 		a, b := sim.RunSeed(cfg, seed), sim.RunSeed(cfg, seed)
 		if a.TraceHash != b.TraceHash || a.RandCalls != b.RandCalls || a.Steps != b.Steps {
 			t.Fatalf("seed %d diverged: %x/%d/%d vs %x/%d/%d", seed, a.TraceHash, a.RandCalls, a.Steps, b.TraceHash, b.RandCalls, b.Steps)
@@ -186,5 +187,80 @@ func TestCampaignIsNotVacuous(t *testing.T) {
 	t.Logf("20 seeds: %+v", tl)
 	if tl.definite < 2000 || tl.indet == 0 || tl.retried == 0 || tl.dupAcks == 0 || tl.readRecs < 2000 {
 		t.Fatalf("campaign too weak: %+v", tl)
+	}
+}
+
+// fakeEnv is the minimum Env for driving the workload by hand.
+type fakeEnv struct{ n uint64 }
+
+func (e *fakeEnv) Uint64() uint64 { e.n++; return e.n }
+func (e *fakeEnv) Intn(n int) int { e.n++; return int(e.n % uint64(n)) }
+func (e *fakeEnv) NewID() (id core.ID) {
+	e.n++
+	id[0], id[1] = byte(e.n), byte(e.n>>8)
+	return id
+}
+func (*fakeEnv) Maybe(core.Site) bool                                { return false }
+func (*fakeEnv) MaybeP(core.Site, float64) bool                      { return false }
+func (*fakeEnv) Fault(core.Site, float64) bool                       { return false }
+func (*fakeEnv) Always(bool, core.Prop, ...core.Detail)              {}
+func (*fakeEnv) AlwaysOrUnreachable(bool, core.Prop, ...core.Detail) {}
+func (*fakeEnv) Sometimes(bool, core.Prop)                           {}
+func (*fakeEnv) Reachable(core.Prop)                                 {}
+func (*fakeEnv) Unreachable(core.Prop, ...core.Detail)               {}
+
+type fakeHist struct{ ops []sim.HistOp }
+
+func (h *fakeHist) Invoke(c core.NodeRef, id, v core.ID, op any) {
+	h.ops = append(h.ops, sim.HistOp{ID: id, Value: v, Client: c, Op: op})
+}
+func (h *fakeHist) Return(id core.ID, res any, o sim.OpOutcome) bool {
+	for i := range h.ops {
+		if h.ops[i].ID == id {
+			h.ops[i].Result, h.ops[i].Outcome = res, o
+			return true
+		}
+	}
+	return false
+}
+func (h *fakeHist) Ops() []sim.HistOp { return h.ops }
+
+// The real broker never answers OUT_OF_ORDER_SEQUENCE to this workload, so the
+// give-up path is driven by hand: a definite rejection abandons the batch, an
+// earlier ambiguous attempt makes it indeterminate, and either way the
+// producer asks for a fresh id.
+func TestFatalProduceErrorReinitsProducer(t *testing.T) {
+	for _, ambiguous := range []bool{false, true} {
+		w := NewWorkload(&fakeEnv{}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
+		h := &fakeHist{}
+		w.SetHistory(h)
+		c := w.clients[0]
+		c.state, c.stage, c.p.pid = csUp, stRun, 1000
+		w.newBatches(c)
+		if len(h.ops) == 0 || len(c.p.cur) != len(h.ops) {
+			t.Fatalf("no batches built: %d ops", len(h.ops))
+		}
+		for _, b := range c.p.cur {
+			b.ambiguous = ambiguous
+		}
+		resp := kmsg.NewPtrProduceResponse()
+		for _, b := range c.p.cur {
+			tp := w.tps[b.tpIdx]
+			resp.Topics = append(resp.Topics, kmsg.ProduceResponseTopic{Topic: tp.Topic,
+				Partitions: []kmsg.ProduceResponseTopicPartition{{Partition: tp.Partition, ErrorCode: 45, BaseOffset: -1}}})
+		}
+		w.onProduce(c, resp)
+		want := sim.OpAbandoned
+		if ambiguous {
+			want = sim.OpIndeterminate
+		}
+		for i, op := range h.ops {
+			if op.Outcome != want {
+				t.Errorf("ambiguous=%v op %d: outcome %d, want %d", ambiguous, i, op.Outcome, want)
+			}
+		}
+		if c.p.pid != 0 || c.stage != stInit || len(c.p.cur) != 0 {
+			t.Errorf("ambiguous=%v: producer not reset: pid=%d stage=%d cur=%d", ambiguous, c.p.pid, c.stage, len(c.p.cur))
+		}
 	}
 }

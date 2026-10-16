@@ -36,8 +36,9 @@ func validate(cfg Config) error {
 // Report.Always lists safety properties (Always, AlwaysOrUnreachable,
 // Unreachable) that were violated, with the violating seeds and the first
 // seed/step. Report.Coverage lists Sometimes properties never satisfied in
-// the campaign; a Reachable that is never executed is never recorded, so it
-// cannot appear there.
+// the campaign. A Reachable that is never executed is never recorded, so it
+// appears there only if listed in Config.ExpectReachable (as an unreached stat
+// with zero Checks). Report.Assertions holds every stat.
 func (runner) Run(cfg Config) (Report, error) {
 	if err := validate(cfg); err != nil {
 		return Report{}, err
@@ -77,6 +78,18 @@ func (runner) Run(cfg Config) (Report, error) {
 			}
 		}
 	}
+	for _, p := range cfg.ExpectReachable {
+		found := false
+		for _, a := range all {
+			if a.Kind == kindReachable && a.Prop == p {
+				found = true
+			}
+		}
+		if !found {
+			all = append(all, AssertionStat{Prop: p, Kind: kindReachable})
+		}
+	}
+	rep.Assertions = all
 	for _, a := range all {
 		switch {
 		case isSafety(a.Kind) && len(a.Seeds) > 0:

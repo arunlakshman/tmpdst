@@ -305,6 +305,7 @@ func (e *Engine) fault(ctx sim.EngineCtx, kind string, a, b core.NodeID, extra .
 	fs := append([]core.Field{{Key: "a", Value: core.Str(a)}, {Key: "b", Value: core.Str(b)}}, extra...)
 	ctx.Fault(kind, fs...)
 	ctx.Assert().Sometimes(true, core.Prop("net: "+kind))
+	ctx.Assert().Reachable(core.Prop("net: " + kind + " injected"))
 }
 
 // ---- Execute ----

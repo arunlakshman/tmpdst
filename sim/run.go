@@ -76,6 +76,12 @@ type Config struct {
 	// close a window.
 	QuiesceEvery core.Duration
 	Scripted     []ScriptedFault
+	// ExpectReachable lists Reachable properties that must be reached at least
+	// once across the campaign. A Reachable only records when it executes, so
+	// code that is never run cannot declare itself; the campaign declares it
+	// here. Report.Coverage lists each one never reached (Kind "reachable",
+	// zero Checks if it never ran at all).
+	ExpectReachable []core.Prop
 	// CheckDeterminism replays every Kth seed and compares
 	// (TraceHash, RandCalls, Steps). 0 = off.
 	CheckDeterminism uint32
@@ -131,10 +137,14 @@ type SeedResult struct {
 
 // Report is the authority on pass/fail (lesson 11).
 type Report struct {
-	Seeds          []SeedResult
-	Always         []AssertionStat // violations: definite bugs
-	Coverage       []AssertionStat // sometimes/reachable never satisfied
-	Nondeterminism []uint64        // seeds whose two runs diverged
+	Seeds    []SeedResult
+	Always   []AssertionStat // violations: definite bugs
+	Coverage []AssertionStat // sometimes/reachable never satisfied, plus unreached ExpectReachable
+	// Assertions is every assertion stat of the campaign aggregated over seeds
+	// (per property and kind, in first-evaluated order), whatever its outcome,
+	// followed by a zero stat for each ExpectReachable property never evaluated.
+	Assertions     []AssertionStat
+	Nondeterminism []uint64 // seeds whose two runs diverged
 }
 
 type AssertionStat struct {

@@ -729,3 +729,42 @@ func TestPhaseAwareWorkload(t *testing.T) {
 		t.Fatal("OnPhase actions must be deterministic and trace-hashed")
 	}
 }
+
+func TestExpectReachableAndAssertions(t *testing.T) {
+	cfg := baseCfg(scripted(ping))
+	cfg.Seeds = []uint64{1, 2}
+	cfg.Invariants = []func() Invariant{func() Invariant {
+		return &fnInvariant{atEnd: func(v View) {
+			v.Assert().Reachable("hit")
+			v.Assert().Always(true, "fine")
+		}}
+	}}
+	cfg.ExpectReachable = []core.Prop{"hit", "never ran", "also never"}
+	rep, err := NewRunner().Run(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cov []core.Prop
+	for _, a := range rep.Coverage {
+		cov = append(cov, a.Prop)
+		if a.Kind != "reachable" || a.Checks != 0 {
+			t.Fatalf("%+v", a)
+		}
+	}
+	if len(cov) != 2 || cov[0] != "never ran" || cov[1] != "also never" {
+		t.Fatalf("coverage: %v", cov)
+	}
+	got := map[core.Prop]AssertionStat{}
+	for _, a := range rep.Assertions {
+		got[a.Prop] = a
+	}
+	if a := got["hit"]; a.Kind != "reachable" || a.Checks != 2 || len(a.Seeds) != 2 {
+		t.Fatalf("hit: %+v", a)
+	}
+	if a := got["fine"]; a.Kind != "always" || a.Passes != 2 || len(a.Seeds) != 0 {
+		t.Fatalf("fine: %+v", a)
+	}
+	if _, ok := got["never ran"]; !ok || len(rep.Always) != 0 {
+		t.Fatalf("%+v", rep)
+	}
+}

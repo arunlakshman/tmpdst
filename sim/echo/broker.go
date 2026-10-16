@@ -353,6 +353,7 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 		case stPut:
 			return b.put(o)
 		case stCommit:
+			b.env.Reachable("echo: commit retried after MaybeApplied")
 			return append([]core.Action{emit("echo_commit_retried", core.Field{Key: "key", Value: core.Str(o.key)})}, b.commit(o)...)
 		case stLookup:
 			return b.lookup(o)
@@ -485,6 +486,7 @@ func (b *Broker) onGet(o *op, e core.ObjGetDone) []core.Action {
 		}
 	}
 	if err != nil {
+		b.env.Reachable("echo: corruption detected on read")
 		acts := []core.Action{emit("corruption_detected", core.Field{Key: "key", Value: core.Str(o.ref.Key)})}
 		return append(acts, b.reply(o, "ERR corrupt")...)
 	}

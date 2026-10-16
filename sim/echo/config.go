@@ -67,6 +67,7 @@ func config(seeds []uint64, brokers core.Factory) sim.Config {
 		Attrition: sim.Attrition{MaxDead: 1, CrashProb: 0.0005, CrashWeight: 2, GracefulWeight: 1,
 			RecoveryDelay: [2]core.Duration{ms(200), ms(1500)}},
 		Cost:             sim.CostParams{PerEvent: 50 * core.Microsecond, PauseProb: 0.001, Pause: slow(1, 5, 20, 100, 0.1)},
+		ExpectReachable:  expectReachable,
 		Swarm:            swarm,
 		Phases:           ph,
 		QuiesceEvery:     core.Second,

@@ -164,16 +164,27 @@ func (l *liveness) AtEnd(v sim.View) {
 	v.Assert().Sometimes(len(v.History().Ops()) > 0, "echo: workload issued requests")
 }
 
-// faultCoverage turns "this fault family fired" into Sometimes properties, so
-// Report.Coverage is empty only when every family fired somewhere in the
-// campaign.
+// expectReachable is the campaign's coverage contract (Config.ExpectReachable):
+// every fault family and recovery path must fire somewhere in the campaign.
+// The engines and the broker declare these props where the event happens; the
+// list lives here because only the campaign knows what it must see.
+var expectReachable = []core.Prop{
+	"obj 503 injected", "obj timeout injected", "obj lost response injected", "obj outage started", "obj get corrupted",
+	"cp 503 injected", "cp timeout injected", "cp lost response injected", "cp outage started",
+	"net: partition injected", "net: clog injected", "net: random_close injected", "net: black_hole injected",
+	"echo: commit retried after MaybeApplied",
+	"echo: corruption detected on read",
+}
+
+// faultCoverage covers what only the kernel's facts show: a hard crash by
+// attrition and a graceful stop. (Everything else is in expectReachable.)
 type faultCoverage struct{}
 
 func (*faultCoverage) Name() string     { return "FaultCoverage" }
 func (*faultCoverage) Observe(sim.View) {}
 
 func (*faultCoverage) AtEnd(v sim.View) {
-	n := func(name, key, val string) bool {
+	has := func(name, key, val string) bool {
 		for _, tf := range v.Timeline().Snapshot(name) {
 			if key == "" {
 				return true
@@ -184,22 +195,6 @@ func (*faultCoverage) AtEnd(v sim.View) {
 		}
 		return false
 	}
-	a := v.Assert()
-	a.Sometimes(n("sim_fault", "kind", "obj_503"), "echo: fault fired: object store 503")
-	a.Sometimes(n("sim_fault", "kind", "obj_timeout"), "echo: fault fired: object store timeout")
-	a.Sometimes(n("sim_fault", "kind", "obj_lost_response"), "echo: fault fired: object store lost response")
-	a.Sometimes(n("sim_fault", "kind", "obj_outage"), "echo: fault fired: object store outage")
-	a.Sometimes(n("sim_fault", "kind", "obj_get_corrupt"), "echo: fault fired: object store corrupt read")
-	a.Sometimes(n("sim_fault", "kind", "cp_503"), "echo: fault fired: control plane 503")
-	a.Sometimes(n("sim_fault", "kind", "cp_timeout"), "echo: fault fired: control plane timeout")
-	a.Sometimes(n("sim_fault", "kind", "cp_lost_response"), "echo: fault fired: control plane lost response")
-	a.Sometimes(n("sim_fault", "kind", "cp_outage"), "echo: fault fired: control plane outage")
-	a.Sometimes(n("sim_fault", "kind", "partition"), "echo: fault fired: partition")
-	a.Sometimes(n("sim_fault", "kind", "clog"), "echo: fault fired: clog")
-	a.Sometimes(n("sim_fault", "kind", "random_close"), "echo: fault fired: random close")
-	a.Sometimes(n("sim_fault", "kind", "black_hole"), "echo: fault fired: black hole")
-	a.Sometimes(n("sim_crashed", "cause", "attrition"), "echo: fault fired: hard crash")
-	a.Sometimes(n("sim_exited", "", ""), "echo: fault fired: graceful stop")
-	a.Sometimes(n("echo_commit_retried", "", ""), "echo: a commit was retried after MaybeApplied")
-	a.Sometimes(n("corruption_detected", "", ""), "echo: corruption detected on read")
+	v.Assert().Sometimes(has("sim_crashed", "cause", "attrition"), "echo: fault fired: hard crash")
+	v.Assert().Sometimes(has("sim_exited", "", ""), "echo: fault fired: graceful stop")
 }

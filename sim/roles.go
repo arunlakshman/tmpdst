@@ -21,6 +21,20 @@ type Workload interface {
 	Quiescent() bool
 }
 
+// PhaseAware is an optional Workload interface. At every phase change (into
+// PhaseSettling and into PhaseSettle) the kernel appends the frozen fact
+// "sim_phase" {phase: U64 of the new Phase}, puts engines into recovery when
+// Settling starts, and then calls OnPhase on each live workload that
+// implements it, in node order. The call is treated like a Step: the returned
+// actions are dispatched the same way (a workload may not Trip or Exit), the
+// trace hash folds the call and its actions, and every StateHash is folded
+// after it. It takes no node time and is not an inbox event, so a busy
+// workload hears it immediately. The initial phase (PhaseChaos) is not
+// announced; a workload starts in it. OnPhase must be deterministic, like Step.
+type PhaseAware interface {
+	OnPhase(p Phase) []core.Action
+}
+
 // WorkloadFactory builds a fresh workload per seed (never reuse instances).
 type WorkloadFactory func(env core.Env, self core.NodeRef, brokers []core.NodeRef) Workload
 

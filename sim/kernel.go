@@ -484,6 +484,7 @@ func (r *run) process(e Entry) {
 		pc := e.Body.(phaseChange)
 		r.phase = pc.to
 		r.logf("phase %d", pc.to)
+		r.simFact("sim_phase", core.Field{Key: "phase", Value: core.U64(uint64(pc.to))})
 		if pc.to == PhaseSettling {
 			for _, eng := range r.engines {
 				if !r.guard("EnterRecovery "+eng.Name(), eng.EnterRecovery) {
@@ -491,6 +492,7 @@ func (r *run) process(e Entry) {
 				}
 			}
 		}
+		r.notifyPhase(pc.to)
 	case EntryQuiesce:
 		r.counters[cSimSteps]++
 		q := true
@@ -503,6 +505,32 @@ func (r *run) process(e Entry) {
 		r.sched.Schedule(Entry{At: r.now() + Time(r.cfg.QuiesceEvery), Lane: laneSim, Kind: EntryQuiesce})
 	default:
 		r.fail(FailProtocol, "bad_entry", fmt.Sprintf("unknown entry kind %d", e.Kind))
+	}
+}
+
+// notifyPhase calls OnPhase on every live PhaseAware workload, in node order,
+// as if it were a Step: the trace hashes the call and the actions, and the
+// actions are dispatched like a Step's. It costs no node time and draws no
+// randomness of its own. A panic aborts the seed, as for a workload Step.
+func (r *run) notifyPhase(p Phase) {
+	for _, n := range r.nodes {
+		if r.halt {
+			return
+		}
+		pa, ok := n.m.(PhaseAware)
+		if !n.workload || !n.alive || !ok {
+			continue
+		}
+		r.trace.str(string(n.name))
+		r.trace.u64(903)
+		r.trace.u64(uint64(p))
+		r.logf("on_phase %s %d", n.name, p)
+		var acts []core.Action
+		if !r.guard("OnPhase "+string(n.name), func() { acts = pa.OnPhase(p) }) {
+			r.halt = true
+			return
+		}
+		r.dispatch(n, acts)
 	}
 }
 

@@ -29,12 +29,12 @@ func config(seeds []uint64, brokers core.Factory) sim.Config {
 		Seeds:     seeds,
 		Processes: []sim.Process{{Name: "broker", Count: 3, Factory: brokers}},
 		Workloads: []sim.WorkloadFactory{func(env core.Env, self core.NodeRef, bs []core.NodeRef) sim.Workload {
-			return NewWorkload(env, self, bs, Opts{Clients: 4, StopAfter: ph.Chaos + ph.Settling, RecycleAt: ph.Chaos})
+			return NewWorkload(env, self, bs, Opts{Clients: 4})
 		}},
 		Invariants: []func() sim.Invariant{
 			func() sim.Invariant { return &ackedIsCommitted{} },
 			func() sim.Invariant { return &readYourAck{acked: map[int64][]byte{}} },
-			func() sim.Invariant { return &liveness{ph: ph} },
+			func() sim.Invariant { return &liveness{} },
 			func() sim.Invariant { return &faultCoverage{} },
 		},
 		Engines: func(sc sim.SeedConfig) []sim.Engine {

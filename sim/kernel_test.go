@@ -679,3 +679,53 @@ func TestEngineLanesStableDisjointAndDistinct(t *testing.T) {
 		}
 	}
 }
+
+type phaseWl struct {
+	wl
+	phases []Phase
+	emit   bool
+}
+
+func (w *phaseWl) OnPhase(p Phase) []core.Action {
+	w.phases = append(w.phases, p)
+	if !w.emit {
+		return nil
+	}
+	return []core.Action{fact("wl_phase", int64(p))}
+}
+
+func TestPhaseAwareWorkload(t *testing.T) {
+	run := func(emit bool) (SeedResult, *phaseWl, []TimedFact, []TimedFact) {
+		w := &phaseWl{emit: emit}
+		cfg := baseCfg(scripted(ping))
+		cfg.Workloads = []WorkloadFactory{func(core.Env, core.NodeRef, []core.NodeRef) Workload { return w }}
+		var sp, wp []TimedFact
+		cfg.Invariants = []func() Invariant{func() Invariant {
+			return &fnInvariant{atEnd: func(v View) {
+				sp, wp = v.Timeline().Snapshot("sim_phase"), v.Timeline().Snapshot("wl_phase")
+			}}
+		}}
+		return RunSeed(cfg, 1), w, sp, wp
+	}
+	res, w, sp, wp := run(true)
+	if len(res.Failures) != 0 {
+		t.Fatalf("%+v", res.Failures)
+	}
+	if len(w.phases) != 2 || w.phases[0] != PhaseSettling || w.phases[1] != PhaseSettle {
+		t.Fatalf("OnPhase calls: %v", w.phases)
+	}
+	if len(sp) != 2 || sp[0].At != Time(core.Second) || sp[1].At != Time(2*core.Second) {
+		t.Fatalf("sim_phase facts: %+v", sp)
+	}
+	if v, _ := sp[0].Fact.Fields[0].Value.(core.U64); v != core.U64(PhaseSettling) {
+		t.Fatalf("phase field: %+v", sp[0].Fact)
+	}
+	if len(wp) != 2 || wp[0].At != sp[0].At {
+		t.Fatalf("actions not dispatched at the phase change: %+v", wp)
+	}
+	res2, _, _, _ := run(true)
+	res3, _, _, _ := run(false)
+	if res2.TraceHash != res.TraceHash || res3.TraceHash == res.TraceHash {
+		t.Fatal("OnPhase actions must be deterministic and trace-hashed")
+	}
+}

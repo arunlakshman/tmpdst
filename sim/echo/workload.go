@@ -20,16 +20,10 @@ type GetOp struct {
 	Offset int64
 }
 
-// Opts configures the workload.
+// Opts configures the workload. Phase behavior is not configured: the workload
+// is sim.PhaseAware (see OnPhase).
 type Opts struct {
 	Clients int
-	// StopAfter: clients issue no new request once this much node-local time has
-	// passed since Started. The kernel does not tell workloads the phase, so the
-	// preset passes Phases.Chaos+Phases.Settling.
-	StopAfter core.Duration
-	// RecycleAt: every client drops its connection at its next op boundary after
-	// this time, so a black-holed pre-Settling connection cannot starve it.
-	RecycleAt core.Duration
 }
 
 const (
@@ -87,7 +81,7 @@ type Workload struct {
 	opts    Opts
 	hist    sim.History
 
-	startAt core.Time
+	stopped bool // PhaseSettle began: no new requests
 	nextReq core.ReqID
 	clients []*client
 }
@@ -122,8 +116,6 @@ func (w *Workload) Quiescent() bool {
 func wakeID(c *client) core.TimerID { return core.TimerID(1 + c.id*2) }
 func reqID(c *client) core.TimerID  { return core.TimerID(2 + c.id*2) }
 
-const recycleTimer = core.TimerID(0)
-
 func (w *Workload) req() core.ReqID { w.nextReq++; return w.nextReq }
 
 // Step implements core.StateMachine.
@@ -131,8 +123,6 @@ func (w *Workload) Step(ev core.Event) []core.Action {
 	var acts []core.Action
 	switch e := ev.Body.(type) {
 	case core.Started:
-		w.startAt = ev.At
-		acts = append(acts, core.SetTimer{ID: recycleTimer, Gen: 1, After: w.opts.RecycleAt})
 		for _, c := range w.clients {
 			acts = append(acts, w.dial(c)...)
 		}
@@ -201,16 +191,6 @@ func retryDelay(n int) core.Duration {
 }
 
 func (w *Workload) onTimer(now core.Time, e core.TimerFired) []core.Action {
-	if e.ID == recycleTimer {
-		var acts []core.Action
-		for _, c := range w.clients {
-			c.recycle = true
-			if c.state == csReady { // idle: recycle now
-				acts = append(acts, w.next(now, c)...)
-			}
-		}
-		return acts
-	}
 	for _, c := range w.clients {
 		switch {
 		case e.ID == wakeID(c):
@@ -221,7 +201,7 @@ func (w *Workload) onTimer(now core.Time, e core.TimerFired) []core.Action {
 			case csBackoff:
 				return w.dial(c)
 			case csReady:
-				return w.next(now, c)
+				return w.next(c)
 			}
 			return nil
 		case e.ID == reqID(c):
@@ -234,9 +214,29 @@ func (w *Workload) onTimer(now core.Time, e core.TimerFired) []core.Action {
 	return nil
 }
 
+// OnPhase implements sim.PhaseAware. Entering Settling every client drops its
+// connection at its next op boundary (idle ones now), so a connection damaged
+// in Chaos (black-holed, clogged) cannot starve it. Entering Settle (the drain)
+// clients issue nothing new; outstanding requests finish.
+func (w *Workload) OnPhase(p sim.Phase) []core.Action {
+	var acts []core.Action
+	switch p {
+	case sim.PhaseSettling:
+		for _, c := range w.clients {
+			c.recycle = true
+			if c.state == csReady { // idle: recycle now
+				acts = append(acts, w.next(c)...)
+			}
+		}
+	case sim.PhaseSettle:
+		w.stopped = true
+	}
+	return acts
+}
+
 // next issues the client's next request, or recycles / stops.
-func (w *Workload) next(now core.Time, c *client) []core.Action {
-	if core.Duration(now-w.startAt) >= w.opts.StopAfter {
+func (w *Workload) next(c *client) []core.Action {
+	if w.stopped {
 		c.state = csDone
 		c.wakeGen++
 		return nil
@@ -346,7 +346,7 @@ func (w *Workload) lost(c *client, why string, abort bool) []core.Action {
 // StateHash folds all state.
 func (w *Workload) StateHash() uint64 {
 	h := newHasher()
-	h.u64(uint64(w.startAt))
+	h.bool(w.stopped)
 	h.u64(uint64(w.nextReq))
 	for _, c := range w.clients {
 		h.u64(uint64(c.state))
@@ -375,4 +375,7 @@ func (w *Workload) StateHash() uint64 {
 	return uint64(h)
 }
 
-var _ sim.Workload = (*Workload)(nil)
+var (
+	_ sim.Workload   = (*Workload)(nil)
+	_ sim.PhaseAware = (*Workload)(nil)
+)

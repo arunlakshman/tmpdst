@@ -26,8 +26,8 @@ type PendingBatch struct {
 	TP      TopicPartition
 	Records int64 // record count in the batch
 	Loc     SegmentRef
-	// Idempotent producer identity (decision 28). Producer == NoProducer means
-	// a non-idempotent batch: never deduplicated.
+	// Idempotent producer identity (decision 28). The zero value (NoProducer)
+	// means a non-idempotent batch: never deduplicated.
 	Producer ProducerID
 	PEpoch   int16
 	BaseSeq  int32
@@ -36,8 +36,10 @@ type PendingBatch struct {
 // ProducerID is a Kafka producer ID allocated by the control plane.
 type ProducerID int64
 
-// NoProducer marks a batch without idempotence (Kafka's -1).
-const NoProducer ProducerID = -1
+// NoProducer marks a batch without idempotence. It is the zero value so a
+// forgotten field is safe; the broker maps Kafka's -1 to it. The control plane
+// allocates real IDs from 1000.
+const NoProducer ProducerID = 0
 
 // CommitSegmentResp has one entry per request batch, in request order.
 type CommitSegmentResp struct{ Assigned []BatchRange }

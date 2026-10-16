@@ -7,8 +7,8 @@ import "manifester/core"
 type Time int64
 
 // Lane is an ordering domain. Entries on one lane at the same Time pop in FIFO
-// order; entries on different lanes at the same Time are ordered by a seeded
-// random tie-break (decision C). One lane per connection direction, per engine
+// order; entries on different lanes at the same Time are ordered by Tie, a
+// seeded random tie-break (decision C). One lane per connection direction, per engine
 // operation stream, per node timer set.
 type Lane uint64
 
@@ -21,22 +21,43 @@ type Target struct {
 	Engine string       // set when delivering an internal event to an engine
 }
 
-// Entry is one item in the global queue.
+// EntryKind says what an entry is. Append-only (hashed). Crash, Restart, Stop,
+// Phase and Quiesce are addressed to the simulator itself.
+type EntryKind uint8
+
+const (
+	EntryDeliver        EntryKind = iota // event to a node
+	EntryEngineInternal                  // engine-private body to an engine
+	EntryCrash
+	EntryRestart
+	EntryStop
+	EntryPhase
+	EntryQuiesce
+)
+
+// Entry is one item in the global queue. Pop order is (At, Tie, Seq).
 type Entry struct {
 	At     Time
 	Lane   Lane
+	Kind   EntryKind
 	Target Target
-	Body   any // core.EventBody for nodes; engine-private plain data for engines
+	Body   any    // core.EventBody for nodes; engine-private plain data for engines
+	Tie    uint64 // drawn by Schedule: exactly one draw per call
+	Seq    uint64 // assigned by Schedule, in call order
 }
 
 // Scheduler owns simulation time and the global order of everything.
 type Scheduler interface {
 	Now() Time
-	// Schedule enqueues; scheduling into the past clamps to Now.
+	// Schedule enqueues; scheduling into the past clamps to Now. It draws Tie
+	// exactly once, and entries on one Lane at the same At stay FIFO whatever
+	// their Ties.
 	Schedule(e Entry) EntryID
 	Cancel(id EntryID)
-	// DropNode removes every pending entry addressed to that incarnation (crash).
-	DropNode(ref core.NodeRef)
+	// DropNode removes every pending entry addressed to that incarnation (crash)
+	// and returns how many. Engine-internal entries are not addressed to a node
+	// and survive.
+	DropNode(ref core.NodeRef) int
 	// Pop removes and returns the next entry, advancing Now. ok=false when empty.
 	Pop() (e Entry, ok bool)
 	Len() int

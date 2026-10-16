@@ -73,8 +73,9 @@ const (
 	ErrConnClosed // connection lost
 	ErrTooLarge
 	ErrCorrupt
-	ErrInvalid // malformed request; never retried
-	ErrIO      // anything else from the outside world
+	ErrInvalid    // malformed request; never retried
+	ErrIO         // anything else from the outside world
+	ErrOutOfOrder // idempotent producer sequence gap (Kafka OUT_OF_ORDER_SEQUENCE_NUMBER); per batch only
 )
 
 // Outcome states what a completion proves about side effects (lesson 1).
@@ -113,6 +114,8 @@ func (e ErrCode) String() string {
 		return "ErrInvalid"
 	case ErrIO:
 		return "ErrIO"
+	case ErrOutOfOrder:
+		return "ErrOutOfOrder"
 	}
 	return "ErrCode(" + strconv.FormatUint(uint64(e), 10) + ")"
 }

@@ -1,0 +1,147 @@
+package kafka
+
+import (
+	"manifester/broker"
+	"manifester/core"
+	"manifester/sim"
+	"manifester/sim/engines/cpengine"
+	"manifester/sim/engines/netsim"
+	"manifester/sim/engines/objstore"
+)
+
+// Phases of the preset campaign.
+func phases() sim.Phases {
+	return sim.Phases{Chaos: 30 * core.Second, Settling: 10 * core.Second, Settle: 5 * core.Second,
+		MaxQuietLatency: 3 * core.Second}
+}
+
+func ms(n int64) core.Duration { return core.Duration(n) * core.Millisecond }
+
+// brokerConfig is the sim-friendly broker: a short flush window so commits
+// are frequent, and a small buffer so backpressure engages.
+func brokerConfig(bug broker.Bug) broker.Config {
+	return broker.Config{BatchWindow: 5 * core.Millisecond, MaxBufferedBytes: 3 << 10, ResumeBufferedBytes: 1 << 10, Bug: bug}
+}
+
+// Config is the Kafka campaign preset: 3 brokers, 1 workload of 3 idempotent
+// producers and 2 consumers over 2 topics x 3 partitions, all three engines,
+// attrition and a swarm over the fault families.
+func Config(seeds []uint64) sim.Config { return config(seeds, broker.BugNone) }
+
+func config(seeds []uint64, bug broker.Bug) sim.Config {
+	opts := DefaultOpts()
+	ph := phases()
+	slow := func(fmin, fmax, smin, smax int64, p float64) sim.TwoSpeed {
+		return sim.TwoSpeed{FastMin: ms(fmin), FastMax: ms(fmax), SlowMin: ms(smin), SlowMax: ms(smax), SlowProb: p}
+	}
+	return sim.Config{
+		Seeds:     seeds,
+		Processes: []sim.Process{{Name: "broker", Count: 3, Factory: broker.New(brokerConfig(bug))}},
+		Workloads: []sim.WorkloadFactory{func(env core.Env, self core.NodeRef, bs []core.NodeRef) sim.Workload {
+			return NewWorkload(env, self, bs, opts)
+		}},
+		Invariants: []func() sim.Invariant{
+			func() sim.Invariant { return newOracle(opts) },
+			func() sim.Invariant { return &trippedNeverAcks{dead: map[core.NodeRef]bool{}} },
+			func() sim.Invariant { return &liveness{} },
+			func() sim.Invariant { return &faultCoverage{} },
+		},
+		Engines: func(sc sim.SeedConfig) []sim.Engine {
+			cp := cpengine.New(sc.ControlPlane)
+			for _, t := range opts.Topics {
+				cp.CreateTopic(t, opts.Partitions)
+			}
+			return []sim.Engine{objstore.New(sc.ObjectStore), cp, netsim.New(sc.Network)}
+		},
+		ObjectStore: sim.ObjectStoreFaults{
+			ApplyLatency:   slow(1, 5, 50, 200, 0.05),
+			RespondLatency: slow(1, 3, 20, 100, 0.05),
+			Unavailable503: 0.03, Timeout: 0.02, LostResponse: 0.02, GetCorruptProb: 0.03,
+			Outage:        sim.Outage{Prob: 0.002, Dur: [2]core.Duration{ms(200), 2 * core.Second}},
+			CallerTimeout: ms(500),
+		},
+		ControlPlane: sim.ControlPlaneFaults{
+			ApplyLatency:   slow(1, 5, 50, 200, 0.05),
+			RespondLatency: slow(1, 3, 20, 100, 0.05),
+			Unavailable503: 0.03, Timeout: 0.02, LostResponse: 0.03,
+			Outage:        sim.Outage{Prob: 0.002, Dur: [2]core.Duration{ms(200), 2 * core.Second}},
+			CallerTimeout: ms(500),
+		},
+		Network: sim.NetworkFaults{
+			Latency:       sim.TwoSpeed{FastMin: 200 * core.Microsecond, FastMax: 2 * core.Millisecond, SlowMin: ms(20), SlowMax: ms(100), SlowProb: 0.03},
+			PartialIOMax:  1024,
+			PartitionProb: 0.002, PartitionDur: [2]core.Duration{ms(300), 3 * core.Second},
+			ClogProb: 0.003, ClogDur: [2]core.Duration{ms(100), ms(500)},
+			RandomCloseProb: 0.002, BlackHoleProb: 0.002,
+			PairLatencyMax: ms(5), ClockSkewMax: ms(100),
+		},
+		Attrition: sim.Attrition{MaxDead: 1, CrashProb: 0.0005, CrashWeight: 2, GracefulWeight: 1,
+			RecoveryDelay: [2]core.Duration{ms(200), ms(1500)}},
+		Cost:             sim.CostParams{PerEvent: 50 * core.Microsecond, PauseProb: 0.001, Pause: slow(1, 5, 20, 100, 0.1)},
+		ExpectReachable:  expectReachable(),
+		Swarm:            swarm,
+		Phases:           ph,
+		QuiesceEvery:     core.Second,
+		CheckDeterminism: 10,
+	}
+}
+
+// swarm switches each fault family fully off with probability 0.4 and scales
+// the rest from a menu (lesson 9). Draws come only from r (Derive("swarm")).
+func swarm(_ uint64, r sim.CountedRand, c *sim.SeedConfig) {
+	menu := [...]float64{0.5, 1, 2, 4}
+	knob := func(p *float64) {
+		if r.Chance(0.4) {
+			*p = 0
+			return
+		}
+		*p = min(*p*menu[r.Intn(len(menu))], 0.4)
+	}
+	o, cp, n := &c.ObjectStore, &c.ControlPlane, &c.Network
+	knob(&o.Unavailable503)
+	knob(&o.Timeout)
+	knob(&o.LostResponse)
+	knob(&o.GetCorruptProb)
+	knob(&o.Outage.Prob)
+	knob(&cp.Unavailable503)
+	knob(&cp.Timeout)
+	knob(&cp.LostResponse)
+	knob(&cp.Outage.Prob)
+	knob(&n.PartitionProb)
+	knob(&n.ClogProb)
+	knob(&n.RandomCloseProb)
+	knob(&n.BlackHoleProb)
+	knob(&c.Attrition.CrashProb)
+	if r.Chance(fenceModeProb) {
+		fenceMode(cp)
+	}
+	switch x := r.Intn(20); { // short transfers: tiny chunks are costly (every chunk is a Step)
+	case x < 2:
+		n.PartialIOMax = 48
+	case x < 8:
+		n.PartialIOMax = 256
+	}
+	if r.Chance(0.3) {
+		o.ApplyLatency.SlowProb, cp.ApplyLatency.SlowProb = 0.3, 0.3
+	}
+	if r.Chance(0.3) {
+		n.Latency.SlowProb = 0.2
+	}
+}
+
+// fenceModeProb is the share of seeds that run the fencing scenario.
+const fenceModeProb = 0.3
+
+// fenceMode makes a Register that the broker gave up on land after its retry
+// has already succeeded, so the control plane holds a newer epoch than the
+// broker and its next CommitSegment is fenced (the fail-stop path, which must
+// end in Trip). Three knobs together: a caller timeout shorter than the slow
+// apply latency (the broker retries before the first Register lands), frequent
+// control-plane timeouts (the first Register is a timed-out one, applied or
+// not by a coin at landing) and frequent slow applies. Outside Chaos no
+// timeout is drawn, so Settling is unaffected.
+func fenceMode(cp *sim.ControlPlaneFaults) {
+	cp.CallerTimeout = ms(30)
+	cp.Timeout = 0.4
+	cp.ApplyLatency.SlowProb = 0.5
+}

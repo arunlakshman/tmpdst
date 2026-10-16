@@ -1,15 +1,19 @@
-// Command manisim runs the echo smoke campaign through the deterministic
-// simulator. It is not a deterministic package: it reads flags and the clock.
+// Command manisim runs a scenario campaign (the Kafka broker by default, or
+// the echo smoke test) through the deterministic simulator. It is not a
+// deterministic package: it reads flags and the clock, and it shards a
+// campaign's seeds over goroutines (seeds are independent; see merge.go).
 package main
 
 import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"time"
 
 	"manifester/sim"
 	"manifester/sim/echo"
+	"manifester/sim/kafka"
 )
 
 // coverageMin is the campaign size from which a never-satisfied Sometimes
@@ -23,17 +27,29 @@ func run() int {
 	start := flag.Uint64("start", 1, "first seed")
 	one := flag.Int64("seed", -1, "replay this one seed with its log printed")
 	verbose := flag.Bool("v", false, "print one line per seed")
+	scenario := flag.String("scenario", "kafka", "scenario: kafka or echo")
+	jobs := flag.Int("j", runtime.NumCPU(), "seed shards to run in parallel")
 	flag.Parse()
 
+	var config func([]uint64) sim.Config
+	switch *scenario {
+	case "kafka":
+		config = kafka.Config
+	case "echo":
+		config = echo.Config
+	default:
+		fmt.Fprintf(os.Stderr, "manisim: unknown scenario %q (want kafka or echo)\n", *scenario)
+		return 2
+	}
 	if *one >= 0 {
-		return replay(uint64(*one))
+		return replay(config, uint64(*one))
 	}
 	list := make([]uint64, *seeds)
 	for i := range list {
 		list[i] = *start + uint64(i)
 	}
 	t0 := time.Now()
-	rep, err := sim.NewRunner().Run(echo.Config(list))
+	rep, err := runSharded(config, list, *jobs)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "manisim:", err)
 		return 2
@@ -51,7 +67,7 @@ func run() int {
 			for _, f := range s.Failures {
 				fmt.Printf("FAIL seed %d: %s (%s) step=%d at=%v: %s\n", s.Seed, kind(f.Kind), f.Prop, f.Step, time.Duration(f.At), f.Msg)
 			}
-			fmt.Printf("  repro: go run ./cmd/manisim -seed %d\n", s.Seed)
+			fmt.Printf("  repro: go run ./cmd/manisim -scenario %s -seed %d\n", *scenario, s.Seed)
 		}
 	}
 	for _, a := range rep.Always {
@@ -61,7 +77,7 @@ func run() int {
 		fmt.Printf("coverage gap: %q (%s) never satisfied\n", a.Prop, a.Kind)
 	}
 	for _, s := range rep.Nondeterminism {
-		fmt.Printf("NONDETERMINISM seed %d: two runs diverged\n  repro: go run ./cmd/manisim -seed %d\n", s, s)
+		fmt.Printf("NONDETERMINISM seed %d: two runs diverged\n  repro: go run ./cmd/manisim -scenario %s -seed %d\n", s, *scenario, s)
 	}
 	fmt.Printf("%d seeds from %d: %d failing, %d steps, %v\n", len(rep.Seeds), *start, bad, steps, time.Since(t0).Round(time.Millisecond))
 	if bad > 0 || len(rep.Always) > 0 || len(rep.Nondeterminism) > 0 || (len(rep.Coverage) > 0 && len(rep.Seeds) >= coverageMin) {
@@ -70,8 +86,8 @@ func run() int {
 	return 0
 }
 
-func replay(seed uint64) int {
-	res, err := sim.NewRunner().Replay(echo.Config([]uint64{seed}), seed)
+func replay(config func([]uint64) sim.Config, seed uint64) int {
+	res, err := sim.NewRunner().Replay(config([]uint64{seed}), seed)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "manisim:", err)
 		return 2

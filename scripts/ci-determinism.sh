@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# CI gate for the deterministic packages (core/, sim/, and every toys3 package
+# CI gate for the deterministic packages (core/, sim/, format/, veritas/ except
+# its sys adapters in veritas/vsys, and every toys3 package
 # except prod and cmd). See docs/decisions.md (I).
 #   1. detcheck: exact-path import allow-list plus banned constructs.
 #   2. Every third-party module they depend on has a reviewed audit record
@@ -11,7 +12,7 @@ cd "$(dirname "$0")/.."
 
 # toys3: every package is deterministic except the production runtime and the
 # commands. Derived, so a new pure package cannot be left out of the gate.
-pkgs=(./core/... ./sim/...)
+pkgs=(./core/... ./sim/... ./format/... ./veritas ./veritas/veritastest)
 while read -r p; do
   pkgs+=("$p")
 done < <(go list ./toys3/... | grep -v -e '/toys3/prod$' -e '/toys3/cmd/')

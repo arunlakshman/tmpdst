@@ -34,6 +34,7 @@ func config(seeds []uint64, brokers core.Factory) sim.Config {
 		Invariants: []func() sim.Invariant{
 			func() sim.Invariant { return &ackedIsCommitted{} },
 			func() sim.Invariant { return &readYourAck{acked: map[int64][]byte{}} },
+			func() sim.Invariant { return &trippedNeverAcks{dead: map[core.NodeRef]bool{}} },
 			func() sim.Invariant { return &liveness{} },
 			func() sim.Invariant { return &faultCoverage{} },
 		},
@@ -67,7 +68,7 @@ func config(seeds []uint64, brokers core.Factory) sim.Config {
 		Attrition: sim.Attrition{MaxDead: 1, CrashProb: 0.0005, CrashWeight: 2, GracefulWeight: 1,
 			RecoveryDelay: [2]core.Duration{ms(200), ms(1500)}},
 		Cost:             sim.CostParams{PerEvent: 50 * core.Microsecond, PauseProb: 0.001, Pause: slow(1, 5, 20, 100, 0.1)},
-		ExpectReachable:  expectReachable,
+		ExpectReachable:  expectReachable(),
 		Swarm:            swarm,
 		Phases:           ph,
 		QuiesceEvery:     core.Second,
@@ -101,10 +102,30 @@ func swarm(_ uint64, r sim.CountedRand, c *sim.SeedConfig) {
 	knob(&n.RandomCloseProb)
 	knob(&n.BlackHoleProb)
 	knob(&c.Attrition.CrashProb)
+	if r.Chance(fenceModeProb) {
+		fenceMode(cp)
+	}
 	if r.Chance(0.3) {
 		o.ApplyLatency.SlowProb, cp.ApplyLatency.SlowProb = 0.3, 0.3
 	}
 	if r.Chance(0.3) {
 		n.Latency.SlowProb = 0.2
 	}
+}
+
+// fenceModeProb is the share of seeds that run the fencing scenario.
+const fenceModeProb = 0.3
+
+// fenceMode makes a Register that the broker gave up on land after its retry
+// has already succeeded, so the control plane holds a newer epoch than the
+// broker and its next CommitSegment is fenced (the fail-stop path, which must
+// end in Trip). Three knobs together: a caller timeout shorter than the slow
+// apply latency (the broker retries before the first Register lands), frequent
+// control-plane timeouts (the first Register is a timed-out one, applied or
+// not by a coin at landing) and frequent slow applies. Outside Chaos no
+// timeout is drawn, so Settling is unaffected.
+func fenceMode(cp *sim.ControlPlaneFaults) {
+	cp.CallerTimeout = ms(30)
+	cp.Timeout = 0.4
+	cp.ApplyLatency.SlowProb = 0.5
 }

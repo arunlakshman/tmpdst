@@ -189,3 +189,31 @@ func TestFramerReassemblesSplitFrames(t *testing.T) {
 		t.Fatal("oversized frame must be rejected")
 	}
 }
+
+// The fail-stop path (ErrFenced -> Trip) must be exercised, and a fenced
+// incarnation must stop acking (TrippedNeverAcks runs in the preset).
+func TestFencingTripsAreExercised(t *testing.T) {
+	cfg := Config(nil)
+	var fenced, trips int
+	cfg.Invariants = append(cfg.Invariants, func() sim.Invariant {
+		return &tripCount{fenced: &fenced}
+	})
+	for s := uint64(1); s <= 40; s++ {
+		res := sim.RunSeed(cfg, s)
+		trips += res.Trips
+		if len(res.Failures) != 0 {
+			t.Fatalf("seed %d: %+v", s, res.Failures)
+		}
+	}
+	if trips == 0 || fenced != trips {
+		t.Fatalf("trips=%d fenced facts=%d", trips, fenced)
+	}
+}
+
+type tripCount struct{ fenced *int }
+
+func (*tripCount) Name() string     { return "tripCount" }
+func (*tripCount) Observe(sim.View) {}
+func (i *tripCount) AtEnd(v sim.View) {
+	*i.fenced += len(v.Timeline().Snapshot("echo_fenced"))
+}

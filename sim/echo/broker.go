@@ -426,6 +426,7 @@ func (b *Broker) onCommit(o *op, e core.CPDone) []core.Action {
 		}
 		return b.ack(o, off)
 	case e.Err == core.ErrFenced:
+		b.env.Reachable("echo: broker tripped on fencing")
 		return []core.Action{emit("echo_fenced", core.Field{Key: "epoch", Value: core.U64(b.epoch)}), core.Trip{Cause: "fenced"}}
 	case e.Outcome == core.MaybeApplied:
 		o.maybe = true

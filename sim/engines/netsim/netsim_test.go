@@ -12,50 +12,6 @@ import (
 
 // ---- test doubles ----
 
-type splitmix struct {
-	seed, state, calls uint64
-}
-
-func newRand(seed uint64) *splitmix { return &splitmix{seed: seed, state: seed} }
-
-func (r *splitmix) Uint64() uint64 {
-	r.calls++
-	r.state += 0x9e3779b97f4a7c15
-	z := r.state
-	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
-	z = (z ^ (z >> 27)) * 0x94d049bb133111eb
-	return z ^ (z >> 31)
-}
-func (r *splitmix) Intn(n int) int { return int(r.Uint64() % uint64(n)) }
-func (r *splitmix) NewID() core.ID {
-	var id core.ID
-	for i := 0; i < 16; i += 8 {
-		v := r.Uint64()
-		for j := 0; j < 8; j++ {
-			id[i+j] = byte(v >> (8 * j))
-		}
-	}
-	return id
-}
-func (r *splitmix) Float64() float64 { return float64(r.Uint64()>>11) / (1 << 53) }
-func (r *splitmix) Chance(p float64) bool {
-	if p <= 0 {
-		return false
-	}
-	return r.Float64() < p
-}
-func (r *splitmix) Between(lo, hi int64) int64 { return lo + int64(r.Uint64()%uint64(hi-lo)) }
-func (r *splitmix) Derive(l string) sim.CountedRand {
-	h := r.seed
-	for i := 0; i < len(l); i++ {
-		h = h*31 + uint64(l[i])
-	}
-	return newRand(h)
-}
-func (r *splitmix) Calls() uint64       { return r.calls }
-func (r *splitmix) Reseed(s uint64)     { r.seed, r.state = s, s }
-func (r *splitmix) Fingerprint() uint64 { return r.state }
-
 type asserts struct{ some map[core.Prop]bool }
 
 func (a *asserts) Always(bool, core.Prop, ...core.Detail)              {}
@@ -81,7 +37,8 @@ type entry struct {
 type harness struct {
 	t      *testing.T
 	eng    *Engine
-	rnd    *splitmix
+	rnd    sim.CountedRand
+	lanes  map[string]sim.Lane
 	now    sim.Time
 	q      []entry
 	seq    uint64
@@ -99,13 +56,21 @@ type harness struct {
 }
 
 func newHarness(t *testing.T, seed uint64, f sim.NetworkFaults) *harness {
-	return &harness{t: t, eng: New(f), rnd: newRand(seed), live: map[core.NodeID]core.NodeRef{},
+	return &harness{t: t, eng: New(f), rnd: sim.NewRand(seed), lanes: map[string]sim.Lane{}, live: map[core.NodeID]core.NodeRef{},
 		as: &asserts{some: map[core.Prop]bool{}}, data: map[string][]byte{}, closed: map[string]core.ConnClosed{},
 		opened: map[string]core.ConnOpened{}, dials: map[core.ReqID]core.DialDone{}, sends: map[core.ReqID]core.SendDone{}}
 }
 
 func (h *harness) Now() sim.Time         { return h.now }
 func (h *harness) Rand() sim.CountedRand { return h.rnd }
+func (h *harness) Lane(key string) sim.Lane {
+	if l, ok := h.lanes[key]; ok {
+		return l
+	}
+	l := sim.Lane(len(h.lanes) + 1)
+	h.lanes[key] = l
+	return l
+}
 func (h *harness) add(e entry) sim.EntryID {
 	h.seq++
 	e.seq = h.seq

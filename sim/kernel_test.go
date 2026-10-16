@@ -648,3 +648,34 @@ func TestReplay(t *testing.T) {
 		t.Fatal("a Process without a Factory must be rejected")
 	}
 }
+
+func TestEngineLanesStableDisjointAndDistinct(t *testing.T) {
+	r := newRun(Config{}, 1)
+	c := &engineCtx{r: r, name: "e"}
+	d := &engineCtx{r: r, name: "other"}
+	seen := map[Lane]string{}
+	for i := 0; i < 1000; i++ {
+		key := fmt.Sprintf("objstore/node-%d", i)
+		l := c.Lane(key)
+		if l >= laneReserved || l == 0 {
+			t.Fatalf("%s: lane %d in or beside the kernel-reserved range", key, l)
+		}
+		if prev, dup := seen[l]; dup {
+			t.Fatalf("keys %q and %q share lane %d", prev, key, l)
+		}
+		seen[l] = key
+	}
+	for l, key := range seen {
+		if c.Lane(key) != l || d.Lane(key) != l {
+			t.Fatalf("lane for %q is not stable", key)
+		}
+	}
+	if c.Lane("net/misc") == c.Lane("net/heal") {
+		t.Fatal("distinct keys share a lane")
+	}
+	for _, l := range []Lane{laneSim, nodeLane(&node{idx: 3}, 0), nodeLane(&node{idx: 3}, 1)} {
+		if _, clash := seen[l]; clash {
+			t.Fatalf("engine lane collides with reserved lane %d", l)
+		}
+	}
+}

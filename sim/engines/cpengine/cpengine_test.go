@@ -62,7 +62,7 @@ func TestNormalAndTruthful(t *testing.T) {
 	call(e, c, a, 4, commit("s1", 1, core.NodeRef{}))
 	call(e, c, a, 5, core.Lookup{TP: tp, From: -1})
 	c.Run()
-	if d := c.Delivered[len(c.Delivered)-1].Body.(core.CPDone); d.Err != core.ErrInvalid && d.Err != core.ErrConflict {
+	if d := c.Find(5).(core.CPDone); d.Err != core.ErrInvalid && d.Err != core.ErrConflict {
 		t.Fatal(d)
 	}
 }

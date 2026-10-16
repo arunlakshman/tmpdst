@@ -41,6 +41,7 @@ package netsim
 import (
 	"hash/crc32"
 	"sort"
+	"strconv"
 
 	"manifester/core"
 	"manifester/sim"
@@ -150,12 +151,11 @@ func (e *Engine) EnterRecovery() { e.recovery = true }
 
 // ---- helpers ----
 
-func laneOf(pair uint64, k uint64) sim.Lane { return sim.Lane(1<<62 | pair<<3 | k) }
-
-const (
-	laneAck  = 2 // +side: SendDone to that side
-	laneMisc = 4 // dial completions
-)
+// Lane keys: "net/misc" (dial failures), "net/heal", and per pair
+// "net/<pair>/<dir>" (data, 0 or 1), "net/<pair>/ack<side>", "net/<pair>/dial".
+func pairKey(pair uint64, what string) string {
+	return "net/" + strconv.FormatUint(pair, 10) + "/" + what
+}
 
 func span(r sim.CountedRand, lo, hi core.Duration) core.Duration {
 	if hi <= lo {
@@ -294,9 +294,9 @@ func (e *Engine) sendRst(ctx sim.EngineCtx, p *pair, to int, net bool, lat core.
 func (e *Engine) ack(ctx sim.EngineCtx, to core.NodeRef, p *pair, side int, req core.ReqID, conn core.ConnID, err core.ErrCode) {
 	var lane sim.Lane
 	if p != nil {
-		lane = laneOf(p.id, laneAck+uint64(side))
+		lane = ctx.Lane(pairKey(p.id, "ack"+strconv.Itoa(side)))
 	} else {
-		lane = laneOf(0, laneMisc)
+		lane = ctx.Lane("net/misc")
 	}
 	ctx.Deliver(to, ctx.Now()+sim.Time(e.sample(ctx.Rand())), lane, core.SendDone{Req: req, Conn: conn, Err: err})
 }
@@ -340,7 +340,7 @@ func (e *Engine) dial(ctx sim.EngineCtx, from core.NodeRef, a core.Dial) {
 	}
 	ref, ok := ctx.Current(target)
 	if !ok {
-		ctx.Deliver(from, at, laneOf(0, laneMisc), core.DialDone{Req: a.Req, Err: core.ErrConnClosed})
+		ctx.Deliver(from, at, ctx.Lane("net/misc"), core.DialDone{Req: a.Req, Err: core.ErrConnClosed})
 		return
 	}
 	e.nextPair++
@@ -349,14 +349,14 @@ func (e *Engine) dial(ctx sim.EngineCtx, from core.NodeRef, a core.Dial) {
 	e.nextConn[target]++
 	p.end[0] = end{ref: from, id: e.nextConn[from.Node]}
 	p.end[1] = end{ref: ref, id: e.nextConn[target]}
-	p.dirs[0].lane = laneOf(p.id, 0)
-	p.dirs[1].lane = laneOf(p.id, 1)
+	p.dirs[0].lane = ctx.Lane(pairKey(p.id, "0"))
+	p.dirs[1].lane = ctx.Lane(pairKey(p.id, "1"))
 	// Data follows the open notice on each direction.
 	p.dirs[0].lastArr, p.dirs[1].lastArr = at, at
 	e.pairs = append(e.pairs, p)
 	e.ends[endKey{from.Node, p.end[0].id}] = endRef{p.id, 0}
 	e.ends[endKey{target, p.end[1].id}] = endRef{p.id, 1}
-	ctx.Deliver(from, at, laneOf(p.id, laneMisc), core.DialDone{Req: a.Req, Conn: p.end[0].id})
+	ctx.Deliver(from, at, ctx.Lane(pairKey(p.id, "dial")), core.DialDone{Req: a.Req, Conn: p.end[0].id})
 	ctx.Deliver(ref, at, p.dirs[0].lane, core.ConnOpened{Conn: p.end[1].id, Peer: string(from.Node)})
 }
 
@@ -374,7 +374,7 @@ func (e *Engine) maybePartition(ctx sim.EngineCtx, a, b core.NodeID) {
 	dur := span(ctx.Rand(), e.f.PartitionDur[0], e.f.PartitionDur[1])
 	l.everCut = true
 	l.healAt = ctx.Now() + sim.Time(dur)
-	ctx.Self(l.healAt, laneOf(0, laneMisc+1), healBody{l.a, l.b})
+	ctx.Self(l.healAt, ctx.Lane("net/heal"), healBody{l.a, l.b})
 	e.fault(ctx, "partition", l.a, l.b, core.Field{Key: "dur", Value: core.I64(dur)})
 }
 

@@ -120,6 +120,9 @@ type run struct {
 	counters [nCounters]uint64
 	halt     bool
 	attr     int // pending attrition evaluations
+
+	lanes    map[string]Lane // engine lanes by key, allocated on first use
+	nextLane Lane
 }
 
 // RunSeed runs one seed to completion and returns its result.
@@ -130,7 +133,7 @@ func RunSeed(cfg Config, seed uint64) SeedResult {
 
 func newRun(cfg Config, seed uint64) *run {
 	r := &run{cfg: cfg, seed: seed, policy: core.ControlFirst{}, trace: newHasher(),
-		byName: map[core.NodeID]*node{}, byEng: map[string]int{}, sites: map[core.Site]bool{}}
+		byName: map[core.NodeID]*node{}, lanes: map[string]Lane{}, nextLane: 1, byEng: map[string]int{}, sites: map[core.Site]bool{}}
 	r.res.Seed = seed
 	r.rng = NewRand(seed)
 	r.sched = newSched(r.rng)
@@ -720,6 +723,22 @@ type engineCtx struct {
 
 func (c *engineCtx) Now() Time         { return c.r.now() }
 func (c *engineCtx) Rand() CountedRand { return c.r.rng }
+
+// Lane allocates lanes 1, 2, 3... in first-use order. Allocation draws no
+// randomness, and first use is itself deterministic, so a key maps to the same
+// lane for the whole seed. The range stays below laneReserved.
+func (c *engineCtx) Lane(key string) Lane {
+	if l, ok := c.r.lanes[key]; ok {
+		return l
+	}
+	l := c.r.nextLane
+	if l >= laneReserved {
+		panic("sim: engine lane space exhausted")
+	}
+	c.r.nextLane++
+	c.r.lanes[key] = l
+	return l
+}
 
 func (c *engineCtx) Deliver(to core.NodeRef, at Time, lane Lane, body core.EventBody) EntryID {
 	n := c.r.byName[to.Node]

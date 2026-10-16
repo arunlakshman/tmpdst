@@ -36,6 +36,13 @@ type Engine interface {
 type EngineCtx interface {
 	Now() Time
 	Rand() CountedRand
+	// Lane returns the ordering lane for key, allocated by the kernel on first
+	// use (sequentially, no randomness) from a range disjoint from the lanes
+	// the kernel reserves for itself. The same key yields the same lane for the
+	// whole run; distinct keys never share one, so FIFO ordering (decision C)
+	// holds exactly within a key. Engines obtain every lane here, never
+	// construct a Lane value. Key convention: "<engine>/<whatever>".
+	Lane(key string) Lane
 	// Deliver schedules a completion or inbound event to a node.
 	Deliver(to core.NodeRef, at Time, lane Lane, body core.EventBody) EntryID
 	// Self schedules an internal entry back to this engine.

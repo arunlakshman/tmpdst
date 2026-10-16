@@ -1,5 +1,4 @@
-// Package enginetest is a hand-written sim.EngineCtx and a SplitMix64
-// sim.CountedRand for engine tests: a tiny queue ordered by (At, seq).
+// Package enginetest is a hand-written sim.EngineCtx for engine tests: a tiny queue ordered by (At, seq).
 package enginetest
 
 import (
@@ -9,49 +8,6 @@ import (
 	"manifester/core"
 	"manifester/sim"
 )
-
-// Rand is a SplitMix64 CountedRand.
-type Rand struct{ s, calls uint64 }
-
-// NewRand returns a stream for seed.
-func NewRand(seed uint64) *Rand { return &Rand{s: seed} }
-
-func (r *Rand) Uint64() uint64 {
-	r.calls++
-	r.s += 0x9e3779b97f4a7c15
-	z := r.s
-	z = (z ^ z>>30) * 0xbf58476d1ce4e5b9
-	z = (z ^ z>>27) * 0x94d049bb133111eb
-	return z ^ z>>31
-}
-func (r *Rand) Intn(n int) int      { return int(r.Uint64() % uint64(n)) }
-func (r *Rand) Float64() float64    { return float64(r.Uint64()>>11) / (1 << 53) }
-func (r *Rand) Reseed(seed uint64)  { r.s = seed }
-func (r *Rand) Calls() uint64       { return r.calls }
-func (r *Rand) Fingerprint() uint64 { return r.s ^ r.calls<<48 }
-func (r *Rand) NewID() (id core.ID) {
-	for i := 0; i < 16; i += 8 {
-		v := r.Uint64()
-		for j := 0; j < 8; j++ {
-			id[i+j] = byte(v >> (8 * j))
-		}
-	}
-	return id
-}
-func (r *Rand) Chance(p float64) bool {
-	if p <= 0 {
-		return false
-	}
-	return r.Float64() < p
-}
-func (r *Rand) Between(lo, hi int64) int64 { return lo + int64(r.Uint64()%uint64(hi-lo)) }
-func (r *Rand) Derive(label string) sim.CountedRand {
-	d := &Rand{s: r.s}
-	for i := 0; i < len(label); i++ {
-		d.s = (d.s ^ uint64(label[i])) * 1099511628211
-	}
-	return d
-}
 
 // Delivery is one completion handed to a node.
 type Delivery struct {
@@ -71,7 +27,7 @@ type entry struct {
 
 // Ctx runs one engine against a queue.
 type Ctx struct {
-	R         *Rand
+	R         sim.CountedRand
 	T         sim.Time
 	Down      map[core.NodeID]bool // test-only
 	Delivered []Delivery
@@ -80,15 +36,26 @@ type Ctx struct {
 	q         []*entry
 	seq       int
 	eng       sim.Engine
+	lanes     map[string]sim.Lane
 }
 
 // New returns a Ctx bound to eng.
 func New(eng sim.Engine, seed uint64) *Ctx {
-	return &Ctx{R: NewRand(seed), Down: map[core.NodeID]bool{}, eng: eng}
+	return &Ctx{R: sim.NewRand(seed), Down: map[core.NodeID]bool{}, eng: eng, lanes: map[string]sim.Lane{}}
 }
 
 func (c *Ctx) Now() sim.Time         { return c.T }
 func (c *Ctx) Rand() sim.CountedRand { return c.R }
+
+// Lane numbers keys sequentially from 1, like the kernel.
+func (c *Ctx) Lane(key string) sim.Lane {
+	if l, ok := c.lanes[key]; ok {
+		return l
+	}
+	l := sim.Lane(len(c.lanes) + 1)
+	c.lanes[key] = l
+	return l
+}
 func (c *Ctx) add(e *entry) sim.EntryID {
 	c.seq++
 	e.seq = c.seq

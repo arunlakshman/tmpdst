@@ -103,16 +103,6 @@ func (c *Core) EnterRecovery() { c.recovery = true }
 // incarnation are dropped by the scheduler or skipped at landing.
 func (c *Core) OnCrash(sim.EngineCtx, core.NodeRef) {}
 
-func lane(engine string, n core.NodeID) sim.Lane {
-	h := uint64(14695981039346656037)
-	for _, s := range []string{engine, "/", string(n)} {
-		for i := 0; i < len(s); i++ {
-			h = (h ^ uint64(s[i])) * 1099511628211
-		}
-	}
-	return sim.Lane(h)
-}
-
 func sample(r sim.CountedRand, t sim.TwoSpeed) core.Duration {
 	lo, hi := t.FastMin, t.FastMax
 	if r.Chance(t.SlowProb) {
@@ -155,7 +145,7 @@ func (c *Core) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.IOAction) {
 	}
 
 	c.nextID++
-	pl := Plan{ID: c.nextID, From: from, Act: a, T1: t1, T2: t2, Flag: flag, Bits: bits, Lane: lane(c.h.Name, from.Node)}
+	pl := Plan{ID: c.nextID, From: from, Act: a, T1: t1, T2: t2, Flag: flag, Bits: bits, Lane: ctx.Lane(c.h.Name + "/" + string(from.Node))}
 	req := core.Field{Key: "req", Value: core.U64(a.ReqID())}
 	timeoutAt := now + sim.Time(p.CallerTimeout)
 	switch {

@@ -11,11 +11,25 @@ type Event struct {
 // EventBody is a closed set of plain-data structs.
 type EventBody interface{ isEvent() }
 
+// Completion is the EventBody that answers an IOAction, matched by ReqID. A
+// completion with an unknown, already-finished or wrong-kind ReqID is ignored:
+// no state change (StateHash is unchanged).
+type Completion interface {
+	EventBody
+	ReqID() ReqID
+}
+
 // ---- lifecycle ----
 
-// Started is the first event of every boot. The node rebuilds what it needs
-// from the control plane and object store; nothing in memory survived.
+// Started is the first event of every boot, and always the first Step of every
+// incarnation. The node rebuilds what it needs from the control plane and
+// object store; nothing in memory survived.
 type Started struct{ Self NodeRef }
+
+// Stop asks the node to shut down gracefully by Deadline (node-local time):
+// stop admitting, finish or hand off in-flight work, then emit Exit. If the
+// deadline passes first the runtime kills the node. Class: Control.
+type Stop struct{ Deadline Time }
 
 // ---- network (inbound) ----
 
@@ -39,6 +53,13 @@ type ConnClosed struct {
 
 // SendDone completes a Send. Err != OK means the bytes may be partially sent.
 type SendDone struct {
+	Req  ReqID
+	Conn ConnID
+	Err  ErrCode
+}
+
+// DialDone completes a Dial. Conn is valid only when Err == OK.
+type DialDone struct {
 	Req  ReqID
 	Conn ConnID
 	Err  ErrCode
@@ -90,6 +111,8 @@ type CPDone struct {
 }
 
 func (Started) isEvent()       {}
+func (Stop) isEvent()          {}
+func (DialDone) isEvent()      {}
 func (ConnOpened) isEvent()    {}
 func (BytesReceived) isEvent() {}
 func (ConnClosed) isEvent()    {}
@@ -100,3 +123,21 @@ func (ObjGetDone) isEvent()    {}
 func (ObjDeleteDone) isEvent() {}
 func (ObjListDone) isEvent()   {}
 func (CPDone) isEvent()        {}
+
+func (e SendDone) ReqID() ReqID      { return e.Req }
+func (e DialDone) ReqID() ReqID      { return e.Req }
+func (e ObjPutDone) ReqID() ReqID    { return e.Req }
+func (e ObjGetDone) ReqID() ReqID    { return e.Req }
+func (e ObjDeleteDone) ReqID() ReqID { return e.Req }
+func (e ObjListDone) ReqID() ReqID   { return e.Req }
+func (e CPDone) ReqID() ReqID        { return e.Req }
+
+var (
+	_ Completion = SendDone{}
+	_ Completion = DialDone{}
+	_ Completion = ObjPutDone{}
+	_ Completion = ObjGetDone{}
+	_ Completion = ObjDeleteDone{}
+	_ Completion = ObjListDone{}
+	_ Completion = CPDone{}
+)

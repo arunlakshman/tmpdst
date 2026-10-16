@@ -1,5 +1,7 @@
 package core
 
+import "strconv"
+
 // Time is a node-local monotonic instant in nanoseconds. In simulation it
 // includes the node's clock skew. Used for deadlines, leases and batch windows.
 type Time int64
@@ -26,10 +28,13 @@ type (
 	Incarnation ID     // fresh per boot; references to an old one are fenced
 	Epoch       uint64 // fencing token issued by the control plane
 	ConnID      uint64 // a connection, as seen by one node
-	ReqID       uint64 // correlates an Action with its completion Event
-	TimerID     uint64
-	TimerGen    uint64 // generation: a TimerFired whose Gen is stale is ignored
-	Offset      int64
+	// ReqID correlates an Action with its completion Event. Unique within one
+	// incarnation only; it must never reach a durable name (object keys come
+	// from Env.NewID()).
+	ReqID    uint64
+	TimerID  uint64
+	TimerGen uint64 // generation: a TimerFired whose Gen is stale is ignored
+	Offset   int64
 )
 
 // NodeRef names one specific boot of one node.
@@ -51,17 +56,21 @@ type SegmentRef struct {
 }
 
 // ErrCode is an error as plain data so events stay comparable and hashable.
+// It is folded into the hash: append-only from here on, never reordered.
+//
+// ErrNotFound, ErrConflict and ErrFenced are always truthful; engines inject
+// only ErrTimeout, ErrUnavailable, ErrIO and ErrConnClosed. ErrCorrupt comes
+// only from the core's decoder, never from sys.Classifier.
 type ErrCode uint16
 
 const (
 	OK             ErrCode = iota
-	ErrTimeout             // deadline passed; see Outcome for what it proves
+	ErrTimeout             // deadline passed, or the response was lost; see Outcome (a lost response is ErrTimeout+MaybeApplied, never silence)
 	ErrUnavailable         // 503 / throttled / overloaded
 	ErrNotFound
-	ErrConflict    // CAS / idempotency-key mismatch
-	ErrFenced      // stale incarnation or epoch
-	ErrConnClosed  // connection lost
-	ErrInterrupted // the caller's node crashed while the op was pending (sim)
+	ErrConflict   // CAS / idempotency-key mismatch
+	ErrFenced     // stale incarnation or epoch
+	ErrConnClosed // connection lost
 	ErrTooLarge
 	ErrCorrupt
 	ErrInvalid // malformed request; never retried
@@ -69,6 +78,8 @@ const (
 )
 
 // Outcome states what a completion proves about side effects (lesson 1).
+// Folded into the hash: append-only from here on. A LostResponse surfaces as
+// ErrTimeout+MaybeApplied, never as silence.
 type Outcome uint8
 
 const (
@@ -76,3 +87,32 @@ const (
 	MaybeApplied                // may have taken effect; retry only if idempotent
 	Applied                     // took effect (the reply itself may be unusable)
 )
+
+// String returns the frozen spelling of e. Spellings are never changed.
+func (e ErrCode) String() string {
+	switch e {
+	case OK:
+		return "OK"
+	case ErrTimeout:
+		return "ErrTimeout"
+	case ErrUnavailable:
+		return "ErrUnavailable"
+	case ErrNotFound:
+		return "ErrNotFound"
+	case ErrConflict:
+		return "ErrConflict"
+	case ErrFenced:
+		return "ErrFenced"
+	case ErrConnClosed:
+		return "ErrConnClosed"
+	case ErrTooLarge:
+		return "ErrTooLarge"
+	case ErrCorrupt:
+		return "ErrCorrupt"
+	case ErrInvalid:
+		return "ErrInvalid"
+	case ErrIO:
+		return "ErrIO"
+	}
+	return "ErrCode(" + strconv.FormatUint(uint64(e), 10) + ")"
+}

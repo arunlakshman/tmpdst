@@ -3,7 +3,8 @@ package core
 import "fmt"
 
 // Class selects which of a node's two inboxes an event goes to
-// (docs/flow-control.md §3.1).
+// (docs/flow-control.md §3.1). It is folded into the hash: append-only from
+// here on, never reordered.
 type Class uint8
 
 const (
@@ -21,7 +22,7 @@ const (
 // can never overtake its last request.
 func ClassOf(b EventBody) Class {
 	switch b.(type) {
-	case Started, TimerFired,
+	case Started, Stop, TimerFired, DialDone,
 		ObjPutDone, ObjGetDone, ObjDeleteDone, ObjListDone,
 		CPDone, SendDone:
 		return Control

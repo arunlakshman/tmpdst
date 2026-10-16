@@ -2,7 +2,19 @@ package core
 
 // Action is output of Step: a request for the outside world to do something.
 // Every I/O action carries a ReqID; its result returns as a completion event.
+//
+// Actions in one slice start in slice order; I/O among them may complete in
+// any order.
 type Action interface{ isAction() }
+
+// IOAction is an Action the outside world executes and answers with exactly one
+// Completion carrying the same ReqID. A live incarnation always gets that
+// completion: a lost response surfaces as ErrTimeout+MaybeApplied, never as
+// silence. Completions addressed to a dead incarnation are dropped.
+type IOAction interface {
+	Action
+	ReqID() ReqID
+}
 
 // ---- timers ----
 
@@ -77,6 +89,19 @@ type CPCall struct {
 	Op  CPOp
 }
 
+// ---- lifecycle ----
+
+// Trip asks the runtime to kill this incarnation: the machine's memory can no
+// longer be trusted. It is the last action of its Step; the runtime starts the
+// actions before it, then stops. Sim: same path as a crash, counted separately
+// as a trip. Prod: the loop returns ErrTripped and the process exits for its
+// supervisor to restart.
+type Trip struct{ Cause string }
+
+// Exit is the last action of a graceful shutdown (see Stop). Like Trip it ends
+// the incarnation, but it is not a fault: the sim counts it as a graceful stop.
+type Exit struct{}
+
 // ---- observability ----
 
 // Emit appends a fact to the timeline (sim: invariants read it; prod: tracing).
@@ -95,3 +120,23 @@ func (ObjDelete) isAction()   {}
 func (ObjList) isAction()     {}
 func (CPCall) isAction()      {}
 func (Emit) isAction()        {}
+func (Trip) isAction()        {}
+func (Exit) isAction()        {}
+
+func (a Send) ReqID() ReqID      { return a.Req }
+func (a Dial) ReqID() ReqID      { return a.Req }
+func (a ObjPut) ReqID() ReqID    { return a.Req }
+func (a ObjGet) ReqID() ReqID    { return a.Req }
+func (a ObjDelete) ReqID() ReqID { return a.Req }
+func (a ObjList) ReqID() ReqID   { return a.Req }
+func (a CPCall) ReqID() ReqID    { return a.Req }
+
+var (
+	_ IOAction = Send{}
+	_ IOAction = Dial{}
+	_ IOAction = ObjPut{}
+	_ IOAction = ObjGet{}
+	_ IOAction = ObjDelete{}
+	_ IOAction = ObjList{}
+	_ IOAction = CPCall{}
+)

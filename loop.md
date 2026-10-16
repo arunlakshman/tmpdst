@@ -86,7 +86,7 @@ and it only changes memory, so it takes microseconds.
     → inbox channel → `Step` → execute actions in goroutines → feed results back
     into the inbox. It shouldn't contain any business logic.
 11. **Build the simulator** (`sim/`) as one goroutine with a priority queue
-    ordered by `(time, seq, rngTie)`, one `*rand.Rand` seeded from `-seed`, and a
+    ordered by `(time, rngTie, seq)` (the tie must come before seq or it never decides anything; decision 18), one `*rand.Rand` seeded from `-seed`, and a
     virtual clock.
 12. **Make the fakes adversarial:** random latency, 503s, timeouts, a PUT that
     succeeds but whose response is lost, duplicated responses, reordering,

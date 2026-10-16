@@ -124,8 +124,10 @@ The core receives `BytesReceived` and frames them with a pure framer plus codec
 - Faults must be **correlated**: sustained partitions, stably slow pairs
   (sampled once per pair), two-speed latency (mostly fast, a slow tail), and
   episodic slowness. Independent per-message drops average out to a healthy network.
-- Swarm masks are drawn from the same stream with a fixed number of draws, so
-  they replay.
+- Swarm masks are drawn from a stream derived from the seed
+  (`CountedRand.Derive("swarm")`), not from the run stream, so they replay and
+  changing a menu does not shift every later draw (decision 17; superseded the
+  earlier "same stream" rule).
 
 ## 10. Three separate roles: Process, Workload, Invariant
 

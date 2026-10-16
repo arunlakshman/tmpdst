@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 
 # toys3: every package is deterministic except the production runtime and the
 # commands. Derived, so a new pure package cannot be left out of the gate.
-pkgs=(./core/... ./sim/... ./format/... ./kwire ./veritas ./veritas/veritastest)
+pkgs=(./core/... ./sim/... ./format/... ./kwire ./broker/... ./veritas ./veritas/veritastest)
 while read -r p; do
   pkgs+=("$p")
 done < <(go list ./toys3/... | grep -v -e '/toys3/prod$' -e '/toys3/cmd/')

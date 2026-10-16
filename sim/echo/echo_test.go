@@ -217,3 +217,22 @@ func (*tripCount) Observe(sim.View) {}
 func (i *tripCount) AtEnd(v sim.View) {
 	*i.fenced += len(v.Timeline().Snapshot("echo_fenced"))
 }
+
+// TestCachedStateHashMatchesFull recomputes every cached StateHash each step;
+// a stale cache fails the seed.
+func TestCachedStateHashMatchesFull(t *testing.T) {
+	n := 60
+	if testing.Short() {
+		n = 10
+	}
+	cfg := Config(seeds(1, n))
+	cfg.VerifyHashes = true
+	rep, err := sim.NewRunner().Run(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if testing.Short() {
+		rep.Coverage = nil
+	}
+	report(t, rep)
+}

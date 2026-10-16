@@ -78,6 +78,11 @@ type node struct {
 	stepped     uint64
 	wakePending bool
 	boots       int
+
+	// sum caches m.StateHash(); valid while sumOK. A machine changes only when
+	// the kernel calls it (boot, Step, OnPhase), and each of those clears sumOK.
+	sum   uint64
+	sumOK bool
 }
 
 type endKind uint8
@@ -102,6 +107,8 @@ type run struct {
 	byName  map[core.NodeID]*node
 	engines []Engine
 	engCtx  []*engineCtx
+	engSum  []uint64 // cached StateHash per engine, valid while engOK
+	engOK   []bool   // cleared whenever the kernel calls into the engine
 	byEng   map[string]int
 
 	tl    *MemTimeline
@@ -219,6 +226,8 @@ func (r *run) setup() {
 	for i, e := range r.engines {
 		r.byEng[e.Name()] = i
 		r.engCtx = append(r.engCtx, &engineCtx{r: r, name: e.Name()})
+		r.engSum = append(r.engSum, 0)
+		r.engOK = append(r.engOK, false)
 	}
 	for _, f := range r.cfg.Invariants {
 		r.invs = append(r.invs, f())
@@ -312,7 +321,7 @@ func (r *run) boot(n *node) {
 	if sh, isH := m.(interface{ SetHistory(History) }); isH {
 		sh.SetHistory(r.hist)
 	}
-	n.m, n.alive = m, true
+	n.m, n.alive, n.sumOK = m, true, false
 	if n.boots > 1 {
 		r.counters[cRestarts]++
 		r.simFact("sim_restarted", core.Field{Key: "node", Value: core.Str(n.name)})
@@ -400,23 +409,45 @@ func (r *run) foldState() {
 		if !n.alive {
 			continue
 		}
-		var sum uint64
-		if !r.guard("StateHash "+string(n.name), func() { sum = n.m.StateHash() }) {
-			r.halt = true
-			return
+		if !n.sumOK {
+			if !r.guard("StateHash "+string(n.name), func() { n.sum = n.m.StateHash() }) {
+				r.halt = true
+				return
+			}
+			n.sumOK = true
+		} else if r.cfg.VerifyHashes {
+			r.verifyHash("node "+string(n.name), n.sum, n.m.StateHash)
 		}
-		h.u64(sum)
+		h.u64(n.sum)
 		h.u64(uint64(len(n.inbox.ctrl.q)))
 		h.u64(uint64(len(n.inbox.data.q)))
 		h.i64(int64(n.inbox.busy))
 	}
-	for _, e := range r.engines {
-		var sum uint64
-		if !r.guard("StateHash "+e.Name(), func() { sum = e.StateHash() }) {
-			r.halt = true
-			return
+	for i, e := range r.engines {
+		if !r.engOK[i] {
+			if !r.guard("StateHash "+e.Name(), func() { r.engSum[i] = e.StateHash() }) {
+				r.halt = true
+				return
+			}
+			r.engOK[i] = true
+		} else if r.cfg.VerifyHashes {
+			r.verifyHash("engine "+e.Name(), r.engSum[i], e.StateHash)
 		}
-		h.u64(sum)
+		h.u64(r.engSum[i])
+	}
+}
+
+// verifyHash fails the seed if the cached sum is not the full StateHash, which
+// means a machine or engine changed without the kernel calling it.
+func (r *run) verifyHash(what string, cached uint64, full func() uint64) {
+	var sum uint64
+	if !r.guard("StateHash "+what, func() { sum = full() }) {
+		r.halt = true
+		return
+	}
+	if sum != cached {
+		r.fail(FailProtocol, "stale_state_hash", what+": state changed outside Step/Execute/OnInternal/OnCrash/EnterRecovery/OnPhase")
+		r.halt = true
 	}
 }
 
@@ -452,6 +483,7 @@ func (r *run) process(e Entry) {
 		}
 		r.counters[cEngineSteps]++
 		r.logf("engine %s internal %s", e.Target.Engine, desc{e.Body})
+		r.engOK[i] = false
 		if !r.guard("OnInternal "+e.Target.Engine, func() { r.engines[i].OnInternal(r.engCtx[i], e.Body) }) {
 			r.halt = true
 			return
@@ -486,7 +518,8 @@ func (r *run) process(e Entry) {
 		r.logf("phase %d", pc.to)
 		r.simFact("sim_phase", core.Field{Key: "phase", Value: core.U64(uint64(pc.to))})
 		if pc.to == PhaseSettling {
-			for _, eng := range r.engines {
+			for i, eng := range r.engines {
+				r.engOK[i] = false
 				if !r.guard("EnterRecovery "+eng.Name(), eng.EnterRecovery) {
 					r.halt = true
 				}
@@ -525,6 +558,7 @@ func (r *run) notifyPhase(p Phase) {
 		r.trace.u64(903)
 		r.trace.u64(uint64(p))
 		r.logf("on_phase %s %d", n.name, p)
+		n.sumOK = false
 		var acts []core.Action
 		if !r.guard("OnPhase "+string(n.name), func() { acts = pa.OnPhase(p) }) {
 			r.halt = true
@@ -559,6 +593,7 @@ func (r *run) pump(n *node) {
 	r.trace.str(string(n.name))
 	r.trace.event(body)
 	r.logf("step %s %s", n.name, desc{body})
+	n.sumOK = false
 	var acts []core.Action
 	if !r.guard("Step "+string(n.name), func() { acts = n.m.Step(core.Event{At: r.local(n), Wall: r.wall(), Body: body}) }) {
 		if n.workload {
@@ -660,6 +695,7 @@ func (r *run) route(n *node, a core.Action) {
 		r.fail(FailProtocol, "unrouted_action", fmt.Sprintf("%s: action %T handled by %d engines", n.name, a, count))
 		return
 	}
+	r.engOK[target] = false
 	if !r.guard("Execute "+r.engines[target].Name(), func() { r.engines[target].Execute(r.engCtx[target], n.ref, a) }) {
 		r.halt = true
 	}
@@ -689,6 +725,7 @@ func (r *run) end(n *node, how endKind, cause string) {
 	r.logf("%s %s (%s)", name, n.name, cause)
 	r.simFact(name, core.Field{Key: "node", Value: core.Str(n.name)}, core.Field{Key: "cause", Value: core.Str(cause)})
 	for i, e := range r.engines {
+		r.engOK[i] = false
 		if !r.guard("OnCrash "+e.Name(), func() { e.OnCrash(r.engCtx[i], ref) }) {
 			r.halt = true
 		}

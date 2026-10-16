@@ -264,3 +264,32 @@ func TestFatalProduceErrorReinitsProducer(t *testing.T) {
 		}
 	}
 }
+
+// TestCachedStateHashMatchesFull recomputes every cached StateHash each step
+// (a stale cache fails the seed) and checks the trace is unchanged by it.
+func TestCachedStateHashMatchesFull(t *testing.T) {
+	n := 40
+	if testing.Short() {
+		n = 6
+	}
+	ss := seeds(1, n)
+	cfg := Config(ss)
+	cfg.VerifyHashes = true
+	rep, err := sim.NewRunner().Run(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if testing.Short() {
+		rep.Coverage = nil
+	}
+	report(t, rep)
+	plain, err := sim.NewRunner().Run(Config(ss))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, s := range rep.Seeds {
+		if p := plain.Seeds[i]; s.TraceHash != p.TraceHash || s.Steps != p.Steps || s.RandCalls != p.RandCalls {
+			t.Errorf("seed %d: verify mode changed the trace", s.Seed)
+		}
+	}
+}

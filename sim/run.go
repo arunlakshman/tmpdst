@@ -85,6 +85,9 @@ type Config struct {
 	// CheckDeterminism replays every Kth seed and compares
 	// (TraceHash, RandCalls, Steps). 0 = off.
 	CheckDeterminism uint32
+	// VerifyHashes recomputes every cached StateHash each step and fails the
+	// seed (FailProtocol) on a mismatch. It does not change TraceHash.
+	VerifyHashes bool
 }
 
 // FailKind classifies a failure. Append-only.

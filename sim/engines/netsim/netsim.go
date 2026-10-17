@@ -40,6 +40,7 @@ package netsim
 
 import (
 	"hash/crc32"
+	"math/bits"
 	"sort"
 	"strconv"
 
@@ -92,6 +93,7 @@ const (
 type item struct {
 	kind itemKind
 	data []byte
+	crc  uint32 // crc32 of data, so StateHash does not rescan it
 	seq  uint64
 	id   sim.EntryID
 	net  bool // network-originated RST: passes a black hole
@@ -112,6 +114,11 @@ type pair struct {
 	id   uint64
 	end  [2]end
 	dirs [2]dir // dirs[d]: side d -> side 1-d
+
+	// StateHash cache: out is the hash state after folding this pair on top of
+	// in. Valid while ok; every access to a pair clears ok (touch).
+	in, out uint64
+	ok      bool
 }
 
 // link is per unordered node pair: permanent extra latency and partition state.
@@ -172,9 +179,12 @@ func (e *Engine) sample(r sim.CountedRand) core.Duration {
 	return span(r, l.FastMin, l.FastMax)
 }
 
+// findPair returns the pair with that id. Every caller may mutate it, so it
+// is marked for rehashing.
 func (e *Engine) findPair(id uint64) *pair {
 	i := sort.Search(len(e.pairs), func(i int) bool { return e.pairs[i].id >= id })
 	if i < len(e.pairs) && e.pairs[i].id == id {
+		e.pairs[i].ok = false
 		return e.pairs[i]
 	}
 	return nil
@@ -275,6 +285,7 @@ func (e *Engine) enqueue(ctx sim.EngineCtx, p *pair, di int, it item, lat core.D
 	d := &p.dirs[di]
 	d.seq++
 	it.seq = d.seq
+	it.crc = crc32.ChecksumIEEE(it.data)
 	at := d.arrival(ctx.Now(), lat)
 	it.id = ctx.Self(at, d.lane, landBody{p.id, di, it.seq})
 	d.flight = append(d.flight, it)
@@ -354,7 +365,7 @@ func (e *Engine) dial(ctx sim.EngineCtx, from core.NodeRef, a core.Dial) {
 	p.dirs[1].lane = ctx.Lane(pairKey(p.id, "1"))
 	// Data follows the open notice on each direction.
 	p.dirs[0].lastArr, p.dirs[1].lastArr = at, at
-	e.pairs = append(e.pairs, p)
+	e.pairs = append(e.pairs, p) // ok is false: hashed on first use
 	e.ends[endKey{from.Node, p.end[0].id}] = endRef{p.id, 0}
 	e.ends[endKey{target, p.end[1].id}] = endRef{p.id, 1}
 	ctx.Deliver(from, at, ctx.Lane(pairKey(p.id, "dial")), core.DialDone{Req: a.Req, Conn: p.end[0].id})
@@ -471,6 +482,7 @@ func (e *Engine) OnInternal(ctx sim.EngineCtx, body any) {
 		for _, p := range e.pairs {
 			a, c := p.end[0].ref.Node, p.end[1].ref.Node
 			if (a == b.A && c == b.B) || (a == b.B && c == b.A) {
+				p.ok = false
 				e.flush(ctx, p, 0)
 				e.flush(ctx, p, 1)
 			}
@@ -544,6 +556,7 @@ func (e *Engine) OnCrash(ctx sim.EngineCtx, ref core.NodeRef) {
 			if p.end[s].ref != ref || p.end[s].closed {
 				continue
 			}
+			p.ok = false
 			p.end[s].closed = true
 			p.end[s].paused = false
 			e.clearDir(ctx, &p.dirs[1-s]) // bytes to the dead node
@@ -562,11 +575,7 @@ func (e *Engine) OnCrash(ctx sim.EngineCtx, ref core.NodeRef) {
 
 type hasher uint64
 
-func (h *hasher) u64(v uint64) {
-	for i := 0; i < 8; i++ {
-		*h = (*h ^ hasher(byte(v>>(8*i)))) * 1099511628211
-	}
-}
+func (h *hasher) u64(v uint64) { *h = hasher(fnvU64(uint64(*h), v)) }
 func (h *hasher) b(v bool) {
 	if v {
 		h.u64(1)
@@ -585,37 +594,31 @@ func (h *hasher) items(its []item) {
 	for _, it := range its {
 		h.u64(uint64(it.kind))
 		h.u64(uint64(len(it.data)))
-		h.u64(uint64(crc32.ChecksumIEEE(it.data)))
+		h.u64(uint64(it.crc))
 		h.b(it.net)
 	}
 }
 
 // StateHash covers every open conn (ascending id), queued bytes, pause flags
-// and links (partitions, pair latency).
-func (e *Engine) StateHash() uint64 {
+// and links (partitions, pair latency). FNV is one running stream, so a pair's
+// fold is reused only while the state it starts from is unchanged: a changed
+// pair rehashes itself and the pairs after it.
+func (e *Engine) StateHash() uint64 { return e.hash(true) }
+
+// fullStateHash is StateHash without the per-pair cache.
+func (e *Engine) fullStateHash() uint64 { return e.hash(false) }
+
+func (e *Engine) hash(cached bool) uint64 {
 	h := hasher(14695981039346656037)
 	h.u64(uint64(len(e.pairs)))
 	for _, p := range e.pairs {
-		h.u64(p.id)
-		for s := 0; s < 2; s++ {
-			en := &p.end[s]
-			h.str(string(en.ref.Node))
-			h.u64(uint64(len(en.ref.Inc)))
-			for _, c := range en.ref.Inc {
-				h.u64(uint64(c))
-			}
-			h.u64(uint64(en.id))
-			h.b(en.closed)
-			h.b(en.eof)
-			h.b(en.paused)
-			d := &p.dirs[s]
-			h.u64(uint64(d.lastArr))
-			h.u64(uint64(d.clogUntil))
-			h.b(d.aborted)
-			h.b(d.blackhole)
-			h.items(d.flight)
-			h.items(d.held)
+		if cached && p.ok && p.in == uint64(h) {
+			h = hasher(p.out)
+			continue
 		}
+		p.in = uint64(h)
+		h.pair(p)
+		p.out, p.ok = uint64(h), cached
 	}
 	h.u64(uint64(len(e.links)))
 	for _, l := range e.links {
@@ -629,4 +632,69 @@ func (e *Engine) StateHash() uint64 {
 	return uint64(h)
 }
 
+func (h *hasher) pair(p *pair) {
+	h.u64(p.id)
+	for s := 0; s < 2; s++ {
+		en := &p.end[s]
+		h.str(string(en.ref.Node))
+		h.u64(uint64(len(en.ref.Inc)))
+		for _, c := range en.ref.Inc {
+			h.u64(uint64(c))
+		}
+		h.u64(uint64(en.id))
+		h.b(en.closed)
+		h.b(en.eof)
+		h.b(en.paused)
+		d := &p.dirs[s]
+		h.u64(uint64(d.lastArr))
+		h.u64(uint64(d.clogUntil))
+		h.b(d.aborted)
+		h.b(d.blackhole)
+		h.items(d.flight)
+		h.items(d.held)
+	}
+}
+
 var _ sim.Engine = (*Engine)(nil)
+
+// fnvP^k mod 2^64, for the zero high bytes of a little-endian u64.
+const (
+	fnvP1 = 1099511628211
+	fnvP2 = (1099511628211 * 1099511628211) % (1 << 64)
+	fnvP3 = (fnvP2 * 1099511628211) % (1 << 64)
+	fnvP4 = (fnvP3 * 1099511628211) % (1 << 64)
+	fnvP5 = (fnvP4 * 1099511628211) % (1 << 64)
+	fnvP6 = (fnvP5 * 1099511628211) % (1 << 64)
+	fnvP7 = (fnvP6 * 1099511628211) % (1 << 64)
+	fnvP8 = (fnvP7 * 1099511628211) % (1 << 64)
+)
+
+// fnvU64 folds v as 8 little-endian bytes. A zero byte only multiplies, so the
+// leading zero bytes collapse into one multiply by fnvP^k: same value, ~4x
+// fewer dependent multiplies for the small integers that dominate.
+func fnvU64(x, v uint64) uint64 {
+	n := (bits.Len64(v) + 7) / 8
+	for i := 0; i < n; i++ {
+		x = (x ^ (v & 0xff)) * fnvP1
+		v >>= 8
+	}
+	switch 8 - n {
+	case 1:
+		return x * fnvP1
+	case 2:
+		return x * fnvP2
+	case 3:
+		return x * fnvP3
+	case 4:
+		return x * fnvP4
+	case 5:
+		return x * fnvP5
+	case 6:
+		return x * fnvP6
+	case 7:
+		return x * fnvP7
+	case 8:
+		return x * fnvP8
+	}
+	return x
+}

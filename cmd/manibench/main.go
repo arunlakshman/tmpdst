@@ -143,7 +143,7 @@ func run(topic string, seeds []string, nClients, size int, dur, every time.Durat
 				}
 				seq++
 				t0 := time.Now()
-				cl.Produce(pctx, rec, func(r *kgo.Record, err error) {
+				cl.Produce(ctx, rec, func(r *kgo.Record, err error) {
 					st.add(len(r.Value), time.Since(t0), err)
 				})
 			}

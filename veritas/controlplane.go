@@ -63,6 +63,12 @@ type ControlPlane struct {
 	topics  map[string]int32                       // topic -> partition count
 	nextPID core.ProducerID
 	prods   map[string]*prodState // pkey(tp, producer) -> state
+
+	// segKeys is every committed segment key, sorted. segPre[i] is the
+	// StateHash state after the epochs and segKeys[:i]; empty means none is
+	// valid. A commit at index i truncates it to i+1 entries; Register clears it.
+	segKeys []string
+	segPre  []hasher
 }
 
 const (
@@ -133,6 +139,7 @@ func (c *ControlPlane) Exec(a core.IOAction) core.Completion {
 	switch op := call.Op.(type) {
 	case core.Register:
 		c.epochs[string(op.Self.Node)]++
+		c.segPre = nil
 		resp := core.RegisterResp{Epoch: c.epochs[string(op.Self.Node)]}
 		return core.CPDone{Req: call.Req, Resp: resp, Outcome: core.Applied}
 	case core.InitProducer:
@@ -168,6 +175,11 @@ func (c *ControlPlane) Exec(a core.IOAction) core.Completion {
 				c.append(r)
 			}
 			seg.ranges = append(seg.ranges, r)
+		}
+		i, _ := slices.BinarySearch(c.segKeys, op.SegmentKey)
+		c.segKeys = slices.Insert(c.segKeys, i, op.SegmentKey)
+		if len(c.segPre) > i+1 {
+			c.segPre = c.segPre[:i+1]
 		}
 		c.segs[op.SegmentKey] = seg
 		resp := core.CommitSegmentResp{Assigned: slices.Clone(seg.ranges)}
@@ -259,6 +271,25 @@ func (c *ControlPlane) append(r core.BatchRange) {
 
 // StateHash folds epochs, committed segments, topics and producer state, each in sorted order.
 func (c *ControlPlane) StateHash() uint64 {
+	if len(c.segPre) == 0 {
+		h := newHasher()
+		for _, n := range sortedKeys(c.epochs) {
+			h.str(n)
+			h.u64(uint64(c.epochs[n]))
+		}
+		c.segPre = append(c.segPre, h)
+	}
+	for i := len(c.segPre) - 1; i < len(c.segKeys); i++ {
+		h := c.segPre[i]
+		h.str(c.segKeys[i])
+		h.ranges(c.segs[c.segKeys[i]].ranges)
+		c.segPre = append(c.segPre, h)
+	}
+	return c.tailHash(c.segPre[len(c.segKeys)])
+}
+
+// fullStateHash is StateHash without the segment prefix cache (for tests).
+func (c *ControlPlane) fullStateHash() uint64 {
 	h := newHasher()
 	for _, n := range sortedKeys(c.epochs) {
 		h.str(n)
@@ -268,6 +299,11 @@ func (c *ControlPlane) StateHash() uint64 {
 		h.str(k)
 		h.ranges(c.segs[k].ranges)
 	}
+	return c.tailHash(h)
+}
+
+// tailHash folds topics, the producer counter and producer state into h.
+func (c *ControlPlane) tailHash(h hasher) uint64 {
 	for _, t := range sortedKeys(c.topics) {
 		h.str(t)
 		h.u64(uint64(c.topics[t]))

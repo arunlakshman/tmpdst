@@ -1,6 +1,7 @@
 package veritas
 
 import (
+	"slices"
 	"strings"
 
 	"manifester/core"
@@ -21,10 +22,24 @@ import (
 //	List    keys with Prefix, sorted; nil if none. Never fails.
 //
 // Exec panics on an action that is not one of these four.
-type ObjectStore struct{ objs map[string][]byte }
+type ObjectStore struct {
+	objs map[string][]byte
+	keys []string // every key, sorted
+	// pre[i] is the StateHash state after folding keys[:i]; len(pre)-1 is how
+	// many are valid. A change at index i truncates it to i+1 entries.
+	pre []hasher
+}
 
 // NewObjectStore returns an empty store.
 func NewObjectStore() *ObjectStore { return &ObjectStore{objs: map[string][]byte{}} }
+
+// touch records that the entry at index i of keys changed (or was inserted or
+// removed there), so folded prefix states beyond it are stale.
+func (s *ObjectStore) touch(i int) {
+	if len(s.pre) > i+1 {
+		s.pre = s.pre[:i+1]
+	}
+}
 
 // Exec runs one action and returns its completion.
 func (s *ObjectStore) Exec(a core.IOAction) core.Completion {
@@ -33,6 +48,11 @@ func (s *ObjectStore) Exec(a core.IOAction) core.Completion {
 		if a.Key == "" {
 			return core.ObjPutDone{Req: a.Req, Key: a.Key, Err: core.ErrInvalid}
 		}
+		i, found := slices.BinarySearch(s.keys, a.Key)
+		if !found {
+			s.keys = slices.Insert(s.keys, i, a.Key)
+		}
+		s.touch(i)
 		s.objs[a.Key] = clone(a.Data)
 		return core.ObjPutDone{Req: a.Req, Key: a.Key, Outcome: core.Applied}
 	case core.ObjGet:
@@ -52,11 +72,14 @@ func (s *ObjectStore) Exec(a core.IOAction) core.Completion {
 		if _, ok := s.objs[a.Key]; !ok {
 			return core.ObjDeleteDone{Req: a.Req, Err: core.ErrNotFound}
 		}
+		i, _ := slices.BinarySearch(s.keys, a.Key)
+		s.keys = slices.Delete(s.keys, i, i+1)
+		s.touch(i)
 		delete(s.objs, a.Key)
 		return core.ObjDeleteDone{Req: a.Req, Outcome: core.Applied}
 	case core.ObjList:
 		var keys []string
-		for _, k := range sortedKeys(s.objs) {
+		for _, k := range s.keys {
 			if strings.HasPrefix(k, a.Prefix) {
 				keys = append(keys, k)
 			}
@@ -67,10 +90,26 @@ func (s *ObjectStore) Exec(a core.IOAction) core.Completion {
 }
 
 // Keys returns every key, sorted.
-func (s *ObjectStore) Keys() []string { return sortedKeys(s.objs) }
+func (s *ObjectStore) Keys() []string { return slices.Clone(s.keys) }
 
-// StateHash folds the sorted (key, data) pairs.
+// StateHash folds the sorted (key, data) pairs. It resumes from the last
+// folded prefix a change left intact, so a put near the end of the key order
+// costs little.
 func (s *ObjectStore) StateHash() uint64 {
+	if len(s.pre) == 0 {
+		s.pre = append(s.pre, newHasher())
+	}
+	for i := len(s.pre) - 1; i < len(s.keys); i++ {
+		h := s.pre[i]
+		h.str(s.keys[i])
+		h.bytes(s.objs[s.keys[i]])
+		s.pre = append(s.pre, h)
+	}
+	return uint64(s.pre[len(s.keys)])
+}
+
+// fullStateHash is StateHash without the prefix cache (for tests).
+func (s *ObjectStore) fullStateHash() uint64 {
 	h := newHasher()
 	for _, k := range sortedKeys(s.objs) {
 		h.str(k)

@@ -108,6 +108,10 @@ func (c *Core) specStateHash() uint64 {
 	return c.specHash
 }
 
+// SpecStateHash is the cached spec hash, exported so conformance (C2) can
+// compare it with the spec's own StateHash (a stale cache shows up as a diff).
+func (c *Core) SpecStateHash() uint64 { return c.specStateHash() }
+
 func (c *Core) Name() string { return c.h.Name }
 
 // EnterRecovery stops new faults for later actions.

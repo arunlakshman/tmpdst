@@ -7,14 +7,14 @@
 //
 // The specs double as test fakes (production-facing adapters over them are in
 // veritas/vsys) and are what implementations are checked against, in lockstep
-// with veritastest. Four checks, none wired yet (no broker, engines or oracle
-// exist):
+// with veritastest. Four checks:
 //
-//	C1  broker with no faults vs Partition: produce/fetch through the real
-//	    state machine, driven by a fault-free executor over these specs.
-//	    Lives next to the broker.
+//	C1  broker with no faults vs Partition: produce/fetch/ListOffsets through
+//	    the real state machine, driven by a fault-free executor over these
+//	    specs (broker/conformance_test.go). Its Bug mutants must fail it.
 //	C2  each sim engine (object store, control plane) with faults off vs its
-//	    spec: same completions, same StateHash. Lives in sim.
+//	    spec: same completions, same StateHash after every operation
+//	    (sim/engines/conformance_test.go).
 //	C3  the sys adapters (S3, the control-plane HTTP client) vs these specs.
 //	    The only check that executes sys. Lives with the adapters.
 //	C4  the Kafka oracle vs Partition. The oracle never imports this package;

@@ -165,7 +165,7 @@ func (b *Broker) onCommit(s *segment, e core.CPDone) []core.Action {
 			return b.failSegment(s, errUnknownServer)
 		}
 		return b.committed(s, resp.Assigned)
-	case e.Err == core.ErrFenced:
+	case e.BrokerFenced():
 		return b.trip("fenced")
 	case e.Err == core.ErrInvalid:
 		return b.isolate(s)
@@ -183,13 +183,13 @@ func (b *Broker) committed(s *segment, rs []core.BatchRange) []core.Action {
 		core.Field{Key: "epoch", Value: core.U64(b.epoch)})}
 	for i, pb := range s.batches {
 		r := rs[i]
-		switch r.Err {
-		case core.OK:
+		switch {
+		case r.Err == core.OK:
 			// Dup is a success at the original offset (decision 28).
 			b.ack(pb, r, s.key)
-		case core.ErrOutOfOrder:
+		case r.Err == core.ErrOutOfOrder:
 			b.release(pb, errOutOfOrderSeq)
-		case core.ErrFenced:
+		case r.ProducerFenced():
 			b.release(pb, errInvalidProducerEpoch)
 		default:
 			b.release(pb, errUnknownServer)

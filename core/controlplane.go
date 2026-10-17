@@ -91,6 +91,19 @@ type TopicInfo struct {
 	Partitions int32
 }
 
+// ErrFenced has two meanings that call for opposite reactions. On a whole
+// CPDone it is a stale broker epoch: the broker must Trip (decision 7). On one
+// BatchRange it is a stale producer epoch: only that batch is rejected. Use
+// these accessors instead of comparing Err directly.
+
+// BrokerFenced reports that the call was refused because the caller's broker
+// epoch is stale.
+func (d CPDone) BrokerFenced() bool { return d.Err == ErrFenced }
+
+// ProducerFenced reports that this batch was refused because its producer
+// epoch is stale.
+func (r BatchRange) ProducerFenced() bool { return r.Err == ErrFenced }
+
 func (Register) isCPOp()       {}
 func (InitProducer) isCPOp()   {}
 func (CommitSegment) isCPOp()  {}

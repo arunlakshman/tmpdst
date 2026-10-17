@@ -1,0 +1,163 @@
+# Produce benchmarks (local, single broker)
+
+Measurement only. No broker, CP or core code was changed. Date: 2026-10-17, branch toys3.
+
+## Method
+
+`cmd/manibench benchmark-producer` (franz-go v1.20.7): N independent `kgo.Client`s, idempotent, acks=all, no
+compression, `MaxBufferedRecords` 5000 per client, each client produces in a loop that blocks on the buffer.
+Latency = time from `Produce()` to its callback (includes time blocked on a full buffer). Partitioner: kgo
+UniformBytes sticky (64 KiB per partition, then another partition), so all 6 partitions are used with large
+batches. One `kgo` default stays: `MaxProduceRequestsInflightPerBroker` = 1 per client.
+
+Three setups, each with fresh processes (and a fresh DynamoDB table prefix / S3 bucket), topic `bench`, 6 partitions,
+broker defaults (BatchWindow 50 ms, MaxSegmentBytes 4 MiB, MaxSegmentPartitions 24, MaxBufferedBytes 64 MiB):
+
+| Setup | Control plane | Objects |
+|---|---|---|
+| A | `-store mem` | `-objects mem` |
+| B | ExtendDB (`-store dynamo -dynamo-endpoint http://127.0.0.1:18080 -create-tables -table-prefix <u>_`) | `-objects mem` |
+| C | same as B | SeaweedFS (`-objects s3 -s3-endpoint http://127.0.0.1:8333 -s3-bucket <u> -s3-path-style -s3-create-bucket`) |
+
+Commands (repo root; binaries built with `go build -o <dir>/bin/<name> ./cmd/<name>`):
+
+```
+scripts/it-up.sh
+manicp <cp flags above>                       # :8080
+manibroker <broker flags above>               # :9092
+manibench benchmark-producer -topic bench -create-partitions 6 -num-clients 1 -duration 2s   # warm-up, creates topic
+manibench benchmark-producer -topic bench -num-clients {1,8,32} -record-size 1024 -duration 30s -interval 5s
+manibench benchmark-producer -topic bench -num-clients 1 -record-size 100 -duration 30s -interval 5s
+scripts/it-down.sh
+```
+
+CPU sampled with `ps -o %cpu,rss` at t=6,12,18,24 s of the 8-client run.
+
+## Caveats
+
+- Apple M1, 8 cores, Docker Desktop (Linux VM, 3.8 GiB). The load generator, CP, broker and the Docker VM share the
+  same 8 cores. Another user container (`extenddb-postgres-dev-extenddb-1`) was crash-looping throughout and
+  `kind-control-plane` was running (about 15% CPU); neither was touched.
+- ExtendDB is SQLite behind an HTTP API; SeaweedFS runs in the VM (its volume server is a single process on a
+  Docker volume). Absolute B and C numbers therefore do not predict real DynamoDB or S3 (real S3 PUTs of 4 MiB are
+  typically slower than 60 ms, real DynamoDB TransactWriteItems is typically 10-30 ms). The A/B/C ratios and the
+  structure of the latency (floor = window + PUT + commit) are the useful part.
+- Single 30 s run per cell, no repeats; expect roughly 5-10% run-to-run noise (not measured).
+- The 32-client runs end after 31-33 s because the drain of buffered records is included in the elapsed time.
+
+## Results (30 s runs, 6 partitions, 0 produce errors in every run)
+
+1 KB records:
+
+| Setup | Clients | records/s | MiB/s | avg latency | p50 | p99 |
+|---|---|---|---|---|---|---|
+| A mem/mem | 1 | 86,246 | 84.2 | 54.3 ms | 69.2 ms | 104 ms |
+| A | 8 | 239,931 | 234.3 | 162 ms | 158 ms | 243 ms |
+| A | 32 | 114,460 | 111.8 | 1.38 s | 1.27 s | 2.55 s |
+| B dynamo/mem | 1 | 68,856 | 67.2 | 69.4 ms | 83.0 ms | 101 ms |
+| B | 8 | 163,593 | 159.8 | 240 ms | 232 ms | 395 ms |
+| B | 32 | 99,168 | 96.8 | 1.57 s | 1.54 s | 2.67 s |
+| C dynamo/s3 | 1 | 30,527 | 29.8 | 160 ms | 136 ms | 1.12 s |
+| C | 8 | 52,252 | 51.0 | 755 ms | 734 ms | 1.25 s |
+| C | 32 | 41,339 | 40.4 | 3.71 s | 3.51 s | 6.87 s |
+
+1 client, 100 B records (per-record cost):
+
+| Setup | records/s | MiB/s | avg | p50 | p99 |
+|---|---|---|---|---|---|
+| A | 74,807 | 7.1 | 64.2 ms | 63.0 ms | 86 ms |
+| B | 56,941 | 5.4 | 85.2 ms | 85.1 ms | 102 ms |
+| C | 51,444 | 4.9 | 94.7 ms | 91.8 ms | 155 ms |
+
+Raw per-interval output was kept in the benchmark session scratch directory (deleted at cleanup); the summary lines
+above are copied from it.
+
+## CPU (8-client run, samples at 6/12/18/24 s, %CPU of one core)
+
+| Setup | manibroker | manibench | manicp |
+|---|---|---|---|
+| A | 106, 103, 95, 104 | 73, 74, 68, 69 | 1-2 |
+| B | 54, 68, 77, 82 | 37, 41, 48, 50 | 5-8 |
+| C | 31, 35, 32, 19 | 20, 27, 26, 14 | 3-6 |
+
+Docker stats after C: extenddb 0.2%, seaweedfs 1.5% (RSS 1.1 GiB), i.e. the backends are idle between requests too.
+
+- A: the broker sits at about 100% of one core while the machine has 8. It looks single-thread bound (the broker
+  state machine runs on one executor; not proven here). The load generator uses 70-80%, so it is not the limit.
+  RSS 430-750 MiB (mem object store holds all data).
+- B: broker 54-82%, loadgen 37-50%; neither saturated, CP 5-8%.
+- C: broker 20-35%, loadgen 14-27%, CP 3-6%. Nothing is CPU bound; the system is waiting on S3 and the CP.
+
+## Analysis
+
+1. Throughput follows Little's law with the client buffer: records/s is about (buffered records) / (avg latency).
+   A c1: 5000/0.054 = 92k (measured 86k). A c8: 40,000/0.162 = 247k (240k). C c8: 40,000/0.755 = 53k (52k).
+   C c32: 160,000/3.7 = 43k (41k). Since the load generator keeps the buffer full, latency is queueing time,
+   and throughput is set by what the broker pipeline can drain.
+2. Latency floor. A c1 min latency is 13 ms, avg 54 ms, p50 69 ms: that is the 50 ms BatchWindow plus a small
+   in-process cost (p50 > window because a request arriving mid-window waits for the flush, then the produce
+   response). B adds about 15 ms avg (+ 14 ms c1) for the DynamoDB commit (one TransactWriteItems to ExtendDB).
+   C adds another 90 ms avg at 1 client (160 vs 69). The 100 B single client (A 64 ms, B 85, C 95) shows the
+   same floor with tiny segments: about 50 ms window, +20 ms commit, +10 ms small PUT.
+3. Why C collapses under load: the segment is flushed at 4 MiB (MaxSegmentBytes) before the window expires once
+   the offered load is above about 80 MiB/s, and at 8 clients segments are PUT then committed one at a time.
+   Direct curl probes against the same SeaweedFS (5 runs each, after a cold first request of 208 ms) gave:
+   1 KB PUT 2.5-8 ms, 1 MiB PUT 19-54 ms, 4 MiB PUT 60-73 ms. A 4 MiB segment cycle of about 70 ms PUT + 15 ms
+   commit gives 4 MiB / 85 ms = 47 MiB/s, which matches C c8 (51 MiB/s) and C c32 (40 MiB/s). That the cap is
+   serialization and not S3 bandwidth is inferred from low CPU everywhere and from the sequential-commit design
+   (decisions row 33, commits issued one at a time in seal order, per the task brief); I did not instrument the
+   broker to log concurrent PUTs, so "the PUT is not pipelined with the previous commit" is the leading
+   explanation, not a measured fact.
+4. Backpressure: with 32 clients, 160,000 records (about 160 MB) are buffered client-side, above MaxBufferedBytes
+   (64 MiB). In A the broker is CPU-bound and 32 clients are slower than 8 (114k vs 240k records/s), consistent
+   with 32 kgo clients plus the broker contending for 8 cores and with read-pause/resume hysteresis, but I did not
+   measure the pause time. Resolving measurement: a broker counter of time spent paused, or running 32 clients
+   with smaller `-buffered-records`.
+5. kgo's own limits: each client has 1 in-flight produce request per broker (default), so one client's throughput
+   is bounded by request size / request latency regardless of the broker. 1 client in A (84 MiB/s) is almost
+   entirely this: about 5000 records per 54 ms. Raising `-max-inflight` (flag in manibench, up to 5 with idempotence) would show
+   how much of the 1-client number is kgo; not run (not in the approved plan).
+6. Per-record cost: 100 B records give 75k records/s in A against 86k records/s at 1 KB, so the per-record cost
+   is small relative to the per-request/per-batch fixed cost. In C the 100 B run (51k records/s) is faster in
+   records than the 1 KB run (31k) only because segments are small and never hit the 4 MiB cut.
+7. The 50 ms window dominates latency whenever the stores are fast (A, B: 54-69 ms at 1 client) and is irrelevant
+   once the store is the bottleneck (C at 8+ clients: latency is queueing).
+
+## Window and segment experiment (setup C): not run
+
+`manibroker` has no flag for `BatchWindow`, `MaxSegmentBytes`, `MaxSegmentPartitions` or `MaxBufferedBytes`;
+`cmd/manibroker/main.go` uses `broker.DefaultConfig()` and only overrides `BrokerID`, `Host`, `Port`. Per the
+instructions I did not change broker code. Defaults: BatchWindow 50 ms, MaxSegmentBytes 4 MiB,
+MaxSegmentPartitions 24, MaxAttempts 6, MaxBufferedBytes 64 MiB (resume at 32 MiB). I would expose these as flags
+(a small cmd/manibroker change) and try on C with 8 clients: window 5/10/20 ms, MaxSegmentBytes 1/2/8/16 MiB.
+
+## Speed-up ideas, ranked by evidence
+
+1. Pipeline PUT and commit (several segments in flight; commit still applied in seal order). Evidence: C is
+   idle on CPU (broker 20-35%) with latency 755 ms at 8 clients, and the PUT+commit cycle (about 85 ms per 4 MiB)
+   matches the measured 51 MiB/s ceiling. Expected gain: up to the number of in-flight segments, until S3/CP or
+   the single broker thread limits (A shows the broker thread tops out near 240 MiB/s).
+2. Parallel PUTs for one segment or per-partition-group objects: same evidence; real S3 has higher per-PUT
+   latency than SeaweedFS here (60-70 ms for 4 MiB), so the gain on real S3 is larger. Needs the commit order
+   preserved.
+3. Segment sizing: 1 MiB PUT took 19-54 ms vs 60-73 ms for 4 MiB, so smaller segments lower per-segment latency
+   but multiply commits; larger segments amortize the commit. Needs the flags above to test; no measurement yet.
+4. Smaller or adaptive BatchWindow: A c1 avg is 54 ms, almost all of it window. At low load, flushing when the
+   executor is idle (or 5-10 ms) would cut latency 5x for A/B-like stores. It does nothing for throughput under
+   load (C at 8 clients is store-bound).
+5. Fewer commit items per byte / batching many producers per segment: already the case at 8+ clients (segments
+   hit 4 MiB); at 1 client in C each commit carries about 1.5 MiB per 50 ms. Low priority.
+6. Higher-capacity client settings (`-max-inflight 5`, larger `-buffered-records`): affects what a single client
+   can offer, not the broker's ceiling. Worth measuring before concluding about the 1-client numbers.
+7. S3 multipart or S3 Express One Zone (single-digit-ms PUT) for production: only matters on real S3; cannot be
+   evaluated on SeaweedFS. Lowest evidence from this machine.
+8. Broker thread (A at 100% of one core, 240 MiB/s): only relevant after items 1-2; profile with pprof first.
+
+## Open questions and what would resolve them
+
+- Whether PUT and commit are truly serialized with nothing else queued: log per-segment PUT start/end and commit
+  start/end at debug level, or add pprof/trace.
+- Time spent in read-pause due to MaxBufferedBytes: counter in the broker.
+- Run-to-run variance and the kgo in-flight effect: repeat each cell 3x, add `-max-inflight 5` runs.
+- p99 1.1 s at C c1 (versus p50 136 ms): a few slow S3 or commit calls (SeaweedFS volume growth or ExtendDB
+  SQLite lock waits are guesses); not explained here.

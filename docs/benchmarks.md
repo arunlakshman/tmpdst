@@ -69,7 +69,7 @@ CPU sampled with `ps -o %cpu,rss` at t=6,12,18,24 s of the 8-client run.
 | B | 56,941 | 5.4 | 85.2 ms | 85.1 ms | 102 ms |
 | C | 51,444 | 4.9 | 94.7 ms | 91.8 ms | 155 ms |
 
-Raw per-interval output was kept in the benchmark session scratch directory (deleted at cleanup); the summary lines
+Raw per-interval output was kept in the benchmark session scratch directory (not committed; kept only in the session scratchpad); the summary lines
 above are copied from it.
 
 ## CPU (8-client run, samples at 6/12/18/24 s, %CPU of one core)

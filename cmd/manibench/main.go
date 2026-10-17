@@ -137,7 +137,7 @@ func run(topic string, seeds []string, nClients, size int, dur, every time.Durat
 				for j := 8; j < size; j++ {
 					val[j] = byte('a' + j%26)
 				}
-				rec := &kgo.Record{Value: val}
+				rec := &kgo.Record{Value: val, Context: ctx} // not pctx: the end of the run must not fail buffered records
 				if parts > 0 {
 					rec.Partition = int32(seq % uint64(parts))
 				}

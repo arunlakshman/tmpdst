@@ -18,7 +18,8 @@
 //	C3  the sys adapters (S3, the control-plane HTTP client) vs these specs.
 //	    The only check that executes sys. Lives with the adapters.
 //	C4  the Kafka oracle vs Partition. The oracle never imports this package;
-//	    C4 is what keeps the two independent.
+//	    C4 is what keeps the two independent. Wired: sim/kafka/c4_test.go
+//	    (accepts correct histories built from these specs, rejects 28 faults and fenced acks).
 //
 // What is checked today: each spec's rules (unit tests), ObjectStore against
 // a sorted-slice model, and ControlPlane invariants (contiguous offsets,

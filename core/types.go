@@ -25,8 +25,7 @@ type ID [16]byte
 
 type (
 	NodeID      string // stable identity of a broker (or sim workload)
-	Incarnation ID     // fresh per boot; references to an old one are fenced
-	Epoch       uint64 // fencing token issued by the control plane
+	Incarnation ID     // fresh per boot; names one run of a node in logs, facts and the runtime
 	ConnID      uint64 // a connection, as seen by one node
 	// ReqID correlates an Action with its completion Event. Unique within one
 	// incarnation only; it must never reach a durable name (object keys come
@@ -58,7 +57,7 @@ type SegmentRef struct {
 // ErrCode is an error as plain data so events stay comparable and hashable.
 // It is folded into the hash: append-only from here on, never reordered.
 //
-// ErrNotFound, ErrConflict and ErrFenced are always truthful; engines inject
+// ErrNotFound and ErrConflict are always truthful; engines inject
 // only ErrTimeout, ErrUnavailable, ErrIO and ErrConnClosed. ErrCorrupt comes
 // only from the core's decoder, never from sys.Classifier.
 type ErrCode uint16
@@ -68,14 +67,13 @@ const (
 	ErrTimeout             // deadline passed, or the response was lost; see Outcome (a lost response is ErrTimeout+MaybeApplied, never silence)
 	ErrUnavailable         // 503 / throttled / overloaded
 	ErrNotFound
-	ErrConflict   // CAS / idempotency-key mismatch
-	ErrFenced     // stale incarnation or epoch
+	ErrConflict   // CAS lost (offset base taken) or idempotency-key mismatch
+	_             // retired: was ErrFenced (decision 44); keeps the numbers below stable
 	ErrConnClosed // connection lost
 	ErrTooLarge
 	ErrCorrupt
-	ErrInvalid    // malformed request; never retried
-	ErrIO         // anything else from the outside world
-	ErrOutOfOrder // idempotent producer sequence gap (Kafka OUT_OF_ORDER_SEQUENCE_NUMBER); per batch only
+	ErrInvalid // malformed request; never retried
+	ErrIO      // anything else from the outside world
 )
 
 // Outcome states what a completion proves about side effects (lesson 1).
@@ -102,8 +100,6 @@ func (e ErrCode) String() string {
 		return "ErrNotFound"
 	case ErrConflict:
 		return "ErrConflict"
-	case ErrFenced:
-		return "ErrFenced"
 	case ErrConnClosed:
 		return "ErrConnClosed"
 	case ErrTooLarge:
@@ -114,8 +110,6 @@ func (e ErrCode) String() string {
 		return "ErrInvalid"
 	case ErrIO:
 		return "ErrIO"
-	case ErrOutOfOrder:
-		return "ErrOutOfOrder"
 	}
 	return "ErrCode(" + strconv.FormatUint(uint64(e), 10) + ")"
 }

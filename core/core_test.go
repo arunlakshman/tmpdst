@@ -23,7 +23,7 @@ func TestClassOfCoversEveryEvent(t *testing.T) {
 func TestErrCodeString(t *testing.T) {
 	want := map[ErrCode]string{
 		OK: "OK", ErrTimeout: "ErrTimeout", ErrUnavailable: "ErrUnavailable",
-		ErrNotFound: "ErrNotFound", ErrConflict: "ErrConflict", ErrFenced: "ErrFenced",
+		ErrNotFound: "ErrNotFound", ErrConflict: "ErrConflict",
 		ErrConnClosed: "ErrConnClosed", ErrTooLarge: "ErrTooLarge",
 		ErrCorrupt: "ErrCorrupt", ErrInvalid: "ErrInvalid", ErrIO: "ErrIO",
 		ErrCode(999): "ErrCode(999)",

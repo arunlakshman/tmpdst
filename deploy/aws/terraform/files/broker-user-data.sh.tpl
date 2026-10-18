@@ -101,5 +101,11 @@ UNIT
 
 systemctl daemon-reload
 systemctl enable --now manicp.service manibroker.service mb-snapshot.service
+# The broker implements neither CreateTopics nor DescribeConfigs, so
+# kafka-topics.sh cannot create the topic. Create it via the control plane
+# (loopback-only), 6 partitions; the harness only waits for it.
+until curl -sf http://127.0.0.1:8080/healthz >/dev/null; do sleep 2; done
+retry 20 curl -sf -X POST http://127.0.0.1:8080/v1/create-topic -d '{"topic":"bench-'"$RUN_ID"'","partitions":6}'
+
 install_alloy broker DDB_TABLE=$DYNAMO_TABLE
 touch /var/lib/bench-bootstrap.done

@@ -42,7 +42,8 @@ install_alloy() { # install_alloy <role> [extra VAR=value ...]
   env RUN="$RUN_ID" ROLE="$role" OBS_DIR=/opt/manifester-obs ALLOY_VERSION=${alloy_version} \
     SSM_PREFIX=${ssm_prefix} \
     PARAM_PROM_URL=${grafana_url_param} PARAM_PROM_USER=${grafana_user_param} \
-    PARAM_API_KEY=${grafana_api_key_param} PARAM_LOKI_URL=${grafana_loki_url_param} \
+    PARAM_API_KEY=${grafana_api_key_param} \
+    PARAM_PROM_KEY=${grafana_prom_key_param} PARAM_LOKI_KEY=${grafana_loki_key_param} PARAM_LOKI_URL=${grafana_loki_url_param} \
     PARAM_LOKI_USER=${grafana_loki_user_param} S3_BUCKET="$BUCKET" \
     S3_METRICS_FILTER_ID=${metrics_filter_id} "$@" \
     bash /opt/manifester-obs/install-alloy.sh

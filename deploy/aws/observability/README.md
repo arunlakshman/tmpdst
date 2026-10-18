@@ -27,7 +27,9 @@ Under `/manifester-bench/` (the Terraform `allowed_ssm_param_prefix`; SecureStri
 | `grafana/user` | Prometheus instance id (number) |
 | `grafana/loki_url` | `https://logs-prod-XXX.grafana.net/loki/api/v1/push` |
 | `grafana/loki_user` | Loki instance id (number) |
-| `grafana/api_key` | Cloud access policy token with `metrics:write`, `logs:write` |
+| `grafana/prom_api_key` | SecureString, access policy token with `metrics:write` |
+| `grafana/loki_api_key` | SecureString, access policy token with `logs:write` |
+| `grafana/api_key` | optional SecureString: one combined token (`metrics:write` + `logs:write`), used for whichever of the two above is missing |
 | `grafana/url`, `grafana/annotation_token` | optional, read by the benchmark harness only: stack URL (`https://ORG.grafana.net`) and a service-account token (Editor) for run annotations |
 | `aws/ddb_table`, `aws/s3_bucket`, `aws/s3_metrics_filter_id` | broker host only; Terraform passes them as environment variables, so these params are only needed when running the installer by hand (filter default `manifester-bench`) |
 
@@ -36,7 +38,7 @@ Under `/manifester-bench/` (the Terraform `allowed_ssm_param_prefix`; SecureStri
 separate and stay on your workstation (`GRAFANA_URL`, `GRAFANA_API_TOKEN`:
 service account, role Editor).
 
-Terraform user-data syncs this directory to the host (`artifacts/observability/`) and runs `RUN=<run> ROLE=broker|loadgen OBS_DIR=... bash install-alloy.sh`; it also accepts `SSM_PREFIX` and `PARAM_*` overrides. The file `/etc/alloy/alloy.env` holds `RUN_ID HOST_ROLE HOST_NAME AWS_REGION GRAFANA_PROM_URL GRAFANA_PROM_USER GRAFANA_LOKI_URL GRAFANA_LOKI_USER GRAFANA_API_KEY` (+ `DDB_TABLE S3_BUCKET S3_METRICS_FILTER_ID` on the broker). Host metrics come from Alloy's embedded `prometheus.exporter.unix`; there is no separate node_exporter.
+Terraform user-data syncs this directory to the host (`artifacts/observability/`) and runs `RUN=<run> ROLE=broker|loadgen OBS_DIR=... bash install-alloy.sh`; it also accepts `SSM_PREFIX` and `PARAM_*` overrides. The file `/etc/alloy/alloy.env` holds `RUN_ID HOST_ROLE HOST_NAME AWS_REGION GRAFANA_PROM_URL GRAFANA_PROM_USER GRAFANA_LOKI_URL GRAFANA_LOKI_USER GRAFANA_PROM_API_KEY GRAFANA_LOKI_API_KEY` (+ `DDB_TABLE S3_BUCKET S3_METRICS_FILTER_ID` on the broker). Host metrics come from Alloy's embedded `prometheus.exporter.unix`; there is no separate node_exporter.
 The instance role needs `iam-cloudwatch-read.json` (broker host; Terraform attaches it; the SSM statement covers `/manifester-bench/*`) plus `kms:Decrypt` if a CMK encrypts the SecureStrings.
 
 ## CloudWatch: why Alloy's embedded YACE, not a Grafana CloudWatch data source

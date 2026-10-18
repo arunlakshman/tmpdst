@@ -25,7 +25,7 @@ PutItem/UpdateItem/DeleteItem/ConditionCheckItem/GetItem, all of which are grant
 - Terraform >= 1.6, AWS CLI, Go (to build), credentials for the target account.
 - The Session Manager plugin for `aws ssm start-session`.
 - SSM parameters (names are variables, defaults under `/manifester-bench/`; full list and how to get the values in `docs/aws-benchmark-runbook.md`):
-  `grafana/remote_write_url`, `grafana/user`, `grafana/api_key` (SecureString), `grafana/loki_url`, `grafana/loki_user`; optional `grafana/url`, `grafana/annotation_token` (SecureString) for run annotations.
+  `grafana/remote_write_url`, `grafana/user`, `grafana/prom_api_key` and `grafana/loki_api_key` (SecureString; a single combined `grafana/api_key` is accepted as fallback), `grafana/loki_url`, `grafana/loki_user`; optional `grafana/url`, `grafana/annotation_token` (SecureString) for run annotations.
   (SecureString with the default `aws/ssm` key; a customer key needs its own kms:Decrypt grant.)
 
 ## Apply

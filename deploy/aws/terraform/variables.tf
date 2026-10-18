@@ -101,9 +101,21 @@ variable "grafana_user_param" {
 }
 
 variable "grafana_api_key_param" {
-  description = "SSM parameter NAME holding the Grafana Cloud API token (SecureString)."
+  description = "SSM parameter NAME of an optional single combined Grafana Cloud token (SecureString), used only for whichever of the two keys below is missing."
   type        = string
   default     = "/manifester-bench/grafana/api_key"
+}
+
+variable "grafana_prom_api_key_param" {
+  description = "SSM parameter NAME holding the metrics:write token (SecureString)."
+  type        = string
+  default     = "/manifester-bench/grafana/prom_api_key"
+}
+
+variable "grafana_loki_api_key_param" {
+  description = "SSM parameter NAME holding the logs:write token (SecureString)."
+  type        = string
+  default     = "/manifester-bench/grafana/loki_api_key"
 }
 
 variable "grafana_loki_url_param" {

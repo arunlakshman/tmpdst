@@ -24,6 +24,8 @@ locals {
     var.grafana_remote_write_url_param,
     var.grafana_user_param,
     var.grafana_api_key_param,
+    var.grafana_prom_api_key_param,
+    var.grafana_loki_api_key_param,
     var.grafana_loki_url_param,
     var.grafana_loki_user_param,
   ]

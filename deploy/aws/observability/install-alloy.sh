@@ -11,14 +11,16 @@
 #   OBS_DIR   directory holding alloy/ (default: this script's directory)
 #   ALLOY_VERSION  rpm version to pin (default below)
 #   SSM_PREFIX     default /manifester-bench (the Terraform allowed_ssm_param_prefix, no trailing /)
-#   PARAM_PROM_URL PARAM_PROM_USER PARAM_API_KEY PARAM_LOKI_URL PARAM_LOKI_USER
-#                  full SSM names; defaults $SSM_PREFIX/grafana/{remote_write_url,user,api_key,loki_url,loki_user}
+#   PARAM_PROM_URL PARAM_PROM_USER PARAM_PROM_KEY PARAM_LOKI_URL PARAM_LOKI_USER PARAM_LOKI_KEY PARAM_API_KEY
+#                  full SSM names; defaults $SSM_PREFIX/grafana/{remote_write_url,user,prom_api_key,loki_url,loki_user,loki_api_key}
+#                  PARAM_API_KEY (grafana/api_key) is a fallback used for whichever key is missing
 #   DDB_TABLE S3_BUCKET S3_METRICS_FILTER_ID  broker only; when unset read from SSM
 #                  $SSM_PREFIX/aws/{ddb_table,s3_bucket,s3_metrics_filter_id} (filter default manifester-bench)
 #   AWS_REGION     default: instance region from IMDS
 #
 # SSM parameters read with the instance role (SecureString for secrets):
-#   grafana/remote_write_url  user  loki_url  loki_user  api_key   (under $SSM_PREFIX)
+#   grafana/remote_write_url  user  prom_api_key  loki_url  loki_user  loki_api_key   (under $SSM_PREFIX;
+#   a single combined api_key works when the two keys are absent)
 # Instance role needs ssm:GetParametersByPath on $SSM_PREFIX/* and kms:Decrypt
 # on the key if SecureStrings use a CMK.
 set -euo pipefail
@@ -31,7 +33,9 @@ SSM_PREFIX="${SSM_PREFIX:-/manifester-bench}"
 SSM_PREFIX="${SSM_PREFIX%/}"
 PARAM_PROM_URL="${PARAM_PROM_URL:-$SSM_PREFIX/grafana/remote_write_url}"
 PARAM_PROM_USER="${PARAM_PROM_USER:-$SSM_PREFIX/grafana/user}"
-PARAM_API_KEY="${PARAM_API_KEY:-$SSM_PREFIX/grafana/api_key}"
+PARAM_PROM_KEY="${PARAM_PROM_KEY:-$SSM_PREFIX/grafana/prom_api_key}"
+PARAM_LOKI_KEY="${PARAM_LOKI_KEY:-$SSM_PREFIX/grafana/loki_api_key}"
+PARAM_API_KEY="${PARAM_API_KEY:-$SSM_PREFIX/grafana/api_key}" # combined fallback
 PARAM_LOKI_URL="${PARAM_LOKI_URL:-$SSM_PREFIX/grafana/loki_url}"
 PARAM_LOKI_USER="${PARAM_LOKI_USER:-$SSM_PREFIX/grafana/loki_user}"
 OBS_DIR="${OBS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
@@ -84,7 +88,10 @@ prom_url=$(ssm "$PARAM_PROM_URL")
 prom_user=$(ssm "$PARAM_PROM_USER")
 loki_url=$(ssm "$PARAM_LOKI_URL")
 loki_user=$(ssm "$PARAM_LOKI_USER")
-api_key=$(ssm "$PARAM_API_KEY")
+fallback_key=$(ssm "$PARAM_API_KEY" "")
+prom_key=$(ssm "$PARAM_PROM_KEY" "$fallback_key")
+loki_key=$(ssm "$PARAM_LOKI_KEY" "$fallback_key")
+[ -n "$prom_key" ] && [ -n "$loki_key" ] || { echo "no Grafana API key: need $PARAM_PROM_KEY and $PARAM_LOKI_KEY, or $PARAM_API_KEY" >&2; exit 1; }
 if [ "$ROLE" = broker ]; then
   ddb_table=${DDB_TABLE:-$(ssm "$SSM_PREFIX/aws/ddb_table")}
   s3_bucket=${S3_BUCKET:-$(ssm "$SSM_PREFIX/aws/s3_bucket")}
@@ -101,7 +108,8 @@ tmp=$(mktemp /etc/alloy/alloy.env.XXXXXX)
   echo "GRAFANA_PROM_USER=$prom_user"
   echo "GRAFANA_LOKI_URL=$loki_url"
   echo "GRAFANA_LOKI_USER=$loki_user"
-  echo "GRAFANA_API_KEY=$api_key"
+  echo "GRAFANA_PROM_API_KEY=$prom_key"
+  echo "GRAFANA_LOKI_API_KEY=$loki_key"
   if [ "$ROLE" = broker ]; then
     echo "DDB_TABLE=$ddb_table"
     echo "S3_BUCKET=$s3_bucket"

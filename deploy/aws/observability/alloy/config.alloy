@@ -7,7 +7,9 @@
 //   GRAFANA_PROM_USER  numeric Prometheus instance id
 //   GRAFANA_LOKI_URL   e.g. https://logs-prod-XXX.grafana.net/loki/api/v1/push
 //   GRAFANA_LOKI_USER  numeric Loki instance id
-//   GRAFANA_API_KEY    Cloud access policy token (metrics:write, logs:write)
+//   GRAFANA_PROM_API_KEY  Cloud access policy token with metrics:write
+//   GRAFANA_LOKI_API_KEY  Cloud access policy token with logs:write
+//   (install-alloy.sh fills both with one combined token when only api_key exists)
 
 // ---- metrics out -----------------------------------------------------------
 
@@ -21,7 +23,7 @@ prometheus.remote_write "cloud" {
 
 		basic_auth {
 			username = sys.env("GRAFANA_PROM_USER")
-			password = sys.env("GRAFANA_API_KEY")
+			password = sys.env("GRAFANA_PROM_API_KEY")
 		}
 
 		queue_config {
@@ -76,7 +78,7 @@ loki.write "cloud" {
 
 		basic_auth {
 			username = sys.env("GRAFANA_LOKI_USER")
-			password = sys.env("GRAFANA_API_KEY")
+			password = sys.env("GRAFANA_LOKI_API_KEY")
 		}
 	}
 }

@@ -8,6 +8,8 @@ locals {
     grafana_url_param       = var.grafana_remote_write_url_param
     grafana_user_param      = var.grafana_user_param
     grafana_api_key_param   = var.grafana_api_key_param
+    grafana_prom_key_param  = var.grafana_prom_api_key_param
+    grafana_loki_key_param  = var.grafana_loki_api_key_param
     grafana_loki_url_param  = var.grafana_loki_url_param
     grafana_loki_user_param = var.grafana_loki_user_param
     ssm_prefix              = trimsuffix(var.allowed_ssm_param_prefix, "/")

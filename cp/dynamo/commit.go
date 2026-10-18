@@ -46,10 +46,42 @@ func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.
 
 func (s *Store) commitOnce(ctx context.Context, op core.CommitSegment) (resp core.CommitSegmentResp, code core.ErrCode, retry bool, err error) {
 	t0 := time.Now()
+	// One read round trip (BatchGetItem, consistent) covers the segment item
+	// (replay), the fence, the producer-ID counter and every item the batches
+	// touch. The write transaction's conditions pin what the decision relied
+	// on, so the reads need not be atomic with each other.
+	wellFormed, hasProducer := op.SegmentKey != "" && len(op.Batches) > 0, false
+	for _, b := range op.Batches {
+		if b.Records <= 0 || b.TP.Topic == "" || b.TP.Partition < 0 || b.PEpoch < 0 || b.BaseSeq < 0 {
+			wellFormed = false
+		}
+		hasProducer = hasProducer || b.Producer != core.NoProducer
+	}
+	var got map[string]item
+	if !wellFormed {
+		// Keys may be unrepresentable (empty topic); only replay can still win.
+		it, err := s.getItem(ctx, segKey(op.SegmentKey))
+		if err != nil {
+			return resp, 0, false, err
+		}
+		got = map[string]item{}
+		if it != nil {
+			got[keyID(segKey(op.SegmentKey))] = it
+		}
+	} else {
+		keys := []item{segKey(op.SegmentKey), nodeKey(op.Owner.Node)}
+		if hasProducer {
+			keys = append(keys, pidKey())
+		}
+		keys = append(keys, snapshotKeys(op.Batches)...)
+		var err error
+		if got, err = s.batchGet(ctx, dedupe(keys)); err != nil {
+			s.Obs.Prep("reads", time.Since(t0))
+			return resp, 0, false, err
+		}
+	}
 	// 1. Already committed: replay or conflict, whatever the epoch says now.
-	if it, err := s.getItem(ctx, segKey(op.SegmentKey)); err != nil {
-		return resp, 0, false, err
-	} else if it != nil {
+	if it := lookupKey(got, segKey(op.SegmentKey)); it != nil {
 		var sb segBlob
 		if err := json.Unmarshal(getBlob(it, "blob"), &sb); err != nil {
 			return resp, 0, false, fmt.Errorf("dynamo: corrupt segment %q: %w", op.SegmentKey, err)
@@ -67,22 +99,11 @@ func (s *Store) commitOnce(ctx context.Context, op core.CommitSegment) (resp cor
 		return resp, core.OK, false, nil
 	}
 	// 2. Malformed (producer IDs are checked against the allocation counter).
-	if op.SegmentKey == "" || len(op.Batches) == 0 {
+	if !wellFormed {
 		return resp, core.ErrInvalid, false, nil
 	}
-	hasProducer := false
-	for _, b := range op.Batches {
-		if b.Records <= 0 || b.TP.Topic == "" || b.TP.Partition < 0 || b.PEpoch < 0 || b.BaseSeq < 0 {
-			return resp, core.ErrInvalid, false, nil
-		}
-		hasProducer = hasProducer || b.Producer != core.NoProducer
-	}
 	if hasProducer {
-		it, err := s.getItem(ctx, pidKey())
-		if err != nil {
-			return resp, 0, false, err
-		}
-		n, _ := getNum(it, "n")
+		n, _ := getNum(lookupKey(got, pidKey()), "n")
 		next := core.ProducerID(firstProducer + n)
 		for _, b := range op.Batches {
 			if b.Producer != core.NoProducer && (b.Producer < firstProducer || b.Producer >= next) {
@@ -91,15 +112,11 @@ func (s *Store) commitOnce(ctx context.Context, op core.CommitSegment) (resp cor
 		}
 	}
 	// 3. Fencing.
-	nit, err := s.getItem(ctx, nodeKey(op.Owner.Node))
-	if err != nil {
-		return resp, 0, false, err
-	}
-	if cur, ok := getNum(nit, "epoch"); !ok || uint64(cur) != uint64(op.Epoch) {
+	if cur, ok := getNum(lookupKey(got, nodeKey(op.Owner.Node)), "epoch"); !ok || uint64(cur) != uint64(op.Epoch) {
 		return resp, core.ErrFenced, false, nil
 	}
-	// 4. Read, decide, commit.
-	snap, err := s.snapshot(ctx, op.Batches)
+	// 4. Decide and commit.
+	snap, err := buildSnapshot(got, op.Batches)
 	s.Obs.Prep("reads", time.Since(t0))
 	if err != nil {
 		return resp, 0, false, err
@@ -137,28 +154,34 @@ func fromWireBatches(bs []cp.Batch) []core.PendingBatch {
 	return out
 }
 
-// snapshot reads the HWM, producer state and topic items the batches touch.
-func (s *Store) snapshot(ctx context.Context, batches []core.PendingBatch) (*snapshot, error) {
-	var keys []item
+func keyID(k item) string { return getStr(k, "pk") + "\x00" + getStr(k, "sk") }
+
+func dedupe(keys []item) []item {
 	seen := map[string]bool{}
-	add := func(k item) {
-		id := getStr(k, "pk") + "\x00" + getStr(k, "sk")
-		if !seen[id] {
+	out := keys[:0:0]
+	for _, k := range keys {
+		if id := keyID(k); !seen[id] {
 			seen[id] = true
-			keys = append(keys, k)
+			out = append(out, k)
 		}
 	}
+	return out
+}
+
+// snapshotKeys lists the HWM, producer state and topic items the batches touch.
+func snapshotKeys(batches []core.PendingBatch) []item {
+	var keys []item
 	for _, b := range batches {
-		add(hwmKey(b.TP))
-		add(topicKey(b.TP.Topic))
+		keys = append(keys, hwmKey(b.TP), topicKey(b.TP.Topic))
 		if b.Producer != core.NoProducer {
-			add(stateKey(skey{b.TP, b.Producer}))
+			keys = append(keys, stateKey(skey{b.TP, b.Producer}))
 		}
 	}
-	got, err := s.batchGet(ctx, keys)
-	if err != nil {
-		return nil, err
-	}
+	return keys
+}
+
+// buildSnapshot extracts the decision inputs from the fetched items.
+func buildSnapshot(got map[string]item, batches []core.PendingBatch) (*snapshot, error) {
 	snap := &snapshot{hwm: map[core.TopicPartition]int64{}, state: map[skey]*pstate{}, topics: map[string]int32{}, ver: map[skey]int64{}}
 	for _, b := range batches {
 		if it := lookupKey(got, hwmKey(b.TP)); it != nil {

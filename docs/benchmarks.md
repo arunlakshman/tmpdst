@@ -287,6 +287,14 @@ Reading:
   whole commit measured directly without SeaweedFS competing for the same cores.
 - Cheap lever: the three serial GetItems (segment key, node epoch, and the producer counter) plus the BatchGet cost
   about 32 to 38 ms before the transaction starts; they could be one BatchGet (or overlapped), saving about 15 to 20 ms of ~100.
+- Tried the lever: `commitOnce` now does one consistent BatchGetItem (segment, node, producer counter, HWM, topic and
+  producer-state keys; split at 100 keys, UnprocessedKeys retried as before) instead of 3 GetItems + 1 BatchGet; malformed
+  requests still read only the segment key. The write transaction's conditions are unchanged. Result on one 30 s run each
+  (setup C, 8 clients, 1 KB, same machine): `commit_prep{reads}` 47.2 ms before, 44.2 ms after; the single BatchGetItem
+  took 43.5 ms against 21.4 ms for the old smaller one, and 3 GetItems at about 8 ms were removed. So ExtendDB's
+  BatchGetItem cost grows with the number of keys, and merging the reads saved only about 3 ms (within run-to-run noise;
+  the commit avg was 137 vs 151 ms, throughput 51.5k vs 44.4k rec/s, both noise-dominated). On real DynamoDB the round-trip
+  saving should be larger; against ExtendDB it is not measurable here.
 - With larger segments (11.9 MB, not 5 MB), the commit is no longer saturated: summed commit seconds were about 0.55 to 0.67 of
   wall time. Two runs only; the earlier slow state was not reproduced, so a repeat with `reuse` of the old database would
   confirm that state, not the code, was the cause.

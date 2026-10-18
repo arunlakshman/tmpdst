@@ -18,7 +18,7 @@ Known limits to keep in mind before reading numbers:
 
 ## 1. Prerequisites
 
-- AWS credentials for the target account (region `us-west-2` in the examples), AWS CLI v2, the Session Manager plugin,
+- AWS credentials for the target account (region `ap-south-2` in the examples), AWS CLI v2, the Session Manager plugin,
   Terraform >= 1.6, Go, Python 3, `jq`.
 - A Grafana Cloud stack (examples: `https://manifesterio.grafana.net`). Known non-secret values:
 
@@ -42,7 +42,7 @@ Never commit tokens; they live only in SSM.
 ### SSM parameters (create once per account/region, before apply)
 
 ```
-R=us-west-2; P=/manifester-bench/grafana
+R=ap-south-2; P=/manifester-bench/grafana
 aws ssm put-parameter --region $R --name $P/remote_write_url --type String       --value 'https://prometheus-prod-36-prod-us-west-0.grafana.net/api/prom/push'
 aws ssm put-parameter --region $R --name $P/user             --type String       --value 2644751
 aws ssm put-parameter --region $R --name $P/prom_api_key     --type SecureString --value "$PROM_TOKEN"
@@ -59,7 +59,7 @@ Use `read -rs PROM_TOKEN` style prompts so tokens stay out of shell history.
 
 ```
 cd deploy/aws/terraform
-cp example.tfvars my.tfvars    # region=us-west-2, az=us-west-2a, run_id, owner, budget_usd, budget_email
+cp example.tfvars my.tfvars    # region=ap-south-2, az=ap-south-2a, run_id, owner, budget_usd, budget_email
 terraform init && terraform plan -var-file=my.tfvars
 terraform apply -var-file=my.tfvars          # you run this; the S3 request-metrics config exists from here on
 ```
@@ -134,7 +134,7 @@ Options: `--reps --duration --gap --warmup --cells --rate --topic --tool`.
 
 On the workstation:
 ```
-deploy/aws/bench/collect-results.sh $(cd deploy/aws/terraform && terraform output -raw bucket) <run_id> us-west-2
+deploy/aws/bench/collect-results.sh $(cd deploy/aws/terraform && terraform output -raw bucket) <run_id> ap-south-2
 ```
 Writes `./results/<run_id>/` (loadgen/, metrics/, manifests, `build-git-sha.txt`, `terraform-outputs.json`) and `summary.md`: per cell and repetition client
 throughput and latency, broker segment put/queue/commit/ack averages, S3 and DynamoDB throttles/errors/retries,

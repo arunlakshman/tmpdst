@@ -155,9 +155,9 @@ run_tool() {
     if [ "$RATE" -gt 0 ]; then nrec=$((RATE * secs)); limit=$((secs + 60)); fi
     for i in $(seq 1 "$clients"); do
       # shellcheck disable=SC2086 # PRODUCER_PROPS is a word list on purpose
-      timeout -s INT -k 10 "$limit" "$(kcmd kafka-producer-perf-test.sh)" --topic "$TOPIC" --num-records "$nrec" \
+      KAFKA_HEAP_OPTS="${KAFKA_HEAP_OPTS:--Xmx384m}" timeout -s INT -k 10 "$limit" "$(kcmd kafka-producer-perf-test.sh)" --topic "$TOPIC" --num-records "$nrec" \
         --record-size "$size" --throughput "$RATE" \
-        --producer-props "bootstrap.servers=$BOOTSTRAP" acks=all ${PRODUCER_PROPS:-} \
+        --producer-props "bootstrap.servers=$BOOTSTRAP" acks=all ${PRODUCER_PROPS:-batch.size=262144 linger.ms=20 buffer.memory=100663296} \
         >"$prefix.c$i.out" 2>&1 &
       pids+=("$!")
     done

@@ -62,6 +62,7 @@ prometheus.scrape "node" {
 	targets         = discovery.relabel.node.output
 	forward_to      = [prometheus.remote_write.cloud.receiver]
 	scrape_interval = "5s"
+	scrape_timeout  = "4s"
 }
 
 // ---- logs out --------------------------------------------------------------

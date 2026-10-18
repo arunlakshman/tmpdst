@@ -25,4 +25,5 @@ prometheus.scrape "loadgen" {
 	targets         = discovery.relabel.loadgen_targets.output
 	forward_to      = [prometheus.remote_write.cloud.receiver]
 	scrape_interval = "5s"
+	scrape_timeout  = "4s"
 }

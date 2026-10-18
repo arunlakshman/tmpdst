@@ -55,3 +55,14 @@ and franz-go compresses by default. Clients have to set
 - Re-check `kwire`'s Supported version table against the new kmsg.
 
 **Done when:** `scripts/ci-determinism.sh`, `go test ./...` (including `it/`) and a 300-seed campaign pass. Trace hashes may change if kmsg encoding changes; review any re-baseline by hand.
+
+## CP range compaction
+
+**Why:** the DynamoDB commit stores one range item per batch and is limited to 100 items, so a segment is capped at 32 batches (decision 35) however large it could be. A 16 MiB segment of small batches is cut short by the batch cap, not by size.
+
+**Plan:** store one range item per contiguous run of same-partition batches in a segment, so large segments with many small batches are not capped by the 100-item transaction limit. This is a contract change in core/veritas/cp. Idempotence windows must stay per batch.
+
+**Done when:**
+- `MaxSegmentBatches` can be raised well above 32 with the DynamoDB CP.
+- The spec, the sim CP engine (`MaxCommitItems` arithmetic) and `cp/dynamo` agree.
+- `cp/cptest` covers segments with many small batches.

@@ -37,4 +37,9 @@
 // 2 + changed partitions + grown topics + producer states read + assigned
 // batches items, so roughly 30 partitions per segment with idempotent
 // producers and 48 without. The spec has no such limit; brokers must cap.
+// The coupling: broker.Config.MaxSegmentPartitions (24) and MaxSegmentBatches
+// (32) bound a segment to 2 + 24 + 32 + 32 = 90 items plus one per grown topic,
+// under 100. Raising either needs this limit raised or range items compacted
+// (docs/TODO.md). A refusal (ErrTooLarge) is not retried by the broker, and the
+// sim CP engine refuses the same commits (sim.ControlPlaneFaults.MaxCommitItems).
 package cp

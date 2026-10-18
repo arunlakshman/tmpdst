@@ -161,3 +161,14 @@ MaxSegmentPartitions 24, MaxAttempts 6, MaxBufferedBytes 64 MiB (resume at 32 Mi
 - Run-to-run variance and the kgo in-flight effect: repeat each cell 3x, add `-max-inflight 5` runs.
 - p99 1.1 s at C c1 (versus p50 136 ms): a few slow S3 or commit calls (SeaweedFS volume growth or ExtendDB
   SQLite lock waits are guesses); not explained here.
+
+## Settings after this change
+
+The runs above used the old defaults: `BatchWindow` 50 ms, `MaxSegmentBytes` 4 MiB, `MaxBufferedBytes` 64 MiB.
+Since decision 35 a segment seals at 16 MiB or 200 ms after its first batch (fixed timer), or at 24 partitions or
+32 batches; the produce buffer is sized from machine memory (`clamp(memory/16, 128 MiB, 1 GiB)`). All of it is set
+by flags (`-segment-bytes 4MiB -segment-window 50ms` reproduces the old segment rule). Not re-measured: no
+benchmark was re-run for this change. Expect, to be checked: a 200 ms window adds up to 150 ms of latency at low
+load (idea 4 above is not implemented: there is still no early seal when idle), and 16 MiB segments change the
+PUT size (the PUT timeout now grows with the body). Items 1 to 3 above still apply.
+

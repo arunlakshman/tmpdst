@@ -45,77 +45,26 @@ func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.
 	return core.CommitSegmentResp{}, 0, fmt.Errorf("%w: commit lost the race %d times", cp.ErrUnavailable, maxAttempts)
 }
 
+// commitOnce is one attempt: read, check the spec's rules in order, decide,
+// write one transaction. retry means the transaction lost a race (or the
+// service was unavailable) and the caller should read again.
 func (s *Store) commitOnce(ctx context.Context, op core.CommitSegment) (resp core.CommitSegmentResp, code core.ErrCode, retry bool, err error) {
 	cpobs.FromContext(ctx).SetSegment(op.SegmentKey)
 	t0 := time.Now()
-	// One read round trip (BatchGetItem, consistent) covers the segment item
-	// (replay), the fence, the producer-ID counter and every item the batches
-	// touch. The write transaction's conditions pin what the decision relied
-	// on, so the reads need not be atomic with each other.
-	wellFormed, hasProducer := op.SegmentKey != "" && len(op.Batches) > 0, false
-	for _, b := range op.Batches {
-		if b.Records <= 0 || b.TP.Topic == "" || b.TP.Partition < 0 || b.PEpoch < 0 || b.BaseSeq < 0 {
-			wellFormed = false
-		}
-		hasProducer = hasProducer || b.Producer != core.NoProducer
-	}
-	var got map[string]item
-	if !wellFormed {
-		// Keys may be unrepresentable (empty topic); only replay can still win.
-		it, err := s.getItem(ctx, segKey(op.SegmentKey))
-		if err != nil {
-			return resp, 0, false, err
-		}
-		got = map[string]item{}
-		if it != nil {
-			got[keyID(segKey(op.SegmentKey))] = it
-		}
-	} else {
-		keys := []item{segKey(op.SegmentKey), nodeKey(op.Owner.Node)}
-		if hasProducer {
-			keys = append(keys, pidKey())
-		}
-		keys = append(keys, snapshotKeys(op.Batches)...)
-		var err error
-		if got, err = s.batchGet(ctx, dedupe(keys)); err != nil {
-			s.Obs.Prep("reads", time.Since(t0))
-			return resp, 0, false, err
-		}
+	wellFormed, hasProducer := inspect(op)
+	got, err := s.readSet(ctx, op, wellFormed, hasProducer)
+	if err != nil {
+		s.Obs.Prep("reads", time.Since(t0))
+		return resp, 0, false, err
 	}
 	// 1. Already committed: replay or conflict, whatever the epoch says now.
 	if it := lookupKey(got, segKey(op.SegmentKey)); it != nil {
-		var sb segBlob
-		if err := json.Unmarshal(getBlob(it, "blob"), &sb); err != nil {
-			return resp, 0, false, fmt.Errorf("dynamo: corrupt segment %q: %w", op.SegmentKey, err)
-		}
-		if !slices.Equal(fromWireBatches(sb.Batches), op.Batches) {
-			return resp, core.ErrConflict, false, nil
-		}
-		for _, r := range sb.Ranges {
-			br, err := cp.RangeFromWire(r)
-			if err != nil {
-				return resp, 0, false, err
-			}
-			resp.Assigned = append(resp.Assigned, br)
-		}
-		return resp, core.OK, false, nil
+		resp, code, err = replay(op, it)
+		return resp, code, false, err
 	}
-	// 2. Malformed (producer IDs are checked against the allocation counter).
-	if !wellFormed {
-		return resp, core.ErrInvalid, false, nil
-	}
-	if hasProducer {
-		n, _ := getNum(lookupKey(got, pidKey()), "n")
-		next := core.ProducerID(firstProducer + n)
-		for _, b := range op.Batches {
-			if b.Producer != core.NoProducer && (b.Producer < firstProducer || b.Producer >= next) {
-				return resp, core.ErrInvalid, false, nil
-			}
-		}
-	}
-	// 3. Fencing.
-	if cur, ok := getNum(lookupKey(got, nodeKey(op.Owner.Node)), "epoch"); !ok || uint64(cur) != uint64(op.Epoch) {
-		return resp, core.ErrFenced, false, nil
+	// 2. Malformed, 3. fencing.
+	if code = precheck(op, got, wellFormed, hasProducer); code != core.OK {
+		return resp, code, false, nil
 	}
 	// 4. Decide and commit.
 	snap, err := buildSnapshot(got, op.Batches)
@@ -130,6 +79,99 @@ func (s *Store) commitOnce(ctx context.Context, op core.CommitSegment) (resp cor
 	if code != core.OK {
 		return resp, code, false, nil
 	}
+	if retry, err = s.writeTx(ctx, op, items); retry || err != nil {
+		return resp, 0, retry, err
+	}
+	return core.CommitSegmentResp{Assigned: d.ranges}, core.OK, false, nil
+}
+
+// inspect reports whether the op is well formed (keys representable, batches
+// sane) and whether any batch is idempotent (reads the producer counter).
+func inspect(op core.CommitSegment) (wellFormed, hasProducer bool) {
+	wellFormed = op.SegmentKey != "" && len(op.Batches) > 0
+	for _, b := range op.Batches {
+		if b.Records <= 0 || b.TP.Topic == "" || b.TP.Partition < 0 || b.PEpoch < 0 || b.BaseSeq < 0 {
+			wellFormed = false
+		}
+		hasProducer = hasProducer || b.Producer != core.NoProducer
+	}
+	return
+}
+
+// readSet is the one read round trip (BatchGetItem, consistent) that covers
+// the segment item (replay), the fence, the producer-ID counter and every item
+// the batches touch. The write transaction's conditions pin what the decision
+// relied on, so the reads need not be atomic with each other. A malformed op
+// reads the segment item only: its keys may be unrepresentable (empty topic)
+// and only replay can still win.
+func (s *Store) readSet(ctx context.Context, op core.CommitSegment, wellFormed, hasProducer bool) (map[string]item, error) {
+	if !wellFormed {
+		it, err := s.getItem(ctx, segKey(op.SegmentKey))
+		if err != nil {
+			return nil, err
+		}
+		got := map[string]item{}
+		if it != nil {
+			got[keyID(segKey(op.SegmentKey))] = it
+		}
+		return got, nil
+	}
+	keys := []item{segKey(op.SegmentKey), nodeKey(op.Owner.Node)}
+	if hasProducer {
+		keys = append(keys, pidKey())
+	}
+	keys = append(keys, snapshotKeys(op.Batches)...)
+	return s.batchGet(ctx, dedupe(keys))
+}
+
+// replay answers a segment that is already committed: the stored answer if the
+// request is the same, ErrConflict if not.
+func replay(op core.CommitSegment, it item) (resp core.CommitSegmentResp, code core.ErrCode, err error) {
+	var sb segBlob
+	if err := json.Unmarshal(getBlob(it, "blob"), &sb); err != nil {
+		return resp, 0, fmt.Errorf("dynamo: corrupt segment %q: %w", op.SegmentKey, err)
+	}
+	if !slices.Equal(fromWireBatches(sb.Batches), op.Batches) {
+		return resp, core.ErrConflict, nil
+	}
+	for _, r := range sb.Ranges {
+		br, err := cp.RangeFromWire(r)
+		if err != nil {
+			return resp, 0, err
+		}
+		resp.Assigned = append(resp.Assigned, br)
+	}
+	return resp, core.OK, nil
+}
+
+// precheck applies rules 2 (malformed, producer IDs against the allocation
+// counter) and 3 (fencing); core.OK means go on.
+func precheck(op core.CommitSegment, got map[string]item, wellFormed, hasProducer bool) core.ErrCode {
+	if !wellFormed || (hasProducer && !producersKnown(op.Batches, got)) {
+		return core.ErrInvalid
+	}
+	if cur, ok := getNum(lookupKey(got, nodeKey(op.Owner.Node)), "epoch"); !ok || uint64(cur) != uint64(op.Epoch) {
+		return core.ErrFenced
+	}
+	return core.OK
+}
+
+// producersKnown: every producer ID was handed out by InitProducer.
+func producersKnown(batches []core.PendingBatch, got map[string]item) bool {
+	n, _ := getNum(lookupKey(got, pidKey()), "n")
+	next := core.ProducerID(firstProducer + n)
+	for _, b := range batches {
+		if b.Producer != core.NoProducer && (b.Producer < firstProducer || b.Producer >= next) {
+			return false
+		}
+	}
+	return true
+}
+
+// writeTx sends the commit transaction. retry: it lost a race
+// (TransactionCanceled) or the service was unavailable; any other error is
+// returned.
+func (s *Store) writeTx(ctx context.Context, op core.CommitSegment, items []types.TransactWriteItem) (retry bool, err error) {
 	t2 := time.Now()
 	tout, err := s.db.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: items,
 		ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal})
@@ -138,25 +180,31 @@ func (s *Store) commitOnce(ctx context.Context, op core.CommitSegment) (resp cor
 		cc = tout.ConsumedCapacity
 	}
 	s.Obs.CallCtx(ctx, "TransactWriteItems", t2, cc)
-	if err != nil {
-		var tc *types.TransactionCanceledException
-		if errors.As(err, &tc) {
-			codes, detail := cancelReasons(tc, items)
-			s.Obs.RetryCtx(ctx, "commit", "transaction_canceled", codes)
-			if s.Obs != nil {
-				s.Obs.Logger().Warn("commit transaction canceled", "event", "commit_txn_canceled", "segment", op.SegmentKey,
-					"items", len(items), "reasons", detail, "err", err.Error())
-			}
-			return resp, 0, true, nil
-		}
-		if errors.Is(infra(err), cp.ErrUnavailable) && !errors.Is(err, context.Canceled) {
-			s.Obs.RetryCtx(ctx, "commit", "unavailable", nil)
-			s.note(ctx, "TransactWriteItems", err)
-			return resp, 0, true, nil
-		}
-		return resp, 0, false, err
+	if err == nil {
+		return false, nil
 	}
-	return core.CommitSegmentResp{Assigned: d.ranges}, core.OK, false, nil
+	var tc *types.TransactionCanceledException
+	if errors.As(err, &tc) {
+		s.noteCanceled(ctx, op, items, tc, err)
+		return true, nil
+	}
+	if errors.Is(infra(err), cp.ErrUnavailable) && !errors.Is(err, context.Canceled) {
+		s.Obs.RetryCtx(ctx, "commit", "unavailable", nil)
+		s.note(ctx, "TransactWriteItems", err)
+		return true, nil
+	}
+	return false, err
+}
+
+// noteCanceled records a lost race: the retry metric with the per-item codes
+// and a WARN line with the first few failing items.
+func (s *Store) noteCanceled(ctx context.Context, op core.CommitSegment, items []types.TransactWriteItem, tc *types.TransactionCanceledException, err error) {
+	codes, detail := cancelReasons(tc, items)
+	s.Obs.RetryCtx(ctx, "commit", "transaction_canceled", codes)
+	if s.Obs != nil {
+		s.Obs.Logger().Warn("commit transaction canceled", "event", "commit_txn_canceled", "segment", op.SegmentKey,
+			"items", len(items), "reasons", detail, "err", err.Error())
+	}
 }
 
 // cancelReasons lists the codes of the items that did not commit and, for the
@@ -245,12 +293,9 @@ func buildSnapshot(got map[string]item, batches []core.PendingBatch) (*snapshot,
 		}
 		k := skey{b.TP, b.Producer}
 		if it := lookupKey(got, stateKey(k)); it != nil {
-			st := &pstate{}
-			pe, _ := getNum(it, "pepoch")
-			st.PEpoch = int16(pe)
-			st.Next, _ = getNum(it, "nxt")
-			if err := json.Unmarshal(getBlob(it, "win"), &st.Window); err != nil {
-				return nil, fmt.Errorf("dynamo: corrupt producer state %v: %w", k, err)
+			st, err := decodeState(k, it)
+			if err != nil {
+				return nil, err
 			}
 			snap.state[k] = st
 			snap.ver[k], _ = getNum(it, "v")
@@ -259,8 +304,41 @@ func buildSnapshot(got map[string]item, batches []core.PendingBatch) (*snapshot,
 	return snap, nil
 }
 
+// decodeState reads a producer state item.
+func decodeState(k skey, it item) (*pstate, error) {
+	st := &pstate{}
+	pe, _ := getNum(it, "pepoch")
+	st.PEpoch = int16(pe)
+	st.Next, _ = getNum(it, "nxt")
+	if err := json.Unmarshal(getBlob(it, "win"), &st.Window); err != nil {
+		return nil, fmt.Errorf("dynamo: corrupt producer state %v: %w", k, err)
+	}
+	return st, nil
+}
+
 // txItems builds the commit transaction, or ErrTooLarge.
 func (s *Store) txItems(op core.CommitSegment, snap *snapshot, d *decision) ([]types.TransactWriteItem, core.ErrCode) {
+	items, ok := s.fenceAndSegment(op, d)
+	if !ok {
+		return nil, core.ErrTooLarge
+	}
+	items = append(items, s.hwmItems(snap, d)...)
+	items = append(items, s.topicItems(d)...)
+	items = append(items, s.stateItems(op, snap, d)...)
+	runs, ok := s.runItems(d)
+	if !ok {
+		return nil, core.ErrTooLarge
+	}
+	items = append(items, runs...)
+	if len(items) > MaxTxItems {
+		return nil, core.ErrTooLarge
+	}
+	return items, core.OK
+}
+
+// fenceAndSegment: the epoch check and the segment item (request and answer).
+// ok is false if the segment blob is too large.
+func (s *Store) fenceAndSegment(op core.CommitSegment, d *decision) ([]types.TransactWriteItem, bool) {
 	sb := segBlob{}
 	for _, b := range op.Batches {
 		sb.Batches = append(sb.Batches, cp.BatchToWire(b))
@@ -270,11 +348,10 @@ func (s *Store) txItems(op core.CommitSegment, snap *snapshot, d *decision) ([]t
 	}
 	payload, _ := json.Marshal(sb)
 	if len(payload) > maxBlob {
-		return nil, core.ErrTooLarge
+		return nil, false
 	}
 	t := &s.table
-	// The fence and the segment itself.
-	items := []types.TransactWriteItem{
+	return []types.TransactWriteItem{
 		{ConditionCheck: &types.ConditionCheck{
 			TableName: t, Key: nodeKey(op.Owner.Node),
 			ConditionExpression:       aws.String("epoch = :e"),
@@ -284,9 +361,14 @@ func (s *Store) txItems(op core.CommitSegment, snap *snapshot, d *decision) ([]t
 			TableName: t, Item: merge(segKey(op.SegmentKey), item{"blob": blob(payload)}),
 			ConditionExpression: aws.String("attribute_not_exists(pk)"),
 		}},
-	}
+	}, true
+}
+
+// hwmItems moves each changed high watermark, pinned to the value read.
+func (s *Store) hwmItems(snap *snapshot, d *decision) []types.TransactWriteItem {
+	var items []types.TransactWriteItem
 	for tp, hwm := range d.hwm {
-		u := &types.Update{TableName: t, Key: hwmKey(tp), UpdateExpression: aws.String("SET hwm = :new")}
+		u := &types.Update{TableName: &s.table, Key: hwmKey(tp), UpdateExpression: aws.String("SET hwm = :new")}
 		if old, ok := snap.hwm[tp]; ok {
 			u.ConditionExpression = aws.String("hwm = :old")
 			u.ExpressionAttributeValues = item{":new": num(hwm), ":old": num(old)}
@@ -296,57 +378,83 @@ func (s *Store) txItems(op core.CommitSegment, snap *snapshot, d *decision) ([]t
 		}
 		items = append(items, types.TransactWriteItem{Update: u})
 	}
+	return items
+}
+
+// topicItems grows the topics whose partition count must rise.
+func (s *Store) topicItems(d *decision) []types.TransactWriteItem {
+	var items []types.TransactWriteItem
 	for topic, parts := range d.topics {
 		items = append(items, types.TransactWriteItem{Update: &types.Update{
-			TableName: t, Key: topicKey(topic),
+			TableName: &s.table, Key: topicKey(topic),
 			UpdateExpression:          aws.String("SET parts = :n"),
 			ConditionExpression:       aws.String("attribute_not_exists(parts) OR parts < :n"),
 			ExpressionAttributeValues: item{":n": num(int64(parts))},
 		}})
 	}
+	return items
+}
+
+// stateItems pins every producer state the batches read: updated if the
+// decision changed it, a plain condition check if not (dup or reject), so the
+// answer holds.
+func (s *Store) stateItems(op core.CommitSegment, snap *snapshot, d *decision) []types.TransactWriteItem {
+	var items []types.TransactWriteItem
 	for k, old := range snap.versions(op.Batches) {
-		st, changed := d.state[k]
-		if !changed {
-			// Read but unchanged (dup or reject): pin it so the answer holds.
-			c := &types.ConditionCheck{TableName: t, Key: stateKey(k)}
-			if old < 0 {
-				c.ConditionExpression = aws.String("attribute_not_exists(pk)")
-			} else {
-				c.ConditionExpression = aws.String("v = :v")
-				c.ExpressionAttributeValues = item{":v": num(old)}
-			}
-			items = append(items, types.TransactWriteItem{ConditionCheck: c})
-			continue
-		}
-		win, _ := json.Marshal(st.Window)
-		u := &types.Update{
-			TableName: t, Key: stateKey(k),
-			UpdateExpression: aws.String("SET pepoch = :pe, nxt = :nx, win = :w, v = :v1"),
-			ExpressionAttributeValues: item{
-				":pe": num(int64(st.PEpoch)), ":nx": num(st.Next), ":w": blob(win), ":v1": num(max(old, 0) + 1),
-			},
-		}
-		if old < 0 {
-			u.ConditionExpression = aws.String("attribute_not_exists(pk)")
+		if st, changed := d.state[k]; changed {
+			items = append(items, types.TransactWriteItem{Update: s.stateUpdate(k, st, old)})
 		} else {
-			u.ConditionExpression = aws.String("v = :v0")
-			u.ExpressionAttributeValues[":v0"] = num(old)
+			items = append(items, types.TransactWriteItem{ConditionCheck: s.stateCheck(k, old)})
 		}
-		items = append(items, types.TransactWriteItem{Update: u})
 	}
+	return items
+}
+
+// stateCheck pins an unchanged state at version old (-1: absent).
+func (s *Store) stateCheck(k skey, old int64) *types.ConditionCheck {
+	c := &types.ConditionCheck{TableName: &s.table, Key: stateKey(k)}
+	if old < 0 {
+		c.ConditionExpression = aws.String("attribute_not_exists(pk)")
+	} else {
+		c.ConditionExpression = aws.String("v = :v")
+		c.ExpressionAttributeValues = item{":v": num(old)}
+	}
+	return c
+}
+
+// stateUpdate writes a changed state, conditioned on version old (-1: absent).
+func (s *Store) stateUpdate(k skey, st *pstate, old int64) *types.Update {
+	win, _ := json.Marshal(st.Window)
+	u := &types.Update{
+		TableName: &s.table, Key: stateKey(k),
+		UpdateExpression: aws.String("SET pepoch = :pe, nxt = :nx, win = :w, v = :v1"),
+		ExpressionAttributeValues: item{
+			":pe": num(int64(st.PEpoch)), ":nx": num(st.Next), ":w": blob(win), ":v1": num(max(old, 0) + 1),
+		},
+	}
+	if old < 0 {
+		u.ConditionExpression = aws.String("attribute_not_exists(pk)")
+	} else {
+		u.ConditionExpression = aws.String("v = :v0")
+		u.ExpressionAttributeValues[":v0"] = num(old)
+	}
+	return u
+}
+
+// runItems is one range run item per partition and segment; ok is false if a
+// run is too large.
+func (s *Store) runItems(d *decision) ([]types.TransactWriteItem, bool) {
+	var items []types.TransactWriteItem
 	for _, run := range runsOf(d.ranges) {
 		it := runItem(run[0].TP, run)
 		if len(getBlob(it, "runs")) > maxRun {
-			return nil, core.ErrTooLarge
+			return nil, false
 		}
 		items = append(items, types.TransactWriteItem{Put: &types.Put{
-			TableName: t, Item: it, ConditionExpression: aws.String("attribute_not_exists(pk)"),
+			TableName: &s.table, Item: it, ConditionExpression: aws.String("attribute_not_exists(pk)"),
 		}})
 	}
-	if len(items) > MaxTxItems {
-		return nil, core.ErrTooLarge
-	}
-	return items, core.OK
+	return items, true
 }
 
 func merge(a, b item) item {

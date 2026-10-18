@@ -70,33 +70,40 @@ func (s *Store) CreateTopic(ctx context.Context, name string, partitions int32) 
 }
 
 func (s *Store) DescribeTopics(ctx context.Context, op core.DescribeTopics) (core.DescribeTopicsResp, error) {
-	var resp core.DescribeTopicsResp
-	add := func(it item) {
-		if n, ok := getNum(it, "parts"); ok {
-			resp.Topics = append(resp.Topics, core.TopicInfo{Name: getStr(it, "sk"), Partitions: int32(n)})
-		}
-	}
 	if len(op.Topics) == 0 {
-		items, err := s.query(ctx, &dynamodb.QueryInput{
-			KeyConditionExpression:    aws.String("pk = :p"),
-			ExpressionAttributeValues: item{":p": str("TOPICS")},
-		}, 0)
-		for _, it := range items {
-			add(it)
-		}
-		return resp, err
+		return s.describeAll(ctx)
 	}
-	names := slices.Clone(op.Topics)
-	slices.Sort(names)
-	for i, n := range names {
-		if i > 0 && names[i-1] == n {
-			continue
-		}
+	return s.describeNamed(ctx, op.Topics)
+}
+
+// topicInfo adds the topic item it to resp; items without a count are skipped.
+func topicInfo(resp *core.DescribeTopicsResp, it item) {
+	if n, ok := getNum(it, "parts"); ok {
+		resp.Topics = append(resp.Topics, core.TopicInfo{Name: getStr(it, "sk"), Partitions: int32(n)})
+	}
+}
+
+func (s *Store) describeAll(ctx context.Context) (core.DescribeTopicsResp, error) {
+	var resp core.DescribeTopicsResp
+	items, err := s.query(ctx, &dynamodb.QueryInput{
+		KeyConditionExpression:    aws.String("pk = :p"),
+		ExpressionAttributeValues: item{":p": str("TOPICS")},
+	}, 0)
+	for _, it := range items {
+		topicInfo(&resp, it)
+	}
+	return resp, err
+}
+
+func (s *Store) describeNamed(ctx context.Context, topics []string) (core.DescribeTopicsResp, error) {
+	var resp core.DescribeTopicsResp
+	names := slices.Compact(slices.Sorted(slices.Values(topics)))
+	for _, n := range names {
 		it, err := s.getItem(ctx, topicKey(n))
 		if err != nil {
 			return core.DescribeTopicsResp{}, err
 		}
-		add(it)
+		topicInfo(&resp, it)
 	}
 	return resp, nil
 }
@@ -133,59 +140,88 @@ func (s *Store) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, co
 	if hwm == 0 {
 		return resp, core.OK, nil
 	}
-	pk := partKey("R#", op.TP)
-	// The run holding From, if any, starts at or before it.
-	lower := int64(op.From)
-	prev, err := s.query(ctx, &dynamodb.QueryInput{
-		KeyConditionExpression:    aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
-		ExpressionAttributeValues: item{":p": str(pk), ":lo": str(offSK(0)), ":hi": str(offSK(int64(op.From)))},
-		ScanIndexForward:          aws.Bool(false),
-		Limit:                     aws.Int32(1),
-	}, 1)
+	lower, err := s.runStart(ctx, op)
 	if err != nil {
 		return core.LookupResp{}, 0, err
 	}
-	if len(prev) > 0 {
-		base, _ := getNum(prev[0], "base")
-		if cnt, _ := getNum(prev[0], "cnt"); base+cnt > int64(op.From) {
-			lower = base
-		}
+	resp.Ranges, err = s.scanRuns(ctx, op, lower, hwm)
+	if err != nil {
+		return core.LookupResp{}, 0, err
 	}
-	var bytes int64
+	return resp, core.OK, nil
+}
+
+// runStart is the sort-key base to scan from: the start of the run holding
+// op.From if there is one, else op.From.
+func (s *Store) runStart(ctx context.Context, op core.Lookup) (int64, error) {
+	prev, err := s.query(ctx, &dynamodb.QueryInput{
+		KeyConditionExpression: aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
+		ExpressionAttributeValues: item{":p": str(partKey("R#", op.TP)),
+			":lo": str(offSK(0)), ":hi": str(offSK(int64(op.From)))},
+		ScanIndexForward: aws.Bool(false),
+		Limit:            aws.Int32(1),
+	}, 1)
+	if err != nil || len(prev) == 0 {
+		return int64(op.From), err
+	}
+	base, _ := getNum(prev[0], "base")
+	if cnt, _ := getNum(prev[0], "cnt"); base+cnt > int64(op.From) {
+		return base, nil
+	}
+	return int64(op.From), nil
+}
+
+// scanRuns reads the run items in [lower, hwm) page by page and returns the
+// batches at or after op.From, stopping once op.MaxBytes is reached.
+func (s *Store) scanRuns(ctx context.Context, op core.Lookup, lower, hwm int64) ([]core.BatchRange, error) {
 	q := &dynamodb.QueryInput{
 		TableName: &s.table, ConsistentRead: aws.Bool(true),
-		KeyConditionExpression:    aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
-		ExpressionAttributeValues: item{":p": str(pk), ":lo": str(offSK(lower)), ":hi": str(offSK(hwm - 1))},
+		KeyConditionExpression: aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
+		ExpressionAttributeValues: item{":p": str(partKey("R#", op.TP)),
+			":lo": str(offSK(lower)), ":hi": str(offSK(hwm - 1))},
 	}
 	if op.MaxBytes > 0 {
 		q.Limit = aws.Int32(64)
 	}
+	var res []core.BatchRange
+	var bytes int64
 	for {
 		out, err := s.queryPage(ctx, q)
 		if err != nil {
-			return core.LookupResp{}, 0, infra(err)
+			return nil, infra(err)
 		}
 		for _, it := range out.Items {
 			rs, err := expandRun(op.TP, it)
 			if err != nil {
-				return core.LookupResp{}, 0, err
+				return nil, err
 			}
-			for _, r := range rs {
-				if int64(r.Base)+r.Count <= int64(op.From) {
-					continue // an earlier batch of the run holding From
-				}
-				resp.Ranges = append(resp.Ranges, r)
-				bytes += r.Loc.Len
-				if op.MaxBytes > 0 && bytes >= int64(op.MaxBytes) {
-					return resp, core.OK, nil
-				}
+			var full bool
+			res, bytes, full = takeRuns(res, bytes, rs, op)
+			if full {
+				return res, nil
 			}
 		}
 		if out.LastEvaluatedKey == nil {
-			return resp, core.OK, nil
+			return res, nil
 		}
 		q.ExclusiveStartKey = out.LastEvaluatedKey
 	}
+}
+
+// takeRuns appends the batches of rs that end after op.From; full reports that
+// MaxBytes is reached.
+func takeRuns(res []core.BatchRange, bytes int64, rs []core.BatchRange, op core.Lookup) ([]core.BatchRange, int64, bool) {
+	for _, r := range rs {
+		if int64(r.Base)+r.Count <= int64(op.From) {
+			continue // an earlier batch of the run holding From
+		}
+		res = append(res, r)
+		bytes += r.Loc.Len
+		if op.MaxBytes > 0 && bytes >= int64(op.MaxBytes) {
+			return res, bytes, true
+		}
+	}
+	return res, bytes, false
 }
 
 // queryPage is one measured Query call.

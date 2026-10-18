@@ -33,9 +33,25 @@ const maxBlob = 300 << 10
 
 const maxAttempts = 20
 
+// DB is the part of the AWS DynamoDB client the store calls. *dynamodb.Client
+// implements it; dynamo/fakedb is an in-memory implementation for tests that
+// must not need Docker.
+type DB interface {
+	GetItem(ctx context.Context, in *dynamodb.GetItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
+	BatchGetItem(ctx context.Context, in *dynamodb.BatchGetItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.BatchGetItemOutput, error)
+	Query(ctx context.Context, in *dynamodb.QueryInput, opts ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error)
+	UpdateItem(ctx context.Context, in *dynamodb.UpdateItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error)
+	TransactWriteItems(ctx context.Context, in *dynamodb.TransactWriteItemsInput, opts ...func(*dynamodb.Options)) (*dynamodb.TransactWriteItemsOutput, error)
+	CreateTable(ctx context.Context, in *dynamodb.CreateTableInput, opts ...func(*dynamodb.Options)) (*dynamodb.CreateTableOutput, error)
+	DescribeTable(ctx context.Context, in *dynamodb.DescribeTableInput, opts ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error)
+	DeleteTable(ctx context.Context, in *dynamodb.DeleteTableInput, opts ...func(*dynamodb.Options)) (*dynamodb.DeleteTableOutput, error)
+}
+
+var _ DB = (*dynamodb.Client)(nil)
+
 // Store implements cp.Store. Any number of replicas may share one table.
 type Store struct {
-	db     *dynamodb.Client
+	db     DB
 	prefix string
 	table  string
 	// Obs, if set, records call timings and retries (non-deterministic edge).
@@ -45,7 +61,7 @@ type Store struct {
 var _ cp.Store = (*Store)(nil)
 
 // New returns a store over the table prefix+"cp".
-func New(db *dynamodb.Client, prefix string) *Store {
+func New(db DB, prefix string) *Store {
 	return &Store{db: db, prefix: prefix, table: prefix + "cp"}
 }
 
@@ -107,21 +123,27 @@ func getBlob(it item, name string) []byte {
 	return v.Value
 }
 
+// retryable lists the SDK errors that mean "try again later".
+var retryable = []func(error) bool{
+	isType[*types.ProvisionedThroughputExceededException],
+	isType[*types.RequestLimitExceeded],
+	isType[*types.ThrottlingException],
+	isType[*types.TransactionInProgressException],
+	isType[*types.TransactionConflictException],
+	isType[*types.InternalServerError],
+}
+
+func isType[T error](err error) bool {
+	var t T
+	return errors.As(err, &t)
+}
+
 // infra maps SDK errors that mean "try again later" to cp.ErrUnavailable.
 func infra(err error) error {
-	if err == nil {
-		return nil
-	}
-	var (
-		a *types.ProvisionedThroughputExceededException
-		b *types.RequestLimitExceeded
-		c *types.ThrottlingException
-		d *types.TransactionInProgressException
-		e *types.TransactionConflictException
-		f *types.InternalServerError
-	)
-	if errors.As(err, &a) || errors.As(err, &b) || errors.As(err, &c) || errors.As(err, &d) || errors.As(err, &e) || errors.As(err, &f) {
-		return fmt.Errorf("%w: %v", cp.ErrUnavailable, err)
+	for _, is := range retryable {
+		if is(err) {
+			return fmt.Errorf("%w: %v", cp.ErrUnavailable, err)
+		}
 	}
 	return err
 }
@@ -173,36 +195,54 @@ func (s *Store) batchGet(ctx context.Context, keys []item) (map[string]item, err
 	res := map[string]item{}
 	for len(keys) > 0 {
 		n := min(len(keys), 100)
-		req := map[string]types.KeysAndAttributes{s.table: {Keys: keys[:n], ConsistentRead: aws.Bool(true)}}
-		keys = keys[n:]
-		for backoff := 5 * time.Millisecond; len(req) > 0; backoff *= 2 {
-			t0 := time.Now()
-			out, err := s.db.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{RequestItems: req,
-				ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal})
-			var cc []types.ConsumedCapacity
-			if out != nil {
-				cc = out.ConsumedCapacity
-			}
-			s.Obs.CallCtx(ctx, "BatchGetItem", t0, cc)
-			if err != nil {
-				s.note(ctx, "BatchGetItem", err)
-				return nil, infra(err)
-			}
-			for _, it := range out.Responses[s.table] {
-				res[getStr(it, "pk")+"\x00"+getStr(it, "sk")] = it
-			}
-			req = out.UnprocessedKeys
-			if len(req) > 0 {
-				if backoff > time.Second {
-					return nil, fmt.Errorf("%w: batch get unprocessed", cp.ErrUnavailable)
-				}
-				if err := sleep(ctx, backoff); err != nil {
-					return nil, err
-				}
-			}
+		if err := s.batchGetChunk(ctx, keys[:n], res); err != nil {
+			return nil, err
 		}
+		keys = keys[n:]
 	}
 	return res, nil
+}
+
+// batchGetChunk reads up to 100 keys into res, resending UnprocessedKeys with
+// a doubling backoff, bounded.
+func (s *Store) batchGetChunk(ctx context.Context, keys []item, res map[string]item) error {
+	req := map[string]types.KeysAndAttributes{s.table: {Keys: keys, ConsistentRead: aws.Bool(true)}}
+	for backoff := 5 * time.Millisecond; len(req) > 0; backoff *= 2 {
+		out, err := s.batchGetPage(ctx, req)
+		if err != nil {
+			return err
+		}
+		for _, it := range out.Responses[s.table] {
+			res[keyID(it)] = it
+		}
+		if req = out.UnprocessedKeys; len(req) == 0 {
+			return nil
+		}
+		if backoff > time.Second {
+			return fmt.Errorf("%w: batch get unprocessed", cp.ErrUnavailable)
+		}
+		if err := sleep(ctx, backoff); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// batchGetPage is one measured BatchGetItem call.
+func (s *Store) batchGetPage(ctx context.Context, req map[string]types.KeysAndAttributes) (*dynamodb.BatchGetItemOutput, error) {
+	t0 := time.Now()
+	out, err := s.db.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{RequestItems: req,
+		ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal})
+	var cc []types.ConsumedCapacity
+	if out != nil {
+		cc = out.ConsumedCapacity
+	}
+	s.Obs.CallCtx(ctx, "BatchGetItem", t0, cc)
+	if err != nil {
+		s.note(ctx, "BatchGetItem", err)
+		return nil, infra(err)
+	}
+	return out, nil
 }
 
 func lookupKey(m map[string]item, k item) item {

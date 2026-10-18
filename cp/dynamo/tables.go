@@ -14,6 +14,13 @@ import (
 // CreateTables creates the table (pay-per-request) and waits for it to be
 // active. An existing table is left alone.
 func (s *Store) CreateTables(ctx context.Context) error {
+	if err := s.createTable(ctx); err != nil {
+		return err
+	}
+	return s.waitActive(ctx)
+}
+
+func (s *Store) createTable(ctx context.Context) error {
 	_, err := s.db.CreateTable(ctx, &dynamodb.CreateTableInput{
 		TableName: &s.table,
 		AttributeDefinitions: []types.AttributeDefinition{
@@ -30,6 +37,10 @@ func (s *Store) CreateTables(ctx context.Context) error {
 	if err != nil && !errors.As(err, &inUse) {
 		return fmt.Errorf("create table %s: %w", s.table, err)
 	}
+	return nil
+}
+
+func (s *Store) waitActive(ctx context.Context) error {
 	for i := 0; i < 100; i++ {
 		out, err := s.db.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: &s.table})
 		if err == nil && out.Table.TableStatus == types.TableStatusActive {

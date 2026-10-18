@@ -65,17 +65,17 @@ $(terraform output -raw ssm_start_session_broker)
   curl -s 127.0.0.1:9100/metrics | head
 $(terraform output -raw ssm_start_session_loadgen)
   ls /var/lib/bench-bootstrap.done ; echo $BOOTSTRAP
-  /opt/kafka/bin/kafka-topics.sh --bootstrap-server $BOOTSTRAP --create --topic t1 --partitions 8
-  warpstream cli benchmark-producer -bootstrap-host $BOOTSTRAP_HOST -bootstrap-port 9092 -topic t1 -num-clients 1
-  # fallback:
-  /opt/kafka/bin/kafka-producer-perf-test.sh --topic t1 --num-records 1000000 --record-size 1024 --throughput -1 --producer-props bootstrap.servers=$BOOTSTRAP
+  /opt/kafka/bin/kafka-topics.sh --bootstrap-server $BOOTSTRAP --list     # bench-<run_id> (created by the broker host at boot)
+  /opt/bench/run-benchmark.sh --smoke                                      # 20 s go/no-go, see docs/aws-benchmark-runbook.md
 ```
 
-The WarpStream CLI is installed from the same tarball the official installer uses (`warpstream_agent_releases/warpstream_agent_linux_amd64_latest.tar.gz`, to `/usr/local/bin/warpstream`; best effort). Its producer/consumer benchmarks are
-`warpstream cli benchmark-producer` / `benchmark-consumer` (flags `-topic`,
-`-num-clients`, `-record-size`, `-max-records-per-second`, `-bootstrap-host`,
-`-bootstrap-port`). Upload results with
-`aws s3 cp out.txt s3://$BUCKET/results/$RUN_ID/` (loadgen may write only `results/*`).
+The topic is created by the broker host through manicp's loopback HTTP API because
+the broker implements neither CreateTopics nor DescribeConfigs (`kafka-topics.sh --create/--describe` fail).
+The load tool is Apache Kafka's `kafka-producer-perf-test.sh`. The WarpStream CLI
+(`/usr/local/bin/warpstream`, same tarball as the official installer; best effort) is installed
+but its `benchmark-producer` cannot be used against this broker: it always compresses
+(no flag to disable) and the broker rejects compressed batches (`UNSUPPORTED_COMPRESSION_TYPE`).
+Results go to `s3://$BUCKET/results/$RUN_ID/` (loadgen may write only `results/*`).
 
 ## Cost (on-demand, us-east-1 list prices, approximate)
 

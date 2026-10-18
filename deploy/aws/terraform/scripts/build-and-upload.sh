@@ -26,5 +26,5 @@ aws s3 rm "s3://$bucket/artifacts/READY" >/dev/null 2>&1 || true
 aws s3 cp "$out/manifester-linux-amd64.tar.gz" "s3://$bucket/artifacts/manifester-linux-amd64.tar.gz"
 aws s3 sync --delete --exclude 'dashboards/*' --exclude 'gen/*' --exclude 'README.md' "$root/deploy/aws/observability/" "s3://$bucket/artifacts/observability/"
 aws s3 sync --delete "$root/deploy/aws/bench/" "s3://$bucket/artifacts/bench/"
-echo "$(git -C "$root" rev-parse HEAD 2>/dev/null || echo unknown)" | aws s3 cp - "s3://$bucket/artifacts/READY"
+{ git -C "$root" rev-parse HEAD 2>/dev/null || echo unknown; } | aws s3 cp - "s3://$bucket/artifacts/READY"
 echo "uploaded; instances will pick it up"

@@ -42,9 +42,11 @@ statements in a profiled file counts as 100%; a function in a file absent from
 the profile (a package with no tests) counts as 0%.
 
 Skipped tests: `go test ./...` includes Docker-backed tests that skip without
-their environment, so code only they exercise (cp/dynamo, sys/s3store, ...)
-shows 0% and scores badly. The default gate therefore measures "what plain
-`go test ./...` covers", which is stable on any machine. To count integration
+their environment. The gate measures "what plain `go test ./...` covers", which
+is stable on any machine, so every backend-facing package has Docker-free tests:
+cp/dynamo runs against an in-memory fake DynamoDB (cp/dynamo/fakedb, checked
+against the memstore spec by the same lockstep suite), sys/s3store against a fake
+S3, cp/cpclient and cp against httptest, the cmd mains through a testable `run`. To count integration
 coverage, pass an extra profile and merge it (counts are summed per block):
 
     make crap CRAP_MERGE=build/it-cover.out
@@ -91,8 +93,8 @@ Flags of `go run ./cmd/crapscore`: `-profile`, `-merge-profile a,b`,
 REGEXP` (on the function key), `-root`. Exit codes: 0 ok, 1 gate failed, 2
 usage or input error. Generated files, `_test.go`, `vendor`, `testdata`, hidden
 directories and nested modules (toys3/minikv) are skipped. No functions are
-excluded by default: `main` functions in `cmd/` show up as offenders because
-they are untested glue; they sit in the baseline instead of being hidden.
+excluded by default. Since commit e098f75 the baseline is empty: no function is
+over 30 (1410 analysed; 40 over 15, 109 over 10, 250 over 6).
 
 The determinism gate stays separate. To run it in `make build`, add
 `./scripts/ci-determinism.sh` as a step before `crap` in the `build` recipe.
@@ -108,7 +110,7 @@ worse" (baselined, CRAP grew beyond the tolerance).
 
 ## The ratchet
 
-Existing code is not refactored. `crap-baseline.json` lists the functions over
+`crap-baseline.json` (currently empty, 0 offenders) lists the functions over
 the threshold with their CRAP when it was generated. The gate fails when:
 
 1. a function not in the baseline exceeds the threshold, or

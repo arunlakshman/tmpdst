@@ -270,31 +270,58 @@ func TestCommitSizeLimit(t *testing.T) {
 		}
 		return op
 	}
-	// 2 + 1 partition + 0 topics + 0 states + 4 batches = 7: fits.
+	// The range items are one run per partition (decision 39), so the number of
+	// batches does not count: 2 + 2 x 1 partition = 4 items for 4 batches or 400.
 	call(e, c, a, 2, many("ok", 4))
-	// 5 batches = 8: refused, and nothing changes.
-	call(e, c, a, 3, many("big", 5))
+	call(e, c, a, 3, many("many", 400))
 	c.Run()
 	if d := c.Find(2).(core.CPDone); d.Err != core.OK {
 		t.Fatal(d)
 	}
-	hwm := e.HighWatermark(tp)
-	if d := c.Find(3).(core.CPDone); d.Err != core.ErrTooLarge || d.Outcome != core.NotApplied || e.HighWatermark(tp) != hwm {
+	if d := c.Find(3).(core.CPDone); d.Err != core.OK {
 		t.Fatal(d)
 	}
-	// A producer state counts: 2 + 1 + 1 + 4 batches = 8 is refused.
-	p := func(n int) core.CommitSegment {
-		op := many("p", n)
+	// Partitions count twice (HWM + run): 3 partitions = 2 + 6 = 8 is refused
+	// and nothing changes; 2 partitions = 6 fits.
+	parts := func(key string, n int) core.CommitSegment {
+		op := many(key, n)
 		for i := range op.Batches {
-			op.Batches[i].Producer = 1000
+			op.Batches[i].TP.Partition = int32(i)
 		}
 		return op
 	}
-	call(e, c, a, 4, core.InitProducer{})
+	hwm := e.HighWatermark(tp)
+	call(e, c, a, 4, parts("p3", 3))
 	c.Run()
-	call(e, c, a, 5, p(4))
+	if d := last(c); d.Err != core.ErrTooLarge || d.Outcome != core.NotApplied || e.HighWatermark(tp) != hwm {
+		t.Fatal(d)
+	}
+	call(e, c, a, 5, parts("p2", 2))
+	c.Run()
+	if d := last(c); d.Err != core.OK {
+		t.Fatal(d)
+	}
+	// A producer state counts: 2 + 2 x 2 partitions + 2 states = 8 is refused.
+	call(e, c, a, 6, core.InitProducer{})
+	c.Run()
+	p := parts("pr", 2)
+	for i := range p.Batches {
+		p.Batches[i].Producer = 1000
+	}
+	call(e, c, a, 7, p)
 	c.Run()
 	if d := last(c); d.Err != core.ErrTooLarge {
+		t.Fatal(d)
+	}
+	// One state, one partition, many batches: 2 + 2 + 1 = 5 fits.
+	q := many("pq", 50)
+	for i := range q.Batches {
+		q.Batches[i].Producer = 1000
+		q.Batches[i].BaseSeq = int32(i)
+	}
+	call(e, c, a, 8, q)
+	c.Run()
+	if d := last(c); d.Err == core.ErrTooLarge {
 		t.Fatal(d)
 	}
 }

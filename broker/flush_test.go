@@ -24,11 +24,11 @@ func sealReasons(h *harness) (out []string) {
 
 func TestDefaultFlushRule(t *testing.T) {
 	d := DefaultConfig()
-	if d.MaxSegmentBytes != 16<<20 || d.BatchWindow != 200*core.Millisecond || d.MaxSegmentBatches != 32 || d.MaxSegmentPartitions != 24 {
+	if d.MaxSegmentBytes != 16<<20 || d.BatchWindow != 200*core.Millisecond || d.MaxSegmentBatches != 256 || d.MaxSegmentItems != 96 || d.MaxSegmentPartitions != 24 {
 		t.Fatalf("%+v", d)
 	}
 	z := Config{}.withDefaults()
-	if z.MaxSegmentBytes != d.MaxSegmentBytes || z.MaxSegmentBatches != 32 || z.BatchWindow != d.BatchWindow {
+	if z.MaxSegmentBytes != d.MaxSegmentBytes || z.MaxSegmentBatches != 256 || z.MaxSegmentItems != 96 || z.BatchWindow != d.BatchWindow {
 		t.Fatalf("zero config: %+v", z)
 	}
 }
@@ -207,5 +207,66 @@ func TestStopFlushesOpenSegment(t *testing.T) {
 	}
 	if r := produced(h.next(c))[0]; r.ErrorCode != 0 {
 		t.Fatal(r.ErrorCode)
+	}
+}
+
+// With the CP storing one range run per partition and segment (decision 39),
+// many small batches no longer hit the batch cap at 32: the segment seals at
+// the byte cap.
+func TestManySmallBatchesSealAtByteCapNotBatchCap(t *testing.T) {
+	n := len(plain(t, "a"))
+	cfg := DefaultConfig()
+	if cfg.MaxSegmentBatches < 200 {
+		t.Fatalf("default batch cap %d", cfg.MaxSegmentBatches)
+	}
+	cfg.MaxSegmentBytes = 200 * n
+	h := startedHarness(t, cfg)
+	c := h.open(1)
+	var es []ent
+	for i := 0; i < 199; i++ {
+		es = append(es, ent{"t", int32(i % 2), plain(t, "a")})
+	}
+	h.send(c, verProduce, prodReq(-1, es...))
+	if len(h.puts) != 0 {
+		t.Fatalf("sealed below the byte cap with %d puts", len(h.puts))
+	}
+	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	if r := sealReasons(h); len(h.puts) != 1 || len(r) != 1 || r[0] != "size" {
+		t.Fatalf("reasons %v puts %d", r, len(h.puts))
+	}
+	f := factsNamed(h.all, "segment_sealed")[0]
+	if b := field(f, "batches").(core.I64); b != 200 {
+		t.Fatalf("%d batches in the segment", b)
+	}
+	if it := field(f, "items").(core.I64); it != 2+2*2 {
+		t.Fatalf("commit items %d, want 6 (2 partitions, no producers)", it)
+	}
+	h.next(c)
+	h.next(c)
+}
+
+// Producer states are the one per-batch growth of the commit cost, so they have
+// their own cap: the segment seals before 2 + 2 x partitions + states could
+// pass MaxSegmentItems.
+func TestItemCapSealsOnProducerStates(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MaxSegmentItems = 20 // 1 partition: 4 + states + 3 > 20 at 14 states
+	h := startedHarness(t, cfg)
+	c, ci := h.open(1), h.open(2) // ci only allocates producer ids
+	for i := 0; i < 13; i++ {
+		pid := h.initPID(ci)
+		h.send(c, verProduce, prodReq(-1, ent{"t", 0, mkBatch(t, pid, 0, 0, "a")}))
+	}
+	if len(h.puts) != 0 {
+		t.Fatalf("sealed below the item cap: %d puts", len(h.puts))
+	}
+	// The 14th producer state tips it.
+	pid := h.initPID(ci)
+	h.send(c, verProduce, prodReq(-1, ent{"t", 0, mkBatch(t, pid, 0, 0, "a")}))
+	if r := sealReasons(h); len(h.puts) != 1 || len(r) != 1 || r[0] != "items" {
+		t.Fatalf("reasons %v puts %d", r, len(h.puts))
+	}
+	if it := field(factsNamed(h.all, "segment_sealed")[0], "items").(core.I64); it != 4+14 {
+		t.Fatalf("commit items %d", it)
 	}
 }

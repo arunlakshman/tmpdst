@@ -24,11 +24,29 @@ type pbatch struct {
 	answered bool // BugEarlyAck already answered it
 }
 
+// stateKey is one producer state the CP commit touches.
+type stateKey struct {
+	tp core.TopicPartition
+	p  core.ProducerID
+}
+
+// commitItems is what the DynamoDB CP's commit transaction costs for the open
+// segment (cp/doc.go): fence and segment items, an HWM item and a range run
+// item per partition, one state item per idempotent (partition, producer).
+// The number of batches does not count. Grown topics are not counted: they are
+// created before use, and the budget keeps spare items for them.
+func (o *openSegment) commitItems() int { return 2 + 2*len(o.parts) + len(o.states) }
+
+// maxItemGrowth is the most one batch adds to commitItems: a new partition (2)
+// and a new producer state (1).
+const maxItemGrowth = 3
+
 // openSegment is the buffer that the next flush seals.
 type openSegment struct {
 	batches []*pbatch
 	bytes   int
 	parts   []core.TopicPartition // distinct partitions buffered
+	states  []stateKey            // distinct idempotent (partition, producer) pairs buffered
 	gen     core.TimerGen         // flush timer generation; 0 = none armed
 	since   core.Time             // when the first batch arrived (age of the segment)
 }
@@ -39,6 +57,7 @@ const (
 	sealTimer      = "timer"
 	sealBatches    = "batches"
 	sealPartitions = "partitions"
+	sealItems      = "items"
 	sealStop       = "stop"
 )
 
@@ -92,6 +111,9 @@ func (b *Broker) addBatch(pb *pbatch) []core.Action {
 	if !slices.Contains(b.open.parts, pb.tp) {
 		b.open.parts = append(b.open.parts, pb.tp)
 	}
+	if sk := (stateKey{pb.tp, pb.producer}); pb.producer != core.NoProducer && !slices.Contains(b.open.states, sk) {
+		b.open.states = append(b.open.states, sk)
+	}
 	if len(b.open.batches) == 1 || b.cfg.Bug == BugTimerFromLastBatch {
 		if len(b.open.batches) == 1 {
 			b.open.since = b.now
@@ -109,6 +131,8 @@ func (b *Broker) addBatch(pb *pbatch) []core.Action {
 		return append(acts, b.seal(sealSize)...)
 	case len(b.open.parts) >= b.cfg.MaxSegmentPartitions:
 		return append(acts, b.seal(sealPartitions)...)
+	case b.open.commitItems()+maxItemGrowth > b.cfg.MaxSegmentItems && b.cfg.Bug != BugNoItemCap:
+		return append(acts, b.seal(sealItems)...)
 	case len(b.open.batches) >= b.cfg.MaxSegmentBatches && b.cfg.Bug != BugNoBatchCap:
 		return append(acts, b.seal(sealBatches)...)
 	}
@@ -133,12 +157,15 @@ func (b *Broker) seal(why string) []core.Action {
 		b.env.Reachable("broker: segment sealed by batch cap")
 	case sealPartitions:
 		b.env.Reachable("broker: segment sealed by partition cap")
+	case sealItems:
+		b.env.Reachable("broker: segment sealed by commit item cap")
 	}
 	acts := []core.Action{core.CancelTimer{ID: timerFlush}, emit("segment_sealed",
 		core.Field{Key: "reason", Value: core.Str(why)},
 		core.Field{Key: "bytes", Value: core.I64(b.open.bytes)},
 		core.Field{Key: "batches", Value: core.I64(len(bs))},
 		core.Field{Key: "parts", Value: core.I64(len(b.open.parts))},
+		core.Field{Key: "items", Value: core.I64(b.open.commitItems())},
 		core.Field{Key: "last", Value: core.I64(len(bs[len(bs)-1].data))},
 		core.Field{Key: "age", Value: core.I64(b.now - b.open.since)},
 		core.Field{Key: "inflight", Value: core.I64(len(b.segs) + 1)},

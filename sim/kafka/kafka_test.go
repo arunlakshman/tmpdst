@@ -100,6 +100,7 @@ func TestMutantsAreCaught(t *testing.T) {
 		{"BugWrongOffset: fetch patches base offset + 1", broker.BugWrongOffset, "kafka: a consumer sees every offset in order, none skipped"},
 		{"BugServeCorrupt: corrupt GET reaches the client", broker.BugServeCorrupt, "kafka: a consumer never receives a corrupt batch"},
 		{"BugNoBatchCap: MaxSegmentBatches ignored", broker.BugNoBatchCap, "kafka: a sealed segment holds at most MaxSegmentBatches batches"},
+		{"BugNoItemCap: MaxSegmentItems ignored", broker.BugNoItemCap, "kafka: a sealed segment's commit cost stays within MaxSegmentItems"},
 		{"BugTimerFromLastBatch: flush window restarts on every batch", broker.BugTimerFromLastBatch, "kafka: a segment is sealed within the window of its first batch"},
 		{"BugSealOffByOne: size rule applied one batch late", broker.BugSealOffByOne, "kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch"},
 	}
@@ -311,12 +312,13 @@ func TestCommitLimitRefusesUncappedSegment(t *testing.T) {
 	t.Fatal("no seed in 40 had the control plane refuse an uncapped segment")
 }
 
-// The production caps (24 partitions, 32 batches) against DynamoDB's 100-item
-// commit: 20 producers keep enough batches in flight to hit the caps, the
-// control plane refuses anything over 100 items, and the broker's defaults
-// (16 MiB, 200 ms) are untouched.
+// The production caps (24 partitions, 256 batches, 96 commit items) against
+// DynamoDB's 100-item commit: 48 producers keep enough batches in flight to hit
+// the partition or item cap, the control plane refuses anything over 100 items
+// (2 + 2 x partitions + producer states), and the broker's defaults (16 MiB,
+// 200 ms) are untouched.
 func TestProductionCapsFitDynamoLimit(t *testing.T) {
-	opts := Opts{Producers: 20, Consumers: 1, Topics: []string{"a", "b", "c", "d"}, Partitions: 8}
+	opts := Opts{Producers: 48, Consumers: 1, Topics: []string{"a", "b", "c", "d"}, Partitions: 8}
 	cfg := configWith(seeds(1, 3), broker.BugNone, opts)
 	prod := broker.DefaultConfig()
 	prod.MaxBufferedBytes, prod.ResumeBufferedBytes = 64<<20, 32<<20
@@ -334,7 +336,7 @@ func TestProductionCapsFitDynamoLimit(t *testing.T) {
 	report(t, rep)
 	hit := uint64(0)
 	for _, a := range rep.Assertions {
-		if a.Prop == "broker: segment sealed by batch cap" || a.Prop == "broker: segment sealed by partition cap" {
+		if a.Prop == "broker: segment sealed by commit item cap" || a.Prop == "broker: segment sealed by partition cap" {
 			t.Logf("%s: %d", a.Prop, a.Checks)
 			hit += a.Checks
 		}

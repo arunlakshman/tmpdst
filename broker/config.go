@@ -26,6 +26,9 @@ const (
 	BugTimerFromLastBatch
 	// BugSealOffByOne applies the size rule one batch late.
 	BugSealOffByOne
+	// BugNoItemCap ignores MaxSegmentItems, so many producers can push a
+	// segment's commit cost over the control plane's transaction limit.
+	BugNoItemCap
 )
 
 // Config is the broker's tuning. Zero numeric fields take DefaultConfig's value.
@@ -39,19 +42,32 @@ type Config struct {
 	// Segment flush rule (decision 35): the open segment is sealed when it holds
 	// MaxSegmentBytes of batch data, or BatchWindow after its first batch
 	// arrived (a fixed timer, not extended by later batches), or when it hits
-	// one of the two count caps below.
+	// one of the count caps below.
 	BatchWindow     core.Duration // flush timer, armed by the first batch of a segment
 	MaxSegmentBytes int           // flush at once when the open segment holds this many batch bytes
 
-	// MaxSegmentPartitions and MaxSegmentBatches cap the open segment so the
-	// control plane can commit it. The DynamoDB CP commits a segment in one
-	// 100-item transaction costing 2 + changed partitions + grown topics +
-	// producer states (<= batches) + ranges (<= batches) items; with 24 and 32
-	// that is at most 90 + grown topics. The broker cannot know the CP: keep
-	// these in step with it (cp/doc.go). A CP answer of ErrTooLarge fails the
-	// segment's batches (UNKNOWN_SERVER_ERROR) instead of retrying.
+	// MaxSegmentPartitions, MaxSegmentBatches and MaxSegmentItems cap the open
+	// segment so the control plane can commit it. The DynamoDB CP stores one
+	// range run item per (partition, segment) however many batches there are
+	// (decision 39), so its commit is one 100-item transaction costing
+	//
+	//	2 + 2 x partitions + producer states + grown topics
+	//
+	// (fence + segment item, HWM + run item per partition, one state item per
+	// idempotent (partition, producer), one item per grown topic). Batches do
+	// not appear. Worst case with the defaults: partitions <= 24 gives 50; the
+	// states are bounded by MaxSegmentItems: the segment is sealed before
+	// 2 + 2 x partitions + states could pass 96, which leaves 4 items for grown
+	// topics (topics are created before use, so normally none). MaxSegmentBatches
+	// no longer protects the transaction; it bounds the segment's G# item (the
+	// request and the answer as JSON, about 300 bytes a batch; the CP refuses
+	// over 300 KB, so about 1000 batches) and the per-segment bookkeeping.
+	// The broker cannot know the CP: keep these in step with it (cp/doc.go). A
+	// CP answer of ErrTooLarge fails the segment's batches
+	// (UNKNOWN_SERVER_ERROR) instead of retrying.
 	MaxSegmentPartitions int // seal at this many distinct partitions
 	MaxSegmentBatches    int // seal at this many batches
+	MaxSegmentItems      int // seal before the commit would cost more than this many CP items
 
 	MaxAttempts int           // tries per PUT, commit or read before giving up
 	RetryBase   core.Duration // backoff of the first retry; doubles each time
@@ -74,7 +90,8 @@ func DefaultConfig() Config {
 		BatchWindow:          200 * core.Millisecond,
 		MaxSegmentBytes:      16 << 20,
 		MaxSegmentPartitions: 24,
-		MaxSegmentBatches:    32,
+		MaxSegmentBatches:    256,
+		MaxSegmentItems:      96,
 		MaxAttempts:          6,
 		RetryBase:            20 * core.Millisecond,
 		RetryMax:             640 * core.Millisecond,
@@ -106,6 +123,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MaxSegmentBatches <= 0 {
 		c.MaxSegmentBatches = d.MaxSegmentBatches
+	}
+	if c.MaxSegmentItems <= 0 {
+		c.MaxSegmentItems = d.MaxSegmentItems
 	}
 	if c.MaxAttempts <= 0 {
 		c.MaxAttempts = d.MaxAttempts

@@ -95,9 +95,11 @@ func (e *Engine) HighWatermark(tp core.TopicPartition) core.Offset { return e.sp
 
 // tooLarge reports whether op is a CommitSegment that a store with a bounded
 // transaction would refuse. The count is cp/dynamo's arithmetic (2 + changed
-// partitions + grown topics + producer states + range items) taken as an upper
-// bound that ignores duplicates and rejections, so it depends on the request
-// and the topic table only. The spec stays limit-free; a refusal reaches it
+// partitions + grown topics + producer states + range run items, one per
+// partition: decision 39) taken as an upper bound that ignores duplicates and
+// rejections (a partition whose batches are all rejected or dups would need no
+// HWM and run item), so it depends on the request and the topic table only.
+// The number of batches does not count. The spec stays limit-free; a refusal reaches it
 // never, so nothing changes.
 func (e *Engine) tooLarge(op core.CPOp) bool {
 	c, ok := op.(core.CommitSegment)
@@ -138,5 +140,5 @@ func (e *Engine) tooLarge(op core.CPOp) bool {
 			grown[b.TP.Topic] = want
 		}
 	}
-	return 2+len(tps)+len(topics)+len(states)+len(c.Batches) > e.maxItems
+	return 2+2*len(tps)+len(topics)+len(states) > e.maxItems
 }

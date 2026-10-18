@@ -17,6 +17,7 @@ type tuning struct {
 	segmentBytes   string
 	window         time.Duration
 	parts, batches int
+	items          int    // control plane commit item budget
 	maxBuffered    string // "auto" or a size
 	resumeBuffered string // "" = half of the max
 }
@@ -28,11 +29,11 @@ func (t tuning) apply(bc *broker.Config, memLimit uint64) error {
 	if err != nil {
 		return fmt.Errorf("-segment-bytes: %w", err)
 	}
-	if seg <= 0 || t.window <= 0 || t.parts <= 0 || t.batches <= 0 {
-		return errors.New("-segment-bytes, -segment-window, -max-segment-partitions and -max-segment-batches must be positive")
+	if seg <= 0 || t.window <= 0 || t.parts <= 0 || t.batches <= 0 || t.items <= 0 {
+		return errors.New("-segment-bytes, -segment-window, -max-segment-partitions, -max-segment-batches and -max-segment-items must be positive")
 	}
 	bc.MaxSegmentBytes, bc.BatchWindow = int(seg), core.Duration(t.window)
-	bc.MaxSegmentPartitions, bc.MaxSegmentBatches = t.parts, t.batches
+	bc.MaxSegmentPartitions, bc.MaxSegmentBatches, bc.MaxSegmentItems = t.parts, t.batches, t.items
 
 	if strings.EqualFold(t.maxBuffered, "auto") {
 		bc.MaxBufferedBytes, bc.ResumeBufferedBytes = prod.AutoBuffered(memLimit)

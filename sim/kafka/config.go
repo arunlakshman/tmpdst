@@ -159,45 +159,55 @@ func fenceMode(cp *sim.ControlPlaneFaults) {
 }
 
 // The 3 producers send at most 2 batches each and wait for the ack, so a
-// segment rarely holds more than 6: the batch cap binds only when it is 2-4.
+// segment rarely holds more than 6: the batch cap binds only when it is 2-4, and
+// the commit item cap (2 + 2 x partitions + producer states, decision 39) only
+// when it is tiny.
 //
 // swarmBroker picks this seed's segment tuning (decision 17) from a profile:
 //
-//	tiny (0.25)       a few KiB: the size rule binds
-//	accumulate (0.25) long windows, big byte cap, small batch cap: the batch cap binds
-//	defaults (0.15)   the production defaults: 16 MiB, 200 ms, 32 batches, 24 partitions
+//	tiny (0.2)        a few KiB: the size rule binds
+//	accumulate (0.2)  long windows, big byte cap, small batch cap: the batch cap binds
+//	defaults (0.15)   the production defaults: 16 MiB, 200 ms, 256 batches, 24 partitions, 96 items
 //	wide (0.1)        2-3 partitions, nothing else binds: the partition cap
+//	items (0.1)       long windows, big byte and batch caps, a tiny commit item budget: the item cap binds
 //	mixed (0.25)      every knob from its own menu
 //
 // Buffer caps are swarmed too. Half the seeds tighten the control plane's commit
-// limit to exactly what the seed's caps allow (2 + partitions + 2 batches), so a
-// broker that ignores a cap is refused; the preset's own limit is 100.
+// limit to exactly what the seed's caps allow (2 + 2 x partitions + batches, or
+// the item budget if that is smaller), so a broker that ignores a cap is
+// refused; the preset's own limit is 100.
 func swarmBroker(r sim.CountedRand, c *sim.SeedConfig) {
 	bc := c.Params.(broker.Config)
 	pick := func(menu ...int) int { return menu[r.Intn(len(menu))] }
 	window := func(menu ...int) core.Duration { return ms(int64(pick(menu...))) }
+	d := broker.DefaultConfig()
+	bc.MaxSegmentItems = d.MaxSegmentItems
 	switch x := r.Float64(); {
-	case x < 0.25: // tiny
+	case x < 0.2: // tiny
 		bc.MaxSegmentBytes, bc.BatchWindow = pick(4<<10, 6<<10, 8<<10), window(20, 50, 200)
-		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(16, 32), pick(12, 24)
-	case x < 0.5: // accumulate
+		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(16, 32, 256), pick(12, 24)
+	case x < 0.4: // accumulate
 		bc.MaxSegmentBytes, bc.BatchWindow = pick(256<<10, 4<<20, 16<<20), window(50, 200)
 		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(2, 3, 4), pick(12, 24)
-	case x < 0.65: // defaults
-		d := broker.DefaultConfig()
+	case x < 0.55: // defaults
 		bc.MaxSegmentBytes, bc.BatchWindow = d.MaxSegmentBytes, d.BatchWindow
 		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = d.MaxSegmentBatches, d.MaxSegmentPartitions
-	case x < 0.75: // wide
+	case x < 0.65: // wide
 		bc.MaxSegmentBytes, bc.BatchWindow = 16<<20, window(50, 200)
-		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = 32, pick(2, 3)
+		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = 256, pick(2, 3)
+	case x < 0.75: // items
+		bc.MaxSegmentBytes, bc.BatchWindow = 16<<20, window(50, 200)
+		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = 256, pick(12, 24)
+		bc.MaxSegmentItems = pick(8, 9, 10, 12, 16)
 	default: // mixed
 		bc.MaxSegmentBytes, bc.BatchWindow = pick(4<<10, 16<<10, 64<<10, 256<<10, 4<<20, 16<<20), window(5, 20, 50, 200)
-		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(2, 4, 8, 32), pick(3, 6, 12, 24)
+		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(2, 4, 8, 32, 256), pick(3, 6, 12, 24)
+		bc.MaxSegmentItems = pick(8, 12, 16, 96, 96)
 	}
 	bc.MaxBufferedBytes = pick(3<<10, 3<<10, 16<<10, 64<<10, 1<<20)
 	bc.ResumeBufferedBytes = bc.MaxBufferedBytes / 3
 	if r.Chance(0.5) {
-		c.ControlPlane.MaxCommitItems = 2 + bc.MaxSegmentPartitions + 2*bc.MaxSegmentBatches
+		c.ControlPlane.MaxCommitItems = min(2+2*bc.MaxSegmentPartitions+bc.MaxSegmentBatches, bc.MaxSegmentItems)
 	}
 	c.Params = bc
 }

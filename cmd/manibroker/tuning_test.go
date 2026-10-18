@@ -11,7 +11,7 @@ import (
 func defaults() tuning {
 	d := broker.DefaultConfig()
 	return tuning{segmentBytes: "16MiB", window: 200 * time.Millisecond, parts: d.MaxSegmentPartitions,
-		batches: d.MaxSegmentBatches, maxBuffered: "auto"}
+		batches: d.MaxSegmentBatches, items: d.MaxSegmentItems, maxBuffered: "auto"}
 }
 
 func TestTuningDefaults(t *testing.T) {
@@ -19,7 +19,7 @@ func TestTuningDefaults(t *testing.T) {
 	if err := defaults().apply(&bc, 8<<30); err != nil {
 		t.Fatal(err)
 	}
-	if bc.MaxSegmentBytes != 16<<20 || bc.BatchWindow != 200*core.Millisecond || bc.MaxSegmentPartitions != 24 || bc.MaxSegmentBatches != 32 {
+	if bc.MaxSegmentBytes != 16<<20 || bc.BatchWindow != 200*core.Millisecond || bc.MaxSegmentPartitions != 24 || bc.MaxSegmentBatches != 256 || bc.MaxSegmentItems != 96 {
 		t.Fatalf("%+v", bc)
 	}
 	if bc.MaxBufferedBytes != 512<<20 || bc.ResumeBufferedBytes != 256<<20 { // 8 GiB / 16
@@ -53,7 +53,7 @@ func TestTuningOverrides(t *testing.T) {
 	}
 	for _, bad := range []func(*tuning){
 		func(t *tuning) { t.segmentBytes = "lots" }, func(t *tuning) { t.window = 0 },
-		func(t *tuning) { t.batches = 0 }, func(t *tuning) { t.maxBuffered = "-1" }, func(t *tuning) { t.maxBuffered = "0" },
+		func(t *tuning) { t.batches = 0 }, func(t *tuning) { t.items = 0 }, func(t *tuning) { t.maxBuffered = "-1" }, func(t *tuning) { t.maxBuffered = "0" },
 	} {
 		x := defaults()
 		bad(&x)

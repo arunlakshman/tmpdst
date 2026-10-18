@@ -12,7 +12,8 @@ const timerSlack = 150 * core.Millisecond
 
 // segmentCaps checks every sealed segment (the broker's segment_sealed fact)
 // against this seed's flush rule: at most MaxSegmentBatches batches and
-// MaxSegmentPartitions partitions, the size rule applied exactly (the bytes
+// MaxSegmentPartitions partitions, a commit cost (2 + 2 x partitions + producer
+// states) of at most MaxSegmentItems, the size rule applied exactly (the bytes
 // before the last batch stayed under MaxSegmentBytes, so a segment overshoots
 // the cap by at most its last batch), and an age of at most the window plus
 // timerSlack. Every committed segment was sealed first.
@@ -36,6 +37,8 @@ func (i *segmentCaps) Observe(v sim.View) {
 			d, core.Detail{Key: "batches", Value: n("batches")}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentBatches})
 		a.Always(n("parts") <= int64(i.cfg.MaxSegmentPartitions), "kafka: a sealed segment spans at most MaxSegmentPartitions partitions",
 			d, core.Detail{Key: "parts", Value: n("parts")}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentPartitions})
+		a.Always(n("items") <= int64(i.cfg.MaxSegmentItems), "kafka: a sealed segment's commit cost stays within MaxSegmentItems",
+			d, core.Detail{Key: "items", Value: n("items")}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentItems})
 		a.Always(n("bytes")-n("last") < int64(i.cfg.MaxSegmentBytes), "kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch",
 			d, core.Detail{Key: "bytes", Value: n("bytes")}, core.Detail{Key: "last", Value: n("last")}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentBytes})
 		a.Always(n("age") <= int64(i.cfg.BatchWindow+timerSlack), "kafka: a segment is sealed within the window of its first batch",

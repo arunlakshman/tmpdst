@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -105,8 +106,16 @@ func (s *Store) query(ctx context.Context, q *dynamodb.QueryInput, limit int) ([
 	q.TableName, q.ConsistentRead = &s.table, aws.Bool(true)
 	var res []item
 	for {
+		q.ReturnConsumedCapacity = types.ReturnConsumedCapacityTotal
+		t0 := time.Now()
 		out, err := s.db.Query(ctx, q)
+		var cc []types.ConsumedCapacity
+		if out != nil {
+			cc = capacities(out.ConsumedCapacity)
+		}
+		s.Obs.CallCtx(ctx, "Query", t0, cc)
 		if err != nil {
+			s.note(ctx, "Query", err)
 			return nil, infra(err)
 		}
 		res = append(res, out.Items...)

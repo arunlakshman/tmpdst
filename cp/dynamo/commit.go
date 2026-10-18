@@ -15,6 +15,7 @@ import (
 
 	"manifester/core"
 	"manifester/cp"
+	"manifester/cp/cpobs"
 )
 
 // segBlob is the segment item's payload: the request and the full original
@@ -35,7 +36,7 @@ func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.
 				return core.CommitSegmentResp{}, 0, err
 			}
 		}
-		s.Obs.Attempt("commit")
+		s.Obs.AttemptCtx(ctx, "commit")
 		resp, code, retry, err := s.commitOnce(ctx, op)
 		if !retry {
 			return resp, code, err
@@ -45,6 +46,7 @@ func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.
 }
 
 func (s *Store) commitOnce(ctx context.Context, op core.CommitSegment) (resp core.CommitSegmentResp, code core.ErrCode, retry bool, err error) {
+	cpobs.FromContext(ctx).SetSegment(op.SegmentKey)
 	t0 := time.Now()
 	// One read round trip (BatchGetItem, consistent) covers the segment item
 	// (replay), the fence, the producer-ID counter and every item the batches
@@ -129,21 +131,68 @@ func (s *Store) commitOnce(ctx context.Context, op core.CommitSegment) (resp cor
 		return resp, code, false, nil
 	}
 	t2 := time.Now()
-	_, err = s.db.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: items})
-	s.Obs.Call("TransactWriteItems", t2)
+	tout, err := s.db.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: items,
+		ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal})
+	var cc []types.ConsumedCapacity
+	if tout != nil {
+		cc = tout.ConsumedCapacity
+	}
+	s.Obs.CallCtx(ctx, "TransactWriteItems", t2, cc)
 	if err != nil {
 		var tc *types.TransactionCanceledException
 		if errors.As(err, &tc) {
-			s.Obs.Retry("commit", "transaction_canceled")
+			codes, detail := cancelReasons(tc, items)
+			s.Obs.RetryCtx(ctx, "commit", "transaction_canceled", codes)
+			if s.Obs != nil {
+				s.Obs.Logger().Warn("commit transaction canceled", "event", "commit_txn_canceled", "segment", op.SegmentKey,
+					"items", len(items), "reasons", detail, "err", err.Error())
+			}
 			return resp, 0, true, nil
 		}
 		if errors.Is(infra(err), cp.ErrUnavailable) && !errors.Is(err, context.Canceled) {
-			s.Obs.Retry("commit", "unavailable")
+			s.Obs.RetryCtx(ctx, "commit", "unavailable", nil)
+			s.note(ctx, "TransactWriteItems", err)
 			return resp, 0, true, nil
 		}
 		return resp, 0, false, err
 	}
 	return core.CommitSegmentResp{Assigned: d.ranges}, core.OK, false, nil
+}
+
+// cancelReasons lists the codes of the items that did not commit and, for the
+// log, "index:code:pk/sk" of the first few of them. Codes "None" (the item was
+// fine) are skipped.
+func cancelReasons(tc *types.TransactionCanceledException, items []types.TransactWriteItem) (codes, detail []string) {
+	for i, r := range tc.CancellationReasons {
+		c := aws.ToString(r.Code)
+		if c == "" || c == "None" {
+			continue
+		}
+		codes = append(codes, c)
+		if len(detail) < 8 {
+			d := fmt.Sprintf("%d:%s", i, c)
+			if i < len(items) {
+				d += ":" + txKey(items[i])
+			}
+			detail = append(detail, d)
+		}
+	}
+	return
+}
+
+func txKey(t types.TransactWriteItem) string {
+	var k item
+	switch {
+	case t.Put != nil:
+		k = t.Put.Item
+	case t.Update != nil:
+		k = t.Update.Key
+	case t.Delete != nil:
+		k = t.Delete.Key
+	case t.ConditionCheck != nil:
+		k = t.ConditionCheck.Key
+	}
+	return getStr(k, "pk") + "/" + getStr(k, "sk")
 }
 
 func fromWireBatches(bs []cp.Batch) []core.PendingBatch {

@@ -12,10 +12,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+	"github.com/aws/smithy-go"
 
 	"manifester/core"
 	"manifester/cp"
 	"manifester/cp/cpobs"
+	"manifester/sys/awsobs"
 )
 
 // MaxTxItems is DynamoDB's TransactWriteItems limit. A commit needs
@@ -123,12 +125,43 @@ func infra(err error) error {
 	return err
 }
 
+// capacities adapts the single ConsumedCapacity of GetItem and Query. A server
+// that does not report it (ExtendDB) leaves it nil.
+func capacities(c *types.ConsumedCapacity) []types.ConsumedCapacity {
+	if c == nil {
+		return nil
+	}
+	return []types.ConsumedCapacity{*c}
+}
+
+// note logs a failed DynamoDB call that infra() maps to "try again later"
+// (throttling, conflicts, 5xx) at WARN, with the error code. The caller
+// returns the error; the HTTP layer answers 503 and the broker retries.
+func (s *Store) note(ctx context.Context, call string, err error) {
+	if s.Obs == nil || errors.Is(err, context.Canceled) || !errors.Is(infra(err), cp.ErrUnavailable) {
+		return
+	}
+	var ae smithy.APIError
+	code := ""
+	if errors.As(err, &ae) {
+		code = ae.ErrorCode()
+	}
+	s.Obs.Logger().Warn("dynamodb call failed", "event", "dynamo_call_failed", "call", call, "code", code,
+		"throttled", awsobs.IsThrottle(code), "err", err.Error())
+}
+
 // getItem is a consistent GetItem; nil if absent.
 func (s *Store) getItem(ctx context.Context, k item) (item, error) {
 	t0 := time.Now()
-	out, err := s.db.GetItem(ctx, &dynamodb.GetItemInput{TableName: &s.table, Key: k, ConsistentRead: aws.Bool(true)})
-	s.Obs.Call("GetItem", t0)
+	out, err := s.db.GetItem(ctx, &dynamodb.GetItemInput{TableName: &s.table, Key: k, ConsistentRead: aws.Bool(true),
+		ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal})
+	var cc []types.ConsumedCapacity
+	if out != nil {
+		cc = capacities(out.ConsumedCapacity)
+	}
+	s.Obs.CallCtx(ctx, "GetItem", t0, cc)
 	if err != nil {
+		s.note(ctx, "GetItem", err)
 		return nil, infra(err)
 	}
 	return out.Item, nil
@@ -143,9 +176,15 @@ func (s *Store) batchGet(ctx context.Context, keys []item) (map[string]item, err
 		keys = keys[n:]
 		for backoff := 5 * time.Millisecond; len(req) > 0; backoff *= 2 {
 			t0 := time.Now()
-			out, err := s.db.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{RequestItems: req})
-			s.Obs.Call("BatchGetItem", t0)
+			out, err := s.db.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{RequestItems: req,
+				ReturnConsumedCapacity: types.ReturnConsumedCapacityTotal})
+			var cc []types.ConsumedCapacity
+			if out != nil {
+				cc = out.ConsumedCapacity
+			}
+			s.Obs.CallCtx(ctx, "BatchGetItem", t0, cc)
 			if err != nil {
+				s.note(ctx, "BatchGetItem", err)
 				return nil, infra(err)
 			}
 			for _, it := range out.Responses[s.table] {

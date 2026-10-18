@@ -6,16 +6,19 @@
 #     bash /opt/manifester/deploy/aws/observability/install-alloy.sh
 #
 # Inputs (environment):
-#   RUN       run id; also the SSM path component (required)
+#   RUN       run id, becomes the run_id label (required)
 #   ROLE      broker | loadgen (required)
 #   OBS_DIR   directory holding alloy/ (default: this script's directory)
 #   ALLOY_VERSION  rpm version to pin (default below)
-#   SSM_PREFIX     default /manifester/$RUN
+#   SSM_PREFIX     default /manifester-bench (the Terraform allowed_ssm_param_prefix, no trailing /)
+#   PARAM_PROM_URL PARAM_PROM_USER PARAM_API_KEY PARAM_LOKI_URL PARAM_LOKI_USER
+#                  full SSM names; defaults $SSM_PREFIX/grafana/{remote_write_url,user,api_key,loki_url,loki_user}
+#   DDB_TABLE S3_BUCKET S3_METRICS_FILTER_ID  broker only; when unset read from SSM
+#                  $SSM_PREFIX/aws/{ddb_table,s3_bucket,s3_metrics_filter_id} (filter default manifester-bench)
 #   AWS_REGION     default: instance region from IMDS
 #
 # SSM parameters read with the instance role (SecureString for secrets):
-#   $SSM_PREFIX/grafana/prom_url  prom_user  loki_url  loki_user  api_key
-#   $SSM_PREFIX/aws/ddb_table  s3_bucket  s3_metrics_filter_id   (broker only)
+#   grafana/remote_write_url  user  loki_url  loki_user  api_key   (under $SSM_PREFIX)
 # Instance role needs ssm:GetParametersByPath on $SSM_PREFIX/* and kms:Decrypt
 # on the key if SecureStrings use a CMK.
 set -euo pipefail
@@ -24,7 +27,13 @@ set -euo pipefail
 : "${ROLE:?ROLE is required (broker|loadgen)}"
 case "$ROLE" in broker | loadgen) ;; *) echo "ROLE must be broker or loadgen" >&2; exit 2 ;; esac
 ALLOY_VERSION="${ALLOY_VERSION:-1.10.1}"
-SSM_PREFIX="${SSM_PREFIX:-/manifester/$RUN}"
+SSM_PREFIX="${SSM_PREFIX:-/manifester-bench}"
+SSM_PREFIX="${SSM_PREFIX%/}"
+PARAM_PROM_URL="${PARAM_PROM_URL:-$SSM_PREFIX/grafana/remote_write_url}"
+PARAM_PROM_USER="${PARAM_PROM_USER:-$SSM_PREFIX/grafana/user}"
+PARAM_API_KEY="${PARAM_API_KEY:-$SSM_PREFIX/grafana/api_key}"
+PARAM_LOKI_URL="${PARAM_LOKI_URL:-$SSM_PREFIX/grafana/loki_url}"
+PARAM_LOKI_USER="${PARAM_LOKI_USER:-$SSM_PREFIX/grafana/loki_user}"
 OBS_DIR="${OBS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
 if [ -z "${AWS_REGION:-}" ]; then
@@ -61,16 +70,26 @@ for r in broker loadgen; do [ "$r" = "$ROLE" ] || rm -f "/etc/alloy/$r.alloy"; d
 install -m 0644 "$OBS_DIR/alloy/alloy.service" /etc/systemd/system/alloy.service
 
 # --- secrets from SSM -> /etc/alloy/alloy.env (0600, never in the repo) -------
-ssm() { # ssm <relative-name> [default]; fails if missing and no default
+ssm() { # ssm <full-name> [default]; fails if missing and no default
   local v
-  if v=$(aws ssm get-parameter --with-decryption --name "$SSM_PREFIX/$1" --query Parameter.Value --output text 2>/dev/null); then
+  if v=$(aws ssm get-parameter --with-decryption --name "$1" --query Parameter.Value --output text 2>/dev/null); then
     printf '%s' "$v"
   elif [ "$#" -ge 2 ]; then
     printf '%s' "$2"
   else
-    echo "missing SSM parameter $SSM_PREFIX/$1" >&2; return 1
+    echo "missing SSM parameter $1" >&2; return 1
   fi
 }
+prom_url=$(ssm "$PARAM_PROM_URL")
+prom_user=$(ssm "$PARAM_PROM_USER")
+loki_url=$(ssm "$PARAM_LOKI_URL")
+loki_user=$(ssm "$PARAM_LOKI_USER")
+api_key=$(ssm "$PARAM_API_KEY")
+if [ "$ROLE" = broker ]; then
+  ddb_table=${DDB_TABLE:-$(ssm "$SSM_PREFIX/aws/ddb_table")}
+  s3_bucket=${S3_BUCKET:-$(ssm "$SSM_PREFIX/aws/s3_bucket")}
+  s3_filter=${S3_METRICS_FILTER_ID:-$(ssm "$SSM_PREFIX/aws/s3_metrics_filter_id" manifester-bench)}
+fi
 umask 077
 tmp=$(mktemp /etc/alloy/alloy.env.XXXXXX)
 {
@@ -78,15 +97,15 @@ tmp=$(mktemp /etc/alloy/alloy.env.XXXXXX)
   echo "HOST_ROLE=$ROLE"
   echo "HOST_NAME=$(hostname -s)"
   echo "AWS_REGION=$AWS_REGION"
-  echo "GRAFANA_PROM_URL=$(ssm grafana/prom_url)"
-  echo "GRAFANA_PROM_USER=$(ssm grafana/prom_user)"
-  echo "GRAFANA_LOKI_URL=$(ssm grafana/loki_url)"
-  echo "GRAFANA_LOKI_USER=$(ssm grafana/loki_user)"
-  echo "GRAFANA_API_KEY=$(ssm grafana/api_key)"
+  echo "GRAFANA_PROM_URL=$prom_url"
+  echo "GRAFANA_PROM_USER=$prom_user"
+  echo "GRAFANA_LOKI_URL=$loki_url"
+  echo "GRAFANA_LOKI_USER=$loki_user"
+  echo "GRAFANA_API_KEY=$api_key"
   if [ "$ROLE" = broker ]; then
-    echo "DDB_TABLE=$(ssm aws/ddb_table)"
-    echo "S3_BUCKET=$(ssm aws/s3_bucket)"
-    echo "S3_METRICS_FILTER_ID=$(ssm aws/s3_metrics_filter_id manifester-bench)"
+    echo "DDB_TABLE=$ddb_table"
+    echo "S3_BUCKET=$s3_bucket"
+    echo "S3_METRICS_FILTER_ID=$s3_filter"
   fi
 } >"$tmp"
 chown root:root "$tmp"; chmod 0600 "$tmp"

@@ -28,7 +28,7 @@
         "ssm:GetParameters",
         "ssm:GetParametersByPath"
       ],
-      "Resource": "arn:aws:ssm:*:*:parameter/manifester/*"
+      "Resource": "arn:aws:ssm:*:*:parameter/manifester-bench/*"
     }
   ]
 }

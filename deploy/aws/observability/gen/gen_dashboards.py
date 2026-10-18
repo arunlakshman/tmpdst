@@ -104,6 +104,9 @@ b.panel("Backpressure",
 b.panel("Buffered produce bytes", [q(f'manibroker_buffered_bytes{{{R}}}', "buffered")], "bytes")
 b.panel("Control-plane call seen by broker, p50/p99 by op",
         hq("manibroker_cp_call_seconds", [0.5, 0.99], by="op"), "s")
+b.panel("Client-side produce latency (WarpStream benchmark-producer, p50/p99)",
+        hq("warpstream_produce_benchmark_produce_request_duration_seconds", [0.5, 0.99], sel=R + ', job="warpstream_bench"'), "s",
+        desc="Only while a warpstream benchmark-producer runs (its Prometheus port 8081). Not available with kafka-producer-perf-test.")
 b.save("pipeline.json")
 
 # --------------------------------------------------------------------- aws
@@ -144,7 +147,7 @@ b.panel("Transaction cancellations and retries",
          q(f'sum(aws_dynamodb_conditional_check_failed_requests_sum{{{R}}}) / 60', "ConditionalCheckFailed/s (CW)")], "ops")
 b.panel("CommitSegment time outside the transaction (p50/p99)", hq("manicp_commit_prep_seconds", [0.5, 0.99], by="stage"), "s")
 b.panel("manicp handler time by op (p99)", hq("manicp_handler_seconds", [0.99], by="op"), "s")
-# SDK-level metrics from sys/awsobs (manibroker_s3_*, manicp_dynamo_*); series appear once the binaries wire them.
+# SDK-level metrics from sys/awsobs (manibroker_s3_*, manicp_dynamo_*), documented in docs/observability.md.
 for pre, nm in [("manibroker_s3", "S3"), ("manicp_dynamo", "DynamoDB")]:
     b.panel(f"{nm} SDK attempt latency by op (p50/p99, result=ok)", hq(f"{pre}_attempt_seconds", [0.5, 0.99], sel=R + ', result="ok"', by="op"), "s")
     b.panel(f"{nm} SDK whole-call latency by op (retries included, p99)", hq(f"{pre}_operation_seconds", [0.99], by="op,outcome"), "s")
@@ -152,6 +155,10 @@ for pre, nm in [("manibroker_s3", "S3"), ("manicp_dynamo", "DynamoDB")]:
             [q(f'sum by (op) (rate({pre}_retries_total{{{R}}}[{RI}]))', "retries {{op}}"),
              q(f'sum by (op, code) (rate({pre}_throttles_total{{{R}}}[{RI}]))', "throttle {{op}} {{code}}"),
              q(f'sum by (op, code) (rate({pre}_api_errors_total{{{R}}}[{RI}]))', "error {{op}} {{code}}")], "ops")
+b.panel("DynamoDB capacity units consumed per second (manicp, successful calls)",
+        [q(f'sum by (kind) (rate(manicp_dynamo_consumed_capacity_units_total{{{R}}}[{RI}]))', "{{kind}}")], "short")
+b.panel("DynamoDB transaction cancel reasons per second",
+        [q(f'sum by (code) (rate(manicp_dynamo_txn_cancel_reasons_total{{{R}}}[{RI}]))', "{{code}}")], "ops")
 b.save("aws.json")
 
 # ------------------------------------------------------------------- hosts

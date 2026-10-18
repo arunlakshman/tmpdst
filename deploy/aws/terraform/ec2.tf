@@ -1,14 +1,17 @@
 locals {
   common_vars = {
-    region                = var.region
-    run_id                = var.run_id
-    bucket                = aws_s3_bucket.run.bucket
-    artifact_wait_minutes = var.artifact_wait_minutes
-    alloy_version         = var.alloy_version
-    node_exporter_version = var.node_exporter_version
-    grafana_url_param     = var.grafana_remote_write_url_param
-    grafana_user_param    = var.grafana_user_param
-    grafana_api_key_param = var.grafana_api_key_param
+    region                  = var.region
+    run_id                  = var.run_id
+    bucket                  = aws_s3_bucket.run.bucket
+    artifact_wait_minutes   = var.artifact_wait_minutes
+    alloy_version           = var.alloy_version
+    grafana_url_param       = var.grafana_remote_write_url_param
+    grafana_user_param      = var.grafana_user_param
+    grafana_api_key_param   = var.grafana_api_key_param
+    grafana_loki_url_param  = var.grafana_loki_url_param
+    grafana_loki_user_param = var.grafana_loki_user_param
+    ssm_prefix              = trimsuffix(var.allowed_ssm_param_prefix, "/")
+    metrics_filter_id       = var.s3_metrics_filter_id
   }
 
   common = templatefile("${path.module}/files/common.sh.tpl", local.common_vars)

@@ -1,6 +1,6 @@
 # manifester-bench: disposable AWS benchmark stack
 
-One broker host (manibroker + manicp + node_exporter + Alloy) and one load
+One broker host (manibroker + manicp + a 10 s `/metrics` snapshotter + Alloy) and one load
 generator host in a single public subnet of one AZ, plus a run bucket, a
 DynamoDB control-plane table, and a budget alarm. Everything is tagged
 `Project=manifester-bench`, `RunId`, `Owner`, `auto-destroy-after` (informational;
@@ -11,8 +11,8 @@ nothing destroys it for you). **You run apply and destroy.**
 | Resource | Notes |
 | --- | --- |
 | VPC 10.42.0.0/16, 1 public subnet, IGW | S3 and DynamoDB gateway endpoints on the route table |
-| Security groups | No inbound except TCP 9092 from the loadgen SG to the broker SG. No SSH: use SSM Session Manager. Metrics are scraped by Alloy on each host over loopback, so no metrics ports are open. IMDSv2 required. |
-| S3 `manifester-bench-<run_id>-<account>` | force_destroy, public access blocked, SSE-S3, everything expires after `bucket_expire_days`, whole-bucket request metrics (`FilterId=EntireBucket`, variable `s3_metrics_filter_id`) |
+| Security groups | No inbound except TCP 9092 from the loadgen SG to the broker SG. No SSH: use SSM Session Manager. Metrics are scraped by Alloy on each host over loopback, so no metrics ports are open; the broker host pushes /metrics snapshots to S3 itself. IMDSv2 required. |
+| S3 `manifester-bench-<run_id>-<account>` | force_destroy, public access blocked, SSE-S3, everything expires after `bucket_expire_days`, whole-bucket request metrics (`FilterId=manifester-bench`, variable `s3_metrics_filter_id`, also handed to Alloy) |
 | DynamoDB `manifester_<run_id>_cp` | Same schema as `cp/dynamo` `CreateTables`: `pk` S hash, `sk` S range, on-demand. Created here, so manicp runs **without** `-create-tables` and its role has no CreateTable/DeleteTable. |
 | IAM | Broker: bucket RW, table RW, SSM params under the prefix, SSM core, CloudWatch read (from `../observability/iam-cloudwatch-read.json` if present, else `-var cloudwatch_read_policy_json`). Loadgen: SSM, read `artifacts/*`, write `results/*`. |
 | Budget | 80% actual and 100% forecast emails. Account-wide (no tag filter, because cost-allocation tags need manual activation), so set `budget_usd` accordingly. |
@@ -24,12 +24,8 @@ PutItem/UpdateItem/DeleteItem/ConditionCheckItem/GetItem, all of which are grant
 
 - Terraform >= 1.6, AWS CLI, Go (to build), credentials for the target account.
 - The Session Manager plugin for `aws ssm start-session`.
-- Three SSM parameters (names are variables, defaults under `/manifester-bench/`):
-  ```
-  aws ssm put-parameter --region R --name /manifester-bench/grafana/remote_write_url --type String       --value 'https://prometheus-...grafana.net/api/prom/push'
-  aws ssm put-parameter --region R --name /manifester-bench/grafana/user             --type String       --value '<metrics user id>'
-  aws ssm put-parameter --region R --name /manifester-bench/grafana/api_key          --type SecureString --value '<token>'
-  ```
+- SSM parameters (names are variables, defaults under `/manifester-bench/`; full list and how to get the values in `docs/aws-benchmark-runbook.md`):
+  `grafana/remote_write_url`, `grafana/user`, `grafana/api_key` (SecureString), `grafana/loki_url`, `grafana/loki_user`; optional `grafana/url`, `grafana/annotation_token` (SecureString) for run annotations.
   (SecureString with the default `aws/ssm` key; a customer key needs its own kms:Decrypt grant.)
 
 ## Apply
@@ -50,27 +46,21 @@ $(terraform output -raw artifact_upload_command)     # from the repo root
 c7i) and uploads, `READY` last:
 
 - `s3://BUCKET/artifacts/manifester-linux-amd64.tar.gz`: `manibroker`, `manicp` at the root.
-- `s3://BUCKET/artifacts/alloy/*`: contents of `deploy/aws/observability/alloy/`. Alloy runs on that directory (`alloy run /etc/alloy/conf.d`). If absent, Alloy is not started.
+- `s3://BUCKET/artifacts/observability/`: `deploy/aws/observability` without `dashboards/` and `gen/` (`install-alloy.sh`, `alloy/*`). User-data runs `install-alloy.sh` from it (Alloy rpm 1.10.1 from rpm.grafana.com; writes `/etc/alloy/alloy.env`, 0600). If absent, Alloy is not installed.
+- `s3://BUCKET/artifacts/bench/`: `deploy/aws/bench` (harness), synced to `/opt/bench` on the loadgen host.
 - `s3://BUCKET/artifacts/READY`: marker (holds the git sha).
 
-Environment variables the Alloy config can rely on (`/etc/alloy/env`):
-`GRAFANA_REMOTE_WRITE_URL`, `GRAFANA_USER`, `GRAFANA_API_KEY`, `RUN_ID`,
-`INSTANCE_ROLE` (`broker` or `loadgen`), `AWS_REGION`, `S3_BUCKET`,
-`DYNAMODB_TABLE` (broker only). Local scrape targets: manibroker
-`127.0.0.1:9100`, manicp `127.0.0.1:9101`, node_exporter `127.0.0.1:9110` (not
-9100, which manibroker uses), WarpStream benchmark `:8081`/`:8082` on loadgen.
+Alloy's environment (`/etc/alloy/alloy.env`) is documented in `deploy/aws/observability/README.md`. Local scrape targets: manibroker
+`127.0.0.1:9100`, manicp `127.0.0.1:9101`, WarpStream benchmark `127.0.0.1:8081` on loadgen; host metrics come from Alloy's embedded unix exporter.
 Alloy's own UI: `127.0.0.1:12345`.
 
-manibroker flags `-run-id`, `-manifest-out` (to `s3://BUCKET/results/<run_id>/manifest.json`)
-and `-log-level` are being added to the Go code concurrently; an older binary
-will make `manibroker.service` fail on an unknown flag. Note the broker's S3
-flags are `-s3-bucket`/`-s3-region` while manicp uses `-region`.
+Both services run with `-run-id`, `-log-level info` and `-manifest-out s3://BUCKET/results/<run_id>/` (each writes `<service>-<run_id>.json`). The broker's S3 flags are `-s3-bucket`/`-s3-region`; manicp uses `-region`. Snapshots of both `/metrics` pages land in `s3://BUCKET/results/<run_id>/metrics/<epoch>-{broker,manicp}.txt`.
 
 ## Verify
 
 ```
 $(terraform output -raw ssm_start_session_broker)
-  systemctl status manicp manibroker node_exporter alloy
+  systemctl status manicp manibroker mb-snapshot alloy
   tail /var/log/bench-bootstrap.log ; journalctl -u manibroker -n 50
   curl -s 127.0.0.1:9100/metrics | head
 $(terraform output -raw ssm_start_session_loadgen)
@@ -81,8 +71,7 @@ $(terraform output -raw ssm_start_session_loadgen)
   /opt/kafka/bin/kafka-producer-perf-test.sh --topic t1 --num-records 1000000 --record-size 1024 --throughput -1 --producer-props bootstrap.servers=$BOOTSTRAP
 ```
 
-The WarpStream CLI is installed with the official `curl https://console.warpstream.com/install.sh | sh`
-(best effort; check `which warpstream`). Its producer/consumer benchmarks are
+The WarpStream CLI is installed from the same tarball the official installer uses (`warpstream_agent_releases/warpstream_agent_linux_amd64_latest.tar.gz`, to `/usr/local/bin/warpstream`; best effort). Its producer/consumer benchmarks are
 `warpstream cli benchmark-producer` / `benchmark-consumer` (flags `-topic`,
 `-num-clients`, `-record-size`, `-max-records-per-second`, `-bootstrap-host`,
 `-bootstrap-port`). Upload results with
@@ -116,9 +105,8 @@ terraform destroy -var-file=my.tfvars
 
 The bucket is `force_destroy`, so objects (including `results/`) are deleted:
 copy anything you want first (`aws s3 sync s3://BUCKET/results/ ./results/`).
-The three SSM parameters were created by you and are not managed here; delete
-them if the account is shared:
-`aws ssm delete-parameters --region R --names /manifester-bench/grafana/remote_write_url /manifester-bench/grafana/user /manifester-bench/grafana/api_key`.
+The SSM parameters were created by you and are not managed here; delete them if the account is shared:
+`aws ssm delete-parameters --region R --names $(aws ssm get-parameters-by-path --region R --path /manifester-bench --recursive --query 'Parameters[].Name' --output text)`.
 
 ## Post-destroy checklist
 
@@ -148,6 +136,6 @@ the checklist passes, since losing it orphans the resources.
 ## Open assumptions
 
 - AMI is the latest Amazon Linux 2023 x86_64 via public SSM parameter, resolved at plan time.
-- Alloy 1.9.2, node_exporter 1.8.2, Kafka 3.8.0 are pinned by variable; confirm the release assets exist.
+- Alloy 1.10.1 (rpm repo) and Kafka 3.8.0 (archive.apache.org) are pinned by variable; both URLs were confirmed to exist with HTTP HEAD on 2026-10-18.
 - Hosts have public IPs (needed for Grafana Cloud and downloads); nothing inbound is allowed.
 - Single broker (`-broker-id 1`); scale-out is out of scope.

@@ -1059,6 +1059,98 @@
           "mode": "multi"
         }
       }
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "DynamoDB capacity units consumed per second (manicp, successful calls)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds_prom}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 72,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (kind) (rate(manicp_dynamo_consumed_capacity_units_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "legendFormat": "{{kind}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${ds_prom}"
+          },
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "DynamoDB transaction cancel reasons per second",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds_prom}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 72,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (code) (rate(manicp_dynamo_txn_cancel_reasons_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "legendFormat": "{{code}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${ds_prom}"
+          },
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
     }
   ],
   "annotations": {

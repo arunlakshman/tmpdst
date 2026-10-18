@@ -62,9 +62,9 @@ variable "bucket_expire_days" {
 }
 
 variable "s3_metrics_filter_id" {
-  description = "Id of the whole-bucket S3 request-metrics configuration. CloudWatch exposes it as the FilterId dimension; keep in sync with deploy/aws/observability/README."
+  description = "Id of the whole-bucket S3 request-metrics configuration. CloudWatch exposes it as the FilterId dimension; also passed to Alloy as S3_METRICS_FILTER_ID, so the YACE query and this resource always agree."
   type        = string
-  default     = "EntireBucket"
+  default     = "manifester-bench"
 }
 
 variable "budget_usd" {
@@ -106,6 +106,18 @@ variable "grafana_api_key_param" {
   default     = "/manifester-bench/grafana/api_key"
 }
 
+variable "grafana_loki_url_param" {
+  description = "SSM parameter NAME holding the Grafana Cloud Loki push URL (.../loki/api/v1/push)."
+  type        = string
+  default     = "/manifester-bench/grafana/loki_url"
+}
+
+variable "grafana_loki_user_param" {
+  description = "SSM parameter NAME holding the Grafana Cloud Loki user (instance id)."
+  type        = string
+  default     = "/manifester-bench/grafana/loki_user"
+}
+
 variable "cloudwatch_read_policy_json" {
   description = "Fallback CloudWatch read policy (JSON) for the broker host when deploy/aws/observability/iam-cloudwatch-read.json does not exist. null: attach nothing."
   type        = string
@@ -113,15 +125,9 @@ variable "cloudwatch_read_policy_json" {
 }
 
 variable "alloy_version" {
-  description = "Grafana Alloy release (GitHub grafana/alloy, without the v). Verify it exists before apply."
+  description = "Grafana Alloy rpm version from rpm.grafana.com (1.10.1 is the version the configs were validated with)."
   type        = string
-  default     = "1.9.2"
-}
-
-variable "node_exporter_version" {
-  description = "node_exporter release (GitHub prometheus/node_exporter, without the v)."
-  type        = string
-  default     = "1.8.2"
+  default     = "1.10.1"
 }
 
 variable "kafka_tools_version" {

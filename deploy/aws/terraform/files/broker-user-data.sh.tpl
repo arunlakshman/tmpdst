@@ -1,5 +1,5 @@
 #!/bin/bash
-# manifester-bench broker host: manibroker + manicp + node_exporter + Alloy.
+# manifester-bench broker host: manibroker + manicp + metrics snapshotter + Alloy.
 set -euxo pipefail
 exec > >(tee -a /var/log/bench-bootstrap.log) 2>&1
 
@@ -18,8 +18,8 @@ useradd --system --no-create-home --shell /sbin/nologin manifester 2>/dev/null |
 PRIVATE_IP=$(imds local-ipv4)
 INSTANCE_ID=$(imds instance-id)
 
-# Flags -run-id, -manifest-out and -log-level are added to cmd/manibroker
-# concurrently; if the uploaded binary predates them, the unit fails fast.
+# Both services write their manifest as <service>-<run_id>.json (trailing /).
+# Logs are JSON on stderr, which journald keeps and Alloy ships to Loki.
 cat > /etc/manifester/manicp.env <<ENV
 AWS_REGION=$REGION
 ENV
@@ -36,7 +36,7 @@ Wants=network-online.target
 [Service]
 User=manifester
 EnvironmentFile=/etc/manifester/manicp.env
-ExecStart=/opt/manifester/manicp -addr 127.0.0.1:8080 -store dynamo -region $REGION -table-prefix ${table_prefix} -metrics-addr 127.0.0.1:9101 ${cp_extra_args}
+ExecStart=/opt/manifester/manicp -addr 127.0.0.1:8080 -store dynamo -region $REGION -table-prefix ${table_prefix} -metrics-addr 127.0.0.1:9101 -run-id $RUN_ID -manifest-out s3://$BUCKET/results/$RUN_ID/ -log-level info ${cp_extra_args}
 Restart=on-failure
 RestartSec=2
 LimitNOFILE=1048576
@@ -54,7 +54,7 @@ Wants=manicp.service network-online.target
 [Service]
 User=manifester
 EnvironmentFile=/etc/manifester/manibroker.env
-ExecStart=/opt/manifester/manibroker -listen :9092 -advertise $PRIVATE_IP:9092 -broker-id 1 -node-id broker-1 -cp-url http://127.0.0.1:8080 -objects s3 -s3-bucket $BUCKET -s3-region $REGION -run-id $RUN_ID -manifest-out s3://$BUCKET/results/$RUN_ID/manifest.json -log-level info -metrics-addr 127.0.0.1:9100 ${broker_extra_args}
+ExecStart=/opt/manifester/manibroker -listen :9092 -advertise $PRIVATE_IP:9092 -broker-id 1 -node-id broker-1 -cp-url http://127.0.0.1:8080 -objects s3 -s3-bucket $BUCKET -s3-region $REGION -run-id $RUN_ID -manifest-out s3://$BUCKET/results/$RUN_ID/ -log-level info -metrics-addr 127.0.0.1:9100 ${broker_extra_args}
 Restart=on-failure
 RestartSec=2
 LimitNOFILE=1048576
@@ -63,8 +63,43 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 UNIT
 
-install_node_exporter
+# Metrics snapshotter: the SG opens no metrics ports and loadgen has no
+# SSM send-command right, so this host pushes /metrics of both services to
+# s3://BUCKET/results/RUN/metrics/<epoch>-{broker,manicp}.txt every 10 s.
+# summarize.py picks the snapshots around each cell by timestamp.
+cat > /usr/local/bin/mb-snapshot.sh <<'SNAP'
+#!/bin/bash
+set -u
+. /etc/manifester/snapshot.env
+while true; do
+  ts=$(date +%s)
+  for pair in broker:9100 manicp:9101; do
+    name=$${pair%%:*}; port=$${pair##*:}
+    curl -sf -m 3 "http://127.0.0.1:$port/metrics" | aws s3 cp - "s3://$BUCKET/results/$RUN_ID/metrics/$ts-$name.txt" --only-show-errors || true
+  done
+  sleep 10
+done
+SNAP
+chmod 0755 /usr/local/bin/mb-snapshot.sh
+cat > /etc/manifester/snapshot.env <<ENV
+BUCKET=$BUCKET
+RUN_ID=$RUN_ID
+AWS_REGION=$REGION
+ENV
+cat > /etc/systemd/system/mb-snapshot.service <<UNIT
+[Unit]
+Description=push /metrics snapshots to S3
+After=manibroker.service
+
+[Service]
+ExecStart=/usr/local/bin/mb-snapshot.sh
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 systemctl daemon-reload
-systemctl enable --now node_exporter.service manicp.service manibroker.service
-install_alloy broker
+systemctl enable --now manicp.service manibroker.service mb-snapshot.service
+install_alloy broker DDB_TABLE=$DYNAMO_TABLE
 touch /var/lib/bench-bootstrap.done

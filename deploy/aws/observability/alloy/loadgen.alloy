@@ -1,10 +1,12 @@
-// Loadgen host add-on: scrape the load generator's metrics endpoint if it
-// exposes one (LOADGEN_METRICS_ADDR, default 127.0.0.1:9102). A closed port
-// only makes the `up{job="loadgen"}` series 0; it breaks nothing.
+// Loadgen host add-on: scrape the WarpStream benchmark-producer's Prometheus
+// endpoint (its -prometheus-port, default 8081). It exists only while a
+// benchmark cell runs; between cells `up{job="warpstream_bench"}` is 0, which
+// is expected. kafka-producer-perf-test exposes nothing: the harness captures
+// its stdout summary and pushes run annotations instead.
 
 discovery.relabel "loadgen_targets" {
 	targets = [
-		{"__address__" = coalesce(sys.env("LOADGEN_METRICS_ADDR"), "127.0.0.1:9102"), "job" = "loadgen", "service" = "loadgen"},
+		{"__address__" = "127.0.0.1:8081", "job" = "warpstream_bench", "service" = "loadgen"},
 	]
 
 	rule {

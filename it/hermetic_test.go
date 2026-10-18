@@ -12,6 +12,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
 
+	"manifester/broker"
 	"manifester/core"
 	"manifester/cp/memstore"
 )
@@ -294,6 +295,33 @@ func TestGracefulStopFlushesProduce(t *testing.T) {
 	s.addBroker()
 	got := consume(t, s.seeds()[1:], map[tp]int{{"orders", 0}: 2})
 	if v := string(got[tp{"orders", 0}][1].Value); v != "inflight" {
+		t.Errorf("second record %q", v)
+	}
+}
+
+// The broker's own defaults (16 MiB, 200 ms): a lone produce waits out the
+// fixed window, and is answered right after it.
+func TestDefaultFlushRule(t *testing.T) {
+	s := newStack(t, memstore.New(), nil, nil)
+	s.brokers = broker.Config{} // every flush knob at its default
+	s.addBrokers(1)
+	create(s)
+	cl := newClient(t, s.seeds())
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	warm := &kgo.Record{Topic: "orders", Partition: 0, Value: []byte("warm")}
+	if err := cl.ProduceSync(ctx, warm).FirstErr(); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	if err := cl.ProduceSync(ctx, &kgo.Record{Topic: "orders", Partition: 0, Value: []byte("x")}).FirstErr(); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d < 150*time.Millisecond || d > 5*time.Second {
+		t.Errorf("produce answered after %v, want about the 200ms window", d)
+	}
+	got := consume(t, s.seeds(), map[tp]int{{"orders", 0}: 2})
+	if v := string(got[tp{"orders", 0}][1].Value); v != "x" {
 		t.Errorf("second record %q", v)
 	}
 }

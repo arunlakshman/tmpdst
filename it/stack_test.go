@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"manifester/broker"
+	"manifester/core"
 	"manifester/cp"
 	"manifester/cp/cpclient"
 	"manifester/sys"
@@ -33,7 +34,9 @@ func newStack(t *testing.T, st cp.Store, objs sys.ObjectStore, cls sys.Classifie
 	if objs == nil {
 		objs, cls = vsys.NewObjectStore(), prod.MemClassifier{}
 	}
-	s := &stack{t: t, cp: cpclient.New(srv.URL, srv.Client()), objs: objs, objCls: cls}
+	// A short window keeps the suite fast; TestDefaultFlushRule runs the real defaults.
+	s := &stack{t: t, cp: cpclient.New(srv.URL, srv.Client()), objs: objs, objCls: cls,
+		brokers: broker.Config{BatchWindow: core.Duration(20 * time.Millisecond)}}
 	t.Cleanup(func() {
 		for _, n := range s.nodes {
 			n.Kill()

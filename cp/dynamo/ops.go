@@ -15,7 +15,7 @@ import (
 
 // Register: the node's epoch item gets an atomic ADD 1.
 func (s *Store) Register(ctx context.Context, op core.Register) (core.RegisterResp, error) {
-	out, err := s.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+	out, err := s.updateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: &s.table, Key: nodeKey(op.Self.Node),
 		UpdateExpression:          aws.String("ADD epoch :one"),
 		ExpressionAttributeValues: item{":one": num(1)},
@@ -33,7 +33,7 @@ func (s *Store) Register(ctx context.Context, op core.Register) (core.RegisterRe
 
 // InitProducer: an atomic counter of calls; the ID is firstProducer-1+count.
 func (s *Store) InitProducer(ctx context.Context) (core.InitProducerResp, error) {
-	out, err := s.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+	out, err := s.updateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: &s.table, Key: pidKey(),
 		UpdateExpression:          aws.String("ADD n :one"),
 		ExpressionAttributeValues: item{":one": num(1)},
@@ -54,7 +54,7 @@ func (s *Store) CreateTopic(ctx context.Context, name string, partitions int32) 
 	if name == "" || partitions <= 0 {
 		return core.ErrInvalid, nil
 	}
-	_, err := s.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+	_, err := s.updateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName: &s.table, Key: topicKey(name),
 		UpdateExpression:          aws.String("SET parts = :n"),
 		ConditionExpression:       aws.String("attribute_not_exists(parts) OR parts < :n"),
@@ -106,16 +106,8 @@ func (s *Store) query(ctx context.Context, q *dynamodb.QueryInput, limit int) ([
 	q.TableName, q.ConsistentRead = &s.table, aws.Bool(true)
 	var res []item
 	for {
-		q.ReturnConsumedCapacity = types.ReturnConsumedCapacityTotal
-		t0 := time.Now()
-		out, err := s.db.Query(ctx, q)
-		var cc []types.ConsumedCapacity
-		if out != nil {
-			cc = capacities(out.ConsumedCapacity)
-		}
-		s.Obs.CallCtx(ctx, "Query", t0, cc)
+		out, err := s.queryPage(ctx, q)
 		if err != nil {
-			s.note(ctx, "Query", err)
 			return nil, infra(err)
 		}
 		res = append(res, out.Items...)
@@ -176,7 +168,7 @@ func (s *Store) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, co
 		q.Limit = aws.Int32(64)
 	}
 	for {
-		out, err := s.db.Query(ctx, q)
+		out, err := s.queryPage(ctx, q)
 		if err != nil {
 			return core.LookupResp{}, 0, infra(err)
 		}
@@ -193,4 +185,39 @@ func (s *Store) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, co
 		}
 		q.ExclusiveStartKey = out.LastEvaluatedKey
 	}
+}
+
+// queryPage is one measured Query call.
+func (s *Store) queryPage(ctx context.Context, q *dynamodb.QueryInput) (*dynamodb.QueryOutput, error) {
+	q.ReturnConsumedCapacity = types.ReturnConsumedCapacityTotal
+	t0 := time.Now()
+	out, err := s.db.Query(ctx, q)
+	var cc []types.ConsumedCapacity
+	if out != nil {
+		cc = capacities(out.ConsumedCapacity)
+	}
+	s.Obs.CallCtx(ctx, "Query", t0, cc)
+	if err != nil {
+		s.note(ctx, "Query", err)
+	}
+	return out, err
+}
+
+// updateItem is one measured UpdateItem call.
+func (s *Store) updateItem(ctx context.Context, in *dynamodb.UpdateItemInput) (*dynamodb.UpdateItemOutput, error) {
+	in.ReturnConsumedCapacity = types.ReturnConsumedCapacityTotal
+	t0 := time.Now()
+	out, err := s.db.UpdateItem(ctx, in)
+	var cc []types.ConsumedCapacity
+	if out != nil {
+		cc = capacities(out.ConsumedCapacity)
+	}
+	s.Obs.CallCtx(ctx, "UpdateItem", t0, cc)
+	if err != nil {
+		var ccf *types.ConditionalCheckFailedException
+		if !errors.As(err, &ccf) {
+			s.note(ctx, "UpdateItem", err)
+		}
+	}
+	return out, err
 }

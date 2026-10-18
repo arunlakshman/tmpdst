@@ -293,7 +293,7 @@ func (m *Metrics) consume(call string, cc []types.ConsumedCapacity) float64 {
 		return 0
 	}
 	kind := "read"
-	if call == "TransactWriteItems" || call == "PutItem" || call == "UpdateItem" {
+	if call == "TransactWriteItems" || call == "PutItem" || call == "UpdateItem" || call == "DeleteItem" {
 		kind = "write"
 	}
 	var total float64

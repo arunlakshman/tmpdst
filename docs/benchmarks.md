@@ -245,3 +245,49 @@ Reading:
   shape: commit utilisation near 100% with PUTs overlapped. The commit time itself (240 to 320 ms for a
   TransactWriteItems of at most 32 batches on ExtendDB/SQLite) was not broken down further; the next step is to time
   the CP call inside the control plane. Two runs only.
+
+## Where the commit time goes (control-plane metrics, setup C)
+
+Decision 37 added `manicp -metrics-addr` (default `:9101`, `/metrics`, prefix `manicp_`) and `manibroker_cp_call_seconds{op}`
+(the CP client's send-to-full-response time). Together they split a broker `commit_ns` into client RTT, server handler
+time, DynamoDB calls and the commit's read/decide steps.
+
+Measurement, 2026-10-18: setup C with fresh `scripts/it-up.sh` backends, 8 clients, 1 KB, 30 s, 6 partitions, defaults of
+decision 35, both /metrics scraped before and after the run (deltas). Two runs, new bucket and table prefix each time.
+Machine: the kind cluster container was up (about 20 to 30% of a core), SeaweedFS 150 to 170%, ExtendDB 32 to 39%, a
+Chrome for Testing helper and fseventsd a few %, load average about 4.7 before the runs. Averages per CommitSegment:
+
+| | run 1 | run 2 |
+|---|---|---|
+| client result | 66.4 MiB/s, 68.0k rec/s, avg 579 ms | 63.7 MiB/s, 65.2k rec/s, avg 602 ms |
+| segments (timer / 32-batch cap / size), avg size | 181 (51 / 117 / 13), 11.9 MB | 178 (44 / 126 / 8), 11.5 MB |
+| broker `segment_commit_seconds` | 96.3 ms | 116.3 ms |
+| client CPCall RTT (`cp_call_seconds{commit-segment}`) | 96.2 ms | 116.0 ms |
+| manicp handler (`handler_seconds{commit-segment}`) | 95.7 ms | 115.5 ms |
+| DynamoDB `TransactWriteItems` | 63.0 ms | 77.2 ms |
+| reads (1 + 3 GetItem, 1 BatchGetItem; `commit_prep{reads}`) | 32.2 ms (GetItem 5.8 each, BatchGet 16.3) | 37.8 ms (6.5 each, 18.8) |
+| decide + build items (`commit_prep{decide_encode}`) | 0.23 ms | 0.28 ms |
+| commit body | 5.8 KB | 6.0 KB |
+| attempts / TransactionCanceled / unavailable retries | 181 / 0 / 0 | 178 / 0 / 0 |
+| in-flight CP requests | 0 at both scrapes; commits are one at a time | same |
+| broker queue wait / PUT / seal to ack | 59 / 290 / 445 ms | 52 / 297 / 465 ms |
+
+Reading:
+
+- The accounting closes. Client RTT minus handler time is 0.4 to 0.5 ms (HTTP, JSON and the loopback), and handler time
+  minus (reads + decide + transact) is about 0.2 ms. So no time hides between the broker and the control plane or in the
+  JSON code: everything is inside the DynamoDB calls, 60 to 65% in the one transaction and 33% in the five consistent reads.
+- There were no conflicts: zero TransactionCanceled, zero retries, one attempt per commit. The commit is not slow because
+  it races (there is a single serial committer per broker).
+- The 240 to 320 ms of the earlier section could not be reproduced: this time commits took 96 to 116 ms and the run
+  reached 64 to 66 MiB/s (against 13.6 to 18.7 MiB/s then, and 50.5 MiB/s earlier that day). The code path is unchanged
+  between the two, so the earlier runs were slowed by the machine or ExtendDB state (that session had a kind cluster
+  running and a reused ExtendDB database), not by the control-plane service code: the service adds under 1 ms around the
+  DynamoDB calls. ExtendDB's own latency is the variable: 63 to 77 ms for a 32-batch transaction here, against 39 to 58 ms for the
+  whole commit measured directly without SeaweedFS competing for the same cores.
+- Cheap lever: the three serial GetItems (segment key, node epoch, and the producer counter) plus the BatchGet cost
+  about 32 to 38 ms before the transaction starts; they could be one BatchGet (or overlapped), saving about 15 to 20 ms of ~100.
+- With larger segments (11.9 MB, not 5 MB), the commit is no longer saturated: summed commit seconds were about 0.55 to 0.67 of
+  wall time. Two runs only; the earlier slow state was not reproduced, so a repeat with `reuse` of the old database would
+  confirm that state, not the code, was the cause.
+

@@ -4,7 +4,7 @@
     "title": "Manifester control plane API",
     "version": "1.0.0",
     "summary": "JSON over HTTP between brokers and the metadata control plane.",
-    "description": "The control plane is the production twin of `veritas.ControlPlane` (the executable spec); every store (cp/memstore, cp/dynamo) is checked against it op for op. Served by `cp.NewHandler` (cp/handler.go); the broker-side client is cp/cpclient. Wire structs: cp/wire.go. This file is kept in sync with the Go code by api/openapi/spec_test.go; edit controlplane.json and regenerate the YAML (see README.md).\n\n## Status mapping\n\n| Condition | HTTP | Body | Client classification (cpclient.Classifier) |\n|---|---|---|---|\n| success or business error | 200 | JSON, `err` field | business code, NotApplied |\n| malformed JSON, body > 32 MiB | 200 | `{\"err\":\"ErrInvalid\"}` | ErrInvalid, NotApplied |\n| ErrUnavailable (throttle, exhausted optimistic retries), context canceled/deadline in the store | 503 | text `unavailable` | ErrUnavailable, NotApplied |\n| any other store error | 500 | text `internal error` | ErrIO, MaybeApplied for Register, InitProducer, CommitSegment |\n| other 4xx / 429 from a proxy | 4xx | any | ErrIO NotApplied / 429: ErrUnavailable NotApplied |\n| timeout, reset or EOF after the request was sent | none | none | ErrTimeout or ErrIO, MaybeApplied for mutating ops |\n\nLookup and DescribeTopics are reads and always NotApplied. A wrong method on a route is 405 and an unknown path 404 (net/http ServeMux).\n\n## Error codes and fencing\n\nBusiness errors travel in the body's `err` as the frozen `core.ErrCode` spelling. `ErrFenced` has two meanings (decision 34): on the WHOLE CommitSegment reply it is a stale broker epoch (the broker must trip, decision 7); on ONE Range it is a stale producer epoch (reject that batch only). The control plane fences by epoch only; the incarnation is never compared.\n\n## Idempotency\n\nCommitSegment is idempotent per `segment_key`; Register and InitProducer are not (a retry after MaybeApplied may burn an epoch or an ID, harmless); CreateTopic, Lookup and DescribeTopics are idempotent. Per-batch producer idempotence (decision 28) is carried in Batch.producer/pepoch/base_seq with a 5-batch window per (partition, producer).\n\n## Limits (decision 39)\n\nDynamoDB commit: at most 100 transaction items = 2 + 2 x partitions with a new batch + grown topics + producer states read, else ErrTooLarge. Stored answer blob 300 KB, one run 200 KB, else ErrTooLarge. Broker-side bounds: MaxSegmentItems 96, MaxSegmentPartitions 24, MaxSegmentBatches 256. Request body 32 MiB. Decisions: docs/decisions.md rows 28, 34, 39.\n\n## Examples\n\nThe worked examples are replayed in order, against a fresh in-memory control plane, by the spec test (`x-replay`)."
+    "description": "The control plane is the production twin of `veritas.ControlPlane` (the executable spec); every store (cp/memstore, cp/dynamo) is checked against it op for op. Served by `cp.NewHandler` (cp/handler.go); the broker-side client is cp/cpclient. Wire structs: cp/wire.go. This file is kept in sync with the Go code by api/openapi/spec_test.go; edit controlplane.json and regenerate the YAML (see README.md).\n\n## Status mapping\n\n| Condition | HTTP | Body | Client classification (cpclient.Classifier) |\n|---|---|---|---|\n| success or business error | 200 | JSON, `err` field | business code, NotApplied |\n| malformed JSON, body > 32 MiB | 200 | `{\"err\":\"ErrInvalid\"}` | ErrInvalid, NotApplied |\n| ErrUnavailable (throttle, exhausted optimistic retries), context canceled/deadline in the store | 503 | text `unavailable` | ErrUnavailable, NotApplied |\n| any other store error | 500 | text `internal error` | ErrIO, MaybeApplied for CommitSegment |\n| other 4xx / 429 from a proxy | 4xx | any | ErrIO NotApplied / 429: ErrUnavailable NotApplied |\n| timeout, reset or EOF after the request was sent | none | none | ErrTimeout or ErrIO, MaybeApplied for mutating ops |\n\nLookup and DescribeTopics are reads and always NotApplied. A wrong method on a route is 405 and an unknown path 404 (net/http ServeMux).\n\n## Error codes\n\nBusiness errors travel in the body's `err` as the frozen `core.ErrCode` spelling. There is no fencing and no producer state (decisions 41, 44): the control plane emits ErrInvalid, ErrConflict and ErrTooLarge only. The numeric slot of the retired ErrFenced is skipped; `ErrFenced` and `ErrOutOfOrder` are not spellings any more.\n\n## Idempotency\n\nCommitSegment is idempotent per `segment_key` (a replay of an identical request returns the original ranges; a different request under the same key is ErrConflict). The control plane assigns the offsets (decision 42): the next offset of a partition is the end of its newest run, and the store appends with a compare-and-set that it retries internally; callers never see the race. CreateTopic, Lookup and DescribeTopics are idempotent. There are no idempotent producers (decision 41), brokers are stateless and there is no registration (decision 44).\n\n## Limits (decisions 39, 42)\n\nDynamoDB commit: at most 100 transaction items = 1 (segment) + distinct partitions + grown topics, else ErrTooLarge. Stored answer blob 300 KB, one run 200 KB, else ErrTooLarge. Broker-side bounds: MaxSegmentPartitions 24, MaxSegmentBatches 256. Request body 32 MiB. Decisions: docs/decisions.md rows 39, 41-44.\n\n## Examples\n\nThe worked examples are replayed in order, against a fresh in-memory control plane, by the spec test (`x-replay`)."
   },
   "servers": [
     {
@@ -96,163 +96,11 @@
         }
       }
     },
-    "/v1/register": {
-      "post": {
-        "operationId": "register",
-        "summary": "Announce a boot and obtain the fencing epoch",
-        "description": "Returns the node's fencing epoch: previous + 1, starting at 1, monotonic per `node` whatever the incarnation (veritas.ControlPlane rules; DynamoDB: UpdateItem ADD on `N#<node>`). A newer epoch fences every older one: a CommitSegment carrying an older epoch is answered `ErrFenced` for the whole call and the broker must trip (decision 7, 34). **The control plane fences by epoch only; `self.inc` is validated (32 hex chars) but never compared (decision 34).**\n\nRetry semantics: NOT idempotent. Each call bumps the epoch. A retry after MaybeApplied may burn an epoch, which is harmless because only the latest value is ever valid, but the broker must use the epoch of the reply it finally receives (cpclient classifies Register as mutating).",
-        "tags": [
-          "control-plane"
-        ],
-        "x-retry": {
-          "idempotent": false,
-          "maybe_applied_on": "timeout or lost reply",
-          "note": "A retry may burn an epoch; harmless."
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RegisterReq"
-              },
-              "examples": {
-                "first-boot": {
-                  "summary": "First boot of broker-1",
-                  "value": {
-                    "self": {
-                      "node": "broker-1",
-                      "inc": "00112233445566778899aabbccddeeff"
-                    }
-                  }
-                },
-                "bad-incarnation": {
-                  "summary": "Incarnation not 32 hex chars is ErrInvalid",
-                  "value": {
-                    "self": {
-                      "node": "broker-1",
-                      "inc": "zz"
-                    }
-                  },
-                  "description": "A business error from a typed handler still carries the zero value of required fields."
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Business outcome. The HTTP status is 200 for success AND for every business error; read `err` in the body (decision 28/34, cp/handler.go). A malformed body, or a body over 32 MiB, is also 200 with `{\"err\":\"ErrInvalid\"}`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/RegisterResp"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ErrorBody"
-                    }
-                  ]
-                },
-                "examples": {
-                  "first-boot": {
-                    "summary": "First boot of broker-1",
-                    "value": {
-                      "epoch": 1
-                    }
-                  },
-                  "bad-incarnation": {
-                    "summary": "Incarnation not 32 hex chars is ErrInvalid",
-                    "value": {
-                      "err": "ErrInvalid",
-                      "epoch": 0
-                    },
-                    "description": "A business error from a typed handler still carries the zero value of required fields."
-                  }
-                }
-              }
-            }
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        }
-      }
-    },
-    "/v1/init-producer": {
-      "post": {
-        "operationId": "initProducer",
-        "summary": "Allocate an idempotent producer ID",
-        "description": "Kafka InitProducerId (key 22, decision 28). Allocates the next producer ID (first is 1000, +1 per call; DynamoDB item `PID`, ID = 999 + n) with `pepoch` 0. Never fails with a business error. IDs below 1000 are never allocated, so `producer` = 0 (`NoProducer`) is unambiguous in a Batch.\n\nRetry semantics: NOT idempotent: a retry after MaybeApplied may allocate another ID, which is harmless (an unused ID is never referenced). The request body is an empty JSON object; unknown fields are ignored.",
-        "tags": [
-          "control-plane"
-        ],
-        "x-retry": {
-          "idempotent": false,
-          "maybe_applied_on": "timeout or lost reply",
-          "note": "A retry may leak an ID; harmless."
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InitProducerReq"
-              },
-              "examples": {
-                "allocate": {
-                  "summary": "First producer ID",
-                  "value": {}
-                }
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Business outcome. The HTTP status is 200 for success AND for every business error; read `err` in the body (decision 28/34, cp/handler.go). A malformed body, or a body over 32 MiB, is also 200 with `{\"err\":\"ErrInvalid\"}`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/InitProducerResp"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ErrorBody"
-                    }
-                  ]
-                },
-                "examples": {
-                  "allocate": {
-                    "summary": "First producer ID",
-                    "value": {
-                      "producer": 1000,
-                      "pepoch": 0
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalError"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        }
-      }
-    },
     "/v1/commit-segment": {
       "post": {
         "operationId": "commitSegment",
         "summary": "Register an uploaded segment and assign offsets atomically",
-        "description": "Registers one uploaded object holding batches for many partitions and assigns their offsets in one atomic step. `assigned` has one entry per request batch, in request order.\n\n**Order of checks** (veritas.ControlPlane, the executable spec): (1) `segment_key` already committed: the original ranges again (success), or `ErrConflict` if the batches differ; (2) empty key or batches, `records` <= 0, empty topic, negative partition, a producer that InitProducer never returned, or negative `pepoch`/`base_seq`: `ErrInvalid`; (3) `epoch` is not the owner node's current epoch, or the node never registered: **whole-call `ErrFenced`** (stale broker epoch, the broker must trip, decision 7/34); (4) otherwise every batch is decided in request order (an earlier batch's effect is seen by a later one).\n\n**Per-batch results** (decision 28): `err` absent = assigned; `dup` = already committed by an earlier segment, `base`/`count`/location name that original commit; `ErrOutOfOrder` = sequence gap; `ErrFenced` on one range = **stale producer epoch** (`pepoch` older than the state), only that batch is rejected. A rejected batch has `base` = -1 and `count` = `records`. The producer state is per (topic, partition, producer): pepoch, next expected sequence, and the last 5 batches. A larger `pepoch` restarts the state and needs `base_seq` 0. The same ErrFenced spelling therefore has opposite meanings on the whole call and on one range: use the call level to trip the broker and the range level to reject a batch.\n\n**Idempotency / retry**: IDEMPOTENT per `segment_key` (the G# item `attribute_not_exists` in DynamoDB, the stored full answer is replayed verbatim, also on another replica). After MaybeApplied (timeout, reset, 5xx other than 503) the broker retries the same key and batches and gets the original offsets. 503 (`ErrUnavailable`, NotApplied: optimistic-race retries exhausted after 20 attempts, throttling) is safe to retry.\n\n**Limits**: a commit costs 2 + 2 x (partitions with a new batch) + grown topics + producer states read (one per idempotent (partition, producer)) DynamoDB transaction items and the transaction allows at most 100; beyond that the answer is `ErrTooLarge` (decision 39). The number of batches does not count toward the transaction. The stored answer blob (`G#`, request + answer) is capped at 300 KB (about 1000 batches) and one partition run at 200 KB; exceeding either is also `ErrTooLarge`. `ErrTooLarge` is NOT retried by the broker, which instead bounds segments up front: `MaxSegmentItems` 96, `MaxSegmentPartitions` 24, `MaxSegmentBatches` 256 (broker.Config). The in-memory store and the spec have no such limit.\n\n`seg_key`/`seg_off`/`seg_len` are the byte range (SegmentRef `Loc`) of the batch inside the uploaded object; `seg_len` <= 0 means to the end of the object.",
+        "description": "Registers one uploaded object holding batches for many partitions and assigns their offsets in one atomic step: every batch is assigned or none is. `assigned` has one entry per request batch, in request order.\n\n**Order of checks** (veritas.ControlPlane, the executable spec): (1) `segment_key` already committed: the original ranges again (success), or `ErrConflict` if the request differs; (2) empty key or batches, `records` <= 0, empty topic or negative partition: `ErrInvalid`; (3) otherwise every batch gets `base` = its partition's end (the end of its newest run, 0 for an empty log), in request order, the end growing by `records`: a later batch of the same partition continues after the earlier one. Topics are created implicitly and grow to cover the partition. A failed commit records nothing: its key is reusable.\n\n**Offsets** (decisions 41, 42): the control plane assigns them; the broker never proposes one. There are no producers, epochs or fencing. A store guards the append with a compare-and-set on the run base and retries internally on a lost race, so concurrent committers (many control-plane replicas, many brokers) get contiguous, non-overlapping offsets per partition.\n\n**Idempotency / retry**: IDEMPOTENT per `segment_key` (the G# item `attribute_not_exists` in DynamoDB; the stored full answer is replayed verbatim, also on another replica). After MaybeApplied (timeout, reset, 5xx other than 503) the broker retries the same key and batches and gets the original offsets. 503 (`ErrUnavailable`, NotApplied: lost-race retries exhausted after 20 attempts, throttling) is safe to retry.\n\n**Limits**: a commit costs 1 + (distinct partitions) + (grown topics) DynamoDB transaction items and the transaction allows at most 100; beyond that the answer is `ErrTooLarge` (decision 39). The number of batches does not count toward the transaction. The stored answer blob (`G#`, request + answer) is capped at 300 KB (about 1000 batches) and one partition run at 200 KB; exceeding either is also `ErrTooLarge`. `ErrTooLarge` is NOT retried by the broker, which instead bounds segments up front: `MaxSegmentPartitions` 24, `MaxSegmentBatches` 256 (broker.Config). The in-memory store and the spec have no such limit.\n\n`seg_key`/`seg_off`/`seg_len` are the byte range (SegmentRef `Loc`) of the batch inside the uploaded object; `seg_len` <= 0 means to the end of the object.",
         "tags": [
           "control-plane"
         ],
@@ -264,7 +112,6 @@
           "not_retried": [
             "ErrTooLarge",
             "ErrInvalid",
-            "ErrFenced",
             "ErrConflict"
           ]
         },
@@ -277,14 +124,9 @@
               },
               "examples": {
                 "three-batches": {
-                  "summary": "3 batches, 2 partitions, one idempotent producer",
+                  "summary": "3 batches, 2 partitions",
                   "value": {
                     "segment_key": "seg-0001",
-                    "owner": {
-                      "node": "broker-1",
-                      "inc": "00112233445566778899aabbccddeeff"
-                    },
-                    "epoch": 1,
                     "batches": [
                       {
                         "topic": "orders",
@@ -292,10 +134,7 @@
                         "records": 5,
                         "seg_key": "seg-0001",
                         "seg_off": 0,
-                        "seg_len": 120,
-                        "producer": 1000,
-                        "pepoch": 0,
-                        "base_seq": 0
+                        "seg_len": 120
                       },
                       {
                         "topic": "orders",
@@ -303,10 +142,7 @@
                         "records": 3,
                         "seg_key": "seg-0001",
                         "seg_off": 120,
-                        "seg_len": 80,
-                        "producer": 1000,
-                        "pepoch": 0,
-                        "base_seq": 0
+                        "seg_len": 80
                       },
                       {
                         "topic": "orders",
@@ -314,93 +150,41 @@
                         "records": 2,
                         "seg_key": "seg-0001",
                         "seg_off": 200,
-                        "seg_len": 60,
-                        "producer": 1000,
-                        "pepoch": 0,
-                        "base_seq": 5
+                        "seg_len": 60
                       }
                     ]
                   },
-                  "description": "Partition 0 gets offsets 0-4 then 5-6 (batch 3 has base_seq 5, the next expected after 5 records); partition 1 gets 0-2. Offsets are contiguous per partition and assigned in one atomic step."
+                  "description": "Partition 0 gets offsets 0-4 then 5-6 (the third batch continues after the first in request order); partition 1 gets 0-2. Offsets are contiguous per partition and assigned in one atomic step."
                 },
-                "duplicate": {
-                  "summary": "Retried producer batch is a Dup",
+                "second-segment": {
+                  "summary": "A later segment continues each partition",
                   "value": {
                     "segment_key": "seg-0002",
-                    "owner": {
-                      "node": "broker-1",
-                      "inc": "00112233445566778899aabbccddeeff"
-                    },
-                    "epoch": 1,
                     "batches": [
-                      {
-                        "topic": "orders",
-                        "partition": 0,
-                        "records": 5,
-                        "seg_key": "seg-0002",
-                        "seg_off": 0,
-                        "seg_len": 120,
-                        "producer": 1000,
-                        "pepoch": 0,
-                        "base_seq": 0
-                      },
                       {
                         "topic": "orders",
                         "partition": 1,
                         "records": 4,
                         "seg_key": "seg-0002",
-                        "seg_off": 120,
-                        "seg_len": 90,
-                        "producer": 1000,
-                        "pepoch": 0,
-                        "base_seq": 3
-                      }
-                    ]
-                  },
-                  "description": "Batch 1 repeats (producer 1000, pepoch 0, base_seq 0) from seg-0001. The answer is success with the ORIGINAL base/count/location (Kafka DUPLICATE_SEQUENCE semantics) and dup=true; the bytes this segment uploaded for it are orphaned. Batch 2 (base_seq 3 = next expected) is assigned normally."
-                },
-                "out-of-order": {
-                  "summary": "Sequence gap is ErrOutOfOrder; non-idempotent batch still assigned",
-                  "value": {
-                    "segment_key": "seg-0003",
-                    "owner": {
-                      "node": "broker-1",
-                      "inc": "00112233445566778899aabbccddeeff"
-                    },
-                    "epoch": 1,
-                    "batches": [
-                      {
-                        "topic": "orders",
-                        "partition": 0,
-                        "records": 2,
-                        "seg_key": "seg-0003",
                         "seg_off": 0,
-                        "seg_len": 50,
-                        "producer": 1000,
-                        "pepoch": 0,
-                        "base_seq": 20
+                        "seg_len": 90
                       },
                       {
                         "topic": "orders",
-                        "partition": 1,
-                        "records": 1,
-                        "seg_key": "seg-0003",
-                        "seg_off": 50,
-                        "seg_len": 40
+                        "partition": 0,
+                        "records": 4,
+                        "seg_key": "seg-0002",
+                        "seg_off": 90,
+                        "seg_len": 100
                       }
                     ]
                   },
-                  "description": "Batch 1 has base_seq 20 but 7 is expected: rejected with err=ErrOutOfOrder, base=-1, count=records, location as requested; nothing changes for it. Batch 2 has no producer (NoProducer) and is always assigned. A segment of only dups and rejects still counts as committed."
+                  "description": "Partition 1 was at 3 and partition 0 at 7 (the end of the newest run): the new batches start there."
                 },
                 "replay": {
                   "summary": "Replay of seg-0001 returns the original offsets",
                   "value": {
                     "segment_key": "seg-0001",
-                    "owner": {
-                      "node": "broker-1",
-                      "inc": "00112233445566778899aabbccddeeff"
-                    },
-                    "epoch": 1,
                     "batches": [
                       {
                         "topic": "orders",
@@ -408,10 +192,7 @@
                         "records": 5,
                         "seg_key": "seg-0001",
                         "seg_off": 0,
-                        "seg_len": 120,
-                        "producer": 1000,
-                        "pepoch": 0,
-                        "base_seq": 0
+                        "seg_len": 120
                       },
                       {
                         "topic": "orders",
@@ -419,10 +200,7 @@
                         "records": 3,
                         "seg_key": "seg-0001",
                         "seg_off": 120,
-                        "seg_len": 80,
-                        "producer": 1000,
-                        "pepoch": 0,
-                        "base_seq": 0
+                        "seg_len": 80
                       },
                       {
                         "topic": "orders",
@@ -430,24 +208,16 @@
                         "records": 2,
                         "seg_key": "seg-0001",
                         "seg_off": 200,
-                        "seg_len": 60,
-                        "producer": 1000,
-                        "pepoch": 0,
-                        "base_seq": 5
+                        "seg_len": 60
                       }
                     ]
                   },
-                  "description": "Idempotent per SegmentKey: the same key with the same batches returns the original ranges, never new ones, whatever `epoch` now says."
+                  "description": "Idempotent per SegmentKey: the same key with the same request returns the original ranges, never new ones, although both partitions have moved on since."
                 },
                 "conflict": {
-                  "summary": "Same SegmentKey, different batches is ErrConflict",
+                  "summary": "Same SegmentKey, different request is ErrConflict",
                   "value": {
                     "segment_key": "seg-0001",
-                    "owner": {
-                      "node": "broker-1",
-                      "inc": "00112233445566778899aabbccddeeff"
-                    },
-                    "epoch": 1,
                     "batches": [
                       {
                         "topic": "orders",
@@ -455,48 +225,16 @@
                         "records": 5,
                         "seg_key": "seg-0001",
                         "seg_off": 0,
-                        "seg_len": 120,
-                        "producer": 1000,
-                        "pepoch": 0,
-                        "base_seq": 0
-                      }
-                    ]
-                  }
-                },
-                "stale-broker-epoch": {
-                  "summary": "Stale broker epoch fences the whole call",
-                  "value": {
-                    "segment_key": "seg-0004",
-                    "owner": {
-                      "node": "broker-1",
-                      "inc": "00112233445566778899aabbccddeeff"
-                    },
-                    "epoch": 0,
-                    "batches": [
-                      {
-                        "topic": "orders",
-                        "partition": 0,
-                        "records": 5,
-                        "seg_key": "seg-0001",
-                        "seg_off": 0,
-                        "seg_len": 120,
-                        "producer": 1000,
-                        "pepoch": 0,
-                        "base_seq": 0
+                        "seg_len": 120
                       }
                     ]
                   },
-                  "description": "Whole-call ErrFenced: the caller's `epoch` is not the node's current epoch (decision 34). The broker must trip. No `assigned` field."
+                  "description": "seg-0001 was committed with three batches; this request has one. Nothing changes."
                 },
                 "empty": {
                   "summary": "No batches is ErrInvalid",
                   "value": {
                     "segment_key": "seg-0005",
-                    "owner": {
-                      "node": "broker-1",
-                      "inc": "00112233445566778899aabbccddeeff"
-                    },
-                    "epoch": 1,
                     "batches": []
                   }
                 }
@@ -521,7 +259,7 @@
                 },
                 "examples": {
                   "three-batches": {
-                    "summary": "3 batches, 2 partitions, one idempotent producer",
+                    "summary": "3 batches, 2 partitions",
                     "value": {
                       "assigned": [
                         {
@@ -553,61 +291,33 @@
                         }
                       ]
                     },
-                    "description": "Partition 0 gets offsets 0-4 then 5-6 (batch 3 has base_seq 5, the next expected after 5 records); partition 1 gets 0-2. Offsets are contiguous per partition and assigned in one atomic step."
+                    "description": "Partition 0 gets offsets 0-4 then 5-6 (the third batch continues after the first in request order); partition 1 gets 0-2. Offsets are contiguous per partition and assigned in one atomic step."
                   },
-                  "duplicate": {
-                    "summary": "Retried producer batch is a Dup",
+                  "second-segment": {
+                    "summary": "A later segment continues each partition",
                     "value": {
                       "assigned": [
-                        {
-                          "topic": "orders",
-                          "partition": 0,
-                          "base": 0,
-                          "count": 5,
-                          "seg_key": "seg-0001",
-                          "seg_off": 0,
-                          "seg_len": 120,
-                          "dup": true
-                        },
                         {
                           "topic": "orders",
                           "partition": 1,
                           "base": 3,
                           "count": 4,
                           "seg_key": "seg-0002",
-                          "seg_off": 120,
-                          "seg_len": 90
-                        }
-                      ]
-                    },
-                    "description": "Batch 1 repeats (producer 1000, pepoch 0, base_seq 0) from seg-0001. The answer is success with the ORIGINAL base/count/location (Kafka DUPLICATE_SEQUENCE semantics) and dup=true; the bytes this segment uploaded for it are orphaned. Batch 2 (base_seq 3 = next expected) is assigned normally."
-                  },
-                  "out-of-order": {
-                    "summary": "Sequence gap is ErrOutOfOrder; non-idempotent batch still assigned",
-                    "value": {
-                      "assigned": [
-                        {
-                          "topic": "orders",
-                          "partition": 0,
-                          "base": -1,
-                          "count": 2,
-                          "seg_key": "seg-0003",
                           "seg_off": 0,
-                          "seg_len": 50,
-                          "err": "ErrOutOfOrder"
+                          "seg_len": 90
                         },
                         {
                           "topic": "orders",
-                          "partition": 1,
+                          "partition": 0,
                           "base": 7,
-                          "count": 1,
-                          "seg_key": "seg-0003",
-                          "seg_off": 50,
-                          "seg_len": 40
+                          "count": 4,
+                          "seg_key": "seg-0002",
+                          "seg_off": 90,
+                          "seg_len": 100
                         }
                       ]
                     },
-                    "description": "Batch 1 has base_seq 20 but 7 is expected: rejected with err=ErrOutOfOrder, base=-1, count=records, location as requested; nothing changes for it. Batch 2 has no producer (NoProducer) and is always assigned. A segment of only dups and rejects still counts as committed."
+                    "description": "Partition 1 was at 3 and partition 0 at 7 (the end of the newest run): the new batches start there."
                   },
                   "replay": {
                     "summary": "Replay of seg-0001 returns the original offsets",
@@ -642,20 +352,14 @@
                         }
                       ]
                     },
-                    "description": "Idempotent per SegmentKey: the same key with the same batches returns the original ranges, never new ones, whatever `epoch` now says."
+                    "description": "Idempotent per SegmentKey: the same key with the same request returns the original ranges, never new ones, although both partitions have moved on since."
                   },
                   "conflict": {
-                    "summary": "Same SegmentKey, different batches is ErrConflict",
+                    "summary": "Same SegmentKey, different request is ErrConflict",
                     "value": {
                       "err": "ErrConflict"
-                    }
-                  },
-                  "stale-broker-epoch": {
-                    "summary": "Stale broker epoch fences the whole call",
-                    "value": {
-                      "err": "ErrFenced"
                     },
-                    "description": "Whole-call ErrFenced: the caller's `epoch` is not the node's current epoch (decision 34). The broker must trip. No `assigned` field."
+                    "description": "seg-0001 was committed with three batches; this request has one. Nothing changes."
                   },
                   "empty": {
                     "summary": "No batches is ErrInvalid",
@@ -680,7 +384,7 @@
       "post": {
         "operationId": "lookup",
         "summary": "Find the segments holding offsets >= from",
-        "description": "Read-only. Returns the byte ranges (per assigned batch) holding offsets >= `from` for one partition plus the high watermark (next offset). `max_bytes` > 0 stops after the batch that takes the summed `seg_len` to `max_bytes` or more, but always returns at least one batch if any matches; `max_bytes` <= 0 is unlimited. An unknown partition is empty with `high_watermark` 0. `from` < 0 is ErrInvalid. In DynamoDB, runs (decision 39) are expanded back into the same per-batch ranges.\n\nRetry semantics: idempotent, always NotApplied; retry freely.",
+        "description": "Read-only. Returns the byte ranges (per assigned batch) holding offsets >= `from` for one partition plus `end`, the partition end offset (the next offset to be assigned, derived from the newest run). `max_bytes` > 0 stops after the batch that takes the summed `seg_len` to `max_bytes` or more, but always returns at least one batch if any matches; `max_bytes` <= 0 is unlimited. An unknown partition is empty with `end` 0. `from` < 0 is ErrInvalid. In DynamoDB, runs (decision 39) are expanded back into the same per-batch ranges.\n\nRetry semantics: idempotent, always NotApplied; retry freely.",
         "tags": [
           "control-plane"
         ],
@@ -704,7 +408,7 @@
                     "from": 0,
                     "max_bytes": 0
                   },
-                  "description": "Ranges are assigned batches only (never dups or rejects) whose last offset is >= `from`, in offset order. max_bytes 0 means no limit."
+                  "description": "Ranges are assigned batches whose last offset is >= `from`, in offset order. max_bytes 0 means no limit."
                 },
                 "max-bytes": {
                   "summary": "Partition 1 from offset 4, max_bytes 85",
@@ -714,7 +418,7 @@
                     "from": 4,
                     "max_bytes": 85
                   },
-                  "description": "Batches wholly below `from` are dropped (the batch at 0-2). The batch at 3-6 (seg_len 90) takes the byte sum to >= 85, so the answer stops after it although offset 7 exists."
+                  "description": "Batches wholly below `from` are dropped (the batch at 0-2). The batch at 3-6 (seg_len 90) takes the byte sum to >= 85, so the answer stops after it although offset 6 is the last."
                 },
                 "negative-from": {
                   "summary": "Negative from is ErrInvalid",
@@ -766,11 +470,20 @@
                           "seg_key": "seg-0001",
                           "seg_off": 200,
                           "seg_len": 60
+                        },
+                        {
+                          "topic": "orders",
+                          "partition": 0,
+                          "base": 7,
+                          "count": 4,
+                          "seg_key": "seg-0002",
+                          "seg_off": 90,
+                          "seg_len": 100
                         }
                       ],
-                      "high_watermark": 7
+                      "end": 11
                     },
-                    "description": "Ranges are assigned batches only (never dups or rejects) whose last offset is >= `from`, in offset order. max_bytes 0 means no limit."
+                    "description": "Ranges are assigned batches whose last offset is >= `from`, in offset order. max_bytes 0 means no limit."
                   },
                   "max-bytes": {
                     "summary": "Partition 1 from offset 4, max_bytes 85",
@@ -782,19 +495,19 @@
                           "base": 3,
                           "count": 4,
                           "seg_key": "seg-0002",
-                          "seg_off": 120,
+                          "seg_off": 0,
                           "seg_len": 90
                         }
                       ],
-                      "high_watermark": 8
+                      "end": 7
                     },
-                    "description": "Batches wholly below `from` are dropped (the batch at 0-2). The batch at 3-6 (seg_len 90) takes the byte sum to >= 85, so the answer stops after it although offset 7 exists."
+                    "description": "Batches wholly below `from` are dropped (the batch at 0-2). The batch at 3-6 (seg_len 90) takes the byte sum to >= 85, so the answer stops after it although offset 6 is the last."
                   },
                   "negative-from": {
                     "summary": "Negative from is ErrInvalid",
                     "value": {
                       "err": "ErrInvalid",
-                      "high_watermark": 0
+                      "end": 0
                     }
                   }
                 }
@@ -931,19 +644,17 @@
     "schemas": {
       "ErrCode": {
         "type": "string",
-        "description": "Wire spelling of core.ErrCode (frozen, never changed). OK is spelled by omitting the field. The control plane itself emits ErrInvalid (malformed or unparsable input), ErrFenced (whole call: stale broker epoch; one Range: stale producer epoch), ErrConflict (SegmentKey replayed with different batches), ErrTooLarge (commit exceeds the item or blob budget) and, per Range only, ErrOutOfOrder. The remaining spellings (ErrTimeout, ErrUnavailable, ErrNotFound, ErrConnClosed, ErrCorrupt, ErrIO) are valid on the wire for the client (cp.ErrFromWire accepts them) but the server reports those conditions through HTTP status instead. An unknown spelling is a client-side CallError (ErrIO, MaybeApplied for mutating ops).",
+        "description": "Wire spelling of core.ErrCode (frozen, never changed). OK is spelled by omitting the field. The numeric slot of the retired ErrFenced (decision 44) has no spelling. The control plane itself emits ErrInvalid (malformed or unparsable input), ErrConflict (SegmentKey replayed with a different request) and ErrTooLarge (commit exceeds the item or blob budget). The remaining spellings (ErrTimeout, ErrUnavailable, ErrNotFound, ErrConnClosed, ErrCorrupt, ErrIO) are valid on the wire for the client (cp.ErrFromWire accepts them) but the server reports those conditions through HTTP status instead. An unknown spelling is a client-side CallError (ErrIO, MaybeApplied for mutating ops).",
         "enum": [
           "ErrTimeout",
           "ErrUnavailable",
           "ErrNotFound",
           "ErrConflict",
-          "ErrFenced",
           "ErrConnClosed",
           "ErrTooLarge",
           "ErrCorrupt",
           "ErrInvalid",
-          "ErrIO",
-          "ErrOutOfOrder"
+          "ErrIO"
         ]
       },
       "ErrorBody": {
@@ -959,28 +670,9 @@
           }
         }
       },
-      "NodeRef": {
-        "type": "object",
-        "description": "Identity of one broker boot: node ID plus a 16-byte random incarnation. The control plane fences by epoch only and never compares the incarnation (decision 34); it is only validated.",
-        "required": [
-          "node",
-          "inc"
-        ],
-        "properties": {
-          "node": {
-            "type": "string",
-            "description": "Stable node ID. Epochs are counted per node."
-          },
-          "inc": {
-            "type": "string",
-            "description": "Incarnation, exactly 32 lowercase or uppercase hex characters (16 bytes). Anything else is ErrInvalid.",
-            "pattern": "^[0-9a-fA-F]{32}$"
-          }
-        }
-      },
       "Batch": {
         "type": "object",
-        "description": "core.PendingBatch: one partition's batch inside an uploaded segment, with its byte range (Loc) and optional idempotent-producer identity (decision 28). The identity is omitted from the JSON when `producer` is 0 (NoProducer).",
+        "description": "core.PendingBatch: one partition's batch inside an uploaded segment, with its byte range (Loc). The control plane assigns the offsets (decision 42); the request carries no base.",
         "required": [
           "topic",
           "partition",
@@ -1008,7 +700,7 @@
           },
           "seg_key": {
             "type": "string",
-            "description": "Object key of the uploaded segment holding the bytes (Loc.Key)."
+            "description": "Object key of the uploaded segment holding the bytes (Loc.Key). An opaque string to the control plane (format.SegmentKey spells it `seg/<32 hex>`, decision 43)."
           },
           "seg_off": {
             "type": "integer",
@@ -1019,30 +711,12 @@
             "type": "integer",
             "description": "Byte length (Loc.Len); <= 0 means to the end of the object.",
             "format": "int64"
-          },
-          "producer": {
-            "type": "integer",
-            "description": "Producer ID from InitProducer (>= 1000). 0 or absent = NoProducer = non-idempotent batch, never deduplicated. An ID InitProducer never returned is ErrInvalid.",
-            "format": "int64",
-            "minimum": 0
-          },
-          "pepoch": {
-            "type": "integer",
-            "description": "Producer epoch; must be >= 0. Omitted when 0.",
-            "minimum": -32768,
-            "maximum": 32767
-          },
-          "base_seq": {
-            "type": "integer",
-            "description": "First sequence number of the batch for this (partition, producer); must be >= 0. Omitted when 0.",
-            "format": "int32",
-            "minimum": 0
           }
         }
       },
       "Range": {
         "type": "object",
-        "description": "core.BatchRange: where one partition's batch landed. Per-batch outcome (decision 28): `err` absent and `dup` absent = newly assigned; `dup` true = already committed by an earlier segment, base/count/location name that ORIGINAL commit and this segment's bytes are orphaned; `err` = ErrOutOfOrder or ErrFenced (stale producer epoch, decision 34) = not assigned, `base` is -1, `count` is the request's records and the location is as requested. In a Lookup answer only assigned batches appear.",
+        "description": "core.BatchRange: where one partition's batch landed: records [base, base+count) stored at the byte range of the segment. Every range is an assigned batch; there are no per-batch errors.",
         "required": [
           "topic",
           "partition",
@@ -1064,9 +738,9 @@
           },
           "base": {
             "type": "integer",
-            "description": "First offset of the batch; -1 when the batch was rejected (err set).",
+            "description": "First offset of the batch: the partition's end (the end of its newest run) when the commit was applied.",
             "format": "int64",
-            "minimum": -1
+            "minimum": 0
           },
           "count": {
             "type": "integer",
@@ -1086,86 +760,6 @@
             "type": "integer",
             "description": "Byte length (Loc.Len); <= 0 means to the end of the object.",
             "format": "int64"
-          },
-          "err": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ErrCode"
-              }
-            ],
-            "description": "Per-batch error: ErrOutOfOrder or ErrFenced (stale producer epoch). Absent = OK."
-          },
-          "dup": {
-            "type": "boolean",
-            "description": "True when this is the original range of a duplicate (producer, pepoch, base_seq) batch. Omitted when false."
-          }
-        }
-      },
-      "RegisterReq": {
-        "type": "object",
-        "required": [
-          "self"
-        ],
-        "properties": {
-          "self": {
-            "$ref": "#/components/schemas/NodeRef"
-          }
-        }
-      },
-      "RegisterResp": {
-        "type": "object",
-        "required": [
-          "epoch"
-        ],
-        "properties": {
-          "err": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ErrCode"
-              }
-            ],
-            "description": "ErrInvalid for a bad incarnation."
-          },
-          "epoch": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0,
-            "description": "Fencing epoch, from 1, +1 per Register of the node. 0 when err is set."
-          }
-        }
-      },
-      "InitProducerReq": {
-        "type": "object",
-        "description": "Empty JSON object. Unknown fields are ignored.",
-        "additionalProperties": true,
-        "properties": {}
-      },
-      "InitProducerResp": {
-        "type": "object",
-        "required": [
-          "producer",
-          "pepoch"
-        ],
-        "properties": {
-          "err": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ErrCode"
-              }
-            ],
-            "description": "Business error code; absent means OK."
-          },
-          "producer": {
-            "type": "integer",
-            "description": "New producer ID, >= 1000.",
-            "format": "int64",
-            "minimum": 1000
-          },
-          "pepoch": {
-            "type": "integer",
-            "description": "Initial producer epoch, always 0.",
-            "minimum": -32768,
-            "maximum": 32767
           }
         }
       },
@@ -1173,8 +767,6 @@
         "type": "object",
         "required": [
           "segment_key",
-          "owner",
-          "epoch",
           "batches"
         ],
         "properties": {
@@ -1182,22 +774,13 @@
             "type": "string",
             "description": "Idempotency key: the object key of the uploaded segment. Must be non-empty."
           },
-          "owner": {
-            "$ref": "#/components/schemas/NodeRef"
-          },
-          "epoch": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0,
-            "description": "The owner's epoch from Register. A value other than the node's current epoch (or an unregistered node) is whole-call ErrFenced."
-          },
           "batches": {
             "type": "array",
             "minItems": 1,
             "items": {
               "$ref": "#/components/schemas/Batch"
             },
-            "description": "At least 1; the broker caps a segment at MaxSegmentBatches (256) and the commit item budget (96); a larger commit may get ErrTooLarge."
+            "description": "At least 1; the broker caps a segment at MaxSegmentBatches (256) and MaxSegmentPartitions (24); a larger commit may get ErrTooLarge."
           }
         }
       },
@@ -1210,7 +793,7 @@
                 "$ref": "#/components/schemas/ErrCode"
               }
             ],
-            "description": "Whole-call error: ErrFenced (stale broker epoch: trip), ErrInvalid, ErrConflict, ErrTooLarge."
+            "description": "Whole-call error: ErrInvalid, ErrConflict, ErrTooLarge."
           },
           "assigned": {
             "type": "array",
@@ -1255,7 +838,7 @@
       "LookupResp": {
         "type": "object",
         "required": [
-          "high_watermark"
+          "end"
         ],
         "properties": {
           "err": {
@@ -1273,9 +856,9 @@
             },
             "description": "Assigned batches covering offsets >= from, in offset order. Absent when none."
           },
-          "high_watermark": {
+          "end": {
             "type": "integer",
-            "description": "Next offset of the partition (0 if unknown).",
+            "description": "The partition end offset: the next offset to be assigned (ListOffsets latest), derived from the newest run. 0 if the partition is unknown.",
             "format": "int64",
             "minimum": 0
           }
@@ -1376,7 +959,7 @@
         }
       },
       "InternalError": {
-        "description": "Any other store error. Plain text `internal error`. The effect is unknown: MaybeApplied for Register, InitProducer and CommitSegment (retry CommitSegment with the same key; the others may leak an epoch or ID).",
+        "description": "Any other store error. Plain text `internal error`. The effect is unknown: MaybeApplied for CommitSegment (retry it with the same key; the replay returns the original ranges).",
         "content": {
           "text/plain": {
             "schema": {
@@ -1398,28 +981,12 @@
       "example": "invalid-partitions"
     },
     {
-      "path": "/v1/register",
-      "example": "first-boot"
-    },
-    {
-      "path": "/v1/register",
-      "example": "bad-incarnation"
-    },
-    {
-      "path": "/v1/init-producer",
-      "example": "allocate"
-    },
-    {
       "path": "/v1/commit-segment",
       "example": "three-batches"
     },
     {
       "path": "/v1/commit-segment",
-      "example": "duplicate"
-    },
-    {
-      "path": "/v1/commit-segment",
-      "example": "out-of-order"
+      "example": "second-segment"
     },
     {
       "path": "/v1/commit-segment",
@@ -1428,10 +995,6 @@
     {
       "path": "/v1/commit-segment",
       "example": "conflict"
-    },
-    {
-      "path": "/v1/commit-segment",
-      "example": "stale-broker-epoch"
     },
     {
       "path": "/v1/commit-segment",

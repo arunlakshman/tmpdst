@@ -13,42 +13,6 @@ import (
 	"manifester/core"
 )
 
-// Register: the node's epoch item gets an atomic ADD 1.
-func (s *Store) Register(ctx context.Context, op core.Register) (core.RegisterResp, error) {
-	out, err := s.updateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName: &s.table, Key: nodeKey(op.Self.Node),
-		UpdateExpression:          aws.String("ADD epoch :one"),
-		ExpressionAttributeValues: item{":one": num(1)},
-		ReturnValues:              types.ReturnValueUpdatedNew,
-	})
-	if err != nil {
-		return core.RegisterResp{}, infra(err)
-	}
-	e, ok := getNum(out.Attributes, "epoch")
-	if !ok {
-		return core.RegisterResp{}, errors.New("dynamo: register: no epoch returned")
-	}
-	return core.RegisterResp{Epoch: core.Epoch(e)}, nil
-}
-
-// InitProducer: an atomic counter of calls; the ID is firstProducer-1+count.
-func (s *Store) InitProducer(ctx context.Context) (core.InitProducerResp, error) {
-	out, err := s.updateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName: &s.table, Key: pidKey(),
-		UpdateExpression:          aws.String("ADD n :one"),
-		ExpressionAttributeValues: item{":one": num(1)},
-		ReturnValues:              types.ReturnValueUpdatedNew,
-	})
-	if err != nil {
-		return core.InitProducerResp{}, infra(err)
-	}
-	n, ok := getNum(out.Attributes, "n")
-	if !ok {
-		return core.InitProducerResp{}, errors.New("dynamo: init producer: no counter returned")
-	}
-	return core.InitProducerResp{Producer: core.ProducerID(firstProducer - 1 + n)}, nil
-}
-
 // CreateTopic raises the partition count; it never shrinks one.
 func (s *Store) CreateTopic(ctx context.Context, name string, partitions int32) (core.ErrCode, error) {
 	if name == "" || partitions <= 0 {
@@ -125,26 +89,25 @@ func (s *Store) query(ctx context.Context, q *dynamodb.QueryInput, limit int) ([
 	}
 }
 
-// Lookup reads the HWM first, then the ranges below it: the answer is a
-// snapshot even while commits run.
+// Lookup reads the partition end (the newest run) first, then the runs below
+// it: the answer is a snapshot even while commits run.
 func (s *Store) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, core.ErrCode, error) {
 	if op.From < 0 {
 		return core.LookupResp{}, core.ErrInvalid, nil
 	}
-	h, err := s.getItem(ctx, hwmKey(op.TP))
+	end, err := s.endOf(ctx, op.TP)
 	if err != nil {
 		return core.LookupResp{}, 0, err
 	}
-	hwm, _ := getNum(h, "hwm")
-	resp := core.LookupResp{HighWatermark: core.Offset(hwm)}
-	if hwm == 0 {
+	resp := core.LookupResp{End: core.Offset(end)}
+	if int64(op.From) >= end {
 		return resp, core.OK, nil
 	}
 	lower, err := s.runStart(ctx, op)
 	if err != nil {
 		return core.LookupResp{}, 0, err
 	}
-	resp.Ranges, err = s.scanRuns(ctx, op, lower, hwm)
+	resp.Ranges, err = s.scanRuns(ctx, op, lower, end)
 	if err != nil {
 		return core.LookupResp{}, 0, err
 	}
@@ -171,14 +134,14 @@ func (s *Store) runStart(ctx context.Context, op core.Lookup) (int64, error) {
 	return int64(op.From), nil
 }
 
-// scanRuns reads the run items in [lower, hwm) page by page and returns the
+// scanRuns reads the run items in [lower, end) page by page and returns the
 // batches at or after op.From, stopping once op.MaxBytes is reached.
-func (s *Store) scanRuns(ctx context.Context, op core.Lookup, lower, hwm int64) ([]core.BatchRange, error) {
+func (s *Store) scanRuns(ctx context.Context, op core.Lookup, lower, end int64) ([]core.BatchRange, error) {
 	q := &dynamodb.QueryInput{
 		TableName: &s.table, ConsistentRead: aws.Bool(true),
 		KeyConditionExpression: aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
 		ExpressionAttributeValues: item{":p": str(partKey("R#", op.TP)),
-			":lo": str(offSK(lower)), ":hi": str(offSK(hwm - 1))},
+			":lo": str(offSK(lower)), ":hi": str(offSK(end - 1))},
 	}
 	if op.MaxBytes > 0 {
 		q.Limit = aws.Int32(64)

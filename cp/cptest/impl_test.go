@@ -32,12 +32,6 @@ type storeImpl struct{ st cp.Store }
 
 func (s storeImpl) Exec(ctx context.Context, op core.CPOp) (core.CPResp, core.ErrCode, error) {
 	switch op := op.(type) {
-	case core.Register:
-		r, err := s.st.Register(ctx, op)
-		return r, core.OK, err
-	case core.InitProducer:
-		r, err := s.st.InitProducer(ctx)
-		return r, core.OK, err
 	case core.CommitSegment:
 		r, c, err := s.st.CommitSegment(ctx, op)
 		return r, c, err

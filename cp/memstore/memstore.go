@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"manifester/core"
+	"manifester/cp"
 	"manifester/veritas"
 )
 
@@ -15,9 +16,7 @@ type Store struct {
 	spec *veritas.ControlPlane
 }
 
-// TODO(phase 2): re-add `var _ cp.Store = (*Store)(nil)` once cp.Store drops
-// Register and InitProducer and (decisions 41-44). The import
-// is left out so this package builds and tests while cp is being migrated.
+var _ cp.Store = (*Store)(nil)
 
 // New returns an empty store.
 func New() *Store { return &Store{spec: veritas.NewControlPlane()} }

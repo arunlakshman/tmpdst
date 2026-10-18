@@ -17,10 +17,8 @@ import (
 // response compared.
 
 type op struct {
-	Kind     string // register, init, create, commit, lookup, describe
-	Node     string
+	Kind     string // create, commit, lookup, describe
 	Name     string // segment key or topic
-	Epoch    uint64
 	Batches  []core.PendingBatch
 	TP       core.TopicPartition
 	From     int64
@@ -35,28 +33,19 @@ type pair struct {
 }
 
 var (
-	nodes  = []string{"a", "b"}
 	topics = []string{"t1", "t2", "t3"}
 )
 
-func gen(r *veritastest.Rand, i int) op {
+func gen(r *veritastest.Rand, _ int) op {
 	pick := func(xs []string) string { return xs[r.Intn(len(xs))] }
 	tp := func() core.TopicPartition {
 		return core.TopicPartition{Topic: pick(topics), Partition: int32(r.Intn(3))}
 	}
 	switch k := r.Intn(32); {
-	case i < 4 && i%2 == 0:
-		return op{Kind: "register", Node: nodes[i/2]}
-	case i < 4:
-		return op{Kind: "init"}
-	case k < 1:
-		return op{Kind: "register", Node: pick(nodes)}
-	case k < 3:
-		return op{Kind: "init"}
 	case k < 4:
 		return op{Kind: "create", Name: pick(append([]string{""}, topics...)), Parts: int32(r.Intn(5)) - 1}
 	case k < 20:
-		o := op{Kind: "commit", Node: pick(nodes), Name: fmt.Sprintf("seg%d", r.Intn(8)), Epoch: uint64(1 + r.Intn(3))}
+		o := op{Kind: "commit", Name: fmt.Sprintf("seg%d", r.Intn(8))}
 		// A key's batches repeat (a replay) unless the variant changes.
 		variant := 0
 		if r.Intn(6) == 0 {
@@ -104,17 +93,6 @@ func batches(r *veritastest.Rand, key string) []core.PendingBatch {
 				b.Records++
 			}
 		}
-		if r.Intn(3) != 0 {
-			b.Producer = core.ProducerID(1000 + r.Intn(2))
-			if r.Intn(60) == 0 {
-				b.Producer = core.ProducerID(998 + r.Intn(8))
-			}
-			b.PEpoch = int16(r.Intn(3))
-			b.BaseSeq = int32(r.Intn(5))
-			if r.Intn(80) == 0 {
-				b.BaseSeq = -1
-			}
-		}
 		if r.Intn(100) == 0 {
 			b.TP.Partition = -1
 		}
@@ -125,12 +103,8 @@ func batches(r *veritastest.Rand, key string) []core.PendingBatch {
 
 func cpOp(o op) core.CPOp {
 	switch o.Kind {
-	case "register":
-		return core.Register{Self: core.NodeRef{Node: core.NodeID(o.Node)}}
-	case "init":
-		return core.InitProducer{}
 	case "commit":
-		return core.CommitSegment{SegmentKey: o.Name, Owner: core.NodeRef{Node: core.NodeID(o.Node)}, Epoch: core.Epoch(o.Epoch), Batches: o.Batches}
+		return core.CommitSegment{SegmentKey: o.Name, Batches: o.Batches}
 	case "lookup":
 		return core.Lookup{TP: o.TP, From: core.Offset(o.From), MaxBytes: o.MaxBytes}
 	case "describe":

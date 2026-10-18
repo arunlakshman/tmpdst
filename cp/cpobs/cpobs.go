@@ -87,7 +87,7 @@ func NewWithLogger(log *slog.Logger) *Metrics {
 		Help: "Per-item cancellation reasons of TransactionCanceledException (ConditionalCheckFailed, TransactionConflict, ThrottlingError, ProvisionedThroughputExceeded, ...)."},
 		[]string{"code"})
 	m.callsDone = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Name: "calls_total",
-		Help: "HTTP calls served, by op and outcome (ok, the business error code such as ErrFenced, http_503, http_500)."}, []string{"op", "outcome"})
+		Help: "HTTP calls served, by op and outcome (ok, the business error code such as ErrConflict, http_503, http_500)."}, []string{"op", "outcome"})
 	m.AWS = awsobs.New(m.reg, "manicp", "dynamo", log)
 	m.AWS.QuietCodes = map[string]bool{"TransactionCanceledException": true} // reported by CommitSegment with reasons
 	m.reg.MustRegister(m.consumed, m.noCap, m.cancels, m.callsDone, m.handler, m.dyn, m.prep, m.body, m.retries, m.attempts, m.inflight,

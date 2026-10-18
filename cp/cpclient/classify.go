@@ -13,7 +13,7 @@ import (
 )
 
 // Classifier is the sys.Classifier for CPCall (lesson 1). A mutating op
-// (Register, InitProducer, CommitSegment) whose request may have reached the
+// (CommitSegment) whose request may have reached the
 // server and whose reply is lost or unusable is MaybeApplied; only failures
 // that prove nothing was sent (dial, DNS, 503) are NotApplied. Reads are
 // always NotApplied.

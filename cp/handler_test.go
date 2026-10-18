@@ -21,12 +21,6 @@ type failStore struct {
 	code core.ErrCode
 }
 
-func (f failStore) Register(context.Context, core.Register) (core.RegisterResp, error) {
-	return core.RegisterResp{}, f.err
-}
-func (f failStore) InitProducer(context.Context) (core.InitProducerResp, error) {
-	return core.InitProducerResp{}, f.err
-}
 func (f failStore) CommitSegment(context.Context, core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
 	return core.CommitSegmentResp{}, f.code, f.err
 }
@@ -48,8 +42,6 @@ func postJSON(t *testing.T, h http.Handler, path, body string) (int, string) {
 	return rec.Code, strings.TrimSpace(string(b))
 }
 
-const node = `{"node":"n1","inc":"00112233445566778899aabbccddeeff"}`
-
 func TestHandlerHappyPath(t *testing.T) {
 	h := cp.NewHandler(memstore.New())
 	rec := httptest.NewRecorder()
@@ -59,11 +51,9 @@ func TestHandlerHappyPath(t *testing.T) {
 	}
 	steps := []struct{ path, body, want string }{
 		{"/v1/create-topic", `{"topic":"t","partitions":2}`, `{}`},
-		{"/v1/register", `{"self":` + node + `}`, `"epoch":`},
-		{"/v1/init-producer", `{}`, `"producer":`},
 		{"/v1/describe-topics", `{"topics":["t"]}`, `"name":"t"`},
-		{"/v1/lookup", `{"topic":"t","partition":0,"from":0,"max_bytes":100}`, `"high_watermark":0`},
-		{"/v1/commit-segment", `{"segment_key":"s","owner":` + node + `,"epoch":1,"batches":[{"topic":"t","partition":1,"records":3,"seg_key":"s","seg_off":0,"seg_len":9}]}`, `"assigned"`},
+		{"/v1/lookup", `{"topic":"t","partition":0,"from":0,"max_bytes":100}`, `"end":0`},
+		{"/v1/commit-segment", `{"segment_key":"s","batches":[{"topic":"t","partition":1,"records":3,"seg_key":"s","seg_off":0,"seg_len":9}]}`, `"assigned"`},
 	}
 	for _, s := range steps {
 		code, body := postJSON(t, h, s.path, s.body)
@@ -71,35 +61,34 @@ func TestHandlerHappyPath(t *testing.T) {
 			t.Errorf("%s: %d %s (want %s)", s.path, code, body, s.want)
 		}
 	}
-	// the commit above registered epoch 1 only if register gave 1; either way
-	// a lookup now reports the topic's watermark without error.
-	if code, body := postJSON(t, h, "/v1/lookup", `{"topic":"t","partition":1,"from":0,"max_bytes":100}`); code != 200 {
+	// the commit above gave partition 1 offsets [0,3): the lookup reports end 3.
+	code, body := postJSON(t, h, "/v1/lookup", `{"topic":"t","partition":1,"from":0,"max_bytes":100}`)
+	if code != 200 || !strings.Contains(body, `"end":3`) || !strings.Contains(body, `"base":0`) {
 		t.Errorf("lookup %d %s", code, body)
+	}
+	// the retired routes are gone.
+	for _, path := range []string{"/v1/register", "/v1/init-producer"} {
+		if code, _ := postJSON(t, h, path, `{}`); code != http.StatusNotFound {
+			t.Errorf("%s: %d, want 404", path, code)
+		}
 	}
 }
 
 func TestHandlerInvalidInput(t *testing.T) {
 	h := cp.NewHandler(memstore.New())
-	for _, path := range []string{"/v1/register", "/v1/commit-segment", "/v1/lookup"} {
+	for _, path := range []string{"/v1/commit-segment", "/v1/lookup"} {
 		code, body := postJSON(t, h, path, `{not json`)
 		if code != 200 || !strings.Contains(body, `"err":"ErrInvalid"`) {
 			t.Errorf("%s malformed: %d %s", path, code, body)
 		}
 	}
-	bad := `{"node":"n","inc":"zz"}`
-	if _, body := postJSON(t, h, "/v1/register", `{"self":`+bad+`}`); !strings.Contains(body, "ErrInvalid") {
-		t.Errorf("register bad node: %s", body)
-	}
-	if _, body := postJSON(t, h, "/v1/commit-segment", `{"owner":`+bad+`}`); !strings.Contains(body, "ErrInvalid") {
-		t.Errorf("commit bad owner: %s", body)
-	}
 }
 
 func TestHandlerBusinessCodes(t *testing.T) {
-	h := cp.NewHandler(failStore{Store: memstore.New(), code: core.ErrFenced})
+	h := cp.NewHandler(failStore{Store: memstore.New(), code: core.ErrConflict})
 	for _, path := range []string{"/v1/commit-segment", "/v1/lookup", "/v1/create-topic"} {
-		code, body := postJSON(t, h, path, `{"owner":`+node+`}`)
-		if code != 200 || !strings.Contains(body, `"err":"ErrFenced"`) {
+		code, body := postJSON(t, h, path, `{}`)
+		if code != 200 || !strings.Contains(body, `"err":"ErrConflict"`) {
 			t.Errorf("%s: %d %s", path, code, body)
 		}
 	}
@@ -107,8 +96,8 @@ func TestHandlerBusinessCodes(t *testing.T) {
 
 func TestHandlerStoreErrors(t *testing.T) {
 	paths := map[string]string{
-		"/v1/register": `{"self":` + node + `}`, "/v1/init-producer": `{}`, "/v1/commit-segment": `{"owner":` + node + `}`,
-		"/v1/lookup": `{}`, "/v1/describe-topics": `{}`, "/v1/create-topic": `{}`,
+		"/v1/commit-segment": `{}`,
+		"/v1/lookup":         `{}`, "/v1/describe-topics": `{}`, "/v1/create-topic": `{}`,
 	}
 	cases := []struct {
 		err  error

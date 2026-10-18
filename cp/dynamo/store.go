@@ -21,10 +21,9 @@ import (
 )
 
 // MaxTxItems is DynamoDB's TransactWriteItems limit. A commit needs
-// 2 (fence, segment) + 2 x (partitions that got a new batch: HWM and one range
-// run item) + (grown topics) + (producer states touched) items, whatever the
-// number of batches: the batches of one partition share one run item (runs.go).
-// So 24 partitions with up to 50 producer states fit.
+// 1 (segment) + (distinct partitions: one run item each) + (grown topics)
+// items, whatever the number of batches: the batches of one partition share
+// one run item (runs.go).
 const MaxTxItems = 100
 
 // maxBlob keeps the segment item (batches + ranges as JSON) well under
@@ -87,16 +86,8 @@ func partKey(prefix string, tp core.TopicPartition) string {
 
 func offSK(o int64) string { return fmt.Sprintf("%020d", o) }
 
-const hwmSK = "!" // sorts before every digit string: never inside a range query
-
-func nodeKey(n core.NodeID) item         { return key("N#"+string(n), "-") }
-func pidKey() item                       { return key("PID", "-") }
-func topicKey(t string) item             { return key("TOPICS", t) }
-func segKey(k string) item               { return key("G#"+k, "-") }
-func hwmKey(tp core.TopicPartition) item { return key(partKey("R#", tp), hwmSK) }
-func stateKey(k skey) item {
-	return key(partKey("S#", k.tp), fmt.Sprintf("%020d", int64(k.p)))
-}
+func topicKey(t string) item { return key("TOPICS", t) }
+func segKey(k string) item   { return key("G#"+k, "-") }
 
 func getNum(it item, name string) (int64, bool) {
 	v, ok := it[name].(*types.AttributeValueMemberN)

@@ -55,14 +55,14 @@ func TestCallLogLine(t *testing.T) {
 		m.RetryCtx(r.Context(), "commit", "transaction_canceled", []string{"ConditionalCheckFailed"})
 		m.AttemptCtx(r.Context(), "commit")
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"err":"ErrFenced"}` + "\n"))
+		w.Write([]byte(`{"err":"ErrConflict"}` + "\n"))
 	}))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/commit-segment", strings.NewReader("abc")))
 	var l map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &l); err != nil {
 		t.Fatalf("%v: %s", err, buf.String())
 	}
-	if l["event"] != "cp_call" || l["op"] != "commit-segment" || l["segment"] != "seg-1" || l["outcome"] != "ErrFenced" ||
+	if l["event"] != "cp_call" || l["op"] != "commit-segment" || l["segment"] != "seg-1" || l["outcome"] != "ErrConflict" ||
 		l["attempts"] != float64(2) || l["retries"] != float64(1) || l["request_bytes"] != float64(3) {
 		t.Errorf("line: %v", l)
 	}
@@ -70,7 +70,7 @@ func TestCallLogLine(t *testing.T) {
 		t.Errorf("timings: %v", l)
 	}
 	out := gather(t, m)
-	for _, want := range []string{`manicp_calls_total{op="commit-segment",outcome="ErrFenced"} 1`,
+	for _, want := range []string{`manicp_calls_total{op="commit-segment",outcome="ErrConflict"} 1`,
 		`manicp_dynamo_txn_cancel_reasons_total{code="ConditionalCheckFailed"} 1`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q", want)

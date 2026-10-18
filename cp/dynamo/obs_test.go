@@ -18,14 +18,14 @@ func TestCancelReasons(t *testing.T) {
 	}}
 	items := []types.TransactWriteItem{
 		{Put: &types.Put{Item: key("G#s", "-")}},
-		{Update: &types.Update{Key: hwmKey(core.TopicPartition{Topic: "t", Partition: 0})}},
-		{ConditionCheck: &types.ConditionCheck{Key: nodeKey("n1")}},
+		{Put: &types.Put{Item: runKey(core.TopicPartition{Topic: "t", Partition: 0}, 5)}},
+		{ConditionCheck: &types.ConditionCheck{Key: topicKey("t")}},
 	}
 	codes, detail := cancelReasons(tc, items)
 	if !slices.Equal(codes, []string{"ConditionalCheckFailed", "ThrottlingError"}) {
 		t.Fatalf("codes %v", codes)
 	}
-	if detail[0] != "1:ConditionalCheckFailed:R#t#0/!" || detail[1] != "2:ThrottlingError:N#n1/-" {
+	if detail[0] != "1:ConditionalCheckFailed:R#t#0/00000000000000000005" || detail[1] != "2:ThrottlingError:TOPICS/t" {
 		t.Fatalf("detail %v", detail)
 	}
 }

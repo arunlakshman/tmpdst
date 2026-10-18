@@ -13,15 +13,12 @@ import (
 
 const maxBody = 32 << 20
 
-// NewHandler serves st over JSON: POST /v1/{register,init-producer,
-// commit-segment,lookup,describe-topics,create-topic} and GET /healthz.
-// Business errors are HTTP 200 with {"err":"ErrFenced"} etc.; ErrUnavailable
+// NewHandler serves st over JSON: POST /v1/{commit-segment,lookup,describe-topics,create-topic} and GET /healthz.
+// Business errors are HTTP 200 with {"err":"ErrConflict"} etc.; ErrUnavailable
 // and context errors are 503; any other store error is 500.
 func NewHandler(st Store) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
-	post(mux, "/v1/register", registerHandler(st))
-	post(mux, "/v1/init-producer", initProducerHandler(st))
 	post(mux, "/v1/commit-segment", commitHandler(st))
 	post(mux, "/v1/lookup", lookupHandler(st))
 	post(mux, "/v1/describe-topics", describeHandler(st))
@@ -29,32 +26,10 @@ func NewHandler(st Store) http.Handler {
 	return mux
 }
 
-func registerHandler(st Store) func(context.Context, RegisterReq) (any, error) {
-	return func(ctx context.Context, q RegisterReq) (any, error) {
-		self, err := NodeFromWire(q.Self)
-		if err != nil {
-			return RegisterResp{Err: ErrString(core.ErrInvalid)}, nil
-		}
-		r, err := st.Register(ctx, core.Register{Self: self})
-		return RegisterResp{Epoch: uint64(r.Epoch)}, err
-	}
-}
-
-func initProducerHandler(st Store) func(context.Context, struct{}) (any, error) {
-	return func(ctx context.Context, _ struct{}) (any, error) {
-		r, err := st.InitProducer(ctx)
-		return InitProducerResp{Producer: int64(r.Producer), PEpoch: r.PEpoch}, err
-	}
-}
-
 func commitHandler(st Store) func(context.Context, CommitReq) (any, error) {
 	return func(ctx context.Context, q CommitReq) (any, error) {
 		cpobs.FromContext(ctx).SetSegment(q.SegmentKey)
-		owner, err := NodeFromWire(q.Owner)
-		if err != nil {
-			return CommitResp{Err: ErrString(core.ErrInvalid)}, nil
-		}
-		op := core.CommitSegment{SegmentKey: q.SegmentKey, Owner: owner, Epoch: core.Epoch(q.Epoch)}
+		op := core.CommitSegment{SegmentKey: q.SegmentKey}
 		for _, b := range q.Batches {
 			op.Batches = append(op.Batches, BatchFromWire(b))
 		}
@@ -73,7 +48,7 @@ func lookupHandler(st Store) func(context.Context, LookupReq) (any, error) {
 		if code != core.OK || err != nil {
 			return LookupResp{Err: ErrString(code)}, err
 		}
-		return LookupResp{HighWatermark: int64(r.HighWatermark), Ranges: rangesToWire(r.Ranges)}, nil
+		return LookupResp{End: int64(r.End), Ranges: rangesToWire(r.Ranges)}, nil
 	}
 }
 

@@ -110,7 +110,7 @@ func specRoutes(d doc) []string {
 
 func TestRoutesMatchHandler(t *testing.T) {
 	code, spec := handlerRoutes(t), specRoutes(load(t))
-	if len(code) < 7 {
+	if len(code) < 5 {
 		t.Fatalf("found only %v in cp/handler.go; has the registration style changed?", code)
 	}
 	for _, r := range code {
@@ -128,9 +128,7 @@ func TestRoutesMatchHandler(t *testing.T) {
 // wireTypes maps each component schema to its Go wire type. Schemas listed in
 // noGoType are spec-only.
 var wireTypes = map[string]reflect.Type{
-	"NodeRef": reflect.TypeOf(cp.NodeRef{}), "Batch": reflect.TypeOf(cp.Batch{}), "Range": reflect.TypeOf(cp.Range{}),
-	"RegisterReq": reflect.TypeOf(cp.RegisterReq{}), "RegisterResp": reflect.TypeOf(cp.RegisterResp{}),
-	"InitProducerReq": reflect.TypeOf(struct{}{}), "InitProducerResp": reflect.TypeOf(cp.InitProducerResp{}),
+	"Batch": reflect.TypeOf(cp.Batch{}), "Range": reflect.TypeOf(cp.Range{}),
 	"CommitReq": reflect.TypeOf(cp.CommitReq{}), "CommitResp": reflect.TypeOf(cp.CommitResp{}),
 	"LookupReq": reflect.TypeOf(cp.LookupReq{}), "LookupResp": reflect.TypeOf(cp.LookupResp{}),
 	"DescribeReq": reflect.TypeOf(cp.DescribeReq{}), "Topic": reflect.TypeOf(cp.Topic{}), "DescribeResp": reflect.TypeOf(cp.DescribeResp{}),
@@ -291,7 +289,6 @@ func TestSchemasMatchWireTypes(t *testing.T) {
 // ones its Go handler decodes and encodes.
 func TestOperationSchemas(t *testing.T) {
 	want := map[string][2]string{
-		"/v1/register": {"RegisterReq", "RegisterResp"}, "/v1/init-producer": {"InitProducerReq", "InitProducerResp"},
 		"/v1/commit-segment": {"CommitReq", "CommitResp"}, "/v1/lookup": {"LookupReq", "LookupResp"},
 		"/v1/describe-topics": {"DescribeReq", "DescribeResp"}, "/v1/create-topic": {"CreateTopicReq", "CreateTopicResp"},
 	}
@@ -321,11 +318,10 @@ func TestErrCodeEnum(t *testing.T) {
 	for _, e := range enum {
 		got = append(got, e.(string))
 	}
-	for c := core.ErrCode(1); ; c++ {
-		if _, ok := cp.ParseErrCode(c.String()); !ok {
-			break
+	for c := core.ErrCode(1); c <= core.ErrIO; c++ { // the retired slot has no spelling
+		if _, ok := cp.ParseErrCode(c.String()); ok {
+			want = append(want, c.String())
 		}
-		want = append(want, c.String())
 	}
 	sort.Strings(got)
 	sort.Strings(want)

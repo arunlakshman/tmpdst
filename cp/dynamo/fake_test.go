@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -54,17 +55,6 @@ func one(tp core.TopicPartition, key string, recs int64) core.PendingBatch {
 	return core.PendingBatch{TP: tp, Records: recs, Loc: core.SegmentRef{Key: key, Len: 10 * recs}}
 }
 
-// registered returns a node's reference and epoch.
-func registered(t testing.TB, st *Store) (core.NodeRef, core.Epoch) {
-	t.Helper()
-	self := core.NodeRef{Node: "n"}
-	r, err := st.Register(bg, core.Register{Self: self})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return self, r.Epoch
-}
-
 // ---- randomized lockstep against memstore (the spec) ----
 
 func randBatches(r *rand.Rand, key string) []core.PendingBatch {
@@ -78,30 +68,14 @@ func randBatches(r *rand.Rand, key string) []core.PendingBatch {
 		if b.Records == 0 && r.IntN(10) != 0 {
 			b.Records, b.Loc.Len = 1, 10
 		}
-		if r.IntN(3) != 0 {
-			b.Producer = core.ProducerID(1000 + r.IntN(2))
-			if r.IntN(40) == 0 {
-				b.Producer = core.ProducerID(998 + r.IntN(8))
-			}
-			b.PEpoch, b.BaseSeq = int16(r.IntN(3)), int32(r.IntN(5))
-		}
 		out = append(out, b)
 	}
 	return out
 }
 
 func randOp(r *rand.Rand, i int) any {
-	nodes := []string{"a", "b"}
 	switch k := r.IntN(32); {
-	case i < 4 && i%2 == 0:
-		return core.Register{Self: core.NodeRef{Node: core.NodeID(nodes[i/2])}}
-	case i < 4:
-		return core.InitProducer{}
-	case k < 2:
-		return core.Register{Self: core.NodeRef{Node: core.NodeID(nodes[r.IntN(2)])}}
 	case k < 4:
-		return core.InitProducer{}
-	case k < 6:
 		return [2]any{[]string{"", "t1", "t2", "t3"}[r.IntN(4)], int32(r.IntN(5)) - 1}
 	case k < 20:
 		key := fmt.Sprintf("seg%d", r.IntN(6))
@@ -109,8 +83,7 @@ func randOp(r *rand.Rand, i int) any {
 		if r.IntN(5) == 0 {
 			bs = randBatches(r, key) // or not: conflict
 		}
-		return core.CommitSegment{SegmentKey: key, Owner: core.NodeRef{Node: core.NodeID(nodes[r.IntN(2)])},
-			Epoch: core.Epoch(1 + r.IntN(3)), Batches: bs}
+		return core.CommitSegment{SegmentKey: key, Batches: bs}
 	case k < 28:
 		return core.Lookup{TP: tpOf([]string{"t1", "t2"}[r.IntN(2)], int32(r.IntN(2))), From: core.Offset(r.IntN(30) - 1), MaxBytes: int32(r.IntN(3)) * 50}
 	}
@@ -126,10 +99,6 @@ func exec(st cp.Store, op any) string {
 	var code core.ErrCode
 	var err error
 	switch op := op.(type) {
-	case core.Register:
-		resp, err = st.Register(bg, op)
-	case core.InitProducer:
-		resp, err = st.InitProducer(bg)
 	case [2]any:
 		code, err = st.CreateTopic(bg, op[0].(string), op[1].(int32))
 	case core.CommitSegment:
@@ -183,19 +152,17 @@ func TestInfraMapping(t *testing.T) {
 
 func TestCallsReportUnavailable(t *testing.T) {
 	st, f := fakeStore(t)
-	self, epoch := registered(t, st)
-	commit := core.CommitSegment{SegmentKey: "s", Owner: self, Epoch: epoch, Batches: []core.PendingBatch{one(tpOf("t", 0), "s", 1)}}
+	commit := core.CommitSegment{SegmentKey: "s", Batches: []core.PendingBatch{one(tpOf("t", 0), "s", 1)}}
 	for _, c := range []struct {
 		call string
 		run  func() error
 	}{
-		{"UpdateItem", func() error { _, err := st.Register(bg, core.Register{Self: self}); return err }},
-		{"UpdateItem", func() error { _, err := st.InitProducer(bg); return err }},
 		{"UpdateItem", func() error { _, err := st.CreateTopic(bg, "t", 1); return err }},
-		{"GetItem", func() error { _, _, err := st.Lookup(bg, core.Lookup{TP: tpOf("t", 0)}); return err }},
+		{"Query", func() error { _, _, err := st.Lookup(bg, core.Lookup{TP: tpOf("t", 0)}); return err }},
 		{"GetItem", func() error { _, err := st.DescribeTopics(bg, core.DescribeTopics{Topics: []string{"t"}}); return err }},
 		{"Query", func() error { _, err := st.DescribeTopics(bg, core.DescribeTopics{}); return err }},
 		{"BatchGetItem", func() error { _, _, err := st.CommitSegment(bg, commit); return err }},
+		{"Query", func() error { _, _, err := st.CommitSegment(bg, commit); return err }},
 		{"GetItem", func() error { _, _, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "z"}); return err }},
 	} {
 		f.Fail = throttle(c.call)
@@ -204,15 +171,20 @@ func TestCallsReportUnavailable(t *testing.T) {
 		}
 	}
 	f.Fail = nil
-	// A Lookup whose range query fails after the HWM read.
+	// A Lookup whose range query fails after the end read.
 	if _, _, err := st.CommitSegment(bg, commit); err != nil {
 		t.Fatal(err)
 	}
-	f.Fail = throttle("Query")
-	if _, _, err := st.Lookup(bg, core.Lookup{TP: tpOf("t", 0)}); !isUnavailable(err) {
-		t.Errorf("lookup query: %v", err)
+	var queries atomic.Int32
+	f.Fail = func(call string) error { // the end read succeeds, the next Query fails
+		if call == "Query" {
+			if queries.Add(1) > 1 {
+				return &types.ThrottlingException{Message: aws.String("slow down")}
+			}
+		}
+		return nil
 	}
-	if _, _, err := st.Lookup(bg, core.Lookup{TP: tpOf("t", 0), From: 1}); !isUnavailable(err) {
+	if _, _, err := st.Lookup(bg, core.Lookup{TP: tpOf("t", 0)}); !isUnavailable(err) {
 		t.Errorf("lookup run start: %v", err)
 	}
 	f.Fail = nil
@@ -221,13 +193,10 @@ func TestCallsReportUnavailable(t *testing.T) {
 	}
 }
 
-func TestRegisterAndProducerErrors(t *testing.T) {
+func TestCreateTopicErrors(t *testing.T) {
 	st, f := fakeStore(t)
 	boom := errors.New("boom")
 	f.Fail = func(call string) error { return boom }
-	if _, err := st.Register(bg, core.Register{}); !errors.Is(err, boom) {
-		t.Error(err)
-	}
 	if code, err := st.CreateTopic(bg, "t", 1); !errors.Is(err, boom) || code != core.OK {
 		t.Error(code, err)
 	}
@@ -278,34 +247,83 @@ func TestBatchGetGivesUp(t *testing.T) {
 	}
 }
 
+func runKey(tp core.TopicPartition, base int64) item { return key(partKey("R#", tp), offSK(base)) }
+
+// Another replica takes the base between this commit's read and its write: the
+// transaction is cancelled and only that partition is read again.
 func TestCommitRetriesLostRace(t *testing.T) {
 	st, f := fakeStore(t)
 	st.Obs = cpobs.New()
-	self, epoch := registered(t, st)
-	tp := tpOf("t", 0)
-	op := core.CommitSegment{SegmentKey: "s", Owner: self, Epoch: epoch, Batches: []core.PendingBatch{one(tp, "s", 3)}}
-	if _, _, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "first", Owner: self, Epoch: epoch, Batches: []core.PendingBatch{one(tp, "first", 2)}}); err != nil {
+	tp, other := tpOf("t", 0), tpOf("t", 1)
+	if _, _, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "first", Batches: []core.PendingBatch{one(tp, "first", 2)}}); err != nil {
 		t.Fatal(err)
 	}
-	// Another replica moves the HWM between this commit's read and its write:
-	// the transaction is cancelled, the retry re-reads and lands at 5.
+	op := core.CommitSegment{SegmentKey: "s", Batches: []core.PendingBatch{one(tp, "s", 3), one(other, "s", 1)}}
+	races := 0
+	var queries atomic.Int32
+	f.BeforeTransact = func() {
+		if races++; races == 1 {
+			f.Put(st.Table(), merge(runKey(tp, 2), item{"base": num(2), "cnt": num(4), "runs": blob(encodeRun([]core.BatchRange{{TP: tp, Base: 2, Count: 4, Loc: core.SegmentRef{Key: "x"}}}))}))
+		}
+	}
+	f.Fail = func(call string) error {
+		if call == "Query" {
+			queries.Add(1)
+		}
+		return nil
+	}
+	resp, code, err := st.CommitSegment(bg, op)
+	if err != nil || code != core.OK || races != 2 || resp.Assigned[0].Base != 6 || resp.Assigned[1].Base != 0 {
+		t.Fatalf("resp %+v code %v err %v after %d attempts", resp, code, err, races)
+	}
+	if queries.Load() != 3 { // two partitions, then the lost one again
+		t.Fatalf("%d queries, want 3", queries.Load())
+	}
+}
+
+// A replica commits the same key between the read and the write: the retry
+// finds it and replays its answer.
+func TestCommitLostRaceOnSameKeyReplays(t *testing.T) {
+	st, f := fakeStore(t)
+	other := New(f, st.Prefix())
+	op := core.CommitSegment{SegmentKey: "s", Batches: []core.PendingBatch{one(tpOf("t", 0), "s", 3)}}
 	races := 0
 	f.BeforeTransact = func() {
 		if races++; races == 1 {
-			f.Put(st.Table(), item{"pk": str("R#t#0"), "sk": str("!"), "hwm": num(5)})
+			if _, _, err := other.CommitSegment(bg, op); err != nil {
+				t.Error(err)
+			}
 		}
 	}
 	resp, code, err := st.CommitSegment(bg, op)
-	if err != nil || code != core.OK || races != 2 || resp.Assigned[0].Base != 5 {
+	if err != nil || code != core.OK || races != 2 || len(resp.Assigned) != 1 || resp.Assigned[0].Base != 0 {
 		t.Fatalf("resp %+v code %v err %v after %d attempts", resp, code, err, races)
+	}
+	if l, _, _ := st.Lookup(bg, core.Lookup{TP: tpOf("t", 0)}); l.End != 3 {
+		t.Fatalf("end %d: committed twice", l.End)
+	}
+}
+
+func TestCommitGivesUpAfterMaxAttempts(t *testing.T) {
+	if testing.Short() {
+		t.Skip("backs off for about a second")
+	}
+	st, f := fakeStore(t)
+	tp := tpOf("t", 0)
+	n := int64(0)
+	f.BeforeTransact = func() { // always lose: take the base this attempt read
+		f.Put(st.Table(), merge(runKey(tp, n), item{"base": num(n), "cnt": num(1), "runs": blob(encodeRun([]core.BatchRange{{TP: tp, Base: core.Offset(n), Count: 1, Loc: core.SegmentRef{Key: "x"}}}))}))
+		n++
+	}
+	if _, _, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "s", Batches: []core.PendingBatch{one(tp, "s", 1)}}); !isUnavailable(err) {
+		t.Fatalf("got %v", err)
 	}
 }
 
 func TestCommitUnavailableRetriesUntilContextEnds(t *testing.T) {
 	st, f := fakeStore(t)
 	st.Obs = cpobs.New()
-	self, epoch := registered(t, st)
-	op := core.CommitSegment{SegmentKey: "s", Owner: self, Epoch: epoch, Batches: []core.PendingBatch{one(tpOf("t", 0), "s", 1)}}
+	op := core.CommitSegment{SegmentKey: "s", Batches: []core.PendingBatch{one(tpOf("t", 0), "s", 1)}}
 	f.Fail = throttle("TransactWriteItems")
 	ctx, cancel := context.WithTimeout(bg, 60*time.Millisecond)
 	defer cancel()
@@ -337,26 +355,21 @@ func TestCommitUnavailableRetriesUntilContextEnds(t *testing.T) {
 
 func TestCommitCorruptItems(t *testing.T) {
 	st, f := fakeStore(t)
-	self, epoch := registered(t, st)
 	tp := tpOf("t", 0)
 	f.Put(st.Table(), merge(segKey("bad"), item{"blob": blob([]byte("{"))}))
-	bad := core.CommitSegment{SegmentKey: "bad", Owner: self, Epoch: epoch, Batches: []core.PendingBatch{one(tp, "bad", 1)}}
+	bad := core.CommitSegment{SegmentKey: "bad", Batches: []core.PendingBatch{one(tp, "bad", 1)}}
 	if _, _, err := st.CommitSegment(bg, bad); err == nil || !strings.Contains(err.Error(), "corrupt segment") {
 		t.Fatalf("segment: %v", err)
 	}
-	pid, _ := st.InitProducer(bg)
-	b := one(tp, "p", 1)
-	b.Producer = pid.Producer
-	f.Put(st.Table(), merge(stateKey(skey{tp, pid.Producer}), item{"pepoch": num(0), "nxt": num(1), "win": blob([]byte("{")), "v": num(1)}))
-	if _, _, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "p", Owner: self, Epoch: epoch, Batches: []core.PendingBatch{b}}); err == nil || !strings.Contains(err.Error(), "corrupt producer state") {
-		t.Fatalf("state: %v", err)
+	bad.Batches = nil // the malformed path replays too
+	if _, _, err := st.CommitSegment(bg, bad); err == nil || !strings.Contains(err.Error(), "corrupt segment") {
+		t.Fatalf("malformed: %v", err)
 	}
 }
 
 func TestLookupCorruptRun(t *testing.T) {
 	st, f := fakeStore(t)
 	tp := tpOf("t", 0)
-	f.Put(st.Table(), item{"pk": str("R#t#0"), "sk": str("!"), "hwm": num(3)})
 	f.Put(st.Table(), item{"pk": str("R#t#0"), "sk": str(offSK(0)), "base": num(0), "cnt": num(3), "runs": blob([]byte{9})})
 	if _, _, err := st.Lookup(bg, core.Lookup{TP: tp}); err == nil {
 		t.Fatal("corrupt run decoded")
@@ -366,7 +379,6 @@ func TestLookupCorruptRun(t *testing.T) {
 func TestLookupPagingAndLimits(t *testing.T) {
 	st, f := fakeStore(t)
 	f.PageSize = 1
-	self, epoch := registered(t, st)
 	tp := tpOf("t", 0)
 	var bs []core.PendingBatch
 	for i := 0; i < 5; i++ {
@@ -377,12 +389,12 @@ func TestLookupPagingAndLimits(t *testing.T) {
 		for j := range bs {
 			bs[j].Loc.Key = k
 		}
-		if _, code, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: k, Owner: self, Epoch: epoch, Batches: bs}); err != nil || code != core.OK {
+		if _, code, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: k, Batches: bs}); err != nil || code != core.OK {
 			t.Fatal(code, err)
 		}
 	}
 	l, code, err := st.Lookup(bg, core.Lookup{TP: tp, From: 13})
-	if err != nil || code != core.OK || l.HighWatermark != 30 || len(l.Ranges) != 9 || l.Ranges[0].Base != 12 {
+	if err != nil || code != core.OK || l.End != 30 || len(l.Ranges) != 9 || l.Ranges[0].Base != 12 {
 		t.Fatalf("from 13: %+v %v %v", l, code, err)
 	}
 	l, _, _ = st.Lookup(bg, core.Lookup{TP: tp, From: 0, MaxBytes: 50})
@@ -390,38 +402,32 @@ func TestLookupPagingAndLimits(t *testing.T) {
 		t.Fatalf("max bytes: %d ranges", len(l.Ranges))
 	}
 	if l, _, _ = st.Lookup(bg, core.Lookup{TP: tp, From: 30}); len(l.Ranges) != 0 {
-		t.Fatalf("at the HWM: %d ranges", len(l.Ranges))
+		t.Fatalf("at the end: %d ranges", len(l.Ranges))
 	}
 }
 
 func TestCommitRejects(t *testing.T) {
 	st, f := fakeStore(t)
-	self, epoch := registered(t, st)
 	tp := tpOf("t", 0)
 	ok := []core.PendingBatch{one(tp, "s", 1)}
-	cases := map[string]struct {
-		op   core.CommitSegment
-		want core.ErrCode
-	}{
-		"no batches":    {core.CommitSegment{SegmentKey: "s", Owner: self, Epoch: epoch}, core.ErrInvalid},
-		"no key":        {core.CommitSegment{Owner: self, Epoch: epoch, Batches: ok}, core.ErrInvalid},
-		"empty topic":   {core.CommitSegment{SegmentKey: "s", Owner: self, Epoch: epoch, Batches: []core.PendingBatch{one(tpOf("", 0), "s", 1)}}, core.ErrInvalid},
-		"stale epoch":   {core.CommitSegment{SegmentKey: "s", Owner: self, Epoch: epoch + 1, Batches: ok}, core.ErrFenced},
-		"unknown node":  {core.CommitSegment{SegmentKey: "s", Owner: core.NodeRef{Node: "zz"}, Epoch: epoch, Batches: ok}, core.ErrFenced},
-		"unknown prod.": {core.CommitSegment{SegmentKey: "s", Owner: self, Epoch: epoch, Batches: []core.PendingBatch{{TP: tp, Records: 1, Producer: 1000}}}, core.ErrInvalid},
+	cases := map[string]core.CommitSegment{
+		"no batches":     {SegmentKey: "s"},
+		"no key":         {Batches: ok},
+		"empty topic":    {SegmentKey: "s", Batches: []core.PendingBatch{one(tpOf("", 0), "s", 1)}},
+		"negative part.": {SegmentKey: "s", Batches: []core.PendingBatch{one(tpOf("t", -1), "s", 1)}},
+		"zero records":   {SegmentKey: "s", Batches: []core.PendingBatch{one(tp, "s", 0)}},
 	}
-	for name, c := range cases {
-		if _, code, err := st.CommitSegment(bg, c.op); err != nil || code != c.want {
+	for name, op := range cases {
+		if _, code, err := st.CommitSegment(bg, op); err != nil || code != core.ErrInvalid {
 			t.Errorf("%s: %v %v", name, code, err)
 		}
 	}
-	if f.Count(st.Table()) != 1 { // only the node item
+	if f.Count(st.Table()) != 0 {
 		t.Fatalf("%d items after rejects", f.Count(st.Table()))
 	}
-	// Replay answers whatever the epoch says now; a different request conflicts.
-	good := core.CommitSegment{SegmentKey: "s", Owner: self, Epoch: epoch, Batches: ok}
+	// Replay answers the original; a different request conflicts, malformed or not.
+	good := core.CommitSegment{SegmentKey: "s", Batches: ok}
 	first, _, _ := st.CommitSegment(bg, good)
-	good.Epoch++
 	if again, code, err := st.CommitSegment(bg, good); err != nil || code != core.OK || fmt.Sprint(again) != fmt.Sprint(first) {
 		t.Fatalf("replay: %v %v", code, err)
 	}
@@ -429,13 +435,78 @@ func TestCommitRejects(t *testing.T) {
 	if _, code, _ := st.CommitSegment(bg, good); code != core.ErrConflict {
 		t.Fatalf("conflict: %v", code)
 	}
+	if _, code, _ := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "s"}); code != core.ErrConflict {
+		t.Fatalf("malformed under a committed key: %v", code)
+	}
+}
+
+// Consecutive batches of one partition in a request continue each other, and
+// the end of a partition is that of its newest run.
+func TestCommitBasesInRequestOrder(t *testing.T) {
+	st, _ := fakeStore(t)
+	a, b := tpOf("t", 0), tpOf("t", 1)
+	resp, code, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "s", Batches: []core.PendingBatch{
+		one(a, "s", 2), one(b, "s", 5), one(a, "s", 3), one(b, "s", 1)}})
+	if err != nil || code != core.OK {
+		t.Fatal(code, err)
+	}
+	var bases []core.Offset
+	for _, r := range resp.Assigned {
+		bases = append(bases, r.Base)
+	}
+	if fmt.Sprint(bases) != "[0 0 2 5]" {
+		t.Fatalf("bases %v", bases)
+	}
+	resp, _, _ = st.CommitSegment(bg, core.CommitSegment{SegmentKey: "s2", Batches: []core.PendingBatch{one(b, "s2", 1), one(a, "s2", 1)}})
+	if resp.Assigned[0].Base != 6 || resp.Assigned[1].Base != 5 {
+		t.Fatalf("second commit %+v", resp.Assigned)
+	}
+	if r, _ := st.DescribeTopics(bg, core.DescribeTopics{}); len(r.Topics) != 1 || r.Topics[0].Partitions != 2 {
+		t.Fatalf("topics %+v", r)
+	}
+}
+
+// 1 (segment) + one item per partition + one per grown topic must fit in a
+// transaction of 100 items.
+func TestTooLargeItems(t *testing.T) {
+	st, f := fakeStore(t)
+	mk := func(n int) []core.PendingBatch {
+		var bs []core.PendingBatch
+		for i := 0; i < n; i++ {
+			bs = append(bs, one(tpOf("big", int32(i)), "b", 1))
+		}
+		return bs
+	}
+	if _, code, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "b", Batches: mk(99)}); err != nil || code != core.ErrTooLarge {
+		t.Fatalf("1+99+1 items: %v %v", code, err)
+	}
+	if f.Count(st.Table()) != 0 {
+		t.Fatal("a refused commit wrote")
+	}
+	if _, code, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "b", Batches: mk(98)}); err != nil || code != core.OK {
+		t.Fatalf("1+98+1 items: %v %v", code, err)
+	}
+}
+
+// A read that fails stops the others; the first error wins.
+func TestRunAllFirstError(t *testing.T) {
+	boom := errors.New("boom")
+	var ran atomic.Int32
+	jobs := []func(context.Context) error{
+		func(context.Context) error { ran.Add(1); return boom },
+	}
+	for i := 0; i < 5; i++ {
+		jobs = append(jobs, func(ctx context.Context) error { ran.Add(1); <-ctx.Done(); return ctx.Err() })
+	}
+	if err := runAll(bg, 8, jobs); !errors.Is(err, boom) || ran.Load() != 6 {
+		t.Fatalf("err %v after %d jobs", err, ran.Load())
+	}
 }
 
 func TestTooLargeBlob(t *testing.T) {
 	st, _ := fakeStore(t)
-	self, epoch := registered(t, st)
 	b := one(tpOf("t", 0), strings.Repeat("k", maxBlob), 1)
-	if _, code, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "s", Owner: self, Epoch: epoch, Batches: []core.PendingBatch{b}}); err != nil || code != core.ErrTooLarge {
+	if _, code, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "s", Batches: []core.PendingBatch{b}}); err != nil || code != core.ErrTooLarge {
 		t.Fatalf("%v %v", code, err)
 	}
 }
@@ -478,8 +549,7 @@ func TestCapacityReported(t *testing.T) {
 	st, f := fakeStore(t)
 	st.Obs = cpobs.New()
 	f.ReportCapacity = true
-	self, epoch := registered(t, st)
-	if _, code, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "s", Owner: self, Epoch: epoch, Batches: []core.PendingBatch{one(tpOf("t", 0), "s", 1)}}); err != nil || code != core.OK {
+	if _, code, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "s", Batches: []core.PendingBatch{one(tpOf("t", 0), "s", 1)}}); err != nil || code != core.OK {
 		t.Fatal(code, err)
 	}
 	if _, _, err := st.Lookup(bg, core.Lookup{TP: tpOf("t", 0)}); err != nil {

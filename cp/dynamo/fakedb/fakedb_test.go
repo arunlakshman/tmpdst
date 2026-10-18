@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -330,5 +332,55 @@ func TestBeforeTransactRace(t *testing.T) {
 	var tc *types.TransactionCanceledException
 	if err := tx(f, put(k("G", "-"))); !errors.As(err, &tc) {
 		t.Fatalf("race not lost: %v", err)
+	}
+}
+
+// The newest item of a partition: a descending Query with Limit 1 (the commit's
+// end-offset read), also on an empty partition.
+func TestQueryNewest(t *testing.T) {
+	f := fresh(t)
+	vals := item{":p": s("p")}
+	back := aws.Bool(false)
+	o, err := query(f, "pk = :p", vals, back, aws.Int32(1), nil)
+	if err != nil || len(o.Items) != 0 || o.LastEvaluatedKey != nil {
+		t.Fatalf("empty partition: %v %v", o, err)
+	}
+	for _, sk := range []string{"00000000000000000000", "00000000000000000007", "00000000000000000012"} {
+		f.Put("t", k("p", sk))
+	}
+	f.Put("t", k("q", "99999999999999999999"))
+	o, err = query(f, "pk = :p", vals, back, aws.Int32(1), nil)
+	if got := sks(o); err != nil || len(got) != 1 || got[0] != "00000000000000000012" {
+		t.Fatalf("newest: %v %v", got, err)
+	}
+}
+
+// A put conditioned on attribute_not_exists(sk) is the compare-and-set of the
+// run base: of many concurrent writers of one key exactly one wins.
+func TestPutIfAbsentOneWinner(t *testing.T) {
+	f := fresh(t)
+	cas := func() error {
+		return tx(f, types.TransactWriteItem{Put: &types.Put{TableName: aws.String("t"), Item: k("p", "5"),
+			ConditionExpression: aws.String("attribute_not_exists(sk)")}})
+	}
+	var wins, losses atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var tc *types.TransactionCanceledException
+			if err := cas(); err == nil {
+				wins.Add(1)
+			} else if errors.As(err, &tc) {
+				losses.Add(1)
+			} else {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if wins.Load() != 1 || losses.Load() != 15 {
+		t.Fatalf("%d winners, %d losers", wins.Load(), losses.Load())
 	}
 }

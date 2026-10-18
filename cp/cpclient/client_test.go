@@ -18,8 +18,6 @@ import (
 	"manifester/cp/memstore"
 )
 
-var self = core.NodeRef{Node: "n1", Inc: core.Incarnation{1, 2, 3}}
-
 func realClient(t *testing.T) *Client {
 	t.Helper()
 	srv := httptest.NewServer(cp.NewHandler(memstore.New()))
@@ -36,17 +34,8 @@ func TestClientAgainstMemstore(t *testing.T) {
 	if err := c.CreateTopic(ctx, "t", 2); err != nil {
 		t.Fatal(err)
 	}
-	reg, err := c.Call(ctx, core.Register{Self: self})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ep := reg.(core.RegisterResp).Epoch
-	ip, err := c.Call(ctx, core.InitProducer{})
-	if err != nil || ip.(core.InitProducerResp).Producer == 0 {
-		t.Fatalf("init-producer %v %v", ip, err)
-	}
 	tp := core.TopicPartition{Topic: "t", Partition: 0}
-	cs, err := c.Call(ctx, core.CommitSegment{SegmentKey: "s1", Owner: self, Epoch: ep, Batches: []core.PendingBatch{
+	cs, err := c.Call(ctx, core.CommitSegment{SegmentKey: "s1", Batches: []core.PendingBatch{
 		{TP: tp, Records: 4, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 40}},
 	}})
 	if err != nil {
@@ -59,22 +48,22 @@ func TestClientAgainstMemstore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if l := lk.(core.LookupResp); len(l.Ranges) != 1 || l.HighWatermark != 4 {
+	if l := lk.(core.LookupResp); len(l.Ranges) != 1 || l.End != 4 {
 		t.Fatalf("lookup %+v", l)
 	}
 	ds, err := c.Call(ctx, core.DescribeTopics{Topics: []string{"t"}})
 	if err != nil || len(ds.(core.DescribeTopicsResp).Topics) != 1 {
 		t.Fatalf("describe %v %v", ds, err)
 	}
-	if len(ops) != 6 {
+	if len(ops) != 4 {
 		t.Errorf("observer saw %v", ops)
 	}
 
-	// business error: a stale epoch is fenced.
-	_, err = c.Call(ctx, core.CommitSegment{SegmentKey: "s2", Owner: self, Epoch: ep + 99, Batches: []core.PendingBatch{{TP: tp, Records: 1, Loc: core.SegmentRef{Key: "s2", Len: 1}}}})
+	// business error: the same key with another request conflicts.
+	_, err = c.Call(ctx, core.CommitSegment{SegmentKey: "s1", Batches: []core.PendingBatch{{TP: tp, Records: 1, Loc: core.SegmentRef{Key: "s1", Len: 1}}}})
 	var be *Error
-	if !errors.As(err, &be) || be.Code != core.ErrFenced || be.Error() != "cp: ErrFenced" {
-		t.Fatalf("want fenced, got %v", err)
+	if !errors.As(err, &be) || be.Code != core.ErrConflict || be.Error() != "cp: ErrConflict" {
+		t.Fatalf("want conflict, got %v", err)
 	}
 	if _, err = c.Call(ctx, core.DescribeTopics{}); err != nil {
 		t.Fatal(err)
@@ -88,7 +77,7 @@ func TestCallCtxAndUnknownOp(t *testing.T) {
 	c := realClient(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := c.Call(ctx, core.InitProducer{}); !errors.Is(err, context.Canceled) {
+	if _, err := c.Call(ctx, core.CommitSegment{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled ctx: %v", err)
 	}
 	_, err := c.Call(context.Background(), nil)
@@ -117,7 +106,7 @@ func TestCallErrorClasses(t *testing.T) {
 		code   core.ErrCode
 		out    core.Outcome
 	}{
-		{"business", 200, `{"err":"ErrFenced"}`, core.ErrFenced, core.NotApplied},
+		{"business", 200, `{"err":"ErrConflict"}`, core.ErrConflict, core.NotApplied},
 		{"unavailable", 503, "busy", core.ErrUnavailable, core.NotApplied},
 		{"throttled", 429, "slow", core.ErrUnavailable, core.NotApplied},
 		{"4xx", 400, "bad", core.ErrIO, core.NotApplied},
@@ -127,11 +116,11 @@ func TestCallErrorClasses(t *testing.T) {
 	}
 	for _, tc := range cases {
 		c := fake(t, tc.status, tc.body)
-		_, err := c.Call(context.Background(), core.Register{Self: self})
+		_, err := c.Call(context.Background(), core.CommitSegment{})
 		if err == nil {
 			t.Fatalf("%s: no error", tc.name)
 		}
-		code, out := Classifier{}.Classify(core.CPCall{Op: core.Register{}}, err)
+		code, out := Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, err)
 		if code != tc.code || out != tc.out {
 			t.Errorf("%s: %v %v, want %v %v (err %v)", tc.name, code, out, tc.code, tc.out, err)
 		}
@@ -141,21 +130,9 @@ func TestCallErrorClasses(t *testing.T) {
 		}
 	}
 	// CallError text carries the status.
-	_, err := fake(t, 500, " oops \n").Call(context.Background(), core.InitProducer{})
-	if !strings.Contains(err.Error(), "init-producer: http 500: oops") {
+	_, err := fake(t, 500, " oops \n").Call(context.Background(), core.CommitSegment{})
+	if !strings.Contains(err.Error(), "commit-segment: http 500: oops") {
 		t.Errorf("error text %q", err)
-	}
-}
-
-func TestCallBadRange(t *testing.T) {
-	c := fake(t, 200, `{"assigned":[{"err":"ErrWhat"}],"ranges":[{"err":"ErrWhat"}]}`)
-	ops := []core.CPOp{core.CommitSegment{}, core.Lookup{}}
-	for _, op := range ops {
-		_, err := c.Call(context.Background(), op)
-		var ce *CallError
-		if !errors.As(err, &ce) || ce.Status != 200 || !ce.Sent {
-			t.Errorf("%T: %v", op, err)
-		}
 	}
 }
 
@@ -163,12 +140,12 @@ func TestCallDialError(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	url := srv.URL
 	srv.Close()
-	_, err := New(url, nil).Call(context.Background(), core.Register{Self: self})
+	_, err := New(url, nil).Call(context.Background(), core.CommitSegment{})
 	var ce *CallError
 	if !errors.As(err, &ce) || ce.Sent {
 		t.Fatalf("want unsent CallError, got %v", err)
 	}
-	code, out := Classifier{}.Classify(core.CPCall{Op: core.Register{}}, err)
+	code, out := Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, err)
 	if code != core.ErrUnavailable || out != core.NotApplied {
 		t.Errorf("dial: %v %v", code, out)
 	}
@@ -200,7 +177,7 @@ func TestCallTimeoutAfterSend(t *testing.T) {
 }
 
 func TestBadBaseURL(t *testing.T) {
-	_, err := New("http://bad host\x7f", nil).Call(context.Background(), core.InitProducer{})
+	_, err := New("http://bad host\x7f", nil).Call(context.Background(), core.CommitSegment{})
 	var ce *CallError
 	if !errors.As(err, &ce) || ce.Sent {
 		t.Fatalf("got %v", err)

@@ -9,7 +9,7 @@ import (
 )
 
 // A run is the batches one commit assigned to one partition. Their offsets are
-// contiguous (decide hands out base = running HWM), so the run is stored as ONE
+// contiguous (assign hands out base = running end), so the run is stored as ONE
 // R# item whose sort key is the base offset of its first batch, and the batches
 // inside it are a packed list. The commit transaction therefore costs one range
 // item per partition however many batches the segment holds.
@@ -144,15 +144,12 @@ func expandRun(tp core.TopicPartition, it item) ([]core.BatchRange, error) {
 	return rs, nil
 }
 
-// runsOf groups the newly assigned batches (no error, not a dup) by partition
+// runsOf groups the newly assigned batches by partition
 // in first-use order. Each group is one run.
 func runsOf(ranges []core.BatchRange) [][]core.BatchRange {
 	var out [][]core.BatchRange
 	at := map[core.TopicPartition]int{} // lookups only
 	for _, r := range ranges {
-		if r.Err != core.OK || r.Dup {
-			continue
-		}
 		i, ok := at[r.TP]
 		if !ok {
 			i = len(out)

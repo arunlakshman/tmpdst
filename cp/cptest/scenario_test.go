@@ -1,14 +1,15 @@
 package cptest
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,40 +30,42 @@ func lockstep(t *testing.T, im impl, ops []op) {
 	}
 }
 
-// windowOps drives one producer past the 5-entry window, then retries an
-// evicted and a live sequence, and a sequence gap.
-func windowOps() []op {
-	ops := []op{{Kind: "register", Node: "a"}, {Kind: "init"}}
-	tp := core.TopicPartition{Topic: "w", Partition: 0}
-	commit := func(key string, seq int32, recs int64) op {
-		return op{Kind: "commit", Node: "a", Name: key, Epoch: 1, Batches: []core.PendingBatch{
-			{TP: tp, Records: recs, Loc: core.SegmentRef{Key: key, Len: 10}, Producer: 1000, BaseSeq: seq}}}
+// replayOps commits a three-batch, two-partition segment, replays it after the
+// ends moved, sends a different request under its key, an invalid request, and
+// a retry of the same batches under a fresh key (new offsets).
+func replayOps() []op {
+	a, b := core.TopicPartition{Topic: "w", Partition: 0}, core.TopicPartition{Topic: "w", Partition: 1}
+	batches := func(key string) []core.PendingBatch {
+		return []core.PendingBatch{
+			{TP: a, Records: 2, Loc: core.SegmentRef{Key: key, Off: 0, Len: 20}},
+			{TP: b, Records: 5, Loc: core.SegmentRef{Key: key, Off: 20, Len: 50}},
+			{TP: a, Records: 3, Loc: core.SegmentRef{Key: key, Off: 70, Len: 30}},
+		}
 	}
-	for i := 0; i < 8; i++ {
-		ops = append(ops, commit(fmt.Sprintf("s%d", i), int32(i*2), 2))
+	commit := func(key string, bs []core.PendingBatch) op { return op{Kind: "commit", Name: key, Batches: bs} }
+	return []op{
+		commit("s1", batches("s1")),
+		commit("s2", batches("s2")),
+		commit("s1", batches("s1")),                // replay: the original ranges
+		commit("s1", batches("s2")),                // other request under s1: conflict
+		commit("s1", nil),                          // malformed under a committed key: conflict
+		commit("s3", []core.PendingBatch{{TP: a}}), // invalid: no records
+		commit("s3", batches("s3")),                // the failed key is reusable
+		commit("re", batches("s3")),                // the same batches, a fresh key: new offsets
+		{Kind: "lookup", TP: a}, {Kind: "lookup", TP: b, From: 6, MaxBytes: 25},
+		{Kind: "describe"},
 	}
-	ops = append(ops,
-		commit("r-old", 0, 2),   // evicted from the window: out of order
-		commit("r-live", 6, 2),  // oldest in the window: dup
-		commit("r-size", 6, 3),  // same seq, other size: out of order
-		commit("r-gap", 40, 1),  // gap
-		commit("r-next", 16, 1), // next expected
-		op{Kind: "lookup", TP: tp},
-		op{Kind: "lookup", TP: tp, From: 5, MaxBytes: 25},
-		op{Kind: "describe"},
-	)
-	return ops
 }
 
-func TestWindowEvictionMemstore(t *testing.T) { lockstep(t, storeImpl{newMem()}, windowOps()) }
-func TestWindowEvictionDynamo(t *testing.T)   { lockstep(t, storeImpl{dynamoStore(t)}, windowOps()) }
+func TestReplayMemstore(t *testing.T) { lockstep(t, storeImpl{newMem()}, replayOps()) }
+func TestReplayDynamo(t *testing.T)   { lockstep(t, storeImpl{dynamoStore(t)}, replayOps()) }
 
 // manyBatchesOps commits segments of many small batches (one DynamoDB range
-// item per partition and segment), with a duplicate inside a segment, a replay
+// item per partition and segment), with a replay
 // of a segment, a segment spanning two runs of one partition (two commits), and
 // a Lookup from every offset with and without a byte limit.
 func manyBatchesOps() []op {
-	ops := []op{{Kind: "register", Node: "a"}, {Kind: "init"}, {Kind: "init"}}
+	var ops []op
 	a := core.TopicPartition{Topic: "m", Partition: 0}
 	b := core.TopicPartition{Topic: "m", Partition: 1}
 	var s1, s2 []core.PendingBatch
@@ -75,18 +78,16 @@ func manyBatchesOps() []op {
 				Loc: core.SegmentRef{Key: "big1", Off: int64(i) * 70, Len: int64(10 + i%5)}})
 		}
 	}
-	// Idempotent producer 1000 on a: seq 0 then a dup of seq 0 inside the segment
-	// and the next seq; producer 1001 on b.
+	// Several batches of one partition around one of another.
 	s2 = []core.PendingBatch{
-		{TP: a, Records: 2, Loc: core.SegmentRef{Key: "big2", Off: 0, Len: 9}, Producer: 1000, BaseSeq: 0},
-		{TP: a, Records: 2, Loc: core.SegmentRef{Key: "big2", Off: 9, Len: 9}, Producer: 1000, BaseSeq: 0}, // dup of the batch above
-		{TP: a, Records: 3, Loc: core.SegmentRef{Key: "big2", Off: 18, Len: 9}, Producer: 1000, BaseSeq: 2},
-		{TP: b, Records: 1, Loc: core.SegmentRef{Key: "big2", Off: 27, Len: 9}, Producer: 1001, BaseSeq: 0},
+		{TP: a, Records: 2, Loc: core.SegmentRef{Key: "big2", Off: 0, Len: 9}},
+		{TP: a, Records: 2, Loc: core.SegmentRef{Key: "big2", Off: 9, Len: 9}},
+		{TP: a, Records: 3, Loc: core.SegmentRef{Key: "big2", Off: 18, Len: 9}},
+		{TP: b, Records: 1, Loc: core.SegmentRef{Key: "big2", Off: 27, Len: 9}},
 		{TP: a, Records: 1, Loc: core.SegmentRef{Key: "big2", Off: 36, Len: 9}},
-		{TP: a, Records: 1, Loc: core.SegmentRef{Key: "other", Off: 1, Len: 2}, Producer: 1000, BaseSeq: 99}, // out of order
 	}
 	commit := func(key string, bs []core.PendingBatch) op {
-		return op{Kind: "commit", Node: "a", Name: key, Epoch: 1, Batches: bs}
+		return op{Kind: "commit", Name: key, Batches: bs}
 	}
 	ops = append(ops, commit("big1", s1), commit("big1", s1), commit("big2", s2), commit("big2", s2),
 		commit("big3", s1), // a second run on each partition, right after the first
@@ -108,14 +109,12 @@ func TestManyBatchesDynamo(t *testing.T)   { lockstep(t, storeImpl{dynamoStore(t
 func TestManyBatchesReplayOtherReplica(t *testing.T) {
 	st := dynamoStore(t)
 	ctx := context.Background()
-	self := core.NodeRef{Node: "n"}
-	reg, _ := st.Register(ctx, core.Register{Self: self})
 	var bs []core.PendingBatch
 	for i := 0; i < 200; i++ {
 		bs = append(bs, core.PendingBatch{TP: core.TopicPartition{Topic: "r", Partition: 0}, Records: 1,
 			Loc: core.SegmentRef{Key: "s", Off: int64(i), Len: 1}})
 	}
-	op := core.CommitSegment{SegmentKey: "s", Owner: self, Epoch: reg.Epoch, Batches: bs}
+	op := core.CommitSegment{SegmentKey: "s", Batches: bs}
 	first, code, err := st.CommitSegment(ctx, op)
 	if err != nil || code != core.OK || len(first.Assigned) != 200 || first.Assigned[199].Base != 199 {
 		t.Fatalf("first: %v %v %d", code, err, len(first.Assigned))
@@ -125,8 +124,8 @@ func TestManyBatchesReplayOtherReplica(t *testing.T) {
 		t.Fatalf("replay: %v %v", code, err)
 	}
 	l, _, _ := st.Lookup(ctx, core.Lookup{TP: bs[0].TP, From: 150})
-	if len(l.Ranges) != 50 || l.Ranges[0].Base != 150 || l.HighWatermark != 200 {
-		t.Fatalf("lookup: %d ranges hwm %d", len(l.Ranges), l.HighWatermark)
+	if len(l.Ranges) != 50 || l.Ranges[0].Base != 150 || l.End != 200 {
+		t.Fatalf("lookup: %d ranges end %d", len(l.Ranges), l.End)
 	}
 }
 
@@ -140,20 +139,11 @@ func TestRoundTrip(t *testing.T) {
 	if resp, err := http.Get(srv.URL + "/healthz"); err != nil || resp.StatusCode != 200 {
 		t.Fatalf("healthz: %v", err)
 	}
-	self := core.NodeRef{Node: "n", Inc: core.Incarnation{1, 2, 3}}
-	r, err := c.Call(ctx, core.Register{Self: self})
-	if err != nil || r.(core.RegisterResp).Epoch != 1 {
-		t.Fatalf("register: %v %v", r, err)
-	}
-	p, err := c.Call(ctx, core.InitProducer{})
-	if err != nil || p.(core.InitProducerResp).Producer != 1000 {
-		t.Fatalf("init: %v %v", p, err)
-	}
 	if err := c.CreateTopic(ctx, "t", 3); err != nil {
 		t.Fatal(err)
 	}
-	commit := core.CommitSegment{SegmentKey: "k", Owner: self, Epoch: 1, Batches: []core.PendingBatch{
-		{TP: core.TopicPartition{Topic: "t", Partition: 1}, Records: 4, Loc: core.SegmentRef{Key: "k", Off: 8, Len: 40}, Producer: 1000, BaseSeq: 0},
+	commit := core.CommitSegment{SegmentKey: "k", Batches: []core.PendingBatch{
+		{TP: core.TopicPartition{Topic: "t", Partition: 1}, Records: 4, Loc: core.SegmentRef{Key: "k", Off: 8, Len: 40}},
 	}}
 	cr, err := c.Call(ctx, commit)
 	if err != nil {
@@ -163,7 +153,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("commit: %+v", got)
 	}
 	l, err := c.Call(ctx, core.Lookup{TP: commit.Batches[0].TP})
-	if err != nil || l.(core.LookupResp).HighWatermark != 4 || len(l.(core.LookupResp).Ranges) != 1 {
+	if err != nil || l.(core.LookupResp).End != 4 || len(l.(core.LookupResp).Ranges) != 1 {
 		t.Fatalf("lookup: %+v %v", l, err)
 	}
 	d, err := c.Call(ctx, core.DescribeTopics{})
@@ -171,13 +161,13 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("describe: %+v %v", d, err)
 	}
 	// Business errors come back as typed errors.
-	commit.SegmentKey, commit.Epoch = "k2", 9
+	commit.Batches[0].Records = 9 // the same key, another request
 	_, err = c.Call(ctx, commit)
 	var be *cpclient.Error
-	if !errors.As(err, &be) || be.Code != core.ErrFenced {
-		t.Fatalf("want ErrFenced, got %v", err)
+	if !errors.As(err, &be) || be.Code != core.ErrConflict {
+		t.Fatalf("want ErrConflict, got %v", err)
 	}
-	if code, out := (cpclient.Classifier{}).Classify(core.CPCall{Op: commit}, err); code != core.ErrFenced || out != core.NotApplied {
+	if code, out := (cpclient.Classifier{}).Classify(core.CPCall{Op: commit}, err); code != core.ErrConflict || out != core.NotApplied {
 		t.Fatalf("classify: %v %v", code, out)
 	}
 	// Malformed body: ErrInvalid at 200.
@@ -192,8 +182,8 @@ type failStore struct {
 	err error
 }
 
-func (f failStore) Register(context.Context, core.Register) (core.RegisterResp, error) {
-	return core.RegisterResp{}, f.err
+func (f failStore) CommitSegment(context.Context, core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
+	return core.CommitSegmentResp{}, core.OK, f.err
 }
 
 func TestHandlerStatus(t *testing.T) {
@@ -206,7 +196,7 @@ func TestHandlerStatus(t *testing.T) {
 		{errors.New("boom"), 500},
 	} {
 		srv := httptest.NewServer(cp.NewHandler(failStore{newMem(), c.err}))
-		resp, err := http.Post(srv.URL+"/v1/register", "application/json", stringsReader(`{"self":{"node":"n","inc":"00000000000000000000000000000000"}}`))
+		resp, err := http.Post(srv.URL+"/v1/commit-segment", "application/json", stringsReader(`{"segment_key":"k"}`))
 		srv.Close()
 		if err != nil || resp.StatusCode != c.want {
 			t.Fatalf("%v: status %v err %v", c.err, resp, err)
@@ -214,14 +204,12 @@ func TestHandlerStatus(t *testing.T) {
 	}
 }
 
-// Concurrency on DynamoDB: several replicas (Store values) over one table.
-
-func TestDynamoConcurrentCommits(t *testing.T) {
-	first := dynamoStore(t)
-	replicas := []cp.Store{first}
-	for i := 0; i < 3; i++ {
-		replicas = append(replicas, newReplica(t, first))
-	}
+// concurrentCommits has several replicas (Store values over one table) commit
+// to the same two partitions from many goroutines: every batch of every
+// accepted commit must land in a contiguous, non-overlapping offset range.
+// Each commit is also retried under the same key (a replay: same answer).
+func concurrentCommits(t *testing.T, replicas []cp.Store) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	const workers, perWorker = 12, 8
@@ -229,120 +217,95 @@ func TestDynamoConcurrentCommits(t *testing.T) {
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	pids := map[core.ProducerID]bool{}
 	assigned := map[core.TopicPartition][][2]int64{} // (base, count)
-	dups := 0
-	var unavailable atomic.Int64
 	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			st := replicas[w%len(replicas)]
-			self := core.NodeRef{Node: core.NodeID(fmt.Sprintf("n%d", w))}
-			reg, err := st.Register(ctx, core.Register{Self: self})
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			ip, err := st.InitProducer(ctx)
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			mu.Lock()
-			pids[ip.Producer] = true
-			mu.Unlock()
 			for i := 0; i < perWorker; i++ {
+				key := fmt.Sprintf("w%d-%d", w, i)
 				batches := []core.PendingBatch{
-					{TP: tps[0], Records: 2, Loc: core.SegmentRef{Key: "x", Len: 5}},
-					{TP: tps[1], Records: 3, Loc: core.SegmentRef{Key: "x", Len: 5}, Producer: ip.Producer, BaseSeq: int32(3 * i)},
+					{TP: tps[0], Records: 2, Loc: core.SegmentRef{Key: key, Len: 5}},
+					{TP: tps[1], Records: 3, Loc: core.SegmentRef{Key: key, Len: 5}},
+					{TP: tps[0], Records: int64(1 + i%3), Loc: core.SegmentRef{Key: key, Off: 5, Len: 5}},
 				}
-				// The same batches under two keys: the second is a producer retry.
-				for _, key := range []string{fmt.Sprintf("w%d-%d", w, i), fmt.Sprintf("w%d-%d-retry", w, i)} {
-					var resp core.CommitSegmentResp
-					var code core.ErrCode
-					// A 503 is NotApplied and the commit idempotent: retry.
-					for try := 0; try < 5; try++ {
-						resp, code, err = st.CommitSegment(ctx, core.CommitSegment{SegmentKey: key, Owner: self, Epoch: reg.Epoch, Batches: batches})
-						if !errors.Is(err, cp.ErrUnavailable) {
-							break
-						}
-						unavailable.Add(1)
-					}
-					if err != nil || code != core.OK {
-						t.Errorf("commit %s: %v %v", key, code, err)
-						return
-					}
-					mu.Lock()
-					for _, r := range resp.Assigned {
-						if r.Dup {
-							dups++
-						} else if r.Err == core.OK {
-							assigned[r.TP] = append(assigned[r.TP], [2]int64{int64(r.Base), r.Count})
-						}
-					}
-					mu.Unlock()
+				first := commitRetrying(ctx, t, st, core.CommitSegment{SegmentKey: key, Batches: batches})
+				again := commitRetrying(ctx, t, replicas[(w+1)%len(replicas)], core.CommitSegment{SegmentKey: key, Batches: batches})
+				if fmt.Sprint(first) != fmt.Sprint(again) {
+					t.Errorf("replay of %s: %v, want %v", key, again, first)
 				}
+				mu.Lock()
+				for _, r := range first.Assigned {
+					assigned[r.TP] = append(assigned[r.TP], [2]int64{int64(r.Base), r.Count})
+				}
+				mu.Unlock()
 			}
 		}()
 	}
 	wg.Wait()
-	t.Logf("503s retried by workers: %d", unavailable.Load())
 	if t.Failed() {
 		return
 	}
-	if len(pids) != workers {
-		t.Errorf("producer ids not unique: %d", len(pids))
-	}
-	// Partition 0 batches are not idempotent: every commit (original and
-	// retry) assigns. Partition 1 retries are dups: one assignment per i.
-	want := map[core.TopicPartition]int{tps[0]: workers * perWorker * 2, tps[1]: workers * perWorker}
-	if dups != workers*perWorker {
-		t.Errorf("dups %d want %d", dups, workers*perWorker)
-	}
 	for tp, list := range assigned {
-		if len(list) != want[tp] {
-			t.Errorf("%v: %d assignments, want %d", tp, len(list), want[tp])
-		}
-		seen := map[int64]bool{}
-		var total int64
-		for _, a := range list {
-			if seen[a[0]] {
-				t.Errorf("%v: duplicate base %d", tp, a[0])
-			}
-			seen[a[0]] = true
-			total += a[1]
-		}
-		// Contiguous: bases cover exactly [0, total).
-		var next int64
-		for next < total {
-			var size int64
-			for _, a := range list {
-				if a[0] == next {
-					size = a[1]
-				}
-			}
-			if size == 0 {
-				t.Errorf("%v: gap at %d (total %d)", tp, next, total)
-				break
-			}
-			next += size
-		}
-		resp, _, err := first.Lookup(ctx, core.Lookup{TP: tp})
-		if err != nil || int64(resp.HighWatermark) != total || len(resp.Ranges) != len(list) {
-			t.Errorf("%v lookup: hwm %d ranges %d, want %d / %d (%v)", tp, resp.HighWatermark, len(resp.Ranges), total, len(list), err)
+		total := checkContiguous(t, tp, list)
+		resp, _, err := replicas[0].Lookup(ctx, core.Lookup{TP: tp})
+		if err != nil || int64(resp.End) != total || len(resp.Ranges) != len(list) {
+			t.Errorf("%v lookup: end %d ranges %d, want %d / %d (%v)", tp, resp.End, len(resp.Ranges), total, len(list), err)
 		}
 	}
+}
+
+// commitRetrying commits, retrying a 503 (NotApplied, and the commit is
+// idempotent per key).
+func commitRetrying(ctx context.Context, t *testing.T, st cp.Store, op core.CommitSegment) core.CommitSegmentResp {
+	for try := 0; try < 5; try++ {
+		resp, code, err := st.CommitSegment(ctx, op)
+		if errors.Is(err, cp.ErrUnavailable) {
+			continue
+		}
+		if err != nil || code != core.OK {
+			t.Errorf("commit %s: %v %v", op.SegmentKey, code, err)
+		}
+		return resp
+	}
+	t.Errorf("commit %s: unavailable", op.SegmentKey)
+	return core.CommitSegmentResp{}
+}
+
+// checkContiguous: the (base, count) ranges tile [0, total) exactly once.
+func checkContiguous(t *testing.T, tp core.TopicPartition, list [][2]int64) (total int64) {
+	t.Helper()
+	slices.SortFunc(list, func(a, b [2]int64) int { return cmp.Compare(a[0], b[0]) })
+	for _, a := range list {
+		if a[0] != total {
+			t.Errorf("%v: range at %d, expected %d (gap or overlap)", tp, a[0], total)
+			return total
+		}
+		total += a[1]
+	}
+	return total
+}
+
+func TestDynamoConcurrentCommits(t *testing.T) {
+	first := dynamoStore(t)
+	replicas := []cp.Store{first}
+	for i := 0; i < 3; i++ {
+		replicas = append(replicas, newReplica(t, first))
+	}
+	concurrentCommits(t, replicas)
 }
 
 // The same segment key committed by many goroutines at once: one winner, all
 // see the same ranges.
 func TestDynamoSameKeyRace(t *testing.T) {
-	st := dynamoStore(t)
+	sameKeyRace(t, dynamoStore(t))
+}
+
+func sameKeyRace(t *testing.T, st cp.Store) {
+	t.Helper()
 	ctx := context.Background()
-	self := core.NodeRef{Node: "n"}
-	reg, _ := st.Register(ctx, core.Register{Self: self})
-	op := core.CommitSegment{SegmentKey: "same", Owner: self, Epoch: reg.Epoch, Batches: []core.PendingBatch{
+	op := core.CommitSegment{SegmentKey: "same", Batches: []core.PendingBatch{
 		{TP: core.TopicPartition{Topic: "r"}, Records: 5, Loc: core.SegmentRef{Key: "same", Len: 9}}}}
 	var wg sync.WaitGroup
 	res := make([]core.CommitSegmentResp, 10)
@@ -350,40 +313,37 @@ func TestDynamoSameKeyRace(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			r, code, err := st.CommitSegment(ctx, op)
-			if err != nil || code != core.OK {
-				t.Errorf("%v %v", code, err)
-			}
-			res[i] = r
+			res[i] = commitRetrying(ctx, t, st, op)
 		}()
 	}
 	wg.Wait()
 	for _, r := range res {
-		if fmt.Sprint(r) != fmt.Sprint(res[0]) || r.Assigned[0].Base != 0 {
+		if len(r.Assigned) != 1 || fmt.Sprint(r) != fmt.Sprint(res[0]) || r.Assigned[0].Base != 0 {
 			t.Fatalf("diverged: %+v vs %+v", r, res[0])
 		}
 	}
-	if l, _, _ := st.Lookup(ctx, core.Lookup{TP: op.Batches[0].TP}); l.HighWatermark != 5 {
-		t.Fatalf("hwm %d", l.HighWatermark)
+	if l, _, _ := st.Lookup(ctx, core.Lookup{TP: op.Batches[0].TP}); l.End != 5 {
+		t.Fatalf("end %d", l.End)
 	}
 }
 
-func TestDynamoTooLarge(t *testing.T) {
-	st := dynamoStore(t)
+func TestDynamoTooLarge(t *testing.T) { tooLarge(t, dynamoStore(t)) }
+
+// 1 segment item + one run per partition + the topic must fit in 100 items.
+func tooLarge(t *testing.T, st cp.Store) {
+	t.Helper()
 	ctx := context.Background()
-	self := core.NodeRef{Node: "n"}
-	reg, _ := st.Register(ctx, core.Register{Self: self})
 	var bs []core.PendingBatch
-	for i := 0; i < 60; i++ {
+	for i := 0; i < 100; i++ {
 		bs = append(bs, core.PendingBatch{TP: core.TopicPartition{Topic: "big", Partition: int32(i)}, Records: 1, Loc: core.SegmentRef{Key: "b", Len: 1}})
 	}
-	_, code, err := st.CommitSegment(ctx, core.CommitSegment{SegmentKey: "b", Owner: self, Epoch: reg.Epoch, Batches: bs})
+	_, code, err := st.CommitSegment(ctx, core.CommitSegment{SegmentKey: "b", Batches: bs})
 	if err != nil || code != core.ErrTooLarge {
-		t.Fatalf("120 items: %v %v", code, err)
+		t.Fatalf("102 items: %v %v", code, err)
 	}
-	_, code, err = st.CommitSegment(ctx, core.CommitSegment{SegmentKey: "b2", Owner: self, Epoch: reg.Epoch, Batches: bs[:40]})
+	_, code, err = st.CommitSegment(ctx, core.CommitSegment{SegmentKey: "b2", Batches: bs[:98]})
 	if err != nil || code != core.OK {
-		t.Fatalf("82 items: %v %v", code, err)
+		t.Fatalf("100 items: %v %v", code, err)
 	}
 }
 

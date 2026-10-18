@@ -73,10 +73,6 @@ func (c *Client) Call(ctx context.Context, op core.CPOp) (core.CPResp, error) {
 		return nil, err
 	}
 	switch op := op.(type) {
-	case core.Register:
-		return c.register(ctx, op)
-	case core.InitProducer:
-		return c.initProducer(ctx)
 	case core.CommitSegment:
 		return c.commitSegment(ctx, op)
 	case core.Lookup:
@@ -96,24 +92,8 @@ func (c *Client) exchange(ctx context.Context, name string, req, out any, errOf 
 	return business(errOf())
 }
 
-func (c *Client) register(ctx context.Context, op core.Register) (core.CPResp, error) {
-	var out cp.RegisterResp
-	if err := c.exchange(ctx, "register", cp.RegisterReq{Self: cp.NodeToWire(op.Self)}, &out, func() string { return out.Err }); err != nil {
-		return nil, err
-	}
-	return core.RegisterResp{Epoch: core.Epoch(out.Epoch)}, nil
-}
-
-func (c *Client) initProducer(ctx context.Context) (core.CPResp, error) {
-	var out cp.InitProducerResp
-	if err := c.exchange(ctx, "init-producer", struct{}{}, &out, func() string { return out.Err }); err != nil {
-		return nil, err
-	}
-	return core.InitProducerResp{Producer: core.ProducerID(out.Producer), PEpoch: out.PEpoch}, nil
-}
-
 func (c *Client) commitSegment(ctx context.Context, op core.CommitSegment) (core.CPResp, error) {
-	req := cp.CommitReq{SegmentKey: op.SegmentKey, Owner: cp.NodeToWire(op.Owner), Epoch: uint64(op.Epoch)}
+	req := cp.CommitReq{SegmentKey: op.SegmentKey}
 	for _, b := range op.Batches {
 		req.Batches = append(req.Batches, cp.BatchToWire(b))
 	}
@@ -121,11 +101,7 @@ func (c *Client) commitSegment(ctx context.Context, op core.CommitSegment) (core
 	if err := c.exchange(ctx, "commit-segment", req, &out, func() string { return out.Err }); err != nil {
 		return nil, err
 	}
-	rs, err := ranges(out.Assigned)
-	if err != nil {
-		return nil, &CallError{Op: "commit-segment", Sent: true, Status: 200, Err: err}
-	}
-	return core.CommitSegmentResp{Assigned: rs}, nil
+	return core.CommitSegmentResp{Assigned: ranges(out.Assigned)}, nil
 }
 
 func (c *Client) lookup(ctx context.Context, op core.Lookup) (core.CPResp, error) {
@@ -134,11 +110,7 @@ func (c *Client) lookup(ctx context.Context, op core.Lookup) (core.CPResp, error
 	if err := c.exchange(ctx, "lookup", req, &out, func() string { return out.Err }); err != nil {
 		return nil, err
 	}
-	rs, err := ranges(out.Ranges)
-	if err != nil {
-		return nil, &CallError{Op: "lookup", Sent: true, Status: 200, Err: err}
-	}
-	return core.LookupResp{Ranges: rs, HighWatermark: core.Offset(out.HighWatermark)}, nil
+	return core.LookupResp{Ranges: ranges(out.Ranges), End: core.Offset(out.End)}, nil
 }
 
 func (c *Client) describeTopics(ctx context.Context, op core.DescribeTopics) (core.CPResp, error) {
@@ -173,16 +145,12 @@ func business(s string) error {
 	return nil
 }
 
-func ranges(in []cp.Range) ([]core.BatchRange, error) {
+func ranges(in []cp.Range) []core.BatchRange {
 	var out []core.BatchRange
 	for _, r := range in {
-		br, err := cp.RangeFromWire(r)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, br)
+		out = append(out, cp.RangeFromWire(r))
 	}
-	return out, nil
+	return out
 }
 
 func (c *Client) do(ctx context.Context, name string, req, resp any) error {

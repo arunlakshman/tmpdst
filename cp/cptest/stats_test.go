@@ -17,7 +17,7 @@ func TestGeneratorCoverage(t *testing.T) {
 		spec := veritas.NewControlPlane()
 		for i := 0; i < 200; i++ {
 			o := gen(r, i)
-			if o.Kind == "create" || o.Kind == "init" && false {
+			if o.Kind == "create" {
 				spec.CreateTopic(o.Name, o.Parts)
 				continue
 			}
@@ -28,21 +28,12 @@ func TestGeneratorCoverage(t *testing.T) {
 			}
 			seen["commit/"+d.Err.String()]++
 			if d.Err == core.OK {
-				for _, b := range d.Resp.(core.CommitSegmentResp).Assigned {
-					switch {
-					case b.Dup:
-						seen["batch/dup"]++
-					case b.Err != core.OK:
-						seen["batch/"+b.Err.String()]++
-					case b.Base >= 0:
-						seen["batch/assigned"]++
-					}
-				}
+				seen["batch/assigned"] += len(d.Resp.(core.CommitSegmentResp).Assigned)
 			}
 		}
 	}
 	t.Log(seen)
-	for _, k := range []string{"commit/OK", "commit/ErrFenced", "commit/ErrConflict", "commit/ErrInvalid", "batch/dup", "batch/ErrOutOfOrder", "batch/ErrFenced", "batch/assigned"} {
+	for _, k := range []string{"commit/OK", "commit/ErrConflict", "commit/ErrInvalid", "batch/assigned"} {
 		if seen[k] < 20 {
 			t.Errorf("generator rarely reaches %s (%d)", k, seen[k])
 		}

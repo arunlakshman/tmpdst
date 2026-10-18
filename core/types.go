@@ -67,7 +67,7 @@ const (
 	ErrTimeout             // deadline passed, or the response was lost; see Outcome (a lost response is ErrTimeout+MaybeApplied, never silence)
 	ErrUnavailable         // 503 / throttled / overloaded
 	ErrNotFound
-	ErrConflict   // CAS lost (offset base taken) or idempotency-key mismatch
+	ErrConflict   // idempotency-key mismatch (same SegmentKey, different request)
 	_             // retired: was ErrFenced (decision 44); keeps the numbers below stable
 	ErrConnClosed // connection lost
 	ErrTooLarge

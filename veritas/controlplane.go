@@ -15,21 +15,17 @@ import (
 //	               Base+Count, 0 when empty. There is no separate counter.
 //	CommitSegment  1. SegmentKey already committed: the original ranges again
 //	                  (OK, Applied); ErrConflict if the request differs.
-//	               2. Empty key or batches, Records <= 0, Base < 0, empty topic
-//	                  or negative partition: ErrInvalid, no change.
-//	               3. Compare-and-set, per batch in request order, where the
-//	                  expected offset of a partition is its end offset with the
-//	                  earlier batches of this request already counted: Base
-//	                  below it (a run already exists at Base) is ErrConflict,
-//	                  Base above it (a hole) is ErrInvalid. The first failing
-//	                  batch decides the error; nothing is applied.
-//	               4. Else every batch is appended as a run at its Base: all
-//	                  or nothing. Topics are created implicitly and grow to
-//	                  cover the partition. The answer echoes the batches as
-//	                  ranges.
+//	               2. Empty key or batches, Records <= 0, empty topic or
+//	                  negative partition: ErrInvalid, no change.
+//	               3. Else every batch gets Base = its partition's end offset
+//	                  (newest run's Base+Count, 0 if empty), in request order,
+//	                  the end then growing by Records: offsets are contiguous
+//	                  per partition, all partitions are assigned in one step,
+//	                  all or nothing. Topics are created implicitly and grow
+//	                  to cover the partition.
 //	               A failed commit records nothing: its key is reusable.
-//	EndOffsets     The end offset of each requested partition, in order; 0 for
-//	               an unknown one. Empty request: empty answer.
+//	               Real stores guard step 3 with a compare-and-set on the run
+//	               base and retry internally; the spec is sequential.
 //	Lookup         From < 0: ErrInvalid. Else the runs of TP whose last offset
 //	               is >= From, in offset order, plus the end offset. MaxBytes > 0
 //	               stops after the batch that takes the summed Loc.Len to
@@ -94,8 +90,6 @@ func (c *ControlPlane) Exec(a core.IOAction) core.Completion {
 	switch op := call.Op.(type) {
 	case core.CommitSegment:
 		return c.execCommit(call.Req, op)
-	case core.EndOffsets:
-		return c.execEnds(call.Req, op)
 	case core.Lookup:
 		return c.execLookup(call.Req, op)
 	case core.DescribeTopics:
@@ -106,27 +100,7 @@ func (c *ControlPlane) Exec(a core.IOAction) core.Completion {
 
 // validBatch reports whether b is well formed on its own.
 func validBatch(b core.PendingBatch) bool {
-	return b.Records > 0 && b.Base >= 0 && b.TP.Topic != "" && b.TP.Partition >= 0
-}
-
-// cas checks every batch's Base against the partition's next offset, counting
-// the earlier batches of the same request, and returns the first failure.
-func (c *ControlPlane) cas(bs []core.PendingBatch) core.ErrCode {
-	next := map[core.TopicPartition]core.Offset{} // lookup only, never iterated
-	for _, b := range bs {
-		end, ok := next[b.TP]
-		if !ok {
-			end = c.End(b.TP)
-		}
-		switch {
-		case b.Base < end:
-			return core.ErrConflict
-		case b.Base > end:
-			return core.ErrInvalid
-		}
-		next[b.TP] = end + core.Offset(b.Records)
-	}
-	return core.OK
+	return b.Records > 0 && b.TP.Topic != "" && b.TP.Partition >= 0
 }
 
 func (c *ControlPlane) execCommit(req core.ReqID, op core.CommitSegment) core.Completion {
@@ -146,12 +120,9 @@ func (c *ControlPlane) execCommit(req core.ReqID, op core.CommitSegment) core.Co
 			return fail(core.ErrInvalid)
 		}
 	}
-	if e := c.cas(op.Batches); e != core.OK {
-		return fail(e)
-	}
 	seg := segment{batches: slices.Clone(op.Batches)}
 	for _, b := range op.Batches {
-		r := core.BatchRange{TP: b.TP, Base: b.Base, Count: b.Records, Loc: b.Loc}
+		r := core.BatchRange{TP: b.TP, Base: c.End(b.TP), Count: b.Records, Loc: b.Loc}
 		c.append(r)
 		seg.ranges = append(seg.ranges, r)
 	}
@@ -163,14 +134,6 @@ func (c *ControlPlane) execCommit(req core.ReqID, op core.CommitSegment) core.Co
 	c.segs[op.SegmentKey] = seg
 	resp := core.CommitSegmentResp{Assigned: slices.Clone(seg.ranges)}
 	return core.CPDone{Req: req, Resp: resp, Outcome: core.Applied}
-}
-
-func (c *ControlPlane) execEnds(req core.ReqID, op core.EndOffsets) core.Completion {
-	resp := core.EndOffsetsResp{Ends: make([]core.Offset, len(op.TPs))}
-	for i, tp := range op.TPs {
-		resp.Ends[i] = c.End(tp)
-	}
-	return core.CPDone{Req: req, Resp: resp}
 }
 
 func (c *ControlPlane) execLookup(req core.ReqID, op core.Lookup) core.Completion {

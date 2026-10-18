@@ -22,7 +22,6 @@ func TestIncrementalStateHashMatchesFull(t *testing.T) {
 	for seed := 1; seed <= 50; seed++ {
 		r := lcg(seed)
 		s, c := NewObjectStore(), NewControlPlane()
-		next := map[int32]core.Offset{}
 		for step := 0; step < 300; step++ {
 			switch r.n(5) {
 			case 0, 1:
@@ -30,16 +29,7 @@ func TestIncrementalStateHashMatchesFull(t *testing.T) {
 			case 2:
 				s.Exec(core.ObjDelete{Req: 3, Key: fmt.Sprintf("seg/%d", r.n(40))})
 			default:
-				// Fresh keys at the right base, plus stale ones that must fail without a trace.
-				p := int32(r.n(3))
-				n := int64(1 + r.n(5))
-				base := next[p]
-				if r.n(4) == 0 && base > 0 {
-					base--
-				}
-				if d := commit(c, fmt.Sprintf("k/%d", r.n(40)), pb("t", p, base, n)); d.Err == core.OK {
-					next[p] = base + core.Offset(n)
-				}
+				commit(c, fmt.Sprintf("k/%d", r.n(40)), pb("t", int32(r.n(3)), int64(1+r.n(5))))
 			}
 			if r.n(3) == 0 {
 				if got, want := s.StateHash(), s.fullStateHash(); got != want {

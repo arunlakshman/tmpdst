@@ -57,27 +57,13 @@ func TestControlPlaneConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// Read the end, propose it as the base, retry on a lost compare-and-set.
-			for try := 0; try < 100; try++ {
-				resp, err := c.Call(ctx, core.EndOffsets{TPs: []core.TopicPartition{tp}})
-				if err != nil {
-					t.Error(err)
-					return
-				}
-				base := resp.(core.EndOffsetsResp).Ends[0]
-				_, err = c.Call(ctx, core.CommitSegment{
-					SegmentKey: string(rune('a' + i)),
-					Batches:    []core.PendingBatch{{TP: tp, Base: base, Records: 2}},
-				})
-				if code(err) == core.ErrConflict {
-					continue
-				}
-				if err != nil {
-					t.Error(err)
-				}
-				return
+			_, err := c.Call(ctx, core.CommitSegment{
+				SegmentKey: string(rune('a' + i)),
+				Batches:    []core.PendingBatch{{TP: tp, Records: 2}},
+			})
+			if err != nil {
+				t.Error(err)
 			}
-			t.Error("never won the compare-and-set")
 		}()
 	}
 	wg.Wait()
@@ -85,9 +71,19 @@ func TestControlPlaneConcurrent(t *testing.T) {
 	if end := resp.(core.LookupResp).End; end != 16 {
 		t.Fatalf("end %d", end)
 	}
-	_, err := c.Call(ctx, core.CommitSegment{SegmentKey: "x", Batches: []core.PendingBatch{{TP: tp, Base: 0, Records: 1}}})
+	if got := len(resp.(core.LookupResp).Ranges); got != 8 {
+		t.Fatalf("%d ranges", got)
+	}
+	next := core.Offset(0)
+	for _, r := range resp.(core.LookupResp).Ranges {
+		if r.Base != next {
+			t.Fatalf("gap or overlap at %d, want %d", r.Base, next)
+		}
+		next += core.Offset(r.Count)
+	}
+	_, err := c.Call(ctx, core.CommitSegment{SegmentKey: "a", Batches: []core.PendingBatch{{TP: tp, Records: 1}}})
 	if code(err) != core.ErrConflict {
-		t.Fatalf("taken base: %v", err)
+		t.Fatalf("different request under a used key: %v", err)
 	}
 	if err := c.CreateTopic("", 1); code(err) != core.ErrInvalid {
 		t.Fatalf("create: %v", err)

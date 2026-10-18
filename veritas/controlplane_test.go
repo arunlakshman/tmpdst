@@ -19,9 +19,9 @@ func commit(c *ControlPlane, key string, bs ...core.PendingBatch) core.CPDone {
 	return call(c, core.CommitSegment{SegmentKey: key, Batches: bs})
 }
 
-// pb is a batch of recs records expected at offset base.
-func pb(t string, p int32, base core.Offset, recs int64) core.PendingBatch {
-	return core.PendingBatch{TP: tp(t, p), Base: base, Records: recs, Loc: core.SegmentRef{Key: "o", Off: 0, Len: recs * 10}}
+// pb is a batch of recs records.
+func pb(t string, p int32, recs int64) core.PendingBatch {
+	return core.PendingBatch{TP: tp(t, p), Records: recs, Loc: core.SegmentRef{Key: "o", Off: 0, Len: recs * 10}}
 }
 
 func assigned(t *testing.T, d core.CPDone) []core.BatchRange {
@@ -32,22 +32,13 @@ func assigned(t *testing.T, d core.CPDone) []core.BatchRange {
 	return d.Resp.(core.CommitSegmentResp).Assigned
 }
 
-func ends(t *testing.T, c *ControlPlane, tps ...core.TopicPartition) []core.Offset {
-	t.Helper()
-	d := call(c, core.EndOffsets{TPs: tps})
-	if d.Err != core.OK || d.Outcome != core.NotApplied {
-		t.Fatalf("ends: %+v", d)
-	}
-	return d.Resp.(core.EndOffsetsResp).Ends
-}
-
 func TestCommitContiguousAcrossPartitions(t *testing.T) {
 	c := NewControlPlane()
-	r1 := assigned(t, commit(c, "s1", pb("t", 0, 0, 3), pb("t", 1, 0, 2), pb("t", 0, 3, 4)))
-	if r1[0].Base != 0 || r1[1].Base != 0 || r1[2].Base != 3 || r1[2].Count != 4 || r1[0].TP != tp("t", 0) {
+	r1 := assigned(t, commit(c, "s1", pb("t", 0, 3), pb("t", 1, 2), pb("t", 0, 4)))
+	if r1[0].Base != 0 || r1[1].Base != 0 || r1[2].Base != 3 || r1[2].Count != 4 || r1[0].TP != tp("t", 0) || r1[0].Loc != pb("t", 0, 3).Loc {
 		t.Fatalf("s1: %+v", r1)
 	}
-	r2 := assigned(t, commit(c, "s2", pb("t", 0, 7, 1), pb("u", 0, 0, 5)))
+	r2 := assigned(t, commit(c, "s2", pb("t", 0, 1), pb("u", 0, 5)))
 	if r2[0].Base != 7 || r2[1].Base != 0 {
 		t.Fatalf("s2: %+v", r2)
 	}
@@ -56,91 +47,57 @@ func TestCommitContiguousAcrossPartitions(t *testing.T) {
 	}
 }
 
-// TestCASByBase: a run may be appended only at the partition's next offset.
-func TestCASByBase(t *testing.T) {
-	c := NewControlPlane()
-	assigned(t, commit(c, "s1", pb("t", 0, 0, 3)))
-	h := c.StateHash()
-	for name, bs := range map[string][]core.PendingBatch{
-		"taken: same base":        {pb("t", 0, 0, 3)},
-		"taken: inside a run":     {pb("t", 0, 2, 1)},
-		"taken after other ok":    {pb("t", 1, 0, 1), pb("t", 0, 1, 1)},
-		"conflict beats hole":     {pb("t", 0, 0, 1), pb("t", 1, 5, 1)},
-		"taken within request":    {pb("t", 0, 3, 2), pb("t", 0, 3, 2)},
-		"chain broken in request": {pb("t", 0, 3, 2), pb("t", 0, 4, 1)},
-	} {
-		d := commit(c, "k", bs...)
-		if d.Err != core.ErrConflict || d.Outcome != core.NotApplied || d.Resp != nil {
-			t.Fatalf("%s: %+v", name, d)
+// TestInterleavedCommittersStayContiguous: committers sharing a partition get
+// disjoint, gap-free offsets whatever the order they land in.
+func TestInterleavedCommittersStayContiguous(t *testing.T) {
+	for seed := uint64(1); seed <= 100; seed++ {
+		r := veritastest.NewRand(seed)
+		c := NewControlPlane()
+		total := map[core.TopicPartition]int64{}
+		for i := 0; i < 60; i++ {
+			var bs []core.PendingBatch
+			for n := 0; n <= r.Intn(3); n++ {
+				p := cpTPs[r.Intn(3)]
+				recs := int64(1 + r.Intn(5))
+				bs = append(bs, pb(p.Topic, p.Partition, recs))
+				total[p] += recs
+			}
+			assigned(t, commit(c, fmt.Sprintf("k%d", i), bs...))
 		}
-		if c.StateHash() != h {
-			t.Fatalf("%s: a conflict changed state", name)
+		for _, p := range cpTPs {
+			l := call(c, core.Lookup{TP: p}).Resp.(core.LookupResp)
+			next := core.Offset(0)
+			for _, x := range l.Ranges {
+				if x.Base != next {
+					t.Fatalf("seed %d %v: run at %d, want %d", seed, p, x.Base, next)
+				}
+				next += core.Offset(x.Count)
+			}
+			if l.End != next || int64(l.End) != total[p] {
+				t.Fatalf("seed %d %v: end %d, want %d", seed, p, l.End, total[p])
+			}
 		}
-	}
-	// A base above the next offset would leave a hole: malformed, not a lost race.
-	for name, bs := range map[string][]core.PendingBatch{
-		"hole":                     {pb("t", 0, 4, 1)},
-		"hole on empty":            {pb("t", 1, 1, 1)},
-		"hole within request":      {pb("t", 0, 3, 2), pb("t", 0, 6, 1)},
-		"hole after ok batch":      {pb("t", 1, 0, 1), pb("t", 0, 9, 1)},
-		"first failure is invalid": {pb("t", 0, 4, 1), pb("t", 0, 0, 1)},
-	} {
-		d := commit(c, "k", bs...)
-		if d.Err != core.ErrInvalid || c.StateHash() != h {
-			t.Fatalf("%s: %+v", name, d)
-		}
-	}
-	// Conflicts are all-or-nothing: the key and the free partition stay unused.
-	if c.End(tp("t", 1)) != 0 {
-		t.Fatal("partial apply")
-	}
-	// The key of a failed commit is reusable with fresh bases.
-	r := assigned(t, commit(c, "k", pb("t", 1, 0, 1), pb("t", 0, 3, 1)))
-	if r[1].Base != 3 || c.End(tp("t", 0)) != 4 || c.End(tp("t", 1)) != 1 {
-		t.Fatalf("retry: %+v", r)
-	}
-}
-
-// TestCASRace: two writers read the same end offset; the second loses, re-reads
-// and wins on the next try. No offset is ever assigned twice.
-func TestCASRace(t *testing.T) {
-	c := NewControlPlane()
-	assigned(t, commit(c, "s0", pb("t", 0, 0, 2)))
-	a, b := ends(t, c, tp("t", 0))[0], ends(t, c, tp("t", 0))[0]
-	assigned(t, commit(c, "A", pb("t", 0, a, 3)))
-	if d := commit(c, "B", pb("t", 0, b, 4)); d.Err != core.ErrConflict {
-		t.Fatalf("loser: %+v", d)
-	}
-	b = ends(t, c, tp("t", 0))[0]
-	if b != 5 {
-		t.Fatalf("end %d", b)
-	}
-	assigned(t, commit(c, "B", pb("t", 0, b, 4)))
-	l := call(c, core.Lookup{TP: tp("t", 0)}).Resp.(core.LookupResp)
-	if l.End != 9 || len(l.Ranges) != 3 || l.Ranges[1].Base != 2 || l.Ranges[2].Base != 5 {
-		t.Fatalf("%+v", l)
 	}
 }
 
 func TestCommitIdempotent(t *testing.T) {
 	c := NewControlPlane()
-	first := assigned(t, commit(c, "s1", pb("t", 0, 0, 3)))
-	assigned(t, commit(c, "s2", pb("t", 0, 3, 2))) // moves the end on
+	first := assigned(t, commit(c, "s1", pb("t", 0, 3)))
+	assigned(t, commit(c, "s2", pb("t", 0, 2))) // moves the end on
 	h := c.StateHash()
-	d := commit(c, "s1", pb("t", 0, 0, 3))
-	if d.Outcome != core.Applied || !slices.Equal(assigned(t, d), first) {
+	d := commit(c, "s1", pb("t", 0, 3))
+	if d.Outcome != core.Applied || !slices.Equal(assigned(t, d), first) || first[0].Base != 0 {
 		t.Fatalf("replay returned %+v, want %+v", d, first)
 	}
 	if c.StateHash() != h || c.End(tp("t", 0)) != 5 {
 		t.Fatal("replay changed state")
 	}
-	// A different request under the same key is a conflict, whatever the bases.
+	// A different request under the same key is a conflict.
 	for name, bs := range map[string][]core.PendingBatch{
-		"records":    {pb("t", 0, 0, 4)},
-		"base":       {pb("t", 0, 5, 3)},
-		"partition":  {pb("t", 1, 0, 3)},
-		"extra":      {pb("t", 0, 0, 3), pb("t", 1, 0, 1)},
-		"loc":        {{TP: tp("t", 0), Base: 0, Records: 3, Loc: core.SegmentRef{Key: "other", Len: 30}}},
+		"records":    {pb("t", 0, 4)},
+		"partition":  {pb("t", 1, 3)},
+		"extra":      {pb("t", 0, 3), pb("t", 1, 1)},
+		"loc":        {{TP: tp("t", 0), Records: 3, Loc: core.SegmentRef{Key: "other", Len: 30}}},
 		"no batches": nil,
 	} {
 		if d := commit(c, "s1", bs...); d.Err != core.ErrConflict || d.Outcome != core.NotApplied {
@@ -153,16 +110,18 @@ func TestCommitIdempotent(t *testing.T) {
 }
 
 // TestManyBatchSegment: one segment with many batches over few partitions
-// chains bases per partition and replays as a whole.
+// assigns bases in request order per partition and replays as a whole.
 func TestManyBatchSegment(t *testing.T) {
 	c := NewControlPlane()
-	assigned(t, commit(c, "pre", pb("t", 1, 0, 7)))
+	assigned(t, commit(c, "pre", pb("t", 1, 7)))
 	var bs []core.PendingBatch
 	next := map[int32]core.Offset{0: 0, 1: 7, 2: 0}
+	var want []core.Offset
 	for i := 0; i < 300; i++ {
 		p := int32(i % 3)
 		n := int64(1 + i%4)
-		bs = append(bs, pb("t", p, next[p], n))
+		bs = append(bs, pb("t", p, n))
+		want = append(want, next[p])
 		next[p] += core.Offset(n)
 	}
 	rs := assigned(t, commit(c, "big", bs...))
@@ -170,7 +129,7 @@ func TestManyBatchSegment(t *testing.T) {
 		t.Fatalf("%d ranges", len(rs))
 	}
 	for i, r := range rs {
-		if r.Base != bs[i].Base || r.Count != bs[i].Records || r.TP != bs[i].TP || r.Loc != bs[i].Loc {
+		if r.Base != want[i] || r.Count != bs[i].Records || r.TP != bs[i].TP || r.Loc != bs[i].Loc {
 			t.Fatalf("range %d: %+v", i, r)
 		}
 	}
@@ -179,14 +138,9 @@ func TestManyBatchSegment(t *testing.T) {
 			t.Fatalf("end of %d: %d, want %d", p, c.End(tp("t", p)), e)
 		}
 	}
-	// One bad batch at the end undoes the lot.
+	// One invalid batch at the end undoes the lot.
 	h := c.StateHash()
-	bad := slices.Clone(bs)
-	for i := range bad {
-		bad[i].Base += next[bad[i].TP.Partition]
-	}
-	bad = append(bad[:len(bs):len(bs)], pb("t", 0, 0, 1))
-	if d := commit(c, "big2", bad...); d.Err == core.OK || c.StateHash() != h {
+	if d := commit(c, "big2", append(slices.Clone(bs), pb("t", 0, 0))...); d.Err != core.ErrInvalid || c.StateHash() != h {
 		t.Fatalf("%+v", d)
 	}
 	if d := commit(c, "big", bs...); !slices.Equal(assigned(t, d), rs) {
@@ -197,18 +151,15 @@ func TestManyBatchSegment(t *testing.T) {
 func TestCommitInvalid(t *testing.T) {
 	c := NewControlPlane()
 	h := c.StateHash()
-	neg := pb("t", 0, 0, 1)
-	neg.Base = -1
 	for _, d := range []core.CPDone{
 		commit(c, ""),
-		commit(c, "", pb("t", 0, 0, 1)),
+		commit(c, "", pb("t", 0, 1)),
 		commit(c, "k"),
-		commit(c, "k", pb("t", 0, 0, 0)),
-		commit(c, "k", pb("", 0, 0, 1)),
-		commit(c, "k", pb("t", -1, 0, 1)),
-		commit(c, "k", neg),
+		commit(c, "k", pb("t", 0, 0)),
+		commit(c, "k", pb("", 0, 1)),
+		commit(c, "k", pb("t", -1, 1)),
 		// valid first batch, invalid second: atomic, nothing applied
-		commit(c, "k", pb("t", 0, 0, 1), pb("t", 1, 0, 0)),
+		commit(c, "k", pb("t", 0, 1), pb("t", 1, 0)),
 	} {
 		if d.Err != core.ErrInvalid || d.Outcome != core.NotApplied {
 			t.Fatalf("%+v", d)
@@ -219,23 +170,11 @@ func TestCommitInvalid(t *testing.T) {
 	}
 }
 
-func TestEndOffsets(t *testing.T) {
-	c := NewControlPlane()
-	if got := ends(t, c); len(got) != 0 {
-		t.Fatalf("empty request: %v", got)
-	}
-	assigned(t, commit(c, "s1", pb("t", 0, 0, 3), pb("t", 1, 0, 2), pb("t", 0, 3, 4)))
-	got := ends(t, c, tp("t", 1), tp("nope", 0), tp("t", 0), tp("t", 1))
-	if !slices.Equal(got, []core.Offset{2, 0, 7, 2}) {
-		t.Fatalf("ends %v", got)
-	}
-}
-
 func TestLookup(t *testing.T) {
 	c := NewControlPlane()
-	assigned(t, commit(c, "s1", pb("t", 0, 0, 3)))
-	assigned(t, commit(c, "s2", pb("t", 0, 3, 2), pb("t", 1, 0, 1)))
-	assigned(t, commit(c, "s3", pb("t", 0, 5, 4)))
+	assigned(t, commit(c, "s1", pb("t", 0, 3)))
+	assigned(t, commit(c, "s2", pb("t", 0, 2), pb("t", 1, 1)))
+	assigned(t, commit(c, "s3", pb("t", 0, 4)))
 	look := func(p int32, from core.Offset, max int32) core.LookupResp {
 		d := call(c, core.Lookup{TP: tp("t", p), From: from, MaxBytes: max})
 		if d.Err != core.OK {
@@ -281,7 +220,7 @@ func TestDescribeTopics(t *testing.T) {
 	if c.CreateTopic("b", 3) != core.OK || c.CreateTopic("", 1) != core.ErrInvalid || c.CreateTopic("x", 0) != core.ErrInvalid {
 		t.Fatal("CreateTopic")
 	}
-	assigned(t, commit(c, "s1", pb("a", 4, 0, 1), pb("b", 1, 0, 1))) // a is created implicitly
+	assigned(t, commit(c, "s1", pb("a", 4, 1), pb("b", 1, 1))) // a is created implicitly
 	desc := func(names ...string) []core.TopicInfo {
 		return call(c, core.DescribeTopics{Topics: names}).Resp.(core.DescribeTopicsResp).Topics
 	}
@@ -323,41 +262,31 @@ type cpState struct {
 	m  cpModel
 }
 
-// cpOp is a compact operation. Kind 0 commit segment Seg built from the model's
-// ends (Skew 0 fresh, 1 first base stale, 2 first base a hole), 1 replay of a
-// committed segment, 2 lookup, 3 end offsets.
+// cpOp is a compact operation. Kind 0 commit segment Seg, 1 replay of a
+// committed segment, 2 lookup, 3 commit of Seg with changed record counts
+// (a different request: under a committed key it must be ErrConflict).
 type cpOp struct {
 	Kind int
 	Seg  int // segment key index
-	Skew int
 	TP   int // lookup: partition index
 	From int64
 }
 
 var cpTPs = []core.TopicPartition{tp("t", 0), tp("t", 1), tp("u", 0)}
 
-// segBatches is a fixed function of the segment index and the model's ends, so
-// a replay of a key can carry the very same batches. Bases chain per partition.
-func (m *cpModel) segBatches(seg, skew int) []core.PendingBatch {
-	next := map[core.TopicPartition]int64{}
+// segBatches is a fixed function of the segment index (and alt), so a replay
+// of a key carries the very same batches.
+func segBatches(seg int, alt bool) []core.PendingBatch {
 	var bs []core.PendingBatch
 	for i := 0; i <= seg%3; i++ {
 		p := cpTPs[(seg+i)%3]
-		e, ok := next[p]
-		if !ok {
-			e = m.end[p]
-		}
 		n := int64(1 + (seg+i)%4)
-		b := pb(p.Topic, p.Partition, core.Offset(e), n)
+		if alt {
+			n++
+		}
+		b := pb(p.Topic, p.Partition, n)
 		b.Loc.Key = fmt.Sprintf("obj%d", seg)
-		if i == 0 && skew == 1 && e > 0 {
-			b.Base--
-		}
-		if i == 0 && skew == 2 {
-			b.Base++
-		}
 		bs = append(bs, b)
-		next[p] = e + n
 	}
 	return bs
 }
@@ -369,8 +298,8 @@ func cpCheck(impl func() cpExec) veritastest.Check[*cpState, cpOp] {
 			return &cpState{impl(), cpModel{map[string]modelSeg{}, map[core.TopicPartition]int64{}}}
 		},
 		Gen: func(r *veritastest.Rand, i int) cpOp {
-			o := cpOp{Kind: r.Intn(4), Seg: r.Intn(5), Skew: r.Intn(4) % 3, TP: r.Intn(3), From: int64(r.Intn(8))}
-			if o.Kind == 3 && r.Intn(2) == 0 {
+			o := cpOp{Kind: r.Intn(4), Seg: r.Intn(5), TP: r.Intn(3), From: int64(r.Intn(8))}
+			if o.Kind == 3 && r.Intn(3) != 0 {
 				o.Kind = 0 // weight commits
 			}
 			return o
@@ -379,7 +308,7 @@ func cpCheck(impl func() cpExec) veritastest.Check[*cpState, cpOp] {
 			do := func(op core.CPOp) core.CPDone { return s.cp.Exec(core.CPCall{Req: 1, Op: op}).(core.CPDone) }
 			key := fmt.Sprintf("seg%d", o.Seg)
 			switch o.Kind {
-			case 0, 1:
+			case 0, 1, 3:
 				return s.stepCommit(do, key, o)
 			case 2:
 				d := do(core.Lookup{TP: cpTPs[o.TP], From: core.Offset(o.From)})
@@ -395,14 +324,6 @@ func cpCheck(impl func() cpExec) veritastest.Check[*cpState, cpOp] {
 				got := d.Resp.(core.LookupResp)
 				if d.Err != core.OK || !slices.Equal(got.Ranges, want) || int64(got.End) != s.m.end[cpTPs[o.TP]] {
 					return fmt.Errorf("lookup: %+v, want %+v", got, want)
-				}
-			case 3:
-				d := do(core.EndOffsets{TPs: cpTPs})
-				got := d.Resp.(core.EndOffsetsResp).Ends
-				for i, p := range cpTPs {
-					if d.Err != core.OK || int64(got[i]) != s.m.end[p] {
-						return fmt.Errorf("end offsets: %+v, want %v", got, s.m.end)
-					}
 				}
 			}
 			return nil
@@ -429,11 +350,6 @@ func cpCheck(impl func() cpExec) veritastest.Check[*cpState, cpOp] {
 			if o.Seg != 0 {
 				x := o
 				x.Seg = 0
-				out = append(out, x)
-			}
-			if o.Skew != 0 {
-				x := o
-				x.Skew = 0
 				out = append(out, x)
 			}
 			return out
@@ -465,17 +381,10 @@ func (s *cpState) stepCommit(do func(core.CPOp) core.CPDone, key string, o cpOp)
 	case o.Kind == 1:
 		batches = orig.batches
 	default:
-		batches = s.m.segBatches(o.Seg, o.Skew)
+		batches = segBatches(o.Seg, o.Kind == 3)
 	}
-	op := core.CommitSegment{SegmentKey: key, Batches: batches}
 	before := s.cp.StateHash()
-	d := do(op)
-	unchanged := func() error {
-		if s.cp.StateHash() != before {
-			return fmt.Errorf("%s: failed or replayed commit changed state", key)
-		}
-		return nil
-	}
+	d := do(core.CommitSegment{SegmentKey: key, Batches: batches})
 	if committed {
 		if slices.Equal(orig.batches, batches) {
 			if d.Err != core.OK || !slices.Equal(d.Resp.(core.CommitSegmentResp).Assigned, orig.ranges) {
@@ -484,23 +393,14 @@ func (s *cpState) stepCommit(do func(core.CPOp) core.CPDone, key string, o cpOp)
 		} else if d.Err != core.ErrConflict {
 			return fmt.Errorf("different request under %s: %+v, want ErrConflict", key, d)
 		}
-		return unchanged()
-	}
-	if o.Skew == 2 { // a hole
-		if d.Err != core.ErrInvalid {
-			return fmt.Errorf("hole in %s: %+v, want ErrInvalid", key, d)
+		if s.cp.StateHash() != before {
+			return fmt.Errorf("%s: failed or replayed commit changed state", key)
 		}
-		return unchanged()
-	}
-	if o.Skew == 1 && s.m.end[batches[0].TP] > 0 { // stale base
-		if d.Err != core.ErrConflict {
-			return fmt.Errorf("stale base in %s: %+v, want ErrConflict", key, d)
-		}
-		return unchanged()
+		return nil
 	}
 	var want []core.BatchRange
 	for _, b := range batches {
-		want = append(want, core.BatchRange{TP: b.TP, Base: b.Base, Count: b.Records, Loc: b.Loc})
+		want = append(want, core.BatchRange{TP: b.TP, Base: core.Offset(s.m.end[b.TP]), Count: b.Records, Loc: b.Loc})
 		s.m.end[b.TP] += b.Records
 	}
 	s.m.segs[key] = modelSeg{batches, want}
@@ -514,7 +414,7 @@ func TestControlPlaneInvariants(t *testing.T) {
 	veritastest.Run(t, cpCheck(func() cpExec { return NewControlPlane() }), veritastest.Options{Seeds: 300, Seed: -1})
 }
 
-// nonIdempotent gives every commit a fresh key, so a replay is a new commit and loses the compare-and-set.
+// nonIdempotent gives every commit a fresh key, so a replay is a new commit that is assigned new offsets.
 type nonIdempotent struct {
 	*ControlPlane
 	n int
@@ -541,7 +441,7 @@ func TestControlPlaneCheckShrinksPlantedBug(t *testing.T) {
 	if f == nil {
 		t.Fatal("planted bug not found")
 	}
-	if len(f.Ops) != 2 || f.Ops[0].Kind != 0 || f.Ops[1].Kind != 1 || f.Ops[0].Seg != 0 || f.Ops[1].Seg != 0 || f.Ops[0].Skew != 0 {
+	if len(f.Ops) != 2 || f.Ops[0].Kind != 0 || f.Ops[1].Kind != 1 || f.Ops[0].Seg != 0 || f.Ops[1].Seg != 0 {
 		t.Fatalf("not minimal (want commit, replay):\n%s", c.Report(f, ""))
 	}
 	t.Logf("example report:\n%s", c.Report(f, "go test ./veritas -run TestControlPlaneCheckShrinksPlantedBug"))

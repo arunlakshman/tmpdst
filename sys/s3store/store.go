@@ -24,6 +24,7 @@ import (
 
 	"manifester/core"
 	"manifester/sys"
+	"manifester/sys/awsobs"
 )
 
 // Config selects the bucket and endpoint. An empty Endpoint is AWS itself.
@@ -35,6 +36,9 @@ type Config struct {
 	PathStyle bool   // required by SeaweedFS and most S3 clones
 	// HTTP overrides the HTTP client (tests).
 	HTTP *http.Client
+	// Obs, if set, measures every HTTP attempt of every SDK call
+	// (manibroker_s3_*) and logs failed attempts.
+	Obs *awsobs.Recorder
 }
 
 // Error is a truthful failure of the store, as plain data.
@@ -74,6 +78,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	c := s3.NewFromConfig(ac, func(o *s3.Options) {
 		o.UsePathStyle = cfg.PathStyle
 		o.Retryer = aws.NopRetryer{} // the broker owns retries
+		o.APIOptions = append(o.APIOptions, cfg.Obs.APIOptions()...)
 		o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
 		if cfg.Endpoint != "" {

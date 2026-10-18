@@ -33,7 +33,11 @@ type NodeConfig struct {
 	Net        NetConfig
 	Exec       ExecConfig
 	Facts      func(core.Fact)
-	Log        *slog.Logger
+	// OnIO, if set, sees every I/O action the broker issues, on the broker's
+	// loop goroutine, before it executes (used to pair segment keys with
+	// segment_sealed facts, see SegmentLog).
+	OnIO func(core.IOAction)
+	Log  *slog.Logger
 }
 
 // Node is a running broker.
@@ -81,6 +85,10 @@ func Start(ctx context.Context, cfg NodeConfig) (*Node, error) {
 	n := &Node{addr: cfg.Listener.Addr(), net: nt, stop: make(chan struct{}), done: make(chan struct{}), kill: kill}
 	exec := NewExecutor(rctx, cfg.Exec, cfg.Objects, cfg.ControlPlane, nt,
 		Classifier{Objects: cfg.ObjClassify, CP: cfg.CPClassify}, in)
+	var ex sys.Executor = exec
+	if cfg.OnIO != nil {
+		ex = tapExecutor{exec, cfg.OnIO}
+	}
 	if cfg.Shutdown != nil {
 		go func() {
 			select {
@@ -98,7 +106,7 @@ func Start(ctx context.Context, cfg NodeConfig) (*Node, error) {
 	self := core.NodeRef{Node: core.NodeID(cfg.NodeID), Inc: core.Incarnation(env.NewID())}
 	go func() {
 		defer close(n.done)
-		err := sys.Run(rctx, b, exec, broker.New(bc), self)
+		err := sys.Run(rctx, b, ex, broker.New(bc), self)
 		grace := time.Duration(0)
 		if err == nil {
 			grace = cfg.FlushGrace // graceful exit: let the last answers reach the clients
@@ -132,3 +140,17 @@ func (n *Node) Wait() error {
 
 // String names the node for logs.
 func (n *Node) String() string { return fmt.Sprintf("broker(%s)", n.addr) }
+
+// tapExecutor shows each action to a hook, then executes it.
+type tapExecutor struct {
+	sys.Executor
+	tap func(core.IOAction)
+}
+
+func (t tapExecutor) Execute(a core.IOAction) {
+	t.tap(a)
+	t.Executor.Execute(a)
+}
+
+// OpenConns is the number of open client connections.
+func (n *Node) OpenConns() int { return n.net.OpenConns() }

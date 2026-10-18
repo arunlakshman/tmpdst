@@ -149,3 +149,7 @@ func (m *Metrics) Observe(f core.Fact) {
 		m.buffered.Set(float64(n("buffered")))
 	}
 }
+
+// Registry is the private registry, for adding collectors that need objects
+// created after NewMetrics (for example the open-connections gauge).
+func (m *Metrics) Registry() *prometheus.Registry { return m.reg }

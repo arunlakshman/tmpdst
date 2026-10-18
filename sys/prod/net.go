@@ -62,6 +62,13 @@ func NewNet(ln net.Listener, sink sys.Sink, cfg NetConfig) *Net {
 	return n
 }
 
+// OpenConns is the number of accepted connections not yet closed.
+func (n *Net) OpenConns() int {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return len(n.conns)
+}
+
 // Addr is the listening address.
 func (n *Net) Addr() net.Addr { return n.ln.Addr() }
 

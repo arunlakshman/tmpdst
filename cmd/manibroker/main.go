@@ -34,6 +34,15 @@ func main() {
 	region := flag.String("s3-region", "us-east-1", "S3 region")
 	pathStyle := flag.Bool("s3-path-style", false, "path-style addressing (SeaweedFS, MinIO)")
 	createBucket := flag.Bool("s3-create-bucket", false, "create the bucket at startup")
+	dflt := broker.DefaultConfig()
+	var tn tuning
+	flag.StringVar(&tn.segmentBytes, "segment-bytes", "16MiB", "seal the open segment at this many batch bytes (16MiB, 16MB, plain bytes)")
+	flag.DurationVar(&tn.window, "segment-window", time.Duration(dflt.BatchWindow), "seal the open segment this long after its first batch")
+	flag.IntVar(&tn.parts, "max-segment-partitions", dflt.MaxSegmentPartitions, "seal at this many distinct partitions (control plane commit limit)")
+	flag.IntVar(&tn.batches, "max-segment-batches", dflt.MaxSegmentBatches, "seal at this many batches (control plane commit limit)")
+	flag.StringVar(&tn.maxBuffered, "max-buffered", "auto", "pause client reads above this much unacked produce data; auto = clamp(memory/16, 128MiB, 1GiB)")
+	flag.StringVar(&tn.resumeBuffered, "resume-buffered", "", "resume reads below this (default: half of -max-buffered)")
+	objTimeout := flag.Duration("obj-timeout", 30*time.Second, "base timeout of an object-store call; large bodies get extra time at 2 MiB/s")
 	grace := flag.Duration("stop-grace", 10*time.Second, "time to finish in-flight work after SIGTERM")
 	debug := flag.Bool("debug", false, "debug logging")
 	flag.Parse()
@@ -55,6 +64,11 @@ func main() {
 		cfg.NodeID = fmt.Sprintf("broker-%d", *brokerID)
 	}
 	cfg.Broker.BrokerID = int32(*brokerID)
+	cfg.Exec.ObjTimeout = *objTimeout
+	mem, memSource := prod.MemoryLimit()
+	if err := tn.apply(&cfg.Broker, mem); err != nil {
+		fatal(err)
+	}
 	switch *objects {
 	case "mem":
 		cfg.Objects, cfg.ObjClassify = vsys.NewObjectStore(), prod.MemClassifier{}
@@ -99,6 +113,12 @@ func main() {
 		fatal(err)
 	}
 	log.Info("manibroker listening", "addr", ln.Addr().String(), "advertised", adv, "broker_id", *brokerID, "objects", *objects)
+	bc := cfg.Broker
+	log.Info("manibroker tuning",
+		"segment_bytes", bc.MaxSegmentBytes, "segment_window", time.Duration(bc.BatchWindow),
+		"max_segment_partitions", bc.MaxSegmentPartitions, "max_segment_batches", bc.MaxSegmentBatches,
+		"max_buffered", bc.MaxBufferedBytes, "resume_buffered", bc.ResumeBufferedBytes,
+		"obj_timeout", *objTimeout, "memory_bytes", mem, "memory_source", memSource)
 	switch err := n.Wait(); {
 	case err == nil:
 		log.Info("manibroker stopped")

@@ -20,13 +20,26 @@ type AsyncConns interface {
 
 // ExecConfig bounds each kind of I/O. Zero fields take the defaults.
 type ExecConfig struct {
-	ObjTimeout time.Duration // per object-store call (30s)
-	CPTimeout  time.Duration // per control-plane call (10s)
+	// ObjTimeout is the base budget of an object-store call (30s). A PUT or GET
+	// of a large body gets ObjTransferRate-worth of extra time on top, so a
+	// 16 MiB segment on a slow link is not cut off by the base alone.
+	ObjTimeout      time.Duration
+	ObjTransferRate int64         // assumed minimum bytes/s for the extra time (2 MiB/s)
+	CPTimeout       time.Duration // per control-plane call (10s)
+}
+
+// objTimeout is the budget of a call that moves n bytes: the base plus n at
+// the assumed minimum transfer rate.
+func (c ExecConfig) objTimeout(n int64) time.Duration {
+	return c.ObjTimeout + time.Duration(n)*time.Second/time.Duration(c.ObjTransferRate)
 }
 
 func (c ExecConfig) withDefaults() ExecConfig {
 	if c.ObjTimeout <= 0 {
 		c.ObjTimeout = 30 * time.Second
+	}
+	if c.ObjTransferRate <= 0 {
+		c.ObjTransferRate = 2 << 20
 	}
 	if c.CPTimeout <= 0 {
 		c.CPTimeout = 10 * time.Second
@@ -99,7 +112,14 @@ func sendErr(err error) core.ErrCode {
 }
 
 func (e *Executor) object(a core.IOAction) core.Completion {
-	ctx, cancel := context.WithTimeout(e.ctx, e.cfg.ObjTimeout)
+	var n int64
+	switch a := a.(type) {
+	case core.ObjPut:
+		n = int64(len(a.Data))
+	case core.ObjGet:
+		n = a.Ref.Len
+	}
+	ctx, cancel := context.WithTimeout(e.ctx, e.cfg.objTimeout(n))
 	defer cancel()
 	fail := func(err error) (core.ErrCode, core.Outcome) { return e.class.Classify(a, err) }
 	switch a := a.(type) {

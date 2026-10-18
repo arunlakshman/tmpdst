@@ -145,3 +145,55 @@ func TestIMDS(t *testing.T) {
 		t.Fatal("unreachable IMDS must give nil")
 	}
 }
+
+func TestWriteEmptyDestAndIMDS(t *testing.T) {
+	m := NewManifest(New("svc", "r3", -1), flag.NewFlagSet("t", flag.ContinueOnError), "", nil)
+	if d, err := Write(context.Background(), m, WriteOptions{}); d != "" || err != nil {
+		t.Fatal(d, err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "PUT" {
+			w.Write([]byte("tok"))
+			return
+		}
+		w.Write([]byte("i-1"))
+	}))
+	defer srv.Close()
+	dest := filepath.Join(t.TempDir(), "m.json")
+	if _, err := Write(context.Background(), m, WriteOptions{Dest: dest, IMDS: true, IMDSEndpoint: srv.URL}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(dest)
+	if !strings.Contains(string(b), "i-1") {
+		t.Fatalf("no instance metadata: %s", b)
+	}
+}
+
+func TestWriteFileFailure(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "file")
+	os.WriteFile(f, nil, 0o644)
+	m := NewManifest(New("svc", "r", -1), flag.NewFlagSet("t", flag.ContinueOnError), "", nil)
+	if _, err := Write(context.Background(), m, WriteOptions{Dest: filepath.Join(f, "sub", "m.json")}); err == nil {
+		t.Fatal("want error")
+	}
+}
+
+func TestWriteS3(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "k")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "s")
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.WriteHeader(200)
+	}))
+	defer srv.Close()
+	m := NewManifest(New("svc", "r4", -1), flag.NewFlagSet("t", flag.ContinueOnError), "us-east-1", nil)
+	dest, err := Write(context.Background(), m, WriteOptions{Dest: "s3://bkt/dir/", Region: "us-east-1", S3Endpoint: srv.URL, S3PathStyle: true})
+	if err != nil || dest != "s3://bkt/dir/svc-r4.json" {
+		t.Fatal(dest, err)
+	}
+	if path != "/bkt/dir/svc-r4.json" {
+		t.Fatal(path)
+	}
+}

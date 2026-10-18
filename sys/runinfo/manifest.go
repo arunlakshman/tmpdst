@@ -96,35 +96,45 @@ func Write(ctx context.Context, m Manifest, o WriteOptions) (string, error) {
 	}
 	body = append(body, '\n')
 	if strings.HasPrefix(dest, "s3://") {
-		u, err := url.Parse(dest)
-		if err != nil || u.Host == "" || strings.TrimPrefix(u.Path, "/") == "" {
-			return dest, fmt.Errorf("manifest: bad S3 destination %q", dest)
-		}
-		opts := []func(*config.LoadOptions) error{}
-		if o.Region != "" {
-			opts = append(opts, config.WithRegion(o.Region))
-		}
-		cfg, err := config.LoadDefaultConfig(ctx, opts...)
-		if err != nil {
-			return dest, err
-		}
-		c := s3.NewFromConfig(cfg, func(so *s3.Options) {
-			so.UsePathStyle = o.S3PathStyle
-			if o.S3Endpoint != "" {
-				so.BaseEndpoint = aws.String(o.S3Endpoint)
-			}
-			so.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
-		})
-		_, err = c.PutObject(ctx, &s3.PutObjectInput{Bucket: &u.Host, Key: aws.String(strings.TrimPrefix(u.Path, "/")),
-			Body: bytes.NewReader(body), ContentType: aws.String("application/json")})
-		return dest, err
+		return dest, putS3(ctx, dest, body, o)
 	}
-	if dir := filepath.Dir(dest); dir != "" {
+	return dest, writeFile(dest, body)
+}
+
+// writeFile writes body to path, creating parent directories.
+func writeFile(path string, body []byte) error {
+	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return dest, err
+			return err
 		}
 	}
-	return dest, os.WriteFile(dest, body, 0o644)
+	return os.WriteFile(path, body, 0o644)
+}
+
+// putS3 uploads body to the s3://bucket/key destination.
+func putS3(ctx context.Context, dest string, body []byte, o WriteOptions) error {
+	u, err := url.Parse(dest)
+	if err != nil || u.Host == "" || strings.TrimPrefix(u.Path, "/") == "" {
+		return fmt.Errorf("manifest: bad S3 destination %q", dest)
+	}
+	opts := []func(*config.LoadOptions) error{}
+	if o.Region != "" {
+		opts = append(opts, config.WithRegion(o.Region))
+	}
+	cfg, err := config.LoadDefaultConfig(ctx, opts...)
+	if err != nil {
+		return err
+	}
+	c := s3.NewFromConfig(cfg, func(so *s3.Options) {
+		so.UsePathStyle = o.S3PathStyle
+		if o.S3Endpoint != "" {
+			so.BaseEndpoint = aws.String(o.S3Endpoint)
+		}
+		so.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+	})
+	_, err = c.PutObject(ctx, &s3.PutObjectInput{Bucket: &u.Host, Key: aws.String(strings.TrimPrefix(u.Path, "/")),
+		Body: bytes.NewReader(body), ContentType: aws.String("application/json")})
+	return err
 }
 
 // ExpandDest substitutes {service} and {run_id} and completes a trailing "/".

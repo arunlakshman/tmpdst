@@ -29,6 +29,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -41,35 +42,84 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 )
 
-func main() {
-	if len(os.Args) < 2 || os.Args[1] != "benchmark-producer" {
-		fmt.Fprintln(os.Stderr, "usage: manibench benchmark-producer -topic T [flags]")
-		os.Exit(2)
+func main() { os.Exit(mainRun(os.Args[1:], os.Stdout, os.Stderr, newKgoClient)) }
+
+// benchConfig is the parsed benchmark-producer command line.
+type benchConfig struct {
+	topic       string
+	brokers     []string
+	clients     int
+	size        int
+	dur         time.Duration
+	every       time.Duration
+	parts       int
+	inflight    int
+	buffered    int
+	cpURL       string
+	createParts int
+}
+
+// producer is the part of *kgo.Client the benchmark uses (a fake in tests).
+type producer interface {
+	Produce(ctx context.Context, r *kgo.Record, promise func(*kgo.Record, error))
+	BufferedProduceRecords() int64
+	Flush(ctx context.Context) error
+	Close()
+}
+
+type clientFactory func(opts ...kgo.Opt) (producer, error)
+
+func newKgoClient(opts ...kgo.Opt) (producer, error) {
+	cl, err := kgo.NewClient(opts...)
+	if err != nil {
+		return nil, err
 	}
-	fs := flag.NewFlagSet("benchmark-producer", flag.ExitOnError)
-	topic := fs.String("topic", "", "topic to produce to (required)")
+	return cl, nil
+}
+
+// parseArgs parses the arguments after "benchmark-producer". ok is false when
+// usage was printed (exit 2).
+func parseArgs(args []string, stderr io.Writer) (c benchConfig, ok bool) {
+	fs := flag.NewFlagSet("benchmark-producer", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.StringVar(&c.topic, "topic", "", "topic to produce to (required)")
 	brokers := fs.String("brokers", "127.0.0.1:9092", "comma-separated seed brokers")
-	clients := fs.Int("num-clients", 1, "number of independent kgo clients")
-	size := fs.Int("record-size", 1024, "record value size in bytes")
-	dur := fs.Duration("duration", 30*time.Second, "how long to produce")
-	every := fs.Duration("interval", 5*time.Second, "reporting interval")
-	parts := fs.Int("partitions", 0, "0: kgo uniform-bytes sticky partitioner; N: round-robin per record over partitions 0..N-1")
-	inflight := fs.Int("max-inflight", 0, "kgo MaxProduceRequestsInflightPerBroker (0: kgo default, 1; max 5 with idempotence)")
-	buffered := fs.Int("buffered-records", 5000, "kgo MaxBufferedRecords per client")
-	cpURL := fs.String("cp-url", "", "control plane URL, used with -create-partitions")
-	createParts := fs.Int("create-partitions", 0, "if > 0, POST /v1/create-topic first")
-	_ = fs.Parse(os.Args[2:])
-	if *topic == "" || *clients < 1 || *size < 8 {
-		fs.Usage()
-		os.Exit(2)
+	fs.IntVar(&c.clients, "num-clients", 1, "number of independent kgo clients")
+	fs.IntVar(&c.size, "record-size", 1024, "record value size in bytes")
+	fs.DurationVar(&c.dur, "duration", 30*time.Second, "how long to produce")
+	fs.DurationVar(&c.every, "interval", 5*time.Second, "reporting interval")
+	fs.IntVar(&c.parts, "partitions", 0, "0: kgo uniform-bytes sticky partitioner; N: round-robin per record over partitions 0..N-1")
+	fs.IntVar(&c.inflight, "max-inflight", 0, "kgo MaxProduceRequestsInflightPerBroker (0: kgo default, 1; max 5 with idempotence)")
+	fs.IntVar(&c.buffered, "buffered-records", 5000, "kgo MaxBufferedRecords per client")
+	fs.StringVar(&c.cpURL, "cp-url", "", "control plane URL, used with -create-partitions")
+	fs.IntVar(&c.createParts, "create-partitions", 0, "if > 0, POST /v1/create-topic first")
+	if fs.Parse(args) != nil {
+		return c, false
 	}
-	if *createParts > 0 {
-		if err := createTopic(*cpURL, *topic, *createParts); err != nil {
-			fmt.Fprintln(os.Stderr, "create topic:", err)
-			os.Exit(1)
+	if c.topic == "" || c.clients < 1 || c.size < 8 {
+		fs.Usage()
+		return c, false
+	}
+	c.brokers = strings.Split(*brokers, ",")
+	return c, true
+}
+
+func mainRun(args []string, stdout, stderr io.Writer, nc clientFactory) int {
+	if len(args) < 1 || args[0] != "benchmark-producer" {
+		fmt.Fprintln(stderr, "usage: manibench benchmark-producer -topic T [flags]")
+		return 2
+	}
+	c, ok := parseArgs(args[1:], stderr)
+	if !ok {
+		return 2
+	}
+	if c.createParts > 0 {
+		if err := createTopic(c.cpURL, c.topic, c.createParts); err != nil {
+			fmt.Fprintln(stderr, "create topic:", err)
+			return 1
 		}
 	}
-	os.Exit(run(*topic, strings.Split(*brokers, ","), *clients, *size, *dur, *every, *parts, *inflight, *buffered))
+	return run(c, stdout, stderr, nc)
 }
 
 func createTopic(url, topic string, n int) error {
@@ -88,30 +138,83 @@ func createTopic(url, topic string, n int) error {
 	return nil
 }
 
-func run(topic string, seeds []string, nClients, size int, dur, every time.Duration, parts, inflight, buffered int) int {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
+// clientOpts builds the kgo options shared by every client.
+func clientOpts(c benchConfig) []kgo.Opt {
 	opts := []kgo.Opt{
-		kgo.SeedBrokers(seeds...),
+		kgo.SeedBrokers(c.brokers...),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
 		kgo.ProducerBatchCompression(kgo.NoCompression()),
-		kgo.MaxBufferedRecords(buffered),
-		kgo.DefaultProduceTopic(topic),
+		kgo.MaxBufferedRecords(c.buffered),
+		kgo.DefaultProduceTopic(c.topic),
 	}
-	if parts > 0 {
+	if c.parts > 0 {
 		opts = append(opts, kgo.RecordPartitioner(kgo.ManualPartitioner()))
 	} else {
 		opts = append(opts, kgo.RecordPartitioner(kgo.UniformBytesPartitioner(64<<10, true, true, nil)))
 	}
-	if inflight > 0 {
-		opts = append(opts, kgo.MaxProduceRequestsInflightPerBroker(inflight))
+	if c.inflight > 0 {
+		opts = append(opts, kgo.MaxProduceRequestsInflightPerBroker(c.inflight))
 	}
-	cls := make([]*kgo.Client, nClients)
+	return opts
+}
+
+// makeValue builds record seq of client ci: ids in the first 8 bytes, a
+// letter pattern after.
+func makeValue(ci int, seq uint64, size int) []byte {
+	val := make([]byte, size)
+	binary.BigEndian.PutUint32(val, uint32(ci))
+	binary.BigEndian.PutUint32(val[4:], uint32(seq))
+	for j := 8; j < size; j++ {
+		val[j] = byte('a' + j%26)
+	}
+	return val
+}
+
+// produceLoop produces as fast as the buffer allows until pctx ends. Records
+// carry ctx, not pctx: the end of the run must not fail buffered records.
+func produceLoop(ctx, pctx context.Context, cl producer, ci int, c benchConfig, st *stats) {
+	var seq uint64
+	for pctx.Err() == nil {
+		rec := &kgo.Record{Value: makeValue(ci, seq, c.size), Context: ctx}
+		if c.parts > 0 {
+			rec.Partition = int32(seq % uint64(c.parts))
+		}
+		seq++
+		t0 := time.Now()
+		cl.Produce(ctx, rec, func(r *kgo.Record, err error) {
+			st.add(len(r.Value), time.Since(t0), err)
+		})
+	}
+}
+
+// reportLoop prints one interval line per tick until pctx ends or done is set.
+func reportLoop(pctx context.Context, w io.Writer, tick <-chan time.Time, start time.Time, cls []producer, st *stats, done *atomic.Bool) {
+	last := start
+	for !done.Load() {
+		select {
+		case now := <-tick:
+			var buf int64
+			for _, cl := range cls {
+				buf += cl.BufferedProduceRecords()
+			}
+			fmt.Fprintln(w, formatInterval(st.takeInterval(), now.Sub(last), buf))
+			last = now
+		case <-pctx.Done():
+			return
+		}
+	}
+}
+
+func run(c benchConfig, stdout, stderr io.Writer, nc clientFactory) int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	opts := clientOpts(c)
+	cls := make([]producer, c.clients)
 	for i := range cls {
-		cl, err := kgo.NewClient(opts...)
+		cl, err := nc(opts...)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "new client:", err)
+			fmt.Fprintln(stderr, "new client:", err)
 			return 1
 		}
 		defer cl.Close()
@@ -120,8 +223,7 @@ func run(topic string, seeds []string, nClients, size int, dur, every time.Durat
 
 	st := newStats()
 	start := time.Now()
-	deadline := start.Add(dur)
-	pctx, pcancel := context.WithDeadline(ctx, deadline)
+	pctx, pcancel := context.WithDeadline(ctx, start.Add(c.dur))
 	defer pcancel()
 
 	var wg sync.WaitGroup
@@ -129,47 +231,17 @@ func run(topic string, seeds []string, nClients, size int, dur, every time.Durat
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			var seq uint64
-			for pctx.Err() == nil {
-				val := make([]byte, size)
-				binary.BigEndian.PutUint32(val, uint32(ci))
-				binary.BigEndian.PutUint32(val[4:], uint32(seq))
-				for j := 8; j < size; j++ {
-					val[j] = byte('a' + j%26)
-				}
-				rec := &kgo.Record{Value: val, Context: ctx} // not pctx: the end of the run must not fail buffered records
-				if parts > 0 {
-					rec.Partition = int32(seq % uint64(parts))
-				}
-				seq++
-				t0 := time.Now()
-				cl.Produce(ctx, rec, func(r *kgo.Record, err error) {
-					st.add(len(r.Value), time.Since(t0), err)
-				})
-			}
+			produceLoop(ctx, pctx, cl, ci, c, st)
 		}()
 	}
 
 	var done atomic.Bool
-	tick := time.NewTicker(every)
+	tick := time.NewTicker(c.every)
 	defer tick.Stop()
 	report := make(chan struct{})
 	go func() {
 		defer close(report)
-		last := start
-		for !done.Load() {
-			select {
-			case now := <-tick.C:
-				var buf int64
-				for _, cl := range cls {
-					buf += cl.BufferedProduceRecords()
-				}
-				fmt.Println(formatInterval(st.takeInterval(), now.Sub(last), buf))
-				last = now
-			case <-pctx.Done():
-				return
-			}
-		}
+		reportLoop(pctx, stdout, tick.C, start, cls, st, &done)
 	}()
 
 	wg.Wait()
@@ -181,6 +253,6 @@ func run(topic string, seeds []string, nClients, size int, dur, every time.Durat
 	}
 	fcancel()
 	done.Store(true)
-	fmt.Print(formatSummary(st.summarize(time.Since(start))))
+	fmt.Fprint(stdout, formatSummary(st.summarize(time.Since(start))))
 	return 0
 }

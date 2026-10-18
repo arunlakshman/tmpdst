@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -28,63 +29,104 @@ import (
 )
 
 func main() {
-	listen := flag.String("listen", "127.0.0.1:9092", "Kafka listen address")
-	advertise := flag.String("advertise", "", "host:port clients are told in Metadata (default: the listen address)")
-	brokerID := flag.Int("broker-id", 1, "broker id advertised in Metadata")
-	nodeID := flag.String("node-id", "", "control-plane node name (default: broker-<id>)")
-	cpURL := flag.String("cp-url", "http://127.0.0.1:8080", "control plane base URL")
-	objects := flag.String("objects", "s3", "object store: s3, or mem (in-process, single broker, lost on exit)")
-	endpoint := flag.String("s3-endpoint", "", "S3 endpoint URL (empty: AWS)")
-	bucket := flag.String("s3-bucket", "manifester", "S3 bucket")
-	prefix := flag.String("s3-prefix", "", "key prefix inside the bucket")
-	region := flag.String("s3-region", "us-east-1", "S3 region")
-	pathStyle := flag.Bool("s3-path-style", false, "path-style addressing (SeaweedFS, MinIO)")
-	createBucket := flag.Bool("s3-create-bucket", false, "create the bucket at startup")
+	os.Exit(run(os.Args[1:], os.Stderr, sys.ShutdownOnSignal(syscall.SIGTERM, os.Interrupt)))
+}
+
+// brokerFlags are the parsed command-line flags.
+type brokerFlags struct {
+	listen, advertise string
+	brokerID          int
+	nodeID, cpURL     string
+	objects           string
+	endpoint, bucket  string
+	prefix, region    string
+	pathStyle         bool
+	createBucket      bool
+	tn                tuning
+	objTimeout, grace time.Duration
+	metricsAddr       string
+	debug             bool
+	logLevel, runID   string
+	manifestOut       string
+}
+
+func parseFlags(args []string, stderr io.Writer) (brokerFlags, *flag.FlagSet, error) {
+	var f brokerFlags
+	fs := flag.NewFlagSet("manibroker", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.StringVar(&f.listen, "listen", "127.0.0.1:9092", "Kafka listen address")
+	fs.StringVar(&f.advertise, "advertise", "", "host:port clients are told in Metadata (default: the listen address)")
+	fs.IntVar(&f.brokerID, "broker-id", 1, "broker id advertised in Metadata")
+	fs.StringVar(&f.nodeID, "node-id", "", "control-plane node name (default: broker-<id>)")
+	fs.StringVar(&f.cpURL, "cp-url", "http://127.0.0.1:8080", "control plane base URL")
+	fs.StringVar(&f.objects, "objects", "s3", "object store: s3, or mem (in-process, single broker, lost on exit)")
+	fs.StringVar(&f.endpoint, "s3-endpoint", "", "S3 endpoint URL (empty: AWS)")
+	fs.StringVar(&f.bucket, "s3-bucket", "manifester", "S3 bucket")
+	fs.StringVar(&f.prefix, "s3-prefix", "", "key prefix inside the bucket")
+	fs.StringVar(&f.region, "s3-region", "us-east-1", "S3 region")
+	fs.BoolVar(&f.pathStyle, "s3-path-style", false, "path-style addressing (SeaweedFS, MinIO)")
+	fs.BoolVar(&f.createBucket, "s3-create-bucket", false, "create the bucket at startup")
 	dflt := broker.DefaultConfig()
-	var tn tuning
-	flag.StringVar(&tn.segmentBytes, "segment-bytes", "16MiB", "seal the open segment at this many batch bytes (16MiB, 16MB, plain bytes)")
-	flag.DurationVar(&tn.window, "segment-window", time.Duration(dflt.BatchWindow), "seal the open segment this long after its first batch")
-	flag.IntVar(&tn.parts, "max-segment-partitions", dflt.MaxSegmentPartitions, "seal at this many distinct partitions (control plane commit limit)")
-	flag.IntVar(&tn.batches, "max-segment-batches", dflt.MaxSegmentBatches, "seal at this many batches (bounds the control plane's segment record, about 300 bytes a batch)")
-	flag.IntVar(&tn.items, "max-segment-items", dflt.MaxSegmentItems, "seal before a commit would cost more than this many control plane items: 2 + 2 x partitions + producer states (DynamoDB limit 100)")
-	flag.StringVar(&tn.maxBuffered, "max-buffered", "auto", "pause client reads above this much unacked produce data; auto = clamp(memory/16, 128MiB, 1GiB)")
-	flag.StringVar(&tn.resumeBuffered, "resume-buffered", "", "resume reads below this (default: half of -max-buffered)")
-	objTimeout := flag.Duration("obj-timeout", 30*time.Second, "base timeout of an object-store call; large bodies get extra time at 2 MiB/s")
-	grace := flag.Duration("stop-grace", 10*time.Second, "time to finish in-flight work after SIGTERM")
-	metricsAddr := flag.String("metrics-addr", ":9100", "serve Prometheus metrics on /metrics at this address (empty: disabled)")
-	debug := flag.Bool("debug", false, "debug logging (same as -log-level debug)")
-	logLevel := flag.String("log-level", "info", "log level: debug, info, warn, error (JSON lines on stderr; segment lines are one per sealed/put/committed segment, so warn keeps failures only)")
-	runID := flag.String("run-id", "", "run id stamped on every log line, metric (build_info) and the manifest (default $MANIFESTER_RUN_ID, else generated)")
-	manifestOut := flag.String("manifest-out", "", "write a JSON run manifest at startup: a file path or s3://bucket/key ({service}, {run_id} expand; a trailing / adds <service>-<run_id>.json); failures are logged, never fatal")
-	flag.Parse()
+	tn := &f.tn
+	fs.StringVar(&tn.segmentBytes, "segment-bytes", "16MiB", "seal the open segment at this many batch bytes (16MiB, 16MB, plain bytes)")
+	fs.DurationVar(&tn.window, "segment-window", time.Duration(dflt.BatchWindow), "seal the open segment this long after its first batch")
+	fs.IntVar(&tn.parts, "max-segment-partitions", dflt.MaxSegmentPartitions, "seal at this many distinct partitions (control plane commit limit)")
+	fs.IntVar(&tn.batches, "max-segment-batches", dflt.MaxSegmentBatches, "seal at this many batches (bounds the control plane's segment record, about 300 bytes a batch)")
+	fs.IntVar(&tn.items, "max-segment-items", dflt.MaxSegmentItems, "seal before a commit would cost more than this many control plane items: 2 + 2 x partitions + producer states (DynamoDB limit 100)")
+	fs.StringVar(&tn.maxBuffered, "max-buffered", "auto", "pause client reads above this much unacked produce data; auto = clamp(memory/16, 128MiB, 1GiB)")
+	fs.StringVar(&tn.resumeBuffered, "resume-buffered", "", "resume reads below this (default: half of -max-buffered)")
+	fs.DurationVar(&f.objTimeout, "obj-timeout", 30*time.Second, "base timeout of an object-store call; large bodies get extra time at 2 MiB/s")
+	fs.DurationVar(&f.grace, "stop-grace", 10*time.Second, "time to finish in-flight work after SIGTERM")
+	fs.StringVar(&f.metricsAddr, "metrics-addr", ":9100", "serve Prometheus metrics on /metrics at this address (empty: disabled)")
+	fs.BoolVar(&f.debug, "debug", false, "debug logging (same as -log-level debug)")
+	fs.StringVar(&f.logLevel, "log-level", "info", "log level: debug, info, warn, error (JSON lines on stderr; segment lines are one per sealed/put/committed segment, so warn keeps failures only)")
+	fs.StringVar(&f.runID, "run-id", "", "run id stamped on every log line, metric (build_info) and the manifest (default $MANIFESTER_RUN_ID, else generated)")
+	fs.StringVar(&f.manifestOut, "manifest-out", "", "write a JSON run manifest at startup: a file path or s3://bucket/key ({service}, {run_id} expand; a trailing / adds <service>-<run_id>.json); failures are logged, never fatal")
+	err := fs.Parse(args)
+	return f, fs, err
+}
 
-	lvl, err := runinfo.ParseLevel(*logLevel)
-	if *debug {
-		lvl, err = slog.LevelDebug, nil
-	}
-	info := runinfo.New("manibroker", *runID, *brokerID)
-	log := runinfo.NewLogger(os.Stderr, lvl, info)
-	slog.SetDefault(log)
+// run is the testable body of main: it serves until shutdown closes and
+// returns the exit code.
+func run(args []string, stderr io.Writer, shutdown <-chan struct{}) int {
+	f, fs, err := parseFlags(args, stderr)
 	if err != nil {
-		fatal(err)
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
 	}
-	log.Info("manibroker starting", "event", "start", "run_id_generated", info.RunIDFresh, "go_version", info.GoVersion,
-		"git_dirty", info.GitDirty, "hostname", info.Hostname, "log_level", lvl.String())
+	if err := serve(f, fs, stderr, shutdown); err != nil {
+		slog.Error("manibroker", "err", err)
+		return 1
+	}
+	return 0
+}
 
-	ctx := context.Background()
-	cpc := cpclient.New(*cpURL, nil)
-	cfg := prod.NodeConfig{
-		NodeID: *nodeID, Broker: broker.DefaultConfig(), Log: log,
+// level resolves -log-level and -debug. The error is reported once the
+// logger exists.
+func (f brokerFlags) level() (slog.Level, error) {
+	if f.debug {
+		return slog.LevelDebug, nil
+	}
+	return runinfo.ParseLevel(f.logLevel)
+}
+
+// nodeConfig builds the prod.NodeConfig that does not depend on the object
+// store or the listener. m is nil when metrics are disabled.
+func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-chan struct{}) (cfg prod.NodeConfig, m *prod.Metrics, mem uint64, memSource string, err error) {
+	cpc := cpclient.New(f.cpURL, nil)
+	cfg = prod.NodeConfig{
+		NodeID: f.nodeID, Broker: broker.DefaultConfig(), Log: log,
 		ControlPlane: cpc, CPClassify: cpclient.Classifier{},
-		StopGrace: *grace,
+		StopGrace: f.grace,
 	}
 	if cfg.NodeID == "" {
-		cfg.NodeID = fmt.Sprintf("broker-%d", *brokerID)
+		cfg.NodeID = fmt.Sprintf("broker-%d", f.brokerID)
 	}
-	cfg.Broker.BrokerID = int32(*brokerID)
-	cfg.Exec.ObjTimeout = *objTimeout
-	var m *prod.Metrics
-	if *metricsAddr != "" {
+	cfg.Broker.BrokerID = int32(f.brokerID)
+	cfg.Exec.ObjTimeout = f.objTimeout
+	if f.metricsAddr != "" {
 		m = prod.NewMetrics()
 		runinfo.Register(m.Registry(), "manibroker", info)
 		cfg.Facts = m.Observe
@@ -99,108 +141,152 @@ func main() {
 		segLog.Observe(f)
 	}
 	cfg.OnIO = segLog.IO
-	mem, memSource := prod.MemoryLimit()
-	if err := tn.apply(&cfg.Broker, mem); err != nil {
-		fatal(err)
-	}
-	switch *objects {
+	mem, memSource = prod.MemoryLimit()
+	err = f.tn.apply(&cfg.Broker, mem)
+	cfg.Shutdown = shutdown
+	return
+}
+
+// openObjects sets cfg.Objects from -objects.
+func openObjects(ctx context.Context, f brokerFlags, cfg *prod.NodeConfig, m *prod.Metrics, log *slog.Logger) error {
+	switch f.objects {
 	case "mem":
 		cfg.Objects, cfg.ObjClassify = vsys.NewObjectStore(), prod.MemClassifier{}
+		return nil
 	case "s3":
 		var obs *awsobs.Recorder
 		if m != nil {
 			obs = awsobs.New(m.Registry(), "manibroker", "s3", log)
 		}
 		s, err := s3store.New(ctx, s3store.Config{
-			Endpoint: *endpoint, Region: *region, Bucket: *bucket, Prefix: *prefix, PathStyle: *pathStyle, Obs: obs,
+			Endpoint: f.endpoint, Region: f.region, Bucket: f.bucket, Prefix: f.prefix, PathStyle: f.pathStyle, Obs: obs,
 		})
 		if err != nil {
-			fatal(err)
+			return err
 		}
-		if *createBucket {
+		if f.createBucket {
 			if err := s.EnsureBucket(ctx); err != nil {
-				fatal(err)
+				return err
 			}
 		}
 		cfg.Objects, cfg.ObjClassify = s, s3store.Classifier{}
-	default:
-		fatal(errors.New("unknown -objects " + *objects))
+		return nil
 	}
-	if m != nil {
-		mln, err := net.Listen("tcp", *metricsAddr)
-		if err != nil {
-			fatal(err)
-		}
-		go func() { _ = http.Serve(mln, runinfo.Mux(m.Handler())) }()
-		log.Info("manibroker metrics", "addr", mln.Addr().String())
+	return errors.New("unknown -objects " + f.objects)
+}
+
+// serveMetrics starts the /metrics listener when metrics are enabled.
+func serveMetrics(log *slog.Logger, m *prod.Metrics, addr string) error {
+	if m == nil {
+		return nil
 	}
-	ln, err := net.Listen("tcp", *listen)
+	mln, err := net.Listen("tcp", addr)
 	if err != nil {
-		fatal(err)
+		return err
+	}
+	go func() { _ = http.Serve(mln, runinfo.Mux(m.Handler())) }()
+	log.Info("manibroker metrics", "addr", mln.Addr().String())
+	return nil
+}
+
+// bind opens the Kafka listener and sets the advertised host and port.
+func bind(f brokerFlags, cfg *prod.NodeConfig) (ln net.Listener, adv string, err error) {
+	ln, err = net.Listen("tcp", f.listen)
+	if err != nil {
+		return nil, "", err
 	}
 	cfg.Listener = ln
-	adv := *advertise
+	adv = f.advertise
 	if adv == "" {
 		adv = ln.Addr().String()
 	}
 	host, port, err := net.SplitHostPort(adv)
-	if err != nil {
-		fatal(err)
+	if err == nil {
+		var p int
+		if p, err = strconv.Atoi(port); err == nil {
+			cfg.Broker.Host, cfg.Broker.Port = host, int32(p)
+		}
 	}
-	p, err := strconv.Atoi(port)
 	if err != nil {
-		fatal(err)
+		ln.Close()
+		return nil, "", err
 	}
-	cfg.Broker.Host, cfg.Broker.Port = host, int32(p)
-	cfg.Shutdown = sys.ShutdownOnSignal(syscall.SIGTERM, os.Interrupt)
+	return ln, adv, nil
+}
 
+func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan struct{}) error {
+	lvl, lerr := f.level()
+	info := runinfo.New("manibroker", f.runID, f.brokerID)
+	log := runinfo.NewLogger(stderr, lvl, info)
+	slog.SetDefault(log)
+	if lerr != nil {
+		return lerr
+	}
+	log.Info("manibroker starting", "event", "start", "run_id_generated", info.RunIDFresh, "go_version", info.GoVersion,
+		"git_dirty", info.GitDirty, "hostname", info.Hostname, "log_level", lvl.String())
+
+	ctx := context.Background()
+	cfg, m, mem, memSource, err := nodeConfig(f, log, info, shutdown)
+	if err != nil {
+		return err
+	}
+	if err := openObjects(ctx, f, &cfg, m, log); err != nil {
+		return err
+	}
+	if err := serveMetrics(log, m, f.metricsAddr); err != nil {
+		return err
+	}
+	ln, adv, err := bind(f, &cfg)
+	if err != nil {
+		return err
+	}
 	n, err := prod.Start(ctx, cfg)
 	if err != nil {
-		fatal(err)
+		return err
 	}
 	if m != nil {
 		m.Registry().MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{Namespace: "manibroker", Name: "open_connections",
 			Help: "Open Kafka client connections."}, func() float64 { return float64(n.OpenConns()) }))
 	}
-	log.Info("manibroker listening", "addr", ln.Addr().String(), "advertised", adv, "objects", *objects)
+	log.Info("manibroker listening", "addr", ln.Addr().String(), "advertised", adv, "objects", f.objects)
 	bc := cfg.Broker
 	log.Info("manibroker tuning",
 		"segment_bytes", bc.MaxSegmentBytes, "segment_window", time.Duration(bc.BatchWindow),
 		"max_segment_partitions", bc.MaxSegmentPartitions, "max_segment_batches", bc.MaxSegmentBatches,
 		"max_segment_items", bc.MaxSegmentItems, "max_buffered", bc.MaxBufferedBytes, "resume_buffered", bc.ResumeBufferedBytes,
-		"obj_timeout", *objTimeout, "memory_bytes", mem, "memory_source", memSource)
-	if *manifestOut != "" {
-		writeManifest(ctx, log, info, *manifestOut, *region, *endpoint, *pathStyle, map[string]any{
-			"segment_bytes": bc.MaxSegmentBytes, "segment_window_ns": int64(bc.BatchWindow),
-			"max_segment_partitions": bc.MaxSegmentPartitions, "max_segment_batches": bc.MaxSegmentBatches, "max_segment_items": bc.MaxSegmentItems,
-			"max_buffered_bytes": bc.MaxBufferedBytes, "resume_buffered_bytes": bc.ResumeBufferedBytes,
-			"obj_timeout_ns": int64(*objTimeout), "memory_bytes": mem, "memory_source": memSource,
-			"node_id": cfg.NodeID, "advertised": adv, "listen": ln.Addr().String(),
-		})
+		"obj_timeout", f.objTimeout, "memory_bytes", mem, "memory_source", memSource)
+	if f.manifestOut != "" {
+		writeManifest(ctx, log, info, fs, f, manifestTuning(cfg, f, mem, memSource, adv, ln))
 	}
-	switch err := n.Wait(); {
-	case err == nil:
-		log.Info("manibroker stopped")
-	default:
-		fatal(err) // sys.ErrTripped, sys.ErrKilled, ...
+	if err := n.Wait(); err != nil {
+		return err // sys.ErrTripped, sys.ErrKilled, ...
+	}
+	log.Info("manibroker stopped")
+	return nil
+}
+
+// manifestTuning is the manifest's "tuning" object (keys are read by the runbook).
+func manifestTuning(cfg prod.NodeConfig, f brokerFlags, mem uint64, memSource, adv string, ln net.Listener) map[string]any {
+	bc := cfg.Broker
+	return map[string]any{
+		"segment_bytes": bc.MaxSegmentBytes, "segment_window_ns": int64(bc.BatchWindow),
+		"max_segment_partitions": bc.MaxSegmentPartitions, "max_segment_batches": bc.MaxSegmentBatches, "max_segment_items": bc.MaxSegmentItems,
+		"max_buffered_bytes": bc.MaxBufferedBytes, "resume_buffered_bytes": bc.ResumeBufferedBytes,
+		"obj_timeout_ns": int64(f.objTimeout), "memory_bytes": mem, "memory_source": memSource,
+		"node_id": cfg.NodeID, "advertised": adv, "listen": ln.Addr().String(),
 	}
 }
 
 // writeManifest records the effective flags and tuning. Never fatal.
-func writeManifest(ctx context.Context, log *slog.Logger, info runinfo.Info, dest, region, s3endpoint string, pathStyle bool, tuning map[string]any) {
-	m := runinfo.NewManifest(info, flag.CommandLine, region, tuning)
+func writeManifest(ctx context.Context, log *slog.Logger, info runinfo.Info, fs *flag.FlagSet, f brokerFlags, tuning map[string]any) {
+	m := runinfo.NewManifest(info, fs, f.region, tuning)
 	m.Log(log)
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	where, err := runinfo.Write(cctx, m, runinfo.WriteOptions{Dest: dest, Region: region, S3Endpoint: s3endpoint, S3PathStyle: pathStyle, IMDS: true})
+	where, err := runinfo.Write(cctx, m, runinfo.WriteOptions{Dest: f.manifestOut, Region: f.region, S3Endpoint: f.endpoint, S3PathStyle: f.pathStyle, IMDS: true})
 	if err != nil {
 		log.Warn("manifest not written", "event", "manifest_failed", "dest", where, "err", err.Error())
 		return
 	}
 	log.Info("manifest written", "event", "manifest_written", "dest", where)
-}
-
-func fatal(err error) {
-	slog.Error("manibroker", "err", err)
-	os.Exit(1)
 }

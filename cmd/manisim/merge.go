@@ -47,32 +47,44 @@ func mergeReports(reps []sim.Report) sim.Report {
 		out.Seeds = append(out.Seeds, r.Seeds...)
 		out.Nondeterminism = append(out.Nondeterminism, r.Nondeterminism...)
 		for _, a := range r.Assertions {
-			k := statKey{string(a.Prop), a.Kind}
-			i, ok := idx[k]
-			if !ok {
-				i = len(out.Assertions)
-				idx[k] = i
-				out.Assertions = append(out.Assertions, sim.AssertionStat{Prop: a.Prop, Kind: a.Kind})
-			}
-			m := &out.Assertions[i]
-			m.Checks += a.Checks
-			m.Passes += a.Passes
-			if len(a.Seeds) > 0 {
-				if len(m.Seeds) == 0 {
-					m.FirstSeed, m.FirstStep = a.FirstSeed, a.FirstStep
-				}
-				m.Seeds = append(m.Seeds, a.Seeds...)
-			}
+			mergeAssertion(&out, idx, a)
 		}
 	}
 	for _, a := range out.Assertions {
-		safety := a.Kind == "always" || a.Kind == "always_or_unreachable" || a.Kind == "unreachable"
-		switch {
-		case safety && len(a.Seeds) > 0:
-			out.Always = append(out.Always, a)
-		case !safety && len(a.Seeds) == 0:
-			out.Coverage = append(out.Coverage, a)
-		}
+		classify(&out, a)
 	}
 	return out
+}
+
+// mergeAssertion adds a's counts and seeds to the (property, kind) entry of out.
+func mergeAssertion(out *sim.Report, idx map[statKey]int, a sim.AssertionStat) {
+	k := statKey{string(a.Prop), a.Kind}
+	i, ok := idx[k]
+	if !ok {
+		i = len(out.Assertions)
+		idx[k] = i
+		out.Assertions = append(out.Assertions, sim.AssertionStat{Prop: a.Prop, Kind: a.Kind})
+	}
+	m := &out.Assertions[i]
+	m.Checks += a.Checks
+	m.Passes += a.Passes
+	if len(a.Seeds) == 0 {
+		return
+	}
+	if len(m.Seeds) == 0 {
+		m.FirstSeed, m.FirstStep = a.FirstSeed, a.FirstStep
+	}
+	m.Seeds = append(m.Seeds, a.Seeds...)
+}
+
+// classify files a into Always (a safety property with failing seeds) or
+// Coverage (a Sometimes property never satisfied).
+func classify(out *sim.Report, a sim.AssertionStat) {
+	safety := a.Kind == "always" || a.Kind == "always_or_unreachable" || a.Kind == "unreachable"
+	switch {
+	case safety && len(a.Seeds) > 0:
+		out.Always = append(out.Always, a)
+	case !safety && len(a.Seeds) == 0:
+		out.Coverage = append(out.Coverage, a)
+	}
 }

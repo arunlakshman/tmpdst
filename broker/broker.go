@@ -53,13 +53,14 @@ type Broker struct {
 	parked []parked
 	topics []core.TopicInfo // topic cache, refreshed from DescribeTopics on a miss
 
-	now      core.Time // At of the event being stepped (set by Step; not state)
-	open     openSegment
-	segs     []*segment // sealed segments in commit order
-	ops      []*op
-	bufBytes int  // produce bytes admitted and not yet answered
-	pressure bool // above MaxBufferedBytes, until back at ResumeBufferedBytes
-	guess    uint64
+	now        core.Time // At of the event being stepped (set by Step; not state)
+	open       openSegment
+	segs       []*segment // sealed segments in commit order
+	ops        []*op
+	bufBytes   int       // produce bytes admitted and not yet answered
+	pressure   bool      // above MaxBufferedBytes, until back at ResumeBufferedBytes
+	pressureAt core.Time // when pressure began (fact timing only, not state)
+	guess      uint64
 }
 
 // parked is a request waiting for registration.
@@ -218,11 +219,16 @@ func (b *Broker) maybeExit(acts []core.Action) []core.Action {
 func (b *Broker) flow(acts []core.Action) []core.Action {
 	switch {
 	case !b.pressure && b.bufBytes >= b.cfg.MaxBufferedBytes:
-		b.pressure = true
+		b.pressure, b.pressureAt = true, b.now
 		b.env.Reachable("broker: reads paused by backpressure")
+		acts = append(acts, emit("backpressure_on",
+			core.Field{Key: "buffered", Value: core.I64(b.bufBytes)}))
 	case b.pressure && b.bufBytes <= b.cfg.ResumeBufferedBytes:
 		b.pressure = false
 		b.env.Reachable("broker: reads resumed after backpressure")
+		acts = append(acts, emit("backpressure_off",
+			core.Field{Key: "buffered", Value: core.I64(b.bufBytes)},
+			core.Field{Key: "paused_ns", Value: core.I64(b.now - b.pressureAt)}))
 	}
 	want := b.pressure || b.stopping
 	for _, c := range b.conns {

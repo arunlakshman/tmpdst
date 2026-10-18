@@ -62,6 +62,22 @@ type segment struct {
 	req      core.ReqID
 	gen      core.TimerGen
 	attempts int
+
+	// Timing for facts only (derived from event times, never read by
+	// behaviour, so not part of StateHash). The PUT starts at the seal.
+	sealedAt  core.Time // when the segment was sealed (its PUT was issued)
+	putDoneAt core.Time // when the PUT finally succeeded
+	commitAt  core.Time // when the first CommitSegment was issued
+	committed bool      // commitAt is set
+}
+
+// dataBytes is the produce data of the segment (what bufBytes counts).
+func (s *segment) dataBytes() int {
+	n := 0
+	for _, pb := range s.batches {
+		n += len(pb.data)
+	}
+	return n
 }
 
 // addBatch appends an admitted batch to the open segment and seals it at the
@@ -124,7 +140,9 @@ func (b *Broker) seal(why string) []core.Action {
 		core.Field{Key: "batches", Value: core.I64(len(bs))},
 		core.Field{Key: "parts", Value: core.I64(len(b.open.parts))},
 		core.Field{Key: "last", Value: core.I64(len(bs[len(bs)-1].data))},
-		core.Field{Key: "age", Value: core.I64(b.now - b.open.since)})}
+		core.Field{Key: "age", Value: core.I64(b.now - b.open.since)},
+		core.Field{Key: "inflight", Value: core.I64(len(b.segs) + 1)},
+		core.Field{Key: "buffered", Value: core.I64(b.bufBytes)})}
 	b.open = openSegment{}
 	return append(acts, b.sealBatches(bs)...)
 }
@@ -143,7 +161,7 @@ func (b *Broker) sealBatches(bs []*pbatch) []core.Action {
 		return nil
 	}
 	s := &segment{id: b.id(), batches: bs, data: data,
-		key: format.SegmentKey(b.self.Node, b.self.Inc, b.env.NewID())}
+		key: format.SegmentKey(b.self.Node, b.self.Inc, b.env.NewID()), sealedAt: b.now}
 	for i, pb := range bs {
 		pb.loc = entries[i].Ref(s.key)
 	}
@@ -163,8 +181,13 @@ func (b *Broker) onPutDone(s *segment, e core.ObjPutDone) []core.Action {
 	if e.Err != core.OK {
 		return b.retry(s, segPut)
 	}
-	s.state, s.req, s.attempts = segPutDone, 0, 0
-	var acts []core.Action
+	attempts := s.attempts + 1
+	s.state, s.req, s.attempts, s.putDoneAt = segPutDone, 0, 0, b.now
+	acts := []core.Action{emit("segment_put_done",
+		core.Field{Key: "segment", Value: core.Str(s.key)},
+		core.Field{Key: "bytes", Value: core.I64(len(s.data))},
+		core.Field{Key: "put_ns", Value: core.I64(b.now - s.sealedAt)},
+		core.Field{Key: "attempts", Value: core.I64(attempts)})}
 	if b.cfg.Bug == BugEarlyAck {
 		for _, pb := range s.batches {
 			b.guess += uint64(pb.records)
@@ -186,6 +209,9 @@ func (b *Broker) pump() []core.Action {
 
 func (b *Broker) commit(s *segment) []core.Action {
 	s.state, s.req = segCommit, b.req()
+	if !s.committed {
+		s.committed, s.commitAt = true, b.now
+	}
 	pend := make([]core.PendingBatch, len(s.batches))
 	for i, pb := range s.batches {
 		pend[i] = core.PendingBatch{TP: pb.tp, Records: pb.records, Loc: pb.loc,
@@ -227,7 +253,16 @@ func (b *Broker) committed(s *segment, rs []core.BatchRange) []core.Action {
 	acts := []core.Action{emit("segment_committed",
 		core.Field{Key: "segment", Value: core.Str(s.key)},
 		core.Field{Key: "batches", Value: core.I64(len(s.batches))},
-		core.Field{Key: "epoch", Value: core.U64(b.epoch)})}
+		core.Field{Key: "epoch", Value: core.U64(b.epoch)},
+		// Timing, in nanoseconds: put + wait + commit = total. wait is the time
+		// the uploaded segment queued behind earlier segments' commits.
+		core.Field{Key: "bytes", Value: core.I64(len(s.data))},
+		core.Field{Key: "put_ns", Value: core.I64(s.putDoneAt - s.sealedAt)},
+		core.Field{Key: "wait_ns", Value: core.I64(s.commitAt - s.putDoneAt)},
+		core.Field{Key: "commit_ns", Value: core.I64(b.now - s.commitAt)},
+		core.Field{Key: "total_ns", Value: core.I64(b.now - s.sealedAt)},
+		core.Field{Key: "inflight", Value: core.I64(len(b.segs) - 1)},
+		core.Field{Key: "buffered", Value: core.I64(b.bufBytes - s.dataBytes())})}
 	for i, pb := range s.batches {
 		r := rs[i]
 		switch {
@@ -285,10 +320,16 @@ func (b *Broker) endSegment(s *segment) []core.Action {
 
 // failSegment answers every unanswered batch of s with code.
 func (b *Broker) failSegment(s *segment, code int16) []core.Action {
+	acts := []core.Action{emit("segment_failed",
+		core.Field{Key: "segment", Value: core.Str(s.key)},
+		core.Field{Key: "code", Value: core.I64(code)},
+		core.Field{Key: "total_ns", Value: core.I64(b.now - s.sealedAt)},
+		core.Field{Key: "inflight", Value: core.I64(len(b.segs) - 1)},
+		core.Field{Key: "buffered", Value: core.I64(b.bufBytes - s.dataBytes())})}
 	for _, pb := range s.batches {
 		b.release(pb, code)
 	}
-	return b.endSegment(s)
+	return append(acts, b.endSegment(s)...)
 }
 
 // retry backs off and repeats the PUT or commit under the same key.

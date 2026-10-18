@@ -31,12 +31,6 @@ func (h *hasher) batchRange(b core.BatchRange) {
 	h.i64(int64(b.Base))
 	h.i64(b.Count)
 	h.segRef(b.Loc)
-	h.u64(uint64(b.Err))
-	if b.Dup {
-		h.u64(1)
-	} else {
-		h.u64(0)
-	}
 }
 
 func (h *hasher) event(b core.EventBody) {
@@ -175,26 +169,16 @@ func (h *hasher) cpOp(op core.CPOp) {
 	switch x := op.(type) {
 	case nil:
 		h.u64(200)
-	case core.Register:
-		h.u64(201)
-		h.ref(x.Self)
 	case core.CommitSegment:
 		h.u64(202)
 		h.str(x.SegmentKey)
-		h.ref(x.Owner)
-		h.u64(uint64(x.Epoch))
 		h.u64(uint64(len(x.Batches)))
 		for _, b := range x.Batches {
 			h.str(b.TP.Topic)
 			h.u64(uint64(uint32(b.TP.Partition)))
 			h.i64(b.Records)
 			h.segRef(b.Loc)
-			h.i64(int64(b.Producer))
-			h.i64(int64(b.PEpoch))
-			h.i64(int64(b.BaseSeq))
 		}
-	case core.InitProducer:
-		h.u64(205)
 	case core.Lookup:
 		h.u64(203)
 		h.str(x.TP.Topic)
@@ -217,13 +201,6 @@ func (h *hasher) cpResp(r core.CPResp) {
 	switch x := r.(type) {
 	case nil:
 		h.u64(300)
-	case core.RegisterResp:
-		h.u64(301)
-		h.u64(uint64(x.Epoch))
-	case core.InitProducerResp:
-		h.u64(305)
-		h.i64(int64(x.Producer))
-		h.i64(int64(x.PEpoch))
 	case core.CommitSegmentResp:
 		h.u64(302)
 		h.u64(uint64(len(x.Assigned)))
@@ -236,7 +213,7 @@ func (h *hasher) cpResp(r core.CPResp) {
 		for _, b := range x.Ranges {
 			h.batchRange(b)
 		}
-		h.i64(int64(x.HighWatermark))
+		h.i64(int64(x.End))
 	case core.DescribeTopicsResp:
 		h.u64(304)
 		h.u64(uint64(len(x.Topics)))

@@ -1,5 +1,5 @@
-// Package kafka is the Kafka scenario: sans-I/O Kafka clients (idempotent
-// producers and consumers over kwire), an oracle that rebuilds each
+// Package kafka is the Kafka scenario: sans-I/O Kafka clients (at-least-once
+// producers, no idempotence, and consumers over kwire), an oracle that rebuilds each
 // partition's committed log from the control plane and object store truth, the
 // invariants over it, and the campaign preset. See docs/decisions.md rows
 // 12-17, 26-31.
@@ -22,7 +22,7 @@ type Opts struct {
 	Partitions           int32
 }
 
-// DefaultOpts is 3 idempotent producers and 2 consumers over 2 topics x 3
+// DefaultOpts is 3 at-least-once producers and 2 consumers over 2 topics x 3
 // partitions.
 func DefaultOpts() Opts {
 	return Opts{Producers: 3, Consumers: 2, Topics: []string{"t0", "t1"}, Partitions: 3}
@@ -58,7 +58,6 @@ type stage uint8
 const (
 	stApi stage = iota
 	stMeta
-	stInit // producers: InitProducerId
 	stList // consumers: ListOffsets earliest
 	stRun
 )
@@ -68,7 +67,6 @@ type reqKind uint8
 const (
 	rqApi reqKind = iota
 	rqMeta
-	rqInit
 	rqList
 	rqProduce
 	rqFetch
@@ -103,7 +101,7 @@ type client struct {
 // Workload is the Kafka clients. Each client has one request outstanding at a
 // time, which also gives max.in.flight=1 per (producer, partition): a batch is
 // resolved (acked or abandoned) before the next one for that partition is
-// built, so the oracle can check sequence order exactly.
+// built, so the oracle can check that acked offsets follow send order.
 type Workload struct {
 	env     core.Env
 	self    core.NodeRef
@@ -125,9 +123,7 @@ func NewWorkload(env core.Env, self core.NodeRef, brokers []core.NodeRef, o Opts
 	}
 	for i := 0; i < o.Producers+o.Consumers; i++ {
 		c := &client{id: i, producer: i < o.Producers}
-		if c.producer {
-			c.p.seqs = make([]int32, len(w.tps))
-		} else {
+		if !c.producer {
 			c.c.pos = make([]int64, len(w.tps))
 		}
 		w.clients = append(w.clients, c)
@@ -283,10 +279,6 @@ func (w *Workload) advance(c *client) []core.Action {
 			r.Topics = append(r.Topics, kmsg.MetadataRequestTopic{Topic: &t})
 		}
 		return w.send(c, rqMeta, r)
-	case stInit:
-		r := kmsg.NewPtrInitProducerIDRequest()
-		r.TransactionalID, r.TransactionTimeoutMillis, r.ProducerID, r.ProducerEpoch = nil, 1000, -1, -1
-		return w.send(c, rqInit, r)
 	case stList:
 		return w.send(c, rqList, w.listReq())
 	}
@@ -350,8 +342,6 @@ func (w *Workload) handle(c *client, k reqKind, resp core.Response) []core.Actio
 		return w.onApi(c, r)
 	case *kmsg.MetadataResponse:
 		return w.onMeta(c, r)
-	case *kmsg.InitProducerIDResponse:
-		return w.onInit(c, r)
 	case *kmsg.ListOffsetsResponse:
 		return w.onList(c, r)
 	case *kmsg.ProduceResponse:
@@ -385,7 +375,7 @@ func (w *Workload) onApi(c *client, r *kmsg.ApiVersionsResponse) []core.Action {
 		c.ver[k] = lo + int16(w.env.Intn(int(hi-lo)+1))
 		return true
 	}
-	if !pick(rqMeta, kwire.KeyMetadata) || !pick(rqInit, kwire.KeyInitProducerID) || !pick(rqList, kwire.KeyListOffsets) ||
+	if !pick(rqMeta, kwire.KeyMetadata) || !pick(rqList, kwire.KeyListOffsets) ||
 		!pick(rqProduce, kwire.KeyProduce) || !pick(rqFetch, kwire.KeyFetch) {
 		return w.retryStage(c)
 	}
@@ -403,8 +393,6 @@ func (w *Workload) onMeta(c *client, r *kmsg.MetadataResponse) []core.Action {
 		return w.retryStage(c)
 	}
 	switch {
-	case c.producer && c.p.pid == 0:
-		c.stage = stInit
 	case !c.producer && !c.c.listed:
 		c.stage = stList
 	default:

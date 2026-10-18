@@ -26,7 +26,7 @@ func brokerConfig(bug broker.Bug) broker.Config {
 		MaxBufferedBytes: 3 << 10, ResumeBufferedBytes: 1 << 10, Bug: bug}
 }
 
-// Config is the Kafka campaign preset: 3 brokers, 1 workload of 3 idempotent
+// Config is the Kafka campaign preset: 3 brokers, 1 workload of 3 at-least-once
 // producers and 2 consumers over 2 topics x 3 partitions, all three engines,
 // attrition and a swarm over the fault families.
 func Config(seeds []uint64) sim.Config { return config(seeds, broker.BugNone) }
@@ -45,14 +45,13 @@ func configWith(seeds []uint64, bug broker.Bug, opts Opts) sim.Config {
 			return broker.New(sc.Params.(broker.Config))
 		}}},
 		InvariantsFor: func(sc sim.SeedConfig) []sim.Invariant {
-			return []sim.Invariant{newSegmentCaps(sc.Params.(broker.Config)), &segmentTiming{}}
+			return []sim.Invariant{newSegmentCaps(sc.Params.(broker.Config), opts.tps()), &segmentTiming{}}
 		},
 		Workloads: []sim.WorkloadFactory{func(env core.Env, self core.NodeRef, bs []core.NodeRef) sim.Workload {
 			return NewWorkload(env, self, bs, opts)
 		}},
 		Invariants: []func() sim.Invariant{
 			func() sim.Invariant { return newOracle(opts) },
-			func() sim.Invariant { return &trippedNeverAcks{dead: map[core.NodeRef]bool{}} },
 			func() sim.Invariant { return &liveness{} },
 			func() sim.Invariant { return &faultCoverage{} },
 		},
@@ -123,9 +122,6 @@ func swarm(_ uint64, r sim.CountedRand, c *sim.SeedConfig) {
 	knob(&n.RandomCloseProb)
 	knob(&n.BlackHoleProb)
 	knob(&c.Attrition.CrashProb)
-	if r.Chance(fenceModeProb) {
-		fenceMode(cp)
-	}
 	switch x := r.Intn(20); { // short transfers: tiny chunks are costly (every chunk is a Step)
 	case x < 2:
 		n.PartialIOMax = 48
@@ -141,73 +137,49 @@ func swarm(_ uint64, r sim.CountedRand, c *sim.SeedConfig) {
 	swarmBroker(r, c) // last, so the fault knobs above keep their draws
 }
 
-// fenceModeProb is the share of seeds that run the fencing scenario.
-const fenceModeProb = 0.3
-
-// fenceMode makes a Register that the broker gave up on land after its retry
-// has already succeeded, so the control plane holds a newer epoch than the
-// broker and its next CommitSegment is fenced (the fail-stop path, which must
-// end in Trip). Three knobs together: a caller timeout shorter than the slow
-// apply latency (the broker retries before the first Register lands), frequent
-// control-plane timeouts (the first Register is a timed-out one, applied or
-// not by a coin at landing) and frequent slow applies. Outside Chaos no
-// timeout is drawn, so Settling is unaffected.
-func fenceMode(cp *sim.ControlPlaneFaults) {
-	cp.CallerTimeout = ms(30)
-	cp.Timeout = 0.4
-	cp.ApplyLatency.SlowProb = 0.5
-}
-
 // The 3 producers send at most 2 batches each and wait for the ack, so a
-// segment rarely holds more than 6: the batch cap binds only when it is 2-4, and
-// the commit item cap (2 + 2 x partitions + producer states, decision 39) only
-// when it is tiny.
+// segment rarely holds more than 6 batches or partitions: the batch cap binds
+// only when it is 2-4, and the partition cap only when it is 2-6.
 //
 // swarmBroker picks this seed's segment tuning (decision 17) from a profile:
 //
 //	tiny (0.2)        a few KiB: the size rule binds
 //	accumulate (0.2)  long windows, big byte cap, small batch cap: the batch cap binds
-//	defaults (0.15)   the production defaults: 16 MiB, 200 ms, 256 batches, 24 partitions, 96 items
-//	wide (0.1)        2-3 partitions, nothing else binds: the partition cap
-//	items (0.1)       long windows, big byte and batch caps, a tiny commit item budget: the item cap binds
+//	defaults (0.15)   the production defaults: 16 MiB, 200 ms, 256 batches, 96 partitions
+//	wide (0.2)        long windows, nothing else binds, a partition cap of 2-6: the partition cap
 //	mixed (0.25)      every knob from its own menu
 //
 // Buffer caps are swarmed too. Half the seeds tighten the control plane's commit
-// limit to exactly what the seed's caps allow (2 + 2 x partitions + batches, or
-// the item budget if that is smaller), so a broker that ignores a cap is
-// refused; the preset's own limit is 100.
+// limit to exactly what the seed's partition cap allows (1 + partitions: the
+// segment item and one run item per partition, decisions 39, 41, 44; batches do
+// not count), so a broker that ignores the cap is refused; the preset's own
+// limit is 100.
 func swarmBroker(r sim.CountedRand, c *sim.SeedConfig) {
 	bc := c.Params.(broker.Config)
 	pick := func(menu ...int) int { return menu[r.Intn(len(menu))] }
 	window := func(menu ...int) core.Duration { return ms(int64(pick(menu...))) }
 	d := broker.DefaultConfig()
-	bc.MaxSegmentItems = d.MaxSegmentItems
 	switch x := r.Float64(); {
 	case x < 0.2: // tiny
 		bc.MaxSegmentBytes, bc.BatchWindow = pick(4<<10, 6<<10, 8<<10), window(20, 50, 200)
-		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(16, 32, 256), pick(12, 24)
+		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(16, 32, 256), pick(12, 24, 96)
 	case x < 0.4: // accumulate
 		bc.MaxSegmentBytes, bc.BatchWindow = pick(256<<10, 4<<20, 16<<20), window(50, 200)
-		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(2, 3, 4), pick(12, 24)
+		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(2, 3, 4), pick(12, 24, 96)
 	case x < 0.55: // defaults
 		bc.MaxSegmentBytes, bc.BatchWindow = d.MaxSegmentBytes, d.BatchWindow
 		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = d.MaxSegmentBatches, d.MaxSegmentPartitions
-	case x < 0.65: // wide
+	case x < 0.75: // wide
 		bc.MaxSegmentBytes, bc.BatchWindow = 16<<20, window(50, 200)
-		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = 256, pick(2, 3)
-	case x < 0.75: // items
-		bc.MaxSegmentBytes, bc.BatchWindow = 16<<20, window(50, 200)
-		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = 256, pick(12, 24)
-		bc.MaxSegmentItems = pick(8, 9, 10, 12, 16)
+		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = 256, pick(2, 3, 4, 5, 6)
 	default: // mixed
 		bc.MaxSegmentBytes, bc.BatchWindow = pick(4<<10, 16<<10, 64<<10, 256<<10, 4<<20, 16<<20), window(5, 20, 50, 200)
-		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(2, 4, 8, 32, 256), pick(3, 6, 12, 24)
-		bc.MaxSegmentItems = pick(8, 12, 16, 96, 96)
+		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(2, 4, 8, 32, 256), pick(3, 6, 12, 24, 96)
 	}
 	bc.MaxBufferedBytes = pick(3<<10, 3<<10, 16<<10, 64<<10, 1<<20)
 	bc.ResumeBufferedBytes = bc.MaxBufferedBytes / 3
 	if r.Chance(0.5) {
-		c.ControlPlane.MaxCommitItems = min(2+2*bc.MaxSegmentPartitions+bc.MaxSegmentBatches, bc.MaxSegmentItems)
+		c.ControlPlane.MaxCommitItems = min(1+bc.MaxSegmentPartitions, sim.DynamoMaxCommitItems)
 	}
 	c.Params = bc
 }

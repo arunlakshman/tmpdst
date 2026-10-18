@@ -23,7 +23,7 @@ func phaseStart(v sim.View, p sim.Phase) (sim.Time, bool) {
 
 // liveness: at the end no op is pending, and nothing that finishes more than
 // livenessGrace into Settling ends in failure: a produce still unresolved then
-// is acked (never abandoned or indeterminate), a fetch answers without error.
+// is acked (never abandoned or indeterminate), except the batch that claims a producer id and is rejected, a fetch answers without error.
 // Indeterminate produces are otherwise allowed (decision 15).
 type liveness struct{}
 
@@ -43,7 +43,7 @@ func (*liveness) AtEnd(v sim.View) {
 		switch r := op.Result.(type) {
 		case ProduceRes:
 			produced++
-			if op.Return >= after {
+			if op.Return >= after && r.Why != "rejected" { // a deliberately idempotent batch is rejected, never acked
 				v.Assert().Always(op.Outcome == sim.OpDefinite && r.Base >= 0, "kafka: a produce still running in Settling is acked",
 					core.Detail{Key: "op", Value: op.Op}, core.Detail{Key: "result", Value: r}, core.Detail{Key: "return", Value: op.Return})
 			}
@@ -63,28 +63,6 @@ func (*liveness) AtEnd(v sim.View) {
 	v.Assert().Sometimes(reads > 0, "kafka: workload issued fetches")
 }
 
-// trippedNeverAcks: once an incarnation reported being fenced it acks nothing
-// more. (Trip kills the incarnation, so a later ack from the same Source means
-// the broker kept serving with a stale epoch.)
-type trippedNeverAcks struct {
-	acks, fenced sim.Cursor
-	dead         map[core.NodeRef]bool
-}
-
-func (*trippedNeverAcks) Name() string   { return "TrippedNeverAcks" }
-func (*trippedNeverAcks) AtEnd(sim.View) {}
-
-func (i *trippedNeverAcks) Observe(v sim.View) {
-	// Fenced facts first: the fact and a same-step ack share one Step, and
-	// the fact is appended before any later ack.
-	for _, tf := range v.Timeline().Since("broker_fenced", &i.fenced) {
-		i.dead[tf.Source] = true
-	}
-	for _, tf := range v.Timeline().Since("produce_acked", &i.acks) {
-		v.Assert().Always(!i.dead[tf.Source], "kafka: a fenced broker never acks", core.Detail{Key: "node", Value: string(tf.Source.Node)})
-	}
-}
-
 // expectReachable is the campaign's coverage contract (Config.ExpectReachable):
 // every fault family and recovery path must fire somewhere in the campaign.
 // The engines and the broker declare these props where the event happens; the
@@ -96,13 +74,12 @@ func expectReachable() []core.Prop {
 		"net: partition injected", "net: clog injected", "net: random_close injected", "net: black_hole injected",
 		"broker: commit retried",
 		"broker: corrupt GET detected",
-		"broker: tripped on fencing",
 		"broker: reads paused by backpressure",
 		"broker: reads resumed after backpressure",
 		"broker: segment sealed by size", "broker: segment sealed by timer",
 		"broker: segment sealed by batch cap", "broker: segment sealed by partition cap",
-		"broker: segment sealed by commit item cap",
 		"broker: oversize batch sealed alone",
+		"broker: idempotent batch rejected",
 	}
 }
 

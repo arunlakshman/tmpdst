@@ -8,8 +8,11 @@ import (
 )
 
 // oracle is the invariant that owns the reconstructed logs and every check
-// that reads them (AckedIsCommitted, NoDuplicates, NoPhantoms, ProducerOrder,
-// ReadsMatchLog, AckedDurable, consumers caught up). One instance per seed so
+// that reads them (AckedIsCommitted, at-least-once duplicates, NoPhantoms,
+// AckedOrder, ReadsMatchLog, AckedDurable, consumers caught up). Delivery is
+// at-least-once (decision 41): a retried batch may be committed more than once
+// (whole, in order, at most once per send and once per stored object), but an
+// acked record is at its acked offset and offsets never gap or overlap. One instance per seed so
 // the logs are rebuilt once, incrementally: committed ranges only ever append,
 // and Gen() skips steps where the control plane did not change. It reads
 // ground truth only (View.CP, View.Objects, facts, history) and never imports
@@ -24,35 +27,16 @@ type oracle struct {
 	cpGen, objGen uint64
 	ackCur        sim.Cursor
 	nops          int
-	opIdx         map[[2]int]int // (client, batch) -> history index
-	pend          []int          // history indexes not yet resolved
-	seen          map[string]int // record value -> partition index (NoDuplicates)
-	ord           map[ordKey]*ordState
-	acked         map[ackKey]int64 // acked batch identity -> base offset
-	cpos          map[[2]int]int64 // (consumer client, partition index) -> next offset it should see
-}
-
-type ordKey struct {
-	tp  int
-	pid int64
-}
-
-type ordState struct {
-	pepoch int16
-	next   int32
-	serial int
-}
-
-type ackKey struct {
-	tp     int
-	pid    int64
-	pepoch int16
-	seq    int32
+	opIdx         map[[2]int]int            // (client, batch) -> history index
+	pend          []int                     // history indexes not yet resolved
+	seen          map[string]int            // record value -> number of times committed
+	locs          map[core.SegmentRef]int64 // stored batch -> offset it was committed at
+	cpos          map[[2]int]int64          // (consumer client, partition index) -> next offset it should see
 }
 
 func newOracle(o Opts) *oracle {
 	or := &oracle{opts: o, tps: o.tps(), idx: map[core.TopicPartition]int{}, opIdx: map[[2]int]int{},
-		seen: map[string]int{}, ord: map[ordKey]*ordState{}, acked: map[ackKey]int64{}, cpos: map[[2]int]int64{}}
+		seen: map[string]int{}, locs: map[core.SegmentRef]int64{}, cpos: map[[2]int]int64{}}
 	for i, tp := range or.tps {
 		or.idx[tp] = i
 		or.logs = append(or.logs, &plog{tp: tp, idx: i, byBase: map[int64]int{}})
@@ -98,17 +82,16 @@ func (o *oracle) refresh(v sim.View) {
 func tpName(tp core.TopicPartition) string { return tp.Topic + "/" + strconv.Itoa(int(tp.Partition)) }
 
 // record checks one committed record: it was produced (to this partition,
-// at this position of its batch, never from a definitely rejected batch) and
-// appears once in the whole log.
+// at this position of its batch, never from a definitely rejected batch). A
+// value may appear again only as a retry of its batch; AtEnd bounds the count
+// by the sends.
 func (o *oracle) record(v sim.View, pl *plog, off int64, i int, val string, det []core.Detail) {
 	as := v.Assert()
 	if val == "?" {
 		return
 	}
 	d := append(det[:len(det):len(det)], core.Detail{Key: "offset", Value: off}, core.Detail{Key: "value", Value: val})
-	prev, dup := o.seen[val]
-	as.Always(!dup, "kafka: no record is committed twice", append(d, core.Detail{Key: "first_tp", Value: tpName(o.tps[prev])})...)
-	o.seen[val] = pl.idx
+	o.seen[val]++
 	c, b, ri, ok := parseVal(val)
 	as.Always(ok && ri == i, "kafka: records of a batch keep their order", d...)
 	hi, known := o.opIdx[[2]int{c, b}]
@@ -120,30 +103,6 @@ func (o *oracle) record(v sim.View, pl *plog, off int64, i int, val string, det 
 	po := op.Op.(ProduceOp)
 	as.Always(po.TP == pl.tp && i < len(po.Vals) && po.Vals[i] == val, "kafka: a record is committed where and as it was produced", d...)
 	as.Always(op.Outcome != sim.OpAbandoned, "kafka: a definitely rejected batch is never committed", d...)
-}
-
-// checkOrder: per (partition, producer id) the committed batches carry
-// sequence numbers 0, n1, n1+n2, ... in log order, and were built in order.
-func (o *oracle) checkOrder(v sim.View, pl *plog, b lbat, det []core.Detail) {
-	if b.pid < 0 {
-		return
-	}
-	d := append(det[:len(det):len(det)], core.Detail{Key: "producer", Value: b.pid}, core.Detail{Key: "seq", Value: int64(b.seq)})
-	k := ordKey{pl.idx, b.pid}
-	st := o.ord[k]
-	if st == nil || b.pepoch > st.pepoch {
-		v.Assert().Always(b.seq == 0, "kafka: a producer's first committed batch has sequence 0", d...)
-		st = &ordState{pepoch: b.pepoch, serial: -1}
-		o.ord[k] = st
-	} else {
-		v.Assert().Always(b.pepoch == st.pepoch, "kafka: a producer's epoch never goes back", d...)
-		v.Assert().Always(b.seq == st.next, "kafka: a producer's batches commit in sequence order with no gap", d...)
-		v.Assert().Always(b.serial < 0 || b.serial > st.serial, "kafka: a producer's batches commit in the order it sent them", d...)
-	}
-	st.next = b.seq + int32(b.count)
-	if b.serial >= 0 {
-		st.serial = b.serial
-	}
 }
 
 func fieldOf(f core.Fact, key string) core.FieldValue {
@@ -164,11 +123,8 @@ func (o *oracle) acks(v sim.View) {
 		part, ok1 := fieldOf(f, "partition").(core.I64)
 		base, ok2 := fieldOf(f, "base_offset").(core.I64)
 		count, ok3 := fieldOf(f, "count").(core.I64)
-		pid, ok4 := fieldOf(f, "producer").(core.I64)
-		pep, ok5 := fieldOf(f, "pepoch").(core.I64)
-		seq, ok6 := fieldOf(f, "base_seq").(core.I64)
-		v.Assert().Always(ok1 && ok2 && ok3 && ok4 && ok5 && ok6, "kafka: ack fact is well formed")
-		if !(ok1 && ok2 && ok3 && ok4 && ok5 && ok6) {
+		v.Assert().Always(ok1 && ok2 && ok3, "kafka: ack fact is well formed")
+		if !(ok1 && ok2 && ok3) {
 			continue
 		}
 		det := []core.Detail{{Key: "tp", Value: string(topic) + "/" + strconv.Itoa(int(part))}, {Key: "base", Value: int64(base)},
@@ -180,19 +136,6 @@ func (o *oracle) acks(v sim.View) {
 		}
 		found = found && o.logs[ti].bats[bi].count == int(count)
 		v.Assert().Always(found, "kafka: acked range is committed in the control plane", det...)
-		if !found {
-			continue
-		}
-		bat := o.logs[ti].bats[bi]
-		v.Assert().Always(bat.pid == int64(pid) && bat.pepoch == int16(pep) && bat.seq == int32(seq),
-			"kafka: acked range holds the acked producer batch", det...)
-		if pid >= 0 {
-			k := ackKey{ti, int64(pid), int16(pep), int32(seq)}
-			if prev, again := o.acked[k]; again {
-				v.Assert().Always(prev == int64(base), "kafka: an idempotent batch is acked at one offset", det...)
-			}
-			o.acked[k] = int64(base)
-		}
 	}
 }
 
@@ -250,6 +193,7 @@ func (o *oracle) AtEnd(v sim.View) {
 	o.refresh(v)
 	as := v.Assert()
 	ops := v.History().Ops()
+	lastAcked := map[[2]int]int64{} // (client, partition index) -> base of its newest acked batch
 	for _, op := range ops {
 		po, ok := op.Op.(ProduceOp)
 		if !ok {
@@ -257,6 +201,13 @@ func (o *oracle) AtEnd(v sim.View) {
 		}
 		res, _ := op.Result.(ProduceRes)
 		ti := o.idx[po.TP]
+		if op.Outcome != sim.OpPending && len(po.Vals) > 0 {
+			// Every send commits at most once (a MaybeApplied commit is retried
+			// under its key), so a batch is in the log at most once per send.
+			as.Always(o.seen[po.Vals[0]] <= max(res.Attempts, 1), "kafka: a batch is committed at most once per send",
+				core.Detail{Key: "tp", Value: tpName(po.TP)}, core.Detail{Key: "value", Value: po.Vals[0]},
+				core.Detail{Key: "times", Value: o.seen[po.Vals[0]]}, core.Detail{Key: "sends", Value: res.Attempts})
+		}
 		switch op.Outcome {
 		case sim.OpDefinite:
 			for i, val := range po.Vals {
@@ -265,10 +216,17 @@ func (o *oracle) AtEnd(v sim.View) {
 				as.Always(same, "kafka: an acked record is in the log at its acked offset",
 					core.Detail{Key: "tp", Value: tpName(po.TP)}, core.Detail{Key: "offset", Value: off}, core.Detail{Key: "value", Value: val})
 			}
+			// One batch at a time per (client, partition): the next batch is built
+			// after this one was acked, so its acked offset is higher.
+			k := [2]int{po.Client, ti}
+			if prev, had := lastAcked[k]; had {
+				as.Always(res.Base >= prev+1, "kafka: a client's acked batches for a partition are at increasing offsets",
+					core.Detail{Key: "tp", Value: tpName(po.TP)}, core.Detail{Key: "base", Value: res.Base}, core.Detail{Key: "previous", Value: prev})
+			}
+			lastAcked[k] = res.Base
 		case sim.OpAbandoned:
 			for _, val := range po.Vals {
-				_, in := o.seen[val]
-				as.Always(!in, "kafka: a definitely rejected batch is never committed", core.Detail{Key: "value", Value: val})
+				as.Always(o.seen[val] == 0, "kafka: a definitely rejected batch is never committed", core.Detail{Key: "value", Value: val})
 			}
 		}
 	}

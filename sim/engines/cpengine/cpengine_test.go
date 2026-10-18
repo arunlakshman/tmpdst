@@ -28,9 +28,9 @@ func call(e *cpengine.Engine, c *enginetest.Ctx, from core.NodeRef, req core.Req
 	e.Execute(c, from, core.CPCall{Req: req, Op: op})
 }
 
-func commit(key string, ep core.Epoch, from core.NodeRef) core.CommitSegment {
-	return core.CommitSegment{SegmentKey: key, Owner: from, Epoch: ep,
-		Batches: []core.PendingBatch{{TP: tp, Records: 5, Loc: core.SegmentRef{Key: key, Len: 10}, Producer: core.NoProducer}}}
+func commit(key string) core.CommitSegment {
+	return core.CommitSegment{SegmentKey: key,
+		Batches: []core.PendingBatch{{TP: tp, Records: 5, Loc: core.SegmentRef{Key: key, Len: 10}}}}
 }
 
 func last(c *enginetest.Ctx) core.CPDone { return c.Delivered[len(c.Delivered)-1].Body.(core.CPDone) }
@@ -40,17 +40,7 @@ func TestNormalAndTruthful(t *testing.T) {
 	if !e.Handles(core.CPCall{}) || e.Handles(core.ObjPut{}) {
 		t.Fatal("Handles")
 	}
-	call(e, c, a, 1, commit("s1", 1, a)) // never registered
-	c.Run()
-	if d := last(c); d.Err != core.ErrFenced {
-		t.Fatal(d)
-	}
-	call(e, c, a, 2, core.Register{Self: a})
-	c.Run()
-	if d := last(c); d.Err != core.OK || d.Resp.(core.RegisterResp).Epoch != 1 {
-		t.Fatal(d)
-	}
-	call(e, c, a, 3, commit("s1", 1, a))
+	call(e, c, a, 3, commit("s1"))
 	c.Run()
 	d := last(c)
 	if d.Err != core.OK || d.Outcome != core.Applied || d.Resp.(core.CommitSegmentResp).Assigned[0].Base != 0 {
@@ -59,10 +49,15 @@ func TestNormalAndTruthful(t *testing.T) {
 	if e.HighWatermark(tp) != 5 || len(e.Committed(tp)) != 1 {
 		t.Fatal("truth")
 	}
-	call(e, c, a, 4, commit("s1", 1, core.NodeRef{}))
+	different := commit("s1")
+	different.Batches[0].Records = 6
+	call(e, c, a, 4, different)
 	call(e, c, a, 5, core.Lookup{TP: tp, From: -1})
 	c.Run()
-	if d := c.Find(5).(core.CPDone); d.Err != core.ErrInvalid && d.Err != core.ErrConflict {
+	if d := c.Find(4).(core.CPDone); d.Err != core.ErrConflict {
+		t.Fatal("same key, different request:", d)
+	}
+	if d := c.Find(5).(core.CPDone); d.Err != core.ErrInvalid {
 		t.Fatal(d)
 	}
 }
@@ -98,7 +93,7 @@ func TestFaultFamilies(t *testing.T) {
 		f := base()
 		tc.f(&f)
 		e, c, _ := setup(f, 1)
-		call(e, c, a, 1, core.Register{Self: a})
+		call(e, c, a, 1, commit("s1"))
 		c.Run()
 		d := last(c)
 		if d.Err != tc.err || d.Outcome != tc.outcome || len(c.Delivered) != 1 {
@@ -120,7 +115,7 @@ func TestFaultFamilies(t *testing.T) {
 	yes, no := 0, 0
 	for seed := uint64(1); seed <= 40; seed++ {
 		e, c, _ := setup(f, seed)
-		call(e, c, a, 1, core.Register{Self: a})
+		call(e, c, a, 1, commit("s1"))
 		c.Run()
 		if d := last(c); d.Err != core.ErrTimeout || d.Outcome != core.MaybeApplied {
 			t.Fatal(d)
@@ -140,15 +135,15 @@ func TestIdempotentRetryAfterLostResponse(t *testing.T) {
 	f := base()
 	f.LostResponse = 1
 	e, c, a := setup(f, 1)
-	call(e, c, a, 1, core.Register{Self: a})
+	call(e, c, a, 1, commit("s1"))
 	c.Run() // applied, caller saw timeout
 	e.EnterRecovery()
-	call(e, c, a, 2, commit("s1", 1, a))
+	call(e, c, a, 2, commit("s1")) // the identical retry
 	c.Run()
 	// Other commits would shift offsets; the retry must not.
-	call(e, c, a, 3, commit("s2", 1, a))
+	call(e, c, a, 3, commit("s2"))
 	c.Run()
-	call(e, c, a, 4, commit("s1", 1, a))
+	call(e, c, a, 4, commit("s1"))
 	c.Run()
 	d := c.Delivered[len(c.Delivered)-3].Body.(core.CPDone)
 	r := last(c)
@@ -168,16 +163,14 @@ func TestLostCommitThenRetryInSim(t *testing.T) {
 	f := base()
 	f.LostResponse = 1
 	e2, c2, a2 := setup(f, 1)
-	call(e2, c2, a2, 1, core.Register{Self: a2}) // lost but applied
+	call(e2, c2, a2, 2, commit("s")) // lost but applied
 	c2.Run()
-	call(e2, c2, a2, 2, commit("s", 1, a2)) // lost but applied
-	c2.Run()
-	if d := c2.Delivered[1].Body.(core.CPDone); d.Err != core.ErrTimeout || d.Outcome != core.MaybeApplied {
+	if d := c2.Delivered[0].Body.(core.CPDone); d.Err != core.ErrTimeout || d.Outcome != core.MaybeApplied {
 		t.Fatal(d)
 	}
 	want := e2.Committed(tp)
 	e2.EnterRecovery()
-	call(e2, c2, a2, 3, commit("s", 1, a2))
+	call(e2, c2, a2, 3, commit("s"))
 	c2.Run()
 	got := last(c2).Resp.(core.CommitSegmentResp).Assigned
 	if len(want) != 1 || !slices.Equal(got, want) {
@@ -187,11 +180,11 @@ func TestLostCommitThenRetryInSim(t *testing.T) {
 
 func TestLandsAfterCrash(t *testing.T) {
 	e, c, a := setup(base(), 1)
-	call(e, c, a, 1, core.Register{Self: a})
+	call(e, c, a, 1, commit("s"))
 	c.Crash("a")
 	c.Run()
 	if len(c.Delivered) != 0 || e.Gen() != 1 {
-		t.Fatal("register must land, silently")
+		t.Fatal("commit must land, silently")
 	}
 }
 
@@ -200,14 +193,14 @@ func TestRecoveryStopsFaults(t *testing.T) {
 	f.Unavailable503, f.Timeout, f.LostResponse = 1, 1, 1
 	f.Outage = sim.Outage{Prob: 1, Dur: [2]core.Duration{ms, 2 * ms}}
 	e, c, a := setup(f, 1)
-	call(e, c, a, 1, core.Register{Self: a})
+	call(e, c, a, 1, commit("s"))
 	e.EnterRecovery()
-	call(e, c, a, 2, core.Register{Self: a})
+	call(e, c, a, 2, commit("s"))
 	c.Run()
 	if d := c.Find(1).(core.CPDone); d.Err != core.ErrUnavailable {
 		t.Fatal("in-flight plan must stand", d)
 	}
-	if d := c.Find(2).(core.CPDone); d.Err != core.OK || d.Resp.(core.RegisterResp).Epoch != 1 {
+	if d := c.Find(2).(core.CPDone); d.Err != core.OK || d.Resp.(core.CommitSegmentResp).Assigned[0].Base != 0 {
 		t.Fatal(d)
 	}
 }
@@ -220,11 +213,9 @@ func TestDeterminism(t *testing.T) {
 		e, c, a := setup(f, seed)
 		for i := 0; i < 60; i++ {
 			c.T += sim.Time(ms)
-			switch i % 3 {
+			switch i % 2 {
 			case 0:
-				call(e, c, a, core.ReqID(i), core.Register{Self: a})
-			case 1:
-				call(e, c, a, core.ReqID(i), commit(string(rune('a'+i%7)), core.Epoch(i/3+1), a))
+				call(e, c, a, core.ReqID(i), commit(string(rune('a'+i%7))))
 			default:
 				call(e, c, a, core.ReqID(i), core.Lookup{TP: tp})
 			}
@@ -246,43 +237,18 @@ func TestDeterminism(t *testing.T) {
 	}
 }
 
-func TestInitProducerMutates(t *testing.T) {
-	e, c, a := setup(base(), 1)
-	call(e, c, a, 1, core.InitProducer{})
-	call(e, c, a, 2, core.InitProducer{})
-	c.Run()
-	if r := c.Find(2).(core.CPDone).Resp.(core.InitProducerResp); r.Producer != 1001 || r.PEpoch != 0 || e.Gen() != 2 {
-		t.Fatal(r, e.Gen())
-	}
-}
-
 func TestCommitSizeLimit(t *testing.T) {
 	f := base()
-	f.MaxCommitItems = 7
+	f.MaxCommitItems = 4
 	e, c, a := setup(f, 1)
 	e.CreateTopic("t", 4)
-	call(e, c, a, 1, core.Register{Self: a})
-	c.Run()
 	many := func(key string, n int) core.CommitSegment {
-		op := commit(key, 1, a)
+		op := commit(key)
 		for i := 1; i < n; i++ {
 			op.Batches = append(op.Batches, op.Batches[0])
 		}
 		return op
 	}
-	// The range items are one run per partition (decision 39), so the number of
-	// batches does not count: 2 + 2 x 1 partition = 4 items for 4 batches or 400.
-	call(e, c, a, 2, many("ok", 4))
-	call(e, c, a, 3, many("many", 400))
-	c.Run()
-	if d := c.Find(2).(core.CPDone); d.Err != core.OK {
-		t.Fatal(d)
-	}
-	if d := c.Find(3).(core.CPDone); d.Err != core.OK {
-		t.Fatal(d)
-	}
-	// Partitions count twice (HWM + run): 3 partitions = 2 + 6 = 8 is refused
-	// and nothing changes; 2 partitions = 6 fits.
 	parts := func(key string, n int) core.CommitSegment {
 		op := many(key, n)
 		for i := range op.Batches {
@@ -290,38 +256,42 @@ func TestCommitSizeLimit(t *testing.T) {
 		}
 		return op
 	}
-	hwm := e.HighWatermark(tp)
-	call(e, c, a, 4, parts("p3", 3))
+	// One item for the segment and one run per distinct partition, so the
+	// number of batches does not count: 1 + 1 = 2 for 4 batches or 400.
+	call(e, c, a, 2, many("ok", 4))
+	call(e, c, a, 3, many("many", 400))
 	c.Run()
-	if d := last(c); d.Err != core.ErrTooLarge || d.Outcome != core.NotApplied || e.HighWatermark(tp) != hwm {
-		t.Fatal(d)
+	for _, req := range []core.ReqID{2, 3} {
+		if d := c.Find(req).(core.CPDone); d.Err != core.OK {
+			t.Fatal(req, d)
+		}
 	}
-	call(e, c, a, 5, parts("p2", 2))
+	// 3 partitions = 1 + 3 = 4 fits; 4 partitions = 5 is refused and changes nothing.
+	call(e, c, a, 4, parts("p3", 3))
 	c.Run()
 	if d := last(c); d.Err != core.OK {
 		t.Fatal(d)
 	}
-	// A producer state counts: 2 + 2 x 2 partitions + 2 states = 8 is refused.
-	call(e, c, a, 6, core.InitProducer{})
+	end, gen := e.HighWatermark(tp), e.Gen()
+	call(e, c, a, 5, parts("p4", 4))
 	c.Run()
-	p := parts("pr", 2)
-	for i := range p.Batches {
-		p.Batches[i].Producer = 1000
+	if d := last(c); d.Err != core.ErrTooLarge || d.Outcome != core.NotApplied || e.HighWatermark(tp) != end || e.Gen() != gen {
+		t.Fatal(d)
 	}
-	call(e, c, a, 7, p)
+	// A grown topic counts: partition 5 of a 4-partition topic is 1 + 1 + 1 = 3
+	// (fits), but one batch each on "u" (new) and "t" partitions 0..1 is 1 + 3 + 1 = 5.
+	grow := commit("g")
+	grow.Batches[0].TP = core.TopicPartition{Topic: "t", Partition: 5}
+	call(e, c, a, 6, grow)
+	c.Run()
+	if d := last(c); d.Err != core.OK {
+		t.Fatal(d)
+	}
+	mixed := parts("m", 2)
+	mixed.Batches = append(mixed.Batches, core.PendingBatch{TP: core.TopicPartition{Topic: "u"}, Records: 1})
+	call(e, c, a, 7, mixed)
 	c.Run()
 	if d := last(c); d.Err != core.ErrTooLarge {
-		t.Fatal(d)
-	}
-	// One state, one partition, many batches: 2 + 2 + 1 = 5 fits.
-	q := many("pq", 50)
-	for i := range q.Batches {
-		q.Batches[i].Producer = 1000
-		q.Batches[i].BaseSeq = int32(i)
-	}
-	call(e, c, a, 8, q)
-	c.Run()
-	if d := last(c); d.Err == core.ErrTooLarge {
-		t.Fatal(d)
+		t.Fatal("grown topic not counted:", d)
 	}
 }

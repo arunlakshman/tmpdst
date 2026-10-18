@@ -15,12 +15,8 @@ import (
 
 // lbat is one committed batch.
 type lbat struct {
-	base   int64
-	count  int
-	pid    int64
-	pepoch int16
-	seq    int32
-	serial int // batch serial of its first record, -1 if unparsable
+	base  int64
+	count int
 }
 
 type plog struct {
@@ -58,7 +54,7 @@ func (o *oracle) ingest(v sim.View, pl *plog) {
 		det := []core.Detail{{Key: "tp", Value: pl.tp.Topic + "/" + strconv.Itoa(int(pl.tp.Partition))},
 			{Key: "base", Value: int64(r.Base)}, {Key: "segment", Value: r.Loc.Key}}
 		v.Assert().Always(int64(r.Base) == int64(len(pl.vals)), "kafka: committed offsets are contiguous", det...)
-		bt, vals := o.readRange(v, r, det)
+		vals := o.readRange(v, r, det)
 		if vals == nil { // unreadable: keep offsets aligned
 			vals = make([]string, r.Count)
 			for i := range vals {
@@ -66,53 +62,66 @@ func (o *oracle) ingest(v sim.View, pl *plog) {
 			}
 		}
 		start := int64(len(pl.vals))
-		serial := -1
-		if len(vals) > 0 {
-			if _, b, _, ok := parseVal(vals[0]); ok {
-				serial = b
-			}
-		}
-		bat := lbat{base: start, count: len(vals), pid: bt.ProducerID, pepoch: bt.ProducerEpoch, seq: bt.BaseSequence, serial: serial}
+		prev, again := o.locs[r.Loc]
+		v.Assert().Always(!again, "kafka: a stored batch is committed at most once",
+			append(det[:len(det):len(det)], core.Detail{Key: "first_offset", Value: prev})...)
+		o.locs[r.Loc] = start
 		pl.byBase[start] = len(pl.bats)
-		pl.bats = append(pl.bats, bat)
+		pl.bats = append(pl.bats, lbat{base: start, count: len(vals)})
 		for i, val := range vals {
 			o.record(v, pl, start+int64(i), i, val, det)
 		}
+		o.checkWhole(v, vals, det)
 		pl.vals = append(pl.vals, vals...)
-		o.checkOrder(v, pl, bat, det)
 	}
 	v.Assert().Always(int64(v.CP().HighWatermark(pl.tp)) == int64(len(pl.vals)),
 		"kafka: the high watermark is the end of the committed log", core.Detail{Key: "tp", Value: pl.tp.Topic + "/" + strconv.Itoa(int(pl.tp.Partition))})
 }
 
-// readRange returns the batch header and record values of one committed
-// range, or (zero, nil) after reporting why it is unreadable.
-func (o *oracle) readRange(v sim.View, r core.BatchRange, det []core.Detail) (kwire.Batch, []string) {
+// checkWhole: a committed range is one produced batch, whole: it starts at
+// record 0 and holds all of the batch's records (a retry duplicates a batch,
+// never part of one).
+func (o *oracle) checkWhole(v sim.View, vals []string, det []core.Detail) {
+	if len(vals) == 0 || vals[0] == "?" {
+		return
+	}
+	c, b, ri, ok := parseVal(vals[0])
+	hi, known := o.opIdx[[2]int{c, b}]
+	if !ok || !known {
+		return // record() reports it
+	}
+	po := v.History().Ops()[hi].Op.(ProduceOp)
+	v.Assert().Always(ri == 0 && len(vals) == len(po.Vals), "kafka: a committed range is one whole produced batch", det...)
+}
+
+// readRange returns the record values of one committed range, or nil after
+// reporting why it is unreadable.
+func (o *oracle) readRange(v sim.View, r core.BatchRange, det []core.Detail) []string {
 	as := v.Assert()
 	obj, ok := v.Objects().Object(r.Loc.Key)
 	as.Always(ok, "kafka: committed segment exists in the object store", det...)
 	if !ok {
-		return kwire.Batch{}, nil
+		return nil
 	}
 	end := r.Loc.Off + r.Loc.Len
 	in := r.Loc.Off >= 0 && r.Loc.Len > 0 && end <= int64(len(obj))
 	as.Always(in, "kafka: committed range lies inside its segment", det...)
 	if !in {
-		return kwire.Batch{}, nil
+		return nil
 	}
 	bt, err := kwire.ParseBatch(obj[r.Loc.Off:end])
 	as.Always(err == nil, "kafka: committed batch is intact", det...)
 	if err != nil {
-		return kwire.Batch{}, nil
+		return nil
 	}
 	recs, err := bt.Records()
 	as.Always(err == nil && int64(len(recs)) == r.Count, "kafka: committed range holds its record count", det...)
 	if err != nil || int64(len(recs)) != r.Count {
-		return bt, nil
+		return nil
 	}
 	vals := make([]string, len(recs))
 	for i, rec := range recs {
 		vals[i] = string(rec.Value)
 	}
-	return bt, vals
+	return vals
 }

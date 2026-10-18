@@ -23,6 +23,13 @@ const (
 	BugTimerFromLastBatch
 	// BugSealOffByOne applies the size rule one batch late.
 	BugSealOffByOne
+	// BugNoPartitionCap ignores MaxSegmentPartitions, so a segment can outgrow
+	// the control plane's commit item budget (1 + partitions).
+	BugNoPartitionCap
+	// BugFreshKeyOnRetry retries a CommitSegment with a fresh SegmentKey, so a
+	// commit that was applied but lost is applied again and the batches are
+	// committed twice.
+	BugFreshKeyOnRetry
 )
 
 // Config is the broker's tuning. Zero numeric fields take DefaultConfig's value.

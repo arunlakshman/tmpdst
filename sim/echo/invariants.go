@@ -164,28 +164,6 @@ func (l *liveness) AtEnd(v sim.View) {
 	v.Assert().Sometimes(len(v.History().Ops()) > 0, "echo: workload issued requests")
 }
 
-// trippedNeverAcks: once an incarnation reported being fenced it acks nothing
-// more. (Trip kills the incarnation, so a later ack from the same Source means
-// the broker kept serving with a stale epoch.)
-type trippedNeverAcks struct {
-	acks, fenced sim.Cursor
-	dead         map[core.NodeRef]bool
-}
-
-func (*trippedNeverAcks) Name() string   { return "TrippedNeverAcks" }
-func (*trippedNeverAcks) AtEnd(sim.View) {}
-
-func (i *trippedNeverAcks) Observe(v sim.View) {
-	// Fenced facts first: the fact and a same-step ack share one Step, and
-	// the fact is appended before any later ack.
-	for _, tf := range v.Timeline().Since("echo_fenced", &i.fenced) {
-		i.dead[tf.Source] = true
-	}
-	for _, tf := range v.Timeline().Since("echo_acked", &i.acks) {
-		v.Assert().Always(!i.dead[tf.Source], "echo: a fenced broker never acks", core.Detail{Key: "node", Value: string(tf.Source.Node)})
-	}
-}
-
 // expectReachable is the campaign's coverage contract (Config.ExpectReachable):
 // every fault family and recovery path must fire somewhere in the campaign.
 // The engines and the broker declare these props where the event happens; the
@@ -197,7 +175,6 @@ func expectReachable() []core.Prop {
 		"net: partition injected", "net: clog injected", "net: random_close injected", "net: black_hole injected",
 		"echo: commit retried after MaybeApplied",
 		"echo: corruption detected on read",
-		"echo: broker tripped on fencing",
 	}
 }
 

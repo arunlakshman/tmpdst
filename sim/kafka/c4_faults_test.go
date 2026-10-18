@@ -2,6 +2,7 @@ package kafka_test
 
 import (
 	"math/rand/v2"
+	"slices"
 	"strconv"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
@@ -14,15 +15,15 @@ import (
 
 // Oracle property names (the stable strings sim/kafka reports).
 const (
-	pDup       core.Prop = "kafka: no record is committed twice"
+	pLocTwice  core.Prop = "kafka: a stored batch is committed at most once"
+	pPerSend   core.Prop = "kafka: a batch is committed at most once per send"
+	pWhole     core.Prop = "kafka: a committed range is one whole produced batch"
+	pAckOrder  core.Prop = "kafka: a client's acked batches for a partition are at increasing offsets"
 	pOrder     core.Prop = "kafka: records of a batch keep their order"
 	pProduced  core.Prop = "kafka: every committed record was produced"
 	pWhere     core.Prop = "kafka: a record is committed where and as it was produced"
 	pRejected  core.Prop = "kafka: a definitely rejected batch is never committed"
-	pSeq0      core.Prop = "kafka: a producer's first committed batch has sequence 0"
-	pSeqGap    core.Prop = "kafka: a producer's batches commit in sequence order with no gap"
 	pAckInCP   core.Prop = "kafka: acked range is committed in the control plane"
-	pAckBatch  core.Prop = "kafka: acked range holds the acked producer batch"
 	pContig    core.Prop = "kafka: committed offsets are contiguous"
 	pSegment   core.Prop = "kafka: committed segment exists in the object store"
 	pInside    core.Prop = "kafka: committed range lies inside its segment"
@@ -38,7 +39,6 @@ const (
 	pSkipped   core.Prop = "kafka: a consumer sees every offset in order, none skipped"
 	pPastHWM   core.Prop = "kafka: a consumer never reads past the high watermark"
 	pReadValue core.Prop = "kafka: a consumer reads the committed value at each offset"
-	pFenced    core.Prop = "kafka: a fenced broker never acks"
 )
 
 // fault is one corruption of a finished world. apply reports false when the
@@ -194,7 +194,7 @@ func faults() []fault {
 			d.Base = core.Offset(w.cp0(tp))
 			w.ranges[tp] = append(w.ranges[tp], d)
 			return true
-		}, []core.Prop{pDup}, false},
+		}, []core.Prop{pLocTwice}, false},
 
 		{"duplicated record in another partition", func(w *world, r *rand.Rand) bool {
 			a, ok := pick(r, w.tpsWith(1))
@@ -206,7 +206,7 @@ func faults() []fault {
 			d.TP, d.Base = b, core.Offset(w.cp0(b))
 			w.ranges[b] = append(w.ranges[b], d)
 			return true
-		}, []core.Prop{pDup, pWhere}, false},
+		}, []core.Prop{pLocTwice, pWhere}, false},
 
 		{"acked record missing (last range dropped)", func(w *world, r *rand.Rand) bool {
 			var c []core.TopicPartition
@@ -285,14 +285,6 @@ func faults() []fault {
 			}
 			return ok
 		}, []core.Prop{pAckInCP}, false},
-
-		{"acked range holds another producer batch", func(w *world, r *rand.Rand) bool {
-			i, ok := pick(r, w.ackFacts())
-			if ok {
-				w.setAck(i, "base_seq", 1)
-			}
-			return ok
-		}, []core.Prop{pAckBatch}, false},
 
 		{"consumer read value differs from the log", func(w *world, r *rand.Rand) bool {
 			ps := w.readParts(func(_ core.TopicPartition, p kafka.ReadPart, _ int64) bool { return len(p.Recs) > 0 })
@@ -395,17 +387,63 @@ func faults() []fault {
 			return ok
 		}, []core.Prop{pCaughtUp}, false},
 
-		{"reordered batches of one producer", func(w *world, r *rand.Rand) bool {
-			ps, tps := w.adjPairs(func(tp core.TopicPartition, a, b core.BatchRange) bool {
-				ma, mb := w.meta[tpBase{tp, int64(a.Base)}], w.meta[tpBase{tp, int64(b.Base)}]
-				return ma != nil && mb != nil && ma.pid >= 0 && ma.pid == mb.pid && ma.pep == mb.pep
-			})
-			i, ok := pick(r, seq(len(ps)))
-			if ok {
-				w.swapAdj(tps[i], ps[i].part)
+		{"batch committed more often than it was sent", func(w *world, r *rand.Rand) bool {
+			var c []int
+			for _, i := range w.definiteOps() {
+				if w.ops[i].Result.(kafka.ProduceRes).Attempts == 1 {
+					c = append(c, i)
+				}
 			}
-			return ok
-		}, []core.Prop{pSeq0, pSeqGap}, true},
+			i, ok := pick(r, c)
+			if !ok {
+				return false
+			}
+			po, res := w.ops[i].Op.(kafka.ProduceOp), w.ops[i].Result.(kafka.ProduceRes)
+			rs := w.ranges[po.TP]
+			for k := range rs {
+				if int64(rs[k].Base) == res.Base { // the same bytes stored and committed once more
+					rg := rs[k]
+					raw := w.objs[rg.Loc.Key][rg.Loc.Off : rg.Loc.Off+rg.Loc.Len]
+					rg.Base, rg.Loc = core.Offset(w.cp0(po.TP)), w.put(slices.Clone(raw))
+					w.ranges[po.TP] = append(rs, rg)
+					return true
+				}
+			}
+			return false
+		}, []core.Prop{pPerSend}, false},
+
+		{"offsets overlap", func(w *world, r *rand.Rand) bool {
+			tp, ok := pick(r, w.tpsWith(2))
+			if !ok {
+				return false
+			}
+			rs := w.ranges[tp]
+			for j := 1 + r.IntN(len(rs)-1); j < len(rs); j++ {
+				rs[j].Base--
+			}
+			return true
+		}, []core.Prop{pContig}, false},
+
+		{"a client's acked offsets go backwards", func(w *world, r *rand.Rand) bool {
+			var c [][2]int // pairs of definite ops of one client and partition, in history order
+			ds := w.definiteOps()
+			for x, i := range ds {
+				for _, j := range ds[x+1:] {
+					a, b := w.ops[i].Op.(kafka.ProduceOp), w.ops[j].Op.(kafka.ProduceOp)
+					if a.Client == b.Client && a.TP == b.TP {
+						c = append(c, [2]int{i, j})
+					}
+				}
+			}
+			p, ok := pick(r, c)
+			if !ok {
+				return false
+			}
+			a, b := w.ops[p[0]].Result.(kafka.ProduceRes), w.ops[p[1]].Result.(kafka.ProduceRes)
+			a.Base, b.Base = b.Base, a.Base
+			w.ops[p[0]].Result, w.ops[p[1]].Result = a, b
+			return true
+		}, []core.Prop{pAckOrder, pAckedAt}, false},
 
 		{"phantom record never produced", func(w *world, r *rand.Rand) bool {
 			tp, _ := pick(r, w.tps)
@@ -449,13 +487,45 @@ func faults() []fault {
 				vals[j] = string(x.Value)
 			}
 			vals[0], vals[1] = vals[1], vals[0]
-			nb, err := kwire.BuildBatch(kwire.BatchParams{ProducerID: bt.ProducerID, ProducerEpoch: bt.ProducerEpoch, BaseSequence: bt.BaseSequence}, recsOf(vals...))
+			nb, err := kwire.BuildBatch(kwire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1}, recsOf(vals...))
 			if err != nil {
 				panic(err)
 			}
 			rg.Loc = w.put(nb)
 			return true
 		}, []core.Prop{pOrder}, false},
+
+		{"a retry commits only part of a batch", func(w *world, r *rand.Rand) bool {
+			var c []partRef
+			var tps []core.TopicPartition
+			for _, tp := range w.tps {
+				for k, rg := range w.ranges[tp] {
+					if rg.Count >= 2 {
+						c, tps = append(c, partRef{0, k}), append(tps, tp)
+					}
+				}
+			}
+			i, ok := pick(r, seq(len(c)))
+			if !ok {
+				return false
+			}
+			rs := w.ranges[tps[i]]
+			k := c[i].part
+			rg := &rs[k]
+			raw := w.objs[rg.Loc.Key][rg.Loc.Off : rg.Loc.Off+rg.Loc.Len]
+			bt, _ := kwire.ParseBatch(raw)
+			recs, _ := bt.Records()
+			nb, err := kwire.BuildBatch(kwire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1}, recsOf(string(recs[0].Value)))
+			if err != nil {
+				panic(err)
+			}
+			gone := rg.Count - 1
+			rg.Loc, rg.Count = w.put(nb), 1
+			for j := k + 1; j < len(rs); j++ {
+				rs[j].Base -= core.Offset(gone)
+			}
+			return true
+		}, []core.Prop{pWhole}, false},
 
 		{"corrupt batch bytes in a segment", func(w *world, r *rand.Rand) bool {
 			tp, ok := pick(r, w.tpsWith(1))

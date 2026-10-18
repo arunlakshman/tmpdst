@@ -6,16 +6,14 @@ import (
 	"math/rand/v2"
 	"os"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
-	"manifester/core"
 	"manifester/sim"
 	"manifester/sim/kafka"
 )
 
-// C4 (veritas/doc.go): the Kafka oracle against the veritas.Partition and
+// C4 (veritas/doc.go): the at-least-once Kafka oracle against the veritas.Partition and
 // veritas.ControlPlane specs. The oracle never imports veritas (decision 21);
 // this external test package may, because detcheck does not read _test.go
 // files and only export_test.go (package kafka, no veritas) reaches into the
@@ -67,7 +65,7 @@ func TestC4AcceptsCorrectHistories(t *testing.T) {
 	var tot stats
 	var maxLog int
 	for seed := uint64(1); seed <= 200; seed++ {
-		// Incremental: the oracle (and trippedNeverAcks) observe every step.
+		// Incremental: the oracle observes every step.
 		w := newWorld(seed, true)
 		for _, inv := range w.invs {
 			inv.AtEnd(w)
@@ -87,13 +85,13 @@ func TestC4AcceptsCorrectHistories(t *testing.T) {
 			maxLog = max(maxLog, int(w2.parts[tp].HighWatermark()))
 		}
 		s := w2.st
-		tot = stats{tot.dups + s.dups, tot.indetLand + s.indetLand, tot.indetNo + s.indetNo, tot.rejected + s.rejected,
-			tot.reinit + s.reinit, tot.bump + s.bump, tot.multi + s.multi, tot.nonIdem + s.nonIdem, tot.fenced + s.fenced}
+		tot = stats{tot.retries + s.retries, tot.replays + s.replays, tot.indetLand + s.indetLand, tot.indetNo + s.indetNo,
+			tot.rejected + s.rejected, tot.multi + s.multi}
 	}
 	t.Logf("coverage over 200 seeds: %+v, longest partition %d", tot, maxLog)
-	for name, n := range map[string]int{"dup retries": tot.dups, "indeterminate landed": tot.indetLand, "indeterminate never landed": tot.indetNo,
-		"rejected": tot.rejected, "pid re-init": tot.reinit, "epoch bump": tot.bump, "multi-batch segments": tot.multi,
-		"non-idempotent": tot.nonIdem, "fenced brokers": tot.fenced} {
+	for name, n := range map[string]int{"committed-twice retries": tot.retries, "replayed commits": tot.replays,
+		"indeterminate landed": tot.indetLand, "indeterminate never landed": tot.indetNo,
+		"rejected (producer id)": tot.rejected, "multi-batch segments": tot.multi} {
 		if n == 0 {
 			t.Errorf("generator never produced: %s", name)
 		}
@@ -130,57 +128,5 @@ func TestC4RejectsEveryFault(t *testing.T) {
 				t.Errorf("fault applicable in only %d of %d seeds", applied, maxSeeds)
 			}
 		})
-	}
-}
-
-// fenceRun feeds acks and broker_fenced facts for 3 brokers to
-// trippedNeverAcks, observing after every fact. With bad, a fenced broker acks
-// again at the end. Reports the violations and whether a broker was fenced.
-func fenceRun(seed uint64, bad bool) (failures, bool) {
-	r := rand.New(rand.NewPCG(seed, 0xfe))
-	w := &world{tl: sim.NewTimeline(), as: failures{}}
-	inv := kafka.NewTripped()
-	dead := map[int]bool{}
-	emit := func(name string, n int) {
-		w.emit(nodeRef("b"+strconv.Itoa(n)), core.Fact{Name: name})
-		inv.Observe(w)
-	}
-	for i := 0; i < 40; i++ {
-		n := r.IntN(3)
-		switch {
-		case dead[n]:
-		case r.IntN(8) == 0 && len(dead) < 2:
-			dead[n] = true
-			emit("broker_fenced", n)
-		default:
-			emit("produce_acked", n)
-		}
-	}
-	if bad {
-		for n := range dead {
-			emit("produce_acked", n)
-			break
-		}
-	}
-	return w.as, len(dead) > 0
-}
-
-func TestC4FencedBrokerNeverAcks(t *testing.T) {
-	bad := 0
-	for seed := uint64(1); seed <= 200; seed++ {
-		if f, _ := fenceRun(seed, false); len(f) > 0 {
-			t.Fatalf("seed %d: correct run rejected: %v", seed, f)
-		}
-		f, fenced := fenceRun(seed, true)
-		if !fenced {
-			continue
-		}
-		bad++
-		if f[pFenced] == 0 {
-			t.Errorf("seed %d: ack after broker_fenced not reported (got %v)", seed, f)
-		}
-	}
-	if bad < 100 {
-		t.Errorf("only %d seeds fenced a broker", bad)
 	}
 }

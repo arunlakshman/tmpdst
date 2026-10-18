@@ -2,10 +2,12 @@ package kafka
 
 import (
 	"github.com/twmb/franz-go/pkg/kmsg"
+	"sync/atomic"
 	"testing"
 
 	"manifester/broker"
 	"manifester/core"
+	"manifester/kwire"
 	"manifester/sim"
 )
 
@@ -89,18 +91,18 @@ func violated(cfg sim.Config, seed uint64) []core.Prop {
 // Each broker mutant must be caught within a few seeds, by the invariant that
 // names the bug (it may be caught by others as well).
 func TestMutantsAreCaught(t *testing.T) {
-	const budget, soon = 20, 5
+	const budget, soon = 20, 8
 	cases := []struct {
 		name string
 		bug  broker.Bug
 		prop core.Prop
 	}{
 		{"BugEarlyAck: ack before CommitSegment", broker.BugEarlyAck, "kafka: acked range is committed in the control plane"},
-		{"BugNoIdempotence: retries are not deduplicated", broker.BugNoIdempotence, "kafka: no record is committed twice"},
+		{"BugFreshKeyOnRetry: a lost commit is retried under a fresh key", broker.BugFreshKeyOnRetry, "kafka: a stored batch is committed at most once"},
+		{"BugNoPartitionCap: MaxSegmentPartitions ignored", broker.BugNoPartitionCap, "kafka: a sealed segment spans at most MaxSegmentPartitions partitions"},
 		{"BugWrongOffset: fetch patches base offset + 1", broker.BugWrongOffset, "kafka: a consumer sees every offset in order, none skipped"},
 		{"BugServeCorrupt: corrupt GET reaches the client", broker.BugServeCorrupt, "kafka: a consumer never receives a corrupt batch"},
 		{"BugNoBatchCap: MaxSegmentBatches ignored", broker.BugNoBatchCap, "kafka: a sealed segment holds at most MaxSegmentBatches batches"},
-		{"BugNoItemCap: MaxSegmentItems ignored", broker.BugNoItemCap, "kafka: a sealed segment's commit cost stays within MaxSegmentItems"},
 		{"BugTimerFromLastBatch: flush window restarts on every batch", broker.BugTimerFromLastBatch, "kafka: a segment is sealed within the window of its first batch"},
 		{"BugSealOffByOne: size rule applied one batch late", broker.BugSealOffByOne, "kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch"},
 	}
@@ -141,7 +143,7 @@ func TestRealBrokerIsClean(t *testing.T) {
 }
 
 type tally struct {
-	batches, definite, indet, abandoned, reads, readRecs, retried, dupAcks, ackFacts int
+	batches, definite, indet, abandoned, rejected, reads, readRecs, retried, ackFacts int
 }
 
 type tallyInv struct{ t *tally }
@@ -151,9 +153,7 @@ func (*tallyInv) Observe(sim.View) {}
 func (i *tallyInv) AtEnd(v sim.View) {
 	for _, tf := range v.Timeline().Snapshot("produce_acked") {
 		i.t.ackFacts++
-		if d, _ := fieldOf(tf.Fact, "dup").(core.Bool); bool(d) {
-			i.t.dupAcks++
-		}
+		_ = tf
 	}
 	for _, op := range v.History().Ops() {
 		switch r := op.Result.(type) {
@@ -166,6 +166,9 @@ func (i *tallyInv) AtEnd(v sim.View) {
 				i.t.indet++
 			case sim.OpAbandoned:
 				i.t.abandoned++
+				if r.Why == "rejected" {
+					i.t.rejected++
+				}
 			}
 			if r.Attempts > 1 {
 				i.t.retried++
@@ -180,7 +183,8 @@ func (i *tallyInv) AtEnd(v sim.View) {
 }
 
 // The campaign must actually exercise the system: acks, retried batches,
-// duplicate answers, ambiguous and rejected outcomes, and reads.
+// ambiguous outcomes, deliberately idempotent batches rejected by the broker,
+// and reads.
 func TestCampaignIsNotVacuous(t *testing.T) {
 	cfg := Config(nil)
 	var tl tally
@@ -189,7 +193,7 @@ func TestCampaignIsNotVacuous(t *testing.T) {
 		sim.RunSeed(cfg, s)
 	}
 	t.Logf("20 seeds: %+v", tl)
-	if tl.definite < 2000 || tl.indet == 0 || tl.retried == 0 || tl.dupAcks == 0 || tl.readRecs < 2000 {
+	if tl.definite < 2000 || tl.indet == 0 || tl.retried == 0 || tl.rejected == 0 || tl.readRecs < 2000 {
 		t.Fatalf("campaign too weak: %+v", tl)
 	}
 }
@@ -229,31 +233,24 @@ func (h *fakeHist) Return(id core.ID, res any, o sim.OpOutcome) bool {
 }
 func (h *fakeHist) Ops() []sim.HistOp { return h.ops }
 
-// The real broker never answers OUT_OF_ORDER_SEQUENCE to this workload, so the
-// give-up path is driven by hand: a definite rejection abandons the batch, an
-// earlier ambiguous attempt makes it indeterminate, and either way the
-// producer asks for a fresh id.
-func TestFatalProduceErrorReinitsProducer(t *testing.T) {
+// The real broker never answers a fatal code to a plain batch, so the give-up
+// path is driven by hand: a definite rejection abandons the batch, an earlier
+// ambiguous attempt makes it indeterminate.
+func TestFatalProduceErrorGivesUp(t *testing.T) {
 	for _, ambiguous := range []bool{false, true} {
 		w := NewWorkload(&fakeEnv{}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
 		h := &fakeHist{}
 		w.SetHistory(h)
 		c := w.clients[0]
-		c.state, c.stage, c.p.pid = csUp, stRun, 1000
+		c.state, c.stage = csUp, stRun
 		w.newBatches(c)
 		if len(h.ops) == 0 || len(c.p.cur) != len(h.ops) {
 			t.Fatalf("no batches built: %d ops", len(h.ops))
 		}
 		for _, b := range c.p.cur {
-			b.ambiguous = ambiguous
+			b.ambiguous, b.idem = ambiguous, false
 		}
-		resp := kmsg.NewPtrProduceResponse()
-		for _, b := range c.p.cur {
-			tp := w.tps[b.tpIdx]
-			resp.Topics = append(resp.Topics, kmsg.ProduceResponseTopic{Topic: tp.Topic,
-				Partitions: []kmsg.ProduceResponseTopicPartition{{Partition: tp.Partition, ErrorCode: 45, BaseOffset: -1}}})
-		}
-		w.onProduce(c, resp)
+		w.onProduce(c, produceResp(w, c, 45))
 		want := sim.OpAbandoned
 		if ambiguous {
 			want = sim.OpIndeterminate
@@ -263,9 +260,77 @@ func TestFatalProduceErrorReinitsProducer(t *testing.T) {
 				t.Errorf("ambiguous=%v op %d: outcome %d, want %d", ambiguous, i, op.Outcome, want)
 			}
 		}
-		if c.p.pid != 0 || c.stage != stInit || len(c.p.cur) != 0 {
-			t.Errorf("ambiguous=%v: producer not reset: pid=%d stage=%d cur=%d", ambiguous, c.p.pid, c.stage, len(c.p.cur))
+		if len(c.p.cur) != 0 {
+			t.Errorf("ambiguous=%v: %d batches still unresolved", ambiguous, len(c.p.cur))
 		}
+	}
+}
+
+func produceResp(w *Workload, c *client, code int16) *kmsg.ProduceResponse {
+	resp := kmsg.NewPtrProduceResponse()
+	for _, b := range c.p.cur {
+		tp := w.tps[b.tpIdx]
+		resp.Topics = append(resp.Topics, kmsg.ProduceResponseTopic{Topic: tp.Topic,
+			Partitions: []kmsg.ProduceResponseTopicPartition{{Partition: tp.Partition, ErrorCode: code, BaseOffset: -1}}})
+	}
+	return resp
+}
+
+// A batch that claims a producer id is resolved as rejected on INVALID_REQUEST
+// (even after an ambiguous earlier attempt) and the producer carries on.
+func TestIdemBatchRejectedIsAbandoned(t *testing.T) {
+	for _, ambiguous := range []bool{false, true} {
+		w := NewWorkload(&fakeEnv{}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
+		h := &fakeHist{}
+		w.SetHistory(h)
+		c := w.clients[0]
+		c.state, c.stage = csUp, stRun
+		w.newBatches(c)
+		for _, b := range c.p.cur {
+			b.ambiguous, b.idem = ambiguous, true
+		}
+		acts := w.onProduce(c, produceResp(w, c, codeInvalidRequest))
+		for i, op := range h.ops {
+			res, _ := op.Result.(ProduceRes)
+			if op.Outcome != sim.OpAbandoned || res.Why != "rejected" || res.Base != -1 {
+				t.Errorf("ambiguous=%v op %d: %d %+v", ambiguous, i, op.Outcome, res)
+			}
+		}
+		if len(c.p.cur) != 0 || len(acts) == 0 {
+			t.Errorf("ambiguous=%v: %d unresolved, %d actions", ambiguous, len(c.p.cur), len(acts))
+		}
+	}
+}
+
+// Only the batches built with idem set carry a producer id on the wire.
+func TestBatchesCarryProducerIDOnlyWhenIdem(t *testing.T) {
+	w := NewWorkload(&fakeEnv{}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
+	w.SetHistory(&fakeHist{})
+	c := w.clients[0]
+	idem, plain := 0, 0
+	for i := 0; i < 200; i++ {
+		c.p.cur = nil
+		w.newBatches(c)
+		for _, b := range c.p.cur {
+			bt, err := kwire.ParseBatch(b.data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if b.idem {
+				idem++
+				if bt.ProducerID != idemPID {
+					t.Fatalf("idem batch has producer id %d", bt.ProducerID)
+				}
+			} else {
+				plain++
+				if bt.ProducerID != -1 || bt.ProducerEpoch != -1 || bt.BaseSequence != -1 {
+					t.Fatalf("plain batch is idempotent: %d/%d/%d", bt.ProducerID, bt.ProducerEpoch, bt.BaseSequence)
+				}
+			}
+		}
+	}
+	if idem == 0 || plain == 0 {
+		t.Fatalf("idem %d plain %d", idem, plain)
 	}
 }
 
@@ -298,10 +363,11 @@ func TestCachedStateHashMatchesFull(t *testing.T) {
 	}
 }
 
-// A broker that ignores its batch cap is refused by the control plane's commit
-// limit too (tight on half the seeds), not only caught by the cap invariant.
+// A broker that ignores its partition cap is refused by the control plane's
+// commit limit too (tight on half the seeds: 1 + the cap), not only caught by
+// the cap invariants.
 func TestCommitLimitRefusesUncappedSegment(t *testing.T) {
-	cfg := config(nil, broker.BugNoBatchCap)
+	cfg := config(nil, broker.BugNoPartitionCap)
 	for s := uint64(1); s <= 40; s++ {
 		for _, p := range violated(cfg, s) {
 			if p == "broker: segment exceeds the control plane's commit size" {
@@ -312,15 +378,20 @@ func TestCommitLimitRefusesUncappedSegment(t *testing.T) {
 	t.Fatal("no seed in 40 had the control plane refuse an uncapped segment")
 }
 
-// The production caps (24 partitions, 256 batches, 96 commit items) against
-// DynamoDB's 100-item commit: 48 producers keep enough batches in flight to hit
-// the partition or item cap, the control plane refuses anything over 100 items
-// (2 + 2 x partitions + producer states), and the broker's defaults (16 MiB,
-// 200 ms) are untouched.
+// The production caps (96 partitions, 256 batches) against DynamoDB's 100-item
+// commit: a commit costs 1 + distinct partitions (+ grown topics), so the cap
+// leaves 3 items spare. 128 producers over 128 partitions keep enough batches in
+// flight for segments to span many partitions; the control plane refuses
+// anything over 100 items, and the broker's defaults (16 MiB, 200 ms) are
+// untouched. The widest committed segment must be over half of the cap, or the
+// test proves nothing.
 func TestProductionCapsFitDynamoLimit(t *testing.T) {
-	opts := Opts{Producers: 48, Consumers: 1, Topics: []string{"a", "b", "c", "d"}, Partitions: 8}
-	cfg := configWith(seeds(1, 3), broker.BugNone, opts)
 	prod := broker.DefaultConfig()
+	if 1+prod.MaxSegmentPartitions > sim.DynamoMaxCommitItems || sim.DynamoMaxCommitItems-1-prod.MaxSegmentPartitions < 3 {
+		t.Fatalf("1 + %d partitions leaves no spare items under %d", prod.MaxSegmentPartitions, sim.DynamoMaxCommitItems)
+	}
+	opts := Opts{Producers: 128, Consumers: 1, Topics: []string{"a", "b"}, Partitions: 64}
+	cfg := configWith(seeds(1, 2), broker.BugNone, opts)
 	prod.MaxBufferedBytes, prod.ResumeBufferedBytes = 64<<20, 32<<20
 	cfg.Params = prod
 	inner := cfg.Swarm
@@ -328,20 +399,44 @@ func TestProductionCapsFitDynamoLimit(t *testing.T) {
 		inner(seed, r, c)
 		c.Params, c.ControlPlane.MaxCommitItems = prod, sim.DynamoMaxCommitItems
 	}
+	var widest atomic.Int64
+	cfg.Invariants = append(cfg.Invariants, func() sim.Invariant { return &widestInv{&widest, opts.tps()} })
 	rep, err := sim.NewRunner().Run(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rep.Coverage = nil // a short campaign does not reach every fault
 	report(t, rep)
-	hit := uint64(0)
-	for _, a := range rep.Assertions {
-		if a.Prop == "broker: segment sealed by commit item cap" || a.Prop == "broker: segment sealed by partition cap" {
-			t.Logf("%s: %d", a.Prop, a.Checks)
-			hit += a.Checks
+	t.Logf("widest committed segment: %d partitions (cap %d)", widest.Load(), prod.MaxSegmentPartitions)
+	if int(widest.Load()) <= prod.MaxSegmentPartitions/2 {
+		t.Errorf("segments spanned at most %d partitions: the production cap was never approached", widest.Load())
+	}
+}
+
+// widestInv records the most distinct partitions in one committed segment.
+type widestInv struct {
+	widest *atomic.Int64
+	tps    []core.TopicPartition
+}
+
+func (*widestInv) Name() string     { return "widest" }
+func (*widestInv) Observe(sim.View) {}
+func (i *widestInv) AtEnd(v sim.View) {
+	parts := map[string]map[core.TopicPartition]bool{}
+	for _, tp := range i.tps {
+		for _, r := range v.CP().Committed(tp) {
+			if parts[r.Loc.Key] == nil {
+				parts[r.Loc.Key] = map[core.TopicPartition]bool{}
+			}
+			parts[r.Loc.Key][tp] = true
 		}
 	}
-	if hit == 0 {
-		t.Error("the production caps never bound: the test proves nothing")
+	for _, m := range parts {
+		for n := int64(len(m)); ; {
+			old := i.widest.Load()
+			if n <= old || i.widest.CompareAndSwap(old, n) {
+				break
+			}
+		}
 	}
 }

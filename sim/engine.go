@@ -99,7 +99,9 @@ type ControlPlaneFaults struct {
 	CallerTimeout  core.Duration
 	// MaxCommitItems models a store that commits a segment in one bounded
 	// transaction (DynamoDB: DynamoMaxCommitItems). A CommitSegment that needs
-	// more items is refused with ErrTooLarge and changes nothing. 0 = no limit.
+	// more items is refused with ErrTooLarge and changes nothing. The item
+	// count is an upper bound: 1 (the segment) + distinct partitions with at
+	// least one batch + topics the commit grows. 0 = no limit.
 	MaxCommitItems int
 }
 

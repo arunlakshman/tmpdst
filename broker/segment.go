@@ -109,7 +109,7 @@ func (b *Broker) addBatch(pb *pbatch) []core.Action {
 	switch {
 	case sizeBytes >= b.cfg.MaxSegmentBytes:
 		return append(acts, b.seal(sealSize)...)
-	case len(b.open.parts) >= b.cfg.MaxSegmentPartitions:
+	case len(b.open.parts) >= b.cfg.MaxSegmentPartitions && b.cfg.Bug != BugNoPartitionCap:
 		return append(acts, b.seal(sealPartitions)...)
 	case len(b.open.batches) >= b.cfg.MaxSegmentBatches && b.cfg.Bug != BugNoBatchCap:
 		return append(acts, b.seal(sealBatches)...)
@@ -218,8 +218,12 @@ func (b *Broker) commit(s *segment) []core.Action {
 	for i, pb := range s.batches {
 		pend[i] = core.PendingBatch{TP: pb.tp, Records: pb.records, Loc: pb.loc}
 	}
+	key := s.key
+	if b.cfg.Bug == BugFreshKeyOnRetry && s.attempts > 0 {
+		key = format.SegmentKey(b.env.NewID())
+	}
 	return []core.Action{core.CPCall{Req: s.req, Op: core.CommitSegment{
-		SegmentKey: s.key, Batches: pend}}}
+		SegmentKey: key, Batches: pend}}}
 }
 
 func (b *Broker) onCommit(s *segment, e core.CPDone) []core.Action {

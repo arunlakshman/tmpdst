@@ -128,7 +128,6 @@ func newCPRig() *rig {
 }
 
 var (
-	cpNodes  = []string{"a", "b"}
 	cpTopics = []string{"t1", "t2", "t3"}
 )
 
@@ -140,14 +139,6 @@ func genCP(r *veritastest.Rand, i int) any {
 	}
 	call := func(op core.CPOp) any { return core.CPCall{Req: req, Op: op} }
 	switch k := r.Intn(32); {
-	case i < 4 && i%2 == 0:
-		return call(core.Register{Self: enginetest.Ref(cpNodes[i/2])})
-	case i < 4:
-		return call(core.InitProducer{})
-	case k < 1:
-		return call(core.Register{Self: enginetest.Ref(pick(cpNodes))})
-	case k < 3:
-		return call(core.InitProducer{})
 	case k < 4:
 		return createTopic{Name: pick(append([]string{""}, cpTopics...)), Parts: int32(r.Intn(5)) - 1}
 	case k < 20:
@@ -160,7 +151,7 @@ func genCP(r *veritastest.Rand, i int) any {
 		if r.Intn(4) == 0 { // a retry of the same batches under a fresh key
 			key = fmt.Sprintf("re%d", r.Intn(1000))
 		}
-		return call(core.CommitSegment{SegmentKey: key, Owner: enginetest.Ref(pick(cpNodes)), Epoch: core.Epoch(1 + r.Intn(3)),
+		return call(core.CommitSegment{SegmentKey: key,
 			Batches: genBatches(veritastest.NewRand(uint64(len(shape)*7+int(shape[len(shape)-1])*131+variant)), key)})
 	case k < 28:
 		return call(core.Lookup{TP: tp(), From: core.Offset(r.Intn(8) - 1), MaxBytes: int32(r.Intn(3)) * 60})
@@ -181,11 +172,6 @@ func genBatches(r *veritastest.Rand, key string) []core.PendingBatch {
 			TP:      core.TopicPartition{Topic: cpTopics[r.Intn(2)], Partition: int32(r.Intn(2))},
 			Records: 1 + int64(r.Intn(3)),
 			Loc:     core.SegmentRef{Key: key, Off: int64(r.Intn(4)) * 100, Len: int64(1 + r.Intn(3)*50)},
-		}
-		if r.Intn(3) != 0 { // idempotent: ids 998..1007 include unissued ones
-			b.Producer = core.ProducerID(998 + r.Intn(8))
-			b.PEpoch = int16(r.Intn(3))
-			b.BaseSeq = int32(r.Intn(5))
 		}
 		out = append(out, b)
 	}

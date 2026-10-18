@@ -6,15 +6,14 @@ import "manifester/core"
 // Value are the batch's id); one ReadOp is one Fetch request.
 
 // ProduceOp is one record batch for one partition. Vals are the record values,
-// unique across the run ("c<client>.b<batch>.r<i>|pad"). The producer identity
-// is fixed when the batch is built and reused by every retry.
+// unique across the run ("c<client>.b<batch>.r<i>|pad"). Every retry resends
+// the same bytes. Idem marks a batch that claims a producer id (the broker
+// must reject it).
 type ProduceOp struct {
 	Client, Batch int
 	TP            core.TopicPartition
 	Vals          []string
-	Producer      int64
-	PEpoch        int16
-	BaseSeq       int32
+	Idem          bool
 }
 
 // ProduceRes is a produce op's result. Base is the acked base offset (-1

@@ -18,10 +18,7 @@ const (
 	mutBadRead             // GET returns a mangled payload
 )
 
-const (
-	maxAttempts = 5
-	regTimer    = core.TimerID(0) // op timers use the op id (>= 1)
-)
+const maxAttempts = 5
 
 type opKind uint8
 
@@ -33,8 +30,7 @@ const (
 type opState uint8
 
 const (
-	stWaitReg opState = iota
-	stPut
+	stPut opState = iota
 	stCommit
 	stLookup
 	stGet
@@ -71,12 +67,6 @@ type Broker struct {
 	env  core.Env
 	self core.NodeRef
 	mut  mutation
-
-	epoch      core.Epoch
-	registered bool
-	regReq     core.ReqID
-	regTries   uint64
-	regGen     core.TimerGen
 
 	nextReq  core.ReqID
 	nextOp   uint64
@@ -138,8 +128,6 @@ func (b *Broker) drop(o *op) {
 func (b *Broker) Step(ev core.Event) []core.Action {
 	var acts []core.Action
 	switch e := ev.Body.(type) {
-	case core.Started:
-		acts = b.register()
 	case core.Stop:
 		acts = b.stop()
 	case core.ConnOpened:
@@ -173,13 +161,8 @@ func (b *Broker) Step(ev core.Event) []core.Action {
 	return b.finish(acts)
 }
 
-// finish ends a graceful stop once nothing is in flight. Trip stays last.
+// finish ends a graceful stop once nothing is in flight.
 func (b *Broker) finish(acts []core.Action) []core.Action {
-	if n := len(acts); n > 0 {
-		if _, trip := acts[n-1].(core.Trip); trip {
-			return acts
-		}
-	}
 	if b.stopping && len(b.ops) == 0 {
 		for _, c := range b.conns {
 			acts = append(acts, core.CloseConn{Conn: c.id})
@@ -190,42 +173,13 @@ func (b *Broker) finish(acts []core.Action) []core.Action {
 	return acts
 }
 
-// ---- registration ----
-
-func (b *Broker) register() []core.Action {
-	b.regReq = b.req()
-	return []core.Action{core.CPCall{Req: b.regReq, Op: core.Register{Self: b.self}}}
-}
-
-func (b *Broker) onRegister(e core.CPDone) []core.Action {
-	b.regReq = 0
-	resp, ok := e.Resp.(core.RegisterResp)
-	if e.Err != core.OK || !ok {
-		if b.stopping {
-			return nil
-		}
-		b.regTries++
-		t, g := b.timer(regTimer, int(b.regTries))
-		b.regGen = g
-		return []core.Action{t}
-	}
-	b.epoch, b.registered, b.regTries = resp.Epoch, true, 0
-	acts := []core.Action{emit("echo_registered", core.Field{Key: "epoch", Value: core.U64(resp.Epoch)})}
-	for _, o := range append([]*op(nil), b.ops...) {
-		if o.state == stWaitReg {
-			acts = append(acts, b.start(o)...)
-		}
-	}
-	return acts
-}
-
 // ---- requests ----
 
 func (b *Broker) stop() []core.Action {
 	b.stopping = true
 	var acts []core.Action
 	for _, o := range append([]*op(nil), b.ops...) {
-		if o.state == stWaitReg || o.state == stBackoff {
+		if o.state == stBackoff {
 			acts = append(acts, b.fail(o)...)
 		}
 	}
@@ -259,7 +213,7 @@ func (b *Broker) send(c core.ConnID, text string) []core.Action {
 
 func (b *Broker) request(c *conn, frame string) []core.Action {
 	cmd, arg, _ := strings.Cut(frame, " ")
-	o := &op{conn: c.id, state: stWaitReg}
+	o := &op{conn: c.id}
 	switch {
 	case b.stopping:
 		return b.send(c.id, "ERR")
@@ -277,9 +231,6 @@ func (b *Broker) request(c *conn, frame string) []core.Action {
 	b.nextOp++
 	o.id = b.nextOp
 	b.ops = append(b.ops, o)
-	if !b.registered {
-		return nil
-	}
 	return b.start(o)
 }
 
@@ -291,7 +242,7 @@ func (b *Broker) start(o *op) []core.Action {
 	if err != nil {
 		return b.reply(o, "ERR")
 	}
-	o.key = format.SegmentKey(b.self.Node, b.self.Inc, b.env.NewID())
+	o.key = format.SegmentKey(b.env.NewID())
 	o.seg, o.ref = data, entries[0].Ref(o.key)
 	return b.put(o)
 }
@@ -335,13 +286,6 @@ func (b *Broker) retryLater(o *op, again opState) []core.Action {
 }
 
 func (b *Broker) onTimer(e core.TimerFired) []core.Action {
-	if e.ID == regTimer {
-		if e.Gen != b.regGen || b.regGen == 0 || b.registered || b.regReq != 0 || b.stopping {
-			return nil
-		}
-		b.regGen = 0
-		return b.register()
-	}
 	for _, o := range b.ops {
 		if core.TimerID(o.id) != e.ID {
 			continue
@@ -387,16 +331,11 @@ func (b *Broker) commit(o *op) []core.Action {
 	o.state, o.req = stCommit, b.req()
 	return []core.Action{core.CPCall{Req: o.req, Op: core.CommitSegment{
 		SegmentKey: o.key,
-		Owner:      b.self,
-		Epoch:      b.epoch,
-		Batches:    []core.PendingBatch{{TP: tp(), Records: 1, Loc: o.ref, Producer: core.NoProducer}},
+		Batches:    []core.PendingBatch{{TP: tp(), Records: 1, Loc: o.ref}},
 	}}}
 }
 
 func (b *Broker) onCP(e core.CPDone) []core.Action {
-	if b.regReq != 0 && e.Req == b.regReq {
-		return b.onRegister(e)
-	}
 	o := b.findReq(e.Req)
 	if o == nil {
 		return nil
@@ -425,9 +364,10 @@ func (b *Broker) onCommit(o *op, e core.CPDone) []core.Action {
 			return nil
 		}
 		return b.ack(o, off)
-	case e.Err == core.ErrFenced:
-		b.env.Reachable("echo: broker tripped on fencing")
-		return []core.Action{emit("echo_fenced", core.Field{Key: "epoch", Value: core.U64(b.epoch)}), core.Trip{Cause: "fenced"}}
+	case e.Err == core.ErrConflict:
+		// The same key with a different request: a broker bug, not a race.
+		b.env.Unreachable("echo: commit key reused with a different request")
+		return b.reply(o, "ERR")
 	case e.Outcome == core.MaybeApplied:
 		o.maybe = true
 		if b.mut == mutAckOnMaybe {
@@ -504,11 +444,6 @@ func emit(name string, fs ...core.Field) core.Emit {
 // StateHash folds all state in a fixed order.
 func (b *Broker) StateHash() uint64 {
 	h := newHasher()
-	h.u64(uint64(b.epoch))
-	h.bool(b.registered)
-	h.u64(uint64(b.regReq))
-	h.u64(b.regTries)
-	h.u64(uint64(b.regGen))
 	h.u64(uint64(b.nextReq))
 	h.u64(b.nextOp)
 	h.u64(uint64(b.timerGen))

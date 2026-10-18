@@ -11,9 +11,6 @@ import (
 // NewOracle returns a fresh oracle invariant for o.
 func NewOracle(o Opts) sim.Invariant { return newOracle(o) }
 
-// NewTripped returns a fresh trippedNeverAcks invariant.
-func NewTripped() sim.Invariant { return &trippedNeverAcks{dead: map[core.NodeRef]bool{}} }
-
 // OracleLog is the log inv (from NewOracle) reconstructed for tp.
 func OracleLog(inv sim.Invariant, tp core.TopicPartition) []string {
 	o := inv.(*oracle)

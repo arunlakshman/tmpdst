@@ -1,6 +1,6 @@
 // Package cpengine is the simulated control plane (decisions 3, 14, 23):
 // veritas.ControlPlane as the state core, plus injected faults and timing.
-// ErrConflict, ErrFenced and ErrInvalid come only from the spec; ErrTooLarge
+// ErrConflict and ErrInvalid come only from the spec; ErrTooLarge
 // only from the engine's optional commit-size limit (ControlPlaneFaults.
 // MaxCommitItems), applied before the spec; a retry of a
 // committed segment returns the original offsets whatever the faults did.
@@ -46,7 +46,7 @@ func New(f sim.ControlPlaneFaults) *Engine {
 		},
 		Mutating: func(a core.IOAction) bool {
 			switch a.(core.CPCall).Op.(type) {
-			case core.Register, core.InitProducer, core.CommitSegment:
+			case core.CommitSegment:
 				return true
 			}
 			return false
@@ -90,42 +90,33 @@ func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
 	return d.Resp.(core.LookupResp).Ranges
 }
 
-// HighWatermark is the next offset of tp.
-func (e *Engine) HighWatermark(tp core.TopicPartition) core.Offset { return e.spec.HighWatermark(tp) }
+// HighWatermark is the partition end: the next offset the spec assigns.
+func (e *Engine) HighWatermark(tp core.TopicPartition) core.Offset { return e.spec.End(tp) }
 
 // tooLarge reports whether op is a CommitSegment that a store with a bounded
-// transaction would refuse. The count is cp/dynamo's arithmetic (2 + changed
-// partitions + grown topics + producer states + range run items, one per
-// partition: decision 39) taken as an upper bound that ignores duplicates and
-// rejections (a partition whose batches are all rejected or dups would need no
-// HWM and run item), so it depends on the request and the topic table only.
-// The number of batches does not count. The spec stays limit-free; a refusal reaches it
-// never, so nothing changes.
+// transaction would refuse. The count is cp/dynamo's arithmetic (decisions 39,
+// 41, 44: no producer, high-watermark or fencing items): one segment item, one
+// range run item per distinct partition and one item per topic the commit
+// grows, taken as an upper bound, so it depends on the request and the topic
+// table only. The number of batches does not count. The spec stays
+// limit-free; a refusal reaches it never, so nothing changes.
 func (e *Engine) tooLarge(op core.CPOp) bool {
 	c, ok := op.(core.CommitSegment)
 	if !ok || e.maxItems <= 0 {
 		return false
 	}
+	return e.commitItems(c) > e.maxItems
+}
+
+// commitItems is the item count of c: 1 + distinct partitions + grown topics.
+func (e *Engine) commitItems(c core.CommitSegment) int {
 	var tps []core.TopicPartition
-	var states []struct {
-		tp core.TopicPartition
-		p  core.ProducerID
-	}
 	grown := map[string]int32{} // keyed lookups only, never iterated for behaviour
-	var topics []string
+	topics := 0
 	known := e.spec.Exec(core.CPCall{Op: core.DescribeTopics{}}).(core.CPDone).Resp.(core.DescribeTopicsResp).Topics
 	for _, b := range c.Batches {
 		if !slices.Contains(tps, b.TP) {
 			tps = append(tps, b.TP)
-		}
-		if b.Producer != core.NoProducer {
-			st := struct {
-				tp core.TopicPartition
-				p  core.ProducerID
-			}{b.TP, b.Producer}
-			if !slices.Contains(states, st) {
-				states = append(states, st)
-			}
 		}
 		have := int32(0)
 		for _, t := range known {
@@ -135,10 +126,10 @@ func (e *Engine) tooLarge(op core.CPOp) bool {
 		}
 		if want := b.TP.Partition + 1; want > max(have, grown[b.TP.Topic]) {
 			if _, seen := grown[b.TP.Topic]; !seen {
-				topics = append(topics, b.TP.Topic)
+				topics++
 			}
 			grown[b.TP.Topic] = want
 		}
 	}
-	return 2+2*len(tps)+len(topics)+len(states) > e.maxItems
+	return 1 + len(tps) + topics
 }

@@ -99,7 +99,7 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 		Spec: func(a core.IOAction) core.Completion { return spec.Exec(a) },
 		Mutating: func(a core.IOAction) bool {
 			switch a.(core.CPCall).Op.(type) {
-			case core.Register, core.CommitSegment:
+			case core.CommitSegment:
 				return true
 			}
 			return false
@@ -126,14 +126,12 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 		ctx.T += sim.Time(ms)
 		n := nodes[r.Between(0, 3)]
 		req := core.ReqID(i)
-		switch r.Between(0, 3) {
+		switch r.Between(0, 2) {
 		case 0:
-			c.Execute(ctx, n, core.CPCall{Req: req, Op: core.Register{Self: n}})
-		case 1:
-			// Epoch guesses: often stale (fenced), sometimes right; keys repeat (replays).
+			// Keys repeat (replays, and conflicts when the request differs).
 			c.Execute(ctx, n, core.CPCall{Req: req, Op: core.CommitSegment{
-				SegmentKey: string(rune('a' + r.Between(0, 8))), Owner: n, Epoch: core.Epoch(r.Between(0, 6)),
-				Batches: []core.PendingBatch{{TP: tps[r.Between(0, 2)], Records: 1 + r.Between(0, 3), Producer: core.NoProducer}},
+				SegmentKey: string(rune('a' + r.Between(0, 8))),
+				Batches:    []core.PendingBatch{{TP: tps[r.Between(0, 2)], Records: 1 + r.Between(0, 3)}},
 			}})
 		default:
 			c.Execute(ctx, n, core.CPCall{Req: req, Op: core.Lookup{TP: tps[0]}})

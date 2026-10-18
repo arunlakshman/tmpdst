@@ -11,8 +11,11 @@ import (
 	"manifester/sim"
 )
 
-// batch is one produce batch for one partition, retried unchanged (same
-// producer id, epoch and base sequence) until resolved.
+// batch is one produce batch for one partition, retried unchanged until
+// resolved. Producers are not idempotent (decision 41): a retry after an
+// ambiguous answer may commit the batch twice. idem marks the rare batch that
+// deliberately claims a producer id: the broker must reject it with
+// INVALID_REQUEST, per partition, and never commit it.
 type batch struct {
 	id        core.ID
 	tpIdx     int
@@ -22,25 +25,25 @@ type batch struct {
 	ambiguous bool // some attempt ended without a definite answer
 	lastCode  int16
 	dig       uint64 // hash of data, so StateHash does not rescan it
+	idem      bool   // carries producer id idemPID: must be rejected
 }
 
-// producer is the idempotent producer state of one client. cur holds the
+// producer is the at-least-once producer state of one client. cur holds the
 // unresolved batches of the current request (distinct partitions).
 type producer struct {
-	pid    int64 // 0: needs InitProducerId
-	pepoch int16
-	seqs   []int32 // next base sequence per partition index
-	serial int     // batches built by this client (values stay unique across re-inits)
+	serial int // batches built by this client (values stay unique)
 	cur    []*batch
 	noNew  bool
 }
 
+// idemPID is the producer id of a deliberately idempotent batch.
+const idemPID = 7
+
+// codeInvalidRequest is INVALID_REQUEST, the broker's answer to a batch that
+// carries a producer id.
+const codeInvalidRequest int16 = 42
+
 func (p *producer) hash(h *hasher) {
-	h.i64(p.pid)
-	h.u64(uint64(p.pepoch))
-	for _, s := range p.seqs {
-		h.u64(uint64(s))
-	}
 	h.u64(uint64(p.serial))
 	h.bool(p.noNew)
 	for _, b := range p.cur {
@@ -48,6 +51,7 @@ func (p *producer) hash(h *hasher) {
 		h.u64(uint64(b.tpIdx))
 		h.u64(uint64(b.attempts))
 		h.bool(b.ambiguous)
+		h.bool(b.idem)
 		h.u64(uint64(b.lastCode))
 		h.u64(b.dig)
 	}
@@ -89,6 +93,9 @@ func (w *Workload) produceNext(c *client) []core.Action {
 	return w.sendProduce(c)
 }
 
+// idemEvery: one batch in idemEvery claims a producer id and must be rejected.
+const idemEvery = 40
+
 // newBatches builds the next request: 1 or 2 batches for distinct partitions.
 func (w *Workload) newBatches(c *client) {
 	p := &c.p
@@ -118,8 +125,12 @@ func (w *Workload) newBatches(c *client) {
 			b.vals = append(b.vals, v)
 			recs[i] = kmsg.Record{Value: []byte(v)}
 		}
-		data, err := kwire.BuildBatch(kwire.BatchParams{ProducerID: p.pid, ProducerEpoch: p.pepoch, BaseSequence: p.seqs[idx],
-			FirstTimestamp: 1, MaxTimestamp: 1}, recs)
+		b.idem = w.env.Intn(idemEvery) == 0
+		pp := kwire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1, FirstTimestamp: 1, MaxTimestamp: 1}
+		if b.idem {
+			pp.ProducerID, pp.ProducerEpoch, pp.BaseSequence = idemPID, 0, 0
+		}
+		data, err := kwire.BuildBatch(pp, recs)
 		if err != nil {
 			w.env.Unreachable("kafka: client batch builds", core.Detail{Key: "err", Value: err.Error()})
 			continue
@@ -129,10 +140,8 @@ func (w *Workload) newBatches(c *client) {
 		dh.bytes(data)
 		b.dig = uint64(dh)
 		if w.hist != nil {
-			w.hist.Invoke(w.self, b.id, b.id, ProduceOp{Client: c.id, Batch: p.serial, TP: w.tps[idx], Vals: b.vals,
-				Producer: p.pid, PEpoch: p.pepoch, BaseSeq: p.seqs[idx]})
+			w.hist.Invoke(w.self, b.id, b.id, ProduceOp{Client: c.id, Batch: p.serial, TP: w.tps[idx], Vals: b.vals, Idem: b.idem})
 		}
-		p.seqs[idx] += int32(n)
 		p.cur = append(p.cur, b)
 	}
 }
@@ -156,19 +165,6 @@ func (w *Workload) sendProduce(c *client) []core.Action {
 		}
 	}
 	return w.send(c, rqProduce, r)
-}
-
-func (w *Workload) onInit(c *client, r *kmsg.InitProducerIDResponse) []core.Action {
-	if r.ErrorCode != 0 || r.ProducerID <= 0 {
-		return w.retryStage(c)
-	}
-	p := &c.p
-	p.pid, p.pepoch = r.ProducerID, r.ProducerEpoch
-	for i := range p.seqs {
-		p.seqs[i] = 0
-	}
-	c.stage, c.fails = stRun, 0
-	return w.advance(c)
 }
 
 func (w *Workload) think(c *client) core.Action {
@@ -195,6 +191,12 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 		case !found:
 			b.ambiguous = true
 			keep = append(keep, b)
+		case b.idem && code == codeInvalidRequest:
+			// Rejected at admission, however many earlier attempts were lost.
+			w.resolve(b, sim.OpAbandoned, ProduceRes{Base: -1, Code: code, Why: "rejected", Attempts: b.attempts})
+		case b.idem && code == 0:
+			w.env.Unreachable("kafka: a batch with a producer id is accepted")
+			w.resolve(b, sim.OpDefinite, ProduceRes{Base: base, Attempts: b.attempts})
 		case code == 0:
 			w.resolve(b, sim.OpDefinite, ProduceRes{Base: base, Attempts: b.attempts})
 		case ambiguousCode(code):
@@ -202,7 +204,7 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 			keep = append(keep, b)
 		case definiteRetriable(code):
 			keep = append(keep, b)
-		default: // out of order, stale epoch, corrupt, ...: the producer is unusable
+		default: // corrupt, invalid, ...: not retriable
 			fatal = true
 			keep = append(keep, b)
 		}
@@ -225,8 +227,7 @@ func (w *Workload) resolve(b *batch, out sim.OpOutcome, res ProduceRes) {
 }
 
 // giveUp abandons every unresolved batch (Indeterminate if any attempt was
-// ambiguous: it may still land at any later time) and re-inits the producer id,
-// as Kafka does.
+// ambiguous: it may still land at any later time).
 func (w *Workload) giveUp(c *client, why string) []core.Action {
 	p := &c.p
 	for _, b := range p.cur {
@@ -236,7 +237,6 @@ func (w *Workload) giveUp(c *client, why string) []core.Action {
 		}
 		w.resolve(b, out, ProduceRes{Base: -1, Code: b.lastCode, Why: why, Attempts: b.attempts})
 	}
-	p.cur, p.pid = nil, 0
-	c.stage = stInit
+	p.cur = nil
 	return []core.Action{w.think(c)}
 }

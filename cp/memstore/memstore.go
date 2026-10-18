@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"manifester/core"
-	"manifester/cp"
 	"manifester/veritas"
 )
 
@@ -16,7 +15,9 @@ type Store struct {
 	spec *veritas.ControlPlane
 }
 
-var _ cp.Store = (*Store)(nil)
+// TODO(phase 2): re-add `var _ cp.Store = (*Store)(nil)` once cp.Store drops
+// Register and InitProducer and gains EndOffsets (decisions 41-44). The import
+// is left out so this package builds and tests while cp is being migrated.
 
 // New returns an empty store.
 func New() *Store { return &Store{spec: veritas.NewControlPlane()} }
@@ -30,22 +31,17 @@ func (s *Store) exec(ctx context.Context, op core.CPOp) (core.CPDone, error) {
 	return s.spec.Exec(core.CPCall{Op: op}).(core.CPDone), nil
 }
 
-func (s *Store) Register(ctx context.Context, op core.Register) (core.RegisterResp, error) {
-	d, err := s.exec(ctx, op)
-	r, _ := d.Resp.(core.RegisterResp)
-	return r, err
-}
-
-func (s *Store) InitProducer(ctx context.Context) (core.InitProducerResp, error) {
-	d, err := s.exec(ctx, core.InitProducer{})
-	r, _ := d.Resp.(core.InitProducerResp)
-	return r, err
-}
-
 func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
 	d, err := s.exec(ctx, op)
 	r, _ := d.Resp.(core.CommitSegmentResp)
 	return r, d.Err, err
+}
+
+// EndOffsets returns the next offset of each partition, in request order.
+func (s *Store) EndOffsets(ctx context.Context, op core.EndOffsets) (core.EndOffsetsResp, error) {
+	d, err := s.exec(ctx, op)
+	r, _ := d.Resp.(core.EndOffsetsResp)
+	return r, err
 }
 
 func (s *Store) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, core.ErrCode, error) {

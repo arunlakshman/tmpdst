@@ -51,34 +51,43 @@ func TestObjectStore(t *testing.T) {
 func TestControlPlaneConcurrent(t *testing.T) {
 	ctx := context.Background()
 	c := NewControlPlane()
-	resp, err := c.Call(ctx, core.Register{Self: core.NodeRef{Node: "n"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := resp.(core.RegisterResp).Epoch
+	tp := core.TopicPartition{Topic: "t"}
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := c.Call(ctx, core.CommitSegment{
-				SegmentKey: string(rune('a' + i)), Owner: core.NodeRef{Node: "n"}, Epoch: e,
-				Batches: []core.PendingBatch{{TP: core.TopicPartition{Topic: "t"}, Records: 2, Producer: core.NoProducer}},
-			})
-			if err != nil {
-				t.Error(err)
+			// Read the end, propose it as the base, retry on a lost compare-and-set.
+			for try := 0; try < 100; try++ {
+				resp, err := c.Call(ctx, core.EndOffsets{TPs: []core.TopicPartition{tp}})
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				base := resp.(core.EndOffsetsResp).Ends[0]
+				_, err = c.Call(ctx, core.CommitSegment{
+					SegmentKey: string(rune('a' + i)),
+					Batches:    []core.PendingBatch{{TP: tp, Base: base, Records: 2}},
+				})
+				if code(err) == core.ErrConflict {
+					continue
+				}
+				if err != nil {
+					t.Error(err)
+				}
+				return
 			}
+			t.Error("never won the compare-and-set")
 		}()
 	}
 	wg.Wait()
-	resp, _ = c.Call(ctx, core.Lookup{TP: core.TopicPartition{Topic: "t"}})
-	if hwm := resp.(core.LookupResp).HighWatermark; hwm != 16 {
-		t.Fatalf("hwm %d", hwm)
+	resp, _ := c.Call(ctx, core.Lookup{TP: tp})
+	if end := resp.(core.LookupResp).End; end != 16 {
+		t.Fatalf("end %d", end)
 	}
-	_, err = c.Call(ctx, core.CommitSegment{SegmentKey: "x", Owner: core.NodeRef{Node: "n"}, Epoch: e + 1,
-		Batches: []core.PendingBatch{{TP: core.TopicPartition{Topic: "t"}, Records: 1, Producer: core.NoProducer}}})
-	if code(err) != core.ErrFenced {
-		t.Fatalf("fenced: %v", err)
+	_, err := c.Call(ctx, core.CommitSegment{SegmentKey: "x", Batches: []core.PendingBatch{{TP: tp, Base: 0, Records: 1}}})
+	if code(err) != core.ErrConflict {
+		t.Fatalf("taken base: %v", err)
 	}
 	if err := c.CreateTopic("", 1); code(err) != core.ErrInvalid {
 		t.Fatalf("create: %v", err)

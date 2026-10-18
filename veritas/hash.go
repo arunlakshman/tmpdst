@@ -48,12 +48,6 @@ func (h *hasher) ranges(rs []core.BatchRange) {
 		h.str(r.Loc.Key)
 		h.u64(uint64(r.Loc.Off))
 		h.u64(uint64(r.Loc.Len))
-		h.u64(uint64(r.Err))
-		if r.Dup {
-			h.byte(1)
-		} else {
-			h.byte(0)
-		}
 	}
 }
 

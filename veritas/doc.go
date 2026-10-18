@@ -23,5 +23,5 @@
 //
 // What is checked today: each spec's rules (unit tests), ObjectStore against
 // a sorted-slice model, and ControlPlane invariants (contiguous offsets,
-// HWM == committed counts, idempotent commit, fencing), all via veritastest.
+// end offset == committed counts, compare-and-set by base, idempotent commit), all via veritastest.
 package veritas

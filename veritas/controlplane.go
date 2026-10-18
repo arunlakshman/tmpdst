@@ -2,7 +2,6 @@ package veritas
 
 import (
 	"slices"
-	"strconv"
 
 	"manifester/core"
 )
@@ -11,85 +10,45 @@ import (
 // (core.CPOp). Sequential, fault-free; Outcome is Applied for a state change
 // and NotApplied for errors and reads. Rules:
 //
-//	Register       epoch for the node = previous + 1, from 1: Epoch is
-//	               monotonic per NodeID, whatever the incarnation.
+//	Log            A partition's log is a list of runs (core.BatchRange), each
+//	               [Base, Base+Count). Its end offset is the newest run's
+//	               Base+Count, 0 when empty. There is no separate counter.
 //	CommitSegment  1. SegmentKey already committed: the original ranges again
-//	                  (OK, Applied), whatever Epoch now says; ErrConflict if
-//	                  the batches differ from the original commit.
-//	               2. Empty key or batches, Records <= 0, empty topic or
-//	                  negative partition: ErrInvalid, no change.
-//	               3. Epoch != the owner node's current epoch, or the node
-//	                  never registered: ErrFenced, no change.
-//	               4. Else every batch gets Base = the partition's high
-//	                  watermark, in order, which then grows by Records:
-//	                  offsets are contiguous per partition, and all
-//	                  partitions are assigned in one step. Topics are created
-//	                  implicitly and grow to cover the partition.
-//	InitProducer   ProducerID = the next one, from 1000, +1 per call; PEpoch 0.
-//	               Applied, never fails.
-//	Idempotence    Within step 4 of CommitSegment, per batch, in request order
-//	               (an earlier batch's effect is seen by a later one):
-//	               - Producer == NoProducer: assigned as above, Err OK, Dup
-//	                 false. Otherwise a Producer InitProducer never returned,
-//	                 or PEpoch < 0 or BaseSeq < 0, is ErrInvalid in step 2.
-//	               - State is per (TP, Producer): PEpoch, the next expected
-//	                 sequence, and the last 5 assigned batches (BaseSeq,
-//	                 Records, range). Sequences are int64 here: int32
-//	                 wraparound is ignored.
-//	               - No state: BaseSeq != 0 is ErrOutOfOrder.
-//	               - PEpoch < state's: ErrFenced. PEpoch > state's: BaseSeq != 0
-//	                 is ErrOutOfOrder, else the state restarts at the new PEpoch.
-//	               - Same PEpoch: a window entry with this BaseSeq answers Dup
-//	                 (Err OK, that entry's Base/Count/Loc, no change) if its
-//	                 Records match, else ErrOutOfOrder. Else BaseSeq == next
-//	                 expected is assigned, enters the window, and advances next
-//	                 by Records; anything else is ErrOutOfOrder.
-//	               - A rejected batch has Base -1, Count = Records, Loc as
-//	                 requested, and changes nothing. A segment of only dups and
-//	                 rejects still counts as committed (Applied).
-//	Lookup         From < 0: ErrInvalid. Else the assigned batches of TP
-//	               (never dups or rejects) whose last offset is >= From, in
-//	               offset order, plus the high watermark. MaxBytes > 0 stops after the batch that takes
-//	               the summed Loc.Len to MaxBytes or more, but always returns
-//	               one if any match. An unknown partition is empty, HWM 0.
+//	                  (OK, Applied); ErrConflict if the request differs.
+//	               2. Empty key or batches, Records <= 0, Base < 0, empty topic
+//	                  or negative partition: ErrInvalid, no change.
+//	               3. Compare-and-set, per batch in request order, where the
+//	                  expected offset of a partition is its end offset with the
+//	                  earlier batches of this request already counted: Base
+//	                  below it (a run already exists at Base) is ErrConflict,
+//	                  Base above it (a hole) is ErrInvalid. The first failing
+//	                  batch decides the error; nothing is applied.
+//	               4. Else every batch is appended as a run at its Base: all
+//	                  or nothing. Topics are created implicitly and grow to
+//	                  cover the partition. The answer echoes the batches as
+//	                  ranges.
+//	               A failed commit records nothing: its key is reusable.
+//	EndOffsets     The end offset of each requested partition, in order; 0 for
+//	               an unknown one. Empty request: empty answer.
+//	Lookup         From < 0: ErrInvalid. Else the runs of TP whose last offset
+//	               is >= From, in offset order, plus the end offset. MaxBytes > 0
+//	               stops after the batch that takes the summed Loc.Len to
+//	               MaxBytes or more, but always returns one if any match. An
+//	               unknown partition is empty, End 0.
 //	DescribeTopics sorted by name; empty request = all; unknown names are
 //	               omitted.
 //
 // Topics can also be made with CreateTopic. Exec panics on a non-CPCall.
 type ControlPlane struct {
-	epochs  map[string]core.Epoch
-	segs    map[string]segment
-	parts   map[string]map[int32][]core.BatchRange // topic -> partition -> ranges
-	topics  map[string]int32                       // topic -> partition count
-	nextPID core.ProducerID
-	prods   map[string]*prodState // pkey(tp, producer) -> state
+	segs   map[string]segment
+	parts  map[string]map[int32][]core.BatchRange // topic -> partition -> runs
+	topics map[string]int32                       // topic -> partition count
 
 	// segKeys is every committed segment key, sorted. segPre[i] is the
-	// StateHash state after the epochs and segKeys[:i]; empty means none is
-	// valid. A commit at index i truncates it to i+1 entries; Register clears it.
+	// StateHash state after segKeys[:i]; segPre[0] is the empty state. A
+	// commit at index i truncates it to i+1 entries.
 	segKeys []string
 	segPre  []hasher
-}
-
-const (
-	firstProducer = 1000
-	dupWindow     = 5
-)
-
-type prodState struct {
-	pepoch int16
-	next   int64
-	window []winEntry // oldest first
-}
-
-type winEntry struct {
-	seq     int64
-	records int64
-	r       core.BatchRange
-}
-
-func pkey(tp core.TopicPartition, p core.ProducerID) string {
-	return tp.Topic + "\x00" + strconv.Itoa(int(tp.Partition)) + "\x00" + strconv.FormatInt(int64(p), 10)
 }
 
 type segment struct {
@@ -100,12 +59,9 @@ type segment struct {
 // NewControlPlane returns an empty control plane.
 func NewControlPlane() *ControlPlane {
 	return &ControlPlane{
-		epochs:  map[string]core.Epoch{},
-		segs:    map[string]segment{},
-		parts:   map[string]map[int32][]core.BatchRange{},
-		topics:  map[string]int32{},
-		nextPID: firstProducer,
-		prods:   map[string]*prodState{},
+		segs:   map[string]segment{},
+		parts:  map[string]map[int32][]core.BatchRange{},
+		topics: map[string]int32{},
 	}
 }
 
@@ -119,8 +75,8 @@ func (c *ControlPlane) CreateTopic(name string, partitions int32) core.ErrCode {
 	return core.OK
 }
 
-// HighWatermark is the next offset of tp (0 if unknown).
-func (c *ControlPlane) HighWatermark(tp core.TopicPartition) core.Offset {
+// End is the next offset of tp: the end of its newest run (0 if unknown).
+func (c *ControlPlane) End(tp core.TopicPartition) core.Offset {
 	rs := c.parts[tp.Topic][tp.Partition]
 	if len(rs) == 0 {
 		return 0
@@ -136,14 +92,10 @@ func (c *ControlPlane) Exec(a core.IOAction) core.Completion {
 		panic("veritas.ControlPlane: not a CPCall")
 	}
 	switch op := call.Op.(type) {
-	case core.Register:
-		return c.execRegister(call.Req, op)
-	case core.InitProducer:
-		resp := core.InitProducerResp{Producer: c.nextPID}
-		c.nextPID++
-		return core.CPDone{Req: call.Req, Resp: resp, Outcome: core.Applied}
 	case core.CommitSegment:
 		return c.execCommit(call.Req, op)
+	case core.EndOffsets:
+		return c.execEnds(call.Req, op)
 	case core.Lookup:
 		return c.execLookup(call.Req, op)
 	case core.DescribeTopics:
@@ -152,22 +104,29 @@ func (c *ControlPlane) Exec(a core.IOAction) core.Completion {
 	return core.CPDone{Req: call.Req, Err: core.ErrInvalid}
 }
 
-func (c *ControlPlane) execRegister(req core.ReqID, op core.Register) core.Completion {
-	c.epochs[string(op.Self.Node)]++
-	c.segPre = nil
-	resp := core.RegisterResp{Epoch: c.epochs[string(op.Self.Node)]}
-	return core.CPDone{Req: req, Resp: resp, Outcome: core.Applied}
+// validBatch reports whether b is well formed on its own.
+func validBatch(b core.PendingBatch) bool {
+	return b.Records > 0 && b.Base >= 0 && b.TP.Topic != "" && b.TP.Partition >= 0
 }
 
-// validBatch reports whether b is well formed against the producer table.
-func (c *ControlPlane) validBatch(b core.PendingBatch) bool {
-	if b.Records <= 0 || b.TP.Topic == "" || b.TP.Partition < 0 {
-		return false
+// cas checks every batch's Base against the partition's next offset, counting
+// the earlier batches of the same request, and returns the first failure.
+func (c *ControlPlane) cas(bs []core.PendingBatch) core.ErrCode {
+	next := map[core.TopicPartition]core.Offset{} // lookup only, never iterated
+	for _, b := range bs {
+		end, ok := next[b.TP]
+		if !ok {
+			end = c.End(b.TP)
+		}
+		switch {
+		case b.Base < end:
+			return core.ErrConflict
+		case b.Base > end:
+			return core.ErrInvalid
+		}
+		next[b.TP] = end + core.Offset(b.Records)
 	}
-	if b.Producer == core.NoProducer {
-		return true
-	}
-	return b.Producer >= firstProducer && b.Producer < c.nextPID && b.PEpoch >= 0 && b.BaseSeq >= 0
+	return core.OK
 }
 
 func (c *ControlPlane) execCommit(req core.ReqID, op core.CommitSegment) core.Completion {
@@ -183,19 +142,17 @@ func (c *ControlPlane) execCommit(req core.ReqID, op core.CommitSegment) core.Co
 		return fail(core.ErrInvalid)
 	}
 	for _, b := range op.Batches {
-		if !c.validBatch(b) {
+		if !validBatch(b) {
 			return fail(core.ErrInvalid)
 		}
 	}
-	if cur, ok := c.epochs[string(op.Owner.Node)]; !ok || op.Epoch != cur {
-		return fail(core.ErrFenced)
+	if e := c.cas(op.Batches); e != core.OK {
+		return fail(e)
 	}
 	seg := segment{batches: slices.Clone(op.Batches)}
 	for _, b := range op.Batches {
-		r, assigned := c.idempotent(b)
-		if assigned {
-			c.append(r)
-		}
+		r := core.BatchRange{TP: b.TP, Base: b.Base, Count: b.Records, Loc: b.Loc}
+		c.append(r)
 		seg.ranges = append(seg.ranges, r)
 	}
 	i, _ := slices.BinarySearch(c.segKeys, op.SegmentKey)
@@ -208,11 +165,19 @@ func (c *ControlPlane) execCommit(req core.ReqID, op core.CommitSegment) core.Co
 	return core.CPDone{Req: req, Resp: resp, Outcome: core.Applied}
 }
 
+func (c *ControlPlane) execEnds(req core.ReqID, op core.EndOffsets) core.Completion {
+	resp := core.EndOffsetsResp{Ends: make([]core.Offset, len(op.TPs))}
+	for i, tp := range op.TPs {
+		resp.Ends[i] = c.End(tp)
+	}
+	return core.CPDone{Req: req, Resp: resp}
+}
+
 func (c *ControlPlane) execLookup(req core.ReqID, op core.Lookup) core.Completion {
 	if op.From < 0 {
 		return core.CPDone{Req: req, Err: core.ErrInvalid}
 	}
-	resp := core.LookupResp{HighWatermark: c.HighWatermark(op.TP)}
+	resp := core.LookupResp{End: c.End(op.TP)}
 	var bytes int64
 	for _, r := range c.parts[op.TP.Topic][op.TP.Partition] {
 		if r.Base+core.Offset(r.Count) <= op.From {
@@ -237,54 +202,6 @@ func (c *ControlPlane) execDescribe(req core.ReqID, op core.DescribeTopics) core
 	return core.CPDone{Req: req, Resp: resp}
 }
 
-// idempotent decides one batch against the producer state and updates it. It
-// reports whether the returned range is a new assignment to append.
-func (c *ControlPlane) idempotent(b core.PendingBatch) (core.BatchRange, bool) {
-	assign := func() core.BatchRange {
-		return core.BatchRange{TP: b.TP, Base: c.HighWatermark(b.TP), Count: b.Records, Loc: b.Loc}
-	}
-	if b.Producer == core.NoProducer {
-		return assign(), true
-	}
-	rej := func(e core.ErrCode) (core.BatchRange, bool) {
-		return core.BatchRange{TP: b.TP, Base: -1, Count: b.Records, Loc: b.Loc, Err: e}, false
-	}
-	key := pkey(b.TP, b.Producer)
-	st := c.prods[key]
-	seq := int64(b.BaseSeq)
-	switch {
-	case st == nil || b.PEpoch > st.pepoch:
-		if seq != 0 {
-			return rej(core.ErrOutOfOrder)
-		}
-		r := assign()
-		c.prods[key] = &prodState{pepoch: b.PEpoch, next: b.Records, window: []winEntry{{seq, b.Records, r}}}
-		return r, true
-	case b.PEpoch < st.pepoch:
-		return rej(core.ErrFenced)
-	}
-	for _, w := range st.window {
-		if w.seq == seq {
-			if w.records != b.Records {
-				return rej(core.ErrOutOfOrder)
-			}
-			r := w.r
-			r.Dup = true
-			return r, false
-		}
-	}
-	if seq != st.next {
-		return rej(core.ErrOutOfOrder)
-	}
-	r := assign()
-	st.window = append(st.window, winEntry{seq, b.Records, r})
-	if len(st.window) > dupWindow {
-		st.window = slices.Delete(st.window, 0, 1)
-	}
-	st.next += b.Records
-	return r, true
-}
-
 func (c *ControlPlane) append(r core.BatchRange) {
 	if c.parts[r.TP.Topic] == nil {
 		c.parts[r.TP.Topic] = map[int32][]core.BatchRange{}
@@ -293,15 +210,11 @@ func (c *ControlPlane) append(r core.BatchRange) {
 	c.topics[r.TP.Topic] = max(c.topics[r.TP.Topic], r.TP.Partition+1)
 }
 
-// StateHash folds epochs, committed segments, topics and producer state, each in sorted order.
+// StateHash folds committed segments (sorted by key, with their ranges) and
+// topics (sorted by name).
 func (c *ControlPlane) StateHash() uint64 {
 	if len(c.segPre) == 0 {
-		h := newHasher()
-		for _, n := range sortedKeys(c.epochs) {
-			h.str(n)
-			h.u64(uint64(c.epochs[n]))
-		}
-		c.segPre = append(c.segPre, h)
+		c.segPre = append(c.segPre, newHasher())
 	}
 	for i := len(c.segPre) - 1; i < len(c.segKeys); i++ {
 		h := c.segPre[i]
@@ -315,10 +228,6 @@ func (c *ControlPlane) StateHash() uint64 {
 // fullStateHash is StateHash without the segment prefix cache (for tests).
 func (c *ControlPlane) fullStateHash() uint64 {
 	h := newHasher()
-	for _, n := range sortedKeys(c.epochs) {
-		h.str(n)
-		h.u64(uint64(c.epochs[n]))
-	}
 	for _, k := range sortedKeys(c.segs) {
 		h.str(k)
 		h.ranges(c.segs[k].ranges)
@@ -326,24 +235,11 @@ func (c *ControlPlane) fullStateHash() uint64 {
 	return c.tailHash(h)
 }
 
-// tailHash folds topics, the producer counter and producer state into h.
+// tailHash folds topics into h.
 func (c *ControlPlane) tailHash(h hasher) uint64 {
 	for _, t := range sortedKeys(c.topics) {
 		h.str(t)
 		h.u64(uint64(c.topics[t]))
-	}
-	h.u64(uint64(c.nextPID))
-	for _, k := range sortedKeys(c.prods) {
-		st := c.prods[k]
-		h.str(k)
-		h.u64(uint64(st.pepoch))
-		h.u64(uint64(st.next))
-		h.u64(uint64(len(st.window)))
-		for _, w := range st.window {
-			h.u64(uint64(w.seq))
-			h.u64(uint64(w.records))
-			h.ranges([]core.BatchRange{w.r})
-		}
 	}
 	return uint64(h)
 }

@@ -20,7 +20,7 @@ ln -sfn "/opt/kafka_2.13-$KV" /opt/kafka
 #   warpstream cli benchmark-producer -bootstrap-host H -bootstrap-port 9092 -topic T -num-clients 1
 mkdir -p /opt/warpstream
 if curl -fsSL "https://warpstream-public-us-east-1.s3.amazonaws.com/warpstream_agent_releases/warpstream_agent_linux_amd64_latest.tar.gz" | tar -xz -C /opt/warpstream; then
-  mv /opt/warpstream/warpstream_agent_linux_amd64 /usr/local/bin/warpstream
+  mv /opt/warpstream/warpstream_agent_linux_amd64 /usr/local/bin/warpstream || echo "warpstream binary name differs; skipped" >&2
 else
   echo "warpstream install failed; use /opt/kafka/bin tools" >&2
 fi
@@ -38,6 +38,8 @@ ENV
 wait_for_artifacts || true   # bench harness and Alloy config come from the same upload
 mkdir -p /opt/bench
 aws s3 sync "s3://$BUCKET/artifacts/bench/" /opt/bench/ || true
+# S3 does not keep mode bits: make the harness scripts executable.
 chmod -R a+rX /opt/bench
+chmod a+x /opt/bench/*.sh /opt/bench/*.py 2>/dev/null || true
 install_alloy loadgen
 touch /var/lib/bench-bootstrap.done

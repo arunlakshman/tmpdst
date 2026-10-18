@@ -136,12 +136,14 @@ On the workstation:
 ```
 deploy/aws/bench/collect-results.sh $(cd deploy/aws/terraform && terraform output -raw bucket) <run_id> us-west-2
 ```
-Writes `./results/<run_id>/` (loadgen/, metrics/, manifests) and `summary.md`: per cell and repetition client
+Writes `./results/<run_id>/` (loadgen/, metrics/, manifests, `build-git-sha.txt`, `terraform-outputs.json`) and `summary.md`: per cell and repetition client
 throughput and latency, broker segment put/queue/commit/ack averages, S3 and DynamoDB throttles/errors/retries,
 DynamoDB write units, then a mean over repetitions. Also keep the Grafana dashboards' time range screenshots if
 needed (free tier retention is 14 days).
 
 ## 8. Destroy and verify nothing is left
+
+**STOP: `terraform destroy` force-deletes the bucket and everything in it (results, metric snapshots, manifests). Do not run it until `./results/<run_id>/summary.md` exists on your workstation (step 7). Also keep `my.tfvars`.** Instance logs survive only in Grafana Cloud Loki (free tier: 14 days).
 
 ```
 cd deploy/aws/terraform && terraform destroy -var-file=my.tfvars     # you run this

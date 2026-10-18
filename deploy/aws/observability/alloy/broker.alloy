@@ -1,0 +1,255 @@
+// Broker host add-on: manibroker, manicp, and CloudWatch (DynamoDB + S3).
+// Extra environment: DDB_TABLE (table name), S3_BUCKET, S3_METRICS_FILTER_ID,
+// AWS_REGION. AWS credentials come from the instance role.
+
+discovery.relabel "broker_targets" {
+	targets = [
+		{"__address__" = "127.0.0.1:9100", "job" = "manibroker", "service" = "manibroker"},
+		{"__address__" = "127.0.0.1:9101", "job" = "manicp", "service" = "manicp"},
+	]
+
+	rule {
+		target_label = "host"
+		replacement  = sys.env("HOST_NAME")
+	}
+
+	rule {
+		target_label = "role"
+		replacement  = sys.env("HOST_ROLE")
+	}
+}
+
+prometheus.scrape "broker" {
+	targets         = discovery.relabel.broker_targets.output
+	forward_to      = [prometheus.remote_write.cloud.receiver]
+	scrape_interval = "5s"
+	scrape_timeout  = "4s"
+}
+
+// CloudWatch via Alloy's embedded YACE. CloudWatch publishes DynamoDB at 1 min
+// and S3 request metrics at 1 min; scraping faster only costs GetMetricData
+// calls. The exporter is scraped every 60 s.
+prometheus.exporter.cloudwatch "aws" {
+	sts_region = sys.env("AWS_REGION")
+	debug      = false
+
+	// Table-level metrics (dimension TableName only).
+	static "ddb_table" {
+		regions    = [sys.env("AWS_REGION")]
+		namespace  = "AWS/DynamoDB"
+		dimensions = {TableName = sys.env("DDB_TABLE")}
+
+		metric {
+			name       = "ConsumedWriteCapacityUnits"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ConsumedReadCapacityUnits"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ProvisionedWriteCapacityUnits"
+			statistics = ["Average"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ProvisionedReadCapacityUnits"
+			statistics = ["Average"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "WriteThrottleEvents"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ReadThrottleEvents"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+	}
+
+	// Per-operation metrics (dimensions TableName + Operation). One static
+	// block per operation the control plane uses.
+	static "ddb_op_transact_write" {
+		regions    = [sys.env("AWS_REGION")]
+		namespace  = "AWS/DynamoDB"
+		dimensions = {TableName = sys.env("DDB_TABLE"), Operation = "TransactWriteItems"}
+
+		metric {
+			name       = "SuccessfulRequestLatency"
+			statistics = ["Average", "Maximum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ThrottledRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "TransactionConflict"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ConditionalCheckFailedRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "SystemErrors"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "UserErrors"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+	}
+
+	static "ddb_op_batch_get" {
+		regions    = [sys.env("AWS_REGION")]
+		namespace  = "AWS/DynamoDB"
+		dimensions = {TableName = sys.env("DDB_TABLE"), Operation = "BatchGetItem"}
+
+		metric {
+			name       = "SuccessfulRequestLatency"
+			statistics = ["Average", "Maximum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ThrottledRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+	}
+
+	static "ddb_op_get" {
+		regions    = [sys.env("AWS_REGION")]
+		namespace  = "AWS/DynamoDB"
+		dimensions = {TableName = sys.env("DDB_TABLE"), Operation = "GetItem"}
+
+		metric {
+			name       = "SuccessfulRequestLatency"
+			statistics = ["Average", "Maximum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ThrottledRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+	}
+
+	static "ddb_op_query" {
+		regions    = [sys.env("AWS_REGION")]
+		namespace  = "AWS/DynamoDB"
+		dimensions = {TableName = sys.env("DDB_TABLE"), Operation = "Query"}
+
+		metric {
+			name       = "SuccessfulRequestLatency"
+			statistics = ["Average", "Maximum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ThrottledRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+	}
+
+	// S3 request metrics: exist only when the bucket has a metrics configuration
+	// with this filter id (see README, "What Terraform must provide").
+	static "s3_requests" {
+		regions    = [sys.env("AWS_REGION")]
+		namespace  = "AWS/S3"
+		dimensions = {BucketName = sys.env("S3_BUCKET"), FilterId = sys.env("S3_METRICS_FILTER_ID")}
+
+		metric {
+			name       = "AllRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "PutRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "GetRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "4xxErrors"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "5xxErrors"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "FirstByteLatency"
+			statistics = ["Average", "Maximum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "TotalRequestLatency"
+			statistics = ["Average", "Maximum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "BytesUploaded"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "BytesDownloaded"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+	}
+}
+
+discovery.relabel "cloudwatch" {
+	targets = prometheus.exporter.cloudwatch.aws.targets
+
+	rule {
+		target_label = "job"
+		replacement  = "cloudwatch"
+	}
+}
+
+prometheus.scrape "cloudwatch" {
+	targets          = discovery.relabel.cloudwatch.output
+	forward_to       = [prometheus.remote_write.cloud.receiver]
+	scrape_interval  = "60s"
+	scrape_timeout   = "50s"
+	honor_timestamps = true
+}

@@ -1,0 +1,25 @@
+// Loadgen host add-on: scrape the load generator's metrics endpoint if it
+// exposes one (LOADGEN_METRICS_ADDR, default 127.0.0.1:9102). A closed port
+// only makes the `up{job="loadgen"}` series 0; it breaks nothing.
+
+discovery.relabel "loadgen_targets" {
+	targets = [
+		{"__address__" = coalesce(sys.env("LOADGEN_METRICS_ADDR"), "127.0.0.1:9102"), "job" = "loadgen", "service" = "loadgen"},
+	]
+
+	rule {
+		target_label = "host"
+		replacement  = sys.env("HOST_NAME")
+	}
+
+	rule {
+		target_label = "role"
+		replacement  = sys.env("HOST_ROLE")
+	}
+}
+
+prometheus.scrape "loadgen" {
+	targets         = discovery.relabel.loadgen_targets.output
+	forward_to      = [prometheus.remote_write.cloud.receiver]
+	scrape_interval = "5s"
+}

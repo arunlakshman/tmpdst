@@ -1,0 +1,34 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CloudWatchReadForAlloyYace",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:GetMetricData",
+        "cloudwatch:GetMetricStatistics",
+        "cloudwatch:ListMetrics"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "TagLookupForYace",
+      "Effect": "Allow",
+      "Action": [
+        "tag:GetResources",
+        "iam:ListAccountAliases"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadRunSsmParameters",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameter",
+        "ssm:GetParameters",
+        "ssm:GetParametersByPath"
+      ],
+      "Resource": "arn:aws:ssm:*:*:parameter/manifester/*"
+    }
+  ]
+}

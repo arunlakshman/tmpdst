@@ -1,0 +1,137 @@
+// Common Alloy config, loaded on every host together with <role>.alloy
+// (broker.alloy or loadgen.alloy): `alloy run /etc/alloy/`.
+//
+// Environment (from /etc/alloy/alloy.env, filled from SSM at boot):
+//   RUN_ID, HOST_ROLE (broker|loadgen), HOST_NAME
+//   GRAFANA_PROM_URL   e.g. https://prometheus-prod-XX.grafana.net/api/prom/push
+//   GRAFANA_PROM_USER  numeric Prometheus instance id
+//   GRAFANA_LOKI_URL   e.g. https://logs-prod-XXX.grafana.net/loki/api/v1/push
+//   GRAFANA_LOKI_USER  numeric Loki instance id
+//   GRAFANA_API_KEY    Cloud access policy token (metrics:write, logs:write)
+
+// ---- metrics out -----------------------------------------------------------
+
+prometheus.remote_write "cloud" {
+	external_labels = {
+		run_id = sys.env("RUN_ID"),
+	}
+
+	endpoint {
+		url = sys.env("GRAFANA_PROM_URL")
+
+		basic_auth {
+			username = sys.env("GRAFANA_PROM_USER")
+			password = sys.env("GRAFANA_API_KEY")
+		}
+
+		queue_config {
+			max_samples_per_send = 2000
+		}
+	}
+}
+
+// ---- host metrics ----------------------------------------------------------
+
+prometheus.exporter.unix "node" {
+	// Network and cpu/memory are what the Hosts dashboard needs.
+	set_collectors = ["cpu", "meminfo", "netdev", "loadavg", "diskstats", "filesystem", "vmstat", "netstat", "uname", "stat", "sockstat"]
+}
+
+discovery.relabel "node" {
+	targets = prometheus.exporter.unix.node.targets
+
+	rule {
+		target_label = "host"
+		replacement  = sys.env("HOST_NAME")
+	}
+
+	rule {
+		target_label = "role"
+		replacement  = sys.env("HOST_ROLE")
+	}
+
+	rule {
+		target_label = "job"
+		replacement  = "node"
+	}
+}
+
+prometheus.scrape "node" {
+	targets         = discovery.relabel.node.output
+	forward_to      = [prometheus.remote_write.cloud.receiver]
+	scrape_interval = "5s"
+}
+
+// ---- logs out --------------------------------------------------------------
+
+loki.write "cloud" {
+	external_labels = {
+		run_id = sys.env("RUN_ID"),
+		host   = sys.env("HOST_NAME"),
+		role   = sys.env("HOST_ROLE"),
+	}
+
+	endpoint {
+		url = sys.env("GRAFANA_LOKI_URL")
+
+		basic_auth {
+			username = sys.env("GRAFANA_LOKI_USER")
+			password = sys.env("GRAFANA_API_KEY")
+		}
+	}
+}
+
+// Only our units; everything else in the journal is dropped.
+loki.relabel "journal" {
+	forward_to = []
+
+	rule {
+		source_labels = ["__journal__systemd_unit"]
+		regex         = "(manibroker|manicp|loadgen|manibench)[^.]*\\.service"
+		action        = "keep"
+	}
+
+	rule {
+		source_labels = ["__journal__systemd_unit"]
+		regex         = "(.+)\\.service"
+		target_label  = "service"
+	}
+}
+
+loki.source.journal "units" {
+	max_age       = "12h"
+	relabel_rules = loki.relabel.journal.rules
+	forward_to    = [loki.process.units.receiver]
+}
+
+// Services log JSON (run_id, service, level, msg, ...) or, until they do,
+// slog text (logfmt). Both end up with a low-cardinality `level` label,
+// lower-cased: debug|info|warn|error.
+loki.process "units" {
+	forward_to = [loki.write.cloud.receiver]
+
+	stage.match {
+		selector = "{service=~\".+\"} |~ \"^\\\\s*\\\\{\""
+
+		stage.json {
+			expressions = {level = "level"}
+		}
+	}
+
+	stage.match {
+		selector = "{service=~\".+\"} !~ \"^\\\\s*\\\\{\""
+
+		stage.logfmt {
+			mapping = {level = ""}
+		}
+	}
+
+	stage.template {
+		source   = "level"
+		template = "{{ ToLower .Value }}"
+	}
+
+	stage.labels {
+		values = {level = ""}
+	}
+}

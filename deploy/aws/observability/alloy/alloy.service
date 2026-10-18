@@ -1,0 +1,28 @@
+# Installed to /etc/systemd/system/alloy.service by install-alloy.sh; it
+# shadows the packaged unit. Configuration is the directory /etc/alloy/
+# (config.alloy + <role>.alloy). Secrets live in /etc/alloy/alloy.env (0600).
+[Unit]
+Description=Grafana Alloy (manifester benchmark telemetry)
+Documentation=https://grafana.com/docs/alloy/latest/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=alloy
+Group=alloy
+# journald read access for loki.source.journal
+SupplementaryGroups=systemd-journal
+EnvironmentFile=/etc/alloy/alloy.env
+Environment=ALLOY_DEPLOY_MODE=systemd
+ExecStart=/usr/bin/alloy run --server.http.listen-addr=127.0.0.1:12345 --storage.path=/var/lib/alloy/data /etc/alloy
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=2
+TimeoutStopSec=20
+LimitNOFILE=65536
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

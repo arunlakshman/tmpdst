@@ -8,6 +8,7 @@ import (
 	"net/http"
 
 	"manifester/core"
+	"manifester/cp/cpobs"
 )
 
 const maxBody = 32 << 20
@@ -32,6 +33,7 @@ func NewHandler(st Store) http.Handler {
 		return InitProducerResp{Producer: int64(r.Producer), PEpoch: r.PEpoch}, err
 	})
 	post(mux, "/v1/commit-segment", func(ctx context.Context, q CommitReq) (any, error) {
+		cpobs.FromContext(ctx).SetSegment(q.SegmentKey)
 		owner, err := NodeFromWire(q.Owner)
 		if err != nil {
 			return CommitResp{Err: ErrString(core.ErrInvalid)}, nil

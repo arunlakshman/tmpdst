@@ -29,7 +29,6 @@ type SegmentLog struct {
 type segInfo struct {
 	reason                     string
 	bytes, batches, parts, age int64
-	items                      int64 // control plane commit items the segment costs
 	putAttempts                int64
 	putMS                      float64
 }
@@ -80,7 +79,7 @@ func (s *SegmentLog) IO(a core.IOAction) {
 	s.pending = s.pending[1:]
 	s.segs[p.Key] = si
 	s.log.Info("segment sealed", "event", "segment_sealed", "segment", p.Key, "reason", si.reason, "bytes", si.bytes,
-		"batches", si.batches, "partitions", si.parts, "commit_items", si.items, "open_age_ms", ms(si.age))
+		"batches", si.batches, "partitions", si.parts, "open_age_ms", ms(si.age))
 }
 
 // Observe consumes one broker fact.
@@ -89,7 +88,7 @@ func (s *SegmentLog) Observe(f core.Fact) {
 	case "segment_sealed":
 		if len(s.pending) < 4096 {
 			s.pending = append(s.pending, &segInfo{reason: fs(f, "reason"), bytes: fi(f, "bytes"),
-				batches: fi(f, "batches"), parts: fi(f, "parts"), items: fi(f, "items"), age: fi(f, "age")})
+				batches: fi(f, "batches"), parts: fi(f, "parts"), age: fi(f, "age")})
 		}
 	case "segment_put_done":
 		key := fs(f, "segment")
@@ -104,7 +103,7 @@ func (s *SegmentLog) Observe(f core.Fact) {
 		key := fs(f, "segment")
 		si := s.take(key)
 		s.log.Info("segment committed", "event", "segment_committed", "segment", key, "reason", si.reason,
-			"bytes", fi(f, "bytes"), "batches", fi(f, "batches"), "partitions", si.parts, "epoch", fi(f, "epoch"),
+			"bytes", fi(f, "bytes"), "batches", fi(f, "batches"), "partitions", si.parts,
 			"put_ms", ms(fi(f, "put_ns")), "wait_ms", ms(fi(f, "wait_ns")), "commit_ms", ms(fi(f, "commit_ns")),
 			"total_ms", ms(fi(f, "total_ns")), "put_attempts", si.putAttempts,
 			"in_flight", fi(f, "inflight"), "buffered_bytes", fi(f, "buffered"))

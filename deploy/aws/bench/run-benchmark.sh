@@ -22,6 +22,8 @@
 # compresses and has no flag to turn that off, and the broker answers every
 # produce with UNSUPPORTED_COMPRESSION_TYPE. `--tool warpstream` stays available
 # only for a broker that accepts compressed batches.
+# Idempotence is switched off (enable.idempotence=false): Kafka 3.8 defaults to
+# true and the broker rejects idempotent batches (decision 41).
 #
 # Broker-side /metrics snapshots: remote mode relies on mb-snapshot.service on the
 # broker host (every 10 s into s3://$BUCKET/results/$RUN_ID/metrics/); --local
@@ -157,7 +159,7 @@ run_tool() {
       # shellcheck disable=SC2086 # PRODUCER_PROPS is a word list on purpose
       KAFKA_HEAP_OPTS="${KAFKA_HEAP_OPTS:--Xmx384m}" timeout -s INT -k 10 "$limit" "$(kcmd kafka-producer-perf-test.sh)" --topic "$TOPIC" --num-records "$nrec" \
         --record-size "$size" --throughput "$RATE" \
-        --producer-props "bootstrap.servers=$BOOTSTRAP" acks=all ${PRODUCER_PROPS:-batch.size=262144 linger.ms=20 buffer.memory=100663296} \
+        --producer-props "bootstrap.servers=$BOOTSTRAP" acks=all enable.idempotence=false ${PRODUCER_PROPS:-batch.size=262144 linger.ms=20 buffer.memory=100663296} \
         >"$prefix.c$i.out" 2>&1 &
       pids+=("$!")
     done

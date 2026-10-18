@@ -66,6 +66,11 @@ latencies, tie-breaks, buggify and IDs.
 
 ## 4. Incarnations
 
+> **Moot since decisions 41-44.** The broker no longer registers, has no epoch, and the
+> control plane fences nothing (`ErrFenced` is retired); there are no idempotent
+> producers either. The text below is kept as the lesson as learned, and applies
+> again if broker membership (a heartbeat lease, see `TODO.md`) is brought back.
+
 Every boot of a node gets fresh random incarnation bits. Leases, segment
 ownership and any reference to a node carry `(NodeID, Incarnation, Epoch)`.
 References to an old boot are rejected (`ErrFenced`), never silently

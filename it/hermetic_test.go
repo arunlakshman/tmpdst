@@ -133,10 +133,13 @@ func TestMetadataAndApiVersions(t *testing.T) {
 		if v.Err != nil {
 			t.Fatal(v.Err)
 		}
-		for _, key := range []int16{0, 1, 2, 3, 18, 22} { // produce fetch listoffsets metadata apiversions initproducerid
+		for _, key := range []int16{0, 1, 2, 3, 18} { // produce fetch listoffsets metadata apiversions
 			if _, ok := v.KeyMaxVersion(key); !ok {
 				t.Errorf("broker %d does not offer API key %d", v.NodeID, key)
 			}
+		}
+		if _, ok := v.KeyMaxVersion(22); ok { // InitProducerId: no idempotent producers (decision 41)
+			t.Errorf("broker %d offers InitProducerId", v.NodeID)
 		}
 	}
 }
@@ -264,7 +267,7 @@ func TestGracefulStopFlushesProduce(t *testing.T) {
 	cl := newClient(t, s.seeds())
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	// Warm the connection and the producer id so the timing below is the
+	// Warm the connection so the timing below is the
 	// batch window and nothing else.
 	if err := cl.ProduceSync(ctx, &kgo.Record{Topic: "orders", Partition: 0, Value: []byte("warm")}).FirstErr(); err != nil {
 		t.Fatal(err)

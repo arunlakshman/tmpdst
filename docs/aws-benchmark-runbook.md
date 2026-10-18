@@ -6,6 +6,7 @@ Related: `deploy/aws/terraform/README.md` (stack), `deploy/aws/observability/REA
 `docs/observability.md` (metrics and logs reference).
 
 Known limits to keep in mind before reading numbers:
+- The broker accepts only non-idempotent producers (decision 41): the harness passes `enable.idempotence=false` to `kafka-producer-perf-test` (Kafka 3.8 defaults to true and would be rejected with INVALID_REQUEST). Keep it if you override `PRODUCER_PROPS`. Results in `docs/aws-benchmark-results-r1.md` predate this change.
 - The load tool is Apache Kafka's `kafka-producer-perf-test`. The WarpStream `benchmark-producer` was tried
   against the broker and cannot be used: it always compresses (no flag to disable) and the broker rejects
   compressed batches with `UNSUPPORTED_COMPRESSION_TYPE`. Never use `cmd/manibench` for the AWS run.

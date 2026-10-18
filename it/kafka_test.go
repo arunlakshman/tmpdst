@@ -21,6 +21,7 @@ func newClient(t *testing.T, seeds []string, opts ...kgo.Opt) *kgo.Client {
 		kgo.SeedBrokers(seeds...),
 		kgo.RecordPartitioner(kgo.ManualPartitioner()),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
+		kgo.DisableIdempotentWrite(), // the broker rejects idempotent batches (decision 41)
 		kgo.ProducerLinger(2 * time.Millisecond),
 		kgo.MetadataMinAge(100 * time.Millisecond), // default 5s makes broker failover slow
 		kgo.RetryBackoffFn(func(int) time.Duration { return 50 * time.Millisecond }),

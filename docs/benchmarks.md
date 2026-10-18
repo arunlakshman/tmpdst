@@ -1,5 +1,7 @@
 # Produce benchmarks (local, single broker)
 
+> **History:** every number in this file was measured before decisions 41-44 (no idempotent producers, no broker fencing, flat segment keys). `manibench` now disables idempotence, the default segment partition cap is 96 and the commit costs 1 + partitions + grown topics. Treat the figures as the old design's.
+
 Measurement only. No broker, CP or core code was changed. Date: 2026-10-17, branch toys3.
 
 ## Method

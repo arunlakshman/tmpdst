@@ -2,6 +2,7 @@ package prod
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"net"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"manifester/core"
 	"manifester/sys"
 	"manifester/veritas/vsys"
+
+	"github.com/twmb/franz-go/pkg/kmsg"
 )
 
 func startNode(t *testing.T, mod func(*NodeConfig)) (*Node, NodeConfig) {
@@ -82,7 +85,24 @@ func TestStartGracefulStop(t *testing.T) {
 	if n.OpenConns() != 0 {
 		t.Errorf("open conns %d", n.OpenConns())
 	}
-	// the broker registers with the control plane on start; the tap sees it.
+	// A list-all-topics Metadata request makes the broker call the control
+	// plane; the tap sees that action.
+	conn, err := net.Dial("tcp", n.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	req := kmsg.NewPtrMetadataRequest()
+	req.Version, req.Topics = 1, nil
+	body := req.AppendTo(nil)
+	frame := binary.BigEndian.AppendUint32(nil, uint32(8+2+len(body)))
+	frame = binary.BigEndian.AppendUint16(frame, uint16(req.Key()))
+	frame = binary.BigEndian.AppendUint16(frame, uint16(req.Version))
+	frame = binary.BigEndian.AppendUint32(frame, 7)
+	frame = binary.BigEndian.AppendUint16(frame, 0xffff) // null client id
+	if _, err := conn.Write(append(frame, body...)); err != nil {
+		t.Fatal(err)
+	}
 	for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(2 * time.Millisecond) {
 		mu.Lock()
 		got := len(seen)

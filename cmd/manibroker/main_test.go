@@ -75,7 +75,7 @@ func TestRunMemBrokerStartsAndStops(t *testing.T) {
 		}
 	}
 	b, err := os.ReadFile(manifest)
-	if err != nil || !strings.Contains(string(b), `"max_segment_items"`) {
+	if err != nil || !strings.Contains(string(b), `"max_segment_batches"`) {
 		t.Fatalf("%v %s", err, b)
 	}
 }

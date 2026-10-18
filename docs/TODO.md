@@ -27,11 +27,10 @@ and franz-go compresses by default. Clients have to set
 **Why:** Metadata lists only the broker that answered (decision 29). Client failover therefore depends on the client's seed list, and with franz-go defaults it takes about 5 s.
 
 **Plan:**
-- The CP keeps each registered broker's advertised host, port and broker id.
-  - Register already carries the node, so the address needs to be added to it.
-  - A new `DescribeBrokers` op lists live brokers.
+- The CP keeps each live broker's advertised host, port and broker id. There is no Register and no broker epoch any more (decisions 41-44), so this needs a new heartbeat lease op that carries the node and its address.
+  - A new `DescribeBrokers` op lists brokers whose lease has not expired.
 - Metadata returns all live brokers. Partition leaders are spread over them deterministically, for example by hashing (topic, partition) over the sorted broker ids.
-- Liveness comes from a lease or heartbeat with an expiry, decided in the CP.
+- Liveness comes from the heartbeat lease with an expiry, decided in the CP. The lease only feeds Metadata; it does not fence anything (commits stay unfenced, decision 44).
 
 **Contract changes:**
 - `core` CP ops.
@@ -60,4 +59,8 @@ and franz-go compresses by default. Clients have to set
 
 **DONE** (decision 39). The DynamoDB commit stores one range run item per (partition, segment) instead of one per batch, so the commit costs 2 + 2 x partitions + producer states + grown topics items whatever the number of batches. `MaxSegmentBatches` default is 256; the new `MaxSegmentItems` (96) bounds the producer states, the one remaining per-batch growth. The abstract contract (core, veritas) did not change; `cp/dynamo` and the sim CP engine's `MaxCommitItems` arithmetic agree, and `cp/cptest` covers segments with many small batches.
 
-**Open follow-up:** producer states are still one item per (partition, producer) per commit. With very many idempotent producers per partition the item budget, not the byte cap, seals segments; compacting S# rows is the next lever if a run shows `reason=items` often.
+The producer-state follow-up is gone: the S# items no longer exist (decisions 41-44), so a commit costs 1 + partitions + grown topics and `MaxSegmentPartitions` (96) is the only item bound.
+
+## Idempotent producers: explicitly not planned
+
+Bringing back idempotent producers (InitProducerId, producer epochs and sequence numbers, duplicate detection in the CP) is **not planned**. The contract is stateless at-least-once (decisions 41-44): clients must disable idempotence (franz-go `kgo.DisableIdempotentWrite()`, Apache Kafka `enable.idempotence=false`), and the broker rejects idempotent batches with INVALID_REQUEST.

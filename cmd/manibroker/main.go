@@ -72,7 +72,6 @@ func parseFlags(args []string, stderr io.Writer) (brokerFlags, *flag.FlagSet, er
 	fs.DurationVar(&tn.window, "segment-window", time.Duration(dflt.BatchWindow), "seal the open segment this long after its first batch")
 	fs.IntVar(&tn.parts, "max-segment-partitions", dflt.MaxSegmentPartitions, "seal at this many distinct partitions (control plane commit limit)")
 	fs.IntVar(&tn.batches, "max-segment-batches", dflt.MaxSegmentBatches, "seal at this many batches (bounds the control plane's segment record, about 300 bytes a batch)")
-	fs.IntVar(&tn.items, "max-segment-items", dflt.MaxSegmentItems, "seal before a commit would cost more than this many control plane items: 2 + 2 x partitions + producer states (DynamoDB limit 100)")
 	fs.StringVar(&tn.maxBuffered, "max-buffered", "auto", "pause client reads above this much unacked produce data; auto = clamp(memory/16, 128MiB, 1GiB)")
 	fs.StringVar(&tn.resumeBuffered, "resume-buffered", "", "resume reads below this (default: half of -max-buffered)")
 	fs.DurationVar(&f.objTimeout, "obj-timeout", 30*time.Second, "base timeout of an object-store call; large bodies get extra time at 2 MiB/s")
@@ -253,7 +252,7 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 	log.Info("manibroker tuning",
 		"segment_bytes", bc.MaxSegmentBytes, "segment_window", time.Duration(bc.BatchWindow),
 		"max_segment_partitions", bc.MaxSegmentPartitions, "max_segment_batches", bc.MaxSegmentBatches,
-		"max_segment_items", bc.MaxSegmentItems, "max_buffered", bc.MaxBufferedBytes, "resume_buffered", bc.ResumeBufferedBytes,
+		"max_buffered", bc.MaxBufferedBytes, "resume_buffered", bc.ResumeBufferedBytes,
 		"obj_timeout", f.objTimeout, "memory_bytes", mem, "memory_source", memSource)
 	if f.manifestOut != "" {
 		writeManifest(ctx, log, info, fs, f, manifestTuning(cfg, f, mem, memSource, adv, ln))
@@ -270,7 +269,7 @@ func manifestTuning(cfg prod.NodeConfig, f brokerFlags, mem uint64, memSource, a
 	bc := cfg.Broker
 	return map[string]any{
 		"segment_bytes": bc.MaxSegmentBytes, "segment_window_ns": int64(bc.BatchWindow),
-		"max_segment_partitions": bc.MaxSegmentPartitions, "max_segment_batches": bc.MaxSegmentBatches, "max_segment_items": bc.MaxSegmentItems,
+		"max_segment_partitions": bc.MaxSegmentPartitions, "max_segment_batches": bc.MaxSegmentBatches,
 		"max_buffered_bytes": bc.MaxBufferedBytes, "resume_buffered_bytes": bc.ResumeBufferedBytes,
 		"obj_timeout_ns": int64(f.objTimeout), "memory_bytes": mem, "memory_source": memSource,
 		"node_id": cfg.NodeID, "advertised": adv, "listen": ln.Addr().String(),

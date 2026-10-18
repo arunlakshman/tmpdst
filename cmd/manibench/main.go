@@ -8,8 +8,9 @@
 //	    [-partitions 0] [-max-inflight 0] [-buffered-records 5000]
 //	    [-cp-url http://127.0.0.1:8080 -create-partitions N]
 //
-// Each client is its own kgo.Client (idempotent, acks=all, no compression:
-// the broker rejects compressed batches, decision 33). It produces as fast as
+// Each client is its own kgo.Client (acks=all, idempotence disabled: the broker rejects
+// idempotent batches, decision 41; no compression: the broker rejects
+// compressed batches, decision 33). It produces as fast as
 // the buffer allows: Produce blocks once -buffered-records are in flight.
 // Latency is the time from the Produce call to its callback.
 //
@@ -89,7 +90,7 @@ func parseArgs(args []string, stderr io.Writer) (c benchConfig, ok bool) {
 	fs.DurationVar(&c.dur, "duration", 30*time.Second, "how long to produce")
 	fs.DurationVar(&c.every, "interval", 5*time.Second, "reporting interval")
 	fs.IntVar(&c.parts, "partitions", 0, "0: kgo uniform-bytes sticky partitioner; N: round-robin per record over partitions 0..N-1")
-	fs.IntVar(&c.inflight, "max-inflight", 0, "kgo MaxProduceRequestsInflightPerBroker (0: kgo default, 1; max 5 with idempotence)")
+	fs.IntVar(&c.inflight, "max-inflight", 0, "kgo MaxProduceRequestsInflightPerBroker (0: kgo default, 1; above 1 a retry can reorder, there is no idempotence)")
 	fs.IntVar(&c.buffered, "buffered-records", 5000, "kgo MaxBufferedRecords per client")
 	fs.StringVar(&c.cpURL, "cp-url", "", "control plane URL, used with -create-partitions")
 	fs.IntVar(&c.createParts, "create-partitions", 0, "if > 0, POST /v1/create-topic first")
@@ -143,6 +144,7 @@ func clientOpts(c benchConfig) []kgo.Opt {
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(c.brokers...),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
+		kgo.DisableIdempotentWrite(), // the broker rejects idempotent batches (decision 41)
 		kgo.ProducerBatchCompression(kgo.NoCompression()),
 		kgo.MaxBufferedRecords(c.buffered),
 		kgo.DefaultProduceTopic(c.topic),

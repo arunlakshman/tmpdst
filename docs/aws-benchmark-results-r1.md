@@ -1,5 +1,7 @@
 # Benchmark summary: r1
 
+> Measured BEFORE decisions 41-44 (idempotent producers, broker registration/fencing and producer-state commit items were still in the design). Not comparable with runs of the stateless at-least-once build.
+
 ```
 {"run_id":"r1","tool":"kafka","topic":"bench-r1","bootstrap":"10.42.1.149:9092","cells":["c1_1k","c8_1k","c32_1k","c1_100b"],"reps":3,"duration_s":60,"gap_s":15,"warmup_s":20,"partitions":6}
 ```

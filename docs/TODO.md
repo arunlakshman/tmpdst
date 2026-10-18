@@ -58,11 +58,6 @@ and franz-go compresses by default. Clients have to set
 
 ## CP range compaction
 
-**Why:** the DynamoDB commit stores one range item per batch and is limited to 100 items, so a segment is capped at 32 batches (decision 35) however large it could be. A 16 MiB segment of small batches is cut short by the batch cap, not by size.
+**DONE** (decision 39). The DynamoDB commit stores one range run item per (partition, segment) instead of one per batch, so the commit costs 2 + 2 x partitions + producer states + grown topics items whatever the number of batches. `MaxSegmentBatches` default is 256; the new `MaxSegmentItems` (96) bounds the producer states, the one remaining per-batch growth. The abstract contract (core, veritas) did not change; `cp/dynamo` and the sim CP engine's `MaxCommitItems` arithmetic agree, and `cp/cptest` covers segments with many small batches.
 
-**Plan:** store one range item per contiguous run of same-partition batches in a segment, so large segments with many small batches are not capped by the 100-item transaction limit. This is a contract change in core/veritas/cp. Idempotence windows must stay per batch.
-
-**Done when:**
-- `MaxSegmentBatches` can be raised well above 32 with the DynamoDB CP.
-- The spec, the sim CP engine (`MaxCommitItems` arithmetic) and `cp/dynamo` agree.
-- `cp/cptest` covers segments with many small batches.
+**Open follow-up:** producer states are still one item per (partition, producer) per commit. With very many idempotent producers per partition the item budget, not the byte cap, seals segments; compacting S# rows is the next lever if a run shows `reason=items` often.

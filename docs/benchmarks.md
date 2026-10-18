@@ -299,3 +299,22 @@ Reading:
   wall time. Two runs only; the earlier slow state was not reproduced, so a repeat with `reuse` of the old database would
   confirm that state, not the code, was the cause.
 
+
+## CP range compaction (decision 39)
+
+The r1 AWS run (`docs/aws-benchmark-results-r1.md`) averaged 5 to 8 MiB per segment because the 32-batch cap sealed before
+16 MiB, and the serial commit stage was the ceiling. The DynamoDB commit now writes one range run item per (partition,
+segment), and `MaxSegmentBatches` is 256, so the byte cap (16 MiB) or the 200 ms timer should seal instead; the counter
+`segments_sealed_total{reason}` shows it (`batches` should disappear, `items` appears only with very many idempotent
+producers per segment). Not re-run on AWS. Local commit cost, `go test -run X -bench Commit ./cp/dynamo` on ExtendDB
+(`scripts/it-up.sh`; M1; one idempotent producer per partition; 200 commits each):
+
+| segment | items before | commit before | items after | commit after |
+|---|---|---|---|---|
+| 32 batches, 24 partitions | 82 | 61.8 ms | 74 | 58.2 ms |
+| 32 batches, 6 partitions | 46 | 33.0 ms | 20 | 22.3 ms |
+| 256 batches, 24 partitions | refused (ErrTooLarge) | - | 74 | 62.1 ms |
+| 256 batches, 6 partitions | refused (ErrTooLarge) | - | 20 | 25.9 ms |
+
+The commit time follows the item count, not the batch count: a 256-batch segment commits in about the time of a
+32-batch one with the same partitions. Old 32-batch results elsewhere in this file were measured with the old cap.

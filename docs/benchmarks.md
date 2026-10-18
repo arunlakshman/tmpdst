@@ -167,8 +167,27 @@ MaxSegmentPartitions 24, MaxAttempts 6, MaxBufferedBytes 64 MiB (resume at 32 Mi
 The runs above used the old defaults: `BatchWindow` 50 ms, `MaxSegmentBytes` 4 MiB, `MaxBufferedBytes` 64 MiB.
 Since decision 35 a segment seals at 16 MiB or 200 ms after its first batch (fixed timer), or at 24 partitions or
 32 batches; the produce buffer is sized from machine memory (`clamp(memory/16, 128 MiB, 1 GiB)`). All of it is set
-by flags (`-segment-bytes 4MiB -segment-window 50ms` reproduces the old segment rule). Not re-measured: no
-benchmark was re-run for this change. Expect, to be checked: a 200 ms window adds up to 150 ms of latency at low
-load (idea 4 above is not implemented: there is still no early seal when idle), and 16 MiB segments change the
-PUT size (the PUT timeout now grows with the body). Items 1 to 3 above still apply.
+by flags (`-segment-bytes 4MiB -segment-window 50ms` reproduces the old segment rule). Re-measured on 2026-10-18 (same machine, single 30 s run per cell, 6 partitions, 0 errors; auto buffer 512 MiB):
+
+| Setup | Load | records/s | MiB/s | avg | p50 | p99 | Before (50 ms, 4 MiB) |
+|---|---|---|---|---|---|---|---|
+| A mem/mem | 1 client, 1 KB | 19,971 | 19.5 | 242 ms | 237 ms | 448 ms | 86,246 rec/s, 54 ms avg |
+| A | 8 clients, 1 KB | 160,360 | 156.6 | 241 ms | 229 ms | 480 ms | 239,931 rec/s, 162 ms avg |
+| A | 1 client, 100 B | 22,796 | 2.2 | 214 ms | 214 ms | 228 ms | 74,807 rec/s, 64 ms avg |
+| C dynamo/s3 | 1 client, 1 KB | 13,207 | 12.9 | 369 ms | 351 ms | 753 ms | 30,527 rec/s, 160 ms avg |
+| C | 8 clients, 1 KB | 51,730 | 50.5 | 760 ms | 674 ms | 1.70 s | 52,252 rec/s, 755 ms avg |
+| C | 1 client, 100 B | 17,984 | 1.7 | 272 ms | 266 ms | 363 ms | 51,444 rec/s, 95 ms avg |
+
+Setup B and the 32-client runs were not repeated.
+
+- Low load: latency is now about 200 ms (the window) plus the store time. A 1-client latency went from 54 to 242 ms
+  and throughput fell by the same factor, because one kgo client has one produce request in flight and is therefore
+  bounded by request size / latency (analysis point 5). This is the cost of the fixed timer with no early seal when idle.
+- C at 8 clients is unchanged: 50.5 MiB/s against 51.0 before, with 16 MiB segments instead of 4 MiB. Analysis point 3
+  explained that ceiling as a 4 MiB PUT + commit cycle. That explanation is wrong: quadrupling the segment size did not
+  move the ceiling. The limit is something else that is independent of segment size, and it is still unmeasured
+  (candidates: SeaweedFS write throughput on the Docker volume, the single executor or connection path in the broker,
+  the commit). Per-segment timing in the broker would settle it; speed-up ideas 1 to 3 should not be trusted until it does.
+- A at 8 clients dropped from 240k to 160k records/s. Not investigated (larger segments, 512 MiB buffer, one run).
+Items 1 to 3 above still apply only as hypotheses.
 

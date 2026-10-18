@@ -2,6 +2,7 @@ package prod
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -33,6 +34,8 @@ type Metrics struct {
 	pausedSeconds prometheus.Counter
 
 	buffered, inflight, paused prometheus.Gauge
+
+	cpCall *prometheus.HistogramVec
 }
 
 const metricsNS = "manibroker"
@@ -74,7 +77,10 @@ func NewMetrics() *Metrics {
 		inflight:      gauge("segments_in_flight", "Sealed segments not yet answered, as of the last segment event."),
 		paused:        gauge("reads_paused", "1 while client reads are paused by backpressure."),
 	}
-	m.reg.MustRegister(m.putSeconds, m.commitSeconds, m.waitSeconds, m.ackSeconds, m.ageSeconds, m.inflightAtSeal,
+	m.cpCall = prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: metricsNS, Name: "cp_call_seconds",
+		Help:    "Control-plane HTTP exchange as the broker sees it (send to full response read), by op.",
+		Buckets: prometheus.ExponentialBuckets(0.0005, 2, 16)}, []string{"op"})
+	m.reg.MustRegister(m.cpCall, m.putSeconds, m.commitSeconds, m.waitSeconds, m.ackSeconds, m.ageSeconds, m.inflightAtSeal,
 		m.sealed, m.sealedBytes, m.committedSegs, m.committedByte, m.failedSegs, m.putAttempts, m.pausedSeconds,
 		m.buffered, m.inflight, m.paused,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
@@ -84,6 +90,11 @@ func NewMetrics() *Metrics {
 // Handler serves the registry in the Prometheus text format.
 func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.reg, promhttp.HandlerOpts{})
+}
+
+// ObserveCPCall records one control-plane exchange (wire to cpclient.Client.Observe).
+func (m *Metrics) ObserveCPCall(op string, d time.Duration) {
+	m.cpCall.WithLabelValues(op).Observe(d.Seconds())
 }
 
 func seconds(ns int64) float64 { return float64(ns) / 1e9 }

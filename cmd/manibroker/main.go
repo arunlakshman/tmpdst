@@ -57,9 +57,10 @@ func main() {
 	slog.SetDefault(log)
 
 	ctx := context.Background()
+	cpc := cpclient.New(*cpURL, nil)
 	cfg := prod.NodeConfig{
 		NodeID: *nodeID, Broker: broker.DefaultConfig(), Log: log,
-		ControlPlane: cpclient.New(*cpURL, nil), CPClassify: cpclient.Classifier{},
+		ControlPlane: cpc, CPClassify: cpclient.Classifier{},
 		StopGrace: *grace,
 	}
 	if cfg.NodeID == "" {
@@ -97,6 +98,7 @@ func main() {
 		}
 		m := prod.NewMetrics()
 		cfg.Facts = m.Observe
+		cpc.Observe(m.ObserveCPCall)
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", m.Handler())
 		go func() { _ = http.Serve(mln, mux) }()

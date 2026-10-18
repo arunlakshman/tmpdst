@@ -35,6 +35,7 @@ func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.
 				return core.CommitSegmentResp{}, 0, err
 			}
 		}
+		s.Obs.Attempt("commit")
 		resp, code, retry, err := s.commitOnce(ctx, op)
 		if !retry {
 			return resp, code, err
@@ -44,6 +45,7 @@ func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.
 }
 
 func (s *Store) commitOnce(ctx context.Context, op core.CommitSegment) (resp core.CommitSegmentResp, code core.ErrCode, retry bool, err error) {
+	t0 := time.Now()
 	// 1. Already committed: replay or conflict, whatever the epoch says now.
 	if it, err := s.getItem(ctx, segKey(op.SegmentKey)); err != nil {
 		return resp, 0, false, err
@@ -98,18 +100,28 @@ func (s *Store) commitOnce(ctx context.Context, op core.CommitSegment) (resp cor
 	}
 	// 4. Read, decide, commit.
 	snap, err := s.snapshot(ctx, op.Batches)
+	s.Obs.Prep("reads", time.Since(t0))
 	if err != nil {
 		return resp, 0, false, err
 	}
+	t1 := time.Now()
 	d := decide(op.Batches, snap)
 	items, code := s.txItems(op, snap, d)
+	s.Obs.Prep("decide_encode", time.Since(t1))
 	if code != core.OK {
 		return resp, code, false, nil
 	}
+	t2 := time.Now()
 	_, err = s.db.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: items})
+	s.Obs.Call("TransactWriteItems", t2)
 	if err != nil {
 		var tc *types.TransactionCanceledException
-		if errors.As(err, &tc) || errors.Is(infra(err), cp.ErrUnavailable) && !errors.Is(err, context.Canceled) {
+		if errors.As(err, &tc) {
+			s.Obs.Retry("commit", "transaction_canceled")
+			return resp, 0, true, nil
+		}
+		if errors.Is(infra(err), cp.ErrUnavailable) && !errors.Is(err, context.Canceled) {
+			s.Obs.Retry("commit", "unavailable")
 			return resp, 0, true, nil
 		}
 		return resp, 0, false, err

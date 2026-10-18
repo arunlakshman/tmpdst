@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
 	"manifester/cp"
+	"manifester/cp/cpobs"
 	"manifester/cp/dynamo"
 	"manifester/cp/memstore"
 )
@@ -29,10 +31,24 @@ func main() {
 	region := flag.String("region", "us-east-1", "AWS region")
 	prefix := flag.String("table-prefix", "manifester_", "DynamoDB table name prefix")
 	create := flag.Bool("create-tables", false, "create the DynamoDB table at startup")
+	metricsAddr := flag.String("metrics-addr", ":9101", "serve Prometheus metrics on /metrics at this address (empty: disabled)")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
+
+	var m *cpobs.Metrics
+	if *metricsAddr != "" {
+		m = cpobs.New()
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", m.Handler())
+		mln, err := net.Listen("tcp", *metricsAddr)
+		if err != nil {
+			fatal(err)
+		}
+		go func() { _ = http.Serve(mln, mux) }()
+		slog.Info("manicp metrics", "addr", mln.Addr().String())
+	}
 
 	var st cp.Store
 	switch *kind {
@@ -40,6 +56,7 @@ func main() {
 		st = memstore.New()
 	case "dynamo":
 		d := dynamo.New(newDynamo(ctx, *endpoint, *region), *prefix)
+		d.Obs = m
 		if *create {
 			if err := d.CreateTables(ctx); err != nil {
 				fatal(err)
@@ -50,7 +67,7 @@ func main() {
 		fatal(errors.New("unknown -store " + *kind))
 	}
 
-	srv := &http.Server{Addr: *addr, Handler: cp.NewHandler(st), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: *addr, Handler: m.Middleware(cp.NewHandler(st)), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

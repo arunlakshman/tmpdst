@@ -60,7 +60,9 @@ func (s *Store) CreateTopic(ctx context.Context, name string, partitions int32) 
 		ExpressionAttributeValues: item{":n": num(int64(partitions))},
 	})
 	var cc *types.ConditionalCheckFailedException
-	if err != nil && !errors.As(err, &cc) {
+	if errors.As(err, &cc) {
+		s.Obs.Retry("create-topic", "conditional_check")
+	} else if err != nil {
 		return core.OK, infra(err)
 	}
 	return core.OK, nil

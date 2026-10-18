@@ -45,7 +45,13 @@ func (e *CallError) Unwrap() error { return e.Err }
 type Client struct {
 	base string
 	hc   *http.Client
+	obs  func(op string, d time.Duration)
 }
+
+// Observe sets a callback receiving, per exchange, the op name and the time
+// from sending the request to reading the whole response (the client-side
+// round trip, errors included). Call before the first Call.
+func (c *Client) Observe(f func(op string, d time.Duration)) { c.obs = f }
 
 var _ sys.ControlPlane = (*Client)(nil)
 
@@ -177,6 +183,10 @@ func (c *Client) do(ctx context.Context, name string, req, resp any) error {
 		return &CallError{Op: name, Err: err}
 	}
 	hreq.Header.Set("Content-Type", "application/json")
+	if c.obs != nil {
+		t0 := time.Now()
+		defer func() { c.obs(name, time.Since(t0)) }()
+	}
 	hres, err := c.hc.Do(hreq)
 	if err != nil {
 		return &CallError{Op: name, Sent: sent, Err: err}

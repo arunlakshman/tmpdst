@@ -15,6 +15,7 @@ import (
 
 	"manifester/core"
 	"manifester/cp"
+	"manifester/cp/cpobs"
 )
 
 // MaxTxItems is DynamoDB's TransactWriteItems limit. A commit needs
@@ -34,6 +35,8 @@ type Store struct {
 	db     *dynamodb.Client
 	prefix string
 	table  string
+	// Obs, if set, records call timings and retries (non-deterministic edge).
+	Obs *cpobs.Metrics
 }
 
 var _ cp.Store = (*Store)(nil)
@@ -122,7 +125,9 @@ func infra(err error) error {
 
 // getItem is a consistent GetItem; nil if absent.
 func (s *Store) getItem(ctx context.Context, k item) (item, error) {
+	t0 := time.Now()
 	out, err := s.db.GetItem(ctx, &dynamodb.GetItemInput{TableName: &s.table, Key: k, ConsistentRead: aws.Bool(true)})
+	s.Obs.Call("GetItem", t0)
 	if err != nil {
 		return nil, infra(err)
 	}
@@ -137,7 +142,9 @@ func (s *Store) batchGet(ctx context.Context, keys []item) (map[string]item, err
 		req := map[string]types.KeysAndAttributes{s.table: {Keys: keys[:n], ConsistentRead: aws.Bool(true)}}
 		keys = keys[n:]
 		for backoff := 5 * time.Millisecond; len(req) > 0; backoff *= 2 {
+			t0 := time.Now()
 			out, err := s.db.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{RequestItems: req})
+			s.Obs.Call("BatchGetItem", t0)
 			if err != nil {
 				return nil, infra(err)
 			}

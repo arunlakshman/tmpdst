@@ -116,3 +116,79 @@ func TestReplayFS(t *testing.T) {
 		control.FSRead{IO: 6, Path: "/d/obj/a"},
 	})
 }
+
+func TestShrinkFSEveryKind(t *testing.T) {
+	last, lastDir := FSPaths()[4], FSDirs()[1]
+	ops := []control.Actuation{
+		control.FSRead{IO: 1, Path: last},
+		control.FSList{IO: 2, Dir: lastDir},
+		control.FSWrite{IO: 3, Path: last, Data: Pattern(10, 'q')},
+		control.FSFsync{IO: 4, Path: last},
+		control.FSFsyncDir{IO: 5, Dir: lastDir},
+		control.FSUnlink{IO: 6, Path: last},
+		control.FSRename{IO: 7, From: last, To: last},
+	}
+	for _, a := range ops {
+		if got := shrinkFS(a); len(got) == 0 {
+			t.Errorf("%T: no shrinks", a)
+		}
+	}
+	if got := shrinkFS(control.FSRename{From: last, To: last}); len(got) != 8 {
+		t.Errorf("rename shrinks = %d, want 8", len(got))
+	}
+	if got := shrinkFS(control.FSRead{Path: FSPaths()[0]}); len(got) != 0 {
+		t.Errorf("simplest read shrinks: %v", got)
+	}
+	if got := shrinkFS(nil); got != nil {
+		t.Errorf("nil shrinks: %v", got)
+	}
+}
+
+func TestFormatFS(t *testing.T) {
+	cases := map[string]control.Actuation{
+		`control.FSWrite{IO: 1, Path: "/d/obj/a"}`:                                    control.FSWrite{IO: 1, Path: "/d/obj/a"},
+		`control.FSWrite{IO: 1, Path: "/d/obj/a", Data: veritastest.Pattern(3, 'c')}`: control.FSWrite{IO: 1, Path: "/d/obj/a", Data: Pattern(3, 'c')},
+		`control.FSWrite{IO: 1, Path: "/d/obj/a", Data: []byte("xx")}`:                control.FSWrite{IO: 1, Path: "/d/obj/a", Data: []byte("xx")},
+		`control.FSFsync{IO: 2, Path: "/p"}`:                                          control.FSFsync{IO: 2, Path: "/p"},
+		`control.FSRename{IO: 3, From: "/a", To: "/b"}`:                               control.FSRename{IO: 3, From: "/a", To: "/b"},
+		`control.FSFsyncDir{IO: 4, Dir: "/d"}`:                                        control.FSFsyncDir{IO: 4, Dir: "/d"},
+		`control.FSRead{IO: 5, Path: "/p"}`:                                           control.FSRead{IO: 5, Path: "/p"},
+		`control.FSUnlink{IO: 6, Path: "/p"}`:                                         control.FSUnlink{IO: 6, Path: "/p"},
+		`control.FSList{IO: 7, Dir: "/d"}`:                                            control.FSList{IO: 7, Dir: "/d"},
+	}
+	for want, a := range cases {
+		if got := formatFS(a); got != want {
+			t.Errorf("got %s, want %s", got, want)
+		}
+	}
+	if got := formatFS(nil); got != "<nil>" {
+		t.Errorf("nil: %s", got)
+	}
+}
+
+type recTB struct{ errs, logs []string }
+
+func (r *recTB) Helper()                   {}
+func (r *recTB) Errorf(f string, a ...any) { r.errs = append(r.errs, fmt.Sprintf(f, a...)) }
+func (r *recTB) Logf(f string, a ...any)   { r.logs = append(r.logs, fmt.Sprintf(f, a...)) }
+
+func TestRunModes(t *testing.T) {
+	good := Check[*int, int]{
+		Name: "int", New: func() *int { return new(int) },
+		Gen:  func(r *Rand, i int) int { return i },
+		Step: func(*int, int) error { return nil }, Format: func(op int) string { return fmt.Sprint(op) }, Ops: 3,
+	}
+	var r recTB
+	Run(&r, good, Options{Seed: 5})
+	Run(&r, good, Options{Seed: -1, Seeds: 4})
+	calls := 0
+	Run(&r, good, Options{Seed: -1, Stop: func() bool { calls++; return calls > 2 }})
+	if len(r.errs) != 0 || len(r.logs) != 3 {
+		t.Fatalf("errs %v logs %v", r.errs, r.logs)
+	}
+	Run(&r, counter(), Options{Seed: -1, Seeds: 200, Replay: func(s uint64) string { return "replay" }})
+	Run(&r, counter(), Options{Seed: 1})
+	if len(r.errs) == 0 {
+		t.Fatal("planted bug not reported")
+	}
+}

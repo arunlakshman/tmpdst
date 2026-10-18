@@ -91,3 +91,16 @@ func TestQueueClampsPastAndDropsIncarnation(t *testing.T) {
 		t.Fatalf("past entry not clamped to now: %v", ats[0])
 	}
 }
+
+func TestEntryKindString(t *testing.T) {
+	want := map[EntryKind]string{
+		KindDeliver: "deliver", KindFSLand: "fs-land", KindClientWake: "client-wake",
+		KindCrash: "crash", KindRestart: "restart", KindQuiesce: "quiesce",
+		KindSettle: "settle", KindSettlingEnd: "settling-end", EntryKind(200): "kind(?)",
+	}
+	for k, w := range want {
+		if got := k.String(); got != w {
+			t.Errorf("%d: got %q, want %q", k, got, w)
+		}
+	}
+}

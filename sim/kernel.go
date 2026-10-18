@@ -460,91 +460,131 @@ func (r *run) verifyHash(what string, cached uint64, full func() uint64) {
 func (r *run) process(e Entry) {
 	switch e.Kind {
 	case EntryDeliver:
-		n := r.byName[e.Target.Node.Node]
-		if n == nil || !n.alive || n.ref != e.Target.Node {
-			r.counters[cDroppedStale]++
-			r.logf("drop stale %s", desc{e.Body})
-			return
-		}
-		if _, isWake := e.Body.(wake); isWake {
-			n.wakePending = false
-			r.counters[cWakes]++
-			r.logf("wake %s", n.name)
-		} else {
-			body, isEv := e.Body.(core.EventBody)
-			if !isEv {
-				r.fail(FailProtocol, "bad_delivery", fmt.Sprintf("delivery body %T is not an event", e.Body))
-				return
-			}
-			r.counters[cDeliveries]++
-			r.logf("deliver %s <- %s", n.name, desc{body})
-			n.inbox.Push(body)
-		}
-		r.pump(n)
+		r.processDeliver(e)
 	case EntryEngineInternal:
-		i, ok := r.byEng[e.Target.Engine]
-		if !ok {
-			r.fail(FailProtocol, "bad_internal", "entry for unknown engine "+e.Target.Engine)
-			return
-		}
-		r.counters[cEngineSteps]++
-		r.logf("engine %s internal %s", e.Target.Engine, desc{e.Body})
-		r.engOK[i] = false
-		if !r.guard("OnInternal "+e.Target.Engine, func() { r.engines[i].OnInternal(r.engCtx[i], e.Body) }) {
-			r.halt = true
-			return
-		}
-		r.attr++
+		r.processInternal(e)
 	case EntryCrash:
-		r.counters[cSimSteps]++
-		n := r.byName[e.Target.Node.Node]
-		if n == nil || !n.alive || (e.Target.Node.Inc != (core.Incarnation{}) && n.ref != e.Target.Node) {
-			return
-		}
-		if n.stopping && e.Target.Node.Inc != (core.Incarnation{}) {
-			r.counters[cDeadlineKills]++
-		}
-		r.end(n, endCrash, "crash")
+		r.processCrash(e)
 	case EntryRestart:
-		r.counters[cSimSteps]++
-		n := r.byName[e.Target.Node.Node]
-		if n != nil && !n.alive && !n.broken {
-			r.boot(n)
-		}
+		r.processRestart(e)
 	case EntryStop:
-		r.counters[cSimSteps]++
-		n := r.byName[e.Target.Node.Node]
-		if n != nil && n.alive && !n.workload && !n.stopping {
-			r.stopNode(n)
-		}
+		r.processStop(e)
 	case EntryPhase:
-		r.counters[cSimSteps]++
-		pc := e.Body.(phaseChange)
-		r.phase = pc.to
-		r.logf("phase %d", pc.to)
-		r.simFact("sim_phase", core.Field{Key: "phase", Value: core.U64(uint64(pc.to))})
-		if pc.to == PhaseSettling {
-			for i, eng := range r.engines {
-				r.engOK[i] = false
-				if !r.guard("EnterRecovery "+eng.Name(), eng.EnterRecovery) {
-					r.halt = true
-				}
-			}
-		}
-		r.notifyPhase(pc.to)
+		r.processPhase(e)
 	case EntryQuiesce:
-		r.counters[cSimSteps]++
-		q := true
-		for _, n := range r.nodes {
-			if n.workload && n.alive && !n.wl.Quiescent() {
-				q = false
-			}
-		}
-		r.simFact("sim_quiesce", core.Field{Key: "quiescent", Value: core.Bool(q)})
-		r.sched.Schedule(Entry{At: r.now() + Time(r.cfg.QuiesceEvery), Lane: laneSim, Kind: EntryQuiesce})
+		r.processQuiesce()
 	default:
 		r.fail(FailProtocol, "bad_entry", fmt.Sprintf("unknown entry kind %d", e.Kind))
 	}
+}
+
+func (r *run) processRestart(e Entry) {
+	r.counters[cSimSteps]++
+	n := r.byName[e.Target.Node.Node]
+	if n != nil && !n.alive && !n.broken {
+		r.boot(n)
+	}
+}
+
+func (r *run) processStop(e Entry) {
+	r.counters[cSimSteps]++
+	n := r.byName[e.Target.Node.Node]
+	if n != nil && n.alive && !n.workload && !n.stopping {
+		r.stopNode(n)
+	}
+}
+
+func (r *run) processDeliver(e Entry) {
+	n := r.byName[e.Target.Node.Node]
+	if n == nil || !n.alive || n.ref != e.Target.Node {
+		r.counters[cDroppedStale]++
+		r.logf("drop stale %s", desc{e.Body})
+		return
+	}
+	if _, isWake := e.Body.(wake); isWake {
+		n.wakePending = false
+		r.counters[cWakes]++
+		r.logf("wake %s", n.name)
+	} else if !r.enqueueDelivery(n, e) {
+		return
+	}
+	r.pump(n)
+}
+
+// enqueueDelivery pushes the event body of e onto n's inbox; false (after
+// failing the seed) if the body is not an event.
+func (r *run) enqueueDelivery(n *node, e Entry) bool {
+	body, isEv := e.Body.(core.EventBody)
+	if !isEv {
+		r.fail(FailProtocol, "bad_delivery", fmt.Sprintf("delivery body %T is not an event", e.Body))
+		return false
+	}
+	r.counters[cDeliveries]++
+	r.logf("deliver %s <- %s", n.name, desc{body})
+	n.inbox.Push(body)
+	return true
+}
+
+func (r *run) processInternal(e Entry) {
+	i, ok := r.byEng[e.Target.Engine]
+	if !ok {
+		r.fail(FailProtocol, "bad_internal", "entry for unknown engine "+e.Target.Engine)
+		return
+	}
+	r.counters[cEngineSteps]++
+	r.logf("engine %s internal %s", e.Target.Engine, desc{e.Body})
+	r.engOK[i] = false
+	if !r.guard("OnInternal "+e.Target.Engine, func() { r.engines[i].OnInternal(r.engCtx[i], e.Body) }) {
+		r.halt = true
+		return
+	}
+	r.attr++
+}
+
+func (r *run) processCrash(e Entry) {
+	r.counters[cSimSteps]++
+	n := r.byName[e.Target.Node.Node]
+	if n == nil || !n.alive || (e.Target.Node.Inc != (core.Incarnation{}) && n.ref != e.Target.Node) {
+		return
+	}
+	if n.stopping && e.Target.Node.Inc != (core.Incarnation{}) {
+		r.counters[cDeadlineKills]++
+	}
+	r.end(n, endCrash, "crash")
+}
+
+func (r *run) processPhase(e Entry) {
+	r.counters[cSimSteps]++
+	pc := e.Body.(phaseChange)
+	r.phase = pc.to
+	r.logf("phase %d", pc.to)
+	r.simFact("sim_phase", core.Field{Key: "phase", Value: core.U64(uint64(pc.to))})
+	if pc.to == PhaseSettling {
+		r.enterRecovery()
+	}
+	r.notifyPhase(pc.to)
+}
+
+// enterRecovery tells every engine the settling phase began.
+func (r *run) enterRecovery() {
+	for i, eng := range r.engines {
+		r.engOK[i] = false
+		if !r.guard("EnterRecovery "+eng.Name(), eng.EnterRecovery) {
+			r.halt = true
+		}
+	}
+}
+
+func (r *run) processQuiesce() {
+	r.counters[cSimSteps]++
+	q := true
+	for _, n := range r.nodes {
+		if n.workload && n.alive && !n.wl.Quiescent() {
+			q = false
+		}
+	}
+	r.simFact("sim_quiesce", core.Field{Key: "quiescent", Value: core.Bool(q)})
+	r.sched.Schedule(Entry{At: r.now() + Time(r.cfg.QuiesceEvery), Lane: laneSim, Kind: EntryQuiesce})
 }
 
 // notifyPhase calls OnPhase on every live PhaseAware workload, in node order,

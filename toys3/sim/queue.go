@@ -25,23 +25,18 @@ const (
 )
 
 func (k EntryKind) String() string {
-	switch k {
-	case KindDeliver:
-		return "deliver"
-	case KindFSLand:
-		return "fs-land"
-	case KindClientWake:
-		return "client-wake"
-	case KindCrash:
-		return "crash"
-	case KindRestart:
-		return "restart"
-	case KindQuiesce:
-		return "quiesce"
-	case KindSettle:
-		return "settle"
-	case KindSettlingEnd:
-		return "settling-end"
+	names := [...]string{
+		KindDeliver:     "deliver",
+		KindFSLand:      "fs-land",
+		KindClientWake:  "client-wake",
+		KindCrash:       "crash",
+		KindRestart:     "restart",
+		KindQuiesce:     "quiesce",
+		KindSettle:      "settle",
+		KindSettlingEnd: "settling-end",
+	}
+	if int(k) < len(names) {
+		return names[k]
 	}
 	return "kind(?)"
 }

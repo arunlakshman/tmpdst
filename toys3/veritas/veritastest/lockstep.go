@@ -229,20 +229,31 @@ func Run[S, Op any](t TB, c Check[S, Op], o Options) {
 		t.Logf("seed %d: %d operations passed", o.Seed, c.Ops)
 		return
 	}
-	n := 0
-	for seed := uint64(1); ; seed++ {
-		if o.Stop != nil {
-			if o.Stop() {
-				break
-			}
-		} else if seed > uint64(o.Seeds) {
-			break
-		}
-		n++
-		if f := c.RunSeed(seed); f != nil {
-			report(f)
-			return
-		}
+	n, f := runSeeds(c, o)
+	if f != nil {
+		report(f)
+		return
 	}
 	t.Logf("%d seeds × %d operations passed", n, c.Ops)
+}
+
+// seedsDone reports whether the seed loop is over before running seed.
+func (o Options) seedsDone(seed uint64) bool {
+	if o.Stop != nil {
+		return o.Stop()
+	}
+	return seed > uint64(o.Seeds)
+}
+
+// runSeeds runs seeds 1, 2, ... until o stops it or one fails; it returns the
+// count run and the first failure.
+func runSeeds[S, Op any](c Check[S, Op], o Options) (int, *Failure[Op]) {
+	n := 0
+	for seed := uint64(1); !o.seedsDone(seed); seed++ {
+		n++
+		if f := c.RunSeed(seed); f != nil {
+			return n, f
+		}
+	}
+	return n, nil
 }

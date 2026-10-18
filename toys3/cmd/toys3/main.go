@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -23,40 +24,69 @@ import (
 	"manifester/toys3/prod"
 )
 
-func main() {
-	dir := flag.String("dir", "./toys3-data", "data directory (obj/ and tmp/ are created inside)")
-	addr := flag.String("addr", ":8080", "HTTP listen address")
-	maxObj := flag.Int("max-object", 64<<20, "largest object in bytes (0 = unlimited)")
-	flag.Parse()
+// config is the parsed command line.
+type config struct {
+	dir    string
+	addr   string
+	maxObj int
+}
 
-	root, err := filepath.Abs(*dir)
+func parseFlags(args []string) (config, error) {
+	var c config
+	fs := flag.NewFlagSet("toys3", flag.ContinueOnError)
+	fs.StringVar(&c.dir, "dir", "./toys3-data", "data directory (obj/ and tmp/ are created inside)")
+	fs.StringVar(&c.addr, "addr", ":8080", "HTTP listen address")
+	fs.IntVar(&c.maxObj, "max-object", 64<<20, "largest object in bytes (0 = unlimited)")
+	return c, fs.Parse(args)
+}
+
+// run serves until ctx is cancelled (nil), the server fails, or the loop
+// trips (an error: in-memory state is untrusted, so the process must exit
+// and be restarted by a supervisor; recovery runs on boot).
+func run(ctx context.Context, args []string) error {
+	c, err := parseFlags(args)
 	if err != nil {
-		log.Fatalf("toys3: %v", err)
+		return err
+	}
+	root, err := filepath.Abs(c.dir)
+	if err != nil {
+		return err
 	}
 	root = filepath.ToSlash(root)
-	log.Printf("toys3: dir=%s addr=%s", root, *addr)
+	log.Printf("toys3: dir=%s addr=%s", root, c.addr)
 	if err := prod.PrepareDir(root); err != nil {
-		log.Fatalf("toys3: prepare %s: %v", root, err)
+		return fmt.Errorf("prepare %s: %w", root, err)
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	loop := prod.NewLoop(control.Config{Dir: root, MaxObjectSize: *maxObj}, control.NewMachine, prod.OSExecutor{}, 1024)
-	srv := &http.Server{Addr: *addr, Handler: &prod.Handler{Loop: loop, MaxBody: int64(*maxObj)}}
-
+	loop := prod.NewLoop(control.Config{Dir: root, MaxObjectSize: c.maxObj}, control.NewMachine, prod.OSExecutor{}, 1024)
+	srv := &http.Server{Addr: c.addr, Handler: &prod.Handler{Loop: loop, MaxBody: int64(c.maxObj)}}
+	tripped := make(chan error, 1)
 	go func() {
 		err := loop.Run(ctx)
 		if errors.Is(err, prod.ErrTripped) {
-			// Fail-stop: in-memory state is untrusted. A supervisor restarts us
-			// and recovery runs on boot.
-			log.Fatalf("toys3: exiting: %v", err)
+			tripped <- err
 		}
 		srv.Close()
 	}()
-
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("toys3: %v", err)
+		return err
+	}
+	select {
+	case err := <-tripped:
+		return fmt.Errorf("exiting: %w", err)
+	default:
 	}
 	log.Printf("toys3: stopped")
+	return nil
+}
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := run(ctx, os.Args[1:])
+	stop()
+	if errors.Is(err, flag.ErrHelp) {
+		return
+	}
+	if err != nil {
+		log.Fatalf("toys3: %v", err)
+	}
 }

@@ -135,82 +135,106 @@ func (c *ControlPlane) Exec(a core.IOAction) core.Completion {
 	if !ok {
 		panic("veritas.ControlPlane: not a CPCall")
 	}
-	fail := func(e core.ErrCode) core.Completion { return core.CPDone{Req: call.Req, Err: e} }
 	switch op := call.Op.(type) {
 	case core.Register:
-		c.epochs[string(op.Self.Node)]++
-		c.segPre = nil
-		resp := core.RegisterResp{Epoch: c.epochs[string(op.Self.Node)]}
-		return core.CPDone{Req: call.Req, Resp: resp, Outcome: core.Applied}
+		return c.execRegister(call.Req, op)
 	case core.InitProducer:
 		resp := core.InitProducerResp{Producer: c.nextPID}
 		c.nextPID++
 		return core.CPDone{Req: call.Req, Resp: resp, Outcome: core.Applied}
 	case core.CommitSegment:
-		if seg, done := c.segs[op.SegmentKey]; done {
-			if !slices.Equal(seg.batches, op.Batches) {
-				return fail(core.ErrConflict)
-			}
-			resp := core.CommitSegmentResp{Assigned: slices.Clone(seg.ranges)}
-			return core.CPDone{Req: call.Req, Resp: resp, Outcome: core.Applied}
-		}
-		if op.SegmentKey == "" || len(op.Batches) == 0 {
-			return fail(core.ErrInvalid)
-		}
-		for _, b := range op.Batches {
-			if b.Records <= 0 || b.TP.Topic == "" || b.TP.Partition < 0 {
-				return fail(core.ErrInvalid)
-			}
-			if b.Producer != core.NoProducer && (b.Producer < firstProducer || b.Producer >= c.nextPID || b.PEpoch < 0 || b.BaseSeq < 0) {
-				return fail(core.ErrInvalid)
-			}
-		}
-		if cur, ok := c.epochs[string(op.Owner.Node)]; !ok || op.Epoch != cur {
-			return fail(core.ErrFenced)
-		}
-		seg := segment{batches: slices.Clone(op.Batches)}
-		for _, b := range op.Batches {
-			r, assigned := c.idempotent(b)
-			if assigned {
-				c.append(r)
-			}
-			seg.ranges = append(seg.ranges, r)
-		}
-		i, _ := slices.BinarySearch(c.segKeys, op.SegmentKey)
-		c.segKeys = slices.Insert(c.segKeys, i, op.SegmentKey)
-		if len(c.segPre) > i+1 {
-			c.segPre = c.segPre[:i+1]
-		}
-		c.segs[op.SegmentKey] = seg
-		resp := core.CommitSegmentResp{Assigned: slices.Clone(seg.ranges)}
-		return core.CPDone{Req: call.Req, Resp: resp, Outcome: core.Applied}
+		return c.execCommit(call.Req, op)
 	case core.Lookup:
-		if op.From < 0 {
+		return c.execLookup(call.Req, op)
+	case core.DescribeTopics:
+		return c.execDescribe(call.Req, op)
+	}
+	return core.CPDone{Req: call.Req, Err: core.ErrInvalid}
+}
+
+func (c *ControlPlane) execRegister(req core.ReqID, op core.Register) core.Completion {
+	c.epochs[string(op.Self.Node)]++
+	c.segPre = nil
+	resp := core.RegisterResp{Epoch: c.epochs[string(op.Self.Node)]}
+	return core.CPDone{Req: req, Resp: resp, Outcome: core.Applied}
+}
+
+// validBatch reports whether b is well formed against the producer table.
+func (c *ControlPlane) validBatch(b core.PendingBatch) bool {
+	if b.Records <= 0 || b.TP.Topic == "" || b.TP.Partition < 0 {
+		return false
+	}
+	if b.Producer == core.NoProducer {
+		return true
+	}
+	return b.Producer >= firstProducer && b.Producer < c.nextPID && b.PEpoch >= 0 && b.BaseSeq >= 0
+}
+
+func (c *ControlPlane) execCommit(req core.ReqID, op core.CommitSegment) core.Completion {
+	fail := func(e core.ErrCode) core.Completion { return core.CPDone{Req: req, Err: e} }
+	if seg, done := c.segs[op.SegmentKey]; done {
+		if !slices.Equal(seg.batches, op.Batches) {
+			return fail(core.ErrConflict)
+		}
+		resp := core.CommitSegmentResp{Assigned: slices.Clone(seg.ranges)}
+		return core.CPDone{Req: req, Resp: resp, Outcome: core.Applied}
+	}
+	if op.SegmentKey == "" || len(op.Batches) == 0 {
+		return fail(core.ErrInvalid)
+	}
+	for _, b := range op.Batches {
+		if !c.validBatch(b) {
 			return fail(core.ErrInvalid)
 		}
-		resp := core.LookupResp{HighWatermark: c.HighWatermark(op.TP)}
-		var bytes int64
-		for _, r := range c.parts[op.TP.Topic][op.TP.Partition] {
-			if r.Base+core.Offset(r.Count) <= op.From {
-				continue
-			}
-			resp.Ranges = append(resp.Ranges, r)
-			bytes += r.Loc.Len
-			if op.MaxBytes > 0 && bytes >= int64(op.MaxBytes) {
-				break
-			}
-		}
-		return core.CPDone{Req: call.Req, Resp: resp}
-	case core.DescribeTopics:
-		var resp core.DescribeTopicsResp
-		for _, name := range sortedKeys(c.topics) {
-			if len(op.Topics) == 0 || slices.Contains(op.Topics, name) {
-				resp.Topics = append(resp.Topics, core.TopicInfo{Name: name, Partitions: c.topics[name]})
-			}
-		}
-		return core.CPDone{Req: call.Req, Resp: resp}
 	}
-	return fail(core.ErrInvalid)
+	if cur, ok := c.epochs[string(op.Owner.Node)]; !ok || op.Epoch != cur {
+		return fail(core.ErrFenced)
+	}
+	seg := segment{batches: slices.Clone(op.Batches)}
+	for _, b := range op.Batches {
+		r, assigned := c.idempotent(b)
+		if assigned {
+			c.append(r)
+		}
+		seg.ranges = append(seg.ranges, r)
+	}
+	i, _ := slices.BinarySearch(c.segKeys, op.SegmentKey)
+	c.segKeys = slices.Insert(c.segKeys, i, op.SegmentKey)
+	if len(c.segPre) > i+1 {
+		c.segPre = c.segPre[:i+1]
+	}
+	c.segs[op.SegmentKey] = seg
+	resp := core.CommitSegmentResp{Assigned: slices.Clone(seg.ranges)}
+	return core.CPDone{Req: req, Resp: resp, Outcome: core.Applied}
+}
+
+func (c *ControlPlane) execLookup(req core.ReqID, op core.Lookup) core.Completion {
+	if op.From < 0 {
+		return core.CPDone{Req: req, Err: core.ErrInvalid}
+	}
+	resp := core.LookupResp{HighWatermark: c.HighWatermark(op.TP)}
+	var bytes int64
+	for _, r := range c.parts[op.TP.Topic][op.TP.Partition] {
+		if r.Base+core.Offset(r.Count) <= op.From {
+			continue
+		}
+		resp.Ranges = append(resp.Ranges, r)
+		bytes += r.Loc.Len
+		if op.MaxBytes > 0 && bytes >= int64(op.MaxBytes) {
+			break
+		}
+	}
+	return core.CPDone{Req: req, Resp: resp}
+}
+
+func (c *ControlPlane) execDescribe(req core.ReqID, op core.DescribeTopics) core.Completion {
+	var resp core.DescribeTopicsResp
+	for _, name := range sortedKeys(c.topics) {
+		if len(op.Topics) == 0 || slices.Contains(op.Topics, name) {
+			resp.Topics = append(resp.Topics, core.TopicInfo{Name: name, Partitions: c.topics[name]})
+		}
+	}
+	return core.CPDone{Req: req, Resp: resp}
 }
 
 // idempotent decides one batch against the producer state and updates it. It

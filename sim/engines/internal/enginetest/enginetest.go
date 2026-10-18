@@ -102,32 +102,44 @@ func (c *Ctx) Crash(n string) {
 
 // Run drains the queue in (At, seq) order.
 func (c *Ctx) Run() {
-	for {
-		var live []*entry
-		for _, e := range c.q {
-			if !e.dead {
-				live = append(live, e)
-			}
-		}
-		c.q = live
-		if len(c.q) == 0 {
-			return
-		}
-		slices.SortStableFunc(c.q, func(a, b *entry) int {
-			if a.at != b.at {
-				return int(a.at - b.at)
-			}
-			return a.seq - b.seq
-		})
-		e := c.q[0]
-		c.q = c.q[1:]
-		c.T = e.at
-		if e.self {
-			c.eng.OnInternal(c, e.body)
-		} else {
-			c.Delivered = append(c.Delivered, Delivery{At: e.at, To: e.to, Body: e.body.(core.EventBody)})
+	for c.step() {
+	}
+}
+
+// dropDead removes cancelled entries from the queue.
+func (c *Ctx) dropDead() {
+	var live []*entry
+	for _, e := range c.q {
+		if !e.dead {
+			live = append(live, e)
 		}
 	}
+	c.q = live
+}
+
+func entryLess(a, b *entry) int {
+	if a.at != b.at {
+		return int(a.at - b.at)
+	}
+	return a.seq - b.seq
+}
+
+// step runs the earliest live entry; false when the queue is empty.
+func (c *Ctx) step() bool {
+	c.dropDead()
+	if len(c.q) == 0 {
+		return false
+	}
+	slices.SortStableFunc(c.q, entryLess)
+	e := c.q[0]
+	c.q = c.q[1:]
+	c.T = e.at
+	if e.self {
+		c.eng.OnInternal(c, e.body)
+	} else {
+		c.Delivered = append(c.Delivered, Delivery{At: e.at, To: e.to, Body: e.body.(core.EventBody)})
+	}
+	return true
 }
 
 // Trace renders the deliveries for equality checks.

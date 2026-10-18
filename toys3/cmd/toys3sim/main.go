@@ -11,8 +11,10 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"sync"
@@ -27,100 +29,161 @@ type failure struct {
 	msg  string
 }
 
-func main() {
-	duration := flag.Duration("duration", time.Minute, "wall-clock budget")
-	workers := flag.Int("workers", runtime.GOMAXPROCS(0), "parallel seeds")
-	startSeed := flag.Uint64("start-seed", 1, "first seed")
-	checkDet := flag.Bool("check-determinism", false, "run every -det-every'th seed twice and compare traces")
-	detEvery := flag.Uint64("det-every", 10, "with -check-determinism: replay every K-th seed")
-	maxFailures := flag.Int("max-failures", 20, "stop early after this many failing seeds")
-	flag.Parse()
+// options are the parsed command-line flags.
+type options struct {
+	duration    time.Duration
+	workers     int
+	startSeed   uint64
+	checkDet    bool
+	detEvery    uint64
+	maxFailures int
+}
 
-	var (
-		next     atomic.Uint64
-		done     atomic.Int64
-		detRuns  atomic.Int64
-		steps    atomic.Int64
-		mu       sync.Mutex
-		agg      sim.Stats
-		failures []failure
-		stop     atomic.Bool
-	)
-	next.Store(*startSeed)
-	start := time.Now()
-	deadline := start.Add(*duration)
+func parseFlags(args []string, errOut io.Writer) (options, error) {
+	var o options
+	fs := flag.NewFlagSet("toys3sim", flag.ContinueOnError)
+	fs.SetOutput(errOut)
+	fs.DurationVar(&o.duration, "duration", time.Minute, "wall-clock budget")
+	fs.IntVar(&o.workers, "workers", runtime.GOMAXPROCS(0), "parallel seeds")
+	fs.Uint64Var(&o.startSeed, "start-seed", 1, "first seed")
+	fs.BoolVar(&o.checkDet, "check-determinism", false, "run every -det-every'th seed twice and compare traces")
+	fs.Uint64Var(&o.detEvery, "det-every", 10, "with -check-determinism: replay every K-th seed")
+	fs.IntVar(&o.maxFailures, "max-failures", 20, "stop early after this many failing seeds")
+	err := fs.Parse(args)
+	return o, err
+}
 
-	record := func(f failure) {
-		mu.Lock()
-		defer mu.Unlock()
-		failures = append(failures, f)
-		fmt.Printf("FAIL seed %d: %s\n  repro: go test ./toys3/sim -run TestSeeds -seed=%d -v\n", f.seed, f.msg, f.seed)
-		if len(failures) >= *maxFailures {
-			stop.Store(true)
-		}
+// campaign is the shared tally of one run; the simulation itself shares
+// nothing between seeds.
+type campaign struct {
+	o        options
+	out      io.Writer
+	next     atomic.Uint64
+	done     atomic.Int64
+	detRuns  atomic.Int64
+	steps    atomic.Int64
+	stop     atomic.Bool
+	mu       sync.Mutex
+	agg      sim.Stats
+	failures []failure
+	start    time.Time
+	deadline time.Time
+	// runSeed is sim.Run; tests replace it.
+	runSeed func(seed uint64) sim.Result
+}
+
+func (c *campaign) record(f failure) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.failures = append(c.failures, f)
+	fmt.Fprintf(c.out, "FAIL seed %d: %s\n  repro: go test ./toys3/sim -run TestSeeds -seed=%d -v\n", f.seed, f.msg, f.seed)
+	if len(c.failures) >= c.o.maxFailures {
+		c.stop.Store(true)
 	}
+}
 
-	var wg sync.WaitGroup
-	for w := 0; w < *workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for !stop.Load() && time.Now().Before(deadline) {
-				seed := next.Add(1) - 1
-				r := sim.Run(sim.DefaultConfig(seed))
-				steps.Add(int64(r.Steps))
-				if len(r.Failures) > 0 {
-					f := r.Failures[0]
-					record(failure{seed, fmt.Sprintf("%s at step %d: %.300s", f.Invariant, f.Step, f.Msg)})
-				}
-				if *checkDet && *detEvery > 0 && seed%*detEvery == 0 {
-					r2 := sim.Run(sim.DefaultConfig(seed))
-					detRuns.Add(1)
-					if r2.TraceHash != r.TraceHash || r2.RandCalls != r.RandCalls || r2.Steps != r.Steps {
-						record(failure{seed, fmt.Sprintf("NONDETERMINISM: trace %016x vs %016x, rand %d vs %d, steps %d vs %d",
-							r.TraceHash, r2.TraceHash, r.RandCalls, r2.RandCalls, r.Steps, r2.Steps)})
-					}
-				}
-				mu.Lock()
-				agg.Add(r.Stats)
-				mu.Unlock()
-				done.Add(1)
-			}
-		}()
+// checkReplay reruns seed and records a failure if the replay differs.
+func (c *campaign) checkReplay(seed uint64, r sim.Result) {
+	r2 := c.runSeed(seed)
+	c.detRuns.Add(1)
+	if r2.TraceHash != r.TraceHash || r2.RandCalls != r.RandCalls || r2.Steps != r.Steps {
+		c.record(failure{seed, fmt.Sprintf("NONDETERMINISM: trace %016x vs %016x, rand %d vs %d, steps %d vs %d",
+			r.TraceHash, r2.TraceHash, r.RandCalls, r2.RandCalls, r.Steps, r2.Steps)})
 	}
+}
 
-	progress := func(final bool) {
-		mu.Lock()
-		defer mu.Unlock()
-		el := time.Since(start)
-		n := done.Load()
-		label := "progress"
-		if final {
-			label = "SUMMARY"
-		}
-		fmt.Printf("%s %v: seeds=%d (%.0f/s) steps=%d determinism-replays=%d failures=%d workers=%d\n  %s\n",
-			label, el.Round(time.Second), n, float64(n)/el.Seconds(), steps.Load(), detRuns.Load(), len(failures), *workers, agg)
+// oneSeed runs a single seed and tallies it.
+func (c *campaign) oneSeed(seed uint64) {
+	r := c.runSeed(seed)
+	c.steps.Add(int64(r.Steps))
+	if len(r.Failures) > 0 {
+		f := r.Failures[0]
+		c.record(failure{seed, fmt.Sprintf("%s at step %d: %.300s", f.Invariant, f.Step, f.Msg)})
 	}
-	ticker := time.NewTicker(10 * time.Second)
+	if c.o.checkDet && c.o.detEvery > 0 && seed%c.o.detEvery == 0 {
+		c.checkReplay(seed, r)
+	}
+	c.mu.Lock()
+	c.agg.Add(r.Stats)
+	c.mu.Unlock()
+	c.done.Add(1)
+}
+
+func (c *campaign) worker() {
+	for !c.stop.Load() && time.Now().Before(c.deadline) {
+		c.oneSeed(c.next.Add(1) - 1)
+	}
+}
+
+func (c *campaign) progress(final bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	el := time.Since(c.start)
+	n := c.done.Load()
+	label := "progress"
+	if final {
+		label = "SUMMARY"
+	}
+	fmt.Fprintf(c.out, "%s %v: seeds=%d (%.0f/s) steps=%d determinism-replays=%d failures=%d workers=%d\n  %s\n",
+		label, el.Round(time.Second), n, float64(n)/el.Seconds(), c.steps.Load(), c.detRuns.Load(), len(c.failures), c.o.workers, c.agg)
+}
+
+// wait blocks until every worker has finished, printing progress every tick.
+func (c *campaign) wait(wg *sync.WaitGroup, tick time.Duration) {
+	ticker := time.NewTicker(tick)
+	defer ticker.Stop()
 	finished := make(chan struct{})
 	go func() { wg.Wait(); close(finished) }()
-loop:
 	for {
 		select {
 		case <-ticker.C:
-			progress(false)
+			c.progress(false)
 		case <-finished:
-			break loop
+			return
 		}
 	}
-	ticker.Stop()
-	progress(true)
-	if len(failures) > 0 {
-		fmt.Printf("%d failing seed(s); reproduce with:\n", len(failures))
-		for _, f := range failures {
-			fmt.Printf("  go test ./toys3/sim -run TestSeeds -seed=%d -v\n", f.seed)
-		}
-		os.Exit(1)
+}
+
+// exec runs the campaign and returns the process exit status.
+func (c *campaign) exec(tick time.Duration) int {
+	c.next.Store(c.o.startSeed)
+	c.start = time.Now()
+	c.deadline = c.start.Add(c.o.duration)
+	var wg sync.WaitGroup
+	for w := 0; w < c.o.workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.worker()
+		}()
 	}
-	fmt.Println("all seeds passed")
+	c.wait(&wg, tick)
+	c.progress(true)
+	if len(c.failures) > 0 {
+		fmt.Fprintf(c.out, "%d failing seed(s); reproduce with:\n", len(c.failures))
+		for _, f := range c.failures {
+			fmt.Fprintf(c.out, "  go test ./toys3/sim -run TestSeeds -seed=%d -v\n", f.seed)
+		}
+		return 1
+	}
+	fmt.Fprintln(c.out, "all seeds passed")
+	return 0
+}
+
+// run parses args, runs the campaign writing to out, and returns the exit
+// status.
+func run(args []string, out io.Writer) int {
+	o, err := parseFlags(args, out)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	c := &campaign{o: o, out: out, runSeed: func(seed uint64) sim.Result { return sim.Run(sim.DefaultConfig(seed)) }}
+	return c.exec(10 * time.Second)
+}
+
+func main() {
+	os.Exit(run(os.Args[1:], os.Stdout))
 }

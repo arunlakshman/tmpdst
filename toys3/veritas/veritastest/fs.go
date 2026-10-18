@@ -81,51 +81,52 @@ func genFS(r *Rand, i int) control.Actuation {
 
 // shrinkFS returns simpler versions of a: shorter data, then earlier paths.
 func shrinkFS(a control.Actuation) []control.Actuation {
-	var out []control.Actuation
 	switch a := a.(type) {
 	case control.FSRead:
-		for _, p := range earlier(FSPaths(), a.Path) {
-			out = append(out, control.FSRead{IO: a.IO, Path: p})
-		}
+		return substitute(FSPaths(), a.Path, func(p string) control.Actuation { return control.FSRead{IO: a.IO, Path: p} })
 	case control.FSList:
-		for _, d := range earlier(FSDirs(), a.Dir) {
-			out = append(out, control.FSList{IO: a.IO, Dir: d})
-		}
+		return substitute(FSDirs(), a.Dir, func(d string) control.Actuation { return control.FSList{IO: a.IO, Dir: d} })
 	case control.FSWrite:
-		start := byte('a')
-		if len(a.Data) > 0 {
-			start = a.Data[0]
-		}
-		for _, n := range shorter(len(a.Data)) {
-			out = append(out, control.FSWrite{IO: a.IO, Path: a.Path, Data: Pattern(n, start)})
-		}
-		if start != 'a' && bytes.Equal(a.Data, Pattern(len(a.Data), start)) {
-			out = append(out, control.FSWrite{IO: a.IO, Path: a.Path, Data: Pattern(len(a.Data), 'a')})
-		}
-		for _, p := range earlier(FSPaths(), a.Path) {
-			out = append(out, control.FSWrite{IO: a.IO, Path: p, Data: a.Data})
-		}
+		return shrinkWrite(a)
 	case control.FSFsync:
-		for _, p := range earlier(FSPaths(), a.Path) {
-			out = append(out, control.FSFsync{IO: a.IO, Path: p})
-		}
+		return substitute(FSPaths(), a.Path, func(p string) control.Actuation { return control.FSFsync{IO: a.IO, Path: p} })
 	case control.FSFsyncDir:
-		for _, d := range earlier(FSDirs(), a.Dir) {
-			out = append(out, control.FSFsyncDir{IO: a.IO, Dir: d})
-		}
+		return substitute(FSDirs(), a.Dir, func(d string) control.Actuation { return control.FSFsyncDir{IO: a.IO, Dir: d} })
 	case control.FSUnlink:
-		for _, p := range earlier(FSPaths(), a.Path) {
-			out = append(out, control.FSUnlink{IO: a.IO, Path: p})
-		}
+		return substitute(FSPaths(), a.Path, func(p string) control.Actuation { return control.FSUnlink{IO: a.IO, Path: p} })
 	case control.FSRename:
-		for _, p := range earlier(FSPaths(), a.From) {
-			out = append(out, control.FSRename{IO: a.IO, From: p, To: a.To})
-		}
-		for _, p := range earlier(FSPaths(), a.To) {
-			out = append(out, control.FSRename{IO: a.IO, From: a.From, To: p})
-		}
+		out := substitute(FSPaths(), a.From, func(p string) control.Actuation { return control.FSRename{IO: a.IO, From: p, To: a.To} })
+		return append(out, substitute(FSPaths(), a.To, func(p string) control.Actuation { return control.FSRename{IO: a.IO, From: a.From, To: p} })...)
+	}
+	return nil
+}
+
+// substitute returns mk(p) for every p in list before cur.
+func substitute(list []string, cur string, mk func(string) control.Actuation) []control.Actuation {
+	var out []control.Actuation
+	for _, p := range earlier(list, cur) {
+		out = append(out, mk(p))
 	}
 	return out
+}
+
+// shrinkWrite shortens the data, then resets its pattern start, then moves
+// the path earlier.
+func shrinkWrite(a control.FSWrite) []control.Actuation {
+	var out []control.Actuation
+	start := byte('a')
+	if len(a.Data) > 0 {
+		start = a.Data[0]
+	}
+	for _, n := range shorter(len(a.Data)) {
+		out = append(out, control.FSWrite{IO: a.IO, Path: a.Path, Data: Pattern(n, start)})
+	}
+	if start != 'a' && bytes.Equal(a.Data, Pattern(len(a.Data), start)) {
+		out = append(out, control.FSWrite{IO: a.IO, Path: a.Path, Data: Pattern(len(a.Data), 'a')})
+	}
+	return append(out, substitute(FSPaths(), a.Path, func(p string) control.Actuation {
+		return control.FSWrite{IO: a.IO, Path: p, Data: a.Data}
+	})...)
 }
 
 // shrinkFSAll returns ops with one path (or directory) renamed to an earlier
@@ -208,15 +209,7 @@ func shorter(n int) []int {
 func formatFS(a control.Actuation) string {
 	switch a := a.(type) {
 	case control.FSWrite:
-		data := ""
-		switch {
-		case len(a.Data) == 0:
-		case bytes.Equal(a.Data, Pattern(len(a.Data), a.Data[0])):
-			data = fmt.Sprintf(", Data: veritastest.Pattern(%d, %q)", len(a.Data), a.Data[0])
-		default:
-			data = fmt.Sprintf(", Data: []byte(%q)", a.Data)
-		}
-		return fmt.Sprintf("control.FSWrite{IO: %d, Path: %q%s}", a.IO, a.Path, data)
+		return fmt.Sprintf("control.FSWrite{IO: %d, Path: %q%s}", a.IO, a.Path, formatData(a.Data))
 	case control.FSFsync:
 		return fmt.Sprintf("control.FSFsync{IO: %d, Path: %q}", a.IO, a.Path)
 	case control.FSRename:
@@ -231,6 +224,17 @@ func formatFS(a control.Actuation) string {
 		return fmt.Sprintf("control.FSList{IO: %d, Dir: %q}", a.IO, a.Dir)
 	}
 	return fmt.Sprintf("%#v", a)
+}
+
+// formatData renders the Data field of a write, or "" for empty data.
+func formatData(d []byte) string {
+	switch {
+	case len(d) == 0:
+		return ""
+	case bytes.Equal(d, Pattern(len(d), d[0])):
+		return fmt.Sprintf(", Data: veritastest.Pattern(%d, %q)", len(d), d[0])
+	}
+	return fmt.Sprintf(", Data: []byte(%q)", d)
 }
 
 // fsPair is an implementation under test and its veritas.

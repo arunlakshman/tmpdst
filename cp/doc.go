@@ -3,6 +3,9 @@
 // executable spec; the stores are checked against it op for op (cp/cptest).
 // Not deterministic (goroutines, net/http): it is not in scripts/ci-determinism.sh.
 //
+// The HTTP API is described in api/openapi/controlplane.yaml (OpenAPI 3.1); a
+// test keeps it in sync with this package's routes and wire types.
+//
 // Stores: cp/memstore (the spec behind a mutex) and cp/dynamo (DynamoDB, safe
 // across many replicas). The broker side is cp/cpclient.
 //

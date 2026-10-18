@@ -69,7 +69,11 @@ func gen(r *veritastest.Rand, i int) op {
 		o.Batches = batches(veritastest.NewRand(uint64(len(shape)*7+int(shape[len(shape)-1])*131+variant)), o.Name)
 		return o
 	case k < 28:
-		return op{Kind: "lookup", TP: tp(), From: int64(r.Intn(8)) - 1, MaxBytes: int32(r.Intn(3)) * 60}
+		from := int64(r.Intn(8)) - 1
+		if r.Intn(3) == 0 {
+			from = int64(r.Intn(80)) // inside the long runs
+		}
+		return op{Kind: "lookup", TP: tp(), From: from, MaxBytes: int32(r.Intn(3)) * 60}
 	default:
 		o := op{Kind: "describe"}
 		for i := r.Intn(3); i > 0; i-- {
@@ -82,6 +86,9 @@ func gen(r *veritastest.Rand, i int) op {
 func batches(r *veritastest.Rand, key string) []core.PendingBatch {
 	var out []core.PendingBatch
 	n := r.Intn(4)
+	if r.Intn(8) == 0 { // many small batches per partition: the range runs of cp/dynamo
+		n = 8 + r.Intn(40)
+	}
 	if r.Intn(40) == 0 {
 		n = 0
 	}

@@ -57,6 +57,79 @@ func windowOps() []op {
 func TestWindowEvictionMemstore(t *testing.T) { lockstep(t, storeImpl{newMem()}, windowOps()) }
 func TestWindowEvictionDynamo(t *testing.T)   { lockstep(t, storeImpl{dynamoStore(t)}, windowOps()) }
 
+// manyBatchesOps commits segments of many small batches (one DynamoDB range
+// item per partition and segment), with a duplicate inside a segment, a replay
+// of a segment, a segment spanning two runs of one partition (two commits), and
+// a Lookup from every offset with and without a byte limit.
+func manyBatchesOps() []op {
+	ops := []op{{Kind: "register", Node: "a"}, {Kind: "init"}, {Kind: "init"}}
+	a := core.TopicPartition{Topic: "m", Partition: 0}
+	b := core.TopicPartition{Topic: "m", Partition: 1}
+	var s1, s2 []core.PendingBatch
+	for i := 0; i < 200; i++ { // 200 batches for a, interleaved with b
+		for _, tp := range []core.TopicPartition{a, b} {
+			if tp == b && i%4 != 0 {
+				continue
+			}
+			s1 = append(s1, core.PendingBatch{TP: tp, Records: int64(1 + i%3),
+				Loc: core.SegmentRef{Key: "big1", Off: int64(i) * 70, Len: int64(10 + i%5)}})
+		}
+	}
+	// Idempotent producer 1000 on a: seq 0 then a dup of seq 0 inside the segment
+	// and the next seq; producer 1001 on b.
+	s2 = []core.PendingBatch{
+		{TP: a, Records: 2, Loc: core.SegmentRef{Key: "big2", Off: 0, Len: 9}, Producer: 1000, BaseSeq: 0},
+		{TP: a, Records: 2, Loc: core.SegmentRef{Key: "big2", Off: 9, Len: 9}, Producer: 1000, BaseSeq: 0}, // dup of the batch above
+		{TP: a, Records: 3, Loc: core.SegmentRef{Key: "big2", Off: 18, Len: 9}, Producer: 1000, BaseSeq: 2},
+		{TP: b, Records: 1, Loc: core.SegmentRef{Key: "big2", Off: 27, Len: 9}, Producer: 1001, BaseSeq: 0},
+		{TP: a, Records: 1, Loc: core.SegmentRef{Key: "big2", Off: 36, Len: 9}},
+		{TP: a, Records: 1, Loc: core.SegmentRef{Key: "other", Off: 1, Len: 2}, Producer: 1000, BaseSeq: 99}, // out of order
+	}
+	commit := func(key string, bs []core.PendingBatch) op {
+		return op{Kind: "commit", Node: "a", Name: key, Epoch: 1, Batches: bs}
+	}
+	ops = append(ops, commit("big1", s1), commit("big1", s1), commit("big2", s2), commit("big2", s2),
+		commit("big3", s1), // a second run on each partition, right after the first
+		commit("big1", s2)) // same key, other batches: conflict
+	for _, tp := range []core.TopicPartition{a, b, {Topic: "m", Partition: 2}} {
+		for from := int64(0); from <= 520; from += 7 {
+			for _, mb := range []int32{0, 1, 25, 300} {
+				ops = append(ops, op{Kind: "lookup", TP: tp, From: from, MaxBytes: mb})
+			}
+		}
+	}
+	return append(ops, op{Kind: "describe"})
+}
+
+func TestManyBatchesMemstore(t *testing.T) { lockstep(t, storeImpl{newMem()}, manyBatchesOps()) }
+func TestManyBatchesDynamo(t *testing.T)   { lockstep(t, storeImpl{dynamoStore(t)}, manyBatchesOps()) }
+
+// Another replica replays a committed many-batch segment: the same answer.
+func TestManyBatchesReplayOtherReplica(t *testing.T) {
+	st := dynamoStore(t)
+	ctx := context.Background()
+	self := core.NodeRef{Node: "n"}
+	reg, _ := st.Register(ctx, core.Register{Self: self})
+	var bs []core.PendingBatch
+	for i := 0; i < 200; i++ {
+		bs = append(bs, core.PendingBatch{TP: core.TopicPartition{Topic: "r", Partition: 0}, Records: 1,
+			Loc: core.SegmentRef{Key: "s", Off: int64(i), Len: 1}})
+	}
+	op := core.CommitSegment{SegmentKey: "s", Owner: self, Epoch: reg.Epoch, Batches: bs}
+	first, code, err := st.CommitSegment(ctx, op)
+	if err != nil || code != core.OK || len(first.Assigned) != 200 || first.Assigned[199].Base != 199 {
+		t.Fatalf("first: %v %v %d", code, err, len(first.Assigned))
+	}
+	again, code, err := newReplica(t, st).CommitSegment(ctx, op)
+	if err != nil || code != core.OK || fmt.Sprint(again) != fmt.Sprint(first) {
+		t.Fatalf("replay: %v %v", code, err)
+	}
+	l, _, _ := st.Lookup(ctx, core.Lookup{TP: bs[0].TP, From: 150})
+	if len(l.Ranges) != 50 || l.Ranges[0].Base != 150 || l.HighWatermark != 200 {
+		t.Fatalf("lookup: %d ranges hwm %d", len(l.Ranges), l.HighWatermark)
+	}
+}
+
 func TestRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	st := newMem()

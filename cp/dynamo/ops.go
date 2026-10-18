@@ -118,14 +118,6 @@ func (s *Store) query(ctx context.Context, q *dynamodb.QueryInput, limit int) ([
 	}
 }
 
-func rangeOf(tp core.TopicPartition, it item) core.BatchRange {
-	base, _ := getNum(it, "base")
-	cnt, _ := getNum(it, "cnt")
-	off, _ := getNum(it, "lo")
-	ln, _ := getNum(it, "ll")
-	return core.BatchRange{TP: tp, Base: core.Offset(base), Count: cnt, Loc: core.SegmentRef{Key: getStr(it, "lk"), Off: off, Len: ln}}
-}
-
 // Lookup reads the HWM first, then the ranges below it: the answer is a
 // snapshot even while commits run.
 func (s *Store) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, core.ErrCode, error) {
@@ -142,7 +134,7 @@ func (s *Store) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, co
 		return resp, core.OK, nil
 	}
 	pk := partKey("R#", op.TP)
-	// The range holding From, if any, starts at or before it.
+	// The run holding From, if any, starts at or before it.
 	lower := int64(op.From)
 	prev, err := s.query(ctx, &dynamodb.QueryInput{
 		KeyConditionExpression:    aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
@@ -154,8 +146,9 @@ func (s *Store) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, co
 		return core.LookupResp{}, 0, err
 	}
 	if len(prev) > 0 {
-		if r := rangeOf(op.TP, prev[0]); int64(r.Base)+r.Count > int64(op.From) {
-			lower = int64(r.Base)
+		base, _ := getNum(prev[0], "base")
+		if cnt, _ := getNum(prev[0], "cnt"); base+cnt > int64(op.From) {
+			lower = base
 		}
 	}
 	var bytes int64
@@ -173,11 +166,19 @@ func (s *Store) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, co
 			return core.LookupResp{}, 0, infra(err)
 		}
 		for _, it := range out.Items {
-			r := rangeOf(op.TP, it)
-			resp.Ranges = append(resp.Ranges, r)
-			bytes += r.Loc.Len
-			if op.MaxBytes > 0 && bytes >= int64(op.MaxBytes) {
-				return resp, core.OK, nil
+			rs, err := expandRun(op.TP, it)
+			if err != nil {
+				return core.LookupResp{}, 0, err
+			}
+			for _, r := range rs {
+				if int64(r.Base)+r.Count <= int64(op.From) {
+					continue // an earlier batch of the run holding From
+				}
+				resp.Ranges = append(resp.Ranges, r)
+				bytes += r.Loc.Len
+				if op.MaxBytes > 0 && bytes >= int64(op.MaxBytes) {
+					return resp, core.OK, nil
+				}
 			}
 		}
 		if out.LastEvaluatedKey == nil {

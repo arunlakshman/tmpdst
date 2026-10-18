@@ -334,17 +334,13 @@ func (s *Store) txItems(op core.CommitSegment, snap *snapshot, d *decision) ([]t
 		}
 		items = append(items, types.TransactWriteItem{Update: u})
 	}
-	for _, r := range d.ranges {
-		if r.Err != core.OK || r.Dup {
-			continue
+	for _, run := range runsOf(d.ranges) {
+		it := runItem(run[0].TP, run)
+		if len(getBlob(it, "runs")) > maxRun {
+			return nil, core.ErrTooLarge
 		}
 		items = append(items, types.TransactWriteItem{Put: &types.Put{
-			TableName: t,
-			Item: merge(key(partKey("R#", r.TP), offSK(int64(r.Base))), item{
-				"base": num(int64(r.Base)), "cnt": num(r.Count),
-				"lk": str(r.Loc.Key), "lo": num(r.Loc.Off), "ll": num(r.Loc.Len),
-			}),
-			ConditionExpression: aws.String("attribute_not_exists(pk)"),
+			TableName: t, Item: it, ConditionExpression: aws.String("attribute_not_exists(pk)"),
 		}})
 	}
 	if len(items) > MaxTxItems {

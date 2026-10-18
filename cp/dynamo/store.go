@@ -21,9 +21,10 @@ import (
 )
 
 // MaxTxItems is DynamoDB's TransactWriteItems limit. A commit needs
-// 2 + (changed partitions) + (grown topics) + (producer states touched) +
-// (assigned batches) items, so about 30 partitions per segment with
-// idempotent producers, 48 without.
+// 2 (fence, segment) + 2 x (partitions that got a new batch: HWM and one range
+// run item) + (grown topics) + (producer states touched) items, whatever the
+// number of batches: the batches of one partition share one run item (runs.go).
+// So 24 partitions with up to 50 producer states fit.
 const MaxTxItems = 100
 
 // maxBlob keeps the segment item (batches + ranges as JSON) well under

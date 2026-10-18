@@ -54,8 +54,8 @@ func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 // onLookup picks the ranges that fit the partition limit (at least one) and
 // starts reading them.
 func (b *Broker) onLookup(o *op, r core.LookupResp) []core.Action {
-	o.fpart.HighWatermark, o.fpart.LastStableOffset = int64(r.HighWatermark), int64(r.HighWatermark)
-	if o.from > r.HighWatermark {
+	o.fpart.HighWatermark, o.fpart.LastStableOffset = int64(r.End), int64(r.End)
+	if o.from > r.End {
 		o.fpart.ErrorCode = errOffsetOutOfRange
 		return b.endOp(o)
 	}
@@ -67,7 +67,7 @@ func (b *Broker) onLookup(o *op, r core.LookupResp) []core.Action {
 		o.ranges = append(o.ranges, rg)
 		total += rg.Loc.Len
 	}
-	if o.from == r.HighWatermark || len(o.ranges) == 0 {
+	if o.from == r.End || len(o.ranges) == 0 {
 		return b.endOp(o)
 	}
 	o.state, o.attempts, o.next = opGet, 0, 0

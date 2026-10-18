@@ -44,16 +44,10 @@ func (b *Broker) StateHash() uint64 {
 	h := newHasher()
 	h.u64(uint64(b.cfg.Bug))
 	h.bool(b.started)
-	h.u64(uint64(b.epoch))
-	h.bool(b.registered)
-	h.u64(uint64(b.regReq))
-	h.u64(b.regTries)
-	h.u64(uint64(b.regGen))
 	h.u64(uint64(b.nextReq))
 	h.u64(b.nextID)
 	h.u64(uint64(b.timerGen))
 	h.bool(b.stopping)
-	h.bool(b.tripped)
 	h.bool(b.exited)
 	h.u64(uint64(b.bufBytes))
 	h.bool(b.pressure)
@@ -82,11 +76,6 @@ func (b *Broker) StateHash() uint64 {
 			h.u64(uint64(len(s.facts)))
 			h.u64(uint64(uint32(s.fetchMax)))
 		}
-	}
-	h.u64(uint64(len(b.parked)))
-	for _, p := range b.parked {
-		h.u64(uint64(p.s.conn.id))
-		h.u64(uint64(uint32(p.s.h.CorrelationID)))
 	}
 	h.u64(uint64(b.open.gen))
 	h.u64(uint64(b.open.since))
@@ -145,10 +134,6 @@ func (h *hasher) batches(bs []*pbatch) {
 		h.u64(uint64(uint32(pb.tp.Partition)))
 		h.bytes(pb.data)
 		h.u64(uint64(pb.records))
-		h.u64(uint64(pb.pid))
-		h.u64(uint64(pb.producer))
-		h.u64(uint64(uint16(pb.pepoch)))
-		h.u64(uint64(uint32(pb.baseSeq)))
 		h.ref(pb.loc)
 		h.bool(pb.answered)
 	}

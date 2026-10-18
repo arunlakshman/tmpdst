@@ -11,12 +11,11 @@ type RequestHeader = core.RequestHeader
 
 // API keys the broker serves.
 const (
-	KeyProduce        int16 = 0
-	KeyFetch          int16 = 1
-	KeyListOffsets    int16 = 2
-	KeyMetadata       int16 = 3
-	KeyApiVersions    int16 = 18
-	KeyInitProducerID int16 = 22
+	KeyProduce     int16 = 0
+	KeyFetch       int16 = 1
+	KeyListOffsets int16 = 2
+	KeyMetadata    int16 = 3
+	KeyApiVersions int16 = 18
 )
 
 // ErrCodeUnsupportedVersion is Kafka's UNSUPPORTED_VERSION error code.
@@ -35,7 +34,6 @@ func Supported() []APIRange {
 		{KeyListOffsets, 1, 7},
 		{KeyMetadata, 1, 12},
 		{KeyApiVersions, 0, 3},
-		{KeyInitProducerID, 0, 4},
 	}
 }
 

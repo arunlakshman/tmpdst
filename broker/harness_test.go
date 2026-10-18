@@ -83,7 +83,6 @@ type harness struct {
 	all     []core.Action // every action emitted, in order
 	paused  map[core.ConnID]bool
 	closed  map[core.ConnID]bool
-	tripped bool
 	exited  bool
 	cpCalls []core.CPOp
 	puts    []string
@@ -99,13 +98,10 @@ func newHarness(t *testing.T, cfg Config) *harness {
 	return h
 }
 
-// started boots the broker and lets registration complete.
+// startedHarness boots the broker.
 func startedHarness(t *testing.T, cfg Config) *harness {
 	h := newHarness(t, cfg)
 	h.do(core.Started{Self: h.self})
-	if !h.b.registered {
-		t.Fatal("broker did not register")
-	}
 	return h
 }
 
@@ -189,8 +185,6 @@ func (h *harness) exec(a core.Action) {
 		h.paused[a.Conn] = true
 	case core.ResumeReads:
 		h.paused[a.Conn] = false
-	case core.Trip:
-		h.tripped = true
 	case core.Exit:
 		h.exited = true
 	}
@@ -284,7 +278,6 @@ const (
 	verFetch    = 11
 	verList     = 5
 	verMetadata = 9
-	verInit     = 2
 )
 
 var params = kwire.BatchParams{FirstTimestamp: 1000, MaxTimestamp: 1000}
@@ -342,22 +335,6 @@ func fetchReq(topic string, part int32, off int64, max int32) *kmsg.FetchRequest
 
 func fetched(r kmsg.Response) kmsg.FetchResponseTopicPartition {
 	return r.(*kmsg.FetchResponse).Topics[0].Partitions[0]
-}
-
-func initReq() *kmsg.InitProducerIDRequest {
-	r := kmsg.NewPtrInitProducerIDRequest()
-	r.TransactionalID, r.TransactionTimeoutMillis, r.ProducerID, r.ProducerEpoch = nil, 1000, -1, -1
-	return r
-}
-
-// initPID runs InitProducerId and returns the new producer id.
-func (h *harness) initPID(c *client) int64 {
-	h.t.Helper()
-	r := h.call(c, verInit, initReq()).(*kmsg.InitProducerIDResponse)
-	if r.ErrorCode != 0 {
-		h.t.Fatalf("InitProducerId error %d", r.ErrorCode)
-	}
-	return r.ProducerID
 }
 
 // produceOne produces one entry, flushes and returns its partition result.

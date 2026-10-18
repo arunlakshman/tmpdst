@@ -34,16 +34,11 @@ func sampleRequest(key, v int16) kmsg.Request {
 		n := "t"
 		r.Topics = []kmsg.MetadataRequestTopic{{Topic: &n}}
 		return r
-	case KeyApiVersions:
+	default: // KeyApiVersions
 		r := kmsg.NewPtrApiVersionsRequest()
 		if v >= 3 {
 			r.ClientSoftwareName, r.ClientSoftwareVersion = "kwire", "1"
 		}
-		return r
-	default:
-		r := kmsg.NewPtrInitProducerIDRequest()
-		r.TransactionalID, r.TransactionTimeoutMillis = nil, 1000
-		r.ProducerID, r.ProducerEpoch = -1, -1
 		return r
 	}
 }
@@ -69,12 +64,8 @@ func sampleResponse(key int16, h core.RequestHeader) kmsg.Response {
 		t := "t"
 		r.Topics = []kmsg.MetadataResponseTopic{{Topic: &t, Partitions: []kmsg.MetadataResponseTopicPartition{{Partition: 0, Leader: 1, Replicas: []int32{1}, ISR: []int32{1}}}}}
 		return r
-	case KeyApiVersions:
+	default: // KeyApiVersions
 		return ApiVersionsResponse(h)
-	default:
-		r := kmsg.NewPtrInitProducerIDResponse()
-		r.ProducerID, r.ProducerEpoch = 1000, 2
-		return r
 	}
 }
 
@@ -223,4 +214,25 @@ func FuzzDecodeRequest(f *testing.F) {
 			_, _ = c.DecodeResponse(core.RequestHeader{APIKey: r.Key, APIVersion: r.Max}, data)
 		}
 	})
+}
+
+// InitProducerId (key 22) is not served (decision 41): it is neither
+// advertised nor decodable, so idempotent clients fail at startup.
+func TestInitProducerIDNotSupported(t *testing.T) {
+	if IsSupported(22, 0) {
+		t.Fatal("key 22 is supported")
+	}
+	for _, r := range ApiVersionsResponse(core.RequestHeader{APIKey: KeyApiVersions, APIVersion: 3}).ApiKeys {
+		if r.ApiKey == 22 {
+			t.Fatal("ApiVersions advertises InitProducerId")
+		}
+	}
+	var c Codec
+	req := kmsg.NewPtrInitProducerIDRequest()
+	wire, err := c.EncodeRequest(core.RequestHeader{APIKey: 22, APIVersion: 0, CorrelationID: 1}, req)
+	if err == nil {
+		if _, _, err = c.DecodeRequest(oneFrame(t, wire)); err == nil {
+			t.Fatal("key 22 decoded")
+		}
+	}
 }

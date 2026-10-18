@@ -71,19 +71,12 @@ func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, 
 	case bt.NumRecords <= 0 || bt.LastOffsetDelta != bt.NumRecords-1:
 		return nil, errCorruptMessage
 	}
-	pb := &pbatch{s: s, part: rp, tp: tp, data: one, records: int64(bt.NumRecords), pid: bt.ProducerID}
-	if bt.ProducerID != -1 {
-		// 0 is core.NoProducer; the control plane numbers real ids from 1000.
-		if bt.ProducerID <= 0 {
-			return nil, errInvalidPIDMapping
-		}
-		if bt.ProducerEpoch < 0 || bt.BaseSequence < 0 {
-			return nil, errCorruptMessage
-		}
-		if b.cfg.Bug != BugNoIdempotence {
-			pb.producer = core.ProducerID(bt.ProducerID)
-		}
-		pb.pepoch, pb.baseSeq = bt.ProducerEpoch, bt.BaseSequence
+	if bt.ProducerID >= 0 {
+		// Idempotent producers are unsupported (decision 41): without the
+		// sequence checks a retry would duplicate records, so refuse rather
+		// than silently weaken the guarantee. INVALID_REQUEST is not retriable.
+		b.env.Reachable("broker: idempotent batch rejected")
+		return nil, errInvalidRequest
 	}
-	return pb, errNone
+	return &pbatch{s: s, part: rp, tp: tp, data: one, records: int64(bt.NumRecords)}, errNone
 }

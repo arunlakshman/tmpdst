@@ -6,12 +6,14 @@
 // (BatchWindow timer or MaxSegmentBytes) encodes it with format.Encode,
 // uploads it (ObjPut) and commits it (CommitSegment); only then is the client
 // answered, with a "produce_acked" fact emitted right before the Send.
-// Commits go out strictly in segment order so a producer's sequences reach the
-// control plane in order. Every retry reuses the segment key, which both the
-// object store and the control plane treat idempotently.
+// Commits go out strictly in segment order, so a partition's batches get
+// offsets in the order the broker admitted them. Every retry resends the
+// identical request under the same segment key, which both the object store and
+// the control plane treat idempotently.
 //
-// Fail-stop (decision 7): a CommitSegment answered ErrFenced trips the broker;
-// afterwards Step returns nothing and nothing is acked.
+// The broker is stateless cattle (decisions 41-44): no registration, epoch or
+// fencing, no idempotent producers, and it never proposes an offset. The
+// segment key is a random id drawn from the injected Env (seg/<32 hex>).
 package broker
 
 import (
@@ -22,7 +24,6 @@ import (
 // Fixed timer ids; retry timers use the id of the segment or op they belong to
 // (ids >= firstID).
 const (
-	timerReg   = core.TimerID(1)
 	timerFlush = core.TimerID(2)
 	firstID    = 16
 )
@@ -34,23 +35,16 @@ type Broker struct {
 	cfg   Config
 	codec kwire.Codec
 
-	started    bool
-	epoch      core.Epoch
-	registered bool
-	regReq     core.ReqID
-	regTries   uint64
-	regGen     core.TimerGen
+	started bool
 
 	nextReq  core.ReqID
 	nextID   uint64
 	timerGen core.TimerGen
 	stopping bool
-	tripped  bool
 	exited   bool
 
 	conns  []*conn
-	dirty  []*conn // connections whose queue head may be ready (drained at end of Step)
-	parked []parked
+	dirty  []*conn          // connections whose queue head may be ready (drained at end of Step)
 	topics []core.TopicInfo // topic cache, refreshed from DescribeTopics on a miss
 
 	now        core.Time // At of the event being stepped (set by Step; not state)
@@ -61,12 +55,6 @@ type Broker struct {
 	pressure   bool      // above MaxBufferedBytes, until back at ResumeBufferedBytes
 	pressureAt core.Time // when pressure began (fact timing only, not state)
 	guess      uint64
-}
-
-// parked is a request waiting for registration.
-type parked struct {
-	s   *slot
-	req core.Request
 }
 
 // New returns the core.Factory of the broker.
@@ -95,17 +83,14 @@ func (b *Broker) timer(id core.TimerID, n int) (core.SetTimer, core.TimerGen) {
 
 // Step implements core.StateMachine.
 func (b *Broker) Step(ev core.Event) []core.Action {
-	if b.tripped || b.exited {
+	if b.exited {
 		return nil
 	}
 	b.now = ev.At
 	var acts []core.Action
 	switch e := ev.Body.(type) {
 	case core.Started:
-		if !b.started {
-			b.started = true
-			acts = b.register()
-		}
+		b.started = true
 	case core.Stop:
 		acts = b.stop()
 	case core.ConnOpened:
@@ -127,44 +112,11 @@ func (b *Broker) Step(ev core.Event) []core.Action {
 }
 
 // finish drains ready responses, applies admission control and ends a graceful
-// stop. After a trip nothing is added: Trip stays the last action.
+// stop.
 func (b *Broker) finish(acts []core.Action) []core.Action {
-	if b.tripped {
-		b.dirty = nil
-		return acts
-	}
 	acts = b.drainDirty(acts)
 	acts = b.flow(acts)
 	return b.maybeExit(acts)
-}
-
-// ---- registration ----
-
-func (b *Broker) register() []core.Action {
-	b.regReq = b.req()
-	return []core.Action{core.CPCall{Req: b.regReq, Op: core.Register{Self: b.self}}}
-}
-
-func (b *Broker) onRegister(e core.CPDone) []core.Action {
-	b.regReq = 0
-	resp, ok := e.Resp.(core.RegisterResp)
-	if e.Err != core.OK || !ok {
-		if b.stopping {
-			return nil
-		}
-		b.regTries++
-		t, g := b.timer(timerReg, int(b.regTries))
-		b.regGen = g
-		return []core.Action{t}
-	}
-	b.epoch, b.registered, b.regTries = resp.Epoch, true, 0
-	acts := []core.Action{emit("broker_registered", core.Field{Key: "epoch", Value: core.U64(resp.Epoch)})}
-	ps := b.parked
-	b.parked = nil
-	for _, p := range ps {
-		acts = append(acts, b.handle(p.s, p.req)...)
-	}
-	return acts
 }
 
 // ---- stop ----
@@ -176,15 +128,6 @@ func (b *Broker) stop() []core.Action {
 		return nil
 	}
 	b.stopping = true
-	// Requests that never got to run (not registered) are dropped with their
-	// connections: the client retries elsewhere.
-	for _, p := range b.parked {
-		p.s.silent = true
-		p.s.conn.closing = true
-		p.s.pending = 1
-		b.finishPart(p.s)
-	}
-	b.parked = nil
 	return b.seal(sealStop)
 }
 
@@ -249,12 +192,6 @@ func (b *Broker) flow(acts []core.Action) []core.Action {
 
 func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 	switch e.ID {
-	case timerReg:
-		if e.Gen != b.regGen || b.regGen == 0 || b.registered || b.regReq != 0 || b.stopping {
-			return nil
-		}
-		b.regGen = 0
-		return b.register()
 	case timerFlush:
 		if e.Gen != b.open.gen || b.open.gen == 0 {
 			return nil
@@ -277,9 +214,6 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 // ---- completions ----
 
 func (b *Broker) onCP(e core.CPDone) []core.Action {
-	if b.regReq != 0 && e.Req == b.regReq {
-		return b.onRegister(e)
-	}
 	for _, s := range b.segs {
 		if s.req == e.Req && s.req != 0 && s.state == segCommit {
 			return b.onCommit(s, e)

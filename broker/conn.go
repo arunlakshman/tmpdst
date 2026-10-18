@@ -121,10 +121,6 @@ func (b *Broker) request(c *conn, frame []byte) []core.Action {
 		return nil
 	}
 	s := b.newSlot(c, h)
-	if !b.registered {
-		b.parked = append(b.parked, parked{s, req})
-		return nil
-	}
 	return b.handle(s, req)
 }
 

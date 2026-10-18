@@ -2,11 +2,14 @@ package broker
 
 import (
 	"encoding/binary"
+	"reflect"
+	"regexp"
 	"testing"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/core"
+	"manifester/format"
 	"manifester/kwire"
 )
 
@@ -20,6 +23,11 @@ func TestApiVersions(t *testing.T) {
 	}()).(*kmsg.ApiVersionsResponse)
 	if r.ErrorCode != 0 || len(r.ApiKeys) != len(kwire.Supported()) {
 		t.Fatalf("got %+v", r)
+	}
+	for _, k := range r.ApiKeys {
+		if k.ApiKey == 22 {
+			t.Fatal("InitProducerId advertised")
+		}
 	}
 	// Unsupported version: raw frame, answered with UNSUPPORTED_VERSION at v0.
 	hd := kwire.RequestHeader{APIKey: kwire.KeyApiVersions, APIVersion: 99, CorrelationID: 77, ClientID: "x"}
@@ -68,35 +76,6 @@ func TestMetadata(t *testing.T) {
 	r = h.call(c, verMetadata, q).(*kmsg.MetadataResponse)
 	if len(r.Topics) != 0 || len(r.Brokers) != 1 {
 		t.Fatalf("empty request: %+v", r)
-	}
-}
-
-func TestInitProducerID(t *testing.T) {
-	h := startedHarness(t, DefaultConfig())
-	c := h.open(1)
-	a, b := h.initPID(c), h.initPID(c)
-	if a < 1000 || b != a+1 {
-		t.Fatalf("pids %d %d", a, b)
-	}
-	q := initReq()
-	id := "txn"
-	q.TransactionalID = &id
-	if r := h.call(c, verInit, q).(*kmsg.InitProducerIDResponse); r.ErrorCode != errInvalidRequest {
-		t.Fatalf("txn id accepted: %d", r.ErrorCode)
-	}
-	// Failures are retried.
-	fails := 2
-	h.cpHook = func(a core.CPCall, run func() core.Completion) core.Completion {
-		if _, ok := a.Op.(core.InitProducer); ok && fails > 0 {
-			fails--
-			return core.CPDone{Req: a.Req, Err: core.ErrUnavailable}
-		}
-		return run()
-	}
-	h.send(c, verInit, initReq())
-	h.fireAll()
-	if r := h.next(c).(*kmsg.InitProducerIDResponse); r.ErrorCode != 0 || r.ProducerID == 0 {
-		t.Fatalf("after retries: %+v", r)
 	}
 }
 
@@ -252,116 +231,10 @@ func TestPipelinedResponsesInOrder(t *testing.T) {
 	}
 }
 
-func TestIdempotentRetryAfterLostCommit(t *testing.T) {
-	h := startedHarness(t, DefaultConfig())
-	c := h.open(1)
-	pid := h.initPID(c)
-	lose := 1
-	h.cpHook = func(a core.CPCall, run func() core.Completion) core.Completion {
-		if _, ok := a.Op.(core.CommitSegment); ok && lose > 0 {
-			lose--
-			run() // applied, response lost
-			return core.CPDone{Req: a.Req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}
-		}
-		return run()
-	}
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, mkBatch(t, pid, 0, 0, "a", "b")}))
-	h.flush()
-	if len(c.out) != 0 {
-		t.Fatal("acked on a lost commit response")
-	}
-	h.fireAll() // backoff, retry with the same key
-	r := produced(h.next(c))[0]
-	if r.ErrorCode != 0 || r.BaseOffset != 0 || h.cp.HighWatermark(core.TopicPartition{Topic: "t"}) != 2 {
-		t.Fatalf("%+v hwm %d", r, h.cp.HighWatermark(core.TopicPartition{Topic: "t"}))
-	}
-	if len(h.puts) != 1 {
-		t.Fatal("retry re-uploaded")
-	}
-	if n := len(factsNamed(h.all, "segment_committed")); n != 1 {
-		t.Fatalf("%d segment_committed", n)
-	}
-	h.noViolations()
-}
-
-// A client retry after REQUEST_TIMED_OUT yields the original offset, not a duplicate.
-func TestClientRetryAfterTimeoutIsDup(t *testing.T) {
-	for _, bug := range []Bug{BugNone, BugNoIdempotence} {
-		cfg := DefaultConfig()
-		cfg.Bug = bug
-		h := startedHarness(t, cfg)
-		c := h.open(1)
-		pid := h.initPID(c)
-		first := true
-		h.cpHook = func(a core.CPCall, run func() core.Completion) core.Completion {
-			if cs, ok := a.Op.(core.CommitSegment); ok && first {
-				run()
-				if cs.Batches[0].TP.Topic == "t" {
-					return core.CPDone{Req: a.Req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}
-				}
-			}
-			return run()
-		}
-		batch := mkBatch(t, pid, 0, 0, "a", "b")
-		h.send(c, verProduce, prodReq(-1, ent{"t", 0, batch}))
-		h.flush()
-		h.fireAll() // every retry loses its response
-		first = false
-		r := produced(h.next(c))[0]
-		if r.ErrorCode != errRequestTimedOut {
-			t.Fatalf("bug %d: first answer %d", bug, r.ErrorCode)
-		}
-		r = h.produceOne(c, ent{"t", 0, batch})
-		hwm := h.cp.HighWatermark(core.TopicPartition{Topic: "t"})
-		switch bug {
-		case BugNone:
-			if r.ErrorCode != 0 || r.BaseOffset != 0 || hwm != 2 {
-				t.Fatalf("dup: %+v hwm %d", r, hwm)
-			}
-			if f := factsNamed(h.all, "produce_acked"); len(f) != 1 || field(f[0], "dup") != core.Bool(true) {
-				t.Fatalf("facts %v", f)
-			}
-		case BugNoIdempotence:
-			if hwm != 4 {
-				t.Fatalf("mutant should duplicate: hwm %d", hwm)
-			}
-		}
-	}
-}
-
-func TestOutOfOrderAndStaleEpoch(t *testing.T) {
-	h := startedHarness(t, DefaultConfig())
-	c := h.open(1)
-	pid := h.initPID(c)
-	if r := h.produceOne(c, ent{"t", 0, mkBatch(t, pid, 0, 0, "a")}); r.ErrorCode != 0 {
-		t.Fatal(r.ErrorCode)
-	}
-	if r := h.produceOne(c, ent{"t", 0, mkBatch(t, pid, 0, 5, "a")}); r.ErrorCode != errOutOfOrderSeq {
-		t.Fatalf("gap: %d", r.ErrorCode)
-	}
-	if r := h.produceOne(c, ent{"t", 0, mkBatch(t, pid, 1, 0, "a")}); r.ErrorCode != 0 {
-		t.Fatalf("epoch bump: %d", r.ErrorCode)
-	}
-	if r := h.produceOne(c, ent{"t", 0, mkBatch(t, pid, 0, 1, "a")}); r.ErrorCode != errInvalidProducerEpoch {
-		t.Fatalf("stale epoch: %d", r.ErrorCode)
-	}
-	// A producer id the control plane never issued fails alone.
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, mkBatch(t, 5000, 0, 0, "a")}, ent{"t", 1, plain(t, "ok")}))
-	h.flush()
-	ps := produced(h.next(c))
-	if ps[0].ErrorCode != errInvalidPIDMapping || ps[1].ErrorCode != 0 {
-		t.Fatalf("isolation: %+v", ps)
-	}
-	if f := factsNamed(h.all, "produce_acked"); len(f) != 3 {
-		t.Fatalf("%d acks", len(f))
-	}
-}
-
 func TestFactImmediatelyBeforeSend(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
-	pid := h.initPID(c)
-	h.produceOne(c, ent{"t", 0, mkBatch(t, pid, 0, 0, "a", "b")})
+	h.produceOne(c, ent{"t", 0, plain(t, "a", "b")})
 	n := 0
 	for i, a := range h.all {
 		e, ok := a.(core.Emit)
@@ -373,33 +246,12 @@ func TestFactImmediatelyBeforeSend(t *testing.T) {
 			t.Fatalf("ack fact not followed by Send: %T", h.all[i+1])
 		}
 		f := e.Fact
-		if field(f, "topic") != core.Str("t") || field(f, "base_offset") != core.I64(0) || field(f, "count") != core.I64(2) ||
-			field(f, "producer") != core.I64(pid) || field(f, "base_seq") != core.I64(0) {
+		if field(f, "topic") != core.Str("t") || field(f, "base_offset") != core.I64(0) || field(f, "count") != core.I64(2) {
 			t.Fatalf("fields %v", f.Fields)
 		}
 	}
 	if n != 1 {
 		t.Fatalf("%d acks", n)
-	}
-}
-
-func TestTripOnFencing(t *testing.T) {
-	h := startedHarness(t, DefaultConfig())
-	c := h.open(1)
-	h.cp.Exec(core.CPCall{Req: 1, Op: core.Register{Self: h.self}}) // a newer epoch exists
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
-	h.flush()
-	if !h.tripped || len(c.out) != 0 {
-		t.Fatalf("tripped=%v out=%d", h.tripped, len(c.out))
-	}
-	if _, ok := h.all[len(h.all)-1].(core.Trip); !ok {
-		t.Fatal("Trip is not the last action")
-	}
-	n := len(h.all)
-	h.step(core.BytesReceived{Conn: 1, Data: h.frame(c, 3, kmsg.NewPtrApiVersionsRequest())})
-	h.step(core.TimerFired{ID: timerFlush, Gen: 1})
-	if len(h.all) != n {
-		t.Fatal("tripped broker acted")
 	}
 }
 
@@ -420,7 +272,7 @@ func TestGracefulStop(t *testing.T) {
 	if r := produced(h.next(c))[0]; r.ErrorCode != 0 || r.BaseOffset != 0 {
 		t.Fatalf("%+v", r)
 	}
-	if h.cp.HighWatermark(core.TopicPartition{Topic: "t"}) != 1 {
+	if h.cp.End(core.TopicPartition{Topic: "t"}) != 1 {
 		t.Fatal("not flushed")
 	}
 	// Idle broker exits at once.
@@ -581,42 +433,6 @@ func TestBackpressure(t *testing.T) {
 	}
 }
 
-func TestParkedUntilRegistered(t *testing.T) {
-	h := newHarness(t, DefaultConfig())
-	fail := 2
-	h.cpHook = func(a core.CPCall, run func() core.Completion) core.Completion {
-		if _, ok := a.Op.(core.Register); ok && fail > 0 {
-			fail--
-			return core.CPDone{Req: a.Req, Err: core.ErrUnavailable}
-		}
-		return run()
-	}
-	h.do(core.Started{Self: h.self})
-	c := h.open(1)
-	chunk := append(h.frame(c, verMetadata, kmsg.NewPtrMetadataRequest()), h.frame(c, 3, kmsg.NewPtrApiVersionsRequest())...)
-	h.do(core.BytesReceived{Conn: 1, Data: chunk})
-	if len(c.out) != 0 {
-		t.Fatal("ApiVersions overtook a parked request")
-	}
-	h.fireAll()
-	if len(c.out) != 2 {
-		t.Fatalf("%d responses", len(c.out))
-	}
-	if _, ok := h.next(c).(*kmsg.MetadataResponse); !ok {
-		t.Fatal("order")
-	}
-	// A stop before registration drops parked requests and exits.
-	h = newHarness(t, DefaultConfig())
-	h.holdCP = true
-	h.do(core.Started{Self: h.self})
-	c = h.open(1)
-	h.send(c, verMetadata, kmsg.NewPtrMetadataRequest())
-	h.do(core.Stop{})
-	if !h.exited || !h.closed[1] {
-		t.Fatalf("exited=%v closed=%v", h.exited, h.closed[1])
-	}
-}
-
 func TestBadInputClosesConnection(t *testing.T) {
 	cases := map[string][]byte{
 		"garbage":     {0, 0, 0, 3, 1, 2, 3},
@@ -635,7 +451,7 @@ func TestBadInputClosesConnection(t *testing.T) {
 		if !h.closed[1] || len(c.out) != 0 {
 			t.Errorf("%s: closed=%v out=%d", name, h.closed[1], len(c.out))
 		}
-		if h.cp.HighWatermark(core.TopicPartition{Topic: "t"}) != 0 || len(h.puts) != 0 {
+		if h.cp.End(core.TopicPartition{Topic: "t"}) != 0 || len(h.puts) != 0 {
 			t.Errorf("%s: data written", name)
 		}
 	}
@@ -655,7 +471,7 @@ func TestPeerCloseDuringProduce(t *testing.T) {
 	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
 	h.do(core.ConnClosed{Conn: 1, Abort: true})
 	h.flush()
-	if h.cp.HighWatermark(core.TopicPartition{Topic: "t"}) != 1 || len(c.out) != 0 {
+	if h.cp.End(core.TopicPartition{Topic: "t"}) != 1 || len(c.out) != 0 {
 		t.Fatal("write must land, response must not be sent")
 	}
 	if len(factsNamed(h.all, "produce_acked")) != 0 {
@@ -746,7 +562,141 @@ func mustFrames(t testing.TB) [][]byte {
 		enc(verProduce, prodReq(-1, ent{"t", 0, mkBatch(t, -1, -1, -1, "a")}, ent{"t", 1, mkBatch(t, 1000, 0, 0, "b")})),
 		enc(verFetch, fetchReq("t", 0, 0, 100)),
 		enc(verMetadata, kmsg.NewPtrMetadataRequest()),
-		enc(verInit, initReq()),
 		enc(3, kmsg.NewPtrApiVersionsRequest()),
+	}
+}
+
+// A batch from an idempotent producer (pid >= 0) is refused alone with
+// INVALID_REQUEST; the other partitions of the same produce still work.
+func TestIdempotentBatchRejected(t *testing.T) {
+	h := startedHarness(t, DefaultConfig())
+	c := h.open(1)
+	h.send(c, verProduce, prodReq(-1,
+		ent{"t", 0, mkBatch(t, 1000, 0, 0, "a")},
+		ent{"t", 1, plain(t, "ok")},
+		ent{"t", 0, mkBatch(t, 0, 0, 0, "a")},
+		ent{"t", 0, plain(t, "ok2")}))
+	h.flush()
+	ps := produced(h.next(c))
+	if ps[0].ErrorCode != errInvalidRequest || ps[2].ErrorCode != errInvalidRequest ||
+		ps[1].ErrorCode != 0 || ps[3].ErrorCode != 0 || ps[3].BaseOffset != 0 {
+		t.Fatalf("%+v", ps)
+	}
+	if h.cp.End(core.TopicPartition{Topic: "t"}) != 1 {
+		t.Fatal("rejected batch was stored")
+	}
+	h.noViolations()
+}
+
+func commitOps(h *harness) (out []core.CommitSegment) {
+	for _, op := range h.cpCalls {
+		if cs, ok := op.(core.CommitSegment); ok {
+			out = append(out, cs)
+		}
+	}
+	return out
+}
+
+// After a lost commit answer the broker resends the identical request with the
+// same key (no new upload) and acks the originally assigned offsets.
+func TestCommitRetryAfterMaybeAppliedResendsIdenticalRequest(t *testing.T) {
+	h := startedHarness(t, DefaultConfig())
+	c := h.open(1)
+	lose := 2
+	h.cpHook = func(a core.CPCall, run func() core.Completion) core.Completion {
+		if _, ok := a.Op.(core.CommitSegment); ok && lose > 0 {
+			lose--
+			run() // applied, response lost
+			return core.CPDone{Req: a.Req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}
+		}
+		return run()
+	}
+	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a", "b")}, ent{"t", 1, plain(t, "c")}))
+	h.flush()
+	if len(c.out) != 0 {
+		t.Fatal("acked on a lost commit response")
+	}
+	h.fireAll()
+	ps := produced(h.next(c))
+	if ps[0].ErrorCode != 0 || ps[0].BaseOffset != 0 || ps[1].ErrorCode != 0 || ps[1].BaseOffset != 0 ||
+		h.cp.End(core.TopicPartition{Topic: "t"}) != 2 {
+		t.Fatalf("%+v", ps)
+	}
+	cs := commitOps(h)
+	if len(cs) != 3 || len(h.puts) != 1 {
+		t.Fatalf("%d commits, %d puts", len(cs), len(h.puts))
+	}
+	for _, x := range cs[1:] {
+		if !reflect.DeepEqual(x, cs[0]) {
+			t.Fatalf("resend differs:\n%+v\n%+v", x, cs[0])
+		}
+	}
+	if n := len(factsNamed(h.all, "segment_committed")); n != 1 {
+		t.Fatalf("%d segment_committed", n)
+	}
+	h.noViolations()
+}
+
+// Two segments in flight commit in seal order and get consecutive offsets.
+func TestTwoSegmentsInFlightCommitInOrder(t *testing.T) {
+	h := startedHarness(t, DefaultConfig())
+	c := h.open(1)
+	h.holdPut = true
+	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.flush()
+	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "b", "c")}))
+	h.flush()
+	if len(h.held) != 2 || len(commitOps(h)) != 0 {
+		t.Fatalf("held %d", len(h.held))
+	}
+	// The second upload finishes first: its commit must still wait.
+	h.holdPut = false
+	second := h.held[1]
+	h.held = h.held[:1]
+	h.queue = append(h.queue, second)
+	h.run()
+	if len(commitOps(h)) != 0 {
+		t.Fatal("second segment committed before the first")
+	}
+	h.releaseHeld()
+	cs := commitOps(h)
+	if len(cs) != 2 || cs[0].SegmentKey != h.puts[0] || cs[1].SegmentKey != h.puts[1] {
+		t.Fatalf("commits %+v puts %v", cs, h.puts)
+	}
+	p0, p1 := produced(h.next(c))[0], produced(h.next(c))[0]
+	if p0.BaseOffset != 0 || p1.BaseOffset != 1 {
+		t.Fatalf("bases %d %d", p0.BaseOffset, p1.BaseOffset)
+	}
+}
+
+var segKeyRE = regexp.MustCompile(`^seg/[0-9a-f]{32}$`)
+
+// Keys are seg/<32 hex> drawn from the Env stream: the same seed gives the
+// same keys, and they equal format.SegmentKey of the env's IDs.
+func TestSegmentKeysAreFlatAndDeterministic(t *testing.T) {
+	run := func() []string {
+		h := startedHarness(t, DefaultConfig())
+		c := h.open(1)
+		for i := 0; i < 3; i++ {
+			h.produceOne(c, ent{"t", 0, plain(t, "a")})
+		}
+		return h.puts
+	}
+	a, b := run(), run()
+	if len(a) != 3 || !reflect.DeepEqual(a, b) {
+		t.Fatalf("keys differ: %v %v", a, b)
+	}
+	env := &testEnv{state: 7}
+	for _, k := range a {
+		if !segKeyRE.MatchString(k) || k != format.SegmentKey(env.NewID()) {
+			t.Fatalf("key %q", k)
+		}
+	}
+	other := startedHarness(t, DefaultConfig())
+	other.env.state = 8
+	oc := other.open(1)
+	other.produceOne(oc, ent{"t", 0, plain(t, "a")})
+	if other.puts[0] == a[0] {
+		t.Fatal("different seeds, same key")
 	}
 }

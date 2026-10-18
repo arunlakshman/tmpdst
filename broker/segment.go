@@ -16,37 +16,21 @@ type pbatch struct {
 	tp       core.TopicPartition
 	data     []byte
 	records  int64
-	pid      int64           // the client's producer id (-1: none), for facts
-	producer core.ProducerID // as committed (BugNoIdempotence zeroes it)
-	pepoch   int16
-	baseSeq  int32
 	loc      core.SegmentRef
 	answered bool // BugEarlyAck already answered it
 }
 
-// stateKey is one producer state the CP commit touches.
-type stateKey struct {
-	tp core.TopicPartition
-	p  core.ProducerID
-}
-
 // commitItems is what the DynamoDB CP's commit transaction costs for the open
-// segment (cp/doc.go): fence and segment items, an HWM item and a range run
-// item per partition, one state item per idempotent (partition, producer).
-// The number of batches does not count. Grown topics are not counted: they are
-// created before use, and the budget keeps spare items for them.
-func (o *openSegment) commitItems() int { return 2 + 2*len(o.parts) + len(o.states) }
-
-// maxItemGrowth is the most one batch adds to commitItems: a new partition (2)
-// and a new producer state (1).
-const maxItemGrowth = 3
+// segment (cp/doc.go): one segment item and one range run item per distinct
+// partition. Batches do not count, and grown topics are not counted: they are
+// created before use, and the partition cap keeps spare items for them.
+func (o *openSegment) commitItems() int { return 1 + len(o.parts) }
 
 // openSegment is the buffer that the next flush seals.
 type openSegment struct {
 	batches []*pbatch
 	bytes   int
 	parts   []core.TopicPartition // distinct partitions buffered
-	states  []stateKey            // distinct idempotent (partition, producer) pairs buffered
 	gen     core.TimerGen         // flush timer generation; 0 = none armed
 	since   core.Time             // when the first batch arrived (age of the segment)
 }
@@ -57,7 +41,6 @@ const (
 	sealTimer      = "timer"
 	sealBatches    = "batches"
 	sealPartitions = "partitions"
-	sealItems      = "items"
 	sealStop       = "stop"
 )
 
@@ -111,9 +94,6 @@ func (b *Broker) addBatch(pb *pbatch) []core.Action {
 	if !slices.Contains(b.open.parts, pb.tp) {
 		b.open.parts = append(b.open.parts, pb.tp)
 	}
-	if sk := (stateKey{pb.tp, pb.producer}); pb.producer != core.NoProducer && !slices.Contains(b.open.states, sk) {
-		b.open.states = append(b.open.states, sk)
-	}
 	if len(b.open.batches) == 1 || b.cfg.Bug == BugTimerFromLastBatch {
 		if len(b.open.batches) == 1 {
 			b.open.since = b.now
@@ -131,8 +111,6 @@ func (b *Broker) addBatch(pb *pbatch) []core.Action {
 		return append(acts, b.seal(sealSize)...)
 	case len(b.open.parts) >= b.cfg.MaxSegmentPartitions:
 		return append(acts, b.seal(sealPartitions)...)
-	case b.open.commitItems()+maxItemGrowth > b.cfg.MaxSegmentItems && b.cfg.Bug != BugNoItemCap:
-		return append(acts, b.seal(sealItems)...)
 	case len(b.open.batches) >= b.cfg.MaxSegmentBatches && b.cfg.Bug != BugNoBatchCap:
 		return append(acts, b.seal(sealBatches)...)
 	}
@@ -157,15 +135,12 @@ func (b *Broker) seal(why string) []core.Action {
 		b.env.Reachable("broker: segment sealed by batch cap")
 	case sealPartitions:
 		b.env.Reachable("broker: segment sealed by partition cap")
-	case sealItems:
-		b.env.Reachable("broker: segment sealed by commit item cap")
 	}
 	acts := []core.Action{core.CancelTimer{ID: timerFlush}, emit("segment_sealed",
 		core.Field{Key: "reason", Value: core.Str(why)},
 		core.Field{Key: "bytes", Value: core.I64(b.open.bytes)},
 		core.Field{Key: "batches", Value: core.I64(len(bs))},
 		core.Field{Key: "parts", Value: core.I64(len(b.open.parts))},
-		core.Field{Key: "items", Value: core.I64(b.open.commitItems())},
 		core.Field{Key: "last", Value: core.I64(len(bs[len(bs)-1].data))},
 		core.Field{Key: "age", Value: core.I64(b.now - b.open.since)},
 		core.Field{Key: "inflight", Value: core.I64(len(b.segs) + 1)},
@@ -188,7 +163,7 @@ func (b *Broker) sealBatches(bs []*pbatch) []core.Action {
 		return nil
 	}
 	s := &segment{id: b.id(), batches: bs, data: data,
-		key: format.SegmentKey(b.self.Node, b.self.Inc, b.env.NewID()), sealedAt: b.now}
+		key: format.SegmentKey(b.env.NewID()), sealedAt: b.now}
 	for i, pb := range bs {
 		pb.loc = entries[i].Ref(s.key)
 	}
@@ -241,11 +216,10 @@ func (b *Broker) commit(s *segment) []core.Action {
 	}
 	pend := make([]core.PendingBatch, len(s.batches))
 	for i, pb := range s.batches {
-		pend[i] = core.PendingBatch{TP: pb.tp, Records: pb.records, Loc: pb.loc,
-			Producer: pb.producer, PEpoch: pb.pepoch, BaseSeq: pb.baseSeq}
+		pend[i] = core.PendingBatch{TP: pb.tp, Records: pb.records, Loc: pb.loc}
 	}
 	return []core.Action{core.CPCall{Req: s.req, Op: core.CommitSegment{
-		SegmentKey: s.key, Owner: b.self, Epoch: b.epoch, Batches: pend}}}
+		SegmentKey: s.key, Batches: pend}}}
 }
 
 func (b *Broker) onCommit(s *segment, e core.CPDone) []core.Action {
@@ -261,18 +235,20 @@ func (b *Broker) onCommit(s *segment, e core.CPDone) []core.Action {
 			return b.failSegment(s, errUnknownServer)
 		}
 		return b.committed(s, resp.Assigned)
-	case e.BrokerFenced():
-		return b.trip("fenced")
 	case e.Err == core.ErrInvalid:
-		return b.isolate(s)
+		return b.failSegment(s, errUnknownServer)
 	case e.Err == core.ErrConflict:
+		// The same key with a different request: a broker bug, not a race.
+		b.env.Unreachable("broker: commit key reused with a different request")
 		return b.failSegment(s, errUnknownServer)
 	case e.Err == core.ErrTooLarge:
 		// The segment exceeds the CP's commit limit; retrying cannot help.
 		b.env.Unreachable("broker: segment exceeds the control plane's commit size")
 		return b.failSegment(s, errUnknownServer)
 	}
-	return b.retry(s, segCommit) // idempotent per SegmentKey (decision 3)
+	// MaybeApplied or a transient error: resend the identical request under
+	// the same key until definite; a replay returns the same answer.
+	return b.retry(s, segCommit)
 }
 
 // committed answers every batch of s from the control plane's verdicts.
@@ -280,7 +256,6 @@ func (b *Broker) committed(s *segment, rs []core.BatchRange) []core.Action {
 	acts := []core.Action{emit("segment_committed",
 		core.Field{Key: "segment", Value: core.Str(s.key)},
 		core.Field{Key: "batches", Value: core.I64(len(s.batches))},
-		core.Field{Key: "epoch", Value: core.U64(b.epoch)},
 		// Timing, in nanoseconds: put + wait + commit = total. wait is the time
 		// the uploaded segment queued behind earlier segments' commits.
 		core.Field{Key: "bytes", Value: core.I64(len(s.data))},
@@ -291,40 +266,9 @@ func (b *Broker) committed(s *segment, rs []core.BatchRange) []core.Action {
 		core.Field{Key: "inflight", Value: core.I64(len(b.segs) - 1)},
 		core.Field{Key: "buffered", Value: core.I64(b.bufBytes - s.dataBytes())})}
 	for i, pb := range s.batches {
-		r := rs[i]
-		switch {
-		case r.Err == core.OK:
-			// Dup is a success at the original offset (decision 28).
-			b.ack(pb, r, s.key)
-		case r.Err == core.ErrOutOfOrder:
-			b.release(pb, errOutOfOrderSeq)
-		case r.ProducerFenced():
-			b.release(pb, errInvalidProducerEpoch)
-		default:
-			b.release(pb, errUnknownServer)
-		}
+		b.ack(pb, rs[i], s.key)
 	}
 	return append(acts, b.endSegment(s)...)
-}
-
-// isolate handles a commit the control plane rejected as invalid (a batch with
-// a producer id it never issued): it splits the segment so only the offender
-// fails.
-func (b *Broker) isolate(s *segment) []core.Action {
-	if len(s.batches) == 1 {
-		pb := s.batches[0]
-		code := errUnknownServer
-		if pb.producer != core.NoProducer {
-			code = errInvalidPIDMapping
-		}
-		return b.failSegment(s, code)
-	}
-	b.remove(s)
-	var acts []core.Action
-	for _, pb := range s.batches {
-		acts = append(acts, b.sealBatches([]*pbatch{pb})...)
-	}
-	return append(acts, b.pump()...)
 }
 
 func (b *Broker) remove(s *segment) {
@@ -401,10 +345,6 @@ func (b *Broker) ack(pb *pbatch, r core.BatchRange, key string) {
 		{Key: "partition", Value: core.I64(pb.tp.Partition)},
 		{Key: "base_offset", Value: core.I64(r.Base)},
 		{Key: "count", Value: core.I64(pb.records)},
-		{Key: "producer", Value: core.I64(pb.pid)},
-		{Key: "pepoch", Value: core.I64(pb.pepoch)},
-		{Key: "base_seq", Value: core.I64(pb.baseSeq)},
-		{Key: "dup", Value: core.Bool(r.Dup)},
 		{Key: "segment", Value: core.Str(key)},
 	}})
 	b.finishPart(pb.s)
@@ -417,14 +357,4 @@ func (b *Broker) release(pb *pbatch, code int16) {
 	}
 	pb.part.ErrorCode, pb.part.BaseOffset = code, -1
 	b.finishPart(pb.s)
-}
-
-// trip is the fail-stop (decision 7): nothing may be acked after this.
-func (b *Broker) trip(cause string) []core.Action {
-	b.env.Reachable("broker: tripped on fencing")
-	b.tripped = true
-	return []core.Action{
-		emit("broker_fenced", core.Field{Key: "epoch", Value: core.U64(b.epoch)}),
-		core.Trip{Cause: cause},
-	}
 }

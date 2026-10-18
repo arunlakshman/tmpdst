@@ -74,22 +74,8 @@ func (b *Broker) metaResp(o *op, infos []core.TopicInfo, code int16) {
 	o.s.resp = resp
 }
 
-// initProducer allocates an idempotent producer id from the control plane.
-// Transactions are not supported; a request to resume an existing id simply
-// gets a fresh one (an unused id is harmless).
-func (b *Broker) initProducer(s *slot, r *kmsg.InitProducerIDRequest) []core.Action {
-	resp := kmsg.NewPtrInitProducerIDResponse()
-	resp.ProducerID, resp.ProducerEpoch = -1, -1
-	s.resp = resp
-	if r.TransactionalID != nil {
-		resp.ErrorCode = errInvalidRequest
-		return nil
-	}
-	return b.startOp(&op{kind: opInit, s: s})
-}
-
-// listOffsets serves earliest (always 0, no retention) and latest (the high
-// watermark); other timestamps are unsupported (decision 29).
+// listOffsets serves earliest (always 0, no retention) and latest (the end
+// offset); other timestamps are unsupported (decision 29).
 func (b *Broker) listOffsets(s *slot, r *kmsg.ListOffsetsRequest) []core.Action {
 	resp := kmsg.NewPtrListOffsetsResponse()
 	resp.Topics = make([]kmsg.ListOffsetsResponseTopic, len(r.Topics))

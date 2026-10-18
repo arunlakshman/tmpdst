@@ -11,7 +11,6 @@ type opKind uint8
 const (
 	opRefresh opKind = iota // DescribeTopics to resolve a topic-cache miss, then resume the request
 	opMeta                  // DescribeTopics answering Metadata
-	opInit                  // InitProducer
 	opList                  // Lookup for one ListOffsets partition
 	opFetch                 // Lookup, then ranged GETs, for one Fetch partition
 )
@@ -87,9 +86,7 @@ func (b *Broker) issue(o *op) []core.Action {
 	switch o.kind {
 	case opRefresh, opMeta:
 		cop = core.DescribeTopics{Topics: o.names}
-	case opInit:
-		cop = core.InitProducer{}
-	case opList: // only the high watermark is wanted: look past the end
+	case opList: // only the end offset is wanted: look past the end
 		cop = core.Lookup{TP: o.tp, From: core.Offset(1<<63 - 1), MaxBytes: 1}
 	case opFetch:
 		cop = core.Lookup{TP: o.tp, From: o.from, MaxBytes: o.maxBytes}
@@ -117,8 +114,6 @@ func (b *Broker) exhaustCode(o *op) int16 {
 	switch o.kind {
 	case opMeta:
 		return errLeaderNotAvailable
-	case opInit:
-		return errCoordNotAvailable
 	case opFetch:
 		if o.corrupt {
 			return errKafkaStorage
@@ -149,8 +144,6 @@ func (b *Broker) failOp(o *op, code int16) []core.Action {
 		return b.resume(o)
 	case opMeta:
 		b.metaResp(o, nil, code)
-	case opInit:
-		o.s.resp.(*kmsg.InitProducerIDResponse).ErrorCode = code
 	case opList:
 		o.lpart.ErrorCode = code
 	case opFetch:
@@ -176,16 +169,10 @@ func (b *Broker) onOpCP(o *op, e core.CPDone) []core.Action {
 			b.metaResp(o, r.Topics, errNone)
 			return b.endOp(o)
 		}
-	case core.InitProducerResp:
-		if o.kind == opInit {
-			resp := o.s.resp.(*kmsg.InitProducerIDResponse)
-			resp.ProducerID, resp.ProducerEpoch = int64(r.Producer), r.PEpoch
-			return b.endOp(o)
-		}
 	case core.LookupResp:
 		switch o.kind {
 		case opList:
-			o.lpart.Offset = int64(r.HighWatermark)
+			o.lpart.Offset = int64(r.End)
 			return b.endOp(o)
 		case opFetch:
 			return b.onLookup(o, r)
@@ -196,7 +183,7 @@ func (b *Broker) onOpCP(o *op, e core.CPDone) []core.Action {
 
 // ---- dispatch ----
 
-// parked requests and fresh ones both enter here, once registered.
+// handle runs a fresh request.
 func (b *Broker) handle(s *slot, req core.Request) []core.Action {
 	acts := b.dispatch(s, req, false)
 	b.finishPart(s) // release the construction guard
@@ -214,8 +201,6 @@ func (b *Broker) dispatch(s *slot, req core.Request, resolved bool) []core.Actio
 	switch r := req.(type) {
 	case *kmsg.MetadataRequest:
 		return b.metadata(s, r)
-	case *kmsg.InitProducerIDRequest:
-		return b.initProducer(s, r)
 	case *kmsg.ProduceRequest:
 		if r.Acks == 0 { // unsupported: no response, close
 			s.silent, s.conn.closing = true, true

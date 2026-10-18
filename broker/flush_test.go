@@ -24,11 +24,11 @@ func sealReasons(h *harness) (out []string) {
 
 func TestDefaultFlushRule(t *testing.T) {
 	d := DefaultConfig()
-	if d.MaxSegmentBytes != 16<<20 || d.BatchWindow != 200*core.Millisecond || d.MaxSegmentBatches != 256 || d.MaxSegmentItems != 96 || d.MaxSegmentPartitions != 24 {
+	if d.MaxSegmentBytes != 16<<20 || d.BatchWindow != 200*core.Millisecond || d.MaxSegmentBatches != 256 || d.MaxSegmentPartitions != 96 {
 		t.Fatalf("%+v", d)
 	}
 	z := Config{}.withDefaults()
-	if z.MaxSegmentBytes != d.MaxSegmentBytes || z.MaxSegmentBatches != 256 || z.MaxSegmentItems != 96 || z.BatchWindow != d.BatchWindow {
+	if z.MaxSegmentBytes != d.MaxSegmentBytes || z.MaxSegmentBatches != 256 || z.BatchWindow != d.BatchWindow {
 		t.Fatalf("zero config: %+v", z)
 	}
 }
@@ -185,7 +185,7 @@ func TestCommitTooLargeFailsBatches(t *testing.T) {
 	if h.b.bufBytes != 0 || len(h.b.segs) != 0 {
 		t.Fatalf("buffered %d, segments %d", h.b.bufBytes, len(h.b.segs))
 	}
-	if h.cp.HighWatermark(core.TopicPartition{Topic: "t"}) != 0 {
+	if h.cp.End(core.TopicPartition{Topic: "t"}) != 0 {
 		t.Fatal("refused segment changed the log")
 	}
 }
@@ -238,35 +238,9 @@ func TestManySmallBatchesSealAtByteCapNotBatchCap(t *testing.T) {
 	if b := field(f, "batches").(core.I64); b != 200 {
 		t.Fatalf("%d batches in the segment", b)
 	}
-	if it := field(f, "items").(core.I64); it != 2+2*2 {
-		t.Fatalf("commit items %d, want 6 (2 partitions, no producers)", it)
+	if n := field(f, "parts").(core.I64); n != 2 {
+		t.Fatalf("%d partitions in the segment, want 2", n)
 	}
 	h.next(c)
 	h.next(c)
-}
-
-// Producer states are the one per-batch growth of the commit cost, so they have
-// their own cap: the segment seals before 2 + 2 x partitions + states could
-// pass MaxSegmentItems.
-func TestItemCapSealsOnProducerStates(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.MaxSegmentItems = 20 // 1 partition: 4 + states + 3 > 20 at 14 states
-	h := startedHarness(t, cfg)
-	c, ci := h.open(1), h.open(2) // ci only allocates producer ids
-	for i := 0; i < 13; i++ {
-		pid := h.initPID(ci)
-		h.send(c, verProduce, prodReq(-1, ent{"t", 0, mkBatch(t, pid, 0, 0, "a")}))
-	}
-	if len(h.puts) != 0 {
-		t.Fatalf("sealed below the item cap: %d puts", len(h.puts))
-	}
-	// The 14th producer state tips it.
-	pid := h.initPID(ci)
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, mkBatch(t, pid, 0, 0, "a")}))
-	if r := sealReasons(h); len(h.puts) != 1 || len(r) != 1 || r[0] != "items" {
-		t.Fatalf("reasons %v puts %d", r, len(h.puts))
-	}
-	if it := field(factsNamed(h.all, "segment_sealed")[0], "items").(core.I64); it != 4+14 {
-		t.Fatalf("commit items %d", it)
-	}
 }

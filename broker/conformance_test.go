@@ -20,21 +20,16 @@ import (
 var c1TPs = []core.TopicPartition{{Topic: "t", Partition: 0}, {Topic: "t", Partition: 1},
 	{Topic: "u", Partition: 0}, {Topic: "u", Partition: 1}, {Topic: "u", Partition: 2}}
 
-// Produce modes of one entry.
-const (
-	mPlain = iota // not idempotent
-	mNew          // idempotent, next sequence
-	mRetry        // idempotent, the same batch again: Dup
-	mGap          // idempotent, skipped sequence: out of order
-)
-
-type c1ent struct{ TP, N, Mode, Back, Gap int }
+// Idem entries carry a producer id: the broker refuses them (decision 41).
+type c1ent struct {
+	TP, N int
+	Idem  bool
+}
 
 type c1op struct {
-	Kind  string // init, produce, fetch, list
+	Kind  string // produce, fetch, list
 	Tag   int    // makes values unique
 	Conn  int
-	Pid   int // index into the producers made so far
 	Ents  []c1ent
 	TP    int
 	From  int
@@ -42,24 +37,11 @@ type c1op struct {
 	Last  bool // list: latest, else earliest
 }
 
-type winB struct {
-	seq  int32
-	n    int
-	base core.Offset
-}
-
-type pstate struct {
-	next int32
-	win  []winB // last 5 acked batches
-}
-
 type c1 struct {
 	t       *testing.T
 	h       *harness
 	conns   []*client
 	model   map[core.TopicPartition]*veritas.Partition
-	pids    []int64
-	prods   map[[2]int]*pstate // (pid index, tp index)
 	corrupt bool
 }
 
@@ -72,7 +54,7 @@ func newC1(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) *c1 {
 	h := newHarness(t, cfg)
 	h.cp.CreateTopic("u", 3)
 	h.do(core.Started{Self: h.self})
-	s := &c1{t: t, h: h, model: map[core.TopicPartition]*veritas.Partition{}, prods: map[[2]int]*pstate{}, corrupt: corrupt}
+	s := &c1{t: t, h: h, model: map[core.TopicPartition]*veritas.Partition{}, corrupt: corrupt}
 	for _, tp := range c1TPs {
 		s.model[tp] = &veritas.Partition{}
 	}
@@ -108,33 +90,9 @@ func (s *c1) await(c *client) (kmsg.Response, error) {
 	return s.h.next(c), nil
 }
 
-func (s *c1) ps(pi, ti int) *pstate {
-	k := [2]int{pi, ti}
-	if s.prods[k] == nil {
-		s.prods[k] = &pstate{}
-	}
-	return s.prods[k]
-}
-
 func (s *c1) step(op c1op) error {
 	c := s.conns[op.Conn%len(s.conns)]
 	switch op.Kind {
-	case "init":
-		r, err := s.await2(c, verInit, initReq())
-		if err != nil {
-			return err
-		}
-		ir := r.(*kmsg.InitProducerIDResponse)
-		if ir.ErrorCode != 0 || ir.ProducerID < 1000 || ir.ProducerEpoch != 0 {
-			return fmt.Errorf("InitProducerId: error %d pid %d epoch %d", ir.ErrorCode, ir.ProducerID, ir.ProducerEpoch)
-		}
-		for _, p := range s.pids {
-			if p == ir.ProducerID {
-				return fmt.Errorf("InitProducerId reissued %d", p)
-			}
-		}
-		s.pids = append(s.pids, ir.ProducerID)
-		return nil
 	case "produce":
 		return s.produce(c, op)
 	case "fetch":
@@ -154,8 +112,6 @@ type expect struct {
 	base core.Offset
 	add  [][]byte // appended to the model on success
 	ti   int
-	pi   int
-	win  *winB
 }
 
 func (s *c1) produce(c *client, op c1op) error {
@@ -174,42 +130,13 @@ func (s *c1) produce(c *client, op c1op) error {
 		for k := 0; k <= e.N%3; k++ {
 			vals = append(vals, fmt.Sprintf("%d.%d.%d", op.Tag, j, k))
 		}
-		mode := e.Mode
-		if mode != mPlain && len(s.pids) == 0 {
-			mode = mPlain
-		}
-		pi := 0
-		var ps *pstate
-		if mode != mPlain {
-			pi = op.Pid % len(s.pids)
-			ps = s.ps(pi, ti)
-		}
-		if mode == mRetry && len(ps.win) == 0 {
-			mode = mNew
-		}
-		x := expect{ti: ti, pi: pi}
-		var raw []byte
-		switch mode {
-		case mPlain:
-			raw = plain(s.t, vals...)
+		x := expect{ti: ti}
+		raw := plain(s.t, vals...)
+		if e.Idem {
+			raw = mkBatch(s.t, int64(1000+j), 0, 0, vals...)
+			x.err, x.base = errInvalidRequest, -1
+		} else {
 			x.base = m.HighWatermark()
-		case mNew:
-			raw = mkBatch(s.t, s.pids[pi], 0, ps.next, vals...)
-			x.base = m.HighWatermark()
-			x.win = &winB{ps.next, len(vals), x.base}
-		case mRetry:
-			w := ps.win[len(ps.win)-1-e.Back%len(ps.win)]
-			vals = vals[:0]
-			for k := 0; k < w.n; k++ { // content is irrelevant to a Dup; keep the length
-				vals = append(vals, fmt.Sprintf("retry.%d", k))
-			}
-			raw = mkBatch(s.t, s.pids[pi], 0, w.seq, vals...)
-			x.base = w.base
-		case mGap:
-			raw = mkBatch(s.t, s.pids[pi], 0, ps.next+1+int32(e.Gap%3), vals...)
-			x.err, x.base = errOutOfOrderSeq, -1
-		}
-		if x.err == 0 && mode != mRetry {
 			for _, v := range vals {
 				x.add = append(x.add, []byte(v))
 			}
@@ -236,14 +163,6 @@ func (s *c1) produce(c *client, op c1op) error {
 		}
 		if len(x.add) > 0 {
 			s.model[tp].Append(x.add)
-		}
-		if x.win != nil {
-			ps := s.ps(x.pi, x.ti)
-			ps.next += int32(x.win.n)
-			ps.win = append(ps.win, *x.win)
-			if len(ps.win) > 5 {
-				ps.win = ps.win[1:]
-			}
 		}
 	}
 	return nil
@@ -350,9 +269,6 @@ func (s *c1) invariant() error {
 	if len(s.h.env.viol) > 0 {
 		return fmt.Errorf("assertion violations: %v", s.h.env.viol)
 	}
-	if s.h.tripped {
-		return fmt.Errorf("broker tripped")
-	}
 	for _, c := range s.conns {
 		if len(c.out) != 0 {
 			return fmt.Errorf("conn %d: stray response", c.id)
@@ -362,24 +278,12 @@ func (s *c1) invariant() error {
 }
 
 func genC1(r *veritastest.Rand, i int) c1op {
-	op := c1op{Tag: i, Conn: r.Intn(2), Pid: r.Intn(3), TP: r.Intn(len(c1TPs)), From: r.Intn(1 << 10), Small: r.Intn(4) == 0, Last: r.Intn(2) == 0}
+	op := c1op{Tag: i, Conn: r.Intn(2), TP: r.Intn(len(c1TPs)), From: r.Intn(1 << 10), Small: r.Intn(4) == 0, Last: r.Intn(2) == 0}
 	switch k := r.Intn(20); {
-	case i < 2 || k < 2:
-		op.Kind = "init"
 	case k < 12:
 		op.Kind = "produce"
 		for n := 1 + r.Intn(2); n > 0; n-- {
-			e := c1ent{TP: r.Intn(len(c1TPs)), N: r.Intn(3), Back: r.Intn(5), Gap: r.Intn(3)}
-			switch m := r.Intn(10); {
-			case m < 2:
-				e.Mode = mPlain
-			case m < 6:
-				e.Mode = mNew
-			case m < 9:
-				e.Mode = mRetry
-			default:
-				e.Mode = mGap
-			}
+			e := c1ent{TP: r.Intn(len(c1TPs)), N: r.Intn(3), Idem: r.Intn(5) == 0}
 			op.Ents = append(op.Ents, e)
 		}
 	case k < 17:
@@ -457,7 +361,7 @@ func TestConformanceBrokerCatchesMutants(t *testing.T) {
 	for _, m := range []struct {
 		bug     Bug
 		corrupt bool
-	}{{BugWrongOffset, false}, {BugNoIdempotence, false}, {BugServeCorrupt, true}} {
+	}{{BugWrongOffset, false}, {BugServeCorrupt, true}} {
 		t.Run(fmt.Sprintf("bug%d", m.bug), func(t *testing.T) {
 			if c1Fail(t, m.bug, m.corrupt, 20) == nil {
 				t.Fatal("mutant not caught")

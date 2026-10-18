@@ -191,3 +191,57 @@ Setup B and the 32-client runs were not repeated.
 - A at 8 clients dropped from 240k to 160k records/s. Not investigated (larger segments, 512 MiB buffer, one run).
 Items 1 to 3 above still apply only as hypotheses.
 
+
+## Where the time goes (per-segment metrics, setup C)
+
+Since decision 36 `manibroker` serves Prometheus metrics on `-metrics-addr` (default `:9100`, `/metrics`).
+
+How to read them (all names `manibroker_...`; histograms in seconds):
+
+- `segment_put_seconds`: seal to successful PUT (retries included). `segment_queue_wait_seconds`: PUT done, waiting for
+  the earlier segments' commits (commits go out one at a time, in seal order). `segment_commit_seconds`: CommitSegment
+  issued to answered. `segment_seal_to_ack_seconds`: the sum of the three. `segment_open_age_seconds`: time the first
+  batch waited in the open buffer before the seal. Client latency is about open age + seal to ack.
+- The commit stage is a single serial pump, so `rate(segment_commit_seconds_sum[1m])` is its utilisation: near 1 means
+  the commit is the ceiling, and throughput is about (bytes per segment) / (commit seconds per segment).
+- `segments_in_flight_at_seal` above 1 means PUTs overlap; `segments_in_flight` and `buffered_bytes` are gauges as of
+  the last segment event. `reads_paused` / `reads_paused_seconds_total` show backpressure.
+- `segments_sealed_total{reason}` and `segment_sealed_batch_bytes_total` give the real segment size
+  (bytes / segments) and which rule seals: with 8 clients most segments seal by the timer or the 32-batch cap, not at 16 MiB.
+
+Measurement, 2026-10-18: setup C, fresh `scripts/it-up.sh` backends, 8 clients, 1 KB, 30 s (+ about 1 s drain), 6 partitions,
+defaults of decision 35, metrics scraped before and after the run (the table is the difference). Two runs, same backends
+(the second reuses the first's SeaweedFS and ExtendDB data, with new bucket and table prefix):
+
+| | run 1 | run 2 |
+|---|---|---|
+| client result | 18.7 MiB/s, 19.1k rec/s, avg 2.04 s, p99 4.6 s | 13.6 MiB/s, 14.0k rec/s, avg 2.82 s, p99 7.2 s |
+| segments committed (sealed by timer / 32-batch cap / size) | 117 (73 / 42 / 2) | 91 (64 / 25 / 2) |
+| average segment | 5.3 MB | 4.9 MB |
+| open age, avg | 171 ms | 173 ms |
+| PUT, avg (per segment) | 716 ms | 676 ms |
+| queue wait for commit, avg | 723 ms | 1363 ms |
+| commit, avg | 242 ms | 323 ms |
+| seal to ack, avg | 1.68 s | 2.36 s |
+| sum of commit seconds / 31 s | 28.3 s (91%) | 29.4 s (95%) |
+| segments in flight at seal, avg (p90 <=) | 6.6 (12) | 7.1 (12) |
+| backpressure paused | 0 s | 0 s |
+
+Reading:
+
+- PUTs do overlap: 6 to 7 segments are in flight on average when one is sealed. The PUT is not the ceiling; a PUT
+  (0.7 s for 5 MB, concurrent with its neighbours) waits behind the commit pump anyway.
+- The commit stage is saturated: it was busy 91 to 95% of the wall time, one commit at a time at 240 to 320 ms each. That
+  is the ceiling: 117 commits in 31 s at about 5.3 MB each is 20 MB/s (run 1), and the queue wait (0.7 to 1.4 s on
+  average) is the symptom. Reads were never paused, so the 512 MiB buffer was not the limit either.
+- The segments are small (about 5 MB, not 16 MiB), because at 8 clients the 200 ms timer or the 32-batch cap seals first.
+  That is why quadrupling `MaxSegmentBytes` did not move the old 50 MiB/s ceiling: the size rule almost never fires, and
+  the bytes per commit stayed constant. Throughput is commits per second x bytes per commit, with commits serial
+  (about 4 per second here), so raising the batch cap or the window (more bytes per commit) or making the commit
+  faster or concurrent per partition are the levers; speed-up ideas 1 to 3 above (S3 side) would not help.
+- Caveats: these runs reached only 13.6 to 18.7 MiB/s against 50.5 MiB/s measured earlier the same day on the same
+  machine, so the machine or Docker was slower during these runs (a kind cluster was also running); absolute numbers
+  are not comparable to the table above, and the earlier ceiling was not re-measured with metrics. What does carry over is the
+  shape: commit utilisation near 100% with PUTs overlapped. The commit time itself (240 to 320 ms for a
+  TransactWriteItems of at most 32 batches on ExtendDB/SQLite) was not broken down further; the next step is to time
+  the CP call inside the control plane. Two runs only.

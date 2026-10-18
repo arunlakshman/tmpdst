@@ -57,26 +57,10 @@ func Start(ctx context.Context, cfg NodeConfig) (*Node, error) {
 	if cfg.Listener == nil || cfg.Objects == nil || cfg.ControlPlane == nil {
 		return nil, errors.New("prod.Start: Listener, Objects and ControlPlane are required")
 	}
-	if cfg.StopGrace <= 0 {
-		cfg.StopGrace = 10 * time.Second
-	}
-	if cfg.FlushGrace <= 0 {
-		cfg.FlushGrace = 5 * time.Second
-	}
-	if cfg.DataInbox <= 0 {
-		cfg.DataInbox = 1024
-	}
-	bc := cfg.Broker
-	if bc.Port == 0 {
-		_, p, err := net.SplitHostPort(cfg.Listener.Addr().String())
-		if err != nil {
-			return nil, err
-		}
-		port, _ := strconv.Atoi(p)
-		bc.Port = int32(port)
-	}
-	if bc.Host == "" {
-		bc.Host = "127.0.0.1"
+	cfg = withDefaults(cfg)
+	bc, err := advertised(cfg.Broker, cfg.Listener)
+	if err != nil {
+		return nil, err
 	}
 	env := NewEnv(cfg.Log)
 	rctx, kill := context.WithCancel(ctx)
@@ -90,13 +74,7 @@ func Start(ctx context.Context, cfg NodeConfig) (*Node, error) {
 		ex = tapExecutor{exec, cfg.OnIO}
 	}
 	if cfg.Shutdown != nil {
-		go func() {
-			select {
-			case <-cfg.Shutdown:
-				n.Stop()
-			case <-n.done:
-			}
-		}()
+		go n.stopOn(cfg.Shutdown)
 	}
 	b := sys.Bundle{
 		Clock: NewClock(), Objects: cfg.Objects, ControlPlane: cfg.ControlPlane, Conns: nt,
@@ -104,18 +82,60 @@ func Start(ctx context.Context, cfg NodeConfig) (*Node, error) {
 		Shutdown: n.stop, StopGrace: core.Duration(cfg.StopGrace),
 	}
 	self := core.NodeRef{Node: core.NodeID(cfg.NodeID), Inc: core.Incarnation(env.NewID())}
-	go func() {
-		defer close(n.done)
-		err := sys.Run(rctx, b, ex, broker.New(bc), self)
-		grace := time.Duration(0)
-		if err == nil {
-			grace = cfg.FlushGrace // graceful exit: let the last answers reach the clients
-		}
-		nt.Shutdown(grace)
-		kill()
-		n.err = err
-	}()
+	go n.run(rctx, b, ex, broker.New(bc), self, cfg.FlushGrace)
 	return n, nil
+}
+
+// withDefaults fills the zero grace periods and inbox size.
+func withDefaults(cfg NodeConfig) NodeConfig {
+	if cfg.StopGrace <= 0 {
+		cfg.StopGrace = 10 * time.Second
+	}
+	if cfg.FlushGrace <= 0 {
+		cfg.FlushGrace = 5 * time.Second
+	}
+	if cfg.DataInbox <= 0 {
+		cfg.DataInbox = 1024
+	}
+	return cfg
+}
+
+// advertised fills the broker's advertised host and port from the listener.
+func advertised(bc broker.Config, ln net.Listener) (broker.Config, error) {
+	if bc.Port == 0 {
+		_, p, err := net.SplitHostPort(ln.Addr().String())
+		if err != nil {
+			return bc, err
+		}
+		port, _ := strconv.Atoi(p)
+		bc.Port = int32(port)
+	}
+	if bc.Host == "" {
+		bc.Host = "127.0.0.1"
+	}
+	return bc, nil
+}
+
+// stopOn stops the node when shutdown closes, or returns once it is done.
+func (n *Node) stopOn(shutdown <-chan struct{}) {
+	select {
+	case <-shutdown:
+		n.Stop()
+	case <-n.done:
+	}
+}
+
+// run drives the broker to its end, then closes the network and marks done.
+func (n *Node) run(ctx context.Context, b sys.Bundle, ex sys.Executor, br core.Factory, self core.NodeRef, flush time.Duration) {
+	defer close(n.done)
+	err := sys.Run(ctx, b, ex, br, self)
+	grace := time.Duration(0)
+	if err == nil {
+		grace = flush // graceful exit: let the last answers reach the clients
+	}
+	n.net.Shutdown(grace)
+	n.kill()
+	n.err = err
 }
 
 // Addr is the address the broker listens on.

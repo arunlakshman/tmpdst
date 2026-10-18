@@ -59,22 +59,30 @@ func classify(a core.IOAction, err error) (core.ErrCode, core.Outcome) {
 	}
 	var ce *CallError
 	if errors.As(err, &ce) {
-		switch {
-		case ce.Status == http.StatusServiceUnavailable || ce.Status == http.StatusTooManyRequests:
-			return core.ErrUnavailable, core.NotApplied
-		case ce.Status >= 400 && ce.Status < 500:
-			return core.ErrIO, core.NotApplied
-		case ce.Status != 0:
-			return core.ErrIO, maybe
-		case !ce.Sent:
-			if isDial(ce.Err) {
-				return core.ErrUnavailable, core.NotApplied
-			}
-			return timeoutOrIO(ce.Err), core.NotApplied
-		}
-		return timeoutOrIO(ce.Err), maybe
+		return classifyCall(ce, maybe)
 	}
 	return timeoutOrIO(err), maybe
+}
+
+func classifyCall(ce *CallError, maybe core.Outcome) (core.ErrCode, core.Outcome) {
+	switch {
+	case ce.Status == http.StatusServiceUnavailable || ce.Status == http.StatusTooManyRequests:
+		return core.ErrUnavailable, core.NotApplied
+	case ce.Status >= 400 && ce.Status < 500:
+		return core.ErrIO, core.NotApplied
+	case ce.Status != 0:
+		return core.ErrIO, maybe
+	case !ce.Sent:
+		return classifyNotSent(ce.Err), core.NotApplied
+	}
+	return timeoutOrIO(ce.Err), maybe
+}
+
+func classifyNotSent(err error) core.ErrCode {
+	if isDial(err) {
+		return core.ErrUnavailable
+	}
+	return timeoutOrIO(err)
 }
 
 func timeoutOrIO(err error) core.ErrCode {

@@ -63,6 +63,14 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	if cfg.Region == "" {
 		cfg.Region = "us-east-1"
 	}
+	ac, err := config.LoadDefaultConfig(ctx, loadOptions(cfg)...)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{c: s3.NewFromConfig(ac, clientOptions(cfg)), bucket: cfg.Bucket, prefix: cfg.Prefix}, nil
+}
+
+func loadOptions(cfg Config) []func(*config.LoadOptions) error {
 	opts := []func(*config.LoadOptions) error{config.WithRegion(cfg.Region)}
 	if cfg.Endpoint != "" && os.Getenv("AWS_ACCESS_KEY_ID") == "" {
 		opts = append(opts, config.WithCredentialsProvider(
@@ -71,11 +79,11 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	if cfg.HTTP != nil {
 		opts = append(opts, config.WithHTTPClient(cfg.HTTP))
 	}
-	ac, err := config.LoadDefaultConfig(ctx, opts...)
-	if err != nil {
-		return nil, err
-	}
-	c := s3.NewFromConfig(ac, func(o *s3.Options) {
+	return opts
+}
+
+func clientOptions(cfg Config) func(*s3.Options) {
+	return func(o *s3.Options) {
 		o.UsePathStyle = cfg.PathStyle
 		o.Retryer = aws.NopRetryer{} // the broker owns retries
 		o.APIOptions = append(o.APIOptions, cfg.Obs.APIOptions()...)
@@ -84,8 +92,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 		if cfg.Endpoint != "" {
 			o.BaseEndpoint = aws.String(cfg.Endpoint)
 		}
-	})
-	return &Store{c: c, bucket: cfg.Bucket, prefix: cfg.Prefix}, nil
+	}
 }
 
 // EnsureBucket creates the bucket if it does not exist (dev and tests).
@@ -119,34 +126,47 @@ func (s *Store) Get(ctx context.Context, ref core.SegmentRef) ([]byte, error) {
 	if ref.Off < 0 {
 		return nil, s.badRange(ctx, ref)
 	}
-	in := &s3.GetObjectInput{Bucket: &s.bucket, Key: s.key(ref.Key)}
-	switch {
-	case ref.Len > 0:
-		in.Range = aws.String(fmt.Sprintf("bytes=%d-%d", ref.Off, ref.Off+ref.Len-1))
-	case ref.Off > 0:
-		in.Range = aws.String(fmt.Sprintf("bytes=%d-", ref.Off))
-	}
+	in := &s3.GetObjectInput{Bucket: &s.bucket, Key: s.key(ref.Key), Range: rangeHeader(ref)}
 	out, err := s.c.GetObject(ctx, in)
 	if err != nil {
-		if notFound(err) && in.Range == nil {
-			return nil, fail(core.ErrNotFound)
-		}
-		// Some servers answer a range past the end of an empty object with 404.
-		if apiCode(err) == "InvalidRange" || notFound(err) {
-			err = s.badRange(ctx, ref)
-			if err == errEmpty {
-				return []byte{}, nil
-			}
-			return nil, err
-		}
-		return nil, err
+		return s.getFailed(ctx, ref, in.Range != nil, err)
 	}
 	defer out.Body.Close()
-	data, err := io.ReadAll(out.Body)
+	return readBody(out.Body, ref.Len)
+}
+
+func rangeHeader(ref core.SegmentRef) *string {
+	switch {
+	case ref.Len > 0:
+		return aws.String(fmt.Sprintf("bytes=%d-%d", ref.Off, ref.Off+ref.Len-1))
+	case ref.Off > 0:
+		return aws.String(fmt.Sprintf("bytes=%d-", ref.Off))
+	}
+	return nil
+}
+
+// getFailed maps a failed GetObject; reading exactly at the end of the
+// object is an empty result, not an error.
+func (s *Store) getFailed(ctx context.Context, ref core.SegmentRef, ranged bool, err error) ([]byte, error) {
+	if notFound(err) && !ranged {
+		return nil, fail(core.ErrNotFound)
+	}
+	// Some servers answer a range past the end of an empty object with 404.
+	if apiCode(err) == "InvalidRange" || notFound(err) {
+		err = s.badRange(ctx, ref)
+		if err == errEmpty {
+			return []byte{}, nil
+		}
+	}
+	return nil, err
+}
+
+func readBody(body io.Reader, want int64) ([]byte, error) {
+	data, err := io.ReadAll(body)
 	if err != nil {
 		return nil, err
 	}
-	if ref.Len > 0 && int64(len(data)) != ref.Len {
+	if want > 0 && int64(len(data)) != want {
 		return nil, fail(core.ErrInvalid) // the range ran past the end
 	}
 	return data, nil

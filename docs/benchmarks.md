@@ -238,7 +238,7 @@ Reading:
   That is why quadrupling `MaxSegmentBytes` did not move the old 50 MiB/s ceiling: the size rule almost never fires, and
   the bytes per commit stayed constant. Throughput is commits per second x bytes per commit, with commits serial
   (about 4 per second here), so raising the batch cap or the window (more bytes per commit) or making the commit
-  faster or concurrent per partition are the levers; speed-up ideas 1 to 3 above (S3 side) would not help.
+  faster or concurrent per partition are the levers; speed-up ideas 1 and 2 above (pipelined or parallel PUTs) would not help: PUTs already overlap, and the commit is what is saturated.
 - Caveats: these runs reached only 13.6 to 18.7 MiB/s against 50.5 MiB/s measured earlier the same day on the same
   machine, so the machine or Docker was slower during these runs (a kind cluster was also running); absolute numbers
   are not comparable to the table above, and the earlier ceiling was not re-measured with metrics. What does carry over is the

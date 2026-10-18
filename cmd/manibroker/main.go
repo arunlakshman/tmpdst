@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"syscall"
@@ -44,6 +45,7 @@ func main() {
 	flag.StringVar(&tn.resumeBuffered, "resume-buffered", "", "resume reads below this (default: half of -max-buffered)")
 	objTimeout := flag.Duration("obj-timeout", 30*time.Second, "base timeout of an object-store call; large bodies get extra time at 2 MiB/s")
 	grace := flag.Duration("stop-grace", 10*time.Second, "time to finish in-flight work after SIGTERM")
+	metricsAddr := flag.String("metrics-addr", ":9100", "serve Prometheus metrics on /metrics at this address (empty: disabled)")
 	debug := flag.Bool("debug", false, "debug logging")
 	flag.Parse()
 
@@ -87,6 +89,18 @@ func main() {
 		cfg.Objects, cfg.ObjClassify = s, s3store.Classifier{}
 	default:
 		fatal(errors.New("unknown -objects " + *objects))
+	}
+	if *metricsAddr != "" {
+		mln, err := net.Listen("tcp", *metricsAddr)
+		if err != nil {
+			fatal(err)
+		}
+		m := prod.NewMetrics()
+		cfg.Facts = m.Observe
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", m.Handler())
+		go func() { _ = http.Serve(mln, mux) }()
+		log.Info("manibroker metrics", "addr", mln.Addr().String())
 	}
 	ln, err := net.Listen("tcp", *listen)
 	if err != nil {

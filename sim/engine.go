@@ -97,7 +97,16 @@ type ControlPlaneFaults struct {
 	LostResponse   float64 // commit applied, response lost: retry must be idempotent
 	Outage         Outage
 	CallerTimeout  core.Duration
+	// MaxCommitItems models a store that commits a segment in one bounded
+	// transaction (DynamoDB: DynamoMaxCommitItems). A CommitSegment that needs
+	// more items is refused with ErrTooLarge and changes nothing. 0 = no limit.
+	MaxCommitItems int
 }
+
+// DynamoMaxCommitItems is DynamoDB's TransactWriteItems limit, the value the
+// Kafka preset uses. It mirrors cp/dynamo.MaxTxItems (decision 32); the sim
+// cannot import that package, so keep the two equal.
+const DynamoMaxCommitItems = 100
 
 // NetworkFaults are connection-level faults (lesson 6).
 type NetworkFaults struct {

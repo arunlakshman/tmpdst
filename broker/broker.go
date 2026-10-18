@@ -53,6 +53,7 @@ type Broker struct {
 	parked []parked
 	topics []core.TopicInfo // topic cache, refreshed from DescribeTopics on a miss
 
+	now      core.Time // At of the event being stepped (set by Step; not state)
 	open     openSegment
 	segs     []*segment // sealed segments in commit order
 	ops      []*op
@@ -96,6 +97,7 @@ func (b *Broker) Step(ev core.Event) []core.Action {
 	if b.tripped || b.exited {
 		return nil
 	}
+	b.now = ev.At
 	var acts []core.Action
 	switch e := ev.Body.(type) {
 	case core.Started:
@@ -182,7 +184,7 @@ func (b *Broker) stop() []core.Action {
 		b.finishPart(p.s)
 	}
 	b.parked = nil
-	return b.seal()
+	return b.seal(sealStop)
 }
 
 func (b *Broker) idle() bool {
@@ -251,7 +253,7 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 		if e.Gen != b.open.gen || b.open.gen == 0 {
 			return nil
 		}
-		return b.seal()
+		return b.seal(sealTimer)
 	}
 	for _, s := range b.segs {
 		if core.TimerID(s.id) == e.ID {

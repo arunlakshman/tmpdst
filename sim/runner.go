@@ -13,7 +13,7 @@ func NewRunner() Runner { return runner{} }
 
 func validate(cfg Config) error {
 	for _, p := range cfg.Processes {
-		if p.Factory == nil {
+		if p.Factory == nil && p.FactoryFor == nil {
 			return errors.New("sim: process " + p.Name + " has no Factory")
 		}
 	}

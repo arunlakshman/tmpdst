@@ -99,6 +99,9 @@ func TestMutantsAreCaught(t *testing.T) {
 		{"BugNoIdempotence: retries are not deduplicated", broker.BugNoIdempotence, "kafka: no record is committed twice"},
 		{"BugWrongOffset: fetch patches base offset + 1", broker.BugWrongOffset, "kafka: a consumer sees every offset in order, none skipped"},
 		{"BugServeCorrupt: corrupt GET reaches the client", broker.BugServeCorrupt, "kafka: a consumer never receives a corrupt batch"},
+		{"BugNoBatchCap: MaxSegmentBatches ignored", broker.BugNoBatchCap, "kafka: a sealed segment holds at most MaxSegmentBatches batches"},
+		{"BugTimerFromLastBatch: flush window restarts on every batch", broker.BugTimerFromLastBatch, "kafka: a segment is sealed within the window of its first batch"},
+		{"BugSealOffByOne: size rule applied one batch late", broker.BugSealOffByOne, "kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch"},
 	}
 	for _, c := range cases {
 		cfg := config(nil, c.bug)
@@ -291,5 +294,52 @@ func TestCachedStateHashMatchesFull(t *testing.T) {
 		if p := plain.Seeds[i]; s.TraceHash != p.TraceHash || s.Steps != p.Steps || s.RandCalls != p.RandCalls {
 			t.Errorf("seed %d: verify mode changed the trace", s.Seed)
 		}
+	}
+}
+
+// A broker that ignores its batch cap is refused by the control plane's commit
+// limit too (tight on half the seeds), not only caught by the cap invariant.
+func TestCommitLimitRefusesUncappedSegment(t *testing.T) {
+	cfg := config(nil, broker.BugNoBatchCap)
+	for s := uint64(1); s <= 40; s++ {
+		for _, p := range violated(cfg, s) {
+			if p == "broker: segment exceeds the control plane's commit size" {
+				return
+			}
+		}
+	}
+	t.Fatal("no seed in 40 had the control plane refuse an uncapped segment")
+}
+
+// The production caps (24 partitions, 32 batches) against DynamoDB's 100-item
+// commit: 20 producers keep enough batches in flight to hit the caps, the
+// control plane refuses anything over 100 items, and the broker's defaults
+// (16 MiB, 200 ms) are untouched.
+func TestProductionCapsFitDynamoLimit(t *testing.T) {
+	opts := Opts{Producers: 20, Consumers: 1, Topics: []string{"a", "b", "c", "d"}, Partitions: 8}
+	cfg := configWith(seeds(1, 3), broker.BugNone, opts)
+	prod := broker.DefaultConfig()
+	prod.MaxBufferedBytes, prod.ResumeBufferedBytes = 64<<20, 32<<20
+	cfg.Params = prod
+	inner := cfg.Swarm
+	cfg.Swarm = func(seed uint64, r sim.CountedRand, c *sim.SeedConfig) {
+		inner(seed, r, c)
+		c.Params, c.ControlPlane.MaxCommitItems = prod, sim.DynamoMaxCommitItems
+	}
+	rep, err := sim.NewRunner().Run(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rep.Coverage = nil // a short campaign does not reach every fault
+	report(t, rep)
+	hit := uint64(0)
+	for _, a := range rep.Assertions {
+		if a.Prop == "broker: segment sealed by batch cap" || a.Prop == "broker: segment sealed by partition cap" {
+			t.Logf("%s: %d", a.Prop, a.Checks)
+			hit += a.Checks
+		}
+	}
+	if hit == 0 {
+		t.Error("the production caps never bound: the test proves nothing")
 	}
 }

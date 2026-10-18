@@ -104,6 +104,9 @@ func (w *Workload) newBatches(c *client) {
 		switch w.env.Intn(16) {
 		case 0:
 			pad = 100 + w.env.Intn(300)
+			if w.env.Intn(2) == 0 { // a batch of several KiB: larger than a small segment cap
+				pad = 2000 + w.env.Intn(2000)
+			}
 		default:
 			pad = w.env.Intn(24)
 		}

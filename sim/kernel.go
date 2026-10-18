@@ -150,7 +150,7 @@ func newRun(cfg Config, seed uint64) *run {
 	r.env = env{Rand: r.rng, Buggify: &buggify{r}, Assertions: r.as}
 
 	r.sc = SeedConfig{ObjectStore: cfg.ObjectStore, ControlPlane: cfg.ControlPlane,
-		Network: cfg.Network, Attrition: cfg.Attrition, Cost: cfg.Cost}
+		Network: cfg.Network, Attrition: cfg.Attrition, Cost: cfg.Cost, Params: cfg.Params}
 	if cfg.Swarm != nil {
 		cfg.Swarm(seed, r.rng.Derive("swarm"), &r.sc)
 	}
@@ -232,6 +232,9 @@ func (r *run) setup() {
 	for _, f := range r.cfg.Invariants {
 		r.invs = append(r.invs, f())
 	}
+	if r.cfg.InvariantsFor != nil {
+		r.invs = append(r.invs, r.cfg.InvariantsFor(r.sc)...)
+	}
 
 	add := func(name string, w bool) *node {
 		n := &node{name: core.NodeID(name), idx: len(r.nodes), workload: w}
@@ -246,6 +249,9 @@ func (r *run) setup() {
 		for i := 0; i < p.Count; i++ {
 			n := add(fmt.Sprintf("%s-%d", p.Name, i), false)
 			n.factory = p.Factory
+			if p.FactoryFor != nil {
+				n.factory = p.FactoryFor(r.sc)
+			}
 		}
 	}
 	for i, wf := range r.cfg.Workloads {

@@ -89,6 +89,7 @@ func (b *Broker) StateHash() uint64 {
 		h.u64(uint64(uint32(p.s.h.CorrelationID)))
 	}
 	h.u64(uint64(b.open.gen))
+	h.u64(uint64(b.open.since))
 	h.u64(uint64(b.open.bytes))
 	h.u64(uint64(len(b.open.parts)))
 	h.batches(b.open.batches)

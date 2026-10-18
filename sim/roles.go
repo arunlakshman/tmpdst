@@ -8,6 +8,9 @@ type Process struct {
 	Name    string
 	Count   int
 	Factory core.Factory
+	// FactoryFor, when set, replaces Factory and sees this seed's (swarmed)
+	// SeedConfig, so a scenario can vary the process's own tuning per seed.
+	FactoryFor func(sc SeedConfig) core.Factory
 }
 
 // Workload is a test driver: a deterministic Kafka client model (kgo cannot run

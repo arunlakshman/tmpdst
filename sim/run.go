@@ -33,6 +33,9 @@ type SeedConfig struct {
 	Network      NetworkFaults
 	Attrition    Attrition
 	Cost         CostParams
+	// Params is scenario-specific tuning that the kernel never reads: set from
+	// Config.Params, adjusted by a Swarm, read by FactoryFor and InvariantsFor.
+	Params any
 }
 
 // Swarm picks this seed's knobs from menus (lesson 9). It draws only from r,
@@ -55,6 +58,10 @@ type Config struct {
 	Processes  []Process
 	Workloads  []WorkloadFactory
 	Invariants []func() Invariant // fresh per seed
+	// InvariantsFor builds more invariants from this seed's (swarmed) config.
+	InvariantsFor func(sc SeedConfig) []Invariant
+	// Params is the initial SeedConfig.Params of every seed.
+	Params any
 	// Engines builds this seed's engines from its (swarmed) config. Fresh per
 	// seed. Engines that hold ground truth also implement ObjectTruth or
 	// CPTruth; the View finds them by type assertion.

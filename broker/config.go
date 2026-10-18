@@ -18,6 +18,14 @@ const (
 	// BugServeCorrupt skips the batch CRC check on fetch, so a corrupted GET
 	// reaches the client.
 	BugServeCorrupt
+	// BugNoBatchCap ignores MaxSegmentBatches, so a segment can outgrow the
+	// control plane's commit limit.
+	BugNoBatchCap
+	// BugTimerFromLastBatch restarts the flush timer on every batch, so a steady
+	// trickle never flushes by the timer.
+	BugTimerFromLastBatch
+	// BugSealOffByOne applies the size rule one batch late.
+	BugSealOffByOne
 )
 
 // Config is the broker's tuning. Zero numeric fields take DefaultConfig's value.
@@ -28,12 +36,22 @@ type Config struct {
 
 	MaxFrame int32 // largest request frame; larger closes the connection
 
+	// Segment flush rule (decision 35): the open segment is sealed when it holds
+	// MaxSegmentBytes of batch data, or BatchWindow after its first batch
+	// arrived (a fixed timer, not extended by later batches), or when it hits
+	// one of the two count caps below.
 	BatchWindow     core.Duration // flush timer, armed by the first batch of a segment
 	MaxSegmentBytes int           // flush at once when the open segment holds this many batch bytes
 
-	// MaxSegmentPartitions flushes when the open segment spans this many distinct
-	// partitions (the DynamoDB control plane rejects ~100 transaction items).
-	MaxSegmentPartitions int
+	// MaxSegmentPartitions and MaxSegmentBatches cap the open segment so the
+	// control plane can commit it. The DynamoDB CP commits a segment in one
+	// 100-item transaction costing 2 + changed partitions + grown topics +
+	// producer states (<= batches) + ranges (<= batches) items; with 24 and 32
+	// that is at most 90 + grown topics. The broker cannot know the CP: keep
+	// these in step with it (cp/doc.go). A CP answer of ErrTooLarge fails the
+	// segment's batches (UNKNOWN_SERVER_ERROR) instead of retrying.
+	MaxSegmentPartitions int // seal at this many distinct partitions
+	MaxSegmentBatches    int // seal at this many batches
 
 	MaxAttempts int           // tries per PUT, commit or read before giving up
 	RetryBase   core.Duration // backoff of the first retry; doubles each time
@@ -53,9 +71,10 @@ func DefaultConfig() Config {
 	return Config{
 		BrokerID: 1, Host: "localhost", Port: 9092,
 		MaxFrame:             16 << 20,
-		BatchWindow:          50 * core.Millisecond,
-		MaxSegmentBytes:      4 << 20,
+		BatchWindow:          200 * core.Millisecond,
+		MaxSegmentBytes:      16 << 20,
 		MaxSegmentPartitions: 24,
+		MaxSegmentBatches:    32,
 		MaxAttempts:          6,
 		RetryBase:            20 * core.Millisecond,
 		RetryMax:             640 * core.Millisecond,
@@ -84,6 +103,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MaxSegmentPartitions <= 0 {
 		c.MaxSegmentPartitions = d.MaxSegmentPartitions
+	}
+	if c.MaxSegmentBatches <= 0 {
+		c.MaxSegmentBatches = d.MaxSegmentBatches
 	}
 	if c.MaxAttempts <= 0 {
 		c.MaxAttempts = d.MaxAttempts

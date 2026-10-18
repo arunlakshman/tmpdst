@@ -30,7 +30,17 @@ type openSegment struct {
 	bytes   int
 	parts   []core.TopicPartition // distinct partitions buffered
 	gen     core.TimerGen         // flush timer generation; 0 = none armed
+	since   core.Time             // when the first batch arrived (age of the segment)
 }
+
+// Why a segment was sealed (the "reason" of the segment_sealed fact).
+const (
+	sealSize       = "size"
+	sealTimer      = "timer"
+	sealBatches    = "batches"
+	sealPartitions = "partitions"
+	sealStop       = "stop"
+)
 
 type segState uint8
 
@@ -54,34 +64,67 @@ type segment struct {
 	attempts int
 }
 
-// addBatch appends an admitted batch to the open segment and flushes at the
-// size limit; the first batch arms the flush timer.
+// addBatch appends an admitted batch to the open segment and seals it at the
+// size, partition or batch cap; the first batch arms the flush timer, which
+// later batches do not move (the window runs from the first batch).
 func (b *Broker) addBatch(pb *pbatch) []core.Action {
 	var acts []core.Action
+	before := b.open.bytes
 	b.open.batches = append(b.open.batches, pb)
 	b.open.bytes += len(pb.data)
 	b.bufBytes += len(pb.data)
 	if !slices.Contains(b.open.parts, pb.tp) {
 		b.open.parts = append(b.open.parts, pb.tp)
 	}
-	if len(b.open.batches) == 1 {
+	if len(b.open.batches) == 1 || b.cfg.Bug == BugTimerFromLastBatch {
+		if len(b.open.batches) == 1 {
+			b.open.since = b.now
+		}
 		b.timerGen++
 		b.open.gen = b.timerGen
 		acts = append(acts, core.SetTimer{ID: timerFlush, Gen: b.timerGen, After: b.cfg.BatchWindow})
 	}
-	if b.open.bytes >= b.cfg.MaxSegmentBytes || len(b.open.parts) >= b.cfg.MaxSegmentPartitions {
-		acts = append(acts, b.seal()...)
+	sizeBytes := b.open.bytes
+	if b.cfg.Bug == BugSealOffByOne {
+		sizeBytes = before
+	}
+	switch {
+	case sizeBytes >= b.cfg.MaxSegmentBytes:
+		return append(acts, b.seal(sealSize)...)
+	case len(b.open.parts) >= b.cfg.MaxSegmentPartitions:
+		return append(acts, b.seal(sealPartitions)...)
+	case len(b.open.batches) >= b.cfg.MaxSegmentBatches && b.cfg.Bug != BugNoBatchCap:
+		return append(acts, b.seal(sealBatches)...)
 	}
 	return acts
 }
 
 // seal turns the open buffer into a segment and starts its upload.
-func (b *Broker) seal() []core.Action {
+func (b *Broker) seal(why string) []core.Action {
 	if len(b.open.batches) == 0 {
 		return nil
 	}
 	bs := b.open.batches
-	acts := []core.Action{core.CancelTimer{ID: timerFlush}}
+	switch why {
+	case sealSize:
+		b.env.Reachable("broker: segment sealed by size")
+		if len(bs) == 1 {
+			b.env.Reachable("broker: oversize batch sealed alone")
+		}
+	case sealTimer:
+		b.env.Reachable("broker: segment sealed by timer")
+	case sealBatches:
+		b.env.Reachable("broker: segment sealed by batch cap")
+	case sealPartitions:
+		b.env.Reachable("broker: segment sealed by partition cap")
+	}
+	acts := []core.Action{core.CancelTimer{ID: timerFlush}, emit("segment_sealed",
+		core.Field{Key: "reason", Value: core.Str(why)},
+		core.Field{Key: "bytes", Value: core.I64(b.open.bytes)},
+		core.Field{Key: "batches", Value: core.I64(len(bs))},
+		core.Field{Key: "parts", Value: core.I64(len(b.open.parts))},
+		core.Field{Key: "last", Value: core.I64(len(bs[len(bs)-1].data))},
+		core.Field{Key: "age", Value: core.I64(b.now - b.open.since)})}
 	b.open = openSegment{}
 	return append(acts, b.sealBatches(bs)...)
 }
@@ -170,6 +213,10 @@ func (b *Broker) onCommit(s *segment, e core.CPDone) []core.Action {
 	case e.Err == core.ErrInvalid:
 		return b.isolate(s)
 	case e.Err == core.ErrConflict:
+		return b.failSegment(s, errUnknownServer)
+	case e.Err == core.ErrTooLarge:
+		// The segment exceeds the CP's commit limit; retrying cannot help.
+		b.env.Unreachable("broker: segment exceeds the control plane's commit size")
 		return b.failSegment(s, errUnknownServer)
 	}
 	return b.retry(s, segCommit) // idempotent per SegmentKey (decision 3)

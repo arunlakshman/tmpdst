@@ -18,9 +18,12 @@ func phases() sim.Phases {
 func ms(n int64) core.Duration { return core.Duration(n) * core.Millisecond }
 
 // brokerConfig is the sim-friendly broker: a short flush window so commits
-// are frequent, and a small buffer so backpressure engages.
+// are frequent, and a small buffer so backpressure engages. The segment size is
+// pinned to the pre-decision-35 default (4 MiB) and the batch cap to 8; a seed's
+// swarm overrides the segment knobs (see swarmBroker).
 func brokerConfig(bug broker.Bug) broker.Config {
-	return broker.Config{BatchWindow: 5 * core.Millisecond, MaxBufferedBytes: 3 << 10, ResumeBufferedBytes: 1 << 10, Bug: bug}
+	return broker.Config{BatchWindow: 5 * core.Millisecond, MaxSegmentBytes: 4 << 20, MaxSegmentBatches: 8,
+		MaxBufferedBytes: 3 << 10, ResumeBufferedBytes: 1 << 10, Bug: bug}
 }
 
 // Config is the Kafka campaign preset: 3 brokers, 1 workload of 3 idempotent
@@ -28,15 +31,22 @@ func brokerConfig(bug broker.Bug) broker.Config {
 // attrition and a swarm over the fault families.
 func Config(seeds []uint64) sim.Config { return config(seeds, broker.BugNone) }
 
-func config(seeds []uint64, bug broker.Bug) sim.Config {
-	opts := DefaultOpts()
+func config(seeds []uint64, bug broker.Bug) sim.Config { return configWith(seeds, bug, DefaultOpts()) }
+
+func configWith(seeds []uint64, bug broker.Bug, opts Opts) sim.Config {
 	ph := phases()
 	slow := func(fmin, fmax, smin, smax int64, p float64) sim.TwoSpeed {
 		return sim.TwoSpeed{FastMin: ms(fmin), FastMax: ms(fmax), SlowMin: ms(smin), SlowMax: ms(smax), SlowProb: p}
 	}
 	return sim.Config{
-		Seeds:     seeds,
-		Processes: []sim.Process{{Name: "broker", Count: 3, Factory: broker.New(brokerConfig(bug))}},
+		Seeds:  seeds,
+		Params: brokerConfig(bug),
+		Processes: []sim.Process{{Name: "broker", Count: 3, FactoryFor: func(sc sim.SeedConfig) core.Factory {
+			return broker.New(sc.Params.(broker.Config))
+		}}},
+		InvariantsFor: func(sc sim.SeedConfig) []sim.Invariant {
+			return []sim.Invariant{newSegmentCaps(sc.Params.(broker.Config))}
+		},
 		Workloads: []sim.WorkloadFactory{func(env core.Env, self core.NodeRef, bs []core.NodeRef) sim.Workload {
 			return NewWorkload(env, self, bs, opts)
 		}},
@@ -64,8 +74,9 @@ func config(seeds []uint64, bug broker.Bug) sim.Config {
 			ApplyLatency:   slow(1, 5, 50, 200, 0.05),
 			RespondLatency: slow(1, 3, 20, 100, 0.05),
 			Unavailable503: 0.03, Timeout: 0.02, LostResponse: 0.03,
-			Outage:        sim.Outage{Prob: 0.002, Dur: [2]core.Duration{ms(200), 2 * core.Second}},
-			CallerTimeout: ms(500),
+			MaxCommitItems: sim.DynamoMaxCommitItems,
+			Outage:         sim.Outage{Prob: 0.002, Dur: [2]core.Duration{ms(200), 2 * core.Second}},
+			CallerTimeout:  ms(500),
 		},
 		Network: sim.NetworkFaults{
 			Latency:       sim.TwoSpeed{FastMin: 200 * core.Microsecond, FastMax: 2 * core.Millisecond, SlowMin: ms(20), SlowMax: ms(100), SlowProb: 0.03},
@@ -127,6 +138,7 @@ func swarm(_ uint64, r sim.CountedRand, c *sim.SeedConfig) {
 	if r.Chance(0.3) {
 		n.Latency.SlowProb = 0.2
 	}
+	swarmBroker(r, c) // last, so the fault knobs above keep their draws
 }
 
 // fenceModeProb is the share of seeds that run the fencing scenario.
@@ -144,4 +156,48 @@ func fenceMode(cp *sim.ControlPlaneFaults) {
 	cp.CallerTimeout = ms(30)
 	cp.Timeout = 0.4
 	cp.ApplyLatency.SlowProb = 0.5
+}
+
+// The 3 producers send at most 2 batches each and wait for the ack, so a
+// segment rarely holds more than 6: the batch cap binds only when it is 2-4.
+//
+// swarmBroker picks this seed's segment tuning (decision 17) from a profile:
+//
+//	tiny (0.25)       a few KiB: the size rule binds
+//	accumulate (0.25) long windows, big byte cap, small batch cap: the batch cap binds
+//	defaults (0.15)   the production defaults: 16 MiB, 200 ms, 32 batches, 24 partitions
+//	wide (0.1)        2-3 partitions, nothing else binds: the partition cap
+//	mixed (0.25)      every knob from its own menu
+//
+// Buffer caps are swarmed too. Half the seeds tighten the control plane's commit
+// limit to exactly what the seed's caps allow (2 + partitions + 2 batches), so a
+// broker that ignores a cap is refused; the preset's own limit is 100.
+func swarmBroker(r sim.CountedRand, c *sim.SeedConfig) {
+	bc := c.Params.(broker.Config)
+	pick := func(menu ...int) int { return menu[r.Intn(len(menu))] }
+	window := func(menu ...int) core.Duration { return ms(int64(pick(menu...))) }
+	switch x := r.Float64(); {
+	case x < 0.25: // tiny
+		bc.MaxSegmentBytes, bc.BatchWindow = pick(4<<10, 6<<10, 8<<10), window(20, 50, 200)
+		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(16, 32), pick(12, 24)
+	case x < 0.5: // accumulate
+		bc.MaxSegmentBytes, bc.BatchWindow = pick(256<<10, 4<<20, 16<<20), window(50, 200)
+		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(2, 3, 4), pick(12, 24)
+	case x < 0.65: // defaults
+		d := broker.DefaultConfig()
+		bc.MaxSegmentBytes, bc.BatchWindow = d.MaxSegmentBytes, d.BatchWindow
+		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = d.MaxSegmentBatches, d.MaxSegmentPartitions
+	case x < 0.75: // wide
+		bc.MaxSegmentBytes, bc.BatchWindow = 16<<20, window(50, 200)
+		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = 32, pick(2, 3)
+	default: // mixed
+		bc.MaxSegmentBytes, bc.BatchWindow = pick(4<<10, 16<<10, 64<<10, 256<<10, 4<<20, 16<<20), window(5, 20, 50, 200)
+		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(2, 4, 8, 32), pick(3, 6, 12, 24)
+	}
+	bc.MaxBufferedBytes = pick(3<<10, 3<<10, 16<<10, 64<<10, 1<<20)
+	bc.ResumeBufferedBytes = bc.MaxBufferedBytes / 3
+	if r.Chance(0.5) {
+		c.ControlPlane.MaxCommitItems = 2 + bc.MaxSegmentPartitions + 2*bc.MaxSegmentBatches
+	}
+	c.Params = bc
 }

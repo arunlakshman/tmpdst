@@ -63,9 +63,12 @@ type c1 struct {
 	corrupt bool
 }
 
-func newC1(t *testing.T, bug Bug, corrupt bool) *c1 {
+func newC1(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) *c1 {
 	cfg := DefaultConfig()
 	cfg.Bug = bug
+	if tune != nil {
+		tune(&cfg)
+	}
 	h := newHarness(t, cfg)
 	h.cp.CreateTopic("u", 3)
 	h.do(core.Started{Self: h.self})
@@ -397,10 +400,10 @@ func shrinkC1(op c1op) []c1op {
 	return out
 }
 
-func c1Check(t *testing.T, bug Bug, corrupt bool) veritastest.Check[*c1, c1op] {
+func c1Check(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) veritastest.Check[*c1, c1op] {
 	return veritastest.Check[*c1, c1op]{
 		Name: "c1op", Ops: 80, MaxShrinkRuns: 300,
-		New:       func() *c1 { return newC1(t, bug, corrupt) },
+		New:       func() *c1 { return newC1(t, bug, corrupt, tune) },
 		Gen:       genC1,
 		Step:      func(s *c1, op c1op) error { return s.step(op) },
 		Invariant: func(s *c1) error { return s.invariant() },
@@ -411,7 +414,7 @@ func c1Check(t *testing.T, bug Bug, corrupt bool) veritastest.Check[*c1, c1op] {
 
 // c1Fail runs seeds 1..n and returns the first failure.
 func c1Fail(t *testing.T, bug Bug, corrupt bool, n int) *veritastest.Failure[c1op] {
-	c := c1Check(t, bug, corrupt)
+	c := c1Check(t, bug, corrupt, nil)
 	for seed := uint64(1); seed <= uint64(n); seed++ {
 		if f := c.RunSeed(seed); f != nil {
 			t.Log(c.Report(f, ""))
@@ -424,8 +427,28 @@ func c1Fail(t *testing.T, bug Bug, corrupt bool, n int) *veritastest.Failure[c1o
 func TestConformanceBroker(t *testing.T) {
 	for _, corrupt := range []bool{false, true} {
 		t.Run(fmt.Sprintf("corruptGets=%v", corrupt), func(t *testing.T) {
-			veritastest.Run(t, c1Check(t, BugNone, corrupt), veritastest.Options{Seeds: 100, Seed: -1})
+			veritastest.Run(t, c1Check(t, BugNone, corrupt, nil), veritastest.Options{Seeds: 100, Seed: -1})
 		})
+	}
+}
+
+// Small segment caps make every seal rule fire inside the generated runs, and
+// the log must still match the Partition spec.
+func TestConformanceBrokerSmallSegments(t *testing.T) {
+	caps := map[string]func(*Config){
+		"bytes":      func(c *Config) { c.MaxSegmentBytes = 120 },
+		"batches":    func(c *Config) { c.MaxSegmentBatches = 2 },
+		"partitions": func(c *Config) { c.MaxSegmentPartitions = 2 },
+		"all": func(c *Config) {
+			c.MaxSegmentBytes, c.MaxSegmentBatches, c.MaxSegmentPartitions = 200, 3, 2
+		},
+	}
+	for _, name := range []string{"bytes", "batches", "partitions", "all"} {
+		for _, corrupt := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/corruptGets=%v", name, corrupt), func(t *testing.T) {
+				veritastest.Run(t, c1Check(t, BugNone, corrupt, caps[name]), veritastest.Options{Seeds: 50, Seed: -1})
+			})
+		}
 	}
 }
 

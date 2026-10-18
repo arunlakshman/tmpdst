@@ -99,6 +99,9 @@ func expectReachable() []core.Prop {
 		"broker: tripped on fencing",
 		"broker: reads paused by backpressure",
 		"broker: reads resumed after backpressure",
+		"broker: segment sealed by size", "broker: segment sealed by timer",
+		"broker: segment sealed by batch cap", "broker: segment sealed by partition cap",
+		"broker: oversize batch sealed alone",
 	}
 }
 

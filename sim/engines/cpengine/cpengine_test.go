@@ -255,3 +255,46 @@ func TestInitProducerMutates(t *testing.T) {
 		t.Fatal(r, e.Gen())
 	}
 }
+
+func TestCommitSizeLimit(t *testing.T) {
+	f := base()
+	f.MaxCommitItems = 7
+	e, c, a := setup(f, 1)
+	e.CreateTopic("t", 4)
+	call(e, c, a, 1, core.Register{Self: a})
+	c.Run()
+	many := func(key string, n int) core.CommitSegment {
+		op := commit(key, 1, a)
+		for i := 1; i < n; i++ {
+			op.Batches = append(op.Batches, op.Batches[0])
+		}
+		return op
+	}
+	// 2 + 1 partition + 0 topics + 0 states + 4 batches = 7: fits.
+	call(e, c, a, 2, many("ok", 4))
+	// 5 batches = 8: refused, and nothing changes.
+	call(e, c, a, 3, many("big", 5))
+	c.Run()
+	if d := c.Find(2).(core.CPDone); d.Err != core.OK {
+		t.Fatal(d)
+	}
+	hwm := e.HighWatermark(tp)
+	if d := c.Find(3).(core.CPDone); d.Err != core.ErrTooLarge || d.Outcome != core.NotApplied || e.HighWatermark(tp) != hwm {
+		t.Fatal(d)
+	}
+	// A producer state counts: 2 + 1 + 1 + 4 batches = 8 is refused.
+	p := func(n int) core.CommitSegment {
+		op := many("p", n)
+		for i := range op.Batches {
+			op.Batches[i].Producer = 1000
+		}
+		return op
+	}
+	call(e, c, a, 4, core.InitProducer{})
+	c.Run()
+	call(e, c, a, 5, p(4))
+	c.Run()
+	if d := last(c); d.Err != core.ErrTooLarge {
+		t.Fatal(d)
+	}
+}

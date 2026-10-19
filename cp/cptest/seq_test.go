@@ -285,7 +285,7 @@ func TestSeqChaosSixBrokers(t *testing.T) {
 	ds := runLoad(t, "", []cp.Store{s}, 6, 15, 288, 33)
 	f.Fail, f.AfterApply, f.Latency = nil, nil, nil
 	lockstepOrder(t, ds, s)
-	if sts := s.Stats(); sts.Unknown == 0 || sts.NotApplied == 0 {
+	if sts := s.Stats(); sts.Unknown == 0 || sts.Retries == 0 {
 		t.Fatalf("no injected failure was seen: %+v", sts)
 	}
 }

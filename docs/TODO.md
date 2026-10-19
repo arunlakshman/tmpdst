@@ -51,3 +51,20 @@ The producer-state follow-up is gone: the S# items no longer exist (decisions 41
 ## Idempotent producers: explicitly not planned
 
 Bringing back idempotent producers (InitProducerId, producer epochs and sequence numbers, duplicate detection in the CP) is **not planned**. The contract is stateless at-least-once (decisions 41-44): clients must disable idempotence (franz-go `kgo.DisableIdempotentWrite()`, Apache Kafka `enable.idempotence=false`), and the broker rejects idempotent batches with INVALID_REQUEST.
+
+## Consumer read path (needed before any consume stage; not scheduled)
+
+**Why:** the audit (docs/surprises-audit.md, items 3, 5, 6, 7) found that consumer stages would fail before measuring anything: Fetch never waits (MinBytes/MaxWait ignored), so every partition of every Fetch is a control-plane Lookup (one idle consumer made 20k Lookups/s locally; about 48k consistent reads/s predicted on AWS), the read path does one S3 GET per batch with no cache (about 6.5k GET/s at 1 GiB/s, above S3's 5,500/s starting rate per prefix), and benchmark consumers start at offset 0 of a topic that earlier stages filled.
+
+**Plan (the product owner agreed a cache is needed, "not now"):**
+- Fetch long-polling that honours MinBytes/MaxWait, so idle consumers stop busy-polling.
+- A Lookup result cache in the broker (end offsets and recent runs, invalidated by commits it knows about, bounded staleness).
+- A broker-side S3 read cache with read-ahead and coalescing of adjacent batches in one segment into a single ranged GET.
+- Control-plane read capacity: check the DynamoDB table quotas in ap-south-2 (30k warm throughput, 40k default) before a consume stage.
+- Benchmark workloads: consumers start at the tail (or use a fresh topic per stage).
+
+**Done when:** a 64-consumer stage at the produce rate runs without Lookup or GET storms, with measured GET/s, Lookup/s and cost per GiB reported in the summary.
+
+## Per-broker partition ownership: declined
+
+The audit (item 1) showed that at 288 partitions every segment overlaps every other, so the single sequencer cannot pipeline and its bound is about transactions/s x ~3 segments per transaction. Giving each broker its own partition group would raise the modelled ceiling to 140-191 commits/s, but it breaks the leaderless Metadata design (decision 29). **Declined by the product owner**: brokers stay interchangeable. Revisit only if measured commit rate on real DynamoDB is the limiting factor.

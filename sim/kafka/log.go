@@ -114,7 +114,7 @@ func (o *oracle) readRange(v sim.View, r core.BatchRange, det []core.Detail) []s
 	if err != nil {
 		return nil
 	}
-	recs, err := bt.Records()
+	recs, err := batchRecords(bt)
 	as.Always(err == nil && int64(len(recs)) == r.Count, "kafka: committed range holds its record count", det...)
 	if err != nil || int64(len(recs)) != r.Count {
 		return nil

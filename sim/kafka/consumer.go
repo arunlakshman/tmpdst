@@ -151,7 +151,7 @@ func (w *Workload) readPart(p kmsg.FetchResponseTopicPartition, pos int64) ReadP
 		bt, err := kwire.ParseBatch(raw)
 		var recs []kmsg.Record
 		if err == nil {
-			recs, err = bt.Records()
+			recs, err = batchRecords(bt)
 		}
 		if err != nil {
 			out.Corrupt = true

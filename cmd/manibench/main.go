@@ -5,12 +5,12 @@
 //
 //	manibench benchmark-producer -topic T [-brokers 127.0.0.1:9092]
 //	    [-num-clients 1] [-record-size 1024] [-duration 30s] [-interval 5s]
-//	    [-partitions 0] [-max-inflight 0] [-buffered-records 5000]
+//	    [-partitions 0] [-compression none] [-max-inflight 0] [-buffered-records 5000]
 //	    [-cp-url http://127.0.0.1:8080 -create-partitions N]
 //
 // Each client is its own kgo.Client (acks=all, idempotence disabled: the broker rejects
-// idempotent batches, decision 41; no compression: the broker rejects
-// compressed batches, decision 33). It produces as fast as
+// idempotent batches, decision 41; -compression picks the batch codec, default
+// none: the broker stores compressed batches as opaque bytes, decision 45). It produces as fast as
 // the buffer allows: Produce blocks once -buffered-records are in flight.
 // Latency is the time from the Produce call to its callback.
 //
@@ -58,6 +58,7 @@ type benchConfig struct {
 	buffered    int
 	cpURL       string
 	createParts int
+	compression string
 }
 
 // producer is the part of *kgo.Client the benchmark uses (a fake in tests).
@@ -92,12 +93,13 @@ func parseArgs(args []string, stderr io.Writer) (c benchConfig, ok bool) {
 	fs.IntVar(&c.parts, "partitions", 0, "0: kgo uniform-bytes sticky partitioner; N: round-robin per record over partitions 0..N-1")
 	fs.IntVar(&c.inflight, "max-inflight", 0, "kgo MaxProduceRequestsInflightPerBroker (0: kgo default, 1; above 1 a retry can reorder, there is no idempotence)")
 	fs.IntVar(&c.buffered, "buffered-records", 5000, "kgo MaxBufferedRecords per client")
+	fs.StringVar(&c.compression, "compression", "none", "batch compression: none, gzip, snappy, lz4 or zstd")
 	fs.StringVar(&c.cpURL, "cp-url", "", "control plane URL, used with -create-partitions")
 	fs.IntVar(&c.createParts, "create-partitions", 0, "if > 0, POST /v1/create-topic first")
 	if fs.Parse(args) != nil {
 		return c, false
 	}
-	if c.topic == "" || c.clients < 1 || c.size < 8 {
+	if _, known := codecByName(c.compression); !known || c.topic == "" || c.clients < 1 || c.size < 8 {
 		fs.Usage()
 		return c, false
 	}
@@ -141,11 +143,12 @@ func createTopic(url, topic string, n int) error {
 
 // clientOpts builds the kgo options shared by every client.
 func clientOpts(c benchConfig) []kgo.Opt {
+	codec, _ := codecByName(c.compression)
 	opts := []kgo.Opt{
 		kgo.SeedBrokers(c.brokers...),
 		kgo.RequiredAcks(kgo.AllISRAcks()),
 		kgo.DisableIdempotentWrite(), // the broker rejects idempotent batches (decision 41)
-		kgo.ProducerBatchCompression(kgo.NoCompression()),
+		kgo.ProducerBatchCompression(codec),
 		kgo.MaxBufferedRecords(c.buffered),
 		kgo.DefaultProduceTopic(c.topic),
 	}
@@ -158,6 +161,23 @@ func clientOpts(c benchConfig) []kgo.Opt {
 		opts = append(opts, kgo.MaxProduceRequestsInflightPerBroker(c.inflight))
 	}
 	return opts
+}
+
+// codecByName maps the -compression flag to a kgo codec.
+func codecByName(name string) (kgo.CompressionCodec, bool) {
+	switch strings.ToLower(name) {
+	case "", "none":
+		return kgo.NoCompression(), true
+	case "gzip":
+		return kgo.GzipCompression(), true
+	case "snappy":
+		return kgo.SnappyCompression(), true
+	case "lz4":
+		return kgo.Lz4Compression(), true
+	case "zstd":
+		return kgo.ZstdCompression(), true
+	}
+	return kgo.NoCompression(), false
 }
 
 // makeValue builds record seq of client ci: ids in the first 8 bytes, a

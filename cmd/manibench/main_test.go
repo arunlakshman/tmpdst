@@ -147,3 +147,22 @@ func TestRunClientError(t *testing.T) {
 		t.Fatal(eb.String())
 	}
 }
+
+func TestCompressionFlag(t *testing.T) {
+	var eb bytes.Buffer
+	c, ok := parseArgs([]string{"-topic", "t"}, &eb)
+	if !ok || c.compression != "none" {
+		t.Fatalf("default %q %v", c.compression, ok)
+	}
+	for _, name := range []string{"none", "gzip", "snappy", "LZ4", "zstd", ""} {
+		if _, known := codecByName(name); !known {
+			t.Errorf("%q unknown", name)
+		}
+	}
+	if _, ok := parseArgs([]string{"-topic", "t", "-compression", "lz5"}, &eb); ok {
+		t.Fatal("unknown codec accepted")
+	}
+	if c, ok := parseArgs([]string{"-topic", "t", "-compression", "lz4"}, &eb); !ok || len(clientOpts(c)) == 0 {
+		t.Fatal("lz4 rejected")
+	}
+}

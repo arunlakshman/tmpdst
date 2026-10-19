@@ -25,7 +25,6 @@ func newClient(t *testing.T, seeds []string, opts ...kgo.Opt) *kgo.Client {
 		kgo.ProducerLinger(2 * time.Millisecond),
 		kgo.MetadataMinAge(100 * time.Millisecond), // default 5s makes broker failover slow
 		kgo.RetryBackoffFn(func(int) time.Duration { return 50 * time.Millisecond }),
-		kgo.ProducerBatchCompression(kgo.NoCompression()), // the broker stores uncompressed batches only (v1)
 	}, opts...)
 	cl, err := kgo.NewClient(opts...)
 	if err != nil {

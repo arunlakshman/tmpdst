@@ -80,6 +80,9 @@ func expectReachable() []core.Prop {
 		"broker: segment sealed by batch cap", "broker: segment sealed by partition cap",
 		"broker: oversize batch sealed alone",
 		"broker: idempotent batch rejected",
+		"broker: corrupt produce batch rejected",
+		"broker: gzip batch admitted", "broker: snappy batch admitted",
+		"broker: lz4 batch admitted", "broker: zstd batch admitted",
 	}
 }
 

@@ -104,6 +104,7 @@ func TestMutantsAreCaught(t *testing.T) {
 		{"BugServeCorrupt: corrupt GET reaches the client", broker.BugServeCorrupt, "kafka: a consumer never receives a corrupt batch"},
 		{"BugNoBatchCap: MaxSegmentBatches ignored", broker.BugNoBatchCap, "kafka: a sealed segment holds at most MaxSegmentBatches batches"},
 		{"BugTimerFromLastBatch: flush window restarts on every batch", broker.BugTimerFromLastBatch, "kafka: a segment is sealed within the window of its first batch"},
+		{"BugSkipProduceCRC: produce admits a corrupted batch", broker.BugSkipProduceCRC, "kafka: committed batch is intact"},
 		{"BugSealOffByOne: size rule applied one batch late", broker.BugSealOffByOne, "kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch"},
 	}
 	for _, c := range cases {
@@ -302,16 +303,33 @@ func TestIdemBatchRejectedIsAbandoned(t *testing.T) {
 	}
 }
 
+// rngEnv is a fakeEnv whose Intn is a seeded xorshift, for tests that need
+// rare events (1 in 40) to occur at unaligned draws.
+type rngEnv struct {
+	fakeEnv
+	x uint64
+}
+
+func (e *rngEnv) Intn(n int) int {
+	e.x ^= e.x << 13
+	e.x ^= e.x >> 7
+	e.x ^= e.x << 17
+	return int(e.x % uint64(n))
+}
+
 // Only the batches built with idem set carry a producer id on the wire.
 func TestBatchesCarryProducerIDOnlyWhenIdem(t *testing.T) {
-	w := NewWorkload(&fakeEnv{}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
+	w := NewWorkload(&rngEnv{x: 88172645463325252}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
 	w.SetHistory(&fakeHist{})
 	c := w.clients[0]
 	idem, plain := 0, 0
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 400; i++ {
 		c.p.cur = nil
 		w.newBatches(c)
 		for _, b := range c.p.cur {
+			if b.corrupt {
+				continue
+			}
 			bt, err := kwire.ParseBatch(b.data)
 			if err != nil {
 				t.Fatal(err)
@@ -438,5 +456,75 @@ func (i *widestInv) AtEnd(v sim.View) {
 				break
 			}
 		}
+	}
+}
+
+// The workload sends every codec id (compressed payloads are opaque to the
+// broker but decodable by the simulated consumer), plus damaged batches.
+func TestWorkloadBuildsEveryCodecAndCorruptBatches(t *testing.T) {
+	w := NewWorkload(&rngEnv{x: 88172645463325252}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
+	h := &fakeHist{}
+	w.SetHistory(h)
+	c := w.clients[0]
+	seen := map[int]int{}
+	corrupt := 0
+	for i := 0; i < 400; i++ {
+		c.p.cur = nil
+		w.newBatches(c)
+		for _, b := range c.p.cur {
+			if b.corrupt {
+				corrupt++
+				if _, err := kwire.ParseBatch(b.data); err == nil {
+					t.Fatal("corrupt batch parses")
+				}
+				continue
+			}
+			bt, err := kwire.ParseBatch(b.data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			recs, err := batchRecords(bt)
+			if err != nil || len(recs) != len(b.vals) {
+				t.Fatalf("codec %d: %v, %d records for %d values", bt.Codec(), err, len(recs), len(b.vals))
+			}
+			for j, r := range recs {
+				if string(r.Value) != b.vals[j] {
+					t.Fatalf("codec %d record %d: %q != %q", bt.Codec(), j, r.Value, b.vals[j])
+				}
+			}
+			seen[bt.Codec()]++
+		}
+	}
+	for codec := kwire.CodecNone; codec <= kwire.CodecZstd; codec++ {
+		if seen[codec] == 0 {
+			t.Errorf("codec %d never built: %v", codec, seen)
+		}
+	}
+	if corrupt == 0 {
+		t.Error("no corrupt batch built")
+	}
+}
+
+// A damaged batch answered CORRUPT_MESSAGE is abandoned as rejected; the same
+// code for a good batch stays fatal.
+func TestCorruptBatchRejectedIsAbandoned(t *testing.T) {
+	w := NewWorkload(&fakeEnv{}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
+	h := &fakeHist{}
+	w.SetHistory(h)
+	c := w.clients[0]
+	c.state, c.stage = csUp, stRun
+	w.newBatches(c)
+	for _, b := range c.p.cur {
+		b.idem, b.corrupt = false, true
+	}
+	w.onProduce(c, produceResp(w, c, codeCorruptMessage))
+	for i, op := range h.ops {
+		res, _ := op.Result.(ProduceRes)
+		if op.Outcome != sim.OpAbandoned || res.Why != "rejected" {
+			t.Errorf("op %d: %d %+v", i, op.Outcome, res)
+		}
+	}
+	if len(c.p.cur) != 0 {
+		t.Fatal("rejected batch kept")
 	}
 }

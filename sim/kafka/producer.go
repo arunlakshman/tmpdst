@@ -26,6 +26,7 @@ type batch struct {
 	lastCode  int16
 	dig       uint64 // hash of data, so StateHash does not rescan it
 	idem      bool   // carries producer id idemPID: must be rejected
+	corrupt   bool   // payload damaged after the CRC was computed: must be rejected
 }
 
 // producer is the at-least-once producer state of one client. cur holds the
@@ -40,8 +41,24 @@ type producer struct {
 const idemPID = 7
 
 // codeInvalidRequest is INVALID_REQUEST, the broker's answer to a batch that
-// carries a producer id.
-const codeInvalidRequest int16 = 42
+// carries a producer id. codeCorruptMessage is CORRUPT_MESSAGE, its answer to a
+// batch whose CRC does not match.
+const (
+	codeInvalidRequest int16 = 42
+	codeCorruptMessage int16 = 2
+)
+
+// expect is the code the broker must answer a batch that is never admitted
+// (0: the batch is good).
+func (b *batch) expect() int16 {
+	switch {
+	case b.idem:
+		return codeInvalidRequest
+	case b.corrupt:
+		return codeCorruptMessage
+	}
+	return 0
+}
 
 func (p *producer) hash(h *hasher) {
 	h.u64(uint64(p.serial))
@@ -52,6 +69,7 @@ func (p *producer) hash(h *hasher) {
 		h.u64(uint64(b.attempts))
 		h.bool(b.ambiguous)
 		h.bool(b.idem)
+		h.bool(b.corrupt)
 		h.u64(uint64(b.lastCode))
 		h.u64(b.dig)
 	}
@@ -94,7 +112,20 @@ func (w *Workload) produceNext(c *client) []core.Action {
 }
 
 // idemEvery: one batch in idemEvery claims a producer id and must be rejected.
-const idemEvery = 40
+// corruptEvery: one batch in corruptEvery is damaged in flight (CRC mismatch).
+const (
+	idemEvery    = 40
+	corruptEvery = 40
+)
+
+// pickCodec draws a codec id: none for a third of the batches, otherwise gzip,
+// snappy, lz4 or zstd with equal weight.
+func (w *Workload) pickCodec() int16 {
+	if c := w.env.Intn(6); c >= 2 {
+		return int16(c - 1)
+	}
+	return kwire.CodecNone
+}
 
 // newBatches builds the next request: 1 or 2 batches for distinct partitions.
 func (w *Workload) newBatches(c *client) {
@@ -130,10 +161,14 @@ func (w *Workload) newBatches(c *client) {
 		if b.idem {
 			pp.ProducerID, pp.ProducerEpoch, pp.BaseSequence = idemPID, 0, 0
 		}
-		data, err := kwire.BuildBatch(pp, recs)
+		data, err := buildBatch(pp, recs, w.pickCodec())
 		if err != nil {
 			w.env.Unreachable("kafka: client batch builds", core.Detail{Key: "err", Value: err.Error()})
 			continue
+		}
+		b.corrupt = !b.idem && w.env.Intn(corruptEvery) == 0
+		if b.corrupt {
+			data[len(data)-1] ^= 0x40
 		}
 		b.data = data
 		dh := newHasher()
@@ -191,11 +226,14 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 		case !found:
 			b.ambiguous = true
 			keep = append(keep, b)
-		case b.idem && code == codeInvalidRequest:
+		case b.expect() != 0 && code == b.expect():
 			// Rejected at admission, however many earlier attempts were lost.
 			w.resolve(b, sim.OpAbandoned, ProduceRes{Base: -1, Code: code, Why: "rejected", Attempts: b.attempts})
 		case b.idem && code == 0:
 			w.env.Unreachable("kafka: a batch with a producer id is accepted")
+			w.resolve(b, sim.OpDefinite, ProduceRes{Base: base, Attempts: b.attempts})
+		case b.corrupt && code == 0:
+			w.env.Unreachable("kafka: a batch with a bad CRC is accepted")
 			w.resolve(b, sim.OpDefinite, ProduceRes{Base: base, Attempts: b.attempts})
 		case code == 0:
 			w.resolve(b, sim.OpDefinite, ProduceRes{Base: base, Attempts: b.attempts})

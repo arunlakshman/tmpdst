@@ -109,7 +109,7 @@ preflight() {
     if ! kafka-topics.sh --bootstrap-server "$ip:9092" --list 2>/dev/null | grep -qx "$TOPIC"; then
       log "  $ip: topic $TOPIC NOT visible (create it: bench-ctl.sh create-topic $PARTITIONS)"; fail=1
     else
-      n=$(kafka-run-class.sh kafka.tools.GetOffsetShell --bootstrap-server "$ip:9092" --topic "$TOPIC" --time -1 2>/dev/null | wc -l | tr -d ' ')
+      n=$(kafka-get-offsets.sh --bootstrap-server "$ip:9092" --topic "$TOPIC" --time -1 2>/dev/null | grep -c "^$TOPIC:" || true)  # Kafka 3.8: GetOffsetShell moved packages; use the wrapper
       log "  $ip: topic $TOPIC has $n partitions"
       [ "$n" -eq "$PARTITIONS" ] || { log "  $ip: expected $PARTITIONS partitions"; fail=1; }
     fi

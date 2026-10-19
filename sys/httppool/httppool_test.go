@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // doer is what both the plain and the AWS SDK clients offer.
@@ -17,9 +18,9 @@ type doer interface {
 
 // wave sends n requests that are all in flight at once (the handler waits
 // until n have arrived), so n connections are needed.
-func wave(t *testing.T, d doer, url string, n int, arrived *sync.WaitGroup) {
+func wave(t *testing.T, d doer, url string, n int, arrived *atomic.Int64) {
 	t.Helper()
-	arrived.Add(n)
+	arrived.Store(0)
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
 		wg.Add(1)
@@ -48,11 +49,15 @@ func TestConnectionsAreReused(t *testing.T) {
 		"aws":   func() doer { return AWS() },
 	} {
 		t.Run(name, func(t *testing.T) {
-			var arrived sync.WaitGroup
+			var arrived atomic.Int64
 			var dials atomic.Int64
 			srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				arrived.Done()
-				arrived.Wait() // hold every request until all n are in flight
+				// Hold every request until all n are in flight (or 10 s, so a
+				// failed dial fails the test instead of hanging it).
+				arrived.Add(1)
+				for dl := time.Now().Add(10 * time.Second); arrived.Load() < n && time.Now().Before(dl); {
+					time.Sleep(time.Millisecond)
+				}
 				_, _ = w.Write([]byte("ok"))
 			}))
 			srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {

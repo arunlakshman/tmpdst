@@ -72,7 +72,7 @@ UNIT
 
 # Metrics snapshotter: the SG opens no metrics ports and loadgen has no
 # SSM send-command right, so this host pushes /metrics of both services to
-# s3://BUCKET/results/RUN/metrics/<epoch>-{broker,manicp}.txt every 10 s.
+# s3://BUCKET/results/RUN/metrics/<broker id>/<epoch>-{broker,manicp}.txt every 10 s.
 # summarize.py picks the snapshots around each cell by timestamp.
 cat > /usr/local/bin/mb-snapshot.sh <<'SNAP'
 #!/bin/bash
@@ -82,7 +82,7 @@ while true; do
   ts=$(date +%s)
   for pair in broker:9100 manicp:9101; do
     name=$${pair%%:*}; port=$${pair##*:}
-    curl -sf -m 3 "http://127.0.0.1:$port/metrics" | aws s3 cp - "s3://$BUCKET/results/$RUN_ID/metrics/$ts-$name.txt" --only-show-errors || true
+    curl -sf -m 3 "http://127.0.0.1:$port/metrics" | aws s3 cp - "s3://$BUCKET/results/$RUN_ID/metrics/$BROKER_ID/$ts-$name.txt" --only-show-errors || true
   done
   sleep 10
 done
@@ -92,6 +92,7 @@ cat > /etc/manifester/snapshot.env <<ENV
 BUCKET=$BUCKET
 RUN_ID=$RUN_ID
 AWS_REGION=$REGION
+BROKER_ID=$BROKER_ID
 ENV
 cat > /etc/systemd/system/mb-snapshot.service <<UNIT
 [Unit]

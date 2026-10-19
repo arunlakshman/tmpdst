@@ -44,6 +44,7 @@ type brokerFlags struct {
 	createBucket      bool
 	tn                tuning
 	objTimeout, grace time.Duration
+	commitDeadline    time.Duration
 	metricsAddr       string
 	debug             bool
 	logLevel, runID   string
@@ -75,6 +76,7 @@ func parseFlags(args []string, stderr io.Writer) (brokerFlags, *flag.FlagSet, er
 	fs.StringVar(&tn.maxBuffered, "max-buffered", "auto", "pause client reads above this much unacked produce data; auto = clamp(memory/16, 128MiB, 1GiB)")
 	fs.StringVar(&tn.resumeBuffered, "resume-buffered", "", "resume reads below this (default: half of -max-buffered)")
 	fs.DurationVar(&f.objTimeout, "obj-timeout", 30*time.Second, "base timeout of an object-store call; large bodies get extra time at 2 MiB/s")
+	fs.DurationVar(&f.commitDeadline, "commit-deadline", time.Duration(dflt.CommitDeadline), "keep retrying a segment's control-plane commit (capped exponential backoff with jitter) this long after its first attempt, then fail its produce requests; keep under the producers' delivery.timeout.ms")
 	fs.DurationVar(&f.grace, "stop-grace", 10*time.Second, "time to finish in-flight work after SIGTERM")
 	fs.StringVar(&f.metricsAddr, "metrics-addr", ":9100", "serve Prometheus metrics on /metrics at this address (empty: disabled)")
 	fs.BoolVar(&f.debug, "debug", false, "debug logging (same as -log-level debug)")
@@ -125,6 +127,9 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 	}
 	cfg.Broker.BrokerID = int32(f.brokerID)
 	cfg.Exec.ObjTimeout = f.objTimeout
+	if f.commitDeadline > 0 {
+		cfg.Broker.CommitDeadline = core.Duration(f.commitDeadline)
+	}
 	if f.metricsAddr != "" {
 		m = prod.NewMetrics()
 		runinfo.Register(m.Registry(), "manibroker", info)

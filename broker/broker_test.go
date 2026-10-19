@@ -700,3 +700,85 @@ func TestSegmentKeysAreFlatAndDeterministic(t *testing.T) {
 		t.Fatal("different seeds, same key")
 	}
 }
+
+// A CP outage far longer than the old six-attempt budget (about 0.6 s) fails
+// nothing: the commit is retried with capped, jittered backoff and the produce
+// is acked once the CP is back (audit item 8).
+func TestCommitSurvivesLongCPOutage(t *testing.T) {
+	h := startedHarness(t, DefaultConfig())
+	c := h.open(1)
+	down := true
+	h.cpHook = func(a core.CPCall, run func() core.Completion) core.Completion {
+		if _, ok := a.Op.(core.CommitSegment); ok && down {
+			return core.CPDone{Req: a.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied}
+		}
+		return run()
+	}
+	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.flush()
+	start := h.now
+	for h.now-start < core.Time(10*core.Second) {
+		if len(h.timers) != 1 {
+			t.Fatalf("want one backoff timer, have %d", len(h.timers))
+		}
+		var id core.TimerID
+		for k := range h.timers {
+			id = k
+		}
+		h.now += core.Time(2 * core.Second)
+		h.fire(id)
+	}
+	if len(c.out) != 0 {
+		t.Fatal("answered during the outage")
+	}
+	down = false
+	for id := range h.timers {
+		h.now += core.Time(2 * core.Second)
+		h.fire(id)
+		break
+	}
+	ps := produced(h.next(c))
+	if ps[0].ErrorCode != 0 {
+		t.Fatalf("%+v", ps)
+	}
+	if len(commitOps(h)) < 6 {
+		t.Fatalf("only %d commits", len(commitOps(h)))
+	}
+	h.noViolations()
+}
+
+// Past CommitDeadline the segment fails with REQUEST_TIMED_OUT and its buffer
+// is released.
+func TestCommitDeadlineFailsSegmentAndReleasesBuffer(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.CommitDeadline = 5 * core.Second
+	h := startedHarness(t, cfg)
+	c := h.open(1)
+	h.cpHook = func(a core.CPCall, run func() core.Completion) core.Completion {
+		if _, ok := a.Op.(core.CommitSegment); ok {
+			return core.CPDone{Req: a.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied}
+		}
+		return run()
+	}
+	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.flush()
+	for i := 0; len(h.timers) > 0; i++ {
+		if i > 100 {
+			t.Fatal("never gave up")
+		}
+		var id core.TimerID
+		for k := range h.timers {
+			id = k
+		}
+		h.now += core.Time(core.Second)
+		h.fire(id)
+	}
+	ps := produced(h.next(c))
+	if ps[0].ErrorCode != errRequestTimedOut {
+		t.Fatalf("%+v", ps)
+	}
+	if h.b.bufBytes != 0 || len(h.b.segs) != 0 {
+		t.Fatalf("buffer %d, segments %d", h.b.bufBytes, len(h.b.segs))
+	}
+	h.noViolations()
+}

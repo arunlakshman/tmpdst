@@ -238,6 +238,11 @@ func (b *Broker) onCommit(s *segment, e core.CPDone) []core.Action {
 		if !shape {
 			return b.failSegment(s, errUnknownServer)
 		}
+		if s.attempts >= b.cfg.MaxAttempts {
+			// Past the old six-attempt budget (audit item 8): the outage was
+			// ridden out instead of failing the segment.
+			b.env.Reachable("broker: commit succeeded after the old retry budget")
+		}
 		return b.committed(s, resp.Assigned)
 	case e.Err == core.ErrInvalid:
 		return b.failSegment(s, errUnknownServer)
@@ -309,18 +314,43 @@ func (b *Broker) failSegment(s *segment, code int16) []core.Action {
 
 // retry backs off and repeats the PUT or commit under the same key.
 func (b *Broker) retry(s *segment, from segState) []core.Action {
+	if from == segCommit {
+		return b.retryCommit(s)
+	}
 	if s.attempts++; s.attempts >= b.cfg.MaxAttempts {
 		// The write may still land later: unbounded MaybeApplied (decision 15).
 		b.env.Reachable("broker: segment retries exhausted")
 		return b.failSegment(s, errRequestTimedOut)
 	}
 	s.state, s.req = segPutBackoff, 0
-	if from == segCommit {
-		s.state = segCommitBackoff
-	}
 	t, g := b.timer(core.TimerID(s.id), s.attempts)
 	s.gen = g
 	return []core.Action{t}
+}
+
+// retryCommit repeats a commit under the same key until CommitDeadline has
+// passed since the first CommitSegment: capped exponential backoff with
+// jitter (drawn from the Env, so deterministic in simulation), never a count
+// limit. Past the deadline the segment fails; the write may still land later
+// (decision 15).
+func (b *Broker) retryCommit(s *segment) []core.Action {
+	left := b.cfg.CommitDeadline - core.Duration(b.now-s.commitAt)
+	if left <= 0 {
+		b.env.Reachable("broker: commit deadline exceeded")
+		return b.failSegment(s, errRequestTimedOut)
+	}
+	s.attempts++
+	d := b.cfg.RetryBase
+	for n := s.attempts; n > 1 && d < b.cfg.CommitRetryMax; n-- {
+		d *= 2
+	}
+	d = min(d, b.cfg.CommitRetryMax)
+	d = d/2 + core.Duration(b.env.Intn(int(d/2)+1)) // jitter in [d/2, d]
+	d = min(d, left)
+	s.state, s.req = segCommitBackoff, 0
+	b.timerGen++
+	s.gen = b.timerGen
+	return []core.Action{core.SetTimer{ID: core.TimerID(s.id), Gen: b.timerGen, After: d}}
 }
 
 func (b *Broker) segTimer(s *segment, gen core.TimerGen) []core.Action {

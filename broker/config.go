@@ -79,6 +79,17 @@ type Config struct {
 	RetryBase   core.Duration // backoff of the first retry; doubles each time
 	RetryMax    core.Duration // backoff ceiling
 
+	// CommitDeadline bounds how long one segment's commit is retried (audit
+	// item 8). A CP outage (restart, host replacement) must not fail every
+	// in-flight produce, so a commit is retried without a count limit, with
+	// capped exponential backoff and jitter (CommitRetryMax is the cap), until
+	// this much time has passed since its first CommitSegment; then the
+	// segment's batches fail with REQUEST_TIMED_OUT and its buffer is
+	// released. Keep it under the producers' delivery.timeout.ms. Meanwhile
+	// the buffer stays held, so backpressure pauses client reads as usual.
+	CommitDeadline core.Duration
+	CommitRetryMax core.Duration
+
 	MaxBufferedBytes    int // pause client reads at or above this many unacked produce bytes
 	ResumeBufferedBytes int // resume at or below this (hysteresis)
 
@@ -100,6 +111,8 @@ func DefaultConfig() Config {
 		MaxAttempts:          6,
 		RetryBase:            20 * core.Millisecond,
 		RetryMax:             640 * core.Millisecond,
+		CommitDeadline:       120 * core.Second,
+		CommitRetryMax:       2 * core.Second,
 		MaxBufferedBytes:     64 << 20,
 		ResumeBufferedBytes:  32 << 20,
 		DefaultFetchBytes:    1 << 20,
@@ -137,6 +150,12 @@ func (c Config) withDefaults() Config {
 	}
 	if c.RetryMax <= 0 {
 		c.RetryMax = d.RetryMax
+	}
+	if c.CommitDeadline <= 0 {
+		c.CommitDeadline = d.CommitDeadline
+	}
+	if c.CommitRetryMax <= 0 {
+		c.CommitRetryMax = d.CommitRetryMax
 	}
 	if c.MaxBufferedBytes <= 0 {
 		c.MaxBufferedBytes = d.MaxBufferedBytes

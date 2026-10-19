@@ -72,7 +72,7 @@ func expectReachable() []core.Prop {
 		"obj 503 injected", "obj timeout injected", "obj lost response injected", "obj outage started", "obj get corrupted",
 		"cp 503 injected", "cp timeout injected", "cp lost response injected", "cp outage started",
 		"net: partition injected", "net: clog injected", "net: random_close injected", "net: black_hole injected",
-		"broker: commit retried",
+		"broker: commit retried", "broker: commit succeeded after the old retry budget",
 		"broker: corrupt GET detected",
 		"broker: reads paused by backpressure",
 		"broker: reads resumed after backpressure",

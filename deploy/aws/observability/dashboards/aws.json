@@ -289,7 +289,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le, call) (rate(manicp_dynamodb_call_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le, call) (rate(manicp_dynamodb_call_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p50 {{call}}",
           "datasource": {
             "type": "prometheus",
@@ -298,7 +298,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le, call) (rate(manicp_dynamodb_call_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, call) (rate(manicp_dynamodb_call_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p99 {{call}}",
           "datasource": {
             "type": "prometheus",
@@ -573,7 +573,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (op, reason) (rate(manicp_retries_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (op, reason) (rate(manicp_retries_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "retry {{op}} {{reason}}",
           "datasource": {
             "type": "prometheus",
@@ -582,7 +582,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum by (op) (rate(manicp_commit_attempts_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (op) (rate(manicp_commit_attempts_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "attempts {{op}}",
           "datasource": {
             "type": "prometheus",
@@ -646,7 +646,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le, stage) (rate(manicp_commit_prep_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le, stage) (rate(manicp_commit_prep_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p50 {{stage}}",
           "datasource": {
             "type": "prometheus",
@@ -655,7 +655,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le, stage) (rate(manicp_commit_prep_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, stage) (rate(manicp_commit_prep_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p99 {{stage}}",
           "datasource": {
             "type": "prometheus",
@@ -701,7 +701,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(manicp_handler_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(manicp_handler_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p99 {{op}}",
           "datasource": {
             "type": "prometheus",
@@ -912,7 +912,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le, op) (rate(manicp_dynamo_attempt_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\", result=\"ok\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le, op) (rate(manicp_dynamo_attempt_seconds_bucket{run_id=\"$run_id\", result=\"ok\"}[$__rate_interval])))",
           "legendFormat": "p50 {{op}}",
           "datasource": {
             "type": "prometheus",
@@ -921,7 +921,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(manicp_dynamo_attempt_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\", result=\"ok\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(manicp_dynamo_attempt_seconds_bucket{run_id=\"$run_id\", result=\"ok\"}[$__rate_interval])))",
           "legendFormat": "p99 {{op}}",
           "datasource": {
             "type": "prometheus",
@@ -967,7 +967,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (le, op,outcome) (rate(manicp_dynamo_operation_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, op,outcome) (rate(manicp_dynamo_operation_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p99 {{op}} {{outcome}}",
           "datasource": {
             "type": "prometheus",
@@ -1013,7 +1013,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (op) (rate(manicp_dynamo_retries_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (op) (rate(manicp_dynamo_retries_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "retries {{op}}",
           "datasource": {
             "type": "prometheus",
@@ -1022,7 +1022,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum by (op, code) (rate(manicp_dynamo_throttles_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (op, code) (rate(manicp_dynamo_throttles_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "throttle {{op}} {{code}}",
           "datasource": {
             "type": "prometheus",
@@ -1031,7 +1031,7 @@
           "refId": "B"
         },
         {
-          "expr": "sum by (op, code) (rate(manicp_dynamo_api_errors_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (op, code) (rate(manicp_dynamo_api_errors_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "error {{op}} {{code}}",
           "datasource": {
             "type": "prometheus",
@@ -1077,7 +1077,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (kind) (rate(manicp_dynamo_consumed_capacity_units_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (kind) (rate(manicp_dynamo_consumed_capacity_units_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "{{kind}}",
           "datasource": {
             "type": "prometheus",
@@ -1123,7 +1123,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (code) (rate(manicp_dynamo_txn_cancel_reasons_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (code) (rate(manicp_dynamo_txn_cancel_reasons_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "{{code}}",
           "datasource": {
             "type": "prometheus",

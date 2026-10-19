@@ -12,10 +12,11 @@ RB = 'run_id="$run_id", broker=~"$broker"'
 
 
 def q(expr, legend="", ds=PROM, ref=None):
-    # manibroker_/manicp_ series carry a `broker` label (Alloy relabel from BROKER_ID); filter them by the
+    # manibroker_ series carry a `broker` label (Alloy relabel from BROKER_ID); filter them by the
     # $broker variable. allValue ".*" also matches series without the label (single-broker runs).
     # CloudWatch (aws_*) series are per account/table, not per broker: only run_id.
-    if ("manibroker_" in expr or "manicp_" in expr) and "aws_" not in expr:
+    # manicp_ series come from the single control-plane host and carry no broker label: only run_id.
+    if "manibroker_" in expr and "aws_" not in expr:
         expr = expr.replace('run_id="$run_id"', RB)
     return {"expr": expr, "legendFormat": legend, "datasource": ds, "refId": ref or "A"}
 
@@ -63,6 +64,16 @@ class B:
         if self.x >= 24:
             self.x = 0
             self.y += h
+
+    def row(self, title):
+        """Collapsible-looking row header; starts a new line of panels."""
+        if self.x:
+            self.x = 0
+            self.y += 8
+        self.d["panels"].append({"id": self.id, "type": "row", "title": title, "collapsed": False,
+                                 "gridPos": {"x": 0, "y": self.y, "w": 24, "h": 1}, "panels": []})
+        self.id += 1
+        self.y += 1
 
     def save(self, name):
         with open(os.path.join("dashboards", name), "w") as f:
@@ -113,6 +124,30 @@ b.panel("Segments per second by seal reason",
 b.panel("Segment size (mean committed bytes per segment)",
         [q(f'sum(rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}])) / sum(rate(manibroker_segments_committed_total{{{R}}}[{RI}]))', "mean")], "bytes")
 b.panel("Buffered produce bytes (unacked)", [q(f'manibroker_buffered_bytes{{{R}}}', "buffered")], "bytes")
+# ---- control plane: the ONE manicp (single sequencer, group commit). manicp_seq_* exist from decision 46 on.
+b.row("Control plane (single manicp sequencer)")
+b.panel("Commit rate: groups/s and segments/s",
+        [q(f'sum by (outcome) (rate(manicp_seq_tx_seconds_count{{{R}}}[{RI}]))', "groups/s {{outcome}}"),
+         q(f'sum(rate(manicp_seq_group_segments_sum{{{R}}}[{RI}]))', "segments/s committed")], "ops",
+        desc="One TransactWriteItems per group. Segments/s should match the sum over brokers of segments/s.")
+b.panel("Queue depth and groups in flight",
+        [q(f'max(manicp_seq_queue_depth{{{R}}})', "queue depth"),
+         q(f'max(manicp_seq_inflight_groups{{{R}}})', "groups in flight")], "short",
+        desc="A persistently non-zero queue depth means the sequencer is the bottleneck.")
+b.panel("Group size (segments per transaction, p50/p99)", hq("manicp_seq_group_segments", [0.5, 0.99]), "short",
+        desc="Group commit: how many broker commits ride on one DynamoDB transaction.")
+b.panel("Transaction latency (TransactWriteItems per group, p50/p99)", hq("manicp_seq_tx_seconds", [0.5, 0.99], by="outcome"), "s")
+b.panel("Queue wait before the group forms (p50/p99)", hq("manicp_seq_queue_wait_seconds", [0.5, 0.99]), "s")
+b.panel("Cancellations and group retries",
+        [q(f'sum(rate(manicp_seq_tx_seconds_count{{{R}, outcome="canceled"}}[{RI}]))', "canceled groups/s"),
+         q(f'sum by (reason) (rate(manicp_seq_retries_total{{{R}}}[{RI}]))', "retry {{reason}}"),
+         q(f'sum by (code) (rate(manicp_dynamo_txn_cancel_reasons_total{{{R}}}[{RI}]))', "cancel reason {{code}}")], "ops",
+        desc="With a single writer, cancellations should be ~0. Sustained cancels mean a second manicp is running.")
+b.panel("DynamoDB write request units per second (manicp-side)",
+        [q(f'sum by (kind) (rate(manicp_dynamo_consumed_capacity_units_total{{{R}}}[{RI}]))', "{{kind}} units/s")], "short")
+b.panel("Sequencer cache hit ratio",
+        [q(f'sum by (cache) (rate(manicp_seq_cache_total{{{R}, result="hit"}}[{RI}])) / sum by (cache) (rate(manicp_seq_cache_total{{{R}}}[{RI}]))', "{{cache}}")], "percentunit",
+        desc="A miss costs a DynamoDB read.")
 LOGSEL = '{run_id="$run_id", level=~"warn|warning|error|fatal|dpanic|panic"}'
 b.panel("Logs: level >= warn", [q(LOGSEL, "", LOKI)], w=24, h=10, kind="logs")
 b.save("overview.json")

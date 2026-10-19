@@ -45,7 +45,7 @@ func gather(t *testing.T, m *Metrics) string {
 
 func TestCallLogLine(t *testing.T) {
 	var buf bytes.Buffer
-	m := NewWithLogger(slog.New(slog.NewJSONHandler(&buf, nil)))
+	m := NewWithLogger(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	h := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.Copy(io.Discard, r.Body)
 		c := FromContext(r.Context())
@@ -100,5 +100,45 @@ func TestStatusOutcome(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/lookup", nil))
 	if !strings.Contains(gather(t, m), `manicp_calls_total{op="lookup",outcome="http_503"} 1`) {
 		t.Error("503 outcome")
+	}
+}
+
+// At the default INFO level a request logs nothing but the sampled summary:
+// 5000 requests inside one second make no line, the first request after the
+// second makes exactly one with the counts.
+func TestInfoLevelLogsOnlyTheSummary(t *testing.T) {
+	var buf bytes.Buffer
+	m := NewWithLogger(slog.New(slog.NewJSONHandler(&buf, nil)))
+	h := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{}`))
+	}))
+	for i := 0; i < 5000; i++ {
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/lookup", strings.NewReader("")))
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("per-request lines at INFO: %s", buf.String())
+	}
+	m.sum.mu.Lock()
+	m.sum.start = m.sum.start.Add(-2 * time.Second) // the interval is over
+	m.sum.mu.Unlock()
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/lookup", strings.NewReader("")))
+	var l map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &l); err != nil || bytes.Count(buf.Bytes(), []byte("\n")) != 1 {
+		t.Fatalf("%v: %s", err, buf.String())
+	}
+	got := l["lookup"].(map[string]any)
+	if l["event"] != "cp_summary" || got["calls"] != float64(5001) || got["not_ok"] != float64(0) {
+		t.Errorf("summary: %v", l)
+	}
+}
+
+// A 5xx stays a WARN line of its own, whatever the level above WARN allows.
+func TestFailureStaysWarn(t *testing.T) {
+	var buf bytes.Buffer
+	m := NewWithLogger(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	h := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(503) }))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/commit-segment", strings.NewReader("")))
+	if !strings.Contains(buf.String(), `"level":"WARN"`) || !strings.Contains(buf.String(), "cp_call") {
+		t.Fatalf("%s", buf.String())
 	}
 }

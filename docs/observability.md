@@ -20,8 +20,10 @@ JSON, one object per line, on stderr. Every line has `time`, `level`, `msg`, `ru
 `event` (the stable name to filter on). Durations are milliseconds with 0.01 ms resolution
 (`*_ms`); sizes are bytes.
 
-Volume: one line per segment event (about 3 per segment) and one per CP call. At 10 segments
-a second that is about 40 lines a second in total, a few MB an hour. There is no sampling;
+Volume: one line per segment event (about 3 per segment) on the broker; manicp logs one
+`cp_summary` line a second at INFO (the per-request `cp_call` line is DEBUG, because a consume
+stage is tens of thousands of requests a second: audit item 9). At 10 segments a second that
+is about 30 lines a second in total, a few MB an hour. Segment lines are not sampled;
 if a run goes much higher, use `-log-level warn`, which keeps only failures, retries,
 throttles and non-2xx lines (the metrics still count everything). Warnings from the AWS
 middleware are rate limited to 20 a second per client; when lines are dropped the next one
@@ -47,7 +49,8 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | event | level | fields | meaning / how to read |
 |---|---|---|---|
 | `start`, `manifest`, `manifest_written`, `manifest_failed` | | as above | |
-| `cp_call` | INFO (WARN if HTTP 5xx) | `op`, `segment`, `outcome`, `http_status`, `attempts`, `retries`, `handler_ms`, `dynamo_ms`, `consumed_units`, `request_bytes`, `response_bytes` | One per `/v1/*` request. `outcome` is `ok`, the business error (`ErrConflict`, ...) or `http_503`/`http_500`. `attempts` counts commit attempts (1 for other ops); `retries` is attempts minus one. `dynamo_ms` is the sum of the request's DynamoDB calls; `handler_ms - dynamo_ms` is CP-side compute. `segment` joins to the broker's `segment_*` lines. `consumed_units` is the capacity DynamoDB reported (0 if not reported). |
+| `cp_call` | DEBUG (WARN if HTTP 5xx) | `op`, `segment`, `outcome`, `http_status`, `attempts`, `retries`, `handler_ms`, `dynamo_ms`, `consumed_units`, `request_bytes`, `response_bytes` | One per `/v1/*` request, but only at `-log-level debug` (or when it is a 5xx, at WARN). `outcome` is `ok`, the business error (`ErrConflict`, ...) or `http_503`/`http_500`. `attempts` counts commit attempts (1 for other ops); `retries` is attempts minus one. `dynamo_ms` is the sum of the request's DynamoDB calls; `handler_ms - dynamo_ms` is CP-side compute. `segment` joins to the broker's `segment_*` lines. `consumed_units` is the capacity DynamoDB reported (0 if not reported). |
+| `cp_summary` | INFO | `window_ms`, then one object per op (`commit-segment`, `lookup`, ...) with `calls`, `not_ok`, `mean_handler_ms`, `max_handler_ms` | manicp only. At most one a second, written by the first request after the interval (no timer, so an idle process logs nothing and the last partial second of a run is not written; the `manicp_*` metrics have every request). Bounds log volume at 1 line/s however many requests arrive, including 48k Lookups/s. |
 | `commit_txn_canceled` | WARN | `segment`, `items`, `reasons`, `err` | A commit transaction lost a race and will be retried. `reasons` entries are `index:code:pk/sk` of the items that failed (`ConditionalCheckFailed`, `TransactionConflict`, `ThrottlingError`, `ProvisionedThroughputExceeded`, ...). Many `ThrottlingError` reasons mean the table is throttling, not racing. |
 | `seq_group` | DEBUG | `segments`, `items`, `partitions`, `tx_ms`, `ok` | One line per group transaction (sequencer). |
 | `seq_retry` | WARN | `reason`, `segments`, `err` | A group is retried (throttling, unknown outcome, failed read). |
@@ -143,7 +146,7 @@ AZ, region, AMI, private IP; absent off EC2, one 300 ms probe).
 1. Manifests give the configuration and the host.
 2. `segment_committed` lines give every segment's bytes, batches, partitions and
    put/wait/commit/total ms; sum `bytes` for throughput, group by `reason` for the seal mix.
-3. `cp_call` lines (join on `segment`) give the CP side: attempts, DynamoDB ms, units.
+3. `cp_call` lines (join on `segment`; run manicp at `-log-level debug` for them) give the CP side: attempts, DynamoDB ms, units.
 4. WARN lines list everything that went wrong; `*_throttles_total` and
    `consumed_capacity_*` give the cost and capacity picture; Prometheus scrapes of
    `:9100` and `:9101` (saved at the end of the run with `curl`) are the totals.

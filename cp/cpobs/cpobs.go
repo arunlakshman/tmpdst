@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,6 +52,7 @@ type Metrics struct {
 	callsDone *prometheus.CounterVec // op, outcome
 
 	log *slog.Logger
+	sum summary
 }
 
 // New is NewWithLogger(nil).
@@ -176,8 +178,63 @@ func (c *Call) retry(reason string, cancels []string) {
 	}
 }
 
+// summaryEvery is the least time between two cp_summary lines.
+const summaryEvery = time.Second
+
+// summary aggregates /v1 calls into one INFO line per summaryEvery. There is
+// no timer: the line is written by the first request that finds the interval
+// over, so an idle process logs nothing and the last partial interval of a
+// run is not written (the metrics have it).
+type summary struct {
+	mu    sync.Mutex
+	start time.Time
+	ops   map[string]*opSum
+}
+
+type opSum struct {
+	n, notOK int64
+	sum, max time.Duration
+}
+
+func (s *summary) add(log *slog.Logger, op, outcome string, el time.Duration, now time.Time) {
+	s.mu.Lock()
+	if s.ops == nil {
+		s.ops, s.start = map[string]*opSum{}, now
+	}
+	o := s.ops[op]
+	if o == nil {
+		o = &opSum{}
+		s.ops[op] = o
+	}
+	o.n++
+	o.sum += el
+	o.max = max(o.max, el)
+	if outcome != "ok" {
+		o.notOK++
+	}
+	if now.Sub(s.start) < summaryEvery {
+		s.mu.Unlock()
+		return
+	}
+	window, ops := now.Sub(s.start), s.ops
+	s.ops, s.start = map[string]*opSum{}, now
+	s.mu.Unlock()
+	names := make([]string, 0, len(ops))
+	for k := range ops {
+		names = append(names, k)
+	}
+	slices.Sort(names)
+	attrs := []any{"event", "cp_summary", "window_ms", ms(window)}
+	for _, k := range names {
+		o := ops[k]
+		attrs = append(attrs, k, map[string]any{"calls": o.n, "not_ok": o.notOK,
+			"mean_handler_ms": ms(o.sum / time.Duration(o.n)), "max_handler_ms": ms(o.max)})
+	}
+	log.Info("cp summary", attrs...)
+}
+
 // Middleware times every request, counts it in flight, records its body size
-// and logs one line per /v1 call: op, attempts, handler_ms, dynamo_ms, outcome.
+// and logs each /v1 call (DEBUG; WARN on HTTP 5xx) plus a sampled INFO summary.
 func (m *Metrics) Middleware(next http.Handler) http.Handler {
 	if m == nil {
 		return next
@@ -209,10 +266,14 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 			if attempts == 0 {
 				attempts = 1
 			}
-			lvl := slog.LevelInfo
+			// Audit item 9: a consume stage is tens of thousands of requests a
+			// second, so the per-request line is DEBUG; failures stay WARN and
+			// an INFO summary (at most one a second) carries the counts.
+			lvl := slog.LevelDebug
 			if sw.status >= 500 {
 				lvl = slog.LevelWarn
 			}
+			m.sum.add(m.log, op, outcome, el, time.Now())
 			m.log.Log(r.Context(), lvl, "cp call", "event", "cp_call", "op", op, "segment", call.segment, "outcome", outcome,
 				"http_status", sw.status, "attempts", attempts, "retries", len(call.retries),
 				"handler_ms", ms(el), "dynamo_ms", ms(call.dynamo), "consumed_units", call.units,

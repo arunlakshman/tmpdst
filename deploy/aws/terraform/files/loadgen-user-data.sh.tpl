@@ -16,7 +16,12 @@ for ip in $${BROKER_IPS//,/ }; do BOOTSTRAP="$${BOOTSTRAP:+$BOOTSTRAP,}$ip:9092"
 
 # Apache Kafka CLI tools (kafka-topics.sh, kafka-producer-perf-test.sh, ...).
 KV=${kafka_tools_version}
-curl -fsSL "https://archive.apache.org/dist/kafka/$KV/kafka_2.13-$KV.tgz" | tar -xz -C /opt
+# archive.apache.org throttles to ~40 KB/s (the 120 MB tarball took ~50 min on the first apply), so prefer the copy
+# build-and-upload.sh puts in s3://BUCKET/artifacts/kafka/ and only then fall back to the archive.
+wait_for_artifacts || true
+if ! aws s3 cp "s3://$BUCKET/artifacts/kafka/kafka_2.13-$KV.tgz" - | tar -xz -C /opt; then
+  curl -fsSL "https://archive.apache.org/dist/kafka/$KV/kafka_2.13-$KV.tgz" | tar -xz -C /opt
+fi
 ln -sfn "/opt/kafka_2.13-$KV" /opt/kafka
 
 # WarpStream CLI: same tarball the official installer (console.warpstream.com/install.sh)

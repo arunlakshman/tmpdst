@@ -38,10 +38,9 @@ LOADGEN_INSTANCE_IDS=${LOADGEN_INSTANCE_IDS:-$(tfout loadgen_instance_ids | jq -
 if [ -z "$BROKER_INSTANCE_IDS" ] || [ -z "$LOADGEN_INSTANCE_IDS" ]; then
   echo "no instance ids: set BROKER_INSTANCE_IDS and LOADGEN_INSTANCE_IDS or use --tf-dir" >&2; exit 1
 fi
-# shellcheck disable=SC2086
-set -- $BROKER_INSTANCE_IDS; BROKER0=$1
-# shellcheck disable=SC2086
-set -- $LOADGEN_INSTANCE_IDS; LOADGEN0=$1
+# first id of each list (do not use `set --` here: it would clobber the command's own arguments "$@")
+BROKER0=${BROKER_INSTANCE_IDS%% *}
+LOADGEN0=${LOADGEN_INSTANCE_IDS%% *}
 
 # ssm_run <instance ids (space separated)> <shell command>: waits, prints each instance's output, fails if any failed.
 ssm_run() {
@@ -74,8 +73,10 @@ case "$cmd" in
     parts=${1:-288}
     topic=${2:-omb-${RUN_ID:?--run-id or RUN_ID, or pass the topic name}}
     echo "creating $topic with $parts partitions through manicp on $BROKER0"
-    ssm_run "$BROKER0" "set -e; curl -sf -m 20 -X POST http://127.0.0.1:8080/v1/create-topic -d '{\"topic\":\"$topic\",\"partitions\":$parts}'; echo; sleep 2; /opt/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:9092 --list 2>/dev/null | grep -x '$topic'" ||
-      { echo "create-topic failed (is /opt/kafka on the broker host? if not, check from loadgen: run-omb.sh pre-flight verifies it)" >&2; exit 1; }
+    # Broker hosts have no Kafka CLI (only loadgens do), so verify through manicp's describe-topics; run-omb.sh pre-flight
+    # re-checks over the Kafka port on every broker. ErrInvalid on create means the topic already exists with other settings.
+    ssm_run "$BROKER0" "set -e; curl -sf -m 20 -X POST http://127.0.0.1:8080/v1/create-topic -d '{\"topic\":\"$topic\",\"partitions\":$parts}'; echo; curl -sf -m 20 -X POST http://127.0.0.1:8080/v1/describe-topics -d '{\"topics\":[\"$topic\"]}' | head -c 300; echo" ||
+      { echo "create-topic failed" >&2; exit 1; }
     ;;
   start-workers) ssm_run "$LOADGEN_INSTANCE_IDS" "/opt/bench/start-omb-workers.sh start" ;;
   stop-workers) ssm_run "$LOADGEN_INSTANCE_IDS" "/opt/bench/start-omb-workers.sh stop" ;;

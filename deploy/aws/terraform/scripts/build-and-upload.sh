@@ -32,5 +32,9 @@ if [ -f "$root/build/omb/openmessaging-benchmark.tar.gz" ]; then
 else
   echo "note: build/omb/openmessaging-benchmark.tar.gz not found; skipping OMB upload" >&2
 fi
+# Kafka CLI tarball cache (archive.apache.org is ~40 KB/s): build/kafka/kafka_2.13-<ver>.tgz, optional.
+for t in "$root"/build/kafka/kafka_2.13-*.tgz; do
+  [ -f "$t" ] && aws s3 cp "$t" "s3://$bucket/artifacts/kafka/$(basename "$t")"
+done
 { git -C "$root" rev-parse HEAD 2>/dev/null || echo unknown; } | aws s3 cp - "s3://$bucket/artifacts/READY"
 echo "uploaded; instances will pick it up"

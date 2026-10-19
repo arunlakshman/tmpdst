@@ -443,9 +443,7 @@ func (s *Store) runItems(ranges []core.BatchRange) ([]types.TransactWriteItem, b
 		if len(getBlob(it, "runs")) > maxRun {
 			return nil, false
 		}
-		items = append(items, types.TransactWriteItem{Put: &types.Put{
-			TableName: &s.table, Item: it, ConditionExpression: aws.String("attribute_not_exists(sk)"),
-		}})
+		items = append(items, putIfAbsent(s.table, it, "attribute_not_exists(sk)"))
 	}
 	return items, true
 }
@@ -455,4 +453,9 @@ func merge(a, b item) item {
 		a[k] = v
 	}
 	return a
+}
+
+// putIfAbsent is a Put guarded by cond (attribute_not_exists).
+func putIfAbsent(table string, it item, cond string) types.TransactWriteItem {
+	return types.TransactWriteItem{Put: &types.Put{TableName: &table, Item: it, ConditionExpression: aws.String(cond)}}
 }

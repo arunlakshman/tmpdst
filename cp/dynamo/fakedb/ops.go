@@ -11,7 +11,7 @@ import (
 )
 
 func (f *Fake) UpdateItem(ctx context.Context, in *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
-	if err := f.failed("UpdateItem"); err != nil {
+	if err := f.failed(ctx, "UpdateItem"); err != nil {
 		return nil, err
 	}
 	f.mu.Lock()
@@ -50,7 +50,7 @@ func pick(it item, names []string) item {
 // condition in sort-key order, at most Limit and PageSize, with a
 // LastEvaluatedKey when more remain.
 func (f *Fake) Query(ctx context.Context, in *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
-	if err := f.failed("Query"); err != nil {
+	if err := f.failed(ctx, "Query"); err != nil {
 		return nil, err
 	}
 	f.mu.Lock()

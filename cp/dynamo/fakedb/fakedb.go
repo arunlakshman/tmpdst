@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -36,6 +37,14 @@ type Fake struct {
 	// "CreateTable", "DescribeTable", "DeleteTable"); a non-nil result is
 	// returned as the call's error and nothing happens.
 	Fail func(call string) error
+	// Latency, if set, is the time every call sleeps (before it takes effect:
+	// a read sees the state at the end of the delay, a transaction is
+	// evaluated and applied at the end of it).
+	Latency func(call string) time.Duration
+	// AfterApply, if set, runs after a TransactWriteItems has been applied; a
+	// non-nil result is returned as the call's error: the transaction DID
+	// commit but the caller never learns it (a lost answer).
+	AfterApply func() error
 	// Unprocess is the number of upcoming BatchGetItem calls that leave their
 	// last key in UnprocessedKeys.
 	Unprocess int
@@ -51,7 +60,18 @@ func validation(format string, a ...any) error {
 	return &smithy.GenericAPIError{Code: "ValidationException", Message: fmt.Sprintf(format, a...)}
 }
 
-func (f *Fake) failed(call string) error {
+func (f *Fake) failed(ctx context.Context, call string) error {
+	if f.Latency != nil {
+		if d := f.Latency(call); d > 0 {
+			t := time.NewTimer(d)
+			defer t.Stop()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-t.C:
+			}
+		}
+	}
 	if f.Fail == nil {
 		return nil
 	}
@@ -104,7 +124,7 @@ func (f *Fake) Count(table string) int {
 }
 
 func (f *Fake) CreateTable(ctx context.Context, in *dynamodb.CreateTableInput, _ ...func(*dynamodb.Options)) (*dynamodb.CreateTableOutput, error) {
-	if err := f.failed("CreateTable"); err != nil {
+	if err := f.failed(ctx, "CreateTable"); err != nil {
 		return nil, err
 	}
 	f.mu.Lock()
@@ -118,7 +138,7 @@ func (f *Fake) CreateTable(ctx context.Context, in *dynamodb.CreateTableInput, _
 }
 
 func (f *Fake) DescribeTable(ctx context.Context, in *dynamodb.DescribeTableInput, _ ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error) {
-	if err := f.failed("DescribeTable"); err != nil {
+	if err := f.failed(ctx, "DescribeTable"); err != nil {
 		return nil, err
 	}
 	f.mu.Lock()
@@ -130,7 +150,7 @@ func (f *Fake) DescribeTable(ctx context.Context, in *dynamodb.DescribeTableInpu
 }
 
 func (f *Fake) DeleteTable(ctx context.Context, in *dynamodb.DeleteTableInput, _ ...func(*dynamodb.Options)) (*dynamodb.DeleteTableOutput, error) {
-	if err := f.failed("DeleteTable"); err != nil {
+	if err := f.failed(ctx, "DeleteTable"); err != nil {
 		return nil, err
 	}
 	f.mu.Lock()
@@ -143,7 +163,7 @@ func (f *Fake) DeleteTable(ctx context.Context, in *dynamodb.DeleteTableInput, _
 }
 
 func (f *Fake) GetItem(ctx context.Context, in *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
-	if err := f.failed("GetItem"); err != nil {
+	if err := f.failed(ctx, "GetItem"); err != nil {
 		return nil, err
 	}
 	f.mu.Lock()
@@ -156,7 +176,7 @@ func (f *Fake) GetItem(ctx context.Context, in *dynamodb.GetItemInput, _ ...func
 }
 
 func (f *Fake) BatchGetItem(ctx context.Context, in *dynamodb.BatchGetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.BatchGetItemOutput, error) {
-	if err := f.failed("BatchGetItem"); err != nil {
+	if err := f.failed(ctx, "BatchGetItem"); err != nil {
 		return nil, err
 	}
 	f.mu.Lock()

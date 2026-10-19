@@ -43,6 +43,8 @@ type Metrics struct {
 	// AWS.APIOptions() to the client.
 	AWS *awsobs.Recorder
 
+	seq *seqMetrics
+
 	consumed  *prometheus.CounterVec // op, kind
 	noCap     *prometheus.CounterVec // op
 	cancels   *prometheus.CounterVec // code
@@ -88,6 +90,7 @@ func NewWithLogger(log *slog.Logger) *Metrics {
 		[]string{"code"})
 	m.callsDone = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Name: "calls_total",
 		Help: "HTTP calls served, by op and outcome (ok, the business error code such as ErrConflict, http_503, http_500)."}, []string{"op", "outcome"})
+	m.seq = newSeqMetrics(m.reg, secs)
 	m.AWS = awsobs.New(m.reg, "manicp", "dynamo", log)
 	m.AWS.QuietCodes = map[string]bool{"TransactionCanceledException": true} // reported by CommitSegment with reasons
 	m.reg.MustRegister(m.consumed, m.noCap, m.cancels, m.callsDone, m.handler, m.dyn, m.prep, m.body, m.retries, m.attempts, m.inflight,

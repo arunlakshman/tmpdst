@@ -60,7 +60,7 @@ func ops(items []types.TransactWriteItem) ([]txOp, error) {
 // transaction; if any fails nothing is written and the error is a
 // TransactionCanceledException with a reason per item.
 func (f *Fake) TransactWriteItems(ctx context.Context, in *dynamodb.TransactWriteItemsInput, _ ...func(*dynamodb.Options)) (*dynamodb.TransactWriteItemsOutput, error) {
-	if err := f.failed("TransactWriteItems"); err != nil {
+	if err := f.failed(ctx, "TransactWriteItems"); err != nil {
 		return nil, err
 	}
 	if f.BeforeTransact != nil {
@@ -87,6 +87,11 @@ func (f *Fake) TransactWriteItems(ctx context.Context, in *dynamodb.TransactWrit
 		return nil, err
 	}
 	f.apply(list, next)
+	if f.AfterApply != nil {
+		if err := f.AfterApply(); err != nil {
+			return nil, err
+		}
+	}
 	return &dynamodb.TransactWriteItemsOutput{}, nil
 }
 

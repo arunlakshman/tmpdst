@@ -8,7 +8,15 @@ R = 'run_id="$run_id"'
 RI = "$__rate_interval"
 
 
+RB = 'run_id="$run_id", broker=~"$broker"'
+
+
 def q(expr, legend="", ds=PROM, ref=None):
+    # manibroker_/manicp_ series carry a `broker` label (Alloy relabel from BROKER_ID); filter them by the
+    # $broker variable. allValue ".*" also matches series without the label (single-broker runs).
+    # CloudWatch (aws_*) series are per account/table, not per broker: only run_id.
+    if ("manibroker_" in expr or "manicp_" in expr) and "aws_" not in expr:
+        expr = expr.replace('run_id="$run_id"', RB)
     return {"expr": expr, "legendFormat": legend, "datasource": ds, "refId": ref or "A"}
 
 
@@ -27,6 +35,9 @@ class B:
                 {"name": "run_id", "type": "query", "label": "run_id", "datasource": PROM,
                  "query": {"query": "label_values(up, run_id)", "refId": "rid"}, "refresh": 2,
                  "sort": 2, "current": {}},
+                {"name": "broker", "type": "query", "label": "broker", "datasource": PROM, "includeAll": True, "multi": True,
+                 "allValue": ".*", "query": {"query": 'label_values(manibroker_build_info{run_id="$run_id"}, broker)', "refId": "br"},
+                 "refresh": 2, "sort": 3, "current": {}},
             ]},
         }
         self.y = 0
@@ -68,6 +79,27 @@ def hq(metric, qs, sel=R, by="", rng=RI):
 
 # ---------------------------------------------------------------- overview
 b = B("Manifester - Overview", "mani-overview", ["overview"])
+# ---- multi-broker block: aggregate, per broker, skew
+b.panel("Aggregate throughput (all selected brokers): committed MB/s and approx msg/s",
+        [q(f'sum(rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}]))', "committed bytes/s"),
+         q(f'sum(rate(manibroker_segment_sealed_batch_bytes_total{{{R}}}[{RI}]))', "sealed batch bytes/s")], "Bps",
+        desc="Write side, summed over the $broker selection. Read throughput has no broker metric yet; use the OMB consume rate.")
+b.panel("Approx msg/s at 1 KiB per message (sealed batch bytes / 1024)",
+        [q(f'sum(rate(manibroker_segment_sealed_batch_bytes_total{{{R}}}[{RI}])) / 1024', "msg/s (1 KiB records)")], "ops",
+        desc="There is no per-record counter on the broker: this is exact only for the 1 KiB OMB workloads (batch framing makes it a slight overestimate). The OMB log/JSON is the source of truth for msg/s.")
+b.panel("Per-broker write throughput (committed bytes/s)",
+        [q(f'sum by (broker) (rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}]))', "broker {{broker}}")], "Bps")
+b.panel("Skew: share of bytes per broker",
+        [q(f'sum by (broker) (rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}])) / ignoring(broker) group_left sum(rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}]))', "broker {{broker}}")],
+        "percentunit", desc="Even split is 1/N. Clients stay on the broker they bootstrapped from, so the split follows client placement.")
+b.panel("Skew: max / min broker throughput",
+        [q(f'max(sum by (broker) (rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}]))) / min(sum by (broker) (rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}])))', "max/min"),
+         q(f'max(sum by (broker) (rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}]))) / avg(sum by (broker) (rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}])))', "max/mean")],
+        "short", desc="1.0 is perfectly even. Needs the brokers selected to all be taking traffic (min of 0 gives +Inf).")
+b.panel("Open client connections per broker", [q(f'manibroker_open_connections{{{R}}}', "broker {{broker}}")], "short",
+        desc="Connections follow bootstrap choice (random among bootstrap.servers): the cause of byte skew.")
+b.panel("Produce ack latency p99 per broker", hq("manibroker_segment_seal_to_ack_seconds", [0.99], by="broker"), "s")
+b.panel("Segments per second per broker", [q(f'sum by (broker) (rate(manibroker_segments_committed_total{{{R}}}[{RI}]))', "broker {{broker}}")], "ops")
 b.panel("Produce ack latency (seal to commit answer)", hq("manibroker_segment_seal_to_ack_seconds", [0.5, 0.99]),
         "s", desc="put + queue wait + commit. Excludes time batches sat in the open segment buffer (see segment open age); "
                   "client-observed latency comes from the load generator.")
@@ -164,6 +196,7 @@ b.save("aws.json")
 # ------------------------------------------------------------------- hosts
 H = f'{R}, host=~"$host"'
 b = B("Manifester - Hosts", "mani-hosts", ["hosts"])
+b.d["templating"]["list"] = [v for v in b.d["templating"]["list"] if v["name"] != "broker"]  # per-host already
 b.d["templating"]["list"].append(
     {"name": "host", "type": "query", "label": "host", "datasource": PROM, "includeAll": True, "multi": True,
      "allValue": ".+", "query": {"query": 'label_values(node_uname_info{run_id="$run_id"}, host)', "refId": "h"},

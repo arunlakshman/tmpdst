@@ -1,0 +1,16 @@
+# WarpStream 'vanity' workload, PRODUCE-ONLY (default first stage). 1,000,000 msg/s x 1 KiB = 976.6 MiB/s (WarpStream calls it 1 GiB/s). 15 min + 2 min warm-up (theirs: 1600 min).
+name: vanity-1gibps-produce-only
+topics: 1
+partitionsPerTopic: 288
+keyDistributor: NO_KEY
+messageSize: 1024
+useRandomizedPayloads: true
+randomBytesRatio: 0.5
+randomizedPayloadPoolSize: 1000
+subscriptionsPerTopic: 1
+producersPerTopic: 64
+consumerPerSubscription: 0
+producerRate: 1000000
+consumerBacklogSizeGB: 0
+testDurationMinutes: 15
+warmupDurationMinutes: 2

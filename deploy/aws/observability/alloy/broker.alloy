@@ -1,5 +1,5 @@
 // Broker host add-on: manibroker, manicp, and CloudWatch (DynamoDB + S3).
-// Extra environment: DDB_TABLE (table name), S3_BUCKET, S3_METRICS_FILTER_ID,
+// Extra environment: BROKER_ID (label `broker`, 1..N), DDB_TABLE (table name), S3_BUCKET, S3_METRICS_FILTER_ID,
 // AWS_REGION. AWS credentials come from the instance role.
 
 discovery.relabel "broker_targets" {
@@ -11,6 +11,11 @@ discovery.relabel "broker_targets" {
 	rule {
 		target_label = "host"
 		replacement  = sys.env("HOST_NAME")
+	}
+
+	rule {
+		target_label = "broker"
+		replacement  = sys.env("BROKER_ID")
 	}
 
 	rule {

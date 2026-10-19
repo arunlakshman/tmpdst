@@ -1,0 +1,16 @@
+# LATER (disabled by default): 4608 partitions. Unverified: control plane and Metadata size at this partition count.
+name: vanity-partitions4608
+topics: 1
+partitionsPerTopic: 4608
+keyDistributor: NO_KEY
+messageSize: 1024
+useRandomizedPayloads: true
+randomBytesRatio: 0.5
+randomizedPayloadPoolSize: 1000
+subscriptionsPerTopic: 1
+producersPerTopic: 64
+consumerPerSubscription: 64
+producerRate: 1000000
+consumerBacklogSizeGB: 0
+testDurationMinutes: 15
+warmupDurationMinutes: 2

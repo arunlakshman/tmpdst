@@ -144,7 +144,8 @@ wait_ready() {
 run_tool() {
   local secs=$1 clients=$2 size=$3 prefix=$4 i
   if [ "$TOOL" = warpstream ]; then
-    local host=${BOOTSTRAP%:*} port=${BOOTSTRAP##*:} pid
+    local first=${BOOTSTRAP%%,*} host port pid
+    host=${first%:*} port=${first##*:}
     timeout -s INT -k 10 "$secs" warpstream cli benchmark-producer -bootstrap-host "$host" -bootstrap-port "$port" \
       -topic "$TOPIC" -num-clients "$clients" -record-size "$size" -num-records -1 \
       -max-records-per-second "$([ "$RATE" -gt 0 ] && echo "$RATE" || echo 1000000)" -percent-random-data 100 -prometheus-port 8081 >"$prefix.out" 2>&1 &

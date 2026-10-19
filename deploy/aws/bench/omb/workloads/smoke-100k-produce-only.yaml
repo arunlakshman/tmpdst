@@ -1,0 +1,16 @@
+# SMOKE: 10% of vanity, produce-only. 100,000 msg/s x 1 KiB = 97.7 MiB/s. 3 min + 1 min warm-up.
+name: smoke-100k-produce-only
+topics: 1
+partitionsPerTopic: 288
+keyDistributor: NO_KEY
+messageSize: 1024
+useRandomizedPayloads: true
+randomBytesRatio: 0.5
+randomizedPayloadPoolSize: 1000
+subscriptionsPerTopic: 1
+producersPerTopic: 64
+consumerPerSubscription: 0
+producerRate: 100000
+consumerBacklogSizeGB: 0
+testDurationMinutes: 3
+warmupDurationMinutes: 1

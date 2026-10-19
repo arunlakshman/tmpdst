@@ -1,0 +1,16 @@
+# RAMP step: 750000 msg/s x 1 KiB = 732.4 MiB/s, produce-only, 5 min + 1 min warm-up.
+name: ramp-750k-produce-only
+topics: 1
+partitionsPerTopic: 288
+keyDistributor: NO_KEY
+messageSize: 1024
+useRandomizedPayloads: true
+randomBytesRatio: 0.5
+randomizedPayloadPoolSize: 1000
+subscriptionsPerTopic: 1
+producersPerTopic: 64
+consumerPerSubscription: 0
+producerRate: 750000
+consumerBacklogSizeGB: 0
+testDurationMinutes: 5
+warmupDurationMinutes: 1

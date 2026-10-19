@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Summarize one benchmark run into a markdown report.
 
-usage: summarize.py RESULTS_DIR [--out FILE]
+usage: summarize.py RESULTS_DIR [--out FILE] [--broker-hourly USD] [--s3-put-per-1000 USD]
+                    [--s3-get-per-1000 USD] [--ddb-wru-per-million USD] [--ddb-rcu-per-million USD]
 
 RESULTS_DIR is ./results/<run_id> (collect-results.sh) or a --local output dir:
-    loadgen/cells.tsv, loadgen/<cell>.rN.*.out|.prom   written by run-benchmark.sh
-    metrics/<epoch>-{broker,manicp}.txt                Prometheus text snapshots
+    loadgen/cells.tsv, loadgen/<cell>.rN.*.out|.prom   written by run-benchmark.sh (Kafka perf-test harness)
+    omb/stages.tsv, omb/run.json, omb/<stage>.json     written by run-omb.sh (OpenMessaging Benchmark)
+    metrics/<epoch>-{broker,manicp}.txt                Prometheus text snapshots, ONE broker (legacy layout)
+    metrics/<broker_id>/<epoch>-{broker,manicp}.txt    one directory per broker (multi-broker layout, preferred)
+Both layouts are read; a flat file is attributed to broker "1". With several brokers the Kafka harness
+cells sum the per-broker deltas.
 
 For each cell the snapshot at or before `start` and the first one at or after
 `end` (after the tool drained) bracket the broker-side deltas, so the window can
@@ -21,6 +26,7 @@ Standard library only.
 """
 import argparse
 import collections
+import json
 import math
 import os
 import re
@@ -198,14 +204,249 @@ def tool_stats(ldir, prefix, tool, clients):
     return res
 
 
+# ------------------------------------------------------------------------ OMB
+MIB = 1048576.0
+GIB = 1073741824.0
+# WarpStream's published figures (monthly, 1 GiB/s, 6 x m6in.4xlarge, AWS 1-year no-upfront), for the comparison block.
+WS = dict(compute=3031.0, s3_get=508.0, s3_put=1788.0, mib_s=1024.0)
+
+
+def mean(v):
+    v = [x for x in v if x is not None]
+    return sum(v) / len(v) if v else None
+
+
+def read_tsv(path):
+    rows = []
+    with open(path) as f:
+        hdr = f.readline().rstrip("\n").split("\t")
+        for line in f:
+            if line.strip():
+                rows.append(dict(zip(hdr, line.rstrip("\n").split("\t"))))
+    return rows
+
+
+def omb_stats(res):
+    """Digest of one OMB result JSON (the TestResult class: lists per 10 s interval plus aggregated*)."""
+    size = float(res.get("messageSize", 0) or 0)
+    pub = [x for x in res.get("publishRate", [])]
+    con = [x for x in res.get("consumeRate", [])]
+    err = [x for x in res.get("publishErrorRate", [])]
+    back = res.get("backlog", [])
+    d = dict(
+        msg_size=size, producers=res.get("producersPerTopic"), consumers=res.get("consumersPerTopic"),
+        partitions=res.get("partitions"),
+        pub_rate=mean(pub), con_rate=mean(con), err_rate=mean(err), err_max=max(err) if err else None,
+        backlog_last=back[-1] if back else None, backlog_max=max(back) if back else None,
+        p_avg=res.get("aggregatedPublishLatencyAvg"), p50=res.get("aggregatedPublishLatency50pct"),
+        p95=res.get("aggregatedPublishLatency95pct"), p99=res.get("aggregatedPublishLatency99pct"),
+        p999=res.get("aggregatedPublishLatency999pct"), pmax=res.get("aggregatedPublishLatencyMax"),
+        e_avg=res.get("aggregatedEndToEndLatencyAvg"), e50=res.get("aggregatedEndToEndLatency50pct"),
+        e99=res.get("aggregatedEndToEndLatency99pct"), e999=res.get("aggregatedEndToEndLatency999pct"),
+        intervals=len(pub),
+    )
+    d["pub_mibs"] = d["pub_rate"] * size / MIB if d["pub_rate"] is not None else None
+    d["con_mibs"] = d["con_rate"] * size / MIB if d["con_rate"] is not None else None
+    # an e2e histogram with no samples reports zeros: treat as absent
+    if not con or (d["con_rate"] or 0) == 0:
+        d["e_avg"] = d["e50"] = d["e99"] = d["e999"] = None
+    return d
+
+
+def usd(x, nd=2):
+    return "n/a" if x is None else f"${x:,.{nd}f}"
+
+
+def omb_report(w, args, rundir, snaps):
+    """Append the OMB sections to w; returns the list of unmet checklist items."""
+    odir = os.path.join(rundir, "omb")
+    stages = read_tsv(os.path.join(odir, "stages.tsv"))
+    run = {}
+    if os.path.exists(os.path.join(odir, "run.json")):
+        with open(os.path.join(odir, "run.json")) as f:
+            run = json.load(f)
+    comp = run.get("compression", stages[0].get("compression") if stages else "unknown")
+    unmet = []
+    w("## OpenMessaging Benchmark stages\n")
+    if run:
+        w("```\n" + json.dumps(run) + "\n```\n")
+    if os.path.exists(os.path.join(odir, "../ABORT")):
+        w("**ABORT file present**: " + open(os.path.join(odir, "../ABORT")).read().strip() + "\n")
+        unmet.append("run aborted (ABORT file): " + open(os.path.join(odir, "../ABORT")).read().strip())
+    w("Client side (OMB aggregated over the measured period, warm-up excluded). Latencies in ms. "
+      "Publish latency is the Kafka producer send-to-ack time (comparable with WarpStream's 'producer latency'); "
+      "end-to-end is producer send to consumer receive.\n")
+    w("| stage | status | target msg/s | target MiB/s | pub msg/s | pub MiB/s | cons MiB/s | err/s (max) | pub avg | p50 | p99 | p99.9 | max | e2e p50 | e2e p99 | e2e p99.9 | backlog last/max |")
+    w("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    digest = {}
+    for st in stages:
+        jp = os.path.join(odir, st["json"])
+        d = None
+        if os.path.exists(jp) and os.path.getsize(jp) > 0:
+            with open(jp) as f:
+                d = omb_stats(json.load(f))
+        digest[st["stage"]] = d
+        tgt = float(st["target_msgs"])
+        tmib = tgt * float(st["msg_size"]) / MIB
+        if d is None:
+            w(f"| {st['stage']} | {st['status']} | {fmt(tgt, 0)} | {fmt(tmib)} | - | - | - | - | - | - | - | - | - | - | - | - | - |")
+            continue
+        w(f"| {st['stage']} | {st['status']} | {fmt(tgt, 0)} | {fmt(tmib)} | {fmt(d['pub_rate'], 0)} | {fmt(d['pub_mibs'])} | {fmt(d['con_mibs'])} | "
+          f"{fmt(d['err_rate'], 1)} ({fmt(d['err_max'], 1)}) | {fmt(d['p_avg'])} | {fmt(d['p50'])} | {fmt(d['p99'])} | {fmt(d['p999'])} | {fmt(d['pmax'])} | "
+          f"{fmt(d['e50'], 0)} | {fmt(d['e99'], 0)} | {fmt(d['e999'], 0)} | {fmt(d['backlog_last'], 0)} / {fmt(d['backlog_max'], 0)} |")
+
+    # ---- per-broker server side per stage
+    bids = sorted(set(snaps["broker"]) | set(snaps["manicp"]), key=lambda x: (len(x), x))
+    stage_win = {}
+    w("\n## Per-broker server side, per stage\n")
+    if not bids:
+        w("No metric snapshots found (metrics/ empty): server-side tables, skew and cost are unavailable.\n")
+    for st in stages:
+        start, end = int(st["start"]), int(st["end"])
+        per_b = {b: broker_window(snaps, b, start, end) for b in bids}
+        per_b = {b: m for b, m in per_b.items() if m}
+        stage_win[st["stage"]] = per_b
+        if not per_b:
+            continue
+        tot = sum(m.get("bytes", 0) for m in per_b.values())
+        w(f"### {st['stage']}\n")
+        w("Window = snapshots around the stage (warm-up included, up to one 10 s snapshot interval of slack each side). put = seal to stored in S3; queue = waiting for earlier commits; commit = CommitSegment round trip; ack = seal to answer.\n")
+        w("| broker | committed MB/s | share | seg/s | put ms | queue ms | commit ms | ack ms | S3 PUT/s | S3 GET/s | S3 thr | S3 err | S3 retry | DDB thr | DDB err | DDB cancel | DDB retry | WRU/s | RCU/s |")
+        w("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        for b in sorted(per_b, key=lambda x: (len(x), x)):
+            m = per_b[b]
+            win = max(1, m.get("win", 1))
+            w(f"| {b} | {fmt(m.get('bytes', 0) / win / 1e6, 1)} | {fmt(100 * m.get('bytes', 0) / tot if tot else None, 1)}% | {fmt(m.get('segs', 0) / win, 2)} | "
+              f"{fmt(avg_ms(m, 'put'))} | {fmt(avg_ms(m, 'queue'))} | {fmt(avg_ms(m, 'commit'))} | {fmt(avg_ms(m, 'ack'))} | "
+              f"{fmt(m.get('s3_put', 0) / win, 1)} | {fmt(m.get('s3_get', 0) / win, 1)} | {fmt(m.get('s3_thr', 0), 0)} | {fmt(m.get('s3_err', 0), 0)} | {fmt(m.get('s3_retry', 0), 0)} | "
+              f"{fmt(m.get('ddb_thr', 0), 0)} | {fmt(m.get('ddb_err', 0), 0)} | {fmt(m.get('ddb_cancel', 0), 0)} | {fmt(m.get('ddb_retry', 0), 0)} | "
+              f"{fmt(m.get('ddb_wru', 0) / win, 0)} | {fmt(m.get('ddb_rcu', 0) / win, 0)} |")
+        w("")
+
+    # ---- skew
+    w("## Skew across brokers\n")
+    w("Each client stays on the broker it bootstrapped from (Metadata names only the answering broker, decision 29), so the split follows how clients landed, not the partition count. Share = committed bytes of the broker / all brokers.\n")
+    w("| stage | brokers with data | max share | min share | max/min | max/mean | note |")
+    w("|---|---|---|---|---|---|---|")
+    worst_skew = None
+    nb_seen = 0
+    for st in stages:
+        per_b = stage_win.get(st["stage"]) or {}
+        by = [m.get("bytes", 0) for m in per_b.values()]
+        if len(by) < 2 or sum(by) == 0:
+            w(f"| {st['stage']} | {len(by)} | - | - | - | - | needs >= 2 brokers with snapshots |")
+            continue
+        nb_seen = max(nb_seen, len(by))
+        tot = sum(by)
+        mx, mn = max(by), min(by)
+        ratio = mx / mn if mn > 0 else float("inf")
+        worst_skew = ratio if worst_skew is None else max(worst_skew, ratio)
+        w(f"| {st['stage']} | {len(by)} | {100 * mx / tot:.1f}% | {100 * mn / tot:.1f}% | {ratio:.2f} | {mx / (tot / len(by)):.2f} | even split would be {100 / len(by):.1f}% each |")
+    w("")
+
+    # ---- cost per GiB
+    w("## Cost per GiB (measured counts x prices you pass)\n")
+    w("Formulas: S3 = PUTs x put_price/1000 + GETs x get_price/1000; DynamoDB = WRU x wru_price/1e6 + RCU x rcu_price/1e6; compute = brokers x hourly x window hours. "
+      "GiB = committed segment bytes (batch data + index) in the window. Prices used: "
+      f"PUT ${args.s3_put_per_1000}/1000, GET ${args.s3_get_per_1000}/1000, WRU ${args.ddb_wru_per_million}/M, RCU ${args.ddb_rcu_per_million}/M, broker ${args.broker_hourly}/h "
+      "(S3/DynamoDB defaults are us-east-1 list prices; check your region; pass --broker-hourly for compute). Warm-up is inside the window, which only dilutes fixed per-window costs.\n")
+    w("| stage | GiB written | S3 PUTs | S3 GETs | WRU | RCU | S3 $/GiB | DDB $/GiB | compute $/GiB | total $/GiB | PUT $/month at 1 GiB/s | GET $/month at 1 GiB/s | DDB $/month at 1 GiB/s |")
+    w("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    GIB_PER_MONTH_AT_1GIBS = 86400 * 30.4167
+    nbrokers = max(1, len(bids))
+    cost_rows = 0
+    for st in stages:
+        per_b = stage_win.get(st["stage"]) or {}
+        if not per_b:
+            continue
+        m = sum_windows(per_b.values())
+        gib = m.get("bytes", 0) / GIB
+        if gib <= 0:
+            continue
+        cost_rows += 1
+        puts, gets = m.get("s3_put", 0), m.get("s3_get", 0)
+        wru, rcu = m.get("ddb_wru", 0), m.get("ddb_rcu", 0)
+        c_put = puts * args.s3_put_per_1000 / 1000
+        c_get = gets * args.s3_get_per_1000 / 1000
+        c_ddb = wru * args.ddb_wru_per_million / 1e6 + rcu * args.ddb_rcu_per_million / 1e6
+        hours = (int(st["end"]) - int(st["start"])) / 3600.0
+        c_comp = nbrokers * args.broker_hourly * hours if args.broker_hourly else None
+        tot = c_put + c_get + c_ddb + (c_comp or 0)
+        per_gib = lambda c: (c / gib) if c is not None else None  # noqa: E731
+        mo = lambda c: c / gib * GIB_PER_MONTH_AT_1GIBS  # noqa: E731
+        w(f"| {st['stage']} | {fmt(gib, 1)} | {fmt(puts, 0)} | {fmt(gets, 0)} | {fmt(wru, 0)} | {fmt(rcu, 0)} | {usd(per_gib(c_put + c_get), 5)} | {usd(per_gib(c_ddb), 5)} | "
+          f"{usd(per_gib(c_comp), 5)} | {usd(per_gib(tot), 5)}{'' if c_comp is not None else ' (no compute)'} | {usd(mo(c_put))} | {usd(mo(c_get))} | {usd(mo(c_ddb))} |")
+    if cost_rows:
+        w(f"\nWarpStream reference (their post, 1 GiB/s, 1-year reserved): compute ${WS['compute']:,.0f}/month, S3 GET ${WS['s3_get']:,.0f}, S3 PUT ${WS['s3_put']:,.0f} "
+          "(plus their control-plane fee $7,541, which has no counterpart here). The 'per month at 1 GiB/s' columns scale our measured per-GiB cost to the same rate; they are only meaningful for stages near that rate and with similar compression.\n")
+
+    # ---- checklist
+    w("## Apples-to-apples checklist (items NOT met)\n")
+    if comp != "lz4":
+        unmet.append(f"compression.type={comp} (WarpStream: lz4 with randomBytesRatio 0.5): about 2x more bytes per msg/s on the wire and in S3")
+    parts = {d["partitions"] for d in digest.values() if d}
+    if parts and parts != {288}:
+        unmet.append(f"partitions {sorted(parts)} (WarpStream vanity: 288)")
+    if any(d and not d["consumers"] for d in digest.values()):
+        unmet.append("produce-only stage(s): no consumers, so no read throughput and no end-to-end latency (WarpStream reports symmetric 1 GiB/s write+read and e2e P99 < 2 s)")
+    if run and run.get("brokers") not in (None, 6):
+        unmet.append(f"{run.get('brokers')} brokers (WarpStream: 6)")
+    full = [s_ for s_ in stages if s_["target_msgs"] and float(s_["target_msgs"]) >= 1_000_000]
+    if not full:
+        unmet.append("no stage reached the 1,000,000 msg/s target (about 977 MiB/s of 1 KiB messages)")
+    for st in full:
+        d = digest.get(st["stage"])
+        if d and d["pub_rate"] is not None and d["pub_rate"] < 0.95 * float(st["target_msgs"]):
+            unmet.append(f"{st['stage']}: achieved {d['pub_rate']:,.0f} msg/s, below 95% of the target")
+    for st in stages:
+        d = digest.get(st["stage"])
+        if d and d["p99"] is not None and d["p99"] > 1000:
+            unmet.append(f"{st['stage']}: producer P99 {d['p99']:,.0f} ms (WarpStream: under 1 s)")
+        if d and d["e99"] is not None and d["e99"] > 2000:
+            unmet.append(f"{st['stage']}: end-to-end P99 {d['e99']:,.0f} ms (WarpStream: under 2 s)")
+        if d and (d["err_max"] or 0) > 0:
+            unmet.append(f"{st['stage']}: producer errors (max {d['err_max']:.1f} err/s)")
+        if st["status"] != "ok":
+            unmet.append(f"{st['stage']}: status {st['status']}")
+    if worst_skew is not None and worst_skew > 1.5:
+        unmet.append(f"per-broker skew max/min {worst_skew:.2f} (WarpStream balances connections across agents; here clients stick to their bootstrap broker)")
+    if not bids:
+        unmet.append("no server-side metric snapshots, so skew, S3 and DynamoDB counts and cost are missing")
+    always = [
+        "metadata store: DynamoDB on-demand transactions vs WarpStream's hosted control plane (different latency, cost and limits)",
+        "single availability zone vs WarpStream's multi-AZ cost model (no inter-AZ transfer is exercised here, so their inter-AZ comparison against Kafka does not carry over)",
+        "durability/availability scope: one AZ, stateless brokers; no zone-failure test (WarpStream scales 6 -> 3 agents mid-run; not done here)",
+        "Fetch ignores MinBytes/MaxWait (answers immediately) and consumers use static assign() without groups or offset commits",
+        "OMB 'Kafka-manifester' driver patched (fixed topic, no CreateTopics, no shuffle): see deploy/aws/bench/omb/patches",
+    ]
+    w("Measured from this run:\n")
+    for u in unmet or ["none"]:
+        w(f"- [ ] {u}")
+    w("\nStructural, true for every run of this setup (state them next to any comparison):\n")
+    for u in always:
+        w(f"- [ ] {u}")
+    w("")
+    return unmet
+
+
 # -------------------------------------------------------------------- driver
 def load_snapshots(mdir):
-    snaps = collections.defaultdict(dict)  # service -> {ts: path}
-    if os.path.isdir(mdir):
-        for fn in os.listdir(mdir):
-            m = re.match(r"(\d+)-(broker|manicp)\.txt$", fn)
+    """-> {service: {broker_id: {ts: path}}}. Nested metrics/<bid>/<ts>-svc.txt and flat metrics/<ts>-svc.txt."""
+    snaps = collections.defaultdict(lambda: collections.defaultdict(dict))
+    if not os.path.isdir(mdir):
+        return snaps
+    pat = re.compile(r"(\d+)-(broker|manicp)\.txt$")
+    for fn in os.listdir(mdir):
+        full = os.path.join(mdir, fn)
+        if os.path.isdir(full):
+            for f2 in os.listdir(full):
+                m = pat.match(f2)
+                if m:
+                    snaps[m.group(2)][fn][int(m.group(1))] = os.path.join(full, f2)
+        else:
+            m = pat.match(fn)
             if m:
-                snaps[m.group(2)][int(m.group(1))] = os.path.join(mdir, fn)
+                snaps[m.group(2)]["1"][int(m.group(1))] = full
     return snaps
 
 
@@ -218,6 +459,72 @@ def bracket(tsmap, start, end):
     return before[-1], after[0]
 
 
+def total_op(snap, name, op_prefix):
+    """Sum of series `name` whose `op` label starts with op_prefix (case-insensitive)."""
+    s = 0.0
+    for (n, labels), v in snap.items():
+        if n == name and dict(labels).get("op", "").lower().startswith(op_prefix):
+            s += v
+    return s
+
+
+def delta_op(a, b, name, op_prefix):
+    return max(0.0, total_op(b, name, op_prefix) - total_op(a, name, op_prefix))
+
+
+ADDITIVE = ("win", "segs", "bytes", "put_s", "put_n", "queue_s", "queue_n", "commit_s", "commit_n", "ack_s", "ack_n",
+            "s3_thr", "s3_err", "s3_retry", "s3_put", "s3_get", "s3_put_bytes",
+            "ddb_thr", "ddb_err", "ddb_cancel", "ddb_retry", "ddb_wru", "ddb_rcu", "ddb_call_s", "ddb_call_n")
+
+
+def broker_window(snaps, bid, start, end):
+    """Additive raw deltas for one broker between the snapshots bracketing [start, end] (None if no data)."""
+    m = {}
+    bb = bracket(snaps["broker"].get(bid, {}), start, end) if snaps["broker"].get(bid) else None
+    if bb:
+        a, b = parse_prom(snaps["broker"][bid][bb[0]]), parse_prom(snaps["broker"][bid][bb[1]])
+        m["win"] = max(1, bb[1] - bb[0])
+        m["segs"] = delta(a, b, "manibroker_segments_committed_total")
+        m["bytes"] = delta(a, b, "manibroker_segment_committed_bytes_total")
+        for key, base in (("put", "manibroker_segment_put_seconds"), ("queue", "manibroker_segment_queue_wait_seconds"),
+                          ("commit", "manibroker_segment_commit_seconds"), ("ack", "manibroker_segment_seal_to_ack_seconds")):
+            m[key + "_s"] = delta(a, b, base + "_sum")
+            m[key + "_n"] = delta(a, b, base + "_count")
+        m["s3_thr"] = delta(a, b, "manibroker_s3_throttles_total")
+        m["s3_err"] = delta(a, b, "manibroker_s3_api_errors_total") + delta(a, b, "manibroker_segments_failed_total")
+        m["s3_retry"] = delta(a, b, "manibroker_segment_put_attempts_total") - m["segs"]
+        m["s3_put"] = delta_op(a, b, "manibroker_s3_attempt_seconds_count", "put")
+        m["s3_get"] = delta_op(a, b, "manibroker_s3_attempt_seconds_count", "get")
+        m["s3_put_bytes"] = delta_op(a, b, "manibroker_s3_request_bytes_sum", "put")
+    cc = bracket(snaps["manicp"].get(bid, {}), start, end) if snaps["manicp"].get(bid) else None
+    if cc:
+        a, b = parse_prom(snaps["manicp"][bid][cc[0]]), parse_prom(snaps["manicp"][bid][cc[1]])
+        m["ddb_thr"] = delta(a, b, "manicp_dynamo_throttles_total")
+        canc = delta(a, b, "manicp_dynamo_api_errors_total", code="TransactionCanceledException")
+        m["ddb_err"] = delta(a, b, "manicp_dynamo_api_errors_total") - canc
+        m["ddb_cancel"] = canc
+        m["ddb_retry"] = delta(a, b, "manicp_dynamo_retries_total")
+        m["ddb_wru"] = delta(a, b, "manicp_dynamo_consumed_capacity_units_total", kind="write")
+        m["ddb_rcu"] = delta(a, b, "manicp_dynamo_consumed_capacity_units_total", kind="read")
+        m["ddb_call_s"] = delta(a, b, "manicp_dynamodb_call_seconds_sum")
+        m["ddb_call_n"] = delta(a, b, "manicp_dynamodb_call_seconds_count")
+    return m or None
+
+
+def sum_windows(ws):
+    """Sum a list of broker_window dicts (keys missing in some are skipped); win = max."""
+    out = {}
+    for w in ws:
+        for k, v in w.items():
+            out[k] = max(out.get(k, 0), v) if k == "win" else out.get(k, 0) + v
+    return out
+
+
+def avg_ms(m, key):
+    n = m.get(key + "_n", 0)
+    return m.get(key + "_s", 0) / n * 1000.0 if n > 0 else None
+
+
 def fmt(x, nd=1, dash="-"):
     return dash if x is None else f"{x:,.{nd}f}"
 
@@ -226,13 +533,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("dir")
     ap.add_argument("--out")
+    ap.add_argument("--broker-hourly", type=float, default=0.0, help="USD per broker instance hour (compute cost); 0 omits compute")
+    ap.add_argument("--s3-put-per-1000", type=float, default=0.005)
+    ap.add_argument("--s3-get-per-1000", type=float, default=0.0004)
+    ap.add_argument("--ddb-wru-per-million", type=float, default=1.25, help="on-demand write request unit price")
+    ap.add_argument("--ddb-rcu-per-million", type=float, default=0.25, help="on-demand read request unit price")
     args = ap.parse_args()
     ldir = os.path.join(args.dir, "loadgen")
     rows = []
-    with open(os.path.join(ldir, "cells.tsv")) as f:
-        hdr = f.readline().rstrip("\n").split("\t")
-        for line in f:
-            rows.append(dict(zip(hdr, line.rstrip("\n").split("\t"))))
+    cells_path = os.path.join(ldir, "cells.tsv")
+    if os.path.exists(cells_path):
+        rows = read_tsv(cells_path)
+    elif not os.path.exists(os.path.join(args.dir, "omb", "stages.tsv")):
+        sys.exit(f"{args.dir}: neither loadgen/cells.tsv nor omb/stages.tsv found")
     snaps = load_snapshots(os.path.join(args.dir, "metrics"))
     out = []
     w = out.append
@@ -247,35 +560,32 @@ def main():
         start, end = int(r["start"]), int(r["end"])
         t = tool_stats(ldir, r["prefix"], r["tool"], clients)
         d = dict(cell=r["cell"], rep=int(r["rep"]), clients=clients, size=size, tool=r["tool"], t=t, note=t["note"])
-        bb = bracket(snaps["broker"], start, end) if snaps["broker"] else None
-        cc = bracket(snaps["manicp"], start, end) if snaps["manicp"] else None
-        if bb:
-            a, b = parse_prom(snaps["broker"][bb[0]]), parse_prom(snaps["broker"][bb[1]])
-            win = max(1, bb[1] - bb[0])
-            d["win"] = win
-            d["seg_rate"] = delta(a, b, "manibroker_segments_committed_total") / win
-            d["bytes_rate"] = delta(a, b, "manibroker_segment_committed_bytes_total") / win
-            d["put"] = hist_avg_ms(a, b, "manibroker_segment_put_seconds")
-            d["queue"] = hist_avg_ms(a, b, "manibroker_segment_queue_wait_seconds")
-            d["commit"] = hist_avg_ms(a, b, "manibroker_segment_commit_seconds")
-            d["ack"] = hist_avg_ms(a, b, "manibroker_segment_seal_to_ack_seconds")
-            d["s3_thr"] = delta(a, b, "manibroker_s3_throttles_total")
-            d["s3_err"] = delta(a, b, "manibroker_s3_api_errors_total") + delta(a, b, "manibroker_segments_failed_total")
-            d["s3_retry"] = delta(a, b, "manibroker_segment_put_attempts_total") - delta(a, b, "manibroker_segments_committed_total")
+        ws = [x for x in (broker_window(snaps, bid, start, end) for bid in sorted(set(snaps["broker"]) | set(snaps["manicp"]))) if x]
+        if ws:
+            m = sum_windows(ws)
+            win = max(1, m.get("win", 1))
+            if "segs" in m:
+                d["win"] = win
+                d["seg_rate"] = m["segs"] / win
+                d["bytes_rate"] = m["bytes"] / win
+                d["put"], d["queue"], d["commit"], d["ack"] = (avg_ms(m, k) for k in ("put", "queue", "commit", "ack"))
+                d["s3_thr"], d["s3_err"], d["s3_retry"] = m["s3_thr"], m["s3_err"], m["s3_retry"]
+            if "ddb_wru" in m:
+                d["ddb_thr"], d["ddb_err"], d["ddb_cancel"] = m["ddb_thr"], m["ddb_err"], m["ddb_cancel"]
+                d["ddb_retry"], d["ddb_wru"], d["ddb_call"] = m["ddb_retry"], m["ddb_wru"], avg_ms(m, "ddb_call")
         else:
             d["note"] += " no broker snapshots around the cell"
-        if cc:
-            a, b = parse_prom(snaps["manicp"][cc[0]]), parse_prom(snaps["manicp"][cc[1]])
-            d["ddb_thr"] = delta(a, b, "manicp_dynamo_throttles_total")
-            errs = delta(a, b, "manicp_dynamo_api_errors_total")
-            canc = delta(a, b, "manicp_dynamo_api_errors_total", code="TransactionCanceledException")
-            d["ddb_err"] = errs - canc
-            d["ddb_cancel"] = canc
-            d["ddb_retry"] = delta(a, b, "manicp_dynamo_retries_total")
-            d["ddb_wru"] = delta(a, b, "manicp_dynamo_consumed_capacity_units_total", kind="write")
-            d["ddb_call"] = hist_avg_ms(a, b, "manicp_dynamodb_call_seconds")
         per.append(d)
 
+    if os.path.exists(os.path.join(args.dir, "omb", "stages.tsv")):
+        omb_report(w, args, args.dir, snaps)
+    if not rows:
+        text = "\n".join(out) + "\n"
+        if args.out:
+            with open(args.out, "w") as f:
+                f.write(text)
+        sys.stdout.write(text)
+        return
     w("## Per cell and repetition\n")
     w("Client side (from the load tool): throughput summed over clients; avg latency record-weighted; p50 record-weighted mean and p99 max over clients, from the tool's final summary line (n/a when the tool did not print one).\n")
     w("| cell | rep | clients | bytes | records/s | MB/s | avg ms | p50 ms | p99 ms | notes |")

@@ -1,0 +1,16 @@
+# LATER (disabled by default): WarpStream round-robin run, 64 producers, 16 consumers, 760,000 msg/s x 1 KiB = 742 MiB/s (they quote ~750 MiB/s).
+name: roundrobin-750mibps
+topics: 1
+partitionsPerTopic: 288
+keyDistributor: KEY_ROUND_ROBIN
+messageSize: 1024
+useRandomizedPayloads: true
+randomBytesRatio: 0.5
+randomizedPayloadPoolSize: 1000
+subscriptionsPerTopic: 1
+producersPerTopic: 64
+consumerPerSubscription: 16
+producerRate: 760000
+consumerBacklogSizeGB: 0
+testDurationMinutes: 15
+warmupDurationMinutes: 2

@@ -19,8 +19,8 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "Produce ack latency (seal to commit answer)",
-      "description": "put + queue wait + commit. Excludes time batches sat in the open segment buffer (see segment open age); client-observed latency comes from the load generator.",
+      "title": "Aggregate throughput (all selected brokers): committed MB/s and approx msg/s",
+      "description": "Write side, summed over the $broker selection. Read throughput has no broker metric yet; use the OMB consume rate.",
       "datasource": {
         "type": "prometheus",
         "uid": "${ds_prom}"
@@ -33,8 +33,8 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(manibroker_segment_seal_to_ack_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
-          "legendFormat": "p50",
+          "expr": "sum(rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "legendFormat": "committed bytes/s",
           "datasource": {
             "type": "prometheus",
             "uid": "${ds_prom}"
@@ -42,8 +42,8 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(manibroker_segment_seal_to_ack_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
-          "legendFormat": "p99",
+          "expr": "sum(rate(manibroker_segment_sealed_batch_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "legendFormat": "sealed batch bytes/s",
           "datasource": {
             "type": "prometheus",
             "uid": "${ds_prom}"
@@ -53,7 +53,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "Bps",
           "custom": {
             "fillOpacity": 8,
             "lineWidth": 1
@@ -74,8 +74,8 @@
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Segment open age (first batch to seal)",
-      "description": "",
+      "title": "Approx msg/s at 1 KiB per message (sealed batch bytes / 1024)",
+      "description": "There is no per-record counter on the broker: this is exact only for the 1 KiB OMB workloads (batch framing makes it a slight overestimate). The OMB log/JSON is the source of truth for msg/s.",
       "datasource": {
         "type": "prometheus",
         "uid": "${ds_prom}"
@@ -88,7 +88,338 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(manibroker_segment_open_age_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
+          "expr": "sum(rate(manibroker_segment_sealed_batch_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])) / 1024",
+          "legendFormat": "msg/s (1 KiB records)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${ds_prom}"
+          },
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Per-broker write throughput (committed bytes/s)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds_prom}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (broker) (rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "legendFormat": "broker {{broker}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${ds_prom}"
+          },
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Skew: share of bytes per broker",
+      "description": "Even split is 1/N. Clients stay on the broker they bootstrapped from, so the split follows client placement.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds_prom}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (broker) (rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])) / ignoring(broker) group_left sum(rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "legendFormat": "broker {{broker}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${ds_prom}"
+          },
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Skew: max / min broker throughput",
+      "description": "1.0 is perfectly even. Needs the brokers selected to all be taking traffic (min of 0 gives +Inf).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds_prom}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "max(sum by (broker) (rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))) / min(sum by (broker) (rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "legendFormat": "max/min",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${ds_prom}"
+          },
+          "refId": "A"
+        },
+        {
+          "expr": "max(sum by (broker) (rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))) / avg(sum by (broker) (rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "legendFormat": "max/mean",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${ds_prom}"
+          },
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Open client connections per broker",
+      "description": "Connections follow bootstrap choice (random among bootstrap.servers): the cause of byte skew.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds_prom}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "manibroker_open_connections{run_id=\"$run_id\", broker=~\"$broker\"}",
+          "legendFormat": "broker {{broker}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${ds_prom}"
+          },
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Produce ack latency p99 per broker",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds_prom}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, broker) (rate(manibroker_segment_seal_to_ack_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "legendFormat": "p99 {{broker}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${ds_prom}"
+          },
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Segments per second per broker",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds_prom}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (broker) (rate(manibroker_segments_committed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "legendFormat": "broker {{broker}}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${ds_prom}"
+          },
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Produce ack latency (seal to commit answer)",
+      "description": "put + queue wait + commit. Excludes time batches sat in the open segment buffer (see segment open age); client-observed latency comes from the load generator.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds_prom}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(manibroker_segment_seal_to_ack_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
           "legendFormat": "p50",
           "datasource": {
             "type": "prometheus",
@@ -97,7 +428,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(manibroker_segment_open_age_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(manibroker_segment_seal_to_ack_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
           "legendFormat": "p99",
           "datasource": {
             "type": "prometheus",
@@ -127,7 +458,62 @@
       }
     },
     {
-      "id": 3,
+      "id": 10,
+      "type": "timeseries",
+      "title": "Segment open age (first batch to seal)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds_prom}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(manibroker_segment_open_age_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "legendFormat": "p50",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${ds_prom}"
+          },
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(manibroker_segment_open_age_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${ds_prom}"
+          },
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 8,
+            "lineWidth": 1
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 11,
       "type": "timeseries",
       "title": "Throughput: committed segment bytes/s",
       "description": "",
@@ -137,13 +523,13 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 8,
+        "y": 40,
         "w": 12,
         "h": 8
       },
       "targets": [
         {
-          "expr": "sum(rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum(rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "committed (batch data + index)",
           "datasource": {
             "type": "prometheus",
@@ -152,7 +538,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(rate(manibroker_segment_sealed_batch_bytes_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum(rate(manibroker_segment_sealed_batch_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "sealed batch bytes",
           "datasource": {
             "type": "prometheus",
@@ -182,7 +568,7 @@
       }
     },
     {
-      "id": 4,
+      "id": 12,
       "type": "timeseries",
       "title": "Segments per second by seal reason",
       "description": "",
@@ -192,13 +578,13 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 8,
+        "y": 40,
         "w": 12,
         "h": 8
       },
       "targets": [
         {
-          "expr": "sum by (reason) (rate(manibroker_segments_sealed_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum by (reason) (rate(manibroker_segments_sealed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "{{reason}}",
           "datasource": {
             "type": "prometheus",
@@ -207,7 +593,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(rate(manibroker_segments_failed_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum(rate(manibroker_segments_failed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "failed",
           "datasource": {
             "type": "prometheus",
@@ -237,7 +623,7 @@
       }
     },
     {
-      "id": 5,
+      "id": 13,
       "type": "timeseries",
       "title": "Segment size (mean committed bytes per segment)",
       "description": "",
@@ -247,13 +633,13 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 16,
+        "y": 48,
         "w": 12,
         "h": 8
       },
       "targets": [
         {
-          "expr": "sum(rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\"}[$__rate_interval])) / sum(rate(manibroker_segments_committed_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum(rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])) / sum(rate(manibroker_segments_committed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "mean",
           "datasource": {
             "type": "prometheus",
@@ -283,7 +669,7 @@
       }
     },
     {
-      "id": 6,
+      "id": 14,
       "type": "timeseries",
       "title": "Buffered produce bytes (unacked)",
       "description": "",
@@ -293,13 +679,13 @@
       },
       "gridPos": {
         "x": 12,
-        "y": 16,
+        "y": 48,
         "w": 12,
         "h": 8
       },
       "targets": [
         {
-          "expr": "manibroker_buffered_bytes{run_id=\"$run_id\"}",
+          "expr": "manibroker_buffered_bytes{run_id=\"$run_id\", broker=~\"$broker\"}",
           "legendFormat": "buffered",
           "datasource": {
             "type": "prometheus",
@@ -329,7 +715,7 @@
       }
     },
     {
-      "id": 7,
+      "id": 15,
       "type": "logs",
       "title": "Logs: level >= warn",
       "description": "",
@@ -339,7 +725,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 24,
+        "y": 56,
         "w": 24,
         "h": 10
       },
@@ -417,6 +803,25 @@
         },
         "refresh": 2,
         "sort": 2,
+        "current": {}
+      },
+      {
+        "name": "broker",
+        "type": "query",
+        "label": "broker",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${ds_prom}"
+        },
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "query": {
+          "query": "label_values(manibroker_build_info{run_id=\"$run_id\"}, broker)",
+          "refId": "br"
+        },
+        "refresh": 2,
+        "sort": 3,
         "current": {}
       }
     ]

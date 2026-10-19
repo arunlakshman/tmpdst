@@ -1,11 +1,166 @@
 # AWS benchmark runbook
 
-Disposable stack: one broker host (manibroker + manicp, S3 + DynamoDB), one load generator host,
-Grafana Cloud for metrics/logs. You run apply and destroy; nothing here is automatic.
-Related: `deploy/aws/terraform/README.md` (stack), `deploy/aws/observability/README.md` (Alloy, dashboards),
-`docs/observability.md` (metrics and logs reference).
+Two flows share the same Terraform stack and observability:
 
-Known limits to keep in mind before reading numbers:
+- **WarpStream-comparable run (6 brokers, OpenMessaging Benchmark): part A below.** Read
+  `docs/aws-benchmark-warpstream-comparison.md` first: it says what the numbers can and cannot claim.
+- **Quick smoke (1 broker, Kafka `kafka-producer-perf-test` matrix): part B, sections 1-10**, the original flow, still
+  valid with `broker_count=1` and the fallback when OMB misbehaves (`run-benchmark.sh` accepts the comma-list
+  `BOOTSTRAP` of N brokers too).
+
+Stack reference: `deploy/aws/terraform/README.md` (variables, outputs, NLB trade-off, artifact contract, cost, destroy,
+post-destroy checklist). Observability: `deploy/aws/observability/README.md`, `docs/observability.md`.
+You run apply and destroy; nothing here is automatic. Never run `docker prune` or touch other AWS resources.
+
+## Part A. 6-broker OMB flow
+
+### A0. What is built where
+
+| piece | where it runs | file |
+|---|---|---|
+| OMB artifact (Kafka driver only, patched) | built locally with Docker | `scripts/build-omb.sh` -> `build/omb/openmessaging-benchmark.tar.gz` (about 29 MB, pinned OMB commit) |
+| operator control (topic, workers, start run) | your workstation, through SSM send-command | `deploy/aws/bench/bench-ctl.sh` |
+| OMB workers | every loadgen host, `:8080` (HTTP) and `:9090` (stats) | `deploy/aws/bench/start-omb-workers.sh` |
+| OMB coordinator + stage plan + abort rules | loadgen host 0 (detached) | `deploy/aws/bench/run-omb.sh` |
+| broker `/metrics` snapshots every 10 s | every broker host (`mb-snapshot.service`) | terraform user-data |
+| summary | your workstation | `deploy/aws/bench/collect-results.sh` -> `results/<run>/summary.md` |
+
+Why topic creation goes through SSM to a broker host: OMB cannot create topics (the broker has no CreateTopics),
+manicp listens on loopback of each broker host, the NLB forwards only Kafka traffic, and loadgen hosts have no
+`ssm:SendCommand`. The 288-partition topic is one TOPICS item in DynamoDB (`cp/doc.go`), so creation is cheap;
+the Metadata response for 288 partitions is a few KB. The patched OMB driver maps every logical topic to the
+topic you created (`omb-<run_id>`), so OMB's random topic names never matter.
+
+### A1. Prerequisites (workstation)
+
+AWS CLI v2 with credentials and the Session Manager plugin, Terraform >= 1.6, Go, Docker (running), Python 3,
+`jq`, git. Grafana tokens and SSM parameters exactly as in part B section 1 below.
+Check the instance types exist in your AZ (terraform README, "Variables"); if you substitute m6i the result is not comparable.
+
+### A2. Build the OMB artifact (before apply, any time)
+
+```
+open -a Docker                       # macOS, if the daemon is not running
+scripts/build-omb.sh                 # about 5 min the first time (Maven cache lives in docker volume manifester-omb-m2)
+python3 -I -m unittest discover -s deploy/aws/bench -p 'test_*.py'   # summarize tests, optional
+```
+The artifact upload command printed by terraform (`artifact_upload_command`) uploads `build/omb/openmessaging-benchmark.tar.gz`
+to `artifacts/omb/` if it exists, so build first. If you built later:
+`aws s3 cp build/omb/openmessaging-benchmark.tar.gz s3://$(terraform output -raw bucket)/artifacts/omb/` and, on each loadgen,
+`aws s3 cp ... /tmp/omb.tgz && mkdir -p /opt/omb && tar -xzf /tmp/omb.tgz -C /opt/omb` (via SSM sessions).
+
+### A3. Apply with six brokers
+
+```
+cd deploy/aws/terraform
+cp example.tfvars my.tfvars       # run_id, owner, budget_usd, budget_email; broker_count = 6, loadgen_count = 2
+terraform init -upgrade && terraform plan -var-file=my.tfvars
+terraform apply -var-file=my.tfvars                                # you run this
+$(terraform output -raw artifact_upload_command)                   # from the repo root; READY is written last
+```
+Apply early: the S3 request metrics take about 15 minutes to show data.
+
+### A4. Verify (about 5-10 minutes after READY)
+
+```
+export AWS_REGION=ap-south-2 RUN_ID=<run_id>
+deploy/aws/bench/bench-ctl.sh worker-status || true          # not started yet: expected "NOT running"
+$(terraform output -json ssm_start_session_brokers | jq -r '.[0]')   # on broker 1:
+  systemctl is-active manicp manibroker mb-snapshot alloy ; curl -s 127.0.0.1:9100/healthz
+$(terraform output -json ssm_start_session_loadgens | jq -r '.[0]')  # on loadgen 0:
+  source /etc/profile.d/bench.sh; echo $BOOTSTRAP $LOADGEN_INDEX $LOADGEN_COUNT; ls /opt/omb/bin /opt/bench
+```
+Grafana: apply dashboards (`deploy/aws/observability/apply-dashboards.sh`), check `up{run_id="<run>"}` for all six
+`broker` values, and that the `$broker` variable of the Overview dashboard lists 1..6.
+
+### A5. Topic and workers (workstation)
+
+```
+deploy/aws/bench/bench-ctl.sh --run-id $RUN_ID create-topic 288         # topic omb-<run_id>, 288 partitions, via SSM on broker 1
+deploy/aws/bench/bench-ctl.sh start-workers                              # benchmark-worker on every loadgen
+deploy/aws/bench/bench-ctl.sh worker-status
+```
+(`bench-ctl.sh` reads `broker_instance_ids` and `loadgen_instance_ids` from `terraform output`, or set
+`BROKER_INSTANCE_IDS` / `LOADGEN_INSTANCE_IDS`.) The OMB worker layout: the first half of the workers run producers,
+the second half consumers; with `loadgen_count=2` that is loadgen 0 producing and loadgen 1 consuming, so a
+produce-only stage uses one loadgen (an m6in.8xlarge is enough, WarpStream used one).
+
+### A6. Smoke, then the full stage
+
+Default plan = pre-flight, `smoke` (100k msg/s = 97.7 MiB/s, 3 min + 1 min warm-up), then `vanity-produce`
+(1,000,000 msg/s = 976.6 MiB/s, 288 partitions, 64 producers, produce-only, 15 min + 2 warm-up). Stop on the first failure.
+Run the smoke alone first; it prints the pre-flight, the compression decision and `SMOKE PASS` / `SMOKE FAIL`:
+```
+deploy/aws/bench/bench-ctl.sh run --stages smoke
+deploy/aws/bench/bench-ctl.sh tail 60          # repeat; also: Grafana Overview and Pipeline dashboards
+```
+Pre-flight (automatic): Kafka ApiVersions on every broker IP (prints node ids, warns on duplicates), the topic
+is visible on every broker with 288 partitions, the lz4 probe (one 1 KiB record with `compression.type=lz4`; today the
+brokers reject it and the run falls back to `none` with a LOUD "not apples-to-apples" warning). Go only if:
+- [ ] `SMOKE PASS`, achieved >= 80% of 100k msg/s, no errors
+- [ ] every broker shows traffic in Grafana (Overview, "Per-broker write throughput"), skew max/min about 1 in balanced mode
+- [ ] `segments_failed` 0, S3 and DynamoDB throttles 0, `manicp` WRU/s about 194 x segments/s (see comparison doc, section 5; the
+      first sign that DynamoDB cost will dominate)
+- [ ] no `level=error` Loki lines
+
+Then the careful path or the default:
+```
+deploy/aws/bench/bench-ctl.sh run --stages smoke,ramp,vanity-produce     # ramp: 100k, 250k, 500k, 750k, 1M msg/s, 5 min each
+deploy/aws/bench/bench-ctl.sh run --stages vanity                        # later: adds 64 consumers (Fetch path, least mature)
+deploy/aws/bench/bench-ctl.sh run --stages vanity-produce --bootstrap-mode random   # skew as an unmodified client sees it
+deploy/aws/bench/bench-ctl.sh run --stages vanity-fanout3 --include-later            # 3x fan-out etc.: workloads/later
+```
+Rates (1 KiB messages): 100k = 97.7 MiB/s, 250k = 244.1, 500k = 488.3, 750k = 732.4, 1M = 976.6.
+Stage names are workload files in `deploy/aws/bench/omb/workloads` (and `later/` with `--include-later`).
+Compression: `--compression auto|lz4|none` (default auto = probe). Once compression lands nothing else changes.
+
+Abort rules, checked on every 10 s OMB line: error rate above 0.1% of the publish rate, publish p99 of the interval above
+10 s, or (when consumers exist) backlog of 100 K messages or more growing for 2 consecutive intervals. A trip kills OMB,
+writes `ABORT` (reason) next to `omb/` on loadgen 0, uploads everything, and skips the remaining stages. Manual stop:
+`bench-ctl.sh abort` (touches `/tmp/omb-stop`, kills the coordinator). `--max-minutes` (default 120) refuses an
+over-long plan. Results land in `~/bench-out/<run>/omb/` and `s3://<bucket>/results/<run>/omb/` after every stage.
+
+### A7. Collect, then destroy
+
+```
+SUMMARIZE_ARGS='--broker-hourly <usd per m6in.4xlarge hour in your region>' \
+  deploy/aws/bench/collect-results.sh $(cd deploy/aws/terraform && terraform output -raw bucket) $RUN_ID ap-south-2
+```
+`results/<run>/summary.md` has the OMB table (target vs achieved msg/s and MiB/s, producer and end-to-end percentiles,
+backlog), per-broker server side per stage, the skew table, cost per GiB with the formulas of the comparison doc, and the
+apples-to-apples checklist of unmet items. Read the checklist before quoting a number. Also take Grafana screenshots
+(free tier retention is 14 days).
+
+**STOP: `terraform destroy` force-deletes the bucket.** Not before `results/<run>/summary.md` exists locally. Then destroy,
+run the post-destroy checklist from the terraform README (it includes the NLB and its target groups), and delete the
+SSM parameters and Grafana tokens if the account is shared.
+
+### A8. Checklist (tick in order)
+
+- [ ] OMB artifact built, tarball present; `broker_count = 6`, `loadgen_count = 2`; budget alarm set
+- [ ] apply + artifact upload done; all hosts `bench-bootstrap.done`; 6 brokers up in Grafana
+- [ ] topic `omb-<run>` with 288 partitions; workers running on both loadgens
+- [ ] smoke passes; compression decision noted (`none` today, so NOT apples-to-apples)
+- [ ] ramp / vanity stages run; ABORT file absent (or understood)
+- [ ] summary collected and read; per-broker snapshots present for all six brokers (`metrics/1/` .. `metrics/6/`)
+- [ ] NLB (`use_nlb`) considered: it does not remove skew; pinned `balanced` mode used and stated
+- [ ] results saved; `terraform destroy`; post-destroy checklist (including the NLB) all empty
+
+### A9. Known gaps and unverified items
+
+- The Kafka client in OMB (3.6.1) and the broker were exercised together only locally (one broker, mem store, 8
+  partitions, produce + assign-consume at 5k msg/s, `compression.type=none`). Nothing here has run on AWS.
+- With `metrics/<broker_id>/` snapshots missing (flat files from the stock template), 6 brokers overwrite each other's
+  snapshot names: the per-broker tables are only valid with the nested layout (terraform change required).
+- `kafka-producer-perf-test` with lz4 as the probe assumes it exits cleanly on UNSUPPORTED_COMPRESSION_TYPE after
+  `retries=0` and `max.block.ms=15000`; if the probe misclassifies, force `--compression none|lz4`.
+- DynamoDB cost and the 98-calls-per-commit behaviour at 288 partitions are predictions (comparison doc, section 5).
+
+# Part B. Quick smoke (single broker)
+
+Everything below is the original single-broker flow (`broker_count=1`, `run-benchmark.sh`). Disposable stack: one broker
+host, one load generator host. Known limits:
+
 - The broker accepts only non-idempotent producers (decision 41): the harness passes `enable.idempotence=false` to `kafka-producer-perf-test` (Kafka 3.8 defaults to true and would be rejected with INVALID_REQUEST). Keep it if you override `PRODUCER_PROPS`. Results in `docs/aws-benchmark-results-r1.md` predate this change.
 - The load tool is Apache Kafka's `kafka-producer-perf-test`. The WarpStream `benchmark-producer` was tried
   against the broker and cannot be used: it always compresses (no flag to disable) and the broker rejects

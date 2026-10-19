@@ -16,6 +16,8 @@
 #                  PARAM_API_KEY (grafana/api_key) is a fallback used for whichever key is missing
 #   DDB_TABLE S3_BUCKET S3_METRICS_FILTER_ID  broker only; when unset read from SSM
 #                  $SSM_PREFIX/aws/{ddb_table,s3_bucket,s3_metrics_filter_id} (filter default manifester-bench)
+#   BROKER_ID      broker only: 1..N, becomes the `broker` label on manibroker/manicp series (default 1)
+#   PRIVATE_IP     accepted, informational
 #   AWS_REGION     default: instance region from IMDS
 #
 # SSM parameters read with the instance role (SecureString for secrets):
@@ -111,6 +113,7 @@ tmp=$(mktemp /etc/alloy/alloy.env.XXXXXX)
   echo "GRAFANA_PROM_API_KEY=$prom_key"
   echo "GRAFANA_LOKI_API_KEY=$loki_key"
   if [ "$ROLE" = broker ]; then
+    echo "BROKER_ID=${BROKER_ID:-1}"
     echo "DDB_TABLE=$ddb_table"
     echo "S3_BUCKET=$s3_bucket"
     echo "S3_METRICS_FILTER_ID=$s3_filter"

@@ -1,0 +1,16 @@
+# LATER (disabled by default): 256 producers (WarpStream scaled 64->256). Per-broker skew shrinks with more producers (see comparison doc).
+name: vanity-producers256
+topics: 1
+partitionsPerTopic: 288
+keyDistributor: NO_KEY
+messageSize: 1024
+useRandomizedPayloads: true
+randomBytesRatio: 0.5
+randomizedPayloadPoolSize: 1000
+subscriptionsPerTopic: 1
+producersPerTopic: 256
+consumerPerSubscription: 64
+producerRate: 1000000
+consumerBacklogSizeGB: 0
+testDurationMinutes: 15
+warmupDurationMinutes: 2

@@ -1,0 +1,160 @@
+diff --git a/benchmark-framework/src/main/java/io/openmessaging/benchmark/WorkloadGenerator.java b/benchmark-framework/src/main/java/io/openmessaging/benchmark/WorkloadGenerator.java
+index 86a2b1a..4e4c448 100644
+--- a/benchmark-framework/src/main/java/io/openmessaging/benchmark/WorkloadGenerator.java
++++ b/benchmark-framework/src/main/java/io/openmessaging/benchmark/WorkloadGenerator.java
+@@ -267,7 +267,7 @@ public class WorkloadGenerator implements AutoCloseable {
+             }
+         }
+ 
+-        Collections.shuffle(consumerAssignment.topicsSubscriptions);
++        // manifester patch: no shuffle, the Kafka driver derives each consumer's partitions from list order.
+ 
+         Timer timer = new Timer();
+ 
+diff --git a/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/Config.java b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/Config.java
+index d2fafaf..91b7ac5 100644
+--- a/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/Config.java
++++ b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/Config.java
+@@ -23,4 +23,21 @@ public class Config {
+     public String producerConfig;
+ 
+     public String consumerConfig;
++
++    // ---- manifester patch: the broker has no CreateTopics and no consumer groups ----
++    /** When set, every logical topic maps to this pre-created topic and createTopics is a no-op. */
++    public String maniTopic;
++    /** assign() a static partition share per consumer instead of subscribe(); never commit offsets. */
++    public boolean maniAssign;
++    /** Consumers per subscription (workload.consumerPerSubscription). */
++    public int maniConsumersTotal = 1;
++    /** Number of OMB consumer workers (workers / 2, rounded down). */
++    public int maniConsumerWorkers = 1;
++    /**
++     * Pin each producer / consumer to one broker of bootstrap.servers, round-robin (client k takes entry
++     * (k + mani.loadgen.index) % N). Stands in for WarpStream's service discovery, which balances client
++     * connections across agents; with the stock random bootstrap choice the per-broker load is binomially
++     * skewed because every manifester broker answers Metadata with itself as leader of all partitions.
++     */
++    public boolean maniBalance;
+ }
+diff --git a/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkConsumer.java b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkConsumer.java
+index e07b417..4bd756a 100644
+--- a/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkConsumer.java
++++ b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkConsumer.java
+@@ -43,6 +43,17 @@ public class KafkaBenchmarkConsumer implements BenchmarkConsumer {
+     private volatile boolean closing = false;
+     private boolean autoCommit;
+ 
++    public KafkaBenchmarkConsumer(
++            KafkaConsumer<String, byte[]> consumer,
++            Properties consumerConfig,
++            ConsumerCallback callback,
++            boolean noCommit) {
++        this(consumer, consumerConfig, callback, 100L);
++        this.noCommit = noCommit;
++    }
++
++    private volatile boolean noCommit = false; // manifester patch: no group, never commit
++
+     public KafkaBenchmarkConsumer(
+             KafkaConsumer<String, byte[]> consumer,
+             Properties consumerConfig,
+@@ -78,7 +89,7 @@ public class KafkaBenchmarkConsumer implements BenchmarkConsumer {
+                                                 new OffsetAndMetadata(record.offset() + 1));
+                                     }
+ 
+-                                    if (!autoCommit && !offsetMap.isEmpty()) {
++                                    if (!autoCommit && !noCommit && !offsetMap.isEmpty()) {
+                                         // Async commit all messages polled so far
+                                         consumer.commitAsync(offsetMap, null);
+                                     }
+diff --git a/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkDriver.java b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkDriver.java
+index d506b5b..86cd2ad 100644
+--- a/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkDriver.java
++++ b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkDriver.java
+@@ -105,8 +105,35 @@ public class KafkaBenchmarkDriver implements BenchmarkDriver {
+         return createTopics(Collections.singletonList(new TopicInfo(topic, partitions)));
+     }
+ 
++    // ---- manifester patch (see Config.java) -------------------------------------------------
++    // Consumer k of a subscription takes the partitions p with p % maniConsumersTotal == k. OMB deals
++    // the consumer list to the consumer workers round-robin (the patched WorkloadGenerator no longer
++    // shuffles it), and createConsumer is called in list order, so the n-th consumer built in this
++    // JVM is list item n * maniConsumerWorkers + (mani.worker.index, set with -D at worker start,
++    // 0-based among the consumer workers) and k = item % maniConsumersTotal.
++    private final java.util.concurrent.atomic.AtomicInteger maniClientSeq =
++            new java.util.concurrent.atomic.AtomicInteger();
++
++    private Properties maniPin(Properties in) {
++        if (!config.maniBalance) {
++            return in;
++        }
++        String[] servers = in.getProperty("bootstrap.servers").split(",");
++        int k = maniClientSeq.getAndIncrement() + Integer.getInteger("mani.loadgen.index", 0);
++        Properties out = new Properties();
++        in.forEach((key, value) -> out.put(key, value));
++        out.put("bootstrap.servers", servers[k % servers.length].trim());
++        return out;
++    }
++
++    private final java.util.concurrent.atomic.AtomicInteger maniConsumerSeq =
++            new java.util.concurrent.atomic.AtomicInteger();
++
+     @Override
+     public CompletableFuture<Void> createTopics(List<TopicInfo> topicInfos) {
++        if (config.maniTopic != null) {
++            return CompletableFuture.completedFuture(null);
++        }
+         @SuppressWarnings({"unchecked", "rawtypes"})
+         Map<String, String> topicConfigs = new HashMap<>((Map) topicProperties);
+         KafkaTopicCreator topicCreator =
+@@ -116,8 +143,9 @@ public class KafkaBenchmarkDriver implements BenchmarkDriver {
+ 
+     @Override
+     public CompletableFuture<BenchmarkProducer> createProducer(String topic) {
+-        KafkaProducer<String, byte[]> kafkaProducer = new KafkaProducer<>(producerProperties);
+-        BenchmarkProducer benchmarkProducer = new KafkaBenchmarkProducer(kafkaProducer, topic);
++        KafkaProducer<String, byte[]> kafkaProducer = new KafkaProducer<>(maniPin(producerProperties));
++        BenchmarkProducer benchmarkProducer =
++                new KafkaBenchmarkProducer(kafkaProducer, config.maniTopic != null ? config.maniTopic : topic);
+         try {
+             // Add to producer list to close later
+             producers.add(benchmarkProducer);
+@@ -134,13 +162,33 @@ public class KafkaBenchmarkDriver implements BenchmarkDriver {
+     public CompletableFuture<BenchmarkConsumer> createConsumer(
+             String topic, String subscriptionName, ConsumerCallback consumerCallback) {
+         Properties properties = new Properties();
+-        consumerProperties.forEach((key, value) -> properties.put(key, value));
+-        properties.put(ConsumerConfig.GROUP_ID_CONFIG, subscriptionName);
++        maniPin(consumerProperties).forEach((key, value) -> properties.put(key, value));
++        if (config.maniTopic != null) {
++            topic = config.maniTopic;
++        }
++        if (!config.maniAssign) {
++            properties.put(ConsumerConfig.GROUP_ID_CONFIG, subscriptionName);
++        }
+         KafkaConsumer<String, byte[]> consumer = new KafkaConsumer<>(properties);
+         try {
+-            consumer.subscribe(Arrays.asList(topic));
++            if (config.maniAssign) {
++                int item =
++                        maniConsumerSeq.getAndIncrement() * config.maniConsumerWorkers
++                                + Integer.getInteger("mani.worker.index", 0);
++                int k = item % config.maniConsumersTotal;
++                List<org.apache.kafka.common.TopicPartition> mine = new ArrayList<>();
++                for (org.apache.kafka.common.PartitionInfo pi : consumer.partitionsFor(topic)) {
++                    if (pi.partition() % config.maniConsumersTotal == k) {
++                        mine.add(new org.apache.kafka.common.TopicPartition(topic, pi.partition()));
++                    }
++                }
++                consumer.assign(mine);
++            } else {
++                consumer.subscribe(Arrays.asList(topic));
++            }
+             return CompletableFuture.completedFuture(
+-                    new KafkaBenchmarkConsumer(consumer, consumerProperties, consumerCallback));
++                    new KafkaBenchmarkConsumer(
++                            consumer, consumerProperties, consumerCallback, config.maniAssign));
+         } catch (Throwable t) {
+             consumer.close();
+             CompletableFuture<BenchmarkConsumer> future = new CompletableFuture<>();

@@ -1,0 +1,16 @@
+# WarpStream 'vanity' workload: 1 topic, 288 partitions, 64 producers, 64 consumers, 1x fan-out, 1,000,000 msg/s = 976.6 MiB/s write + 976.6 MiB/s read. Needs the Fetch path (second stage).
+name: vanity-1gibps
+topics: 1
+partitionsPerTopic: 288
+keyDistributor: NO_KEY
+messageSize: 1024
+useRandomizedPayloads: true
+randomBytesRatio: 0.5
+randomizedPayloadPoolSize: 1000
+subscriptionsPerTopic: 1
+producersPerTopic: 64
+consumerPerSubscription: 64
+producerRate: 1000000
+consumerBacklogSizeGB: 0
+testDurationMinutes: 15
+warmupDurationMinutes: 2

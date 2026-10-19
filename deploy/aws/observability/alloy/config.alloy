@@ -1,8 +1,8 @@
 // Common Alloy config, loaded on every host together with <role>.alloy
-// (broker.alloy or loadgen.alloy): `alloy run /etc/alloy/`.
+// (broker.alloy, cp.alloy or loadgen.alloy): `alloy run /etc/alloy/`.
 //
 // Environment (from /etc/alloy/alloy.env, filled from SSM at boot):
-//   RUN_ID, HOST_ROLE (broker|loadgen), HOST_NAME
+//   RUN_ID, HOST_ROLE (broker|cp|loadgen), HOST_NAME
 //   GRAFANA_PROM_URL   e.g. https://prometheus-prod-XX.grafana.net/api/prom/push
 //   GRAFANA_PROM_USER  numeric Prometheus instance id
 //   GRAFANA_LOKI_URL   e.g. https://logs-prod-XXX.grafana.net/loki/api/v1/push

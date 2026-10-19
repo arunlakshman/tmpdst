@@ -20,6 +20,49 @@ locals {
   common = templatefile("${path.module}/files/common.sh.tpl", local.common_vars)
 }
 
+resource "aws_instance" "cp" {
+  ami                                  = data.aws_ssm_parameter.al2023_ami.value
+  instance_type                        = var.cp_instance_type
+  subnet_id                            = aws_subnet.public.id
+  vpc_security_group_ids               = [aws_security_group.cp.id]
+  iam_instance_profile                 = aws_iam_instance_profile.cp.name
+  associate_public_ip_address          = true
+  user_data_replace_on_change          = true
+  instance_initiated_shutdown_behavior = "terminate"
+
+  user_data = templatefile("${path.module}/files/cp-user-data.sh.tpl", merge(local.common_vars, {
+    common                   = local.common
+    table_prefix             = local.table_prefix
+    table_name               = local.table_name
+    cp_extra_args            = var.cp_extra_args
+    initial_topic_partitions = var.initial_topic_partitions
+  }))
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+
+  root_block_device {
+    volume_type = "gp3"
+    volume_size = var.root_volume_gb
+    encrypted   = true
+    tags        = merge(local.tags, { Name = "${local.name}-cp-root" })
+  }
+
+  tags = { Name = "${local.name}-cp", Role = "cp" }
+
+  depends_on = [
+    terraform_data.ssm_prefix_check,
+    aws_route_table_association.public,
+    aws_vpc_endpoint.s3,
+    aws_vpc_endpoint.dynamodb,
+    aws_iam_role_policy.cp,
+    aws_iam_role_policy.cp_ssm_read,
+  ]
+}
+
 resource "aws_instance" "broker" {
   count = var.broker_count
 
@@ -33,13 +76,10 @@ resource "aws_instance" "broker" {
   instance_initiated_shutdown_behavior = "terminate"
 
   user_data = templatefile("${path.module}/files/broker-user-data.sh.tpl", merge(local.common_vars, {
-    common                   = local.common
-    table_prefix             = local.table_prefix
-    table_name               = local.table_name
-    broker_extra_args        = var.broker_extra_args
-    cp_extra_args            = var.cp_extra_args
-    broker_id                = count.index + 1
-    initial_topic_partitions = var.initial_topic_partitions
+    common            = local.common
+    broker_extra_args = var.broker_extra_args
+    broker_id         = count.index + 1
+    cp_private_ip     = aws_instance.cp.private_ip
   }))
 
   metadata_options {

@@ -34,6 +34,80 @@ data "aws_iam_policy_document" "ssm_read" {
   }
 }
 
+# ------------------------------------------------------ control-plane host
+
+resource "aws_iam_role" "cp" {
+  name_prefix        = "${local.name}-cp-"
+  assume_role_policy = data.aws_iam_policy_document.assume_ec2.json
+}
+
+resource "aws_iam_role_policy_attachment" "cp_ssm_core" {
+  role       = aws_iam_role.cp.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# Least privilege: the table, artifacts read, results write (run manifest + metrics snapshots). No segment data access.
+data "aws_iam_policy_document" "cp" {
+  statement {
+    sid       = "BucketList"
+    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
+    resources = [aws_s3_bucket.run.arn]
+  }
+
+  statement {
+    sid       = "ReadArtifacts"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.run.arn}/artifacts/*"]
+  }
+
+  statement {
+    sid       = "WriteResults"
+    actions   = ["s3:PutObject", "s3:AbortMultipartUpload"]
+    resources = ["${aws_s3_bucket.run.arn}/results/*"]
+  }
+
+  statement {
+    sid = "ControlPlaneTable"
+    actions = [
+      "dynamodb:GetItem",
+      "dynamodb:BatchGetItem",
+      "dynamodb:PutItem",
+      "dynamodb:UpdateItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:BatchWriteItem",
+      "dynamodb:ConditionCheckItem",
+      "dynamodb:Query",
+      "dynamodb:DescribeTable",
+    ]
+    resources = [aws_dynamodb_table.cp.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "cp" {
+  name   = "cp-data"
+  role   = aws_iam_role.cp.id
+  policy = data.aws_iam_policy_document.cp.json
+}
+
+resource "aws_iam_role_policy" "cp_ssm_read" {
+  name   = "ssm-read"
+  role   = aws_iam_role.cp.id
+  policy = data.aws_iam_policy_document.ssm_read.json
+}
+
+# Alloy on the CP host scrapes CloudWatch (DynamoDB table metrics) with the same read policy as the brokers.
+resource "aws_iam_role_policy" "cp_cloudwatch_read" {
+  count  = local.cw_policy_json == null ? 0 : 1
+  name   = "cloudwatch-read"
+  role   = aws_iam_role.cp.id
+  policy = local.cw_policy_json
+}
+
+resource "aws_iam_instance_profile" "cp" {
+  name_prefix = "${local.name}-cp-"
+  role        = aws_iam_role.cp.name
+}
+
 # ------------------------------------------------------------ broker host
 
 resource "aws_iam_role" "broker" {

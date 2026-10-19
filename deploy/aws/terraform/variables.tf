@@ -38,7 +38,7 @@ variable "auto_destroy_after" {
 }
 
 variable "broker_count" {
-  description = "Number of stateless broker hosts (each runs manibroker + its own manicp on loopback), all in the one AZ and sharing one bucket and one table. WarpStream's published benchmark uses 6."
+  description = "Number of stateless broker hosts (each runs manibroker only and points -cp-url at the single control-plane host), all in the one AZ and sharing one bucket and one table. WarpStream's published benchmark uses 6."
   type        = number
   default     = 6
 
@@ -48,8 +48,14 @@ variable "broker_count" {
   }
 }
 
+variable "cp_instance_type" {
+  description = "Control-plane host: exactly ONE instance running only manicp (the single sequencer, decision 46). x86_64 only. 4 vCPU / 16 GiB is enough for the sequencer; counts 4 vCPUs against the account quota."
+  type        = string
+  default     = "m6in.xlarge"
+}
+
 variable "broker_instance_type" {
-  description = "Broker host (manibroker + manicp). x86_64 only: the artifact is linux/amd64. Default matches WarpStream's published agents (16 vCPU / 64 GiB / up to 40 Gbps)."
+  description = "Broker host (manibroker only). x86_64 only: the artifact is linux/amd64. Default matches WarpStream's published agents (16 vCPU / 64 GiB / up to 40 Gbps)."
   type        = string
   default     = "m6in.4xlarge"
 }
@@ -101,7 +107,7 @@ variable "ddb_warm_read_units" {
 }
 
 variable "initial_topic_partitions" {
-  description = "Partitions of the topic bench-<run_id> that broker 1 creates through its loopback manicp at boot (the broker implements no CreateTopics)."
+  description = "Partitions of the topic bench-<run_id> that the control-plane host creates through its loopback manicp at boot (the broker implements no CreateTopics)."
   type        = number
   default     = 6
 }
@@ -212,7 +218,7 @@ variable "broker_extra_args" {
 }
 
 variable "cp_extra_args" {
-  description = "Extra flags appended to the manicp command line."
+  description = "Extra flags appended to the manicp command line on the control-plane host (e.g. sequencer tuning flags once manicp has them). Empty by default so it stays valid for any manicp build."
   type        = string
   default     = ""
 }

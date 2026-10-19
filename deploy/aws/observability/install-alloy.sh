@@ -7,14 +7,14 @@
 #
 # Inputs (environment):
 #   RUN       run id, becomes the run_id label (required)
-#   ROLE      broker | loadgen (required)
+#   ROLE      broker | cp | loadgen (required)
 #   OBS_DIR   directory holding alloy/ (default: this script's directory)
 #   ALLOY_VERSION  rpm version to pin (default below)
 #   SSM_PREFIX     default /manifester-bench (the Terraform allowed_ssm_param_prefix, no trailing /)
 #   PARAM_PROM_URL PARAM_PROM_USER PARAM_PROM_KEY PARAM_LOKI_URL PARAM_LOKI_USER PARAM_LOKI_KEY PARAM_API_KEY
 #                  full SSM names; defaults $SSM_PREFIX/grafana/{remote_write_url,user,prom_api_key,loki_url,loki_user,loki_api_key}
 #                  PARAM_API_KEY (grafana/api_key) is a fallback used for whichever key is missing
-#   DDB_TABLE S3_BUCKET S3_METRICS_FILTER_ID  broker only; when unset read from SSM
+#   DDB_TABLE (cp only) S3_BUCKET S3_METRICS_FILTER_ID (broker only); when unset read from SSM
 #                  $SSM_PREFIX/aws/{ddb_table,s3_bucket,s3_metrics_filter_id} (filter default manifester-bench)
 #   BROKER_ID      broker only: 1..N, becomes the `broker` label on manibroker/manicp series (default 1)
 #   PRIVATE_IP     accepted, informational
@@ -28,8 +28,8 @@
 set -euo pipefail
 
 : "${RUN:?RUN is required}"
-: "${ROLE:?ROLE is required (broker|loadgen)}"
-case "$ROLE" in broker | loadgen) ;; *) echo "ROLE must be broker or loadgen" >&2; exit 2 ;; esac
+: "${ROLE:?ROLE is required (broker|cp|loadgen)}"
+case "$ROLE" in broker | cp | loadgen) ;; *) echo "ROLE must be broker, cp or loadgen" >&2; exit 2 ;; esac
 ALLOY_VERSION="${ALLOY_VERSION:-1.10.1}"
 SSM_PREFIX="${SSM_PREFIX:-/manifester-bench}"
 SSM_PREFIX="${SSM_PREFIX%/}"
@@ -72,7 +72,7 @@ install -d -m 0755 /etc/alloy
 install -m 0644 "$OBS_DIR/alloy/config.alloy" /etc/alloy/config.alloy
 install -m 0644 "$OBS_DIR/alloy/$ROLE.alloy" "/etc/alloy/$ROLE.alloy"
 # drop the other role's file if the host was re-purposed
-for r in broker loadgen; do [ "$r" = "$ROLE" ] || rm -f "/etc/alloy/$r.alloy"; done
+for r in broker cp loadgen; do [ "$r" = "$ROLE" ] || rm -f "/etc/alloy/$r.alloy"; done
 install -m 0644 "$OBS_DIR/alloy/alloy.service" /etc/systemd/system/alloy.service
 
 # --- secrets from SSM -> /etc/alloy/alloy.env (0600, never in the repo) -------
@@ -94,8 +94,10 @@ fallback_key=$(ssm "$PARAM_API_KEY" "")
 prom_key=$(ssm "$PARAM_PROM_KEY" "$fallback_key")
 loki_key=$(ssm "$PARAM_LOKI_KEY" "$fallback_key")
 [ -n "$prom_key" ] && [ -n "$loki_key" ] || { echo "no Grafana API key: need $PARAM_PROM_KEY and $PARAM_LOKI_KEY, or $PARAM_API_KEY" >&2; exit 1; }
-if [ "$ROLE" = broker ]; then
+if [ "$ROLE" = cp ]; then
   ddb_table=${DDB_TABLE:-$(ssm "$SSM_PREFIX/aws/ddb_table")}
+fi
+if [ "$ROLE" = broker ]; then
   s3_bucket=${S3_BUCKET:-$(ssm "$SSM_PREFIX/aws/s3_bucket")}
   s3_filter=${S3_METRICS_FILTER_ID:-$(ssm "$SSM_PREFIX/aws/s3_metrics_filter_id" manifester-bench)}
 fi
@@ -112,9 +114,11 @@ tmp=$(mktemp /etc/alloy/alloy.env.XXXXXX)
   echo "GRAFANA_LOKI_USER=$loki_user"
   echo "GRAFANA_PROM_API_KEY=$prom_key"
   echo "GRAFANA_LOKI_API_KEY=$loki_key"
+  if [ "$ROLE" = cp ]; then
+    echo "DDB_TABLE=$ddb_table"
+  fi
   if [ "$ROLE" = broker ]; then
     echo "BROKER_ID=${BROKER_ID:-1}"
-    echo "DDB_TABLE=$ddb_table"
     echo "S3_BUCKET=$s3_bucket"
     echo "S3_METRICS_FILTER_ID=$s3_filter"
   fi

@@ -115,6 +115,35 @@ resource "aws_security_group" "broker" {
   }
 }
 
+# Control-plane host: the one manicp. 8080 only from the brokers; bench-ctl reaches it through SSM send-command
+# (so loadgen -> cp stays closed). No metrics ports: Alloy and the snapshotter use loopback.
+resource "aws_security_group" "cp" {
+  name_prefix = "${local.name}-cp-"
+  description = "manifester-bench control plane (single manicp): 8080 from brokers only"
+  vpc_id      = aws_vpc.this.id
+  tags        = { Name = "${local.name}-cp" }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "cp_from_brokers" {
+  security_group_id            = aws_security_group.cp.id
+  referenced_security_group_id = aws_security_group.broker.id
+  ip_protocol                  = "tcp"
+  from_port                    = 8080
+  to_port                      = 8080
+  description                  = "manicp HTTP from brokers"
+}
+
+resource "aws_vpc_security_group_egress_rule" "cp_all" {
+  security_group_id = aws_security_group.cp.id
+  ip_protocol       = "-1"
+  cidr_ipv4         = "0.0.0.0/0"
+  description       = "outbound: DynamoDB/S3 endpoints, SSM, Grafana Cloud, package downloads"
+}
+
 resource "aws_vpc_security_group_ingress_rule" "kafka_from_loadgen" {
   security_group_id            = aws_security_group.broker.id
   referenced_security_group_id = aws_security_group.loadgen.id

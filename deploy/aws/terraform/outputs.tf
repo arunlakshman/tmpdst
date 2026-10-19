@@ -1,3 +1,16 @@
+output "cp_private_ip" {
+  description = "Private IP of the single control-plane host; brokers use -cp-url http://<ip>:8080."
+  value       = aws_instance.cp.private_ip
+}
+
+output "cp_instance_id" {
+  value = aws_instance.cp.id
+}
+
+output "ssm_start_session_cp" {
+  value = "aws ssm start-session --region ${var.region} --target ${aws_instance.cp.id}"
+}
+
 output "broker_private_ips" {
   value = aws_instance.broker[*].private_ip
 }

@@ -1,9 +1,9 @@
 #!/bin/bash
-# manifester-bench broker host ${broker_id}: manibroker + manicp + metrics snapshotter + Alloy.
+# manifester-bench broker host ${broker_id}: manibroker + metrics snapshotter + Alloy.
+# The ONE manicp (single sequencer, decision 46) runs on the dedicated control-plane host ${cp_private_ip}:8080.
 set -euxo pipefail
 exec > >(tee -a /var/log/bench-bootstrap.log) 2>&1
 
-DYNAMO_TABLE=${table_name}
 BROKER_ID=${broker_id}
 ${common}
 
@@ -13,7 +13,7 @@ wait_for_artifacts
 mkdir -p /opt/manifester /etc/manifester
 aws s3 cp "s3://$BUCKET/artifacts/manifester-linux-amd64.tar.gz" /tmp/manifester.tar.gz
 tar -xzf /tmp/manifester.tar.gz -C /opt/manifester
-chmod 0755 /opt/manifester/manibroker /opt/manifester/manicp
+chmod 0755 /opt/manifester/manibroker
 useradd --system --no-create-home --shell /sbin/nologin manifester 2>/dev/null || true
 
 PRIVATE_IP=$(imds local-ipv4)
@@ -25,43 +25,31 @@ PRIVATE_IP=$PRIVATE_IP
 INSTANCE_ID=$INSTANCE_ID
 ENV
 
-# Both services write their manifest as <service>-<run_id>.json (trailing /).
+CP_URL=http://${cp_private_ip}:8080
+# manibroker writes its manifest as manibroker-<run_id>.json (trailing /).
 # Logs are JSON on stderr, which journald keeps and Alloy ships to Loki.
-cat > /etc/manifester/manicp.env <<ENV
-AWS_REGION=$REGION
-ENV
 cat > /etc/manifester/manibroker.env <<ENV
 AWS_REGION=$REGION
 ENV
 
-cat > /etc/systemd/system/manicp.service <<UNIT
+# The control-plane host boots in parallel: wait (bounded, 10 min) until its manicp answers before starting the
+# broker. On timeout the unit is started anyway; Restart=on-failure keeps retrying until the CP is up.
+cp_deadline=$(( $(date +%s) + 600 ))
+until curl -sf -m 3 "$CP_URL/healthz" >/dev/null; do
+  if [ "$(date +%s)" -gt "$cp_deadline" ]; then echo "control plane $CP_URL not healthy after 10 min; starting broker anyway" >&2; break; fi
+  sleep 3
+done
+
+cat > /etc/systemd/system/manibroker.service <<UNIT
 [Unit]
-Description=manicp (control plane, DynamoDB)
+Description=manibroker (Kafka on S3)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 User=manifester
-EnvironmentFile=/etc/manifester/manicp.env
-ExecStart=/opt/manifester/manicp -addr 127.0.0.1:8080 -store dynamo -region $REGION -table-prefix ${table_prefix} -metrics-addr 127.0.0.1:9101 -run-id $RUN_ID -manifest-out s3://$BUCKET/results/$RUN_ID/ -log-level info ${cp_extra_args}
-Restart=on-failure
-RestartSec=2
-LimitNOFILE=1048576
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-
-cat > /etc/systemd/system/manibroker.service <<UNIT
-[Unit]
-Description=manibroker (Kafka on S3)
-After=manicp.service network-online.target
-Wants=manicp.service network-online.target
-
-[Service]
-User=manifester
 EnvironmentFile=/etc/manifester/manibroker.env
-ExecStart=/opt/manifester/manibroker -listen :9092 -advertise $PRIVATE_IP:9092 -broker-id $BROKER_ID -node-id broker-$BROKER_ID -cp-url http://127.0.0.1:8080 -objects s3 -s3-bucket $BUCKET -s3-region $REGION -run-id $RUN_ID -manifest-out s3://$BUCKET/results/$RUN_ID/ -log-level info -metrics-addr 127.0.0.1:9100 ${broker_extra_args}
+ExecStart=/opt/manifester/manibroker -listen :9092 -advertise $PRIVATE_IP:9092 -broker-id $BROKER_ID -node-id broker-$BROKER_ID -cp-url $CP_URL -objects s3 -s3-bucket $BUCKET -s3-region $REGION -run-id $RUN_ID -manifest-out s3://$BUCKET/results/$RUN_ID/ -log-level info -metrics-addr 127.0.0.1:9100 ${broker_extra_args}
 Restart=on-failure
 RestartSec=2
 LimitNOFILE=1048576
@@ -71,8 +59,8 @@ WantedBy=multi-user.target
 UNIT
 
 # Metrics snapshotter: the SG opens no metrics ports and loadgen has no
-# SSM send-command right, so this host pushes /metrics of both services to
-# s3://BUCKET/results/RUN/metrics/<broker id>/<epoch>-{broker,manicp}.txt every 10 s.
+# SSM send-command right, so this host pushes /metrics of manibroker to
+# s3://BUCKET/results/RUN/metrics/<broker id>/<epoch>-broker.txt every 10 s (manicp's go to metrics/cp/ from the CP host).
 # summarize.py picks the snapshots around each cell by timestamp.
 cat > /usr/local/bin/mb-snapshot.sh <<'SNAP'
 #!/bin/bash
@@ -80,7 +68,7 @@ set -u
 . /etc/manifester/snapshot.env
 while true; do
   ts=$(date +%s)
-  for pair in broker:9100 manicp:9101; do
+  for pair in broker:9100; do
     name=$${pair%%:*}; port=$${pair##*:}
     curl -sf -m 3 "http://127.0.0.1:$port/metrics" | aws s3 cp - "s3://$BUCKET/results/$RUN_ID/metrics/$BROKER_ID/$ts-$name.txt" --only-show-errors || true
   done
@@ -108,15 +96,6 @@ WantedBy=multi-user.target
 UNIT
 
 systemctl daemon-reload
-systemctl enable --now manicp.service manibroker.service mb-snapshot.service
-# The broker implements neither CreateTopics nor DescribeConfigs, so
-# kafka-topics.sh cannot create the topic. Create it via the control plane
-# (loopback-only). Brokers share one control-plane table, so broker 1 alone
-# creates the topic; the harness waits for it.
-until curl -sf http://127.0.0.1:8080/healthz >/dev/null; do sleep 2; done
-if [ "$BROKER_ID" = 1 ]; then
-  retry 20 curl -sf -X POST http://127.0.0.1:8080/v1/create-topic -d '{"topic":"bench-'"$RUN_ID"'","partitions":${initial_topic_partitions}}'
-fi
-
-install_alloy broker DDB_TABLE=$DYNAMO_TABLE BROKER_ID=$BROKER_ID PRIVATE_IP=$PRIVATE_IP
+systemctl enable --now manibroker.service mb-snapshot.service
+install_alloy broker BROKER_ID=$BROKER_ID PRIVATE_IP=$PRIVATE_IP
 touch /var/lib/bench-bootstrap.done

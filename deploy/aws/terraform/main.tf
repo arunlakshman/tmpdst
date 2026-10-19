@@ -95,7 +95,7 @@ resource "aws_vpc_endpoint" "dynamodb" {
 # Alloy agent on each host over loopback, so no metrics ports are opened.
 resource "aws_security_group" "loadgen" {
   name_prefix = "${local.name}-loadgen-"
-  description = "manifester-bench load generator: no inbound"
+  description = "manifester-bench load generators: OMB ports from each other only"
   vpc_id      = aws_vpc.this.id
   tags        = { Name = "${local.name}-loadgen" }
 
@@ -122,6 +122,40 @@ resource "aws_vpc_security_group_ingress_rule" "kafka_from_loadgen" {
   from_port                    = 9092
   to_port                      = 9092
   description                  = "Kafka from loadgen"
+}
+
+# NLB health checks and (without client-IP preservation) forwarded connections
+# originate from NLB node addresses inside the subnet; there is no inter-broker
+# traffic, so this is the only other 9092 source.
+resource "aws_vpc_security_group_ingress_rule" "kafka_from_nlb" {
+  count             = var.use_nlb ? 1 : 0
+  security_group_id = aws_security_group.broker.id
+  cidr_ipv4         = aws_subnet.public.cidr_block
+  ip_protocol       = "tcp"
+  from_port         = 9092
+  to_port           = 9092
+  description       = "Kafka health checks from the internal NLB (subnet CIDR)"
+}
+
+# OpenMessaging Benchmark: driver -> workers HTTP (8080/8081) and the worker
+# data ports, between loadgen hosts only.
+resource "aws_vpc_security_group_ingress_rule" "loadgen_omb_http" {
+  for_each                     = toset(["8080", "8081"])
+  security_group_id            = aws_security_group.loadgen.id
+  referenced_security_group_id = aws_security_group.loadgen.id
+  ip_protocol                  = "tcp"
+  from_port                    = tonumber(each.value)
+  to_port                      = tonumber(each.value)
+  description                  = "OMB worker HTTP between loadgen hosts"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "loadgen_omb_ports" {
+  security_group_id            = aws_security_group.loadgen.id
+  referenced_security_group_id = aws_security_group.loadgen.id
+  ip_protocol                  = "tcp"
+  from_port                    = 9090
+  to_port                      = 9099
+  description                  = "OMB / stats ports between loadgen hosts"
 }
 
 resource "aws_vpc_security_group_egress_rule" "broker_all" {

@@ -4,6 +4,10 @@ REGION=${region}
 RUN_ID=${run_id}
 export AWS_REGION=$REGION AWS_DEFAULT_REGION=$REGION
 
+# Self-destruct guard: with instance_initiated_shutdown_behavior=terminate this
+# terminates the instance ${max_runtime_minutes} min after boot.
+shutdown -h +${max_runtime_minutes} "bench max_runtime_minutes reached" || echo "could not schedule shutdown" >&2
+
 imds() {
   local tok
   tok=$(curl -sf -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 300')

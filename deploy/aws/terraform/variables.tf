@@ -37,16 +37,73 @@ variable "auto_destroy_after" {
   default     = "manual"
 }
 
+variable "broker_count" {
+  description = "Number of stateless broker hosts (each runs manibroker + its own manicp on loopback), all in the one AZ and sharing one bucket and one table. WarpStream's published benchmark uses 6."
+  type        = number
+  default     = 6
+
+  validation {
+    condition     = var.broker_count >= 1 && var.broker_count <= 12 && floor(var.broker_count) == var.broker_count
+    error_message = "broker_count must be an integer in 1..12."
+  }
+}
+
 variable "broker_instance_type" {
-  description = "Broker host (manibroker + manicp). x86_64 only: the artifact is linux/amd64."
+  description = "Broker host (manibroker + manicp). x86_64 only: the artifact is linux/amd64. Default matches WarpStream's published agents (16 vCPU / 64 GiB / up to 40 Gbps)."
   type        = string
-  default     = "c7i.xlarge"
+  default     = "m6in.4xlarge"
+}
+
+variable "loadgen_count" {
+  description = "Number of load generator hosts (OpenMessaging Benchmark workers/driver are spread over them)."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.loadgen_count >= 1 && var.loadgen_count <= 8 && floor(var.loadgen_count) == var.loadgen_count
+    error_message = "loadgen_count must be an integer in 1..8."
+  }
 }
 
 variable "loadgen_instance_type" {
-  description = "Load generator host. x86_64 only."
+  description = "Load generator host. x86_64 only. Default matches WarpStream's OMB host (32 vCPU / 128 GiB / 50 Gbps)."
   type        = string
-  default     = "c7i.large"
+  default     = "m6in.8xlarge"
+}
+
+variable "use_nlb" {
+  description = "Create an internal Network Load Balancer (TCP 9092) in front of the brokers as an optional single bootstrap address (output kafka_bootstrap_nlb). Connection-level spreading only."
+  type        = bool
+  default     = true
+}
+
+variable "max_runtime_minutes" {
+  description = "Self-destruct guard: user-data schedules 'shutdown -h +N' on every host and instance_initiated_shutdown_behavior is terminate, so each instance terminates N minutes after boot even if you forget to destroy."
+  type        = number
+  default     = 360
+
+  validation {
+    condition     = var.max_runtime_minutes >= 30 && var.max_runtime_minutes <= 1440
+    error_message = "max_runtime_minutes must be 30..1440."
+  }
+}
+
+variable "ddb_warm_write_units" {
+  description = "DynamoDB on-demand warm_throughput write units/s (a new table starts at 4,000). Pre-warming is billed once by AWS, see README. Needs aws provider >= 6.13."
+  type        = number
+  default     = 30000
+}
+
+variable "ddb_warm_read_units" {
+  description = "DynamoDB on-demand warm_throughput read units/s (a new table starts at 12,000)."
+  type        = number
+  default     = 30000
+}
+
+variable "initial_topic_partitions" {
+  description = "Partitions of the topic bench-<run_id> that broker 1 creates through its loopback manicp at boot (the broker implements no CreateTopics)."
+  type        = number
+  default     = 6
 }
 
 variable "root_volume_gb" {

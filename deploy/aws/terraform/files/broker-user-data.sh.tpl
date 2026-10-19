@@ -1,9 +1,10 @@
 #!/bin/bash
-# manifester-bench broker host: manibroker + manicp + metrics snapshotter + Alloy.
+# manifester-bench broker host ${broker_id}: manibroker + manicp + metrics snapshotter + Alloy.
 set -euxo pipefail
 exec > >(tee -a /var/log/bench-bootstrap.log) 2>&1
 
 DYNAMO_TABLE=${table_name}
+BROKER_ID=${broker_id}
 ${common}
 
 dnf install -y tar gzip >/dev/null
@@ -17,6 +18,12 @@ useradd --system --no-create-home --shell /sbin/nologin manifester 2>/dev/null |
 
 PRIVATE_IP=$(imds local-ipv4)
 INSTANCE_ID=$(imds instance-id)
+
+cat > /etc/manifester/host.env <<ENV
+BROKER_ID=$BROKER_ID
+PRIVATE_IP=$PRIVATE_IP
+INSTANCE_ID=$INSTANCE_ID
+ENV
 
 # Both services write their manifest as <service>-<run_id>.json (trailing /).
 # Logs are JSON on stderr, which journald keeps and Alloy ships to Loki.
@@ -54,7 +61,7 @@ Wants=manicp.service network-online.target
 [Service]
 User=manifester
 EnvironmentFile=/etc/manifester/manibroker.env
-ExecStart=/opt/manifester/manibroker -listen :9092 -advertise $PRIVATE_IP:9092 -broker-id 1 -node-id broker-1 -cp-url http://127.0.0.1:8080 -objects s3 -s3-bucket $BUCKET -s3-region $REGION -run-id $RUN_ID -manifest-out s3://$BUCKET/results/$RUN_ID/ -log-level info -metrics-addr 127.0.0.1:9100 ${broker_extra_args}
+ExecStart=/opt/manifester/manibroker -listen :9092 -advertise $PRIVATE_IP:9092 -broker-id $BROKER_ID -node-id broker-$BROKER_ID -cp-url http://127.0.0.1:8080 -objects s3 -s3-bucket $BUCKET -s3-region $REGION -run-id $RUN_ID -manifest-out s3://$BUCKET/results/$RUN_ID/ -log-level info -metrics-addr 127.0.0.1:9100 ${broker_extra_args}
 Restart=on-failure
 RestartSec=2
 LimitNOFILE=1048576
@@ -103,9 +110,12 @@ systemctl daemon-reload
 systemctl enable --now manicp.service manibroker.service mb-snapshot.service
 # The broker implements neither CreateTopics nor DescribeConfigs, so
 # kafka-topics.sh cannot create the topic. Create it via the control plane
-# (loopback-only), 6 partitions; the harness only waits for it.
+# (loopback-only). Brokers share one control-plane table, so broker 1 alone
+# creates the topic; the harness waits for it.
 until curl -sf http://127.0.0.1:8080/healthz >/dev/null; do sleep 2; done
-retry 20 curl -sf -X POST http://127.0.0.1:8080/v1/create-topic -d '{"topic":"bench-'"$RUN_ID"'","partitions":6}'
+if [ "$BROKER_ID" = 1 ]; then
+  retry 20 curl -sf -X POST http://127.0.0.1:8080/v1/create-topic -d '{"topic":"bench-'"$RUN_ID"'","partitions":${initial_topic_partitions}}'
+fi
 
-install_alloy broker DDB_TABLE=$DYNAMO_TABLE
+install_alloy broker DDB_TABLE=$DYNAMO_TABLE BROKER_ID=$BROKER_ID PRIVATE_IP=$PRIVATE_IP
 touch /var/lib/bench-bootstrap.done

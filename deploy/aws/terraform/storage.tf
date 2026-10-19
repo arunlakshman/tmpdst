@@ -53,6 +53,13 @@ resource "aws_dynamodb_table" "cp" {
   hash_key     = "pk"
   range_key    = "sk"
 
+  # Pre-warm the on-demand table so ~1 GiB/s of segment commits is not throttled
+  # while the table doubles up from the 4,000 WRU/s default.
+  warm_throughput {
+    read_units_per_second  = var.ddb_warm_read_units
+    write_units_per_second = var.ddb_warm_write_units
+  }
+
   attribute {
     name = "pk"
     type = "S"

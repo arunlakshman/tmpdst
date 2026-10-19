@@ -320,3 +320,52 @@ producers per segment). Not re-run on AWS. Local commit cost, `go test -run X -b
 
 The commit time follows the item count, not the batch count: a 256-batch segment commits in about the time of a
 32-batch one with the same partitions. Old 32-batch results elsewhere in this file were measured with the old cap.
+
+## Sequencer (decision 46)
+
+Why: on AWS, 6 brokers each with their own manicp committed ~33 of 288 partitions to one DynamoDB table and lost the
+run-item compare-and-set constantly (387 of 705 attempts cancelled on broker 1, 7 commits gave up after 20 attempts,
+commit_ms up to 11 s). The control plane now owns sequencing: one manicp, one loop, group commit, offsets from memory
+(`cp/doc.go`, "Sequencer").
+
+Measurement: `MANIFESTER_SEQ_BENCH=fake|extenddb go test ./cp/cptest -run SequencerBench -v` (8 s per case, 2026-10-19,
+Apple laptop, Go 1.24). Six committers loop at the maximum rate; each commit is a segment of 33 random distinct partitions
+of 288 (one batch of 1-5 records each); a 503 is resent under the same key, as a broker does. "before" is six independent
+`dynamo.Store` values on one table (the old path: every commit reads the newest run of each partition and does its own
+CAS); "after" is one `Sequencer`. The latency a committer sees includes the resends. `items/tx` counts applied
+transactions only.
+
+fakedb with injected latency (30 ms per `TransactWriteItems`, 5 ms per read call):
+
+| case | commits/s | avg ms | p50 ms | p99 ms | 503 | cancelled txs | txs | items/tx |
+|---|---|---|---|---|---|---|---|---|
+| before: 6 independent stores | 20.0 | 319 | 51 | 6501 | 9 | 280 | 440 | 34 |
+| after: sequencer, pipeline 1 | 90.9 | 66 | 65 | 108 | 0 | 0 | 243 | 91 |
+| after: sequencer, pipeline 4 (default) | 90.9 | 66 | 65 | 101 | 0 | 0 | 243 | 91 |
+| disjoint partition sets (48 per committer), pipeline 1 | 61.5 | 98 | 96 | 150 | 0 | 0 | 246 | 68 |
+| disjoint partition sets (48 per committer), pipeline 4 | 148.0 | 41 | 32 | 75 | 0 | 0 | 982 | 41 |
+
+Local ExtendDB (Docker Desktop, `scripts/it-up.sh`; a transaction takes about 100 ms there, so this is a slow-database
+case, not a prediction for DynamoDB):
+
+| case | commits/s | avg ms | p50 ms | p99 ms | 503 | cancelled txs | txs | items/tx |
+|---|---|---|---|---|---|---|---|---|
+| before: 6 independent stores | 15.8 | 398 | 61 | 8301 | 7 | 192 | 318 | 34 |
+| after: sequencer, pipeline 1 | 53.4 | 113 | 104 | 277 | 0 | 0 | 143 | 90 |
+| after: sequencer, pipeline 4 (default) | 47.8 | 126 | 118 | 238 | 0 | 0 | 128 | 91 |
+| disjoint partition sets, pipeline 1 | 46.6 | 129 | 126 | 265 | 0 | 0 | 187 | 68 |
+| disjoint partition sets, pipeline 4 | 49.2 | 123 | 107 | 270 | 0 | 0 | 347 | 39 |
+
+Reading it:
+- The old path's median is fine (51 ms) but the tail is not: p99 6.5 s and 8.3 s, hundreds of cancelled transactions, the
+  same shape as the AWS run. The sequencer has zero cancellations in steady state and a p99 about 1.5x its median.
+- Group commit does the work: about 3 segments (91 items, near the 100 limit) per transaction. The bound is transactions
+  per second times segments per transaction: 30 ms per transaction gives 91 commits/s (22 transactions/s x 3 plus a
+  read at start), 1 GiB/s of 16 MiB segments needs 64/s. The ExtendDB row is the same arithmetic at 100 ms.
+- Pipelining only helps when the partition sets of commits are disjoint (2.4x on fakedb). With six brokers that all write
+  all partitions, two random 33-of-288 segments are disjoint with probability about 2%, so the groups conflict and
+  serialise: pipeline 1 and 4 are equal. ExtendDB executes transactions about one at a time, so it shows no gain either.
+  Default 4 costs nothing and is kept for deployments where brokers own partition ranges.
+- Steady state costs one transaction per group and no reads (the "before" path does about 23 descending Queries per
+  commit): `manicp_seq_cache_total{cache="end"}` hits dominate after the first touch of each partition.
+- Not measured here: real DynamoDB (single-digit ms reads, 20-40 ms transactions): the AWS run is the evidence.

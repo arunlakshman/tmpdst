@@ -6,8 +6,10 @@
 // The HTTP API is described in api/openapi/controlplane.yaml (OpenAPI 3.1); a
 // test keeps it in sync with this package's routes and wire types.
 //
-// Stores: cp/memstore (the spec behind a mutex) and cp/dynamo (DynamoDB, safe
-// across many replicas). The broker side is cp/cpclient.
+// Stores: cp/memstore (the spec behind a mutex) and cp/dynamo (DynamoDB: the
+// Store, safe across many replicas but contended when they share partitions,
+// and the Sequencer over it, which is what cmd/manicp serves; see "Sequencer"
+// below). The broker side is cp/cpclient.
 //
 // DynamoDB design (decisions 39, 41-44): one table <prefix>cp, string keys pk
 // and sk, on demand. There is no node item, producer state, segment-to-offset
@@ -74,4 +76,51 @@
 // The broker bounds a segment by MaxSegmentPartitions (24) and
 // MaxSegmentBatches (256, for the G# blob) well below that. The spec has no
 // such limit. A refusal (ErrTooLarge) is not retried by the broker.
+// # Sequencer (decision 46)
+//
+// dynamo.Sequencer is a cp.Store over a dynamo.Store. It owns the sequencing:
+// brokers never retry because of contention, the sequencer retries inside and
+// returns the assigned offsets. Deploy exactly ONE manicp (every broker's
+// -cp-url points at it); correctness does not depend on that, the compare-and-set
+// of the commit transaction is unchanged and a second or stale sequencer, an old
+// Store, a restart or an out-of-band CreateTopic only cost internal retries.
+//
+//   - One loop goroutine takes queued CommitSegment requests in order and forms
+//     groups. A group is committed by ONE TransactWriteItems: 1 G# item per
+//     segment, 1 run item per distinct partition (the batches of one partition
+//     from several segments are merged into one run; the packed run keeps a
+//     table of distinct segment keys), 1 Update per grown topic; at most
+//     MaxItems (100) items and 1 MiB of G# blobs. There is no wait: a lone
+//     commit goes immediately; groups form while a transaction is in flight.
+//   - Each request is answered with its own ranges in request order. A replay,
+//     conflict, ErrTooLarge or malformed request is answered alone and the
+//     rest of the group still commits; a request that does not fit the budget
+//     waits for the next group (with every later request that shares one of its
+//     partitions, so per-partition order is the queue order).
+//   - State in memory (never an authority): the next offset of each partition
+//     (loaded with the descending Query on first touch), the topic partition
+//     counts and a bounded LRU of recently committed segment keys with their
+//     answers (replay without a read). A new key needs no read: the G# Put is
+//     conditional; if it fails, that G# is read and the request answered as a
+//     replay or conflict, and the others retry.
+//   - Failure handling. TransactionCanceled: the per-item reasons say what to
+//     refresh (run item: that partition, topic item: that topic, G#: read it),
+//     the group is rebuilt and retried with jittered backoff, at most 40
+//     attempts / 8 s, then cp.ErrUnavailable (503, the broker resends the same
+//     key). A rejection before apply (throttling, TransactionConflict) retries
+//     with the state kept. Any other error may have applied (5xx, timeout, lost
+//     answer): the group's partitions and topics are forgotten and every G# of
+//     the group is read first, so an applied commit is answered with its stored
+//     ranges and never assigned twice.
+//   - Pipelining (SeqOptions.Pipeline, default 4): groups on disjoint
+//     partitions, disjoint growing topics and disjoint segment keys may be in
+//     flight together. A group reserves those resources until it ends and the
+//     planner never forms a group that touches a reserved one, so no transaction
+//     is issued with a base chained after another in flight on the same
+//     partition: a failed transaction cannot leave a hole behind it.
+//   - A context cancelled while the request is queued withdraws it; once its
+//     group is formed it may still commit and the broker's resend replays it.
+//
+// Metrics: manicp_seq_* (cp/cpobs); the per-request commit_attempts_total and
+// retries_total keep counting.
 package cp

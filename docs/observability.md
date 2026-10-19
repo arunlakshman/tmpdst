@@ -49,6 +49,9 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `start`, `manifest`, `manifest_written`, `manifest_failed` | | as above | |
 | `cp_call` | INFO (WARN if HTTP 5xx) | `op`, `segment`, `outcome`, `http_status`, `attempts`, `retries`, `handler_ms`, `dynamo_ms`, `consumed_units`, `request_bytes`, `response_bytes` | One per `/v1/*` request. `outcome` is `ok`, the business error (`ErrConflict`, ...) or `http_503`/`http_500`. `attempts` counts commit attempts (1 for other ops); `retries` is attempts minus one. `dynamo_ms` is the sum of the request's DynamoDB calls; `handler_ms - dynamo_ms` is CP-side compute. `segment` joins to the broker's `segment_*` lines. `consumed_units` is the capacity DynamoDB reported (0 if not reported). |
 | `commit_txn_canceled` | WARN | `segment`, `items`, `reasons`, `err` | A commit transaction lost a race and will be retried. `reasons` entries are `index:code:pk/sk` of the items that failed (`ConditionalCheckFailed`, `TransactionConflict`, `ThrottlingError`, `ProvisionedThroughputExceeded`, ...). Many `ThrottlingError` reasons mean the table is throttling, not racing. |
+| `seq_group` | DEBUG | `segments`, `items`, `partitions`, `tx_ms`, `ok` | One line per group transaction (sequencer). |
+| `seq_retry` | WARN | `reason`, `segments`, `err` | A group is retried (throttling, unknown outcome, failed read). |
+| `seq_txn_canceled` | WARN | `segments`, `items`, `reasons`, `err` | A group transaction was cancelled (a lost race or a replayed key); the sequencer refreshes what the reasons name and retries. With one manicp this is rare. |
 | `dynamo_call_failed` | WARN | `call`, `code`, `throttled`, `err` | A DynamoDB call failed with a retryable error (throttling, conflict, 5xx) after the SDK's own retries; the CP answers 503. |
 | `aws_attempt_failed` | WARN | `aws_service=dynamo`, same fields as above | One DynamoDB HTTP attempt failed. The SDK retries these itself; each retry is a separate line. `TransactionCanceledException` attempts are DEBUG here (see `commit_txn_canceled`). |
 
@@ -92,7 +95,7 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `manicp_inflight_requests` | gauge | | Requests being served. |
 | `manicp_dynamodb_call_seconds` | histogram | `call` | Time of one DynamoDB SDK call as the store sees it (retries inside the SDK included). |
 | `manicp_commit_prep_seconds` | histogram | `stage` | `reads` and `decide_encode` per attempt. |
-| `manicp_commit_attempts_total` | counter | `op` | Commit attempts. |
+| `manicp_commit_attempts_total` | counter | `op` | Commit attempts (with the sequencer: per request and per group attempt). |
 | `manicp_retries_total` | counter | `op`, `reason` | Internal retries (`transaction_canceled`, `unavailable`, `conditional_check`). |
 | `manicp_dynamo_attempt_seconds` | histogram | `op`, `result` | One DynamoDB HTTP attempt (SDK retries are separate samples). |
 | `manicp_dynamo_operation_seconds` | histogram | `op`, `outcome` | Whole SDK call including SDK backoff. |
@@ -103,6 +106,13 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `manicp_dynamo_consumed_capacity_units_total` | counter | `op`, `kind` (`read`, `write`) | Capacity units DynamoDB reported (`ReturnConsumedCapacity=TOTAL`) for successful calls. Multiply by the unit price for the cost of the run: writes are WRU, reads are RRU (a consistent read of up to 4 KB is 1 unit; a transaction counts double). Failed calls are not reported by DynamoDB. |
 | `manicp_dynamo_consumed_capacity_missing_total` | counter | `op` | Successful calls with no `ConsumedCapacity` in the response (ExtendDB, local emulators). If this grows while the units counter is flat, the server does not report capacity: compute cost from call counts instead. |
 | `manicp_dynamo_txn_cancel_reasons_total` | counter | `code` | Per-item cancellation reasons. `ConditionalCheckFailed` is a lost race; `ThrottlingError`/`ProvisionedThroughputExceeded` is throttling inside a transaction. |
+| `manicp_seq_queue_depth` | gauge | | Commit requests waiting for the sequencer (decision 46). Persistently above a few means the loop is the bottleneck (transaction time times group size is below the commit rate). |
+| `manicp_seq_queue_wait_seconds` | histogram | | Time a request waited before its group was formed. |
+| `manicp_seq_group_segments`, `manicp_seq_group_items` | histogram | | Segments and items per group transaction when it is sent (limit 100 items). Group size grows with load; items near 100 means the budget binds. |
+| `manicp_seq_tx_seconds` | histogram | `outcome` (`ok`, `canceled`, `unavailable`, `unknown`, `error`) | `TransactWriteItems` time of a group. `canceled` should stay near 0 with one manicp; `unknown` is a 5xx/timeout/lost answer (the group then re-reads before it goes on). |
+| `manicp_seq_cache_total` | counter | `cache` (`end`, `topic`, `segment`), `result` (`hit`, `miss`) | In-memory state lookups. `end` misses are the first touch of a partition (a Query) and recoveries after a retry; a `segment` miss is every new key (normal: it costs nothing) and a segment hit is a replay served from memory. |
+| `manicp_seq_retries_total` | counter | `reason` (`transaction_canceled`, `unavailable`, `unknown_outcome`, `read_failed`) | Group retries, one count per group. A second manicp or a stale one shows up as `transaction_canceled`. |
+| `manicp_seq_inflight_groups` | gauge | | Group transactions in flight (at most `-seq-pipeline`). |
 | `manicp_build_info`, `_start_time_seconds`, `_uptime_seconds` | | | As for the broker. |
 | `go_*`, `process_*` | | | Runtime and process collectors. |
 

@@ -217,7 +217,7 @@ for st in "${STAGE_LIST[@]}"; do
   if [ -e "$OUT/STOP" ] || [ -e /tmp/omb-stop ]; then log "STOP file present: not starting $st"; break; fi
   cons=$(yget "$f" consumerPerSubscription); target=$(yget "$f" producerRate); msz=$(yget "$f" messageSize)
   drv=$OUT/omb/driver-$st.yaml
-  "$OMBCFG/render-driver.sh" "$BOOTSTRAP" "$COMP" "$drv" "$TOPIC" "$cons" "$cworkers" "$([ "$BMODE" = balanced ] && echo true || echo false)" 2>/dev/null
+  bash "$OMBCFG/render-driver.sh" "$BOOTSTRAP" "$COMP" "$drv" "$TOPIC" "$cons" "$cworkers" "$([ "$BMODE" = balanced ] && echo true || echo false)" 2>/dev/null
   mib=$(awk -v r="$target" -v m="$msz" 'BEGIN{printf "%.1f", r*m/1048576}')
   log "stage $st: $target msg/s = $mib MiB/s, consumers/subscription=$cons, compression=$COMP"
   if [ "$DRY" -eq 1 ]; then log "dry run: would run benchmark with driver $drv"; continue; fi

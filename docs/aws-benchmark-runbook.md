@@ -392,3 +392,29 @@ All `manibroker_*`, `manicp_*` and `node_*` series in the dashboards were checke
 `aws_dynamodb_{read,write}_throttle_events_sum`, `aws_dynamodb_throttled_requests_sum`,
 `aws_dynamodb_transaction_conflict_sum`, `aws_dynamodb_conditional_check_failed_requests_sum`, label `dimension_Operation`).
 First thing after READY: Explore `{__name__=~"aws_.*"}` and fix `deploy/aws/observability/gen/gen_dashboards.py` if spelled differently.
+
+## Run w2: sequencer, smoke and ramp (2026-10-19, ap-south-2, 6 brokers m6in.4xlarge, 1 CP m6in.xlarge, 288 partitions, lz4, balanced)
+
+Short run (stack up about 24 min, test about 14 min): smoke 100k (2 min + 1 warm-up), ramp 250k and 500k (3 min + 1 warm-up each),
+produce-only. Raw data in `results/w2` (git-ignored). Destroyed; post-destroy checks empty.
+
+| stage | target msg/s | achieved msg/s (MiB/s) | pub p50 / p99 ms | skew max/min | groups/s | mean group | queue ms | tx ms | WRU/s | cache hit |
+|---|---|---|---|---|---|---|---|---|---|---|
+| smoke | 100k | 100.2k (97.9) | 320 / 464 | 1.10 | 19.6 | 1.00 | 3 | 31 | 1,880 | 96.7% |
+| ramp 250k | 250k | 250.4k (244.5) | 446 / 628 | 1.10 | 15.5 | 1.01 | 10 | 45 | 2,659 | 98.2% |
+| ramp 500k | 500k | ~250k then falling (ABORT, p99 11.7 s) | 6.8 s / 11.7 s at abort | 1.10 | 13.0 | 1.20 | 229 | 60 | 2,462 | 98.4% |
+
+Findings
+- Plateau is about 250k msg/s (about 245 MiB/s). The limit is the single sequencer commit rate: about 15-20 commits (groups) per second, each one
+  TransactWriteItems of 30-60 ms (rising with load). Each of the six brokers seals about 2.6 segments/s regardless of rate, so segments grow with load
+  (about 8 MB at 100k, about 8 MB committed per segment at 250k) but the commit count stays flat; at 500k the commit queue wait on brokers
+  reached about 10 s and the p99 rule tripped. S3 PUT p50 time 80-100 ms, no throttles or errors, S3 PUT/s only about 16 in total: S3 is not the limit.
+  DynamoDB throttles, errors, cancellations and retries were all 0. Broker CPU was not captured (the top snapshot was taken after the stage ended).
+- Audit predictions: single-segment groups held (mean group size 1.0 up to 250k; 1.2 at 500k when the queue built). WRU per commit was
+  about 100-190 (not 240): 96 at smoke, 171 at 250k, 190 at 500k. WRU/s stayed about 2-2.7k, so DynamoDB capacity is not the bound.
+  Commit-rate bound confirmed: about 1 / (tx + about 20 ms) per second.
+- Plan implications: reaching 500k-1M msg/s needs more segments per commit (batch several broker segments into one group: bigger group,
+  larger transactions, still under the 100 items cap), or fewer and larger segments (longer seal interval or size trigger), or a pipelined sequencer
+  (overlap commits instead of one transaction at a time, partitions are independent). Fewer partitions per segment would also allow group size above 1.
+- Bugs found: run-omb.sh called render-driver.sh directly, but S3 upload drops the exec bit, so the stage loop died silently after pre-flight
+  (fixed: `bash render-driver.sh`). The runbook workloads use 5 min stages; this run shortened them on the loadgen with sed (not committed).

@@ -17,11 +17,10 @@
 #   nohup /opt/bench/run-benchmark.sh > /var/log/bench-run.log 2>&1 &
 #
 # Load tool: Apache Kafka's kafka-producer-perf-test (one process per client; prints
-# p50/p95/p99 in rate-limited mode). The WarpStream `benchmark-producer` was
-# tried locally and CANNOT be used against this broker: its producer always
-# compresses and has no flag to turn that off, and the broker answers every
-# produce with UNSUPPORTED_COMPRESSION_TYPE. `--tool warpstream` stays available
-# only for a broker that accepts compressed batches.
+# p50/p95/p99 in rate-limited mode). The WarpStream `benchmark-producer` always
+# compresses and has no flag to turn that off; the broker stores compressed batches
+# as opaque bytes (decision 45), so `--tool warpstream` works as well. A broker built
+# before decision 45 answers every such produce with UNSUPPORTED_COMPRESSION_TYPE.
 # Idempotence is switched off (enable.idempotence=false): Kafka 3.8 defaults to
 # true and the broker rejects idempotent batches (decision 41).
 #

@@ -148,8 +148,8 @@ The topic is created by the broker host through manicp's loopback HTTP API becau
 the broker implements neither CreateTopics nor DescribeConfigs (`kafka-topics.sh --create/--describe` fail).
 The load tool is Apache Kafka's `kafka-producer-perf-test.sh`. The WarpStream CLI
 (`/usr/local/bin/warpstream`, same tarball as the official installer; best effort) is installed
-but its `benchmark-producer` cannot be used against this broker: it always compresses
-(no flag to disable) and the broker rejects compressed batches (`UNSUPPORTED_COMPRESSION_TYPE`).
+and its `benchmark-producer` always compresses (no flag to disable); that works since the broker
+stores compressed batches as opaque bytes (decision 45; older brokers answered `UNSUPPORTED_COMPRESSION_TYPE`).
 Results go to `s3://$BUCKET/results/$RUN_ID/` (loadgen may write only `results/*`).
 
 ## Cost (on-demand; ap-south-2 list prices for EC2, other lines approximate)

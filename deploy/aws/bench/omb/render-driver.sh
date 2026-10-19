@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Render driver-kafka-manifester.yaml from the template.
 #   render-driver.sh <bootstrap-list> <lz4|none> <out-file> <topic> [consumers-per-subscription=0] [consumer-workers=1] [balance=true|false]
-# This is the one-line compression switch: pass `lz4` instead of `none` once the brokers accept compression.
+# Compression defaults to lz4 (as WarpStream; the broker accepts it since decision 45); `none` prints a warning.
 set -euo pipefail
 boot=${1:?bootstrap list ip:9092,ip:9092}
-comp=${2:?lz4|none}
+comp=${2:-lz4}
 out=${3:?output file}
 topic=${4:?pre-created topic name}
 consumers=${5:-0}

@@ -5,22 +5,9 @@ what done means. Decisions it depends on are in `decisions.md`.
 
 ## Compression
 
-**Why:** the broker rejects compressed batches (UNSUPPORTED_COMPRESSION_TYPE),
-and franz-go compresses by default. Clients have to set
-`kgo.ProducerBatchCompression(kgo.NoCompression())` (decision 33).
+**Done (decision 45).** The broker accepts gzip, snappy, lz4 and zstd and stores and serves the batches as opaque bytes. It validates the header only (magic, CRC, codec id, count against `lastOffsetDelta`) and never decompresses, so there is no codec dependency to audit. Fetch still patches only the base offset and leader epoch (decision 30). `MaxFrame` is 100 MiB so `max.request.size=64000000` fits. The sim workload mixes codecs, the `it/` tests run every codec and kgo's default, and the OMB driver defaults to lz4.
 
-**Plan:**
-- Accept gzip, snappy, lz4 and zstd.
-- Decompress only to validate the batch: CRC, record count, last offset delta.
-- Store and serve the batch bytes exactly as the producer sent them. Fetch keeps patching only the base offset and leader epoch (decision 30).
-
-**Dependencies:** each codec library needs an audit record under `docs/dep-audits/` and an allow-list entry (decision I). Pure-Go codecs only.
-
-**Done when:**
-- `kwire` handles compressed batches.
-- The broker admits them.
-- The sim workload produces a mix of codecs.
-- The `it/` tests run with kgo's default compression.
+**Open:** an lz4 run of the real OMB build, and of the AWS benchmark, has not happened.
 
 ## Metadata lists every live broker
 

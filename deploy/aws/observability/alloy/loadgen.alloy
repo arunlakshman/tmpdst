@@ -1,5 +1,4 @@
-// Loadgen host add-on (only useful with `run-benchmark.sh --tool warpstream`, which
-// the current broker rejects: no compression support; harmless otherwise): scrape the WarpStream benchmark-producer's Prometheus
+// Loadgen host add-on (only useful with `run-benchmark.sh --tool warpstream`; harmless otherwise): scrape the WarpStream benchmark-producer's Prometheus
 // endpoint (its -prometheus-port, default 8081). It exists only while a
 // benchmark cell runs; between cells `up{job="warpstream_bench"}` is 0, which
 // is expected. kafka-producer-perf-test exposes nothing: the harness captures

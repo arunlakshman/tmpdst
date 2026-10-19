@@ -2,8 +2,8 @@
 # (https://www.warpstream.com/blog/warpstream-benchmarks-and-tco). Do NOT edit the generated copy;
 # render it with render-driver.sh (run-omb.sh does), which substitutes the @@...@@ markers:
 #   @@BOOTSTRAP@@    comma list ip:9092 of all brokers (or the NLB)
-#   @@COMPRESSION@@  lz4 | none     <- THE one-line switch: COMPRESSION=lz4 once the broker accepts compression
-#                                      (docs/TODO.md "Compression"). Today it must be none, which is NOT
+#   @@COMPRESSION@@  lz4 | none     lz4 is the default (as WarpStream); the broker stores compressed batches as
+#                                      opaque bytes (decision 45). none is only for a broker that rejects lz4 and is NOT
 #                                      apples-to-apples with WarpStream; run-omb.sh prints a loud warning.
 #   @@TOPIC@@ @@CONSUMERS@@ @@CONSUMER_WORKERS@@  see below
 name: Kafka-manifester

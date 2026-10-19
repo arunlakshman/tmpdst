@@ -29,7 +29,7 @@ files (the workload YAML is inline in the post, the driver settings are listed a
 | Duration | 1600 min | 15 min after a 2 min warm-up (cost) | no |
 | linger.ms / batch.size | 25 / 100000 | same | yes |
 | buffer.memory / max.request.size | 128000000 / 64000000 | same | yes |
-| compression.type | lz4 | `none` TODAY (broker rejects compressed batches with UNSUPPORTED_COMPRESSION_TYPE); switch is one argument once compression lands | NO |
+| compression.type | lz4 | `lz4` by default (the broker stores compressed batches as opaque bytes, decision 45); `run-omb.sh` falls back to `none` with a loud warning only if its probe finds a broker that rejects lz4 | yes |
 | enable.idempotence | not stated in the post; their docs recommend false | false (required: brokers reject idempotent producers, decision 41) | yes |
 | acks | OMB default (all) | all | yes |
 | Consumer | auto.offset.reset=earliest, enable.auto.commit=true, fetch.max.bytes = max.partition.fetch.bytes = 100485760 | same fetch sizes, but NO consumer group: `assign()` of a static partition share, no commits (broker has no FindCoordinator/JoinGroup/OffsetCommit) | partly |
@@ -54,14 +54,14 @@ Client tool notes that matter for fairness:
 
 Not apples-to-apples, in order of how much they move the result:
 
-1. **Compression (largest).** WarpStream used lz4 with `randomBytesRatio: 0.5`, so roughly half of each 1 KiB record is
-   compressible. Their post says their 1 GiB/s of producer traffic was about 490 MiB/s compressed (they assume a
-   conservative 200 MiB/s for TCO). With `compression.type=none` we move and store about twice as many bytes per
-   msg/s: more NIC time, more S3 bytes, larger segments to PUT, more bytes to GET. Until compression lands
-   (`docs/TODO.md` "Compression") the honest statement is "same msg/s, about 2x the bytes". `run-omb.sh` probes
-   with a one-record lz4 produce, picks `lz4` automatically if the brokers accept it, prints a loud warning
-   otherwise, and `summarize.py` lists it as an unmet item. A fairer per-byte comparison is available today:
-   compare MiB/s and $/GiB, not msg/s.
+1. **Compression (resolved; was the largest).** WarpStream used lz4 with `randomBytesRatio: 0.5`, so roughly half of
+   each 1 KiB record is compressible. Their post says their 1 GiB/s of producer traffic was about 490 MiB/s compressed
+   (they assume a conservative 200 MiB/s for TCO). The broker now accepts gzip, snappy, lz4 and zstd and stores the
+   batches verbatim without decompressing them (decision 45), so the OMB driver runs `compression.type=lz4` as they did.
+   `run-omb.sh` still probes with a one-record lz4 produce and only falls back to `none` (loud warning, listed by
+   `summarize.py` as an unmet item) if a broker rejects it. With `none` we would move and store about twice as many bytes
+   per msg/s, so compare MiB/s and $/GiB, not msg/s, for such a run. Verified locally with the Apache Kafka 3.9 perf
+   tool and franz-go; an lz4 OMB run on AWS has not happened yet.
 2. **Metadata store.** Our commit path is a DynamoDB transaction per sealed segment plus one query per distinct
    partition in it (`cp/doc.go`: P + 2 calls, 1 + P items). Their control plane is proprietary and priced as a flat
    fee. Latency, throttling, and cost behave differently, and the number of partitions per segment drives our
@@ -134,7 +134,7 @@ Report all of these together, never the headline alone:
 
 1. msg/s AND MiB/s achieved vs target (and the target for each ramp step), write and read.
 2. Producer P50/P99/P99.9 and end-to-end P50/P99/P99.9 (read stage only), with the OMB version/commit.
-3. Compression setting, with the sentence "no compression, so about 2x WarpStream's bytes per msg/s" while it applies.
+3. Compression setting (lz4 as WarpStream; if the run fell back to `none`, say "no compression, so about 2x WarpStream's bytes per msg/s").
 4. Bootstrap mode (balanced or random) and the per-broker skew table.
 5. Broker CPU (the Hosts dashboard, "Process CPU" and node CPU) next to WarpStream's "about 5 of 16 cores".
 6. Server-side: segment put/queue/commit/ack ms, S3 and DynamoDB errors, throttles, retries.
@@ -171,7 +171,7 @@ $/month at 1 GiB/s = ($/GiB) * 86400 * 30.4167          (2,629,800 GiB per month
 their $3,031, S3 PUT/GET against $1,788/$508, DynamoDB against their $7,541 fee (the control-plane component).
 Do not compare totals unless compression and AZ scope are stated.
 
-Pre-run estimate for 1,000,000 msg/s x 1 KiB over 6 brokers, no compression (a prediction, to be checked against
+Pre-run estimate for 1,000,000 msg/s x 1 KiB over 6 brokers, uncompressed bytes, so with lz4 the bytes (not the request counts) are about half (a prediction, to be checked against
 the counters): the segment rule seals at 16 MiB, 200 ms, or 96 distinct partitions (`broker/config.go`). Each
 producer's batches (~100 KB) walk across all 288 partitions, so a segment reaches the 96-partition cap after about
 117 batches, about 11.7 MB: roughly 83 segments/s cluster-wide, about 83 PUTs/s, or 218 million PUTs a month

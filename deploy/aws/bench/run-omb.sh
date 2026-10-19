@@ -121,7 +121,8 @@ preflight() {
   log "pre-flight ok"
 }
 
-# lz4 probe: one 1 KiB record with compression.type=lz4. The broker answers UNSUPPORTED_COMPRESSION_TYPE today.
+# lz4 probe: one 1 KiB record with compression.type=lz4. A broker without compression support (before decision 45)
+# answers UNSUPPORTED_COMPRESSION_TYPE; the default `auto` then falls back to none with a loud warning.
 probe_lz4() {
   local o
   o=$(timeout 60 kafka-producer-perf-test.sh --topic "$TOPIC" --num-records 1 --record-size 1024 --throughput -1 \
@@ -135,7 +136,7 @@ if [ "$SKIP_PRE" -eq 0 ] && [ "$DRY" -eq 0 ]; then preflight || exit 1; fi
 case "$COMPRESSION" in
   auto)
     if [ "$DRY" -eq 1 ]; then COMP=none
-    elif probe_lz4; then COMP=lz4; log "lz4 pre-flight: the brokers ACCEPT lz4 -> compression.type=lz4 (as WarpStream)"
+    elif probe_lz4; then COMP=lz4; log "lz4 pre-flight: the brokers ACCEPT lz4 -> compression.type=lz4 (default, as WarpStream)"
     else COMP=none; log "lz4 pre-flight: the brokers REJECT lz4 batches -> compression.type=none"; fi ;;
   lz4 | none) COMP=$COMPRESSION ;;
   *) echo "bad --compression $COMPRESSION" >&2; exit 2 ;;

@@ -95,8 +95,8 @@ deploy/aws/bench/bench-ctl.sh run --stages smoke
 deploy/aws/bench/bench-ctl.sh tail 60          # repeat; also: Grafana Overview and Pipeline dashboards
 ```
 Pre-flight (automatic): Kafka ApiVersions on every broker IP (prints node ids, warns on duplicates), the topic
-is visible on every broker with 288 partitions, the lz4 probe (one 1 KiB record with `compression.type=lz4`; today the
-brokers reject it and the run falls back to `none` with a LOUD "not apples-to-apples" warning). Go only if:
+is visible on every broker with 288 partitions, the lz4 probe (one 1 KiB record with `compression.type=lz4`; the brokers accept it since decision 45, and a broker that
+rejects it makes the run fall back to `none` with a LOUD "not apples-to-apples" warning). Go only if:
 - [ ] `SMOKE PASS`, achieved >= 80% of 100k msg/s, no errors
 - [ ] every broker shows traffic in Grafana (Overview, "Per-broker write throughput"), skew max/min about 1 in balanced mode
 - [ ] `segments_failed` 0, S3 and DynamoDB throttles 0, `manicp` WRU/s about 194 x segments/s (see comparison doc, section 5; the
@@ -112,7 +112,7 @@ deploy/aws/bench/bench-ctl.sh run --stages vanity-fanout3 --include-later       
 ```
 Rates (1 KiB messages): 100k = 97.7 MiB/s, 250k = 244.1, 500k = 488.3, 750k = 732.4, 1M = 976.6.
 Stage names are workload files in `deploy/aws/bench/omb/workloads` (and `later/` with `--include-later`).
-Compression: `--compression auto|lz4|none` (default auto = probe). Once compression lands nothing else changes.
+Compression: `--compression auto|lz4|none` (default auto = lz4 if the probe passes, as WarpStream; `none` only as a fallback).
 
 Abort rules, checked on every 10 s OMB line: error rate above 0.1% of the publish rate, publish p99 of the interval above
 10 s, or (when consumers exist) backlog of 100 K messages or more growing for 2 consecutive intervals. A trip kills OMB,
@@ -140,7 +140,7 @@ SSM parameters and Grafana tokens if the account is shared.
 - [ ] OMB artifact built, tarball present; `broker_count = 6`, `loadgen_count = 2`; budget alarm set
 - [ ] apply + artifact upload done; all hosts `bench-bootstrap.done`; 6 brokers up in Grafana
 - [ ] topic `omb-<run>` with 288 partitions; workers running on both loadgens
-- [ ] smoke passes; compression decision noted (`none` today, so NOT apples-to-apples)
+- [ ] smoke passes; compression decision noted (`lz4` expected; `none` would NOT be apples-to-apples)
 - [ ] ramp / vanity stages run; ABORT file absent (or understood)
 - [ ] summary collected and read; per-broker snapshots present for all six brokers (`metrics/1/` .. `metrics/6/`)
 - [ ] NLB (`use_nlb`) considered: it does not remove skew; pinned `balanced` mode used and stated
@@ -149,11 +149,12 @@ SSM parameters and Grafana tokens if the account is shared.
 ### A9. Known gaps and unverified items
 
 - The Kafka client in OMB (3.6.1) and the broker were exercised together only locally (one broker, mem store, 8
-  partitions, produce + assign-consume at 5k msg/s, `compression.type=none`). Nothing here has run on AWS.
+  partitions, produce + assign-consume at 5k msg/s, `compression.type=none`). Nothing here has run on AWS. lz4 was
+  verified locally with the Apache Kafka 3.9 perf tool and franz-go only, not with an OMB run.
 - With `metrics/<broker_id>/` snapshots missing (flat files from the stock template), 6 brokers overwrite each other's
   snapshot names: the per-broker tables are only valid with the nested layout (terraform change required).
-- `kafka-producer-perf-test` with lz4 as the probe assumes it exits cleanly on UNSUPPORTED_COMPRESSION_TYPE after
-  `retries=0` and `max.block.ms=15000`; if the probe misclassifies, force `--compression none|lz4`.
+- The lz4 probe (`kafka-producer-perf-test`, `retries=0`, `max.block.ms=15000`) passes against a broker with decision 45;
+  if it ever misclassifies, force `--compression none|lz4`.
 - DynamoDB cost and the 98-calls-per-commit behaviour at 288 partitions are predictions (comparison doc, section 5).
 
 # Part B. Quick smoke (single broker)
@@ -162,9 +163,9 @@ Everything below is the original single-broker flow (`broker_count=1`, `run-benc
 host, one load generator host. Known limits:
 
 - The broker accepts only non-idempotent producers (decision 41): the harness passes `enable.idempotence=false` to `kafka-producer-perf-test` (Kafka 3.8 defaults to true and would be rejected with INVALID_REQUEST). Keep it if you override `PRODUCER_PROPS`. Results in `docs/aws-benchmark-results-r1.md` predate this change.
-- The load tool is Apache Kafka's `kafka-producer-perf-test`. The WarpStream `benchmark-producer` was tried
-  against the broker and cannot be used: it always compresses (no flag to disable) and the broker rejects
-  compressed batches with `UNSUPPORTED_COMPRESSION_TYPE`. Never use `cmd/manibench` for the AWS run.
+- The load tool is Apache Kafka's `kafka-producer-perf-test`. The WarpStream `benchmark-producer` always compresses
+  (no flag to disable); the broker accepts that since decision 45 (earlier brokers answered
+  `UNSUPPORTED_COMPRESSION_TYPE`). Never use `cmd/manibench` for the AWS run.
 - The broker implements neither CreateTopics nor DescribeConfigs, so `kafka-topics.sh --create/--describe`
   fail. The broker host creates the 6-partition topic `bench-<run_id>` at boot through manicp's loopback API;
   the harness only waits for it (`kafka-topics.sh --list` works).

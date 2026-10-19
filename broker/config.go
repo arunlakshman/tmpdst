@@ -30,6 +30,9 @@ const (
 	// commit that was applied but lost is applied again and the batches are
 	// committed twice.
 	BugFreshKeyOnRetry
+	// BugSkipProduceCRC admits a produced batch without checking its CRC, so a
+	// corrupted (compressed) batch is acked and stored.
+	BugSkipProduceCRC
 )
 
 // Config is the broker's tuning. Zero numeric fields take DefaultConfig's value.
@@ -38,7 +41,11 @@ type Config struct {
 	Host     string // advertised host
 	Port     int32  // advertised port
 
-	MaxFrame int32 // largest request frame; larger closes the connection
+	// MaxFrame is the largest request frame; a larger one closes the
+	// connection. The default is 100 MiB, Kafka's socket.request.max.bytes, so a
+	// client with max.request.size=64000000 (the WarpStream benchmark config) can
+	// send a 64 MB Produce request (decision 45).
+	MaxFrame int32
 
 	// Segment flush rule (decision 35): the open segment is sealed when it holds
 	// MaxSegmentBytes of batch data, or BatchWindow after its first batch
@@ -85,7 +92,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		BrokerID: 1, Host: "localhost", Port: 9092,
-		MaxFrame:             16 << 20,
+		MaxFrame:             100 << 20,
 		BatchWindow:          200 * core.Millisecond,
 		MaxSegmentBytes:      16 << 20,
 		MaxSegmentPartitions: 96,

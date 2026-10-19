@@ -57,26 +57,58 @@ func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, 
 	if err != nil {
 		return nil, errCorruptMessage
 	}
-	bt, err := kwire.ParseBatch(one)
-	switch {
-	case errors.Is(err, kwire.ErrUnsupportedBatch):
-		if len(one) >= 23 && (one[22]&7) != 0 {
-			return nil, errUnsupportedCompress
-		}
-		return nil, errUnsupportedForFormat
-	case err != nil:
-		return nil, errCorruptMessage
-	case bt.IsTransactional() || bt.IsControl():
-		return nil, errInvalidRequest
-	case bt.NumRecords <= 0 || bt.LastOffsetDelta != bt.NumRecords-1:
-		return nil, errCorruptMessage
+	bt, code := b.checkBatch(one)
+	if code != errNone {
+		return nil, code
 	}
-	if bt.ProducerID >= 0 {
+	b.reachCodec(bt.Codec())
+	return &pbatch{s: s, part: rp, tp: tp, data: one, records: int64(bt.NumRecords)}, errNone
+}
+
+// checkBatch validates one batch's header without decompressing it
+// (decision 45): magic 2, CRC32C over the possibly compressed bytes, a known
+// codec, no transaction or control flags, a record count that matches
+// lastOffsetDelta, and no producer id (decision 41). The payload stays opaque;
+// the broker only ever relies on the header count.
+func (b *Broker) checkBatch(one []byte) (kwire.Batch, int16) {
+	parse := kwire.ParseBatch
+	if b.cfg.Bug == BugSkipProduceCRC {
+		parse = kwire.ParseBatchUnverified
+	}
+	bt, err := parse(one)
+	switch {
+	case errors.Is(err, kwire.ErrUnknownCodec):
+		return bt, errUnsupportedCompress
+	case errors.Is(err, kwire.ErrUnsupportedBatch):
+		return bt, errUnsupportedForFormat
+	case err != nil:
+		b.env.Reachable("broker: corrupt produce batch rejected")
+		return bt, errCorruptMessage
+	case bt.IsTransactional() || bt.IsControl():
+		return bt, errInvalidRequest
+	case bt.NumRecords <= 0 || bt.LastOffsetDelta != bt.NumRecords-1:
+		return bt, errCorruptMessage
+	case bt.ProducerID >= 0:
 		// Idempotent producers are unsupported (decision 41): without the
 		// sequence checks a retry would duplicate records, so refuse rather
 		// than silently weaken the guarantee. INVALID_REQUEST is not retriable.
 		b.env.Reachable("broker: idempotent batch rejected")
-		return nil, errInvalidRequest
+		return bt, errInvalidRequest
 	}
-	return &pbatch{s: s, part: rp, tp: tp, data: one, records: int64(bt.NumRecords)}, errNone
+	return bt, errNone
+}
+
+// reachCodec declares that a batch of codec c (1..4) was admitted. The strings
+// are constants: the broker core builds no names at run time.
+func (b *Broker) reachCodec(c int) {
+	switch c {
+	case kwire.CodecGzip:
+		b.env.Reachable("broker: gzip batch admitted")
+	case kwire.CodecSnappy:
+		b.env.Reachable("broker: snappy batch admitted")
+	case kwire.CodecLZ4:
+		b.env.Reachable("broker: lz4 batch admitted")
+	case kwire.CodecZstd:
+		b.env.Reachable("broker: zstd batch admitted")
+	}
 }

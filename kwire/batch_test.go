@@ -2,6 +2,7 @@ package kwire
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"testing"
 
@@ -69,6 +70,16 @@ func TestBatchRejects(t *testing.T) {
 	if _, err := BuildBatch(p, []kmsg.Record{{}}); !errors.Is(err, ErrUnsupportedBatch) {
 		t.Fatal(err)
 	}
+	p.Attributes = 5
+	if _, err := BuildOpaqueBatch(p, 1, []byte("x")); !errors.Is(err, ErrUnknownCodec) {
+		t.Fatal(err)
+	}
+	if _, err := BuildOpaqueBatch(testParams, 0, []byte("x")); err == nil {
+		t.Fatal("zero records accepted")
+	}
+	if _, err := BuildOpaqueBatch(testParams, 1, nil); err == nil {
+		t.Fatal("empty payload accepted")
+	}
 	b, _ := BuildBatch(testParams, []kmsg.Record{{Value: []byte("hello")}})
 	flip := func(i int) []byte { c := append([]byte(nil), b...); c[i] ^= 1; return c }
 	if _, err := ParseBatch(flip(len(b) - 1)); !errors.Is(err, ErrCorrupt) {
@@ -77,8 +88,8 @@ func TestBatchRejects(t *testing.T) {
 	if _, err := ParseBatch(flip(16)); !errors.Is(err, ErrUnsupportedBatch) {
 		t.Fatalf("magic: %v", err)
 	}
-	if _, err := ParseBatch(flip(22)); !errors.Is(err, ErrUnsupportedBatch) {
-		t.Fatalf("compressed: %v", err)
+	if _, err := ParseBatch(flip(22)); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("attributes flip must fail the CRC: %v", err)
 	}
 	if _, err := ParseBatch(b[:len(b)-1]); !errors.Is(err, ErrCorrupt) {
 		t.Fatalf("truncated: %v", err)
@@ -159,4 +170,72 @@ func FuzzParseBatch(f *testing.F) {
 		_, _ = SplitBatches(data)
 		_ = PatchBatch(data, 1, 2)
 	})
+}
+
+// refix recomputes the CRC after a test edits the header.
+func refix(b []byte) []byte {
+	binary.BigEndian.PutUint32(b[17:], crc32c(b[crcStart:]))
+	return b
+}
+
+func TestOpaqueCompressedBatch(t *testing.T) {
+	rng := xorshift(7)
+	for codec := int16(CodecNone); codec <= CodecZstd; codec++ {
+		p := testParams
+		p.Attributes = codec
+		// 500 records in 40 payload bytes: only possible when compressed.
+		payload := rng.bytes(40)
+		payload[0] = 1
+		n := int32(500)
+		if codec == CodecNone {
+			n = 20
+		}
+		b, err := BuildOpaqueBatch(p, n, payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pb, err := ParseBatch(b)
+		if err != nil {
+			t.Fatalf("codec %d: %v", codec, err)
+		}
+		if pb.Codec() != int(codec) || pb.NumRecords != n || pb.LastOffsetDelta != n-1 || pb.IsTransactional() || pb.IsControl() {
+			t.Fatalf("codec %d: %+v", codec, pb)
+		}
+		_, rerr := pb.Records()
+		if codec != CodecNone && !errors.Is(rerr, ErrUnsupportedBatch) {
+			t.Fatalf("Records on compressed: %v", rerr)
+		}
+		patched, err := ParseBatch(PatchBatch(b, 1<<33, 4))
+		if err != nil || patched.BaseOffset != 1<<33 {
+			t.Fatalf("patched compressed batch: %v", err)
+		}
+		bad := append([]byte(nil), b...)
+		bad[len(bad)-1] ^= 0x80
+		if _, err := ParseBatch(bad); !errors.Is(err, ErrCorrupt) {
+			t.Fatalf("codec %d corrupt payload: %v", codec, err)
+		}
+	}
+}
+
+func TestOpaqueBatchHeaderChecks(t *testing.T) {
+	b, _ := BuildOpaqueBatch(BatchParams{Attributes: CodecLZ4, ProducerID: -1}, 3, []byte("zzzz"))
+	unk := append([]byte(nil), b...)
+	unk[22] = 6 // codec 6, CRC recomputed: valid CRC, unknown codec
+	if _, err := ParseBatch(refix(unk)); !errors.Is(err, ErrUnknownCodec) {
+		t.Fatalf("unknown codec: %v", err)
+	}
+	neg := append([]byte(nil), b...)
+	binary.BigEndian.PutUint32(neg[57:], uint32(0xffffffff)) // numRecords -1
+	if _, err := ParseBatch(refix(neg)); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("negative count: %v", err)
+	}
+	plain, _ := BuildBatch(testParams, []kmsg.Record{{Value: []byte("a")}})
+	many := append([]byte(nil), plain...)
+	binary.BigEndian.PutUint32(many[57:], 1000)
+	if _, err := ParseBatch(refix(many)); !errors.Is(err, ErrCorrupt) {
+		t.Fatalf("count above payload bytes (plain): %v", err)
+	}
+	if countFits(true, 5, 0) || !countFits(true, 0, 0) || !countFits(true, 9, 1) {
+		t.Fatal("countFits compressed")
+	}
 }

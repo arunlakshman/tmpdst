@@ -21,12 +21,26 @@ const (
 var (
 	// ErrCorrupt means a batch failed structure or CRC validation.
 	ErrCorrupt = errors.New("kwire: corrupt record batch")
-	// ErrUnsupportedBatch means magic != 2 or the batch is compressed.
+	// ErrUnsupportedBatch means magic != 2, or Records was called on a
+	// compressed batch (the broker never decompresses).
 	ErrUnsupportedBatch = errors.New("kwire: unsupported record batch")
+	// ErrUnknownCodec means the attributes carry a compression codec id above
+	// CodecZstd. Kafka answers it with UNSUPPORTED_COMPRESSION_TYPE.
+	ErrUnknownCodec = errors.New("kwire: unknown compression codec")
 	// ErrTruncated means SplitBatches hit a partial trailing batch.
 	ErrTruncated = errors.New("kwire: truncated record batch")
 	// ErrNotSingle means a payload did not hold exactly one batch.
 	ErrNotSingle = errors.New("kwire: expected exactly one record batch")
+)
+
+// Compression codec ids, the low three attribute bits of a v2 batch. The
+// broker stores and serves compressed payloads as opaque bytes (decision 45).
+const (
+	CodecNone   = 0
+	CodecGzip   = 1
+	CodecSnappy = 2
+	CodecLZ4    = 3
+	CodecZstd   = 4
 )
 
 func crc32c(b []byte) uint32 { return crc32.Checksum(b, crc32.MakeTable(crc32.Castagnoli)) }
@@ -34,7 +48,7 @@ func crc32c(b []byte) uint32 { return crc32.Checksum(b, crc32.MakeTable(crc32.Ca
 // BatchParams are the caller-supplied batch header fields (no clock here).
 type BatchParams struct {
 	LeaderEpoch   int32
-	Attributes    int16 // flag bits only; compression bits must be 0
+	Attributes    int16 // flag bits; BuildBatch needs compression bits 0, BuildOpaqueBatch takes them as the codec
 	ProducerID    int64
 	ProducerEpoch int16
 	BaseSequence  int32
@@ -63,22 +77,41 @@ func BuildBatch(p BatchParams, recs []kmsg.Record) ([]byte, error) {
 		body = binary.AppendVarint(body, int64(len(enc)))
 		body = append(body, enc...)
 	}
+	return assembleBatch(p, int32(len(recs)), body), nil
+}
+
+// BuildOpaqueBatch builds a v2 batch around an already-encoded (and, with a
+// codec in p.Attributes, already-compressed) records payload that it never
+// looks inside: numRecords goes into the header, lastOffsetDelta is
+// numRecords-1 and the CRC is valid. It models what a client sends, for
+// tests and the simulator; the payload need not decompress.
+func BuildOpaqueBatch(p BatchParams, numRecords int32, payload []byte) ([]byte, error) {
+	if numRecords <= 0 || len(payload) == 0 {
+		return nil, errors.New("kwire: empty batch")
+	}
+	if p.Attributes&7 > CodecZstd {
+		return nil, fmt.Errorf("%w: %d", ErrUnknownCodec, p.Attributes&7)
+	}
+	return assembleBatch(p, numRecords, payload), nil
+}
+
+func assembleBatch(p BatchParams, n int32, body []byte) []byte {
 	rb := kmsg.NewRecordBatch()
 	rb.Length = int32(batchMinLength + len(body))
 	rb.PartitionLeaderEpoch = p.LeaderEpoch
 	rb.Magic = 2
 	rb.Attributes = p.Attributes
-	rb.LastOffsetDelta = int32(len(recs) - 1)
+	rb.LastOffsetDelta = n - 1
 	rb.FirstTimestamp = p.FirstTimestamp
 	rb.MaxTimestamp = p.MaxTimestamp
 	rb.ProducerID = p.ProducerID
 	rb.ProducerEpoch = p.ProducerEpoch
 	rb.FirstSequence = p.BaseSequence
-	rb.NumRecords = int32(len(recs))
+	rb.NumRecords = n
 	rb.Records = body
 	out := rb.AppendTo(nil)
 	binary.BigEndian.PutUint32(out[17:], crc32c(out[crcStart:]))
-	return out, nil
+	return out
 }
 
 // Batch is a parsed, CRC-verified record batch v2 header.
@@ -102,10 +135,21 @@ type Batch struct {
 func (b Batch) IsTransactional() bool { return b.Attributes&0x10 != 0 }
 func (b Batch) IsControl() bool       { return b.Attributes&0x20 != 0 }
 
-// ParseBatch parses and verifies exactly one batch. It rejects magic != 2 and
-// compressed batches with ErrUnsupportedBatch, and structural or CRC failures
-// with ErrCorrupt. The returned Batch aliases b.
-func ParseBatch(b []byte) (Batch, error) {
+// Codec is the compression codec id (CodecNone .. CodecZstd).
+func (b Batch) Codec() int { return int(b.Attributes & 7) }
+
+// ParseBatch parses and verifies exactly one batch without decompressing it.
+// It rejects magic != 2 with ErrUnsupportedBatch, a valid-CRC batch with a
+// codec id above CodecZstd with ErrUnknownCodec, and structural or CRC
+// failures with ErrCorrupt. The returned Batch aliases b.
+func ParseBatch(b []byte) (Batch, error) { return parseBatch(b, true) }
+
+// ParseBatchUnverified is ParseBatch without the CRC check. It exists only so
+// a broker mutant (broker.BugSkipProduceCRC) can model a missing check; real
+// code must use ParseBatch.
+func ParseBatchUnverified(b []byte) (Batch, error) { return parseBatch(b, false) }
+
+func parseBatch(b []byte, verifyCRC bool) (Batch, error) {
 	var out Batch
 	if len(b) < 17 {
 		return out, fmt.Errorf("%w: %d bytes", ErrCorrupt, len(b))
@@ -119,17 +163,17 @@ func ParseBatch(b []byte) (Batch, error) {
 	if l := int32(binary.BigEndian.Uint32(b[8:])); l < batchMinLength || int64(l) != int64(len(b))-12 {
 		return out, fmt.Errorf("%w: length %d for %d bytes", ErrCorrupt, l, len(b))
 	}
-	if binary.BigEndian.Uint16(b[21:])&7 != 0 {
-		return out, fmt.Errorf("%w: compressed", ErrUnsupportedBatch)
-	}
-	if crc32c(b[crcStart:]) != binary.BigEndian.Uint32(b[17:]) {
+	if verifyCRC && crc32c(b[crcStart:]) != binary.BigEndian.Uint32(b[17:]) {
 		return out, fmt.Errorf("%w: crc mismatch", ErrCorrupt)
+	}
+	if c := binary.BigEndian.Uint16(b[21:]) & 7; c > CodecZstd {
+		return out, fmt.Errorf("%w: %d", ErrUnknownCodec, c)
 	}
 	var rb kmsg.RecordBatch
 	if err := rb.ReadFrom(b); err != nil {
 		return out, fmt.Errorf("%w: %v", ErrCorrupt, err)
 	}
-	if rb.NumRecords < 0 || int64(rb.NumRecords) > int64(len(rb.Records)) {
+	if !countFits(rb.Attributes&7 != 0, rb.NumRecords, len(rb.Records)) {
 		return out, fmt.Errorf("%w: %d records in %d bytes", ErrCorrupt, rb.NumRecords, len(rb.Records))
 	}
 	return Batch{
@@ -142,12 +186,39 @@ func ParseBatch(b []byte) (Batch, error) {
 	}, nil
 }
 
-// Records decodes the batch's records. Keys, values and header values alias
+// countFits reports whether the header record count is possible for a payload
+// of n bytes. Every plain record takes at least one byte, so the count cannot
+// exceed n; a compressed payload can be far smaller than its record count, so
+// only emptiness is checked.
+func countFits(compressed bool, count int32, n int) bool {
+	switch {
+	case count < 0:
+		return false
+	case compressed:
+		return count == 0 || n > 0
+	}
+	return int64(count) <= int64(n)
+}
+
+// Records decodes the batch's records. A compressed batch yields
+// ErrUnsupportedBatch: the broker never decompresses. Keys, values and header values alias
 // the buffer given to ParseBatch.
 func (b Batch) Records() ([]kmsg.Record, error) {
-	rest := b.records
-	recs := make([]kmsg.Record, 0, b.NumRecords)
-	for i := int32(0); i < b.NumRecords; i++ {
+	if b.Codec() != CodecNone {
+		return nil, fmt.Errorf("%w: compressed (codec %d)", ErrUnsupportedBatch, b.Codec())
+	}
+	return DecodeRecords(b.records, b.NumRecords)
+}
+
+// Payload is the batch's records section as stored: compressed when Codec is
+// not CodecNone. It aliases the buffer given to ParseBatch.
+func (b Batch) Payload() []byte { return b.records }
+
+// DecodeRecords decodes n records from an uncompressed records section (a
+// Payload of a CodecNone batch, or a client's own decompressed payload).
+func DecodeRecords(rest []byte, n int32) ([]kmsg.Record, error) {
+	recs := make([]kmsg.Record, 0, min(int(n), len(rest)))
+	for i := int32(0); i < n; i++ {
 		l, k := binary.Varint(rest)
 		if k <= 0 || l <= 0 || l > int64(len(rest)-k) {
 			return nil, fmt.Errorf("%w: record %d length", ErrCorrupt, i)

@@ -1,7 +1,8 @@
 # manifester-bench: disposable AWS benchmark stack (WarpStream-comparable)
 
-N stateless brokers (default 6, one AZ; each runs manibroker + its own manicp on
-loopback + a 10 s `/metrics` snapshotter + Alloy), `loadgen_count` load generator
+N stateless brokers (default 6, one AZ; each runs manibroker + a 10 s `/metrics` snapshotter + Alloy),
+ONE dedicated control-plane host running the only manicp (single sequencer, decision 46; brokers
+point `-cp-url` at it), `loadgen_count` load generator
 hosts (default 2, OpenMessaging Benchmark), an optional internal NLB, one run bucket
 and one DynamoDB control-plane table, all in one public subnet, plus a budget alarm.
 Everything is tagged `Project=manifester-bench`, `RunId`, `Owner`, `auto-destroy-after`.
@@ -18,8 +19,8 @@ metadata store are plain S3 + DynamoDB rather than WarpStream's.
  loadgen-0..L-1  |   (OMB driver+workers, Kafka CLI)                                                          |
    SG loadgen ---+--9092--> [optional internal NLB :9092, TCP, no cross-zone] --9092--> broker-1 .. broker-N  |
         |        |                                                                       SG broker            |
-        +--8080,8081,9090-9099 (loadgen <-> loadgen only)                                (manibroker :9092 +  |
-                 |                                                                        manicp 127.0.0.1)  |
+        +--8080,8081,9090-9099 (loadgen <-> loadgen only)                                (manibroker :9092)   |
+                 |                                          broker SG --8080--> cp (manicp, the only one)     |
                  +-----------------------------------------------------------------------+------------------+
                                                        S3 gateway endpoint / DynamoDB gateway endpoint
                                                        one S3 bucket  <--+--> one DynamoDB table (warm throughput)
@@ -31,13 +32,14 @@ metadata store are plain S3 + DynamoDB rather than WarpStream's.
 | Resource | Notes |
 | --- | --- |
 | VPC 10.42.0.0/16, 1 public subnet, IGW | S3 and DynamoDB gateway endpoints on the route table |
-| Brokers `aws_instance.broker[0..N-1]` | broker id = index + 1, `-advertise <own private IP>:9092`, `-node-id broker-<id>`, `-cp-url http://127.0.0.1:8080`. Broker 1 creates topic `bench-<run_id>` (`initial_topic_partitions`, default 6) through its loopback manicp. `instance_initiated_shutdown_behavior = terminate`. |
+| Brokers `aws_instance.broker[0..N-1]` | broker id = index + 1, `-advertise <own private IP>:9092`, `-node-id broker-<id>`, `-cp-url http://<cp private ip>:8080`. manibroker starts after the CP answers `/healthz` (bounded 10 min wait in user-data). No manicp runs on brokers. `instance_initiated_shutdown_behavior = terminate`. |
+| Control plane `aws_instance.cp` (count 1) | `cp_instance_type` (default m6in.xlarge, 4 vCPU), runs ONLY manicp: `-addr :8080 -store dynamo -region R -table-prefix ... -metrics-addr 127.0.0.1:9101 -run-id -manifest-out s3://BUCKET/results/RUN/ ${cp_extra_args}` (no `-dynamo-endpoint`: real AWS). Creates topic `bench-<run_id>` (`initial_topic_partitions`, default 6) on loopback at boot. Pushes `/metrics` to `results/<run_id>/metrics/cp/<epoch>-manicp.txt` every 10 s, Alloy with role `cp` (manicp scrape + CloudWatch DynamoDB), self-terminates like the others. |
 | Load generators `aws_instance.loadgen[0..L-1]` | Java 17 (Corretto), Kafka 3.8 CLI in `/opt/kafka`, OMB from `artifacts/omb/openmessaging-benchmark.tar.gz` into `/opt/omb` (skipped with a log line if absent), harness in `/opt/bench`, `/etc/profile.d/bench.sh` |
 | Internal NLB (`use_nlb`) | TCP 9092 listener, instance targets = all brokers, TCP health check on 9092, one subnet, no cross-zone, no SG |
-| Security groups | Broker: 9092 from the loadgen SG (plus the subnet CIDR for NLB health checks when `use_nlb`); nothing else, no inter-broker rule. Loadgen: self-referencing TCP 8080, 8081 and 9090-9099 (OMB worker HTTP and stats) and nothing from outside. No SSH. Metrics are scraped by Alloy on each host over loopback; the broker hosts push /metrics snapshots to S3. |
+| Security groups | Control plane: 8080 from the broker SG only, no other inbound (bench-ctl reaches it with SSM send-command; loadgen to CP is closed). Broker: 9092 from the loadgen SG (plus the subnet CIDR for NLB health checks when `use_nlb`); nothing else, no inter-broker rule. Loadgen: self-referencing TCP 8080, 8081 and 9090-9099 (OMB worker HTTP and stats) and nothing from outside. No SSH. Metrics are scraped by Alloy on each host over loopback; the broker hosts push /metrics snapshots to S3. |
 | S3 `manifester-bench-<run_id>-<account>` | force_destroy, public access blocked, SSE-S3, everything expires after `bucket_expire_days`, whole-bucket request metrics (`FilterId=manifester-bench`, variable `s3_metrics_filter_id`, also handed to Alloy) |
 | DynamoDB `manifester_<run_id>_cp` | Same schema as `cp/dynamo` `CreateTables`: `pk` S hash, `sk` S range, on-demand with `warm_throughput` (default 30,000 write / 30,000 read units/s). Created here, so every manicp runs **without** `-create-tables` and the role has no CreateTable/DeleteTable. |
-| IAM | Broker: bucket RW, table RW, SSM params under the prefix, SSM core, CloudWatch read (from `../observability/iam-cloudwatch-read.json` if present, else `-var cloudwatch_read_policy_json`). Loadgen: SSM, read `artifacts/*`, write `results/*`. |
+| IAM | Control plane: table RW, bucket list + read `artifacts/*` + write `results/*` (manifest, snapshots), SSM params, SSM core, CloudWatch read. Broker: bucket RW, table RW, SSM params under the prefix, SSM core, CloudWatch read (from `../observability/iam-cloudwatch-read.json` if present, else `-var cloudwatch_read_policy_json`). Loadgen: SSM, read `artifacts/*`, write `results/*`. |
 | Budget | 80% actual and 100% forecast emails. Account-wide (no tag filter, because cost-allocation tags need manual activation), so set `budget_usd` accordingly. |
 
 TransactWriteItems/TransactGetItems have no IAM actions; they are authorized by
@@ -49,6 +51,8 @@ PutItem/UpdateItem/DeleteItem/ConditionCheckItem/GetItem, all of which are grant
 | --- | --- | --- |
 | `region`, `az`, `run_id`, `owner`, `budget_usd`, `budget_email` | none | required, see `example.tfvars` |
 | `broker_count` | 6 | 1..12 stateless brokers |
+| `cp_instance_type` | `m6in.xlarge` | the single control-plane host (4 vCPU / 16 GiB), exactly one |
+| `cp_extra_args` | empty | extra manicp flags (sequencer tuning once manicp has them); empty keeps the unit valid for any manicp build |
 | `broker_instance_type` | `m6in.4xlarge` | 16 vCPU / 64 GiB / up to 40 Gbps, as WarpStream's agents |
 | `loadgen_count` | 2 | 1..8 load generator hosts |
 | `loadgen_instance_type` | `m6in.8xlarge` | 32 vCPU / 128 GiB / 50 Gbps, as WarpStream's OMB host |
@@ -71,7 +75,7 @@ offered in your AZ, set `broker_instance_type`/`loadgen_instance_type` to `m6i.4
 
 ## Outputs
 
-`broker_private_ips` (list), `broker_instance_ids`, `loadgen_instance_ids`, `kafka_bootstrap`
+`cp_private_ip`, `cp_instance_id`, `ssm_start_session_cp`, `broker_private_ips` (list), `broker_instance_ids`, `loadgen_instance_ids`, `kafka_bootstrap`
 (`ip:9092,ip:9092,...` of every broker), `kafka_bootstrap_nlb` (null when `use_nlb=false`),
 `ssm_start_session_brokers` / `ssm_start_session_loadgens` (lists of commands),
 `ssm_start_session_broker` / `ssm_start_session_loadgen` (first host), `bucket`, `dynamodb_table`,
@@ -122,20 +126,22 @@ Alloy's environment (`/etc/alloy/alloy.env`) is documented in `deploy/aws/observ
 `127.0.0.1:9100`, manicp `127.0.0.1:9101`, WarpStream benchmark `127.0.0.1:8081` on loadgen; host metrics come from Alloy's embedded unix exporter.
 Alloy's own UI: `127.0.0.1:12345`.
 
-Both services run with `-run-id`, `-log-level info` and `-manifest-out s3://BUCKET/results/<run_id>/` (each writes `<service>-<run_id>.json`). The broker's S3 flags are `-s3-bucket`/`-s3-region`; manicp uses `-region`. Snapshots of both `/metrics` pages land in `s3://BUCKET/results/<run_id>/metrics/<epoch>-{broker,manicp}.txt`.
+Both services run with `-run-id`, `-log-level info` and `-manifest-out s3://BUCKET/results/<run_id>/` (each writes `<service>-<run_id>.json`). The broker's S3 flags are `-s3-bucket`/`-s3-region`; manicp uses `-region`. Snapshots of `/metrics` land in `s3://BUCKET/results/<run_id>/metrics/<broker id>/<epoch>-broker.txt` (each broker) and `.../metrics/cp/<epoch>-manicp.txt` (the control-plane host).
 
 ## Verify
 
 ```
 terraform output broker_private_ips ; terraform output kafka_bootstrap_nlb
+terraform output ssm_start_session_cp ; terraform output cp_private_ip
+  systemctl status manicp mb-snapshot alloy ; curl -s 127.0.0.1:8080/healthz ; pgrep -xc manicp   # exactly 1
 # pick a command from: terraform output ssm_start_session_brokers
-  systemctl status manicp manibroker mb-snapshot alloy ; cat /etc/manifester/host.env
+  systemctl status manibroker mb-snapshot alloy ; cat /etc/manifester/host.env   # no manicp here
   tail /var/log/bench-bootstrap.log ; journalctl -u manibroker -n 50 ; sudo shutdown --show
   curl -s 127.0.0.1:9100/metrics | head
 # pick a command from: terraform output ssm_start_session_loadgens
   ls /var/lib/bench-bootstrap.done ; source /etc/profile.d/bench.sh ; env | grep -E 'BOOTSTRAP|BROKER_IPS|LOADGEN'
   ls /opt/omb ; java -version
-  /opt/kafka/bin/kafka-topics.sh --bootstrap-server $BOOTSTRAP --list     # bench-<run_id> (created by broker 1 at boot)
+  /opt/kafka/bin/kafka-topics.sh --bootstrap-server $BOOTSTRAP --list     # bench-<run_id> (created by the control-plane host at boot)
   /opt/bench/run-benchmark.sh --smoke                                      # 20 s go/no-go, see docs/aws-benchmark-runbook.md
 aws elbv2 describe-target-health --region R --target-group-arn <arn>      # all brokers healthy (use_nlb)
 ```
@@ -144,7 +150,7 @@ aws elbv2 describe-target-health --region R --target-group-arn <arn>      # all 
 `BOOTSTRAP_NLB` (empty when `use_nlb=false`), `BROKER_IPS` (comma-separated), `BOOTSTRAP_HOST` (first broker IP),
 `LOADGEN_INDEX` (0-based), `LOADGEN_COUNT`, `RUN_ID`, `BUCKET`, `TABLE`, `REGION`, `AWS_REGION`, `SSM_PREFIX`.
 
-The topic is created by the broker host through manicp's loopback HTTP API because
+The topic is created by the control-plane host through manicp's loopback HTTP API because
 the broker implements neither CreateTopics nor DescribeConfigs (`kafka-topics.sh --create/--describe` fail).
 The load tool is Apache Kafka's `kafka-producer-perf-test.sh`. The WarpStream CLI
 (`/usr/local/bin/warpstream`, same tarball as the official installer; best effort) is installed
@@ -159,20 +165,21 @@ EC2 prices are the AWS public price list for Asia Pacific (Hyderabad), Linux, fe
 | Item | Per hour |
 | --- | --- |
 | 6 x m6in.4xlarge brokers ($1.1718 each) | $7.031 |
+| 1 x m6in.xlarge control plane (instance + root volume + public IPv4) | about $0.23 |
 | 2 x m6in.8xlarge loadgens ($2.3437 each) | $4.687 |
 | Internal NLB (about $0.0225 base + about $0.01 LCU) | $0.03 |
-| 8 x 30 GB gp3 root volumes | $0.03 |
+| 8 x 30 GB gp3 root volumes (the CP's is in its line above) | $0.03 |
 | 8 x public IPv4 ($0.005 each) | $0.04 |
 | S3 request metrics (about 16 metrics at $0.30/month, prorated) | $0.007 |
 | Gateway endpoints, SGs, IAM, VPC, budget (first 2 free) | $0 |
-| **Fixed subtotal** | **about $11.8 / hour** |
+| **Fixed subtotal** | **about $12.0 / hour** |
 | S3 PUT/GET, 16 MiB segments at 1 GiB/s is about 64 PUT/s (about 230k/h, $0.005 per 1k) | up to about $1.2 |
 | DynamoDB commits. r1 measured about 190 write units per segment (about 12 segments/s at 108 MB/s), so 64 segments/s is about 12k WRU/s, about 44M WRU/h at about $0.625 per million | up to about $27 at a sustained 1 GiB/s; proportional to load |
 | DynamoDB `warm_throughput` 30k/30k | AWS charges for pre-warming once, not hourly; the rate is on the DynamoDB pricing page and was not verified here |
 
-A 4 hour run: about **$47 fixed** (11.8 x 4), **worst case about $160** with a sustained 1 GiB/s
+A 4 hour run: about **$48 fixed** (12.0 x 4), **worst case about $160** with a sustained 1 GiB/s
 for the whole 4 hours; a realistic mix of idle time and shorter load windows lands between. 6 hours (the
-self-destruct limit): about $71 fixed. Not included: Grafana Cloud, CloudWatch GetMetricData calls made
+self-destruct limit): about $72 fixed. Not included: Grafana Cloud, CloudWatch GetMetricData calls made
 by Alloy, internet egress (negligible), warm-throughput pre-warm charge. Same-AZ traffic and S3/DynamoDB
 through gateway endpoints is free. The NLB is in the same AZ as the targets, so no cross-AZ charges.
 `example.tfvars` sets `budget_usd = 200`.
@@ -228,5 +235,7 @@ the checklist passes, since losing it orphans the resources.
 - AMI is the latest Amazon Linux 2023 x86_64 via public SSM parameter, resolved at plan time.
 - Alloy 1.10.1 (rpm repo) and Kafka 3.8.0 (archive.apache.org) are pinned by variable; both URLs were confirmed to exist with HTTP HEAD on 2026-10-18.
 - Hosts have public IPs (needed for Grafana Cloud and downloads); nothing inbound is allowed.
+- vCPU quota: the full stack is 6 x 16 (brokers) + 2 x 32 (loadgens) + 4 (control plane) = 164 vCPUs against the 192 account quota.
+- The control plane is a single host and a single point of failure for availability (not for correctness: the DynamoDB compare-and-set is the safety net). If it dies, restart it or `terraform apply -replace=aws_instance.cp` (the private IP changes, so brokers are replaced too; see the runbook A10). Active/standby with an advisory DynamoDB lease is future work.
 - Brokers are cattle (decisions 41-44): no registration, fencing or idempotence; ids 1..N come from the instance index, so replacing a host re-uses its id harmlessly.
 - Not verified here: `warm_throughput` apply behaviour and pre-warm price, per-AZ m6in availability, and a full plan/apply (never run in this session).

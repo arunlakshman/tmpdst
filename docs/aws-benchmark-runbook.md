@@ -22,12 +22,13 @@ You run apply and destroy; nothing here is automatic. Never run `docker prune` o
 | operator control (topic, workers, start run) | your workstation, through SSM send-command | `deploy/aws/bench/bench-ctl.sh` |
 | OMB workers | every loadgen host, `:8080` (HTTP) and `:9090` (stats) | `deploy/aws/bench/start-omb-workers.sh` |
 | OMB coordinator + stage plan + abort rules | loadgen host 0 (detached) | `deploy/aws/bench/run-omb.sh` |
-| broker `/metrics` snapshots every 10 s | every broker host (`mb-snapshot.service`) | terraform user-data |
+| the ONE manicp (single sequencer, decision 46) + `metrics/cp/` snapshots | dedicated control-plane host (`cp_instance_type`, default m6in.xlarge), `:8080` | `files/cp-user-data.sh.tpl` |
+| manibroker `/metrics` snapshots every 10 s (`metrics/<broker id>/`) | every broker host (`mb-snapshot.service`) | terraform user-data |
 | summary | your workstation | `deploy/aws/bench/collect-results.sh` -> `results/<run>/summary.md` |
 
-Why topic creation goes through SSM to a broker host: OMB cannot create topics (the broker has no CreateTopics),
-manicp listens on loopback of each broker host, the NLB forwards only Kafka traffic, and loadgen hosts have no
-`ssm:SendCommand`. The 288-partition topic is one TOPICS item in DynamoDB (`cp/doc.go`), so creation is cheap;
+Why topic creation goes through SSM to the control-plane host: OMB cannot create topics (the broker has no CreateTopics),
+the CP security group admits `:8080` from the broker SG only (loadgen to CP stays closed), the NLB forwards only Kafka
+traffic, and loadgen hosts have no `ssm:SendCommand`. The 288-partition topic is one TOPICS item in DynamoDB (`cp/doc.go`), so creation is cheap;
 the Metadata response for 288 partitions is a few KB. The patched OMB driver maps every logical topic to the
 topic you created (`omb-<run_id>`), so OMB's random topic names never matter.
 
@@ -66,22 +67,28 @@ Apply early: the S3 request metrics take about 15 minutes to show data.
 export AWS_REGION=ap-south-2 RUN_ID=<run_id>
 deploy/aws/bench/bench-ctl.sh worker-status || true          # not started yet: expected "NOT running"
 $(terraform output -json ssm_start_session_brokers | jq -r '.[0]')   # on broker 1:
-  systemctl is-active manicp manibroker mb-snapshot alloy ; curl -s 127.0.0.1:9100/healthz
+  systemctl is-active manibroker mb-snapshot alloy ; curl -s 127.0.0.1:9100/healthz ; pgrep -c manicp   # 0: no manicp on brokers
+$(terraform output -raw ssm_start_session_cp)                         # on the control-plane host:
+  systemctl is-active manicp mb-snapshot alloy ; curl -s 127.0.0.1:8080/healthz ; pgrep -xc manicp   # exactly 1
 $(terraform output -json ssm_start_session_loadgens | jq -r '.[0]')  # on loadgen 0:
   source /etc/profile.d/bench.sh; echo $BOOTSTRAP $LOADGEN_INDEX $LOADGEN_COUNT; ls /opt/omb/bin /opt/bench
 ```
+Or in one command from the workstation: `deploy/aws/bench/bench-ctl.sh check-cp` (exactly one manicp process on the CP host,
+healthz ok, no manicp on any broker, every broker reaches `<cp_private_ip>:8080`).
 Grafana: apply dashboards (`deploy/aws/observability/apply-dashboards.sh`), check `up{run_id="<run>"}` for all six
-`broker` values, and that the `$broker` variable of the Overview dashboard lists 1..6.
+`broker` values plus one `manicp` series with `role="cp"`, and that the `$broker` variable of the Overview dashboard lists 1..6.
+The Overview "Control plane" row (commit rate, queue depth, group size, transaction latency, cancellations, DynamoDB WRU)
+reads that one manicp; its cancellations should stay near 0 (see A10).
 
 ### A5. Topic and workers (workstation)
 
 ```
-deploy/aws/bench/bench-ctl.sh --run-id $RUN_ID create-topic 288         # topic omb-<run_id>, 288 partitions, via SSM on broker 1
+deploy/aws/bench/bench-ctl.sh --run-id $RUN_ID create-topic 288         # topic omb-<run_id>, 288 partitions, via SSM on the control-plane host
 deploy/aws/bench/bench-ctl.sh start-workers                              # benchmark-worker on every loadgen
 deploy/aws/bench/bench-ctl.sh worker-status
 ```
-(`bench-ctl.sh` reads `broker_instance_ids` and `loadgen_instance_ids` from `terraform output`, or set
-`BROKER_INSTANCE_IDS` / `LOADGEN_INSTANCE_IDS`.) The OMB worker layout: the first half of the workers run producers,
+(`bench-ctl.sh` reads `cp_instance_id`, `cp_private_ip`, `broker_instance_ids` and `loadgen_instance_ids` from
+`terraform output`, or set `CP_INSTANCE_ID` / `CP_PRIVATE_IP` / `BROKER_INSTANCE_IDS` / `LOADGEN_INSTANCE_IDS`.) The OMB worker layout: the first half of the workers run producers,
 the second half consumers; with `loadgen_count=2` that is loadgen 0 producing and loadgen 1 consuming, so a
 produce-only stage uses one loadgen (an m6in.8xlarge is enough, WarpStream used one).
 
@@ -94,13 +101,15 @@ Run the smoke alone first; it prints the pre-flight, the compression decision an
 deploy/aws/bench/bench-ctl.sh run --stages smoke
 deploy/aws/bench/bench-ctl.sh tail 60          # repeat; also: Grafana Overview and Pipeline dashboards
 ```
-Pre-flight (automatic): Kafka ApiVersions on every broker IP (prints node ids, warns on duplicates), the topic
+Pre-flight (automatic): the control plane is alive (a `metrics/cp/<epoch>-manicp.txt` snapshot in S3 newer than 90 s;
+loadgens cannot reach the CP over the network by design), Kafka ApiVersions on every broker IP (prints node ids, warns on duplicates), the topic
 is visible on every broker with 288 partitions, the lz4 probe (one 1 KiB record with `compression.type=lz4`; the brokers accept it since decision 45, and a broker that
 rejects it makes the run fall back to `none` with a LOUD "not apples-to-apples" warning). Go only if:
 - [ ] `SMOKE PASS`, achieved >= 80% of 100k msg/s, no errors
 - [ ] every broker shows traffic in Grafana (Overview, "Per-broker write throughput"), skew max/min about 1 in balanced mode
-- [ ] `segments_failed` 0, S3 and DynamoDB throttles 0, `manicp` WRU/s about 194 x segments/s (see comparison doc, section 5; the
-      first sign that DynamoDB cost will dominate)
+- [ ] `segments_failed` 0, S3 and DynamoDB throttles 0, `manicp` WRU/s (summary.md "Control plane" table; Overview "Control plane" row) and the mean group size: with group commit the WRU per
+      segment should fall as load rises; the 194 x segments/s of the comparison doc, section 5, is the per-segment worst case
+- [ ] control plane: queue depth not growing, canceled groups about 0 (one writer), commit latency steady
 - [ ] no `level=error` Loki lines
 
 Then the careful path or the default:
@@ -138,11 +147,11 @@ SSM parameters and Grafana tokens if the account is shared.
 ### A8. Checklist (tick in order)
 
 - [ ] OMB artifact built, tarball present; `broker_count = 6`, `loadgen_count = 2`; budget alarm set
-- [ ] apply + artifact upload done; all hosts `bench-bootstrap.done`; 6 brokers up in Grafana
+- [ ] apply + artifact upload done; all hosts `bench-bootstrap.done`; 6 brokers up in Grafana; `bench-ctl.sh check-cp` ok (exactly one manicp)
 - [ ] topic `omb-<run>` with 288 partitions; workers running on both loadgens
 - [ ] smoke passes; compression decision noted (`lz4` expected; `none` would NOT be apples-to-apples)
 - [ ] ramp / vanity stages run; ABORT file absent (or understood)
-- [ ] summary collected and read; per-broker snapshots present for all six brokers (`metrics/1/` .. `metrics/6/`)
+- [ ] summary collected and read; per-broker snapshots present for all six brokers (`metrics/1/` .. `metrics/6/`) and the control plane's in `metrics/cp/`
 - [ ] NLB (`use_nlb`) considered: it does not remove skew; pinned `balanced` mode used and stated
 - [ ] results saved; `terraform destroy`; post-destroy checklist (including the NLB) all empty
 
@@ -151,11 +160,47 @@ SSM parameters and Grafana tokens if the account is shared.
 - The Kafka client in OMB (3.6.1) and the broker were exercised together only locally (one broker, mem store, 8
   partitions, produce + assign-consume at 5k msg/s, `compression.type=none`). Nothing here has run on AWS. lz4 was
   verified locally with the Apache Kafka 3.9 perf tool and franz-go only, not with an OMB run.
-- With `metrics/<broker_id>/` snapshots missing (flat files from the stock template), 6 brokers overwrite each other's
-  snapshot names: the per-broker tables are only valid with the nested layout (terraform change required).
+- The single-sequencer control plane (decision 46) and its `manicp_seq_*` metrics are new: the first AWS run with
+  them is the evidence. summarize.py shows `-` for sequencer columns when the manicp build exports none.
+- The CP is a single point of failure for availability (not for correctness): see A10.
 - The lz4 probe (`kafka-producer-perf-test`, `retries=0`, `max.block.ms=15000`) passes against a broker with decision 45;
   if it ever misclassifies, force `--compression none|lz4`.
 - DynamoDB cost and the 98-calls-per-commit behaviour at 288 partitions are predictions (comparison doc, section 5).
+
+### A10. The single control plane: verify, and what to do when it dies
+
+Decision 46: the control plane owns sequencing. There is exactly ONE manicp (host `mb-<run>-cp`, `cp_instance_type`,
+count 1) with a single sequencing thread, group commit and an in-memory offset cache; every broker runs
+`-cp-url http://<cp_private_ip>:8080`. The first 6-broker smoke run with one manicp per broker (6 independent writers on
+one DynamoDB table) showed constant compare-and-set cancellations and commit latency spikes: that is what this layout removes.
+
+Verify the single CP (also part of every apply):
+- `deploy/aws/bench/bench-ctl.sh check-cp`: exactly one `manicp` process on the CP host, healthz ok, no `manicp` process on
+  any broker, every broker reaches the CP.
+- Grafana Overview, "Control plane" row: one series for the sequencer; "Cancellations and group retries" about 0. Sustained
+  cancels or two `manicp` hosts under `up{job="manicp"}` mean a second manicp is running somewhere (a leftover process, a
+  hand-started instance): stop it. Correctness never depends on this (the DynamoDB compare-and-set is the safety net,
+  so a second writer cannot corrupt offsets); it is only a performance problem.
+- `s3://<bucket>/results/<run>/metrics/cp/` gets a new file every 10 s; run-omb.sh pre-flight refuses to start without it.
+
+If the CP dies (instance terminated by the max_runtime guard, crash, host failure):
+- Symptom: brokers' produce acks stall or fail (the commit step cannot reach `:8080`), `up{job="manicp"}` 0, no new
+  `metrics/cp/` files, `bench-ctl.sh check-cp` fails. Segments already stored in S3 are not lost: they are simply not
+  committed (visible) until a CP answers; clients retry per their delivery timeouts.
+- Process died, host alive: `bench-ctl.sh`/SSM session on the CP host, `sudo systemctl restart manicp` (the unit has
+  `Restart=on-failure` already; look at `journalctl -u manicp`). The state is all in DynamoDB, so a restart only costs
+  the cold in-memory cache (a burst of reads).
+- Host gone: `terraform apply -replace=aws_instance.cp -var-file=my.tfvars` (replaces only the CP; after upload READY is
+  already set, so it boots straight away). The private IP changes, which changes the brokers' user-data (`-cp-url`):
+  Terraform replaces the broker hosts too (`user_data_replace_on_change`), which in a benchmark is acceptable but loses the
+  run; for a mid-run recovery instead restart the instance in place or re-point a broker by hand
+  (`/etc/systemd/system/manibroker.service`, `-cp-url`, `systemctl daemon-reload && systemctl restart manibroker`).
+- After recovery run `check-cp`, then resume or re-run the stage; note the outage in the run notes.
+
+HA (future work, not needed for correctness): an active/standby pair, where the standby holds an advisory DynamoDB lease
+(heartbeat item with TTL) and takes over by fencing through the existing compare-and-set when the active one stops
+renewing. The lease would only prevent two active sequencers (a performance matter, as above); safety stays with the
+conditional writes. Not built, not needed for the benchmark.
 
 # Part B. Quick smoke (single broker)
 
@@ -167,7 +212,7 @@ host, one load generator host. Known limits:
   (no flag to disable); the broker accepts that since decision 45 (earlier brokers answered
   `UNSUPPORTED_COMPRESSION_TYPE`). Never use `cmd/manibench` for the AWS run.
 - The broker implements neither CreateTopics nor DescribeConfigs, so `kafka-topics.sh --create/--describe`
-  fail. The broker host creates the 6-partition topic `bench-<run_id>` at boot through manicp's loopback API;
+  fail. The control-plane host creates the 6-partition topic `bench-<run_id>` at boot through its loopback manicp API;
   the harness only waits for it (`kafka-topics.sh --list` works).
 - Saturating runs (default) make client-side latency mostly client queueing and print no percentiles. Use
   broker-side ack latency (`seal_to_ack`) for saturation, and `--rate N` runs for client p50/p99 below saturation.
@@ -233,11 +278,13 @@ and the harness (`artifacts/bench/`), and writes `READY` last.
 
 ## 4. Wait for READY and verify health
 
-Both hosts: `ls /var/lib/bench-bootstrap.done` (takes about 3-6 minutes after READY).
+Every host: `ls /var/lib/bench-bootstrap.done` (takes about 3-6 minutes after READY).
 ```
+$(terraform output -raw ssm_start_session_cp)
+  systemctl is-active manicp mb-snapshot alloy ; curl -s 127.0.0.1:8080/healthz ; curl -s 127.0.0.1:9101/healthz
 $(terraform output -raw ssm_start_session_broker)
-  systemctl is-active manicp manibroker mb-snapshot alloy
-  curl -s 127.0.0.1:9100/healthz ; curl -s 127.0.0.1:9101/healthz
+  systemctl is-active manibroker mb-snapshot alloy
+  curl -s 127.0.0.1:9100/healthz
   tail -n 30 /var/log/bench-bootstrap.log ; journalctl -u manibroker -n 20 --no-pager
 $(terraform output -raw ssm_start_session_loadgen)
   systemctl is-active alloy ; ls /opt/bench ; source /etc/profile.d/bench.sh
@@ -248,7 +295,7 @@ Grafana (stack URL): apply dashboards once from your workstation, with the Edito
 cd deploy/aws/observability
 GRAFANA_URL=https://manifesterio.grafana.net GRAFANA_API_TOKEN=... ./apply-dashboards.sh
 ```
-Then check: Explore (Prometheus) `up{run_id="<run>"}` shows broker, manicp, node jobs for both hosts with value 1;
+Then check: Explore (Prometheus) `up{run_id="<run>"}` shows broker, manicp (role `cp`), node jobs for all hosts with value 1;
 Explore (Loki) `{run_id="<run>"}` shows `manibroker` and `manicp` JSON lines (labels `service`, `level`, `host`);
 dashboards Overview, Pipeline, AWS, Hosts show data for the run (AWS CloudWatch panels lag 2-15 minutes).
 The S3 manifests appear in `s3://<bucket>/results/<run>/manibroker-<run>.json` and `manicp-<run>.json`.
@@ -265,7 +312,7 @@ It waits for the broker, checks the topic, runs a 5 s warm-up and one 20 s cell 
 - [ ] Grafana Pipeline dashboard shows the segment rate and `committed bytes` rising during the window; `segments_failed` stays 0.
 - [ ] Loki has no `level=error` lines for the window (Overview log panel).
 - [ ] AWS dashboard: `manibroker_s3_*` and `manicp_dynamo_*` panels show attempts; throttles 0.
-- [ ] `s3://<bucket>/results/<run>/metrics/` is receiving `<epoch>-broker.txt` and `-manicp.txt` files (every 10 s).
+- [ ] `s3://<bucket>/results/<run>/metrics/` is receiving `<broker id>/<epoch>-broker.txt` and `cp/<epoch>-manicp.txt` files (every 10 s).
 - [ ] An annotation "run <run> start" is visible (if you set the annotation parameters).
 If it fails, check `journalctl -u manibroker` on the broker host (a `UNSUPPORTED_*` or S3/DynamoDB permission error shows up there) before spending more.
 
@@ -280,7 +327,7 @@ Matrix: warm-up 20 s; cells `c1_1k` (1 client, 1 KB), `c8_1k`, `c32_1k`, `c1_100
 repeated 3 times, 15 s idle between cells; about 17 minutes. Each cell's stdout is saved
 (`loadgen/<cell>.r<N>.c<K>.out`, one file per client), uploaded after every cell to
 `s3://<bucket>/results/<run>/loadgen/`, with Grafana annotations at run start, each cell start and end, and run end.
-Broker and manicp `/metrics` snapshots come from `mb-snapshot.service` on the broker host (every 10 s; the SGs open
+manibroker `/metrics` snapshots come from `mb-snapshot.service` on the broker host and manicp's from the same unit on the control-plane host (every 10 s; the SGs open
 no metrics ports and loadgen has no `ssm:SendCommand`, so a push-to-S3 timer was the simplest option). `summarize.py`
 picks the snapshots around each cell by timestamp.
 Latency run below saturation (optional, afterwards): `run-benchmark.sh --rate 500 --cells "c1_1k c8_1k" --reps 1`

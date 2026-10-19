@@ -3,7 +3,8 @@
 # Run on the operator workstation BEFORE terraform destroy (the bucket is force-destroyed).
 #   usage: collect-results.sh <bucket> <run_id> [region]
 # Result layout: results/<run_id>/{loadgen,omb,metrics}/ plus the service manifests. metrics/ holds either
-# <broker_id>/<epoch>-{broker,manicp}.txt (6-broker layout) or flat <epoch>-*.txt (single broker).
+# <broker_id>/<epoch>-broker.txt per broker plus cp/<epoch>-manicp.txt from the single control-plane host
+# (decision 46), or the older flat <epoch>-*.txt / <broker_id>/<epoch>-manicp.txt layouts (one manicp per broker).
 # Price knobs for the cost-per-GiB table are passed to summarize.py through SUMMARIZE_ARGS, e.g.
 #   SUMMARIZE_ARGS='--broker-hourly 0.9 --s3-put-per-1000 0.0055' collect-results.sh ...
 set -euo pipefail

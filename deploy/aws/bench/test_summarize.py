@@ -53,7 +53,23 @@ def write(path, text):
         f.write(text)
 
 
-def make_run(d, nested=True, brokers=(("1", 6e9), ("2", 3e9), ("3", 1e9)), comp="none", sample_target=5000):
+def prom_seq(scale):
+    return f"""manicp_seq_tx_seconds_count{{outcome="ok"}} {10 * scale}
+manicp_seq_tx_seconds_count{{outcome="canceled"}} {scale}
+manicp_seq_tx_seconds_sum{{outcome="ok"}} {0.04 * 10 * scale}
+manicp_seq_group_segments_sum {40 * scale}
+manicp_seq_group_items_sum {120 * scale}
+manicp_seq_queue_wait_seconds_sum {0.002 * 40 * scale}
+manicp_seq_queue_wait_seconds_count {40 * scale}
+manicp_seq_retries_total{{reason="transaction_canceled"}} {scale}
+manicp_seq_cache_total{{cache="end",result="hit"}} {90 * scale}
+manicp_seq_cache_total{{cache="end",result="miss"}} {10 * scale}
+manicp_seq_queue_depth {2 * scale}
+"""
+
+
+def make_run(d, nested=True, brokers=(("1", 6e9), ("2", 3e9), ("3", 1e9)), comp="none", sample_target=5000, cp=None):
+    """cp: None = legacy (a manicp snapshot per broker); "seq" / "noseq" = single control plane under metrics/cp/."""
     omb = os.path.join(d, "omb")
     os.makedirs(omb)
     with open(os.path.join(HERE, "testdata", "omb-local-sample.json")) as f:
@@ -68,8 +84,13 @@ def make_run(d, nested=True, brokers=(("1", 6e9), ("2", 3e9), ("3", 1e9)), comp=
         pre = "" if nested else ""
         write(os.path.join(base, f"{pre}{START - 5}-broker.txt"), prom(0, 0, 0, 0, 0, 0, 0, 0))
         write(os.path.join(base, f"{pre}{END + 5}-broker.txt"), prom(100, nbytes, 100, 10, 0, 0, 5.0, 100))
-        write(os.path.join(base, f"{START - 5}-manicp.txt"), prom_cp(0, 0))
-        write(os.path.join(base, f"{END + 5}-manicp.txt"), prom_cp(20000, 500))
+        if cp is None:
+            write(os.path.join(base, f"{START - 5}-manicp.txt"), prom_cp(0, 0))
+            write(os.path.join(base, f"{END + 5}-manicp.txt"), prom_cp(20000, 500))
+    if cp:
+        base = os.path.join(d, "metrics", "cp")
+        write(os.path.join(base, f"{START - 5}-manicp.txt"), prom_cp(0, 0) + (prom_seq(0) if cp == "seq" else ""))
+        write(os.path.join(base, f"{END + 5}-manicp.txt"), prom_cp(20000, 700) + (prom_seq(100) if cp == "seq" else ""))
 
 
 def report(d, **kw):
@@ -109,6 +130,29 @@ class OMBTests(unittest.TestCase):
         self.assertIn("S3 $/GiB", text)
         # 300 PUTs, 30 GETs
         self.assertIn("| 300 | 30 |", text)
+
+    def test_single_control_plane_with_seq_metrics(self):
+        with tempfile.TemporaryDirectory() as d:
+            make_run(d, cp="seq")
+            text, _ = report(d)
+        self.assertIn("Control plane (single manicp sequencer)", text)
+        # cp is not a broker row; 3 brokers only, per-broker table has no DDB columns
+        self.assertNotIn("| cp |", text)
+        self.assertNotIn("| 1 | 85.7 | 60.0% | 1.43 | 70.0 | 0.0 | 40.0 | 50.0 | 1.4 | 0.1 | 0 | 0 | 0 | 0 |", text)
+        # groups 1100/70s = 15.7, segments 4000/70 = 57.1, size 3.64, cache hit 90.0%, WRU 20000/70 = 286
+        self.assertIn("| smoke | 15.7 | 57.1 | 3.64 |", text)
+        self.assertIn("90.0%", text)
+        self.assertIn("| 286 | 10 |", text)
+        # cost: 20000 WRU + 700 RCU counted once (not per broker)
+        self.assertIn("| 20,000 | 700 |", text)
+
+    def test_single_control_plane_without_seq_metrics(self):
+        with tempfile.TemporaryDirectory() as d:
+            make_run(d, cp="noseq")
+            text, _ = report(d)
+        self.assertIn("Control plane (single manicp sequencer)", text)
+        self.assertIn("| smoke | - | - | - |", text)
+        self.assertIn("| 20,000 | 700 |", text)
 
     def test_flat_legacy_layout_single_broker(self):
         with tempfile.TemporaryDirectory() as d:

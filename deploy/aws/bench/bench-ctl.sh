@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Operator-workstation control for the 6-broker OMB run. Everything goes through SSM send-command (no SSH).
-# Needs: aws CLI v2 with credentials, jq, terraform outputs (broker_instance_ids, loadgen_instance_ids).
+# Needs: aws CLI v2 with credentials, jq, terraform outputs (cp_instance_id, cp_private_ip, broker_instance_ids, loadgen_instance_ids).
 #
 #   bench-ctl.sh [--tf-dir DIR] [--region R] [--run-id ID] <command> [args]
 #
-#   create-topic [PARTITIONS=288] [TOPIC]   POST /v1/create-topic on broker 0's loopback manicp (any manicp works:
-#                                           all share the DynamoDB table); then lists the topic on that broker.
+#   create-topic [PARTITIONS=288] [TOPIC]   POST /v1/create-topic on the control-plane host's loopback manicp (the ONE
+#                                           manicp, decision 46) through SSM send-command; then describes the topic.
+#   check-cp                                verify the single control plane: exactly one manicp process on the CP host,
+#                                           healthz ok, no manicp on any broker, every broker reaches CP:8080
 #   start-workers                           run /opt/bench/start-omb-workers.sh on every loadgen host
 #   stop-workers
 #   worker-status
@@ -13,9 +15,9 @@
 #   tail [N=40]                             last N lines of that log
 #   abort                                   touch the STOP file and kill the coordinator on loadgen 0
 #
-# Override instance lists with BROKER_INSTANCE_IDS / LOADGEN_INSTANCE_IDS (space separated).
-# Why through the broker host and not the NLB for topic creation: the NLB only forwards Kafka (9092) and
-# manicp listens on loopback; the loadgen role has no ssm:SendCommand. OMB itself cannot create topics.
+# Override with CP_INSTANCE_ID / CP_PRIVATE_IP / BROKER_INSTANCE_IDS / LOADGEN_INSTANCE_IDS (ids space separated).
+# Why through the CP host's SSM and not over the network: the CP security group admits 8080 from the brokers only
+# (loadgen -> CP stays closed) and the loadgen role has no ssm:SendCommand. OMB itself cannot create topics.
 set -euo pipefail
 TF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../terraform" && pwd)
 REGION=${AWS_REGION:-${AWS_DEFAULT_REGION:-}}
@@ -29,7 +31,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 cmd=${1:-}; [ $# -eq 0 ] || shift
-[ -n "$cmd" ] || { sed -n '2,19p' "$0"; exit 2; }
+[ -n "$cmd" ] || { sed -n '2,23p' "$0"; exit 2; }
 [ -z "$REGION" ] || export AWS_DEFAULT_REGION=$REGION
 
 tfout() { (cd "$TF_DIR" && terraform output -json "$1" 2>/dev/null) || true; }
@@ -38,8 +40,9 @@ LOADGEN_INSTANCE_IDS=${LOADGEN_INSTANCE_IDS:-$(tfout loadgen_instance_ids | jq -
 if [ -z "$BROKER_INSTANCE_IDS" ] || [ -z "$LOADGEN_INSTANCE_IDS" ]; then
   echo "no instance ids: set BROKER_INSTANCE_IDS and LOADGEN_INSTANCE_IDS or use --tf-dir" >&2; exit 1
 fi
+CP_INSTANCE_ID=${CP_INSTANCE_ID:-$(tfout cp_instance_id | jq -r '.// empty' 2>/dev/null || true)}
+CP_PRIVATE_IP=${CP_PRIVATE_IP:-$(tfout cp_private_ip | jq -r '.// empty' 2>/dev/null || true)}
 # first id of each list (do not use `set --` here: it would clobber the command's own arguments "$@")
-BROKER0=${BROKER_INSTANCE_IDS%% *}
 LOADGEN0=${LOADGEN_INSTANCE_IDS%% *}
 
 # ssm_run <instance ids (space separated)> <shell command>: waits, prints each instance's output, fails if any failed.
@@ -72,11 +75,21 @@ case "$cmd" in
   create-topic)
     parts=${1:-288}
     topic=${2:-omb-${RUN_ID:?--run-id or RUN_ID, or pass the topic name}}
-    echo "creating $topic with $parts partitions through manicp on $BROKER0"
-    # Broker hosts have no Kafka CLI (only loadgens do), so verify through manicp's describe-topics; run-omb.sh pre-flight
+    [ -n "$CP_INSTANCE_ID" ] || { echo "no control-plane instance: set CP_INSTANCE_ID or use --tf-dir (terraform output cp_instance_id)" >&2; exit 1; }
+    echo "creating $topic with $parts partitions through the control-plane manicp on $CP_INSTANCE_ID"
+    # Hosts have no Kafka CLI (only loadgens do), so verify through manicp's describe-topics; run-omb.sh pre-flight
     # re-checks over the Kafka port on every broker. ErrInvalid on create means the topic already exists with other settings.
-    ssm_run "$BROKER0" "set -e; curl -sf -m 20 -X POST http://127.0.0.1:8080/v1/create-topic -d '{\"topic\":\"$topic\",\"partitions\":$parts}'; echo; curl -sf -m 20 -X POST http://127.0.0.1:8080/v1/describe-topics -d '{\"topics\":[\"$topic\"]}' | head -c 300; echo" ||
+    ssm_run "$CP_INSTANCE_ID" "set -e; curl -sf -m 20 -X POST http://127.0.0.1:8080/v1/create-topic -d '{\"topic\":\"$topic\",\"partitions\":$parts}'; echo; curl -sf -m 20 -X POST http://127.0.0.1:8080/v1/describe-topics -d '{\"topics\":[\"$topic\"]}' | head -c 300; echo" ||
       { echo "create-topic failed" >&2; exit 1; }
+    ;;
+  check-cp)
+    [ -n "$CP_INSTANCE_ID" ] || { echo "no control-plane instance: set CP_INSTANCE_ID or use --tf-dir" >&2; exit 1; }
+    echo "== control-plane host $CP_INSTANCE_ID: exactly one manicp, healthy"
+    ssm_run "$CP_INSTANCE_ID" "n=\$(pgrep -x manicp | wc -l); echo manicp processes: \$n; systemctl is-active manicp mb-snapshot alloy; curl -sf -m 5 http://127.0.0.1:8080/healthz && echo healthz ok; [ \$n -eq 1 ]" ||
+      { echo "check-cp FAILED on the control-plane host" >&2; exit 1; }
+    echo "== broker hosts: no manicp, CP reachable${CP_PRIVATE_IP:+ at $CP_PRIVATE_IP:8080}"
+    ssm_run "$BROKER_INSTANCE_IDS" "echo manicp processes: \$(pgrep -x manicp | wc -l); systemctl is-active manibroker; curl -sf -m 5 http://${CP_PRIVATE_IP:-CP_IP_UNKNOWN}:8080/healthz && echo cp reachable" ||
+      { echo "check-cp: a broker cannot reach the CP (or runs manicp)" >&2; exit 1; }
     ;;
   start-workers) ssm_run "$LOADGEN_INSTANCE_IDS" "/opt/bench/start-omb-workers.sh start" ;;
   stop-workers) ssm_run "$LOADGEN_INSTANCE_IDS" "/opt/bench/start-omb-workers.sh stop" ;;

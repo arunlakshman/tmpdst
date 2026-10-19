@@ -17,7 +17,7 @@
 # discovery balances connections; a manifester broker names only itself in Metadata). random: stock client behaviour
 # (binomial skew, see docs/aws-benchmark-warpstream-comparison.md).
 #
-# Prerequisites (bench-ctl.sh does them from the workstation): topic created through manicp with the
+# Prerequisites (bench-ctl.sh does them from the workstation): topic created through the control-plane manicp with the
 # right partition count (OMB cannot: no CreateTopics), OMB workers running on all loadgen hosts.
 #
 # Abort rules (checked on every 10 s OMB stats line): error rate > 0.1% of publish rate, publish p99 over the
@@ -27,7 +27,8 @@
 #
 # Output: $OUT (default ~/bench-out/$RUN_ID)/omb/<stage>.json (OMB result), <stage>.log (coordinator log),
 # driver-<stage>.yaml, stages.tsv; synced to s3://$BUCKET/results/$RUN_ID/omb/ after each stage.
-# Broker-side /metrics snapshots come from mb-snapshot.service on every broker host (every 10 s).
+# manibroker /metrics snapshots come from mb-snapshot.service on every broker host (metrics/<broker id>/), manicp's from
+# the single control-plane host (metrics/cp/), every 10 s.
 set -euo pipefail
 
 STAGES="smoke,vanity-produce" COMPRESSION=auto PARTITIONS=288 BMODE=balanced TOPIC="" MAX_MIN=120 LATER=0 SKIP_PRE=0 DRY=0 OUT=""
@@ -98,8 +99,21 @@ log "run_id=$RUN_ID brokers=$nbrokers topic=$TOPIC partitions=$PARTITIONS loadge
 [ "$total_min" -le "$MAX_MIN" ] || { log "REFUSING: estimated $total_min min > --max-minutes $MAX_MIN (cost guard)"; exit 2; }
 
 # ---- pre-flight ---------------------------------------------------------------------------------
+# The single manicp (decision 46) pushes metrics/cp/<epoch>-manicp.txt every 10 s; loadgens cannot reach it on 8080
+# (closed on purpose) but can list the bucket. A fresh snapshot means it is up; a missing one means no CP.
+check_cp() {
+  local last now age
+  last=$(aws s3 ls "s3://$BUCKET/results/$RUN_ID/metrics/cp/" 2>/dev/null | awk '{print $4}' | sed -n 's/^\([0-9]*\)-manicp\.txt$/\1/p' | sort -n | tail -n 1)
+  if [ -z "$last" ]; then log "  control plane: NO metrics/cp/ snapshot in s3://$BUCKET/results/$RUN_ID/ (CP host down or still booting: bench-ctl.sh check-cp)"; return 1; fi
+  now=$(date +%s); age=$((now - last))
+  if [ "$age" -gt 90 ]; then log "  control plane: newest manicp snapshot is ${age}s old (CP dead or stuck: see the runbook)"; return 1; fi
+  log "  control plane: manicp snapshot ${age}s old (single sequencer up)"
+}
+
 preflight() {
   local ip n ids="" fail=0 out
+  log "pre-flight: control plane (single manicp)"
+  check_cp || fail=1
   log "pre-flight: Kafka metadata on every broker ($nbrokers)"
   for ip in $brokers; do
     if out=$(kafka-broker-api-versions.sh --bootstrap-server "$ip:9092" 2>&1 | head -n 1); then

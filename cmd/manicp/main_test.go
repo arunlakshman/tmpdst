@@ -11,6 +11,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"manifester/cp/cpobs"
+	"manifester/cp/dynamo"
 )
 
 func freeAddr(t *testing.T) string {
@@ -130,4 +133,28 @@ func TestDynamoStoreAgainstFakeEndpoint(t *testing.T) {
 	if code := run(ctx, args, &logs); code != 0 {
 		t.Fatalf("code %d\n%s", code, logs.String())
 	}
+}
+
+func TestOpenStoreSequencerFlag(t *testing.T) {
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	m := cpobs.New()
+	f, _, err := parseFlags([]string{"-store", "dynamo", "-dynamo-endpoint", "http://127.0.0.1:1"}, &bytes.Buffer{})
+	if err != nil || !f.sequencer || f.seqPipeline != 4 || f.seqMaxItems != 100 || f.seqCache != 4096 {
+		t.Fatalf("defaults: %+v %v", f, err)
+	}
+	st, closeStore, err := openStore(context.Background(), f, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st.(*dynamo.Sequencer); !ok {
+		t.Fatalf("default dynamo store is %T, want the sequencer", st)
+	}
+	closeStore()
+	f.sequencer = false
+	st, closeStore, err = openStore(context.Background(), f, m)
+	if _, ok := st.(*dynamo.Store); !ok || err != nil {
+		t.Fatalf("-sequencer=false gives %T %v", st, err)
+	}
+	closeStore()
 }

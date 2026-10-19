@@ -44,6 +44,11 @@ Client tool notes that matter for fairness:
   `metadata.recovery.strategy=rebootstrap`, and `linger.ms=100` for the Java client. The post's OMB settings
   (linger 25) are the ones copied here; the in-flight setting is left at the Java default (5) because the post does
   not list it. The OMB build uses kafka-clients 3.6.1, which does not know `metadata.recovery.strategy`.
+- Ordering under retries: the broker has no idempotent producers (decision 41), so with `enable.idempotence=false` and
+  `max.in.flight.requests.per.connection=5` a retried batch can land after later batches of the same partition (KIP-91
+  behaviour): records may be duplicated (decision 41) and also reordered within a partition. OMB does not check order, so
+  the run is unaffected, but state it next to any claim about ordering. Where order matters set
+  `max.in.flight.requests.per.connection=1` (at a throughput cost) or accept the reordering.
 - The Kafka driver the repo builds is OMB's, plus `deploy/aws/bench/omb/patches/0001`: (a) every logical topic maps
   to one topic created beforehand through manicp (the broker has no CreateTopics); (b) consumers `assign()` partitions
   statically and never commit; (c) the consumer list is not shuffled so the static split is deterministic;
@@ -176,12 +181,16 @@ the counters): the segment rule seals at 16 MiB, 200 ms, or 96 distinct partitio
 producer's batches (~100 KB) walk across all 288 partitions, so a segment reaches the 96-partition cap after about
 117 batches, about 11.7 MB: roughly 83 segments/s cluster-wide, about 83 PUTs/s, or 218 million PUTs a month
 ($1,091 at $0.005/1000), below WarpStream's $1,788. The commit of such a segment is 1 BatchGet + 96 Queries + one
-97-item transaction (`cp/doc.go`): about 194 WRU and 96 RCU per commit, so about 16,000 WRU/s and 8,000 RCU/s,
-which at on-demand us-east-1 prices ($1.25/M WRU, $0.25/M RCU) is about $53,000 + $5,000 a month at a sustained
-1 GiB/s, far above their whole $12,868. If that holds, the per-partition run item design (decision 39) and the
+97-item transaction (`cp/doc.go`): about 240 WRU per commit (not 194, which the first estimate used: each 96-byte run
+item rounds up to 1 KB and costs 2 transactional WRU, 96 x 2, plus the G# blob of about 21 KB for the segment, measured by
+the meter in `docs/surprises-audit.md` section 2.1). With the sequencer the offsets come from memory, so steady-state
+commits do no reads; the 96 RCU per commit were the pre-sequencer path. At 83 commits/s (uncompressed 100 KB batches) that is
+about 20,000 WRU/s, about $90/hour and $65,000 a month; with lz4 batches (about 79.5 KB each, 55 commits/s) about 13,000 WRU/s,
+about $59/hour and $43,000 a month, at on-demand us-east-1 prices ($1.25/M WRU) and a sustained 1 GiB/s, far above their
+whole $12,868. If that holds, the per-partition run item design (decision 39) and the
 96-partition cap make DynamoDB the dominant cost at 288 partitions, and raising segment size or lowering the
 partitions per segment is the lever, not S3. The first ramp steps (100k, 250k msg/s) confirm or refute it
-cheaply: check `WRU/s` per broker in the summary against 194 x segments/s.
+cheaply: check `WRU/s` in the summary against 240 x commits/s.
 
 ### Control plane: availability caveat
 
@@ -200,8 +209,17 @@ table). Consequences to state next to any number:
 - Throughput: the sequencer is a deliberate single thread; at 1 GiB/s the question the run answers is whether one
   sequencing thread with group commit keeps up (watch queue depth and group size in the "Control plane" table of
   summary.md), not whether a cluster of control-plane nodes scales.
-- Cost: one more instance (about $0.23/hour, 4 vCPU) and no per-broker manicp compute; DynamoDB WRU should drop as group
-  size grows, because one transaction now carries several segments.
+- Cost: one more instance (about $0.23/hour, 4 vCPU) and no per-broker manicp compute. DynamoDB WRU does NOT drop as
+  group size grows at this shape: with 288 partitions and random partition spread every segment holds about 96 partitions
+  (97 items), any two segments share a partition, and a group is capped at 100 items, so every group holds one segment
+  (measured, `docs/surprises-audit.md` S1/S7: group size 1, 1.00 transaction per commit, 240 WRU per commit). The group
+  commit gain in `docs/benchmarks.md` "Sequencer" (about 3 segments, 91 items per transaction) was measured with 33-partition
+  segments; it appears here only with fewer partitions per segment (partition affinity, not built). The same shape caps the
+  cluster at 1 / transaction latency commits per second (about 430-600k msg/s at the 28-40 ms w1 measured).
+- Failure: a CP restart is not free. Brokers retry a commit for `-commit-deadline` (default 120 s) with capped, jittered
+  backoff, so a gap of seconds delays acks (and backpressures producers) but fails nothing; a longer gap fails the segments in
+  flight (REQUEST_TIMED_OUT). systemd restarts manicp after 1 s (`Restart=always`, `RestartSec=1`), and the new process starts
+  with a cold sequencer cache (a burst of DynamoDB reads). It is not just a cold cache.
 - HA is future work: an active/standby pair with an advisory DynamoDB lease (not needed for correctness) would remove the
   availability gap without changing the data path.
 

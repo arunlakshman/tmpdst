@@ -57,7 +57,7 @@ PutItem/UpdateItem/DeleteItem/ConditionCheckItem/GetItem, all of which are grant
 | `loadgen_count` | 2 | 1..8 load generator hosts |
 | `loadgen_instance_type` | `m6in.8xlarge` | 32 vCPU / 128 GiB / 50 Gbps, as WarpStream's OMB host |
 | `use_nlb` | true | internal NLB bootstrap |
-| `max_runtime_minutes` | 360 | `shutdown -h +N` on every host, instance terminates |
+| `max_runtime_minutes` | 360 | `shutdown -h +N` on every host, instance terminates. Counts from boot; the full plan with consumers takes about 135-140 min including boot and collection, and the CP host dying stops all writes, so keep this at 240 or more |
 | `ddb_warm_write_units`, `ddb_warm_read_units` | 30000, 30000 | table `warm_throughput` |
 | `initial_topic_partitions` | 6 | partitions of `bench-<run_id>` |
 | `bucket_expire_days`, `root_volume_gb`, `broker_extra_args`, `cp_extra_args`, `alloy_version`, `kafka_tools_version`, Grafana SSM param names | see `variables.tf` | unchanged |
@@ -195,6 +195,10 @@ Destroy order is handled by Terraform (listener, attachments, target group and N
 the instances and VPC). Self-termination after `max_runtime_minutes` removes only the EC2 hosts:
 the NLB, table, bucket and budget keep existing (and the NLB keeps billing) until `terraform destroy`.
 Keep `terraform.tfstate` until the checklist is clean.
+
+The bucket expires every object after `bucket_expire_days` (default 3), including the `seg/` segments that DynamoDB still
+points to, so after expiry a Fetch of old offsets fails with `committed segment missing`. That is acceptable for a
+disposable stack, but results must be collected before `terraform destroy` (and within the expiry window).
 
 The bucket is `force_destroy`, so objects (including `results/`) are deleted:
 copy anything you want first (`aws s3 sync s3://BUCKET/results/ ./results/`).

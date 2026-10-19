@@ -34,8 +34,8 @@ Wants=network-online.target
 User=manifester
 EnvironmentFile=/etc/manifester/manicp.env
 ExecStart=/opt/manifester/manicp -addr :8080 -store dynamo -region $REGION -table-prefix ${table_prefix} -metrics-addr 127.0.0.1:9101 -run-id $RUN_ID -manifest-out s3://$BUCKET/results/$RUN_ID/ -log-level info ${cp_extra_args}
-Restart=on-failure
-RestartSec=2
+Restart=always
+RestartSec=1
 LimitNOFILE=1048576
 
 [Install]

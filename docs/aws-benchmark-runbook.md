@@ -107,8 +107,9 @@ is visible on every broker with 288 partitions, the lz4 probe (one 1 KiB record 
 rejects it makes the run fall back to `none` with a LOUD "not apples-to-apples" warning). Go only if:
 - [ ] `SMOKE PASS`, achieved >= 80% of 100k msg/s, no errors
 - [ ] every broker shows traffic in Grafana (Overview, "Per-broker write throughput"), skew max/min about 1 in balanced mode
-- [ ] `segments_failed` 0, S3 and DynamoDB throttles 0, `manicp` WRU/s (summary.md "Control plane" table; Overview "Control plane" row) and the mean group size: with group commit the WRU per
-      segment should fall as load rises; the 194 x segments/s of the comparison doc, section 5, is the per-segment worst case
+- [ ] `segments_failed` 0, S3 and DynamoDB throttles 0, `manicp` WRU/s (summary.md "Control plane" table; Overview "Control plane" row) and the mean group size: at 288 partitions with random partition spread a segment holds about 96 partitions (97 items), so
+      every group holds ONE segment (a group is capped at 100 items) and the WRU per commit stays about 240 at any load; expect group size 1 and
+      240 x commits/s (comparison doc, section 5; `docs/surprises-audit.md` S1/S7). It would fall only with fewer partitions per segment
 - [ ] control plane: queue depth not growing, canceled groups about 0 (one writer), commit latency steady
 - [ ] no `level=error` Loki lines
 
@@ -187,9 +188,17 @@ If the CP dies (instance terminated by the max_runtime guard, crash, host failur
 - Symptom: brokers' produce acks stall or fail (the commit step cannot reach `:8080`), `up{job="manicp"}` 0, no new
   `metrics/cp/` files, `bench-ctl.sh check-cp` fails. Segments already stored in S3 are not lost: they are simply not
   committed (visible) until a CP answers; clients retry per their delivery timeouts.
-- Process died, host alive: `bench-ctl.sh`/SSM session on the CP host, `sudo systemctl restart manicp` (the unit has
-  `Restart=on-failure` already; look at `journalctl -u manicp`). The state is all in DynamoDB, so a restart only costs
-  the cold in-memory cache (a burst of reads).
+- Process died, host alive: the unit has `Restart=always`, `RestartSec=1`, so systemd brings it back in about a second
+  (look at `journalctl -u manicp`; `sudo systemctl restart manicp` by hand if it gave up). The state is all in DynamoDB,
+  so nothing is lost, but a restart is not free. Real behaviour: (1) every commit that reaches the CP during the gap is
+  refused at the connection; the brokers keep retrying it (capped exponential backoff, 20 ms up to 2 s, with jitter) for
+  `-commit-deadline` (default 120 s) after the commit's first attempt, so a gap of seconds fails no produce but delays the
+  acks and fills the produce buffer (clients are paused by backpressure meanwhile); (2) a commit whose answer was lost
+  is resent under the same key and gets the same answer, so it is not duplicated; (3) the new process starts with an
+  empty sequencer cache, so the first commit and the first Lookup of every partition read DynamoDB (a burst of reads);
+  (4) a gap longer than the deadline fails the segments in flight with REQUEST_TIMED_OUT, and producers that retry may then
+  duplicate records whose lost commit had landed (decision 41). A host replacement takes minutes, which is beyond the
+  deadline: expect failed produces and re-run the stage.
 - Host gone: `terraform apply -replace=aws_instance.cp -var-file=my.tfvars` (replaces only the CP; after upload READY is
   already set, so it boots straight away). The private IP changes, which changes the brokers' user-data (`-cp-url`):
   Terraform replaces the broker hosts too (`user_data_replace_on_change`), which in a benchmark is acceptable but loses the
@@ -344,6 +353,11 @@ Writes `./results/<run_id>/` (loadgen/, metrics/, manifests, `build-git-sha.txt`
 throughput and latency, broker segment put/queue/commit/ack averages, S3 and DynamoDB throttles/errors/retries,
 DynamoDB write units, then a mean over repetitions. Also keep the Grafana dashboards' time range screenshots if
 needed (free tier retention is 14 days).
+
+Collect before `terraform destroy` (`force_destroy` deletes `results/`), and well inside `bucket_expire_days` (default 3
+days): the lifecycle rule expires every object, including the `seg/` segments that DynamoDB still points to, so after
+expiry a Fetch of old offsets fails with `committed segment missing` (KAFKA_STORAGE_ERROR). That is acceptable for a
+disposable stack but means data and results are not durable.
 
 ## 8. Destroy and verify nothing is left
 

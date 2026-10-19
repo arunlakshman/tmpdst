@@ -16,6 +16,7 @@ import (
 	"manifester/core"
 	"manifester/cp"
 	"manifester/sys"
+	"manifester/sys/httppool"
 )
 
 // Error is a business error answered by the control plane (HTTP 200).
@@ -59,9 +60,8 @@ var _ sys.ControlPlane = (*Client)(nil)
 // client; deadlines come from the context of each call.
 func New(baseURL string, hc *http.Client) *Client {
 	if hc == nil {
-		hc = &http.Client{Transport: &http.Transport{
-			MaxIdleConnsPerHost: 16, IdleConnTimeout: 60 * time.Second,
-		}}
+		// Sized for the real concurrency (audit item 4): see httppool.
+		hc = &http.Client{Transport: httppool.Transport()}
 	}
 	return &Client{base: strings.TrimRight(baseURL, "/"), hc: hc}
 }

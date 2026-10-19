@@ -25,6 +25,7 @@ import (
 	"manifester/core"
 	"manifester/sys"
 	"manifester/sys/awsobs"
+	"manifester/sys/httppool"
 )
 
 // Config selects the bucket and endpoint. An empty Endpoint is AWS itself.
@@ -63,7 +64,11 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	if cfg.Region == "" {
 		cfg.Region = "us-east-1"
 	}
-	ac, err := config.LoadDefaultConfig(ctx, loadOptions(cfg)...)
+	opts := loadOptions(cfg)
+	if cfg.HTTP == nil {
+		opts = append(opts, config.WithHTTPClient(httppool.AWS()))
+	}
+	ac, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}

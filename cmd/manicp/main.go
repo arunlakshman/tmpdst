@@ -24,6 +24,7 @@ import (
 	"manifester/cp/cpobs"
 	"manifester/cp/dynamo"
 	"manifester/cp/memstore"
+	"manifester/sys/httppool"
 	"manifester/sys/runinfo"
 )
 
@@ -199,6 +200,7 @@ func newDynamo(ctx context.Context, endpoint, region string, apiOpts []func(*mid
 		opts = append(opts, config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
 			"AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "")))
 	}
+	opts = append(opts, config.WithHTTPClient(httppool.AWS())) // sized pool, audit item 4
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return nil, err

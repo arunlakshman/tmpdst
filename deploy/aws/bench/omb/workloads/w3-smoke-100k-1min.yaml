@@ -1,4 +1,4 @@
-# SMOKE: 10% of vanity, produce-only. 100,000 msg/s x 1 KiB = 97.7 MiB/s. 3 min + 1 min warm-up.
+# W3 validity check: 100,000 msg/s x 1 KiB, 1 min, no warm-up.
 name: w3-smoke-100k-1min
 topics: 1
 partitionsPerTopic: 288

@@ -418,3 +418,15 @@ Findings
   (overlap commits instead of one transaction at a time, partitions are independent). Fewer partitions per segment would also allow group size above 1.
 - Bugs found: run-omb.sh called render-driver.sh directly, but S3 upload drops the exec bit, so the stage loop died silently after pre-flight
   (fixed: `bash render-driver.sh`). The runbook workloads use 5 min stages; this run shortened them on the loadgen with sed (not committed).
+
+## W3 experiments: partition-affine producers and a longer segment window
+
+Both are opt-in; the default WarpStream-style run is unchanged.
+- Partition-affine producers (patch `0004-affine-partitioner.patch`, rebuild the OMB tarball with `scripts/build-omb.sh`): `run-omb.sh --affine`
+  (driver key `maniAffine`) makes producer k, pinned to broker k % 6, write only partitions p with p % 6 == k % 6 (48 each; sticky per
+  ~batch.size bytes like the stock partitioner). Needs balanced mode. NOT comparable to WarpStream: label results "partition-affine producers".
+- Segment window: `bench-ctl.sh broker-args -segment-window 1s` adds the flag to every manibroker (systemd drop-in) and restarts them;
+  `bench-ctl.sh broker-args` with no flags removes the drop-in. (Or set `broker_extra_args` in my.tfvars at apply time.)
+- Abort threshold: `run-omb.sh --abort-p99-ms 60000` (or env `OMB_ABORT_P99_MS`); default 10000.
+- Short stages: `w3-smoke-100k-1min` (1 min), `w3-500k-2min` (2 min + 1 min warm-up). Example:
+  `bench-ctl.sh run --stages w3-500k-2min --abort-p99-ms 60000 [--affine]`. Results of such short stages are indicative only.

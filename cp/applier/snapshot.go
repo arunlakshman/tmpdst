@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"hash/fnv"
 	"io"
+
+	"manifester/core"
 )
 
 // A checkpoint is the whole store at one log slot: replaying the log from that
@@ -28,11 +30,20 @@ var errSnap = errors.New("applier: bad checkpoint")
 
 // Snapshot writes a consistent checkpoint of the store, tagged with slot.
 func (a *Applier) Snapshot(w io.Writer, slot int64) error {
+	return a.SnapshotAt(w, func() int64 { return slot })
+}
+
+// SnapshotAt is Snapshot with the slot decided once the consistent view
+// exists: begin runs after the view is established and before anything is
+// read, and returns the slot to tag. A replica uses it to read its applied
+// counter at exactly the point the view was taken (it blocks its apply loop
+// until begin returns, not for the whole copy).
+func (a *Applier) SnapshotAt(w io.Writer, begin func() int64) error {
 	bw := bufio.NewWriter(w)
-	bw.WriteString(snapMagic)
-	bw.Write(binary.AppendVarint(nil, slot))
 	var werr error
 	err := a.kv.View(func(tx Tx) {
+		bw.WriteString(snapMagic)
+		bw.Write(binary.AppendVarint(nil, begin()))
 		tx.Ascend([]byte{0}, nil, func(k, v []byte) bool {
 			werr = writeEntry(bw, k, v)
 			return werr == nil
@@ -166,4 +177,38 @@ func (a *Applier) StateHash() uint64 {
 		})
 	})
 	return h.Sum64()
+}
+
+// AssignState says what Assigned knows about a command.
+type AssignState int
+
+// Assigned results.
+const (
+	// AssignUnknown: no record of the key (invalid, or forgotten by Trim).
+	AssignUnknown AssignState = iota
+	// AssignElsewhere: the key committed at another slot, or with another
+	// request: this command was a replay or a conflict and assigned nothing.
+	AssignElsewhere
+	// AssignHere: the command is the first commit of its key, at this slot.
+	AssignHere
+)
+
+// Assigned reports the ranges op was given if it is the first commit of its
+// key at slot, rebuilt from the key's record. An indexer uses it to write the
+// run rows of a slot after the fact.
+func (a *Applier) Assigned(slot int64, op core.CommitSegment) (rs []core.BatchRange, st AssignState, err error) {
+	err = a.kv.View(func(tx Tx) {
+		rec := tx.Get(idemKey(op.SegmentKey))
+		if rec == nil {
+			return
+		}
+		st = AssignElsewhere
+		first, _ := binary.Uvarint(rec)
+		d := replay(rec, digest(op.Batches), op)
+		if int64(first) != slot || d.Err != core.OK {
+			return
+		}
+		rs, st = d.Resp.(core.CommitSegmentResp).Assigned, AssignHere
+	})
+	return rs, st, err
 }

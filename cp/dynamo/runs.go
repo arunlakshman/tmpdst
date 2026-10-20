@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+
 	"manifester/core"
 )
 
@@ -160,3 +162,15 @@ func runsOf(ranges []core.BatchRange) [][]core.BatchRange {
 	}
 	return out
 }
+
+// RunRow is the R# item of one run, for writers outside this package (the
+// log-backed service's indexer): rs are the batches one commit assigned to
+// one partition, contiguous and in order. Readers of this package's Store read
+// exactly these rows.
+func RunRow(tp core.TopicPartition, rs []core.BatchRange) map[string]types.AttributeValue {
+	return runItem(tp, rs)
+}
+
+// TopicsPK is the partition key of the topic rows (sort key: the topic name,
+// attribute parts: its partition count).
+const TopicsPK = "TOPICS"

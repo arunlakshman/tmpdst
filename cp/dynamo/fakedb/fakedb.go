@@ -25,7 +25,8 @@ type item = map[string]types.AttributeValue
 // Fake is the in-memory service. The zero value is not usable; use New.
 type Fake struct {
 	mu     sync.Mutex
-	tables map[string]map[string]item // table -> "pk\x00sk" -> item
+	tables map[string]map[string]item                // table -> "pk\x00sk" -> item
+	byPK   map[string]map[string]map[string]struct{} // table -> pk -> ids: a Query must not scan the table
 
 	// PageSize caps the items of one Query page when > 0 (the real service
 	// pages at 1 MB; a small cap makes tests exercise pagination).
@@ -49,6 +50,9 @@ type Fake struct {
 	// result is returned as the call's error (the put DID land, the answer is
 	// lost).
 	AfterPut func() error
+	// UnprocessWrite is the number of upcoming BatchWriteItem calls that leave
+	// their last request in UnprocessedItems.
+	UnprocessWrite int
 	// Unprocess is the number of upcoming BatchGetItem calls that leave their
 	// last key in UnprocessedKeys.
 	Unprocess int
@@ -58,7 +62,26 @@ type Fake struct {
 }
 
 // New returns an empty service.
-func New() *Fake { return &Fake{tables: map[string]map[string]item{}} }
+func New() *Fake {
+	return &Fake{tables: map[string]map[string]item{}, byPK: map[string]map[string]map[string]struct{}{}}
+}
+
+// store writes it and keeps the partition index.
+func (f *Fake) store(table string, it item) {
+	f.tables[table][idOf(it)] = it
+	pks := f.byPK[table]
+	pk := strOf(it, "pk")
+	if pks[pk] == nil {
+		pks[pk] = map[string]struct{}{}
+	}
+	pks[pk][idOf(it)] = struct{}{}
+}
+
+// remove deletes the item with the key.
+func (f *Fake) remove(table string, key item) {
+	delete(f.tables[table], idOf(key))
+	delete(f.byPK[table][strOf(key, "pk")], idOf(key))
+}
 
 func validation(format string, a ...any) error {
 	return &smithy.GenericAPIError{Code: "ValidationException", Message: fmt.Sprintf(format, a...)}
@@ -110,7 +133,7 @@ func (f *Fake) table(name *string) (map[string]item, error) {
 func (f *Fake) Put(table string, it item) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.tables[table][idOf(it)] = cloneItem(it)
+	f.store(table, cloneItem(it))
 }
 
 // Item returns a copy of the stored item, or nil.
@@ -138,6 +161,7 @@ func (f *Fake) CreateTable(ctx context.Context, in *dynamodb.CreateTableInput, _
 		return nil, &types.ResourceInUseException{Message: aws.String("table exists: " + name)}
 	}
 	f.tables[name] = map[string]item{}
+	f.byPK[name] = map[string]map[string]struct{}{}
 	return &dynamodb.CreateTableOutput{}, nil
 }
 
@@ -163,6 +187,7 @@ func (f *Fake) DeleteTable(ctx context.Context, in *dynamodb.DeleteTableInput, _
 		return nil, err
 	}
 	delete(f.tables, aws.ToString(in.TableName))
+	delete(f.byPK, aws.ToString(in.TableName))
 	return &dynamodb.DeleteTableOutput{}, nil
 }
 

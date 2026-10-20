@@ -429,3 +429,41 @@ func TestPutItem(t *testing.T) {
 		t.Fatal("unsupported condition must fail")
 	}
 }
+
+func TestBatchWriteItem(t *testing.T) {
+	f := fresh(t)
+	put := func(sk string) types.WriteRequest {
+		return types.WriteRequest{PutRequest: &types.PutRequest{Item: k("p", sk)}}
+	}
+	del := func(sk string) types.WriteRequest {
+		return types.WriteRequest{DeleteRequest: &types.DeleteRequest{Key: k("p", sk)}}
+	}
+	call := func(reqs ...types.WriteRequest) (*dynamodb.BatchWriteItemOutput, error) {
+		return f.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{"t": reqs}})
+	}
+	if _, err := call(put("a"), put("b"), put("c")); err != nil || f.Count("t") != 3 {
+		t.Fatalf("puts: %v %d", err, f.Count("t"))
+	}
+	f.UnprocessWrite = 1
+	out, err := call(del("a"), del("b"))
+	if err != nil || len(out.UnprocessedItems["t"]) != 1 || f.Count("t") != 2 {
+		t.Fatalf("unprocessed: %v %+v %d", err, out, f.Count("t"))
+	}
+	if _, err = call(); err == nil {
+		t.Fatal("empty batch accepted")
+	}
+	big := make([]types.WriteRequest, 26)
+	for i := range big {
+		big[i] = put(strconv.Itoa(i))
+	}
+	if _, err = call(big...); err == nil {
+		t.Fatal("26 requests accepted")
+	}
+	if _, err = f.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{"nope": {put("x")}}}); err == nil {
+		t.Fatal("missing table accepted")
+	}
+	f.Fail = func(string) error { return errors.New("down") }
+	if _, err = call(put("z")); err == nil {
+		t.Fatal("injected failure ignored")
+	}
+}

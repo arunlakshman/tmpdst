@@ -30,7 +30,7 @@ func (f *Fake) UpdateItem(ctx context.Context, in *dynamodb.UpdateItemInput, _ .
 	if err != nil {
 		return nil, err
 	}
-	t[idOf(in.Key)] = next
+	f.store(aws.ToString(in.TableName), next)
 	out := &dynamodb.UpdateItemOutput{ConsumedCapacity: f.capacity(aws.ToString(in.TableName))}
 	if in.ReturnValues == types.ReturnValueUpdatedNew {
 		out.Attributes = pick(next, set)
@@ -78,8 +78,8 @@ func (f *Fake) Query(ctx context.Context, in *dynamodb.QueryInput, _ ...func(*dy
 // rowsAfter is the matching rows in query order, after ExclusiveStartKey.
 func (f *Fake) rowsAfter(t map[string]item, kc keyCond, in *dynamodb.QueryInput) []item {
 	var rows []item
-	for _, it := range t {
-		if kc.matches(it) {
+	for id := range f.byPK[aws.ToString(in.TableName)][kc.pk] {
+		if it := t[id]; kc.matches(it) {
 			rows = append(rows, it)
 		}
 	}
@@ -133,11 +133,52 @@ func (f *Fake) PutItem(ctx context.Context, in *dynamodb.PutItemInput, _ ...func
 		}
 		return nil, e
 	}
-	t[idOf(in.Item)] = cloneItem(in.Item)
+	f.store(aws.ToString(in.TableName), cloneItem(in.Item))
 	if f.AfterPut != nil {
 		if err := f.AfterPut(); err != nil {
 			return nil, err
 		}
 	}
 	return &dynamodb.PutItemOutput{ConsumedCapacity: f.capacity(aws.ToString(in.TableName))}, nil
+}
+
+// BatchWriteItem applies up to 25 puts and deletes (no conditions, like the
+// service). While UnprocessWrite > 0 a call leaves its last request in
+// UnprocessedItems and decrements it, so tests exercise the retry.
+func (f *Fake) BatchWriteItem(ctx context.Context, in *dynamodb.BatchWriteItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error) {
+	if err := f.failed(ctx, "BatchWriteItem"); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	total := 0
+	for _, reqs := range in.RequestItems {
+		total += len(reqs)
+	}
+	if total == 0 || total > 25 {
+		return nil, validation("BatchWriteItem takes 1 to 25 requests, got %d", total)
+	}
+	out := &dynamodb.BatchWriteItemOutput{UnprocessedItems: map[string][]types.WriteRequest{}}
+	hold := f.UnprocessWrite > 0
+	if hold {
+		f.UnprocessWrite--
+	}
+	for name, reqs := range in.RequestItems {
+		if _, err := f.table(&name); err != nil {
+			return nil, err
+		}
+		for i, r := range reqs {
+			if hold && i == len(reqs)-1 {
+				out.UnprocessedItems[name] = append(out.UnprocessedItems[name], r)
+				continue
+			}
+			if r.PutRequest != nil {
+				f.store(name, cloneItem(r.PutRequest.Item))
+			} else if r.DeleteRequest != nil {
+				f.remove(name, r.DeleteRequest.Key)
+			}
+		}
+		out.ConsumedCapacity = append(out.ConsumedCapacity, f.capacities(name)...)
+	}
+	return out, nil
 }

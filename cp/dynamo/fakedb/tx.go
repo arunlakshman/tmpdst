@@ -150,7 +150,7 @@ func (f *Fake) plan(list []txOp) ([]item, error) {
 func (f *Fake) apply(list []txOp, next []item) {
 	for i, o := range list {
 		if next[i] != nil {
-			f.tables[o.table][idOf(o.key)] = next[i]
+			f.store(o.table, next[i])
 		}
 	}
 }

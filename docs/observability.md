@@ -121,6 +121,29 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `manicp_build_info`, `_start_time_seconds`, `_uptime_seconds` | | | As for the broker. |
 | `go_*`, `process_*` | | | Runtime and process collectors. |
 
+#### Log-backed control plane (`manicp_log_*`, `cp/logcp`, stage 2; exported once stage 4 wires `-store`)
+
+| name | type | labels | meaning |
+|---|---|---|---|
+| `manicp_log_slot_attempts_total` | counter | `result` (`won`, `lost`, `error`) | Slot append attempts. `error` is an unknown outcome retried at the same slot. |
+| `manicp_log_lost_slots_total` | counter | | Slots lost to another writer or a hole filler. Persistently nonzero: two appenders. |
+| `manicp_log_slots_total` | counter | | Slots this node won; `rate()` is the slot rate (budget about 200/s). |
+| `manicp_log_append_seconds` | histogram | | One slot append to a definite answer. |
+| `manicp_log_entries_per_slot`, `manicp_log_entry_bytes` | histogram | | Commands grouped in a slot; encoded size (limit 350 KB). |
+| `manicp_log_queue_depth`, `manicp_log_queue_wait_seconds` | gauge, histogram | | Commands waiting for a slot. |
+| `manicp_log_rejected_total` | counter | `reason` (`not_active`, `overloaded`, `blocked`, `too_large`) | Refused requests. |
+| `manicp_log_applied_slot`, `manicp_log_apply_lag_slots`, `manicp_log_standby_lag_slots` | gauge | | Position; slots known but not applied; same on a standby. Standby lag growing means it cannot take over cleanly. |
+| `manicp_log_apply_seconds` | histogram | | One apply batch. |
+| `manicp_log_hole_fills_total` | counter | | No-ops this node wrote. |
+| `manicp_log_tail_reads_total` | counter | `result` | Tail reads of the replica loop. |
+| `manicp_log_tail_checks_total`, `manicp_log_fresh_reads_total`, `manicp_log_fresh_wait_seconds` | counter, counter, histogram | `result` | Tail checks for fresh reads; reads served (ratio is the batching factor); their wait. |
+| `manicp_log_active`, `manicp_log_role_changes_total` | gauge, counter | `to` | Advisory role. Flapping is a sign of a bad `TakeoverAfter`. |
+| `manicp_log_window_keys` | gauge | | Segment keys in the idempotency window. |
+| `manicp_log_blocked` | gauge | | 1: the node cannot apply (unknown format, store failure, trimmed); alert. |
+| `manicp_log_checkpoint_slot`, `_checkpoint_age_seconds`, `_checkpoint_bytes`, `_checkpoint_seconds`, `_checkpoint_errors_total` | | | Checkpoints; alert on age above 3 x `CkptEvery`. |
+| `manicp_log_trimmed_slots_total` | counter | | Slots tombstoned behind the checkpoint. |
+| `manicp_log_index_watermark_slot`, `_index_lag_slots`, `_index_flush_seconds`, `_index_rows_total`, `_index_unprocessed_total`, `_index_throttles_total`, `_index_lost_runs_total`, `_index_errors_total` | | | R# indexer. Lag is bounded by the flush period; `lost_runs` nonzero means the index stalled past the window. |
+
 ### Useful queries
 
 - Segment ack latency p99: `histogram_quantile(0.99, rate(manibroker_segment_seal_to_ack_seconds_bucket[1m]))`.

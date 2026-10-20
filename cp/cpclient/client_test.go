@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -235,5 +236,68 @@ func TestIsDial(t *testing.T) {
 		if isDial(e) {
 			t.Errorf("isDial(%v) = true", e)
 		}
+	}
+}
+
+func TestFailoverAcrossURLs(t *testing.T) {
+	var standby atomic.Int64
+	sb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		standby.Add(1)
+		http.Error(w, "not active", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(sb.Close)
+	dead := httptest.NewServer(http.NotFoundHandler())
+	deadURL := dead.URL
+	dead.Close() // connection refused
+	up := httptest.NewServer(cp.NewHandler(memstore.New()))
+	t.Cleanup(up.Close)
+
+	c := New(deadURL+", "+sb.URL+","+up.URL+"/", nil)
+	ctx := context.Background()
+	if err := c.CreateTopic(ctx, "t", 2); err != nil {
+		t.Fatalf("create through three urls: %v", err)
+	}
+	if got := c.cur.Load(); got != 2 {
+		t.Fatalf("sticky url %d, want 2", got)
+	}
+	before := standby.Load()
+	if _, err := c.Call(ctx, core.DescribeTopics{}); err != nil || standby.Load() != before {
+		t.Fatalf("a later call must start at the url that worked: %v (standby hits %d -> %d)", err, before, standby.Load())
+	}
+}
+
+func TestFailoverGivesUpAfterEachURLOnce(t *testing.T) {
+	var hits atomic.Int64
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		http.Error(w, "no", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(bad.Close)
+	c := New(bad.URL+","+bad.URL, nil)
+	err := c.CreateTopic(context.Background(), "t", 1)
+	var ce *CallError
+	if !errors.As(err, &ce) || ce.Status != 503 || hits.Load() != 2 {
+		t.Fatalf("err %v hits %d", err, hits.Load())
+	}
+}
+
+func TestNoFailoverOnBusinessErrorOrTimeout(t *testing.T) {
+	var hits atomic.Int64
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		io.Copy(io.Discard, r.Body) // lets the server notice the client going away
+		<-r.Context().Done()
+	}))
+	t.Cleanup(slow.Close)
+	up := httptest.NewServer(cp.NewHandler(memstore.New()))
+	t.Cleanup(up.Close)
+	c := New(slow.URL+","+up.URL, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := c.CreateTopic(ctx, "t", 1); err == nil || hits.Load() != 1 {
+		t.Fatalf("a sent request that times out must not be resent elsewhere: %v hits %d", err, hits.Load())
+	}
+	if c2 := New(up.URL, nil); c2.CreateTopic(context.Background(), "", 1) == nil {
+		t.Fatal("business error lost")
 	}
 }

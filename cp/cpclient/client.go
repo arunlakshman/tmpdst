@@ -6,11 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptrace"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"manifester/core"
@@ -44,9 +46,10 @@ func (e *CallError) Unwrap() error { return e.Err }
 
 // Client implements sys.ControlPlane.
 type Client struct {
-	base string
-	hc   *http.Client
-	obs  func(op string, d time.Duration)
+	bases []string
+	cur   atomic.Int32 // index of the URL that last worked
+	hc    *http.Client
+	obs   func(op string, d time.Duration)
 }
 
 // Observe sets a callback receiving, per exchange, the op name and the time
@@ -56,14 +59,25 @@ func (c *Client) Observe(f func(op string, d time.Duration)) { c.obs = f }
 
 var _ sys.ControlPlane = (*Client)(nil)
 
-// New returns a client for the service at baseURL. A nil hc gets a default
-// client; deadlines come from the context of each call.
+// New returns a client for the service at baseURL. baseURL may be a comma
+// separated list of control-plane URLs (decision 51): calls go to the URL that
+// last worked, and a connection that could not be made or a 503 (a standby, a
+// node that is starting or cannot apply the log) moves on to the next URL
+// within the same call, each URL at most once. A commit retried this way is
+// safe: it carries its segment key. A nil hc gets a default client; deadlines
+// come from the context of each call.
 func New(baseURL string, hc *http.Client) *Client {
 	if hc == nil {
 		// Sized for the real concurrency (audit item 4): see httppool.
 		hc = &http.Client{Transport: httppool.Transport()}
 	}
-	return &Client{base: strings.TrimRight(baseURL, "/"), hc: hc}
+	c := &Client{hc: hc}
+	for _, u := range strings.Split(baseURL, ",") {
+		if u = strings.TrimRight(strings.TrimSpace(u), "/"); u != "" {
+			c.bases = append(c.bases, u)
+		}
+	}
+	return c
 }
 
 // Call performs op. A business error is returned as *Error, any other
@@ -154,13 +168,39 @@ func ranges(in []cp.Range) []core.BatchRange {
 }
 
 func (c *Client) do(ctx context.Context, name string, req, resp any) error {
+	n := len(c.bases)
+	start := int(c.cur.Load())
+	var err error
+	for i := 0; i < n; i++ {
+		idx := (start + i) % n
+		if err = c.doAt(ctx, c.bases[idx], name, req, resp); !shouldFailover(ctx, err) {
+			if i > 0 && err == nil {
+				c.cur.Store(int32(idx))
+			}
+			return err
+		}
+	}
+	return err
+}
+
+// shouldFailover: the request certainly did not run here (no connection) or
+// the node said it will not take it now (503), and the caller is still waiting.
+func shouldFailover(ctx context.Context, err error) bool {
+	var ce *CallError
+	if err == nil || ctx.Err() != nil || !errors.As(err, &ce) {
+		return false
+	}
+	return !ce.Sent || ce.Status == http.StatusServiceUnavailable
+}
+
+func (c *Client) doAt(ctx context.Context, base, name string, req, resp any) error {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return &CallError{Op: name, Err: err}
 	}
 	sent := false
 	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { sent = true }})
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/v1/"+name, bytes.NewReader(body))
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/"+name, bytes.NewReader(body))
 	if err != nil {
 		return &CallError{Op: name, Err: err}
 	}

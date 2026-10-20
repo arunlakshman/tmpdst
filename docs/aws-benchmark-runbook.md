@@ -428,5 +428,5 @@ Both are opt-in; the default WarpStream-style run is unchanged.
 - Segment window: `bench-ctl.sh broker-args -segment-window 1s` adds the flag to every manibroker (systemd drop-in) and restarts them;
   `bench-ctl.sh broker-args` with no flags removes the drop-in. (Or set `broker_extra_args` in my.tfvars at apply time.)
 - Abort threshold: `run-omb.sh --abort-p99-ms 60000` (or env `OMB_ABORT_P99_MS`); default 10000.
-- Short stages: `w3-smoke-100k-1min` (1 min), `w3-500k-2min` (2 min + 1 min warm-up). Example:
-  `bench-ctl.sh run --stages w3-500k-2min --abort-p99-ms 60000 [--affine]`. Results of such short stages are indicative only.
+- Short stages: `w3-smoke-100k-1min` (1 min), `w3-500k-4min` (4 min + 1 min warm-up). Example:
+  `bench-ctl.sh run --stages w3-500k-4min --abort-p99-ms 60000 [--affine]`. Results of such short stages are indicative only.

@@ -1,6 +1,6 @@
 # Log-backed control-plane service (stage 2)
 
-Status: built and tested in `cp/logcp`; not the default `-store` (stage 4 wires `cmd/manicp`). Decisions 48-52,
+Status: built and tested in `cp/logcp` (sim engine and cap 4096 in stage 3, `docs/sim-log-engine.md`); not the default `-store` (stage 4 wires `cmd/manicp`). Decisions 48-52,
 `docs/design-a-prototype.md` section 8, `docs/applier-bakeoff.md`. Constructor: `logcp.New(Config)`,
 `Start(ctx)`, `Handler()`; test builders in `cp/logcp/logcptest`.
 
@@ -144,6 +144,5 @@ Index-on p99 at 256/s includes the indexer and fake sharing one host (about 38k 
 
 ## NOT done
 
-Wiring into `cmd/manicp`, flags, TTL enablement on the table, pre-warming (stage 4); cap 4096 and the sim engine
-(stage 3); AWS run (stage 5); full reindex from Pebble when the index stalls past the window; advisory active hint
+Wiring into `cmd/manicp`, flags, TTL enablement on the table, pre-warming (stage 4); AWS run (stage 5); full reindex from Pebble when the index stalls past the window; advisory active hint
 beyond `X-CP-Role`; S3 index; streaming checkpoints (a checkpoint is built in memory).

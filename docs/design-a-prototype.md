@@ -184,7 +184,7 @@ over 30) green. No stage touches an existing sim trace hash except stage 3, whic
 |---|---|---|
 | 1. KV applier and lockstep | `cp/applier`: the state machine of decision 49 on an embedded KV store chosen by a bake-off (`docs/applier-bakeoff.md`); commands CommitSegment and CreateTopic, queries Lookup, DescribeTopics, End; runs packed per (partition, segment); per-key digest plus bases for the window; checkpoint, restore and trim by slot. | X2 harness with the applier as every replica's state machine and veritas as the oracle: 100,000 seeds, 0 failures (equal answers, offsets and query digests); `cptest` conformance green against the applier as a `cp.Store`; apply rate well above 430 segments/s at 150 partitions per segment with 40k partitions of state; the store dependency recorded per decisions I and J. |
 | 2. Log-backed CP service (DONE, `docs/log-cp-service.md`) | The `cp/` service on the DynamoDB log through the `cp/logsm` seam: committer with K=4, hole filler, hot standby tailing the log (decision 51, the slot is the fence), sticky routing of commits to one node, checkpoint and trim (trim stays behind the key window), indexer writing `R#` rows every 10 s on a pre-warmed table, fresh Lookup through `CheckTail` with shared (batched) tail reads. | Conformance C3 against the real service on fakedb; a standby takes over after the appender is killed with no lost or duplicated offset; restart from checkpoint plus tail gives the same state digest; Lookup after an ack sees it; unit and race tests for each loop. |
-| 3. Cap 4096 and sim | Raise `MaxSegmentPartitions` from 96 to about 4096 (decision 52); add a sim CP engine for the log (Put/Query with latency, lost answers, unknown outcome; replicas as actors with crash and restart from a checkpoint; `HoleAfter` on the virtual clock) next to the S3 engine; veritas stays the oracle over the log's first-slot order. | Every trace hash re-baselined and reviewed by hand (a diff per hash with the cause); 300-seed campaign green; invariants: all live replicas' query digests equal at a quiesced log, an answer derives from the applied slot, no empty slot is passed without a no-op. |
+| 3. Cap 4096 and sim (DONE, `docs/sim-log-engine.md`) | Raise `MaxSegmentPartitions` from 96 to about 4096 (decision 52); add a sim CP engine for the log (Put/Query with latency, lost answers, unknown outcome; replicas as actors with crash and restart from a checkpoint; `HoleAfter` on the virtual clock) next to the S3 engine; veritas stays the oracle over the log's first-slot order. | Every trace hash re-baselined and reviewed by hand (a diff per hash with the cause); 300-seed campaign green; invariants: all live replicas' query digests equal at a quiesced log, an answer derives from the applied slot, no empty slot is passed without a no-op. |
 | 4. Wiring and operations | `manicp -store` kind for the log, OpenAPI and a CP URL list (or NLB) for brokers with failover to the next URL, `manicp_` observability for apply lag, slot loss, hole fills, checkpoint age, indexer lag, window size. | `it/` kill-the-appender test fails over within the budget; metrics documented in `docs/observability.md`; runbook updated. |
 | 5. AWS rerun | 500k, 750k and 1M random clients, no partition affinity, with the production CP (X1/X3/X4 numbers re-measured at that load). | Report in `docs/` with commit rate, commit latency p50/p99, tail-query rate, DynamoDB WRU, failover penalty and cost per GiB; the stage-5 results decide whether the S3 index (TODO) is scheduled. |
 
@@ -197,3 +197,37 @@ seeded X2 on the real service, 20,000 seeds, 0 failures (takeover, failback, spl
 checkpoint, trim); `-race` test; restart from checkpoint plus tail gives equal state; Lookup after an ack sees it on
 any node. Two findings changed the design text (decision 53): the idempotency window must be a function of the
 slot number, and trimming must leave tombstones. Not wired into `cmd/manicp` (stage 4).
+
+### Stage 3 status
+
+Done (decision 52 note). `broker.Config.MaxSegmentPartitions` and `manibroker -max-segment-partitions` default to 4096;
+the old transaction store needs `-max-segment-partitions 96` (documented in `broker/config.go`, `cp/doc.go`, the flag help,
+the runbook; `deploy/aws/terraform` defaults `broker_extra_args` to it because it still runs `manicp -store dynamo`), and
+refuses a wider segment with `ErrTooLarge` and no write (tested at 4096 partitions in `cp/dynamo`). The broker does not
+learn the limit from the CP: that needs a new endpoint and a contract field, and the CP URL list of stage 4 is the better
+place. `sim/engines/logengine` is the sim log CP (`docs/sim-log-engine.md`); `manisim -scenario kafka-log` runs the whole
+system on it; four mutants are caught; C2 conformance against veritas passes. The sim's SegmentCaps invariant now uses the
+store's item limit (none for the log store) instead of the constant 100.
+
+**Trace hashes: none changed, none pinned.** No golden or pinned hash exists in the repo (the determinism tests compare two
+runs of one seed; `sim.rand_test` pins the RNG stream, which did not change). The simulated workload moves 6 partitions, so
+a cap of 96 or 4096 never binds: the 300 and 2000 seed campaigns before and after the cap change are identical seed by
+seed (same step count, rand calls and trace hash, 0 failing in both):
+
+| campaign (preset `kafka`) | before (cap 96) | after (cap 4096) |
+|---|---|---|
+| 300 seeds | 0 failing, 5,828,573 steps | identical hash for every seed |
+| 2000 seeds | 0 failing, 40,495,135 steps | identical hash for every seed |
+
+The cap change is exercised by wide workloads instead (`sim/kafka` tests): 128 producers over 256 partitions commit a
+100-partition segment on the log store (the old store allows at most 96 and would refuse 101 items), and
+`TestCapChangeIsExplainedBySealReasons` shows the only difference at the broker: with the veritas CP and no item limit, 2
+of 265 segments sealed by the 96-partition rule at cap 96 and none at 4096 (they run on to the timer). The new preset
+`kafka-log`: 300 seeds 0 failing (7,519,187 steps), 2000 seeds 0 failing (50,734,757 steps, no coverage gap). No
+correctness hole in the log design showed up; one property of mine was too strict (a lagging restored replica may meet a
+tombstone again when a newer checkpoint trimmed past it, and restarts again: the real invariant is that a checkpoint is
+never below the trim floor, now asserted).
+
+Left for stage 4: `manicp -store` kind for the log, OpenAPI and URL list wiring, the `manicp_log_*` dashboards and alerts,
+and then `broker_extra_args` can drop the 96 flag. Stage 5: the AWS rerun at 500k to 1M (this is where the cap lets
+segments grow past 96 partitions, which the sim workload cannot show).

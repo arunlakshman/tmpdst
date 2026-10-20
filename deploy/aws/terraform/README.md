@@ -52,6 +52,7 @@ PutItem/UpdateItem/DeleteItem/ConditionCheckItem/GetItem, all of which are grant
 | `region`, `az`, `run_id`, `owner`, `budget_usd`, `budget_email` | none | required, see `example.tfvars` |
 | `broker_count` | 6 | 1..12 stateless brokers |
 | `cp_instance_type` | `m6in.xlarge` | the single control-plane host (4 vCPU / 16 GiB), exactly one |
+| `broker_extra_args` | `-max-segment-partitions 96` | extra manibroker flags. The default keeps the partition cap at 96 because `-store dynamo` commits one 100-item transaction and refuses wider segments (decision 52); use `""` with the log store (cap 4096) |
 | `cp_extra_args` | empty | extra manicp flags (sequencer tuning once manicp has them); empty keeps the unit valid for any manicp build |
 | `broker_instance_type` | `m6in.4xlarge` | 16 vCPU / 64 GiB / up to 40 Gbps, as WarpStream's agents |
 | `loadgen_count` | 2 | 1..8 load generator hosts |
@@ -60,7 +61,7 @@ PutItem/UpdateItem/DeleteItem/ConditionCheckItem/GetItem, all of which are grant
 | `max_runtime_minutes` | 360 | `shutdown -h +N` on every host, instance terminates. Counts from boot; the full plan with consumers takes about 135-140 min including boot and collection, and the CP host dying stops all writes, so keep this at 240 or more |
 | `ddb_warm_write_units`, `ddb_warm_read_units` | 30000, 30000 | table `warm_throughput` |
 | `initial_topic_partitions` | 6 | partitions of `bench-<run_id>` |
-| `bucket_expire_days`, `root_volume_gb`, `broker_extra_args`, `cp_extra_args`, `alloy_version`, `kafka_tools_version`, Grafana SSM param names | see `variables.tf` | unchanged |
+| `bucket_expire_days`, `root_volume_gb`, `cp_extra_args`, `alloy_version`, `kafka_tools_version`, Grafana SSM param names | see `variables.tf` | unchanged |
 
 The AWS provider is now `~> 6.13` (was `~> 5.80`): `warm_throughput` on `aws_dynamodb_table`
 first appears in 6.13.0 (the previously locked 5.100.0 has no such argument; verified from its schema).

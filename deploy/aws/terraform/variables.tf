@@ -212,9 +212,9 @@ variable "kafka_tools_version" {
 }
 
 variable "broker_extra_args" {
-  description = "Extra flags appended to the manibroker command line (e.g. \"-segment-bytes 32MiB\")."
+  description = "Extra flags appended to the manibroker command line (e.g. \"-segment-bytes 32MiB\"). The default pins the partition cap to 96 because the control plane host runs manicp -store dynamo, whose 100-item transaction refuses a wider segment (decision 52); set it to \"\" once manicp runs the log store (stage 4), whose cap is the broker default of 4096."
   type        = string
-  default     = ""
+  default     = "-max-segment-partitions 96"
 }
 
 variable "cp_extra_args" {

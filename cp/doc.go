@@ -73,7 +73,9 @@
 //
 //	items = 1 + distinct partitions + topics that must grow (<= 100)
 //
-// The broker bounds a segment by MaxSegmentPartitions (24) and
+// The broker bounds a segment by MaxSegmentPartitions (this store needs
+// at most 96: -max-segment-partitions 96, since the broker default is 4096 for
+// the log store, decision 52) and
 // MaxSegmentBatches (256, for the G# blob) well below that. The spec has no
 // such limit. A refusal (ErrTooLarge) is not retried by the broker.
 // # Sequencer (decision 46)

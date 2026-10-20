@@ -107,7 +107,7 @@ is visible on every broker with 288 partitions, the lz4 probe (one 1 KiB record 
 rejects it makes the run fall back to `none` with a LOUD "not apples-to-apples" warning). Go only if:
 - [ ] `SMOKE PASS`, achieved >= 80% of 100k msg/s, no errors
 - [ ] every broker shows traffic in Grafana (Overview, "Per-broker write throughput"), skew max/min about 1 in balanced mode
-- [ ] `segments_failed` 0, S3 and DynamoDB throttles 0, `manicp` WRU/s (summary.md "Control plane" table; Overview "Control plane" row) and the mean group size: at 288 partitions with random partition spread a segment holds about 96 partitions (97 items), so
+- [ ] `segments_failed` 0, S3 and DynamoDB throttles 0, `manicp` WRU/s (summary.md "Control plane" table; Overview "Control plane" row) and the mean group size: at 288 partitions with random partition spread a segment holds about 96 partitions (97 items; the cap is `-max-segment-partitions 96` on the old store, see the partition cap note below), so
       every group holds ONE segment (a group is capped at 100 items) and the WRU per commit stays about 240 at any load; expect group size 1 and
       240 x commits/s (comparison doc, section 5; `docs/surprises-audit.md` S1/S7). It would fall only with fewer partitions per segment
 - [ ] control plane: queue depth not growing, canceled groups about 0 (one writer), commit latency steady
@@ -427,6 +427,10 @@ Both are opt-in; the default WarpStream-style run is unchanged.
   ~batch.size bytes like the stock partitioner). Needs balanced mode. NOT comparable to WarpStream: label results "partition-affine producers".
 - Segment window: `bench-ctl.sh broker-args -segment-window 1s` adds the flag to every manibroker (systemd drop-in) and restarts them;
   `bench-ctl.sh broker-args` with no flags removes the drop-in. (Or set `broker_extra_args` in my.tfvars at apply time.)
+- Partition cap (decision 52): the broker default `-max-segment-partitions` is now 4096, valid only for the log store. The runs in this
+  runbook use `manicp -store dynamo` (one 100-item transaction), which refuses a segment of more than 99 partitions with `ErrTooLarge`, so
+  `broker_extra_args` defaults to `-max-segment-partitions 96` in `variables.tf`; keep it for every run against the old store and set it to
+  `""` for the log store (stage 5).
 - Abort threshold: `run-omb.sh --abort-p99-ms 60000` (or env `OMB_ABORT_P99_MS`); default 10000.
 - Short stages: `w3-smoke-100k-1min` (1 min), `w3-500k-4min` (4 min + 1 min warm-up). Example:
   `bench-ctl.sh run --stages w3-500k-4min --abort-p99-ms 60000 [--affine]`. Results of such short stages are indicative only.

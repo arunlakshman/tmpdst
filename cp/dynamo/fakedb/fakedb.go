@@ -45,6 +45,10 @@ type Fake struct {
 	// non-nil result is returned as the call's error: the transaction DID
 	// commit but the caller never learns it (a lost answer).
 	AfterApply func() error
+	// AfterPut, if set, runs after a PutItem has been applied; a non-nil
+	// result is returned as the call's error (the put DID land, the answer is
+	// lost).
+	AfterPut func() error
 	// Unprocess is the number of upcoming BatchGetItem calls that leave their
 	// last key in UnprocessedKeys.
 	Unprocess int

@@ -384,3 +384,48 @@ func TestPutIfAbsentOneWinner(t *testing.T) {
 		t.Fatalf("%d winners, %d losers", wins.Load(), losses.Load())
 	}
 }
+
+func TestPutItem(t *testing.T) {
+	f := fresh(t)
+	put := func(sk, v string, old bool) error {
+		in := &dynamodb.PutItemInput{TableName: aws.String("t"), Item: item{"pk": s("p"), "sk": s(sk), "v": s(v)},
+			ConditionExpression: aws.String("attribute_not_exists(pk)")}
+		if old {
+			in.ReturnValuesOnConditionCheckFailure = types.ReturnValuesOnConditionCheckFailureAllOld
+		}
+		_, err := f.PutItem(ctx, in)
+		return err
+	}
+	if err := put("1", "a", true); err != nil {
+		t.Fatal(err)
+	}
+	var cc *types.ConditionalCheckFailedException
+	err := put("1", "b", true)
+	if !errors.As(err, &cc) || cc.Item["v"].(*types.AttributeValueMemberS).Value != "a" {
+		t.Fatalf("second put: %v %+v", err, cc)
+	}
+	if err := put("1", "b", false); !errors.As(err, &cc) || cc.Item != nil {
+		t.Fatalf("no old item expected: %v", err)
+	}
+	if got := f.Item("t", k("p", "1"))["v"].(*types.AttributeValueMemberS).Value; got != "a" {
+		t.Fatalf("stored %q", got)
+	}
+	f.AfterPut = func() error { return errors.New("lost answer") }
+	if err := put("2", "c", false); err == nil || f.Item("t", k("p", "2")) == nil {
+		t.Fatalf("lost answer must still store: %v", err)
+	}
+	f.Fail = func(call string) error { return errors.New("boom " + call) }
+	if err := put("3", "d", false); err == nil || f.Item("t", k("p", "3")) != nil {
+		t.Fatalf("failed call must not store: %v", err)
+	}
+	f.Fail = nil
+	bad := &dynamodb.PutItemInput{TableName: aws.String("nope"), Item: k("p", "9")}
+	var nf *types.ResourceNotFoundException
+	if _, err := f.PutItem(ctx, bad); !errors.As(err, &nf) {
+		t.Fatalf("missing table: %v", err)
+	}
+	bad = &dynamodb.PutItemInput{TableName: aws.String("t"), Item: k("p", "9"), ConditionExpression: aws.String("size(x) > 1")}
+	if _, err := f.PutItem(ctx, bad); err == nil {
+		t.Fatal("unsupported condition must fail")
+	}
+}

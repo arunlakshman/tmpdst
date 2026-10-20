@@ -109,3 +109,35 @@ func (f *Fake) pageLen(limit *int32, avail int) int {
 	}
 	return n
 }
+
+// PutItem stores the item if the condition holds. On a failed condition with
+// ReturnValuesOnConditionCheckFailure ALL_OLD the error carries the existing
+// item, like the service.
+func (f *Fake) PutItem(ctx context.Context, in *dynamodb.PutItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+	if err := f.failed(ctx, "PutItem"); err != nil {
+		return nil, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, err := f.table(in.TableName)
+	if err != nil {
+		return nil, err
+	}
+	cur := t[idOf(in.Item)]
+	if ok, err := evalCond(in.ConditionExpression, in.ExpressionAttributeValues, cur); err != nil {
+		return nil, err
+	} else if !ok {
+		e := &types.ConditionalCheckFailedException{Message: aws.String("The conditional request failed")}
+		if in.ReturnValuesOnConditionCheckFailure == types.ReturnValuesOnConditionCheckFailureAllOld {
+			e.Item = cloneItem(cur)
+		}
+		return nil, e
+	}
+	t[idOf(in.Item)] = cloneItem(in.Item)
+	if f.AfterPut != nil {
+		if err := f.AfterPut(); err != nil {
+			return nil, err
+		}
+	}
+	return &dynamodb.PutItemOutput{ConsumedCapacity: f.capacity(aws.ToString(in.TableName))}, nil
+}

@@ -25,6 +25,9 @@ func NewCommitter(r *Replica, k int) *Committer {
 // ctx's: the command may or may not be in the log (the caller retries under
 // the same key, which is safe).
 func (c *Committer) Do(ctx context.Context, e Entry) (core.CPDone, error) {
+	if err := ctx.Err(); err != nil {
+		return core.CPDone{}, err
+	}
 	select {
 	case c.sem <- struct{}{}:
 	case <-ctx.Done():

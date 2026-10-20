@@ -22,7 +22,7 @@ You run apply and destroy; nothing here is automatic. Never run `docker prune` o
 | operator control (topic, workers, start run) | your workstation, through SSM send-command | `deploy/aws/bench/bench-ctl.sh` |
 | OMB workers | every loadgen host, `:8080` (HTTP) and `:9090` (stats) | `deploy/aws/bench/start-omb-workers.sh` |
 | OMB coordinator + stage plan + abort rules | loadgen host 0 (detached) | `deploy/aws/bench/run-omb.sh` |
-| the ONE manicp (single sequencer, decision 46) + `metrics/cp/` snapshots | dedicated control-plane host (`cp_instance_type`, default m6in.xlarge), `:8080` | `files/cp-user-data.sh.tpl` |
+| manicp: the log store (`-store dynamolog`, default) on an active host (rank 0) plus `cp_standby_count` (default 1) hot standbys, or with `cp_store = dynamo` the ONE sequencer of decision 46; `metrics/cp/` (rank 0) and `metrics/cp-<rank>/` snapshots | dedicated control-plane hosts (`cp_instance_type`, default m6in.xlarge), `:8080` | `files/cp-user-data.sh.tpl` |
 | manibroker `/metrics` snapshots every 10 s (`metrics/<broker id>/`) | every broker host (`mb-snapshot.service`) | terraform user-data |
 | summary | your workstation | `deploy/aws/bench/collect-results.sh` -> `results/<run>/summary.md` |
 
@@ -168,7 +168,9 @@ SSM parameters and Grafana tokens if the account is shared.
   if it ever misclassifies, force `--compression none|lz4`.
 - DynamoDB cost and the 98-calls-per-commit behaviour at 288 partitions are predictions (comparison doc, section 5).
 
-### A10. The single control plane: verify, and what to do when it dies
+### A10. The single control plane (`cp_store = dynamo`, the rollback store): verify, and what to do when it dies
+
+This section describes the old transaction store. The default since stage 4 is the log store: read A11 first.
 
 Decision 46: the control plane owns sequencing. There is exactly ONE manicp (host `mb-<run>-cp`, `cp_instance_type`,
 count 1) with a single sequencing thread, group commit and an in-memory offset cache; every broker runs
@@ -210,6 +212,51 @@ HA (future work, not needed for correctness): an active/standby pair, where the 
 (heartbeat item with TTL) and takes over by fencing through the existing compare-and-set when the active one stops
 renewing. The lease would only prevent two active sequencers (a performance matter, as above); safety stays with the
 conditional writes. Not built, not needed for the benchmark.
+
+### A11. The log store (stage 4 default): two CP nodes, run id, killing the appender
+
+What runs: `cp_store = log` (default) starts `aws_instance.cp` (rank 0, the preferred appender) and `cp_standby_count`
+(default 1) `aws_instance.cp_standby` (rank 1, a hot standby that tails and applies the log, serves reads, and answers
+commits with 503). Each runs `manicp -store dynamolog -rank R -node-name cp-R -takeover-after 5s -ckpt-bucket <run bucket>
+-ckpt-prefix cp/ -pebble-dir /var/lib/manicp/pebble` (`cp_takeover_after`, `cp_extra_args` change them). Brokers get
+`-cp-url http://<rank0>:8080,http://<rank1>:8080` (output `cp_urls`) and the default `-max-segment-partitions 4096`
+(`broker_extra_args` is empty). The DynamoDB table has TTL on `ttl` and warm throughput `ddb_warm_*` (decision 50; X4: a
+cold on-demand table throttles near 4k items/s). Checkpoints are objects under `cp/ckpt/` in the run bucket.
+
+Run id: one `run_id` names the bucket, table, tags and every log line (`-run-id`). The table is new per run, so the log starts
+at slot 0. Do not reuse a run id's table with a different `-window-slots` (a cluster constant).
+
+Verify (after apply and upload): `bench-ctl.sh check-cp` (one manicp on each CP host, healthz, brokers reach rank 0) and
+`bench-ctl.sh cp-roles` (rank 0 `X-CP-Role: active`, rank 1 `standby`). `s3://<bucket>/results/<run>/metrics/cp/` (rank 0)
+and `metrics/cp-1/` (standby) get a file every 10 s. `summarize.py` reads `metrics/cp/` only: after a failover the active
+node's numbers are in `cp-1/`.
+
+Kill the appender mid-run (the failover measurement): during a stage at steady load, note the time and run
+`bench-ctl.sh kill-appender 60` (SIGKILL manicp on rank 0, held down 60 s, then started again; it comes back as the
+preferred appender and the standby steps down, so you also measure the failback). Expect, in this order:
+1. brokers' commits fail to connect to rank 0 or reach it reset, and move to rank 1, which answers 503 until it takes
+   over; produce acks stall (`manibroker_segment_commit_seconds` p99 rises, buffered bytes grow, backpressure pauses reads);
+2. after `takeover-after` (5 s) plus the standby's next tail pass rank 1 becomes active (`manicp_log_active` 1,
+   `manicp_log_role_changes_total{to="active"}`, a few `manicp_log_hole_fills_total` if the dead node held a slot, up to
+   250 ms each) and the stall ends; in-flight commits are replayed by segment key (the window answers them with the original
+   offsets), so there are no duplicates and no lost acked data;
+3. when rank 0 restarts it restores the newest checkpoint (or replays) and starts active; rank 1 sees a lower-rank writer
+   and demotes (`role_changes_total{to="standby"}`); brokers fail back through a 503 from rank 1.
+Look at: Overview, row "Control plane (log store ...)" (slot rate, append p50/p99, lost slots, apply and standby lag, hole
+fills and role changes, queue/refused, index backlog, checkpoint age); Pipeline "Commit" p99 and "Segments in flight";
+OMB's own latency chart for the gap; `journalctl -u manicp` on both hosts (`log_role`, `log_ready`, `cp call` WARNs).
+Budget: an ack gap of `takeover-after` + about 2 s of broker backoff + the 10 s CP call timeout in the worst case (a host
+that drops packets instead of refusing: dial 5 s, then 503 from the standby), far below the 120 s `-commit-deadline`;
+the it/ test measures about 2 s with a 1.5 s takeover on loopback. If a gap approaches the deadline, produces fail with
+REQUEST_TIMED_OUT and the stage is invalid.
+
+Index and rollback: the R# rows are written 10 s after the ack. To go back to `cp_store = dynamo` mid-experiment, stop
+the producers, wait until `manicp_log_index_lag_slots` is 0 on the active node, then re-apply (see
+`docs/log-cp-service.md` "Upgrade and rollback"). Replays of old segment keys after a rollback commit again (decision 41).
+
+Standby or whole-CP loss: lose the standby only: nothing visible (alert on `up{job="manicp"}`); the active keeps serving. Lose
+both: as in A10 (acks stall, everything retried for the deadline). Replace one host with `terraform apply
+-replace=aws_instance.cp_standby[0]` (its IP is in the brokers' user-data, so Terraform replaces the brokers too).
 
 # Part B. Quick smoke (single broker)
 

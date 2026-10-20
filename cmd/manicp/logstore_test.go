@@ -237,8 +237,9 @@ func TestLogStoreThreeNodesTakeover(t *testing.T) {
 	before := n.Load()
 	n0.stop(t) // the appender dies mid-stream
 	waitCount(t, &n, before+150)
-	if r := role(t, n1); r != "active" {
-		t.Fatalf("standby n1 did not take over: role %q\n%s", r, n1.logs.String())
+	// Either standby may win the takeover race; commits only succeed through an active node.
+	if r1, r2 := role(t, n1), role(t, n2); r1 != "active" && r2 != "active" {
+		t.Fatalf("no standby took over: roles %q %q\n%s", r1, r2, n1.logs.String())
 	}
 	close(stop)
 	for w := 0; w < 3; w++ {

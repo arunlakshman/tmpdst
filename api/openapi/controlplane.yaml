@@ -13,6 +13,7 @@ info:
     | success or business error | 200 | JSON, `err` field | business code, NotApplied |
     | malformed JSON, body > 32 MiB | 200 | `{"err":"ErrInvalid"}` | ErrInvalid, NotApplied |
     | ErrUnavailable (throttle, exhausted optimistic retries), context canceled/deadline in the store | 503 | text `unavailable` | ErrUnavailable, NotApplied |
+    | log store: a standby answering a write (`commit-segment`, `create-topic`), a node that cannot apply the log, a full commit queue | 503 | text `not active` or `unavailable`, header `Retry-After: 1` on a standby | ErrUnavailable, NotApplied; cpclient moves to the next URL of its list |
     | any other store error | 500 | text `internal error` | ErrIO, MaybeApplied for CommitSegment |
     | other 4xx / 429 from a proxy | 4xx | any | ErrIO NotApplied / 429: ErrUnavailable NotApplied |
     | timeout, reset or EOF after the request was sent | none | none | ErrTimeout or ErrIO, MaybeApplied for mutating ops |
@@ -34,6 +35,10 @@ info:
     ## Examples
 
     The worked examples are replayed in order, against a fresh in-memory control plane, by the spec test (`x-replay`).
+
+    ## Log store: roles, 503 and the URL list
+
+    With `manicp -store dynamolog` several nodes serve this API over one shared log. Every response carries `X-CP-Role: active|standby`. A standby answers `lookup` and `describe-topics` (fresh reads, any node) but answers `commit-segment` and `create-topic` with 503, `Retry-After: 1`, before reading the body, so nothing was done and the request is safe to send to the next node. Brokers hold a comma-separated list of node URLs (`manibroker -cp-url a,b`): cpclient uses the URL that last worked and moves on, each URL once per call, on a connect error or a 503; a commit that moves carries the same `segment_key`, so a replay returns the original ranges. `/healthz` is 503 while a node is starting, stopped, or cannot apply the log (unknown entry format); it is 200 on a standby. Rolling back to `-store dynamo` needs commits quiesced and the index flushed (docs/log-cp-service.md).
 servers:
   - url: "http://127.0.0.1:8080"
     description: "Loopback in the AWS setup."
@@ -464,7 +469,7 @@ paths:
       summary: "Liveness probe"
       tags:
         - "control-plane"
-      description: "Always 200 with the plain-text body `ok` (and a newline) while the process serves HTTP. It does not touch the store."
+      description: "With the memory and transaction stores: always 200 with the plain-text body `ok` while the process serves HTTP; it does not touch the store. With the log store: 200 once the node has restored its checkpoint and caught up and can apply the log (also on a standby), else 503 with the reason as text. The log store sets `X-CP-Role`."
       responses:
         "200":
           description: "Alive."
@@ -474,6 +479,21 @@ paths:
                 type: "string"
                 const: "ok\n"
               example: "ok\n"
+          headers:
+            "X-CP-Role":
+              description: "Log-backed control plane (manicp -store dynamolog) only: this node's advisory role, \"active\" or \"standby\" (decision 51). Absent on the other stores. Advisory: brokers may log it, nothing depends on it."
+              schema:
+                type: "string"
+                enum:
+                  - "active"
+                  - "standby"
+        "503":
+          description: "Log store only: the node is starting, stopped, or blocked on an unknown log entry format."
+          content:
+            "text/plain":
+              schema:
+                type: "string"
+              example: "logcp: starting\n"
 components:
   schemas:
     ErrCode:
@@ -697,12 +717,24 @@ components:
           description: "Business error code; absent means OK."
   responses:
     Unavailable:
-      description: "Store unavailable: throttling, overload, exhausted optimistic retries (20 attempts), or the request context ended. Plain text `unavailable`. The client treats it as ErrUnavailable, NotApplied, so it is safe to retry any operation."
+      description: "Store unavailable: throttling, overload, exhausted optimistic retries (20 attempts), or the request context ended. Plain text `unavailable`. The client treats it as ErrUnavailable, NotApplied, so it is safe to retry any operation. The log store also answers 503 from a standby for commit-segment and create-topic (header `Retry-After: 1`, text `not active`), from a node that cannot apply the log, and when its commit queue is full."
       content:
         "text/plain":
           schema:
             type: "string"
           example: "unavailable\n"
+      headers:
+        "Retry-After":
+          description: "Seconds; set by a log-store standby refusing a write."
+          schema:
+            type: "string"
+        "X-CP-Role":
+          description: "Log-backed control plane (manicp -store dynamolog) only: this node's advisory role, \"active\" or \"standby\" (decision 51). Absent on the other stores. Advisory: brokers may log it, nothing depends on it."
+          schema:
+            type: "string"
+            enum:
+              - "active"
+              - "standby"
     InternalError:
       description: "Any other store error. Plain text `internal error`. The effect is unknown: MaybeApplied for CommitSegment (retry it with the same key; the replay returns the original ranges)."
       content:

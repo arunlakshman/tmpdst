@@ -1,6 +1,6 @@
 # Log-backed control-plane service (stage 2)
 
-Status: built and tested in `cp/logcp` (sim engine and cap 4096 in stage 3, `docs/sim-log-engine.md`); not the default `-store` (stage 4 wires `cmd/manicp`). Decisions 48-52,
+Status: built and tested in `cp/logcp` (sim engine and cap 4096 in stage 3, `docs/sim-log-engine.md`); wired in stage 4 as `manicp -store dynamolog` (flags below), the Terraform default for the benchmark. Decisions 48-52,
 `docs/design-a-prototype.md` section 8, `docs/applier-bakeoff.md`. Constructor: `logcp.New(Config)`,
 `Start(ctx)`, `Handler()`; test builders in `cp/logcp/logcptest`.
 
@@ -59,7 +59,7 @@ open; a batch starts at least `TailBatch` after the previous. Then wait until ap
 kicked), then answer from Pebble. Works on any node, so standbys scale reads. A hole below the tail waits up to
 `HoleAfter`, then a no-op fills it.
 
-**Failover.** Active dies: the standby promotes after `TakeoverAfter` (default advisory; stage 4 sets 5 s) and starts
+**Failover.** Active dies: the standby promotes after `TakeoverAfter` (the library default is advisory only; `manicp -takeover-after` defaults to 5 s) and starts
 appending at the tail; in-flight entries of the dead node either landed (replays answer them) or never will. Brokers
 (`cpclient` URL list `a,b`, comma separated) move on at connect error or 503, sticky to the last good URL, each URL
 once per call; commit retries carry the same key. Failback is the same in reverse.
@@ -80,6 +80,30 @@ backoff, `IndexRate` pacing), so the table always holds a prefix of each partiti
 **What reads it today: nothing in the service.** Lookup is answered from Pebble. The rows serve a rollback to the
 old store (quiesce commits, flush, check `index_lag_slots`=0, switch; `G#` keys are not written, so replays of old
 keys after a rollback commit again, allowed by decision 41) and the future S3 index or reader scale-out.
+
+## `manicp -store dynamolog` (stage 4)
+
+Flags (all `-store dynamolog` only; defaults follow decisions 48-53): `-table` (default `<table-prefix>cp`), `-ckpt-bucket`
+(empty: no checkpoints and no trim, a restart replays the whole log) `-ckpt-prefix cp/` `-s3-endpoint` `-s3-path-style`,
+`-node-name` (hostname) `-rank 0`, `-takeover-after 5s` `-heartbeat 1s` `-hole-after 250ms` `-log-k 4` `-slot-rate 200`,
+`-ckpt-every 5m` `-ckpt-min-slots 1000` `-final-checkpoint=true`, `-window-slots 131072` (cluster constant), `-index=true`
+`-index-every 10s` `-index-rate 0` `-index-parallel 8`, `-log-ttl 168h`, `-trim-delete=true`, `-pebble-dir` (empty: temporary;
+a given directory is wiped at start if it holds a Pebble database, refused if it holds anything else), `-start-timeout 10m`,
+`-create-tables` (dev). `-takeover-after` must be several times `-heartbeat`, and far below the brokers' `-commit-deadline`.
+Start: open Pebble (empty), restore the newest checkpoint, replay to the tail, THEN listen: while that runs the port refuses
+connections and brokers use the other URL. `X-CP-Role` is on every response; `/healthz` is 503 until ready or when blocked.
+Shutdown: HTTP drains (15 s), the active node writes a final checkpoint (20 s), loops stop, Pebble closes. `-store mem` and
+`-store dynamo` are unchanged.
+
+### Upgrade and rollback
+
+Upgrade from the old store: it is a new table layout on the same table name. Quiesce producers, stop the old manicp, start the
+log nodes on the same (or a new) table; the log starts empty, so topics must be created again (or the table is fresh per run,
+as in the benchmark). R# rows from the old store are not read by the log service; do not point both stores at one live table.
+Rolling the log format forward: two deploys (decision 53). Roll back to `-store dynamo`: stop producers (commits quiesced),
+wait for `manicp_log_index_lag_slots` = 0 on the active node (the indexer flushes every 10 s), stop the log nodes, start the old
+manicp and give brokers `-max-segment-partitions 96`. G# keys are not written by the log store, so replays of old keys commit
+again (decision 41). If the index was off (`-index=false`) or stalled past the window there is nothing to roll back to.
 
 ## Config (`logcp.Config`)
 
@@ -144,5 +168,5 @@ Index-on p99 at 256/s includes the indexer and fake sharing one host (about 38k 
 
 ## NOT done
 
-Wiring into `cmd/manicp`, flags, TTL enablement on the table, pre-warming (stage 4); AWS run (stage 5); full reindex from Pebble when the index stalls past the window; advisory active hint
+AWS run (stage 5); full reindex from Pebble when the index stalls past the window; advisory active hint
 beyond `X-CP-Role`; S3 index; streaming checkpoints (a checkpoint is built in memory).

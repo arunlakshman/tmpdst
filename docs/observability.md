@@ -121,7 +121,7 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `manicp_build_info`, `_start_time_seconds`, `_uptime_seconds` | | | As for the broker. |
 | `go_*`, `process_*` | | | Runtime and process collectors. |
 
-#### Log-backed control plane (`manicp_log_*`, `cp/logcp`, stage 2; exported once stage 4 wires `-store`)
+#### Log-backed control plane (`manicp_log_*`, `cp/logcp`; exported by `manicp -store dynamolog` since stage 4; one series per CP node, Alloy adds `host` and `cp_rank`)
 
 | name | type | labels | meaning |
 |---|---|---|---|
@@ -143,6 +143,17 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `manicp_log_checkpoint_slot`, `_checkpoint_age_seconds`, `_checkpoint_bytes`, `_checkpoint_seconds`, `_checkpoint_errors_total` | | | Checkpoints; alert on age above 3 x `CkptEvery`. |
 | `manicp_log_trimmed_slots_total` | counter | | Slots tombstoned behind the checkpoint. |
 | `manicp_log_index_watermark_slot`, `_index_lag_slots`, `_index_flush_seconds`, `_index_rows_total`, `_index_unprocessed_total`, `_index_throttles_total`, `_index_lost_runs_total`, `_index_errors_total` | | | R# indexer. Lag is bounded by the flush period; `lost_runs` nonzero means the index stalled past the window. |
+
+Dashboard (Overview, row "Control plane (log store ...)", `gen_dashboards.py`): slot rate and lost slots; append latency p50/p99;
+commands per slot and entry size; apply lag and standby lag; hole fills, role changes and the active gauge; queue depth, queue wait
+and refused requests; index backlog, flush p99, throttles; checkpoint age, size and errors; fresh reads and tail checks. The old
+sequencer row is renamed and stays empty with the log store. Alloy (`cp.alloy`) scrapes each CP host's manicp and adds `cp_rank`;
+CloudWatch DynamoDB metrics (`cpcloudwatch.alloy`, now with PutItem and BatchWriteItem operations) are scraped from rank 0 only.
+Log events (INFO unless noted): `log_ready` (node, rank, applied slot, role), `log_role` (active true/false, a takeover or
+failback), `log_final_ckpt`, `log_final_ckpt_failed` (WARN), `log_no_checkpoint` (WARN, no `-ckpt-bucket`). The manifest
+gains `store`, `rank`, `takeover_after`, `ckpt_bucket`. Suggested alerts: `manicp_log_blocked` = 1; checkpoint age above 15 min;
+`manicp_log_standby_lag_slots` rising; `rate(manicp_log_lost_slots_total)` > 0 for minutes; `manicp_log_index_lag_slots` > 3 x flush
+period x slot rate.
 
 ### Useful queries
 

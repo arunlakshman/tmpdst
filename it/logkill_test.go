@@ -182,8 +182,9 @@ func TestKillTheAppenderMidProduce(t *testing.T) {
 	if gap := resumed.Sub(killedAt); gap > 20*time.Second {
 		t.Fatalf("takeover stall %v, budget 20 s (commit deadline 120 s)", gap)
 	}
-	if r := roleOf(s.cps[1]); r != "active" {
-		t.Fatalf("n1 role %q after takeover", r)
+	// Either standby may win the takeover race.
+	if r1, r2 := roleOf(s.cps[1]), roleOf(s.cps[2]); r1 != "active" && r2 != "active" {
+		t.Fatalf("no standby took over: %q %q", r1, r2)
 	}
 	got := consume(t, s.seeds(), wantCounts(topics, n))
 	verify(t, acked, got, false)

@@ -86,6 +86,23 @@ A `G#` blob (S1 here), decoded and abbreviated (the real JSON repeats the full s
 
 Segment keys are flat and random, `seg/<32 hex>` (decision 43); the control plane treats them as opaque strings. Below a key is shortened to its last 8 hex digits (`…646b7279`) or to its label `S1`..`S10` (commit order).
 
+### Log store layout (`-store dynamolog`, decisions 48-53)
+
+The log store uses the SAME table (`<prefix>cp`, keys `pk`/`sk`) with a different set of items; nothing below is written by
+`-store dynamo` and the `G#` idempotency items are NOT written (the idempotency window lives in the applier). After a run:
+
+| pk | sk | attributes | what it is |
+|---|---|---|---|
+| `LOG` | slot, 20 digits | `d` B (entry: version byte, rank, writer, append id, ts, count, commands), `v`, `w` writer, `id`, `ts`, `n` commands, `ttl` | one item per log slot, written with `attribute_not_exists(pk)`: the slot is the fence. Zero commands is a no-op (heartbeat, hole fill). Trimmed slots are overwritten with a tombstone stub. `ttl` (epoch s, `-log-ttl` 7 d) lets the table's TTL expire old slots. |
+| `CKPT` | `-` | `ck_slot` N, `ck_key` S, `ck_size` N, `ck_sum` S (sha-256), `ck_ts` N (ms) | forward-only conditional put; the object is `cp/ckpt/<slot>` in the checkpoint bucket. |
+| `IDX` | `-` | `ix_slot` N | index watermark: slots below it are in the R# rows. |
+| `TOPICS` | `<topic>` | `parts` N | written by the indexer, after the ack (same as the old store). |
+| `R#<topic>#<p>` | 20-digit base offset | `base`, `cnt`, `runs` | the same run rows as section 1, but written by the indexer up to 10 s AFTER the commit is acked, per partition in offset order; a scan right after an ack may not show them yet. They are not read by the log service (Lookup is answered from Pebble); they serve a rollback to the old store and a future S3 index. |
+
+So after N acked commits a scan shows about N/(commands per slot) `LOG` items plus heartbeats (one a second when idle), one
+`CKPT`, one `IDX`, and the `R#` rows once the next flush has passed. The worked scan below is of the old store; it was not
+regenerated for the log store (no live scan was taken, so no example item is invented here).
+
 ## 2. Scan summary
 
 | type | items | notes |

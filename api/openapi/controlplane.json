@@ -4,7 +4,7 @@
     "title": "Manifester control plane API",
     "version": "1.0.0",
     "summary": "JSON over HTTP between brokers and the metadata control plane.",
-    "description": "The control plane is the production twin of `veritas.ControlPlane` (the executable spec); every store (cp/memstore, cp/dynamo) is checked against it op for op. Served by `cp.NewHandler` (cp/handler.go); the broker-side client is cp/cpclient. Wire structs: cp/wire.go. This file is kept in sync with the Go code by api/openapi/spec_test.go; edit controlplane.json and regenerate the YAML (see README.md).\n\n## Status mapping\n\n| Condition | HTTP | Body | Client classification (cpclient.Classifier) |\n|---|---|---|---|\n| success or business error | 200 | JSON, `err` field | business code, NotApplied |\n| malformed JSON, body > 32 MiB | 200 | `{\"err\":\"ErrInvalid\"}` | ErrInvalid, NotApplied |\n| ErrUnavailable (throttle, exhausted optimistic retries), context canceled/deadline in the store | 503 | text `unavailable` | ErrUnavailable, NotApplied |\n| any other store error | 500 | text `internal error` | ErrIO, MaybeApplied for CommitSegment |\n| other 4xx / 429 from a proxy | 4xx | any | ErrIO NotApplied / 429: ErrUnavailable NotApplied |\n| timeout, reset or EOF after the request was sent | none | none | ErrTimeout or ErrIO, MaybeApplied for mutating ops |\n\nLookup and DescribeTopics are reads and always NotApplied. A wrong method on a route is 405 and an unknown path 404 (net/http ServeMux).\n\n## Error codes\n\nBusiness errors travel in the body's `err` as the frozen `core.ErrCode` spelling. There is no fencing and no producer state (decisions 41, 44): the control plane emits ErrInvalid, ErrConflict and ErrTooLarge only. The numeric slot of the retired ErrFenced is skipped; `ErrFenced` and `ErrOutOfOrder` are not spellings any more.\n\n## Idempotency\n\nCommitSegment is idempotent per `segment_key` (a replay of an identical request returns the original ranges; a different request under the same key is ErrConflict). The control plane assigns the offsets (decision 42): the next offset of a partition is the end of its newest run, and the store appends with a compare-and-set that it retries internally; callers never see the race. CreateTopic, Lookup and DescribeTopics are idempotent. There are no idempotent producers (decision 41), brokers are stateless and there is no registration (decision 44).\n\n## Limits (decisions 39, 42)\n\nDynamoDB commit: at most 100 transaction items = 1 (segment) + distinct partitions + grown topics, else ErrTooLarge. Stored answer blob 300 KB, one run 200 KB, else ErrTooLarge. Broker-side bounds: MaxSegmentPartitions 24, MaxSegmentBatches 256. Request body 32 MiB. Decisions: docs/decisions.md rows 39, 41-44.\n\n## Examples\n\nThe worked examples are replayed in order, against a fresh in-memory control plane, by the spec test (`x-replay`)."
+    "description": "The control plane is the production twin of `veritas.ControlPlane` (the executable spec); every store (cp/memstore, cp/dynamo) is checked against it op for op. Served by `cp.NewHandler` (cp/handler.go); the broker-side client is cp/cpclient. Wire structs: cp/wire.go. This file is kept in sync with the Go code by api/openapi/spec_test.go; edit controlplane.json and regenerate the YAML (see README.md).\n\n## Status mapping\n\n| Condition | HTTP | Body | Client classification (cpclient.Classifier) |\n|---|---|---|---|\n| success or business error | 200 | JSON, `err` field | business code, NotApplied |\n| malformed JSON, body > 32 MiB | 200 | `{\"err\":\"ErrInvalid\"}` | ErrInvalid, NotApplied |\n| ErrUnavailable (throttle, exhausted optimistic retries), context canceled/deadline in the store | 503 | text `unavailable` | ErrUnavailable, NotApplied |\n| log store: a standby answering a write (`commit-segment`, `create-topic`), a node that cannot apply the log, a full commit queue | 503 | text `not active` or `unavailable`, header `Retry-After: 1` on a standby | ErrUnavailable, NotApplied; cpclient moves to the next URL of its list |\n| any other store error | 500 | text `internal error` | ErrIO, MaybeApplied for CommitSegment |\n| other 4xx / 429 from a proxy | 4xx | any | ErrIO NotApplied / 429: ErrUnavailable NotApplied |\n| timeout, reset or EOF after the request was sent | none | none | ErrTimeout or ErrIO, MaybeApplied for mutating ops |\n\nLookup and DescribeTopics are reads and always NotApplied. A wrong method on a route is 405 and an unknown path 404 (net/http ServeMux).\n\n## Error codes\n\nBusiness errors travel in the body's `err` as the frozen `core.ErrCode` spelling. There is no fencing and no producer state (decisions 41, 44): the control plane emits ErrInvalid, ErrConflict and ErrTooLarge only. The numeric slot of the retired ErrFenced is skipped; `ErrFenced` and `ErrOutOfOrder` are not spellings any more.\n\n## Idempotency\n\nCommitSegment is idempotent per `segment_key` (a replay of an identical request returns the original ranges; a different request under the same key is ErrConflict). The control plane assigns the offsets (decision 42): the next offset of a partition is the end of its newest run, and the store appends with a compare-and-set that it retries internally; callers never see the race. CreateTopic, Lookup and DescribeTopics are idempotent. There are no idempotent producers (decision 41), brokers are stateless and there is no registration (decision 44).\n\n## Limits (decisions 39, 42)\n\nDynamoDB commit: at most 100 transaction items = 1 (segment) + distinct partitions + grown topics, else ErrTooLarge. Stored answer blob 300 KB, one run 200 KB, else ErrTooLarge. Broker-side bounds: MaxSegmentPartitions 24, MaxSegmentBatches 256. Request body 32 MiB. Decisions: docs/decisions.md rows 39, 41-44.\n\n## Examples\n\nThe worked examples are replayed in order, against a fresh in-memory control plane, by the spec test (`x-replay`).\n\n## Log store: roles, 503 and the URL list\n\nWith `manicp -store dynamolog` several nodes serve this API over one shared log. Every response carries `X-CP-Role: active|standby`. A standby answers `lookup` and `describe-topics` (fresh reads, any node) but answers `commit-segment` and `create-topic` with 503, `Retry-After: 1`, before reading the body, so nothing was done and the request is safe to send to the next node. Brokers hold a comma-separated list of node URLs (`manibroker -cp-url a,b`): cpclient uses the URL that last worked and moves on, each URL once per call, on a connect error or a 503; a commit that moves carries the same `segment_key`, so a replay returns the original ranges. `/healthz` is 503 while a node is starting, stopped, or cannot apply the log (unknown entry format); it is 200 on a standby. Rolling back to `-store dynamo` needs commits quiesced and the index flushed (docs/log-cp-service.md)."
   },
   "servers": [
     {
@@ -622,7 +622,7 @@
         "tags": [
           "control-plane"
         ],
-        "description": "Always 200 with the plain-text body `ok` (and a newline) while the process serves HTTP. It does not touch the store.",
+        "description": "With the memory and transaction stores: always 200 with the plain-text body `ok` while the process serves HTTP; it does not touch the store. With the log store: 200 once the node has restored its checkpoint and caught up and can apply the log (also on a standby), else 503 with the reason as text. The log store sets `X-CP-Role`.",
         "responses": {
           "200": {
             "description": "Alive.",
@@ -633,6 +633,29 @@
                   "const": "ok\n"
                 },
                 "example": "ok\n"
+              }
+            },
+            "headers": {
+              "X-CP-Role": {
+                "description": "Log-backed control plane (manicp -store dynamolog) only: this node's advisory role, \"active\" or \"standby\" (decision 51). Absent on the other stores. Advisory: brokers may log it, nothing depends on it.",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "active",
+                    "standby"
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Log store only: the node is starting, stopped, or blocked on an unknown log entry format.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "logcp: starting\n"
               }
             }
           }
@@ -948,13 +971,31 @@
     },
     "responses": {
       "Unavailable": {
-        "description": "Store unavailable: throttling, overload, exhausted optimistic retries (20 attempts), or the request context ended. Plain text `unavailable`. The client treats it as ErrUnavailable, NotApplied, so it is safe to retry any operation.",
+        "description": "Store unavailable: throttling, overload, exhausted optimistic retries (20 attempts), or the request context ended. Plain text `unavailable`. The client treats it as ErrUnavailable, NotApplied, so it is safe to retry any operation. The log store also answers 503 from a standby for commit-segment and create-topic (header `Retry-After: 1`, text `not active`), from a node that cannot apply the log, and when its commit queue is full.",
         "content": {
           "text/plain": {
             "schema": {
               "type": "string"
             },
             "example": "unavailable\n"
+          }
+        },
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds; set by a log-store standby refusing a write.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          "X-CP-Role": {
+            "description": "Log-backed control plane (manicp -store dynamolog) only: this node's advisory role, \"active\" or \"standby\" (decision 51). Absent on the other stores. Advisory: brokers may log it, nothing depends on it.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "standby"
+              ]
+            }
           }
         }
       },

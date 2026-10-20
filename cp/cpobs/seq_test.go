@@ -20,7 +20,7 @@ func TestSeqMetrics(t *testing.T) {
 	m.TallyDynamo(context.Background(), time.Millisecond)
 	out := gather(t, m)
 	for _, want := range []string{"manicp_seq_queue_depth 3", "manicp_seq_inflight_groups 2", "manicp_seq_queue_wait_seconds_count 1",
-		"manicp_seq_group_segments_count 1", "manicp_seq_group_items_sum 80", `manicp_seq_tx_seconds_count{outcome="ok"} 1`,
+		"manicp_seq_group_segments_count 1", "manicp_seq_group_items_sum 80", `manicp_seq_tx_items_bucket{le="70"} 0`, `manicp_seq_tx_items_bucket{le="80"} 1`, "manicp_seq_tx_items_count 1", `manicp_seq_tx_seconds_count{outcome="ok"} 1`,
 		`manicp_seq_cache_total{cache="end",result="hit"} 1`, `manicp_seq_cache_total{cache="end",result="miss"} 1`,
 		`manicp_seq_retries_total{reason="transaction_canceled"} 1`} {
 		if !strings.Contains(out, want) {

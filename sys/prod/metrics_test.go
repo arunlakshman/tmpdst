@@ -36,8 +36,8 @@ func scrape(t *testing.T, m *Metrics) string {
 func TestMetricsFromFacts(t *testing.T) {
 	m := NewMetrics()
 	const ms = 1_000_000
-	m.Observe(fact("segment_sealed", "reason", "size", "bytes", 1000, "age", 100*ms, "inflight", 2, "buffered", 5000))
-	m.Observe(fact("segment_sealed", "reason", "timer", "bytes", 500, "age", 200*ms, "inflight", 1, "buffered", 5500))
+	m.Observe(fact("segment_sealed", "reason", "size", "bytes", 1000, "parts", 3, "age", 100*ms, "inflight", 2, "buffered", 5000))
+	m.Observe(fact("segment_sealed", "reason", "timer", "bytes", 500, "parts", 100, "age", 200*ms, "inflight", 1, "buffered", 5500))
 	m.Observe(fact("segment_put_done", "put_ns", 40*ms, "attempts", 2))
 	m.Observe(fact("segment_committed", "put_ns", 40*ms, "wait_ns", 60*ms, "commit_ns", 10*ms, "total_ns", 110*ms,
 		"bytes", 1100, "inflight", 1, "buffered", 4500))
@@ -56,6 +56,10 @@ func TestMetricsFromFacts(t *testing.T) {
 		`manibroker_segment_seal_to_ack_seconds_count 2`, // committed and failed
 		`manibroker_segments_in_flight_at_seal_bucket{le="1"} 1`,
 		`manibroker_segments_in_flight_at_seal_bucket{le="2"} 2`,
+		`manibroker_segment_partitions_bucket{le="2"} 0`,
+		`manibroker_segment_partitions_bucket{le="4"} 1`,
+		`manibroker_segment_partitions_bucket{le="128"} 2`,
+		`manibroker_segment_partitions_sum 103`,
 		`manibroker_segments_committed_total 1`,
 		`manibroker_segment_committed_bytes_total 1100`,
 		`manibroker_segments_failed_total 1`,

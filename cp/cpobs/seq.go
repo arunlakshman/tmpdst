@@ -16,6 +16,7 @@ type seqMetrics struct {
 	wait     prometheus.Histogram
 	segs     prometheus.Histogram
 	items    prometheus.Histogram
+	txItems  prometheus.Histogram
 	tx       *prometheus.HistogramVec // outcome
 	cache    *prometheus.CounterVec   // cache, result
 	retries  *prometheus.CounterVec   // reason
@@ -34,6 +35,8 @@ func newSeqMetrics(reg *prometheus.Registry, secs []float64) *seqMetrics {
 		wait:     h("queue_wait_seconds", "Time a commit request waited in the sequencer queue before its group was formed.", secs),
 		segs:     h("group_segments", "Segments (commit requests) per group transaction.", prometheus.LinearBuckets(1, 1, 24)),
 		items:    h("group_items", "Items per group transaction (limit 100).", prometheus.LinearBuckets(5, 5, 20)),
+		txItems: h("tx_items", "DynamoDB items per group transaction actually sent (limit 100).",
+			[]float64{1, 2, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100}),
 		tx: prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: "manicp", Subsystem: "seq", Name: "tx_seconds",
 			Help: "TransactWriteItems time of a group, by outcome (ok, canceled, unavailable, unknown, error).", Buckets: secs}, []string{"outcome"}),
 		cache: prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Subsystem: "seq", Name: "cache_total",
@@ -41,7 +44,7 @@ func newSeqMetrics(reg *prometheus.Registry, secs []float64) *seqMetrics {
 		retries: prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Subsystem: "seq", Name: "retries_total",
 			Help: "Group retries by reason (transaction_canceled, unavailable, unknown_outcome, read_failed). One count per group, not per segment."}, []string{"reason"}),
 	}
-	reg.MustRegister(s.depth, s.inflight, s.wait, s.segs, s.items, s.tx, s.cache, s.retries)
+	reg.MustRegister(s.depth, s.inflight, s.wait, s.segs, s.items, s.txItems, s.tx, s.cache, s.retries)
 	return s
 }
 
@@ -71,6 +74,7 @@ func (m *Metrics) SeqGroup(segments, items int) {
 	if m != nil {
 		m.seq.segs.Observe(float64(segments))
 		m.seq.items.Observe(float64(items))
+		m.seq.txItems.Observe(float64(items))
 	}
 }
 

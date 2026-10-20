@@ -70,7 +70,8 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `manibroker_segment_seal_to_ack_seconds` | histogram | | Seal to answer (put + wait + commit); also observed for failed segments. |
 | `manibroker_segment_open_age_seconds` | histogram | | First batch to seal. |
 | `manibroker_segments_in_flight_at_seal` | histogram | | Segments not yet answered when one is sealed; above 1 means overlapping PUTs. |
-| `manibroker_segments_sealed_total` | counter | `reason` | Seals by reason. |
+| `manibroker_segments_sealed_total` | counter | `reason` (`size`, `timer`, `batches`, `partitions`, `stop`) | Seals by reason: `size` 16 MiB, `timer` window, `batches` batch cap, `partitions` partition cap, `stop` shutdown. |
+| `manibroker_segment_partitions` | histogram | | Distinct topic-partitions per sealed segment (buckets 1 to 4096). |
 | `manibroker_segment_sealed_batch_bytes_total` | counter | | Batch bytes sealed. |
 | `manibroker_segments_committed_total`, `_segment_committed_bytes_total`, `_segments_failed_total` | counter | | Outcomes. |
 | `manibroker_segment_put_attempts_total` | counter | | PUT attempts that ended in success (retries counted). |
@@ -112,6 +113,7 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `manicp_seq_queue_depth` | gauge | | Commit requests waiting for the sequencer (decision 46). Persistently above a few means the loop is the bottleneck (transaction time times group size is below the commit rate). |
 | `manicp_seq_queue_wait_seconds` | histogram | | Time a request waited before its group was formed. |
 | `manicp_seq_group_segments`, `manicp_seq_group_items` | histogram | | Segments and items per group transaction when it is sent (limit 100 items). Group size grows with load; items near 100 means the budget binds. |
+| `manicp_seq_tx_items` | histogram | | DynamoDB items per group transaction actually sent (buckets 1 to 100). |
 | `manicp_seq_tx_seconds` | histogram | `outcome` (`ok`, `canceled`, `unavailable`, `unknown`, `error`) | `TransactWriteItems` time of a group. `canceled` should stay near 0 with one manicp; `unknown` is a 5xx/timeout/lost answer (the group then re-reads before it goes on). |
 | `manicp_seq_cache_total` | counter | `cache` (`end`, `topic`, `segment`), `result` (`hit`, `miss`) | In-memory state lookups. `end` misses are the first touch of a partition (a Query) and recoveries after a retry; a `segment` miss is every new key (normal: it costs nothing) and a segment hit is a replay served from memory. |
 | `manicp_seq_retries_total` | counter | `reason` (`transaction_canceled`, `unavailable`, `unknown_outcome`, `read_failed`) | Group retries, one count per group. A second manicp or a stale one shows up as `transaction_canceled`. |

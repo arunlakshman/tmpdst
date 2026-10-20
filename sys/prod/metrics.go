@@ -23,7 +23,7 @@ type Metrics struct {
 	reg *prometheus.Registry
 
 	putSeconds, commitSeconds, waitSeconds, ackSeconds, ageSeconds prometheus.Histogram
-	inflightAtSeal                                                 prometheus.Histogram
+	inflightAtSeal, partitions                                     prometheus.Histogram
 
 	sealed        *prometheus.CounterVec
 	sealedBytes   prometheus.Counter
@@ -65,6 +65,9 @@ func NewMetrics() *Metrics {
 		inflightAtSeal: prometheus.NewHistogram(prometheus.HistogramOpts{Namespace: metricsNS, Name: "segments_in_flight_at_seal",
 			Help:    "Segments sealed and not yet answered, counting the one just sealed. Above 1 means PUTs overlap.",
 			Buckets: []float64{1, 2, 3, 4, 6, 8, 12, 16, 32}}),
+		partitions: prometheus.NewHistogram(prometheus.HistogramOpts{Namespace: metricsNS, Name: "segment_partitions",
+			Help:    "Distinct topic-partitions per sealed segment.",
+			Buckets: []float64{1, 2, 4, 8, 16, 32, 48, 64, 96, 128, 192, 288, 512, 1024, 4096}}),
 		sealed: prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: metricsNS, Name: "segments_sealed_total",
 			Help: "Segments sealed, by reason (size, timer, batches, partitions, stop)."}, []string{"reason"}),
 		sealedBytes:   counter("segment_sealed_batch_bytes_total", "Produce batch bytes sealed into segments."),
@@ -80,7 +83,7 @@ func NewMetrics() *Metrics {
 	m.cpCall = prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: metricsNS, Name: "cp_call_seconds",
 		Help:    "Control-plane HTTP exchange as the broker sees it (send to full response read), by op.",
 		Buckets: prometheus.ExponentialBuckets(0.0005, 2, 16)}, []string{"op"})
-	m.reg.MustRegister(m.cpCall, m.putSeconds, m.commitSeconds, m.waitSeconds, m.ackSeconds, m.ageSeconds, m.inflightAtSeal,
+	m.reg.MustRegister(m.cpCall, m.putSeconds, m.commitSeconds, m.waitSeconds, m.ackSeconds, m.ageSeconds, m.inflightAtSeal, m.partitions,
 		m.sealed, m.sealedBytes, m.committedSegs, m.committedByte, m.failedSegs, m.putAttempts, m.pausedSeconds,
 		m.buffered, m.inflight, m.paused,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
@@ -122,6 +125,7 @@ func (m *Metrics) Observe(f core.Fact) {
 		m.sealedBytes.Add(float64(n("bytes")))
 		m.ageSeconds.Observe(seconds(n("age")))
 		m.inflightAtSeal.Observe(float64(n("inflight")))
+		m.partitions.Observe(float64(n("parts")))
 		m.inflight.Set(float64(n("inflight")))
 		m.buffered.Set(float64(n("buffered")))
 	case "segment_put_done":

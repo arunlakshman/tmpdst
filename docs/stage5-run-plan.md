@@ -78,7 +78,7 @@ Wall time about 2 h 5 min, inside the 2.5 h budget. One token cannot cover it. C
   = 20 min margin before token #2 expires (rule: >= 15 min). The 4096 stage is dropped (scope is OMB at 288 partitions only).
 - The load runs detached on loadgen 0 (instance role), so the run survives an expired token; only `bench-ctl`, S3 sync and destroy need it.
 - Rejected: two separate stacks (second apply costs 15 min and about $5 more); a long-lived SSO session setting (not ours to change).
-- If any stage slips by more than 10 min, drop stage 6 first, then shorten nothing else: 4b and stage 5 (failover) outranks 4096.
+- If any stage slips by more than 10 min, shorten the gaps first; the kill test (stage 5) is the first stage to drop, 4b is not.
 
 ## Teardown and verification checklist
 

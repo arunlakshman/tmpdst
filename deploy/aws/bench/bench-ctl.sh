@@ -8,6 +8,9 @@
 #                                           manicp, decision 46) through SSM send-command; then describes the topic.
 #   check-cp                                verify the single control plane: exactly one manicp process on the CP host,
 #                                           healthz ok, no manicp on any broker, every broker reaches CP:8080
+#   cp-roles                                print /healthz and the X-CP-Role header (active|standby) of every CP host (log store)
+#   kill-appender [DOWN_SECONDS=60]         SIGKILL manicp on the rank-0 CP host, keep it down DOWN_SECONDS, then start it again
+#                                           (it fails back as the preferred appender). Runs detached on the host; prints the time.
 #   start-workers                           run /opt/bench/start-omb-workers.sh on every loadgen host
 #   stop-workers
 #   worker-status
@@ -44,6 +47,9 @@ if [ -z "$BROKER_INSTANCE_IDS" ] || [ -z "$LOADGEN_INSTANCE_IDS" ]; then
 fi
 CP_INSTANCE_ID=${CP_INSTANCE_ID:-$(tfout cp_instance_id | jq -r '.// empty' 2>/dev/null || true)}
 CP_PRIVATE_IP=${CP_PRIVATE_IP:-$(tfout cp_private_ip | jq -r '.// empty' 2>/dev/null || true)}
+# hot-standby CP hosts of the log store (empty with the old store or cp_standby_count = 0)
+CP_STANDBY_INSTANCE_IDS=${CP_STANDBY_INSTANCE_IDS:-$(tfout cp_standby_instance_ids | jq -r '.[]?' 2>/dev/null | tr '\n' ' ' || true)}
+CP_ALL_IDS="$CP_INSTANCE_ID $CP_STANDBY_INSTANCE_IDS"
 # first id of each list (do not use `set --` here: it would clobber the command's own arguments "$@")
 LOADGEN0=${LOADGEN_INSTANCE_IDS%% *}
 
@@ -89,10 +95,23 @@ case "$cmd" in
     echo "== control-plane host $CP_INSTANCE_ID: exactly one manicp, healthy"
     ssm_run "$CP_INSTANCE_ID" "n=\$(pgrep -x manicp | wc -l); echo manicp processes: \$n; systemctl is-active manicp mb-snapshot alloy; curl -sf -m 5 http://127.0.0.1:8080/healthz && echo healthz ok; [ \$n -eq 1 ]" ||
       { echo "check-cp FAILED on the control-plane host" >&2; exit 1; }
+    for sb in $CP_STANDBY_INSTANCE_IDS; do
+      echo "== standby control-plane host $sb: one manicp, healthy"
+      ssm_run "$sb" "n=\$(pgrep -x manicp | wc -l); echo manicp processes: \$n; systemctl is-active manicp mb-snapshot alloy; curl -sf -m 5 http://127.0.0.1:8080/healthz && echo healthz ok; [ \$n -eq 1 ]" ||
+        { echo "check-cp FAILED on standby $sb" >&2; exit 1; }
+    done
     echo "== broker hosts: no manicp, CP reachable${CP_PRIVATE_IP:+ at $CP_PRIVATE_IP:8080}"
     ssm_run "$BROKER_INSTANCE_IDS" "echo manicp processes: \$(pgrep -x manicp | wc -l); systemctl is-active manibroker; curl -sf -m 5 http://${CP_PRIVATE_IP:-CP_IP_UNKNOWN}:8080/healthz && echo cp reachable" ||
       { echo "check-cp: a broker cannot reach the CP (or runs manicp)" >&2; exit 1; }
     ;;
+  cp-roles)
+    # shellcheck disable=SC2086
+    ssm_run "$CP_ALL_IDS" "curl -s -m 5 -D - -o /dev/null http://127.0.0.1:8080/healthz | grep -i -E '^(HTTP|x-cp-role)'; systemctl is-active manicp" ;;
+  kill-appender)
+    down=${1:-60}
+    [ -n "$CP_INSTANCE_ID" ] || { echo "no control-plane instance: set CP_INSTANCE_ID or use --tf-dir" >&2; exit 1; }
+    date -u +"kill at %Y-%m-%dT%H:%M:%SZ (note it for the report)"
+    ssm_run "$CP_INSTANCE_ID" "nohup bash -c 'systemctl kill -s SIGKILL manicp; systemctl stop manicp; sleep $down; systemctl start manicp' >/var/log/kill-appender.log 2>&1 & echo killer started" ;;
   broker-args)
     # Flags later on the command line override earlier ones (Go flag package), so appending is enough.
     flags=$*

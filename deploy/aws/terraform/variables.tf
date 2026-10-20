@@ -38,7 +38,7 @@ variable "auto_destroy_after" {
 }
 
 variable "broker_count" {
-  description = "Number of stateless broker hosts (each runs manibroker only and points -cp-url at the single control-plane host), all in the one AZ and sharing one bucket and one table. WarpStream's published benchmark uses 6."
+  description = "Number of stateless broker hosts (each runs manibroker only and points -cp-url at the control-plane URL list), all in the one AZ and sharing one bucket and one table. WarpStream's published benchmark uses 6."
   type        = number
   default     = 6
 
@@ -48,8 +48,36 @@ variable "broker_count" {
   }
 }
 
+variable "cp_store" {
+  description = "Control-plane store. \"log\" (default): manicp -store dynamolog, the DynamoDB log with a hot standby (decisions 48-53, docs/log-cp-service.md); brokers use the default -max-segment-partitions 4096. \"dynamo\": the old transaction store, ONE host (cp_standby_count must be 0), brokers get -max-segment-partitions 96 (rollback; needs commits quiesced and the index flushed when switching, see docs/aws-benchmark-runbook.md)."
+  type        = string
+  default     = "log"
+
+  validation {
+    condition     = contains(["log", "dynamo"], var.cp_store)
+    error_message = "cp_store must be \"log\" or \"dynamo\"."
+  }
+}
+
+variable "cp_standby_count" {
+  description = "Hot-standby control-plane hosts (cp_store = log): rank 1..N tail the log and take over when the rank-0 appender dies. Brokers get the URL list rank 0 first (sticky routing, decision 48). 1 is the default (active + standby); 0 is a single CP with no failover. Must be 0 with cp_store = dynamo."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.cp_standby_count >= 0 && var.cp_standby_count <= 2 && floor(var.cp_standby_count) == var.cp_standby_count
+    error_message = "cp_standby_count must be an integer in 0..2."
+  }
+}
+
+variable "cp_takeover_after" {
+  description = "manicp -takeover-after on every CP host (Go duration): a standby that saw no slot of another writer for this long becomes active. The idle appender writes a no-op every second, so keep it several seconds; it adds directly to the commit stall of a failover and must stay far under the brokers' 120 s -commit-deadline."
+  type        = string
+  default     = "5s"
+}
+
 variable "cp_instance_type" {
-  description = "Control-plane host: exactly ONE instance running only manicp (the single sequencer, decision 46). x86_64 only. 4 vCPU / 16 GiB is enough for the sequencer; counts 4 vCPUs against the account quota."
+  description = "Control-plane host type, used for the active node and each standby; each runs only manicp. x86_64 only. 4 vCPU / 16 GiB: the log store keeps its state in Pebble on the root volume and in memory; each host counts 4 vCPUs against the account quota."
   type        = string
   default     = "m6in.xlarge"
 }
@@ -212,13 +240,13 @@ variable "kafka_tools_version" {
 }
 
 variable "broker_extra_args" {
-  description = "Extra flags appended to the manibroker command line (e.g. \"-segment-bytes 32MiB\"). The default pins the partition cap to 96 because the control plane host runs manicp -store dynamo, whose 100-item transaction refuses a wider segment (decision 52); set it to \"\" once manicp runs the log store (stage 4), whose cap is the broker default of 4096."
+  description = "Extra flags appended to the manibroker command line (e.g. \"-segment-bytes 32MiB\"). Empty by default: the log store takes the broker default -max-segment-partitions 4096. With cp_store = dynamo, Terraform adds -max-segment-partitions 96 itself (its 100-item transaction refuses a wider segment, decision 52)."
   type        = string
-  default     = "-max-segment-partitions 96"
+  default     = ""
 }
 
 variable "cp_extra_args" {
-  description = "Extra flags appended to the manicp command line on the control-plane host (e.g. sequencer tuning flags once manicp has them). Empty by default so it stays valid for any manicp build."
+  description = "Extra flags appended to the manicp command line on every control-plane host (e.g. -slot-rate, -log-k, -index-every for the log store; sequencer flags for the old store). Empty by default so it stays valid for any manicp build."
   type        = string
   default     = ""
 }

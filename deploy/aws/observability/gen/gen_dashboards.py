@@ -125,7 +125,7 @@ b.panel("Segment size (mean committed bytes per segment)",
         [q(f'sum(rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}])) / sum(rate(manibroker_segments_committed_total{{{R}}}[{RI}]))', "mean")], "bytes")
 b.panel("Buffered produce bytes (unacked)", [q(f'manibroker_buffered_bytes{{{R}}}', "buffered")], "bytes")
 # ---- control plane: the ONE manicp (single sequencer, group commit). manicp_seq_* exist from decision 46 on.
-b.row("Control plane (single manicp sequencer)")
+b.row("Control plane (transaction store -store dynamo: single manicp sequencer; empty with the log store)")
 b.panel("Commit rate: groups/s and segments/s",
         [q(f'sum by (outcome) (rate(manicp_seq_tx_seconds_count{{{R}}}[{RI}]))', "groups/s {{outcome}}"),
          q(f'sum(rate(manicp_seq_group_segments_sum{{{R}}}[{RI}]))', "segments/s committed")], "ops",
@@ -148,6 +148,47 @@ b.panel("DynamoDB write request units per second (manicp-side)",
 b.panel("Sequencer cache hit ratio",
         [q(f'sum by (cache) (rate(manicp_seq_cache_total{{{R}, result="hit"}}[{RI}])) / sum by (cache) (rate(manicp_seq_cache_total{{{R}}}[{RI}]))', "{{cache}}")], "percentunit",
         desc="A miss costs a DynamoDB read.")
+# ---- control plane: the log store (-store dynamolog, decisions 48-53). One series per CP host (label host, cp_rank).
+b.row("Control plane (log store: manicp_log_*, one series per CP node)")
+b.panel("Slot rate (slots/s won) and lost slots",
+        [q(f'sum by (host) (rate(manicp_log_slots_total{{{R}}}[{RI}]))', "slots/s {{host}}"),
+         q(f'sum by (host) (rate(manicp_log_lost_slots_total{{{R}}}[{RI}]))', "lost slots/s {{host}}"),
+         q(f'sum by (host, result) (rate(manicp_log_slot_attempts_total{{{R}, result="error"}}[{RI}]))', "unknown-outcome retries/s {{host}}")], "ops",
+        desc="The active node's slot rate is bounded by -slot-rate (200/s, one hot DynamoDB key). Lost slots stay at 0 with one appender; a burst around a takeover is expected, persistent loss means two appenders.")
+b.panel("Slot append latency (PutItem to definite answer, p50/p99)", hq("manicp_log_append_seconds", [0.5, 0.99], by="host"), "s",
+        desc="Includes retries of unknown outcomes. This is the floor of every commit's latency.")
+b.panel("Commands per slot and entry size (p50/p99)",
+        hq("manicp_log_entries_per_slot", [0.5, 0.99], by="host") + hq("manicp_log_entry_bytes", [0.99], by="host"), "short",
+        desc="Entries per slot grows with load (group commit); 1 at low load. Entry bytes p99 is in bytes, limit 350 KB.")
+b.panel("Apply lag and standby lag (slots)",
+        [q(f'max by (host) (manicp_log_apply_lag_slots{{{R}}})', "apply lag {{host}}"),
+         q(f'max by (host) (manicp_log_standby_lag_slots{{{R}}})', "standby lag {{host}}")], "short",
+        desc="Slots known to exist but not applied. A standby whose lag grows cannot take over cleanly.")
+b.panel("Hole fills and role changes",
+        [q(f'sum by (host) (rate(manicp_log_hole_fills_total{{{R}}}[{RI}]))', "hole fills/s {{host}}"),
+         q(f'sum by (host, to) (increase(manicp_log_role_changes_total{{{R}}}[{RI}]))', "role -> {{to}} {{host}}"),
+         q(f'max by (host) (manicp_log_active{{{R}}})', "active (1) {{host}}")], "short",
+        desc="Hole fills happen when an appender dies holding a slot; role changes mark a takeover or a failback. The kill-the-appender marker.")
+b.panel("Queue depth, queue wait and refused requests",
+        [q(f'max by (host) (manicp_log_queue_depth{{{R}}})', "queue depth {{host}}"),
+         q(f'histogram_quantile(0.99, sum by (le, host) (rate(manicp_log_queue_wait_seconds_bucket{{{R}}}[{RI}])))', "queue wait p99 {{host}}"),
+         q(f'sum by (host, reason) (rate(manicp_log_rejected_total{{{R}}}[{RI}]))', "refused/s {{reason}} {{host}}")], "short",
+        desc="Refusals with reason not_active on a standby are normal (brokers fail over). overloaded means the queue is full.")
+b.panel("Index backlog (slots) and flush time",
+        [q(f'max by (host) (manicp_log_index_lag_slots{{{R}}})', "index lag slots {{host}}"),
+         q(f'histogram_quantile(0.99, sum by (le, host) (rate(manicp_log_index_flush_seconds_bucket{{{R}}}[{RI}])))', "flush p99 s {{host}}"),
+         q(f'sum by (host) (rate(manicp_log_index_throttles_total{{{R}}}[{RI}]))', "index throttles/s {{host}}"),
+         q(f'sum by (host) (rate(manicp_log_index_rows_total{{{R}}}[{RI}]))', "rows/s {{host}}")], "short",
+        desc="The indexer flushes every 10 s; lag is bounded by that unless the table throttles. Must be ~0 before a rollback to the old store.")
+b.panel("Checkpoint age (s) and size",
+        [q(f'max by (host) (manicp_log_checkpoint_age_seconds{{{R}}})', "age s {{host}}"),
+         q(f'max by (host) (manicp_log_checkpoint_bytes{{{R}}})', "bytes {{host}}"),
+         q(f'sum by (host) (increase(manicp_log_checkpoint_errors_total{{{R}}}[{RI}]))', "errors {{host}}")], "short",
+        desc="Alert on age above 3 x -ckpt-every (15 min). Only the active node checkpoints.")
+b.panel("Fresh reads served and tail checks (batching factor)",
+        [q(f'sum by (host) (rate(manicp_log_fresh_reads_total{{{R}}}[{RI}]))', "fresh reads/s {{host}}"),
+         q(f'sum by (host) (rate(manicp_log_tail_checks_total{{{R}}}[{RI}]))', "tail checks/s {{host}}"),
+         q(f'max by (host) (manicp_log_blocked{{{R}}})', "blocked {{host}}")], "short")
 LOGSEL = '{run_id="$run_id", level=~"warn|warning|error|fatal|dpanic|panic"}'
 b.panel("Logs: level >= warn", [q(LOGSEL, "", LOKI)], w=24, h=10, kind="logs")
 b.save("overview.json")

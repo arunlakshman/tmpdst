@@ -1,6 +1,8 @@
 #!/bin/bash
 # manifester-bench broker host ${broker_id}: manibroker + metrics snapshotter + Alloy.
-# The ONE manicp (single sequencer, decision 46) runs on the dedicated control-plane host ${cp_private_ip}:8080.
+# The control plane runs on dedicated hosts (rank 0 = preferred appender, then hot standbys): -cp-url is the list ${cp_urls}.
+# cpclient uses the first URL and moves to the next only on a connect error or HTTP 503 (decision 51); a commit
+# that moves carries its segment key, so the replay is safe. With the old store the list has one URL.
 set -euxo pipefail
 exec > >(tee -a /var/log/bench-bootstrap.log) 2>&1
 
@@ -25,18 +27,19 @@ PRIVATE_IP=$PRIVATE_IP
 INSTANCE_ID=$INSTANCE_ID
 ENV
 
-CP_URL=http://${cp_private_ip}:8080
+CP_URL=${cp_urls}
+CP_FIRST=$${CP_URL%%,*}
 # manibroker writes its manifest as manibroker-<run_id>.json (trailing /).
 # Logs are JSON on stderr, which journald keeps and Alloy ships to Loki.
 cat > /etc/manifester/manibroker.env <<ENV
 AWS_REGION=$REGION
 ENV
 
-# The control-plane host boots in parallel: wait (bounded, 10 min) until its manicp answers before starting the
+# The control-plane hosts boot in parallel: wait (bounded, 10 min) until the first (rank 0) manicp answers before starting the
 # broker. On timeout the unit is started anyway; Restart=on-failure keeps retrying until the CP is up.
 cp_deadline=$(( $(date +%s) + 600 ))
-until curl -sf -m 3 "$CP_URL/healthz" >/dev/null; do
-  if [ "$(date +%s)" -gt "$cp_deadline" ]; then echo "control plane $CP_URL not healthy after 10 min; starting broker anyway" >&2; break; fi
+until curl -sf -m 3 "$CP_FIRST/healthz" >/dev/null; do
+  if [ "$(date +%s)" -gt "$cp_deadline" ]; then echo "control plane $CP_FIRST not healthy after 10 min; starting broker anyway" >&2; break; fi
   sleep 3
 done
 

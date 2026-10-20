@@ -18,6 +18,16 @@ locals {
   }
 
   common = templatefile("${path.module}/files/common.sh.tpl", local.common_vars)
+
+  cp_vars = merge(local.common_vars, {
+    common                   = local.common
+    table_prefix             = local.table_prefix
+    table_name               = local.table_name
+    cp_extra_args            = var.cp_extra_args
+    cp_store                 = var.cp_store
+    cp_takeover_after        = var.cp_takeover_after
+    initial_topic_partitions = var.initial_topic_partitions
+  })
 }
 
 resource "aws_instance" "cp" {
@@ -30,13 +40,7 @@ resource "aws_instance" "cp" {
   user_data_replace_on_change          = true
   instance_initiated_shutdown_behavior = "terminate"
 
-  user_data = templatefile("${path.module}/files/cp-user-data.sh.tpl", merge(local.common_vars, {
-    common                   = local.common
-    table_prefix             = local.table_prefix
-    table_name               = local.table_name
-    cp_extra_args            = var.cp_extra_args
-    initial_topic_partitions = var.initial_topic_partitions
-  }))
+  user_data = templatefile("${path.module}/files/cp-user-data.sh.tpl", merge(local.cp_vars, { cp_rank = 0 }))
 
   metadata_options {
     http_endpoint               = "enabled"
@@ -51,10 +55,53 @@ resource "aws_instance" "cp" {
     tags        = merge(local.tags, { Name = "${local.name}-cp-root" })
   }
 
-  tags = { Name = "${local.name}-cp", Role = "cp" }
+  tags = { Name = "${local.name}-cp", Role = "cp", CpRank = "0" }
 
   depends_on = [
     terraform_data.ssm_prefix_check,
+    terraform_data.cp_store_check,
+    aws_route_table_association.public,
+    aws_vpc_endpoint.s3,
+    aws_vpc_endpoint.dynamodb,
+    aws_iam_role_policy.cp,
+    aws_iam_role_policy.cp_ssm_read,
+  ]
+}
+
+# Hot standbys of the log store (rank 1..N): same image and user-data as rank 0, started as standbys. They tail
+# and apply the log, serve reads, answer commits with 503, and take over after -takeover-after.
+resource "aws_instance" "cp_standby" {
+  count = var.cp_standby_count
+
+  ami                                  = data.aws_ssm_parameter.al2023_ami.value
+  instance_type                        = var.cp_instance_type
+  subnet_id                            = aws_subnet.public.id
+  vpc_security_group_ids               = [aws_security_group.cp.id]
+  iam_instance_profile                 = aws_iam_instance_profile.cp.name
+  associate_public_ip_address          = true
+  user_data_replace_on_change          = true
+  instance_initiated_shutdown_behavior = "terminate"
+
+  user_data = templatefile("${path.module}/files/cp-user-data.sh.tpl", merge(local.cp_vars, { cp_rank = count.index + 1 }))
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
+
+  root_block_device {
+    volume_type = "gp3"
+    volume_size = var.root_volume_gb
+    encrypted   = true
+    tags        = merge(local.tags, { Name = "${local.name}-cp-${count.index + 1}-root" })
+  }
+
+  tags = { Name = "${local.name}-cp-${count.index + 1}", Role = "cp", CpRank = tostring(count.index + 1) }
+
+  depends_on = [
+    terraform_data.ssm_prefix_check,
+    terraform_data.cp_store_check,
     aws_route_table_association.public,
     aws_vpc_endpoint.s3,
     aws_vpc_endpoint.dynamodb,
@@ -77,9 +124,9 @@ resource "aws_instance" "broker" {
 
   user_data = templatefile("${path.module}/files/broker-user-data.sh.tpl", merge(local.common_vars, {
     common            = local.common
-    broker_extra_args = var.broker_extra_args
+    broker_extra_args = local.broker_args
     broker_id         = count.index + 1
-    cp_private_ip     = aws_instance.cp.private_ip
+    cp_urls           = local.cp_urls
   }))
 
   metadata_options {

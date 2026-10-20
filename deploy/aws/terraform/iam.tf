@@ -46,7 +46,8 @@ resource "aws_iam_role_policy_attachment" "cp_ssm_core" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# Least privilege: the table, artifacts read, results write (run manifest + metrics snapshots). No segment data access.
+# Least privilege: the table, artifacts read, results write (run manifest + metrics snapshots), and the checkpoint
+# objects of the log store (cp/ in the run bucket). No segment data access.
 data "aws_iam_policy_document" "cp" {
   statement {
     sid       = "BucketList"
@@ -64,6 +65,12 @@ data "aws_iam_policy_document" "cp" {
     sid       = "WriteResults"
     actions   = ["s3:PutObject", "s3:AbortMultipartUpload"]
     resources = ["${aws_s3_bucket.run.arn}/results/*"]
+  }
+
+  statement {
+    sid       = "LogStoreCheckpoints"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
+    resources = ["${aws_s3_bucket.run.arn}/cp/*"]
   }
 
   statement {

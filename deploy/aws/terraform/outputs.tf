@@ -1,6 +1,25 @@
 output "cp_private_ip" {
-  description = "Private IP of the single control-plane host; brokers use -cp-url http://<ip>:8080."
+  description = "Private IP of the rank-0 control-plane host (the preferred appender)."
   value       = aws_instance.cp.private_ip
+}
+
+output "cp_private_ips" {
+  description = "Private IPs of all control-plane hosts, rank 0 first."
+  value       = local.cp_ips
+}
+
+output "cp_urls" {
+  description = "The -cp-url list given to every broker (rank 0 first)."
+  value       = local.cp_urls
+}
+
+output "cp_standby_instance_ids" {
+  description = "Instance ids of the hot-standby control-plane hosts (rank 1..N); empty with cp_standby_count = 0."
+  value       = aws_instance.cp_standby[*].id
+}
+
+output "ssm_start_session_cp_standby" {
+  value = [for id in aws_instance.cp_standby[*].id : "aws ssm start-session --region ${var.region} --target ${id}"]
 }
 
 output "cp_instance_id" {

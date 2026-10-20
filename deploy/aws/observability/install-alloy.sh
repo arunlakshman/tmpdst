@@ -16,6 +16,8 @@
 #                  PARAM_API_KEY (grafana/api_key) is a fallback used for whichever key is missing
 #   DDB_TABLE (cp only) S3_BUCKET S3_METRICS_FILTER_ID (broker only); when unset read from SSM
 #                  $SSM_PREFIX/aws/{ddb_table,s3_bucket,s3_metrics_filter_id} (filter default manifester-bench)
+#   CP_RANK        cp only: 0 = preferred appender, 1.. = hot standbys; becomes the cp_rank label (default 0)
+#   CP_CLOUDWATCH  cp only: 1 installs cpcloudwatch.alloy (DynamoDB table metrics; ONE host per run), default 1 for rank 0, else 0
 #   BROKER_ID      broker only: 1..N, becomes the `broker` label on manibroker/manicp series (default 1)
 #   PRIVATE_IP     accepted, informational
 #   AWS_REGION     default: instance region from IMDS
@@ -73,6 +75,12 @@ install -m 0644 "$OBS_DIR/alloy/config.alloy" /etc/alloy/config.alloy
 install -m 0644 "$OBS_DIR/alloy/$ROLE.alloy" "/etc/alloy/$ROLE.alloy"
 # drop the other role's file if the host was re-purposed
 for r in broker cp loadgen; do [ "$r" = "$ROLE" ] || rm -f "/etc/alloy/$r.alloy"; done
+CP_RANK="${CP_RANK:-0}"
+if [ "$ROLE" = cp ] && [ "${CP_CLOUDWATCH:-$([ "$CP_RANK" = 0 ] && echo 1 || echo 0)}" = 1 ]; then
+  install -m 0644 "$OBS_DIR/alloy/cpcloudwatch.alloy" /etc/alloy/cpcloudwatch.alloy
+else
+  rm -f /etc/alloy/cpcloudwatch.alloy
+fi
 install -m 0644 "$OBS_DIR/alloy/alloy.service" /etc/systemd/system/alloy.service
 
 # --- secrets from SSM -> /etc/alloy/alloy.env (0600, never in the repo) -------
@@ -94,7 +102,7 @@ fallback_key=$(ssm "$PARAM_API_KEY" "")
 prom_key=$(ssm "$PARAM_PROM_KEY" "$fallback_key")
 loki_key=$(ssm "$PARAM_LOKI_KEY" "$fallback_key")
 [ -n "$prom_key" ] && [ -n "$loki_key" ] || { echo "no Grafana API key: need $PARAM_PROM_KEY and $PARAM_LOKI_KEY, or $PARAM_API_KEY" >&2; exit 1; }
-if [ "$ROLE" = cp ]; then
+if [ "$ROLE" = cp ] && [ -f /etc/alloy/cpcloudwatch.alloy ]; then
   ddb_table=${DDB_TABLE:-$(ssm "$SSM_PREFIX/aws/ddb_table")}
 fi
 if [ "$ROLE" = broker ]; then
@@ -115,7 +123,8 @@ tmp=$(mktemp /etc/alloy/alloy.env.XXXXXX)
   echo "GRAFANA_PROM_API_KEY=$prom_key"
   echo "GRAFANA_LOKI_API_KEY=$loki_key"
   if [ "$ROLE" = cp ]; then
-    echo "DDB_TABLE=$ddb_table"
+    echo "CP_RANK=$CP_RANK"
+    [ -f /etc/alloy/cpcloudwatch.alloy ] && echo "DDB_TABLE=$ddb_table"
   fi
   if [ "$ROLE" = broker ]; then
     echo "BROKER_ID=${BROKER_ID:-1}"

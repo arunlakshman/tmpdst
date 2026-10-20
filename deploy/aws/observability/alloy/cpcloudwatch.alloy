@@ -1,0 +1,216 @@
+// CloudWatch add-on for the control-plane role: DynamoDB table metrics. Installed on exactly ONE CP host per run
+// (install-alloy.sh CP_CLOUDWATCH=1, the rank-0 host), so the series are not duplicated.
+// Extra environment: DDB_TABLE (table name), AWS_REGION. AWS credentials come from the instance role.
+
+// CloudWatch via Alloy's embedded YACE; DynamoDB publishes at 1 min.
+prometheus.exporter.cloudwatch "aws" {
+	sts_region = sys.env("AWS_REGION")
+	debug      = false
+
+	// Table-level metrics (dimension TableName only).
+	static "ddb_table" {
+		regions    = [sys.env("AWS_REGION")]
+		namespace  = "AWS/DynamoDB"
+		dimensions = {TableName = sys.env("DDB_TABLE")}
+
+		metric {
+			name       = "ConsumedWriteCapacityUnits"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ConsumedReadCapacityUnits"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ProvisionedWriteCapacityUnits"
+			statistics = ["Average"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ProvisionedReadCapacityUnits"
+			statistics = ["Average"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "WriteThrottleEvents"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ReadThrottleEvents"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+	}
+
+	// Per-operation metrics (dimensions TableName + Operation). One static
+	// block per operation the control plane uses (the transaction store: TransactWriteItems, BatchGetItem,
+	// GetItem, Query; the log store: PutItem for LOG slots, Query for the tail, BatchWriteItem for the index).
+	static "ddb_op_transact_write" {
+		regions    = [sys.env("AWS_REGION")]
+		namespace  = "AWS/DynamoDB"
+		dimensions = {TableName = sys.env("DDB_TABLE"), Operation = "TransactWriteItems"}
+
+		metric {
+			name       = "SuccessfulRequestLatency"
+			statistics = ["Average", "Maximum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ThrottledRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "TransactionConflict"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ConditionalCheckFailedRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "SystemErrors"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "UserErrors"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+	}
+
+	static "ddb_op_batch_get" {
+		regions    = [sys.env("AWS_REGION")]
+		namespace  = "AWS/DynamoDB"
+		dimensions = {TableName = sys.env("DDB_TABLE"), Operation = "BatchGetItem"}
+
+		metric {
+			name       = "SuccessfulRequestLatency"
+			statistics = ["Average", "Maximum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ThrottledRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+	}
+
+	static "ddb_op_get" {
+		regions    = [sys.env("AWS_REGION")]
+		namespace  = "AWS/DynamoDB"
+		dimensions = {TableName = sys.env("DDB_TABLE"), Operation = "GetItem"}
+
+		metric {
+			name       = "SuccessfulRequestLatency"
+			statistics = ["Average", "Maximum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ThrottledRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+	}
+
+	static "ddb_op_query" {
+		regions    = [sys.env("AWS_REGION")]
+		namespace  = "AWS/DynamoDB"
+		dimensions = {TableName = sys.env("DDB_TABLE"), Operation = "Query"}
+
+		metric {
+			name       = "SuccessfulRequestLatency"
+			statistics = ["Average", "Maximum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ThrottledRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+	}
+
+	static "ddb_op_put" {
+		regions    = [sys.env("AWS_REGION")]
+		namespace  = "AWS/DynamoDB"
+		dimensions = {TableName = sys.env("DDB_TABLE"), Operation = "PutItem"}
+
+		metric {
+			name       = "SuccessfulRequestLatency"
+			statistics = ["Average", "Maximum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ThrottledRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ConditionalCheckFailedRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+	}
+
+	static "ddb_op_batch_write" {
+		regions    = [sys.env("AWS_REGION")]
+		namespace  = "AWS/DynamoDB"
+		dimensions = {TableName = sys.env("DDB_TABLE"), Operation = "BatchWriteItem"}
+
+		metric {
+			name       = "SuccessfulRequestLatency"
+			statistics = ["Average", "Maximum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ThrottledRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+
+		metric {
+			name       = "ConditionalCheckFailedRequests"
+			statistics = ["Sum"]
+			period     = "1m"
+		}
+	}
+}
+
+discovery.relabel "cloudwatch" {
+	targets = prometheus.exporter.cloudwatch.aws.targets
+
+	rule {
+		target_label = "job"
+		replacement  = "cloudwatch"
+	}
+}
+
+prometheus.scrape "cloudwatch" {
+	targets          = discovery.relabel.cloudwatch.output
+	forward_to       = [prometheus.remote_write.cloud.receiver]
+	scrape_interval  = "60s"
+	scrape_timeout   = "50s"
+	honor_timestamps = true
+}

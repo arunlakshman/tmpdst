@@ -301,3 +301,42 @@ func TestNoFailoverOnBusinessErrorOrTimeout(t *testing.T) {
 		t.Fatal("business error lost")
 	}
 }
+
+// Failback: the client is sticky to the URL that last worked (the promoted
+// standby); when that node steps down (503) the call wraps around to the
+// preferred node, which becomes the sticky URL again.
+func TestFailbackWrapsAround(t *testing.T) {
+	var demoted atomic.Bool
+	b := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if demoted.Load() {
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "not active", http.StatusServiceUnavailable)
+			return
+		}
+		cp.NewHandler(memstore.New()).ServeHTTP(w, r)
+	}))
+	t.Cleanup(b.Close)
+	a := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	}))
+	aURL := a.URL
+	c := New(aURL+","+b.URL, nil)
+	ctx := context.Background()
+	if err := c.CreateTopic(ctx, "t", 1); err != nil || c.cur.Load() != 1 {
+		t.Fatalf("failover to b: %v cur %d", err, c.cur.Load())
+	}
+	a.Close()
+	a2 := httptest.NewUnstartedServer(cp.NewHandler(memstore.New()))
+	a2.Listener.Close()
+	l, err := net.Listen("tcp", strings.TrimPrefix(aURL, "http://"))
+	if err != nil {
+		t.Skip("port not reusable:", err)
+	}
+	a2.Listener = l
+	a2.Start()
+	t.Cleanup(a2.Close)
+	demoted.Store(true)
+	if err := c.CreateTopic(ctx, "t2", 1); err != nil || c.cur.Load() != 0 {
+		t.Fatalf("failback to the preferred url: %v cur %d", err, c.cur.Load())
+	}
+}

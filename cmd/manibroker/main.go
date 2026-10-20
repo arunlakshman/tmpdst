@@ -59,7 +59,7 @@ func parseFlags(args []string, stderr io.Writer) (brokerFlags, *flag.FlagSet, er
 	fs.StringVar(&f.advertise, "advertise", "", "host:port clients are told in Metadata (default: the listen address)")
 	fs.IntVar(&f.brokerID, "broker-id", 1, "broker id advertised in Metadata")
 	fs.StringVar(&f.nodeID, "node-id", "", "control-plane node name (default: broker-<id>)")
-	fs.StringVar(&f.cpURL, "cp-url", "http://127.0.0.1:8080", "control plane base URL")
+	fs.StringVar(&f.cpURL, "cp-url", "http://127.0.0.1:8080", "control plane base URL, or a comma-separated list for the log-backed control plane (e.g. http://cp0:8080,http://cp1:8080): calls go to the URL that last worked (start with the preferred appender first) and move to the next on a connect error or HTTP 503, each URL once per call; a failed-over commit is safe, it carries its segment key")
 	fs.StringVar(&f.objects, "objects", "s3", "object store: s3, or mem (in-process, single broker, lost on exit)")
 	fs.StringVar(&f.endpoint, "s3-endpoint", "", "S3 endpoint URL (empty: AWS)")
 	fs.StringVar(&f.bucket, "s3-bucket", "manifester", "S3 bucket")

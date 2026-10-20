@@ -43,6 +43,7 @@ type cpFlags struct {
 	manifestOut                          string
 	sequencer                            bool
 	seqPipeline, seqMaxItems, seqCache   int
+	log                                  logFlags
 }
 
 func parseFlags(args []string, stderr io.Writer) (cpFlags, *flag.FlagSet, error) {
@@ -50,7 +51,7 @@ func parseFlags(args []string, stderr io.Writer) (cpFlags, *flag.FlagSet, error)
 	fs := flag.NewFlagSet("manicp", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&f.addr, "addr", ":8080", "listen address")
-	fs.StringVar(&f.kind, "store", "mem", "mem or dynamo")
+	fs.StringVar(&f.kind, "store", "mem", "mem, dynamo (the transaction store, kept for rollback) or dynamolog (the log-backed control plane, decisions 48-53)")
 	fs.StringVar(&f.endpoint, "dynamo-endpoint", "", "DynamoDB endpoint URL (empty: AWS)")
 	fs.StringVar(&f.region, "region", "us-east-1", "AWS region")
 	fs.StringVar(&f.prefix, "table-prefix", "manifester_", "DynamoDB table name prefix")
@@ -63,6 +64,7 @@ func parseFlags(args []string, stderr io.Writer) (cpFlags, *flag.FlagSet, error)
 	fs.IntVar(&f.seqPipeline, "seq-pipeline", 4, "sequencer: group transactions in flight at once (they touch disjoint partitions; 1 = strictly serial)")
 	fs.IntVar(&f.seqMaxItems, "seq-max-group-items", dynamo.MaxTxItems, "sequencer: item budget of one group transaction (at most 100, DynamoDB's limit)")
 	fs.IntVar(&f.seqCache, "seq-cache-keys", 4096, "sequencer: recently committed segment keys remembered for replay without a read (negative: none)")
+	registerLogFlags(fs, &f.log)
 	err := fs.Parse(args)
 	return f, fs, err
 }
@@ -70,6 +72,11 @@ func parseFlags(args []string, stderr io.Writer) (cpFlags, *flag.FlagSet, error)
 // run is the testable body of main: it serves until ctx ends and returns the
 // exit code.
 func run(ctx context.Context, args []string, stderr io.Writer) int {
+	return runWith(ctx, args, stderr, realDeps())
+}
+
+// runWith is run with the log store's outside parts supplied (tests).
+func runWith(ctx context.Context, args []string, stderr io.Writer, d deps) int {
 	f, fs, err := parseFlags(args, stderr)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -77,14 +84,14 @@ func run(ctx context.Context, args []string, stderr io.Writer) int {
 		}
 		return 2
 	}
-	if err := serve(ctx, f, fs, stderr); err != nil {
+	if err := serve(ctx, d, f, fs, stderr); err != nil {
 		slog.Error("manicp", "err", err)
 		return 1
 	}
 	return 0
 }
 
-func serve(ctx context.Context, f cpFlags, fs *flag.FlagSet, stderr io.Writer) error {
+func serve(ctx context.Context, d deps, f cpFlags, fs *flag.FlagSet, stderr io.Writer) error {
 	lvl, lerr := runinfo.ParseLevel(f.logLevel)
 	info := runinfo.New("manicp", f.runID, -1)
 	log := runinfo.NewLogger(stderr, lvl, info)
@@ -102,22 +109,38 @@ func serve(ctx context.Context, f cpFlags, fs *flag.FlagSet, stderr io.Writer) e
 	if err := serveMetrics(log, m, f.metricsAddr); err != nil {
 		return err
 	}
-	st, closeStore, err := openStore(ctx, f, m)
+	h, closeStore, err := openHandler(ctx, d, f, m, log)
 	if err != nil {
 		return err
 	}
 	defer closeStore()
-	srv := &http.Server{Addr: f.addr, Handler: m.Middleware(cp.NewHandler(st)), ReadHeaderTimeout: 10 * time.Second}
-	go shutdownOnDone(ctx, srv)
+	srv := &http.Server{Addr: f.addr, Handler: m.Middleware(h), ReadHeaderTimeout: 10 * time.Second}
+	drained := shutdownOnDone(ctx, srv)
 	log.Info("manicp listening", "addr", f.addr, "store", f.kind, "sequencer", f.sequencer && f.kind == "dynamo")
 	if f.manifestOut != "" {
 		writeManifest(ctx, log, info, fs, f)
 	}
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	err = srv.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		<-drained // in-flight requests finish before the store is released
+	} else if err != nil {
 		return err
 	}
 	log.Info("manicp stopped")
 	return nil
+}
+
+// openHandler builds the HTTP handler over the -store backend. The returned
+// func releases the backend; call it once the server has drained.
+func openHandler(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *slog.Logger) (http.Handler, func(), error) {
+	if f.kind == kindLog {
+		return openLog(ctx, d, f, m, log)
+	}
+	st, closeStore, err := openStore(ctx, f, m)
+	if err != nil {
+		return nil, closeStore, err
+	}
+	return cp.NewHandler(st), closeStore, nil
 }
 
 // serveMetrics starts the /metrics listener unless addr is empty.
@@ -167,18 +190,25 @@ func openDynamo(ctx context.Context, f cpFlags, m *cpobs.Metrics) (cp.Store, fun
 	return s, s.Close, nil
 }
 
-// shutdownOnDone shuts srv down gracefully once ctx ends.
-func shutdownOnDone(ctx context.Context, srv *http.Server) {
-	<-ctx.Done()
-	sctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	srv.Shutdown(sctx)
+// shutdownOnDone shuts srv down gracefully once ctx ends; the channel closes
+// when the shutdown has finished.
+func shutdownOnDone(ctx context.Context, srv *http.Server) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-ctx.Done()
+		sctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		srv.Shutdown(sctx)
+	}()
+	return done
 }
 
 // writeManifest records the run manifest. Never fatal.
 func writeManifest(ctx context.Context, log *slog.Logger, info runinfo.Info, fs *flag.FlagSet, f cpFlags) {
 	mf := runinfo.NewManifest(info, fs, f.region, map[string]any{
-		"table": f.prefix + "cp", "dynamo_endpoint": f.endpoint, "max_commit_attempts": 20, "max_tx_items": dynamo.MaxTxItems,
+		"table": f.log.tableName(f.prefix), "store": f.kind, "rank": f.log.rank, "takeover_after": f.log.takeoverAfter.String(),
+		"ckpt_bucket": f.log.ckptBucket, "dynamo_endpoint": f.endpoint, "max_commit_attempts": 20, "max_tx_items": dynamo.MaxTxItems,
 		"sequencer": f.sequencer && f.kind == "dynamo", "seq_pipeline": f.seqPipeline, "seq_max_group_items": f.seqMaxItems, "seq_cache_keys": f.seqCache})
 	mf.Log(log)
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)

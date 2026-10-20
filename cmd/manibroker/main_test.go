@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"manifester/core"
+	"manifester/sys/runinfo"
 )
 
 func freeAddr(t *testing.T) string {
@@ -123,5 +129,30 @@ func TestOpenObjectsS3(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "manibroker starting") {
 		t.Fatal(logs.String())
+	}
+}
+
+// -cp-url takes a list: a dead URL and a standby (503) are skipped in one call.
+func TestCPURLListFailsOver(t *testing.T) {
+	dead := httptest.NewServer(http.NotFoundHandler())
+	deadURL := dead.URL
+	dead.Close()
+	standby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-CP-Role", "standby")
+		http.Error(w, "not active", http.StatusServiceUnavailable)
+	}))
+	defer standby.Close()
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte(`{"topics":[]}`)) }))
+	defer up.Close()
+	f, _, err := parseFlags([]string{"-cp-url", deadURL + "," + standby.URL + "," + up.URL}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, _, _, err := nodeConfig(f, slog.New(slog.NewTextHandler(io.Discard, nil)), runinfo.New("manibroker", "t", 1), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cfg.ControlPlane.Call(context.Background(), core.DescribeTopics{}); err != nil {
+		t.Fatalf("call through a dead url and a standby: %v", err)
 	}
 }

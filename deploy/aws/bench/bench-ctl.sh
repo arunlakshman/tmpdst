@@ -10,7 +10,8 @@
 #                                           healthz ok, no manicp on any broker, every broker reaches CP:8080
 #   cp-roles                                print /healthz and the X-CP-Role header (active|standby) of every CP host (log store)
 #   kill-appender [DOWN_SECONDS=60]         SIGKILL manicp on the rank-0 CP host, keep it down DOWN_SECONDS, then start it again
-#                                           (it fails back as the preferred appender). Runs detached on the host; prints the time.
+#                                           (it fails back as the preferred appender). Runs detached on the host; prints the time and
+#                                           writes results/RUN/markers/kill-appender-<epoch>.txt for summarize.py's failover summary.
 #   start-workers                           run /opt/bench/start-omb-workers.sh on every loadgen host
 #   stop-workers
 #   worker-status
@@ -111,7 +112,7 @@ case "$cmd" in
     down=${1:-60}
     [ -n "$CP_INSTANCE_ID" ] || { echo "no control-plane instance: set CP_INSTANCE_ID or use --tf-dir" >&2; exit 1; }
     date -u +"kill at %Y-%m-%dT%H:%M:%SZ (note it for the report)"
-    ssm_run "$CP_INSTANCE_ID" "nohup bash -c 'systemctl kill -s SIGKILL manicp; systemctl stop manicp; sleep $down; systemctl start manicp' >/var/log/kill-appender.log 2>&1 & echo killer started" ;;
+    ssm_run "$CP_INSTANCE_ID" "nohup bash -c '. /etc/manifester/snapshot.env; t=\$(date +%s); echo kill_epoch=\$t | aws s3 cp - s3://\$BUCKET/results/\$RUN_ID/markers/kill-appender-\$t.txt --only-show-errors --region \$AWS_REGION || true; systemctl kill -s SIGKILL manicp; systemctl stop manicp; sleep $down; systemctl start manicp' >/var/log/kill-appender.log 2>&1 & echo killer started" ;;
   broker-args)
     # Flags later on the command line override earlier ones (Go flag package), so appending is enough.
     flags=$*

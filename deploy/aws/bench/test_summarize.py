@@ -6,6 +6,7 @@ import argparse
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -195,6 +196,88 @@ class OMBTests(unittest.TestCase):
                 body = f.read()
         self.assertIn("OpenMessaging Benchmark stages", body)
         self.assertIn("Apples-to-apples checklist", body)
+
+
+FAILOVER = os.path.join(HERE, "testdata", "failover")
+
+
+def failover_report(rundir):
+    args = argparse.Namespace(broker_hourly=0.0, s3_put_per_1000=0.005, s3_get_per_1000=0.0004,
+                              ddb_wru_per_million=1.25, ddb_rcu_per_million=0.25)
+    lines = []
+    unmet = summarize.omb_report(lines.append, args, rundir, summarize.load_snapshots(os.path.join(rundir, "metrics")))
+    return "\n".join(lines), unmet
+
+
+class ControlPlaneNodesTests(unittest.TestCase):
+    def test_cp_dirs_are_not_brokers(self):
+        snaps = summarize.load_snapshots(os.path.join(FAILOVER, "metrics"))
+        self.assertEqual(summarize.cp_ids(snaps), ["cp", "cp-1"])
+        self.assertEqual(summarize.broker_ids(snaps), ["1", "2"])
+
+    def test_active_runs_per_node(self):
+        snaps = summarize.load_snapshots(os.path.join(FAILOVER, "metrics"))
+        runs = summarize.active_runs(summarize.cp_active_samples(snaps))
+        self.assertEqual(runs, [("cp", 990, 1090), ("cp-1", 1100, 1180), ("cp", 1190, 1210)])
+
+    def test_roles_table_and_failover_summary(self):
+        text, unmet = failover_report(FAILOVER)
+        self.assertIn("| stage | cp active/snapshots | cp-1 active/snapshots |", text)
+        self.assertIn("| kill500k | 12/15 | 9/21 |", text)
+        self.assertIn("- active before the kill: cp", text)
+        self.assertIn("- cp snapshot gap: 70 s without snapshots", text)
+        self.assertIn("takeover: cp-1 first seen active at", text)
+        self.assertIn("5 s after the kill", text)
+        self.assertIn("failback: cp active again", text)
+        self.assertIn("between 25 and 35 s after T", text)
+        self.assertIn("in stage kill500k (status ok)", text)
+        self.assertIn("No ABORT file.", text)
+        self.assertFalse(any("standby took over" in u or "acknowledged" in u for u in unmet))
+
+    def test_cp_deltas_sum_over_nodes(self):
+        snaps = summarize.load_snapshots(os.path.join(FAILOVER, "metrics"))
+        m = summarize.cp_window(snaps, 1000, 1200)
+        self.assertEqual(m["log_lost"], 2)  # cp-1 lost two slots; cp's counters did not move
+        self.assertEqual(m["log_role_changes"], 2)
+
+    def test_no_takeover_and_abort_are_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            shutil.copytree(FAILOVER, d, dirs_exist_ok=True)
+            for f in os.listdir(os.path.join(d, "metrics", "cp-1")):
+                write(os.path.join(d, "metrics", "cp-1", f), "manicp_log_active 0\n")
+            write(os.path.join(d, "ABORT"), "publish p99 over 60 s\n")
+            text, unmet = failover_report(d)
+        self.assertIn("NO other node was seen active", text)
+        self.assertIn("ABORT file: publish p99 over 60 s", text)
+        self.assertTrue(any("no standby took over" in u for u in unmet))
+        self.assertTrue(any("ABORT" in u for u in unmet))
+
+    def test_no_marker_means_no_failover_section(self):
+        with tempfile.TemporaryDirectory() as d:
+            shutil.copytree(FAILOVER, d, dirs_exist_ok=True)
+            shutil.rmtree(os.path.join(d, "markers"))
+            text, _ = failover_report(d)
+        self.assertIn("Control-plane nodes: active role", text)
+        self.assertNotIn("### Failover", text)
+
+    def test_single_cp_without_log_metrics_has_no_role_section(self):
+        with tempfile.TemporaryDirectory() as d:
+            make_run(d, cp="seq")
+            text, _ = report(d)
+        self.assertNotIn("Control-plane nodes", text)
+
+    def test_cp_hourly_counts_every_cp_node(self):
+        with tempfile.TemporaryDirectory() as d:
+            shutil.copytree(FAILOVER, d, dirs_exist_ok=True)
+            args = argparse.Namespace(broker_hourly=1.0, cp_hourly=10.0, s3_put_per_1000=0.005, s3_get_per_1000=0.0004,
+                                      ddb_wru_per_million=1.25, ddb_rcu_per_million=0.25)
+            lines = []
+            summarize.omb_report(lines.append, args, d, summarize.load_snapshots(os.path.join(d, "metrics")))
+            one = "\n".join(lines)
+            args.cp_hourly = 0.0
+            lines = []
+            summarize.omb_report(lines.append, args, d, summarize.load_snapshots(os.path.join(d, "metrics")))
+        self.assertNotEqual(one, "\n".join(lines))
 
 
 class HistTests(unittest.TestCase):

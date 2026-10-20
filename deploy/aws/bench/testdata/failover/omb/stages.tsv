@@ -1,0 +1,2 @@
+stage	workload	start	end	status	target_msgs	msg_size	consumers	compression	json
+kill500k	kill.yaml	1000	1200	ok	500000	1024	4	lz4	kill.json

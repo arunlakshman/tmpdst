@@ -9,7 +9,9 @@ RESULTS_DIR is ./results/<run_id> (collect-results.sh) or a --local output dir:
     omb/stages.tsv, omb/run.json, omb/<stage>.json     written by run-omb.sh (OpenMessaging Benchmark)
     metrics/<epoch>-{broker,manicp}.txt                Prometheus text snapshots, ONE broker (legacy layout)
     metrics/<broker_id>/<epoch>-broker.txt             one directory per broker (multi-broker layout)
-    metrics/cp/<epoch>-manicp.txt                      the single control-plane manicp (decision 46): DynamoDB and sequencer side
+    metrics/cp/<epoch>-manicp.txt                      the control-plane manicp (decision 46): DynamoDB and sequencer side
+    metrics/cp-<rank>/<epoch>-manicp.txt               standby control-plane nodes (log store); every metrics/cp[-N] dir is read
+    markers/kill-appender-<epoch>.txt                  written by bench-ctl.sh kill-appender (epoch = kill time); drives the failover summary
     metrics/<broker_id>/<epoch>-manicp.txt             older layout, one manicp per broker (still read)
 Both layouts are read; a flat file is attributed to broker "1". With several brokers the Kafka harness
 cells sum the per-broker deltas.
@@ -28,6 +30,7 @@ Standard library only.
 """
 import argparse
 import collections
+import datetime
 import json
 import math
 import os
@@ -206,6 +209,151 @@ def tool_stats(ldir, prefix, tool, clients):
     return res
 
 
+# ------------------------------------------------- control-plane roles and failover
+SNAP_GAP = 30  # seconds without a snapshot from a node end its "active" run (snapshots come every 10 s)
+MARKER = re.compile(r"kill-appender-(\d+)\.txt$")
+
+
+def cp_active_samples(snaps):
+    """-> {node: [(ts, active 0/1/None)]} from manicp_log_active (None: snapshot has no log-store metrics)."""
+    out = {}
+    for n in cp_ids(snaps):
+        rows = []
+        for ts, path in sorted(snaps["manicp"][n].items()):
+            snap = parse_prom(path)
+            has = any(k[0] == "manicp_log_active" for k in snap)
+            rows.append((ts, int(total(snap, "manicp_log_active") > 0.5) if has else None))
+        out[n] = rows
+    return out
+
+
+def active_runs(samples):
+    """-> [(node, first_ts, last_ts)] runs of consecutive active snapshots per node, sorted by start."""
+    runs = []
+    for n, rows in samples.items():
+        cur = None
+        for ts, act in rows:
+            if act == 1 and cur and ts - cur[2] <= SNAP_GAP:
+                cur[2] = ts
+            elif act == 1:
+                if cur:
+                    runs.append(tuple(cur))
+                cur = [n, ts, ts]
+            elif cur:
+                runs.append(tuple(cur))
+                cur = None
+        if cur:
+            runs.append(tuple(cur))
+    return sorted(runs, key=lambda r: (r[1], r[0]))
+
+
+def utc(ts):
+    return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime("%H:%M:%S")
+
+
+def ack_increments(snaps):
+    """-> [(ts_prev, ts, increase)] of the broker seal-to-ack counter, per broker snapshot interval."""
+    out = []
+    for bid, tm in snaps["broker"].items():
+        prev = None
+        for ts in sorted(tm):
+            c = total(parse_prom(tm[ts]), "manibroker_segment_seal_to_ack_seconds_count")
+            if prev is not None:
+                out.append((prev[0], ts, max(0.0, c - prev[1])))
+            prev = (ts, c)
+    return out
+
+
+def failover_lines(rundir, snaps, stages, digest, samples, runs):
+    """Markdown lines about each kill-appender marker (markers/kill-appender-<epoch>.txt) and the ABORT file;
+    (lines, unmet). Resolution is the snapshot interval, so every time is an upper bound within about 10 s."""
+    mdir = os.path.join(rundir, "markers")
+    kills = sorted(int(m.group(1)) for m in (MARKER.search(f) for f in os.listdir(mdir)) if m) if os.path.isdir(mdir) else []
+    lines, unmet = [], []
+    inc = ack_increments(snaps)
+    for t in kills:
+        before = [r for r in runs if r[1] <= t]
+        prior = max(before, key=lambda r: r[2])[0] if before else None
+        lines.append(f"Appender kill at {utc(t)} UTC (epoch {t}):")
+        lines.append(f"- active before the kill: {prior or 'unknown (no manicp_log_active before T)'}")
+        down = [(n, max((ts for ts, _ in rows if ts <= t), default=None), min((ts for ts, _ in rows if ts > t), default=None))
+                for n, rows in samples.items() if n == prior]
+        for n, last, first in down:
+            gap = f"{first - last} s without snapshots (last {utc(last)}, next {utc(first)})" if last and first else "no snapshot gap seen"
+            lines.append(f"- {n} snapshot gap: {gap}")
+        after = [r for r in runs if r[1] > t and r[0] != prior]
+        if after:
+            r = min(after, key=lambda r: r[1])
+            lines.append(f"- takeover: {r[0]} first seen active at {utc(r[1])} UTC, {r[1] - t} s after the kill (at most; resolution 10 s)")
+        else:
+            lines.append("- takeover: NO other node was seen active after the kill")
+            unmet.append(f"kill at {utc(t)} UTC: no standby took over (no manicp_log_active=1 on another node)")
+        back = [r for r in runs if r[1] > t and r[0] == prior]
+        lines.append(f"- failback: {prior} active again at {utc(min(back, key=lambda r: r[1])[1])} UTC" if back and prior else "- failback: not seen")
+        fa = [(a, b) for a, b, d in inc if a >= t and d > 0]
+        if fa:
+            a, b = min(fa, key=lambda x: x[1])
+            lines.append(f"- first ack after the kill: in the snapshot interval {utc(a)}-{utc(b)} UTC, i.e. between {a - t} and {b - t} s after T")
+        else:
+            lines.append("- first ack after the kill: NOT seen in any broker snapshot interval that starts after T")
+            unmet.append(f"kill at {utc(t)} UTC: no broker acknowledged a segment after the kill")
+        stage = next((st for st in stages if int(st["start"]) <= t <= int(st["end"])), None)
+        if stage:
+            d = digest.get(stage["stage"])
+            e = f"{d['err_max']:.1f} err/s max, p99 {d['p99']:,.0f} ms" if d and d["err_max"] is not None and d["p99"] is not None else "no OMB numbers"
+            lines.append(f"- in stage {stage['stage']} (status {stage['status']}): {e}")
+        else:
+            lines.append("- the kill is outside every OMB stage window")
+        lines.append("")
+    ab = os.path.join(rundir, "ABORT")
+    if os.path.exists(ab):
+        lines.append("ABORT file: " + read_text(ab) + "\n")
+    elif kills:
+        lines.append("No ABORT file.\n")
+    return lines, unmet
+
+
+def roles_section(w, snaps, stages, rundir, digest):
+    """Which control-plane node was active per stage and in what runs; the failover summary. Returns unmet items."""
+    ids = cp_ids(snaps)
+    if len(ids) < 1:
+        return []
+    samples = cp_active_samples(snaps)
+    has_log = any(a is not None for rows in samples.values() for _, a in rows)
+    if not has_log and len(ids) < 2:
+        return []
+    runs = active_runs(samples)
+    w("## Control-plane nodes: active role and failover\n")
+    if not has_log:
+        w("Snapshots of " + ", ".join(ids) + " carry no manicp_log_active (not the log store): roles unknown.\n")
+        return []
+    w("From manicp_log_active in " + ", ".join(f"metrics/{n}/" for n in ids) + " (10 s snapshots; a gap of more than %d s ends a run). `active/snapshots` counts snapshots in the stage window.\n" % SNAP_GAP)
+    w("| stage | " + " | ".join(f"{n} active/snapshots" for n in ids) + " | slots/s | lost slots | role changes |")
+    w("|---|" + "---|" * (len(ids) + 3))
+    for st in stages:
+        a, b = int(st["start"]), int(st["end"])
+        cells = []
+        for n in ids:
+            rows = [x for ts, x in samples[n] if a <= ts <= b]
+            cells.append(f"{sum(1 for x in rows if x == 1)}/{len(rows)}")
+        m = cp_window(snaps, a, b) or {}
+        win = max(1, m.get("win", 1))
+        w(f"| {st['stage']} | " + " | ".join(cells) + f" | {fmt(m['log_slots'] / win, 1) if 'log_slots' in m else '-'} | "
+          f"{fmt(m.get('log_lost'), 0) if 'log_lost' in m else '-'} | {fmt(m.get('log_role_changes'), 0) if 'log_role_changes' in m else '-'} |")
+    w("\nActive runs:\n")
+    w("| node | from (UTC) | to (UTC) | seconds |")
+    w("|---|---|---|---|")
+    for n, a, b in runs:
+        w(f"| {n} | {utc(a)} | {utc(b)} | {b - a} |")
+    w("")
+    lines, unmet = failover_lines(rundir, snaps, stages, digest, samples, runs)
+    if lines:
+        w("### Failover\n")
+        for ln in lines:
+            w(ln)
+    return unmet
+
+
 # ------------------------------------------------------------------------ OMB
 MIB = 1048576.0
 GIB = 1073741824.0
@@ -216,6 +364,11 @@ WS = dict(compute=3031.0, s3_get=508.0, s3_put=1788.0, mib_s=1024.0)
 def mean(v):
     v = [x for x in v if x is not None]
     return sum(v) / len(v) if v else None
+
+
+def read_text(path):
+    with open(path) as f:
+        return f.read().strip()
 
 
 def read_tsv(path):
@@ -273,8 +426,9 @@ def omb_report(w, args, rundir, snaps):
     if run:
         w("```\n" + json.dumps(run) + "\n```\n")
     if os.path.exists(os.path.join(odir, "../ABORT")):
-        w("**ABORT file present**: " + open(os.path.join(odir, "../ABORT")).read().strip() + "\n")
-        unmet.append("run aborted (ABORT file): " + open(os.path.join(odir, "../ABORT")).read().strip())
+        abort_text = read_text(os.path.join(odir, "../ABORT"))
+        w("**ABORT file present**: " + abort_text + "\n")
+        unmet.append("run aborted (ABORT file): " + abort_text)
     w("Client side (OMB aggregated over the measured period, warm-up excluded). Latencies in ms. "
       "Publish latency is the Kafka producer send-to-ack time (comparable with WarpStream's 'producer latency'); "
       "end-to-end is producer send to consumer receive.\n")
@@ -358,6 +512,8 @@ def omb_report(w, args, rundir, snaps):
               f"{fmt(m['ddb_wru'] / win, 0)} | {fmt(m['ddb_rcu'] / win, 0)} | {fmt(avg_ms(m, 'ddb_call'))} |")
         w("")
 
+    unmet.extend(roles_section(w, snaps, stages, rundir, digest))
+
     # ---- skew
     w("## Skew across brokers\n")
     w("Each client stays on the broker it bootstrapped from (Metadata names only the answering broker, decision 29), so the split follows how clients landed, not the partition count. Share = committed bytes of the broker / all brokers.\n")
@@ -405,7 +561,7 @@ def omb_report(w, args, rundir, snaps):
         c_get = gets * args.s3_get_per_1000 / 1000
         c_ddb = wru * args.ddb_wru_per_million / 1e6 + rcu * args.ddb_rcu_per_million / 1e6
         hours = (int(st["end"]) - int(st["start"])) / 3600.0
-        c_comp = (nbrokers * args.broker_hourly + (getattr(args, "cp_hourly", 0.0) if cp_win else 0.0)) * hours if args.broker_hourly else None
+        c_comp = (nbrokers * args.broker_hourly + (getattr(args, "cp_hourly", 0.0) if cp_win else 0.0) * len(cp_ids(snaps))) * hours if args.broker_hourly else None
         tot = c_put + c_get + c_ddb + (c_comp or 0)
         per_gib = lambda c: (c / gib) if c is not None else None  # noqa: E731
         mo = lambda c: c / gib * GIB_PER_MONTH_AT_1GIBS  # noqa: E731
@@ -548,18 +704,24 @@ def broker_window(snaps, bid, start, end):
     return m or None
 
 
-CP = "cp"  # metrics/cp/: the single control-plane manicp
+CP = "cp"  # metrics/cp/: the first control-plane manicp; standbys of the log store are metrics/cp-1/, cp-2/, ...
+CP_DIR = re.compile(r"cp(-\d+)?$")
+
+
+def cp_ids(snaps):
+    """Control-plane node dirs (cp, cp-1, ...) in rank order."""
+    ids = [k for k in snaps["manicp"] if CP_DIR.match(k)]
+    return sorted(ids, key=lambda x: int(x[3:]) if len(x) > 2 else -1)
 
 
 def broker_ids(snaps):
-    """Broker ids (manibroker snapshots, or legacy per-broker manicp dirs); the cp dir is not a broker."""
-    return sorted((set(snaps["broker"]) | set(snaps["manicp"])) - {CP}, key=lambda x: (len(x), x))
+    """Broker ids (manibroker snapshots, or legacy per-broker manicp dirs); the cp dirs are not brokers."""
+    return sorted((set(snaps["broker"]) | set(snaps["manicp"])) - set(cp_ids(snaps)), key=lambda x: (len(x), x))
 
 
-def cp_window(snaps, start, end):
-    """Control-plane (single manicp) deltas between the snapshots bracketing [start, end]; None without snapshots.
+def cp_node_window(tm, start, end):
+    """Deltas of ONE control-plane node's snapshots (tm = {ts: path}) around [start, end]; None without a bracket.
     manicp_seq_* keys appear only when the snapshots carry the sequencer metrics (older manicp builds: absent)."""
-    tm = snaps["manicp"].get(CP)
     cc = bracket(tm, start, end) if tm else None
     if not cc:
         return None
@@ -574,6 +736,10 @@ def cp_window(snaps, start, end):
     m["ddb_rcu"] = delta(a, b, "manicp_dynamo_consumed_capacity_units_total", kind="read")
     m["ddb_call_s"] = delta(a, b, "manicp_dynamodb_call_seconds_sum")
     m["ddb_call_n"] = delta(a, b, "manicp_dynamodb_call_seconds_count")
+    if any(n.startswith("manicp_log_") for (n, _l) in b):  # log store: slot rate, lost slots, role flips
+        m["log_slots"] = delta(a, b, "manicp_log_slots_total")
+        m["log_lost"] = delta(a, b, "manicp_log_lost_slots_total")
+        m["log_role_changes"] = delta(a, b, "manicp_log_role_changes_total")
     if any(n.startswith("manicp_seq_") for (n, _l) in b):
         m["seq_groups"] = delta(a, b, "manicp_seq_tx_seconds_count")
         m["seq_cancel_groups"] = delta(a, b, "manicp_seq_tx_seconds_count", outcome="canceled")
@@ -588,6 +754,13 @@ def cp_window(snaps, start, end):
         m["seq_cache_miss"] = delta(a, b, "manicp_seq_cache_total", result="miss")
         m["seq_depth_end"] = total(b, "manicp_seq_queue_depth")
     return m
+
+
+def cp_window(snaps, start, end):
+    """Control-plane deltas summed over all cp nodes (only the active one moves counters; a restarted node's counters
+    reset, so its delta in the stage of the restart is a lower bound). None when no node has a bracket."""
+    ws = [w for w in (cp_node_window(snaps["manicp"].get(n), start, end) for n in cp_ids(snaps)) if w]
+    return sum_windows(ws) if ws else None
 
 
 def sum_windows(ws):

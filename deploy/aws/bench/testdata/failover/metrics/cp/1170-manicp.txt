@@ -1,0 +1,4 @@
+manicp_log_active 0
+manicp_log_slots_total 100
+manicp_log_lost_slots_total 0
+manicp_log_role_changes_total{to="active"} 0

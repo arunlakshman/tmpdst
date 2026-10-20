@@ -2,8 +2,8 @@
 # Pull a run's results from S3 to ./results/<run_id> and summarize them.
 # Run on the operator workstation BEFORE terraform destroy (the bucket is force-destroyed).
 #   usage: collect-results.sh <bucket> <run_id> [region]
-# Result layout: results/<run_id>/{loadgen,omb,metrics}/ plus the service manifests. metrics/ holds either
-# <broker_id>/<epoch>-broker.txt per broker plus cp/<epoch>-manicp.txt from the single control-plane host
+# Result layout: results/<run_id>/{loadgen,omb,metrics}/ plus the service manifests and markers/kill-appender-<epoch>.txt (bench-ctl kill-appender). metrics/ holds either
+# <broker_id>/<epoch>-broker.txt per broker plus cp/ (and cp-1/ ... for log-store standbys) <epoch>-manicp.txt from the control-plane hosts
 # (decision 46), or the older flat <epoch>-*.txt / <broker_id>/<epoch>-manicp.txt layouts (one manicp per broker).
 # Price knobs for the cost-per-GiB table are passed to summarize.py through SUMMARIZE_ARGS, e.g.
 #   SUMMARIZE_ARGS='--broker-hourly 0.9 --s3-put-per-1000 0.0055' collect-results.sh ...

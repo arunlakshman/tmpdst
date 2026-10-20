@@ -313,3 +313,36 @@ func TestConcurrentFakeDB(t *testing.T) {
 		t.Fatalf("u/0 end %d: idempotency broken", end)
 	}
 }
+
+// noOld hides the existing item from a failed condition, like a backend that
+// ignores ReturnValuesOnConditionCheckFailure.
+type noOld struct{ DB }
+
+func (n noOld) PutItem(ctx context.Context, in *dynamodb.PutItemInput, o ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+	out, err := n.DB.PutItem(ctx, in, o...)
+	var cc *types.ConditionalCheckFailedException
+	if errors.As(err, &cc) {
+		cc.Item = nil
+	}
+	return out, err
+}
+
+func TestDynLogFallbackQuery(t *testing.T) {
+	db := fakedb.New()
+	l := NewDynLog(noOld{fakeLog(t, db).db}, "log")
+	if _, won, _ := l.Append(bg, 2, Entry{ID: "a", Kind: KindNoop}); !won {
+		t.Fatal("setup")
+	}
+	if cur, won, err := l.Append(bg, 2, Entry{ID: "b"}); err != nil || won || cur.ID != "a" {
+		t.Fatalf("fallback: %+v %v %v", cur, won, err)
+	}
+	db.Fail = func(call string) error {
+		if call == "Query" {
+			return errors.New("boom")
+		}
+		return nil
+	}
+	if _, _, err := l.Append(bg, 2, Entry{ID: "c"}); err == nil {
+		t.Fatal("unreadable winner must be an error")
+	}
+}

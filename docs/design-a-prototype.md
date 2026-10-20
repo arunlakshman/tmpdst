@@ -173,3 +173,17 @@ window decision, the compact applier. |
 - No indexer, no lease or routing for "sticky"; no group commit of several commands into one entry; no striping.
 - Replica restart, more than 3 replicas, clock skew and real time (the model uses real sleeps on one machine,
   about 20% optimistic as in the earlier model) are not covered.
+
+## 8. Production plan (decisions 48-52)
+
+The prototype above becomes the production control plane in five stages. Each stage ends with its exit criteria met
+and `gofmt`, `go vet`, `scripts/ci-determinism.sh`, `go test -p 1 ./...` and `make build` (CRAP gate: no new offender
+over 30) green. No stage touches an existing sim trace hash except stage 3, which re-baselines them by hand.
+
+| stage | work | exit criteria |
+|---|---|---|
+| 1. KV applier and lockstep | `cp/applier`: the state machine of decision 49 on an embedded KV store chosen by a bake-off (`docs/applier-bakeoff.md`); commands CommitSegment and CreateTopic, queries Lookup, DescribeTopics, End; runs packed per (partition, segment); per-key digest plus bases for the window; checkpoint, restore and trim by slot. | X2 harness with the applier as every replica's state machine and veritas as the oracle: 100,000 seeds, 0 failures (equal answers, offsets and query digests); `cptest` conformance green against the applier as a `cp.Store`; apply rate well above 430 segments/s at 150 partitions per segment with 40k partitions of state; the store dependency recorded per decisions I and J. |
+| 2. Log-backed CP service | The `cp/` service on the DynamoDB log through the `cp/logsm` seam: committer with K=4, hole filler, hot standby tailing the log (decision 51, the slot is the fence), sticky routing of commits to one node, checkpoint and trim (trim stays behind the key window), indexer writing `R#` rows every 10 s on a pre-warmed table, fresh Lookup through `CheckTail` with shared (batched) tail reads. | Conformance C3 against the real service on fakedb; a standby takes over after the appender is killed with no lost or duplicated offset; restart from checkpoint plus tail gives the same state digest; Lookup after an ack sees it; unit and race tests for each loop. |
+| 3. Cap 4096 and sim | Raise `MaxSegmentPartitions` from 96 to about 4096 (decision 52); add a sim CP engine for the log (Put/Query with latency, lost answers, unknown outcome; replicas as actors with crash and restart from a checkpoint; `HoleAfter` on the virtual clock) next to the S3 engine; veritas stays the oracle over the log's first-slot order. | Every trace hash re-baselined and reviewed by hand (a diff per hash with the cause); 300-seed campaign green; invariants: all live replicas' query digests equal at a quiesced log, an answer derives from the applied slot, no empty slot is passed without a no-op. |
+| 4. Wiring and operations | `manicp -store` kind for the log, OpenAPI and a CP URL list (or NLB) for brokers with failover to the next URL, `manicp_` observability for apply lag, slot loss, hole fills, checkpoint age, indexer lag, window size. | `it/` kill-the-appender test fails over within the budget; metrics documented in `docs/observability.md`; runbook updated. |
+| 5. AWS rerun | 500k, 750k and 1M random clients, no partition affinity, with the production CP (X1/X3/X4 numbers re-measured at that load). | Report in `docs/` with commit rate, commit latency p50/p99, tail-query rate, DynamoDB WRU, failover penalty and cost per GiB; the stage-5 results decide whether the S3 index (TODO) is scheduled. |

@@ -68,3 +68,18 @@ Bringing back idempotent producers (InitProducerId, producer epochs and sequence
 ## Per-broker partition ownership: declined
 
 The audit (item 1) showed that at 288 partitions every segment overlaps every other, so the single sequencer cannot pipeline and its bound is about transactions/s x ~3 segments per transaction. Giving each broker its own partition group would raise the modelled ceiling to 140-191 commits/s, but it breaks the leaderless Metadata design (decision 29). **Declined by the product owner**: brokers stay interchangeable. Revisit only if measured commit rate on real DynamoDB is the limiting factor.
+
+## Move the index to S3 (accepted, not scheduled)
+
+**Why:** with design A (decisions 48-50) the control plane's materialised state (partition ends, runs for Lookup, the key window) is rebuilt from the DynamoDB log plus a checkpoint, and the `R#` index rows are written to DynamoDB every 10 s. That is fine for hours of retention. Memory and DynamoDB item cost grow with retention (about 6 GB per hour of index-able batches at 6,450 batches/s, 5.6 GB per day with a compact index), so long retention needs the index out of the CP's memory and out of DynamoDB. The Conflux model (idea B of `docs/delos-logdrive-ideas.md`) does this: the log is short, state lives in object storage.
+
+**Plan:**
+- The applier checkpoints its state to S3 (a checkpoint object per slot, written by the appender or the standby, never required for safety).
+- The index becomes immutable index files in S3 (runs per partition range, packed as in `cp/dynamo/runs.go`), written by the indexer, listed by a small manifest in the checkpoint.
+- The log is trimmed behind the newest checkpoint, but never closer than the key window (decision 48: window = log retention, at least 2 x `CommitDeadline` plus the checkpoint interval).
+- A Lookup below the in-memory tail reads the index file for that partition range; the newest runs stay in memory.
+- A restart loads the latest checkpoint and replays the log tail; `R#` rows in DynamoDB are removed.
+
+**Contract changes:** none for brokers (Lookup keeps its shape). `cp/` service, indexer, checkpoint format, the sim CP engine for the log.
+
+**Done when:** a CP restarts from an S3 checkpoint plus a short log tail with the index larger than memory; Lookup tail latency is reported for in-memory and S3-resident ranges; the log holds minutes, not hours; the sim covers a restart from a checkpoint.

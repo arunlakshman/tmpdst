@@ -66,6 +66,18 @@ bbolt alternative recorded in `docs/applier-bakeoff.md`; neither is worth it now
 - 9 more vulnerabilities in imported packages and 15 in required modules are not called by manicp (govulncheck's
   own classification).
 
+## Follow-up 2026-10-21: x/text v0.39.0 attempted, NOT applied; release toolchain
+
+- `go get golang.org/x/text@v0.39.0` was tried and reverted. x/text v0.39.0 declares `go 1.25.0`, and it forces
+  x/mod v0.37.0, x/sync v0.21.0, x/sys v0.46.0, x/tools v0.47.0 (all `go 1.25.0`), so go.mod's `go 1.24.0` would become
+  `go 1.25.0`. That is a minimum-version change, left to the product owner. No x/text release newer than v0.34.0 that
+  fixes GO-2026-5970 is below go 1.25 (v0.35 to v0.38 not checked individually; the fix is first in v0.39.0 per the advisory).
+- Release toolchain: the newest 1.24 patch, go1.24.13, still shows 25 stdlib findings (1.24 is end of life; fixes are
+  only in 1.25.13 and 1.26.9). Building the same code with `GOTOOLCHAIN=go1.26.10` (go.mod unchanged, still `go 1.24.0`)
+  and `govulncheck -mode=binary` on linux/amd64 and linux/arm64 gives: manibroker, no vulnerabilities; manicp, one
+  finding, GO-2026-5970 (x/text v0.34.0, see above). `deploy/aws/terraform/scripts/build-and-upload.sh` now defaults
+  `GOTOOLCHAIN` to go1.26.10 (override with the environment).
+
 ## Recommendation
 
 Accept all 16 as edge dependencies, record no per-module determinism audits (they are outside the closure), and keep

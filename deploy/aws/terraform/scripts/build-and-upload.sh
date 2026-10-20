@@ -17,6 +17,8 @@ out=$(mktemp -d)
 trap 'rm -rf "$out"' EXIT
 
 cd "$root"
+# Newest toolchain so the binaries carry no stdlib advisories (go.mod keeps its older minimum; override via env).
+export GOTOOLCHAIN=${GOTOOLCHAIN:-go1.26.10}
 for c in manibroker manicp; do
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o "$out/$c" "./cmd/$c"
 done

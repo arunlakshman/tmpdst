@@ -211,7 +211,7 @@ franz-go produce with idempotence off (decisions 41-44), the active node is cras
 (race-clean, repeated). Terraform: log store default, `cp_standby_count` (1), `cp_takeover_after`, `cp_store` (`dynamo` brings back
 one host and `-max-segment-partitions 96`), TTL on `ttl`, checkpoint IAM on `cp/*`, Alloy per node; dashboards and
 `docs/observability.md`, runbook A11, OpenAPI (503, Retry-After, X-CP-Role). Dependency audit: `docs/dep-audits/pebble-indirect-modules.md`.
-Not verified: `terraform fmt/validate/plan` (no terraform binary and no Docker daemon in the build environment), anything on AWS.
+`terraform fmt` and `init -backend=false` + `validate` (hashicorp/terraform:1.9 in Docker, 2026-10-21): clean. Not verified: `terraform plan`, anything on AWS. The stage 5 run is planned in `docs/stage5-run-plan.md`.
 Failover budget and the broker backoff interplay: runbook A11 (takeover 5 s + about 2 s backoff, deadline 120 s).
 
 ### Stage 3 status

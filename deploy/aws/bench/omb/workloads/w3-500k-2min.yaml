@@ -1,0 +1,16 @@
+# W3 experiment: 500k msg/s, 2 min test + 1 min warm-up (indicative only).
+name: w3-500k-2min
+topics: 1
+partitionsPerTopic: 288
+keyDistributor: NO_KEY
+messageSize: 1024
+useRandomizedPayloads: true
+randomBytesRatio: 0.5
+randomizedPayloadPoolSize: 1000
+subscriptionsPerTopic: 1
+producersPerTopic: 64
+consumerPerSubscription: 0
+producerRate: 500000
+consumerBacklogSizeGB: 0
+testDurationMinutes: 2
+warmupDurationMinutes: 1

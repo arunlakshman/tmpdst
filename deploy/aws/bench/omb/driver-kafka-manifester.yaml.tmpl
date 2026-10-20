@@ -16,6 +16,7 @@ maniTopic: @@TOPIC@@
 maniAssign: true
 maniConsumersTotal: @@CONSUMERS@@          # = workload consumerPerSubscription
 maniBalance: @@BALANCE@@                 # true: client k pins to broker (k + loadgen index) % N of bootstrap.servers (stands in for WarpStream service discovery); false: stock random bootstrap choice (binomial skew)
+maniAffine: @@AFFINE@@                  # EXPERIMENT, default false (patch 0004): producer k writes only partitions p % N == k % N; NOT comparable to WarpStream
 maniConsumerWorkers: @@CONSUMER_WORKERS@@  # = loadgen count / 2 (OMB gives the second half of the workers the consumers)
 
 # Unused (no CreateTopics), kept because the stock driver requires the keys.

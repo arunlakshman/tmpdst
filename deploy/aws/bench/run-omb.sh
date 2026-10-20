@@ -3,7 +3,7 @@
 # (SSM session, or detached through `bench-ctl.sh run`). Read docs/aws-benchmark-runbook.md first.
 #
 #   run-omb.sh [--stages LIST] [--compression auto|lz4|none] [--partitions N] [--topic NAME]
-#              [--bootstrap-mode balanced|random] [--max-minutes N] [--include-later] [--skip-preflight] [--dry-run] [--out DIR]
+#              [--bootstrap-mode balanced|random] [--affine] [--abort-p99-ms N] [--max-minutes N] [--include-later] [--skip-preflight] [--dry-run] [--out DIR]
 #
 # Stages (comma list; names are workload files in omb/workloads, aliases below):
 #   smoke           smoke-100k-produce-only       100k msg/s =  97.7 MiB/s, 3 min   (+1 min warm-up)
@@ -20,8 +20,11 @@
 # Prerequisites (bench-ctl.sh does them from the workstation): topic created through the control-plane manicp with the
 # right partition count (OMB cannot: no CreateTopics), OMB workers running on all loadgen hosts.
 #
+# --affine: EXPERIMENT (patch 0004), default off: producer k writes only partitions p % N == k % N (N = brokers), so each
+# broker's segments hold a disjoint partition set. Not comparable to WarpStream; needs balanced mode.
+#
 # Abort rules (checked on every 10 s OMB stats line): error rate > 0.1% of publish rate, publish p99 over the
-# 10 s interval > 10000 ms, or (consumers > 0) backlog >= 100 K messages and growing for 2 consecutive
+# 10 s interval > 10000 ms (--abort-p99-ms N or env OMB_ABORT_P99_MS), or (consumers > 0) backlog >= 100 K messages and growing for 2 consecutive
 # intervals. On abort: OMB is killed, an ABORT file with the reason is written, results are uploaded and the
 # remaining stages are skipped. Touch $OUT/STOP (or /tmp/omb-stop) to stop cleanly between stages.
 #
@@ -31,7 +34,7 @@
 # the single control-plane host (metrics/cp/), every 10 s.
 set -euo pipefail
 
-STAGES="smoke,vanity-produce" COMPRESSION=auto PARTITIONS=288 BMODE=balanced TOPIC="" MAX_MIN=120 LATER=0 SKIP_PRE=0 DRY=0 OUT=""
+STAGES="smoke,vanity-produce" COMPRESSION=auto PARTITIONS=288 BMODE=balanced TOPIC="" MAX_MIN=120 LATER=0 SKIP_PRE=0 DRY=0 OUT="" AFFINE=false ABORT_P99=${OMB_ABORT_P99_MS:-10000}
 while [ $# -gt 0 ]; do
   case "$1" in
     --stages) STAGES=$2; shift ;;
@@ -39,12 +42,14 @@ while [ $# -gt 0 ]; do
     --partitions) PARTITIONS=$2; shift ;;
     --topic) TOPIC=$2; shift ;;
     --bootstrap-mode) BMODE=$2; shift ;;
+    --affine) AFFINE=true ;;
+    --abort-p99-ms) ABORT_P99=$2; shift ;;
     --max-minutes) MAX_MIN=$2; shift ;;
     --include-later) LATER=1 ;;
     --skip-preflight) SKIP_PRE=1 ;;
     --dry-run) DRY=1 ;;
     --out) OUT=$2; shift ;;
-    -h | --help) sed -n '2,33p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,36p' "$0"; exit 0 ;;
     *) echo "unknown argument $1" >&2; exit 2 ;;
   esac
   shift
@@ -196,7 +201,7 @@ check_line() { # check_line <consumers> <line>; returns 3 and sets REASON; state
   p99=$(echo "$line" | sed -n 's/.*Pub Latency (ms) avg: *[0-9.]* - 50%: *[0-9.]* - 99%: *\([0-9.]*\).*/\1/p')
   [ -n "$rate" ] || return 0
   if awk -v r="$rate" -v e="$err" 'BEGIN{exit !((r>0 && e/r>0.001) || (r==0 && e>0))}'; then REASON="error rate $err err/s at publish rate $rate msg/s (> 0.1%)"; return 3; fi
-  if [ -n "$p99" ] && awk -v p="$p99" 'BEGIN{exit !(p>10000)}'; then REASON="publish p99 ${p99} ms > 10000 ms"; return 3; fi
+  if [ -n "$p99" ] && awk -v p="$p99" -v lim="$ABORT_P99" 'BEGIN{exit !(p>lim)}'; then REASON="publish p99 ${p99} ms > ${ABORT_P99} ms"; return 3; fi
   if [ "$cons" -gt 0 ] && [ -n "$back" ]; then
     if awk -v b="$back" -v p="${PREVB:-0}" 'BEGIN{exit !(b>=100 && b>p)}'; then GROW=$((GROW + 1)); else GROW=0; fi
     PREVB=$back
@@ -208,8 +213,8 @@ check_line() { # check_line <consumers> <line>; returns 3 and sets REASON; state
 rm -f "$OUT/ABORT"
 printf 'stage\tworkload\tstart\tend\tstatus\ttarget_msgs\tmsg_size\tconsumers\tcompression\tjson\n' >"$OUT/omb/stages.tsv"
 jq -nc --arg run "$RUN_ID" --arg topic "$TOPIC" --argjson parts "$PARTITIONS" --arg comp "$COMP" --argjson nb "$nbrokers" \
-  --arg boot "$BOOTSTRAP" --arg bmode "$BMODE" --argjson lg "$nworkers" --arg stages "${STAGE_LIST[*]}" \
-  '{run_id:$run,topic:$topic,partitions:$parts,compression:$comp,brokers:$nb,loadgens:$lg,bootstrap:$boot,bootstrap_mode:$bmode,stages:($stages|split(" "))}' >"$OUT/omb/run.json"
+  --arg boot "$BOOTSTRAP" --arg bmode "$BMODE" --argjson lg "$nworkers" --arg affine "$AFFINE" --arg stages "${STAGE_LIST[*]}" \
+  '{run_id:$run,topic:$topic,partitions:$parts,compression:$comp,brokers:$nb,loadgens:$lg,bootstrap:$boot,bootstrap_mode:$bmode,affine:($affine=="true"),stages:($stages|split(" "))}' >"$OUT/omb/run.json"
 
 status=0
 for st in "${STAGE_LIST[@]}"; do
@@ -217,9 +222,9 @@ for st in "${STAGE_LIST[@]}"; do
   if [ -e "$OUT/STOP" ] || [ -e /tmp/omb-stop ]; then log "STOP file present: not starting $st"; break; fi
   cons=$(yget "$f" consumerPerSubscription); target=$(yget "$f" producerRate); msz=$(yget "$f" messageSize)
   drv=$OUT/omb/driver-$st.yaml
-  bash "$OMBCFG/render-driver.sh" "$BOOTSTRAP" "$COMP" "$drv" "$TOPIC" "$cons" "$cworkers" "$([ "$BMODE" = balanced ] && echo true || echo false)" 2>/dev/null
+  bash "$OMBCFG/render-driver.sh" "$BOOTSTRAP" "$COMP" "$drv" "$TOPIC" "$cons" "$cworkers" "$([ "$BMODE" = balanced ] && echo true || echo false)" "$AFFINE" 2>/dev/null
   mib=$(awk -v r="$target" -v m="$msz" 'BEGIN{printf "%.1f", r*m/1048576}')
-  log "stage $st: $target msg/s = $mib MiB/s, consumers/subscription=$cons, compression=$COMP"
+  log "stage $st: $target msg/s = $mib MiB/s, consumers/subscription=$cons, compression=$COMP, affine=$AFFINE, abort p99 > ${ABORT_P99} ms"
   if [ "$DRY" -eq 1 ]; then log "dry run: would run benchmark with driver $drv"; continue; fi
   cd "$OMB"
   start=$(date +%s)

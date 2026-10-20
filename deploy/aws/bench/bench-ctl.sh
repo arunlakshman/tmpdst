@@ -12,6 +12,8 @@
 #   stop-workers
 #   worker-status
 #   run [run-omb.sh args]                   start run-omb.sh DETACHED on loadgen 0 (log /var/log/omb-run.log)
+#   broker-args [FLAGS...]                  append FLAGS (e.g. -segment-window 1s) to every manibroker's command line through a
+#                                           systemd drop-in and restart manibroker; no FLAGS removes the drop-in (defaults)
 #   tail [N=40]                             last N lines of that log
 #   abort                                   touch the STOP file and kill the coordinator on loadgen 0
 #
@@ -31,7 +33,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 cmd=${1:-}; [ $# -eq 0 ] || shift
-[ -n "$cmd" ] || { sed -n '2,23p' "$0"; exit 2; }
+[ -n "$cmd" ] || { sed -n '2,25p' "$0"; exit 2; }
 [ -z "$REGION" ] || export AWS_DEFAULT_REGION=$REGION
 
 tfout() { (cd "$TF_DIR" && terraform output -json "$1" 2>/dev/null) || true; }
@@ -90,6 +92,15 @@ case "$cmd" in
     echo "== broker hosts: no manicp, CP reachable${CP_PRIVATE_IP:+ at $CP_PRIVATE_IP:8080}"
     ssm_run "$BROKER_INSTANCE_IDS" "echo manicp processes: \$(pgrep -x manicp | wc -l); systemctl is-active manibroker; curl -sf -m 5 http://${CP_PRIVATE_IP:-CP_IP_UNKNOWN}:8080/healthz && echo cp reachable" ||
       { echo "check-cp: a broker cannot reach the CP (or runs manicp)" >&2; exit 1; }
+    ;;
+  broker-args)
+    # Flags later on the command line override earlier ones (Go flag package), so appending is enough.
+    flags=$*
+    if [ -z "$flags" ]; then
+      ssm_run "$BROKER_INSTANCE_IDS" "rm -rf /etc/systemd/system/manibroker.service.d; systemctl daemon-reload; systemctl restart manibroker; sleep 3; systemctl is-active manibroker; pgrep -a manibroker | cut -c1-400"
+    else
+      ssm_run "$BROKER_INSTANCE_IDS" "set -e; o=\$(grep '^ExecStart=' /etc/systemd/system/manibroker.service); mkdir -p /etc/systemd/system/manibroker.service.d; printf '[Service]\nExecStart=\n%s %s\n' \"\$o\" '$flags' > /etc/systemd/system/manibroker.service.d/bench-args.conf; systemctl daemon-reload; systemctl restart manibroker; sleep 3; systemctl is-active manibroker; pgrep -a manibroker | cut -c1-400"
+    fi
     ;;
   start-workers) ssm_run "$LOADGEN_INSTANCE_IDS" "/opt/bench/start-omb-workers.sh start" ;;
   stop-workers) ssm_run "$LOADGEN_INSTANCE_IDS" "/opt/bench/start-omb-workers.sh stop" ;;

@@ -396,26 +396,29 @@ func TestCommitLimitRefusesUncappedSegment(t *testing.T) {
 	t.Fatal("no seed in 40 had the control plane refuse an uncapped segment")
 }
 
-// The production caps (96 partitions, 256 batches) against DynamoDB's 100-item
-// commit: a commit costs 1 + distinct partitions (+ grown topics), so the cap
-// leaves 3 items spare. 128 producers over 128 partitions keep enough batches in
-// flight for segments to span many partitions; the control plane refuses
-// anything over 100 items, and the broker's defaults (16 MiB, 200 ms) are
-// untouched. The widest committed segment must be over half of the cap, or the
-// test proves nothing.
-func TestProductionCapsFitDynamoLimit(t *testing.T) {
+// wideCampaign runs 128 producers over 128 partitions (enough batches in flight
+// for segments to span many partitions; 128 per topic in the log case, so more than the old cap can be reached) with the production broker defaults
+// except for the partition cap, against the veritas-backed store limited to
+// DynamoDB's 100-item commit (log false) or the log store (log true). It
+// returns the widest committed segment, in partitions.
+func wideCampaign(t *testing.T, capParts, batches int, log bool) int64 {
+	t.Helper()
 	prod := broker.DefaultConfig()
-	if 1+prod.MaxSegmentPartitions > sim.DynamoMaxCommitItems || sim.DynamoMaxCommitItems-1-prod.MaxSegmentPartitions < 3 {
-		t.Fatalf("1 + %d partitions leaves no spare items under %d", prod.MaxSegmentPartitions, sim.DynamoMaxCommitItems)
-	}
+	prod.MaxSegmentPartitions, prod.MaxSegmentBatches = capParts, batches
+	prod.MaxBufferedBytes, prod.ResumeBufferedBytes = 64<<20, 32<<20
 	opts := Opts{Producers: 128, Consumers: 1, Topics: []string{"a", "b"}, Partitions: 64}
 	cfg := configWith(seeds(1, 2), broker.BugNone, opts)
-	prod.MaxBufferedBytes, prod.ResumeBufferedBytes = 64<<20, 32<<20
+	items := sim.DynamoMaxCommitItems
+	if log {
+		opts.Partitions = 128
+		cfg = configLogWith(seeds(1, 2), broker.BugNone, 0, opts)
+		items = 0
+	}
 	cfg.Params = prod
 	inner := cfg.Swarm
 	cfg.Swarm = func(seed uint64, r sim.CountedRand, c *sim.SeedConfig) {
 		inner(seed, r, c)
-		c.Params, c.ControlPlane.MaxCommitItems = prod, sim.DynamoMaxCommitItems
+		c.Params, c.ControlPlane.MaxCommitItems = prod, items
 	}
 	var widest atomic.Int64
 	cfg.Invariants = append(cfg.Invariants, func() sim.Invariant { return &widestInv{&widest, opts.tps()} })
@@ -425,9 +428,38 @@ func TestProductionCapsFitDynamoLimit(t *testing.T) {
 	}
 	rep.Coverage = nil // a short campaign does not reach every fault
 	report(t, rep)
-	t.Logf("widest committed segment: %d partitions (cap %d)", widest.Load(), prod.MaxSegmentPartitions)
-	if int(widest.Load()) <= prod.MaxSegmentPartitions/2 {
-		t.Errorf("segments spanned at most %d partitions: the production cap was never approached", widest.Load())
+	return widest.Load()
+}
+
+// The old store (decisions 39, 41, 44): a commit costs 1 + distinct partitions
+// (+ grown topics) of the 100 items of a transaction, so the broker must run with
+// -max-segment-partitions 96 (3 spare items). At that cap the control plane
+// refuses nothing; the widest committed segment must be over half of the cap,
+// or the test proves nothing.
+func TestProductionCapsFitDynamoLimit(t *testing.T) {
+	const capParts = 96
+	if 1+capParts > sim.DynamoMaxCommitItems || sim.DynamoMaxCommitItems-1-capParts < 3 {
+		t.Fatalf("1 + %d partitions leaves no spare items under %d", capParts, sim.DynamoMaxCommitItems)
+	}
+	w := wideCampaign(t, capParts, 256, false)
+	t.Logf("old store: widest committed segment %d partitions (cap %d)", w, capParts)
+	if int(w) <= capParts/2 {
+		t.Errorf("segments spanned at most %d partitions: the cap was never approached", w)
+	}
+}
+
+// The log store (decision 52): the production default cap of 4096 and no item
+// limit. With 128 partitions a segment can span more than the old store's 96,
+// and nothing is refused.
+func TestLogStoreTakesTheDefaultCap(t *testing.T) {
+	const old = 96
+	if got := broker.DefaultConfig().MaxSegmentPartitions; got != 4096 {
+		t.Fatalf("default cap %d, want 4096", got)
+	}
+	w := wideCampaign(t, broker.DefaultConfig().MaxSegmentPartitions, 1024, true)
+	t.Logf("log store: widest committed segment %d partitions (cap 4096)", w)
+	if int(w) <= old {
+		t.Errorf("widest segment %d partitions: not past the old store's %d, the cap change was never exercised", w, old)
 	}
 }
 

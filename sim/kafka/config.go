@@ -5,6 +5,7 @@ import (
 	"manifester/core"
 	"manifester/sim"
 	"manifester/sim/engines/cpengine"
+	"manifester/sim/engines/logengine"
 	"manifester/sim/engines/netsim"
 	"manifester/sim/engines/objstore"
 )
@@ -33,6 +34,39 @@ func Config(seeds []uint64) sim.Config { return config(seeds, broker.BugNone) }
 
 func config(seeds []uint64, bug broker.Bug) sim.Config { return configWith(seeds, bug, DefaultOpts()) }
 
+// ConfigLog is Config against the log-backed control plane (sim/engines/logengine,
+// docs/sim-log-engine.md) instead of the veritas-backed one: the same workload,
+// brokers, oracle and fault families, plus the log's own (lost slots, holes,
+// takeover, trim). The broker keeps its default segment cap (4096): the log has
+// no commit item limit.
+func ConfigLog(seeds []uint64) sim.Config { return configLog(seeds, broker.BugNone, 0) }
+
+// configLog builds the log preset with a broker mutant and a log engine mutant.
+func configLog(seeds []uint64, bug broker.Bug, logBug uint8) sim.Config {
+	return configLogWith(seeds, bug, logBug, DefaultOpts())
+}
+
+func configLogWith(seeds []uint64, bug broker.Bug, logBug uint8, opts Opts) sim.Config {
+	cfg := configWith(seeds, bug, opts)
+	cfg.ControlPlane.Log = logengine.DefaultParams()
+	cfg.ControlPlane.Log.Bug = logBug
+	cfg.ControlPlane.MaxCommitItems = 0
+	cfg.ExpectReachable = append(cfg.ExpectReachable, logReachables()...)
+	return cfg
+}
+
+// logReachables are the log engine's paths a campaign must reach.
+func logReachables() []core.Prop {
+	return []core.Prop{
+		"logcp-sim: lost slot retried at a later slot", "logcp-sim: hole filled by a no-op",
+		"logcp-sim: standby took over", "logcp-sim: failback, the standby stepped down",
+		"logcp-sim: replay of a key whose slot was trimmed", "logcp-sim: idempotent replay after takeover",
+		"logcp-sim: replayed key answered from the window", "logcp-sim: Put not answered, same slot repeated",
+		"logcp-sim: replica restored from a checkpoint", "logcp-sim: log trimmed below a checkpoint",
+		"logcp-sim: replica stalled", "logcp-sim: replica crashed",
+	}
+}
+
 func configWith(seeds []uint64, bug broker.Bug, opts Opts) sim.Config {
 	ph := phases()
 	slow := func(fmin, fmax, smin, smax int64, p float64) sim.TwoSpeed {
@@ -56,11 +90,7 @@ func configWith(seeds []uint64, bug broker.Bug, opts Opts) sim.Config {
 			func() sim.Invariant { return &faultCoverage{} },
 		},
 		Engines: func(sc sim.SeedConfig) []sim.Engine {
-			cp := cpengine.New(sc.ControlPlane)
-			for _, t := range opts.Topics {
-				cp.CreateTopic(t, opts.Partitions)
-			}
-			return []sim.Engine{objstore.New(sc.ObjectStore), cp, netsim.New(sc.Network)}
+			return []sim.Engine{objstore.New(sc.ObjectStore), controlPlane(sc, opts), netsim.New(sc.Network)}
 		},
 		ObjectStore: sim.ObjectStoreFaults{
 			ApplyLatency:   slow(1, 5, 50, 200, 0.05),
@@ -93,6 +123,47 @@ func configWith(seeds []uint64, bug broker.Bug, opts Opts) sim.Config {
 		Phases:           ph,
 		QuiesceEvery:     core.Second,
 		CheckDeterminism: 10,
+	}
+}
+
+// topicMaker is a control plane engine that topics can be created in before the run.
+type topicMaker interface {
+	sim.Engine
+	CreateTopic(name string, partitions int32) core.ErrCode
+}
+
+// controlPlane builds this seed's control plane engine with the workload's topics.
+func controlPlane(sc sim.SeedConfig, opts Opts) sim.Engine {
+	var cp topicMaker = cpengine.New(sc.ControlPlane)
+	if sc.ControlPlane.Log.Enabled {
+		cp = logengine.New(sc.ControlPlane)
+	}
+	for _, t := range opts.Topics {
+		cp.CreateTopic(t, opts.Partitions)
+	}
+	return cp
+}
+
+// swarmLog picks this seed's log control plane knobs. It draws after every
+// other swarm decision, and only for the log preset, so the veritas-backed
+// preset keeps its draws.
+func swarmLog(r sim.CountedRand, c *sim.SeedConfig) {
+	l := &c.ControlPlane.Log
+	scale := func(p *float64) {
+		menu := [...]float64{0, 0.5, 1, 2, 4}
+		*p = min(*p*menu[r.Intn(len(menu))], 0.4)
+	}
+	scale(&l.PutFail)
+	scale(&l.PutLost)
+	scale(&l.ReadFail)
+	scale(&l.StallProb)
+	scale(&l.CrashProb)
+	l.K = []int{1, 2, 4, 8}[r.Intn(4)]
+	l.GroupMax = []int{1, 2, 4, 16}[r.Intn(4)]
+	l.HoleAfter = ms([]int64{20, 60, 200}[r.Intn(3)])
+	l.TakeoverAfter = ms([]int64{300, 600, 1500}[r.Intn(3)])
+	if r.Chance(0.4) { // trim-heavy: checkpoints and trims every few slots
+		l.CkptEvery, l.KeepSlots, l.TrimStride = []int{4, 8, 16}[r.Intn(3)], []int{2, 4}[r.Intn(2)], 4
 	}
 }
 
@@ -135,6 +206,9 @@ func swarm(_ uint64, r sim.CountedRand, c *sim.SeedConfig) {
 		n.Latency.SlowProb = 0.2
 	}
 	swarmBroker(r, c) // last, so the fault knobs above keep their draws
+	if c.ControlPlane.Log.Enabled {
+		swarmLog(r, c)
+	}
 }
 
 // The 3 producers send at most 2 batches each and wait for the ack, so a

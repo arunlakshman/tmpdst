@@ -8,6 +8,7 @@ import (
 	"manifester/sim"
 	"manifester/sim/engines/cpengine"
 	"manifester/sim/engines/internal/enginetest"
+	"manifester/sim/engines/logengine"
 	"manifester/sim/engines/objstore"
 	"manifester/veritas"
 	"manifester/veritas/veritastest"
@@ -24,7 +25,9 @@ type engine interface {
 
 // rig is an engine under a test context plus a fresh spec to compare with.
 type rig struct {
-	eng  engine
+	eng  sim.Engine
+	sh   func() uint64 // the engine's cached spec hash; nil when it has none (the log engine)
+	run  func()        // drains the engine's work for one operation (default: the queue)
 	ctx  *enginetest.Ctx
 	from core.NodeRef
 	spec func(op any) string // runs op on the spec, returns the rendered result
@@ -34,7 +37,11 @@ type rig struct {
 
 // finish runs the engine and renders the one completion for req.
 func (g *rig) finish(req core.ReqID) (string, error) {
-	g.ctx.Run()
+	if g.run != nil {
+		g.run()
+	} else {
+		g.ctx.Run()
+	}
 	c := g.ctx.Find(req)
 	if c == nil {
 		return "", fmt.Errorf("req %d: no completion", req)
@@ -69,7 +76,10 @@ func step(g *rig, op any) error {
 	if got != want {
 		return fmt.Errorf("engine: %s\n  spec: %s", got, want)
 	}
-	if h, w := g.eng.SpecStateHash(), g.hash(); h != w {
+	if g.sh == nil {
+		return nil
+	}
+	if h, w := g.sh(), g.hash(); h != w {
 		return fmt.Errorf("state hash: engine %#x, spec %#x (after %s)", h, w, want)
 	}
 	return nil
@@ -81,7 +91,7 @@ func format(op any) string { return fmt.Sprintf("%#v", op) }
 
 func newObjRig() *rig {
 	e, spec := objstore.New(sim.ObjectStoreFaults{}), veritas.NewObjectStore()
-	g := &rig{eng: e, ctx: enginetest.New(e, 1), from: enginetest.Ref("a"), hash: spec.StateHash}
+	g := &rig{eng: e, sh: e.SpecStateHash, ctx: enginetest.New(e, 1), from: enginetest.Ref("a"), hash: spec.StateHash}
 	g.spec = func(op any) string { return render(spec.Exec(op.(core.IOAction))) }
 	g.call = func(op any) string { e.Execute(g.ctx, g.from, op.(core.IOAction)); return "" }
 	return g
@@ -110,7 +120,7 @@ func genObj(r *veritastest.Rand, i int) any {
 
 func newCPRig() *rig {
 	e, spec := cpengine.New(sim.ControlPlaneFaults{}), veritas.NewControlPlane()
-	g := &rig{eng: e, ctx: enginetest.New(e, 1), from: enginetest.Ref("a"), hash: spec.StateHash}
+	g := &rig{eng: e, sh: e.SpecStateHash, ctx: enginetest.New(e, 1), from: enginetest.Ref("a"), hash: spec.StateHash}
 	g.spec = func(op any) string {
 		if c, ok := op.(createTopic); ok {
 			return spec.CreateTopic(c.Name, c.Parts).String()
@@ -178,6 +188,29 @@ func genBatches(r *veritastest.Rand, key string) []core.PendingBatch {
 	return out
 }
 
+// newLogRig is the log engine under the same operations as the spec. The
+// engine's tick chain never drains, so each operation runs for 100 ms of
+// virtual time (a few ticks of both replicas); there is no spec hash to compare.
+func newLogRig() *rig {
+	e, spec := logengine.New(sim.ControlPlaneFaults{Log: sim.LogParams{Enabled: true}}), veritas.NewControlPlane()
+	g := &rig{eng: e, ctx: enginetest.New(e, 1), from: enginetest.Ref("a"), hash: spec.StateHash}
+	g.run = func() { g.ctx.RunUntil(g.ctx.T + sim.Time(100*core.Millisecond)) }
+	g.spec = func(op any) string {
+		if c, ok := op.(createTopic); ok {
+			return spec.CreateTopic(c.Name, c.Parts).String()
+		}
+		return render(spec.Exec(op.(core.IOAction)))
+	}
+	g.call = func(op any) string {
+		if c, ok := op.(createTopic); ok {
+			return e.CreateTopic(c.Name, c.Parts).String()
+		}
+		e.Execute(g.ctx, g.from, op.(core.IOAction))
+		return ""
+	}
+	return g
+}
+
 func check(newRig func() *rig, gen func(*veritastest.Rand, int) any) veritastest.Check[*rig, any] {
 	return veritastest.Check[*rig, any]{
 		Name: "any", New: newRig, Gen: gen, Ops: 120, MaxShrinkRuns: 300,
@@ -192,3 +225,6 @@ func run(t *testing.T, c veritastest.Check[*rig, any]) {
 
 func TestConformanceObjStore(t *testing.T) { run(t, check(newObjRig, genObj)) }
 func TestConformanceCPEngine(t *testing.T) { run(t, check(newCPRig, genCP)) }
+
+// C2 for the log engine: fault-free, it answers every operation as the spec does.
+func TestConformanceLogEngine(t *testing.T) { run(t, check(newLogRig, genCP)) }

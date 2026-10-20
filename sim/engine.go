@@ -103,6 +103,42 @@ type ControlPlaneFaults struct {
 	// count is an upper bound: 1 (the segment) + distinct partitions with at
 	// least one batch + topics the commit grows. 0 = no limit.
 	MaxCommitItems int
+	// Log, when Enabled, replaces the commit model by the log-backed control
+	// plane (sim/engines/logengine): the same fault families above apply at the
+	// service boundary (503, timeout, lost response, outage) and Log adds the
+	// store-side ones. MaxCommitItems is ignored there: the log has no item limit.
+	Log LogParams
+}
+
+// LogParams are the knobs of the simulated log control plane (docs/sim-log-engine.md).
+// Latencies of a log Put and of its answer are ControlPlaneFaults.ApplyLatency
+// and RespondLatency. Slot counts (window, stride, checkpoint, keep) are scaled
+// down from production (131072, 1024, ...) so a 45 s run crosses them.
+type LogParams struct {
+	Enabled bool
+	// K appends in flight per writer; GroupMax commands per log entry.
+	K, GroupMax int
+	// Tick is the engine's polling period (tail reads, role checks, flushes).
+	Tick core.Duration
+	// HoleAfter before an empty slot below the tail is filled with a no-op;
+	// TakeoverAfter without a slot from another writer before the standby
+	// becomes active; PutRetry before an unanswered Put is repeated; Heartbeat
+	// between no-op appends of an idle active node.
+	HoleAfter, TakeoverAfter, PutRetry, Heartbeat core.Duration
+	// PutFail: a Put is refused (not applied). PutLost: a Put is applied, its
+	// answer is lost. ReadFail: a replica's tail read fails this tick.
+	PutFail, PutLost, ReadFail float64
+	// StallProb and CrashProb are per replica per tick (chaos only). A stalled
+	// replica does nothing for StallDur; a crashed one loses its memory and
+	// restarts from the latest checkpoint after DownDur.
+	StallProb, CrashProb float64
+	StallDur, DownDur    [2]core.Duration
+	// WindowSlots: a key is forgotten this many slots after its first slot,
+	// evaluated every TrimStride slots. CkptEvery slots between checkpoints;
+	// KeepSlots below a checkpoint stay untrimmed.
+	WindowSlots, TrimStride, CkptEvery, KeepSlots int
+	// Bug selects a mutant of the log engine (logengine.Bug*); 0 = none.
+	Bug uint8
 }
 
 // DynamoMaxCommitItems is DynamoDB's TransactWriteItems limit, the value the

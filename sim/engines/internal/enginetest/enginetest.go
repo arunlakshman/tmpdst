@@ -33,10 +33,12 @@ type Ctx struct {
 	Delivered []Delivery
 	Faults    []string
 	Reached   []string
-	q         []*entry
-	seq       int
-	eng       sim.Engine
-	lanes     map[string]sim.Lane
+	// Violations lists the properties an Always found false.
+	Violations []string
+	q          []*entry
+	seq        int
+	eng        sim.Engine
+	lanes      map[string]sim.Lane
 }
 
 // New returns a Ctx bound to eng.
@@ -106,6 +108,23 @@ func (c *Ctx) Run() {
 	}
 }
 
+// RunUntil runs the queue in order up to and including time at, for engines
+// whose own timers never let the queue drain. The clock ends at `at`.
+func (c *Ctx) RunUntil(at sim.Time) {
+	for {
+		c.dropDead()
+		if len(c.q) == 0 {
+			break
+		}
+		slices.SortStableFunc(c.q, entryLess)
+		if c.q[0].at > at {
+			break
+		}
+		c.step()
+	}
+	c.T = max(c.T, at)
+}
+
 // dropDead removes cancelled entries from the queue.
 func (c *Ctx) dropDead() {
 	var live []*entry
@@ -153,7 +172,11 @@ func (c *Ctx) Trace() string {
 
 type asserts struct{ c *Ctx }
 
-func (a asserts) Always(bool, core.Prop, ...core.Detail)              {}
+func (a asserts) Always(cond bool, p core.Prop, _ ...core.Detail) {
+	if !cond {
+		a.c.Violations = append(a.c.Violations, string(p))
+	}
+}
 func (a asserts) AlwaysOrUnreachable(bool, core.Prop, ...core.Detail) {}
 func (a asserts) Sometimes(cond bool, p core.Prop) {
 	if cond {

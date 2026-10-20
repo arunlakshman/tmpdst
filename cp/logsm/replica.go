@@ -10,9 +10,21 @@ import (
 	"manifester/veritas"
 )
 
+// Machine is the state machine a Replica applies the log to. The default is
+// veritas.ControlPlane; the production applier (cp/applier) and the lockstep
+// tests plug in here. Exec gets the log slot as the Req of a CommitSegment.
+type Machine interface {
+	Exec(a core.IOAction) core.Completion
+	CreateTopic(name string, partitions int32) core.ErrCode
+	StateHash() uint64
+}
+
 // Config configures a Replica. Log is required.
 type Config struct {
 	Log Log
+	// Machine is the state machine; nil means a fresh veritas.ControlPlane.
+	// Checkpoint needs the veritas default.
+	Machine Machine
 	// Writer names this replica in entry IDs; it must differ between
 	// replicas sharing a log.
 	Writer string
@@ -49,7 +61,7 @@ type Replica struct {
 	cfg Config
 
 	mu      sync.Mutex
-	cp      *veritas.ControlPlane
+	cp      Machine
 	applied int64           // every slot below is applied
 	high    int64           // 1 + highest slot seen or allocated: the next to allocate
 	buf     map[int64]Entry // read but not yet applicable (above a hole)
@@ -75,7 +87,11 @@ func NewReplica(cfg Config) *Replica {
 	if cfg.ReadMax <= 0 {
 		cfg.ReadMax = 500
 	}
-	return &Replica{cfg: cfg, cp: veritas.NewControlPlane(), buf: map[int64]Entry{},
+	m := cfg.Machine
+	if m == nil {
+		m = veritas.NewControlPlane()
+	}
+	return &Replica{cfg: cfg, cp: m, buf: map[int64]Entry{},
 		watch: map[int64]bool{}, done: map[int64]core.CPDone{}, lastPul: -1 << 62}
 }
 

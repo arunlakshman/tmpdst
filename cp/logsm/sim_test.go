@@ -198,7 +198,11 @@ func genCommand(r *veritastest.Rand) Entry {
 }
 
 // runSeed runs one X2 scenario and returns the first violation it finds.
-func runSeed(seed uint64) (result, error) {
+func runSeed(seed uint64) (result, error) { return runSeedWith(seed, nil) }
+
+// runSeedWith is runSeed with a state machine per replica from mk (nil: the
+// veritas default).
+func runSeedWith(seed uint64, mk func() Machine) (result, error) {
 	const replicas, perWriter = 3, 8
 	writersPer := 1 + int(seed%3) // K in flight per replica
 	s := newSched(seed, 200000)
@@ -206,8 +210,12 @@ func runSeed(seed uint64) (result, error) {
 	log := &simLog{s: s, inner: mem}
 	var rs []*Replica
 	for i := 0; i < replicas; i++ {
+		var m Machine
+		if mk != nil {
+			m = mk()
+		}
 		rs = append(rs, NewReplica(Config{
-			Log: log, Writer: "r" + strconv.Itoa(i), Now: func() int64 { return s.step },
+			Machine: m, Log: log, Writer: "r" + strconv.Itoa(i), Now: func() int64 { return s.step },
 			Wait: func(ctx context.Context) error {
 				s.yield()
 				if s.step > s.limit {

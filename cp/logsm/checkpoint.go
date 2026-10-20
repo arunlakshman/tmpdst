@@ -35,8 +35,9 @@ func KeyHash(key string) [16]byte {
 func (r *Replica) Checkpoint() Checkpoint {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	c := Checkpoint{Slot: r.applied, Hash: r.cp.StateHash(), Ends: r.cp.Ends()}
-	for _, k := range r.cp.SegmentKeys() {
+	v := r.cp.(*veritas.ControlPlane) // the prototype checkpoint is veritas-only
+	c := Checkpoint{Slot: r.applied, Hash: v.StateHash(), Ends: v.Ends()}
+	for _, k := range v.SegmentKeys() {
 		c.Keys = append(c.Keys, KeyHash(k))
 	}
 	slices.SortFunc(c.Keys, func(a, b [16]byte) int { return bytes.Compare(a[:], b[:]) })

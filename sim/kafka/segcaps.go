@@ -15,7 +15,7 @@ const timerSlack = 150 * core.Millisecond
 // segmentCaps checks every sealed segment (the broker's segment_sealed fact)
 // against this seed's flush rule: at most MaxSegmentBatches batches and
 // MaxSegmentPartitions partitions with an implied commit cost (1 + partitions,
-// decisions 39, 41, 44) of at most the DynamoDB limit, the size rule applied exactly (the bytes
+// decisions 39, 41, 44) of at most the store's limit (none for the log store), the size rule applied exactly (the bytes
 // before the last batch stayed under MaxSegmentBytes, so a segment overshoots
 // the cap by at most its last batch), and an age of at most the window plus
 // timerSlack. Every committed segment was sealed first.
@@ -23,14 +23,19 @@ const timerSlack = 150 * core.Millisecond
 // AtEnd repeats the partition and batch checks on the control plane's truth,
 // independent of the broker's facts: the committed ranges grouped by segment.
 type segmentCaps struct {
-	cfg  broker.Config
-	tps  []core.TopicPartition
-	seal sim.Cursor
+	cfg   broker.Config
+	tps   []core.TopicPartition
+	items int // the store's commit item limit; 0 = unbounded (the log store)
+	seal  sim.Cursor
 }
 
-func newSegmentCaps(cfg broker.Config, tps []core.TopicPartition) *segmentCaps {
-	return &segmentCaps{cfg: cfg, tps: tps}
+func newSegmentCaps(cfg broker.Config, items int, tps []core.TopicPartition) *segmentCaps {
+	return &segmentCaps{cfg: cfg, items: items, tps: tps}
 }
+
+// fits reports whether a commit of parts partitions is within the store's item
+// limit (1 + parts, decisions 39, 41, 44); an unbounded store always fits.
+func (i *segmentCaps) fits(parts int64) bool { return i.items <= 0 || 1+parts <= int64(i.items) }
 
 func (*segmentCaps) Name() string { return "SegmentCaps" }
 
@@ -65,7 +70,7 @@ func (i *segmentCaps) AtEnd(v sim.View) {
 			d, core.Detail{Key: "batches", Value: u.batches}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentBatches})
 		a.Always(len(u.parts) <= i.cfg.MaxSegmentPartitions, "kafka: a committed segment spans at most MaxSegmentPartitions partitions",
 			d, core.Detail{Key: "parts", Value: len(u.parts)}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentPartitions})
-		a.Always(1+len(u.parts) <= sim.DynamoMaxCommitItems, "kafka: a committed segment's commit cost (1 + partitions) fits the DynamoDB item limit",
+		a.Always(i.fits(int64(len(u.parts))), "kafka: a committed segment's commit cost (1 + partitions) fits the store's commit item limit",
 			d, core.Detail{Key: "parts", Value: len(u.parts)})
 	}
 }
@@ -80,7 +85,7 @@ func (i *segmentCaps) Observe(v sim.View) {
 			d, core.Detail{Key: "batches", Value: n("batches")}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentBatches})
 		a.Always(n("parts") <= int64(i.cfg.MaxSegmentPartitions), "kafka: a sealed segment spans at most MaxSegmentPartitions partitions",
 			d, core.Detail{Key: "parts", Value: n("parts")}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentPartitions})
-		a.Always(1+n("parts") <= int64(sim.DynamoMaxCommitItems), "kafka: a sealed segment's implied commit cost (1 + partitions) fits the DynamoDB item limit",
+		a.Always(i.fits(n("parts")), "kafka: a sealed segment's implied commit cost (1 + partitions) fits the store's commit item limit",
 			d, core.Detail{Key: "parts", Value: n("parts")})
 		a.Always(n("bytes")-n("last") < int64(i.cfg.MaxSegmentBytes), "kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch",
 			d, core.Detail{Key: "bytes", Value: n("bytes")}, core.Detail{Key: "last", Value: n("last")}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentBytes})

@@ -24,7 +24,8 @@ const (
 	// BugSealOffByOne applies the size rule one batch late.
 	BugSealOffByOne
 	// BugNoPartitionCap ignores MaxSegmentPartitions, so a segment can outgrow
-	// the control plane's commit item budget (1 + partitions).
+	// the partition cap (and, on the DynamoDB transaction store, its commit
+	// item budget 1 + partitions).
 	BugNoPartitionCap
 	// BugFreshKeyOnRetry retries a CommitSegment with a fresh SegmentKey, so a
 	// commit that was applied but lost is applied again and the batches are
@@ -55,23 +56,25 @@ type Config struct {
 	MaxSegmentBytes int           // flush at once when the open segment holds this many batch bytes
 
 	// MaxSegmentPartitions and MaxSegmentBatches cap the open segment so the
-	// control plane can commit it. The DynamoDB CP stores one range run item
-	// per (partition, segment) however many batches there are (decision 39),
-	// so its commit is one 100-item transaction costing
+	// control plane can commit it. The cap is a per-store setting (decision 52):
 	//
-	//	1 + partitions + grown topics
+	//	log store (cp/logcp)     one command of about 20 bytes per partition in a
+	//	                         log entry, so the default is 4096 (about 80 KB,
+	//	                         far under the 350 KB entry guard). No item limit.
+	//	DynamoDB transaction     (cp/dynamo, decisions 39, 41, 44) one 100-item
+	//	store                    transaction costing 1 + partitions + grown
+	//	                         topics, so it needs MaxSegmentPartitions <= 96
+	//	                         (-max-segment-partitions 96 on manibroker). A
+	//	                         wider segment is refused with ErrTooLarge, which
+	//	                         the broker never retries (the segment's batches
+	//	                         fail with UNKNOWN_SERVER_ERROR). Set the flag to 96
+	//	                         before rolling back to that store.
 	//
-	// (the segment item, one run item per distinct partition, one item per
-	// grown topic). Batches do not appear, and with no producer state or
-	// fencing items (decisions 41, 44) the item budget is just the partition
-	// cap, so the former MaxSegmentItems knob is gone. With the default of 96
-	// partitions the cost is 97, leaving 3 items for grown topics (topics are
-	// created before use, so normally none). MaxSegmentBatches bounds the
-	// segment's G# item (the request and the answer as JSON, about 300 bytes a
-	// batch; the CP refuses over 300 KB, so about 1000 batches) and the
-	// per-segment bookkeeping. The broker cannot know the CP: keep these in
-	// step with it (cp/doc.go). A CP answer of ErrTooLarge fails the segment's
-	// batches (UNKNOWN_SERVER_ERROR) instead of retrying.
+	// MaxSegmentBatches bounds the segment's G# item on the old store (the
+	// request and the answer as JSON, about 300 bytes a batch; refused over
+	// 300 KB, so about 1000 batches) and the per-segment bookkeeping and the
+	// log entry size on the new one. The broker cannot know the CP: keep these
+	// in step with it (cp/doc.go).
 	MaxSegmentPartitions int // seal at this many distinct partitions
 	MaxSegmentBatches    int // seal at this many batches
 
@@ -106,7 +109,7 @@ func DefaultConfig() Config {
 		MaxFrame:             100 << 20,
 		BatchWindow:          200 * core.Millisecond,
 		MaxSegmentBytes:      16 << 20,
-		MaxSegmentPartitions: 96,
+		MaxSegmentPartitions: 4096,
 		MaxSegmentBatches:    256,
 		MaxAttempts:          6,
 		RetryBase:            20 * core.Millisecond,

@@ -19,7 +19,7 @@ func TestTuningDefaults(t *testing.T) {
 	if err := defaults().apply(&bc, 8<<30); err != nil {
 		t.Fatal(err)
 	}
-	if bc.MaxSegmentBytes != 16<<20 || bc.BatchWindow != 200*core.Millisecond || bc.MaxSegmentPartitions != 96 || bc.MaxSegmentBatches != 256 {
+	if bc.MaxSegmentBytes != 16<<20 || bc.BatchWindow != 200*core.Millisecond || bc.MaxSegmentPartitions != 4096 || bc.MaxSegmentBatches != 256 {
 		t.Fatalf("%+v", bc)
 	}
 	if bc.MaxBufferedBytes != 512<<20 || bc.ResumeBufferedBytes != 256<<20 { // 8 GiB / 16

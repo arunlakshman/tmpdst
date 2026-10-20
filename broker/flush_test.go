@@ -24,7 +24,7 @@ func sealReasons(h *harness) (out []string) {
 
 func TestDefaultFlushRule(t *testing.T) {
 	d := DefaultConfig()
-	if d.MaxSegmentBytes != 16<<20 || d.BatchWindow != 200*core.Millisecond || d.MaxSegmentBatches != 256 || d.MaxSegmentPartitions != 96 {
+	if d.MaxSegmentBytes != 16<<20 || d.BatchWindow != 200*core.Millisecond || d.MaxSegmentBatches != 256 || d.MaxSegmentPartitions != 4096 {
 		t.Fatalf("%+v", d)
 	}
 	z := Config{}.withDefaults()

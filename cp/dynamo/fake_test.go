@@ -488,6 +488,23 @@ func TestTooLargeItems(t *testing.T) {
 	}
 }
 
+// The old transaction store refuses a segment as wide as the log store's cap
+// (decision 52) with ErrTooLarge and writes nothing, so a rollback to it with
+// -max-segment-partitions left at 4096 fails the segment cleanly.
+func TestTooLargeAtLogStoreCap(t *testing.T) {
+	st, f := fakeStore(t)
+	var bs []core.PendingBatch
+	for i := 0; i < 4096; i++ {
+		bs = append(bs, one(tpOf("wide", int32(i)), "b", 1))
+	}
+	if _, code, err := st.CommitSegment(bg, core.CommitSegment{SegmentKey: "w", Batches: bs}); err != nil || code != core.ErrTooLarge {
+		t.Fatalf("4096 partitions: %v %v", code, err)
+	}
+	if f.Count(st.Table()) != 0 {
+		t.Fatal("a refused commit wrote")
+	}
+}
+
 // A read that fails stops the others; the first error wins.
 func TestRunAllFirstError(t *testing.T) {
 	boom := errors.New("boom")

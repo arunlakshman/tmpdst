@@ -43,7 +43,6 @@ Abort rules: `--abort-p99-ms 60000` (the w3 rule), errors > 0.1%, `run-omb.sh --
 | 3 | 750k | 6 min | >= 712k, p99 < 1.5 s; same CP numbers; slot WRU < 700/s (hot key limit 1000 WRU/s, X1) |
 | - | PAUSE | 3-5 min | re-login to SSO, read stages 1-3 in Grafana before spending the 1M stage |
 | 4 | 1M | 8 min | >= 950k (95% rule), p99 < 2 s, no producer errors, brokers balanced (max/min < 1.5), segments mostly 8-16 MiB |
-| 4b | 1M symmetric: 64 producers + 64 consumers (`vanity-1gibps`, needs Fetch) | 8 min | produce bars of stage 4 hold WITH consumers; consume >= 950 MiB/s (the reported higher-throughput number: ~1 GiB/s write + ~1 GiB/s read); backlog not growing; e2e p99 < 2 s (WarpStream's claim); broker fetch CPU/net and cache hit rate captured; CP Lookup/fresh-read rate and latency bounded |
 | 5 | kill the appender at 500k | 10 min | 1 warm-up, kill at t = 3 min of steady load (`bench-ctl.sh kill-appender 60`, writes the marker `summarize.py` reads), 60 s down, failback; ack gap <= 15 s (5 s takeover + ~2 s backoff + tail pass), 0 errors, no ABORT, rank 0 active again |
 
 Common pass bars (stages 2-4): `index_lag_slots` bounded (< 10 s of slots, not growing); `apply_lag_slots` and `standby_lag_slots` bounded;
@@ -70,15 +69,15 @@ S3 and the rest under $2; the one-off warm-throughput charge is unverified. **Es
 
 ## Timing and the SSO token (about 1 h)
 
-Needed: login, apply (15 min incl. boot and READY), 10 min checks, load about 70 min (46 min of stages + gaps), collect 5 min, destroy 10 min.
+Needed: login, apply (15 min incl. boot and READY), 10 min checks, load about 60 min (38 min of stages + gaps), collect 5 min, destroy 10 min.
 Wall time about 2 h 5 min, inside the 2.5 h budget. One token cannot cover it. Cleanest option, **one re-login at the planned pause**:
 - T+0 login #1 (token to about T+60). T+0-15 apply, upload, READY. T+15-25 checks. T+25 smoke, T+30 500k, T+39 750k, ends T+48.
 - T+48 PAUSE: the user runs `aws sso login` again (1 min), reads the 500k/750k panels; go/no-go for 1M. Token #2 runs to about T+110.
-- T+52 1M produce-only (ends T+60), T+63 1M symmetric (ends T+71), T+74 kill test (ends T+84), T+87 `collect-results.sh`, **teardown starts T+90**
-  = 20 min margin before token #2 expires (rule: >= 15 min). The 4096 stage is dropped (scope is OMB at 288 partitions only).
+- T+52 1M produce-only (ends T+60), T+63 kill test (ends T+73), T+76 `collect-results.sh`, **teardown starts T+80**
+  = 30 min margin before token #2 expires (rule: >= 15 min). Scope is OMB at 288 partitions only; no 4096 stage, no consumers.
 - The load runs detached on loadgen 0 (instance role), so the run survives an expired token; only `bench-ctl`, S3 sync and destroy need it.
 - Rejected: two separate stacks (second apply costs 15 min and about $5 more); a long-lived SSO session setting (not ours to change).
-- If any stage slips by more than 10 min, shorten the gaps first; the kill test (stage 5) is the first stage to drop, 4b is not.
+- If any stage slips by more than 10 min, shorten the gaps first; the kill test (stage 5) is the first stage to drop.
 
 ## Teardown and verification checklist
 
@@ -95,7 +94,7 @@ Wall time about 2 h 5 min, inside the 2.5 h budget. One token cannot cover it. C
 2. Client placement: `bootstrap-mode balanced` (default; each OMB client pinned to one broker round-robin, like WarpStream's discovery) or
    `random` (stock; binomial skew across brokers, a harsher test). Partition choice is random per message either way. Recommended: balanced.
 3. DECIDED (product owner): OMB with 288 partitions only, matching the WarpStream benchmark; the 4096-partition point is dropped.
-4. Consumers: DECIDED (product owner). Scope is catching up with the WarpStream post (symmetric 1 GiB/s write+read, 288 partitions), so the consumer read path is REQUIRED for the headline result. PREREQUISITE, see docs/TODO.md "Consumer read path" and docs/surprises-audit.md: Fetch exists (assign(), no groups) but ignores MinBytes/MaxWait, so 64 consumers would cause ~48k Lookups/s (RCU above the 30k warm), the read path has no S3 cache (~6.5k GET/s at 1 GiB/s, above S3's 5,500/s per prefix), so 4b is BLOCKED until the long-poll Fetch, Lookup cache and S3 read cache are built; consumers also need to start at the tail. Original note:: at least one stage with consumers, the 1M symmetric stage 4b. Produce-only stages stay for diagnosis; Fetch must be confirmed working on the log store in the smoke stage (a short consume check) before spending 4b.
+4. Consumers: DECIDED (product owner): NOT in this benchmark. w4 is produce-only like w2/w3, OMB at 288 partitions. The symmetric 1 GiB/s write+read stage (`vanity-1gibps`) is a later run, after the consumer read path of docs/TODO.md (long-poll Fetch, Lookup cache, S3 read cache, consumers at the tail) exists.
 5. Cost cap ($60 proposed) and whether the one-time DynamoDB pre-warm charge is acceptable (not verified).
 6. Go/no-go at the pause, and the go.mod `go 1.25` question for `x/text` v0.39.0 (GO-2026-5970), unrelated to the run.
 7. The build toolchain for the artifact: `build-and-upload.sh` now defaults `GOTOOLCHAIN=go1.26.10` (no stdlib advisories).

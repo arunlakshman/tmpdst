@@ -20,8 +20,7 @@ engineer-days (ed), one engineer, including sim coverage and review; not a commi
   the document and anything copied from it out of the OSS repo and out of git history, and implement our roadmap
   clean-room**: from public docs, the Kafka protocol spec, AWS guidance and our own measurements. For each item in
   section 2 I note whether a public or independent basis exists.
-- Hygiene now: add `docs/arun-*` to `.git/info/exclude` (not `.gitignore`, which is public), never `git add -A` (the
-  untracked `results/` is also at risk, section 3).
+- Hygiene now: add `docs/arun-*` to `.git/info/exclude`; never `git add -A` (untracked `results/` is also at risk).
 
 ## 1. Side by side
 
@@ -39,11 +38,9 @@ Status: have / partial / missing / different (deliberately). "T:" = teardown sec
 | Read path | CP returns pointers (file, index offset, batch), agent range-reads (E.4) | CP `Lookup` returns runs, broker GETs per batch | partial, same idea, no coalescing |
 | Compaction | Planner family, levels and lanes, CP validates the swap (T:15) | None; log trimmed, segments never merged (dec 53) | missing |
 | Retention / GC | Expire, dead-file view, bucket-scanning deadscanner for orphans (T:16) | None. Orphans from failed commits accumulate; bucket lifecycle can delete live `seg/` objects after 3 days (audit S13) | missing, and a correctness hazard |
-| Tiering | None found; "tiers" are compaction sizes (F.1) | None | same |
 | Consumer groups / offsets | In the CP; both classic and KIP-848; batched RPCs (T:9.2c) | None; `kwire/supported.go` serves 5 APIs (Produce, Fetch, ListOffsets, Metadata, ApiVersions); static `assign()` in the benchmark | missing. Audit S19 |
 | Transactions / idempotence | CP state, per-batch producer ids in the commit | Rejected on purpose; brokers return INVALID_REQUEST for idempotent batches (dec 41, 44, TODO "not planned") | different (constraint) |
-| Data lake / Iceberg, query, pipelines | Same pattern again, 35 `DL*` RPCs, DuckDB (T:17) | None | out of scope |
-| Schema registry | Confluent-compatible personality, CP-held schemas | None | out of scope for now |
+| Data lake, query, pipelines, schema registry | Same pattern again (35 `DL*` RPCs, DuckDB, Confluent-compatible SR) (T:17) | None | out of scope |
 | Service discovery | Heartbeat to CP, `Discover`, power-of-2 choices, AZ steering via client.id (T:13, 7.2) | Metadata names only the answering broker (dec 29); live-broker list is a TODO needing a heartbeat lease | missing (planned, TODO "Metadata lists every live broker") |
 | Auth / ACL | SASL PLAIN/SCRAM/OAUTH, mTLS, SPIFFE, ACL logs (T:19) | None: no SASL, no TLS, no ACL (audit S19) | missing |
 | Observability | Prometheus on the agent, CP utilisation gauge, push telemetry by default (T:18) | Strong: facts-based metrics, JSON logs with run id, slot/index/lag series (dec 36-38, `docs/observability.md`). No CP utilisation gauge yet | have, no phone-home (good) |
@@ -95,7 +92,6 @@ Ranked by value over effort. Dependencies: 1 and 2 can start now in parallel; 3 
   spread, optional AZ hint in client id, drain on `Stop`; try `-takeover-after 2s`; run the kill test at 1M.
 - REVISIT: decision 29 says each broker names only itself; listing all brokers changes Metadata semantics, not
   interchangeability. Contract change touches core, veritas, cpengine, lockstep; hashes re-baseline.
-- Not copy: periodic forced connection churn and per-CPU connection limits (no evidence we need them).
 
 ### 4. Consumer groups, offsets and minimal admin APIs (about 35 to 45 ed)
 - Measured need: 5 APIs advertised today, so any group-based client fails ("broker is too old"). This is the largest
@@ -169,12 +165,11 @@ Checklist. Status: OK / TODO / BLOCKER.
   `ebea3be`, `e21eb81`, `176d541`. Harmless, but secret scanners will flag them: add an allowlist or change the fixture.
 - `results/` (170 MB: `terraform-outputs.json`, raw metrics) is untracked and NOT ignored (`git status` shows `??`; the
   w4 doc says "git-ignored", which is wrong). Add to `.gitignore` now.
-- Emails: only `example.com` placeholders; the commit identity is the GitHub noreply address. No internal hostnames or
-  instance/VPC ids found in history.
+- Emails: only `example.com`; commits use the GitHub noreply address. No hostnames or instance/VPC ids in history.
 - Remedy: rewrite with `git filter-repo --replace-text` before the first public push (history is 14 MB, rewrite is cheap),
   or publish from a fresh squashed repo and keep this one as the private design record. The remote `origin` is
   `github.com/arunlakshman/tmpdst`: confirm it is private; if it was ever public, treat the identifiers as already out.
-- Confirm the teardown was never committed: `git log --all` has no commit touching it (checked). Keep it that way.
+- The teardown was never committed (`git log --all` shows no commit touching it). Keep it that way.
 
 ### Wording and competitor risk
 - WarpStream appears 140 times in 30+ tracked files, including source comments (`broker/config.go`, `cmd/manibench`),
@@ -183,7 +178,6 @@ Checklist. Status: OK / TODO / BLOCKER.
   say "our reconstruction of their published settings", add a trademark line (WarpStream, Kafka and others belong to
   their owners; no affiliation). Don't: claim "parity", "faster than", or compare our 975 MiB/s produce-only with their
   symmetric figures; avoid "WarpStream clone/alternative" in the repo description. Rename `vanity` workloads.
-- Our public-sources comparison reads their licence snippet only second hand; have it re-read by legal.
 
 ### Reproducibility for outsiders
 - Terraform stack (`deploy/aws/terraform`, region has no default, good) plus runbook and OMB patches at a pinned commit.
@@ -236,7 +230,7 @@ Outline:
 Charts: throughput and p50/p99 per stage; segment size and partitions per segment vs rate; CP append latency and slots/s;
 kill-test timeline; old vs new commit path; cost stack.
 
-### 4b. OSS alpha: gates = section 3 BLOCKERs closed, secrets remedied, clean-clone CI, licence file, no teardown content.
+4b. OSS alpha gates: section 3 BLOCKERs closed, secrets remedied, clean-clone CI, licence, no teardown content.
 
 ### 4c. Blog 2: "Reading it back: a consumer path for an S3-backed log, and the symmetric 1 GiB/s run"
 Gates: items 1 and 2 done; 3 symmetric runs at 1M write plus 1M read meeting 95% of target both ways; measured GET/s and
@@ -255,6 +249,5 @@ Outline:
 Charts: GET/s and Lookup/s before and after; cache hit rate; end-to-end latency CDF; throughput timeline both directions;
 bill breakdown.
 
-### Not before (any of them)
-Legal answer on the teardown and licence; secrets remedy; 3 repeat runs; bill-based cost; a stranger reproduced the smoke
-run; name search; README gap list. For blog 2 also: item 1 merged and the sim green.
+Not before (any): legal answer; secrets remedy; 3 repeat runs; bill-based cost; a stranger reproduced the smoke run; name
+search; README gap list. Blog 2 also: item 1 merged, sim green.

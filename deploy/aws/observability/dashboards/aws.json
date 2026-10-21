@@ -152,7 +152,7 @@
       },
       "targets": [
         {
-          "expr": "rate(manibroker_segment_put_attempts_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]) - sum(rate(manibroker_segment_put_seconds_count{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum(rate(manibroker_segment_put_attempts_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])) - sum(rate(manibroker_segment_put_seconds_count{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "PUT retries/s (attempts - segments)",
           "datasource": {
             "type": "prometheus",

@@ -226,7 +226,7 @@ b.panel("S3 latency (CloudWatch request metrics)",
          q(f'aws_s3_total_request_latency_maximum{{{R}}} / 1000', "total request max")], "s",
         desc="Needs the bucket metrics filter (README). 1-minute CloudWatch resolution.")
 b.panel("S3 errors and PUT retries",
-        [q(f'rate(manibroker_segment_put_attempts_total{{{R}}}[{RI}]) - sum(rate(manibroker_segment_put_seconds_count{{{R}}}[{RI}]))', "PUT retries/s (attempts - segments)"),
+        [q(f'sum(rate(manibroker_segment_put_attempts_total{{{R}}}[{RI}])) - sum(rate(manibroker_segment_put_seconds_count{{{R}}}[{RI}]))', "PUT retries/s (attempts - segments)"),
          q(f'sum(rate(manibroker_segments_failed_total{{{R}}}[{RI}]))', "failed segments/s"),
          q(f'sum(aws_s3_5xx_errors_sum{{{R}}}) / 60', "S3 5xx/s (CloudWatch)"),
          q(f'sum(aws_s3_4xx_errors_sum{{{R}}}) / 60', "S3 4xx/s (CloudWatch)")], "ops")

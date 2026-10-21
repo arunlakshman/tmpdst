@@ -55,7 +55,6 @@ REVISIT and needs a product-owner decision; none is done silently.
 
 Ranked by value over effort. Dependencies: 1 and 2 can start now in parallel; 3 after 1 starts; 4 needs 1; 5 needs 2 and
 "index to S3" (accepted in TODO, my estimate 12 to 15 ed, not scheduled).
-
 ### 1. Consumer read path: long-poll Fetch, Lookup cache, coalesced ranged GETs, broker chunk cache (about 20 ed)
 - Measured need: one idle franz-go consumer made 20.6k Lookups/s locally; 64 consumers predicted 48k Lookups/s (above the
   30k warm DynamoDB throughput, but note Lookup is now answered from Pebble on the log CP, so the limit becomes CP HTTP and
@@ -73,7 +72,6 @@ Ranked by value over effort. Dependencies: 1 and 2 can start now in parallel; 3 
 - Do NOT copy: RAM sized per vCPU as a rule (size from our w4 RSS of 237 MiB); consistent-hash peer routing before
   measured hit rates justify it (it starts to make brokers non-interchangeable for performance, not correctness: REVISIT
   decision 29's spirit if adopted).
-
 ### 2. Retention, orphan GC and bucket preflight (about 10 to 12 ed)
 - Measured need: nothing is ever deleted (S13); 32 segments/s at 1M is 2.8M objects/day (computed); index-able state grows
   about 6 GB/hour (TODO). Worse, a 3-day lifecycle rule deletes `seg/` objects the index still points to.
@@ -83,7 +81,6 @@ Ranked by value over effort. Dependencies: 1 and 2 can start now in parallel; 3 
 - Basis: the two-phase "index first, then sweep" idea is standard and also in public WarpStream docs; the preflight is
   ordinary operability. Regression risk: deleting a live object is unrecoverable; ship dry-run mode first, and add a sim
   invariant "no indexed run points to a deleted object". Not copy: the optimistic delete queue; start simple.
-
 ### 3. Broker membership, AZ hints and drain (about 10 to 13 ed, including a 1M failover test)
 - Measured need: franz-go failover about 5 s on seed lists (TODO); CP failover ack gap 8 s at 500k, and a broker buffers
   at most 64 MiB (`MaxBufferedBytes`) while each broker takes about 163 MiB/s offered at 1M (84.5 MiB/s committed x about
@@ -92,7 +89,6 @@ Ranked by value over effort. Dependencies: 1 and 2 can start now in parallel; 3 
   spread, optional AZ hint in client id, drain on `Stop`; try `-takeover-after 2s`; run the kill test at 1M.
 - REVISIT: decision 29 says each broker names only itself; listing all brokers changes Metadata semantics, not
   interchangeability. Contract change touches core, veritas, cpengine, lockstep; hashes re-baseline.
-
 ### 4. Consumer groups, offsets and minimal admin APIs (about 35 to 45 ed)
 - Measured need: 5 APIs advertised today, so any group-based client fails ("broker is too old"). This is the largest
   adoption blocker; the Kafka protocol spec is the independent basis, we do not need the teardown's API list.
@@ -107,7 +103,6 @@ Ranked by value over effort. Dependencies: 1 and 2 can start now in parallel; 3 
 - Do NOT copy: KIP-848 protocol, transactions, producer ids. Producer idempotence stays out; this takeaway does not
   force REVISIT of 41-44, but note that Java clients default to idempotence on since Kafka 3.0, so INVALID_REQUEST is an
   adoption papercut: document it in the README; if the product owner wants a tolerant mode, that IS a revisit of 41.
-
 ### 5. Compaction of per-partition slices (about 30 ed, plus 12 to 15 for index to S3 first)
 - Measured need: at 1M a segment holds about 99 of 288 partitions, so each partition gets a slice of about 155 KiB, about
   11 slices/s per partition (computed from w4 figures). Reading one hour of one partition cold is about 40k slices

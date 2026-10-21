@@ -1,0 +1,16 @@
+# W4: 500000 msg/s produce-only, 3 min, no warm-up (indicative only).
+name: w4-500k-3min
+topics: 1
+partitionsPerTopic: 288
+keyDistributor: NO_KEY
+messageSize: 1024
+useRandomizedPayloads: true
+randomBytesRatio: 0.5
+randomizedPayloadPoolSize: 1000
+subscriptionsPerTopic: 1
+producersPerTopic: 64
+consumerPerSubscription: 0
+producerRate: 500000
+consumerBacklogSizeGB: 0
+testDurationMinutes: 3
+warmupDurationMinutes: 0

@@ -1,0 +1,16 @@
+# W3 validity check: 100,000 msg/s x 1 KiB, 1 min, no warm-up.
+name: w4-smoke-100k-1min
+topics: 1
+partitionsPerTopic: 288
+keyDistributor: NO_KEY
+messageSize: 1024
+useRandomizedPayloads: true
+randomBytesRatio: 0.5
+randomizedPayloadPoolSize: 1000
+subscriptionsPerTopic: 1
+producersPerTopic: 64
+consumerPerSubscription: 0
+producerRate: 100000
+consumerBacklogSizeGB: 0
+testDurationMinutes: 1
+warmupDurationMinutes: 0

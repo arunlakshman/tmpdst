@@ -77,7 +77,7 @@ type Replica struct {
 // NewReplica returns a replica at the empty state.
 func NewReplica(cfg Config) *Replica {
 	if cfg.Now == nil {
-		cfg.Now = func() int64 { return time.Now().UnixNano() }
+		cfg.Now = RealNow
 	}
 	if cfg.Wait == nil {
 		cfg.Wait = sleepWait

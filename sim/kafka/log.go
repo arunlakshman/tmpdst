@@ -29,7 +29,7 @@ type plog struct {
 }
 
 // recKey names a record value: client, batch serial, index.
-func parseVal(v string) (client, batch, idx int, ok bool) {
+func parseVal(v string) (int, int, int, bool) {
 	head, _, found := strings.Cut(v, "|")
 	if !found || len(head) < 6 || head[0] != 'c' {
 		return 0, 0, 0, false

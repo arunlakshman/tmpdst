@@ -24,6 +24,18 @@ func fail(code core.ErrCode) error {
 	return &Error{code}
 }
 
+// locked runs fn while holding mu, after ctx is checked. fn's code becomes the error.
+func locked[T any](ctx context.Context, mu *sync.Mutex, fn func() (T, core.ErrCode)) (T, error) {
+	var zero T
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	v, code := fn()
+	return v, fail(code)
+}
+
 // ObjectStore is a sys.ObjectStore over veritas.ObjectStore.
 type ObjectStore struct {
 	mu   sync.Mutex
@@ -45,13 +57,14 @@ func (s *ObjectStore) Put(ctx context.Context, key string, data []byte) error {
 
 // Get returns the bytes referenced by ref.
 func (s *ObjectStore) Get(ctx context.Context, ref core.SegmentRef) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	d := s.spec.Exec(core.ObjGet{Ref: ref}).(core.ObjGetDone)
-	return d.Data, fail(d.Err)
+	return locked(ctx, &s.mu, func() ([]byte, core.ErrCode) {
+		return s.objectBytes(core.ObjGet{Ref: ref})
+	})
+}
+
+func (s *ObjectStore) objectBytes(a core.ObjGet) ([]byte, core.ErrCode) {
+	d := s.spec.Exec(a).(core.ObjGetDone)
+	return d.Data, d.Err
 }
 
 // Delete removes the object under key.
@@ -66,13 +79,14 @@ func (s *ObjectStore) Delete(ctx context.Context, key string) error {
 
 // List returns the keys that start with prefix.
 func (s *ObjectStore) List(ctx context.Context, prefix string) ([]string, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	d := s.spec.Exec(core.ObjList{Prefix: prefix}).(core.ObjListDone)
-	return d.Keys, fail(d.Err)
+	return locked(ctx, &s.mu, func() ([]string, core.ErrCode) {
+		return s.objectKeys(core.ObjList{Prefix: prefix})
+	})
+}
+
+func (s *ObjectStore) objectKeys(a core.ObjList) ([]string, core.ErrCode) {
+	d := s.spec.Exec(a).(core.ObjListDone)
+	return d.Keys, d.Err
 }
 
 // ControlPlane is a sys.ControlPlane over veritas.ControlPlane.
@@ -93,13 +107,14 @@ func (c *ControlPlane) CreateTopic(name string, partitions int32) error {
 
 // Call executes op against the control-plane spec.
 func (c *ControlPlane) Call(ctx context.Context, op core.CPOp) (core.CPResp, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	d := c.spec.Exec(core.CPCall{Op: op}).(core.CPDone)
-	return d.Resp, fail(d.Err)
+	return locked(ctx, &c.mu, func() (core.CPResp, core.ErrCode) {
+		return c.callResp(core.CPCall{Op: op})
+	})
+}
+
+func (c *ControlPlane) callResp(a core.CPCall) (core.CPResp, core.ErrCode) {
+	d := c.spec.Exec(a).(core.CPDone)
+	return d.Resp, d.Err
 }
 
 var (

@@ -113,7 +113,7 @@ func (t *txn) Set(key, val []byte) { t.fail(t.b.Set(key, val, nil)) }
 
 func (t *txn) Delete(key []byte) { t.fail(t.b.Delete(key, nil)) }
 
-func (t *txn) Floor(lo, hi []byte) (key, val []byte) {
+func (t *txn) Floor(lo, hi []byte) ([]byte, []byte) {
 	it, err := t.iter(&pebble.IterOptions{LowerBound: lo, UpperBound: hi})
 	if err != nil {
 		t.fail(err)

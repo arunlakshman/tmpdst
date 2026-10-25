@@ -21,10 +21,16 @@ type Env struct {
 	Wait func(ctx context.Context, ready <-chan struct{}, d time.Duration) error
 }
 
+// wallTime is the real wall clock (DynLog TTL when no clock is injected).
+func wallTime() time.Time { return time.Now() }
+
+// realNow is the wall clock in nanoseconds.
+func realNow() int64 { return wallTime().UnixNano() }
+
 // RealEnv is the wall clock, plain goroutines and timers.
 func RealEnv() Env {
 	return Env{
-		Now: func() int64 { return time.Now().UnixNano() },
+		Now: realNow,
 		Go:  func(f func()) { go f() },
 		Wait: func(ctx context.Context, ready <-chan struct{}, d time.Duration) error {
 			if err := ctx.Err(); err != nil {

@@ -45,7 +45,7 @@ func (o *Objects) Get(_ context.Context, ref core.SegmentRef) ([]byte, error) {
 	defer o.mu.Unlock()
 	d, ok := o.m[ref.Key]
 	if !ok || ref.Off < 0 || ref.Off+ref.Len > int64(len(d)) {
-		return nil, &notFound{ref.Key}
+		return nil, &notFoundError{ref.Key}
 	}
 	return append([]byte(nil), d[ref.Off:ref.Off+ref.Len]...), nil
 }
@@ -72,9 +72,9 @@ func (o *Objects) List(_ context.Context, prefix string) ([]string, error) {
 	return out, nil
 }
 
-type notFound struct{ key string }
+type notFoundError struct{ key string }
 
-func (e *notFound) Error() string { return "logcptest: no such object " + e.key }
+func (e *notFoundError) Error() string { return "logcptest: no such object " + e.key }
 
 // FastConfig is a config with short intervals for tests: one node over log, an
 // in-memory applier store, no DB.

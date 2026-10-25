@@ -129,11 +129,12 @@ func (m latModel) modeA(ctx context.Context, db *fakedb.Fake, nrep, k int) (comm
 		cs = append(cs, NewCommitter(r, k))
 		go r.Run(ctx)
 	}
-	lost := func() (n int64) {
+	lost := func() int64 {
+		var n int64
 		for _, r := range rs {
 			n += r.Stats().Lost
 		}
-		return
+		return n
 	}
 	return func(ctx context.Context, broker int, e Entry) error {
 		d, err := cs[broker%nrep].Do(ctx, e)
@@ -151,11 +152,13 @@ type sample struct{ queue, commit time.Duration }
 // stop submitting at the end of the window; throughput and latency are those
 // of commits that COMPLETED inside [warm, warm+dur], so a saturated mode
 // cannot hide its backlog. total counts every completed commit.
-func runBrokers(commit committerFn, rate float64, warm, dur time.Duration) (in []sample, total, failed int) {
+func runBrokers(commit committerFn, rate float64, warm, dur time.Duration) ([]sample, int, int) {
 	const brokers = 6
 	period := time.Duration(float64(time.Second) * brokers / rate)
 	start := time.Now()
 	from, end := start.Add(warm), start.Add(warm+dur)
+	var in []sample
+	var total, failed int
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for b := 0; b < brokers; b++ {
@@ -198,7 +201,8 @@ func pct(ds []time.Duration, p float64) time.Duration {
 	return s[min(len(s)-1, int(float64(len(s))*p))]
 }
 
-func mean(ds []time.Duration) (m time.Duration) {
+func mean(ds []time.Duration) time.Duration {
+	var m time.Duration
 	for _, d := range ds {
 		m += d
 	}

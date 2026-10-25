@@ -64,18 +64,25 @@ const (
 )
 
 // View is what an invariant sees after a step: the fact timeline, the history
-// and read-only ground truth from the engines.
+// and read-only ground truth from the engines. Whether a node is up is
+// NodeAlive; type-assert a View when an invariant needs it.
 type View interface {
 	Step() uint64
 	Now() Time
 	Phase() Phase
-	Alive(ref core.NodeRef) bool
 	Timeline() Timeline
 	History() History
 	Objects() ObjectTruth
 	CP() CPTruth
 	// Assert is how invariants report.
 	Assert() core.Assertions
+}
+
+// NodeAlive reports whether one incarnation is up. It is separate from View
+// so the invariant surface stays within eight methods.
+type NodeAlive interface {
+	// Alive reports whether ref is the live incarnation of its node.
+	Alive(ref core.NodeRef) bool
 }
 
 // ObjectTruth is what the object store really holds, as builtin types only

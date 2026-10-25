@@ -81,7 +81,8 @@ func newKgoClient(opts ...kgo.Opt) (producer, error) {
 
 // parseArgs parses the arguments after "benchmark-producer". ok is false when
 // usage was printed (exit 2).
-func parseArgs(args []string, stderr io.Writer) (c benchConfig, ok bool) {
+func parseArgs(args []string, stderr io.Writer) (benchConfig, bool) {
+	var c benchConfig
 	fs := flag.NewFlagSet("benchmark-producer", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&c.topic, "topic", "", "topic to produce to (required)")

@@ -63,7 +63,7 @@ type Sink interface {
 }
 
 // Executor runs I/O only. The loop handles Emit, timers, Trip, Exit and
-// panics on an unknown action. Exactly one Completion per IOAction, with the
+// returns an error on an unknown action. Exactly one Completion per IOAction, with the
 // same ReqID, delivered to the Sink and never on the caller's goroutine.
 // Execute MUST NOT block: it hands work to goroutines/queues.
 type Executor interface {

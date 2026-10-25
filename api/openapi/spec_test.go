@@ -157,7 +157,7 @@ func jsonFields(t reflect.Type) []field {
 }
 
 // kindFormat is the (type, format) a Go kind has in the spec.
-func kindFormat(k reflect.Kind) (typ, format string) {
+func kindFormat(k reflect.Kind) (string, string) {
 	switch k {
 	case reflect.String:
 		return "string", ""

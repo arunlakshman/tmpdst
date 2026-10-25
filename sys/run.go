@@ -40,7 +40,7 @@ func Run(ctx context.Context, b Bundle, exec Executor, f core.Factory, self core
 	}()
 	m := f(b.Env, self)
 
-	step := func(body core.EventBody) (done bool, err error) {
+	step := func(body core.EventBody) (bool, error) {
 		acts := m.Step(core.Event{At: b.Clock.Mono(), Wall: b.Clock.Wall(), Body: body})
 		return r.dispatch(acts)
 	}
@@ -95,7 +95,7 @@ type runner struct {
 }
 
 // dispatch runs one Step's actions in order; done reports Trip or Exit.
-func (r *runner) dispatch(acts []core.Action) (done bool, err error) {
+func (r *runner) dispatch(acts []core.Action) (bool, error) {
 	for _, a := range acts {
 		switch a := a.(type) {
 		case core.IOAction:
@@ -128,7 +128,7 @@ func (r *runner) dispatch(acts []core.Action) (done bool, err error) {
 		case core.Exit:
 			return true, nil
 		default:
-			panic(fmt.Sprintf("sys: unknown action %T", a))
+			return true, fmt.Errorf("sys: unknown action %T", a)
 		}
 	}
 	return false, nil

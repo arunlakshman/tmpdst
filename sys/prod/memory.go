@@ -79,7 +79,7 @@ func parseMemTotal(s string) (uint64, bool) {
 
 // AutoBuffered derives the produce buffer cap and its resume mark from a memory
 // limit (0 = unknown): clamp(limit/16, 128 MiB, 1 GiB), resume at half.
-func AutoBuffered(limit uint64) (max, resume int) {
+func AutoBuffered(limit uint64) (int, int) {
 	m := uint64(MinBufferedBytes)
 	if limit != 0 {
 		m = min(max64(limit/16, MinBufferedBytes), MaxBufferedCap)

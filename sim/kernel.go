@@ -206,10 +206,9 @@ func (r *run) logf(format string, args ...any) {
 }
 
 // guard runs fn, turning a panic into FailPanic. It reports whether fn returned.
-func (r *run) guard(what string, fn func()) (ok bool) {
+func (r *run) guard(what string, fn func()) bool {
 	defer func() {
 		if x := recover(); x != nil {
-			ok = false
 			r.fail(FailPanic, "panic", fmt.Sprintf("%s: %v", what, x))
 		}
 	}()
@@ -881,7 +880,10 @@ func (c *engineCtx) Current(node core.NodeID) (core.NodeRef, bool) {
 	return n.ref, true
 }
 
-var _ EngineCtx = (*engineCtx)(nil)
+var (
+	_ EngineCtx   = (*engineCtx)(nil)
+	_ NodeCurrent = (*engineCtx)(nil)
+)
 
 // desc defers rendering to the moment the log line is written; log text is
 // never hashed.

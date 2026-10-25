@@ -24,7 +24,8 @@ func putHex(b *strings.Builder, id [16]byte) {
 	}
 }
 
-func parseHex(s string) (id [16]byte, ok bool) {
+func parseHex(s string) ([16]byte, bool) {
+	var id [16]byte
 	if len(s) != 32 {
 		return id, false
 	}
@@ -56,7 +57,8 @@ func SegmentKey(id core.ID) string {
 
 // ParseSegmentKey inverts SegmentKey. ok is false for any string SegmentKey
 // could not have produced, including the old nested "seg/<node>/<inc>/<id>".
-func ParseSegmentKey(key string) (id core.ID, ok bool) {
+func ParseSegmentKey(key string) (core.ID, bool) {
+	var id core.ID
 	rest, found := strings.CutPrefix(key, keyPrefix)
 	if !found {
 		return id, false

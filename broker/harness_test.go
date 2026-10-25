@@ -26,7 +26,8 @@ func (e *testEnv) Uint64() uint64 {
 	return z ^ z>>31
 }
 func (e *testEnv) Intn(n int) int { return int(e.Uint64() % uint64(n)) }
-func (e *testEnv) NewID() (id core.ID) {
+func (e *testEnv) NewID() core.ID {
+	var id core.ID
 	for i := 0; i < 16; i += 8 {
 		v := e.Uint64()
 		for j := 0; j < 8; j++ {
@@ -351,7 +352,8 @@ func (h *harness) produceOne(c *client, e ent) kmsg.ProduceResponseTopicPartitio
 }
 
 // sends lists the actions of the given kind in emission order.
-func sends(all []core.Action) (out []core.Send) {
+func sends(all []core.Action) []core.Send {
+	var out []core.Send
 	for _, a := range all {
 		if s, ok := a.(core.Send); ok {
 			out = append(out, s)
@@ -360,7 +362,8 @@ func sends(all []core.Action) (out []core.Send) {
 	return out
 }
 
-func factsNamed(all []core.Action, name string) (out []core.Fact) {
+func factsNamed(all []core.Action, name string) []core.Fact {
+	var out []core.Fact
 	for _, a := range all {
 		if e, ok := a.(core.Emit); ok && e.Fact.Name == name {
 			out = append(out, e.Fact)

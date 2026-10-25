@@ -82,7 +82,9 @@ func idemRecord(slot int64, dig [digestLen]byte, rs []core.BatchRange) []byte {
 }
 
 // parseIdem splits a record into its digest and bases.
-func parseIdem(b []byte) (dig [digestLen]byte, bases []int64, err error) {
+func parseIdem(b []byte) ([digestLen]byte, []int64, error) {
+	var dig [digestLen]byte
+	var bases []int64
 	_, n := binary.Uvarint(b)
 	if n <= 0 || len(b) < n+digestLen {
 		return dig, nil, errCorrupt

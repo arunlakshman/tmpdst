@@ -68,7 +68,9 @@ func writeEntry(w *bufio.Writer, k, v []byte) error {
 
 // Restore loads a checkpoint into this (empty) store and returns its slot:
 // the next log slot to apply.
-func (a *Applier) Restore(r io.Reader) (slot int64, err error) {
+func (a *Applier) Restore(r io.Reader) (int64, error) {
+	var slot int64
+	var err error
 	br := bufio.NewReader(r)
 	head := make([]byte, len(snapMagic))
 	if _, err = io.ReadFull(br, head); err != nil || string(head) != snapMagic {
@@ -87,9 +89,10 @@ func (a *Applier) Restore(r io.Reader) (slot int64, err error) {
 
 // restoreChunk reads entries until the chunk is full or the end mark, and
 // writes them in one transaction.
-func (a *Applier) restoreChunk(br *bufio.Reader) (done bool, err error) {
+func (a *Applier) restoreChunk(br *bufio.Reader) (bool, error) {
 	var ents [][2][]byte
 	size := 0
+	var done bool
 	for size < restoreChunk && !done {
 		k, v, end, err := readEntry(br)
 		if err != nil {
@@ -106,7 +109,7 @@ func (a *Applier) restoreChunk(br *bufio.Reader) (done bool, err error) {
 	})
 }
 
-func readEntry(br *bufio.Reader) (k, v []byte, end bool, err error) {
+func readEntry(br *bufio.Reader) ([]byte, []byte, bool, error) {
 	kl, err := binary.ReadUvarint(br)
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("%w: truncated", errSnap)
@@ -114,14 +117,15 @@ func readEntry(br *bufio.Reader) (k, v []byte, end bool, err error) {
 	if kl == 0 {
 		return nil, nil, true, nil
 	}
-	if k, err = readN(br, kl); err != nil {
+	k, err := readN(br, kl)
+	if err != nil {
 		return nil, nil, false, err
 	}
 	vl, err := binary.ReadUvarint(br)
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("%w: truncated", errSnap)
 	}
-	v, err = readN(br, vl)
+	v, err := readN(br, vl)
 	return k, v, false, err
 }
 
@@ -137,9 +141,10 @@ func readN(br *bufio.Reader, n uint64) ([]byte, error) {
 // Trim forgets the idempotency records of commands at slots below slot (the
 // log no longer holds them) and returns how many keys it dropped. Offsets and
 // runs are untouched. A key forgotten here commits again as a new segment.
-func (a *Applier) Trim(slot int64) (dropped int, err error) {
+func (a *Applier) Trim(slot int64) (int, error) {
 	hi := binary.BigEndian.AppendUint64([]byte{pSlot}, uint64(slot))
-	err = a.kv.Update(func(tx Tx) {
+	var dropped int
+	err := a.kv.Update(func(tx Tx) {
 		var sk [][]byte
 		tx.Ascend([]byte{pSlot}, hi, func(k, _ []byte) bool {
 			sk = append(sk, bytes.Clone(k))
@@ -155,7 +160,8 @@ func (a *Applier) Trim(slot int64) (dropped int, err error) {
 }
 
 // Window is the number of segment keys currently remembered.
-func (a *Applier) Window() (n int) {
+func (a *Applier) Window() int {
+	var n int
 	_ = a.kv.View(func(tx Tx) {
 		lo := []byte{pSlot}
 		tx.Ascend(lo, prefixEnd(lo), func(_, _ []byte) bool { n++; return true })
@@ -198,8 +204,10 @@ const (
 // Assigned reports the ranges op was given if it is the first commit of its
 // key at slot, rebuilt from the key's record. An indexer uses it to write the
 // run rows of a slot after the fact.
-func (a *Applier) Assigned(slot int64, op core.CommitSegment) (rs []core.BatchRange, st AssignState, err error) {
-	err = a.kv.View(func(tx Tx) {
+func (a *Applier) Assigned(slot int64, op core.CommitSegment) ([]core.BatchRange, AssignState, error) {
+	var rs []core.BatchRange
+	var st AssignState
+	err := a.kv.View(func(tx Tx) {
 		rec := tx.Get(idemKey(op.SegmentKey))
 		if rec == nil {
 			return

@@ -35,7 +35,7 @@ const freshTries = 4
 // fresh returns once this node has applied every slot that existed when the
 // call began.
 func (s *Service) fresh(ctx context.Context) error {
-	t0 := time.Now()
+	t0 := s.env.Now()
 	if err := s.Blocked(); err != nil {
 		s.m.reject("blocked")
 		return ErrBlocked
@@ -48,7 +48,7 @@ func (s *Service) fresh(ctx context.Context) error {
 				return b.err
 			}
 			err := s.waitApplied(ctx, b.tail)
-			s.m.fresh(time.Since(t0))
+			s.m.fresh(s.since(t0))
 			return err
 		default:
 		}

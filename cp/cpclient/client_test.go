@@ -185,11 +185,11 @@ func TestBadBaseURL(t *testing.T) {
 	}
 }
 
-type timeoutErr struct{}
+type timeoutError struct{}
 
-func (timeoutErr) Error() string   { return "t" }
-func (timeoutErr) Timeout() bool   { return true }
-func (timeoutErr) Temporary() bool { return false }
+func (timeoutError) Error() string   { return "t" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return false }
 
 func TestClassifyDirect(t *testing.T) {
 	put := core.CPCall{Op: core.CommitSegment{}}
@@ -203,14 +203,14 @@ func TestClassifyDirect(t *testing.T) {
 		out  core.Outcome
 	}{
 		{"plain error", put, errors.New("x"), core.ErrIO, core.MaybeApplied},
-		{"plain timeout", put, timeoutErr{}, core.ErrTimeout, core.MaybeApplied},
+		{"plain timeout", put, timeoutError{}, core.ErrTimeout, core.MaybeApplied},
 		{"deadline", put, context.DeadlineExceeded, core.ErrTimeout, core.MaybeApplied},
 		{"not a cp call", notCP, errors.New("x"), core.ErrIO, core.MaybeApplied},
 		{"unsent ctx", put, &CallError{Err: context.Canceled}, core.ErrIO, core.NotApplied},
-		{"unsent timeout", put, &CallError{Err: timeoutErr{}}, core.ErrTimeout, core.NotApplied},
+		{"unsent timeout", put, &CallError{Err: timeoutError{}}, core.ErrTimeout, core.NotApplied},
 		{"unsent dial", put, &CallError{Err: dial}, core.ErrUnavailable, core.NotApplied},
 		{"sent eof", put, &CallError{Sent: true, Err: errors.New("EOF")}, core.ErrIO, core.MaybeApplied},
-		{"sent timeout", put, &CallError{Sent: true, Err: timeoutErr{}}, core.ErrTimeout, core.MaybeApplied},
+		{"sent timeout", put, &CallError{Sent: true, Err: timeoutError{}}, core.ErrTimeout, core.MaybeApplied},
 		{"business", put, fmt.Errorf("w: %w", &Error{Code: core.ErrNotFound}), core.ErrNotFound, core.NotApplied},
 	}
 	for _, tc := range cases {

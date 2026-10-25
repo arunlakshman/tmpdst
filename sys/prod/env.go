@@ -3,6 +3,7 @@ package prod
 import (
 	crand "crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"sync"
@@ -21,15 +22,15 @@ type Env struct {
 var _ core.Env = (*Env)(nil)
 
 // NewEnv returns a production Env that logs to log.
-func NewEnv(log *slog.Logger) *Env {
+func NewEnv(log *slog.Logger) (*Env, error) {
 	var seed [32]byte
 	if _, err := crand.Read(seed[:]); err != nil {
-		panic(err)
+		return nil, fmt.Errorf("prod.NewEnv: %w", err)
 	}
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Env{rnd: rand.NewChaCha8(seed), log: log}
+	return &Env{rnd: rand.NewChaCha8(seed), log: log}, nil
 }
 
 // Uint64 returns a random 64-bit value.

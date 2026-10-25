@@ -175,57 +175,89 @@ func corrupt(format string, a ...any) error {
 // Decode validates a whole object (header, lengths, body CRC, index, every
 // batch CRC) and returns its contents. It never panics.
 func Decode(obj []byte) (Segment, error) {
+	body, err := decodeHeader(obj)
+	if err != nil {
+		return Segment{}, err
+	}
+	ents, raws, payloadOff, err := decodeIndex(body)
+	if err != nil {
+		return Segment{}, err
+	}
+	return attachPayloads(body, ents, raws, payloadOff)
+}
+
+// decodeHeader checks magic/version/flags/body-len/body-CRC and returns the body.
+func decodeHeader(obj []byte) ([]byte, error) {
 	if len(obj) < HeaderSize {
-		return Segment{}, corrupt("truncated header: %d bytes", len(obj))
+		return nil, corrupt("truncated header: %d bytes", len(obj))
 	}
 	if string(obj[:4]) != Magic {
-		return Segment{}, corrupt("bad magic")
+		return nil, corrupt("bad magic")
 	}
 	if v := binary.BigEndian.Uint16(obj[4:]); v != Version {
-		return Segment{}, corrupt("unsupported version %d", v)
+		return nil, corrupt("unsupported version %d", v)
 	}
 	if f := binary.BigEndian.Uint16(obj[6:]); f != 0 {
-		return Segment{}, corrupt("unknown flags %#x", f)
+		return nil, corrupt("unknown flags %#x", f)
 	}
 	if bl := binary.BigEndian.Uint64(obj[8:]); bl != uint64(len(obj)-HeaderSize) {
-		return Segment{}, corrupt("body length %d, have %d bytes", bl, len(obj)-HeaderSize)
+		return nil, corrupt("body length %d, have %d bytes", bl, len(obj)-HeaderSize)
 	}
 	body := obj[HeaderSize:]
 	if binary.BigEndian.Uint32(obj[16:]) != Checksum(body) {
-		return Segment{}, corrupt("body CRC mismatch")
+		return nil, corrupt("body CRC mismatch")
 	}
+	return body, nil
+}
+
+// indexRaw is one index entry's body-relative payload range.
+type indexRaw struct{ off, n uint64 }
+
+// decodeIndex parses the index and returns entries (CRC filled, Off/Len later),
+// raw ranges, and the body offset where payloads must start.
+func decodeIndex(body []byte) ([]Entry, []indexRaw, uint64, error) {
 	if len(body) < 4 {
-		return Segment{}, corrupt("no index")
+		return nil, nil, 0, corrupt("no index")
 	}
 	count := uint64(binary.BigEndian.Uint32(body))
 	if count == 0 || count > uint64(len(body)-4)/minEntry {
-		return Segment{}, corrupt("bad batch count %d", count)
+		return nil, nil, 0, corrupt("bad batch count %d", count)
 	}
-	seg := Segment{Entries: make([]Entry, 0, count), Batches: make([]Batch, 0, count)}
-	type raw struct{ off, n uint64 }
-	raws := make([]raw, 0, count)
+	ents := make([]Entry, 0, count)
+	raws := make([]indexRaw, 0, count)
 	p := 4
 	for i := uint64(0); i < count; i++ {
 		if len(body)-p < 2 {
-			return Segment{}, corrupt("truncated index")
+			return nil, nil, 0, corrupt("truncated index")
 		}
 		tl := int(binary.BigEndian.Uint16(body[p:]))
 		if tl == 0 || len(body)-p < 2+tl+28 {
-			return Segment{}, corrupt("bad index entry %d", i)
+			return nil, nil, 0, corrupt("bad index entry %d", i)
 		}
 		topic := string(body[p+2 : p+2+tl])
 		q := p + 2 + tl
 		part := int32(binary.BigEndian.Uint32(body[q:]))
 		if part < 0 {
-			return Segment{}, corrupt("negative partition in entry %d", i)
+			return nil, nil, 0, corrupt("negative partition in entry %d", i)
 		}
-		e := Entry{TP: core.TP(topic, part), Records: binary.BigEndian.Uint32(body[q+4:]),
-			CRC: binary.BigEndian.Uint32(body[q+24:])}
-		raws = append(raws, raw{binary.BigEndian.Uint64(body[q+8:]), binary.BigEndian.Uint64(body[q+16:])})
-		seg.Entries = append(seg.Entries, e)
+		ents = append(ents, Entry{
+			TP:      core.TP(topic, part),
+			Records: binary.BigEndian.Uint32(body[q+4:]),
+			CRC:     binary.BigEndian.Uint32(body[q+24:]),
+		})
+		raws = append(raws, indexRaw{
+			off: binary.BigEndian.Uint64(body[q+8:]),
+			n:   binary.BigEndian.Uint64(body[q+16:]),
+		})
 		p = q + 28
 	}
-	next := uint64(p) // payloads start right after the index
+	return ents, raws, uint64(p), nil
+}
+
+// attachPayloads checks contiguous ranges and per-batch CRCs, fills Off/Len,
+// and builds Batches that alias body slices.
+func attachPayloads(body []byte, ents []Entry, raws []indexRaw, next uint64) (Segment, error) {
+	seg := Segment{Entries: ents, Batches: make([]Batch, 0, len(ents))}
 	for i, r := range raws {
 		if r.off != next || r.n == 0 || r.n > uint64(len(body))-r.off {
 			return Segment{}, corrupt("entry %d: bad range off=%d len=%d", i, r.off, r.n)

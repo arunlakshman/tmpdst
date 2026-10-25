@@ -165,16 +165,18 @@ func TestTimerFiresAndEmitFact(t *testing.T) {
 	}
 }
 
-func stops(m *fakeMachine) (n int, last core.Stop) {
+func stops(m *fakeMachine) (int, core.Stop) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	var n int
+	var last core.Stop
 	for _, e := range m.events {
 		if s, ok := e.Body.(core.Stop); ok {
 			n++
 			last = s
 		}
 	}
-	return
+	return n, last
 }
 
 func TestShutdownStopThenExit(t *testing.T) {

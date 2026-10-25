@@ -101,65 +101,86 @@ func ParseTree(root string) ([]*Func, error) {
 		if err != nil {
 			return err
 		}
-		name := d.Name()
 		if d.IsDir() {
-			if p != root {
-				if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || name == "vendor" || name == "testdata" {
-					return filepath.SkipDir
-				}
-				if _, e := os.Stat(filepath.Join(p, "go.mod")); e == nil {
-					return filepath.SkipDir
-				}
+			if skipTreeDir(root, p, d.Name()) {
+				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			return nil
-		}
-		src, err := os.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		if isGenerated(src) {
-			return nil
-		}
-		rel, _ := filepath.Rel(root, p)
-		rel = filepath.ToSlash(rel)
-		f, err := parser.ParseFile(fset, rel, src, 0)
-		if err != nil {
-			return fmt.Errorf("parse %s: %w", rel, err)
-		}
-		dir := filepath.ToSlash(filepath.Dir(rel))
-		for _, decl := range f.Decls {
-			d, ok := decl.(*ast.FuncDecl)
-			if !ok || d.Body == nil {
-				continue
-			}
-			nm := d.Name.Name
-			if r := recvName(d); r != "" {
-				nm = r + "." + nm
-			}
-			out = append(out, &Func{
-				Key:        dir + "." + nm,
-				Name:       nm,
-				File:       rel,
-				Line:       fset.Position(d.Pos()).Line,
-				EndLine:    fset.Position(d.End()).Line,
-				Complexity: Complexity(d),
-			})
-		}
-		return nil
+		return collectGo(fset, root, p, d.Name(), &out)
 	})
 	if err != nil {
 		return nil, err
 	}
+	sortFuncs(out)
+	disambiguateKeys(out)
+	return out, nil
+}
+
+func skipTreeDir(root, path, name string) bool {
+	if path == root {
+		return false
+	}
+	if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
+		return true
+	}
+	if name == "vendor" || name == "testdata" {
+		return true
+	}
+	_, err := os.Stat(filepath.Join(path, "go.mod"))
+	return err == nil
+}
+
+func collectGo(fset *token.FileSet, root, path, name string, out *[]*Func) error {
+	if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+		return nil
+	}
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if isGenerated(src) {
+		return nil
+	}
+	rel, _ := filepath.Rel(root, path)
+	rel = filepath.ToSlash(rel)
+	f, err := parser.ParseFile(fset, rel, src, 0)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", rel, err)
+	}
+	dir := filepath.ToSlash(filepath.Dir(rel))
+	for _, decl := range f.Decls {
+		d, ok := decl.(*ast.FuncDecl)
+		if !ok || d.Body == nil {
+			continue
+		}
+		nm := d.Name.Name
+		if r := recvName(d); r != "" {
+			nm = r + "." + nm
+		}
+		*out = append(*out, &Func{
+			Key:        dir + "." + nm,
+			Name:       nm,
+			File:       rel,
+			Line:       fset.Position(d.Pos()).Line,
+			EndLine:    fset.Position(d.End()).Line,
+			Complexity: Complexity(d),
+		})
+	}
+	return nil
+}
+
+func sortFuncs(out []*Func) {
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].File != out[j].File {
 			return out[i].File < out[j].File
 		}
 		return out[i].Line < out[j].Line
 	})
-	// Disambiguate repeated keys (several init functions, "_" methods).
+}
+
+// disambiguateKeys numbers repeated keys (several init functions, "_" methods).
+func disambiguateKeys(out []*Func) {
 	seen := map[string]int{}
 	for _, f := range out {
 		seen[f.Key]++
@@ -167,5 +188,4 @@ func ParseTree(root string) ([]*Func, error) {
 			f.Key = fmt.Sprintf("%s#%d", f.Key, c)
 		}
 	}
-	return out, nil
 }

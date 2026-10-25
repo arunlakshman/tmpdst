@@ -588,7 +588,8 @@ func TestIdempotentBatchRejected(t *testing.T) {
 	h.noViolations()
 }
 
-func commitOps(h *harness) (out []core.CommitSegment) {
+func commitOps(h *harness) []core.CommitSegment {
+	var out []core.CommitSegment
 	for _, op := range h.cpCalls {
 		if cs, ok := op.(core.CommitSegment); ok {
 			out = append(out, cs)

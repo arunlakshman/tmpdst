@@ -50,6 +50,7 @@ func (noCP) Gen() uint64                                     { return 0 }
 
 var (
 	_ View        = view{}
+	_ NodeAlive   = view{}
 	_ ObjectTruth = noObjects{}
 	_ CPTruth     = noCP{}
 )

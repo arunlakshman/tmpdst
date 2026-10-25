@@ -224,7 +224,7 @@ func (c *Core) OnInternal(ctx sim.EngineCtx, body any) {
 	if pl.Kind != Normal {
 		return
 	}
-	if cur, up := ctx.Current(pl.From.Node); !up || cur != pl.From {
+	if cur, up := ctx.(sim.NodeCurrent).Current(pl.From.Node); !up || cur != pl.From {
 		return // caller died; the effect stands, nobody to tell
 	}
 	if c.h.Finish != nil {

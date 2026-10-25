@@ -46,8 +46,9 @@ func (a *Applier) Exec(act core.IOAction) core.Completion {
 }
 
 // Commit applies a CommitSegment that sits at log slot slot.
-func (a *Applier) Commit(slot int64, op core.CommitSegment) (d core.CPDone, err error) {
-	err = a.kv.Update(func(tx Tx) { d = commitTx(tx, slot, op) })
+func (a *Applier) Commit(slot int64, op core.CommitSegment) (core.CPDone, error) {
+	var d core.CPDone
+	err := a.kv.Update(func(tx Tx) { d = commitTx(tx, slot, op) })
 	return d, err
 }
 
@@ -61,8 +62,9 @@ type Command struct {
 // the writes of the ones before it) and returns their answers. It is what a
 // replica uses to apply the slots one tail read delivered: the same state as
 // applying them one by one, with far fewer page writes in the store.
-func (a *Applier) CommitBatch(cmds []Command) (out []core.CPDone, err error) {
-	err = a.kv.Update(func(tx Tx) {
+func (a *Applier) CommitBatch(cmds []Command) ([]core.CPDone, error) {
+	var out []core.CPDone
+	err := a.kv.Update(func(tx Tx) {
 		out = make([]core.CPDone, len(cmds))
 		for i, c := range cmds {
 			out[i] = commitTx(tx, c.Slot, c.Op)
@@ -72,17 +74,19 @@ func (a *Applier) CommitBatch(cmds []Command) (out []core.CPDone, err error) {
 }
 
 // Lookup answers a Lookup from the stored runs.
-func (a *Applier) Lookup(op core.Lookup) (d core.CPDone, err error) {
+func (a *Applier) Lookup(op core.Lookup) (core.CPDone, error) {
 	if op.From < 0 {
 		return core.CPDone{Err: core.ErrInvalid}, nil
 	}
-	err = a.kv.View(func(tx Tx) { d = lookupTx(tx, op) })
+	var d core.CPDone
+	err := a.kv.View(func(tx Tx) { d = lookupTx(tx, op) })
 	return d, err
 }
 
 // Describe answers a DescribeTopics.
-func (a *Applier) Describe(op core.DescribeTopics) (d core.CPDone, err error) {
-	err = a.kv.View(func(tx Tx) { d = describeTx(tx, op) })
+func (a *Applier) Describe(op core.DescribeTopics) (core.CPDone, error) {
+	var d core.CPDone
+	err := a.kv.View(func(tx Tx) { d = describeTx(tx, op) })
 	return d, err
 }
 
@@ -99,7 +103,8 @@ func (a *Applier) CreateTopic(name string, partitions int32) core.ErrCode {
 }
 
 // End is the next offset of tp (0 if unknown).
-func (a *Applier) End(tp core.TopicPartition) (end core.Offset) {
+func (a *Applier) End(tp core.TopicPartition) core.Offset {
+	var end core.Offset
 	err := a.kv.View(func(tx Tx) { end = core.Offset(getUvarint(tx.Get(endKey(tp)))) })
 	if err != nil {
 		panic(fmt.Errorf("applier: store failed: %w", err))

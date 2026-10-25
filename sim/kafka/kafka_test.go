@@ -204,8 +204,9 @@ type fakeEnv struct{ n uint64 }
 
 func (e *fakeEnv) Uint64() uint64 { e.n++; return e.n }
 func (e *fakeEnv) Intn(n int) int { e.n++; return int(e.n % uint64(n)) }
-func (e *fakeEnv) NewID() (id core.ID) {
+func (e *fakeEnv) NewID() core.ID {
 	e.n++
+	var id core.ID
 	id[0], id[1] = byte(e.n), byte(e.n>>8)
 	return id
 }

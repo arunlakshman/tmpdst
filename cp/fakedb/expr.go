@@ -120,8 +120,9 @@ func evalAtom(atom string, vals, cur item) (bool, error) {
 
 // applyUpdate applies an UpdateExpression to a copy of cur (nil: a new item
 // with key) and returns it with the names of the attributes it set.
-func applyUpdate(expr string, vals item, key, cur item) (out item, set []string, err error) {
-	out = cloneItem(cur)
+func applyUpdate(expr string, vals item, key, cur item) (item, []string, error) {
+	out := cloneItem(cur)
+	var set []string
 	if out == nil {
 		out = cloneItem(key)
 	}

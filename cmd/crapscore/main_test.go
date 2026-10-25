@@ -75,9 +75,9 @@ func empty() {}
 `
 
 // setup builds a temp module with sample.go, a generated file and a test file.
-func setup(t *testing.T, profile string) (root string) {
+func setup(t *testing.T, profile string) string {
 	t.Helper()
-	root = t.TempDir()
+	root := t.TempDir()
 	must := func(name, s string) {
 		p := filepath.Join(root, name)
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {

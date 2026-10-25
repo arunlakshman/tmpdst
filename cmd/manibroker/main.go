@@ -115,9 +115,9 @@ func (f brokerFlags) level() (slog.Level, error) {
 
 // nodeConfig builds the prod.NodeConfig that does not depend on the object
 // store or the listener. m is nil when metrics are disabled.
-func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-chan struct{}) (cfg prod.NodeConfig, m *prod.Metrics, mem uint64, memSource string, err error) {
+func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-chan struct{}) (prod.NodeConfig, *prod.Metrics, uint64, string, error) {
 	cpc := cpclient.New(f.cpURL, nil)
-	cfg = prod.NodeConfig{
+	cfg := prod.NodeConfig{
 		NodeID: f.nodeID, Broker: broker.DefaultConfig(), Log: log,
 		ControlPlane: cpc, CPClassify: cpclient.Classifier{},
 		StopGrace: f.grace,
@@ -130,6 +130,7 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 	if f.commitDeadline > 0 {
 		cfg.Broker.CommitDeadline = core.Duration(f.commitDeadline)
 	}
+	var m *prod.Metrics
 	if f.metricsAddr != "" {
 		m = prod.NewMetrics()
 		runinfo.Register(m.Registry(), "manibroker", info)
@@ -145,8 +146,8 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 		segLog.Observe(f)
 	}
 	cfg.OnIO = segLog.IO
-	mem, memSource = prod.MemoryLimit()
-	err = f.tn.apply(&cfg.Broker, mem)
+	mem, memSource := prod.MemoryLimit()
+	err := f.tn.apply(&cfg.Broker, mem)
 	cfg.Shutdown = shutdown
 	return cfg, m, mem, memSource, err
 }
@@ -194,13 +195,13 @@ func serveMetrics(log *slog.Logger, m *prod.Metrics, addr string) error {
 }
 
 // bind opens the Kafka listener and sets the advertised host and port.
-func bind(f brokerFlags, cfg *prod.NodeConfig) (ln net.Listener, adv string, err error) {
-	ln, err = net.Listen("tcp", f.listen)
+func bind(f brokerFlags, cfg *prod.NodeConfig) (net.Listener, string, error) {
+	ln, err := net.Listen("tcp", f.listen)
 	if err != nil {
 		return nil, "", err
 	}
 	cfg.Listener = ln
-	adv = f.advertise
+	adv := f.advertise
 	if adv == "" {
 		adv = ln.Addr().String()
 	}

@@ -68,7 +68,7 @@ func (t *memTx) Delete(key []byte) {
 	}
 }
 
-func (t *memTx) Floor(lo, hi []byte) (key, val []byte) {
+func (t *memTx) Floor(lo, hi []byte) ([]byte, []byte) {
 	i := len(t.es)
 	if hi != nil {
 		i, _ = t.at(hi)

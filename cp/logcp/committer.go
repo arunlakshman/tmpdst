@@ -82,9 +82,11 @@ func (q *queue) depth() int {
 
 // take removes the commands of the next slot: those whose caller is still
 // waiting, up to maxCmds and the entry size bound.
-func (q *queue) take(maxCmds int) (out []*pending, size int) {
+func (q *queue) take(maxCmds int) ([]*pending, int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	var out []*pending
+	var size int
 	i := 0
 	for ; i < len(q.items) && len(out) < maxCmds; i++ {
 		p := q.items[i]
@@ -214,7 +216,7 @@ func (s *Service) newEntry(ps []*pending) Entry {
 // replica applies the slot (replica.deliverLocked).
 func (s *Service) appendGroup(ctx context.Context, e Entry, ps []*pending) {
 	s.rep.register(e.ID, ps)
-	t0 := time.Now()
+	t0 := s.env.Now()
 	size := len(MarshalEntry(e, Version))
 	for {
 		n := s.rep.alloc()
@@ -227,10 +229,10 @@ func (s *Service) appendGroup(ctx context.Context, e Entry, ps []*pending) {
 		}
 		s.rep.observe(n, cur)
 		if won || cur.ID == e.ID {
-			s.m.attemptWon(time.Since(t0), len(e.Cmds), size)
+			s.m.attemptWon(s.since(t0), len(e.Cmds), size)
 			return
 		}
-		s.m.attemptLost(time.Since(t0))
+		s.m.attemptLost(s.since(t0))
 		s.rep.pull(ctx)
 	}
 }

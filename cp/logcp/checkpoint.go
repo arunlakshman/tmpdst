@@ -88,7 +88,7 @@ func (s *Service) Checkpoint(ctx context.Context) (core.LogSlot, error) {
 	if !s.canCheckpoint() {
 		return 0, errors.New("logcp: checkpointing needs DB, Table and Objects")
 	}
-	t0 := time.Now()
+	t0 := s.env.Now()
 	data, slot, err := s.snapshot()
 	if err == nil {
 		err = s.publish(ctx, data, slot)
@@ -100,7 +100,7 @@ func (s *Service) Checkpoint(ctx context.Context) (core.LogSlot, error) {
 	s.ck.mu.Lock()
 	s.ck.slot, s.ck.at = max(s.ck.slot, slot), s.env.Now()
 	s.ck.mu.Unlock()
-	s.m.checkpoint(int64(slot), len(data), time.Since(t0))
+	s.m.checkpoint(int64(slot), len(data), s.since(t0))
 	s.trimLog(ctx, slot)
 	return slot, nil
 }

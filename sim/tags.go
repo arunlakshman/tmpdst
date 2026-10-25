@@ -67,6 +67,13 @@ func (h *hasher) event(b core.EventBody) {
 		h.u64(8)
 		h.u64(uint64(e.ID))
 		h.u64(uint64(e.Gen))
+	default:
+		h.eventDone(b)
+	}
+}
+
+func (h *hasher) eventDone(b core.EventBody) {
+	switch e := b.(type) {
 	case core.ObjPutDone:
 		h.u64(9)
 		h.u64(uint64(e.Req))
@@ -131,6 +138,13 @@ func (h *hasher) action(a core.Action) {
 		h.u64(107)
 		h.u64(uint64(x.Req))
 		h.str(x.Addr)
+	default:
+		h.actionIO(a)
+	}
+}
+
+func (h *hasher) actionIO(a core.Action) {
+	switch x := a.(type) {
 	case core.ObjPut:
 		h.u64(108)
 		h.u64(uint64(x.Req))

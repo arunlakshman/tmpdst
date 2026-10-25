@@ -101,6 +101,8 @@ func (c *Ctx) Current(n core.NodeID) (core.NodeRef, bool) {
 	return Ref(string(n)), true
 }
 
+var _ sim.NodeCurrent = (*Ctx)(nil)
+
 // Ref is the live incarnation of node n in tests.
 func Ref(n string) core.NodeRef {
 	return core.NodeRef{Node: core.NodeID(n), Inc: core.Incarnation{1}}

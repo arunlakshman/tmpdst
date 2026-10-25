@@ -33,8 +33,9 @@ func appendFrame(dst []byte, body string) []byte {
 type framer struct{ buf []byte }
 
 // push returns every complete frame; bad reports an unrecoverable stream.
-func (f *framer) push(d []byte) (frames []string, bad bool) {
+func (f *framer) push(d []byte) ([]string, bool) {
 	f.buf = append(f.buf, d...)
+	var frames []string
 	for len(f.buf) >= 4 {
 		n := binary.BigEndian.Uint32(f.buf)
 		if n > maxFrame {

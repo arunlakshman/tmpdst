@@ -2,6 +2,7 @@ package veritastest
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -65,7 +66,7 @@ func (c Check[S, Op]) Generate(seed uint64) []Op {
 // Replay runs ops in lockstep on a fresh pair and returns the index of the
 // first failing operation and its error, or -1 and nil. A panic in Step or
 // Invariant counts as a failure of that operation.
-func (c Check[S, Op]) Replay(ops []Op) (index int, err error) {
+func (c Check[S, Op]) Replay(ops []Op) (int, error) {
 	s := c.New()
 	for i, op := range ops {
 		if err := c.step(s, op); err != nil {
@@ -124,55 +125,88 @@ func (c Check[S, Op]) shrink(ops []Op, err error) ([]Op, int, error) {
 	if budget == 0 {
 		budget = 5000
 	}
-	runs := 0
-	// try reports whether cand fails; if it does, it becomes the sequence.
-	try := func(cand []Op) bool {
-		if runs >= budget {
-			return false
+	s := shrinkState[Op]{ops: ops, err: err, budget: budget, replay: c.Replay}
+	for progress := true; progress && s.runs < budget; {
+		progress = s.dropChunks()
+		if s.shrinkOne(c.Shrink) {
+			progress = true
 		}
-		runs++
-		i, e := c.Replay(cand)
-		if e == nil {
-			return false
+		if s.shrinkAll(c.ShrinkAll) {
+			progress = true
 		}
-		ops, err = cand[:i+1], e
-		return true
 	}
-	for progress := true; progress && runs < budget; {
-		progress = false
-		for size := max(len(ops)/2, 1); size >= 1; size /= 2 {
-			for i := 0; i+size <= len(ops); {
-				cand := append(append([]Op(nil), ops[:i]...), ops[i+size:]...)
-				if try(cand) {
-					progress = true
-				} else {
-					i += size
-				}
+	return s.ops, s.runs, s.err
+}
+
+// shrinkState shrinks one failing sequence. try reports whether cand fails;
+// if it does, it becomes the sequence.
+type shrinkState[Op any] struct {
+	ops    []Op
+	err    error
+	runs   int
+	budget int
+	replay func([]Op) (int, error)
+}
+
+func (s *shrinkState[Op]) try(cand []Op) bool {
+	if s.runs >= s.budget {
+		return false
+	}
+	s.runs++
+	i, e := s.replay(cand)
+	if e == nil {
+		return false
+	}
+	s.ops, s.err = cand[:i+1], e
+	return true
+}
+
+func (s *shrinkState[Op]) dropChunks() bool {
+	progress := false
+	for size := max(len(s.ops)/2, 1); size >= 1; size /= 2 {
+		for i := 0; i+size <= len(s.ops); {
+			cand := append(append([]Op(nil), s.ops[:i]...), s.ops[i+size:]...)
+			if s.try(cand) {
+				progress = true
+			} else {
+				i += size
 			}
 		}
-		for i := 0; c.Shrink != nil && i < len(ops); i++ {
-			for again := true; again && i < len(ops); {
-				again = false
-				for _, simpler := range c.Shrink(ops[i]) {
-					cand := append([]Op(nil), ops...)
-					cand[i] = simpler
-					if try(cand) {
-						progress, again = true, true
-						break
-					}
-				}
-			}
-		}
-		if c.ShrinkAll != nil {
-			for _, cand := range c.ShrinkAll(ops) {
-				if try(cand) {
-					progress = true
+	}
+	return progress
+}
+
+func (s *shrinkState[Op]) shrinkOne(shrink func(Op) []Op) bool {
+	if shrink == nil {
+		return false
+	}
+	progress := false
+	for i := 0; i < len(s.ops); i++ {
+		for again := true; again && i < len(s.ops); {
+			again = false
+			for _, simpler := range shrink(s.ops[i]) {
+				cand := slices.Clone(s.ops)
+				cand[i] = simpler
+				if s.try(cand) {
+					progress, again = true, true
 					break
 				}
 			}
 		}
 	}
-	return ops, runs, err
+	return progress
+}
+
+func (s *shrinkState[Op]) shrinkAll(shrinkAll func([]Op) [][]Op) bool {
+	if shrinkAll == nil {
+		return false
+	}
+	for _, cand := range shrinkAll(s.ops) {
+		if s.try(cand) {
+			return true
+		}
+	}
+	return false
 }
 
 // Literal returns ops as a Go composite literal of type []c.Name.

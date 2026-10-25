@@ -33,7 +33,7 @@ type DynLogOptions struct {
 	// much longer than the checkpoint interval: a slot at or above the newest
 	// checkpoint is needed to restart.
 	TTL time.Duration
-	// Now is the clock for ttl (default time.Now).
+	// Now is the clock for ttl (default the wall clock).
 	Now func() time.Time
 	// StubTTL, if > 0, lets a tombstone expire this long after it was written
 	// (default 30 days when TTL is set). After that a slot is empty again, so
@@ -56,7 +56,7 @@ type DynLog struct {
 // NewDynLog returns a log in table.
 func NewDynLog(db DB, table string, o DynLogOptions) *DynLog {
 	if o.Now == nil {
-		o.Now = time.Now
+		o.Now = wallTime
 	}
 	if o.Version == 0 {
 		o.Version = Version

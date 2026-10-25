@@ -349,7 +349,7 @@ func (e *Engine) dial(ctx sim.EngineCtx, from core.NodeRef, a core.Dial) {
 	if l := e.link(from.Node, target); l.everCut && l.healAt > ctx.Now() && l.healAt+sim.Time(lat) > at {
 		at = l.healAt + sim.Time(lat)
 	}
-	ref, ok := ctx.Current(target)
+	ref, ok := ctx.(sim.NodeCurrent).Current(target)
 	if !ok {
 		ctx.Deliver(from, at, ctx.Lane("net/misc"), core.DialDone{Req: a.Req, Err: core.ErrConnClosed})
 		return

@@ -1,10 +1,6 @@
-# golangci-lint v2. The original rule set is clean on ALL code. Rules added
-# later (design rules: panic, size, nesting, dupes, ...) are grandfathered with
-# issues.new-from-rev: only lines changed after that commit are checked, so
-# old debt cannot fail the build but cannot grow either. CI needs full git
-# history (fetch-depth: 0). Move the rev forward when a debt batch is paid.
-# time.Now in core/ sim/ is NOT linted here: tools/detcheck owns determinism
-# (import allow-list), do not duplicate.
+# golangci-lint v2. All enabled rules are enforced on the whole tree (no
+# new-from-rev grandfathering). time.Now in core/ sim/ is NOT linted here:
+# tools/detcheck owns determinism (import allow-list), do not duplicate.
 version: "2"
 run:
   timeout: 5m
@@ -19,7 +15,6 @@ output:
 issues:
   max-issues-per-linter: 20
   max-same-issues: 3
-  new-from-rev: 41894c2
 linters:
   default: none
   enable:
@@ -87,10 +82,15 @@ linters:
       - testdata
       - build
     rules:
-      # panic: allowed where the doc says impossible-state panics live, and in tests.
+      # panic: impossible state in core/sim/tools, the veritas reference machine
+      # (it mirrors sim), and tests.
       - linters: [forbidigo]
         text: 'panic'
-        path: '^(core|sim|tools)/|_test\.go$'
+        path: '^(core|sim|tools|veritas)/|_test\.go$'
+      # applier mirrors veritas; store corruption / type mismatch are impossible under correct wiring.
+      - linters: [forbidigo]
+        text: 'panic'
+        path: '^cp/applier/'
       # time.Now: banned only in cp/logcp and cp/logsm (path-except inverts the match).
       # env.go is the one place the real clock is wired in.
       - linters: [forbidigo]

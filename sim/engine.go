@@ -52,6 +52,12 @@ type EngineCtx interface {
 	Fault(kind string, fields ...core.Field)
 	// Assert records fault coverage ("lost CP response happened").
 	Assert() core.Assertions
+}
+
+// NodeCurrent is the live-incarnation lookup split from EngineCtx so that
+// interface stays within eight methods. Every context the kernel lends
+// implements it; engines type-assert.
+type NodeCurrent interface {
 	// Current returns the live incarnation of a node, ok=false while it is
 	// down. The network engine uses it to route Dial and deliver ConnOpened.
 	Current(node core.NodeID) (ref core.NodeRef, ok bool)

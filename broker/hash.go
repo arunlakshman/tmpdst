@@ -56,8 +56,20 @@ func (b *Broker) StateHash() uint64 {
 		h.str(t.Name)
 		h.u64(uint64(t.Partitions))
 	}
-	h.u64(uint64(len(b.conns)))
-	for _, c := range b.conns {
+	h.conns(b.conns)
+	h.u64(uint64(b.open.gen))
+	h.u64(uint64(b.open.since))
+	h.u64(uint64(b.open.bytes))
+	h.u64(uint64(len(b.open.parts)))
+	h.batches(b.open.batches)
+	h.segs(b.segs)
+	h.ops(b.ops)
+	return uint64(h)
+}
+
+func (h *hasher) conns(conns []*conn) {
+	h.u64(uint64(len(conns)))
+	for _, c := range conns {
 		h.u64(uint64(c.id))
 		h.u64(uint64(c.rx))
 		h.u64(uint64(c.fr.Buffered()))
@@ -75,13 +87,11 @@ func (b *Broker) StateHash() uint64 {
 			h.u64(uint64(uint32(s.fetchMax)))
 		}
 	}
-	h.u64(uint64(b.open.gen))
-	h.u64(uint64(b.open.since))
-	h.u64(uint64(b.open.bytes))
-	h.u64(uint64(len(b.open.parts)))
-	h.batches(b.open.batches)
-	h.u64(uint64(len(b.segs)))
-	for _, s := range b.segs {
+}
+
+func (h *hasher) segs(segs []*segment) {
+	h.u64(uint64(len(segs)))
+	for _, s := range segs {
 		h.u64(s.id)
 		h.u64(uint64(s.state))
 		h.u64(uint64(s.req))
@@ -91,8 +101,11 @@ func (b *Broker) StateHash() uint64 {
 		h.u64(uint64(len(s.data)))
 		h.batches(s.batches)
 	}
-	h.u64(uint64(len(b.ops)))
-	for _, o := range b.ops {
+}
+
+func (h *hasher) ops(ops []*op) {
+	h.u64(uint64(len(ops)))
+	for _, o := range ops {
 		h.u64(o.id)
 		h.u64(uint64(o.kind))
 		h.u64(uint64(o.state))
@@ -120,7 +133,6 @@ func (b *Broker) StateHash() uint64 {
 		h.bytes(o.out)
 		h.bool(o.corrupt)
 	}
-	return uint64(h)
 }
 
 func (h *hasher) batches(bs []*pbatch) {

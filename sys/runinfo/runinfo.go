@@ -62,8 +62,9 @@ func New(service, runID string, brokerID int) Info {
 	return i
 }
 
-func build() (version, sha string, dirty bool) {
-	version, sha = Version, GitSHA
+func build() (string, string, bool) {
+	version, sha := Version, GitSHA
+	var dirty bool
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		if version == "" && bi.Main.Version != "" {
 			version = bi.Main.Version
@@ -85,7 +86,7 @@ func build() (version, sha string, dirty bool) {
 	if sha == "" {
 		sha = "unknown"
 	}
-	return
+	return version, sha, dirty
 }
 
 // ParseLevel maps debug|info|warn|error to a slog level.

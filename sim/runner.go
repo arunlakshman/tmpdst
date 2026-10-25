@@ -2,6 +2,8 @@ package sim
 
 import (
 	"errors"
+
+	"manifester/core"
 )
 
 // runner is the Runner. It runs seeds one after another on the calling
@@ -48,37 +50,55 @@ func (runner) Run(cfg Config) (Report, error) {
 	var all []AssertionStat
 	for i, seed := range cfg.Seeds {
 		res, stats := runSeed(cfg, seed)
-		if k := cfg.CheckDeterminism; k > 0 && uint32(i)%k == 0 {
-			again := cfg
-			again.Log = !cfg.Log
-			res2, _ := runSeed(again, seed)
-			if res2.TraceHash != res.TraceHash || res2.RandCalls != res.RandCalls || res2.Steps != res.Steps {
-				res.Failures = append(res.Failures, Failure{Seed: seed, Kind: FailNondeterminism, Prop: "determinism",
-					Step: res.Steps, Msg: "second run of the seed diverged"})
-				rep.Nondeterminism = append(rep.Nondeterminism, seed)
-			}
-		}
+		noteDeterminism(cfg, i, seed, &res, &rep)
 		rep.Seeds = append(rep.Seeds, res)
-		for _, s := range stats {
-			k := statKey{s.Prop, s.Kind}
-			j, ok := agg[k]
-			if !ok {
-				j = len(all)
-				agg[k] = j
-				all = append(all, AssertionStat{Prop: s.Prop, Kind: s.Kind})
+		all = mergeStats(all, agg, stats)
+	}
+	all = addUnreached(all, cfg.ExpectReachable)
+	rep.Assertions = all
+	rep.Always, rep.Coverage = classifyStats(all)
+	return rep, nil
+}
+
+func noteDeterminism(cfg Config, i int, seed uint64, res *SeedResult, rep *Report) {
+	k := cfg.CheckDeterminism
+	if k == 0 || uint32(i)%k != 0 {
+		return
+	}
+	again := cfg
+	again.Log = !cfg.Log
+	res2, _ := runSeed(again, seed)
+	if res2.TraceHash != res.TraceHash || res2.RandCalls != res.RandCalls || res2.Steps != res.Steps {
+		res.Failures = append(res.Failures, Failure{Seed: seed, Kind: FailNondeterminism, Prop: "determinism",
+			Step: res.Steps, Msg: "second run of the seed diverged"})
+		rep.Nondeterminism = append(rep.Nondeterminism, seed)
+	}
+}
+
+func mergeStats(all []AssertionStat, agg map[statKey]int, stats []AssertionStat) []AssertionStat {
+	for _, s := range stats {
+		k := statKey{s.Prop, s.Kind}
+		j, ok := agg[k]
+		if !ok {
+			j = len(all)
+			agg[k] = j
+			all = append(all, AssertionStat{Prop: s.Prop, Kind: s.Kind})
+		}
+		a := &all[j]
+		a.Checks += s.Checks
+		a.Passes += s.Passes
+		if len(s.Seeds) > 0 {
+			if len(a.Seeds) == 0 {
+				a.FirstSeed, a.FirstStep = s.FirstSeed, s.FirstStep
 			}
-			a := &all[j]
-			a.Checks += s.Checks
-			a.Passes += s.Passes
-			if len(s.Seeds) > 0 {
-				if len(a.Seeds) == 0 {
-					a.FirstSeed, a.FirstStep = s.FirstSeed, s.FirstStep
-				}
-				a.Seeds = append(a.Seeds, s.Seeds...)
-			}
+			a.Seeds = append(a.Seeds, s.Seeds...)
 		}
 	}
-	for _, p := range cfg.ExpectReachable {
+	return all
+}
+
+func addUnreached(all []AssertionStat, expect []core.Prop) []AssertionStat {
+	for _, p := range expect {
 		found := false
 		for _, a := range all {
 			if a.Kind == kindReachable && a.Prop == p {
@@ -89,16 +109,20 @@ func (runner) Run(cfg Config) (Report, error) {
 			all = append(all, AssertionStat{Prop: p, Kind: kindReachable})
 		}
 	}
-	rep.Assertions = all
+	return all
+}
+
+func classifyStats(all []AssertionStat) ([]AssertionStat, []AssertionStat) {
+	var always, coverage []AssertionStat
 	for _, a := range all {
 		switch {
 		case isSafety(a.Kind) && len(a.Seeds) > 0:
-			rep.Always = append(rep.Always, a)
+			always = append(always, a)
 		case !isSafety(a.Kind) && len(a.Seeds) == 0:
-			rep.Coverage = append(rep.Coverage, a)
+			coverage = append(coverage, a)
 		}
 	}
-	return rep, nil
+	return always, coverage
 }
 
 // Replay runs one seed with HaltOnFirst and full logging. For a seed that

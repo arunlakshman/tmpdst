@@ -13,12 +13,12 @@ import (
 	"manifester/core"
 )
 
-type apiErr struct{ code string }
+type apiError struct{ code string }
 
-func (e apiErr) Error() string                 { return e.code }
-func (e apiErr) ErrorCode() string             { return e.code }
-func (e apiErr) ErrorMessage() string          { return e.code }
-func (e apiErr) ErrorFault() smithy.ErrorFault { return smithy.FaultServer }
+func (e apiError) Error() string                 { return e.code }
+func (e apiError) ErrorCode() string             { return e.code }
+func (e apiError) ErrorMessage() string          { return e.code }
+func (e apiError) ErrorFault() smithy.ErrorFault { return smithy.FaultServer }
 
 func TestClassify(t *testing.T) {
 	dial := &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}
@@ -34,7 +34,7 @@ func TestClassify(t *testing.T) {
 		{"notfound", get, fail(core.ErrNotFound), core.ErrNotFound, core.NotApplied},
 		{"notfound delete", del, fmt.Errorf("w: %w", fail(core.ErrNotFound)), core.ErrNotFound, core.NotApplied},
 		{"dial put", put, fmt.Errorf("w: %w", dial), core.ErrUnavailable, core.NotApplied},
-		{"slowdown put", put, apiErr{"SlowDown"}, core.ErrUnavailable, core.NotApplied},
+		{"slowdown put", put, apiError{"SlowDown"}, core.ErrUnavailable, core.NotApplied},
 		{"timeout put", put, context.DeadlineExceeded, core.ErrTimeout, core.MaybeApplied},
 		{"timeout delete", del, context.DeadlineExceeded, core.ErrTimeout, core.MaybeApplied},
 		{"reset put", put, reset, core.ErrIO, core.MaybeApplied},

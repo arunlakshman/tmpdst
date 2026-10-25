@@ -89,6 +89,7 @@ func (e *Executor) Execute(a core.IOAction) {
 	case core.CPCall:
 		go func() { e.deliver(e.control(a)) }()
 	default:
+		//nolint:forbidigo // impossible: machine emits only known IOAction types
 		panic(fmt.Sprintf("prod: unknown IOAction %T", a))
 	}
 }
@@ -111,6 +112,22 @@ func sendErr(err error) core.ErrCode {
 	return core.ErrConnClosed
 }
 
+func mutateOutcome(err error, fail func(error) (core.ErrCode, core.Outcome)) (core.ErrCode, core.Outcome) {
+	if err != nil {
+		return fail(err)
+	}
+	return core.OK, core.Applied
+}
+
+// failCode classifies err. The bool is false when err is nil.
+func failCode(err error, fail func(error) (core.ErrCode, core.Outcome)) (core.ErrCode, bool) {
+	if err == nil {
+		return core.OK, false
+	}
+	c, _ := fail(err)
+	return c, true
+}
+
 func (e *Executor) object(a core.IOAction) core.Completion {
 	var n int64
 	switch a := a.(type) {
@@ -124,33 +141,27 @@ func (e *Executor) object(a core.IOAction) core.Completion {
 	fail := func(err error) (core.ErrCode, core.Outcome) { return e.class.Classify(a, err) }
 	switch a := a.(type) {
 	case core.ObjPut:
-		if err := e.objs.Put(ctx, a.Key, a.Data); err != nil {
-			c, o := fail(err)
-			return core.ObjPutDone{Req: a.Req, Key: a.Key, Err: c, Outcome: o}
-		}
-		return core.ObjPutDone{Req: a.Req, Key: a.Key, Outcome: core.Applied}
+		c, o := mutateOutcome(e.objs.Put(ctx, a.Key, a.Data), fail)
+		return core.ObjPutDone{Req: a.Req, Key: a.Key, Err: c, Outcome: o}
 	case core.ObjGet:
 		data, err := e.objs.Get(ctx, a.Ref)
-		if err != nil {
-			c, _ := fail(err)
+		if c, bad := failCode(err, fail); bad {
 			return core.ObjGetDone{Req: a.Req, Err: c}
 		}
 		return core.ObjGetDone{Req: a.Req, Data: data}
 	case core.ObjDelete:
-		if err := e.objs.Delete(ctx, a.Key); err != nil {
-			c, o := fail(err)
-			return core.ObjDeleteDone{Req: a.Req, Err: c, Outcome: o}
-		}
-		return core.ObjDeleteDone{Req: a.Req, Outcome: core.Applied}
+		c, o := mutateOutcome(e.objs.Delete(ctx, a.Key), fail)
+		return core.ObjDeleteDone{Req: a.Req, Err: c, Outcome: o}
 	case core.ObjList:
 		keys, err := e.objs.List(ctx, a.Prefix)
-		if err != nil {
-			c, _ := fail(err)
-			return core.ObjListDone{Req: a.Req, Err: c}
+		c, bad := failCode(err, fail)
+		if !bad {
+			return core.ObjListDone{Req: a.Req, Keys: keys}
 		}
-		return core.ObjListDone{Req: a.Req, Keys: keys}
+		return core.ObjListDone{Req: a.Req, Err: c}
+	default:
+		return core.ObjPutDone{Req: a.ReqID(), Err: core.ErrInvalid}
 	}
-	panic("unreachable")
 }
 
 func (e *Executor) control(a core.CPCall) core.Completion {

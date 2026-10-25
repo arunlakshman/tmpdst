@@ -208,7 +208,7 @@ func (e *Engine) drop(id uint64) {
 }
 
 func (e *Engine) deliver(ctx sim.EngineCtx, to core.NodeRef, c core.CPDone) {
-	if cur, up := ctx.Current(to.Node); !up || cur != to {
+	if cur, up := ctx.(sim.NodeCurrent).Current(to.Node); !up || cur != to {
 		return
 	}
 	at := ctx.Now() + sim.Time(e.f.RespondLatency.Sample(ctx.Rand()))
@@ -223,7 +223,7 @@ func (e *Engine) onDeadline(ctx sim.EngineCtx, id uint64) {
 	}
 	rq.done = true
 	e.drop(id)
-	if cur, up := ctx.Current(rq.from.Node); !up || cur != rq.from {
+	if cur, up := ctx.(sim.NodeCurrent).Current(rq.from.Node); !up || cur != rq.from {
 		return
 	}
 	ctx.Deliver(rq.from, ctx.Now(), ctx.Lane("logengine/"+string(rq.from.Node)),

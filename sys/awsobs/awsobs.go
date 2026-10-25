@@ -102,7 +102,8 @@ func IsThrottle(code string) bool {
 
 // Result classifies an attempt's outcome for the "result" label and returns the
 // HTTP status (0 if none) and API error code ("" if none).
-func Result(ctx context.Context, status int, err error) (result string, code string) {
+func Result(ctx context.Context, status int, err error) (string, string) {
+	var code string
 	var ae smithy.APIError
 	if errors.As(err, &ae) {
 		code = ae.ErrorCode()
@@ -136,7 +137,7 @@ type attemptMW struct{ r *Recorder }
 func (attemptMW) ID() string { return "manifesterAwsObsAttempt" }
 
 func (m attemptMW) HandleFinalize(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (
-	out middleware.FinalizeOutput, md middleware.Metadata, err error) {
+	middleware.FinalizeOutput, middleware.Metadata, error) {
 	r := m.r
 	op := awsmw.GetOperationName(ctx)
 	var bytes int64 = -1
@@ -148,7 +149,7 @@ func (m attemptMW) HandleFinalize(ctx context.Context, in middleware.FinalizeInp
 		}
 	}
 	t0 := time.Now()
-	out, md, err = next.HandleFinalize(ctx, in)
+	out, md, err := next.HandleFinalize(ctx, in)
 	d := time.Since(t0)
 
 	status := 0
@@ -200,9 +201,9 @@ type opMW struct{ r *Recorder }
 func (opMW) ID() string { return "manifesterAwsObsOperation" }
 
 func (m opMW) HandleFinalize(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (
-	out middleware.FinalizeOutput, md middleware.Metadata, err error) {
+	middleware.FinalizeOutput, middleware.Metadata, error) {
 	t0 := time.Now()
-	out, md, err = next.HandleFinalize(ctx, in)
+	out, md, err := next.HandleFinalize(ctx, in)
 	op := awsmw.GetOperationName(ctx)
 	outcome := "ok"
 	if err != nil {
@@ -212,7 +213,7 @@ func (m opMW) HandleFinalize(ctx context.Context, in middleware.FinalizeInput, n
 	if ar, ok := retry.GetAttemptResults(md); ok && len(ar.Results) > 1 {
 		m.r.retries.WithLabelValues(op).Add(float64(len(ar.Results) - 1))
 	}
-	return
+	return out, md, err
 }
 
 func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
@@ -228,9 +229,10 @@ type limiter struct {
 
 // allow reports whether an event may be logged and how many were dropped since
 // the last admitted one (to report once).
-func (l *limiter) allow(now time.Time) (dropped int, ok bool) {
+func (l *limiter) allow(now time.Time) (int, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	var dropped int
 	if s := now.Unix(); s != l.sec {
 		l.sec, l.n = s, 0
 	}

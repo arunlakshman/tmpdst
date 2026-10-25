@@ -62,7 +62,10 @@ func Start(ctx context.Context, cfg NodeConfig) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	env := NewEnv(cfg.Log)
+	env, err := NewEnv(cfg.Log)
+	if err != nil {
+		return nil, err
+	}
 	rctx, kill := context.WithCancel(ctx)
 	in := sys.NewInbox(cfg.DataInbox)
 	nt := NewNet(cfg.Listener, in, cfg.Net)

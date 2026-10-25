@@ -30,10 +30,11 @@ func (p *Partition) HighWatermark() core.Offset { return core.Offset(len(p.recs)
 // Read returns up to max records (max <= 0: all) starting at from. ok is
 // false if from is negative or beyond the high watermark (Kafka's
 // OFFSET_OUT_OF_RANGE); from == HighWatermark is ok and empty.
-func (p *Partition) Read(from core.Offset, max int) (recs []Record, ok bool) {
+func (p *Partition) Read(from core.Offset, max int) ([]Record, bool) {
 	if from < 0 || from > p.HighWatermark() {
 		return nil, false
 	}
+	var recs []Record
 	for o := from; o < p.HighWatermark() && (max <= 0 || len(recs) < max); o++ {
 		recs = append(recs, Record{Offset: o, Value: clone(p.recs[o])})
 	}

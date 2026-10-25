@@ -31,16 +31,19 @@ func (s *Store) exec(ctx context.Context, op core.CPOp) (core.CPDone, error) {
 	return s.spec.Exec(core.CPCall{Op: op}).(core.CPDone), nil
 }
 
+func execAs[R any](ctx context.Context, s *Store, op core.CPOp) (R, core.ErrCode, error) {
+	d, err := s.exec(ctx, op)
+	return core.RespAs[R](d), d.Err, err
+}
+
 // CommitSegment implements cp.Store.
 func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
-	d, err := s.exec(ctx, op)
-	return core.RespAs[core.CommitSegmentResp](d), d.Err, err
+	return execAs[core.CommitSegmentResp](ctx, s, op)
 }
 
 // Lookup implements cp.Store.
 func (s *Store) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, core.ErrCode, error) {
-	d, err := s.exec(ctx, op)
-	return core.RespAs[core.LookupResp](d), d.Err, err
+	return execAs[core.LookupResp](ctx, s, op)
 }
 
 // DescribeTopics implements cp.Store.

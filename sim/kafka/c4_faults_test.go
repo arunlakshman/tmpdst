@@ -151,7 +151,9 @@ func (w *world) swapAdj(tp core.TopicPartition, i int) {
 }
 
 // adjPairs lists (tp, i) with entries i, i+1 passing ok.
-func (w *world) adjPairs(ok func(tp core.TopicPartition, a, b core.BatchRange) bool) (out []partRef, tps []core.TopicPartition) {
+func (w *world) adjPairs(ok func(tp core.TopicPartition, a, b core.BatchRange) bool) ([]partRef, []core.TopicPartition) {
+	var out []partRef
+	var tps []core.TopicPartition
 	for _, tp := range w.tps {
 		rs := w.ranges[tp]
 		for i := 0; i+1 < len(rs); i++ {
@@ -160,7 +162,7 @@ func (w *world) adjPairs(ok func(tp core.TopicPartition, a, b core.BatchRange) b
 			}
 		}
 	}
-	return
+	return out, tps
 }
 
 func (w *world) put(obj []byte) core.SegmentRef {

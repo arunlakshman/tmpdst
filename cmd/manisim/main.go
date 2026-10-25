@@ -104,7 +104,9 @@ func failed(rep sim.Report, bad int) bool {
 
 // printSeeds prints the per-seed lines and failures; it returns the number of
 // failing seeds and the total steps.
-func printSeeds(w io.Writer, rep sim.Report, o options) (bad int, steps uint64) {
+func printSeeds(w io.Writer, rep sim.Report, o options) (int, uint64) {
+	var bad int
+	var steps uint64
 	for _, s := range rep.Seeds {
 		steps += s.Steps
 		if o.verbose {

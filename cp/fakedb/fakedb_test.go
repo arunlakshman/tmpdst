@@ -184,11 +184,12 @@ func query(f *Fake, expr string, vals item, fwd *bool, limit *int32, start item)
 		ExpressionAttributeValues: vals, ScanIndexForward: fwd, Limit: limit, ExclusiveStartKey: start})
 }
 
-func sks(o *dynamodb.QueryOutput) (out []string) {
+func sks(o *dynamodb.QueryOutput) []string {
+	var out []string
 	for _, it := range o.Items {
 		out = append(out, strOf(it, "sk"))
 	}
-	return
+	return out
 }
 
 func TestQuery(t *testing.T) {

@@ -6,7 +6,8 @@ import (
 	"manifester/core"
 )
 
-func flushTimers(h *harness) (out []core.SetTimer) {
+func flushTimers(h *harness) []core.SetTimer {
+	var out []core.SetTimer
 	for _, a := range h.all {
 		if s, ok := a.(core.SetTimer); ok && s.ID == timerFlush {
 			out = append(out, s)
@@ -15,7 +16,8 @@ func flushTimers(h *harness) (out []core.SetTimer) {
 	return out
 }
 
-func sealReasons(h *harness) (out []string) {
+func sealReasons(h *harness) []string {
+	var out []string
 	for _, f := range factsNamed(h.all, "segment_sealed") {
 		out = append(out, string(f.Field("reason").(core.Str)))
 	}

@@ -2,7 +2,6 @@ package logcp
 
 import (
 	"errors"
-	"time"
 
 	"manifester/core"
 	"manifester/cp/applier"
@@ -63,7 +62,7 @@ func (r *replica) takeBatch() []Slot {
 // first cut to WindowSlots: the rule depends only on the slot number, so every
 // replica forgets the same keys at the same point of the log.
 func (r *replica) applyBatch(b []Slot) error {
-	t0 := time.Now()
+	t0 := r.s.env.Now()
 	if start := b[0].N; int64(start)%r.s.cfg.TrimStride == 0 && int64(start) >= r.s.cfg.WindowSlots {
 		if _, err := r.s.app.Trim(int64(start) - r.s.cfg.WindowSlots); err != nil {
 			return err
@@ -82,7 +81,7 @@ func (r *replica) applyBatch(b []Slot) error {
 	if err := run.flush(r.s.app, res); err != nil {
 		return err
 	}
-	r.s.m.applyBatch(time.Since(t0))
+	r.s.m.applyBatch(r.s.since(t0))
 	r.complete(b, res)
 	return nil
 }

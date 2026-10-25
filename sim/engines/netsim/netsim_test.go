@@ -102,6 +102,8 @@ func (h *harness) Current(n core.NodeID) (core.NodeRef, bool) {
 	return r, ok
 }
 
+var _ sim.NodeCurrent = (*harness)(nil)
+
 func (h *harness) boot(n string) core.NodeRef {
 	r := core.NodeRef{Node: core.NodeID(n), Inc: core.Incarnation(h.rnd.NewID())}
 	h.live[r.Node] = r
@@ -204,13 +206,13 @@ func (h *harness) send(from core.NodeRef, c core.ConnID, data []byte) core.ReqID
 var lat = sim.TwoSpeed{FastMin: 1000, FastMax: 5000, SlowMin: 100000, SlowMax: 200000, SlowProb: 0.1}
 
 // connect dials a->b and returns both conn ids.
-func (h *harness) connect(a, b core.NodeRef) (ca, cb core.ConnID) {
+func (h *harness) connect(a, b core.NodeRef) (core.ConnID, core.ConnID) {
 	d, ok := h.dial(a, string(b.Node))
 	if !ok || d.Err != core.OK {
 		h.t.Fatalf("dial failed: %+v %v", d, ok)
 	}
 	// listener conn id: the only opened key for b not yet claimed
-	cb = h.lastOpened(b.Node)
+	cb := h.lastOpened(b.Node)
 	return d.Conn, cb
 }
 
@@ -437,7 +439,7 @@ func TestBlackHoleAndRandomClose(t *testing.T) {
 	}
 }
 
-func scenario(seed uint64) (log []string, hash uint64) {
+func scenario(seed uint64) ([]string, uint64) {
 	f := sim.NetworkFaults{Latency: lat, PartialIOMax: 5, PairLatencyMax: 20000, PartitionProb: 0.05,
 		PartitionDur: [2]core.Duration{10000, 400000}, ClogProb: 0.1, ClogDur: [2]core.Duration{1000, 100000},
 		RandomCloseProb: 0.02, BlackHoleProb: 0.02}

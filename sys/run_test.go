@@ -3,6 +3,7 @@ package sys
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -162,6 +163,32 @@ func TestTimerFiresAndEmitFact(t *testing.T) {
 	}
 	if len(facts) != 1 {
 		t.Fatalf("facts = %v", facts)
+	}
+}
+
+func TestDispatchTimersAndConns(t *testing.T) {
+	m := &fakeMachine{}
+	b, ex, cn, f := setup(m)
+	m.script = func(n int, _ core.EventBody) []core.Action {
+		if n != 0 {
+			return nil
+		}
+		return []core.Action{
+			core.SetTimer{ID: 1, After: core.Duration(time.Hour)},
+			core.SetTimer{ID: 1, After: core.Duration(time.Hour)}, // replace
+			core.CancelTimer{ID: 1},
+			core.CancelTimer{ID: 99}, // missing
+			core.CloseConn{Conn: 7, Abort: true},
+			core.ResumeReads{Conn: 7},
+			core.Emit{}, // Facts is nil
+			core.Exit{},
+		}
+	}
+	if err := Run(context.Background(), b, ex, f, core.NodeRef{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(cn.log, ","); got != "close,resume" {
+		t.Fatalf("conns = %v", cn.log)
 	}
 }
 

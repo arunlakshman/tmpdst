@@ -55,30 +55,21 @@ Generate the baseline under the same conditions the gate runs in. A baseline mad
 without Docker is the conservative choice: more coverage later only lowers
 scores, and the gate never fails for improvements.
 
-## Why 30 and not 5 or 6
+## Why 20 (not 30, and not 5 or 6)
 
 With full coverage CRAP equals complexity, so a limit of 5-6 means every
 function must have complexity <= 5-6 (the usual "simple" band is 1-10) and be
-nearly fully covered. That is very strict. This repo currently has 275
-functions over 6 and 163 over 10; a 6 gate would block almost any change
-touching a switch or a few error checks, and invite splitting functions purely
-to satisfy the number. 30 is the published threshold, catches only genuinely
-risky code, and with the ratchet (below) tightens over time. The threshold is a
-flag, so you can choose:
+nearly fully covered. That is very strict and invites splitting functions purely
+to satisfy the number. The published CRAP literature uses 30; this repo gates at
+**20** as a tighter ratchet that still tolerates large type-switches with good
+coverage. The threshold is a flag, so you can choose:
 
     make build CRAP_THRESHOLD=15
     go run ./cmd/crapscore -profile build/cover.out -threshold 10
 
-Counts on the tree when this was added (strict, plain `go test ./...`):
-
-| CRAP over | functions |
-|-----------|-----------|
-| 30        | 34        |
-| 15        | 87        |
-| 10        | 163       |
-| 6         | 275       |
-
-(of 1248 functions). Run `make crap-strict` for the full list.
+Default threshold is **20** (tightened from the published 30). Counts on a
+recent tree (strict, plain `go test ./...`): run `make crap-strict` for the
+full list; expect 0 over 20 when the gate is green.
 
 ## Running
 
@@ -88,13 +79,13 @@ Counts on the tree when this was added (strict, plain `go test ./...`):
     make crap-baseline  rewrite crap-baseline.json (deliberate, reviewable)
 
 Flags of `go run ./cmd/crapscore`: `-profile`, `-merge-profile a,b`,
-`-threshold` (env `CRAP_THRESHOLD`, default 30), `-baseline`, `-update-baseline`,
+`-threshold` (env `CRAP_THRESHOLD`, default 20), `-baseline`, `-update-baseline`,
 `-strict`, `-json`, `-top N` (0 = all), `-tolerance` (default 0.5), `-exclude
 REGEXP` (on the function key), `-root`. Exit codes: 0 ok, 1 gate failed, 2
 usage or input error. Generated files, `_test.go`, `vendor`, `testdata`, hidden
 directories and nested modules (toys3/minikv) are skipped. No functions are
-excluded by default. Since commit e098f75 the baseline is empty: no function is
-over 30 (1410 analysed; 40 over 15, 109 over 10, 250 over 6).
+excluded by default. The baseline is empty: the gate fails on any function over
+the threshold.
 
 The determinism gate stays separate. To run it in `make build`, add
 `./scripts/ci-determinism.sh` as a step before `crap` in the `build` recipe.

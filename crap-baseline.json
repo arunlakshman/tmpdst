@@ -1,5 +1,5 @@
 {
-  "threshold": 30,
+  "threshold": 20,
   "note": "Ratchet baseline for cmd/crapscore. Regenerate: go run ./cmd/crapscore -profile \u003ccover.out\u003e -update-baseline   (or: make crap-baseline); review and commit the diff of crap-baseline.json",
   "functions": {}
 }

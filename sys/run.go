@@ -105,18 +105,9 @@ func (r *runner) dispatch(acts []core.Action) (bool, error) {
 				r.b.Facts(a.Fact)
 			}
 		case core.SetTimer:
-			if old := r.timers[a.ID]; old != nil {
-				old.Stop() // stale gen would be ignored anyway
-			}
-			id, gen := a.ID, a.Gen
-			r.timers[id] = time.AfterFunc(time.Duration(a.After), func() {
-				r.in.DeliverControl(core.TimerFired{ID: id, Gen: gen})
-			})
+			r.setTimer(a)
 		case core.CancelTimer:
-			if t := r.timers[a.ID]; t != nil {
-				t.Stop()
-				delete(r.timers, a.ID)
-			}
+			r.cancelTimer(a.ID)
 		case core.CloseConn:
 			_ = r.b.Conns.Close(a.Conn, a.Abort)
 		case core.PauseReads:
@@ -132,4 +123,21 @@ func (r *runner) dispatch(acts []core.Action) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func (r *runner) setTimer(a core.SetTimer) {
+	if old := r.timers[a.ID]; old != nil {
+		old.Stop() // stale gen would be ignored anyway
+	}
+	id, gen := a.ID, a.Gen
+	r.timers[id] = time.AfterFunc(time.Duration(a.After), func() {
+		r.in.DeliverControl(core.TimerFired{ID: id, Gen: gen})
+	})
+}
+
+func (r *runner) cancelTimer(id core.TimerID) {
+	if t := r.timers[id]; t != nil {
+		t.Stop()
+		delete(r.timers, id)
+	}
 }

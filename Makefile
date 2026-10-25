@@ -8,7 +8,7 @@ COVER_PROFILE ?= build/cover.out
 # (e.g. coverage from Docker-backed integration tests).
 CRAP_MERGE    ?=
 # Fail threshold; also settable as CRAP_THRESHOLD in the environment.
-CRAP_THRESHOLD ?= 30
+CRAP_THRESHOLD ?= 20
 CRAP_FLAGS    ?=
 
 export CRAP_THRESHOLD

@@ -169,6 +169,21 @@ func TestStartedIsFirstStep(t *testing.T) {
 	}
 }
 
+func TestScriptedGracefulStop(t *testing.T) {
+	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
+		if _, ok := ev.Body.(core.Stop); ok {
+			return []core.Action{core.Exit{}}
+		}
+		return ping(m, ev)
+	})
+	cfg := baseCfg(f)
+	cfg.Scripted = []ScriptedFault{{At: Time(300 * core.Millisecond), Node: "b-0", Kind: EntryStop}}
+	res := RunSeed(cfg, 1)
+	if len(res.Failures) != 0 || stat(res, "graceful_stops") != 1 {
+		t.Fatalf("graceful_stops=%d failures=%+v", stat(res, "graceful_stops"), res.Failures)
+	}
+}
+
 func TestStartedFirstEvenWithQueuedData(t *testing.T) {
 	// A data event queued before the node's first Step must not overtake Started.
 	var firsts []core.EventBody

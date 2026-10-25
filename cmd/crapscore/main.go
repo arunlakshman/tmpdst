@@ -104,7 +104,7 @@ func parseFlags(args []string, stderr io.Writer) (*config, bool) {
 	fs.StringVar(&c.root, "root", ".", "module root (directory with go.mod)")
 	fs.StringVar(&c.profile, "profile", "", "coverprofile from go test -coverprofile (required)")
 	fs.StringVar(&c.merge, "merge-profile", "", "comma-separated extra coverprofiles to merge (e.g. from Docker-backed integration tests)")
-	fs.Float64Var(&c.threshold, "threshold", envFloat("CRAP_THRESHOLD", 30), "fail above this CRAP score (env CRAP_THRESHOLD)")
+	fs.Float64Var(&c.threshold, "threshold", envFloat("CRAP_THRESHOLD", 20), "fail above this CRAP score (env CRAP_THRESHOLD)")
 	fs.StringVar(&c.basePath, "baseline", "crap-baseline.json", "ratchet baseline file")
 	fs.BoolVar(&c.update, "update-baseline", false, "write the baseline from the current offenders and exit 0")
 	fs.BoolVar(&c.strict, "strict", false, "ignore the baseline: fail on every offender")
@@ -129,22 +129,38 @@ func analyse(c *config) ([]*Func, error) {
 	if err != nil {
 		return nil, err
 	}
-	if c.exclude != "" {
-		re, err := regexp.Compile(c.exclude)
-		if err != nil {
-			return nil, fmt.Errorf("-exclude: %w", err)
-		}
-		kept := funcs[:0]
-		for _, f := range funcs {
-			if !re.MatchString(f.Key) {
-				kept = append(kept, f)
-			}
-		}
-		funcs = kept
-	}
-	module, err := ModulePath(c.root)
+	funcs, err = applyExclude(funcs, c.exclude)
 	if err != nil {
 		return nil, err
+	}
+	if err := applyCoverage(c, funcs); err != nil {
+		return nil, err
+	}
+	sort.SliceStable(funcs, func(i, j int) bool { return funcs[i].CRAP > funcs[j].CRAP })
+	return funcs, nil
+}
+
+func applyExclude(funcs []*Func, exclude string) ([]*Func, error) {
+	if exclude == "" {
+		return funcs, nil
+	}
+	re, err := regexp.Compile(exclude)
+	if err != nil {
+		return nil, fmt.Errorf("-exclude: %w", err)
+	}
+	kept := funcs[:0]
+	for _, f := range funcs {
+		if !re.MatchString(f.Key) {
+			kept = append(kept, f)
+		}
+	}
+	return kept, nil
+}
+
+func applyCoverage(c *config, funcs []*Func) error {
+	module, err := ModulePath(c.root)
+	if err != nil {
+		return err
 	}
 	prof := Profile{}
 	paths := []string{c.profile}
@@ -155,12 +171,11 @@ func analyse(c *config) ([]*Func, error) {
 	}
 	for _, p := range paths {
 		if err := prof.ReadProfileFile(p); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	prof.Apply(module, funcs)
-	sort.SliceStable(funcs, func(i, j int) bool { return funcs[i].CRAP > funcs[j].CRAP })
-	return funcs, nil
+	return nil
 }
 
 func writeBaseline(c *config, funcs []*Func) (int, error) {

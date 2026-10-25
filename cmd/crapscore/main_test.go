@@ -174,9 +174,12 @@ func TestExitCodesAndRatchet(t *testing.T) {
 	base := filepath.Join(root, "base.json")
 	common := []string{"-root", root, "-profile", prof, "-baseline", base}
 
-	// uncovered has CRAP 6: fine at 30, offender at 5.
-	if code, out := runTool(t, append(common, "-threshold", "30")...); code != 0 {
-		t.Fatalf("threshold 30 should pass (code %d): %s", code, out)
+	// uncovered has CRAP 6: fine at 20, offender at 5.
+	if code, out := runTool(t, append(common, "-threshold", "20")...); code != 0 {
+		t.Fatalf("threshold 20 should pass (code %d): %s", code, out)
+	}
+	if code, out := runTool(t, append(common, "-threshold", "20", "-exclude", "p\\.uncovered")...); code != 0 {
+		t.Fatalf("exclude should pass (code %d): %s", code, out)
 	}
 	if code, out := runTool(t, append(common, "-threshold", "5")...); code != 1 || !strings.Contains(out, "uncovered") {
 		t.Fatalf("threshold 5 without baseline should fail (code %d): %s", code, out)

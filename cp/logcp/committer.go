@@ -253,10 +253,10 @@ func failAll(ps []*pending, err error) {
 // writeSlot appends e at slot n and retries an unknown outcome at the same
 // slot: the append is conditional, so it either lands, or fails and shows
 // what is there, which is ours iff the ID matches.
-func (s *Service) writeSlot(ctx context.Context, n core.LogSlot, e Entry) (cur Entry, won bool, err error) {
+func (s *Service) writeSlot(ctx context.Context, n core.LogSlot, e Entry) (Entry, bool, error) {
 	backoff := time.Millisecond
 	for {
-		cur, won, err = s.log.Append(ctx, int64(n), e)
+		cur, won, err := s.log.Append(ctx, int64(n), e)
 		if err == nil || errors.Is(err, ErrEntryTooLarge) || errors.Is(err, ErrTrimmed) {
 			return cur, won, err
 		}

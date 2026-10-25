@@ -248,7 +248,7 @@ func (r *Replica) pullLocked(ctx context.Context, now int64) {
 
 // holeDue reports whether the slot at applied has been empty for HoleAfter
 // (starting the timer on first sight), and which slot it is.
-func (r *Replica) holeDue() (slot core.LogSlot, due bool) {
+func (r *Replica) holeDue() (core.LogSlot, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.cfg.Now()

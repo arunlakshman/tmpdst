@@ -59,7 +59,7 @@ func (r *replica) appliedNow() core.LogSlot {
 }
 
 // position returns where the replica is and a channel that closes when that changes.
-func (r *replica) position() (applied core.LogSlot, adv <-chan struct{}, blocked error) {
+func (r *replica) position() (core.LogSlot, <-chan struct{}, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.applied, r.adv, r.blocked

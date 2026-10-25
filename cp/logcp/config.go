@@ -26,9 +26,8 @@ type Config struct {
 	Log Log
 	KV  applier.KV // an empty store: state is rebuilt from the checkpoint and the log
 
-	// DB and Table hold the pointer items (CKPT, IDX) and the R# rows;
-	// Objects holds checkpoints. Without DB+Table there is no index; without
-	// Objects (or DB) there is no checkpoint.
+	// DB and Table hold the pointer item (CKPT);
+	// Objects holds checkpoints. Without Objects (or DB) there is no checkpoint.
 	DB      DB
 	Table   string
 	Objects sys.ObjectStore
@@ -62,13 +61,6 @@ type Config struct {
 	CkptMinSlots int64         // skip a checkpoint when fewer slots were applied since the last (default 1000)
 	KeepSlots    int64         // log slots kept behind the checkpoint (default WindowSlots)
 	TrimDelete   bool          // delete trimmed slots explicitly (otherwise only the TTL attribute expires them)
-
-	// Index.
-	NoIndex       bool          // do not write R# rows (default: write them, decision 50)
-	IndexEvery    time.Duration // flush period (default 10 s)
-	IndexParallel int           // BatchWriteItem calls in flight (default 8)
-	IndexRate     float64       // items per second the writer paces itself to (0: unpaced)
-	FeedMax       int           // commands the indexer feed holds in memory (default 200000)
 }
 
 func (c *Config) defaults() error {
@@ -90,15 +82,12 @@ func (c *Config) defaults() error {
 	setI(&c.QueueMax, 4096)
 	setI(&c.QueueBytesMax, 64<<20)
 	setI(&c.ReadMax, 500)
-	setI(&c.IndexParallel, 8)
-	setI(&c.FeedMax, 200000)
 	setF(&c.MaxSlotRate, 200)
 	setD(&c.Heartbeat, time.Second)
 	setD(&c.HoleAfter, 250*time.Millisecond)
 	setD(&c.TailPoll, 25*time.Millisecond)
 	setD(&c.TailBatch, 10*time.Millisecond)
 	setD(&c.CommitDeadline, 120*time.Second)
-	setD(&c.IndexEvery, 10*time.Second)
 	if c.CkptEvery == 0 {
 		c.CkptEvery = 5 * time.Minute
 	}

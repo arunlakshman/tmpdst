@@ -174,17 +174,9 @@ func (s *Service) pruneObjects(ctx context.Context) {
 	}
 }
 
-// trimLog drops log slots below the checkpoint minus KeepSlots, and never
-// past the index watermark (the indexer may still read them).
+// trimLog drops log slots below the checkpoint minus KeepSlots.
 func (s *Service) trimLog(ctx context.Context, ckptSlot int64) {
 	below := ckptSlot - s.cfg.KeepSlots
-	if !s.noIndex() {
-		w, err := s.watermark(ctx)
-		if err != nil {
-			return
-		}
-		below = min(below, w)
-	}
 	tr, ok := s.log.(Trimmer)
 	if !s.cfg.TrimDelete || !ok || below <= 0 {
 		return

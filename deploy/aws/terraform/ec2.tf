@@ -24,7 +24,6 @@ locals {
     table_prefix             = local.table_prefix
     table_name               = local.table_name
     cp_extra_args            = var.cp_extra_args
-    cp_store                 = var.cp_store
     cp_takeover_after        = var.cp_takeover_after
     initial_topic_partitions = var.initial_topic_partitions
   })
@@ -59,7 +58,6 @@ resource "aws_instance" "cp" {
 
   depends_on = [
     terraform_data.ssm_prefix_check,
-    terraform_data.cp_store_check,
     aws_route_table_association.public,
     aws_vpc_endpoint.s3,
     aws_vpc_endpoint.dynamodb,
@@ -101,7 +99,6 @@ resource "aws_instance" "cp_standby" {
 
   depends_on = [
     terraform_data.ssm_prefix_check,
-    terraform_data.cp_store_check,
     aws_route_table_association.public,
     aws_vpc_endpoint.s3,
     aws_vpc_endpoint.dynamodb,
@@ -124,7 +121,7 @@ resource "aws_instance" "broker" {
 
   user_data = templatefile("${path.module}/files/broker-user-data.sh.tpl", merge(local.common_vars, {
     common            = local.common
-    broker_extra_args = local.broker_args
+    broker_extra_args = var.broker_extra_args
     broker_id         = count.index + 1
     cp_urls           = local.cp_urls
   }))

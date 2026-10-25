@@ -1,5 +1,7 @@
 # Commit path redesign: a sequenced log with an asynchronous index
 
+*Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This document is a record.*
+
 Status: PROPOSAL (2026-10-20). Nothing here is built. No code or other doc changed. Evidence labels as in
 `surprises-audit.md`: **measured** (AWS run w2), **modelled** (local fakedb experiment, §6), **computed**, **suspected**.
 

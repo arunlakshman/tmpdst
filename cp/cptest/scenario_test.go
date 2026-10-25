@@ -1,17 +1,13 @@
 package cptest
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	"manifester/core"
 	"manifester/cp"
@@ -58,7 +54,6 @@ func replayOps() []op {
 }
 
 func TestReplayMemstore(t *testing.T) { lockstep(t, storeImpl{newMem()}, replayOps()) }
-func TestReplayDynamo(t *testing.T)   { lockstep(t, storeImpl{dynamoStore(t)}, replayOps()) }
 
 // manyBatchesOps commits segments of many small batches (one DynamoDB range
 // item per partition and segment), with a replay
@@ -103,31 +98,6 @@ func manyBatchesOps() []op {
 }
 
 func TestManyBatchesMemstore(t *testing.T) { lockstep(t, storeImpl{newMem()}, manyBatchesOps()) }
-func TestManyBatchesDynamo(t *testing.T)   { lockstep(t, storeImpl{dynamoStore(t)}, manyBatchesOps()) }
-
-// Another replica replays a committed many-batch segment: the same answer.
-func TestManyBatchesReplayOtherReplica(t *testing.T) {
-	st := dynamoStore(t)
-	ctx := context.Background()
-	var bs []core.PendingBatch
-	for i := 0; i < 200; i++ {
-		bs = append(bs, core.PendingBatch{TP: core.TopicPartition{Topic: "r", Partition: 0}, Records: 1,
-			Loc: core.SegmentRef{Key: "s", Off: int64(i), Len: 1}})
-	}
-	op := core.CommitSegment{SegmentKey: "s", Batches: bs}
-	first, code, err := st.CommitSegment(ctx, op)
-	if err != nil || code != core.OK || len(first.Assigned) != 200 || first.Assigned[199].Base != 199 {
-		t.Fatalf("first: %v %v %d", code, err, len(first.Assigned))
-	}
-	again, code, err := newReplica(t, st).CommitSegment(ctx, op)
-	if err != nil || code != core.OK || fmt.Sprint(again) != fmt.Sprint(first) {
-		t.Fatalf("replay: %v %v", code, err)
-	}
-	l, _, _ := st.Lookup(ctx, core.Lookup{TP: bs[0].TP, From: 150})
-	if len(l.Ranges) != 50 || l.Ranges[0].Base != 150 || l.End != 200 {
-		t.Fatalf("lookup: %d ranges end %d", len(l.Ranges), l.End)
-	}
-}
 
 func TestRoundTrip(t *testing.T) {
 	ctx := context.Background()
@@ -201,149 +171,6 @@ func TestHandlerStatus(t *testing.T) {
 		if err != nil || resp.StatusCode != c.want {
 			t.Fatalf("%v: status %v err %v", c.err, resp, err)
 		}
-	}
-}
-
-// concurrentCommits has several replicas (Store values over one table) commit
-// to the same two partitions from many goroutines: every batch of every
-// accepted commit must land in a contiguous, non-overlapping offset range.
-// Each commit is also retried under the same key (a replay: same answer).
-func concurrentCommits(t *testing.T, replicas []cp.Store) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	const workers, perWorker = 12, 8
-	tps := []core.TopicPartition{{Topic: "c", Partition: 0}, {Topic: "c", Partition: 1}}
-
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	assigned := map[core.TopicPartition][][2]int64{} // (base, count)
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			st := replicas[w%len(replicas)]
-			for i := 0; i < perWorker; i++ {
-				key := fmt.Sprintf("w%d-%d", w, i)
-				batches := []core.PendingBatch{
-					{TP: tps[0], Records: 2, Loc: core.SegmentRef{Key: key, Len: 5}},
-					{TP: tps[1], Records: 3, Loc: core.SegmentRef{Key: key, Len: 5}},
-					{TP: tps[0], Records: int64(1 + i%3), Loc: core.SegmentRef{Key: key, Off: 5, Len: 5}},
-				}
-				first := commitRetrying(ctx, t, st, core.CommitSegment{SegmentKey: key, Batches: batches})
-				again := commitRetrying(ctx, t, replicas[(w+1)%len(replicas)], core.CommitSegment{SegmentKey: key, Batches: batches})
-				if fmt.Sprint(first) != fmt.Sprint(again) {
-					t.Errorf("replay of %s: %v, want %v", key, again, first)
-				}
-				mu.Lock()
-				for _, r := range first.Assigned {
-					assigned[r.TP] = append(assigned[r.TP], [2]int64{int64(r.Base), r.Count})
-				}
-				mu.Unlock()
-			}
-		}()
-	}
-	wg.Wait()
-	if t.Failed() {
-		return
-	}
-	for tp, list := range assigned {
-		total := checkContiguous(t, tp, list)
-		resp, _, err := replicas[0].Lookup(ctx, core.Lookup{TP: tp})
-		if err != nil || int64(resp.End) != total || len(resp.Ranges) != len(list) {
-			t.Errorf("%v lookup: end %d ranges %d, want %d / %d (%v)", tp, resp.End, len(resp.Ranges), total, len(list), err)
-		}
-	}
-}
-
-// commitRetrying commits, retrying a 503 (NotApplied, and the commit is
-// idempotent per key).
-func commitRetrying(ctx context.Context, t *testing.T, st cp.Store, op core.CommitSegment) core.CommitSegmentResp {
-	for try := 0; try < 5; try++ {
-		resp, code, err := st.CommitSegment(ctx, op)
-		if errors.Is(err, cp.ErrUnavailable) {
-			continue
-		}
-		if err != nil || code != core.OK {
-			t.Errorf("commit %s: %v %v", op.SegmentKey, code, err)
-		}
-		return resp
-	}
-	t.Errorf("commit %s: unavailable", op.SegmentKey)
-	return core.CommitSegmentResp{}
-}
-
-// checkContiguous: the (base, count) ranges tile [0, total) exactly once.
-func checkContiguous(t *testing.T, tp core.TopicPartition, list [][2]int64) (total int64) {
-	t.Helper()
-	slices.SortFunc(list, func(a, b [2]int64) int { return cmp.Compare(a[0], b[0]) })
-	for _, a := range list {
-		if a[0] != total {
-			t.Errorf("%v: range at %d, expected %d (gap or overlap)", tp, a[0], total)
-			return total
-		}
-		total += a[1]
-	}
-	return total
-}
-
-func TestDynamoConcurrentCommits(t *testing.T) {
-	first := dynamoStore(t)
-	replicas := []cp.Store{first}
-	for i := 0; i < 3; i++ {
-		replicas = append(replicas, newReplica(t, first))
-	}
-	concurrentCommits(t, replicas)
-}
-
-// The same segment key committed by many goroutines at once: one winner, all
-// see the same ranges.
-func TestDynamoSameKeyRace(t *testing.T) {
-	sameKeyRace(t, dynamoStore(t))
-}
-
-func sameKeyRace(t *testing.T, st cp.Store) {
-	t.Helper()
-	ctx := context.Background()
-	op := core.CommitSegment{SegmentKey: "same", Batches: []core.PendingBatch{
-		{TP: core.TopicPartition{Topic: "r"}, Records: 5, Loc: core.SegmentRef{Key: "same", Len: 9}}}}
-	var wg sync.WaitGroup
-	res := make([]core.CommitSegmentResp, 10)
-	for i := range res {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			res[i] = commitRetrying(ctx, t, st, op)
-		}()
-	}
-	wg.Wait()
-	for _, r := range res {
-		if len(r.Assigned) != 1 || fmt.Sprint(r) != fmt.Sprint(res[0]) || r.Assigned[0].Base != 0 {
-			t.Fatalf("diverged: %+v vs %+v", r, res[0])
-		}
-	}
-	if l, _, _ := st.Lookup(ctx, core.Lookup{TP: op.Batches[0].TP}); l.End != 5 {
-		t.Fatalf("end %d", l.End)
-	}
-}
-
-func TestDynamoTooLarge(t *testing.T) { tooLarge(t, dynamoStore(t)) }
-
-// 1 segment item + one run per partition + the topic must fit in 100 items.
-func tooLarge(t *testing.T, st cp.Store) {
-	t.Helper()
-	ctx := context.Background()
-	var bs []core.PendingBatch
-	for i := 0; i < 100; i++ {
-		bs = append(bs, core.PendingBatch{TP: core.TopicPartition{Topic: "big", Partition: int32(i)}, Records: 1, Loc: core.SegmentRef{Key: "b", Len: 1}})
-	}
-	_, code, err := st.CommitSegment(ctx, core.CommitSegment{SegmentKey: "b", Batches: bs})
-	if err != nil || code != core.ErrTooLarge {
-		t.Fatalf("102 items: %v %v", code, err)
-	}
-	_, code, err = st.CommitSegment(ctx, core.CommitSegment{SegmentKey: "b2", Batches: bs[:98]})
-	if err != nil || code != core.OK {
-		t.Fatalf("100 items: %v %v", code, err)
 	}
 }
 

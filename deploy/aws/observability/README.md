@@ -58,7 +58,7 @@ follow YACE: `aws_dynamodb_successful_request_latency_average`, label
    `aws_s3_bucket_metric` with `bucket = <bench bucket>` and `name = var.s3_metrics_filter_id` (default `manifester-bench`) and **no filter** (whole bucket). The `name` is the CloudWatch `FilterId` dimension; Terraform passes the same value to Alloy as `S3_METRICS_FILTER_ID`, so they cannot drift. Metrics appear about 15 min after enabling; enable it before the run.
 2. The `grafana/*` SSM parameters above (created by the operator).
 3. Instance profile policy from `iam-cloudwatch-read.json` on the broker host (cloudwatch:GetMetricData/GetMetricStatistics/ListMetrics, tag:GetResources, ssm read).
-4. DynamoDB needs nothing extra (table metrics are on by default). The static discovery covers operations TransactWriteItems, BatchGetItem, GetItem, Query; add a block in `cp.alloy` for others.
+4. DynamoDB needs nothing extra (table metrics are on by default). The static discovery covers operations PutItem, GetItem, Query, BatchWriteItem; add a block in `cp.alloy` for others.
 
 ## Dashboards
 `./apply-dashboards.sh --dry-run` then `GRAFANA_URL=... GRAFANA_API_TOKEN=... ./apply-dashboards.sh` (optional `GRAFANA_FOLDER_UID`). Idempotent (overwrite by uid). Variables: `ds_prom`, `ds_loki` (pick your Cloud data sources), `run_id`, `host` (Hosts). Overview has a Loki panel `{run_id="$run_id", level=~"warn|error|..."}`. Dashboards show annotations tagged `manifester` + `run:<run_id>`.

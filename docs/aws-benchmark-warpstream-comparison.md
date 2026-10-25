@@ -1,5 +1,7 @@
 # Benchmark parity with WarpStream's published numbers
 
+*Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This document is a record.*
+
 Goal: run the benchmark WarpStream published ("WarpStream benchmarks and TCO",
 https://www.warpstream.com/blog/warpstream-benchmarks-and-tco, and the client guidance in
 https://docs.warpstream.com/warpstream/kafka/benchmarking and `.../configure-kafka-client/tuning-for-performance`)

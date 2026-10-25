@@ -22,7 +22,6 @@ import (
 
 	"manifester/cp"
 	"manifester/cp/cpobs"
-	"manifester/cp/dynamo"
 	"manifester/cp/memstore"
 	"manifester/sys/httppool"
 	"manifester/sys/runinfo"
@@ -41,8 +40,6 @@ type cpFlags struct {
 	create                               bool
 	metricsAddr, logLevel, runID         string
 	manifestOut                          string
-	sequencer                            bool
-	seqPipeline, seqMaxItems, seqCache   int
 	log                                  logFlags
 }
 
@@ -51,7 +48,7 @@ func parseFlags(args []string, stderr io.Writer) (cpFlags, *flag.FlagSet, error)
 	fs := flag.NewFlagSet("manicp", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&f.addr, "addr", ":8080", "listen address")
-	fs.StringVar(&f.kind, "store", "mem", "mem, dynamo (the transaction store, kept for rollback) or dynamolog (the log-backed control plane, decisions 48-53)")
+	fs.StringVar(&f.kind, "store", "mem", "mem (in-memory, for tests and demos) or dynamolog (the log-backed control plane, decisions 48-53)")
 	fs.StringVar(&f.endpoint, "dynamo-endpoint", "", "DynamoDB endpoint URL (empty: AWS)")
 	fs.StringVar(&f.region, "region", "us-east-1", "AWS region")
 	fs.StringVar(&f.prefix, "table-prefix", "manifester_", "DynamoDB table name prefix")
@@ -60,10 +57,6 @@ func parseFlags(args []string, stderr io.Writer) (cpFlags, *flag.FlagSet, error)
 	fs.StringVar(&f.logLevel, "log-level", "info", "log level: debug, info, warn, error (JSON lines on stderr; the per-request \"cp call\" line is DEBUG (WARN on HTTP 5xx) and INFO carries one \"cp summary\" line a second, so warn keeps failures only)")
 	fs.StringVar(&f.runID, "run-id", "", "run id stamped on every log line, metric (build_info) and the manifest (default $MANIFESTER_RUN_ID, else generated)")
 	fs.StringVar(&f.manifestOut, "manifest-out", "", "write a JSON run manifest at startup: a file path or s3://bucket/key ({service}, {run_id} expand; a trailing / adds <service>-<run_id>.json); failures are logged, never fatal")
-	fs.BoolVar(&f.sequencer, "sequencer", true, "-store dynamo: serialise commits through one in-process sequencer (group commit, offsets from memory, contention retried here). Run exactly ONE manicp and point every broker's -cp-url at it; correctness never depends on that (the run-item compare-and-set stays), a second manicp only costs retries. false: every commit does its own read-and-CAS (the pre-decision-46 path)")
-	fs.IntVar(&f.seqPipeline, "seq-pipeline", 4, "sequencer: group transactions in flight at once (they touch disjoint partitions; 1 = strictly serial)")
-	fs.IntVar(&f.seqMaxItems, "seq-max-group-items", dynamo.MaxTxItems, "sequencer: item budget of one group transaction (at most 100, DynamoDB's limit)")
-	fs.IntVar(&f.seqCache, "seq-cache-keys", 4096, "sequencer: recently committed segment keys remembered for replay without a read (negative: none)")
 	registerLogFlags(fs, &f.log)
 	err := fs.Parse(args)
 	return f, fs, err
@@ -116,7 +109,7 @@ func serve(ctx context.Context, d deps, f cpFlags, fs *flag.FlagSet, stderr io.W
 	defer closeStore()
 	srv := &http.Server{Addr: f.addr, Handler: m.Middleware(h), ReadHeaderTimeout: 10 * time.Second}
 	drained := shutdownOnDone(ctx, srv)
-	log.Info("manicp listening", "addr", f.addr, "store", f.kind, "sequencer", f.sequencer && f.kind == "dynamo")
+	log.Info("manicp listening", "addr", f.addr, "store", f.kind)
 	if f.manifestOut != "" {
 		writeManifest(ctx, log, info, fs, f)
 	}
@@ -136,7 +129,7 @@ func openHandler(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *
 	if f.kind == kindLog {
 		return openLog(ctx, d, f, m, log)
 	}
-	st, closeStore, err := openStore(ctx, f, m)
+	st, closeStore, err := openStore(f)
 	if err != nil {
 		return nil, closeStore, err
 	}
@@ -157,37 +150,13 @@ func serveMetrics(log *slog.Logger, m *cpobs.Metrics, addr string) error {
 	return nil
 }
 
-// openStore builds the -store backend. The returned func releases it (the
-// sequencer's loop); call it once the server has stopped.
-func openStore(ctx context.Context, f cpFlags, m *cpobs.Metrics) (cp.Store, func(), error) {
+// openStore builds the in-memory -store backend.
+func openStore(f cpFlags) (cp.Store, func(), error) {
 	nop := func() {}
-	switch f.kind {
-	case "mem":
+	if f.kind == "mem" {
 		return memstore.New(), nop, nil
-	case "dynamo":
-		return openDynamo(ctx, f, m)
 	}
 	return nil, nop, errors.New("unknown -store " + f.kind)
-}
-
-func openDynamo(ctx context.Context, f cpFlags, m *cpobs.Metrics) (cp.Store, func(), error) {
-	nop := func() {}
-	c, err := newDynamo(ctx, f.endpoint, f.region, m.APIOptions())
-	if err != nil {
-		return nil, nop, err
-	}
-	d := dynamo.New(c, f.prefix)
-	d.Obs = m
-	if f.create {
-		if err := d.CreateTables(ctx); err != nil {
-			return nil, nop, err
-		}
-	}
-	if !f.sequencer {
-		return d, nop, nil
-	}
-	s := dynamo.NewSequencer(d, dynamo.SeqOptions{Pipeline: f.seqPipeline, MaxItems: f.seqMaxItems, CacheKeys: f.seqCache})
-	return s, s.Close, nil
 }
 
 // shutdownOnDone shuts srv down gracefully once ctx ends; the channel closes
@@ -208,8 +177,7 @@ func shutdownOnDone(ctx context.Context, srv *http.Server) <-chan struct{} {
 func writeManifest(ctx context.Context, log *slog.Logger, info runinfo.Info, fs *flag.FlagSet, f cpFlags) {
 	mf := runinfo.NewManifest(info, fs, f.region, map[string]any{
 		"table": f.log.tableName(f.prefix), "store": f.kind, "rank": f.log.rank, "takeover_after": f.log.takeoverAfter.String(),
-		"ckpt_bucket": f.log.ckptBucket, "dynamo_endpoint": f.endpoint, "max_commit_attempts": 20, "max_tx_items": dynamo.MaxTxItems,
-		"sequencer": f.sequencer && f.kind == "dynamo", "seq_pipeline": f.seqPipeline, "seq_max_group_items": f.seqMaxItems, "seq_cache_keys": f.seqCache})
+		"ckpt_bucket": f.log.ckptBucket, "dynamo_endpoint": f.endpoint})
 	mf.Log(log)
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	where, err := runinfo.Write(cctx, mf, runinfo.WriteOptions{Dest: f.manifestOut, Region: f.region, IMDS: true})

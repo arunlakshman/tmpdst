@@ -39,7 +39,6 @@ type Service struct {
 	exitMu  sync.Once
 
 	ck ckptState
-	ix idxState
 }
 
 var _ cp.Store = (*Service)(nil)
@@ -74,14 +73,12 @@ func (s *Service) Blocked() error {
 
 func (s *Service) stopped() bool { return s.ctx.Err() != nil }
 
-func (s *Service) noIndex() bool { return s.cfg.NoIndex || s.cfg.DB == nil || s.cfg.Table == "" }
-
 // Ready is true once Start has restored the checkpoint and caught up.
 func (s *Service) Ready() bool { return s.ready.Load() }
 
 // Start restores the newest checkpoint (if any), replays the log to its tail
 // and starts the loops: tailing with the hole filler and role logic, K
-// flushers, checkpointing and the indexer. Rank 0 starts as the active node.
+// flushers, checkpointing. Rank 0 starts as the active node.
 // ctx bounds the startup only; Close stops the loops.
 func (s *Service) Start(ctx context.Context) error {
 	slot, err := s.restore(ctx)
@@ -108,7 +105,6 @@ func (s *Service) Start(ctx context.Context) error {
 		s.spawn(s.flusher)
 	}
 	s.spawn(s.ckptLoop)
-	s.spawn(s.indexLoop)
 	s.ready.Store(true)
 	return nil
 }

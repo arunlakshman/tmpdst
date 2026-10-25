@@ -15,7 +15,7 @@ def q(expr, legend="", ds=PROM, ref=None):
     # manibroker_ series carry a `broker` label (Alloy relabel from BROKER_ID); filter them by the
     # $broker variable. allValue ".*" also matches series without the label (single-broker runs).
     # CloudWatch (aws_*) series are per account/table, not per broker: only run_id.
-    # manicp_ series come from the single control-plane host and carry no broker label: only run_id.
+    # manicp_ series come from the control-plane hosts and carry no broker label: only run_id.
     if "manibroker_" in expr and "aws_" not in expr:
         expr = expr.replace('run_id="$run_id"', RB)
     return {"expr": expr, "legendFormat": legend, "datasource": ds, "refId": ref or "A"}
@@ -124,30 +124,6 @@ b.panel("Segments per second by seal reason",
 b.panel("Segment size (mean committed bytes per segment)",
         [q(f'sum(rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}])) / sum(rate(manibroker_segments_committed_total{{{R}}}[{RI}]))', "mean")], "bytes")
 b.panel("Buffered produce bytes (unacked)", [q(f'manibroker_buffered_bytes{{{R}}}', "buffered")], "bytes")
-# ---- control plane: the ONE manicp (single sequencer, group commit). manicp_seq_* exist from decision 46 on.
-b.row("Control plane (transaction store -store dynamo: single manicp sequencer; empty with the log store)")
-b.panel("Commit rate: groups/s and segments/s",
-        [q(f'sum by (outcome) (rate(manicp_seq_tx_seconds_count{{{R}}}[{RI}]))', "groups/s {{outcome}}"),
-         q(f'sum(rate(manicp_seq_group_segments_sum{{{R}}}[{RI}]))', "segments/s committed")], "ops",
-        desc="One TransactWriteItems per group. Segments/s should match the sum over brokers of segments/s.")
-b.panel("Queue depth and groups in flight",
-        [q(f'max(manicp_seq_queue_depth{{{R}}})', "queue depth"),
-         q(f'max(manicp_seq_inflight_groups{{{R}}})', "groups in flight")], "short",
-        desc="A persistently non-zero queue depth means the sequencer is the bottleneck.")
-b.panel("Group size (segments per transaction, p50/p99)", hq("manicp_seq_group_segments", [0.5, 0.99]), "short",
-        desc="Group commit: how many broker commits ride on one DynamoDB transaction.")
-b.panel("Transaction latency (TransactWriteItems per group, p50/p99)", hq("manicp_seq_tx_seconds", [0.5, 0.99], by="outcome"), "s")
-b.panel("Queue wait before the group forms (p50/p99)", hq("manicp_seq_queue_wait_seconds", [0.5, 0.99]), "s")
-b.panel("Cancellations and group retries",
-        [q(f'sum(rate(manicp_seq_tx_seconds_count{{{R}, outcome="canceled"}}[{RI}]))', "canceled groups/s"),
-         q(f'sum by (reason) (rate(manicp_seq_retries_total{{{R}}}[{RI}]))', "retry {{reason}}"),
-         q(f'sum by (code) (rate(manicp_dynamo_txn_cancel_reasons_total{{{R}}}[{RI}]))', "cancel reason {{code}}")], "ops",
-        desc="With a single writer, cancellations should be ~0. Sustained cancels mean a second manicp is running.")
-b.panel("DynamoDB write request units per second (manicp-side)",
-        [q(f'sum by (kind) (rate(manicp_dynamo_consumed_capacity_units_total{{{R}}}[{RI}]))', "{{kind}} units/s")], "short")
-b.panel("Sequencer cache hit ratio",
-        [q(f'sum by (cache) (rate(manicp_seq_cache_total{{{R}, result="hit"}}[{RI}])) / sum by (cache) (rate(manicp_seq_cache_total{{{R}}}[{RI}]))', "{{cache}}")], "percentunit",
-        desc="A miss costs a DynamoDB read.")
 # ---- control plane: the log store (-store dynamolog, decisions 48-53). One series per CP host (label host, cp_rank).
 b.row("Control plane (log store: manicp_log_*, one series per CP node)")
 b.panel("Slot rate (slots/s won) and lost slots",
@@ -174,12 +150,6 @@ b.panel("Queue depth, queue wait and refused requests",
          q(f'histogram_quantile(0.99, sum by (le, host) (rate(manicp_log_queue_wait_seconds_bucket{{{R}}}[{RI}])))', "queue wait p99 {{host}}"),
          q(f'sum by (host, reason) (rate(manicp_log_rejected_total{{{R}}}[{RI}]))', "refused/s {{reason}} {{host}}")], "short",
         desc="Refusals with reason not_active on a standby are normal (brokers fail over). overloaded means the queue is full.")
-b.panel("Index backlog (slots) and flush time",
-        [q(f'max by (host) (manicp_log_index_lag_slots{{{R}}})', "index lag slots {{host}}"),
-         q(f'histogram_quantile(0.99, sum by (le, host) (rate(manicp_log_index_flush_seconds_bucket{{{R}}}[{RI}])))', "flush p99 s {{host}}"),
-         q(f'sum by (host) (rate(manicp_log_index_throttles_total{{{R}}}[{RI}]))', "index throttles/s {{host}}"),
-         q(f'sum by (host) (rate(manicp_log_index_rows_total{{{R}}}[{RI}]))', "rows/s {{host}}")], "short",
-        desc="The indexer flushes every 10 s; lag is bounded by that unless the table throttles. Must be ~0 before a rollback to the old store.")
 b.panel("Checkpoint age (s) and size",
         [q(f'max by (host) (manicp_log_checkpoint_age_seconds{{{R}}})', "age s {{host}}"),
          q(f'max by (host) (manicp_log_checkpoint_bytes{{{R}}})', "bytes {{host}}"),
@@ -235,9 +205,6 @@ b.panel("S3 requests per second (CloudWatch)",
          q(f'sum(aws_s3_all_requests_sum{{{R}}}) / 60', "all")], "reqps")
 b.panel("DynamoDB call latency inside manicp (p50/p99 by call)",
         hq("manicp_dynamodb_call_seconds", [0.5, 0.99], by="call"), "s")
-b.panel("TransactWriteItems latency (CloudWatch, server side)",
-        [q(f'aws_dynamodb_successful_request_latency_average{{{R}, dimension_Operation="TransactWriteItems"}} / 1000', "avg"),
-         q(f'aws_dynamodb_successful_request_latency_maximum{{{R}, dimension_Operation="TransactWriteItems"}} / 1000', "max")], "s")
 b.panel("SuccessfulRequestLatency by operation (CloudWatch avg)",
         [q(f'aws_dynamodb_successful_request_latency_average{{{R}}} / 1000', "{{dimension_Operation}}")], "s")
 b.panel("Consumed capacity (CloudWatch, units/s)",
@@ -248,12 +215,6 @@ b.panel("Throttles (CloudWatch, per minute)",
         [q(f'sum(aws_dynamodb_write_throttle_events_sum{{{R}}})', "write throttle events"),
          q(f'sum(aws_dynamodb_read_throttle_events_sum{{{R}}})', "read throttle events"),
          q(f'sum by (dimension_Operation) (aws_dynamodb_throttled_requests_sum{{{R}}})', "throttled {{dimension_Operation}}")], "short")
-b.panel("Transaction cancellations and retries",
-        [q(f'sum by (op, reason) (rate(manicp_retries_total{{{R}}}[{RI}]))', "retry {{op}} {{reason}}"),
-         q(f'sum by (op) (rate(manicp_commit_attempts_total{{{R}}}[{RI}]))', "attempts {{op}}"),
-         q(f'sum(aws_dynamodb_transaction_conflict_sum{{{R}}}) / 60', "TransactionConflict/s (CW)"),
-         q(f'sum(aws_dynamodb_conditional_check_failed_requests_sum{{{R}}}) / 60', "ConditionalCheckFailed/s (CW)")], "ops")
-b.panel("CommitSegment time outside the transaction (p50/p99)", hq("manicp_commit_prep_seconds", [0.5, 0.99], by="stage"), "s")
 b.panel("manicp handler time by op (p99)", hq("manicp_handler_seconds", [0.99], by="op"), "s")
 # SDK-level metrics from sys/awsobs (manibroker_s3_*, manicp_dynamo_*), documented in docs/observability.md.
 for pre, nm in [("manibroker_s3", "S3"), ("manicp_dynamo", "DynamoDB")]:
@@ -265,8 +226,6 @@ for pre, nm in [("manibroker_s3", "S3"), ("manicp_dynamo", "DynamoDB")]:
              q(f'sum by (op, code) (rate({pre}_api_errors_total{{{R}}}[{RI}]))', "error {{op}} {{code}}")], "ops")
 b.panel("DynamoDB capacity units consumed per second (manicp, successful calls)",
         [q(f'sum by (kind) (rate(manicp_dynamo_consumed_capacity_units_total{{{R}}}[{RI}]))', "{{kind}}")], "short")
-b.panel("DynamoDB transaction cancel reasons per second",
-        [q(f'sum by (code) (rate(manicp_dynamo_txn_cancel_reasons_total{{{R}}}[{RI}]))', "{{code}}")], "ops")
 b.save("aws.json")
 
 # ------------------------------------------------------------------- hosts

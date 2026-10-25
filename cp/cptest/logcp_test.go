@@ -8,7 +8,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
 	"manifester/cp/cpclient"
-	"manifester/cp/dynamo/fakedb"
+	"manifester/cp/fakedb"
 	"manifester/cp/logcp"
 	"manifester/cp/logcp/logcptest"
 )

@@ -2,7 +2,7 @@
 // observation per HTTP attempt (so retries the SDK hides are visible), one per
 // operation, retries, request bytes and throttling. It lives at the
 // non-deterministic edge and is shared by sys/s3store (manibroker_s3_*) and
-// cp/dynamo (manicp_dynamo_*).
+// manicp's DynamoDB client (manicp_dynamo_*).
 //
 // Every method is safe on a nil *Recorder.
 package awsobs

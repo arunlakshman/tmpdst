@@ -22,13 +22,13 @@ You run apply and destroy; nothing here is automatic. Never run `docker prune` o
 | operator control (topic, workers, start run) | your workstation, through SSM send-command | `deploy/aws/bench/bench-ctl.sh` |
 | OMB workers | every loadgen host, `:8080` (HTTP) and `:9090` (stats) | `deploy/aws/bench/start-omb-workers.sh` |
 | OMB coordinator + stage plan + abort rules | loadgen host 0 (detached) | `deploy/aws/bench/run-omb.sh` |
-| manicp: the log store (`-store dynamolog`, default) on an active host (rank 0) plus `cp_standby_count` (default 1) hot standbys, or with `cp_store = dynamo` the ONE sequencer of decision 46; `metrics/cp/` (rank 0) and `metrics/cp-<rank>/` snapshots | dedicated control-plane hosts (`cp_instance_type`, default m6in.xlarge), `:8080` | `files/cp-user-data.sh.tpl` |
+| manicp: the log store (`-store dynamolog`) on an active host (rank 0) plus `cp_standby_count` (default 1) hot standbys; `metrics/cp/` (rank 0) and `metrics/cp-<rank>/` snapshots | dedicated control-plane hosts (`cp_instance_type`, default m6in.xlarge), `:8080` | `files/cp-user-data.sh.tpl` |
 | manibroker `/metrics` snapshots every 10 s (`metrics/<broker id>/`) | every broker host (`mb-snapshot.service`) | terraform user-data |
 | summary | your workstation | `deploy/aws/bench/collect-results.sh` -> `results/<run>/summary.md` |
 
 Why topic creation goes through SSM to the control-plane host: OMB cannot create topics (the broker has no CreateTopics),
 the CP security group admits `:8080` from the broker SG only (loadgen to CP stays closed), the NLB forwards only Kafka
-traffic, and loadgen hosts have no `ssm:SendCommand`. The 288-partition topic is one TOPICS item in DynamoDB (`cp/doc.go`), so creation is cheap;
+traffic, and loadgen hosts have no `ssm:SendCommand`. The 288-partition topic is one `CreateTopic` command in the log, so creation is cheap;
 the Metadata response for 288 partitions is a few KB. The patched OMB driver maps every logical topic to the
 topic you created (`omb-<run_id>`), so OMB's random topic names never matter.
 
@@ -77,8 +77,8 @@ Or in one command from the workstation: `deploy/aws/bench/bench-ctl.sh check-cp`
 healthz ok, no manicp on any broker, every broker reaches `<cp_private_ip>:8080`).
 Grafana: apply dashboards (`deploy/aws/observability/apply-dashboards.sh`), check `up{run_id="<run>"}` for all six
 `broker` values plus one `manicp` series with `role="cp"`, and that the `$broker` variable of the Overview dashboard lists 1..6.
-The Overview "Control plane" row (commit rate, queue depth, group size, transaction latency, cancellations, DynamoDB WRU)
-reads that one manicp; its cancellations should stay near 0 (see A10).
+The Overview "Control plane" row (slot rate, append latency, lost slots, apply and standby lag, queue, DynamoDB WRU)
+reads the active manicp; lost slots should stay near 0 (see A10, A11).
 
 ### A5. Topic and workers (workstation)
 
@@ -161,43 +161,28 @@ SSM parameters and Grafana tokens if the account is shared.
 - The Kafka client in OMB (3.6.1) and the broker were exercised together only locally (one broker, mem store, 8
   partitions, produce + assign-consume at 5k msg/s, `compression.type=none`). Nothing here has run on AWS. lz4 was
   verified locally with the Apache Kafka 3.9 perf tool and franz-go only, not with an OMB run.
-- The single-sequencer control plane (decision 46) and its `manicp_seq_*` metrics are new: the first AWS run with
-  them is the evidence. summarize.py shows `-` for sequencer columns when the manicp build exports none.
-- The CP is a single point of failure for availability (not for correctness): see A10.
+- The CP is a single point of failure for availability (not for correctness): see A10 (A11 adds a standby).
 - The lz4 probe (`kafka-producer-perf-test`, `retries=0`, `max.block.ms=15000`) passes against a broker with decision 45;
   if it ever misclassifies, force `--compression none|lz4`.
 - DynamoDB cost and the 98-calls-per-commit behaviour at 288 partitions are predictions (comparison doc, section 5).
 
-### A10. The single control plane (`cp_store = dynamo`, the rollback store): verify, and what to do when it dies
+### A10. Control-plane loss: what happens when it dies
 
-This section describes the old transaction store. The default since stage 4 is the log store: read A11 first.
-
-Decision 46: the control plane owns sequencing. There is exactly ONE manicp (host `mb-<run>-cp`, `cp_instance_type`,
-count 1) with a single sequencing thread, group commit and an in-memory offset cache; every broker runs
-`-cp-url http://<cp_private_ip>:8080`. The first 6-broker smoke run with one manicp per broker (6 independent writers on
-one DynamoDB table) showed constant compare-and-set cancellations and commit latency spikes: that is what this layout removes.
-
-Verify the single CP (also part of every apply):
-- `deploy/aws/bench/bench-ctl.sh check-cp`: exactly one `manicp` process on the CP host, healthz ok, no `manicp` process on
-  any broker, every broker reaches the CP.
-- Grafana Overview, "Control plane" row: one series for the sequencer; "Cancellations and group retries" about 0. Sustained
-  cancels or two `manicp` hosts under `up{job="manicp"}` mean a second manicp is running somewhere (a leftover process, a
-  hand-started instance): stop it. Correctness never depends on this (the DynamoDB compare-and-set is the safety net,
-  so a second writer cannot corrupt offsets); it is only a performance problem.
-- `s3://<bucket>/results/<run>/metrics/cp/` gets a new file every 10 s; run-omb.sh pre-flight refuses to start without it.
+The control plane is the log store (A11). The old transaction-based store, its single sequencer and the rollback to it were
+removed (decision 54). The bullets below apply to a lone CP, or to losing both nodes of the pair.
 
 If the CP dies (instance terminated by the max_runtime guard, crash, host failure):
 - Symptom: brokers' produce acks stall or fail (the commit step cannot reach `:8080`), `up{job="manicp"}` 0, no new
   `metrics/cp/` files, `bench-ctl.sh check-cp` fails. Segments already stored in S3 are not lost: they are simply not
   committed (visible) until a CP answers; clients retry per their delivery timeouts.
 - Process died, host alive: the unit has `Restart=always`, `RestartSec=1`, so systemd brings it back in about a second
-  (look at `journalctl -u manicp`; `sudo systemctl restart manicp` by hand if it gave up). The state is all in DynamoDB,
+  (look at `journalctl -u manicp`; `sudo systemctl restart manicp` by hand if it gave up). The state is all in DynamoDB (log) and S3 (checkpoints),
   so nothing is lost, but a restart is not free. Real behaviour: (1) every commit that reaches the CP during the gap is
   refused at the connection; the brokers keep retrying it (capped exponential backoff, 20 ms up to 2 s, with jitter) for
   `-commit-deadline` (default 120 s) after the commit's first attempt, so a gap of seconds fails no produce but delays the
   acks and fills the produce buffer (clients are paused by backpressure meanwhile); (2) a commit whose answer was lost
   is resent under the same key and gets the same answer, so it is not duplicated; (3) the new process starts with an
-  empty sequencer cache, so the first commit and the first Lookup of every partition read DynamoDB (a burst of reads);
+  empty Pebble state and restores the newest checkpoint and replays the log after it before it listens (reads of DynamoDB and S3);
   (4) a gap longer than the deadline fails the segments in flight with REQUEST_TIMED_OUT, and producers that retry may then
   duplicate records whose lost commit had landed (decision 41). A host replacement takes minutes, which is beyond the
   deadline: expect failed produces and re-run the stage.
@@ -208,14 +193,9 @@ If the CP dies (instance terminated by the max_runtime guard, crash, host failur
   (`/etc/systemd/system/manibroker.service`, `-cp-url`, `systemctl daemon-reload && systemctl restart manibroker`).
 - After recovery run `check-cp`, then resume or re-run the stage; note the outage in the run notes.
 
-HA (future work, not needed for correctness): an active/standby pair, where the standby holds an advisory DynamoDB lease
-(heartbeat item with TTL) and takes over by fencing through the existing compare-and-set when the active one stops
-renewing. The lease would only prevent two active sequencers (a performance matter, as above); safety stays with the
-conditional writes. Not built, not needed for the benchmark.
-
 ### A11. The log store (stage 4 default): two CP nodes, run id, killing the appender
 
-What runs: `cp_store = log` (default) starts `aws_instance.cp` (rank 0, the preferred appender) and `cp_standby_count`
+What runs: the control plane starts `aws_instance.cp` (rank 0, the preferred appender) and `cp_standby_count`
 (default 1) `aws_instance.cp_standby` (rank 1, a hot standby that tails and applies the log, serves reads, and answers
 commits with 503). Each runs `manicp -store dynamolog -rank R -node-name cp-R -takeover-after 5s -ckpt-bucket <run bucket>
 -ckpt-prefix cp/ -pebble-dir /var/lib/manicp/pebble` (`cp_takeover_after`, `cp_extra_args` change them). Brokers get
@@ -243,16 +223,14 @@ preferred appender and the standby steps down, so you also measure the failback)
 3. when rank 0 restarts it restores the newest checkpoint (or replays) and starts active; rank 1 sees a lower-rank writer
    and demotes (`role_changes_total{to="standby"}`); brokers fail back through a 503 from rank 1.
 Look at: Overview, row "Control plane (log store ...)" (slot rate, append p50/p99, lost slots, apply and standby lag, hole
-fills and role changes, queue/refused, index backlog, checkpoint age); Pipeline "Commit" p99 and "Segments in flight";
+fills and role changes, queue/refused, checkpoint age); Pipeline "Commit" p99 and "Segments in flight";
 OMB's own latency chart for the gap; `journalctl -u manicp` on both hosts (`log_role`, `log_ready`, `cp call` WARNs).
 Budget: an ack gap of `takeover-after` + about 2 s of broker backoff + the 10 s CP call timeout in the worst case (a host
 that drops packets instead of refusing: dial 5 s, then 503 from the standby), far below the 120 s `-commit-deadline`;
 the it/ test measures about 2 s with a 1.5 s takeover on loopback. If a gap approaches the deadline, produces fail with
 REQUEST_TIMED_OUT and the stage is invalid.
 
-Index and rollback: the R# rows are written 10 s after the ack. To go back to `cp_store = dynamo` mid-experiment, stop
-the producers, wait until `manicp_log_index_lag_slots` is 0 on the active node, then re-apply (see
-`docs/log-cp-service.md` "Upgrade and rollback"). Replays of old segment keys after a rollback commit again (decision 41).
+There is no rollback to the transaction store (decision 54); going back needs an older git revision.
 
 Standby or whole-CP loss: lose the standby only: nothing visible (alert on `up{job="manicp"}`); the active keeps serving. Lose
 both: as in A10 (acks stall, everything retried for the deadline). Replace one host with `terraform apply
@@ -423,7 +401,7 @@ table, IAM roles and instance profiles, the budget. Then delete the SSM paramete
 Fixed cost about $0.29/hour (c7i.xlarge $0.179, c7i.large $0.089, volumes, public IPv4, S3 request metrics).
 A session of about 2 hours (apply, 15 min of waiting, smoke, matrix, collection, destroy) is about $0.6 fixed.
 Usage: S3 PUTs at 5-60 segments/s for 17 minutes is on the order of 5-60 thousand PUTs per minute at the extreme
-($0.005 per 1000), so $0.2-1.5; DynamoDB on-demand writes (transactional, 2 units each) similar order, under $1;
+($0.005 per 1000), so $0.2-1.5; DynamoDB on-demand writes (about one per slot) similar order, under $1;
 CloudWatch GetMetricData by Alloy a few cents. Expect **$2-5 total** (the first minutes of S3 request metrics are a
 monthly custom-metric price prorated). Budget alarm thresholds are in `my.tfvars`. Grafana Cloud free tier is not
 included. Left running for a day by mistake: about $7.
@@ -441,6 +419,8 @@ All `manibroker_*`, `manicp_*` and `node_*` series in the dashboards were checke
 First thing after READY: Explore `{__name__=~"aws_.*"}` and fix `deploy/aws/observability/gen/gen_dashboards.py` if spelled differently.
 
 ## Run w2: sequencer, smoke and ramp (2026-10-19, ap-south-2, 6 brokers m6in.4xlarge, 1 CP m6in.xlarge, 288 partitions, lz4, balanced)
+
+*Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This section is a record.*
 
 Short run (stack up about 24 min, test about 14 min): smoke 100k (2 min + 1 warm-up), ramp 250k and 500k (3 min + 1 warm-up each),
 produce-only. Raw data in `results/w2` (git-ignored). Destroyed; post-destroy checks empty.
@@ -474,10 +454,9 @@ Both are opt-in; the default WarpStream-style run is unchanged.
   ~batch.size bytes like the stock partitioner). Needs balanced mode. NOT comparable to WarpStream: label results "partition-affine producers".
 - Segment window: `bench-ctl.sh broker-args -segment-window 1s` adds the flag to every manibroker (systemd drop-in) and restarts them;
   `bench-ctl.sh broker-args` with no flags removes the drop-in. (Or set `broker_extra_args` in my.tfvars at apply time.)
-- Partition cap (decision 52): the broker default `-max-segment-partitions` is now 4096, valid only for the log store. The runs in this
-  runbook use `manicp -store dynamo` (one 100-item transaction), which refuses a segment of more than 99 partitions with `ErrTooLarge`, so
-  `broker_extra_args` defaults to `-max-segment-partitions 96` in `variables.tf`; keep it for every run against the old store and set it to
-  `""` for the log store (stage 5).
+- Partition cap (decision 52): the broker default `-max-segment-partitions` is now 4096, valid only for the log store. The old
+  transaction store refused a segment of more than 99 partitions with `ErrTooLarge` and needed `-max-segment-partitions 96`; it is
+  removed (decision 54), so leave `broker_extra_args` empty.
 - Abort threshold: `run-omb.sh --abort-p99-ms 60000` (or env `OMB_ABORT_P99_MS`); default 10000.
 - Short stages: `w3-smoke-100k-1min` (1 min), `w3-500k-4min` (4 min + 1 min warm-up). Example:
   `bench-ctl.sh run --stages w3-500k-4min --abort-p99-ms 60000 [--affine]`. Results of such short stages are indicative only.

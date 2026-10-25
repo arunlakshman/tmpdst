@@ -94,7 +94,7 @@ func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
 func (e *Engine) HighWatermark(tp core.TopicPartition) core.Offset { return e.spec.End(tp) }
 
 // tooLarge reports whether op is a CommitSegment that a store with a bounded
-// transaction would refuse. The count is cp/dynamo's arithmetic (decisions 39,
+// transaction would refuse. The count is the arithmetic of the removed DynamoDB-transaction store (decisions 39,
 // 41, 44: no producer, high-watermark or fencing items): one segment item, one
 // range run item per distinct partition and one item per topic the commit
 // grows, taken as an upper bound, so it depends on the request and the topic

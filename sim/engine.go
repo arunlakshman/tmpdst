@@ -142,8 +142,8 @@ type LogParams struct {
 }
 
 // DynamoMaxCommitItems is DynamoDB's TransactWriteItems limit, the value the
-// Kafka preset uses. It mirrors cp/dynamo.MaxTxItems (decision 32); the sim
-// cannot import that package, so keep the two equal.
+// Kafka preset uses. It models the item cap of the removed transactional
+// store (decision 32), a limit the log control plane does not have.
 const DynamoMaxCommitItems = 100
 
 // NetworkFaults are connection-level faults (lesson 6).

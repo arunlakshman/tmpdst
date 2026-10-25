@@ -1,6 +1,5 @@
 // Package cpobs is the control-plane service's Prometheus instrumentation:
-// HTTP handler time, DynamoDB call time, commit preparation time, retries and
-// cancellations, in-flight requests and request sizes. It lives at the
+// HTTP handler time, DynamoDB call time, in-flight requests and request sizes. It lives at the
 // non-deterministic edge (wall clocks, atomics, no core import) and every
 // method is safe on a nil *Metrics, so stores and handlers run uninstrumented.
 package cpobs
@@ -36,19 +35,14 @@ type Metrics struct {
 	dyn      *prometheus.HistogramVec // call
 	prep     *prometheus.HistogramVec // stage
 	body     *prometheus.HistogramVec // op
-	retries  *prometheus.CounterVec   // op, reason
-	attempts *prometheus.CounterVec   // op
 	inflight prometheus.Gauge
 
 	// AWS measures every DynamoDB HTTP attempt (manicp_dynamo_*): pass
 	// AWS.APIOptions() to the client.
 	AWS *awsobs.Recorder
 
-	seq *seqMetrics
-
 	consumed  *prometheus.CounterVec // op, kind
 	noCap     *prometheus.CounterVec // op
-	cancels   *prometheus.CounterVec // code
 	callsDone *prometheus.CounterVec // op, outcome
 
 	log *slog.Logger
@@ -70,15 +64,10 @@ func NewWithLogger(log *slog.Logger) *Metrics {
 		return prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: "manicp", Name: name, Help: help, Buckets: b}, []string{label})
 	}
 	m := &Metrics{
-		reg:     prometheus.NewRegistry(),
-		handler: hv("handler_seconds", "Whole HTTP handler time (body read to response written), by op.", "op", secs),
-		dyn:     hv("dynamodb_call_seconds", "Time inside one DynamoDB SDK call (TransactWriteItems, GetItem, BatchGetItem, ...).", "call", secs),
-		prep:    hv("commit_prep_seconds", "CommitSegment time outside the transaction: reads (consistent gets) and decide_encode (decide + build items), per attempt.", "stage", secs),
-		body:    hv("request_body_bytes", "HTTP request body size, by op.", "op", prometheus.ExponentialBuckets(64, 4, 10)),
-		retries: prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Name: "retries_total",
-			Help: "Internal retries by op and reason (transaction_canceled, unavailable, conditional_check)."}, []string{"op", "reason"}),
-		attempts: prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Name: "commit_attempts_total",
-			Help: "CommitSegment attempts (first tries plus retries), by op."}, []string{"op"}),
+		reg:      prometheus.NewRegistry(),
+		handler:  hv("handler_seconds", "Whole HTTP handler time (body read to response written), by op.", "op", secs),
+		dyn:      hv("dynamodb_call_seconds", "Time inside one DynamoDB SDK call (TransactWriteItems, GetItem, BatchGetItem, ...).", "call", secs),
+		body:     hv("request_body_bytes", "HTTP request body size, by op.", "op", prometheus.ExponentialBuckets(64, 4, 10)),
 		inflight: prometheus.NewGauge(prometheus.GaugeOpts{Namespace: "manicp", Name: "inflight_requests", Help: "HTTP requests being served."}),
 		log:      log,
 	}
@@ -87,15 +76,10 @@ func NewWithLogger(log *slog.Logger) *Metrics {
 		[]string{"op", "kind"})
 	m.noCap = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Subsystem: "dynamo", Name: "consumed_capacity_missing_total",
 		Help: "Successful calls whose response carried no ConsumedCapacity (ExtendDB, local emulators), by call."}, []string{"op"})
-	m.cancels = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Subsystem: "dynamo", Name: "txn_cancel_reasons_total",
-		Help: "Per-item cancellation reasons of TransactionCanceledException (ConditionalCheckFailed, TransactionConflict, ThrottlingError, ProvisionedThroughputExceeded, ...)."},
-		[]string{"code"})
 	m.callsDone = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Name: "calls_total",
 		Help: "HTTP calls served, by op and outcome (ok, the business error code such as ErrConflict, http_503, http_500)."}, []string{"op", "outcome"})
-	m.seq = newSeqMetrics(m.reg, secs)
 	m.AWS = awsobs.New(m.reg, "manicp", "dynamo", log)
-	m.AWS.QuietCodes = map[string]bool{"TransactionCanceledException": true} // reported by CommitSegment with reasons
-	m.reg.MustRegister(m.consumed, m.noCap, m.cancels, m.callsDone, m.handler, m.dyn, m.prep, m.body, m.retries, m.attempts, m.inflight,
+	m.reg.MustRegister(m.consumed, m.noCap, m.callsDone, m.handler, m.dyn, m.body, m.inflight,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	return m
 }
@@ -126,13 +110,10 @@ func (m *Metrics) Logger() *slog.Logger {
 // middleware creates it, the store fills it through the request context, and
 // the middleware logs it as the request's one line. All methods are safe on nil.
 type Call struct {
-	mu       sync.Mutex
-	segment  string
-	attempts int
-	dynamo   time.Duration
-	retries  []string
-	cancels  []string
-	units    float64
+	mu      sync.Mutex
+	segment string
+	dynamo  time.Duration
+	units   float64
 }
 
 type callKey struct{}
@@ -152,28 +133,11 @@ func (c *Call) SetSegment(k string) {
 	}
 }
 
-func (c *Call) attempt() {
-	if c != nil {
-		c.mu.Lock()
-		c.attempts++
-		c.mu.Unlock()
-	}
-}
-
 func (c *Call) addDynamo(d time.Duration, units float64) {
 	if c != nil {
 		c.mu.Lock()
 		c.dynamo += d
 		c.units += units
-		c.mu.Unlock()
-	}
-}
-
-func (c *Call) retry(reason string, cancels []string) {
-	if c != nil {
-		c.mu.Lock()
-		c.retries = append(c.retries, reason)
-		c.cancels = append(c.cancels, cancels...)
 		c.mu.Unlock()
 	}
 }
@@ -262,10 +226,6 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 			m.callsDone.WithLabelValues(op, outcome).Inc()
 			call.mu.Lock()
 			defer call.mu.Unlock()
-			attempts := call.attempts
-			if attempts == 0 {
-				attempts = 1
-			}
 			// Audit item 9: a consume stage is tens of thousands of requests a
 			// second, so the per-request line is DEBUG; failures stay WARN and
 			// an INFO summary (at most one a second) carries the counts.
@@ -275,8 +235,7 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 			}
 			m.sum.add(m.log, op, outcome, el, time.Now())
 			m.log.Log(r.Context(), lvl, "cp call", "event", "cp_call", "op", op, "segment", call.segment, "outcome", outcome,
-				"http_status", sw.status, "attempts", attempts, "retries", len(call.retries),
-				"handler_ms", ms(el), "dynamo_ms", ms(call.dynamo), "consumed_units", call.units,
+				"http_status", sw.status, "handler_ms", ms(el), "dynamo_ms", ms(call.dynamo), "consumed_units", call.units,
 				"request_bytes", cb.n, "response_bytes", sw.n)
 		}()
 		next.ServeHTTP(sw, r.WithContext(context.WithValue(r.Context(), callKey{}, call)))
@@ -373,38 +332,4 @@ func (m *Metrics) consume(call string, cc []types.ConsumedCapacity) float64 {
 	}
 	m.consumed.WithLabelValues(call, kind).Add(total)
 	return total
-}
-
-// Prep records the time of a commit stage ("reads" or "decide_encode").
-func (m *Metrics) Prep(stage string, d time.Duration) {
-	if m != nil {
-		m.prep.WithLabelValues(stage).Observe(d.Seconds())
-	}
-}
-
-// Retry counts an internal retry of op for reason. cancels are the
-// per-item cancellation codes of a TransactionCanceledException, if any.
-func (m *Metrics) Retry(op, reason string) { m.RetryCtx(context.Background(), op, reason, nil) }
-
-// RetryCtx is Retry plus the request's own tally.
-func (m *Metrics) RetryCtx(ctx context.Context, op, reason string, cancels []string) {
-	if m == nil {
-		return
-	}
-	m.retries.WithLabelValues(op, reason).Inc()
-	for _, c := range cancels {
-		m.cancels.WithLabelValues(c).Inc()
-	}
-	FromContext(ctx).retry(reason, cancels)
-}
-
-// Attempt counts one attempt of op.
-func (m *Metrics) Attempt(op string) { m.AttemptCtx(context.Background(), op) }
-
-// AttemptCtx is Attempt plus the request's own tally.
-func (m *Metrics) AttemptCtx(ctx context.Context, op string) {
-	if m != nil {
-		m.attempts.WithLabelValues(op).Inc()
-		FromContext(ctx).attempt()
-	}
 }

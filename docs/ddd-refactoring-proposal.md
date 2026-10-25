@@ -1,5 +1,7 @@
 # DDD refactoring proposal
 
+*Note: the DynamoDB-transaction control plane (`cp/dynamo`) named in this proposal was removed (decision 54); the log-based CP (`cp/logcp`, `cp/logsm`) is the only one, so references to `cp/dynamo` are historical.*
+
 Status: proposal for discussion, nothing applied. Constraints are decisions 7, 10, 11, 12 (frozen fact
 names), 21 (spec independence), 22 and 28. "Hash-neutral" means no trace hash or `StateHash` output
 changes.
@@ -24,7 +26,7 @@ changes.
 
 | Concept | Today | Problem |
 |---|---|---|
-| Segment | `broker.segment` is an in-flight upload; `veritas.segment` is a committed request and answer; `format` calls it an object; the DynamoDB CP calls it `G#<segkey>` | Three things share one word. |
+| Segment | `broker.segment` is an in-flight upload; `veritas.segment` is a committed request and answer; `format` calls it an object; the (removed) DynamoDB transaction CP called it `G#<segkey>`; the log CP keeps it as a key in the applier window | Three things share one word. |
 | Segment name | `SegmentKey string` field, but `format.SegmentKey()` is a function | Not a typed key. Rename the function to `format.NewSegmentKey`. |
 | Byte range | `core.SegmentRef`, also called `Loc` and `Ref` | It is a range inside an object. Call it `ObjectRange`. |
 | Batch | `pbatch`, `PendingBatch`, `format.Batch`, `kwire.Batch`, `cp.Batch`, `kmsg.RecordBatch`, and `ProduceOp.Batch` (a serial number) | Six or seven meanings. Always qualify it: RecordBatch, AdmittedBatch, PendingBatch. |
@@ -58,7 +60,7 @@ Proposed glossary, to go in `docs/glossary.md` and be cited by doc comments:
 | Kafka protocol | `kwire`, `core/kafka.go`, the response half of `broker/` | Conformist to Kafka. Correct. |
 | Ingest (produce pipeline) | `broker/segment.go`, `broker/produce.go` | **Leaks.** Kafka codes are chosen inside `committed()` and `isolate()`, and `pbatch.part` holds a `*kmsg` response struct. |
 | Read path | `broker/fetch.go`, `broker/ops.go` | Same leak: `op.lpart` and `op.fpart`. |
-| Log and idempotence | `core/controlplane.go` (contract), `veritas` (spec), `cp/dynamo` (implementation), `cpengine` | Duplicated on purpose (decision 21). |
+| Log and idempotence | `core/controlplane.go` (contract), `veritas` (spec), `cp/logsm` and `cp/logcp` (implementation), `cpengine` | Duplicated on purpose (decision 21). |
 | Membership and fencing | `Register` and `broker.trip` | |
 | Object layout | `format`, `veritas.ObjectStore`, `sys/s3store` | Shared kernel. Fine. |
 | Runtime | `core`, `sys`, the sim kernel | |
@@ -66,7 +68,7 @@ Proposed glossary, to go in `docs/glossary.md` and be cited by doc comments:
 
 **Shared pure "idempotence rules" module?** No for the rules, yes for the vocabulary.
 
-- If `veritas` and `cp/dynamo/decide.go` called one decide function, a bug in it would be in both, and lockstep would only test the transaction plumbing.
+- If `veritas` and the log state machine (`cp/logsm`) called one decide function, a bug in it would be in both, and lockstep would only test the plumbing.
 - Keep the duplicated constants (`firstProducer = 1000`, `dupWindow = 5`) on purpose.
 - Instead, number the spec rules (R1..R9) and reference them from `decide.go` and from lockstep failure messages.
 
@@ -106,7 +108,7 @@ Facts are already past-tense domain events. The only problems are the edges:
 | 5 | Fact name constants in `core`, typed constructors, and a test that pins the names | S | none | |
 | 6 | One `core.Hasher` in place of five copies, and a shared retry and backoff helper (`retryState`) | S–M | none | |
 | 7 | Split the overloaded `ErrFenced`. **A:** typed accessors only (recommended). **B:** a new `ErrProducerFenced`, which changes the HTTP wire format and re-baselines | L | B re-baselines | yes |
-| 8 | Rule numbering between `veritas` and `cp/dynamo`; decide whether Incarnation should fence (lessons §4 vs code) | S | none (a behaviour change if it fences) | open question |
+| 8 | Rule numbering between `veritas` and `cp/logsm`; decide whether Incarnation should fence (lessons §4 vs code) | S | none (a behaviour change if it fences) | open question |
 
 Validation for every step:
 

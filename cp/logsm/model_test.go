@@ -15,7 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
 	"manifester/core"
-	"manifester/cp/dynamo/fakedb"
+	"manifester/cp/fakedb"
 )
 
 // The commit-path model of docs/commit-path-redesign.md section 6, extended

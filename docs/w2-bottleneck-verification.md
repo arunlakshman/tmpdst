@@ -1,5 +1,7 @@
 # Run w2: bottleneck verification from Prometheus
 
+*Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This document is a record.*
+
 Source: Grafana Cloud Prometheus, label `run_id="w2"`, scrape interval 5 s (no scrape gaps seen, 120 samples per 10 min).
 Read-only analysis; no AWS resources used. Everything below was recomputed from the metrics, not from the earlier docs.
 The OMB stage log (`results/w2/omb/stages.tsv`) gives the stage clocks.

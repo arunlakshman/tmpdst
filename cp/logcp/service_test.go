@@ -18,7 +18,7 @@ import (
 	"manifester/core"
 	"manifester/cp"
 	"manifester/cp/applier"
-	"manifester/cp/dynamo/fakedb"
+	"manifester/cp/fakedb"
 	"manifester/cp/logcp"
 	"manifester/cp/logcp/logcptest"
 	"manifester/cp/logsm"
@@ -421,9 +421,6 @@ func TestRestartFromCheckpointAndTrim(t *testing.T) {
 			}
 		}
 	}
-	if err := a.FlushIndex(bg); err != nil { // the log is trimmed only behind the index watermark
-		t.Fatal(err)
-	}
 	slot, err := a.Checkpoint(bg)
 	if err != nil {
 		t.Fatal(err)
@@ -498,9 +495,6 @@ func TestLaggingNodeStopsInsteadOfWritingIntoTrimmedSlots(t *testing.T) {
 	b := node(t, "n1", 1, log, db, objs, func(c *logcp.Config) { small(c); c.TailPoll = time.Hour })
 	for i := 0; i < 50; i++ {
 		commit(t, a, seg("l"+string(rune('a'+i%26))+string(rune('a'+i/26)), tp("t", 0)))
-	}
-	if err := a.FlushIndex(bg); err != nil {
-		t.Fatal(err)
 	}
 	if _, err := a.Checkpoint(bg); err != nil {
 		t.Fatal(err)
@@ -597,7 +591,7 @@ func TestRealGoroutinesRace(t *testing.T) {
 	objs := logcptest.NewObjects()
 	log := logcp.NewDynLog(db, "cp", logcp.DynLogOptions{})
 	mod := func(c *logcp.Config) {
-		c.CkptEvery, c.CkptMinSlots, c.IndexEvery, c.TakeoverAfter = 30*time.Millisecond, 3, 20*time.Millisecond, 200*time.Millisecond
+		c.CkptEvery, c.CkptMinSlots, c.TakeoverAfter = 30*time.Millisecond, 3, 200*time.Millisecond
 		c.WindowSlots, c.TrimStride, c.KeepSlots, c.TrimDelete = 4096, 64, 256, true
 	}
 	nodes := []*logcp.Service{node(t, "n0", 0, log, db, objs, mod), node(t, "n1", 1, log, db, objs, mod), node(t, "n2", 2, log, db, objs, mod)}
@@ -640,11 +634,6 @@ func TestRealGoroutinesRace(t *testing.T) {
 			if end, err := s.End(bg, p); err != nil || end != want {
 				t.Fatalf("%v end %d acked %d (%v)", p, end, want, err)
 			}
-		}
-	}
-	for _, s := range nodes {
-		if err := s.FlushIndex(bg); err != nil {
-			t.Fatal(err)
 		}
 	}
 }

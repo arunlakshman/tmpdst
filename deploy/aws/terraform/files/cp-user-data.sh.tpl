@@ -1,7 +1,7 @@
 #!/bin/bash
-# manifester-bench control-plane host, rank ${cp_rank} (store ${cp_store}): manicp, metrics snapshotter, Alloy.
-# Runs nothing else. Log store: rank 0 is the preferred appender, higher ranks are hot standbys that tail the log
-# (decisions 48-53); brokers hold the URL list. Old store: exactly one host (the single sequencer, decision 46).
+# manifester-bench control-plane host, rank ${cp_rank} (log store): manicp, metrics snapshotter, Alloy.
+# Runs nothing else. Rank 0 is the preferred appender, higher ranks are hot standbys that tail the log
+# (decisions 48-53); brokers hold the URL list.
 # Brokers reach it at http://<this private ip>:8080; topic creation (rank 0 only) happens here on loopback.
 set -euxo pipefail
 exec > >(tee -a /var/log/bench-bootstrap.log) 2>&1
@@ -33,16 +33,12 @@ else
   MANIFEST_OUT=s3://$BUCKET/results/$RUN_ID/cp-$CP_RANK/
   SNAP_DIR=cp-$CP_RANK
 fi
-%{ if cp_store == "log" ~}
-# Log store: DynamoDB log + Pebble state under /var/lib/manicp (StateDirectory) + checkpoints in the run bucket under cp/.
+# DynamoDB log + Pebble state under /var/lib/manicp (StateDirectory) + checkpoints in the run bucket under cp/.
 # The table (with TTL and warm throughput) is created by Terraform, so no -create-tables.
 STORE_ARGS="-store dynamolog -table ${table_name} -ckpt-bucket $BUCKET -ckpt-prefix cp/ -rank $CP_RANK -node-name cp-$CP_RANK -takeover-after ${cp_takeover_after} -pebble-dir /var/lib/manicp/pebble"
-%{ else ~}
-STORE_ARGS="-store dynamo"
-%{ endif ~}
 
 # Real AWS DynamoDB: no -dynamo-endpoint. Manifest is written as manicp-<run_id>.json (trailing /).
-# Optional extra flags (e.g. slot rate, sequencer tuning) come from the cp_extra_args variable.
+# Optional extra flags (e.g. slot rate, log-k) come from the cp_extra_args variable.
 cat > /etc/systemd/system/manicp.service <<UNIT
 [Unit]
 Description=manicp (control plane, rank $CP_RANK)

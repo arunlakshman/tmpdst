@@ -25,7 +25,7 @@ import (
 // one segment at a time in seal order (decision 48's broker rule), against one
 // active node and one standby over fakedb with DynamoDB-like latency (PutItem
 // 3.5 ms with 1% 12 ms outliers, Query and GetItem 2 ms, BatchWriteItem 6 ms,
-// numbers from docs/x1-x3-x4-results.md), the Pebble applier and the indexer
+// numbers from docs/x1-x3-x4-results.md), the Pebble applier
 // on. 150 partitions per segment, 200 batches. Not part of the default run:
 //
 //	LOGCP_MODEL=1 [LOGCP_MODEL_SECS=10] go test ./cp/logcp -run Model -v -timeout 30m
@@ -77,8 +77,7 @@ func runModel(t *testing.T, rate int, dur time.Duration) modelRow {
 	reg := prometheus.NewRegistry()
 	mod := func(c *logcp.Config) {
 		c.TailBatch, c.TailPoll, c.HoleAfter, c.MaxSlotRate = 20*time.Millisecond, 25*time.Millisecond, 250*time.Millisecond, 200
-		c.IndexEvery, c.CkptEvery = 2*time.Second, -1
-		c.NoIndex = os.Getenv("LOGCP_MODEL_NOINDEX") != ""
+		c.CkptEvery = -1
 	}
 	cfg := logcptest.FastConfig("n0", 0, log)
 	cfg.KV, cfg.DB, cfg.Table, cfg.Objects, cfg.Metrics = kv, db, "cp", objs, logcp.NewMetrics(reg)

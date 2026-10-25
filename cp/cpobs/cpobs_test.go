@@ -20,19 +20,16 @@ func TestMiddlewareAndNil(t *testing.T) {
 	h := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.Copy(io.Discard, r.Body) }))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("POST", "/v1/commit-segment", strings.NewReader("hello")))
 	m.Call("TransactWriteItems", time.Now())
-	m.Prep("reads", time.Millisecond)
-	m.Retry("commit", "transaction_canceled")
 	rec := httptest.NewRecorder()
 	m.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
 	for _, want := range []string{`manicp_handler_seconds_count{op="commit-segment"} 1`, `manicp_request_body_bytes_sum{op="commit-segment"} 5`,
-		`manicp_dynamodb_call_seconds_count{call="TransactWriteItems"} 1`, `manicp_retries_total{op="commit",reason="transaction_canceled"} 1`, "manicp_inflight_requests 0"} {
+		`manicp_dynamodb_call_seconds_count{call="TransactWriteItems"} 1`, "manicp_inflight_requests 0"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("missing %q", want)
 		}
 	}
 	var nm *Metrics
 	nm.Call("x", time.Now())
-	nm.Retry("a", "b")
 	nm.Middleware(http.NotFoundHandler())
 }
 
@@ -50,10 +47,7 @@ func TestCallLogLine(t *testing.T) {
 		io.Copy(io.Discard, r.Body)
 		c := FromContext(r.Context())
 		c.SetSegment("seg-1")
-		m.AttemptCtx(r.Context(), "commit")
 		m.CallCtx(r.Context(), "BatchGetItem", time.Now().Add(-4*time.Millisecond), nil)
-		m.RetryCtx(r.Context(), "commit", "transaction_canceled", []string{"ConditionalCheckFailed"})
-		m.AttemptCtx(r.Context(), "commit")
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"err":"ErrConflict"}` + "\n"))
 	}))
@@ -63,15 +57,14 @@ func TestCallLogLine(t *testing.T) {
 		t.Fatalf("%v: %s", err, buf.String())
 	}
 	if l["event"] != "cp_call" || l["op"] != "commit-segment" || l["segment"] != "seg-1" || l["outcome"] != "ErrConflict" ||
-		l["attempts"] != float64(2) || l["retries"] != float64(1) || l["request_bytes"] != float64(3) {
+		l["request_bytes"] != float64(3) {
 		t.Errorf("line: %v", l)
 	}
 	if l["dynamo_ms"].(float64) < 4 {
 		t.Errorf("timings: %v", l)
 	}
 	out := gather(t, m)
-	for _, want := range []string{`manicp_calls_total{op="commit-segment",outcome="ErrConflict"} 1`,
-		`manicp_dynamo_txn_cancel_reasons_total{code="ConditionalCheckFailed"} 1`} {
+	for _, want := range []string{`manicp_calls_total{op="commit-segment",outcome="ErrConflict"} 1`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q", want)
 		}

@@ -13,7 +13,7 @@ import (
 )
 
 // DB is the part of the DynamoDB client the service uses. *dynamodb.Client and
-// cp/dynamo/fakedb.Fake satisfy it.
+// cp/fakedb.Fake satisfy it.
 type DB interface {
 	PutItem(ctx context.Context, in *dynamodb.PutItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
 	GetItem(ctx context.Context, in *dynamodb.GetItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)

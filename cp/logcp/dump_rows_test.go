@@ -1,7 +1,6 @@
 package logcp_test
 
 import (
-	"encoding/binary"
 	"fmt"
 	"os"
 	"sort"
@@ -14,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
 	"manifester/core"
-	"manifester/cp/dynamo/fakedb"
+	"manifester/cp/fakedb"
 	"manifester/cp/logcp"
 	"manifester/cp/logcp/logcptest"
 	"manifester/cp/logsm"
@@ -31,7 +30,7 @@ func TestDumpSampleRows(t *testing.T) {
 	}
 	db, objs := newDB(t), logcptest.NewObjects()
 	log := logcp.NewDynLog(db, "cp", logcp.DynLogOptions{TTL: 7 * 24 * time.Hour})
-	s := node(t, "n0", 0, log, db, objs, func(c *logcp.Config) { c.IndexEvery = time.Hour })
+	s := node(t, "n0", 0, log, db, objs, nil)
 	if code, err := s.CreateTopic(bg, "orders", 4); err != nil || code != core.OK {
 		t.Fatal(code, err)
 	}
@@ -47,9 +46,6 @@ func TestDumpSampleRows(t *testing.T) {
 		}
 		commit(t, s, c)
 	}
-	if err := s.FlushIndex(bg); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := s.Checkpoint(bg); err != nil {
 		t.Fatal(err)
 	}
@@ -61,11 +57,8 @@ func TestDumpSampleRows(t *testing.T) {
 	for _, spec := range []struct {
 		pk, typ string
 		keep    []int // indexes shown; negative counts from the end
-	}{{"LOG", "LOG", []int{0, 1, 2, -1}}, {"R#orders#0", "R#", []int{0, 1}}, {"R#orders#1", "R#", []int{0, 1}}, {"R#orders#2", "R#", []int{0}}, {"R#orders#3", "R#", []int{0}}} {
+	}{{"LOG", "LOG", []int{0, 1, 2, -1}}} {
 		items := queryAll(t, db, spec.pk)
-		if spec.pk == "R#orders#0" {
-			w("\n### Index rows (pk=R#<topic>#<partition>, sk=base offset)")
-		}
 		shown := map[int]bool{}
 		for _, i := range spec.keep {
 			shown[(i+len(items))%len(items)] = true
@@ -84,7 +77,7 @@ func TestDumpSampleRows(t *testing.T) {
 		sizes[typ] = append(sizes[typ], itemSize(it))
 		w("%s", body)
 	}
-	for _, f := range []struct{ pk, sk, typ string }{{"TOPICS", "orders", "TOPICS"}, {"CKPT", "-", "CKPT"}, {"IDX", "-", "IDX"}} {
+	for _, f := range []struct{ pk, sk, typ string }{{"CKPT", "-", "CKPT"}} {
 		it := db.Item("cp", map[string]types.AttributeValue{"pk": sv(f.pk), "sk": sv(f.sk)})
 		if it == nil {
 			t.Fatalf("missing %s", f.pk)
@@ -188,37 +181,6 @@ func describe(t testing.TB, it map[string]types.AttributeValue) string {
 				fmt.Fprintf(&b, " [%s/%d rec=%d off=%d len=%d]", pb.TP.Topic, pb.TP.Partition, pb.Records, pb.Loc.Off, pb.Loc.Len)
 			}
 		}
-	case strings.HasPrefix(pk, "R#"):
-		for _, l := range decodeRuns(it["runs"].(*types.AttributeValueMemberB).Value, mustInt(attr(it, "base"))) {
-			fmt.Fprintf(&b, "\n- %s", l)
-		}
 	}
 	return b.String()
-}
-
-func mustInt(s string) int64 {
-	var v int64
-	fmt.Sscan(s, &v)
-	return v
-}
-
-// decodeRuns mirrors the packed layout documented in cp/dynamo/runs.go.
-func decodeRuns(b []byte, base int64) []string {
-	fmt := fmt.Sprintf
-	ver := b[0]
-	b = b[1:]
-	uv := func() uint64 { v, n := binary.Uvarint(b); b = b[n:]; return v }
-	sv := func() int64 { v, n := binary.Varint(b); b = b[n:]; return v }
-	keys := make([]string, uv())
-	for i := range keys {
-		l := uv()
-		keys[i], b = string(b[:l]), b[l:]
-	}
-	out := []string{fmt("format byte %d, segment keys %q", ver, keys)}
-	for n := uv(); n > 0; n-- {
-		ki, cnt, off, ln := uv(), uv(), sv(), sv()
-		out = append(out, fmt("offsets [%d,%d) -> %s off=%d len=%d", base, base+int64(cnt), keys[ki], off, ln))
-		base += int64(cnt)
-	}
-	return out
 }

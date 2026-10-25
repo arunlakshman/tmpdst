@@ -1,5 +1,7 @@
 # W4: the log store at 500k, 750k and 1M msg/s (random clients, 288 partitions)
 
+*Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This document is a record.*
+
 Run w4, 2026-10-20/21, ap-south-2a, account 478483354994. Stack: 6 brokers m6in.4xlarge, 2 loadgens m6in.8xlarge (loadgen 0 produced, loadgen 1 idle),
 2 CP nodes m6in.xlarge (rank 0 active, rank 1 hot standby), `cp_store = log`, `-takeover-after 5s`, NLB on, DynamoDB table with TTL and 30k warm
 throughput, `broker_extra_args = ""` (default `-max-segment-partitions 4096`). Workload: the unmodified OMB workload (64 producers, 1 KiB,

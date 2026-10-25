@@ -51,68 +51,8 @@ prometheus.exporter.cloudwatch "aws" {
 	}
 
 	// Per-operation metrics (dimensions TableName + Operation). One static
-	// block per operation the control plane uses (the transaction store: TransactWriteItems, BatchGetItem,
-	// GetItem, Query; the log store: PutItem for LOG slots, Query for the tail, BatchWriteItem for the index).
-	static "ddb_op_transact_write" {
-		regions    = [sys.env("AWS_REGION")]
-		namespace  = "AWS/DynamoDB"
-		dimensions = {TableName = sys.env("DDB_TABLE"), Operation = "TransactWriteItems"}
-
-		metric {
-			name       = "SuccessfulRequestLatency"
-			statistics = ["Average", "Maximum"]
-			period     = "1m"
-		}
-
-		metric {
-			name       = "ThrottledRequests"
-			statistics = ["Sum"]
-			period     = "1m"
-		}
-
-		metric {
-			name       = "TransactionConflict"
-			statistics = ["Sum"]
-			period     = "1m"
-		}
-
-		metric {
-			name       = "ConditionalCheckFailedRequests"
-			statistics = ["Sum"]
-			period     = "1m"
-		}
-
-		metric {
-			name       = "SystemErrors"
-			statistics = ["Sum"]
-			period     = "1m"
-		}
-
-		metric {
-			name       = "UserErrors"
-			statistics = ["Sum"]
-			period     = "1m"
-		}
-	}
-
-	static "ddb_op_batch_get" {
-		regions    = [sys.env("AWS_REGION")]
-		namespace  = "AWS/DynamoDB"
-		dimensions = {TableName = sys.env("DDB_TABLE"), Operation = "BatchGetItem"}
-
-		metric {
-			name       = "SuccessfulRequestLatency"
-			statistics = ["Average", "Maximum"]
-			period     = "1m"
-		}
-
-		metric {
-			name       = "ThrottledRequests"
-			statistics = ["Sum"]
-			period     = "1m"
-		}
-	}
-
+	// block per operation the control plane uses (log store: PutItem for LOG slots, GetItem, Query for the tail,
+	// BatchWriteItem for trims).
 	static "ddb_op_get" {
 		regions    = [sys.env("AWS_REGION")]
 		namespace  = "AWS/DynamoDB"

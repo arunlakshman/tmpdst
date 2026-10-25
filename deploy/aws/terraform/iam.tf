@@ -77,12 +77,10 @@ data "aws_iam_policy_document" "cp" {
     sid = "ControlPlaneTable"
     actions = [
       "dynamodb:GetItem",
-      "dynamodb:BatchGetItem",
       "dynamodb:PutItem",
       "dynamodb:UpdateItem",
       "dynamodb:DeleteItem",
       "dynamodb:BatchWriteItem",
-      "dynamodb:ConditionCheckItem",
       "dynamodb:Query",
       "dynamodb:DescribeTable",
     ]
@@ -144,25 +142,6 @@ data "aws_iam_policy_document" "broker" {
       "s3:ListMultipartUploadParts",
     ]
     resources = ["${aws_s3_bucket.run.arn}/*"]
-  }
-
-  # TransactWriteItems / TransactGetItems have no IAM action of their own:
-  # they are authorized per item by PutItem/UpdateItem/DeleteItem/
-  # ConditionCheckItem/GetItem.
-  statement {
-    sid = "ControlPlaneTable"
-    actions = [
-      "dynamodb:GetItem",
-      "dynamodb:BatchGetItem",
-      "dynamodb:PutItem",
-      "dynamodb:UpdateItem",
-      "dynamodb:DeleteItem",
-      "dynamodb:BatchWriteItem",
-      "dynamodb:ConditionCheckItem",
-      "dynamodb:Query",
-      "dynamodb:DescribeTable",
-    ]
-    resources = [aws_dynamodb_table.cp.arn]
   }
 }
 

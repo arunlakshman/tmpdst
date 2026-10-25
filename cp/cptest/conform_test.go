@@ -75,7 +75,7 @@ func gen(r *veritastest.Rand, _ int) op {
 func batches(r *veritastest.Rand, key string) []core.PendingBatch {
 	var out []core.PendingBatch
 	n := r.Intn(4)
-	if r.Intn(8) == 0 { // many small batches per partition: the range runs of cp/dynamo
+	if r.Intn(8) == 0 { // many small batches per partition:
 		n = 8 + r.Intn(40)
 	}
 	if r.Intn(40) == 0 {
@@ -175,16 +175,6 @@ func TestConformanceMemstore(t *testing.T) {
 
 func TestConformanceMemstoreHTTP(t *testing.T) {
 	run(t, func() impl { return httpOver(t, newMem()) }, 100, 30)
-}
-
-func TestConformanceDynamo(t *testing.T) {
-	needDynamo(t)
-	run(t, func() impl { return storeImpl{dynamoStore(t)} }, 80, 12)
-}
-
-func TestConformanceDynamoHTTP(t *testing.T) {
-	needDynamo(t)
-	run(t, func() impl { return httpOver(t, dynamoStore(t)) }, 80, 4)
 }
 
 var _ cp.Store = newMem()

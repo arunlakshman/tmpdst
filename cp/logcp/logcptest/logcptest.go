@@ -83,7 +83,7 @@ func FastConfig(name string, rank int, log logcp.Log) logcp.Config {
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Name:   name, Rank: rank, Incarnation: "t", Log: log, KV: applier.NewMemKV(),
 		HoleAfter: 30 * time.Millisecond, TailPoll: 2 * time.Millisecond, TailBatch: time.Millisecond,
-		Heartbeat: 20 * time.Millisecond, CkptEvery: -1, IndexEvery: 20 * time.Millisecond, MaxSlotRate: 5000,
+		Heartbeat: 20 * time.Millisecond, CkptEvery: -1, MaxSlotRate: 5000,
 	}
 }
 

@@ -1,5 +1,4 @@
 // Package cptest holds the control-plane tests only: handler and client round
-// trips, conformance C3 (stores and the full HTTP stack against
-// veritas.ControlPlane) and the DynamoDB concurrency tests. DynamoDB tests run
-// when MANIFESTER_DYNAMO_ENDPOINT is set (scripts/it-up.sh).
+// trips, conformance C3 (the memstore and the full HTTP stack against
+// veritas.ControlPlane) and the log control plane's conformance runs.
 package cptest

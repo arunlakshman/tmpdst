@@ -20,7 +20,7 @@ import (
 	"manifester/broker"
 	"manifester/core"
 	"manifester/cp/cpclient"
-	"manifester/cp/dynamo/fakedb"
+	"manifester/cp/fakedb"
 	"manifester/cp/logcp"
 	"manifester/cp/logcp/logcptest"
 	"manifester/sys/prod"

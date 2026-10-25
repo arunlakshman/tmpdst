@@ -1,5 +1,7 @@
 # Refactoring proposal (general and DDD), second edition
 
+*Note: the DynamoDB-transaction control plane (`cp/dynamo`) named in this proposal was removed (decision 54); the log-based CP (`cp/logcp`, `cp/logsm`) is the only one, so references to `cp/dynamo` are historical.*
+
 Status: proposal only, nothing applied. It supersedes the open items of `ddd-refactoring-proposal.md`
 (deferred by decision 34). Measured on branch `toys3` at commit `ebea3be` plus uncommitted edits.
 

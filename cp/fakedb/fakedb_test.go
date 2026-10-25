@@ -69,21 +69,21 @@ func TestFailInjection(t *testing.T) {
 	boom := errors.New("boom")
 	f.Fail = func(call string) error {
 		if call == "GetItem" || call == "DescribeTable" || call == "CreateTable" || call == "DeleteTable" ||
-			call == "BatchGetItem" || call == "Query" || call == "UpdateItem" || call == "TransactWriteItems" {
+			call == "PutItem" || call == "Query" || call == "UpdateItem" || call == "BatchWriteItem" {
 			return boom
 		}
 		return nil
 	}
 	tn := aws.String("t")
 	for name, err := range map[string]error{
-		"GetItem":   func() error { _, e := f.GetItem(ctx, &dynamodb.GetItemInput{TableName: tn}); return e }(),
-		"Batch":     func() error { _, e := f.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{}); return e }(),
-		"Query":     func() error { _, e := f.Query(ctx, &dynamodb.QueryInput{TableName: tn}); return e }(),
-		"Update":    func() error { _, e := f.UpdateItem(ctx, &dynamodb.UpdateItemInput{TableName: tn}); return e }(),
-		"Tx":        func() error { _, e := f.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{}); return e }(),
-		"Create":    func() error { _, e := f.CreateTable(ctx, &dynamodb.CreateTableInput{TableName: tn}); return e }(),
-		"Describe":  func() error { _, e := f.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: tn}); return e }(),
-		"DeleteTbl": func() error { _, e := f.DeleteTable(ctx, &dynamodb.DeleteTableInput{TableName: tn}); return e }(),
+		"GetItem":    func() error { _, e := f.GetItem(ctx, &dynamodb.GetItemInput{TableName: tn}); return e }(),
+		"Put":        func() error { _, e := f.PutItem(ctx, &dynamodb.PutItemInput{TableName: tn}); return e }(),
+		"Query":      func() error { _, e := f.Query(ctx, &dynamodb.QueryInput{TableName: tn}); return e }(),
+		"Update":     func() error { _, e := f.UpdateItem(ctx, &dynamodb.UpdateItemInput{TableName: tn}); return e }(),
+		"BatchWrite": func() error { _, e := f.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{}); return e }(),
+		"Create":     func() error { _, e := f.CreateTable(ctx, &dynamodb.CreateTableInput{TableName: tn}); return e }(),
+		"Describe":   func() error { _, e := f.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: tn}); return e }(),
+		"DeleteTbl":  func() error { _, e := f.DeleteTable(ctx, &dynamodb.DeleteTableInput{TableName: tn}); return e }(),
 	} {
 		if !errors.Is(err, boom) {
 			t.Errorf("%s: %v", name, err)
@@ -161,7 +161,7 @@ func TestCompare(t *testing.T) {
 	}
 }
 
-func TestGetAndBatchGet(t *testing.T) {
+func TestGet(t *testing.T) {
 	f := fresh(t)
 	cp := item{"pk": s("a"), "sk": s("b"), "blob": &types.AttributeValueMemberB{Value: []byte("xy")}}
 	f.Put("t", cp)
@@ -173,24 +173,6 @@ func TestGetAndBatchGet(t *testing.T) {
 	}
 	if g, _ = f.GetItem(ctx, &dynamodb.GetItemInput{TableName: aws.String("t"), Key: k("x", "y")}); g.Item != nil {
 		t.Fatal("absent item returned")
-	}
-	keys := []item{k("a", "b"), k("x", "y"), k("a", "c")}
-	req := map[string]types.KeysAndAttributes{"t": {Keys: keys}}
-	b, err := f.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{RequestItems: req})
-	if err != nil || len(b.Responses["t"]) != 1 || len(b.UnprocessedKeys) != 0 || len(b.ConsumedCapacity) != 1 {
-		t.Fatalf("batch: %+v %v", b, err)
-	}
-	f.Unprocess = 1
-	b, _ = f.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{RequestItems: req})
-	if len(b.UnprocessedKeys["t"].Keys) != 1 || idOf(b.UnprocessedKeys["t"].Keys[0]) != idOf(keys[2]) || f.Unprocess != 0 {
-		t.Fatalf("unprocessed: %+v", b.UnprocessedKeys)
-	}
-	big := make([]item, 101)
-	if _, err := f.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{RequestItems: map[string]types.KeysAndAttributes{"t": {Keys: big}}}); err == nil {
-		t.Error("101 keys accepted")
-	}
-	if _, err := f.BatchGetItem(ctx, &dynamodb.BatchGetItemInput{RequestItems: map[string]types.KeysAndAttributes{"nope": {}}}); err == nil {
-		t.Error("missing table accepted")
 	}
 	if f.Count("t") != 1 {
 		t.Fatalf("count %d", f.Count("t"))
@@ -261,80 +243,6 @@ func TestQuery(t *testing.T) {
 	}
 }
 
-func put(key item) types.TransactWriteItem {
-	return types.TransactWriteItem{Put: &types.Put{TableName: aws.String("t"), Item: key, ConditionExpression: aws.String("attribute_not_exists(pk)")}}
-}
-
-func check(key item, cond string, vals item) types.TransactWriteItem {
-	return types.TransactWriteItem{ConditionCheck: &types.ConditionCheck{TableName: aws.String("t"), Key: key, ConditionExpression: aws.String(cond), ExpressionAttributeValues: vals}}
-}
-
-func update(key item, expr string, vals item) types.TransactWriteItem {
-	return types.TransactWriteItem{Update: &types.Update{TableName: aws.String("t"), Key: key, UpdateExpression: aws.String(expr), ExpressionAttributeValues: vals}}
-}
-
-func tx(f *Fake, items ...types.TransactWriteItem) error {
-	_, err := f.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: items})
-	return err
-}
-
-func TestTransactAtomic(t *testing.T) {
-	f := fresh(t)
-	f.Put("t", item{"pk": s("N"), "sk": s("-"), "epoch": n(2)})
-	ok := check(k("N", "-"), "epoch = :e", item{":e": n(2)})
-	if err := tx(f, ok, put(k("G", "-")), update(k("R", "!"), "SET hwm = :h", item{":h": n(7)})); err != nil {
-		t.Fatal(err)
-	}
-	if f.Item("t", k("G", "-")) == nil || f.Item("t", k("R", "!"))["hwm"].(*types.AttributeValueMemberN).Value != "7" {
-		t.Fatal("transaction not applied")
-	}
-	// The second item's condition fails (G exists): nothing else is written.
-	stale := check(k("N", "-"), "epoch = :e", item{":e": n(1)})
-	err := tx(f, put(k("G2", "-")), put(k("G", "-")), stale)
-	var tc *types.TransactionCanceledException
-	if !errors.As(err, &tc) || len(tc.CancellationReasons) != 3 {
-		t.Fatalf("want cancellation, got %v", err)
-	}
-	want := []string{"None", "ConditionalCheckFailed", "ConditionalCheckFailed"}
-	for i, r := range tc.CancellationReasons {
-		if aws.ToString(r.Code) != want[i] {
-			t.Errorf("reason %d: %s", i, aws.ToString(r.Code))
-		}
-	}
-	if f.Item("t", k("G2", "-")) != nil {
-		t.Fatal("cancelled transaction wrote an item")
-	}
-}
-
-func TestTransactInvalid(t *testing.T) {
-	f := fresh(t)
-	for name, items := range map[string][]types.TransactWriteItem{
-		"empty":     nil,
-		"too many":  make([]types.TransactWriteItem, 101),
-		"delete":    {{Delete: &types.Delete{}}},
-		"duplicate": {put(k("a", "b")), update(k("a", "b"), "SET x = :v", item{":v": n(1)})},
-		"bad cond":  {check(k("a", "b"), "x > :v", item{":v": n(1)})},
-		"bad upd":   {update(k("a", "b"), "REMOVE x", nil)},
-		"no table":  {{Put: &types.Put{TableName: aws.String("nope"), Item: k("a", "b")}}},
-	} {
-		if err := tx(f, items...); err == nil {
-			t.Errorf("%s: accepted", name)
-		}
-	}
-	if f.Count("t") != 0 {
-		t.Fatal("an invalid transaction wrote")
-	}
-}
-
-func TestBeforeTransactRace(t *testing.T) {
-	f := fresh(t)
-	f.BeforeTransact = func() { f.Put("t", k("G", "-")) }
-	var tc *types.TransactionCanceledException
-	if err := tx(f, put(k("G", "-"))); !errors.As(err, &tc) {
-		t.Fatalf("race not lost: %v", err)
-	}
-}
-
 // The newest item of a partition: a descending Query with Limit 1 (the commit's
 // end-offset read), also on an empty partition.
 func TestQueryNewest(t *testing.T) {
@@ -360,8 +268,9 @@ func TestQueryNewest(t *testing.T) {
 func TestPutIfAbsentOneWinner(t *testing.T) {
 	f := fresh(t)
 	cas := func() error {
-		return tx(f, types.TransactWriteItem{Put: &types.Put{TableName: aws.String("t"), Item: k("p", "5"),
-			ConditionExpression: aws.String("attribute_not_exists(sk)")}})
+		_, err := f.PutItem(ctx, &dynamodb.PutItemInput{TableName: aws.String("t"), Item: k("p", "5"),
+			ConditionExpression: aws.String("attribute_not_exists(sk)")})
+		return err
 	}
 	var wins, losses atomic.Int32
 	var wg sync.WaitGroup
@@ -369,10 +278,10 @@ func TestPutIfAbsentOneWinner(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			var tc *types.TransactionCanceledException
+			var cc *types.ConditionalCheckFailedException
 			if err := cas(); err == nil {
 				wins.Add(1)
-			} else if errors.As(err, &tc) {
+			} else if errors.As(err, &cc) {
 				losses.Add(1)
 			} else {
 				t.Error(err)

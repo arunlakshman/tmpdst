@@ -21,10 +21,8 @@ locals {
   # Control plane: rank 0 (aws_instance.cp) is the preferred appender, ranks 1.. (aws_instance.cp_standby) are hot
   # standbys. Brokers get the list in rank order: they use the first URL and move to the next only on a connect
   # error or HTTP 503 (cp/cpclient, decision 51).
-  cp_log      = var.cp_store == "log"
   cp_ips      = concat([aws_instance.cp.private_ip], aws_instance.cp_standby[*].private_ip)
   cp_urls     = join(",", [for ip in local.cp_ips : "http://${ip}:8080"])
-  broker_args = join(" ", compact([var.cp_store == "dynamo" ? "-max-segment-partitions 96" : "", var.broker_extra_args]))
 
   ssm_arn_prefix = "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${trimsuffix(var.allowed_ssm_param_prefix, "/")}"
 
@@ -216,15 +214,6 @@ resource "terraform_data" "ssm_prefix_check" {
     precondition {
       condition     = alltrue([for p in local.grafana_params : startswith(p, var.allowed_ssm_param_prefix)])
       error_message = "Every grafana_*_param must start with allowed_ssm_param_prefix, or the instance role cannot read it."
-    }
-  }
-}
-
-resource "terraform_data" "cp_store_check" {
-  lifecycle {
-    precondition {
-      condition     = local.cp_log || var.cp_standby_count == 0
-      error_message = "cp_store = dynamo is the single-sequencer store (decision 46): cp_standby_count must be 0."
     }
   }
 }

@@ -13,7 +13,6 @@ import (
 
 	"manifester/cp/applier/pebblekv"
 	"manifester/cp/cpobs"
-	"manifester/cp/dynamo"
 	"manifester/cp/logcp"
 	"manifester/sys"
 	"manifester/sys/s3store"
@@ -38,10 +37,6 @@ type logFlags struct {
 	ckptEvery, logTTL        time.Duration
 	finalCkpt                bool
 	windowSlots              int64
-	index                    bool
-	indexEvery               time.Duration
-	indexRate                float64
-	indexParallel            int
 	pebbleDir                string
 	trimDelete               bool
 	ckptMinSlots             int64
@@ -65,10 +60,6 @@ func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
 	fs.Int64Var(&f.ckptMinSlots, "ckpt-min-slots", 1000, "-store dynamolog: skip a periodic checkpoint when fewer slots were applied since the last")
 	fs.BoolVar(&f.finalCkpt, "final-checkpoint", true, "-store dynamolog: an active node writes a checkpoint on graceful shutdown (faster next start)")
 	fs.Int64Var(&f.windowSlots, "window-slots", 131072, "-store dynamolog: idempotency window in slots. A CLUSTER constant: every node of one log must use the same value")
-	fs.BoolVar(&f.index, "index", true, "-store dynamolog: write the R# index rows after the ack (decision 50); needed to roll back to -store dynamo")
-	fs.DurationVar(&f.indexEvery, "index-every", 10*time.Second, "-store dynamolog: index flush period")
-	fs.Float64Var(&f.indexRate, "index-rate", 0, "-store dynamolog: index items per second (0: unpaced)")
-	fs.IntVar(&f.indexParallel, "index-parallel", 8, "-store dynamolog: BatchWriteItem calls in flight")
 	fs.DurationVar(&f.logTTL, "log-ttl", 7*24*time.Hour, "-store dynamolog: ttl attribute stamped on log slots (the table's TTL setting expires them); must far exceed -ckpt-every")
 	fs.BoolVar(&f.trimDelete, "trim-delete", true, "-store dynamolog: overwrite trimmed slots with tombstones (false: leave them to the TTL)")
 	fs.StringVar(&f.pebbleDir, "pebble-dir", "", "-store dynamolog: directory of the Pebble state. It is rebuilt from the checkpoint and the log at every start, so it is wiped (only if it holds a Pebble database). Empty: a temporary directory")
@@ -77,7 +68,7 @@ func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
 // logDB is what the log store needs of DynamoDB: the log's calls and table creation.
 type logDB interface {
 	logcp.DB
-	dynamo.DB
+	logcp.TableAdmin
 }
 
 // deps are the outside parts run builds the log store from; tests replace them.
@@ -112,7 +103,6 @@ func logConfig(f cpFlags, name string, log *slog.Logger) logcp.Config {
 		Name: name, Rank: l.rank, Logger: log,
 		K: l.k, MaxSlotRate: l.slotRate, TakeoverAfter: l.takeoverAfter, Heartbeat: l.heartbeat, HoleAfter: l.holeAfter,
 		WindowSlots: l.windowSlots, CkptEvery: l.ckptEvery, CkptMinSlots: l.ckptMinSlots, TrimDelete: l.trimDelete,
-		NoIndex: !l.index, IndexEvery: l.indexEvery, IndexRate: l.indexRate, IndexParallel: l.indexParallel,
 	}
 }
 
@@ -127,7 +117,7 @@ func openLog(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *slog
 	}
 	table := f.log.tableName(f.prefix)
 	if f.create {
-		if err := dynamo.New(db, f.prefix).CreateTables(ctx); err != nil {
+		if err := logcp.CreateTable(ctx, db, table); err != nil {
 			return nil, nop, err
 		}
 	}

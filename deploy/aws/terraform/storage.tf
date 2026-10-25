@@ -45,7 +45,7 @@ resource "aws_s3_bucket_metric" "all" {
   name   = var.s3_metrics_filter_id
 }
 
-# Identical to cp/dynamo CreateTables: table <prefix>cp, pk (S) hash,
+# Log-store table: <prefix>cp, pk (S) hash,
 # sk (S) range, pay-per-request, plus TTL on the "ttl" attribute (the log store stamps every LOG slot with it, a
 # backstop behind checkpoint + tombstone trim: docs/log-cp-service.md) and warm throughput (X4: a cold on-demand
 # table throttles at about 4,000 items/s). manicp runs without -create-tables.
@@ -55,7 +55,7 @@ resource "aws_dynamodb_table" "cp" {
   hash_key     = "pk"
   range_key    = "sk"
 
-  # Pre-warm the on-demand table (decision 50): the log's single hot key plus the index rows must not be throttled
+  # Pre-warm the on-demand table (decision 50): the log's single hot key must not be throttled
   # while the table doubles up from the 4,000 WRU/s default.
   warm_throughput {
     read_units_per_second  = var.ddb_warm_read_units
@@ -63,7 +63,7 @@ resource "aws_dynamodb_table" "cp" {
   }
 
   # Epoch-seconds attribute set by manicp -store dynamolog (-log-ttl, default 7 days) on LOG slots. Items without
-  # it (R# rows, pointers, the old store's items) never expire.
+  # it (pointers, checkpoint rows) never expire.
   ttl {
     attribute_name = "ttl"
     enabled        = true

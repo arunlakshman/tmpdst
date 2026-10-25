@@ -19,13 +19,11 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"manifester/core"
 	"manifester/cp/applier"
-	"manifester/cp/dynamo"
-	"manifester/cp/dynamo/fakedb"
+	"manifester/cp/fakedb"
 	"manifester/cp/logcp"
 	"manifester/cp/logcp/logcptest"
 	"manifester/cp/logsm"
@@ -47,9 +45,7 @@ import (
 //     leaves the window, the veritas oracle's query digest;
 //   - every answer a client got equals the model's answer for some slot that
 //     holds that command;
-//   - a Lookup or Describe on ANY node after an ack sees the acknowledged data;
-//   - the R# rows the indexer wrote read back, through cp/dynamo's Store,
-//     equal to the model.
+//   - a Lookup or Describe on ANY node after an ack sees the acknowledged data.
 
 type simMode int
 
@@ -223,7 +219,7 @@ func (r *simRun) nodeConfig(i int, incar int) (logcp.Config, *prometheus.Registr
 		HoleAfter: time.Duration(5+r.seed%50) * time.Millisecond, TailPoll: 2 * time.Millisecond, TailBatch: 2 * time.Millisecond,
 		ReadMax: 4 + int(r.seed%5), Heartbeat: 10 * time.Millisecond, TakeoverAfter: takeover,
 		WindowSlots: r.window, TrimStride: r.stride, KeepSlots: r.keep, TrimDelete: r.mode == modeWindow,
-		CkptEvery: 40 * time.Millisecond, CkptMinSlots: 3, IndexEvery: 25 * time.Millisecond, IndexParallel: 2,
+		CkptEvery: 40 * time.Millisecond, CkptMinSlots: 3,
 	}, reg
 }
 
@@ -488,12 +484,6 @@ func (r *simRun) coordinator() {
 	r.settled = r.settle()
 	r.finished.Store(true)
 	for _, n := range r.live() {
-		if err := n.svc.FlushIndex(context.Background()); err != nil {
-			r.fail("final index flush on n%d: %v", n.idx, err)
-		}
-		break
-	}
-	for _, n := range r.live() {
 		n.svc.Stop()
 	}
 	for _, n := range r.nodes {
@@ -641,7 +631,7 @@ func (r *simRun) coverage() map[string]float64 {
 	cov := map[string]float64{"restarts": 0, "trimmed_blocked": float64(r.trimmedN), "restart_raced_by_trim": float64(r.raced)}
 	want := map[string]string{"manicp_log_lost_slots_total": "lost_slots", "manicp_log_hole_fills_total": "hole_fills",
 		"manicp_log_trimmed_slots_total": "trimmed", "manicp_log_slots_total": "won_slots", "manicp_log_role_changes_total": "role_changes",
-		"manicp_log_index_rows_total": "index_rows", "manicp_log_checkpoint_seconds": "checkpoints"}
+		"manicp_log_checkpoint_seconds": "checkpoints"}
 	for _, reg := range r.regs {
 		mf, _ := reg.Gather()
 		for _, f := range mf {
@@ -734,7 +724,7 @@ func (r *simRun) check(res *simResult) error {
 			return err
 		}
 	}
-	return r.checkIndex(buildModel(prefix(slots, r.watermark()), r.window, r.stride), &res.lost)
+	return nil
 }
 
 func prefix(slots []logcp.Slot, n int64) []logcp.Slot {
@@ -820,54 +810,6 @@ func queryDigest(exec func(core.CPOp) core.CPDone) uint64 {
 	return h.Sum64()
 }
 
-// watermark is the slot below which the indexer says everything is in the rows.
-func (r *simRun) watermark() int64 {
-	it := r.db.Item("cp", map[string]types.AttributeValue{"pk": &types.AttributeValueMemberS{Value: "IDX"}, "sk": &types.AttributeValueMemberS{Value: "-"}})
-	n, _ := it["ix_slot"].(*types.AttributeValueMemberN)
-	if n == nil {
-		return 0
-	}
-	v, _ := strconv.ParseInt(n.Value, 10, 64)
-	return v
-}
-
-// checkIndex reads the R# rows back through the old store's read path.
-func (r *simRun) checkIndex(m *model, lost *float64) error {
-	for _, reg := range r.regs {
-		mf, _ := reg.Gather()
-		for _, f := range mf {
-			if f.GetName() == "manicp_log_index_lost_runs_total" {
-				for _, mm := range f.GetMetric() {
-					*lost += mm.GetCounter().GetValue()
-				}
-			}
-		}
-	}
-	if *lost > 0 {
-		return nil // the index stalled for longer than the window: rows are knowingly missing
-	}
-	st := dynamo.New(r.db, "")
-	for tp, want := range m.runs {
-		l, code, err := st.Lookup(context.Background(), core.Lookup{TP: tp})
-		var end core.Offset
-		if len(want) > 0 {
-			end = want[len(want)-1].Base + core.Offset(want[len(want)-1].Count)
-		}
-		if err != nil || code != core.OK || l.End != end || !slices.Equal(l.Ranges, want) {
-			return fmt.Errorf("index rows of %v: %v %v end %d ranges %+v, model end %d %+v", tp, err, code, l.End, l.Ranges, end, want)
-		}
-	}
-	d, err := st.DescribeTopics(context.Background(), core.DescribeTopics{})
-	got := map[string]int32{}
-	for _, t := range d.Topics {
-		got[t.Name] = t.Partitions
-	}
-	if err != nil || (!reflect.DeepEqual(got, m.topics) && len(m.topics) > 0) {
-		return fmt.Errorf("index topics %v (%v), model %v", got, err, m.topics)
-	}
-	return nil
-}
-
 // ---- tests ------------------------------------------------------------------
 
 func simSeeds() int {
@@ -914,7 +856,7 @@ func TestSimSeeds(t *testing.T) {
 	wg.Wait()
 	t.Logf("seeds=%d failed=%d slots=%d acks=%d runs_lost_to_window=%d", n, failed.Load(), slots.Load(), acks.Load(), lost.Load())
 	t.Logf("coverage: %v", cov)
-	for _, k := range []string{"lost_slots", "hole_fills", "role_changes", "restarts", "trimmed", "index_rows", "checkpoints"} {
+	for _, k := range []string{"lost_slots", "hole_fills", "role_changes", "restarts", "trimmed", "checkpoints"} {
 		if n >= 300 && cov[k] == 0 {
 			t.Errorf("the seeds never exercised %s", k)
 		}

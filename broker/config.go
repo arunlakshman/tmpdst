@@ -61,20 +61,10 @@ type Config struct {
 	//	log store (cp/logcp)     one command of about 20 bytes per partition in a
 	//	                         log entry, so the default is 4096 (about 80 KB,
 	//	                         far under the 350 KB entry guard). No item limit.
-	//	DynamoDB transaction     (cp/dynamo, decisions 39, 41, 44) one 100-item
-	//	store                    transaction costing 1 + partitions + grown
-	//	                         topics, so it needs MaxSegmentPartitions <= 96
-	//	                         (-max-segment-partitions 96 on manibroker). A
-	//	                         wider segment is refused with ErrTooLarge, which
-	//	                         the broker never retries (the segment's batches
-	//	                         fail with UNKNOWN_SERVER_ERROR). Set the flag to 96
-	//	                         before rolling back to that store.
 	//
-	// MaxSegmentBatches bounds the segment's G# item on the old store (the
-	// request and the answer as JSON, about 300 bytes a batch; refused over
-	// 300 KB, so about 1000 batches) and the per-segment bookkeeping and the
-	// log entry size on the new one. The broker cannot know the CP: keep these
-	// in step with it (cp/doc.go).
+	// MaxSegmentBatches bounds the per-segment bookkeeping and the log entry
+	// size. The broker cannot know the CP: keep these in step with it
+	// (cp/doc.go).
 	MaxSegmentPartitions int // seal at this many distinct partitions
 	MaxSegmentBatches    int // seal at this many batches
 

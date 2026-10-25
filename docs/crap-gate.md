@@ -44,8 +44,8 @@ the profile (a package with no tests) counts as 0%.
 Skipped tests: `go test ./...` includes Docker-backed tests that skip without
 their environment. The gate measures "what plain `go test ./...` covers", which
 is stable on any machine, so every backend-facing package has Docker-free tests:
-cp/dynamo runs against an in-memory fake DynamoDB (cp/dynamo/fakedb, checked
-against the memstore spec by the same lockstep suite), sys/s3store against a fake
+cp/logcp runs against an in-memory fake DynamoDB (cp/fakedb, checked
+against the log state machine by the cptest conformance suite), sys/s3store against a fake
 S3, cp/cpclient and cp against httptest, the cmd mains through a testable `run`. To count integration
 coverage, pass an extra profile and merge it (counts are summed per block):
 

@@ -1,5 +1,7 @@
 # Surprises audit (before the next AWS benchmark)
 
+*Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This document is a record.*
+
 Date: 2026-10-19. Scope: the working tree of branch `toys3` at commit `4854ad7` plus the uncommitted single-writer
 sequencer (`cp/dynamo/seq*.go`, decision 46). That sequencer was still being written during this audit. Findings that
 depend on it say so.

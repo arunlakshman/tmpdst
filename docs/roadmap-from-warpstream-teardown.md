@@ -188,7 +188,7 @@ Consumer groups and any consumer-side result (missing); read path and cache (mis
 TLS, SASL, ACLs (missing); Kafka API coverage 5 of about 70 (Produce 3-9, Fetch 4-12, ListOffsets 1-7, Metadata 1-12,
 ApiVersions 0-3); at-least-once with possible reorder when `max.in.flight` > 1 (audit S11); single appender by design;
 single-AZ benchmark so no cross-AZ cost claim; upgrade story only for the CP log (two deploys), none for broker/CP wire
-or Pebble data; rollback undefined; partitions measured only at 288.
+or Pebble data; no rollback path for the CP store (decision 54; an older git revision is needed); partitions measured only at 288.
 
 ## 4. Timeline (assumes one engineer about 4 productive ed/week; today Wed 2026-10-21)
 

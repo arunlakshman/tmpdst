@@ -49,14 +49,9 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | event | level | fields | meaning / how to read |
 |---|---|---|---|
 | `start`, `manifest`, `manifest_written`, `manifest_failed` | | as above | |
-| `cp_call` | DEBUG (WARN if HTTP 5xx) | `op`, `segment`, `outcome`, `http_status`, `attempts`, `retries`, `handler_ms`, `dynamo_ms`, `consumed_units`, `request_bytes`, `response_bytes` | One per `/v1/*` request, but only at `-log-level debug` (or when it is a 5xx, at WARN). `outcome` is `ok`, the business error (`ErrConflict`, ...) or `http_503`/`http_500`. `attempts` counts commit attempts (1 for other ops); `retries` is attempts minus one. `dynamo_ms` is the sum of the request's DynamoDB calls; `handler_ms - dynamo_ms` is CP-side compute. `segment` joins to the broker's `segment_*` lines. `consumed_units` is the capacity DynamoDB reported (0 if not reported). |
+| `cp_call` | DEBUG (WARN if HTTP 5xx) | `op`, `segment`, `outcome`, `http_status`, `handler_ms`, `dynamo_ms`, `consumed_units`, `request_bytes`, `response_bytes` | One per `/v1/*` request, but only at `-log-level debug` (or when it is a 5xx, at WARN). `outcome` is `ok`, the business error (`ErrConflict`, ...) or `http_503`/`http_500`. `dynamo_ms` is the sum of the request's DynamoDB calls; `handler_ms - dynamo_ms` is CP-side compute. `segment` joins to the broker's `segment_*` lines. `consumed_units` is the capacity DynamoDB reported (0 if not reported). |
 | `cp_summary` | INFO | `window_ms`, then one object per op (`commit-segment`, `lookup`, ...) with `calls`, `not_ok`, `mean_handler_ms`, `max_handler_ms` | manicp only. At most one a second, written by the first request after the interval (no timer, so an idle process logs nothing and the last partial second of a run is not written; the `manicp_*` metrics have every request). Bounds log volume at 1 line/s however many requests arrive, including 48k Lookups/s. |
-| `commit_txn_canceled` | WARN | `segment`, `items`, `reasons`, `err` | A commit transaction lost a race and will be retried. `reasons` entries are `index:code:pk/sk` of the items that failed (`ConditionalCheckFailed`, `TransactionConflict`, `ThrottlingError`, `ProvisionedThroughputExceeded`, ...). Many `ThrottlingError` reasons mean the table is throttling, not racing. |
-| `seq_group` | DEBUG | `segments`, `items`, `partitions`, `tx_ms`, `ok` | One line per group transaction (sequencer). |
-| `seq_retry` | WARN | `reason`, `segments`, `err` | A group is retried (throttling, unknown outcome, failed read). |
-| `seq_txn_canceled` | WARN | `segments`, `items`, `reasons`, `err` | A group transaction was cancelled (a lost race or a replayed key); the sequencer refreshes what the reasons name and retries. With one manicp this is rare. |
-| `dynamo_call_failed` | WARN | `call`, `code`, `throttled`, `err` | A DynamoDB call failed with a retryable error (throttling, conflict, 5xx) after the SDK's own retries; the CP answers 503. |
-| `aws_attempt_failed` | WARN | `aws_service=dynamo`, same fields as above | One DynamoDB HTTP attempt failed. The SDK retries these itself; each retry is a separate line. `TransactionCanceledException` attempts are DEBUG here (see `commit_txn_canceled`). |
+| `aws_attempt_failed` | WARN | `aws_service=dynamo`, same fields as above | One DynamoDB HTTP attempt failed. The SDK retries these itself; each retry is a separate line. |
 
 ## Metrics
 
@@ -98,26 +93,14 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `manicp_request_body_bytes` | histogram | `op` | Request body size. |
 | `manicp_inflight_requests` | gauge | | Requests being served. |
 | `manicp_dynamodb_call_seconds` | histogram | `call` | Time of one DynamoDB SDK call as the store sees it (retries inside the SDK included). |
-| `manicp_commit_prep_seconds` | histogram | `stage` | `reads` and `decide_encode` per attempt. |
-| `manicp_commit_attempts_total` | counter | `op` | Commit attempts (with the sequencer: per request and per group attempt). |
-| `manicp_retries_total` | counter | `op`, `reason` | Internal retries (`transaction_canceled`, `unavailable`, `conditional_check`). |
 | `manicp_dynamo_attempt_seconds` | histogram | `op`, `result` | One DynamoDB HTTP attempt (SDK retries are separate samples). |
 | `manicp_dynamo_operation_seconds` | histogram | `op`, `outcome` | Whole SDK call including SDK backoff. |
 | `manicp_dynamo_retries_total` | counter | `op` | SDK-level retries; nonzero means DynamoDB is throttling or failing and the SDK is absorbing it. |
 | `manicp_dynamo_request_bytes` | histogram | `op` | Request body size per attempt. |
-| `manicp_dynamo_api_errors_total` | counter | `op`, `code` | Attempts ending in a DynamoDB error code (includes `TransactionCanceledException`, the normal race). |
+| `manicp_dynamo_api_errors_total` | counter | `op`, `code` | Attempts ending in a DynamoDB error code (includes `ConditionalCheckFailed`, a lost log slot). |
 | `manicp_dynamo_throttles_total` | counter | `op`, `code` | `ProvisionedThroughputExceededException`, `ThrottlingException`, `RequestLimitExceeded`. Should be 0 on on-demand tables at this load. |
 | `manicp_dynamo_consumed_capacity_units_total` | counter | `op`, `kind` (`read`, `write`) | Capacity units DynamoDB reported (`ReturnConsumedCapacity=TOTAL`) for successful calls. Multiply by the unit price for the cost of the run: writes are WRU, reads are RRU (a consistent read of up to 4 KB is 1 unit; a transaction counts double). Failed calls are not reported by DynamoDB. |
 | `manicp_dynamo_consumed_capacity_missing_total` | counter | `op` | Successful calls with no `ConsumedCapacity` in the response (ExtendDB, local emulators). If this grows while the units counter is flat, the server does not report capacity: compute cost from call counts instead. |
-| `manicp_dynamo_txn_cancel_reasons_total` | counter | `code` | Per-item cancellation reasons. `ConditionalCheckFailed` is a lost race; `ThrottlingError`/`ProvisionedThroughputExceeded` is throttling inside a transaction. |
-| `manicp_seq_queue_depth` | gauge | | Commit requests waiting for the sequencer (decision 46). Persistently above a few means the loop is the bottleneck (transaction time times group size is below the commit rate). |
-| `manicp_seq_queue_wait_seconds` | histogram | | Time a request waited before its group was formed. |
-| `manicp_seq_group_segments`, `manicp_seq_group_items` | histogram | | Segments and items per group transaction when it is sent (limit 100 items). Group size grows with load; items near 100 means the budget binds. |
-| `manicp_seq_tx_items` | histogram | | DynamoDB items per group transaction actually sent (buckets 1 to 100). |
-| `manicp_seq_tx_seconds` | histogram | `outcome` (`ok`, `canceled`, `unavailable`, `unknown`, `error`) | `TransactWriteItems` time of a group. `canceled` should stay near 0 with one manicp; `unknown` is a 5xx/timeout/lost answer (the group then re-reads before it goes on). |
-| `manicp_seq_cache_total` | counter | `cache` (`end`, `topic`, `segment`), `result` (`hit`, `miss`) | In-memory state lookups. `end` misses are the first touch of a partition (a Query) and recoveries after a retry; a `segment` miss is every new key (normal: it costs nothing) and a segment hit is a replay served from memory. |
-| `manicp_seq_retries_total` | counter | `reason` (`transaction_canceled`, `unavailable`, `unknown_outcome`, `read_failed`) | Group retries, one count per group. A second manicp or a stale one shows up as `transaction_canceled`. |
-| `manicp_seq_inflight_groups` | gauge | | Group transactions in flight (at most `-seq-pipeline`). |
 | `manicp_build_info`, `_start_time_seconds`, `_uptime_seconds` | | | As for the broker. |
 | `go_*`, `process_*` | | | Runtime and process collectors. |
 
@@ -142,18 +125,15 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `manicp_log_blocked` | gauge | | 1: the node cannot apply (unknown format, store failure, trimmed); alert. |
 | `manicp_log_checkpoint_slot`, `_checkpoint_age_seconds`, `_checkpoint_bytes`, `_checkpoint_seconds`, `_checkpoint_errors_total` | | | Checkpoints; alert on age above 3 x `CkptEvery`. |
 | `manicp_log_trimmed_slots_total` | counter | | Slots tombstoned behind the checkpoint. |
-| `manicp_log_index_watermark_slot`, `_index_lag_slots`, `_index_flush_seconds`, `_index_rows_total`, `_index_unprocessed_total`, `_index_throttles_total`, `_index_lost_runs_total`, `_index_errors_total` | | | R# indexer. Lag is bounded by the flush period; `lost_runs` nonzero means the index stalled past the window. |
 
 Dashboard (Overview, row "Control plane (log store ...)", `gen_dashboards.py`): slot rate and lost slots; append latency p50/p99;
 commands per slot and entry size; apply lag and standby lag; hole fills, role changes and the active gauge; queue depth, queue wait
-and refused requests; index backlog, flush p99, throttles; checkpoint age, size and errors; fresh reads and tail checks. The old
-sequencer row is renamed and stays empty with the log store. Alloy (`cp.alloy`) scrapes each CP host's manicp and adds `cp_rank`;
+and refused requests; checkpoint age, size and errors; fresh reads and tail checks.  Alloy (`cp.alloy`) scrapes each CP host's manicp and adds `cp_rank`;
 CloudWatch DynamoDB metrics (`cpcloudwatch.alloy`, now with PutItem and BatchWriteItem operations) are scraped from rank 0 only.
 Log events (INFO unless noted): `log_ready` (node, rank, applied slot, role), `log_role` (active true/false, a takeover or
 failback), `log_final_ckpt`, `log_final_ckpt_failed` (WARN), `log_no_checkpoint` (WARN, no `-ckpt-bucket`). The manifest
 gains `store`, `rank`, `takeover_after`, `ckpt_bucket`. Suggested alerts: `manicp_log_blocked` = 1; checkpoint age above 15 min;
-`manicp_log_standby_lag_slots` rising; `rate(manicp_log_lost_slots_total)` > 0 for minutes; `manicp_log_index_lag_slots` > 3 x flush
-period x slot rate.
+`manicp_log_standby_lag_slots` rising; `rate(manicp_log_lost_slots_total)` > 0 for minutes.
 
 ### Useful queries
 

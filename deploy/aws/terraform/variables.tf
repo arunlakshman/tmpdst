@@ -48,19 +48,8 @@ variable "broker_count" {
   }
 }
 
-variable "cp_store" {
-  description = "Control-plane store. \"log\" (default): manicp -store dynamolog, the DynamoDB log with a hot standby (decisions 48-53, docs/log-cp-service.md); brokers use the default -max-segment-partitions 4096. \"dynamo\": the old transaction store, ONE host (cp_standby_count must be 0), brokers get -max-segment-partitions 96 (rollback; needs commits quiesced and the index flushed when switching, see docs/aws-benchmark-runbook.md)."
-  type        = string
-  default     = "log"
-
-  validation {
-    condition     = contains(["log", "dynamo"], var.cp_store)
-    error_message = "cp_store must be \"log\" or \"dynamo\"."
-  }
-}
-
 variable "cp_standby_count" {
-  description = "Hot-standby control-plane hosts (cp_store = log): rank 1..N tail the log and take over when the rank-0 appender dies. Brokers get the URL list rank 0 first (sticky routing, decision 48). 1 is the default (active + standby); 0 is a single CP with no failover. Must be 0 with cp_store = dynamo."
+  description = "Hot-standby control-plane hosts: rank 1..N tail the log and take over when the rank-0 appender dies. Brokers get the URL list rank 0 first (sticky routing, decision 48). 1 is the default (active + standby); 0 is a single CP with no failover."
   type        = number
   default     = 1
 
@@ -240,13 +229,13 @@ variable "kafka_tools_version" {
 }
 
 variable "broker_extra_args" {
-  description = "Extra flags appended to the manibroker command line (e.g. \"-segment-bytes 32MiB\"). Empty by default: the log store takes the broker default -max-segment-partitions 4096. With cp_store = dynamo, Terraform adds -max-segment-partitions 96 itself (its 100-item transaction refuses a wider segment, decision 52)."
+  description = "Extra flags appended to the manibroker command line (e.g. \"-segment-bytes 32MiB\"). Empty by default: brokers take the default -max-segment-partitions 4096."
   type        = string
   default     = ""
 }
 
 variable "cp_extra_args" {
-  description = "Extra flags appended to the manicp command line on every control-plane host (e.g. -slot-rate, -log-k, -index-every for the log store; sequencer flags for the old store). Empty by default so it stays valid for any manicp build."
+  description = "Extra flags appended to the manicp command line on every control-plane host (e.g. -slot-rate, -log-k). Empty by default so it stays valid for any manicp build."
   type        = string
   default     = ""
 }

@@ -1,5 +1,7 @@
 # W3: partition-affine producers and a longer segment window
 
+*Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This document is a record.*
+
 Run w3, 2026-10-20, ap-south-2, same stack as w2 (6 brokers m6in.4xlarge, 1 CP m6in.xlarge, 2 loadgens, 288 partitions, lz4,
 balanced pinning, produce-only, 1 KiB messages). Stack up about 40 minutes. Raw data in `results/w3` (git-ignored); metrics from Grafana
 Cloud Prometheus (`run_id="w3"`). Each stage was short (see the windows below), so the numbers are indicative, one sample each.

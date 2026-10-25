@@ -1,5 +1,7 @@
 # Stage 5: AWS run w4 plan (NOT executed)
 
+*Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This document is a record.*
+
 Status: plan only, 2026-10-21. Nothing here has been applied; no AWS resource exists for w4. Context: `docs/design-a-prototype.md`
 section 8 (stage 5), `docs/log-cp-service.md`, runbook A11, `docs/w2-bottleneck-verification.md` and
 `docs/w3-affinity-and-window-experiments.md` (what the old store did at 500k), `docs/x1-x3-x4-results.md` (DynamoDB numbers).

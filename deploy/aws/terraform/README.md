@@ -1,8 +1,8 @@
 # manifester-bench: disposable AWS benchmark stack (WarpStream-comparable)
 
 N stateless brokers (default 6, one AZ; each runs manibroker + a 10 s `/metrics` snapshotter + Alloy),
-ONE dedicated control-plane host running the only manicp (single sequencer, decision 46; brokers
-point `-cp-url` at it), `loadgen_count` load generator
+a log-based control plane (manicp `-store dynamolog`: one active host plus an optional hot standby; brokers
+point `-cp-url` at the URL list), `loadgen_count` load generator
 hosts (default 2, OpenMessaging Benchmark), an optional internal NLB, one run bucket
 and one DynamoDB control-plane table, all in one public subnet, plus a budget alarm.
 Everything is tagged `Project=manifester-bench`, `RunId`, `Owner`, `auto-destroy-after`.
@@ -33,12 +33,12 @@ metadata store are plain S3 + DynamoDB rather than WarpStream's.
 | --- | --- |
 | VPC 10.42.0.0/16, 1 public subnet, IGW | S3 and DynamoDB gateway endpoints on the route table |
 | Brokers `aws_instance.broker[0..N-1]` | broker id = index + 1, `-advertise <own private IP>:9092`, `-node-id broker-<id>`, `-cp-url http://<cp private ip>:8080`. manibroker starts after the CP answers `/healthz` (bounded 10 min wait in user-data). No manicp runs on brokers. `instance_initiated_shutdown_behavior = terminate`. |
-| Control plane `aws_instance.cp` (rank 0) + `aws_instance.cp_standby` (`cp_standby_count`, default 1) | `cp_instance_type` (default m6in.xlarge), runs ONLY manicp. Default `cp_store = log`: `-store dynamolog -table T -ckpt-bucket B -ckpt-prefix cp/ -rank R -node-name cp-R -takeover-after 5s -pebble-dir /var/lib/manicp/pebble` (+ `-addr :8080 -region -table-prefix -metrics-addr 127.0.0.1:9101 -run-id -manifest-out ${cp_extra_args}`); rank 0 is the preferred appender and creates topic `bench-<run_id>` on loopback, the standby tails the log. `cp_store = dynamo` is the old single-sequencer host (`-store dynamo`, no standby). Brokers get `-cp-url` = the URL list, rank 0 first (output `cp_urls`). Pushes `/metrics` to `results/<run_id>/metrics/cp/` (rank 0) and `metrics/cp-<rank>/`, Alloy role `cp` (manicp scrape on each; CloudWatch DynamoDB on rank 0 only), self-terminates like the others. |
+| Control plane `aws_instance.cp` (rank 0) + `aws_instance.cp_standby` (`cp_standby_count`, default 1) | `cp_instance_type` (default m6in.xlarge), runs ONLY manicp. `-store dynamolog -table T -ckpt-bucket B -ckpt-prefix cp/ -rank R -node-name cp-R -takeover-after 5s -pebble-dir /var/lib/manicp/pebble` (+ `-addr :8080 -region -table-prefix -metrics-addr 127.0.0.1:9101 -run-id -manifest-out ${cp_extra_args}`); rank 0 is the preferred appender and creates topic `bench-<run_id>` on loopback, the standby tails the log. Brokers get `-cp-url` = the URL list, rank 0 first (output `cp_urls`). Pushes `/metrics` to `results/<run_id>/metrics/cp/` (rank 0) and `metrics/cp-<rank>/`, Alloy role `cp` (manicp scrape on each; CloudWatch DynamoDB on rank 0 only), self-terminates like the others. |
 | Load generators `aws_instance.loadgen[0..L-1]` | Java 17 (Corretto), Kafka 3.8 CLI in `/opt/kafka`, OMB from `artifacts/omb/openmessaging-benchmark.tar.gz` into `/opt/omb` (skipped with a log line if absent), harness in `/opt/bench`, `/etc/profile.d/bench.sh` |
 | Internal NLB (`use_nlb`) | TCP 9092 listener, instance targets = all brokers, TCP health check on 9092, one subnet, no cross-zone, no SG |
 | Security groups | Control plane: 8080 from the broker SG only, no other inbound (bench-ctl reaches it with SSM send-command; loadgen to CP is closed). Broker: 9092 from the loadgen SG (plus the subnet CIDR for NLB health checks when `use_nlb`); nothing else, no inter-broker rule. Loadgen: self-referencing TCP 8080, 8081 and 9090-9099 (OMB worker HTTP and stats) and nothing from outside. No SSH. Metrics are scraped by Alloy on each host over loopback; the broker hosts push /metrics snapshots to S3. |
 | S3 `manifester-bench-<run_id>-<account>` | force_destroy, public access blocked, SSE-S3, everything expires after `bucket_expire_days`, whole-bucket request metrics (`FilterId=manifester-bench`, variable `s3_metrics_filter_id`, also handed to Alloy) |
-| DynamoDB `manifester_<run_id>_cp` | Same schema as `cp/dynamo` `CreateTables`: `pk` S hash, `sk` S range, on-demand with `warm_throughput` (default 30,000 write / 30,000 read units/s). Created here, so every manicp runs **without** `-create-tables` and the role has no CreateTable/DeleteTable. |
+| DynamoDB `manifester_<run_id>_cp` | Log-store schema: `pk` S hash, `sk` S range, on-demand with `warm_throughput` (default 30,000 write / 30,000 read units/s). Created here, so every manicp runs **without** `-create-tables` and the role has no CreateTable/DeleteTable. |
 | IAM | Control plane: table RW, bucket list + read `artifacts/*` + write `results/*` (manifest, snapshots), SSM params, SSM core, CloudWatch read. Broker: bucket RW, table RW, SSM params under the prefix, SSM core, CloudWatch read (from `../observability/iam-cloudwatch-read.json` if present, else `-var cloudwatch_read_policy_json`). Loadgen: SSM, read `artifacts/*`, write `results/*`. |
 | Budget | 80% actual and 100% forecast emails. Account-wide (no tag filter, because cost-allocation tags need manual activation), so set `budget_usd` accordingly. |
 
@@ -52,11 +52,10 @@ PutItem/UpdateItem/DeleteItem/ConditionCheckItem/GetItem, all of which are grant
 | `region`, `az`, `run_id`, `owner`, `budget_usd`, `budget_email` | none | required, see `example.tfvars` |
 | `broker_count` | 6 | 1..12 stateless brokers |
 | `cp_instance_type` | `m6in.xlarge` | each control-plane host (4 vCPU / 16 GiB) |
-| `cp_store` | `log` | `log`: manicp `-store dynamolog` (active + standby); `dynamo`: the old transaction store, one host, brokers get `-max-segment-partitions 96` |
-| `cp_standby_count` | `1` | hot-standby CP hosts (0..2; must be 0 with `cp_store = dynamo`) |
+| `cp_standby_count` | `1` | hot-standby CP hosts (0..2) |
 | `cp_takeover_after` | `5s` | manicp `-takeover-after`; adds to the failover stall, far under the 120 s `-commit-deadline` |
-| `broker_extra_args` | `""` | extra manibroker flags. Empty: the log store takes the broker default `-max-segment-partitions 4096`. With `cp_store = dynamo` Terraform adds `-max-segment-partitions 96` itself (the 100-item transaction refuses wider segments, decision 52). |
-| `cp_extra_args` | empty | extra manicp flags (sequencer tuning once manicp has them); empty keeps the unit valid for any manicp build |
+| `broker_extra_args` | `""` | extra manibroker flags. Empty: brokers take the default `-max-segment-partitions 4096`. |
+| `cp_extra_args` | empty | extra manicp flags (e.g. `-slot-rate`, `-log-k`); empty keeps the unit valid for any manicp build |
 | `broker_instance_type` | `m6in.4xlarge` | 16 vCPU / 64 GiB / up to 40 Gbps, as WarpStream's agents |
 | `loadgen_count` | 2 | 1..8 load generator hosts |
 | `loadgen_instance_type` | `m6in.8xlarge` | 32 vCPU / 128 GiB / 50 Gbps, as WarpStream's OMB host |
@@ -244,6 +243,6 @@ the checklist passes, since losing it orphans the resources.
 - Alloy 1.10.1 (rpm repo) and Kafka 3.8.0 (archive.apache.org) are pinned by variable; both URLs were confirmed to exist with HTTP HEAD on 2026-10-18.
 - Hosts have public IPs (needed for Grafana Cloud and downloads); nothing inbound is allowed.
 - vCPU quota: the full stack is 6 x 16 (brokers) + 2 x 32 (loadgens) + 4 (control plane) = 164 vCPUs against the 192 account quota.
-- With `cp_store = log` the control plane is an active node plus a hot standby: losing one is a failover of a few seconds (runbook A11), losing both stalls acks until one is back. With `cp_store = dynamo` it is a single host and a single point of failure for availability (not for correctness); see runbook A10. Standby IPs are in the brokers' user-data: replacing a CP host replaces the brokers. The DynamoDB table has TTL on `ttl` and warm throughput `ddb_warm_*`. `terraform fmt`/`validate` were not run for the stage-4 changes (no terraform binary available when they were written): run `terraform init -upgrade && terraform validate` before the first plan.
+- The control plane is an active node plus a hot standby: losing one is a failover of a few seconds (runbook A11), losing both stalls acks until one is back. Standby IPs are in the brokers' user-data: replacing a CP host replaces the brokers. The DynamoDB table has TTL on `ttl` and warm throughput `ddb_warm_*`. Run `terraform init -upgrade && terraform validate` before the first plan.
 - Brokers are cattle (decisions 41-44): no registration, fencing or idempotence; ids 1..N come from the instance index, so replacing a host re-uses its id harmlessly.
 - Not verified here: `warm_throughput` apply behaviour and pre-warm price, per-AZ m6in availability, and a full plan/apply (never run in this session).

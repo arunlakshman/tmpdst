@@ -1,5 +1,7 @@
 # Design A prototype: the control plane over a command log (X2, X5, commit model)
 
+*Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This document is a record.*
+
 Status: PROTOTYPE and measurements (2026-10-20), not a decision. Idea A of `delos-logdrive-ideas.md`, built under
 `cp/logsm`. It is reachable only from tests: no `-store` kind, no change to `cmd/manicp`, no trace hash changed.
 Labels: **measured** (this machine, Apple M1, Go 1.24), **modelled** (fakedb with injected latency), **computed**,

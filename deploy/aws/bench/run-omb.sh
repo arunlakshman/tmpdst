@@ -104,7 +104,7 @@ log "run_id=$RUN_ID brokers=$nbrokers topic=$TOPIC partitions=$PARTITIONS loadge
 [ "$total_min" -le "$MAX_MIN" ] || { log "REFUSING: estimated $total_min min > --max-minutes $MAX_MIN (cost guard)"; exit 2; }
 
 # ---- pre-flight ---------------------------------------------------------------------------------
-# The single manicp (decision 46) pushes metrics/cp/<epoch>-manicp.txt every 10 s; loadgens cannot reach it on 8080
+# The active manicp pushes metrics/cp/<epoch>-manicp.txt every 10 s; loadgens cannot reach it on 8080
 # (closed on purpose) but can list the bucket. A fresh snapshot means it is up; a missing one means no CP.
 check_cp() {
   local last now age
@@ -112,7 +112,7 @@ check_cp() {
   if [ -z "$last" ]; then log "  control plane: NO metrics/cp/ snapshot in s3://$BUCKET/results/$RUN_ID/ (CP host down or still booting: bench-ctl.sh check-cp)"; return 1; fi
   now=$(date +%s); age=$((now - last))
   if [ "$age" -gt 90 ]; then log "  control plane: newest manicp snapshot is ${age}s old (CP dead or stuck: see the runbook)"; return 1; fi
-  log "  control plane: manicp snapshot ${age}s old (single sequencer up)"
+  log "  control plane: manicp snapshot ${age}s old (up)"
 }
 
 preflight() {

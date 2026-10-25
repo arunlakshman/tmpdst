@@ -21,7 +21,7 @@ import (
 	"manifester/core"
 	"manifester/cp/cpclient"
 	"manifester/cp/cpobs"
-	"manifester/cp/dynamo/fakedb"
+	"manifester/cp/fakedb"
 	"manifester/cp/logcp/logcptest"
 	"manifester/sys"
 )
@@ -64,7 +64,7 @@ func startLogNode(t *testing.T, d deps, name string, rank int, extra ...string) 
 	n := &logNode{addr: freeAddr(t), done: make(chan int, 1), logs: &syncBuf{}}
 	args := append([]string{"-store", kindLog, "-addr", n.addr, "-metrics-addr", "", "-node-name", name, "-rank", fmt.Sprint(rank),
 		"-ckpt-bucket", "b", "-takeover-after", "600ms", "-heartbeat", "50ms", "-hole-after", "30ms", "-slot-rate", "5000",
-		"-index-every", "50ms", "-pebble-dir", filepath.Join(t.TempDir(), "pebble"), "-final-checkpoint=false"}, extra...)
+		"-pebble-dir", filepath.Join(t.TempDir(), "pebble"), "-final-checkpoint=false"}, extra...)
 	var ctx context.Context
 	ctx, n.cancel = context.WithCancel(context.Background())
 	t.Cleanup(n.cancel)
@@ -331,7 +331,7 @@ func TestLogFlagsDefaults(t *testing.T) {
 	}
 	l := f.log
 	if l.takeoverAfter != 5*time.Second || l.k != 4 || l.slotRate != 200 || l.holeAfter != 250*time.Millisecond ||
-		l.ckptEvery != 5*time.Minute || l.windowSlots != 131072 || !l.index || l.indexEvery != 10*time.Second ||
+		l.ckptEvery != 5*time.Minute || l.windowSlots != 131072 ||
 		l.heartbeat != time.Second || l.tableName(f.prefix) != "manifester_cp" || nodeName(l) == "" {
 		t.Fatalf("defaults: %+v", l)
 	}

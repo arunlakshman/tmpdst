@@ -1,5 +1,7 @@
 # Ideas from Delos and the LogDrive for the commit path
 
+*Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This document is a record.*
+
 Status: IDEAS (2026-10-20), not a decision. Nothing here is built, nothing else is changed. Labels: **paper** (quoted
 from the text, section named), **measured** (our w2/w3), **computed** (arithmetic from stated inputs), **inferred**
 (my reasoning, not in any paper), **unknown**.

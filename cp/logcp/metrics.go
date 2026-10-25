@@ -37,14 +37,6 @@ type Metrics struct {
 	ckptSec    prometheus.Histogram
 	ckptErrs   prometheus.Counter
 	trimmed    prometheus.Counter
-	idxMark    prometheus.Gauge
-	idxLag     prometheus.Gauge
-	idxSec     prometheus.Histogram
-	idxRows    prometheus.Counter
-	idxUnproc  prometheus.Counter
-	idxThrot   prometheus.Counter
-	idxLost    prometheus.Counter
-	idxErrs    prometheus.Counter
 }
 
 // NewMetrics registers the collectors on reg.
@@ -91,19 +83,10 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		ckptSec:    h("checkpoint_seconds", "Time to write one checkpoint (snapshot, S3 put, pointer).", secs),
 		ckptErrs:   c("checkpoint_errors_total", "Failed checkpoint attempts."),
 		trimmed:    c("trimmed_slots_total", "Log slots deleted behind the checkpoint."),
-		idxMark:    g("index_watermark_slot", "Slots below this are in the R# rows."),
-		idxLag:     g("index_lag_slots", "Applied slots not yet in the R# rows (index watermark behind applied)."),
-		idxSec:     h("index_flush_seconds", "One index flush (plan, BatchWriteItem rows, watermark).", secs),
-		idxRows:    c("index_rows_total", "R# rows written."),
-		idxUnproc:  c("index_unprocessed_total", "Requests DynamoDB returned in UnprocessedItems (retried)."),
-		idxThrot:   c("index_throttles_total", "BatchWriteItem calls throttled and retried."),
-		idxLost:    c("index_lost_runs_total", "Commands whose runs could not be indexed because their key had left the window (index stalled for longer than the window)."),
-		idxErrs:    c("index_errors_total", "Failed index flushes (retried at the next flush)."),
 	}
 	reg.MustRegister(m.attempts, m.lost, m.slots, m.appendSec, m.cmdsPer, m.entryBytes, m.holeFills, m.pulls, m.applied, m.lag,
 		m.standbyLag, m.applySec, m.windowKeys, m.blocked, m.queueDepth, m.queueWait, m.rejected, m.role, m.roleChange,
-		m.tailChecks, m.freshReads, m.freshWait, m.ckptSlot, m.ckptAge, m.ckptBytes, m.ckptSec, m.ckptErrs, m.trimmed,
-		m.idxMark, m.idxLag, m.idxSec, m.idxRows, m.idxUnproc, m.idxThrot, m.idxLost, m.idxErrs)
+		m.tailChecks, m.freshReads, m.freshWait, m.ckptSlot, m.ckptAge, m.ckptBytes, m.ckptSec, m.ckptErrs, m.trimmed)
 	return m
 }
 
@@ -252,45 +235,5 @@ func (m *Metrics) checkpointErr() {
 func (m *Metrics) trim(n int) {
 	if m != nil {
 		m.trimmed.Add(float64(n))
-	}
-}
-
-func (m *Metrics) indexed(mark, applied int64, rows int, d time.Duration) {
-	if m != nil {
-		m.idxMark.Set(float64(mark))
-		m.idxLag.Set(float64(max(applied-mark, 0)))
-		m.idxRows.Add(float64(rows))
-		m.idxSec.Observe(secs(d))
-	}
-}
-
-func (m *Metrics) indexLag(mark, applied int64) {
-	if m != nil {
-		m.idxMark.Set(float64(mark))
-		m.idxLag.Set(float64(max(applied-mark, 0)))
-	}
-}
-
-func (m *Metrics) indexUnprocessed(n int) {
-	if m != nil {
-		m.idxUnproc.Add(float64(n))
-	}
-}
-
-func (m *Metrics) indexThrottle() {
-	if m != nil {
-		m.idxThrot.Inc()
-	}
-}
-
-func (m *Metrics) indexLost(n int) {
-	if m != nil {
-		m.idxLost.Add(float64(n))
-	}
-}
-
-func (m *Metrics) indexErr() {
-	if m != nil {
-		m.idxErrs.Inc()
 	}
 }

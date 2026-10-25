@@ -11,13 +11,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
-	"manifester/cp/dynamo"
+	"manifester/cp/logcp"
+	"manifester/cp/logcp/logcptest"
 	"manifester/sys/s3store"
 )
 
-// fullStack is the real thing: the DynamoDB control plane on ExtendDB and
-// segments in SeaweedFS. Skipped unless both endpoints are set
-// (scripts/it-up.sh prints them).
+// fullStack is the real thing: the log control plane on ExtendDB and segments
+// in SeaweedFS. Skipped unless both endpoints are set (scripts/it-up.sh prints
+// them).
 func fullStack(t *testing.T) *stack {
 	t.Helper()
 	dy, s3ep := os.Getenv("MANIFESTER_DYNAMO_ENDPOINT"), os.Getenv("MANIFESTER_S3_ENDPOINT")
@@ -31,11 +32,11 @@ func fullStack(t *testing.T) *stack {
 		BaseEndpoint: aws.String(dy),
 		Credentials:  credentials.NewStaticCredentialsProvider("AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", ""),
 	})
-	st := dynamo.New(db, fmt.Sprintf("it%d_", time.Now().UnixNano()))
-	if err := st.CreateTables(ctx); err != nil {
+	table := fmt.Sprintf("it%d_cp", time.Now().UnixNano())
+	if err := logcp.CreateTable(ctx, db, table); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { st.DeleteTables(context.Background()) })
+	t.Cleanup(func() { db.DeleteTable(context.Background(), &dynamodb.DeleteTableInput{TableName: &table}) })
 	objs, err := s3store.New(ctx, s3store.Config{Endpoint: s3ep, Bucket: s3store.UniqueBucket(), PathStyle: true})
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +44,9 @@ func fullStack(t *testing.T) *stack {
 	if err := objs.EnsureBucket(ctx); err != nil {
 		t.Fatal(err)
 	}
-	return newStack(t, st, objs, s3store.Classifier{})
+	cfg := logcptest.FastConfig("it0", 0, logcp.NewDynLog(db, table, logcp.DynLogOptions{}))
+	cfg.DB, cfg.Table, cfg.Objects = db, table, logcptest.NewObjects()
+	return newStack(t, logcptest.Start(t, cfg), objs, s3store.Classifier{})
 }
 
 func TestFullStackRoundTrip(t *testing.T) {

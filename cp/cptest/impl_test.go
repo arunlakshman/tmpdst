@@ -5,19 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
-	"os"
-	"sync/atomic"
 	"testing"
-	"time"
-
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
 	"manifester/core"
 	"manifester/cp"
 	"manifester/cp/cpclient"
-	"manifester/cp/dynamo"
 	"manifester/cp/memstore"
 )
 
@@ -84,43 +76,4 @@ func httpOver(t testing.TB, st cp.Store) impl {
 	return httpImpl{cpclient.New(srv.URL, srv.Client())}
 }
 
-var tableSeq atomic.Int64
-
-func needDynamo(t testing.TB) string {
-	t.Helper()
-	e := os.Getenv("MANIFESTER_DYNAMO_ENDPOINT")
-	if e == "" {
-		t.Skip("MANIFESTER_DYNAMO_ENDPOINT not set (scripts/it-up.sh)")
-	}
-	return e
-}
-
-// dynamoStore returns a store over fresh uniquely prefixed tables, or skips.
-func dynamoStore(t testing.TB) *dynamo.Store {
-	t.Helper()
-	db := dynamoClient(needDynamo(t))
-	prefix := fmt.Sprintf("t%d_%d_", time.Now().UnixNano(), tableSeq.Add(1))
-	st := dynamo.New(db, prefix)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	if err := st.CreateTables(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.DeleteTables(context.Background()) })
-	return st
-}
-
-func dynamoClient(endpoint string) *dynamodb.Client {
-	return dynamodb.New(dynamodb.Options{
-		Region:       "us-east-1",
-		BaseEndpoint: aws.String(endpoint),
-		Credentials:  credentials.NewStaticCredentialsProvider("AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", ""),
-	})
-}
-
 func newMem() cp.Store { return memstore.New() }
-
-// newReplica is another Store over the same table as st.
-func newReplica(t testing.TB, st *dynamo.Store) cp.Store {
-	return dynamo.New(dynamoClient(needDynamo(t)), st.Prefix())
-}

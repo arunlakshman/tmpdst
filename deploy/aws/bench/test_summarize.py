@@ -41,7 +41,7 @@ manibroker_s3_request_bytes_sum{{op="PutObject"}} {nbytes}
 def prom_cp(wru, rcu):
     return f"""manicp_dynamo_consumed_capacity_units_total{{kind="write"}} {wru}
 manicp_dynamo_consumed_capacity_units_total{{kind="read"}} {rcu}
-manicp_dynamo_api_errors_total{{op="TransactWriteItems",code="TransactionCanceledException"}} 3
+manicp_dynamo_api_errors_total{{op="PutItem",code="ProvisionedThroughputExceededException"}} 3
 manicp_dynamo_retries_total{{op="Query"}} 1
 manicp_dynamodb_call_seconds_sum 2
 manicp_dynamodb_call_seconds_count 100
@@ -54,23 +54,15 @@ def write(path, text):
         f.write(text)
 
 
-def prom_seq(scale):
-    return f"""manicp_seq_tx_seconds_count{{outcome="ok"}} {10 * scale}
-manicp_seq_tx_seconds_count{{outcome="canceled"}} {scale}
-manicp_seq_tx_seconds_sum{{outcome="ok"}} {0.04 * 10 * scale}
-manicp_seq_group_segments_sum {40 * scale}
-manicp_seq_group_items_sum {120 * scale}
-manicp_seq_queue_wait_seconds_sum {0.002 * 40 * scale}
-manicp_seq_queue_wait_seconds_count {40 * scale}
-manicp_seq_retries_total{{reason="transaction_canceled"}} {scale}
-manicp_seq_cache_total{{cache="end",result="hit"}} {90 * scale}
-manicp_seq_cache_total{{cache="end",result="miss"}} {10 * scale}
-manicp_seq_queue_depth {2 * scale}
+def prom_log(scale):
+    return f"""manicp_log_slots_total {700 * scale}
+manicp_log_lost_slots_total {scale}
+manicp_log_role_changes_total{{to="active"}} {scale}
 """
 
 
 def make_run(d, nested=True, brokers=(("1", 6e9), ("2", 3e9), ("3", 1e9)), comp="none", sample_target=5000, cp=None):
-    """cp: None = legacy (a manicp snapshot per broker); "seq" / "noseq" = single control plane under metrics/cp/."""
+    """cp: None = legacy (a manicp snapshot per broker); "log" / "nolog" = single control plane under metrics/cp/."""
     omb = os.path.join(d, "omb")
     os.makedirs(omb)
     with open(os.path.join(HERE, "testdata", "omb-local-sample.json")) as f:
@@ -90,8 +82,8 @@ def make_run(d, nested=True, brokers=(("1", 6e9), ("2", 3e9), ("3", 1e9)), comp=
             write(os.path.join(base, f"{END + 5}-manicp.txt"), prom_cp(20000, 500))
     if cp:
         base = os.path.join(d, "metrics", "cp")
-        write(os.path.join(base, f"{START - 5}-manicp.txt"), prom_cp(0, 0) + (prom_seq(0) if cp == "seq" else ""))
-        write(os.path.join(base, f"{END + 5}-manicp.txt"), prom_cp(20000, 700) + (prom_seq(100) if cp == "seq" else ""))
+        write(os.path.join(base, f"{START - 5}-manicp.txt"), prom_cp(0, 0) + (prom_log(0) if cp == "log" else ""))
+        write(os.path.join(base, f"{END + 5}-manicp.txt"), prom_cp(20000, 700) + (prom_log(100) if cp == "log" else ""))
 
 
 def report(d, **kw):
@@ -132,26 +124,25 @@ class OMBTests(unittest.TestCase):
         # 300 PUTs, 30 GETs
         self.assertIn("| 300 | 30 |", text)
 
-    def test_single_control_plane_with_seq_metrics(self):
+    def test_single_control_plane_with_log_metrics(self):
         with tempfile.TemporaryDirectory() as d:
-            make_run(d, cp="seq")
+            make_run(d, cp="log")
             text, _ = report(d)
-        self.assertIn("Control plane (single manicp sequencer)", text)
+        self.assertIn("Control plane (log store)", text)
         # cp is not a broker row; 3 brokers only, per-broker table has no DDB columns
         self.assertNotIn("| cp |", text)
         self.assertNotIn("| 1 | 85.7 | 60.0% | 1.43 | 70.0 | 0.0 | 40.0 | 50.0 | 1.4 | 0.1 | 0 | 0 | 0 | 0 |", text)
-        # groups 1100/70s = 15.7, segments 4000/70 = 57.1, size 3.64, cache hit 90.0%, WRU 20000/70 = 286
-        self.assertIn("| smoke | 15.7 | 57.1 | 3.64 |", text)
-        self.assertIn("90.0%", text)
+        # slots 70000/70s = 1000.0, lost 100, role changes 100, WRU 20000/70 = 286
+        self.assertIn("| smoke | 1,000.0 | 100 | 100 |", text)
         self.assertIn("| 286 | 10 |", text)
         # cost: 20000 WRU + 700 RCU counted once (not per broker)
         self.assertIn("| 20,000 | 700 |", text)
 
-    def test_single_control_plane_without_seq_metrics(self):
+    def test_single_control_plane_without_log_metrics(self):
         with tempfile.TemporaryDirectory() as d:
-            make_run(d, cp="noseq")
+            make_run(d, cp="nolog")
             text, _ = report(d)
-        self.assertIn("Control plane (single manicp sequencer)", text)
+        self.assertIn("Control plane (log store)", text)
         self.assertIn("| smoke | - | - | - |", text)
         self.assertIn("| 20,000 | 700 |", text)
 
@@ -262,7 +253,7 @@ class ControlPlaneNodesTests(unittest.TestCase):
 
     def test_single_cp_without_log_metrics_has_no_role_section(self):
         with tempfile.TemporaryDirectory() as d:
-            make_run(d, cp="seq")
+            make_run(d, cp="log")
             text, _ = report(d)
         self.assertNotIn("Control-plane nodes", text)
 

@@ -125,14 +125,13 @@ func (r *replica) applyCmd(run *runBuf, res [][]core.CPDone, i, j int, slot int6
 }
 
 // complete publishes an applied batch: answers to the waiting callers, the
-// indexer feed, the role observations and the new position.
+// role observations and the new position.
 func (r *replica) complete(b []Slot, res [][]core.CPDone) {
 	now := r.s.env.Now()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for i, sl := range b {
 		r.deliverLocked(sl.E.ID, res[i])
-		r.feedLocked(sl)
 		r.observeWriterLocked(sl, now)
 	}
 	r.applied = b[len(b)-1].N + 1
@@ -156,26 +155,6 @@ func (r *replica) deliverLocked(id string, res []core.CPDone) {
 	delete(r.waiters, id)
 	for k, p := range ps {
 		p.finish(res[k], nil)
-	}
-}
-
-func (r *replica) feedLocked(sl Slot) {
-	if r.s.noIndex() {
-		return
-	}
-	for _, c := range sl.E.Cmds {
-		r.feed = append(r.feed, feedItem{slot: sl.N, cmd: c})
-	}
-	if len(r.feed) > r.s.cfg.FeedMax { // the indexer reads the dropped part from the log
-		i := len(r.feed) / 2
-		for i < len(r.feed) && r.feed[i].slot == r.feed[i-1].slot {
-			i++
-		}
-		r.feed = append([]feedItem(nil), r.feed[i:]...)
-		r.feedFrom = sl.N + 1
-		if len(r.feed) > 0 {
-			r.feedFrom = r.feed[0].slot
-		}
 	}
 }
 

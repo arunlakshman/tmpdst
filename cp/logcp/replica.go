@@ -5,19 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-
-	"manifester/cp/logsm"
 )
-
-// feedItem is one applied command, kept for the indexer until its rows are written.
-type feedItem struct {
-	slot int64
-	cmd  logsm.Entry
-}
 
 // replica is the node's position in the log: the entries read but not yet
 // applied, the slots allocated to local appends, the callers waiting for an
-// answer and the indexer's feed. The state machine itself is the applier; all
+// answer and. The state machine itself is the applier; all
 // of the replica's state is a function of the log prefix it has applied
 // (plus the clock readings that only feed the advisory role logic).
 type replica struct {
@@ -39,9 +31,6 @@ type replica struct {
 	stuck   bool          // apply itself failed: nothing more is applied
 	seq     uint64
 
-	feed     []feedItem
-	feedFrom int64 // every command at a slot >= feedFrom is in feed (until dropped)
-
 	lastPullOK  int64
 	lastOtherAt int64 // when a slot of another writer was last applied
 	lastOwnAt   int64 // when a slot of this node was last applied
@@ -58,7 +47,7 @@ func newReplica(s *Service) *replica {
 func (r *replica) startAt(slot int64) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.applied, r.high, r.tail, r.feedFrom = slot, slot, slot, slot
+	r.applied, r.high, r.tail = slot, slot, slot
 }
 
 func (r *replica) appliedNow() int64 {

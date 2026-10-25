@@ -1,11 +1,9 @@
-// Package fakedb is an in-memory DynamoDB for the cp/dynamo store's tests: it
-// implements dynamo.DB faithfully enough for the expressions the store uses
-// (conditions, ADD/SET updates, key conditions with BETWEEN), with the
-// semantics the store depends on: single-item atomicity, all-or-nothing
-// TransactWriteItems that fails with TransactionCanceledException and a
-// reason per item, Query paging and ordering, BatchGetItem UnprocessedKeys.
-// It also injects failures. It is a test double, not a database: no
-// concurrency beyond one mutex, no size accounting beyond the transaction cap.
+// Package fakedb is an in-memory DynamoDB for the log control plane's tests: it
+// implements logcp.DB faithfully enough for the expressions the log uses
+// (conditions, SET updates, key conditions with BETWEEN), with the semantics
+// the log depends on: single-item atomicity, conditional puts, Query paging
+// and ordering, BatchWriteItem UnprocessedItems. It also injects failures. It
+// is a test double, not a database: no concurrency beyond one mutex.
 package fakedb
 
 import (
@@ -34,18 +32,14 @@ type Fake struct {
 	// ReportCapacity makes calls return ConsumedCapacity (ExtendDB does not).
 	ReportCapacity bool
 	// Fail is consulted at the start of every call with its name ("GetItem",
-	// "BatchGetItem", "Query", "UpdateItem", "TransactWriteItems",
-	// "CreateTable", "DescribeTable", "DeleteTable"); a non-nil result is
+	// "PutItem", "Query", "UpdateItem", "BatchWriteItem", "CreateTable",
+	// "DescribeTable", "DeleteTable"); a non-nil result is
 	// returned as the call's error and nothing happens.
 	Fail func(call string) error
 	// Latency, if set, is the time every call sleeps (before it takes effect:
-	// a read sees the state at the end of the delay, a transaction is
+	// a read sees the state at the end of the delay, a write is
 	// evaluated and applied at the end of it).
 	Latency func(call string) time.Duration
-	// AfterApply, if set, runs after a TransactWriteItems has been applied; a
-	// non-nil result is returned as the call's error: the transaction DID
-	// commit but the caller never learns it (a lost answer).
-	AfterApply func() error
 	// AfterPut, if set, runs after a PutItem has been applied; a non-nil
 	// result is returned as the call's error (the put DID land, the answer is
 	// lost).
@@ -53,12 +47,6 @@ type Fake struct {
 	// UnprocessWrite is the number of upcoming BatchWriteItem calls that leave
 	// their last request in UnprocessedItems.
 	UnprocessWrite int
-	// Unprocess is the number of upcoming BatchGetItem calls that leave their
-	// last key in UnprocessedKeys.
-	Unprocess int
-	// BeforeTransact runs (without the lock) before each TransactWriteItems is
-	// evaluated: a test writes through Put to lose the race on purpose.
-	BeforeTransact func()
 }
 
 // New returns an empty service.
@@ -202,42 +190,4 @@ func (f *Fake) GetItem(ctx context.Context, in *dynamodb.GetItemInput, _ ...func
 		return nil, err
 	}
 	return &dynamodb.GetItemOutput{Item: cloneItem(t[idOf(in.Key)]), ConsumedCapacity: f.capacity(aws.ToString(in.TableName))}, nil
-}
-
-func (f *Fake) BatchGetItem(ctx context.Context, in *dynamodb.BatchGetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.BatchGetItemOutput, error) {
-	if err := f.failed(ctx, "BatchGetItem"); err != nil {
-		return nil, err
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := &dynamodb.BatchGetItemOutput{Responses: map[string][]item{}, UnprocessedKeys: map[string]types.KeysAndAttributes{}}
-	for name, ka := range in.RequestItems {
-		if len(ka.Keys) > 100 {
-			return nil, validation("too many items requested for the BatchGetItem call")
-		}
-		t, err := f.table(&name)
-		if err != nil {
-			return nil, err
-		}
-		keys, left := f.splitUnprocessed(ka.Keys)
-		for _, k := range keys {
-			if it := t[idOf(k)]; it != nil {
-				out.Responses[name] = append(out.Responses[name], cloneItem(it))
-			}
-		}
-		if len(left) > 0 {
-			out.UnprocessedKeys[name] = types.KeysAndAttributes{Keys: left, ConsistentRead: ka.ConsistentRead}
-		}
-		out.ConsumedCapacity = append(out.ConsumedCapacity, f.capacities(name)...)
-	}
-	return out, nil
-}
-
-// splitUnprocessed holds back the last key while Unprocess calls remain.
-func (f *Fake) splitUnprocessed(keys []item) (processed, left []item) {
-	if f.Unprocess <= 0 || len(keys) == 0 {
-		return keys, nil
-	}
-	f.Unprocess--
-	return keys[:len(keys)-1], keys[len(keys)-1:]
 }

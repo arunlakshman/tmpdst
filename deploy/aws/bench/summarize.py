@@ -9,8 +9,8 @@ RESULTS_DIR is ./results/<run_id> (collect-results.sh) or a --local output dir:
     omb/stages.tsv, omb/run.json, omb/<stage>.json     written by run-omb.sh (OpenMessaging Benchmark)
     metrics/<epoch>-{broker,manicp}.txt                Prometheus text snapshots, ONE broker (legacy layout)
     metrics/<broker_id>/<epoch>-broker.txt             one directory per broker (multi-broker layout)
-    metrics/cp/<epoch>-manicp.txt                      the control-plane manicp (decision 46): DynamoDB and sequencer side
-    metrics/cp-<rank>/<epoch>-manicp.txt               standby control-plane nodes (log store); every metrics/cp[-N] dir is read
+    metrics/cp/<epoch>-manicp.txt                      the active control-plane manicp: DynamoDB and log-store side
+    metrics/cp-<rank>/<epoch>-manicp.txt               standby control-plane nodes; every metrics/cp[-N] dir is read
     markers/kill-appender-<epoch>.txt                  written by bench-ctl.sh kill-appender (epoch = kill time); drives the failover summary
     metrics/<broker_id>/<epoch>-manicp.txt             older layout, one manicp per broker (still read)
 Both layouts are read; a flat file is attributed to broker "1". With several brokers the Kafka harness
@@ -474,41 +474,37 @@ def omb_report(w, args, rundir, snaps):
         # DynamoDB columns only for the older one-manicp-per-broker layout; with the single control plane they live in the CP table.
         legacy = any("ddb_wru" in m for m in per_b.values())
         w("| broker | committed MB/s | share | seg/s | put ms | queue ms | commit ms | ack ms | S3 PUT/s | S3 GET/s | S3 thr | S3 err | S3 retry |"
-          + (" DDB thr | DDB err | DDB cancel | DDB retry | WRU/s | RCU/s |" if legacy else ""))
-        w("|---|---|---|---|---|---|---|---|---|---|---|---|---|" + ("---|---|---|---|---|---|" if legacy else ""))
+          + (" DDB thr | DDB err | DDB retry | WRU/s | RCU/s |" if legacy else ""))
+        w("|---|---|---|---|---|---|---|---|---|---|---|---|---|" + ("---|---|---|---|---|" if legacy else ""))
         for b in sorted(per_b, key=lambda x: (len(x), x)):
             m = per_b[b]
             win = max(1, m.get("win", 1))
             w(f"| {b} | {fmt(m.get('bytes', 0) / win / 1e6, 1)} | {fmt(100 * m.get('bytes', 0) / tot if tot else None, 1)}% | {fmt(m.get('segs', 0) / win, 2)} | "
               f"{fmt(avg_ms(m, 'put'))} | {fmt(avg_ms(m, 'queue'))} | {fmt(avg_ms(m, 'commit'))} | {fmt(avg_ms(m, 'ack'))} | "
               f"{fmt(m.get('s3_put', 0) / win, 1)} | {fmt(m.get('s3_get', 0) / win, 1)} | {fmt(m.get('s3_thr', 0), 0)} | {fmt(m.get('s3_err', 0), 0)} | {fmt(m.get('s3_retry', 0), 0)} |"
-              + (f" {fmt(m.get('ddb_thr', 0), 0)} | {fmt(m.get('ddb_err', 0), 0)} | {fmt(m.get('ddb_cancel', 0), 0)} | {fmt(m.get('ddb_retry', 0), 0)} | "
+              + (f" {fmt(m.get('ddb_thr', 0), 0)} | {fmt(m.get('ddb_err', 0), 0)} | {fmt(m.get('ddb_retry', 0), 0)} | "
                  f"{fmt(m.get('ddb_wru', 0) / win, 0)} | {fmt(m.get('ddb_rcu', 0) / win, 0)} |" if legacy else ""))
         w("")
 
     # ---- control plane
-    w("## Control plane (single manicp sequencer), per stage\n")
+    w("## Control plane (log store), per stage\n")
     if not cp_win:
         w("No metrics/cp/ snapshots (older run with one manicp per broker, or the CP snapshotter was down): DynamoDB numbers are in the per-broker tables when present.\n")
     else:
-        w("From metrics/cp/ (the ONE manicp). Deltas between the snapshots around each stage. group = one TransactWriteItems; "
-          "size = segments per group; queue = wait before the group forms; tx = TransactWriteItems time; cancels should be about 0 with one writer. "
-          "`-` = the manicp build does not export manicp_seq_* (no sequencer metrics).\n")
-        w("| stage | groups/s | segments/s | mean group size | queue ms | tx ms | canceled groups | group retries | cache hit | queue depth (last) | DDB thr | DDB err | DDB cancel | DDB retry | WRU/s | RCU/s | DDB call ms |")
-        w("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        w("From metrics/cp*/ (all control-plane nodes, summed; only the active one moves counters). Deltas between the snapshots around each stage. "
+          "slots = LOG slots appended to DynamoDB; lost = slots another writer won; role changes = active/standby flips. "
+          "`-` = the snapshots carry no manicp_log_* metrics.\n")
+        w("| stage | slots/s | lost slots | role changes | DDB thr | DDB err | DDB retry | WRU/s | RCU/s | DDB call ms |")
+        w("|---|---|---|---|---|---|---|---|---|---|")
         for st in stages:
             m = cp_win.get(st["stage"])
             if not m:
                 continue
             win = max(1, m.get("win", 1))
-            has = "seq_groups" in m
-            hit, miss = m.get("seq_cache_hit", 0), m.get("seq_cache_miss", 0)
-            g = m.get("seq_groups", 0)
-            w(f"| {st['stage']} | {fmt(g / win, 1) if has else '-'} | {fmt(m.get('seq_segs', 0) / win, 1) if has else '-'} | "
-              f"{fmt(m['seq_segs'] / g, 2) if has and g > 0 else '-'} | {fmt(avg_ms(m, 'seq_wait'))} | {fmt(avg_ms(m, 'seq_tx'))} | "
-              f"{fmt(m.get('seq_cancel_groups'), 0) if has else '-'} | {fmt(m.get('seq_retries'), 0) if has else '-'} | "
-              f"{fmt(100 * hit / (hit + miss), 1) + '%' if has and hit + miss > 0 else '-'} | {fmt(m.get('seq_depth_end'), 0) if has else '-'} | "
-              f"{fmt(m['ddb_thr'], 0)} | {fmt(m['ddb_err'], 0)} | {fmt(m['ddb_cancel'], 0)} | {fmt(m['ddb_retry'], 0)} | "
+            has = "log_slots" in m
+            w(f"| {st['stage']} | {fmt(m['log_slots'] / win, 1) if has else '-'} | {fmt(m.get('log_lost'), 0) if has else '-'} | "
+              f"{fmt(m.get('log_role_changes'), 0) if has else '-'} | "
+              f"{fmt(m['ddb_thr'], 0)} | {fmt(m['ddb_err'], 0)} | {fmt(m['ddb_retry'], 0)} | "
               f"{fmt(m['ddb_wru'] / win, 0)} | {fmt(m['ddb_rcu'] / win, 0)} | {fmt(avg_ms(m, 'ddb_call'))} |")
         w("")
 
@@ -604,7 +600,7 @@ def omb_report(w, args, rundir, snaps):
     if not bids:
         unmet.append("no server-side metric snapshots, so skew, S3 and DynamoDB counts and cost are missing")
     always = [
-        "metadata store: DynamoDB on-demand transactions vs WarpStream's hosted control plane (different latency, cost and limits)",
+        "metadata store: DynamoDB on-demand log (log-based control plane) vs WarpStream's hosted control plane (different latency, cost and limits)",
         "single availability zone vs WarpStream's multi-AZ cost model (no inter-AZ transfer is exercised here, so their inter-AZ comparison against Kafka does not carry over)",
         "durability/availability scope: one AZ, stateless brokers; no zone-failure test (WarpStream scales 6 -> 3 agents mid-run; not done here)",
         "Fetch ignores MinBytes/MaxWait (answers immediately) and consumers use static assign() without groups or offset commits",
@@ -665,9 +661,8 @@ def delta_op(a, b, name, op_prefix):
 
 ADDITIVE = ("win", "segs", "bytes", "put_s", "put_n", "queue_s", "queue_n", "commit_s", "commit_n", "ack_s", "ack_n",
             "s3_thr", "s3_err", "s3_retry", "s3_put", "s3_get", "s3_put_bytes",
-            "ddb_thr", "ddb_err", "ddb_cancel", "ddb_retry", "ddb_wru", "ddb_rcu", "ddb_call_s", "ddb_call_n",
-            "seq_groups", "seq_cancel_groups", "seq_tx_s", "seq_tx_n", "seq_segs", "seq_items", "seq_wait_s", "seq_wait_n",
-            "seq_retries", "seq_cache_hit", "seq_cache_miss")
+            "ddb_thr", "ddb_err", "ddb_retry", "ddb_wru", "ddb_rcu", "ddb_call_s", "ddb_call_n",
+            "log_slots", "log_lost", "log_role_changes")
 
 
 def broker_window(snaps, bid, start, end):
@@ -693,9 +688,7 @@ def broker_window(snaps, bid, start, end):
     if cc:
         a, b = parse_prom(snaps["manicp"][bid][cc[0]]), parse_prom(snaps["manicp"][bid][cc[1]])
         m["ddb_thr"] = delta(a, b, "manicp_dynamo_throttles_total")
-        canc = delta(a, b, "manicp_dynamo_api_errors_total", code="TransactionCanceledException")
-        m["ddb_err"] = delta(a, b, "manicp_dynamo_api_errors_total") - canc
-        m["ddb_cancel"] = canc
+        m["ddb_err"] = delta(a, b, "manicp_dynamo_api_errors_total")
         m["ddb_retry"] = delta(a, b, "manicp_dynamo_retries_total")
         m["ddb_wru"] = delta(a, b, "manicp_dynamo_consumed_capacity_units_total", kind="write")
         m["ddb_rcu"] = delta(a, b, "manicp_dynamo_consumed_capacity_units_total", kind="read")
@@ -721,16 +714,14 @@ def broker_ids(snaps):
 
 def cp_node_window(tm, start, end):
     """Deltas of ONE control-plane node's snapshots (tm = {ts: path}) around [start, end]; None without a bracket.
-    manicp_seq_* keys appear only when the snapshots carry the sequencer metrics (older manicp builds: absent)."""
+    manicp_log_* keys appear only when the snapshots carry the log-store metrics."""
     cc = bracket(tm, start, end) if tm else None
     if not cc:
         return None
     a, b = parse_prom(tm[cc[0]]), parse_prom(tm[cc[1]])
     m = {"win": max(1, cc[1] - cc[0])}
-    canc = delta(a, b, "manicp_dynamo_api_errors_total", code="TransactionCanceledException")
     m["ddb_thr"] = delta(a, b, "manicp_dynamo_throttles_total")
-    m["ddb_err"] = delta(a, b, "manicp_dynamo_api_errors_total") - canc
-    m["ddb_cancel"] = canc
+    m["ddb_err"] = delta(a, b, "manicp_dynamo_api_errors_total")
     m["ddb_retry"] = delta(a, b, "manicp_dynamo_retries_total")
     m["ddb_wru"] = delta(a, b, "manicp_dynamo_consumed_capacity_units_total", kind="write")
     m["ddb_rcu"] = delta(a, b, "manicp_dynamo_consumed_capacity_units_total", kind="read")
@@ -740,19 +731,6 @@ def cp_node_window(tm, start, end):
         m["log_slots"] = delta(a, b, "manicp_log_slots_total")
         m["log_lost"] = delta(a, b, "manicp_log_lost_slots_total")
         m["log_role_changes"] = delta(a, b, "manicp_log_role_changes_total")
-    if any(n.startswith("manicp_seq_") for (n, _l) in b):
-        m["seq_groups"] = delta(a, b, "manicp_seq_tx_seconds_count")
-        m["seq_cancel_groups"] = delta(a, b, "manicp_seq_tx_seconds_count", outcome="canceled")
-        m["seq_tx_s"] = delta(a, b, "manicp_seq_tx_seconds_sum")
-        m["seq_tx_n"] = m["seq_groups"]
-        m["seq_segs"] = delta(a, b, "manicp_seq_group_segments_sum")
-        m["seq_items"] = delta(a, b, "manicp_seq_group_items_sum")
-        m["seq_wait_s"] = delta(a, b, "manicp_seq_queue_wait_seconds_sum")
-        m["seq_wait_n"] = delta(a, b, "manicp_seq_queue_wait_seconds_count")
-        m["seq_retries"] = delta(a, b, "manicp_seq_retries_total")
-        m["seq_cache_hit"] = delta(a, b, "manicp_seq_cache_total", result="hit")
-        m["seq_cache_miss"] = delta(a, b, "manicp_seq_cache_total", result="miss")
-        m["seq_depth_end"] = total(b, "manicp_seq_queue_depth")
     return m
 
 
@@ -768,7 +746,7 @@ def sum_windows(ws):
     out = {}
     for w in ws:
         for k, v in w.items():
-            out[k] = max(out.get(k, 0), v) if k in ("win", "seq_depth_end") else out.get(k, 0) + v
+            out[k] = max(out.get(k, 0), v) if k == "win" else out.get(k, 0) + v
     return out
 
 
@@ -826,11 +804,8 @@ def main():
                 d["bytes_rate"] = m["bytes"] / win
                 d["put"], d["queue"], d["commit"], d["ack"] = (avg_ms(m, k) for k in ("put", "queue", "commit", "ack"))
                 d["s3_thr"], d["s3_err"], d["s3_retry"] = m["s3_thr"], m["s3_err"], m["s3_retry"]
-            if "seq_groups" in m:
-                d["seq_groups"], d["seq_segs"], d["seq_cancel"] = m["seq_groups"], m["seq_segs"], m["seq_cancel_groups"]
-                d["seq_wait"], d["seq_tx"] = avg_ms(m, "seq_wait"), avg_ms(m, "seq_tx")
             if "ddb_wru" in m:
-                d["ddb_thr"], d["ddb_err"], d["ddb_cancel"] = m["ddb_thr"], m["ddb_err"], m["ddb_cancel"]
+                d["ddb_thr"], d["ddb_err"] = m["ddb_thr"], m["ddb_err"]
                 d["ddb_retry"], d["ddb_wru"], d["ddb_call"] = m["ddb_retry"], m["ddb_wru"], avg_ms(m, "ddb_call")
         else:
             d["note"] += " no broker snapshots around the cell"
@@ -855,22 +830,11 @@ def main():
 
     w("\n## Broker and control plane, same cells (deltas between snapshots)\n")
     w("Averages are exact (delta sum / delta count). `seg/s` and `MB/s` use the snapshot window. put = seal to stored in S3; queue = waiting for earlier commits; commit = CommitSegment round trip; ack = seal to answer.\n")
-    w("| cell | rep | seg/s | committed MB/s | put ms | queue ms | commit ms | ack ms | S3 throttles | S3 errors | S3 retries | DDB throttles | DDB errors | DDB txn cancels | DDB retries | DDB WRU | DDB call ms |")
-    w("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    w("| cell | rep | seg/s | committed MB/s | put ms | queue ms | commit ms | ack ms | S3 throttles | S3 errors | S3 retries | DDB throttles | DDB errors | DDB retries | DDB WRU | DDB call ms |")
+    w("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for d in per:
         g = d.get
-        w(f"| {d['cell']} | {d['rep']} | {fmt(g('seg_rate'), 2)} | {fmt(g('bytes_rate') / 1e6 if g('bytes_rate') is not None else None, 2)} | {fmt(g('put'))} | {fmt(g('queue'))} | {fmt(g('commit'))} | {fmt(g('ack'))} | {fmt(g('s3_thr'), 0)} | {fmt(g('s3_err'), 0)} | {fmt(g('s3_retry'), 0)} | {fmt(g('ddb_thr'), 0)} | {fmt(g('ddb_err'), 0)} | {fmt(g('ddb_cancel'), 0)} | {fmt(g('ddb_retry'), 0)} | {fmt(g('ddb_wru'), 0)} | {fmt(g('ddb_call'))} |")
-
-    if any("seq_groups" in d for d in per):
-        w("\n## Control plane (single sequencer), same cells\n")
-        w("| cell | rep | groups/s | segments/s | mean group size | queue ms | tx ms | canceled groups |")
-        w("|---|---|---|---|---|---|---|---|")
-        for d in per:
-            g = d.get
-            win = g("win") or 1
-            gr = g("seq_groups")
-            w(f"| {d['cell']} | {d['rep']} | {fmt(gr / win if gr is not None else None, 1)} | {fmt(g('seq_segs') / win if g('seq_segs') is not None else None, 1)} | "
-              f"{fmt(g('seq_segs') / gr if gr else None, 2)} | {fmt(g('seq_wait'))} | {fmt(g('seq_tx'))} | {fmt(g('seq_cancel'), 0)} |")
+        w(f"| {d['cell']} | {d['rep']} | {fmt(g('seg_rate'), 2)} | {fmt(g('bytes_rate') / 1e6 if g('bytes_rate') is not None else None, 2)} | {fmt(g('put'))} | {fmt(g('queue'))} | {fmt(g('commit'))} | {fmt(g('ack'))} | {fmt(g('s3_thr'), 0)} | {fmt(g('s3_err'), 0)} | {fmt(g('s3_retry'), 0)} | {fmt(g('ddb_thr'), 0)} | {fmt(g('ddb_err'), 0)} | {fmt(g('ddb_retry'), 0)} | {fmt(g('ddb_wru'), 0)} | {fmt(g('ddb_call'))} |")
 
     w("\n## Mean over repetitions\n")
     w("| cell | reps | records/s | MB/s | avg ms | p99 ms (worst rep) | put ms | commit ms | ack ms | S3 throttles+errors | DDB throttles+errors |")
@@ -890,7 +854,7 @@ def main():
         s3 = sum((d.get("s3_thr") or 0) + (d.get("s3_err") or 0) for d in ds)
         dd = sum((d.get("ddb_thr") or 0) + (d.get("ddb_err") or 0) for d in ds)
         w(f"| {c} | {len(ds)} | {fmt(mean([d['t']['rps'] for d in ds]), 0)} | {fmt(mean([d['t']['mbps'] for d in ds]), 2)} | {fmt(mean([d['t']['avg'] for d in ds]))} | {fmt(max(p99) if p99 else None)} | {fmt(mean([d.get('put') for d in ds]))} | {fmt(mean([d.get('commit') for d in ds]))} | {fmt(mean([d.get('ack') for d in ds]))} | {fmt(s3, 0)} | {fmt(dd, 0)} |")
-    w("\nDDB errors exclude `TransactionCanceledException` (a lost race, counted separately). CloudWatch-side AWS numbers are not in this report; use the Grafana AWS dashboard for the same window.")
+    w("\nCloudWatch-side AWS numbers are not in this report; use the Grafana AWS dashboard for the same window.")
     text = "\n".join(out) + "\n"
     if args.out:
         with open(args.out, "w") as f:

@@ -330,7 +330,7 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "TransactWriteItems latency (CloudWatch, server side)",
+      "title": "SuccessfulRequestLatency by operation (CloudWatch avg)",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -339,61 +339,6 @@
       "gridPos": {
         "x": 12,
         "y": 16,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "expr": "aws_dynamodb_successful_request_latency_average{run_id=\"$run_id\", dimension_Operation=\"TransactWriteItems\"} / 1000",
-          "legendFormat": "avg",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${ds_prom}"
-          },
-          "refId": "A"
-        },
-        {
-          "expr": "aws_dynamodb_successful_request_latency_maximum{run_id=\"$run_id\", dimension_Operation=\"TransactWriteItems\"} / 1000",
-          "legendFormat": "max",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${ds_prom}"
-          },
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "fillOpacity": 8,
-            "lineWidth": 1
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      }
-    },
-    {
-      "id": 7,
-      "type": "timeseries",
-      "title": "SuccessfulRequestLatency by operation (CloudWatch avg)",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${ds_prom}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 24,
         "w": 12,
         "h": 8
       },
@@ -429,7 +374,7 @@
       }
     },
     {
-      "id": 8,
+      "id": 7,
       "type": "timeseries",
       "title": "Consumed capacity (CloudWatch, units/s)",
       "description": "",
@@ -438,7 +383,7 @@
         "uid": "${ds_prom}"
       },
       "gridPos": {
-        "x": 12,
+        "x": 0,
         "y": 24,
         "w": 12,
         "h": 8
@@ -493,7 +438,7 @@
       }
     },
     {
-      "id": 9,
+      "id": 8,
       "type": "timeseries",
       "title": "Throttles (CloudWatch, per minute)",
       "description": "",
@@ -502,8 +447,8 @@
         "uid": "${ds_prom}"
       },
       "gridPos": {
-        "x": 0,
-        "y": 32,
+        "x": 12,
+        "y": 24,
         "w": 12,
         "h": 8
       },
@@ -557,135 +502,7 @@
       }
     },
     {
-      "id": 10,
-      "type": "timeseries",
-      "title": "Transaction cancellations and retries",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${ds_prom}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 32,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "expr": "sum by (op, reason) (rate(manicp_retries_total{run_id=\"$run_id\"}[$__rate_interval]))",
-          "legendFormat": "retry {{op}} {{reason}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${ds_prom}"
-          },
-          "refId": "A"
-        },
-        {
-          "expr": "sum by (op) (rate(manicp_commit_attempts_total{run_id=\"$run_id\"}[$__rate_interval]))",
-          "legendFormat": "attempts {{op}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${ds_prom}"
-          },
-          "refId": "B"
-        },
-        {
-          "expr": "sum(aws_dynamodb_transaction_conflict_sum{run_id=\"$run_id\"}) / 60",
-          "legendFormat": "TransactionConflict/s (CW)",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${ds_prom}"
-          },
-          "refId": "C"
-        },
-        {
-          "expr": "sum(aws_dynamodb_conditional_check_failed_requests_sum{run_id=\"$run_id\"}) / 60",
-          "legendFormat": "ConditionalCheckFailed/s (CW)",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${ds_prom}"
-          },
-          "refId": "D"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
-          "custom": {
-            "fillOpacity": 8,
-            "lineWidth": 1
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      }
-    },
-    {
-      "id": 11,
-      "type": "timeseries",
-      "title": "CommitSegment time outside the transaction (p50/p99)",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${ds_prom}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 40,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.5, sum by (le, stage) (rate(manicp_commit_prep_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
-          "legendFormat": "p50 {{stage}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${ds_prom}"
-          },
-          "refId": "A"
-        },
-        {
-          "expr": "histogram_quantile(0.99, sum by (le, stage) (rate(manicp_commit_prep_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
-          "legendFormat": "p99 {{stage}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${ds_prom}"
-          },
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "custom": {
-            "fillOpacity": 8,
-            "lineWidth": 1
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      }
-    },
-    {
-      "id": 12,
+      "id": 9,
       "type": "timeseries",
       "title": "manicp handler time by op (p99)",
       "description": "",
@@ -694,8 +511,8 @@
         "uid": "${ds_prom}"
       },
       "gridPos": {
-        "x": 12,
-        "y": 40,
+        "x": 0,
+        "y": 32,
         "w": 12,
         "h": 8
       },
@@ -731,7 +548,7 @@
       }
     },
     {
-      "id": 13,
+      "id": 10,
       "type": "timeseries",
       "title": "S3 SDK attempt latency by op (p50/p99, result=ok)",
       "description": "",
@@ -740,8 +557,8 @@
         "uid": "${ds_prom}"
       },
       "gridPos": {
-        "x": 0,
-        "y": 48,
+        "x": 12,
+        "y": 32,
         "w": 12,
         "h": 8
       },
@@ -786,7 +603,7 @@
       }
     },
     {
-      "id": 14,
+      "id": 11,
       "type": "timeseries",
       "title": "S3 SDK whole-call latency by op (retries included, p99)",
       "description": "",
@@ -795,8 +612,8 @@
         "uid": "${ds_prom}"
       },
       "gridPos": {
-        "x": 12,
-        "y": 48,
+        "x": 0,
+        "y": 40,
         "w": 12,
         "h": 8
       },
@@ -832,7 +649,7 @@
       }
     },
     {
-      "id": 15,
+      "id": 12,
       "type": "timeseries",
       "title": "S3 SDK retries, throttles and API errors",
       "description": "",
@@ -841,8 +658,8 @@
         "uid": "${ds_prom}"
       },
       "gridPos": {
-        "x": 0,
-        "y": 56,
+        "x": 12,
+        "y": 40,
         "w": 12,
         "h": 8
       },
@@ -896,7 +713,7 @@
       }
     },
     {
-      "id": 16,
+      "id": 13,
       "type": "timeseries",
       "title": "DynamoDB SDK attempt latency by op (p50/p99, result=ok)",
       "description": "",
@@ -905,8 +722,8 @@
         "uid": "${ds_prom}"
       },
       "gridPos": {
-        "x": 12,
-        "y": 56,
+        "x": 0,
+        "y": 48,
         "w": 12,
         "h": 8
       },
@@ -951,7 +768,7 @@
       }
     },
     {
-      "id": 17,
+      "id": 14,
       "type": "timeseries",
       "title": "DynamoDB SDK whole-call latency by op (retries included, p99)",
       "description": "",
@@ -960,8 +777,8 @@
         "uid": "${ds_prom}"
       },
       "gridPos": {
-        "x": 0,
-        "y": 64,
+        "x": 12,
+        "y": 48,
         "w": 12,
         "h": 8
       },
@@ -997,7 +814,7 @@
       }
     },
     {
-      "id": 18,
+      "id": 15,
       "type": "timeseries",
       "title": "DynamoDB SDK retries, throttles and API errors",
       "description": "",
@@ -1006,8 +823,8 @@
         "uid": "${ds_prom}"
       },
       "gridPos": {
-        "x": 12,
-        "y": 64,
+        "x": 0,
+        "y": 56,
         "w": 12,
         "h": 8
       },
@@ -1061,7 +878,7 @@
       }
     },
     {
-      "id": 19,
+      "id": 16,
       "type": "timeseries",
       "title": "DynamoDB capacity units consumed per second (manicp, successful calls)",
       "description": "",
@@ -1070,8 +887,8 @@
         "uid": "${ds_prom}"
       },
       "gridPos": {
-        "x": 0,
-        "y": 72,
+        "x": 12,
+        "y": 56,
         "w": 12,
         "h": 8
       },
@@ -1089,52 +906,6 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": {
-            "fillOpacity": 8,
-            "lineWidth": 1
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      }
-    },
-    {
-      "id": 20,
-      "type": "timeseries",
-      "title": "DynamoDB transaction cancel reasons per second",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${ds_prom}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 72,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "expr": "sum by (code) (rate(manicp_dynamo_txn_cancel_reasons_total{run_id=\"$run_id\"}[$__rate_interval]))",
-          "legendFormat": "{{code}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${ds_prom}"
-          },
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "ops",
           "custom": {
             "fillOpacity": 8,
             "lineWidth": 1

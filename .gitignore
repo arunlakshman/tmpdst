@@ -1,2 +1,5 @@
 .DS_Store
 results/*
+/manicp
+__pycache__/
+*.pyc

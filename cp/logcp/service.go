@@ -189,8 +189,7 @@ func (s *Service) CommitSegment(ctx context.Context, op core.CommitSegment) (cor
 	if err != nil {
 		return core.CommitSegmentResp{}, core.OK, err
 	}
-	resp, _ := d.Resp.(core.CommitSegmentResp)
-	return resp, d.Err, nil
+	return core.RespAs[core.CommitSegmentResp](d), d.Err, nil
 }
 
 // CreateTopic implements cp.Store.
@@ -212,8 +211,7 @@ func (s *Service) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, 
 		return core.LookupResp{}, core.OK, err
 	}
 	d, err := s.app.Lookup(op)
-	resp, _ := d.Resp.(core.LookupResp)
-	return resp, d.Err, err
+	return core.RespAs[core.LookupResp](d), d.Err, err
 }
 
 // DescribeTopics implements cp.Store, fresh like Lookup.
@@ -222,8 +220,7 @@ func (s *Service) DescribeTopics(ctx context.Context, op core.DescribeTopics) (c
 		return core.DescribeTopicsResp{}, err
 	}
 	d, err := s.app.Describe(op)
-	resp, _ := d.Resp.(core.DescribeTopicsResp)
-	return resp, err
+	return core.RespAs[core.DescribeTopicsResp](d), err
 }
 
 // End is the next offset of tp, fresh like Lookup.

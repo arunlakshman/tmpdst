@@ -26,7 +26,7 @@ Suggested waves: **P0 → P1 → P2 → P3 → P4**.
 | **P3** | Split Phase / Extract Function on hot paths | Makes Extract Class safe |
 | **P4** | Extract Class / polymorphism / ACL finish | Structure after seams exist |
 
-**Next up:** P1 Resp type-assert boilerplate.
+**Next up:** P2 — pick one fork (logsm↔logcp dynlog/replica, cmd boot, or shared binary reader).
 
 ---
 
@@ -71,7 +71,7 @@ Bounded-context merge, Extract Class on Broker/Service/kernel, Dynamo ACL — th
 - [x] ~~`fieldOf` / fact getters — **Move Function** / **Extract Function** — echo, kafka oracle, `sys/prod/seglog`, metrics~~ (`core.Fact.Field`)
 - [x] ~~`sample` / TwoSpeed — **Pull Up Method** / **Parameterize Function** — fakeio, logengine, echo/kafka config~~ (use `TwoSpeed.Sample`; echo/kafka `slow()` ctor dupes left)
 - [x] ~~FNV helpers if duplicated — **Move Function** — broker hash, netsim, etc.~~ (`core.FnvU64`; echo/veritas naive hashers left)
-- [ ] Resp type-assert boilerplate — **Extract Function** / **Parameterize Function** — logsm store, applier store, memstore, logcp
+- [x] ~~Resp type-assert boilerplate — **Extract Function** / **Parameterize Function** — logsm store, applier store, memstore, logcp~~ (`core.RespAs`)
 
 **VO landing order:** (1) `TopicPartition` → (2) `KafkaCode` → (3) Slot/position IDs → (4) optional key wrappers at Dynamo/S3 edge.
 
@@ -212,8 +212,8 @@ After P1–P3 seams exist.
 ## Suggested calendar
 
 1. **Now:** clear P0. *(done — tests green on touched packages)*
-2. **Next:** P1 Resp type-assert boilerplate (then P2; **test + green per item/commit**).
-3. **Then:** P2 pick one fork (**test + green per item/commit**).
+2. **P1 VO helpers:** done.
+3. **Next:** P2 pick one fork (**test + green per item/commit**).
 4. **Then:** P3 Split Phase/Extract Function only where P1 types exist (**test + green per item/commit**).
 5. **Last:** P4 Extract Class / polymorphism / ACL / formal bounded contexts (**test + green per item/commit**).
 

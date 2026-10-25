@@ -30,8 +30,7 @@ func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.
 	if err != nil {
 		return core.CommitSegmentResp{}, core.OK, err
 	}
-	resp, _ := d.Resp.(core.CommitSegmentResp)
-	return resp, d.Err, nil
+	return core.RespAs[core.CommitSegmentResp](d), d.Err, nil
 }
 
 // Lookup implements cp.Store.
@@ -40,15 +39,13 @@ func (s *Store) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, co
 	if err != nil {
 		return core.LookupResp{}, core.OK, err
 	}
-	resp, _ := d.Resp.(core.LookupResp)
-	return resp, d.Err, nil
+	return core.RespAs[core.LookupResp](d), d.Err, nil
 }
 
 // DescribeTopics implements cp.Store.
 func (s *Store) DescribeTopics(ctx context.Context, op core.DescribeTopics) (core.DescribeTopicsResp, error) {
 	d, err := s.R.Read(ctx, op)
-	resp, _ := d.Resp.(core.DescribeTopicsResp)
-	return resp, err
+	return core.RespAs[core.DescribeTopicsResp](d), err
 }
 
 // CreateTopic implements cp.Store.

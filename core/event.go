@@ -116,6 +116,12 @@ type CPDone struct {
 	Outcome Outcome
 }
 
+// RespAs returns d.Resp asserted to T, or the zero value.
+func RespAs[T any](d CPDone) T {
+	r, _ := d.Resp.(T)
+	return r
+}
+
 func (Started) isEvent()       {}
 func (Stop) isEvent()          {}
 func (DialDone) isEvent()      {}

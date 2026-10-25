@@ -34,22 +34,19 @@ func (s *Store) exec(ctx context.Context, op core.CPOp) (core.CPDone, error) {
 // CommitSegment implements cp.Store.
 func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
 	d, err := s.exec(ctx, op)
-	r, _ := d.Resp.(core.CommitSegmentResp)
-	return r, d.Err, err
+	return core.RespAs[core.CommitSegmentResp](d), d.Err, err
 }
 
 // Lookup implements cp.Store.
 func (s *Store) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, core.ErrCode, error) {
 	d, err := s.exec(ctx, op)
-	r, _ := d.Resp.(core.LookupResp)
-	return r, d.Err, err
+	return core.RespAs[core.LookupResp](d), d.Err, err
 }
 
 // DescribeTopics implements cp.Store.
 func (s *Store) DescribeTopics(ctx context.Context, op core.DescribeTopics) (core.DescribeTopicsResp, error) {
 	d, err := s.exec(ctx, op)
-	r, _ := d.Resp.(core.DescribeTopicsResp)
-	return r, err
+	return core.RespAs[core.DescribeTopicsResp](d), err
 }
 
 // CreateTopic implements cp.Store.

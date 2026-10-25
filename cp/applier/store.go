@@ -27,22 +27,19 @@ func (s *Store) CommitSegment(_ context.Context, op core.CommitSegment) (core.Co
 	s.next++
 	d, err := s.A.Commit(slot, op)
 	s.mu.Unlock()
-	resp, _ := d.Resp.(core.CommitSegmentResp)
-	return resp, d.Err, err
+	return core.RespAs[core.CommitSegmentResp](d), d.Err, err
 }
 
 // Lookup implements cp.Store.
 func (s *Store) Lookup(_ context.Context, op core.Lookup) (core.LookupResp, core.ErrCode, error) {
 	d, err := s.A.Lookup(op)
-	resp, _ := d.Resp.(core.LookupResp)
-	return resp, d.Err, err
+	return core.RespAs[core.LookupResp](d), d.Err, err
 }
 
 // DescribeTopics implements cp.Store.
 func (s *Store) DescribeTopics(_ context.Context, op core.DescribeTopics) (core.DescribeTopicsResp, error) {
 	d, err := s.A.Describe(op)
-	resp, _ := d.Resp.(core.DescribeTopicsResp)
-	return resp, err
+	return core.RespAs[core.DescribeTopicsResp](d), err
 }
 
 // CreateTopic implements cp.Store.

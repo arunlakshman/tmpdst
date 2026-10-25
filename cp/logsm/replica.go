@@ -205,13 +205,30 @@ func (r *Replica) applyLocked(n int64, e Entry) {
 // pull reads the log from the first unapplied slot and applies what it can.
 // Concurrent callers share one read: if one is in flight, or the last one was
 // less than TailPoll ago (and !force), pull does nothing.
-func (r *Replica) pull(ctx context.Context, force bool) {
+// pullPaced reads the tail unless a pull is already in flight or TailPoll has
+// not yet elapsed since the last pull.
+func (r *Replica) pullPaced(ctx context.Context) {
 	r.mu.Lock()
 	now := r.cfg.Now()
-	if r.syncing || (!force && now-r.lastPul < r.cfg.TailPoll) {
+	if r.syncing || now-r.lastPul < r.cfg.TailPoll {
 		r.mu.Unlock()
 		return
 	}
+	r.pullLocked(ctx, now)
+}
+
+// pullNow reads the tail immediately unless a pull is already in flight.
+func (r *Replica) pullNow(ctx context.Context) {
+	r.mu.Lock()
+	if r.syncing {
+		r.mu.Unlock()
+		return
+	}
+	r.pullLocked(ctx, r.cfg.Now())
+}
+
+// pullLocked runs the Read under r.mu held on entry; it releases and reacquires.
+func (r *Replica) pullLocked(ctx context.Context, now int64) {
 	r.syncing, r.lastPul = true, now
 	from := r.applied
 	r.mu.Unlock()
@@ -256,16 +273,26 @@ func (r *Replica) fill(ctx context.Context, slot int64) {
 	r.observeLocked(slot, cur)
 }
 
-// SyncTo applies the log through slot target-1: it reads the tail, waits for
-// slots still in flight, and fills a hole that stays empty past HoleAfter.
-// force makes the first read immediate. It returns ctx's error only.
-func (r *Replica) SyncTo(ctx context.Context, target int64, force bool) error {
+// SyncTo applies the log through slot target-1: it reads the tail (paced),
+// waits for slots still in flight, and fills a hole that stays empty past
+// HoleAfter. It returns ctx's error only.
+func (r *Replica) SyncTo(ctx context.Context, target int64) error {
+	return r.syncTo(ctx, target, r.pullPaced)
+}
+
+// SyncToNow is SyncTo with an immediate first pull (not paced by TailPoll).
+func (r *Replica) SyncToNow(ctx context.Context, target int64) error {
+	return r.syncTo(ctx, target, r.pullNow)
+}
+
+func (r *Replica) syncTo(ctx context.Context, target int64, firstPull func(context.Context)) error {
+	pull := firstPull
 	for {
 		if r.Applied() >= target {
 			return nil
 		}
-		r.pull(ctx, force)
-		force = false
+		pull(ctx)
+		pull = r.pullPaced
 		if r.Applied() >= target {
 			return nil
 		}
@@ -281,7 +308,7 @@ func (r *Replica) SyncTo(ctx context.Context, target int64, force bool) error {
 
 // Await returns the result of the local append at slot n once n is applied.
 func (r *Replica) Await(ctx context.Context, n int64) (core.CPDone, error) {
-	if err := r.SyncTo(ctx, n+1, false); err != nil {
+	if err := r.SyncTo(ctx, n+1); err != nil {
 		r.unwatch(n)
 		return core.CPDone{}, err
 	}
@@ -303,7 +330,7 @@ func (r *Replica) Read(ctx context.Context, op core.CPOp) (core.CPDone, error) {
 		}
 		tail, err = r.cfg.Log.CheckTail(ctx)
 	}
-	if err := r.SyncTo(ctx, tail, true); err != nil {
+	if err := r.SyncToNow(ctx, tail); err != nil {
 		return core.CPDone{}, err
 	}
 	return r.Local(op), nil
@@ -319,7 +346,7 @@ func (r *Replica) Local(op core.CPOp) core.CPDone {
 // Tick is one step of tailing: a paced tail read, and a hole fill if slots
 // are stuck behind an empty one for too long.
 func (r *Replica) Tick(ctx context.Context) {
-	r.pull(ctx, false)
+	r.pullPaced(ctx)
 	if r.pending() {
 		if slot, due := r.holeDue(); due {
 			r.fill(ctx, slot)

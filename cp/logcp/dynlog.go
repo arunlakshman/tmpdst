@@ -146,7 +146,7 @@ func (l *DynLog) Read(ctx context.Context, from int64, limit int) ([]Slot, error
 	var out []Slot
 	var start map[string]types.AttributeValue
 	for len(out) < limit {
-		page, err := l.query(ctx, slotKey(max(from, 0)), true, int32(limit-len(out)), start, true)
+		page, err := l.query(ctx, slotKey(max(from, 0)), true, int32(limit-len(out)), start)
 		if err != nil {
 			return out, err
 		}
@@ -164,14 +164,14 @@ func (l *DynLog) Read(ctx context.Context, from int64, limit int) ([]Slot, error
 	return out, nil
 }
 
-func (l *DynLog) query(ctx context.Context, lo string, forward bool, limit int32, start map[string]types.AttributeValue, consistent bool) (*dynamodb.QueryOutput, error) {
+func (l *DynLog) query(ctx context.Context, lo string, forward bool, limit int32, start map[string]types.AttributeValue) (*dynamodb.QueryOutput, error) {
 	return l.db.Query(ctx, &dynamodb.QueryInput{
 		TableName:              &l.table,
 		KeyConditionExpression: aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":p": sv(logPK), ":lo": sv(lo), ":hi": sv(slotMax),
 		},
-		ConsistentRead:    aws.Bool(consistent),
+		ConsistentRead:    aws.Bool(true),
 		ScanIndexForward:  aws.Bool(forward),
 		Limit:             aws.Int32(limit),
 		ExclusiveStartKey: start,
@@ -180,7 +180,7 @@ func (l *DynLog) query(ctx context.Context, lo string, forward bool, limit int32
 
 // CheckTail implements Log with a consistent descending Query, Limit 1.
 func (l *DynLog) CheckTail(ctx context.Context) (int64, error) {
-	page, err := l.query(ctx, slotKey(0), false, 1, nil, true)
+	page, err := l.query(ctx, slotKey(0), false, 1, nil)
 	if err != nil || len(page.Items) == 0 {
 		return 0, err
 	}

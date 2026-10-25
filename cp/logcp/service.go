@@ -247,5 +247,3 @@ func (s *Service) Healthy() error {
 
 // since is the age of a clock reading.
 func (s *Service) since(t int64) time.Duration { return time.Duration(s.env.Now() - t) }
-
-func asErr[T error](err error, target *T) bool { return errors.As(err, target) }

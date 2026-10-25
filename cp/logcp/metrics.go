@@ -92,21 +92,31 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 
 func secs(d time.Duration) float64 { return d.Seconds() }
 
-func (m *Metrics) attempt(result string, d time.Duration, cmds, bytes int) {
+func (m *Metrics) attemptWon(d time.Duration, cmds, bytes int) {
 	if m == nil {
 		return
 	}
-	m.attempts.WithLabelValues(result).Inc()
-	switch result {
-	case "won":
-		m.appendSec.Observe(secs(d))
-		m.slots.Inc()
-		m.cmdsPer.Observe(float64(cmds))
-		m.entryBytes.Observe(float64(bytes))
-	case "lost":
-		m.appendSec.Observe(secs(d))
-		m.lost.Inc()
+	m.attempts.WithLabelValues("won").Inc()
+	m.appendSec.Observe(secs(d))
+	m.slots.Inc()
+	m.cmdsPer.Observe(float64(cmds))
+	m.entryBytes.Observe(float64(bytes))
+}
+
+func (m *Metrics) attemptLost(d time.Duration) {
+	if m == nil {
+		return
 	}
+	m.attempts.WithLabelValues("lost").Inc()
+	m.appendSec.Observe(secs(d))
+	m.lost.Inc()
+}
+
+func (m *Metrics) attemptError() {
+	if m == nil {
+		return
+	}
+	m.attempts.WithLabelValues("error").Inc()
 }
 
 func (m *Metrics) holeFill() {

@@ -143,11 +143,11 @@ func (w *Workload) Step(ev core.Event) []core.Action {
 		}
 	case core.ConnClosed:
 		if c := w.byConn(e.Conn); c != nil {
-			acts = w.lost(c, "conn_closed", false)
+			acts = w.lostPeerClosed(c, "conn_closed")
 		}
 	case core.SendDone:
 		if c := w.byConn(e.Conn); c != nil && e.Err != core.OK && c.sendReq == e.Req {
-			acts = w.lost(c, "send_failed", true)
+			acts = w.lostAbort(c, "send_failed")
 		}
 	}
 	return acts
@@ -211,7 +211,7 @@ func (w *Workload) onTimer(now core.Time, e core.TimerFired) []core.Action {
 			if e.Gen != c.reqGen || c.state != csBusy {
 				return nil
 			}
-			return w.lost(c, "timeout", true)
+			return w.lostAbort(c, "timeout")
 		}
 	}
 	return nil
@@ -286,7 +286,7 @@ func (w *Workload) onBytes(now core.Time, c *client, data []byte) []core.Action 
 		acts = append(acts, w.reply(c, f)...)
 	}
 	if bad && c.conn != 0 {
-		return append(acts, w.lost(c, "bad_stream", true)...)
+		return append(acts, w.lostAbort(c, "bad_stream")...)
 	}
 	return acts
 }
@@ -325,11 +325,15 @@ func (c *client) record(off int64, payload string) {
 
 // lost handles a dead or unusable connection: the outstanding request's fate is
 // unknown, and the client reconnects with backoff.
-func (w *Workload) lost(c *client, why string, abort bool) []core.Action {
-	var acts []core.Action
-	if abort {
-		acts = append(acts, core.CloseConn{Conn: c.conn, Abort: true})
-	}
+func (w *Workload) lostPeerClosed(c *client, why string) []core.Action {
+	return w.lost(c, why, nil)
+}
+
+func (w *Workload) lostAbort(c *client, why string) []core.Action {
+	return w.lost(c, why, []core.Action{core.CloseConn{Conn: c.conn, Abort: true}})
+}
+
+func (w *Workload) lost(c *client, why string, acts []core.Action) []core.Action {
 	if p := c.pend; p != nil {
 		out := sim.OpIndeterminate
 		if p.get {

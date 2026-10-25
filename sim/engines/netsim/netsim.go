@@ -608,23 +608,34 @@ func (h *hasher) items(its []item) {
 // and links (partitions, pair latency). FNV is one running stream, so a pair's
 // fold is reused only while the state it starts from is unchanged: a changed
 // pair rehashes itself and the pairs after it.
-func (e *Engine) StateHash() uint64 { return e.hash(true) }
-
-// fullStateHash is StateHash without the per-pair cache.
-func (e *Engine) fullStateHash() uint64 { return e.hash(false) }
-
-func (e *Engine) hash(cached bool) uint64 {
+func (e *Engine) StateHash() uint64 {
 	h := hasher(14695981039346656037)
 	h.u64(uint64(len(e.pairs)))
 	for _, p := range e.pairs {
-		if cached && p.ok && p.in == uint64(h) {
+		if p.ok && p.in == uint64(h) {
 			h = hasher(p.out)
 			continue
 		}
 		p.in = uint64(h)
 		h.pair(p)
-		p.out, p.ok = uint64(h), cached
+		p.out, p.ok = uint64(h), true
 	}
+	return e.finishHash(h)
+}
+
+// fullStateHash is StateHash without the per-pair cache.
+func (e *Engine) fullStateHash() uint64 {
+	h := hasher(14695981039346656037)
+	h.u64(uint64(len(e.pairs)))
+	for _, p := range e.pairs {
+		p.in = uint64(h)
+		h.pair(p)
+		p.out, p.ok = uint64(h), false
+	}
+	return e.finishHash(h)
+}
+
+func (e *Engine) finishHash(h hasher) uint64 {
 	h.u64(uint64(len(e.links)))
 	for _, l := range e.links {
 		h.str(string(l.a))

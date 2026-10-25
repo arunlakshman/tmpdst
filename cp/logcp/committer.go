@@ -227,10 +227,10 @@ func (s *Service) appendGroup(ctx context.Context, e Entry, ps []*pending) {
 		}
 		s.rep.observe(n, cur)
 		if won || cur.ID == e.ID {
-			s.m.attempt("won", time.Since(t0), len(e.Cmds), size)
+			s.m.attemptWon(time.Since(t0), len(e.Cmds), size)
 			return
 		}
-		s.m.attempt("lost", time.Since(t0), 0, 0)
+		s.m.attemptLost(time.Since(t0))
 		s.rep.pull(ctx)
 	}
 }
@@ -260,7 +260,7 @@ func (s *Service) writeSlot(ctx context.Context, n int64, e Entry) (cur Entry, w
 		if err == nil || errors.Is(err, ErrEntryTooLarge) || errors.Is(err, ErrTrimmed) {
 			return cur, won, err
 		}
-		s.m.attempt("error", 0, 0, 0)
+		s.m.attemptError()
 		if err := s.env.sleep(ctx, backoff); err != nil {
 			return Entry{}, false, err
 		}

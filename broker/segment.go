@@ -20,12 +20,6 @@ type pbatch struct {
 	answered bool // BugEarlyAck already answered it
 }
 
-// commitItems is what the DynamoDB CP's commit transaction costs for the open
-// segment (cp/doc.go): one segment item and one range run item per distinct
-// partition. Batches do not count, and grown topics are not counted: they are
-// created before use, and the partition cap keeps spare items for them.
-func (o *openSegment) commitItems() int { return 1 + len(o.parts) }
-
 // openSegment is the buffer that the next flush seals.
 type openSegment struct {
 	batches []*pbatch
@@ -181,7 +175,7 @@ func (b *Broker) onPutDone(s *segment, e core.ObjPutDone) []core.Action {
 		return b.failSegment(s, errUnknownServer)
 	}
 	if e.Err != core.OK {
-		return b.retry(s, segPut)
+		return b.retryPut(s)
 	}
 	attempts := s.attempts + 1
 	s.state, s.req, s.attempts, s.putDoneAt = segPutDone, 0, 0, b.now
@@ -257,7 +251,7 @@ func (b *Broker) onCommit(s *segment, e core.CPDone) []core.Action {
 	}
 	// MaybeApplied or a transient error: resend the identical request under
 	// the same key until definite; a replay returns the same answer.
-	return b.retry(s, segCommit)
+	return b.retryCommit(s)
 }
 
 // committed answers every batch of s from the control plane's verdicts.
@@ -312,11 +306,8 @@ func (b *Broker) failSegment(s *segment, code int16) []core.Action {
 	return append(acts, b.endSegment(s)...)
 }
 
-// retry backs off and repeats the PUT or commit under the same key.
-func (b *Broker) retry(s *segment, from segState) []core.Action {
-	if from == segCommit {
-		return b.retryCommit(s)
-	}
+// retryPut backs off and repeats the PUT under the same key.
+func (b *Broker) retryPut(s *segment) []core.Action {
 	if s.attempts++; s.attempts >= b.cfg.MaxAttempts {
 		// The write may still land later: unbounded MaybeApplied (decision 15).
 		b.env.Reachable("broker: segment retries exhausted")

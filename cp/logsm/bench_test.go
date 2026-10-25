@@ -114,7 +114,7 @@ func TestBacklogReplay(t *testing.T) {
 		}
 		r := NewReplica(Config{Log: l, Writer: "r", ReadMax: 1000})
 		start := time.Now()
-		if err := r.SyncTo(bg, int64(rate*60), true); err != nil {
+		if err := r.SyncToNow(bg, int64(rate*60)); err != nil {
 			t.Fatal(err)
 		}
 		d := time.Since(start)

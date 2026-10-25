@@ -47,7 +47,7 @@ func (c *Committer) Do(ctx context.Context, e Entry) (core.CPDone, error) {
 		}
 		c.r.unwatch(n)
 		c.r.lostSlot()
-		c.r.pull(ctx, false) // learn the new tail (shared, paced) before retrying
+		c.r.pullPaced(ctx) // learn the new tail (shared, paced) before retrying
 	}
 }
 

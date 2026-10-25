@@ -184,7 +184,7 @@ func growTopic(tx Tx, seen map[string]int32, topic string, n int32) {
 		cur = int32(getUvarint(tx.Get(topicKey(topic))))
 	}
 	if n > cur {
-		cur = max(cur, n)
+		cur = n
 		tx.Set(topicKey(topic), putUvarintVal(int64(cur)))
 	}
 	seen[topic] = cur

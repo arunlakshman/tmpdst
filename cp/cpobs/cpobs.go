@@ -33,7 +33,6 @@ type Metrics struct {
 
 	handler  *prometheus.HistogramVec // op
 	dyn      *prometheus.HistogramVec // call
-	prep     *prometheus.HistogramVec // stage
 	body     *prometheus.HistogramVec // op
 	inflight prometheus.Gauge
 

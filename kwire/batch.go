@@ -144,30 +144,48 @@ func (b Batch) Codec() int { return int(b.Attributes & 7) }
 // It rejects magic != 2 with ErrUnsupportedBatch, a valid-CRC batch with a
 // codec id above CodecZstd with ErrUnknownCodec, and structural or CRC
 // failures with ErrCorrupt. The returned Batch aliases b.
-func ParseBatch(b []byte) (Batch, error) { return parseBatch(b, true) }
+func ParseBatch(b []byte) (Batch, error) { return parseBatch(b) }
 
 // ParseBatchUnverified is ParseBatch without the CRC check. It exists only so
 // a broker mutant (broker.BugSkipProduceCRC) can model a missing check; real
 // code must use ParseBatch.
-func ParseBatchUnverified(b []byte) (Batch, error) { return parseBatch(b, false) }
+func ParseBatchUnverified(b []byte) (Batch, error) { return parseBatchUnverified(b) }
 
-func parseBatch(b []byte, verifyCRC bool) (Batch, error) {
-	var out Batch
+func parseBatch(b []byte) (Batch, error) {
+	if err := checkBatchShape(b); err != nil {
+		return Batch{}, err
+	}
+	if crc32c(b[crcStart:]) != binary.BigEndian.Uint32(b[17:]) {
+		return Batch{}, fmt.Errorf("%w: crc mismatch", ErrCorrupt)
+	}
+	return decodeBatch(b)
+}
+
+func parseBatchUnverified(b []byte) (Batch, error) {
+	if err := checkBatchShape(b); err != nil {
+		return Batch{}, err
+	}
+	return decodeBatch(b)
+}
+
+func checkBatchShape(b []byte) error {
 	if len(b) < 17 {
-		return out, fmt.Errorf("%w: %d bytes", ErrCorrupt, len(b))
+		return fmt.Errorf("%w: %d bytes", ErrCorrupt, len(b))
 	}
 	if m := int8(b[16]); m != 2 {
-		return out, fmt.Errorf("%w: magic %d", ErrUnsupportedBatch, m)
+		return fmt.Errorf("%w: magic %d", ErrUnsupportedBatch, m)
 	}
 	if len(b) < batchHeaderLen {
-		return out, fmt.Errorf("%w: %d bytes", ErrCorrupt, len(b))
+		return fmt.Errorf("%w: %d bytes", ErrCorrupt, len(b))
 	}
 	if l := int32(binary.BigEndian.Uint32(b[8:])); l < batchMinLength || int64(l) != int64(len(b))-12 {
-		return out, fmt.Errorf("%w: length %d for %d bytes", ErrCorrupt, l, len(b))
+		return fmt.Errorf("%w: length %d for %d bytes", ErrCorrupt, l, len(b))
 	}
-	if verifyCRC && crc32c(b[crcStart:]) != binary.BigEndian.Uint32(b[17:]) {
-		return out, fmt.Errorf("%w: crc mismatch", ErrCorrupt)
-	}
+	return nil
+}
+
+func decodeBatch(b []byte) (Batch, error) {
+	var out Batch
 	if c := binary.BigEndian.Uint16(b[21:]) & 7; c > CodecZstd {
 		return out, fmt.Errorf("%w: %d", ErrUnknownCodec, c)
 	}

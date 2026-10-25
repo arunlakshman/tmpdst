@@ -185,19 +185,21 @@ func (b *Broker) onOpCP(o *op, e core.CPDone) []core.Action {
 
 // handle runs a fresh request.
 func (b *Broker) handle(s *slot, req core.Request) []core.Action {
-	acts := b.dispatch(s, req, false)
+	acts := b.dispatch(s, req)
 	b.finishPart(s) // release the construction guard
 	return acts
 }
 
-// dispatch runs a request. resolved is true once a topic-cache refresh has
-// been tried, so it is not tried again.
-func (b *Broker) dispatch(s *slot, req core.Request, resolved bool) []core.Action {
-	if !resolved {
-		if names := b.missing(req); len(names) > 0 {
-			return b.startOp(&op{kind: opRefresh, s: s, names: names, creq: req})
-		}
+// dispatch runs a request, refreshing the topic cache first when needed.
+func (b *Broker) dispatch(s *slot, req core.Request) []core.Action {
+	if names := b.missing(req); len(names) > 0 {
+		return b.startOp(&op{kind: opRefresh, s: s, names: names, creq: req})
 	}
+	return b.dispatchAfterRefresh(s, req)
+}
+
+// dispatchAfterRefresh runs a request without trying another topic-cache refresh.
+func (b *Broker) dispatchAfterRefresh(s *slot, req core.Request) []core.Action {
 	switch r := req.(type) {
 	case *kmsg.MetadataRequest:
 		return b.metadata(s, r)
@@ -221,7 +223,7 @@ func (b *Broker) resume(o *op) []core.Action {
 	b.dropOp(o)
 	var acts []core.Action
 	if !o.s.conn.closed {
-		acts = b.dispatch(o.s, o.creq, true)
+		acts = b.dispatchAfterRefresh(o.s, o.creq)
 	}
 	b.finishPart(o.s)
 	return acts

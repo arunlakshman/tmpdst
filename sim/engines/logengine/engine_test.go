@@ -168,7 +168,7 @@ func TestTakeoverReplayAndFailback(t *testing.T) {
 func TestTrimWindowAndRestore(t *testing.T) {
 	e, c, a := rig(sim.LogParams{CkptEvery: 4, KeepSlots: 2, TrimStride: 4}, 5)
 	var first []core.BatchRange
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		send(e, c, a, core.ReqID(i+1), commit("s"+string(rune('a'+i)), 2))
 		c.RunUntil(at(int64(100 * (i + 1))))
 	}
@@ -198,11 +198,11 @@ func TestTrimWindowAndRestore(t *testing.T) {
 // Lost and refused Puts: every command is still committed exactly once.
 func TestLossyPuts(t *testing.T) {
 	e, c, a := rig(sim.LogParams{PutLost: 0.4, PutFail: 0.3, K: 4, GroupMax: 2}, 6)
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		send(e, c, a, core.ReqID(i+1), commit("k"+string(rune('a'+i)), 1))
 	}
 	c.RunUntil(at(20000))
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		if d := done(t, c, core.ReqID(i+1)); d.Err != core.OK {
 			t.Fatal(i, d)
 		}
@@ -215,7 +215,7 @@ func TestLossyPuts(t *testing.T) {
 func TestDeterministic(t *testing.T) {
 	run := func() string {
 		e, c, a := rig(sim.LogParams{PutLost: 0.2, PutFail: 0.2, StallProb: 0.01, CrashProb: 0.01}, 9)
-		for i := 0; i < 20; i++ {
+		for i := range 20 {
 			send(e, c, a, core.ReqID(i+1), commit("k"+string(rune('a'+i)), 1))
 			c.RunUntil(at(int64(50 * (i + 1))))
 		}

@@ -147,10 +147,8 @@ func lockSeeds(t *testing.T, n int, mk func() capplier.KV) {
 	var failed, slots atomic.Int64
 	var wg sync.WaitGroup
 	next := make(chan uint64)
-	for w := 0; w < 4; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 4 {
+		wg.Go(func() {
 			for seed := range next {
 				res, err := lockSeed(seed, mk)
 				slots.Add(res.slots)
@@ -159,7 +157,7 @@ func lockSeeds(t *testing.T, n int, mk func() capplier.KV) {
 					t.Errorf("seed %d: %v", seed, err)
 				}
 			}
-		}()
+		})
 	}
 	for seed := uint64(1); seed <= uint64(n); seed++ {
 		next <- seed

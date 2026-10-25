@@ -209,7 +209,7 @@ func runSeedWith(seed uint64, mk func() Machine) (result, error) {
 	mem := NewMemLog()
 	log := &simLog{s: s, inner: mem}
 	var rs []*Replica
-	for i := 0; i < replicas; i++ {
+	for i := range replicas {
 		var m Machine
 		if mk != nil {
 			m = mk()
@@ -232,14 +232,14 @@ func runSeedWith(seed uint64, mk func() Machine) (result, error) {
 	var writers atomic.Int64
 	for i, r := range rs {
 		c := NewCommitter(r, writersPer)
-		for w := 0; w < writersPer; w++ {
+		for range writersPer {
 			writers.Add(1)
 			s.spawn(func() {
 				defer writers.Add(-1)
 				ctx, cancel := context.WithCancel(context.Background())
 				ctx = context.WithValue(ctx, crashKey{}, cancel)
 				defer cancel()
-				for n := 0; n < perWriter; n++ {
+				for range perWriter {
 					e := genCommand(s.rng)
 					d, err := c.Do(ctx, e)
 					mu.Lock()
@@ -415,10 +415,8 @@ func TestX2Seeds(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	next := make(chan uint64)
-	for w := 0; w < 4; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 4 {
+		wg.Go(func() {
 			for seed := range next {
 				res, err := runSeed(seed)
 				mu.Lock()
@@ -434,7 +432,7 @@ func TestX2Seeds(t *testing.T) {
 					t.Errorf("seed %d: %v (reproduce: LOGSM_SEED=%d go test ./cp/logsm -run TestX2Seed -v)", seed, err, seed)
 				}
 			}
-		}()
+		})
 	}
 	for seed := uint64(1); seed <= uint64(n); seed++ {
 		next <- seed

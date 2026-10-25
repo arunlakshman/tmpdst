@@ -25,7 +25,7 @@ func fullStack(t *testing.T) *stack {
 	if dy == "" || s3ep == "" {
 		t.Skip("MANIFESTER_DYNAMO_ENDPOINT and MANIFESTER_S3_ENDPOINT not set (scripts/it-up.sh)")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	db := dynamodb.New(dynamodb.Options{
 		Region:       "us-east-1",
@@ -36,7 +36,7 @@ func fullStack(t *testing.T) *stack {
 	if err := logcp.CreateTable(ctx, db, table); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = db.DeleteTable(context.Background(), &dynamodb.DeleteTableInput{TableName: &table}) })
+	t.Cleanup(func() { _, _ = db.DeleteTable(t.Context(), &dynamodb.DeleteTableInput{TableName: &table}) })
 	objs, err := s3store.New(ctx, s3store.Config{Endpoint: s3ep, Bucket: s3store.UniqueBucket(), PathStyle: true})
 	if err != nil {
 		t.Fatal(err)

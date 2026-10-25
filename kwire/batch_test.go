@@ -11,7 +11,7 @@ import (
 
 func sampleRecords(rng *xorshift, n int) []kmsg.Record {
 	var recs []kmsg.Record
-	for i := 0; i < n; i++ {
+	for i := range n {
 		r := kmsg.Record{Value: rng.bytes(rng.intn(30)), TimestampDelta64: int64(i * 3)}
 		if i%2 == 0 {
 			r.Key = rng.bytes(1 + rng.intn(5))
@@ -122,7 +122,7 @@ func TestSplitBatches(t *testing.T) {
 	rng := xorshift(99)
 	var parts [][]byte
 	var cat []byte
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		b, _ := BuildBatch(testParams, sampleRecords(&rng, 1+i))
 		parts = append(parts, b)
 		cat = append(cat, b...)

@@ -132,7 +132,7 @@ func (w *Workload) newBatches(c *client) {
 	p := &c.p
 	k := 1 + w.env.Intn(2)
 	first := w.env.Intn(len(w.tps))
-	for j := 0; j < k; j++ {
+	for j := range k {
 		idx := first
 		if j == 1 {
 			idx = (first + 1 + w.env.Intn(len(w.tps)-1)) % len(w.tps)

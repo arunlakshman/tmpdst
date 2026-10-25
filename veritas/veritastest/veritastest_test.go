@@ -135,7 +135,7 @@ func TestRun(t *testing.T) {
 
 func TestRand(t *testing.T) {
 	a, b := NewRand(7), NewRand(7)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		if x, y := a.Uint64(), b.Uint64(); x != y {
 			t.Fatal("not reproducible")
 		}

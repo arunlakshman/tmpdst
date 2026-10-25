@@ -26,7 +26,7 @@ func freeAddr(t *testing.T) string {
 func TestRunServesMemStoreAndStops(t *testing.T) {
 	addr, maddr := freeAddr(t), freeAddr(t)
 	manifest := filepath.Join(t.TempDir(), "m.json")
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	var logs bytes.Buffer
 	done := make(chan int, 1)
@@ -85,14 +85,14 @@ func TestRunErrors(t *testing.T) {
 	}
 	for name, args := range cases {
 		logs.Reset()
-		if code := run(context.Background(), args, &logs); code != 1 {
+		if code := run(t.Context(), args, &logs); code != 1 {
 			t.Errorf("%s: code %d", name, code)
 		}
 	}
-	if code := run(context.Background(), []string{"-bogus"}, &logs); code != 2 {
+	if code := run(t.Context(), []string{"-bogus"}, &logs); code != 2 {
 		t.Fatal(code)
 	}
-	if code := run(context.Background(), []string{"-h"}, &logs); code != 0 {
+	if code := run(t.Context(), []string{"-h"}, &logs); code != 0 {
 		t.Fatal(code)
 	}
 }
@@ -100,7 +100,7 @@ func TestRunErrors(t *testing.T) {
 func TestManifestFailureIsNotFatal(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "file")
 	_ = os.WriteFile(f, nil, 0o644)
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
 	defer cancel()
 	var logs bytes.Buffer
 	code := run(ctx, []string{"-addr", freeAddr(t), "-metrics-addr", "", "-manifest-out", filepath.Join(f, "x", "m.json")}, &logs)
@@ -120,7 +120,7 @@ func TestCreateTablesFailureExits(t *testing.T) {
 	defer srv.Close()
 	var logs bytes.Buffer
 	args := []string{"-store", kindLog, "-dynamo-endpoint", srv.URL, "-metrics-addr", "", "-create-tables", "-addr", freeAddr(t)}
-	if code := run(context.Background(), args, &logs); code != 1 {
+	if code := run(t.Context(), args, &logs); code != 1 {
 		t.Fatalf("create-tables against a failing endpoint must exit 1, got %d\n%s", code, logs.String())
 	}
 }
@@ -129,7 +129,7 @@ func TestUnknownStoreRejected(t *testing.T) {
 	var logs bytes.Buffer
 	for _, kind := range []string{"dynamo", "nope"} {
 		args := []string{"-store", kind, "-metrics-addr", "", "-addr", freeAddr(t)}
-		if code := run(context.Background(), args, &logs); code != 1 {
+		if code := run(t.Context(), args, &logs); code != 1 {
 			t.Fatalf("-store %s: code %d\n%s", kind, code, logs.String())
 		}
 	}

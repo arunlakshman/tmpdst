@@ -19,7 +19,7 @@ const (
 // same value, ~4x fewer dependent multiplies for the small integers that dominate.
 func FnvU64(x, v uint64) uint64 {
 	n := (bits.Len64(v) + 7) / 8
-	for i := 0; i < n; i++ {
+	for range n {
 		x = (x ^ (v & 0xff)) * fnvP1
 		v >>= 8
 	}

@@ -2,7 +2,6 @@ package runinfo
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"flag"
 	"net/http"
@@ -99,7 +98,7 @@ func TestManifestFile(t *testing.T) {
 	i := New("svc", "r2", -1)
 	m := NewManifest(i, fs, "eu-west-1", map[string]any{"segment_bytes": 5})
 	dir := t.TempDir()
-	dest, err := Write(context.Background(), m, WriteOptions{Dest: filepath.Join(dir, "sub") + "/"})
+	dest, err := Write(t.Context(), m, WriteOptions{Dest: filepath.Join(dir, "sub") + "/"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +117,7 @@ func TestManifestFile(t *testing.T) {
 
 func TestManifestS3DestErrorsAreReturned(t *testing.T) {
 	m := NewManifest(New("svc", "r", -1), flag.NewFlagSet("t", flag.ContinueOnError), "us-east-1", nil)
-	if _, err := Write(context.Background(), m, WriteOptions{Dest: "s3://bucketonly"}); err == nil {
+	if _, err := Write(t.Context(), m, WriteOptions{Dest: "s3://bucketonly"}); err == nil {
 		t.Fatal("want error")
 	}
 }
@@ -137,18 +136,18 @@ func TestIMDS(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	got := FetchIMDS(context.Background(), srv.URL, time.Second)
+	got := FetchIMDS(t.Context(), srv.URL, time.Second)
 	if got["instance_type"] != "c7g.xlarge" || len(got) != 1 {
 		t.Fatalf("%v", got)
 	}
-	if FetchIMDS(context.Background(), "http://127.0.0.1:1", 50*time.Millisecond) != nil {
+	if FetchIMDS(t.Context(), "http://127.0.0.1:1", 50*time.Millisecond) != nil {
 		t.Fatal("unreachable IMDS must give nil")
 	}
 }
 
 func TestWriteEmptyDestAndIMDS(t *testing.T) {
 	m := NewManifest(New("svc", "r3", -1), flag.NewFlagSet("t", flag.ContinueOnError), "", nil)
-	if d, err := Write(context.Background(), m, WriteOptions{}); d != "" || err != nil {
+	if d, err := Write(t.Context(), m, WriteOptions{}); d != "" || err != nil {
 		t.Fatal(d, err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -160,7 +159,7 @@ func TestWriteEmptyDestAndIMDS(t *testing.T) {
 	}))
 	defer srv.Close()
 	dest := filepath.Join(t.TempDir(), "m.json")
-	if _, err := Write(context.Background(), m, WriteOptions{Dest: dest, IMDS: true, IMDSEndpoint: srv.URL}); err != nil {
+	if _, err := Write(t.Context(), m, WriteOptions{Dest: dest, IMDS: true, IMDSEndpoint: srv.URL}); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(dest)
@@ -173,7 +172,7 @@ func TestWriteFileFailure(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "file")
 	_ = os.WriteFile(f, nil, 0o644) // test setup; the test asserts on the failure path below
 	m := NewManifest(New("svc", "r", -1), flag.NewFlagSet("t", flag.ContinueOnError), "", nil)
-	if _, err := Write(context.Background(), m, WriteOptions{Dest: filepath.Join(f, "sub", "m.json")}); err == nil {
+	if _, err := Write(t.Context(), m, WriteOptions{Dest: filepath.Join(f, "sub", "m.json")}); err == nil {
 		t.Fatal("want error")
 	}
 }
@@ -189,7 +188,7 @@ func TestWriteS3(t *testing.T) {
 	}))
 	defer srv.Close()
 	m := NewManifest(New("svc", "r4", -1), flag.NewFlagSet("t", flag.ContinueOnError), "us-east-1", nil)
-	dest, err := Write(context.Background(), m, WriteOptions{Dest: "s3://bkt/dir/", Region: "us-east-1", S3Endpoint: srv.URL, S3PathStyle: true})
+	dest, err := Write(t.Context(), m, WriteOptions{Dest: "s3://bkt/dir/", Region: "us-east-1", S3Endpoint: srv.URL, S3PathStyle: true})
 	if err != nil || dest != "s3://bkt/dir/svc-r4.json" {
 		t.Fatal(dest, err)
 	}

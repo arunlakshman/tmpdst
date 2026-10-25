@@ -65,7 +65,7 @@ func (r *splitMix) Between(lo, hi int64) int64 {
 func (r *splitMix) NewID() core.ID {
 	var id core.ID
 	a, b := r.Uint64(), r.Uint64()
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		id[i] = byte(a >> (8 * i))
 		id[8+i] = byte(b >> (8 * i))
 	}

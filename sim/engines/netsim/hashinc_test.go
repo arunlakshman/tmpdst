@@ -34,7 +34,7 @@ func TestIncrementalStateHashMatchesFull(t *testing.T) {
 				t.Fatalf("seed %d after %s: cached %016x, full %016x", seed, what, got, want)
 			}
 		}
-		for i := 0; i < 300; i++ {
+		for i := range 300 {
 			a := nodes[names[h.rnd.Intn(3)]]
 			what := ""
 			switch h.rnd.Intn(8) {
@@ -81,7 +81,7 @@ func TestIncrementalStateHashMatchesFull(t *testing.T) {
 			// Remember every conn the engine knows, to aim later actions.
 			conns = conns[:0]
 			for _, p := range h.eng.pairs {
-				for s := 0; s < 2; s++ {
+				for s := range 2 {
 					conns = append(conns, cn{p.end[s].ref, p.end[s].id})
 				}
 			}

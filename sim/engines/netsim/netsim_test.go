@@ -267,7 +267,7 @@ func TestOrderedDeliveryProperty(t *testing.T) {
 		a, b := h.boot("a"), h.boot("b")
 		ca, cb := h.connect(a, b)
 		var wantAB, wantBA []byte
-		for i := 0; i < 20; i++ {
+		for i := range 20 {
 			n := int(h.rnd.Intn(40))
 			buf := make([]byte, n)
 			for j := range buf {
@@ -447,7 +447,7 @@ func scenario(seed uint64) ([]string, uint64) {
 	a, b := h.boot("a"), h.boot("b")
 	d, _ := h.dial(a, "b")
 	cb := h.lastOpened("b")
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		h.send(a, d.Conn, []byte(fmt.Sprintf("msg-%d-%d", seed, i)))
 		h.send(b, cb, []byte("reply"))
 		h.runUntil(h.now + sim.Time(h.rnd.Intn(30000)))

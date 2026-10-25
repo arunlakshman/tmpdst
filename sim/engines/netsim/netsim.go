@@ -204,7 +204,7 @@ func (e *Engine) maybeRemove(p *pair) {
 	if !p.end[0].closed || !p.end[1].closed {
 		return
 	}
-	for s := 0; s < 2; s++ {
+	for s := range 2 {
 		delete(e.ends, endKey{p.end[s].ref.Node, p.end[s].id})
 	}
 	i := sort.Search(len(e.pairs), func(i int) bool { return e.pairs[i].id >= p.id })
@@ -458,11 +458,11 @@ func (e *Engine) closeConn(ctx sim.EngineCtx, from core.NodeRef, a core.CloseCon
 
 // netAbort resets a conn from the network: both open ends get Abort:true.
 func (e *Engine) netAbort(ctx sim.EngineCtx, p *pair) {
-	for di := 0; di < 2; di++ {
+	for di := range 2 {
 		e.clearDir(ctx, &p.dirs[di])
 		p.dirs[di].aborted = true
 	}
-	for to := 0; to < 2; to++ {
+	for to := range 2 {
 		if !p.end[to].closed {
 			e.sendRst(ctx, p, to, true, e.sample(ctx.Rand()))
 		}
@@ -552,7 +552,7 @@ func (e *Engine) OnCrash(ctx sim.EngineCtx, ref core.NodeRef) {
 	// Snapshot: maybeRemove edits e.pairs.
 	ps := append([]*pair(nil), e.pairs...)
 	for _, p := range ps {
-		for s := 0; s < 2; s++ {
+		for s := range 2 {
 			if p.end[s].ref != ref || p.end[s].closed {
 				continue
 			}
@@ -645,7 +645,7 @@ func (e *Engine) finishHash(h hasher) uint64 {
 
 func (h *hasher) pair(p *pair) {
 	h.u64(p.id)
-	for s := 0; s < 2; s++ {
+	for s := range 2 {
 		en := &p.end[s]
 		h.str(string(en.ref.Node))
 		h.u64(uint64(len(en.ref.Inc)))

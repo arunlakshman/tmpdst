@@ -55,16 +55,14 @@ func (h httpImpl) CreateTopic(ctx context.Context, name string, parts int32) (co
 }
 
 func errCode(err error) core.ErrCode {
-	var be *cpclient.Error
-	if errors.As(err, &be) {
+	if be, ok := errors.AsType[*cpclient.Error](err); ok {
 		return be.Code
 	}
 	return core.OK
 }
 
 func nonBusiness(err error) error {
-	var be *cpclient.Error
-	if errors.As(err, &be) {
+	if _, ok := errors.AsType[*cpclient.Error](err); ok {
 		return nil
 	}
 	return err

@@ -42,8 +42,7 @@ func classify(a core.IOAction, err error) (core.ErrCode, core.Outcome) {
 	case core.ObjPut, core.ObjDelete:
 		maybe = core.MaybeApplied
 	}
-	var se *Error
-	if errors.As(err, &se) {
+	if se, ok := errors.AsType[*Error](err); ok {
 		return se.Code, core.NotApplied
 	}
 	if isDial(err) {
@@ -53,8 +52,7 @@ func classify(a core.IOAction, err error) (core.ErrCode, core.Outcome) {
 	case "SlowDown", "ServiceUnavailable", "RequestLimitExceeded", "Throttling", "ThrottlingException":
 		return core.ErrUnavailable, core.NotApplied
 	}
-	var re *awshttp.ResponseError
-	if errors.As(err, &re) {
+	if re, ok := errors.AsType[*awshttp.ResponseError](err); ok {
 		switch st := re.HTTPStatusCode(); {
 		case st == http.StatusServiceUnavailable || st == http.StatusTooManyRequests:
 			return core.ErrUnavailable, core.NotApplied

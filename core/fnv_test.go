@@ -6,13 +6,13 @@ import "testing"
 // little-endian bytes one at a time.
 func TestFnvU64MatchesBytewise(t *testing.T) {
 	slow := func(x, v uint64) uint64 {
-		for i := 0; i < 8; i++ {
+		for i := range 8 {
 			x = (x ^ (v >> (8 * i) & 0xff)) * 1099511628211
 		}
 		return x
 	}
 	x := uint64(14695981039346656037)
-	for i := 0; i < 20000; i++ {
+	for i := range 20000 {
 		v := uint64(i) * 0x9e3779b97f4a7c15 >> (uint(i) % 64) // every byte width
 		if i%7 == 0 {
 			v = uint64(i)

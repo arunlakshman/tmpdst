@@ -1,7 +1,6 @@
 package cptest
 
 import (
-	"context"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -36,7 +35,7 @@ func logcpHTTP(t testing.TB, s *logcp.Service) impl {
 func fakeDBService(t testing.TB) *logcp.Service {
 	t.Helper()
 	db := fakedb.New()
-	if _, err := db.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("cp")}); err != nil {
+	if _, err := db.CreateTable(t.Context(), &dynamodb.CreateTableInput{TableName: aws.String("cp")}); err != nil {
 		t.Fatal(err)
 	}
 	cfg := logcptest.FastConfig("n0", 0, logcp.NewDynLog(db, "cp", logcp.DynLogOptions{}))

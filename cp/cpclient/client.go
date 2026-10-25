@@ -171,7 +171,7 @@ func (c *Client) do(ctx context.Context, name string, req, resp any) error {
 	n := len(c.bases)
 	start := int(c.cur.Load())
 	var err error
-	for i := 0; i < n; i++ {
+	for i := range n {
 		idx := (start + i) % n
 		if err = c.doAt(ctx, c.bases[idx], name, req, resp); !shouldFailover(ctx, err) {
 			if i > 0 && err == nil {

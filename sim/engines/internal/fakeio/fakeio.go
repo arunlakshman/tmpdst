@@ -242,7 +242,7 @@ func (c *Core) OnInternal(ctx sim.EngineCtx, body any) {
 func (c *Core) StateHash() uint64 {
 	h := uint64(14695981039346656037)
 	mix := func(v uint64) {
-		for i := 0; i < 8; i++ {
+		for i := range 8 {
 			h = (h ^ (v >> (8 * i) & 0xff)) * 1099511628211
 		}
 	}

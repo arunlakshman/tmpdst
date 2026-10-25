@@ -49,7 +49,7 @@ func modelSegment(r *rand.Rand, key string) core.CommitSegment {
 	for i := range parts {
 		parts[i] = int32(r.Intn(40000))
 	}
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		c.Batches = append(c.Batches, core.PendingBatch{
 			TP:      core.TP("load", parts[i%150]),
 			Records: 100, Loc: core.SegmentRef{Key: key, Off: int64(i) * 4096, Len: 4096},
@@ -94,10 +94,8 @@ func runModel(t *testing.T, rate int, dur time.Duration) modelRow {
 	var wg sync.WaitGroup
 	start := time.Now()
 	stop := start.Add(dur)
-	for c := 0; c < clients; c++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for c := range clients {
+		wg.Go(func() {
 			r := rand.New(rand.NewSource(int64(c) + 1))
 			every := time.Duration(float64(time.Second) * clients / float64(rate))
 			next := start.Add(time.Duration(r.Float64() * float64(every))) // random phase
@@ -118,11 +116,9 @@ func runModel(t *testing.T, rate int, dur time.Duration) modelRow {
 				lats = append(lats, float64(time.Since(sealed))/1e6)
 				mu.Unlock()
 			}
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() { // a consumer-ish read load: 100 fresh Lookups a second
-		defer wg.Done()
+	wg.Go(func() { // a consumer-ish read load: 100 fresh Lookups a second
 		r := rand.New(rand.NewSource(99))
 		for tick := time.NewTicker(10 * time.Millisecond); time.Now().Before(stop); <-tick.C {
 			t0 := time.Now()
@@ -132,7 +128,7 @@ func runModel(t *testing.T, rate int, dur time.Duration) modelRow {
 				mu.Unlock()
 			}
 		}
-	}()
+	})
 	wg.Wait()
 	el := time.Since(start).Seconds()
 	slices.Sort(lats)

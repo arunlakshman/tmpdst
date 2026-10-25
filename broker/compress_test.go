@@ -128,7 +128,7 @@ func TestFetchLimitsWithLargeCompressedBatches(t *testing.T) {
 	c := h.open(1)
 	big := []byte(nil)
 	var es []ent
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		big = opaque(t, kwire.CodecZstd, 10, 5000+i)
 		es = append(es, e("t", 0, big))
 	}

@@ -123,7 +123,7 @@ func (m latModel) modeA(ctx context.Context, db *fakedb.Fake, nrep, k int) (comm
 	}
 	var cs []*Committer
 	var rs []*Replica
-	for i := 0; i < nrep; i++ {
+	for i := range nrep {
 		r := NewReplica(Config{Log: NewDynLog(db, "log"), Writer: fmt.Sprint("r", i), HoleAfter: int64(250 * time.Millisecond), TailPoll: int64(10 * time.Millisecond)})
 		rs = append(rs, r)
 		cs = append(cs, NewCommitter(r, k))
@@ -161,10 +161,8 @@ func runBrokers(commit committerFn, rate float64, warm, dur time.Duration) ([]sa
 	var total, failed int
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	for b := 0; b < brokers; b++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for b := range brokers {
+		wg.Go(func() {
 			s := newSynth(uint64(100+b), 288, 150)
 			for next := start.Add(rand.N(period)); next.Before(end); next = next.Add(period) {
 				time.Sleep(time.Until(next))
@@ -186,7 +184,7 @@ func runBrokers(commit committerFn, rate float64, warm, dur time.Duration) ([]sa
 				}
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	return in, total, failed

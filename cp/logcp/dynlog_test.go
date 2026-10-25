@@ -87,7 +87,7 @@ func TestDynLogPagesThroughQueryLimit(t *testing.T) {
 	db := newFake(t)
 	db.PageSize = 2
 	l := NewDynLog(db, "cp", DynLogOptions{})
-	for n := int64(0); n < 7; n++ {
+	for n := range int64(7) {
 		_, _, _ = l.Append(bg, n, entryOf("e"))
 	}
 	got, err := l.Read(bg, 0, 100)
@@ -102,8 +102,7 @@ type noOld struct{ DB }
 
 func (n noOld) PutItem(ctx context.Context, in *dynamodb.PutItemInput, o ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
 	out, err := n.DB.PutItem(ctx, in, o...)
-	var cc *types.ConditionalCheckFailedException
-	if errors.As(err, &cc) {
+	if cc, ok := errors.AsType[*types.ConditionalCheckFailedException](err); ok {
 		cc.Item = nil
 	}
 	return out, err
@@ -161,7 +160,7 @@ func TestDynLogUnreadableLoser(t *testing.T) {
 
 func TestTrimLeavesTombstones(t *testing.T) {
 	logs(t, func(t *testing.T, l Log) {
-		for n := int64(0); n < 600; n++ {
+		for n := range int64(600) {
 			_, _, _ = l.Append(bg, n, entryOf("e", "k"))
 		}
 		tr := l.(Trimmer)

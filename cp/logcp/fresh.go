@@ -89,7 +89,7 @@ func (s *Service) runBatch(b *freshBatch) {
 
 func (s *Service) checkTail(ctx context.Context) (core.LogSlot, error) {
 	var err error
-	for try := 0; try < freshTries; try++ {
+	for try := range freshTries {
 		var n int64
 		if n, err = s.log.CheckTail(ctx); err == nil {
 			s.m.tailCheck(true)

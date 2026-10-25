@@ -91,7 +91,7 @@ func TestCode(t *testing.T) {
 func TestFlipEveryByte(t *testing.T) {
 	obj, _, _ := Encode(sample())
 	for i := range obj {
-		for bit := 0; bit < 8; bit++ {
+		for bit := range 8 {
 			c := append([]byte(nil), obj...)
 			c[i] ^= 1 << bit
 			_, err := Decode(c)
@@ -104,7 +104,7 @@ func TestFlipEveryByte(t *testing.T) {
 
 func TestTruncation(t *testing.T) {
 	obj, _, _ := Encode(sample())
-	for n := 0; n < len(obj); n++ {
+	for n := range obj {
 		if _, err := Decode(obj[:n]); !errors.Is(err, ErrCorrupt) {
 			t.Fatalf("len %d: %v", n, err)
 		}

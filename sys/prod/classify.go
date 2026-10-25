@@ -33,8 +33,7 @@ type MemClassifier struct{}
 
 // Classify maps an in-memory store error to an error code and outcome.
 func (MemClassifier) Classify(_ core.IOAction, err error) (core.ErrCode, core.Outcome) {
-	var ve *vsys.Error
-	if errors.As(err, &ve) {
+	if ve, ok := errors.AsType[*vsys.Error](err); ok {
 		return ve.Code, core.NotApplied
 	}
 	return core.ErrIO, core.MaybeApplied

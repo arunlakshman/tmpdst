@@ -116,12 +116,12 @@ func TestConformanceS3(t *testing.T) {
 	base := UniqueBucket()
 	n := 0
 	run(t, func() sys.ObjectStore {
-		s, err := New(context.Background(), Config{Endpoint: ep, Bucket: base, Prefix: fmt.Sprintf("c3-%d/", n), PathStyle: true})
+		s, err := New(t.Context(), Config{Endpoint: ep, Bucket: base, Prefix: fmt.Sprintf("c3-%d/", n), PathStyle: true})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if n == 0 {
-			if err := s.EnsureBucket(context.Background()); err != nil {
+			if err := s.EnsureBucket(t.Context()); err != nil {
 				t.Fatal(err)
 			}
 		}

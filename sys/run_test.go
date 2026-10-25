@@ -71,7 +71,7 @@ func TestStartedFirstControlBeatsData(t *testing.T) {
 		}
 		return nil
 	}
-	if err := Run(context.Background(), b, ex, f, core.NodeRef{}); err != nil {
+	if err := Run(t.Context(), b, ex, f, core.NodeRef{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := m.events[0].Body.(core.Started); !ok {
@@ -90,7 +90,7 @@ func TestTripRunsEarlierActions(t *testing.T) {
 		return []core.Action{core.ObjPut{Req: 1}, core.PauseReads{Conn: 2}, core.Trip{Cause: "x"}, core.ObjPut{Req: 2}}
 	}}
 	b, ex, cn, f := setup(m)
-	err := Run(context.Background(), b, ex, f, core.NodeRef{})
+	err := Run(t.Context(), b, ex, f, core.NodeRef{})
 	if !errors.Is(err, ErrTripped) {
 		t.Fatalf("err = %v", err)
 	}
@@ -102,13 +102,13 @@ func TestTripRunsEarlierActions(t *testing.T) {
 func TestExitReturnsNilAndLateDeliveryDropped(t *testing.T) {
 	m := &fakeMachine{script: func(int, core.EventBody) []core.Action { return []core.Action{core.Exit{}} }}
 	b, ex, _, f := setup(m)
-	if err := Run(context.Background(), b, ex, f, core.NodeRef{}); err != nil {
+	if err := Run(t.Context(), b, ex, f, core.NodeRef{}); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan struct{})
 	go func() {
 		b.Inbox.DeliverControl(core.SendDone{Req: 1})
-		for i := 0; i < 100; i++ { // would block on a full data queue if not dropped
+		for range 100 { // would block on a full data queue if not dropped
 			b.Inbox.DeliverData(core.ConnOpened{})
 		}
 		close(done)
@@ -128,7 +128,7 @@ func TestExitReturnsNilAndLateDeliveryDropped(t *testing.T) {
 func TestCtxCancelStops(t *testing.T) {
 	m := &fakeMachine{}
 	b, ex, _, f := setup(m)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	res := make(chan error, 1)
 	go func() { res <- Run(ctx, b, ex, f, core.NodeRef{}) }()
 	cancel()
@@ -158,7 +158,7 @@ func TestTimerFiresAndEmitFact(t *testing.T) {
 		}
 		return nil
 	}
-	if err := Run(context.Background(), b, ex, f, core.NodeRef{}); err != nil {
+	if err := Run(t.Context(), b, ex, f, core.NodeRef{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(facts) != 1 {
@@ -184,7 +184,7 @@ func TestDispatchTimersAndConns(t *testing.T) {
 			core.Exit{},
 		}
 	}
-	if err := Run(context.Background(), b, ex, f, core.NodeRef{}); err != nil {
+	if err := Run(t.Context(), b, ex, f, core.NodeRef{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(cn.log, ","); got != "close,resume" {
@@ -218,7 +218,7 @@ func TestShutdownStopThenExit(t *testing.T) {
 	sd := make(chan struct{})
 	b.Shutdown, b.StopGrace = sd, core.Duration(time.Second)
 	res := make(chan error, 1)
-	go func() { res <- Run(context.Background(), b, ex, f, core.NodeRef{}) }()
+	go func() { res <- Run(t.Context(), b, ex, f, core.NodeRef{}) }()
 	close(sd)
 	if err := <-res; err != nil {
 		t.Fatal(err)
@@ -235,7 +235,7 @@ func TestShutdownIgnoredKilled(t *testing.T) {
 	sd := make(chan struct{})
 	b.Shutdown, b.StopGrace = sd, core.Duration(50*time.Millisecond)
 	res := make(chan error, 1)
-	go func() { res <- Run(context.Background(), b, ex, f, core.NodeRef{}) }()
+	go func() { res <- Run(t.Context(), b, ex, f, core.NodeRef{}) }()
 	close(sd)
 	start := time.Now()
 	if err := <-res; !errors.Is(err, ErrKilled) {
@@ -257,10 +257,10 @@ func TestShutdownStopDeliveredOnce(t *testing.T) {
 	sd := make(chan struct{})
 	b.Shutdown, b.StopGrace = sd, core.Duration(100*time.Millisecond)
 	close(sd)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		b.Inbox.DeliverControl(core.TimerFired{ID: core.TimerID(i)})
 	}
-	err := Run(context.Background(), b, ex, f, core.NodeRef{})
+	err := Run(t.Context(), b, ex, f, core.NodeRef{})
 	if !errors.Is(err, ErrKilled) {
 		t.Fatalf("err = %v", err)
 	}

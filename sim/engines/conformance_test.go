@@ -176,7 +176,7 @@ func genCP(r *veritastest.Rand, i int) any {
 func genBatches(r *veritastest.Rand, key string) []core.PendingBatch {
 	var out []core.PendingBatch
 	n := r.Intn(4)
-	for j := 0; j < n; j++ {
+	for range n {
 		b := core.PendingBatch{
 			TP:      core.TP(cpTopics[r.Intn(2)], int32(r.Intn(2))),
 			Records: 1 + int64(r.Intn(3)),

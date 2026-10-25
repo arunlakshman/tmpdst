@@ -18,7 +18,7 @@ func TestCheckpointRoundTrip(t *testing.T) {
 	l := NewMemLog()
 	r := newMemReplica("r", l)
 	c := NewCommitter(r, 1)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if d, err := c.Do(bg, commitEntry(fmt.Sprint("k", i), pb("a", int32(i), 2), pb("b", 0, 3))); err != nil || d.Err != core.OK {
 			t.Fatal(d, err)
 		}
@@ -51,13 +51,13 @@ func TestCheckpointRoundTrip(t *testing.T) {
 func synthCheckpoint(nParts, nKeys int) Checkpoint {
 	r := veritastest.NewRand(5)
 	c := Checkpoint{Slot: 1 << 20, Hash: r.Uint64()}
-	for p := 0; p < nParts; p++ {
+	for p := range nParts {
 		c.Ends = append(c.Ends, veritas.End{
 			TP:     core.TP(fmt.Sprintf("topic-%03d", p/100), int32(p%100)),
 			Offset: core.Offset(r.Intn(5_000_000)),
 		})
 	}
-	for i := 0; i < nKeys; i++ {
+	for range nKeys {
 		var k [16]byte
 		for j := range k {
 			k[j] = byte(r.Uint64())
@@ -85,7 +85,7 @@ func TestX5(t *testing.T) {
 		_, _ = w.Write(b)
 		_ = w.Close()
 		var dec, load []time.Duration
-		for i := 0; i < 15; i++ {
+		for range 15 {
 			t0 := time.Now()
 			got, err := UnmarshalCheckpoint(b)
 			t1 := time.Now()

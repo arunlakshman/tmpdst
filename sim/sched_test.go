@@ -48,10 +48,10 @@ func TestSchedulerOrderAndClamp(t *testing.T) {
 
 func TestSchedulerFIFOWithinLaneAndSeededAcrossLanes(t *testing.T) {
 	laneAFirst, laneBFirst := 0, 0
-	for seed := uint64(0); seed < 64; seed++ {
+	for seed := range uint64(64) {
 		s := NewScheduler(NewRand(seed))
 		// Lane 1 and 2 interleaved at one instant: bodies 10.. are lane 1, 20.. lane 2.
-		for i := uint64(0); i < 5; i++ {
+		for i := range uint64(5) {
 			s.Schedule(entry(100, 1, 10+i))
 			s.Schedule(entry(100, 2, 20+i))
 		}
@@ -86,7 +86,7 @@ func TestSchedulerFIFOWithinLaneAndSeededAcrossLanes(t *testing.T) {
 
 func TestSchedulerFIFOAfterLaterTime(t *testing.T) {
 	// Entries on one lane at T scheduled around an entry at T+1 stay FIFO.
-	for seed := uint64(0); seed < 32; seed++ {
+	for seed := range uint64(32) {
 		s := NewScheduler(NewRand(seed))
 		s.Schedule(entry(10, 1, 1))
 		s.Schedule(entry(20, 1, 9))

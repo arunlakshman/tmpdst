@@ -46,7 +46,7 @@ func TestExecutorCompletesOnceAndNeverBlocks(t *testing.T) {
 	in := sys.NewInbox(8)
 	objs := slowObjs{ObjectStore: vsys.NewObjectStore(), block: make(chan struct{})}
 	cls := Classifier{Objects: MemClassifier{}, CP: MemClassifier{}}
-	e := NewExecutor(context.Background(), ExecConfig{ObjTimeout: 50 * time.Millisecond}, objs, nil, nilConns{}, cls, in)
+	e := NewExecutor(t.Context(), ExecConfig{ObjTimeout: 50 * time.Millisecond}, objs, nil, nilConns{}, cls, in)
 
 	start := time.Now()
 	e.Execute(core.ObjPut{Req: 7, Key: "k"}) // blocked in the store
@@ -56,7 +56,7 @@ func TestExecutorCompletesOnceAndNeverBlocks(t *testing.T) {
 	}
 	var put core.ObjPutDone
 	var send core.SendDone
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		switch d := wait(t, in).(type) {
 		case core.ObjPutDone:
 			put = d
@@ -82,7 +82,7 @@ func TestExecutorCompletesOnceAndNeverBlocks(t *testing.T) {
 
 func TestExecutorDropsAfterClose(t *testing.T) {
 	in := sys.NewInbox(8)
-	e := NewExecutor(context.Background(), ExecConfig{}, vsys.NewObjectStore(), nil, nilConns{},
+	e := NewExecutor(t.Context(), ExecConfig{}, vsys.NewObjectStore(), nil, nilConns{},
 		Classifier{Objects: MemClassifier{}}, in)
 	in.Close()
 	e.Execute(core.ObjList{Req: 1})

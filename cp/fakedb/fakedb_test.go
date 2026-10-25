@@ -275,19 +275,16 @@ func TestPutIfAbsentOneWinner(t *testing.T) {
 	}
 	var wins, losses atomic.Int32
 	var wg sync.WaitGroup
-	for i := 0; i < 16; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			var cc *types.ConditionalCheckFailedException
+	for range 16 {
+		wg.Go(func() {
 			if err := cas(); err == nil {
 				wins.Add(1)
-			} else if errors.As(err, &cc) {
+			} else if _, ok := errors.AsType[*types.ConditionalCheckFailedException](err); ok {
 				losses.Add(1)
 			} else {
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if wins.Load() != 1 || losses.Load() != 15 {

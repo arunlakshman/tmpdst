@@ -62,11 +62,11 @@ func value(topic string, p int32, i int) []byte {
 // explicit, values increasing per partition) and waits for the acks.
 func produce(t *testing.T, cl *kgo.Client, topics map[string]int32, n int, s *sent) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		for topic, parts := range topics {
-			for p := int32(0); p < parts; p++ {
+			for p := range parts {
 				cl.Produce(ctx, &kgo.Record{Topic: topic, Partition: p, Value: value(topic, p, i)}, s.promise)
 			}
 		}
@@ -90,7 +90,7 @@ func consume(t *testing.T, seeds []string, want map[tp]int) map[tp][]*kgo.Record
 		total += n
 	}
 	cl := newClient(t, seeds, kgo.ConsumePartitions(parts))
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	got := map[tp][]*kgo.Record{}
 	have := 0
@@ -160,7 +160,7 @@ func verify(t *testing.T, acked *sent, got map[tp][]*kgo.Record, inOrder bool) {
 func wantCounts(topics map[string]int32, n int) map[tp]int {
 	m := map[tp]int{}
 	for topic, parts := range topics {
-		for p := int32(0); p < parts; p++ {
+		for p := range parts {
 			m[tp{topic, p}] = n
 		}
 	}

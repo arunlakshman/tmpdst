@@ -226,7 +226,7 @@ func decodeIndex(body []byte) ([]Entry, []indexRaw, uint64, error) {
 	ents := make([]Entry, 0, count)
 	raws := make([]indexRaw, 0, count)
 	p := 4
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		if len(body)-p < 2 {
 			return nil, nil, 0, corrupt("truncated index")
 		}

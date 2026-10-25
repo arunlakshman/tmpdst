@@ -16,7 +16,7 @@ func batch(tp core.TopicPartition, n int64) core.PendingBatch {
 }
 
 func TestCommitLookupEnd(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := New()
 	if code, err := s.CreateTopic(ctx, "t", 2); code != core.OK || err != nil {
 		t.Fatal(code, err)
@@ -48,17 +48,15 @@ func TestCommitLookupEnd(t *testing.T) {
 
 // Concurrent committers on one partition get contiguous, disjoint offsets.
 func TestConcurrentCommittersContiguous(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := New()
 	var wg sync.WaitGroup
-	for i := 0; i < 16; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for i := range 16 {
+		wg.Go(func() {
 			if _, code, _ := s.CommitSegment(ctx, core.CommitSegment{SegmentKey: string(rune('a' + i)), Batches: []core.PendingBatch{batch(tpA, 2), batch(tpA, 1)}}); code != core.OK {
 				t.Error(code)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	l, _, _ := s.Lookup(ctx, core.Lookup{TP: tpA})
@@ -75,7 +73,7 @@ func TestConcurrentCommittersContiguous(t *testing.T) {
 }
 
 func TestCancelled(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, _, err := New().CommitSegment(ctx, core.CommitSegment{}); err == nil {
 		t.Fatal("want ctx error")

@@ -151,7 +151,7 @@ func mixU64(h, v uint64) uint64 {
 	if h == 0 {
 		h = 14695981039346656037
 	}
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		h = (h ^ (v >> (8 * i) & 0xff)) * 1099511628211
 	}
 	return h

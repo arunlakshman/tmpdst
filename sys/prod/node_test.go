@@ -1,7 +1,6 @@
 package prod
 
 import (
-	"context"
 	"encoding/binary"
 	"errors"
 	"net"
@@ -33,7 +32,7 @@ func startNode(t *testing.T, mod func(*NodeConfig)) (*Node, NodeConfig) {
 	if mod != nil {
 		mod(&cfg)
 	}
-	n, err := Start(context.Background(), cfg)
+	n, err := Start(t.Context(), cfg)
 	if err != nil {
 		_ = ln.Close()
 		t.Fatal(err)
@@ -67,7 +66,7 @@ func TestStartRequiresPieces(t *testing.T) {
 	} {
 		c := full
 		mod(&c)
-		if _, err := Start(context.Background(), c); err == nil || !strings.Contains(err.Error(), "required") {
+		if _, err := Start(t.Context(), c); err == nil || !strings.Contains(err.Error(), "required") {
 			t.Errorf("%s: %v", name, err)
 		}
 	}

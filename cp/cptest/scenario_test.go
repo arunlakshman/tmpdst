@@ -64,7 +64,7 @@ func manyBatchesOps() []op {
 	a := core.TP("m", 0)
 	b := core.TP("m", 1)
 	var s1, s2 []core.PendingBatch
-	for i := 0; i < 200; i++ { // 200 batches for a, interleaved with b
+	for i := range 200 { // 200 batches for a, interleaved with b
 		for _, tp := range []core.TopicPartition{a, b} {
 			if tp == b && i%4 != 0 {
 				continue
@@ -100,7 +100,7 @@ func manyBatchesOps() []op {
 func TestManyBatchesMemstore(t *testing.T) { lockstep(t, storeImpl{newMem()}, manyBatchesOps()) }
 
 func TestRoundTrip(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	st := newMem()
 	srv := httptest.NewServer(cp.NewHandler(st))
 	defer srv.Close()

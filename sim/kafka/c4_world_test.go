@@ -143,7 +143,7 @@ func newWorld(seed uint64, live bool) *world {
 			w.parts[tp] = &veritas.Partition{}
 		}
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		w.brks = append(w.brks, &broker{ref: nodeRef(fmt.Sprintf("b%d", i))})
 	}
 	for i := 0; i < opts.Producers; i++ {
@@ -153,7 +153,7 @@ func newWorld(seed uint64, live bool) *world {
 		w.invs = []sim.Invariant{kafka.NewOracle(opts)}
 	}
 	steps := 20 + r.IntN(30)
-	for i := 0; i < steps; i++ {
+	for range steps {
 		if r.IntN(3) == 0 {
 			w.readStep(r)
 		} else {

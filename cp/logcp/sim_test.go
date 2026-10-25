@@ -335,14 +335,14 @@ func (r *simRun) call(ctx context.Context, n *simNode, cmd logsm.Entry) (core.Co
 func (r *simRun) client(id, ops int) {
 	defer r.clients.Add(-1)
 	at := id % 3
-	for i := 0; i < ops; i++ {
+	for range ops {
 		cmd := genOp(r.s.rng)
 		r.doOp(id, &at, cmd)
 	}
 }
 
 func (r *simRun) doOp(id int, at *int, cmd logsm.Entry) {
-	for try := 0; try < 400; try++ {
+	for range 400 {
 		n := r.pick(*at)
 		if n == nil {
 			r.s.yield()
@@ -513,7 +513,7 @@ func runSimRun(seed uint64) (*simRun, simResult, error) {
 	if _, err := r.db.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("cp")}); err != nil {
 		return nil, simResult{}, err
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		r.startNode(i, r.s.spawn)
 	}
 	nc := 1 + int(seed/5%3)
@@ -828,10 +828,8 @@ func TestSimSeeds(t *testing.T) {
 	var wg sync.WaitGroup
 	next := make(chan uint64)
 	workers := max(2, runtime.GOMAXPROCS(0)-1)
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range workers {
+		wg.Go(func() {
 			for seed := range next {
 				res, err := runSim(seed)
 				slots.Add(res.slots)
@@ -847,7 +845,7 @@ func TestSimSeeds(t *testing.T) {
 					t.Errorf("seed %d (mode %d): %v", seed, seed%uint64(numModes), err)
 				}
 			}
-		}()
+		})
 	}
 	for seed := uint64(1); seed <= uint64(n); seed++ {
 		next <- seed

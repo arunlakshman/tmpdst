@@ -251,11 +251,9 @@ func run(c benchConfig, stdout, stderr io.Writer, nc clientFactory) int {
 
 	var wg sync.WaitGroup
 	for ci, cl := range cls {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			produceLoop(ctx, pctx, cl, ci, c, st)
-		}()
+		})
 	}
 
 	var done atomic.Bool

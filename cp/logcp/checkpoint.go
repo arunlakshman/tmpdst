@@ -139,8 +139,7 @@ func (s *Service) publish(ctx context.Context, data []byte, slot core.LogSlot) e
 		ConditionExpression:       aws.String("attribute_not_exists(ck_slot) OR ck_slot < :s"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{":s": nv(int64(slot))},
 	})
-	var cc *types.ConditionalCheckFailedException
-	if errors.As(err, &cc) { // a checkpoint at this slot or newer exists; pruning removes our object if it is older
+	if _, ok := errors.AsType[*types.ConditionalCheckFailedException](err); ok { // a checkpoint at this slot or newer exists; pruning removes our object if it is older
 		s.pruneObjects(ctx)
 		return nil
 	}

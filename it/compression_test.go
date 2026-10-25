@@ -48,10 +48,10 @@ func runCompression(t *testing.T, s *stack) {
 		topic := "cmp-" + cc.name
 		s.createTopic(topic, parts)
 		cl := newClient(t, s.seeds(), cc.opt...)
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 		acked := newSent()
-		for i := 0; i < n; i++ {
-			for p := int32(0); p < parts; p++ {
+		for i := range n {
+			for p := range int32(parts) {
 				cl.Produce(ctx, &kgo.Record{Topic: topic, Partition: p, Value: bigValue(topic, p, i)}, acked.promise)
 			}
 		}

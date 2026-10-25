@@ -230,8 +230,7 @@ func (s *Store) List(ctx context.Context, prefix string) ([]string, error) {
 }
 
 func apiCode(err error) string {
-	var ae smithy.APIError
-	if errors.As(err, &ae) {
+	if ae, ok := errors.AsType[smithy.APIError](err); ok {
 		return ae.ErrorCode()
 	}
 	return ""

@@ -22,7 +22,7 @@ func TestIncrementalStateHashMatchesFull(t *testing.T) {
 	for seed := 1; seed <= 50; seed++ {
 		r := lcg(seed)
 		s, c := NewObjectStore(), NewControlPlane()
-		for step := 0; step < 300; step++ {
+		for step := range 300 {
 			switch r.n(5) {
 			case 0, 1:
 				put(s, fmt.Sprintf("seg/%d", r.n(40)), fmt.Sprint(r.n(1000)))

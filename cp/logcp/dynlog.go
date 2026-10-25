@@ -250,8 +250,7 @@ func (l *DynLog) setTrimmed(ctx context.Context, slot int64) error {
 		ConditionExpression:       aws.String("attribute_not_exists(tr_below) OR tr_below < :s"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{":s": nv(slot)},
 	})
-	var cc *types.ConditionalCheckFailedException
-	if errors.As(err, &cc) {
+	if _, ok := errors.AsType[*types.ConditionalCheckFailedException](err); ok {
 		return nil
 	}
 	return err

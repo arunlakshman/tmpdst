@@ -55,7 +55,7 @@ func (s *stack) addBroker() *prod.Node {
 	}
 	bc := s.brokers
 	bc.BrokerID = int32(len(s.nodes) + 1)
-	n, err := prod.Start(context.Background(), prod.NodeConfig{
+	n, err := prod.Start(s.t.Context(), prod.NodeConfig{
 		NodeID: "broker-" + string(rune('a'+len(s.nodes))), Broker: bc, Listener: ln,
 		Objects: s.objs, ObjClassify: s.objCls,
 		ControlPlane: s.cp, CPClassify: cpclient.Classifier{},
@@ -69,7 +69,7 @@ func (s *stack) addBroker() *prod.Node {
 }
 
 func (s *stack) addBrokers(n int) {
-	for i := 0; i < n; i++ {
+	for range n {
 		s.addBroker()
 	}
 }
@@ -84,7 +84,7 @@ func (s *stack) seeds() []string {
 
 func (s *stack) createTopic(name string, parts int32) {
 	s.t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(s.t.Context(), 10*time.Second)
 	defer cancel()
 	if err := s.cp.CreateTopic(ctx, name, parts); err != nil {
 		s.t.Fatal(err)

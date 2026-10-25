@@ -2,7 +2,6 @@ package applier_test
 
 import (
 	"bytes"
-	"context"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -65,7 +64,7 @@ func lockstep(t *testing.T, mk func(testing.TB) applier.KV, seeds, ops int) {
 	for seed := uint64(1); seed <= uint64(seeds); seed++ {
 		r := veritastest.NewRand(seed)
 		a, o := applier.New(mk(t)), veritas.NewControlPlane()
-		for i := 0; i < ops; i++ {
+		for i := range ops {
 			if r.Intn(25) == 0 {
 				name, n := "t"+strconv.Itoa(r.Intn(3)), int32(r.Intn(4))
 				if got, want := a.CreateTopic(name, n), o.CreateTopic(name, n); got != want {
@@ -204,7 +203,7 @@ func TestInvalidAndUnknown(t *testing.T) {
 }
 
 func TestStoreAdapter(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := &applier.Store{A: applier.New(applier.NewMemKV())}
 	if c, err := s.CreateTopic(ctx, "t", 3); c != core.OK || err != nil {
 		t.Fatal(c, err)

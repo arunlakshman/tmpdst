@@ -30,7 +30,7 @@ func (e *testEnv) NewID() core.ID {
 	var id core.ID
 	for i := 0; i < 16; i += 8 {
 		v := e.Uint64()
-		for j := 0; j < 8; j++ {
+		for j := range 8 {
 			id[i+j] = byte(v >> (8 * j))
 		}
 	}

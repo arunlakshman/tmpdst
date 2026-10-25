@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"io"
 	"log/slog"
 	"net"
@@ -152,7 +151,7 @@ func TestCPURLListFailsOver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cfg.ControlPlane.Call(context.Background(), core.DescribeTopics{}); err != nil {
+	if _, err := cfg.ControlPlane.Call(t.Context(), core.DescribeTopics{}); err != nil {
 		t.Fatalf("call through a dead url and a standby: %v", err)
 	}
 }

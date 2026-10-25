@@ -15,11 +15,11 @@ import (
 func newTestStore(t *testing.T, prefix string) (*Store, *fakeS3) {
 	t.Helper()
 	f := newFakeS3(t)
-	s, err := New(context.Background(), Config{Endpoint: f.srv.URL, Bucket: "b", Prefix: prefix, PathStyle: true})
+	s, err := New(t.Context(), Config{Endpoint: f.srv.URL, Bucket: "b", Prefix: prefix, PathStyle: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.EnsureBucket(context.Background()); err != nil {
+	if err := s.EnsureBucket(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	return s, f
@@ -34,7 +34,7 @@ func wantCode(t *testing.T, err error, code core.ErrCode) {
 }
 
 func TestStorePutGetDeleteList(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s, f := newTestStore(t, "p/")
 	for k, v := range map[string]string{"a": "0123456789", "b/c": "xyz", "b/d": ""} {
 		if err := s.Put(ctx, k, []byte(v)); err != nil {
@@ -95,7 +95,7 @@ func TestStorePutGetDeleteList(t *testing.T) {
 }
 
 func TestStoreServerErrors(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cases := []struct {
 		name   string
 		status int
@@ -167,11 +167,11 @@ func TestStoreTimeout(t *testing.T) {
 	slow := newSlow(release)
 	t.Cleanup(slow.Close)
 	t.Cleanup(func() { close(release) })
-	st, err := New(context.Background(), Config{Endpoint: slow.URL, Bucket: "b", PathStyle: true})
+	st, err := New(t.Context(), Config{Endpoint: slow.URL, Bucket: "b", PathStyle: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	err = st.Put(ctx, "k", []byte("v"))
 	// A deadline hit mid-request surfaces as an SDK ResponseError with status
@@ -187,16 +187,16 @@ func TestStoreDialAndHTTPClient(t *testing.T) {
 	f := newFakeS3(t)
 	url := f.srv.URL
 	f.srv.Close()
-	s, err := New(context.Background(), Config{Endpoint: url, Bucket: "b", PathStyle: true, HTTP: &http.Client{}, Region: "eu-west-1"})
+	s, err := New(t.Context(), Config{Endpoint: url, Bucket: "b", PathStyle: true, HTTP: &http.Client{}, Region: "eu-west-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = s.Put(context.Background(), "k", nil)
+	err = s.Put(t.Context(), "k", nil)
 	code, out := Classifier{}.Classify(core.ObjPut{}, err)
 	if code != core.ErrUnavailable || out != core.NotApplied {
 		t.Errorf("dial: %v %v (%v)", code, out, err)
 	}
-	if err := s.EnsureBucket(context.Background()); err == nil {
+	if err := s.EnsureBucket(t.Context()); err == nil {
 		t.Error("EnsureBucket on a dead endpoint succeeded")
 	}
 	if !strings.HasPrefix(UniqueBucket(), "manifester-") {
@@ -207,7 +207,7 @@ func TestStoreDialAndHTTPClient(t *testing.T) {
 func TestConformanceFake(t *testing.T) {
 	run(t, func() sys.ObjectStore {
 		f := newFakeS3(t)
-		s, err := New(context.Background(), Config{Endpoint: f.srv.URL, Bucket: "b", Prefix: "c3/", PathStyle: true})
+		s, err := New(t.Context(), Config{Endpoint: f.srv.URL, Bucket: "b", Prefix: "c3/", PathStyle: true})
 		if err != nil {
 			t.Fatal(err)
 		}

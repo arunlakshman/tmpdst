@@ -31,7 +31,7 @@ func parseHex(s string) ([16]byte, bool) {
 	}
 	for i := range id {
 		var v [2]byte
-		for j := 0; j < 2; j++ {
+		for j := range 2 {
 			c := s[2*i+j]
 			switch {
 			case '0' <= c && c <= '9':

@@ -1,9 +1,10 @@
 package kafka
 
 import (
-	"github.com/twmb/franz-go/pkg/kmsg"
 	"sync/atomic"
 	"testing"
+
+	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/broker"
 	"manifester/core"
@@ -324,7 +325,7 @@ func TestBatchesCarryProducerIDOnlyWhenIdem(t *testing.T) {
 	w.SetHistory(&fakeHist{})
 	c := w.clients[0]
 	idem, plain := 0, 0
-	for i := 0; i < 400; i++ {
+	for range 400 {
 		c.p.cur = nil
 		w.newBatches(c)
 		for _, b := range c.p.cur {
@@ -501,7 +502,7 @@ func TestWorkloadBuildsEveryCodecAndCorruptBatches(t *testing.T) {
 	c := w.clients[0]
 	seen := map[int]int{}
 	corrupt := 0
-	for i := 0; i < 400; i++ {
+	for range 400 {
 		c.p.cur = nil
 		w.newBatches(c)
 		for _, b := range c.p.cur {

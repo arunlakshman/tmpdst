@@ -1,7 +1,6 @@
 package cptest
 
 import (
-	"context"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -22,7 +21,7 @@ func TestConformanceLogSMMem(t *testing.T) {
 func TestConformanceLogSMFakeDB(t *testing.T) {
 	run(t, func() impl {
 		db := fakedb.New()
-		if _, err := db.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("log")}); err != nil {
+		if _, err := db.CreateTable(t.Context(), &dynamodb.CreateTableInput{TableName: aws.String("log")}); err != nil {
 			t.Fatal(err)
 		}
 		r := logsm.NewReplica(logsm.Config{Log: logsm.NewDynLog(db, "log"), Writer: "w0"})

@@ -15,7 +15,7 @@ func TestGeneratorCoverage(t *testing.T) {
 	for seed := uint64(1); seed <= 200; seed++ {
 		r := veritastest.NewRand(seed)
 		spec := veritas.NewControlPlane()
-		for i := 0; i < 200; i++ {
+		for i := range 200 {
 			o := gen(r, i)
 			if o.Kind == "create" {
 				spec.CreateTopic(o.Name, o.Parts)

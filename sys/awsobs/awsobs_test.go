@@ -77,7 +77,7 @@ func TestDynamoRetriesAndThrottles(t *testing.T) {
 		Region: "us-east-1", BaseEndpoint: aws.String(srv.URL), Credentials: credentials.NewStaticCredentialsProvider("a", "b", ""),
 		APIOptions: rec.APIOptions(), RetryMaxAttempts: 5,
 	})
-	if _, err := c.GetItem(context.Background(), &dynamodb.GetItemInput{TableName: aws.String("t"), Key: map[string]dbtypes.AttributeValue{"pk": &dbtypes.AttributeValueMemberS{Value: "x"}}}); err != nil {
+	if _, err := c.GetItem(t.Context(), &dynamodb.GetItemInput{TableName: aws.String("t"), Key: map[string]dbtypes.AttributeValue{"pk": &dbtypes.AttributeValueMemberS{Value: "x"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if n := sum(family(t, reg, "manicp_dynamo_attempt_seconds"), map[string]string{"op": "GetItem", "result": "http_400"}); n != 2 {
@@ -123,11 +123,11 @@ func TestS3Non2xxAndTimeout(t *testing.T) {
 		Credentials: credentials.NewStaticCredentialsProvider("a", "b", ""),
 		APIOptions:  rec.APIOptions(), Retryer: aws.NopRetryer{},
 	})
-	_, err := c.PutObject(context.Background(), &s3.PutObjectInput{Bucket: aws.String("b"), Key: aws.String("k"), Body: strings.NewReader("hello")})
+	_, err := c.PutObject(t.Context(), &s3.PutObjectInput{Bucket: aws.String("b"), Key: aws.String("k"), Body: strings.NewReader("hello")})
 	if err == nil {
 		t.Fatal("want error")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	_, err = c.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String("b"), Key: aws.String("slow"), Body: strings.NewReader("hello")})
 	if err == nil {
@@ -160,7 +160,7 @@ func TestQuietCodesLogAtDebug(t *testing.T) {
 	rec.QuietCodes = map[string]bool{"TransactionCanceledException": true}
 	c := dynamodb.New(dynamodb.Options{Region: "us-east-1", BaseEndpoint: aws.String(srv.URL),
 		Credentials: credentials.NewStaticCredentialsProvider("a", "b", ""), APIOptions: rec.APIOptions()})
-	_, _ = c.TransactWriteItems(context.Background(), &dynamodb.TransactWriteItemsInput{})
+	_, _ = c.TransactWriteItems(t.Context(), &dynamodb.TransactWriteItemsInput{})
 	if logs.Len() != 0 {
 		t.Errorf("quiet code logged at warn: %s", logs.String())
 	}
@@ -169,7 +169,7 @@ func TestQuietCodesLogAtDebug(t *testing.T) {
 func TestLimiter(t *testing.T) {
 	l := limiter{perSec: 2}
 	now := time.Unix(100, 0)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		if _, ok := l.allow(now); !ok {
 			t.Fatal("under limit")
 		}

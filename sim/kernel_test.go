@@ -669,7 +669,7 @@ func TestEngineLanesStableDisjointAndDistinct(t *testing.T) {
 	c := &engineCtx{r: r, name: "e"}
 	d := &engineCtx{r: r, name: "other"}
 	seen := map[Lane]string{}
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		key := fmt.Sprintf("objstore/node-%d", i)
 		l := c.Lane(key)
 		if l >= laneReserved || l == 0 {

@@ -66,7 +66,7 @@ func startLogNode(t *testing.T, d deps, name string, rank int, extra ...string) 
 		"-ckpt-bucket", "b", "-takeover-after", "600ms", "-heartbeat", "50ms", "-hole-after", "30ms", "-slot-rate", "5000",
 		"-pebble-dir", filepath.Join(t.TempDir(), "pebble"), "-final-checkpoint=false"}, extra...)
 	var ctx context.Context
-	ctx, n.cancel = context.WithCancel(context.Background())
+	ctx, n.cancel = context.WithCancel(t.Context())
 	t.Cleanup(n.cancel)
 	go func() { n.done <- runWith(ctx, args, n.logs, d) }()
 	waitHealthy(t, n)
@@ -116,7 +116,7 @@ func role(t *testing.T, n *logNode) string {
 func newFake(t *testing.T) *fakedb.Fake {
 	t.Helper()
 	db := fakedb.New()
-	if _, err := db.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("manifester_cp")}); err != nil {
+	if _, err := db.CreateTable(t.Context(), &dynamodb.CreateTableInput{TableName: aws.String("manifester_cp")}); err != nil {
 		t.Fatal(err)
 	}
 	return db
@@ -186,7 +186,7 @@ func checkPartitions(t *testing.T, c *cpclient.Client, a *acks) {
 	for tp, runs := range want {
 		var next int64
 		for next < int64(len(runs))*100 {
-			resp, err := c.Call(context.Background(), core.Lookup{TP: tp, From: core.Offset(next), MaxBytes: 1 << 30})
+			resp, err := c.Call(t.Context(), core.Lookup{TP: tp, From: core.Offset(next), MaxBytes: 1 << 30})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -222,7 +222,7 @@ func TestLogStoreThreeNodesTakeover(t *testing.T) {
 	}
 	// Brokers' URL list: preferred node first.
 	c := cpclient.New("http://"+n0.addr+",http://"+n1.addr+",http://"+n2.addr, nil)
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := c.CreateTopic(ctx, "t", 3); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestLogStoreThreeNodesTakeover(t *testing.T) {
 	var n atomic.Int64
 	stop := make(chan struct{})
 	errs := make(chan error, 3)
-	for w := 0; w < 3; w++ {
+	for w := range 3 {
 		go func() { errs <- commitLoop(ctx, c, w, a, &n, stop) }()
 	}
 	waitCount(t, &n, 100)
@@ -242,7 +242,7 @@ func TestLogStoreThreeNodesTakeover(t *testing.T) {
 		t.Fatalf("no standby took over: roles %q %q\n%s", r1, r2, n1.logs.String())
 	}
 	close(stop)
-	for w := 0; w < 3; w++ {
+	for range 3 {
 		if err := <-errs; err != nil {
 			t.Fatalf("commit failed across the takeover: %v", err)
 		}
@@ -269,12 +269,12 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 	d := fakeDeps(db, objs)
 	n := startLogNode(t, d, "n0", 0, "-final-checkpoint=true", "-ckpt-every", "-1s")
 	c := cpclient.New("http://"+n.addr, nil)
-	if err := c.CreateTopic(context.Background(), "t", 1); err != nil {
+	if err := c.CreateTopic(t.Context(), "t", 1); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		key := fmt.Sprintf("seg/%d", i)
-		_, err := c.Call(context.Background(), core.CommitSegment{SegmentKey: key, Batches: []core.PendingBatch{
+		_, err := c.Call(t.Context(), core.CommitSegment{SegmentKey: key, Batches: []core.PendingBatch{
 			{TP: core.TP("t", 0), Records: 3, Loc: core.SegmentRef{Key: key, Len: 9}}}})
 		if err != nil {
 			t.Fatal(err)
@@ -283,11 +283,11 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 	if code := n.stop(t); code != 0 || !strings.Contains(n.logs.String(), "log_final_ckpt") {
 		t.Fatalf("code %d, no final checkpoint\n%s", code, n.logs.String())
 	}
-	if keys, _ := objs.List(context.Background(), "ckpt/"); len(keys) == 0 {
+	if keys, _ := objs.List(t.Context(), "ckpt/"); len(keys) == 0 {
 		t.Fatalf("no checkpoint object: %v", keys)
 	}
 	n2 := startLogNode(t, d, "n0", 0)
-	resp, err := cpclient.New("http://"+n2.addr, nil).Call(context.Background(), core.Lookup{TP: core.TP("t", 0), MaxBytes: 1 << 20})
+	resp, err := cpclient.New("http://"+n2.addr, nil).Call(t.Context(), core.Lookup{TP: core.TP("t", 0), MaxBytes: 1 << 20})
 	if err != nil || resp.(core.LookupResp).End != 15 {
 		t.Fatalf("after restart: %v %+v", err, resp)
 	}
@@ -305,7 +305,7 @@ func TestLogStoreStartupErrors(t *testing.T) {
 		d := fakeDeps(newFake(t), logcptest.NewObjects())
 		args := append([]string{"-store", kindLog, "-addr", freeAddr(t), "-metrics-addr", "", "-takeover-after", "1s", "-start-timeout", "500ms"}, extra...)
 		var logs syncBuf
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 		if code := runWith(ctx, args, &logs, d); code != 1 {
 			t.Errorf("%s: code %d\n%s", name, code, logs.String())
 		}
@@ -345,10 +345,10 @@ func TestRealDepsBuild(t *testing.T) {
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	f, _, _ := parseFlags([]string{"-store", kindLog, "-dynamo-endpoint", "http://127.0.0.1:1", "-ckpt-bucket", "b", "-s3-endpoint", "http://127.0.0.1:1"}, &bytes.Buffer{})
 	d := realDeps()
-	if db, err := d.db(context.Background(), f, cpobs.New()); err != nil || db == nil {
+	if db, err := d.db(t.Context(), f, cpobs.New()); err != nil || db == nil {
 		t.Fatal(err)
 	}
-	if o, err := d.objects(context.Background(), f); err != nil || o == nil {
+	if o, err := d.objects(t.Context(), f); err != nil || o == nil {
 		t.Fatal(err)
 	}
 }
@@ -356,13 +356,13 @@ func TestRealDepsBuild(t *testing.T) {
 func TestPlainStoresStillServe(t *testing.T) {
 	// The rollback kinds go through the same handler path and are unchanged.
 	f, _, _ := parseFlags([]string{"-store", "mem"}, &bytes.Buffer{})
-	h, closeStore, err := openHandler(context.Background(), realDeps(), f, cpobs.New(), nil)
+	h, closeStore, err := openHandler(t.Context(), realDeps(), f, cpobs.New(), nil)
 	if err != nil || h == nil {
 		t.Fatal(err)
 	}
 	closeStore()
 	f.kind = "nope"
-	if _, _, err := openHandler(context.Background(), realDeps(), f, cpobs.New(), nil); err == nil {
+	if _, _, err := openHandler(t.Context(), realDeps(), f, cpobs.New(), nil); err == nil {
 		t.Fatal("unknown store accepted")
 	}
 }

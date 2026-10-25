@@ -678,7 +678,7 @@ func TestSegmentKeysAreFlatAndDeterministic(t *testing.T) {
 	run := func() []string {
 		h := startedHarness(t, DefaultConfig())
 		c := h.open(1)
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			h.produceOne(c, e("t", 0, plain(t, "a")))
 		}
 		return h.puts

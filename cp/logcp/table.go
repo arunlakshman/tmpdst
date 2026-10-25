@@ -36,7 +36,7 @@ func CreateTable(ctx context.Context, db TableAdmin, table string) error {
 	if err != nil && !errors.As(err, &inUse) {
 		return fmt.Errorf("create table %s: %w", table, err)
 	}
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		out, err := db.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: &table})
 		if err == nil && out.Table.TableStatus == types.TableStatusActive {
 			return nil

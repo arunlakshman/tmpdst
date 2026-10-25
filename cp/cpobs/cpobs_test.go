@@ -2,7 +2,6 @@ package cpobs
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -74,9 +73,9 @@ func TestCallLogLine(t *testing.T) {
 func TestConsumedCapacity(t *testing.T) {
 	m := New()
 	four, half := 4.0, 0.5
-	m.CallCtx(context.Background(), "TransactWriteItems", time.Now(), []types.ConsumedCapacity{{CapacityUnits: &four}})
-	m.CallCtx(context.Background(), "BatchGetItem", time.Now(), []types.ConsumedCapacity{{CapacityUnits: &half}, {CapacityUnits: &half}})
-	m.CallCtx(context.Background(), "GetItem", time.Now(), nil) // ExtendDB: no capacity
+	m.CallCtx(t.Context(), "TransactWriteItems", time.Now(), []types.ConsumedCapacity{{CapacityUnits: &four}})
+	m.CallCtx(t.Context(), "BatchGetItem", time.Now(), []types.ConsumedCapacity{{CapacityUnits: &half}, {CapacityUnits: &half}})
+	m.CallCtx(t.Context(), "GetItem", time.Now(), nil) // ExtendDB: no capacity
 	out := gather(t, m)
 	for _, want := range []string{`manicp_dynamo_consumed_capacity_units_total{kind="write",op="TransactWriteItems"} 4`,
 		`manicp_dynamo_consumed_capacity_units_total{kind="read",op="BatchGetItem"} 1`,
@@ -107,7 +106,7 @@ func TestInfoLevelLogsOnlyTheSummary(t *testing.T) {
 	h := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{}`))
 	}))
-	for i := 0; i < 5000; i++ {
+	for range 5000 {
 		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/lookup", strings.NewReader("")))
 	}
 	if buf.Len() != 0 {

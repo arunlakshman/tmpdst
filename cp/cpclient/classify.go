@@ -54,12 +54,10 @@ func classify(a core.IOAction, err error) (core.ErrCode, core.Outcome) {
 	if mutating(a) {
 		maybe = core.MaybeApplied
 	}
-	var be *Error
-	if errors.As(err, &be) {
+	if be, ok := errors.AsType[*Error](err); ok {
 		return be.Code, core.NotApplied
 	}
-	var ce *CallError
-	if errors.As(err, &ce) {
+	if ce, ok := errors.AsType[*CallError](err); ok {
 		return classifyCall(ce, maybe)
 	}
 	return timeoutOrIO(err), maybe

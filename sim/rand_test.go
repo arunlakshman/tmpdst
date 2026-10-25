@@ -16,7 +16,7 @@ func TestSplitMixReference(t *testing.T) {
 
 func TestRandBasics(t *testing.T) {
 	r := NewRand(42)
-	for i := 0; i < 2000; i++ {
+	for range 2000 {
 		if v := r.Intn(7); v < 0 || v >= 7 {
 			t.Fatalf("Intn out of range: %d", v)
 		}
@@ -60,7 +60,7 @@ func TestRandBasics(t *testing.T) {
 func TestIntnUnbiasedish(t *testing.T) {
 	r := NewRand(7)
 	var buckets [3]int
-	for i := 0; i < 30000; i++ {
+	for range 30000 {
 		buckets[r.Intn(3)]++
 	}
 	for _, b := range buckets {
@@ -88,7 +88,7 @@ func TestDeriveIndependence(t *testing.T) {
 	// Drawing from the parent never moves a derived stream.
 	p := NewRand(5)
 	d1 := p.Derive("x").Uint64()
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		p.Uint64()
 	}
 	if p.Derive("x").Uint64() != d1 {
@@ -115,7 +115,7 @@ func TestTwoSpeedSample(t *testing.T) {
 	r := NewRand(3)
 	ts := TwoSpeed{FastMin: 10, FastMax: 20, SlowMin: 1000, SlowMax: 2000, SlowProb: 0.5}
 	fast, slow := 0, 0
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		d := ts.Sample(r)
 		switch {
 		case d >= 10 && d <= 20:

@@ -57,7 +57,7 @@ func newHasher() hasher { return 14695981039346656037 }
 
 func (h *hasher) byte(b byte) { *h = (*h ^ hasher(b)) * 1099511628211 }
 func (h *hasher) u64(v uint64) {
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		h.byte(byte(v >> (8 * i)))
 	}
 }

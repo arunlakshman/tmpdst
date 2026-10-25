@@ -96,7 +96,7 @@ func TestTimerRuleFromFirstBatch(t *testing.T) {
 	if age := f[0].Field("age").(core.I64); age <= 0 {
 		t.Fatalf("age %d", age)
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		produced(h.next(c))
 	}
 }
@@ -127,7 +127,7 @@ func TestBatchCapSeals(t *testing.T) {
 	h := startedHarness(t, cfg)
 	c := h.open(1)
 	var es []ent
-	for i := 0; i < 31; i++ {
+	for i := range 31 {
 		es = append(es, e("t", int32(i%2), plain(t, "a")))
 	}
 	h.send(c, verProduce, prodReq(-1, es...))
@@ -225,7 +225,7 @@ func TestManySmallBatchesSealAtByteCapNotBatchCap(t *testing.T) {
 	h := startedHarness(t, cfg)
 	c := h.open(1)
 	var es []ent
-	for i := 0; i < 199; i++ {
+	for i := range 199 {
 		es = append(es, e("t", int32(i%2), plain(t, "a")))
 	}
 	h.send(c, verProduce, prodReq(-1, es...))

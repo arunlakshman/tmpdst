@@ -20,11 +20,9 @@ func runSharded(config func([]uint64) sim.Config, seeds []uint64, jobs int) (sim
 	per := (len(seeds) + jobs - 1) / jobs
 	for j := 0; j < jobs; j++ {
 		lo, hi := min(j*per, len(seeds)), min((j+1)*per, len(seeds))
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			reps[j], errs[j] = sim.NewRunner().Run(config(seeds[lo:hi]))
-		}()
+		})
 	}
 	wg.Wait()
 	for _, err := range errs {

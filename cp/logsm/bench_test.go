@@ -21,13 +21,13 @@ func warm(r *Replica, universe, keys int) {
 	s := newSynth(99, universe, 100)
 	for i := 0; i < universe/100; i++ {
 		var bs []core.PendingBatch
-		for j := 0; j < 100; j++ {
+		for j := range 100 {
 			p := i*100 + j
 			bs = append(bs, core.PendingBatch{TP: core.TP(fmt.Sprintf("topic-%03d", p/s.per), int32(p%s.per)), Records: 5})
 		}
 		r.observe(r.alloc(), Entry{Kind: KindCommit, Commit: core.CommitSegment{SegmentKey: s.key(), Batches: bs}})
 	}
-	for i := 0; i < keys; i++ {
+	for range keys {
 		e := s.command()
 		e.Commit.Batches = e.Commit.Batches[:1]
 		r.observe(r.alloc(), e)

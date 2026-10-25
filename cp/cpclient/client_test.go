@@ -28,7 +28,7 @@ func realClient(t *testing.T) *Client {
 
 func TestClientAgainstMemstore(t *testing.T) {
 	c := realClient(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	var ops []string
 	c.Observe(func(op string, d time.Duration) { ops = append(ops, op) })
 
@@ -76,12 +76,12 @@ func TestClientAgainstMemstore(t *testing.T) {
 
 func TestCallCtxAndUnknownOp(t *testing.T) {
 	c := realClient(t)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if _, err := c.Call(ctx, core.CommitSegment{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled ctx: %v", err)
 	}
-	_, err := c.Call(context.Background(), nil)
+	_, err := c.Call(t.Context(), nil)
 	var be *Error
 	if !errors.As(err, &be) || be.Code != core.ErrInvalid {
 		t.Fatalf("unknown op: %v", err)
@@ -117,7 +117,7 @@ func TestCallErrorClasses(t *testing.T) {
 	}
 	for _, tc := range cases {
 		c := fake(t, tc.status, tc.body)
-		_, err := c.Call(context.Background(), core.CommitSegment{})
+		_, err := c.Call(t.Context(), core.CommitSegment{})
 		if err == nil {
 			t.Fatalf("%s: no error", tc.name)
 		}
@@ -131,7 +131,7 @@ func TestCallErrorClasses(t *testing.T) {
 		}
 	}
 	// CallError text carries the status.
-	_, err := fake(t, 500, " oops \n").Call(context.Background(), core.CommitSegment{})
+	_, err := fake(t, 500, " oops \n").Call(t.Context(), core.CommitSegment{})
 	if !strings.Contains(err.Error(), "commit-segment: http 500: oops") {
 		t.Errorf("error text %q", err)
 	}
@@ -141,7 +141,7 @@ func TestCallDialError(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	url := srv.URL
 	srv.Close()
-	_, err := New(url, nil).Call(context.Background(), core.CommitSegment{})
+	_, err := New(url, nil).Call(t.Context(), core.CommitSegment{})
 	var ce *CallError
 	if !errors.As(err, &ce) || ce.Sent {
 		t.Fatalf("want unsent CallError, got %v", err)
@@ -164,7 +164,7 @@ func TestCallTimeoutAfterSend(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	t.Cleanup(func() { close(release) })
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	_, err := New(srv.URL, nil).Call(ctx, core.CommitSegment{})
 	code, out := Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, err)
@@ -178,7 +178,7 @@ func TestCallTimeoutAfterSend(t *testing.T) {
 }
 
 func TestBadBaseURL(t *testing.T) {
-	_, err := New("http://bad host\x7f", nil).Call(context.Background(), core.CommitSegment{})
+	_, err := New("http://bad host\x7f", nil).Call(t.Context(), core.CommitSegment{})
 	var ce *CallError
 	if !errors.As(err, &ce) || ce.Sent {
 		t.Fatalf("got %v", err)
@@ -253,7 +253,7 @@ func TestFailoverAcrossURLs(t *testing.T) {
 	t.Cleanup(up.Close)
 
 	c := New(deadURL+", "+sb.URL+","+up.URL+"/", nil)
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := c.CreateTopic(ctx, "t", 2); err != nil {
 		t.Fatalf("create through three urls: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestFailoverGivesUpAfterEachURLOnce(t *testing.T) {
 	}))
 	t.Cleanup(bad.Close)
 	c := New(bad.URL+","+bad.URL, nil)
-	err := c.CreateTopic(context.Background(), "t", 1)
+	err := c.CreateTopic(t.Context(), "t", 1)
 	var ce *CallError
 	if !errors.As(err, &ce) || ce.Status != 503 || hits.Load() != 2 {
 		t.Fatalf("err %v hits %d", err, hits.Load())
@@ -292,12 +292,12 @@ func TestNoFailoverOnBusinessErrorOrTimeout(t *testing.T) {
 	up := httptest.NewServer(cp.NewHandler(memstore.New()))
 	t.Cleanup(up.Close)
 	c := New(slow.URL+","+up.URL, nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	if err := c.CreateTopic(ctx, "t", 1); err == nil || hits.Load() != 1 {
 		t.Fatalf("a sent request that times out must not be resent elsewhere: %v hits %d", err, hits.Load())
 	}
-	if c2 := New(up.URL, nil); c2.CreateTopic(context.Background(), "", 1) == nil {
+	if c2 := New(up.URL, nil); c2.CreateTopic(t.Context(), "", 1) == nil {
 		t.Fatal("business error lost")
 	}
 }
@@ -321,7 +321,7 @@ func TestFailbackWrapsAround(t *testing.T) {
 	}))
 	aURL := a.URL
 	c := New(aURL+","+b.URL, nil)
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := c.CreateTopic(ctx, "t", 1); err != nil || c.cur.Load() != 1 {
 		t.Fatalf("failover to b: %v cur %d", err, c.cur.Load())
 	}

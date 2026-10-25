@@ -54,7 +54,7 @@ func TestInterleavedCommittersStayContiguous(t *testing.T) {
 		r := veritastest.NewRand(seed)
 		c := NewControlPlane()
 		total := map[core.TopicPartition]int64{}
-		for i := 0; i < 60; i++ {
+		for i := range 60 {
 			var bs []core.PendingBatch
 			for n := 0; n <= r.Intn(3); n++ {
 				p := cpTPs[r.Intn(3)]
@@ -117,7 +117,7 @@ func TestManyBatchSegment(t *testing.T) {
 	var bs []core.PendingBatch
 	next := map[int32]core.Offset{0: 0, 1: 7, 2: 0}
 	var want []core.Offset
-	for i := 0; i < 300; i++ {
+	for i := range 300 {
 		p := int32(i % 3)
 		n := int64(1 + i%4)
 		bs = append(bs, pb("t", p, n))

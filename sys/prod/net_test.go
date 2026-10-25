@@ -55,7 +55,7 @@ func TestNetOpenReadWriteOrdered(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	var want bytes.Buffer
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		chunk := bytes.Repeat([]byte{byte(i)}, 1000)
 		want.Write(chunk)
 		wg.Add(1)

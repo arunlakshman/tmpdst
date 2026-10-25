@@ -254,7 +254,7 @@ func TestDeterminism(t *testing.T) {
 	f.Outage = sim.Outage{Prob: 0.05, Dur: [2]core.Duration{10 * ms, 20 * ms}}
 	run := func(seed uint64) (string, uint64, uint64) {
 		e, c, a := setup(f, seed)
-		for i := 0; i < 60; i++ {
+		for i := range 60 {
 			c.T += sim.Time(ms)
 			k := string(rune('a' + i%5))
 			switch i % 3 {

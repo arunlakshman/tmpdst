@@ -71,7 +71,7 @@ func runRoundTrip(t *testing.T, s *stack) {
 	}
 	verify(t, acked, got, true)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	adm := kadm.NewClient(cl)
 	ends, err := adm.ListEndOffsets(ctx, "orders", "events")
@@ -96,7 +96,7 @@ func TestMetadataAndApiVersions(t *testing.T) {
 	s := memStack(t, 2)
 	create(s)
 	cl := newClient(t, s.seeds()[:1])
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	adm := kadm.NewClient(cl)
 
@@ -148,7 +148,7 @@ func TestProduceUnknownTopic(t *testing.T) {
 	s := memStack(t, 1)
 	create(s)
 	cl := newClient(t, s.seeds(), kgo.UnknownTopicRetries(0), kgo.RecordDeliveryTimeout(10*time.Second))
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	start := time.Now()
 	res := cl.ProduceSync(ctx, &kgo.Record{Topic: "ghost", Partition: 0, Value: []byte("x")})
@@ -172,9 +172,9 @@ func TestListOffsetsRequest(t *testing.T) {
 	s := memStack(t, 1)
 	create(s)
 	cl := newClient(t, s.seeds())
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if err := cl.ProduceSync(ctx, &kgo.Record{Topic: "orders", Partition: 1, Value: value("orders", 1, i)}).FirstErr(); err != nil {
 			t.Fatal(err)
 		}
@@ -218,15 +218,15 @@ func TestKillBrokerMidProduce(t *testing.T) {
 func runKill(t *testing.T, s *stack) {
 	cl := newClient(t, s.seeds(), kgo.RetryTimeout(60*time.Second), kgo.RecordDeliveryTimeout(60*time.Second))
 	acked := newSent()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	const n = 500
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			for topic, parts := range topics {
-				for p := int32(0); p < parts; p++ {
+				for p := range parts {
 					cl.Produce(ctx, &kgo.Record{Topic: topic, Partition: p, Value: value(topic, p, i)}, acked.promise)
 				}
 			}
@@ -265,7 +265,7 @@ func TestGracefulStopFlushesProduce(t *testing.T) {
 	s.addBrokers(1)
 	create(s)
 	cl := newClient(t, s.seeds())
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	// Warm the connection so the timing below is the
 	// batch window and nothing else.
@@ -310,7 +310,7 @@ func TestDefaultFlushRule(t *testing.T) {
 	s.addBrokers(1)
 	create(s)
 	cl := newClient(t, s.seeds())
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	warm := &kgo.Record{Topic: "orders", Partition: 0, Value: []byte("warm")}
 	if err := cl.ProduceSync(ctx, warm).FirstErr(); err != nil {

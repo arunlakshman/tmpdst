@@ -11,8 +11,7 @@ import (
 )
 
 func code(err error) core.ErrCode {
-	var e *Error
-	if errors.As(err, &e) {
+	if e, ok := errors.AsType[*Error](err); ok {
 		return e.Code
 	}
 	if err == nil {
@@ -22,7 +21,7 @@ func code(err error) core.ErrCode {
 }
 
 func TestObjectStore(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	s := NewObjectStore()
 	if err := s.Put(ctx, "a/1", []byte("hello")); err != nil {
 		t.Fatal(err)
@@ -49,14 +48,12 @@ func TestObjectStore(t *testing.T) {
 }
 
 func TestControlPlaneConcurrent(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	c := NewControlPlane()
 	tp := core.TP("t", 0)
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for i := range 8 {
+		wg.Go(func() {
 			_, err := c.Call(ctx, core.CommitSegment{
 				SegmentKey: string(rune('a' + i)),
 				Batches:    []core.PendingBatch{{TP: tp, Records: 2}},
@@ -64,7 +61,7 @@ func TestControlPlaneConcurrent(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	resp, _ := c.Call(ctx, core.Lookup{TP: tp})

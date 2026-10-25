@@ -33,7 +33,7 @@ func frameOf(p []byte) []byte {
 
 func TestFramerSplits(t *testing.T) {
 	rng := xorshift(0x9E3779B97F4A7C15)
-	for iter := 0; iter < 200; iter++ {
+	for iter := range 200 {
 		var payloads [][]byte
 		var stream []byte
 		for i, n := 0, 1+rng.intn(6); i < n; i++ {

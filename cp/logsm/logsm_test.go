@@ -48,7 +48,7 @@ func TestCodecRoundTrip(t *testing.T) {
 
 func TestCodecCorrupt(t *testing.T) {
 	good := Encode(commitEntry("k", pb("a", 0, 3), pb("a", 1, 3)))
-	for n := 0; n < len(good); n++ { // every truncation fails or decodes cleanly, never panics
+	for n := range good { // every truncation fails or decodes cleanly, never panics
 		_, _ = Decode(good[:n])
 	}
 	if _, err := Decode(good[:len(good)-1]); err == nil {
@@ -109,7 +109,7 @@ func TestDynLogPaging(t *testing.T) {
 	db := fakedb.New()
 	db.PageSize = 2
 	l := fakeLog(t, db)
-	for n := int64(0); n < 7; n++ {
+	for n := range int64(7) {
 		if _, won, err := l.Append(bg, n, Entry{ID: fmt.Sprint(n)}); !won || err != nil {
 			t.Fatal(won, err)
 		}
@@ -272,28 +272,25 @@ func TestConcurrentFakeDB(t *testing.T) {
 	ctx, cancel := context.WithCancel(bg)
 	var tail sync.WaitGroup
 	var rs []*Replica
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		r := NewReplica(Config{Log: l, Writer: fmt.Sprint("r", i), HoleAfter: int64(30 * time.Millisecond), TailPoll: int64(time.Millisecond)})
 		rs = append(rs, r)
-		tail.Add(1)
-		go func() { defer tail.Done(); r.Run(ctx) }()
+		tail.Go(func() { ; r.Run(ctx) })
 	}
 	var wg sync.WaitGroup
 	var bad atomic.Int64
 	for i, r := range rs {
 		c := NewCommitter(r, 4)
-		for w := 0; w < 4; w++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for j := 0; j < 15; j++ {
+		for w := range 4 {
+			wg.Go(func() {
+				for j := range 15 {
 					key := fmt.Sprintf("k%d", (i*7+w*3+j)%20)
 					d, err := c.Do(bg, commitEntry(key, pb("t", int32(len(key)), 2), pb("u", 0, 1)))
 					if err != nil || d.Err != core.OK {
 						bad.Add(1)
 					}
 				}
-			}()
+			})
 		}
 	}
 	wg.Wait()
@@ -320,8 +317,7 @@ type noOld struct{ DB }
 
 func (n noOld) PutItem(ctx context.Context, in *dynamodb.PutItemInput, o ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
 	out, err := n.DB.PutItem(ctx, in, o...)
-	var cc *types.ConditionalCheckFailedException
-	if errors.As(err, &cc) {
+	if cc, ok := errors.AsType[*types.ConditionalCheckFailedException](err); ok {
 		cc.Item = nil
 	}
 	return out, err

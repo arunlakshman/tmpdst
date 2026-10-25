@@ -104,8 +104,7 @@ func IsThrottle(code string) bool {
 // HTTP status (0 if none) and API error code ("" if none).
 func Result(ctx context.Context, status int, err error) (string, string) {
 	var code string
-	var ae smithy.APIError
-	if errors.As(err, &ae) {
+	if ae, ok := errors.AsType[smithy.APIError](err); ok {
 		code = ae.ErrorCode()
 	}
 	if err == nil {
@@ -158,8 +157,7 @@ func (m attemptMW) HandleFinalize(ctx context.Context, in middleware.FinalizeInp
 	}
 	result, code := Result(ctx, status, err)
 	var reqID string
-	var re *awshttp.ResponseError
-	if errors.As(err, &re) {
+	if re, ok := errors.AsType[*awshttp.ResponseError](err); ok {
 		if status == 0 {
 			status = re.HTTPStatusCode()
 		}

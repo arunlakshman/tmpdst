@@ -22,10 +22,8 @@ func wave(t *testing.T, d doer, url string, n int, arrived *atomic.Int64) {
 	t.Helper()
 	arrived.Store(0)
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range n {
+		wg.Go(func() {
 			req, _ := http.NewRequest(http.MethodGet, url, nil)
 			resp, err := d.Do(req)
 			if err != nil {
@@ -34,7 +32,7 @@ func wave(t *testing.T, d doer, url string, n int, arrived *atomic.Int64) {
 			}
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -74,7 +72,7 @@ func TestConnectionsAreReused(t *testing.T) {
 			if first < n || first > n+8 {
 				t.Fatalf("first wave dialed %d connections, want about %d", first, n)
 			}
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				wave(t, d, srv.URL, n, &arrived)
 			}
 			if again := dials.Load() - first; again > 8 {

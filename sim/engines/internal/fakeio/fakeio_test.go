@@ -67,7 +67,7 @@ func TestSpecHashCacheObjectStore(t *testing.T) {
 	ctx := enginetest.New(stub{c}, 5)
 	from := enginetest.Ref("a")
 	r := sim.NewRand(99)
-	for i := 0; i < 400; i++ {
+	for i := range 400 {
 		ctx.T += sim.Time(ms)
 		k := string(rune('a' + r.Between(0, 6)))
 		req := core.ReqID(i)
@@ -119,7 +119,7 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 	if got, want := c.StateHash(), fresh(c); got != want {
 		t.Fatal("after CreateTopic: stale")
 	}
-	for i := 0; i < 400; i++ {
+	for i := range 400 {
 		ctx.T += sim.Time(ms)
 		n := nodes[r.Between(0, 3)]
 		req := core.ReqID(i)

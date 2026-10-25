@@ -51,14 +51,14 @@ type logStack struct {
 func newLogStack(t *testing.T, brokers int) *logStack {
 	t.Helper()
 	db := fakedb.New()
-	if _, err := db.CreateTable(context.Background(), &dynamodb.CreateTableInput{TableName: aws.String("cp")}); err != nil {
+	if _, err := db.CreateTable(t.Context(), &dynamodb.CreateTableInput{TableName: aws.String("cp")}); err != nil {
 		t.Fatal(err)
 	}
 	objs := logcptest.NewObjects()
 	log := logcp.NewDynLog(db, "cp", logcp.DynLogOptions{})
 	ls := &logStack{}
 	var urls []string
-	for rank := 0; rank < 3; rank++ {
+	for rank := range 3 {
 		cfg := logcptest.FastConfig(fmt.Sprintf("cp%d", rank), rank, log)
 		cfg.Incarnation = fmt.Sprintf("it%d", rank)
 		cfg.DB, cfg.Table, cfg.Objects = db, "cp", objs
@@ -89,7 +89,7 @@ func newLogStack(t *testing.T, brokers int) *logStack {
 // (the macOS ephemeral-port flake); any other error is final.
 func retryDial(f func() error) error {
 	var err error
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		if err = f(); err == nil || !isDialErr(err) {
 			return err
 		}
@@ -135,7 +135,7 @@ func TestKillTheAppenderMidProduce(t *testing.T) {
 	}
 	cl := newClient(t, s.seeds(), kgo.RetryTimeout(60*time.Second), kgo.RecordDeliveryTimeout(60*time.Second))
 	acked := newSent()
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 	const n = 1000
 	var lastAck atomic.Int64
@@ -146,9 +146,9 @@ func TestKillTheAppenderMidProduce(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			for topic, parts := range topics {
-				for p := int32(0); p < parts; p++ {
+				for p := range parts {
 					cl.Produce(ctx, &kgo.Record{Topic: topic, Partition: p, Value: value(topic, p, i)}, promise)
 				}
 			}

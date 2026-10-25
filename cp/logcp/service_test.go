@@ -137,12 +137,10 @@ func TestGroupCommitFewerSlotsThanCommands(t *testing.T) {
 	const n = 200
 	var wg sync.WaitGroup
 	resps := make([]core.CommitSegmentResp, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for i := range n {
+		wg.Go(func() {
 			resps[i] = commit(t, s, seg("g"+string(rune('A'+i/26))+string(rune('a'+i%26)), tp("t", int32(i%3))))
-		}()
+		})
 	}
 	wg.Wait()
 	slots := s.Applied()
@@ -193,12 +191,10 @@ func TestAdmissionControl(t *testing.T) {
 	ctx, cancel := context.WithCancel(bg)
 	defer cancel()
 	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ { // one in the stuck append, three queued
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for i := range 4 { // one in the stuck append, three queued
+		wg.Go(func() {
 			_, _, _ = s.CommitSegment(ctx, seg("q"+string(rune('a'+i)), tp("t", 0)))
-		}()
+		})
 		for deadline := time.Now().Add(2 * time.Second); log.appends.Load() < 1 && time.Now().Before(deadline); {
 			time.Sleep(time.Millisecond)
 		}
@@ -213,7 +209,7 @@ func TestAdmissionControl(t *testing.T) {
 	// a command too large for one slot is refused with ErrTooLarge and never queued
 	var big core.CommitSegment
 	big.SegmentKey = "big"
-	for i := 0; i < 20000; i++ {
+	for i := range 20000 {
 		big.Batches = append(big.Batches, core.PendingBatch{TP: tp(strings.Repeat("x", 30)+string(rune('a'+i%26))+strings.Repeat("y", i%50), int32(i)), Records: 1, Loc: core.SegmentRef{Key: strings.Repeat("z", 20) + string(rune(i)), Len: 1}})
 	}
 	if _, code, err := s.CommitSegment(bg, big); err != nil || code != core.ErrTooLarge {
@@ -237,7 +233,7 @@ func TestStandbyRefusesCommitsAndServesFreshReads(t *testing.T) {
 	if _, err := standby.CreateTopic(bg, "t", 1); !errors.Is(err, logcp.ErrNotActive) {
 		t.Fatalf("standby create: %v", err)
 	}
-	for i := 0; i < 20; i++ { // a read on the standby sees every ack of the active node, at once
+	for i := range 20 { // a read on the standby sees every ack of the active node, at once
 		r := commit(t, active, seg("k"+string(rune('a'+i)), tp("t", 0)))
 		l, _, err := standby.Lookup(bg, core.Lookup{TP: tp("t", 0), From: r.Assigned[0].Base})
 		if err != nil || l.End != r.Assigned[0].Base+core.Offset(r.Assigned[0].Count) {
@@ -268,7 +264,7 @@ func TestFailoverNoLossNoDuplicate(t *testing.T) {
 	a := node(t, "n0", 0, log, nil, nil, mod)
 	b := node(t, "n1", 1, log, nil, nil, mod)
 	acked := map[string]core.CommitSegmentResp{}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		k := "pre" + string(rune('a'+i))
 		acked[k] = commit(t, a, seg(k, tp("t", 0)))
 	}
@@ -308,12 +304,10 @@ func TestSplitBrainTwoAppenders(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	next := map[core.TopicPartition]core.Offset{}
-	for w := 0; w < 4; w++ {
+	for w := range 4 {
 		for _, s := range []*logcp.Service{a, b} {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for i := 0; i < 25; i++ {
+			wg.Go(func() {
+				for i := range 25 {
 					r := commit(t, s, seg("sb"+s.Name()+itoa2(w, i), tp("t", int32(i%2))))
 					mu.Lock()
 					for _, x := range r.Assigned {
@@ -321,7 +315,7 @@ func TestSplitBrainTwoAppenders(t *testing.T) {
 					}
 					mu.Unlock()
 				}
-			}()
+			})
 		}
 	}
 	wg.Wait()
@@ -412,7 +406,7 @@ func TestRestartFromCheckpointAndTrim(t *testing.T) {
 	small := func(c *logcp.Config) { c.WindowSlots, c.TrimStride, c.KeepSlots, c.TrimDelete = 40, 8, 10, true }
 	a := node(t, "n0", 0, log, db, objs, func(c *logcp.Config) { small(c); c.Metrics = logcp.NewMetrics(reg) })
 	acked := map[string]core.CommitSegmentResp{}
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		k := "c" + string(rune('A'+i/26)) + string(rune('a'+i%26))
 		acked[k] = commit(t, a, seg(k, tp("t", int32(i%4))))
 		if i == 29 {
@@ -435,7 +429,7 @@ func TestRestartFromCheckpointAndTrim(t *testing.T) {
 		t.Fatalf("the start of the log should be tombstones: %v", err)
 	}
 	// more commits after the checkpoint, then a node that restores and replays the tail
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		commit(t, a, seg("tail"+string(rune('a'+i)), tp("t", 0)))
 	}
 	b := node(t, "n1", 1, log, db, objs, small)
@@ -470,7 +464,7 @@ func TestCheckpointFallsBackToTheWholeLog(t *testing.T) {
 	objs := logcptest.NewObjects()
 	log := logcp.NewDynLog(db, "cp", logcp.DynLogOptions{})
 	a := node(t, "n0", 0, log, db, objs, nil)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		commit(t, a, seg("f"+string(rune('a'+i)), tp("t", 0)))
 	}
 	if _, err := a.Checkpoint(bg); err != nil {
@@ -493,7 +487,7 @@ func TestLaggingNodeStopsInsteadOfWritingIntoTrimmedSlots(t *testing.T) {
 	a := node(t, "n0", 0, log, db, objs, small)
 	// b is a node that stopped reading early: a stale view of the log
 	b := node(t, "n1", 1, log, db, objs, func(c *logcp.Config) { small(c); c.TailPoll = time.Hour })
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		commit(t, a, seg("l"+string(rune('a'+i%26))+string(rune('a'+i/26)), tp("t", 0)))
 	}
 	if _, err := a.Checkpoint(bg); err != nil {
@@ -546,14 +540,12 @@ func TestFreshReadsShareTailChecks(t *testing.T) {
 	commit(t, s, seg("k", tp("t", 0)))
 	before := log.tails.Load()
 	var wg sync.WaitGroup
-	for i := 0; i < 200; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 200 {
+		wg.Go(func() {
 			if l, _, err := s.Lookup(bg, core.Lookup{TP: tp("t", 0)}); err != nil || l.End != 2 {
 				t.Errorf("lookup %+v %v", l, err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if n := log.tails.Load() - before; n > 5 {
@@ -598,12 +590,10 @@ func TestRealGoroutinesRace(t *testing.T) {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	ends := map[core.TopicPartition]core.Offset{}
-	for c := 0; c < 8; c++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for c := range 8 {
+		wg.Go(func() {
 			at := 0
-			for i := 0; i < 40; i++ {
+			for i := range 40 {
 				cmd := seg("r"+string(rune('a'+c))+string(rune('A'+i)), tp("t", int32(i%3)), tp("u", int32(c%2)))
 				for {
 					r, code, err := nodes[at].CommitSegment(bg, cmd)
@@ -624,7 +614,7 @@ func TestRealGoroutinesRace(t *testing.T) {
 					break
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	failing.Store(false)

@@ -66,7 +66,7 @@ func TestClassifier(t *testing.T) {
 
 // Real failures through a real client, classified end to end.
 func TestClassifierLive(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	commit := core.CommitSegment{SegmentKey: "k"}
 	classify := func(url string, hc *http.Client, op core.CPOp, ctx context.Context) (core.ErrCode, core.Outcome) {
 		_, err := cpclient.New(url, hc).Call(ctx, op)

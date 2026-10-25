@@ -241,7 +241,7 @@ func (b Batch) Payload() []byte { return b.records }
 // Payload of a CodecNone batch, or a client's own decompressed payload).
 func DecodeRecords(rest []byte, n int32) ([]kmsg.Record, error) {
 	recs := make([]kmsg.Record, 0, min(int(n), len(rest)))
-	for i := int32(0); i < n; i++ {
+	for i := range n {
 		l, k := binary.Varint(rest)
 		if k <= 0 || l <= 0 || l > int64(len(rest)-k) {
 			return nil, fmt.Errorf("%w: record %d length", ErrCorrupt, i)

@@ -39,11 +39,11 @@ type Log interface {
 	// Append writes e at slot if the slot is empty. cur is the entry in the
 	// slot afterwards (e itself when won, the existing one when not). A
 	// non-nil err means the outcome is unknown: the write may have landed.
-	Append(ctx context.Context, slot core.LogSlot, e Entry) (cur Entry, won bool, err error)
+	Append(ctx context.Context, slot int64, e Entry) (cur Entry, won bool, err error)
 	// Read returns up to limit written slots >= from in ascending order. Empty
 	// slots are skipped, so the result may have holes. The read is consistent.
-	Read(ctx context.Context, from core.LogSlot, limit int) ([]Slot, error)
+	Read(ctx context.Context, from int64, limit int) ([]Slot, error)
 	// CheckTail returns 1 + the highest written slot (0 for an empty log),
 	// consistently.
-	CheckTail(ctx context.Context) (core.LogSlot, error)
+	CheckTail(ctx context.Context) (int64, error)
 }

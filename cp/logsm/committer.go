@@ -56,7 +56,7 @@ func (c *Committer) Do(ctx context.Context, e Entry) (core.CPDone, error) {
 // there, which is ours iff the ID matches.
 func (c *Committer) write(ctx context.Context, n core.LogSlot, e Entry) (bool, error) {
 	for {
-		cur, won, err := c.r.cfg.Log.Append(ctx, n, e)
+		cur, won, err := c.r.cfg.Log.Append(ctx, int64(n), e)
 		if err == nil {
 			c.r.observe(n, cur)
 			return won || cur.ID == e.ID, nil

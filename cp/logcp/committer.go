@@ -256,7 +256,7 @@ func failAll(ps []*pending, err error) {
 func (s *Service) writeSlot(ctx context.Context, n core.LogSlot, e Entry) (cur Entry, won bool, err error) {
 	backoff := time.Millisecond
 	for {
-		cur, won, err = s.log.Append(ctx, n, e)
+		cur, won, err = s.log.Append(ctx, int64(n), e)
 		if err == nil || errors.Is(err, ErrEntryTooLarge) || errors.Is(err, ErrTrimmed) {
 			return cur, won, err
 		}

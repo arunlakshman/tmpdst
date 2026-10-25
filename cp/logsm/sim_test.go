@@ -117,7 +117,7 @@ func (l *simLog) pause() {
 	}
 }
 
-func (l *simLog) Append(ctx context.Context, slot core.LogSlot, e Entry) (Entry, bool, error) {
+func (l *simLog) Append(ctx context.Context, slot int64, e Entry) (Entry, bool, error) {
 	l.pause()
 	if cancel, ok := ctx.Value(crashKey{}).(context.CancelFunc); ok && l.s.chance(2) {
 		l.crashes.Add(1)
@@ -135,7 +135,7 @@ func (l *simLog) Append(ctx context.Context, slot core.LogSlot, e Entry) (Entry,
 	return cur, won, err
 }
 
-func (l *simLog) Read(ctx context.Context, from core.LogSlot, limit int) ([]Slot, error) {
+func (l *simLog) Read(ctx context.Context, from int64, limit int) ([]Slot, error) {
 	l.pause()
 	if l.s.chance(5) {
 		return nil, errLost
@@ -143,7 +143,7 @@ func (l *simLog) Read(ctx context.Context, from core.LogSlot, limit int) ([]Slot
 	return l.inner.Read(ctx, from, limit)
 }
 
-func (l *simLog) CheckTail(ctx context.Context) (core.LogSlot, error) {
+func (l *simLog) CheckTail(ctx context.Context) (int64, error) {
 	l.pause()
 	if l.s.chance(5) {
 		return 0, errLost

@@ -117,7 +117,7 @@ type slowLog struct {
 	gate    chan struct{} // if set, appends wait for it to close
 }
 
-func (l *slowLog) Append(ctx context.Context, slot core.LogSlot, e logcp.Entry) (logcp.Entry, bool, error) {
+func (l *slowLog) Append(ctx context.Context, slot int64, e logcp.Entry) (logcp.Entry, bool, error) {
 	l.appends.Add(1)
 	if l.gate != nil {
 		select {
@@ -566,7 +566,7 @@ type countTail struct {
 	tails atomic.Int64
 }
 
-func (c *countTail) CheckTail(ctx context.Context) (core.LogSlot, error) {
+func (c *countTail) CheckTail(ctx context.Context) (int64, error) {
 	c.tails.Add(1)
 	return c.Log.CheckTail(ctx)
 }

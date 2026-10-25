@@ -232,7 +232,7 @@ func (r *Replica) pullLocked(ctx context.Context, now int64) {
 	r.syncing, r.lastPul = true, now
 	from := r.applied
 	r.mu.Unlock()
-	slots, err := r.cfg.Log.Read(ctx, from, r.cfg.ReadMax)
+	slots, err := r.cfg.Log.Read(ctx, int64(from), r.cfg.ReadMax)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.syncing = false
@@ -261,7 +261,7 @@ func (r *Replica) holeDue() (slot core.LogSlot, due bool) {
 // fill writes a no-op into the empty slot. Whoever wins the slot, the entry
 // that results is observed: the no-op, or the late original command.
 func (r *Replica) fill(ctx context.Context, slot core.LogSlot) {
-	cur, _, err := r.cfg.Log.Append(ctx, slot, Entry{Kind: KindNoop, ID: r.newID()})
+	cur, _, err := r.cfg.Log.Append(ctx, int64(slot), Entry{Kind: KindNoop, ID: r.newID()})
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if err != nil {
@@ -323,14 +323,14 @@ func (r *Replica) Await(ctx context.Context, n core.LogSlot) (core.CPDone, error
 // Read serves a read-only op (Lookup, DescribeTopics) fresh: one consistent
 // tail read, then apply through it, then answer from memory.
 func (r *Replica) Read(ctx context.Context, op core.CPOp) (core.CPDone, error) {
-	tail, err := r.cfg.Log.CheckTail(ctx)
+	n, err := r.cfg.Log.CheckTail(ctx)
 	for err != nil {
 		if err = r.cfg.Wait(ctx); err != nil {
 			return core.CPDone{}, err
 		}
-		tail, err = r.cfg.Log.CheckTail(ctx)
+		n, err = r.cfg.Log.CheckTail(ctx)
 	}
-	if err := r.SyncToNow(ctx, tail); err != nil {
+	if err := r.SyncToNow(ctx, core.LogSlot(n)); err != nil {
 		return core.CPDone{}, err
 	}
 	return r.Local(op), nil

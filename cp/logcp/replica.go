@@ -127,7 +127,7 @@ func (r *replica) pull(ctx context.Context) {
 	r.pulling = true
 	from := r.applied
 	r.mu.Unlock()
-	slots, err := r.s.log.Read(ctx, from, r.s.cfg.ReadMax)
+	slots, err := r.s.log.Read(ctx, int64(from), r.s.cfg.ReadMax)
 	r.mu.Lock()
 	r.pulling = false
 	for _, sl := range slots {
@@ -189,7 +189,7 @@ func (r *replica) fill(ctx context.Context, slot core.LogSlot) {
 		return
 	}
 	noop := r.s.newEntry(nil)
-	cur, _, err := r.s.log.Append(ctx, slot, noop)
+	cur, _, err := r.s.log.Append(ctx, int64(slot), noop)
 	if err != nil {
 		r.blockIfTrimmed(err)
 		return
@@ -227,7 +227,7 @@ func (s *Service) trimmedPast(ctx context.Context, slot core.LogSlot) bool {
 	if it == nil || core.LogSlot(numAttr(it, "ck_slot")) <= slot {
 		return false
 	}
-	got, err := s.log.Read(ctx, slot, 1)
+	got, err := s.log.Read(ctx, int64(slot), 1)
 	if err == nil && len(got) > 0 && got[0].N == slot {
 		s.rep.observe(slot, got[0].E)
 		return true

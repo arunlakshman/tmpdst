@@ -65,7 +65,7 @@ func TestLogReadSkipsHolesAndPages(t *testing.T) {
 		if tail, err := l.CheckTail(bg); err != nil || tail != 0 {
 			t.Fatalf("empty tail %d %v", tail, err)
 		}
-		for _, n := range []core.LogSlot{0, 1, 2, 5, 6, 9} {
+		for _, n := range []int64{0, 1, 2, 5, 6, 9} {
 			if _, won, err := l.Append(bg, n, entryOf("e"+string(rune('a'+n)))); err != nil || !won {
 				t.Fatal(err)
 			}
@@ -87,7 +87,7 @@ func TestDynLogPagesThroughQueryLimit(t *testing.T) {
 	db := newFake(t)
 	db.PageSize = 2
 	l := NewDynLog(db, "cp", DynLogOptions{})
-	for n := core.LogSlot(0); n < 7; n++ {
+	for n := int64(0); n < 7; n++ {
 		_, _, _ = l.Append(bg, n, entryOf("e"))
 	}
 	got, err := l.Read(bg, 0, 100)
@@ -161,7 +161,7 @@ func TestDynLogUnreadableLoser(t *testing.T) {
 
 func TestTrimLeavesTombstones(t *testing.T) {
 	logs(t, func(t *testing.T, l Log) {
-		for n := core.LogSlot(0); n < 600; n++ {
+		for n := int64(0); n < 600; n++ {
 			_, _, _ = l.Append(bg, n, entryOf("e", "k"))
 		}
 		tr := l.(Trimmer)

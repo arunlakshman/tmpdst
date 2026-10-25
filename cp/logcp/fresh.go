@@ -90,10 +90,10 @@ func (s *Service) runBatch(b *freshBatch) {
 func (s *Service) checkTail(ctx context.Context) (core.LogSlot, error) {
 	var err error
 	for try := 0; try < freshTries; try++ {
-		var tail core.LogSlot
-		if tail, err = s.log.CheckTail(ctx); err == nil {
+		var n int64
+		if n, err = s.log.CheckTail(ctx); err == nil {
 			s.m.tailCheck(true)
-			return tail, nil
+			return core.LogSlot(n), nil
 		}
 		s.m.tailCheck(false)
 		if s.env.sleep(ctx, time.Duration(try+1)*2*time.Millisecond) != nil {

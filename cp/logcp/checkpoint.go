@@ -181,7 +181,7 @@ func (s *Service) trimLog(ctx context.Context, ckptSlot core.LogSlot) {
 	if !s.cfg.TrimDelete || !ok || below <= 0 {
 		return
 	}
-	n, err := tr.TrimBelow(ctx, below)
+	n, err := tr.TrimBelow(ctx, int64(below))
 	s.m.trim(n)
 	if err != nil {
 		s.cfg.Logger.Warn("log: trim failed", "event", "log_trim_failed", "below", below, "err", err.Error())

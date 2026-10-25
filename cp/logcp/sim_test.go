@@ -119,11 +119,11 @@ func (r *simRun) fail(format string, a ...any) {
 type recLog struct {
 	logcp.Log
 	mu   sync.Mutex
-	hist map[core.LogSlot]logcp.Entry
+	hist map[int64]logcp.Entry
 	viol []error
 }
 
-func (l *recLog) Append(ctx context.Context, slot core.LogSlot, e logcp.Entry) (logcp.Entry, bool, error) {
+func (l *recLog) Append(ctx context.Context, slot int64, e logcp.Entry) (logcp.Entry, bool, error) {
 	cur, won, err := l.Log.Append(ctx, slot, e)
 	if err == nil {
 		l.mu.Lock()
@@ -141,7 +141,7 @@ func (l *recLog) slots() []logcp.Slot {
 	defer l.mu.Unlock()
 	var out []logcp.Slot
 	for n, e := range l.hist {
-		out = append(out, logcp.Slot{N: n, E: e})
+		out = append(out, logcp.Slot{N: core.LogSlot(n), E: e})
 	}
 	slices.SortFunc(out, func(a, b logcp.Slot) int { return int(a.N - b.N) })
 	return out
@@ -161,7 +161,7 @@ func (l *faultLog) pause() {
 
 var errInjected = errors.New("injected")
 
-func (l *faultLog) Append(ctx context.Context, slot core.LogSlot, e logcp.Entry) (logcp.Entry, bool, error) {
+func (l *faultLog) Append(ctx context.Context, slot int64, e logcp.Entry) (logcp.Entry, bool, error) {
 	l.pause()
 	if l.s.chance(5) {
 		return logcp.Entry{}, false, errInjected // never lands
@@ -174,7 +174,7 @@ func (l *faultLog) Append(ctx context.Context, slot core.LogSlot, e logcp.Entry)
 	return cur, won, err
 }
 
-func (l *faultLog) Read(ctx context.Context, from core.LogSlot, limit int) ([]logcp.Slot, error) {
+func (l *faultLog) Read(ctx context.Context, from int64, limit int) ([]logcp.Slot, error) {
 	l.pause()
 	if l.s.chance(5) {
 		return nil, errInjected
@@ -182,7 +182,7 @@ func (l *faultLog) Read(ctx context.Context, from core.LogSlot, limit int) ([]lo
 	return l.inner.Read(ctx, from, limit)
 }
 
-func (l *faultLog) CheckTail(ctx context.Context) (core.LogSlot, error) {
+func (l *faultLog) CheckTail(ctx context.Context) (int64, error) {
 	l.pause()
 	if l.s.chance(5) {
 		return 0, errInjected
@@ -190,7 +190,7 @@ func (l *faultLog) CheckTail(ctx context.Context) (core.LogSlot, error) {
 	return l.inner.CheckTail(ctx)
 }
 
-func (l *faultLog) TrimBelow(ctx context.Context, slot core.LogSlot) (int, error) {
+func (l *faultLog) TrimBelow(ctx context.Context, slot int64) (int, error) {
 	l.pause()
 	return l.inner.(logcp.Trimmer).TrimBelow(ctx, slot)
 }
@@ -423,7 +423,7 @@ func (r *simRun) chaos() {
 	grow := func(by int64) { // wait until the log has grown by `by` slots
 		start, _ := r.mem.CheckTail(context.Background())
 		for !r.finished.Load() {
-			if tail, _ := r.mem.CheckTail(context.Background()); tail >= start+core.LogSlot(by) {
+			if tail, _ := r.mem.CheckTail(context.Background()); tail >= start+by {
 				return
 			}
 			r.s.yield()
@@ -465,12 +465,12 @@ func (r *simRun) settle() core.LogSlot {
 		tail, _ := r.mem.CheckTail(context.Background())
 		ok := true
 		for _, n := range r.live() {
-			if n.svc.Blocked() == nil && n.svc.Applied() < tail {
+			if n.svc.Blocked() == nil && n.svc.Applied() < core.LogSlot(tail) {
 				ok = false
 			}
 		}
 		if ok && i > 50 {
-			return tail
+			return core.LogSlot(tail)
 		}
 		r.s.yield()
 	}
@@ -506,7 +506,7 @@ func runSimRun(seed uint64) (*simRun, simResult, error) {
 		r.s.limit *= 20
 	}
 	r.mem = logcp.NewMemLog()
-	r.rec = &recLog{Log: r.mem, hist: map[core.LogSlot]logcp.Entry{}}
+	r.rec = &recLog{Log: r.mem, hist: map[int64]logcp.Entry{}}
 	if r.mode == modeWindow {
 		r.window, r.stride, r.keep = 24, 8, 12
 	}
@@ -873,6 +873,6 @@ func TestSimIsDeterministic(t *testing.T) {
 	}
 }
 
-func (l *recLog) TrimBelow(ctx context.Context, slot core.LogSlot) (int, error) {
+func (l *recLog) TrimBelow(ctx context.Context, slot int64) (int, error) {
 	return l.Log.(logcp.Trimmer).TrimBelow(ctx, slot)
 }

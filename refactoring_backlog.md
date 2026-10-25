@@ -66,6 +66,7 @@ Bounded-context merge, Extract Class on Broker/Service/kernel, Dynamo ACL — th
 - [x] ~~Topic/partition pair (`TopicPartition` / `TP`) — **Replace Primitive with Object** — broker, kwire, sim/kafka, wire~~
 - [x] ~~Kafka `err*` `int16` → `KafkaCode` — **Replace Primitive with Object** — `broker/config.go` + call sites~~
 - [x] ~~Slot / HW / offset IDs — **Replace Primitive with Object** — logcp/logsm replica, dynlog~~
+  - Log/DynLog/MemLog APIs stay `int64` until P2 shared kernel.
 - [x] ~~CRC table once — **Replace Temp with Query** — `format/format.go` (+ kwire if shared)~~
 - [ ] `fieldOf` / fact getters — **Move Function** / **Extract Function** — echo, kafka oracle, `sys/prod/seglog`, metrics
 - [ ] `sample` / TwoSpeed — **Pull Up Method** / **Parameterize Function** — fakeio, logengine, echo/kafka config

@@ -88,7 +88,7 @@ func (r *replica) project(c cmd) []core.Offset {
 }
 
 func (e *Engine) schedLand(ctx sim.EngineCtx, op *appendOp, after core.Duration) {
-	at := e.now + sim.Time(after) + sim.Time(sample(ctx.Rand(), e.f.ApplyLatency))
+	at := e.now + sim.Time(after) + sim.Time(e.f.ApplyLatency.Sample(ctx.Rand()))
 	ctx.Self(at, e.lane(ctx, op.rank, op.id), landEv{op: op.id})
 }
 
@@ -168,7 +168,7 @@ func (e *Engine) afterPut(ctx sim.EngineCtx, op *appendOp, f fate, out outcome) 
 		ctx.Self(e.now+sim.Time(e.p.PutRetry), e.lane(ctx, op.rank, op.id), landEv{op: op.id})
 		return
 	}
-	at := e.now + sim.Time(sample(ctx.Rand(), e.f.RespondLatency))
+	at := e.now + sim.Time(e.f.RespondLatency.Sample(ctx.Rand()))
 	op.attempt++
 	ctx.Self(at, e.lane(ctx, op.rank, op.id), answerEv{op: op.id, out: out})
 }

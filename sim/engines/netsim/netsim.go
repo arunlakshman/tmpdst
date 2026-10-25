@@ -175,11 +175,7 @@ func span(r sim.CountedRand, lo, hi core.Duration) core.Duration {
 }
 
 func (e *Engine) sample(r sim.CountedRand) core.Duration {
-	l := e.f.Latency
-	if r.Chance(l.SlowProb) {
-		return span(r, l.SlowMin, l.SlowMax)
-	}
-	return span(r, l.FastMin, l.FastMax)
+	return e.f.Latency.Sample(r)
 }
 
 // findPair returns the pair with that id. Every caller may mutate it, so it

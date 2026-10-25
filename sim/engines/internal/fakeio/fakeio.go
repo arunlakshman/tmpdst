@@ -124,17 +124,6 @@ func (c *Core) EnterRecovery() { c.recovery = true }
 // incarnation are dropped by the scheduler or skipped at landing.
 func (c *Core) OnCrash(sim.EngineCtx, core.NodeRef) {}
 
-func sample(r sim.CountedRand, t sim.TwoSpeed) core.Duration {
-	lo, hi := t.FastMin, t.FastMax
-	if r.Chance(t.SlowProb) {
-		lo, hi = t.SlowMin, t.SlowMax
-	}
-	if hi <= lo {
-		return lo
-	}
-	return core.Duration(r.Between(int64(lo), int64(hi)))
-}
-
 // Execute plans an op. Draw order: outage, 503, timeout, lost coins, apply
 // latency, respond latency, extra.
 func (c *Core) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.IOAction) {
@@ -157,8 +146,8 @@ func (c *Core) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.IOAction) {
 		isTimeout = r.Chance(p.PTimeout)
 		isLost = r.Chance(p.PLost)
 	}
-	t1 := now + sim.Time(sample(r, p.Apply))
-	t2 := t1 + sim.Time(sample(r, p.Respond))
+	t1 := now + sim.Time(p.Apply.Sample(r))
+	t2 := t1 + sim.Time(p.Respond.Sample(r))
 	var flag bool
 	var bits uint64
 	if !c.recovery && c.h.Extra != nil {

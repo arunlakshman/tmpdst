@@ -27,17 +27,6 @@ const (
 	fLost    // the call is served, its answer is dropped
 )
 
-func sample(r sim.CountedRand, t sim.TwoSpeed) core.Duration {
-	lo, hi := t.FastMin, t.FastMax
-	if r.Chance(t.SlowProb) {
-		lo, hi = t.SlowMin, t.SlowMax
-	}
-	if hi <= lo {
-		return lo
-	}
-	return core.Duration(r.Between(int64(lo), int64(hi)))
-}
-
 func cause(outage bool) string {
 	if outage {
 		return "outage"
@@ -222,7 +211,7 @@ func (e *Engine) deliver(ctx sim.EngineCtx, to core.NodeRef, c core.CPDone) {
 	if cur, up := ctx.Current(to.Node); !up || cur != to {
 		return
 	}
-	at := ctx.Now() + sim.Time(sample(ctx.Rand(), e.f.RespondLatency))
+	at := ctx.Now() + sim.Time(e.f.RespondLatency.Sample(ctx.Rand()))
 	ctx.Deliver(to, at, ctx.Lane("logengine/"+string(to.Node)), c)
 }
 

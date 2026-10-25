@@ -1,4 +1,4 @@
-package sim
+package core
 
 import "testing"
 
@@ -17,13 +17,13 @@ func TestFnvU64MatchesBytewise(t *testing.T) {
 		if i%7 == 0 {
 			v = uint64(i)
 		}
-		if got, want := fnvU64(x, v), slow(x, v); got != want {
+		if got, want := FnvU64(x, v), slow(x, v); got != want {
 			t.Fatalf("v=%#x: %#x != %#x", v, got, want)
 		}
 		x = slow(x, v)
 	}
 	for _, v := range []uint64{0, 1, 255, 256, 1<<64 - 1, 1 << 63} {
-		if fnvU64(x, v) != slow(x, v) {
+		if FnvU64(x, v) != slow(x, v) {
 			t.Fatalf("v=%#x", v)
 		}
 	}

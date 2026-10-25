@@ -1,5 +1,8 @@
-# golangci-lint v2. Enforced on ALL code (no baseline, by decision); the
-# existing violations are counted in docs/lint-baseline.md and must be fixed.
+# golangci-lint v2. The original rule set is clean on ALL code. Rules added
+# later (design rules: panic, size, nesting, dupes, ...) are grandfathered with
+# issues.new-from-rev: only lines changed after that commit are checked, so
+# old debt cannot fail the build but cannot grow either. CI needs full git
+# history (fetch-depth: 0). Move the rev forward when a debt batch is paid.
 # time.Now in core/ sim/ is NOT linted here: tools/detcheck owns determinism
 # (import allow-list), do not duplicate.
 version: "2"
@@ -16,6 +19,7 @@ output:
 issues:
   max-issues-per-linter: 20
   max-same-issues: 3
+  new-from-rev: 41894c2
 linters:
   default: none
   enable:
@@ -29,7 +33,35 @@ linters:
     - nolintlint
     - usestdlibvars
     - copyloopvar
+    - nonamedreturns # task 20
+    - forbidigo      # tasks 15 (panic), 22 (time.Now in cp/logcp, cp/logsm)
+    - funlen         # task 13/14
+    - gocognit       # task 13/14
+    - nestif         # task 21
+    - errname        # task 17
+    - interfacebloat # task 24
+    - dupl           # task 10
   settings:
+    nonamedreturns:
+      report-error-in-defer: false
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: ^panic$
+          msg: "return an error; panic is for impossible state in core/ sim/ only (Effective Go, Panic)"
+        - pattern: ^time\.Now$
+          msg: "cp/logcp and cp/logsm take an injected clock (Env.Now); do not call time.Now directly"
+    funlen:
+      lines: 80
+      statements: 50
+    gocognit:
+      min-complexity: 25
+    nestif:
+      min-complexity: 5
+    interfacebloat:
+      max: 8
+    dupl:
+      threshold: 50
     revive:
       rules:
         - name: exported
@@ -43,6 +75,7 @@ linters:
         - name: unexported-return
         - name: context-as-argument
         - name: use-any
+        - name: early-return
     nolintlint:
       require-specific: true
       require-explanation: true
@@ -51,6 +84,22 @@ linters:
     paths:
       - testdata
       - build
+    rules:
+      # panic: allowed where the doc says impossible-state panics live, and in tests.
+      - linters: [forbidigo]
+        text: 'panic'
+        path: '^(core|sim|tools)/|_test\.go$'
+      # time.Now: banned only in cp/logcp and cp/logsm (path-except inverts the match).
+      # env.go is the one place the real clock is wired in.
+      - linters: [forbidigo]
+        text: 'time\.Now'
+        path-except: '^cp/(logcp|logsm)/'
+      - linters: [forbidigo]
+        text: 'time\.Now'
+        path: '^cp/(logcp|logsm)/(env\.go|.*_test\.go)$'
+      # size/dupe rules are for production code.
+      - linters: [funlen, gocognit, nestif, dupl, interfacebloat]
+        path: '_test\.go$'
 formatters:
   enable:
     - gofmt

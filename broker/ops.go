@@ -259,16 +259,16 @@ func (b *Broker) merge(infos []core.TopicInfo) {
 // missing lists the topics of req (once each) that the cache cannot resolve.
 func (b *Broker) missing(req core.Request) []string {
 	var out []string
-	add := func(topic string, part int32) {
-		if b.knows(core.TopicPartition{Topic: topic, Partition: part}) {
+	add := func(tp core.TopicPartition) {
+		if b.knows(tp) {
 			return
 		}
 		for _, n := range out {
-			if n == topic {
+			if n == tp.Topic {
 				return
 			}
 		}
-		out = append(out, topic)
+		out = append(out, tp.Topic)
 	}
 	switch r := req.(type) {
 	case *kmsg.ProduceRequest:
@@ -277,19 +277,19 @@ func (b *Broker) missing(req core.Request) []string {
 		}
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				add(t.Topic, p.Partition)
+				add(core.TP(t.Topic, p.Partition))
 			}
 		}
 	case *kmsg.FetchRequest:
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				add(t.Topic, p.Partition)
+				add(core.TP(t.Topic, p.Partition))
 			}
 		}
 	case *kmsg.ListOffsetsRequest:
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				add(t.Topic, p.Partition)
+				add(core.TP(t.Topic, p.Partition))
 			}
 		}
 	}

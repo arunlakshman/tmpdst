@@ -101,7 +101,7 @@ func queryDigest(exec func(core.CPOp) core.CPDone) uint64 {
 	for _, t := range d.Topics {
 		_, _ = fmt.Fprintf(h, "T%s/%d;", t.Name, t.Partitions)
 		for p := int32(0); p < t.Partitions; p++ {
-			l := exec(core.Lookup{TP: core.TopicPartition{Topic: t.Name, Partition: p}}).Resp.(core.LookupResp)
+			l := exec(core.Lookup{TP: core.TP(t.Name, p)}).Resp.(core.LookupResp)
 			_, _ = fmt.Fprintf(h, "P%d/%d:%+v;", p, l.End, l.Ranges)
 		}
 	}

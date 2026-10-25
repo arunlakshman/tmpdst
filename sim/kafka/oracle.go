@@ -129,7 +129,7 @@ func (o *oracle) acks(v sim.View) {
 		}
 		det := []core.Detail{{Key: "tp", Value: string(topic) + "/" + strconv.Itoa(int(part))}, {Key: "base", Value: int64(base)},
 			{Key: "count", Value: int64(count)}, {Key: "node", Value: string(tf.Source.Node)}}
-		ti, known := o.idx[core.TopicPartition{Topic: string(topic), Partition: int32(part)}]
+		ti, known := o.idx[core.TP(string(topic), int32(part))]
 		bi, found := -1, false
 		if known {
 			bi, found = o.logs[ti].byBase[int64(base)]

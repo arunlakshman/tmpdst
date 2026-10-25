@@ -35,7 +35,7 @@ func TestCheckpointRoundTrip(t *testing.T) {
 		t.Fatalf("round trip %+v err %v", got, err)
 	}
 	rs := got.Restore()
-	if _, ok := rs.Keys[KeyHash("k3")]; !ok || rs.Ends[core.TopicPartition{Topic: "b", Partition: 0}] != 15 {
+	if _, ok := rs.Keys[KeyHash("k3")]; !ok || rs.Ends[core.TP("b", 0)] != 15 {
 		t.Fatalf("restored %+v", rs.Ends)
 	}
 	b := cp.Marshal()
@@ -53,7 +53,7 @@ func synthCheckpoint(nParts, nKeys int) Checkpoint {
 	c := Checkpoint{Slot: 1 << 20, Hash: r.Uint64()}
 	for p := 0; p < nParts; p++ {
 		c.Ends = append(c.Ends, veritas.End{
-			TP:     core.TopicPartition{Topic: fmt.Sprintf("topic-%03d", p/100), Partition: int32(p % 100)},
+			TP:     core.TP(fmt.Sprintf("topic-%03d", p/100), int32(p%100)),
 			Offset: core.Offset(r.Intn(5_000_000)),
 		})
 	}

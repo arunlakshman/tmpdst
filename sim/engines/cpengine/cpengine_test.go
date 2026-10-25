@@ -17,7 +17,7 @@ func base() sim.ControlPlaneFaults {
 	return sim.ControlPlaneFaults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}
 }
 
-var tp = core.TopicPartition{Topic: "t", Partition: 0}
+var tp = core.TP("t", 0)
 
 func setup(f sim.ControlPlaneFaults, seed uint64) (*cpengine.Engine, *enginetest.Ctx, core.NodeRef) {
 	e := cpengine.New(f)
@@ -281,14 +281,14 @@ func TestCommitSizeLimit(t *testing.T) {
 	// A grown topic counts: partition 5 of a 4-partition topic is 1 + 1 + 1 = 3
 	// (fits), but one batch each on "u" (new) and "t" partitions 0..1 is 1 + 3 + 1 = 5.
 	grow := commit("g")
-	grow.Batches[0].TP = core.TopicPartition{Topic: "t", Partition: 5}
+	grow.Batches[0].TP = core.TP("t", 5)
 	call(e, c, a, 6, grow)
 	c.Run()
 	if d := last(c); d.Err != core.OK {
 		t.Fatal(d)
 	}
 	mixed := parts("m", 2)
-	mixed.Batches = append(mixed.Batches, core.PendingBatch{TP: core.TopicPartition{Topic: "u"}, Records: 1})
+	mixed.Batches = append(mixed.Batches, core.PendingBatch{TP: core.TP("u", 0), Records: 1})
 	call(e, c, a, 7, mixed)
 	c.Run()
 	if d := last(c); d.Err != core.ErrTooLarge {

@@ -11,7 +11,7 @@ import (
 
 const ms = core.Duration(1_000_000)
 
-var tp = core.TopicPartition{Topic: "t", Partition: 0}
+var tp = core.TP("t", 0)
 
 func faults(l sim.LogParams) sim.ControlPlaneFaults {
 	ts := sim.TwoSpeed{FastMin: ms, FastMax: 3 * ms, SlowMin: 40 * ms, SlowMax: 60 * ms}

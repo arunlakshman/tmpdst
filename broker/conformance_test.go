@@ -17,8 +17,8 @@ import (
 // veritas.Partition per (topic, partition). Client requests are built with
 // kwire; every ack, fetch and ListOffsets is compared with the model.
 
-var c1TPs = []core.TopicPartition{{Topic: "t", Partition: 0}, {Topic: "t", Partition: 1},
-	{Topic: "u", Partition: 0}, {Topic: "u", Partition: 1}, {Topic: "u", Partition: 2}}
+var c1TPs = []core.TopicPartition{core.TP("t", 0), core.TP("t", 1),
+	core.TP("u", 0), core.TP("u", 1), core.TP("u", 2)}
 
 // Idem entries carry a producer id: the broker refuses them (decision 41).
 type c1ent struct {
@@ -118,8 +118,8 @@ func (s *c1) produce(c *client, op c1op) error {
 	var ents []ent
 	var exps []expect
 	seen := map[int]bool{}
-	for j, e := range op.Ents {
-		ti := e.TP % len(c1TPs)
+	for j, ce := range op.Ents {
+		ti := ce.TP % len(c1TPs)
 		if seen[ti] {
 			continue
 		}
@@ -127,12 +127,12 @@ func (s *c1) produce(c *client, op c1op) error {
 		tp := c1TPs[ti]
 		m := s.model[tp]
 		var vals []string
-		for k := 0; k <= e.N%3; k++ {
+		for k := 0; k <= ce.N%3; k++ {
 			vals = append(vals, fmt.Sprintf("%d.%d.%d", op.Tag, j, k))
 		}
 		x := expect{ti: ti}
 		raw := plain(s.t, vals...)
-		if e.Idem {
+		if ce.Idem {
 			raw = mkBatch(s.t, int64(1000+j), 0, 0, vals...)
 			x.err, x.base = errInvalidRequest, -1
 		} else {
@@ -141,7 +141,7 @@ func (s *c1) produce(c *client, op c1op) error {
 				x.add = append(x.add, []byte(v))
 			}
 		}
-		ents = append(ents, ent{tp.Topic, tp.Partition, raw})
+		ents = append(ents, e(tp.Topic, tp.Partition, raw))
 		exps = append(exps, x)
 	}
 	if len(ents) == 0 {
@@ -177,7 +177,7 @@ func (s *c1) fetch(c *client, op c1op) error {
 	if op.Small {
 		max = 1
 	}
-	r, err := s.await2(c, verFetch, fetchReq(tp.Topic, tp.Partition, int64(from), max))
+	r, err := s.await2(c, verFetch, fetchReq(tp, int64(from), max))
 	if err != nil {
 		return err
 	}

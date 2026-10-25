@@ -9,7 +9,7 @@ import (
 	"manifester/core"
 )
 
-var tpA = core.TopicPartition{Topic: "t", Partition: 0}
+var tpA = core.TP("t", 0)
 
 func batch(tp core.TopicPartition, n int64) core.PendingBatch {
 	return core.PendingBatch{TP: tp, Records: n, Loc: core.SegmentRef{Key: "o", Len: n * 10}}

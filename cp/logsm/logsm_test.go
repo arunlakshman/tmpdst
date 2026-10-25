@@ -20,7 +20,7 @@ import (
 
 var bg = context.Background()
 
-func tpOf(t string, p int32) core.TopicPartition { return core.TopicPartition{Topic: t, Partition: p} }
+func tpOf(t string, p int32) core.TopicPartition { return core.TP(t, p) }
 
 func commitEntry(key string, bs ...core.PendingBatch) Entry {
 	return Entry{Kind: KindCommit, Commit: core.CommitSegment{SegmentKey: key, Batches: bs}}

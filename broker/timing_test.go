@@ -19,8 +19,8 @@ func TestSegmentTimingFacts(t *testing.T) {
 	h := startedHarness(t, cfg)
 	c := h.open(1)
 	h.holdPut = true
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
-	h.send(c, verProduce, prodReq(-1, ent{"t", 1, plain(t, "b")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
+	h.send(c, verProduce, prodReq(-1, e("t", 1, plain(t, "b"))))
 	h.now += core.Time(40 * core.Millisecond) // the PUTs take a while
 	h.holdPut = false
 	h.releaseHeld()
@@ -62,7 +62,7 @@ func TestPutDoneCountsAttempts(t *testing.T) {
 		}
 		return run()
 	}
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.flush()
 	h.fireAll()
 	produced(h.next(c))
@@ -81,7 +81,7 @@ func TestBackpressureFacts(t *testing.T) {
 	c := h.open(1)
 	h.call(c, verMetadata, kmsg.NewPtrMetadataRequest())
 	h.holdCP = true
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.flush()
 	h.now += core.Time(30 * core.Millisecond)
 	h.holdCP = false

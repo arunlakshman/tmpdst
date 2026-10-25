@@ -54,7 +54,7 @@ func TestCompressedBatchesStoredVerbatimMixedSegment(t *testing.T) {
 	}
 	var es []ent
 	for _, b := range batches {
-		es = append(es, ent{"t", 0, b})
+		es = append(es, e("t", 0, b))
 	}
 	h.send(c, verProduce, prodReq(-1, es...))
 	h.flush()
@@ -70,7 +70,7 @@ func TestCompressedBatchesStoredVerbatimMixedSegment(t *testing.T) {
 		}
 		want += int64(bt.NumRecords)
 	}
-	p := fetched(h.call(c, verFetch, fetchReq("t", 0, 0, 1<<20)))
+	p := fetched(h.call(c, verFetch, fetchReq(core.TP("t", 0), 0, 1<<20)))
 	got, err := kwire.SplitBatches(p.RecordBatches)
 	if err != nil || len(got) != len(batches) || p.HighWatermark != want {
 		t.Fatalf("fetch: %v, %d batches, hwm %d (want %d)", err, len(got), p.HighWatermark, want)
@@ -104,7 +104,7 @@ func TestCompressedBatchRejections(t *testing.T) {
 	unknown[22] = 5
 	binary.BigEndian.PutUint32(unknown[17:], crc(unknown))
 	h.send(c, verProduce, prodReq(-1,
-		ent{"t", 0, badCRC}, ent{"t", 0, badCount}, ent{"t", 0, unknown}, ent{"t", 0, opaque(t, kwire.CodecSnappy, 2, 10)}))
+		e("t", 0, badCRC), e("t", 0, badCount), e("t", 0, unknown), e("t", 0, opaque(t, kwire.CodecSnappy, 2, 10))))
 	h.flush()
 	ps := produced(h.next(c))
 	want := []int16{errCorruptMessage, errCorruptMessage, errUnsupportedCompress, 0}
@@ -113,7 +113,7 @@ func TestCompressedBatchRejections(t *testing.T) {
 			t.Errorf("partition %d: error %d, want %d", i, ps[i].ErrorCode, w)
 		}
 	}
-	if end := h.cp.End(core.TopicPartition{Topic: "t"}); end != 2 {
+	if end := h.cp.End(core.TP("t", 0)); end != 2 {
 		t.Fatalf("end offset %d: a rejected batch was stored", end)
 	}
 	h.noViolations()
@@ -128,13 +128,13 @@ func TestFetchLimitsWithLargeCompressedBatches(t *testing.T) {
 	var es []ent
 	for i := 0; i < 3; i++ {
 		big = opaque(t, kwire.CodecZstd, 10, 5000+i)
-		es = append(es, ent{"t", 0, big})
+		es = append(es, e("t", 0, big))
 	}
 	h.send(c, verProduce, prodReq(-1, es...))
 	h.flush()
 	h.next(c)
 	count := func(max int32) int {
-		bs, err := kwire.SplitBatches(fetched(h.call(c, verFetch, fetchReq("t", 0, 0, max))).RecordBatches)
+		bs, err := kwire.SplitBatches(fetched(h.call(c, verFetch, fetchReq(core.TP("t", 0), 0, max))).RecordBatches)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -149,7 +149,7 @@ func TestFetchLimitsWithLargeCompressedBatches(t *testing.T) {
 	if n := count(1 << 20); n != 3 {
 		t.Fatalf("no limit: %d", n)
 	}
-	r := fetchReq("t", 0, 0, 1<<20)
+	r := fetchReq(core.TP("t", 0), 0, 1<<20)
 	r.MaxBytes = 6000 // request limit: the first partition's data is kept whole
 	if p := fetched(h.call(c, verFetch, r)); len(p.RecordBatches) == 0 {
 		t.Fatal("first partition dropped by the request limit")
@@ -162,7 +162,7 @@ func TestLargeProduceRequest(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	big := opaque(t, kwire.CodecLZ4, 500000, 62_000_000)
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, big}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, big)))
 	if h.closed[1] {
 		t.Fatal("connection closed on a 62 MB request")
 	}
@@ -173,7 +173,7 @@ func TestLargeProduceRequest(t *testing.T) {
 	if ps[0].ErrorCode != 0 || ps[0].BaseOffset != 0 {
 		t.Fatalf("%+v", ps[0])
 	}
-	p := fetched(h.call(c, verFetch, fetchReq("t", 0, 0, 1)))
+	p := fetched(h.call(c, verFetch, fetchReq(core.TP("t", 0), 0, 1)))
 	if len(p.RecordBatches) != len(big) || p.HighWatermark != 500000 || !sameButOffset(p.RecordBatches, big) {
 		t.Fatalf("fetched %d bytes, hwm %d", len(p.RecordBatches), p.HighWatermark)
 	}
@@ -190,7 +190,7 @@ func TestSkipProduceCRCMutantAcksCorruptBatch(t *testing.T) {
 	c := h.open(1)
 	bad := opaque(t, kwire.CodecLZ4, 4, 50)
 	bad[len(bad)-1] ^= 1
-	if r := h.produceOne(c, ent{"t", 0, bad}); r.ErrorCode != 0 {
+	if r := h.produceOne(c, e("t", 0, bad)); r.ErrorCode != 0 {
 		t.Fatalf("mutant did not admit the corrupt batch: %d", r.ErrorCode)
 	}
 }

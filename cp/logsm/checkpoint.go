@@ -88,7 +88,7 @@ func UnmarshalCheckpoint(b []byte) (Checkpoint, error) {
 		prev := int32(0)
 		for n := d.u(); n > 0 && d.err == nil; n-- {
 			prev += int32(d.u())
-			c.Ends = append(c.Ends, veritas.End{TP: core.TopicPartition{Topic: topic, Partition: prev}, Offset: core.Offset(d.u())})
+			c.Ends = append(c.Ends, veritas.End{TP: core.TP(topic, prev), Offset: core.Offset(d.u())})
 		}
 	}
 	n := d.u()

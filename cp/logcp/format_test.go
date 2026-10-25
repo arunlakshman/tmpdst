@@ -18,7 +18,7 @@ func commitCmd(key string, tps ...core.TopicPartition) logsm.Entry {
 	return logsm.Entry{Kind: logsm.KindCommit, Commit: c}
 }
 
-func tpOf(t string, p int32) core.TopicPartition { return core.TopicPartition{Topic: t, Partition: p} }
+func tpOf(t string, p int32) core.TopicPartition { return core.TP(t, p) }
 
 func TestEntryRoundTrip(t *testing.T) {
 	e := Entry{Writer: "n1", Rank: 2, ID: "n1/x/7", TS: 1234567, Cmds: []logsm.Entry{

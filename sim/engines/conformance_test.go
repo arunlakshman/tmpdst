@@ -144,7 +144,7 @@ func genCP(r *veritastest.Rand, i int) any {
 	pick := func(xs []string) string { return xs[r.Intn(len(xs))] }
 	req := core.ReqID(i + 1)
 	tp := func() core.TopicPartition {
-		return core.TopicPartition{Topic: pick(cpTopics), Partition: int32(r.Intn(3))}
+		return core.TP(pick(cpTopics), int32(r.Intn(3)))
 	}
 	call := func(op core.CPOp) any { return core.CPCall{Req: req, Op: op} }
 	switch k := r.Intn(32); {
@@ -178,7 +178,7 @@ func genBatches(r *veritastest.Rand, key string) []core.PendingBatch {
 	n := r.Intn(4)
 	for j := 0; j < n; j++ {
 		b := core.PendingBatch{
-			TP:      core.TopicPartition{Topic: cpTopics[r.Intn(2)], Partition: int32(r.Intn(2))},
+			TP:      core.TP(cpTopics[r.Intn(2)], int32(r.Intn(2))),
 			Records: 1 + int64(r.Intn(3)),
 			Loc:     core.SegmentRef{Key: key, Off: int64(r.Intn(4)) * 100, Len: int64(1 + r.Intn(3)*50)},
 		}

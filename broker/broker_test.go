@@ -83,7 +83,7 @@ func TestProduceFetchRoundTrip(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	b1, b2, b3 := plain(t, "a", "b"), plain(t, "c"), plain(t, "d", "e", "f")
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, b1}, ent{"t", 1, b2}, ent{"t", 0, b3}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, b1), e("t", 1, b2), e("t", 0, b3)))
 	if len(c.out) != 0 {
 		t.Fatal("acked before commit")
 	}
@@ -95,7 +95,7 @@ func TestProduceFetchRoundTrip(t *testing.T) {
 	if ps[0].BaseOffset != 0 || ps[1].BaseOffset != 0 || ps[2].BaseOffset != 2 || ps[0].ErrorCode+ps[1].ErrorCode+ps[2].ErrorCode != 0 {
 		t.Fatalf("results %+v", ps)
 	}
-	p := fetched(h.call(c, verFetch, fetchReq("t", 0, 0, 1<<20)))
+	p := fetched(h.call(c, verFetch, fetchReq(core.TP("t", 0), 0, 1<<20)))
 	bs, err := kwire.SplitBatches(p.RecordBatches)
 	if err != nil || len(bs) != 2 || p.HighWatermark != 5 || p.LastStableOffset != 5 || p.LogStartOffset != 0 {
 		t.Fatalf("fetch: %v %d batches hwm %d", err, len(bs), p.HighWatermark)
@@ -107,22 +107,22 @@ func TestProduceFetchRoundTrip(t *testing.T) {
 		}
 	}
 	// From the middle: the containing batch is returned whole.
-	p = fetched(h.call(c, verFetch, fetchReq("t", 0, 3, 1<<20)))
+	p = fetched(h.call(c, verFetch, fetchReq(core.TP("t", 0), 3, 1<<20)))
 	if bs, _ := kwire.SplitBatches(p.RecordBatches); len(bs) != 1 {
 		t.Fatalf("mid fetch %d batches", len(bs))
 	}
 	// Partition limit: at least one batch, no more than fits.
-	p = fetched(h.call(c, verFetch, fetchReq("t", 0, 0, 1)))
+	p = fetched(h.call(c, verFetch, fetchReq(core.TP("t", 0), 0, 1)))
 	if bs, _ := kwire.SplitBatches(p.RecordBatches); len(bs) != 1 {
 		t.Fatalf("limited fetch %d batches", len(bs))
 	}
-	if p = fetched(h.call(c, verFetch, fetchReq("t", 0, 5, 1<<20))); len(p.RecordBatches) != 0 || p.ErrorCode != 0 || p.HighWatermark != 5 {
+	if p = fetched(h.call(c, verFetch, fetchReq(core.TP("t", 0), 5, 1<<20))); len(p.RecordBatches) != 0 || p.ErrorCode != 0 || p.HighWatermark != 5 {
 		t.Fatalf("at HWM: %+v", p)
 	}
-	if p = fetched(h.call(c, verFetch, fetchReq("t", 0, 6, 1<<20))); p.ErrorCode != errOffsetOutOfRange {
+	if p = fetched(h.call(c, verFetch, fetchReq(core.TP("t", 0), 6, 1<<20))); p.ErrorCode != errOffsetOutOfRange {
 		t.Fatalf("beyond HWM: %d", p.ErrorCode)
 	}
-	if p = fetched(h.call(c, verFetch, fetchReq("zz", 0, 0, 1<<20))); p.ErrorCode != errUnknownTopicOrPart {
+	if p = fetched(h.call(c, verFetch, fetchReq(core.TP("zz", 0), 0, 1<<20))); p.ErrorCode != errUnknownTopicOrPart {
 		t.Fatalf("unknown topic: %d", p.ErrorCode)
 	}
 	h.noViolations()
@@ -140,8 +140,8 @@ func TestProduceErrors(t *testing.T) {
 	txn, _ = kwire.BuildBatch(p, []kmsg.Record{{Value: []byte("x")}})
 	two := append(plain(t, "x"), plain(t, "y")...)
 	h.send(c, verProduce, prodReq(-1,
-		ent{"nope", 0, plain(t, "x")}, ent{"t", 9, plain(t, "x")}, ent{"t", 0, bad},
-		ent{"t", 0, txn}, ent{"t", 0, two}, ent{"t", 0, nil}, ent{"t", 0, plain(t, "ok")}))
+		e("nope", 0, plain(t, "x")), e("t", 9, plain(t, "x")), e("t", 0, bad),
+		e("t", 0, txn), e("t", 0, two), e("t", 0, nil), e("t", 0, plain(t, "ok"))))
 	h.flush()
 	ps := produced(h.next(c))
 	want := []int16{errUnknownTopicOrPart, errUnknownTopicOrPart, errCorruptMessage, errInvalidRequest, errCorruptMessage, errCorruptMessage, 0}
@@ -150,7 +150,7 @@ func TestProduceErrors(t *testing.T) {
 			t.Errorf("partition %d: error %d, want %d", i, ps[i].ErrorCode, w)
 		}
 	}
-	if q := h.call(c, verProduce, prodReq(7, ent{"t", 0, plain(t, "x")})); produced(q)[0].ErrorCode != errInvalidRequiredAcks {
+	if q := h.call(c, verProduce, prodReq(7, e("t", 0, plain(t, "x")))); produced(q)[0].ErrorCode != errInvalidRequiredAcks {
 		t.Fatal("bad acks accepted")
 	}
 }
@@ -159,12 +159,12 @@ func TestTopicCacheRefresh(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.cp.CreateTopic("late", 1)
-	r := h.produceOne(c, ent{"late", 0, plain(t, "x")})
+	r := h.produceOne(c, e("late", 0, plain(t, "x")))
 	if r.ErrorCode != 0 || r.BaseOffset != 0 {
 		t.Fatalf("%+v", r)
 	}
 	n := len(h.cpCalls)
-	h.produceOne(c, ent{"late", 0, plain(t, "y")})
+	h.produceOne(c, e("late", 0, plain(t, "y")))
 	for _, op := range h.cpCalls[n:] {
 		if _, ok := op.(core.DescribeTopics); ok {
 			t.Fatal("cache not used")
@@ -177,7 +177,7 @@ func TestSizeFlushAndPartitionCap(t *testing.T) {
 	cfg.MaxSegmentBytes = 100
 	h := startedHarness(t, cfg)
 	c := h.open(1)
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}, ent{"t", 0, plain(t, "b")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a")), e("t", 0, plain(t, "b"))))
 	if len(h.puts) != 1 {
 		t.Fatalf("size trigger: %d puts", len(h.puts))
 	}
@@ -188,7 +188,7 @@ func TestSizeFlushAndPartitionCap(t *testing.T) {
 	h = startedHarness(t, cfg)
 	h.cp.CreateTopic("m", 5)
 	c = h.open(1)
-	h.send(c, verProduce, prodReq(-1, ent{"m", 0, plain(t, "a")}, ent{"m", 0, plain(t, "a")}, ent{"m", 1, plain(t, "a")}, ent{"m", 2, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("m", 0, plain(t, "a")), e("m", 0, plain(t, "a")), e("m", 1, plain(t, "a")), e("m", 2, plain(t, "a"))))
 	if len(h.puts) != 1 {
 		t.Fatalf("partition cap: %d puts (want 1 sealed, 1 open)", len(h.puts))
 	}
@@ -207,9 +207,9 @@ func TestPipelinedResponsesInOrder(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	var chunk []byte
-	chunk = append(chunk, h.frame(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))...)
+	chunk = append(chunk, h.frame(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))...)
 	chunk = append(chunk, h.frame(c, 3, kmsg.NewPtrApiVersionsRequest())...)
-	chunk = append(chunk, h.frame(c, verFetch, fetchReq("t", 0, 0, 1<<20))...)
+	chunk = append(chunk, h.frame(c, verFetch, fetchReq(core.TP("t", 0), 0, 1<<20))...)
 	h.do(core.BytesReceived{Conn: 1, Data: chunk})
 	if len(c.out) != 0 {
 		t.Fatal("later requests overtook the pending produce")
@@ -234,7 +234,7 @@ func TestPipelinedResponsesInOrder(t *testing.T) {
 func TestFactImmediatelyBeforeSend(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
-	h.produceOne(c, ent{"t", 0, plain(t, "a", "b")})
+	h.produceOne(c, e("t", 0, plain(t, "a", "b")))
 	n := 0
 	for i, a := range h.all {
 		e, ok := a.(core.Emit)
@@ -258,7 +258,7 @@ func TestFactImmediatelyBeforeSend(t *testing.T) {
 func TestGracefulStop(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	if len(h.puts) != 0 {
 		t.Fatal("flushed early")
 	}
@@ -272,7 +272,7 @@ func TestGracefulStop(t *testing.T) {
 	if r := produced(h.next(c))[0]; r.ErrorCode != 0 || r.BaseOffset != 0 {
 		t.Fatalf("%+v", r)
 	}
-	if h.cp.End(core.TopicPartition{Topic: "t"}) != 1 {
+	if h.cp.End(core.TP("t", 0)) != 1 {
 		t.Fatal("not flushed")
 	}
 	// Idle broker exits at once.
@@ -286,7 +286,7 @@ func TestGracefulStop(t *testing.T) {
 func TestListOffsets(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
-	h.produceOne(c, ent{"t", 0, plain(t, "a", "b", "c")})
+	h.produceOne(c, e("t", 0, plain(t, "a", "b", "c")))
 	q := kmsg.NewPtrListOffsetsRequest()
 	q.ReplicaID = -1
 	mk := func(topic string, p int32, ts int64) kmsg.ListOffsetsRequestTopic {
@@ -307,7 +307,7 @@ func TestCorruptGetRetried(t *testing.T) {
 		cfg.Bug = bug
 		h := startedHarness(t, cfg)
 		c := h.open(1)
-		h.produceOne(c, ent{"t", 0, plain(t, "hello")})
+		h.produceOne(c, e("t", 0, plain(t, "hello")))
 		corrupt := true
 		h.objHook = func(a core.IOAction, run func() core.Completion) core.Completion {
 			d := run()
@@ -319,7 +319,7 @@ func TestCorruptGetRetried(t *testing.T) {
 			}
 			return d
 		}
-		h.send(c, verFetch, fetchReq("t", 0, 0, 1<<20))
+		h.send(c, verFetch, fetchReq(core.TP("t", 0), 0, 1<<20))
 		if bug == BugNone {
 			if len(c.out) != 0 {
 				t.Fatal("corrupt data served")
@@ -344,7 +344,7 @@ func TestCorruptGetRetried(t *testing.T) {
 func TestFetchGetsExhausted(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
-	h.produceOne(c, ent{"t", 0, plain(t, "hello")})
+	h.produceOne(c, e("t", 0, plain(t, "hello")))
 	h.objHook = func(a core.IOAction, run func() core.Completion) core.Completion {
 		d := run()
 		if g, ok := d.(core.ObjGetDone); ok {
@@ -354,7 +354,7 @@ func TestFetchGetsExhausted(t *testing.T) {
 		}
 		return d
 	}
-	h.send(c, verFetch, fetchReq("t", 0, 0, 1<<20))
+	h.send(c, verFetch, fetchReq(core.TP("t", 0), 0, 1<<20))
 	h.fireAll()
 	if p := fetched(h.next(c)); p.ErrorCode != errKafkaStorage || len(p.RecordBatches) != 0 {
 		t.Fatalf("%+v", p.ErrorCode)
@@ -366,8 +366,8 @@ func TestWrongOffsetMutant(t *testing.T) {
 	cfg.Bug = BugWrongOffset
 	h := startedHarness(t, cfg)
 	c := h.open(1)
-	h.produceOne(c, ent{"t", 0, plain(t, "a")})
-	p := fetched(h.call(c, verFetch, fetchReq("t", 0, 0, 1<<20)))
+	h.produceOne(c, e("t", 0, plain(t, "a")))
+	p := fetched(h.call(c, verFetch, fetchReq(core.TP("t", 0), 0, 1<<20)))
 	if bt, err := kwire.ParseBatch(p.RecordBatches); err != nil || bt.BaseOffset != 1 {
 		t.Fatalf("mutant base %v %v", bt.BaseOffset, err)
 	}
@@ -380,7 +380,7 @@ func TestEarlyAckMutant(t *testing.T) {
 	c := h.open(1)
 	h.call(c, verMetadata, kmsg.NewPtrMetadataRequest()) // warm the topic cache
 	h.holdCP = true
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.flush()
 	if len(c.out) != 1 || len(h.held) != 1 { // answered while the commit response is outstanding
 		t.Fatalf("mutant should ack before the commit: out=%d", len(c.out))
@@ -395,7 +395,7 @@ func TestEarlyAckMutant(t *testing.T) {
 	c = h.open(1)
 	h.call(c, verMetadata, kmsg.NewPtrMetadataRequest()) // warm the topic cache
 	h.holdCP = true
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.flush()
 	if len(c.out) != 0 {
 		t.Fatal("real broker acked before commit")
@@ -410,7 +410,7 @@ func TestBackpressure(t *testing.T) {
 	h.open(2)
 	h.call(c1, verMetadata, kmsg.NewPtrMetadataRequest())
 	h.holdCP = true
-	h.send(c1, verProduce, prodReq(-1, ent{"t", 0, plain(t, string(make([]byte, 400)))}))
+	h.send(c1, verProduce, prodReq(-1, e("t", 0, plain(t, string(make([]byte, 400))))))
 	if !h.paused[1] || !h.paused[2] {
 		t.Fatal("reads not paused")
 	}
@@ -445,13 +445,13 @@ func TestBadInputClosesConnection(t *testing.T) {
 		h := startedHarness(t, DefaultConfig())
 		c := h.open(1)
 		if name == "acks=0" {
-			data = h.frame(c, verProduce, prodReq(0, ent{"t", 0, plain(t, "a")}))
+			data = h.frame(c, verProduce, prodReq(0, e("t", 0, plain(t, "a"))))
 		}
 		h.do(core.BytesReceived{Conn: 1, Data: data})
 		if !h.closed[1] || len(c.out) != 0 {
 			t.Errorf("%s: closed=%v out=%d", name, h.closed[1], len(c.out))
 		}
-		if h.cp.End(core.TopicPartition{Topic: "t"}) != 0 || len(h.puts) != 0 {
+		if h.cp.End(core.TP("t", 0)) != 0 || len(h.puts) != 0 {
 			t.Errorf("%s: data written", name)
 		}
 	}
@@ -468,10 +468,10 @@ func unknownKey() []byte {
 func TestPeerCloseDuringProduce(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.do(core.ConnClosed{Conn: 1, Abort: true})
 	h.flush()
-	if h.cp.End(core.TopicPartition{Topic: "t"}) != 1 || len(c.out) != 0 {
+	if h.cp.End(core.TP("t", 0)) != 1 || len(c.out) != 0 {
 		t.Fatal("write must land, response must not be sent")
 	}
 	if len(factsNamed(h.all, "produce_acked")) != 0 {
@@ -485,11 +485,11 @@ func TestStateHash(t *testing.T) {
 		c := h.open(1)
 		var hs []uint64
 		hs = append(hs, h.b.StateHash())
-		h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+		h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 		hs = append(hs, h.b.StateHash())
 		h.flush()
 		hs = append(hs, h.b.StateHash())
-		h.call(c, verFetch, fetchReq("t", 0, 0, 100))
+		h.call(c, verFetch, fetchReq(core.TP("t", 0), 0, 100))
 		return append(hs, h.b.StateHash())
 	}
 	a, b := run(), run()
@@ -559,8 +559,8 @@ func mustFrames(t testing.TB) [][]byte {
 		return b
 	}
 	return [][]byte{
-		enc(verProduce, prodReq(-1, ent{"t", 0, mkBatch(t, -1, -1, -1, "a")}, ent{"t", 1, mkBatch(t, 1000, 0, 0, "b")})),
-		enc(verFetch, fetchReq("t", 0, 0, 100)),
+		enc(verProduce, prodReq(-1, e("t", 0, mkBatch(t, -1, -1, -1, "a")), e("t", 1, mkBatch(t, 1000, 0, 0, "b")))),
+		enc(verFetch, fetchReq(core.TP("t", 0), 0, 100)),
 		enc(verMetadata, kmsg.NewPtrMetadataRequest()),
 		enc(3, kmsg.NewPtrApiVersionsRequest()),
 	}
@@ -572,17 +572,17 @@ func TestIdempotentBatchRejected(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.send(c, verProduce, prodReq(-1,
-		ent{"t", 0, mkBatch(t, 1000, 0, 0, "a")},
-		ent{"t", 1, plain(t, "ok")},
-		ent{"t", 0, mkBatch(t, 0, 0, 0, "a")},
-		ent{"t", 0, plain(t, "ok2")}))
+		e("t", 0, mkBatch(t, 1000, 0, 0, "a")),
+		e("t", 1, plain(t, "ok")),
+		e("t", 0, mkBatch(t, 0, 0, 0, "a")),
+		e("t", 0, plain(t, "ok2"))))
 	h.flush()
 	ps := produced(h.next(c))
 	if ps[0].ErrorCode != errInvalidRequest || ps[2].ErrorCode != errInvalidRequest ||
 		ps[1].ErrorCode != 0 || ps[3].ErrorCode != 0 || ps[3].BaseOffset != 0 {
 		t.Fatalf("%+v", ps)
 	}
-	if h.cp.End(core.TopicPartition{Topic: "t"}) != 1 {
+	if h.cp.End(core.TP("t", 0)) != 1 {
 		t.Fatal("rejected batch was stored")
 	}
 	h.noViolations()
@@ -611,7 +611,7 @@ func TestCommitRetryAfterMaybeAppliedResendsIdenticalRequest(t *testing.T) {
 		}
 		return run()
 	}
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a", "b")}, ent{"t", 1, plain(t, "c")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a", "b")), e("t", 1, plain(t, "c"))))
 	h.flush()
 	if len(c.out) != 0 {
 		t.Fatal("acked on a lost commit response")
@@ -619,7 +619,7 @@ func TestCommitRetryAfterMaybeAppliedResendsIdenticalRequest(t *testing.T) {
 	h.fireAll()
 	ps := produced(h.next(c))
 	if ps[0].ErrorCode != 0 || ps[0].BaseOffset != 0 || ps[1].ErrorCode != 0 || ps[1].BaseOffset != 0 ||
-		h.cp.End(core.TopicPartition{Topic: "t"}) != 2 {
+		h.cp.End(core.TP("t", 0)) != 2 {
 		t.Fatalf("%+v", ps)
 	}
 	cs := commitOps(h)
@@ -642,9 +642,9 @@ func TestTwoSegmentsInFlightCommitInOrder(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.holdPut = true
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.flush()
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "b", "c")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "b", "c"))))
 	h.flush()
 	if len(h.held) != 2 || len(commitOps(h)) != 0 {
 		t.Fatalf("held %d", len(h.held))
@@ -678,7 +678,7 @@ func TestSegmentKeysAreFlatAndDeterministic(t *testing.T) {
 		h := startedHarness(t, DefaultConfig())
 		c := h.open(1)
 		for i := 0; i < 3; i++ {
-			h.produceOne(c, ent{"t", 0, plain(t, "a")})
+			h.produceOne(c, e("t", 0, plain(t, "a")))
 		}
 		return h.puts
 	}
@@ -695,7 +695,7 @@ func TestSegmentKeysAreFlatAndDeterministic(t *testing.T) {
 	other := startedHarness(t, DefaultConfig())
 	other.env.state = 8
 	oc := other.open(1)
-	other.produceOne(oc, ent{"t", 0, plain(t, "a")})
+	other.produceOne(oc, e("t", 0, plain(t, "a")))
 	if other.puts[0] == a[0] {
 		t.Fatal("different seeds, same key")
 	}
@@ -714,7 +714,7 @@ func TestCommitSurvivesLongCPOutage(t *testing.T) {
 		}
 		return run()
 	}
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.flush()
 	start := h.now
 	for h.now-start < core.Time(10*core.Second) {
@@ -760,7 +760,7 @@ func TestCommitDeadlineFailsSegmentAndReleasesBuffer(t *testing.T) {
 		}
 		return run()
 	}
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.flush()
 	for i := 0; len(h.timers) > 0; i++ {
 		if i > 100 {

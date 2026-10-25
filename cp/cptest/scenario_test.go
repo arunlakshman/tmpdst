@@ -30,7 +30,7 @@ func lockstep(t *testing.T, im impl, ops []op) {
 // ends moved, sends a different request under its key, an invalid request, and
 // a retry of the same batches under a fresh key (new offsets).
 func replayOps() []op {
-	a, b := core.TopicPartition{Topic: "w", Partition: 0}, core.TopicPartition{Topic: "w", Partition: 1}
+	a, b := core.TP("w", 0), core.TP("w", 1)
 	batches := func(key string) []core.PendingBatch {
 		return []core.PendingBatch{
 			{TP: a, Records: 2, Loc: core.SegmentRef{Key: key, Off: 0, Len: 20}},
@@ -61,8 +61,8 @@ func TestReplayMemstore(t *testing.T) { lockstep(t, storeImpl{newMem()}, replayO
 // a Lookup from every offset with and without a byte limit.
 func manyBatchesOps() []op {
 	var ops []op
-	a := core.TopicPartition{Topic: "m", Partition: 0}
-	b := core.TopicPartition{Topic: "m", Partition: 1}
+	a := core.TP("m", 0)
+	b := core.TP("m", 1)
 	var s1, s2 []core.PendingBatch
 	for i := 0; i < 200; i++ { // 200 batches for a, interleaved with b
 		for _, tp := range []core.TopicPartition{a, b} {
@@ -87,7 +87,7 @@ func manyBatchesOps() []op {
 	ops = append(ops, commit("big1", s1), commit("big1", s1), commit("big2", s2), commit("big2", s2),
 		commit("big3", s1), // a second run on each partition, right after the first
 		commit("big1", s2)) // same key, other batches: conflict
-	for _, tp := range []core.TopicPartition{a, b, {Topic: "m", Partition: 2}} {
+	for _, tp := range []core.TopicPartition{a, b, core.TP("m", 2)} {
 		for from := int64(0); from <= 520; from += 7 {
 			for _, mb := range []int32{0, 1, 25, 300} {
 				ops = append(ops, op{Kind: "lookup", TP: tp, From: from, MaxBytes: mb})
@@ -113,7 +113,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	commit := core.CommitSegment{SegmentKey: "k", Batches: []core.PendingBatch{
-		{TP: core.TopicPartition{Topic: "t", Partition: 1}, Records: 4, Loc: core.SegmentRef{Key: "k", Off: 8, Len: 40}},
+		{TP: core.TP("t", 1), Records: 4, Loc: core.SegmentRef{Key: "k", Off: 8, Len: 40}},
 	}}
 	cr, err := c.Call(ctx, commit)
 	if err != nil {

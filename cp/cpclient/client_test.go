@@ -35,7 +35,7 @@ func TestClientAgainstMemstore(t *testing.T) {
 	if err := c.CreateTopic(ctx, "t", 2); err != nil {
 		t.Fatal(err)
 	}
-	tp := core.TopicPartition{Topic: "t", Partition: 0}
+	tp := core.TP("t", 0)
 	cs, err := c.Call(ctx, core.CommitSegment{SegmentKey: "s1", Batches: []core.PendingBatch{
 		{TP: tp, Records: 4, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 40}},
 	}})

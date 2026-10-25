@@ -40,7 +40,7 @@ func genOp(r *veritastest.Rand, slot int64) core.CPCall {
 		return core.CPCall{Req: core.ReqID(slot), Op: core.DescribeTopics{Topics: [][]string{nil, {"a"}, {"b", "zz"}}[r.Intn(3)]}}
 	case k < 9:
 		return core.CPCall{Req: core.ReqID(slot), Op: core.Lookup{
-			TP:   core.TopicPartition{Topic: []string{"a", "b", "none"}[r.Intn(3)], Partition: int32(r.Intn(5))},
+			TP:   core.TP([]string{"a", "b", "none"}[r.Intn(3)], int32(r.Intn(5))),
 			From: core.Offset(r.Intn(40) - 1), MaxBytes: int32(r.Intn(3) * 70)}}
 	}
 	key := "seg/" + strconv.Itoa(r.Intn(60))
@@ -52,7 +52,7 @@ func genOp(r *veritastest.Rand, slot int64) core.CPCall {
 	var bs []core.PendingBatch
 	for i := 1 + pr.Intn(6); i > 0; i-- {
 		bs = append(bs, core.PendingBatch{
-			TP:      core.TopicPartition{Topic: []string{"a", "b"}[pr.Intn(2)], Partition: int32(pr.Intn(5))},
+			TP:      core.TP([]string{"a", "b"}[pr.Intn(2)], int32(pr.Intn(5))),
 			Records: int64(1 + pr.Intn(4)),
 			Loc:     core.SegmentRef{Key: key, Off: int64(pr.Intn(5)) * 100, Len: int64(1 + pr.Intn(3)*50)},
 		})
@@ -82,7 +82,7 @@ func lockstep(t *testing.T, mk func(testing.TB) applier.KV, seeds, ops int) {
 				edgeLookups(t, a, o, lk, want.(core.CPDone))
 			}
 		}
-		for _, tp := range []core.TopicPartition{{Topic: "a", Partition: 1}, {Topic: "b", Partition: 4}, {Topic: "q"}} {
+		for _, tp := range []core.TopicPartition{core.TP("a", 1), core.TP("b", 4), core.TP("q", 0)} {
 			if a.End(tp) != o.End(tp) {
 				t.Fatalf("seed %d End(%v) %d vs oracle %d", seed, tp, a.End(tp), o.End(tp))
 			}
@@ -99,7 +99,7 @@ func commit(key string, bs ...core.PendingBatch) core.CommitSegment {
 }
 
 func pb(topic string, p int32, n int64) core.PendingBatch {
-	return core.PendingBatch{TP: core.TopicPartition{Topic: topic, Partition: p}, Records: n,
+	return core.PendingBatch{TP: core.TP(topic, p), Records: n,
 		Loc: core.SegmentRef{Key: topic, Off: n * 10, Len: n}}
 }
 
@@ -154,7 +154,7 @@ func TestTrimForgetsKeysNotOffsets(t *testing.T) {
 	if n, err := a.Trim(5); err != nil || n != 1 || a.Window() != 1 {
 		t.Fatalf("Trim dropped %d err %v window %d", n, err, a.Window())
 	}
-	if a.StateHash() != h || a.End(core.TopicPartition{Topic: "a"}) != 10 {
+	if a.StateHash() != h || a.End(core.TP("a", 0)) != 10 {
 		t.Fatal("trim changed offsets or runs")
 	}
 	// "new" is still in the window: replay answers the original ranges.
@@ -213,7 +213,7 @@ func TestStoreAdapter(t *testing.T) {
 	if err != nil || c != core.OK || resp.Assigned[0].Base != 0 {
 		t.Fatalf("%+v %v %v", resp, c, err)
 	}
-	lk, c, _ := s.Lookup(ctx, core.Lookup{TP: core.TopicPartition{Topic: "t", Partition: 2}})
+	lk, c, _ := s.Lookup(ctx, core.Lookup{TP: core.TP("t", 2)})
 	if c != core.OK || lk.End != 4 || len(lk.Ranges) != 1 {
 		t.Fatalf("%+v %v", lk, c)
 	}

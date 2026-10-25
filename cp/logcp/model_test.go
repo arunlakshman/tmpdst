@@ -51,7 +51,7 @@ func modelSegment(r *rand.Rand, key string) core.CommitSegment {
 	}
 	for i := 0; i < 200; i++ {
 		c.Batches = append(c.Batches, core.PendingBatch{
-			TP:      core.TopicPartition{Topic: "load", Partition: parts[i%150]},
+			TP:      core.TP("load", parts[i%150]),
 			Records: 100, Loc: core.SegmentRef{Key: key, Off: int64(i) * 4096, Len: 4096},
 		})
 	}
@@ -126,7 +126,7 @@ func runModel(t *testing.T, rate int, dur time.Duration) modelRow {
 		r := rand.New(rand.NewSource(99))
 		for tick := time.NewTicker(10 * time.Millisecond); time.Now().Before(stop); <-tick.C {
 			t0 := time.Now()
-			if _, _, err := active.Lookup(bg, core.Lookup{TP: core.TopicPartition{Topic: "load", Partition: int32(r.Intn(40000))}, MaxBytes: 1 << 20}); err == nil {
+			if _, _, err := active.Lookup(bg, core.Lookup{TP: core.TP("load", int32(r.Intn(40000))), MaxBytes: 1 << 20}); err == nil {
 				mu.Lock()
 				lookups = append(lookups, float64(time.Since(t0))/1e6)
 				mu.Unlock()

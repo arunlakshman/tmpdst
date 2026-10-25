@@ -33,7 +33,7 @@ func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
 			rp := &resp.Topics[i].Partitions[j]
-			tp := core.TopicPartition{Topic: t.Topic, Partition: p.Partition}
+			tp := core.TP(t.Topic, p.Partition)
 			switch {
 			case !b.knows(tp):
 				rp.ErrorCode = errUnknownTopicOrPart

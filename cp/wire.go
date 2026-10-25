@@ -111,7 +111,7 @@ func BatchToWire(b core.PendingBatch) Batch {
 // BatchFromWire converts a wire batch back to a pending batch.
 func BatchFromWire(b Batch) core.PendingBatch {
 	return core.PendingBatch{
-		TP: core.TopicPartition{Topic: b.Topic, Partition: b.Partition}, Records: b.Records,
+		TP: core.TP(b.Topic, b.Partition), Records: b.Records,
 		Loc: core.SegmentRef{Key: b.SegKey, Off: b.SegOff, Len: b.SegLen},
 	}
 }
@@ -124,7 +124,7 @@ func RangeToWire(r core.BatchRange) Range {
 // RangeFromWire converts a wire range back to a batch range.
 func RangeFromWire(r Range) core.BatchRange {
 	return core.BatchRange{
-		TP: core.TopicPartition{Topic: r.Topic, Partition: r.Partition}, Base: core.Offset(r.Base), Count: r.Count,
+		TP: core.TP(r.Topic, r.Partition), Base: core.Offset(r.Base), Count: r.Count,
 		Loc: core.SegmentRef{Key: r.SegKey, Off: r.SegOff, Len: r.SegLen},
 	}
 }

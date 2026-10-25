@@ -186,7 +186,7 @@ func genCommand(r *veritastest.Rand) Entry {
 	var bs []core.PendingBatch
 	for i := 1 + pr.Intn(5); i > 0; i-- {
 		bs = append(bs, core.PendingBatch{
-			TP:      core.TopicPartition{Topic: []string{"a", "b"}[pr.Intn(2)], Partition: int32(pr.Intn(4))},
+			TP:      core.TP([]string{"a", "b"}[pr.Intn(2)], int32(pr.Intn(4))),
 			Records: int64(1 + pr.Intn(3)),
 			Loc:     core.SegmentRef{Key: key, Off: int64(pr.Intn(4)) * 100, Len: int64(1 + pr.Intn(3)*50)},
 		})

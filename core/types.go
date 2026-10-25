@@ -1,6 +1,9 @@
 package core
 
-import "strconv"
+import (
+	"fmt"
+	"strconv"
+)
 
 // Time is a node-local monotonic instant in nanoseconds. In simulation it
 // includes the node's clock skew. Used for deadlines, leases and batch windows.
@@ -53,6 +56,15 @@ type NodeRef struct {
 type TopicPartition struct {
 	Topic     string
 	Partition int32
+}
+
+// TP builds a TopicPartition.
+func TP(topic string, partition int32) TopicPartition {
+	return TopicPartition{Topic: topic, Partition: partition}
+}
+
+func (tp TopicPartition) String() string {
+	return fmt.Sprintf("%s-%d", tp.Topic, tp.Partition)
 }
 
 // SegmentRef is a byte range inside an object in the object store.

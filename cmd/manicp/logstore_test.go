@@ -137,7 +137,7 @@ func commitLoop(ctx context.Context, c *cpclient.Client, w int, a *acks, n *atom
 		}
 		key := fmt.Sprintf("seg/w%d-%06d", w, i)
 		op := core.CommitSegment{SegmentKey: key, Batches: []core.PendingBatch{
-			{TP: core.TopicPartition{Topic: "t", Partition: int32(i % 3)}, Records: 2 + int64(w), Loc: core.SegmentRef{Key: key, Off: 0, Len: 10}}}}
+			{TP: core.TP("t", int32(i%3)), Records: 2 + int64(w), Loc: core.SegmentRef{Key: key, Off: 0, Len: 10}}}}
 		resp, err := commitRetrying(ctx, c, op)
 		if err != nil {
 			return fmt.Errorf("%s: %w", key, err)
@@ -275,7 +275,7 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		key := fmt.Sprintf("seg/%d", i)
 		_, err := c.Call(context.Background(), core.CommitSegment{SegmentKey: key, Batches: []core.PendingBatch{
-			{TP: core.TopicPartition{Topic: "t"}, Records: 3, Loc: core.SegmentRef{Key: key, Len: 9}}}})
+			{TP: core.TP("t", 0), Records: 3, Loc: core.SegmentRef{Key: key, Len: 9}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -287,7 +287,7 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 		t.Fatalf("no checkpoint object: %v", keys)
 	}
 	n2 := startLogNode(t, d, "n0", 0)
-	resp, err := cpclient.New("http://"+n2.addr, nil).Call(context.Background(), core.Lookup{TP: core.TopicPartition{Topic: "t"}, MaxBytes: 1 << 20})
+	resp, err := cpclient.New("http://"+n2.addr, nil).Call(context.Background(), core.Lookup{TP: core.TP("t", 0), MaxBytes: 1 << 20})
 	if err != nil || resp.(core.LookupResp).End != 15 {
 		t.Fatalf("after restart: %v %+v", err, resp)
 	}

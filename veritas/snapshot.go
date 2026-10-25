@@ -24,7 +24,7 @@ func (c *ControlPlane) Ends() []End {
 		}
 		slices.Sort(ps)
 		for _, p := range ps {
-			tp := core.TopicPartition{Topic: t, Partition: p}
+			tp := core.TP(t, p)
 			out = append(out, End{TP: tp, Offset: c.End(tp)})
 		}
 	}

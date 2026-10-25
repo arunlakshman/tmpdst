@@ -27,7 +27,7 @@ import (
 
 var bg = context.Background()
 
-func tp(t string, p int32) core.TopicPartition { return core.TopicPartition{Topic: t, Partition: p} }
+func tp(t string, p int32) core.TopicPartition { return core.TP(t, p) }
 
 func seg(key string, tps ...core.TopicPartition) core.CommitSegment {
 	c := core.CommitSegment{SegmentKey: key}

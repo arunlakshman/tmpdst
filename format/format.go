@@ -216,7 +216,7 @@ func Decode(obj []byte) (Segment, error) {
 		if part < 0 {
 			return Segment{}, corrupt("negative partition in entry %d", i)
 		}
-		e := Entry{TP: core.TopicPartition{Topic: topic, Partition: part}, Records: binary.BigEndian.Uint32(body[q+4:]),
+		e := Entry{TP: core.TP(topic, part), Records: binary.BigEndian.Uint32(body[q+4:]),
 			CRC: binary.BigEndian.Uint32(body[q+24:])}
 		raws = append(raws, raw{binary.BigEndian.Uint64(body[q+8:]), binary.BigEndian.Uint64(body[q+16:])})
 		seg.Entries = append(seg.Entries, e)

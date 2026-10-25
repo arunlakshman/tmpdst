@@ -309,7 +309,7 @@ func genOp(r *veritastest.Rand) logsm.Entry {
 	var bs []core.PendingBatch
 	for i := 1 + pr.Intn(5); i > 0; i-- {
 		bs = append(bs, core.PendingBatch{
-			TP:      core.TopicPartition{Topic: []string{"a", "b"}[pr.Intn(2)], Partition: int32(pr.Intn(4))},
+			TP:      core.TP([]string{"a", "b"}[pr.Intn(2)], int32(pr.Intn(4))),
 			Records: int64(1 + pr.Intn(3)),
 			Loc:     core.SegmentRef{Key: key, Off: int64(pr.Intn(4)) * 100, Len: int64(1 + pr.Intn(3)*50)},
 		})
@@ -803,7 +803,7 @@ func queryDigest(exec func(core.CPOp) core.CPDone) uint64 {
 	for _, t := range d.Topics {
 		_, _ = fmt.Fprintf(h, "T%s/%d;", t.Name, t.Partitions)
 		for p := int32(0); p < t.Partitions; p++ {
-			l := exec(core.Lookup{TP: core.TopicPartition{Topic: t.Name, Partition: p}}).Resp.(core.LookupResp)
+			l := exec(core.Lookup{TP: core.TP(t.Name, p)}).Resp.(core.LookupResp)
 			_, _ = fmt.Fprintf(h, "P%d/%d:%+v;", p, l.End, l.Ranges)
 		}
 	}

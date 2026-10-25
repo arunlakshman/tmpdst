@@ -301,17 +301,20 @@ func mkBatch(t testing.TB, pid int64, epoch int16, seq int32, vals ...string) []
 func plain(t testing.TB, vals ...string) []byte { return mkBatch(t, -1, -1, -1, vals...) }
 
 type ent struct {
-	topic string
-	part  int32
-	rec   []byte
+	tp  core.TopicPartition
+	rec []byte
+}
+
+func e(topic string, part int32, rec []byte) ent {
+	return ent{tp: core.TP(topic, part), rec: rec}
 }
 
 func prodReq(acks int16, es ...ent) *kmsg.ProduceRequest {
 	r := kmsg.NewPtrProduceRequest()
 	r.Acks, r.TimeoutMillis = acks, 1000
 	for _, e := range es {
-		r.Topics = append(r.Topics, kmsg.ProduceRequestTopic{Topic: e.topic,
-			Partitions: []kmsg.ProduceRequestTopicPartition{{Partition: e.part, Records: e.rec}}})
+		r.Topics = append(r.Topics, kmsg.ProduceRequestTopic{Topic: e.tp.Topic,
+			Partitions: []kmsg.ProduceRequestTopicPartition{{Partition: e.tp.Partition, Records: e.rec}}})
 	}
 	return r
 }
@@ -325,11 +328,11 @@ func produced(r kmsg.Response) []kmsg.ProduceResponseTopicPartition {
 	return out
 }
 
-func fetchReq(topic string, part int32, off int64, max int32) *kmsg.FetchRequest {
+func fetchReq(tp core.TopicPartition, off int64, max int32) *kmsg.FetchRequest {
 	r := kmsg.NewPtrFetchRequest()
 	r.MaxBytes, r.MinBytes, r.MaxWaitMillis = 1<<20, 1, 100
-	r.Topics = []kmsg.FetchRequestTopic{{Topic: topic, Partitions: []kmsg.FetchRequestTopicPartition{
-		{Partition: part, FetchOffset: off, PartitionMaxBytes: max, CurrentLeaderEpoch: -1}}}}
+	r.Topics = []kmsg.FetchRequestTopic{{Topic: tp.Topic, Partitions: []kmsg.FetchRequestTopicPartition{
+		{Partition: tp.Partition, FetchOffset: off, PartitionMaxBytes: max, CurrentLeaderEpoch: -1}}}}
 	return r
 }
 

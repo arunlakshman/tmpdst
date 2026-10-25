@@ -26,7 +26,7 @@ Suggested waves: **P0 → P1 → P2 → P3 → P4**.
 | **P3** | Split Phase / Extract Function on hot paths | Makes Extract Class safe |
 | **P4** | Extract Class / polymorphism / ACL finish | Structure after seams exist |
 
-**Next up:** P1 `TopicPartition` (P0 cleared).
+**Next up:** P1 `KafkaCode`.
 
 ---
 
@@ -63,7 +63,7 @@ Bounded-context merge, Extract Class on Broker/Service/kernel, Dynamo ACL — th
 
 ### Items
 
-- [ ] Topic/partition pair (`TopicPartition` / `TP`) — **Replace Primitive with Object** — broker, kwire, sim/kafka, wire
+- [x] ~~Topic/partition pair (`TopicPartition` / `TP`) — **Replace Primitive with Object** — broker, kwire, sim/kafka, wire~~
 - [ ] Kafka `err*` `int16` → `KafkaCode` — **Replace Primitive with Object** — `broker/config.go` + call sites
 - [ ] Slot / HW / offset IDs — **Replace Primitive with Object** — logcp/logsm replica, dynlog
 - [ ] CRC table once — **Replace Temp with Query** — `format/format.go` (+ kwire if shared)
@@ -211,7 +211,7 @@ After P1–P3 seams exist.
 ## Suggested calendar
 
 1. **Now:** clear P0. *(done — tests green on touched packages)*
-2. **Next:** P1 `TopicPartition` → `KafkaCode` → Slot IDs (one PR each; **test + green per item/commit**).
+2. **Next:** P1 `KafkaCode` → Slot IDs (one PR each; **test + green per item/commit**).
 3. **Then:** P2 pick one fork (**test + green per item/commit**).
 4. **Then:** P3 Split Phase/Extract Function only where P1 types exist (**test + green per item/commit**).
 5. **Last:** P4 Extract Class / polymorphism / ACL / formal bounded contexts (**test + green per item/commit**).

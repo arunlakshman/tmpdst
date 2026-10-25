@@ -50,7 +50,7 @@ func (s *synth) command() Entry {
 		recs := int64(1 + s.r.Intn(40))
 		l := recs * int64(500+s.r.Intn(1500))
 		c.Batches = append(c.Batches, core.PendingBatch{
-			TP:      core.TopicPartition{Topic: fmt.Sprintf("topic-%03d", p/s.per), Partition: int32(p % s.per)},
+			TP:      core.TP(fmt.Sprintf("topic-%03d", p/s.per), int32(p%s.per)),
 			Records: recs, Loc: core.SegmentRef{Key: key, Off: off, Len: l},
 		})
 		off += l

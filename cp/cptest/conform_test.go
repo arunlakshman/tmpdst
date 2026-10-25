@@ -39,7 +39,7 @@ var (
 func gen(r *veritastest.Rand, _ int) op {
 	pick := func(xs []string) string { return xs[r.Intn(len(xs))] }
 	tp := func() core.TopicPartition {
-		return core.TopicPartition{Topic: pick(topics), Partition: int32(r.Intn(3))}
+		return core.TP(pick(topics), int32(r.Intn(3)))
 	}
 	switch k := r.Intn(32); {
 	case k < 4:
@@ -83,7 +83,7 @@ func batches(r *veritastest.Rand, key string) []core.PendingBatch {
 	}
 	for i := 0; i < n; i++ {
 		b := core.PendingBatch{
-			TP:      core.TopicPartition{Topic: topics[r.Intn(2)], Partition: int32(r.Intn(2))},
+			TP:      core.TP(topics[r.Intn(2)], int32(r.Intn(2))),
 			Records: 1,
 			Loc:     core.SegmentRef{Key: key, Off: int64(r.Intn(4)) * 100, Len: int64(1 + r.Intn(3)*50)},
 		}

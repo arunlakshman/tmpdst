@@ -43,7 +43,7 @@ func commitHandler(st Store) func(context.Context, CommitReq) (any, error) {
 
 func lookupHandler(st Store) func(context.Context, LookupReq) (any, error) {
 	return func(ctx context.Context, q LookupReq) (any, error) {
-		op := core.Lookup{TP: core.TopicPartition{Topic: q.Topic, Partition: q.Partition}, From: core.Offset(q.From), MaxBytes: q.MaxBytes}
+		op := core.Lookup{TP: core.TP(q.Topic, q.Partition), From: core.Offset(q.From), MaxBytes: q.MaxBytes}
 		r, code, err := st.Lookup(ctx, op)
 		if code != core.OK || err != nil {
 			return LookupResp{Err: ErrString(code)}, err

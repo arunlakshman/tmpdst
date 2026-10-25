@@ -40,11 +40,11 @@ func TestSizeRuleSealsAtExactlyTheCap(t *testing.T) {
 	cfg.MaxSegmentBytes = 3 * n
 	h := startedHarness(t, cfg)
 	c := h.open(1)
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a")), e("t", 0, plain(t, "a"))))
 	if len(h.puts) != 0 {
 		t.Fatalf("sealed below the cap (%d of %d bytes)", 2*n, 3*n)
 	}
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	if len(h.puts) != 1 {
 		t.Fatalf("not sealed at exactly the cap: %d puts", len(h.puts))
 	}
@@ -61,7 +61,7 @@ func TestOversizeBatchSealedAlone(t *testing.T) {
 	cfg.MaxSegmentBytes = 10
 	h := startedHarness(t, cfg)
 	c := h.open(1)
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	if len(h.puts) != 1 {
 		t.Fatalf("%d puts", len(h.puts))
 	}
@@ -73,9 +73,9 @@ func TestOversizeBatchSealedAlone(t *testing.T) {
 func TestTimerRuleFromFirstBatch(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
-	h.send(c, verProduce, prodReq(-1, ent{"t", 1, plain(t, "b")}))
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "c")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
+	h.send(c, verProduce, prodReq(-1, e("t", 1, plain(t, "b"))))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "c"))))
 	ts := flushTimers(h)
 	if len(ts) != 1 || ts[0].After != 200*core.Millisecond {
 		t.Fatalf("flush timers %+v (want one of 200ms)", ts)
@@ -103,8 +103,8 @@ func TestTimerRuleFromFirstBatch(t *testing.T) {
 func TestFlushTimerRearms(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
-	h.produceOne(c, ent{"t", 0, plain(t, "a")})
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "b")}))
+	h.produceOne(c, e("t", 0, plain(t, "a")))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "b"))))
 	ts := flushTimers(h)
 	if len(ts) != 2 || ts[1].Gen == ts[0].Gen || ts[1].After != 200*core.Millisecond {
 		t.Fatalf("%+v", ts)
@@ -126,13 +126,13 @@ func TestBatchCapSeals(t *testing.T) {
 	c := h.open(1)
 	var es []ent
 	for i := 0; i < 31; i++ {
-		es = append(es, ent{"t", int32(i % 2), plain(t, "a")})
+		es = append(es, e("t", int32(i%2), plain(t, "a")))
 	}
 	h.send(c, verProduce, prodReq(-1, es...))
 	if len(h.puts) != 0 {
 		t.Fatal("sealed below the batch cap")
 	}
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	if len(h.puts) != 1 {
 		t.Fatalf("batch cap: %d puts", len(h.puts))
 	}
@@ -148,7 +148,7 @@ func TestPartitionCapReason(t *testing.T) {
 	cfg.MaxSegmentPartitions = 2
 	h := startedHarness(t, cfg)
 	c := h.open(1)
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}, ent{"t", 0, plain(t, "a")}, ent{"t", 1, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a")), e("t", 0, plain(t, "a")), e("t", 1, plain(t, "a"))))
 	if r := sealReasons(h); len(r) != 1 || r[0] != "partitions" || len(h.puts) != 1 {
 		t.Fatalf("reasons %v puts %d", r, len(h.puts))
 	}
@@ -168,7 +168,7 @@ func TestCommitTooLargeFailsBatches(t *testing.T) {
 		}
 		return run()
 	}
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}, ent{"t", 1, plain(t, "b")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a")), e("t", 1, plain(t, "b"))))
 	h.flush()
 	h.fireAll()
 	for _, p := range produced(h.next(c)) {
@@ -185,7 +185,7 @@ func TestCommitTooLargeFailsBatches(t *testing.T) {
 	if h.b.bufBytes != 0 || len(h.b.segs) != 0 {
 		t.Fatalf("buffered %d, segments %d", h.b.bufBytes, len(h.b.segs))
 	}
-	if h.cp.End(core.TopicPartition{Topic: "t"}) != 0 {
+	if h.cp.End(core.TP("t", 0)) != 0 {
 		t.Fatal("refused segment changed the log")
 	}
 }
@@ -194,7 +194,7 @@ func TestCommitTooLargeFailsBatches(t *testing.T) {
 func TestStopFlushesOpenSegment(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	if len(h.puts) != 0 {
 		t.Fatal("sealed early")
 	}
@@ -224,13 +224,13 @@ func TestManySmallBatchesSealAtByteCapNotBatchCap(t *testing.T) {
 	c := h.open(1)
 	var es []ent
 	for i := 0; i < 199; i++ {
-		es = append(es, ent{"t", int32(i % 2), plain(t, "a")})
+		es = append(es, e("t", int32(i%2), plain(t, "a")))
 	}
 	h.send(c, verProduce, prodReq(-1, es...))
 	if len(h.puts) != 0 {
 		t.Fatalf("sealed below the byte cap with %d puts", len(h.puts))
 	}
-	h.send(c, verProduce, prodReq(-1, ent{"t", 0, plain(t, "a")}))
+	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	if r := sealReasons(h); len(h.puts) != 1 || len(r) != 1 || r[0] != "size" {
 		t.Fatalf("reasons %v puts %d", r, len(h.puts))
 	}

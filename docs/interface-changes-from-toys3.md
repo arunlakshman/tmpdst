@@ -392,8 +392,6 @@ type Entry struct {
 // order.
 ```
 
-- Fix `loop.md:89`. It says `(time, seq, rngTie)`, under which the random tie
-  can never decide anything.
 - Crashes, restarts, stops, phase changes and quiesce points are queue entries
   addressed to the simulator itself.
 - Attrition gains `CrashProb float64`, evaluated after each node Step and each

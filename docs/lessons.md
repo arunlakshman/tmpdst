@@ -2,7 +2,7 @@
 
 Distilled from the Moonpool Sim Book (https://pierrez.github.io/moonpool/), which
 synthesizes FoundationDB, TigerBeetle and Antithesis practice, and applied to our
-Go, WarpStream-like engine built on the `Step(Event) []Action` loop (see `loop.md`).
+Go, WarpStream-like engine built on the `Step(Event) []Action` loop.
 
 ## 0. The framing: in Go, the Action/Event vocabulary *is* the provider interface
 

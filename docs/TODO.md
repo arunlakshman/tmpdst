@@ -2,6 +2,7 @@
 
 Accepted work that is not scheduled yet. Each item says why it is needed and
 what done means. Decisions it depends on are in `decisions.md`.
+Known flaky tests and an unstable test environment are in `flaky-tests.md`.
 
 ## Compression
 

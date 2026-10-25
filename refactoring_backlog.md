@@ -212,7 +212,7 @@ After P1–P3 seams exist.
 ## Suggested calendar
 
 1. **Now:** clear P0. *(done — tests green on touched packages)*
-2. **Next:** P1 `fieldOf` / fact getters (then remaining P1; **test + green per item/commit**).
+2. **Next:** P1 `sample` / TwoSpeed (then remaining P1; **test + green per item/commit**).
 3. **Then:** P2 pick one fork (**test + green per item/commit**).
 4. **Then:** P3 Split Phase/Extract Function only where P1 types exist (**test + green per item/commit**).
 5. **Last:** P4 Extract Class / polymorphism / ACL / formal bounded contexts (**test + green per item/commit**).

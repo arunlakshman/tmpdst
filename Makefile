@@ -13,9 +13,9 @@ CRAP_FLAGS    ?=
 
 export CRAP_THRESHOLD
 
-.PHONY: build test-race lint fmt-check vet compile test crap crap-baseline crap-strict
+.PHONY: build test-race ascii-check lint fmt-check vet compile test crap crap-baseline crap-strict
 
-build: fmt-check vet lint compile test crap
+build: fmt-check ascii-check vet lint compile test crap
 
 fmt-check:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
@@ -26,6 +26,10 @@ vet:
 # Effective Go rules via .golangci.yml (terse; capped per linter). See docs/lint-baseline.md.
 lint:
 	golangci-lint run ./...
+
+# No non-ASCII characters in code files (scripts/ascii-check.sh).
+ascii-check:
+	@scripts/ascii-check.sh
 
 compile:
 	go build ./...

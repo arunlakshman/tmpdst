@@ -47,7 +47,7 @@ type Classifier interface {
 	Classify(a core.IOAction, err error) (core.ErrCode, core.Outcome)
 }
 
-// Sink is the node's pair of inboxes (docs/flow-control.md §3). Callers route
+// Sink is the node's pair of inboxes (docs/flow-control.md sec. 3). Callers route
 // with core.ClassOf. The loop picks with core.InboxPolicy and stamps At/Wall
 // when it dequeues.
 type Sink interface {

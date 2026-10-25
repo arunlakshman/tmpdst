@@ -12,7 +12,7 @@ func sample() []Batch {
 	return []Batch{
 		{core.TopicPartition{Topic: "orders", Partition: 0}, 3, []byte("hello")},
 		{core.TopicPartition{Topic: "orders", Partition: 7}, 1, []byte("x")},
-		{core.TopicPartition{Topic: "t/é", Partition: 2}, 9, bytes.Repeat([]byte{0xAB}, 40)},
+		{core.TopicPartition{Topic: "t/\u00e9", Partition: 2}, 9, bytes.Repeat([]byte{0xAB}, 40)},
 	}
 }
 

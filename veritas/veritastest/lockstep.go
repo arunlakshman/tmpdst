@@ -245,5 +245,5 @@ func Run[S, Op any](t TB, c Check[S, Op], o Options) {
 			return
 		}
 	}
-	t.Logf("%d seeds × %d operations passed", n, c.Ops)
+	t.Logf("%d seeds x %d operations passed", n, c.Ops)
 }

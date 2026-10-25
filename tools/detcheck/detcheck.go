@@ -214,7 +214,7 @@ func checkReflectMap(pass *analysis.Pass, n *ast.CallExpr, report reportFunc) {
 	}
 }
 
-// suppressions maps line → reason for every //detcheck:ok comment in f.
+// suppressions maps line -> reason for every //detcheck:ok comment in f.
 func suppressions(pass *analysis.Pass, f *ast.File) map[int]string {
 	out := map[int]string{}
 	for _, cg := range f.Comments {

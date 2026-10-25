@@ -3,7 +3,7 @@ package core
 import "fmt"
 
 // Class selects which of a node's two inboxes an event goes to
-// (docs/flow-control.md §3.1). It is folded into the hash: append-only from
+// (docs/flow-control.md sec. 3.1). It is folded into the hash: append-only from
 // here on, never reordered.
 type Class uint8
 
@@ -44,10 +44,10 @@ type Queue interface {
 
 // InboxPolicy picks the next event for Step. It must be a pure function of the
 // two queues' contents and its own counters, and is the SAME code in
-// production and simulation (docs/flow-control.md §3.3):
+// production and simulation (docs/flow-control.md sec. 3.3):
 //
-//  1. control non-empty → take head of control (always);
-//  2. else data non-empty → take head of data;
+//  1. control non-empty -> take head of control (always);
+//  2. else data non-empty -> take head of data;
 //  3. else ok=false (the caller sleeps until either queue is non-empty).
 //
 // Go's select must never decide priority.

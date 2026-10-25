@@ -3,7 +3,7 @@ package sim
 import "manifester/core"
 
 // CostModel says how long a node's loop goroutine stays busy for one Step
-// (docs/flow-control.md §4.1). Deliveries go into the node's simulated
+// (docs/flow-control.md sec. 4.1). Deliveries go into the node's simulated
 // control/data inboxes; the node picks with core.InboxPolicy and is busy for
 // Sample(...) after each Step. Zero cost reproduces an instantaneous Step.
 type CostModel interface {

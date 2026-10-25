@@ -42,7 +42,7 @@ func (n *nodeInbox) Push(body core.EventBody) {
 
 func (n *nodeInbox) empty() bool { return len(n.ctrl.q) == 0 && len(n.data.q) == 0 }
 
-// defaultCost is the CostModel of docs/flow-control.md §4.1.
+// defaultCost is the CostModel of docs/flow-control.md sec. 4.1.
 type defaultCost struct{ p CostParams }
 
 // NewCostModel returns the default CostModel. Zero params cost nothing and

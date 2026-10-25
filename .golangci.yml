@@ -41,6 +41,8 @@ linters:
     - errname        # task 17
     - interfacebloat # task 24
     - dupl           # task 10
+    - asciicheck     # non-ASCII identifiers (comments/strings: scripts/ascii-check.sh)
+    - bidichk        # bidi control chars (trojan source)
   settings:
     nonamedreturns:
       report-error-in-defer: false

@@ -1,6 +1,6 @@
 module manifester
 
-go 1.24.0
+go 1.26.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.47.3
@@ -15,8 +15,8 @@ require (
 	github.com/twmb/franz-go v1.20.7
 	github.com/twmb/franz-go/pkg/kadm v1.17.1
 	github.com/twmb/franz-go/pkg/kmsg v1.14.0
-	golang.org/x/sys v0.41.0
-	golang.org/x/tools v0.41.0
+	golang.org/x/sys v0.49.0
+	golang.org/x/tools v0.52.0
 )
 
 require (
@@ -57,8 +57,8 @@ require (
 	github.com/stretchr/testify v1.10.0 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/exp v0.0.0-20230626212559-97b1e661b5df // indirect
-	golang.org/x/mod v0.32.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/mod v0.42.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 )

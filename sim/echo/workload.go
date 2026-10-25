@@ -15,6 +15,8 @@ type PutOp struct {
 	Client, Seq int
 	Payload     string
 }
+
+// GetOp is a read request from Client.
 type GetOp struct {
 	Client int
 	Offset int64
@@ -98,6 +100,7 @@ func NewWorkload(env core.Env, self core.NodeRef, brokers []core.NodeRef, o Opts
 	return w
 }
 
+// Name implements sim.Workload.
 func (w *Workload) Name() string { return "echo" }
 
 // SetHistory is called by the kernel.

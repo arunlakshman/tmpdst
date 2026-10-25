@@ -19,7 +19,7 @@ func freeAddr(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	return ln.Addr().String()
 }
 
@@ -37,7 +37,7 @@ func TestRunServesMemStoreAndStops(t *testing.T) {
 	for {
 		resp, err := http.Get("http://" + maddr + "/healthz")
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			break
 		}
 		if time.Now().After(deadline) {
@@ -48,7 +48,7 @@ func TestRunServesMemStoreAndStops(t *testing.T) {
 	for {
 		c, err := net.Dial("tcp", addr)
 		if err == nil {
-			c.Close()
+			_ = c.Close()
 			break
 		}
 		if time.Now().After(deadline) {
@@ -99,7 +99,7 @@ func TestRunErrors(t *testing.T) {
 
 func TestManifestFailureIsNotFatal(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "file")
-	os.WriteFile(f, nil, 0o644)
+	_ = os.WriteFile(f, nil, 0o644)
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
 	var logs bytes.Buffer
@@ -114,8 +114,8 @@ func TestCreateTablesFailureExits(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", "")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-amz-json-1.0")
-		w.WriteHeader(400)
-		w.Write([]byte(`{"__type":"com.amazon.coral.service#ValidationException","message":"fake"}`))
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"__type":"com.amazon.coral.service#ValidationException","message":"fake"}`))
 	}))
 	defer srv.Close()
 	var logs bytes.Buffer

@@ -1,6 +1,6 @@
 package core
 
-// Control-plane operations as seen by a broker (decision 3). The control plane
+// CPOp is a control-plane operation as seen by a broker (decision 3). The control plane
 // is an HTTP service over a metadata store (SQLite locally, DynamoDB in prod)
 // that the broker never sees. Shapes are provisional until the control-plane
 // session; the invariants below are not.
@@ -11,6 +11,8 @@ package core
 // stays correct under concurrent committers (a compare-and-set on the run base
 // with an internal retry) is the store's business, not part of this contract.
 type CPOp interface{ isCPOp() }
+
+// CPResp is the answer to a CPOp.
 type CPResp interface{ isCPResp() }
 
 // CommitSegment registers one uploaded object holding batches for many
@@ -31,6 +33,7 @@ type CommitSegment struct {
 	Batches    []PendingBatch
 }
 
+// PendingBatch describes one uploaded batch awaiting offset assignment.
 type PendingBatch struct {
 	TP      TopicPartition
 	Records int64 // record count in the batch
@@ -67,8 +70,10 @@ type LookupResp struct {
 // DescribeTopics answers Kafka Metadata requests.
 type DescribeTopics struct{ Topics []string } // empty = all
 
+// DescribeTopicsResp answers DescribeTopics.
 type DescribeTopicsResp struct{ Topics []TopicInfo }
 
+// TopicInfo describes one topic.
 type TopicInfo struct {
 	Name       string
 	Partitions int32

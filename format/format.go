@@ -51,8 +51,11 @@ import (
 )
 
 const (
-	Magic      = "MSEG"
-	Version    = 1
+	// Magic is the segment header magic.
+	Magic = "MSEG"
+	// Version is the segment format version.
+	Version = 1
+	// HeaderSize is the segment header length in bytes.
 	HeaderSize = 20
 )
 

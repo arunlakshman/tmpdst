@@ -1,6 +1,7 @@
 package prod
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -26,7 +27,7 @@ func fact(name string, kv ...any) core.Fact {
 func scrape(t *testing.T, m *Metrics) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	m.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/metrics", nil))
+	m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if rec.Code != 200 {
 		t.Fatalf("status %d", rec.Code)
 	}

@@ -61,7 +61,7 @@ func TestCreateTopic(t *testing.T) {
 	status := 200
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var b bytes.Buffer
-		b.ReadFrom(r.Body)
+		_, _ = b.ReadFrom(r.Body)
 		body = r.URL.Path + " " + b.String()
 		w.WriteHeader(status)
 	}))

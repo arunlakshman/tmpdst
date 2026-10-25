@@ -106,7 +106,7 @@ func TestRoundTrip(t *testing.T) {
 	defer srv.Close()
 	c := cpclient.New(srv.URL, srv.Client())
 
-	if resp, err := http.Get(srv.URL + "/healthz"); err != nil || resp.StatusCode != 200 {
+	if resp, err := http.Get(srv.URL + "/healthz"); err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("healthz: %v", err)
 	}
 	if err := c.CreateTopic(ctx, "t", 3); err != nil {
@@ -142,7 +142,7 @@ func TestRoundTrip(t *testing.T) {
 	}
 	// Malformed body: ErrInvalid at 200.
 	resp, _ := http.Post(srv.URL+"/v1/lookup", "application/json", nil)
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("malformed: %d", resp.StatusCode)
 	}
 }

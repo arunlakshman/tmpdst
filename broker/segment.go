@@ -227,8 +227,8 @@ func (b *Broker) commit(s *segment) []core.Action {
 }
 
 func (b *Broker) onCommit(s *segment, e core.CPDone) []core.Action {
-	switch {
-	case e.Err == core.OK:
+	switch e.Err {
+	case core.OK:
 		resp, ok := e.Resp.(core.CommitSegmentResp)
 		shape := ok && len(resp.Assigned) == len(s.batches)
 		for i := 0; shape && i < len(s.batches); i++ {
@@ -244,13 +244,13 @@ func (b *Broker) onCommit(s *segment, e core.CPDone) []core.Action {
 			b.env.Reachable("broker: commit succeeded after the old retry budget")
 		}
 		return b.committed(s, resp.Assigned)
-	case e.Err == core.ErrInvalid:
+	case core.ErrInvalid:
 		return b.failSegment(s, errUnknownServer)
-	case e.Err == core.ErrConflict:
+	case core.ErrConflict:
 		// The same key with a different request: a broker bug, not a race.
 		b.env.Unreachable("broker: commit key reused with a different request")
 		return b.failSegment(s, errUnknownServer)
-	case e.Err == core.ErrTooLarge:
+	case core.ErrTooLarge:
 		// The segment exceeds the CP's commit limit; retrying cannot help.
 		b.env.Unreachable("broker: segment exceeds the control plane's commit size")
 		return b.failSegment(s, errUnknownServer)

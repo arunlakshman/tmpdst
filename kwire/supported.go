@@ -15,7 +15,7 @@ const (
 	KeyFetch       int16 = 1
 	KeyListOffsets int16 = 2
 	KeyMetadata    int16 = 3
-	KeyApiVersions int16 = 18
+	KeyApiVersions int16 = 18 //nolint:revive // Kafka spelling (ApiVersions); renaming breaks sim/ callers
 )
 
 // ErrCodeUnsupportedVersion is Kafka's UNSUPPORTED_VERSION error code.
@@ -57,7 +57,7 @@ func IsSupported(key, version int16) bool {
 // with header h. When h.APIVersion is unsupported it carries
 // UNSUPPORTED_VERSION; EncodeResponse then encodes it as v0, as Kafka does.
 // Set the other fields (ThrottleMillis) as needed.
-func ApiVersionsResponse(h RequestHeader) *kmsg.ApiVersionsResponse {
+func ApiVersionsResponse(h RequestHeader) *kmsg.ApiVersionsResponse { //nolint:revive // Kafka spelling (ApiVersions); renaming breaks sim/ callers
 	resp := kmsg.NewPtrApiVersionsResponse()
 	if !IsSupported(KeyApiVersions, h.APIVersion) {
 		resp.ErrorCode = ErrCodeUnsupportedVersion

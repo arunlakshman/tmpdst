@@ -8,11 +8,11 @@ import "fmt"
 type Class uint8
 
 const (
-	// Control: things the node caused itself (completions of its own actions,
+	// Control is the class of things the node caused itself (completions of its own actions,
 	// its own timers, boot). Strict priority; bounded by construction because
 	// the state machine caps in-flight work.
 	Control Class = iota
-	// Data: everything a connection sends, one ordered stream per connection.
+	// Data is the class of everything a connection sends, one ordered stream per connection.
 	// Bounded; real backpressure is PauseReads.
 	Data
 )

@@ -82,8 +82,8 @@ func waitHealthy(t *testing.T, n *logNode) {
 		default:
 		}
 		if resp, err := http.Get("http://" + n.addr + "/healthz"); err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
 				return
 			}
 		}
@@ -109,7 +109,7 @@ func role(t *testing.T, n *logNode) string {
 	if err != nil {
 		return "down"
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	return resp.Header.Get("X-CP-Role")
 }
 
@@ -296,7 +296,7 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 
 func TestLogStoreStartupErrors(t *testing.T) {
 	foreign := t.TempDir()
-	os.WriteFile(filepath.Join(foreign, "precious.txt"), []byte("x"), 0o644)
+	_ = os.WriteFile(filepath.Join(foreign, "precious.txt"), []byte("x"), 0o644)
 	cases := map[string][]string{
 		"foreign pebble dir": {"-pebble-dir", foreign},
 		"table is missing":   {"-table", "missing"},

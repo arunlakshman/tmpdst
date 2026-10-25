@@ -171,10 +171,10 @@ type result struct {
 // common; a key's payload usually repeats and sometimes differs (a conflict);
 // a few commands are invalid; a few create topics.
 func genCommand(r *veritastest.Rand) Entry {
-	switch k := r.Intn(40); {
-	case k == 0:
+	switch r.Intn(40) {
+	case 0:
 		return Entry{Kind: KindCreateTopic, Topic: "t" + strconv.Itoa(r.Intn(3)), Parts: int32(r.Intn(4))}
-	case k == 1:
+	case 1:
 		return Entry{Kind: KindCommit, Commit: core.CommitSegment{SegmentKey: "bad" + strconv.Itoa(r.Intn(2))}}
 	}
 	key := "k" + strconv.Itoa(r.Intn(8))

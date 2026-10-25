@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"slices"
 	"strconv"
 
 	"manifester/core"
@@ -57,8 +58,7 @@ func (o *oracle) Observe(v sim.View) {
 func (o *oracle) scanOps(v sim.View) {
 	ops := v.History().Ops()
 	for ; o.nops < len(ops); o.nops++ {
-		switch op := ops[o.nops].Op.(type) {
-		case ProduceOp:
+		if op, ok := ops[o.nops].Op.(ProduceOp); ok {
 			o.opIdx[[2]int{op.Client, op.Batch}] = o.nops
 		}
 		o.pend = append(o.pend, o.nops)
@@ -90,7 +90,7 @@ func (o *oracle) record(v sim.View, pl *plog, off int64, i int, val string, det 
 	if val == "?" {
 		return
 	}
-	d := append(det[:len(det):len(det)], core.Detail{Key: "offset", Value: off}, core.Detail{Key: "value", Value: val})
+	d := append(slices.Clip(det), core.Detail{Key: "offset", Value: off}, core.Detail{Key: "value", Value: val})
 	o.seen[val]++
 	c, b, ri, ok := parseVal(val)
 	as.Always(ok && ri == i, "kafka: records of a batch keep their order", d...)
@@ -124,7 +124,7 @@ func (o *oracle) acks(v sim.View) {
 		base, ok2 := fieldOf(f, "base_offset").(core.I64)
 		count, ok3 := fieldOf(f, "count").(core.I64)
 		v.Assert().Always(ok1 && ok2 && ok3, "kafka: ack fact is well formed")
-		if !(ok1 && ok2 && ok3) {
+		if !ok1 || !ok2 || !ok3 {
 			continue
 		}
 		det := []core.Detail{{Key: "tp", Value: string(topic) + "/" + strconv.Itoa(int(part))}, {Key: "base", Value: int64(base)},
@@ -173,7 +173,7 @@ func (o *oracle) checkRead(v sim.View, ro ReadOp, rr ReadRes) {
 		key := [2]int{ro.Client, ti}
 		as.Always(from.Off == o.cpos[key], "kafka: a consumer resumes exactly where its last read ended", det...)
 		for j, r := range part.Recs {
-			d := append(det[:len(det):len(det)], core.Detail{Key: "offset", Value: r.Off}, core.Detail{Key: "value", Value: r.Val})
+			d := append(slices.Clip(det), core.Detail{Key: "offset", Value: r.Off}, core.Detail{Key: "value", Value: r.Val})
 			ok := r.Off == from.Off+int64(j)
 			as.Always(ok, "kafka: a consumer sees every offset in order, none skipped", d...)
 			inLog := r.Off >= 0 && r.Off < int64(len(pl.vals)) && r.Off < part.HWM

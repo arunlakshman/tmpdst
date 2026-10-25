@@ -15,6 +15,7 @@ type Classifier struct{ Objects, CP sys.Classifier }
 
 var _ sys.Classifier = Classifier{}
 
+// Classify maps an IO error to an error code and outcome.
 func (c Classifier) Classify(a core.IOAction, err error) (core.ErrCode, core.Outcome) {
 	switch a.(type) {
 	case core.CPCall:
@@ -30,6 +31,7 @@ func (c Classifier) Classify(a core.IOAction, err error) (core.ErrCode, core.Out
 // with truthful spec errors.
 type MemClassifier struct{}
 
+// Classify maps an in-memory store error to an error code and outcome.
 func (MemClassifier) Classify(_ core.IOAction, err error) (core.ErrCode, core.Outcome) {
 	var ve *vsys.Error
 	if errors.As(err, &ve) {

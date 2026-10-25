@@ -2,6 +2,7 @@ package prod
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -42,9 +43,9 @@ func TestNetOpenReadWriteOrdered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	op := next(t, in).(core.ConnOpened)
-	c.Write([]byte("hello"))
+	_, _ = c.Write([]byte("hello"))
 	var got []byte
 	for len(got) < 5 {
 		got = append(got, next(t, in).(core.BytesReceived).Data...)
@@ -72,7 +73,7 @@ func TestNetOpenReadWriteOrdered(t *testing.T) {
 		t.Fatalf("writes reordered or lost: %v", err)
 	}
 	wg.Wait()
-	c.Close()
+	_ = c.Close()
 	if cc, ok := next(t, in).(core.ConnClosed); !ok || cc.Conn != op.Conn || cc.Abort {
 		t.Fatalf("want graceful ConnClosed, got %+v", cc)
 	}
@@ -81,18 +82,18 @@ func TestNetOpenReadWriteOrdered(t *testing.T) {
 func TestNetPauseParksReader(t *testing.T) {
 	n, in := newTestNet(t)
 	c, _ := net.Dial("tcp", n.Addr().String())
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	op := next(t, in).(core.ConnOpened)
-	c.Write([]byte("a"))
+	_, _ = c.Write([]byte("a"))
 	next(t, in)
 	n.PauseReads(op.Conn)
 	// The Read already blocked when we paused may return once more.
-	c.Write([]byte("b"))
+	_, _ = c.Write([]byte("b"))
 	time.Sleep(100 * time.Millisecond)
 	for in.Data().Len() > 0 {
 		in.Data().Pop()
 	}
-	c.Write([]byte("c"))
+	_, _ = c.Write([]byte("c"))
 	time.Sleep(100 * time.Millisecond)
 	if in.Data().Len() != 0 {
 		t.Fatal("reader kept reading while paused")
@@ -106,9 +107,9 @@ func TestNetPauseParksReader(t *testing.T) {
 func TestNetAbortResetsAndGracefulFlushes(t *testing.T) {
 	n, in := newTestNet(t)
 	c, _ := net.Dial("tcp", n.Addr().String())
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	op := next(t, in).(core.ConnOpened)
-	n.Write(op.Conn, []byte("bye"))
+	_ = n.Write(op.Conn, []byte("bye"))
 	if err := n.Close(op.Conn, false); err != nil {
 		t.Fatal(err)
 	}
@@ -121,14 +122,14 @@ func TestNetAbortResetsAndGracefulFlushes(t *testing.T) {
 	}
 
 	c2, _ := net.Dial("tcp", n.Addr().String())
-	defer c2.Close()
+	defer func() { _ = c2.Close() }()
 	op2 := next(t, in).(core.ConnOpened)
 	if op2.Conn == op.Conn {
 		t.Fatal("ConnID reused")
 	}
-	n.Close(op2.Conn, true)
-	c2.SetReadDeadline(time.Now().Add(time.Second))
-	if _, err := c2.Read(make([]byte, 1)); err == nil || err == io.EOF {
+	_ = n.Close(op2.Conn, true)
+	_ = c2.SetReadDeadline(time.Now().Add(time.Second))
+	if _, err := c2.Read(make([]byte, 1)); err == nil || errors.Is(err, io.EOF) {
 		t.Fatalf("abort should reset, got %v", err)
 	}
 }

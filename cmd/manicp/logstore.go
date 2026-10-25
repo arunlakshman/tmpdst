@@ -136,7 +136,7 @@ func openLog(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *slog
 		return nil, nop, err
 	}
 	cfg.KV = kv
-	closeAll := func() { kv.Close(); removeTemp(f.log.pebbleDir, dir) }
+	closeAll := func() { _ = kv.Close(); removeTemp(f.log.pebbleDir, dir) }
 	svc, err := logcp.New(cfg)
 	if err != nil {
 		closeAll()
@@ -146,7 +146,7 @@ func openLog(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *slog
 	err = svc.Start(sctx)
 	cancel()
 	if err != nil {
-		svc.Close()
+		_ = svc.Close() // already returning the start error
 		closeAll()
 		return nil, nop, fmt.Errorf("log store start: %w", err)
 	}
@@ -178,7 +178,7 @@ func stopLog(svc *logcp.Service, l logFlags, log *slog.Logger) {
 			log.Info("final checkpoint", "event", "log_final_ckpt", "slot", slot)
 		}
 	}
-	svc.Close()
+	_ = svc.Close() // shutdown path; nothing to do on failure
 }
 
 // openState opens the Pebble state in dir (a temporary directory when empty),
@@ -221,6 +221,6 @@ func wipeState(dir string) error {
 
 func removeTemp(flagDir, used string) {
 	if flagDir == "" {
-		os.RemoveAll(used)
+		_ = os.RemoveAll(used) // best-effort temp cleanup
 	}
 }

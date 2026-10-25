@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
+// UpdateItem applies an update expression to one item in the fake.
 func (f *Fake) UpdateItem(ctx context.Context, in *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
 	if err := f.failed(ctx, "UpdateItem"); err != nil {
 		return nil, err

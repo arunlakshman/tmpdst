@@ -196,7 +196,7 @@ func (s *c1) fetch(c *client, op c1op) error {
 	}
 	bs, err := kwire.SplitBatches(p.RecordBatches)
 	if err != nil {
-		return fmt.Errorf("fetch %v@%d: %v", tp, from, err)
+		return fmt.Errorf("fetch %v@%d: %w", tp, from, err)
 	}
 	if from == hwm {
 		if len(bs) != 0 {
@@ -211,11 +211,11 @@ func (s *c1) fetch(c *client, op c1op) error {
 	for _, b := range bs {
 		bt, err := kwire.ParseBatch(b) // verifies the CRC
 		if err != nil {
-			return fmt.Errorf("fetch %v@%d: %v", tp, from, err)
+			return fmt.Errorf("fetch %v@%d: %w", tp, from, err)
 		}
 		recs, err := bt.Records()
 		if err != nil {
-			return fmt.Errorf("fetch %v@%d: %v", tp, from, err)
+			return fmt.Errorf("fetch %v@%d: %w", tp, from, err)
 		}
 		base := core.Offset(bt.BaseOffset)
 		if next < 0 { // the first batch is the one containing from

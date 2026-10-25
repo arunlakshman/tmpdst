@@ -12,6 +12,7 @@ type Fact struct {
 	Fields []Field
 }
 
+// Field is one named value of a Fact.
 type Field struct {
 	Key   string
 	Value FieldValue
@@ -21,10 +22,15 @@ type Field struct {
 type FieldValue interface{ isFieldValue() }
 
 type (
-	I64   int64
-	U64   uint64
-	Str   string
-	Bool  bool
+	// I64 is a signed integer field value.
+	I64 int64
+	// U64 is an unsigned integer field value.
+	U64 uint64
+	// Str is a string field value.
+	Str string
+	// Bool is a boolean field value.
+	Bool bool
+	// Bytes is a byte-slice field value.
 	Bytes []byte
 )
 

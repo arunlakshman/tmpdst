@@ -36,7 +36,7 @@ func fullStack(t *testing.T) *stack {
 	if err := logcp.CreateTable(ctx, db, table); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.DeleteTable(context.Background(), &dynamodb.DeleteTableInput{TableName: &table}) })
+	t.Cleanup(func() { _, _ = db.DeleteTable(context.Background(), &dynamodb.DeleteTableInput{TableName: &table}) })
 	objs, err := s3store.New(ctx, s3store.Config{Endpoint: s3ep, Bucket: s3store.UniqueBucket(), PathStyle: true})
 	if err != nil {
 		t.Fatal(err)

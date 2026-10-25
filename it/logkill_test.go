@@ -113,7 +113,7 @@ func roleOf(n *cpNode) string {
 		if err != nil {
 			return err
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		role = resp.Header.Get(logcp.RoleHeader)
 		return nil
 	})

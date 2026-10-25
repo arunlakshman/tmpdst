@@ -99,10 +99,10 @@ func queryDigest(exec func(core.CPOp) core.CPDone) uint64 {
 	h := fnv.New64a()
 	d := exec(core.DescribeTopics{}).Resp.(core.DescribeTopicsResp)
 	for _, t := range d.Topics {
-		fmt.Fprintf(h, "T%s/%d;", t.Name, t.Partitions)
+		_, _ = fmt.Fprintf(h, "T%s/%d;", t.Name, t.Partitions)
 		for p := int32(0); p < t.Partitions; p++ {
 			l := exec(core.Lookup{TP: core.TopicPartition{Topic: t.Name, Partition: p}}).Resp.(core.LookupResp)
-			fmt.Fprintf(h, "P%d/%d:%+v;", p, l.End, l.Ranges)
+			_, _ = fmt.Fprintf(h, "P%d/%d:%+v;", p, l.End, l.Ranges)
 		}
 	}
 	return h.Sum64()
@@ -132,7 +132,7 @@ func lockSeed(seed uint64, mk func() capplier.KV) (result, error) {
 		return res, err
 	}
 	for i, m := range ms {
-		defer m.app.Close()
+		defer func() { _ = m.app.Close() }()
 		if err := m.verify(); err != nil {
 			return res, fmt.Errorf("replica %d: %w", i, err)
 		}

@@ -169,7 +169,7 @@ func (m attemptMW) HandleFinalize(ctx context.Context, in middleware.FinalizeInp
 		r.reqBytes.WithLabelValues(op).Observe(float64(bytes))
 	}
 	if result == "ok" {
-		return
+		return out, md, err
 	}
 	if code != "" {
 		r.apiErrs.WithLabelValues(op, code).Inc()
@@ -184,7 +184,7 @@ func (m attemptMW) HandleFinalize(ctx context.Context, in middleware.FinalizeInp
 	}
 	if lvl == slog.LevelWarn {
 		if n, ok := r.lim.allow(time.Now()); !ok {
-			return
+			return out, md, err
 		} else if n > 0 {
 			r.log.Warn("aws attempt warnings suppressed", "event", "aws_warn_suppressed", "suppressed", n)
 		}
@@ -192,7 +192,7 @@ func (m attemptMW) HandleFinalize(ctx context.Context, in middleware.FinalizeInp
 	r.log.Log(ctx, lvl, "aws attempt failed", "event", "aws_attempt_failed", "op", op, "result", result,
 		"http_status", status, "code", code, "throttled", throttled, "duration_ms", ms(d), "request_bytes", bytes,
 		"target", target, "request_id", reqID, "err", err.Error())
-	return
+	return out, md, err
 }
 
 type opMW struct{ r *Recorder }

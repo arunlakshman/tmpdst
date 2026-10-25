@@ -14,7 +14,7 @@ func open(t *testing.T) *pebblekv.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { db.Close() })
+	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
 
@@ -85,12 +85,12 @@ func TestReopenKeepsData(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = db.Update(func(tx applier.Tx) { tx.Set([]byte("k"), []byte("v")) })
-	db.Close()
+	_ = db.Close() // closing for the reopen; the test checks what survived
 	db, err = pebblekv.Open(dir, pebblekv.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_ = db.View(func(tx applier.Tx) {
 		if string(tx.Get([]byte("k"))) != "v" {
 			t.Error("data lost on reopen")

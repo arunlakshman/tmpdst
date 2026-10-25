@@ -42,7 +42,7 @@ func done(t *testing.T, c *enginetest.Ctx, req core.ReqID) core.CPDone {
 	return d
 }
 
-func at(ms_ int64) sim.Time { return sim.Time(core.Duration(ms_) * ms) }
+func at(n int64) sim.Time { return sim.Time(core.Duration(n) * ms) }
 
 func reached(c *enginetest.Ctx, p string) bool { return slices.Contains(c.Reached, p) }
 
@@ -222,7 +222,8 @@ func TestDeterministic(t *testing.T) {
 		c.RunUntil(at(15000))
 		return c.Trace()
 	}
-	if run() != run() {
+	a, b := run(), run()
+	if a != b {
 		t.Fatal("same seed, different trace")
 	}
 }

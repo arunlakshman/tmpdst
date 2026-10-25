@@ -86,12 +86,12 @@ func TestDumpSampleRows(t *testing.T) {
 	}
 	w("\n### Item sizes (bytes, DynamoDB accounting: attribute names + values)\n")
 	w("| item type | count | min | max |\n|---|---|---|---|")
-	var types_ []string
+	var typeNames []string
 	for k := range sizes {
-		types_ = append(types_, k)
+		typeNames = append(typeNames, k)
 	}
-	sort.Strings(types_)
-	for _, k := range types_ {
+	sort.Strings(typeNames)
+	for _, k := range typeNames {
 		mn, mx := sizes[k][0], sizes[k][0]
 		for _, v := range sizes[k] {
 			mn, mx = min(mn, v), max(mx, v)
@@ -163,8 +163,7 @@ func describe(t testing.TB, it map[string]types.AttributeValue) string {
 		}
 	}
 	fmt.Fprintf(&b, "\n**pk=`%s` sk=`%s`** (%d bytes): %s", pk, sk, itemSize(it), strings.Join(attrs, " "))
-	switch {
-	case pk == "LOG":
+	if pk == "LOG" {
 		raw := it["d"].(*types.AttributeValueMemberB).Value
 		e, err := logcp.UnmarshalEntry(raw)
 		if err != nil {

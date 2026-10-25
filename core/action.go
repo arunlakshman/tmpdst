@@ -61,22 +61,26 @@ type Dial struct {
 
 // ---- object store ----
 
+// ObjPut uploads Data under Key.
 type ObjPut struct {
 	Req  ReqID
 	Key  string // unique per upload, so a MaybeApplied PUT is safe to retry
 	Data []byte
 }
 
+// ObjGet reads the byte range Ref.
 type ObjGet struct {
 	Req ReqID
 	Ref SegmentRef
 }
 
+// ObjDelete removes the object at Key.
 type ObjDelete struct {
 	Req ReqID
 	Key string
 }
 
+// ObjList lists the keys under Prefix.
 type ObjList struct {
 	Req    ReqID
 	Prefix string
@@ -84,6 +88,7 @@ type ObjList struct {
 
 // ---- control plane (HTTP) ----
 
+// CPCall sends Op to the control plane.
 type CPCall struct {
 	Req ReqID
 	Op  CPOp
@@ -123,13 +128,26 @@ func (Emit) isAction()        {}
 func (Trip) isAction()        {}
 func (Exit) isAction()        {}
 
-func (a Send) ReqID() ReqID      { return a.Req }
-func (a Dial) ReqID() ReqID      { return a.Req }
-func (a ObjPut) ReqID() ReqID    { return a.Req }
-func (a ObjGet) ReqID() ReqID    { return a.Req }
+// ReqID returns the request this action carries.
+func (a Send) ReqID() ReqID { return a.Req }
+
+// ReqID returns the request this action carries.
+func (a Dial) ReqID() ReqID { return a.Req }
+
+// ReqID returns the request this action carries.
+func (a ObjPut) ReqID() ReqID { return a.Req }
+
+// ReqID returns the request this action carries.
+func (a ObjGet) ReqID() ReqID { return a.Req }
+
+// ReqID returns the request this action carries.
 func (a ObjDelete) ReqID() ReqID { return a.Req }
-func (a ObjList) ReqID() ReqID   { return a.Req }
-func (a CPCall) ReqID() ReqID    { return a.Req }
+
+// ReqID returns the request this action carries.
+func (a ObjList) ReqID() ReqID { return a.Req }
+
+// ReqID returns the request this action carries.
+func (a CPCall) ReqID() ReqID { return a.Req }
 
 var (
 	_ IOAction = Send{}

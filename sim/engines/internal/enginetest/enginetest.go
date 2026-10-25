@@ -46,7 +46,10 @@ func New(eng sim.Engine, seed uint64) *Ctx {
 	return &Ctx{R: sim.NewRand(seed), Down: map[core.NodeID]bool{}, eng: eng, lanes: map[string]sim.Lane{}}
 }
 
-func (c *Ctx) Now() sim.Time         { return c.T }
+// Now returns the fake clock.
+func (c *Ctx) Now() sim.Time { return c.T }
+
+// Rand returns the seeded random source.
 func (c *Ctx) Rand() sim.CountedRand { return c.R }
 
 // Lane numbers keys sequentially from 1, like the kernel.
@@ -64,12 +67,18 @@ func (c *Ctx) add(e *entry) sim.EntryID {
 	c.q = append(c.q, e)
 	return sim.EntryID(e.seq)
 }
+
+// Deliver queues an event for a node.
 func (c *Ctx) Deliver(to core.NodeRef, at sim.Time, _ sim.Lane, b core.EventBody) sim.EntryID {
 	return c.add(&entry{at: max(at, c.T), to: to, body: b})
 }
+
+// Self queues an engine-private entry.
 func (c *Ctx) Self(at sim.Time, _ sim.Lane, b any) sim.EntryID {
 	return c.add(&entry{at: max(at, c.T), self: true, body: b})
 }
+
+// Cancel marks a queued entry dead.
 func (c *Ctx) Cancel(id sim.EntryID) {
 	for _, e := range c.q {
 		if sim.EntryID(e.seq) == id {
@@ -77,8 +86,14 @@ func (c *Ctx) Cancel(id sim.EntryID) {
 		}
 	}
 }
+
+// Fault records an injected fault kind.
 func (c *Ctx) Fault(kind string, _ ...core.Field) { c.Faults = append(c.Faults, kind) }
-func (c *Ctx) Assert() core.Assertions            { return asserts{c} }
+
+// Assert returns the assertion recorder.
+func (c *Ctx) Assert() core.Assertions { return asserts{c} }
+
+// Current returns the live incarnation of n.
 func (c *Ctx) Current(n core.NodeID) (core.NodeRef, bool) {
 	if c.Down[n] {
 		return core.NodeRef{}, false

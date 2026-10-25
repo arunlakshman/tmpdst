@@ -78,12 +78,12 @@ func TestClassifierLive(t *testing.T) {
 	// Connection refused: a port nobody listens on.
 	l, _ := net.Listen("tcp", "127.0.0.1:0")
 	addr := l.Addr().String()
-	l.Close()
+	_ = l.Close()
 	if c, o := classify("http://"+addr, nil, commit, ctx); c != core.ErrUnavailable || o != core.NotApplied {
 		t.Errorf("refused: %v %v", c, o)
 	}
 	// 503.
-	s503 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "x", 503) }))
+	s503 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "x", http.StatusServiceUnavailable) }))
 	defer s503.Close()
 	if c, o := classify(s503.URL, nil, commit, ctx); c != core.ErrUnavailable || o != core.NotApplied {
 		t.Errorf("503: %v %v", c, o)
@@ -91,7 +91,7 @@ func TestClassifierLive(t *testing.T) {
 	// Connection dropped after the request arrived.
 	drop := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		conn, _, _ := w.(http.Hijacker).Hijack()
-		conn.Close()
+		_ = conn.Close()
 	}))
 	defer drop.Close()
 	if c, o := classify(drop.URL, nil, commit, ctx); c != core.ErrIO || o != core.MaybeApplied {
@@ -102,7 +102,7 @@ func TestClassifierLive(t *testing.T) {
 	}
 	// Server too slow.
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.Copy(io.Discard, r.Body)
+		_, _ = io.Copy(io.Discard, r.Body)
 		<-r.Context().Done()
 	}))
 	defer slow.Close()

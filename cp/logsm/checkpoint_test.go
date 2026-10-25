@@ -82,8 +82,8 @@ func TestX5(t *testing.T) {
 		b := c.Marshal()
 		var z bytes.Buffer
 		w, _ := flate.NewWriter(&z, flate.BestSpeed)
-		w.Write(b)
-		w.Close()
+		_, _ = w.Write(b)
+		_ = w.Close()
 		var dec, load []time.Duration
 		for i := 0; i < 15; i++ {
 			t0 := time.Now()

@@ -141,7 +141,7 @@ func (s *Service) catchUp(ctx context.Context) error {
 		tail, err := s.checkTail(ctx)
 		if err != nil {
 			if serr := s.env.sleep(ctx, s.cfg.TailPoll); serr != nil {
-				return fmt.Errorf("%w (last tail check: %v)", serr, err)
+				return fmt.Errorf("%w (last tail check: %w)", serr, err)
 			}
 			continue
 		}

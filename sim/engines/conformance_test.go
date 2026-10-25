@@ -52,8 +52,7 @@ func (g *rig) finish(req core.ReqID) (string, error) {
 func render(c core.Completion) string { return fmt.Sprintf("%+v", c) }
 
 func reqOf(op any) core.ReqID {
-	switch o := op.(type) {
-	case core.IOAction:
+	if o, ok := op.(core.IOAction); ok {
 		return o.ReqID()
 	}
 	panic("op")

@@ -37,7 +37,7 @@ func s3Error(w http.ResponseWriter, r *http.Request, status int, code string) {
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(status)
 	if r.Method != http.MethodHead {
-		fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><Error><Code>%s</Code><Message>%s</Message></Error>`, code, code)
+		_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><Error><Code>%s</Code><Message>%s</Message></Error>`, code, code)
 	}
 }
 
@@ -47,7 +47,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.calls++
 	if f.inject != nil {
 		if st, code := f.inject(r); st != 0 {
-			io.Copy(io.Discard, r.Body)
+			_, _ = io.Copy(io.Discard, r.Body)
 			s3Error(w, r, st, code)
 			return
 		}
@@ -101,7 +101,7 @@ func (f *fakeS3) get(w http.ResponseWriter, r *http.Request, path string) {
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(status)
 	if r.Method == http.MethodGet {
-		w.Write(body)
+		_, _ = w.Write(body)
 	}
 }
 
@@ -125,7 +125,7 @@ func (f *fakeS3) list(w http.ResponseWriter, r *http.Request, bucket string) {
 		res.Contents = append(res.Contents, content{k})
 	}
 	w.Header().Set("Content-Type", "application/xml")
-	xml.NewEncoder(w).Encode(res)
+	_ = xml.NewEncoder(w).Encode(res)
 }
 
 // newSlow is an endpoint that never answers until release is closed.

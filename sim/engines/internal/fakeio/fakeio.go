@@ -56,7 +56,9 @@ type Hooks struct {
 // Kind is how an issued op resolves.
 type Kind uint8
 
+// Kind values: Normal, Unavailable, Timeout and Lost, as commented below.
 const (
+	// Normal applies at T1 and responds at T2.
 	Normal      Kind = iota // apply at T1, respond at T2
 	Unavailable             // refused, NotApplied
 	Timeout                 // caller sees timeout; op applies or not (drawn at T1)
@@ -112,12 +114,13 @@ func (c *Core) specStateHash() uint64 {
 // compare it with the spec's own StateHash (a stale cache shows up as a diff).
 func (c *Core) SpecStateHash() uint64 { return c.specStateHash() }
 
+// Name returns the hooks name.
 func (c *Core) Name() string { return c.h.Name }
 
 // EnterRecovery stops new faults for later actions.
 func (c *Core) EnterRecovery() { c.recovery = true }
 
-// OnCrash: effects stand and landings stay scheduled; deliveries to the dead
+// OnCrash does nothing: effects stand and landings stay scheduled; deliveries to the dead
 // incarnation are dropped by the scheduler or skipped at landing.
 func (c *Core) OnCrash(sim.EngineCtx, core.NodeRef) {}
 

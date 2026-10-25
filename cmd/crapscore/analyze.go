@@ -6,7 +6,6 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
-	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,7 +27,7 @@ type Func struct {
 // CRAP is the Savoia/Evans formula: comp^2 * (1-cov)^3 + comp.
 func CRAP(comp int, cov float64) float64 {
 	c := float64(comp)
-	return c*c*math.Pow(1-cov, 3) + c
+	return c*c*(1-cov)*(1-cov)*(1-cov) + c
 }
 
 // Complexity is cyclomatic complexity: 1 + every if, for, range, non-default

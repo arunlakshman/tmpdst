@@ -86,7 +86,7 @@ func (p Profile) ReadProfileFile(path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if err := p.ReadProfile(f); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}

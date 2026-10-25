@@ -109,7 +109,7 @@ func parseArgs(args []string, stderr io.Writer) (c benchConfig, ok bool) {
 
 func mainRun(args []string, stdout, stderr io.Writer, nc clientFactory) int {
 	if len(args) < 1 || args[0] != "benchmark-producer" {
-		fmt.Fprintln(stderr, "usage: manibench benchmark-producer -topic T [flags]")
+		_, _ = fmt.Fprintln(stderr, "usage: manibench benchmark-producer -topic T [flags]")
 		return 2
 	}
 	c, ok := parseArgs(args[1:], stderr)
@@ -118,7 +118,7 @@ func mainRun(args []string, stdout, stderr io.Writer, nc clientFactory) int {
 	}
 	if c.createParts > 0 {
 		if err := createTopic(c.cpURL, c.topic, c.createParts); err != nil {
-			fmt.Fprintln(stderr, "create topic:", err)
+			_, _ = fmt.Fprintln(stderr, "create topic:", err)
 			return 1
 		}
 	}
@@ -134,8 +134,8 @@ func createTopic(url, topic string, n int) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	defer func() { _ = resp.Body.Close() }() // read-only response
+	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("status %s", resp.Status)
 	}
 	return nil
@@ -219,7 +219,7 @@ func reportLoop(pctx context.Context, w io.Writer, tick <-chan time.Time, start 
 			for _, cl := range cls {
 				buf += cl.BufferedProduceRecords()
 			}
-			fmt.Fprintln(w, formatInterval(st.takeInterval(), now.Sub(last), buf))
+			_, _ = fmt.Fprintln(w, formatInterval(st.takeInterval(), now.Sub(last), buf))
 			last = now
 		case <-pctx.Done():
 			return
@@ -236,7 +236,7 @@ func run(c benchConfig, stdout, stderr io.Writer, nc clientFactory) int {
 	for i := range cls {
 		cl, err := nc(opts...)
 		if err != nil {
-			fmt.Fprintln(stderr, "new client:", err)
+			_, _ = fmt.Fprintln(stderr, "new client:", err)
 			return 1
 		}
 		defer cl.Close()
@@ -275,6 +275,6 @@ func run(c benchConfig, stdout, stderr io.Writer, nc clientFactory) int {
 	}
 	fcancel()
 	done.Store(true)
-	fmt.Fprint(stdout, formatSummary(st.summarize(time.Since(start))))
+	_, _ = fmt.Fprint(stdout, formatSummary(st.summarize(time.Since(start))))
 	return 0
 }

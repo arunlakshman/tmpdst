@@ -33,6 +33,7 @@ type ObjectStore struct {
 // NewObjectStore returns an empty store.
 func NewObjectStore() *ObjectStore { return &ObjectStore{spec: veritas.NewObjectStore()} }
 
+// Put stores data under key.
 func (s *ObjectStore) Put(ctx context.Context, key string, data []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -42,6 +43,7 @@ func (s *ObjectStore) Put(ctx context.Context, key string, data []byte) error {
 	return fail(s.spec.Exec(core.ObjPut{Key: key, Data: data}).(core.ObjPutDone).Err)
 }
 
+// Get returns the bytes referenced by ref.
 func (s *ObjectStore) Get(ctx context.Context, ref core.SegmentRef) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -52,6 +54,7 @@ func (s *ObjectStore) Get(ctx context.Context, ref core.SegmentRef) ([]byte, err
 	return d.Data, fail(d.Err)
 }
 
+// Delete removes the object under key.
 func (s *ObjectStore) Delete(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -61,6 +64,7 @@ func (s *ObjectStore) Delete(ctx context.Context, key string) error {
 	return fail(s.spec.Exec(core.ObjDelete{Key: key}).(core.ObjDeleteDone).Err)
 }
 
+// List returns the keys that start with prefix.
 func (s *ObjectStore) List(ctx context.Context, prefix string) ([]string, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -87,6 +91,7 @@ func (c *ControlPlane) CreateTopic(name string, partitions int32) error {
 	return fail(c.spec.CreateTopic(name, partitions))
 }
 
+// Call executes op against the control-plane spec.
 func (c *ControlPlane) Call(ctx context.Context, op core.CPOp) (core.CPResp, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

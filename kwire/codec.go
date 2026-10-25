@@ -90,7 +90,7 @@ func (Codec) DecodeRequest(frame []byte) (core.RequestHeader, core.Request, erro
 		}
 	}
 	if err := req.ReadFrom(rest); err != nil {
-		return h, nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+		return h, nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
 	return h, req, nil
 }
@@ -173,7 +173,7 @@ func (Codec) DecodeResponse(h core.RequestHeader, frame []byte) (core.Response, 
 		}
 	}
 	if err := resp.ReadFrom(rest); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+		return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
 	return resp, nil
 }

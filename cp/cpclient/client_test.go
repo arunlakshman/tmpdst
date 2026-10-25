@@ -93,7 +93,7 @@ func fake(t *testing.T, status int, body string) *Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(status)
-		fmt.Fprint(w, body)
+		_, _ = fmt.Fprint(w, body)
 	}))
 	t.Cleanup(srv.Close)
 	return New(srv.URL, srv.Client())
@@ -285,7 +285,7 @@ func TestNoFailoverOnBusinessErrorOrTimeout(t *testing.T) {
 	var hits atomic.Int64
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
-		io.Copy(io.Discard, r.Body) // lets the server notice the client going away
+		_, _ = io.Copy(io.Discard, r.Body) // lets the server notice the client going away
 		<-r.Context().Done()
 	}))
 	t.Cleanup(slow.Close)
@@ -327,7 +327,7 @@ func TestFailbackWrapsAround(t *testing.T) {
 	}
 	a.Close()
 	a2 := httptest.NewUnstartedServer(cp.NewHandler(memstore.New()))
-	a2.Listener.Close()
+	_ = a2.Listener.Close()
 	l, err := net.Listen("tcp", strings.TrimPrefix(aURL, "http://"))
 	if err != nil {
 		t.Skip("port not reusable:", err)

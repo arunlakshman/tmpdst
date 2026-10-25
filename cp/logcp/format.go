@@ -29,7 +29,7 @@ const (
 	itemOverhead = 256
 )
 
-// ErrEntryTooLarge: the entry does not fit in one slot.
+// ErrEntryTooLarge means the entry does not fit in one slot.
 var ErrEntryTooLarge = errors.New("logcp: entry larger than one slot")
 
 // UnsupportedError is a slot written in a format newer than this build reads.
@@ -43,7 +43,7 @@ func (e *UnsupportedError) Error() string {
 
 var errCorrupt = errors.New("logcp: corrupt slot")
 
-// ErrTrimmed: the slot was trimmed. Trimming overwrites a slot with a
+// ErrTrimmed means the slot was trimmed. Trimming overwrites a slot with a
 // tombstone instead of deleting it, so a node that is behind the trim point
 // (a reader, or a writer whose slot number is stale) finds a tombstone where
 // it expected a slot, never an empty slot it could fill. Such a node must

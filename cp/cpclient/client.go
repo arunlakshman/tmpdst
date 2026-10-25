@@ -213,7 +213,7 @@ func (c *Client) doAt(ctx context.Context, base, name string, req, resp any) err
 	if err != nil {
 		return &CallError{Op: name, Sent: sent, Err: err}
 	}
-	defer hres.Body.Close()
+	defer func() { _ = hres.Body.Close() }() // body already read by decodeReply
 	return decodeReply(name, hres, resp)
 }
 

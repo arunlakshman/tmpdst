@@ -21,7 +21,7 @@ func newPebble(t testing.TB) applier.KV {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { kv.Close() })
+	t.Cleanup(func() { _ = kv.Close() })
 	return kv
 }
 
@@ -87,7 +87,7 @@ func lockstep(t *testing.T, mk func(testing.TB) applier.KV, seeds, ops int) {
 				t.Fatalf("seed %d End(%v) %d vs oracle %d", seed, tp, a.End(tp), o.End(tp))
 			}
 		}
-		a.Close()
+		_ = a.Close()
 	}
 }
 

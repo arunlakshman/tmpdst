@@ -294,10 +294,10 @@ func (r *simRun) alive(n *simNode) bool {
 // common; a key's payload usually repeats and sometimes differs (a conflict);
 // a few commands are invalid; a few create topics.
 func genOp(r *veritastest.Rand) logsm.Entry {
-	switch k := r.Intn(40); {
-	case k == 0:
+	switch r.Intn(40) {
+	case 0:
 		return logsm.Entry{Kind: logsm.KindCreateTopic, Topic: "t" + strconv.Itoa(r.Intn(3)), Parts: int32(1 + r.Intn(4))}
-	case k == 1:
+	case 1:
 		return logsm.Entry{Kind: logsm.KindCommit, Commit: core.CommitSegment{SegmentKey: "bad" + strconv.Itoa(r.Intn(2))}}
 	}
 	key := "k" + strconv.Itoa(r.Intn(16))
@@ -755,7 +755,7 @@ func (m *model) checkState(a *applier.Applier) error {
 	for _, t := range d.Resp.(core.DescribeTopicsResp).Topics {
 		got[t.Name] = t.Partitions
 	}
-	if !reflect.DeepEqual(got, m.topics) && !(len(got) == 0 && len(m.topics) == 0) {
+	if !reflect.DeepEqual(got, m.topics) && (len(got) != 0 || len(m.topics) != 0) {
 		return fmt.Errorf("topics %v, model %v", got, m.topics)
 	}
 	return nil
@@ -801,10 +801,10 @@ func queryDigest(exec func(core.CPOp) core.CPDone) uint64 {
 	h := fnv.New64a()
 	d := exec(core.DescribeTopics{}).Resp.(core.DescribeTopicsResp)
 	for _, t := range d.Topics {
-		fmt.Fprintf(h, "T%s/%d;", t.Name, t.Partitions)
+		_, _ = fmt.Fprintf(h, "T%s/%d;", t.Name, t.Partitions)
 		for p := int32(0); p < t.Partitions; p++ {
 			l := exec(core.Lookup{TP: core.TopicPartition{Topic: t.Name, Partition: p}}).Resp.(core.LookupResp)
-			fmt.Fprintf(h, "P%d/%d:%+v;", p, l.End, l.Ranges)
+			_, _ = fmt.Fprintf(h, "P%d/%d:%+v;", p, l.End, l.Ranges)
 		}
 	}
 	return h.Sum64()

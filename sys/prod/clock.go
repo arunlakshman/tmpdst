@@ -16,7 +16,11 @@ type Clock struct{ start time.Time }
 
 var _ sys.Clock = Clock{}
 
+// NewClock returns a Clock anchored at the current time.
 func NewClock() Clock { return Clock{start: time.Now()} }
 
-func (c Clock) Mono() core.Time     { return core.Time(time.Since(c.start)) }
+// Mono returns monotonic time elapsed since the clock was created.
+func (c Clock) Mono() core.Time { return core.Time(time.Since(c.start)) }
+
+// Wall returns the current wall-clock time in nanoseconds.
 func (c Clock) Wall() core.WallTime { return core.WallTime(time.Now().UnixNano()) }

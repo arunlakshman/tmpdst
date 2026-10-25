@@ -7,7 +7,11 @@ import (
 )
 
 func TestParseCgroupLimit(t *testing.T) {
-	for in, want := range map[string]uint64{"536870912\n": 512 << 20, " 1073741824 ": 1 << 30} {
+	for _, tc := range []struct {
+		in   string
+		want uint64
+	}{{"536870912\n", 512 << 20}, {" 1073741824 ", 1 << 30}} {
+		in, want := tc.in, tc.want
 		if n, ok := parseCgroupLimit(in); !ok || n != want {
 			t.Errorf("%q: %d %v", in, n, ok)
 		}

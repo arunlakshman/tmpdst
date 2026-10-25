@@ -126,14 +126,14 @@ func TestManifestS3DestErrorsAreReturned(t *testing.T) {
 func TestIMDS(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == "PUT":
-			w.Write([]byte("tok"))
+		case r.Method == http.MethodPut:
+			_, _ = w.Write([]byte("tok"))
 		case r.Header.Get("X-aws-ec2-metadata-token") != "tok":
-			w.WriteHeader(401)
+			w.WriteHeader(http.StatusUnauthorized)
 		case strings.HasSuffix(r.URL.Path, "instance-type"):
-			w.Write([]byte("c7g.xlarge"))
+			_, _ = w.Write([]byte("c7g.xlarge"))
 		default:
-			w.WriteHeader(404)
+			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
 	defer srv.Close()
@@ -152,11 +152,11 @@ func TestWriteEmptyDestAndIMDS(t *testing.T) {
 		t.Fatal(d, err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "PUT" {
-			w.Write([]byte("tok"))
+		if r.Method == http.MethodPut {
+			_, _ = w.Write([]byte("tok"))
 			return
 		}
-		w.Write([]byte("i-1"))
+		_, _ = w.Write([]byte("i-1"))
 	}))
 	defer srv.Close()
 	dest := filepath.Join(t.TempDir(), "m.json")
@@ -171,7 +171,7 @@ func TestWriteEmptyDestAndIMDS(t *testing.T) {
 
 func TestWriteFileFailure(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "file")
-	os.WriteFile(f, nil, 0o644)
+	_ = os.WriteFile(f, nil, 0o644) // test setup; the test asserts on the failure path below
 	m := NewManifest(New("svc", "r", -1), flag.NewFlagSet("t", flag.ContinueOnError), "", nil)
 	if _, err := Write(context.Background(), m, WriteOptions{Dest: filepath.Join(f, "sub", "m.json")}); err == nil {
 		t.Fatal("want error")
@@ -185,7 +185,7 @@ func TestWriteS3(t *testing.T) {
 	var path string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
-		w.WriteHeader(200)
+		w.WriteHeader(http.StatusOK)
 	}))
 	defer srv.Close()
 	m := NewManifest(New("svc", "r4", -1), flag.NewFlagSet("t", flag.ContinueOnError), "us-east-1", nil)

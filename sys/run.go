@@ -10,9 +10,12 @@ import (
 )
 
 var (
+	// ErrTripped is returned when the run was stopped by a tripped guard.
 	ErrTripped = errors.New("tripped")
+	// ErrStopped is returned when Run ends because its context was done.
 	ErrStopped = errors.New("stopped")
-	ErrKilled  = errors.New("killed") // graceful stop missed its deadline
+	// ErrKilled is returned when a graceful stop missed its deadline.
+	ErrKilled = errors.New("killed") // graceful stop missed its deadline
 )
 
 // Run delivers Started, then loops: core.ControlFirst picks, At/Wall are

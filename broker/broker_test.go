@@ -133,7 +133,7 @@ func TestProduceErrors(t *testing.T) {
 	c := h.open(1)
 	bad := plain(t, "x")
 	bad[len(bad)-1] ^= 0xff
-	txn := plain(t, "x")
+	var txn []byte
 	// A transactional batch needs a valid CRC, so build one with the flag.
 	p := params
 	p.Attributes, p.ProducerID, p.ProducerEpoch, p.BaseSequence = 0x10, 1000, 0, 0

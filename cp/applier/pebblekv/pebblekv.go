@@ -5,6 +5,7 @@
 package pebblekv
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -31,9 +32,9 @@ var _ applier.KV = (*DB)(nil)
 
 type quiet struct{}
 
-func (quiet) Infof(string, ...interface{})  {}
-func (quiet) Errorf(string, ...interface{}) {}
-func (quiet) Fatalf(f string, a ...interface{}) {
+func (quiet) Infof(string, ...any)  {}
+func (quiet) Errorf(string, ...any) {}
+func (quiet) Fatalf(f string, a ...any) {
 	panic(fmt.Sprintf("pebblekv: "+f, a...))
 }
 
@@ -63,7 +64,7 @@ func (d *DB) Close() error {
 // View implements applier.KV: a snapshot, so a multi-read query is consistent.
 func (d *DB) View(fn func(applier.Tx)) error {
 	s := d.db.NewSnapshot()
-	defer s.Close()
+	defer func() { _ = s.Close() }() // read-only snapshot; nothing to flush
 	t := &txn{get: s.Get, iter: s.NewIter}
 	fn(t)
 	return t.err
@@ -73,7 +74,7 @@ func (d *DB) View(fn func(applier.Tx)) error {
 // committed without sync.
 func (d *DB) Update(fn func(applier.Tx)) error {
 	b := d.db.NewIndexedBatch()
-	defer b.Close()
+	defer func() { _ = b.Close() }() // Commit already reported any write error
 	t := &txn{b: b, get: b.Get, iter: b.NewIter}
 	fn(t)
 	if t.err != nil {
@@ -97,14 +98,14 @@ func (t *txn) fail(err error) {
 
 func (t *txn) Get(key []byte) []byte {
 	v, c, err := t.get(key)
-	if err == pebble.ErrNotFound {
+	if errors.Is(err, pebble.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
 		t.fail(err)
 		return nil
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }() // read-only value handle
 	return append([]byte{}, v...)
 }
 
@@ -118,7 +119,7 @@ func (t *txn) Floor(lo, hi []byte) (key, val []byte) {
 		t.fail(err)
 		return nil, nil
 	}
-	defer it.Close()
+	defer func() { _ = it.Close() }() // read-only iterator
 	if !it.Last() {
 		t.fail(it.Error())
 		return nil, nil
@@ -132,7 +133,7 @@ func (t *txn) Ascend(lo, hi []byte, fn func(key, val []byte) bool) {
 		t.fail(err)
 		return
 	}
-	defer it.Close()
+	defer func() { _ = it.Close() }() // read-only iterator
 	for ok := it.First(); ok; ok = it.Next() {
 		if !fn(it.Key(), it.Value()) {
 			return

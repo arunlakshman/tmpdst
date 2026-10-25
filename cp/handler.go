@@ -18,7 +18,7 @@ const maxBody = 32 << 20
 // and context errors are 503; any other store error is 500.
 func NewHandler(st Store) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	post(mux, "/v1/commit-segment", commitHandler(st))
 	post(mux, "/v1/lookup", lookupHandler(st))
 	post(mux, "/v1/describe-topics", describeHandler(st))
@@ -103,5 +103,5 @@ func post[Q any](mux *http.ServeMux, path string, f func(context.Context, Q) (an
 func reply(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v) // a write failure means the client is gone
 }

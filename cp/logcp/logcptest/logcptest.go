@@ -99,7 +99,7 @@ func Start(t testing.TB, cfg logcp.Config) *logcp.Service {
 	if err := s.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 

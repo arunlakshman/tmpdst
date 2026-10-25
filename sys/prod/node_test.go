@@ -35,7 +35,7 @@ func startNode(t *testing.T, mod func(*NodeConfig)) (*Node, NodeConfig) {
 	}
 	n, err := Start(context.Background(), cfg)
 	if err != nil {
-		ln.Close()
+		_ = ln.Close()
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { n.Kill(); <-n.Done() })
@@ -58,7 +58,7 @@ func TestStartRequiresPieces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	full := NodeConfig{Listener: ln, Objects: vsys.NewObjectStore(), ControlPlane: vsys.NewControlPlane()}
 	for name, mod := range map[string]func(*NodeConfig){
 		"listener": func(c *NodeConfig) { c.Listener = nil },
@@ -91,7 +91,7 @@ func TestStartGracefulStop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	req := kmsg.NewPtrMetadataRequest()
 	req.Version, req.Topics = 1, nil
 	body := req.AppendTo(nil)
@@ -145,7 +145,7 @@ func TestAdvertisedAndDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	bc, err := advertised(broker.Config{}, ln)
 	if err != nil || bc.Host != "127.0.0.1" || bc.Port != int32(ln.Addr().(*net.TCPAddr).Port) {
 		t.Errorf("advertised %+v %v", bc, err)

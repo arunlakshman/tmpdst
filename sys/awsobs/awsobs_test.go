@@ -63,11 +63,11 @@ func TestDynamoRetriesAndThrottles(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-amz-json-1.0")
 		if calls.Add(1) <= 2 {
-			w.WriteHeader(400)
-			w.Write([]byte(`{"__type":"com.amazonaws.dynamodb.v20120810#ThrottlingException","message":"slow"}`))
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"__type":"com.amazonaws.dynamodb.v20120810#ThrottlingException","message":"slow"}`))
 			return
 		}
-		w.Write([]byte(`{"Item":{}}`))
+		_, _ = w.Write([]byte(`{"Item":{}}`))
 	}))
 	defer srv.Close()
 	reg := prometheus.NewRegistry()
@@ -111,8 +111,8 @@ func TestS3Non2xxAndTimeout(t *testing.T) {
 		if strings.Contains(r.URL.Path, "slow") {
 			time.Sleep(300 * time.Millisecond)
 		}
-		w.WriteHeader(503)
-		w.Write([]byte(`<Error><Code>SlowDown</Code><Message>x</Message></Error>`))
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`<Error><Code>SlowDown</Code><Message>x</Message></Error>`))
 	}))
 	defer srv.Close()
 	reg := prometheus.NewRegistry()
@@ -151,8 +151,8 @@ func TestS3Non2xxAndTimeout(t *testing.T) {
 func TestQuietCodesLogAtDebug(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-amz-json-1.0")
-		w.WriteHeader(400)
-		w.Write([]byte(`{"__type":"com.amazonaws.dynamodb.v20120810#TransactionCanceledException","message":"x"}`))
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"__type":"com.amazonaws.dynamodb.v20120810#TransactionCanceledException","message":"x"}`))
 	}))
 	defer srv.Close()
 	var logs bytes.Buffer

@@ -71,7 +71,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	config, ok := scenarioConfig(o.scenario)
 	if !ok {
-		fmt.Fprintf(stderr, "manisim: unknown scenario %q (want kafka, kafka-log or echo)\n", o.scenario)
+		_, _ = fmt.Fprintf(stderr, "manisim: unknown scenario %q (want kafka, kafka-log or echo)\n", o.scenario)
 		return 2
 	}
 	if o.one >= 0 {
@@ -84,12 +84,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	t0 := time.Now()
 	rep, err := runSharded(config, list, o.jobs)
 	if err != nil {
-		fmt.Fprintln(stderr, "manisim:", err)
+		_, _ = fmt.Fprintln(stderr, "manisim:", err)
 		return 2
 	}
 	bad, steps := printSeeds(stdout, rep, o)
 	printCampaign(stdout, rep, o.scenario)
-	fmt.Fprintf(stdout, "%d seeds from %d: %d failing, %d steps, %v\n", len(rep.Seeds), o.start, bad, steps, time.Since(t0).Round(time.Millisecond))
+	_, _ = fmt.Fprintf(stdout, "%d seeds from %d: %d failing, %d steps, %v\n", len(rep.Seeds), o.start, bad, steps, time.Since(t0).Round(time.Millisecond))
 	if failed(rep, bad) {
 		return 1
 	}
@@ -108,7 +108,7 @@ func printSeeds(w io.Writer, rep sim.Report, o options) (bad int, steps uint64) 
 	for _, s := range rep.Seeds {
 		steps += s.Steps
 		if o.verbose {
-			fmt.Fprintf(w, "seed %d: steps=%d rand=%d hash=%016x crashes=%d exits=%d failures=%d\n",
+			_, _ = fmt.Fprintf(w, "seed %d: steps=%d rand=%d hash=%016x crashes=%d exits=%d failures=%d\n",
 				s.Seed, s.Steps, s.RandCalls, s.TraceHash, s.Crashes, s.Exits, len(s.Failures))
 		}
 		if len(s.Failures) == 0 {
@@ -116,9 +116,9 @@ func printSeeds(w io.Writer, rep sim.Report, o options) (bad int, steps uint64) 
 		}
 		bad++
 		for _, f := range s.Failures {
-			fmt.Fprintf(w, "FAIL seed %d: %s (%s) step=%d at=%v: %s\n", s.Seed, kind(f.Kind), f.Prop, f.Step, time.Duration(f.At), f.Msg)
+			_, _ = fmt.Fprintf(w, "FAIL seed %d: %s (%s) step=%d at=%v: %s\n", s.Seed, kind(f.Kind), f.Prop, f.Step, time.Duration(f.At), f.Msg)
 		}
-		fmt.Fprintf(w, "  repro: go run ./cmd/manisim -scenario %s -seed %d\n", o.scenario, s.Seed)
+		_, _ = fmt.Fprintf(w, "  repro: go run ./cmd/manisim -scenario %s -seed %d\n", o.scenario, s.Seed)
 	}
 	return bad, steps
 }
@@ -126,29 +126,29 @@ func printSeeds(w io.Writer, rep sim.Report, o options) (bad int, steps uint64) 
 // printCampaign prints the campaign-wide findings.
 func printCampaign(w io.Writer, rep sim.Report, scenario string) {
 	for _, a := range rep.Always {
-		fmt.Fprintf(w, "VIOLATED %q first at seed %d step %d (%d seeds)\n", a.Prop, a.FirstSeed, a.FirstStep, len(a.Seeds))
+		_, _ = fmt.Fprintf(w, "VIOLATED %q first at seed %d step %d (%d seeds)\n", a.Prop, a.FirstSeed, a.FirstStep, len(a.Seeds))
 	}
 	for _, a := range rep.Coverage {
-		fmt.Fprintf(w, "coverage gap: %q (%s) never satisfied\n", a.Prop, a.Kind)
+		_, _ = fmt.Fprintf(w, "coverage gap: %q (%s) never satisfied\n", a.Prop, a.Kind)
 	}
 	for _, s := range rep.Nondeterminism {
-		fmt.Fprintf(w, "NONDETERMINISM seed %d: two runs diverged\n  repro: go run ./cmd/manisim -scenario %s -seed %d\n", s, scenario, s)
+		_, _ = fmt.Fprintf(w, "NONDETERMINISM seed %d: two runs diverged\n  repro: go run ./cmd/manisim -scenario %s -seed %d\n", s, scenario, s)
 	}
 }
 
 func replay(stdout, stderr io.Writer, config func([]uint64) sim.Config, seed uint64) int {
 	res, err := sim.NewRunner().Replay(config([]uint64{seed}), seed)
 	if err != nil {
-		fmt.Fprintln(stderr, "manisim:", err)
+		_, _ = fmt.Fprintln(stderr, "manisim:", err)
 		return 2
 	}
 	for _, l := range res.Log {
-		fmt.Fprintf(stdout, "%6d %12v  %s\n", l.Step, time.Duration(l.At), l.Text)
+		_, _ = fmt.Fprintf(stdout, "%6d %12v  %s\n", l.Step, time.Duration(l.At), l.Text)
 	}
-	fmt.Fprintf(stdout, "seed %d: steps=%d rand=%d hash=%016x crashes=%d trips=%d exits=%d\n",
+	_, _ = fmt.Fprintf(stdout, "seed %d: steps=%d rand=%d hash=%016x crashes=%d trips=%d exits=%d\n",
 		seed, res.Steps, res.RandCalls, res.TraceHash, res.Crashes, res.Trips, res.Exits)
 	for _, f := range res.Failures {
-		fmt.Fprintf(stdout, "FAIL %s (%s) step=%d at=%v: %s\n", kind(f.Kind), f.Prop, f.Step, time.Duration(f.At), f.Msg)
+		_, _ = fmt.Fprintf(stdout, "FAIL %s (%s) step=%d at=%v: %s\n", kind(f.Kind), f.Prop, f.Step, time.Duration(f.At), f.Msg)
 	}
 	if len(res.Failures) > 0 {
 		return 1

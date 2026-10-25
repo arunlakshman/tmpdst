@@ -33,6 +33,7 @@ type Stop struct{ Deadline Time }
 
 // ---- network (inbound) ----
 
+// ConnOpened reports that a connection was accepted.
 type ConnOpened struct {
 	Conn ConnID
 	Peer string // remote address, informational only
@@ -76,6 +77,7 @@ type TimerFired struct {
 
 // ---- object store completions ----
 
+// ObjPutDone reports that an object PUT finished.
 type ObjPutDone struct {
 	Req     ReqID
 	Key     string
@@ -83,18 +85,21 @@ type ObjPutDone struct {
 	Outcome Outcome
 }
 
+// ObjGetDone reports that an object GET finished.
 type ObjGetDone struct {
 	Req  ReqID
 	Data []byte
 	Err  ErrCode
 }
 
+// ObjDeleteDone reports that an object DELETE finished.
 type ObjDeleteDone struct {
 	Req     ReqID
 	Err     ErrCode
 	Outcome Outcome
 }
 
+// ObjListDone reports that an object LIST finished.
 type ObjListDone struct {
 	Req  ReqID
 	Keys []string // sorted
@@ -103,6 +108,7 @@ type ObjListDone struct {
 
 // ---- control plane completions ----
 
+// CPDone reports that a control-plane call finished.
 type CPDone struct {
 	Req     ReqID
 	Resp    CPResp // nil unless Err == OK
@@ -124,13 +130,26 @@ func (ObjDeleteDone) isEvent() {}
 func (ObjListDone) isEvent()   {}
 func (CPDone) isEvent()        {}
 
-func (e SendDone) ReqID() ReqID      { return e.Req }
-func (e DialDone) ReqID() ReqID      { return e.Req }
-func (e ObjPutDone) ReqID() ReqID    { return e.Req }
-func (e ObjGetDone) ReqID() ReqID    { return e.Req }
+// ReqID returns the request this completion answers.
+func (e SendDone) ReqID() ReqID { return e.Req }
+
+// ReqID returns the request this completion answers.
+func (e DialDone) ReqID() ReqID { return e.Req }
+
+// ReqID returns the request this completion answers.
+func (e ObjPutDone) ReqID() ReqID { return e.Req }
+
+// ReqID returns the request this completion answers.
+func (e ObjGetDone) ReqID() ReqID { return e.Req }
+
+// ReqID returns the request this completion answers.
 func (e ObjDeleteDone) ReqID() ReqID { return e.Req }
-func (e ObjListDone) ReqID() ReqID   { return e.Req }
-func (e CPDone) ReqID() ReqID        { return e.Req }
+
+// ReqID returns the request this completion answers.
+func (e ObjListDone) ReqID() ReqID { return e.Req }
+
+// ReqID returns the request this completion answers.
+func (e CPDone) ReqID() ReqID { return e.Req }
 
 var (
 	_ Completion = SendDone{}

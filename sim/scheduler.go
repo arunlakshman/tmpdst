@@ -25,9 +25,12 @@ type Target struct {
 // Phase and Quiesce are addressed to the simulator itself.
 type EntryKind uint8
 
+// EntryKind values.
 const (
-	EntryDeliver        EntryKind = iota // event to a node
-	EntryEngineInternal                  // engine-private body to an engine
+	// EntryDeliver is an event to a node.
+	EntryDeliver EntryKind = iota // event to a node
+	// EntryEngineInternal is an engine-private body to an engine.
+	EntryEngineInternal // engine-private body to an engine
 	EntryCrash
 	EntryRestart
 	EntryStop

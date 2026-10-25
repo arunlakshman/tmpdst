@@ -13,6 +13,7 @@ type WallTime int64
 // Duration is nanoseconds.
 type Duration int64
 
+// Duration units.
 const (
 	Nanosecond  Duration = 1
 	Microsecond          = 1000 * Nanosecond
@@ -24,16 +25,22 @@ const (
 type ID [16]byte
 
 type (
-	NodeID      string // stable identity of a broker (or sim workload)
-	Incarnation ID     // fresh per boot; names one run of a node in logs, facts and the runtime
-	ConnID      uint64 // a connection, as seen by one node
+	// NodeID names a node.
+	NodeID string // stable identity of a broker (or sim workload)
+	// Incarnation identifies one boot of a node.
+	Incarnation ID // fresh per boot; names one run of a node in logs, facts and the runtime
+	// ConnID names a connection.
+	ConnID uint64 // a connection, as seen by one node
 	// ReqID correlates an Action with its completion Event. Unique within one
 	// incarnation only; it must never reach a durable name (object keys come
 	// from Env.NewID()).
-	ReqID    uint64
-	TimerID  uint64
+	ReqID uint64
+	// TimerID names a timer.
+	TimerID uint64
+	// TimerGen is a timer generation.
 	TimerGen uint64 // generation: a TimerFired whose Gen is stale is ignored
-	Offset   int64
+	// Offset is a partition log offset.
+	Offset int64
 )
 
 // NodeRef names one specific boot of one node.
@@ -42,6 +49,7 @@ type NodeRef struct {
 	Inc  Incarnation
 }
 
+// TopicPartition names one partition of a topic.
 type TopicPartition struct {
 	Topic     string
 	Partition int32
@@ -62,6 +70,7 @@ type SegmentRef struct {
 // only from the core's decoder, never from sys.Classifier.
 type ErrCode uint16
 
+// ErrCode values.
 const (
 	OK             ErrCode = iota
 	ErrTimeout             // deadline passed, or the response was lost; see Outcome (a lost response is ErrTimeout+MaybeApplied, never silence)
@@ -81,6 +90,7 @@ const (
 // ErrTimeout+MaybeApplied, never as silence.
 type Outcome uint8
 
+// Outcome values.
 const (
 	NotApplied   Outcome = iota // provably no effect
 	MaybeApplied                // may have taken effect; retry only if idempotent

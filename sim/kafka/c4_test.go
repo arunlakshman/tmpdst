@@ -4,7 +4,7 @@ import (
 	"go/parser"
 	"go/token"
 	"math/rand/v2"
-	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -21,16 +21,21 @@ import (
 
 func TestC4OracleDoesNotImportVeritas(t *testing.T) {
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", func(fi os.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, parser.ImportsOnly)
+	names, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range pkgs {
-		for name, f := range p.Files {
-			for _, imp := range f.Imports {
-				if strings.Contains(imp.Path.Value, "veritas") {
-					t.Errorf("%s imports %s", name, imp.Path.Value)
-				}
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, imp := range f.Imports {
+			if strings.Contains(imp.Path.Value, "veritas") {
+				t.Errorf("%s imports %s", name, imp.Path.Value)
 			}
 		}
 	}

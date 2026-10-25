@@ -66,7 +66,7 @@ func (l *DynLog) Append(ctx context.Context, slot int64, e Entry) (Entry, bool, 
 func (l *DynLog) existing(ctx context.Context, slot int64) (Entry, bool, error) {
 	got, err := l.Read(ctx, slot, 1)
 	if err != nil || len(got) == 0 || got[0].N != slot {
-		return Entry{}, false, fmt.Errorf("logsm: slot %d taken but unreadable: %v", slot, err)
+		return Entry{}, false, fmt.Errorf("logsm: slot %d taken but unreadable: %w", slot, err)
 	}
 	return got[0].E, false, nil
 }

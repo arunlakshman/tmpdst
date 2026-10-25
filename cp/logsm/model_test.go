@@ -186,7 +186,7 @@ func runBrokers(commit committerFn, rate float64, warm, dur time.Duration) (in [
 		}()
 	}
 	wg.Wait()
-	return
+	return in, total, failed
 }
 
 func pct(ds []time.Duration, p float64) time.Duration {

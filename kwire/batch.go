@@ -131,9 +131,11 @@ type Batch struct {
 	records              []byte // aliases the input to ParseBatch
 }
 
-// IsTransactional and IsControl report the attribute flag bits.
+// IsTransactional reports the transactional attribute flag bit.
 func (b Batch) IsTransactional() bool { return b.Attributes&0x10 != 0 }
-func (b Batch) IsControl() bool       { return b.Attributes&0x20 != 0 }
+
+// IsControl reports the control attribute flag bit.
+func (b Batch) IsControl() bool { return b.Attributes&0x20 != 0 }
 
 // Codec is the compression codec id (CodecNone .. CodecZstd).
 func (b Batch) Codec() int { return int(b.Attributes & 7) }
@@ -171,7 +173,7 @@ func parseBatch(b []byte, verifyCRC bool) (Batch, error) {
 	}
 	var rb kmsg.RecordBatch
 	if err := rb.ReadFrom(b); err != nil {
-		return out, fmt.Errorf("%w: %v", ErrCorrupt, err)
+		return out, fmt.Errorf("%w: %w", ErrCorrupt, err)
 	}
 	if !countFits(rb.Attributes&7 != 0, rb.NumRecords, len(rb.Records)) {
 		return out, fmt.Errorf("%w: %d records in %d bytes", ErrCorrupt, rb.NumRecords, len(rb.Records))
@@ -225,7 +227,7 @@ func DecodeRecords(rest []byte, n int32) ([]kmsg.Record, error) {
 		}
 		var r kmsg.Record
 		if err := r.ReadFrom(rest[:k+int(l)]); err != nil {
-			return nil, fmt.Errorf("%w: record %d: %v", ErrCorrupt, i, err)
+			return nil, fmt.Errorf("%w: record %d: %w", ErrCorrupt, i, err)
 		}
 		recs = append(recs, r)
 		rest = rest[k+int(l):]
@@ -265,7 +267,7 @@ func SplitBatches(b []byte) ([][]byte, error) {
 func OneBatch(b []byte) ([]byte, error) {
 	bs, err := SplitBatches(b)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrNotSingle, err)
+		return nil, fmt.Errorf("%w: %w", ErrNotSingle, err)
 	}
 	if len(bs) != 1 {
 		return nil, fmt.Errorf("%w: found %d", ErrNotSingle, len(bs))

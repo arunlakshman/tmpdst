@@ -113,6 +113,7 @@ func (s *Store) EnsureBucket(ctx context.Context) error {
 
 func (s *Store) key(k string) *string { return aws.String(s.prefix + k) }
 
+// Put writes data under key.
 func (s *Store) Put(ctx context.Context, key string, data []byte) error {
 	if key == "" {
 		return fail(core.ErrInvalid)
@@ -124,6 +125,7 @@ func (s *Store) Put(ctx context.Context, key string, data []byte) error {
 	return err
 }
 
+// Get reads the bytes referenced by ref.
 func (s *Store) Get(ctx context.Context, ref core.SegmentRef) ([]byte, error) {
 	if ref.Key == "" {
 		return nil, fail(core.ErrNotFound) // never stored: Put refuses it
@@ -136,7 +138,7 @@ func (s *Store) Get(ctx context.Context, ref core.SegmentRef) ([]byte, error) {
 	if err != nil {
 		return s.getFailed(ctx, ref, in.Range != nil, err)
 	}
-	defer out.Body.Close()
+	defer func() { _ = out.Body.Close() }()
 	return readBody(out.Body, ref.Len)
 }
 
@@ -159,7 +161,7 @@ func (s *Store) getFailed(ctx context.Context, ref core.SegmentRef, ranged bool,
 	// Some servers answer a range past the end of an empty object with 404.
 	if apiCode(err) == "InvalidRange" || notFound(err) {
 		err = s.badRange(ctx, ref)
-		if err == errEmpty {
+		if errors.Is(err, errEmpty) {
 			return []byte{}, nil
 		}
 	}
@@ -195,6 +197,7 @@ func (s *Store) badRange(ctx context.Context, ref core.SegmentRef) error {
 
 var errEmpty = errors.New("empty range")
 
+// Delete removes the object under key.
 func (s *Store) Delete(ctx context.Context, key string) error {
 	if key == "" {
 		return fail(core.ErrNotFound)
@@ -209,6 +212,7 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 	return err
 }
 
+// List returns the keys that start with prefix.
 func (s *Store) List(ctx context.Context, prefix string) ([]string, error) {
 	var keys []string
 	p := s3.NewListObjectsV2Paginator(s.c, &s3.ListObjectsV2Input{Bucket: &s.bucket, Prefix: aws.String(s.prefix + prefix)})

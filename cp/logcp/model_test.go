@@ -73,7 +73,7 @@ func runModel(t *testing.T, rate int, dur time.Duration) modelRow {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { kv.Close() })
+	t.Cleanup(func() { _ = kv.Close() })
 	reg := prometheus.NewRegistry()
 	mod := func(c *logcp.Config) {
 		c.TailBatch, c.TailPoll, c.HoleAfter, c.MaxSlotRate = 20*time.Millisecond, 25*time.Millisecond, 250*time.Millisecond, 200

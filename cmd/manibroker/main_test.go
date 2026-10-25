@@ -24,7 +24,7 @@ func freeAddr(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	return ln.Addr().String()
 }
 
@@ -34,7 +34,7 @@ func waitDial(t *testing.T, addr string) {
 	for {
 		c, err := net.Dial("tcp", addr)
 		if err == nil {
-			c.Close()
+			_ = c.Close()
 			return
 		}
 		if time.Now().After(deadline) {
@@ -61,8 +61,8 @@ func TestRunMemBrokerStartsAndStops(t *testing.T) {
 		t.Fatal(err)
 	}
 	var body bytes.Buffer
-	body.ReadFrom(resp.Body)
-	resp.Body.Close()
+	_, _ = body.ReadFrom(resp.Body)
+	_ = resp.Body.Close()
 	if !strings.Contains(body.String(), "manibroker_open_connections") {
 		t.Error("open_connections gauge missing")
 	}
@@ -91,7 +91,7 @@ func TestRunErrors(t *testing.T) {
 	close(stop)
 	var logs bytes.Buffer
 	busy, _ := net.Listen("tcp", "127.0.0.1:0")
-	defer busy.Close()
+	defer func() { _ = busy.Close() }()
 	cases := map[string][]string{
 		"bad level":       {"-log-level", "loud"},
 		"bad tuning":      {"-segment-bytes", "x", "-objects", "mem", "-metrics-addr", ""},
@@ -116,7 +116,7 @@ func TestOpenObjectsS3(t *testing.T) {
 	t.Setenv("AWS_ACCESS_KEY_ID", "k")
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "s")
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 	defer srv.Close()
 	stop := make(chan struct{})
 	close(stop)
@@ -142,7 +142,7 @@ func TestCPURLListFailsOver(t *testing.T) {
 		http.Error(w, "not active", http.StatusServiceUnavailable)
 	}))
 	defer standby.Close()
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte(`{"topics":[]}`)) }))
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"topics":[]}`)) }))
 	defer up.Close()
 	f, _, err := parseFlags([]string{"-cp-url", deadURL + "," + standby.URL + "," + up.URL}, &bytes.Buffer{})
 	if err != nil {

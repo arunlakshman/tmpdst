@@ -42,8 +42,9 @@ func (a *Applier) SnapshotAt(w io.Writer, begin func() int64) error {
 	bw := bufio.NewWriter(w)
 	var werr error
 	err := a.kv.View(func(tx Tx) {
-		bw.WriteString(snapMagic)
-		bw.Write(binary.AppendVarint(nil, begin()))
+		// bufio.Writer latches write errors; Flush below reports them.
+		_, _ = bw.WriteString(snapMagic)
+		_, _ = bw.Write(binary.AppendVarint(nil, begin()))
 		tx.Ascend([]byte{0}, nil, func(k, v []byte) bool {
 			werr = writeEntry(bw, k, v)
 			return werr == nil
@@ -52,14 +53,15 @@ func (a *Applier) SnapshotAt(w io.Writer, begin func() int64) error {
 	if err = errors.Join(err, werr); err != nil {
 		return err
 	}
-	bw.WriteByte(0)
+	_ = bw.WriteByte(0) // errors are latched and reported by Flush
 	return bw.Flush()
 }
 
 func writeEntry(w *bufio.Writer, k, v []byte) error {
-	w.Write(binary.AppendUvarint(nil, uint64(len(k))))
-	w.Write(k)
-	w.Write(binary.AppendUvarint(nil, uint64(len(v))))
+	// bufio.Writer latches the first error, so the last Write reports it.
+	_, _ = w.Write(binary.AppendUvarint(nil, uint64(len(k))))
+	_, _ = w.Write(k)
+	_, _ = w.Write(binary.AppendUvarint(nil, uint64(len(v))))
 	_, err := w.Write(v)
 	return err
 }

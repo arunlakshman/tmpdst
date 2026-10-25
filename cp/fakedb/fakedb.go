@@ -125,7 +125,7 @@ func (f *Fake) Put(table string, it item) {
 }
 
 // Item returns a copy of the stored item, or nil.
-func (f *Fake) Item(table string, key item) item {
+func (f *Fake) Item(table string, key item) map[string]types.AttributeValue {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return cloneItem(f.tables[table][idOf(key)])
@@ -138,6 +138,7 @@ func (f *Fake) Count(table string) int {
 	return len(f.tables[table])
 }
 
+// CreateTable creates a table in the fake.
 func (f *Fake) CreateTable(ctx context.Context, in *dynamodb.CreateTableInput, _ ...func(*dynamodb.Options)) (*dynamodb.CreateTableOutput, error) {
 	if err := f.failed(ctx, "CreateTable"); err != nil {
 		return nil, err
@@ -153,6 +154,7 @@ func (f *Fake) CreateTable(ctx context.Context, in *dynamodb.CreateTableInput, _
 	return &dynamodb.CreateTableOutput{}, nil
 }
 
+// DescribeTable describes a table in the fake.
 func (f *Fake) DescribeTable(ctx context.Context, in *dynamodb.DescribeTableInput, _ ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error) {
 	if err := f.failed(ctx, "DescribeTable"); err != nil {
 		return nil, err
@@ -165,6 +167,7 @@ func (f *Fake) DescribeTable(ctx context.Context, in *dynamodb.DescribeTableInpu
 	return &dynamodb.DescribeTableOutput{Table: &types.TableDescription{TableName: in.TableName, TableStatus: types.TableStatusActive}}, nil
 }
 
+// DeleteTable deletes a table from the fake.
 func (f *Fake) DeleteTable(ctx context.Context, in *dynamodb.DeleteTableInput, _ ...func(*dynamodb.Options)) (*dynamodb.DeleteTableOutput, error) {
 	if err := f.failed(ctx, "DeleteTable"); err != nil {
 		return nil, err
@@ -179,6 +182,7 @@ func (f *Fake) DeleteTable(ctx context.Context, in *dynamodb.DeleteTableInput, _
 	return &dynamodb.DeleteTableOutput{}, nil
 }
 
+// GetItem reads one item from the fake.
 func (f *Fake) GetItem(ctx context.Context, in *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
 	if err := f.failed(ctx, "GetItem"); err != nil {
 		return nil, err

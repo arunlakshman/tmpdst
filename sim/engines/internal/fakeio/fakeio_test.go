@@ -98,11 +98,8 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 		Name: "cp", Prefix: "cp", Params: params(),
 		Spec: func(a core.IOAction) core.Completion { return spec.Exec(a) },
 		Mutating: func(a core.IOAction) bool {
-			switch a.(core.CPCall).Op.(type) {
-			case core.CommitSegment:
-				return true
-			}
-			return false
+			_, ok := a.(core.CPCall).Op.(core.CommitSegment)
+			return ok
 		},
 		Fail: func(a core.IOAction, err core.ErrCode, o core.Outcome) core.Completion {
 			return core.CPDone{Req: a.ReqID(), Err: err, Outcome: o}

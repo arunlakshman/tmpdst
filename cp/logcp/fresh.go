@@ -99,7 +99,7 @@ func (s *Service) checkTail(ctx context.Context) (int64, error) {
 			break
 		}
 	}
-	return 0, fmt.Errorf("%w: tail check: %v", cp.ErrUnavailable, err)
+	return 0, fmt.Errorf("%w: tail check: %w", cp.ErrUnavailable, err)
 }
 
 // waitApplied blocks until slots below tail are applied, nudging the tailing

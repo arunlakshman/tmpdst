@@ -168,11 +168,11 @@ func FetchIMDS(ctx context.Context, endpoint string, timeout time.Duration) map[
 		if err != nil {
 			return "", false
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }() // read-only response
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return strings.TrimSpace(string(b)), resp.StatusCode == 200
+		return strings.TrimSpace(string(b)), resp.StatusCode == http.StatusOK
 	}
-	tok, ok := do("PUT", "/latest/api/token", map[string]string{"X-aws-ec2-metadata-token-ttl-seconds": "60"})
+	tok, ok := do(http.MethodPut, "/latest/api/token", map[string]string{"X-aws-ec2-metadata-token-ttl-seconds": "60"})
 	if !ok {
 		return nil
 	}

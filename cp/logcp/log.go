@@ -95,7 +95,7 @@ func (m *MemLog) TrimBelow(_ context.Context, slot int64) (int, error) {
 	defer m.mu.Unlock()
 	n := 0
 	for s, raw := range m.slots {
-		if s < slot && !(len(raw) == 1 && raw[0] == tombstone[0]) {
+		if s < slot && (len(raw) != 1 || raw[0] != tombstone[0]) {
 			m.slots[s] = tombstone
 			n++
 		}

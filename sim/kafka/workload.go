@@ -56,7 +56,7 @@ const (
 type stage uint8
 
 const (
-	stApi stage = iota
+	stAPI stage = iota
 	stMeta
 	stList // consumers: ListOffsets earliest
 	stRun
@@ -65,7 +65,7 @@ const (
 type reqKind uint8
 
 const (
-	rqApi reqKind = iota
+	rqAPI reqKind = iota
 	rqMeta
 	rqList
 	rqProduce
@@ -131,6 +131,7 @@ func NewWorkload(env core.Env, self core.NodeRef, brokers []core.NodeRef, o Opts
 	return w
 }
 
+// Name implements sim.Workload.
 func (w *Workload) Name() string { return "kafka" }
 
 // SetHistory is called by the kernel.
@@ -235,9 +236,9 @@ func (w *Workload) onDial(c *client, e core.DialDone) []core.Action {
 		c.state = csBackoff
 		return []core.Action{w.later(c, retryDelay(c.fails))}
 	}
-	c.conn, c.fr, c.state, c.stage, c.out = e.Conn, kwire.NewFramer(maxFrame), csUp, stApi, nil
+	c.conn, c.fr, c.state, c.stage, c.out = e.Conn, kwire.NewFramer(maxFrame), csUp, stAPI, nil
 	r, _ := kwire.Range(kwire.KeyApiVersions)
-	c.ver[rqApi] = r.Min + int16(w.env.Intn(int(r.Max-r.Min)+1))
+	c.ver[rqAPI] = r.Min + int16(w.env.Intn(int(r.Max-r.Min)+1))
 	return w.advance(c)
 }
 
@@ -268,14 +269,13 @@ func (w *Workload) onTimer(now core.Time, e core.TimerFired) []core.Action {
 // advance sends the request of the client's current stage.
 func (w *Workload) advance(c *client) []core.Action {
 	switch c.stage {
-	case stApi:
+	case stAPI:
 		r := kmsg.NewPtrApiVersionsRequest()
 		r.ClientSoftwareName, r.ClientSoftwareVersion = "manisim", "1"
-		return w.send(c, rqApi, r)
+		return w.send(c, rqAPI, r)
 	case stMeta:
 		r := kmsg.NewPtrMetadataRequest()
 		for _, t := range w.opts.Topics {
-			t := t
 			r.Topics = append(r.Topics, kmsg.MetadataRequestTopic{Topic: &t})
 		}
 		return w.send(c, rqMeta, r)
@@ -339,7 +339,7 @@ func (w *Workload) onBytes(now core.Time, c *client, data []byte) []core.Action 
 func (w *Workload) handle(c *client, k reqKind, resp core.Response) []core.Action {
 	switch r := resp.(type) {
 	case *kmsg.ApiVersionsResponse:
-		return w.onApi(c, r)
+		return w.onAPI(c, r)
 	case *kmsg.MetadataResponse:
 		return w.onMeta(c, r)
 	case *kmsg.ListOffsetsResponse:
@@ -352,9 +352,9 @@ func (w *Workload) handle(c *client, k reqKind, resp core.Response) []core.Actio
 	return w.lost(c, "bad_response", true)
 }
 
-// onApi picks, per API, a version inside both our supported range and the
+// onAPI picks, per API, a version inside both our supported range and the
 // broker's.
-func (w *Workload) onApi(c *client, r *kmsg.ApiVersionsResponse) []core.Action {
+func (w *Workload) onAPI(c *client, r *kmsg.ApiVersionsResponse) []core.Action {
 	if r.ErrorCode != 0 {
 		return w.retryStage(c)
 	}
@@ -428,7 +428,7 @@ func (w *Workload) lost(c *client, why string, abort bool) []core.Action {
 	c.out, c.conn, c.fr = nil, 0, nil
 	c.reqGen++
 	c.fails++
-	c.stage, c.state = stApi, csBackoff
+	c.stage, c.state = stAPI, csBackoff
 	return append(acts, core.CancelTimer{ID: reqID(c)}, w.later(c, retryDelay(c.fails)))
 }
 

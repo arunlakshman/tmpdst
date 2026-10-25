@@ -116,7 +116,7 @@ func parseFlags(args []string, stderr io.Writer) (*config, bool) {
 		return nil, false
 	}
 	if c.profile == "" {
-		fmt.Fprintln(stderr, "crapscore: -profile is required")
+		_, _ = fmt.Fprintln(stderr, "crapscore: -profile is required")
 		return nil, false
 	}
 	return c, true
@@ -208,21 +208,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	funcs, err := analyse(c)
 	if err != nil {
-		fmt.Fprintln(stderr, "crapscore:", err)
+		_, _ = fmt.Fprintln(stderr, "crapscore:", err)
 		return 2
 	}
 	if c.update {
 		n, err := writeBaseline(c, funcs)
 		if err != nil {
-			fmt.Fprintln(stderr, "crapscore:", err)
+			_, _ = fmt.Fprintln(stderr, "crapscore:", err)
 			return 2
 		}
-		fmt.Fprintf(stdout, "crapscore: wrote %s with %d offenders over %.0f\n", c.basePath, n, c.threshold)
+		_, _ = fmt.Fprintf(stdout, "crapscore: wrote %s with %d offenders over %.0f\n", c.basePath, n, c.threshold)
 		return 0
 	}
 	base, warn, err := loadBaseline(c)
 	if err != nil {
-		fmt.Fprintln(stderr, "crapscore:", err)
+		_, _ = fmt.Fprintln(stderr, "crapscore:", err)
 		return 2
 	}
 	v := Evaluate(funcs, c.threshold, base, c.tol)
@@ -256,39 +256,39 @@ func writeText(w io.Writer, funcs []*Func, v Verdict, threshold float64, top int
 	if top > 0 && top < n {
 		n = top
 	}
-	fmt.Fprintf(w, "%8s %5s %6s  %-52s %s\n", "CRAP", "CC", "COV%", "FUNCTION", "LOCATION")
+	_, _ = fmt.Fprintf(w, "%8s %5s %6s  %-52s %s\n", "CRAP", "CC", "COV%", "FUNCTION", "LOCATION")
 	for _, f := range funcs[:n] {
-		fmt.Fprintf(w, "%8.1f %5d %5.1f%%  %-52s %s:%d\n", f.CRAP, f.Complexity, f.Coverage*100, f.Key, f.File, f.Line)
+		_, _ = fmt.Fprintf(w, "%8.1f %5d %5.1f%%  %-52s %s:%d\n", f.CRAP, f.Complexity, f.Coverage*100, f.Key, f.File, f.Line)
 	}
 	c := counts(funcs)
-	fmt.Fprintf(w, "\n%d functions analysed. Functions with CRAP over:", len(funcs))
+	_, _ = fmt.Fprintf(w, "\n%d functions analysed. Functions with CRAP over:", len(funcs))
 	for _, t := range reportThresholds {
-		fmt.Fprintf(w, "  %.0f: %d", t, c[t])
+		_, _ = fmt.Fprintf(w, "  %.0f: %d", t, c[t])
 	}
-	fmt.Fprintln(w)
+	_, _ = fmt.Fprintln(w)
 	if warn != "" {
-		fmt.Fprintln(w, "WARNING:", warn)
+		_, _ = fmt.Fprintln(w, "WARNING:", warn)
 	}
 	if len(v.Improved) > 0 {
-		fmt.Fprintf(w, "%d baselined functions improved or vanished (baseline can be tightened).\n", len(v.Improved))
+		_, _ = fmt.Fprintf(w, "%d baselined functions improved or vanished (baseline can be tightened).\n", len(v.Improved))
 	}
 	mode := "ratchet"
 	if strict {
 		mode = "strict"
 	}
 	if !v.Failed() {
-		fmt.Fprintf(w, "crapscore: OK (%s, threshold %.0f, %d offenders tolerated)\n", mode, threshold, len(v.Offenders))
+		_, _ = fmt.Fprintf(w, "crapscore: OK (%s, threshold %.0f, %d offenders tolerated)\n", mode, threshold, len(v.Offenders))
 		return
 	}
-	fmt.Fprintf(w, "\ncrapscore: FAIL (%s, threshold %.0f)\n", mode, threshold)
+	_, _ = fmt.Fprintf(w, "\ncrapscore: FAIL (%s, threshold %.0f)\n", mode, threshold)
 	for _, f := range v.New {
-		fmt.Fprintf(w, "  over threshold:  %-50s CRAP %.1f (CC %d, cov %.0f%%) %s:%d\n", f.Key, f.CRAP, f.Complexity, f.Coverage*100, f.File, f.Line)
+		_, _ = fmt.Fprintf(w, "  over threshold:  %-50s CRAP %.1f (CC %d, cov %.0f%%) %s:%d\n", f.Key, f.CRAP, f.Complexity, f.Coverage*100, f.File, f.Line)
 	}
 	for _, f := range v.Worse {
-		fmt.Fprintf(w, "  got worse:       %-50s CRAP %.1f (CC %d, cov %.0f%%) %s:%d\n", f.Key, f.CRAP, f.Complexity, f.Coverage*100, f.File, f.Line)
+		_, _ = fmt.Fprintf(w, "  got worse:       %-50s CRAP %.1f (CC %d, cov %.0f%%) %s:%d\n", f.Key, f.CRAP, f.Complexity, f.Coverage*100, f.File, f.Line)
 	}
-	fmt.Fprintln(w, "Fix: add tests or split the function. Only if the offender is accepted, regenerate the baseline deliberately:")
-	fmt.Fprintln(w, "  "+regenHint)
+	_, _ = fmt.Fprintln(w, "Fix: add tests or split the function. Only if the offender is accepted, regenerate the baseline deliberately:")
+	_, _ = fmt.Fprintln(w, "  "+regenHint)
 }
 
 func writeJSON(w io.Writer, funcs []*Func, v Verdict, threshold float64, top int, strict bool, warn string) {
@@ -307,7 +307,7 @@ func writeJSON(w io.Writer, funcs []*Func, v Verdict, threshold float64, top int
 		"functions": funcs[:n],
 	}
 	data, _ := json.MarshalIndent(out, "", "  ")
-	fmt.Fprintln(w, string(data))
+	_, _ = fmt.Fprintln(w, string(data))
 }
 
 func keys(fs []*Func) []string {

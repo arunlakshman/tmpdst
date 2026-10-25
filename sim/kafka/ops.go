@@ -31,6 +31,7 @@ type ReadOp struct {
 	Parts  []ReadFrom
 }
 
+// ReadFrom names one partition and the offset to fetch from.
 type ReadFrom struct {
 	TP  core.TopicPartition
 	Off int64
@@ -44,6 +45,7 @@ type ReadRes struct {
 	Why   string
 }
 
+// ReadPart is the Fetch answer for one partition.
 type ReadPart struct {
 	Code    int16
 	HWM     int64
@@ -51,6 +53,7 @@ type ReadPart struct {
 	Corrupt bool // a returned batch failed kwire.ParseBatch (CRC or structure)
 }
 
+// Rec is one returned record: its offset and value.
 type Rec struct {
 	Off int64
 	Val string

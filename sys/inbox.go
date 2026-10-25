@@ -21,6 +21,7 @@ type Inbox struct {
 
 var _ Sink = (*Inbox)(nil)
 
+// NewInbox returns an Inbox whose data queue holds at most dataCap events.
 func NewInbox(dataCap int) *Inbox {
 	if dataCap < 1 {
 		dataCap = 1
@@ -48,6 +49,7 @@ func (i *Inbox) notify() {
 	}
 }
 
+// DeliverControl enqueues a control event; control events are never dropped.
 func (i *Inbox) DeliverControl(b core.EventBody) {
 	i.mu.Lock()
 	if i.closed() {
@@ -59,6 +61,7 @@ func (i *Inbox) DeliverControl(b core.EventBody) {
 	i.notify()
 }
 
+// DeliverData enqueues a data event, blocking or backpressuring per the data capacity.
 func (i *Inbox) DeliverData(b core.EventBody) {
 	if i.closed() {
 		return
@@ -78,6 +81,7 @@ func (i *Inbox) DeliverData(b core.EventBody) {
 	i.notify()
 }
 
+// Closed returns a channel that is closed when the inbox is closed.
 func (i *Inbox) Closed() <-chan struct{} { return i.done }
 
 // Close ends the incarnation: pending and later deliveries are dropped and
@@ -93,7 +97,9 @@ func (i *Inbox) Close() {
 
 // Control and Data are the two queues as core.Queue views for the policy.
 func (i *Inbox) Control() core.Queue { return ctrlQ{i} }
-func (i *Inbox) Data() core.Queue    { return dataQ{i} }
+
+// Data returns the data queue view of the inbox.
+func (i *Inbox) Data() core.Queue { return dataQ{i} }
 
 type ctrlQ struct{ i *Inbox }
 

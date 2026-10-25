@@ -168,7 +168,7 @@ func shutdownOnDone(ctx context.Context, srv *http.Server) <-chan struct{} {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		srv.Shutdown(sctx)
+		_ = srv.Shutdown(sctx) // best-effort at exit
 	}()
 	return done
 }

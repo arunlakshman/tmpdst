@@ -7,6 +7,7 @@ import "manifester/core"
 type Bug uint8
 
 const (
+	// BugNone is the real, unbroken broker.
 	BugNone Bug = iota
 	// BugEarlyAck acks a produce after the S3 PUT, before CommitSegment.
 	BugEarlyAck

@@ -191,8 +191,7 @@ func (b *Broker) flow(acts []core.Action) []core.Action {
 // ---- timers ----
 
 func (b *Broker) onTimer(e core.TimerFired) []core.Action {
-	switch e.ID {
-	case timerFlush:
+	if e.ID == timerFlush {
 		if e.Gen != b.open.gen || b.open.gen == 0 {
 			return nil
 		}

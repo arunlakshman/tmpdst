@@ -37,7 +37,7 @@ const (
 	ckptKeep   = 2 // checkpoint objects kept
 )
 
-// ErrNoCheckpoint: the pointer's object is unusable and the log no longer
+// ErrNoCheckpoint means the pointer's object is unusable and the log no longer
 // starts at slot 0, so the state cannot be rebuilt.
 var ErrNoCheckpoint = errors.New("logcp: checkpoint unusable and the log is trimmed")
 
@@ -70,7 +70,7 @@ func numAttr(it map[string]types.AttributeValue, name string) int64 {
 		return 0
 	}
 	var v int64
-	fmt.Sscan(n.Value, &v)
+	_, _ = fmt.Sscan(n.Value, &v) // malformed counts read as 0
 	return v
 }
 
@@ -231,13 +231,13 @@ func (s *Service) fetchCheckpoint(ctx context.Context, it map[string]types.Attri
 func (s *Service) fromScratch(ctx context.Context, cause error) (int64, error) {
 	first, err := s.log.Read(ctx, 0, 1)
 	if errors.Is(err, ErrTrimmed) {
-		return 0, fmt.Errorf("%w: %v", ErrNoCheckpoint, cause)
+		return 0, fmt.Errorf("%w: %w", ErrNoCheckpoint, cause)
 	}
 	if err != nil {
 		return 0, err
 	}
 	if len(first) > 0 && first[0].N != 0 {
-		return 0, fmt.Errorf("%w: %v", ErrNoCheckpoint, cause)
+		return 0, fmt.Errorf("%w: %w", ErrNoCheckpoint, cause)
 	}
 	s.cfg.Logger.Warn("log: checkpoint unusable, replaying the whole log", "event", "log_ckpt_unusable", "err", cause.Error())
 	return 0, nil

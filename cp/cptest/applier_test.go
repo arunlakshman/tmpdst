@@ -27,7 +27,7 @@ func TestConformanceApplierPebble(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { kv.Close() })
+		t.Cleanup(func() { _ = kv.Close() })
 		return storeImpl{&applier.Store{A: applier.New(kv)}}
 	}, 100, 20)
 }

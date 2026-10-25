@@ -88,7 +88,7 @@ func TestDynLogPagesThroughQueryLimit(t *testing.T) {
 	db.PageSize = 2
 	l := NewDynLog(db, "cp", DynLogOptions{})
 	for n := int64(0); n < 7; n++ {
-		l.Append(bg, n, entryOf("e"))
+		_, _, _ = l.Append(bg, n, entryOf("e"))
 	}
 	got, err := l.Read(bg, 0, 100)
 	if err != nil || len(got) != 7 {
@@ -111,7 +111,7 @@ func (n noOld) PutItem(ctx context.Context, in *dynamodb.PutItemInput, o ...func
 
 func TestDynLogLoserFallsBackToARead(t *testing.T) {
 	l := NewDynLog(noOld{newFake(t)}, "cp", DynLogOptions{})
-	l.Append(bg, 1, entryOf("a"))
+	_, _, _ = l.Append(bg, 1, entryOf("a"))
 	cur, won, err := l.Append(bg, 1, entryOf("b"))
 	if err != nil || won || cur.ID != "a" {
 		t.Fatalf("%v %v %+v", err, won, cur)
@@ -162,7 +162,7 @@ func TestDynLogUnreadableLoser(t *testing.T) {
 func TestTrimLeavesTombstones(t *testing.T) {
 	logs(t, func(t *testing.T, l Log) {
 		for n := int64(0); n < 600; n++ {
-			l.Append(bg, n, entryOf("e", "k"))
+			_, _, _ = l.Append(bg, n, entryOf("e", "k"))
 		}
 		tr := l.(Trimmer)
 		if n, err := tr.TrimBelow(bg, 0); err != nil || n != 0 {
@@ -202,7 +202,7 @@ func TestStubTTL(t *testing.T) {
 	db := newFake(t)
 	now := time.Unix(2_000_000, 0)
 	l := NewDynLog(db, "cp", DynLogOptions{TTL: time.Hour, Now: func() time.Time { return now }})
-	l.Append(bg, 0, entryOf("a", "k"))
+	_, _, _ = l.Append(bg, 0, entryOf("a", "k"))
 	if n, err := l.TrimBelow(bg, 1); err != nil || n != 1 {
 		t.Fatal(n, err)
 	}

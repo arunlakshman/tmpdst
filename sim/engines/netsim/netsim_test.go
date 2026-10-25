@@ -222,7 +222,7 @@ func (h *harness) lastOpened(n core.NodeID) core.ConnID {
 		for i := len(k) - 1; i >= 0; i-- {
 			if k[i] == '/' {
 				name = k[:i]
-				fmt.Sscanf(k[i+1:], "%d", &c)
+				_, _ = fmt.Sscanf(k[i+1:], "%d", &c) // best-effort parse; c stays zero on malformed keys
 				break
 			}
 		}

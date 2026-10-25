@@ -86,7 +86,7 @@ func (n *Net) accept() {
 		n.mu.Lock()
 		if n.closed {
 			n.mu.Unlock()
-			nc.Close()
+			_ = nc.Close() // best-effort teardown
 			return
 		}
 		n.conns[c.id] = c
@@ -146,12 +146,14 @@ func (n *Net) Close(id core.ConnID, abort bool) error {
 	return c.enqueue(item{fin: true})
 }
 
+// PauseReads stops reading from the connection until ResumeReads is called.
 func (n *Net) PauseReads(id core.ConnID) {
 	if c := n.get(id); c != nil {
 		c.setPaused(true)
 	}
 }
 
+// ResumeReads resumes reading from a connection paused by PauseReads.
 func (n *Net) ResumeReads(id core.ConnID) {
 	if c := n.get(id); c != nil {
 		c.setPaused(false)
@@ -162,7 +164,7 @@ func (n *Net) ResumeReads(id core.ConnID) {
 // to grace, then resets whatever is left. It returns when every goroutine is
 // gone.
 func (n *Net) Shutdown(grace time.Duration) {
-	n.ln.Close()
+	_ = n.ln.Close() // best-effort teardown
 	n.mu.Lock()
 	n.closed = true
 	n.mu.Unlock()
@@ -278,9 +280,9 @@ func (c *conn) abort(byCore bool) {
 	}
 	c.mu.Unlock()
 	if tc, ok := c.nc.(*net.TCPConn); ok {
-		tc.SetLinger(0)
+		_ = tc.SetLinger(0) // best-effort teardown
 	}
-	c.nc.Close()
+	_ = c.nc.Close() // best-effort teardown
 	for _, it := range q {
 		if it.done != nil {
 			it.done(net.ErrClosed)
@@ -336,7 +338,7 @@ func (c *conn) signalWriter() {
 // writer has stopped as well.
 func (c *conn) finish() {
 	<-c.stopped
-	c.nc.Close()
+	_ = c.nc.Close() // best-effort teardown
 	c.n.forget(c)
 }
 
@@ -362,7 +364,7 @@ func (c *conn) writeLoop() {
 			c.closeGracefully()
 			return
 		}
-		c.nc.SetWriteDeadline(time.Now().Add(c.n.cfg.WriteTimeout))
+		_ = c.nc.SetWriteDeadline(time.Now().Add(c.n.cfg.WriteTimeout)) // best-effort teardown
 		_, err := c.nc.Write(it.data)
 		if it.done != nil {
 			it.done(err)
@@ -384,9 +386,9 @@ func (c *conn) fail() {
 // closing with unread input cannot turn into a reset that eats the answers.
 func (c *conn) closeGracefully() {
 	if tc, ok := c.nc.(*net.TCPConn); ok {
-		tc.CloseWrite()
+		_ = tc.CloseWrite() // best-effort teardown
 	}
-	c.nc.SetReadDeadline(time.Now().Add(c.n.cfg.LingerRead))
+	_ = c.nc.SetReadDeadline(time.Now().Add(c.n.cfg.LingerRead)) // best-effort teardown
 	c.mu.Lock()
 	c.dead = true
 	c.mu.Unlock()

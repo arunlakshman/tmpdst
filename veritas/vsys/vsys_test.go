@@ -27,7 +27,7 @@ func TestObjectStore(t *testing.T) {
 	if err := s.Put(ctx, "a/1", []byte("hello")); err != nil {
 		t.Fatal(err)
 	}
-	s.Put(ctx, "b", nil)
+	_ = s.Put(ctx, "b", nil)
 	got, err := s.Get(ctx, core.SegmentRef{Key: "a/1", Off: 1, Len: 3})
 	if err != nil || string(got) != "ell" {
 		t.Fatalf("get: %q %v", got, err)

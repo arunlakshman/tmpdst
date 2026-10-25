@@ -42,6 +42,7 @@ func mutating(a core.IOAction) bool {
 	return true
 }
 
+// Classify maps a failed cp call to its error code and outcome (logged at debug).
 func (Classifier) Classify(a core.IOAction, err error) (core.ErrCode, core.Outcome) {
 	code, out := classify(a, err)
 	slog.Debug("cp call failed", "action", a, "err", err, "code", code, "outcome", out)

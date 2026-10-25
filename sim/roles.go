@@ -54,10 +54,13 @@ type Invariant interface {
 // Phase is the run's current fault regime. Append-only.
 type Phase uint8
 
+// Phase values, in run order: Chaos, Settling, Settle.
 const (
-	PhaseChaos    Phase = iota // faults injected
-	PhaseSettling              // recovery mode, nodes alive
-	PhaseSettle                // draining remaining events
+	// PhaseChaos injects faults.
+	PhaseChaos Phase = iota // faults injected
+	// PhaseSettling is recovery mode with nodes alive.
+	PhaseSettling // recovery mode, nodes alive
+	PhaseSettle   // draining remaining events
 )
 
 // View is what an invariant sees after a step: the fact timeline, the history
@@ -96,14 +99,15 @@ type CPTruth interface {
 type OpOutcome uint8
 
 const (
+	// OpPending has no result yet.
 	OpPending OpOutcome = iota
-	// OpDefinite: the result is known; the effect lies inside [Invoke, Return].
+	// OpDefinite means the result is known; the effect lies inside [Invoke, Return].
 	OpDefinite
-	// OpIndeterminate: the client saw MaybeApplied. The op may take effect at
+	// OpIndeterminate means the client saw MaybeApplied. The op may take effect at
 	// ANY time after Invoke, including after the client moved on (Jepsen
 	// :info). It never closes; it stays a candidate in every later window.
 	OpIndeterminate
-	// OpAbandoned: the client gave up and will not retry this op id.
+	// OpAbandoned means the client gave up and will not retry this op id.
 	OpAbandoned
 )
 

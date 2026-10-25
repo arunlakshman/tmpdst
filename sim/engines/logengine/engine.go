@@ -232,6 +232,7 @@ func (e *Engine) CreateTopic(name string, partitions int32) core.ErrCode {
 	return core.OK
 }
 
+// Name returns the engine name.
 func (e *Engine) Name() string { return e.name }
 
 // Handles reports whether a is a control plane call.
@@ -243,7 +244,7 @@ func (e *Engine) Handles(a core.Action) bool {
 // EnterRecovery stops new faults for later actions and ticks.
 func (e *Engine) EnterRecovery() { e.recovery = true }
 
-// OnCrash: a caller's death changes nothing in the service.
+// OnCrash does nothing: a caller's death changes nothing in the service.
 func (e *Engine) OnCrash(sim.EngineCtx, core.NodeRef) {}
 
 // Gen counts applied changes of the reference log.

@@ -144,8 +144,10 @@ type rstBody struct {
 }
 type healBody struct{ A, B core.NodeID }
 
+// Name implements sim.Engine.
 func (e *Engine) Name() string { return "netsim" }
 
+// Handles reports whether a is a network action.
 func (e *Engine) Handles(a core.Action) bool {
 	switch a.(type) {
 	case core.Send, core.Dial, core.CloseConn, core.PauseReads, core.ResumeReads:
@@ -154,6 +156,7 @@ func (e *Engine) Handles(a core.Action) bool {
 	return false
 }
 
+// EnterRecovery switches the engine to recovery mode.
 func (e *Engine) EnterRecovery() { e.recovery = true }
 
 // ---- helpers ----
@@ -321,6 +324,7 @@ func (e *Engine) fault(ctx sim.EngineCtx, kind string, a, b core.NodeID, extra .
 
 // ---- Execute ----
 
+// Execute applies a network action issued by node from.
 func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.Action) {
 	switch a := a.(type) {
 	case core.Dial:
@@ -472,6 +476,7 @@ func (e *Engine) netAbort(ctx sim.EngineCtx, p *pair) {
 
 // ---- internal entries ----
 
+// OnInternal handles an engine-private entry body.
 func (e *Engine) OnInternal(ctx sim.EngineCtx, body any) {
 	switch b := body.(type) {
 	case landBody:

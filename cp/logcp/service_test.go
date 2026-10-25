@@ -197,7 +197,7 @@ func TestAdmissionControl(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			s.CommitSegment(ctx, seg("q"+string(rune('a'+i)), tp("t", 0)))
+			_, _, _ = s.CommitSegment(ctx, seg("q"+string(rune('a'+i)), tp("t", 0)))
 		}()
 		for deadline := time.Now().Add(2 * time.Second); log.appends.Load() < 1 && time.Now().Before(deadline); {
 			time.Sleep(time.Millisecond)
@@ -250,14 +250,14 @@ func TestStandbyRefusesCommitsAndServesFreshReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp.Body.Close()
-	if resp.StatusCode != 503 || resp.Header.Get("Retry-After") == "" || resp.Header.Get(logcp.RoleHeader) != "standby" {
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") == "" || resp.Header.Get(logcp.RoleHeader) != "standby" {
 		t.Fatalf("standby http: %d %v", resp.StatusCode, resp.Header)
 	}
-	if resp, _ = http.Post(srv.URL+"/v1/describe-topics", "application/json", strings.NewReader(`{}`)); resp.StatusCode != 200 {
+	if resp, _ = http.Post(srv.URL+"/v1/describe-topics", "application/json", strings.NewReader(`{}`)); resp.StatusCode != http.StatusOK {
 		t.Fatalf("describe on a standby: %d", resp.StatusCode)
 	}
-	if resp, _ = http.Get(srv.URL + "/healthz"); resp.StatusCode != 200 {
+	if resp, _ = http.Get(srv.URL + "/healthz"); resp.StatusCode != http.StatusOK {
 		t.Fatalf("healthz: %d", resp.StatusCode)
 	}
 }
@@ -358,9 +358,9 @@ func TestHoleIsFilledAfterHoleAfter(t *testing.T) {
 	log := logcp.NewMemLog()
 	reg := prometheus.NewRegistry()
 	// another writer took slot 0 and 2 and died before writing slot 1
-	log.Append(bg, 0, logcp.Entry{Writer: "dead", ID: "d/1"})
+	_, _, _ = log.Append(bg, 0, logcp.Entry{Writer: "dead", ID: "d/1"})
 	cmd := logsm.Entry{Kind: logsm.KindCommit, Commit: seg("late", tp("t", 0))}
-	log.Append(bg, 2, logcp.Entry{Writer: "dead", ID: "d/2", Cmds: []logsm.Entry{cmd}})
+	_, _, _ = log.Append(bg, 2, logcp.Entry{Writer: "dead", ID: "d/2", Cmds: []logsm.Entry{cmd}})
 	s := node(t, "n0", 0, log, nil, nil, func(c *logcp.Config) { c.Metrics = logcp.NewMetrics(reg) })
 	d, code, err := s.Lookup(bg, core.Lookup{TP: tp("t", 0)})
 	if err != nil || code != core.OK || d.End != 2 {
@@ -376,7 +376,7 @@ func TestHoleIsFilledAfterHoleAfter(t *testing.T) {
 
 func TestUnsupportedSlotStopsTheNode(t *testing.T) {
 	log := logcp.NewMemLog()
-	log.Append(bg, 0, logcp.Entry{Writer: "w", ID: "i"})
+	_, _, _ = log.Append(bg, 0, logcp.Entry{Writer: "w", ID: "i"})
 	log.Put(1, []byte{logcp.Version + 1, 0, 0}) // written by a newer build
 	s, err := logcp.New(logcptest.FastConfig("n0", 0, log))
 	if err != nil {
@@ -401,7 +401,7 @@ func TestUnsupportedSlotStopsTheNode(t *testing.T) {
 	if s.Healthy() == nil {
 		t.Fatal("blocked node reports healthy")
 	}
-	s.Close()
+	_ = s.Close()
 }
 
 func TestRestartFromCheckpointAndTrim(t *testing.T) {
@@ -450,7 +450,7 @@ func TestRestartFromCheckpointAndTrim(t *testing.T) {
 	}
 	// a node that cannot find its checkpoint and whose log is trimmed refuses to start
 	for _, k := range mustList(objs) {
-		objs.Delete(bg, k)
+		_ = objs.Delete(bg, k)
 	}
 	cfg := logcptest.FastConfig("n2", 2, log)
 	cfg.DB, cfg.Table, cfg.Objects = db, "cp", objs
@@ -477,7 +477,7 @@ func TestCheckpointFallsBackToTheWholeLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	keys := mustList(objs)
-	objs.Put(bg, keys[0], []byte("garbage")) // the object is damaged; the log still starts at slot 0
+	_ = objs.Put(bg, keys[0], []byte("garbage")) // the object is damaged; the log still starts at slot 0
 	b := node(t, "n1", 1, log, db, objs, nil)
 	waitApplied(t, a, b)
 	if end, _ := b.End(bg, tp("t", 0)); end != 16 {
@@ -521,7 +521,7 @@ func TestMetricsAreExported(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	s := node(t, "n0", 0, logcp.NewMemLog(), nil, nil, func(c *logcp.Config) { c.Metrics = logcp.NewMetrics(reg) })
 	commit(t, s, seg("m", tp("t", 0)))
-	s.Lookup(bg, core.Lookup{TP: tp("t", 0)})
+	_, _, _ = s.Lookup(bg, core.Lookup{TP: tp("t", 0)})
 	want := []string{"slot_attempts_total", "slots_total", "append_seconds", "entries_per_slot", "entry_bytes", "applied_slot", "apply_lag_slots",
 		"apply_seconds", "active", "role_changes_total", "tail_checks_total", "fresh_reads_total", "fresh_wait_seconds", "queue_wait_seconds", "tail_reads_total"}
 	mf, _ := reg.Gather()

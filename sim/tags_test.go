@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -16,24 +17,26 @@ import (
 func scanCore(t *testing.T) map[string][]string {
 	t.Helper()
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, "../core", nil, 0)
+	names, err := filepath.Glob("../core/*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := map[string][]string{}
-	for _, p := range pkgs {
-		for fname, f := range p.Files {
-			if strings.HasSuffix(fname, "_test.go") {
+	for _, fname := range names {
+		if strings.HasSuffix(fname, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, fname, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range f.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || fd.Recv == nil || len(fd.Recv.List) != 1 || !strings.HasPrefix(fd.Name.Name, "is") {
 				continue
 			}
-			for _, d := range f.Decls {
-				fd, ok := d.(*ast.FuncDecl)
-				if !ok || fd.Recv == nil || len(fd.Recv.List) != 1 || !strings.HasPrefix(fd.Name.Name, "is") {
-					continue
-				}
-				if id, ok := fd.Recv.List[0].Type.(*ast.Ident); ok {
-					out[fd.Name.Name] = append(out[fd.Name.Name], id.Name)
-				}
+			if id, ok := fd.Recv.List[0].Type.(*ast.Ident); ok {
+				out[fd.Name.Name] = append(out[fd.Name.Name], id.Name)
 			}
 		}
 	}

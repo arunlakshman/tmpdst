@@ -100,8 +100,11 @@ type Config struct {
 // FailKind classifies a failure. Append-only.
 type FailKind uint8
 
+// FailKind values.
 const (
+	// FailViolation is a safety/property violation.
 	FailViolation FailKind = iota
+	// FailInconclusive means the run could not decide.
 	FailInconclusive
 	FailProtocol // Trip/Exit not last, unknown action, reply to unknown request, duplicate completion
 	FailPanic    // recovered from Step / Factory
@@ -157,6 +160,7 @@ type Report struct {
 	Nondeterminism []uint64 // seeds whose two runs diverged
 }
 
+// AssertionStat is the tally of one assertion across a run.
 type AssertionStat struct {
 	Prop      core.Prop
 	Kind      string

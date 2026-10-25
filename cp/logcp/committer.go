@@ -246,7 +246,7 @@ func failAll(ps []*pending, err error) {
 		return
 	}
 	for _, p := range ps {
-		p.finish(core.CPDone{}, fmt.Errorf("%w: %v", ErrStopped, err))
+		p.finish(core.CPDone{}, fmt.Errorf("%w: %w", ErrStopped, err))
 	}
 }
 

@@ -29,6 +29,7 @@ type Classifier struct{}
 
 var _ sys.Classifier = Classifier{}
 
+// Classify maps an S3 error to an error code and outcome.
 func (Classifier) Classify(a core.IOAction, err error) (core.ErrCode, core.Outcome) {
 	code, out := classify(a, err)
 	slog.Debug("object call failed", "action", a, "err", err, "code", code, "outcome", out)

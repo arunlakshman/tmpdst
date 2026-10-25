@@ -42,7 +42,7 @@ func BenchmarkApply150(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer kv.Close()
+	defer func() { _ = kv.Close() }()
 	a := applier.New(kv)
 	rng := rand.New(rand.NewSource(1))
 	n := 0

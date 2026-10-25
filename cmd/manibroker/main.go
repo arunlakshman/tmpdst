@@ -148,7 +148,7 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 	mem, memSource = prod.MemoryLimit()
 	err = f.tn.apply(&cfg.Broker, mem)
 	cfg.Shutdown = shutdown
-	return
+	return cfg, m, mem, memSource, err
 }
 
 // openObjects sets cfg.Objects from -objects.
@@ -212,7 +212,7 @@ func bind(f brokerFlags, cfg *prod.NodeConfig) (ln net.Listener, adv string, err
 		}
 	}
 	if err != nil {
-		ln.Close()
+		_ = ln.Close() // already returning the original error
 		return nil, "", err
 	}
 	return ln, adv, nil

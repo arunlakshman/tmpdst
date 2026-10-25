@@ -85,8 +85,8 @@ func TestCorruptStoredRecordsPanic(t *testing.T) {
 		tx.Set(idemKey("k"), []byte{0x80})
 	})
 	for name, f := range map[string]func(){
-		"lookup": func() { a.Lookup(core.Lookup{TP: tp}) },
-		"replay": func() { a.Commit(1, core.CommitSegment{SegmentKey: "k"}) },
+		"lookup": func() { _, _ = a.Lookup(core.Lookup{TP: tp}) },
+		"replay": func() { _, _ = a.Commit(1, core.CommitSegment{SegmentKey: "k"}) },
 	} {
 		func() {
 			defer func() {

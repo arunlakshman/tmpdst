@@ -369,15 +369,6 @@ func factsNamed(all []core.Action, name string) (out []core.Fact) {
 	return out
 }
 
-func field(f core.Fact, key string) core.FieldValue {
-	for _, x := range f.Fields {
-		if x.Key == key {
-			return x.Value
-		}
-	}
-	return nil
-}
-
 func (h *harness) noViolations() {
 	h.t.Helper()
 	if len(h.env.viol) > 0 {

@@ -105,21 +105,14 @@ func seconds(ns int64) float64 { return float64(ns) / 1e9 }
 // Observe consumes one broker fact; facts it does not know are ignored.
 func (m *Metrics) Observe(f core.Fact) {
 	n := func(k string) int64 {
-		for _, x := range f.Fields {
-			if x.Key == k {
-				v, _ := x.Value.(core.I64)
-				return int64(v)
-			}
-		}
-		return 0
+		v, _ := f.Field(k).(core.I64)
+		return int64(v)
 	}
 	switch f.Name {
 	case "segment_sealed":
 		reason := "unknown"
-		for _, x := range f.Fields {
-			if s, ok := x.Value.(core.Str); ok && x.Key == "reason" {
-				reason = string(s)
-			}
+		if s, ok := f.Field("reason").(core.Str); ok {
+			reason = string(s)
 		}
 		m.sealed.WithLabelValues(reason).Inc()
 		m.sealedBytes.Add(float64(n("bytes")))

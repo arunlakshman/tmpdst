@@ -40,18 +40,8 @@ func NewSegmentLog(log *slog.Logger) *SegmentLog {
 
 func ms(ns int64) float64 { return float64(ns/10_000) / 100 } // 10 us resolution
 
-func field(f core.Fact, k string) (core.FieldValue, bool) {
-	for _, x := range f.Fields {
-		if x.Key == k {
-			return x.Value, true
-		}
-	}
-	return nil, false
-}
-
 func fi(f core.Fact, k string) int64 {
-	v, _ := field(f, k)
-	switch x := v.(type) {
+	switch x := f.Field(k).(type) {
 	case core.I64:
 		return int64(x)
 	case core.U64:
@@ -61,8 +51,7 @@ func fi(f core.Fact, k string) int64 {
 }
 
 func fs(f core.Fact, k string) string {
-	v, _ := field(f, k)
-	s, _ := v.(core.Str)
+	s, _ := f.Field(k).(core.Str)
 	return string(s)
 }
 

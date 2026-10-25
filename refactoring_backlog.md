@@ -26,7 +26,7 @@ Suggested waves: **P0 → P1 → P2 → P3 → P4**.
 | **P3** | Split Phase / Extract Function on hot paths | Makes Extract Class safe |
 | **P4** | Extract Class / polymorphism / ACL finish | Structure after seams exist |
 
-**Next up:** P1 `fieldOf` / fact getters.
+**Next up:** P1 `sample` / TwoSpeed.
 
 ---
 
@@ -68,7 +68,7 @@ Bounded-context merge, Extract Class on Broker/Service/kernel, Dynamo ACL — th
 - [x] ~~Slot / HW / offset IDs — **Replace Primitive with Object** — logcp/logsm replica, dynlog~~
   - Log/DynLog/MemLog APIs stay `int64` until P2 shared kernel.
 - [x] ~~CRC table once — **Replace Temp with Query** — `format/format.go` (+ kwire if shared)~~
-- [ ] `fieldOf` / fact getters — **Move Function** / **Extract Function** — echo, kafka oracle, `sys/prod/seglog`, metrics
+- [x] ~~`fieldOf` / fact getters — **Move Function** / **Extract Function** — echo, kafka oracle, `sys/prod/seglog`, metrics~~ (`core.Fact.Field`)
 - [ ] `sample` / TwoSpeed — **Pull Up Method** / **Parameterize Function** — fakeio, logengine, echo/kafka config
 - [ ] FNV helpers if duplicated — **Move Function** — broker hash, netsim, etc.
 - [ ] Resp type-assert boilerplate — **Extract Function** / **Parameterize Function** — logsm store, applier store, memstore, logcp

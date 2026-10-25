@@ -105,24 +105,15 @@ func (o *oracle) record(v sim.View, pl *plog, off int64, i int, val string, det 
 	as.Always(op.Outcome != sim.OpAbandoned, "kafka: a definitely rejected batch is never committed", d...)
 }
 
-func fieldOf(f core.Fact, key string) core.FieldValue {
-	for _, x := range f.Fields {
-		if x.Key == key {
-			return x.Value
-		}
-	}
-	return nil
-}
-
 // acks checks each produce_acked fact against the truth at the Step that
 // emitted it.
 func (o *oracle) acks(v sim.View) {
 	for _, tf := range v.Timeline().Since("produce_acked", &o.ackCur) {
 		f := tf.Fact
-		topic, _ := fieldOf(f, "topic").(core.Str)
-		part, ok1 := fieldOf(f, "partition").(core.I64)
-		base, ok2 := fieldOf(f, "base_offset").(core.I64)
-		count, ok3 := fieldOf(f, "count").(core.I64)
+		topic, _ := f.Field("topic").(core.Str)
+		part, ok1 := f.Field("partition").(core.I64)
+		base, ok2 := f.Field("base_offset").(core.I64)
+		count, ok3 := f.Field("count").(core.I64)
 		v.Assert().Always(ok1 && ok2 && ok3, "kafka: ack fact is well formed")
 		if !ok1 || !ok2 || !ok3 {
 			continue

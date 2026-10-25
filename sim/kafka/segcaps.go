@@ -77,9 +77,9 @@ func (i *segmentCaps) AtEnd(v sim.View) {
 
 func (i *segmentCaps) Observe(v sim.View) {
 	for _, tf := range v.Timeline().Since("segment_sealed", &i.seal) {
-		n := func(k string) int64 { x, _ := fieldOf(tf.Fact, k).(core.I64); return int64(x) }
+		n := func(k string) int64 { x, _ := tf.Fact.Field(k).(core.I64); return int64(x) }
 		a := v.Assert()
-		why, _ := fieldOf(tf.Fact, "reason").(core.Str)
+		why, _ := tf.Fact.Field("reason").(core.Str)
 		d := core.Detail{Key: "reason", Value: string(why)}
 		a.Always(n("batches") <= int64(i.cfg.MaxSegmentBatches), "kafka: a sealed segment holds at most MaxSegmentBatches batches",
 			d, core.Detail{Key: "batches", Value: n("batches")}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentBatches})

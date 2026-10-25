@@ -23,8 +23,8 @@ func (*sealInv) Name() string   { return "SealStats" }
 func (*sealInv) AtEnd(sim.View) {}
 func (i *sealInv) Observe(v sim.View) {
 	for _, tf := range v.Timeline().Since("segment_sealed", &i.seal) {
-		n, _ := fieldOf(tf.Fact, "parts").(core.I64)
-		why, _ := fieldOf(tf.Fact, "reason").(core.Str)
+		n, _ := tf.Fact.Field("parts").(core.I64)
+		why, _ := tf.Fact.Field("reason").(core.Str)
 		i.st.segs.Add(1)
 		i.st.parts.Add(int64(n))
 		switch string(why) {

@@ -12,6 +12,16 @@ type Fact struct {
 	Fields []Field
 }
 
+// Field returns the value for key, or nil if absent.
+func (f Fact) Field(key string) FieldValue {
+	for _, x := range f.Fields {
+		if x.Key == key {
+			return x.Value
+		}
+	}
+	return nil
+}
+
 // Field is one named value of a Fact.
 type Field struct {
 	Key   string

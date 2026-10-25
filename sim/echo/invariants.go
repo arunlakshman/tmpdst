@@ -8,15 +8,6 @@ import (
 	"manifester/sim"
 )
 
-func fieldOf(f core.Fact, key string) core.FieldValue {
-	for _, x := range f.Fields {
-		if x.Key == key {
-			return x.Value
-		}
-	}
-	return nil
-}
-
 type ackFact struct {
 	off     int64
 	key     string
@@ -24,9 +15,9 @@ type ackFact struct {
 }
 
 func parseAck(f core.Fact) (ackFact, bool) {
-	o, ok1 := fieldOf(f, "offset").(core.I64)
-	k, ok2 := fieldOf(f, "key").(core.Str)
-	p, ok3 := fieldOf(f, "payload").(core.Bytes)
+	o, ok1 := f.Field("offset").(core.I64)
+	k, ok2 := f.Field("key").(core.Str)
+	p, ok3 := f.Field("payload").(core.Bytes)
 	return ackFact{int64(o), string(k), p}, ok1 && ok2 && ok3
 }
 
@@ -133,7 +124,7 @@ func (*liveness) Observe(sim.View) {}
 // phaseStart is when the kernel announced phase p, from its sim_phase fact.
 func phaseStart(v sim.View, p sim.Phase) (sim.Time, bool) {
 	for _, tf := range v.Timeline().Snapshot("sim_phase") {
-		if ph, ok := fieldOf(tf.Fact, "phase").(core.U64); ok && sim.Phase(ph) == p {
+		if ph, ok := tf.Fact.Field("phase").(core.U64); ok && sim.Phase(ph) == p {
 			return tf.At, true
 		}
 	}
@@ -191,7 +182,7 @@ func (*faultCoverage) AtEnd(v sim.View) {
 			if key == "" {
 				return true
 			}
-			if s, ok := fieldOf(tf.Fact, key).(core.Str); ok && string(s) == val {
+			if s, ok := tf.Fact.Field(key).(core.Str); ok && string(s) == val {
 				return true
 			}
 		}

@@ -14,7 +14,7 @@ const livenessGrace = 6 * core.Second
 // phaseStart is when the kernel announced phase p, from its sim_phase fact.
 func phaseStart(v sim.View, p sim.Phase) (sim.Time, bool) {
 	for _, tf := range v.Timeline().Snapshot("sim_phase") {
-		if ph, ok := fieldOf(tf.Fact, "phase").(core.U64); ok && sim.Phase(ph) == p {
+		if ph, ok := tf.Fact.Field("phase").(core.U64); ok && sim.Phase(ph) == p {
 			return tf.At, true
 		}
 	}
@@ -99,7 +99,7 @@ func (*faultCoverage) AtEnd(v sim.View) {
 			if key == "" {
 				return true
 			}
-			if s, ok := fieldOf(tf.Fact, key).(core.Str); ok && string(s) == val {
+			if s, ok := tf.Fact.Field(key).(core.Str); ok && string(s) == val {
 				return true
 			}
 		}

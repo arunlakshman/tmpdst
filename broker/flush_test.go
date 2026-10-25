@@ -17,7 +17,7 @@ func flushTimers(h *harness) (out []core.SetTimer) {
 
 func sealReasons(h *harness) (out []string) {
 	for _, f := range factsNamed(h.all, "segment_sealed") {
-		out = append(out, string(field(f, "reason").(core.Str)))
+		out = append(out, string(f.Field("reason").(core.Str)))
 	}
 	return out
 }
@@ -88,10 +88,10 @@ func TestTimerRuleFromFirstBatch(t *testing.T) {
 		t.Fatalf("%d puts after the timer", len(h.puts))
 	}
 	f := factsNamed(h.all, "segment_sealed")
-	if len(f) != 1 || field(f[0], "reason").(core.Str) != "timer" || field(f[0], "batches").(core.I64) != 3 {
+	if len(f) != 1 || f[0].Field("reason").(core.Str) != "timer" || f[0].Field("batches").(core.I64) != 3 {
 		t.Fatalf("%+v", f)
 	}
-	if age := field(f[0], "age").(core.I64); age <= 0 {
+	if age := f[0].Field("age").(core.I64); age <= 0 {
 		t.Fatalf("age %d", age)
 	}
 	for i := 0; i < 3; i++ {
@@ -235,10 +235,10 @@ func TestManySmallBatchesSealAtByteCapNotBatchCap(t *testing.T) {
 		t.Fatalf("reasons %v puts %d", r, len(h.puts))
 	}
 	f := factsNamed(h.all, "segment_sealed")[0]
-	if b := field(f, "batches").(core.I64); b != 200 {
+	if b := f.Field("batches").(core.I64); b != 200 {
 		t.Fatalf("%d batches in the segment", b)
 	}
-	if n := field(f, "parts").(core.I64); n != 2 {
+	if n := f.Field("parts").(core.I64); n != 2 {
 		t.Fatalf("%d partitions in the segment, want 2", n)
 	}
 	h.next(c)

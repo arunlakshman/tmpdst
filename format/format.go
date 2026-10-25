@@ -81,8 +81,11 @@ func Code(err error) core.ErrCode {
 	return core.ErrCorrupt
 }
 
+// castagnoli is the CRC32C table; built once (MakeTable is not free).
+var castagnoli = crc32.MakeTable(crc32.Castagnoli)
+
 // Checksum is CRC32C (Castagnoli).
-func Checksum(b []byte) uint32 { return crc32.Checksum(b, crc32.MakeTable(crc32.Castagnoli)) }
+func Checksum(b []byte) uint32 { return crc32.Checksum(b, castagnoli) }
 
 // Batch is one partition's record batch to be written.
 type Batch struct {

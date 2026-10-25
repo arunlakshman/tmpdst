@@ -43,7 +43,10 @@ const (
 	CodecZstd   = 4
 )
 
-func crc32c(b []byte) uint32 { return crc32.Checksum(b, crc32.MakeTable(crc32.Castagnoli)) }
+// castagnoli is the CRC32C table; built once (MakeTable is not free).
+var castagnoli = crc32.MakeTable(crc32.Castagnoli)
+
+func crc32c(b []byte) uint32 { return crc32.Checksum(b, castagnoli) }
 
 // BatchParams are the caller-supplied batch header fields (no clock here).
 type BatchParams struct {

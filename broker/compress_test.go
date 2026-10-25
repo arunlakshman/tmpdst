@@ -11,7 +11,9 @@ import (
 	"manifester/kwire"
 )
 
-func crc(b []byte) uint32 { return crc32.Checksum(b[21:], crc32.MakeTable(crc32.Castagnoli)) }
+var castagnoli = crc32.MakeTable(crc32.Castagnoli)
+
+func crc(b []byte) uint32 { return crc32.Checksum(b[21:], castagnoli) }
 
 // opaque builds a batch with codec c whose payload is n pseudo-random bytes
 // the broker must never look into, claiming recs records.

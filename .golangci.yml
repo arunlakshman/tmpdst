@@ -1,0 +1,63 @@
+# golangci-lint v2. Enforced on ALL code (no baseline, by decision); the
+# existing violations are counted in docs/lint-baseline.md and must be fixed.
+# time.Now in core/ sim/ is NOT linted here: tools/detcheck owns determinism
+# (import allow-list), do not duplicate.
+version: "2"
+run:
+  timeout: 5m
+  tests: true
+output:
+  formats:
+    text:
+      path: stdout
+      print-issued-lines: false
+      print-linter-name: true
+      colors: false
+issues:
+  max-issues-per-linter: 20
+  max-same-issues: 3
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - revive
+    - errorlint
+    - gocritic
+    - nakedret
+    - nolintlint
+    - usestdlibvars
+    - copyloopvar
+  settings:
+    revive:
+      rules:
+        - name: exported
+        - name: var-naming
+        - name: package-comments
+        - name: error-strings
+        - name: error-naming
+        - name: indent-error-flow
+        - name: superfluous-else
+        - name: receiver-naming
+        - name: unexported-return
+        - name: context-as-argument
+        - name: use-any
+    nolintlint:
+      require-specific: true
+      require-explanation: true
+  exclusions:
+    generated: lax
+    paths:
+      - testdata
+      - build
+formatters:
+  enable:
+    - gofmt
+  settings:
+    gofmt:
+      simplify: true
+  exclusions:
+    generated: lax
+    paths:
+      - testdata

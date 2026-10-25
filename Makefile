@@ -13,9 +13,9 @@ CRAP_FLAGS    ?=
 
 export CRAP_THRESHOLD
 
-.PHONY: build fmt-check vet compile test crap crap-baseline crap-strict
+.PHONY: build test-race lint fmt-check vet compile test crap crap-baseline crap-strict
 
-build: fmt-check vet compile test crap
+build: fmt-check vet lint compile test crap
 
 fmt-check:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
@@ -23,12 +23,20 @@ fmt-check:
 vet:
 	go vet ./...
 
+# Effective Go rules via .golangci.yml (terse; capped per linter). See docs/lint-baseline.md.
+lint:
+	golangci-lint run ./...
+
 compile:
 	go build ./...
 
 test:
 	@mkdir -p $(dir $(COVER_PROFILE)) && echo '*' > $(dir $(COVER_PROFILE)).gitignore
 	go test -coverprofile=$(COVER_PROFILE) ./...
+
+# Race detector: too slow for `build` (>10 min on this tree), run on demand.
+test-race:
+	go test -race ./...
 
 # CRAP gate alone (reuses an existing profile; run `make test` first if absent).
 crap:

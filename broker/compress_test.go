@@ -107,9 +107,9 @@ func TestCompressedBatchRejections(t *testing.T) {
 		e("t", 0, badCRC), e("t", 0, badCount), e("t", 0, unknown), e("t", 0, opaque(t, kwire.CodecSnappy, 2, 10))))
 	h.flush()
 	ps := produced(h.next(c))
-	want := []int16{errCorruptMessage, errCorruptMessage, errUnsupportedCompress, 0}
+	want := []kafkaCode{errCorruptMessage, errCorruptMessage, errUnsupportedCompress, 0}
 	for i, w := range want {
-		if ps[i].ErrorCode != w {
+		if kafkaCode(ps[i].ErrorCode) != w {
 			t.Errorf("partition %d: error %d, want %d", i, ps[i].ErrorCode, w)
 		}
 	}

@@ -66,7 +66,7 @@ func TestMetadata(t *testing.T) {
 	a, b := "t", "nope"
 	q.Topics = []kmsg.MetadataRequestTopic{{Topic: &b}, {Topic: &a}}
 	r = h.call(c, verMetadata, q).(*kmsg.MetadataResponse)
-	if len(r.Topics) != 2 || r.Topics[0].ErrorCode != errUnknownTopicOrPart || r.Topics[1].ErrorCode != 0 {
+	if len(r.Topics) != 2 || kafkaCode(r.Topics[0].ErrorCode) != errUnknownTopicOrPart || r.Topics[1].ErrorCode != 0 {
 		t.Fatalf("topics %+v", r.Topics)
 	}
 	for _, cmd := range h.cp.Exec(core.CPCall{Req: 1, Op: core.DescribeTopics{Topics: []string{"nope"}}}).(core.CPDone).Resp.(core.DescribeTopicsResp).Topics {
@@ -119,10 +119,10 @@ func TestProduceFetchRoundTrip(t *testing.T) {
 	if p = fetched(h.call(c, verFetch, fetchReq(core.TP("t", 0), 5, 1<<20))); len(p.RecordBatches) != 0 || p.ErrorCode != 0 || p.HighWatermark != 5 {
 		t.Fatalf("at HWM: %+v", p)
 	}
-	if p = fetched(h.call(c, verFetch, fetchReq(core.TP("t", 0), 6, 1<<20))); p.ErrorCode != errOffsetOutOfRange {
+	if p = fetched(h.call(c, verFetch, fetchReq(core.TP("t", 0), 6, 1<<20))); kafkaCode(p.ErrorCode) != errOffsetOutOfRange {
 		t.Fatalf("beyond HWM: %d", p.ErrorCode)
 	}
-	if p = fetched(h.call(c, verFetch, fetchReq(core.TP("zz", 0), 0, 1<<20))); p.ErrorCode != errUnknownTopicOrPart {
+	if p = fetched(h.call(c, verFetch, fetchReq(core.TP("zz", 0), 0, 1<<20))); kafkaCode(p.ErrorCode) != errUnknownTopicOrPart {
 		t.Fatalf("unknown topic: %d", p.ErrorCode)
 	}
 	h.noViolations()
@@ -144,13 +144,13 @@ func TestProduceErrors(t *testing.T) {
 		e("t", 0, txn), e("t", 0, two), e("t", 0, nil), e("t", 0, plain(t, "ok"))))
 	h.flush()
 	ps := produced(h.next(c))
-	want := []int16{errUnknownTopicOrPart, errUnknownTopicOrPart, errCorruptMessage, errInvalidRequest, errCorruptMessage, errCorruptMessage, 0}
+	want := []kafkaCode{errUnknownTopicOrPart, errUnknownTopicOrPart, errCorruptMessage, errInvalidRequest, errCorruptMessage, errCorruptMessage, 0}
 	for i, w := range want {
-		if ps[i].ErrorCode != w {
+		if kafkaCode(ps[i].ErrorCode) != w {
 			t.Errorf("partition %d: error %d, want %d", i, ps[i].ErrorCode, w)
 		}
 	}
-	if q := h.call(c, verProduce, prodReq(7, e("t", 0, plain(t, "x")))); produced(q)[0].ErrorCode != errInvalidRequiredAcks {
+	if q := h.call(c, verProduce, prodReq(7, e("t", 0, plain(t, "x")))); kafkaCode(produced(q)[0].ErrorCode) != errInvalidRequiredAcks {
 		t.Fatal("bad acks accepted")
 	}
 }
@@ -296,7 +296,7 @@ func TestListOffsets(t *testing.T) {
 	r := h.call(c, verList, q).(*kmsg.ListOffsetsResponse)
 	get := func(i int) kmsg.ListOffsetsResponseTopicPartition { return r.Topics[i].Partitions[0] }
 	if get(0).Offset != 0 || get(0).ErrorCode != 0 || get(1).Offset != 3 || get(2).Offset != 0 ||
-		get(3).ErrorCode != errUnsupportedForFormat || get(4).ErrorCode != errUnknownTopicOrPart {
+		kafkaCode(get(3).ErrorCode) != errUnsupportedForFormat || kafkaCode(get(4).ErrorCode) != errUnknownTopicOrPart {
 		t.Fatalf("%+v", r.Topics)
 	}
 }
@@ -356,7 +356,7 @@ func TestFetchGetsExhausted(t *testing.T) {
 	}
 	h.send(c, verFetch, fetchReq(core.TP("t", 0), 0, 1<<20))
 	h.fireAll()
-	if p := fetched(h.next(c)); p.ErrorCode != errKafkaStorage || len(p.RecordBatches) != 0 {
+	if p := fetched(h.next(c)); kafkaCode(p.ErrorCode) != errKafkaStorage || len(p.RecordBatches) != 0 {
 		t.Fatalf("%+v", p.ErrorCode)
 	}
 }
@@ -578,7 +578,7 @@ func TestIdempotentBatchRejected(t *testing.T) {
 		e("t", 0, plain(t, "ok2"))))
 	h.flush()
 	ps := produced(h.next(c))
-	if ps[0].ErrorCode != errInvalidRequest || ps[2].ErrorCode != errInvalidRequest ||
+	if kafkaCode(ps[0].ErrorCode) != errInvalidRequest || kafkaCode(ps[2].ErrorCode) != errInvalidRequest ||
 		ps[1].ErrorCode != 0 || ps[3].ErrorCode != 0 || ps[3].BaseOffset != 0 {
 		t.Fatalf("%+v", ps)
 	}
@@ -774,7 +774,7 @@ func TestCommitDeadlineFailsSegmentAndReleasesBuffer(t *testing.T) {
 		h.fire(id)
 	}
 	ps := produced(h.next(c))
-	if ps[0].ErrorCode != errRequestTimedOut {
+	if kafkaCode(ps[0].ErrorCode) != errRequestTimedOut {
 		t.Fatalf("%+v", ps)
 	}
 	if h.b.bufBytes != 0 || len(h.b.segs) != 0 {

@@ -110,7 +110,7 @@ func (b *Broker) retryOp(o *op) []core.Action {
 	return []core.Action{t}
 }
 
-func (b *Broker) exhaustCode(o *op) int16 {
+func (b *Broker) exhaustCode(o *op) kafkaCode {
 	switch o.kind {
 	case opMeta:
 		return errLeaderNotAvailable
@@ -138,16 +138,16 @@ func (b *Broker) endOp(o *op) []core.Action {
 }
 
 // failOp answers o's part with code and retires it.
-func (b *Broker) failOp(o *op, code int16) []core.Action {
+func (b *Broker) failOp(o *op, code kafkaCode) []core.Action {
 	switch o.kind {
 	case opRefresh:
 		return b.resume(o)
 	case opMeta:
 		b.metaResp(o, nil, code)
 	case opList:
-		o.lpart.ErrorCode = code
+		o.lpart.ErrorCode = int16(code)
 	case opFetch:
-		o.fpart.ErrorCode = code
+		o.fpart.ErrorCode = int16(code)
 	}
 	return b.endOp(o)
 }

@@ -293,10 +293,10 @@ func (b *Broker) endSegment(s *segment) []core.Action {
 }
 
 // failSegment answers every unanswered batch of s with code.
-func (b *Broker) failSegment(s *segment, code int16) []core.Action {
+func (b *Broker) failSegment(s *segment, code kafkaCode) []core.Action {
 	acts := []core.Action{emit("segment_failed",
 		core.Field{Key: "segment", Value: core.Str(s.key)},
-		core.Field{Key: "code", Value: core.I64(code)},
+		core.Field{Key: "code", Value: core.I64(int64(code))},
 		core.Field{Key: "total_ns", Value: core.I64(b.now - s.sealedAt)},
 		core.Field{Key: "inflight", Value: core.I64(len(b.segs) - 1)},
 		core.Field{Key: "buffered", Value: core.I64(b.bufBytes - s.dataBytes())})}
@@ -364,7 +364,7 @@ func (b *Broker) ack(pb *pbatch, r core.BatchRange, key string) {
 	if pb.answered {
 		return
 	}
-	pb.part.ErrorCode, pb.part.BaseOffset = errNone, int64(r.Base)
+	pb.part.ErrorCode, pb.part.BaseOffset = int16(errNone), int64(r.Base)
 	pb.s.facts = append(pb.s.facts, core.Fact{Name: "produce_acked", Fields: []core.Field{
 		{Key: "topic", Value: core.Str(pb.tp.Topic)},
 		{Key: "partition", Value: core.I64(pb.tp.Partition)},
@@ -376,10 +376,10 @@ func (b *Broker) ack(pb *pbatch, r core.BatchRange, key string) {
 }
 
 // release answers pb with an error code (unless already answered).
-func (b *Broker) release(pb *pbatch, code int16) {
+func (b *Broker) release(pb *pbatch, code kafkaCode) {
 	if pb.answered {
 		return
 	}
-	pb.part.ErrorCode, pb.part.BaseOffset = code, -1
+	pb.part.ErrorCode, pb.part.BaseOffset = int16(code), -1
 	b.finishPart(pb.s)
 }

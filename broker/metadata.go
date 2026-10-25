@@ -29,7 +29,7 @@ func (b *Broker) metadata(s *slot, r *kmsg.MetadataRequest) []core.Action {
 
 // metaResp builds the Metadata response of o from the control plane's topics.
 // A non-zero code (the call failed) marks every requested topic with it.
-func (b *Broker) metaResp(o *op, infos []core.TopicInfo, code int16) {
+func (b *Broker) metaResp(o *op, infos []core.TopicInfo, code kafkaCode) {
 	r := o.creq.(*kmsg.MetadataRequest)
 	resp := kmsg.NewPtrMetadataResponse()
 	cluster := "manifester"
@@ -51,9 +51,9 @@ func (b *Broker) metaResp(o *op, infos []core.TopicInfo, code int16) {
 			}
 			return t
 		}
-		t.ErrorCode = errUnknownTopicOrPart
+		t.ErrorCode = int16(errUnknownTopicOrPart)
 		if code != errNone {
-			t.ErrorCode = code
+			t.ErrorCode = int16(code)
 		}
 		return t
 	}
@@ -65,7 +65,7 @@ func (b *Broker) metaResp(o *op, infos []core.TopicInfo, code int16) {
 	for _, rt := range r.Topics {
 		if rt.Topic == nil { // topic ids are not supported
 			t := kmsg.NewMetadataResponseTopic()
-			t.TopicID, t.ErrorCode = rt.TopicID, errUnknownTopicID
+			t.TopicID, t.ErrorCode = rt.TopicID, int16(errUnknownTopicID)
 			resp.Topics = append(resp.Topics, t)
 			continue
 		}
@@ -96,13 +96,13 @@ func (b *Broker) listOffsets(s *slot, r *kmsg.ListOffsetsRequest) []core.Action 
 			tp := core.TP(t.Topic, p.Partition)
 			switch {
 			case !b.knows(tp):
-				rp.ErrorCode = errUnknownTopicOrPart
+				rp.ErrorCode = int16(errUnknownTopicOrPart)
 			case p.Timestamp == -2:
 				rp.Offset = 0
 			case p.Timestamp == -1:
 				acts = append(acts, b.startOp(&op{kind: opList, s: s, tp: tp, lpart: rp})...)
 			default:
-				rp.ErrorCode = errUnsupportedForFormat
+				rp.ErrorCode = int16(errUnsupportedForFormat)
 			}
 		}
 	}

@@ -172,7 +172,7 @@ func TestCommitTooLargeFailsBatches(t *testing.T) {
 	h.flush()
 	h.fireAll()
 	for _, p := range produced(h.next(c)) {
-		if p.ErrorCode != errUnknownServer || p.BaseOffset != -1 {
+		if kafkaCode(p.ErrorCode) != errUnknownServer || p.BaseOffset != -1 {
 			t.Fatalf("code %d offset %d", p.ErrorCode, p.BaseOffset)
 		}
 	}

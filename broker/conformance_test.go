@@ -108,7 +108,7 @@ func (s *c1) await2(c *client, ver int16, req kmsg.Request) (kmsg.Response, erro
 }
 
 type expect struct {
-	err  int16
+	err  kafkaCode
 	base core.Offset
 	add  [][]byte // appended to the model on success
 	ti   int
@@ -157,7 +157,7 @@ func (s *c1) produce(c *client, op c1op) error {
 	}
 	for i, x := range exps {
 		tp := c1TPs[x.ti]
-		if got[i].ErrorCode != x.err || got[i].BaseOffset != int64(x.base) {
+		if kafkaCode(got[i].ErrorCode) != x.err || got[i].BaseOffset != int64(x.base) {
 			return fmt.Errorf("produce %v: error %d base %d, want error %d base %d (model hwm %d)",
 				tp, got[i].ErrorCode, got[i].BaseOffset, x.err, x.base, s.model[tp].HighWatermark())
 		}
@@ -186,7 +186,7 @@ func (s *c1) fetch(c *client, op c1op) error {
 		return fmt.Errorf("fetch %v@%d: hwm %d, want %d", tp, from, p.HighWatermark, hwm)
 	}
 	if from > hwm {
-		if p.ErrorCode != errOffsetOutOfRange {
+		if kafkaCode(p.ErrorCode) != errOffsetOutOfRange {
 			return fmt.Errorf("fetch %v@%d beyond hwm %d: error %d", tp, from, hwm, p.ErrorCode)
 		}
 		return nil

@@ -32,7 +32,7 @@ func (b *Broker) produce(s *slot, r *kmsg.ProduceRequest) []core.Action {
 			tp := core.TP(t.Topic, p.Partition)
 			pb, code := b.admit(s, r, tp, p.Records, rp)
 			if code != errNone {
-				rp.ErrorCode = code
+				rp.ErrorCode = int16(code)
 				continue
 			}
 			s.pending++
@@ -44,7 +44,7 @@ func (b *Broker) produce(s *slot, r *kmsg.ProduceRequest) []core.Action {
 
 // admit validates one partition's payload and returns the batch to buffer, or
 // the Kafka error code that answers the partition.
-func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, raw []byte, rp *kmsg.ProduceResponseTopicPartition) (*pbatch, int16) {
+func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, raw []byte, rp *kmsg.ProduceResponseTopicPartition) (*pbatch, kafkaCode) {
 	switch {
 	case r.Acks != 0 && r.Acks != 1 && r.Acks != -1:
 		return nil, errInvalidRequiredAcks
@@ -70,7 +70,7 @@ func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, 
 // codec, no transaction or control flags, a record count that matches
 // lastOffsetDelta, and no producer id (decision 41). The payload stays opaque;
 // the broker only ever relies on the header count.
-func (b *Broker) checkBatch(one []byte) (kwire.Batch, int16) {
+func (b *Broker) checkBatch(one []byte) (kwire.Batch, kafkaCode) {
 	parse := kwire.ParseBatch
 	if b.cfg.Bug == BugSkipProduceCRC {
 		parse = kwire.ParseBatchUnverified

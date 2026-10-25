@@ -14,7 +14,7 @@ func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 	resp := kmsg.NewPtrFetchResponse()
 	s.resp = resp
 	if r.SessionEpoch > 0 { // incremental sessions are never granted
-		resp.ErrorCode = errFetchSessionNotFound
+		resp.ErrorCode = int16(errFetchSessionNotFound)
 		return nil
 	}
 	s.fetchMax = r.MaxBytes
@@ -36,9 +36,9 @@ func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 			tp := core.TP(t.Topic, p.Partition)
 			switch {
 			case !b.knows(tp):
-				rp.ErrorCode = errUnknownTopicOrPart
+				rp.ErrorCode = int16(errUnknownTopicOrPart)
 			case p.FetchOffset < 0:
-				rp.ErrorCode = errOffsetOutOfRange
+				rp.ErrorCode = int16(errOffsetOutOfRange)
 			default:
 				lim := p.PartitionMaxBytes
 				if lim <= 0 {
@@ -56,7 +56,7 @@ func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 func (b *Broker) onLookup(o *op, r core.LookupResp) []core.Action {
 	o.fpart.HighWatermark, o.fpart.LastStableOffset = int64(r.End), int64(r.End)
 	if o.from > r.End {
-		o.fpart.ErrorCode = errOffsetOutOfRange
+		o.fpart.ErrorCode = int16(errOffsetOutOfRange)
 		return b.endOp(o)
 	}
 	var total int64

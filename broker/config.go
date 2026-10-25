@@ -163,21 +163,23 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
-// Kafka error codes the broker returns.
+// kafkaCode is a Kafka protocol error code returned on responses.
+type kafkaCode int16
+
 const (
-	errNone                 int16 = 0
-	errOffsetOutOfRange     int16 = 1
-	errCorruptMessage       int16 = 2
-	errUnknownTopicOrPart   int16 = 3
-	errLeaderNotAvailable   int16 = 5
-	errNotLeader            int16 = 6
-	errRequestTimedOut      int16 = 7
-	errInvalidRequiredAcks  int16 = 21
-	errInvalidRequest       int16 = 42
-	errUnsupportedForFormat int16 = 43
-	errKafkaStorage         int16 = 56
-	errFetchSessionNotFound int16 = 70
-	errUnsupportedCompress  int16 = 76
-	errUnknownTopicID       int16 = 100
-	errUnknownServer        int16 = -1
+	errNone                 kafkaCode = 0
+	errOffsetOutOfRange     kafkaCode = 1
+	errCorruptMessage       kafkaCode = 2
+	errUnknownTopicOrPart   kafkaCode = 3
+	errLeaderNotAvailable   kafkaCode = 5
+	errNotLeader            kafkaCode = 6
+	errRequestTimedOut      kafkaCode = 7
+	errInvalidRequiredAcks  kafkaCode = 21
+	errInvalidRequest       kafkaCode = 42
+	errUnsupportedForFormat kafkaCode = 43
+	errKafkaStorage         kafkaCode = 56
+	errFetchSessionNotFound kafkaCode = 70
+	errUnsupportedCompress  kafkaCode = 76
+	errUnknownTopicID       kafkaCode = 100
+	errUnknownServer        kafkaCode = -1
 )

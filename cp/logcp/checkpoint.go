@@ -43,8 +43,8 @@ var ErrNoCheckpoint = errors.New("logcp: checkpoint unusable and the log is trim
 
 type ckptState struct {
 	mu   sync.Mutex
-	slot int64 // newest checkpoint known (written or restored)
-	at   int64 // when it was written by this node, env ns (0: never)
+	slot core.LogSlot // newest checkpoint known (written or restored)
+	at   int64        // when it was written by this node, env ns (0: never)
 }
 
 func (s *Service) canCheckpoint() bool {
@@ -84,7 +84,7 @@ func strAttr(it map[string]types.AttributeValue, name string) string {
 
 // Checkpoint writes a checkpoint of the applied state now and trims the log
 // behind it. It returns the slot of the checkpoint.
-func (s *Service) Checkpoint(ctx context.Context) (int64, error) {
+func (s *Service) Checkpoint(ctx context.Context) (core.LogSlot, error) {
 	if !s.canCheckpoint() {
 		return 0, errors.New("logcp: checkpointing needs DB, Table and Objects")
 	}
@@ -100,31 +100,31 @@ func (s *Service) Checkpoint(ctx context.Context) (int64, error) {
 	s.ck.mu.Lock()
 	s.ck.slot, s.ck.at = max(s.ck.slot, slot), s.env.Now()
 	s.ck.mu.Unlock()
-	s.m.checkpoint(slot, len(data), time.Since(t0))
+	s.m.checkpoint(int64(slot), len(data), time.Since(t0))
 	s.trimLog(ctx, slot)
 	return slot, nil
 }
 
 // snapshot copies the applier at a consistent slot. The apply loop is held
 // only until the store's view exists.
-func (s *Service) snapshot() ([]byte, int64, error) {
+func (s *Service) snapshot() ([]byte, core.LogSlot, error) {
 	var buf bytes.Buffer
-	var slot int64
+	var slot core.LogSlot
 	s.rep.applyMu.Lock()
 	unlock := sync.OnceFunc(s.rep.applyMu.Unlock)
 	defer unlock()
 	err := s.app.SnapshotAt(&buf, func() int64 {
 		slot = s.rep.appliedNow()
 		unlock()
-		return slot
+		return int64(slot)
 	})
 	return buf.Bytes(), slot, err
 }
 
-func ckptKey(slot int64) string { return ckptPrefix + slotKey(slot) }
+func ckptKey(slot core.LogSlot) string { return ckptPrefix + slotKey(int64(slot)) }
 
 // publish stores the object, then moves the pointer to it.
-func (s *Service) publish(ctx context.Context, data []byte, slot int64) error {
+func (s *Service) publish(ctx context.Context, data []byte, slot core.LogSlot) error {
 	key := ckptKey(slot)
 	if err := s.cfg.Objects.Put(ctx, key, data); err != nil {
 		return err
@@ -133,11 +133,11 @@ func (s *Service) publish(ctx context.Context, data []byte, slot int64) error {
 	_, err := s.cfg.DB.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName: &s.cfg.Table,
 		Item: map[string]types.AttributeValue{
-			"pk": sv(ckptPK), "sk": sv("-"), "ck_slot": nv(slot), "ck_key": sv(key),
+			"pk": sv(ckptPK), "sk": sv("-"), "ck_slot": nv(int64(slot)), "ck_key": sv(key),
 			"ck_size": nv(int64(len(data))), "ck_sum": sv(hex.EncodeToString(sum[:])), "ck_ts": nv(s.env.Now() / 1e6),
 		},
 		ConditionExpression:       aws.String("attribute_not_exists(ck_slot) OR ck_slot < :s"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{":s": nv(slot)},
+		ExpressionAttributeValues: map[string]types.AttributeValue{":s": nv(int64(slot))},
 	})
 	var cc *types.ConditionalCheckFailedException
 	if errors.As(err, &cc) { // a checkpoint at this slot or newer exists; pruning removes our object if it is older
@@ -175,8 +175,8 @@ func (s *Service) pruneObjects(ctx context.Context) {
 }
 
 // trimLog drops log slots below the checkpoint minus KeepSlots.
-func (s *Service) trimLog(ctx context.Context, ckptSlot int64) {
-	below := ckptSlot - s.cfg.KeepSlots
+func (s *Service) trimLog(ctx context.Context, ckptSlot core.LogSlot) {
+	below := ckptSlot - core.LogSlot(s.cfg.KeepSlots)
 	tr, ok := s.log.(Trimmer)
 	if !s.cfg.TrimDelete || !ok || below <= 0 {
 		return
@@ -191,7 +191,7 @@ func (s *Service) trimLog(ctx context.Context, ckptSlot int64) {
 // restore loads the newest checkpoint into the (empty) applier and returns
 // its slot (0: none). An unusable object falls back to replaying the whole
 // log if it still starts at slot 0.
-func (s *Service) restore(ctx context.Context) (int64, error) {
+func (s *Service) restore(ctx context.Context) (core.LogSlot, error) {
 	if !s.canCheckpoint() {
 		return 0, nil
 	}
@@ -203,11 +203,12 @@ func (s *Service) restore(ctx context.Context) (int64, error) {
 	if err != nil {
 		return s.fromScratch(ctx, err)
 	}
-	slot, err := s.app.Restore(bytes.NewReader(data))
+	n, err := s.app.Restore(bytes.NewReader(data))
 	if err != nil {
 		return 0, fmt.Errorf("logcp: restoring checkpoint: %w", err)
 	}
-	if want := numAttr(it, "ck_slot"); slot != want {
+	slot := core.LogSlot(n)
+	if want := numAttr(it, "ck_slot"); n != want {
 		return 0, fmt.Errorf("logcp: checkpoint holds slot %d, pointer says %d", slot, want)
 	}
 	s.ck.slot = slot
@@ -228,7 +229,7 @@ func (s *Service) fetchCheckpoint(ctx context.Context, it map[string]types.Attri
 	return data, nil
 }
 
-func (s *Service) fromScratch(ctx context.Context, cause error) (int64, error) {
+func (s *Service) fromScratch(ctx context.Context, cause error) (core.LogSlot, error) {
 	first, err := s.log.Read(ctx, 0, 1)
 	if errors.Is(err, ErrTrimmed) {
 		return 0, fmt.Errorf("%w: %w", ErrNoCheckpoint, cause)
@@ -262,7 +263,7 @@ func (s *Service) ckptLoop(ctx context.Context) {
 			s.m.checkpointAge(s.since(at))
 		}
 		due := s.cfg.CkptEvery > 0 && s.canCheckpoint() && s.isActive() && s.since(last) >= s.cfg.CkptEvery
-		if due && s.rep.appliedNow()-have >= s.cfg.CkptMinSlots {
+		if due && int64(s.rep.appliedNow()-have) >= s.cfg.CkptMinSlots {
 			last = s.env.Now()
 			if _, err := s.Checkpoint(ctx); err != nil {
 				s.cfg.Logger.Warn("log: checkpoint failed", "event", "log_ckpt_failed", "err", err.Error())

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"manifester/core"
 	"manifester/cp"
 )
 
@@ -24,7 +25,7 @@ type fresher struct {
 
 type freshBatch struct {
 	done chan struct{}
-	tail int64
+	tail core.LogSlot
 	err  error
 }
 
@@ -86,10 +87,10 @@ func (s *Service) runBatch(b *freshBatch) {
 	close(b.done)
 }
 
-func (s *Service) checkTail(ctx context.Context) (int64, error) {
+func (s *Service) checkTail(ctx context.Context) (core.LogSlot, error) {
 	var err error
 	for try := 0; try < freshTries; try++ {
-		var tail int64
+		var tail core.LogSlot
 		if tail, err = s.log.CheckTail(ctx); err == nil {
 			s.m.tailCheck(true)
 			return tail, nil
@@ -104,7 +105,7 @@ func (s *Service) checkTail(ctx context.Context) (int64, error) {
 
 // waitApplied blocks until slots below tail are applied, nudging the tailing
 // loop to read now.
-func (s *Service) waitApplied(ctx context.Context, tail int64) error {
+func (s *Service) waitApplied(ctx context.Context, tail core.LogSlot) error {
 	for {
 		applied, adv, blocked := s.rep.position()
 		switch {

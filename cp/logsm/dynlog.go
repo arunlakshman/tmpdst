@@ -8,6 +8,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+
+	"manifester/core"
 )
 
 // DB is the part of the DynamoDB client DynLog uses. *dynamodb.Client and
@@ -40,11 +42,11 @@ func sv(v string) types.AttributeValue { return &types.AttributeValueMemberS{Val
 // Append implements Log with one conditional PutItem. A failed condition
 // returns the existing item (ALL_OLD); if the service did not, one consistent
 // Query fetches it.
-func (l *DynLog) Append(ctx context.Context, slot int64, e Entry) (Entry, bool, error) {
+func (l *DynLog) Append(ctx context.Context, slot core.LogSlot, e Entry) (Entry, bool, error) {
 	_, err := l.db.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName: &l.table,
 		Item: map[string]types.AttributeValue{
-			"pk": sv(logPK), "sk": sv(slotKey(slot)), "id": sv(e.ID),
+			"pk": sv(logPK), "sk": sv(slotKey(int64(slot))), "id": sv(e.ID),
 			"d": &types.AttributeValueMemberB{Value: Encode(e)},
 		},
 		ConditionExpression:                 aws.String("attribute_not_exists(pk)"),
@@ -63,7 +65,7 @@ func (l *DynLog) Append(ctx context.Context, slot int64, e Entry) (Entry, bool, 
 	return l.existing(ctx, slot)
 }
 
-func (l *DynLog) existing(ctx context.Context, slot int64) (Entry, bool, error) {
+func (l *DynLog) existing(ctx context.Context, slot core.LogSlot) (Entry, bool, error) {
 	got, err := l.Read(ctx, slot, 1)
 	if err != nil || len(got) == 0 || got[0].N != slot {
 		return Entry{}, false, fmt.Errorf("logsm: slot %d taken but unreadable: %w", slot, err)
@@ -80,11 +82,11 @@ func decodeItem(it map[string]types.AttributeValue) (Entry, error) {
 }
 
 // Read implements Log with consistent Queries, paging until limit.
-func (l *DynLog) Read(ctx context.Context, from int64, limit int) ([]Slot, error) {
+func (l *DynLog) Read(ctx context.Context, from core.LogSlot, limit int) ([]Slot, error) {
 	var out []Slot
 	var start map[string]types.AttributeValue
 	for len(out) < limit {
-		page, err := l.query(ctx, slotKey(max(from, 0)), true, int32(limit-len(out)), start)
+		page, err := l.query(ctx, slotKey(int64(max(from, 0))), true, int32(limit-len(out)), start)
 		if err != nil {
 			return nil, err
 		}
@@ -112,7 +114,7 @@ func decodeSlot(it map[string]types.AttributeValue) (Slot, error) {
 		return Slot{}, err
 	}
 	e, err := decodeItem(it)
-	return Slot{N: n, E: e}, err
+	return Slot{N: core.LogSlot(n), E: e}, err
 }
 
 func (l *DynLog) query(ctx context.Context, lo string, forward bool, limit int32, start map[string]types.AttributeValue) (*dynamodb.QueryOutput, error) {
@@ -130,7 +132,7 @@ func (l *DynLog) query(ctx context.Context, lo string, forward bool, limit int32
 }
 
 // CheckTail implements Log with a consistent descending Query, Limit 1.
-func (l *DynLog) CheckTail(ctx context.Context) (int64, error) {
+func (l *DynLog) CheckTail(ctx context.Context) (core.LogSlot, error) {
 	page, err := l.query(ctx, slotKey(0), false, 1, nil)
 	if err != nil || len(page.Items) == 0 {
 		return 0, err

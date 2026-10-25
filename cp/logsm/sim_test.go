@@ -117,7 +117,7 @@ func (l *simLog) pause() {
 	}
 }
 
-func (l *simLog) Append(ctx context.Context, slot int64, e Entry) (Entry, bool, error) {
+func (l *simLog) Append(ctx context.Context, slot core.LogSlot, e Entry) (Entry, bool, error) {
 	l.pause()
 	if cancel, ok := ctx.Value(crashKey{}).(context.CancelFunc); ok && l.s.chance(2) {
 		l.crashes.Add(1)
@@ -135,7 +135,7 @@ func (l *simLog) Append(ctx context.Context, slot int64, e Entry) (Entry, bool, 
 	return cur, won, err
 }
 
-func (l *simLog) Read(ctx context.Context, from int64, limit int) ([]Slot, error) {
+func (l *simLog) Read(ctx context.Context, from core.LogSlot, limit int) ([]Slot, error) {
 	l.pause()
 	if l.s.chance(5) {
 		return nil, errLost
@@ -143,7 +143,7 @@ func (l *simLog) Read(ctx context.Context, from int64, limit int) ([]Slot, error
 	return l.inner.Read(ctx, from, limit)
 }
 
-func (l *simLog) CheckTail(ctx context.Context) (int64, error) {
+func (l *simLog) CheckTail(ctx context.Context) (core.LogSlot, error) {
 	l.pause()
 	if l.s.chance(5) {
 		return 0, errLost
@@ -292,7 +292,7 @@ func check(mem *MemLog, rs []*Replica, seen []obs, res *result) error {
 	slots, _ := mem.Read(context.Background(), 0, 1<<30)
 	res.slots = int64(len(slots))
 	for i, r := range rs {
-		if r.Applied() != int64(len(slots)) || (len(slots) > 0 && slots[len(slots)-1].N != r.Applied()-1) {
+		if r.Applied() != core.LogSlot(len(slots)) || (len(slots) > 0 && slots[len(slots)-1].N != r.Applied()-1) {
 			return fmt.Errorf("replica %d applied %d, log has %d slots", i, r.Applied(), len(slots))
 		}
 		if r.StateHash() != rs[0].StateHash() {

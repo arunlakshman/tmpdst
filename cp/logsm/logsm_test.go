@@ -73,7 +73,7 @@ func testLog(t *testing.T, l Log) {
 	if cur, won, err := l.Append(bg, 3, b); err != nil || won || cur.ID != "a" {
 		t.Fatalf("second append must lose and show the winner: %+v %v %v", cur, won, err)
 	}
-	for _, n := range []int64{0, 5, 4} {
+	for _, n := range []core.LogSlot{0, 5, 4} {
 		if _, won, err := l.Append(bg, n, Entry{ID: fmt.Sprint(n)}); err != nil || !won {
 			t.Fatalf("append %d: %v %v", n, won, err)
 		}
@@ -109,7 +109,7 @@ func TestDynLogPaging(t *testing.T) {
 	db := fakedb.New()
 	db.PageSize = 2
 	l := fakeLog(t, db)
-	for n := int64(0); n < 7; n++ {
+	for n := core.LogSlot(0); n < 7; n++ {
 		if _, won, err := l.Append(bg, n, Entry{ID: fmt.Sprint(n)}); !won || err != nil {
 			t.Fatal(won, err)
 		}

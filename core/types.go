@@ -44,6 +44,8 @@ type (
 	TimerGen uint64 // generation: a TimerFired whose Gen is stale is ignored
 	// Offset is a partition log offset.
 	Offset int64
+	// LogSlot is a position in the replicated command log (loglet).
+	LogSlot int64
 )
 
 // NodeRef names one specific boot of one node.

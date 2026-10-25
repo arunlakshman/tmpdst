@@ -88,7 +88,7 @@ type simRun struct {
 	clients  atomic.Int64
 	finished atomic.Bool
 
-	settled  int64 // the log tail when the nodes were last seen quiescent
+	settled  core.LogSlot // the log tail when the nodes were last seen quiescent
 	acks     int
 	regs     []*prometheus.Registry
 	window   int64
@@ -119,11 +119,11 @@ func (r *simRun) fail(format string, a ...any) {
 type recLog struct {
 	logcp.Log
 	mu   sync.Mutex
-	hist map[int64]logcp.Entry
+	hist map[core.LogSlot]logcp.Entry
 	viol []error
 }
 
-func (l *recLog) Append(ctx context.Context, slot int64, e logcp.Entry) (logcp.Entry, bool, error) {
+func (l *recLog) Append(ctx context.Context, slot core.LogSlot, e logcp.Entry) (logcp.Entry, bool, error) {
 	cur, won, err := l.Log.Append(ctx, slot, e)
 	if err == nil {
 		l.mu.Lock()
@@ -161,7 +161,7 @@ func (l *faultLog) pause() {
 
 var errInjected = errors.New("injected")
 
-func (l *faultLog) Append(ctx context.Context, slot int64, e logcp.Entry) (logcp.Entry, bool, error) {
+func (l *faultLog) Append(ctx context.Context, slot core.LogSlot, e logcp.Entry) (logcp.Entry, bool, error) {
 	l.pause()
 	if l.s.chance(5) {
 		return logcp.Entry{}, false, errInjected // never lands
@@ -174,7 +174,7 @@ func (l *faultLog) Append(ctx context.Context, slot int64, e logcp.Entry) (logcp
 	return cur, won, err
 }
 
-func (l *faultLog) Read(ctx context.Context, from int64, limit int) ([]logcp.Slot, error) {
+func (l *faultLog) Read(ctx context.Context, from core.LogSlot, limit int) ([]logcp.Slot, error) {
 	l.pause()
 	if l.s.chance(5) {
 		return nil, errInjected
@@ -182,7 +182,7 @@ func (l *faultLog) Read(ctx context.Context, from int64, limit int) ([]logcp.Slo
 	return l.inner.Read(ctx, from, limit)
 }
 
-func (l *faultLog) CheckTail(ctx context.Context) (int64, error) {
+func (l *faultLog) CheckTail(ctx context.Context) (core.LogSlot, error) {
 	l.pause()
 	if l.s.chance(5) {
 		return 0, errInjected
@@ -190,7 +190,7 @@ func (l *faultLog) CheckTail(ctx context.Context) (int64, error) {
 	return l.inner.CheckTail(ctx)
 }
 
-func (l *faultLog) TrimBelow(ctx context.Context, slot int64) (int, error) {
+func (l *faultLog) TrimBelow(ctx context.Context, slot core.LogSlot) (int, error) {
 	l.pause()
 	return l.inner.(logcp.Trimmer).TrimBelow(ctx, slot)
 }
@@ -423,7 +423,7 @@ func (r *simRun) chaos() {
 	grow := func(by int64) { // wait until the log has grown by `by` slots
 		start, _ := r.mem.CheckTail(context.Background())
 		for !r.finished.Load() {
-			if tail, _ := r.mem.CheckTail(context.Background()); tail >= start+by {
+			if tail, _ := r.mem.CheckTail(context.Background()); tail >= start+core.LogSlot(by) {
 				return
 			}
 			r.s.yield()
@@ -460,7 +460,7 @@ func (r *simRun) restartIfRunning(i int) {
 }
 
 // settle waits for every live node to apply the whole log.
-func (r *simRun) settle() int64 {
+func (r *simRun) settle() core.LogSlot {
 	for i := 0; i < 20000 && r.s.step < r.s.limit; i++ {
 		tail, _ := r.mem.CheckTail(context.Background())
 		ok := true
@@ -506,7 +506,7 @@ func runSimRun(seed uint64) (*simRun, simResult, error) {
 		r.s.limit *= 20
 	}
 	r.mem = logcp.NewMemLog()
-	r.rec = &recLog{Log: r.mem, hist: map[int64]logcp.Entry{}}
+	r.rec = &recLog{Log: r.mem, hist: map[core.LogSlot]logcp.Entry{}}
 	if r.mode == modeWindow {
 		r.window, r.stride, r.keep = 24, 8, 12
 	}
@@ -541,7 +541,7 @@ func runSimRun(seed uint64) (*simRun, simResult, error) {
 // ---- the independent model ------------------------------------------------
 
 type firstInfo struct {
-	slot int64
+	slot core.LogSlot
 	cmd  core.CommitSegment
 	rs   []core.BatchRange
 }
@@ -574,9 +574,9 @@ func buildModel(slots []logcp.Slot, window, stride int64) *model {
 	m := &model{window: window, stride: stride, first: map[string]firstInfo{},
 		runs: map[core.TopicPartition][]core.BatchRange{}, topics: map[string]int32{}, answers: map[string][]core.CPDone{}}
 	for _, sl := range slots {
-		if sl.N%stride == 0 && sl.N >= window {
+		if int64(sl.N)%stride == 0 && int64(sl.N) >= window {
 			for k, f := range m.first {
-				if f.slot < sl.N-window {
+				if f.slot < sl.N-core.LogSlot(window) {
 					delete(m.first, k)
 				}
 			}
@@ -593,7 +593,7 @@ func (m *model) grow(topic string, n int32) {
 	m.topics[topic] = max(m.topics[topic], n)
 }
 
-func (m *model) apply(slot int64, c logsm.Entry) core.CPDone {
+func (m *model) apply(slot core.LogSlot, c logsm.Entry) core.CPDone {
 	if c.Kind == logsm.KindCreateTopic {
 		if c.Topic == "" || c.Parts <= 0 {
 			return core.CPDone{Err: core.ErrInvalid}
@@ -697,7 +697,7 @@ func (r *simRun) check(res *simResult) error {
 	if len(nodes) == 0 {
 		return errors.New("no live node at the end")
 	}
-	byApplied := map[int64]*simNode{}
+	byApplied := map[core.LogSlot]*simNode{}
 	for _, n := range nodes {
 		if n.svc.Applied() < r.settled {
 			return fmt.Errorf("n%d applied %d, below the settled tail %d", n.idx, n.svc.Applied(), r.settled)
@@ -727,7 +727,7 @@ func (r *simRun) check(res *simResult) error {
 	return nil
 }
 
-func prefix(slots []logcp.Slot, n int64) []logcp.Slot {
+func prefix(slots []logcp.Slot, n core.LogSlot) []logcp.Slot {
 	i := 0
 	for i < len(slots) && slots[i].N < n {
 		i++
@@ -873,6 +873,6 @@ func TestSimIsDeterministic(t *testing.T) {
 	}
 }
 
-func (l *recLog) TrimBelow(ctx context.Context, slot int64) (int, error) {
+func (l *recLog) TrimBelow(ctx context.Context, slot core.LogSlot) (int, error) {
 	return l.Log.(logcp.Trimmer).TrimBelow(ctx, slot)
 }

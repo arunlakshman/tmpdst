@@ -110,11 +110,11 @@ func TestBacklogReplay(t *testing.T) {
 		for i := 0; i < rate*60; i++ {
 			e := s.command()
 			bytes += len(Encode(e))
-			_, _, _ = l.Append(bg, int64(i), e)
+			_, _, _ = l.Append(bg, core.LogSlot(i), e)
 		}
 		r := NewReplica(Config{Log: l, Writer: "r", ReadMax: 1000})
 		start := time.Now()
-		if err := r.SyncToNow(bg, int64(rate*60)); err != nil {
+		if err := r.SyncToNow(bg, core.LogSlot(rate*60)); err != nil {
 			t.Fatal(err)
 		}
 		d := time.Since(start)

@@ -44,7 +44,7 @@ func (r *replica) takeBatch() []Slot {
 	}
 	var b []Slot
 	for n := r.applied; len(b) < maxBatchSlots; n++ {
-		if len(b) > 0 && n%r.s.cfg.TrimStride == 0 {
+		if len(b) > 0 && int64(n)%r.s.cfg.TrimStride == 0 {
 			break
 		}
 		e, ok := r.buf[n]
@@ -64,8 +64,8 @@ func (r *replica) takeBatch() []Slot {
 // replica forgets the same keys at the same point of the log.
 func (r *replica) applyBatch(b []Slot) error {
 	t0 := time.Now()
-	if start := b[0].N; start%r.s.cfg.TrimStride == 0 && start >= r.s.cfg.WindowSlots {
-		if _, err := r.s.app.Trim(start - r.s.cfg.WindowSlots); err != nil {
+	if start := b[0].N; int64(start)%r.s.cfg.TrimStride == 0 && int64(start) >= r.s.cfg.WindowSlots {
+		if _, err := r.s.app.Trim(int64(start) - r.s.cfg.WindowSlots); err != nil {
 			return err
 		}
 	}
@@ -108,10 +108,10 @@ func (b *runBuf) flush(a *applier.Applier, res [][]core.CPDone) error {
 	return nil
 }
 
-func (r *replica) applyCmd(run *runBuf, res [][]core.CPDone, i, j int, slot int64, c logsm.Entry) error {
+func (r *replica) applyCmd(run *runBuf, res [][]core.CPDone, i, j int, slot core.LogSlot, c logsm.Entry) error {
 	switch c.Kind {
 	case logsm.KindCommit:
-		run.cmds = append(run.cmds, applier.Command{Slot: slot, Op: c.Commit})
+		run.cmds = append(run.cmds, applier.Command{Slot: int64(slot), Op: c.Commit})
 		run.where = append(run.where, [2]int{i, j})
 	case logsm.KindCreateTopic:
 		if err := run.flush(r.s.app, res); err != nil {
@@ -141,7 +141,7 @@ func (r *replica) complete(b []Slot, res [][]core.CPDone) {
 			delete(r.buf, n)
 		}
 	}
-	r.s.m.progress(r.applied, max(r.tail, r.high)-r.applied, !r.s.isActive())
+	r.s.m.progress(int64(r.applied), int64(max(r.tail, r.high)-r.applied), !r.s.isActive())
 	close(r.adv)
 	r.adv = make(chan struct{})
 }

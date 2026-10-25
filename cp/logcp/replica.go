@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+
+	"manifester/core"
 )
 
 // replica is the node's position in the log: the entries read but not yet
@@ -18,11 +20,11 @@ type replica struct {
 	applyMu sync.Mutex // one apply batch at a time; also held to start a snapshot
 
 	mu      sync.Mutex
-	applied int64           // every slot below is applied
-	high    int64           // 1 + highest slot seen or allocated: the next to allocate
-	tail    int64           // 1 + highest slot known to exist
-	buf     map[int64]Entry // read but not yet applicable (above a hole)
-	holeAt  int64           // when the slot at applied was first found empty, 0 = not waiting
+	applied core.LogSlot           // every slot below is applied
+	high    core.LogSlot           // 1 + highest slot seen or allocated: the next to allocate
+	tail    core.LogSlot           // 1 + highest slot known to exist
+	buf     map[core.LogSlot]Entry // read but not yet applicable (above a hole)
+	holeAt  int64                  // when the slot at applied was first found empty, 0 = not waiting
 	waiters map[string][]*pending
 	adv     chan struct{} // closed (and replaced) whenever applied moves
 	kick    chan struct{} // wakes the tailing loop
@@ -32,32 +34,32 @@ type replica struct {
 	seq     uint64
 
 	lastPullOK  int64
-	lastOtherAt int64 // when a slot of another writer was last applied
-	lastOwnAt   int64 // when a slot of this node was last applied
-	promoSlot   int64 // slots from here on are written after this node became active
-	lowerSeen   bool  // a writer of a lower rank wrote at or after promoSlot
+	lastOtherAt int64        // when a slot of another writer was last applied
+	lastOwnAt   int64        // when a slot of this node was last applied
+	promoSlot   core.LogSlot // slots from here on are written after this node became active
+	lowerSeen   bool         // a writer of a lower rank wrote at or after promoSlot
 }
 
 func newReplica(s *Service) *replica {
-	return &replica{s: s, buf: map[int64]Entry{}, waiters: map[string][]*pending{},
+	return &replica{s: s, buf: map[core.LogSlot]Entry{}, waiters: map[string][]*pending{},
 		adv: make(chan struct{}), kick: make(chan struct{}, 1)}
 }
 
 // startAt positions an empty replica after a restored checkpoint.
-func (r *replica) startAt(slot int64) {
+func (r *replica) startAt(slot core.LogSlot) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.applied, r.high, r.tail = slot, slot, slot
 }
 
-func (r *replica) appliedNow() int64 {
+func (r *replica) appliedNow() core.LogSlot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.applied
 }
 
 // position returns where the replica is and a channel that closes when that changes.
-func (r *replica) position() (applied int64, adv <-chan struct{}, blocked error) {
+func (r *replica) position() (applied core.LogSlot, adv <-chan struct{}, blocked error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.applied, r.adv, r.blocked
@@ -71,7 +73,7 @@ func (r *replica) newID() string {
 }
 
 // alloc reserves the next slot for a local append.
-func (r *replica) alloc() int64 {
+func (r *replica) alloc() core.LogSlot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := max(r.high, r.applied)
@@ -92,14 +94,14 @@ func (r *replica) unregister(id string) {
 }
 
 // observe records that slot n holds e and applies whatever became contiguous.
-func (r *replica) observe(n int64, e Entry) {
+func (r *replica) observe(n core.LogSlot, e Entry) {
 	r.mu.Lock()
 	r.addLocked(n, e)
 	r.mu.Unlock()
 	r.drain()
 }
 
-func (r *replica) addLocked(n int64, e Entry) {
+func (r *replica) addLocked(n core.LogSlot, e Entry) {
 	r.high = max(r.high, n+1)
 	r.tail = max(r.tail, n+1)
 	if n >= r.applied {
@@ -182,7 +184,7 @@ func (r *replica) holeTick(ctx context.Context) {
 
 // fill writes a no-op into the empty slot. Whoever wins the slot, the entry
 // that results is observed: the no-op, or the late original command.
-func (r *replica) fill(ctx context.Context, slot int64) {
+func (r *replica) fill(ctx context.Context, slot core.LogSlot) {
 	if r.s.trimmedPast(ctx, slot) {
 		return
 	}
@@ -214,7 +216,7 @@ func (r *replica) blockIfTrimmed(err error) {
 // slot is read instead: if it exists it is applied, if it is gone the node
 // stops (trimming leaves tombstones, which stop it the same way). It returns
 // true when it has dealt with the slot and the caller must not fill it.
-func (s *Service) trimmedPast(ctx context.Context, slot int64) bool {
+func (s *Service) trimmedPast(ctx context.Context, slot core.LogSlot) bool {
 	if !s.canCheckpoint() {
 		return false
 	}
@@ -222,7 +224,7 @@ func (s *Service) trimmedPast(ctx context.Context, slot int64) bool {
 	if err != nil {
 		return true // cannot tell; try again at the next tick
 	}
-	if it == nil || numAttr(it, "ck_slot") <= slot {
+	if it == nil || core.LogSlot(numAttr(it, "ck_slot")) <= slot {
 		return false
 	}
 	got, err := s.log.Read(ctx, slot, 1)

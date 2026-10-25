@@ -10,6 +10,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
+
+	"manifester/core"
 )
 
 // DB is the part of the DynamoDB client the service uses. *dynamodb.Client and
@@ -77,9 +79,9 @@ func nv(v int64) types.AttributeValue {
 	return &types.AttributeValueMemberN{Value: strconv.FormatInt(v, 10)}
 }
 
-func (l *DynLog) item(slot int64, e Entry) map[string]types.AttributeValue {
+func (l *DynLog) item(slot core.LogSlot, e Entry) map[string]types.AttributeValue {
 	it := map[string]types.AttributeValue{
-		"pk": sv(logPK), "sk": sv(slotKey(slot)),
+		"pk": sv(logPK), "sk": sv(slotKey(int64(slot))),
 		"d": &types.AttributeValueMemberB{Value: MarshalEntry(e, l.o.Version)},
 		"v": nv(int64(l.o.Version)), "w": sv(e.Writer), "id": sv(e.ID), "ts": nv(e.TS), "n": nv(int64(len(e.Cmds))),
 	}
@@ -92,7 +94,7 @@ func (l *DynLog) item(slot int64, e Entry) map[string]types.AttributeValue {
 // Append implements Log with one conditional PutItem. A failed condition
 // returns the existing item (ALL_OLD), so a loser learns the winner without
 // another read; if the service did not return it, one consistent Query does.
-func (l *DynLog) Append(ctx context.Context, slot int64, e Entry) (Entry, bool, error) {
+func (l *DynLog) Append(ctx context.Context, slot core.LogSlot, e Entry) (Entry, bool, error) {
 	it := l.item(slot, e)
 	if sz := len(it["d"].(*types.AttributeValueMemberB).Value) + itemOverhead; sz > MaxEntryBytes {
 		return Entry{}, false, ErrEntryTooLarge
@@ -116,7 +118,7 @@ func (l *DynLog) Append(ctx context.Context, slot int64, e Entry) (Entry, bool, 
 	return l.existing(ctx, slot)
 }
 
-func (l *DynLog) existing(ctx context.Context, slot int64) (Entry, bool, error) {
+func (l *DynLog) existing(ctx context.Context, slot core.LogSlot) (Entry, bool, error) {
 	got, err := l.Read(ctx, slot, 1)
 	if err != nil || len(got) == 0 || got[0].N != slot {
 		return Entry{}, false, fmt.Errorf("logcp: slot %d taken but unreadable: %w", slot, err)
@@ -138,15 +140,15 @@ func decodeSlot(it map[string]types.AttributeValue) (Slot, error) {
 		return Slot{}, err
 	}
 	e, err := decodeItem(it)
-	return Slot{N: n, E: e}, err
+	return Slot{N: core.LogSlot(n), E: e}, err
 }
 
 // Read implements Log with consistent Queries, paging until limit.
-func (l *DynLog) Read(ctx context.Context, from int64, limit int) ([]Slot, error) {
+func (l *DynLog) Read(ctx context.Context, from core.LogSlot, limit int) ([]Slot, error) {
 	var out []Slot
 	var start map[string]types.AttributeValue
 	for len(out) < limit {
-		page, err := l.query(ctx, slotKey(max(from, 0)), true, int32(limit-len(out)), start)
+		page, err := l.query(ctx, slotKey(int64(max(from, 0))), true, int32(limit-len(out)), start)
 		if err != nil {
 			return out, err
 		}
@@ -179,13 +181,13 @@ func (l *DynLog) query(ctx context.Context, lo string, forward bool, limit int32
 }
 
 // CheckTail implements Log with a consistent descending Query, Limit 1.
-func (l *DynLog) CheckTail(ctx context.Context) (int64, error) {
+func (l *DynLog) CheckTail(ctx context.Context) (core.LogSlot, error) {
 	page, err := l.query(ctx, slotKey(0), false, 1, nil)
 	if err != nil || len(page.Items) == 0 {
 		return 0, err
 	}
 	n, err := decodeSlotNum(page.Items[0])
-	return n + 1, err // whatever the slot holds (an unknown format, a tombstone), it is written
+	return core.LogSlot(n) + 1, err // whatever the slot holds (an unknown format, a tombstone), it is written
 }
 
 // trimBatch is the number of slots TrimBelow looks up and stubs per round.
@@ -201,7 +203,7 @@ const trimPK = "TRIM"
 // there is refused (the condition fails and the loser learns "trimmed") and
 // stops, instead of writing into an empty slot the others have long applied.
 // The tombstones expire by TTL after StubTTL.
-func (l *DynLog) TrimBelow(ctx context.Context, slot int64) (int, error) {
+func (l *DynLog) TrimBelow(ctx context.Context, slot core.LogSlot) (int, error) {
 	if slot <= 0 {
 		return 0, nil
 	}
@@ -215,7 +217,7 @@ func (l *DynLog) TrimBelow(ctx context.Context, slot int64) (int, error) {
 			TableName:              &l.table,
 			KeyConditionExpression: aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
 			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":p": sv(logPK), ":lo": sv(slotKey(from)), ":hi": sv(slotKey(slot - 1)),
+				":p": sv(logPK), ":lo": sv(slotKey(int64(from))), ":hi": sv(slotKey(int64(slot - 1))),
 			},
 			ProjectionExpression: aws.String("pk, sk"),
 			Limit:                aws.Int32(trimBatch),
@@ -228,25 +230,25 @@ func (l *DynLog) TrimBelow(ctx context.Context, slot int64) (int, error) {
 		}
 		total += len(page.Items)
 		last, _ := decodeSlotNum(page.Items[len(page.Items)-1])
-		from = last + 1
+		from = core.LogSlot(last) + 1
 	}
 	return total, l.setTrimmed(ctx, slot)
 }
 
-func (l *DynLog) trimmedBelow(ctx context.Context) (int64, error) {
+func (l *DynLog) trimmedBelow(ctx context.Context) (core.LogSlot, error) {
 	out, err := l.db.GetItem(ctx, &dynamodb.GetItemInput{TableName: &l.table, Key: pkSK(trimPK), ConsistentRead: aws.Bool(true)})
 	if err != nil {
 		return 0, err
 	}
-	return numAttr(out.Item, "tr_below"), nil
+	return core.LogSlot(numAttr(out.Item, "tr_below")), nil
 }
 
-func (l *DynLog) setTrimmed(ctx context.Context, slot int64) error {
+func (l *DynLog) setTrimmed(ctx context.Context, slot core.LogSlot) error {
 	_, err := l.db.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName:                 &l.table,
-		Item:                      map[string]types.AttributeValue{"pk": sv(trimPK), "sk": sv("-"), "tr_below": nv(slot)},
+		Item:                      map[string]types.AttributeValue{"pk": sv(trimPK), "sk": sv("-"), "tr_below": nv(int64(slot))},
 		ConditionExpression:       aws.String("attribute_not_exists(tr_below) OR tr_below < :s"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{":s": nv(slot)},
+		ExpressionAttributeValues: map[string]types.AttributeValue{":s": nv(int64(slot))},
 	})
 	var cc *types.ConditionalCheckFailedException
 	if errors.As(err, &cc) {

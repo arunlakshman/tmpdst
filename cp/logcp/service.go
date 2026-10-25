@@ -62,7 +62,7 @@ func (s *Service) Applier() *applier.Applier { return s.app }
 func (s *Service) Name() string { return s.cfg.Name }
 
 // Applied is the number of slots applied: slots 0..Applied()-1.
-func (s *Service) Applied() int64 { return s.rep.appliedNow() }
+func (s *Service) Applied() core.LogSlot { return s.rep.appliedNow() }
 
 // Blocked is non-nil once the node cannot apply the log any further (a slot
 // in a format newer than this build, or a failed store): it serves 503.

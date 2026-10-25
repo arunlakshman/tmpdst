@@ -19,7 +19,7 @@ import (
 // stay in the log (docs/design-a-prototype.md). It is a prototype for X5: there
 // is no restore into a veritas.ControlPlane.
 type Checkpoint struct {
-	Slot int64 // the first slot NOT covered: replay resumes here
+	Slot core.LogSlot // the first slot NOT covered: replay resumes here
 	Hash uint64
 	Ends []veritas.End
 	Keys [][16]byte // sorted
@@ -47,7 +47,7 @@ func (r *Replica) Checkpoint() Checkpoint {
 // Marshal serialises the checkpoint: slot, hash, ends grouped by topic with
 // delta-coded partition numbers, then the sorted key hashes verbatim.
 func (c Checkpoint) Marshal() []byte {
-	b := binary.AppendVarint(nil, c.Slot)
+	b := binary.AppendVarint(nil, int64(c.Slot))
 	b = binary.LittleEndian.AppendUint64(b, c.Hash)
 	var topics [][]veritas.End
 	for _, e := range c.Ends {
@@ -78,7 +78,7 @@ func (c Checkpoint) Marshal() []byte {
 // UnmarshalCheckpoint parses Marshal's output.
 func UnmarshalCheckpoint(b []byte) (Checkpoint, error) {
 	d := &decoder{b: b}
-	c := Checkpoint{Slot: d.i()}
+	c := Checkpoint{Slot: core.LogSlot(d.i())}
 	if len(d.b) < 8 {
 		return Checkpoint{}, errCorrupt
 	}

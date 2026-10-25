@@ -62,14 +62,14 @@ type Replica struct {
 
 	mu      sync.Mutex
 	cp      Machine
-	applied int64           // every slot below is applied
-	high    int64           // 1 + highest slot seen or allocated: the next to allocate
-	buf     map[int64]Entry // read but not yet applicable (above a hole)
-	syncing bool            // a tail read is in flight (the "bus stand")
+	applied core.LogSlot           // every slot below is applied
+	high    core.LogSlot           // 1 + highest slot seen or allocated: the next to allocate
+	buf     map[core.LogSlot]Entry // read but not yet applicable (above a hole)
+	syncing bool                   // a tail read is in flight (the "bus stand")
 	lastPul int64
 	holeAt  int64 // when the slot at applied was first found empty, 0 = not waiting
-	watch   map[int64]bool
-	done    map[int64]core.CPDone // results of watched slots
+	watch   map[core.LogSlot]bool
+	done    map[core.LogSlot]core.CPDone // results of watched slots
 	seq     uint64
 	st      Stats
 }
@@ -91,8 +91,8 @@ func NewReplica(cfg Config) *Replica {
 	if m == nil {
 		m = veritas.NewControlPlane()
 	}
-	return &Replica{cfg: cfg, cp: m, buf: map[int64]Entry{},
-		watch: map[int64]bool{}, done: map[int64]core.CPDone{}, lastPul: -1 << 62}
+	return &Replica{cfg: cfg, cp: m, buf: map[core.LogSlot]Entry{},
+		watch: map[core.LogSlot]bool{}, done: map[core.LogSlot]core.CPDone{}, lastPul: -1 << 62}
 }
 
 func defaultNs(v, d int64) int64 {
@@ -114,7 +114,7 @@ func sleepWait(ctx context.Context) error {
 }
 
 // Applied is the number of slots applied: slots 0..Applied()-1.
-func (r *Replica) Applied() int64 {
+func (r *Replica) Applied() core.LogSlot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.applied
@@ -143,7 +143,7 @@ func (r *Replica) newID() string {
 }
 
 // alloc reserves the next slot for a local append and watches its result.
-func (r *Replica) alloc() int64 {
+func (r *Replica) alloc() core.LogSlot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := max(r.high, r.applied)
@@ -153,7 +153,7 @@ func (r *Replica) alloc() int64 {
 }
 
 // unwatch drops the watch on slot n (the append lost it or gave up).
-func (r *Replica) unwatch(n int64) {
+func (r *Replica) unwatch(n core.LogSlot) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.watch, n)
@@ -162,7 +162,7 @@ func (r *Replica) unwatch(n int64) {
 
 // observe records that slot n holds e and applies whatever has become
 // contiguous. The caller holds mu.
-func (r *Replica) observeLocked(n int64, e Entry) {
+func (r *Replica) observeLocked(n core.LogSlot, e Entry) {
 	r.high = max(r.high, n+1)
 	if n >= r.applied {
 		r.buf[n] = e
@@ -179,7 +179,7 @@ func (r *Replica) observeLocked(n int64, e Entry) {
 	}
 }
 
-func (r *Replica) observe(n int64, e Entry) {
+func (r *Replica) observe(n core.LogSlot, e Entry) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.observeLocked(n, e)
@@ -188,7 +188,7 @@ func (r *Replica) observe(n int64, e Entry) {
 // applyLocked is the one place the state changes: slot n's command goes
 // through the veritas state machine. The result is kept only if a local
 // committer is waiting for it.
-func (r *Replica) applyLocked(n int64, e Entry) {
+func (r *Replica) applyLocked(n core.LogSlot, e Entry) {
 	var res core.CPDone
 	switch e.Kind {
 	case KindCommit:
@@ -248,7 +248,7 @@ func (r *Replica) pullLocked(ctx context.Context, now int64) {
 
 // holeDue reports whether the slot at applied has been empty for HoleAfter
 // (starting the timer on first sight), and which slot it is.
-func (r *Replica) holeDue() (slot int64, due bool) {
+func (r *Replica) holeDue() (slot core.LogSlot, due bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.cfg.Now()
@@ -260,7 +260,7 @@ func (r *Replica) holeDue() (slot int64, due bool) {
 
 // fill writes a no-op into the empty slot. Whoever wins the slot, the entry
 // that results is observed: the no-op, or the late original command.
-func (r *Replica) fill(ctx context.Context, slot int64) {
+func (r *Replica) fill(ctx context.Context, slot core.LogSlot) {
 	cur, _, err := r.cfg.Log.Append(ctx, slot, Entry{Kind: KindNoop, ID: r.newID()})
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -276,16 +276,16 @@ func (r *Replica) fill(ctx context.Context, slot int64) {
 // SyncTo applies the log through slot target-1: it reads the tail (paced),
 // waits for slots still in flight, and fills a hole that stays empty past
 // HoleAfter. It returns ctx's error only.
-func (r *Replica) SyncTo(ctx context.Context, target int64) error {
+func (r *Replica) SyncTo(ctx context.Context, target core.LogSlot) error {
 	return r.syncTo(ctx, target, r.pullPaced)
 }
 
 // SyncToNow is SyncTo with an immediate first pull (not paced by TailPoll).
-func (r *Replica) SyncToNow(ctx context.Context, target int64) error {
+func (r *Replica) SyncToNow(ctx context.Context, target core.LogSlot) error {
 	return r.syncTo(ctx, target, r.pullNow)
 }
 
-func (r *Replica) syncTo(ctx context.Context, target int64, firstPull func(context.Context)) error {
+func (r *Replica) syncTo(ctx context.Context, target core.LogSlot, firstPull func(context.Context)) error {
 	pull := firstPull
 	for {
 		if r.Applied() >= target {
@@ -307,7 +307,7 @@ func (r *Replica) syncTo(ctx context.Context, target int64, firstPull func(conte
 }
 
 // Await returns the result of the local append at slot n once n is applied.
-func (r *Replica) Await(ctx context.Context, n int64) (core.CPDone, error) {
+func (r *Replica) Await(ctx context.Context, n core.LogSlot) (core.CPDone, error) {
 	if err := r.SyncTo(ctx, n+1); err != nil {
 		r.unwatch(n)
 		return core.CPDone{}, err

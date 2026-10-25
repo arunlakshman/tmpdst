@@ -54,7 +54,7 @@ func (c *Committer) Do(ctx context.Context, e Entry) (core.CPDone, error) {
 // write appends e at slot n. The append is conditional, so an unknown outcome
 // is retried at the same slot: it either lands, or fails and shows what is
 // there, which is ours iff the ID matches.
-func (c *Committer) write(ctx context.Context, n int64, e Entry) (bool, error) {
+func (c *Committer) write(ctx context.Context, n core.LogSlot, e Entry) (bool, error) {
 	for {
 		cur, won, err := c.r.cfg.Log.Append(ctx, n, e)
 		if err == nil {

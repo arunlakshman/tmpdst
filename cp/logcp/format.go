@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"manifester/core"
 	"manifester/cp/logsm"
 )
 
@@ -67,7 +68,7 @@ type Entry struct {
 
 // Slot is an entry with its position.
 type Slot struct {
-	N int64
+	N core.LogSlot
 	E Entry
 }
 

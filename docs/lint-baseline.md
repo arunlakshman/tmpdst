@@ -1,6 +1,9 @@
 # Lint baseline
 
-All enabled rules in `.golangci.yml` are enforced on the whole tree. The
+All enabled rules in `.golangci.yml` are enforced on the whole tree. Any
+finding fails `golangci-lint` (and therefore `make lint` / `make build`):
+`run.issues-exit-code: 1`, with unlimited `max-issues-per-linter` /
+`max-same-issues` so nothing is capped into a soft warning. The
 `issues.new-from-rev` grandfathering (formerly `41894c2`) has been removed;
 design-rule debt (nonamedreturns, forbidigo, funlen, gocognit, nestif, errname,
 interfacebloat, dupl) is paid.

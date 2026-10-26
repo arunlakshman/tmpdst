@@ -31,7 +31,8 @@ fmt-check:
 vet:
 	go vet ./...
 
-# Effective Go rules via .golangci.yml (terse; capped per linter). See docs/lint-baseline.md.
+# Effective Go rules via .golangci.yml. Any finding fails the build (exit 1).
+# See docs/lint-baseline.md.
 lint:
 	golangci-lint run ./...
 

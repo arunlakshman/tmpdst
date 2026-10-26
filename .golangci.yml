@@ -1,10 +1,8 @@
-# golangci-lint v2. All enabled rules are enforced on the whole tree (no
-# new-from-rev grandfathering). time.Now in core/ sim/ is NOT linted here:
-# tools/detcheck owns determinism (import allow-list), do not duplicate.
 version: "2"
 run:
   timeout: 5m
   tests: true
+  issues-exit-code: 1
 output:
   formats:
     text:
@@ -13,8 +11,8 @@ output:
       print-linter-name: true
       colors: false
 issues:
-  max-issues-per-linter: 20
-  max-same-issues: 3
+  max-issues-per-linter: 0
+  max-same-issues: 0
 linters:
   default: none
   enable:
@@ -28,24 +26,22 @@ linters:
     - nolintlint
     - usestdlibvars
     - copyloopvar
-    - nonamedreturns # task 20
-    - forbidigo      # tasks 15 (panic), 22 (time.Now in cp/logcp, cp/logsm)
-    - funlen         # task 13/14
-    - gocognit       # task 13/14
-    - nestif         # task 21
-    - errname        # task 17
-    - interfacebloat # task 24
-    - dupl           # task 10
-    - asciicheck     # non-ASCII identifiers (comments/strings: scripts/ascii-check.sh)
-    - bidichk        # bidi control chars (trojan source)
-    - unused         # dead code
-    - bodyclose      # unclosed HTTP response bodies
-    - noctx          # HTTP/net calls missing context
-    - gosec          # security scanner
+    - nonamedreturns
+    - forbidigo
+    - funlen
+    - gocognit
+    - nestif
+    - errname
+    - interfacebloat
+    - dupl
+    - asciicheck
+    - bidichk
+    - unused
+    - bodyclose
+    - noctx
+    - gosec
   settings:
     gosec:
-      # G115 (int-to-uint cast) is noise here: FNV folds and Kafka/wire widths are
-      # intentional. Real overflow bugs are caught by tests and reviews.
       excludes:
         - G115
     nonamedreturns:
@@ -91,24 +87,18 @@ linters:
       - testdata
       - build
     rules:
-      # panic: impossible state in core/sim/tools, the veritas reference machine
-      # (it mirrors sim), and tests.
       - linters: [forbidigo]
         text: 'panic'
         path: '^(core|sim|tools|veritas)/|_test\.go$'
-      # applier mirrors veritas; store corruption / type mismatch are impossible under correct wiring.
       - linters: [forbidigo]
         text: 'panic'
         path: '^cp/applier/'
-      # time.Now: banned only in cp/logcp and cp/logsm (path-except inverts the match).
-      # env.go is the one place the real clock is wired in.
       - linters: [forbidigo]
         text: 'time\.Now'
         path-except: '^cp/(logcp|logsm)/'
       - linters: [forbidigo]
         text: 'time\.Now'
         path: '^cp/(logcp|logsm)/(env\.go|.*_test\.go)$'
-      # size/dupe rules are for production code.
       - linters: [funlen, gocognit, nestif, dupl, interfacebloat]
         path: '_test\.go$'
 formatters:

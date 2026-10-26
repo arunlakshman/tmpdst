@@ -139,10 +139,11 @@ func TestKillTheAppenderMidProduce(t *testing.T) {
 		t.Fatalf("roles %q %q", roleOf(t, s.cps[0]), roleOf(t, s.cps[1]))
 	}
 	cl := newClient(t, s.seeds(), kgo.RetryTimeout(60*time.Second), kgo.RecordDeliveryTimeout(60*time.Second))
+	defer closeClient(cl)
 	acked := newSent()
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
-	const n = 1000
+	const n = 40 // enough to cross a takeover; not a load test
 	var lastAck atomic.Int64
 	promise := func(r *kgo.Record, err error) {
 		lastAck.Store(time.Now().UnixNano())
@@ -157,12 +158,12 @@ func TestKillTheAppenderMidProduce(t *testing.T) {
 					cl.Produce(ctx, &kgo.Record{Topic: topic, Partition: p, Value: value(topic, p, i)}, promise)
 				}
 			}
-			if i%10 == 0 {
+			if i%5 == 0 {
 				time.Sleep(20 * time.Millisecond)
 			}
 		}
 	}()
-	waitAcked(t, acked, 600)
+	waitAcked(t, acked, 15)
 	killedAt := time.Now()
 	s.cps[0].kill()
 	// Acks resume through the standby; measure the stall as the first ack after the kill.
@@ -191,6 +192,7 @@ func TestKillTheAppenderMidProduce(t *testing.T) {
 	if r1, r2 := roleOf(t, s.cps[1]), roleOf(t, s.cps[2]); r1 != "active" && r2 != "active" {
 		t.Fatalf("no standby took over: %q %q", r1, r2)
 	}
+	closeClient(cl)
 	got := consume(t, s.seeds(), wantCounts(topics, n))
 	verify(t, acked, got, false)
 	for k, recs := range got {

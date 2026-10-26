@@ -1,0 +1,10 @@
+# Host tools for `make build` / the pre-commit hook.
+# Bootstrap: install https://mise.jdx.dev then run  mise install
+# (installs go + golangci-lint, then postinstall runs make install-hooks).
+
+[tools]
+go = "1.26.10"
+golangci-lint = "2.15.0"
+
+[hooks]
+postinstall = "make install-hooks"

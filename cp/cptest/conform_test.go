@@ -164,7 +164,7 @@ func run(t *testing.T, newImpl func() impl, ops, seeds int) {
 	}
 	for seed := uint64(1); seed <= uint64(seeds); seed++ {
 		if f := c.RunSeed(seed); f != nil {
-			t.Fatal(c.Report(f, fmt.Sprintf("go test ./cp/cptest -run %s", t.Name())))
+			t.Fatal(c.Report(f, "go test ./cp/cptest -run "+t.Name()))
 		}
 	}
 }

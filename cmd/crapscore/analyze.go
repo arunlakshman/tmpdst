@@ -59,7 +59,7 @@ func Complexity(fn ast.Node) int {
 }
 
 func isGenerated(src []byte) bool {
-	for _, line := range strings.Split(string(src), "\n") {
+	for line := range strings.SplitSeq(string(src), "\n") {
 		if strings.HasPrefix(line, "package ") {
 			return false
 		}

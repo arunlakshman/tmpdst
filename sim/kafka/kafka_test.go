@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"slices"
 	"sync/atomic"
 	"testing"
 
@@ -389,10 +390,8 @@ func TestCachedStateHashMatchesFull(t *testing.T) {
 func TestCommitLimitRefusesUncappedSegment(t *testing.T) {
 	cfg := config(nil, broker.BugNoPartitionCap)
 	for s := uint64(1); s <= 40; s++ {
-		for _, p := range violated(cfg, s) {
-			if p == "broker: segment exceeds the control plane's commit size" {
-				return
-			}
+		if slices.Contains(violated(cfg, s), "broker: segment exceeds the control plane's commit size") {
+			return
 		}
 	}
 	t.Fatal("no seed in 40 had the control plane refuse an uncapped segment")

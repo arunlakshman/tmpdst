@@ -2,7 +2,8 @@ package main
 
 import (
 	"fmt"
-	"sort"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 )
@@ -109,21 +110,15 @@ func pct(sorted []time.Duration, p float64) time.Duration {
 	if len(sorted) == 0 {
 		return 0
 	}
-	i := int(p/100*float64(len(sorted))+0.999999999) - 1
-	if i < 0 {
-		i = 0
-	}
-	if i >= len(sorted) {
-		i = len(sorted) - 1
-	}
-	return sorted[i]
+	i := max(0, int(p/100*float64(len(sorted))+0.999999999)-1)
+	return sorted[min(i, len(sorted)-1)]
 }
 
 func (s *stats) summarize(elapsed time.Duration) summary {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sorted := append([]time.Duration(nil), s.lat...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	slices.Sort(sorted)
 	sm := summary{N: int64(len(sorted)), Bytes: s.bytes, Elapsed: elapsed, Errors: s.errCount,
 		FirstErrors: append([]string(nil), s.errFirst...)}
 	if len(sorted) > 0 {
@@ -143,13 +138,14 @@ func formatSummary(sm summary) string {
 	if secs <= 0 {
 		secs = 1
 	}
-	out := fmt.Sprintf("SUMMARY: %d records (%.2f MiB) in %v, %.2f records/sec (%.2f MiB/sec)\n",
+	var out strings.Builder
+	fmt.Fprintf(&out, "SUMMARY: %d records (%.2f MiB) in %v, %.2f records/sec (%.2f MiB/sec)\n",
 		sm.N, float64(sm.Bytes)/mib, sm.Elapsed.Round(time.Millisecond), float64(sm.N)/secs, float64(sm.Bytes)/mib/secs)
-	out += fmt.Sprintf("latency: min %v avg %v p50 %v p90 %v p99 %v max %v\n",
+	fmt.Fprintf(&out, "latency: min %v avg %v p50 %v p90 %v p99 %v max %v\n",
 		rd(sm.Min), rd(sm.Avg), rd(sm.P50), rd(sm.P90), rd(sm.P99), rd(sm.Max))
-	out += fmt.Sprintf("produce errors: %d\n", sm.Errors)
+	fmt.Fprintf(&out, "produce errors: %d\n", sm.Errors)
 	for _, e := range sm.FirstErrors {
-		out += "  error: " + e + "\n"
+		out.WriteString("  error: " + e + "\n")
 	}
-	return out
+	return out.String()
 }

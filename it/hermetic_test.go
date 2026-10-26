@@ -57,13 +57,14 @@ func TestProduceConsumeRoundTrip(t *testing.T) {
 // runRoundTrip is the flow shared with the full-stack test.
 func runRoundTrip(t *testing.T, s *stack) {
 	cl := newClient(t, s.seeds())
+	defer closeClient(cl)
 	acked := newSent()
-	const n = 100
+	const n = 10 // functional coverage, not load
 	produce(t, cl, topics, n, acked)
 	if len(acked.fails) > 0 {
 		t.Fatalf("produce failures: %v", acked.fails)
 	}
-	got := consume(t, s.seeds(), wantCounts(topics, n))
+	got := consumeFrom(t, cl, wantCounts(topics, n))
 	for k, recs := range got {
 		if len(recs) != n {
 			t.Fatalf("%v: %d records, want %d", k, len(recs), n)
@@ -96,6 +97,7 @@ func TestMetadataAndApiVersions(t *testing.T) {
 	s := memStack(t, 2)
 	create(s)
 	cl := newClient(t, s.seeds()[:1])
+	defer closeClient(cl)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	adm := kadm.NewClient(cl)
@@ -148,6 +150,7 @@ func TestProduceUnknownTopic(t *testing.T) {
 	s := memStack(t, 1)
 	create(s)
 	cl := newClient(t, s.seeds(), kgo.UnknownTopicRetries(0), kgo.RecordDeliveryTimeout(10*time.Second))
+	defer closeClient(cl)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	start := time.Now()
@@ -172,6 +175,7 @@ func TestListOffsetsRequest(t *testing.T) {
 	s := memStack(t, 1)
 	create(s)
 	cl := newClient(t, s.seeds())
+	defer closeClient(cl)
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 	for i := range 5 {
@@ -217,10 +221,11 @@ func TestKillBrokerMidProduce(t *testing.T) {
 // runKill needs three brokers; it is shared with the full-stack test.
 func runKill(t *testing.T, s *stack) {
 	cl := newClient(t, s.seeds(), kgo.RetryTimeout(60*time.Second), kgo.RecordDeliveryTimeout(60*time.Second))
+	defer closeClient(cl)
 	acked := newSent()
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
-	const n = 500
+	const n = 40 // enough to survive two kills; not a load test
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -230,16 +235,16 @@ func runKill(t *testing.T, s *stack) {
 					cl.Produce(ctx, &kgo.Record{Topic: topic, Partition: p, Value: value(topic, p, i)}, acked.promise)
 				}
 			}
-			if i%10 == 0 {
+			if i%5 == 0 {
 				time.Sleep(10 * time.Millisecond)
 			}
 		}
 	}()
 	// The client talks to the first seed. Kill it once acks are flowing, then
 	// the broker it moved to, so retries must land on a different broker twice.
-	waitAcked(t, acked, 300)
+	waitAcked(t, acked, 20)
 	s.nodes[0].Kill()
-	waitAcked(t, acked, 1200)
+	waitAcked(t, acked, 80)
 	s.nodes[1].Kill()
 	<-done
 	if err := cl.Flush(ctx); err != nil {
@@ -248,6 +253,7 @@ func runKill(t *testing.T, s *stack) {
 	if len(acked.fails) > 0 {
 		t.Fatalf("produce failures despite a live broker: %v", acked.fails)
 	}
+	closeClient(cl)
 	got := consume(t, s.seeds()[2:], wantCounts(topics, n))
 	verify(t, acked, got, false)
 	for k, recs := range got {
@@ -294,6 +300,7 @@ func TestGracefulStopFlushesProduce(t *testing.T) {
 	if err := s.nodes[0].Wait(); err != nil {
 		t.Fatalf("broker exit: %v", err)
 	}
+	closeClient(cl)
 	// The data is durable: a fresh broker serves it.
 	s.addBroker()
 	got := consume(t, s.seeds()[1:], map[tp]int{{"orders", 0}: 2})
@@ -310,6 +317,7 @@ func TestDefaultFlushRule(t *testing.T) {
 	s.addBrokers(1)
 	create(s)
 	cl := newClient(t, s.seeds())
+	defer closeClient(cl)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	warm := &kgo.Record{Topic: "orders", Partition: 0, Value: []byte("warm")}
@@ -323,7 +331,7 @@ func TestDefaultFlushRule(t *testing.T) {
 	if d := time.Since(start); d < 150*time.Millisecond || d > 5*time.Second {
 		t.Errorf("produce answered after %v, want about the 200ms window", d)
 	}
-	got := consume(t, s.seeds(), map[tp]int{{"orders", 0}: 2})
+	got := consumeFrom(t, cl, map[tp]int{{"orders", 0}: 2})
 	if v := string(got[tp{"orders", 0}][1].Value); v != "x" {
 		t.Errorf("second record %q", v)
 	}

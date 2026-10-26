@@ -4,6 +4,7 @@ package enginetest
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"manifester/core"
 	"manifester/sim"
@@ -180,11 +181,11 @@ func (c *Ctx) step() bool {
 
 // Trace renders the deliveries for equality checks.
 func (c *Ctx) Trace() string {
-	s := ""
+	var s strings.Builder
 	for _, d := range c.Delivered {
-		s += fmt.Sprintf("%d %s %#v\n", d.At, d.To.Node, d.Body)
+		fmt.Fprintf(&s, "%d %s %#v\n", d.At, d.To.Node, d.Body)
 	}
-	return s
+	return s.String()
 }
 
 type asserts struct{ c *Ctx }

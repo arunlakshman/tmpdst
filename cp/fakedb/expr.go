@@ -88,7 +88,7 @@ func evalCond(expr *string, vals item, cur item) (bool, error) {
 	if expr == nil {
 		return true, nil
 	}
-	for _, alt := range strings.Split(*expr, " OR ") {
+	for alt := range strings.SplitSeq(*expr, " OR ") {
 		ok, err := evalAtom(strings.TrimSpace(alt), vals, cur)
 		if ok || err != nil {
 			return ok, err
@@ -130,7 +130,7 @@ func applyUpdate(expr string, vals item, key, cur item) (item, []string, error) 
 	if verb != "SET" && verb != "ADD" {
 		return nil, nil, validation("unsupported update %q", expr)
 	}
-	for _, clause := range strings.Split(rest, ",") {
+	for clause := range strings.SplitSeq(rest, ",") {
 		name, err := applyClause(verb, strings.Fields(clause), vals, out)
 		if err != nil {
 			return nil, nil, err

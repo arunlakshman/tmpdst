@@ -3,6 +3,7 @@ package it
 import (
 	"context"
 	"net"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"manifester/cp"
 	"manifester/cp/cpclient"
 	"manifester/sys"
+	"manifester/sys/httppool"
 	"manifester/sys/prod"
 	"manifester/veritas/vsys"
 )
@@ -34,8 +36,15 @@ func newStack(t *testing.T, st cp.Store, objs sys.ObjectStore, cls sys.Classifie
 	if objs == nil {
 		objs, cls = vsys.NewObjectStore(), prod.MemClassifier{}
 	}
+	// One pooled client shared by every broker: reuse CP connections instead of
+	// dialing per request (macOS ephemeral-port pressure).
+	hc := srv.Client()
+	if tr, ok := hc.Transport.(*http.Transport); ok {
+		httppool.Configure(tr)
+	}
+	t.Cleanup(hc.CloseIdleConnections)
 	// A short window keeps the suite fast; TestDefaultFlushRule runs the real defaults.
-	s := &stack{t: t, cp: cpclient.New(srv.URL, srv.Client()), objs: objs, objCls: cls,
+	s := &stack{t: t, cp: cpclient.New(srv.URL, hc), objs: objs, objCls: cls,
 		brokers: broker.Config{BatchWindow: core.Duration(20 * time.Millisecond)}}
 	t.Cleanup(func() {
 		for _, n := range s.nodes {

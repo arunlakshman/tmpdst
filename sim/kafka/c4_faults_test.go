@@ -374,11 +374,11 @@ func faults() []fault {
 			var c []partRef
 			seen := map[[2]any]bool{}
 			ps := w.anyParts() // time order: walk back to find the last read per (client, tp)
-			for i := len(ps) - 1; i >= 0; i-- {
-				ro := w.ops[ps[i].op].Op.(kafka.ReadOp)
-				k := [2]any{ro.Client, ro.Parts[ps[i].part].TP}
-				if !seen[k] && len(w.part(ps[i]).Recs) > 0 {
-					c = append(c, ps[i])
+			for _, p := range slices.Backward(ps) {
+				ro := w.ops[p.op].Op.(kafka.ReadOp)
+				k := [2]any{ro.Client, ro.Parts[p.part].TP}
+				if !seen[k] && len(w.part(p).Recs) > 0 {
+					c = append(c, p)
 				}
 				seen[k] = true
 			}

@@ -20,8 +20,8 @@ func parseSize(s string) (int64, error) {
 	}
 	mult := 1.0
 	for _, u := range units {
-		if strings.HasSuffix(t, u.suffix) {
-			t, mult = strings.TrimSpace(strings.TrimSuffix(t, u.suffix)), u.mult
+		if before, ok := strings.CutSuffix(t, u.suffix); ok {
+			t, mult = strings.TrimSpace(before), u.mult
 			break
 		}
 	}

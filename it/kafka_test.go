@@ -3,6 +3,7 @@ package it
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,25 @@ type tp struct {
 	part  int32
 }
 
+// dialBroker dials with a short retry on macOS EADDRNOTAVAIL (see isDialErr).
+func dialBroker(ctx context.Context, network, host string) (net.Conn, error) {
+	d := net.Dialer{Timeout: 10 * time.Second}
+	var last error
+	for range 5 {
+		c, err := d.DialContext(ctx, network, host)
+		if err == nil || !isDialErr(err) {
+			return c, err
+		}
+		last = err
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return nil, last
+}
+
 func newClient(t *testing.T, seeds []string, opts ...kgo.Opt) *kgo.Client {
 	t.Helper()
 	opts = append([]kgo.Opt{
@@ -25,13 +45,22 @@ func newClient(t *testing.T, seeds []string, opts ...kgo.Opt) *kgo.Client {
 		kgo.ProducerLinger(2 * time.Millisecond),
 		kgo.MetadataMinAge(100 * time.Millisecond), // default 5s makes broker failover slow
 		kgo.RetryBackoffFn(func(int) time.Duration { return 50 * time.Millisecond }),
+		kgo.Dialer(dialBroker),
 	}, opts...)
 	cl, err := kgo.NewClient(opts...)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Safety net; prefer closeClient when a phase finishes so sockets are not
+	// held until the end of a multi-step test (TIME_WAIT pile-up on macOS).
 	t.Cleanup(cl.Close)
 	return cl
+}
+
+func closeClient(cl *kgo.Client) {
+	if cl != nil {
+		cl.Close()
+	}
 }
 
 // sent is what a producer was told about the records it acked.
@@ -76,20 +105,39 @@ func produce(t *testing.T, cl *kgo.Client, topics map[string]int32, n int, s *se
 	}
 }
 
-// consume reads every partition in want from offset 0 until it has want[tp]
-// records (or fails at the deadline). It never joins a group.
-func consume(t *testing.T, seeds []string, want map[tp]int) map[tp][]*kgo.Record {
-	t.Helper()
+func consumeParts(want map[tp]int) map[string]map[int32]kgo.Offset {
 	parts := map[string]map[int32]kgo.Offset{}
-	total := 0
-	for k, n := range want {
+	for k := range want {
 		if parts[k.topic] == nil {
 			parts[k.topic] = map[int32]kgo.Offset{}
 		}
 		parts[k.topic][k.part] = kgo.NewOffset().AtStart()
+	}
+	return parts
+}
+
+// consumeFrom attaches want to an existing client and reads them. Prefer this
+// over consume so produce+consume+admin share one dial set.
+func consumeFrom(t *testing.T, cl *kgo.Client, want map[tp]int) map[tp][]*kgo.Record {
+	t.Helper()
+	cl.AddConsumePartitions(consumeParts(want))
+	return pollWant(t, cl, want)
+}
+
+// consume dials a dedicated client, reads want, and closes immediately.
+func consume(t *testing.T, seeds []string, want map[tp]int) map[tp][]*kgo.Record {
+	t.Helper()
+	cl := newClient(t, seeds, kgo.ConsumePartitions(consumeParts(want)))
+	defer closeClient(cl)
+	return pollWant(t, cl, want)
+}
+
+func pollWant(t *testing.T, cl *kgo.Client, want map[tp]int) map[tp][]*kgo.Record {
+	t.Helper()
+	total := 0
+	for _, n := range want {
 		total += n
 	}
-	cl := newClient(t, seeds, kgo.ConsumePartitions(parts))
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 	got := map[tp][]*kgo.Record{}
@@ -111,7 +159,6 @@ func consume(t *testing.T, seeds []string, want map[tp]int) map[tp][]*kgo.Record
 			t.FailNow()
 		}
 	}
-	// A moment more, to catch records beyond the expected ones (duplicates).
 	extra, ecancel := context.WithTimeout(ctx, 300*time.Millisecond)
 	defer ecancel()
 	cl.PollFetches(extra).EachRecord(func(r *kgo.Record) {

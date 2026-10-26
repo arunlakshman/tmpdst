@@ -128,11 +128,11 @@ func TestRoutesMatchHandler(t *testing.T) {
 // wireTypes maps each component schema to its Go wire type. Schemas listed in
 // noGoType are spec-only.
 var wireTypes = map[string]reflect.Type{
-	"Batch": reflect.TypeOf(cp.Batch{}), "Range": reflect.TypeOf(cp.Range{}),
-	"CommitReq": reflect.TypeOf(cp.CommitReq{}), "CommitResp": reflect.TypeOf(cp.CommitResp{}),
-	"LookupReq": reflect.TypeOf(cp.LookupReq{}), "LookupResp": reflect.TypeOf(cp.LookupResp{}),
-	"DescribeReq": reflect.TypeOf(cp.DescribeReq{}), "Topic": reflect.TypeOf(cp.Topic{}), "DescribeResp": reflect.TypeOf(cp.DescribeResp{}),
-	"CreateTopicReq": reflect.TypeOf(cp.CreateTopicReq{}), "CreateTopicResp": reflect.TypeOf(cp.CreateTopicResp{}),
+	"Batch": reflect.TypeFor[cp.Batch](), "Range": reflect.TypeFor[cp.Range](),
+	"CommitReq": reflect.TypeFor[cp.CommitReq](), "CommitResp": reflect.TypeFor[cp.CommitResp](),
+	"LookupReq": reflect.TypeFor[cp.LookupReq](), "LookupResp": reflect.TypeFor[cp.LookupResp](),
+	"DescribeReq": reflect.TypeFor[cp.DescribeReq](), "Topic": reflect.TypeFor[cp.Topic](), "DescribeResp": reflect.TypeFor[cp.DescribeResp](),
+	"CreateTopicReq": reflect.TypeFor[cp.CreateTopicReq](), "CreateTopicResp": reflect.TypeFor[cp.CreateTopicResp](),
 }
 
 var noGoType = []string{"ErrCode", "ErrorBody"}
@@ -145,13 +145,13 @@ type field struct {
 
 func jsonFields(t reflect.Type) []field {
 	var out []field
-	for i := 0; i < t.NumField(); i++ {
-		tag := t.Field(i).Tag.Get("json")
+	for field0 := range t.Fields() {
+		tag := field0.Tag.Get("json")
 		name, opts, _ := strings.Cut(tag, ",")
 		if name == "" || name == "-" {
 			continue
 		}
-		out = append(out, field{name, !strings.Contains(opts, "omitempty"), t.Field(i).Type})
+		out = append(out, field{name, !strings.Contains(opts, "omitempty"), field0.Type})
 	}
 	return out
 }

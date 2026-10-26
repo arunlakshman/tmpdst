@@ -40,6 +40,8 @@ linters:
     - bodyclose
     - noctx
     - gosec
+    - modernize
+    - perfsprint
   settings:
     gosec:
       excludes:

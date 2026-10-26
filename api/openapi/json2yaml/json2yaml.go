@@ -6,8 +6,8 @@ package json2yaml
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -106,7 +106,7 @@ func literal(s string) bool {
 			return false
 		}
 	}
-	for _, ln := range strings.Split(s, "\n") {
+	for ln := range strings.SplitSeq(s, "\n") {
 		if strings.HasSuffix(ln, " ") {
 			return false
 		}
@@ -120,7 +120,7 @@ func inline(v any) (string, bool) {
 	case nil:
 		return "null", true
 	case bool:
-		return fmt.Sprint(x), true
+		return strconv.FormatBool(x), true
 	case json.Number:
 		return x.String(), true
 	case string:
@@ -179,7 +179,7 @@ func item(v any, pad string) []string {
 
 func text(s, pad string) []string {
 	var out []string
-	for _, ln := range strings.Split(s, "\n") {
+	for ln := range strings.SplitSeq(s, "\n") {
 		if ln == "" {
 			out = append(out, "")
 		} else {

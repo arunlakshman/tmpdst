@@ -160,7 +160,7 @@ func (o *oracle) checkRead(v sim.View, ro ReadOp, rr ReadRes) {
 			continue
 		}
 		as.Always(part.HWM <= int64(len(pl.vals)), "kafka: a fetch never reports a high watermark above the committed log",
-			append(det[:len(det):len(det)], core.Detail{Key: "hwm", Value: part.HWM})...)
+			append(slices.Clip(det), core.Detail{Key: "hwm", Value: part.HWM})...)
 		key := [2]int{ro.Client, ti}
 		as.Always(from.Off == o.cpos[key], "kafka: a consumer resumes exactly where its last read ended", det...)
 		for j, r := range part.Recs {

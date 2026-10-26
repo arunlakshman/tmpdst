@@ -421,10 +421,7 @@ func (e *Engine) send(ctx sim.EngineCtx, from core.NodeRef, a core.Send) {
 	for len(data) > 0 {
 		n := len(data)
 		if m := e.f.PartialIOMax; m > 0 && n > m {
-			n = int(r.Between(1, int64(m)+1))
-			if n > len(data) {
-				n = len(data)
-			}
+			n = min(int(r.Between(1, int64(m)+1)), len(data))
 		}
 		chunk := append([]byte(nil), data[:n]...)
 		data = data[n:]

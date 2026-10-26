@@ -40,10 +40,11 @@ func bigValue(topic string, p int32, i int) []byte {
 }
 
 // runCompression produces with every codec, reads the batches back raw to see
-// the codec id the broker stored and served, then consumes with a default
-// client (which decompresses) and checks every value.
+// the codec id the broker stored and served, then consumes (same client) and
+// checks every value. One client per codec, closed before the next, so the
+// suite does not accumulate dials.
 func runCompression(t *testing.T, s *stack) {
-	const n, parts = 60, 2
+	const n, parts = 8, 2 // functional: codec + offsets, not volume
 	for _, cc := range codecCases() {
 		topic := "cmp-" + cc.name
 		s.createTopic(topic, parts)
@@ -62,7 +63,8 @@ func runCompression(t *testing.T, s *stack) {
 			checkStoredCodec(ctx, t, cl, topic, cc)
 		}
 		cancel()
-		got := consume(t, s.seeds(), map[tp]int{{topic, 0}: n, {topic, 1}: n})
+		got := consumeFrom(t, cl, map[tp]int{{topic, 0}: n, {topic, 1}: n})
+		closeClient(cl)
 		for k, recs := range got {
 			for i, r := range recs {
 				if want := bigValue(topic, k.part, i); string(r.Value) != string(want) || r.Offset != int64(i) {

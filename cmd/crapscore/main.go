@@ -164,7 +164,7 @@ func applyCoverage(c *config, funcs []*Func) error {
 	}
 	prof := Profile{}
 	paths := []string{c.profile}
-	for _, m := range strings.Split(c.merge, ",") {
+	for m := range strings.SplitSeq(c.merge, ",") {
 		if m = strings.TrimSpace(m); m != "" {
 			paths = append(paths, m)
 		}

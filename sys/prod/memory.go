@@ -59,7 +59,7 @@ func parseCgroupLimit(s string) (uint64, bool) {
 
 // parseMemTotal reads MemTotal (kB) from /proc/meminfo.
 func parseMemTotal(s string) (uint64, bool) {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		rest, ok := strings.CutPrefix(line, "MemTotal:")
 		if !ok {
 			continue

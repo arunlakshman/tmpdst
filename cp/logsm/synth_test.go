@@ -20,10 +20,7 @@ type synth struct {
 }
 
 func newSynth(seed uint64, universe, parts int) *synth {
-	per := 100
-	if universe < per {
-		per = universe
-	}
+	per := min(universe, 100)
 	return &synth{r: veritastest.NewRand(seed), topics: universe / per, per: per, parts: parts, segmentLength: 16 << 20}
 }
 

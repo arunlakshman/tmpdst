@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Runs the full project gate (`make build`) before allowing a commit.
+# Install: mise install  (or: make install-hooks)
+# Bypass once: SKIP_BUILD_HOOK=1 git commit ...
+set -euo pipefail
+
+if [[ "${SKIP_BUILD_HOOK:-}" == "1" ]]; then
+	echo "pre-commit: SKIP_BUILD_HOOK=1, skipping make build" >&2
+	exit 0
+fi
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+echo "pre-commit: make build (fmt, ascii, vet, lint, compile, test, sim, it-hermetic, crap)" >&2
+if command -v mise >/dev/null 2>&1; then
+	mise exec -- make build
+else
+	make build
+fi

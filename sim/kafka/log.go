@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -64,7 +65,7 @@ func (o *oracle) ingest(v sim.View, pl *plog) {
 		start := int64(len(pl.vals))
 		prev, again := o.locs[r.Loc]
 		v.Assert().Always(!again, "kafka: a stored batch is committed at most once",
-			append(det[:len(det):len(det)], core.Detail{Key: "first_offset", Value: prev})...)
+			append(slices.Clip(det), core.Detail{Key: "first_offset", Value: prev})...)
 		o.locs[r.Loc] = start
 		pl.byBase[start] = len(pl.bats)
 		pl.bats = append(pl.bats, lbat{base: start, count: len(vals)})

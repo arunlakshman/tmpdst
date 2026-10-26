@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -99,12 +100,12 @@ func ModulePath(root string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, l := range strings.Split(string(b), "\n") {
+	for l := range strings.SplitSeq(string(b), "\n") {
 		if f := strings.Fields(l); len(f) == 2 && f[0] == "module" {
 			return strings.Trim(f[1], `"`), nil
 		}
 	}
-	return "", fmt.Errorf("no module line in go.mod")
+	return "", errors.New("no module line in go.mod")
 }
 
 // Apply fills Coverage and CRAP on every function. A block belongs to a

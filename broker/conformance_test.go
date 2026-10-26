@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -85,7 +86,7 @@ func (s *c1) await(c *client) (kmsg.Response, error) {
 		s.h.fireAll()
 	}
 	if len(c.out) == 0 {
-		return nil, fmt.Errorf("no response")
+		return nil, errors.New("no response")
 	}
 	return s.h.next(c), nil
 }

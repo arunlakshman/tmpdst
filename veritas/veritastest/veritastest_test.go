@@ -2,7 +2,7 @@ package veritastest
 
 import (
 	"errors"
-	"fmt"
+	"strconv"
 	"testing"
 )
 
@@ -27,7 +27,7 @@ func counter() Check[*int, int] {
 			}
 			return []int{0, op / 2, op - 1}
 		},
-		Format: func(op int) string { return fmt.Sprint(op) },
+		Format: strconv.Itoa,
 		Ops:    50,
 	}
 }
@@ -53,7 +53,7 @@ func TestInvariantAndPanicFail(t *testing.T) {
 		Gen:       func(r *Rand, i int) int { return i },
 		Step:      func(s *int, op int) error { *s += op; return nil },
 		Invariant: func(s *int) error { return nil },
-		Format:    func(op int) string { return fmt.Sprint(op) },
+		Format:    strconv.Itoa,
 		Ops:       5,
 	}
 	if f := c.RunSeed(1); f != nil {
@@ -97,7 +97,7 @@ func TestShrinkAll(t *testing.T) {
 			}
 			return [][]int{down}
 		},
-		Format: func(op int) string { return fmt.Sprint(op) },
+		Format: strconv.Itoa,
 		Ops:    2,
 	}
 	f := c.RunSeed(3)

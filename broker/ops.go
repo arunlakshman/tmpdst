@@ -1,6 +1,8 @@
 package broker
 
 import (
+	"slices"
+
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/core"
@@ -263,10 +265,8 @@ func (b *Broker) missing(req core.Request) []string {
 		if b.knows(tp) {
 			return
 		}
-		for _, n := range out {
-			if n == tp.Topic {
-				return
-			}
+		if slices.Contains(out, tp.Topic) {
+			return
 		}
 		out = append(out, tp.Topic)
 	}

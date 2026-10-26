@@ -201,12 +201,7 @@ func (s *shrinkState[Op]) shrinkAll(shrinkAll func([]Op) [][]Op) bool {
 	if shrinkAll == nil {
 		return false
 	}
-	for _, cand := range shrinkAll(s.ops) {
-		if s.try(cand) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(shrinkAll(s.ops), s.try)
 }
 
 // Literal returns ops as a Go composite literal of type []c.Name.

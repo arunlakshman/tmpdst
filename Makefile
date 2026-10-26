@@ -3,6 +3,8 @@
 # Docker fullstack it/ tests still Skip unless MANIFESTER_*_ENDPOINT are set.
 # Determinism gate is separate: scripts/ci-determinism.sh
 # (to include it, add `./scripts/ci-determinism.sh` as a step before `crap`).
+# Toolchain + commit hook: `mise install` (pins in mise.toml; postinstall runs
+# make install-hooks). Without mise: `make install-hooks` alone.
 
 COVER_DIR     ?= build
 COVER_UNIT    ?= $(COVER_DIR)/cover-unit.out
@@ -21,9 +23,18 @@ UNIT_PKGS = $(shell go list ./... | grep -vE '/sim(/|$$)|/it$$')
 export CRAP_THRESHOLD
 
 .PHONY: build compile test sim it-hermetic test-all test-race \
-	ascii-check lint fmt-check vet crap crap-baseline crap-strict
+	ascii-check lint fmt-check vet crap crap-baseline crap-strict install-hooks
 
 build: fmt-check ascii-check vet lint compile test sim it-hermetic crap
+
+# Symlink scripts/githooks/* into .git/hooks so every commit runs `make build`.
+# Does not change git config. Prefer `mise install` (runs this via postinstall).
+# Bypass once: SKIP_BUILD_HOOK=1 git commit ...
+install-hooks:
+	@mkdir -p .git/hooks
+	@ln -sfn ../../scripts/githooks/pre-commit .git/hooks/pre-commit
+	@chmod +x scripts/githooks/pre-commit
+	@echo "installed .git/hooks/pre-commit -> scripts/githooks/pre-commit"
 
 fmt-check:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi

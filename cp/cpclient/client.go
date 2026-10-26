@@ -72,7 +72,7 @@ func New(baseURL string, hc *http.Client) *Client {
 		hc = &http.Client{Transport: httppool.Transport()}
 	}
 	c := &Client{hc: hc}
-	for _, u := range strings.Split(baseURL, ",") {
+	for u := range strings.SplitSeq(baseURL, ",") {
 		if u = strings.TrimRight(strings.TrimSpace(u), "/"); u != "" {
 			c.bases = append(c.bases, u)
 		}

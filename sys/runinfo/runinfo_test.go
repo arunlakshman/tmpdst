@@ -74,12 +74,12 @@ func TestRegister(t *testing.T) {
 	for _, mf := range mfs {
 		got[mf.GetName()] = true
 		if mf.GetName() == "x_build_info" {
-			var lbl string
+			var lbl strings.Builder
 			for _, l := range mf.Metric[0].Label {
-				lbl += l.GetName() + "=" + l.GetValue() + ","
+				lbl.WriteString(l.GetName() + "=" + l.GetValue() + ",")
 			}
-			if !strings.Contains(lbl, "run_id=r9") || !strings.Contains(lbl, "go_version=go") {
-				t.Errorf("labels %s", lbl)
+			if !strings.Contains(lbl.String(), "run_id=r9") || !strings.Contains(lbl.String(), "go_version=go") {
+				t.Errorf("labels %s", lbl.String())
 			}
 		}
 	}

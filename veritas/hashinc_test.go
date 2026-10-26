@@ -2,6 +2,7 @@ package veritas
 
 import (
 	"fmt"
+	"strconv"
 	"testing"
 
 	"manifester/core"
@@ -25,7 +26,7 @@ func TestIncrementalStateHashMatchesFull(t *testing.T) {
 		for step := range 300 {
 			switch r.n(5) {
 			case 0, 1:
-				put(s, fmt.Sprintf("seg/%d", r.n(40)), fmt.Sprint(r.n(1000)))
+				put(s, fmt.Sprintf("seg/%d", r.n(40)), strconv.Itoa(r.n(1000)))
 			case 2:
 				s.Exec(core.ObjDelete{Req: 3, Key: fmt.Sprintf("seg/%d", r.n(40))})
 			default:

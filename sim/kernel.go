@@ -679,10 +679,7 @@ func (r *run) dispatch(n *node, acts []core.Action) {
 		case core.Emit:
 			r.appendFact(n.ref, x.Fact)
 		case core.SetTimer:
-			after := x.After
-			if after < 0 {
-				after = 0
-			}
+			after := max(x.After, 0)
 			r.counters[cTimersSet]++
 			n.timers[x.ID] = r.sched.Schedule(Entry{At: r.now() + Time(after), Lane: nodeLane(n, 0), Kind: EntryDeliver,
 				Target: Target{Node: n.ref}, Body: core.TimerFired{ID: x.ID, Gen: x.Gen}})

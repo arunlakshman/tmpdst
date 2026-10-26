@@ -13,7 +13,7 @@ import (
 func lines(t *testing.T, b *bytes.Buffer) []map[string]any {
 	t.Helper()
 	var out []map[string]any
-	for _, l := range strings.Split(strings.TrimSpace(b.String()), "\n") {
+	for l := range strings.SplitSeq(strings.TrimSpace(b.String()), "\n") {
 		if l == "" {
 			continue
 		}

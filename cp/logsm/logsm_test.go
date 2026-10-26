@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -74,7 +75,7 @@ func testLog(t *testing.T, l Log) {
 		t.Fatalf("second append must lose and show the winner: %+v %v %v", cur, won, err)
 	}
 	for _, n := range []int64{0, 5, 4} {
-		if _, won, err := l.Append(bg, n, Entry{ID: fmt.Sprint(n)}); err != nil || !won {
+		if _, won, err := l.Append(bg, n, Entry{ID: strconv.FormatInt(n, 10)}); err != nil || !won {
 			t.Fatalf("append %d: %v %v", n, won, err)
 		}
 	}
@@ -110,7 +111,7 @@ func TestDynLogPaging(t *testing.T) {
 	db.PageSize = 2
 	l := fakeLog(t, db)
 	for n := range int64(7) {
-		if _, won, err := l.Append(bg, n, Entry{ID: fmt.Sprint(n)}); !won || err != nil {
+		if _, won, err := l.Append(bg, n, Entry{ID: strconv.FormatInt(n, 10)}); !won || err != nil {
 			t.Fatal(won, err)
 		}
 	}

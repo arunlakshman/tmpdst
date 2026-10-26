@@ -1,5 +1,7 @@
 package sim
 
+import "slices"
+
 import "manifester/core"
 
 // MemTimeline is the in-memory append-only Timeline: one log in append order
@@ -40,7 +42,7 @@ func (t *MemTimeline) Since(name string, c *Cursor) []TimedFact {
 // Snapshot returns every fact named name so far. The caller must not modify it.
 func (t *MemTimeline) Snapshot(name string) []TimedFact {
 	l := t.byName[name]
-	return l[:len(l):len(l)]
+	return slices.Clip(l)
 }
 
 var _ Timeline = (*MemTimeline)(nil)

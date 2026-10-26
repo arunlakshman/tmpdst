@@ -73,8 +73,11 @@ full list; expect 0 over 20 when the gate is green.
 
 ## Running
 
-    make build          gofmt check, go vet, go build, go test -coverprofile, crap gate (last)
-    make crap           only the gate, reusing build/cover.out (runs tests if absent)
+    make build          fmt, ascii, vet, lint, compile, unit test, sim, hermetic it, crap
+    make test           unit packages only (excludes sim/ and it/)
+    make sim            go test ./sim/...
+    make it-hermetic    go test ./it/ (Docker fullstack Skips without endpoints)
+    make crap           CRAP gate on merged unit+sim+it coverprofiles
     make crap-strict    ignore the baseline, print every function, fail on all offenders
     make crap-baseline  rewrite crap-baseline.json (deliberate, reviewable)
 

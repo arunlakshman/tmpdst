@@ -1,9 +1,13 @@
-# Project build. `make build` is the full gate; the CRAP gate is its last step.
-# See docs/crap-gate.md. Determinism gate is separate: scripts/ci-determinism.sh
-# (to include it, add `./scripts/ci-determinism.sh` as a step before `crap` in
-# the build recipe).
+# Project build. `make` / `make build` is the full gate:
+#   fmt, ascii, vet, lint, compile, unit tests, sim, hermetic it, CRAP.
+# Docker fullstack it/ tests still Skip unless MANIFESTER_*_ENDPOINT are set.
+# Determinism gate is separate: scripts/ci-determinism.sh
+# (to include it, add `./scripts/ci-determinism.sh` as a step before `crap`).
 
-COVER_PROFILE ?= build/cover.out
+COVER_DIR     ?= build
+COVER_UNIT    ?= $(COVER_DIR)/cover-unit.out
+COVER_SIM     ?= $(COVER_DIR)/cover-sim.out
+COVER_IT      ?= $(COVER_DIR)/cover-it.out
 # Optional extra coverprofile(s), comma separated, merged into the CRAP input
 # (e.g. coverage from Docker-backed integration tests).
 CRAP_MERGE    ?=
@@ -11,11 +15,15 @@ CRAP_MERGE    ?=
 CRAP_THRESHOLD ?= 20
 CRAP_FLAGS    ?=
 
+# Everything except sim/ and it/ (those have their own targets).
+UNIT_PKGS = $(shell go list ./... | grep -vE '/sim(/|$$)|/it$$')
+
 export CRAP_THRESHOLD
 
-.PHONY: build test-race ascii-check lint fmt-check vet compile test crap crap-baseline crap-strict
+.PHONY: build compile test sim it-hermetic test-all test-race \
+	ascii-check lint fmt-check vet crap crap-baseline crap-strict
 
-build: fmt-check ascii-check vet lint compile test crap
+build: fmt-check ascii-check vet lint compile test sim it-hermetic crap
 
 fmt-check:
 	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
@@ -34,18 +42,39 @@ ascii-check:
 compile:
 	go build ./...
 
-test:
-	@mkdir -p $(dir $(COVER_PROFILE)) && echo '*' > $(dir $(COVER_PROFILE)).gitignore
-	go test -coverprofile=$(COVER_PROFILE) ./...
+$(COVER_DIR)/.gitignore:
+	@mkdir -p $(COVER_DIR) && echo '*' > $@
+
+# Unit packages only (not sim/, not it/).
+test: $(COVER_DIR)/.gitignore
+	go test -coverprofile=$(COVER_UNIT) $(UNIT_PKGS)
+
+# Deterministic simulation packages.
+sim: $(COVER_DIR)/.gitignore
+	go test -coverprofile=$(COVER_SIM) ./sim/...
+
+# Hermetic integration tests (in-process memstore). Fullstack Docker tests
+# in the same package Skip unless MANIFESTER_DYNAMO_ENDPOINT + MANIFESTER_S3_ENDPOINT are set.
+it-hermetic: $(COVER_DIR)/.gitignore
+	go test -coverprofile=$(COVER_IT) ./it/
+
+# All tests without lint/compile/crap.
+test-all: test sim it-hermetic
 
 # Race detector: too slow for `build` (>10 min on this tree), run on demand.
 test-race:
 	go test -race ./...
 
-# CRAP gate alone (reuses an existing profile; run `make test` first if absent).
+# CRAP gate: merge unit + sim + hermetic-it coverprofiles.
 crap:
-	@test -f $(COVER_PROFILE) || $(MAKE) test
-	go run ./cmd/crapscore -profile $(COVER_PROFILE) $(if $(CRAP_MERGE),-merge-profile $(CRAP_MERGE)) $(CRAP_FLAGS)
+	@test -f $(COVER_UNIT) || $(MAKE) test
+	@test -f $(COVER_SIM) || $(MAKE) sim
+	@test -f $(COVER_IT) || $(MAKE) it-hermetic
+	go run ./cmd/crapscore -profile $(COVER_UNIT) \
+		-merge-profile $(COVER_SIM),$(COVER_IT)$(if $(CRAP_MERGE),$(comma)$(CRAP_MERGE)) \
+		$(CRAP_FLAGS)
+
+comma := ,
 
 # Full offender list, ignoring the baseline.
 crap-strict:
@@ -53,5 +82,9 @@ crap-strict:
 
 # Deliberate, reviewable: rewrite crap-baseline.json from the current tree.
 crap-baseline:
-	@test -f $(COVER_PROFILE) || $(MAKE) test
-	go run ./cmd/crapscore -profile $(COVER_PROFILE) $(if $(CRAP_MERGE),-merge-profile $(CRAP_MERGE)) -update-baseline
+	@test -f $(COVER_UNIT) || $(MAKE) test
+	@test -f $(COVER_SIM) || $(MAKE) sim
+	@test -f $(COVER_IT) || $(MAKE) it-hermetic
+	go run ./cmd/crapscore -profile $(COVER_UNIT) \
+		-merge-profile $(COVER_SIM),$(COVER_IT)$(if $(CRAP_MERGE),$(comma)$(CRAP_MERGE)) \
+		-update-baseline

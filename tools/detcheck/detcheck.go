@@ -69,7 +69,7 @@ func (a allowList) allows(path string) bool {
 func loadAllow() (allowList, error) {
 	text := embeddedAllow
 	if allowFile != "" {
-		b, err := os.ReadFile(allowFile)
+		b, err := os.ReadFile(allowFile) //nolint:gosec // G304: path is an explicit CLI argument
 		if err != nil {
 			return allowList{}, err
 		}

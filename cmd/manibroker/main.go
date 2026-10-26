@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -181,22 +182,30 @@ func openObjects(ctx context.Context, f brokerFlags, cfg *prod.NodeConfig, m *pr
 }
 
 // serveMetrics starts the /metrics listener when metrics are enabled.
-func serveMetrics(log *slog.Logger, m *prod.Metrics, addr string) error {
+func serveMetrics(ctx context.Context, log *slog.Logger, m *prod.Metrics, addr string) error {
 	if m == nil {
 		return nil
 	}
-	mln, err := net.Listen("tcp", addr)
+	mln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}
-	go func() { _ = http.Serve(mln, runinfo.Mux(m.Handler())) }()
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           runinfo.Mux(m.Handler()),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	go func() { _ = srv.Serve(mln) }()
 	log.Info("manibroker metrics", "addr", mln.Addr().String())
 	return nil
 }
 
 // bind opens the Kafka listener and sets the advertised host and port.
-func bind(f brokerFlags, cfg *prod.NodeConfig) (net.Listener, string, error) {
-	ln, err := net.Listen("tcp", f.listen)
+func bind(ctx context.Context, f brokerFlags, cfg *prod.NodeConfig) (net.Listener, string, error) {
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", f.listen)
 	if err != nil {
 		return nil, "", err
 	}
@@ -205,18 +214,38 @@ func bind(f brokerFlags, cfg *prod.NodeConfig) (net.Listener, string, error) {
 	if adv == "" {
 		adv = ln.Addr().String()
 	}
-	host, port, err := net.SplitHostPort(adv)
-	if err == nil {
-		var p int
-		if p, err = strconv.Atoi(port); err == nil {
-			cfg.Broker.Host, cfg.Broker.Port = host, int32(p)
-		}
-	}
+	host, port, err := advertisedPort(adv)
 	if err != nil {
 		_ = ln.Close() // already returning the original error
 		return nil, "", err
 	}
+	cfg.Broker.Host, cfg.Broker.Port = host, port
 	return ln, adv, nil
+}
+
+// advertisedPort splits addr and rejects a port that does not fit in int32.
+func advertisedPort(addr string) (string, int32, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "", 0, err
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		return "", 0, err
+	}
+	p32, err := checkedInt32(p)
+	if err != nil {
+		return "", 0, err
+	}
+	return host, p32, nil
+}
+
+// checkedInt32 converts n to int32 after rejecting values that would overflow.
+func checkedInt32(n int) (int32, error) {
+	if n < math.MinInt32 || n > math.MaxInt32 {
+		return 0, fmt.Errorf("value %d out of int32 range", n)
+	}
+	return int32(n), nil
 }
 
 func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan struct{}) error {
@@ -238,10 +267,10 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 	if err := openObjects(ctx, f, &cfg, m, log); err != nil {
 		return err
 	}
-	if err := serveMetrics(log, m, f.metricsAddr); err != nil {
+	if err := serveMetrics(ctx, log, m, f.metricsAddr); err != nil {
 		return err
 	}
-	ln, adv, err := bind(f, &cfg)
+	ln, adv, err := bind(ctx, f, &cfg)
 	if err != nil {
 		return err
 	}

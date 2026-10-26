@@ -44,7 +44,7 @@ func BenchmarkApply150(b *testing.B) {
 	}
 	defer func() { _ = kv.Close() }()
 	a := applier.New(kv)
-	rng := rand.New(rand.NewSource(1))
+	rng := rand.New(rand.NewSource(1)) //nolint:gosec // G404: deterministic test/sim PRNG
 	n := 0
 	apply := func(k int) {
 		for done := 0; done < k; done += 8 {

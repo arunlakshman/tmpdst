@@ -21,10 +21,11 @@ type doer interface {
 func wave(t *testing.T, d doer, url string, n int, arrived *atomic.Int64) {
 	t.Helper()
 	arrived.Store(0)
+	ctx := t.Context()
 	var wg sync.WaitGroup
 	for range n {
 		wg.Go(func() {
-			req, _ := http.NewRequest(http.MethodGet, url, nil)
+			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 			resp, err := d.Do(req)
 			if err != nil {
 				t.Error(err)

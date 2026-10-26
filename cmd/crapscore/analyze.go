@@ -135,7 +135,7 @@ func collectGo(fset *token.FileSet, root, path, name string, out *[]*Func) error
 	if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 		return nil
 	}
-	src, err := os.ReadFile(path)
+	src, err := os.ReadFile(path) //nolint:gosec // G304: path is a file under the explicit CLI root
 	if err != nil {
 		return err
 	}

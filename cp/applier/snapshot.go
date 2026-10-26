@@ -177,9 +177,15 @@ func (a *Applier) StateHash() uint64 {
 	_ = a.kv.View(func(tx Tx) {
 		tx.Ascend([]byte{0}, nil, func(k, v []byte) bool {
 			if k[0] != pKey && k[0] != pSlot {
-				h.Write(binary.AppendUvarint(nil, uint64(len(k))))
-				h.Write(k)
-				h.Write(v)
+				if _, err := h.Write(binary.AppendUvarint(nil, uint64(len(k)))); err != nil {
+					return false
+				}
+				if _, err := h.Write(k); err != nil {
+					return false
+				}
+				if _, err := h.Write(v); err != nil {
+					return false
+				}
 			}
 			return true
 		})

@@ -190,7 +190,7 @@ func writeBaseline(c *config, funcs []*Func) (int, error) {
 		}
 	}
 	data, _ := json.MarshalIndent(b, "", "  ")
-	return len(b.Functions), os.WriteFile(c.basePath, append(data, '\n'), 0o644)
+	return len(b.Functions), os.WriteFile(c.basePath, append(data, '\n'), 0o600)
 }
 
 // loadBaseline returns the baseline (nil in strict mode) and a warning text.

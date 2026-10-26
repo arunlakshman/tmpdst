@@ -19,7 +19,7 @@ import (
 
 func freeAddr(t *testing.T) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func waitDial(t *testing.T, addr string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		c, err := net.Dial("tcp", addr)
+		c, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", addr)
 		if err == nil {
 			_ = c.Close()
 			return
@@ -55,7 +55,11 @@ func TestRunMemBrokerStartsAndStops(t *testing.T) {
 	}()
 	waitDial(t, listen)
 	waitDial(t, maddr)
-	resp, err := http.Get("http://" + maddr + "/metrics")
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+maddr+"/metrics", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +83,7 @@ func TestRunMemBrokerStartsAndStops(t *testing.T) {
 			t.Errorf("missing %q", want)
 		}
 	}
-	b, err := os.ReadFile(manifest)
+	b, err := os.ReadFile(manifest) //nolint:gosec // G304: path is a test temp file
 	if err != nil || !strings.Contains(string(b), `"max_segment_batches"`) {
 		t.Fatalf("%v %s", err, b)
 	}
@@ -89,7 +93,7 @@ func TestRunErrors(t *testing.T) {
 	stop := make(chan struct{})
 	close(stop)
 	var logs bytes.Buffer
-	busy, _ := net.Listen("tcp", "127.0.0.1:0")
+	busy, _ := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	defer func() { _ = busy.Close() }()
 	cases := map[string][]string{
 		"bad level":       {"-log-level", "loud"},

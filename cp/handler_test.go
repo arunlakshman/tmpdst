@@ -37,7 +37,7 @@ func (f failStore) CreateTopic(context.Context, string, int32) (core.ErrCode, er
 func postJSON(t *testing.T, h http.Handler, path, body string) (int, string) {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, strings.NewReader(body)))
 	b, _ := io.ReadAll(rec.Body)
 	return rec.Code, strings.TrimSpace(string(b))
 }
@@ -45,7 +45,7 @@ func postJSON(t *testing.T, h http.Handler, path, body string) (int, string) {
 func TestHandlerHappyPath(t *testing.T) {
 	h := cp.NewHandler(memstore.New())
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
 	if rec.Code != 200 || rec.Body.String() != "ok\n" {
 		t.Fatalf("healthz %d %q", rec.Code, rec.Body)
 	}

@@ -81,7 +81,11 @@ func waitHealthy(t *testing.T, n *logNode) {
 			t.Fatalf("exited %d before it was healthy\n%s", code, n.logs.String())
 		default:
 		}
-		if resp, err := http.Get("http://" + n.addr + "/healthz"); err == nil {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+n.addr+"/healthz", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp, doErr := http.DefaultClient.Do(req); doErr == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return
@@ -105,7 +109,11 @@ func (n *logNode) stop(t *testing.T) int {
 
 func role(t *testing.T, n *logNode) string {
 	t.Helper()
-	resp, err := http.Get("http://" + n.addr + "/healthz")
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+n.addr+"/healthz", nil)
+	if err != nil {
+		return "down"
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "down"
 	}
@@ -296,7 +304,7 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 
 func TestLogStoreStartupErrors(t *testing.T) {
 	foreign := t.TempDir()
-	_ = os.WriteFile(filepath.Join(foreign, "precious.txt"), []byte("x"), 0o644)
+	_ = os.WriteFile(filepath.Join(foreign, "precious.txt"), []byte("x"), 0o600)
 	cases := map[string][]string{
 		"foreign pebble dir": {"-pebble-dir", foreign},
 		"table is missing":   {"-table", "missing"},

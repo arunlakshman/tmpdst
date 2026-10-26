@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -110,13 +111,27 @@ func advertised(bc broker.Config, ln net.Listener) (broker.Config, error) {
 		if err != nil {
 			return bc, err
 		}
-		port, _ := strconv.Atoi(p)
-		bc.Port = int32(port)
+		port, err := strconv.Atoi(p)
+		if err != nil {
+			return bc, err
+		}
+		bc.Port, err = checkedInt32(port)
+		if err != nil {
+			return bc, err
+		}
 	}
 	if bc.Host == "" {
 		bc.Host = "127.0.0.1"
 	}
 	return bc, nil
+}
+
+// checkedInt32 converts n to int32 after rejecting values that would overflow.
+func checkedInt32(n int) (int32, error) {
+	if n < math.MinInt32 || n > math.MaxInt32 {
+		return 0, fmt.Errorf("value %d out of int32 range", n)
+	}
+	return int32(n), nil
 }
 
 // stopOn stops the node when shutdown closes, or returns once it is done.

@@ -17,10 +17,10 @@ import (
 func TestMiddlewareAndNil(t *testing.T) {
 	m := New()
 	h := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.Copy(io.Discard, r.Body) }))
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/commit-segment", strings.NewReader("hello")))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/commit-segment", strings.NewReader("hello")))
 	m.Call("TransactWriteItems", time.Now())
 	rec := httptest.NewRecorder()
-	m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	m.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
 	for _, want := range []string{`manicp_handler_seconds_count{op="commit-segment"} 1`, `manicp_request_body_bytes_sum{op="commit-segment"} 5`,
 		`manicp_dynamodb_call_seconds_count{call="TransactWriteItems"} 1`, "manicp_inflight_requests 0"} {
 		if !strings.Contains(rec.Body.String(), want) {
@@ -35,7 +35,7 @@ func TestMiddlewareAndNil(t *testing.T) {
 func gather(t *testing.T, m *Metrics) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	m.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
 	return rec.Body.String()
 }
 
@@ -50,7 +50,7 @@ func TestCallLogLine(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"err":"ErrConflict"}` + "\n"))
 	}))
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/commit-segment", strings.NewReader("abc")))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/commit-segment", strings.NewReader("abc")))
 	var l map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &l); err != nil {
 		t.Fatalf("%v: %s", err, buf.String())
@@ -91,7 +91,7 @@ func TestStatusOutcome(t *testing.T) {
 	h := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 	}))
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/lookup", nil))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/lookup", nil))
 	if !strings.Contains(gather(t, m), `manicp_calls_total{op="lookup",outcome="http_503"} 1`) {
 		t.Error("503 outcome")
 	}
@@ -107,7 +107,7 @@ func TestInfoLevelLogsOnlyTheSummary(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	for range 5000 {
-		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/lookup", strings.NewReader("")))
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/lookup", strings.NewReader("")))
 	}
 	if buf.Len() != 0 {
 		t.Fatalf("per-request lines at INFO: %s", buf.String())
@@ -115,7 +115,7 @@ func TestInfoLevelLogsOnlyTheSummary(t *testing.T) {
 	m.sum.mu.Lock()
 	m.sum.start = m.sum.start.Add(-2 * time.Second) // the interval is over
 	m.sum.mu.Unlock()
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/lookup", strings.NewReader("")))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/lookup", strings.NewReader("")))
 	var l map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &l); err != nil || bytes.Count(buf.Bytes(), []byte("\n")) != 1 {
 		t.Fatalf("%v: %s", err, buf.String())
@@ -131,7 +131,7 @@ func TestFailureStaysWarn(t *testing.T) {
 	var buf bytes.Buffer
 	m := NewWithLogger(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
 	h := m.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/v1/commit-segment", strings.NewReader("")))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/commit-segment", strings.NewReader("")))
 	if !strings.Contains(buf.String(), `"level":"WARN"`) || !strings.Contains(buf.String(), "cp_call") {
 		t.Fatalf("%s", buf.String())
 	}

@@ -17,7 +17,6 @@ import (
 
 type fakeProducer struct {
 	n      atomic.Int64
-	parts  map[int32]bool
 	closed atomic.Bool
 }
 
@@ -66,17 +65,17 @@ func TestCreateTopic(t *testing.T) {
 		w.WriteHeader(status)
 	}))
 	defer srv.Close()
-	if err := createTopic(srv.URL+"/", "tt", 3); err != nil {
+	if err := createTopic(t.Context(), srv.URL+"/", "tt", 3); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(body, "/v1/create-topic") || !strings.Contains(body, `"partitions":3`) {
 		t.Fatal(body)
 	}
 	status = 500
-	if err := createTopic(srv.URL, "tt", 3); err == nil {
+	if err := createTopic(t.Context(), srv.URL, "tt", 3); err == nil {
 		t.Fatal("want status error")
 	}
-	if err := createTopic("http://127.0.0.1:1", "tt", 3); err == nil {
+	if err := createTopic(t.Context(), "http://127.0.0.1:1", "tt", 3); err == nil {
 		t.Fatal("want dial error")
 	}
 
@@ -143,7 +142,7 @@ func TestRunWithFakeClients(t *testing.T) {
 func TestRunClientError(t *testing.T) {
 	nc := func(opts ...kgo.Opt) (producer, error) { return nil, errors.New("nope") }
 	var out, eb bytes.Buffer
-	if run(benchConfig{clients: 1, dur: time.Millisecond, every: time.Second}, &out, &eb, nc) != 1 || !strings.Contains(eb.String(), "new client: nope") {
+	if run(t.Context(), benchConfig{clients: 1, dur: time.Millisecond, every: time.Second}, &out, &eb, nc) != 1 || !strings.Contains(eb.String(), "new client: nope") {
 		t.Fatal(eb.String())
 	}
 }

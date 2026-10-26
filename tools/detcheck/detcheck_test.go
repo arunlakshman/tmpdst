@@ -25,7 +25,7 @@ func TestLoadAllowFile(t *testing.T) {
 	old := allowFile
 	defer func() { allowFile = old }()
 	f := filepath.Join(t.TempDir(), "allow.txt")
-	if err := os.WriteFile(f, []byte("# c\n\nfmt\nmanifester/core/...\n"), 0o644); err != nil {
+	if err := os.WriteFile(f, []byte("# c\n\nfmt\nmanifester/core/...\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	allowFile = f

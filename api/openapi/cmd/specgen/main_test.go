@@ -8,7 +8,7 @@ import (
 
 func TestRun(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "controlplane.json"), []byte(`{"a":[1]}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "controlplane.json"), []byte(`{"a":[1]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := run([]string{"-dir", dir, "-check"}, nil); err == nil {
@@ -20,7 +20,7 @@ func TestRun(t *testing.T) {
 	if err := run([]string{"-dir", dir, "-check"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "controlplane.yaml"), []byte("stale\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "controlplane.yaml"), []byte("stale\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := run([]string{"-dir", dir, "-check"}, nil); err == nil {

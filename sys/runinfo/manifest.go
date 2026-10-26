@@ -104,11 +104,11 @@ func Write(ctx context.Context, m Manifest, o WriteOptions) (string, error) {
 // writeFile writes body to path, creating parent directories.
 func writeFile(path string, body []byte) error {
 	if dir := filepath.Dir(path); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			return err
 		}
 	}
-	return os.WriteFile(path, body, 0o644)
+	return os.WriteFile(path, body, 0o600)
 }
 
 // putS3 uploads body to the s3://bucket/key destination.

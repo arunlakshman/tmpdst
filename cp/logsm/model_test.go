@@ -66,7 +66,7 @@ func (m latModel) fake() (*fakedb.Fake, *atomic.Int64, *atomic.Int64) {
 		switch call {
 		case "PutItem":
 			puts.Add(1)
-			return m.putLo + rand.N(m.putHi-m.putLo+1)
+			return m.putLo + rand.N(m.putHi-m.putLo+1) //nolint:gosec // G404: deterministic test/sim PRNG
 		case "Query":
 			queries.Add(1)
 			return m.read
@@ -164,7 +164,7 @@ func runBrokers(commit committerFn, rate float64, warm, dur time.Duration) ([]sa
 	for b := range brokers {
 		wg.Go(func() {
 			s := newSynth(uint64(100+b), 288, 150)
-			for next := start.Add(rand.N(period)); next.Before(end); next = next.Add(period) {
+			for next := start.Add(rand.N(period)); next.Before(end); next = next.Add(period) { //nolint:gosec // G404: deterministic test/sim PRNG
 				time.Sleep(time.Until(next))
 				if time.Now().After(end) {
 					return

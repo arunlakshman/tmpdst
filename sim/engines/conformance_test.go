@@ -18,11 +18,6 @@ import (
 // operation exactly as its spec does and its cached spec hash tracks the
 // spec's StateHash after every operation.
 
-type engine interface {
-	sim.Engine
-	SpecStateHash() uint64
-}
-
 // rig is an engine under a test context plus a fresh spec to compare with.
 type rig struct {
 	eng  sim.Engine

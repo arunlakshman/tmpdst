@@ -19,7 +19,7 @@ import (
 
 func startNode(t *testing.T, mod func(*NodeConfig)) (*Node, NodeConfig) {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func waitDone(t *testing.T, n *Node) error {
 }
 
 func TestStartRequiresPieces(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestStartGracefulStop(t *testing.T) {
 	}
 	// A list-all-topics Metadata request makes the broker call the control
 	// plane; the tap sees that action.
-	conn, err := net.Dial("tcp", n.Addr().String())
+	conn, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", n.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestStartShutdownChannel(t *testing.T) {
 }
 
 func TestAdvertisedAndDefaults(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}

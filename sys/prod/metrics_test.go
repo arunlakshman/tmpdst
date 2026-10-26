@@ -11,7 +11,7 @@ import (
 
 func fact(name string, kv ...any) core.Fact {
 	f := core.Fact{Name: name}
-	for i := 0; i < len(kv); i += 2 {
+	for i := 0; i+1 < len(kv); i += 2 {
 		var v core.FieldValue
 		switch x := kv[i+1].(type) {
 		case string:
@@ -27,7 +27,7 @@ func fact(name string, kv ...any) core.Fact {
 func scrape(t *testing.T, m *Metrics) string {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	m.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	m.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
 	if rec.Code != 200 {
 		t.Fatalf("status %d", rec.Code)
 	}

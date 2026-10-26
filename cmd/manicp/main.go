@@ -99,7 +99,7 @@ func serve(ctx context.Context, d deps, f cpFlags, fs *flag.FlagSet, stderr io.W
 	// /metrics port is disabled.
 	m := cpobs.NewWithLogger(log)
 	runinfo.Register(m.Registry(), "manicp", info)
-	if err := serveMetrics(log, m, f.metricsAddr); err != nil {
+	if err := serveMetrics(ctx, log, m, f.metricsAddr); err != nil {
 		return err
 	}
 	h, closeStore, err := openHandler(ctx, d, f, m, log)
@@ -137,15 +137,23 @@ func openHandler(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *
 }
 
 // serveMetrics starts the /metrics listener unless addr is empty.
-func serveMetrics(log *slog.Logger, m *cpobs.Metrics, addr string) error {
+func serveMetrics(ctx context.Context, log *slog.Logger, m *cpobs.Metrics, addr string) error {
 	if addr == "" {
 		return nil
 	}
-	mln, err := net.Listen("tcp", addr)
+	mln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}
-	go func() { _ = http.Serve(mln, runinfo.Mux(m.Handler())) }()
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           runinfo.Mux(m.Handler()),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	go func() { _ = srv.Serve(mln) }()
 	log.Info("manicp metrics", "addr", mln.Addr().String())
 	return nil
 }
@@ -166,7 +174,8 @@ func shutdownOnDone(ctx context.Context, srv *http.Server) <-chan struct{} {
 	go func() {
 		defer close(done)
 		<-ctx.Done()
-		sctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		// ctx is already cancelled; keep its values so the drain can still finish.
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(sctx) // best-effort at exit
 	}()

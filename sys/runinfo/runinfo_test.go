@@ -105,7 +105,7 @@ func TestManifestFile(t *testing.T) {
 	if filepath.Base(dest) != "svc-r2.json" {
 		t.Fatal(dest)
 	}
-	b, _ := os.ReadFile(dest)
+	b, _ := os.ReadFile(dest) //nolint:gosec // G304: path is a test temp file
 	var got Manifest
 	if err := json.Unmarshal(b, &got); err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestWriteEmptyDestAndIMDS(t *testing.T) {
 	if _, err := Write(t.Context(), m, WriteOptions{Dest: dest, IMDS: true, IMDSEndpoint: srv.URL}); err != nil {
 		t.Fatal(err)
 	}
-	b, _ := os.ReadFile(dest)
+	b, _ := os.ReadFile(dest) //nolint:gosec // G304: path is a test temp file
 	if !strings.Contains(string(b), "i-1") {
 		t.Fatalf("no instance metadata: %s", b)
 	}
@@ -170,7 +170,7 @@ func TestWriteEmptyDestAndIMDS(t *testing.T) {
 
 func TestWriteFileFailure(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "file")
-	_ = os.WriteFile(f, nil, 0o644) // test setup; the test asserts on the failure path below
+	_ = os.WriteFile(f, nil, 0o600) // test setup; the test asserts on the failure path below
 	m := NewManifest(New("svc", "r", -1), flag.NewFlagSet("t", flag.ContinueOnError), "", nil)
 	if _, err := Write(t.Context(), m, WriteOptions{Dest: filepath.Join(f, "sub", "m.json")}); err == nil {
 		t.Fatal("want error")

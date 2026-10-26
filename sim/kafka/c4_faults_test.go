@@ -15,30 +15,30 @@ import (
 
 // Oracle property names (the stable strings sim/kafka reports).
 const (
-	pLocTwice  core.Prop = "kafka: a stored batch is committed at most once"
-	pPerSend   core.Prop = "kafka: a batch is committed at most once per send"
-	pWhole     core.Prop = "kafka: a committed range is one whole produced batch"
-	pAckOrder  core.Prop = "kafka: a client's acked batches for a partition are at increasing offsets"
-	pOrder     core.Prop = "kafka: records of a batch keep their order"
-	pProduced  core.Prop = "kafka: every committed record was produced"
-	pWhere     core.Prop = "kafka: a record is committed where and as it was produced"
-	pRejected  core.Prop = "kafka: a definitely rejected batch is never committed"
-	pAckInCP   core.Prop = "kafka: acked range is committed in the control plane"
-	pContig    core.Prop = "kafka: committed offsets are contiguous"
-	pSegment   core.Prop = "kafka: committed segment exists in the object store"
-	pInside    core.Prop = "kafka: committed range lies inside its segment"
-	pIntact    core.Prop = "kafka: committed batch is intact"
-	pCount     core.Prop = "kafka: committed range holds its record count"
-	pHWM       core.Prop = "kafka: the high watermark is the end of the committed log"
-	pAckedAt   core.Prop = "kafka: an acked record is in the log at its acked offset"
-	pCaughtUp  core.Prop = "kafka: every consumer caught up with the final log"
-	pCorrupt   core.Prop = "kafka: a consumer never receives a corrupt batch"
-	pRange     core.Prop = "kafka: a consumer's fetch is never out of range"
-	pHWMAbove  core.Prop = "kafka: a fetch never reports a high watermark above the committed log"
-	pResume    core.Prop = "kafka: a consumer resumes exactly where its last read ended"
-	pSkipped   core.Prop = "kafka: a consumer sees every offset in order, none skipped"
-	pPastHWM   core.Prop = "kafka: a consumer never reads past the high watermark"
-	pReadValue core.Prop = "kafka: a consumer reads the committed value at each offset"
+	pLocTwice   core.Prop = "kafka: a stored batch is committed at most once"
+	pPerSend    core.Prop = "kafka: a batch is committed at most once per send"
+	pOneBatch   core.Prop = "kafka: a committed range is one whole produced batch"
+	pAckOrder   core.Prop = "kafka: a client's acked batches for a partition are at increasing offsets"
+	pOrder      core.Prop = "kafka: records of a batch keep their order"
+	pProduced   core.Prop = "kafka: every committed record was produced"
+	pAsProduced core.Prop = "kafka: a record is committed where and as it was produced"
+	pRejected   core.Prop = "kafka: a definitely rejected batch is never committed"
+	pAckInCP    core.Prop = "kafka: acked range is committed in the control plane"
+	pContig     core.Prop = "kafka: committed offsets are contiguous"
+	pSegment    core.Prop = "kafka: committed segment exists in the object store"
+	pInside     core.Prop = "kafka: committed range lies inside its segment"
+	pIntact     core.Prop = "kafka: committed batch is intact"
+	pCount      core.Prop = "kafka: committed range holds its record count"
+	pHWM        core.Prop = "kafka: the high watermark is the end of the committed log"
+	pAckedAt    core.Prop = "kafka: an acked record is in the log at its acked offset"
+	pCaughtUp   core.Prop = "kafka: every consumer caught up with the final log"
+	pCorrupt    core.Prop = "kafka: a consumer never receives a corrupt batch"
+	pRange      core.Prop = "kafka: a consumer's fetch is never out of range"
+	pHWMAbove   core.Prop = "kafka: a fetch never reports a high watermark above the committed log"
+	pResume     core.Prop = "kafka: a consumer resumes exactly where its last read ended"
+	pSkipped    core.Prop = "kafka: a consumer sees every offset in order, none skipped"
+	pPastHWM    core.Prop = "kafka: a consumer never reads past the high watermark"
+	pReadValue  core.Prop = "kafka: a consumer reads the committed value at each offset"
 )
 
 // fault is one corruption of a finished world. apply reports false when the
@@ -208,7 +208,7 @@ func faults() []fault {
 			d.TP, d.Base = b, core.Offset(w.cp0(b))
 			w.ranges[b] = append(w.ranges[b], d)
 			return true
-		}, []core.Prop{pLocTwice, pWhere}, false},
+		}, []core.Prop{pLocTwice, pAsProduced}, false},
 
 		{"acked record missing (last range dropped)", func(w *world, r *rand.Rand) bool {
 			var c []core.TopicPartition
@@ -527,7 +527,7 @@ func faults() []fault {
 				rs[j].Base -= core.Offset(gone)
 			}
 			return true
-		}, []core.Prop{pWhole}, false},
+		}, []core.Prop{pOneBatch}, false},
 
 		{"corrupt batch bytes in a segment", func(w *world, r *rand.Rand) bool {
 			tp, ok := pick(r, w.tpsWith(1))

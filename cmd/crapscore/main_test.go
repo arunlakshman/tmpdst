@@ -80,10 +80,10 @@ func setup(t *testing.T, profile string) string {
 	root := t.TempDir()
 	must := func(name, s string) {
 		p := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
+		if err := os.WriteFile(p, []byte(s), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -146,7 +146,7 @@ func TestCoverageMappingAndExclusions(t *testing.T) {
 func TestMergeProfiles(t *testing.T) {
 	root := setup(t, profile)
 	extra := "mode: set\nexample.com/m/p/sample.go:10.24,11.10 1 1\nexample.com/m/p/sample.go:11.10,13.3 1 1\nexample.com/m/p/sample.go:14.2,14.10 1 1\n"
-	if err := os.WriteFile(filepath.Join(root, "extra.out"), []byte(extra), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "extra.out"), []byte(extra), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if u := analyseSample(t, root, "extra.out")["uncovered"]; u.Coverage != 1 {
@@ -195,16 +195,16 @@ func TestExitCodesAndRatchet(t *testing.T) {
 		t.Fatalf("strict should fail, got %d", code)
 	}
 	// Make a function worse: add a branch to uncovered.
-	src, _ := os.ReadFile(filepath.Join(root, "p/sample.go"))
+	src, _ := os.ReadFile(filepath.Join(root, "p/sample.go")) //nolint:gosec // G304: path is a test temp file
 	worse := strings.Replace(string(src), "func uncovered(a int) int {\n", "func uncovered(a int) int {\n\tif a > 5 && a < 9 {\n\t\treturn 3\n\t}\n", 1)
-	if err := os.WriteFile(filepath.Join(root, "p/sample.go"), []byte(worse), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "p/sample.go"), []byte(worse), 0o600); err != nil { //nolint:gosec // G703: path is a test temp file under t.TempDir
 		t.Fatal(err)
 	}
 	if code, out := runTool(t, append(common, "-threshold", "5")...); code != 1 || !strings.Contains(out, "got worse") {
 		t.Fatalf("worse baselined function should fail (code %d): %s", code, out)
 	}
 	// A brand new offender fails too.
-	if err := os.WriteFile(filepath.Join(root, "p/new.go"), []byte("package p\n\nfunc fresh(a bool) { if a { }; if a { }; if a { } }\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "p/new.go"), []byte("package p\n\nfunc fresh(a bool) { if a { }; if a { }; if a { } }\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if code, out := runTool(t, append(common, "-threshold", "5")...); code != 1 || !strings.Contains(out, "p.fresh") {

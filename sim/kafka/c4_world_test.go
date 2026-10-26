@@ -128,7 +128,7 @@ func (w *world) step() {
 func nodeRef(s string) core.NodeRef { return core.NodeRef{Node: core.NodeID(s)} }
 
 func newWorld(seed uint64, live bool) *world {
-	r := rand.New(rand.NewPCG(seed, 0xc4))
+	r := rand.New(rand.NewPCG(seed, 0xc4)) //nolint:gosec // G404: deterministic test/sim PRNG
 	opts := kafka.DefaultOpts()
 	w := &world{opts: opts, cp: veritas.NewControlPlane(), parts: map[core.TopicPartition]*veritas.Partition{},
 		pos: map[[2]int]int64{}, ranges: map[core.TopicPartition][]core.BatchRange{},
@@ -178,13 +178,12 @@ func (w *world) newID() core.ID {
 }
 
 type item struct {
-	op     int // index in w.ops
-	po     kafka.ProduceOp
-	p      *producer
-	fate   int
-	bytes  []byte
-	pb     core.PendingBatch
-	landed bool
+	op    int // index in w.ops
+	po    kafka.ProduceOp
+	p     *producer
+	fate  int
+	bytes []byte
+	pb    core.PendingBatch
 }
 
 const (
@@ -262,11 +261,15 @@ func (w *world) commit(items []*item, replay bool) []core.BatchRange {
 	}
 	touched := map[core.TopicPartition]bool{}
 	for i, rg := range as {
-		base := w.parts[rg.TP].Append(valBytes(items[i].po.Vals))
-		if base != rg.Base {
-			panic(fmt.Sprintf("Partition base %d != CP base %d", base, rg.Base))
+		if i < len(items) {
+			base := w.parts[rg.TP].Append(valBytes(items[i].po.Vals))
+			if base != rg.Base {
+				panic(fmt.Sprintf("Partition base %d != CP base %d", base, rg.Base))
+			}
+			touched[rg.TP] = true
+			continue
 		}
-		touched[rg.TP] = true
+		panic(fmt.Sprintf("spec CP assigned %d ranges for %d batches", len(as), len(items)))
 	}
 	for tp := range touched { // map order is irrelevant: independent entries
 		lk := w.cp.Exec(core.CPCall{Op: core.Lookup{TP: tp}}).(core.CPDone).Resp.(core.LookupResp)

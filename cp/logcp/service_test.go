@@ -242,7 +242,12 @@ func TestStandbyRefusesCommitsAndServesFreshReads(t *testing.T) {
 	}
 	srv := httptest.NewServer(standby.Handler())
 	defer srv.Close()
-	resp, err := http.Post(srv.URL+"/v1/commit-segment", "application/json", strings.NewReader(`{"segment_key":"x"}`))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/v1/commit-segment", strings.NewReader(`{"segment_key":"x"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,11 +255,30 @@ func TestStandbyRefusesCommitsAndServesFreshReads(t *testing.T) {
 	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") == "" || resp.Header.Get(logcp.RoleHeader) != "standby" {
 		t.Fatalf("standby http: %d %v", resp.StatusCode, resp.Header)
 	}
-	if resp, _ = http.Post(srv.URL+"/v1/describe-topics", "application/json", strings.NewReader(`{}`)); resp.StatusCode != http.StatusOK {
+	req, err = http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/v1/describe-topics", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("describe on a standby: %d", resp.StatusCode)
 	}
-	if resp, _ = http.Get(srv.URL + "/healthz"); resp.StatusCode != http.StatusOK {
-		t.Fatalf("healthz: %d", resp.StatusCode)
+	hreq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/healthz", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hresp, err := http.DefaultClient.Do(hreq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = hresp.Body.Close()
+	if hresp.StatusCode != http.StatusOK {
+		t.Fatalf("healthz: %d", hresp.StatusCode)
 	}
 }
 

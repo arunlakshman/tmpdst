@@ -205,7 +205,7 @@ func openState(dir string) (*pebblekv.DB, string, error) {
 func wipeState(dir string) error {
 	ents, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) || (err == nil && len(ents) == 0) {
-		return os.MkdirAll(dir, 0o755)
+		return os.MkdirAll(dir, 0o750)
 	}
 	if err != nil {
 		return err
@@ -216,7 +216,7 @@ func wipeState(dir string) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
-	return os.MkdirAll(dir, 0o755)
+	return os.MkdirAll(dir, 0o750)
 }
 
 func removeTemp(flagDir, used string) {

@@ -110,7 +110,7 @@ func TestC4RejectsEveryFault(t *testing.T) {
 			applied := 0
 			for seed := uint64(1); seed <= maxSeeds && applied < wantApplied; seed++ {
 				w := newWorld(seed, false)
-				if !f.apply(w, rand.New(rand.NewPCG(seed, 0xfa17))) {
+				if !f.apply(w, rand.New(rand.NewPCG(seed, 0xfa17))) { //nolint:gosec // G404: deterministic test/sim PRNG
 					continue
 				}
 				applied++

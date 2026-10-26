@@ -353,10 +353,11 @@ func exampleValue(op doc, side, name string) (any, bool) {
 	return v, ok
 }
 
-func post(h http.Handler, path string, body any) (int, []byte) {
+func post(t *testing.T, h http.Handler, path string, body any) (int, []byte) {
+	t.Helper()
 	b, _ := json.Marshal(body)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, bytes.NewReader(b)))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, path, bytes.NewReader(b)))
 	out, _ := io.ReadAll(rec.Body)
 	return rec.Code, out
 }
@@ -392,7 +393,7 @@ func TestExamplesReplay(t *testing.T) {
 			continue
 		}
 		used[s.path+" "+s.name] = true
-		code, body := post(h, s.path, req)
+		code, body := post(t, h, s.path, req)
 		if code != http.StatusOK {
 			t.Errorf("%s example %q: status %d, want 200", s.path, s.name, code)
 		}
@@ -416,14 +417,14 @@ func TestExamplesReplay(t *testing.T) {
 func TestHealthzAndErrors(t *testing.T) {
 	h := cp.NewHandler(memstore.New())
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/healthz", nil))
 	want := sub(load(t), "paths", "/healthz", "get", "responses", "200", "content", "text/plain")["example"]
 	if rec.Code != 200 || rec.Body.String() != want {
 		t.Fatalf("healthz %d %q, spec example %q", rec.Code, rec.Body.String(), want)
 	}
 	// malformed body: 200 {"err":"ErrInvalid"}, as the spec's ErrorBody says.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/lookup", strings.NewReader("{")))
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/lookup", strings.NewReader("{")))
 	if err := sameJSON(rec.Body.Bytes(), doc{"err": "ErrInvalid"}); err != nil || rec.Code != 200 {
 		t.Fatalf("malformed body: %d %v", rec.Code, err)
 	}

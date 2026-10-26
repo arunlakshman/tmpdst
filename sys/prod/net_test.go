@@ -15,7 +15,7 @@ import (
 
 func newTestNet(t *testing.T) (*Net, *sys.Inbox) {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func next(t *testing.T, in *sys.Inbox) core.EventBody {
 
 func TestNetOpenReadWriteOrdered(t *testing.T) {
 	n, in := newTestNet(t)
-	c, err := net.Dial("tcp", n.Addr().String())
+	c, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", n.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestNetOpenReadWriteOrdered(t *testing.T) {
 
 func TestNetPauseParksReader(t *testing.T) {
 	n, in := newTestNet(t)
-	c, _ := net.Dial("tcp", n.Addr().String())
+	c, _ := (&net.Dialer{}).DialContext(t.Context(), "tcp", n.Addr().String())
 	defer func() { _ = c.Close() }()
 	op := next(t, in).(core.ConnOpened)
 	_, _ = c.Write([]byte("a"))
@@ -106,7 +106,7 @@ func TestNetPauseParksReader(t *testing.T) {
 
 func TestNetAbortResetsAndGracefulFlushes(t *testing.T) {
 	n, in := newTestNet(t)
-	c, _ := net.Dial("tcp", n.Addr().String())
+	c, _ := (&net.Dialer{}).DialContext(t.Context(), "tcp", n.Addr().String())
 	defer func() { _ = c.Close() }()
 	op := next(t, in).(core.ConnOpened)
 	_ = n.Write(op.Conn, []byte("bye"))
@@ -121,7 +121,7 @@ func TestNetAbortResetsAndGracefulFlushes(t *testing.T) {
 		t.Fatal("write after close succeeded")
 	}
 
-	c2, _ := net.Dial("tcp", n.Addr().String())
+	c2, _ := (&net.Dialer{}).DialContext(t.Context(), "tcp", n.Addr().String())
 	defer func() { _ = c2.Close() }()
 	op2 := next(t, in).(core.ConnOpened)
 	if op2.Conn == op.Conn {

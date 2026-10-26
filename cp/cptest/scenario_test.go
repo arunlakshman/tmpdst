@@ -106,8 +106,17 @@ func TestRoundTrip(t *testing.T) {
 	defer srv.Close()
 	c := cpclient.New(srv.URL, srv.Client())
 
-	if resp, err := http.Get(srv.URL + "/healthz"); err != nil || resp.StatusCode != http.StatusOK {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/healthz", nil)
+	if err != nil {
 		t.Fatalf("healthz: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("healthz: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("healthz: %s", resp.Status)
 	}
 	if err := c.CreateTopic(ctx, "t", 3); err != nil {
 		t.Fatal(err)
@@ -141,7 +150,16 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("classify: %v %v", code, out)
 	}
 	// Malformed body: ErrInvalid at 200.
-	resp, _ := http.Post(srv.URL+"/v1/lookup", "application/json", nil)
+	req, err = http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/v1/lookup", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("malformed: %d", resp.StatusCode)
 	}
@@ -166,9 +184,20 @@ func TestHandlerStatus(t *testing.T) {
 		{errors.New("boom"), 500},
 	} {
 		srv := httptest.NewServer(cp.NewHandler(failStore{newMem(), c.err}))
-		resp, err := http.Post(srv.URL+"/v1/commit-segment", "application/json", stringsReader(`{"segment_key":"k"}`))
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/v1/commit-segment", stringsReader(`{"segment_key":"k"}`))
+		if err != nil {
+			srv.Close()
+			t.Fatalf("%v: %v", c.err, err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			srv.Close()
+			t.Fatalf("%v: status %v err %v", c.err, resp, err)
+		}
+		_ = resp.Body.Close()
 		srv.Close()
-		if err != nil || resp.StatusCode != c.want {
+		if resp.StatusCode != c.want {
 			t.Fatalf("%v: status %v err %v", c.err, resp, err)
 		}
 	}

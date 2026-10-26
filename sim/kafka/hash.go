@@ -23,9 +23,3 @@ func (h *hasher) bytes(b []byte) {
 		h.byte(c)
 	}
 }
-func (h *hasher) str(s string) {
-	h.u64(uint64(len(s)))
-	for i := 0; i < len(s); i++ {
-		h.byte(s[i])
-	}
-}

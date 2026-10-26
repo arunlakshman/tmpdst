@@ -351,17 +351,6 @@ func (h *harness) produceOne(c *client, e ent) kmsg.ProduceResponseTopicPartitio
 	return produced(h.next(c))[0]
 }
 
-// sends lists the actions of the given kind in emission order.
-func sends(all []core.Action) []core.Send {
-	var out []core.Send
-	for _, a := range all {
-		if s, ok := a.(core.Send); ok {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 func factsNamed(all []core.Action, name string) []core.Fact {
 	var out []core.Fact
 	for _, a := range all {

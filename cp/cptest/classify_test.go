@@ -76,7 +76,7 @@ func TestClassifierLive(t *testing.T) {
 		return cpclient.Classifier{}.Classify(core.CPCall{Op: op}, err)
 	}
 	// Connection refused: a port nobody listens on.
-	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	l, _ := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	addr := l.Addr().String()
 	_ = l.Close()
 	if c, o := classify("http://"+addr, nil, commit, ctx); c != core.ErrUnavailable || o != core.NotApplied {

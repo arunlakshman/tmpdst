@@ -328,7 +328,7 @@ func TestFailbackWrapsAround(t *testing.T) {
 	a.Close()
 	a2 := httptest.NewUnstartedServer(cp.NewHandler(memstore.New()))
 	_ = a2.Listener.Close()
-	l, err := net.Listen("tcp", strings.TrimPrefix(aURL, "http://"))
+	l, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", strings.TrimPrefix(aURL, "http://"))
 	if err != nil {
 		t.Skip("port not reusable:", err)
 	}

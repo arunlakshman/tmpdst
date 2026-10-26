@@ -38,7 +38,16 @@ linters:
     - dupl           # task 10
     - asciicheck     # non-ASCII identifiers (comments/strings: scripts/ascii-check.sh)
     - bidichk        # bidi control chars (trojan source)
+    - unused         # dead code
+    - bodyclose      # unclosed HTTP response bodies
+    - noctx          # HTTP/net calls missing context
+    - gosec          # security scanner
   settings:
+    gosec:
+      # G115 (int-to-uint cast) is noise here: FNV folds and Kafka/wire widths are
+      # intentional. Real overflow bugs are caught by tests and reviews.
+      excludes:
+        - G115
     nonamedreturns:
       report-error-in-defer: false
     forbidigo:

@@ -82,7 +82,7 @@ func parseBlock(line string) (Block, error) {
 
 // ReadProfileFile reads one profile file into p.
 func (p Profile) ReadProfileFile(path string) error {
-	f, err := os.Open(path)
+	f, err := os.Open(path) //nolint:gosec // G304: path is an explicit CLI argument
 	if err != nil {
 		return err
 	}
@@ -95,7 +95,7 @@ func (p Profile) ReadProfileFile(path string) error {
 
 // ModulePath returns the module path from root/go.mod.
 func ModulePath(root string) (string, error) {
-	b, err := os.ReadFile(root + "/go.mod")
+	b, err := os.ReadFile(root + "/go.mod") //nolint:gosec // G304: path is an explicit CLI argument
 	if err != nil {
 		return "", err
 	}

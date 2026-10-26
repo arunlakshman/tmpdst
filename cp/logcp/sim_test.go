@@ -284,12 +284,6 @@ func (r *simRun) live() []*simNode {
 	return out
 }
 
-func (r *simRun) alive(n *simNode) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return !n.dead
-}
-
 // genOp draws a command: keys come from a small pool, so duplicates are
 // common; a key's payload usually repeats and sometimes differs (a conflict);
 // a few commands are invalid; a few create topics.

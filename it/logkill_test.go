@@ -106,10 +106,15 @@ func isDialErr(err error) bool {
 var roleClient = &http.Client{Timeout: 5 * time.Second}
 
 // roleOf reads X-CP-Role from /healthz ("" if the node is down).
-func roleOf(n *cpNode) string {
+func roleOf(t *testing.T, n *cpNode) string {
+	t.Helper()
 	var role string
 	err := retryDial(func() error {
-		resp, err := roleClient.Get(n.srv.URL + "/healthz")
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, n.srv.URL+"/healthz", nil)
+		if err != nil {
+			return err
+		}
+		resp, err := roleClient.Do(req)
 		if err != nil {
 			return err
 		}
@@ -130,8 +135,8 @@ func roleOf(n *cpNode) string {
 func TestKillTheAppenderMidProduce(t *testing.T) {
 	s := newLogStack(t, 2)
 	create(s.stack)
-	if roleOf(s.cps[0]) != "active" || roleOf(s.cps[1]) != "standby" {
-		t.Fatalf("roles %q %q", roleOf(s.cps[0]), roleOf(s.cps[1]))
+	if roleOf(t, s.cps[0]) != "active" || roleOf(t, s.cps[1]) != "standby" {
+		t.Fatalf("roles %q %q", roleOf(t, s.cps[0]), roleOf(t, s.cps[1]))
 	}
 	cl := newClient(t, s.seeds(), kgo.RetryTimeout(60*time.Second), kgo.RecordDeliveryTimeout(60*time.Second))
 	acked := newSent()
@@ -183,7 +188,7 @@ func TestKillTheAppenderMidProduce(t *testing.T) {
 		t.Fatalf("takeover stall %v, budget 20 s (commit deadline 120 s)", gap)
 	}
 	// Either standby may win the takeover race.
-	if r1, r2 := roleOf(s.cps[1]), roleOf(s.cps[2]); r1 != "active" && r2 != "active" {
+	if r1, r2 := roleOf(t, s.cps[1]), roleOf(t, s.cps[2]); r1 != "active" && r2 != "active" {
 		t.Fatalf("no standby took over: %q %q", r1, r2)
 	}
 	got := consume(t, s.seeds(), wantCounts(topics, n))

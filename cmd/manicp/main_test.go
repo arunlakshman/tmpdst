@@ -15,7 +15,7 @@ import (
 
 func freeAddr(t *testing.T) string {
 	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,11 @@ func TestRunServesMemStoreAndStops(t *testing.T) {
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		resp, err := http.Get("http://" + maddr + "/healthz")
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+maddr+"/healthz", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err == nil {
 			_ = resp.Body.Close()
 			break
@@ -46,7 +50,7 @@ func TestRunServesMemStoreAndStops(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	for {
-		c, err := net.Dial("tcp", addr)
+		c, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", addr)
 		if err == nil {
 			_ = c.Close()
 			break
@@ -99,7 +103,7 @@ func TestRunErrors(t *testing.T) {
 
 func TestManifestFailureIsNotFatal(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "file")
-	_ = os.WriteFile(f, nil, 0o644)
+	_ = os.WriteFile(f, nil, 0o600)
 	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
 	defer cancel()
 	var logs bytes.Buffer

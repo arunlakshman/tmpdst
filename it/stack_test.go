@@ -49,7 +49,7 @@ func newStack(t *testing.T, st cp.Store, objs sys.ObjectStore, cls sys.Classifie
 // addBroker starts a broker on 127.0.0.1:0 and returns it with its address.
 func (s *stack) addBroker() *prod.Node {
 	s.t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := (&net.ListenConfig{}).Listen(s.t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		s.t.Fatal(err)
 	}

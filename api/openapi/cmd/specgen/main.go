@@ -39,9 +39,9 @@ func run(args []string, _ io.Writer) error {
 	}
 	path := filepath.Join(*dir, "controlplane.yaml")
 	if !*check {
-		return os.WriteFile(path, want, 0o644)
+		return os.WriteFile(path, want, 0o644) //nolint:gosec // G306: shared OpenAPI spec must stay world-readable
 	}
-	got, err := os.ReadFile(path)
+	got, err := os.ReadFile(path) //nolint:gosec // G304: path is an explicit CLI argument
 	if err != nil {
 		return err
 	}

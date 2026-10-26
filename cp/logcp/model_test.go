@@ -33,7 +33,7 @@ import (
 func latency(call string) time.Duration {
 	switch call {
 	case "PutItem":
-		if rand.Intn(100) == 0 {
+		if rand.Intn(100) == 0 { //nolint:gosec // G404: deterministic test/sim PRNG
 			return 12 * time.Millisecond
 		}
 		return 3500 * time.Microsecond
@@ -96,7 +96,7 @@ func runModel(t *testing.T, rate int, dur time.Duration) modelRow {
 	stop := start.Add(dur)
 	for c := range clients {
 		wg.Go(func() {
-			r := rand.New(rand.NewSource(int64(c) + 1))
+			r := rand.New(rand.NewSource(int64(c) + 1)) //nolint:gosec // G404: deterministic test/sim PRNG
 			every := time.Duration(float64(time.Second) * clients / float64(rate))
 			next := start.Add(time.Duration(r.Float64() * float64(every))) // random phase
 			for n := 0; next.Before(stop); n++ {
@@ -119,7 +119,7 @@ func runModel(t *testing.T, rate int, dur time.Duration) modelRow {
 		})
 	}
 	wg.Go(func() { // a consumer-ish read load: 100 fresh Lookups a second
-		r := rand.New(rand.NewSource(99))
+		r := rand.New(rand.NewSource(99)) //nolint:gosec // G404: deterministic test/sim PRNG
 		for tick := time.NewTicker(10 * time.Millisecond); time.Now().Before(stop); <-tick.C {
 			t0 := time.Now()
 			if _, _, err := active.Lookup(bg, core.Lookup{TP: core.TP("load", int32(r.Intn(40000))), MaxBytes: 1 << 20}); err == nil {

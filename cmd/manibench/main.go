@@ -117,21 +117,28 @@ func mainRun(args []string, stdout, stderr io.Writer, nc clientFactory) int {
 	if !ok {
 		return 2
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	if c.createParts > 0 {
-		if err := createTopic(c.cpURL, c.topic, c.createParts); err != nil {
+		if err := createTopic(ctx, c.cpURL, c.topic, c.createParts); err != nil {
 			_, _ = fmt.Fprintln(stderr, "create topic:", err)
 			return 1
 		}
 	}
-	return run(c, stdout, stderr, nc)
+	return run(ctx, c, stdout, stderr, nc)
 }
 
-func createTopic(url, topic string, n int) error {
+func createTopic(ctx context.Context, url, topic string, n int) error {
 	if url == "" {
 		url = "http://127.0.0.1:8080"
 	}
 	body, _ := json.Marshal(map[string]any{"topic": topic, "partitions": n})
-	resp, err := http.Post(strings.TrimRight(url, "/")+"/v1/create-topic", "application/json", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(url, "/")+"/v1/create-topic", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -228,10 +235,7 @@ func reportLoop(pctx context.Context, w io.Writer, tick <-chan time.Time, start 
 	}
 }
 
-func run(c benchConfig, stdout, stderr io.Writer, nc clientFactory) int {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
+func run(ctx context.Context, c benchConfig, stdout, stderr io.Writer, nc clientFactory) int {
 	opts := clientOpts(c)
 	cls := make([]producer, c.clients)
 	for i := range cls {

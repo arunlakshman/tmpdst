@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -117,5 +118,38 @@ func TestStandbyCommitUnavailable(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected unavailable")
+	}
+}
+
+func TestStartCanceledContext(t *testing.T) {
+	n := server.New(server.Config{
+		Machine: machine.Config{K: 4, CatchUpEvery: core.Duration(time.Hour)},
+		Log:     exec.NewMemLog(),
+		Objects: exec.NewMemObjects(),
+		Self:    core.NodeRef{Node: "cp-0"},
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := n.Start(ctx); err == nil {
+		_ = n.Close()
+		t.Fatal("expected Start to fail on canceled context")
+	}
+}
+
+func TestStartCancelWhileWaiting(t *testing.T) {
+	n := server.New(server.Config{
+		Machine: machine.Config{K: 4, CatchUpEvery: core.Duration(time.Hour)},
+		Log:     exec.NewMemLog(),
+		Objects: exec.NewMemObjects(),
+		Self:    core.NodeRef{Node: "cp-0"},
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+	if err := n.Start(ctx); err == nil {
+		_ = n.Close()
+		t.Fatal("expected Start to fail when context cancels during wait")
 	}
 }

@@ -9,7 +9,6 @@ import (
 
 	"manifester/controlplane/cpobs"
 	"manifester/controlplane/exec"
-	"manifester/controlplane/logcp"
 	"manifester/core"
 	"manifester/sys"
 	"manifester/sys/s3store"
@@ -61,7 +60,7 @@ func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
 
 type logDB interface {
 	exec.DB
-	logcp.TableAdmin
+	exec.TableAdmin
 }
 
 type deps struct {
@@ -107,7 +106,7 @@ func openDynLog(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *s
 	}
 	table := f.log.tableName(f.prefix)
 	if f.create {
-		if err := logcp.CreateTable(ctx, db, table); err != nil {
+		if err := exec.CreateTable(ctx, db, table); err != nil {
 			return nil, nil, nop, err
 		}
 	}

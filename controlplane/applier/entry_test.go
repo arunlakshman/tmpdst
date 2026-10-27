@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"manifester/controlplane/applier"
-	"manifester/controlplane/logsm"
 	"manifester/core"
 )
 
@@ -26,33 +25,6 @@ func TestEntryCodecRoundTrip(t *testing.T) {
 		if err != nil || got.ID != e.ID || got.Kind != e.Kind || got.Topic != e.Topic || got.Parts != e.Parts ||
 			got.Commit.SegmentKey != e.Commit.SegmentKey || !slices.Equal(got.Commit.Batches, e.Commit.Batches) {
 			t.Fatalf("round trip %+v -> %+v (%v)", e, got, err)
-		}
-	}
-}
-
-func TestEntryCodecMatchesLogsm(t *testing.T) {
-	pairs := []struct {
-		a applier.Entry
-		l logsm.Entry
-	}{
-		{applier.Entry{ID: "n", Kind: applier.KindNoop}, logsm.Entry{ID: "n", Kind: logsm.KindNoop}},
-		{applier.Entry{ID: "c", Kind: applier.KindCreateTopic, Topic: "t", Parts: 2},
-			logsm.Entry{ID: "c", Kind: logsm.KindCreateTopic, Topic: "t", Parts: 2}},
-		{applier.Entry{ID: "k", Kind: applier.KindCommit, Commit: core.CommitSegment{
-			SegmentKey: "seg",
-			Batches:    []core.PendingBatch{{TP: core.TP("x", 0), Records: 2, Loc: core.SegmentRef{Key: "b", Off: 0, Len: 4}}},
-		}}, logsm.Entry{ID: "k", Kind: logsm.KindCommit, Commit: core.CommitSegment{
-			SegmentKey: "seg",
-			Batches:    []core.PendingBatch{{TP: core.TP("x", 0), Records: 2, Loc: core.SegmentRef{Key: "b", Off: 0, Len: 4}}},
-		}}},
-	}
-	for _, p := range pairs {
-		if ga, gl := applier.Encode(p.a), logsm.Encode(p.l); !slices.Equal(ga, gl) {
-			t.Fatalf("encode mismatch applier %v vs logsm %v", ga, gl)
-		}
-		back, err := applier.Decode(logsm.Encode(p.l))
-		if err != nil || back.ID != p.a.ID || back.Kind != p.a.Kind {
-			t.Fatalf("decode logsm bytes: %+v %v", back, err)
 		}
 	}
 }

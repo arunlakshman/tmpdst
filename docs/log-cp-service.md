@@ -2,9 +2,9 @@
 
 Status: production path is `controlplane/machine` + `controlplane/run` + gRPC (`manicp -store dynamolog`,
 decision 55–58). Sim `kafka-log` uses the same machine as CP processes plus `logstore` (CP-DSM-8,
-`docs/sim-log-engine.md`). Package `controlplane/logcp` remains for DynLog/table helpers and legacy X2
-harness until X2 is fully re-homed as kernel seeds. Decisions 48-52, `docs/design-a-prototype.md`
-section 8, `docs/applier-bakeoff.md`. Tree path is `controlplane/` (decision 56).
+`docs/sim-log-engine.md`). The goroutine `controlplane/logcp` twin is deleted; DynLog/table helpers
+live in `controlplane/exec`. Decisions 48-52, `docs/design-a-prototype.md` section 8,
+`docs/applier-bakeoff.md`. Tree path is `controlplane/` (decision 56).
 
 ## Architecture
 
@@ -36,11 +36,11 @@ reads worked) becomes active. An active node steps down when a writer of a lower
 
 Item: `pk=LOG`, `sk=%020d`, `d` (B) = entry, plus `v`, `w` (writer), `id`, `ts`, `n` (commands), `ttl`. Entry v1:
 version byte, rank, writer, append ID, ts (ms, advisory, never state), count, then each command as
-`controlplane/logsm` codec (key table, batches). Zero commands is a no-op (hole fill, heartbeat). Size guard: entry plus 256 B
+`controlplane/applier` codec (key table, batches). Zero commands is a no-op (hole fill, heartbeat). Size guard: entry plus 256 B
 of item overhead <= 350 KB; a single command that cannot fit is answered `ErrTooLarge` and never queued; the group
 stops growing at the guard.
 **Versioning rule (the open question):** the first byte is the format version. A reader that meets a version above
-`logcp.Version` or a payload it cannot decode STOPS (`Blocked`, 503, `/healthz` 503, `manicp_log_blocked`); it never
+the format version or a payload it cannot decode STOPS (`Blocked`, 503, `/healthz` 503, `manicp_log_blocked`); it never
 skips, since skipping forks the state. Upgrade in two deploys: first every node reads v+1, then flip the writers
 (`DynLogOptions.Version`). Going back after the flip needs the old build to understand v+1.
 

@@ -8,7 +8,7 @@ import (
 	"manifester/core"
 )
 
-// Entry kinds match the Dynamo loglet payload (controlplane/logsm codec).
+// Entry kinds are the Dynamo loglet payload kinds.
 const (
 	KindNoop Kind = iota
 	KindCommit
@@ -52,7 +52,7 @@ func (e *encoder) ref(v string) uint64 {
 	return uint64(len(e.tab) - 1)
 }
 
-// Encode serialises an entry (wire-compatible with logsm.Encode).
+// Encode serialises an entry.
 func Encode(en Entry) []byte {
 	e := &encoder{idx: map[string]int{}}
 	e.u(uint64(en.Kind))
@@ -125,7 +125,7 @@ func (d *decoder) s() string {
 	return v
 }
 
-// Decode parses an entry made by Encode (or logsm.Encode).
+// Decode parses an entry made by Encode.
 func Decode(b []byte) (Entry, error) {
 	d := &decoder{b: b}
 	en := Entry{Kind: Kind(d.u())}

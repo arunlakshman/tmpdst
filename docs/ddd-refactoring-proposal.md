@@ -9,7 +9,7 @@ changes.
 ## Summary
 
 - **Already good:** the strategic shape is close to DDD. `core` is the published language, `veritas` the
-  executable spec, `cp/wire.go` a real anti-corruption layer, and `format/` and `kwire/` clean context
+  executable spec, `controlplane/api/v1` + `apiconv` the gRPC wire boundary, and `format/` and `kwire/` clean context
   modules.
 - **Weak spots are tactical:**
   1. The same concept has several names and types.

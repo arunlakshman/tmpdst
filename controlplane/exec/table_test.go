@@ -1,4 +1,4 @@
-package logcp_test
+package exec_test
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
-	"manifester/controlplane/logcp"
+	"manifester/controlplane/exec"
 )
 
 // tableAdmin is a scripted TableAdmin: create is the CreateTable result and
@@ -38,7 +38,7 @@ func (a *tableAdmin) DescribeTable(_ context.Context, _ *dynamodb.DescribeTableI
 
 func TestCreateTableActive(t *testing.T) {
 	a := &tableAdmin{statuses: []types.TableStatus{types.TableStatusActive}}
-	if err := logcp.CreateTable(t.Context(), a, "t1"); err != nil {
+	if err := exec.CreateTable(t.Context(), a, "t1"); err != nil {
 		t.Fatalf("CreateTable: %v", err)
 	}
 	in := a.created
@@ -58,7 +58,7 @@ func TestCreateTableAlreadyExists(t *testing.T) {
 		create:   &types.ResourceInUseException{},
 		statuses: []types.TableStatus{types.TableStatusActive},
 	}
-	if err := logcp.CreateTable(t.Context(), a, "t1"); err != nil {
+	if err := exec.CreateTable(t.Context(), a, "t1"); err != nil {
 		t.Fatalf("existing table must be left alone, got %v", err)
 	}
 }
@@ -66,7 +66,7 @@ func TestCreateTableAlreadyExists(t *testing.T) {
 func TestCreateTableCreateError(t *testing.T) {
 	boom := errors.New("boom")
 	a := &tableAdmin{create: boom, statuses: []types.TableStatus{types.TableStatusActive}}
-	err := logcp.CreateTable(t.Context(), a, "t1")
+	err := exec.CreateTable(t.Context(), a, "t1")
 	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "create table t1") {
 		t.Fatalf("err = %v, want wrapped boom naming the table", err)
 	}
@@ -77,7 +77,7 @@ func TestCreateTableCreateError(t *testing.T) {
 
 func TestCreateTableWaitsUntilActive(t *testing.T) {
 	a := &tableAdmin{statuses: []types.TableStatus{types.TableStatusCreating, types.TableStatusActive}}
-	if err := logcp.CreateTable(t.Context(), a, "t1"); err != nil {
+	if err := exec.CreateTable(t.Context(), a, "t1"); err != nil {
 		t.Fatalf("CreateTable: %v", err)
 	}
 	if a.described != 2 {
@@ -89,7 +89,7 @@ func TestCreateTableContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	a := &tableAdmin{statuses: []types.TableStatus{types.TableStatusCreating}}
-	if err := logcp.CreateTable(ctx, a, "t1"); !errors.Is(err, context.Canceled) {
+	if err := exec.CreateTable(ctx, a, "t1"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
 }

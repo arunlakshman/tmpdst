@@ -59,7 +59,7 @@ type Config struct {
 	// MaxSegmentPartitions and MaxSegmentBatches cap the open segment so the
 	// control plane can commit it. The cap is a per-store setting (decision 52):
 	//
-	//	log store (cp/logcp)     one command of about 20 bytes per partition in a
+	//	log store (machine/exec) one command of about 20 bytes per partition in a
 	//	                         log entry, so the default is 4096 (about 80 KB,
 	//	                         far under the 350 KB entry guard). No item limit.
 	//

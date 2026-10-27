@@ -22,8 +22,8 @@ import (
 
 	"manifester/controlplane/cpclient"
 	"manifester/controlplane/cpobs"
+	"manifester/controlplane/exec"
 	"manifester/controlplane/fakedb"
-	"manifester/controlplane/logcp/logcptest"
 	"manifester/core"
 	"manifester/sys"
 )
@@ -243,7 +243,7 @@ func waitPartitions(t *testing.T, addr string, a *acks) {
 }
 
 func TestLogStoreThreeNodesTakeover(t *testing.T) {
-	db, objs := newFake(t), logcptest.NewObjects()
+	db, objs := newFake(t), exec.NewMemObjects()
 	d := fakeDeps(db, objs)
 	n0 := startLogNode(t, d, "n0", 0)
 	n1 := startLogNode(t, d, "n1", 1)
@@ -296,7 +296,7 @@ func waitCount(t *testing.T, n *atomic.Int64, want int64) {
 }
 
 func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
-	db, objs := newFake(t), logcptest.NewObjects()
+	db, objs := newFake(t), exec.NewMemObjects()
 	d := fakeDeps(db, objs)
 	n := startLogNode(t, d, "n0", 0, "-final-checkpoint=true", "-ckpt-every", "-1s")
 	c := cpclient.New(n.addr, nil)
@@ -325,7 +325,7 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 }
 
 func TestLogStoreStartupErrors(t *testing.T) {
-	d := fakeDeps(newFake(t), logcptest.NewObjects())
+	d := fakeDeps(newFake(t), exec.NewMemObjects())
 	args := []string{"-store", kindLog, "-addr", freeAddr(t), "-metrics-addr", "", "-table", "missing",
 		"-takeover-after", "1s", "-start-timeout", "500ms", "-ckpt-bucket", ""}
 	var logs syncBuf
@@ -340,7 +340,7 @@ func TestLogStoreStartupErrors(t *testing.T) {
 }
 
 func TestLogStoreWithoutBucketWarns(t *testing.T) {
-	d := fakeDeps(newFake(t), logcptest.NewObjects())
+	d := fakeDeps(newFake(t), exec.NewMemObjects())
 	n := startLogNode(t, d, "n0", 0, "-ckpt-bucket", "")
 	if code := n.stop(t); code != 0 || !strings.Contains(n.logs.String(), "log_no_checkpoint") {
 		t.Fatalf("code %d\n%s", code, n.logs.String())

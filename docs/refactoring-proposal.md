@@ -59,8 +59,9 @@ New growth since the earlier proposal:
   latency is 1.2 s: the serial commit stage (`pump()` commits only `b.segs[0]`) is the bottleneck, not DynamoDB
   (commit 30-60 ms, zero throttles). Every performance item below goes through `segment.go`.
 
-Still good (do not touch): `core` as published language, `veritas` as independent spec, `cp/wire.go` as
-anti-corruption layer, `format/` and `kwire/` as clean modules, facts as the single observation channel.
+Still good (do not touch): `core` as published language, `veritas` as independent spec,
+`controlplane/api/v1` + `apiconv` as the gRPC wire boundary, `format/` and `kwire/` as clean modules,
+facts as the single observation channel.
 
 ## 2. Quick wins (all S, hash-neutral, parallelizable)
 

@@ -6,7 +6,7 @@
 // the independent oracle and shares schema types via apiconv, not apply code
 // (decision 21).
 //
-// Stores and helpers under this tree (memstore, logcp, applier) remain for
-// tests and for the machine's fold. Not deterministic (goroutines, net): it is
-// not in scripts/ci-determinism.sh.
+// Helpers under this tree (memstore, applier, exec) support tests and the
+// machine's fold and IO. Not deterministic (goroutines, net): it is not in
+// scripts/ci-determinism.sh.
 package controlplane

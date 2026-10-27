@@ -83,7 +83,7 @@ Bounded-context merge, Extract Class on Broker/Service/kernel, Dynamo ACL — th
 - [ ] Replica apply / hole-fill / buf — **Extract Class** → shared core — `logcp/replica.go` ↔ `logsm/replica.go`
 - [ ] Commit append/retry — **Combine Functions into Class** — `logcp/committer.go` ↔ `logsm/committer.go`
 - [ ] Binary reader/cursor — **Extract Class** — `logcp/format`, `logsm/codec`, `applier/keys`
-- [ ] Wire Batch/Range map pairs — **Combine Functions into Transform** / **Extract Function** — `cp/wire.go`
+- [x] Wire Batch/Range map pairs — **done/obsolete**: JSON `cp/wire.go` deleted (CP-DSM-7); gRPC uses `controlplane/apiconv`
 - [ ] Echo ↔ kafka client FSM — **Extract Superclass** / **Form Template Method** — `sim/echo/workload` ↔ `sim/kafka/workload`
 - [ ] Echo ↔ kafka campaign presets — **Parameterize Function** / **Form Template Method** — `*/config.go`, invariants
 - [ ] Boundary faults plan — **Form Template Method** — `fakeio` ↔ `logengine`
@@ -188,7 +188,7 @@ Do per package **after** P1 types for that package.
 
 ### tools / api
 
-- [ ] **Extract Function** / **Parameterize Function:** json2yaml `renderChild`; detcheck optional checker list; hoist loadAllow
+- [ ] **Extract Function** / **Parameterize Function:** detcheck optional checker list; hoist loadAllow (json2yaml deleted with `api/openapi`)
 
 ---
 

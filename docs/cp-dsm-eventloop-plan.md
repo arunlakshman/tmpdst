@@ -473,7 +473,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 - [ ] Edit `sim/kafka` config so `kafka-log` runs CP replica processes plus logstore engine.
 - [ ] Delete or gut `sim/engines/logengine` replica/state once mutants and C2 move to the machine.
-- [ ] Delete `logcp` goroutine loops and `logcp.Env` scheduler path when unused.
+- [x] Delete `logcp` goroutine loops and `logcp.Env` scheduler path when unused (retired; SoT is `controlplane/machine` + `exec`).
 - [ ] Edit `docs/sim-log-engine.md`, `docs/log-cp-service.md`, `docs/decisions.md`, `refactoring_backlog.md`.
 - [ ] Re-home X2 coverage as kernel seeds where practical.
 

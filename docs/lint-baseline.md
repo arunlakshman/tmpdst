@@ -12,8 +12,8 @@ Original rule set (errcheck, revive, errorlint, staticcheck, gocritic, nakedret,
 usestdlibvars, copyloopvar): still clean everywhere.
 
 Panic remains allowed only where the config excludes it: `core/`, `sim/`,
-`tools/`, `veritas/` (reference machine), `cp/applier/` (mirrors veritas), and
-`*_test.go`. `time.Now` remains banned in `cp/logcp` and `cp/logsm` except
-`env.go` and tests.
+`tools/`, `veritas/` (reference machine), `controlplane/applier/` (mirrors
+veritas), and `*_test.go`. The former `logcp`/`logsm` `time.Now` ban was
+removed with those packages.
 
 Not linter-checkable: tasks 7, 9, 23, 25.

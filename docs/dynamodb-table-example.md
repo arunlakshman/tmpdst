@@ -2,7 +2,7 @@
 
 Note: the DynamoDB-transaction control plane that this page used to show (`G#`, `R#` and `TOPICS` items written by `cp/dynamo`) was removed (decision 54); the log-based control plane is the only one. Its worked ten-commit scan is in git history.
 
-The control plane (`-store dynamolog`, `cp/logcp`, decisions 48-53) uses one table, `<table-prefix>cp`, with string keys `pk` (hash) and `sk` (range) and on-demand billing (`logcp.CreateTable`, or Terraform). Sample rows, decoded, from a real run: `docs/dynamodb-log-store-sample-rows.md`. Design: `docs/log-cp-service.md`.
+The control plane (`-store dynamolog`, `controlplane/machine` + `exec`, decisions 48-53) uses one table, `<table-prefix>cp`, with string keys `pk` (hash) and `sk` (range) and on-demand billing (`exec.CreateTable`, or Terraform). Sample rows, decoded, from a real run: `docs/dynamodb-log-store-sample-rows.md`. Design: `docs/log-cp-service.md`.
 
 | pk | sk | attributes | what it is |
 |---|---|---|---|

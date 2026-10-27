@@ -1,4 +1,4 @@
-package logcp
+package exec
 
 import (
 	"context"
@@ -32,9 +32,10 @@ func CreateTable(ctx context.Context, db TableAdmin, table string) error {
 		},
 		BillingMode: types.BillingModePayPerRequest,
 	})
-	var inUse *types.ResourceInUseException
-	if err != nil && !errors.As(err, &inUse) {
-		return fmt.Errorf("create table %s: %w", table, err)
+	if err != nil {
+		if _, ok := errors.AsType[*types.ResourceInUseException](err); !ok {
+			return fmt.Errorf("create table %s: %w", table, err)
+		}
 	}
 	for range 100 {
 		out, err := db.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: &table})

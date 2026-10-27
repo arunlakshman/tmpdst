@@ -6,8 +6,6 @@ import (
 	"manifester/core"
 )
 
-// wantSupported is the advertised registry the tests pin. It is independent of
-// the production table so a drift in either side fails the test.
 var wantSupported = []APIRange{
 	{Key: KeyProduce, Min: 3, Max: 9},
 	{Key: KeyFetch, Min: 4, Max: 12},

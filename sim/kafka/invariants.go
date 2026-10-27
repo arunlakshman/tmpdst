@@ -6,11 +6,6 @@ import (
 	"manifester/sim/internal/campaign"
 )
 
-// liveness: at the end no op is pending, and nothing that finishes more than
-// campaign.LivenessGrace into Settling ends in failure. A produce still
-// unresolved then is acked, never abandoned or indeterminate, except the batch
-// that claims a producer id and is rejected. A fetch answers without error.
-// Indeterminate produces are otherwise allowed (decision 15).
 type liveness struct{}
 
 func (*liveness) Name() string     { return "Liveness" }
@@ -29,7 +24,7 @@ func (*liveness) AtEnd(v sim.View) {
 		switch r := op.Result.(type) {
 		case ProduceRes:
 			produced++
-			if op.Return >= after && r.Why != "rejected" { // a deliberately idempotent batch is rejected, never acked
+			if op.Return >= after && r.Why != "rejected" {
 				v.Assert().Always(op.Outcome == sim.OpDefinite && r.Base >= 0, "kafka: a produce still running in Settling is acked",
 					core.Detail{Key: "op", Value: op.Op}, core.Detail{Key: "result", Value: r}, core.Detail{Key: "return", Value: op.Return})
 			}

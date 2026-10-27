@@ -24,7 +24,6 @@ const ErrCodeUnsupportedVersion int16 = 35
 // APIRange is an API key and its inclusive supported version range.
 type APIRange struct{ Key, Min, Max int16 }
 
-// supported is the API registry in key order. supportedByKey indexes it by API key.
 var (
 	supported = []APIRange{
 		{Key: KeyProduce, Min: 3, Max: 9},

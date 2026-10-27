@@ -415,8 +415,6 @@ func wideCampaign(t *testing.T, capParts, batches int, log bool) int64 {
 		opts.Partitions = 128
 		cfg = configLogWith(seeds(1, 2), broker.BugNone, 0, opts)
 		items = 0
-		// Width check only: campaign deadlines/coins shrink committed spans
-		// below the old 96-partition bar. kafka-log / mutants keep coins live.
 		cfg.ControlPlane.CallerTimeout = 800 * core.Millisecond
 		cfg.LogStore.CallerTimeout = 800 * core.Millisecond
 		cfg.Phases = campaign.Phases()
@@ -444,7 +442,7 @@ func wideCampaign(t *testing.T, capParts, batches int, log bool) int64 {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep.Coverage = nil // a short campaign does not reach every fault
+	rep.Coverage = nil
 	report(t, rep)
 	return widest.Load()
 }

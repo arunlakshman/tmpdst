@@ -19,7 +19,7 @@ type Preset struct {
 	CheckDeterminism uint32
 }
 
-// Millis returns n milliseconds.
+// Millis is n as a core.Duration in milliseconds.
 func Millis(n int64) core.Duration { return core.Duration(n) * core.Millisecond }
 
 func slow(fmin, fmax, smin, smax int64, p float64) sim.TwoSpeed {
@@ -29,7 +29,7 @@ func slow(fmin, fmax, smin, smax int64, p float64) sim.TwoSpeed {
 	}
 }
 
-// Phases returns the preset schedule.
+// Phases is Chaos 30s, Settling 10s, Settle 5s, MaxQuietLatency 3s.
 func Phases() sim.Phases {
 	return sim.Phases{
 		Chaos: 30 * core.Second, Settling: 10 * core.Second, Settle: 5 * core.Second,
@@ -73,7 +73,7 @@ func New() Preset {
 	}
 }
 
-// LivenessGrace is how long into Settling a request may still fail.
+// LivenessGrace is the Settling offset used by campaign liveness invariants.
 const LivenessGrace = 6 * core.Second
 
 // PhaseStart reports when the kernel announced phase p, from its sim_phase fact.

@@ -166,15 +166,12 @@ func swarmLog(r sim.CountedRand, c *sim.SeedConfig) {
 	scale(&l.PutFail)
 	scale(&l.PutLost)
 	scale(&l.ReadFail)
-	l.StallProb, l.CrashProb = 0, 0 // in-process stall/crash follow-up
-	// Floor K above 1: one in-flight PutLost otherwise stalls every commit
-	// behind it for the whole bridge CallerTimeout.
+	l.StallProb, l.CrashProb = 0, 0
 	l.K = []int{2, 4, 8}[r.Intn(3)]
 	l.GroupMax = []int{1, 2, 4, 16}[r.Intn(4)]
 	l.HoleAfter = campaign.Millis([]int64{20, 60, 200}[r.Intn(3)])
-	// Floor takeover above heartbeat so a healthy primary is not displaced.
 	l.TakeoverAfter = campaign.Millis([]int64{600, 900, 1500}[r.Intn(3)])
-	if r.Chance(0.4) { // checkpoint often; keep enough slots for PutFail lag
+	if r.Chance(0.4) {
 		l.CkptEvery, l.KeepSlots, l.TrimStride = []int{8, 16, 24}[r.Intn(3)], []int{16, 32}[r.Intn(2)], 4
 	}
 	c.LogStore.Unavailable503 = l.PutFail
@@ -186,55 +183,38 @@ func swarmLog(r sim.CountedRand, c *sim.SeedConfig) {
 
 func swarm(_ uint64, r sim.CountedRand, c *sim.SeedConfig) {
 	campaign.Swarm(r, c, func() {
-		switch x := r.Intn(20); { // short transfers: tiny chunks are costly (every chunk is a Step)
+		switch x := r.Intn(20); {
 		case x < 2:
 			c.Network.PartialIOMax = 48
 		case x < 8:
 			c.Network.PartialIOMax = 256
 		}
 	})
-	swarmBroker(r, c) // last, so the fault knobs above keep their draws
+	swarmBroker(r, c)
 	if c.ControlPlane.Log.Enabled {
 		swarmLog(r, c)
 	}
 }
 
-// The 3 producers send at most 2 batches each and wait for the ack, so a
-// segment rarely holds more than 6 batches or partitions: the batch cap binds
-// only when it is 2-4, and the partition cap only when it is 2-6.
-//
-// swarmBroker picks this seed's segment tuning (decision 17) from a profile:
-//
-//	tiny (0.2)        a few KiB: the size rule binds
-//	accumulate (0.2)  long windows, big byte cap, small batch cap: the batch cap binds
-//	defaults (0.15)   the production defaults: 16 MiB, 200 ms, 256 batches, 96 partitions
-//	wide (0.2)        long windows, nothing else binds, a partition cap of 2-6: the partition cap
-//	mixed (0.25)      every knob from its own menu
-//
-// Buffer caps are swarmed too. Half the seeds tighten the control plane's commit
-// limit to exactly what the seed's partition cap allows (1 + partitions: the
-// segment item and one run item per partition, decisions 39, 41, 44; batches do
-// not count), so a broker that ignores the cap is refused; the preset's own
-// limit is 100.
 func swarmBroker(r sim.CountedRand, c *sim.SeedConfig) {
 	bc := c.Params.(broker.Config)
 	pick := func(menu ...int) int { return menu[r.Intn(len(menu))] }
 	window := func(menu ...int) core.Duration { return campaign.Millis(int64(pick(menu...))) }
 	d := broker.DefaultConfig()
 	switch x := r.Float64(); {
-	case x < 0.2: // tiny
+	case x < 0.2:
 		bc.MaxSegmentBytes, bc.BatchWindow = pick(4<<10, 6<<10, 8<<10), window(20, 50, 200)
 		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(16, 32, 256), pick(12, 24, 96)
-	case x < 0.4: // accumulate
+	case x < 0.4:
 		bc.MaxSegmentBytes, bc.BatchWindow = pick(256<<10, 4<<20, 16<<20), window(50, 200)
 		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(2, 3, 4), pick(12, 24, 96)
-	case x < 0.55: // defaults
+	case x < 0.55:
 		bc.MaxSegmentBytes, bc.BatchWindow = d.MaxSegmentBytes, d.BatchWindow
 		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = d.MaxSegmentBatches, d.MaxSegmentPartitions
-	case x < 0.75: // wide
+	case x < 0.75:
 		bc.MaxSegmentBytes, bc.BatchWindow = 16<<20, window(50, 200)
 		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = 256, pick(2, 3, 4, 5, 6)
-	default: // mixed
+	default:
 		bc.MaxSegmentBytes, bc.BatchWindow = pick(4<<10, 16<<10, 64<<10, 256<<10, 4<<20, 16<<20), window(5, 20, 50, 200)
 		bc.MaxSegmentBatches, bc.MaxSegmentPartitions = pick(2, 4, 8, 32, 256), pick(3, 6, 12, 24, 96)
 	}

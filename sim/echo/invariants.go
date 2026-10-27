@@ -107,11 +107,6 @@ func (i *readYourAck) Observe(v sim.View) {
 	}
 }
 
-// liveness: at the end no request is pending, and every request invoked in
-// Settling after campaign.LivenessGrace succeeded. Settling is bounded by the
-// kernel's "sim_phase" facts, not by configured times. Connections damaged in
-// Chaos are only recycled at the phase change, and a node stopped at the end
-// of Chaos is killed at its Stop deadline (5s of kernel grace) and then restarts.
 type liveness struct{}
 
 func (*liveness) Name() string     { return "Liveness" }

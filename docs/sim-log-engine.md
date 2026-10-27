@@ -27,11 +27,14 @@ The veritas-backed preset (`-scenario kafka`) is unchanged.
 ```
 
 Two CP processes (rank 0 preferred appender, rank 1 standby). CP processes are
-`NoAttrition` (in-process stall/crash follow-up). Bridge and logstore Put
-fault coins are currently zeroed in `swarmLog` so CommitSegment retry budget
-matches the old in-engine put loop; re-enable under a green stacked-fault pass.
-Log knobs stay on `sim.LogParams`. Mutants use `LogParams.Bug` /
-`machine.Config.Bug` (and `LogStoreFaults.Bug` for trim-delete).
+`NoAttrition`; `StallProb` / `CrashProb` stay forced off in `swarmLog`
+(in-process stall/crash and CP attrition are a separate follow-up). Bridge and
+logstore Put fault coins stay live in `swarmLog`. A MaybeApplied commit Put
+retries the same slot (conditional append); abandoning the slot used to wedge
+`drain` so later commits never applied. `ConfigLog` also raises bridge
+`CallerTimeout`, shortens per-Put logstore timeout, and extends Settling/Settle
+under stacked retries. Log knobs stay on `sim.LogParams`. Mutants use
+`LogParams.Bug` / `machine.Config.Bug` (and `LogStoreFaults.Bug` for trim-delete).
 
 ## Mutants (`sim/kafka/logmutants_test.go`)
 

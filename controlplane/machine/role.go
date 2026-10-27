@@ -2,6 +2,7 @@ package machine
 
 import (
 	"fmt"
+	"slices"
 
 	"manifester/controlplane/applier"
 	"manifester/core"
@@ -18,6 +19,9 @@ const (
 
 // Ready reports that restore (if any) and the first catch-up round finished.
 func (m *Machine) Ready() bool { return m.ready }
+
+// Booting reports restore or catch-up in progress (not yet Ready).
+func (m *Machine) Booting() bool { return m.booting }
 
 // IsActive reports the advisory appender role.
 func (m *Machine) IsActive() bool { return m.active }
@@ -167,8 +171,76 @@ func (m *Machine) softCrash() []core.Action {
 	m.buf = map[core.LogSlot][]byte{}
 	m.pending, m.pendingKind = 0, pendingNone
 	m.proj = nil
+	m.fillSlot, m.fillData = 0, nil
+	m.holeArmed = false
 	// Refuse client work until afterCrashRestart restores fold + catch-up.
 	return nil
+}
+
+// isTomb reports a LogAppend into a trimmed slot (tombstone): Conflict, Taken,
+// and no Existing bytes (store.go). Empty-delete mutants look like free slots.
+func isTomb(d core.LogAppendDone) bool {
+	return d.Err == core.ErrConflict && d.Taken && len(d.Existing) == 0
+}
+
+// hitTrimmed handles append/fill against a tombstone: refuse clients, drop
+// local log state, and restore from checkpoint (docs/log-cp-service.md).
+// Catch-up from slot 0 after a tomb re-enters the trimmed prefix; needsCkpt
+// blocks that until a snapshot lands.
+func (m *Machine) hitTrimmed() []core.Action {
+	m.env.Reachable("logcp-sim: replica hit a trimmed slot")
+	m.refuseClients(core.ErrUnavailable, core.MaybeApplied)
+	m.setActive(false)
+	m.ready = false
+	m.booting = true
+	m.needsCkpt = true
+	m.queue = nil
+	m.flights = map[core.ReqID]*flight{}
+	m.waiters = map[string][]pendingCmd{}
+	m.buf = map[core.LogSlot][]byte{}
+	m.pending, m.pendingKind = 0, pendingNone
+	m.proj = nil
+	m.fillSlot, m.fillData = 0, nil
+	m.holeArmed = false
+	return m.afterCrashRestart()
+}
+
+func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {
+	refuse := func(c pendingCmd) {
+		m.answers = append(m.answers, Answer{
+			Req: c.req, From: c.from,
+			Done: core.CPDone{Req: c.req, Err: err, Outcome: o},
+		})
+	}
+	// Sort map keys so answer order is stable across runs (TraceHash).
+	reqs := make([]core.ReqID, 0, len(m.flights))
+	for req := range m.flights {
+		reqs = append(reqs, req)
+	}
+	slices.Sort(reqs)
+	seen := map[string]bool{}
+	for _, req := range reqs {
+		f := m.flights[req]
+		seen[f.id] = true
+		for _, c := range f.cmds {
+			refuse(c)
+		}
+	}
+	for _, c := range m.queue {
+		refuse(c)
+	}
+	ids := make([]string, 0, len(m.waiters))
+	for id := range m.waiters {
+		if !seen[id] {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		for _, c := range m.waiters[id] {
+			refuse(c)
+		}
+	}
 }
 
 func (m *Machine) afterCrashRestart() []core.Action {

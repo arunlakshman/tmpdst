@@ -170,6 +170,7 @@ func (e *Engine) OnInternal(ctx sim.EngineCtx, body any) {
 	}
 	p.done = true
 	p.muted = true // late CPReply must not deliver a second answer
+	delete(e.pending, key)
 	e.deliver(ctx, p.from, core.CPDone{Req: d.req, Err: core.ErrTimeout, Outcome: core.MaybeApplied})
 }
 
@@ -237,6 +238,12 @@ func (e *Engine) execReply(ctx sim.EngineCtx, r core.CPReply) {
 	ctx.Cancel(p.deadline)
 	delete(e.pending, key)
 	if p.muted {
+		// Lost/timeout fault: never forward the service reply. Answer the broker
+		// now (same ErrTimeout+MaybeApplied the deadline would have sent) so a
+		// cancelled deadline cannot leave the commit hung.
+		e.deliver(ctx, p.from, core.CPDone{
+			Req: r.Done.Req, Err: core.ErrTimeout, Outcome: core.MaybeApplied,
+		})
 		return
 	}
 	lat := e.f.RespondLatency.Sample(ctx.Rand())

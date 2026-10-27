@@ -52,6 +52,22 @@ func (a *Applier) Commit(slot int64, op core.CommitSegment) (core.CPDone, error)
 	return d, err
 }
 
+// KnownCommit answers op from the idempotency window when the key is already
+// present. ok is false when the key is unknown (caller must append).
+func (a *Applier) KnownCommit(op core.CommitSegment) (core.CPDone, bool, error) {
+	var d core.CPDone
+	var ok bool
+	err := a.kv.View(func(tx Tx) {
+		rec := tx.Get(idemKey(op.SegmentKey))
+		if rec == nil {
+			return
+		}
+		ok = true
+		d = replay(rec, digest(op.Batches), op)
+	})
+	return d, ok, err
+}
+
 // Command is one CommitSegment at its log slot.
 type Command struct {
 	Slot int64

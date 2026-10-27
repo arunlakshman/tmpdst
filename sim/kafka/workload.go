@@ -22,6 +22,9 @@ type Opts struct {
 	Partitions           int32
 	// MaxAttempts caps client produce sends before abandon. Zero means 3.
 	MaxAttempts int
+	// ReqTimeout is how long a non-fetch request waits before the client drops
+	// the connection. Zero means 1500 ms.
+	ReqTimeout core.Duration
 }
 
 // DefaultOpts is 3 at-least-once producers and 2 consumers over 2 topics x 3
@@ -35,6 +38,13 @@ func (o Opts) maxAttempts() int {
 		return o.MaxAttempts
 	}
 	return maxAttempts
+}
+
+func (o Opts) reqTimeout() core.Duration {
+	if o.ReqTimeout > 0 {
+		return o.ReqTimeout
+	}
+	return reqTimeout
 }
 
 func (o Opts) tps() []core.TopicPartition {
@@ -306,7 +316,7 @@ func (w *Workload) send(c *client, kind reqKind, req kmsg.Request) []core.Action
 		w.env.Unreachable("kafka: client request encodes", core.Detail{Key: "err", Value: err.Error()})
 		return nil
 	}
-	timeout := reqTimeout
+	timeout := w.opts.reqTimeout()
 	if kind == rqFetch {
 		timeout = fetchWait
 	}

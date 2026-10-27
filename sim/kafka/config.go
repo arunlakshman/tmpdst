@@ -45,8 +45,8 @@ func ConfigLog(seeds []uint64) sim.Config { return configLog(seeds, broker.BugNo
 // configLog builds the log preset with a broker mutant and a log engine mutant.
 func configLog(seeds []uint64, bug broker.Bug, logBug uint8) sim.Config {
 	opts := DefaultOpts()
-	// Stacked logstore retries need more client sends than the veritas CP path.
-	opts.MaxAttempts = 8
+	// Stacked bridge + logstore retries need more produce sends than veritas.
+	opts.MaxAttempts = 16
 	return configLogWith(seeds, bug, logBug, opts)
 }
 
@@ -73,33 +73,26 @@ func configLogWith(seeds []uint64, bug broker.Bug, logBug uint8, opts Opts) sim.
 		Name: "cp", Count: 2, NoAttrition: true,
 		FactoryFor: func(sc sim.SeedConfig) core.Factory { return cpFactory(sc, opts) },
 	})
-	cfg.ControlPlane.CallerTimeout = 800 * core.Millisecond
-	cfg.LogStore.CallerTimeout = 800 * core.Millisecond
-	cfg.ExpectReachable = append(withoutProps(cfg.ExpectReachable,
-		"cp 503 injected", "cp timeout injected", "cp lost response injected", "cp outage started",
-		"broker: commit succeeded after the old retry budget", "broker: commit retried",
-	), logReachables()...)
+	// Bridge deadline covers several logstore Put attempts. Per-append timeout
+	// must clear ApplyLatency SlowMax (200ms) so a slow Put is not a false
+	// MaybeApplied; keep it below the bridge so PutFail can still retry inside
+	// one CommitSegment.
+	cfg.ControlPlane.CallerTimeout = 1500 * core.Millisecond
+	cfg.LogStore.CallerTimeout = 500 * core.Millisecond
+	ph := cfg.Phases
+	ph.Settling = 25 * core.Second
+	ph.Settle = 20 * core.Second
+	cfg.Phases = ph
+	cfg.ExpectReachable = append(cfg.ExpectReachable, logReachables()...)
 	return cfg
-}
-
-func withoutProps(in []core.Prop, drop ...core.Prop) []core.Prop {
-	skip := map[core.Prop]bool{}
-	for _, p := range drop {
-		skip[p] = true
-	}
-	var out []core.Prop
-	for _, p := range in {
-		if !skip[p] {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 // logReachables are the log engine's paths a campaign must reach.
 func logReachables() []core.Prop {
 	return []core.Prop{
+		"logcp-sim: lost slot retried at a later slot",
 		"logcp-sim: hole filled by a no-op",
+		"logcp-sim: Put not answered, same slot repeated",
 		"logcp-sim: replayed key answered from the window",
 		"logcp-sim: log trimmed below a checkpoint",
 	}
@@ -203,28 +196,21 @@ func swarmLog(r sim.CountedRand, c *sim.SeedConfig) {
 	scale(&l.PutLost)
 	scale(&l.ReadFail)
 	l.StallProb, l.CrashProb = 0, 0 // in-process stall/crash follow-up
-	l.K = []int{1, 2, 4, 8}[r.Intn(4)]
+	// Floor K above 1: one in-flight PutLost otherwise stalls every commit
+	// behind it for the whole bridge CallerTimeout.
+	l.K = []int{2, 4, 8}[r.Intn(3)]
 	l.GroupMax = []int{1, 2, 4, 16}[r.Intn(4)]
 	l.HoleAfter = ms([]int64{20, 60, 200}[r.Intn(3)])
 	// Floor takeover above heartbeat so a healthy primary is not displaced.
 	l.TakeoverAfter = ms([]int64{600, 900, 1500}[r.Intn(3)])
-	if r.Chance(0.4) { // trim-heavy: checkpoints and trims every few slots
-		l.CkptEvery, l.KeepSlots, l.TrimStride = []int{4, 8, 16}[r.Intn(3)], []int{2, 4}[r.Intn(2)], 4
+	if r.Chance(0.4) { // checkpoint often; keep enough slots for PutFail lag
+		l.CkptEvery, l.KeepSlots, l.TrimStride = []int{8, 16, 24}[r.Intn(3)], []int{16, 32}[r.Intn(2)], 4
 	}
-	// Bridge faults off: machine LogAppend retries hide PutFail (old logengine).
-	c.ControlPlane.Unavailable503 = 0
-	c.ControlPlane.Timeout = 0
-	c.ControlPlane.LostResponse = 0
-	c.ControlPlane.Outage.Prob = 0
-	// Logstore PutFail/PutLost stay off until CommitSegment retry budget under
-	// stacked IO latency matches the old in-engine put loop (pending ops / retries).
-	c.LogStore.Unavailable503 = 0
-	c.LogStore.LostResponse = 0
-	l.PutFail, l.PutLost = 0, 0
+	c.LogStore.Unavailable503 = l.PutFail
+	c.LogStore.LostResponse = l.PutLost
 	c.LogStore.Bug = l.Bug
 	c.LogStore.WindowSlots = l.WindowSlots
 	c.LogStore.TrimStride = l.TrimStride
-	c.LogStore.CallerTimeout = c.ControlPlane.CallerTimeout
 }
 
 // swarm switches each fault family fully off with probability 0.4 and scales

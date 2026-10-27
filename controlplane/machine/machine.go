@@ -64,6 +64,7 @@ type Machine struct {
 	stallUntil core.Time
 	downUntil  core.Time
 	crashed    bool
+	needsCkpt  bool // hit a tomb; must restore before catch-up from zero
 	seeds      []topicSeed
 }
 
@@ -267,6 +268,11 @@ func (m *Machine) onAppendDone(d core.LogAppendDone) []core.Action {
 	offered := m.fillData
 	m.pending, m.pendingKind = 0, pendingNone
 	m.fillSlot, m.fillData = 0, nil
+	if isTomb(d) {
+		// Hole fill landed on a trimmed slot: catch-up cannot rewrite tombs
+		// (docs/log-cp-service.md). Restore from checkpoint and rejoin.
+		return m.hitTrimmed()
+	}
 	if d.Err != core.OK || d.Outcome != core.Applied {
 		return m.armCatchUp()
 	}

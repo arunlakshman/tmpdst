@@ -107,6 +107,35 @@ func TestBridgeFaultCoins(t *testing.T) {
 	}
 }
 
+func TestBridgeLostReplyStillTimesOut(t *testing.T) {
+	// LostResponse mutes the service reply; the caller-timeout deadline must
+	// still answer the broker (a cancelled deadline left commits hung).
+	// execCall floors CallerTimeout at 500ms.
+	f := faults()
+	f.Unavailable503, f.Timeout, f.Outage.Prob = 0, 0, 0
+	f.LostResponse = 1
+	f.CallerTimeout = 500 * ms
+	e := logengine.New(f)
+	c := enginetest.New(e, 5)
+	broker := enginetest.Ref("broker-0")
+	e.Execute(c, broker, core.CPCall{Req: 9, Op: core.Lookup{}})
+	c.RunUntil(sim.Time(10 * ms))
+	c.Delivered = nil
+	e.Execute(c, enginetest.Ref("cp-0"), core.CPReply{
+		To: broker, Done: core.CPDone{Req: 9, Err: core.OK, Outcome: core.Applied},
+	})
+	c.RunUntil(sim.Time(20 * ms))
+	var got *core.CPDone
+	for _, d := range c.Delivered {
+		if done, ok := d.Body.(core.CPDone); ok && done.Req == 9 {
+			got = &done
+		}
+	}
+	if got == nil || got.Err != core.ErrTimeout || got.Outcome != core.MaybeApplied {
+		t.Fatalf("after lost reply got %#v faults=%v delivered=%s", got, c.Faults, c.Trace())
+	}
+}
+
 func TestBridgeFailoverOnUnavailable(t *testing.T) {
 	f := faults()
 	f.Unavailable503, f.Timeout, f.LostResponse, f.Outage.Prob = 0, 0, 0, 0

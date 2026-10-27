@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"manifester/broker"
+	cp "manifester/controlplane"
+	"manifester/controlplane/cpclient"
 	"manifester/core"
-	"manifester/cp"
-	"manifester/cp/cpclient"
 	"manifester/sys"
 	"manifester/sys/httppool"
 	"manifester/sys/prod"

@@ -19,11 +19,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
+	"manifester/controlplane/cpclient"
+	"manifester/controlplane/cpobs"
+	"manifester/controlplane/fakedb"
+	"manifester/controlplane/logcp/logcptest"
 	"manifester/core"
-	"manifester/cp/cpclient"
-	"manifester/cp/cpobs"
-	"manifester/cp/fakedb"
-	"manifester/cp/logcp/logcptest"
 	"manifester/sys"
 )
 

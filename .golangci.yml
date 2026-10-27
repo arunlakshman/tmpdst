@@ -54,7 +54,7 @@ linters:
         - pattern: ^panic$
           msg: "return an error; panic is for impossible state in core/ sim/ only (Effective Go, Panic)"
         - pattern: ^time\.Now$
-          msg: "cp/logcp and cp/logsm take an injected clock (Env.Now); do not call time.Now directly"
+          msg: "controlplane/logcp and controlplane/logsm take an injected clock (Env.Now); do not call time.Now directly"
     funlen:
       lines: 80
       statements: 50
@@ -94,13 +94,13 @@ linters:
         path: '^(core|sim|tools|veritas)/|_test\.go$'
       - linters: [forbidigo]
         text: 'panic'
-        path: '^cp/applier/'
+        path: '^controlplane/applier/'
       - linters: [forbidigo]
         text: 'time\.Now'
-        path-except: '^cp/(logcp|logsm)/'
+        path-except: '^controlplane/(logcp|logsm)/'
       - linters: [forbidigo]
         text: 'time\.Now'
-        path: '^cp/(logcp|logsm)/(env\.go|.*_test\.go)$'
+        path: '^controlplane/(logcp|logsm)/(env\.go|.*_test\.go)$'
       - linters: [funlen, gocognit, nestif, dupl, interfacebloat]
         path: '_test\.go$'
 formatters:

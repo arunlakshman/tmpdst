@@ -11,8 +11,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
-	"manifester/cp/logcp"
-	"manifester/cp/logcp/logcptest"
+	"manifester/controlplane/logcp"
+	"manifester/controlplane/logcp/logcptest"
 	"manifester/sys/s3store"
 )
 

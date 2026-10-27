@@ -18,11 +18,11 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"manifester/broker"
+	"manifester/controlplane/cpclient"
+	"manifester/controlplane/fakedb"
+	"manifester/controlplane/logcp"
+	"manifester/controlplane/logcp/logcptest"
 	"manifester/core"
-	"manifester/cp/cpclient"
-	"manifester/cp/fakedb"
-	"manifester/cp/logcp"
-	"manifester/cp/logcp/logcptest"
 	"manifester/sys/prod"
 	"manifester/veritas/vsys"
 )

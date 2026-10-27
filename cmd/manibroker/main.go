@@ -19,8 +19,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"manifester/broker"
+	"manifester/controlplane/cpclient"
 	"manifester/core"
-	"manifester/cp/cpclient"
 	"manifester/sys"
 	"manifester/sys/awsobs"
 	"manifester/sys/prod"

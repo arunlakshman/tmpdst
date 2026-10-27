@@ -30,12 +30,18 @@ type Machine struct {
 	seq         uint64
 	applied     core.LogSlot // next slot to apply
 	goalTail    core.LogSlot // CheckTail answer for the current round
+	high        core.LogSlot // next slot to allocate for commit appends
 	buf         map[core.LogSlot][]byte
 	pending     core.ReqID
 	pendingKind pendingKind
 	fillSlot    core.LogSlot // slot of in-flight hole-fill append
 	fillData    []byte       // bytes we offered for that append
 	holeArmed   bool         // hole timer is outstanding
+
+	queue   []pendingCmd           // client ops waiting for a commit slot
+	flights map[core.ReqID]*flight // in-flight commit LogAppends (at most K)
+	waiters map[string][]pendingCmd
+	answers []Answer
 }
 
 type pendingKind uint8
@@ -52,8 +58,10 @@ func New(cfg Config) core.Factory {
 	return func(env core.Env, self core.NodeRef) core.Machine {
 		return &Machine{
 			env: env, self: self, cfg: cfg,
-			fold: applier.NewMem(),
-			buf:  map[core.LogSlot][]byte{},
+			fold:    applier.NewMem(),
+			buf:     map[core.LogSlot][]byte{},
+			flights: map[core.ReqID]*flight{},
+			waiters: map[string][]pendingCmd{},
 		}
 	}
 }
@@ -145,14 +153,19 @@ func (m *Machine) onReadDone(d core.LogReadDone) []core.Action {
 			continue
 		}
 		m.buf[e.Slot] = append([]byte(nil), e.Data...)
+		m.observeSlot(e.Slot)
 	}
 	if err := m.drain(); err != nil {
 		return m.trip(err)
 	}
-	return m.progress()
+	acts := m.progress()
+	return append(acts, m.flushCommits()...)
 }
 
 func (m *Machine) onAppendDone(d core.LogAppendDone) []core.Action {
+	if f, ok := m.flights[d.Req]; ok {
+		return m.onCommitAppendDone(d, f)
+	}
 	if d.Req != m.pending || m.pendingKind != pendingAppend {
 		return nil
 	}
@@ -167,13 +180,15 @@ func (m *Machine) onAppendDone(d core.LogAppendDone) []core.Action {
 	if d.Taken {
 		data = append([]byte(nil), d.Existing...)
 	}
+	m.observeSlot(slot)
 	if slot >= m.applied {
 		m.buf[slot] = data
 	}
 	if err := m.drain(); err != nil {
 		return m.trip(err)
 	}
-	return m.progress()
+	acts := m.progress()
+	return append(acts, m.flushCommits()...)
 }
 
 func (m *Machine) drain() error {
@@ -183,7 +198,7 @@ func (m *Machine) drain() error {
 			return nil
 		}
 		delete(m.buf, m.applied)
-		if _, err := m.fold.ApplyBytes(int64(m.applied), data); err != nil {
+		if err := m.applySlot(m.applied, data); err != nil {
 			return err
 		}
 		m.applied++
@@ -292,13 +307,20 @@ func (m *Machine) StateHash() uint64 {
 	h = core.FnvU64(h, uint64(m.seq))
 	h = core.FnvU64(h, uint64(m.applied))
 	h = core.FnvU64(h, uint64(m.goalTail))
+	h = core.FnvU64(h, uint64(m.high))
 	h = core.FnvU64(h, uint64(m.pending))
 	h = core.FnvU64(h, uint64(m.pendingKind))
 	h = core.FnvU64(h, uint64(m.fillSlot))
 	h = core.FnvU64(h, bool64(m.holeArmed))
+	h = core.FnvU64(h, uint64(len(m.queue)))
+	h = core.FnvU64(h, uint64(len(m.flights)))
+	h = core.FnvU64(h, uint64(len(m.waiters)))
 	h = core.FnvU64(h, uint64(m.cfg.CatchUpEvery))
 	h = core.FnvU64(h, uint64(m.cfg.ReadLimit))
 	h = core.FnvU64(h, uint64(m.cfg.HoleAfter))
+	h = core.FnvU64(h, uint64(m.cfg.K))
+	h = core.FnvU64(h, uint64(m.cfg.MaxCmdsPerSlot))
+	h = core.FnvU64(h, uint64(m.cfg.QueueMax))
 	h = core.FnvU64(h, m.fold.StateHash())
 	return h
 }

@@ -6,6 +6,7 @@
 // other controlplane packages, but not broker, sim, sys, cmd, veritas, kwire,
 // format, net/http, Pebble, or the Dynamo SDK.
 //
-// Log I/O goes out only as Log* IOActions. CP-DSM-3 adds a timer-driven
-// catch-up sketch (CheckTail then Read) that does not apply commands yet.
+// Log I/O goes out only as Log* IOActions. Catch-up reads the log, applies
+// entries in slot order through an in-memory applier fold, and emits no-op
+// LogAppend actions to fill holes. Commit queue and K in-flight land later.
 package machine

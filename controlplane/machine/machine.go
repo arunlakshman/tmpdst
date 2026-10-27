@@ -1,8 +1,16 @@
 package machine
 
-import "manifester/core"
+import (
+	"fmt"
 
-const timerCatchUp = core.TimerID(1)
+	"manifester/controlplane/applier"
+	"manifester/core"
+)
+
+const (
+	timerCatchUp  = core.TimerID(1)
+	timerHoleFill = core.TimerID(2)
+)
 
 // Machine is the control-plane DSM. Build it with New.
 type Machine struct {
@@ -14,12 +22,20 @@ type Machine struct {
 	stopping bool
 	exited   bool
 
+	fold *applier.Applier
+
 	timerGen    core.TimerGen
+	holeGen     core.TimerGen
 	nextReq     core.ReqID
-	nextSlot    core.LogSlot // next slot to LogRead; apply is CP-DSM-4
+	seq         uint64
+	applied     core.LogSlot // next slot to apply
 	goalTail    core.LogSlot // CheckTail answer for the current round
-	pending     core.ReqID   // in-flight log ReqID, or 0
+	buf         map[core.LogSlot][]byte
+	pending     core.ReqID
 	pendingKind pendingKind
+	fillSlot    core.LogSlot // slot of in-flight hole-fill append
+	fillData    []byte       // bytes we offered for that append
+	holeArmed   bool         // hole timer is outstanding
 }
 
 type pendingKind uint8
@@ -28,16 +44,28 @@ const (
 	pendingNone pendingKind = iota
 	pendingTail
 	pendingRead
+	pendingAppend
 )
 
 // New returns the core.Factory of the control-plane machine.
 func New(cfg Config) core.Factory {
 	return func(env core.Env, self core.NodeRef) core.Machine {
-		return &Machine{env: env, self: self, cfg: cfg}
+		return &Machine{
+			env: env, self: self, cfg: cfg,
+			fold: applier.NewMem(),
+			buf:  map[core.LogSlot][]byte{},
+		}
 	}
 }
 
 var _ core.Machine = (*Machine)(nil)
+
+// Fold is the in-memory applier after the applied prefix. Tests compare its
+// digest to an independent oracle.
+func (m *Machine) Fold() *applier.Applier { return m.fold }
+
+// Applied is the next slot to apply (slots below are folded).
+func (m *Machine) Applied() core.LogSlot { return m.applied }
 
 // Step implements core.StateMachine. Unknown completions and unhandled bodies
 // leave state unchanged. After Exit, every event is a no-op.
@@ -56,6 +84,8 @@ func (m *Machine) Step(ev core.Event) []core.Action {
 		return m.onCheckTailDone(body)
 	case core.LogReadDone:
 		return m.onReadDone(body)
+	case core.LogAppendDone:
+		return m.onAppendDone(body)
 	default:
 		return nil
 	}
@@ -70,10 +100,24 @@ func (m *Machine) onStarted() []core.Action {
 }
 
 func (m *Machine) onTimer(e core.TimerFired) []core.Action {
-	if e.ID != timerCatchUp || e.Gen != m.timerGen || m.pending != 0 || m.cfg.CatchUpEvery <= 0 {
+	switch e.ID {
+	case timerCatchUp:
+		if e.Gen != m.timerGen || m.pending != 0 || m.cfg.CatchUpEvery <= 0 {
+			return nil
+		}
+		return m.emitCheckTail()
+	case timerHoleFill:
+		if e.Gen != m.holeGen || !m.holeArmed || m.pending != 0 {
+			return nil
+		}
+		m.holeArmed = false
+		if !m.holeOpen() {
+			return m.progress()
+		}
+		return m.emitHoleFill()
+	default:
 		return nil
 	}
-	return m.emitCheckTail()
 }
 
 func (m *Machine) onCheckTailDone(d core.LogCheckTailDone) []core.Action {
@@ -85,10 +129,7 @@ func (m *Machine) onCheckTailDone(d core.LogCheckTailDone) []core.Action {
 		return m.armCatchUp()
 	}
 	m.goalTail = d.Tail
-	if d.Tail > m.nextSlot {
-		return m.emitRead()
-	}
-	return m.armCatchUp()
+	return m.progress()
 }
 
 func (m *Machine) onReadDone(d core.LogReadDone) []core.Action {
@@ -99,21 +140,105 @@ func (m *Machine) onReadDone(d core.LogReadDone) []core.Action {
 	if d.Err != core.OK || d.Outcome != core.Applied {
 		return m.armCatchUp()
 	}
-	// Catch-up sketch only advances the read cursor. Apply is CP-DSM-4.
 	for _, e := range d.Entries {
-		if e.Slot >= m.nextSlot {
-			m.nextSlot = e.Slot + 1
+		if e.Slot < m.applied {
+			continue
 		}
+		m.buf[e.Slot] = append([]byte(nil), e.Data...)
 	}
-	if len(d.Entries) >= int(m.cfg.readLimit()) && m.nextSlot < m.goalTail {
+	if err := m.drain(); err != nil {
+		return m.trip(err)
+	}
+	return m.progress()
+}
+
+func (m *Machine) onAppendDone(d core.LogAppendDone) []core.Action {
+	if d.Req != m.pending || m.pendingKind != pendingAppend {
+		return nil
+	}
+	slot := m.fillSlot
+	offered := m.fillData
+	m.pending, m.pendingKind = 0, pendingNone
+	m.fillSlot, m.fillData = 0, nil
+	if d.Err != core.OK || d.Outcome != core.Applied {
+		return m.armCatchUp()
+	}
+	data := offered
+	if d.Taken {
+		data = append([]byte(nil), d.Existing...)
+	}
+	if slot >= m.applied {
+		m.buf[slot] = data
+	}
+	if err := m.drain(); err != nil {
+		return m.trip(err)
+	}
+	return m.progress()
+}
+
+func (m *Machine) drain() error {
+	for {
+		data, ok := m.buf[m.applied]
+		if !ok {
+			return nil
+		}
+		delete(m.buf, m.applied)
+		if _, err := m.fold.ApplyBytes(int64(m.applied), data); err != nil {
+			return err
+		}
+		m.applied++
+		m.holeArmed = false
+	}
+}
+
+func (m *Machine) progress() []core.Action {
+	if m.pending != 0 {
+		return nil
+	}
+	if m.applied < m.goalTail {
+		if m.holeOpen() {
+			return m.maybeHoleFill()
+		}
 		return m.emitRead()
 	}
-	// Short page: holes or tombs above nextSlot. Jump to the known tail;
-	// hole-fill is CP-DSM-4.
-	if m.nextSlot < m.goalTail {
-		m.nextSlot = m.goalTail
+	if m.holeOpen() {
+		return m.maybeHoleFill()
 	}
 	return m.armCatchUp()
+}
+
+func (m *Machine) holeOpen() bool {
+	if len(m.buf) == 0 {
+		return false
+	}
+	_, ok := m.buf[m.applied]
+	return !ok
+}
+
+func (m *Machine) maybeHoleFill() []core.Action {
+	if m.cfg.HoleAfter <= 0 {
+		return m.emitHoleFill()
+	}
+	if m.holeArmed {
+		return nil
+	}
+	m.holeGen++
+	m.holeArmed = true
+	return []core.Action{core.SetTimer{ID: timerHoleFill, Gen: m.holeGen, After: m.cfg.HoleAfter}}
+}
+
+func (m *Machine) emitHoleFill() []core.Action {
+	m.seq++
+	data := applier.Encode(applier.Entry{
+		ID:   fmt.Sprintf("%s/%d", m.cfg.writer(), m.seq),
+		Kind: applier.KindNoop,
+	})
+	m.nextReq++
+	m.pending = m.nextReq
+	m.pendingKind = pendingAppend
+	m.fillSlot = m.applied
+	m.fillData = data
+	return []core.Action{core.LogAppend{Req: m.pending, Slot: m.fillSlot, Data: data}}
 }
 
 func (m *Machine) emitCheckTail() []core.Action {
@@ -127,12 +252,20 @@ func (m *Machine) emitRead() []core.Action {
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingRead
-	return []core.Action{core.LogRead{Req: m.pending, From: m.nextSlot, Limit: m.cfg.readLimit()}}
+	return []core.Action{core.LogRead{Req: m.pending, From: m.applied, Limit: m.cfg.readLimit()}}
 }
 
 func (m *Machine) armCatchUp() []core.Action {
+	if m.cfg.CatchUpEvery <= 0 {
+		return nil
+	}
 	m.timerGen++
 	return []core.Action{core.SetTimer{ID: timerCatchUp, Gen: m.timerGen, After: m.cfg.CatchUpEvery}}
+}
+
+func (m *Machine) trip(err error) []core.Action {
+	m.exited = true
+	return []core.Action{core.Trip{Cause: err.Error()}}
 }
 
 // stop marks the machine shutting down and emits Exit. With no in-flight work
@@ -146,20 +279,27 @@ func (m *Machine) stop() []core.Action {
 	return []core.Action{core.Exit{}}
 }
 
-// StateHash folds every field that influences behaviour, in a fixed order.
+// StateHash folds every field that influences behaviour, including the applied
+// applier digest (comparable across machines that folded the same prefix).
 func (m *Machine) StateHash() uint64 {
 	h := uint64(14695981039346656037) // FNV-1a offset basis
 	h = core.FnvU64(h, bool64(m.started))
 	h = core.FnvU64(h, bool64(m.stopping))
 	h = core.FnvU64(h, bool64(m.exited))
 	h = core.FnvU64(h, uint64(m.timerGen))
+	h = core.FnvU64(h, uint64(m.holeGen))
 	h = core.FnvU64(h, uint64(m.nextReq))
-	h = core.FnvU64(h, uint64(m.nextSlot))
+	h = core.FnvU64(h, uint64(m.seq))
+	h = core.FnvU64(h, uint64(m.applied))
 	h = core.FnvU64(h, uint64(m.goalTail))
 	h = core.FnvU64(h, uint64(m.pending))
 	h = core.FnvU64(h, uint64(m.pendingKind))
+	h = core.FnvU64(h, uint64(m.fillSlot))
+	h = core.FnvU64(h, bool64(m.holeArmed))
 	h = core.FnvU64(h, uint64(m.cfg.CatchUpEvery))
 	h = core.FnvU64(h, uint64(m.cfg.ReadLimit))
+	h = core.FnvU64(h, uint64(m.cfg.HoleAfter))
+	h = core.FnvU64(h, m.fold.StateHash())
 	return h
 }
 

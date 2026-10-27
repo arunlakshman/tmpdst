@@ -28,4 +28,7 @@
 // A store failure is fail-stop: Exec panics (the replica's memory-equivalent
 // state is no longer trustworthy); the error-returning methods are for callers
 // that handle it.
+//
+// NewMem, Encode/Decode, and Apply/ApplyBytes expose the pure command fold for
+// controlplane/machine Step without Pebble. Entry bytes match logsm.Encode.
 package applier

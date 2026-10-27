@@ -1,0 +1,44 @@
+ts	phase	decision	why	evidence	result
+2026-10-27T06:01:21Z	start	armed autopilot-stack for CP DSM from operator go	plan is ready and operator said go; context high so owners do the work	docs/cp-dsm-eventloop-plan.md	open
+2026-10-27T06:01:21Z	frame	stack base is toys3 not main	toys3 is the active remote branch with the codebase; main is stale	git branch -vv	open
+2026-10-27T06:01:21Z	frame	forge is gh	origin CLI not present; gh is available	command -v gh	open
+2026-10-27T06:01:46Z	spawn	spawned CP-DSM-1 owner	first stack item; rename plus proto scaffold	agent 0a020dca-3848-40c6-9c05-bd0e92e3ba30	open
+2026-10-27T06:01:46Z	arm	armed /loop 1h audit tick	plan requires hourly audit while owners run	shell pid 83797	open
+2026-10-27T06:07:23Z	stuck	CP-DSM-1 owner stuck; replacing	uncommitted rename in worktree, no push, no PR, no trail row, no live build process	worktree tmpdst-cp-dsm-1 agent 0a020dca	open
+2026-10-27T06:07:35Z	spawn	replaced CP-DSM-1 owner	prior owner stuck with uncommitted work; fresh agent continues same worktree	agent 85ba07c8-5d57-4d3f-8c94-8123da3bf482	open
+2026-10-27T06:16:31Z	CP-DSM-1	STACK-READY	rename+api+Log* vocabulary; PR #2 base toys3; tip bd41f14eda7d3cbd706a85357e8546e2bd3e9eaf	make build ok; make proto ok; go test core controlplane broker engines ok; no manifester/cp imports	https://github.com/arunlakshman/tmpdst/pull/2
+2026-10-27T06:16:47Z	CP-DSM-1	STACK-READY	rename+proto+Log*+decisions landed; PR open base toys3; do not merge; do not start CP-DSM-2+	branch=cp-dsm-1 tip=bd41f14eda7d3cbd706a85357e8546e2bd3e9eaf pr=https://github.com/arunlakshman/tmpdst/pull/2	STACK-READY
+2026-10-27T06:17:58Z	CP-DSM-1	accepted STACK-READY	owner reported; PR open base toys3; DCO fail noted; spawn CP-DSM-2 next; stack CP-DSM-3 on 2 due to machine file overlap	pr=https://github.com/arunlakshman/tmpdst/pull/2 tip=bd41f14	open
+2026-10-27T06:18:11Z	spawn	spawned CP-DSM-2 owner	machine scaffold from cp-dsm-1 tip; CP-DSM-3 stacked later due to machine file overlap	agent 9f4d24fd-c15b-498d-b1c8-88430055b39e worktree tmpdst-cp-dsm-2	open
+2026-10-27T06:18:11Z	blocker	DCO fail on PR #2	commits lack Signed-off-by; prior toys3 PR also unsigned; force-push signoff needs operator go	https://github.com/arunlakshman/tmpdst/pull/2	open
+2026-10-27T06:18:32Z	CP-DSM-1	replacement also STACK-READY	same tip bd41f14 PR #2; already accepted; no new action	agent 85ba07c8-5d57-4d3f-8c94-8123da3bf482	noop
+2026-10-27T06:24:44Z	CP-DSM-2	accepted STACK-READY	machine scaffold; PR #3 base cp-dsm-1; DCO fail same as #2; spawn CP-DSM-3 stacked	pr=https://github.com/arunlakshman/tmpdst/pull/3 tip=4c9c7a6	open
+2026-10-27T06:24:55Z	spawn	spawned CP-DSM-3 owner	logstore engine stacked on cp-dsm-2	agent 2ada9501-ef02-41c3-afa4-4da6771d0b13 worktree tmpdst-cp-dsm-3	open
+2026-10-27T06:27:02Z	override	operator: do not commit generated pb.go	mise pins buf; generate on make build; decision 58 supersedes 57 commit wording; hold CP-DSM-3; fix on cp-dsm-1 then rebase 2/3	agent c13c4971-229f-4c2f-8e14-45b19e04eb21	open
+2026-10-27T06:36:31Z	CP-DSM-1	proto override landed	decision 58; mise buf; pb.go untracked; tip 89e564d	pr=https://github.com/arunlakshman/tmpdst/pull/2	open
+2026-10-27T06:36:31Z	rebase	rebased cp-dsm-2 onto 89e564d	force-with-lease 4c9c7a6->c2ba681; cp-dsm-3 branch reset to c2ba681 with WIP restored	pr3=https://github.com/arunlakshman/tmpdst/pull/3	open
+2026-10-27T06:38:58Z	CP-DSM-3	accepted STACK-READY	logstore+catch-up; correctly stacked on c2ba681 (includes proto override); no pb.go	pr=https://github.com/arunlakshman/tmpdst/pull/4 tip=408d28b	open
+2026-10-27T06:39:08Z	spawn	spawned CP-DSM-4 owner	apply+hole-fill from cp-dsm-3 tip 408d28b	worktree tmpdst-cp-dsm-4	open
+2026-10-27T06:39:11Z	spawn	CP-DSM-4 agent id	apply+hole-fill	agent d9fb58a6-2fb8-4c92-8c8e-ef754ab09806	open
+2026-10-27T06:49:44Z	CP-DSM-4	accepted STACK-READY	apply+hole-fill; stacked on cp-dsm-3; no pb.go	pr=https://github.com/arunlakshman/tmpdst/pull/5 tip=f7d6d61	open
+2026-10-27T06:49:44Z	spawn	spawned CP-DSM-5 owner	commit queue + K in-flight	worktree tmpdst-cp-dsm-5	open
+2026-10-27T06:49:48Z	spawn	CP-DSM-5 agent id	commit queue K	agent 64647127-3ec8-480d-8565-e8cb310a89b1	open
+2026-10-27T07:01:16Z	CP-DSM-5	accepted STACK-READY	commit queue + K; stacked on cp-dsm-4	pr=https://github.com/arunlakshman/tmpdst/pull/6 tip=7ddb954	open
+2026-10-27T07:01:24Z	spawn	spawned CP-DSM-6 owner	role+checkpoint+trim	agent 5c6d0a89-552b-40c2-ac22-7ad0867fd676	open
+2026-10-27T07:02:02Z	tick	hourly audit	PRs 2-6 open stacked; CP-DSM-6 in progress clean WT at 7ddb954; no stuck; no new unreported change	none	ok
+2026-10-27T07:15:03Z	CP-DSM-6	accepted STACK-READY	roles+ckpt+trim; stacked on cp-dsm-5	pr=https://github.com/arunlakshman/tmpdst/pull/7 tip=641d5b7	open
+2026-10-27T07:15:13Z	spawn	spawned CP-DSM-7 owner	manicp gRPC cutover; review-gated for land	agent caa5cee2-ade0-421b-9ae3-60eb365c70d5	open
+2026-10-27T08:02:18Z	tick	hourly audit	PRs 2-7 open; CP-DSM-7 WIP no remote yet; last make red on crapscore (exec/run 0% cov); it/unit/sim green; not stuck	none new beyond prior chat	ok
+2026-10-27T08:04:35Z	CP-DSM-7	accepted STACK-READY	gRPC cutover; review-gated; text receipts only no png/mp4	pr=https://github.com/arunlakshman/tmpdst/pull/8 tip=d89a61a	open
+2026-10-27T08:04:45Z	spawn	spawned CP-DSM-8 owner	kafka-log cutover; review-gated	agent 43c81aca-8cb5-4bef-9d25-d407c95c1f3e	open
+2026-10-27T09:02:09Z	tick	hourly audit	PRs 2-8 open; CP-DSM-8 WIP no remote; kafka green; make red on hasher tags CPOffer/CPReply; not stuck	none new beyond prior chat	ok
+2026-10-27T09:04:54Z	CP-DSM-8	accepted STACK-READY	kafka-log machines+logstore; stack tip; swarmLog Put faults=0 noted; review-gated	pr=https://github.com/arunlakshman/tmpdst/pull/9 tip=8a52887	open
+2026-10-27T09:04:54Z	stack	all owners STACK-READY	PRs 2-9 chained toys3..cp-dsm-8; await operator review media for 7+8 then land bottom-up; DCO still red on unsigned commits	tip=8a52887	parked-for-operator
+2026-10-27T09:20:54Z	follow-up	restore stacked Put/bridge faults on cp-dsm-8	keep NoAttrition/stall off; bar=make build+kafka-log 300+log mutants; land on PR #9	agent pending	open
+2026-10-27T09:21:01Z	spawn	CP-DSM-8 fault follow-up owner	restore Put/bridge coins; keep attrition off	agent 411eb9c2-feda-4b78-9df6-e24dd11fcc37	open
+2026-10-27T10:01:56Z	tick	hourly audit	fault follow-up WIP on #9; PutFail wiring restored; 300 seeds green; kafka TestLogStoreTakesTheDefaultCap still red; MaxAttempts retest running; not stuck	none beyond prior chat	ok
+2026-10-27T10:27:27Z	CP-DSM-8	fault follow-up pushed	Put/bridge coins live; make build+300xj8x3 green; tip f8a465b on PR #9	pr=https://github.com/arunlakshman/tmpdst/pull/9	open
+2026-10-27T10:28:30Z	dco	rewrote Signed-off-by on stack	force-with-lease cp-dsm-1..8; tip cp-dsm-8=cfca8b6	sob=Arun Lakshman Ravichandran	open
+2026-10-27T10:29:06Z	CP-DSM-8	fault follow-up STACK-READY accepted	coins live; tip cfca8b6 (DCO rewrite of f8a465b); DCO pass; ready to land	pr=https://github.com/arunlakshman/tmpdst/pull/9	parked-for-operator
+2026-10-27T11:46:19Z	land	operator approved; merged stack #2-#9 into toys3	attrition/stall remain deferred follow-up	toys3=bf460bd	done
+2026-10-27T12:04:40Z	tick	hourly audit #5; stack already landed on toys3	no open cp-dsm PRs; attrition follow-up documented only	toys3=d506699	stand-down

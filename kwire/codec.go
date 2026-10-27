@@ -83,19 +83,35 @@ func (Codec) DecodeRequest(frame []byte) (core.RequestHeader, core.Request, erro
 		return h, nil, &UnsupportedError{Key: h.APIKey, Version: h.APIVersion, UnknownKey: true}
 	}
 	req.SetVersion(h.APIVersion)
-	if req.IsFlexible() {
-		var err error
-		if rest, err = skipTags(rest); err != nil {
-			return h, nil, err
-		}
-	}
-	if err := req.ReadFrom(rest); err != nil {
-		return h, nil, fmt.Errorf("%w: %w", ErrMalformed, err)
+	if err := readBody(rest, req.IsFlexible(), req.ReadFrom); err != nil {
+		return h, nil, err
 	}
 	return h, req, nil
 }
 
+// readBody skips the header tagged fields when flexible, then reads the body.
+func readBody(rest []byte, flexible bool, read func([]byte) error) error {
+	if flexible {
+		var err error
+		if rest, err = skipTags(rest); err != nil {
+			return err
+		}
+	}
+	if err := read(rest); err != nil {
+		return fmt.Errorf("%w: %w", ErrMalformed, err)
+	}
+	return nil
+}
+
 func prefix(dst []byte) []byte { return append(dst, 0, 0, 0, 0) }
+
+// appendFlexibleTag appends an empty header tagged-field section when flexible.
+func appendFlexibleTag(b []byte, flexible bool) []byte {
+	if flexible {
+		return append(b, 0)
+	}
+	return b
+}
 
 func seal(b []byte) []byte {
 	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
@@ -122,9 +138,7 @@ func (Codec) EncodeResponse(h core.RequestHeader, resp core.Response) ([]byte, e
 	r.SetVersion(respVersion(h))
 	b := prefix(nil)
 	b = binary.BigEndian.AppendUint32(b, uint32(h.CorrelationID))
-	if r.IsFlexible() && h.APIKey != KeyApiVersions {
-		b = append(b, 0)
-	}
+	b = appendFlexibleTag(b, r.IsFlexible() && h.APIKey != KeyApiVersions)
 	return seal(r.AppendTo(b)), nil
 }
 
@@ -145,9 +159,7 @@ func (Codec) EncodeRequest(h core.RequestHeader, req core.Request) ([]byte, erro
 	b = binary.BigEndian.AppendUint32(b, uint32(h.CorrelationID))
 	b = binary.BigEndian.AppendUint16(b, uint16(len(h.ClientID)))
 	b = append(b, h.ClientID...)
-	if r.IsFlexible() {
-		b = append(b, 0)
-	}
+	b = appendFlexibleTag(b, r.IsFlexible())
 	return seal(r.AppendTo(b)), nil
 }
 
@@ -165,15 +177,8 @@ func (Codec) DecodeResponse(h core.RequestHeader, frame []byte) (core.Response, 
 		return nil, &UnsupportedError{Key: h.APIKey, Version: h.APIVersion, UnknownKey: true}
 	}
 	resp.SetVersion(respVersion(h))
-	rest := frame[4:]
-	if resp.IsFlexible() && h.APIKey != KeyApiVersions {
-		var err error
-		if rest, err = skipTags(rest); err != nil {
-			return nil, err
-		}
-	}
-	if err := resp.ReadFrom(rest); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
+	if err := readBody(frame[4:], resp.IsFlexible() && h.APIKey != KeyApiVersions, resp.ReadFrom); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }

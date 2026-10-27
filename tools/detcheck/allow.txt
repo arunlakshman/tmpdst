@@ -1,4 +1,5 @@
-# Exact import paths the deterministic packages (core/, sim/) may import.
+# Exact import paths the deterministic packages (core/, sim/, broker/, kwire/,
+# format/, veritas/, controlplane/machine/) may import.
 # Matching is EXACT. A trailing "/..." also allows every subpackage.
 # Adding a line requires a dependency audit (scripts/audit-dep.sh) and, for a
 # third-party module, a record under docs/dep-audits/.

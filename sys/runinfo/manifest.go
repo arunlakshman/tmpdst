@@ -101,6 +101,22 @@ func Write(ctx context.Context, m Manifest, o WriteOptions) (string, error) {
 	return dest, writeFile(dest, body)
 }
 
+// Publish logs m and writes it to o.Dest within 10s; empty Dest is a no-op. Never fatal.
+func Publish(ctx context.Context, log *slog.Logger, m Manifest, o WriteOptions) {
+	if o.Dest == "" {
+		return
+	}
+	m.Log(log)
+	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	where, err := Write(cctx, m, o)
+	if err != nil {
+		log.Warn("manifest not written", "event", "manifest_failed", "dest", where, "err", err.Error())
+		return
+	}
+	log.Info("manifest written", "event", "manifest_written", "dest", where)
+}
+
 // writeFile writes body to path, creating parent directories.
 func writeFile(path string, body []byte) error {
 	if dir := filepath.Dir(path); dir != "" {

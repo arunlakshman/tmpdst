@@ -3,37 +3,18 @@ package kafka
 import (
 	"manifester/core"
 	"manifester/sim"
+	"manifester/sim/internal/campaign"
 )
 
-// livenessGrace is how long into Settling a request may still fail: faults
-// planned in Chaos can land late (an engine op planned at the end of Chaos, a
-// partition that outlives it), and a node stopped at the end of Chaos is killed
-// at its Stop deadline and then restarts.
-const livenessGrace = 6 * core.Second
-
-// phaseStart is when the kernel announced phase p, from its sim_phase fact.
-func phaseStart(v sim.View, p sim.Phase) (sim.Time, bool) {
-	for _, tf := range v.Timeline().Snapshot("sim_phase") {
-		if ph, ok := tf.Fact.Field("phase").(core.U64); ok && sim.Phase(ph) == p {
-			return tf.At, true
-		}
-	}
-	return 0, false
-}
-
-// liveness: at the end no op is pending, and nothing that finishes more than
-// livenessGrace into Settling ends in failure: a produce still unresolved then
-// is acked (never abandoned or indeterminate), except the batch that claims a producer id and is rejected, a fetch answers without error.
-// Indeterminate produces are otherwise allowed (decision 15).
 type liveness struct{}
 
 func (*liveness) Name() string     { return "Liveness" }
 func (*liveness) Observe(sim.View) {}
 
 func (*liveness) AtEnd(v sim.View) {
-	settling, ok := phaseStart(v, sim.PhaseSettling)
+	settling, ok := campaign.PhaseStart(v, sim.PhaseSettling)
 	v.Assert().Always(ok, "kafka: the kernel announced Settling")
-	after := settling + sim.Time(livenessGrace)
+	after := settling + sim.Time(campaign.LivenessGrace)
 	var produced, reads int
 	for _, op := range v.History().Ops() {
 		v.Assert().Always(op.Outcome != sim.OpPending, "kafka: no op pending at end", core.Detail{Key: "op", Value: op.Op})
@@ -43,7 +24,7 @@ func (*liveness) AtEnd(v sim.View) {
 		switch r := op.Result.(type) {
 		case ProduceRes:
 			produced++
-			if op.Return >= after && r.Why != "rejected" { // a deliberately idempotent batch is rejected, never acked
+			if op.Return >= after && r.Why != "rejected" {
 				v.Assert().Always(op.Outcome == sim.OpDefinite && r.Base >= 0, "kafka: a produce still running in Settling is acked",
 					core.Detail{Key: "op", Value: op.Op}, core.Detail{Key: "result", Value: r}, core.Detail{Key: "return", Value: op.Return})
 			}
@@ -84,27 +65,4 @@ func expectReachable() []core.Prop {
 		"broker: gzip batch admitted", "broker: snappy batch admitted",
 		"broker: lz4 batch admitted", "broker: zstd batch admitted",
 	}
-}
-
-// faultCoverage covers what only the kernel's facts show: a hard crash by
-// attrition and a graceful stop. (Everything else is in expectReachable.)
-type faultCoverage struct{}
-
-func (*faultCoverage) Name() string     { return "FaultCoverage" }
-func (*faultCoverage) Observe(sim.View) {}
-
-func (*faultCoverage) AtEnd(v sim.View) {
-	has := func(name, key, val string) bool {
-		for _, tf := range v.Timeline().Snapshot(name) {
-			if key == "" {
-				return true
-			}
-			if s, ok := tf.Fact.Field(key).(core.Str); ok && string(s) == val {
-				return true
-			}
-		}
-		return false
-	}
-	v.Assert().Sometimes(has("sim_crashed", "cause", "attrition"), "kafka: fault fired: hard crash")
-	v.Assert().Sometimes(has("sim_exited", "", ""), "kafka: fault fired: graceful stop")
 }

@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"io"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -88,6 +91,76 @@ func TestRegister(t *testing.T) {
 			t.Errorf("missing %s", n)
 		}
 	}
+}
+
+func TestServeMetrics(t *testing.T) {
+	h := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	t.Run("empty addr", func(t *testing.T) {
+		var buf bytes.Buffer
+		log := slog.New(slog.NewJSONHandler(&buf, nil))
+		if err := ServeMetrics(t.Context(), log, "svc", "", h); err != nil {
+			t.Fatal(err)
+		}
+		if buf.Len() != 0 {
+			t.Fatalf("empty addr logged %s", buf.String())
+		}
+	})
+	t.Run("busy addr", func(t *testing.T) {
+		ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = ln.Close() })
+		var buf bytes.Buffer
+		log := slog.New(slog.NewJSONHandler(&buf, nil))
+		if err := ServeMetrics(t.Context(), log, "svc", ln.Addr().String(), h); err == nil {
+			t.Fatal("busy addr: want error")
+		}
+		if buf.Len() != 0 {
+			t.Fatalf("failed listen logged %s", buf.String())
+		}
+	})
+	t.Run("healthz", func(t *testing.T) {
+		var buf bytes.Buffer
+		log := slog.New(slog.NewJSONHandler(&buf, nil))
+		if err := ServeMetrics(t.Context(), log, "svc", "127.0.0.1:0", h); err != nil {
+			t.Fatal(err)
+		}
+		var line map[string]any
+		if err := json.Unmarshal(buf.Bytes(), &line); err != nil {
+			t.Fatal(err)
+		}
+		addr, _ := line["addr"].(string)
+		if line["msg"] != "svc metrics" || addr == "" {
+			t.Fatalf("%s", buf.String())
+		}
+		client := &http.Client{Timeout: time.Second}
+		deadline := time.Now().Add(2 * time.Second)
+		var resp *http.Response
+		var err error
+		for {
+			req, rerr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+"/healthz", nil)
+			if rerr != nil {
+				t.Fatal(rerr)
+			}
+			resp, err = client.Do(req)
+			if err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal(err)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK || string(body) != "ok\n" {
+			t.Fatalf("status %d body %q", resp.StatusCode, body)
+		}
+	})
 }
 
 func TestManifestFile(t *testing.T) {
@@ -195,4 +268,73 @@ func TestWriteS3(t *testing.T) {
 	if path != "/bkt/dir/svc-r4.json" {
 		t.Fatal(path)
 	}
+}
+
+func TestPublish(t *testing.T) {
+	manifest := func() Manifest {
+		fs := flag.NewFlagSet("t", flag.ContinueOnError)
+		return NewManifest(New("svc", "rpub", -1), fs, "us-east-1", map[string]any{"k": 1})
+	}
+	t.Run("empty dest", func(t *testing.T) {
+		var buf bytes.Buffer
+		Publish(t.Context(), slog.New(slog.NewJSONHandler(&buf, nil)), manifest(), WriteOptions{})
+		if buf.Len() != 0 {
+			t.Fatalf("empty dest logged %s", buf.String())
+		}
+	})
+	t.Run("failure", func(t *testing.T) {
+		blocked := filepath.Join(t.TempDir(), "file")
+		if err := os.WriteFile(blocked, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		dest := filepath.Join(blocked, "sub", "m.json")
+		var buf bytes.Buffer
+		Publish(t.Context(), slog.New(slog.NewJSONHandler(&buf, nil)), manifest(), WriteOptions{Dest: dest})
+		ev := logEvents(t, &buf)
+		failed := ev["manifest_failed"]
+		if ev["manifest"] == nil || failed == nil || ev["manifest_written"] != nil {
+			t.Fatalf("%s", buf.String())
+		}
+		if failed["level"] != "WARN" || failed["dest"] != dest || failed["err"] == "" {
+			t.Fatalf("%v", failed)
+		}
+	})
+	t.Run("success", func(t *testing.T) {
+		dest := filepath.Join(t.TempDir(), "m.json")
+		var buf bytes.Buffer
+		Publish(t.Context(), slog.New(slog.NewJSONHandler(&buf, nil)), manifest(), WriteOptions{Dest: dest})
+		ev := logEvents(t, &buf)
+		written := ev["manifest_written"]
+		if ev["manifest"] == nil || written == nil || ev["manifest_failed"] != nil {
+			t.Fatalf("%s", buf.String())
+		}
+		if written["level"] != "INFO" || written["dest"] != dest {
+			t.Fatalf("%v", written)
+		}
+		b, err := os.ReadFile(dest) //nolint:gosec // G304: path is a test temp file
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), `"run_id": "rpub"`) {
+			t.Fatalf("%s", b)
+		}
+	})
+}
+
+func logEvents(t *testing.T, buf *bytes.Buffer) map[string]map[string]any {
+	t.Helper()
+	got := map[string]map[string]any{}
+	raw := bytes.TrimSpace(buf.Bytes())
+	if len(raw) == 0 {
+		return got
+	}
+	for line := range bytes.SplitSeq(raw, []byte("\n")) {
+		var rec map[string]any
+		if err := json.Unmarshal(line, &rec); err != nil {
+			t.Fatal(err)
+		}
+		ev, _ := rec["event"].(string)
+		got[ev] = rec
+	}
+	return got
 }

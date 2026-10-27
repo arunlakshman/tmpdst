@@ -6,6 +6,7 @@ import (
 	"manifester/core"
 	"manifester/format"
 	"manifester/sim"
+	"manifester/sim/internal/campaign"
 )
 
 type ackFact struct {
@@ -106,36 +107,16 @@ func (i *readYourAck) Observe(v sim.View) {
 	}
 }
 
-// livenessGrace is how long into Settling a request may still fail: faults
-// planned in Chaos can land late (an engine op planned at the end of Chaos, a
-// partition that outlives it), connections damaged in Chaos are only recycled
-// at the phase change, and a node stopped at the end of Chaos is killed at its
-// Stop deadline (5s of kernel grace) and then restarts.
-const livenessGrace = 6 * core.Second
-
-// liveness: at the end no request is pending, and every request invoked in
-// Settling after livenessGrace succeeded. Settling is bounded by the kernel's
-// "sim_phase" facts, not by configured times.
 type liveness struct{}
 
 func (*liveness) Name() string     { return "Liveness" }
 func (*liveness) Observe(sim.View) {}
 
-// phaseStart is when the kernel announced phase p, from its sim_phase fact.
-func phaseStart(v sim.View, p sim.Phase) (sim.Time, bool) {
-	for _, tf := range v.Timeline().Snapshot("sim_phase") {
-		if ph, ok := tf.Fact.Field("phase").(core.U64); ok && sim.Phase(ph) == p {
-			return tf.At, true
-		}
-	}
-	return 0, false
-}
-
 func (l *liveness) AtEnd(v sim.View) {
-	settling, ok1 := phaseStart(v, sim.PhaseSettling)
-	settle, ok2 := phaseStart(v, sim.PhaseSettle)
+	settling, ok1 := campaign.PhaseStart(v, sim.PhaseSettling)
+	settle, ok2 := campaign.PhaseStart(v, sim.PhaseSettle)
 	v.Assert().Always(ok1 && ok2, "echo: the kernel announced Settling and Settle")
-	from, to := settling+sim.Time(livenessGrace), settle
+	from, to := settling+sim.Time(campaign.LivenessGrace), settle
 	for _, op := range v.History().Ops() {
 		v.Assert().Always(op.Outcome != sim.OpPending, "echo: no request pending at end", core.Detail{Key: "op", Value: op.Op})
 		if !ok1 || !ok2 || op.Invoke < from || op.Invoke >= to {
@@ -167,27 +148,4 @@ func expectReachable() []core.Prop {
 		"echo: commit retried after MaybeApplied",
 		"echo: corruption detected on read",
 	}
-}
-
-// faultCoverage covers what only the kernel's facts show: a hard crash by
-// attrition and a graceful stop. (Everything else is in expectReachable.)
-type faultCoverage struct{}
-
-func (*faultCoverage) Name() string     { return "FaultCoverage" }
-func (*faultCoverage) Observe(sim.View) {}
-
-func (*faultCoverage) AtEnd(v sim.View) {
-	has := func(name, key, val string) bool {
-		for _, tf := range v.Timeline().Snapshot(name) {
-			if key == "" {
-				return true
-			}
-			if s, ok := tf.Fact.Field(key).(core.Str); ok && string(s) == val {
-				return true
-			}
-		}
-		return false
-	}
-	v.Assert().Sometimes(has("sim_crashed", "cause", "attrition"), "echo: fault fired: hard crash")
-	v.Assert().Sometimes(has("sim_exited", "", ""), "echo: fault fired: graceful stop")
 }

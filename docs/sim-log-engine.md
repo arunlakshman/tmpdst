@@ -3,8 +3,8 @@
 `sim/engines/logengine` simulates the log-backed control plane (`docs/log-cp-service.md`) so the whole-system swarm
 (brokers, Kafka clients, S3, network, attrition) runs against log semantics. Run it with
 `go run ./cmd/manisim -scenario kafka-log -seeds 300` (`kafka.ConfigLog`); the veritas-backed preset (`-scenario kafka`) is
-unchanged. Decision 21 holds: the state machine (`state.go`) shares no code with veritas, `cp/applier` or `cp/logcp`;
-veritas remains the oracle through the Kafka invariants and the C2 conformance test.
+unchanged. Decision 21 holds: the state machine (`state.go`) shares no code with veritas, `controlplane/applier` or `controlplane/logcp`;
+veritas remains the oracle through the Kafka invariants and the C2 conformance test. The extractable tree is `controlplane/` (decision 56); the DSM machine lands under `controlplane/machine` (decision 55).
 
 ## Model
 
@@ -74,5 +74,5 @@ old store would refuse (101 items).
 ## Limits
 
 Two replicas, one log, no real DynamoDB behaviour (throttling, item size, TTL), no index (`R#` rows) and no
-checkpoint-to-S3 failure; those stay in `cp/logcp` tests. Latencies are the CP fault menu, not the fakedb model. A third
+checkpoint-to-S3 failure; those stay in `controlplane/logcp` tests. Latencies are the CP fault menu, not the fakedb model. A third
 replica and a log-wide outage (all replicas down) are not modelled. The window is never exhausted in the default preset.

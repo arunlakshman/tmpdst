@@ -98,8 +98,10 @@ it-hermetic: $(COVER_DIR)/.gitignore
 test-all: test sim it-hermetic
 
 # Race detector: too slow for `build` (>10 min on this tree), run on demand.
+# sim/kafka alone needs ~16m under -race on a typical laptop; Go's default
+# 10m package timeout cuts it mid-campaign. Keep this above measured wall time.
 test-race:
-	go test -race ./...
+	go test -race -timeout 30m ./...
 
 # CRAP gate: merge unit + sim + hermetic-it coverprofiles.
 crap:

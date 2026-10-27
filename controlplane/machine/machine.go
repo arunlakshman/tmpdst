@@ -21,11 +21,17 @@ type Machine struct {
 	started  bool
 	stopping bool
 	exited   bool
+	booting  bool // restore/catch-up in progress; Ready flips when done
+	ready    bool
+	active   bool // advisory appender role
 
 	fold *applier.Applier
 
+	now         core.Time
 	timerGen    core.TimerGen
 	holeGen     core.TimerGen
+	roleGen     core.TimerGen
+	ckptGen     core.TimerGen
 	nextReq     core.ReqID
 	seq         uint64
 	applied     core.LogSlot // next slot to apply
@@ -37,6 +43,17 @@ type Machine struct {
 	fillSlot    core.LogSlot // slot of in-flight hole-fill append
 	fillData    []byte       // bytes we offered for that append
 	holeArmed   bool         // hole timer is outstanding
+
+	lastPullOK  core.Time
+	lastOtherAt core.Time
+	lastOwnAt   core.Time
+	promoSlot   core.LogSlot
+	lowerSeen   bool
+
+	ckptSlot    core.LogSlot // newest checkpoint slot (written or restored)
+	ckptAt      core.Time
+	ckptPending core.LogSlot // slot of in-flight ObjPut snapshot
+	ckptData    []byte
 
 	queue   []pendingCmd           // client ops waiting for a commit slot
 	flights map[core.ReqID]*flight // in-flight commit LogAppends (at most K)
@@ -51,6 +68,9 @@ const (
 	pendingTail
 	pendingRead
 	pendingAppend
+	pendingObjGet
+	pendingObjPut
+	pendingTrim
 )
 
 // New returns the core.Factory of the control-plane machine.
@@ -81,6 +101,7 @@ func (m *Machine) Step(ev core.Event) []core.Action {
 	if m.exited {
 		return nil
 	}
+	m.now = ev.At
 	switch body := ev.Body.(type) {
 	case core.Started:
 		return m.onStarted()
@@ -94,6 +115,12 @@ func (m *Machine) Step(ev core.Event) []core.Action {
 		return m.onReadDone(body)
 	case core.LogAppendDone:
 		return m.onAppendDone(body)
+	case core.ObjGetDone:
+		return m.onObjGetDone(body)
+	case core.ObjPutDone:
+		return m.onObjPutDone(body)
+	case core.LogTrimDone:
+		return m.onTrimDone(body)
 	default:
 		return nil
 	}
@@ -101,10 +128,41 @@ func (m *Machine) Step(ev core.Event) []core.Action {
 
 func (m *Machine) onStarted() []core.Action {
 	m.started = true
-	if m.cfg.CatchUpEvery <= 0 {
+	if m.ckptEnabled() {
+		m.booting = true
+		m.ready = false
+		return m.emitCkptGet()
+	}
+	return m.afterRestore()
+}
+
+func (m *Machine) afterRestore() []core.Action {
+	if m.cfg.CatchUpEvery > 0 {
+		m.booting = true
+		m.ready = false
+		return m.armCatchUp()
+	}
+	return m.finishBoot()
+}
+
+func (m *Machine) finishBoot() []core.Action {
+	m.booting = false
+	m.ready = true
+	m.lastOtherAt, m.lastPullOK, m.lastOwnAt = m.now, m.now, m.now
+	if m.rolesArmed() && m.cfg.Rank == 0 {
+		m.setActive(true)
+	}
+	var acts []core.Action
+	acts = append(acts, m.armRole()...)
+	acts = append(acts, m.armCkpt()...)
+	return acts
+}
+
+func (m *Machine) maybeBecomeReady() []core.Action {
+	if !m.booting || m.pending != 0 || m.applied < m.goalTail {
 		return nil
 	}
-	return m.armCatchUp()
+	return m.finishBoot()
 }
 
 func (m *Machine) onTimer(e core.TimerFired) []core.Action {
@@ -123,6 +181,10 @@ func (m *Machine) onTimer(e core.TimerFired) []core.Action {
 			return m.progress()
 		}
 		return m.emitHoleFill()
+	case timerRole:
+		return m.onRoleTimer(e)
+	case timerCkpt:
+		return m.onCkptTimer(e)
 	default:
 		return nil
 	}
@@ -136,6 +198,7 @@ func (m *Machine) onCheckTailDone(d core.LogCheckTailDone) []core.Action {
 	if d.Err != core.OK || d.Outcome != core.Applied {
 		return m.armCatchUp()
 	}
+	m.notePullOK()
 	m.goalTail = d.Tail
 	return m.progress()
 }
@@ -148,6 +211,7 @@ func (m *Machine) onReadDone(d core.LogReadDone) []core.Action {
 	if d.Err != core.OK || d.Outcome != core.Applied {
 		return m.armCatchUp()
 	}
+	m.notePullOK()
 	for _, e := range d.Entries {
 		if e.Slot < m.applied {
 			continue
@@ -219,6 +283,12 @@ func (m *Machine) progress() []core.Action {
 	if m.holeOpen() {
 		return m.maybeHoleFill()
 	}
+	if acts := m.maybeBecomeReady(); acts != nil {
+		var out []core.Action
+		out = append(out, acts...)
+		out = append(out, m.armCatchUp()...)
+		return out
+	}
 	return m.armCatchUp()
 }
 
@@ -244,10 +314,11 @@ func (m *Machine) maybeHoleFill() []core.Action {
 
 func (m *Machine) emitHoleFill() []core.Action {
 	m.seq++
-	data := applier.Encode(applier.Entry{
+	inner := applier.Encode(applier.Entry{
 		ID:   fmt.Sprintf("%s/%d", m.cfg.writer(), m.seq),
 		Kind: applier.KindNoop,
 	})
+	data := wrap(m.cfg.Rank, m.cfg.writer(), inner)
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingAppend
@@ -301,8 +372,13 @@ func (m *Machine) StateHash() uint64 {
 	h = core.FnvU64(h, bool64(m.started))
 	h = core.FnvU64(h, bool64(m.stopping))
 	h = core.FnvU64(h, bool64(m.exited))
+	h = core.FnvU64(h, bool64(m.booting))
+	h = core.FnvU64(h, bool64(m.ready))
+	h = core.FnvU64(h, bool64(m.active))
 	h = core.FnvU64(h, uint64(m.timerGen))
 	h = core.FnvU64(h, uint64(m.holeGen))
+	h = core.FnvU64(h, uint64(m.roleGen))
+	h = core.FnvU64(h, uint64(m.ckptGen))
 	h = core.FnvU64(h, uint64(m.nextReq))
 	h = core.FnvU64(h, uint64(m.seq))
 	h = core.FnvU64(h, uint64(m.applied))
@@ -312,6 +388,9 @@ func (m *Machine) StateHash() uint64 {
 	h = core.FnvU64(h, uint64(m.pendingKind))
 	h = core.FnvU64(h, uint64(m.fillSlot))
 	h = core.FnvU64(h, bool64(m.holeArmed))
+	h = core.FnvU64(h, uint64(m.promoSlot))
+	h = core.FnvU64(h, bool64(m.lowerSeen))
+	h = core.FnvU64(h, uint64(m.ckptSlot))
 	h = core.FnvU64(h, uint64(len(m.queue)))
 	h = core.FnvU64(h, uint64(len(m.flights)))
 	h = core.FnvU64(h, uint64(len(m.waiters)))
@@ -321,6 +400,12 @@ func (m *Machine) StateHash() uint64 {
 	h = core.FnvU64(h, uint64(m.cfg.K))
 	h = core.FnvU64(h, uint64(m.cfg.MaxCmdsPerSlot))
 	h = core.FnvU64(h, uint64(m.cfg.QueueMax))
+	h = core.FnvU64(h, uint64(m.cfg.Rank))
+	h = core.FnvU64(h, uint64(m.cfg.Heartbeat))
+	h = core.FnvU64(h, uint64(m.cfg.TakeoverAfter))
+	h = core.FnvU64(h, uint64(m.cfg.CkptEvery))
+	h = core.FnvU64(h, uint64(m.cfg.CkptMinSlots))
+	h = core.FnvU64(h, uint64(m.cfg.KeepSlots))
 	h = core.FnvU64(h, m.fold.StateHash())
 	return h
 }

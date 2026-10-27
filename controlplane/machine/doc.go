@@ -11,5 +11,8 @@
 // LogAppend actions to fill holes. Client commits enter via Offer into a
 // bounded queue; flush packs up to MaxCmdsPerSlot commands into one entry and
 // keeps at most K LogAppends in flight. Answers leave via TakeAnswers once the
-// winning slot applies. Role, checkpoint, and trim land later.
+// winning slot applies. Advisory roles use timers for heartbeat, takeover, and
+// failback (the slot put remains the fence). Checkpoints publish applier
+// snapshots via ObjPut and trim via LogTrim; Started restores then catch-up
+// before Ready.
 package machine

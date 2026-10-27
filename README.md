@@ -11,8 +11,8 @@ Kafka-protocol brokers and a log-backed control plane (Go).
 mise install
 ```
 
-That installs the pinned toolchain from `mise.toml` (`go`, `golangci-lint`) and
-runs `make install-hooks` (mise `postinstall`), which links
+That installs the pinned toolchain from `mise.toml` (`go`, `golangci-lint`,
+`buf`) and runs `make install-hooks` (mise `postinstall`), which links
 `scripts/githooks/pre-commit` into `.git/hooks/pre-commit`.
 
 Without mise:
@@ -27,6 +27,7 @@ make install-hooks   # uses ambient go / golangci-lint on PATH
 
 | Step | What |
 |------|------|
+| proto | `make proto` regenerates ignored `*.pb.go` via mise `buf` |
 | fmt-check | `gofmt -l` must be empty |
 | ascii-check | `scripts/ascii-check.sh` |
 | vet | `go vet ./...` |

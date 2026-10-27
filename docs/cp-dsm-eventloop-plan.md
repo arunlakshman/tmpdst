@@ -82,7 +82,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Rename tree `cp/` → `controlplane/` and fix all Go imports. Binary name stays `manicp`.
 - [ ] Create `controlplane/api/v1/*.proto` (`package controlplane.v1`).
 - [ ] Create local-only `buf.yaml` / `buf.gen.yaml` and a `make proto` target. No Buf Schema Registry.
-- [ ] Commit generated Go under `controlplane/api/v1`.
+- [ ] Generate Go on build via `make proto` (mise-pinned `buf`); gitignore `controlplane/api/v1/*.pb.go`. Do not commit generated files.
 - [ ] Edit `core/action.go` for `Log*` IOActions and for `CPCall`/`CPDone` to carry `controlplane/api/v1` messages (replace hand-written `CPOp` as the wire contract).
 - [ ] Edit `core/event.go` and `core/inbox.go` (`ClassOf`) for new bodies.
 - [ ] Create `core/logio_test.go` and API round-trip tests.

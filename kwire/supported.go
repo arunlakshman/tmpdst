@@ -24,27 +24,36 @@ const ErrCodeUnsupportedVersion int16 = 35
 // APIRange is an API key and its inclusive supported version range.
 type APIRange struct{ Key, Min, Max int16 }
 
+// supported is the API registry in key order. supportedByKey indexes it by API key.
+var (
+	supported = []APIRange{
+		{Key: KeyProduce, Min: 3, Max: 9},
+		{Key: KeyFetch, Min: 4, Max: 12},
+		{Key: KeyListOffsets, Min: 1, Max: 7},
+		{Key: KeyMetadata, Min: 1, Max: 12},
+		{Key: KeyApiVersions, Min: 0, Max: 3},
+	}
+	supportedByKey map[int16]APIRange
+)
+
+func init() {
+	supportedByKey = make(map[int16]APIRange, len(supported))
+	for _, r := range supported {
+		supportedByKey[r.Key] = r
+	}
+}
+
 // Supported returns the advertised APIs in key order. Produce >= 3 so batches
 // are RecordBatch v2. Produce and Fetch stay below v13, which switches to
-// topic IDs.
+// topic IDs. The result aliases the package registry, so callers must not mutate it.
 func Supported() []APIRange {
-	return []APIRange{
-		{KeyProduce, 3, 9},
-		{KeyFetch, 4, 12},
-		{KeyListOffsets, 1, 7},
-		{KeyMetadata, 1, 12},
-		{KeyApiVersions, 0, 3},
-	}
+	return supported
 }
 
 // Range returns the supported version range of key.
 func Range(key int16) (APIRange, bool) {
-	for _, r := range Supported() {
-		if r.Key == key {
-			return r, true
-		}
-	}
-	return APIRange{}, false
+	r, ok := supportedByKey[key]
+	return r, ok
 }
 
 // IsSupported reports whether (key, version) is served.
@@ -62,7 +71,7 @@ func ApiVersionsResponse(h RequestHeader) *kmsg.ApiVersionsResponse { //nolint:r
 	if !IsSupported(KeyApiVersions, h.APIVersion) {
 		resp.ErrorCode = ErrCodeUnsupportedVersion
 	}
-	for _, r := range Supported() {
+	for _, r := range supported {
 		resp.ApiKeys = append(resp.ApiKeys, kmsg.ApiVersionsResponseApiKey{ApiKey: r.Key, MinVersion: r.Min, MaxVersion: r.Max})
 	}
 	return resp

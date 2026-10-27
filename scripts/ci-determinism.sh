@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # CI gate for the deterministic packages (core/, sim/, format/, veritas/ except
-# its sys adapters in veritas/vsys, plus kwire/ and broker/). See
-# docs/decisions.md (I).
+# its sys adapters in veritas/vsys, plus kwire/, broker/, and
+# controlplane/machine/). See docs/decisions.md (I, 55, 56).
 #   1. detcheck: exact-path import allow-list plus banned constructs.
 #   2. Every third-party module they depend on has a reviewed audit record
 #      for the exact version in go.mod (so a version bump forces a re-audit).
@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-pkgs=(./core/... ./sim/... ./format/... ./kwire ./broker/... ./veritas ./veritas/veritastest)
+pkgs=(./core/... ./sim/... ./format/... ./kwire ./broker/... ./veritas ./veritas/veritastest ./controlplane/machine/...)
 
 echo "== detcheck"
 go run ./tools/detcheck "${pkgs[@]}"

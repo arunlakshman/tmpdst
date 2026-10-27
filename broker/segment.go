@@ -25,8 +25,13 @@ type openSegment struct {
 	batches []*pbatch
 	bytes   int
 	parts   []core.TopicPartition // distinct partitions buffered
-	gen     core.TimerGen         // flush timer generation; 0 = none armed
-	since   core.Time             // when the first batch arrived (age of the segment)
+	// Flush timer generation matched by onTimer. 0 means none is armed, an
+	// empty buffer or one just sealed.
+	gen core.TimerGen
+	// Time of the first batch, for the segment_sealed age fact and
+	// SegmentCaps. Not used to schedule. Does not move when
+	// BugTimerFromLastBatch re-arms gen.
+	since core.Time
 }
 
 // Why a segment was sealed (the "reason" of the segment_sealed fact).
@@ -59,12 +64,14 @@ type segment struct {
 	gen      core.TimerGen
 	attempts int
 
-	// Timing for facts only (derived from event times, never read by
-	// behaviour, so not part of StateHash). The PUT starts at the seal.
-	sealedAt  core.Time // when the segment was sealed (its PUT was issued)
-	putDoneAt core.Time // when the PUT finally succeeded
-	commitAt  core.Time // when the first CommitSegment was issued
-	committed bool      // commitAt is set
+	// sealedAt and putDoneAt are facts only, and StateHash omits them.
+	// The PUT starts at the seal. commitAt is the time of the first
+	// CommitSegment, and commitStarted keeps that time fixed.
+	// retryCommit reads commitAt for the deadline. StateHash omits both.
+	sealedAt      core.Time
+	putDoneAt     core.Time
+	commitAt      core.Time
+	commitStarted bool
 }
 
 // dataBytes is the produce data of the segment (what bufBytes counts).
@@ -76,9 +83,8 @@ func (s *segment) dataBytes() int {
 	return n
 }
 
-// addBatch appends an admitted batch to the open segment and seals it at the
-// size, partition or batch cap; the first batch arms the flush timer, which
-// later batches do not move (the window runs from the first batch).
+// addBatch appends an admitted batch. The first batch arms a fixed
+// BatchWindow timer per decision 35, and a cap may seal earlier.
 func (b *Broker) addBatch(pb *pbatch) []core.Action {
 	var acts []core.Action
 	before := b.open.bytes
@@ -89,6 +95,8 @@ func (b *Broker) addBatch(pb *pbatch) []core.Action {
 		b.open.parts = append(b.open.parts, pb.tp)
 	}
 	if len(b.open.batches) == 1 || b.cfg.Bug == BugTimerFromLastBatch {
+		// since must not move when the mutant re-arms the timer, or the age
+		// invariant cannot catch it.
 		if len(b.open.batches) == 1 {
 			b.open.since = b.now
 		}
@@ -205,8 +213,8 @@ func (b *Broker) pump() []core.Action {
 
 func (b *Broker) commit(s *segment) []core.Action {
 	s.state, s.req = segCommit, b.req()
-	if !s.committed {
-		s.committed, s.commitAt = true, b.now
+	if !s.commitStarted {
+		s.commitStarted, s.commitAt = true, b.now
 	}
 	pend := make([]core.PendingBatch, len(s.batches))
 	for i, pb := range s.batches {
@@ -255,12 +263,12 @@ func (b *Broker) onCommit(s *segment, e core.CPDone) []core.Action {
 }
 
 // committed answers every batch of s from the control plane's verdicts.
+// Timing is in nanoseconds. put plus wait plus commit equals total. wait is
+// the time the uploaded segment queued behind earlier segments' commits.
 func (b *Broker) committed(s *segment, rs []core.BatchRange) []core.Action {
 	acts := []core.Action{emit("segment_committed",
 		core.Field{Key: "segment", Value: core.Str(s.key)},
 		core.Field{Key: "batches", Value: core.I64(len(s.batches))},
-		// Timing, in nanoseconds: put + wait + commit = total. wait is the time
-		// the uploaded segment queued behind earlier segments' commits.
 		core.Field{Key: "bytes", Value: core.I64(len(s.data))},
 		core.Field{Key: "put_ns", Value: core.I64(s.putDoneAt - s.sealedAt)},
 		core.Field{Key: "wait_ns", Value: core.I64(s.commitAt - s.putDoneAt)},

@@ -3,9 +3,16 @@
 // fakeio fault/timing core. Fault coins and delays are drawn at issue time
 // (decision 14). Every live ReqID gets exactly one completion; a lost answer
 // surfaces as ErrTimeout+MaybeApplied.
+//
+// After CP-DSM-8 the engine is also sim.CPTruth: a reference replay of durable
+// slots through controlplane/machine.ReplaySlot (decision 21 / log replay).
 package logstore
 
 import (
+	"slices"
+
+	"manifester/controlplane/applier"
+	"manifester/controlplane/machine"
 	"manifester/core"
 	"manifester/sim"
 	"manifester/sim/engines/internal/fakeio"
@@ -15,13 +22,30 @@ import (
 type Engine struct {
 	*fakeio.Core
 	spec *store
+
+	ref         *applier.Applier
+	applied     core.LogSlot // next slot to fold into ref
+	gen         uint64
+	windowSlots int64
+	trimStride  int64
 }
 
-var _ sim.Engine = (*Engine)(nil)
+var (
+	_ sim.Engine  = (*Engine)(nil)
+	_ sim.CPTruth = (*Engine)(nil)
+)
 
 // New returns an empty logstore with the given faults.
 func New(f sim.LogStoreFaults) *Engine {
-	e := &Engine{spec: &store{}}
+	e := &Engine{
+		spec:        &store{bug: f.Bug},
+		ref:         applier.NewMem(),
+		windowSlots: int64(f.WindowSlots),
+		trimStride:  int64(f.TrimStride),
+	}
+	if e.trimStride <= 0 {
+		e.trimStride = 16
+	}
 	e.Core = fakeio.New(fakeio.Hooks{
 		Name:   "logstore",
 		Prefix: "log",
@@ -30,13 +54,67 @@ func New(f sim.LogStoreFaults) *Engine {
 			P503: f.Unavailable503, PTimeout: f.Timeout, PLost: f.LostResponse,
 			Outage: f.Outage, CallerTimeout: f.CallerTimeout,
 		},
-		Spec:     func(a core.IOAction) core.Completion { return e.spec.exec(a) },
+		Spec:     e.specAndTruth,
 		Mutating: mutating,
 		Fail:     fail,
 		Changed:  changed,
-		SpecHash: e.spec.stateHash,
+		SpecHash: e.stateHash,
 	})
 	return e
+}
+
+func (e *Engine) specAndTruth(a core.IOAction) core.Completion {
+	c := e.spec.exec(a)
+	switch c := c.(type) {
+	case core.LogAppendDone:
+		if c.Err == core.OK && c.Outcome == core.Applied && !c.Taken {
+			e.advanceRef()
+		}
+	case core.LogTrimDone:
+		if c.Err == core.OK && c.Outcome == core.Applied {
+			through := a.(core.LogTrim).Through
+			// LogTrim drops durable slots only. The idempotency window is cut on
+			// apply stride (decision 48), same as controlplane/machine.
+			if e.applied <= through {
+				e.applied = through + 1
+			}
+			e.gen++
+		}
+	}
+	return c
+}
+
+func (e *Engine) advanceRef() {
+	for {
+		data, ok := e.spec.entry(e.applied)
+		if !ok {
+			return
+		}
+		slot := e.applied
+		if err := machine.ReplaySlot(e.ref, slot, data); err != nil {
+			// Foreign / test payloads are durable bytes but not CP entries.
+			e.applied++
+			e.gen++
+			continue
+		}
+		e.trimWindow(slot)
+		e.applied++
+		e.gen++
+	}
+}
+
+func (e *Engine) trimWindow(slot core.LogSlot) {
+	window, stride := e.windowSlots, e.trimStride
+	if window <= 0 || stride <= 0 {
+		return
+	}
+	if int64(slot)%stride == 0 && int64(slot) >= window {
+		_, _ = e.ref.Trim(int64(slot) - window)
+	}
+}
+
+func (e *Engine) stateHash() uint64 {
+	return e.spec.stateHash() ^ e.ref.StateHash() ^ e.gen
 }
 
 func mutating(a core.IOAction) bool {
@@ -89,3 +167,29 @@ func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.Action) {
 func (e *Engine) Entry(slot core.LogSlot) ([]byte, bool) {
 	return e.spec.entry(slot)
 }
+
+// CreateTopic seeds a topic on the reference fold before the run.
+func (e *Engine) CreateTopic(name string, partitions int32) core.ErrCode {
+	err := e.ref.CreateTopic(name, partitions)
+	if err == core.OK {
+		e.gen++
+	}
+	return err
+}
+
+// Committed implements sim.CPTruth.
+func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
+	d, err := e.ref.Lookup(core.Lookup{TP: tp})
+	if err != nil || d.Err != core.OK {
+		return nil
+	}
+	return slices.Clone(core.RespAs[core.LookupResp](d).Ranges)
+}
+
+// HighWatermark implements sim.CPTruth.
+func (e *Engine) HighWatermark(tp core.TopicPartition) core.Offset {
+	return e.ref.End(tp)
+}
+
+// Gen implements sim.CPTruth.
+func (e *Engine) Gen() uint64 { return e.gen }

@@ -26,6 +26,7 @@ type slotRec struct {
 // tomb), matching DynLog.
 type store struct {
 	slots []slotRec
+	bug   uint8 // logengine.BugTrimDelete empties instead of tombstoning
 }
 
 func (s *store) ensure(slot core.LogSlot) {
@@ -99,8 +100,12 @@ func (s *store) trim(a core.LogTrim) core.LogTrimDone {
 		return core.LogTrimDone{Req: a.Req, Err: core.ErrInvalid, Outcome: core.NotApplied}
 	}
 	s.ensure(a.Through)
+	kind := slotTomb
+	if s.bug == 2 { // logengine.BugTrimDelete
+		kind = slotEmpty
+	}
 	for i := range int(a.Through) + 1 {
-		s.slots[i] = slotRec{kind: slotTomb}
+		s.slots[i] = slotRec{kind: kind}
 	}
 	return core.LogTrimDone{Req: a.Req, Err: core.OK, Outcome: core.Applied}
 }

@@ -32,11 +32,17 @@ func (m *Machine) setActive(on bool) {
 	if m.active == on {
 		return
 	}
+	was := m.active
 	m.active = on
 	if on {
 		m.promoSlot = max(m.high, m.applied)
 		m.lowerSeen = false
 		m.lastOtherAt = m.now
+		if !was && m.ready {
+			m.env.Reachable("logcp-sim: standby took over")
+		}
+	} else if was {
+		m.env.Reachable("logcp-sim: failback, the standby stepped down")
 	}
 	m.lowerSeen = false
 }
@@ -53,7 +59,7 @@ func (m *Machine) isAppender() bool {
 }
 
 func (m *Machine) canCommit() bool {
-	if m.booting {
+	if m.booting || m.crashed || m.now < m.stallUntil {
 		return false
 	}
 	if m.rolesArmed() {
@@ -92,6 +98,19 @@ func (m *Machine) onRoleTimer(e core.TimerFired) []core.Action {
 }
 
 func (m *Machine) roleTick() []core.Action {
+	if m.crashed {
+		if m.now < m.downUntil {
+			return nil
+		}
+		m.crashed = false
+		return m.afterCrashRestart()
+	}
+	if m.now < m.stallUntil {
+		return nil
+	}
+	if acts := m.maybeReplicaFault(); acts != nil || m.crashed || m.now < m.stallUntil {
+		return acts
+	}
 	take := m.cfg.TakeoverAfter
 	switch {
 	case m.active && m.lowerSeen:
@@ -108,6 +127,59 @@ func (m *Machine) roleTick() []core.Action {
 		return m.emitHeartbeat()
 	}
 	return nil
+}
+
+func (m *Machine) maybeReplicaFault() []core.Action {
+	// Only impair the appender so a hot standby can take over (old logengine
+	// never impaired both replicas at once).
+	if !m.active || !m.ready {
+		return nil
+	}
+	if m.cfg.StallProb > 0 && m.env.Fault("logcp_stall", m.cfg.StallProb) {
+		m.stallUntil = m.now + core.Time(betweenDur(m.env, m.cfg.StallDur))
+		m.env.Reachable("logcp-sim: replica stalled")
+		return nil
+	}
+	if m.cfg.CrashProb > 0 && m.env.Fault("logcp_crash", m.cfg.CrashProb) {
+		return m.softCrash()
+	}
+	return nil
+}
+
+func betweenDur(r interface{ Intn(int) int }, d [2]core.Duration) core.Duration {
+	if d[1] <= d[0] {
+		return d[0]
+	}
+	return d[0] + core.Duration(r.Intn(int(d[1]-d[0])+1))
+}
+
+func (m *Machine) softCrash() []core.Action {
+	m.env.Reachable("logcp-sim: replica crashed")
+	m.setActive(false)
+	m.ready = false
+	m.booting = true
+	m.crashed = true
+	m.downUntil = m.now + core.Time(betweenDur(m.env, m.cfg.DownDur))
+	m.queue = nil
+	m.flights = map[core.ReqID]*flight{}
+	m.waiters = map[string][]pendingCmd{}
+	m.answers = nil
+	m.buf = map[core.LogSlot][]byte{}
+	m.pending, m.pendingKind = 0, pendingNone
+	m.proj = nil
+	// Refuse client work until afterCrashRestart restores fold + catch-up.
+	return nil
+}
+
+func (m *Machine) afterCrashRestart() []core.Action {
+	m.fold = applier.NewMem()
+	m.reseedTopics()
+	m.applied, m.high, m.goalTail = 0, 0, 0
+	m.seq = 0
+	if m.ckptEnabled() {
+		return m.emitCkptGet()
+	}
+	return m.afterRestore()
 }
 
 func (m *Machine) emitHeartbeat() []core.Action {

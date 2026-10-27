@@ -50,7 +50,30 @@ type Config struct {
 	// KeepSlots is how many log slots to keep behind a published checkpoint
 	// before LogTrim. Zero skips trim.
 	KeepSlots int64
+
+	// Bug selects a sim mutant (logengine.Bug* constants). Zero is none.
+	Bug uint8
+	// WindowSlots is the idempotency window length. Keys older than this many
+	// slots are forgotten at TrimStride boundaries (decision 48). Zero skips.
+	WindowSlots int64
+	// TrimStride is how often (in slots) the idempotency window is cut.
+	// Zero means 16 when WindowSlots > 0.
+	TrimStride int64
+
+	// StallProb / CrashProb are per role-tick cooperative faults (sim only).
+	// Fault() suppresses them after EnterRecovery. Zero disables.
+	StallProb, CrashProb float64
+	StallDur, DownDur    [2]core.Duration
 }
+
+// Bug constants match sim/engines/logengine (kept numeric for LogParams.Bug).
+const (
+	BugNone             uint8 = iota
+	BugWriterOffsets          // offsets chosen by the writer instead of by apply
+	BugTrimDelete             // trimmed slots deleted, not tombstoned (logstore)
+	BugPerReplicaWindow       // each replica forgets keys on its own clock
+	BugHoleSkip               // pass an empty slot without a no-op fill
+)
 
 func (c Config) readLimit() int32 {
 	if c.ReadLimit > 0 {

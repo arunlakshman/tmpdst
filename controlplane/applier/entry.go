@@ -25,6 +25,9 @@ type Entry struct {
 	Commit core.CommitSegment // KindCommit
 	Topic  string             // KindCreateTopic
 	Parts  int32              // KindCreateTopic
+	// WriterBases, when set and equal in length to Commit.Batches, forces those
+	// bases at apply (sim BugWriterOffsets). Not on the wire.
+	WriterBases []core.Offset
 }
 
 // ErrCorrupt means the bytes are not a valid Entry.
@@ -190,6 +193,11 @@ func (a *Applier) Apply(slot int64, e Entry) core.CPDone {
 	case KindNoop:
 		return core.CPDone{Req: core.ReqID(slot), Outcome: core.Applied}
 	case KindCommit:
+		if len(e.WriterBases) == len(e.Commit.Batches) && len(e.WriterBases) > 0 {
+			d := a.commitWithBases(slot, e.Commit, e.WriterBases)
+			d.Req = core.ReqID(slot)
+			return d
+		}
 		d, err := a.Commit(slot, e.Commit)
 		if err != nil {
 			panic(fmt.Errorf("applier: store failed: %w", err))

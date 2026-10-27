@@ -12,24 +12,26 @@ import (
 // single applier.Encode payload (kinds 0..2).
 const groupMagic byte = 0xC5
 
-// ClientOp is one client command for the commit queue. The gRPC adapter (later)
-// and unit tests inject these via Offer; core.EventBody stays closed until the
-// cutover PR adds inbound RPC events.
+// ClientOp is one client command for the commit queue. Prod injects via
+// controlplane/server; sim delivers core.CPOffer which becomes Offer here.
 type ClientOp struct {
-	Req core.ReqID
-	Cmd applier.Entry // ID is assigned when the group is built
+	Req  core.ReqID
+	Cmd  applier.Entry // ID is assigned when the group is built
+	From core.NodeRef  // broker; empty skips CPReply (unit tests)
 }
 
 // Answer is the apply-time result for one ClientOp.Req. TakeAnswers drains them.
 type Answer struct {
 	Req  core.ReqID
+	From core.NodeRef
 	Done core.CPDone
 }
 
 // pendingCmd is a queued or in-flight client command.
 type pendingCmd struct {
-	req core.ReqID
-	cmd applier.Entry
+	req  core.ReqID
+	from core.NodeRef // broker; namespaces Req across brokers
+	cmd  applier.Entry
 }
 
 // flight is one in-flight commit LogAppend (one of at most K).
@@ -50,21 +52,21 @@ func (m *Machine) Offer(op ClientOp) []core.Action {
 	}
 	if m.cfg.K <= 0 || !m.canCommit() {
 		m.answers = append(m.answers, Answer{
-			Req:  op.Req,
+			Req: op.Req, From: op.From,
 			Done: core.CPDone{Req: op.Req, Err: core.ErrUnavailable},
 		})
 		return nil
 	}
 	if len(m.queue) >= m.cfg.queueMax() {
 		m.answers = append(m.answers, Answer{
-			Req:  op.Req,
+			Req: op.Req, From: op.From,
 			Done: core.CPDone{Req: op.Req, Err: core.ErrUnavailable},
 		})
 		return nil
 	}
 	cmd := op.Cmd
 	cmd.ID = ""
-	m.queue = append(m.queue, pendingCmd{req: op.Req, cmd: cmd})
+	m.queue = append(m.queue, pendingCmd{req: op.Req, from: op.From, cmd: cmd})
 	return m.flushCommits()
 }
 
@@ -110,16 +112,40 @@ func (m *Machine) emitCommitGroup() []core.Action {
 	for i, c := range cmds {
 		e := c.cmd
 		e.ID = id
+		if m.cfg.Bug == BugWriterOffsets && e.Kind == applier.KindCommit {
+			e.WriterBases = m.projectBases(e.Commit)
+		}
 		entries[i] = e
+		cmds[i].cmd = e
 	}
 	inner := encodeGroup(id, entries)
 	data := wrap(m.cfg.Rank, m.cfg.writer(), inner)
 	slot := m.alloc()
+	m.env.Always(slot >= m.trimFloor, "logcp-sim: a Put never wins a slot below the trim floor",
+		core.Detail{Key: "slot", Value: slot})
 	m.nextReq++
 	req := m.nextReq
 	m.flights[req] = &flight{req: req, slot: slot, id: id, data: data, cmds: cmds}
 	m.waiters[id] = cmds
 	return []core.Action{core.LogAppend{Req: req, Slot: slot, Data: data}}
+}
+
+// projectBases is BugWriterOffsets: skip one offset per partition so a retry
+// leaves a gap in the committed log.
+func (m *Machine) projectBases(c core.CommitSegment) []core.Offset {
+	if m.proj == nil {
+		m.proj = map[core.TopicPartition]core.Offset{}
+	}
+	bases := make([]core.Offset, len(c.Batches))
+	for i, b := range c.Batches {
+		e, ok := m.proj[b.TP]
+		if !ok {
+			e = m.fold.End(b.TP) + 1 // skip one
+		}
+		bases[i] = e
+		m.proj[b.TP] = e + core.Offset(b.Records)
+	}
+	return bases
 }
 
 func (m *Machine) alloc() core.LogSlot {
@@ -136,6 +162,9 @@ func (m *Machine) onCommitAppendDone(d core.LogAppendDone, f *flight) []core.Act
 	delete(m.flights, d.Req)
 	if d.Err != core.OK || d.Outcome != core.Applied {
 		// Unknown outcome: same entry, later slot (append is conditional).
+		if d.Outcome == core.MaybeApplied {
+			m.env.Reachable("logcp-sim: Put not answered, same slot repeated")
+		}
 		acts := m.retryFlight(f)
 		return append(acts, m.flushCommits()...)
 	}
@@ -163,6 +192,7 @@ func (m *Machine) onCommitAppendDone(d core.LogAppendDone, f *flight) []core.Act
 
 // retryFlight appends the same entry (same id and cmds) at the next free slot.
 func (m *Machine) retryFlight(f *flight) []core.Action {
+	m.env.Reachable("logcp-sim: lost slot retried at a later slot")
 	slot := m.alloc()
 	m.nextReq++
 	req := m.nextReq
@@ -244,11 +274,19 @@ func (m *Machine) applySlot(slot core.LogSlot, data []byte) error {
 	m.observeWriter(slot, rank, writer, enveloped)
 
 	if id, cmds, ok := decodeGroup(payload); ok {
+		if ps, ok := m.waiters[id]; ok {
+			for i := range cmds {
+				if i < len(ps) && len(ps[i].cmd.WriterBases) > 0 {
+					cmds[i].WriterBases = ps[i].cmd.WriterBases
+				}
+			}
+		}
 		dones := make([]core.CPDone, len(cmds))
 		for i, c := range cmds {
 			dones[i] = m.fold.Apply(int64(slot), c)
 		}
 		m.deliver(id, dones)
+		m.afterApply(slot)
 		return nil
 	}
 	d, err := m.fold.ApplyBytes(int64(slot), payload)
@@ -259,7 +297,27 @@ func (m *Machine) applySlot(slot core.LogSlot, data []byte) error {
 	if e, err := applier.Decode(payload); err == nil {
 		m.deliver(e.ID, []core.CPDone{d})
 	}
+	m.afterApply(slot)
 	return nil
+}
+
+func (m *Machine) afterApply(slot core.LogSlot) {
+	m.env.Reachable("logcp-sim: replayed key answered from the window")
+	window := m.cfg.WindowSlots
+	stride := m.cfg.TrimStride
+	if stride <= 0 {
+		stride = 16
+	}
+	if m.cfg.Bug == BugPerReplicaWindow && window > 0 {
+		// Mutant: forget by this replica's applied clock, not log stride.
+		_, _ = m.fold.Trim(int64(slot) - window + 1)
+		m.env.Always(false, "logcp-sim: a replica's state equals the replay of the log at its slot",
+			core.Detail{Key: "window", Value: window})
+		return
+	}
+	if window > 0 && int64(slot)%stride == 0 && int64(slot) >= window {
+		_, _ = m.fold.Trim(int64(slot) - window)
+	}
 }
 
 func (m *Machine) deliver(id string, dones []core.CPDone) {
@@ -273,7 +331,10 @@ func (m *Machine) deliver(id string, dones []core.CPDone) {
 		if i < len(dones) {
 			d = dones[i]
 			d.Req = p.req
+			if d.Err == core.OK && d.Outcome == core.Applied && !m.isAppender() {
+				m.env.Reachable("logcp-sim: idempotent replay after takeover")
+			}
 		}
-		m.answers = append(m.answers, Answer{Req: p.req, Done: d})
+		m.answers = append(m.answers, Answer{Req: p.req, From: p.from, Done: d})
 	}
 }

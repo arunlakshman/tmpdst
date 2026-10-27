@@ -39,4 +39,9 @@ func TestCPCallAndCPDoneClassOf(t *testing.T) {
 	if ClassOf(done) != Control || done.ReqID() != 9 {
 		t.Fatalf("CPDone class/req broken")
 	}
+	offer := CPOffer{From: NodeRef{Node: "b-0"}, Req: 9, Op: call.Op}
+	if ClassOf(offer) != Control {
+		t.Fatalf("CPOffer class = %v", ClassOf(offer))
+	}
+	_ = CPReply{To: offer.From, Done: done}
 }

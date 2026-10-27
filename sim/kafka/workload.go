@@ -20,12 +20,21 @@ type Opts struct {
 	Producers, Consumers int
 	Topics               []string
 	Partitions           int32
+	// MaxAttempts caps client produce sends before abandon. Zero means 3.
+	MaxAttempts int
 }
 
 // DefaultOpts is 3 at-least-once producers and 2 consumers over 2 topics x 3
 // partitions.
 func DefaultOpts() Opts {
 	return Opts{Producers: 3, Consumers: 2, Topics: []string{"t0", "t1"}, Partitions: 3}
+}
+
+func (o Opts) maxAttempts() int {
+	if o.MaxAttempts > 0 {
+		return o.MaxAttempts
+	}
+	return maxAttempts
 }
 
 func (o Opts) tps() []core.TopicPartition {

@@ -26,7 +26,7 @@ Suggested waves: **P0 → P1 → P2 → P3 → P4**.
 | **P3** | Split Phase / Extract Function on hot paths | Makes Extract Class safe |
 | **P4** | Extract Class / polymorphism / ACL finish | Structure after seams exist |
 
-**Next up:** CP DSM program (`docs/cp-dsm-eventloop-plan.md`), starting at CP-DSM-1 (rename + gRPC API scaffold). Resume P2 forks after the DSM stack lands or between DSM PRs when they do not conflict.
+**Next up:** Finish CP-DSM-8 kafka-log 300-seed green (bridge CPTruth under faults, CP attrition takeover). Then close the DSM program. Resume P2 forks after the stack lands.
 
 ---
 

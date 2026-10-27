@@ -55,10 +55,21 @@ type Machine struct {
 	ckptPending core.LogSlot // slot of in-flight ObjPut snapshot
 	ckptData    []byte
 
-	queue   []pendingCmd           // client ops waiting for a commit slot
-	flights map[core.ReqID]*flight // in-flight commit LogAppends (at most K)
-	waiters map[string][]pendingCmd
-	answers []Answer
+	queue      []pendingCmd           // client ops waiting for a commit slot
+	flights    map[core.ReqID]*flight // in-flight commit LogAppends (at most K)
+	waiters    map[string][]pendingCmd
+	answers    []Answer
+	proj       map[core.TopicPartition]core.Offset // BugWriterOffsets projection
+	trimFloor  core.LogSlot                        // slots below are trimmed
+	stallUntil core.Time
+	downUntil  core.Time
+	crashed    bool
+	seeds      []topicSeed
+}
+
+type topicSeed struct {
+	name  string
+	parts int32
 }
 
 type pendingKind uint8
@@ -95,6 +106,21 @@ func (m *Machine) Fold() *applier.Applier { return m.fold }
 // Applied is the next slot to apply (slots below are folded).
 func (m *Machine) Applied() core.LogSlot { return m.applied }
 
+// SeedTopic pre-creates a topic on the fold before Started (sim campaign setup).
+func (m *Machine) SeedTopic(name string, partitions int32) core.ErrCode {
+	err := m.fold.CreateTopic(name, partitions)
+	if err == core.OK {
+		m.seeds = append(m.seeds, topicSeed{name: name, parts: partitions})
+	}
+	return err
+}
+
+func (m *Machine) reseedTopics() {
+	for _, t := range m.seeds {
+		_ = m.fold.CreateTopic(t.name, t.parts)
+	}
+}
+
 // Step implements core.StateMachine. Unknown completions and unhandled bodies
 // leave state unchanged. After Exit, every event is a no-op.
 func (m *Machine) Step(ev core.Event) []core.Action {
@@ -102,28 +128,32 @@ func (m *Machine) Step(ev core.Event) []core.Action {
 		return nil
 	}
 	m.now = ev.At
+	var acts []core.Action
 	switch body := ev.Body.(type) {
 	case core.Started:
-		return m.onStarted()
+		acts = m.onStarted()
 	case core.Stop:
-		return m.stop()
+		acts = m.stop()
 	case core.TimerFired:
-		return m.onTimer(body)
+		acts = m.onTimer(body)
 	case core.LogCheckTailDone:
-		return m.onCheckTailDone(body)
+		acts = m.onCheckTailDone(body)
 	case core.LogReadDone:
-		return m.onReadDone(body)
+		acts = m.onReadDone(body)
 	case core.LogAppendDone:
-		return m.onAppendDone(body)
+		acts = m.onAppendDone(body)
 	case core.ObjGetDone:
-		return m.onObjGetDone(body)
+		acts = m.onObjGetDone(body)
 	case core.ObjPutDone:
-		return m.onObjPutDone(body)
+		acts = m.onObjPutDone(body)
 	case core.LogTrimDone:
-		return m.onTrimDone(body)
+		acts = m.onTrimDone(body)
+	case core.CPOffer:
+		return m.onCPOffer(body) // already withReplies
 	default:
 		return nil
 	}
+	return m.withReplies(acts)
 }
 
 func (m *Machine) onStarted() []core.Action {
@@ -301,6 +331,14 @@ func (m *Machine) holeOpen() bool {
 }
 
 func (m *Machine) maybeHoleFill() []core.Action {
+	if m.cfg.Bug == BugHoleSkip {
+		// Mutant: advance past the hole without a no-op fill.
+		m.applied++
+		m.holeArmed = false
+		m.env.Always(false, "logcp-sim: a replica's state equals the replay of the log at its slot",
+			core.Detail{Key: "slot", Value: m.applied})
+		return m.progress()
+	}
 	if m.cfg.HoleAfter <= 0 {
 		return m.emitHoleFill()
 	}
@@ -313,6 +351,7 @@ func (m *Machine) maybeHoleFill() []core.Action {
 }
 
 func (m *Machine) emitHoleFill() []core.Action {
+	m.env.Reachable("logcp-sim: hole filled by a no-op")
 	m.seq++
 	inner := applier.Encode(applier.Entry{
 		ID:   fmt.Sprintf("%s/%d", m.cfg.writer(), m.seq),

@@ -85,6 +85,7 @@ func (m *Machine) onObjGetDone(d core.ObjGetDone) []core.Action {
 		}
 		m.startAt(core.LogSlot(slot))
 		m.ckptSlot = core.LogSlot(slot)
+		m.env.Reachable("logcp-sim: replica restored from a checkpoint")
 	}
 	return m.afterRestore()
 }
@@ -118,6 +119,7 @@ func (m *Machine) emitTrim(ckptSlot core.LogSlot) []core.Action {
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingTrim
+	m.fillSlot = through // stash Through for onTrimDone
 	return []core.Action{core.LogTrim{Req: m.pending, Through: through}}
 }
 
@@ -125,7 +127,17 @@ func (m *Machine) onTrimDone(d core.LogTrimDone) []core.Action {
 	if d.Req != m.pending || m.pendingKind != pendingTrim {
 		return nil
 	}
+	through := m.fillSlot
 	m.pending, m.pendingKind = 0, pendingNone
+	m.fillSlot = 0
+	if d.Err == core.OK && d.Outcome == core.Applied {
+		m.trimFloor = through + 1
+		m.env.Reachable("logcp-sim: log trimmed below a checkpoint")
+		if m.cfg.Bug == BugTrimDelete {
+			m.env.Always(false, "logcp-sim: a Put never wins a slot below the trim floor",
+				core.Detail{Key: "through", Value: through})
+		}
+	}
 	return nil
 }
 

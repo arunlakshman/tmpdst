@@ -119,6 +119,14 @@ type CPDone struct {
 	Outcome Outcome
 }
 
+// CPOffer delivers one broker CPCall to a control-plane replica process. The
+// sim bridge engine issues this; the machine answers with CPReply actions.
+type CPOffer struct {
+	From NodeRef // broker that issued the CPCall
+	Req  ReqID
+	Op   CPOp
+}
+
 // ---- shared command log completions ----
 
 // LogEntry is one slot's payload as returned by LogRead.
@@ -180,6 +188,7 @@ func (ObjGetDone) isEvent()       {}
 func (ObjDeleteDone) isEvent()    {}
 func (ObjListDone) isEvent()      {}
 func (CPDone) isEvent()           {}
+func (CPOffer) isEvent()          {}
 func (LogAppendDone) isEvent()    {}
 func (LogReadDone) isEvent()      {}
 func (LogCheckTailDone) isEvent() {}

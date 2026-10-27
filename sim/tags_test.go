@@ -63,7 +63,7 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		"BytesReceived": core.BytesReceived{}, "ConnClosed": core.ConnClosed{}, "SendDone": core.SendDone{},
 		"DialDone": core.DialDone{}, "TimerFired": core.TimerFired{}, "ObjPutDone": core.ObjPutDone{},
 		"ObjGetDone": core.ObjGetDone{}, "ObjDeleteDone": core.ObjDeleteDone{}, "ObjListDone": core.ObjListDone{},
-		"CPDone":        core.CPDone{},
+		"CPDone": core.CPDone{}, "CPOffer": core.CPOffer{},
 		"LogAppendDone": core.LogAppendDone{}, "LogReadDone": core.LogReadDone{},
 		"LogCheckTailDone": core.LogCheckTailDone{}, "LogTrimDone": core.LogTrimDone{},
 	}
@@ -71,7 +71,7 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		"SetTimer": core.SetTimer{}, "CancelTimer": core.CancelTimer{}, "Send": core.Send{},
 		"CloseConn": core.CloseConn{}, "PauseReads": core.PauseReads{}, "ResumeReads": core.ResumeReads{},
 		"Dial": core.Dial{}, "ObjPut": core.ObjPut{}, "ObjGet": core.ObjGet{}, "ObjDelete": core.ObjDelete{},
-		"ObjList": core.ObjList{}, "CPCall": core.CPCall{},
+		"ObjList": core.ObjList{}, "CPCall": core.CPCall{}, "CPReply": core.CPReply{},
 		"LogAppend": core.LogAppend{}, "LogRead": core.LogRead{}, "LogCheckTail": core.LogCheckTail{},
 		"LogTrim": core.LogTrim{},
 		"Emit":    core.Emit{}, "Trip": core.Trip{}, "Exit": core.Exit{},

@@ -1,9 +1,9 @@
 package core
 
-// CPOp is a control-plane operation as seen by a broker (decision 3). The control plane
-// is an HTTP service over a metadata store (SQLite locally, DynamoDB in prod)
-// that the broker never sees. Shapes are provisional until the control-plane
-// session; the invariants below are not.
+// CPOp is a control-plane operation as seen by a broker (decision 3). The wire
+// protocol for new work is gRPC (`controlplane/api/v1`, decision 57); CPOp remains
+// the in-process vocabulary until cutover. The metadata store is still invisible
+// to the broker. The invariants below are not provisional.
 //
 // Brokers are stateless (decision 44): there is no registration, epoch or
 // fencing, and no idempotent producers (decision 41). The control plane

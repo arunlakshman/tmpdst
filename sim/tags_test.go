@@ -63,13 +63,18 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		"BytesReceived": core.BytesReceived{}, "ConnClosed": core.ConnClosed{}, "SendDone": core.SendDone{},
 		"DialDone": core.DialDone{}, "TimerFired": core.TimerFired{}, "ObjPutDone": core.ObjPutDone{},
 		"ObjGetDone": core.ObjGetDone{}, "ObjDeleteDone": core.ObjDeleteDone{}, "ObjListDone": core.ObjListDone{},
-		"CPDone": core.CPDone{},
+		"CPDone":        core.CPDone{},
+		"LogAppendDone": core.LogAppendDone{}, "LogReadDone": core.LogReadDone{},
+		"LogCheckTailDone": core.LogCheckTailDone{}, "LogTrimDone": core.LogTrimDone{},
 	}
 	actions := map[string]core.Action{
 		"SetTimer": core.SetTimer{}, "CancelTimer": core.CancelTimer{}, "Send": core.Send{},
 		"CloseConn": core.CloseConn{}, "PauseReads": core.PauseReads{}, "ResumeReads": core.ResumeReads{},
 		"Dial": core.Dial{}, "ObjPut": core.ObjPut{}, "ObjGet": core.ObjGet{}, "ObjDelete": core.ObjDelete{},
-		"ObjList": core.ObjList{}, "CPCall": core.CPCall{}, "Emit": core.Emit{}, "Trip": core.Trip{}, "Exit": core.Exit{},
+		"ObjList": core.ObjList{}, "CPCall": core.CPCall{},
+		"LogAppend": core.LogAppend{}, "LogRead": core.LogRead{}, "LogCheckTail": core.LogCheckTail{},
+		"LogTrim": core.LogTrim{},
+		"Emit":    core.Emit{}, "Trip": core.Trip{}, "Exit": core.Exit{},
 	}
 	ops := map[string]core.CPOp{
 		"CommitSegment": core.CommitSegment{}, "Lookup": core.Lookup{},

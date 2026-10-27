@@ -105,6 +105,42 @@ func (h *hasher) eventDone(b core.EventBody) {
 		h.u64(uint64(e.Outcome))
 		h.cpResp(e.Resp)
 	default:
+		h.eventLogDone(b)
+	}
+}
+
+func (h *hasher) eventLogDone(b core.EventBody) {
+	switch e := b.(type) {
+	case core.LogAppendDone:
+		h.u64(14)
+		h.u64(uint64(e.Req))
+		h.i64(int64(e.Slot))
+		h.bool(e.Taken)
+		h.bytes(e.Existing)
+		h.u64(uint64(e.Err))
+		h.u64(uint64(e.Outcome))
+	case core.LogReadDone:
+		h.u64(15)
+		h.u64(uint64(e.Req))
+		h.u64(uint64(len(e.Entries)))
+		for _, ent := range e.Entries {
+			h.i64(int64(ent.Slot))
+			h.bytes(ent.Data)
+		}
+		h.u64(uint64(e.Err))
+		h.u64(uint64(e.Outcome))
+	case core.LogCheckTailDone:
+		h.u64(16)
+		h.u64(uint64(e.Req))
+		h.i64(int64(e.Tail))
+		h.u64(uint64(e.Err))
+		h.u64(uint64(e.Outcome))
+	case core.LogTrimDone:
+		h.u64(17)
+		h.u64(uint64(e.Req))
+		h.u64(uint64(e.Err))
+		h.u64(uint64(e.Outcome))
+	default:
 		panic(fmt.Sprintf("sim: trace hash: untagged event %T", b))
 	}
 }
@@ -173,6 +209,23 @@ func (h *hasher) actionIO(a core.Action) {
 		h.str(x.Cause)
 	case core.Exit:
 		h.u64(115)
+	case core.LogAppend:
+		h.u64(116)
+		h.u64(uint64(x.Req))
+		h.i64(int64(x.Slot))
+		h.bytes(x.Data)
+	case core.LogRead:
+		h.u64(117)
+		h.u64(uint64(x.Req))
+		h.i64(int64(x.From))
+		h.u64(uint64(uint32(x.Limit)))
+	case core.LogCheckTail:
+		h.u64(118)
+		h.u64(uint64(x.Req))
+	case core.LogTrim:
+		h.u64(119)
+		h.u64(uint64(x.Req))
+		h.i64(int64(x.Through))
 	default:
 		panic(fmt.Sprintf("sim: trace hash: untagged action %T", a))
 	}

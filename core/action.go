@@ -86,12 +86,43 @@ type ObjList struct {
 	Prefix string
 }
 
-// ---- control plane (HTTP) ----
+// ---- control plane (gRPC wire contract: controlplane/api/v1) ----
 
-// CPCall sends Op to the control plane.
+// CPCall asks the executor to perform one control-plane RPC. The wire contract
+// is controlplane/api/v1 (decision 57). Op is the in-process vocabulary brokers
+// and sim use today; controlplane/apiconv maps Op to generated request
+// messages. Typed *Request fields stay off this struct until the gRPC cutover:
+// importing the generated package would pull grpc into core's dep closure and
+// fail the determinism audit.
 type CPCall struct {
 	Req ReqID
 	Op  CPOp
+}
+
+// ---- shared command log (Dynamo loglet; engine lands in a later PR) ----
+
+// LogAppend is an if-absent put of Data at Slot.
+type LogAppend struct {
+	Req  ReqID
+	Slot LogSlot
+	Data []byte
+}
+
+// LogRead reads up to Limit entries at or after From, in slot order.
+type LogRead struct {
+	Req   ReqID
+	From  LogSlot
+	Limit int32
+}
+
+// LogCheckTail reports the highest contiguous written slot plus one (the tail).
+type LogCheckTail struct{ Req ReqID }
+
+// LogTrim tombstones every slot at or below Through. Trimmed slots must not be
+// rewritten.
+type LogTrim struct {
+	Req     ReqID
+	Through LogSlot
 }
 
 // ---- lifecycle ----
@@ -112,21 +143,25 @@ type Exit struct{}
 // Emit appends a fact to the timeline (sim: invariants read it; prod: tracing).
 type Emit struct{ Fact Fact }
 
-func (SetTimer) isAction()    {}
-func (CancelTimer) isAction() {}
-func (Send) isAction()        {}
-func (CloseConn) isAction()   {}
-func (PauseReads) isAction()  {}
-func (ResumeReads) isAction() {}
-func (Dial) isAction()        {}
-func (ObjPut) isAction()      {}
-func (ObjGet) isAction()      {}
-func (ObjDelete) isAction()   {}
-func (ObjList) isAction()     {}
-func (CPCall) isAction()      {}
-func (Emit) isAction()        {}
-func (Trip) isAction()        {}
-func (Exit) isAction()        {}
+func (SetTimer) isAction()     {}
+func (CancelTimer) isAction()  {}
+func (Send) isAction()         {}
+func (CloseConn) isAction()    {}
+func (PauseReads) isAction()   {}
+func (ResumeReads) isAction()  {}
+func (Dial) isAction()         {}
+func (ObjPut) isAction()       {}
+func (ObjGet) isAction()       {}
+func (ObjDelete) isAction()    {}
+func (ObjList) isAction()      {}
+func (CPCall) isAction()       {}
+func (LogAppend) isAction()    {}
+func (LogRead) isAction()      {}
+func (LogCheckTail) isAction() {}
+func (LogTrim) isAction()      {}
+func (Emit) isAction()         {}
+func (Trip) isAction()         {}
+func (Exit) isAction()         {}
 
 // ReqID returns the request this action carries.
 func (a Send) ReqID() ReqID { return a.Req }
@@ -149,6 +184,19 @@ func (a ObjList) ReqID() ReqID { return a.Req }
 // ReqID returns the request this action carries.
 func (a CPCall) ReqID() ReqID { return a.Req }
 
+// ReqID returns the request this action carries.
+func (a LogAppend) ReqID() ReqID { return a.Req }
+
+// ReqID returns the request this action carries.
+func (a LogRead) ReqID() ReqID { return a.Req }
+
+// ReqID returns the request this action carries.
+func (a LogCheckTail) ReqID() ReqID { return a.Req }
+
+// ReqID returns the request this action carries.
+func (a LogTrim) ReqID() ReqID { return a.Req }
+
+//nolint:dupl // compile-time IOAction assertions; parallel list lives on Completions
 var (
 	_ IOAction = Send{}
 	_ IOAction = Dial{}
@@ -157,4 +205,8 @@ var (
 	_ IOAction = ObjDelete{}
 	_ IOAction = ObjList{}
 	_ IOAction = CPCall{}
+	_ IOAction = LogAppend{}
+	_ IOAction = LogRead{}
+	_ IOAction = LogCheckTail{}
+	_ IOAction = LogTrim{}
 )

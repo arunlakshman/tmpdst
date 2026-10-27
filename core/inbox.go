@@ -24,7 +24,9 @@ func ClassOf(b EventBody) Class {
 	switch b.(type) {
 	case Started, Stop, TimerFired, DialDone,
 		ObjPutDone, ObjGetDone, ObjDeleteDone, ObjListDone,
-		CPDone, SendDone:
+		CPDone,
+		LogAppendDone, LogReadDone, LogCheckTailDone, LogTrimDone,
+		SendDone:
 		return Control
 	case ConnOpened, BytesReceived, ConnClosed:
 		return Data

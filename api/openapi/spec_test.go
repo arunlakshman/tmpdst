@@ -17,9 +17,9 @@ import (
 
 	"manifester/api/openapi"
 	"manifester/api/openapi/json2yaml"
+	cp "manifester/controlplane"
+	"manifester/controlplane/memstore"
 	"manifester/core"
-	"manifester/cp"
-	"manifester/cp/memstore"
 )
 
 type doc = map[string]any
@@ -80,7 +80,7 @@ var (
 // read from the source so a new route cannot be forgotten.
 func handlerRoutes(t *testing.T) []string {
 	t.Helper()
-	src, err := os.ReadFile("../../cp/handler.go")
+	src, err := os.ReadFile("../../controlplane/handler.go")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,16 +111,16 @@ func specRoutes(d doc) []string {
 func TestRoutesMatchHandler(t *testing.T) {
 	code, spec := handlerRoutes(t), specRoutes(load(t))
 	if len(code) < 5 {
-		t.Fatalf("found only %v in cp/handler.go; has the registration style changed?", code)
+		t.Fatalf("found only %v in controlplane/handler.go; has the registration style changed?", code)
 	}
 	for _, r := range code {
 		if !slices.Contains(spec, r) {
-			t.Errorf("route %s is registered in cp/handler.go but missing from the spec", r)
+			t.Errorf("route %s is registered in controlplane/handler.go but missing from the spec", r)
 		}
 	}
 	for _, r := range spec {
 		if !slices.Contains(code, r) {
-			t.Errorf("route %s is in the spec but not registered in cp/handler.go", r)
+			t.Errorf("route %s is in the spec but not registered in controlplane/handler.go", r)
 		}
 	}
 }

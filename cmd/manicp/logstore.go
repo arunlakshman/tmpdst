@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"manifester/cp/applier/pebblekv"
-	"manifester/cp/cpobs"
-	"manifester/cp/logcp"
+	"manifester/controlplane/applier/pebblekv"
+	"manifester/controlplane/cpobs"
+	"manifester/controlplane/logcp"
 	"manifester/sys"
 	"manifester/sys/s3store"
 )

@@ -22,10 +22,34 @@ UNIT_PKGS = $(shell go list ./... | grep -vE '/sim(/|$$)|/it$$')
 
 export CRAP_THRESHOLD
 
-.PHONY: build compile test sim it-hermetic test-all test-race \
-	ascii-check lint fmt-check vet crap crap-baseline crap-strict install-hooks
+# Proto plugins (pin versions; local buf, no BSR). Override via env if needed.
+# buf itself comes from mise (`mise install`); plugins still go-install.
+BUF            ?= buf
+PROTOC_GEN_GO  ?= protoc-gen-go
+PROTOC_GEN_GRPC ?= protoc-gen-go-grpc
+PROTO_GO_VER   ?= v1.35.2
+PROTO_GRPC_VER ?= v1.5.1
 
-build: fmt-check ascii-check vet lint compile test sim it-hermetic crap
+.PHONY: build compile test sim it-hermetic test-all test-race \
+	ascii-check lint fmt-check vet crap crap-baseline crap-strict install-hooks proto proto-tools
+
+build: proto fmt-check ascii-check vet lint compile test sim it-hermetic crap
+
+# Generate Go from controlplane/api/v1/*.proto into ignored *.pb.go files.
+# Prefer mise-provided buf; plugins via `make proto-tools` (go install).
+proto: proto-tools
+	@if command -v mise >/dev/null 2>&1; then \
+		mise exec -- $(BUF) generate; \
+	elif command -v $(BUF) >/dev/null 2>&1; then \
+		$(BUF) generate; \
+	else \
+		echo "buf not found: run \`mise install\` (pins buf in mise.toml)" >&2; \
+		exit 1; \
+	fi
+
+proto-tools:
+	@command -v $(PROTOC_GEN_GO) >/dev/null || go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTO_GO_VER)
+	@command -v $(PROTOC_GEN_GRPC) >/dev/null || go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTO_GRPC_VER)
 
 # Symlink scripts/githooks/* into .git/hooks so every commit runs `make build`.
 # Does not change git config. Prefer `mise install` (runs this via postinstall).

@@ -20,9 +20,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/smithy-go/middleware"
 
-	"manifester/cp"
-	"manifester/cp/cpobs"
-	"manifester/cp/memstore"
+	cp "manifester/controlplane"
+	"manifester/controlplane/cpobs"
+	"manifester/controlplane/memstore"
 	"manifester/sys/httppool"
 	"manifester/sys/runinfo"
 )

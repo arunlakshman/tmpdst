@@ -1,8 +1,8 @@
 # Log-backed control-plane service (stage 2)
 
-Status: built and tested in `cp/logcp` (sim engine and cap 4096 in stage 3, `docs/sim-log-engine.md`); wired in stage 4 as `manicp -store dynamolog` (flags below), the only DynamoDB-backed control plane (decision 54). Decisions 48-52,
+Status: built and tested in `controlplane/logcp` (sim engine and cap 4096 in stage 3, `docs/sim-log-engine.md`); wired in stage 4 as `manicp -store dynamolog` (flags below), the only DynamoDB-backed control plane (decision 54). Decisions 48-52,
 `docs/design-a-prototype.md` section 8, `docs/applier-bakeoff.md`. Constructor: `logcp.New(Config)`,
-`Start(ctx)`, `Handler()`; test builders in `cp/logcp/logcptest`.
+`Start(ctx)`, `Handler()`; test builders in `controlplane/logcp/logcptest`. Tree path is `controlplane/` (decision 56).
 
 ## Architecture
 
@@ -34,7 +34,7 @@ reads worked) becomes active. An active node steps down when a writer of a lower
 
 Item: `pk=LOG`, `sk=%020d`, `d` (B) = entry, plus `v`, `w` (writer), `id`, `ts`, `n` (commands), `ttl`. Entry v1:
 version byte, rank, writer, append ID, ts (ms, advisory, never state), count, then each command as
-`cp/logsm` codec (key table, batches). Zero commands is a no-op (hole fill, heartbeat). Size guard: entry plus 256 B
+`controlplane/logsm` codec (key table, batches). Zero commands is a no-op (hole fill, heartbeat). Size guard: entry plus 256 B
 of item overhead <= 350 KB; a single command that cannot fit is answered `ErrTooLarge` and never queued; the group
 stops growing at the guard.
 **Versioning rule (the open question):** the first byte is the format version. A reader that meets a version above

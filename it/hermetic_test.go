@@ -13,8 +13,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/broker"
+	"manifester/controlplane/memstore"
 	"manifester/core"
-	"manifester/cp/memstore"
 )
 
 func memStack(t *testing.T, brokers int) *stack {

@@ -108,10 +108,55 @@ type ObjListDone struct {
 
 // ---- control plane completions ----
 
-// CPDone reports that a control-plane call finished.
+// CPDone reports that a control-plane call finished. Resp is the in-process
+// response (nil unless Err == OK). Generated API response messages map through
+// controlplane/apiconv; typed *Response fields wait for the gRPC cutover so
+// core does not import grpc (decision 57).
 type CPDone struct {
 	Req     ReqID
-	Resp    CPResp // nil unless Err == OK
+	Resp    CPResp
+	Err     ErrCode
+	Outcome Outcome
+}
+
+// ---- shared command log completions ----
+
+// LogEntry is one slot's payload as returned by LogRead.
+type LogEntry struct {
+	Slot LogSlot
+	Data []byte
+}
+
+// LogAppendDone reports that a LogAppend finished. Taken means the slot was
+// already held; Existing is the winner's bytes when Taken is true.
+type LogAppendDone struct {
+	Req      ReqID
+	Slot     LogSlot
+	Taken    bool
+	Existing []byte
+	Err      ErrCode
+	Outcome  Outcome
+}
+
+// LogReadDone reports that a LogRead finished. Entries are in slot order.
+type LogReadDone struct {
+	Req     ReqID
+	Entries []LogEntry
+	Err     ErrCode
+	Outcome Outcome
+}
+
+// LogCheckTailDone reports the log tail (next slot to write).
+type LogCheckTailDone struct {
+	Req     ReqID
+	Tail    LogSlot
+	Err     ErrCode
+	Outcome Outcome
+}
+
+// LogTrimDone reports that a LogTrim finished.
+type LogTrimDone struct {
+	Req     ReqID
 	Err     ErrCode
 	Outcome Outcome
 }
@@ -122,19 +167,23 @@ func RespAs[T any](d CPDone) T {
 	return r
 }
 
-func (Started) isEvent()       {}
-func (Stop) isEvent()          {}
-func (DialDone) isEvent()      {}
-func (ConnOpened) isEvent()    {}
-func (BytesReceived) isEvent() {}
-func (ConnClosed) isEvent()    {}
-func (SendDone) isEvent()      {}
-func (TimerFired) isEvent()    {}
-func (ObjPutDone) isEvent()    {}
-func (ObjGetDone) isEvent()    {}
-func (ObjDeleteDone) isEvent() {}
-func (ObjListDone) isEvent()   {}
-func (CPDone) isEvent()        {}
+func (Started) isEvent()          {}
+func (Stop) isEvent()             {}
+func (DialDone) isEvent()         {}
+func (ConnOpened) isEvent()       {}
+func (BytesReceived) isEvent()    {}
+func (ConnClosed) isEvent()       {}
+func (SendDone) isEvent()         {}
+func (TimerFired) isEvent()       {}
+func (ObjPutDone) isEvent()       {}
+func (ObjGetDone) isEvent()       {}
+func (ObjDeleteDone) isEvent()    {}
+func (ObjListDone) isEvent()      {}
+func (CPDone) isEvent()           {}
+func (LogAppendDone) isEvent()    {}
+func (LogReadDone) isEvent()      {}
+func (LogCheckTailDone) isEvent() {}
+func (LogTrimDone) isEvent()      {}
 
 // ReqID returns the request this completion answers.
 func (e SendDone) ReqID() ReqID { return e.Req }
@@ -157,6 +206,19 @@ func (e ObjListDone) ReqID() ReqID { return e.Req }
 // ReqID returns the request this completion answers.
 func (e CPDone) ReqID() ReqID { return e.Req }
 
+// ReqID returns the request this completion answers.
+func (e LogAppendDone) ReqID() ReqID { return e.Req }
+
+// ReqID returns the request this completion answers.
+func (e LogReadDone) ReqID() ReqID { return e.Req }
+
+// ReqID returns the request this completion answers.
+func (e LogCheckTailDone) ReqID() ReqID { return e.Req }
+
+// ReqID returns the request this completion answers.
+func (e LogTrimDone) ReqID() ReqID { return e.Req }
+
+//nolint:dupl // compile-time Completion assertions; parallel list lives on IOActions
 var (
 	_ Completion = SendDone{}
 	_ Completion = DialDone{}
@@ -165,4 +227,8 @@ var (
 	_ Completion = ObjDeleteDone{}
 	_ Completion = ObjListDone{}
 	_ Completion = CPDone{}
+	_ Completion = LogAppendDone{}
+	_ Completion = LogReadDone{}
+	_ Completion = LogCheckTailDone{}
+	_ Completion = LogTrimDone{}
 )

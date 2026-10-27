@@ -3,7 +3,9 @@
 Prioritized Fowler (and selective DDD-adjacent) work for this repo.
 Pick items **one wave at a time**. Do not start P3 god-object splits until P1 value objects and relevant P2 shared kernels have landed for that area.
 
-**Status legend:** ~~struck~~ = done · open = not started
+**Status legend:** ~~struck~~ = done or obsolete · open = not started
+
+**Ground truth (toys3 tip):** CP-DSM-1..8 landed. `controlplane/logcp` and `controlplane/logsm` are deleted (`5d8be1d`). Prod and sim share `controlplane/machine` + gRPC (`controlplane/api/v1`, `apiconv`). Dynamo log I/O is `controlplane/exec` (+ sim `logstore`). Path prefix `cp/` in older notes means `controlplane/`.
 
 ---
 
@@ -11,10 +13,10 @@ Pick items **one wave at a time**. Do not start P3 god-object splits until P1 va
 
 1. **Safety first** — dead code / unused flags before behavior reshapes.
 2. **Types before moves** — value objects / shared primitives before Extract Class / Move Function that touch those fields.
-3. **Share before split** — dedupe forks (logsm↔logcp, echo↔kafka) before carving god types further apart.
+3. **Share before split** — dedupe remaining forks (echo↔kafka, cmd boot) before carving god types further apart.
 4. **Extract Class last within a package** — Split Phase / Extract Function on hot paths first so classes have clean seams.
-5. **One vertical slice per PR** — one type, one subsystem, or one shared helper — not “refactor broker.”
-6. **Green gate (mandatory)** — after **every backlog line item** and before **every commit**, run the relevant tests and confirm the build is green. Do not strike an item or commit until tests pass. Prefer package-scoped `go test` for the touched packages first; widen if the change crosses packages. Sim hash / lockstep / cptest packages remain the hard gate for deterministic/core changes — don’t cross packages until the type/helper is stable.
+5. **One vertical slice per PR** — one type, one subsystem, or one shared helper — not "refactor broker."
+6. **Green gate (mandatory)** — after **every backlog line item** and before **every commit**, run the relevant tests and confirm the build is green. Do not strike an item or commit until tests pass. Prefer package-scoped `go test` for the touched packages first; widen if the change crosses packages. Sim hash / lockstep / cptest packages remain the hard gate for deterministic/core changes — don't cross packages until the type/helper is stable.
 
 Suggested waves: **P0 → P1 → P2 → P3 → P4**.
 
@@ -22,28 +24,28 @@ Suggested waves: **P0 → P1 → P2 → P3 → P4**.
 |------|--------|-----------|
 | **P0** | Dead code, unused flags, tiny cleanups | Zero behavior risk; shrinks noise |
 | **P1** | Value objects + shared micro-helpers | Types stabilize every later move |
-| **P2** | Cross-copy dedupe (logsm/logcp, echo/kafka, codecs, cmd boot) | Stops paying twice |
+| **P2** | Cross-copy dedupe (echo/kafka, cmd boot, codecs) | Stops paying twice |
 | **P3** | Split Phase / Extract Function on hot paths | Makes Extract Class safe |
 | **P4** | Extract Class / polymorphism / ACL finish | Structure after seams exist |
 
-**Next up:** Finish CP-DSM-8 kafka-log 300-seed green (bridge CPTruth under faults, CP attrition takeover). Then close the DSM program. Resume P2 forks after the stack lands.
+**Next up:** P2 echo↔kafka client FSM (`sim/internal/session`), or kwire Encode/Decode framing. Optional last: logengine↔fakeio bridge faults. Attrition/stall follow-up remains `docs/cp-dsm-attrition-stall-followup.md` (separate from refactor P2).
 
 ---
 
 ## P0 — Just delete / clarify
 
 - [x] ~~Unused `openSegment.commitItems` — **Remove Dead Code** — `broker/segment.go` (note: `cpengine.commitItems` is live; do not remove that)~~
-- [x] ~~Unused `asErr` — **Remove Dead Code** — `cp/logcp/service.go`~~
-- [x] ~~Unused `prep` HistogramVec — **Remove Dead Code** — `cp/cpobs/cpobs.go`~~
-- [x] ~~`query(..., consistent bool)` always `true` — **Remove Flag Argument** — `cp/logcp/dynlog.go`~~
+- [x] ~~Unused `asErr` — **Remove Dead Code** — was `cp/logcp/service.go` (package deleted)~~
+- [x] ~~Unused `prep` HistogramVec — **Remove Dead Code** — `controlplane/cpobs`~~
+- [x] ~~`query(..., consistent bool)` always `true` — **Remove Flag Argument** — was `logcp/dynlog.go` (now single `exec/dynlog.go`)~~
 - [x] ~~`parseBatch(..., verifyCRC bool)` — **Remove Flag Argument** — `kwire/batch.go` (prefer `parseBatch` / `parseBatchUnverified` or keep public wrappers only)~~
 - [x] ~~`dispatch(..., resolved bool)` — **Remove Flag Argument** — `broker/ops.go` → `dispatch` vs `dispatchAfterRefresh` (or equivalent)~~
 - [x] ~~`retry(s, from segState)` — **Remove Flag Argument** — `broker/segment.go` → keep only `retryPut` / `retryCommit`~~
 - [x] ~~`lost(..., abort bool)` — **Remove Flag Argument** — `sim/kafka/workload.go` + `sim/echo/workload.go` → `lostAbort` / `lostPeerClosed` (or equivalent)~~
 - [x] ~~`hash(cached bool)` — **Remove Flag Argument** — `sim/engines/netsim/netsim.go` → explicit cached vs full methods~~
-- [x] ~~`pull` / `SyncTo` `force bool` — **Remove Flag Argument** — `cp/logsm/replica.go` → `pullNow` / `pullPaced` or always-force first read~~
-- [x] ~~`attempt("won"|"lost"|"error")` — **Remove Flag Argument** / typed result — `cp/logcp/committer.go` + `cp/logcp/metrics.go`~~
-- [x] ~~Redundant `cur = max(cur, n)` after `if n > cur` — **Inline Variable** — `cp/applier/applier.go`~~
+- [x] ~~`pull` / `SyncTo` `force bool` — **Remove Flag Argument** — was `logsm/replica.go` (deleted with twin)~~
+- [x] ~~`attempt("won"|"lost"|"error")` — **Remove Flag Argument** / typed result — was `logcp/committer.go` (deleted with twin)~~
+- [x] ~~Redundant `cur = max(cur, n)` after `if n > cur` — **Inline Variable** — `controlplane/applier/applier.go`~~
 
 ---
 
@@ -51,27 +53,26 @@ Suggested waves: **P0 → P1 → P2 → P3 → P4**.
 
 ### How to land each VO
 
-1. Add type in the **owning package** (`core` or `kwire` for TP/code; `cp` or shared internal for Slot).
+1. Add type in the **owning package** (`core` or `kwire` for TP/code; `controlplane` or shared internal for Slot).
 2. Convert **one consumer package** end-to-end (e.g. broker only), keep adapters at wire. **Run tests; green before continuing.**
-3. Convert sim + veritas + cp call sites. **Run tests after each package (or each commit).**
+3. Convert sim + veritas + controlplane call sites. **Run tests after each package (or each commit).**
 4. Delete leftover primitive aliases / helper overloads. **Run tests again.**
 5. No behavior change — tests/hashes unchanged. **Strike the backlog line only after green.**
 
 ### Explicitly out of P1
 
-Bounded-context merge, Extract Class on Broker/Service/kernel, Dynamo ACL — those are P2–P4.
+Bounded-context merge, Extract Class on Broker/Service/kernel — those are P2–P4.
 
 ### Items
 
 - [x] ~~Topic/partition pair (`TopicPartition` / `TP`) — **Replace Primitive with Object** — broker, kwire, sim/kafka, wire~~
 - [x] ~~Kafka `err*` `int16` → `KafkaCode` — **Replace Primitive with Object** — `broker/config.go` + call sites~~
-- [x] ~~Slot / HW / offset IDs — **Replace Primitive with Object** — logcp/logsm replica, dynlog~~
-  - Log/DynLog/MemLog APIs stay `int64` until P2 shared kernel.
+- [x] ~~Slot / HW / offset IDs — **Replace Primitive with Object** — `core.LogSlot` is already the parameter on `controlplane/exec.Log` (`Append`/`Read`/`CheckTail`/`TrimThrough`)~~
 - [x] ~~CRC table once — **Replace Temp with Query** — `format/format.go` (+ kwire if shared)~~
 - [x] ~~`fieldOf` / fact getters — **Move Function** / **Extract Function** — echo, kafka oracle, `sys/prod/seglog`, metrics~~ (`core.Fact.Field`)
 - [x] ~~`sample` / TwoSpeed — **Pull Up Method** / **Parameterize Function** — fakeio, logengine, echo/kafka config~~ (use `TwoSpeed.Sample`; echo/kafka `slow()` ctor dupes left)
 - [x] ~~FNV helpers if duplicated — **Move Function** — broker hash, netsim, etc.~~ (`core.FnvU64`; echo/veritas naive hashers left)
-- [x] ~~Resp type-assert boilerplate — **Extract Function** / **Parameterize Function** — logsm store, applier store, memstore, logcp~~ (`core.RespAs`)
+- [x] ~~Resp type-assert boilerplate — **Extract Function** / **Parameterize Function** — stores / applier / memstore~~ (`core.RespAs`)
 
 **VO landing order:** (1) `TopicPartition` → (2) `KafkaCode` → (3) Slot/position IDs → (4) optional key wrappers at Dynamo/S3 edge.
 
@@ -79,20 +80,25 @@ Bounded-context merge, Extract Class on Broker/Service/kernel, Dynamo ACL — th
 
 ## P2 — Stop paying twice (shared kernel / template)
 
-- [ ] DynLog Append/Read/query/CheckTail — **Substitute Algorithm** / shared dynloglet — `cp/logcp/dynlog.go` ↔ `cp/logsm/dynlog.go`
-- [ ] Replica apply / hole-fill / buf — **Extract Class** → shared core — `logcp/replica.go` ↔ `logsm/replica.go`
-- [ ] Commit append/retry — **Combine Functions into Class** — `logcp/committer.go` ↔ `logsm/committer.go`
-- [ ] Binary reader/cursor — **Extract Class** — `logcp/format`, `logsm/codec`, `applier/keys`
-- [x] Wire Batch/Range map pairs — **done/obsolete**: JSON `cp/wire.go` deleted (CP-DSM-7); gRPC uses `controlplane/apiconv`
-- [ ] Echo ↔ kafka client FSM — **Extract Superclass** / **Form Template Method** — `sim/echo/workload` ↔ `sim/kafka/workload`
-- [ ] Echo ↔ kafka campaign presets — **Parameterize Function** / **Form Template Method** — `*/config.go`, invariants
-- [ ] Boundary faults plan — **Form Template Method** — `fakeio` ↔ `logengine`
-- [ ] `serveMetrics` + `writeManifest` — **Extract Function** / **Move Function** — `cmd/manibroker` ↔ `cmd/manicp`
-- [ ] Service boot skeleton — **Form Template Method** — same cmds
-- [ ] ApiVersions / Supported cache — **Substitute Algorithm** — `kwire/supported.go`
+### Closed by CP-DSM (do not reopen as logcp↔logsm)
+
+- [x] ~~DynLog Append/Read/query/CheckTail fork — **obsolete**: twin deleted; sole Dynamo loglet is `controlplane/exec/dynlog.go`~~
+- [x] ~~Replica apply / hole-fill / buf fork — **obsolete**: twin deleted; live path is `controlplane/machine` (+ sim `logstore` for durable slots / CPTruth)~~
+- [x] ~~Commit append/retry fork — **obsolete**: twin deleted; live path is `controlplane/machine/commit.go`~~
+- [x] ~~Binary reader/cursor across logcp/format + logsm/codec — **obsolete as a cross-package fork** (twins deleted). Leftover same-package sticky cursors (`applier/keys.go` `reader`, `applier/entry.go` `decoder`, `machine/commit.go` `takeUvarint`) are optional P3 polish, not a P2 share~~
+- [x] ~~Wire Batch/Range map pairs — **done/obsolete**: JSON `controlplane/wire.go` deleted (CP-DSM-7); gRPC uses `controlplane/apiconv`~~
+
+### Still open
+
+- [ ] Echo ↔ kafka client FSM — **Extract Superclass** / **Form Template Method** — `sim/echo/workload` ↔ `sim/kafka/workload` → candidate `sim/internal/session` (dial/backoff/lost loop only; protocol hooks stay in scenarios)
+- [x] ~~Echo ↔ kafka campaign presets — **Parameterize Function** / **Form Template Method** — `sim/internal/campaign` (Swarm `afterKnobs` preserves kafka PartialIOMax draw order; TraceHash canaries matched)~~
+- [ ] Bridge boundary faults — **Form Template Method** (optional) — `sim/engines/logengine` `plan` ↔ `sim/engines/internal/fakeio` (objstore, cpengine, and logstore already embed fakeio; logengine keeps its own coin draws after DSM-8)
+- [x] ~~`serveMetrics` + `writeManifest` — **Extract Function** / **Move Function** — `sys/runinfo.ServeMetrics` + `Publish` (manicp metrics gains Read/Write/Idle timeouts matching broker)~~
+- [x] ~~Service boot skeleton — **Form Template Method** — same cmds — **not worth it**: after logger setup the two `serve` bodies share no steps; a template needs hooks without deleting branches~~
+- [x] ~~ApiVersions / Supported cache — **Substitute Algorithm** — `kwire/supported.go` (`supported` table + `supportedByKey`)~~
 - [ ] Encode/Decode framing — **Extract Function** / **Introduce Parameter Object** — `kwire/codec.go`
 
-**P2 rule:** pick **one** fork at a time (logsm/logcp dynlog+replica **or** cmd boot **or** shared binary reader) — not all three.
+**P2 rule:** pick **one** fork at a time (echo/kafka **or** cmd boot **or** kwire framing) — not all three.
 
 ---
 
@@ -114,53 +120,42 @@ Do per package **after** P1 types for that package.
 - [ ] **Split Phase:** `parseBatch`, `format.Decode` / Encode steps
 - [ ] **Extract Function:** BuildBatch encode loop, index entry pair
 
-### cp/logcp
+### controlplane/machine
 
-- [ ] **Split Phase:** `Start`, `catchUp`, `applyBatch`, `Checkpoint`, `TrimBelow`, fresh join/wait
-- [ ] **Extract Function** / **Parameterize Function:** `withFresh`, wait-for-finish, pruneObjects, roleTick arms
-- [ ] **Introduce Parameter Object:** `applyCmd` site, CKPT attrs → `ckptPointer`
-- [ ] **Move Function/Field:** `trimmedPast`, Dynamo attrs out of checkpoint, role clocks off replica
-- [ ] **Encapsulate Collection:** buf/waiters
-- [ ] **Separate Query from Modifier:** `holeTick`
-- [ ] **Rename Field:** `adv`/`kick`
-- [ ] **Extract Function:** metrics registration by domain; batchwrite retry body
-- [ ] **Parameterize Function:** config `setI`/`setI64`/… defaults
+Old `logcp` / `logsm` P3 names (`Start`, `catchUp`, `applyBatch`, `Checkpoint`, `TrimBelow`, `withFresh`, `SyncTo`, `holeTick`, `holeDue`, `decodeSlot`, `adv`/`kick`, `setI`/`setI64`, batchwrite retry) are **gone**. DSM already split catch-up / commit / checkpoint / role across files. Do **not** retarget the deleted logsm list onto `Machine`. Remaining smells:
 
-### cp/logsm
+- [ ] **Extract Function** / **Decompose Conditional:** `roleTick` arms — `controlplane/machine/role.go`
+- [ ] **Move Field:** role clocks (`lastOwnAt` / `lastOtherAt`) off the replica struct if a role collaborator earns its place
+- [ ] **Encapsulate Collection:** `buf` / waiters maps on `Machine`
+- [ ] **Separate Query from Modifier:** `maybeHoleFill` (still decides and emits)
+- [ ] **Extract Function:** `cpobs.New` metrics registration by domain (live registrar; HTTP `Middleware` is test-only husk)
 
-- [ ] **Extract Function:** SyncTo loop, Marshal checkpoint, Do commit loop
-- [ ] **Decompose Conditional:** Read CheckTail retry
-- [ ] **Encapsulate Collection:** buf/watch/done
-- [ ] **Separate Query from Modifier:** `holeDue`
-- [ ] **Split Phase** / **Extract Function:** codec encode table
-- [ ] **Introduce Assertion:** checkpoint Machine is veritas
-- [ ] Unify `decodeSlot` with logcp
+### controlplane/applier
 
-### cp/applier
-
-- [ ] **Extract Function** / **Introduce Parameter Object:** `assign` ends/runs/order
+- [ ] **Extract Function** / **Introduce Parameter Object:** `assign` / `assignAt` ends/runs/order
 - [ ] **Decompose Conditional:** `commitTx`
-- [ ] **Replace Temp with Query:** digest path
+- [ ] **Replace Temp with Query:** digest path (`applier/keys.go`)
 - [ ] **Split Phase:** SnapshotAt / Restore
-- [ ] **Move Function:** Trim/Window/StateHash/Assigned off snapshot file
-- [ ] **Extract Function:** pebble `newTxn`, digest build
+- [ ] **Move Function:** Trim/Window/StateHash/Assigned off `snapshot.go`
+- [ ] **Extract Function:** pebblekv `View` / `Update` bodies (no `newTxn`); digest build
 
-### cp/cpclient / cpobs / fakedb
+### controlplane/cpclient / fakedb / exec
 
-- [ ] **Split Phase** / **Extract Function:** client do/doAt/decode; Middleware observe→log
-- [ ] **Introduce Parameter Object:** Faults; optional endpoint struct
-- [ ] **Change Function Declaration:** `errOf func() string`
-- [ ] **Extract Function:** fakedb preamble; Put/Update apply; `parseBetween`
+- [x] ~~cpclient HTTP `decode` / Faults / endpoint struct / `errOf` — **obsolete** (gRPC + `apiconv` / `mapRPCErr`; client holds an address list)~~
+- [x] ~~cpobs Middleware observe→log as prod path — **obsolete** (manicp serves gRPC; Middleware only in cpobs tests; live hook is `APIOptions`)~~
+- [ ] **Split Phase** / **Extract Function:** cpclient `do` / `doAt`
+- [ ] **Extract Function:** fakedb preamble; Put/Update apply (`ops.go` / `expr.go` `applyUpdate` / `applyClause`); `parseKeyCond` (was `parseBetween`)
 - [ ] **Decompose Conditional** / **Guard Clauses:** expr SET, BatchWriteItem
+- [ ] **Extract Function** / **Split Phase:** `exec/dynlog` Append/Read/CheckTail clarity (single copy; no twin merge)
 
 ### sim
 
-- [ ] **Split Phase** / **Extract Function:** kernel setup/boot/pump/loop entry; netsim send/dial/flush; logengine defaults; fakeio Execute; kafka newBatches/onProduce/onFetch/AtEnd; echo onGet/onCommit/next; runner seed→fold
+- [ ] **Split Phase** / **Extract Function:** kernel setup/boot/pump/loop entry; netsim send/dial/flush; logengine defaults + `plan`; fakeio Execute; kafka newBatches/onProduce/onFetch/AtEnd; echo onGet/onCommit/next; runner seed→fold
 - [ ] **Decompose Conditional:** attrition, crash, produce classify, reply
 - [ ] **Consolidate Duplicate Conditional Fragments:** callEngine, segcaps Observe/AtEnd, config knobs
 - [ ] **Replace Loop with Pipeline:** serveReads, TP assembly, response index by TP
 - [ ] **Extract Function:** producer/consumer shared TP request helper; codes.go predicates
-- [ ] **Move Function:** CPTruth view; engineCtx file; unify landBody/rstBody
+- [ ] **Move Function:** CPTruth view helpers; engineCtx file; unify `landBody`/`rstBody` (fakeio vs netsim)
 
 ### sys
 
@@ -181,14 +176,14 @@ Do per package **after** P1 types for that package.
 - [ ] **Extract Function:** openS3Objects, wireFacts, applySegment/BufferLimits, shouldFinalCheckpoint, Evaluate classify/improved, ParseTree helpers, coverageFor, openClients+cleanup, formatFailure, fail(), ReportView
 - [ ] **Introduce Parameter Object:** brokerFlags groups, worker, BaselinePolicy, logFlags nesting
 - [ ] **Preserve Whole Object:** runtimeSnapshot for manifest
-- [ ] **Slide Statements:** validate log-level before “starting”
+- [ ] **Slide Statements:** validate log-level before "starting"
 - [ ] **Decompose Conditional:** tuning apply, parseArgs, improved branches
 - [ ] **Combine Functions into Class:** pebbleState lifecycle
 - [ ] **Replace Conditional with Polymorphism** (light): scenario registry, bufferPolicy auto/fixed, store-kind
 
-### tools / api
+### tools
 
-- [ ] **Extract Function** / **Parameterize Function:** detcheck optional checker list; hoist loadAllow (json2yaml deleted with `api/openapi`)
+- [ ] **Parameterize Function:** detcheck optional checker list (`checkFile` always runs imports/globals/node switch; no toggle). `loadAllow` / json2yaml / `api/openapi` share is gone — do not reopen.
 
 ---
 
@@ -199,13 +194,13 @@ After P1–P3 seams exist.
 - [ ] Broker collaborators — **Extract Class** — conn table, segment pipeline, op table
 - [ ] op by kind — **Replace Type Code with Subclasses** / **Replace Conditional with Polymorphism** — `broker/ops.go`
 - [ ] segState machine — **Replace Conditional with Polymorphism** — `broker/segment.go`
-- [ ] logcp.Service parts — **Extract Class** — queue/committer, fresher, checkpoint, role, dyn attr helpers
-- [ ] Shared replica/dynlog types — **Extract Class** (finish P2) — after shared kernel exists
+- [ ] `controlplane/machine.Machine` — **Extract Class** (optional; file seams already exist as `commit.go` / catch-up in `machine.go` / `checkpoint.go` / `role.go`) — only if a collaborator earns a type boundary
+- [x] ~~`logcp.Service` / shared replica↔dynlog finish-P2 — **obsolete** (no `Service`; no twin)~~
 - [ ] `sim.run` / `logengine.Engine` / `netsim.Engine` / `kafka.Workload` — **Extract Class** — lifecycle, dispatcher, replicaSet, clientSession, linkTable
 - [ ] cstate/opState/mutants — **Replace Type Code** / **Polymorphism** — kafka + echo
 - [ ] executor Obj* switch — **Replace Conditional with Polymorphism** — `sys/prod/executor.go`
-- [ ] Dynamo/S3/wire ACL — **Encapsulate Record** / **Extract Class** / **Hide Delegate** — ckptPointer, logical keys, store adapters (DDD edge)
-- [ ] Bounded context formalize — shared kernel or hard ACL — logsm vs logcp; echo vs kafka (DDD #1; only after P2 dedupe choice)
+- [ ] Dynamo/S3/gRPC ACL — **Encapsulate Record** / **Hide Delegate** — edges are `exec/dynlog` items, `exec/objects`, `apiconv`, `applier/keys` (`ckptPointer` and JSON wire are gone)
+- [ ] Bounded context formalize — hard ACL between `controlplane/machine` (deterministic Step) and `controlplane/exec` / AWS I/O; echo vs kafka only after P2 dedupe choice
 
 ---
 
@@ -213,19 +208,20 @@ After P1–P3 seams exist.
 
 1. **Now:** clear P0. *(done — tests green on touched packages)*
 2. **P1 VO helpers:** done.
-3. **Next:** P2 pick one fork (**test + green per item/commit**).
-4. **Then:** P3 Split Phase/Extract Function only where P1 types exist (**test + green per item/commit**).
-5. **Last:** P4 Extract Class / polymorphism / ACL / formal bounded contexts (**test + green per item/commit**).
+3. **CP-DSM program:** done (stack landed; twin + JSON/OpenAPI husk removed).
+4. **Next:** attrition/stall follow-up, then P2 pick one remaining fork (**test + green per item/commit**).
+5. **Then:** P3 Split Phase/Extract Function only where P1 types exist (**test + green per item/commit**).
+6. **Last:** P4 Extract Class / polymorphism / ACL / formal bounded contexts (**test + green per item/commit**).
 
 ---
 
 ## Cross-cutting reminders (from earlier review)
 
-Highest leverage themes (mapped into waves above):
+Highest leverage themes still live (mapped into waves above):
 
-1. Share or formally fork **logsm ↔ logcp** (P2 / P4)
-2. **Extract Class** on god types after seams (P4)
-3. **Remove Dead Code** / flags (P0)
-4. Shared **cmd boot** + split **openLog** (P2 / P3)
-5. Echo ↔ Kafka **client FSM / campaign** (P2)
-6. Shared **binary reader** (P2)
+1. **Extract Class** on god types after seams (P4), especially broker + `controlplane/machine`
+2. ~~Shared serve/manifest helpers~~ — **done** (`sys/runinfo.ServeMetrics` / `Publish`)
+3. Echo ↔ Kafka **client FSM** (P2; campaign presets done)
+4. ~~Share or formally fork logsm ↔ logcp~~ — **done by deletion**; one machine + exec remains
+5. ~~Shared binary reader across log twins~~ — **gone with the twins**
+6. ~~Remove Dead Code / flags (P0)~~ — **done**

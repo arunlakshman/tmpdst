@@ -5,6 +5,7 @@ import (
 
 	"manifester/core"
 	"manifester/sim"
+	"manifester/sim/internal/campaign"
 )
 
 func seeds(from uint64, n int) []uint64 {
@@ -144,7 +145,7 @@ func (i *tallyInv) AtEnd(v sim.View) {
 		if len(res) >= 3 && res[:3] == "ERR" {
 			i.t.errs++
 		}
-		if op.Invoke >= sim.Time(i.ph.Chaos+livenessGrace) {
+		if op.Invoke >= sim.Time(i.ph.Chaos+campaign.LivenessGrace) {
 			i.t.window++
 		}
 	}

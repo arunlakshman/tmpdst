@@ -11,6 +11,7 @@ import (
 	"manifester/core"
 	"manifester/kwire"
 	"manifester/sim"
+	"manifester/sim/internal/campaign"
 )
 
 func seeds(from uint64, n int) []uint64 {
@@ -418,7 +419,7 @@ func wideCampaign(t *testing.T, capParts, batches int, log bool) int64 {
 		// below the old 96-partition bar. kafka-log / mutants keep coins live.
 		cfg.ControlPlane.CallerTimeout = 800 * core.Millisecond
 		cfg.LogStore.CallerTimeout = 800 * core.Millisecond
-		cfg.Phases = phases()
+		cfg.Phases = campaign.Phases()
 	}
 	cfg.Params = prod
 	inner := cfg.Swarm

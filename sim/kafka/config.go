@@ -9,15 +9,8 @@ import (
 	"manifester/sim/engines/logstore"
 	"manifester/sim/engines/netsim"
 	"manifester/sim/engines/objstore"
+	"manifester/sim/internal/campaign"
 )
-
-// Phases of the preset campaign.
-func phases() sim.Phases {
-	return sim.Phases{Chaos: 30 * core.Second, Settling: 10 * core.Second, Settle: 5 * core.Second,
-		MaxQuietLatency: 3 * core.Second}
-}
-
-func ms(n int64) core.Duration { return core.Duration(n) * core.Millisecond }
 
 // brokerConfig is the sim-friendly broker: a short flush window so commits
 // are frequent, and a small buffer so backpressure engages. The segment size is
@@ -99,10 +92,9 @@ func logReachables() []core.Prop {
 }
 
 func configWith(seeds []uint64, bug broker.Bug, opts Opts) sim.Config {
-	ph := phases()
-	slow := func(fmin, fmax, smin, smax int64, p float64) sim.TwoSpeed {
-		return sim.TwoSpeed{FastMin: ms(fmin), FastMax: ms(fmax), SlowMin: ms(smin), SlowMax: ms(smax), SlowProb: p}
-	}
+	p := campaign.New()
+	p.Network.PartialIOMax = 1024
+	p.ControlPlane.MaxCommitItems = sim.DynamoMaxCommitItems
 	return sim.Config{
 		Seeds:  seeds,
 		Params: brokerConfig(bug),
@@ -118,7 +110,7 @@ func configWith(seeds []uint64, bug broker.Bug, opts Opts) sim.Config {
 		Invariants: []func() sim.Invariant{
 			func() sim.Invariant { return newOracle(opts) },
 			func() sim.Invariant { return &liveness{} },
-			func() sim.Invariant { return &faultCoverage{} },
+			func() sim.Invariant { return campaign.FaultCoverage("kafka:") },
 		},
 		Engines: func(sc sim.SeedConfig) []sim.Engine {
 			es := []sim.Engine{objstore.New(sc.ObjectStore), controlPlane(sc, opts), netsim.New(sc.Network)}
@@ -131,37 +123,16 @@ func configWith(seeds []uint64, bug broker.Bug, opts Opts) sim.Config {
 			}
 			return es
 		},
-		ObjectStore: sim.ObjectStoreFaults{
-			ApplyLatency:   slow(1, 5, 50, 200, 0.05),
-			RespondLatency: slow(1, 3, 20, 100, 0.05),
-			Unavailable503: 0.03, Timeout: 0.02, LostResponse: 0.02, GetCorruptProb: 0.03,
-			Outage:        sim.Outage{Prob: 0.002, Dur: [2]core.Duration{ms(200), 2 * core.Second}},
-			CallerTimeout: ms(500),
-		},
-		ControlPlane: sim.ControlPlaneFaults{
-			ApplyLatency:   slow(1, 5, 50, 200, 0.05),
-			RespondLatency: slow(1, 3, 20, 100, 0.05),
-			Unavailable503: 0.03, Timeout: 0.02, LostResponse: 0.03,
-			MaxCommitItems: sim.DynamoMaxCommitItems,
-			Outage:         sim.Outage{Prob: 0.002, Dur: [2]core.Duration{ms(200), 2 * core.Second}},
-			CallerTimeout:  ms(500),
-		},
-		Network: sim.NetworkFaults{
-			Latency:       sim.TwoSpeed{FastMin: 200 * core.Microsecond, FastMax: 2 * core.Millisecond, SlowMin: ms(20), SlowMax: ms(100), SlowProb: 0.03},
-			PartialIOMax:  1024,
-			PartitionProb: 0.002, PartitionDur: [2]core.Duration{ms(300), 3 * core.Second},
-			ClogProb: 0.003, ClogDur: [2]core.Duration{ms(100), ms(500)},
-			RandomCloseProb: 0.002, BlackHoleProb: 0.002,
-			PairLatencyMax: ms(5), ClockSkewMax: ms(100),
-		},
-		Attrition: sim.Attrition{MaxDead: 1, CrashProb: 0.0005, CrashWeight: 2, GracefulWeight: 1,
-			RecoveryDelay: [2]core.Duration{ms(200), ms(1500)}},
-		Cost:             sim.CostParams{PerEvent: 50 * core.Microsecond, PauseProb: 0.001, Pause: slow(1, 5, 20, 100, 0.1)},
+		ObjectStore:      p.ObjectStore,
+		ControlPlane:     p.ControlPlane,
+		Network:          p.Network,
+		Attrition:        p.Attrition,
+		Cost:             p.Cost,
 		ExpectReachable:  expectReachable(),
 		Swarm:            swarm,
-		Phases:           ph,
-		QuiesceEvery:     core.Second,
-		CheckDeterminism: 10,
+		Phases:           p.Phases,
+		QuiesceEvery:     p.QuiesceEvery,
+		CheckDeterminism: p.CheckDeterminism,
 	}
 }
 
@@ -200,9 +171,9 @@ func swarmLog(r sim.CountedRand, c *sim.SeedConfig) {
 	// behind it for the whole bridge CallerTimeout.
 	l.K = []int{2, 4, 8}[r.Intn(3)]
 	l.GroupMax = []int{1, 2, 4, 16}[r.Intn(4)]
-	l.HoleAfter = ms([]int64{20, 60, 200}[r.Intn(3)])
+	l.HoleAfter = campaign.Millis([]int64{20, 60, 200}[r.Intn(3)])
 	// Floor takeover above heartbeat so a healthy primary is not displaced.
-	l.TakeoverAfter = ms([]int64{600, 900, 1500}[r.Intn(3)])
+	l.TakeoverAfter = campaign.Millis([]int64{600, 900, 1500}[r.Intn(3)])
 	if r.Chance(0.4) { // checkpoint often; keep enough slots for PutFail lag
 		l.CkptEvery, l.KeepSlots, l.TrimStride = []int{8, 16, 24}[r.Intn(3)], []int{16, 32}[r.Intn(2)], 4
 	}
@@ -213,44 +184,15 @@ func swarmLog(r sim.CountedRand, c *sim.SeedConfig) {
 	c.LogStore.TrimStride = l.TrimStride
 }
 
-// swarm switches each fault family fully off with probability 0.4 and scales
-// the rest from a menu (lesson 9). Draws come only from r (Derive("swarm")).
 func swarm(_ uint64, r sim.CountedRand, c *sim.SeedConfig) {
-	menu := [...]float64{0.5, 1, 2, 4}
-	knob := func(p *float64) {
-		if r.Chance(0.4) {
-			*p = 0
-			return
+	campaign.Swarm(r, c, func() {
+		switch x := r.Intn(20); { // short transfers: tiny chunks are costly (every chunk is a Step)
+		case x < 2:
+			c.Network.PartialIOMax = 48
+		case x < 8:
+			c.Network.PartialIOMax = 256
 		}
-		*p = min(*p*menu[r.Intn(len(menu))], 0.4)
-	}
-	o, cp, n := &c.ObjectStore, &c.ControlPlane, &c.Network
-	knob(&o.Unavailable503)
-	knob(&o.Timeout)
-	knob(&o.LostResponse)
-	knob(&o.GetCorruptProb)
-	knob(&o.Outage.Prob)
-	knob(&cp.Unavailable503)
-	knob(&cp.Timeout)
-	knob(&cp.LostResponse)
-	knob(&cp.Outage.Prob)
-	knob(&n.PartitionProb)
-	knob(&n.ClogProb)
-	knob(&n.RandomCloseProb)
-	knob(&n.BlackHoleProb)
-	knob(&c.Attrition.CrashProb)
-	switch x := r.Intn(20); { // short transfers: tiny chunks are costly (every chunk is a Step)
-	case x < 2:
-		n.PartialIOMax = 48
-	case x < 8:
-		n.PartialIOMax = 256
-	}
-	if r.Chance(0.3) {
-		o.ApplyLatency.SlowProb, cp.ApplyLatency.SlowProb = 0.3, 0.3
-	}
-	if r.Chance(0.3) {
-		n.Latency.SlowProb = 0.2
-	}
+	})
 	swarmBroker(r, c) // last, so the fault knobs above keep their draws
 	if c.ControlPlane.Log.Enabled {
 		swarmLog(r, c)
@@ -277,7 +219,7 @@ func swarm(_ uint64, r sim.CountedRand, c *sim.SeedConfig) {
 func swarmBroker(r sim.CountedRand, c *sim.SeedConfig) {
 	bc := c.Params.(broker.Config)
 	pick := func(menu ...int) int { return menu[r.Intn(len(menu))] }
-	window := func(menu ...int) core.Duration { return ms(int64(pick(menu...))) }
+	window := func(menu ...int) core.Duration { return campaign.Millis(int64(pick(menu...))) }
 	d := broker.DefaultConfig()
 	switch x := r.Float64(); {
 	case x < 0.2: // tiny

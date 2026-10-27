@@ -6,6 +6,7 @@ import (
 	"manifester/sim"
 	"manifester/sim/engines/cpengine"
 	"manifester/sim/engines/logengine"
+	"manifester/sim/engines/logstore"
 	"manifester/sim/engines/netsim"
 	"manifester/sim/engines/objstore"
 )
@@ -90,7 +91,11 @@ func configWith(seeds []uint64, bug broker.Bug, opts Opts) sim.Config {
 			func() sim.Invariant { return &faultCoverage{} },
 		},
 		Engines: func(sc sim.SeedConfig) []sim.Engine {
-			return []sim.Engine{objstore.New(sc.ObjectStore), controlPlane(sc, opts), netsim.New(sc.Network)}
+			es := []sim.Engine{objstore.New(sc.ObjectStore), controlPlane(sc, opts), netsim.New(sc.Network)}
+			if sc.LogStore.Enabled {
+				es = append(es, logstore.New(sc.LogStore))
+			}
+			return es
 		},
 		ObjectStore: sim.ObjectStoreFaults{
 			ApplyLatency:   slow(1, 5, 50, 200, 0.05),

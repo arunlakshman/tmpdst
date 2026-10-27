@@ -30,6 +30,7 @@ type Attrition struct {
 type SeedConfig struct {
 	ObjectStore  ObjectStoreFaults
 	ControlPlane ControlPlaneFaults
+	LogStore     LogStoreFaults
 	Network      NetworkFaults
 	Attrition    Attrition
 	Cost         CostParams
@@ -68,6 +69,7 @@ type Config struct {
 	Engines      func(sc SeedConfig) []Engine
 	ObjectStore  ObjectStoreFaults
 	ControlPlane ControlPlaneFaults
+	LogStore     LogStoreFaults
 	Network      NetworkFaults
 	Attrition    Attrition
 	Swarm        Swarm

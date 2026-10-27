@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -97,7 +96,7 @@ func serve(ctx context.Context, d deps, f cpFlags, fs *flag.FlagSet, stderr io.W
 
 	m := cpobs.NewWithLogger(log)
 	runinfo.Register(m.Registry(), "manicp", info)
-	if err := serveMetrics(ctx, log, m, f.metricsAddr); err != nil {
+	if err := runinfo.ServeMetrics(ctx, log, "manicp", f.metricsAddr, m.Handler()); err != nil {
 		return err
 	}
 	node, closeNode, err := openNode(ctx, d, f, m, log)
@@ -117,9 +116,23 @@ func serve(ctx context.Context, d deps, f cpFlags, fs *flag.FlagSet, stderr io.W
 		gs.GracefulStop()
 	}()
 	log.Info("manicp listening", "addr", ln.Addr().String(), "store", f.kind)
-	if f.manifestOut != "" {
-		writeManifest(ctx, log, info, fs, f)
-	}
+	runinfo.Publish(
+		ctx,
+		log,
+		runinfo.NewManifest(info, fs, f.region, map[string]any{
+			"table":           f.log.tableName(f.prefix),
+			"store":           f.kind,
+			"rank":            f.log.rank,
+			"takeover_after":  f.log.takeoverAfter.String(),
+			"ckpt_bucket":     f.log.ckptBucket,
+			"dynamo_endpoint": f.endpoint,
+		}),
+		runinfo.WriteOptions{
+			Dest:   f.manifestOut,
+			Region: f.region,
+			IMDS:   true,
+		},
+	)
 	err = gs.Serve(ln)
 	log.Info("manicp stopped")
 	if err != nil && !errors.Is(err, grpc.ErrServerStopped) && !strings.Contains(err.Error(), "the server has been stopped") {
@@ -186,39 +199,6 @@ func openNode(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *slo
 		return nil, nop, err
 	}
 	return n, func() { _ = n.Close(); closeStore() }, nil
-}
-
-func serveMetrics(ctx context.Context, log *slog.Logger, m *cpobs.Metrics, addr string) error {
-	if addr == "" {
-		return nil
-	}
-	mln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
-	if err != nil {
-		return err
-	}
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           runinfo.Mux(m.Handler()),
-		ReadHeaderTimeout: 10 * time.Second,
-	}
-	go func() { _ = srv.Serve(mln) }()
-	log.Info("manicp metrics", "addr", mln.Addr().String())
-	return nil
-}
-
-func writeManifest(ctx context.Context, log *slog.Logger, info runinfo.Info, fs *flag.FlagSet, f cpFlags) {
-	mf := runinfo.NewManifest(info, fs, f.region, map[string]any{
-		"table": f.log.tableName(f.prefix), "store": f.kind, "rank": f.log.rank, "takeover_after": f.log.takeoverAfter.String(),
-		"ckpt_bucket": f.log.ckptBucket, "dynamo_endpoint": f.endpoint})
-	mf.Log(log)
-	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	where, err := runinfo.Write(cctx, mf, runinfo.WriteOptions{Dest: f.manifestOut, Region: f.region, IMDS: true})
-	cancel()
-	if err != nil {
-		log.Warn("manifest not written", "event", "manifest_failed", "dest", where, "err", err.Error())
-		return
-	}
-	log.Info("manifest written", "event", "manifest_written", "dest", where)
 }
 
 func newDynamo(ctx context.Context, endpoint, region string, apiOpts []func(*middleware.Stack) error) (*dynamodb.Client, error) {

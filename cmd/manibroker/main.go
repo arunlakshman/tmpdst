@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"math"
 	"net"
-	"net/http"
 	"os"
 	"strconv"
 	"syscall"
@@ -181,28 +180,6 @@ func openObjects(ctx context.Context, f brokerFlags, cfg *prod.NodeConfig, m *pr
 	return errors.New("unknown -objects " + f.objects)
 }
 
-// serveMetrics starts the /metrics listener when metrics are enabled.
-func serveMetrics(ctx context.Context, log *slog.Logger, m *prod.Metrics, addr string) error {
-	if m == nil {
-		return nil
-	}
-	mln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
-	if err != nil {
-		return err
-	}
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           runinfo.Mux(m.Handler()),
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       120 * time.Second,
-	}
-	go func() { _ = srv.Serve(mln) }()
-	log.Info("manibroker metrics", "addr", mln.Addr().String())
-	return nil
-}
-
 // bind opens the Kafka listener and sets the advertised host and port.
 func bind(ctx context.Context, f brokerFlags, cfg *prod.NodeConfig) (net.Listener, string, error) {
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", f.listen)
@@ -267,8 +244,10 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 	if err := openObjects(ctx, f, &cfg, m, log); err != nil {
 		return err
 	}
-	if err := serveMetrics(ctx, log, m, f.metricsAddr); err != nil {
-		return err
+	if m != nil {
+		if err := runinfo.ServeMetrics(ctx, log, "manibroker", f.metricsAddr, m.Handler()); err != nil {
+			return err
+		}
 	}
 	ln, adv, err := bind(ctx, f, &cfg)
 	if err != nil {
@@ -289,9 +268,18 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 		"max_segment_partitions", bc.MaxSegmentPartitions, "max_segment_batches", bc.MaxSegmentBatches,
 		"max_buffered", bc.MaxBufferedBytes, "resume_buffered", bc.ResumeBufferedBytes,
 		"obj_timeout", f.objTimeout, "memory_bytes", mem, "memory_source", memSource)
-	if f.manifestOut != "" {
-		writeManifest(ctx, log, info, fs, f, manifestTuning(cfg, f, mem, memSource, adv, ln))
-	}
+	runinfo.Publish(
+		ctx,
+		log,
+		runinfo.NewManifest(info, fs, f.region, manifestTuning(cfg, f, mem, memSource, adv, ln)),
+		runinfo.WriteOptions{
+			Dest:        f.manifestOut,
+			Region:      f.region,
+			S3Endpoint:  f.endpoint,
+			S3PathStyle: f.pathStyle,
+			IMDS:        true,
+		},
+	)
 	if err := n.Wait(); err != nil {
 		return err // sys.ErrTripped, sys.ErrKilled, ...
 	}
@@ -309,18 +297,4 @@ func manifestTuning(cfg prod.NodeConfig, f brokerFlags, mem uint64, memSource, a
 		"obj_timeout_ns": int64(f.objTimeout), "memory_bytes": mem, "memory_source": memSource,
 		"node_id": cfg.NodeID, "advertised": adv, "listen": ln.Addr().String(),
 	}
-}
-
-// writeManifest records the effective flags and tuning. Never fatal.
-func writeManifest(ctx context.Context, log *slog.Logger, info runinfo.Info, fs *flag.FlagSet, f brokerFlags, tuning map[string]any) {
-	m := runinfo.NewManifest(info, fs, f.region, tuning)
-	m.Log(log)
-	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	where, err := runinfo.Write(cctx, m, runinfo.WriteOptions{Dest: f.manifestOut, Region: f.region, S3Endpoint: f.endpoint, S3PathStyle: f.pathStyle, IMDS: true})
-	if err != nil {
-		log.Warn("manifest not written", "event", "manifest_failed", "dest", where, "err", err.Error())
-		return
-	}
-	log.Info("manifest written", "event", "manifest_written", "dest", where)
 }

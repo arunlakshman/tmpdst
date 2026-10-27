@@ -5,11 +5,13 @@
 package runinfo
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
@@ -136,6 +138,28 @@ func Mux(metrics http.Handler) *http.ServeMux {
 	mux.Handle("/metrics", metrics)
 	mux.HandleFunc("/healthz", Healthz)
 	return mux
+}
+
+// ServeMetrics serves Mux(h) on addr in the background; empty addr is a no-op.
+func ServeMetrics(ctx context.Context, log *slog.Logger, service, addr string, h http.Handler) error {
+	if addr == "" {
+		return nil
+	}
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           Mux(h),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+	go func() { _ = srv.Serve(ln) }()
+	log.Info(service+" metrics", "addr", ln.Addr().String())
+	return nil
 }
 
 // Fatal logs err and exits 1.

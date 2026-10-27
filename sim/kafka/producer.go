@@ -9,6 +9,7 @@ import (
 	"manifester/core"
 	"manifester/kwire"
 	"manifester/sim"
+	"manifester/sim/internal/session"
 )
 
 // batch is one produce batch for one partition, retried unchanged until
@@ -152,7 +153,7 @@ func (w *Workload) newBatches(c *client) {
 		b := &batch{id: w.env.NewID(), tpIdx: idx}
 		recs := make([]kmsg.Record, n)
 		for i := range recs {
-			v := fmt.Sprintf("c%d.b%d.r%d|%s", c.id, p.serial, i, strings.Repeat("x", pad))
+			v := fmt.Sprintf("c%d.b%d.r%d|%s", c.ID, p.serial, i, strings.Repeat("x", pad))
 			b.vals = append(b.vals, v)
 			recs[i] = kmsg.Record{Value: []byte(v)}
 		}
@@ -175,7 +176,7 @@ func (w *Workload) newBatches(c *client) {
 		dh.bytes(data)
 		b.dig = uint64(dh)
 		if w.hist != nil {
-			w.hist.Invoke(w.self, b.id, b.id, ProduceOp{Client: c.id, Batch: p.serial, TP: w.tps[idx], Vals: b.vals, Idem: b.idem})
+			w.hist.Invoke(w.self, b.id, b.id, ProduceOp{Client: c.ID, Batch: p.serial, TP: w.tps[idx], Vals: b.vals, Idem: b.idem})
 		}
 		p.cur = append(p.cur, b)
 	}
@@ -203,7 +204,7 @@ func (w *Workload) sendProduce(c *client) []core.Action {
 }
 
 func (w *Workload) think(c *client) core.Action {
-	return w.later(c, core.Duration(20+w.env.Intn(60))*core.Millisecond)
+	return c.Wake(core.Duration(20+w.env.Intn(60)) * core.Millisecond)
 }
 
 // onProduce resolves each batch of the request from its partition's answer.
@@ -252,9 +253,9 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 	case fatal:
 		return w.giveUp(c, "fatal produce error")
 	case len(keep) > 0:
-		return []core.Action{w.later(c, retryDelay(keep[0].attempts))}
+		return []core.Action{c.Wake(session.RetryDelay(keep[0].attempts))}
 	}
-	c.fails = 0
+	c.Fails = 0
 	return []core.Action{w.think(c)}
 }
 

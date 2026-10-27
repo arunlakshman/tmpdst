@@ -12,6 +12,7 @@ import (
 	"manifester/kwire"
 	"manifester/sim"
 	"manifester/sim/internal/campaign"
+	"manifester/sim/internal/session"
 )
 
 func seeds(from uint64, n int) []uint64 {
@@ -246,8 +247,8 @@ func TestFatalProduceErrorGivesUp(t *testing.T) {
 		w := NewWorkload(&fakeEnv{}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
 		h := &fakeHist{}
 		w.SetHistory(h)
-		c := w.clients[0]
-		c.state, c.stage = csUp, stRun
+		c := w.loop.Clients[0]
+		c.State, c.stage = session.Up, stRun
 		w.newBatches(c)
 		if len(h.ops) == 0 || len(c.p.cur) != len(h.ops) {
 			t.Fatalf("no batches built: %d ops", len(h.ops))
@@ -288,8 +289,8 @@ func TestIdemBatchRejectedIsAbandoned(t *testing.T) {
 		w := NewWorkload(&fakeEnv{}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
 		h := &fakeHist{}
 		w.SetHistory(h)
-		c := w.clients[0]
-		c.state, c.stage = csUp, stRun
+		c := w.loop.Clients[0]
+		c.State, c.stage = session.Up, stRun
 		w.newBatches(c)
 		for _, b := range c.p.cur {
 			b.ambiguous, b.idem = ambiguous, true
@@ -325,7 +326,7 @@ func (e *rngEnv) Intn(n int) int {
 func TestBatchesCarryProducerIDOnlyWhenIdem(t *testing.T) {
 	w := NewWorkload(&rngEnv{x: 88172645463325252}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
 	w.SetHistory(&fakeHist{})
-	c := w.clients[0]
+	c := w.loop.Clients[0]
 	idem, plain := 0, 0
 	for range 400 {
 		c.p.cur = nil
@@ -513,7 +514,7 @@ func TestWorkloadBuildsEveryCodecAndCorruptBatches(t *testing.T) {
 	w := NewWorkload(&rngEnv{x: 88172645463325252}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
 	h := &fakeHist{}
 	w.SetHistory(h)
-	c := w.clients[0]
+	c := w.loop.Clients[0]
 	seen := map[int]int{}
 	corrupt := 0
 	for range 400 {
@@ -559,8 +560,8 @@ func TestCorruptBatchRejectedIsAbandoned(t *testing.T) {
 	w := NewWorkload(&fakeEnv{}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
 	h := &fakeHist{}
 	w.SetHistory(h)
-	c := w.clients[0]
-	c.state, c.stage = csUp, stRun
+	c := w.loop.Clients[0]
+	c.State, c.stage = session.Up, stRun
 	w.newBatches(c)
 	for _, b := range c.p.cur {
 		b.idem, b.corrupt = false, true

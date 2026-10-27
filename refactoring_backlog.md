@@ -28,7 +28,7 @@ Suggested waves: **P0 → P1 → P2 → P3 → P4**.
 | **P3** | Split Phase / Extract Function on hot paths | Makes Extract Class safe |
 | **P4** | Extract Class / polymorphism / ACL finish | Structure after seams exist |
 
-**Next up:** P2 echo↔kafka client FSM (`sim/internal/session`), or kwire Encode/Decode framing. Optional last: logengine↔fakeio bridge faults. Attrition/stall follow-up remains `docs/cp-dsm-attrition-stall-followup.md` (separate from refactor P2).
+**Next up:** P2 kwire Encode/Decode framing. Optional last: logengine↔fakeio bridge faults. Attrition/stall follow-up remains `docs/cp-dsm-attrition-stall-followup.md` (separate from refactor P2).
 
 ---
 
@@ -90,7 +90,7 @@ Bounded-context merge, Extract Class on Broker/Service/kernel — those are P2�
 
 ### Still open
 
-- [ ] Echo ↔ kafka client FSM — **Extract Superclass** / **Form Template Method** — `sim/echo/workload` ↔ `sim/kafka/workload` → candidate `sim/internal/session` (dial/backoff/lost loop only; protocol hooks stay in scenarios)
+- [x] ~~Echo ↔ kafka client FSM — **Extract Superclass** / **Form Template Method** — `sim/internal/session` (`Loop` hooks; protocol + StateHash stay in scenarios; TraceHash canaries green)~~
 - [x] ~~Echo ↔ kafka campaign presets — **Parameterize Function** / **Form Template Method** — `sim/internal/campaign` (Swarm `afterKnobs` preserves kafka PartialIOMax draw order; TraceHash canaries matched)~~
 - [ ] Bridge boundary faults — **Form Template Method** (optional) — `sim/engines/logengine` `plan` ↔ `sim/engines/internal/fakeio` (objstore, cpengine, and logstore already embed fakeio; logengine keeps its own coin draws after DSM-8)
 - [x] ~~`serveMetrics` + `writeManifest` — **Extract Function** / **Move Function** — `sys/runinfo.ServeMetrics` + `Publish` (manicp metrics gains Read/Write/Idle timeouts matching broker)~~
@@ -221,7 +221,7 @@ Highest leverage themes still live (mapped into waves above):
 
 1. **Extract Class** on god types after seams (P4), especially broker + `controlplane/machine`
 2. ~~Shared serve/manifest helpers~~ — **done** (`sys/runinfo.ServeMetrics` / `Publish`)
-3. Echo ↔ Kafka **client FSM** (P2; campaign presets done)
+3. ~~Echo ↔ Kafka client FSM / campaign~~ — **done** (`sim/internal/session`, `sim/internal/campaign`)
 4. ~~Share or formally fork logsm ↔ logcp~~ — **done by deletion**; one machine + exec remains
 5. ~~Shared binary reader across log twins~~ — **gone with the twins**
 6. ~~Remove Dead Code / flags (P0)~~ — **done**

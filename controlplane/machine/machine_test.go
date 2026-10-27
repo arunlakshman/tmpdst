@@ -3,6 +3,7 @@ package machine_test
 import (
 	"testing"
 
+	"manifester/controlplane/applier"
 	"manifester/controlplane/machine"
 	"manifester/core"
 )
@@ -36,9 +37,9 @@ func (e *testEnv) Sometimes(bool, core.Prop)                           {}
 func (e *testEnv) Reachable(core.Prop)                                 {}
 func (e *testEnv) Unreachable(core.Prop, ...core.Detail)               {}
 
-func newMachine(t *testing.T) *machine.Machine {
+func newMachine(t *testing.T, cfg machine.Config) *machine.Machine {
 	t.Helper()
-	m := machine.New(machine.Config{})(&testEnv{}, core.NodeRef{Node: "cp-0"})
+	m := machine.New(cfg)(&testEnv{}, core.NodeRef{Node: "cp-0"})
 	sm, ok := m.(*machine.Machine)
 	if !ok {
 		t.Fatalf("New returned %T, want *machine.Machine", m)
@@ -50,8 +51,12 @@ func step(m *machine.Machine, body core.EventBody) []core.Action {
 	return m.Step(core.Event{Body: body})
 }
 
+func noop(id string) []byte {
+	return applier.Encode(applier.Entry{ID: id, Kind: applier.KindNoop})
+}
+
 func TestStartedAndStop(t *testing.T) {
-	m := newMachine(t)
+	m := newMachine(t, machine.Config{})
 	if acts := step(m, core.Started{Self: core.NodeRef{Node: "cp-0"}}); acts != nil {
 		t.Fatalf("Started returned actions %v", acts)
 	}
@@ -76,7 +81,7 @@ func TestStartedAndStop(t *testing.T) {
 }
 
 func TestStateHashStableAcrossNoopCompletions(t *testing.T) {
-	m := newMachine(t)
+	m := newMachine(t, machine.Config{})
 	step(m, core.Started{})
 	before := m.StateHash()
 	noops := []core.EventBody{
@@ -107,7 +112,7 @@ func TestStateHashStableAcrossNoopCompletions(t *testing.T) {
 
 func TestStateHashDeterministicAcrossBoots(t *testing.T) {
 	hash := func() uint64 {
-		m := newMachine(t)
+		m := newMachine(t, machine.Config{})
 		step(m, core.Started{})
 		return m.StateHash()
 	}
@@ -123,9 +128,8 @@ func TestNewImplementsFactory(t *testing.T) {
 	}
 }
 
-func TestCatchUpEmitsCheckTailThenRead(t *testing.T) {
-	m := machine.New(machine.Config{CatchUpEvery: core.Millisecond, ReadLimit: 8})(
-		&testEnv{}, core.NodeRef{Node: "cp-0"}).(*machine.Machine)
+func TestCatchUpAppliesContiguousReads(t *testing.T) {
+	m := newMachine(t, machine.Config{CatchUpEvery: core.Millisecond, ReadLimit: 8})
 
 	acts := step(m, core.Started{})
 	if len(acts) != 1 {
@@ -145,7 +149,7 @@ func TestCatchUpEmitsCheckTailThenRead(t *testing.T) {
 		t.Fatalf("TimerFired action = %T %#v, want LogCheckTail", acts[0], acts[0])
 	}
 
-	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 3, Err: core.OK, Outcome: core.Applied})
+	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
 	if len(acts) != 1 {
 		t.Fatalf("CheckTailDone actions = %v, want [LogRead]", acts)
 	}
@@ -156,40 +160,19 @@ func TestCatchUpEmitsCheckTailThenRead(t *testing.T) {
 
 	acts = step(m, core.LogReadDone{
 		Req: read.Req, Err: core.OK, Outcome: core.Applied,
-		Entries: []core.LogEntry{{Slot: 0, Data: []byte("a")}, {Slot: 1, Data: []byte("b")}},
+		Entries: []core.LogEntry{
+			{Slot: 0, Data: noop("a")},
+			{Slot: 1, Data: noop("b")},
+		},
 	})
 	if len(acts) != 1 {
 		t.Fatalf("ReadDone actions = %v, want [SetTimer]", acts)
 	}
 	if _, ok := acts[0].(core.SetTimer); !ok {
-		t.Fatalf("ReadDone action = %T, want SetTimer (no apply yet)", acts[0])
+		t.Fatalf("ReadDone action = %T, want SetTimer", acts[0])
 	}
-
-	// Empty short page under a higher Tail advances past holes (no hole-fill yet).
-	acts = step(m, core.TimerFired{ID: timer.ID, Gen: acts[0].(core.SetTimer).Gen})
-	tail2 := acts[0].(core.LogCheckTail)
-	acts = step(m, core.LogCheckTailDone{Req: tail2.Req, Tail: 5, Err: core.OK, Outcome: core.Applied})
-	read2 := acts[0].(core.LogRead)
-	// First round jumped nextSlot to goalTail 3 after a short page.
-	if read2.From != 3 {
-		t.Fatalf("second Read From = %d, want 3", read2.From)
-	}
-	acts = step(m, core.LogReadDone{Req: read2.Req, Err: core.OK, Outcome: core.Applied})
-	if len(acts) != 1 {
-		t.Fatalf("empty ReadDone actions = %v, want [SetTimer]", acts)
-	}
-	timer2, ok := acts[0].(core.SetTimer)
-	if !ok {
-		t.Fatalf("empty ReadDone action = %T, want SetTimer", acts[0])
-	}
-	acts = step(m, core.TimerFired{ID: timer2.ID, Gen: timer2.Gen})
-	tail3 := acts[0].(core.LogCheckTail)
-	acts = step(m, core.LogCheckTailDone{Req: tail3.Req, Tail: 5, Err: core.OK, Outcome: core.Applied})
-	if len(acts) != 1 {
-		t.Fatalf("caught-up CheckTailDone = %v, want [SetTimer]", acts)
-	}
-	if _, ok := acts[0].(core.SetTimer); !ok {
-		t.Fatalf("caught-up action = %T, want SetTimer (no more reads)", acts[0])
+	if m.Applied() != 2 {
+		t.Fatalf("Applied = %d, want 2", m.Applied())
 	}
 
 	before := m.StateHash()
@@ -202,7 +185,7 @@ func TestCatchUpEmitsCheckTailThenRead(t *testing.T) {
 }
 
 func TestCatchUpDisabledByDefault(t *testing.T) {
-	m := newMachine(t)
+	m := newMachine(t, machine.Config{})
 	if acts := step(m, core.Started{}); acts != nil {
 		t.Fatalf("default Started returned %v", acts)
 	}

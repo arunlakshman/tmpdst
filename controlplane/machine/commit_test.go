@@ -125,6 +125,33 @@ func TestGroupPackingCapsAtMaxCmdsPerSlot(t *testing.T) {
 	}
 }
 
+func TestMaybeAppliedRetriesSameSlot(t *testing.T) {
+	m := newMachine(t, machine.Config{K: 2, MaxCmdsPerSlot: 1, Writer: "w"})
+	a := onlyAppend(t, m.Offer(machine.ClientOp{Req: 1, Cmd: commitCmd("a", 1)}))
+	b := onlyAppend(t, m.Offer(machine.ClientOp{Req: 2, Cmd: commitCmd("b", 1)}))
+	// b lands first; a times out. Same-slot retry must not leave a hole that
+	// wedges drain past b.
+	step(m, core.LogAppendDone{Req: b.Req, Slot: b.Slot, Err: core.OK, Outcome: core.Applied})
+	if m.Applied() != 0 {
+		t.Fatalf("Applied = %d before hole filled, want 0", m.Applied())
+	}
+	acts := step(m, core.LogAppendDone{
+		Req: a.Req, Slot: a.Slot, Err: core.ErrTimeout, Outcome: core.MaybeApplied,
+	})
+	retry := onlyAppend(t, acts)
+	if retry.Slot != a.Slot {
+		t.Fatalf("MaybeApplied retry slot %d, want same slot %d", retry.Slot, a.Slot)
+	}
+	step(m, core.LogAppendDone{Req: retry.Req, Slot: retry.Slot, Err: core.OK, Outcome: core.Applied})
+	if m.Applied() != 2 {
+		t.Fatalf("Applied = %d, want 2", m.Applied())
+	}
+	ans := m.TakeAnswers()
+	if len(ans) != 2 {
+		t.Fatalf("answers = %d, want 2 (drain unwedged)", len(ans))
+	}
+}
+
 func TestLostAppendRetriesSameEntryLaterSlot(t *testing.T) {
 	m := newMachine(t, machine.Config{K: 1, MaxCmdsPerSlot: 1, Writer: "w"})
 	ap := onlyAppend(t, m.Offer(machine.ClientOp{Req: 7, Cmd: commitCmd("lost-key", 2)}))
@@ -194,5 +221,43 @@ func TestOfferRefusedWhenCommitQueueDisabled(t *testing.T) {
 	ans := m.TakeAnswers()
 	if len(ans) != 1 || ans[0].Done.Err != core.ErrUnavailable {
 		t.Fatalf("answers = %+v, want ErrUnavailable", ans)
+	}
+}
+
+func TestOfferKnownCommitSkipsAppend(t *testing.T) {
+	m := newMachine(t, machine.Config{K: 1, MaxCmdsPerSlot: 1, Writer: "w"})
+	first := onlyAppend(t, m.Offer(machine.ClientOp{Req: 1, Cmd: commitCmd("known", 2)}))
+	step(m, core.LogAppendDone{Req: first.Req, Slot: first.Slot, Err: core.OK, Outcome: core.Applied})
+	if ans := m.TakeAnswers(); len(ans) != 1 || ans[0].Done.Err != core.OK {
+		t.Fatalf("first answers = %+v", ans)
+	}
+	acts := m.Offer(machine.ClientOp{Req: 2, Cmd: commitCmd("known", 2)})
+	if len(acts) != 0 {
+		t.Fatalf("known Offer returned %v, want immediate answer", acts)
+	}
+	ans := m.TakeAnswers()
+	if len(ans) != 1 || ans[0].Req != 2 || ans[0].Done.Err != core.OK {
+		t.Fatalf("known answers = %+v", ans)
+	}
+	resp, ok := ans[0].Done.Resp.(core.CommitSegmentResp)
+	if !ok || len(resp.Assigned) != 1 || resp.Assigned[0].Count != 2 {
+		t.Fatalf("known resp = %+v", ans[0].Done.Resp)
+	}
+}
+
+func TestOfferRetargetsInFlightCommit(t *testing.T) {
+	m := newMachine(t, machine.Config{K: 1, MaxCmdsPerSlot: 1, Writer: "w"})
+	first := onlyAppend(t, m.Offer(machine.ClientOp{Req: 1, Cmd: commitCmd("retry", 1)}))
+	acts := m.Offer(machine.ClientOp{Req: 2, Cmd: commitCmd("retry", 1)})
+	if len(acts) != 0 {
+		t.Fatalf("retarget Offer returned %v", acts)
+	}
+	if m.QueueDepth() != 0 {
+		t.Fatalf("queue depth = %d, want 0 (coalesced)", m.QueueDepth())
+	}
+	step(m, core.LogAppendDone{Req: first.Req, Slot: first.Slot, Err: core.OK, Outcome: core.Applied})
+	ans := m.TakeAnswers()
+	if len(ans) != 1 || ans[0].Req != 2 || ans[0].Done.Err != core.OK {
+		t.Fatalf("answers = %+v, want Req 2", ans)
 	}
 }

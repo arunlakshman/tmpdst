@@ -1,27 +1,14 @@
-// Package logengine is the simulated log-backed control plane (decisions 48-53,
-// docs/log-cp-service.md, docs/sim-log-engine.md): a DynamoDB-like log of slots
-// written with if-absent Puts, two replicas that apply it (an active writer and
-// a hot standby), and the service boundary faults of the other engines.
-//
-// It models what the production service does and what can go wrong with it:
-// K appends in flight per writer, a lost Put answer (retry the same slot), a
-// lost slot (the same entry is appended later), holes (a later slot lands
-// first; after HoleAfter any replica fills the gap with a no-op), takeover and
-// failback (the slot is the fence), checkpoints, trimming that leaves
-// tombstones, replica crash and restart from a checkpoint, and an idempotency
-// window that is a function of the slot number.
-//
-// It is an independent implementation (decision 21): the state machine is in
-// state.go and shares no code with veritas, cp/applier or cp/logcp. veritas
-// remains the oracle through the Kafka simulator's invariants. A reference
-// replay of the log (ref) is the engine's ground truth (CPTruth) and every
-// replica's state digest is checked against it.
-//
-// The engine is deterministic: no goroutines, no map iteration, no wall clock;
-// every draw comes from the run's CountedRand in event order.
+// Package logengine is the sim bridge from broker CPCall to control-plane
+// replica processes (CP-DSM-8). Replica apply lives in controlplane/machine;
+// the shared Dynamo log and CPTruth live in sim/engines/logstore. This package
+// keeps boundary faults (503, timeout, lost response, outage) and routes
+// CPOffer/CPReply. Bug constants stay numeric for LogParams.Bug and
+// machine.Config.Bug.
 package logengine
 
 import (
+	"slices"
+
 	"manifester/core"
 	"manifester/sim"
 )
@@ -35,128 +22,51 @@ const (
 	BugHoleSkip               // a replica passes an empty slot without a no-op
 )
 
-type slotKind uint8
-
-const (
-	slotEmpty slotKind = iota
-	slotEntry
-	slotTomb
-)
-
-// slotRec is one slot of the log.
-type slotRec struct {
-	kind   slotKind
-	writer int // rank
-	id     uint64
-	cmds   []cmd // empty for a no-op
-}
-
-// entry is what a writer appends: one or more commands.
-type entry struct {
-	id   uint64
-	cmds []cmd
-}
-
-type waiter struct {
-	eid uint64
-	idx int
-	req uint64
-}
-
-type qcmd struct {
-	c   cmd
-	req uint64
-}
-
-// request is one CPCall in flight at the service boundary.
-type request struct {
-	id       uint64
-	from     core.NodeRef
-	call     core.CPCall
-	deadline sim.Time
-	rank     int // replica that serves a read
-	tail     int // slot a read must reach
-	muted    bool
-	done     bool
-}
-
-type appendOp struct {
-	id      uint64
-	rank    int
-	inc     int
-	slot    int
-	ent     *entry
-	filler  bool
-	attempt int
-}
-
-type snapshot struct {
-	slot int
-	st   *state
-}
-
-type projEnd struct {
-	tp  core.TopicPartition
-	end core.Offset
-}
-
-type replica struct {
-	rank, inc             int
-	up, active, sawLower  bool
-	stallUntil, downUntil sim.Time
-	st                    *state
-	applied, next         int
-	holeSlot, fillSlot    int
-	holeSince             sim.Time
-	lastOther, lastAppend sim.Time
-	q                     []qcmd
-	ops                   []uint64
-	waits                 []waiter
-	proj                  []projEnd
-}
-
-type shadowKey struct {
-	key    string
-	ranges []core.BatchRange
-}
-
-// Engine is the simulated log control plane. It is also the sim.CPTruth.
+// Engine bridges CPCall to CP replica nodes via CPOffer/CPReply.
 type Engine struct {
 	f    sim.ControlPlaneFaults
 	p    sim.LogParams
 	name string
 
-	slots   []slotRec
-	hi      int // highest landed slot, -1 when none
-	trimmed int // slots below are tombstoned (or deleted by the mutant)
-	reps    [2]*replica
-	ref     *replica // reference replay of the log (ground truth)
-	refDig  []uint64 // refDig[s] = reference digest after slot s
-	fresh   *state   // topics created before the run
-	snaps   []snapshot
-	shadow  []shadowKey
-
-	reqs    []*request
-	ops     []*appendOp
-	nextReq uint64
-	nextOp  uint64
-	nextEnt uint64
-	ticks   uint64
-	gen     uint64
-
 	now      sim.Time
 	until    sim.Time
 	recovery bool
-	started  bool
+
+	pending map[pendKey]*pending
+	topics  []TopicSeed
 }
 
-var (
-	_ sim.Engine  = (*Engine)(nil)
-	_ sim.CPTruth = (*Engine)(nil)
-)
+// TopicSeed is one topic pre-created before the run for CP process folds.
+type TopicSeed struct {
+	Name  string
+	Parts int32
+}
 
-// DefaultParams are scaled-down production values for a 45 s run: a window
-// larger than a run, checkpoints every 24 slots, 8 slots kept below them.
+// pendKey namespaces broker ReqIDs: each broker allocates ReqIDs from its own
+// counter, so Req alone collides across brokers.
+type pendKey struct {
+	node core.NodeID
+	req  core.ReqID
+}
+
+type pending struct {
+	from     core.NodeRef
+	op       core.CPOp
+	to       core.NodeRef
+	failover bool
+	muted    bool
+	deadline sim.EntryID
+	done     bool
+}
+
+type deadlineEv struct {
+	node core.NodeID
+	req  core.ReqID
+}
+
+var _ sim.Engine = (*Engine)(nil)
+
+// DefaultParams are scaled-down production values for a 45 s run.
 func DefaultParams() sim.LogParams {
 	ms := core.Millisecond
 	return sim.LogParams{Enabled: true, K: 4, GroupMax: 4, Tick: 10 * ms,
@@ -167,139 +77,255 @@ func DefaultParams() sim.LogParams {
 		WindowSlots: 1 << 20, TrimStride: 16, CkptEvery: 24, KeepSlots: 8}
 }
 
-// New returns an empty log control plane. Faults are f; the log knobs are
-// f.Log (zero fields take DefaultParams).
+// New returns a CPCall bridge. Log knobs are f.Log (zero fields take DefaultParams).
 func New(f sim.ControlPlaneFaults) *Engine {
-	e := &Engine{f: f, p: withDefaults(f.Log), name: "logengine", hi: -1, fresh: &state{}}
-	for i := range e.reps {
-		e.reps[i] = newReplica(i, e.fresh)
+	return &Engine{
+		f: f, p: withDefaults(f.Log), name: "logengine",
+		pending: map[pendKey]*pending{},
 	}
-	e.reps[0].active = true
-	e.ref = newReplica(-1, e.fresh)
-	return e
 }
 
 func withDefaults(p sim.LogParams) sim.LogParams {
 	d := DefaultParams()
-	if p.K <= 0 {
+	if p.K == 0 {
 		p.K = d.K
 	}
-	if p.GroupMax <= 0 {
+	if p.GroupMax == 0 {
 		p.GroupMax = d.GroupMax
 	}
-	if p.Tick <= 0 {
+	if p.Tick == 0 {
 		p.Tick = d.Tick
 	}
-	def := func(v *core.Duration, dv core.Duration) {
-		if *v <= 0 {
-			*v = dv
-		}
+	if p.HoleAfter == 0 {
+		p.HoleAfter = d.HoleAfter
 	}
-	def(&p.HoleAfter, d.HoleAfter)
-	def(&p.TakeoverAfter, d.TakeoverAfter)
-	def(&p.PutRetry, d.PutRetry)
-	def(&p.Heartbeat, d.Heartbeat)
-	if p.WindowSlots <= 0 {
+	if p.TakeoverAfter == 0 {
+		p.TakeoverAfter = d.TakeoverAfter
+	}
+	if p.Heartbeat == 0 {
+		p.Heartbeat = d.Heartbeat
+	}
+	if p.WindowSlots == 0 {
 		p.WindowSlots = d.WindowSlots
 	}
-	if p.TrimStride <= 0 {
-		p.TrimStride = d.TrimStride
-	}
-	if p.CkptEvery <= 0 {
+	if p.CkptEvery == 0 {
 		p.CkptEvery = d.CkptEvery
 	}
-	if p.KeepSlots <= 0 {
+	if p.KeepSlots == 0 {
 		p.KeepSlots = d.KeepSlots
 	}
+	if p.TrimStride == 0 {
+		p.TrimStride = d.TrimStride
+	}
+	p.Enabled = true
 	return p
 }
 
-func newReplica(rank int, base *state) *replica {
-	return &replica{rank: rank, up: true, st: base.clone(), applied: -1, holeSlot: -1, fillSlot: -1}
-}
+// Params returns the resolved log knobs (for kafka CP process factories).
+func (e *Engine) Params() sim.LogParams { return e.p }
 
-// CreateTopic pre-creates a topic (setup, before the run starts).
+// CreateTopic records a topic name for CP process factories (folds seed too).
 func (e *Engine) CreateTopic(name string, partitions int32) core.ErrCode {
 	if name == "" || partitions <= 0 {
 		return core.ErrInvalid
 	}
-	e.fresh.grow(name, partitions)
-	e.ref.st.grow(name, partitions)
-	for _, r := range e.reps {
-		r.st.grow(name, partitions)
-	}
-	e.gen++
+	e.topics = append(e.topics, TopicSeed{Name: name, Parts: partitions})
 	return core.OK
 }
 
-// Name returns the engine name.
+// Topics returns topics created at setup for CP process factories.
+func (e *Engine) Topics() []TopicSeed { return slices.Clone(e.topics) }
+
+// Name implements sim.Engine.
 func (e *Engine) Name() string { return e.name }
 
-// Handles reports whether a is a control plane call.
+// Handles reports whether a is a CPCall or CPReply.
 func (e *Engine) Handles(a core.Action) bool {
-	_, ok := a.(core.CPCall)
-	return ok
+	switch a.(type) {
+	case core.CPCall, core.CPReply:
+		return true
+	}
+	return false
 }
 
-// EnterRecovery stops new faults for later actions and ticks.
+// StateHash is stable for the bridge (truth lives on logstore).
+func (e *Engine) StateHash() uint64 { return uint64(len(e.pending)) ^ uint64(len(e.topics)) }
+
+// EnterRecovery stops new boundary faults.
 func (e *Engine) EnterRecovery() { e.recovery = true }
 
-// OnCrash does nothing: a caller's death changes nothing in the service.
+// OnCrash is a no-op: replica crash is attrition on CP processes.
 func (e *Engine) OnCrash(sim.EngineCtx, core.NodeRef) {}
 
-// Gen counts applied changes of the reference log.
-func (e *Engine) Gen() uint64 { return e.gen }
+// OnInternal handles caller-timeout deadlines.
+func (e *Engine) OnInternal(ctx sim.EngineCtx, body any) {
+	d, ok := body.(deadlineEv)
+	if !ok {
+		return
+	}
+	key := pendKey(d)
+	p := e.pending[key]
+	if p == nil || p.done {
+		return
+	}
+	p.done = true
+	p.muted = true // late CPReply must not deliver a second answer
+	delete(e.pending, key)
+	e.deliver(ctx, p.from, core.CPDone{Req: d.req, Err: core.ErrTimeout, Outcome: core.MaybeApplied})
+}
 
-// Committed returns the committed ranges of tp in offset order (reference replay).
-func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
-	i, ok := e.ref.st.find(tp)
+type fault uint8
+
+const (
+	fNone fault = iota
+	fUnavailable
+	fTimeout
+	fLost
+)
+
+// Execute starts a CPCall or lands a CPReply.
+func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.Action) {
+	e.now = ctx.Now()
+	switch a := a.(type) {
+	case core.CPCall:
+		e.execCall(ctx, from, a)
+	case core.CPReply:
+		e.execReply(ctx, a)
+	default:
+		panic("logengine: not a CP action")
+	}
+}
+
+func (e *Engine) execCall(ctx sim.EngineCtx, from core.NodeRef, call core.CPCall) {
+	k := e.plan(ctx)
+	if k == fUnavailable {
+		e.deliver(ctx, from, core.CPDone{Req: call.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied})
+		return
+	}
+	cp, ok := e.pickCP(ctx, core.NodeRef{})
+	if !ok {
+		e.deliver(ctx, from, core.CPDone{Req: call.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied})
+		return
+	}
+	key := pendKey{from.Node, call.Req}
+	p := &pending{from: from, op: call.Op, to: cp, muted: k == fLost || k == fTimeout}
+	to := ctx.Now() + sim.Time(max(e.f.CallerTimeout, 500*core.Millisecond))
+	p.deadline = ctx.Self(to, ctx.Lane("logengine/deadline"), deadlineEv{node: from.Node, req: call.Req})
+	e.pending[key] = p
+	if k == fTimeout && ctx.Rand().Chance(0.5) {
+		return // never reached the service; deadline answers the broker
+	}
+	e.offer(ctx, cp, from, call.Req, call.Op)
+}
+
+func (e *Engine) execReply(ctx sim.EngineCtx, r core.CPReply) {
+	// CPReply.To is the broker (machine stamps replyTo from the offer).
+	key := pendKey{r.To.Node, r.Done.Req}
+	p := e.pending[key]
+	if p == nil || p.done {
+		return
+	}
+	// Standby (or booting) refuses: one failover offer to the other live CP.
+	if r.Done.Err == core.ErrUnavailable && !p.failover {
+		if other, ok := e.pickCP(ctx, p.to); ok {
+			p.failover = true
+			p.to = other
+			e.offer(ctx, other, p.from, r.Done.Req, p.op)
+			return
+		}
+	}
+	p.done = true
+	ctx.Cancel(p.deadline)
+	delete(e.pending, key)
+	if p.muted {
+		// Lost/timeout fault: never forward the service reply. Answer the broker
+		// now (same ErrTimeout+MaybeApplied the deadline would have sent) so a
+		// cancelled deadline cannot leave the commit hung.
+		e.deliver(ctx, p.from, core.CPDone{
+			Req: r.Done.Req, Err: core.ErrTimeout, Outcome: core.MaybeApplied,
+		})
+		return
+	}
+	lat := e.f.RespondLatency.Sample(ctx.Rand())
+	e.deliverAt(ctx, p.from, ctx.Now()+sim.Time(lat), r.Done)
+}
+
+func (e *Engine) offer(ctx sim.EngineCtx, cp, from core.NodeRef, req core.ReqID, op core.CPOp) {
+	lat := e.f.ApplyLatency.Sample(ctx.Rand())
+	at := ctx.Now() + sim.Time(lat)
+	ctx.Deliver(cp, at, ctx.Lane("logengine/offer/"+string(cp.Node)),
+		core.CPOffer{From: from, Req: req, Op: op})
+}
+
+func (e *Engine) pickCP(ctx sim.EngineCtx, exclude core.NodeRef) (core.NodeRef, bool) {
+	refs := e.liveCPs(ctx)
+	for _, ref := range refs {
+		if exclude.Node != "" && ref.Node == exclude.Node {
+			continue
+		}
+		return ref, true
+	}
+	return core.NodeRef{}, false
+}
+
+func (e *Engine) liveCPs(ctx sim.EngineCtx) []core.NodeRef {
+	cur, ok := ctx.(sim.NodeCurrent)
 	if !ok {
 		return nil
 	}
-	return append([]core.BatchRange(nil), e.ref.st.parts[i].runs...)
+	var out []core.NodeRef
+	for _, name := range []core.NodeID{"cp-0", "cp-1"} {
+		if ref, ok := cur.Current(name); ok {
+			out = append(out, ref)
+		}
+	}
+	return out
 }
 
-// HighWatermark is the partition end: the next offset the log assigns.
-func (e *Engine) HighWatermark(tp core.TopicPartition) core.Offset { return e.ref.st.end(tp) }
-
-// Applied is the last slot replica rank has applied (-1 none); for tests.
-func (e *Engine) Applied(rank int) int { return e.reps[rank].applied }
-
-// Tail is the highest landed slot (-1 none); for tests.
-func (e *Engine) Tail() int { return e.hi }
-
-// Digest is the digest of replica rank's state; for tests.
-func (e *Engine) Digest(rank int) uint64 { return e.reps[rank].st.digest }
-
-// RefDigest is the reference digest after slot s; for tests.
-func (e *Engine) RefDigest(s int) uint64 { return e.refDig[s] }
-
-// StateHash folds everything that can change the future of the run.
-func (e *Engine) StateHash() uint64 {
-	h := uint64(0)
-	for _, v := range []uint64{uint64(e.hi + 1), uint64(e.trimmed), e.gen, uint64(len(e.slots)),
-		uint64(e.until), uint64(len(e.reqs)), uint64(len(e.ops)), e.ticks, e.nextEnt, uint64(len(e.snaps))} {
-		h = mixU64(h, v)
+func (e *Engine) plan(ctx sim.EngineCtx) fault {
+	if e.recovery {
+		return fNone
 	}
-	for _, r := range e.reps {
-		h = mixU64(h, r.hash())
+	r, now, p := ctx.Rand(), ctx.Now(), e.f
+	if now >= e.until && r.Chance(p.Outage.Prob) {
+		d := p.Outage.Dur[0]
+		if p.Outage.Dur[1] > d {
+			d = core.Duration(r.Between(int64(p.Outage.Dur[0]), int64(p.Outage.Dur[1])))
+		}
+		e.until = now + sim.Time(d)
+		ctx.Fault("cp_outage", core.Field{Key: "dur", Value: core.I64(d)})
+		ctx.Assert().Reachable("cp outage started")
 	}
-	return mixU64(mixU64(h, e.ref.st.digest), boolBit(e.recovery))
+	out := now < e.until
+	is503, isTimeout, isLost := r.Chance(p.Unavailable503), r.Chance(p.Timeout), r.Chance(p.LostResponse)
+	switch {
+	case out || is503:
+		ctx.Fault("cp_503", core.Field{Key: "cause", Value: core.Str(cause(out))})
+		ctx.Assert().Reachable("cp 503 injected")
+		return fUnavailable
+	case isTimeout:
+		ctx.Fault("cp_timeout")
+		ctx.Assert().Reachable("cp timeout injected")
+		return fTimeout
+	case isLost:
+		ctx.Fault("cp_lost_response")
+		ctx.Assert().Reachable("cp lost response injected")
+		return fLost
+	}
+	return fNone
 }
 
-func (r *replica) hash() uint64 {
-	h := uint64(0)
-	for _, v := range []uint64{uint64(r.applied + 1), r.st.digest, boolBit(r.up), boolBit(r.active),
-		uint64(r.stallUntil), uint64(r.downUntil), uint64(len(r.q)), uint64(len(r.ops)), uint64(r.next), uint64(len(r.waits)),
-		uint64(r.holeSlot + 1), uint64(r.inc)} {
-		h = mixU64(h, v)
+func cause(outage bool) string {
+	if outage {
+		return "outage"
 	}
-	return h
+	return "coin"
 }
 
-func boolBit(b bool) uint64 {
-	if b {
-		return 1
-	}
-	return 0
+func (e *Engine) deliver(ctx sim.EngineCtx, to core.NodeRef, c core.CPDone) {
+	e.deliverAt(ctx, to, ctx.Now(), c)
+}
+
+func (e *Engine) deliverAt(ctx sim.EngineCtx, to core.NodeRef, at sim.Time, c core.CPDone) {
+	ctx.Deliver(to, at, ctx.Lane("logengine/"+string(to.Node)), c)
 }

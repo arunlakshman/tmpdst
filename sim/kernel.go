@@ -83,6 +83,8 @@ type node struct {
 	// the kernel calls it (boot, Step, OnPhase), and each of those clears sumOK.
 	sum   uint64
 	sumOK bool
+
+	noAttrition bool
 }
 
 type endKind uint8
@@ -248,6 +250,7 @@ func (r *run) setup() {
 		for i := 0; i < p.Count; i++ {
 			n := add(fmt.Sprintf("%s-%d", p.Name, i), false)
 			n.factory = p.Factory
+			n.noAttrition = p.NoAttrition
 			if p.FactoryFor != nil {
 				n.factory = p.FactoryFor(r.sc)
 			}
@@ -803,7 +806,7 @@ func (r *run) attrition() {
 	down := 0
 	for _, n := range r.nodes {
 		switch {
-		case n.workload:
+		case n.workload, n.noAttrition:
 		case !n.alive || n.stopping:
 			down++
 		default:

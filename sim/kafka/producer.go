@@ -104,7 +104,7 @@ func (w *Workload) produceNext(c *client) []core.Action {
 		w.newBatches(c)
 	}
 	for _, b := range p.cur {
-		if b.attempts >= maxAttempts {
+		if b.attempts >= w.opts.maxAttempts() {
 			return w.giveUp(c, "retries exhausted")
 		}
 	}

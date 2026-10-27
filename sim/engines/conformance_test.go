@@ -8,7 +8,6 @@ import (
 	"manifester/sim"
 	"manifester/sim/engines/cpengine"
 	"manifester/sim/engines/internal/enginetest"
-	"manifester/sim/engines/logengine"
 	"manifester/sim/engines/objstore"
 	"manifester/veritas"
 	"manifester/veritas/veritastest"
@@ -182,29 +181,6 @@ func genBatches(r *veritastest.Rand, key string) []core.PendingBatch {
 	return out
 }
 
-// newLogRig is the log engine under the same operations as the spec. The
-// engine's tick chain never drains, so each operation runs for 100 ms of
-// virtual time (a few ticks of both replicas); there is no spec hash to compare.
-func newLogRig() *rig {
-	e, spec := logengine.New(sim.ControlPlaneFaults{Log: sim.LogParams{Enabled: true}}), veritas.NewControlPlane()
-	g := &rig{eng: e, ctx: enginetest.New(e, 1), from: enginetest.Ref("a"), hash: spec.StateHash}
-	g.run = func() { g.ctx.RunUntil(g.ctx.T + sim.Time(100*core.Millisecond)) }
-	g.spec = func(op any) string {
-		if c, ok := op.(createTopic); ok {
-			return spec.CreateTopic(c.Name, c.Parts).String()
-		}
-		return render(spec.Exec(op.(core.IOAction)))
-	}
-	g.call = func(op any) string {
-		if c, ok := op.(createTopic); ok {
-			return e.CreateTopic(c.Name, c.Parts).String()
-		}
-		e.Execute(g.ctx, g.from, op.(core.IOAction))
-		return ""
-	}
-	return g
-}
-
 func check(newRig func() *rig, gen func(*veritastest.Rand, int) any) veritastest.Check[*rig, any] {
 	return veritastest.Check[*rig, any]{
 		Name: "any", New: newRig, Gen: gen, Ops: 120, MaxShrinkRuns: 300,
@@ -220,5 +196,8 @@ func run(t *testing.T, c veritastest.Check[*rig, any]) {
 func TestConformanceObjStore(t *testing.T) { run(t, check(newObjRig, genObj)) }
 func TestConformanceCPEngine(t *testing.T) { run(t, check(newCPRig, genCP)) }
 
-// C2 for the log engine: fault-free, it answers every operation as the spec does.
-func TestConformanceLogEngine(t *testing.T) { run(t, check(newLogRig, genCP)) }
+// C2 for the log path moved to controlplane/machine lockstep (CP-DSM-8). The
+// logengine package is now a CPCall bridge, not a replica state machine.
+func TestConformanceLogEngine(t *testing.T) {
+	t.Skip("C2: use go test ./controlplane/machine -run Lockstep (CP-DSM-8)")
+}

@@ -164,6 +164,12 @@ type LogStoreFaults struct {
 	LostResponse   float64
 	Outage         Outage
 	CallerTimeout  core.Duration
+	// Bug selects a logstore mutant (logengine.BugTrimDelete deletes instead of
+	// tombstoning on LogTrim). Zero is none.
+	Bug uint8
+	// WindowSlots and TrimStride mirror LogParams for CPTruth idempotency trim
+	// during reference replay (decision 48). Zero WindowSlots skips trim.
+	WindowSlots, TrimStride int
 }
 
 // NetworkFaults are connection-level faults (lesson 6).

@@ -32,7 +32,13 @@ func (m *Machine) armCkpt() []core.Action {
 }
 
 func (m *Machine) onCkptTimer(e core.TimerFired) []core.Action {
-	if e.Gen != m.ckptGen || m.cfg.CkptEvery <= 0 {
+	if e.Gen != m.ckptGen {
+		return nil
+	}
+	if m.needsCkpt {
+		return m.emitCkptGet()
+	}
+	if m.cfg.CkptEvery <= 0 {
 		return nil
 	}
 	acts := m.maybeCheckpoint()
@@ -85,8 +91,25 @@ func (m *Machine) onObjGetDone(d core.ObjGetDone) []core.Action {
 		}
 		m.startAt(core.LogSlot(slot))
 		m.ckptSlot = core.LogSlot(slot)
+		m.needsCkpt = false
+		m.env.Reachable("logcp-sim: replica restored from a checkpoint")
+		return m.afterRestore()
+	}
+	if m.needsCkpt {
+		// Tomb forced a restore but no snapshot yet (or Get failed). Retry;
+		// do not catch up from slot 0 through the trimmed prefix.
+		return m.armCkptRetry()
 	}
 	return m.afterRestore()
+}
+
+func (m *Machine) armCkptRetry() []core.Action {
+	after := m.cfg.Heartbeat
+	if after <= 0 {
+		after = 250 * core.Millisecond
+	}
+	m.ckptGen++
+	return []core.Action{core.SetTimer{ID: timerCkpt, Gen: m.ckptGen, After: after}}
 }
 
 func (m *Machine) onObjPutDone(d core.ObjPutDone) []core.Action {
@@ -118,6 +141,7 @@ func (m *Machine) emitTrim(ckptSlot core.LogSlot) []core.Action {
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingTrim
+	m.fillSlot = through // stash Through for onTrimDone
 	return []core.Action{core.LogTrim{Req: m.pending, Through: through}}
 }
 
@@ -125,7 +149,17 @@ func (m *Machine) onTrimDone(d core.LogTrimDone) []core.Action {
 	if d.Req != m.pending || m.pendingKind != pendingTrim {
 		return nil
 	}
+	through := m.fillSlot
 	m.pending, m.pendingKind = 0, pendingNone
+	m.fillSlot = 0
+	if d.Err == core.OK && d.Outcome == core.Applied {
+		m.trimFloor = through + 1
+		m.env.Reachable("logcp-sim: log trimmed below a checkpoint")
+		if m.cfg.Bug == BugTrimDelete {
+			m.env.Always(false, "logcp-sim: a Put never wins a slot below the trim floor",
+				core.Detail{Key: "through", Value: through})
+		}
+	}
 	return nil
 }
 

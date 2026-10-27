@@ -101,6 +101,13 @@ type CPCall struct {
 
 // ---- shared command log (Dynamo loglet; engine lands in a later PR) ----
 
+// CPReply asks the sim CP bridge to deliver Done to To (the broker that
+// issued the matching CPCall). Production uses gRPC waiters instead.
+type CPReply struct {
+	To   NodeRef
+	Done CPDone
+}
+
 // LogAppend is an if-absent put of Data at Slot.
 type LogAppend struct {
 	Req  ReqID
@@ -155,6 +162,7 @@ func (ObjGet) isAction()       {}
 func (ObjDelete) isAction()    {}
 func (ObjList) isAction()      {}
 func (CPCall) isAction()       {}
+func (CPReply) isAction()      {}
 func (LogAppend) isAction()    {}
 func (LogRead) isAction()      {}
 func (LogCheckTail) isAction() {}

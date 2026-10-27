@@ -414,12 +414,28 @@ func wideCampaign(t *testing.T, capParts, batches int, log bool) int64 {
 		opts.Partitions = 128
 		cfg = configLogWith(seeds(1, 2), broker.BugNone, 0, opts)
 		items = 0
+		// Width check only: campaign deadlines/coins shrink committed spans
+		// below the old 96-partition bar. kafka-log / mutants keep coins live.
+		cfg.ControlPlane.CallerTimeout = 800 * core.Millisecond
+		cfg.LogStore.CallerTimeout = 800 * core.Millisecond
+		cfg.Phases = phases()
 	}
 	cfg.Params = prod
 	inner := cfg.Swarm
 	cfg.Swarm = func(seed uint64, r sim.CountedRand, c *sim.SeedConfig) {
 		inner(seed, r, c)
 		c.Params, c.ControlPlane.MaxCommitItems = prod, items
+		if log {
+			c.ControlPlane.Unavailable503 = 0
+			c.ControlPlane.Timeout = 0
+			c.ControlPlane.LostResponse = 0
+			c.ControlPlane.Outage.Prob = 0
+			c.LogStore.Unavailable503 = 0
+			c.LogStore.LostResponse = 0
+			c.ControlPlane.Log.PutFail = 0
+			c.ControlPlane.Log.PutLost = 0
+			c.LogStore.CallerTimeout = c.ControlPlane.CallerTimeout
+		}
 	}
 	var widest atomic.Int64
 	cfg.Invariants = append(cfg.Invariants, func() sim.Invariant { return &widestInv{&widest, opts.tps()} })

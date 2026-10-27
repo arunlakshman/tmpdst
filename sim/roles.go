@@ -11,6 +11,9 @@ type Process struct {
 	// FactoryFor, when set, replaces Factory and sees this seed's (swarmed)
 	// SeedConfig, so a scenario can vary the process's own tuning per seed.
 	FactoryFor func(sc SeedConfig) core.Factory
+	// NoAttrition excludes this process from kernel attrition. CP replicas use
+	// LogParams StallProb/CrashProb instead (kafka-log).
+	NoAttrition bool
 }
 
 // Workload is a test driver: a deterministic Kafka client model (kgo cannot run

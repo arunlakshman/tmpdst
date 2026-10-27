@@ -77,6 +77,45 @@ func TestHoleFillUsesWinnerWhenTaken(t *testing.T) {
 	}
 }
 
+func TestHoleFillTombRestoresFromCheckpoint(t *testing.T) {
+	// Lagging replica: LogRead skips a trimmed slot, hole-fill hits the tomb,
+	// machine must restore instead of looping armCatchUp (seed-2 campaign hang).
+	m := newMachine(t, machine.Config{
+		CatchUpEvery: core.Millisecond, HoleAfter: 0, Writer: "w",
+		CkptKey: "ckpt/t", CkptEvery: core.Second, Rank: 1,
+	})
+	acts := step(m, core.Started{})
+	get := acts[0].(core.ObjGet)
+	acts = step(m, core.ObjGetDone{Req: get.Req, Err: core.ErrNotFound})
+	// after empty restore: catch-up timer then driveToHole shape
+	timer := acts[0].(core.SetTimer)
+	acts = step(m, core.TimerFired{ID: timer.ID, Gen: timer.Gen})
+	tail := acts[0].(core.LogCheckTail)
+	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
+	read := acts[0].(core.LogRead)
+	acts = step(m, core.LogReadDone{
+		Req: read.Req, Err: core.OK, Outcome: core.Applied,
+		Entries: []core.LogEntry{{Slot: 1, Data: noop("late")}},
+	})
+	ap := acts[0].(core.LogAppend)
+	acts = step(m, core.LogAppendDone{
+		Req: ap.Req, Slot: 0, Taken: true, Existing: nil,
+		Err: core.ErrConflict, Outcome: core.NotApplied,
+	})
+	if !m.Booting() {
+		t.Fatal("want booting after tomb hit")
+	}
+	if m.IsActive() {
+		t.Fatal("tomb hit must demote")
+	}
+	if len(acts) != 1 {
+		t.Fatalf("acts = %v, want ObjGet restore", acts)
+	}
+	if get, ok := acts[0].(core.ObjGet); !ok || get.Ref.Key != "ckpt/t" {
+		t.Fatalf("act = %#v, want ObjGet ckpt/t", acts[0])
+	}
+}
+
 func TestHoleFillTimerWaits(t *testing.T) {
 	m := newMachine(t, machine.Config{
 		CatchUpEvery: core.Millisecond,

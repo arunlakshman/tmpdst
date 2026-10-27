@@ -52,6 +52,22 @@ func (a *Applier) Commit(slot int64, op core.CommitSegment) (core.CPDone, error)
 	return d, err
 }
 
+// KnownCommit answers op from the idempotency window when the key is already
+// present. ok is false when the key is unknown (caller must append).
+func (a *Applier) KnownCommit(op core.CommitSegment) (core.CPDone, bool, error) {
+	var d core.CPDone
+	var ok bool
+	err := a.kv.View(func(tx Tx) {
+		rec := tx.Get(idemKey(op.SegmentKey))
+		if rec == nil {
+			return
+		}
+		ok = true
+		d = replay(rec, digest(op.Batches), op)
+	})
+	return d, ok, err
+}
+
 // Command is one CommitSegment at its log slot.
 type Command struct {
 	Slot int64
@@ -134,6 +150,31 @@ func commitTx(tx Tx, slot int64, op core.CommitSegment) core.CPDone {
 	return core.CPDone{Resp: core.CommitSegmentResp{Assigned: assigned}, Outcome: core.Applied}
 }
 
+// commitWithBases is the BugWriterOffsets apply path: bases come from the
+// writer instead of partition ends.
+func (a *Applier) commitWithBases(slot int64, op core.CommitSegment, bases []core.Offset) core.CPDone {
+	var d core.CPDone
+	err := a.kv.Update(func(tx Tx) {
+		dig := digest(op.Batches)
+		if rec := tx.Get(idemKey(op.SegmentKey)); rec != nil {
+			d = replay(rec, dig, op)
+			return
+		}
+		if !validCommit(op) || len(bases) != len(op.Batches) {
+			d = core.CPDone{Err: core.ErrInvalid}
+			return
+		}
+		assigned := assignAt(tx, op.Batches, bases)
+		tx.Set(idemKey(op.SegmentKey), idemRecord(slot, dig, assigned))
+		tx.Set(slotKey(slot, op.SegmentKey), []byte{1})
+		d = core.CPDone{Resp: core.CommitSegmentResp{Assigned: assigned}, Outcome: core.Applied}
+	})
+	if err != nil {
+		panic(fmt.Errorf("applier: store failed: %w", err))
+	}
+	return d
+}
+
 // replay answers a commit whose key is known: the original ranges, or
 // ErrConflict if the request differs.
 func replay(rec []byte, dig [digestLen]byte, op core.CommitSegment) core.CPDone {
@@ -172,13 +213,41 @@ func assign(tx Tx, bs []core.PendingBatch) []core.BatchRange {
 		ends[b.TP], runs[b.TP] = e+b.Records, append(runs[b.TP], r)
 		out = append(out, r)
 	}
+	writeAssign(tx, order, ends, runs)
+	return out
+}
+
+// assignAt is assign with writer-chosen bases (BugWriterOffsets).
+func assignAt(tx Tx, bs []core.PendingBatch, bases []core.Offset) []core.BatchRange {
+	var order []core.TopicPartition
+	ends := map[core.TopicPartition]int64{}
+	runs := map[core.TopicPartition][]core.BatchRange{}
+	out := make([]core.BatchRange, 0, len(bs))
+	seen := map[core.TopicPartition]bool{}
+	for i, b := range bs {
+		r := core.BatchRange{TP: b.TP, Base: bases[i], Count: b.Records, Loc: b.Loc}
+		end := int64(bases[i]) + b.Records
+		if !seen[b.TP] {
+			order = append(order, b.TP)
+			seen[b.TP] = true
+		}
+		if end > ends[b.TP] {
+			ends[b.TP] = end
+		}
+		runs[b.TP] = append(runs[b.TP], r)
+		out = append(out, r)
+	}
+	writeAssign(tx, order, ends, runs)
+	return out
+}
+
+func writeAssign(tx Tx, order []core.TopicPartition, ends map[core.TopicPartition]int64, runs map[core.TopicPartition][]core.BatchRange) {
 	topics := map[string]int32{}
 	for _, tp := range order {
 		tx.Set(endKey(tp), putUvarintVal(ends[tp]))
 		tx.Set(runKey(tp, int64(runs[tp][0].Base)), encodeRun(runs[tp]))
 		growTopic(tx, topics, tp.Topic, tp.Partition+1)
 	}
-	return out
 }
 
 // growTopic raises topic's partition count to at least n; seen caches the

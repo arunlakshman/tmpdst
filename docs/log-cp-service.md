@@ -1,8 +1,10 @@
 # Log-backed control-plane service (stage 2)
 
-Status: built and tested in `controlplane/logcp` (sim engine and cap 4096 in stage 3, `docs/sim-log-engine.md`); wired in stage 4 as `manicp -store dynamolog` (flags below), the only DynamoDB-backed control plane (decision 54). Decisions 48-52,
-`docs/design-a-prototype.md` section 8, `docs/applier-bakeoff.md`. Constructor: `logcp.New(Config)`,
-`Start(ctx)`, `Handler()`; test builders in `controlplane/logcp/logcptest`. Tree path is `controlplane/` (decision 56).
+Status: production path is `controlplane/machine` + `controlplane/run` + gRPC (`manicp -store dynamolog`,
+decision 55–58). Sim `kafka-log` uses the same machine as CP processes plus `logstore` (CP-DSM-8,
+`docs/sim-log-engine.md`). Package `controlplane/logcp` remains for DynLog/table helpers and legacy X2
+harness until X2 is fully re-homed as kernel seeds. Decisions 48-52, `docs/design-a-prototype.md`
+section 8, `docs/applier-bakeoff.md`. Tree path is `controlplane/` (decision 56).
 
 ## Architecture
 

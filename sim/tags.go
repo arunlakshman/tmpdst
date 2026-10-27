@@ -104,6 +104,11 @@ func (h *hasher) eventDone(b core.EventBody) {
 		h.u64(uint64(e.Err))
 		h.u64(uint64(e.Outcome))
 		h.cpResp(e.Resp)
+	case core.CPOffer:
+		h.u64(18)
+		h.ref(e.From)
+		h.u64(uint64(e.Req))
+		h.cpOp(e.Op)
 	default:
 		h.eventLogDone(b)
 	}
@@ -202,6 +207,13 @@ func (h *hasher) actionIO(a core.Action) {
 		h.u64(112)
 		h.u64(uint64(x.Req))
 		h.cpOp(x.Op)
+	case core.CPReply:
+		h.u64(120)
+		h.ref(x.To)
+		h.u64(uint64(x.Done.Req))
+		h.u64(uint64(x.Done.Err))
+		h.u64(uint64(x.Done.Outcome))
+		h.cpResp(x.Done.Resp)
 	case core.Emit:
 		h.u64(113) // the fact itself is folded when it reaches the timeline
 	case core.Trip:
@@ -209,6 +221,13 @@ func (h *hasher) actionIO(a core.Action) {
 		h.str(x.Cause)
 	case core.Exit:
 		h.u64(115)
+	default:
+		h.actionLog(a)
+	}
+}
+
+func (h *hasher) actionLog(a core.Action) {
+	switch x := a.(type) {
 	case core.LogAppend:
 		h.u64(116)
 		h.u64(uint64(x.Req))

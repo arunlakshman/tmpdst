@@ -28,7 +28,7 @@ Suggested waves: **P0 → P1 → P2 → P3 → P4**.
 | **P3** | Split Phase / Extract Function on hot paths | Makes Extract Class safe |
 | **P4** | Extract Class / polymorphism / ACL finish | Structure after seams exist |
 
-**Next up:** P2 kwire Encode/Decode framing. Optional last: logengine↔fakeio bridge faults. Attrition/stall follow-up remains `docs/cp-dsm-attrition-stall-followup.md` (separate from refactor P2).
+**Next up:** P3 hot-path clarity (broker `flow`/`addBatch`/`drain`, or `controlplane/machine` `roleTick`/`maybeHoleFill`). Attrition/stall follow-up remains `docs/cp-dsm-attrition-stall-followup.md` (separate from refactor waves).
 
 ---
 
@@ -88,17 +88,17 @@ Bounded-context merge, Extract Class on Broker/Service/kernel — those are P2�
 - [x] ~~Binary reader/cursor across logcp/format + logsm/codec — **obsolete as a cross-package fork** (twins deleted). Leftover same-package sticky cursors (`applier/keys.go` `reader`, `applier/entry.go` `decoder`, `machine/commit.go` `takeUvarint`) are optional P3 polish, not a P2 share~~
 - [x] ~~Wire Batch/Range map pairs — **done/obsolete**: JSON `controlplane/wire.go` deleted (CP-DSM-7); gRPC uses `controlplane/apiconv`~~
 
-### Still open
+### Landed
 
 - [x] ~~Echo ↔ kafka client FSM — **Extract Superclass** / **Form Template Method** — `sim/internal/session` (`Loop` hooks; protocol + StateHash stay in scenarios; TraceHash canaries green)~~
 - [x] ~~Echo ↔ kafka campaign presets — **Parameterize Function** / **Form Template Method** — `sim/internal/campaign` (Swarm `afterKnobs` preserves kafka PartialIOMax draw order; TraceHash canaries matched)~~
-- [ ] Bridge boundary faults — **Form Template Method** (optional) — `sim/engines/logengine` `plan` ↔ `sim/engines/internal/fakeio` (objstore, cpengine, and logstore already embed fakeio; logengine keeps its own coin draws after DSM-8)
+- [x] ~~Bridge boundary faults — **Form Template Method** — `fakeio.Params.Draw` shared by fakeio Execute and logengine (coin order preserved; TraceHash stable)~~
 - [x] ~~`serveMetrics` + `writeManifest` — **Extract Function** / **Move Function** — `sys/runinfo.ServeMetrics` + `Publish` (manicp metrics gains Read/Write/Idle timeouts matching broker)~~
 - [x] ~~Service boot skeleton — **Form Template Method** — same cmds — **not worth it**: after logger setup the two `serve` bodies share no steps; a template needs hooks without deleting branches~~
 - [x] ~~ApiVersions / Supported cache — **Substitute Algorithm** — `kwire/supported.go` (`supported` table + `supportedByKey`)~~
-- [ ] Encode/Decode framing — **Extract Function** / **Introduce Parameter Object** — `kwire/codec.go`
+- [x] ~~Encode/Decode framing — **Extract Function** — `kwire/codec.go` (`appendFlexibleTag`, `readBody`)~~
 
-**P2 rule:** pick **one** fork at a time (echo/kafka **or** cmd boot **or** kwire framing) — not all three.
+**P2:** closed.
 
 ---
 
@@ -209,8 +209,8 @@ After P1–P3 seams exist.
 1. **Now:** clear P0. *(done — tests green on touched packages)*
 2. **P1 VO helpers:** done.
 3. **CP-DSM program:** done (stack landed; twin + JSON/OpenAPI husk removed).
-4. **Next:** attrition/stall follow-up, then P2 pick one remaining fork (**test + green per item/commit**).
-5. **Then:** P3 Split Phase/Extract Function only where P1 types exist (**test + green per item/commit**).
+4. **P2 shared kernels:** done (kwire, runinfo, campaign, session, codec framing, boundary Draw).
+5. **Next:** P3 Split Phase/Extract Function (**test + green per item/commit**), or attrition/stall follow-up in parallel.
 6. **Last:** P4 Extract Class / polymorphism / ACL / formal bounded contexts (**test + green per item/commit**).
 
 ---
@@ -222,6 +222,7 @@ Highest leverage themes still live (mapped into waves above):
 1. **Extract Class** on god types after seams (P4), especially broker + `controlplane/machine`
 2. ~~Shared serve/manifest helpers~~ — **done** (`sys/runinfo.ServeMetrics` / `Publish`)
 3. ~~Echo ↔ Kafka client FSM / campaign~~ — **done** (`sim/internal/session`, `sim/internal/campaign`)
-4. ~~Share or formally fork logsm ↔ logcp~~ — **done by deletion**; one machine + exec remains
-5. ~~Shared binary reader across log twins~~ — **gone with the twins**
-6. ~~Remove Dead Code / flags (P0)~~ — **done**
+4. ~~kwire framing + boundary fault Draw~~ — **done** (`appendFlexibleTag`/`readBody`, `fakeio.Params.Draw`)
+5. ~~Share or formally fork logsm ↔ logcp~~ — **done by deletion**; one machine + exec remains
+6. ~~Shared binary reader across log twins~~ — **gone with the twins**
+7. ~~Remove Dead Code / flags (P0)~~ — **done**

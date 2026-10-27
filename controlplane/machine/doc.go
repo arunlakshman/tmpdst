@@ -6,6 +6,6 @@
 // other controlplane packages, but not broker, sim, sys, cmd, veritas, kwire,
 // format, net/http, Pebble, or the Dynamo SDK.
 //
-// CP-DSM-2 scaffolds New, Step, StateHash, and boot handling for Started and
-// Stop only. Later PRs add log I/O, apply, commit queue, and roles.
+// Log I/O goes out only as Log* IOActions. CP-DSM-3 adds a timer-driven
+// catch-up sketch (CheckTail then Read) that does not apply commands yet.
 package machine

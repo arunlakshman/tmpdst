@@ -150,7 +150,7 @@ func newRun(cfg Config, seed uint64) *run {
 	r.env = env{Rand: r.rng, Buggify: &buggify{r}, Assertions: r.as}
 
 	r.sc = SeedConfig{ObjectStore: cfg.ObjectStore, ControlPlane: cfg.ControlPlane,
-		Network: cfg.Network, Attrition: cfg.Attrition, Cost: cfg.Cost, Params: cfg.Params}
+		LogStore: cfg.LogStore, Network: cfg.Network, Attrition: cfg.Attrition, Cost: cfg.Cost, Params: cfg.Params}
 	if cfg.Swarm != nil {
 		cfg.Swarm(seed, r.rng.Derive("swarm"), &r.sc)
 	}

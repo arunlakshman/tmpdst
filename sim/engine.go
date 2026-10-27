@@ -152,6 +152,20 @@ type LogParams struct {
 // store (decision 32), a limit the log control plane does not have.
 const DynamoMaxCommitItems = 100
 
+// LogStoreFaults are the fault families of the fake Dynamo loglet engine
+// (sim/engines/logstore). Enabled gates construction in scenario Engines funcs.
+// Same issue-time draw rules as ObjectStoreFaults (decision 14).
+type LogStoreFaults struct {
+	Enabled        bool
+	ApplyLatency   TwoSpeed
+	RespondLatency TwoSpeed
+	Unavailable503 float64
+	Timeout        float64
+	LostResponse   float64
+	Outage         Outage
+	CallerTimeout  core.Duration
+}
+
 // NetworkFaults are connection-level faults (lesson 6).
 type NetworkFaults struct {
 	Latency         TwoSpeed

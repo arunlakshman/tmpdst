@@ -8,5 +8,8 @@
 //
 // Log I/O goes out only as Log* IOActions. Catch-up reads the log, applies
 // entries in slot order through an in-memory applier fold, and emits no-op
-// LogAppend actions to fill holes. Commit queue and K in-flight land later.
+// LogAppend actions to fill holes. Client commits enter via Offer into a
+// bounded queue; flush packs up to MaxCmdsPerSlot commands into one entry and
+// keeps at most K LogAppends in flight. Answers leave via TakeAnswers once the
+// winning slot applies. Role, checkpoint, and trim land later.
 package machine

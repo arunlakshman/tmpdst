@@ -116,9 +116,23 @@ func (n *Node) Start(ctx context.Context) error {
 		}
 		return loopErr
 	}
-	deadline := time.Now().Add(2 * time.Minute)
+	deadline := time.NewTimer(2 * time.Minute)
+	defer deadline.Stop()
 	for {
+		done := make(chan struct{})
+		var ready bool
+		n.inject <- func() []core.Action {
+			defer close(done)
+			m := n.m.Load()
+			ready = m != nil && m.Ready()
+			return nil
+		}
 		select {
+		case <-done:
+			if ready {
+				n.health.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+				return nil
+			}
 		case <-ctx.Done():
 			return fail(ctx.Err())
 		case err := <-n.loopDone:
@@ -126,21 +140,8 @@ func (n *Node) Start(ctx context.Context) error {
 				err = errors.New("controlplane/server: run exited before Ready")
 			}
 			return err
-		default:
-		}
-		if time.Now().After(deadline) {
+		case <-deadline.C:
 			return fail(errors.New("controlplane/server: timed out waiting for Ready"))
-		}
-		m := n.m.Load()
-		if m != nil && m.Ready() {
-			n.health.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
-			return nil
-		}
-		select {
-		case n.inject <- func() []core.Action { return nil }:
-		case <-ctx.Done():
-			return fail(ctx.Err())
-		case <-time.After(5 * time.Millisecond):
 		}
 	}
 }

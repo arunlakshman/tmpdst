@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"net"
@@ -13,6 +14,15 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	cpv1 "manifester/controlplane/api/v1"
+	"manifester/controlplane/apiconv"
+	"manifester/controlplane/exec"
+	"manifester/controlplane/machine"
+	"manifester/controlplane/server"
 	"manifester/core"
 	"manifester/sys/runinfo"
 )
@@ -135,19 +145,60 @@ func TestOpenObjectsS3(t *testing.T) {
 	}
 }
 
-// -cp-url takes a list: a dead URL and a standby (503) are skipped in one call.
+type unavailCP struct {
+	cpv1.UnimplementedControlPlaneServer
+}
+
+func (unavailCP) DescribeTopics(context.Context, *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
+	detail := &cpv1.ErrorDetail{
+		Code:    apiconv.FromCoreErr(core.ErrUnavailable),
+		Outcome: apiconv.FromCoreOutcome(core.NotApplied),
+	}
+	s, err := status.New(codes.Unavailable, "standby").WithDetails(detail)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, "standby")
+	}
+	return nil, s.Err()
+}
+
+func serveCP(t *testing.T, reg func(*grpc.Server)) string {
+	t.Helper()
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs := grpc.NewServer()
+	reg(gs)
+	go func() { _ = gs.Serve(ln) }()
+	t.Cleanup(gs.Stop)
+	return ln.Addr().String()
+}
+
+// -cp-url takes a list: a dead address and a standby (Unavailable) are skipped in one call.
 func TestCPURLListFailsOver(t *testing.T) {
-	dead := httptest.NewServer(http.NotFoundHandler())
-	deadURL := dead.URL
-	dead.Close()
-	standby := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("X-CP-Role", "standby")
-		http.Error(w, "not active", http.StatusServiceUnavailable)
-	}))
-	defer standby.Close()
-	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"topics":[]}`)) }))
-	defer up.Close()
-	f, _, err := parseFlags([]string{"-cp-url", deadURL + "," + standby.URL + "," + up.URL}, &bytes.Buffer{})
+	deadLn, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dead := deadLn.Addr().String()
+	_ = deadLn.Close()
+
+	standby := serveCP(t, func(gs *grpc.Server) {
+		cpv1.RegisterControlPlaneServer(gs, unavailCP{})
+	})
+	upNode := server.New(server.Config{
+		Machine: machine.Config{K: 4, CatchUpEvery: core.Duration(time.Millisecond), Rank: 0, Heartbeat: core.Duration(time.Second)},
+		Log:     exec.NewMemLog(),
+		Objects: exec.NewMemObjects(),
+		Self:    core.NodeRef{Node: "cp-up"},
+	})
+	if err := upNode.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = upNode.Close() })
+	up := serveCP(t, upNode.Register)
+
+	f, _, err := parseFlags([]string{"-cp-url", dead + "," + standby + "," + up}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}

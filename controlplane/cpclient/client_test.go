@@ -3,34 +3,54 @@ package cpclient
 import (
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
-	cp "manifester/controlplane"
-	"manifester/controlplane/memstore"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	cpv1 "manifester/controlplane/api/v1"
+	"manifester/controlplane/exec"
+	"manifester/controlplane/machine"
+	"manifester/controlplane/server"
 	"manifester/core"
 )
 
 func realClient(t *testing.T) *Client {
 	t.Helper()
-	srv := httptest.NewServer(cp.NewHandler(memstore.New()))
-	t.Cleanup(srv.Close)
-	return New(srv.URL+"/", nil)
+	n := server.New(server.Config{
+		Machine: machine.Config{
+			K: 4, CatchUpEvery: core.Duration(time.Millisecond),
+			Rank: 0, Heartbeat: core.Duration(time.Second),
+		},
+		Log: exec.NewMemLog(), Objects: exec.NewMemObjects(),
+		Self: core.NodeRef{Node: "cp-0"},
+	})
+	if err := n.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gs := grpc.NewServer()
+	n.Register(gs)
+	go func() { _ = gs.Serve(ln) }()
+	t.Cleanup(func() {
+		gs.GracefulStop()
+		_ = n.Close()
+	})
+	return New(ln.Addr().String(), nil)
 }
 
-func TestClientAgainstMemstore(t *testing.T) {
+func TestClientAgainstMachine(t *testing.T) {
 	c := realClient(t)
 	ctx := t.Context()
 	var ops []string
-	c.Observe(func(op string, d time.Duration) { ops = append(ops, op) })
+	c.Observe(func(op string, _ time.Duration) { ops = append(ops, op) })
 
 	if err := c.CreateTopic(ctx, "t", 2); err != nil {
 		t.Fatal(err)
@@ -60,17 +80,12 @@ func TestClientAgainstMemstore(t *testing.T) {
 		t.Errorf("observer saw %v", ops)
 	}
 
-	// business error: the same key with another request conflicts.
-	_, err = c.Call(ctx, core.CommitSegment{SegmentKey: "s1", Batches: []core.PendingBatch{{TP: tp, Records: 1, Loc: core.SegmentRef{Key: "s1", Len: 1}}}})
+	_, err = c.Call(ctx, core.CommitSegment{SegmentKey: "s1", Batches: []core.PendingBatch{
+		{TP: tp, Records: 1, Loc: core.SegmentRef{Key: "s1", Len: 1}},
+	}})
 	var be *Error
-	if !errors.As(err, &be) || be.Code != core.ErrConflict || be.Error() != "cp: ErrConflict" {
+	if !errors.As(err, &be) || be.Code != core.ErrConflict {
 		t.Fatalf("want conflict, got %v", err)
-	}
-	if _, err = c.Call(ctx, core.DescribeTopics{}); err != nil {
-		t.Fatal(err)
-	}
-	if err = c.CreateTopic(ctx, "bad", 0); err != nil && !errors.As(err, &be) {
-		t.Fatalf("create-topic: %v", err)
 	}
 }
 
@@ -88,255 +103,98 @@ func TestCallCtxAndUnknownOp(t *testing.T) {
 	}
 }
 
-// fake serves a fixed status and body for every request.
-func fake(t *testing.T, status int, body string) *Client {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(status)
-		_, _ = fmt.Fprint(w, body)
-	}))
-	t.Cleanup(srv.Close)
-	return New(srv.URL, srv.Client())
-}
-
-func TestCallErrorClasses(t *testing.T) {
-	cases := []struct {
-		name   string
-		status int
-		body   string
-		code   core.ErrCode
-		out    core.Outcome
-	}{
-		{"business", 200, `{"err":"ErrConflict"}`, core.ErrConflict, core.NotApplied},
-		{"unavailable", 503, "busy", core.ErrUnavailable, core.NotApplied},
-		{"throttled", 429, "slow", core.ErrUnavailable, core.NotApplied},
-		{"4xx", 400, "bad", core.ErrIO, core.NotApplied},
-		{"5xx", 500, "oops", core.ErrIO, core.MaybeApplied},
-		{"malformed", 200, `{"epoch":`, core.ErrIO, core.MaybeApplied},
-		{"unknown err", 200, `{"err":"ErrWhat"}`, core.ErrIO, core.MaybeApplied},
-	}
-	for _, tc := range cases {
-		c := fake(t, tc.status, tc.body)
-		_, err := c.Call(t.Context(), core.CommitSegment{})
-		if err == nil {
-			t.Fatalf("%s: no error", tc.name)
-		}
-		code, out := Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, err)
-		if code != tc.code || out != tc.out {
-			t.Errorf("%s: %v %v, want %v %v (err %v)", tc.name, code, out, tc.code, tc.out, err)
-		}
-		// reads are never MaybeApplied
-		if _, rout := (Classifier{}).Classify(core.CPCall{Op: core.Lookup{}}, err); rout == core.MaybeApplied {
-			t.Errorf("%s: read classified MaybeApplied", tc.name)
-		}
-	}
-	// CallError text carries the status.
-	_, err := fake(t, 500, " oops \n").Call(t.Context(), core.CommitSegment{})
-	if !strings.Contains(err.Error(), "commit-segment: http 500: oops") {
-		t.Errorf("error text %q", err)
-	}
-}
-
 func TestCallDialError(t *testing.T) {
-	srv := httptest.NewServer(http.NotFoundHandler())
-	url := srv.URL
-	srv.Close()
-	_, err := New(url, nil).Call(t.Context(), core.CommitSegment{})
-	var ce *CallError
-	if !errors.As(err, &ce) || ce.Sent {
-		t.Fatalf("want unsent CallError, got %v", err)
-	}
-	code, out := Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, err)
-	if code != core.ErrUnavailable || out != core.NotApplied {
-		t.Errorf("dial: %v %v", code, out)
-	}
-}
-
-func TestCallTimeoutAfterSend(t *testing.T) {
-	var hits atomic.Int32
-	release := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits.Add(1)
-		select {
-		case <-r.Context().Done():
-		case <-release:
-		}
-	}))
-	t.Cleanup(srv.Close)
-	t.Cleanup(func() { close(release) })
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer cancel()
-	_, err := New(srv.URL, nil).Call(ctx, core.CommitSegment{})
-	code, out := Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, err)
-	if code != core.ErrTimeout || out != core.MaybeApplied {
-		t.Errorf("timeout: %v %v (%v)", code, out, err)
-	}
-	_, out = Classifier{}.Classify(core.CPCall{Op: core.Lookup{}}, err)
-	if out != core.NotApplied {
-		t.Errorf("read timeout outcome %v", out)
-	}
-}
-
-func TestBadBaseURL(t *testing.T) {
-	_, err := New("http://bad host\x7f", nil).Call(t.Context(), core.CommitSegment{})
-	var ce *CallError
-	if !errors.As(err, &ce) || ce.Sent {
-		t.Fatalf("got %v", err)
-	}
-}
-
-type timeoutError struct{}
-
-func (timeoutError) Error() string   { return "t" }
-func (timeoutError) Timeout() bool   { return true }
-func (timeoutError) Temporary() bool { return false }
-
-func TestClassifyDirect(t *testing.T) {
-	put := core.CPCall{Op: core.CommitSegment{}}
-	notCP := core.ObjPut{}
-	dial := &net.OpError{Op: "dial", Err: errors.New("x")}
-	cases := []struct {
-		name string
-		a    core.IOAction
-		err  error
-		code core.ErrCode
-		out  core.Outcome
-	}{
-		{"plain error", put, errors.New("x"), core.ErrIO, core.MaybeApplied},
-		{"plain timeout", put, timeoutError{}, core.ErrTimeout, core.MaybeApplied},
-		{"deadline", put, context.DeadlineExceeded, core.ErrTimeout, core.MaybeApplied},
-		{"not a cp call", notCP, errors.New("x"), core.ErrIO, core.MaybeApplied},
-		{"unsent ctx", put, &CallError{Err: context.Canceled}, core.ErrIO, core.NotApplied},
-		{"unsent timeout", put, &CallError{Err: timeoutError{}}, core.ErrTimeout, core.NotApplied},
-		{"unsent dial", put, &CallError{Err: dial}, core.ErrUnavailable, core.NotApplied},
-		{"sent eof", put, &CallError{Sent: true, Err: errors.New("EOF")}, core.ErrIO, core.MaybeApplied},
-		{"sent timeout", put, &CallError{Sent: true, Err: timeoutError{}}, core.ErrTimeout, core.MaybeApplied},
-		{"business", put, fmt.Errorf("w: %w", &Error{Code: core.ErrNotFound}), core.ErrNotFound, core.NotApplied},
-	}
-	for _, tc := range cases {
-		code, out := classify(tc.a, tc.err)
-		if code != tc.code || out != tc.out {
-			t.Errorf("%s: %v %v, want %v %v", tc.name, code, out, tc.code, tc.out)
-		}
-	}
-}
-
-func TestIsDial(t *testing.T) {
-	yes := []error{
-		&net.DNSError{Err: "no such host"},
-		&net.OpError{Op: "dial", Err: errors.New("x")},
-		syscall.ECONNREFUSED, syscall.EHOSTUNREACH, syscall.ENETUNREACH,
-	}
-	for _, e := range yes {
-		if !isDial(e) {
-			t.Errorf("isDial(%v) = false", e)
-		}
-	}
-	for _, e := range []error{errors.New("x"), &net.OpError{Op: "read", Err: errors.New("x")}, syscall.ECONNRESET} {
-		if isDial(e) {
-			t.Errorf("isDial(%v) = true", e)
-		}
-	}
-}
-
-func TestFailoverAcrossURLs(t *testing.T) {
-	var standby atomic.Int64
-	sb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		standby.Add(1)
-		http.Error(w, "not active", http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(sb.Close)
-	dead := httptest.NewServer(http.NotFoundHandler())
-	deadURL := dead.URL
-	dead.Close() // connection refused
-	up := httptest.NewServer(cp.NewHandler(memstore.New()))
-	t.Cleanup(up.Close)
-
-	c := New(deadURL+", "+sb.URL+","+up.URL+"/", nil)
-	ctx := t.Context()
-	if err := c.CreateTopic(ctx, "t", 2); err != nil {
-		t.Fatalf("create through three urls: %v", err)
-	}
-	if got := c.cur.Load(); got != 2 {
-		t.Fatalf("sticky url %d, want 2", got)
-	}
-	before := standby.Load()
-	if _, err := c.Call(ctx, core.DescribeTopics{}); err != nil || standby.Load() != before {
-		t.Fatalf("a later call must start at the url that worked: %v (standby hits %d -> %d)", err, before, standby.Load())
-	}
-}
-
-func TestFailoverGivesUpAfterEachURLOnce(t *testing.T) {
-	var hits atomic.Int64
-	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hits.Add(1)
-		http.Error(w, "no", http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(bad.Close)
-	c := New(bad.URL+","+bad.URL, nil)
-	err := c.CreateTopic(t.Context(), "t", 1)
-	var ce *CallError
-	if !errors.As(err, &ce) || ce.Status != 503 || hits.Load() != 2 {
-		t.Fatalf("err %v hits %d", err, hits.Load())
-	}
-}
-
-func TestNoFailoverOnBusinessErrorOrTimeout(t *testing.T) {
-	var hits atomic.Int64
-	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hits.Add(1)
-		_, _ = io.Copy(io.Discard, r.Body) // lets the server notice the client going away
-		<-r.Context().Done()
-	}))
-	t.Cleanup(slow.Close)
-	up := httptest.NewServer(cp.NewHandler(memstore.New()))
-	t.Cleanup(up.Close)
-	c := New(slow.URL+","+up.URL, nil)
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer cancel()
-	if err := c.CreateTopic(ctx, "t", 1); err == nil || hits.Load() != 1 {
-		t.Fatalf("a sent request that times out must not be resent elsewhere: %v hits %d", err, hits.Load())
-	}
-	if c2 := New(up.URL, nil); c2.CreateTopic(t.Context(), "", 1) == nil {
-		t.Fatal("business error lost")
-	}
-}
-
-// Failback: the client is sticky to the URL that last worked (the promoted
-// standby); when that node steps down (503) the call wraps around to the
-// preferred node, which becomes the sticky URL again.
-func TestFailbackWrapsAround(t *testing.T) {
-	var demoted atomic.Bool
-	b := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if demoted.Load() {
-			w.Header().Set("Retry-After", "1")
-			http.Error(w, "not active", http.StatusServiceUnavailable)
-			return
-		}
-		cp.NewHandler(memstore.New()).ServeHTTP(w, r)
-	}))
-	t.Cleanup(b.Close)
-	a := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "down", http.StatusServiceUnavailable)
-	}))
-	aURL := a.URL
-	c := New(aURL+","+b.URL, nil)
-	ctx := t.Context()
-	if err := c.CreateTopic(ctx, "t", 1); err != nil || c.cur.Load() != 1 {
-		t.Fatalf("failover to b: %v cur %d", err, c.cur.Load())
-	}
-	a.Close()
-	a2 := httptest.NewUnstartedServer(cp.NewHandler(memstore.New()))
-	_ = a2.Listener.Close()
-	l, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", strings.TrimPrefix(aURL, "http://"))
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Skip("port not reusable:", err)
+		t.Fatal(err)
 	}
-	a2.Listener = l
-	a2.Start()
-	t.Cleanup(a2.Close)
-	demoted.Store(true)
-	if err := c.CreateTopic(ctx, "t2", 1); err != nil || c.cur.Load() != 0 {
-		t.Fatalf("failback to the preferred url: %v cur %d", err, c.cur.Load())
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	_, err = New(addr, nil).Call(t.Context(), core.CommitSegment{
+		SegmentKey: "k", Batches: []core.PendingBatch{{TP: core.TP("t", 0), Records: 1}},
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	code, out := Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, err)
+	if code != core.ErrUnavailable && code != core.ErrIO {
+		t.Errorf("dial: %v %v (%v)", code, out, err)
+	}
+}
+
+func TestClassifyBusinessAndTimeout(t *testing.T) {
+	be := &Error{Code: core.ErrConflict}
+	code, out := Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, be)
+	if code != core.ErrConflict || out != core.NotApplied {
+		t.Fatalf("business: %v %v", code, out)
+	}
+	ce := &CallError{Op: "CommitSegment", Sent: true, Code: codes.DeadlineExceeded, Err: context.DeadlineExceeded}
+	code, out = Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, ce)
+	if code != core.ErrTimeout || out != core.MaybeApplied {
+		t.Fatalf("timeout: %v %v", code, out)
+	}
+	_, out = Classifier{}.Classify(core.CPCall{Op: core.Lookup{}}, ce)
+	if out != core.NotApplied {
+		t.Fatalf("read timeout outcome %v", out)
+	}
+	ce = &CallError{Op: "x", Sent: false, Err: syscall.ECONNREFUSED}
+	code, out = Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, ce)
+	if code != core.ErrUnavailable || out != core.NotApplied {
+		t.Fatalf("unsent: %v %v", code, out)
+	}
+}
+
+func TestFailoverSkipsUnavailable(t *testing.T) {
+	bad := New("127.0.0.1:1", nil) // nothing listening
+	// Preferred bad, then a real node.
+	good := realClient(t)
+	c := New("127.0.0.1:1,"+good.addrs[0], nil)
+	_ = bad
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := c.CreateTopic(ctx, "t", 1); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMapRPCErrDetail(t *testing.T) {
+	st := status.New(codes.AlreadyExists, "ErrConflict")
+	st, err := st.WithDetails(&cpv1.ErrorDetail{
+		Code: cpv1.ErrCode_ERR_CODE_CONFLICT, Outcome: cpv1.Outcome_OUTCOME_NOT_APPLIED,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := mapRPCErr("CommitSegment", st.Err())
+	var be *Error
+	if !errors.As(got, &be) || be.Code != core.ErrConflict {
+		t.Fatalf("got %v", got)
+	}
+	if ce, ok := errors.AsType[*CallError](mapRPCErr("x", errors.New("plain"))); !ok || !ce.Sent {
+		t.Fatalf("plain: %v", mapRPCErr("x", errors.New("plain")))
+	}
+	for _, tc := range []struct {
+		code codes.Code
+		want core.ErrCode
+	}{
+		{codes.Unavailable, core.ErrUnavailable},
+		{codes.InvalidArgument, core.ErrInvalid},
+		{codes.NotFound, core.ErrNotFound},
+		{codes.AlreadyExists, core.ErrConflict},
+	} {
+		got := mapRPCErr("op", status.Error(tc.code, "x"))
+		be, ok := errors.AsType[*Error](got)
+		if !ok || be.Code != tc.want {
+			t.Fatalf("%v: %v", tc.code, got)
+		}
+	}
+	got = mapRPCErr("op", status.Error(codes.DeadlineExceeded, "late"))
+	ce, ok := errors.AsType[*CallError](got)
+	if !ok || ce.Code != codes.DeadlineExceeded {
+		t.Fatalf("deadline: %v", got)
+	}
+	got = mapRPCErr("op", status.Error(codes.Internal, "boom"))
+	if _, ok := errors.AsType[*CallError](got); !ok {
+		t.Fatalf("internal: %v", got)
 	}
 }

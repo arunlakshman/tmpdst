@@ -2,27 +2,21 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
-	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
-	"manifester/controlplane/applier/pebblekv"
 	"manifester/controlplane/cpobs"
+	"manifester/controlplane/exec"
 	"manifester/controlplane/logcp"
+	"manifester/core"
 	"manifester/sys"
 	"manifester/sys/s3store"
 )
 
-// kindLog is the -store kind of the log-backed control plane (decisions
-// 48-53, docs/log-cp-service.md): a DynamoDB log, Pebble state, S3 checkpoints.
 const kindLog = "dynamolog"
 
-// logFlags configure -store dynamolog. Defaults follow decisions 48-53.
 type logFlags struct {
 	table                    string
 	heartbeat, startTimeout  time.Duration
@@ -44,34 +38,32 @@ type logFlags struct {
 
 func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
 	fs.StringVar(&f.table, "table", "", "-store dynamolog: DynamoDB table (default <table-prefix>cp)")
-	fs.StringVar(&f.ckptBucket, "ckpt-bucket", "", "-store dynamolog: S3 bucket for checkpoints (empty: no checkpoints and no log trim; a restart replays the whole log)")
-	fs.StringVar(&f.ckptPrefix, "ckpt-prefix", "cp/", "-store dynamolog: key prefix of checkpoint objects in the bucket")
-	fs.StringVar(&f.s3Endpoint, "s3-endpoint", "", "-store dynamolog: S3 endpoint URL (empty: AWS)")
-	fs.BoolVar(&f.s3PathStyle, "s3-path-style", false, "-store dynamolog: path-style S3 addressing (SeaweedFS, MinIO)")
-	fs.StringVar(&f.nodeName, "node-name", "", "-store dynamolog: node name, unique per node, stamped on every slot (default the hostname)")
-	fs.IntVar(&f.rank, "rank", 0, "-store dynamolog: 0 is the preferred appender (starts active); higher ranks start as hot standbys")
-	fs.DurationVar(&f.takeoverAfter, "takeover-after", 5*time.Second, "-store dynamolog: a standby that saw no slot of another writer for this long becomes active (0: never on its own). Must stay well under the brokers' -commit-deadline (120 s)")
-	fs.DurationVar(&f.startTimeout, "start-timeout", 10*time.Minute, "-store dynamolog: give up if restoring the checkpoint and replaying the log takes longer (the port opens only after that, so brokers use the other CP URLs meanwhile)")
-	fs.DurationVar(&f.heartbeat, "heartbeat", time.Second, "-store dynamolog: an idle active node appends a no-op slot this often; -takeover-after must be several times larger")
-	fs.IntVar(&f.k, "log-k", 4, "-store dynamolog: slot appends in flight on the active node")
-	fs.Float64Var(&f.slotRate, "slot-rate", 200, "-store dynamolog: slot appends per second the active node paces itself to (one hot DynamoDB key)")
-	fs.DurationVar(&f.holeAfter, "hole-after", 250*time.Millisecond, "-store dynamolog: an empty slot below later ones is filled with a no-op after this long")
-	fs.DurationVar(&f.ckptEvery, "ckpt-every", 5*time.Minute, "-store dynamolog: checkpoint period on the active node (negative: never)")
-	fs.Int64Var(&f.ckptMinSlots, "ckpt-min-slots", 1000, "-store dynamolog: skip a periodic checkpoint when fewer slots were applied since the last")
-	fs.BoolVar(&f.finalCkpt, "final-checkpoint", true, "-store dynamolog: an active node writes a checkpoint on graceful shutdown (faster next start)")
-	fs.Int64Var(&f.windowSlots, "window-slots", 131072, "-store dynamolog: idempotency window in slots. A CLUSTER constant: every node of one log must use the same value")
-	fs.DurationVar(&f.logTTL, "log-ttl", 7*24*time.Hour, "-store dynamolog: ttl attribute stamped on log slots (the table's TTL setting expires them); must far exceed -ckpt-every")
-	fs.BoolVar(&f.trimDelete, "trim-delete", true, "-store dynamolog: overwrite trimmed slots with tombstones (false: leave them to the TTL)")
-	fs.StringVar(&f.pebbleDir, "pebble-dir", "", "-store dynamolog: directory of the Pebble state. It is rebuilt from the checkpoint and the log at every start, so it is wiped (only if it holds a Pebble database). Empty: a temporary directory")
+	fs.StringVar(&f.ckptBucket, "ckpt-bucket", "", "-store dynamolog: S3 bucket for checkpoints")
+	fs.StringVar(&f.ckptPrefix, "ckpt-prefix", "cp/", "-store dynamolog: key prefix of checkpoint objects")
+	fs.StringVar(&f.s3Endpoint, "s3-endpoint", "", "-store dynamolog: S3 endpoint URL")
+	fs.BoolVar(&f.s3PathStyle, "s3-path-style", false, "-store dynamolog: path-style S3 addressing")
+	fs.StringVar(&f.nodeName, "node-name", "", "-store dynamolog: node name (default hostname)")
+	fs.IntVar(&f.rank, "rank", 0, "-store dynamolog: 0 is the preferred appender")
+	fs.DurationVar(&f.takeoverAfter, "takeover-after", 5*time.Second, "-store dynamolog: standby takeover silence")
+	fs.DurationVar(&f.startTimeout, "start-timeout", 10*time.Minute, "-store dynamolog: startup budget")
+	fs.DurationVar(&f.heartbeat, "heartbeat", time.Second, "-store dynamolog: idle heartbeat")
+	fs.IntVar(&f.k, "log-k", 4, "-store dynamolog: commit LogAppends in flight")
+	fs.Float64Var(&f.slotRate, "slot-rate", 200, "-store dynamolog: advisory slot rate (unused by machine)")
+	fs.DurationVar(&f.holeAfter, "hole-after", 250*time.Millisecond, "-store dynamolog: hole-fill delay")
+	fs.DurationVar(&f.ckptEvery, "ckpt-every", 5*time.Minute, "-store dynamolog: checkpoint period")
+	fs.Int64Var(&f.ckptMinSlots, "ckpt-min-slots", 1000, "-store dynamolog: min slots between checkpoints")
+	fs.BoolVar(&f.finalCkpt, "final-checkpoint", true, "-store dynamolog: checkpoint on graceful shutdown (best effort)")
+	fs.Int64Var(&f.windowSlots, "window-slots", 131072, "-store dynamolog: idempotency window hint")
+	fs.DurationVar(&f.logTTL, "log-ttl", 7*24*time.Hour, "-store dynamolog: ttl attribute on log slots")
+	fs.BoolVar(&f.trimDelete, "trim-delete", true, "-store dynamolog: tombstone trimmed slots")
+	fs.StringVar(&f.pebbleDir, "pebble-dir", "", "-store dynamolog: unused (machine fold is in-memory); kept for flag compatibility")
 }
 
-// logDB is what the log store needs of DynamoDB: the log's calls and table creation.
 type logDB interface {
-	logcp.DB
+	exec.DB
 	logcp.TableAdmin
 }
 
-// deps are the outside parts run builds the log store from; tests replace them.
 type deps struct {
 	db      func(ctx context.Context, f cpFlags, m *cpobs.Metrics) (logDB, error)
 	objects func(ctx context.Context, f cpFlags) (sys.ObjectStore, error)
@@ -96,65 +88,6 @@ func (l logFlags) tableName(prefix string) string {
 	return prefix + "cp"
 }
 
-// logConfig maps the flags onto logcp.Config (the parts that are not wiring).
-func logConfig(f cpFlags, name string, log *slog.Logger) logcp.Config {
-	l := f.log
-	return logcp.Config{
-		Name: name, Rank: l.rank, Logger: log,
-		K: l.k, MaxSlotRate: l.slotRate, TakeoverAfter: l.takeoverAfter, Heartbeat: l.heartbeat, HoleAfter: l.holeAfter,
-		WindowSlots: l.windowSlots, CkptEvery: l.ckptEvery, CkptMinSlots: l.ckptMinSlots, TrimDelete: l.trimDelete,
-	}
-}
-
-// openLog builds, restores and starts the log-backed service and returns its
-// handler. The returned func stops it (final checkpoint, loops, Pebble); call
-// it once the HTTP server has drained.
-func openLog(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *slog.Logger) (http.Handler, func(), error) {
-	nop := func() {}
-	db, err := d.db(ctx, f, m)
-	if err != nil {
-		return nil, nop, err
-	}
-	table := f.log.tableName(f.prefix)
-	if f.create {
-		if err := logcp.CreateTable(ctx, db, table); err != nil {
-			return nil, nop, err
-		}
-	}
-	cfg := logConfig(f, nodeName(f.log), log)
-	cfg.DB, cfg.Table, cfg.Metrics = db, table, logcp.NewMetrics(m.Registry())
-	cfg.Log = logcp.NewDynLog(db, table, logcp.DynLogOptions{TTL: f.log.logTTL})
-	if f.log.ckptBucket != "" {
-		if cfg.Objects, err = d.objects(ctx, f); err != nil {
-			return nil, nop, err
-		}
-	} else {
-		log.Warn("no -ckpt-bucket: no checkpoints and no log trim; a restart replays the whole log", "event", "log_no_checkpoint")
-	}
-	kv, dir, err := openState(f.log.pebbleDir)
-	if err != nil {
-		return nil, nop, err
-	}
-	cfg.KV = kv
-	closeAll := func() { _ = kv.Close(); removeTemp(f.log.pebbleDir, dir) }
-	svc, err := logcp.New(cfg)
-	if err != nil {
-		closeAll()
-		return nil, nop, err
-	}
-	sctx, cancel := context.WithTimeout(ctx, f.log.startTimeout)
-	err = svc.Start(sctx)
-	cancel()
-	if err != nil {
-		_ = svc.Close() // already returning the start error
-		closeAll()
-		return nil, nop, fmt.Errorf("log store start: %w", err)
-	}
-	log.Info("log store ready", "event", "log_ready", "node", cfg.Name, "rank", cfg.Rank, "applied_slot", svc.Applied(),
-		"active", svc.IsActive(), "table", table, "ckpt_bucket", f.log.ckptBucket, "pebble_dir", dir)
-	return svc.Handler(), func() { stopLog(svc, f.log, log); closeAll() }, nil
-}
-
 func nodeName(l logFlags) string {
 	if l.nodeName != "" {
 		return l.nodeName
@@ -166,61 +99,43 @@ func nodeName(l logFlags) string {
 	return h
 }
 
-// stopLog writes the optional final checkpoint, then stops the loops.
-func stopLog(svc *logcp.Service, l logFlags, log *slog.Logger) {
-	if l.finalCkpt && l.ckptBucket != "" && svc.IsActive() && svc.Blocked() == nil {
-		cctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		slot, err := svc.Checkpoint(cctx)
-		cancel()
-		if err != nil {
-			log.Warn("final checkpoint failed", "event", "log_final_ckpt_failed", "err", err.Error())
-		} else {
-			log.Info("final checkpoint", "event", "log_final_ckpt", "slot", slot)
+func openDynLog(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *slog.Logger) (exec.Log, exec.ObjectStore, func(), error) {
+	nop := func() {}
+	db, err := d.db(ctx, f, m)
+	if err != nil {
+		return nil, nil, nop, err
+	}
+	table := f.log.tableName(f.prefix)
+	if f.create {
+		if err := logcp.CreateTable(ctx, db, table); err != nil {
+			return nil, nil, nop, err
 		}
 	}
-	_ = svc.Close() // shutdown path; nothing to do on failure
-}
-
-// openState opens the Pebble state in dir (a temporary directory when empty),
-// first removing any previous Pebble database there.
-func openState(dir string) (*pebblekv.DB, string, error) {
-	if dir == "" {
-		d, err := os.MkdirTemp("", "manicp-pebble-")
+	lg := exec.NewDynLog(db, table, exec.DynLogOptions{TTL: f.log.logTTL})
+	var objs exec.ObjectStore = exec.NewMemObjects()
+	if f.log.ckptBucket != "" {
+		store, err := d.objects(ctx, f)
 		if err != nil {
-			return nil, "", err
+			return nil, nil, nop, err
 		}
-		dir = d
-	} else if err := wipeState(dir); err != nil {
-		return nil, "", err
+		objs = sysObjects{store}
+	} else {
+		log.Warn("no -ckpt-bucket: no checkpoints and no log trim; a restart replays the whole log", "event", "log_no_checkpoint")
 	}
-	kv, err := pebblekv.Open(dir, pebblekv.Options{})
-	if err != nil {
-		return nil, "", err
-	}
-	return kv, dir, nil
+	log.Info("log store ready", "event", "log_ready", "node", nodeName(f.log), "rank", f.log.rank, "table", table, "ckpt_bucket", f.log.ckptBucket)
+	return lg, objs, nop, nil
 }
 
-// wipeState empties dir if it holds a Pebble database (a CURRENT file) or
-// nothing; any other content is refused, so a wrong flag cannot delete data.
-func wipeState(dir string) error {
-	ents, err := os.ReadDir(dir)
-	if errors.Is(err, os.ErrNotExist) || (err == nil && len(ents) == 0) {
-		return os.MkdirAll(dir, 0o750)
-	}
-	if err != nil {
-		return err
-	}
-	if _, err := os.Stat(filepath.Join(dir, "CURRENT")); err != nil {
-		return fmt.Errorf("-pebble-dir %s is not empty and holds no Pebble database; refusing to wipe it", dir)
-	}
-	if err := os.RemoveAll(dir); err != nil {
-		return err
-	}
-	return os.MkdirAll(dir, 0o750)
-}
+// sysObjects adapts sys.ObjectStore to exec.ObjectStore.
+type sysObjects struct{ s sys.ObjectStore }
 
-func removeTemp(flagDir, used string) {
-	if flagDir == "" {
-		_ = os.RemoveAll(used) // best-effort temp cleanup
-	}
+func (a sysObjects) Put(ctx context.Context, key string, data []byte) error {
+	return a.s.Put(ctx, key, data)
+}
+func (a sysObjects) Get(ctx context.Context, ref core.SegmentRef) ([]byte, error) {
+	return a.s.Get(ctx, ref)
+}
+func (a sysObjects) Delete(ctx context.Context, key string) error { return a.s.Delete(ctx, key) }
+func (a sysObjects) List(ctx context.Context, prefix string) ([]string, error) {
+	return a.s.List(ctx, prefix)
 }

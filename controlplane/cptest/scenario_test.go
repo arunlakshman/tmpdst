@@ -1,16 +1,11 @@
 package cptest
 
 import (
-	"context"
 	"errors"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 
-	cp "manifester/controlplane"
 	"manifester/controlplane/cpclient"
+	"manifester/controlplane/grpctest"
 	"manifester/core"
 	"manifester/veritas"
 )
@@ -101,23 +96,8 @@ func TestManyBatchesMemstore(t *testing.T) { lockstep(t, storeImpl{newMem()}, ma
 
 func TestRoundTrip(t *testing.T) {
 	ctx := t.Context()
-	st := newMem()
-	srv := httptest.NewServer(cp.NewHandler(st))
-	defer srv.Close()
-	c := cpclient.New(srv.URL, srv.Client())
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/healthz", nil)
-	if err != nil {
-		t.Fatalf("healthz: %v", err)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("healthz: %v", err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("healthz: %s", resp.Status)
-	}
+	n := grpctest.StartMem(t)
+	c := n.Client
 	if err := c.CreateTopic(ctx, "t", 3); err != nil {
 		t.Fatal(err)
 	}
@@ -139,8 +119,7 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil || d.(core.DescribeTopicsResp).Topics[0] != (core.TopicInfo{Name: "t", Partitions: 3}) {
 		t.Fatalf("describe: %+v %v", d, err)
 	}
-	// Business errors come back as typed errors.
-	commit.Batches[0].Records = 9 // the same key, another request
+	commit.Batches[0].Records = 9
 	_, err = c.Call(ctx, commit)
 	var be *cpclient.Error
 	if !errors.As(err, &be) || be.Code != core.ErrConflict {
@@ -149,58 +128,4 @@ func TestRoundTrip(t *testing.T) {
 	if code, out := (cpclient.Classifier{}).Classify(core.CPCall{Op: commit}, err); code != core.ErrConflict || out != core.NotApplied {
 		t.Fatalf("classify: %v %v", code, out)
 	}
-	// Malformed body: ErrInvalid at 200.
-	req, err = http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/v1/lookup", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err = http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("malformed: %d", resp.StatusCode)
-	}
 }
-
-type failStore struct {
-	cp.Store
-	err error
-}
-
-func (f failStore) CommitSegment(context.Context, core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
-	return core.CommitSegmentResp{}, core.OK, f.err
-}
-
-func TestHandlerStatus(t *testing.T) {
-	for _, c := range []struct {
-		err  error
-		want int
-	}{
-		{fmt.Errorf("busy: %w", cp.ErrUnavailable), 503},
-		{context.DeadlineExceeded, 503},
-		{errors.New("boom"), 500},
-	} {
-		srv := httptest.NewServer(cp.NewHandler(failStore{newMem(), c.err}))
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/v1/commit-segment", stringsReader(`{"segment_key":"k"}`))
-		if err != nil {
-			srv.Close()
-			t.Fatalf("%v: %v", c.err, err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			srv.Close()
-			t.Fatalf("%v: status %v err %v", c.err, resp, err)
-		}
-		_ = resp.Body.Close()
-		srv.Close()
-		if resp.StatusCode != c.want {
-			t.Fatalf("%v: status %v err %v", c.err, resp, err)
-		}
-	}
-}
-
-func stringsReader(s string) *strings.Reader { return strings.NewReader(s) }

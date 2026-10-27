@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http/httptest"
 	"testing"
 
 	cp "manifester/controlplane"
 	"manifester/controlplane/cpclient"
+	"manifester/controlplane/grpctest"
 	"manifester/controlplane/memstore"
 	"manifester/core"
 )
@@ -41,15 +41,15 @@ func (s storeImpl) CreateTopic(ctx context.Context, name string, parts int32) (c
 	return s.st.CreateTopic(ctx, name, parts)
 }
 
-// httpImpl drives a store through handler + client over httptest.
-type httpImpl struct{ c *cpclient.Client }
+// grpcImpl drives a machine node through cpclient.
+type grpcImpl struct{ c *cpclient.Client }
 
-func (h httpImpl) Exec(ctx context.Context, op core.CPOp) (core.CPResp, core.ErrCode, error) {
+func (h grpcImpl) Exec(ctx context.Context, op core.CPOp) (core.CPResp, core.ErrCode, error) {
 	r, err := h.c.Call(ctx, op)
 	return r, errCode(err), nonBusiness(err)
 }
 
-func (h httpImpl) CreateTopic(ctx context.Context, name string, parts int32) (core.ErrCode, error) {
+func (h grpcImpl) CreateTopic(ctx context.Context, name string, parts int32) (core.ErrCode, error) {
 	err := h.c.CreateTopic(ctx, name, parts)
 	return errCode(err), nonBusiness(err)
 }
@@ -68,10 +68,8 @@ func nonBusiness(err error) error {
 	return err
 }
 
-func httpOver(t testing.TB, st cp.Store) impl {
-	srv := httptest.NewServer(cp.NewHandler(st))
-	t.Cleanup(srv.Close)
-	return httpImpl{cpclient.New(srv.URL, srv.Client())}
+func grpcOver(t testing.TB) impl {
+	return grpcImpl{grpctest.StartMem(t).Client}
 }
 
 func newMem() cp.Store { return memstore.New() }

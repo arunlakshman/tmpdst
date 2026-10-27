@@ -7,7 +7,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"net/http/httptest"
 	"sort"
 	"strings"
 	"sync"
@@ -107,12 +106,4 @@ func Start(t testing.TB, cfg logcp.Config) *logcp.Service {
 func NewMem(t testing.TB) *logcp.Service {
 	t.Helper()
 	return Start(t, FastConfig("n0", 0, logcp.NewMemLog()))
-}
-
-// Server serves s's handler over httptest and closes it with t.
-func Server(t testing.TB, s *logcp.Service) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(s.Handler())
-	t.Cleanup(srv.Close)
-	return srv
 }

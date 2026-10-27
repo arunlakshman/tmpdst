@@ -1,87 +1,97 @@
 // Package cpclient is the broker-side adapter for the control plane: a
-// sys.ControlPlane over the cp HTTP API and the sys.Classifier for CPCall.
+// sys.ControlPlane over the gRPC API and the sys.Classifier for CPCall.
 package cpclient
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptrace"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	cp "manifester/controlplane"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+
+	cpv1 "manifester/controlplane/api/v1"
+	"manifester/controlplane/apiconv"
 	"manifester/core"
 	"manifester/sys"
-	"manifester/sys/httppool"
 )
 
-// Error is a business error answered by the control plane (HTTP 200).
-type Error struct{ Code core.ErrCode }
+// Error is a business error answered by the control plane (non-OK status with
+// ErrorDetail).
+type Error struct {
+	Code    core.ErrCode
+	Outcome core.Outcome
+}
 
 func (e *Error) Error() string { return "cp: " + e.Code.String() }
 
-// CallError is a failed exchange. Sent reports whether the request may have
-// reached the server (a connection was obtained); Status is the HTTP status
-// if a response arrived.
+// CallError is a failed exchange (dial, transport, or undecodable status).
+// Sent reports whether the request may have reached the server.
 type CallError struct {
-	Op     string
-	Sent   bool
-	Status int
-	Err    error
+	Op   string
+	Sent bool
+	Code codes.Code
+	Err  error
 }
 
 func (e *CallError) Error() string {
-	if e.Status != 0 {
-		return fmt.Sprintf("cp: %s: http %d: %v", e.Op, e.Status, e.Err)
+	if e.Code != codes.OK {
+		return fmt.Sprintf("cp: %s: grpc %s: %v", e.Op, e.Code, e.Err)
 	}
 	return fmt.Sprintf("cp: %s: %v", e.Op, e.Err)
 }
 func (e *CallError) Unwrap() error { return e.Err }
 
-// Client implements sys.ControlPlane.
+// Client implements sys.ControlPlane over plaintext gRPC.
 type Client struct {
-	bases []string
-	cur   atomic.Int32 // index of the URL that last worked
-	hc    *http.Client
+	addrs []string
+	cur   atomic.Int32
+	dial  func(ctx context.Context, addr string) (*grpc.ClientConn, error)
 	obs   func(op string, d time.Duration)
+
+	mu    atomic.Pointer[grpc.ClientConn]
+	muIdx atomic.Int32
 }
 
-// Observe sets a callback receiving, per exchange, the op name and the time
-// from sending the request to reading the whole response (the client-side
-// round trip, errors included). Call before the first Call.
+// Observe sets a callback receiving, per exchange, the op name and duration.
 func (c *Client) Observe(f func(op string, d time.Duration)) { c.obs = f }
 
 var _ sys.ControlPlane = (*Client)(nil)
 
-// New returns a client for the service at baseURL. baseURL may be a comma
-// separated list of control-plane URLs (decision 51): calls go to the URL that
-// last worked, and a connection that could not be made or a 503 (a standby, a
-// node that is starting or cannot apply the log) moves on to the next URL
-// within the same call, each URL at most once. A commit retried this way is
-// safe: it carries its segment key. A nil hc gets a default client; deadlines
-// come from the context of each call.
-func New(baseURL string, hc *http.Client) *Client {
-	if hc == nil {
-		// Sized for the real concurrency (audit item 4): see httppool.
-		hc = &http.Client{Transport: httppool.Transport()}
+// New returns a client for target. target may be a comma-separated list of
+// host:port addresses (decision 51 / Appendix E): calls go to the address that
+// last worked; Unavailable moves on to the next within the same call.
+func New(target string, _ any) *Client {
+	c := &Client{
+		dial: func(ctx context.Context, addr string) (*grpc.ClientConn, error) {
+			return grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		},
 	}
-	c := &Client{hc: hc}
-	for u := range strings.SplitSeq(baseURL, ",") {
-		if u = strings.TrimRight(strings.TrimSpace(u), "/"); u != "" {
-			c.bases = append(c.bases, u)
+	for a := range strings.SplitSeq(target, ",") {
+		if a = strings.TrimSpace(a); a != "" {
+			// Accept legacy http(s)://host:port by stripping the scheme.
+			a = strings.TrimPrefix(a, "https://")
+			a = strings.TrimPrefix(a, "http://")
+			c.addrs = append(c.addrs, a)
 		}
 	}
 	return c
 }
 
-// Call performs op. A business error is returned as *Error, any other
-// failure as *CallError (or the context error if ctx was already done).
+// Close tears down the cached connection.
+func (c *Client) Close() error {
+	if conn := c.mu.Swap(nil); conn != nil {
+		return conn.Close()
+	}
+	return nil
+}
+
+// Call performs op. A business error is *Error; other failures are *CallError.
 func (c *Client) Call(ctx context.Context, op core.CPOp) (core.CPResp, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -97,83 +107,82 @@ func (c *Client) Call(ctx context.Context, op core.CPOp) (core.CPResp, error) {
 	return nil, &Error{Code: core.ErrInvalid}
 }
 
-// exchange posts req to the named endpoint, decodes into out and turns its
-// business error field (errOf, read after decoding) into *Error.
-func (c *Client) exchange(ctx context.Context, name string, req, out any, errOf func() string) error {
-	if err := c.do(ctx, name, req, out); err != nil {
-		return err
-	}
-	return business(errOf())
-}
-
+//nolint:dupl // each CPOp keeps its own request/response conversion
 func (c *Client) commitSegment(ctx context.Context, op core.CommitSegment) (core.CPResp, error) {
-	req := cp.CommitReq{SegmentKey: op.SegmentKey}
-	for _, b := range op.Batches {
-		req.Batches = append(req.Batches, cp.BatchToWire(b))
-	}
-	var out cp.CommitResp
-	if err := c.exchange(ctx, "commit-segment", req, &out, func() string { return out.Err }); err != nil {
-		return nil, err
-	}
-	return core.CommitSegmentResp{Assigned: ranges(out.Assigned)}, nil
-}
-
-func (c *Client) lookup(ctx context.Context, op core.Lookup) (core.CPResp, error) {
-	req := cp.LookupReq{Topic: op.TP.Topic, Partition: op.TP.Partition, From: int64(op.From), MaxBytes: op.MaxBytes}
-	var out cp.LookupResp
-	if err := c.exchange(ctx, "lookup", req, &out, func() string { return out.Err }); err != nil {
-		return nil, err
-	}
-	return core.LookupResp{Ranges: ranges(out.Ranges), End: core.Offset(out.End)}, nil
-}
-
-func (c *Client) describeTopics(ctx context.Context, op core.DescribeTopics) (core.CPResp, error) {
-	var out cp.DescribeResp
-	if err := c.exchange(ctx, "describe-topics", cp.DescribeReq{Topics: op.Topics}, &out, func() string { return out.Err }); err != nil {
-		return nil, err
-	}
-	var resp core.DescribeTopicsResp
-	for _, t := range out.Topics {
-		resp.Topics = append(resp.Topics, core.TopicInfo{Name: t.Name, Partitions: t.Partitions})
-	}
-	return resp, nil
-}
-
-// CreateTopic is the dev/test helper over POST /v1/create-topic.
-func (c *Client) CreateTopic(ctx context.Context, name string, partitions int32) error {
-	var out cp.CreateTopicResp
-	if err := c.do(ctx, "create-topic", cp.CreateTopicReq{Topic: name, Partitions: partitions}, &out); err != nil {
-		return err
-	}
-	return business(out.Err)
-}
-
-func business(s string) error {
-	code, err := cp.ErrFromWire(s)
+	var out *cpv1.CommitSegmentResponse
+	err := c.do(ctx, "CommitSegment", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
+		var e error
+		out, e = cli.CommitSegment(ctx, apiconv.CommitSegmentFromCore(op))
+		return e
+	})
 	if err != nil {
-		return &CallError{Op: "decode", Sent: true, Status: 200, Err: err}
+		return nil, err
 	}
-	if code != core.OK {
-		return &Error{Code: code}
-	}
-	return nil
+	return apiconv.CommitSegmentRespToCore(out), nil
 }
 
-func ranges(in []cp.Range) []core.BatchRange {
-	var out []core.BatchRange
-	for _, r := range in {
-		out = append(out, cp.RangeFromWire(r))
+//nolint:dupl // each CPOp keeps its own request/response conversion
+func (c *Client) lookup(ctx context.Context, op core.Lookup) (core.CPResp, error) {
+	var out *cpv1.LookupResponse
+	err := c.do(ctx, "Lookup", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
+		var e error
+		out, e = cli.Lookup(ctx, apiconv.LookupFromCore(op))
+		return e
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out
+	return apiconv.LookupRespToCore(out), nil
 }
 
-func (c *Client) do(ctx context.Context, name string, req, resp any) error {
-	n := len(c.bases)
+//nolint:dupl // each CPOp keeps its own request/response conversion
+func (c *Client) describeTopics(ctx context.Context, op core.DescribeTopics) (core.CPResp, error) {
+	var out *cpv1.DescribeTopicsResponse
+	err := c.do(ctx, "DescribeTopics", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
+		var e error
+		out, e = cli.DescribeTopics(ctx, apiconv.DescribeTopicsFromCore(op))
+		return e
+	})
+	if err != nil {
+		return nil, err
+	}
+	return apiconv.DescribeTopicsRespToCore(out), nil
+}
+
+// CreateTopic is the dev/test helper over CreateTopic.
+func (c *Client) CreateTopic(ctx context.Context, name string, partitions int32) error {
+	return c.do(ctx, "CreateTopic", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
+		_, err := cli.CreateTopic(ctx, &cpv1.CreateTopicRequest{Topic: name, Partitions: partitions})
+		return err
+	})
+}
+
+// GetStatus calls GetStatus on the preferred address.
+func (c *Client) GetStatus(ctx context.Context) (*cpv1.GetStatusResponse, error) {
+	var out *cpv1.GetStatusResponse
+	err := c.do(ctx, "GetStatus", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
+		var e error
+		out, e = cli.GetStatus(ctx, &cpv1.GetStatusRequest{})
+		return e
+	})
+	return out, err
+}
+
+func (c *Client) do(ctx context.Context, name string, fn func(context.Context, cpv1.ControlPlaneClient) error) error {
+	if c.obs != nil {
+		t0 := time.Now()
+		defer func() { c.obs(name, time.Since(t0)) }()
+	}
+	n := len(c.addrs)
+	if n == 0 {
+		return &CallError{Op: name, Err: errors.New("no addresses")}
+	}
 	start := int(c.cur.Load())
 	var err error
 	for i := range n {
 		idx := (start + i) % n
-		if err = c.doAt(ctx, c.bases[idx], name, req, resp); !shouldFailover(ctx, err) {
+		err = c.doAt(ctx, c.addrs[idx], idx, name, fn)
+		if !shouldFailover(ctx, err) {
 			if i > 0 && err == nil {
 				c.cur.Store(int32(idx))
 			}
@@ -183,52 +192,76 @@ func (c *Client) do(ctx context.Context, name string, req, resp any) error {
 	return err
 }
 
-// shouldFailover: the request certainly did not run here (no connection) or
-// the node said it will not take it now (503), and the caller is still waiting.
 func shouldFailover(ctx context.Context, err error) bool {
-	var ce *CallError
-	if err == nil || ctx.Err() != nil || !errors.As(err, &ce) {
+	if err == nil || ctx.Err() != nil {
 		return false
 	}
-	return !ce.Sent || ce.Status == http.StatusServiceUnavailable
+	if ce, ok := errors.AsType[*CallError](err); ok {
+		return !ce.Sent || ce.Code == codes.Unavailable
+	}
+	if be, ok := errors.AsType[*Error](err); ok {
+		return be.Code == core.ErrUnavailable
+	}
+	st, ok := status.FromError(err)
+	return ok && st.Code() == codes.Unavailable
 }
 
-func (c *Client) doAt(ctx context.Context, base, name string, req, resp any) error {
-	body, err := json.Marshal(req)
+func (c *Client) doAt(ctx context.Context, addr string, idx int, name string, fn func(context.Context, cpv1.ControlPlaneClient) error) error {
+	conn, err := c.conn(ctx, addr, idx)
 	if err != nil {
-		return &CallError{Op: name, Err: err}
+		return &CallError{Op: name, Sent: false, Err: err}
 	}
-	sent := false
-	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { sent = true }})
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/v1/"+name, bytes.NewReader(body))
-	if err != nil {
-		return &CallError{Op: name, Err: err}
+	err = fn(ctx, cpv1.NewControlPlaneClient(conn))
+	if err == nil {
+		return nil
 	}
-	hreq.Header.Set("Content-Type", "application/json")
-	if c.obs != nil {
-		t0 := time.Now()
-		defer func() { c.obs(name, time.Since(t0)) }()
-	}
-	hres, err := c.hc.Do(hreq)
-	if err != nil {
-		return &CallError{Op: name, Sent: sent, Err: err}
-	}
-	defer func() { _ = hres.Body.Close() }() // body already read by decodeReply
-	return decodeReply(name, hres, resp)
+	return mapRPCErr(name, err)
 }
 
-// decodeReply reads a response that has arrived: non-200 and unreadable or
-// malformed bodies are *CallError with Sent set.
-func decodeReply(name string, hres *http.Response, resp any) error {
-	data, err := io.ReadAll(io.LimitReader(hres.Body, 64<<20))
+func (c *Client) conn(ctx context.Context, addr string, idx int) (*grpc.ClientConn, error) {
+	if conn := c.mu.Load(); conn != nil && int(c.muIdx.Load()) == idx {
+		return conn, nil
+	}
+	conn, err := c.dial(ctx, addr)
 	if err != nil {
-		return &CallError{Op: name, Sent: true, Status: hres.StatusCode, Err: err}
+		return nil, err
 	}
-	if hres.StatusCode != http.StatusOK {
-		return &CallError{Op: name, Sent: true, Status: hres.StatusCode, Err: fmt.Errorf("%s", strings.TrimSpace(string(data)))}
+	if old := c.mu.Swap(conn); old != nil {
+		_ = old.Close()
 	}
-	if err := json.Unmarshal(data, resp); err != nil {
-		return &CallError{Op: name, Sent: true, Status: hres.StatusCode, Err: err}
+	c.muIdx.Store(int32(idx))
+	return conn, nil
+}
+
+func mapRPCErr(name string, err error) error {
+	st, ok := status.FromError(err)
+	if !ok {
+		return &CallError{Op: name, Sent: true, Err: err}
 	}
-	return nil
+	for _, d := range st.Details() {
+		if ed, ok := d.(*cpv1.ErrorDetail); ok {
+			return &Error{
+				Code:    apiconv.ToCoreErr(ed.Code),
+				Outcome: apiconv.ToCoreOutcome(ed.Outcome),
+			}
+		}
+	}
+	code := core.ErrIO
+	switch st.Code() {
+	case codes.Unavailable:
+		code = core.ErrUnavailable
+	case codes.InvalidArgument:
+		code = core.ErrInvalid
+	case codes.NotFound:
+		code = core.ErrNotFound
+	case codes.AlreadyExists:
+		code = core.ErrConflict
+	case codes.DeadlineExceeded, codes.Canceled:
+		code = core.ErrTimeout
+	}
+	// Prefer typed Error when the status maps cleanly so Classify sees business codes.
+	if code == core.ErrUnavailable || code == core.ErrInvalid || code == core.ErrNotFound || code == core.ErrConflict {
+		return &Error{Code: code}
+	}
+	return &CallError{Op: name, Sent: true, Code: st.Code(), Err: err}
 }

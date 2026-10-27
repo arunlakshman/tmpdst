@@ -3,8 +3,6 @@ package logcp_test
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -239,46 +237,6 @@ func TestStandbyRefusesCommitsAndServesFreshReads(t *testing.T) {
 		if err != nil || l.End != r.Assigned[0].Base+core.Offset(r.Assigned[0].Count) {
 			t.Fatalf("standby lookup after ack %d: %+v %v", i, l, err)
 		}
-	}
-	srv := httptest.NewServer(standby.Handler())
-	defer srv.Close()
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/v1/commit-segment", strings.NewReader(`{"segment_key":"x"}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") == "" || resp.Header.Get(logcp.RoleHeader) != "standby" {
-		t.Fatalf("standby http: %d %v", resp.StatusCode, resp.Header)
-	}
-	req, err = http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL+"/v1/describe-topics", strings.NewReader(`{}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err = http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("describe on a standby: %d", resp.StatusCode)
-	}
-	hreq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/healthz", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hresp, err := http.DefaultClient.Do(hreq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = hresp.Body.Close()
-	if hresp.StatusCode != http.StatusOK {
-		t.Fatalf("healthz: %d", hresp.StatusCode)
 	}
 }
 

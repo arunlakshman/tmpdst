@@ -24,14 +24,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/signal"
 	"strings"
@@ -41,6 +38,8 @@ import (
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
+
+	"manifester/controlplane/cpclient"
 )
 
 func main() { os.Exit(mainRun(os.Args[1:], os.Stdout, os.Stderr, newKgoClient)) }
@@ -95,8 +94,8 @@ func parseArgs(args []string, stderr io.Writer) (benchConfig, bool) {
 	fs.IntVar(&c.inflight, "max-inflight", 0, "kgo MaxProduceRequestsInflightPerBroker (0: kgo default, 1; above 1 a retry can reorder, there is no idempotence)")
 	fs.IntVar(&c.buffered, "buffered-records", 5000, "kgo MaxBufferedRecords per client")
 	fs.StringVar(&c.compression, "compression", "none", "batch compression: none, gzip, snappy, lz4 or zstd")
-	fs.StringVar(&c.cpURL, "cp-url", "", "control plane URL, used with -create-partitions")
-	fs.IntVar(&c.createParts, "create-partitions", 0, "if > 0, POST /v1/create-topic first")
+	fs.StringVar(&c.cpURL, "cp-url", "", "control plane gRPC address (host:port), used with -create-partitions")
+	fs.IntVar(&c.createParts, "create-partitions", 0, "if > 0, CreateTopic via gRPC first")
 	if fs.Parse(args) != nil {
 		return c, false
 	}
@@ -128,25 +127,13 @@ func mainRun(args []string, stdout, stderr io.Writer, nc clientFactory) int {
 	return run(ctx, c, stdout, stderr, nc)
 }
 
-func createTopic(ctx context.Context, url, topic string, n int) error {
-	if url == "" {
-		url = "http://127.0.0.1:8080"
+func createTopic(ctx context.Context, addr, topic string, n int) error {
+	if addr == "" {
+		addr = "127.0.0.1:8080"
 	}
-	body, _ := json.Marshal(map[string]any{"topic": topic, "partitions": n})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(url, "/")+"/v1/create-topic", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }() // read-only response
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("status %s", resp.Status)
-	}
-	return nil
+	c := cpclient.New(addr, nil)
+	defer func() { _ = c.Close() }()
+	return c.CreateTopic(ctx, topic, int32(n))
 }
 
 // clientOpts builds the kgo options shared by every client.

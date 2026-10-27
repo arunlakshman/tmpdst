@@ -173,8 +173,8 @@ func TestConformanceMemstore(t *testing.T) {
 	run(t, func() impl { return storeImpl{newMem()} }, 200, 200)
 }
 
-func TestConformanceMemstoreHTTP(t *testing.T) {
-	run(t, func() impl { return httpOver(t, newMem()) }, 100, 30)
+func TestConformanceMemstoreGRPC(t *testing.T) {
+	run(t, func() impl { return grpcOver(t) }, 100, 30)
 }
 
 var _ cp.Store = newMem()

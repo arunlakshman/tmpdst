@@ -5,14 +5,19 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"net/http"
-	"net/http/httptest"
+	"net"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
+	"google.golang.org/grpc"
+
+	"manifester/controlplane/exec"
+	"manifester/controlplane/machine"
+	"manifester/controlplane/server"
+	"manifester/core"
 )
 
 type fakeProducer struct {
@@ -56,31 +61,35 @@ func TestMainRunUsage(t *testing.T) {
 }
 
 func TestCreateTopic(t *testing.T) {
-	var body string
-	status := 200
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var b bytes.Buffer
-		_, _ = b.ReadFrom(r.Body)
-		body = r.URL.Path + " " + b.String()
-		w.WriteHeader(status)
-	}))
-	defer srv.Close()
-	if err := createTopic(t.Context(), srv.URL+"/", "tt", 3); err != nil {
+	n := server.New(server.Config{
+		Machine: machine.Config{
+			K: 4, CatchUpEvery: core.Duration(time.Millisecond),
+			Rank: 0, Heartbeat: core.Duration(time.Second),
+		},
+		Log: exec.NewMemLog(), Objects: exec.NewMemObjects(),
+		Self: core.NodeRef{Node: "cp"},
+	})
+	if err := n.Start(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(body, "/v1/create-topic") || !strings.Contains(body, `"partitions":3`) {
-		t.Fatal(body)
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
 	}
-	status = 500
-	if err := createTopic(t.Context(), srv.URL, "tt", 3); err == nil {
-		t.Fatal("want status error")
+	gs := grpc.NewServer()
+	n.Register(gs)
+	go func() { _ = gs.Serve(ln) }()
+	t.Cleanup(func() { gs.Stop(); _ = n.Close() })
+	addr := ln.Addr().String()
+	if err := createTopic(t.Context(), addr, "tt", 3); err != nil {
+		t.Fatal(err)
 	}
-	if err := createTopic(t.Context(), "http://127.0.0.1:1", "tt", 3); err == nil {
+	if err := createTopic(t.Context(), "127.0.0.1:1", "tt", 3); err == nil {
 		t.Fatal("want dial error")
 	}
 
 	var out, eb bytes.Buffer
-	if mainRun([]string{"benchmark-producer", "-topic", "t", "-create-partitions", "2", "-cp-url", srv.URL}, &out, &eb, nil) != 1 {
+	if mainRun([]string{"benchmark-producer", "-topic", "t", "-create-partitions", "2", "-cp-url", "127.0.0.1:1"}, &out, &eb, nil) != 1 {
 		t.Fatal("create failure must exit 1")
 	}
 	if !strings.Contains(eb.String(), "create topic:") {

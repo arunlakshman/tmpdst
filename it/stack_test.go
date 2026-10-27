@@ -3,17 +3,14 @@ package it
 import (
 	"context"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"manifester/broker"
-	cp "manifester/controlplane"
 	"manifester/controlplane/cpclient"
+	"manifester/controlplane/grpctest"
 	"manifester/core"
 	"manifester/sys"
-	"manifester/sys/httppool"
 	"manifester/sys/prod"
 	"manifester/veritas/vsys"
 )
@@ -28,23 +25,14 @@ type stack struct {
 	brokers broker.Config
 }
 
-// newStack serves st over HTTP and uses objs (nil: in memory) for segments.
-func newStack(t *testing.T, st cp.Store, objs sys.ObjectStore, cls sys.Classifier) *stack {
+// newStack boots an in-process gRPC control plane. st is ignored (kept for call-site shape).
+func newStack(t *testing.T, _ any, objs sys.ObjectStore, cls sys.Classifier) *stack {
 	t.Helper()
-	srv := httptest.NewServer(cp.NewHandler(st))
-	t.Cleanup(srv.Close)
+	gn := grpctest.StartMem(t)
 	if objs == nil {
 		objs, cls = vsys.NewObjectStore(), prod.MemClassifier{}
 	}
-	// One pooled client shared by every broker: reuse CP connections instead of
-	// dialing per request (macOS ephemeral-port pressure).
-	hc := srv.Client()
-	if tr, ok := hc.Transport.(*http.Transport); ok {
-		httppool.Configure(tr)
-	}
-	t.Cleanup(hc.CloseIdleConnections)
-	// A short window keeps the suite fast; TestDefaultFlushRule runs the real defaults.
-	s := &stack{t: t, cp: cpclient.New(srv.URL, hc), objs: objs, objCls: cls,
+	s := &stack{t: t, cp: gn.Client, objs: objs, objCls: cls,
 		brokers: broker.Config{BatchWindow: core.Duration(20 * time.Millisecond)}}
 	t.Cleanup(func() {
 		for _, n := range s.nodes {

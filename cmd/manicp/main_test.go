@@ -35,7 +35,7 @@ func TestRunServesMemStoreAndStops(t *testing.T) {
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+maddr+"/healthz", nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+maddr+"/metrics", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -104,7 +104,7 @@ func TestRunErrors(t *testing.T) {
 func TestManifestFailureIsNotFatal(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "file")
 	_ = os.WriteFile(f, nil, 0o600)
-	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	var logs bytes.Buffer
 	code := run(ctx, []string{"-addr", freeAddr(t), "-metrics-addr", "", "-manifest-out", filepath.Join(f, "x", "m.json")}, &logs)

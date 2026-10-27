@@ -6,9 +6,12 @@ import (
 	"manifester/core"
 )
 
-// ControlPlane is the spec of the control plane as a broker sees it
-// (core.CPOp). Sequential, fault-free; Outcome is Applied for a state change
-// and NotApplied for errors and reads. Rules:
+// ControlPlane is the spec of the control plane as a broker sees it.
+// Wire payloads are controlplane/api/v1 messages (decision 57); this oracle
+// still steps core.CPOp values via CPCall so sim and brokers keep one bridge,
+// with apiconv at the gRPC edge. Apply logic stays unshared (decision 21).
+// Sequential, fault-free; Outcome is Applied for a state change and NotApplied
+// for errors and reads. Rules:
 //
 //	Log            A partition's log is a list of runs (core.BatchRange), each
 //	               [Base, Base+Count). Its end offset is the newest run's

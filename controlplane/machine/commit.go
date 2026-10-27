@@ -43,11 +43,12 @@ type flight struct {
 
 // Offer enqueues a client command and flushes when an in-flight slot is free.
 // Answers arrive via TakeAnswers only after the winning slot applies.
+// Standby or not-yet-Ready nodes refuse without emitting LogAppend.
 func (m *Machine) Offer(op ClientOp) []core.Action {
 	if m.exited {
 		return nil
 	}
-	if m.cfg.K <= 0 {
+	if m.cfg.K <= 0 || !m.canCommit() {
 		m.answers = append(m.answers, Answer{
 			Req:  op.Req,
 			Done: core.CPDone{Req: op.Req, Err: core.ErrUnavailable},
@@ -81,7 +82,11 @@ func (m *Machine) InFlightCommits() int { return len(m.flights) }
 func (m *Machine) QueueDepth() int { return len(m.queue) }
 
 func (m *Machine) flushCommits() []core.Action {
-	if m.cfg.K <= 0 || m.exited {
+	if m.cfg.K <= 0 || m.exited || m.booting {
+		return nil
+	}
+	// Demote still drains a non-empty queue; Offer already refused new work.
+	if !m.isAppender() && len(m.queue) == 0 {
 		return nil
 	}
 	var acts []core.Action
@@ -107,7 +112,8 @@ func (m *Machine) emitCommitGroup() []core.Action {
 		e.ID = id
 		entries[i] = e
 	}
-	data := encodeGroup(id, entries)
+	inner := encodeGroup(id, entries)
+	data := wrap(m.cfg.Rank, m.cfg.writer(), inner)
 	slot := m.alloc()
 	m.nextReq++
 	req := m.nextReq
@@ -178,6 +184,11 @@ func encodeGroup(id string, cmds []applier.Entry) []byte {
 }
 
 func decodeGroup(data []byte) (string, []applier.Entry, bool) {
+	_, _, payload, ok := unwrap(data)
+	if !ok {
+		return "", nil, false
+	}
+	data = payload
 	if len(data) == 0 || data[0] != groupMagic {
 		return "", nil, false
 	}
@@ -225,7 +236,14 @@ func takeUvarint(b []byte) (uint64, []byte, bool) {
 }
 
 func (m *Machine) applySlot(slot core.LogSlot, data []byte) error {
-	if id, cmds, ok := decodeGroup(data); ok {
+	rank, writer, payload, ok := unwrap(data)
+	if !ok {
+		return fmt.Errorf("machine: truncated log envelope at slot %d", slot)
+	}
+	enveloped := len(data) > 0 && data[0] == envelopeMagic
+	m.observeWriter(slot, rank, writer, enveloped)
+
+	if id, cmds, ok := decodeGroup(payload); ok {
 		dones := make([]core.CPDone, len(cmds))
 		for i, c := range cmds {
 			dones[i] = m.fold.Apply(int64(slot), c)
@@ -233,12 +251,12 @@ func (m *Machine) applySlot(slot core.LogSlot, data []byte) error {
 		m.deliver(id, dones)
 		return nil
 	}
-	d, err := m.fold.ApplyBytes(int64(slot), data)
+	d, err := m.fold.ApplyBytes(int64(slot), payload)
 	if err != nil {
 		return err
 	}
 	// Single-entry catch-up / hole-fill: deliver only if we were waiting on it.
-	if e, err := applier.Decode(data); err == nil {
+	if e, err := applier.Decode(payload); err == nil {
 		m.deliver(e.ID, []core.CPDone{d})
 	}
 	return nil

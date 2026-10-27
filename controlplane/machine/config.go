@@ -6,6 +6,8 @@ import "manifester/core"
 // commit queue off (CP-DSM-2 scaffold behaviour). CatchUpEvery > 0 arms
 // timer-driven catch-up with slot-ordered apply and hole-fill (CP-DSM-4).
 // K > 0 arms the commit queue with up to K in-flight LogAppend slots (CP-DSM-5).
+// Heartbeat or TakeoverAfter arms advisory roles (CP-DSM-6). CkptEvery or
+// CkptKey arms checkpoint restore/publish and optional LogTrim.
 type Config struct {
 	// CatchUpEvery is the pause between catch-up rounds. Zero disables catch-up.
 	CatchUpEvery core.Duration
@@ -26,6 +28,28 @@ type Config struct {
 	// QueueMax caps queued client ops before Offer answers ErrUnavailable.
 	// Zero means 4096.
 	QueueMax int
+
+	// Rank is the advisory preference (0 preferred). Used for failback.
+	Rank int
+	// Heartbeat is how long an idle active node waits before a no-op append.
+	// Zero disables heartbeat (and, with TakeoverAfter 0, roles).
+	Heartbeat core.Duration
+	// TakeoverAfter is how long a standby waits with no other-writer slot
+	// before promoting. Zero means only Promote flips the role.
+	TakeoverAfter core.Duration
+
+	// CkptEvery is the pause between checkpoint attempts on the appender.
+	// Zero disables the timer; set CkptKey alone to restore on Started.
+	CkptEvery core.Duration
+	// CkptMinSlots skips a checkpoint when fewer slots were applied since the
+	// last. Zero means 1.
+	CkptMinSlots int64
+	// CkptKey is the object-store key for the latest snapshot. Empty means
+	// "ckpt/latest" when checkpointing is enabled.
+	CkptKey string
+	// KeepSlots is how many log slots to keep behind a published checkpoint
+	// before LogTrim. Zero skips trim.
+	KeepSlots int64
 }
 
 func (c Config) readLimit() int32 {

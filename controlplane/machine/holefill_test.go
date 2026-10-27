@@ -33,7 +33,11 @@ func driveToHole(t *testing.T, m *machine.Machine) core.LogAppend {
 func TestHoleFillEmitsNoopAppend(t *testing.T) {
 	m := newMachine(t, machine.Config{CatchUpEvery: core.Millisecond, HoleAfter: 0, Writer: "w"})
 	ap := driveToHole(t, m)
-	got, err := applier.Decode(ap.Data)
+	payload, ok := machine.UnwrapPayload(ap.Data)
+	if !ok {
+		t.Fatal("hole-fill envelope truncated")
+	}
+	got, err := applier.Decode(payload)
 	if err != nil || got.Kind != applier.KindNoop {
 		t.Fatalf("append payload = %+v %v, want KindNoop", got, err)
 	}

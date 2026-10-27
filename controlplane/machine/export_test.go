@@ -2,9 +2,21 @@ package machine
 
 import "manifester/controlplane/applier"
 
-// DecodeGroup exports group decoding for tests.
+// Timer IDs for role and checkpoint tests.
+const (
+	TimerRole = timerRole
+	TimerCkpt = timerCkpt
+)
+
+// DecodeGroup exports group decoding for tests (strips the machine envelope).
 func DecodeGroup(data []byte) (string, []applier.Entry, bool) {
 	return decodeGroup(data)
+}
+
+// UnwrapPayload exports envelope stripping for tests.
+func UnwrapPayload(data []byte) ([]byte, bool) {
+	_, _, payload, ok := unwrap(data)
+	return payload, ok
 }
 
 // EncodeGroupForTest builds a multi-command entry with a fixed id.
@@ -15,4 +27,9 @@ func EncodeGroupForTest(id string, cmds []applier.Entry) []byte {
 		in[i] = c
 	}
 	return encodeGroup(id, in)
+}
+
+// EncodeEnvelopedForTest wraps an inner payload with rank and writer.
+func EncodeEnvelopedForTest(rank int, writer string, payload []byte) []byte {
+	return wrap(rank, writer, payload)
 }

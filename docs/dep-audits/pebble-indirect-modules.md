@@ -2,15 +2,15 @@
 
 Date: 2026-10-21. Auditor: stage-4 agent. Scope: the 16 modules that appeared in `go.mod` as `// indirect` when
 `github.com/cockroachdb/pebble v1.1.5` (decision 49) was added. They are EDGE dependencies: only
-`cp/applier/pebblekv` (and so `cmd/manicp`) imports Pebble. `core/`, `sim/` and every other deterministic package do not
-reach them (`scripts/ci-determinism.sh` is green), so none needs a per-module determinism record under
+`cp/applier/pebblekv` (and so `cmd/manicp`) imports Pebble. `internal/core/`, `internal/verify/sim/` and every other deterministic package do not
+reach them (`ops/scripts/ci-determinism.sh` is green), so none needs a per-module determinism record under
 `docs/dep-audits/<module>@<version>.md`; this page is the summary the open item asked for. The Pebble record itself is
 `github.com/cockroachdb/pebble@v1.1.5.md`.
 
 ## The 16 modules
 
 "Linked" is from `go version -m` of the release build (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath ./cmd/manicp`,
-the build `deploy/aws/terraform/scripts/build-and-upload.sh` makes). None is linked into `manibroker`.
+the build `ops/deploy/aws/terraform/scripts/build-and-upload.sh` makes). None is linked into `manibroker`.
 
 | module | version | license (module cache LICENSE) | size in cache / non-test go files | linked in release manicp |
 |---|---|---|---|---|
@@ -75,13 +75,13 @@ bbolt alternative recorded in `docs/applier-bakeoff.md`; neither is worth it now
 - Release toolchain: the newest 1.24 patch, go1.24.13, still shows 25 stdlib findings (1.24 is end of life; fixes are
   only in 1.25.13 and 1.26.9). Building the same code with `GOTOOLCHAIN=go1.26.10` (go.mod unchanged, still `go 1.24.0`)
   and `govulncheck -mode=binary` on linux/amd64 and linux/arm64 gives: manibroker, no vulnerabilities; manicp, one
-  finding, GO-2026-5970 (x/text v0.34.0, see above). `deploy/aws/terraform/scripts/build-and-upload.sh` now defaults
+  finding, GO-2026-5970 (x/text v0.34.0, see above). `ops/deploy/aws/terraform/scripts/build-and-upload.sh` now defaults
   `GOTOOLCHAIN` to go1.26.10 (override with the environment).
 
 ## Recommendation
 
 Accept all 16 as edge dependencies, record no per-module determinism audits (they are outside the closure), and keep
-`detcheck`'s allow-list unchanged. Do not import any of them from `core/` or `sim/`. Re-run this page's commands when
+`detcheck`'s allow-list unchanged. Do not import any of them from `internal/core/` or `internal/verify/sim/`. Re-run this page's commands when
 Pebble is bumped.
 
 ## Evidence

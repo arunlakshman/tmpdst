@@ -1,6 +1,6 @@
 # github.com/twmb/franz-go/pkg/kmsg@v1.14.0
 
-- Date: 2026-10-05. Audited by a Claude subagent, then reproduced with `scripts/audit-dep.sh`.
+- Date: 2026-10-05. Audited by a Claude subagent, then reproduced with `ops/scripts/audit-dep.sh`.
 - Requires Go: 1.24.0 (the reason this repo moved to Go 1.24).
 - Verdict: **ACCEPTED WITH RULES**. Pure encode/decode: no clock, randomness,
   goroutines, channels, sync, os or net.

@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"manifester/broker"
-	"manifester/core"
+	"manifester/internal/broker"
+	"manifester/internal/core"
 )
 
 func defaults() tuning {

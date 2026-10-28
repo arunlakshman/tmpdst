@@ -1,9 +1,0 @@
-{
-  "threshold": 20,
-  "note": "Ratchet baseline for cmd/crapscore. Regenerate: go run ./cmd/crapscore -profile \u003ccover.out\u003e -update-baseline   (or: make crap-baseline); review and commit the diff of crap-baseline.json",
-  "functions": {
-    "controlplane/machine.Machine.roleTick": 56.62,
-    "sim/engines/logengine.Engine.plan": 23.63,
-    "sim/engines/logengine.withDefaults": 20.94
-  }
-}

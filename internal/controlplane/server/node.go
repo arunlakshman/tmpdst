@@ -1,0 +1,384 @@
+package server
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+
+	cpv1 "manifester/internal/controlplane/api/v1"
+	"manifester/internal/controlplane/apiconv"
+	"manifester/internal/controlplane/applier"
+	"manifester/internal/controlplane/exec"
+	"manifester/internal/controlplane/machine"
+	"manifester/internal/controlplane/run"
+	"manifester/internal/core"
+)
+
+// Config wires a Node.
+type Config struct {
+	Machine machine.Config
+	Self    core.NodeRef
+	Env     core.Env
+	Clock   run.Clock
+	Log     exec.Log
+	Objects exec.ObjectStore
+	// StopGrace is how long the machine gets after Shutdown to Exit.
+	StopGrace core.Duration
+}
+
+// Node owns the machine run loop and serves ControlPlane RPCs.
+type Node struct {
+	cpv1.UnimplementedControlPlaneServer
+
+	cfg    Config
+	inbox  *run.Inbox
+	inject chan run.InjectFunc
+	m      atomic.Pointer[machine.Machine]
+	health *health.Server
+
+	mu        sync.Mutex
+	waiters   map[core.ReqID]chan core.CPDone
+	nextReq   core.ReqID
+	shutdown  chan struct{}
+	loopDone  chan error
+	cancel    context.CancelFunc
+	closeOnce sync.Once
+	closeErr  error
+}
+
+// New builds a Node. Call Start then serve gRPC with Register.
+func New(cfg Config) *Node {
+	if cfg.Self.Node == "" {
+		cfg.Self = core.NodeRef{Node: "cp"}
+	}
+	if cfg.Clock == nil {
+		cfg.Clock = wallClock{}
+	}
+	if cfg.Env == nil {
+		cfg.Env = &prodEnv{}
+	}
+	if cfg.Log == nil {
+		cfg.Log = exec.NewMemLog()
+	}
+	if cfg.StopGrace <= 0 {
+		cfg.StopGrace = core.Duration(15e9) // 15s
+	}
+	return &Node{
+		cfg:      cfg,
+		inbox:    run.NewInbox(64),
+		inject:   make(chan run.InjectFunc, 64),
+		health:   health.NewServer(),
+		waiters:  map[core.ReqID]chan core.CPDone{},
+		shutdown: make(chan struct{}),
+		loopDone: make(chan error, 1),
+	}
+}
+
+// Health returns the health server to register on the gRPC server.
+func (n *Node) Health() *health.Server { return n.health }
+
+// Start launches the run loop. Ready flips health to Serving.
+// ctx bounds only the Ready wait; the loop runs until Close (or a Trip/Exit).
+func (n *Node) Start(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	n.cancel = cancel
+	ex := exec.New(runCtx, exec.Config{}, n.cfg.Log, n.cfg.Objects, n.inbox)
+	b := run.Bundle{
+		Clock: n.cfg.Clock, Env: n.cfg.Env, Inbox: n.inbox,
+		Shutdown: n.shutdown, StopGrace: n.cfg.StopGrace, Inject: n.inject,
+		AfterStep: func(cm core.Machine) {
+			if m, ok := cm.(*machine.Machine); ok {
+				n.flushAnswers(m)
+			}
+		},
+	}
+	f := machine.New(n.cfg.Machine)
+	go func() {
+		err := run.Run(runCtx, b, ex, func(env core.Env, self core.NodeRef) core.Machine {
+			m := f(env, self).(*machine.Machine)
+			n.m.Store(m)
+			return m
+		}, n.cfg.Self)
+		n.health.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
+		n.loopDone <- err
+	}()
+	fail := func(err error) error {
+		cancel()
+		loopErr := <-n.loopDone
+		if err != nil {
+			return err
+		}
+		return loopErr
+	}
+	deadline := time.NewTimer(2 * time.Minute)
+	defer deadline.Stop()
+	for {
+		done := make(chan struct{})
+		var ready bool
+		n.inject <- func() []core.Action {
+			defer close(done)
+			m := n.m.Load()
+			ready = m != nil && m.Ready()
+			return nil
+		}
+		select {
+		case <-done:
+			if ready {
+				n.health.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+				return nil
+			}
+		case <-ctx.Done():
+			return fail(ctx.Err())
+		case err := <-n.loopDone:
+			if err == nil {
+				err = errors.New("controlplane/server: run exited before Ready")
+			}
+			return err
+		case <-deadline.C:
+			return fail(errors.New("controlplane/server: timed out waiting for Ready"))
+		}
+	}
+}
+
+// Close asks the loop to stop and waits for it. Safe to call more than once.
+func (n *Node) Close() error {
+	n.closeOnce.Do(func() {
+		select {
+		case <-n.shutdown:
+		default:
+			close(n.shutdown)
+		}
+		if n.cancel != nil {
+			n.cancel()
+		}
+		n.closeErr = <-n.loopDone
+	})
+	return n.closeErr
+}
+
+func (n *Node) allocReq() core.ReqID {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.nextReq++
+	return n.nextReq
+}
+
+func (n *Node) onLoop(ctx context.Context, fn func(m *machine.Machine) []core.Action) error {
+	done := make(chan struct{})
+	var runErr error
+	select {
+	case n.inject <- func() []core.Action {
+		defer close(done)
+		m := n.m.Load()
+		if m == nil {
+			runErr = errors.New("controlplane/server: machine not started")
+			return nil
+		}
+		acts := fn(m)
+		n.flushAnswers(m)
+		return acts
+	}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-done:
+		return runErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (n *Node) flushAnswers(m *machine.Machine) {
+	for _, a := range m.TakeAnswers() {
+		n.mu.Lock()
+		ch := n.waiters[a.Req]
+		delete(n.waiters, a.Req)
+		n.mu.Unlock()
+		if ch != nil {
+			ch <- a.Done
+		}
+	}
+}
+
+func (n *Node) offer(ctx context.Context, cmd applier.Entry) (core.CPDone, error) {
+	req := n.allocReq()
+	ch := make(chan core.CPDone, 1)
+	n.mu.Lock()
+	n.waiters[req] = ch
+	n.mu.Unlock()
+	defer func() {
+		n.mu.Lock()
+		delete(n.waiters, req)
+		n.mu.Unlock()
+	}()
+
+	err := n.onLoop(ctx, func(m *machine.Machine) []core.Action {
+		return m.Offer(machine.ClientOp{Req: req, Cmd: cmd})
+	})
+	if err != nil {
+		return core.CPDone{}, err
+	}
+	// Offer may have answered synchronously (standby / queue full).
+	select {
+	case d := <-ch:
+		return d, nil
+	default:
+	}
+	for {
+		select {
+		case d := <-ch:
+			return d, nil
+		case <-ctx.Done():
+			return core.CPDone{Req: req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}, ctx.Err()
+		case n.inject <- func() []core.Action {
+			m := n.m.Load()
+			if m != nil {
+				n.flushAnswers(m)
+			}
+			return nil
+		}:
+		}
+	}
+}
+
+func (n *Node) read(ctx context.Context, fn func(m *machine.Machine) (core.CPDone, error)) (core.CPDone, error) {
+	type result struct {
+		d   core.CPDone
+		err error
+	}
+	ch := make(chan result, 1)
+	err := n.onLoop(ctx, func(m *machine.Machine) []core.Action {
+		if !m.Ready() {
+			ch <- result{d: core.CPDone{Err: core.ErrUnavailable}}
+			return nil
+		}
+		d, e := fn(m)
+		ch <- result{d: d, err: e}
+		return nil
+	})
+	if err != nil {
+		return core.CPDone{}, err
+	}
+	select {
+	case r := <-ch:
+		return r.d, r.err
+	case <-ctx.Done():
+		return core.CPDone{Err: core.ErrTimeout, Outcome: core.NotApplied}, ctx.Err()
+	}
+}
+
+// CommitSegment implements ControlPlane.
+func (n *Node) CommitSegment(ctx context.Context, req *cpv1.CommitSegmentRequest) (*cpv1.CommitSegmentResponse, error) {
+	op := apiconv.CommitSegmentToCore(req)
+	d, err := n.offer(ctx, applier.Entry{Kind: applier.KindCommit, Commit: op})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, rpcError(core.ErrTimeout, core.MaybeApplied)
+		}
+		return nil, rpcError(core.ErrIO, core.MaybeApplied)
+	}
+	if d.Err != core.OK {
+		return nil, rpcError(d.Err, d.Outcome)
+	}
+	return apiconv.CommitSegmentRespFromCore(core.RespAs[core.CommitSegmentResp](d)), nil
+}
+
+// Lookup implements ControlPlane.
+//
+//nolint:dupl // mirror of DescribeTopics; each RPC keeps its own conversion path
+func (n *Node) Lookup(ctx context.Context, req *cpv1.LookupRequest) (*cpv1.LookupResponse, error) {
+	op := apiconv.LookupToCore(req)
+	d, err := n.read(ctx, func(m *machine.Machine) (core.CPDone, error) {
+		return m.Fold().Lookup(op)
+	})
+	if err != nil {
+		return nil, rpcError(core.ErrIO, core.NotApplied)
+	}
+	if d.Err != core.OK {
+		return nil, rpcError(d.Err, d.Outcome)
+	}
+	return apiconv.LookupRespFromCore(core.RespAs[core.LookupResp](d)), nil
+}
+
+// DescribeTopics implements ControlPlane.
+//
+//nolint:dupl // mirror of Lookup; each RPC keeps its own conversion path
+func (n *Node) DescribeTopics(ctx context.Context, req *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
+	op := apiconv.DescribeTopicsToCore(req)
+	d, err := n.read(ctx, func(m *machine.Machine) (core.CPDone, error) {
+		return m.Fold().Describe(op)
+	})
+	if err != nil {
+		return nil, rpcError(core.ErrIO, core.NotApplied)
+	}
+	if d.Err != core.OK {
+		return nil, rpcError(d.Err, d.Outcome)
+	}
+	return apiconv.DescribeTopicsRespFromCore(core.RespAs[core.DescribeTopicsResp](d)), nil
+}
+
+// CreateTopic implements ControlPlane.
+func (n *Node) CreateTopic(ctx context.Context, req *cpv1.CreateTopicRequest) (*cpv1.CreateTopicResponse, error) {
+	if req == nil {
+		return nil, rpcError(core.ErrInvalid, core.NotApplied)
+	}
+	d, err := n.offer(ctx, applier.Entry{
+		Kind: applier.KindCreateTopic, Topic: req.Topic, Parts: req.Partitions,
+	})
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, rpcError(core.ErrTimeout, core.MaybeApplied)
+		}
+		return nil, rpcError(core.ErrIO, core.MaybeApplied)
+	}
+	if d.Err != core.OK {
+		return nil, rpcError(d.Err, d.Outcome)
+	}
+	return &cpv1.CreateTopicResponse{}, nil
+}
+
+// GetStatus implements ControlPlane.
+func (n *Node) GetStatus(ctx context.Context, _ *cpv1.GetStatusRequest) (*cpv1.GetStatusResponse, error) {
+	type st struct {
+		role             string
+		applied, logTail int64
+		ready            bool
+	}
+	ch := make(chan st, 1)
+	err := n.onLoop(ctx, func(m *machine.Machine) []core.Action {
+		role := "standby"
+		if m.IsActive() {
+			role = "active"
+		}
+		ch <- st{
+			role: role, applied: int64(m.Applied()), logTail: int64(m.Applied()),
+			ready: m.Ready(),
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, rpcError(core.ErrIO, core.NotApplied)
+	}
+	select {
+	case s := <-ch:
+		if !s.ready {
+			return nil, rpcError(core.ErrUnavailable, core.NotApplied)
+		}
+		return &cpv1.GetStatusResponse{Role: s.role, AppliedSlot: s.applied, LogTail: s.logTail}, nil
+	case <-ctx.Done():
+		return nil, rpcError(core.ErrTimeout, core.NotApplied)
+	}
+}
+
+// Register attaches the ControlPlane service and health to s.
+func (n *Node) Register(s *grpc.Server) {
+	cpv1.RegisterControlPlaneServer(s, n)
+	healthpb.RegisterHealthServer(s, n.health)
+}

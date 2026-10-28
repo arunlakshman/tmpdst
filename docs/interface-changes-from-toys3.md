@@ -3,8 +3,8 @@
 toys3 is a small S3-like store built end to end with the same DST design as
 this repo: a sans-I/O core, a simulator, a production runtime, oracle,
 invariants, mutants, golden traces and reference specs (veritas). This document
-lists the changes it implies for the root contracts in `core/`, `sim/` and
-`sys/`. The short form of each accepted decision is a row in `decisions.md`
+lists the changes it implies for the root contracts in `internal/core/`, `internal/verify/sim/` and
+`internal/sys/`. The short form of each accepted decision is a row in `decisions.md`
 (rows 7–22). Evidence points into `toys3/` (code) and `toys3/book/` (chapters).
 
 Status: **accepted, not yet applied to the Go files.**
@@ -453,7 +453,7 @@ func Run(ctx context.Context, b Bundle, f core.Factory, self core.NodeRef) error
 
 ## 4. New packages (decisions 21, 22)
 
-- **`veritas/`** (21). Executable specs: sequential, fault-free, short. Each
+- **`internal/verify/veritas/`** (21). Executable specs: sequential, fault-free, short. Each
   doubles as the unit-test fake and implements the matching `sys` interface.
   - `veritas.ObjectStore`: a map.
   - `veritas.ControlPlane`: CommitSegment idempotent per SegmentKey.
@@ -468,7 +468,7 @@ func Run(ctx context.Context, b Bundle, f core.Factory, self core.NodeRef) error
       vs veritas. This also covers `Classifier`; DST never executes `sys`.
     - **C4**: the Kafka oracle vs `veritas.Partition`.
   - The oracle must not import veritas; C4 is what keeps them independent.
-- **`format/`** (22). Segment object layout (magic, CRC, length) and segment key
+- **`internal/wire/format/`** (22). Segment object layout (magic, CRC, length) and segment key
   naming, shared by the broker, sim invariants and veritas, under detcheck.
 - **Mutants** (in `sim` tests): `Mutant{Name; Wrap func(core.Factory) core.Factory; Why string}`.
   - Pin a table of first-catch seeds and which check caught each mutant.

@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package controlplane.v1;
+
+option go_package = "manifester/internal/controlplane/api/v1;controlplanev1";
+
+// ControlPlane is the broker-facing unary API. Non-OK RPCs return a gRPC
+// status with ErrorDetail. Success returns the response message only.
+// Servers also register grpc.health.v1 (not defined here).
+service ControlPlane {
+  rpc CommitSegment(CommitSegmentRequest) returns (CommitSegmentResponse);
+  rpc Lookup(LookupRequest) returns (LookupResponse);
+  rpc DescribeTopics(DescribeTopicsRequest) returns (DescribeTopicsResponse);
+  rpc CreateTopic(CreateTopicRequest) returns (CreateTopicResponse);
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+}
+
+// ErrCode mirrors core.ErrCode spellings for the wire. Numbers are stable.
+enum ErrCode {
+  ERR_CODE_OK = 0;
+  ERR_CODE_TIMEOUT = 1;
+  ERR_CODE_UNAVAILABLE = 2;
+  ERR_CODE_NOT_FOUND = 3;
+  ERR_CODE_CONFLICT = 4;
+  // 5 was ErrFenced (retired); keep the gap for number stability.
+  ERR_CODE_CONN_CLOSED = 6;
+  ERR_CODE_TOO_LARGE = 7;
+  ERR_CODE_CORRUPT = 8;
+  ERR_CODE_INVALID = 9;
+  ERR_CODE_IO = 10;
+}
+
+// Outcome mirrors core.Outcome.
+enum Outcome {
+  OUTCOME_NOT_APPLIED = 0;
+  OUTCOME_MAYBE_APPLIED = 1;
+  OUTCOME_APPLIED = 2;
+}
+
+// ErrorDetail is attached to non-OK gRPC statuses.
+message ErrorDetail {
+  ErrCode code = 1;
+  Outcome outcome = 2;
+}
+
+message TopicPartition {
+  string topic = 1;
+  int32 partition = 2;
+}
+
+message SegmentRef {
+  string key = 1;
+  int64 off = 2;
+  int64 len = 3;
+}
+
+message PendingBatch {
+  TopicPartition tp = 1;
+  int64 records = 2;
+  SegmentRef loc = 3;
+}
+
+message BatchRange {
+  TopicPartition tp = 1;
+  int64 base = 2;
+  int64 count = 3;
+  SegmentRef loc = 4;
+}
+
+message TopicInfo {
+  string name = 1;
+  int32 partitions = 2;
+}
+
+message CommitSegmentRequest {
+  string segment_key = 1;
+  repeated PendingBatch batches = 2;
+}
+
+message CommitSegmentResponse {
+  repeated BatchRange assigned = 1;
+}
+
+message LookupRequest {
+  TopicPartition tp = 1;
+  int64 from = 2;
+  int32 max_bytes = 3;
+}
+
+message LookupResponse {
+  repeated BatchRange ranges = 1;
+  int64 end = 2;
+}
+
+message DescribeTopicsRequest {
+  repeated string topics = 1;
+}
+
+message DescribeTopicsResponse {
+  repeated TopicInfo topics = 1;
+}
+
+message CreateTopicRequest {
+  string topic = 1;
+  int32 partitions = 2;
+}
+
+message CreateTopicResponse {}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  string role = 1;
+  int64 applied_slot = 2;
+  int64 log_tail = 3;
+}

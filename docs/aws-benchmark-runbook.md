@@ -8,8 +8,8 @@ Two flows share the same Terraform stack and observability:
   valid with `broker_count=1` and the fallback when OMB misbehaves (`run-benchmark.sh` accepts the comma-list
   `BOOTSTRAP` of N brokers too).
 
-Stack reference: `deploy/aws/terraform/README.md` (variables, outputs, NLB trade-off, artifact contract, cost, destroy,
-post-destroy checklist). Observability: `deploy/aws/observability/README.md`, `docs/observability.md`.
+Stack reference: `ops/deploy/aws/terraform/README.md` (variables, outputs, NLB trade-off, artifact contract, cost, destroy,
+post-destroy checklist). Observability: `ops/deploy/aws/observability/README.md`, `docs/observability.md`.
 You run apply and destroy; nothing here is automatic. Never run `docker prune` or touch other AWS resources.
 
 ## Part A. 6-broker OMB flow
@@ -18,13 +18,13 @@ You run apply and destroy; nothing here is automatic. Never run `docker prune` o
 
 | piece | where it runs | file |
 |---|---|---|
-| OMB artifact (Kafka driver only, patched) | built locally with Docker | `scripts/build-omb.sh` -> `build/omb/openmessaging-benchmark.tar.gz` (about 29 MB, pinned OMB commit) |
-| operator control (topic, workers, start run) | your workstation, through SSM send-command | `deploy/aws/bench/bench-ctl.sh` |
-| OMB workers | every loadgen host, `:8080` (HTTP) and `:9090` (stats) | `deploy/aws/bench/start-omb-workers.sh` |
-| OMB coordinator + stage plan + abort rules | loadgen host 0 (detached) | `deploy/aws/bench/run-omb.sh` |
+| OMB artifact (Kafka driver only, patched) | built locally with Docker | `ops/scripts/build-omb.sh` -> `build/omb/openmessaging-benchmark.tar.gz` (about 29 MB, pinned OMB commit) |
+| operator control (topic, workers, start run) | your workstation, through SSM send-command | `ops/deploy/aws/bench/bench-ctl.sh` |
+| OMB workers | every loadgen host, `:8080` (HTTP) and `:9090` (stats) | `ops/deploy/aws/bench/start-omb-workers.sh` |
+| OMB coordinator + stage plan + abort rules | loadgen host 0 (detached) | `ops/deploy/aws/bench/run-omb.sh` |
 | manicp: the log store (`-store dynamolog`) on an active host (rank 0) plus `cp_standby_count` (default 1) hot standbys; `metrics/cp/` (rank 0) and `metrics/cp-<rank>/` snapshots | dedicated control-plane hosts (`cp_instance_type`, default m6in.xlarge), `:8080` | `files/cp-user-data.sh.tpl` |
 | manibroker `/metrics` snapshots every 10 s (`metrics/<broker id>/`) | every broker host (`mb-snapshot.service`) | terraform user-data |
-| summary | your workstation | `deploy/aws/bench/collect-results.sh` -> `results/<run>/summary.md` |
+| summary | your workstation | `ops/deploy/aws/bench/collect-results.sh` -> `results/<run>/summary.md` |
 
 Why topic creation goes through SSM to the control-plane host: OMB cannot create topics (the broker has no CreateTopics),
 the CP security group admits `:8080` from the broker SG only (loadgen to CP stays closed), the NLB forwards only Kafka
@@ -42,8 +42,8 @@ Check the instance types exist in your AZ (terraform README, "Variables"); if yo
 
 ```
 open -a Docker                       # macOS, if the daemon is not running
-scripts/build-omb.sh                 # about 5 min the first time (Maven cache lives in docker volume manifester-omb-m2)
-python3 -I -m unittest discover -s deploy/aws/bench -p 'test_*.py'   # summarize tests, optional
+ops/scripts/build-omb.sh                 # about 5 min the first time (Maven cache lives in docker volume manifester-omb-m2)
+python3 -I -m unittest discover -s ops/deploy/aws/bench -p 'test_*.py'   # summarize tests, optional
 ```
 The artifact upload command printed by terraform (`artifact_upload_command`) uploads `build/omb/openmessaging-benchmark.tar.gz`
 to `artifacts/omb/` if it exists, so build first. If you built later:
@@ -53,7 +53,7 @@ to `artifacts/omb/` if it exists, so build first. If you built later:
 ### A3. Apply with six brokers
 
 ```
-cd deploy/aws/terraform
+cd ops/deploy/aws/terraform
 cp example.tfvars my.tfvars       # run_id, owner, budget_usd, budget_email; broker_count = 6, loadgen_count = 2
 terraform init -upgrade && terraform plan -var-file=my.tfvars
 terraform apply -var-file=my.tfvars                                # you run this
@@ -65,7 +65,7 @@ Apply early: the S3 request metrics take about 15 minutes to show data.
 
 ```
 export AWS_REGION=ap-south-2 RUN_ID=<run_id>
-deploy/aws/bench/bench-ctl.sh worker-status || true          # not started yet: expected "NOT running"
+ops/deploy/aws/bench/bench-ctl.sh worker-status || true          # not started yet: expected "NOT running"
 $(terraform output -json ssm_start_session_brokers | jq -r '.[0]')   # on broker 1:
   systemctl is-active manibroker mb-snapshot alloy ; curl -s 127.0.0.1:9100/healthz ; pgrep -c manicp   # 0: no manicp on brokers
 $(terraform output -raw ssm_start_session_cp)                         # on the control-plane host:
@@ -73,9 +73,9 @@ $(terraform output -raw ssm_start_session_cp)                         # on the c
 $(terraform output -json ssm_start_session_loadgens | jq -r '.[0]')  # on loadgen 0:
   source /etc/profile.d/bench.sh; echo $BOOTSTRAP $LOADGEN_INDEX $LOADGEN_COUNT; ls /opt/omb/bin /opt/bench
 ```
-Or in one command from the workstation: `deploy/aws/bench/bench-ctl.sh check-cp` (exactly one manicp process on the CP host,
+Or in one command from the workstation: `ops/deploy/aws/bench/bench-ctl.sh check-cp` (exactly one manicp process on the CP host,
 healthz ok, no manicp on any broker, every broker reaches `<cp_private_ip>:8080`).
-Grafana: apply dashboards (`deploy/aws/observability/apply-dashboards.sh`), check `up{run_id="<run>"}` for all six
+Grafana: apply dashboards (`ops/deploy/aws/observability/apply-dashboards.sh`), check `up{run_id="<run>"}` for all six
 `broker` values plus one `manicp` series with `role="cp"`, and that the `$broker` variable of the Overview dashboard lists 1..6.
 The Overview "Control plane" row (slot rate, append latency, lost slots, apply and standby lag, queue, DynamoDB WRU)
 reads the active manicp; lost slots should stay near 0 (see A10, A11).
@@ -83,9 +83,9 @@ reads the active manicp; lost slots should stay near 0 (see A10, A11).
 ### A5. Topic and workers (workstation)
 
 ```
-deploy/aws/bench/bench-ctl.sh --run-id $RUN_ID create-topic 288         # topic omb-<run_id>, 288 partitions, via SSM on the control-plane host
-deploy/aws/bench/bench-ctl.sh start-workers                              # benchmark-worker on every loadgen
-deploy/aws/bench/bench-ctl.sh worker-status
+ops/deploy/aws/bench/bench-ctl.sh --run-id $RUN_ID create-topic 288         # topic omb-<run_id>, 288 partitions, via SSM on the control-plane host
+ops/deploy/aws/bench/bench-ctl.sh start-workers                              # benchmark-worker on every loadgen
+ops/deploy/aws/bench/bench-ctl.sh worker-status
 ```
 (`bench-ctl.sh` reads `cp_instance_id`, `cp_private_ip`, `broker_instance_ids` and `loadgen_instance_ids` from
 `terraform output`, or set `CP_INSTANCE_ID` / `CP_PRIVATE_IP` / `BROKER_INSTANCE_IDS` / `LOADGEN_INSTANCE_IDS`.) The OMB worker layout: the first half of the workers run producers,
@@ -98,8 +98,8 @@ Default plan = pre-flight, `smoke` (100k msg/s = 97.7 MiB/s, 3 min + 1 min warm-
 (1,000,000 msg/s = 976.6 MiB/s, 288 partitions, 64 producers, produce-only, 15 min + 2 warm-up). Stop on the first failure.
 Run the smoke alone first; it prints the pre-flight, the compression decision and `SMOKE PASS` / `SMOKE FAIL`:
 ```
-deploy/aws/bench/bench-ctl.sh run --stages smoke
-deploy/aws/bench/bench-ctl.sh tail 60          # repeat; also: Grafana Overview and Pipeline dashboards
+ops/deploy/aws/bench/bench-ctl.sh run --stages smoke
+ops/deploy/aws/bench/bench-ctl.sh tail 60          # repeat; also: Grafana Overview and Pipeline dashboards
 ```
 Pre-flight (automatic): the control plane is alive (a `metrics/cp/<epoch>-manicp.txt` snapshot in S3 newer than 90 s;
 loadgens cannot reach the CP over the network by design), Kafka ApiVersions on every broker IP (prints node ids, warns on duplicates), the topic
@@ -115,13 +115,13 @@ rejects it makes the run fall back to `none` with a LOUD "not apples-to-apples" 
 
 Then the careful path or the default:
 ```
-deploy/aws/bench/bench-ctl.sh run --stages smoke,ramp,vanity-produce     # ramp: 100k, 250k, 500k, 750k, 1M msg/s, 5 min each
-deploy/aws/bench/bench-ctl.sh run --stages vanity                        # later: adds 64 consumers (Fetch path, least mature)
-deploy/aws/bench/bench-ctl.sh run --stages vanity-produce --bootstrap-mode random   # skew as an unmodified client sees it
-deploy/aws/bench/bench-ctl.sh run --stages vanity-fanout3 --include-later            # 3x fan-out etc.: workloads/later
+ops/deploy/aws/bench/bench-ctl.sh run --stages smoke,ramp,vanity-produce     # ramp: 100k, 250k, 500k, 750k, 1M msg/s, 5 min each
+ops/deploy/aws/bench/bench-ctl.sh run --stages vanity                        # later: adds 64 consumers (Fetch path, least mature)
+ops/deploy/aws/bench/bench-ctl.sh run --stages vanity-produce --bootstrap-mode random   # skew as an unmodified client sees it
+ops/deploy/aws/bench/bench-ctl.sh run --stages vanity-fanout3 --include-later            # 3x fan-out etc.: workloads/later
 ```
 Rates (1 KiB messages): 100k = 97.7 MiB/s, 250k = 244.1, 500k = 488.3, 750k = 732.4, 1M = 976.6.
-Stage names are workload files in `deploy/aws/bench/omb/workloads` (and `later/` with `--include-later`).
+Stage names are workload files in `ops/deploy/aws/bench/omb/workloads` (and `later/` with `--include-later`).
 Compression: `--compression auto|lz4|none` (default auto = lz4 if the probe passes, as WarpStream; `none` only as a fallback).
 
 Abort rules, checked on every 10 s OMB line: error rate above 0.1% of the publish rate, publish p99 of the interval above
@@ -134,7 +134,7 @@ over-long plan. Results land in `~/bench-out/<run>/omb/` and `s3://<bucket>/resu
 
 ```
 SUMMARIZE_ARGS='--broker-hourly <usd per m6in.4xlarge hour in your region>' \
-  deploy/aws/bench/collect-results.sh $(cd deploy/aws/terraform && terraform output -raw bucket) $RUN_ID ap-south-2
+  ops/deploy/aws/bench/collect-results.sh $(cd ops/deploy/aws/terraform && terraform output -raw bucket) $RUN_ID ap-south-2
 ```
 `results/<run>/summary.md` has the OMB table (target vs achieved msg/s and MiB/s, producer and end-to-end percentiles,
 backlog), per-broker server side per stage, the skew table, cost per GiB with the formulas of the comparison doc, and the
@@ -294,7 +294,7 @@ Use `read -rs PROM_TOKEN` style prompts so tokens stay out of shell history.
 ## 2. Apply
 
 ```
-cd deploy/aws/terraform
+cd ops/deploy/aws/terraform
 cp example.tfvars my.tfvars    # region=ap-south-2, az=ap-south-2a, run_id, owner, budget_usd, budget_email
 terraform init && terraform plan -var-file=my.tfvars
 terraform apply -var-file=my.tfvars          # you run this; the S3 request-metrics config exists from here on
@@ -305,7 +305,7 @@ Note the S3 request metrics need about 15 minutes after creation to show data: a
 
 From the repo root, right after apply (instances wait up to 45 minutes for `READY`):
 ```
-$(cd deploy/aws/terraform && terraform output -raw artifact_upload_command)
+$(cd ops/deploy/aws/terraform && terraform output -raw artifact_upload_command)
 ```
 It builds linux/amd64 `manibroker`/`manicp`, uploads them, the observability directory (`artifacts/observability/`)
 and the harness (`artifacts/bench/`), and writes `READY` last.
@@ -326,7 +326,7 @@ $(terraform output -raw ssm_start_session_loadgen)
 ```
 Grafana (stack URL): apply dashboards once from your workstation, with the Editor service-account token:
 ```
-cd deploy/aws/observability
+cd ops/deploy/aws/observability
 GRAFANA_URL=https://manifesterio.grafana.net GRAFANA_API_TOKEN=... ./apply-dashboards.sh
 ```
 Then check: Explore (Prometheus) `up{run_id="<run>"}` shows broker, manicp (role `cp`), node jobs for all hosts with value 1;
@@ -372,7 +372,7 @@ Options: `--reps --duration --gap --warmup --cells --rate --topic --tool`.
 
 On the workstation:
 ```
-deploy/aws/bench/collect-results.sh $(cd deploy/aws/terraform && terraform output -raw bucket) <run_id> ap-south-2
+ops/deploy/aws/bench/collect-results.sh $(cd ops/deploy/aws/terraform && terraform output -raw bucket) <run_id> ap-south-2
 ```
 Writes `./results/<run_id>/` (loadgen/, metrics/, manifests, `build-git-sha.txt`, `terraform-outputs.json`) and `summary.md`: per cell and repetition client
 throughput and latency, broker segment put/queue/commit/ack averages, S3 and DynamoDB throttles/errors/retries,
@@ -389,9 +389,9 @@ disposable stack but means data and results are not durable.
 **STOP: `terraform destroy` force-deletes the bucket and everything in it (results, metric snapshots, manifests). Do not run it until `./results/<run_id>/summary.md` exists on your workstation (step 7). Also keep `my.tfvars`.** Instance logs survive only in Grafana Cloud Loki (free tier: 14 days).
 
 ```
-cd deploy/aws/terraform && terraform destroy -var-file=my.tfvars     # you run this
+cd ops/deploy/aws/terraform && terraform destroy -var-file=my.tfvars     # you run this
 ```
-Then run every command of "Post-destroy checklist" in `deploy/aws/terraform/README.md` (all must print nothing):
+Then run every command of "Post-destroy checklist" in `ops/deploy/aws/terraform/README.md` (all must print nothing):
 tagged resources, EC2 instances and volumes, VPC and endpoints, unattached Elastic IPs, the bucket, the DynamoDB
 table, IAM roles and instance profiles, the budget. Then delete the SSM parameters if the account is shared
 (command in that README) and revoke the three Grafana tokens. Keep `terraform.tfstate` until the checklist passes.
@@ -410,13 +410,13 @@ included. Left running for a day by mistake: about $7.
 
 All `manibroker_*`, `manicp_*` and `node_*` series in the dashboards were checked against the Go code and
 `docs/observability.md` (the `manibroker_s3_*`/`manicp_dynamo_*` families are composed from a Subsystem in
-`sys/awsobs`, confirmed in code). Not confirmed against a live scrape: the CloudWatch series from Alloy's embedded YACE
+`internal/sys/awsobs`, confirmed in code). Not confirmed against a live scrape: the CloudWatch series from Alloy's embedded YACE
 (`aws_s3_first_byte_latency_average`, `aws_s3_total_request_latency_{average,maximum}`, `aws_s3_{all,put,get}_requests_sum`,
 `aws_s3_{4xx,5xx}_errors_sum`, `aws_dynamodb_successful_request_latency_{average,maximum}`,
 `aws_dynamodb_consumed_{read,write}_capacity_units_sum`, `aws_dynamodb_provisioned_*_capacity_units_average`,
 `aws_dynamodb_{read,write}_throttle_events_sum`, `aws_dynamodb_throttled_requests_sum`,
 `aws_dynamodb_transaction_conflict_sum`, `aws_dynamodb_conditional_check_failed_requests_sum`, label `dimension_Operation`).
-First thing after READY: Explore `{__name__=~"aws_.*"}` and fix `deploy/aws/observability/gen/gen_dashboards.py` if spelled differently.
+First thing after READY: Explore `{__name__=~"aws_.*"}` and fix `ops/deploy/aws/observability/gen/gen_dashboards.py` if spelled differently.
 
 ## Run w2: sequencer, smoke and ramp (2026-10-19, ap-south-2, 6 brokers m6in.4xlarge, 1 CP m6in.xlarge, 288 partitions, lz4, balanced)
 
@@ -449,7 +449,7 @@ Findings
 ## W3 experiments: partition-affine producers and a longer segment window
 
 Both are opt-in; the default WarpStream-style run is unchanged.
-- Partition-affine producers (patch `0004-affine-partitioner.patch`, rebuild the OMB tarball with `scripts/build-omb.sh`): `run-omb.sh --affine`
+- Partition-affine producers (patch `0004-affine-partitioner.patch`, rebuild the OMB tarball with `ops/scripts/build-omb.sh`): `run-omb.sh --affine`
   (driver key `maniAffine`) makes producer k, pinned to broker k % 6, write only partitions p with p % 6 == k % 6 (48 each; sticky per
   ~batch.size bytes like the stock partitioner). Needs balanced mode. NOT comparable to WarpStream: label results "partition-affine producers".
 - Segment window: `bench-ctl.sh broker-args -segment-window 1s` adds the flag to every manibroker (systemd drop-in) and restarts them;

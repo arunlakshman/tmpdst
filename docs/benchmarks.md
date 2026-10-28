@@ -26,13 +26,13 @@ broker defaults (BatchWindow 50 ms, MaxSegmentBytes 4 MiB, MaxSegmentPartitions 
 Commands (repo root; binaries built with `go build -o <dir>/bin/<name> ./cmd/<name>`):
 
 ```
-scripts/it-up.sh
+ops/scripts/it-up.sh
 manicp <cp flags above>                       # :8080
 manibroker <broker flags above>               # :9092
 manibench benchmark-producer -topic bench -create-partitions 6 -num-clients 1 -duration 2s   # warm-up, creates topic
 manibench benchmark-producer -topic bench -num-clients {1,8,32} -record-size 1024 -duration 30s -interval 5s
 manibench benchmark-producer -topic bench -num-clients 1 -record-size 100 -duration 30s -interval 5s
-scripts/it-down.sh
+ops/scripts/it-down.sh
 ```
 
 CPU sampled with `ps -o %cpu,rss` at t=6,12,18,24 s of the 8-client run.
@@ -213,7 +213,7 @@ How to read them (all names `manibroker_...`; histograms in seconds):
 - `segments_sealed_total{reason}` and `segment_sealed_batch_bytes_total` give the real segment size
   (bytes / segments) and which rule seals: with 8 clients most segments seal by the timer or the 32-batch cap, not at 16 MiB.
 
-Measurement, 2026-10-18: setup C, fresh `scripts/it-up.sh` backends, 8 clients, 1 KB, 30 s (+ about 1 s drain), 6 partitions,
+Measurement, 2026-10-18: setup C, fresh `ops/scripts/it-up.sh` backends, 8 clients, 1 KB, 30 s (+ about 1 s drain), 6 partitions,
 defaults of decision 35, metrics scraped before and after the run (the table is the difference). Two runs, same backends
 (the second reuses the first's SeaweedFS and ExtendDB data, with new bucket and table prefix):
 
@@ -256,7 +256,7 @@ Decision 37 added `manicp -metrics-addr` (default `:9101`, `/metrics`, prefix `m
 (the CP client's send-to-full-response time). Together they split a broker `commit_ns` into client RTT, server handler
 time, DynamoDB calls and the commit's read/decide steps.
 
-Measurement, 2026-10-18: setup C with fresh `scripts/it-up.sh` backends, 8 clients, 1 KB, 30 s, 6 partitions, defaults of
+Measurement, 2026-10-18: setup C with fresh `ops/scripts/it-up.sh` backends, 8 clients, 1 KB, 30 s, 6 partitions, defaults of
 decision 35, both /metrics scraped before and after the run (deltas). Two runs, new bucket and table prefix each time.
 Machine: the kind cluster container was up (about 20 to 30% of a core), SeaweedFS 150 to 170%, ExtendDB 32 to 39%, a
 Chrome for Testing helper and fseventsd a few %, load average about 4.7 before the runs. Averages per CommitSegment:
@@ -311,7 +311,7 @@ The r1 AWS run (`docs/aws-benchmark-results-r1.md`) averaged 5 to 8 MiB per segm
 segment), and `MaxSegmentBatches` is 256, so the byte cap (16 MiB) or the 200 ms timer should seal instead; the counter
 `segments_sealed_total{reason}` shows it (`batches` should disappear, `items` appears only with very many idempotent
 producers per segment). Not re-run on AWS. Local commit cost, `go test -run X -bench Commit ./cp/dynamo` on ExtendDB
-(`scripts/it-up.sh`; M1; one idempotent producer per partition; 200 commits each):
+(`ops/scripts/it-up.sh`; M1; one idempotent producer per partition; 200 commits each):
 
 | segment | items before | commit before | items after | commit after |
 |---|---|---|---|---|
@@ -347,7 +347,7 @@ fakedb with injected latency (30 ms per `TransactWriteItems`, 5 ms per read call
 | disjoint partition sets (48 per committer), pipeline 1 | 61.5 | 98 | 96 | 150 | 0 | 0 | 246 | 68 |
 | disjoint partition sets (48 per committer), pipeline 4 | 148.0 | 41 | 32 | 75 | 0 | 0 | 982 | 41 |
 
-Local ExtendDB (Docker Desktop, `scripts/it-up.sh`; a transaction takes about 100 ms there, so this is a slow-database
+Local ExtendDB (Docker Desktop, `ops/scripts/it-up.sh`; a transaction takes about 100 ms there, so this is a slow-database
 case, not a prediction for DynamoDB):
 
 | case | commits/s | avg ms | p50 ms | p99 ms | 503 | cancelled txs | txs | items/tx |

@@ -9,18 +9,18 @@ changes.
 ## Summary
 
 - **Already good:** the strategic shape is close to DDD. `core` is the published language, `veritas` the
-  executable spec, `controlplane/api/v1` + `apiconv` the gRPC wire boundary, and `format/` and `kwire/` clean context
+  executable spec, `internal/controlplane/api/v1` + `apiconv` the gRPC wire boundary, and `internal/wire/format/` and `internal/wire/kwire/` clean context
   modules.
 - **Weak spots are tactical:**
   1. The same concept has several names and types.
-  2. `broker/` is one ~1,740-line struct holding four or five aggregates, with Kafka error codes inside
+  2. `internal/broker/` is one ~1,740-line struct holding four or five aggregates, with Kafka error codes inside
      commit logic.
   3. Primitives stand in for value objects.
   4. Boilerplate is copied: six FNV hashers, three retry and backoff skeletons, fact names as string
      literals.
 - **Hash impact:** almost everything below is hash-neutral. Only a new `ErrCode` or a fact rename
   re-baselines the golden hashes.
-- **Packages:** no new packages. `broker/` stays one package.
+- **Packages:** no new packages. `internal/broker/` stays one package.
 
 ## 1. Language drift
 
@@ -33,7 +33,7 @@ changes.
 | `core.BatchRange` | One struct is an assignment, a duplicate, a rejection (`Base = -1`) and a Lookup entry | A rejection called a "range" is the strongest smell. |
 | Producer id | `pbatch.pid int64` and `pbatch.producer ProducerID` side by side (for `BugNoIdempotence`) | The reason is not visible in the types. |
 | Epoch | `core.Epoch` is the broker's registration epoch; `PEpoch` is the producer's; plus Kafka's leader epoch; the fact key `"epoch"` means the broker's | "Epoch" alone is ambiguous. Rename the Go type to `BrokerEpoch`; never rename the fact key. |
-| **`ErrFenced`** | Means both "stale broker epoch, so fail-stop" (`broker/segment.go:168`) and "stale producer epoch, so reject one batch" (`:192`) | **The most important language problem.** |
+| **`ErrFenced`** | Means both "stale broker epoch, so fail-stop" (`internal/broker/segment.go:168`) and "stale producer epoch, so reject one batch" (`:192`) | **The most important language problem.** |
 | Incarnation | Carried in segment keys and `Owner`, but the CP fences on `Owner.Node` and epoch only | lessons §4 says a stale incarnation is fenced; the code never checks it. Decide which is right. |
 | `release` | Means "answer with an error" | Rename to `reject`. |
 | `op` | Has four meanings across the code | The broker's `op` is really a request part. |
@@ -57,14 +57,14 @@ Proposed glossary, to go in `docs/glossary.md` and be cited by doc comments:
 
 | Context | Packages | Status |
 |---|---|---|
-| Kafka protocol | `kwire`, `core/kafka.go`, the response half of `broker/` | Conformist to Kafka. Correct. |
-| Ingest (produce pipeline) | `broker/segment.go`, `broker/produce.go` | **Leaks.** Kafka codes are chosen inside `committed()` and `isolate()`, and `pbatch.part` holds a `*kmsg` response struct. |
-| Read path | `broker/fetch.go`, `broker/ops.go` | Same leak: `op.lpart` and `op.fpart`. |
-| Log and idempotence | `core/controlplane.go` (contract), `veritas` (spec), `cp/logsm` and `cp/logcp` (implementation), `cpengine` | Duplicated on purpose (decision 21). |
+| Kafka protocol | `kwire`, `internal/core/kafka.go`, the response half of `internal/broker/` | Conformist to Kafka. Correct. |
+| Ingest (produce pipeline) | `internal/broker/segment.go`, `internal/broker/produce.go` | **Leaks.** Kafka codes are chosen inside `committed()` and `isolate()`, and `pbatch.part` holds a `*kmsg` response struct. |
+| Read path | `internal/broker/fetch.go`, `internal/broker/ops.go` | Same leak: `op.lpart` and `op.fpart`. |
+| Log and idempotence | `internal/core/controlplane.go` (contract), `veritas` (spec), `cp/logsm` and `cp/logcp` (implementation), `cpengine` | Duplicated on purpose (decision 21). |
 | Membership and fencing | `Register` and `broker.trip` | |
-| Object layout | `format`, `veritas.ObjectStore`, `sys/s3store` | Shared kernel. Fine. |
+| Object layout | `format`, `veritas.ObjectStore`, `internal/sys/s3store` | Shared kernel. Fine. |
 | Runtime | `core`, `sys`, the sim kernel | |
-| Verification | `sim`, `sim/kafka`, `veritastest`, `detcheck` | |
+| Verification | `sim`, `internal/verify/sim/kafka`, `veritastest`, `detcheck` | |
 
 **Shared pure "idempotence rules" module?** No for the rules, yes for the vocabulary.
 
@@ -102,7 +102,7 @@ Facts are already past-tense domain events. The only problems are the edges:
 | # | What | Effort | Hash | Sign-off |
 |---|---|---|---|---|
 | 1 | `docs/glossary.md`, doc comments, unexported broker renames (`release`→`reject`, `op`→`part`, `pbatch`→`admitted`) | S | none | |
-| 2 | One place translates CP verdicts to Kafka codes (`broker/kafkaerr.go`: `kcode`, `verdictCode`, `exhaustCode`) | S | none | |
+| 2 | One place translates CP verdicts to Kafka codes (`internal/broker/kafkaerr.go`: `kcode`, `verdictCode`, `exhaustCode`) | S | none | |
 | 3 | Value objects in `core` (`BatchIdentity`, `SegmentKey`, `OffsetRange`). Touches core, cp, veritas, sim, broker; land alone after other work merges | M | none (tags hash field by field; verify with golden hashes) | |
 | 4 | Broker aggregates as types in the same package (`ingest.go`, `connpipe.go`, segment transition methods, an `answer` handle that cuts the kmsg leak), one aggregate per commit | M–L | none if the `StateHash` order is kept | |
 | 5 | Fact name constants in `core`, typed constructors, and a test that pins the names | S | none | |
@@ -117,7 +117,7 @@ Validation for every step:
 - `TestDeterminismCanary` passes.
 - Lockstep against memstore and DynamoDB passes.
 
-**Split `broker/` into sub-packages?** Not now.
+**Split `internal/broker/` into sub-packages?** Not now.
 
 - Decision 22 rejected toys3's full package split.
 - `StateHash` reads every private field.
@@ -144,5 +144,5 @@ Use files instead.
 1. Items 1, 5 and 8: documentation and constants.
 2. Item 2: error translation.
 3. Items 6 and 4: one aggregate per commit, golden hashes unchanged each time.
-4. Item 3, after the current `sim/` and `sys/` work has merged.
+4. Item 3, after the current `internal/verify/sim/` and `internal/sys/` work has merged.
 5. Item 7, after you choose A or B (A recommended).

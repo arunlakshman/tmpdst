@@ -15,7 +15,7 @@ from the text, section named), **measured** (our w2/w3), **computed** (arithmeti
   metadata store of Confluent's S3-based Kafka, K2. Sections 1 to 8 read; the proofs in the appendix only skimmed.
   No other paper was substituted.
 - **Repo:** `commit-path-redesign.md` (design L), `w2-bottleneck-verification.md` only through the numbers L quotes,
-  `w3-affinity-and-window-experiments.md`, decisions 21/29/35/39/41-47, `TODO.md`, `veritas/controlplane.go` size only.
+  `w3-affinity-and-window-experiments.md`, decisions 21/29/35/39/41-47, `TODO.md`, `internal/verify/veritas/controlplane.go` size only.
 
 ## 2. What the papers say that matters here
 

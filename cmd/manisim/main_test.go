@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/core"
-	"manifester/sim"
+	"manifester/internal/core"
+	"manifester/internal/verify/sim"
 )
 
 func TestRunEchoCampaign(t *testing.T) {

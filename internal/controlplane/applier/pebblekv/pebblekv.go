@@ -1,4 +1,4 @@
-// Package pebblekv is the production applier.KV over Pebble
+// Package pebblekv is the production applier.KeyValueStore over Pebble
 // (github.com/cockroachdb/pebble). It is the only package that imports the
 // store. Commits do not fsync: the applier's state is rebuilt from the log and a
 // checkpoint into a fresh directory, never trusted after a crash.
@@ -21,20 +21,20 @@ type Options struct {
 	MemTableBytes uint64
 }
 
-// DB is a Pebble database used as an applier.KV.
+// DB is a Pebble database used as an applier.KeyValueStore.
 type DB struct {
 	db   *pebble.DB
 	once sync.Once
 	err  error
 }
 
-var _ applier.KV = (*DB)(nil)
+var _ applier.KeyValueStore = (*DB)(nil)
 
-type quiet struct{}
+type silentLogger struct{}
 
-func (quiet) Infof(string, ...any)  {}
-func (quiet) Errorf(string, ...any) {}
-func (quiet) Fatalf(f string, a ...any) {
+func (silentLogger) Infof(string, ...any)  {}
+func (silentLogger) Errorf(string, ...any) {}
+func (silentLogger) Fatalf(f string, a ...any) {
 	panic(fmt.Sprintf("pebblekv: "+f, a...))
 }
 
@@ -48,21 +48,21 @@ func Open(dir string, o Options) (*DB, error) {
 	}
 	cache := pebble.NewCache(o.CacheBytes)
 	defer cache.Unref()
-	db, err := pebble.Open(dir, &pebble.Options{Cache: cache, MemTableSize: o.MemTableBytes, Logger: quiet{}})
+	db, err := pebble.Open(dir, &pebble.Options{Cache: cache, MemTableSize: o.MemTableBytes, Logger: silentLogger{}})
 	if err != nil {
 		return nil, fmt.Errorf("pebblekv: %w", err)
 	}
 	return &DB{db: db}, nil
 }
 
-// Close implements applier.KV; closing twice is harmless.
+// Close implements applier.KeyValueStore; closing twice is harmless.
 func (d *DB) Close() error {
 	d.once.Do(func() { d.err = d.db.Close() })
 	return d.err
 }
 
-// View implements applier.KV: a snapshot, so a multi-read query is consistent.
-func (d *DB) View(fn func(applier.Tx)) error {
+// View implements applier.KeyValueStore: a snapshot, so a multi-read query is consistent.
+func (d *DB) View(fn func(applier.Transaction)) error {
 	s := d.db.NewSnapshot()
 	defer func() { _ = s.Close() }() // read-only snapshot; nothing to flush
 	t := &txn{get: s.Get, iter: s.NewIter}
@@ -70,9 +70,9 @@ func (d *DB) View(fn func(applier.Tx)) error {
 	return t.err
 }
 
-// Update implements applier.KV: an indexed batch (reads see its own writes),
+// Update implements applier.KeyValueStore: an indexed batch (reads see its own writes),
 // committed without sync.
-func (d *DB) Update(fn func(applier.Tx)) error {
+func (d *DB) Update(fn func(applier.Transaction)) error {
 	b := d.db.NewIndexedBatch()
 	defer func() { _ = b.Close() }() // Commit already reported any write error
 	t := &txn{b: b, get: b.Get, iter: b.NewIter}

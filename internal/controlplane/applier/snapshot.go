@@ -18,15 +18,15 @@ import (
 // val) in key order, closed by klen 0. The slot is the first log slot NOT
 // covered (the caller's Applied()).
 
-const snapMagic = "APLR1"
+const snapshotMarker = "APLR1"
 
 // restoreChunk is how many bytes of entries one Restore transaction holds.
 const restoreChunk = 8 << 20
 
-var errSnap = errors.New("applier: bad checkpoint")
+var errSnapshot = errors.New("applier: bad checkpoint")
 
 // Snapshot writes a consistent checkpoint of the store, tagged with slot.
-func (a *Applier) Snapshot(w io.Writer, slot int64) error {
+func (a *StateUpdater) Snapshot(w io.Writer, slot int64) error {
 	return a.SnapshotAt(w, func() int64 { return slot })
 }
 
@@ -35,10 +35,10 @@ func (a *Applier) Snapshot(w io.Writer, slot int64) error {
 // read, and returns the slot to tag. A replica uses it to read its applied
 // counter at exactly the point the view was taken (it blocks its apply loop
 // until begin returns, not for the whole copy).
-func (a *Applier) SnapshotAt(w io.Writer, begin func() int64) error {
+func (a *StateUpdater) SnapshotAt(w io.Writer, begin func() int64) error {
 	bw := bufio.NewWriter(w)
 	var werr error
-	err := a.kv.View(func(tx Tx) { werr = writeSnap(bw, tx, begin) })
+	err := a.kv.View(func(tx Transaction) { werr = writeSnapshot(bw, tx, begin) })
 	if err = errors.Join(err, werr); err != nil {
 		return err
 	}
@@ -46,9 +46,9 @@ func (a *Applier) SnapshotAt(w io.Writer, begin func() int64) error {
 	return bw.Flush()
 }
 
-func writeSnap(bw *bufio.Writer, tx Tx, begin func() int64) error {
+func writeSnapshot(bw *bufio.Writer, tx Transaction, begin func() int64) error {
 	// bufio.Writer latches write errors; Flush below reports them.
-	_, _ = bw.WriteString(snapMagic)
+	_, _ = bw.WriteString(snapshotMarker)
 	_, _ = bw.Write(binary.AppendVarint(nil, begin()))
 	var werr error
 	tx.Ascend([]byte{0}, nil, func(k, v []byte) bool {
@@ -69,16 +69,16 @@ func writeEntry(w *bufio.Writer, k, v []byte) error {
 
 // Restore loads a checkpoint into this (empty) store and returns its slot:
 // the next log slot to apply.
-func (a *Applier) Restore(r io.Reader) (int64, error) {
+func (a *StateUpdater) Restore(r io.Reader) (int64, error) {
 	var slot int64
 	var err error
 	br := bufio.NewReader(r)
-	head := make([]byte, len(snapMagic))
-	if _, err = io.ReadFull(br, head); err != nil || string(head) != snapMagic {
-		return 0, fmt.Errorf("%w: header", errSnap)
+	head := make([]byte, len(snapshotMarker))
+	if _, err = io.ReadFull(br, head); err != nil || string(head) != snapshotMarker {
+		return 0, fmt.Errorf("%w: header", errSnapshot)
 	}
 	if slot, err = binary.ReadVarint(br); err != nil {
-		return 0, fmt.Errorf("%w: slot", errSnap)
+		return 0, fmt.Errorf("%w: slot", errSnapshot)
 	}
 	for done := false; !done; {
 		if done, err = a.restoreChunk(br); err != nil {
@@ -90,7 +90,7 @@ func (a *Applier) Restore(r io.Reader) (int64, error) {
 
 // restoreChunk reads entries until the chunk is full or the end mark, and
 // writes them in one transaction.
-func (a *Applier) restoreChunk(br *bufio.Reader) (bool, error) {
+func (a *StateUpdater) restoreChunk(br *bufio.Reader) (bool, error) {
 	var ents [][2][]byte
 	size := 0
 	var done bool
@@ -103,7 +103,7 @@ func (a *Applier) restoreChunk(br *bufio.Reader) (bool, error) {
 			ents, size = append(ents, [2][]byte{k, v}), size+len(k)+len(v)
 		}
 	}
-	return done, a.kv.Update(func(tx Tx) {
+	return done, a.kv.Update(func(tx Transaction) {
 		for _, e := range ents {
 			tx.Set(e[0], e[1])
 		}
@@ -113,28 +113,28 @@ func (a *Applier) restoreChunk(br *bufio.Reader) (bool, error) {
 func readEntry(br *bufio.Reader) ([]byte, []byte, bool, error) {
 	kl, err := binary.ReadUvarint(br)
 	if err != nil {
-		return nil, nil, false, fmt.Errorf("%w: truncated", errSnap)
+		return nil, nil, false, fmt.Errorf("%w: truncated", errSnapshot)
 	}
 	if kl == 0 {
 		return nil, nil, true, nil
 	}
-	k, err := readN(br, kl)
+	k, err := readBytes(br, kl)
 	if err != nil {
 		return nil, nil, false, err
 	}
 	vl, err := binary.ReadUvarint(br)
 	if err != nil {
-		return nil, nil, false, fmt.Errorf("%w: truncated", errSnap)
+		return nil, nil, false, fmt.Errorf("%w: truncated", errSnapshot)
 	}
-	v, err := readN(br, vl)
+	v, err := readBytes(br, vl)
 	return k, v, false, err
 }
 
-// readN reads exactly n bytes without trusting n for the allocation.
-func readN(br *bufio.Reader, n uint64) ([]byte, error) {
+// readBytes reads exactly n bytes without trusting n for the allocation.
+func readBytes(br *bufio.Reader, n uint64) ([]byte, error) {
 	var buf bytes.Buffer
 	if _, err := io.CopyN(&buf, br, int64(n)); err != nil {
-		return nil, fmt.Errorf("%w: truncated", errSnap)
+		return nil, fmt.Errorf("%w: truncated", errSnapshot)
 	}
 	return buf.Bytes(), nil
 }

@@ -23,7 +23,7 @@ type Engine struct {
 	*fakeio.Core
 	spec *store
 
-	ref         *applier.Applier
+	ref         *applier.StateUpdater
 	applied     core.LogPosition // next slot to fold into ref
 	gen         uint64
 	windowSlots int64

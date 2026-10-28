@@ -8,20 +8,20 @@ import (
 	"manifester/internal/core"
 )
 
-// Applier is the control-plane state machine over a KV. Writes (commands) must
+// StateUpdater is the control-plane state machine over a KeyValueStore. Writes (commands) must
 // be applied by one goroutine in log order; reads may run concurrently.
-type Applier struct{ kv KV }
+type StateUpdater struct{ kv KeyValueStore }
 
 // New returns an applier over kv (empty, or restored from a checkpoint).
-func New(kv KV) *Applier { return &Applier{kv: kv} }
+func New(kv KeyValueStore) *StateUpdater { return &StateUpdater{kv: kv} }
 
 // Close closes the store.
-func (a *Applier) Close() error { return a.kv.Close() }
+func (a *StateUpdater) Close() error { return a.kv.Close() }
 
 // Exec runs one ControlPlaneCall like veritas.ControlPlane.Exec. For a CommitSegment the
 // call's Req is the log slot (it orders the idempotency window for Trim). A
 // store failure panics.
-func (a *Applier) Exec(act core.IOCall) core.IOResult {
+func (a *StateUpdater) Exec(act core.IOCall) core.IOResult {
 	call, ok := act.(core.ControlPlaneCall)
 	if !ok {
 		panic("applier: not a CPCall")
@@ -46,24 +46,24 @@ func (a *Applier) Exec(act core.IOCall) core.IOResult {
 }
 
 // Commit applies a CommitSegment that sits at log slot slot.
-func (a *Applier) Commit(slot int64, op core.CommitSegment) (core.ControlPlaneDone, error) {
+func (a *StateUpdater) Commit(slot int64, op core.CommitSegment) (core.ControlPlaneDone, error) {
 	var d core.ControlPlaneDone
-	err := a.kv.Update(func(tx Tx) { d = commitTx(tx, slot, op) })
+	err := a.kv.Update(func(tx Transaction) { d = commitTransaction(tx, slot, op) })
 	return d, err
 }
 
 // KnownCommit answers op from the idempotency window when the key is already
 // present. ok is false when the key is unknown (caller must append).
-func (a *Applier) KnownCommit(op core.CommitSegment) (core.ControlPlaneDone, bool, error) {
+func (a *StateUpdater) KnownCommit(op core.CommitSegment) (core.ControlPlaneDone, bool, error) {
 	var d core.ControlPlaneDone
 	var ok bool
-	err := a.kv.View(func(tx Tx) {
-		rec := tx.Get(idemKey(op.SegmentKey))
+	err := a.kv.View(func(tx Transaction) {
+		rec := tx.Get(duplicateCheckKey(op.SegmentKey))
 		if rec == nil {
 			return
 		}
 		ok = true
-		d = replay(rec, digest(op.Batches), op)
+		d = replay(rec, checksum(op.Batches), op)
 	})
 	return d, ok, err
 }
@@ -78,50 +78,50 @@ type Command struct {
 // the writes of the ones before it) and returns their answers. It is what a
 // replica uses to apply the slots one tail read delivered: the same state as
 // applying them one by one, with far fewer page writes in the store.
-func (a *Applier) CommitBatch(cmds []Command) ([]core.ControlPlaneDone, error) {
+func (a *StateUpdater) CommitBatch(cmds []Command) ([]core.ControlPlaneDone, error) {
 	var out []core.ControlPlaneDone
-	err := a.kv.Update(func(tx Tx) {
+	err := a.kv.Update(func(tx Transaction) {
 		out = make([]core.ControlPlaneDone, len(cmds))
 		for i, c := range cmds {
-			out[i] = commitTx(tx, c.Slot, c.Op)
+			out[i] = commitTransaction(tx, c.Slot, c.Op)
 		}
 	})
 	return out, err
 }
 
 // Lookup answers a Lookup from the stored runs.
-func (a *Applier) Lookup(op core.FindSegments) (core.ControlPlaneDone, error) {
+func (a *StateUpdater) Lookup(op core.FindSegments) (core.ControlPlaneDone, error) {
 	if op.From < 0 {
 		return core.ControlPlaneDone{Err: core.ErrInvalid}, nil
 	}
 	var d core.ControlPlaneDone
-	err := a.kv.View(func(tx Tx) { d = lookupTx(tx, op) })
+	err := a.kv.View(func(tx Transaction) { d = lookupTransaction(tx, op) })
 	return d, err
 }
 
 // Describe answers a DescribeTopics.
-func (a *Applier) Describe(op core.DescribeTopics) (core.ControlPlaneDone, error) {
+func (a *StateUpdater) Describe(op core.DescribeTopics) (core.ControlPlaneDone, error) {
 	var d core.ControlPlaneDone
-	err := a.kv.View(func(tx Tx) { d = describeTx(tx, op) })
+	err := a.kv.View(func(tx Transaction) { d = describeTransaction(tx, op) })
 	return d, err
 }
 
 // CreateTopic creates name with at least partitions partitions (never
 // shrinks). ErrInvalid for an empty name or partitions <= 0.
-func (a *Applier) CreateTopic(name string, partitions int32) core.ErrCode {
+func (a *StateUpdater) CreateTopic(name string, partitions int32) core.ErrCode {
 	if name == "" || partitions <= 0 {
 		return core.ErrInvalid
 	}
-	if err := a.kv.Update(func(tx Tx) { growTopic(tx, map[string]int32{}, name, partitions) }); err != nil {
+	if err := a.kv.Update(func(tx Transaction) { addPartitions(tx, map[string]int32{}, name, partitions) }); err != nil {
 		panic(fmt.Errorf("applier: store failed: %w", err))
 	}
 	return core.OK
 }
 
 // End is the next offset of tp (0 if unknown).
-func (a *Applier) End(tp core.TopicPartition) core.Offset {
+func (a *StateUpdater) End(tp core.TopicPartition) core.Offset {
 	var end core.Offset
-	err := a.kv.View(func(tx Tx) { end = core.Offset(getUvarint(tx.Get(endKey(tp)))) })
+	err := a.kv.View(func(tx Transaction) { end = core.Offset(readVarint(tx.Get(endKey(tp)))) })
 	if err != nil {
 		panic(fmt.Errorf("applier: store failed: %w", err))
 	}
@@ -136,9 +136,9 @@ func validCommit(op core.CommitSegment) bool {
 	return op.SegmentKey != "" && len(op.Batches) > 0 && slices.IndexFunc(op.Batches, func(b core.PendingBatch) bool { return !validBatch(b) }) < 0
 }
 
-func commitTx(tx Tx, slot int64, op core.CommitSegment) core.ControlPlaneDone {
-	dig := digest(op.Batches)
-	if rec := tx.Get(idemKey(op.SegmentKey)); rec != nil {
+func commitTransaction(tx Transaction, slot int64, op core.CommitSegment) core.ControlPlaneDone {
+	dig := checksum(op.Batches)
+	if rec := tx.Get(duplicateCheckKey(op.SegmentKey)); rec != nil {
 		return replay(rec, dig, op)
 	}
 	if !validCommit(op) {
@@ -149,11 +149,11 @@ func commitTx(tx Tx, slot int64, op core.CommitSegment) core.ControlPlaneDone {
 
 // commitWithBases is the BugWriterOffsets apply path: bases come from the
 // writer instead of partition ends.
-func (a *Applier) commitWithBases(slot int64, op core.CommitSegment, bases []core.Offset) core.ControlPlaneDone {
+func (a *StateUpdater) commitWithBases(slot int64, op core.CommitSegment, bases []core.Offset) core.ControlPlaneDone {
 	var d core.ControlPlaneDone
-	err := a.kv.Update(func(tx Tx) {
-		dig := digest(op.Batches)
-		if rec := tx.Get(idemKey(op.SegmentKey)); rec != nil {
+	err := a.kv.Update(func(tx Transaction) {
+		dig := checksum(op.Batches)
+		if rec := tx.Get(duplicateCheckKey(op.SegmentKey)); rec != nil {
 			d = replay(rec, dig, op)
 			return
 		}
@@ -171,8 +171,8 @@ func (a *Applier) commitWithBases(slot int64, op core.CommitSegment, bases []cor
 
 // replay answers a commit whose key is known: the original ranges, or
 // ErrConflict if the request differs.
-func replay(rec []byte, dig [digestLen]byte, op core.CommitSegment) core.ControlPlaneDone {
-	was, bases, err := parseIdem(rec)
+func replay(rec []byte, dig [checksumLength]byte, op core.CommitSegment) core.ControlPlaneDone {
+	was, bases, err := parseDuplicateCheck(rec)
 	if err != nil {
 		panic(fmt.Errorf("applier: key %q: %w", op.SegmentKey, err))
 	}
@@ -189,29 +189,29 @@ func replay(rec []byte, dig [digestLen]byte, op core.CommitSegment) core.Control
 	return core.ControlPlaneDone{Resp: core.CommitSegmentResp{Assigned: rs}, Outcome: core.Applied}
 }
 
-func storeCommit(tx Tx, slot int64, op core.CommitSegment, dig [digestLen]byte, assigned []core.BatchRange) core.ControlPlaneDone {
-	tx.Set(idemKey(op.SegmentKey), idemRecord(slot, dig, assigned))
+func storeCommit(tx Transaction, slot int64, op core.CommitSegment, dig [checksumLength]byte, assigned []core.BatchRange) core.ControlPlaneDone {
+	tx.Set(duplicateCheckKey(op.SegmentKey), duplicateCheckRecord(slot, dig, assigned))
 	tx.Set(slotKey(slot, op.SegmentKey), []byte{1})
 	return core.ControlPlaneDone{Resp: core.CommitSegmentResp{Assigned: assigned}, Outcome: core.Applied}
 }
 
-// assignPlan is the per-partition end and run built while handing out offsets.
-type assignPlan struct {
+// offsetPlan is the per-partition end and run built while handing out offsets.
+type offsetPlan struct {
 	order []core.TopicPartition
 	ends  map[core.TopicPartition]int64
 	runs  map[core.TopicPartition][]core.BatchRange
 	seen  map[core.TopicPartition]bool
 }
 
-func newAssignPlan() *assignPlan {
-	return &assignPlan{
+func newOffsetPlan() *offsetPlan {
+	return &offsetPlan{
 		ends: map[core.TopicPartition]int64{},
 		runs: map[core.TopicPartition][]core.BatchRange{},
 		seen: map[core.TopicPartition]bool{},
 	}
 }
 
-func (p *assignPlan) add(b core.PendingBatch, base int64) core.BatchRange {
+func (p *offsetPlan) add(b core.PendingBatch, base int64) core.BatchRange {
 	if !p.seen[b.TP] {
 		p.order = append(p.order, b.TP)
 		p.seen[b.TP] = true
@@ -224,18 +224,18 @@ func (p *assignPlan) add(b core.PendingBatch, base int64) core.BatchRange {
 	return r
 }
 
-func (p *assignPlan) write(tx Tx) { writeAssign(tx, p.order, p.ends, p.runs) }
+func (p *offsetPlan) write(tx Transaction) { writeAssign(tx, p.order, p.ends, p.runs) }
 
 // assign hands out offsets: each batch's Base is its partition's end, in
 // request order, the end then growing by Records. It writes the new ends, one
 // packed run per partition and grown topics, and returns the ranges.
-func assign(tx Tx, bs []core.PendingBatch) []core.BatchRange {
-	p := newAssignPlan()
+func assign(tx Transaction, bs []core.PendingBatch) []core.BatchRange {
+	p := newOffsetPlan()
 	out := make([]core.BatchRange, 0, len(bs))
 	for _, b := range bs {
 		base := p.ends[b.TP]
 		if !p.seen[b.TP] {
-			base = getUvarint(tx.Get(endKey(b.TP)))
+			base = readVarint(tx.Get(endKey(b.TP)))
 		}
 		out = append(out, p.add(b, base))
 	}
@@ -244,8 +244,8 @@ func assign(tx Tx, bs []core.PendingBatch) []core.BatchRange {
 }
 
 // assignAt is assign with writer-chosen bases (BugWriterOffsets).
-func assignAt(tx Tx, bs []core.PendingBatch, bases []core.Offset) []core.BatchRange {
-	p := newAssignPlan()
+func assignAt(tx Transaction, bs []core.PendingBatch, bases []core.Offset) []core.BatchRange {
+	p := newOffsetPlan()
 	out := make([]core.BatchRange, 0, len(bs))
 	for i, b := range bs {
 		out = append(out, p.add(b, int64(bases[i])))
@@ -254,40 +254,40 @@ func assignAt(tx Tx, bs []core.PendingBatch, bases []core.Offset) []core.BatchRa
 	return out
 }
 
-func writeAssign(tx Tx, order []core.TopicPartition, ends map[core.TopicPartition]int64, runs map[core.TopicPartition][]core.BatchRange) {
+func writeAssign(tx Transaction, order []core.TopicPartition, ends map[core.TopicPartition]int64, runs map[core.TopicPartition][]core.BatchRange) {
 	topics := map[string]int32{}
 	for _, tp := range order {
-		tx.Set(endKey(tp), putUvarintVal(ends[tp]))
-		tx.Set(runKey(tp, int64(runs[tp][0].Base)), encodeRun(runs[tp]))
-		growTopic(tx, topics, tp.Topic, tp.Partition+1)
+		tx.Set(endKey(tp), writeVarint(ends[tp]))
+		tx.Set(batchRunKey(tp, int64(runs[tp][0].Base)), encodeBatchRun(runs[tp]))
+		addPartitions(tx, topics, tp.Topic, tp.Partition+1)
 	}
 }
 
-// growTopic raises topic's partition count to at least n; seen caches the
+// addPartitions raises topic's partition count to at least n; seen caches the
 // counts read in this transaction.
-func growTopic(tx Tx, seen map[string]int32, topic string, n int32) {
+func addPartitions(tx Transaction, seen map[string]int32, topic string, n int32) {
 	cur, ok := seen[topic]
 	if !ok {
-		cur = int32(getUvarint(tx.Get(topicKey(topic))))
+		cur = int32(readVarint(tx.Get(topicKey(topic))))
 	}
 	if n > cur {
 		cur = n
-		tx.Set(topicKey(topic), putUvarintVal(int64(cur)))
+		tx.Set(topicKey(topic), writeVarint(int64(cur)))
 	}
 	seen[topic] = cur
 }
 
-func lookupTx(tx Tx, op core.FindSegments) core.ControlPlaneDone {
-	resp := core.FindSegmentsResp{End: core.Offset(getUvarint(tx.Get(endKey(op.TP))))}
-	lo := runKey(op.TP, 0)
-	hi := prefixEnd(tpPrefix(pRun, op.TP))
-	if k, _ := tx.Floor(lo, append(runKey(op.TP, int64(op.From)), 0)); k != nil {
+func lookupTransaction(tx Transaction, op core.FindSegments) core.ControlPlaneDone {
+	resp := core.FindSegmentsResp{End: core.Offset(readVarint(tx.Get(endKey(op.TP))))}
+	lo := batchRunKey(op.TP, 0)
+	hi := prefixEnd(topicPartitionPrefix(prefixRun, op.TP))
+	if k, _ := tx.Floor(lo, append(batchRunKey(op.TP, int64(op.From)), 0)); k != nil {
 		lo = k // the run holding From starts at or before it
 	}
 	var size int64
 	var bad error
 	tx.Ascend(lo, hi, func(k, v []byte) bool {
-		rs, err := decodeRun(op.TP, runBase(k), v)
+		rs, err := decodeBatchRun(op.TP, batchRunBase(k), v)
 		if err != nil {
 			bad = err
 			return false
@@ -310,13 +310,13 @@ func lookupTx(tx Tx, op core.FindSegments) core.ControlPlaneDone {
 	return core.ControlPlaneDone{Resp: resp}
 }
 
-func describeTx(tx Tx, op core.DescribeTopics) core.ControlPlaneDone {
+func describeTransaction(tx Transaction, op core.DescribeTopics) core.ControlPlaneDone {
 	var resp core.DescribeTopicsResp
-	lo := []byte{pTopic}
+	lo := []byte{prefixTopic}
 	tx.Ascend(lo, prefixEnd(lo), func(k, v []byte) bool {
 		name := string(bytes.Clone(k[1:]))
 		if len(op.Topics) == 0 || slices.Contains(op.Topics, name) {
-			resp.Topics = append(resp.Topics, core.TopicInfo{Name: name, Partitions: int32(getUvarint(v))})
+			resp.Topics = append(resp.Topics, core.TopicInfo{Name: name, Partitions: int32(readVarint(v))})
 		}
 		return true
 	})

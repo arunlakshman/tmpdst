@@ -25,7 +25,7 @@ type Machine struct {
 	ready    bool
 	active   bool // advisory appender role
 
-	fold *applier.Applier
+	fold *applier.StateUpdater
 
 	now         core.NodeTime
 	timerGen    core.TimerVersion
@@ -102,7 +102,7 @@ var _ core.Machine = (*Machine)(nil)
 
 // Fold is the in-memory applier after the applied prefix. Tests compare its
 // digest to an independent oracle.
-func (m *Machine) Fold() *applier.Applier { return m.fold }
+func (m *Machine) Fold() *applier.StateUpdater { return m.fold }
 
 // Applied is the next slot to apply (slots below are folded).
 func (m *Machine) Applied() core.LogPosition { return m.applied }

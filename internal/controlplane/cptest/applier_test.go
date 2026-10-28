@@ -11,11 +11,11 @@ import (
 
 // Conformance C3 for the production applier (decision 49): the shared control
 // plane suite runs on cp/applier as a cp.Store. The applier also has its own
-// test with the Applier type directly, in package applier.
+// test with the StateUpdater type directly, in package applier.
 
 func TestConformanceApplierMem(t *testing.T) {
 	runProfiles(t, func() impl {
-		return storeImpl{&applier.Store{A: applier.New(applier.NewMemKV())}}
+		return storeImpl{&applier.Store{A: applier.New(applier.NewMemoryKeyValueStore())}}
 	}, 20)
 }
 

@@ -8,11 +8,11 @@ import (
 	"manifester/internal/core"
 )
 
-// Store is a cp.Store over an Applier with a local slot counter: a single
+// Store is a cp.Store over a StateUpdater with a local slot counter: a single
 // node, no log. It is for the conformance suite and tools; the log-backed
 // service (stage 2) applies commands at their real slots.
 type Store struct {
-	A *Applier
+	A *StateUpdater
 
 	mu   sync.Mutex
 	next int64

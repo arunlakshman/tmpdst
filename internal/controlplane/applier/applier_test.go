@@ -18,7 +18,7 @@ import (
 	"manifester/internal/verify/veritas/veritastest/suites"
 )
 
-func newPebble(t testing.TB) applier.KV {
+func newPebble(t testing.TB) applier.KeyValueStore {
 	t.Helper()
 	kv, err := pebblekv.Open(filepath.Join(t.TempDir(), "state"), pebblekv.Options{CacheBytes: 8 << 20, MemTableBytes: 4 << 20})
 	if err != nil {
@@ -28,14 +28,14 @@ func newPebble(t testing.TB) applier.KV {
 	return kv
 }
 
-var backends = map[string]func(testing.TB) applier.KV{
-	"mem":    func(testing.TB) applier.KV { return applier.NewMemKV() },
+var backends = map[string]func(testing.TB) applier.KeyValueStore{
+	"mem":    func(testing.TB) applier.KeyValueStore { return applier.NewMemoryKeyValueStore() },
 	"pebble": newPebble,
 }
 
-// applierSubject runs the Applier directly as a suite subject. The applier
+// applierSubject runs the StateUpdater directly as a suite subject. The applier
 // hash is not the hash of the spec, so StateHash says no.
-type applierSubject struct{ a *applier.Applier }
+type applierSubject struct{ a *applier.StateUpdater }
 
 func (s applierSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
 	switch {
@@ -53,7 +53,7 @@ func (s applierSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlan
 
 func (applierSubject) StateHash() (uint64, bool) { return 0, false }
 
-func newApplierSubject(t testing.TB, mk func(testing.TB) applier.KV) suites.ControlPlaneSubject {
+func newApplierSubject(t testing.TB, mk func(testing.TB) applier.KeyValueStore) suites.ControlPlaneSubject {
 	a := applier.New(mk(t))
 	t.Cleanup(func() { _ = a.Close() })
 	return applierSubject{a}
@@ -61,7 +61,7 @@ func newApplierSubject(t testing.TB, mk func(testing.TB) applier.KV) suites.Cont
 
 // runSuite runs the shared control plane suite on the applier for every
 // profile. Pebble is slower, so it passes a smaller default number of seeds.
-func runSuite(t *testing.T, mk func(testing.TB) applier.KV, defaultSeeds int) {
+func runSuite(t *testing.T, mk func(testing.TB) applier.KeyValueStore, defaultSeeds int) {
 	for _, profile := range suites.AllControlPlaneProfiles() {
 		t.Run(profile.Name, func(t *testing.T) {
 			suites.ControlPlane(t, profile, func() suites.ControlPlaneSubject { return newApplierSubject(t, mk) },
@@ -118,7 +118,7 @@ func pb(topic string, p int32, n int64) core.PendingBatch {
 		Loc: core.SegmentRef{Key: topic, Off: n * 10, Len: n}}
 }
 
-func mustCommit(t *testing.T, a *applier.Applier, slot int64, op core.CommitSegment) core.ControlPlaneDone {
+func mustCommit(t *testing.T, a *applier.StateUpdater, slot int64, op core.CommitSegment) core.ControlPlaneDone {
 	t.Helper()
 	d, err := a.Commit(slot, op)
 	if err != nil {
@@ -162,7 +162,7 @@ func TestSnapshotRestoreAndReplay(t *testing.T) {
 }
 
 func TestTrimForgetsKeysNotOffsets(t *testing.T) {
-	a := applier.New(applier.NewMemKV())
+	a := applier.New(applier.NewMemoryKeyValueStore())
 	mustCommit(t, a, 0, commit("old", pb("a", 0, 5)))
 	mustCommit(t, a, 5, commit("new", pb("a", 0, 5)))
 	h := a.StateHash()
@@ -184,7 +184,7 @@ func TestTrimForgetsKeysNotOffsets(t *testing.T) {
 }
 
 func TestRestoreRejectsDamage(t *testing.T) {
-	a := applier.New(applier.NewMemKV())
+	a := applier.New(applier.NewMemoryKeyValueStore())
 	mustCommit(t, a, 0, commit("k", pb("a", 0, 2)))
 	var buf bytes.Buffer
 	if err := a.Snapshot(&buf, 1); err != nil {
@@ -193,14 +193,14 @@ func TestRestoreRejectsDamage(t *testing.T) {
 	good := buf.Bytes()
 	cases := map[string][]byte{"empty": nil, "magic": []byte("XXXXXX"), "no end mark": good[:len(good)-1], "cut": good[:len(good)/2], "header only": good[:6]}
 	for name, b := range cases {
-		if _, err := applier.New(applier.NewMemKV()).Restore(bytes.NewReader(b)); err == nil {
+		if _, err := applier.New(applier.NewMemoryKeyValueStore()).Restore(bytes.NewReader(b)); err == nil {
 			t.Errorf("%s: restore accepted a damaged checkpoint", name)
 		}
 	}
 }
 
 func TestInvalidAndUnknown(t *testing.T) {
-	a := applier.New(applier.NewMemKV())
+	a := applier.New(applier.NewMemoryKeyValueStore())
 	if a.CreateTopic("", 1) != core.ErrInvalid || a.CreateTopic("t", 0) != core.ErrInvalid {
 		t.Fatal("CreateTopic must reject empty name and non-positive partitions")
 	}
@@ -220,7 +220,7 @@ func TestInvalidAndUnknown(t *testing.T) {
 
 func TestStoreAdapter(t *testing.T) {
 	ctx := t.Context()
-	s := &applier.Store{A: applier.New(applier.NewMemKV())}
+	s := &applier.Store{A: applier.New(applier.NewMemoryKeyValueStore())}
 	if c, err := s.CreateTopic(ctx, "t", 3); c != core.OK || err != nil {
 		t.Fatal(c, err)
 	}
@@ -249,7 +249,7 @@ func TestCommitBatchEqualsSequential(t *testing.T) {
 		{Slot: 3, Op: commit("k1", pb("a", 0, 1))},                // conflict
 		{Slot: 4, Op: commit("bad")},
 	}
-	one, many := applier.New(applier.NewMemKV()), applier.New(applier.NewMemKV())
+	one, many := applier.New(applier.NewMemoryKeyValueStore()), applier.New(applier.NewMemoryKeyValueStore())
 	got, err := many.CommitBatch(cmds)
 	if err != nil {
 		t.Fatal(err)

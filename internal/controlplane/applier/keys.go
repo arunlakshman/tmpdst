@@ -9,55 +9,55 @@ import (
 )
 
 const (
-	pTopic = 'T'
-	pEnd   = 'E'
-	pRun   = 'R'
-	pKey   = 'K'
-	pSlot  = 'S'
+	prefixTopic = 'T'
+	pEnd        = 'E'
+	prefixRun   = 'R'
+	prefixKey   = 'K'
+	prefixSlot  = 'S'
 
-	digestLen = 16
-	runFormat = 1
+	checksumLength = 16
+	runFormat      = 1
 )
 
 var errCorrupt = errors.New("applier: corrupt record")
 
-func topicKey(name string) []byte { return append([]byte{pTopic}, name...) }
+func topicKey(name string) []byte { return append([]byte{prefixTopic}, name...) }
 
-// tpPrefix is the prefix-free key prefix of one partition for kind p.
-func tpPrefix(p byte, tp core.TopicPartition) []byte {
+// topicPartitionPrefix is the prefix-free key prefix of one partition for kind p.
+func topicPartitionPrefix(p byte, tp core.TopicPartition) []byte {
 	b := binary.AppendUvarint([]byte{p}, uint64(len(tp.Topic)))
 	b = append(b, tp.Topic...)
 	return binary.BigEndian.AppendUint32(b, uint32(tp.Partition))
 }
 
-func endKey(tp core.TopicPartition) []byte { return tpPrefix(pEnd, tp) }
+func endKey(tp core.TopicPartition) []byte { return topicPartitionPrefix(pEnd, tp) }
 
-func runKey(tp core.TopicPartition, base int64) []byte {
-	return binary.BigEndian.AppendUint64(tpPrefix(pRun, tp), uint64(base))
+func batchRunKey(tp core.TopicPartition, base int64) []byte {
+	return binary.BigEndian.AppendUint64(topicPartitionPrefix(prefixRun, tp), uint64(base))
 }
 
-func idemKey(segKey string) []byte { return append([]byte{pKey}, segKey...) }
+func duplicateCheckKey(segKey string) []byte { return append([]byte{prefixKey}, segKey...) }
 
 func slotKey(slot int64, segKey string) []byte {
-	return append(binary.BigEndian.AppendUint64([]byte{pSlot}, uint64(slot)), segKey...)
+	return append(binary.BigEndian.AppendUint64([]byte{prefixSlot}, uint64(slot)), segKey...)
 }
 
-func putUvarintVal(n int64) []byte { return binary.AppendUvarint(nil, uint64(n)) }
+func writeVarint(n int64) []byte { return binary.AppendUvarint(nil, uint64(n)) }
 
-// getUvarint decodes a stored non-negative number (0 when absent).
-func getUvarint(b []byte) int64 {
+// readVarint decodes a stored non-negative number (0 when absent).
+func readVarint(b []byte) int64 {
 	v, _ := binary.Uvarint(b)
 	return int64(v)
 }
 
-// digest identifies a request's batches (not its key): a replay is the same
+// checksum identifies a request's batches (not its key): a replay is the same
 // request iff the digests are equal.
-func digest(bs []core.PendingBatch) [digestLen]byte {
-	sum := sha256.Sum256(digestBytes(bs))
-	return [digestLen]byte(sum[:digestLen])
+func checksum(bs []core.PendingBatch) [checksumLength]byte {
+	sum := sha256.Sum256(checksumBytes(bs))
+	return [checksumLength]byte(sum[:checksumLength])
 }
 
-func digestBytes(bs []core.PendingBatch) []byte {
+func checksumBytes(bs []core.PendingBatch) []byte {
 	n := binary.AppendUvarint(nil, uint64(len(bs)))
 	for _, b := range bs {
 		n = binary.AppendUvarint(n, uint64(len(b.TP.Topic)))
@@ -72,9 +72,9 @@ func digestBytes(bs []core.PendingBatch) []byte {
 	return n
 }
 
-// idemRecord is the stored fact that a key committed: its slot, the request
+// duplicateCheckRecord is the stored fact that a key committed: its slot, the request
 // digest, and the base offset assigned to each batch, in request order.
-func idemRecord(slot int64, dig [digestLen]byte, rs []core.BatchRange) []byte {
+func duplicateCheckRecord(slot int64, dig [checksumLength]byte, rs []core.BatchRange) []byte {
 	b := binary.AppendUvarint(nil, uint64(slot))
 	b = append(b, dig[:]...)
 	for _, r := range rs {
@@ -83,16 +83,16 @@ func idemRecord(slot int64, dig [digestLen]byte, rs []core.BatchRange) []byte {
 	return b
 }
 
-// parseIdem splits a record into its digest and bases.
-func parseIdem(b []byte) ([digestLen]byte, []int64, error) {
-	var dig [digestLen]byte
+// parseDuplicateCheck splits a record into its digest and bases.
+func parseDuplicateCheck(b []byte) ([checksumLength]byte, []int64, error) {
+	var dig [checksumLength]byte
 	var bases []int64
 	_, n := binary.Uvarint(b)
-	if n <= 0 || len(b) < n+digestLen {
+	if n <= 0 || len(b) < n+checksumLength {
 		return dig, nil, errCorrupt
 	}
 	copy(dig[:], b[n:])
-	b = b[n+digestLen:]
+	b = b[n+checksumLength:]
 	for len(b) > 0 {
 		v, m := binary.Uvarint(b)
 		if m <= 0 {
@@ -103,10 +103,10 @@ func parseIdem(b []byte) ([digestLen]byte, []int64, error) {
 	return dig, bases, nil
 }
 
-// encodeRun packs the batches of one run (one partition, contiguous offsets,
+// encodeBatchRun packs the batches of one run (one partition, contiguous offsets,
 // in order): format byte, the distinct segment keys, then per batch the key
 // index, record count, offset and length.
-func encodeRun(rs []core.BatchRange) []byte {
+func encodeBatchRun(rs []core.BatchRange) []byte {
 	var keys []string
 	idx := map[string]int{} // lookups only
 	for _, r := range rs {
@@ -168,8 +168,8 @@ func (r *reader) str() string {
 	return s
 }
 
-// decodeRun unpacks the run of tp that starts at base.
-func decodeRun(tp core.TopicPartition, base int64, b []byte) ([]core.BatchRange, error) {
+// decodeBatchRun unpacks the run of tp that starts at base.
+func decodeBatchRun(tp core.TopicPartition, base int64, b []byte) ([]core.BatchRange, error) {
 	if len(b) == 0 || b[0] != runFormat {
 		return nil, errCorrupt
 	}
@@ -202,7 +202,7 @@ func decodeRun(tp core.TopicPartition, base int64, b []byte) ([]core.BatchRange,
 	return out, nil
 }
 
-// runBase is the base offset in an R key.
-func runBase(key []byte) int64 {
+// batchRunBase is the base offset in an R key.
+func batchRunBase(key []byte) int64 {
 	return int64(binary.BigEndian.Uint64(key[len(key)-8:]))
 }

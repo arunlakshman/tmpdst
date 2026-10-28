@@ -23,7 +23,7 @@
 //	    Test: internal/verify/sim/engines/conformance_test.go.
 //	C3  The real adapters are compared with the specs: the S3 object store
 //	    against ObjectStore, and the control-plane stores (in-memory store,
-//	    gRPC client, applier on MemKV and on Pebble) against ControlPlane.
+//	    gRPC client, applier on MemoryKeyValueStore and on Pebble) against ControlPlane.
 //	    This is the only check that runs the real code in internal/sys and
 //	    the control-plane stores. The S3 test needs MANIFESTER_S3_ENDPOINT.
 //	    Tests: internal/sys/s3store/conform_test.go and

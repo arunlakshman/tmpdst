@@ -33,17 +33,17 @@ type Entry struct {
 // ErrCorrupt means the bytes are not a valid Entry.
 var ErrCorrupt = errors.New("applier: corrupt entry")
 
-type encoder struct {
+type entryEncoder struct {
 	buf []byte
 	tab []string
 	idx map[string]int
 }
 
-func (e *encoder) u(v uint64) { e.buf = binary.AppendUvarint(e.buf, v) }
-func (e *encoder) i(v int64)  { e.buf = binary.AppendVarint(e.buf, v) }
-func (e *encoder) s(v string) { e.u(uint64(len(v))); e.buf = append(e.buf, v...) }
+func (e *entryEncoder) u(v uint64) { e.buf = binary.AppendUvarint(e.buf, v) }
+func (e *entryEncoder) i(v int64)  { e.buf = binary.AppendVarint(e.buf, v) }
+func (e *entryEncoder) s(v string) { e.u(uint64(len(v))); e.buf = append(e.buf, v...) }
 
-func (e *encoder) ref(v string) uint64 {
+func (e *entryEncoder) ref(v string) uint64 {
 	if n, ok := e.idx[v]; ok {
 		return uint64(n)
 	}
@@ -54,7 +54,7 @@ func (e *encoder) ref(v string) uint64 {
 
 // Encode serialises an entry.
 func Encode(en Entry) []byte {
-	e := &encoder{idx: map[string]int{}}
+	e := &entryEncoder{idx: map[string]int{}}
 	e.u(uint64(en.Kind))
 	e.s(en.ID)
 	switch en.Kind {
@@ -67,7 +67,7 @@ func Encode(en Entry) []byte {
 	return e.buf
 }
 
-func (e *encoder) commit(c core.CommitSegment) {
+func (e *entryEncoder) commit(c core.CommitSegment) {
 	e.s(c.SegmentKey)
 	head := e.buf
 	e.buf = nil
@@ -89,12 +89,12 @@ func (e *encoder) commit(c core.CommitSegment) {
 	e.buf = append(e.buf, body...)
 }
 
-type decoder struct {
+type entryDecoder struct {
 	b   []byte
 	err error
 }
 
-func (d *decoder) u() uint64 {
+func (d *entryDecoder) u() uint64 {
 	v, n := binary.Uvarint(d.b)
 	if n <= 0 {
 		d.err = ErrCorrupt
@@ -104,7 +104,7 @@ func (d *decoder) u() uint64 {
 	return v
 }
 
-func (d *decoder) i() int64 {
+func (d *entryDecoder) i() int64 {
 	v, n := binary.Varint(d.b)
 	if n <= 0 {
 		d.err = ErrCorrupt
@@ -114,7 +114,7 @@ func (d *decoder) i() int64 {
 	return v
 }
 
-func (d *decoder) s() string {
+func (d *entryDecoder) s() string {
 	n := d.u()
 	if d.err != nil || n > uint64(len(d.b)) {
 		d.err = ErrCorrupt
@@ -127,7 +127,7 @@ func (d *decoder) s() string {
 
 // Decode parses an entry made by Encode.
 func Decode(b []byte) (Entry, error) {
-	d := &decoder{b: b}
+	d := &entryDecoder{b: b}
 	en := Entry{Kind: Kind(d.u())}
 	en.ID = d.s()
 	switch en.Kind {
@@ -149,7 +149,7 @@ func Decode(b []byte) (Entry, error) {
 	return en, nil
 }
 
-func (d *decoder) commit() core.CommitSegment {
+func (d *entryDecoder) commit() core.CommitSegment {
 	c := core.CommitSegment{SegmentKey: d.s()}
 	tab := make([]string, 0, 8)
 	for n := d.u(); n > 0 && d.err == nil; n-- {
@@ -184,11 +184,11 @@ func (d *decoder) commit() core.CommitSegment {
 
 // NewMem returns an applier over an in-memory KV. No Pebble. Suitable for the
 // DSM Step fold and for tests that need the pure command fold.
-func NewMem() *Applier { return New(NewMemKV()) }
+func NewMem() *StateUpdater { return New(NewMemoryKeyValueStore()) }
 
 // Apply folds one log entry at slot into the store. No-ops leave state unchanged.
 // A store failure panics (fail-stop), matching Commit.
-func (a *Applier) Apply(slot int64, e Entry) core.ControlPlaneDone {
+func (a *StateUpdater) Apply(slot int64, e Entry) core.ControlPlaneDone {
 	switch e.Kind {
 	case KindNoop:
 		return core.ControlPlaneDone{Req: core.RequestID(slot), Outcome: core.Applied}
@@ -212,7 +212,7 @@ func (a *Applier) Apply(slot int64, e Entry) core.ControlPlaneDone {
 }
 
 // ApplyBytes decodes data then Apply. Returns ErrCorrupt without mutating state.
-func (a *Applier) ApplyBytes(slot int64, data []byte) (core.ControlPlaneDone, error) {
+func (a *StateUpdater) ApplyBytes(slot int64, data []byte) (core.ControlPlaneDone, error) {
 	e, err := Decode(data)
 	if err != nil {
 		return core.ControlPlaneDone{}, err

@@ -15,28 +15,28 @@ func TestRunRoundTripAndCorruption(t *testing.T) {
 		{TP: tp, Base: 12, Count: 5, Loc: core.SegmentRef{Key: "s1", Off: 50, Len: -1}},
 		{TP: tp, Base: 17, Count: 1, Loc: core.SegmentRef{Key: "s2", Off: 7, Len: 9}},
 	}
-	b := encodeRun(rs)
-	got, err := decodeRun(tp, 10, b)
+	b := encodeBatchRun(rs)
+	got, err := decodeBatchRun(tp, 10, b)
 	if err != nil || len(got) != 3 || got[2] != rs[2] || got[1] != rs[1] {
 		t.Fatalf("round trip: %+v %v", got, err)
 	}
 	bad := [][]byte{nil, {9}, b[:len(b)-1], append(append([]byte{}, b...), 0), {runFormat, 0xFF}, {runFormat, 1, 5, 'a'},
 		{runFormat, 0, 200}, {runFormat, 1, 1, 'k', 1, 5, 1, 0, 0}, {runFormat, 100}}
 	for i, x := range bad {
-		if _, err := decodeRun(tp, 0, x); !errors.Is(err, errCorrupt) {
+		if _, err := decodeBatchRun(tp, 0, x); !errors.Is(err, errCorrupt) {
 			t.Errorf("case %d: err %v", i, err)
 		}
 	}
 }
 
 func TestIdemRecordCorruption(t *testing.T) {
-	var dig [digestLen]byte
-	rec := idemRecord(7, dig, []core.BatchRange{{Base: 3}, {Base: 300}})
-	if _, bases, err := parseIdem(rec); err != nil || len(bases) != 2 || bases[1] != 300 {
+	var dig [checksumLength]byte
+	rec := duplicateCheckRecord(7, dig, []core.BatchRange{{Base: 3}, {Base: 300}})
+	if _, bases, err := parseDuplicateCheck(rec); err != nil || len(bases) != 2 || bases[1] != 300 {
 		t.Fatalf("%v %v", bases, err)
 	}
-	for _, x := range [][]byte{nil, {0x80}, rec[:5], append(append([]byte{}, rec[:1+digestLen]...), 0x80)} {
-		if _, _, err := parseIdem(x); err == nil {
+	for _, x := range [][]byte{nil, {0x80}, rec[:5], append(append([]byte{}, rec[:1+checksumLength]...), 0x80)} {
+		if _, _, err := parseDuplicateCheck(x); err == nil {
 			t.Errorf("accepted %v", x)
 		}
 	}
@@ -51,9 +51,9 @@ func TestPrefixEnd(t *testing.T) {
 // brokenKV fails every transaction.
 type brokenKV struct{}
 
-func (*brokenKV) View(func(Tx)) error   { return errors.New("disk gone") }
-func (*brokenKV) Update(func(Tx)) error { return errors.New("disk gone") }
-func (*brokenKV) Close() error          { return nil }
+func (*brokenKV) View(func(Transaction)) error   { return errors.New("disk gone") }
+func (*brokenKV) Update(func(Transaction)) error { return errors.New("disk gone") }
+func (*brokenKV) Close() error                   { return nil }
 
 func TestStoreFailureIsFailStop(t *testing.T) {
 	a := New(&brokenKV{})
@@ -77,12 +77,12 @@ func TestStoreFailureIsFailStop(t *testing.T) {
 }
 
 func TestCorruptStoredRecordsPanic(t *testing.T) {
-	a := New(NewMemKV())
+	a := New(NewMemoryKeyValueStore())
 	tp := core.NewTopicPartition("t", 0)
-	_ = a.kv.Update(func(tx Tx) {
-		tx.Set(runKey(tp, 0), []byte{9, 9})
+	_ = a.kv.Update(func(tx Transaction) {
+		tx.Set(batchRunKey(tp, 0), []byte{9, 9})
 		tx.Set(endKey(tp), []byte{5})
-		tx.Set(idemKey("k"), []byte{0x80})
+		tx.Set(duplicateCheckKey("k"), []byte{0x80})
 	})
 	for name, f := range map[string]func(){
 		"lookup": func() { _, _ = a.Lookup(core.FindSegments{TP: tp}) },

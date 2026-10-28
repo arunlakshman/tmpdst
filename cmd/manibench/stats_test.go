@@ -18,7 +18,7 @@ func TestFormatIntervalShape(t *testing.T) {
 }
 
 func TestAggregation(t *testing.T) {
-	s := newStats()
+	s := newLatencyStats()
 	for i := 1; i <= 100; i++ {
 		s.add(1000, time.Duration(i)*time.Millisecond, nil)
 	}

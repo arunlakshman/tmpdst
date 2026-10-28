@@ -44,13 +44,13 @@ func TestComplexity(t *testing.T) {
 }
 
 func TestCRAPFormula(t *testing.T) {
-	if got := CRAP(10, 1); got != 10 {
+	if got := RiskScore(10, 1); got != 10 {
 		t.Errorf("full coverage: %v", got)
 	}
-	if got := CRAP(5, 0); got != 30 {
+	if got := RiskScore(5, 0); got != 30 {
 		t.Errorf("zero coverage CC5: %v", got)
 	}
-	if got := CRAP(10, 0.5); math.Abs(got-22.5) > 1e-9 {
+	if got := RiskScore(10, 0.5); math.Abs(got-22.5) > 1e-9 {
 		t.Errorf("half coverage CC10: %v", got)
 	}
 }
@@ -132,10 +132,10 @@ func TestCoverageMappingAndExclusions(t *testing.T) {
 	if len(m) != 3 {
 		t.Fatalf("want 3 functions (no generated/test/nested), got %d: %v", len(m), m)
 	}
-	if c := m["covered"]; c.Coverage != 1 || c.CRAP != 2 {
+	if c := m["covered"]; c.Coverage != 1 || c.RiskScore != 2 {
 		t.Errorf("covered: %+v", c)
 	}
-	if u := m["uncovered"]; u.Coverage != 0 || u.CRAP != 6 {
+	if u := m["uncovered"]; u.Coverage != 0 || u.RiskScore != 6 {
 		t.Errorf("uncovered: %+v", u)
 	}
 	if e := m["empty"]; e.Coverage != 1 {

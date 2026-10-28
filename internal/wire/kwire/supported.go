@@ -21,10 +21,10 @@ const (
 // ErrCodeUnsupportedVersion is Kafka's UNSUPPORTED_VERSION error code.
 const ErrCodeUnsupportedVersion int16 = 35
 
-// APIRange is an API key and its inclusive supported version range.
-type APIRange struct{ Key, Min, Max int16 }
+// APIVersionRange is an API key and its inclusive supported version range.
+type APIVersionRange struct{ Key, Min, Max int16 }
 
-var supported = []APIRange{ //nolint:dupl // supported_test.go pins this table with its own copy
+var supported = []APIVersionRange{ //nolint:dupl // supported_test.go pins this table with its own copy
 	{Key: KeyProduce, Min: 3, Max: 9},
 	{Key: KeyFetch, Min: 4, Max: 12},
 	{Key: KeyListOffsets, Min: 1, Max: 7},
@@ -35,18 +35,18 @@ var supported = []APIRange{ //nolint:dupl // supported_test.go pins this table w
 // Supported returns the advertised APIs in key order. Produce >= 3 so batches
 // are RecordBatch v2. Produce and Fetch stay below v13, which switches to
 // topic IDs. The result aliases the package registry, so callers must not mutate it.
-func Supported() []APIRange {
+func Supported() []APIVersionRange {
 	return supported
 }
 
 // Range returns the supported version range of key.
-func Range(key int16) (APIRange, bool) {
+func Range(key int16) (APIVersionRange, bool) {
 	for _, r := range supported {
 		if r.Key == key {
 			return r, true
 		}
 	}
-	return APIRange{}, false
+	return APIVersionRange{}, false
 }
 
 // IsSupported reports whether (key, version) is served.

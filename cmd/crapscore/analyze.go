@@ -21,11 +21,11 @@ type Func struct {
 	EndLine    int     `json:"end_line"`
 	Complexity int     `json:"complexity"`
 	Coverage   float64 `json:"coverage"` // 0..1
-	CRAP       float64 `json:"crap"`
+	RiskScore  float64 `json:"crap"`
 }
 
-// CRAP is the Savoia/Evans formula: comp^2 * (1-cov)^3 + comp.
-func CRAP(comp int, cov float64) float64 {
+// RiskScore is the Savoia/Evans formula: comp^2 * (1-cov)^3 + comp.
+func RiskScore(comp int, cov float64) float64 {
 	c := float64(comp)
 	return c*c*(1-cov)*(1-cov)*(1-cov) + c
 }

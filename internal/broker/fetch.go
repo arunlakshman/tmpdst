@@ -109,7 +109,7 @@ func (b *Broker) acceptFetch(o *operation, data []byte, rg core.BatchRange) []co
 	if b.cfg.InjectedBug == InjectedBugWrongOffset {
 		base++
 	}
-	o.out = append(o.out, kwire.PatchBatch(data, base, 0)...)
+	o.out = append(o.out, kwire.ChangeBatchOffset(data, base, 0)...)
 	o.next++
 	o.attempts, o.corrupt = 0, false
 	if o.next < len(o.ranges) {

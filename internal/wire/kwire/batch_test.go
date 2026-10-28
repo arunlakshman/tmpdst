@@ -102,7 +102,7 @@ func TestBatchRejects(t *testing.T) {
 func TestPatchBatch(t *testing.T) {
 	b, _ := BuildBatch(testParams, []kmsg.Record{{Value: []byte("x")}, {Value: []byte("y")}})
 	orig := append([]byte(nil), b...)
-	p := PatchBatch(b, 1<<40+5, 9)
+	p := ChangeBatchOffset(b, 1<<40+5, 9)
 	if !bytes.Equal(b, orig) {
 		t.Fatal("input mutated")
 	}
@@ -113,7 +113,7 @@ func TestPatchBatch(t *testing.T) {
 	if !bytes.Equal(p[16:], b[16:]) || !bytes.Equal(p[8:12], b[8:12]) {
 		t.Fatal("patched outside 0..7, 12..15")
 	}
-	if got := PatchBatch([]byte{1, 2}, 1, 1); !bytes.Equal(got, []byte{1, 2}) {
+	if got := ChangeBatchOffset([]byte{1, 2}, 1, 1); !bytes.Equal(got, []byte{1, 2}) {
 		t.Fatal("short input")
 	}
 }
@@ -148,13 +148,13 @@ func TestSplitBatches(t *testing.T) {
 	if _, err := SplitBatches(make([]byte, 20)); !errors.Is(err, ErrCorrupt) {
 		t.Fatal(err)
 	}
-	if one, err := OneBatch(parts[0]); err != nil || !bytes.Equal(one, parts[0]) {
+	if one, err := RequireSingleBatch(parts[0]); err != nil || !bytes.Equal(one, parts[0]) {
 		t.Fatal(err)
 	}
-	if _, err := OneBatch(cat); !errors.Is(err, ErrNotSingle) {
+	if _, err := RequireSingleBatch(cat); !errors.Is(err, ErrNotSingle) {
 		t.Fatal(err)
 	}
-	if _, err := OneBatch(cat[:30]); !errors.Is(err, ErrNotSingle) {
+	if _, err := RequireSingleBatch(cat[:30]); !errors.Is(err, ErrNotSingle) {
 		t.Fatal(err)
 	}
 }
@@ -168,13 +168,13 @@ func FuzzParseBatch(f *testing.F) {
 			_, _ = pb.Records()
 		}
 		_, _ = SplitBatches(data)
-		_ = PatchBatch(data, 1, 2)
+		_ = ChangeBatchOffset(data, 1, 2)
 	})
 }
 
 // refix recomputes the CRC after a test edits the header.
 func refix(b []byte) []byte {
-	binary.BigEndian.PutUint32(b[17:], crc32c(b[crcStart:]))
+	binary.BigEndian.PutUint32(b[17:], crc32cChecksum(b[crcStart:]))
 	return b
 }
 
@@ -205,7 +205,7 @@ func TestOpaqueCompressedBatch(t *testing.T) {
 		if codec != CodecNone && !errors.Is(rerr, ErrUnsupportedBatch) {
 			t.Fatalf("Records on compressed: %v", rerr)
 		}
-		patched, err := ParseBatch(PatchBatch(b, 1<<33, 4))
+		patched, err := ParseBatch(ChangeBatchOffset(b, 1<<33, 4))
 		if err != nil || patched.BaseOffset != 1<<33 {
 			t.Fatalf("patched compressed batch: %v", err)
 		}

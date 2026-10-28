@@ -6,7 +6,7 @@ import (
 	"manifester/internal/core"
 )
 
-var wantSupported = []APIRange{
+var wantSupported = []APIVersionRange{
 	{Key: KeyProduce, Min: 3, Max: 9},
 	{Key: KeyFetch, Min: 4, Max: 12},
 	{Key: KeyListOffsets, Min: 1, Max: 7},
@@ -35,7 +35,7 @@ func TestRange(t *testing.T) {
 			t.Fatalf("Range(%d) = %+v, %v", want.Key, got, ok)
 		}
 	}
-	if got, ok := Range(22); ok || got != (APIRange{}) {
+	if got, ok := Range(22); ok || got != (APIVersionRange{}) {
 		t.Fatalf("Range(22) = %+v, %v", got, ok)
 	}
 }

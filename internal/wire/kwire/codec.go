@@ -36,8 +36,8 @@ func malformed(format string, a ...any) error {
 	return fmt.Errorf("%w: %s", ErrMalformed, fmt.Sprintf(format, a...))
 }
 
-// skipTags skips a tagged-field section and returns the bytes after it.
-func skipTags(b []byte) ([]byte, error) {
+// skipTaggedFields skips a tagged-field section and returns the bytes after it.
+func skipTaggedFields(b []byte) ([]byte, error) {
 	n, k := binary.Uvarint(b)
 	if k <= 0 {
 		return nil, malformed("tagged fields")
@@ -95,7 +95,7 @@ func (Codec) DecodeRequest(frame []byte) (core.RequestHeader, core.Request, erro
 func readBody(rest []byte, flexible bool, read func([]byte) error) error {
 	if flexible {
 		var err error
-		if rest, err = skipTags(rest); err != nil {
+		if rest, err = skipTaggedFields(rest); err != nil {
 			return err
 		}
 	}
@@ -105,17 +105,17 @@ func readBody(rest []byte, flexible bool, read func([]byte) error) error {
 	return nil
 }
 
-func prefix(dst []byte) []byte { return append(dst, 0, 0, 0, 0) }
+func readPrefix(dst []byte) []byte { return append(dst, 0, 0, 0, 0) }
 
-// appendFlexibleTag appends an empty header tagged-field section when flexible.
-func appendFlexibleTag(b []byte, flexible bool) []byte {
+// appendTaggedField appends an empty header tagged-field section when flexible.
+func appendTaggedField(b []byte, flexible bool) []byte {
 	if flexible {
 		return append(b, 0)
 	}
 	return b
 }
 
-func seal(b []byte) []byte {
+func finishBatch(b []byte) []byte {
 	binary.BigEndian.PutUint32(b, uint32(len(b)-4))
 	return b
 }
@@ -145,10 +145,10 @@ func (Codec) EncodeResponse(h core.RequestHeader, resp core.Response) ([]byte, e
 		return nil, fmt.Errorf("kwire: response %T does not match api key %d", resp, h.APIKey)
 	}
 	r.SetVersion(respVersion(h))
-	b := prefix(nil)
+	b := readPrefix(nil)
 	b = binary.BigEndian.AppendUint32(b, uint32(h.CorrelationID))
-	b = appendFlexibleTag(b, respHeaderTags(h, r.IsFlexible()))
-	return seal(r.AppendTo(b)), nil
+	b = appendTaggedField(b, respHeaderTags(h, r.IsFlexible()))
+	return finishBatch(r.AppendTo(b)), nil
 }
 
 // EncodeRequest returns length prefix + request header + body, setting req's
@@ -162,14 +162,14 @@ func (Codec) EncodeRequest(h core.RequestHeader, req core.Request) ([]byte, erro
 		return nil, errors.New("kwire: client id too long")
 	}
 	r.SetVersion(h.APIVersion)
-	b := prefix(nil)
+	b := readPrefix(nil)
 	b = binary.BigEndian.AppendUint16(b, uint16(h.APIKey))
 	b = binary.BigEndian.AppendUint16(b, uint16(h.APIVersion))
 	b = binary.BigEndian.AppendUint32(b, uint32(h.CorrelationID))
 	b = binary.BigEndian.AppendUint16(b, uint16(len(h.ClientID)))
 	b = append(b, h.ClientID...)
-	b = appendFlexibleTag(b, r.IsFlexible())
-	return seal(r.AppendTo(b)), nil
+	b = appendTaggedField(b, r.IsFlexible())
+	return finishBatch(r.AppendTo(b)), nil
 }
 
 // DecodeResponse parses a response frame (no length prefix) to the request

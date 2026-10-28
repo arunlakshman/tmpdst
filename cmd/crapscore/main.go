@@ -17,7 +17,7 @@ import (
 	"strings"
 )
 
-const regenHint = "go run ./cmd/crapscore -profile <cover.out> -update-baseline   (or: make crap-baseline); review and commit the diff of ops/crap-baseline.json"
+const rebuildHint = "go run ./cmd/crapscore -profile <cover.out> -update-baseline   (or: make crap-baseline); review and commit the diff of ops/crap-baseline.json"
 
 // Baseline is the checked-in ratchet file: the offenders that existed when it
 // was generated, with their CRAP at that time.
@@ -27,23 +27,23 @@ type Baseline struct {
 	Functions map[string]float64 `json:"functions"`
 }
 
-// Verdict is the outcome of comparing the offenders with the baseline.
-type Verdict struct {
+// Result is the outcome of comparing the offenders with the baseline.
+type Result struct {
 	Offenders []*Func  // all functions over the threshold
 	New       []*Func  // not in baseline
 	Worse     []*Func  // in baseline, CRAP grew beyond tolerance
 	Improved  []string // baselined, now fine or better (baseline could be tightened)
 }
 
-func (v Verdict) Failed() bool { return len(v.New)+len(v.Worse) > 0 }
+func (v Result) Failed() bool { return len(v.New)+len(v.Worse) > 0 }
 
 // Evaluate applies the ratchet. With base == nil (strict) every offender fails.
-func Evaluate(funcs []*Func, threshold float64, base *Baseline, tol float64) Verdict {
-	var v Verdict
+func Evaluate(funcs []*Func, threshold float64, base *Baseline, tol float64) Result {
+	var v Result
 	seen := map[string]bool{}
 	for _, f := range funcs {
 		seen[f.Key] = true
-		if f.CRAP <= threshold {
+		if f.RiskScore <= threshold {
 			continue
 		}
 		v.Offenders = append(v.Offenders, f)
@@ -55,7 +55,7 @@ func Evaluate(funcs []*Func, threshold float64, base *Baseline, tol float64) Ver
 		switch {
 		case !ok:
 			v.New = append(v.New, f)
-		case f.CRAP > old+tol:
+		case f.RiskScore > old+tol:
 			v.Worse = append(v.Worse, f)
 		}
 	}
@@ -66,10 +66,10 @@ func Evaluate(funcs []*Func, threshold float64, base *Baseline, tol float64) Ver
 			}
 		}
 		for _, f := range funcs {
-			if old, ok := base.Functions[f.Key]; ok && f.CRAP <= threshold {
-				v.Improved = append(v.Improved, fmt.Sprintf("%s: %.1f -> %.1f (now within threshold)", f.Key, old, f.CRAP))
-			} else if ok && f.CRAP < old-tol {
-				v.Improved = append(v.Improved, fmt.Sprintf("%s: %.1f -> %.1f", f.Key, old, f.CRAP))
+			if old, ok := base.Functions[f.Key]; ok && f.RiskScore <= threshold {
+				v.Improved = append(v.Improved, fmt.Sprintf("%s: %.1f -> %.1f (now within threshold)", f.Key, old, f.RiskScore))
+			} else if ok && f.RiskScore < old-tol {
+				v.Improved = append(v.Improved, fmt.Sprintf("%s: %.1f -> %.1f", f.Key, old, f.RiskScore))
 			}
 		}
 		sort.Strings(v.Improved)
@@ -129,18 +129,18 @@ func analyse(c *config) ([]*Func, error) {
 	if err != nil {
 		return nil, err
 	}
-	funcs, err = applyExclude(funcs, c.exclude)
+	funcs, err = removeExcluded(funcs, c.exclude)
 	if err != nil {
 		return nil, err
 	}
 	if err := applyCoverage(c, funcs); err != nil {
 		return nil, err
 	}
-	sort.SliceStable(funcs, func(i, j int) bool { return funcs[i].CRAP > funcs[j].CRAP })
+	sort.SliceStable(funcs, func(i, j int) bool { return funcs[i].RiskScore > funcs[j].RiskScore })
 	return funcs, nil
 }
 
-func applyExclude(funcs []*Func, exclude string) ([]*Func, error) {
+func removeExcluded(funcs []*Func, exclude string) ([]*Func, error) {
 	if exclude == "" {
 		return funcs, nil
 	}
@@ -181,12 +181,12 @@ func applyCoverage(c *config, funcs []*Func) error {
 func writeBaseline(c *config, funcs []*Func) (int, error) {
 	b := Baseline{
 		Threshold: c.threshold,
-		Note:      "Ratchet baseline for cmd/crapscore. Regenerate: " + regenHint,
+		Note:      "Ratchet baseline for cmd/crapscore. Regenerate: " + rebuildHint,
 		Functions: map[string]float64{},
 	}
 	for _, f := range funcs {
-		if f.CRAP > c.threshold {
-			b.Functions[f.Key] = round2(f.CRAP)
+		if f.RiskScore > c.threshold {
+			b.Functions[f.Key] = round2(f.RiskScore)
 		}
 	}
 	data, _ := json.MarshalIndent(b, "", "  ")
@@ -258,7 +258,7 @@ func counts(funcs []*Func) map[float64]int {
 	m := map[float64]int{}
 	for _, t := range reportThresholds {
 		for _, f := range funcs {
-			if f.CRAP > t {
+			if f.RiskScore > t {
 				m[t]++
 			}
 		}
@@ -266,14 +266,14 @@ func counts(funcs []*Func) map[float64]int {
 	return m
 }
 
-func writeText(w io.Writer, funcs []*Func, v Verdict, threshold float64, top int, strict bool, warn string) {
+func writeText(w io.Writer, funcs []*Func, v Result, threshold float64, top int, strict bool, warn string) {
 	n := len(funcs)
 	if top > 0 && top < n {
 		n = top
 	}
 	_, _ = fmt.Fprintf(w, "%8s %5s %6s  %-52s %s\n", "CRAP", "CC", "COV%", "FUNCTION", "LOCATION")
 	for _, f := range funcs[:n] {
-		_, _ = fmt.Fprintf(w, "%8.1f %5d %5.1f%%  %-52s %s:%d\n", f.CRAP, f.Complexity, f.Coverage*100, f.Key, f.File, f.Line)
+		_, _ = fmt.Fprintf(w, "%8.1f %5d %5.1f%%  %-52s %s:%d\n", f.RiskScore, f.Complexity, f.Coverage*100, f.Key, f.File, f.Line)
 	}
 	c := counts(funcs)
 	_, _ = fmt.Fprintf(w, "\n%d functions analysed. Functions with CRAP over:", len(funcs))
@@ -297,16 +297,16 @@ func writeText(w io.Writer, funcs []*Func, v Verdict, threshold float64, top int
 	}
 	_, _ = fmt.Fprintf(w, "\ncrapscore: FAIL (%s, threshold %.0f)\n", mode, threshold)
 	for _, f := range v.New {
-		_, _ = fmt.Fprintf(w, "  over threshold:  %-50s CRAP %.1f (CC %d, cov %.0f%%) %s:%d\n", f.Key, f.CRAP, f.Complexity, f.Coverage*100, f.File, f.Line)
+		_, _ = fmt.Fprintf(w, "  over threshold:  %-50s CRAP %.1f (CC %d, cov %.0f%%) %s:%d\n", f.Key, f.RiskScore, f.Complexity, f.Coverage*100, f.File, f.Line)
 	}
 	for _, f := range v.Worse {
-		_, _ = fmt.Fprintf(w, "  got worse:       %-50s CRAP %.1f (CC %d, cov %.0f%%) %s:%d\n", f.Key, f.CRAP, f.Complexity, f.Coverage*100, f.File, f.Line)
+		_, _ = fmt.Fprintf(w, "  got worse:       %-50s CRAP %.1f (CC %d, cov %.0f%%) %s:%d\n", f.Key, f.RiskScore, f.Complexity, f.Coverage*100, f.File, f.Line)
 	}
 	_, _ = fmt.Fprintln(w, "Fix: add tests or split the function. Only if the offender is accepted, regenerate the baseline deliberately:")
-	_, _ = fmt.Fprintln(w, "  "+regenHint)
+	_, _ = fmt.Fprintln(w, "  "+rebuildHint)
 }
 
-func writeJSON(w io.Writer, funcs []*Func, v Verdict, threshold float64, top int, strict bool, warn string) {
+func writeJSON(w io.Writer, funcs []*Func, v Result, threshold float64, top int, strict bool, warn string) {
 	n := len(funcs)
 	if top > 0 && top < n {
 		n = top

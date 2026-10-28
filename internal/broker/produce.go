@@ -58,7 +58,7 @@ func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, 
 	case !b.knows(tp):
 		return nil, errUnknownTopicOrPart
 	}
-	one, err := kwire.OneBatch(raw)
+	one, err := kwire.RequireSingleBatch(raw)
 	if err != nil {
 		return nil, errCorruptMessage
 	}

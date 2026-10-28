@@ -18,9 +18,9 @@ import (
 	"manifester/internal/verify/sim/kafka"
 )
 
-// coverageMin is the campaign size from which a never-satisfied Sometimes
+// minimumCoverage is the campaign size from which a never-satisfied Sometimes
 // property counts as a failure (smaller runs cannot be expected to reach it).
-const coverageMin = 100
+const minimumCoverage = 100
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
@@ -75,14 +75,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if o.one >= 0 {
-		return replay(stdout, stderr, config, uint64(o.one))
+		return rerunSeed(stdout, stderr, config, uint64(o.one))
 	}
 	list := make([]uint64, o.seeds)
 	for i := range list {
 		list[i] = o.start + uint64(i)
 	}
 	t0 := time.Now()
-	rep, err := runSharded(config, list, o.jobs)
+	rep, err := runInParts(config, list, o.jobs)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "manisim:", err)
 		return 2
@@ -99,7 +99,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 // failed is the campaign verdict: any failing seed, violated Always property,
 // nondeterminism, or (in a big enough campaign) a coverage gap.
 func failed(rep sim.Report, bad int) bool {
-	return bad > 0 || len(rep.Always) > 0 || len(rep.Nondeterminism) > 0 || (len(rep.Coverage) > 0 && len(rep.Seeds) >= coverageMin)
+	return bad > 0 || len(rep.Always) > 0 || len(rep.Nondeterminism) > 0 || (len(rep.Coverage) > 0 && len(rep.Seeds) >= minimumCoverage)
 }
 
 // printSeeds prints the per-seed lines and failures; it returns the number of
@@ -138,7 +138,7 @@ func printCampaign(w io.Writer, rep sim.Report, scenario string) {
 	}
 }
 
-func replay(stdout, stderr io.Writer, config func([]uint64) sim.Config, seed uint64) int {
+func rerunSeed(stdout, stderr io.Writer, config func([]uint64) sim.Config, seed uint64) int {
 	res, err := sim.NewRunner().Replay(config([]uint64{seed}), seed)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "manisim:", err)
@@ -158,7 +158,7 @@ func replay(stdout, stderr io.Writer, config func([]uint64) sim.Config, seed uin
 	return 0
 }
 
-var kindNames = map[sim.FailKind]string{
+var failureKindNames = map[sim.FailKind]string{
 	sim.FailViolation:      "violation",
 	sim.FailInconclusive:   "inconclusive",
 	sim.FailProtocol:       "protocol",
@@ -168,7 +168,7 @@ var kindNames = map[sim.FailKind]string{
 }
 
 func kind(k sim.FailKind) string {
-	if n, ok := kindNames[k]; ok {
+	if n, ok := failureKindNames[k]; ok {
 		return n
 	}
 	return fmt.Sprintf("kind(%d)", k)

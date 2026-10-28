@@ -51,8 +51,8 @@ import (
 )
 
 const (
-	// Magic is the segment header magic.
-	Magic = "MSEG"
+	// FileMarker is the segment header magic.
+	FileMarker = "MSEG"
 	// Version is the segment format version.
 	Version = 1
 	// HeaderSize is the segment header length in bytes.
@@ -79,8 +79,8 @@ func Code(err error) core.ErrCode {
 	return core.ErrCorrupt
 }
 
-// Checksum is CRC32C (Castagnoli); MakeTable returns the cached table.
-func Checksum(b []byte) uint32 { return crc32.Checksum(b, crc32.MakeTable(crc32.Castagnoli)) }
+// CRC32CChecksum is CRC32C (Castagnoli); MakeTable returns the cached table.
+func CRC32CChecksum(b []byte) uint32 { return crc32.Checksum(b, crc32.MakeTable(crc32.Castagnoli)) }
 
 // Batch is one partition's record batch to be written.
 type Batch struct {
@@ -162,15 +162,15 @@ func writeObject(batches []Batch, idx, total int) ([]byte, []Entry) {
 			Records: b.Records,
 			Off:     int64(HeaderSize + off),
 			Len:     int64(len(b.Data)),
-			CRC:     Checksum(b.Data),
+			CRC:     CRC32CChecksum(b.Data),
 		}
 		off += len(b.Data)
 	}
-	copy(obj, Magic)
+	copy(obj, FileMarker)
 	binary.BigEndian.PutUint16(obj[4:], Version)
 	// obj[6:8] flags = 0
 	binary.BigEndian.PutUint64(obj[8:], uint64(bodyLen))
-	binary.BigEndian.PutUint32(obj[16:], Checksum(body))
+	binary.BigEndian.PutUint32(obj[16:], CRC32CChecksum(body))
 	return obj, entries
 }
 
@@ -181,7 +181,7 @@ func putEntry(w []byte, b Batch, off uint64) int {
 	binary.BigEndian.PutUint32(w[n+4:], b.Records)
 	binary.BigEndian.PutUint64(w[n+8:], off)
 	binary.BigEndian.PutUint64(w[n+16:], uint64(len(b.Data)))
-	binary.BigEndian.PutUint32(w[n+24:], Checksum(b.Data))
+	binary.BigEndian.PutUint32(w[n+24:], CRC32CChecksum(b.Data))
 	return n + entryTail
 }
 
@@ -208,7 +208,7 @@ func decodeHeader(obj []byte) ([]byte, error) {
 	if len(obj) < HeaderSize {
 		return nil, corrupt("truncated header: %d bytes", len(obj))
 	}
-	if string(obj[:4]) != Magic {
+	if string(obj[:4]) != FileMarker {
 		return nil, corrupt("bad magic")
 	}
 	if v := binary.BigEndian.Uint16(obj[4:]); v != Version {
@@ -221,22 +221,22 @@ func decodeHeader(obj []byte) ([]byte, error) {
 		return nil, corrupt("body length %d, have %d bytes", bl, len(obj)-HeaderSize)
 	}
 	body := obj[HeaderSize:]
-	if binary.BigEndian.Uint32(obj[16:]) != Checksum(body) {
+	if binary.BigEndian.Uint32(obj[16:]) != CRC32CChecksum(body) {
 		return nil, corrupt("body CRC mismatch")
 	}
 	return body, nil
 }
 
-// indexEntry is a decoded index entry with its body-relative payload range;
+// segmentIndexEntry is a decoded index entry with its body-relative payload range;
 // Entry.Off and Entry.Len are filled once the range is validated.
-type indexEntry struct {
+type segmentIndexEntry struct {
 	Entry
 	off, n uint64
 }
 
 // decodeIndex parses the index and returns its entries and the body offset
 // where payloads must start.
-func decodeIndex(body []byte) ([]indexEntry, uint64, error) {
+func decodeIndex(body []byte) ([]segmentIndexEntry, uint64, error) {
 	if len(body) < 4 {
 		return nil, 0, corrupt("no index")
 	}
@@ -244,7 +244,7 @@ func decodeIndex(body []byte) ([]indexEntry, uint64, error) {
 	if count == 0 || count > uint64(len(body)-4)/minEntry {
 		return nil, 0, corrupt("bad batch count %d", count)
 	}
-	idx := make([]indexEntry, 0, count)
+	idx := make([]segmentIndexEntry, 0, count)
 	p := 4
 	for i := range count {
 		ent, next, err := readIndexEntry(body, p, i)
@@ -257,21 +257,21 @@ func decodeIndex(body []byte) ([]indexEntry, uint64, error) {
 	return idx, uint64(p), nil
 }
 
-func readIndexEntry(body []byte, p int, i uint64) (indexEntry, int, error) {
+func readIndexEntry(body []byte, p int, i uint64) (segmentIndexEntry, int, error) {
 	if len(body)-p < 2 {
-		return indexEntry{}, 0, corrupt("truncated index")
+		return segmentIndexEntry{}, 0, corrupt("truncated index")
 	}
 	tl := int(binary.BigEndian.Uint16(body[p:]))
 	if tl == 0 || len(body)-p < 2+tl+entryTail {
-		return indexEntry{}, 0, corrupt("bad index entry %d", i)
+		return segmentIndexEntry{}, 0, corrupt("bad index entry %d", i)
 	}
 	topic := string(body[p+2 : p+2+tl])
 	q := p + 2 + tl
 	part := int32(binary.BigEndian.Uint32(body[q:]))
 	if part < 0 {
-		return indexEntry{}, 0, corrupt("negative partition in entry %d", i)
+		return segmentIndexEntry{}, 0, corrupt("negative partition in entry %d", i)
 	}
-	return indexEntry{
+	return segmentIndexEntry{
 		Entry: Entry{
 			TP:      core.NewTopicPartition(topic, part),
 			Records: binary.BigEndian.Uint32(body[q+4:]),
@@ -284,7 +284,7 @@ func readIndexEntry(body []byte, p int, i uint64) (indexEntry, int, error) {
 
 // attachPayloads checks contiguous ranges and per-batch CRCs, fills Off/Len,
 // and builds Batches that alias body slices.
-func attachPayloads(body []byte, idx []indexEntry, next uint64) (Segment, error) {
+func attachPayloads(body []byte, idx []segmentIndexEntry, next uint64) (Segment, error) {
 	seg := Segment{Entries: make([]Entry, 0, len(idx)), Batches: make([]Batch, 0, len(idx))}
 	for i, r := range idx {
 		if r.off != next || r.n == 0 || r.n > uint64(len(body))-r.off {
@@ -292,7 +292,7 @@ func attachPayloads(body []byte, idx []indexEntry, next uint64) (Segment, error)
 		}
 		next = r.off + r.n
 		data := body[r.off:next:next]
-		if Checksum(data) != r.CRC {
+		if CRC32CChecksum(data) != r.CRC {
 			return Segment{}, corrupt("entry %d: batch CRC mismatch", i)
 		}
 		r.Off, r.Len = int64(HeaderSize+r.off), int64(r.n)
@@ -311,7 +311,7 @@ func VerifyBatch(e Entry, b []byte) ([]byte, error) {
 	if int64(len(b)) != e.Len {
 		return nil, corrupt("batch length %d, want %d", len(b), e.Len)
 	}
-	if Checksum(b) != e.CRC {
+	if CRC32CChecksum(b) != e.CRC {
 		return nil, corrupt("batch CRC mismatch")
 	}
 	return b, nil

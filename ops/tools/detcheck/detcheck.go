@@ -32,29 +32,29 @@ import (
 )
 
 //go:embed allow.txt
-var embeddedAllow string
+var builtInAllowedImports string
 
-var allowFile string
+var allowedImportsFile string
 
-// Analyzer is the detcheck analysis pass.
-var Analyzer = &analysis.Analyzer{
+// DeterminismAnalyzer is the detcheck analysis pass.
+var DeterminismAnalyzer = &analysis.Analyzer{
 	Name: "detcheck",
 	Doc:  "reports constructs that break deterministic simulation (see docs/lessons.md, lesson 12)",
 	Run:  run,
 }
 
 func init() {
-	Analyzer.Flags.StringVar(&allowFile, "allow", "", "import allow-list file (default: the embedded allow.txt)")
+	DeterminismAnalyzer.Flags.StringVar(&allowedImportsFile, "allow", "", "import allow-list file (default: the embedded allow.txt)")
 }
 
-func main() { singlechecker.Main(Analyzer) }
+func main() { singlechecker.Main(DeterminismAnalyzer) }
 
-type allowList struct {
+type allowedImports struct {
 	exact  map[string]bool
 	prefix []string
 }
 
-func (a allowList) allows(path string) bool {
+func (a allowedImports) allows(path string) bool {
 	if a.exact[path] {
 		return true
 	}
@@ -66,16 +66,16 @@ func (a allowList) allows(path string) bool {
 	return false
 }
 
-func loadAllow() (allowList, error) {
-	text := embeddedAllow
-	if allowFile != "" {
-		b, err := os.ReadFile(allowFile) //nolint:gosec // G304: path is an explicit CLI argument
+func loadAllow() (allowedImports, error) {
+	text := builtInAllowedImports
+	if allowedImportsFile != "" {
+		b, err := os.ReadFile(allowedImportsFile) //nolint:gosec // G304: path is an explicit CLI argument
 		if err != nil {
-			return allowList{}, err
+			return allowedImports{}, err
 		}
 		text = string(b)
 	}
-	al := allowList{exact: map[string]bool{}}
+	al := allowedImports{exact: map[string]bool{}}
 	sc := bufio.NewScanner(strings.NewReader(text))
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -105,14 +105,14 @@ func run(pass *analysis.Pass) (any, error) {
 		if strings.HasSuffix(pass.Fset.File(f.Pos()).Name(), "_test.go") {
 			continue
 		}
-		checkFile(pass, f, al, []fileCheck{checkImports, checkGlobals, checkAST})
+		checkFile(pass, f, al, []fileCheck{checkImports, checkGlobals, checkSyntaxTree})
 	}
 	return nil, nil
 }
 
-// reporter returns a report func that honours //detcheck:ok on the same or
+// problemReporter returns a report func that honours //detcheck:ok on the same or
 // the previous line.
-func reporter(pass *analysis.Pass, sup map[int]string) func(token.Pos, string, ...any) {
+func problemReporter(pass *analysis.Pass, sup map[int]string) func(token.Pos, string, ...any) {
 	return func(pos token.Pos, format string, args ...any) {
 		line := pass.Fset.Position(pos).Line
 		if reason, ok := sup[line]; ok && reason != "" {
@@ -125,13 +125,13 @@ func reporter(pass *analysis.Pass, sup map[int]string) func(token.Pos, string, .
 	}
 }
 
-type reportFunc = func(token.Pos, string, ...any)
+type reportProblemFunc = func(token.Pos, string, ...any)
 
-type fileCheck func(pass *analysis.Pass, f *ast.File, al allowList, report reportFunc)
+type fileCheck func(pass *analysis.Pass, f *ast.File, al allowedImports, report reportProblemFunc)
 
-func checkFile(pass *analysis.Pass, f *ast.File, al allowList, checks []fileCheck) {
-	sup := suppressions(pass, f)
-	report := reporter(pass, sup)
+func checkFile(pass *analysis.Pass, f *ast.File, al allowedImports, checks []fileCheck) {
+	sup := allowedExceptions(pass, f)
+	report := problemReporter(pass, sup)
 	for line, reason := range sup { // order irrelevant: the driver sorts diagnostics
 		if reason == "" {
 			pass.Reportf(pass.Fset.File(f.Pos()).LineStart(line), "detcheck:ok needs a reason")
@@ -142,7 +142,7 @@ func checkFile(pass *analysis.Pass, f *ast.File, al allowList, checks []fileChec
 	}
 }
 
-func checkImports(_ *analysis.Pass, f *ast.File, al allowList, report reportFunc) {
+func checkImports(_ *analysis.Pass, f *ast.File, al allowedImports, report reportProblemFunc) {
 	for _, imp := range f.Imports {
 		path, _ := strconv.Unquote(imp.Path.Value)
 		if !al.allows(path) {
@@ -151,7 +151,7 @@ func checkImports(_ *analysis.Pass, f *ast.File, al allowList, report reportFunc
 	}
 }
 
-func checkGlobals(pass *analysis.Pass, f *ast.File, _ allowList, report reportFunc) {
+func checkGlobals(pass *analysis.Pass, f *ast.File, _ allowedImports, report reportProblemFunc) {
 	errorIface := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
 	for _, decl := range f.Decls {
 		gd, ok := decl.(*ast.GenDecl)
@@ -173,14 +173,14 @@ func checkGlobals(pass *analysis.Pass, f *ast.File, _ allowList, report reportFu
 	}
 }
 
-func checkAST(pass *analysis.Pass, f *ast.File, _ allowList, report reportFunc) {
+func checkSyntaxTree(pass *analysis.Pass, f *ast.File, _ allowedImports, report reportProblemFunc) {
 	ast.Inspect(f, func(n ast.Node) bool {
 		checkNode(pass, n, report)
 		return true
 	})
 }
 
-func checkNode(pass *analysis.Pass, n ast.Node, report reportFunc) {
+func checkNode(pass *analysis.Pass, n ast.Node, report reportProblemFunc) {
 	switch n := n.(type) {
 	case *ast.GoStmt:
 		report(n.Pos(), "go statement: goroutine scheduling is nondeterministic")
@@ -201,7 +201,7 @@ func checkNode(pass *analysis.Pass, n ast.Node, report reportFunc) {
 	}
 }
 
-func checkRange(pass *analysis.Pass, n *ast.RangeStmt, report reportFunc) {
+func checkRange(pass *analysis.Pass, n *ast.RangeStmt, report reportProblemFunc) {
 	switch pass.TypesInfo.TypeOf(n.X).Underlying().(type) {
 	case *types.Map:
 		report(n.Pos(), "range over map: iteration order is randomized; iterate sorted keys")
@@ -210,7 +210,7 @@ func checkRange(pass *analysis.Pass, n *ast.RangeStmt, report reportFunc) {
 	}
 }
 
-func checkReflectMap(pass *analysis.Pass, n *ast.CallExpr, report reportFunc) {
+func checkReflectMap(pass *analysis.Pass, n *ast.CallExpr, report reportProblemFunc) {
 	sel, ok := n.Fun.(*ast.SelectorExpr)
 	if !ok || (sel.Sel.Name != "MapKeys" && sel.Sel.Name != "MapRange") {
 		return
@@ -220,8 +220,8 @@ func checkReflectMap(pass *analysis.Pass, n *ast.CallExpr, report reportFunc) {
 	}
 }
 
-// suppressions maps line -> reason for every //detcheck:ok comment in f.
-func suppressions(pass *analysis.Pass, f *ast.File) map[int]string {
+// allowedExceptions maps line -> reason for every //detcheck:ok comment in f.
+func allowedExceptions(pass *analysis.Pass, f *ast.File) map[int]string {
 	out := map[int]string{}
 	for _, cg := range f.Comments {
 		for _, c := range cg.List {

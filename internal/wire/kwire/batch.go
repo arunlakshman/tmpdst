@@ -13,13 +13,13 @@ import (
 // magic[16] crc[17:21] attributes[21:23] ... records[61:]. The CRC covers
 // bytes 21 to the end; length counts bytes after offset 12.
 const (
-	lengthOff      = 8
-	epochOff       = 12 // also the size of the base offset + length prefix
-	magicOff       = 16
-	crcOff         = 17
+	lengthOffset   = 8
+	epochOffset    = 12 // also the size of the base offset + length prefix
+	magicOffset    = 16
+	crcOffset      = 17
 	crcStart       = 21 // attributes; the CRC covers [crcStart:]
 	batchHeaderLen = 61
-	batchMinLength = batchHeaderLen - epochOff
+	batchMinLength = batchHeaderLen - epochOffset
 )
 
 var (
@@ -47,8 +47,8 @@ const (
 	CodecZstd   = 4
 )
 
-// crc32c is CRC32C (Castagnoli); MakeTable returns the cached table.
-func crc32c(b []byte) uint32 { return crc32.Checksum(b, crc32.MakeTable(crc32.Castagnoli)) }
+// crc32cChecksum is CRC32C (Castagnoli); MakeTable returns the cached table.
+func crc32cChecksum(b []byte) uint32 { return crc32.Checksum(b, crc32.MakeTable(crc32.Castagnoli)) }
 
 // BatchParams are the caller-supplied batch header fields (no clock here).
 type BatchParams struct {
@@ -119,7 +119,7 @@ func assembleBatch(p BatchParams, n int32, body []byte) []byte {
 	rb.NumRecords = n
 	rb.Records = body
 	out := rb.AppendTo(nil)
-	binary.BigEndian.PutUint32(out[crcOff:], crc32c(out[crcStart:]))
+	binary.BigEndian.PutUint32(out[crcOffset:], crc32cChecksum(out[crcStart:]))
 	return out
 }
 
@@ -157,7 +157,7 @@ func ParseBatch(b []byte) (Batch, error) {
 	if err := checkBatchShape(b); err != nil {
 		return Batch{}, err
 	}
-	if crc32c(b[crcStart:]) != binary.BigEndian.Uint32(b[crcOff:]) {
+	if crc32cChecksum(b[crcStart:]) != binary.BigEndian.Uint32(b[crcOffset:]) {
 		return Batch{}, fmt.Errorf("%w: crc mismatch", ErrCorrupt)
 	}
 	return decodeBatch(b)
@@ -174,16 +174,16 @@ func ParseBatchUnverified(b []byte) (Batch, error) {
 }
 
 func checkBatchShape(b []byte) error {
-	if len(b) <= magicOff {
+	if len(b) <= magicOffset {
 		return fmt.Errorf("%w: %d bytes", ErrCorrupt, len(b))
 	}
-	if m := int8(b[magicOff]); m != 2 {
+	if m := int8(b[magicOffset]); m != 2 {
 		return fmt.Errorf("%w: magic %d", ErrUnsupportedBatch, m)
 	}
 	if len(b) < batchHeaderLen {
 		return fmt.Errorf("%w: %d bytes", ErrCorrupt, len(b))
 	}
-	if l := int32(binary.BigEndian.Uint32(b[lengthOff:])); l < batchMinLength || int64(l) != int64(len(b))-epochOff {
+	if l := int32(binary.BigEndian.Uint32(b[lengthOffset:])); l < batchMinLength || int64(l) != int64(len(b))-epochOffset {
 		return fmt.Errorf("%w: length %d for %d bytes", ErrCorrupt, l, len(b))
 	}
 	return nil
@@ -268,14 +268,14 @@ func DecodeRecords(rest []byte, n int32) ([]kmsg.Record, error) {
 func SplitBatches(b []byte) ([][]byte, error) {
 	var out [][]byte
 	for len(b) > 0 {
-		if len(b) < epochOff {
+		if len(b) < epochOffset {
 			return out, ErrTruncated
 		}
-		l := int64(int32(binary.BigEndian.Uint32(b[lengthOff:])))
+		l := int64(int32(binary.BigEndian.Uint32(b[lengthOffset:])))
 		if l < batchMinLength {
 			return out, fmt.Errorf("%w: length %d", ErrCorrupt, l)
 		}
-		n := epochOff + l
+		n := epochOffset + l
 		if n > int64(len(b)) {
 			return out, ErrTruncated
 		}
@@ -285,9 +285,9 @@ func SplitBatches(b []byte) ([][]byte, error) {
 	return out, nil
 }
 
-// OneBatch returns b if it holds exactly one batch (Produce v3+ partition
+// RequireSingleBatch returns b if it holds exactly one batch (Produce v3+ partition
 // Records), else ErrNotSingle (wrapping the split error if any).
-func OneBatch(b []byte) ([]byte, error) {
+func RequireSingleBatch(b []byte) ([]byte, error) {
 	bs, err := SplitBatches(b)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrNotSingle, err)
@@ -298,14 +298,14 @@ func OneBatch(b []byte) ([]byte, error) {
 	return bs[0], nil
 }
 
-// PatchBatch returns a copy of b with base offset (bytes 0..7) and partition
+// ChangeBatchOffset returns a copy of b with base offset (bytes 0..7) and partition
 // leader epoch (12..15) rewritten. Both lie outside the CRC, which stays
 // valid. An input shorter than 16 bytes is returned as an unchanged copy.
-func PatchBatch(b []byte, baseOffset int64, leaderEpoch int32) []byte {
+func ChangeBatchOffset(b []byte, baseOffset int64, leaderEpoch int32) []byte {
 	out := append([]byte(nil), b...)
-	if len(out) >= magicOff {
+	if len(out) >= magicOffset {
 		binary.BigEndian.PutUint64(out, uint64(baseOffset))
-		binary.BigEndian.PutUint32(out[epochOff:], uint32(leaderEpoch))
+		binary.BigEndian.PutUint32(out[epochOffset:], uint32(leaderEpoch))
 	}
 	return out
 }

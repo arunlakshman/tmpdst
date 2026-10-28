@@ -55,7 +55,7 @@ func TestRunBadArgs(t *testing.T) {
 }
 
 func TestKind(t *testing.T) {
-	for k, want := range kindNames {
+	for k, want := range failureKindNames {
 		if kind(k) != want {
 			t.Errorf("kind(%v)", k)
 		}
@@ -89,7 +89,7 @@ func TestPrintAndVerdict(t *testing.T) {
 	if !failed(rep, 1) || failed(sim.Report{}, 0) {
 		t.Fatal("verdict")
 	}
-	cov := sim.Report{Coverage: rep.Coverage, Seeds: make([]sim.SeedResult, coverageMin)}
+	cov := sim.Report{Coverage: rep.Coverage, Seeds: make([]sim.SeedResult, minimumCoverage)}
 	if !failed(cov, 0) {
 		t.Fatal("coverage gap in a big campaign must fail")
 	}
@@ -116,7 +116,7 @@ func TestMergeReports(t *testing.T) {
 			{Prop: core.PropertyID("never"), Kind: "unreachable", Checks: 1, Passes: 1},
 		},
 	}
-	got := mergeReports([]sim.Report{a, b})
+	got := combineReports([]sim.Report{a, b})
 	if len(got.Seeds) != 2 || len(got.Nondeterminism) != 1 || len(got.Assertions) != 3 {
 		t.Fatalf("%+v", got)
 	}
@@ -128,7 +128,7 @@ func TestMergeReports(t *testing.T) {
 		t.Fatalf("always %+v coverage %+v", got.Always, got.Coverage)
 	}
 	// coverage: sometimes with no seeds anywhere
-	c := mergeReports([]sim.Report{{Assertions: []sim.AssertionStat{{Prop: "x", Kind: "sometimes"}}}})
+	c := combineReports([]sim.Report{{Assertions: []sim.AssertionStat{{Prop: "x", Kind: "sometimes"}}}})
 	if len(c.Coverage) != 1 || len(c.Always) != 0 {
 		t.Fatalf("%+v", c)
 	}
@@ -136,11 +136,11 @@ func TestMergeReports(t *testing.T) {
 
 func TestRunSharded(t *testing.T) {
 	cfg, _ := scenarioConfig("echo")
-	rep, err := runSharded(cfg, []uint64{1, 2, 3, 4, 5}, 3)
+	rep, err := runInParts(cfg, []uint64{1, 2, 3, 4, 5}, 3)
 	if err != nil || len(rep.Seeds) != 5 {
 		t.Fatal(len(rep.Seeds), err)
 	}
-	one, err := runSharded(cfg, []uint64{1, 2}, 1)
+	one, err := runInParts(cfg, []uint64{1, 2}, 1)
 	if err != nil || len(one.Seeds) != 2 {
 		t.Fatal(err)
 	}

@@ -9,8 +9,8 @@ import (
 	"strings"
 )
 
-// Block is one coverprofile block.
-type Block struct {
+// CodeBlock is one coverprofile block.
+type CodeBlock struct {
 	File      string // path as written in the profile (import path form)
 	StartLine int
 	StartCol  int
@@ -26,7 +26,7 @@ type blockKey struct {
 }
 
 // Profile maps a profile file name to its merged blocks.
-type Profile map[string][]Block
+type Profile map[string][]CodeBlock
 
 // ReadProfile parses a go coverprofile (mode set, count or atomic) and merges
 // it into p. Blocks present in several profiles are merged by summing counts,
@@ -61,13 +61,13 @@ func (p Profile) ReadProfile(r io.Reader) error {
 	return sc.Err()
 }
 
-func keyOf(b Block) blockKey {
+func keyOf(b CodeBlock) blockKey {
 	return blockKey{b.File, b.StartLine, b.StartCol, b.EndLine, b.EndCol, b.Stmts}
 }
 
 // parseBlock parses "file:sl.sc,el.ec nstmt count".
-func parseBlock(line string) (Block, error) {
-	var b Block
+func parseBlock(line string) (CodeBlock, error) {
+	var b CodeBlock
 	colon := strings.LastIndex(line, ":")
 	if colon < 0 {
 		return b, fmt.Errorf("bad block %q", line)
@@ -114,7 +114,7 @@ func ModulePath(root string) (string, error) {
 // function with no statements in a profiled file counts as fully covered;
 // a function in a file absent from the profile counts as 0% covered.
 func (p Profile) Apply(module string, funcs []*Func) {
-	byFile := map[string][]Block{}
+	byFile := map[string][]CodeBlock{}
 	for name, bl := range p {
 		byFile[strings.TrimPrefix(name, module+"/")] = bl
 	}
@@ -137,6 +137,6 @@ func (p Profile) Apply(module string, funcs []*Func) {
 		default:
 			f.Coverage = 0
 		}
-		f.CRAP = CRAP(f.Complexity, f.Coverage)
+		f.RiskScore = RiskScore(f.Complexity, f.Coverage)
 	}
 }

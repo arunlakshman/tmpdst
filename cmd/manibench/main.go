@@ -189,7 +189,7 @@ func makeValue(ci int, seq uint64, size int) []byte {
 
 // produceLoop produces as fast as the buffer allows until pctx ends. Records
 // carry ctx, not pctx: the end of the run must not fail buffered records.
-func produceLoop(ctx, pctx context.Context, cl producer, ci int, c benchConfig, st *stats) {
+func produceLoop(ctx, pctx context.Context, cl producer, ci int, c benchConfig, st *latencyStats) {
 	var seq uint64
 	for pctx.Err() == nil {
 		rec := &kgo.Record{Value: makeValue(ci, seq, c.size), Context: ctx}
@@ -205,7 +205,7 @@ func produceLoop(ctx, pctx context.Context, cl producer, ci int, c benchConfig, 
 }
 
 // reportLoop prints one interval line per tick until pctx ends or done is set.
-func reportLoop(pctx context.Context, w io.Writer, tick <-chan time.Time, start time.Time, cls []producer, st *stats, done *atomic.Bool) {
+func reportLoop(pctx context.Context, w io.Writer, tick <-chan time.Time, start time.Time, cls []producer, st *latencyStats, done *atomic.Bool) {
 	last := start
 	for !done.Load() {
 		select {
@@ -235,7 +235,7 @@ func run(ctx context.Context, c benchConfig, stdout, stderr io.Writer, nc client
 		cls[i] = cl
 	}
 
-	st := newStats()
+	st := newLatencyStats()
 	start := time.Now()
 	pctx, pcancel := context.WithDeadline(ctx, start.Add(c.dur))
 	defer pcancel()

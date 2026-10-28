@@ -6,10 +6,10 @@ import (
 	"manifester/internal/verify/sim"
 )
 
-// runSharded runs seeds in jobs contiguous shards on separate goroutines and
+// runInParts runs seeds in jobs contiguous shards on separate goroutines and
 // merges the shard reports as one Run would have. A seed's result does not
 // depend on which shard ran it (every seed builds its own world).
-func runSharded(config func([]uint64) sim.Config, seeds []uint64, jobs int) (sim.Report, error) {
+func runInParts(config func([]uint64) sim.Config, seeds []uint64, jobs int) (sim.Report, error) {
 	jobs = max(1, min(jobs, len(seeds)))
 	if jobs == 1 {
 		return sim.NewRunner().Run(config(seeds))
@@ -30,22 +30,22 @@ func runSharded(config func([]uint64) sim.Config, seeds []uint64, jobs int) (sim
 			return sim.Report{}, err
 		}
 	}
-	return mergeReports(reps), nil
+	return combineReports(reps), nil
 }
 
 type statKey struct{ prop, kind string }
 
-// mergeReports combines shard reports in shard order: seeds are concatenated,
+// combineReports combines shard reports in shard order: seeds are concatenated,
 // assertion stats are summed per (property, kind), and Always/Coverage are
 // recomputed over the whole campaign by the same rule sim.Runner.Run uses.
-func mergeReports(reps []sim.Report) sim.Report {
+func combineReports(reps []sim.Report) sim.Report {
 	var out sim.Report
 	idx := map[statKey]int{}
 	for _, r := range reps {
 		out.Seeds = append(out.Seeds, r.Seeds...)
 		out.Nondeterminism = append(out.Nondeterminism, r.Nondeterminism...)
 		for _, a := range r.Assertions {
-			mergeAssertion(&out, idx, a)
+			combineAssertion(&out, idx, a)
 		}
 	}
 	for _, a := range out.Assertions {
@@ -54,8 +54,8 @@ func mergeReports(reps []sim.Report) sim.Report {
 	return out
 }
 
-// mergeAssertion adds a's counts and seeds to the (property, kind) entry of out.
-func mergeAssertion(out *sim.Report, idx map[statKey]int, a sim.AssertionStat) {
+// combineAssertion adds a's counts and seeds to the (property, kind) entry of out.
+func combineAssertion(out *sim.Report, idx map[statKey]int, a sim.AssertionStat) {
 	k := statKey{string(a.Prop), a.Kind}
 	i, ok := idx[k]
 	if !ok {

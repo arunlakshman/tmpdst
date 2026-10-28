@@ -64,7 +64,7 @@ func (w *Workload) onList(c *client, r *kmsg.ListOffsetsResponse) []core.Action 
 	if n != len(w.tps) {
 		return w.retryStage(c)
 	}
-	c.c.pos, c.c.listed, c.stage, c.fails = pos, true, stRun, 0
+	c.c.pos, c.c.listed, c.stage, c.Fails = pos, true, stRun, 0
 	return w.advance(c)
 }
 
@@ -75,7 +75,7 @@ func (w *Workload) fetchNext(c *client) []core.Action {
 	}
 	r := kmsg.NewPtrFetchRequest()
 	r.MaxWaitMillis, r.MinBytes, r.MaxBytes, r.SessionEpoch = 100, 1, 1<<20, -1
-	op := ReadOp{Client: c.id}
+	op := ReadOp{Client: c.ID}
 	perPart := int32(1024) << w.env.Intn(6)
 	for i, tp := range w.tps {
 		op.Parts = append(op.Parts, ReadFrom{TP: tp, Off: cs.pos[i]})
@@ -130,12 +130,12 @@ func (w *Workload) onFetch(c *client, r *kmsg.FetchResponse) []core.Action {
 	if got {
 		d = 30
 	}
-	c.fails = 0
+	c.Fails = 0
 	if cs.drain && atEnd {
 		cs.done = true
 		return nil
 	}
-	return []core.Action{w.later(c, core.Duration(d)*core.Millisecond)}
+	return []core.Action{c.Wake(core.Duration(d) * core.Millisecond)}
 }
 
 func (w *Workload) readPart(p kmsg.FetchResponseTopicPartition, pos int64) ReadPart {

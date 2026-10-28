@@ -7,6 +7,7 @@ import (
 
 	"manifester/core"
 	"manifester/sim"
+	"manifester/sim/internal/session"
 )
 
 // PutOp and GetOp are the History ops. A PUT result is the reply text, or ""
@@ -33,13 +34,9 @@ const (
 	keepAcked  = 16 // GET candidates per client
 )
 
-type cstate uint8
-
 const (
-	csBackoff cstate = iota // wake timer pending, then dial
-	csDial
-	csReady // connected, wake timer pending (think time)
-	csBusy  // request outstanding
+	csReady = session.Up + iota // wake timer pending (think time)
+	csBusy                      // request outstanding
 	csDone
 )
 
@@ -57,15 +54,7 @@ type pending struct {
 }
 
 type client struct {
-	id      int
-	state   cstate
-	conn    core.ConnID
-	dialReq core.ReqID
-	sendReq core.ReqID
-	dials   int
-	fails   int // consecutive dial/connection failures
-	wakeGen core.TimerGen
-	reqGen  core.TimerGen
+	session.Client
 	fr      framer
 	seq     int
 	recycle bool
@@ -77,25 +66,31 @@ type client struct {
 
 // Workload is N closed-loop clients speaking the echo protocol.
 type Workload struct {
-	env     core.Env
-	self    core.NodeRef
-	brokers []core.NodeID
-	opts    Opts
-	hist    sim.History
+	env  core.Env
+	self core.NodeRef
+	opts Opts
+	hist sim.History
 
 	stopped bool // PhaseSettle began: no new requests
-	nextReq core.ReqID
-	clients []*client
+	loop    session.Loop[*client]
 }
 
 // NewWorkload builds the workload machine.
 func NewWorkload(env core.Env, self core.NodeRef, brokers []core.NodeRef, o Opts) *Workload {
 	w := &Workload{env: env, self: self, opts: o}
+	w.loop = session.Loop[*client]{
+		Connected: func(c *client) bool { return c.State == csReady || c.State == csBusy },
+		Busy:      func(c *client) bool { return c.State == csBusy },
+		Ready:     w.onReady,
+		Idle:      w.next,
+		Bytes:     w.onBytes,
+		Lost:      w.lost,
+	}
 	for _, b := range brokers {
-		w.brokers = append(w.brokers, b.Node)
+		w.loop.Brokers = append(w.loop.Brokers, b.Node)
 	}
 	for i := 0; i < o.Clients; i++ {
-		w.clients = append(w.clients, &client{id: i, digest: newHasher()})
+		w.loop.Clients = append(w.loop.Clients, &client{Client: session.Client{ID: i}, digest: newHasher()})
 	}
 	return w
 }
@@ -108,7 +103,7 @@ func (w *Workload) SetHistory(h sim.History) { w.hist = h }
 
 // Quiescent reports that no request is outstanding.
 func (w *Workload) Quiescent() bool {
-	for _, c := range w.clients {
+	for _, c := range w.loop.Clients {
 		if c.pend != nil {
 			return false
 		}
@@ -116,105 +111,12 @@ func (w *Workload) Quiescent() bool {
 	return true
 }
 
-func wakeID(c *client) core.TimerID { return core.TimerID(1 + c.id*2) }
-func reqID(c *client) core.TimerID  { return core.TimerID(2 + c.id*2) }
-
-func (w *Workload) req() core.ReqID { w.nextReq++; return w.nextReq }
-
 // Step implements core.StateMachine.
-func (w *Workload) Step(ev core.Event) []core.Action {
-	var acts []core.Action
-	switch e := ev.Body.(type) {
-	case core.Started:
-		for _, c := range w.clients {
-			acts = append(acts, w.dial(c)...)
-		}
-	case core.TimerFired:
-		acts = w.onTimer(ev.At, e)
-	case core.DialDone:
-		for _, c := range w.clients {
-			if c.state == csDial && c.dialReq == e.Req {
-				acts = w.onDial(c, e)
-			}
-		}
-	case core.BytesReceived:
-		if c := w.byConn(e.Conn); c != nil {
-			acts = w.onBytes(ev.At, c, e.Data)
-		}
-	case core.ConnClosed:
-		if c := w.byConn(e.Conn); c != nil {
-			acts = w.lostPeerClosed(c, "conn_closed")
-		}
-	case core.SendDone:
-		if c := w.byConn(e.Conn); c != nil && e.Err != core.OK && c.sendReq == e.Req {
-			acts = w.lostAbort(c, "send_failed")
-		}
-	}
-	return acts
-}
+func (w *Workload) Step(ev core.Event) []core.Action { return w.loop.Step(ev) }
 
-func (w *Workload) byConn(id core.ConnID) *client {
-	for _, c := range w.clients {
-		if c.conn == id && id != 0 && (c.state == csReady || c.state == csBusy) {
-			return c
-		}
-	}
-	return nil
-}
-
-func (w *Workload) wake(c *client, d core.Duration) core.Action {
-	c.wakeGen++
-	return core.SetTimer{ID: wakeID(c), Gen: c.wakeGen, After: d}
-}
-
-func (w *Workload) dial(c *client) []core.Action {
-	c.state, c.dialReq = csDial, w.req()
-	addr := string(w.brokers[(c.id+c.dials)%len(w.brokers)])
-	c.dials++
-	return []core.Action{core.Dial{Req: c.dialReq, Addr: addr}}
-}
-
-func (w *Workload) onDial(c *client, e core.DialDone) []core.Action {
-	c.dialReq = 0
-	if e.Err != core.OK {
-		c.fails++
-		c.state = csBackoff
-		return []core.Action{w.wake(c, retryDelay(c.fails))}
-	}
-	c.conn, c.fails, c.fr = e.Conn, 0, framer{}
-	c.state = csReady
-	return []core.Action{w.wake(c, core.Millisecond)}
-}
-
-func retryDelay(n int) core.Duration {
-	if n > 4 {
-		n = 4
-	}
-	return 50 * core.Millisecond << n
-}
-
-func (w *Workload) onTimer(now core.Time, e core.TimerFired) []core.Action {
-	for _, c := range w.clients {
-		switch {
-		case e.ID == wakeID(c):
-			if e.Gen != c.wakeGen {
-				return nil
-			}
-			switch c.state {
-			case csBackoff:
-				return w.dial(c)
-			case csReady:
-				return w.next(c)
-			}
-			return nil
-		case e.ID == reqID(c):
-			if e.Gen != c.reqGen || c.state != csBusy {
-				return nil
-			}
-			return w.lostAbort(c, "timeout")
-		}
-	}
-	return nil
+func (w *Workload) onReady(c *client) []core.Action {
+	c.Fails, c.fr = 0, framer{}
+	return []core.Action{c.Wake(core.Millisecond)}
 }
 
 // OnPhase implements sim.PhaseAware. Entering Settling every client drops its
@@ -225,9 +127,9 @@ func (w *Workload) OnPhase(p sim.Phase) []core.Action {
 	var acts []core.Action
 	switch p {
 	case sim.PhaseSettling:
-		for _, c := range w.clients {
+		for _, c := range w.loop.Clients {
 			c.recycle = true
-			if c.state == csReady { // idle: recycle now
+			if c.State == csReady { // idle: recycle now
 				acts = append(acts, w.next(c)...)
 			}
 		}
@@ -240,15 +142,15 @@ func (w *Workload) OnPhase(p sim.Phase) []core.Action {
 // next issues the client's next request, or recycles / stops.
 func (w *Workload) next(c *client) []core.Action {
 	if w.stopped {
-		c.state = csDone
-		c.wakeGen++
+		c.State = csDone
+		c.WakeGen++
 		return nil
 	}
 	if c.recycle {
 		c.recycle = false
-		acts := []core.Action{core.CloseConn{Conn: c.conn, Abort: true}}
-		c.conn, c.state = 0, csBackoff
-		return append(acts, w.dial(c)...)
+		acts := []core.Action{core.CloseConn{Conn: c.Conn, Abort: true}}
+		c.Conn = 0
+		return append(acts, w.loop.Dial(c)...)
 	}
 	p := &pending{id: w.env.NewID()}
 	var op any
@@ -256,37 +158,32 @@ func (w *Workload) next(c *client) []core.Action {
 	if w.env.Intn(3) == 0 && len(c.acked) > 0 {
 		a := c.acked[w.env.Intn(len(c.acked))]
 		p.get, p.off = true, a.off
-		op, body = GetOp{c.id, a.off}, "GET "+strconv.FormatInt(a.off, 10)
+		op, body = GetOp{c.ID, a.off}, "GET "+strconv.FormatInt(a.off, 10)
 	} else {
 		c.seq++
 		p.seq = c.seq
-		p.payload = fmt.Sprintf("c%d-s%d-%s", c.id, c.seq, strings.Repeat("x", w.env.Intn(48)))
-		op, body = PutOp{c.id, c.seq, p.payload}, "PUT "+p.payload
+		p.payload = fmt.Sprintf("c%d-s%d-%s", c.ID, c.seq, strings.Repeat("x", w.env.Intn(48)))
+		op, body = PutOp{c.ID, c.seq, p.payload}, "PUT "+p.payload
 	}
-	c.pend, c.state = p, csBusy
+	c.pend, c.State = p, csBusy
 	if w.hist != nil {
 		w.hist.Invoke(w.self, p.id, p.id, op)
 	}
-	c.sendReq = w.req()
-	c.reqGen++
-	return []core.Action{
-		core.Send{Req: c.sendReq, Conn: c.conn, Data: appendFrame(nil, body)},
-		core.SetTimer{ID: reqID(c), Gen: c.reqGen, After: reqTimeout},
-	}
+	return w.loop.Request(c, appendFrame(nil, body), reqTimeout)
 }
 
-func (w *Workload) onBytes(now core.Time, c *client, data []byte) []core.Action {
+func (w *Workload) onBytes(c *client, data []byte) []core.Action {
 	frames, bad := c.fr.push(data)
 	var acts []core.Action
 	for _, f := range frames {
-		if c.state != csBusy || c.pend == nil {
+		if c.State != csBusy || c.pend == nil {
 			bad = true // unsolicited reply
 			break
 		}
 		acts = append(acts, w.reply(c, f)...)
 	}
-	if bad && c.conn != 0 {
-		return append(acts, w.lostAbort(c, "bad_stream")...)
+	if bad && c.Conn != 0 {
+		return append(acts, w.loop.Abort(c, "bad_stream")...)
 	}
 	return acts
 }
@@ -294,8 +191,7 @@ func (w *Workload) onBytes(now core.Time, c *client, data []byte) []core.Action 
 // reply completes the outstanding request with the broker's answer.
 func (w *Workload) reply(c *client, text string) []core.Action {
 	p := c.pend
-	c.pend, c.state = nil, csReady
-	c.reqGen++
+	c.pend, c.State = nil, csReady
 	out := sim.OpDefinite
 	if !p.get {
 		if rest, ok := strings.CutPrefix(text, "OK "); ok {
@@ -310,7 +206,7 @@ func (w *Workload) reply(c *client, text string) []core.Action {
 		w.hist.Return(p.id, text, out)
 	}
 	think := core.Duration(200+w.env.Intn(600)) * core.Millisecond
-	return []core.Action{core.CancelTimer{ID: reqID(c)}, w.wake(c, think)}
+	return []core.Action{c.Answered(), c.Wake(think)}
 }
 
 func (c *client) record(off int64, payload string) {
@@ -323,17 +219,8 @@ func (c *client) record(off int64, payload string) {
 	}
 }
 
-// lost handles a dead or unusable connection: the outstanding request's fate is
-// unknown, and the client reconnects with backoff.
-func (w *Workload) lostPeerClosed(c *client, why string) []core.Action {
-	return w.lost(c, why, nil)
-}
-
-func (w *Workload) lostAbort(c *client, why string) []core.Action {
-	return w.lost(c, why, []core.Action{core.CloseConn{Conn: c.conn, Abort: true}})
-}
-
-func (w *Workload) lost(c *client, why string, acts []core.Action) []core.Action {
+// lost settles the outstanding request, whose fate is unknown.
+func (w *Workload) lost(c *client, why string) {
 	if p := c.pend; p != nil {
 		out := sim.OpIndeterminate
 		if p.get {
@@ -343,27 +230,23 @@ func (w *Workload) lost(c *client, why string, acts []core.Action) []core.Action
 			w.hist.Return(p.id, why, out)
 		}
 	}
-	c.pend, c.conn, c.fr = nil, 0, framer{}
-	c.reqGen++
-	c.fails++
-	c.state = csBackoff
-	return append(acts, core.CancelTimer{ID: reqID(c)}, w.wake(c, retryDelay(c.fails)))
+	c.pend, c.fr = nil, framer{}
 }
 
 // StateHash folds all state.
 func (w *Workload) StateHash() uint64 {
 	h := newHasher()
 	h.bool(w.stopped)
-	h.u64(uint64(w.nextReq))
-	for _, c := range w.clients {
-		h.u64(uint64(c.state))
-		h.u64(uint64(c.conn))
-		h.u64(uint64(c.dialReq))
-		h.u64(uint64(c.sendReq))
-		h.u64(uint64(c.dials))
-		h.u64(uint64(c.fails))
-		h.u64(uint64(c.wakeGen))
-		h.u64(uint64(c.reqGen))
+	h.u64(uint64(w.loop.NextReq))
+	for _, c := range w.loop.Clients {
+		h.u64(uint64(c.State))
+		h.u64(uint64(c.Conn))
+		h.u64(uint64(c.DialReq))
+		h.u64(uint64(c.SendReq))
+		h.u64(uint64(c.Dials))
+		h.u64(uint64(c.Fails))
+		h.u64(uint64(c.WakeGen))
+		h.u64(uint64(c.ReqGen))
 		h.bytes(c.fr.buf)
 		h.u64(uint64(c.seq))
 		h.bool(c.recycle)

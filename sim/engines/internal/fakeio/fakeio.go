@@ -124,27 +124,52 @@ func (c *Core) EnterRecovery() { c.recovery = true }
 // incarnation are dropped by the scheduler or skipped at landing.
 func (c *Core) OnCrash(sim.EngineCtx, core.NodeRef) {}
 
-// Execute plans an op. Draw order: outage, 503, timeout, lost coins, apply
-// latency, respond latency, extra.
-func (c *Core) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.IOAction) {
-	r, now, p, pre := ctx.Rand(), ctx.Now(), c.h.Params, c.h.Prefix
-	var is503, isTimeout, isLost, inOutage bool
-	if !c.recovery {
-		if now >= c.until && r.Chance(p.Outage.Prob) {
-			d := core.Duration(0)
-			if p.Outage.Dur[1] > p.Outage.Dur[0] {
-				d = core.Duration(r.Between(int64(p.Outage.Dur[0]), int64(p.Outage.Dur[1])))
-			} else {
-				d = p.Outage.Dur[0]
-			}
-			c.until = now + sim.Time(d)
-			ctx.Fault(pre+"_outage", core.Field{Key: "dur", Value: core.I64(d)})
-			ctx.Assert().Reachable(core.Prop(pre + " outage started"))
+// Draw draws the boundary fault coins (outage, 503, timeout, lost, in that
+// order) and emits the matching fault named pre+"_...". until is the end of
+// the outage window and is extended when one starts. fields lead the
+// 503/timeout/lost fault fields.
+func (p Params) Draw(ctx sim.EngineCtx, pre string, until *sim.Time, fields ...core.Field) Kind {
+	r, now := ctx.Rand(), ctx.Now()
+	if now >= *until && r.Chance(p.Outage.Prob) {
+		d := p.Outage.Dur[0]
+		if p.Outage.Dur[1] > d {
+			d = core.Duration(r.Between(int64(p.Outage.Dur[0]), int64(p.Outage.Dur[1])))
 		}
-		inOutage = now < c.until
-		is503 = r.Chance(p.P503)
-		isTimeout = r.Chance(p.PTimeout)
-		isLost = r.Chance(p.PLost)
+		*until = now + sim.Time(d)
+		ctx.Fault(pre+"_outage", core.Field{Key: "dur", Value: core.I64(d)})
+		ctx.Assert().Reachable(core.Prop(pre + " outage started"))
+	}
+	inOutage := now < *until
+	is503, isTimeout, isLost := r.Chance(p.P503), r.Chance(p.PTimeout), r.Chance(p.PLost)
+	switch {
+	case inOutage || is503:
+		cause := "coin"
+		if inOutage {
+			cause = "outage"
+		}
+		ctx.Fault(pre+"_503", append(fields, core.Field{Key: "cause", Value: core.Str(cause)})...)
+		ctx.Assert().Reachable(core.Prop(pre + " 503 injected"))
+		return Unavailable
+	case isTimeout:
+		ctx.Fault(pre+"_timeout", fields...)
+		ctx.Assert().Reachable(core.Prop(pre + " timeout injected"))
+		return Timeout
+	case isLost:
+		ctx.Fault(pre+"_lost_response", fields...)
+		ctx.Assert().Reachable(core.Prop(pre + " lost response injected"))
+		return Lost
+	}
+	return Normal
+}
+
+// Execute plans an op. Draw order: fault coins (Draw), apply latency, respond
+// latency, extra.
+func (c *Core) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.IOAction) {
+	r, now, p := ctx.Rand(), ctx.Now(), c.h.Params
+	req := core.Field{Key: "req", Value: core.U64(a.ReqID())}
+	kind := Normal
+	if !c.recovery {
+		kind = p.Draw(ctx, c.h.Prefix, &c.until, req)
 	}
 	t1 := now + sim.Time(p.Apply.Sample(r))
 	t2 := t1 + sim.Time(p.Respond.Sample(r))
@@ -155,31 +180,13 @@ func (c *Core) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.IOAction) {
 	}
 
 	c.nextID++
-	pl := Plan{ID: c.nextID, From: from, Act: a, T1: t1, T2: t2, Flag: flag, Bits: bits, Lane: ctx.Lane(c.h.Name + "/" + string(from.Node))}
-	req := core.Field{Key: "req", Value: core.U64(a.ReqID())}
-	timeoutAt := now + sim.Time(p.CallerTimeout)
-	switch {
-	case inOutage || is503:
-		pl.Kind = Unavailable
-		cause := "coin"
-		if inOutage {
-			cause = "outage"
-		}
-		ctx.Fault(pre+"_503", req, core.Field{Key: "cause", Value: core.Str(cause)})
-		ctx.Assert().Reachable(core.Prop(pre + " 503 injected"))
+	pl := Plan{ID: c.nextID, From: from, Act: a, Kind: kind, T1: t1, T2: t2, Flag: flag, Bits: bits, Lane: ctx.Lane(c.h.Name + "/" + string(from.Node))}
+	switch kind {
+	case Unavailable:
 		ctx.Deliver(from, t2, pl.Lane, c.h.Fail(a, core.ErrUnavailable, core.NotApplied))
 		return
-	case isTimeout:
-		pl.Kind = Timeout
-		ctx.Fault(pre+"_timeout", req)
-		ctx.Assert().Reachable(core.Prop(pre + " timeout injected"))
-	case isLost:
-		pl.Kind = Lost
-		ctx.Fault(pre+"_lost_response", req)
-		ctx.Assert().Reachable(core.Prop(pre + " lost response injected"))
-	}
-	if pl.Kind == Timeout || pl.Kind == Lost {
-		ctx.Deliver(from, timeoutAt, pl.Lane, c.h.Fail(a, core.ErrTimeout, core.MaybeApplied))
+	case Timeout, Lost:
+		ctx.Deliver(from, now+sim.Time(p.CallerTimeout), pl.Lane, c.h.Fail(a, core.ErrTimeout, core.MaybeApplied))
 		if !c.h.Mutating(a) {
 			return // nothing to apply, nothing to answer
 		}

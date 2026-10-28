@@ -11,6 +11,7 @@ import (
 
 	"manifester/core"
 	"manifester/sim"
+	"manifester/sim/engines/internal/fakeio"
 )
 
 // Bug selects a mutant (sim.LogParams.Bug). Each is caught by a property.
@@ -174,15 +175,6 @@ func (e *Engine) OnInternal(ctx sim.EngineCtx, body any) {
 	e.deliver(ctx, p.from, core.CPDone{Req: d.req, Err: core.ErrTimeout, Outcome: core.MaybeApplied})
 }
 
-type fault uint8
-
-const (
-	fNone fault = iota
-	fUnavailable
-	fTimeout
-	fLost
-)
-
 // Execute starts a CPCall or lands a CPReply.
 func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.Action) {
 	e.now = ctx.Now()
@@ -198,7 +190,7 @@ func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.Action) {
 
 func (e *Engine) execCall(ctx sim.EngineCtx, from core.NodeRef, call core.CPCall) {
 	k := e.plan(ctx)
-	if k == fUnavailable {
+	if k == fakeio.Unavailable {
 		e.deliver(ctx, from, core.CPDone{Req: call.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied})
 		return
 	}
@@ -208,11 +200,11 @@ func (e *Engine) execCall(ctx sim.EngineCtx, from core.NodeRef, call core.CPCall
 		return
 	}
 	key := pendKey{from.Node, call.Req}
-	p := &pending{from: from, op: call.Op, to: cp, muted: k == fLost || k == fTimeout}
+	p := &pending{from: from, op: call.Op, to: cp, muted: k == fakeio.Lost || k == fakeio.Timeout}
 	to := ctx.Now() + sim.Time(max(e.f.CallerTimeout, 500*core.Millisecond))
 	p.deadline = ctx.Self(to, ctx.Lane("logengine/deadline"), deadlineEv{node: from.Node, req: call.Req})
 	e.pending[key] = p
-	if k == fTimeout && ctx.Rand().Chance(0.5) {
+	if k == fakeio.Timeout && ctx.Rand().Chance(0.5) {
 		return // never reached the service; deadline answers the broker
 	}
 	e.offer(ctx, cp, from, call.Req, call.Op)
@@ -282,44 +274,12 @@ func (e *Engine) liveCPs(ctx sim.EngineCtx) []core.NodeRef {
 	return out
 }
 
-func (e *Engine) plan(ctx sim.EngineCtx) fault {
+func (e *Engine) plan(ctx sim.EngineCtx) fakeio.Kind {
 	if e.recovery {
-		return fNone
+		return fakeio.Normal
 	}
-	r, now, p := ctx.Rand(), ctx.Now(), e.f
-	if now >= e.until && r.Chance(p.Outage.Prob) {
-		d := p.Outage.Dur[0]
-		if p.Outage.Dur[1] > d {
-			d = core.Duration(r.Between(int64(p.Outage.Dur[0]), int64(p.Outage.Dur[1])))
-		}
-		e.until = now + sim.Time(d)
-		ctx.Fault("cp_outage", core.Field{Key: "dur", Value: core.I64(d)})
-		ctx.Assert().Reachable("cp outage started")
-	}
-	out := now < e.until
-	is503, isTimeout, isLost := r.Chance(p.Unavailable503), r.Chance(p.Timeout), r.Chance(p.LostResponse)
-	switch {
-	case out || is503:
-		ctx.Fault("cp_503", core.Field{Key: "cause", Value: core.Str(cause(out))})
-		ctx.Assert().Reachable("cp 503 injected")
-		return fUnavailable
-	case isTimeout:
-		ctx.Fault("cp_timeout")
-		ctx.Assert().Reachable("cp timeout injected")
-		return fTimeout
-	case isLost:
-		ctx.Fault("cp_lost_response")
-		ctx.Assert().Reachable("cp lost response injected")
-		return fLost
-	}
-	return fNone
-}
-
-func cause(outage bool) string {
-	if outage {
-		return "outage"
-	}
-	return "coin"
+	p := fakeio.Params{P503: e.f.Unavailable503, PTimeout: e.f.Timeout, PLost: e.f.LostResponse, Outage: e.f.Outage}
+	return p.Draw(ctx, "cp", &e.until)
 }
 
 func (e *Engine) deliver(ctx sim.EngineCtx, to core.NodeRef, c core.CPDone) {

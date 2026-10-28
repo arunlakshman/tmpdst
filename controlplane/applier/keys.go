@@ -53,9 +53,12 @@ func getUvarint(b []byte) int64 {
 // digest identifies a request's batches (not its key): a replay is the same
 // request iff the digests are equal.
 func digest(bs []core.PendingBatch) [digestLen]byte {
-	h := sha256.New()
-	var n []byte
-	n = binary.AppendUvarint(n, uint64(len(bs)))
+	sum := sha256.Sum256(digestBytes(bs))
+	return [digestLen]byte(sum[:digestLen])
+}
+
+func digestBytes(bs []core.PendingBatch) []byte {
+	n := binary.AppendUvarint(nil, uint64(len(bs)))
 	for _, b := range bs {
 		n = binary.AppendUvarint(n, uint64(len(b.TP.Topic)))
 		n = append(n, b.TP.Topic...)
@@ -66,8 +69,7 @@ func digest(bs []core.PendingBatch) [digestLen]byte {
 		n = binary.AppendVarint(n, b.Loc.Off)
 		n = binary.AppendVarint(n, b.Loc.Len)
 	}
-	h.Write(n)
-	return [digestLen]byte(h.Sum(nil)[:digestLen])
+	return n
 }
 
 // idemRecord is the stored fact that a key committed: its slot, the request

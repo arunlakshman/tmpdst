@@ -7,7 +7,8 @@ import (
 )
 
 // MemKV is an in-memory KV: a sorted slice copied on every write transaction.
-// It is the test fake (small states only); the production store is boltkv.
+// It is a test fake for small states. The chosen production store is Pebble
+// (see applier/pebblekv), but the control-plane machine uses MemKV today.
 type MemKV struct {
 	mu sync.RWMutex
 	es []memEntry

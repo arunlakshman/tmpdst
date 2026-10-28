@@ -11,7 +11,11 @@ import (
 	"manifester/internal/wire/kwire"
 )
 
-// testEnv is a seeded core.Env that records assertion violations.
+// testEnv is a seeded core.Env that records assertion violations. It keeps its
+// own SplitMix64 copy and not veritastest.Rand, for two reasons. Uint64 gives
+// the same values as veritastest.Rand, but Intn here uses a plain modulo and
+// veritastest.Rand uses Lemire, so the seeds would change their streams. Also,
+// broker_test.go sets the state field directly to reseed the environment.
 type testEnv struct {
 	state uint64
 	viol  []string

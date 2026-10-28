@@ -5,12 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	cp "manifester/internal/controlplane"
 	"manifester/internal/controlplane/cpclient"
 	"manifester/internal/controlplane/grpctest"
 	"manifester/internal/controlplane/memstore"
 	"manifester/internal/core"
+	"manifester/internal/verify/veritas/veritastest/generator"
+	"manifester/internal/verify/veritas/veritastest/observation"
+	"manifester/internal/verify/veritas/veritastest/suites"
 )
 
 // impl is a control plane as the conformance runner drives it.
@@ -73,3 +77,35 @@ func grpcOver(t testing.TB) impl {
 }
 
 func newMem() cp.Store { return memstore.New() }
+
+// implSubject makes an impl usable as a suite subject. The stores keep no spec
+// hash, so StateHash says no. A commit that succeeds is Applied, as in the spec.
+type implSubject struct{ im impl }
+
+func (s implSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	switch {
+	case op.CreateTopic != nil:
+		code, err := s.im.CreateTopic(ctx, op.CreateTopic.Name, op.CreateTopic.Partitions)
+		return observation.ControlPlaneResult{Code: code}, err
+	case op.Call != nil:
+		resp, code, err := s.im.Exec(ctx, op.Call.Op)
+		if err != nil || code != core.OK {
+			return observation.ControlPlaneResult{Code: code}, err
+		}
+		done := core.CPDone{Resp: resp}
+		if _, ok := op.Call.Op.(core.CommitSegment); ok {
+			done.Outcome = core.Applied
+		}
+		return observation.FromControlPlaneDone(done), nil
+	}
+	return observation.ControlPlaneResult{}, errors.New("the operation has neither CreateTopic nor Call")
+}
+
+func (implSubject) StateHash() (uint64, bool) { return 0, false }
+
+// subjectOf returns a factory of fresh subjects for the suite.
+func subjectOf(newImpl func() impl) func() suites.ControlPlaneSubject {
+	return func() suites.ControlPlaneSubject { return implSubject{newImpl()} }
+}

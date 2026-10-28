@@ -2,16 +2,20 @@ package applier_test
 
 import (
 	"bytes"
+	"errors"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"testing"
 
 	"manifester/internal/controlplane/applier"
 	"manifester/internal/controlplane/applier/pebblekv"
 	"manifester/internal/core"
-	"manifester/internal/verify/veritas"
 	"manifester/internal/verify/veritas/veritastest"
+	"manifester/internal/verify/veritas/veritastest/generator"
+	"manifester/internal/verify/veritas/veritastest/observation"
+	"manifester/internal/verify/veritas/veritastest/plantedbug"
+	"manifester/internal/verify/veritas/veritastest/runcontrol"
+	"manifester/internal/verify/veritas/veritastest/suites"
 )
 
 func newPebble(t testing.TB) applier.KV {
@@ -29,69 +33,81 @@ var backends = map[string]func(testing.TB) applier.KV{
 	"pebble": newPebble,
 }
 
-// genOp draws one operation: commits from a small key pool (so duplicates and
-// conflicts are common), invalid commands, topics, lookups and describes.
-func genOp(r *veritastest.Rand, slot int64) core.CPCall {
-	switch k := r.Intn(20); {
-	case k == 0:
-		return core.CPCall{Req: core.ReqID(slot), Op: core.CommitSegment{SegmentKey: "bad" + strconv.Itoa(r.Intn(2))}}
-	case k < 4:
-		return core.CPCall{Req: core.ReqID(slot), Op: core.DescribeTopics{Topics: [][]string{nil, {"a"}, {"b", "zz"}}[r.Intn(3)]}}
-	case k < 9:
-		return core.CPCall{Req: core.ReqID(slot), Op: core.Lookup{
-			TP:   core.TP([]string{"a", "b", "none"}[r.Intn(3)], int32(r.Intn(5))),
-			From: core.Offset(r.Intn(40) - 1), MaxBytes: int32(r.Intn(3) * 70)}}
+// applierSubject runs the Applier directly as a suite subject. The applier
+// hash is not the hash of the spec, so StateHash says no.
+type applierSubject struct{ a *applier.Applier }
+
+func (s applierSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+	switch {
+	case op.CreateTopic != nil:
+		return observation.ControlPlaneResult{Code: s.a.CreateTopic(op.CreateTopic.Name, op.CreateTopic.Partitions)}, nil
+	case op.Call != nil:
+		done, ok := s.a.Exec(*op.Call).(core.CPDone)
+		if !ok {
+			return observation.ControlPlaneResult{}, errors.New("the applier did not return a CPDone")
+		}
+		return observation.FromControlPlaneDone(done), nil
 	}
-	key := "seg/" + strconv.Itoa(r.Intn(60))
-	variant := 0
-	if r.Intn(8) == 0 {
-		variant = 1
-	}
-	pr := veritastest.NewRand(uint64(len(key))*977 + uint64(key[len(key)-1]) + uint64(variant)*13)
-	var bs []core.PendingBatch
-	for i := 1 + pr.Intn(6); i > 0; i-- {
-		bs = append(bs, core.PendingBatch{
-			TP:      core.TP([]string{"a", "b"}[pr.Intn(2)], int32(pr.Intn(5))),
-			Records: int64(1 + pr.Intn(4)),
-			Loc:     core.SegmentRef{Key: key, Off: int64(pr.Intn(5)) * 100, Len: int64(1 + pr.Intn(3)*50)},
+	return observation.ControlPlaneResult{}, errors.New("the operation has neither CreateTopic nor Call")
+}
+
+func (applierSubject) StateHash() (uint64, bool) { return 0, false }
+
+func newApplierSubject(t testing.TB, mk func(testing.TB) applier.KV) suites.ControlPlaneSubject {
+	a := applier.New(mk(t))
+	t.Cleanup(func() { _ = a.Close() })
+	return applierSubject{a}
+}
+
+// runSuite runs the shared control plane suite on the applier for every
+// profile. Pebble is slower, so it passes a smaller default number of seeds.
+func runSuite(t *testing.T, mk func(testing.TB) applier.KV, defaultSeeds int) {
+	for _, profile := range suites.AllControlPlaneProfiles() {
+		t.Run(profile.Name, func(t *testing.T) {
+			suites.ControlPlane(t, profile, func() suites.ControlPlaneSubject { return newApplierSubject(t, mk) },
+				runcontrol.Options(t, defaultSeeds))
 		})
 	}
-	return core.CPCall{Req: core.ReqID(slot), Op: core.CommitSegment{SegmentKey: key, Batches: bs}}
 }
 
-func lockstep(t *testing.T, mk func(testing.TB) applier.KV, seeds, ops int) {
-	t.Helper()
-	for seed := uint64(1); seed <= uint64(seeds); seed++ {
-		r := veritastest.NewRand(seed)
-		a, o := applier.New(mk(t)), veritas.NewControlPlane()
-		for i := range ops {
-			if r.Intn(25) == 0 {
-				name, n := "t"+strconv.Itoa(r.Intn(3)), int32(r.Intn(4))
-				if got, want := a.CreateTopic(name, n), o.CreateTopic(name, n); got != want {
-					t.Fatalf("seed %d op %d CreateTopic: %v vs oracle %v", seed, i, got, want)
+func TestLockstepMem(t *testing.T)    { runSuite(t, backends["mem"], 20) }
+func TestLockstepPebble(t *testing.T) { runSuite(t, backends["pebble"], 3) }
+
+// TestLookupMaxBytesEdges checks what the shared suite does not: a Lookup with
+// MaxBytes at, just below and just above every running total of Len in an
+// answer. The stop rule is a >= on exactly these values, and the suite only
+// uses fixed MaxBytes values.
+func TestLookupMaxBytesEdges(t *testing.T) {
+	for name, mk := range backends {
+		seeds := 40
+		if name == "pebble" {
+			seeds = 3
+		}
+		t.Run(name, func(t *testing.T) {
+			profile := generator.LookupCuts()
+			ops := generator.ControlPlaneOps(profile)
+			for seed := uint64(1); seed <= uint64(seeds); seed++ {
+				r := veritastest.NewRand(seed)
+				a, spec := applier.New(mk(t)), suites.NewSpecControlPlaneSubject()
+				subject := applierSubject{a}
+				for i := range 120 {
+					op := ops(r, i)
+					expected, _ := spec.Do(op)
+					actual, _ := subject.Do(op)
+					if diff := observation.DiffControlPlane(expected, actual); diff != "" {
+						t.Fatalf("Seed %d, operation %d (%s): %s", seed, i, op.Describe(), diff)
+					}
+					if op.Call != nil {
+						if lk, ok := op.Call.Op.(core.Lookup); ok {
+							edgeLookups(t, subject, spec, lk, expected)
+						}
+					}
 				}
-				continue
+				_ = a.Close()
 			}
-			call := genOp(r, int64(i))
-			got, want := a.Exec(call), o.Exec(call)
-			if !reflect.DeepEqual(got, want) {
-				t.Fatalf("seed %d op %d %+v\n got %+v\nwant %+v", seed, i, call.Op, got, want)
-			}
-			if lk, ok := call.Op.(core.Lookup); ok {
-				edgeLookups(t, a, o, lk, want.(core.CPDone))
-			}
-		}
-		for _, tp := range []core.TopicPartition{core.TP("a", 1), core.TP("b", 4), core.TP("q", 0)} {
-			if a.End(tp) != o.End(tp) {
-				t.Fatalf("seed %d End(%v) %d vs oracle %d", seed, tp, a.End(tp), o.End(tp))
-			}
-		}
-		_ = a.Close()
+		})
 	}
 }
-
-func TestLockstepMem(t *testing.T)    { lockstep(t, backends["mem"], 300, 300) }
-func TestLockstepPebble(t *testing.T) { lockstep(t, backends["pebble"], 15, 300) }
 
 func commit(key string, bs ...core.PendingBatch) core.CommitSegment {
 	return core.CommitSegment{SegmentKey: key, Batches: bs}
@@ -249,22 +265,31 @@ func TestCommitBatchEqualsSequential(t *testing.T) {
 	}
 }
 
-// edgeLookups re-asks lk with MaxBytes at, just below and just above every
-// running total of Len in the answer: the stop rule is a >= on exactly these.
-func edgeLookups(t *testing.T, a *applier.Applier, o *veritas.ControlPlane, lk core.Lookup, d core.CPDone) {
+// edgeLookups asks lk again with MaxBytes at, just below and just above every
+// running total of Len in the expected answer.
+func edgeLookups(t *testing.T, subject, spec suites.ControlPlaneSubject, lk core.Lookup, expected observation.ControlPlaneResult) {
 	t.Helper()
-	resp, _ := d.Resp.(core.LookupResp)
 	var sum int64
-	for _, r := range resp.Ranges {
+	for _, r := range expected.Ranges {
 		sum += r.Loc.Len
 		for e := int64(-1); e <= 1; e++ {
 			if sum+e <= 0 {
 				continue
 			}
-			q := core.CPCall{Op: core.Lookup{TP: lk.TP, From: lk.From, MaxBytes: int32(sum + e)}}
-			if got, want := a.Exec(q), o.Exec(q); !reflect.DeepEqual(got, want) {
-				t.Fatalf("%+v\n got %+v\nwant %+v", q.Op, got, want)
+			q := generator.NewCall(core.CPCall{Op: core.Lookup{TP: lk.TP, From: lk.From, MaxBytes: int32(sum + e)}})
+			want, _ := spec.Do(q)
+			got, _ := subject.Do(q)
+			if diff := observation.DiffControlPlane(want, got); diff != "" {
+				t.Fatalf("For %s: %s", q.Describe(), diff)
 			}
 		}
 	}
+}
+
+// TestPlantedBugsCaughtApplierMem proves that the suite fails when the applier
+// has a known bug. The applier hash is not the hash of the spec, so the helper
+// skips the one bug that only a state hash can show.
+func TestPlantedBugsCaughtApplierMem(t *testing.T) {
+	newCorrect := func() suites.ControlPlaneSubject { return newApplierSubject(t, backends["mem"]) }
+	plantedbug.RequireAllControlPlaneBugsCaught(t, newCorrect, 100)
 }

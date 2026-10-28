@@ -10,18 +10,21 @@ import (
 	"manifester/internal/core"
 	"manifester/internal/verify/veritas"
 	"manifester/internal/verify/veritas/veritastest"
+	"manifester/internal/verify/veritas/veritastest/runcontrol"
 	"manifester/internal/wire/kwire"
 )
 
-// Conformance C1: the real broker state machine, driven by the fault-free
-// harness over veritas.ObjectStore and veritas.ControlPlane, against one
-// veritas.Partition per (topic, partition). Client requests are built with
-// kwire; every ack, fetch and ListOffsets is compared with the model.
+// Conformance C1 tests the REAL broker logic against SIMULATED fakes of the
+// world. The fakes are the veritas spec object store and the veritas spec
+// control plane, and the harness runs without faults. The test sends client
+// requests built with kwire. It compares every ack, fetch and ListOffsets
+// answer with one veritas.Partition per topic partition.
 
 var c1TPs = []core.TopicPartition{core.TP("t", 0), core.TP("t", 1),
 	core.TP("u", 0), core.TP("u", 1), core.TP("u", 2)}
 
-// Idem entries carry a producer id: the broker refuses them (decision 41).
+// An Idem entry carries a producer id. The broker refuses these entries
+// (decision 41), so the test expects an error and no new record.
 type c1ent struct {
 	TP, N int
 	Idem  bool
@@ -305,8 +308,8 @@ func shrinkC1(op c1op) []c1op {
 	return out
 }
 
-func c1Check(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) veritastest.Check[*c1, c1op] {
-	return veritastest.Check[*c1, c1op]{
+func c1Check(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) veritastest.SpecComparator[*c1, c1op] {
+	return veritastest.SpecComparator[*c1, c1op]{
 		Name: "c1op", Ops: 80, MaxShrinkRuns: 300,
 		New:       func() *c1 { return newC1(t, bug, corrupt, tune) },
 		Gen:       genC1,
@@ -317,28 +320,45 @@ func c1Check(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) veritastes
 	}
 }
 
-// c1Fail runs seeds 1..n and returns the first failure.
-func c1Fail(t *testing.T, bug Bug, corrupt bool, n int) *veritastest.Failure[c1op] {
-	c := c1Check(t, bug, corrupt, nil)
-	for seed := uint64(1); seed <= uint64(n); seed++ {
-		if f := c.RunSeed(seed); f != nil {
-			t.Log(c.Report(f, ""))
+// c1Fail runs the seeds that o chooses and returns the first failure, or nil
+// if every seed passes. A planted-bug test needs the failure as a value, so it
+// cannot use veritastest.Run, which reports the failure to the test itself.
+func c1Fail(t *testing.T, bug Bug, corrupt bool, tune func(*Config), o veritastest.Options) *veritastest.Failure[c1op] {
+	c := c1Check(t, bug, corrupt, tune)
+	try := func(seed uint64) *veritastest.Failure[c1op] {
+		f := c.RunSeed(seed)
+		if f != nil {
+			replay := ""
+			if o.Replay != nil {
+				replay = o.Replay(seed)
+			}
+			t.Log(c.Report(f, replay))
+		}
+		return f
+	}
+	if o.Seed >= 0 {
+		return try(uint64(o.Seed))
+	}
+	for seed := uint64(1); ; seed++ {
+		if o.Stop != nil && o.Stop() || o.Stop == nil && seed > uint64(o.Seeds) {
+			return nil
+		}
+		if f := try(seed); f != nil {
 			return f
 		}
 	}
-	return nil
 }
 
 func TestConformanceBroker(t *testing.T) {
 	for _, corrupt := range []bool{false, true} {
 		t.Run(fmt.Sprintf("corruptGets=%v", corrupt), func(t *testing.T) {
-			veritastest.Run(t, c1Check(t, BugNone, corrupt, nil), veritastest.Options{Seeds: 100, Seed: -1})
+			veritastest.Run(t, c1Check(t, BugNone, corrupt, nil), runcontrol.Options(t, 100))
 		})
 	}
 }
 
-// Small segment caps make every seal rule fire inside the generated runs, and
-// the log must still match the Partition spec.
+// Small segment caps make every seal rule fire during the generated runs. The
+// log must still match the Partition spec after each seal.
 func TestConformanceBrokerSmallSegments(t *testing.T) {
 	caps := map[string]func(*Config){
 		"bytes":      func(c *Config) { c.MaxSegmentBytes = 120 },
@@ -351,21 +371,43 @@ func TestConformanceBrokerSmallSegments(t *testing.T) {
 	for _, name := range []string{"bytes", "batches", "partitions", "all"} {
 		for _, corrupt := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/corruptGets=%v", name, corrupt), func(t *testing.T) {
-				veritastest.Run(t, c1Check(t, BugNone, corrupt, caps[name]), veritastest.Options{Seeds: 50, Seed: -1})
+				veritastest.Run(t, c1Check(t, BugNone, corrupt, caps[name]), runcontrol.Options(t, 50))
 			})
 		}
 	}
 }
 
-// The check is not vacuous: each broken broker is caught.
+// This test shows that the C1 comparison can fail. Each planted bug below
+// changes something the harness can observe, so C1 must catch it.
+//
+// C1 cannot catch the other planted bugs, because the client cannot see them
+// in a fault-free run. The simulator tests in internal/verify/sim/kafka catch
+// them: TestMutantsAreCaught in kafka_test.go runs every Bug value and names
+// the invariant that must fail.
+//   - BugNoBatchCap, BugNoPartitionCap, BugSealOffByOne change only where the
+//     broker cuts a segment. The records and offsets stay the same. The sim
+//     invariants on segment size are expected to catch them.
+//   - BugTimerFromLastBatch changes only when the flush timer fires. C1 does
+//     not check time, so the sim invariant on the flush window must catch it.
+//   - BugFreshKeyOnRetry acts only when a commit is retried, and the C1 harness
+//     has no faults, so no retry happens. The sim invariant "a stored batch is
+//     committed at most once" must catch it.
+//   - BugSkipProduceCRC matters only for a corrupt produce batch, and the C1
+//     generator sends only valid batches. TestSkipProduceCRCMutantAcksCorruptBatch
+//     and the sim invariant "committed batch is intact" must catch it.
 func TestConformanceBrokerCatchesMutants(t *testing.T) {
 	for _, m := range []struct {
+		name    string
 		bug     Bug
 		corrupt bool
-	}{{BugWrongOffset, false}, {BugServeCorrupt, true}} {
-		t.Run(fmt.Sprintf("bug%d", m.bug), func(t *testing.T) {
-			if c1Fail(t, m.bug, m.corrupt, 20) == nil {
-				t.Fatal("mutant not caught")
+	}{
+		{"BugWrongOffset", BugWrongOffset, false},
+		{"BugServeCorrupt", BugServeCorrupt, true},
+		{"BugEarlyAck", BugEarlyAck, false},
+	} {
+		t.Run(m.name, func(t *testing.T) {
+			if c1Fail(t, m.bug, m.corrupt, nil, runcontrol.Options(t, 20)) == nil {
+				t.Fatalf("the C1 comparison did not catch %s in 20 seeds.", m.name)
 			}
 		})
 	}

@@ -69,6 +69,10 @@ func BuildBatch(p BatchParams, recs []kmsg.Record) ([]byte, error) {
 	if p.Attributes&7 != 0 {
 		return nil, fmt.Errorf("%w: compression requested", ErrUnsupportedBatch)
 	}
+	return assembleBatch(p, int32(len(recs)), encodeRecords(recs)), nil
+}
+
+func encodeRecords(recs []kmsg.Record) []byte {
 	var body []byte
 	for i := range recs {
 		r := recs[i]
@@ -80,7 +84,7 @@ func BuildBatch(p BatchParams, recs []kmsg.Record) ([]byte, error) {
 		body = binary.AppendVarint(body, int64(len(enc)))
 		body = append(body, enc...)
 	}
-	return assembleBatch(p, int32(len(recs)), body), nil
+	return body
 }
 
 // BuildOpaqueBatch builds a v2 batch around an already-encoded (and, with a

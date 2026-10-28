@@ -17,7 +17,7 @@ import (
 	"strings"
 )
 
-const regenHint = "go run ./cmd/crapscore -profile <cover.out> -update-baseline   (or: make crap-baseline); review and commit the diff of crap-baseline.json"
+const regenHint = "go run ./cmd/crapscore -profile <cover.out> -update-baseline   (or: make crap-baseline); review and commit the diff of ops/crap-baseline.json"
 
 // Baseline is the checked-in ratchet file: the offenders that existed when it
 // was generated, with their CRAP at that time.
@@ -105,7 +105,7 @@ func parseFlags(args []string, stderr io.Writer) (*config, bool) {
 	fs.StringVar(&c.profile, "profile", "", "coverprofile from go test -coverprofile (required)")
 	fs.StringVar(&c.merge, "merge-profile", "", "comma-separated extra coverprofiles to merge (e.g. from Docker-backed integration tests)")
 	fs.Float64Var(&c.threshold, "threshold", envFloat("CRAP_THRESHOLD", 20), "fail above this CRAP score (env CRAP_THRESHOLD)")
-	fs.StringVar(&c.basePath, "baseline", "crap-baseline.json", "ratchet baseline file")
+	fs.StringVar(&c.basePath, "baseline", "ops/crap-baseline.json", "ratchet baseline file")
 	fs.BoolVar(&c.update, "update-baseline", false, "write the baseline from the current offenders and exit 0")
 	fs.BoolVar(&c.strict, "strict", false, "ignore the baseline: fail on every offender")
 	fs.BoolVar(&c.asJSON, "json", false, "machine-readable output")

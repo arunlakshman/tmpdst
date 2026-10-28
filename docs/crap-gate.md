@@ -79,7 +79,7 @@ full list; expect 0 over 20 when the gate is green.
     make it-hermetic    go test ./it/ (Docker fullstack Skips without endpoints)
     make crap           CRAP gate on merged unit+sim+it coverprofiles
     make crap-strict    ignore the baseline, print every function, fail on all offenders
-    make crap-baseline  rewrite crap-baseline.json (deliberate, reviewable)
+    make crap-baseline  rewrite ops/crap-baseline.json (deliberate, reviewable)
 
 Flags of `go run ./cmd/crapscore`: `-profile`, `-merge-profile a,b`,
 `-threshold` (env `CRAP_THRESHOLD`, default 20), `-baseline`, `-update-baseline`,
@@ -104,7 +104,7 @@ worse" (baselined, CRAP grew beyond the tolerance).
 
 ## The ratchet
 
-`crap-baseline.json` (currently empty, 0 offenders) lists the functions over
+`ops/crap-baseline.json` (currently empty, 0 offenders) lists the functions over
 the threshold with their CRAP when it was generated. The gate fails when:
 
 1. a function not in the baseline exceeds the threshold, or
@@ -119,7 +119,7 @@ baseline, the output warns; regenerate it.
 Regenerate deliberately, and commit the diff for review:
 
     make crap-baseline
-    git diff crap-baseline.json
+    git diff ops/crap-baseline.json
 
 A diff that only lowers numbers or removes entries is good; a diff that adds
 entries or raises numbers is accepting new debt and needs a reason in the PR.

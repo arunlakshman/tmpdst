@@ -39,9 +39,9 @@ build: proto fmt-check ascii-check vet lint compile test sim it-hermetic crap
 # Prefer mise-provided buf; plugins via `make proto-tools` (go install).
 proto: proto-tools
 	@if command -v mise >/dev/null 2>&1; then \
-		mise exec -- $(BUF) generate; \
+		cd internal/controlplane/api && mise exec -- $(BUF) generate; \
 	elif command -v $(BUF) >/dev/null 2>&1; then \
-		$(BUF) generate; \
+		cd internal/controlplane/api && $(BUF) generate; \
 	else \
 		echo "buf not found: run \`mise install\` (pins buf in mise.toml)" >&2; \
 		exit 1; \
@@ -118,7 +118,7 @@ comma := ,
 crap-strict:
 	@$(MAKE) crap CRAP_FLAGS="-strict -top 0 $(CRAP_FLAGS)"
 
-# Deliberate, reviewable: rewrite crap-baseline.json from the current tree.
+# Deliberate, reviewable: rewrite ops/crap-baseline.json from the current tree.
 crap-baseline:
 	@test -f $(COVER_UNIT) || $(MAKE) test
 	@test -f $(COVER_SIM) || $(MAKE) sim

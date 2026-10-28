@@ -81,7 +81,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Edit `docs/log-cp-service.md` title paths toward `internal/controlplane/`.
 - [ ] Rename tree `cp/` → `internal/controlplane/` and fix all Go imports. Binary name stays `manicp`.
 - [ ] Create `internal/controlplane/api/v1/*.proto` (`package controlplane.v1`).
-- [ ] Create local-only `buf.yaml` / `buf.gen.yaml` and a `make proto` target. No Buf Schema Registry.
+- [ ] Create local-only `internal/controlplane/api/buf.yaml` / `buf.gen.yaml` and a `make proto` target. No Buf Schema Registry.
 - [ ] Generate Go on build via `make proto` (mise-pinned `buf`); gitignore `internal/controlplane/api/v1/*.pb.go`. Do not commit generated files.
 - [ ] Edit `internal/core/action.go` for `Log*` IOActions and for `CPCall`/`CPDone` to carry `internal/controlplane/api/v1` messages (replace hand-written `CPOp` as the wire contract).
 - [ ] Edit `internal/core/event.go` and `internal/core/inbox.go` (`ClassOf`) for new bodies.
@@ -569,7 +569,7 @@ Let `internal/controlplane/machine` import `sim` helpers for tests. Rejected. Te
 
 CP-DSM-1. Rename + proto hard cut leaves a stray `manifester/cp` import or breaks ClassOf. Owner watches rename scan and `make proto`.
 
-CP-DSM-1. Buf plugins drift across machines. Owner pins plugin versions in `buf.gen.yaml` / Go tool versions and checks `make proto` on a clean VM.
+CP-DSM-1. Buf plugins drift across machines. Owner pins plugin versions in `internal/controlplane/api/buf.gen.yaml` / Go tool versions and checks `make proto` on a clean VM.
 
 CP-DSM-2. Autonomy leaks through a convenience import from `sys` or `sim`. Owner watches the import-boundary test every PR.
 

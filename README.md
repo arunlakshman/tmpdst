@@ -56,8 +56,8 @@ make crap-strict
 
 Docker fullstack tests under `test/it/` skip unless
 `MANIFESTER_DYNAMO_ENDPOINT` and `MANIFESTER_S3_ENDPOINT` are set
-(`ops/scripts/it-up.sh`). Determinism is a separate gate:
-`ops/scripts/ci-determinism.sh`.
+(`ops/scripts/it-up.sh`). The import rules for the deterministic packages
+are checked by `go run ./ops/tools/detcheck <packages>`.
 
 ## Docs
 

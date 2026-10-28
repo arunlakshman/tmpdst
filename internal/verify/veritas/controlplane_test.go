@@ -291,8 +291,8 @@ func segBatches(seg int, alt bool) []core.PendingBatch {
 	return bs
 }
 
-func cpCheck(impl func() cpExec) veritastest.Check[*cpState, cpOp] {
-	return veritastest.Check[*cpState, cpOp]{
+func cpCheck(impl func() cpExec) veritastest.SpecComparator[*cpState, cpOp] {
+	return veritastest.SpecComparator[*cpState, cpOp]{
 		Name: "cpOp",
 		New: func() *cpState {
 			return &cpState{impl(), cpModel{map[string]modelSeg{}, map[core.TopicPartition]int64{}}}

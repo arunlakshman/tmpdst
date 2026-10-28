@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"manifester/internal/core"
-	"manifester/internal/sys"
 )
 
 func newTestStore(t *testing.T, prefix string) (*Store, *fakeS3) {
@@ -202,15 +201,4 @@ func TestStoreDialAndHTTPClient(t *testing.T) {
 	if !strings.HasPrefix(UniqueBucket(), "manifester-") {
 		t.Error("UniqueBucket")
 	}
-}
-
-func TestConformanceFake(t *testing.T) {
-	run(t, func() sys.ObjectStore {
-		f := newFakeS3(t)
-		s, err := New(t.Context(), Config{Endpoint: f.srv.URL, Bucket: "b", Prefix: "c3/", PathStyle: true})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return s
-	}, 20)
 }

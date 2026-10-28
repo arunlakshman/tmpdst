@@ -10,19 +10,18 @@ import (
 
 	"manifester/internal/core"
 	"manifester/internal/sys"
-	"manifester/internal/verify/veritas"
-	"manifester/internal/verify/veritas/veritastest"
+	"manifester/internal/verify/veritas/veritastest/observation"
+	"manifester/internal/verify/veritas/veritastest/plantedbug"
+	"manifester/internal/verify/veritas/veritastest/runcontrol"
+	"manifester/internal/verify/veritas/veritastest/suites"
 	"manifester/internal/verify/veritas/vsys"
 )
 
-// Conformance C3: the same random operations against the store under test and
-// a fresh veritas.ObjectStore, every result compared.
+// Conformance C3: the shared object store suite runs on the S3 adapter and on
+// the in-process fake. Both are compared with veritas.ObjectStore.
 
-type pair struct {
-	impl sys.ObjectStore
-	spec *veritas.ObjectStore
-}
-
+// codeOf turns an error of the adapter or of the fake into a core.ErrCode.
+// Any other error counts as ErrIO, as the broker would see it.
 func codeOf(err error) core.ErrCode {
 	var se *Error
 	var ve *vsys.Error
@@ -37,85 +36,82 @@ func codeOf(err error) core.ErrCode {
 	return core.ErrIO
 }
 
-func step(p pair, a core.IOAction) error {
+// storeSubject makes a sys.ObjectStore usable as a suite subject. Neither the
+// fake nor real S3 can give the hash of the spec, so StateHash says no.
+type storeSubject struct{ store sys.ObjectStore }
+
+func (s storeSubject) Do(op core.IOAction) (observation.ObjectResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	var got, want string
-	switch a := a.(type) {
+	switch op := op.(type) {
 	case core.ObjPut:
-		got = codeOf(p.impl.Put(ctx, a.Key, a.Data)).String()
-		want = p.spec.Exec(a).(core.ObjPutDone).Err.String()
+		return writeResult(s.store.Put(ctx, op.Key, op.Data)), nil
 	case core.ObjGet:
-		d, err := p.impl.Get(ctx, a.Ref)
-		got = fmt.Sprintf("%v %q", codeOf(err), d)
-		w := p.spec.Exec(a).(core.ObjGetDone)
-		want = fmt.Sprintf("%v %q", w.Err, w.Data)
-		if w.Err != core.OK {
-			want = fmt.Sprintf("%v %q", w.Err, []byte(nil))
+		data, err := s.store.Get(ctx, op.Ref)
+		if err != nil {
+			return observation.ObjectResult{Code: codeOf(err)}, nil
 		}
+		return observation.ObjectResult{Data: data}, nil
 	case core.ObjDelete:
-		got = codeOf(p.impl.Delete(ctx, a.Key)).String()
-		want = p.spec.Exec(a).(core.ObjDeleteDone).Err.String()
+		return writeResult(s.store.Delete(ctx, op.Key)), nil
 	case core.ObjList:
-		k, err := p.impl.List(ctx, a.Prefix)
-		got = fmt.Sprintf("%v %q", codeOf(err), k)
-		w := p.spec.Exec(a).(core.ObjListDone)
-		want = fmt.Sprintf("%v %q", w.Err, w.Keys)
+		keys, err := s.store.List(ctx, op.Prefix)
+		if err != nil {
+			return observation.ObjectResult{Code: codeOf(err)}, nil
+		}
+		return observation.ObjectResult{Keys: keys}, nil
 	}
-	if got != want {
-		return fmt.Errorf("impl %s, spec %s", got, want)
-	}
-	return nil
+	return observation.ObjectResult{}, fmt.Errorf("the operation type %T is not an object store operation", op)
 }
 
-func check(newImpl func() sys.ObjectStore) veritastest.Check[pair, core.IOAction] {
-	keys := []string{"", "a", "a/b", "a/c", "b"}
-	prefixes := []string{"", "a", "a/", "b", "z"}
-	return veritastest.Check[pair, core.IOAction]{
-		Name: "core.IOAction",
-		New:  func() pair { return pair{newImpl(), veritas.NewObjectStore()} },
-		Gen: func(r *veritastest.Rand, i int) core.IOAction {
-			req, key := core.ReqID(i+1), keys[r.Intn(len(keys))]
-			switch r.Intn(7) {
-			case 0, 1, 2:
-				data := make([]byte, r.Intn(5))
-				for j := range data {
-					data[j] = byte('a' + r.Intn(26))
-				}
-				return core.ObjPut{Req: req, Key: key, Data: data}
-			case 3, 4:
-				return core.ObjGet{Req: req, Ref: core.SegmentRef{Key: key, Off: int64(r.Intn(7) - 1), Len: int64(r.Intn(7) - 1)}}
-			case 5:
-				return core.ObjDelete{Req: req, Key: key}
-			}
-			return core.ObjList{Req: req, Prefix: prefixes[r.Intn(len(prefixes))]}
-		},
-		Step:          step,
-		Format:        func(a core.IOAction) string { return fmt.Sprintf("%#v", a) },
-		Ops:           60,
-		MaxShrinkRuns: 200,
+// writeResult follows the spec: a write that succeeds is Applied, and a write
+// that fails is NotApplied.
+func writeResult(err error) observation.ObjectResult {
+	if err != nil {
+		return observation.ObjectResult{Code: codeOf(err), Outcome: core.NotApplied}
+	}
+	return observation.ObjectResult{Code: core.OK, Outcome: core.Applied}
+}
+
+func (storeSubject) StateHash() (uint64, bool) { return 0, false }
+
+func newFake() suites.ObjectSubject { return storeSubject{vsys.NewObjectStore()} }
+
+func runProfiles(t *testing.T, newSubject func() suites.ObjectSubject, defaultSeeds int) {
+	for _, profile := range suites.AllObjectProfiles() {
+		t.Run(profile.Name, func(t *testing.T) {
+			suites.ObjectStore(t, profile, newSubject, runcontrol.Options(t, defaultSeeds))
+		})
 	}
 }
 
-func run(t *testing.T, newImpl func() sys.ObjectStore, seeds int) {
-	t.Helper()
-	veritastest.Run(t, check(newImpl), veritastest.Options{Seeds: seeds, Seed: -1})
+func TestConformanceMem(t *testing.T) { runProfiles(t, newFake, 100) }
+
+// newFakeS3Subject returns the S3 adapter on the in-process fake S3 server.
+// It runs without a network, so it always runs.
+func newFakeS3Subject(t *testing.T) func() suites.ObjectSubject {
+	return func() suites.ObjectSubject {
+		f := newFakeS3(t)
+		s, err := New(t.Context(), Config{Endpoint: f.srv.URL, Bucket: "b", Prefix: "c3/", PathStyle: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return storeSubject{s}
+	}
 }
 
-func TestConformanceMem(t *testing.T) {
-	run(t, func() sys.ObjectStore { return vsys.NewObjectStore() }, 100)
-}
+func TestConformanceFake(t *testing.T) { runProfiles(t, newFakeS3Subject(t), 8) }
 
-// TestConformanceS3 runs against a real S3 endpoint (SeaweedFS) when
-// MANIFESTER_S3_ENDPOINT is set; every sequence gets its own key prefix.
+// TestConformanceS3 runs against a real S3 endpoint (SeaweedFS) only when
+// MANIFESTER_S3_ENDPOINT is set. Every sequence gets its own key prefix.
 func TestConformanceS3(t *testing.T) {
 	ep := os.Getenv("MANIFESTER_S3_ENDPOINT")
 	if ep == "" {
-		t.Skip("MANIFESTER_S3_ENDPOINT not set")
+		t.Skip("The environment variable MANIFESTER_S3_ENDPOINT is not set, so the test of the real S3 endpoint is skipped.")
 	}
 	base := UniqueBucket()
 	n := 0
-	run(t, func() sys.ObjectStore {
+	runProfiles(t, func() suites.ObjectSubject {
 		s, err := New(t.Context(), Config{Endpoint: ep, Bucket: base, Prefix: fmt.Sprintf("c3-%d/", n), PathStyle: true})
 		if err != nil {
 			t.Fatal(err)
@@ -126,6 +122,16 @@ func TestConformanceS3(t *testing.T) {
 			}
 		}
 		n++
-		return s
+		return storeSubject{s}
 	}, 50)
 }
+
+// TestPlantedBugsCaught proves that the suite fails when the adapter on the
+// fake S3 server has a known bug, so a pass of TestConformanceFake means
+// something.
+func TestPlantedBugsCaught(t *testing.T) {
+	plantedbug.RequireAllObjectBugsCaught(t, newFakeS3Subject(t), 100)
+}
+
+// TestPlantedBugsCaughtMem does the same for the in-process fake store.
+func TestPlantedBugsCaughtMem(t *testing.T) { plantedbug.RequireAllObjectBugsCaught(t, newFake, 100) }

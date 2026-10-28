@@ -27,8 +27,8 @@ import (
 //	                  all or nothing. Topics are created implicitly and grow
 //	                  to cover the partition.
 //	               A failed commit records nothing: its key is reusable.
-//	               Real stores guard step 3 with a compare-and-set on the run
-//	               base and retry internally; the spec is sequential.
+//	               The real applier runs commands one at a time in log order,
+//	               so it needs no locking for step 3. The spec is sequential too.
 //	Lookup         From < 0: ErrInvalid. Else the runs of TP whose last offset
 //	               is >= From, in offset order, plus the end offset. MaxBytes > 0
 //	               stops after the batch that takes the summed Loc.Len to

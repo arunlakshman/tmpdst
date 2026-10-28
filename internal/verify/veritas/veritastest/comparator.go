@@ -6,55 +6,59 @@ import (
 	"strings"
 )
 
-// TB is the part of testing.TB the runner uses.
-type TB interface {
+// Reporter is the small part of testing.TB that Run needs. *testing.T
+// satisfies it. Keeping it small lets this package avoid importing testing.
+type Reporter interface {
 	Helper()
 	Errorf(format string, args ...any)
 	Logf(format string, args ...any)
 }
 
-// Check is one conformance check: how to build a fresh implementation paired
-// with its veritas (S), how to generate operations (Op), and how to run one
-// operation on both and compare.
-type Check[S, Op any] struct {
-	// Name is the Go type of Op as written in a regression test (for
-	// example "core.IOAction"); it heads the printed sequence.
+// SpecComparator compares an implementation with its spec after every step.
+// S holds a fresh implementation paired with its spec. Op is one operation.
+// The fields say how to build S, how to make operations, and how to run one
+// operation on both sides.
+type SpecComparator[S, Op any] struct {
+	// Name is the Go type of Op as written in a regression test, for
+	// example "core.IOAction". It is the first line of the printed sequence.
 	Name string
-	// New returns a fresh implementation and veritas, both empty.
+	// New returns a fresh implementation and a fresh spec, both empty.
 	New func() S
-	// Gen returns the i-th operation of a sequence. Draw everything from r.
+	// Gen returns operation number i of a sequence. It must take all random
+	// values from r, so the same seed always gives the same sequence.
 	Gen func(r *Rand, i int) Op
-	// Step applies op to the implementation and to the veritas and returns
-	// an error describing any difference in their results.
+	// Step applies op to the implementation and to the spec. It returns an
+	// error that describes any difference between the two results.
 	Step func(s S, op Op) error
-	// Invariant, if set, runs after every Step.
+	// Invariant, if set, runs after every Step and checks a rule that must
+	// always hold.
 	Invariant func(s S) error
-	// Shrink, if set, returns simpler versions of op, simplest first.
+	// Shrink, if set, returns simpler versions of op. The simplest comes first.
 	Shrink func(op Op) []Op
-	// ShrinkAll, if set, returns simpler versions of a whole sequence,
-	// simplest first: changes that only keep a failure if made everywhere
-	// at once, like renaming a path in every operation that uses it. A
-	// candidate must differ from ops, or it counts as progress forever.
+	// ShrinkAll, if set, returns simpler versions of a whole sequence. The
+	// simplest comes first. Use it for a change that keeps the failure only
+	// if it is made in every operation, such as renaming one path everywhere.
+	// Each candidate must differ from ops. Otherwise shrinking never ends.
 	ShrinkAll func(ops []Op) [][]Op
-	// Format returns op as a Go expression.
+	// Format returns op as Go source text.
 	Format func(op Op) string
-	// Ops is the length of each generated sequence.
+	// Ops is the number of operations in each generated sequence.
 	Ops int
-	// MaxShrinkRuns caps the sequences executed while shrinking (0: 5000).
+	// MaxShrinkRuns is the most sequences shrinking may run. Zero means 5000.
 	MaxShrinkRuns int
 }
 
-// Failure is a failing sequence, shrunk.
+// Failure is a failing sequence after shrinking.
 type Failure[Op any] struct {
 	Seed     uint64
 	Ops      []Op  // the shrunk sequence; its last operation fails
 	Err      error // what went wrong at the last operation
 	Original int   // length of the generated sequence up to the first failure
-	Runs     int   // sequences executed while shrinking
+	Runs     int   // number of sequences run while shrinking
 }
 
-// Generate returns the operations of seed's sequence.
-func (c Check[S, Op]) Generate(seed uint64) []Op {
+// Generate returns the operations for seed. The same seed gives the same list.
+func (c SpecComparator[S, Op]) Generate(seed uint64) []Op {
 	r := NewRand(seed)
 	ops := make([]Op, c.Ops)
 	for i := range ops {
@@ -63,10 +67,10 @@ func (c Check[S, Op]) Generate(seed uint64) []Op {
 	return ops
 }
 
-// Replay runs ops in lockstep on a fresh pair and returns the index of the
-// first failing operation and its error, or -1 and nil. A panic in Step or
-// Invariant counts as a failure of that operation.
-func (c Check[S, Op]) Replay(ops []Op) (int, error) {
+// Replay runs ops on a fresh pair. It returns the index of the first failing
+// operation and its error, or -1 and nil. A panic in Step or Invariant counts
+// as a failure of that operation.
+func (c SpecComparator[S, Op]) Replay(ops []Op) (int, error) {
 	s := c.New()
 	for i, op := range ops {
 		if err := c.step(s, op); err != nil {
@@ -76,7 +80,7 @@ func (c Check[S, Op]) Replay(ops []Op) (int, error) {
 	return -1, nil
 }
 
-func (c Check[S, Op]) step(s S, op Op) (err error) {
+func (c SpecComparator[S, Op]) step(s S, op Op) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = fmt.Errorf("panic: %v", p)
@@ -93,9 +97,10 @@ func (c Check[S, Op]) step(s S, op Op) (err error) {
 	return nil
 }
 
-// RunSeed generates seed's sequence and runs it. If it fails, the failure is
-// shrunk and returned; otherwise RunSeed returns nil.
-func (c Check[S, Op]) RunSeed(seed uint64) *Failure[Op] {
+// RunSeed makes the sequence for seed and runs it. If it fails, RunSeed
+// shrinks the sequence and returns the failure. If it passes, RunSeed returns
+// nil.
+func (c SpecComparator[S, Op]) RunSeed(seed uint64) *Failure[Op] {
 	ops := c.Generate(seed)
 	i, err := c.Replay(ops)
 	if err == nil {
@@ -106,21 +111,20 @@ func (c Check[S, Op]) RunSeed(seed uint64) *Failure[Op] {
 	return f
 }
 
-// shrink returns a shorter or simpler sequence that still fails, and its
-// error. ops must fail at its last operation. Passes, repeated until none
-// makes progress:
+// shrink makes the failing case smaller and returns it with its error. ops
+// must fail at its last operation. It repeats these passes until none helps:
 //
-//  1. drop chunks: halves, then quarters, ... down to single operations;
-//  2. replace each operation with the first of its Shrink candidates that
-//     still fails, repeatedly;
+//  1. drop chunks: halves, then quarters, down to single operations;
+//  2. replace each operation with the first Shrink candidate that still
+//     fails, and repeat;
 //  3. replace the whole sequence with the first ShrinkAll candidate that
 //     still fails.
 //
-// After each success the sequence is cut just after its (new) failing
-// operation. Every choice is a fixed order, so shrinking is deterministic.
-// Any failure counts, not only the original one: the shrunk sequence may
-// show a different bug, which is still a bug.
-func (c Check[S, Op]) shrink(ops []Op, err error) ([]Op, int, error) {
+// After each success it cuts the sequence just after the new failing
+// operation. Every choice follows a fixed order, so the result is the same
+// on every run. Any failure is accepted, not only the first one, because a
+// different failure is also a real bug.
+func (c SpecComparator[S, Op]) shrink(ops []Op, err error) ([]Op, int, error) {
 	budget := c.MaxShrinkRuns
 	if budget == 0 {
 		budget = 5000
@@ -138,8 +142,8 @@ func (c Check[S, Op]) shrink(ops []Op, err error) ([]Op, int, error) {
 	return s.ops, s.runs, s.err
 }
 
-// shrinkState shrinks one failing sequence. try reports whether cand fails;
-// if it does, it becomes the sequence.
+// shrinkState holds the failing sequence while it shrinks. try reports whether
+// cand fails. If it does, cand becomes the new sequence.
 type shrinkState[Op any] struct {
 	ops    []Op
 	err    error
@@ -204,8 +208,8 @@ func (s *shrinkState[Op]) shrinkAll(shrinkAll func([]Op) [][]Op) bool {
 	return slices.ContainsFunc(shrinkAll(s.ops), s.try)
 }
 
-// Literal returns ops as a Go composite literal of type []c.Name.
-func (c Check[S, Op]) Literal(ops []Op) string {
+// Literal returns ops as Go source text of type []c.Name.
+func (c SpecComparator[S, Op]) Literal(ops []Op) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[]%s{\n", c.Name)
 	for _, op := range ops {
@@ -216,32 +220,38 @@ func (c Check[S, Op]) Literal(ops []Op) string {
 }
 
 // Report describes f: the seed, how to replay it, and the shrunk sequence.
-func (c Check[S, Op]) Report(f *Failure[Op], replay string) string {
+// It always prints a replay line. If replay is empty, the line says that no
+// replay command is configured.
+func (c SpecComparator[S, Op]) Report(f *Failure[Op], replay string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "seed %d: operation %d of the shrunk sequence failed: %v\n", f.Seed, len(f.Ops), f.Err)
 	fmt.Fprintf(&b, "(shrunk from %d operations to %d in %d runs)\n", f.Original, len(f.Ops), f.Runs)
-	if replay != "" {
-		fmt.Fprintf(&b, "replay: %s\n", replay)
+	if replay == "" {
+		replay = "not configured (set Options.Replay)"
 	}
+	fmt.Fprintf(&b, "replay: %s\n", replay)
 	fmt.Fprintf(&b, "shrunk sequence:\n%s", c.Literal(f.Ops))
 	return b.String()
 }
 
-// Options chooses the seeds Run runs. The caller maps its test flags onto it.
+// Options chooses the seeds that Run uses. The caller maps its own test flags
+// onto these fields.
 type Options struct {
-	// Seeds runs seeds 1..Seeds.
+	// Seeds runs the seeds 1 to Seeds.
 	Seeds int
-	// Seed, if >= 0, runs only this seed (overrides Seeds and Stop).
+	// Seed, if zero or more, runs only this seed. It overrides Seeds and Stop.
 	Seed int64
-	// Stop, if set, runs seeds 1, 2, ... until it returns true (overrides
-	// Seeds), for wall-clock campaigns.
+	// Stop, if set, runs seeds 1, 2, 3 and so on until it returns true. It
+	// overrides Seeds. Use it for runs limited by time.
 	Stop func() bool
-	// Replay returns the command that replays one seed.
+	// Replay returns the command that runs one seed again. Please set it:
+	// without it, a failure report cannot tell the reader how to replay.
 	Replay func(seed uint64) string
 }
 
-// Run runs c on the seeds o chooses and reports the first failure, shrunk.
-func Run[S, Op any](t TB, c Check[S, Op], o Options) {
+// Run runs c on the seeds that o chooses. It reports the first failure after
+// shrinking it.
+func Run[S, Op any](t Reporter, c SpecComparator[S, Op], o Options) {
 	t.Helper()
 	report := func(f *Failure[Op]) {
 		t.Helper()

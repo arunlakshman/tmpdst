@@ -1,6 +1,24 @@
 package sim
 
-import "testing"
+import (
+	"testing"
+
+	"manifester/internal/verify/veritas/veritastest"
+)
+
+// veritastest.Rand is a copy of the sim stream, so that the veritas tests do
+// not import sim. This test fails if the two copies ever give different values.
+func TestVeritastestRandMatchesSimStream(t *testing.T) {
+	for _, seed := range []uint64{0, 1, 7, 42, 1 << 40, ^uint64(0)} {
+		simStream := NewRand(seed)
+		specStream := veritastest.NewRand(seed)
+		for i := range 1000 {
+			if s, v := simStream.Uint64(), specStream.Uint64(); s != v {
+				t.Fatalf("seed %d, draw %d: the sim stream gave %#x, veritastest.Rand gave %#x.", seed, i, s, v)
+			}
+		}
+	}
+}
 
 func TestSplitMixReference(t *testing.T) {
 	r := NewRand(0)

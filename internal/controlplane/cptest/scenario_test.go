@@ -7,24 +7,44 @@ import (
 	"manifester/internal/controlplane/cpclient"
 	"manifester/internal/controlplane/grpctest"
 	"manifester/internal/core"
-	"manifester/internal/verify/veritas"
+	"manifester/internal/verify/veritas/veritastest/generator"
+	"manifester/internal/verify/veritas/veritastest/observation"
+	"manifester/internal/verify/veritas/veritastest/suites"
 )
 
-// lockstep runs ops on impl and a fresh spec.
-func lockstep(t *testing.T, im impl, ops []op) {
+// compareSteps runs the operations one by one on the subject and on a fresh
+// spec. It fails at the first difference.
+func compareSteps(t *testing.T, subject suites.ControlPlaneSubject, ops []generator.ControlPlaneOp) {
 	t.Helper()
-	p := pair{im, veritas.NewControlPlane()}
-	for i, o := range ops {
-		if err := step(p, o); err != nil {
-			t.Fatalf("op %d (%+v): %v", i, o, err)
+	spec := suites.NewSpecControlPlaneSubject()
+	for i, op := range ops {
+		expected, err := spec.Do(op)
+		if err != nil {
+			t.Fatalf("The spec could not run operation %d (%s): %v", i, op.Describe(), err)
+		}
+		actual, err := subject.Do(op)
+		if err != nil {
+			t.Fatalf("The subject could not run operation %d (%s): %v", i, op.Describe(), err)
+		}
+		if op.CreateTopic != nil {
+			expected, actual = observation.ControlPlaneResult{Code: expected.Code}, observation.ControlPlaneResult{Code: actual.Code}
+		}
+		if diff := observation.DiffControlPlane(expected, actual); diff != "" {
+			t.Fatalf("For operation %d (%s): %s", i, op.Describe(), diff)
 		}
 	}
+}
+
+// call wraps a control-plane operation. The request number is not used by the
+// stores, so it is always 1.
+func call(op core.CPOp) generator.ControlPlaneOp {
+	return generator.NewCall(core.CPCall{Req: 1, Op: op})
 }
 
 // replayOps commits a three-batch, two-partition segment, replays it after the
 // ends moved, sends a different request under its key, an invalid request, and
 // a retry of the same batches under a fresh key (new offsets).
-func replayOps() []op {
+func replayOps() []generator.ControlPlaneOp {
 	a, b := core.TP("w", 0), core.TP("w", 1)
 	batches := func(key string) []core.PendingBatch {
 		return []core.PendingBatch{
@@ -33,8 +53,10 @@ func replayOps() []op {
 			{TP: a, Records: 3, Loc: core.SegmentRef{Key: key, Off: 70, Len: 30}},
 		}
 	}
-	commit := func(key string, bs []core.PendingBatch) op { return op{Kind: "commit", Name: key, Batches: bs} }
-	return []op{
+	commit := func(key string, bs []core.PendingBatch) generator.ControlPlaneOp {
+		return call(core.CommitSegment{SegmentKey: key, Batches: bs})
+	}
+	return []generator.ControlPlaneOp{
 		commit("s1", batches("s1")),
 		commit("s2", batches("s2")),
 		commit("s1", batches("s1")),                // replay: the original ranges
@@ -43,19 +65,19 @@ func replayOps() []op {
 		commit("s3", []core.PendingBatch{{TP: a}}), // invalid: no records
 		commit("s3", batches("s3")),                // the failed key is reusable
 		commit("re", batches("s3")),                // the same batches, a fresh key: new offsets
-		{Kind: "lookup", TP: a}, {Kind: "lookup", TP: b, From: 6, MaxBytes: 25},
-		{Kind: "describe"},
+		call(core.Lookup{TP: a}), call(core.Lookup{TP: b, From: 6, MaxBytes: 25}),
+		call(core.DescribeTopics{}),
 	}
 }
 
-func TestReplayMemstore(t *testing.T) { lockstep(t, storeImpl{newMem()}, replayOps()) }
+func TestReplayMemstore(t *testing.T) { compareSteps(t, implSubject{storeImpl{newMem()}}, replayOps()) }
 
 // manyBatchesOps commits segments of many small batches (one DynamoDB range
 // item per partition and segment), with a replay
 // of a segment, a segment spanning two runs of one partition (two commits), and
 // a Lookup from every offset with and without a byte limit.
-func manyBatchesOps() []op {
-	var ops []op
+func manyBatchesOps() []generator.ControlPlaneOp {
+	var ops []generator.ControlPlaneOp
 	a := core.TP("m", 0)
 	b := core.TP("m", 1)
 	var s1, s2 []core.PendingBatch
@@ -76,8 +98,8 @@ func manyBatchesOps() []op {
 		{TP: b, Records: 1, Loc: core.SegmentRef{Key: "big2", Off: 27, Len: 9}},
 		{TP: a, Records: 1, Loc: core.SegmentRef{Key: "big2", Off: 36, Len: 9}},
 	}
-	commit := func(key string, bs []core.PendingBatch) op {
-		return op{Kind: "commit", Name: key, Batches: bs}
+	commit := func(key string, bs []core.PendingBatch) generator.ControlPlaneOp {
+		return call(core.CommitSegment{SegmentKey: key, Batches: bs})
 	}
 	ops = append(ops, commit("big1", s1), commit("big1", s1), commit("big2", s2), commit("big2", s2),
 		commit("big3", s1), // a second run on each partition, right after the first
@@ -85,14 +107,16 @@ func manyBatchesOps() []op {
 	for _, tp := range []core.TopicPartition{a, b, core.TP("m", 2)} {
 		for from := int64(0); from <= 520; from += 7 {
 			for _, mb := range []int32{0, 1, 25, 300} {
-				ops = append(ops, op{Kind: "lookup", TP: tp, From: from, MaxBytes: mb})
+				ops = append(ops, call(core.Lookup{TP: tp, From: core.Offset(from), MaxBytes: mb}))
 			}
 		}
 	}
-	return append(ops, op{Kind: "describe"})
+	return append(ops, call(core.DescribeTopics{}))
 }
 
-func TestManyBatchesMemstore(t *testing.T) { lockstep(t, storeImpl{newMem()}, manyBatchesOps()) }
+func TestManyBatchesMemstore(t *testing.T) {
+	compareSteps(t, implSubject{storeImpl{newMem()}}, manyBatchesOps())
+}
 
 func TestRoundTrip(t *testing.T) {
 	ctx := t.Context()

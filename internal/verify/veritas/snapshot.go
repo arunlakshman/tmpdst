@@ -13,8 +13,8 @@ type End struct {
 }
 
 // Ends lists every partition that has a run with its end offset, ordered by
-// topic then partition. It exists for checkpoints of the command-log prototype
-// (cp/logsm); it changes nothing.
+// topic then partition. Only a test uses it today, to check the end offsets of one
+// control plane. It changes nothing.
 func (c *ControlPlane) Ends() []End {
 	var out []End
 	for _, t := range sortedKeys(c.parts) {

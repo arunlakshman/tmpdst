@@ -1,27 +1,61 @@
-// Package veritas holds executable specs of the outside world: the object
-// store (ObjectStore), the control plane (ControlPlane) and one Kafka
-// partition (Partition). Each is sequential, fault-free, plain data and short
-// enough to be obviously correct (decision 21). ObjectStore and ControlPlane
-// answer core.IOAction with core.Completion via Exec; all three have a
-// StateHash. Nothing here iterates a map for behavior.
+// Package veritas holds the specs of the outside world: the object store
+// (ObjectStore), the control plane (ControlPlane) and one Kafka partition
+// (Partition). A spec is a small program that shows the correct behavior. It
+// has no faults, it runs one operation at a time, and it keeps plain data. It
+// is short so that a reader can see that it is correct.
 //
-// The specs double as test fakes (production-facing adapters over them are in
-// veritas/vsys) and are what implementations are checked against, in lockstep
-// with veritastest. Four checks:
+// ObjectStore and ControlPlane answer a core.IOAction with a core.Completion
+// through Exec. Partition has Append and Read. All three have a StateHash.
 //
-//	C1  broker with no faults vs Partition: produce/fetch/ListOffsets through
-//	    the real state machine, driven by a fault-free executor over these
-//	    specs (broker/conformance_test.go). Its Bug mutants must fail it.
-//	C2  each sim engine (object store, control plane) with faults off vs its
-//	    spec: same completions, same StateHash after every operation
-//	    (sim/engines/conformance_test.go).
-//	C3  the sys adapters (S3, the control-plane HTTP client) vs these specs.
-//	    The only check that executes sys. Lives with the adapters.
-//	C4  the Kafka oracle vs Partition. The oracle never imports this package;
-//	    C4 is what keeps the two independent. Wired: sim/kafka/c4_test.go
-//	    (accepts correct histories built from these specs, rejects 28 faults and fenced acks).
+// A spec is also used as a test fake (the adapters over the specs are in
+// veritas/vsys). The main use is as an oracle: a checker we trust to say if a
+// result is correct. Each real component is compared with its spec, step by
+// step, using the helpers in veritastest. There are four checks:
 //
-// What is checked today: each spec's rules (unit tests), ObjectStore against
-// a sorted-slice model, and ControlPlane invariants (contiguous offsets,
-// end offset == committed counts, compare-and-set by base, idempotent commit), all via veritastest.
+//	C1  The broker state machine runs with no faults, over the ObjectStore
+//	    and ControlPlane specs. Its answers to produce, fetch and ListOffsets
+//	    are compared with Partition. The test also checks that the planted
+//	    bugs BugWrongOffset and BugServeCorrupt are caught.
+//	    Test: internal/broker/conformance_test.go.
+//	C2  Each simulated engine (object store, control plane) runs with all
+//	    faults off. It must give the same completion and the same StateHash
+//	    as its spec after every operation.
+//	    Test: internal/verify/sim/engines/conformance_test.go.
+//	C3  The real adapters are compared with the specs: the S3 object store
+//	    against ObjectStore, and the control-plane stores (in-memory store,
+//	    gRPC client, applier on MemKV and on Pebble) against ControlPlane.
+//	    This is the only check that runs the real code in internal/sys and
+//	    the control-plane stores. The S3 test needs MANIFESTER_S3_ENDPOINT.
+//	    Tests: internal/sys/s3store/conform_test.go and
+//	    internal/controlplane/cptest/conform_test.go.
+//	C4  The Kafka oracle (in sim/kafka) is compared with Partition and
+//	    ControlPlane. The oracle must accept the histories built from the
+//	    specs and must reject every fault that the test plants in a history.
+//	    The oracle never imports this package. C4 keeps the two independent.
+//	    Test: internal/verify/sim/kafka/c4_test.go and c4_faults_test.go.
+//
+// The table below shows, for each check, what is compared and which side is
+// real code and which side is simulated or a spec.
+//
+//	check | what is tested                    | compared with        | real or simulated
+//	C1    | broker answers (produce, fetch,   | Partition            | broker code is real;
+//	      | ListOffsets)                      |                      | storage and control plane are specs
+//	C2    | simulated object store and        | ObjectStore and      | engines are simulated;
+//	      | control plane, faults off         | ControlPlane         | specs are the reference
+//	C3    | S3 adapter; control-plane stores  | ObjectStore and      | adapters are real code (S3 needs
+//	      |                                   | ControlPlane         | a live endpoint); specs are the reference
+//	C4    | Kafka oracle (accepts and         | Partition and        | oracle is simulation-side code;
+//	      | rejects histories)                | ControlPlane         | specs are the reference
+//
+// The specs themselves are checked in this package. The unit tests check each
+// rule. ObjectStore is compared with a sorted-slice model. ControlPlane is
+// compared with a naive model made of maps and loops (controlplane_model_test.go)
+// and its invariants are checked: offsets are contiguous, the end offset equals
+// the committed counts, and a repeated commit gives the same answer. Partition
+// is compared with a slice model (partition_model_test.go).
+//
+// Terms:
+//
+//	oracle  a checker we trust to say if a result is correct.
+//	spec    a short, fault-free program that shows the correct behavior.
 package veritas

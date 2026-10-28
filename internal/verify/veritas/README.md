@@ -7,14 +7,130 @@ specs, to prove that they behave the same.
 Words used here:
 
 - **spec**: a short program that shows the correct behavior. It has no faults
-  and it runs one operation at a time.
+  and it runs one operation at a time. The paper below calls it a
+  "reference model".
 - **oracle**: a checker we trust to say if a result is correct. A spec is the
   oracle for the code that is compared with it.
 - **subject**: the real or simulated code under test.
 - **seed**: a number that fixes the random operations. The same seed always
   gives the same test.
+- **shrink**: make a failing case smaller, so that a person can read it.
 - **planted bug**: a known bug that a test adds on purpose, to prove that the
   suite can catch it.
+
+## Where this design comes from
+
+This package follows the ideas of one paper:
+
+> James Bornholt, Rajeev Joshi, Vytautas Astrauskas, Brendan Cully, Bernhard
+> Kragl, Seth Markle, Kyle Sauri, Drew Schleit, Grant Slatton, Serdar Tasiran,
+> Jacob Van Geffen and Andrew Warfield. *Using Lightweight Formal Methods to
+> Validate a Key-Value Storage Node in Amazon S3.* SOSP 2021.
+> https://www.amazon.science/publications/using-lightweight-formal-methods-to-validate-a-key-value-storage-node-in-amazon-s3
+> (DOI 10.1145/3477132.3483540)
+
+Read the paper once. It is 15 pages. This
+section tells you what we took from it, what we changed and what we did not do.
+
+### The problem in the paper
+
+Amazon S3 built a new storage node called ShardStore. It has more than 40,000
+lines of Rust. It changes every week. A full proof of such a system is too
+expensive, and the proof would be out of date after the next change. So the
+authors chose "lightweight formal methods". They do not prove the code correct.
+They use tools that run by themselves, that normal engineers can use, and that
+keep working while the code and the specification change.
+
+They found 16 bugs before production, including crash and concurrency bugs
+that normal tests had missed. The team that owns the code now maintains the
+checks. That is the real result: the checks stayed alive.
+
+### The idea we took
+
+1. **Write the specification as a small program, in the same language as the
+   code.** The paper calls it an executable reference model. The model for
+   their log-structured merge tree is a hash map, and all models together are
+   about 1% of the implementation (450 lines, against 44,048). Because it is
+   normal code, engineers can read it and change it without learning a new
+   language. Our three specs are about 400 lines of Go in total
+   (`objectstore.go`, `controlplane.go`, `partition.go`). `ObjectStore` is a
+   map. `Partition` is a slice.
+2. **Check that the real code agrees with the model.** The paper uses
+   property-based testing: make a random list of operations, run each one on
+   the model and on the implementation, compare the results, then check some
+   invariants. We do the same in `veritastest.SpecComparator` (the `Step` and
+   `Invariant` functions).
+3. **Split "correct" into separate properties and check each with the right
+   tool.** The paper has three: normal behavior, crash behavior and concurrent
+   behavior. We have four checks, C1 to C4, one for each kind of component (see
+   below).
+4. **Make the failing case small.** The paper reports one failure that began
+   with 61 operations and ended with 6 after automatic minimization. We have
+   our own shrinker in `veritastest`. It removes chunks of operations and
+   replaces each operation with a simpler one. The result is printed as a Go
+   list, so you can paste it into a test.
+5. **Choose random arguments with care.** If keys are fully random, a Get
+   almost never finds a key that a Put wrote. The paper biases Get toward keys
+   that were Put earlier, and toward corner cases. It also warns that too much
+   bias hides the cases you did not think of, so it keeps the default
+   randomness and adds bias only when there is evidence. Our `generator`
+   profiles do the same: they change how often things happen (small key pools,
+   many replays, many invalid requests), and every case stays possible.
+6. **Watch the quality of the generator.** The paper uses code coverage to find
+   parts that the tests never reach. We count the interesting cases that each
+   generator makes (a replay, a conflict, an invalid commit, a lookup that is
+   cut by `MaxBytes`, and so on) and the test fails if a count is too low.
+7. **Keep the system deterministic**, so that a failure can be replayed. The
+   paper removes random behavior, for example the random order of a Rust hash
+   map. We have the same rule: a spec never lets the order of a Go map decide
+   a result.
+8. **Reuse the model as a test fake.** The paper uses its index model as a mock
+   in unit tests. Our adapters in `vsys` run production code on top of the
+   specs, and the simulator uses the specs as its fake object store and fake
+   control plane.
+9. **Run longer to find more.** The paper calls this "pay-as-you-go": the same
+   checks run quickly on a laptop and for a long time before a release. We have
+   `MANIFESTER_SEEDS` and `MANIFESTER_CAMPAIGN` for this.
+10. **A passing check is not a proof.** The paper gives an example: a cache was
+    so large in all tests that the cache-miss path was never reached, and a bug
+    there was missed. Our broker tests use very small segment limits
+    (`TestConformanceBrokerSmallSegments`) so that every rule for cutting a
+    segment is used.
+
+### What we changed or added
+
+- **Planted bugs.** The paper reports the bugs that its checks found in real
+  code. We also add known bugs on purpose (`veritastest/plantedbug`), and every
+  suite must catch all of them. A suite that cannot catch a planted bug is not
+  trusted.
+- **Four checks, with two independent judges.** C1 to C4 below. The Kafka
+  oracle is a second checker that never imports this package, so one mistake
+  cannot hide in both.
+- **A whole-system simulator.** Our project also runs the full system in a
+  deterministic simulator (`internal/verify/sim`). The paper mostly tests one
+  component at a time, on an in-memory disk. The specs here serve both uses.
+- **Plain-language rules for the team.** The code is maintained by engineers who
+  read English as a second language, so names and comments are simple. See
+  `veritastest/README.md` for how to add a new spec.
+
+### What we did not do (yet)
+
+- **No proofs.** Like the paper, we can miss bugs. A green test means "no bug
+  found with these seeds", not "no bug".
+- **No failure injection in the comparison yet.** The paper relaxes the check
+  after an injected disk failure, with a simple "has failed" flag, because the
+  model does not know which part of an operation was done. Our C2 runs with all
+  faults off. The design for faults is in section 8 of
+  `docs/veritas-conformance-plan.md`.
+- **No crash-state checks.** The paper checks crash consistency with a
+  "Dependency" object for every write. Our brokers keep no state, and the
+  control plane is rebuilt from its log, so we did not need this first.
+- **No concurrency model checking.** The paper uses Loom and Shuttle to check
+  that the code is linearizable. We do not. The `vsys` adapters use a mutex, and
+  the simulator runs one step at a time.
+- **No proof of the specs themselves.** The paper starts to prove properties of
+  its models with the Prusti tool. We check our specs with an independent naive
+  model and with invariants (see below).
 
 ## The three specs
 
@@ -99,3 +215,4 @@ To add a new spec, follow `veritastest/README.md`.
 - No clock, no network, no goroutines, no files. A spec is plain data.
 - Keep a spec short enough that a reader can see that it is correct. If a spec
   grows hard to read, split the rule, do not add more code.
+- Write names and comments in short, simple English.

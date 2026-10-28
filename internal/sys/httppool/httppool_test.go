@@ -45,7 +45,7 @@ func TestConnectionsAreReused(t *testing.T) {
 	const n = 200
 	for name, mk := range map[string]func() doer{
 		"plain": func() doer { return &http.Client{Transport: Transport()} },
-		"aws":   func() doer { return AWS() },
+		"aws":   func() doer { return ConfigureAWSClient() },
 	} {
 		t.Run(name, func(t *testing.T) {
 			var arrived atomic.Int64

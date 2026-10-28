@@ -6,14 +6,14 @@ import (
 	"manifester/internal/core"
 )
 
-// Sink is the completion target for executors and timer callbacks.
-type Sink interface {
+// InboxWriter is the completion target for executors and timer callbacks.
+type InboxWriter interface {
 	DeliverControl(body core.EventData)
 	DeliverData(body core.EventData)
 	Closed() <-chan struct{}
 }
 
-// Inbox is the Sink: unbounded control queue and a data queue capped at
+// Inbox is the InboxWriter: unbounded control queue and a data queue capped at
 // dataCap. Both drop after Close.
 type Inbox struct {
 	mu      sync.Mutex
@@ -25,7 +25,7 @@ type Inbox struct {
 	once    sync.Once
 }
 
-var _ Sink = (*Inbox)(nil)
+var _ InboxWriter = (*Inbox)(nil)
 
 // NewInbox returns an Inbox whose data queue holds at most dataCap events.
 func NewInbox(dataCap int) *Inbox {
@@ -101,20 +101,20 @@ func (i *Inbox) Close() {
 }
 
 // Control and Data are the two queues as core.Inbox views for the policy.
-func (i *Inbox) Control() core.Inbox { return ctrlQ{i} }
+func (i *Inbox) Control() core.Inbox { return controlQueue{i} }
 
 // Data returns the data queue view of the inbox.
-func (i *Inbox) Data() core.Inbox { return dataQ{i} }
+func (i *Inbox) Data() core.Inbox { return dataQueue{i} }
 
-type ctrlQ struct{ i *Inbox }
+type controlQueue struct{ i *Inbox }
 
-func (q ctrlQ) Len() int {
+func (q controlQueue) Len() int {
 	q.i.mu.Lock()
 	defer q.i.mu.Unlock()
 	return len(q.i.control)
 }
 
-func (q ctrlQ) Pop() (core.EventData, bool) {
+func (q controlQueue) Pop() (core.EventData, bool) {
 	q.i.mu.Lock()
 	defer q.i.mu.Unlock()
 	if len(q.i.control) == 0 {
@@ -126,15 +126,15 @@ func (q ctrlQ) Pop() (core.EventData, bool) {
 	return b, true
 }
 
-type dataQ struct{ i *Inbox }
+type dataQueue struct{ i *Inbox }
 
-func (q dataQ) Len() int {
+func (q dataQueue) Len() int {
 	q.i.mu.Lock()
 	defer q.i.mu.Unlock()
 	return len(q.i.data)
 }
 
-func (q dataQ) Pop() (core.EventData, bool) {
+func (q dataQueue) Pop() (core.EventData, bool) {
 	q.i.mu.Lock()
 	if len(q.i.data) == 0 {
 		q.i.mu.Unlock()

@@ -65,7 +65,7 @@ func TestStartedThenExit(t *testing.T) {
 		}
 		return nil
 	}
-	b := run.Bundle{Clock: fakeClock{}, Env: testEnv{}, Inbox: run.NewInbox(4)}
+	b := run.Dependencies{Clock: fakeClock{}, Env: testEnv{}, Inbox: run.NewInbox(4)}
 	f := func(core.Environment, core.NodeInstance) core.Machine { return m }
 	if err := run.Run(t.Context(), b, &fakeExec{}, f, core.NodeInstance{Node: "cp"}); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestInjectRunsOnLoop(t *testing.T) {
 		}
 		return nil
 	}
-	b := run.Bundle{
+	b := run.Dependencies{
 		Clock: fakeClock{}, Env: testEnv{}, Inbox: run.NewInbox(4), Inject: inject,
 	}
 	f := func(core.Environment, core.NodeInstance) core.Machine { return m }
@@ -112,7 +112,7 @@ func TestInjectRunsOnLoop(t *testing.T) {
 func TestWaitIdleThenExit(t *testing.T) {
 	m := &fakeMachine{}
 	inject := make(chan run.InjectFunc)
-	b := run.Bundle{Clock: fakeClock{}, Env: testEnv{}, Inbox: run.NewInbox(4), Inject: inject}
+	b := run.Dependencies{Clock: fakeClock{}, Env: testEnv{}, Inbox: run.NewInbox(4), Inject: inject}
 	f := func(core.Environment, core.NodeInstance) core.Machine { return m }
 	done := make(chan error, 1)
 	go func() { done <- run.Run(t.Context(), b, &fakeExec{}, f, core.NodeInstance{}) }()
@@ -150,7 +150,7 @@ func TestDeliverDataAndDispatch(t *testing.T) {
 		return nil
 	}
 	facts := 0
-	b := run.Bundle{
+	b := run.Dependencies{
 		Clock: fakeClock{}, Env: testEnv{}, Inbox: in,
 		Facts: func(core.Fact) { facts++ },
 	}

@@ -86,9 +86,9 @@ func Write(ctx context.Context, m Manifest, o WriteOptions) (string, error) {
 		return "", nil
 	}
 	if o.IMDS {
-		m.Instance = FetchIMDS(ctx, o.IMDSEndpoint, o.IMDSTimeout)
+		m.Instance = FetchInstanceMetadata(ctx, o.IMDSEndpoint, o.IMDSTimeout)
 	}
-	dest := ExpandDest(o.Dest, m.Info)
+	dest := ExpandDestination(o.Dest, m.Info)
 	m.ManifestURI = dest
 	body, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
@@ -96,7 +96,7 @@ func Write(ctx context.Context, m Manifest, o WriteOptions) (string, error) {
 	}
 	body = append(body, '\n')
 	if strings.HasPrefix(dest, "s3://") {
-		return dest, putS3(ctx, dest, body, o)
+		return dest, uploadToS3(ctx, dest, body, o)
 	}
 	return dest, writeFile(dest, body)
 }
@@ -127,8 +127,8 @@ func writeFile(path string, body []byte) error {
 	return os.WriteFile(path, body, 0o600)
 }
 
-// putS3 uploads body to the s3://bucket/key destination.
-func putS3(ctx context.Context, dest string, body []byte, o WriteOptions) error {
+// uploadToS3 uploads body to the s3://bucket/key destination.
+func uploadToS3(ctx context.Context, dest string, body []byte, o WriteOptions) error {
 	u, err := url.Parse(dest)
 	if err != nil || u.Host == "" || strings.TrimPrefix(u.Path, "/") == "" {
 		return fmt.Errorf("manifest: bad S3 destination %q", dest)
@@ -153,8 +153,8 @@ func putS3(ctx context.Context, dest string, body []byte, o WriteOptions) error 
 	return err
 }
 
-// ExpandDest substitutes {service} and {run_id} and completes a trailing "/".
-func ExpandDest(d string, i Info) string {
+// ExpandDestination substitutes {service} and {run_id} and completes a trailing "/".
+func ExpandDestination(d string, i Info) string {
 	d = strings.NewReplacer("{service}", i.Service, "{run_id}", i.RunID).Replace(d)
 	if strings.HasSuffix(d, "/") {
 		d += i.Service + "-" + i.RunID + ".json"
@@ -162,9 +162,9 @@ func ExpandDest(d string, i Info) string {
 	return d
 }
 
-// FetchIMDS reads a few IMDSv2 fields. It returns nil when the endpoint is not
+// FetchInstanceMetadata reads a few IMDSv2 fields. It returns nil when the endpoint is not
 // reachable (not on EC2), after at most one short timeout.
-func FetchIMDS(ctx context.Context, endpoint string, timeout time.Duration) map[string]string {
+func FetchInstanceMetadata(ctx context.Context, endpoint string, timeout time.Duration) map[string]string {
 	if endpoint == "" {
 		endpoint = "http://169.254.169.254"
 	}

@@ -137,7 +137,7 @@ type LogDeleteOld struct {
 // StopForRestart asks the runtime to kill this incarnation: the machine's memory can no
 // longer be trusted. It is the last action of its Step; the runtime starts the
 // actions before it, then stops. Sim: same path as a crash, counted separately
-// as a trip. Prod: the loop returns ErrTripped and the process exits for its
+// as a trip. Prod: the loop returns ErrStoppedForRestart and the process exits for its
 // supervisor to restart.
 type StopForRestart struct{ Cause string }
 

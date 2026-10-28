@@ -22,10 +22,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// Overridable at link time: -ldflags "-X manifester/internal/sys/runinfo.GitSHA=abc123".
+// Overridable at link time: -ldflags "-X manifester/internal/sys/runinfo.GitCommit=abc123".
 var (
-	GitSHA  = ""
-	Version = ""
+	GitCommit = ""
+	Version   = ""
 )
 
 // EnvRunID names the environment variable that supplies the run id.
@@ -37,7 +37,7 @@ type Info struct {
 	Service    string    `json:"service"`
 	BrokerID   int       `json:"broker_id"` // -1: not a broker
 	Version    string    `json:"version"`
-	GitSHA     string    `json:"git_sha"`
+	GitCommit  string    `json:"git_sha"`
 	GitDirty   bool      `json:"git_dirty"`
 	GoVersion  string    `json:"go_version"`
 	Started    time.Time `json:"started_at"`
@@ -60,12 +60,12 @@ func New(service, runID string, brokerID int) Info {
 	}
 	i.RunID = runID
 	i.Hostname, _ = os.Hostname()
-	i.Version, i.GitSHA, i.GitDirty = build()
+	i.Version, i.GitCommit, i.GitDirty = build()
 	return i
 }
 
 func build() (string, string, bool) {
-	version, sha := Version, GitSHA
+	version, sha := Version, GitCommit
 	var dirty bool
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		if version == "" && bi.Main.Version != "" {
@@ -108,7 +108,7 @@ func NewLogger(w io.Writer, level slog.Level, i Info) *slog.Logger {
 	if i.BrokerID >= 0 {
 		attrs = append(attrs, "broker_id", i.BrokerID)
 	}
-	attrs = append(attrs, "version", i.Version, "git_sha", i.GitSHA)
+	attrs = append(attrs, "version", i.Version, "git_sha", i.GitCommit)
 	return slog.New(h).With(attrs...)
 }
 
@@ -117,7 +117,7 @@ func NewLogger(w io.Writer, level slog.Level, i Info) *slog.Logger {
 func Register(reg prometheus.Registerer, ns string, i Info) {
 	bi := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: ns, Name: "build_info",
 		Help:        "Always 1; the labels identify the build and the run.",
-		ConstLabels: prometheus.Labels{"version": i.Version, "go_version": i.GoVersion, "git_sha": i.GitSHA, "run_id": i.RunID}})
+		ConstLabels: prometheus.Labels{"version": i.Version, "go_version": i.GoVersion, "git_sha": i.GitCommit, "run_id": i.RunID}})
 	bi.Set(1)
 	st := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: ns, Name: "start_time_seconds", Help: "Process start, unix seconds."})
 	st.Set(float64(i.Started.UnixNano()) / 1e9)
@@ -126,17 +126,17 @@ func Register(reg prometheus.Registerer, ns string, i Info) {
 	reg.MustRegister(bi, st, up)
 }
 
-// Healthz answers 200 "ok" (for the metrics ports).
-func Healthz(w http.ResponseWriter, _ *http.Request) {
+// HealthCheckHandler answers 200 "ok" (for the metrics ports).
+func HealthCheckHandler(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	_, _ = w.Write([]byte("ok\n"))
 }
 
-// Mux serves /metrics and /healthz, the two routes of a metrics port.
-func Mux(metrics http.Handler) *http.ServeMux {
+// NewRouter serves /metrics and /healthz, the two routes of a metrics port.
+func NewRouter(metrics http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", metrics)
-	mux.HandleFunc("/healthz", Healthz)
+	mux.HandleFunc("/healthz", HealthCheckHandler)
 	return mux
 }
 
@@ -151,7 +151,7 @@ func ServeMetrics(ctx context.Context, log *slog.Logger, service, addr string, h
 	}
 	srv := &http.Server{
 		Addr:              addr,
-		Handler:           Mux(h),
+		Handler:           NewRouter(h),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -162,8 +162,8 @@ func ServeMetrics(ctx context.Context, log *slog.Logger, service, addr string, h
 	return nil
 }
 
-// Fatal logs err and exits 1.
-func Fatal(log *slog.Logger, err error) {
+// LogAndExit logs err and exits 1.
+func LogAndExit(log *slog.Logger, err error) {
 	log.Error("fatal", "err", err.Error())
 	os.Exit(1)
 }

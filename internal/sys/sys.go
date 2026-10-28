@@ -29,9 +29,9 @@ type ControlPlane interface {
 	Call(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, error)
 }
 
-// Conns writes to and closes accepted connections. Writes on one connection
+// Connections writes to and closes accepted connections. Writes on one connection
 // are applied in call order (one writer goroutine per connection).
-type Conns interface {
+type Connections interface {
 	Write(conn core.ConnID, data []byte) error
 	Close(conn core.ConnID, abort bool) error
 	// PauseReads parks the connection's reader goroutine; ResumeReads wakes it.
@@ -39,18 +39,18 @@ type Conns interface {
 	ResumeReads(conn core.ConnID)
 }
 
-// Classifier is the single place SDK/HTTP/net errors become plain data
+// ErrorClassifier is the single place SDK/HTTP/net errors become plain data
 // (lesson 1). Getting Outcome right here is what makes acks honest.
-type Classifier interface {
+type ErrorClassifier interface {
 	// Classify reduces err to plain data. It logs err; the core only sees the
 	// code. The Outcome depends on which operation failed, not only on err.
 	Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome)
 }
 
-// Sink is the node's pair of inboxes (docs/flow-control.md sec. 3). Callers route
+// InboxWriter is the node's pair of inboxes (docs/flow-control.md sec. 3). Callers route
 // with core.InboxKindOf. The loop picks with core.InboxPicker and stamps At/Wall
 // when it dequeues.
-type Sink interface {
+type InboxWriter interface {
 	// DeliverControl is used by timer callbacks and I/O completion goroutines.
 	// It never blocks: the control queue is bounded by construction.
 	DeliverControl(body core.EventData)
@@ -64,22 +64,22 @@ type Sink interface {
 
 // Executor runs I/O only. The loop handles RecordFact, timers, StopForRestart, ShutdownDone and
 // returns an error on an unknown action. Exactly one IOResult per IOCall, with the
-// same RequestID, delivered to the Sink and never on the caller's goroutine.
+// same RequestID, delivered to the InboxWriter and never on the caller's goroutine.
 // Execute MUST NOT block: it hands work to goroutines/queues.
 type Executor interface {
 	Execute(a core.IOCall)
 }
 
-// Bundle is everything nondeterministic a production broker process needs.
-type Bundle struct {
+// Dependencies is everything nondeterministic a production broker process needs.
+type Dependencies struct {
 	Clock        Clock
 	Objects      ObjectStore
 	ControlPlane ControlPlane
-	Conns        Conns
-	Classifier   Classifier
+	Connections  Connections
+	Classifier   ErrorClassifier
 	Env          core.Environment // crypto-seeded Rand, inert FaultInjector, logging Assertions
 	Inbox        *Inbox           // shared with the Executor and readers; Run closes it on return
 	Facts        func(core.Fact)  // optional: receives RecordFact facts (tracing)
-	Shutdown     <-chan struct{}  // optional: closing it asks Run for a graceful stop (see ShutdownOnSignal)
+	Shutdown     <-chan struct{}  // optional: closing it asks Run for a graceful stop (see StopOnSignal)
 	StopGrace    core.Duration    // time the machine gets after Shutdown to emit ShutdownDone
 }

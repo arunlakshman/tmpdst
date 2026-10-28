@@ -81,16 +81,16 @@ func (r *Recorder) APIOptions() []func(*middleware.Stack) error {
 	}
 	return []func(*middleware.Stack) error{func(st *middleware.Stack) error {
 		// Whole operation: before Retry, so it sees the attempt results.
-		if err := st.Finalize.Insert(opMW{r}, "Retry", middleware.Before); err != nil {
+		if err := st.Finalize.Insert(operationMiddleware{r}, "Retry", middleware.Before); err != nil {
 			return err
 		}
 		// Per attempt: after Retry (and signing), closest to the transport.
-		return st.Finalize.Add(attemptMW{r}, middleware.After)
+		return st.Finalize.Add(attemptMiddleware{r}, middleware.After)
 	}}
 }
 
-// IsThrottle reports whether an AWS error code means "slow down".
-func IsThrottle(code string) bool {
+// IsTooManyRequests reports whether an AWS error code means "slow down".
+func IsTooManyRequests(code string) bool {
 	switch code {
 	case "ProvisionedThroughputExceededException", "ThrottlingException", "RequestLimitExceeded",
 		"SlowDown", "Throttling", "ThrottledException", "RequestThrottled", "TooManyRequestsException",
@@ -131,11 +131,11 @@ func Result(ctx context.Context, status int, err error) (string, string) {
 	return "error", code
 }
 
-type attemptMW struct{ r *Recorder }
+type attemptMiddleware struct{ r *Recorder }
 
-func (attemptMW) ID() string { return "manifesterAwsObsAttempt" }
+func (attemptMiddleware) ID() string { return "manifesterAwsObsAttempt" }
 
-func (m attemptMW) HandleFinalize(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (
+func (m attemptMiddleware) HandleFinalize(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (
 	middleware.FinalizeOutput, middleware.Metadata, error) {
 	r := m.r
 	op := awsmw.GetOperationName(ctx)
@@ -173,7 +173,7 @@ func (m attemptMW) HandleFinalize(ctx context.Context, in middleware.FinalizeInp
 	if code != "" {
 		r.apiErrs.WithLabelValues(op, code).Inc()
 	}
-	throttled := IsThrottle(code)
+	throttled := IsTooManyRequests(code)
 	if throttled {
 		r.throttles.WithLabelValues(op, code).Inc()
 	}
@@ -194,11 +194,11 @@ func (m attemptMW) HandleFinalize(ctx context.Context, in middleware.FinalizeInp
 	return out, md, err
 }
 
-type opMW struct{ r *Recorder }
+type operationMiddleware struct{ r *Recorder }
 
-func (opMW) ID() string { return "manifesterAwsObsOperation" }
+func (operationMiddleware) ID() string { return "manifesterAwsObsOperation" }
 
-func (m opMW) HandleFinalize(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (
+func (m operationMiddleware) HandleFinalize(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (
 	middleware.FinalizeOutput, middleware.Metadata, error) {
 	t0 := time.Now()
 	out, md, err := next.HandleFinalize(ctx, in)

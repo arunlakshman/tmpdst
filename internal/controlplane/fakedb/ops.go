@@ -12,7 +12,7 @@ import (
 )
 
 // UpdateItem applies an update expression to one item in the fake.
-func (f *Fake) UpdateItem(ctx context.Context, in *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
+func (f *FakeDynamoDB) UpdateItem(ctx context.Context, in *dynamodb.UpdateItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error) {
 	if err := f.failed(ctx, "UpdateItem"); err != nil {
 		return nil, err
 	}
@@ -22,7 +22,7 @@ func (f *Fake) UpdateItem(ctx context.Context, in *dynamodb.UpdateItemInput, _ .
 	if err != nil {
 		return nil, err
 	}
-	cur := t[idOf(in.Key)]
+	cur := t[itemIDOf(in.Key)]
 	if err := rejectCond(in.ConditionExpression, in.ExpressionAttributeValues, cur); err != nil {
 		return nil, err
 	}
@@ -33,12 +33,12 @@ func (f *Fake) UpdateItem(ctx context.Context, in *dynamodb.UpdateItemInput, _ .
 	f.store(aws.ToString(in.TableName), next)
 	out := &dynamodb.UpdateItemOutput{ConsumedCapacity: f.capacity(aws.ToString(in.TableName))}
 	if in.ReturnValues == types.ReturnValueUpdatedNew {
-		out.Attributes = pick(next, set)
+		out.Attributes = chooseItem(next, set)
 	}
 	return out, nil
 }
 
-func pick(it item, names []string) item {
+func chooseItem(it item, names []string) item {
 	out := item{}
 	for _, n := range names {
 		out[n] = it[n]
@@ -49,7 +49,7 @@ func pick(it item, names []string) item {
 // Query returns one page: the items of the partition matching the key
 // condition in sort-key order, at most Limit and PageSize, with a
 // LastEvaluatedKey when more remain.
-func (f *Fake) Query(ctx context.Context, in *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+func (f *FakeDynamoDB) Query(ctx context.Context, in *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
 	if err := f.failed(ctx, "Query"); err != nil {
 		return nil, err
 	}
@@ -76,30 +76,30 @@ func (f *Fake) Query(ctx context.Context, in *dynamodb.QueryInput, _ ...func(*dy
 }
 
 // rowsAfter is the matching rows in query order, after ExclusiveStartKey.
-func (f *Fake) rowsAfter(t map[string]item, kc keyCond, in *dynamodb.QueryInput) []item {
+func (f *FakeDynamoDB) rowsAfter(t map[string]item, kc keyCondition, in *dynamodb.QueryInput) []item {
 	var rows []item
 	for id := range f.byPK[aws.ToString(in.TableName)][kc.pk] {
 		if it := t[id]; kc.matches(it) {
 			rows = append(rows, it)
 		}
 	}
-	slices.SortFunc(rows, func(a, b item) int { return strings.Compare(strOf(a, "sk"), strOf(b, "sk")) })
+	slices.SortFunc(rows, func(a, b item) int { return strings.Compare(stringOf(a, "sk"), stringOf(b, "sk")) })
 	if in.ScanIndexForward != nil && !*in.ScanIndexForward {
 		slices.Reverse(rows)
 	}
 	if in.ExclusiveStartKey == nil {
 		return rows
 	}
-	start := strOf(in.ExclusiveStartKey, "sk")
+	start := stringOf(in.ExclusiveStartKey, "sk")
 	forward := in.ScanIndexForward == nil || *in.ScanIndexForward
 	return slices.DeleteFunc(rows, func(it item) bool {
-		sk := strOf(it, "sk")
+		sk := stringOf(it, "sk")
 		return (forward && sk <= start) || (!forward && sk >= start)
 	})
 }
 
 // pageLen is how many of avail rows one page returns.
-func (f *Fake) pageLen(limit *int32, avail int) int {
+func (f *FakeDynamoDB) pageLen(limit *int32, avail int) int {
 	n := avail
 	if limit != nil {
 		n = min(n, int(*limit))
@@ -113,7 +113,7 @@ func (f *Fake) pageLen(limit *int32, avail int) int {
 // PutItem stores the item if the condition holds. On a failed condition with
 // ReturnValuesOnConditionCheckFailure ALL_OLD the error carries the existing
 // item, like the service.
-func (f *Fake) PutItem(ctx context.Context, in *dynamodb.PutItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
+func (f *FakeDynamoDB) PutItem(ctx context.Context, in *dynamodb.PutItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error) {
 	if err := f.failed(ctx, "PutItem"); err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (f *Fake) PutItem(ctx context.Context, in *dynamodb.PutItemInput, _ ...func
 	if err != nil {
 		return nil, err
 	}
-	cur := t[idOf(in.Item)]
+	cur := t[itemIDOf(in.Item)]
 	if err := rejectCond(in.ConditionExpression, in.ExpressionAttributeValues, cur); err != nil {
 		if failed, ok := errors.AsType[*types.ConditionalCheckFailedException](err); ok && in.ReturnValuesOnConditionCheckFailure == types.ReturnValuesOnConditionCheckFailureAllOld {
 			failed.Item = cloneItem(cur)
@@ -140,7 +140,7 @@ func (f *Fake) PutItem(ctx context.Context, in *dynamodb.PutItemInput, _ ...func
 }
 
 func rejectCond(expr *string, vals, cur item) error {
-	ok, err := evalCond(expr, vals, cur)
+	ok, err := evalCondition(expr, vals, cur)
 	if err != nil {
 		return err
 	}
@@ -153,7 +153,7 @@ func rejectCond(expr *string, vals, cur item) error {
 // BatchWriteItem applies up to 25 puts and deletes (no conditions, like the
 // service). While UnprocessWrite > 0 a call leaves its last request in
 // UnprocessedItems and decrements it, so tests exercise the retry.
-func (f *Fake) BatchWriteItem(ctx context.Context, in *dynamodb.BatchWriteItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error) {
+func (f *FakeDynamoDB) BatchWriteItem(ctx context.Context, in *dynamodb.BatchWriteItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error) {
 	if err := f.failed(ctx, "BatchWriteItem"); err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func writeCount(in *dynamodb.BatchWriteItemInput) int {
 	return total
 }
 
-func (f *Fake) applyWrite(name string, r types.WriteRequest) {
+func (f *FakeDynamoDB) applyWrite(name string, r types.WriteRequest) {
 	if r.PutRequest != nil {
 		f.store(name, cloneItem(r.PutRequest.Item))
 		return

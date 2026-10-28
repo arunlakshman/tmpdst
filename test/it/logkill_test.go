@@ -89,7 +89,7 @@ func newLogStack(t *testing.T, brokers int) *logStack {
 		ls.cps = append(ls.cps, cn)
 		addrs = append(addrs, addr)
 	}
-	st := &stack{t: t, cp: cpclient.New(strings.Join(addrs, ","), nil), objs: vsys.NewObjectStore(), objCls: prod.MemClassifier{},
+	st := &stack{t: t, cp: cpclient.New(strings.Join(addrs, ","), nil), objs: vsys.NewObjectStore(), objCls: prod.MemoryErrorClassifier{},
 		brokers: broker.Config{BatchWindow: core.Duration(20 * time.Millisecond)}}
 	t.Cleanup(func() {
 		for _, n := range st.nodes {

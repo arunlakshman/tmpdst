@@ -18,8 +18,8 @@ const (
 	unknownLimit     = 1 << 60 // cgroup "no limit" values are close to MaxInt64
 )
 
-// MemFS reads a file; injectable for tests.
-type MemFS func(path string) ([]byte, error)
+// MemoryFileSystem reads a file; injectable for tests.
+type MemoryFileSystem func(path string) ([]byte, error)
 
 // MemoryLimit returns the memory this process may use and where the number
 // came from: "cgroup v2", "cgroup v1", "meminfo", "sysctl hw.memsize", or
@@ -27,7 +27,7 @@ type MemFS func(path string) ([]byte, error)
 func MemoryLimit() (uint64, string) { return memoryLimit(os.ReadFile, sysMemory) }
 
 // memoryLimit prefers the container limit over the host total.
-func memoryLimit(read MemFS, sys func() (uint64, string)) (uint64, string) {
+func memoryLimit(read MemoryFileSystem, sys func() (uint64, string)) (uint64, string) {
 	if b, err := read("/sys/fs/cgroup/memory.max"); err == nil {
 		if n, ok := parseCgroupLimit(string(b)); ok {
 			return n, "cgroup v2"
@@ -82,12 +82,12 @@ func parseMemTotal(s string) (uint64, bool) {
 func AutoBuffered(limit uint64) (int, int) {
 	m := uint64(MinBufferedBytes)
 	if limit != 0 {
-		m = min(max64(limit/16, MinBufferedBytes), MaxBufferedCap)
+		m = min(maxInt64(limit/16, MinBufferedBytes), MaxBufferedCap)
 	}
 	return int(m), int(m / 2)
 }
 
-func max64(a, b uint64) uint64 {
+func maxInt64(a, b uint64) uint64 {
 	if a > b {
 		return a
 	}

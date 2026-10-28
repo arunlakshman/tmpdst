@@ -49,7 +49,7 @@ func Transport() *http.Transport {
 	return t
 }
 
-// AWS returns an AWS SDK HTTP client with the pool of Configure.
-func AWS() *awshttp.BuildableClient {
+// ConfigureAWSClient returns an ConfigureAWSClient SDK HTTP client with the pool of Configure.
+func ConfigureAWSClient() *awshttp.BuildableClient {
 	return awshttp.NewBuildableClient().WithTransportOptions(Configure)
 }

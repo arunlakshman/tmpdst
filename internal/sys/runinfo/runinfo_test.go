@@ -209,11 +209,11 @@ func TestIMDS(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	got := FetchIMDS(t.Context(), srv.URL, time.Second)
+	got := FetchInstanceMetadata(t.Context(), srv.URL, time.Second)
 	if got["instance_type"] != "c7g.xlarge" || len(got) != 1 {
 		t.Fatalf("%v", got)
 	}
-	if FetchIMDS(t.Context(), "http://127.0.0.1:1", 50*time.Millisecond) != nil {
+	if FetchInstanceMetadata(t.Context(), "http://127.0.0.1:1", 50*time.Millisecond) != nil {
 		t.Fatal("unreachable IMDS must give nil")
 	}
 }

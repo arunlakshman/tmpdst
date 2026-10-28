@@ -17,7 +17,7 @@ import (
 // Anything else is a ValidationException, so a new expression in the store
 // fails loudly here instead of being silently mis-evaluated.
 
-func strOf(it item, name string) string {
+func stringOf(it item, name string) string {
 	v, _ := it[name].(*types.AttributeValueMemberS)
 	if v == nil {
 		return ""
@@ -25,7 +25,7 @@ func strOf(it item, name string) string {
 	return v.Value
 }
 
-func idOf(it item) string { return strOf(it, "pk") + "\x00" + strOf(it, "sk") }
+func itemIDOf(it item) string { return stringOf(it, "pk") + "\x00" + stringOf(it, "sk") }
 
 func cloneValue(v types.AttributeValue) types.AttributeValue {
 	if b, ok := v.(*types.AttributeValueMemberB); ok {
@@ -53,7 +53,7 @@ func compare(a, b types.AttributeValue) (int, error) {
 		if !ok {
 			return 0, validation("type mismatch")
 		}
-		return compareNum(x.Value, y.Value)
+		return compareNumbers(x.Value, y.Value)
 	case *types.AttributeValueMemberS:
 		y, ok := b.(*types.AttributeValueMemberS)
 		if !ok {
@@ -64,7 +64,7 @@ func compare(a, b types.AttributeValue) (int, error) {
 	return 0, validation("unsupported type %T in a comparison", a)
 }
 
-func compareNum(a, b string) (int, error) {
+func compareNumbers(a, b string) (int, error) {
 	x, err := strconv.ParseInt(a, 10, 64)
 	if err != nil {
 		return 0, validation("bad number %q", a)
@@ -82,14 +82,14 @@ func compareNum(a, b string) (int, error) {
 	return 0, nil
 }
 
-// evalCond evaluates a ConditionExpression against cur (nil: no such item).
+// evalCondition evaluates a ConditionExpression against cur (nil: no such item).
 // A nil expression is true.
-func evalCond(expr *string, vals item, cur item) (bool, error) {
+func evalCondition(expr *string, vals item, cur item) (bool, error) {
 	if expr == nil {
 		return true, nil
 	}
 	for alt := range strings.SplitSeq(*expr, " OR ") {
-		ok, err := evalAtom(strings.TrimSpace(alt), vals, cur)
+		ok, err := evalSimpleCondition(strings.TrimSpace(alt), vals, cur)
 		if ok || err != nil {
 			return ok, err
 		}
@@ -97,7 +97,7 @@ func evalCond(expr *string, vals item, cur item) (bool, error) {
 	return false, nil
 }
 
-func evalAtom(atom string, vals, cur item) (bool, error) {
+func evalSimpleCondition(atom string, vals, cur item) (bool, error) {
 	if name, ok := strings.CutPrefix(atom, "attribute_not_exists("); ok {
 		_, has := cur[strings.TrimSuffix(name, ")")]
 		return !has, nil
@@ -150,7 +150,7 @@ func applyClause(verb string, f []string, vals, it item) (string, error) {
 		it[name] = cloneValue(v)
 		return name, nil
 	}
-	sum, err := addNum(it[name], v)
+	sum, err := addNumbers(it[name], v)
 	it[name] = sum
 	return name, err
 }
@@ -168,8 +168,8 @@ func clauseValue(verb string, f []string, vals item) (string, types.AttributeVal
 	return f[0], v, nil
 }
 
-// addNum is ADD for numbers: an absent attribute counts as 0.
-func addNum(cur, delta types.AttributeValue) (types.AttributeValue, error) {
+// addNumbers is ADD for numbers: an absent attribute counts as 0.
+func addNumbers(cur, delta types.AttributeValue) (types.AttributeValue, error) {
 	d, ok := delta.(*types.AttributeValueMemberN)
 	if !ok {
 		return nil, validation("ADD needs a number")
@@ -186,16 +186,16 @@ func addNum(cur, delta types.AttributeValue) (types.AttributeValue, error) {
 	return &types.AttributeValueMemberN{Value: strconv.FormatInt(x+y, 10)}, nil
 }
 
-// keyCond is a parsed key condition: partition pk, optionally sk in [lo, hi].
-type keyCond struct {
+// keyCondition is a parsed key condition: partition pk, optionally sk in [lo, hi].
+type keyCondition struct {
 	pk       string
 	lo, hi   string
 	hasRange bool
 }
 
-func parseKeyCond(expr string, vals item) (keyCond, error) {
+func parseKeyCond(expr string, vals item) (keyCondition, error) {
 	parts := strings.Split(expr, " AND ")
-	var kc keyCond
+	var kc keyCondition
 	pk, ok := valueOf(strings.Fields(parts[0]), "pk", "=", vals)
 	if !ok || (len(parts) != 1 && len(parts) != 3) {
 		return kc, validation("unsupported key condition %q", expr)
@@ -207,7 +207,7 @@ func parseKeyCond(expr string, vals item) (keyCond, error) {
 	return parseKeyRange(kc, parts, vals, expr)
 }
 
-func parseKeyRange(kc keyCond, parts []string, vals item, expr string) (keyCond, error) {
+func parseKeyRange(kc keyCondition, parts []string, vals item, expr string) (keyCondition, error) {
 	lo, ok1 := valueOf(strings.Fields(parts[1]), "sk", "BETWEEN", vals)
 	hi, ok2 := valueOf([]string{"", "", strings.TrimSpace(parts[2])}, "", "", vals)
 	if !ok1 || !ok2 {
@@ -229,10 +229,10 @@ func valueOf(f []string, name, op string, vals item) (string, bool) {
 	return s.Value, true
 }
 
-func (kc keyCond) matches(it item) bool {
-	if strOf(it, "pk") != kc.pk {
+func (kc keyCondition) matches(it item) bool {
+	if stringOf(it, "pk") != kc.pk {
 		return false
 	}
-	sk := strOf(it, "sk")
+	sk := stringOf(it, "sk")
 	return !kc.hasRange || (sk >= kc.lo && sk <= kc.hi)
 }

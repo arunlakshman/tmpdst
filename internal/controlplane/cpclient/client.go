@@ -1,5 +1,5 @@
 // Package cpclient is the broker-side adapter for the control plane: a
-// sys.ControlPlane over the gRPC API and the sys.Classifier for ControlPlaneCall.
+// sys.ControlPlane over the gRPC API and the sys.ErrorClassifier for ControlPlaneCall.
 package cpclient
 
 import (

@@ -13,7 +13,7 @@ import (
 	"manifester/internal/sys"
 )
 
-// Classifier is the sys.Classifier for ControlPlaneCall (lesson 1). A mutating op
+// Classifier is the sys.ErrorClassifier for ControlPlaneCall (lesson 1). A mutating op
 // (CommitSegment) whose request may have reached the server and whose reply
 // is lost or unusable is MaybeApplied; only failures that prove nothing was
 // sent (dial, Unavailable) are NotApplied. Reads are always NotApplied.
@@ -21,7 +21,7 @@ import (
 // (Appendix E).
 type Classifier struct{}
 
-var _ sys.Classifier = Classifier{}
+var _ sys.ErrorClassifier = Classifier{}
 
 func changesData(a core.IOCall) bool {
 	call, ok := a.(core.ControlPlaneCall)

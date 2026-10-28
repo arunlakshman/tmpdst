@@ -14,7 +14,7 @@ import (
 	"manifester/internal/sys"
 )
 
-// Classifier is the sys.Classifier for Obj* actions (lesson 1). Only PUT and
+// Classifier is the sys.ErrorClassifier for Obj* actions (lesson 1). Only PUT and
 // DELETE mutate; GET and LIST never leave side effects.
 //
 //	*Error (truthful business error)          its code          NotApplied
@@ -27,7 +27,7 @@ import (
 // GET and LIST failures are always NotApplied with the same codes.
 type Classifier struct{}
 
-var _ sys.Classifier = Classifier{}
+var _ sys.ErrorClassifier = Classifier{}
 
 // Classify maps an S3 error to an error code and outcome.
 func (Classifier) Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {

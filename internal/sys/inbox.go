@@ -6,7 +6,7 @@ import (
 	"manifester/internal/core"
 )
 
-// Inbox is the Sink: a control queue that never blocks its senders (bounded
+// Inbox is the InboxWriter: a control queue that never blocks its senders (bounded
 // by construction: the machine caps in-flight work) and a data queue bounded
 // at dataCap that blocks when full. Both drop after Close.
 type Inbox struct {
@@ -19,7 +19,7 @@ type Inbox struct {
 	once    sync.Once
 }
 
-var _ Sink = (*Inbox)(nil)
+var _ InboxWriter = (*Inbox)(nil)
 
 // NewInbox returns an Inbox whose data queue holds at most dataCap events.
 func NewInbox(dataCap int) *Inbox {
@@ -96,20 +96,20 @@ func (i *Inbox) Close() {
 }
 
 // Control and Data are the two queues as core.Inbox views for the policy.
-func (i *Inbox) Control() core.Inbox { return ctrlQ{i} }
+func (i *Inbox) Control() core.Inbox { return controlQueue{i} }
 
 // Data returns the data queue view of the inbox.
-func (i *Inbox) Data() core.Inbox { return dataQ{i} }
+func (i *Inbox) Data() core.Inbox { return dataQueue{i} }
 
-type ctrlQ struct{ i *Inbox }
+type controlQueue struct{ i *Inbox }
 
-func (q ctrlQ) Len() int {
+func (q controlQueue) Len() int {
 	q.i.mu.Lock()
 	defer q.i.mu.Unlock()
 	return len(q.i.control)
 }
 
-func (q ctrlQ) Pop() (core.EventData, bool) {
+func (q controlQueue) Pop() (core.EventData, bool) {
 	q.i.mu.Lock()
 	defer q.i.mu.Unlock()
 	if len(q.i.control) == 0 {
@@ -121,15 +121,15 @@ func (q ctrlQ) Pop() (core.EventData, bool) {
 	return b, true
 }
 
-type dataQ struct{ i *Inbox }
+type dataQueue struct{ i *Inbox }
 
-func (q dataQ) Len() int {
+func (q dataQueue) Len() int {
 	q.i.mu.Lock()
 	defer q.i.mu.Unlock()
 	return len(q.i.data)
 }
 
-func (q dataQ) Pop() (core.EventData, bool) {
+func (q dataQueue) Pop() (core.EventData, bool) {
 	q.i.mu.Lock()
 	if len(q.i.data) == 0 {
 		q.i.mu.Unlock()

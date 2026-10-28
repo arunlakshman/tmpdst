@@ -207,7 +207,7 @@ func newDynamo(ctx context.Context, endpoint, region string, apiOpts []func(*mid
 		opts = append(opts, config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
 			"AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "")))
 	}
-	opts = append(opts, config.WithHTTPClient(httppool.AWS()))
+	opts = append(opts, config.WithHTTPClient(httppool.ConfigureAWSClient()))
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return nil, err

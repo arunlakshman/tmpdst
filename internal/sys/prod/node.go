@@ -23,9 +23,9 @@ type NodeConfig struct {
 	Listener net.Listener
 
 	Objects      sys.ObjectStore
-	ObjClassify  sys.Classifier
+	ObjClassify  sys.ErrorClassifier
 	ControlPlane sys.ControlPlane
-	CPClassify   sys.Classifier
+	CPClassify   sys.ErrorClassifier
 
 	Shutdown   <-chan struct{} // optional; closing it is Node.Stop
 	StopGrace  time.Duration   // time the broker gets to finish in-flight work (10s)
@@ -75,13 +75,13 @@ func Start(ctx context.Context, cfg NodeConfig) (*Node, error) {
 		Classifier{Objects: cfg.ObjClassify, CP: cfg.CPClassify}, in)
 	var ex sys.Executor = exec
 	if cfg.OnIO != nil {
-		ex = tapExecutor{exec, cfg.OnIO}
+		ex = hookedExecutor{exec, cfg.OnIO}
 	}
 	if cfg.Shutdown != nil {
 		go n.stopOn(cfg.Shutdown)
 	}
-	b := sys.Bundle{
-		Clock: NewClock(), Objects: cfg.Objects, ControlPlane: cfg.ControlPlane, Conns: nt,
+	b := sys.Dependencies{
+		Clock: NewClock(), Objects: cfg.Objects, ControlPlane: cfg.ControlPlane, Connections: nt,
 		Classifier: exec.class, Env: env, Inbox: in, Facts: cfg.Facts,
 		Shutdown: n.stop, StopGrace: core.Duration(cfg.StopGrace),
 	}
@@ -144,7 +144,7 @@ func (n *Node) stopOn(shutdown <-chan struct{}) {
 }
 
 // run drives the broker to its end, then closes the network and marks done.
-func (n *Node) run(ctx context.Context, b sys.Bundle, ex sys.Executor, br core.MachineFactory, self core.NodeInstance, flush time.Duration) {
+func (n *Node) run(ctx context.Context, b sys.Dependencies, ex sys.Executor, br core.MachineFactory, self core.NodeInstance, flush time.Duration) {
 	defer close(n.done)
 	err := sys.Run(ctx, b, ex, br, self)
 	grace := time.Duration(0)
@@ -169,8 +169,8 @@ func (n *Node) Kill() { n.kill() }
 func (n *Node) Done() <-chan struct{} { return n.done }
 
 // Wait blocks until the broker has stopped and returns sys.Run's result: nil
-// after a graceful exit, sys.ErrStopped after Kill, sys.ErrTripped or
-// sys.ErrKilled otherwise.
+// after a graceful exit, sys.ErrStopped after Kill, sys.ErrStoppedForRestart or
+// sys.ErrKilledByRuntime otherwise.
 func (n *Node) Wait() error {
 	<-n.done
 	return n.err
@@ -179,13 +179,13 @@ func (n *Node) Wait() error {
 // String names the node for logs.
 func (n *Node) String() string { return fmt.Sprintf("broker(%s)", n.addr) }
 
-// tapExecutor shows each action to a hook, then executes it.
-type tapExecutor struct {
+// hookedExecutor shows each action to a hook, then executes it.
+type hookedExecutor struct {
 	sys.Executor
 	tap func(core.IOCall)
 }
 
-func (t tapExecutor) Execute(a core.IOCall) {
+func (t hookedExecutor) Execute(a core.IOCall) {
 	t.tap(a)
 	t.Executor.Execute(a)
 }

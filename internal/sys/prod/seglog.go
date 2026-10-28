@@ -22,11 +22,11 @@ import (
 // Observe and IO must be called from one goroutine (the broker loop).
 type SegmentLog struct {
 	log     *slog.Logger
-	pending []*segInfo
-	segs    map[string]*segInfo
+	pending []*segmentInfo
+	segs    map[string]*segmentInfo
 }
 
-type segInfo struct {
+type segmentInfo struct {
 	reason                     string
 	bytes, batches, parts, age int64
 	putAttempts                int64
@@ -35,7 +35,7 @@ type segInfo struct {
 
 // NewSegmentLog returns a logger of segment lifecycle facts.
 func NewSegmentLog(log *slog.Logger) *SegmentLog {
-	return &SegmentLog{log: log, segs: map[string]*segInfo{}}
+	return &SegmentLog{log: log, segs: map[string]*segmentInfo{}}
 }
 
 func ms(ns int64) float64 { return float64(ns/10_000) / 100 } // 10 us resolution
@@ -76,14 +76,14 @@ func (s *SegmentLog) Observe(f core.Fact) {
 	switch f.Name {
 	case "segment_sealed":
 		if len(s.pending) < 4096 {
-			s.pending = append(s.pending, &segInfo{reason: fs(f, "reason"), bytes: fi(f, "bytes"),
+			s.pending = append(s.pending, &segmentInfo{reason: fs(f, "reason"), bytes: fi(f, "bytes"),
 				batches: fi(f, "batches"), parts: fi(f, "parts"), age: fi(f, "age")})
 		}
 	case "segment_put_done":
 		key := fs(f, "segment")
 		si := s.segs[key]
 		if si == nil {
-			si = &segInfo{}
+			si = &segmentInfo{}
 		}
 		si.putAttempts, si.putMS = fi(f, "attempts"), ms(fi(f, "put_ns"))
 		s.log.Info("segment put done", "event", "segment_put_done", "segment", key, "bytes", fi(f, "bytes"),
@@ -111,10 +111,10 @@ func (s *SegmentLog) Observe(f core.Fact) {
 	}
 }
 
-func (s *SegmentLog) take(key string) *segInfo {
+func (s *SegmentLog) take(key string) *segmentInfo {
 	si := s.segs[key]
 	if si == nil {
-		return &segInfo{}
+		return &segmentInfo{}
 	}
 	delete(s.segs, key)
 	return si

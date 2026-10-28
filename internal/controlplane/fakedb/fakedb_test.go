@@ -21,7 +21,7 @@ func n(v int) types.AttributeValue {
 }
 func k(pk, sk string) item { return item{"pk": s(pk), "sk": s(sk)} }
 
-func fresh(t *testing.T) *Fake {
+func fresh(t *testing.T) *FakeDynamoDB {
 	t.Helper()
 	f := New()
 	if _, err := f.CreateTable(ctx, &dynamodb.CreateTableInput{TableName: aws.String("t")}); err != nil {
@@ -156,7 +156,7 @@ func TestCompare(t *testing.T) {
 			t.Errorf("compare(%v,%v) = %d, %v", c.a, c.b, got, err)
 		}
 	}
-	if _, err := addNum(&types.AttributeValueMemberN{Value: "x"}, n(1)); err == nil {
+	if _, err := addNumbers(&types.AttributeValueMemberN{Value: "x"}, n(1)); err == nil {
 		t.Error("ADD on a non-number accepted")
 	}
 }
@@ -179,7 +179,7 @@ func TestGet(t *testing.T) {
 	}
 }
 
-func query(f *Fake, expr string, vals item, fwd *bool, limit *int32, start item) (*dynamodb.QueryOutput, error) {
+func query(f *FakeDynamoDB, expr string, vals item, fwd *bool, limit *int32, start item) (*dynamodb.QueryOutput, error) {
 	return f.Query(ctx, &dynamodb.QueryInput{TableName: aws.String("t"), KeyConditionExpression: aws.String(expr),
 		ExpressionAttributeValues: vals, ScanIndexForward: fwd, Limit: limit, ExclusiveStartKey: start})
 }
@@ -187,7 +187,7 @@ func query(f *Fake, expr string, vals item, fwd *bool, limit *int32, start item)
 func sks(o *dynamodb.QueryOutput) []string {
 	var out []string
 	for _, it := range o.Items {
-		out = append(out, strOf(it, "sk"))
+		out = append(out, stringOf(it, "sk"))
 	}
 	return out
 }

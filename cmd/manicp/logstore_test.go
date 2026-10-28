@@ -54,7 +54,7 @@ type logNode struct {
 	logs   *syncBuf
 }
 
-func fakeDeps(db *fakedb.Fake, objs sys.ObjectStore) deps {
+func fakeDeps(db *fakedb.FakeDynamoDB, objs sys.ObjectStore) deps {
 	return deps{
 		db:      func(context.Context, cpFlags, *cpobs.Metrics) (logDB, error) { return db, nil },
 		objects: func(context.Context, cpFlags) (sys.ObjectStore, error) { return objs, nil },
@@ -125,7 +125,7 @@ func role(t *testing.T, n *logNode) string {
 	return st.Role
 }
 
-func newFake(t *testing.T) *fakedb.Fake {
+func newFake(t *testing.T) *fakedb.FakeDynamoDB {
 	t.Helper()
 	db := fakedb.New()
 	if _, err := db.CreateTable(t.Context(), &dynamodb.CreateTableInput{TableName: aws.String("manifester_cp")}); err != nil {

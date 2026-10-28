@@ -81,7 +81,7 @@ type SegmentRef struct {
 //
 // ErrNotFound and ErrConflict are always truthful; engines inject
 // only ErrTimeout, ErrUnavailable, ErrIO and ErrConnClosed. ErrCorrupt comes
-// only from the core's decoder, never from sys.Classifier.
+// only from the core's decoder, never from sys.ErrorClassifier.
 type ErrCode uint16
 
 // ErrCode values.

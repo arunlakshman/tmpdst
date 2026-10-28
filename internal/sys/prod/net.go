@@ -39,10 +39,10 @@ func (c NetConfig) withDefaults() NetConfig {
 // Net is the TCP side of a broker: an accept loop that delivers ConnOpened,
 // one reader goroutine per connection (BytesReceived / ConnClosed to the data
 // inbox, parked by PauseReads) and one writer goroutine per connection
-// (writes in call order). It implements sys.Conns.
+// (writes in call order). It implements sys.Connections.
 type Net struct {
 	cfg  NetConfig
-	sink sys.Sink
+	sink sys.InboxWriter
 	ln   net.Listener
 	next atomic.Uint64
 	wg   sync.WaitGroup
@@ -52,10 +52,10 @@ type Net struct {
 	closed bool
 }
 
-var _ sys.Conns = (*Net)(nil)
+var _ sys.Connections = (*Net)(nil)
 
 // NewNet starts accepting on ln. ConnIDs are unique per process and start at 1.
-func NewNet(ln net.Listener, sink sys.Sink, cfg NetConfig) *Net {
+func NewNet(ln net.Listener, sink sys.InboxWriter, cfg NetConfig) *Net {
 	n := &Net{cfg: cfg.withDefaults(), sink: sink, ln: ln, conns: map[core.ConnID]*conn{}}
 	n.wg.Add(1)
 	go n.accept()

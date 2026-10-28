@@ -25,19 +25,19 @@ func (c Config) withDefaults() Config {
 }
 
 // Executor runs Log* and Obj* IOCalls on goroutines and delivers exactly
-// one IOResult per action to the Sink.
+// one IOResult per action to the InboxWriter.
 type Executor struct {
 	ctx  context.Context
 	cfg  Config
 	log  Log
 	objs ObjectStore
-	sink run.Sink
+	sink run.InboxWriter
 }
 
 var _ run.Executor = (*Executor)(nil)
 
 // New builds an Executor. Cancelling ctx aborts calls in flight.
-func New(ctx context.Context, cfg Config, log Log, objs ObjectStore, sink run.Sink) *Executor {
+func New(ctx context.Context, cfg Config, log Log, objs ObjectStore, sink run.InboxWriter) *Executor {
 	if objs == nil {
 		objs = NewMemoryObjects()
 	}

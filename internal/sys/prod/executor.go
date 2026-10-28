@@ -11,10 +11,10 @@ import (
 	"manifester/internal/sys"
 )
 
-// AsyncConns is the connection set the Executor writes to: sys.Conns plus a
+// AsyncConnections is the connection set the Executor writes to: sys.Connections plus a
 // write that reports when the bytes left (Net implements it).
-type AsyncConns interface {
-	sys.Conns
+type AsyncConnections interface {
+	sys.Connections
 	WriteAsync(conn core.ConnID, data []byte, done func(error)) error
 }
 
@@ -48,23 +48,23 @@ func (c ExecConfig) withDefaults() ExecConfig {
 }
 
 // Executor is the production sys.Executor: each IOCall runs on its own
-// goroutine under a timeout and yields exactly one IOResult on the Sink.
+// goroutine under a timeout and yields exactly one IOResult on the InboxWriter.
 // Sends go through the connection's ordered writer queue instead.
 type Executor struct {
 	ctx   context.Context
 	cfg   ExecConfig
 	objs  sys.ObjectStore
 	cp    sys.ControlPlane
-	conns AsyncConns
-	class sys.Classifier
-	sink  sys.Sink
+	conns AsyncConnections
+	class sys.ErrorClassifier
+	sink  sys.InboxWriter
 }
 
 var _ sys.Executor = (*Executor)(nil)
 
 // NewExecutor builds an Executor; cancelling ctx aborts calls in flight.
 func NewExecutor(ctx context.Context, cfg ExecConfig, objs sys.ObjectStore, cp sys.ControlPlane,
-	conns AsyncConns, class sys.Classifier, sink sys.Sink) *Executor {
+	conns AsyncConnections, class sys.ErrorClassifier, sink sys.InboxWriter) *Executor {
 	return &Executor{ctx: ctx, cfg: cfg.withDefaults(), objs: objs, cp: cp, conns: conns, class: class, sink: sink}
 }
 

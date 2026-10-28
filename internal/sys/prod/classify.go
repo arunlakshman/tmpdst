@@ -11,9 +11,9 @@ import (
 
 // Classifier routes by action: ControlPlaneCall to CP, Obj* to Objects, anything else
 // is a bug that classifies as ErrIO, MaybeApplied.
-type Classifier struct{ Objects, CP sys.Classifier }
+type Classifier struct{ Objects, CP sys.ErrorClassifier }
 
-var _ sys.Classifier = Classifier{}
+var _ sys.ErrorClassifier = Classifier{}
 
 // Classify maps an IO error to an error code and outcome.
 func (c Classifier) Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
@@ -27,12 +27,12 @@ func (c Classifier) Classify(a core.IOCall, err error) (core.ErrCode, core.Outco
 	return core.ErrIO, core.MaybeApplied
 }
 
-// MemClassifier classifies the in-memory object store (vsys), which fails only
+// MemoryErrorClassifier classifies the in-memory object store (vsys), which fails only
 // with truthful spec errors.
-type MemClassifier struct{}
+type MemoryErrorClassifier struct{}
 
 // Classify maps an in-memory store error to an error code and outcome.
-func (MemClassifier) Classify(_ core.IOCall, err error) (core.ErrCode, core.Outcome) {
+func (MemoryErrorClassifier) Classify(_ core.IOCall, err error) (core.ErrCode, core.Outcome) {
 	if ve, ok := errors.AsType[*vsys.Error](err); ok {
 		return ve.Code, core.NotApplied
 	}

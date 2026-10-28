@@ -53,9 +53,9 @@ func (m *fakeMachine) Step(e core.Event) []core.Action {
 }
 func (m *fakeMachine) StateHash() uint64 { return 0 }
 
-func setup(m *fakeMachine) (Bundle, *fakeExec, *fakeConns, core.MachineFactory) {
+func setup(m *fakeMachine) (Dependencies, *fakeExec, *fakeConns, core.MachineFactory) {
 	cn := &fakeConns{}
-	b := Bundle{Clock: fakeClock{}, Conns: cn, Inbox: NewInbox(8)}
+	b := Dependencies{Clock: fakeClock{}, Connections: cn, Inbox: NewInbox(8)}
 	return b, &fakeExec{}, cn, func(core.Environment, core.NodeInstance) core.Machine { return m }
 }
 
@@ -91,7 +91,7 @@ func TestTripRunsEarlierActions(t *testing.T) {
 	}}
 	b, ex, cn, f := setup(m)
 	err := Run(t.Context(), b, ex, f, core.NodeInstance{})
-	if !errors.Is(err, ErrTripped) {
+	if !errors.Is(err, ErrStoppedForRestart) {
 		t.Fatalf("err = %v", err)
 	}
 	if len(ex.got) != 1 || ex.got[0].RequestID() != 1 || len(cn.log) != 1 {
@@ -238,7 +238,7 @@ func TestShutdownIgnoredKilled(t *testing.T) {
 	go func() { res <- Run(t.Context(), b, ex, f, core.NodeInstance{}) }()
 	close(sd)
 	start := time.Now()
-	if err := <-res; !errors.Is(err, ErrKilled) {
+	if err := <-res; !errors.Is(err, ErrKilledByRuntime) {
 		t.Fatalf("err = %v", err)
 	}
 	if time.Since(start) < 40*time.Millisecond {
@@ -261,7 +261,7 @@ func TestShutdownStopDeliveredOnce(t *testing.T) {
 		b.Inbox.DeliverControl(core.TimerFired{ID: core.TimerID(i)})
 	}
 	err := Run(t.Context(), b, ex, f, core.NodeInstance{})
-	if !errors.Is(err, ErrKilled) {
+	if !errors.Is(err, ErrKilledByRuntime) {
 		t.Fatalf("err = %v", err)
 	}
 	if n, _ := stops(m); n != 1 {

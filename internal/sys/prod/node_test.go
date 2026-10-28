@@ -25,8 +25,8 @@ func startNode(t *testing.T, mod func(*NodeConfig)) (*Node, NodeConfig) {
 	}
 	cfg := NodeConfig{
 		NodeID: "n1", Broker: broker.DefaultConfig(), Listener: ln,
-		Objects: vsys.NewObjectStore(), ObjClassify: MemClassifier{},
-		ControlPlane: vsys.NewControlPlane(), CPClassify: MemClassifier{},
+		Objects: vsys.NewObjectStore(), ObjClassify: MemoryErrorClassifier{},
+		ControlPlane: vsys.NewControlPlane(), CPClassify: MemoryErrorClassifier{},
 		StopGrace: time.Second, FlushGrace: 50 * time.Millisecond,
 	}
 	if mod != nil {
@@ -125,7 +125,7 @@ func TestStartGracefulStop(t *testing.T) {
 func TestStartKill(t *testing.T) {
 	n, _ := startNode(t, nil)
 	n.Kill()
-	if err := waitDone(t, n); !errors.Is(err, sys.ErrStopped) && !errors.Is(err, sys.ErrKilled) {
+	if err := waitDone(t, n); !errors.Is(err, sys.ErrStopped) && !errors.Is(err, sys.ErrKilledByRuntime) {
 		t.Errorf("kill: %v", err)
 	}
 }

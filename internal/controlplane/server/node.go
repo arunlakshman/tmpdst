@@ -89,7 +89,7 @@ func (n *Node) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	n.cancel = cancel
 	ex := exec.New(runCtx, exec.Config{}, n.cfg.Log, n.cfg.Objects, n.inbox)
-	b := run.Bundle{
+	b := run.Dependencies{
 		Clock: n.cfg.Clock, Env: n.cfg.Env, Inbox: n.inbox,
 		Shutdown: n.shutdown, StopGrace: n.cfg.StopGrace, Inject: n.inject,
 		AfterStep: func(cm core.Machine) {

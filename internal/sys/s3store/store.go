@@ -1,5 +1,5 @@
 // Package s3store is the S3 adapter: a sys.ObjectStore over the AWS SDK and
-// the sys.Classifier for Obj* actions. It behaves like veritas.ObjectStore
+// the sys.ErrorClassifier for Obj* actions. It behaves like veritas.ObjectStore
 // (conformance C3), so a range outside the object is ErrInvalid and deleting
 // an absent key is ErrNotFound.
 package s3store
@@ -66,7 +66,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 	}
 	opts := loadOptions(cfg)
 	if cfg.HTTP == nil {
-		opts = append(opts, config.WithHTTPClient(httppool.AWS()))
+		opts = append(opts, config.WithHTTPClient(httppool.ConfigureAWSClient()))
 	}
 	ac, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {

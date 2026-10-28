@@ -29,7 +29,7 @@ import (
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stderr, sys.ShutdownOnSignal(syscall.SIGTERM, os.Interrupt)))
+	os.Exit(run(os.Args[1:], os.Stderr, sys.StopOnSignal(syscall.SIGTERM, os.Interrupt)))
 }
 
 // brokerFlags are the parsed command-line flags.
@@ -156,7 +156,7 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 func openObjects(ctx context.Context, f brokerFlags, cfg *prod.NodeConfig, m *prod.Metrics, log *slog.Logger) error {
 	switch f.objects {
 	case "mem":
-		cfg.Objects, cfg.ObjClassify = vsys.NewObjectStore(), prod.MemClassifier{}
+		cfg.Objects, cfg.ObjClassify = vsys.NewObjectStore(), prod.MemoryErrorClassifier{}
 		return nil
 	case "s3":
 		var obs *awsobs.Recorder
@@ -281,7 +281,7 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 		},
 	)
 	if err := n.Wait(); err != nil {
-		return err // sys.ErrTripped, sys.ErrKilled, ...
+		return err // sys.ErrStoppedForRestart, sys.ErrKilledByRuntime, ...
 	}
 	log.Info("manibroker stopped")
 	return nil

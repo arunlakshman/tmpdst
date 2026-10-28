@@ -45,7 +45,7 @@ func wait(t *testing.T, in *sys.Inbox) core.EventData {
 func TestExecutorCompletesOnceAndNeverBlocks(t *testing.T) {
 	in := sys.NewInbox(8)
 	objs := slowObjs{ObjectStore: vsys.NewObjectStore(), block: make(chan struct{})}
-	cls := Classifier{Objects: MemClassifier{}, CP: MemClassifier{}}
+	cls := Classifier{Objects: MemoryErrorClassifier{}, CP: MemoryErrorClassifier{}}
 	e := NewExecutor(t.Context(), ExecConfig{ObjTimeout: 50 * time.Millisecond}, objs, nil, nilConns{}, cls, in)
 
 	start := time.Now()
@@ -83,7 +83,7 @@ func TestExecutorCompletesOnceAndNeverBlocks(t *testing.T) {
 func TestExecutorDropsAfterClose(t *testing.T) {
 	in := sys.NewInbox(8)
 	e := NewExecutor(t.Context(), ExecConfig{}, vsys.NewObjectStore(), nil, nilConns{},
-		Classifier{Objects: MemClassifier{}}, in)
+		Classifier{Objects: MemoryErrorClassifier{}}, in)
 	in.Close()
 	e.Execute(core.ObjectList{Req: 1})
 	time.Sleep(30 * time.Millisecond)
@@ -93,7 +93,7 @@ func TestExecutorDropsAfterClose(t *testing.T) {
 }
 
 func TestClassifierRoutes(t *testing.T) {
-	c := Classifier{Objects: s3store.Classifier{}, CP: MemClassifier{}}
+	c := Classifier{Objects: s3store.Classifier{}, CP: MemoryErrorClassifier{}}
 	if code, out := c.Classify(core.ObjectPut{}, context.DeadlineExceeded); code != core.ErrTimeout || out != core.MaybeApplied {
 		t.Errorf("obj: %v %v", code, out)
 	}

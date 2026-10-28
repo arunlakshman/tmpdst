@@ -10,12 +10,12 @@ import (
 )
 
 var (
-	// ErrTripped is returned when the run was stopped by a tripped guard.
-	ErrTripped = errors.New("tripped")
+	// ErrStoppedForRestart is returned when the run was stopped by a tripped guard.
+	ErrStoppedForRestart = errors.New("tripped")
 	// ErrStopped is returned when Run ends because its context was done.
 	ErrStopped = errors.New("stopped")
-	// ErrKilled is returned when a graceful stop missed its deadline.
-	ErrKilled = errors.New("killed")
+	// ErrKilledByRuntime is returned when a graceful stop missed its deadline.
+	ErrKilledByRuntime = errors.New("killed")
 )
 
 // Clock stamps Event.At/Wall at inbox dequeue.
@@ -25,17 +25,17 @@ type Clock interface {
 }
 
 // Executor runs I/O only. Exactly one IOResult per IOCall, delivered to
-// the Sink and never on the caller's goroutine. Execute MUST NOT block.
+// the InboxWriter and never on the caller's goroutine. Execute MUST NOT block.
 type Executor interface {
 	Execute(a core.IOCall)
 }
 
 // InjectFunc runs on the loop goroutine and returns actions to dispatch
-// (Offer, TakeAnswers bookkeeping). Optional on Bundle.Inject.
+// (Offer, TakeAnswers bookkeeping). Optional on Dependencies.Inject.
 type InjectFunc func() []core.Action
 
-// Bundle is everything nondeterministic a control-plane process needs.
-type Bundle struct {
+// Dependencies is everything nondeterministic a control-plane process needs.
+type Dependencies struct {
 	Clock     Clock
 	Env       core.Environment
 	Inbox     *Inbox
@@ -51,17 +51,17 @@ type Bundle struct {
 }
 
 // Run delivers Started, then loops: ControlFirst picks, At/Wall stamped at
-// dequeue, Step, actions dispatched in slice order. Returns ErrTripped
-// (wrapped) on Trip, nil on Exit, ErrStopped on ctx done, ErrKilled when
+// dequeue, Step, actions dispatched in slice order. Returns ErrStoppedForRestart
+// (wrapped) on Trip, nil on Exit, ErrStopped on ctx done, ErrKilledByRuntime when
 // StopGrace expires after Shutdown. Closes b.Inbox on return.
-func Run(ctx context.Context, b Bundle, exec Executor, f core.MachineFactory, self core.NodeInstance) error {
+func Run(ctx context.Context, b Dependencies, exec Executor, f core.MachineFactory, self core.NodeInstance) error {
 	in := b.Inbox
 	if in == nil {
 		return errors.New("controlplane/run: Bundle.Inbox is nil")
 	}
 	defer in.Close()
 	m := f(b.Env, self)
-	r := &runner{b: b, in: in, exec: exec, m: m, timers: map[core.TimerID]*time.Timer{}}
+	r := &eventLoop{b: b, in: in, exec: exec, m: m, timers: map[core.TimerID]*time.Timer{}}
 	defer func() {
 		for _, t := range r.timers {
 			t.Stop()
@@ -94,7 +94,7 @@ func Run(ctx context.Context, b Bundle, exec Executor, f core.MachineFactory, se
 		}
 		select {
 		case <-kill:
-			return ErrKilled
+			return ErrKilledByRuntime
 		default:
 		}
 		if done, err := r.drainInject(); done {
@@ -116,14 +116,14 @@ func Run(ctx context.Context, b Bundle, exec Executor, f core.MachineFactory, se
 	}
 }
 
-func (r *runner) waitIdle(ctx context.Context, shutdown *<-chan struct{}, kill <-chan time.Time) (bool, error) {
+func (r *eventLoop) waitIdle(ctx context.Context, shutdown *<-chan struct{}, kill <-chan time.Time) (bool, error) {
 	select {
 	case <-ctx.Done():
 		return true, ErrStopped
 	case <-*shutdown:
 		return false, nil
 	case <-kill:
-		return true, ErrKilled
+		return true, ErrKilledByRuntime
 	case fn := <-r.b.Inject:
 		return r.runInject(fn)
 	case <-r.in.wake:
@@ -131,21 +131,21 @@ func (r *runner) waitIdle(ctx context.Context, shutdown *<-chan struct{}, kill <
 	}
 }
 
-type runner struct {
-	b      Bundle
+type eventLoop struct {
+	b      Dependencies
 	in     *Inbox
 	exec   Executor
 	m      core.Machine
 	timers map[core.TimerID]*time.Timer
 }
 
-func (r *runner) after() {
+func (r *eventLoop) after() {
 	if r.b.AfterStep != nil {
 		r.b.AfterStep(r.m)
 	}
 }
 
-func (r *runner) drainInject() (bool, error) {
+func (r *eventLoop) drainInject() (bool, error) {
 	if r.b.Inject == nil {
 		return false, nil
 	}
@@ -161,14 +161,14 @@ func (r *runner) drainInject() (bool, error) {
 	}
 }
 
-func (r *runner) runInject(fn InjectFunc) (bool, error) {
+func (r *eventLoop) runInject(fn InjectFunc) (bool, error) {
 	if fn == nil {
 		return false, nil
 	}
 	return r.dispatch(fn())
 }
 
-func (r *runner) dispatch(acts []core.Action) (bool, error) {
+func (r *eventLoop) dispatch(acts []core.Action) (bool, error) {
 	for _, a := range acts {
 		switch a := a.(type) {
 		case core.IOCall:
@@ -183,7 +183,7 @@ func (r *runner) dispatch(acts []core.Action) (bool, error) {
 			r.cancelTimer(a.ID)
 		case core.StopForRestart:
 			r.after()
-			return true, fmt.Errorf("%w: %s", ErrTripped, a.Cause)
+			return true, fmt.Errorf("%w: %s", ErrStoppedForRestart, a.Cause)
 		case core.ShutdownDone:
 			r.after()
 			return true, nil
@@ -196,7 +196,7 @@ func (r *runner) dispatch(acts []core.Action) (bool, error) {
 	return false, nil
 }
 
-func (r *runner) setTimer(a core.SetTimer) {
+func (r *eventLoop) setTimer(a core.SetTimer) {
 	if old := r.timers[a.ID]; old != nil {
 		old.Stop()
 	}
@@ -206,7 +206,7 @@ func (r *runner) setTimer(a core.SetTimer) {
 	})
 }
 
-func (r *runner) cancelTimer(id core.TimerID) {
+func (r *eventLoop) cancelTimer(id core.TimerID) {
 	if t := r.timers[id]; t != nil {
 		t.Stop()
 		delete(r.timers, id)

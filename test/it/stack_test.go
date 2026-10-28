@@ -20,17 +20,17 @@ type stack struct {
 	t       *testing.T
 	cp      *cpclient.Client
 	objs    sys.ObjectStore
-	objCls  sys.Classifier
+	objCls  sys.ErrorClassifier
 	nodes   []*prod.Node
 	brokers broker.Config
 }
 
 // newStack boots an in-process gRPC control plane. st is ignored (kept for call-site shape).
-func newStack(t *testing.T, _ any, objs sys.ObjectStore, cls sys.Classifier) *stack {
+func newStack(t *testing.T, _ any, objs sys.ObjectStore, cls sys.ErrorClassifier) *stack {
 	t.Helper()
 	gn := grpctest.StartMem(t)
 	if objs == nil {
-		objs, cls = vsys.NewObjectStore(), prod.MemClassifier{}
+		objs, cls = vsys.NewObjectStore(), prod.MemoryErrorClassifier{}
 	}
 	s := &stack{t: t, cp: gn.Client, objs: objs, objCls: cls,
 		brokers: broker.Config{BatchWindow: core.Duration(20 * time.Millisecond)}}

@@ -20,8 +20,8 @@ import (
 
 type item = map[string]types.AttributeValue
 
-// Fake is the in-memory service. The zero value is not usable; use New.
-type Fake struct {
+// FakeDynamoDB is the in-memory service. The zero value is not usable; use New.
+type FakeDynamoDB struct {
 	mu     sync.Mutex
 	tables map[string]map[string]item                // table -> "pk\x00sk" -> item
 	byPK   map[string]map[string]map[string]struct{} // table -> pk -> ids: a Query must not scan the table
@@ -50,32 +50,32 @@ type Fake struct {
 }
 
 // New returns an empty service.
-func New() *Fake {
-	return &Fake{tables: map[string]map[string]item{}, byPK: map[string]map[string]map[string]struct{}{}}
+func New() *FakeDynamoDB {
+	return &FakeDynamoDB{tables: map[string]map[string]item{}, byPK: map[string]map[string]map[string]struct{}{}}
 }
 
 // store writes it and keeps the partition index.
-func (f *Fake) store(table string, it item) {
-	f.tables[table][idOf(it)] = it
+func (f *FakeDynamoDB) store(table string, it item) {
+	f.tables[table][itemIDOf(it)] = it
 	pks := f.byPK[table]
-	pk := strOf(it, "pk")
+	pk := stringOf(it, "pk")
 	if pks[pk] == nil {
 		pks[pk] = map[string]struct{}{}
 	}
-	pks[pk][idOf(it)] = struct{}{}
+	pks[pk][itemIDOf(it)] = struct{}{}
 }
 
 // remove deletes the item with the key.
-func (f *Fake) remove(table string, key item) {
-	delete(f.tables[table], idOf(key))
-	delete(f.byPK[table][strOf(key, "pk")], idOf(key))
+func (f *FakeDynamoDB) remove(table string, key item) {
+	delete(f.tables[table], itemIDOf(key))
+	delete(f.byPK[table][stringOf(key, "pk")], itemIDOf(key))
 }
 
 func validation(format string, a ...any) error {
 	return &smithy.GenericAPIError{Code: "ValidationException", Message: fmt.Sprintf(format, a...)}
 }
 
-func (f *Fake) failed(ctx context.Context, call string) error {
+func (f *FakeDynamoDB) failed(ctx context.Context, call string) error {
 	if f.Latency != nil {
 		if d := f.Latency(call); d > 0 {
 			t := time.NewTimer(d)
@@ -94,14 +94,14 @@ func (f *Fake) failed(ctx context.Context, call string) error {
 }
 
 // capacity is the ConsumedCapacity of one call if reporting is on.
-func (f *Fake) capacity(table string) *types.ConsumedCapacity {
+func (f *FakeDynamoDB) capacity(table string) *types.ConsumedCapacity {
 	if !f.ReportCapacity {
 		return nil
 	}
 	return &types.ConsumedCapacity{TableName: aws.String(table), CapacityUnits: aws.Float64(1)}
 }
 
-func (f *Fake) capacities(table string) []types.ConsumedCapacity {
+func (f *FakeDynamoDB) capacities(table string) []types.ConsumedCapacity {
 	if c := f.capacity(table); c != nil {
 		return []types.ConsumedCapacity{*c}
 	}
@@ -109,7 +109,7 @@ func (f *Fake) capacities(table string) []types.ConsumedCapacity {
 }
 
 // table returns the named table's rows; the lock is held by the caller.
-func (f *Fake) table(name *string) (map[string]item, error) {
+func (f *FakeDynamoDB) table(name *string) (map[string]item, error) {
 	t, ok := f.tables[aws.ToString(name)]
 	if !ok {
 		return nil, &types.ResourceNotFoundException{Message: aws.String("table not found: " + aws.ToString(name))}
@@ -118,28 +118,28 @@ func (f *Fake) table(name *string) (map[string]item, error) {
 }
 
 // Put stores an item directly (tests; no conditions). The table must exist.
-func (f *Fake) Put(table string, it item) {
+func (f *FakeDynamoDB) Put(table string, it item) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.store(table, cloneItem(it))
 }
 
 // Item returns a copy of the stored item, or nil.
-func (f *Fake) Item(table string, key item) map[string]types.AttributeValue {
+func (f *FakeDynamoDB) Item(table string, key item) map[string]types.AttributeValue {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return cloneItem(f.tables[table][idOf(key)])
+	return cloneItem(f.tables[table][itemIDOf(key)])
 }
 
 // Count is the number of items in the table.
-func (f *Fake) Count(table string) int {
+func (f *FakeDynamoDB) Count(table string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.tables[table])
 }
 
 // CreateTable creates a table in the fake.
-func (f *Fake) CreateTable(ctx context.Context, in *dynamodb.CreateTableInput, _ ...func(*dynamodb.Options)) (*dynamodb.CreateTableOutput, error) {
+func (f *FakeDynamoDB) CreateTable(ctx context.Context, in *dynamodb.CreateTableInput, _ ...func(*dynamodb.Options)) (*dynamodb.CreateTableOutput, error) {
 	if err := f.failed(ctx, "CreateTable"); err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func (f *Fake) CreateTable(ctx context.Context, in *dynamodb.CreateTableInput, _
 }
 
 // DescribeTable describes a table in the fake.
-func (f *Fake) DescribeTable(ctx context.Context, in *dynamodb.DescribeTableInput, _ ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error) {
+func (f *FakeDynamoDB) DescribeTable(ctx context.Context, in *dynamodb.DescribeTableInput, _ ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error) {
 	if err := f.failed(ctx, "DescribeTable"); err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func (f *Fake) DescribeTable(ctx context.Context, in *dynamodb.DescribeTableInpu
 }
 
 // DeleteTable deletes a table from the fake.
-func (f *Fake) DeleteTable(ctx context.Context, in *dynamodb.DeleteTableInput, _ ...func(*dynamodb.Options)) (*dynamodb.DeleteTableOutput, error) {
+func (f *FakeDynamoDB) DeleteTable(ctx context.Context, in *dynamodb.DeleteTableInput, _ ...func(*dynamodb.Options)) (*dynamodb.DeleteTableOutput, error) {
 	if err := f.failed(ctx, "DeleteTable"); err != nil {
 		return nil, err
 	}
@@ -183,7 +183,7 @@ func (f *Fake) DeleteTable(ctx context.Context, in *dynamodb.DeleteTableInput, _
 }
 
 // GetItem reads one item from the fake.
-func (f *Fake) GetItem(ctx context.Context, in *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
+func (f *FakeDynamoDB) GetItem(ctx context.Context, in *dynamodb.GetItemInput, _ ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error) {
 	if err := f.failed(ctx, "GetItem"); err != nil {
 		return nil, err
 	}
@@ -193,5 +193,5 @@ func (f *Fake) GetItem(ctx context.Context, in *dynamodb.GetItemInput, _ ...func
 	if err != nil {
 		return nil, err
 	}
-	return &dynamodb.GetItemOutput{Item: cloneItem(t[idOf(in.Key)]), ConsumedCapacity: f.capacity(aws.ToString(in.TableName))}, nil
+	return &dynamodb.GetItemOutput{Item: cloneItem(t[itemIDOf(in.Key)]), ConsumedCapacity: f.capacity(aws.ToString(in.TableName))}, nil
 }

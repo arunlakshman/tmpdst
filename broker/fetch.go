@@ -79,22 +79,19 @@ func (b *Broker) onLookup(o *op, r core.LookupResp) []core.Action {
 // cover whole objects but not byte ranges, decision 27).
 func (b *Broker) onFetchGet(o *op, e core.ObjGetDone) []core.Action {
 	rg := o.ranges[o.next]
+	if e.Err == core.ErrNotFound { // committed segments are never deleted
+		b.env.Unreachable("broker: committed segment missing")
+		return b.failOp(o, errKafkaStorage)
+	}
 	if e.Err != core.OK {
-		if e.Err == core.ErrNotFound { // committed segments are never deleted
-			b.env.Unreachable("broker: committed segment missing")
-			return b.failOp(o, errKafkaStorage)
-		}
 		o.corrupt = false
 		return b.retryOp(o)
 	}
-	if b.cfg.Bug != BugServeCorrupt {
-		bt, err := kwire.ParseBatch(e.Data)
-		if err != nil || int64(len(e.Data)) != rg.Loc.Len || int64(bt.NumRecords) != rg.Count {
-			b.env.Reachable("broker: corrupt GET detected")
-			o.corrupt = true
-			acts := []core.Action{emit("corruption_detected", core.Field{Key: "segment", Value: core.Str(rg.Loc.Key)})}
-			return append(acts, b.retryOp(o)...)
-		}
+	if b.cfg.Bug != BugServeCorrupt && !intact(e.Data, rg) {
+		b.env.Reachable("broker: corrupt GET detected")
+		o.corrupt = true
+		acts := []core.Action{emit("corruption_detected", core.Field{Key: "segment", Value: core.Str(rg.Loc.Key)})}
+		return append(acts, b.retryOp(o)...)
 	}
 	base := int64(rg.Base)
 	if b.cfg.Bug == BugWrongOffset {
@@ -108,4 +105,10 @@ func (b *Broker) onFetchGet(o *op, e core.ObjGetDone) []core.Action {
 	}
 	o.fpart.RecordBatches = o.out
 	return b.endOp(o)
+}
+
+// intact reports whether data is the one valid batch that rg committed.
+func intact(data []byte, rg core.BatchRange) bool {
+	bt, err := kwire.ParseBatch(data)
+	return err == nil && int64(len(data)) == rg.Loc.Len && int64(bt.NumRecords) == rg.Count
 }

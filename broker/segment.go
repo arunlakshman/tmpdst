@@ -94,12 +94,13 @@ func (b *Broker) addBatch(pb *pbatch) []core.Action {
 	if !slices.Contains(b.open.parts, pb.tp) {
 		b.open.parts = append(b.open.parts, pb.tp)
 	}
-	if len(b.open.batches) == 1 || b.cfg.Bug == BugTimerFromLastBatch {
-		// since must not move when the mutant re-arms the timer, or the age
-		// invariant cannot catch it.
-		if len(b.open.batches) == 1 {
-			b.open.since = b.now
-		}
+	first := len(b.open.batches) == 1
+	// since must not move when the mutant re-arms the timer, or the age
+	// invariant cannot catch it.
+	if first {
+		b.open.since = b.now
+	}
+	if first || b.cfg.Bug == BugTimerFromLastBatch {
 		b.timerGen++
 		b.open.gen = b.timerGen
 		acts = append(acts, core.SetTimer{ID: timerFlush, Gen: b.timerGen, After: b.cfg.BatchWindow})

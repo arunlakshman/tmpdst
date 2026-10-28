@@ -115,7 +115,8 @@ func (b *Broker) Step(ev core.Event) []core.Action {
 // stop.
 func (b *Broker) finish(acts []core.Action) []core.Action {
 	acts = b.drainDirty(acts)
-	acts = b.flow(acts)
+	acts = b.updatePressure(acts)
+	acts = b.syncReads(acts)
 	return b.maybeExit(acts)
 }
 
@@ -157,9 +158,9 @@ func (b *Broker) maybeExit(acts []core.Action) []core.Action {
 
 // ---- admission control ----
 
-// flow pauses reads on every client connection while the broker holds too many
-// unacked produce bytes (or is stopping) and resumes below the low mark.
-func (b *Broker) flow(acts []core.Action) []core.Action {
+// updatePressure turns pressure on when the broker holds too many unacked
+// produce bytes and off once back at the low mark.
+func (b *Broker) updatePressure(acts []core.Action) []core.Action {
 	switch {
 	case !b.pressure && b.bufBytes >= b.cfg.MaxBufferedBytes:
 		b.pressure, b.pressureAt = true, b.now
@@ -173,6 +174,12 @@ func (b *Broker) flow(acts []core.Action) []core.Action {
 			core.Field{Key: "buffered", Value: core.I64(b.bufBytes)},
 			core.Field{Key: "paused_ns", Value: core.I64(b.now - b.pressureAt)}))
 	}
+	return acts
+}
+
+// syncReads pauses reads on every client connection under pressure or while
+// stopping, and resumes them otherwise.
+func (b *Broker) syncReads(acts []core.Action) []core.Action {
 	want := b.pressure || b.stopping
 	for _, c := range b.conns {
 		if c.closing || c.paused == want {

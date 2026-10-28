@@ -20,8 +20,7 @@ Words used here:
 compares a subject with a spec after every step and shrinks a failing
 sequence.
 
-These four packages are added in the same change as this README. If one of
-them is missing in your checkout, the change is not complete:
+These packages sit under `veritastest/`:
 
 | Package | What it does |
 | --- | --- |

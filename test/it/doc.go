@@ -4,5 +4,5 @@
 // and an in-memory object store. The full-stack test needs the docker
 // backends (scripts/it-up.sh) and MANIFESTER_DYNAMO_ENDPOINT +
 // MANIFESTER_S3_ENDPOINT. kgo is imported only here: never from a
-// deterministic package (scripts/ci-determinism.sh).
+// deterministic package (ops/tools/detcheck).
 package it

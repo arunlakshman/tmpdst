@@ -338,7 +338,7 @@ W6 and W7 touch disjoint trees and can run at the same time after W5.
 1. Re-run W0's measurements. Produce a before/after table: tests, seeds, wall
    time, generator count, planted bugs caught.
 2. Full gate: `make build` (proto, fmt-check, ascii-check, vet, lint, compile,
-   test, sim, it-hermetic, crap) and `ops/scripts/ci-determinism.sh`.
+   test, sim, it-hermetic, crap) and the determinism script (removed later in this PR).
    Needs `mise install` (buf, golangci-lint). If the toolchain is missing, say
    so and stop; do not claim the gate passed.
 3. Flake check: run every conformance test 20 times, `-count=20`, plus
@@ -384,7 +384,7 @@ adapters (`vsys` serializes with a mutex today).
 - [ ] No dangling `t.Skip` for conformance (the env-gated real S3/Dynamo ones
       are documented and skip with a clear message).
 - [ ] Docs match code; README recipe exists.
-- [ ] `make build` and `ci-determinism.sh` pass; wall time of the conformance
+- [ ] `make build` and the determinism script (removed later in this PR) pass; wall time of the conformance
       tests no more than +20 percent over the W0 baseline.
 - [ ] One commit, explicit paths, nothing from `deploy/` or `docs/learn/`.
 
@@ -395,7 +395,7 @@ adapters (`vsys` serializes with a mutex today).
 | The refactor silently weakens coverage | planted-bug catch table before/after; generator coverage tests; W0 baseline |
 | Shared generators change what each seed exercises | accepted explicitly; seed numbers in old regression literals are replaced by shrunk literals |
 | CRAP gate (threshold 20) fails on new non-test helpers | W1-W5 keep functions small; `make crap` run per package before integration |
-| Determinism gate rejects `runcontrol` | it is a separate edge package outside the deterministic list; confirm with `ci-determinism.sh` |
+| Determinism gate rejects `runcontrol` | it is a separate edge package outside the deterministic list; confirm with the determinism script (removed later in this PR) |
 | Real S3 / DynamoDB paths cannot run locally | stated in the final report as not run; hermetic fakes cover the logic |
 | Renames collide with parallel edits | W1 is a barrier and lands first |
 | Pebble suites slow the gate | seed counts stay as today; `MANIFESTER_SEEDS` override |

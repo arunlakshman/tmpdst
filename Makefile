@@ -1,8 +1,8 @@
 # Project build. `make` / `make build` is the full gate:
 #   fmt, ascii, vet, lint, compile, unit tests, sim, hermetic it, CRAP.
 # Docker fullstack test/it tests still Skip unless MANIFESTER_*_ENDPOINT are set.
-# Determinism gate is separate: ops/scripts/ci-determinism.sh
-# (to include it, add `./ops/scripts/ci-determinism.sh` as a step before `crap`).
+# The import check for deterministic packages is the detcheck tool:
+# go run ./ops/tools/detcheck <packages>
 # Toolchain + commit hook: `mise install` (pins in mise.toml; postinstall runs
 # make install-hooks). Without mise: `make install-hooks` alone.
 

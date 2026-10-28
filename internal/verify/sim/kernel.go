@@ -14,7 +14,7 @@ const (
 	laneSim      Lane = laneReserved
 
 	// wallEpoch is the scripted UTC at simulation time zero (2023-11-14).
-	wallEpoch core.WallTime = 1_700_000_000 * 1_000_000_000
+	wallEpoch core.RealTime = 1_700_000_000 * 1_000_000_000
 
 	// stopGrace is how long a node has to ShutdownDone after core.StopRequest before it is
 	// killed. Node-local StopRequest.Deadline is the sim deadline plus the node's skew.
@@ -102,7 +102,7 @@ type run struct {
 
 	rng    CountedRand
 	sched  *sched
-	policy core.InboxPolicy
+	policy core.InboxPicker
 	cost   CostModel
 
 	nodes   []*node
@@ -141,7 +141,7 @@ func RunSeed(cfg Config, seed uint64) SeedResult {
 }
 
 func newRun(cfg Config, seed uint64) *run {
-	r := &run{cfg: cfg, seed: seed, policy: core.ControlFirst{}, trace: newHasher(),
+	r := &run{cfg: cfg, seed: seed, policy: core.ControlFirstPicker{}, trace: newHasher(),
 		byName: map[core.NodeID]*node{}, lanes: map[string]Lane{}, nextLane: 1, byEng: map[string]int{}, sites: map[core.FaultPointID]bool{}}
 	r.res.Seed = seed
 	r.rng = NewRand(seed)
@@ -190,9 +190,9 @@ func runSeed(cfg Config, seed uint64) (SeedResult, []AssertionStat) {
 func (r *run) now() Time { return r.sched.Now() }
 
 // local is node n's clock: simulation time plus its fixed skew.
-func (r *run) local(n *node) core.Time { return core.Time(r.now()) + core.Time(n.skew) }
+func (r *run) local(n *node) core.NodeTime { return core.NodeTime(r.now()) + core.NodeTime(n.skew) }
 
-func (r *run) wall() core.WallTime { return wallEpoch + core.WallTime(r.now()) }
+func (r *run) wall() core.RealTime { return wallEpoch + core.RealTime(r.now()) }
 
 func (r *run) fail(k FailKind, p core.PropertyID, msg string) {
 	r.res.Failures = append(r.res.Failures, Failure{Seed: r.seed, Kind: k, Prop: p, Step: r.steps, At: r.now(), Msg: msg})
@@ -808,7 +808,7 @@ func (r *run) stopNode(n *node) {
 	dl := r.now() + Time(stopGrace)
 	r.sched.Schedule(Entry{At: dl, Lane: laneSim, Kind: EntryCrash, Target: Target{Node: n.ref}})
 	r.simFact("sim_stop_requested", core.Field{Key: "node", Value: core.Str(n.name)})
-	n.inbox.Push(core.StopRequest{Deadline: core.Time(dl) + core.Time(n.skew)})
+	n.inbox.Push(core.StopRequest{Deadline: core.NodeTime(dl) + core.NodeTime(n.skew)})
 	r.pump(n)
 }
 

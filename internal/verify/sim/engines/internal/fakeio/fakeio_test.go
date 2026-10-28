@@ -51,7 +51,7 @@ func TestSpecHashCacheObjectStore(t *testing.T) {
 			case core.ObjectGet:
 				return core.ObjectGetDone{Req: a.Req, Err: e}
 			}
-			return core.ObjectListDone{Req: a.ReqID(), Err: e}
+			return core.ObjectListDone{Req: a.RequestID(), Err: e}
 		},
 		Changed: func(c core.IOResult) bool {
 			switch c := c.(type) {
@@ -70,7 +70,7 @@ func TestSpecHashCacheObjectStore(t *testing.T) {
 	for i := range 400 {
 		ctx.T += sim.Time(ms)
 		k := string(rune('a' + r.Between(0, 6)))
-		req := core.ReqID(i)
+		req := core.RequestID(i)
 		switch r.Between(0, 4) {
 		case 0, 1:
 			c.Execute(ctx, from, core.ObjectPut{Req: req, Key: k, Data: []byte{byte(i)}})
@@ -102,7 +102,7 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 			return ok
 		},
 		Fail: func(a core.IOCall, err core.ErrCode, o core.Outcome) core.IOResult {
-			return core.ControlPlaneDone{Req: a.ReqID(), Err: err, Outcome: o}
+			return core.ControlPlaneDone{Req: a.RequestID(), Err: err, Outcome: o}
 		},
 		Changed:  func(c core.IOResult) bool { return c.(core.ControlPlaneDone).Outcome == core.Applied },
 		SpecHash: spec.StateHash,
@@ -110,7 +110,7 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 	ctx := enginetest.New(stub{c}, 6)
 	r := sim.NewRand(77)
 	nodes := []core.NodeInstance{enginetest.Ref("a"), enginetest.Ref("b"), enginetest.Ref("c")}
-	tps := []core.TopicPartition{core.TP("t", 0), core.TP("t", 1)}
+	tps := []core.TopicPartition{core.TopicPartitionKey("t", 0), core.TopicPartitionKey("t", 1)}
 	for _, tp := range tps[:1] {
 		if spec.CreateTopic(tp.Topic, 2) == core.OK {
 			c.Bump()
@@ -122,7 +122,7 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 	for i := range 400 {
 		ctx.T += sim.Time(ms)
 		n := nodes[r.Between(0, 3)]
-		req := core.ReqID(i)
+		req := core.RequestID(i)
 		switch r.Between(0, 2) {
 		case 0:
 			// Keys repeat (replays, and conflicts when the request differs).

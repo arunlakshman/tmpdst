@@ -106,14 +106,14 @@ func validBatch(b core.PendingBatch) bool {
 	return b.Records > 0 && b.TP.Topic != "" && b.TP.Partition >= 0
 }
 
-func (c *ControlPlane) execCommit(req core.ReqID, op core.CommitSegment) core.IOResult {
+func (c *ControlPlane) execCommit(req core.RequestID, op core.CommitSegment) core.IOResult {
 	if seg, done := c.segs[op.SegmentKey]; done {
 		return c.replayCommit(req, op, seg)
 	}
 	return c.freshCommit(req, op)
 }
 
-func (c *ControlPlane) replayCommit(req core.ReqID, op core.CommitSegment, seg segment) core.IOResult {
+func (c *ControlPlane) replayCommit(req core.RequestID, op core.CommitSegment, seg segment) core.IOResult {
 	if !slices.Equal(seg.batches, op.Batches) {
 		return core.ControlPlaneDone{Req: req, Err: core.ErrConflict}
 	}
@@ -121,7 +121,7 @@ func (c *ControlPlane) replayCommit(req core.ReqID, op core.CommitSegment, seg s
 	return core.ControlPlaneDone{Req: req, Resp: resp, Outcome: core.Applied}
 }
 
-func (c *ControlPlane) freshCommit(req core.ReqID, op core.CommitSegment) core.IOResult {
+func (c *ControlPlane) freshCommit(req core.RequestID, op core.CommitSegment) core.IOResult {
 	if op.SegmentKey == "" || len(op.Batches) == 0 {
 		return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
 	}
@@ -146,7 +146,7 @@ func (c *ControlPlane) freshCommit(req core.ReqID, op core.CommitSegment) core.I
 	return core.ControlPlaneDone{Req: req, Resp: resp, Outcome: core.Applied}
 }
 
-func (c *ControlPlane) execLookup(req core.ReqID, op core.FindSegments) core.IOResult {
+func (c *ControlPlane) execLookup(req core.RequestID, op core.FindSegments) core.IOResult {
 	if op.From < 0 {
 		return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
 	}
@@ -165,7 +165,7 @@ func (c *ControlPlane) execLookup(req core.ReqID, op core.FindSegments) core.IOR
 	return core.ControlPlaneDone{Req: req, Resp: resp}
 }
 
-func (c *ControlPlane) execDescribe(req core.ReqID, op core.DescribeTopics) core.IOResult {
+func (c *ControlPlane) execDescribe(req core.RequestID, op core.DescribeTopics) core.IOResult {
 	var resp core.DescribeTopicsResp
 	for _, name := range sortedKeys(c.topics) {
 		if len(op.Topics) == 0 || slices.Contains(op.Topics, name) {

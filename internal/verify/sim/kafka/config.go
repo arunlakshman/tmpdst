@@ -104,7 +104,7 @@ func configWith(seeds []uint64, bug broker.Bug, opts Opts) sim.Config {
 		InvariantsFor: func(sc sim.SeedConfig) []sim.Invariant {
 			return []sim.Invariant{newSegmentCaps(sc.Params.(broker.Config), sc.ControlPlane.MaxCommitItems, opts.tps()), &segmentTiming{}}
 		},
-		Workloads: []sim.WorkloadFactory{func(env core.Env, self core.NodeInstance, bs []core.NodeInstance) sim.Workload {
+		Workloads: []sim.WorkloadFactory{func(env core.Environment, self core.NodeInstance, bs []core.NodeInstance) sim.Workload {
 			return NewWorkload(env, self, bs, opts)
 		}},
 		Invariants: []func() sim.Invariant{

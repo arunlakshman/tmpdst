@@ -194,7 +194,7 @@ func objCheck(impl func() objExec) veritastest.SpecComparator[*objPair, core.IOC
 		Name: "core.IOCall",
 		New:  func() *objPair { return &objPair{impl(), &sliceStore{}} },
 		Gen: func(r *veritastest.Rand, i int) core.IOCall {
-			req, key := core.ReqID(i+1), keys[r.Intn(len(keys))]
+			req, key := core.RequestID(i+1), keys[r.Intn(len(keys))]
 			switch r.Intn(7) {
 			case 0, 1, 2:
 				data := make([]byte, r.Intn(5))

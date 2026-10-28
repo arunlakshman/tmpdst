@@ -1,19 +1,19 @@
 package core
 
 // Action is output of Step: a request for the outside world to do something.
-// Every I/O action carries a ReqID; its result returns as a completion event.
+// Every I/O action carries a RequestID; its result returns as a completion event.
 //
 // Actions in one slice start in slice order; I/O among them may complete in
 // any order.
 type Action interface{ isAction() }
 
 // IOCall is an Action the outside world executes and answers with exactly one
-// IOResult carrying the same ReqID. A live incarnation always gets that
+// IOResult carrying the same RequestID. A live incarnation always gets that
 // completion: a lost response surfaces as ErrTimeout+MaybeApplied, never as
 // silence. IOResults addressed to a dead incarnation are dropped.
 type IOCall interface {
 	Action
-	ReqID() ReqID
+	RequestID() RequestID
 }
 
 // ---- timers ----
@@ -21,7 +21,7 @@ type IOCall interface {
 // SetTimer asks for TimerFired{ID, Gen} after the given duration of node-local time.
 type SetTimer struct {
 	ID    TimerID
-	Gen   TimerGen
+	Gen   TimerVersion
 	After Duration
 }
 
@@ -32,7 +32,7 @@ type CancelTimer struct{ ID TimerID }
 
 // Send writes bytes to a connection, in order with earlier Sends on it.
 type Send struct {
-	Req  ReqID
+	Req  RequestID
 	Conn ConnID
 	Data []byte
 }
@@ -55,7 +55,7 @@ type ResumeReads struct{ Conn ConnID }
 // Connect opens an outbound connection (used by sim workloads; brokers reach the
 // control plane through ControlPlaneCall, not raw dials).
 type Connect struct {
-	Req  ReqID
+	Req  RequestID
 	Addr string
 }
 
@@ -63,26 +63,26 @@ type Connect struct {
 
 // ObjectPut uploads Data under Key.
 type ObjectPut struct {
-	Req  ReqID
+	Req  RequestID
 	Key  string // unique per upload, so a MaybeApplied PUT is safe to retry
 	Data []byte
 }
 
 // ObjectGet reads the byte range Ref.
 type ObjectGet struct {
-	Req ReqID
+	Req RequestID
 	Ref SegmentRef
 }
 
 // ObjectDelete removes the object at Key.
 type ObjectDelete struct {
-	Req ReqID
+	Req RequestID
 	Key string
 }
 
 // ObjectList lists the keys under Prefix.
 type ObjectList struct {
-	Req    ReqID
+	Req    RequestID
 	Prefix string
 }
 
@@ -95,7 +95,7 @@ type ObjectList struct {
 // importing the generated package would pull grpc into core's dep closure and
 // fail the determinism audit.
 type ControlPlaneCall struct {
-	Req ReqID
+	Req RequestID
 	Op  ControlPlaneOperation
 }
 
@@ -110,26 +110,26 @@ type ControlPlaneReply struct {
 
 // LogAppend is an if-absent put of Data at Slot.
 type LogAppend struct {
-	Req  ReqID
-	Slot LogSlot
+	Req  RequestID
+	Slot LogPosition
 	Data []byte
 }
 
 // LogRead reads up to Limit entries at or after From, in slot order.
 type LogRead struct {
-	Req   ReqID
-	From  LogSlot
+	Req   RequestID
+	From  LogPosition
 	Limit int32
 }
 
 // LogGetEnd reports the highest contiguous written slot plus one (the tail).
-type LogGetEnd struct{ Req ReqID }
+type LogGetEnd struct{ Req RequestID }
 
 // LogDeleteOld tombstones every slot at or below Through. Trimmed slots must not be
 // rewritten.
 type LogDeleteOld struct {
-	Req     ReqID
-	Through LogSlot
+	Req     RequestID
+	Through LogPosition
 }
 
 // ---- lifecycle ----
@@ -171,38 +171,38 @@ func (RecordFact) isAction()        {}
 func (StopForRestart) isAction()    {}
 func (ShutdownDone) isAction()      {}
 
-// ReqID returns the request this action carries.
-func (a Send) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a Send) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a Connect) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a Connect) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a ObjectPut) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a ObjectPut) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a ObjectGet) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a ObjectGet) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a ObjectDelete) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a ObjectDelete) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a ObjectList) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a ObjectList) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a ControlPlaneCall) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a ControlPlaneCall) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a LogAppend) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a LogAppend) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a LogRead) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a LogRead) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a LogGetEnd) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a LogGetEnd) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a LogDeleteOld) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a LogDeleteOld) RequestID() RequestID { return a.Req }
 
 //nolint:dupl // compile-time IOCall assertions; parallel list lives on IOResults
 var (

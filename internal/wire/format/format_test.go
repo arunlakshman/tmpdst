@@ -10,9 +10,9 @@ import (
 
 func sample() []Batch {
 	return []Batch{
-		{core.TP("orders", 0), 3, []byte("hello")},
-		{core.TP("orders", 7), 1, []byte("x")},
-		{core.TP("t/\u00e9", 2), 9, bytes.Repeat([]byte{0xAB}, 40)},
+		{core.TopicPartitionKey("orders", 0), 3, []byte("hello")},
+		{core.TopicPartitionKey("orders", 7), 1, []byte("x")},
+		{core.TopicPartitionKey("t/\u00e9", 2), 9, bytes.Repeat([]byte{0xAB}, 40)},
 	}
 }
 
@@ -70,10 +70,10 @@ func TestVerifyBatchCorrupt(t *testing.T) {
 func TestEncodeInvalid(t *testing.T) {
 	bad := [][]Batch{
 		nil,
-		{{core.TP("", 0), 1, []byte("x")}},
-		{{core.TP("t", -1), 1, []byte("x")}},
-		{{core.TP("t", 0), 1, nil}},
-		{{core.TP(string(make([]byte, 70000)), 0), 1, []byte("x")}},
+		{{core.TopicPartitionKey("", 0), 1, []byte("x")}},
+		{{core.TopicPartitionKey("t", -1), 1, []byte("x")}},
+		{{core.TopicPartitionKey("t", 0), 1, nil}},
+		{{core.TopicPartitionKey(string(make([]byte, 70000)), 0), 1, []byte("x")}},
 	}
 	for i, b := range bad {
 		if _, _, err := Encode(b); !errors.Is(err, ErrInvalid) || Code(err) != core.ErrInvalid {

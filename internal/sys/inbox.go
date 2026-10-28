@@ -95,11 +95,11 @@ func (i *Inbox) Close() {
 	})
 }
 
-// Control and Data are the two queues as core.Queue views for the policy.
-func (i *Inbox) Control() core.Queue { return ctrlQ{i} }
+// Control and Data are the two queues as core.Inbox views for the policy.
+func (i *Inbox) Control() core.Inbox { return ctrlQ{i} }
 
 // Data returns the data queue view of the inbox.
-func (i *Inbox) Data() core.Queue { return dataQ{i} }
+func (i *Inbox) Data() core.Inbox { return dataQ{i} }
 
 type ctrlQ struct{ i *Inbox }
 

@@ -8,14 +8,14 @@ import (
 
 type wallClock struct{}
 
-func (wallClock) Mono() core.Time {
-	return core.Time(time.Now().UnixNano())
+func (wallClock) Mono() core.NodeTime {
+	return core.NodeTime(time.Now().UnixNano())
 }
-func (wallClock) Wall() core.WallTime {
-	return core.WallTime(time.Now().UnixNano())
+func (wallClock) Wall() core.RealTime {
+	return core.RealTime(time.Now().UnixNano())
 }
 
-// prodEnv is a minimal core.Env for production manicp (no buggify).
+// prodEnv is a minimal core.Environment for production manicp (no buggify).
 type prodEnv struct{ n uint64 }
 
 func (e *prodEnv) Uint64() uint64 {

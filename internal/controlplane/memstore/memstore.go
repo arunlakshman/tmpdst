@@ -33,7 +33,7 @@ func (s *Store) exec(ctx context.Context, op core.ControlPlaneOperation) (core.C
 
 func execAs[R any](ctx context.Context, s *Store, op core.ControlPlaneOperation) (R, core.ErrCode, error) {
 	d, err := s.exec(ctx, op)
-	return core.RespAs[R](d), d.Err, err
+	return core.ResponseAs[R](d), d.Err, err
 }
 
 // CommitSegment implements cp.Store.
@@ -49,7 +49,7 @@ func (s *Store) Lookup(ctx context.Context, op core.FindSegments) (core.FindSegm
 // DescribeTopics implements cp.Store.
 func (s *Store) DescribeTopics(ctx context.Context, op core.DescribeTopics) (core.DescribeTopicsResp, error) {
 	d, err := s.exec(ctx, op)
-	return core.RespAs[core.DescribeTopicsResp](d), err
+	return core.ResponseAs[core.DescribeTopicsResp](d), err
 }
 
 // CreateTopic implements cp.Store.

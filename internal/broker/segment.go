@@ -27,11 +27,11 @@ type openSegment struct {
 	parts   []core.TopicPartition // distinct partitions buffered
 	// Flush timer generation matched by onTimer. 0 means none is armed, an
 	// empty buffer or one just sealed.
-	gen core.TimerGen
+	gen core.TimerVersion
 	// Time of the first batch, for the segment_sealed age fact and
 	// SegmentCaps. Not used to schedule. Does not move when
 	// BugTimerFromLastBatch re-arms gen.
-	since core.Time
+	since core.NodeTime
 }
 
 // Why a segment was sealed (the "reason" of the segment_sealed fact).
@@ -60,17 +60,17 @@ type segment struct {
 	key      string
 	data     []byte
 	state    segState
-	req      core.ReqID
-	gen      core.TimerGen
+	req      core.RequestID
+	gen      core.TimerVersion
 	attempts int
 
 	// sealedAt and putDoneAt are facts only, and StateHash omits them.
 	// The PUT starts at the seal. commitAt is the time of the first
 	// CommitSegment, and commitStarted keeps that time fixed.
 	// retryCommit reads commitAt for the deadline. StateHash omits both.
-	sealedAt      core.Time
-	putDoneAt     core.Time
-	commitAt      core.Time
+	sealedAt      core.NodeTime
+	putDoneAt     core.NodeTime
+	commitAt      core.NodeTime
 	commitStarted bool
 }
 
@@ -329,7 +329,7 @@ func (b *Broker) retryPut(s *segment) []core.Action {
 
 // retryCommit repeats a commit under the same key until CommitDeadline has
 // passed since the first CommitSegment: capped exponential backoff with
-// jitter (drawn from the Env, so deterministic in simulation), never a count
+// jitter (drawn from the Environment, so deterministic in simulation), never a count
 // limit. Past the deadline the segment fails; the write may still land later
 // (decision 15).
 func (b *Broker) retryCommit(s *segment) []core.Action {
@@ -352,7 +352,7 @@ func (b *Broker) retryCommit(s *segment) []core.Action {
 	return []core.Action{core.SetTimer{ID: core.TimerID(s.id), Gen: b.timerGen, After: d}}
 }
 
-func (b *Broker) segTimer(s *segment, gen core.TimerGen) []core.Action {
+func (b *Broker) segTimer(s *segment, gen core.TimerVersion) []core.Action {
 	if s.gen != gen {
 		return nil
 	}

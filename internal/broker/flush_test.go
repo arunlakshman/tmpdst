@@ -187,7 +187,7 @@ func TestCommitTooLargeFailsBatches(t *testing.T) {
 	if h.b.bufBytes != 0 || len(h.b.segs) != 0 {
 		t.Fatalf("buffered %d, segments %d", h.b.bufBytes, len(h.b.segs))
 	}
-	if h.cp.End(core.TP("t", 0)) != 0 {
+	if h.cp.End(core.TopicPartitionKey("t", 0)) != 0 {
 		t.Fatal("refused segment changed the log")
 	}
 }

@@ -66,7 +66,7 @@ type client struct {
 
 // Workload is N closed-loop clients speaking the echo protocol.
 type Workload struct {
-	env  core.Env
+	env  core.Environment
 	self core.NodeInstance
 	opts Opts
 	hist sim.History
@@ -76,7 +76,7 @@ type Workload struct {
 }
 
 // NewWorkload builds the workload machine.
-func NewWorkload(env core.Env, self core.NodeInstance, brokers []core.NodeInstance, o Opts) *Workload {
+func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.NodeInstance, o Opts) *Workload {
 	w := &Workload{env: env, self: self, opts: o}
 	w.loop = session.Loop[*client]{
 		Connected: func(c *client) bool { return c.State == csReady || c.State == csBusy },

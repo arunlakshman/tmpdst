@@ -20,8 +20,8 @@ import (
 // requests built with kwire. It compares every ack, fetch and ListOffsets
 // answer with one veritas.Partition per topic partition.
 
-var c1TPs = []core.TopicPartition{core.TP("t", 0), core.TP("t", 1),
-	core.TP("u", 0), core.TP("u", 1), core.TP("u", 2)}
+var c1TPs = []core.TopicPartition{core.TopicPartitionKey("t", 0), core.TopicPartitionKey("t", 1),
+	core.TopicPartitionKey("u", 0), core.TopicPartitionKey("u", 1), core.TopicPartitionKey("u", 2)}
 
 // An Idem entry carries a producer id. The broker refuses these entries
 // (decision 41), so the test expects an error and no new record.

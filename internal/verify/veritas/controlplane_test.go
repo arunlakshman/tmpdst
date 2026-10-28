@@ -9,7 +9,7 @@ import (
 	"manifester/internal/verify/veritas/veritastest"
 )
 
-func tp(t string, p int32) core.TopicPartition { return core.TP(t, p) }
+func tp(t string, p int32) core.TopicPartition { return core.TopicPartitionKey(t, p) }
 
 func call(c *ControlPlane, op core.ControlPlaneOperation) core.ControlPlaneDone {
 	return c.Exec(core.ControlPlaneCall{Req: 9, Op: op}).(core.ControlPlaneDone)

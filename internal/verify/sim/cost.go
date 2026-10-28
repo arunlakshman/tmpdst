@@ -4,7 +4,7 @@ import "manifester/internal/core"
 
 // CostModel says how long a node's loop goroutine stays busy for one Step
 // (docs/flow-control.md sec. 4.1). Deliveries go into the node's simulated
-// control/data inboxes; the node picks with core.InboxPolicy and is busy for
+// control/data inboxes; the node picks with core.InboxPicker and is busy for
 // Sample(...) after each Step. Zero cost reproduces an instantaneous Step.
 type CostModel interface {
 	Sample(body core.EventData, r CountedRand) core.Duration
@@ -24,8 +24,8 @@ type CostParams struct {
 // NodeInbox is the simulator's model of one node's two inboxes and its busy
 // loop goroutine. Queue lengths and BusyUntil are folded into the state hash.
 type NodeInbox interface {
-	Control() core.Queue
-	Data() core.Queue
+	Control() core.Inbox
+	Data() core.Inbox
 	// Push routes with core.InboxKindOf.
 	Push(body core.EventData)
 	BusyUntil() Time

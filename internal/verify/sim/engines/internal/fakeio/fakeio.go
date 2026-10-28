@@ -166,7 +166,7 @@ func (p Params) Draw(ctx sim.EngineCtx, pre string, until *sim.Time, fields ...c
 // latency, extra.
 func (c *Core) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.IOCall) {
 	r, now, p := ctx.Rand(), ctx.Now(), c.h.Params
-	req := core.Field{Key: "req", Value: core.U64(a.ReqID())}
+	req := core.Field{Key: "req", Value: core.U64(a.RequestID())}
 	kind := Normal
 	if !c.recovery {
 		kind = p.Draw(ctx, c.h.Prefix, &c.until, req)
@@ -261,7 +261,7 @@ func (c *Core) StateHash() uint64 {
 		for _, b := range p.From.Inc {
 			mix(uint64(b))
 		}
-		mix(uint64(p.Act.ReqID()))
+		mix(uint64(p.Act.RequestID()))
 		mix(uint64(p.Kind))
 		mix(uint64(p.T1))
 		mix(uint64(p.T2))

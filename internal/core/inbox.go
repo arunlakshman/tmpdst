@@ -36,15 +36,15 @@ func InboxKindOf(b EventData) InboxKind {
 	}
 }
 
-// Queue is one inbox as seen by an InboxPolicy. Production backs it with a
+// Inbox is one inbox as seen by an InboxPicker. Production backs it with a
 // channel (non-blocking receive); the simulator backs it with a slice.
-type Queue interface {
+type Inbox interface {
 	Len() int
 	// Pop removes and returns the head. ok=false when empty.
 	Pop() (body EventData, ok bool)
 }
 
-// InboxPolicy picks the next event for Step. It must be a pure function of the
+// InboxPicker picks the next event for Step. It must be a pure function of the
 // two queues' contents and its own counters, and is the SAME code in
 // production and simulation (docs/flow-control.md sec. 3.3):
 //
@@ -53,6 +53,6 @@ type Queue interface {
 //  3. else ok=false (the caller sleeps until either queue is non-empty).
 //
 // Go's select must never decide priority.
-type InboxPolicy interface {
-	Next(control, data Queue) (body EventData, ok bool)
+type InboxPicker interface {
+	Next(control, data Inbox) (body EventData, ok bool)
 }

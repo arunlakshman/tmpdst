@@ -2,7 +2,7 @@ package sim
 
 import "manifester/internal/core"
 
-// inboxQueue is one inbox: a FIFO slice implementing core.Queue.
+// inboxQueue is one inbox: a FIFO slice implementing core.Inbox.
 type inboxQueue struct{ q []core.EventData }
 
 func (q *inboxQueue) Len() int { return len(q.q) }
@@ -27,8 +27,8 @@ type nodeInbox struct {
 // NewNodeInbox returns an empty, idle inbox.
 func NewNodeInbox() NodeInbox { return &nodeInbox{} }
 
-func (n *nodeInbox) Control() core.Queue { return &n.ctrl }
-func (n *nodeInbox) Data() core.Queue    { return &n.data }
+func (n *nodeInbox) Control() core.Inbox { return &n.ctrl }
+func (n *nodeInbox) Data() core.Inbox    { return &n.data }
 func (n *nodeInbox) BusyUntil() Time     { return n.busy }
 
 // Push routes body with core.InboxKindOf.

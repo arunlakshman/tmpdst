@@ -53,7 +53,7 @@ func NewDynLog(db DB, table string, o DynLogOptions) *DynLog {
 	return &DynLog{db: db, table: table, o: o}
 }
 
-func slotKey(n core.LogSlot) string { return fmt.Sprintf("%020d", n) }
+func slotKey(n core.LogPosition) string { return fmt.Sprintf("%020d", n) }
 func sv(v string) types.AttributeValue {
 	return &types.AttributeValueMemberS{Value: v}
 }
@@ -62,7 +62,7 @@ func nv(v int64) types.AttributeValue {
 }
 
 // Append implements Log with a conditional PutItem.
-func (l *DynLog) Append(ctx context.Context, slot core.LogSlot, data []byte) ([]byte, bool, error) {
+func (l *DynLog) Append(ctx context.Context, slot core.LogPosition, data []byte) ([]byte, bool, error) {
 	it := map[string]types.AttributeValue{
 		"pk": sv(logPK), "sk": sv(slotKey(slot)),
 		"d": &types.AttributeValueMemberB{Value: data},
@@ -110,17 +110,17 @@ func itemData(it map[string]types.AttributeValue) []byte {
 	return b.Value
 }
 
-func itemSlot(it map[string]types.AttributeValue) (core.LogSlot, error) {
+func itemSlot(it map[string]types.AttributeValue) (core.LogPosition, error) {
 	sk, ok := it["sk"].(*types.AttributeValueMemberS)
 	if !ok {
 		return 0, ErrInvalidSlot
 	}
 	n, err := strconv.ParseInt(sk.Value, 10, 64)
-	return core.LogSlot(n), err
+	return core.LogPosition(n), err
 }
 
 // Read implements Log with consistent Queries.
-func (l *DynLog) Read(ctx context.Context, from core.LogSlot, limit int) ([]core.LogEntry, error) {
+func (l *DynLog) Read(ctx context.Context, from core.LogPosition, limit int) ([]core.LogEntry, error) {
 	var out []core.LogEntry
 	var start map[string]types.AttributeValue
 	for len(out) < limit {
@@ -152,7 +152,7 @@ func (l *DynLog) Read(ctx context.Context, from core.LogSlot, limit int) ([]core
 }
 
 // CheckTail implements Log.
-func (l *DynLog) CheckTail(ctx context.Context) (core.LogSlot, error) {
+func (l *DynLog) CheckTail(ctx context.Context) (core.LogPosition, error) {
 	q := l.between(slotKey(0), slotMax)
 	q.ConsistentRead = aws.Bool(true)
 	q.ScanIndexForward = aws.Bool(false)
@@ -166,7 +166,7 @@ func (l *DynLog) CheckTail(ctx context.Context) (core.LogSlot, error) {
 }
 
 // TrimThrough tombstones every slot at or below through.
-func (l *DynLog) TrimThrough(ctx context.Context, through core.LogSlot) error {
+func (l *DynLog) TrimThrough(ctx context.Context, through core.LogPosition) error {
 	if through < 0 {
 		return ErrInvalidSlot
 	}

@@ -83,7 +83,7 @@ func TestOrderedLandings(t *testing.T) {
 	e.Execute(c, a, core.LogAppend{Req: 2, Slot: 0, Data: []byte("a")})
 	e.Execute(c, a, core.LogAppend{Req: 3, Slot: 1, Data: []byte("b")})
 	c.Run()
-	for _, req := range []core.ReqID{1, 2, 3} {
+	for _, req := range []core.RequestID{1, 2, 3} {
 		if d := c.Find(req).(core.LogAppendDone); d.Err != core.OK || d.Taken {
 			t.Fatal(req, d)
 		}
@@ -94,7 +94,7 @@ func TestOrderedLandings(t *testing.T) {
 	if r.Err != core.OK || len(r.Entries) != 3 {
 		t.Fatal(r)
 	}
-	want := []core.LogSlot{0, 1, 2}
+	want := []core.LogPosition{0, 1, 2}
 	for i, ent := range r.Entries {
 		if ent.Slot != want[i] {
 			t.Fatalf("entry %d slot %d, want %d", i, ent.Slot, want[i])
@@ -158,16 +158,16 @@ func TestDeterminism(t *testing.T) {
 		e, c, a := setup(f, seed)
 		for i := range 40 {
 			c.T += sim.Time(ms)
-			slot := core.LogSlot(i % 5)
+			slot := core.LogPosition(i % 5)
 			switch i % 4 {
 			case 0:
-				e.Execute(c, a, core.LogAppend{Req: core.ReqID(i), Slot: slot, Data: []byte{byte(i)}})
+				e.Execute(c, a, core.LogAppend{Req: core.RequestID(i), Slot: slot, Data: []byte{byte(i)}})
 			case 1:
-				e.Execute(c, a, core.LogRead{Req: core.ReqID(i), From: 0, Limit: 8})
+				e.Execute(c, a, core.LogRead{Req: core.RequestID(i), From: 0, Limit: 8})
 			case 2:
-				e.Execute(c, a, core.LogGetEnd{Req: core.ReqID(i)})
+				e.Execute(c, a, core.LogGetEnd{Req: core.RequestID(i)})
 			default:
-				e.Execute(c, a, core.LogDeleteOld{Req: core.ReqID(i), Through: 0})
+				e.Execute(c, a, core.LogDeleteOld{Req: core.RequestID(i), Through: 0})
 			}
 		}
 		mid := e.StateHash()

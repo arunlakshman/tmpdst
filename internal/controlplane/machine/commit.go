@@ -16,29 +16,29 @@ const groupMagic byte = 0xC5
 // ClientOp is one client command for the commit queue. Prod injects via
 // controlplane/server; sim delivers core.ControlPlaneDeliver which becomes Offer here.
 type ClientOp struct {
-	Req  core.ReqID
+	Req  core.RequestID
 	Cmd  applier.Entry     // ID is assigned when the group is built
 	From core.NodeInstance // broker; empty skips ControlPlaneReply (unit tests)
 }
 
 // Answer is the apply-time result for one ClientOp.Req. TakeAnswers drains them.
 type Answer struct {
-	Req  core.ReqID
+	Req  core.RequestID
 	From core.NodeInstance
 	Done core.ControlPlaneDone
 }
 
 // pendingCmd is a queued or in-flight client command.
 type pendingCmd struct {
-	req  core.ReqID
+	req  core.RequestID
 	from core.NodeInstance // broker; namespaces Req across brokers
 	cmd  applier.Entry
 }
 
 // flight is one in-flight commit LogAppend (one of at most K).
 type flight struct {
-	req  core.ReqID
-	slot core.LogSlot
+	req  core.RequestID
+	slot core.LogPosition
 	id   string
 	data []byte
 	cmds []pendingCmd
@@ -51,7 +51,7 @@ type flight struct {
 // A CommitSegment whose key is already in the fold is answered immediately
 // (no LogAppend). A retry for a key still queued or in flight retargets that
 // waiter to the new Req/From so a bridge timeout cannot orphan the apply
-// answer onto a dead broker ReqID.
+// answer onto a dead broker RequestID.
 func (m *Machine) Offer(op ClientOp) []core.Action {
 	if m.exited {
 		return nil
@@ -105,7 +105,7 @@ func (m *Machine) retargetCommit(op ClientOp) bool {
 			return true
 		}
 	}
-	reqs := make([]core.ReqID, 0, len(m.flights))
+	reqs := make([]core.RequestID, 0, len(m.flights))
 	for req := range m.flights {
 		reqs = append(reqs, req)
 	}
@@ -199,13 +199,13 @@ func (m *Machine) projectBases(c core.CommitSegment) []core.Offset {
 	return bases
 }
 
-func (m *Machine) alloc() core.LogSlot {
+func (m *Machine) alloc() core.LogPosition {
 	n := max(m.high, m.applied)
 	m.high = n + 1
 	return n
 }
 
-func (m *Machine) observeSlot(n core.LogSlot) {
+func (m *Machine) observeSlot(n core.LogPosition) {
 	m.high = max(m.high, n+1)
 }
 
@@ -332,7 +332,7 @@ func takeUvarint(b []byte) (uint64, []byte, bool) {
 	return v, b[n:], true
 }
 
-func (m *Machine) applySlot(slot core.LogSlot, data []byte) error {
+func (m *Machine) applySlot(slot core.LogPosition, data []byte) error {
 	rank, writer, payload, ok := unwrap(data)
 	if !ok {
 		return fmt.Errorf("machine: truncated log envelope at slot %d", slot)
@@ -368,7 +368,7 @@ func (m *Machine) applySlot(slot core.LogSlot, data []byte) error {
 	return nil
 }
 
-func (m *Machine) afterApply(slot core.LogSlot) {
+func (m *Machine) afterApply(slot core.LogPosition) {
 	m.env.Reachable("logcp-sim: replayed key answered from the window")
 	window := m.cfg.WindowSlots
 	stride := m.cfg.TrimStride

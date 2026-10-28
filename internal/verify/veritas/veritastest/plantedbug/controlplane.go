@@ -172,7 +172,7 @@ func PartialApplyOnInvalidBatch() ControlPlaneBug {
 	return beforeControlPlane("PartialApplyOnInvalidBatch",
 		"A commit with an invalid batch applies the valid batches before it, instead of nothing.",
 		func() func(suites.ControlPlaneSubject, generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
-			n := core.ReqID(0)
+			n := core.RequestID(0)
 			return func(inner suites.ControlPlaneSubject, op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
 				call, commit, ok := commitOf(op)
 				if ok && commit.SegmentKey != "" {

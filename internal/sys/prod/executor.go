@@ -160,7 +160,7 @@ func (e *Executor) object(a core.IOCall) core.IOResult {
 		}
 		return core.ObjectListDone{Req: a.Req, Err: c}
 	default:
-		return core.ObjectPutDone{Req: a.ReqID(), Err: core.ErrInvalid}
+		return core.ObjectPutDone{Req: a.RequestID(), Err: core.ErrInvalid}
 	}
 }
 

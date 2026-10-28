@@ -1,5 +1,5 @@
 // Package core is the deterministic heart of the engine: plain-data Events and
-// Actions, the StateMachine contract, and the Env through which the only
+// Actions, the StateMachine contract, and the Environment through which the only
 // permitted nondeterminism (randomness, buggify) and assertion recording enter.
 //
 // Rules (enforced by depguard/forbidigo in CI):

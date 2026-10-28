@@ -18,7 +18,7 @@ func (b *Broker) produce(s *slot, r *kmsg.ProduceRequest) []core.Action {
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
 			rp := &resp.Topics[i].Partitions[j]
-			tp := core.TP(t.Topic, p.Partition)
+			tp := core.TopicPartitionKey(t.Topic, p.Partition)
 			pb, code := b.admit(s, r, tp, p.Records, rp)
 			if code != errNone {
 				rp.ErrorCode = int16(code)

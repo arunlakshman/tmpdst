@@ -8,7 +8,7 @@ import (
 )
 
 // Segment keys are "seg/<id hex>": one flat name (decision 43). The ID is a
-// random 128-bit value the broker draws from Env.NewID, never from a ReqID
+// random 128-bit value the broker draws from Environment.NewID, never from a RequestID
 // (decision 10), so a key is unique across nodes, boots and segments, and a
 // retry of one commit reuses it. The hex is 32 lower-case digits, so the key
 // has a single canonical spelling and no case aliasing on case-insensitive

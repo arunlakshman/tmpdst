@@ -49,13 +49,13 @@ func (o ControlPlaneOp) Describe() string {
 }
 
 // ControlPlaneOps returns a generator of control-plane operations for profile
-// p. Operation i carries ReqID i+1. Commits cover a fresh key, a replay, a
+// p. Operation i carries RequestID i+1. Commits cover a fresh key, a replay, a
 // conflict, the same batches under a fresh key, and five kinds of malformed
 // request. Lookups cover From = -1, From inside long runs and MaxBytes cuts.
 // DescribeTopics covers known, unknown and all topics.
 func ControlPlaneOps(p Profile) func(r *veritastest.Rand, i int) ControlPlaneOp {
 	return func(r *veritastest.Rand, i int) ControlPlaneOp {
-		req := core.ReqID(i + 1)
+		req := core.RequestID(i + 1)
 		switch pickWeighted(r, p.CreateTopicWeight, p.CommitWeight, p.LookupWeight, p.DescribeWeight) {
 		case 0:
 			return genCreateTopic(p, r)
@@ -125,7 +125,7 @@ func genInvalidCommit(p Profile, r *veritastest.Rand) core.CommitSegment {
 }
 
 func genLookup(p Profile, r *veritastest.Rand) core.FindSegments {
-	tp := core.TP(pick(r, p.Topics), int32(r.Intn(p.PartitionCount)))
+	tp := core.TopicPartitionKey(pick(r, p.Topics), int32(r.Intn(p.PartitionCount)))
 	from := int64(r.Intn(p.LookupShortSpan))
 	if percent(r, p.LookupLongPercent) {
 		from = int64(r.Intn(p.LookupLongSpan))
@@ -190,7 +190,7 @@ func shapeSeed(shape string) uint64 {
 func genBatch(p Profile, r *veritastest.Rand, segmentKey string) core.PendingBatch {
 	topics := p.Topics[:min(p.BatchTopics, len(p.Topics))]
 	return core.PendingBatch{
-		TP:      core.TP(pick(r, topics), int32(r.Intn(p.BatchPartitions))),
+		TP:      core.TopicPartitionKey(pick(r, topics), int32(r.Intn(p.BatchPartitions))),
 		Records: 1 + int64(r.Intn(3)),
 		Loc:     core.SegmentRef{Key: segmentKey, Off: int64(r.Intn(4)) * 100, Len: int64(1 + r.Intn(3)*50)},
 	}
@@ -288,10 +288,10 @@ func shrinkLookup(l core.FindSegments) []core.ControlPlaneOperation {
 		out = append(out, core.FindSegments{TP: l.TP, From: l.From / 2, MaxBytes: l.MaxBytes})
 	}
 	if l.TP.Partition > 0 {
-		out = append(out, core.FindSegments{TP: core.TP(l.TP.Topic, 0), From: l.From, MaxBytes: l.MaxBytes})
+		out = append(out, core.FindSegments{TP: core.TopicPartitionKey(l.TP.Topic, 0), From: l.From, MaxBytes: l.MaxBytes})
 	}
 	for _, t := range shorterStrings(l.TP.Topic) {
-		out = append(out, core.FindSegments{TP: core.TP(t, l.TP.Partition), From: l.From, MaxBytes: l.MaxBytes})
+		out = append(out, core.FindSegments{TP: core.TopicPartitionKey(t, l.TP.Partition), From: l.From, MaxBytes: l.MaxBytes})
 	}
 	return out
 }
@@ -327,7 +327,7 @@ func formatCPOp(op core.ControlPlaneOperation) string {
 	case core.CommitSegment:
 		return fmt.Sprintf("core.CommitSegment{SegmentKey: %q%s}", op.SegmentKey, formatBatchesField(op.Batches))
 	case core.FindSegments:
-		return fmt.Sprintf("core.FindSegments{TP: core.TP(%q, %d), From: %d, MaxBytes: %d}", op.TP.Topic, op.TP.Partition, op.From, op.MaxBytes)
+		return fmt.Sprintf("core.FindSegments{TP: core.TopicPartitionKey(%q, %d), From: %d, MaxBytes: %d}", op.TP.Topic, op.TP.Partition, op.From, op.MaxBytes)
 	case core.DescribeTopics:
 		if op.Topics == nil {
 			return "core.DescribeTopics{}"
@@ -343,7 +343,7 @@ func formatBatchesField(batches []core.PendingBatch) string {
 	}
 	parts := make([]string, len(batches))
 	for i, b := range batches {
-		parts[i] = fmt.Sprintf("{TP: core.TP(%q, %d), Records: %d, Loc: %s}", b.TP.Topic, b.TP.Partition, b.Records, formatRef(b.Loc))
+		parts[i] = fmt.Sprintf("{TP: core.TopicPartitionKey(%q, %d), Records: %d, Loc: %s}", b.TP.Topic, b.TP.Partition, b.Records, formatRef(b.Loc))
 	}
 	return ", Batches: []core.PendingBatch{" + strings.Join(parts, ", ") + "}"
 }

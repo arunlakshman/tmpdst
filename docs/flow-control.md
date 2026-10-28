@@ -46,7 +46,7 @@ The broker never drops a request it has already accepted.
 
 ### How the priority is deterministic and simulation-tested
 
-1. **The policy is a pure function, `core.InboxPolicy.Next(ctrl, data)`, shared
+1. **The policy is a pure function, `core.InboxPicker.Next(ctrl, data)`, shared
    by production and the simulator.** Go's `select` never decides priority,
    because it picks randomly among ready cases. Production reads the control
    queue first without blocking and uses `select` only to sleep when both
@@ -192,7 +192,7 @@ Properties:
   differently; correctness must not depend on that interleaving (the simulator
   checks this, §4).
 - **Deterministic given the queue contents.** The policy is a pure function
-  (`core.InboxPolicy`), with no Go `select` deciding priority. In Go, `select`
+  (`core.InboxPicker`), with no Go `select` deciding priority. In Go, `select`
   picks randomly among ready cases, so the production loop drains control with
   non-blocking receives first and only uses a two-way `select` to *sleep* when
   both queues are empty.
@@ -231,7 +231,7 @@ simNode = {
 
 engines/network deliver → append to node.ctrl or node.data (NOT straight into Step)
 when node is idle and has queued events:
-    ev   := core.InboxPolicy.Next(ctrl, data)     // the SAME code as production
+    ev   := core.InboxPicker.Next(ctrl, data)     // the SAME code as production
     cost := CostModel.Sample(ev, rng)             // seeded
     run Step(ev) at now; node busy until now+cost; actions issued at now
 ```

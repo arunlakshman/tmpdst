@@ -32,8 +32,8 @@ type op struct {
 	kind     opKind
 	state    opState
 	retry    opState // state a backoff returns to
-	req      core.ReqID
-	gen      core.TimerGen
+	req      core.RequestID
+	gen      core.TimerVersion
 	attempts int
 	s        *slot
 
@@ -52,7 +52,7 @@ type op struct {
 	corrupt bool // the last failure was a corrupt GET
 }
 
-func (b *Broker) findOp(r core.ReqID) *op {
+func (b *Broker) findOp(r core.RequestID) *op {
 	for _, o := range b.ops {
 		if o.req == r && o.req != 0 {
 			return o
@@ -135,7 +135,7 @@ func (b *Broker) exhaustCode(o *op) kafkaCode {
 	return errRequestTimedOut
 }
 
-func (b *Broker) opTimer(o *op, gen core.TimerGen) []core.Action {
+func (b *Broker) opTimer(o *op, gen core.TimerVersion) []core.Action {
 	if o.state != opBackoff || o.gen != gen {
 		return nil
 	}
@@ -288,19 +288,19 @@ func (b *Broker) missing(req core.Request) []string {
 		}
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				add(core.TP(t.Topic, p.Partition))
+				add(core.TopicPartitionKey(t.Topic, p.Partition))
 			}
 		}
 	case *kmsg.FetchRequest:
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				add(core.TP(t.Topic, p.Partition))
+				add(core.TopicPartitionKey(t.Topic, p.Partition))
 			}
 		}
 	case *kmsg.ListOffsetsRequest:
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				add(core.TP(t.Topic, p.Partition))
+				add(core.TopicPartitionKey(t.Topic, p.Partition))
 			}
 		}
 	}

@@ -9,7 +9,7 @@ import (
 )
 
 func TestRunRoundTripAndCorruption(t *testing.T) {
-	tp := core.TP("t", 3)
+	tp := core.TopicPartitionKey("t", 3)
 	rs := []core.BatchRange{
 		{TP: tp, Base: 10, Count: 2, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 50}},
 		{TP: tp, Base: 12, Count: 5, Loc: core.SegmentRef{Key: "s1", Off: 50, Len: -1}},
@@ -63,7 +63,7 @@ func TestStoreFailureIsFailStop(t *testing.T) {
 	for name, f := range map[string]func(){
 		"Exec":        func() { a.Exec(core.ControlPlaneCall{Op: core.DescribeTopics{}}) },
 		"CreateTopic": func() { a.CreateTopic("t", 1) },
-		"End":         func() { a.End(core.TP("t", 0)) },
+		"End":         func() { a.End(core.TopicPartitionKey("t", 0)) },
 	} {
 		func() {
 			defer func() {
@@ -78,7 +78,7 @@ func TestStoreFailureIsFailStop(t *testing.T) {
 
 func TestCorruptStoredRecordsPanic(t *testing.T) {
 	a := New(NewMemKV())
-	tp := core.TP("t", 0)
+	tp := core.TopicPartitionKey("t", 0)
 	_ = a.kv.Update(func(tx Tx) {
 		tx.Set(runKey(tp, 0), []byte{9, 9})
 		tx.Set(endKey(tp), []byte{5})

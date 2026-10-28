@@ -17,10 +17,10 @@ type ControlPlanePair struct {
 	specSubject ControlPlaneSubject
 	subject     ControlPlaneSubject
 	model       *cpModel
-	extra       core.ReqID
+	extra       core.RequestID
 }
 
-func (p *ControlPlanePair) nextReq() core.ReqID {
+func (p *ControlPlanePair) nextReq() core.RequestID {
 	p.extra++
 	return extraReqBase + p.extra
 }

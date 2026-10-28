@@ -20,8 +20,8 @@ var (
 
 // Clock stamps Event.At/Wall at inbox dequeue.
 type Clock interface {
-	Mono() core.Time
-	Wall() core.WallTime
+	Mono() core.NodeTime
+	Wall() core.RealTime
 }
 
 // Executor runs I/O only. Exactly one IOResult per IOCall, delivered to
@@ -37,7 +37,7 @@ type InjectFunc func() []core.Action
 // Bundle is everything nondeterministic a control-plane process needs.
 type Bundle struct {
 	Clock     Clock
-	Env       core.Env
+	Env       core.Environment
 	Inbox     *Inbox
 	Facts     func(core.Fact)
 	Shutdown  <-chan struct{}
@@ -75,7 +75,7 @@ func Run(ctx context.Context, b Bundle, exec Executor, f core.MachineFactory, se
 	if done, err := step(core.NodeStarted{Self: self}); done {
 		return err
 	}
-	var policy core.InboxPolicy = core.ControlFirst{}
+	var policy core.InboxPicker = core.ControlFirstPicker{}
 	ctrl, data := in.Control(), in.Data()
 	shutdown := b.Shutdown
 	var kill <-chan time.Time
@@ -86,7 +86,7 @@ func Run(ctx context.Context, b Bundle, exec Executor, f core.MachineFactory, se
 		select {
 		case <-shutdown:
 			shutdown = nil
-			in.DeliverControl(core.StopRequest{Deadline: b.Clock.Mono() + core.Time(b.StopGrace)})
+			in.DeliverControl(core.StopRequest{Deadline: b.Clock.Mono() + core.NodeTime(b.StopGrace)})
 			t := time.NewTimer(time.Duration(b.StopGrace))
 			defer t.Stop()
 			kill = t.C

@@ -24,7 +24,7 @@ import (
 type Config struct {
 	Machine machine.Config
 	Self    core.NodeInstance
-	Env     core.Env
+	Env     core.Environment
 	Clock   run.Clock
 	Log     exec.Log
 	Objects exec.ObjectStore
@@ -43,8 +43,8 @@ type Node struct {
 	health *health.Server
 
 	mu        sync.Mutex
-	waiters   map[core.ReqID]chan core.ControlPlaneDone
-	nextReq   core.ReqID
+	waiters   map[core.RequestID]chan core.ControlPlaneDone
+	nextReq   core.RequestID
 	shutdown  chan struct{}
 	loopDone  chan error
 	cancel    context.CancelFunc
@@ -74,7 +74,7 @@ func New(cfg Config) *Node {
 		inbox:    run.NewInbox(64),
 		inject:   make(chan run.InjectFunc, 64),
 		health:   health.NewServer(),
-		waiters:  map[core.ReqID]chan core.ControlPlaneDone{},
+		waiters:  map[core.RequestID]chan core.ControlPlaneDone{},
 		shutdown: make(chan struct{}),
 		loopDone: make(chan error, 1),
 	}
@@ -100,7 +100,7 @@ func (n *Node) Start(ctx context.Context) error {
 	}
 	f := machine.New(n.cfg.Machine)
 	go func() {
-		err := run.Run(runCtx, b, ex, func(env core.Env, self core.NodeInstance) core.Machine {
+		err := run.Run(runCtx, b, ex, func(env core.Environment, self core.NodeInstance) core.Machine {
 			m := f(env, self).(*machine.Machine)
 			n.m.Store(m)
 			return m
@@ -162,7 +162,7 @@ func (n *Node) Close() error {
 	return n.closeErr
 }
 
-func (n *Node) allocReq() core.ReqID {
+func (n *Node) allocReq() core.RequestID {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.nextReq++
@@ -287,7 +287,7 @@ func (n *Node) CommitSegment(ctx context.Context, req *cpv1.CommitSegmentRequest
 	if d.Err != core.OK {
 		return nil, rpcError(d.Err, d.Outcome)
 	}
-	return apiconv.CommitSegmentRespFromCore(core.RespAs[core.CommitSegmentResp](d)), nil
+	return apiconv.CommitSegmentRespFromCore(core.ResponseAs[core.CommitSegmentResp](d)), nil
 }
 
 // Lookup implements ControlPlane.
@@ -304,7 +304,7 @@ func (n *Node) Lookup(ctx context.Context, req *cpv1.LookupRequest) (*cpv1.Looku
 	if d.Err != core.OK {
 		return nil, rpcError(d.Err, d.Outcome)
 	}
-	return apiconv.LookupRespFromCore(core.RespAs[core.FindSegmentsResp](d)), nil
+	return apiconv.LookupRespFromCore(core.ResponseAs[core.FindSegmentsResp](d)), nil
 }
 
 // DescribeTopics implements ControlPlane.
@@ -321,7 +321,7 @@ func (n *Node) DescribeTopics(ctx context.Context, req *cpv1.DescribeTopicsReque
 	if d.Err != core.OK {
 		return nil, rpcError(d.Err, d.Outcome)
 	}
-	return apiconv.DescribeTopicsRespFromCore(core.RespAs[core.DescribeTopicsResp](d)), nil
+	return apiconv.DescribeTopicsRespFromCore(core.ResponseAs[core.DescribeTopicsResp](d)), nil
 }
 
 // CreateTopic implements ControlPlane.

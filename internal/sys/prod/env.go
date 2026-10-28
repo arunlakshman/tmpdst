@@ -11,7 +11,7 @@ import (
 	"manifester/internal/core"
 )
 
-// Env is the production core.Env: crypto-seeded randomness, inert buggify and
+// Env is the production core.Environment: crypto-seeded randomness, inert buggify and
 // assertions that log violations and carry on.
 type Env struct {
 	mu  sync.Mutex
@@ -19,7 +19,7 @@ type Env struct {
 	log *slog.Logger
 }
 
-var _ core.Env = (*Env)(nil)
+var _ core.Environment = (*Env)(nil)
 
 // NewEnv returns a production Env that logs to log.
 func NewEnv(log *slog.Logger) (*Env, error) {

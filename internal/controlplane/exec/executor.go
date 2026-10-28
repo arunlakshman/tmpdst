@@ -65,7 +65,7 @@ func (e *Executor) run(a core.IOCall) core.IOResult {
 	case core.ObjectPut, core.ObjectGet, core.ObjectDelete, core.ObjectList:
 		return e.objIO(a)
 	default:
-		return core.LogAppendDone{Req: a.ReqID(), Err: core.ErrInvalid, Outcome: core.NotApplied}
+		return core.LogAppendDone{Req: a.RequestID(), Err: core.ErrInvalid, Outcome: core.NotApplied}
 	}
 }
 
@@ -108,7 +108,7 @@ func (e *Executor) logIO(a core.IOCall) core.IOResult {
 		}
 		return core.LogDeleteOldDone{Req: a.Req, Err: core.OK, Outcome: core.Applied}
 	default:
-		return core.LogAppendDone{Req: a.ReqID(), Err: core.ErrInvalid, Outcome: core.NotApplied}
+		return core.LogAppendDone{Req: a.RequestID(), Err: core.ErrInvalid, Outcome: core.NotApplied}
 	}
 }
 
@@ -129,7 +129,7 @@ func (e *Executor) objIO(a core.IOCall) core.IOResult {
 	case core.ObjectList:
 		return e.objList(ctx, a)
 	default:
-		return core.ObjectGetDone{Req: a.ReqID(), Err: core.ErrInvalid}
+		return core.ObjectGetDone{Req: a.RequestID(), Err: core.ErrInvalid}
 	}
 }
 

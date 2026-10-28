@@ -52,7 +52,7 @@ func (o Opts) tps() []core.TopicPartition {
 	var out []core.TopicPartition
 	for _, t := range o.Topics {
 		for p := int32(0); p < o.Partitions; p++ {
-			out = append(out, core.TP(t, p))
+			out = append(out, core.TopicPartitionKey(t, p))
 		}
 	}
 	return out
@@ -107,7 +107,7 @@ type client struct {
 // resolved (acked or abandoned) before the next one for that partition is
 // built, so the oracle can check that acked offsets follow send order.
 type Workload struct {
-	env   core.Env
+	env   core.Environment
 	self  core.NodeInstance
 	opts  Opts
 	tps   []core.TopicPartition
@@ -117,7 +117,7 @@ type Workload struct {
 }
 
 // NewWorkload builds the workload machine.
-func NewWorkload(env core.Env, self core.NodeInstance, brokers []core.NodeInstance, o Opts) *Workload {
+func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.NodeInstance, o Opts) *Workload {
 	w := &Workload{env: env, self: self, opts: o, tps: o.tps()}
 	w.loop = session.Loop[*client]{
 		Connected: func(c *client) bool { return c.State == session.Up },

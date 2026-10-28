@@ -1,8 +1,8 @@
 package core
 
-// Env is injected into every StateMachine at construction. It is the only way
+// Environment is injected into every StateMachine at construction. It is the only way
 // nondeterminism enters the core. Time is NOT here: it arrives on each Event.
-type Env interface {
+type Environment interface {
 	Rand
 	FaultInjector
 	Assertions

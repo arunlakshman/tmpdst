@@ -13,7 +13,7 @@
 //
 // The broker is stateless cattle (decisions 41-44): no registration, epoch or
 // fencing, no idempotent producers, and it never proposes an offset. The
-// segment key is a random id drawn from the injected Env (seg/<32 hex>).
+// segment key is a random id drawn from the injected Environment (seg/<32 hex>).
 package broker
 
 import (
@@ -30,16 +30,16 @@ const (
 
 // Broker is the machine. Build it with New.
 type Broker struct {
-	env   core.Env
+	env   core.Environment
 	self  core.NodeInstance
 	cfg   Config
 	codec kwire.Codec
 
 	started bool
 
-	nextReq  core.ReqID
+	nextReq  core.RequestID
 	nextID   uint64
-	timerGen core.TimerGen
+	timerGen core.TimerVersion
 	stopping bool
 	exited   bool
 
@@ -47,26 +47,26 @@ type Broker struct {
 	dirty  []*conn          // connections whose queue head may be ready (drained at end of Step)
 	topics []core.TopicInfo // topic cache, refreshed from DescribeTopics on a miss
 
-	now        core.Time // At of the event being stepped (set by Step; not state)
+	now        core.NodeTime // At of the event being stepped (set by Step; not state)
 	open       openSegment
 	segs       []*segment // sealed segments in commit order
 	ops        []*op
-	bufBytes   int       // produce bytes admitted and not yet answered
-	pressure   bool      // above MaxBufferedBytes, until back at ResumeBufferedBytes
-	pressureAt core.Time // when pressure began (fact timing only, not state)
+	bufBytes   int           // produce bytes admitted and not yet answered
+	pressure   bool          // above MaxBufferedBytes, until back at ResumeBufferedBytes
+	pressureAt core.NodeTime // when pressure began (fact timing only, not state)
 	guess      uint64
 }
 
 // New returns the core.MachineFactory of the broker.
 func New(cfg Config) core.MachineFactory {
 	cfg = cfg.withDefaults()
-	return func(env core.Env, self core.NodeInstance) core.Machine {
+	return func(env core.Environment, self core.NodeInstance) core.Machine {
 		return &Broker{env: env, self: self, cfg: cfg, nextID: firstID}
 	}
 }
 
-func (b *Broker) req() core.ReqID { b.nextReq++; return b.nextReq }
-func (b *Broker) id() uint64      { b.nextID++; return b.nextID }
+func (b *Broker) req() core.RequestID { b.nextReq++; return b.nextReq }
+func (b *Broker) id() uint64          { b.nextID++; return b.nextID }
 
 func (b *Broker) backoff(n int) core.Duration {
 	d := b.cfg.RetryBase
@@ -76,7 +76,7 @@ func (b *Broker) backoff(n int) core.Duration {
 	return min(d, b.cfg.RetryMax)
 }
 
-func (b *Broker) timer(id core.TimerID, n int) (core.SetTimer, core.TimerGen) {
+func (b *Broker) timer(id core.TimerID, n int) (core.SetTimer, core.TimerVersion) {
 	b.timerGen++
 	return core.SetTimer{ID: id, Gen: b.timerGen, After: b.backoff(n)}, b.timerGen
 }
@@ -226,7 +226,7 @@ func (b *Broker) segByTimer(id core.TimerID) *segment {
 	return nil
 }
 
-func (b *Broker) segByReq(req core.ReqID, st segState) *segment {
+func (b *Broker) segByReq(req core.RequestID, st segState) *segment {
 	if req == 0 {
 		return nil
 	}

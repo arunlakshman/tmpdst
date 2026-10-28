@@ -313,10 +313,10 @@ func controlPlaneSequence(p Profile, seed uint64) []string {
 func TestRequestIDsFollowPosition(t *testing.T) {
 	r, objects, plane := veritastest.NewRand(3), ObjectOps(Default()), ControlPlaneOps(Default())
 	for i := range 50 {
-		if got := objects(r, i).ReqID(); got != core.ReqID(i+1) {
+		if got := objects(r, i).RequestID(); got != core.RequestID(i+1) {
 			t.Fatalf("object operation %d has request id %d, want %d.", i, got, i+1)
 		}
-		if op := plane(r, i); op.Call != nil && op.Call.Req != core.ReqID(i+1) {
+		if op := plane(r, i); op.Call != nil && op.Call.Req != core.RequestID(i+1) {
 			t.Fatalf("control-plane operation %d has request id %d, want %d.", i, op.Call.Req, i+1)
 		}
 	}
@@ -406,8 +406,8 @@ func TestFormatExamples(t *testing.T) {
 		{FormatObjectOp(core.ObjectList{Req: 3, Prefix: "a/"}), `core.ObjectList{Req: 3, Prefix: "a/"}`},
 		{FormatControlPlaneOp(NewCreateTopic("t1", 2)), `generator.NewCreateTopic("t1", 2)`},
 		{
-			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: core.TP("t1", 1), From: -1, MaxBytes: 60}})),
-			`generator.NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: core.TP("t1", 1), From: -1, MaxBytes: 60}})`,
+			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: core.TopicPartitionKey("t1", 1), From: -1, MaxBytes: 60}})),
+			`generator.NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: core.TopicPartitionKey("t1", 1), From: -1, MaxBytes: 60}})`,
 		},
 	}
 	for _, c := range cases {

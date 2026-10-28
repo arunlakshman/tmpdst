@@ -27,7 +27,7 @@ func (m *Machine) onCPOffer(o core.ControlPlaneDeliver) []core.Action {
 	}
 }
 
-func (m *Machine) readFold(req core.ReqID, fn func() (core.ControlPlaneDone, error)) core.ControlPlaneDone {
+func (m *Machine) readFold(req core.RequestID, fn func() (core.ControlPlaneDone, error)) core.ControlPlaneDone {
 	if !m.Ready() {
 		return core.ControlPlaneDone{Req: req, Err: core.ErrUnavailable}
 	}

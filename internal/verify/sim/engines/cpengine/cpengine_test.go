@@ -17,14 +17,14 @@ func base() sim.ControlPlaneFaults {
 	return sim.ControlPlaneFaults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}
 }
 
-var tp = core.TP("t", 0)
+var tp = core.TopicPartitionKey("t", 0)
 
 func setup(f sim.ControlPlaneFaults, seed uint64) (*cpengine.Engine, *enginetest.Ctx, core.NodeInstance) {
 	e := cpengine.New(f)
 	return e, enginetest.New(e, seed), enginetest.Ref("a")
 }
 
-func call(e *cpengine.Engine, c *enginetest.Ctx, from core.NodeInstance, req core.ReqID, op core.ControlPlaneOperation) {
+func call(e *cpengine.Engine, c *enginetest.Ctx, from core.NodeInstance, req core.RequestID, op core.ControlPlaneOperation) {
 	e.Execute(c, from, core.ControlPlaneCall{Req: req, Op: op})
 }
 
@@ -217,9 +217,9 @@ func TestDeterminism(t *testing.T) {
 			c.T += sim.Time(ms)
 			switch i % 2 {
 			case 0:
-				call(e, c, a, core.ReqID(i), commit(string(rune('a'+i%7))))
+				call(e, c, a, core.RequestID(i), commit(string(rune('a'+i%7))))
 			default:
-				call(e, c, a, core.ReqID(i), core.FindSegments{TP: tp})
+				call(e, c, a, core.RequestID(i), core.FindSegments{TP: tp})
 			}
 		}
 		mid := e.StateHash()
@@ -263,7 +263,7 @@ func TestCommitSizeLimit(t *testing.T) {
 	call(e, c, a, 2, many("ok", 4))
 	call(e, c, a, 3, many("many", 400))
 	c.Run()
-	for _, req := range []core.ReqID{2, 3} {
+	for _, req := range []core.RequestID{2, 3} {
 		if d := c.Find(req).(core.ControlPlaneDone); d.Err != core.OK {
 			t.Fatal(req, d)
 		}
@@ -283,14 +283,14 @@ func TestCommitSizeLimit(t *testing.T) {
 	// A grown topic counts: partition 5 of a 4-partition topic is 1 + 1 + 1 = 3
 	// (fits), but one batch each on "u" (new) and "t" partitions 0..1 is 1 + 3 + 1 = 5.
 	grow := commit("g")
-	grow.Batches[0].TP = core.TP("t", 5)
+	grow.Batches[0].TP = core.TopicPartitionKey("t", 5)
 	call(e, c, a, 6, grow)
 	c.Run()
 	if d := last(c); d.Err != core.OK {
 		t.Fatal(d)
 	}
 	mixed := parts("m", 2)
-	mixed.Batches = append(mixed.Batches, core.PendingBatch{TP: core.TP("u", 0), Records: 1})
+	mixed.Batches = append(mixed.Batches, core.PendingBatch{TP: core.TopicPartitionKey("u", 0), Records: 1})
 	call(e, c, a, 7, mixed)
 	c.Run()
 	if d := last(c); d.Err != core.ErrTooLarge {

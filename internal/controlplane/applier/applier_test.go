@@ -114,7 +114,7 @@ func commit(key string, bs ...core.PendingBatch) core.CommitSegment {
 }
 
 func pb(topic string, p int32, n int64) core.PendingBatch {
-	return core.PendingBatch{TP: core.TP(topic, p), Records: n,
+	return core.PendingBatch{TP: core.TopicPartitionKey(topic, p), Records: n,
 		Loc: core.SegmentRef{Key: topic, Off: n * 10, Len: n}}
 }
 
@@ -169,7 +169,7 @@ func TestTrimForgetsKeysNotOffsets(t *testing.T) {
 	if n, err := a.Trim(5); err != nil || n != 1 || a.Window() != 1 {
 		t.Fatalf("Trim dropped %d err %v window %d", n, err, a.Window())
 	}
-	if a.StateHash() != h || a.End(core.TP("a", 0)) != 10 {
+	if a.StateHash() != h || a.End(core.TopicPartitionKey("a", 0)) != 10 {
 		t.Fatal("trim changed offsets or runs")
 	}
 	// "new" is still in the window: replay answers the original ranges.
@@ -228,7 +228,7 @@ func TestStoreAdapter(t *testing.T) {
 	if err != nil || c != core.OK || resp.Assigned[0].Base != 0 {
 		t.Fatalf("%+v %v %v", resp, c, err)
 	}
-	lk, c, _ := s.Lookup(ctx, core.FindSegments{TP: core.TP("t", 2)})
+	lk, c, _ := s.Lookup(ctx, core.FindSegments{TP: core.TopicPartitionKey("t", 2)})
 	if c != core.OK || lk.End != 4 || len(lk.Ranges) != 1 {
 		t.Fatalf("%+v %v", lk, c)
 	}

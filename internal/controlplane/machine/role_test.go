@@ -17,7 +17,7 @@ func findTimer(acts []core.Action, id core.TimerID) (core.SetTimer, bool) {
 	return core.SetTimer{}, false
 }
 
-func bootEmpty(t *testing.T, m *machine.Machine, at core.Time) []core.Action {
+func bootEmpty(t *testing.T, m *machine.Machine, at core.NodeTime) []core.Action {
 	t.Helper()
 	acts := m.Step(core.Event{At: at, Body: core.NodeStarted{}})
 	timer, ok := acts[0].(core.SetTimer)
@@ -77,7 +77,7 @@ func TestTakeoverAfterSilence(t *testing.T) {
 	}
 	// Other writers silent since boot (t=0). Refresh pullOK at later so the
 	// logcp rule (recent successful pull) holds, then fire the role timer.
-	later := core.Time(take + core.Millisecond)
+	later := core.NodeTime(take + core.Millisecond)
 	acts = m.Step(core.Event{At: later, Body: core.TimerFired{ID: catch.ID, Gen: catch.Gen}})
 	check := acts[0].(core.LogGetEnd)
 	m.Step(core.Event{At: later, Body: core.LogGetEndDone{
@@ -113,7 +113,7 @@ func TestFailbackOnLowerRank(t *testing.T) {
 	if !ok {
 		t.Fatalf("catch-up timer missing in %v", acts)
 	}
-	at := core.Time(take)
+	at := core.NodeTime(take)
 	acts = m.Step(core.Event{At: at, Body: core.TimerFired{ID: catch.ID, Gen: catch.Gen}})
 	check := acts[0].(core.LogGetEnd)
 	acts = m.Step(core.Event{At: at, Body: core.LogGetEndDone{
@@ -155,7 +155,7 @@ func TestHeartbeatEmitsNoopWhenIdle(t *testing.T) {
 		t.Fatalf("role rearm missing in %v", acts)
 	}
 
-	due := core.Time(hb + core.Millisecond)
+	due := core.NodeTime(hb + core.Millisecond)
 	acts = m.Step(core.Event{At: due, Body: core.TimerFired{ID: role.ID, Gen: role.Gen}})
 	ap, ok := findAppend(acts)
 	if !ok {

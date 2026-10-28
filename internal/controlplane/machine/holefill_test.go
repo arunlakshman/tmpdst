@@ -63,7 +63,7 @@ func TestHoleFillUsesWinnerWhenTaken(t *testing.T) {
 		ID: "other", Kind: applier.KindCommit,
 		Commit: core.CommitSegment{
 			SegmentKey: "win",
-			Batches:    []core.PendingBatch{{TP: core.TP("t", 0), Records: 1, Loc: core.SegmentRef{Key: "o", Off: 0, Len: 1}}},
+			Batches:    []core.PendingBatch{{TP: core.TopicPartitionKey("t", 0), Records: 1, Loc: core.SegmentRef{Key: "o", Off: 0, Len: 1}}},
 		},
 	})
 	step(m, core.LogAppendDone{
@@ -72,8 +72,8 @@ func TestHoleFillUsesWinnerWhenTaken(t *testing.T) {
 	if m.Applied() != 2 {
 		t.Fatalf("Applied = %d, want 2", m.Applied())
 	}
-	if m.Fold().End(core.TP("t", 0)) != 1 {
-		t.Fatalf("end = %d, want 1 from winning commit", m.Fold().End(core.TP("t", 0)))
+	if m.Fold().End(core.TopicPartitionKey("t", 0)) != 1 {
+		t.Fatalf("end = %d, want 1 from winning commit", m.Fold().End(core.TopicPartitionKey("t", 0)))
 	}
 }
 
@@ -215,7 +215,7 @@ func TestHoleFillSkipMutantAdvancesWithoutAppend(t *testing.T) {
 		t.Fatalf("Always = %+v, want one failing %q", env.always, prop)
 	}
 	d := env.always[0].details
-	if len(d) != 1 || d[0].Key != "slot" || d[0].Value != core.LogSlot(1) {
+	if len(d) != 1 || d[0].Key != "slot" || d[0].Value != core.LogPosition(1) {
 		t.Fatalf("Always details = %+v, want slot 1 after the advance", d)
 	}
 }

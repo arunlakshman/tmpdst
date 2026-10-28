@@ -10,8 +10,8 @@ func TestLogIOCallsAreIOCalls(t *testing.T) {
 		LogDeleteOld{Req: 5, Through: 1},
 	}
 	for _, a := range acts {
-		if a.ReqID() == 0 {
-			t.Fatalf("%T: ReqID zero", a)
+		if a.RequestID() == 0 {
+			t.Fatalf("%T: RequestID zero", a)
 		}
 	}
 	dones := []IOResult{
@@ -24,19 +24,19 @@ func TestLogIOCallsAreIOCalls(t *testing.T) {
 		if InboxKindOf(d) != Control {
 			t.Fatalf("%T: InboxKindOf = %v, want Control", d, InboxKindOf(d))
 		}
-		if d.ReqID() == 0 {
-			t.Fatalf("%T: ReqID zero", d)
+		if d.RequestID() == 0 {
+			t.Fatalf("%T: RequestID zero", d)
 		}
 	}
 }
 
 func TestCPCallAndCPDoneClassOf(t *testing.T) {
-	call := ControlPlaneCall{Req: 9, Op: FindSegments{TP: TP("t", 1), From: 7}}
-	if call.ReqID() != 9 {
-		t.Fatalf("ReqID = %d", call.ReqID())
+	call := ControlPlaneCall{Req: 9, Op: FindSegments{TP: TopicPartitionKey("t", 1), From: 7}}
+	if call.RequestID() != 9 {
+		t.Fatalf("RequestID = %d", call.RequestID())
 	}
 	done := ControlPlaneDone{Req: 9, Outcome: NotApplied, Err: ErrUnavailable}
-	if InboxKindOf(done) != Control || done.ReqID() != 9 {
+	if InboxKindOf(done) != Control || done.RequestID() != 9 {
 		t.Fatalf("CPDone class/req broken")
 	}
 	offer := ControlPlaneDeliver{From: NodeInstance{Node: "b-0"}, Req: 9, Op: call.Op}

@@ -23,7 +23,7 @@ func setup(f sim.ObjectStoreFaults, seed uint64) (*objstore.Engine, *enginetest.
 	return e, enginetest.New(e, seed), enginetest.Ref("a")
 }
 
-func put(e *objstore.Engine, c *enginetest.Ctx, from core.NodeInstance, req core.ReqID, key, data string) {
+func put(e *objstore.Engine, c *enginetest.Ctx, from core.NodeInstance, req core.RequestID, key, data string) {
 	e.Execute(c, from, core.ObjectPut{Req: req, Key: key, Data: []byte(data)})
 }
 
@@ -259,11 +259,11 @@ func TestDeterminism(t *testing.T) {
 			k := string(rune('a' + i%5))
 			switch i % 3 {
 			case 0:
-				put(e, c, a, core.ReqID(i), k, "data-"+k)
+				put(e, c, a, core.RequestID(i), k, "data-"+k)
 			case 1:
-				e.Execute(c, a, core.ObjectGet{Req: core.ReqID(i), Ref: core.SegmentRef{Key: k}})
+				e.Execute(c, a, core.ObjectGet{Req: core.RequestID(i), Ref: core.SegmentRef{Key: k}})
 			default:
-				e.Execute(c, a, core.ObjectDelete{Req: core.ReqID(i), Key: k})
+				e.Execute(c, a, core.ObjectDelete{Req: core.RequestID(i), Key: k})
 			}
 		}
 		mid := e.StateHash() // pending plans folded in

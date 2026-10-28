@@ -83,7 +83,7 @@ func firstCatch(cfg sim.Config, n int, prop core.PropertyID) uint64 {
 }
 
 func mutantFactory(m mutation) core.MachineFactory {
-	return func(env core.Env, self core.NodeInstance) core.Machine {
+	return func(env core.Environment, self core.NodeInstance) core.Machine {
 		return &Broker{env: env, self: self, mut: m}
 	}
 }

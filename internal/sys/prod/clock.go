@@ -20,7 +20,7 @@ var _ sys.Clock = Clock{}
 func NewClock() Clock { return Clock{start: time.Now()} }
 
 // Mono returns monotonic time elapsed since the clock was created.
-func (c Clock) Mono() core.Time { return core.Time(time.Since(c.start)) }
+func (c Clock) Mono() core.NodeTime { return core.NodeTime(time.Since(c.start)) }
 
 // Wall returns the current wall-clock time in nanoseconds.
-func (c Clock) Wall() core.WallTime { return core.WallTime(time.Now().UnixNano()) }
+func (c Clock) Wall() core.RealTime { return core.RealTime(time.Now().UnixNano()) }

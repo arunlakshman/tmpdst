@@ -67,12 +67,12 @@ Bounded-context merge, Extract Class on Broker/Service/kernel — those are P2�
 
 - [x] ~~Topic/partition pair (`TopicPartition` / `TP`) — **Replace Primitive with Object** — broker, kwire, sim/kafka, wire~~
 - [x] ~~Kafka `err*` `int16` → `KafkaCode` — **Replace Primitive with Object** — `internal/broker/config.go` + call sites~~
-- [x] ~~Slot / HW / offset IDs — **Replace Primitive with Object** — `core.LogSlot` is already the parameter on `internal/controlplane/exec.Log` (`Append`/`Read`/`CheckTail`/`TrimThrough`)~~
+- [x] ~~Slot / HW / offset IDs — **Replace Primitive with Object** — `core.LogPosition` is already the parameter on `internal/controlplane/exec.Log` (`Append`/`Read`/`CheckTail`/`TrimThrough`)~~
 - [x] ~~CRC table once — **Replace Temp with Query** — `internal/wire/format/format.go` (+ kwire if shared)~~
 - [x] ~~`fieldOf` / fact getters — **Move Function** / **Extract Function** — echo, kafka oracle, `internal/sys/prod/seglog`, metrics~~ (`core.Fact.Field`)
 - [x] ~~`sample` / TwoSpeed — **Pull Up Method** / **Parameterize Function** — fakeio, logengine, echo/kafka config~~ (use `TwoSpeed.Sample`; echo/kafka `slow()` ctor dupes left)
-- [x] ~~FNV helpers if duplicated — **Move Function** — broker hash, netsim, etc.~~ (`core.FnvU64`; echo/veritas naive hashers left)
-- [x] ~~Resp type-assert boilerplate — **Extract Function** / **Parameterize Function** — stores / applier / memstore~~ (`core.RespAs`)
+- [x] ~~FNV helpers if duplicated — **Move Function** — broker hash, netsim, etc.~~ (`core.Fnv64Hash`; echo/veritas naive hashers left)
+- [x] ~~Resp type-assert boilerplate — **Extract Function** / **Parameterize Function** — stores / applier / memstore~~ (`core.ResponseAs`)
 
 **VO landing order:** (1) `TopicPartition` → (2) `KafkaCode` → (3) Slot/position IDs → (4) optional key wrappers at Dynamo/S3 edge.
 

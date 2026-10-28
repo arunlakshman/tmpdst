@@ -11,7 +11,7 @@ import (
 	"manifester/internal/wire/kwire"
 )
 
-// testEnv is a seeded core.Env that records assertion violations. It keeps its
+// testEnv is a seeded core.Environment that records assertion violations. It keeps its
 // own SplitMix64 copy and not veritastest.Rand, for two reasons. Uint64 gives
 // the same values as veritastest.Rand, but Intn here uses a plain modulo and
 // veritastest.Rand uses Lemire, so the seeds would change their streams. Also,
@@ -77,7 +77,7 @@ type harness struct {
 	cp    *veritas.ControlPlane
 	cfg   Config
 	self  core.NodeInstance
-	now   core.Time
+	now   core.NodeTime
 
 	// cpHook/objHook may replace an I/O action's outcome; exec runs the spec.
 	cpHook  func(a core.ControlPlaneCall, exec func() core.IOResult) core.IOResult
@@ -87,7 +87,7 @@ type harness struct {
 	held    []core.IOResult
 
 	queue   []core.IOResult
-	timers  map[core.TimerID]core.TimerGen
+	timers  map[core.TimerID]core.TimerVersion
 	clients map[core.ConnID]*client
 	all     []core.Action // every action emitted, in order
 	paused  map[core.ConnID]bool
@@ -99,7 +99,7 @@ type harness struct {
 
 func newHarness(t *testing.T, cfg Config) *harness {
 	h := &harness{t: t, env: &testEnv{state: 7}, store: veritas.NewObjectStore(), cp: veritas.NewControlPlane(),
-		cfg: cfg, timers: map[core.TimerID]core.TimerGen{}, clients: map[core.ConnID]*client{},
+		cfg: cfg, timers: map[core.TimerID]core.TimerVersion{}, clients: map[core.ConnID]*client{},
 		paused: map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}
 	h.cp.CreateTopic("t", 2)
 	h.self = core.NodeInstance{Node: "b1", Inc: core.BootNumber{1}}
@@ -115,8 +115,8 @@ func startedHarness(t *testing.T, cfg Config) *harness {
 }
 
 func (h *harness) step(body core.EventData) []core.Action {
-	h.now += core.Time(core.Millisecond)
-	acts := h.b.Step(core.Event{At: h.now, Wall: core.WallTime(h.now), Body: body})
+	h.now += core.NodeTime(core.Millisecond)
+	acts := h.b.Step(core.Event{At: h.now, Wall: core.RealTime(h.now), Body: body})
 	h.all = append(h.all, acts...)
 	for _, a := range acts {
 		h.exec(a)
@@ -315,7 +315,7 @@ type ent struct {
 }
 
 func e(topic string, part int32, rec []byte) ent {
-	return ent{tp: core.TP(topic, part), rec: rec}
+	return ent{tp: core.TopicPartitionKey(topic, part), rec: rec}
 }
 
 func prodReq(acks int16, es ...ent) *kmsg.ProduceRequest {

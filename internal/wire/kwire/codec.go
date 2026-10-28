@@ -27,10 +27,10 @@ func (e *UnsupportedError) Error() string {
 	return fmt.Sprintf("kwire: unsupported version %d of api key %d", e.Version, e.Key)
 }
 
-// Codec implements core.Codec on kmsg. It is stateless.
+// Codec implements core.KafkaCodec on kmsg. It is stateless.
 type Codec struct{}
 
-var _ core.Codec = Codec{}
+var _ core.KafkaCodec = Codec{}
 
 func malformed(format string, a ...any) error {
 	return fmt.Errorf("%w: %s", ErrMalformed, fmt.Sprintf(format, a...))

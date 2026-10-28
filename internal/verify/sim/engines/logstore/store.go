@@ -29,7 +29,7 @@ type store struct {
 	bug   uint8 // logengine.BugTrimDelete empties instead of tombstoning
 }
 
-func (s *store) ensure(slot core.LogSlot) {
+func (s *store) ensure(slot core.LogPosition) {
 	n := int(slot) + 1
 	if n > len(s.slots) {
 		s.slots = append(s.slots, make([]slotRec, n-len(s.slots))...)
@@ -79,16 +79,16 @@ func (s *store) read(a core.LogRead) core.LogReadDone {
 		if s.slots[i].kind != slotEntry {
 			continue
 		}
-		out = append(out, core.LogEntry{Slot: core.LogSlot(i), Data: slices.Clone(s.slots[i].data)})
+		out = append(out, core.LogEntry{Slot: core.LogPosition(i), Data: slices.Clone(s.slots[i].data)})
 	}
 	return core.LogReadDone{Req: a.Req, Entries: out, Err: core.OK, Outcome: core.Applied}
 }
 
 func (s *store) checkTail(a core.LogGetEnd) core.LogGetEndDone {
-	tail := core.LogSlot(0)
+	tail := core.LogPosition(0)
 	for i, r := range slices.Backward(s.slots) {
 		if r.kind != slotEmpty {
-			tail = core.LogSlot(i) + 1
+			tail = core.LogPosition(i) + 1
 			break
 		}
 	}
@@ -110,7 +110,7 @@ func (s *store) trim(a core.LogDeleteOld) core.LogDeleteOldDone {
 	return core.LogDeleteOldDone{Req: a.Req, Err: core.OK, Outcome: core.Applied}
 }
 
-func (s *store) entry(slot core.LogSlot) ([]byte, bool) {
+func (s *store) entry(slot core.LogPosition) ([]byte, bool) {
 	if slot < 0 || int(slot) >= len(s.slots) || s.slots[slot].kind != slotEntry {
 		return nil, false
 	}

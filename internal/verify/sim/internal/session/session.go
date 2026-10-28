@@ -22,12 +22,12 @@ type Client struct {
 	ID      int
 	State   State
 	Conn    core.ConnID
-	DialReq core.ReqID
-	SendReq core.ReqID
+	DialReq core.RequestID
+	SendReq core.RequestID
 	Dials   int
 	Fails   int // consecutive dial/connection failures
-	WakeGen core.TimerGen
-	ReqGen  core.TimerGen
+	WakeGen core.TimerVersion
+	ReqGen  core.TimerVersion
 }
 
 func (c *Client) session() *Client { return c }
@@ -68,7 +68,7 @@ type member interface{ session() *Client }
 type Loop[C member] struct {
 	Brokers []core.NodeID
 	Clients []C
-	NextReq core.ReqID
+	NextReq core.RequestID
 
 	// Connected reports that c's connection delivers its events to c.
 	Connected func(c C) bool
@@ -85,7 +85,7 @@ type Loop[C member] struct {
 	Lost func(c C, why string)
 }
 
-func (l *Loop[C]) req() core.ReqID { l.NextReq++; return l.NextReq }
+func (l *Loop[C]) req() core.RequestID { l.NextReq++; return l.NextReq }
 
 // Step handles the connection events of ev.
 func (l *Loop[C]) Step(ev core.Event) []core.Action {

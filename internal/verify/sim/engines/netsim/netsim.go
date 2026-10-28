@@ -300,7 +300,7 @@ func (e *Engine) sendRst(ctx sim.EngineCtx, p *pair, to int, net bool, lat core.
 	d.flight = append(d.flight, item{kind: kRst, seq: d.seq, net: net, id: id})
 }
 
-func (e *Engine) ack(ctx sim.EngineCtx, to core.NodeInstance, p *pair, side int, req core.ReqID, conn core.ConnID, err core.ErrCode) {
+func (e *Engine) ack(ctx sim.EngineCtx, to core.NodeInstance, p *pair, side int, req core.RequestID, conn core.ConnID, err core.ErrCode) {
 	var lane sim.Lane
 	if p != nil {
 		lane = ctx.Lane(pairKey(p.id, "ack"+strconv.Itoa(side)))

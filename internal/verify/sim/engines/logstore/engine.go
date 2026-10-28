@@ -1,7 +1,7 @@
 // Package logstore is the simulated Dynamo loglet (CP-DSM-3): an if-absent Put
 // store for LogAppend/LogRead/LogGetEnd/LogDeleteOld, wrapped in the shared
 // fakeio fault/timing core. Fault coins and delays are drawn at issue time
-// (decision 14). Every live ReqID gets exactly one completion; a lost answer
+// (decision 14). Every live RequestID gets exactly one completion; a lost answer
 // surfaces as ErrTimeout+MaybeApplied.
 //
 // After CP-DSM-8 the engine is also sim.CPTruth: a reference replay of durable
@@ -24,7 +24,7 @@ type Engine struct {
 	spec *store
 
 	ref         *applier.Applier
-	applied     core.LogSlot // next slot to fold into ref
+	applied     core.LogPosition // next slot to fold into ref
 	gen         uint64
 	windowSlots int64
 	trimStride  int64
@@ -103,7 +103,7 @@ func (e *Engine) advanceRef() {
 	}
 }
 
-func (e *Engine) trimWindow(slot core.LogSlot) {
+func (e *Engine) trimWindow(slot core.LogPosition) {
 	window, stride := e.windowSlots, e.trimStride
 	if window <= 0 || stride <= 0 {
 		return
@@ -164,7 +164,7 @@ func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.Actio
 }
 
 // Entry returns a copy of the bytes at slot, or false when empty or tombstoned.
-func (e *Engine) Entry(slot core.LogSlot) ([]byte, bool) {
+func (e *Engine) Entry(slot core.LogPosition) ([]byte, bool) {
 	return e.spec.entry(slot)
 }
 
@@ -183,7 +183,7 @@ func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
 	if err != nil || d.Err != core.OK {
 		return nil
 	}
-	return slices.Clone(core.RespAs[core.FindSegmentsResp](d).Ranges)
+	return slices.Clone(core.ResponseAs[core.FindSegmentsResp](d).Ranges)
 }
 
 // HighWatermark implements sim.CPTruth.

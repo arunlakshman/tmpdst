@@ -42,7 +42,7 @@ type PhaseAware interface {
 }
 
 // WorkloadFactory builds a fresh workload per seed (never reuse instances).
-type WorkloadFactory func(env core.Env, self core.NodeInstance, brokers []core.NodeInstance) Workload
+type WorkloadFactory func(env core.Environment, self core.NodeInstance, brokers []core.NodeInstance) Workload
 
 // Invariant checks one property (lesson 10). Config.Invariants builds a fresh
 // instance per seed, so there is no Reset. Violations go through View.Assert.

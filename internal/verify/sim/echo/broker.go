@@ -49,8 +49,8 @@ type op struct {
 	kind     opKind
 	state    opState
 	retry    opState // what a backoff restarts
-	req      core.ReqID
-	gen      core.TimerGen
+	req      core.RequestID
+	gen      core.TimerVersion
 	attempts int
 	maybe    bool // a commit may have applied
 	replied  bool // mutants only: already acked early
@@ -64,13 +64,13 @@ type op struct {
 // Broker is the echo broker: PUT stores one batch as a segment and commits it
 // to the control plane, GET reads it back.
 type Broker struct {
-	env  core.Env
+	env  core.Environment
 	self core.NodeInstance
 	mut  mutation
 
-	nextReq  core.ReqID
+	nextReq  core.RequestID
 	nextOp   uint64
-	timerGen core.TimerGen
+	timerGen core.TimerVersion
 	stopping bool
 	acked    uint64
 
@@ -79,11 +79,11 @@ type Broker struct {
 }
 
 // NewBroker is the core.MachineFactory of the echo broker.
-func NewBroker(env core.Env, self core.NodeInstance) core.Machine {
+func NewBroker(env core.Environment, self core.NodeInstance) core.Machine {
 	return &Broker{env: env, self: self}
 }
 
-func (b *Broker) req() core.ReqID { b.nextReq++; return b.nextReq }
+func (b *Broker) req() core.RequestID { b.nextReq++; return b.nextReq }
 
 func backoff(n int) core.Duration {
 	if n > 5 {
@@ -92,7 +92,7 @@ func backoff(n int) core.Duration {
 	return 20 * core.Millisecond << n
 }
 
-func (b *Broker) timer(id core.TimerID, n int) (core.SetTimer, core.TimerGen) {
+func (b *Broker) timer(id core.TimerID, n int) (core.SetTimer, core.TimerVersion) {
 	b.timerGen++
 	return core.SetTimer{ID: id, Gen: b.timerGen, After: backoff(n)}, b.timerGen
 }
@@ -106,7 +106,7 @@ func (b *Broker) findConn(id core.ConnID) int {
 	return -1
 }
 
-func (b *Broker) findReq(r core.ReqID) *op {
+func (b *Broker) findReq(r core.RequestID) *op {
 	for _, o := range b.ops {
 		if o.req == r && o.req != 0 {
 			return o

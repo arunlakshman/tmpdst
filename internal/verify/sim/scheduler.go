@@ -3,7 +3,7 @@ package sim
 import "manifester/internal/core"
 
 // Time is global simulation time. Nodes never see it directly; they see their
-// own skewed core.Time on each Event.
+// own skewed core.NodeTime on each Event.
 type Time int64
 
 // Lane is an ordering domain. Entries on one lane at the same Time pop in FIFO

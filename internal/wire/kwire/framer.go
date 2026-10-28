@@ -12,14 +12,14 @@ import (
 var ErrBadFrame = errors.New("kwire: bad frame length")
 
 // Framer reassembles 4-byte big-endian length-prefixed frames. It implements
-// core.Framer. After an error every later Push returns the same error.
+// core.FrameSplitter. After an error every later Push returns the same error.
 type Framer struct {
 	max int32
 	buf []byte
 	err error
 }
 
-var _ core.Framer = (*Framer)(nil)
+var _ core.FrameSplitter = (*Framer)(nil)
 
 // NewFramer returns a Framer rejecting frames longer than max bytes.
 func NewFramer(max int32) *Framer { return &Framer{max: max} }

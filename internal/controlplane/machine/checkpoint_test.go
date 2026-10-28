@@ -53,8 +53,8 @@ func TestRestoreOnStartedThenReady(t *testing.T) {
 	if !m.Ready() {
 		t.Fatal("Ready after restore catch-up")
 	}
-	if m.Fold().End(core.TP("t", 0)) != 3 {
-		t.Fatalf("restored end = %d, want 3", m.Fold().End(core.TP("t", 0)))
+	if m.Fold().End(core.TopicPartitionKey("t", 0)) != 3 {
+		t.Fatalf("restored end = %d, want 3", m.Fold().End(core.TopicPartitionKey("t", 0)))
 	}
 }
 
@@ -92,7 +92,7 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 	if !ok {
 		t.Fatalf("ckpt timer missing in %v", acts)
 	}
-	acts = m.Step(core.Event{At: core.Time(20 * core.Millisecond), Body: core.TimerFired{
+	acts = m.Step(core.Event{At: core.NodeTime(20 * core.Millisecond), Body: core.TimerFired{
 		ID: ckpt.ID, Gen: ckpt.Gen,
 	}})
 	put, ok := acts[0].(core.ObjectPut)
@@ -122,7 +122,7 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 		t.Fatalf("Applied = %d, want 3", m.Applied())
 	}
 	// Re-arm ckpt by firing a fresh gen (timer was re-armed in onCkptTimer).
-	acts = m.Step(core.Event{At: core.Time(40 * core.Millisecond), Body: core.TimerFired{
+	acts = m.Step(core.Event{At: core.NodeTime(40 * core.Millisecond), Body: core.TimerFired{
 		ID: machine.TimerCkpt, Gen: ckpt.Gen + 1,
 	}})
 	put = acts[0].(core.ObjectPut)

@@ -8,12 +8,12 @@ import (
 )
 
 // ObjectOps returns a generator of object store operations for profile p.
-// Operation i carries ReqID i+1. The mix includes the empty key, reads past
+// Operation i carries RequestID i+1. The mix includes the empty key, reads past
 // the end of an object, Len <= 0 (read to the end), and prefixes with and
 // without a slash, because each of these is a place where stores differ.
 func ObjectOps(p Profile) func(r *veritastest.Rand, i int) core.IOCall {
 	return func(r *veritastest.Rand, i int) core.IOCall {
-		req := core.ReqID(i + 1)
+		req := core.RequestID(i + 1)
 		key := pick(r, p.ObjectKeys)
 		if percent(r, p.EmptyKeyPercent) {
 			key = ""

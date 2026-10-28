@@ -3,20 +3,20 @@ package core
 // Event is the input to Step. The runtime (prod) or simulator stamps At and
 // Wall when the event is dequeued, so At never decreases in Step order.
 type Event struct {
-	At   Time     // node-local monotonic now
-	Wall WallTime // UTC now
+	At   NodeTime // node-local monotonic now
+	Wall RealTime // UTC now
 	Body EventData
 }
 
 // EventData is a closed set of plain-data structs.
 type EventData interface{ isEvent() }
 
-// IOResult is the EventData that answers an IOCall, matched by ReqID. A
-// completion with an unknown, already-finished or wrong-kind ReqID is ignored:
+// IOResult is the EventData that answers an IOCall, matched by RequestID. A
+// completion with an unknown, already-finished or wrong-kind RequestID is ignored:
 // no state change (StateHash is unchanged).
 type IOResult interface {
 	EventData
-	ReqID() ReqID
+	RequestID() RequestID
 }
 
 // ---- lifecycle ----
@@ -29,7 +29,7 @@ type NodeStarted struct{ Self NodeInstance }
 // StopRequest asks the node to shut down gracefully by Deadline (node-local time):
 // stop admitting, finish or hand off in-flight work, then emit ShutdownDone. If the
 // deadline passes first the runtime kills the node. InboxKind: Control.
-type StopRequest struct{ Deadline Time }
+type StopRequest struct{ Deadline NodeTime }
 
 // ---- network (inbound) ----
 
@@ -54,14 +54,14 @@ type ConnClosed struct {
 
 // SendDone completes a Send. Err != OK means the bytes may be partially sent.
 type SendDone struct {
-	Req  ReqID
+	Req  RequestID
 	Conn ConnID
 	Err  ErrCode
 }
 
 // ConnectDone completes a Connect. Conn is valid only when Err == OK.
 type ConnectDone struct {
-	Req  ReqID
+	Req  RequestID
 	Conn ConnID
 	Err  ErrCode
 }
@@ -72,14 +72,14 @@ type ConnectDone struct {
 // for ID. Timers are matched by generation, not cancelled.
 type TimerFired struct {
 	ID  TimerID
-	Gen TimerGen
+	Gen TimerVersion
 }
 
 // ---- object store completions ----
 
 // ObjectPutDone reports that an object PUT finished.
 type ObjectPutDone struct {
-	Req     ReqID
+	Req     RequestID
 	Key     string
 	Err     ErrCode
 	Outcome Outcome
@@ -87,21 +87,21 @@ type ObjectPutDone struct {
 
 // ObjectGetDone reports that an object GET finished.
 type ObjectGetDone struct {
-	Req  ReqID
+	Req  RequestID
 	Data []byte
 	Err  ErrCode
 }
 
 // ObjectDeleteDone reports that an object DELETE finished.
 type ObjectDeleteDone struct {
-	Req     ReqID
+	Req     RequestID
 	Err     ErrCode
 	Outcome Outcome
 }
 
 // ObjectListDone reports that an object LIST finished.
 type ObjectListDone struct {
-	Req  ReqID
+	Req  RequestID
 	Keys []string // sorted
 	Err  ErrCode
 }
@@ -113,7 +113,7 @@ type ObjectListDone struct {
 // controlplane/apiconv; typed *Response fields wait for the gRPC cutover so
 // core does not import grpc (decision 57).
 type ControlPlaneDone struct {
-	Req     ReqID
+	Req     RequestID
 	Resp    ControlPlaneResponse
 	Err     ErrCode
 	Outcome Outcome
@@ -123,7 +123,7 @@ type ControlPlaneDone struct {
 // sim bridge engine issues this; the machine answers with ControlPlaneReply actions.
 type ControlPlaneDeliver struct {
 	From NodeInstance // broker that issued the ControlPlaneCall
-	Req  ReqID
+	Req  RequestID
 	Op   ControlPlaneOperation
 }
 
@@ -131,15 +131,15 @@ type ControlPlaneDeliver struct {
 
 // LogEntry is one slot's payload as returned by LogRead.
 type LogEntry struct {
-	Slot LogSlot
+	Slot LogPosition
 	Data []byte
 }
 
 // LogAppendDone reports that a LogAppend finished. Taken means the slot was
 // already held; Existing is the winner's bytes when Taken is true.
 type LogAppendDone struct {
-	Req      ReqID
-	Slot     LogSlot
+	Req      RequestID
+	Slot     LogPosition
 	Taken    bool
 	Existing []byte
 	Err      ErrCode
@@ -148,7 +148,7 @@ type LogAppendDone struct {
 
 // LogReadDone reports that a LogRead finished. Entries are in slot order.
 type LogReadDone struct {
-	Req     ReqID
+	Req     RequestID
 	Entries []LogEntry
 	Err     ErrCode
 	Outcome Outcome
@@ -156,21 +156,21 @@ type LogReadDone struct {
 
 // LogGetEndDone reports the log tail (next slot to write).
 type LogGetEndDone struct {
-	Req     ReqID
-	Tail    LogSlot
+	Req     RequestID
+	Tail    LogPosition
 	Err     ErrCode
 	Outcome Outcome
 }
 
 // LogDeleteOldDone reports that a LogDeleteOld finished.
 type LogDeleteOldDone struct {
-	Req     ReqID
+	Req     RequestID
 	Err     ErrCode
 	Outcome Outcome
 }
 
-// RespAs returns d.Resp asserted to T, or the zero value.
-func RespAs[T any](d ControlPlaneDone) T {
+// ResponseAs returns d.Resp asserted to T, or the zero value.
+func ResponseAs[T any](d ControlPlaneDone) T {
 	r, _ := d.Resp.(T)
 	return r
 }
@@ -194,38 +194,38 @@ func (LogReadDone) isEvent()         {}
 func (LogGetEndDone) isEvent()       {}
 func (LogDeleteOldDone) isEvent()    {}
 
-// ReqID returns the request this completion answers.
-func (e SendDone) ReqID() ReqID { return e.Req }
+// RequestID returns the request this completion answers.
+func (e SendDone) RequestID() RequestID { return e.Req }
 
-// ReqID returns the request this completion answers.
-func (e ConnectDone) ReqID() ReqID { return e.Req }
+// RequestID returns the request this completion answers.
+func (e ConnectDone) RequestID() RequestID { return e.Req }
 
-// ReqID returns the request this completion answers.
-func (e ObjectPutDone) ReqID() ReqID { return e.Req }
+// RequestID returns the request this completion answers.
+func (e ObjectPutDone) RequestID() RequestID { return e.Req }
 
-// ReqID returns the request this completion answers.
-func (e ObjectGetDone) ReqID() ReqID { return e.Req }
+// RequestID returns the request this completion answers.
+func (e ObjectGetDone) RequestID() RequestID { return e.Req }
 
-// ReqID returns the request this completion answers.
-func (e ObjectDeleteDone) ReqID() ReqID { return e.Req }
+// RequestID returns the request this completion answers.
+func (e ObjectDeleteDone) RequestID() RequestID { return e.Req }
 
-// ReqID returns the request this completion answers.
-func (e ObjectListDone) ReqID() ReqID { return e.Req }
+// RequestID returns the request this completion answers.
+func (e ObjectListDone) RequestID() RequestID { return e.Req }
 
-// ReqID returns the request this completion answers.
-func (e ControlPlaneDone) ReqID() ReqID { return e.Req }
+// RequestID returns the request this completion answers.
+func (e ControlPlaneDone) RequestID() RequestID { return e.Req }
 
-// ReqID returns the request this completion answers.
-func (e LogAppendDone) ReqID() ReqID { return e.Req }
+// RequestID returns the request this completion answers.
+func (e LogAppendDone) RequestID() RequestID { return e.Req }
 
-// ReqID returns the request this completion answers.
-func (e LogReadDone) ReqID() ReqID { return e.Req }
+// RequestID returns the request this completion answers.
+func (e LogReadDone) RequestID() RequestID { return e.Req }
 
-// ReqID returns the request this completion answers.
-func (e LogGetEndDone) ReqID() ReqID { return e.Req }
+// RequestID returns the request this completion answers.
+func (e LogGetEndDone) RequestID() RequestID { return e.Req }
 
-// ReqID returns the request this completion answers.
-func (e LogDeleteOldDone) ReqID() ReqID { return e.Req }
+// RequestID returns the request this completion answers.
+func (e LogDeleteOldDone) RequestID() RequestID { return e.Req }
 
 //nolint:dupl // compile-time IOResult assertions; parallel list lives on IOCalls
 var (

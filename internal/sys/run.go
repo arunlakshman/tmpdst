@@ -18,7 +18,7 @@ var (
 	ErrKilled = errors.New("killed") // graceful stop missed its deadline
 )
 
-// Run delivers NodeStarted, then loops: core.ControlFirst picks, At/Wall are
+// Run delivers NodeStarted, then loops: core.ControlFirstPicker picks, At/Wall are
 // stamped at dequeue, Step, actions dispatched in slice order. Returns
 // ErrTripped (wrapped with the cause) on StopForRestart, nil on ShutdownDone, ErrStopped on ctx
 // done. When b.Shutdown fires, Run delivers core.StopRequest{Deadline: Mono+StopGrace}
@@ -47,7 +47,7 @@ func Run(ctx context.Context, b Bundle, exec Executor, f core.MachineFactory, se
 	if done, err := step(core.NodeStarted{Self: self}); done {
 		return err
 	}
-	var policy core.InboxPolicy = core.ControlFirst{}
+	var policy core.InboxPicker = core.ControlFirstPicker{}
 	ctrl, data := in.Control(), in.Data()
 	shutdown := b.Shutdown // nil once fired: StopRequest is delivered exactly once
 	var kill <-chan time.Time
@@ -58,7 +58,7 @@ func Run(ctx context.Context, b Bundle, exec Executor, f core.MachineFactory, se
 		select {
 		case <-shutdown:
 			shutdown = nil
-			in.DeliverControl(core.StopRequest{Deadline: b.Clock.Mono() + core.Time(b.StopGrace)})
+			in.DeliverControl(core.StopRequest{Deadline: b.Clock.Mono() + core.NodeTime(b.StopGrace)})
 			t := time.NewTimer(time.Duration(b.StopGrace))
 			defer t.Stop()
 			kill = t.C

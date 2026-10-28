@@ -11,7 +11,7 @@ func cpFactory(sc sim.SeedConfig, opts Opts) core.MachineFactory {
 	lp := sc.ControlPlane.Log
 	topics := opts.Topics
 	parts := opts.Partitions
-	return func(env core.Env, self core.NodeInstance) core.Machine {
+	return func(env core.Environment, self core.NodeInstance) core.Machine {
 		rank := 0
 		if self.Node == "cp-1" {
 			rank = 1

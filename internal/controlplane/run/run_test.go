@@ -11,8 +11,8 @@ import (
 
 type fakeClock struct{}
 
-func (fakeClock) Mono() core.Time     { return 7 }
-func (fakeClock) Wall() core.WallTime { return 9 }
+func (fakeClock) Mono() core.NodeTime { return 7 }
+func (fakeClock) Wall() core.RealTime { return 9 }
 
 type fakeExec struct {
 	mu  sync.Mutex
@@ -66,7 +66,7 @@ func TestStartedThenExit(t *testing.T) {
 		return nil
 	}
 	b := run.Bundle{Clock: fakeClock{}, Env: testEnv{}, Inbox: run.NewInbox(4)}
-	f := func(core.Env, core.NodeInstance) core.Machine { return m }
+	f := func(core.Environment, core.NodeInstance) core.Machine { return m }
 	if err := run.Run(t.Context(), b, &fakeExec{}, f, core.NodeInstance{Node: "cp"}); err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestInjectRunsOnLoop(t *testing.T) {
 	b := run.Bundle{
 		Clock: fakeClock{}, Env: testEnv{}, Inbox: run.NewInbox(4), Inject: inject,
 	}
-	f := func(core.Env, core.NodeInstance) core.Machine { return m }
+	f := func(core.Environment, core.NodeInstance) core.Machine { return m }
 	done := make(chan error, 1)
 	go func() { done <- run.Run(t.Context(), b, &fakeExec{}, f, core.NodeInstance{}) }()
 	inject <- func() []core.Action {
@@ -113,7 +113,7 @@ func TestWaitIdleThenExit(t *testing.T) {
 	m := &fakeMachine{}
 	inject := make(chan run.InjectFunc)
 	b := run.Bundle{Clock: fakeClock{}, Env: testEnv{}, Inbox: run.NewInbox(4), Inject: inject}
-	f := func(core.Env, core.NodeInstance) core.Machine { return m }
+	f := func(core.Environment, core.NodeInstance) core.Machine { return m }
 	done := make(chan error, 1)
 	go func() { done <- run.Run(t.Context(), b, &fakeExec{}, f, core.NodeInstance{}) }()
 	time.Sleep(20 * time.Millisecond) // park in waitIdle
@@ -155,7 +155,7 @@ func TestDeliverDataAndDispatch(t *testing.T) {
 		Facts: func(core.Fact) { facts++ },
 	}
 	ex := &fakeExec{}
-	if err := run.Run(t.Context(), b, ex, func(core.Env, core.NodeInstance) core.Machine { return m }, core.NodeInstance{}); err != nil {
+	if err := run.Run(t.Context(), b, ex, func(core.Environment, core.NodeInstance) core.Machine { return m }, core.NodeInstance{}); err != nil {
 		t.Fatal(err)
 	}
 	if facts != 1 || len(ex.got) != 1 {

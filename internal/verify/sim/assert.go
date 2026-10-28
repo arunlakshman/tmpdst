@@ -124,7 +124,7 @@ func (b *buggify) Fault(site core.FaultPointID, p float64) bool {
 
 var _ core.FaultInjector = (*buggify)(nil)
 
-// env is the core.Env every machine of a seed shares: the run stream, buggify
+// env is the core.Environment every machine of a seed shares: the run stream, buggify
 // and assertions.
 type env struct {
 	core.Rand

@@ -31,7 +31,7 @@ import (
 const seedBudget = 50
 
 // completionFor drains the engine queue and returns the completion of req.
-func completionFor(ctx *enginetest.Ctx, req core.ReqID) (core.IOResult, error) {
+func completionFor(ctx *enginetest.Ctx, req core.RequestID) (core.IOResult, error) {
 	ctx.Run()
 	c := ctx.Find(req)
 	if c == nil {
@@ -54,7 +54,7 @@ func newEngineObjectSubject() suites.ObjectSubject {
 
 func (s *engineObjectSubject) Do(op core.IOCall) (observation.ObjectResult, error) {
 	s.engine.Execute(s.ctx, s.from, op)
-	c, err := completionFor(s.ctx, op.ReqID())
+	c, err := completionFor(s.ctx, op.RequestID())
 	if err != nil {
 		return observation.ObjectResult{}, err
 	}
@@ -83,13 +83,13 @@ func (s *engineControlPlaneSubject) Do(op generator.ControlPlaneOp) (observation
 		return observation.ControlPlaneResult{Code: code}, nil
 	case op.Call != nil:
 		s.engine.Execute(s.ctx, s.from, *op.Call)
-		c, err := completionFor(s.ctx, op.Call.ReqID())
+		c, err := completionFor(s.ctx, op.Call.RequestID())
 		if err != nil {
 			return observation.ControlPlaneResult{}, err
 		}
 		done, ok := c.(core.ControlPlaneDone)
 		if !ok {
-			return observation.ControlPlaneResult{}, fmt.Errorf("request %d: the completion is %T, not a CPDone", op.Call.ReqID(), c)
+			return observation.ControlPlaneResult{}, fmt.Errorf("request %d: the completion is %T, not a CPDone", op.Call.RequestID(), c)
 		}
 		return observation.FromControlPlaneDone(done), nil
 	}

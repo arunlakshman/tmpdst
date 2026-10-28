@@ -21,7 +21,7 @@ func TestSegmentTimingFacts(t *testing.T) {
 	h.holdPut = true
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.send(c, verProduce, prodReq(-1, e("t", 1, plain(t, "b"))))
-	h.now += core.Time(40 * core.Millisecond) // the PUTs take a while
+	h.now += core.NodeTime(40 * core.Millisecond) // the PUTs take a while
 	h.holdPut = false
 	h.releaseHeld()
 	produced(h.next(c))
@@ -83,7 +83,7 @@ func TestBackpressureFacts(t *testing.T) {
 	h.holdCP = true
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.flush()
-	h.now += core.Time(30 * core.Millisecond)
+	h.now += core.NodeTime(30 * core.Millisecond)
 	h.holdCP = false
 	h.releaseHeld()
 	produced(h.next(c))

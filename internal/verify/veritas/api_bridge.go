@@ -9,7 +9,7 @@ import (
 // ExecRequest runs a generated CommitSegment/FindSegments/DescribeTopics request
 // through the oracle. Apply logic stays in this package (decision 21); only
 // the message types are shared with the wire API.
-func (c *ControlPlane) ExecRequest(req core.ReqID, msg any) core.ControlPlaneDone {
+func (c *ControlPlane) ExecRequest(req core.RequestID, msg any) core.ControlPlaneDone {
 	switch m := msg.(type) {
 	case *cpv1.CommitSegmentRequest:
 		return c.Exec(core.ControlPlaneCall{Req: req, Op: apiconv.CommitSegmentToCore(m)}).(core.ControlPlaneDone)

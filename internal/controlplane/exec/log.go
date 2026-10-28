@@ -10,10 +10,10 @@ import (
 
 // Log is a byte-oriented shared loglet. Slots hold opaque machine payloads.
 type Log interface {
-	Append(ctx context.Context, slot core.LogSlot, data []byte) (existing []byte, taken bool, err error)
-	Read(ctx context.Context, from core.LogSlot, limit int) ([]core.LogEntry, error)
-	CheckTail(ctx context.Context) (core.LogSlot, error)
-	TrimThrough(ctx context.Context, through core.LogSlot) error
+	Append(ctx context.Context, slot core.LogPosition, data []byte) (existing []byte, taken bool, err error)
+	Read(ctx context.Context, from core.LogPosition, limit int) ([]core.LogEntry, error)
+	CheckTail(ctx context.Context) (core.LogPosition, error)
+	TrimThrough(ctx context.Context, through core.LogPosition) error
 }
 
 // MemLog is an in-memory Log for tests and -store mem demos.
@@ -38,7 +38,7 @@ type slotRec struct {
 // NewMemLog returns an empty in-memory log.
 func NewMemLog() *MemLog { return &MemLog{} }
 
-func (m *MemLog) ensure(slot core.LogSlot) {
+func (m *MemLog) ensure(slot core.LogPosition) {
 	n := int(slot) + 1
 	if n > len(m.slots) {
 		m.slots = append(m.slots, make([]slotRec, n-len(m.slots))...)
@@ -46,7 +46,7 @@ func (m *MemLog) ensure(slot core.LogSlot) {
 }
 
 // Append implements Log.
-func (m *MemLog) Append(_ context.Context, slot core.LogSlot, data []byte) ([]byte, bool, error) {
+func (m *MemLog) Append(_ context.Context, slot core.LogPosition, data []byte) ([]byte, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if slot < 0 {
@@ -65,7 +65,7 @@ func (m *MemLog) Append(_ context.Context, slot core.LogSlot, data []byte) ([]by
 }
 
 // Read implements Log.
-func (m *MemLog) Read(_ context.Context, from core.LogSlot, limit int) ([]core.LogEntry, error) {
+func (m *MemLog) Read(_ context.Context, from core.LogPosition, limit int) ([]core.LogEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if from < 0 || limit < 0 {
@@ -76,25 +76,25 @@ func (m *MemLog) Read(_ context.Context, from core.LogSlot, limit int) ([]core.L
 		if m.slots[i].kind != slotEntry {
 			continue
 		}
-		out = append(out, core.LogEntry{Slot: core.LogSlot(i), Data: slices.Clone(m.slots[i].data)})
+		out = append(out, core.LogEntry{Slot: core.LogPosition(i), Data: slices.Clone(m.slots[i].data)})
 	}
 	return out, nil
 }
 
 // CheckTail implements Log.
-func (m *MemLog) CheckTail(context.Context) (core.LogSlot, error) {
+func (m *MemLog) CheckTail(context.Context) (core.LogPosition, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i := range slices.Backward(m.slots) {
 		if m.slots[i].kind != slotEmpty {
-			return core.LogSlot(i) + 1, nil
+			return core.LogPosition(i) + 1, nil
 		}
 	}
 	return 0, nil
 }
 
 // TrimThrough implements Log.
-func (m *MemLog) TrimThrough(_ context.Context, through core.LogSlot) error {
+func (m *MemLog) TrimThrough(_ context.Context, through core.LogPosition) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if through < 0 {

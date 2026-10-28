@@ -205,9 +205,9 @@ func (a asserts) Reachable(p core.PropertyID)                      { a.c.Reached
 func (a asserts) Unreachable(core.PropertyID, ...core.ContextPair) {}
 
 // Find returns the delivered completion for req (nil if none).
-func (c *Ctx) Find(req core.ReqID) core.IOResult {
+func (c *Ctx) Find(req core.RequestID) core.IOResult {
 	for _, d := range c.Delivered {
-		if cp, ok := d.Body.(core.IOResult); ok && cp.ReqID() == req {
+		if cp, ok := d.Body.(core.IOResult); ok && cp.RequestID() == req {
 			return cp
 		}
 	}

@@ -10,7 +10,7 @@ type hasher uint64
 func newHasher() hasher { return 14695981039346656037 }
 
 func (h *hasher) byte(b byte)  { *h = (*h ^ hasher(b)) * 1099511628211 }
-func (h *hasher) u64(v uint64) { *h = hasher(core.FnvU64(uint64(*h), v)) }
+func (h *hasher) u64(v uint64) { *h = hasher(core.Fnv64Hash(uint64(*h), v)) }
 func (h *hasher) bool(b bool) {
 	if b {
 		h.u64(1)

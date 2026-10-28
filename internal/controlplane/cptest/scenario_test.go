@@ -45,7 +45,7 @@ func call(op core.ControlPlaneOperation) generator.ControlPlaneOp {
 // ends moved, sends a different request under its key, an invalid request, and
 // a retry of the same batches under a fresh key (new offsets).
 func replayOps() []generator.ControlPlaneOp {
-	a, b := core.TP("w", 0), core.TP("w", 1)
+	a, b := core.TopicPartitionKey("w", 0), core.TopicPartitionKey("w", 1)
 	batches := func(key string) []core.PendingBatch {
 		return []core.PendingBatch{
 			{TP: a, Records: 2, Loc: core.SegmentRef{Key: key, Off: 0, Len: 20}},
@@ -78,8 +78,8 @@ func TestReplayMemstore(t *testing.T) { compareSteps(t, implSubject{storeImpl{ne
 // a Lookup from every offset with and without a byte limit.
 func manyBatchesOps() []generator.ControlPlaneOp {
 	var ops []generator.ControlPlaneOp
-	a := core.TP("m", 0)
-	b := core.TP("m", 1)
+	a := core.TopicPartitionKey("m", 0)
+	b := core.TopicPartitionKey("m", 1)
 	var s1, s2 []core.PendingBatch
 	for i := range 200 { // 200 batches for a, interleaved with b
 		for _, tp := range []core.TopicPartition{a, b} {
@@ -104,7 +104,7 @@ func manyBatchesOps() []generator.ControlPlaneOp {
 	ops = append(ops, commit("big1", s1), commit("big1", s1), commit("big2", s2), commit("big2", s2),
 		commit("big3", s1), // a second run on each partition, right after the first
 		commit("big1", s2)) // same key, other batches: conflict
-	for _, tp := range []core.TopicPartition{a, b, core.TP("m", 2)} {
+	for _, tp := range []core.TopicPartition{a, b, core.TopicPartitionKey("m", 2)} {
 		for from := int64(0); from <= 520; from += 7 {
 			for _, mb := range []int32{0, 1, 25, 300} {
 				ops = append(ops, call(core.FindSegments{TP: tp, From: core.Offset(from), MaxBytes: mb}))
@@ -126,7 +126,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	commit := core.CommitSegment{SegmentKey: "k", Batches: []core.PendingBatch{
-		{TP: core.TP("t", 1), Records: 4, Loc: core.SegmentRef{Key: "k", Off: 8, Len: 40}},
+		{TP: core.TopicPartitionKey("t", 1), Records: 4, Loc: core.SegmentRef{Key: "k", Off: 8, Len: 40}},
 	}}
 	cr, err := c.Call(ctx, commit)
 	if err != nil {

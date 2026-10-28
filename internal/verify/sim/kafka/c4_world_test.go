@@ -142,7 +142,7 @@ func newWorld(seed uint64, live bool) *world {
 	for _, t := range opts.Topics {
 		w.cp.CreateTopic(t, opts.Partitions)
 		for p := int32(0); p < opts.Partitions; p++ {
-			tp := core.TP(t, p)
+			tp := core.TopicPartitionKey(t, p)
 			w.tps = append(w.tps, tp)
 			w.parts[tp] = &veritas.Partition{}
 		}

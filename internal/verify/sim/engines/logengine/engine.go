@@ -47,7 +47,7 @@ type TopicSeed struct {
 // counter, so Req alone collides across brokers.
 type pendKey struct {
 	node core.NodeID
-	req  core.ReqID
+	req  core.RequestID
 }
 
 type pending struct {
@@ -62,7 +62,7 @@ type pending struct {
 
 type deadlineEv struct {
 	node core.NodeID
-	req  core.ReqID
+	req  core.RequestID
 }
 
 var _ sim.Engine = (*Engine)(nil)
@@ -242,7 +242,7 @@ func (e *Engine) execReply(ctx sim.EngineCtx, r core.ControlPlaneReply) {
 	e.deliverAt(ctx, p.from, ctx.Now()+sim.Time(lat), r.Done)
 }
 
-func (e *Engine) offer(ctx sim.EngineCtx, cp, from core.NodeInstance, req core.ReqID, op core.ControlPlaneOperation) {
+func (e *Engine) offer(ctx sim.EngineCtx, cp, from core.NodeInstance, req core.RequestID, op core.ControlPlaneOperation) {
 	lat := e.f.ApplyLatency.Sample(ctx.Rand())
 	at := ctx.Now() + sim.Time(lat)
 	ctx.Deliver(cp, at, ctx.Lane("logengine/offer/"+string(cp.Node)),

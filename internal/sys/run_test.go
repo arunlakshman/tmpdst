@@ -13,8 +13,8 @@ import (
 
 type fakeClock struct{}
 
-func (fakeClock) Mono() core.Time     { return 7 }
-func (fakeClock) Wall() core.WallTime { return 9 }
+func (fakeClock) Mono() core.NodeTime { return 7 }
+func (fakeClock) Wall() core.RealTime { return 9 }
 
 type fakeConns struct {
 	mu  sync.Mutex
@@ -56,7 +56,7 @@ func (m *fakeMachine) StateHash() uint64 { return 0 }
 func setup(m *fakeMachine) (Bundle, *fakeExec, *fakeConns, core.MachineFactory) {
 	cn := &fakeConns{}
 	b := Bundle{Clock: fakeClock{}, Conns: cn, Inbox: NewInbox(8)}
-	return b, &fakeExec{}, cn, func(core.Env, core.NodeInstance) core.Machine { return m }
+	return b, &fakeExec{}, cn, func(core.Environment, core.NodeInstance) core.Machine { return m }
 }
 
 func TestStartedFirstControlBeatsData(t *testing.T) {
@@ -94,7 +94,7 @@ func TestTripRunsEarlierActions(t *testing.T) {
 	if !errors.Is(err, ErrTripped) {
 		t.Fatalf("err = %v", err)
 	}
-	if len(ex.got) != 1 || ex.got[0].ReqID() != 1 || len(cn.log) != 1 {
+	if len(ex.got) != 1 || ex.got[0].RequestID() != 1 || len(cn.log) != 1 {
 		t.Fatalf("got %v %v", ex.got, cn.log)
 	}
 }
@@ -224,7 +224,7 @@ func TestShutdownStopThenExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	n, s := stops(m)
-	if n != 1 || s.Deadline != 7+core.Time(time.Second) {
+	if n != 1 || s.Deadline != 7+core.NodeTime(time.Second) {
 		t.Fatalf("stops=%d deadline=%d", n, s.Deadline)
 	}
 }

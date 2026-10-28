@@ -15,7 +15,7 @@ func commitCmd(key string, records int64) applier.Entry {
 		Commit: core.CommitSegment{
 			SegmentKey: key,
 			Batches: []core.PendingBatch{
-				{TP: core.TP("t", 0), Records: records, Loc: core.SegmentRef{Key: key, Off: 0, Len: records}},
+				{TP: core.TopicPartitionKey("t", 0), Records: records, Loc: core.SegmentRef{Key: key, Off: 0, Len: records}},
 			},
 		},
 	}
@@ -39,13 +39,13 @@ func TestKConcurrentLogAppend(t *testing.T) {
 	var first []core.LogAppend
 	for i := range k {
 		key := "s" + string(rune('a'+i))
-		acts := m.Offer(machine.ClientOp{Req: core.ReqID(i + 1), Cmd: commitCmd(key, 1)})
+		acts := m.Offer(machine.ClientOp{Req: core.RequestID(i + 1), Cmd: commitCmd(key, 1)})
 		first = append(first, onlyAppend(t, acts))
 	}
 	if m.InFlightCommits() != k {
 		t.Fatalf("in-flight = %d, want %d", m.InFlightCommits(), k)
 	}
-	slots := map[core.LogSlot]bool{}
+	slots := map[core.LogPosition]bool{}
 	for _, ap := range first {
 		if slots[ap.Slot] {
 			t.Fatalf("duplicate slot %d among concurrent appends", ap.Slot)
@@ -91,7 +91,7 @@ func TestGroupPackingCapsAtMaxCmdsPerSlot(t *testing.T) {
 	first := onlyAppend(t, m.Offer(machine.ClientOp{Req: 1, Cmd: commitCmd("g0", 1)}))
 	for i := 2; i <= 6; i++ {
 		if acts := m.Offer(machine.ClientOp{
-			Req: core.ReqID(i),
+			Req: core.RequestID(i),
 			Cmd: commitCmd("g"+string(rune('0'+i-1)), 1),
 		}); len(acts) != 0 {
 			t.Fatalf("Offer while in-flight returned %v", acts)
@@ -116,12 +116,12 @@ func TestGroupPackingCapsAtMaxCmdsPerSlot(t *testing.T) {
 		t.Fatalf("packed answers = %d, want 3", len(ans))
 	}
 	for i, a := range ans {
-		if a.Req != core.ReqID(i+2) || a.Done.Err != core.OK {
+		if a.Req != core.RequestID(i+2) || a.Done.Err != core.OK {
 			t.Fatalf("answer[%d] = %+v", i, a)
 		}
 	}
-	if m.Fold().End(core.TP("t", 0)) != 4 { // g0 + 3 packed
-		t.Fatalf("end = %d, want 4", m.Fold().End(core.TP("t", 0)))
+	if m.Fold().End(core.TopicPartitionKey("t", 0)) != 4 { // g0 + 3 packed
+		t.Fatalf("end = %d, want 4", m.Fold().End(core.TopicPartitionKey("t", 0)))
 	}
 }
 
@@ -179,8 +179,8 @@ func TestLostAppendRetriesSameEntryLaterSlot(t *testing.T) {
 	if len(ans) != 1 || ans[0].Req != 7 || ans[0].Done.Err != core.OK {
 		t.Fatalf("answers after retry apply = %+v", ans)
 	}
-	if m.Fold().End(core.TP("t", 0)) != 3 {
-		t.Fatalf("end = %d, want 3", m.Fold().End(core.TP("t", 0)))
+	if m.Fold().End(core.TopicPartitionKey("t", 0)) != 3 {
+		t.Fatalf("end = %d, want 3", m.Fold().End(core.TopicPartitionKey("t", 0)))
 	}
 }
 
@@ -189,7 +189,7 @@ func TestStickySingleAppenderAtMachineLevel(t *testing.T) {
 	var apps []core.LogAppend
 	for i := range 2 {
 		apps = append(apps, onlyAppend(t, m.Offer(machine.ClientOp{
-			Req: core.ReqID(i + 1),
+			Req: core.RequestID(i + 1),
 			Cmd: commitCmd("st"+string(rune('a'+i)), 1),
 		})))
 	}

@@ -20,17 +20,17 @@ const (
 	// extraReqBase is the first request number of the extra calls that the
 	// suites make for invariants. Generated operations use small numbers, so
 	// the two groups never share a request number.
-	extraReqBase core.ReqID = 1 << 30
+	extraReqBase core.RequestID = 1 << 30
 )
 
 // ObjectPair is a fresh spec and a fresh subject of the object store suite.
 type ObjectPair struct {
 	spec    *veritas.ObjectStore
 	subject ObjectSubject
-	extra   core.ReqID
+	extra   core.RequestID
 }
 
-func (p *ObjectPair) nextReq() core.ReqID {
+func (p *ObjectPair) nextReq() core.RequestID {
 	p.extra++
 	return extraReqBase + p.extra
 }

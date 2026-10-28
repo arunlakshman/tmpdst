@@ -12,8 +12,8 @@ import (
 
 // Clock is read only by the runtime, at inbox dequeue, to stamp Event.At/Wall.
 type Clock interface {
-	Mono() core.Time
-	Wall() core.WallTime
+	Mono() core.NodeTime
+	Wall() core.RealTime
 }
 
 // ObjectStore is the S3 adapter.
@@ -48,7 +48,7 @@ type Classifier interface {
 }
 
 // Sink is the node's pair of inboxes (docs/flow-control.md sec. 3). Callers route
-// with core.InboxKindOf. The loop picks with core.InboxPolicy and stamps At/Wall
+// with core.InboxKindOf. The loop picks with core.InboxPicker and stamps At/Wall
 // when it dequeues.
 type Sink interface {
 	// DeliverControl is used by timer callbacks and I/O completion goroutines.
@@ -64,7 +64,7 @@ type Sink interface {
 
 // Executor runs I/O only. The loop handles RecordFact, timers, StopForRestart, ShutdownDone and
 // returns an error on an unknown action. Exactly one IOResult per IOCall, with the
-// same ReqID, delivered to the Sink and never on the caller's goroutine.
+// same RequestID, delivered to the Sink and never on the caller's goroutine.
 // Execute MUST NOT block: it hands work to goroutines/queues.
 type Executor interface {
 	Execute(a core.IOCall)
@@ -77,9 +77,9 @@ type Bundle struct {
 	ControlPlane ControlPlane
 	Conns        Conns
 	Classifier   Classifier
-	Env          core.Env        // crypto-seeded Rand, inert FaultInjector, logging Assertions
-	Inbox        *Inbox          // shared with the Executor and readers; Run closes it on return
-	Facts        func(core.Fact) // optional: receives RecordFact facts (tracing)
-	Shutdown     <-chan struct{} // optional: closing it asks Run for a graceful stop (see ShutdownOnSignal)
-	StopGrace    core.Duration   // time the machine gets after Shutdown to emit ShutdownDone
+	Env          core.Environment // crypto-seeded Rand, inert FaultInjector, logging Assertions
+	Inbox        *Inbox           // shared with the Executor and readers; Run closes it on return
+	Facts        func(core.Fact)  // optional: receives RecordFact facts (tracing)
+	Shutdown     <-chan struct{}  // optional: closing it asks Run for a graceful stop (see ShutdownOnSignal)
+	StopGrace    core.Duration    // time the machine gets after Shutdown to emit ShutdownDone
 }

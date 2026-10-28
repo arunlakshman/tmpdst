@@ -14,13 +14,13 @@ func TestCPTruthCreateTopic(t *testing.T) {
 	if e.CreateTopic("t0", 2) != core.OK {
 		t.Fatal("CreateTopic")
 	}
-	if e.HighWatermark(core.TP("t0", 0)) != 0 {
-		t.Fatal(e.HighWatermark(core.TP("t0", 0)))
+	if e.HighWatermark(core.TopicPartitionKey("t0", 0)) != 0 {
+		t.Fatal(e.HighWatermark(core.TopicPartitionKey("t0", 0)))
 	}
 	if e.Gen() == 0 {
 		t.Fatal("gen")
 	}
-	if e.Committed(core.TP("t0", 0)) != nil {
+	if e.Committed(core.TopicPartitionKey("t0", 0)) != nil {
 		t.Fatal("expected empty committed")
 	}
 }
@@ -41,7 +41,7 @@ func TestCPTruthReplaysNoopAndTrimStride(t *testing.T) {
 	_ = e.CreateTopic("t", 1)
 	for slot := range 6 {
 		inner := applier.Encode(applier.Entry{ID: "n", Kind: applier.KindNoop})
-		e.Execute(c, a, core.LogAppend{Req: core.ReqID(slot + 1), Slot: core.LogSlot(slot), Data: inner})
+		e.Execute(c, a, core.LogAppend{Req: core.RequestID(slot + 1), Slot: core.LogPosition(slot), Data: inner})
 		c.Run()
 		c.Delivered = nil
 	}

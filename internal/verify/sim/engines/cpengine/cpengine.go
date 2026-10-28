@@ -49,7 +49,7 @@ func New(f sim.ControlPlaneFaults) *Engine {
 			return ok
 		},
 		Fail: func(a core.IOCall, err core.ErrCode, o core.Outcome) core.IOResult {
-			return core.ControlPlaneDone{Req: a.ReqID(), Err: err, Outcome: o}
+			return core.ControlPlaneDone{Req: a.RequestID(), Err: err, Outcome: o}
 		},
 		// A replayed commit is Applied too, so Gen may bump without a change.
 		Changed:  func(c core.IOResult) bool { return c.(core.ControlPlaneDone).Outcome == core.Applied },

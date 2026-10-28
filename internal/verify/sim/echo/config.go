@@ -19,7 +19,7 @@ func config(seeds []uint64, brokers core.MachineFactory) sim.Config {
 	return sim.Config{
 		Seeds:     seeds,
 		Processes: []sim.Process{{Name: "broker", Count: 3, Factory: brokers}},
-		Workloads: []sim.WorkloadFactory{func(env core.Env, self core.NodeInstance, bs []core.NodeInstance) sim.Workload {
+		Workloads: []sim.WorkloadFactory{func(env core.Environment, self core.NodeInstance, bs []core.NodeInstance) sim.Workload {
 			return NewWorkload(env, self, bs, Opts{Clients: 4})
 		}},
 		Invariants: []func() sim.Invariant{

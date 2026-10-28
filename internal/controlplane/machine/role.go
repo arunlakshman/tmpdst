@@ -137,8 +137,8 @@ func (m *Machine) takeoverDue() bool {
 	if m.active || take <= 0 {
 		return false
 	}
-	return m.now-m.lastOtherAt > core.Time(take) &&
-		m.now-m.lastPullOK < core.Time(take)
+	return m.now-m.lastOtherAt > core.NodeTime(take) &&
+		m.now-m.lastPullOK < core.NodeTime(take)
 }
 
 func (m *Machine) heartbeatDue() bool {
@@ -146,7 +146,7 @@ func (m *Machine) heartbeatDue() bool {
 	if !m.active || hb <= 0 {
 		return false
 	}
-	if m.now-m.lastOwnAt <= core.Time(hb) {
+	if m.now-m.lastOwnAt <= core.NodeTime(hb) {
 		return false
 	}
 	return len(m.queue) == 0 && len(m.flights) == 0 && m.pending == 0
@@ -159,7 +159,7 @@ func (m *Machine) maybeReplicaFault() []core.Action {
 		return nil
 	}
 	if m.cfg.StallProb > 0 && m.env.Fault("logcp_stall", m.cfg.StallProb) {
-		m.stallUntil = m.now + core.Time(betweenDur(m.env, m.cfg.StallDur))
+		m.stallUntil = m.now + core.NodeTime(betweenDur(m.env, m.cfg.StallDur))
 		m.env.Reachable("logcp-sim: replica stalled")
 		return nil
 	}
@@ -182,7 +182,7 @@ func (m *Machine) softCrash() []core.Action {
 	m.ready = false
 	m.booting = true
 	m.crashed = true
-	m.downUntil = m.now + core.Time(betweenDur(m.env, m.cfg.DownDur))
+	m.downUntil = m.now + core.NodeTime(betweenDur(m.env, m.cfg.DownDur))
 	m.answers = nil
 	m.clearLocal()
 	// Refuse client work until afterCrashRestart restores fold + catch-up.
@@ -212,9 +212,9 @@ func (m *Machine) hitTrimmed() []core.Action {
 
 func (m *Machine) clearLocal() {
 	m.queue = nil
-	m.flights = map[core.ReqID]*flight{}
+	m.flights = map[core.RequestID]*flight{}
 	m.waiters = map[string][]pendingCmd{}
-	m.buf = map[core.LogSlot][]byte{}
+	m.buf = map[core.LogPosition][]byte{}
 	m.pending, m.pendingKind = 0, pendingNone
 	m.proj = nil
 	m.fillSlot, m.fillData = 0, nil
@@ -229,7 +229,7 @@ func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {
 		})
 	}
 	// Sort map keys so answer order is stable across runs (TraceHash).
-	reqs := make([]core.ReqID, 0, len(m.flights))
+	reqs := make([]core.RequestID, 0, len(m.flights))
 	for req := range m.flights {
 		reqs = append(reqs, req)
 	}
@@ -282,7 +282,7 @@ func (m *Machine) emitHeartbeat() []core.Action {
 	return []core.Action{core.LogAppend{Req: req, Slot: slot, Data: data}}
 }
 
-func (m *Machine) observeWriter(slot core.LogSlot, rank int, writer string, enveloped bool) {
+func (m *Machine) observeWriter(slot core.LogPosition, rank int, writer string, enveloped bool) {
 	if !enveloped || writer == "" {
 		return
 	}

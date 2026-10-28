@@ -68,7 +68,7 @@ func (m *naiveControlPlane) createTopic(name string, parts int32) core.ErrCode {
 	return core.OK
 }
 
-func (m *naiveControlPlane) commit(req core.ReqID, op core.CommitSegment) core.ControlPlaneDone {
+func (m *naiveControlPlane) commit(req core.RequestID, op core.CommitSegment) core.ControlPlaneDone {
 	if old, found := m.segs[op.SegmentKey]; found {
 		if !sameBatches(old.batches, op.Batches) {
 			return core.ControlPlaneDone{Req: req, Err: core.ErrConflict}
@@ -99,7 +99,7 @@ func (m *naiveControlPlane) commit(req core.ReqID, op core.CommitSegment) core.C
 	return core.ControlPlaneDone{Req: req, Resp: resp, Outcome: core.Applied}
 }
 
-func (m *naiveControlPlane) lookup(req core.ReqID, op core.FindSegments) core.ControlPlaneDone {
+func (m *naiveControlPlane) lookup(req core.RequestID, op core.FindSegments) core.ControlPlaneDone {
 	if op.From < 0 {
 		return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
 	}
@@ -118,7 +118,7 @@ func (m *naiveControlPlane) lookup(req core.ReqID, op core.FindSegments) core.Co
 	return core.ControlPlaneDone{Req: req, Resp: resp}
 }
 
-func (m *naiveControlPlane) describe(req core.ReqID, op core.DescribeTopics) core.ControlPlaneDone {
+func (m *naiveControlPlane) describe(req core.RequestID, op core.DescribeTopics) core.ControlPlaneDone {
 	var names []string
 	for name := range m.topics {
 		names = append(names, name)
@@ -162,7 +162,7 @@ var (
 )
 
 func modelTP(r *veritastest.Rand) core.TopicPartition {
-	return core.TP(modelTopics[r.Intn(len(modelTopics))], int32(r.Intn(3)))
+	return core.TopicPartitionKey(modelTopics[r.Intn(len(modelTopics))], int32(r.Intn(3)))
 }
 
 // canonicalBatches gives the same batches every time for one key. A commit
@@ -171,7 +171,7 @@ func canonicalBatches(key string) []core.PendingBatch {
 	k := int(key[1] - '0')
 	var bs []core.PendingBatch
 	for j := 0; j <= k%3; j++ {
-		p := core.TP(modelTopics[(k+j)%len(modelTopics)], int32((k+2*j)%3))
+		p := core.TopicPartitionKey(modelTopics[(k+j)%len(modelTopics)], int32((k+2*j)%3))
 		n := int64(1 + (k+j)%4)
 		bs = append(bs, core.PendingBatch{TP: p, Records: n, Loc: core.SegmentRef{Key: "o" + key, Off: int64(j), Len: n * 10}})
 	}
@@ -224,7 +224,7 @@ func genCPModelOp(r *veritastest.Rand, _ int) cpModelOp {
 }
 
 func stepCPModel(s cpModelPair, op cpModelOp) error {
-	const req = core.ReqID(5)
+	const req = core.RequestID(5)
 	var got, want core.ControlPlaneDone
 	switch op.Kind {
 	case "create":
@@ -257,7 +257,7 @@ func stepCPModel(s cpModelPair, op cpModelOp) error {
 func checkCPModelState(s cpModelPair) error {
 	for _, t := range modelTopics {
 		for p := range int32(3) {
-			tp := core.TP(t, p)
+			tp := core.TopicPartitionKey(t, p)
 			if g, w := s.spec.End(tp), s.model.end(tp); g != w {
 				return fmt.Errorf("End(%v): the spec returned %d, the model returned %d", tp, g, w)
 			}

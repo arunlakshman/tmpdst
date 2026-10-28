@@ -168,7 +168,7 @@ func TestNodeInboxAndCost(t *testing.T) {
 	if in.Control().Len() != 1 || in.Data().Len() != 2 {
 		t.Fatal("InboxKindOf routing")
 	}
-	var p core.InboxPolicy = core.ControlFirst{}
+	var p core.InboxPicker = core.ControlFirstPicker{}
 	b, _ := p.Next(in.Control(), in.Data())
 	if _, ok := b.(core.TimerFired); !ok {
 		t.Fatalf("control must win: %T", b)

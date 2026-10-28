@@ -89,8 +89,8 @@ func (m *Machine) onObjGetDone(d core.ObjectGetDone) []core.Action {
 		if err != nil {
 			return m.trip(err)
 		}
-		m.startAt(core.LogSlot(slot))
-		m.ckptSlot = core.LogSlot(slot)
+		m.startAt(core.LogPosition(slot))
+		m.ckptSlot = core.LogPosition(slot)
 		m.needsCkpt = false
 		m.env.Reachable("logcp-sim: replica restored from a checkpoint")
 		return m.afterRestore()
@@ -128,12 +128,12 @@ func (m *Machine) onObjPutDone(d core.ObjectPutDone) []core.Action {
 	return m.emitTrim(slot)
 }
 
-func (m *Machine) emitTrim(ckptSlot core.LogSlot) []core.Action {
+func (m *Machine) emitTrim(ckptSlot core.LogPosition) []core.Action {
 	keep := m.cfg.KeepSlots
 	if keep <= 0 {
 		return nil
 	}
-	below := ckptSlot - core.LogSlot(keep)
+	below := ckptSlot - core.LogPosition(keep)
 	if below <= 0 {
 		return nil
 	}
@@ -163,7 +163,7 @@ func (m *Machine) onTrimDone(d core.LogDeleteOldDone) []core.Action {
 	return nil
 }
 
-func (m *Machine) startAt(slot core.LogSlot) {
+func (m *Machine) startAt(slot core.LogPosition) {
 	m.applied = slot
 	m.high = max(m.high, slot)
 	m.goalTail = max(m.goalTail, slot)

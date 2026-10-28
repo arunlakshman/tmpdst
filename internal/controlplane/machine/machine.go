@@ -14,7 +14,7 @@ const (
 
 // Machine is the control-plane DSM. Build it with New.
 type Machine struct {
-	env  core.Env
+	env  core.Environment
 	self core.NodeInstance
 	cfg  Config
 
@@ -27,42 +27,42 @@ type Machine struct {
 
 	fold *applier.Applier
 
-	now         core.Time
-	timerGen    core.TimerGen
-	holeGen     core.TimerGen
-	roleGen     core.TimerGen
-	ckptGen     core.TimerGen
-	nextReq     core.ReqID
+	now         core.NodeTime
+	timerGen    core.TimerVersion
+	holeGen     core.TimerVersion
+	roleGen     core.TimerVersion
+	ckptGen     core.TimerVersion
+	nextReq     core.RequestID
 	seq         uint64
-	applied     core.LogSlot // next slot to apply
-	goalTail    core.LogSlot // CheckTail answer for the current round
-	high        core.LogSlot // next slot to allocate for commit appends
-	buf         map[core.LogSlot][]byte
-	pending     core.ReqID
+	applied     core.LogPosition // next slot to apply
+	goalTail    core.LogPosition // CheckTail answer for the current round
+	high        core.LogPosition // next slot to allocate for commit appends
+	buf         map[core.LogPosition][]byte
+	pending     core.RequestID
 	pendingKind pendingKind
-	fillSlot    core.LogSlot // slot of in-flight hole-fill append
-	fillData    []byte       // bytes we offered for that append
-	holeArmed   bool         // hole timer is outstanding
+	fillSlot    core.LogPosition // slot of in-flight hole-fill append
+	fillData    []byte           // bytes we offered for that append
+	holeArmed   bool             // hole timer is outstanding
 
-	lastPullOK  core.Time
-	lastOtherAt core.Time
-	lastOwnAt   core.Time
-	promoSlot   core.LogSlot
+	lastPullOK  core.NodeTime
+	lastOtherAt core.NodeTime
+	lastOwnAt   core.NodeTime
+	promoSlot   core.LogPosition
 	lowerSeen   bool
 
-	ckptSlot    core.LogSlot // newest checkpoint slot (written or restored)
-	ckptAt      core.Time
-	ckptPending core.LogSlot // slot of in-flight ObjectPut snapshot
+	ckptSlot    core.LogPosition // newest checkpoint slot (written or restored)
+	ckptAt      core.NodeTime
+	ckptPending core.LogPosition // slot of in-flight ObjectPut snapshot
 	ckptData    []byte
 
-	queue      []pendingCmd           // client ops waiting for a commit slot
-	flights    map[core.ReqID]*flight // in-flight commit LogAppends (at most K)
+	queue      []pendingCmd               // client ops waiting for a commit slot
+	flights    map[core.RequestID]*flight // in-flight commit LogAppends (at most K)
 	waiters    map[string][]pendingCmd
 	answers    []Answer
 	proj       map[core.TopicPartition]core.Offset // BugWriterOffsets projection
-	trimFloor  core.LogSlot                        // slots below are trimmed
-	stallUntil core.Time
-	downUntil  core.Time
+	trimFloor  core.LogPosition                    // slots below are trimmed
+	stallUntil core.NodeTime
+	downUntil  core.NodeTime
 	crashed    bool
 	needsCkpt  bool // hit a tomb; must restore before catch-up from zero
 	seeds      []topicSeed
@@ -87,12 +87,12 @@ const (
 
 // New returns the core.MachineFactory of the control-plane machine.
 func New(cfg Config) core.MachineFactory {
-	return func(env core.Env, self core.NodeInstance) core.Machine {
+	return func(env core.Environment, self core.NodeInstance) core.Machine {
 		return &Machine{
 			env: env, self: self, cfg: cfg,
 			fold:    applier.NewMem(),
-			buf:     map[core.LogSlot][]byte{},
-			flights: map[core.ReqID]*flight{},
+			buf:     map[core.LogPosition][]byte{},
+			flights: map[core.RequestID]*flight{},
 			waiters: map[string][]pendingCmd{},
 		}
 	}
@@ -105,7 +105,7 @@ var _ core.Machine = (*Machine)(nil)
 func (m *Machine) Fold() *applier.Applier { return m.fold }
 
 // Applied is the next slot to apply (slots below are folded).
-func (m *Machine) Applied() core.LogSlot { return m.applied }
+func (m *Machine) Applied() core.LogPosition { return m.applied }
 
 // SeedTopic pre-creates a topic on the fold before NodeStarted (sim campaign setup).
 func (m *Machine) SeedTopic(name string, partitions int32) core.ErrCode {

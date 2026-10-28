@@ -84,7 +84,7 @@ func (b *Broker) listOffsets(s *slot, r *kmsg.ListOffsetsRequest) []core.Action 
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
 			rp := &resp.Topics[i].Partitions[j]
-			acts = append(acts, b.listOne(s, core.TP(t.Topic, p.Partition), p.Timestamp, rp)...)
+			acts = append(acts, b.listOne(s, core.TopicPartitionKey(t.Topic, p.Partition), p.Timestamp, rp)...)
 		}
 	}
 	return acts

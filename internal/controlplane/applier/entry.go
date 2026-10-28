@@ -191,23 +191,23 @@ func NewMem() *Applier { return New(NewMemKV()) }
 func (a *Applier) Apply(slot int64, e Entry) core.ControlPlaneDone {
 	switch e.Kind {
 	case KindNoop:
-		return core.ControlPlaneDone{Req: core.ReqID(slot), Outcome: core.Applied}
+		return core.ControlPlaneDone{Req: core.RequestID(slot), Outcome: core.Applied}
 	case KindCommit:
 		if len(e.WriterBases) == len(e.Commit.Batches) && len(e.WriterBases) > 0 {
 			d := a.commitWithBases(slot, e.Commit, e.WriterBases)
-			d.Req = core.ReqID(slot)
+			d.Req = core.RequestID(slot)
 			return d
 		}
 		d, err := a.Commit(slot, e.Commit)
 		if err != nil {
 			panic(fmt.Errorf("applier: store failed: %w", err))
 		}
-		d.Req = core.ReqID(slot)
+		d.Req = core.RequestID(slot)
 		return d
 	case KindCreateTopic:
-		return core.ControlPlaneDone{Req: core.ReqID(slot), Err: a.CreateTopic(e.Topic, e.Parts)}
+		return core.ControlPlaneDone{Req: core.RequestID(slot), Err: a.CreateTopic(e.Topic, e.Parts)}
 	default:
-		return core.ControlPlaneDone{Req: core.ReqID(slot), Err: core.ErrInvalid}
+		return core.ControlPlaneDone{Req: core.RequestID(slot), Err: core.ErrInvalid}
 	}
 }
 

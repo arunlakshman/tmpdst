@@ -203,7 +203,7 @@ func TestCampaignIsNotVacuous(t *testing.T) {
 	}
 }
 
-// fakeEnv is the minimum Env for driving the workload by hand.
+// fakeEnv is the minimum Environment for driving the workload by hand.
 type fakeEnv struct{ n uint64 }
 
 func (e *fakeEnv) Uint64() uint64 { e.n++; return e.n }

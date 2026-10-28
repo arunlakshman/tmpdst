@@ -11,11 +11,11 @@ import (
 
 type scriptM struct {
 	fn   func(m *scriptM, ev core.Event) []core.Action
-	env  core.Env
+	env  core.Environment
 	self core.NodeInstance
 	n    int
 	h    uint64
-	gen  core.TimerGen
+	gen  core.TimerVersion
 }
 
 func (m *scriptM) Step(ev core.Event) []core.Action {
@@ -26,7 +26,9 @@ func (m *scriptM) Step(ev core.Event) []core.Action {
 func (m *scriptM) StateHash() uint64 { return m.h }
 
 func scripted(fn func(m *scriptM, ev core.Event) []core.Action) core.MachineFactory {
-	return func(env core.Env, self core.NodeInstance) core.Machine { return &scriptM{fn: fn, env: env, self: self} }
+	return func(env core.Environment, self core.NodeInstance) core.Machine {
+		return &scriptM{fn: fn, env: env, self: self}
+	}
 }
 
 func fact(name string, v int64) core.RecordFact {
@@ -54,7 +56,7 @@ func ping(m *scriptM, ev core.Event) []core.Action {
 
 type echoApply struct {
 	from core.NodeInstance
-	req  core.ReqID
+	req  core.RequestID
 	lost bool
 }
 
@@ -109,7 +111,7 @@ func putter(m *scriptM, ev core.Event) []core.Action {
 		}
 		m.gen++
 		return []core.Action{
-			core.ObjectPut{Req: core.ReqID(m.n), Key: fmt.Sprint("k", m.n), Data: []byte{byte(m.n)}},
+			core.ObjectPut{Req: core.RequestID(m.n), Key: fmt.Sprint("k", m.n), Data: []byte{byte(m.n)}},
 			core.SetTimer{ID: 1, Gen: m.gen, After: 5 * core.Millisecond},
 		}
 	case core.ObjectPutDone:
@@ -318,7 +320,7 @@ func TestStopExitPath(t *testing.T) {
 }
 
 func TestStopDeadlineKill(t *testing.T) {
-	var deadlines []core.Time
+	var deadlines []core.NodeTime
 	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
 		if s, ok := ev.Body.(core.StopRequest); ok {
 			deadlines = append(deadlines, s.Deadline-ev.At)
@@ -332,7 +334,7 @@ func TestStopDeadlineKill(t *testing.T) {
 	if len(res.Failures) != 0 || res.Exits != 0 || res.Crashes == 0 || stat(res, "deadline_kills") == 0 {
 		t.Fatalf("exits=%d crashes=%d %+v stats=%+v", res.Exits, res.Crashes, res.Failures, res.Stats)
 	}
-	if len(deadlines) == 0 || deadlines[0] != core.Time(stopGrace) {
+	if len(deadlines) == 0 || deadlines[0] != core.NodeTime(stopGrace) {
 		t.Fatalf("deadline offset = %v", deadlines)
 	}
 }
@@ -401,7 +403,7 @@ func TestPanicRecovery(t *testing.T) {
 		t.Fatalf("HaltOnFirst: steps=%d", halted.Steps)
 	}
 	// A panicking factory is a failure, not a crash of the simulator.
-	cfg = baseCfg(func(core.Env, core.NodeInstance) core.Machine { panic("factory") })
+	cfg = baseCfg(func(core.Environment, core.NodeInstance) core.Machine { panic("factory") })
 	if r := RunSeed(cfg, 1); !hasFailure(r, FailPanic, "") {
 		t.Fatalf("%+v", r.Failures)
 	}
@@ -442,7 +444,7 @@ func (e *echoDel) OnCrash(EngineCtx, core.NodeInstance)              {}
 func (e *echoDel) EnterRecovery()                                    {}
 
 func TestClockSkewAndWall(t *testing.T) {
-	var ats []core.Time
+	var ats []core.NodeTime
 	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
 		if _, ok := ev.Body.(core.NodeStarted); ok {
 			ats = append(ats, ev.At)
@@ -456,9 +458,9 @@ func TestClockSkewAndWall(t *testing.T) {
 	cfg.Processes[0].Count = 6
 	cfg.Network.ClockSkewMax = 100 * core.Millisecond
 	RunSeed(cfg, 1)
-	distinct := map[core.Time]bool{}
+	distinct := map[core.NodeTime]bool{}
 	for _, a := range ats {
-		if a < 0 || a > core.Time(100*core.Millisecond) {
+		if a < 0 || a > core.NodeTime(100*core.Millisecond) {
 			t.Fatalf("skew out of range: %d", a)
 		}
 		distinct[a] = true
@@ -495,7 +497,7 @@ func TestWorkloadRole(t *testing.T) {
 	cfg := baseCfg(scripted(ping))
 	cfg.Processes[0].Count = 2
 	cfg.QuiesceEvery = 100 * core.Millisecond
-	cfg.Workloads = []WorkloadFactory{func(env core.Env, self core.NodeInstance, b []core.NodeInstance) Workload {
+	cfg.Workloads = []WorkloadFactory{func(env core.Environment, self core.NodeInstance, b []core.NodeInstance) Workload {
 		brokers = b
 		w = &wl{}
 		return w
@@ -515,7 +517,7 @@ func TestWorkloadRole(t *testing.T) {
 		t.Fatalf("workload steps=%d history=%v quiesce=%d", w.n, w.hist != nil, quiesce)
 	}
 	// A workload may not StopForRestart.
-	cfg.Workloads = []WorkloadFactory{func(core.Env, core.NodeInstance, []core.NodeInstance) Workload { return &wl{trip: true} }}
+	cfg.Workloads = []WorkloadFactory{func(core.Environment, core.NodeInstance, []core.NodeInstance) Workload { return &wl{trip: true} }}
 	cfg.Invariants = nil
 	if res = RunSeed(cfg, 1); !hasFailure(res, FailProtocol, "workload_ended") {
 		t.Fatalf("%+v", res.Failures)
@@ -713,7 +715,7 @@ func TestPhaseAwareWorkload(t *testing.T) {
 	run := func(emit bool) (SeedResult, *phaseWl, []TimedFact, []TimedFact) {
 		w := &phaseWl{emit: emit}
 		cfg := baseCfg(scripted(ping))
-		cfg.Workloads = []WorkloadFactory{func(core.Env, core.NodeInstance, []core.NodeInstance) Workload { return w }}
+		cfg.Workloads = []WorkloadFactory{func(core.Environment, core.NodeInstance, []core.NodeInstance) Workload { return w }}
 		var sp, wp []TimedFact
 		cfg.Invariants = []func() Invariant{func() Invariant {
 			return &fnInvariant{atEnd: func(v View) {

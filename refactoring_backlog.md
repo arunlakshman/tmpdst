@@ -28,7 +28,7 @@ Suggested waves: **P0 → P1 → P2 → P3 → P4**.
 | **P3** | Split Phase / Extract Function on hot paths | Makes Extract Class safe |
 | **P4** | Extract Class / polymorphism / ACL finish | Structure after seams exist |
 
-**Next up:** P3 `controlplane/machine` leftovers (`roleTick`, `maybeHoleFill`), or attrition/stall follow-up (`docs/cp-dsm-attrition-stall-followup.md`).
+**Next up:** P4 Extract Class / polymorphism / ACL. Attrition and stall follow-up stays in `docs/cp-dsm-attrition-stall-followup.md` and is not part of this wave.
 
 ---
 
@@ -110,81 +110,81 @@ Do per package **after** P1 types for that package.
 
 - [x] ~~**Consolidate Conditional Expression:** `ack`/`release` → `answerPart`~~
 - [x] ~~**Split Phase:** `flow` → `updatePressure`/`syncReads`; flatten `addBatch` / `onFetchGet` (+ `intact`); left `drain` alone (already flat)~~
-- [ ] **Extract Function:** backoff, find-by-id, mirror response shape, `checkBatch` groups, metadata topic builder, ApiVersions single path, StateHash folds
-- [ ] **Decompose Conditional:** timers, ListOffsets timestamps, fetch corrupt path (**Guard Clauses**)
-- [ ] **Separate Query from Modifier:** `req`/`id`, `finishPart`
-- [ ] **Encapsulate Collection:** op/conn find-drop
-- [ ] **Split Phase:** produce/fetch skeleton vs admit (remaining)
+- [x] ~~**Extract Function:** backoff was already `Broker.backoff`. Find-by-id is `segByReq`, `segByTimer`, and `opByTimer`. Response skeletons are `produceSkeleton`, `fillFetchSkeleton`, and `listOffsetsSkeleton`. `checkBatch` splits parse from policy. `metaTopic` builds one topic. ApiVersions is `apiVersionsReply`. StateHash folds are `hashScalars`, `topics`, and `openSeg`.~~
+- [x] ~~**Decompose Conditional:** the flush timer is `onFlushTimer`. ListOffsets timestamps are `listOne`. A corrupt fetch GET is `retryCorrupt`. An accepted batch is `acceptFetch`.~~
+- [x] ~~**Separate Query from Modifier:** `finishPart` writes the last part through `readySlot`. `req` and `id` stay one-line allocators. Every caller wants the new id, and a query with no caller adds a layer.~~
+- [x] ~~**Encapsulate Collection:** conn and op slices go through find, add, and drop (`addConn`, `addOp`, and the existing find and drop). A conn table type is P4 Extract Class.~~
+- [x] ~~**Split Phase:** produce, fetch, and list offsets build the response skeleton, then admit.~~
 
 ### kwire / format
 
-- [ ] **Split Phase:** `parseBatch`, `format.Decode` / Encode steps
-- [ ] **Extract Function:** BuildBatch encode loop, index entry pair
+- [x] ~~**Split Phase:** `parseBatch` was already `checkBatchShape`, the CRC check, and `decodeBatch`. `Decode` was already `decodeHeader`, `decodeIndex`, and `attachPayloads`. `Encode` measures, then `writeObject`.~~
+- [x] ~~**Extract Function:** `encodeRecords` is the BuildBatch loop. `readIndexEntry` is the read pair of `putEntry`.~~
 
 ### controlplane/machine
 
 Old `logcp` / `logsm` P3 names (`Start`, `catchUp`, `applyBatch`, `Checkpoint`, `TrimBelow`, `withFresh`, `SyncTo`, `holeTick`, `holeDue`, `decodeSlot`, `adv`/`kick`, `setI`/`setI64`, batchwrite retry) are **gone**. DSM already split catch-up / commit / checkpoint / role across files. Do **not** retarget the deleted logsm list onto `Machine`. Remaining smells:
 
-- [ ] **Extract Function** / **Decompose Conditional:** `roleTick` arms — `controlplane/machine/role.go`
-- [ ] **Move Field:** role clocks (`lastOwnAt` / `lastOtherAt`) off the replica struct if a role collaborator earns its place
-- [ ] **Encapsulate Collection:** `buf` / waiters maps on `Machine`
-- [ ] **Separate Query from Modifier:** `maybeHoleFill` (still decides and emits)
-- [ ] **Extract Function:** `cpobs.New` metrics registration by domain (live registrar; HTTP `Middleware` is test-only husk)
+- [x] ~~**Extract Function** / **Decompose Conditional:** `roleTick` asks `failbackDue`, `takeoverDue`, and `heartbeatDue`, then `setActive` or `emitHeartbeat`.~~
+- [x] ~~**Move Field:** role clocks stay on `Machine` — **not worth it**: `lastOwnAt` and `lastOtherAt` have one writer (`observeWriter`) and one reader (`takeoverDue`, `heartbeatDue`). A role struct would sit between those two lines.~~
+- [x] ~~**Encapsulate Collection:** `clearLocal` wipes `buf`, `waiters`, and the other in-flight maps that `softCrash` and `hitTrimmed` both reset. A map type does not earn a boundary.~~
+- [x] ~~**Separate Query from Modifier:** `holeFillPlan` chooses wait, fill, arm, or the hole-skip mutant. `maybeHoleFill` applies that choice.~~
+- [x] ~~**Extract Function:** `cpobs.NewWithLogger` builds HTTP collectors in `registerHTTP` and Dynamo collectors in `registerDynamo`.~~
 
 ### controlplane/applier
 
-- [ ] **Extract Function** / **Introduce Parameter Object:** `assign` / `assignAt` ends/runs/order
-- [ ] **Decompose Conditional:** `commitTx`
-- [ ] **Replace Temp with Query:** digest path (`applier/keys.go`)
-- [ ] **Split Phase:** SnapshotAt / Restore
-- [ ] **Move Function:** Trim/Window/StateHash/Assigned off `snapshot.go`
-- [ ] **Extract Function:** pebblekv `View` / `Update` bodies (no `newTxn`); digest build
+- [x] ~~**Extract Function** / **Introduce Parameter Object:** `assign` and `assignAt` share `assignPlan`.~~
+- [x] ~~**Decompose Conditional:** `commitTx` and the writer-base path share `storeCommit`.~~
+- [x] ~~**Replace Temp with Query:** `digestBytes` is the digest input.~~
+- [x] ~~**Split Phase:** `SnapshotAt` writes through `writeSnap`. `Restore` was already `restoreChunk` and `readEntry`.~~
+- [x] ~~**Move Function:** `Trim`, `Window`, `StateHash`, and `Assigned` live in `query.go`.~~
+- [x] ~~**Extract Function:** pebble `View` and `Update` stay separate — **not worth it**: each body is the snapshot versus the indexed batch, and a shared constructor is the `newTxn` this line forbids.~~
 
 ### controlplane/cpclient / fakedb / exec
 
 - [x] ~~cpclient HTTP `decode` / Faults / endpoint struct / `errOf` — **obsolete** (gRPC + `apiconv` / `mapRPCErr`; client holds an address list)~~
 - [x] ~~cpobs Middleware observe→log as prod path — **obsolete** (manicp serves gRPC; Middleware only in cpobs tests; live hook is `APIOptions`)~~
-- [ ] **Split Phase** / **Extract Function:** cpclient `do` / `doAt`
-- [ ] **Extract Function:** fakedb preamble; Put/Update apply (`ops.go` / `expr.go` `applyUpdate` / `applyClause`); `parseKeyCond` (was `parseBetween`)
-- [ ] **Decompose Conditional** / **Guard Clauses:** expr SET, BatchWriteItem
-- [ ] **Extract Function** / **Split Phase:** `exec/dynlog` Append/Read/CheckTail clarity (single copy; no twin merge)
+- [x] ~~**Split Phase** / **Extract Function:** `do` times the call. `failover` walks addresses. `doAt` is one attempt.~~
+- [x] ~~**Extract Function:** `rejectCond` is the shared condition check. `clauseValue` reads one SET or ADD clause. `parseKeyRange` is the BETWEEN half of `parseKeyCond`. `writeCount` and `applyWrite` are the BatchWriteItem steps.~~
+- [x] ~~**Decompose Conditional** / **Guard Clauses:** SET versus ADD is `clauseValue`, then the verb. BatchWriteItem holds the last request, otherwise `applyWrite`.~~
+- [x] ~~**Extract Function** / **Split Phase:** `DynLog.between` builds the shared key condition. Read, CheckTail, and TrimThrough set their own flags on it.~~
 
 ### sim
 
-- [ ] **Split Phase** / **Extract Function:** kernel setup/boot/pump/loop entry; netsim send/dial/flush; logengine defaults + `plan`; fakeio Execute; kafka newBatches/onProduce/onFetch/AtEnd; echo onGet/onCommit/next; runner seed→fold
-- [ ] **Decompose Conditional:** attrition, crash, produce classify, reply
-- [ ] **Consolidate Duplicate Conditional Fragments:** callEngine, segcaps Observe/AtEnd, config knobs
-- [ ] **Replace Loop with Pipeline:** serveReads, TP assembly, response index by TP
-- [ ] **Extract Function:** producer/consumer shared TP request helper; codes.go predicates
-- [ ] **Move Function:** CPTruth view helpers; engineCtx file; unify `landBody`/`rstBody` (fakeio vs netsim)
+- [x] ~~**Split Phase** / **Extract Function:** `setup` is `wireEngines`, `addInvariants`, `addNodes`, `bootNodes`, and `scheduleCampaign`. netsim `send`, `dial`, and `flush`, logengine `plan`, fakeio `Execute`, kafka `newBatches`, `onProduce`, `onFetch`, and `AtEnd`, and echo `onGet`, `onCommit`, and `next` are already one phase each.~~
+- [x] ~~**Decompose Conditional:** attrition, crash, produce classify, and reply — **not worth it**: `attrition` is already guard clauses, and `onProduce` is the classification. Moving that switch one hop does not delete a branch.~~
+- [x] ~~**Consolidate Duplicate Conditional Fragments:** callEngine, segcaps Observe/AtEnd, config knobs — **not worth it**: campaign presets already share the knobs (P2). The remaining copies are protocol-specific.~~
+- [x] ~~**Replace Loop with Pipeline:** serveReads, TP assembly, response index by TP — **not worth it**: the loops are the read. A pipeline type would add a layer with one caller.~~
+- [x] ~~**Extract Function:** producer and consumer TP request helper, codes.go predicates — **not worth it**: `code` predicates and the per-protocol request builders are already named, and a shared TP helper would hide the protocol difference.~~
+- [x] ~~**Move Function:** CPTruth view helpers, engineCtx file, unify `landBody`/`rstBody` — **not worth it**: fakeio and netsim land different completions. One body would take a flag or a hook and not delete a branch.~~
 
 ### sys
 
-- [ ] **Extract Function** / **Split Phase:** net Shutdown/accept; executor timeout template; metrics NewMetrics + Observe map; seglog attrs; awsobs finalize; s3store Get; run waitForWork; manifest enrich→put
-- [ ] **Move Function:** conn loops; fact accessors; S3 writer overlap
-- [ ] **Decompose Conditional** / **Guard Clauses:** enqueue, getFailed, classify ladder
-- [ ] **Consolidate Duplicate Conditional Fragments:** inbox Control/Data Pop
-- [ ] **Extract Function:** node `wireBundle`
+- [x] ~~**Extract Function** / **Split Phase:** net `Shutdown`, executor timeout, `NewMetrics`, `Observe`, seglog, `HandleFinalize`, s3store `Get`, `waitForWork`, and manifest publish are already one phase each. A second split does not hide a decision.~~
+- [x] ~~**Move Function:** conn loops, fact accessors, S3 writer overlap — **not worth it**: each already lives next to the type that owns it.~~
+- [x] ~~**Decompose Conditional** / **Guard Clauses:** enqueue, getFailed, classify ladder — **not worth it**: the ladders are the function. Pulling a clause out leaves a one-caller wrapper.~~
+- [x] ~~**Consolidate Duplicate Conditional Fragments:** inbox Control/Data Pop — **not worth it**: the two pops differ by lane. A shared pop would take the lane as a flag.~~
+- [x] ~~**Extract Function:** node `wireBundle` — **not worth it**: the bundle is the constructor's argument list. A named bundle type is P4.~~
 
 ### veritas
 
-- [ ] **Split Phase** / **Extract Function:** execCommit; Get range; lockstep named shrink passes
-- [ ] **Form Template Method:** prefix StateHash with ControlPlane
+- [x] ~~**Split Phase** / **Extract Function:** `execCommit` is `replayCommit` or `freshCommit`. Get's range check is `sliceRange`. Lockstep shrink passes were already `dropChunks`, `shrinkOne`, and `shrinkAll`.~~
+- [x] ~~**Form Template Method:** `extendPrefix` is the shared prefix fold for `ObjectStore.StateHash` and `ControlPlane.StateHash`. `Partition.StateHash` folds a record list and does not use the prefix cache.~~
 
 ### cmd
 
-- [ ] **Split Phase:** manibroker/manicp serve; openLog phases; manibench run; crapscore analyse
-- [ ] **Extract Function:** openS3Objects, wireFacts, applySegment/BufferLimits, shouldFinalCheckpoint, Evaluate classify/improved, ParseTree helpers, coverageFor, openClients+cleanup, formatFailure, fail(), ReportView
-- [ ] **Introduce Parameter Object:** brokerFlags groups, worker, BaselinePolicy, logFlags nesting
-- [ ] **Preserve Whole Object:** runtimeSnapshot for manifest
-- [ ] **Slide Statements:** validate log-level before "starting"
-- [ ] **Decompose Conditional:** tuning apply, parseArgs, improved branches
-- [ ] **Combine Functions into Class:** pebbleState lifecycle
-- [ ] **Replace Conditional with Polymorphism** (light): scenario registry, bufferPolicy auto/fixed, store-kind
+- [x] ~~**Split Phase:** manibroker and manicp `serve` are already a sequence of named calls (`nodeConfig`, `openObjects`, `bind`, `Start`, `Publish`, `Wait`). `openLog`, manibench `run`, and crapscore `analyse` are the same shape.~~
+- [x] ~~**Extract Function:** openS3Objects, wireFacts, applySegment/BufferLimits, shouldFinalCheckpoint, Evaluate classify, ParseTree, coverageFor, openClients, formatFailure, fail, ReportView — **not worth it**: the bodies are already those calls, or a helper would have one caller and no second shape.~~
+- [x] ~~**Introduce Parameter Object:** brokerFlags groups, worker, BaselinePolicy, logFlags nesting — **not worth it**: the flag structs are the parameter objects. Nesting them again hides the flag a reader looks up.~~
+- [x] ~~**Preserve Whole Object:** runtimeSnapshot for manifest — **not worth it**: `manifestTuning` already returns the object the manifest stores.~~
+- [x] ~~**Slide Statements:** the log-level error returns before the "starting" line. Moving it before `slog.SetDefault` would change that side effect.~~
+- [x] ~~**Decompose Conditional:** tuning apply, parseArgs, improved branches — **not worth it**: each branch is the decision. A table would not delete a case.~~
+- [x] ~~**Combine Functions into Class:** pebbleState lifecycle — **not worth it**: open and close are two calls on the pebble DB. A lifecycle type adds a layer.~~
+- [x] ~~**Replace Conditional with Polymorphism** (light): scenario registry, bufferPolicy, store-kind — **not worth it**: this is the P4 polymorphism pass. The cmd switches are small and local.~~
 
 ### tools
 
-- [ ] **Parameterize Function:** detcheck optional checker list (`checkFile` always runs imports/globals/node switch; no toggle). `loadAllow` / json2yaml / `api/openapi` share is gone — do not reopen.
+- [x] ~~**Parameterize Function:** `checkFile` takes a `[]fileCheck`. `run` passes `checkImports`, `checkGlobals`, and `checkAST`. `loadAllow`, json2yaml, and `api/openapi` stay closed.~~
 
 ---
 
@@ -211,7 +211,7 @@ After P1–P3 seams exist.
 2. **P1 VO helpers:** done.
 3. **CP-DSM program:** done (stack landed; twin + JSON/OpenAPI husk removed).
 4. **P2 shared kernels:** done (kwire, runinfo, campaign, session, codec framing, boundary Draw).
-5. **Next:** P3 Split Phase/Extract Function (**test + green per item/commit**), or attrition/stall follow-up in parallel.
+5. **P3:** done (hot-path extracts, or struck where a helper would only add a layer).
 6. **Last:** P4 Extract Class / polymorphism / ACL / formal bounded contexts (**test + green per item/commit**).
 
 ---

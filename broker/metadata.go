@@ -35,31 +35,9 @@ func (b *Broker) metaResp(o *op, infos []core.TopicInfo, code kafkaCode) {
 	cluster := "manifester"
 	resp.ClusterID, resp.ControllerID = &cluster, b.cfg.BrokerID
 	resp.Brokers = []kmsg.MetadataResponseBroker{{NodeID: b.cfg.BrokerID, Host: b.cfg.Host, Port: b.cfg.Port}}
-	topic := func(name string) kmsg.MetadataResponseTopic {
-		n := name
-		t := kmsg.NewMetadataResponseTopic()
-		t.Topic = &n
-		for _, in := range infos {
-			if in.Name != name {
-				continue
-			}
-			for p := int32(0); p < in.Partitions; p++ {
-				mp := kmsg.NewMetadataResponseTopicPartition()
-				mp.Partition, mp.Leader, mp.LeaderEpoch = p, b.cfg.BrokerID, 0
-				mp.Replicas, mp.ISR = []int32{b.cfg.BrokerID}, []int32{b.cfg.BrokerID}
-				t.Partitions = append(t.Partitions, mp)
-			}
-			return t
-		}
-		t.ErrorCode = int16(errUnknownTopicOrPart)
-		if code != errNone {
-			t.ErrorCode = int16(code)
-		}
-		return t
-	}
 	if r.Topics == nil { // all topics
 		for _, in := range infos {
-			resp.Topics = append(resp.Topics, topic(in.Name))
+			resp.Topics = append(resp.Topics, b.metaTopic(in.Name, infos, code))
 		}
 	}
 	for _, rt := range r.Topics {
@@ -69,17 +47,52 @@ func (b *Broker) metaResp(o *op, infos []core.TopicInfo, code kafkaCode) {
 			resp.Topics = append(resp.Topics, t)
 			continue
 		}
-		resp.Topics = append(resp.Topics, topic(*rt.Topic))
+		resp.Topics = append(resp.Topics, b.metaTopic(*rt.Topic, infos, code))
 	}
 	o.s.resp = resp
+}
+
+func (b *Broker) metaTopic(name string, infos []core.TopicInfo, code kafkaCode) kmsg.MetadataResponseTopic {
+	n := name
+	t := kmsg.NewMetadataResponseTopic()
+	t.Topic = &n
+	for _, in := range infos {
+		if in.Name != name {
+			continue
+		}
+		for p := int32(0); p < in.Partitions; p++ {
+			mp := kmsg.NewMetadataResponseTopicPartition()
+			mp.Partition, mp.Leader, mp.LeaderEpoch = p, b.cfg.BrokerID, 0
+			mp.Replicas, mp.ISR = []int32{b.cfg.BrokerID}, []int32{b.cfg.BrokerID}
+			t.Partitions = append(t.Partitions, mp)
+		}
+		return t
+	}
+	t.ErrorCode = int16(errUnknownTopicOrPart)
+	if code != errNone {
+		t.ErrorCode = int16(code)
+	}
+	return t
 }
 
 // listOffsets serves earliest (always 0, no retention) and latest (the end
 // offset); other timestamps are unsupported (decision 29).
 func (b *Broker) listOffsets(s *slot, r *kmsg.ListOffsetsRequest) []core.Action {
+	resp := listOffsetsSkeleton(r)
+	s.resp = resp
+	var acts []core.Action
+	for i, t := range r.Topics {
+		for j, p := range t.Partitions {
+			rp := &resp.Topics[i].Partitions[j]
+			acts = append(acts, b.listOne(s, core.TP(t.Topic, p.Partition), p.Timestamp, rp)...)
+		}
+	}
+	return acts
+}
+
+func listOffsetsSkeleton(r *kmsg.ListOffsetsRequest) *kmsg.ListOffsetsResponse {
 	resp := kmsg.NewPtrListOffsetsResponse()
 	resp.Topics = make([]kmsg.ListOffsetsResponseTopic, len(r.Topics))
-	s.resp = resp
 	for i, t := range r.Topics {
 		rt := &resp.Topics[i]
 		rt.Topic = t.Topic
@@ -89,22 +102,19 @@ func (b *Broker) listOffsets(s *slot, r *kmsg.ListOffsetsRequest) []core.Action 
 			rp.Partition, rp.Timestamp, rp.Offset, rp.LeaderEpoch = t.Partitions[j].Partition, -1, -1, 0
 		}
 	}
-	var acts []core.Action
-	for i, t := range r.Topics {
-		for j, p := range t.Partitions {
-			rp := &resp.Topics[i].Partitions[j]
-			tp := core.TP(t.Topic, p.Partition)
-			switch {
-			case !b.knows(tp):
-				rp.ErrorCode = int16(errUnknownTopicOrPart)
-			case p.Timestamp == -2:
-				rp.Offset = 0
-			case p.Timestamp == -1:
-				acts = append(acts, b.startOp(&op{kind: opList, s: s, tp: tp, lpart: rp})...)
-			default:
-				rp.ErrorCode = int16(errUnsupportedForFormat)
-			}
-		}
+	return resp
+}
+
+func (b *Broker) listOne(s *slot, tp core.TopicPartition, ts int64, rp *kmsg.ListOffsetsResponseTopicPartition) []core.Action {
+	switch {
+	case !b.knows(tp):
+		rp.ErrorCode = int16(errUnknownTopicOrPart)
+	case ts == -2:
+		rp.Offset = 0
+	case ts == -1:
+		return b.startOp(&op{kind: opList, s: s, tp: tp, lpart: rp})
+	default:
+		rp.ErrorCode = int16(errUnsupportedForFormat)
 	}
-	return acts
+	return nil
 }

@@ -107,20 +107,27 @@ func validBatch(b core.PendingBatch) bool {
 }
 
 func (c *ControlPlane) execCommit(req core.ReqID, op core.CommitSegment) core.Completion {
-	fail := func(e core.ErrCode) core.Completion { return core.CPDone{Req: req, Err: e} }
 	if seg, done := c.segs[op.SegmentKey]; done {
-		if !slices.Equal(seg.batches, op.Batches) {
-			return fail(core.ErrConflict)
-		}
-		resp := core.CommitSegmentResp{Assigned: slices.Clone(seg.ranges)}
-		return core.CPDone{Req: req, Resp: resp, Outcome: core.Applied}
+		return c.replayCommit(req, op, seg)
 	}
+	return c.freshCommit(req, op)
+}
+
+func (c *ControlPlane) replayCommit(req core.ReqID, op core.CommitSegment, seg segment) core.Completion {
+	if !slices.Equal(seg.batches, op.Batches) {
+		return core.CPDone{Req: req, Err: core.ErrConflict}
+	}
+	resp := core.CommitSegmentResp{Assigned: slices.Clone(seg.ranges)}
+	return core.CPDone{Req: req, Resp: resp, Outcome: core.Applied}
+}
+
+func (c *ControlPlane) freshCommit(req core.ReqID, op core.CommitSegment) core.Completion {
 	if op.SegmentKey == "" || len(op.Batches) == 0 {
-		return fail(core.ErrInvalid)
+		return core.CPDone{Req: req, Err: core.ErrInvalid}
 	}
 	for _, b := range op.Batches {
 		if !validBatch(b) {
-			return fail(core.ErrInvalid)
+			return core.CPDone{Req: req, Err: core.ErrInvalid}
 		}
 	}
 	seg := segment{batches: slices.Clone(op.Batches)}
@@ -179,15 +186,11 @@ func (c *ControlPlane) append(r core.BatchRange) {
 // StateHash folds committed segments (sorted by key, with their ranges) and
 // topics (sorted by name).
 func (c *ControlPlane) StateHash() uint64 {
-	if len(c.segPre) == 0 {
-		c.segPre = append(c.segPre, newHasher())
-	}
-	for i := len(c.segPre) - 1; i < len(c.segKeys); i++ {
-		h := c.segPre[i]
+	c.segPre = extendPrefix(c.segPre, len(c.segKeys), func(i int, h hasher) hasher {
 		h.str(c.segKeys[i])
 		h.ranges(c.segs[c.segKeys[i]].ranges)
-		c.segPre = append(c.segPre, h)
-	}
+		return h
+	})
 	return c.tailHash(c.segPre[len(c.segKeys)])
 }
 

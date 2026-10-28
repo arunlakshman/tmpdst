@@ -125,18 +125,31 @@ const (
 // batch, in order. It returns ErrInvalid for an empty list, an empty topic or
 // payload, a topic longer than 65535 bytes, or a negative partition.
 func Encode(batches []Batch) ([]byte, []Entry, error) {
+	idx, total, err := measureBatches(batches)
+	if err != nil {
+		return nil, nil, err
+	}
+	obj, entries := writeObject(batches, idx, total)
+	return obj, entries, nil
+}
+
+func measureBatches(batches []Batch) (int, int, error) {
 	if len(batches) == 0 || uint64(len(batches)) > math.MaxUint32 {
-		return nil, nil, fmt.Errorf("%w: %d batches", ErrInvalid, len(batches))
+		return 0, 0, fmt.Errorf("%w: %d batches", ErrInvalid, len(batches))
 	}
 	idx := 4
 	total := 0
 	for i, b := range batches {
 		if b.TP.Topic == "" || len(b.TP.Topic) > maxTopic || b.TP.Partition < 0 || len(b.Data) == 0 {
-			return nil, nil, fmt.Errorf("%w: batch %d", ErrInvalid, i)
+			return 0, 0, fmt.Errorf("%w: batch %d", ErrInvalid, i)
 		}
 		idx += minEntry + len(b.TP.Topic)
 		total += len(b.Data)
 	}
+	return idx, total, nil
+}
+
+func writeObject(batches []Batch, idx, total int) ([]byte, []Entry) {
 	bodyLen := idx + total
 	obj := make([]byte, HeaderSize+bodyLen)
 	body := obj[HeaderSize:]
@@ -154,7 +167,7 @@ func Encode(batches []Batch) ([]byte, []Entry, error) {
 	// obj[6:8] flags = 0
 	binary.BigEndian.PutUint64(obj[8:], uint64(bodyLen))
 	binary.BigEndian.PutUint32(obj[16:], Checksum(body))
-	return obj, entries, nil
+	return obj, entries
 }
 
 func putEntry(w []byte, b Batch, off uint64) int {
@@ -227,31 +240,41 @@ func decodeIndex(body []byte) ([]Entry, []indexRaw, uint64, error) {
 	raws := make([]indexRaw, 0, count)
 	p := 4
 	for i := range count {
-		if len(body)-p < 2 {
-			return nil, nil, 0, corrupt("truncated index")
+		ent, raw, next, err := readIndexEntry(body, p, i)
+		if err != nil {
+			return nil, nil, 0, err
 		}
-		tl := int(binary.BigEndian.Uint16(body[p:]))
-		if tl == 0 || len(body)-p < 2+tl+28 {
-			return nil, nil, 0, corrupt("bad index entry %d", i)
-		}
-		topic := string(body[p+2 : p+2+tl])
-		q := p + 2 + tl
-		part := int32(binary.BigEndian.Uint32(body[q:]))
-		if part < 0 {
-			return nil, nil, 0, corrupt("negative partition in entry %d", i)
-		}
-		ents = append(ents, Entry{
-			TP:      core.TP(topic, part),
-			Records: binary.BigEndian.Uint32(body[q+4:]),
-			CRC:     binary.BigEndian.Uint32(body[q+24:]),
-		})
-		raws = append(raws, indexRaw{
-			off: binary.BigEndian.Uint64(body[q+8:]),
-			n:   binary.BigEndian.Uint64(body[q+16:]),
-		})
-		p = q + 28
+		ents = append(ents, ent)
+		raws = append(raws, raw)
+		p = next
 	}
 	return ents, raws, uint64(p), nil
+}
+
+func readIndexEntry(body []byte, p int, i uint64) (Entry, indexRaw, int, error) {
+	if len(body)-p < 2 {
+		return Entry{}, indexRaw{}, 0, corrupt("truncated index")
+	}
+	tl := int(binary.BigEndian.Uint16(body[p:]))
+	if tl == 0 || len(body)-p < 2+tl+28 {
+		return Entry{}, indexRaw{}, 0, corrupt("bad index entry %d", i)
+	}
+	topic := string(body[p+2 : p+2+tl])
+	q := p + 2 + tl
+	part := int32(binary.BigEndian.Uint32(body[q:]))
+	if part < 0 {
+		return Entry{}, indexRaw{}, 0, corrupt("negative partition in entry %d", i)
+	}
+	ent := Entry{
+		TP:      core.TP(topic, part),
+		Records: binary.BigEndian.Uint32(body[q+4:]),
+		CRC:     binary.BigEndian.Uint32(body[q+24:]),
+	}
+	raw := indexRaw{
+		off: binary.BigEndian.Uint64(body[q+8:]),
+		n:   binary.BigEndian.Uint64(body[q+16:]),
+	}
+	return ent, raw, q + 28, nil
 }
 
 // attachPayloads checks contiguous ranges and per-batch CRCs, fills Off/Len,

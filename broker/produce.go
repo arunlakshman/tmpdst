@@ -12,18 +12,7 @@ import (
 // produce admits one batch per partition into the open segment. Acks 1 and -1
 // both mean "committed" (acks=0 never gets here: the connection is closed).
 func (b *Broker) produce(s *slot, r *kmsg.ProduceRequest) []core.Action {
-	resp := kmsg.NewPtrProduceResponse()
-	resp.Topics = make([]kmsg.ProduceResponseTopic, len(r.Topics))
-	for i, t := range r.Topics {
-		rt := &resp.Topics[i]
-		rt.Topic = t.Topic
-		rt.Partitions = make([]kmsg.ProduceResponseTopicPartition, len(t.Partitions))
-		for j, p := range t.Partitions {
-			rp := &rt.Partitions[j]
-			rp.Default()
-			rp.Partition, rp.BaseOffset, rp.LogStartOffset = p.Partition, -1, 0
-		}
-	}
+	resp := produceSkeleton(r)
 	s.resp = resp
 	var acts []core.Action
 	for i, t := range r.Topics {
@@ -40,6 +29,22 @@ func (b *Broker) produce(s *slot, r *kmsg.ProduceRequest) []core.Action {
 		}
 	}
 	return acts
+}
+
+func produceSkeleton(r *kmsg.ProduceRequest) *kmsg.ProduceResponse {
+	resp := kmsg.NewPtrProduceResponse()
+	resp.Topics = make([]kmsg.ProduceResponseTopic, len(r.Topics))
+	for i, t := range r.Topics {
+		rt := &resp.Topics[i]
+		rt.Topic = t.Topic
+		rt.Partitions = make([]kmsg.ProduceResponseTopicPartition, len(t.Partitions))
+		for j, p := range t.Partitions {
+			rp := &rt.Partitions[j]
+			rp.Default()
+			rp.Partition, rp.BaseOffset, rp.LogStartOffset = p.Partition, -1, 0
+		}
+	}
+	return resp
 }
 
 // admit validates one partition's payload and returns the batch to buffer, or
@@ -71,31 +76,47 @@ func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, 
 // lastOffsetDelta, and no producer id (decision 41). The payload stays opaque;
 // the broker only ever relies on the header count.
 func (b *Broker) checkBatch(one []byte) (kwire.Batch, kafkaCode) {
-	parse := kwire.ParseBatch
-	if b.cfg.Bug == BugSkipProduceCRC {
-		parse = kwire.ParseBatchUnverified
+	bt, err := b.parseProduceBatch(one)
+	if err != nil {
+		return bt, b.batchParseCode(err)
 	}
-	bt, err := parse(one)
+	return bt, b.batchPolicy(bt)
+}
+
+func (b *Broker) parseProduceBatch(one []byte) (kwire.Batch, error) {
+	if b.cfg.Bug == BugSkipProduceCRC {
+		return kwire.ParseBatchUnverified(one)
+	}
+	return kwire.ParseBatch(one)
+}
+
+func (b *Broker) batchParseCode(err error) kafkaCode {
 	switch {
 	case errors.Is(err, kwire.ErrUnknownCodec):
-		return bt, errUnsupportedCompress
+		return errUnsupportedCompress
 	case errors.Is(err, kwire.ErrUnsupportedBatch):
-		return bt, errUnsupportedForFormat
-	case err != nil:
+		return errUnsupportedForFormat
+	default:
 		b.env.Reachable("broker: corrupt produce batch rejected")
-		return bt, errCorruptMessage
+		return errCorruptMessage
+	}
+}
+
+func (b *Broker) batchPolicy(bt kwire.Batch) kafkaCode {
+	switch {
 	case bt.IsTransactional() || bt.IsControl():
-		return bt, errInvalidRequest
+		return errInvalidRequest
 	case bt.NumRecords <= 0 || bt.LastOffsetDelta != bt.NumRecords-1:
-		return bt, errCorruptMessage
+		return errCorruptMessage
 	case bt.ProducerID >= 0:
 		// Idempotent producers are unsupported (decision 41): without the
 		// sequence checks a retry would duplicate records, so refuse rather
 		// than silently weaken the guarantee. INVALID_REQUEST is not retriable.
 		b.env.Reachable("broker: idempotent batch rejected")
-		return bt, errInvalidRequest
+		return errInvalidRequest
+	default:
+		return errNone
 	}
-	return bt, errNone
 }
 
 // reachCodec declares that a batch of codec c (1..4) was admitted. The strings

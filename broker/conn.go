@@ -55,11 +55,13 @@ func (b *Broker) dropConn(c *conn) {
 	}
 }
 
+func (b *Broker) addConn(c *conn) { b.conns = append(b.conns, c) }
+
 func (b *Broker) onOpen(e core.ConnOpened) []core.Action {
 	if b.stopping || b.findConn(e.Conn) != nil {
 		return []core.Action{core.CloseConn{Conn: e.Conn, Abort: true}}
 	}
-	b.conns = append(b.conns, &conn{id: e.Conn, fr: kwire.NewFramer(b.cfg.MaxFrame)})
+	b.addConn(&conn{id: e.Conn, fr: kwire.NewFramer(b.cfg.MaxFrame)})
 	return nil
 }
 
@@ -99,29 +101,30 @@ func (b *Broker) onBytes(e core.BytesReceived) []core.Action {
 // request decodes one frame and routes it.
 func (b *Broker) request(c *conn, frame []byte) []core.Action {
 	h, req, err := b.codec.DecodeRequest(frame)
-	var ue *kwire.UnsupportedError
-	switch {
-	case errors.As(err, &ue) && h.APIKey == kwire.KeyApiVersions:
+	if resp, ok := apiVersionsReply(h, req, err); ok {
 		s := b.newSlot(c, h)
-		s.resp = kwire.ApiVersionsResponse(h)
-		b.finishPart(s)
-		return nil
-	case err != nil:
-		c.closing = true
-		return nil
-	}
-	if req.Key() == kwire.KeyApiVersions {
-		s := b.newSlot(c, h)
-		s.resp = kwire.ApiVersionsResponse(h)
+		s.resp = resp
 		b.finishPart(s)
 		return nil
 	}
-	if b.stopping {
+	if err != nil || b.stopping {
 		c.closing = true
 		return nil
 	}
 	s := b.newSlot(c, h)
 	return b.handle(s, req)
+}
+
+// apiVersionsReply is the one ApiVersions answer. An unsupported version of
+// that key still gets the supported range. Every other decode error does not.
+func apiVersionsReply(h kwire.RequestHeader, req core.Request, err error) (*kmsg.ApiVersionsResponse, bool) {
+	if _, ok := errors.AsType[*kwire.UnsupportedError](err); ok && h.APIKey == kwire.KeyApiVersions {
+		return kwire.ApiVersionsResponse(h), true
+	}
+	if err == nil && req.Key() == kwire.KeyApiVersions {
+		return kwire.ApiVersionsResponse(h), true
+	}
+	return nil, false
 }
 
 // newSlot reserves the next response position on c. pending starts at 1, the
@@ -133,11 +136,16 @@ func (b *Broker) newSlot(c *conn, h kwire.RequestHeader) *slot {
 	return s
 }
 
-// finishPart retires one pending part; at zero the response is ready.
+// finishPart retires one pending part. The last part marks the slot ready.
 func (b *Broker) finishPart(s *slot) {
-	if s.pending--; s.pending > 0 {
+	s.pending--
+	if s.pending > 0 {
 		return
 	}
+	b.readySlot(s)
+}
+
+func (b *Broker) readySlot(s *slot) {
 	b.finalize(s)
 	s.ready = true
 	b.dirty = append(b.dirty, s.conn)

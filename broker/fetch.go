@@ -18,17 +18,7 @@ func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 		return nil
 	}
 	s.fetchMax = r.MaxBytes
-	resp.Topics = make([]kmsg.FetchResponseTopic, len(r.Topics))
-	for i, t := range r.Topics {
-		rt := &resp.Topics[i]
-		rt.Topic = t.Topic
-		rt.Partitions = make([]kmsg.FetchResponseTopicPartition, len(t.Partitions))
-		for j := range t.Partitions {
-			rp := &rt.Partitions[j]
-			rp.Partition = t.Partitions[j].Partition
-			rp.HighWatermark, rp.LastStableOffset, rp.LogStartOffset, rp.PreferredReadReplica = -1, -1, 0, -1
-		}
-	}
+	fillFetchSkeleton(resp, r)
 	var acts []core.Action
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
@@ -49,6 +39,20 @@ func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 		}
 	}
 	return acts
+}
+
+func fillFetchSkeleton(resp *kmsg.FetchResponse, r *kmsg.FetchRequest) {
+	resp.Topics = make([]kmsg.FetchResponseTopic, len(r.Topics))
+	for i, t := range r.Topics {
+		rt := &resp.Topics[i]
+		rt.Topic = t.Topic
+		rt.Partitions = make([]kmsg.FetchResponseTopicPartition, len(t.Partitions))
+		for j := range t.Partitions {
+			rp := &rt.Partitions[j]
+			rp.Partition = t.Partitions[j].Partition
+			rp.HighWatermark, rp.LastStableOffset, rp.LogStartOffset, rp.PreferredReadReplica = -1, -1, 0, -1
+		}
+	}
 }
 
 // onLookup picks the ranges that fit the partition limit (at least one) and
@@ -88,16 +92,24 @@ func (b *Broker) onFetchGet(o *op, e core.ObjGetDone) []core.Action {
 		return b.retryOp(o)
 	}
 	if b.cfg.Bug != BugServeCorrupt && !intact(e.Data, rg) {
-		b.env.Reachable("broker: corrupt GET detected")
-		o.corrupt = true
-		acts := []core.Action{emit("corruption_detected", core.Field{Key: "segment", Value: core.Str(rg.Loc.Key)})}
-		return append(acts, b.retryOp(o)...)
+		return b.retryCorrupt(o, rg)
 	}
+	return b.acceptFetch(o, e.Data, rg)
+}
+
+func (b *Broker) retryCorrupt(o *op, rg core.BatchRange) []core.Action {
+	b.env.Reachable("broker: corrupt GET detected")
+	o.corrupt = true
+	acts := []core.Action{emit("corruption_detected", core.Field{Key: "segment", Value: core.Str(rg.Loc.Key)})}
+	return append(acts, b.retryOp(o)...)
+}
+
+func (b *Broker) acceptFetch(o *op, data []byte, rg core.BatchRange) []core.Action {
 	base := int64(rg.Base)
 	if b.cfg.Bug == BugWrongOffset {
 		base++
 	}
-	o.out = append(o.out, kwire.PatchBatch(e.Data, base, 0)...)
+	o.out = append(o.out, kwire.PatchBatch(data, base, 0)...)
 	o.next++
 	o.attempts, o.corrupt = 0, false
 	if o.next < len(o.ranges) {

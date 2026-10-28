@@ -221,6 +221,14 @@ func (r *run) guard(what string, fn func()) bool {
 // ---- setup ----
 
 func (r *run) setup() {
+	r.wireEngines()
+	r.addInvariants()
+	r.addNodes()
+	r.bootNodes()
+	r.scheduleCampaign()
+}
+
+func (r *run) wireEngines() {
 	if r.cfg.Engines != nil {
 		r.engines = r.cfg.Engines(r.sc)
 	}
@@ -230,13 +238,18 @@ func (r *run) setup() {
 		r.engSum = append(r.engSum, 0)
 		r.engOK = append(r.engOK, false)
 	}
+}
+
+func (r *run) addInvariants() {
 	for _, f := range r.cfg.Invariants {
 		r.invs = append(r.invs, f())
 	}
 	if r.cfg.InvariantsFor != nil {
 		r.invs = append(r.invs, r.cfg.InvariantsFor(r.sc)...)
 	}
+}
 
+func (r *run) addNodes() {
 	add := func(name string, w bool) *node {
 		n := &node{name: core.NodeID(name), idx: len(r.nodes), workload: w}
 		if max := r.sc.Network.ClockSkewMax; max > 0 {
@@ -260,6 +273,9 @@ func (r *run) setup() {
 		n := add(fmt.Sprintf("workload-%d", i), true)
 		n.wlFactory = wf
 	}
+}
+
+func (r *run) bootNodes() {
 	for _, n := range r.nodes {
 		if !n.workload { // workloads boot after every broker has a ref
 			r.boot(n)
@@ -270,7 +286,9 @@ func (r *run) setup() {
 			r.boot(n)
 		}
 	}
+}
 
+func (r *run) scheduleCampaign() {
 	at := Time(r.cfg.Phases.Chaos)
 	r.sched.Schedule(Entry{At: at, Lane: laneSim, Kind: EntryPhase, Body: phaseChange{PhaseSettling}})
 	at += Time(r.cfg.Phases.Settling)

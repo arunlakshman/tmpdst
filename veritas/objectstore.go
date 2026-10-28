@@ -45,48 +45,72 @@ func (s *ObjectStore) touch(i int) {
 func (s *ObjectStore) Exec(a core.IOAction) core.Completion {
 	switch a := a.(type) {
 	case core.ObjPut:
-		if a.Key == "" {
-			return core.ObjPutDone{Req: a.Req, Key: a.Key, Err: core.ErrInvalid}
-		}
-		i, found := slices.BinarySearch(s.keys, a.Key)
-		if !found {
-			s.keys = slices.Insert(s.keys, i, a.Key)
-		}
-		s.touch(i)
-		s.objs[a.Key] = clone(a.Data)
-		return core.ObjPutDone{Req: a.Req, Key: a.Key, Outcome: core.Applied}
+		return s.execPut(a)
 	case core.ObjGet:
-		data, ok := s.objs[a.Ref.Key]
-		if !ok {
-			return core.ObjGetDone{Req: a.Req, Err: core.ErrNotFound}
-		}
-		end := int64(len(data))
-		if a.Ref.Len > 0 {
-			end = a.Ref.Off + a.Ref.Len
-		}
-		if a.Ref.Off < 0 || a.Ref.Off > int64(len(data)) || end > int64(len(data)) {
-			return core.ObjGetDone{Req: a.Req, Err: core.ErrInvalid}
-		}
-		return core.ObjGetDone{Req: a.Req, Data: clone(data[a.Ref.Off:end])}
+		return s.execGet(a)
 	case core.ObjDelete:
-		if _, ok := s.objs[a.Key]; !ok {
-			return core.ObjDeleteDone{Req: a.Req, Err: core.ErrNotFound}
-		}
-		i, _ := slices.BinarySearch(s.keys, a.Key)
-		s.keys = slices.Delete(s.keys, i, i+1)
-		s.touch(i)
-		delete(s.objs, a.Key)
-		return core.ObjDeleteDone{Req: a.Req, Outcome: core.Applied}
+		return s.execDelete(a)
 	case core.ObjList:
-		var keys []string
-		for _, k := range s.keys {
-			if strings.HasPrefix(k, a.Prefix) {
-				keys = append(keys, k)
-			}
-		}
-		return core.ObjListDone{Req: a.Req, Keys: keys}
+		return s.execList(a)
 	}
 	panic("veritas.ObjectStore: not an object store action")
+}
+
+func (s *ObjectStore) execPut(a core.ObjPut) core.Completion {
+	if a.Key == "" {
+		return core.ObjPutDone{Req: a.Req, Key: a.Key, Err: core.ErrInvalid}
+	}
+	i, found := slices.BinarySearch(s.keys, a.Key)
+	if !found {
+		s.keys = slices.Insert(s.keys, i, a.Key)
+	}
+	s.touch(i)
+	s.objs[a.Key] = clone(a.Data)
+	return core.ObjPutDone{Req: a.Req, Key: a.Key, Outcome: core.Applied}
+}
+
+func (s *ObjectStore) execGet(a core.ObjGet) core.Completion {
+	data, ok := s.objs[a.Ref.Key]
+	if !ok {
+		return core.ObjGetDone{Req: a.Req, Err: core.ErrNotFound}
+	}
+	got, ok := sliceRange(data, a.Ref)
+	if !ok {
+		return core.ObjGetDone{Req: a.Req, Err: core.ErrInvalid}
+	}
+	return core.ObjGetDone{Req: a.Req, Data: clone(got)}
+}
+
+func sliceRange(data []byte, ref core.SegmentRef) ([]byte, bool) {
+	end := int64(len(data))
+	if ref.Len > 0 {
+		end = ref.Off + ref.Len
+	}
+	if ref.Off < 0 || ref.Off > int64(len(data)) || end > int64(len(data)) {
+		return nil, false
+	}
+	return data[ref.Off:end], true
+}
+
+func (s *ObjectStore) execDelete(a core.ObjDelete) core.Completion {
+	if _, ok := s.objs[a.Key]; !ok {
+		return core.ObjDeleteDone{Req: a.Req, Err: core.ErrNotFound}
+	}
+	i, _ := slices.BinarySearch(s.keys, a.Key)
+	s.keys = slices.Delete(s.keys, i, i+1)
+	s.touch(i)
+	delete(s.objs, a.Key)
+	return core.ObjDeleteDone{Req: a.Req, Outcome: core.Applied}
+}
+
+func (s *ObjectStore) execList(a core.ObjList) core.Completion {
+	var keys []string
+	for _, k := range s.keys {
+		if strings.HasPrefix(k, a.Prefix) {
+			keys = append(keys, k)
+		}
+	}
+	return core.ObjListDone{Req: a.Req, Keys: keys}
 }
 
 // Keys returns every key, sorted.
@@ -96,15 +120,11 @@ func (s *ObjectStore) Keys() []string { return slices.Clone(s.keys) }
 // folded prefix a change left intact, so a put near the end of the key order
 // costs little.
 func (s *ObjectStore) StateHash() uint64 {
-	if len(s.pre) == 0 {
-		s.pre = append(s.pre, newHasher())
-	}
-	for i := len(s.pre) - 1; i < len(s.keys); i++ {
-		h := s.pre[i]
+	s.pre = extendPrefix(s.pre, len(s.keys), func(i int, h hasher) hasher {
 		h.str(s.keys[i])
 		h.bytes(s.objs[s.keys[i]])
-		s.pre = append(s.pre, h)
-	}
+		return h
+	})
 	return uint64(s.pre[len(s.keys)])
 }
 

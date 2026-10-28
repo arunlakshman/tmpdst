@@ -2,6 +2,7 @@ package fakedb
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 
@@ -22,10 +23,8 @@ func (f *Fake) UpdateItem(ctx context.Context, in *dynamodb.UpdateItemInput, _ .
 		return nil, err
 	}
 	cur := t[idOf(in.Key)]
-	if ok, err := evalCond(in.ConditionExpression, in.ExpressionAttributeValues, cur); err != nil {
+	if err := rejectCond(in.ConditionExpression, in.ExpressionAttributeValues, cur); err != nil {
 		return nil, err
-	} else if !ok {
-		return nil, &types.ConditionalCheckFailedException{Message: aws.String("The conditional request failed")}
 	}
 	next, set, err := applyUpdate(aws.ToString(in.UpdateExpression), in.ExpressionAttributeValues, in.Key, cur)
 	if err != nil {
@@ -125,14 +124,11 @@ func (f *Fake) PutItem(ctx context.Context, in *dynamodb.PutItemInput, _ ...func
 		return nil, err
 	}
 	cur := t[idOf(in.Item)]
-	if ok, err := evalCond(in.ConditionExpression, in.ExpressionAttributeValues, cur); err != nil {
-		return nil, err
-	} else if !ok {
-		e := &types.ConditionalCheckFailedException{Message: aws.String("The conditional request failed")}
-		if in.ReturnValuesOnConditionCheckFailure == types.ReturnValuesOnConditionCheckFailureAllOld {
-			e.Item = cloneItem(cur)
+	if err := rejectCond(in.ConditionExpression, in.ExpressionAttributeValues, cur); err != nil {
+		if failed, ok := errors.AsType[*types.ConditionalCheckFailedException](err); ok && in.ReturnValuesOnConditionCheckFailure == types.ReturnValuesOnConditionCheckFailureAllOld {
+			failed.Item = cloneItem(cur)
 		}
-		return nil, e
+		return nil, err
 	}
 	f.store(aws.ToString(in.TableName), cloneItem(in.Item))
 	if f.AfterPut != nil {
@@ -141,6 +137,17 @@ func (f *Fake) PutItem(ctx context.Context, in *dynamodb.PutItemInput, _ ...func
 		}
 	}
 	return &dynamodb.PutItemOutput{ConsumedCapacity: f.capacity(aws.ToString(in.TableName))}, nil
+}
+
+func rejectCond(expr *string, vals, cur item) error {
+	ok, err := evalCond(expr, vals, cur)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return &types.ConditionalCheckFailedException{Message: aws.String("The conditional request failed")}
+	}
+	return nil
 }
 
 // BatchWriteItem applies up to 25 puts and deletes (no conditions, like the
@@ -152,10 +159,7 @@ func (f *Fake) BatchWriteItem(ctx context.Context, in *dynamodb.BatchWriteItemIn
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	total := 0
-	for _, reqs := range in.RequestItems {
-		total += len(reqs)
-	}
+	total := writeCount(in)
 	if total == 0 || total > 25 {
 		return nil, validation("BatchWriteItem takes 1 to 25 requests, got %d", total)
 	}
@@ -173,13 +177,27 @@ func (f *Fake) BatchWriteItem(ctx context.Context, in *dynamodb.BatchWriteItemIn
 				out.UnprocessedItems[name] = append(out.UnprocessedItems[name], r)
 				continue
 			}
-			if r.PutRequest != nil {
-				f.store(name, cloneItem(r.PutRequest.Item))
-			} else if r.DeleteRequest != nil {
-				f.remove(name, r.DeleteRequest.Key)
-			}
+			f.applyWrite(name, r)
 		}
 		out.ConsumedCapacity = append(out.ConsumedCapacity, f.capacities(name)...)
 	}
 	return out, nil
+}
+
+func writeCount(in *dynamodb.BatchWriteItemInput) int {
+	total := 0
+	for _, reqs := range in.RequestItems {
+		total += len(reqs)
+	}
+	return total
+}
+
+func (f *Fake) applyWrite(name string, r types.WriteRequest) {
+	if r.PutRequest != nil {
+		f.store(name, cloneItem(r.PutRequest.Item))
+		return
+	}
+	if r.DeleteRequest != nil {
+		f.remove(name, r.DeleteRequest.Key)
+	}
 }

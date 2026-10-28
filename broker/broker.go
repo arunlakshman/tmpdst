@@ -199,19 +199,40 @@ func (b *Broker) syncReads(acts []core.Action) []core.Action {
 
 func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 	if e.ID == timerFlush {
-		if e.Gen != b.open.gen || b.open.gen == 0 {
-			return nil
+		return b.onFlushTimer(e)
+	}
+	if s := b.segByTimer(e.ID); s != nil {
+		return b.segTimer(s, e.Gen)
+	}
+	if o := b.opByTimer(e.ID); o != nil {
+		return b.opTimer(o, e.Gen)
+	}
+	return nil
+}
+
+func (b *Broker) onFlushTimer(e core.TimerFired) []core.Action {
+	if e.Gen != b.open.gen || b.open.gen == 0 {
+		return nil
+	}
+	return b.seal(sealTimer)
+}
+
+func (b *Broker) segByTimer(id core.TimerID) *segment {
+	for _, s := range b.segs {
+		if core.TimerID(s.id) == id {
+			return s
 		}
-		return b.seal(sealTimer)
+	}
+	return nil
+}
+
+func (b *Broker) segByReq(req core.ReqID, st segState) *segment {
+	if req == 0 {
+		return nil
 	}
 	for _, s := range b.segs {
-		if core.TimerID(s.id) == e.ID {
-			return b.segTimer(s, e.Gen)
-		}
-	}
-	for _, o := range b.ops {
-		if core.TimerID(o.id) == e.ID {
-			return b.opTimer(o, e.Gen)
+		if s.req == req && s.state == st {
+			return s
 		}
 	}
 	return nil
@@ -220,10 +241,8 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 // ---- completions ----
 
 func (b *Broker) onCP(e core.CPDone) []core.Action {
-	for _, s := range b.segs {
-		if s.req == e.Req && s.req != 0 && s.state == segCommit {
-			return b.onCommit(s, e)
-		}
+	if s := b.segByReq(e.Req, segCommit); s != nil {
+		return b.onCommit(s, e)
 	}
 	if o := b.findOp(e.Req); o != nil && o.state == opCP {
 		return b.onOpCP(o, e)
@@ -232,10 +251,8 @@ func (b *Broker) onCP(e core.CPDone) []core.Action {
 }
 
 func (b *Broker) onPut(e core.ObjPutDone) []core.Action {
-	for _, s := range b.segs {
-		if s.req == e.Req && s.req != 0 && s.state == segPut {
-			return b.onPutDone(s, e)
-		}
+	if s := b.segByReq(e.Req, segPut); s != nil {
+		return b.onPutDone(s, e)
 	}
 	return nil
 }

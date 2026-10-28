@@ -173,6 +173,10 @@ func (c *Client) do(ctx context.Context, name string, fn func(context.Context, c
 		t0 := time.Now()
 		defer func() { c.obs(name, time.Since(t0)) }()
 	}
+	return c.failover(ctx, name, fn)
+}
+
+func (c *Client) failover(ctx context.Context, name string, fn func(context.Context, cpv1.ControlPlaneClient) error) error {
 	n := len(c.addrs)
 	if n == 0 {
 		return &CallError{Op: name, Err: errors.New("no addresses")}

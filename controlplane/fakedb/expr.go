@@ -142,22 +142,30 @@ func applyUpdate(expr string, vals item, key, cur item) (item, []string, error) 
 
 // applyClause applies "n = :v" (SET) or "n :v" (ADD) to it and returns n.
 func applyClause(verb string, f []string, vals, it item) (string, error) {
+	name, v, err := clauseValue(verb, f, vals)
+	if err != nil {
+		return "", err
+	}
+	if verb == "SET" {
+		it[name] = cloneValue(v)
+		return name, nil
+	}
+	sum, err := addNum(it[name], v)
+	it[name] = sum
+	return name, err
+}
+
+func clauseValue(verb string, f []string, vals item) (string, types.AttributeValue, error) {
 	if verb == "SET" && len(f) == 3 && f[1] == "=" {
 		f = []string{f[0], f[2]}
 	} else if verb == "SET" || len(f) != 2 {
-		return "", validation("unsupported %s clause %q", verb, strings.Join(f, " "))
+		return "", nil, validation("unsupported %s clause %q", verb, strings.Join(f, " "))
 	}
 	v, ok := vals[f[1]]
 	if !ok {
-		return "", validation("value %s not provided", f[1])
+		return "", nil, validation("value %s not provided", f[1])
 	}
-	if verb == "SET" {
-		it[f[0]] = cloneValue(v)
-		return f[0], nil
-	}
-	sum, err := addNum(it[f[0]], v)
-	it[f[0]] = sum
-	return f[0], err
+	return f[0], v, nil
 }
 
 // addNum is ADD for numbers: an absent attribute counts as 0.
@@ -196,6 +204,10 @@ func parseKeyCond(expr string, vals item) (keyCond, error) {
 	if len(parts) == 1 {
 		return kc, nil
 	}
+	return parseKeyRange(kc, parts, vals, expr)
+}
+
+func parseKeyRange(kc keyCond, parts []string, vals item, expr string) (keyCond, error) {
 	lo, ok1 := valueOf(strings.Fields(parts[1]), "sk", "BETWEEN", vals)
 	hi, ok2 := valueOf([]string{"", "", strings.TrimSpace(parts[2])}, "", "", vals)
 	if !ok1 || !ok2 {

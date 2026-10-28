@@ -105,7 +105,7 @@ func run(pass *analysis.Pass) (any, error) {
 		if strings.HasSuffix(pass.Fset.File(f.Pos()).Name(), "_test.go") {
 			continue
 		}
-		checkFile(pass, f, al)
+		checkFile(pass, f, al, []fileCheck{checkImports, checkGlobals, checkAST})
 	}
 	return nil, nil
 }
@@ -127,7 +127,9 @@ func reporter(pass *analysis.Pass, sup map[int]string) func(token.Pos, string, .
 
 type reportFunc = func(token.Pos, string, ...any)
 
-func checkFile(pass *analysis.Pass, f *ast.File, al allowList) {
+type fileCheck func(pass *analysis.Pass, f *ast.File, al allowList, report reportFunc)
+
+func checkFile(pass *analysis.Pass, f *ast.File, al allowList, checks []fileCheck) {
 	sup := suppressions(pass, f)
 	report := reporter(pass, sup)
 	for line, reason := range sup { // order irrelevant: the driver sorts diagnostics
@@ -135,15 +137,12 @@ func checkFile(pass *analysis.Pass, f *ast.File, al allowList) {
 			pass.Reportf(pass.Fset.File(f.Pos()).LineStart(line), "detcheck:ok needs a reason")
 		}
 	}
-	checkImports(f, al, report)
-	checkGlobals(pass, f, report)
-	ast.Inspect(f, func(n ast.Node) bool {
-		checkNode(pass, n, report)
-		return true
-	})
+	for _, check := range checks {
+		check(pass, f, al, report)
+	}
 }
 
-func checkImports(f *ast.File, al allowList, report reportFunc) {
+func checkImports(_ *analysis.Pass, f *ast.File, al allowList, report reportFunc) {
 	for _, imp := range f.Imports {
 		path, _ := strconv.Unquote(imp.Path.Value)
 		if !al.allows(path) {
@@ -152,7 +151,7 @@ func checkImports(f *ast.File, al allowList, report reportFunc) {
 	}
 }
 
-func checkGlobals(pass *analysis.Pass, f *ast.File, report reportFunc) {
+func checkGlobals(pass *analysis.Pass, f *ast.File, _ allowList, report reportFunc) {
 	errorIface := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
 	for _, decl := range f.Decls {
 		gd, ok := decl.(*ast.GenDecl)
@@ -172,6 +171,13 @@ func checkGlobals(pass *analysis.Pass, f *ast.File, report reportFunc) {
 			}
 		}
 	}
+}
+
+func checkAST(pass *analysis.Pass, f *ast.File, _ allowList, report reportFunc) {
+	ast.Inspect(f, func(n ast.Node) bool {
+		checkNode(pass, n, report)
+		return true
+	})
 }
 
 func checkNode(pass *analysis.Pass, n ast.Node, report reportFunc) {

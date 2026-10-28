@@ -92,6 +92,16 @@ func (l *DynLog) Append(ctx context.Context, slot core.LogSlot, data []byte) ([]
 	return ents[0].Data, true, nil
 }
 
+func (l *DynLog) between(lo, hi string) *dynamodb.QueryInput {
+	return &dynamodb.QueryInput{
+		TableName:              &l.table,
+		KeyConditionExpression: aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":p": sv(logPK), ":lo": sv(lo), ":hi": sv(hi),
+		},
+	}
+}
+
 func itemData(it map[string]types.AttributeValue) []byte {
 	b, ok := it["d"].(*types.AttributeValueMemberB)
 	if !ok {
@@ -114,17 +124,12 @@ func (l *DynLog) Read(ctx context.Context, from core.LogSlot, limit int) ([]core
 	var out []core.LogEntry
 	var start map[string]types.AttributeValue
 	for len(out) < limit {
-		page, err := l.db.Query(ctx, &dynamodb.QueryInput{
-			TableName:              &l.table,
-			KeyConditionExpression: aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
-			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":p": sv(logPK), ":lo": sv(slotKey(max(from, 0))), ":hi": sv(slotMax),
-			},
-			ConsistentRead:    aws.Bool(true),
-			ScanIndexForward:  aws.Bool(true),
-			Limit:             aws.Int32(int32(limit - len(out))), // limit is small
-			ExclusiveStartKey: start,
-		})
+		q := l.between(slotKey(max(from, 0)), slotMax)
+		q.ConsistentRead = aws.Bool(true)
+		q.ScanIndexForward = aws.Bool(true)
+		q.Limit = aws.Int32(int32(limit - len(out))) // limit is small
+		q.ExclusiveStartKey = start
+		page, err := l.db.Query(ctx, q)
 		if err != nil {
 			return out, err
 		}
@@ -148,16 +153,11 @@ func (l *DynLog) Read(ctx context.Context, from core.LogSlot, limit int) ([]core
 
 // CheckTail implements Log.
 func (l *DynLog) CheckTail(ctx context.Context) (core.LogSlot, error) {
-	page, err := l.db.Query(ctx, &dynamodb.QueryInput{
-		TableName:              &l.table,
-		KeyConditionExpression: aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":p": sv(logPK), ":lo": sv(slotKey(0)), ":hi": sv(slotMax),
-		},
-		ConsistentRead:   aws.Bool(true),
-		ScanIndexForward: aws.Bool(false),
-		Limit:            aws.Int32(1),
-	})
+	q := l.between(slotKey(0), slotMax)
+	q.ConsistentRead = aws.Bool(true)
+	q.ScanIndexForward = aws.Bool(false)
+	q.Limit = aws.Int32(1)
+	page, err := l.db.Query(ctx, q)
 	if err != nil || len(page.Items) == 0 {
 		return 0, err
 	}
@@ -173,16 +173,11 @@ func (l *DynLog) TrimThrough(ctx context.Context, through core.LogSlot) error {
 	const batch = 25
 	var start map[string]types.AttributeValue
 	for {
-		page, err := l.db.Query(ctx, &dynamodb.QueryInput{
-			TableName:              &l.table,
-			KeyConditionExpression: aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
-			ExpressionAttributeValues: map[string]types.AttributeValue{
-				":p": sv(logPK), ":lo": sv(slotKey(0)), ":hi": sv(slotKey(through)),
-			},
-			ProjectionExpression: aws.String("pk, sk"),
-			Limit:                aws.Int32(batch),
-			ExclusiveStartKey:    start,
-		})
+		q := l.between(slotKey(0), slotKey(through))
+		q.ProjectionExpression = aws.String("pk, sk")
+		q.Limit = aws.Int32(batch)
+		q.ExclusiveStartKey = start
+		page, err := l.db.Query(ctx, q)
 		if err != nil {
 			return err
 		}

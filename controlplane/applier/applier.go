@@ -144,10 +144,7 @@ func commitTx(tx Tx, slot int64, op core.CommitSegment) core.CPDone {
 	if !validCommit(op) {
 		return core.CPDone{Err: core.ErrInvalid}
 	}
-	assigned := assign(tx, op.Batches)
-	tx.Set(idemKey(op.SegmentKey), idemRecord(slot, dig, assigned))
-	tx.Set(slotKey(slot, op.SegmentKey), []byte{1})
-	return core.CPDone{Resp: core.CommitSegmentResp{Assigned: assigned}, Outcome: core.Applied}
+	return storeCommit(tx, slot, op, dig, assign(tx, op.Batches))
 }
 
 // commitWithBases is the BugWriterOffsets apply path: bases come from the
@@ -164,10 +161,7 @@ func (a *Applier) commitWithBases(slot int64, op core.CommitSegment, bases []cor
 			d = core.CPDone{Err: core.ErrInvalid}
 			return
 		}
-		assigned := assignAt(tx, op.Batches, bases)
-		tx.Set(idemKey(op.SegmentKey), idemRecord(slot, dig, assigned))
-		tx.Set(slotKey(slot, op.SegmentKey), []byte{1})
-		d = core.CPDone{Resp: core.CommitSegmentResp{Assigned: assigned}, Outcome: core.Applied}
+		d = storeCommit(tx, slot, op, dig, assignAt(tx, op.Batches, bases))
 	})
 	if err != nil {
 		panic(fmt.Errorf("applier: store failed: %w", err))
@@ -195,49 +189,68 @@ func replay(rec []byte, dig [digestLen]byte, op core.CommitSegment) core.CPDone 
 	return core.CPDone{Resp: core.CommitSegmentResp{Assigned: rs}, Outcome: core.Applied}
 }
 
+func storeCommit(tx Tx, slot int64, op core.CommitSegment, dig [digestLen]byte, assigned []core.BatchRange) core.CPDone {
+	tx.Set(idemKey(op.SegmentKey), idemRecord(slot, dig, assigned))
+	tx.Set(slotKey(slot, op.SegmentKey), []byte{1})
+	return core.CPDone{Resp: core.CommitSegmentResp{Assigned: assigned}, Outcome: core.Applied}
+}
+
+// assignPlan is the per-partition end and run built while handing out offsets.
+type assignPlan struct {
+	order []core.TopicPartition
+	ends  map[core.TopicPartition]int64
+	runs  map[core.TopicPartition][]core.BatchRange
+	seen  map[core.TopicPartition]bool
+}
+
+func newAssignPlan() *assignPlan {
+	return &assignPlan{
+		ends: map[core.TopicPartition]int64{},
+		runs: map[core.TopicPartition][]core.BatchRange{},
+		seen: map[core.TopicPartition]bool{},
+	}
+}
+
+func (p *assignPlan) add(b core.PendingBatch, base int64) core.BatchRange {
+	if !p.seen[b.TP] {
+		p.order = append(p.order, b.TP)
+		p.seen[b.TP] = true
+	}
+	r := core.BatchRange{TP: b.TP, Base: core.Offset(base), Count: b.Records, Loc: b.Loc}
+	if end := base + b.Records; end > p.ends[b.TP] {
+		p.ends[b.TP] = end
+	}
+	p.runs[b.TP] = append(p.runs[b.TP], r)
+	return r
+}
+
+func (p *assignPlan) write(tx Tx) { writeAssign(tx, p.order, p.ends, p.runs) }
+
 // assign hands out offsets: each batch's Base is its partition's end, in
 // request order, the end then growing by Records. It writes the new ends, one
 // packed run per partition and grown topics, and returns the ranges.
 func assign(tx Tx, bs []core.PendingBatch) []core.BatchRange {
-	var order []core.TopicPartition
-	ends := map[core.TopicPartition]int64{}
-	runs := map[core.TopicPartition][]core.BatchRange{}
+	p := newAssignPlan()
 	out := make([]core.BatchRange, 0, len(bs))
 	for _, b := range bs {
-		e, seen := ends[b.TP]
-		if !seen {
-			e = getUvarint(tx.Get(endKey(b.TP)))
-			order = append(order, b.TP)
+		base := p.ends[b.TP]
+		if !p.seen[b.TP] {
+			base = getUvarint(tx.Get(endKey(b.TP)))
 		}
-		r := core.BatchRange{TP: b.TP, Base: core.Offset(e), Count: b.Records, Loc: b.Loc}
-		ends[b.TP], runs[b.TP] = e+b.Records, append(runs[b.TP], r)
-		out = append(out, r)
+		out = append(out, p.add(b, base))
 	}
-	writeAssign(tx, order, ends, runs)
+	p.write(tx)
 	return out
 }
 
 // assignAt is assign with writer-chosen bases (BugWriterOffsets).
 func assignAt(tx Tx, bs []core.PendingBatch, bases []core.Offset) []core.BatchRange {
-	var order []core.TopicPartition
-	ends := map[core.TopicPartition]int64{}
-	runs := map[core.TopicPartition][]core.BatchRange{}
+	p := newAssignPlan()
 	out := make([]core.BatchRange, 0, len(bs))
-	seen := map[core.TopicPartition]bool{}
 	for i, b := range bs {
-		r := core.BatchRange{TP: b.TP, Base: bases[i], Count: b.Records, Loc: b.Loc}
-		end := int64(bases[i]) + b.Records
-		if !seen[b.TP] {
-			order = append(order, b.TP)
-			seen[b.TP] = true
-		}
-		if end > ends[b.TP] {
-			ends[b.TP] = end
-		}
-		runs[b.TP] = append(runs[b.TP], r)
-		out = append(out, r)
+		out = append(out, p.add(b, int64(bases[i])))
 	}
-	writeAssign(tx, order, ends, runs)
+	p.write(tx)
 	return out
 }
 

@@ -64,3 +64,15 @@ func sortedKeys[V any](m map[string]V) []string {
 // clone copies b; the result is never nil, so empty data reads back the same
 // whether it was stored as nil or empty.
 func clone(b []byte) []byte { return append([]byte{}, b...) }
+
+// extendPrefix folds keys[len(pre)-1, n) onto a prefix cache. pre[0] is the
+// empty hasher. step receives the key index and the hash of the keys before it.
+func extendPrefix(pre []hasher, n int, step func(i int, h hasher) hasher) []hasher {
+	if len(pre) == 0 {
+		pre = append(pre, newHasher())
+	}
+	for i := len(pre) - 1; i < n; i++ {
+		pre = append(pre, step(i, pre[i]))
+	}
+	return pre
+}

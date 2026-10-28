@@ -31,7 +31,7 @@ func TestLogIOCallsAreIOCalls(t *testing.T) {
 }
 
 func TestCPCallAndCPDoneClassOf(t *testing.T) {
-	call := ControlPlaneCall{Req: 9, Op: FindSegments{TP: TopicPartitionKey("t", 1), From: 7}}
+	call := ControlPlaneCall{Req: 9, Op: FindSegments{TP: NewTopicPartition("t", 1), From: 7}}
 	if call.RequestID() != 9 {
 		t.Fatalf("RequestID = %d", call.RequestID())
 	}

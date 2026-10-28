@@ -56,7 +56,7 @@ func TestLogMutantsAreCaught(t *testing.T) {
 		{"a replica passes an empty slot without a no-op", logengine.BugHoleSkip, 0, "logcp-sim: a replica's state equals the replay of the log at its slot"},
 	}
 	for _, c := range cases {
-		cfg := configLog(nil, broker.BugNone, c.bug)
+		cfg := configLog(nil, broker.InjectedBugNone, c.bug)
 		if c.window > 0 {
 			cfg.ControlPlane.Log.WindowSlots = c.window
 		}

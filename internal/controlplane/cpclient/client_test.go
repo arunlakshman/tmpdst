@@ -55,7 +55,7 @@ func TestClientAgainstMachine(t *testing.T) {
 	if err := c.CreateTopic(ctx, "t", 2); err != nil {
 		t.Fatal(err)
 	}
-	tp := core.TopicPartitionKey("t", 0)
+	tp := core.NewTopicPartition("t", 0)
 	cs, err := c.Call(ctx, core.CommitSegment{SegmentKey: "s1", Batches: []core.PendingBatch{
 		{TP: tp, Records: 4, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 40}},
 	}})
@@ -111,7 +111,7 @@ func TestCallDialError(t *testing.T) {
 	addr := ln.Addr().String()
 	_ = ln.Close()
 	_, err = New(addr, nil).Call(t.Context(), core.CommitSegment{
-		SegmentKey: "k", Batches: []core.PendingBatch{{TP: core.TopicPartitionKey("t", 0), Records: 1}},
+		SegmentKey: "k", Batches: []core.PendingBatch{{TP: core.NewTopicPartition("t", 0), Records: 1}},
 	})
 	if err == nil {
 		t.Fatal("expected error")

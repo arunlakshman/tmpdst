@@ -162,7 +162,7 @@ var (
 )
 
 func modelTP(r *veritastest.Rand) core.TopicPartition {
-	return core.TopicPartitionKey(modelTopics[r.Intn(len(modelTopics))], int32(r.Intn(3)))
+	return core.NewTopicPartition(modelTopics[r.Intn(len(modelTopics))], int32(r.Intn(3)))
 }
 
 // canonicalBatches gives the same batches every time for one key. A commit
@@ -171,7 +171,7 @@ func canonicalBatches(key string) []core.PendingBatch {
 	k := int(key[1] - '0')
 	var bs []core.PendingBatch
 	for j := 0; j <= k%3; j++ {
-		p := core.TopicPartitionKey(modelTopics[(k+j)%len(modelTopics)], int32((k+2*j)%3))
+		p := core.NewTopicPartition(modelTopics[(k+j)%len(modelTopics)], int32((k+2*j)%3))
 		n := int64(1 + (k+j)%4)
 		bs = append(bs, core.PendingBatch{TP: p, Records: n, Loc: core.SegmentRef{Key: "o" + key, Off: int64(j), Len: n * 10}})
 	}
@@ -257,7 +257,7 @@ func stepCPModel(s cpModelPair, op cpModelOp) error {
 func checkCPModelState(s cpModelPair) error {
 	for _, t := range modelTopics {
 		for p := range int32(3) {
-			tp := core.TopicPartitionKey(t, p)
+			tp := core.NewTopicPartition(t, p)
 			if g, w := s.spec.End(tp), s.model.end(tp); g != w {
 				return fmt.Errorf("End(%v): the spec returned %d, the model returned %d", tp, g, w)
 			}

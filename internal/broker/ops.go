@@ -8,30 +8,30 @@ import (
 	"manifester/internal/core"
 )
 
-type opKind uint8
+type operationKind uint8
 
 const (
-	opRefresh opKind = iota // DescribeTopics to resolve a topic-cache miss, then resume the request
-	opMeta                  // DescribeTopics answering Metadata
-	opList                  // FindSegments for one ListOffsets partition
-	opFetch                 // FindSegments, then ranged GETs, for one Fetch partition
+	opRefresh  operationKind = iota // DescribeTopics to resolve a topic-cache miss, then resume the request
+	opMetadata                      // DescribeTopics answering Metadata
+	opList                          // FindSegments for one ListOffsets partition
+	opFetch                         // FindSegments, then ranged GETs, for one Fetch partition
 )
 
-type opState uint8
+type operationState uint8
 
 const (
-	opCP opState = iota // a ControlPlaneCall is in flight
+	opControlPlane operationState = iota // a ControlPlaneCall is in flight
 	opGet
 	opBackoff
 )
 
-// op is one control-plane / object-store interaction serving a request part.
+// operation is one control-plane / object-store interaction serving a request part.
 // It retries with backoff; a part never fails silently.
-type op struct {
+type operation struct {
 	id       uint64
-	kind     opKind
-	state    opState
-	retry    opState // state a backoff returns to
+	kind     operationKind
+	state    operationState
+	retry    operationState // state a backoff returns to
 	req      core.RequestID
 	gen      core.TimerVersion
 	attempts int
@@ -52,7 +52,7 @@ type op struct {
 	corrupt bool // the last failure was a corrupt GET
 }
 
-func (b *Broker) findOp(r core.RequestID) *op {
+func (b *Broker) findOp(r core.RequestID) *operation {
 	for _, o := range b.ops {
 		if o.req == r && o.req != 0 {
 			return o
@@ -61,7 +61,7 @@ func (b *Broker) findOp(r core.RequestID) *op {
 	return nil
 }
 
-func (b *Broker) dropOp(o *op) {
+func (b *Broker) dropOp(o *operation) {
 	for i, x := range b.ops {
 		if x == o {
 			b.ops = append(b.ops[:i:i], b.ops[i+1:]...)
@@ -70,9 +70,9 @@ func (b *Broker) dropOp(o *op) {
 	}
 }
 
-func (b *Broker) addOp(o *op) { b.ops = append(b.ops, o) }
+func (b *Broker) addOp(o *operation) { b.ops = append(b.ops, o) }
 
-func (b *Broker) opByTimer(id core.TimerID) *op {
+func (b *Broker) opByTimer(id core.TimerID) *operation {
 	for _, o := range b.ops {
 		if core.TimerID(o.id) == id {
 			return o
@@ -82,22 +82,22 @@ func (b *Broker) opByTimer(id core.TimerID) *op {
 }
 
 // startOp registers o as a pending part of its slot and issues its first call.
-func (b *Broker) startOp(o *op) []core.Action {
+func (b *Broker) startOp(o *operation) []core.Action {
 	o.id = b.id()
-	o.state = opCP
+	o.state = opControlPlane
 	o.s.pending++
 	b.addOp(o)
 	return b.issue(o)
 }
 
-func (b *Broker) issue(o *op) []core.Action {
+func (b *Broker) issue(o *operation) []core.Action {
 	o.req = b.req()
 	if o.state == opGet {
 		return []core.Action{core.ObjectGet{Req: o.req, Ref: o.ranges[o.next].Loc}}
 	}
 	var cop core.ControlPlaneOperation
 	switch o.kind {
-	case opRefresh, opMeta:
+	case opRefresh, opMetadata:
 		cop = core.DescribeTopics{Topics: o.names}
 	case opList: // only the end offset is wanted: look past the end
 		cop = core.FindSegments{TP: o.tp, From: core.Offset(1<<63 - 1), MaxBytes: 1}
@@ -109,7 +109,7 @@ func (b *Broker) issue(o *op) []core.Action {
 
 // retryOp backs off and repeats the call, or gives up after MaxAttempts or
 // when the client is gone.
-func (b *Broker) retryOp(o *op) []core.Action {
+func (b *Broker) retryOp(o *operation) []core.Action {
 	if o.s.conn.closed {
 		return b.endOp(o)
 	}
@@ -123,9 +123,9 @@ func (b *Broker) retryOp(o *op) []core.Action {
 	return []core.Action{t}
 }
 
-func (b *Broker) exhaustCode(o *op) kafkaCode {
+func (b *Broker) exhaustCode(o *operation) kafkaErrorCode {
 	switch o.kind {
-	case opMeta:
+	case opMetadata:
 		return errLeaderNotAvailable
 	case opFetch:
 		if o.corrupt {
@@ -135,7 +135,7 @@ func (b *Broker) exhaustCode(o *op) kafkaCode {
 	return errRequestTimedOut
 }
 
-func (b *Broker) opTimer(o *op, gen core.TimerVersion) []core.Action {
+func (b *Broker) opTimer(o *operation, gen core.TimerVersion) []core.Action {
 	if o.state != opBackoff || o.gen != gen {
 		return nil
 	}
@@ -144,18 +144,18 @@ func (b *Broker) opTimer(o *op, gen core.TimerVersion) []core.Action {
 }
 
 // endOp retires o without touching its response.
-func (b *Broker) endOp(o *op) []core.Action {
+func (b *Broker) endOp(o *operation) []core.Action {
 	b.dropOp(o)
 	b.finishPart(o.s)
 	return nil
 }
 
 // failOp answers o's part with code and retires it.
-func (b *Broker) failOp(o *op, code kafkaCode) []core.Action {
+func (b *Broker) failOp(o *operation, code kafkaErrorCode) []core.Action {
 	switch o.kind {
 	case opRefresh:
 		return b.resume(o)
-	case opMeta:
+	case opMetadata:
 		b.metaResp(o, nil, code)
 	case opList:
 		o.lpart.ErrorCode = int16(code)
@@ -165,7 +165,7 @@ func (b *Broker) failOp(o *op, code kafkaCode) []core.Action {
 	return b.endOp(o)
 }
 
-func (b *Broker) onOpCP(o *op, e core.ControlPlaneDone) []core.Action {
+func (b *Broker) onOpCP(o *operation, e core.ControlPlaneDone) []core.Action {
 	if e.Err == core.ErrInvalid {
 		return b.failOp(o, errUnknownServer)
 	}
@@ -174,7 +174,7 @@ func (b *Broker) onOpCP(o *op, e core.ControlPlaneDone) []core.Action {
 	}
 	switch r := e.Resp.(type) {
 	case core.DescribeTopicsResp:
-		if o.kind == opRefresh || o.kind == opMeta {
+		if o.kind == opRefresh || o.kind == opMetadata {
 			b.merge(r.Topics)
 			if o.kind == opRefresh {
 				return b.resume(o)
@@ -206,7 +206,7 @@ func (b *Broker) handle(s *slot, req core.Request) []core.Action {
 // dispatch runs a request, refreshing the topic cache first when needed.
 func (b *Broker) dispatch(s *slot, req core.Request) []core.Action {
 	if names := b.missing(req); len(names) > 0 {
-		return b.startOp(&op{kind: opRefresh, s: s, names: names, creq: req})
+		return b.startOp(&operation{kind: opRefresh, s: s, names: names, creq: req})
 	}
 	return b.dispatchAfterRefresh(s, req)
 }
@@ -232,7 +232,7 @@ func (b *Broker) dispatchAfterRefresh(s *slot, req core.Request) []core.Action {
 }
 
 // resume runs the request a refresh was holding, with whatever the cache now has.
-func (b *Broker) resume(o *op) []core.Action {
+func (b *Broker) resume(o *operation) []core.Action {
 	b.dropOp(o)
 	var acts []core.Action
 	if !o.s.conn.closed {
@@ -288,19 +288,19 @@ func (b *Broker) missing(req core.Request) []string {
 		}
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				add(core.TopicPartitionKey(t.Topic, p.Partition))
+				add(core.NewTopicPartition(t.Topic, p.Partition))
 			}
 		}
 	case *kmsg.FetchRequest:
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				add(core.TopicPartitionKey(t.Topic, p.Partition))
+				add(core.NewTopicPartition(t.Topic, p.Partition))
 			}
 		}
 	case *kmsg.ListOffsetsRequest:
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				add(core.TopicPartitionKey(t.Topic, p.Partition))
+				add(core.NewTopicPartition(t.Topic, p.Partition))
 			}
 		}
 	}

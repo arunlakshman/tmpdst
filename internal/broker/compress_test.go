@@ -72,7 +72,7 @@ func TestCompressedBatchesStoredVerbatimMixedSegment(t *testing.T) {
 		}
 		want += int64(bt.NumRecords)
 	}
-	p := fetched(h.call(c, verFetch, fetchReq(core.TopicPartitionKey("t", 0), 0, 1<<20)))
+	p := fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)))
 	got, err := kwire.SplitBatches(p.RecordBatches)
 	if err != nil || len(got) != len(batches) || p.HighWatermark != want {
 		t.Fatalf("fetch: %v, %d batches, hwm %d (want %d)", err, len(got), p.HighWatermark, want)
@@ -109,13 +109,13 @@ func TestCompressedBatchRejections(t *testing.T) {
 		e("t", 0, badCRC), e("t", 0, badCount), e("t", 0, unknown), e("t", 0, opaque(t, kwire.CodecSnappy, 2, 10))))
 	h.flush()
 	ps := produced(h.next(c))
-	want := []kafkaCode{errCorruptMessage, errCorruptMessage, errUnsupportedCompress, 0}
+	want := []kafkaErrorCode{errCorruptMessage, errCorruptMessage, errUnsupportedCompress, 0}
 	for i, w := range want {
-		if kafkaCode(ps[i].ErrorCode) != w {
+		if kafkaErrorCode(ps[i].ErrorCode) != w {
 			t.Errorf("partition %d: error %d, want %d", i, ps[i].ErrorCode, w)
 		}
 	}
-	if end := h.cp.End(core.TopicPartitionKey("t", 0)); end != 2 {
+	if end := h.cp.End(core.NewTopicPartition("t", 0)); end != 2 {
 		t.Fatalf("end offset %d: a rejected batch was stored", end)
 	}
 	h.noViolations()
@@ -136,7 +136,7 @@ func TestFetchLimitsWithLargeCompressedBatches(t *testing.T) {
 	h.flush()
 	h.next(c)
 	count := func(max int32) int {
-		bs, err := kwire.SplitBatches(fetched(h.call(c, verFetch, fetchReq(core.TopicPartitionKey("t", 0), 0, max))).RecordBatches)
+		bs, err := kwire.SplitBatches(fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, max))).RecordBatches)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -151,7 +151,7 @@ func TestFetchLimitsWithLargeCompressedBatches(t *testing.T) {
 	if n := count(1 << 20); n != 3 {
 		t.Fatalf("no limit: %d", n)
 	}
-	r := fetchReq(core.TopicPartitionKey("t", 0), 0, 1<<20)
+	r := fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)
 	r.MaxBytes = 6000 // request limit: the first partition's data is kept whole
 	if p := fetched(h.call(c, verFetch, r)); len(p.RecordBatches) == 0 {
 		t.Fatal("first partition dropped by the request limit")
@@ -175,7 +175,7 @@ func TestLargeProduceRequest(t *testing.T) {
 	if ps[0].ErrorCode != 0 || ps[0].BaseOffset != 0 {
 		t.Fatalf("%+v", ps[0])
 	}
-	p := fetched(h.call(c, verFetch, fetchReq(core.TopicPartitionKey("t", 0), 0, 1)))
+	p := fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1)))
 	if len(p.RecordBatches) != len(big) || p.HighWatermark != 500000 || !sameButOffset(p.RecordBatches, big) {
 		t.Fatalf("fetched %d bytes, hwm %d", len(p.RecordBatches), p.HighWatermark)
 	}
@@ -187,7 +187,7 @@ func TestLargeProduceRequest(t *testing.T) {
 
 func TestSkipProduceCRCMutantAcksCorruptBatch(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Bug = BugSkipProduceCRC
+	cfg.InjectedBug = InjectedBugSkipProduceCRC
 	h := startedHarness(t, cfg)
 	c := h.open(1)
 	bad := opaque(t, kwire.CodecLZ4, 4, 50)

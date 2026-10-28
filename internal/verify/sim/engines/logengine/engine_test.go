@@ -46,7 +46,7 @@ func TestBridgeUnavailableWithoutCP(t *testing.T) {
 	c.Crash("cp-0")
 	c.Crash("cp-1")
 	broker := enginetest.Ref("broker-0")
-	e.Execute(c, broker, core.ControlPlaneCall{Req: 1, Op: core.FindSegments{TP: core.TopicPartitionKey("t", 0)}})
+	e.Execute(c, broker, core.ControlPlaneCall{Req: 1, Op: core.FindSegments{TP: core.NewTopicPartition("t", 0)}})
 	c.Run()
 	if len(c.Delivered) != 1 {
 		t.Fatalf("got %d %#v", len(c.Delivered), c.Delivered)

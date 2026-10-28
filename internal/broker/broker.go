@@ -43,14 +43,14 @@ type Broker struct {
 	stopping bool
 	exited   bool
 
-	conns  []*conn
-	dirty  []*conn          // connections whose queue head may be ready (drained at end of Step)
+	conns  []*connection
+	dirty  []*connection    // connections whose queue head may be ready (drained at end of Step)
 	topics []core.TopicInfo // topic cache, refreshed from DescribeTopics on a miss
 
 	now        core.NodeTime // At of the event being stepped (set by Step; not state)
 	open       openSegment
 	segs       []*segment // sealed segments in commit order
-	ops        []*op
+	ops        []*operation
 	bufBytes   int           // produce bytes admitted and not yet answered
 	pressure   bool          // above MaxBufferedBytes, until back at ResumeBufferedBytes
 	pressureAt core.NodeTime // when pressure began (fact timing only, not state)
@@ -129,7 +129,7 @@ func (b *Broker) stop() []core.Action {
 		return nil
 	}
 	b.stopping = true
-	return b.seal(sealStop)
+	return b.seal(closeOnStop)
 }
 
 func (b *Broker) idle() bool {
@@ -153,7 +153,7 @@ func (b *Broker) maybeExit(acts []core.Action) []core.Action {
 		acts = append(acts, core.CloseConn{Conn: c.id})
 	}
 	b.conns = nil
-	return append(acts, emit("broker_exited"), core.ShutdownDone{})
+	return append(acts, recordFact("broker_exited"), core.ShutdownDone{})
 }
 
 // ---- admission control ----
@@ -165,12 +165,12 @@ func (b *Broker) updatePressure(acts []core.Action) []core.Action {
 	case !b.pressure && b.bufBytes >= b.cfg.MaxBufferedBytes:
 		b.pressure, b.pressureAt = true, b.now
 		b.env.Reachable("broker: reads paused by backpressure")
-		acts = append(acts, emit("backpressure_on",
+		acts = append(acts, recordFact("backpressure_on",
 			core.Field{Key: "buffered", Value: core.I64(b.bufBytes)}))
 	case b.pressure && b.bufBytes <= b.cfg.ResumeBufferedBytes:
 		b.pressure = false
 		b.env.Reachable("broker: reads resumed after backpressure")
-		acts = append(acts, emit("backpressure_off",
+		acts = append(acts, recordFact("backpressure_off",
 			core.Field{Key: "buffered", Value: core.I64(b.bufBytes)},
 			core.Field{Key: "paused_ns", Value: core.I64(b.now - b.pressureAt)}))
 	}
@@ -214,7 +214,7 @@ func (b *Broker) onFlushTimer(e core.TimerFired) []core.Action {
 	if e.Gen != b.open.gen || b.open.gen == 0 {
 		return nil
 	}
-	return b.seal(sealTimer)
+	return b.seal(closeOnTimer)
 }
 
 func (b *Broker) segByTimer(id core.TimerID) *segment {
@@ -226,7 +226,7 @@ func (b *Broker) segByTimer(id core.TimerID) *segment {
 	return nil
 }
 
-func (b *Broker) segByReq(req core.RequestID, st segState) *segment {
+func (b *Broker) segByReq(req core.RequestID, st segmentState) *segment {
 	if req == 0 {
 		return nil
 	}
@@ -241,17 +241,17 @@ func (b *Broker) segByReq(req core.RequestID, st segState) *segment {
 // ---- completions ----
 
 func (b *Broker) onCP(e core.ControlPlaneDone) []core.Action {
-	if s := b.segByReq(e.Req, segCommit); s != nil {
+	if s := b.segByReq(e.Req, segmentCommit); s != nil {
 		return b.onCommit(s, e)
 	}
-	if o := b.findOp(e.Req); o != nil && o.state == opCP {
+	if o := b.findOp(e.Req); o != nil && o.state == opControlPlane {
 		return b.onOpCP(o, e)
 	}
 	return nil
 }
 
 func (b *Broker) onPut(e core.ObjectPutDone) []core.Action {
-	if s := b.segByReq(e.Req, segPut); s != nil {
+	if s := b.segByReq(e.Req, segmentUpload); s != nil {
 		return b.onPutDone(s, e)
 	}
 	return nil
@@ -264,7 +264,7 @@ func (b *Broker) onGet(e core.ObjectGetDone) []core.Action {
 	return nil
 }
 
-func emit(name string, fs ...core.Field) core.RecordFact {
+func recordFact(name string, fs ...core.Field) core.RecordFact {
 	return core.RecordFact{Fact: core.Fact{Name: name, Fields: fs}}
 }
 

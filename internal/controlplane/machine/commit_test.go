@@ -15,7 +15,7 @@ func commitCmd(key string, records int64) applier.Entry {
 		Commit: core.CommitSegment{
 			SegmentKey: key,
 			Batches: []core.PendingBatch{
-				{TP: core.TopicPartitionKey("t", 0), Records: records, Loc: core.SegmentRef{Key: key, Off: 0, Len: records}},
+				{TP: core.NewTopicPartition("t", 0), Records: records, Loc: core.SegmentRef{Key: key, Off: 0, Len: records}},
 			},
 		},
 	}
@@ -120,8 +120,8 @@ func TestGroupPackingCapsAtMaxCmdsPerSlot(t *testing.T) {
 			t.Fatalf("answer[%d] = %+v", i, a)
 		}
 	}
-	if m.Fold().End(core.TopicPartitionKey("t", 0)) != 4 { // g0 + 3 packed
-		t.Fatalf("end = %d, want 4", m.Fold().End(core.TopicPartitionKey("t", 0)))
+	if m.Fold().End(core.NewTopicPartition("t", 0)) != 4 { // g0 + 3 packed
+		t.Fatalf("end = %d, want 4", m.Fold().End(core.NewTopicPartition("t", 0)))
 	}
 }
 
@@ -179,8 +179,8 @@ func TestLostAppendRetriesSameEntryLaterSlot(t *testing.T) {
 	if len(ans) != 1 || ans[0].Req != 7 || ans[0].Done.Err != core.OK {
 		t.Fatalf("answers after retry apply = %+v", ans)
 	}
-	if m.Fold().End(core.TopicPartitionKey("t", 0)) != 3 {
-		t.Fatalf("end = %d, want 3", m.Fold().End(core.TopicPartitionKey("t", 0)))
+	if m.Fold().End(core.NewTopicPartition("t", 0)) != 3 {
+		t.Fatalf("end = %d, want 3", m.Fold().End(core.NewTopicPartition("t", 0)))
 	}
 }
 

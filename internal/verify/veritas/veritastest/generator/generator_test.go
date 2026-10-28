@@ -406,7 +406,7 @@ func TestFormatExamples(t *testing.T) {
 		{FormatObjectOp(core.ObjectList{Req: 3, Prefix: "a/"}), `core.ObjectList{Req: 3, Prefix: "a/"}`},
 		{FormatControlPlaneOp(NewCreateTopic("t1", 2)), `generator.NewCreateTopic("t1", 2)`},
 		{
-			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: core.TopicPartitionKey("t1", 1), From: -1, MaxBytes: 60}})),
+			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: core.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})),
 			`generator.NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: core.TopicPartitionKey("t1", 1), From: -1, MaxBytes: 60}})`,
 		},
 	}

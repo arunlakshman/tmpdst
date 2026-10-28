@@ -164,7 +164,7 @@ func ParseBatch(b []byte) (Batch, error) {
 }
 
 // ParseBatchUnverified is ParseBatch without the CRC check. It exists only so
-// a broker mutant (broker.BugSkipProduceCRC) can model a missing check; real
+// a broker mutant (broker.InjectedBugSkipProduceCRC) can model a missing check; real
 // code must use ParseBatch.
 func ParseBatchUnverified(b []byte) (Batch, error) {
 	if err := checkBatchShape(b); err != nil {

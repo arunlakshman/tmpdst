@@ -115,7 +115,7 @@ func CommitSegmentToCore(req *cpv1.CommitSegmentRequest) core.CommitSegment {
 		}
 		var tp core.TopicPartition
 		if b.Tp != nil {
-			tp = core.TopicPartitionKey(b.Tp.Topic, b.Tp.Partition)
+			tp = core.NewTopicPartition(b.Tp.Topic, b.Tp.Partition)
 		}
 		var loc core.SegmentRef
 		if b.Loc != nil {
@@ -142,7 +142,7 @@ func LookupToCore(req *cpv1.LookupRequest) core.FindSegments {
 	}
 	op := core.FindSegments{From: core.Offset(req.From), MaxBytes: req.MaxBytes}
 	if req.Tp != nil {
-		op.TP = core.TopicPartitionKey(req.Tp.Topic, req.Tp.Partition)
+		op.TP = core.NewTopicPartition(req.Tp.Topic, req.Tp.Partition)
 	}
 	return op
 }
@@ -241,7 +241,7 @@ func batchRangeToCore(br *cpv1.BatchRange) core.BatchRange {
 	}
 	out := core.BatchRange{Base: core.Offset(br.Base), Count: br.Count}
 	if br.Tp != nil {
-		out.TP = core.TopicPartitionKey(br.Tp.Topic, br.Tp.Partition)
+		out.TP = core.NewTopicPartition(br.Tp.Topic, br.Tp.Partition)
 	}
 	if br.Loc != nil {
 		out.Loc = core.SegmentRef{Key: br.Loc.Key, Off: br.Loc.Off, Len: br.Loc.Len}

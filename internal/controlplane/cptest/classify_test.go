@@ -66,7 +66,7 @@ func TestClassifierLiveDial(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	_, err := cpclient.New(addr, nil).Call(ctx, core.CommitSegment{SegmentKey: "k", Batches: []core.PendingBatch{
-		{TP: core.TopicPartitionKey("t", 0), Records: 1},
+		{TP: core.NewTopicPartition("t", 0), Records: 1},
 	}})
 	if err == nil {
 		t.Fatal("want error")

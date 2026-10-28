@@ -53,8 +53,8 @@ func TestRestoreOnStartedThenReady(t *testing.T) {
 	if !m.Ready() {
 		t.Fatal("Ready after restore catch-up")
 	}
-	if m.Fold().End(core.TopicPartitionKey("t", 0)) != 3 {
-		t.Fatalf("restored end = %d, want 3", m.Fold().End(core.TopicPartitionKey("t", 0)))
+	if m.Fold().End(core.NewTopicPartition("t", 0)) != 3 {
+		t.Fatalf("restored end = %d, want 3", m.Fold().End(core.NewTopicPartition("t", 0)))
 	}
 }
 

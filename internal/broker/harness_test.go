@@ -315,7 +315,7 @@ type ent struct {
 }
 
 func e(topic string, part int32, rec []byte) ent {
-	return ent{tp: core.TopicPartitionKey(topic, part), rec: rec}
+	return ent{tp: core.NewTopicPartition(topic, part), rec: rec}
 }
 
 func prodReq(acks int16, es ...ent) *kmsg.ProduceRequest {

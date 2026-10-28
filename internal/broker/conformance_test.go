@@ -20,8 +20,8 @@ import (
 // requests built with kwire. It compares every ack, fetch and ListOffsets
 // answer with one veritas.Partition per topic partition.
 
-var c1TPs = []core.TopicPartition{core.TopicPartitionKey("t", 0), core.TopicPartitionKey("t", 1),
-	core.TopicPartitionKey("u", 0), core.TopicPartitionKey("u", 1), core.TopicPartitionKey("u", 2)}
+var c1TPs = []core.TopicPartition{core.NewTopicPartition("t", 0), core.NewTopicPartition("t", 1),
+	core.NewTopicPartition("u", 0), core.NewTopicPartition("u", 1), core.NewTopicPartition("u", 2)}
 
 // An Idem entry carries a producer id. The broker refuses these entries
 // (decision 41), so the test expects an error and no new record.
@@ -49,9 +49,9 @@ type c1 struct {
 	corrupt bool
 }
 
-func newC1(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) *c1 {
+func newC1(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) *c1 {
 	cfg := DefaultConfig()
-	cfg.Bug = bug
+	cfg.InjectedBug = bug
 	if tune != nil {
 		tune(&cfg)
 	}
@@ -112,7 +112,7 @@ func (s *c1) await2(c *client, ver int16, req kmsg.Request) (kmsg.Response, erro
 }
 
 type expect struct {
-	err  kafkaCode
+	err  kafkaErrorCode
 	base core.Offset
 	add  [][]byte // appended to the model on success
 	ti   int
@@ -161,7 +161,7 @@ func (s *c1) produce(c *client, op c1op) error {
 	}
 	for i, x := range exps {
 		tp := c1TPs[x.ti]
-		if kafkaCode(got[i].ErrorCode) != x.err || got[i].BaseOffset != int64(x.base) {
+		if kafkaErrorCode(got[i].ErrorCode) != x.err || got[i].BaseOffset != int64(x.base) {
 			return fmt.Errorf("produce %v: error %d base %d, want error %d base %d (model hwm %d)",
 				tp, got[i].ErrorCode, got[i].BaseOffset, x.err, x.base, s.model[tp].HighWatermark())
 		}
@@ -190,7 +190,7 @@ func (s *c1) fetch(c *client, op c1op) error {
 		return fmt.Errorf("fetch %v@%d: hwm %d, want %d", tp, from, p.HighWatermark, hwm)
 	}
 	if from > hwm {
-		if kafkaCode(p.ErrorCode) != errOffsetOutOfRange {
+		if kafkaErrorCode(p.ErrorCode) != errOffsetOutOfRange {
 			return fmt.Errorf("fetch %v@%d beyond hwm %d: error %d", tp, from, hwm, p.ErrorCode)
 		}
 		return nil
@@ -308,7 +308,7 @@ func shrinkC1(op c1op) []c1op {
 	return out
 }
 
-func c1Check(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) veritastest.SpecComparator[*c1, c1op] {
+func c1Check(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) veritastest.SpecComparator[*c1, c1op] {
 	return veritastest.SpecComparator[*c1, c1op]{
 		Name: "c1op", Ops: 80, MaxShrinkRuns: 300,
 		New:       func() *c1 { return newC1(t, bug, corrupt, tune) },
@@ -323,7 +323,7 @@ func c1Check(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) veritastes
 // c1Fail runs the seeds that o chooses and returns the first failure, or nil
 // if every seed passes. A planted-bug test needs the failure as a value, so it
 // cannot use veritastest.Run, which reports the failure to the test itself.
-func c1Fail(t *testing.T, bug Bug, corrupt bool, tune func(*Config), o veritastest.Options) *veritastest.Failure[c1op] {
+func c1Fail(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config), o veritastest.Options) *veritastest.Failure[c1op] {
 	c := c1Check(t, bug, corrupt, tune)
 	try := func(seed uint64) *veritastest.Failure[c1op] {
 		f := c.RunSeed(seed)
@@ -352,7 +352,7 @@ func c1Fail(t *testing.T, bug Bug, corrupt bool, tune func(*Config), o veritaste
 func TestConformanceBroker(t *testing.T) {
 	for _, corrupt := range []bool{false, true} {
 		t.Run(fmt.Sprintf("corruptGets=%v", corrupt), func(t *testing.T) {
-			veritastest.Run(t, c1Check(t, BugNone, corrupt, nil), runcontrol.Options(t, 100))
+			veritastest.Run(t, c1Check(t, InjectedBugNone, corrupt, nil), runcontrol.Options(t, 100))
 		})
 	}
 }
@@ -371,7 +371,7 @@ func TestConformanceBrokerSmallSegments(t *testing.T) {
 	for _, name := range []string{"bytes", "batches", "partitions", "all"} {
 		for _, corrupt := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/corruptGets=%v", name, corrupt), func(t *testing.T) {
-				veritastest.Run(t, c1Check(t, BugNone, corrupt, caps[name]), runcontrol.Options(t, 50))
+				veritastest.Run(t, c1Check(t, InjectedBugNone, corrupt, caps[name]), runcontrol.Options(t, 50))
 			})
 		}
 	}
@@ -382,28 +382,28 @@ func TestConformanceBrokerSmallSegments(t *testing.T) {
 //
 // C1 cannot catch the other planted bugs, because the client cannot see them
 // in a fault-free run. The simulator tests in internal/verify/sim/kafka catch
-// them: TestMutantsAreCaught in kafka_test.go runs every Bug value and names
+// them: TestMutantsAreCaught in kafka_test.go runs every InjectedBug value and names
 // the invariant that must fail.
-//   - BugNoBatchCap, BugNoPartitionCap, BugSealOffByOne change only where the
+//   - InjectedBugNoBatchCap, InjectedBugNoPartitionCap, InjectedBugSealOffByOne change only where the
 //     broker cuts a segment. The records and offsets stay the same. The sim
 //     invariants on segment size are expected to catch them.
-//   - BugTimerFromLastBatch changes only when the flush timer fires. C1 does
+//   - InjectedBugTimerFromLastBatch changes only when the flush timer fires. C1 does
 //     not check time, so the sim invariant on the flush window must catch it.
-//   - BugFreshKeyOnRetry acts only when a commit is retried, and the C1 harness
+//   - InjectedBugFreshKeyOnRetry acts only when a commit is retried, and the C1 harness
 //     has no faults, so no retry happens. The sim invariant "a stored batch is
 //     committed at most once" must catch it.
-//   - BugSkipProduceCRC matters only for a corrupt produce batch, and the C1
+//   - InjectedBugSkipProduceCRC matters only for a corrupt produce batch, and the C1
 //     generator sends only valid batches. TestSkipProduceCRCMutantAcksCorruptBatch
 //     and the sim invariant "committed batch is intact" must catch it.
 func TestConformanceBrokerCatchesMutants(t *testing.T) {
 	for _, m := range []struct {
 		name    string
-		bug     Bug
+		bug     InjectedBug
 		corrupt bool
 	}{
-		{"BugWrongOffset", BugWrongOffset, false},
-		{"BugServeCorrupt", BugServeCorrupt, true},
-		{"BugEarlyAck", BugEarlyAck, false},
+		{"BugWrongOffset", InjectedBugWrongOffset, false},
+		{"BugServeCorrupt", InjectedBugServeCorrupt, true},
+		{"BugEarlyAck", InjectedBugEarlyAck, false},
 	} {
 		t.Run(m.name, func(t *testing.T) {
 			if c1Fail(t, m.bug, m.corrupt, nil, runcontrol.Options(t, 20)) == nil {

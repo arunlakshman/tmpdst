@@ -60,8 +60,8 @@ type TopicPartition struct {
 	Partition int32
 }
 
-// TopicPartitionKey builds a TopicPartition.
-func TopicPartitionKey(topic string, partition int32) TopicPartition {
+// NewTopicPartition builds a TopicPartition.
+func NewTopicPartition(topic string, partition int32) TopicPartition {
 	return TopicPartition{Topic: topic, Partition: partition}
 }
 

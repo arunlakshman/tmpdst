@@ -66,7 +66,7 @@ func TestMetadata(t *testing.T) {
 	a, b := "t", "nope"
 	q.Topics = []kmsg.MetadataRequestTopic{{Topic: &b}, {Topic: &a}}
 	r = h.call(c, verMetadata, q).(*kmsg.MetadataResponse)
-	if len(r.Topics) != 2 || kafkaCode(r.Topics[0].ErrorCode) != errUnknownTopicOrPart || r.Topics[1].ErrorCode != 0 {
+	if len(r.Topics) != 2 || kafkaErrorCode(r.Topics[0].ErrorCode) != errUnknownTopicOrPart || r.Topics[1].ErrorCode != 0 {
 		t.Fatalf("topics %+v", r.Topics)
 	}
 	for _, cmd := range h.cp.Exec(core.ControlPlaneCall{Req: 1, Op: core.DescribeTopics{Topics: []string{"nope"}}}).(core.ControlPlaneDone).Resp.(core.DescribeTopicsResp).Topics {
@@ -95,7 +95,7 @@ func TestProduceFetchRoundTrip(t *testing.T) {
 	if ps[0].BaseOffset != 0 || ps[1].BaseOffset != 0 || ps[2].BaseOffset != 2 || ps[0].ErrorCode+ps[1].ErrorCode+ps[2].ErrorCode != 0 {
 		t.Fatalf("results %+v", ps)
 	}
-	p := fetched(h.call(c, verFetch, fetchReq(core.TopicPartitionKey("t", 0), 0, 1<<20)))
+	p := fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)))
 	bs, err := kwire.SplitBatches(p.RecordBatches)
 	if err != nil || len(bs) != 2 || p.HighWatermark != 5 || p.LastStableOffset != 5 || p.LogStartOffset != 0 {
 		t.Fatalf("fetch: %v %d batches hwm %d", err, len(bs), p.HighWatermark)
@@ -107,22 +107,22 @@ func TestProduceFetchRoundTrip(t *testing.T) {
 		}
 	}
 	// From the middle: the containing batch is returned whole.
-	p = fetched(h.call(c, verFetch, fetchReq(core.TopicPartitionKey("t", 0), 3, 1<<20)))
+	p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 3, 1<<20)))
 	if bs, _ := kwire.SplitBatches(p.RecordBatches); len(bs) != 1 {
 		t.Fatalf("mid fetch %d batches", len(bs))
 	}
 	// Partition limit: at least one batch, no more than fits.
-	p = fetched(h.call(c, verFetch, fetchReq(core.TopicPartitionKey("t", 0), 0, 1)))
+	p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1)))
 	if bs, _ := kwire.SplitBatches(p.RecordBatches); len(bs) != 1 {
 		t.Fatalf("limited fetch %d batches", len(bs))
 	}
-	if p = fetched(h.call(c, verFetch, fetchReq(core.TopicPartitionKey("t", 0), 5, 1<<20))); len(p.RecordBatches) != 0 || p.ErrorCode != 0 || p.HighWatermark != 5 {
+	if p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 5, 1<<20))); len(p.RecordBatches) != 0 || p.ErrorCode != 0 || p.HighWatermark != 5 {
 		t.Fatalf("at HWM: %+v", p)
 	}
-	if p = fetched(h.call(c, verFetch, fetchReq(core.TopicPartitionKey("t", 0), 6, 1<<20))); kafkaCode(p.ErrorCode) != errOffsetOutOfRange {
+	if p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 6, 1<<20))); kafkaErrorCode(p.ErrorCode) != errOffsetOutOfRange {
 		t.Fatalf("beyond HWM: %d", p.ErrorCode)
 	}
-	if p = fetched(h.call(c, verFetch, fetchReq(core.TopicPartitionKey("zz", 0), 0, 1<<20))); kafkaCode(p.ErrorCode) != errUnknownTopicOrPart {
+	if p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("zz", 0), 0, 1<<20))); kafkaErrorCode(p.ErrorCode) != errUnknownTopicOrPart {
 		t.Fatalf("unknown topic: %d", p.ErrorCode)
 	}
 	h.noViolations()
@@ -144,13 +144,13 @@ func TestProduceErrors(t *testing.T) {
 		e("t", 0, txn), e("t", 0, two), e("t", 0, nil), e("t", 0, plain(t, "ok"))))
 	h.flush()
 	ps := produced(h.next(c))
-	want := []kafkaCode{errUnknownTopicOrPart, errUnknownTopicOrPart, errCorruptMessage, errInvalidRequest, errCorruptMessage, errCorruptMessage, 0}
+	want := []kafkaErrorCode{errUnknownTopicOrPart, errUnknownTopicOrPart, errCorruptMessage, errInvalidRequest, errCorruptMessage, errCorruptMessage, 0}
 	for i, w := range want {
-		if kafkaCode(ps[i].ErrorCode) != w {
+		if kafkaErrorCode(ps[i].ErrorCode) != w {
 			t.Errorf("partition %d: error %d, want %d", i, ps[i].ErrorCode, w)
 		}
 	}
-	if q := h.call(c, verProduce, prodReq(7, e("t", 0, plain(t, "x")))); kafkaCode(produced(q)[0].ErrorCode) != errInvalidRequiredAcks {
+	if q := h.call(c, verProduce, prodReq(7, e("t", 0, plain(t, "x")))); kafkaErrorCode(produced(q)[0].ErrorCode) != errInvalidRequiredAcks {
 		t.Fatal("bad acks accepted")
 	}
 }
@@ -209,7 +209,7 @@ func TestPipelinedResponsesInOrder(t *testing.T) {
 	var chunk []byte
 	chunk = append(chunk, h.frame(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))...)
 	chunk = append(chunk, h.frame(c, 3, kmsg.NewPtrApiVersionsRequest())...)
-	chunk = append(chunk, h.frame(c, verFetch, fetchReq(core.TopicPartitionKey("t", 0), 0, 1<<20))...)
+	chunk = append(chunk, h.frame(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20))...)
 	h.do(core.BytesReceived{Conn: 1, Data: chunk})
 	if len(c.out) != 0 {
 		t.Fatal("later requests overtook the pending produce")
@@ -272,7 +272,7 @@ func TestGracefulStop(t *testing.T) {
 	if r := produced(h.next(c))[0]; r.ErrorCode != 0 || r.BaseOffset != 0 {
 		t.Fatalf("%+v", r)
 	}
-	if h.cp.End(core.TopicPartitionKey("t", 0)) != 1 {
+	if h.cp.End(core.NewTopicPartition("t", 0)) != 1 {
 		t.Fatal("not flushed")
 	}
 	// Idle broker exits at once.
@@ -296,15 +296,15 @@ func TestListOffsets(t *testing.T) {
 	r := h.call(c, verList, q).(*kmsg.ListOffsetsResponse)
 	get := func(i int) kmsg.ListOffsetsResponseTopicPartition { return r.Topics[i].Partitions[0] }
 	if get(0).Offset != 0 || get(0).ErrorCode != 0 || get(1).Offset != 3 || get(2).Offset != 0 ||
-		kafkaCode(get(3).ErrorCode) != errUnsupportedForFormat || kafkaCode(get(4).ErrorCode) != errUnknownTopicOrPart {
+		kafkaErrorCode(get(3).ErrorCode) != errUnsupportedForFormat || kafkaErrorCode(get(4).ErrorCode) != errUnknownTopicOrPart {
 		t.Fatalf("%+v", r.Topics)
 	}
 }
 
 func TestCorruptGetRetried(t *testing.T) {
-	for _, bug := range []Bug{BugNone, BugServeCorrupt} {
+	for _, bug := range []InjectedBug{InjectedBugNone, InjectedBugServeCorrupt} {
 		cfg := DefaultConfig()
-		cfg.Bug = bug
+		cfg.InjectedBug = bug
 		h := startedHarness(t, cfg)
 		c := h.open(1)
 		h.produceOne(c, e("t", 0, plain(t, "hello")))
@@ -319,8 +319,8 @@ func TestCorruptGetRetried(t *testing.T) {
 			}
 			return d
 		}
-		h.send(c, verFetch, fetchReq(core.TopicPartitionKey("t", 0), 0, 1<<20))
-		if bug == BugNone {
+		h.send(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20))
+		if bug == InjectedBugNone {
 			if len(c.out) != 0 {
 				t.Fatal("corrupt data served")
 			}
@@ -329,11 +329,11 @@ func TestCorruptGetRetried(t *testing.T) {
 		p := fetched(h.next(c))
 		_, err := kwire.ParseBatch(p.RecordBatches)
 		switch bug {
-		case BugNone:
+		case InjectedBugNone:
 			if err != nil || len(factsNamed(h.all, "corruption_detected")) != 1 {
 				t.Fatalf("err %v", err)
 			}
-		case BugServeCorrupt:
+		case InjectedBugServeCorrupt:
 			if err == nil {
 				t.Fatal("mutant should serve corrupt bytes")
 			}
@@ -354,20 +354,20 @@ func TestFetchGetsExhausted(t *testing.T) {
 		}
 		return d
 	}
-	h.send(c, verFetch, fetchReq(core.TopicPartitionKey("t", 0), 0, 1<<20))
+	h.send(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20))
 	h.fireAll()
-	if p := fetched(h.next(c)); kafkaCode(p.ErrorCode) != errKafkaStorage || len(p.RecordBatches) != 0 {
+	if p := fetched(h.next(c)); kafkaErrorCode(p.ErrorCode) != errKafkaStorage || len(p.RecordBatches) != 0 {
 		t.Fatalf("%+v", p.ErrorCode)
 	}
 }
 
 func TestWrongOffsetMutant(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Bug = BugWrongOffset
+	cfg.InjectedBug = InjectedBugWrongOffset
 	h := startedHarness(t, cfg)
 	c := h.open(1)
 	h.produceOne(c, e("t", 0, plain(t, "a")))
-	p := fetched(h.call(c, verFetch, fetchReq(core.TopicPartitionKey("t", 0), 0, 1<<20)))
+	p := fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)))
 	if bt, err := kwire.ParseBatch(p.RecordBatches); err != nil || bt.BaseOffset != 1 {
 		t.Fatalf("mutant base %v %v", bt.BaseOffset, err)
 	}
@@ -375,7 +375,7 @@ func TestWrongOffsetMutant(t *testing.T) {
 
 func TestEarlyAckMutant(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Bug = BugEarlyAck
+	cfg.InjectedBug = InjectedBugEarlyAck
 	h := startedHarness(t, cfg)
 	c := h.open(1)
 	h.call(c, verMetadata, kmsg.NewPtrMetadataRequest()) // warm the topic cache
@@ -451,7 +451,7 @@ func TestBadInputClosesConnection(t *testing.T) {
 		if !h.closed[1] || len(c.out) != 0 {
 			t.Errorf("%s: closed=%v out=%d", name, h.closed[1], len(c.out))
 		}
-		if h.cp.End(core.TopicPartitionKey("t", 0)) != 0 || len(h.puts) != 0 {
+		if h.cp.End(core.NewTopicPartition("t", 0)) != 0 || len(h.puts) != 0 {
 			t.Errorf("%s: data written", name)
 		}
 	}
@@ -471,7 +471,7 @@ func TestPeerCloseDuringProduce(t *testing.T) {
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.do(core.ConnClosed{Conn: 1, Abort: true})
 	h.flush()
-	if h.cp.End(core.TopicPartitionKey("t", 0)) != 1 || len(c.out) != 0 {
+	if h.cp.End(core.NewTopicPartition("t", 0)) != 1 || len(c.out) != 0 {
 		t.Fatal("write must land, response must not be sent")
 	}
 	if len(factsNamed(h.all, "produce_acked")) != 0 {
@@ -489,7 +489,7 @@ func TestStateHash(t *testing.T) {
 		hs = append(hs, h.b.StateHash())
 		h.flush()
 		hs = append(hs, h.b.StateHash())
-		h.call(c, verFetch, fetchReq(core.TopicPartitionKey("t", 0), 0, 100))
+		h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 100))
 		return append(hs, h.b.StateHash())
 	}
 	a, b := run(), run()
@@ -560,7 +560,7 @@ func mustFrames(t testing.TB) [][]byte {
 	}
 	return [][]byte{
 		enc(verProduce, prodReq(-1, e("t", 0, mkBatch(t, -1, -1, -1, "a")), e("t", 1, mkBatch(t, 1000, 0, 0, "b")))),
-		enc(verFetch, fetchReq(core.TopicPartitionKey("t", 0), 0, 100)),
+		enc(verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 100)),
 		enc(verMetadata, kmsg.NewPtrMetadataRequest()),
 		enc(3, kmsg.NewPtrApiVersionsRequest()),
 	}
@@ -578,11 +578,11 @@ func TestIdempotentBatchRejected(t *testing.T) {
 		e("t", 0, plain(t, "ok2"))))
 	h.flush()
 	ps := produced(h.next(c))
-	if kafkaCode(ps[0].ErrorCode) != errInvalidRequest || kafkaCode(ps[2].ErrorCode) != errInvalidRequest ||
+	if kafkaErrorCode(ps[0].ErrorCode) != errInvalidRequest || kafkaErrorCode(ps[2].ErrorCode) != errInvalidRequest ||
 		ps[1].ErrorCode != 0 || ps[3].ErrorCode != 0 || ps[3].BaseOffset != 0 {
 		t.Fatalf("%+v", ps)
 	}
-	if h.cp.End(core.TopicPartitionKey("t", 0)) != 1 {
+	if h.cp.End(core.NewTopicPartition("t", 0)) != 1 {
 		t.Fatal("rejected batch was stored")
 	}
 	h.noViolations()
@@ -620,7 +620,7 @@ func TestCommitRetryAfterMaybeAppliedResendsIdenticalRequest(t *testing.T) {
 	h.fireAll()
 	ps := produced(h.next(c))
 	if ps[0].ErrorCode != 0 || ps[0].BaseOffset != 0 || ps[1].ErrorCode != 0 || ps[1].BaseOffset != 0 ||
-		h.cp.End(core.TopicPartitionKey("t", 0)) != 2 {
+		h.cp.End(core.NewTopicPartition("t", 0)) != 2 {
 		t.Fatalf("%+v", ps)
 	}
 	cs := commitOps(h)
@@ -775,7 +775,7 @@ func TestCommitDeadlineFailsSegmentAndReleasesBuffer(t *testing.T) {
 		h.fire(id)
 	}
 	ps := produced(h.next(c))
-	if kafkaCode(ps[0].ErrorCode) != errRequestTimedOut {
+	if kafkaErrorCode(ps[0].ErrorCode) != errRequestTimedOut {
 		t.Fatalf("%+v", ps)
 	}
 	if h.b.bufBytes != 0 || len(h.b.segs) != 0 {

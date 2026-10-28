@@ -98,18 +98,18 @@ func TestMutantsAreCaught(t *testing.T) {
 	const budget, soon = 20, 8
 	cases := []struct {
 		name string
-		bug  broker.Bug
+		bug  broker.InjectedBug
 		prop core.PropertyID
 	}{
-		{"BugEarlyAck: ack before CommitSegment", broker.BugEarlyAck, "kafka: acked range is committed in the control plane"},
-		{"BugFreshKeyOnRetry: a lost commit is retried under a fresh key", broker.BugFreshKeyOnRetry, "kafka: a stored batch is committed at most once"},
-		{"BugNoPartitionCap: MaxSegmentPartitions ignored", broker.BugNoPartitionCap, "kafka: a sealed segment spans at most MaxSegmentPartitions partitions"},
-		{"BugWrongOffset: fetch patches base offset + 1", broker.BugWrongOffset, "kafka: a consumer sees every offset in order, none skipped"},
-		{"BugServeCorrupt: corrupt GET reaches the client", broker.BugServeCorrupt, "kafka: a consumer never receives a corrupt batch"},
-		{"BugNoBatchCap: MaxSegmentBatches ignored", broker.BugNoBatchCap, "kafka: a sealed segment holds at most MaxSegmentBatches batches"},
-		{"BugTimerFromLastBatch: flush window restarts on every batch", broker.BugTimerFromLastBatch, "kafka: a segment is sealed within the window of its first batch"},
-		{"BugSkipProduceCRC: produce admits a corrupted batch", broker.BugSkipProduceCRC, "kafka: committed batch is intact"},
-		{"BugSealOffByOne: size rule applied one batch late", broker.BugSealOffByOne, "kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch"},
+		{"BugEarlyAck: ack before CommitSegment", broker.InjectedBugEarlyAck, "kafka: acked range is committed in the control plane"},
+		{"BugFreshKeyOnRetry: a lost commit is retried under a fresh key", broker.InjectedBugFreshKeyOnRetry, "kafka: a stored batch is committed at most once"},
+		{"BugNoPartitionCap: MaxSegmentPartitions ignored", broker.InjectedBugNoPartitionCap, "kafka: a sealed segment spans at most MaxSegmentPartitions partitions"},
+		{"BugWrongOffset: fetch patches base offset + 1", broker.InjectedBugWrongOffset, "kafka: a consumer sees every offset in order, none skipped"},
+		{"BugServeCorrupt: corrupt GET reaches the client", broker.InjectedBugServeCorrupt, "kafka: a consumer never receives a corrupt batch"},
+		{"BugNoBatchCap: MaxSegmentBatches ignored", broker.InjectedBugNoBatchCap, "kafka: a sealed segment holds at most MaxSegmentBatches batches"},
+		{"BugTimerFromLastBatch: flush window restarts on every batch", broker.InjectedBugTimerFromLastBatch, "kafka: a segment is sealed within the window of its first batch"},
+		{"BugSkipProduceCRC: produce admits a corrupted batch", broker.InjectedBugSkipProduceCRC, "kafka: committed batch is intact"},
+		{"BugSealOffByOne: size rule applied one batch late", broker.InjectedBugSealOffByOne, "kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch"},
 	}
 	for _, c := range cases {
 		cfg := config(nil, c.bug)
@@ -390,7 +390,7 @@ func TestCachedStateHashMatchesFull(t *testing.T) {
 // commit limit too (tight on half the seeds: 1 + the cap), not only caught by
 // the cap invariants.
 func TestCommitLimitRefusesUncappedSegment(t *testing.T) {
-	cfg := config(nil, broker.BugNoPartitionCap)
+	cfg := config(nil, broker.InjectedBugNoPartitionCap)
 	for s := uint64(1); s <= 40; s++ {
 		if slices.Contains(violated(cfg, s), "broker: segment exceeds the control plane's commit size") {
 			return
@@ -410,11 +410,11 @@ func wideCampaign(t *testing.T, capParts, batches int, log bool) int64 {
 	prod.MaxSegmentPartitions, prod.MaxSegmentBatches = capParts, batches
 	prod.MaxBufferedBytes, prod.ResumeBufferedBytes = 64<<20, 32<<20
 	opts := Opts{Producers: 128, Consumers: 1, Topics: []string{"a", "b"}, Partitions: 64}
-	cfg := configWith(seeds(1, 2), broker.BugNone, opts)
+	cfg := configWith(seeds(1, 2), broker.InjectedBugNone, opts)
 	items := sim.DynamoMaxCommitItems
 	if log {
 		opts.Partitions = 128
-		cfg = configLogWith(seeds(1, 2), broker.BugNone, 0, opts)
+		cfg = configLogWith(seeds(1, 2), broker.InjectedBugNone, 0, opts)
 		items = 0
 		cfg.ControlPlane.CallerTimeout = 800 * core.Millisecond
 		cfg.LogStore.CallerTimeout = 800 * core.Millisecond

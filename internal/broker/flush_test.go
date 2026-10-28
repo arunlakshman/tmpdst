@@ -174,7 +174,7 @@ func TestCommitTooLargeFailsBatches(t *testing.T) {
 	h.flush()
 	h.fireAll()
 	for _, p := range produced(h.next(c)) {
-		if kafkaCode(p.ErrorCode) != errUnknownServer || p.BaseOffset != -1 {
+		if kafkaErrorCode(p.ErrorCode) != errUnknownServer || p.BaseOffset != -1 {
 			t.Fatalf("code %d offset %d", p.ErrorCode, p.BaseOffset)
 		}
 	}
@@ -187,7 +187,7 @@ func TestCommitTooLargeFailsBatches(t *testing.T) {
 	if h.b.bufBytes != 0 || len(h.b.segs) != 0 {
 		t.Fatalf("buffered %d, segments %d", h.b.bufBytes, len(h.b.segs))
 	}
-	if h.cp.End(core.TopicPartitionKey("t", 0)) != 0 {
+	if h.cp.End(core.NewTopicPartition("t", 0)) != 0 {
 		t.Fatal("refused segment changed the log")
 	}
 }

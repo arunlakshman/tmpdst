@@ -15,8 +15,8 @@ func TestEntryCodecRoundTrip(t *testing.T) {
 		{ID: "w/3", Kind: applier.KindCommit, Commit: core.CommitSegment{
 			SegmentKey: "k",
 			Batches: []core.PendingBatch{
-				{TP: core.TopicPartitionKey("a", 0), Records: 3, Loc: core.SegmentRef{Key: "o", Off: 7, Len: 30}},
-				{TP: core.TopicPartitionKey("a", 1), Records: 1, Loc: core.SegmentRef{Key: "o", Off: 1, Len: 10}},
+				{TP: core.NewTopicPartition("a", 0), Records: 3, Loc: core.SegmentRef{Key: "o", Off: 7, Len: 30}},
+				{TP: core.NewTopicPartition("a", 1), Records: 1, Loc: core.SegmentRef{Key: "o", Off: 1, Len: 10}},
 			},
 		}},
 	}
@@ -41,7 +41,7 @@ func TestApplyBytesNoopAndCommit(t *testing.T) {
 		ID: "c", Kind: applier.KindCommit,
 		Commit: core.CommitSegment{
 			SegmentKey: "s1",
-			Batches:    []core.PendingBatch{{TP: core.TopicPartitionKey("t", 0), Records: 2, Loc: core.SegmentRef{Key: "o", Off: 0, Len: 8}}},
+			Batches:    []core.PendingBatch{{TP: core.NewTopicPartition("t", 0), Records: 2, Loc: core.SegmentRef{Key: "o", Off: 0, Len: 8}}},
 		},
 	}))
 	if err != nil || d.Err != core.OK || d.Outcome != core.Applied {
@@ -50,8 +50,8 @@ func TestApplyBytesNoopAndCommit(t *testing.T) {
 	if a.StateHash() == before {
 		t.Fatal("commit left StateHash unchanged")
 	}
-	if a.End(core.TopicPartitionKey("t", 0)) != 2 {
-		t.Fatalf("end = %d, want 2", a.End(core.TopicPartitionKey("t", 0)))
+	if a.End(core.NewTopicPartition("t", 0)) != 2 {
+		t.Fatalf("end = %d, want 2", a.End(core.NewTopicPartition("t", 0)))
 	}
 }
 

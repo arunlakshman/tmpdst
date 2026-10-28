@@ -2,39 +2,39 @@ package broker
 
 import "manifester/internal/core"
 
-// Bug selects a deliberately broken behaviour for mutant tests. TEST ONLY: the
+// InjectedBug selects a deliberately broken behaviour for mutant tests. TEST ONLY: the
 // zero value is the real broker and production code must never set it.
-type Bug uint8
+type InjectedBug uint8
 
 const (
-	// BugNone is the real, unbroken broker.
-	BugNone Bug = iota
-	// BugEarlyAck acks a produce after the S3 PUT, before CommitSegment.
-	BugEarlyAck
-	// BugWrongOffset patches fetched batches with base offset + 1.
-	BugWrongOffset
-	// BugServeCorrupt skips the batch CRC check on fetch, so a corrupted GET
+	// InjectedBugNone is the real, unbroken broker.
+	InjectedBugNone InjectedBug = iota
+	// InjectedBugEarlyAck acks a produce after the S3 PUT, before CommitSegment.
+	InjectedBugEarlyAck
+	// InjectedBugWrongOffset patches fetched batches with base offset + 1.
+	InjectedBugWrongOffset
+	// InjectedBugServeCorrupt skips the batch CRC check on fetch, so a corrupted GET
 	// reaches the client.
-	BugServeCorrupt
-	// BugNoBatchCap ignores MaxSegmentBatches, so a segment can outgrow the
+	InjectedBugServeCorrupt
+	// InjectedBugNoBatchCap ignores MaxSegmentBatches, so a segment can outgrow the
 	// control plane's commit limit.
-	BugNoBatchCap
-	// BugTimerFromLastBatch restarts the flush timer on every batch, so a steady
+	InjectedBugNoBatchCap
+	// InjectedBugTimerFromLastBatch restarts the flush timer on every batch, so a steady
 	// trickle never flushes by the timer.
-	BugTimerFromLastBatch
-	// BugSealOffByOne applies the size rule one batch late.
-	BugSealOffByOne
-	// BugNoPartitionCap ignores MaxSegmentPartitions, so a segment can outgrow
+	InjectedBugTimerFromLastBatch
+	// InjectedBugSealOffByOne applies the size rule one batch late.
+	InjectedBugSealOffByOne
+	// InjectedBugNoPartitionCap ignores MaxSegmentPartitions, so a segment can outgrow
 	// the partition cap (and, on the DynamoDB transaction store, its commit
 	// item budget 1 + partitions).
-	BugNoPartitionCap
-	// BugFreshKeyOnRetry retries a CommitSegment with a fresh SegmentKey, so a
+	InjectedBugNoPartitionCap
+	// InjectedBugFreshKeyOnRetry retries a CommitSegment with a fresh SegmentKey, so a
 	// commit that was applied but lost is applied again and the batches are
 	// committed twice.
-	BugFreshKeyOnRetry
-	// BugSkipProduceCRC admits a produced batch without checking its CRC, so a
+	InjectedBugFreshKeyOnRetry
+	// InjectedBugSkipProduceCRC admits a produced batch without checking its CRC, so a
 	// corrupted (compressed) batch is acked and stored.
-	BugSkipProduceCRC
+	InjectedBugSkipProduceCRC
 )
 
 // Config is the broker's tuning. Zero numeric fields take DefaultConfig's value.
@@ -89,8 +89,8 @@ type Config struct {
 
 	DefaultFetchBytes int32 // partition limit when a Fetch asks for none (<= 0)
 
-	// Bug is test-only; see Bug.
-	Bug Bug
+	// InjectedBug is test-only; see InjectedBug.
+	InjectedBug InjectedBug
 }
 
 // DefaultConfig is a reasonable single-broker configuration.
@@ -163,23 +163,23 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
-// kafkaCode is a Kafka protocol error code returned on responses.
-type kafkaCode int16
+// kafkaErrorCode is a Kafka protocol error code returned on responses.
+type kafkaErrorCode int16
 
 const (
-	errNone                 kafkaCode = 0
-	errOffsetOutOfRange     kafkaCode = 1
-	errCorruptMessage       kafkaCode = 2
-	errUnknownTopicOrPart   kafkaCode = 3
-	errLeaderNotAvailable   kafkaCode = 5
-	errNotLeader            kafkaCode = 6
-	errRequestTimedOut      kafkaCode = 7
-	errInvalidRequiredAcks  kafkaCode = 21
-	errInvalidRequest       kafkaCode = 42
-	errUnsupportedForFormat kafkaCode = 43
-	errKafkaStorage         kafkaCode = 56
-	errFetchSessionNotFound kafkaCode = 70
-	errUnsupportedCompress  kafkaCode = 76
-	errUnknownTopicID       kafkaCode = 100
-	errUnknownServer        kafkaCode = -1
+	errNone                 kafkaErrorCode = 0
+	errOffsetOutOfRange     kafkaErrorCode = 1
+	errCorruptMessage       kafkaErrorCode = 2
+	errUnknownTopicOrPart   kafkaErrorCode = 3
+	errLeaderNotAvailable   kafkaErrorCode = 5
+	errNotLeader            kafkaErrorCode = 6
+	errRequestTimedOut      kafkaErrorCode = 7
+	errInvalidRequiredAcks  kafkaErrorCode = 21
+	errInvalidRequest       kafkaErrorCode = 42
+	errUnsupportedForFormat kafkaErrorCode = 43
+	errKafkaStorage         kafkaErrorCode = 56
+	errFetchSessionNotFound kafkaErrorCode = 70
+	errUnsupportedCompress  kafkaErrorCode = 76
+	errUnknownTopicID       kafkaErrorCode = 100
+	errUnknownServer        kafkaErrorCode = -1
 )

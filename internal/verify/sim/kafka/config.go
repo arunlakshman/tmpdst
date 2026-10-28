@@ -16,34 +16,36 @@ import (
 // are frequent, and a small buffer so backpressure engages. The segment size is
 // pinned to the pre-decision-35 default (4 MiB) and the batch cap to 8; a seed's
 // swarm overrides the segment knobs (see swarmBroker).
-func brokerConfig(bug broker.Bug) broker.Config {
+func brokerConfig(bug broker.InjectedBug) broker.Config {
 	return broker.Config{BatchWindow: 5 * core.Millisecond, MaxSegmentBytes: 4 << 20, MaxSegmentBatches: 8,
-		MaxBufferedBytes: 3 << 10, ResumeBufferedBytes: 1 << 10, Bug: bug}
+		MaxBufferedBytes: 3 << 10, ResumeBufferedBytes: 1 << 10, InjectedBug: bug}
 }
 
 // Config is the Kafka campaign preset: 3 brokers, 1 workload of 3 at-least-once
 // producers and 2 consumers over 2 topics x 3 partitions, all three engines,
 // attrition and a swarm over the fault families.
-func Config(seeds []uint64) sim.Config { return config(seeds, broker.BugNone) }
+func Config(seeds []uint64) sim.Config { return config(seeds, broker.InjectedBugNone) }
 
-func config(seeds []uint64, bug broker.Bug) sim.Config { return configWith(seeds, bug, DefaultOpts()) }
+func config(seeds []uint64, bug broker.InjectedBug) sim.Config {
+	return configWith(seeds, bug, DefaultOpts())
+}
 
 // ConfigLog is Config against CP replica machines plus logstore (CP-DSM-8,
 // docs/sim-log-engine.md) instead of the veritas-backed cpengine: the same
 // workload, brokers, oracle and fault families. Brokers still emit ControlPlaneCall; the
 // logengine bridge offers them to cp-* processes. The broker keeps its default
 // segment cap (4096): the log has no commit item limit.
-func ConfigLog(seeds []uint64) sim.Config { return configLog(seeds, broker.BugNone, 0) }
+func ConfigLog(seeds []uint64) sim.Config { return configLog(seeds, broker.InjectedBugNone, 0) }
 
 // configLog builds the log preset with a broker mutant and a log engine mutant.
-func configLog(seeds []uint64, bug broker.Bug, logBug uint8) sim.Config {
+func configLog(seeds []uint64, bug broker.InjectedBug, logBug uint8) sim.Config {
 	opts := DefaultOpts()
 	// Stacked bridge + logstore retries need more produce sends than veritas.
 	opts.MaxAttempts = 16
 	return configLogWith(seeds, bug, logBug, opts)
 }
 
-func configLogWith(seeds []uint64, bug broker.Bug, logBug uint8, opts Opts) sim.Config {
+func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Opts) sim.Config {
 	cfg := configWith(seeds, bug, opts)
 	cfg.ControlPlane.Log = logengine.DefaultParams()
 	cfg.ControlPlane.Log.Bug = logBug
@@ -91,7 +93,7 @@ func logReachables() []core.PropertyID {
 	}
 }
 
-func configWith(seeds []uint64, bug broker.Bug, opts Opts) sim.Config {
+func configWith(seeds []uint64, bug broker.InjectedBug, opts Opts) sim.Config {
 	p := campaign.New()
 	p.Network.PartialIOMax = 1024
 	p.ControlPlane.MaxCommitItems = sim.DynamoMaxCommitItems

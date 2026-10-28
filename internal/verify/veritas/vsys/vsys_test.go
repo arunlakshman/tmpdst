@@ -50,7 +50,7 @@ func TestObjectStore(t *testing.T) {
 func TestControlPlaneConcurrent(t *testing.T) {
 	ctx := t.Context()
 	c := NewControlPlane()
-	tp := core.TopicPartitionKey("t", 0)
+	tp := core.NewTopicPartition("t", 0)
 	var wg sync.WaitGroup
 	for i := range 8 {
 		wg.Go(func() {

@@ -48,7 +48,7 @@ func capCampaign(t *testing.T, capParts int) *sealStats {
 	prod.MaxSegmentPartitions, prod.MaxSegmentBatches = capParts, 1024
 	prod.MaxBufferedBytes, prod.ResumeBufferedBytes = 64<<20, 32<<20
 	opts := Opts{Producers: 128, Consumers: 1, Topics: []string{"a", "b"}, Partitions: 128}
-	cfg := configWith(seeds(1, 2), broker.BugNone, opts)
+	cfg := configWith(seeds(1, 2), broker.InjectedBugNone, opts)
 	inner := cfg.Swarm
 	cfg.Swarm = func(seed uint64, r sim.CountedRand, c *sim.SeedConfig) {
 		inner(seed, r, c)

@@ -110,7 +110,7 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 	ctx := enginetest.New(stub{c}, 6)
 	r := sim.NewRand(77)
 	nodes := []core.NodeInstance{enginetest.Ref("a"), enginetest.Ref("b"), enginetest.Ref("c")}
-	tps := []core.TopicPartition{core.TopicPartitionKey("t", 0), core.TopicPartitionKey("t", 1)}
+	tps := []core.TopicPartition{core.NewTopicPartition("t", 0), core.NewTopicPartition("t", 1)}
 	for _, tp := range tps[:1] {
 		if spec.CreateTopic(tp.Topic, 2) == core.OK {
 			c.Bump()

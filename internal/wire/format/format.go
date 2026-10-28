@@ -273,7 +273,7 @@ func readIndexEntry(body []byte, p int, i uint64) (indexEntry, int, error) {
 	}
 	return indexEntry{
 		Entry: Entry{
-			TP:      core.TopicPartitionKey(topic, part),
+			TP:      core.NewTopicPartition(topic, part),
 			Records: binary.BigEndian.Uint32(body[q+4:]),
 			CRC:     binary.BigEndian.Uint32(body[q+24:]),
 		},

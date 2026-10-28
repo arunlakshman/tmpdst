@@ -9,20 +9,20 @@ import (
 	"manifester/internal/wire/format"
 )
 
-// pbatch is one admitted partition batch on its way to a segment.
-type pbatch struct {
+// partitionBatch is one admitted partition batch on its way to a segment.
+type partitionBatch struct {
 	s        *slot
 	part     *kmsg.ProduceResponseTopicPartition
 	tp       core.TopicPartition
 	data     []byte
 	records  int64
 	loc      core.SegmentRef
-	answered bool // answerPart already ran (early under BugEarlyAck)
+	answered bool // answerPart already ran (early under InjectedBugEarlyAck)
 }
 
 // openSegment is the buffer that the next flush seals.
 type openSegment struct {
-	batches []*pbatch
+	batches []*partitionBatch
 	bytes   int
 	parts   []core.TopicPartition // distinct partitions buffered
 	// Flush timer generation matched by onTimer. 0 means none is armed, an
@@ -30,36 +30,36 @@ type openSegment struct {
 	gen core.TimerVersion
 	// Time of the first batch, for the segment_sealed age fact and
 	// SegmentCaps. Not used to schedule. Does not move when
-	// BugTimerFromLastBatch re-arms gen.
+	// InjectedBugTimerFromLastBatch re-arms gen.
 	since core.NodeTime
 }
 
 // Why a segment was sealed (the "reason" of the segment_sealed fact).
 const (
-	sealSize       = "size"
-	sealTimer      = "timer"
-	sealBatches    = "batches"
-	sealPartitions = "partitions"
-	sealStop       = "stop"
+	closeOnSize       = "size"
+	closeOnTimer      = "timer"
+	closeOnBatches    = "batches"
+	closeOnPartitions = "partitions"
+	closeOnStop       = "stop"
 )
 
-type segState uint8
+type segmentState uint8
 
 const (
-	segPut segState = iota // ObjectPut in flight
-	segPutBackoff
-	segPutDone // uploaded, waiting for its turn to commit
-	segCommit  // CommitSegment in flight
-	segCommitBackoff
+	segmentUpload segmentState = iota // ObjectPut in flight
+	segmentUploadRetry
+	segmentUploadDone // uploaded, waiting for its turn to commit
+	segmentCommit     // CommitSegment in flight
+	segmentCommitRetry
 )
 
 // segment is a sealed upload: one object, one CommitSegment.
 type segment struct {
 	id       uint64
-	batches  []*pbatch
+	batches  []*partitionBatch
 	key      string
 	data     []byte
-	state    segState
+	state    segmentState
 	req      core.RequestID
 	gen      core.TimerVersion
 	attempts int
@@ -85,7 +85,7 @@ func (s *segment) dataBytes() int {
 
 // addBatch appends an admitted batch. The first batch arms a fixed
 // BatchWindow timer per decision 35, and a cap may seal earlier.
-func (b *Broker) addBatch(pb *pbatch) []core.Action {
+func (b *Broker) addBatch(pb *partitionBatch) []core.Action {
 	var acts []core.Action
 	before := b.open.bytes
 	b.open.batches = append(b.open.batches, pb)
@@ -100,22 +100,22 @@ func (b *Broker) addBatch(pb *pbatch) []core.Action {
 	if first {
 		b.open.since = b.now
 	}
-	if first || b.cfg.Bug == BugTimerFromLastBatch {
+	if first || b.cfg.InjectedBug == InjectedBugTimerFromLastBatch {
 		b.timerGen++
 		b.open.gen = b.timerGen
 		acts = append(acts, core.SetTimer{ID: timerFlush, Gen: b.timerGen, After: b.cfg.BatchWindow})
 	}
 	sizeBytes := b.open.bytes
-	if b.cfg.Bug == BugSealOffByOne {
+	if b.cfg.InjectedBug == InjectedBugSealOffByOne {
 		sizeBytes = before
 	}
 	switch {
 	case sizeBytes >= b.cfg.MaxSegmentBytes:
-		return append(acts, b.seal(sealSize)...)
-	case len(b.open.parts) >= b.cfg.MaxSegmentPartitions && b.cfg.Bug != BugNoPartitionCap:
-		return append(acts, b.seal(sealPartitions)...)
-	case len(b.open.batches) >= b.cfg.MaxSegmentBatches && b.cfg.Bug != BugNoBatchCap:
-		return append(acts, b.seal(sealBatches)...)
+		return append(acts, b.seal(closeOnSize)...)
+	case len(b.open.parts) >= b.cfg.MaxSegmentPartitions && b.cfg.InjectedBug != InjectedBugNoPartitionCap:
+		return append(acts, b.seal(closeOnPartitions)...)
+	case len(b.open.batches) >= b.cfg.MaxSegmentBatches && b.cfg.InjectedBug != InjectedBugNoBatchCap:
+		return append(acts, b.seal(closeOnBatches)...)
 	}
 	return acts
 }
@@ -127,19 +127,19 @@ func (b *Broker) seal(why string) []core.Action {
 	}
 	bs := b.open.batches
 	switch why {
-	case sealSize:
+	case closeOnSize:
 		b.env.Reachable("broker: segment sealed by size")
 		if len(bs) == 1 {
 			b.env.Reachable("broker: oversize batch sealed alone")
 		}
-	case sealTimer:
+	case closeOnTimer:
 		b.env.Reachable("broker: segment sealed by timer")
-	case sealBatches:
+	case closeOnBatches:
 		b.env.Reachable("broker: segment sealed by batch cap")
-	case sealPartitions:
+	case closeOnPartitions:
 		b.env.Reachable("broker: segment sealed by partition cap")
 	}
-	acts := []core.Action{core.CancelTimer{ID: timerFlush}, emit("segment_sealed",
+	acts := []core.Action{core.CancelTimer{ID: timerFlush}, recordFact("segment_sealed",
 		core.Field{Key: "reason", Value: core.Str(why)},
 		core.Field{Key: "bytes", Value: core.I64(b.open.bytes)},
 		core.Field{Key: "batches", Value: core.I64(len(bs))},
@@ -152,7 +152,7 @@ func (b *Broker) seal(why string) []core.Action {
 	return append(acts, b.sealBatches(bs)...)
 }
 
-func (b *Broker) sealBatches(bs []*pbatch) []core.Action {
+func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
 	fb := make([]format.Batch, len(bs))
 	for i, pb := range bs {
 		fb[i] = format.Batch{TP: pb.tp, Records: uint32(pb.records), Data: pb.data}
@@ -175,7 +175,7 @@ func (b *Broker) sealBatches(bs []*pbatch) []core.Action {
 }
 
 func (b *Broker) put(s *segment) []core.Action {
-	s.state, s.req = segPut, b.req()
+	s.state, s.req = segmentUpload, b.req()
 	return []core.Action{core.ObjectPut{Req: s.req, Key: s.key, Data: s.data}}
 }
 
@@ -187,13 +187,13 @@ func (b *Broker) onPutDone(s *segment, e core.ObjectPutDone) []core.Action {
 		return b.retryPut(s)
 	}
 	attempts := s.attempts + 1
-	s.state, s.req, s.attempts, s.putDoneAt = segPutDone, 0, 0, b.now
-	acts := []core.Action{emit("segment_put_done",
+	s.state, s.req, s.attempts, s.putDoneAt = segmentUploadDone, 0, 0, b.now
+	acts := []core.Action{recordFact("segment_put_done",
 		core.Field{Key: "segment", Value: core.Str(s.key)},
 		core.Field{Key: "bytes", Value: core.I64(len(s.data))},
 		core.Field{Key: "put_ns", Value: core.I64(b.now - s.sealedAt)},
 		core.Field{Key: "attempts", Value: core.I64(attempts)})}
-	if b.cfg.Bug == BugEarlyAck {
+	if b.cfg.InjectedBug == InjectedBugEarlyAck {
 		for _, pb := range s.batches {
 			b.guess += uint64(pb.records)
 			b.answerPart(pb, errNone, core.BatchRange{TP: pb.tp, Base: core.Offset(b.guess) - core.Offset(pb.records), Count: pb.records}, s.key)
@@ -205,14 +205,14 @@ func (b *Broker) onPutDone(s *segment, e core.ObjectPutDone) []core.Action {
 // pump starts the commit of the head segment once it is uploaded. Only the
 // head commits, so segments reach the control plane in seal order.
 func (b *Broker) pump() []core.Action {
-	if len(b.segs) == 0 || b.segs[0].state != segPutDone {
+	if len(b.segs) == 0 || b.segs[0].state != segmentUploadDone {
 		return nil
 	}
 	return b.commit(b.segs[0])
 }
 
 func (b *Broker) commit(s *segment) []core.Action {
-	s.state, s.req = segCommit, b.req()
+	s.state, s.req = segmentCommit, b.req()
 	if !s.commitStarted {
 		s.commitStarted, s.commitAt = true, b.now
 	}
@@ -221,7 +221,7 @@ func (b *Broker) commit(s *segment) []core.Action {
 		pend[i] = core.PendingBatch{TP: pb.tp, Records: pb.records, Loc: pb.loc}
 	}
 	key := s.key
-	if b.cfg.Bug == BugFreshKeyOnRetry && s.attempts > 0 {
+	if b.cfg.InjectedBug == InjectedBugFreshKeyOnRetry && s.attempts > 0 {
 		key = format.SegmentKey(b.env.NewID())
 	}
 	return []core.Action{core.ControlPlaneCall{Req: s.req, Op: core.CommitSegment{
@@ -266,7 +266,7 @@ func (b *Broker) onCommit(s *segment, e core.ControlPlaneDone) []core.Action {
 // Timing is in nanoseconds. put plus wait plus commit equals total. wait is
 // the time the uploaded segment queued behind earlier segments' commits.
 func (b *Broker) committed(s *segment, rs []core.BatchRange) []core.Action {
-	acts := []core.Action{emit("segment_committed",
+	acts := []core.Action{recordFact("segment_committed",
 		core.Field{Key: "segment", Value: core.Str(s.key)},
 		core.Field{Key: "batches", Value: core.I64(len(s.batches))},
 		core.Field{Key: "bytes", Value: core.I64(len(s.data))},
@@ -301,8 +301,8 @@ func (b *Broker) endSegment(s *segment) []core.Action {
 }
 
 // failSegment answers every unanswered batch of s with code.
-func (b *Broker) failSegment(s *segment, code kafkaCode) []core.Action {
-	acts := []core.Action{emit("segment_failed",
+func (b *Broker) failSegment(s *segment, code kafkaErrorCode) []core.Action {
+	acts := []core.Action{recordFact("segment_failed",
 		core.Field{Key: "segment", Value: core.Str(s.key)},
 		core.Field{Key: "code", Value: core.I64(int64(code))},
 		core.Field{Key: "total_ns", Value: core.I64(b.now - s.sealedAt)},
@@ -321,7 +321,7 @@ func (b *Broker) retryPut(s *segment) []core.Action {
 		b.env.Reachable("broker: segment retries exhausted")
 		return b.failSegment(s, errRequestTimedOut)
 	}
-	s.state, s.req = segPutBackoff, 0
+	s.state, s.req = segmentUploadRetry, 0
 	t, g := b.timer(core.TimerID(s.id), s.attempts)
 	s.gen = g
 	return []core.Action{t}
@@ -346,7 +346,7 @@ func (b *Broker) retryCommit(s *segment) []core.Action {
 	d = min(d, b.cfg.CommitRetryMax)
 	d = d/2 + core.Duration(b.env.Intn(int(d/2)+1)) // jitter in [d/2, d]
 	d = min(d, left)
-	s.state, s.req = segCommitBackoff, 0
+	s.state, s.req = segmentCommitRetry, 0
 	b.timerGen++
 	s.gen = b.timerGen
 	return []core.Action{core.SetTimer{ID: core.TimerID(s.id), Gen: b.timerGen, After: d}}
@@ -357,9 +357,9 @@ func (b *Broker) segTimer(s *segment, gen core.TimerVersion) []core.Action {
 		return nil
 	}
 	switch s.state {
-	case segPutBackoff:
+	case segmentUploadRetry:
 		return b.put(s)
-	case segCommitBackoff:
+	case segmentCommitRetry:
 		b.env.Reachable("broker: commit retried")
 		return b.commit(s)
 	}
@@ -369,7 +369,7 @@ func (b *Broker) segTimer(s *segment, gen core.TimerVersion) []core.Action {
 // answerPart answers pb once, with code or, on errNone, with success at range
 // r of segment key. A success also records the "produce_acked" fact that
 // drain emits right before the Send (decision 12).
-func (b *Broker) answerPart(pb *pbatch, code kafkaCode, r core.BatchRange, key string) {
+func (b *Broker) answerPart(pb *partitionBatch, code kafkaErrorCode, r core.BatchRange, key string) {
 	if pb.answered {
 		return
 	}

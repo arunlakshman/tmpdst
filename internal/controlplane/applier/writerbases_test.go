@@ -12,7 +12,7 @@ func TestCommitWithWriterBases(t *testing.T) {
 	op := core.CommitSegment{
 		SegmentKey: "seg/1",
 		Batches: []core.PendingBatch{
-			{TP: core.TopicPartitionKey("t", 0), Records: 3, Loc: core.SegmentRef{Key: "o", Off: 0, Len: 1}},
+			{TP: core.NewTopicPartition("t", 0), Records: 3, Loc: core.SegmentRef{Key: "o", Off: 0, Len: 1}},
 		},
 	}
 	d := a.Apply(1, applier.Entry{
@@ -26,7 +26,7 @@ func TestCommitWithWriterBases(t *testing.T) {
 	if len(resp.Assigned) != 1 || resp.Assigned[0].Base != 5 || resp.Assigned[0].Count != 3 {
 		t.Fatalf("%+v", resp)
 	}
-	if a.End(core.TopicPartitionKey("t", 0)) != 8 {
-		t.Fatal(a.End(core.TopicPartitionKey("t", 0)))
+	if a.End(core.NewTopicPartition("t", 0)) != 8 {
+		t.Fatal(a.End(core.NewTopicPartition("t", 0)))
 	}
 }

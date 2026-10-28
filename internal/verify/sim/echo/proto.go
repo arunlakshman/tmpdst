@@ -22,7 +22,7 @@ const maxFrame = 1 << 20
 // Topic and partition of the one log the echo broker writes.
 const Topic = "echo"
 
-func tp() core.TopicPartition { return core.TopicPartitionKey(Topic, 0) }
+func tp() core.TopicPartition { return core.NewTopicPartition(Topic, 0) }
 
 func appendFrame(dst []byte, body string) []byte {
 	dst = binary.BigEndian.AppendUint32(dst, uint32(len(body)))

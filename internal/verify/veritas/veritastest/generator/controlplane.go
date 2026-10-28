@@ -125,7 +125,7 @@ func genInvalidCommit(p Profile, r *veritastest.Rand) core.CommitSegment {
 }
 
 func genLookup(p Profile, r *veritastest.Rand) core.FindSegments {
-	tp := core.TopicPartitionKey(pick(r, p.Topics), int32(r.Intn(p.PartitionCount)))
+	tp := core.NewTopicPartition(pick(r, p.Topics), int32(r.Intn(p.PartitionCount)))
 	from := int64(r.Intn(p.LookupShortSpan))
 	if percent(r, p.LookupLongPercent) {
 		from = int64(r.Intn(p.LookupLongSpan))
@@ -190,7 +190,7 @@ func shapeSeed(shape string) uint64 {
 func genBatch(p Profile, r *veritastest.Rand, segmentKey string) core.PendingBatch {
 	topics := p.Topics[:min(p.BatchTopics, len(p.Topics))]
 	return core.PendingBatch{
-		TP:      core.TopicPartitionKey(pick(r, topics), int32(r.Intn(p.BatchPartitions))),
+		TP:      core.NewTopicPartition(pick(r, topics), int32(r.Intn(p.BatchPartitions))),
 		Records: 1 + int64(r.Intn(3)),
 		Loc:     core.SegmentRef{Key: segmentKey, Off: int64(r.Intn(4)) * 100, Len: int64(1 + r.Intn(3)*50)},
 	}
@@ -288,10 +288,10 @@ func shrinkLookup(l core.FindSegments) []core.ControlPlaneOperation {
 		out = append(out, core.FindSegments{TP: l.TP, From: l.From / 2, MaxBytes: l.MaxBytes})
 	}
 	if l.TP.Partition > 0 {
-		out = append(out, core.FindSegments{TP: core.TopicPartitionKey(l.TP.Topic, 0), From: l.From, MaxBytes: l.MaxBytes})
+		out = append(out, core.FindSegments{TP: core.NewTopicPartition(l.TP.Topic, 0), From: l.From, MaxBytes: l.MaxBytes})
 	}
 	for _, t := range shorterStrings(l.TP.Topic) {
-		out = append(out, core.FindSegments{TP: core.TopicPartitionKey(t, l.TP.Partition), From: l.From, MaxBytes: l.MaxBytes})
+		out = append(out, core.FindSegments{TP: core.NewTopicPartition(t, l.TP.Partition), From: l.From, MaxBytes: l.MaxBytes})
 	}
 	return out
 }

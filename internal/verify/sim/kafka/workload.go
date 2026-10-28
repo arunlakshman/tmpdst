@@ -52,7 +52,7 @@ func (o Opts) tps() []core.TopicPartition {
 	var out []core.TopicPartition
 	for _, t := range o.Topics {
 		for p := int32(0); p < o.Partitions; p++ {
-			out = append(out, core.TopicPartitionKey(t, p))
+			out = append(out, core.NewTopicPartition(t, p))
 		}
 	}
 	return out

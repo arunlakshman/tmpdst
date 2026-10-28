@@ -18,7 +18,7 @@ func (b *Broker) produce(s *slot, r *kmsg.ProduceRequest) []core.Action {
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
 			rp := &resp.Topics[i].Partitions[j]
-			tp := core.TopicPartitionKey(t.Topic, p.Partition)
+			tp := core.NewTopicPartition(t.Topic, p.Partition)
 			pb, code := b.admit(s, r, tp, p.Records, rp)
 			if code != errNone {
 				rp.ErrorCode = int16(code)
@@ -49,7 +49,7 @@ func produceSkeleton(r *kmsg.ProduceRequest) *kmsg.ProduceResponse {
 
 // admit validates one partition's payload and returns the batch to buffer, or
 // the Kafka error code that answers the partition.
-func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, raw []byte, rp *kmsg.ProduceResponseTopicPartition) (*pbatch, kafkaCode) {
+func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, raw []byte, rp *kmsg.ProduceResponseTopicPartition) (*partitionBatch, kafkaErrorCode) {
 	switch {
 	case r.Acks != 0 && r.Acks != 1 && r.Acks != -1:
 		return nil, errInvalidRequiredAcks
@@ -67,7 +67,7 @@ func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, 
 		return nil, code
 	}
 	b.reachCodec(bt.Codec())
-	return &pbatch{s: s, part: rp, tp: tp, data: one, records: int64(bt.NumRecords)}, errNone
+	return &partitionBatch{s: s, part: rp, tp: tp, data: one, records: int64(bt.NumRecords)}, errNone
 }
 
 // checkBatch validates one batch's header without decompressing it
@@ -75,7 +75,7 @@ func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, 
 // codec, no transaction or control flags, a record count that matches
 // lastOffsetDelta, and no producer id (decision 41). The payload stays opaque;
 // the broker only ever relies on the header count.
-func (b *Broker) checkBatch(one []byte) (kwire.Batch, kafkaCode) {
+func (b *Broker) checkBatch(one []byte) (kwire.Batch, kafkaErrorCode) {
 	bt, err := b.parseProduceBatch(one)
 	if err != nil {
 		return bt, b.batchParseCode(err)
@@ -84,13 +84,13 @@ func (b *Broker) checkBatch(one []byte) (kwire.Batch, kafkaCode) {
 }
 
 func (b *Broker) parseProduceBatch(one []byte) (kwire.Batch, error) {
-	if b.cfg.Bug == BugSkipProduceCRC {
+	if b.cfg.InjectedBug == InjectedBugSkipProduceCRC {
 		return kwire.ParseBatchUnverified(one)
 	}
 	return kwire.ParseBatch(one)
 }
 
-func (b *Broker) batchParseCode(err error) kafkaCode {
+func (b *Broker) batchParseCode(err error) kafkaErrorCode {
 	switch {
 	case errors.Is(err, kwire.ErrUnknownCodec):
 		return errUnsupportedCompress
@@ -102,7 +102,7 @@ func (b *Broker) batchParseCode(err error) kafkaCode {
 	}
 }
 
-func (b *Broker) batchPolicy(bt kwire.Batch) kafkaCode {
+func (b *Broker) batchPolicy(bt kwire.Batch) kafkaErrorCode {
 	switch {
 	case bt.IsTransactional() || bt.IsControl():
 		return errInvalidRequest

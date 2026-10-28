@@ -188,7 +188,7 @@ func TestHoleFillSkipMutantAdvancesWithoutAppend(t *testing.T) {
 	m, env := newMachineEnv(t, machine.Config{
 		CatchUpEvery: core.Millisecond,
 		HoleAfter:    0,
-		Bug:          machine.BugHoleSkip,
+		InjectedBug:  machine.InjectedBugHoleSkip,
 		Writer:       "w",
 	})
 	acts := step(m, core.NodeStarted{})

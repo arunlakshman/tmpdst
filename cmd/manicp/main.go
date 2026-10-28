@@ -167,8 +167,8 @@ func openNode(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *slo
 	var err error
 	switch f.kind {
 	case "mem":
-		logStore = exec.NewMemLog()
-		objs = exec.NewMemObjects()
+		logStore = exec.NewMemoryLog()
+		objs = exec.NewMemoryObjects()
 		closeStore = nop
 	case kindLog:
 		logStore, objs, closeStore, err = openDynLog(ctx, d, f, m, log)

@@ -27,8 +27,8 @@ func startNode(t *testing.T, cfg machine.Config) (cpv1.ControlPlaneClient, healt
 	}
 	n := server.New(server.Config{
 		Machine: cfg,
-		Log:     exec.NewMemLog(),
-		Objects: exec.NewMemObjects(),
+		Log:     exec.NewMemoryLog(),
+		Objects: exec.NewMemoryObjects(),
 		Self:    core.NodeInstance{Node: "cp-0"},
 	})
 	ctx := t.Context()
@@ -124,8 +124,8 @@ func TestStandbyCommitUnavailable(t *testing.T) {
 func TestStartCanceledContext(t *testing.T) {
 	n := server.New(server.Config{
 		Machine: machine.Config{K: 4, CatchUpEvery: core.Duration(time.Hour)},
-		Log:     exec.NewMemLog(),
-		Objects: exec.NewMemObjects(),
+		Log:     exec.NewMemoryLog(),
+		Objects: exec.NewMemoryObjects(),
 		Self:    core.NodeInstance{Node: "cp-0"},
 	})
 	ctx, cancel := context.WithCancel(t.Context())
@@ -139,8 +139,8 @@ func TestStartCanceledContext(t *testing.T) {
 func TestStartCancelWhileWaiting(t *testing.T) {
 	n := server.New(server.Config{
 		Machine: machine.Config{K: 4, CatchUpEvery: core.Duration(time.Hour)},
-		Log:     exec.NewMemLog(),
-		Objects: exec.NewMemObjects(),
+		Log:     exec.NewMemoryLog(),
+		Objects: exec.NewMemoryObjects(),
 		Self:    core.NodeInstance{Node: "cp-0"},
 	})
 	ctx, cancel := context.WithCancel(t.Context())

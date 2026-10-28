@@ -14,7 +14,7 @@ func Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
 		return core.OK, core.Applied
 	}
 	maybe := core.NotApplied
-	if mutating(a) {
+	if changesData(a) {
 		maybe = core.MaybeApplied
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -33,7 +33,7 @@ func Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
 	return core.ErrIO, maybe
 }
 
-func mutating(a core.IOCall) bool {
+func changesData(a core.IOCall) bool {
 	switch a.(type) {
 	case core.LogAppend, core.LogDeleteOld, core.ObjectPut, core.ObjectDelete:
 		return true

@@ -5,7 +5,7 @@
 // surfaces as ErrTimeout+MaybeApplied.
 //
 // After CP-DSM-8 the engine is also sim.CPTruth: a reference replay of durable
-// slots through controlplane/machine.ReplaySlot (decision 21 / log replay).
+// slots through controlplane/machine.ReplayPosition (decision 21 / log replay).
 package logstore
 
 import (
@@ -91,7 +91,7 @@ func (e *Engine) advanceRef() {
 			return
 		}
 		slot := e.applied
-		if err := machine.ReplaySlot(e.ref, slot, data); err != nil {
+		if err := machine.ReplayPosition(e.ref, slot, data); err != nil {
 			// Foreign / test payloads are durable bytes but not CP entries.
 			e.applied++
 			e.gen++

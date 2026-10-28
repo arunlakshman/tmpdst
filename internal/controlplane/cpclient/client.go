@@ -186,7 +186,7 @@ func (c *Client) failover(ctx context.Context, name string, fn func(context.Cont
 	for i := range n {
 		idx := (start + i) % n
 		err = c.doAt(ctx, c.addrs[idx], idx, name, fn)
-		if !shouldFailover(ctx, err) {
+		if !shouldTryOtherNode(ctx, err) {
 			if i > 0 && err == nil {
 				c.cur.Store(int32(idx))
 			}
@@ -196,7 +196,7 @@ func (c *Client) failover(ctx context.Context, name string, fn func(context.Cont
 	return err
 }
 
-func shouldFailover(ctx context.Context, err error) bool {
+func shouldTryOtherNode(ctx context.Context, err error) bool {
 	if err == nil || ctx.Err() != nil {
 		return false
 	}
@@ -219,7 +219,7 @@ func (c *Client) doAt(ctx context.Context, addr string, idx int, name string, fn
 	if err == nil {
 		return nil
 	}
-	return mapRPCErr(name, err)
+	return convertRPCError(name, err)
 }
 
 func (c *Client) conn(ctx context.Context, addr string, idx int) (*grpc.ClientConn, error) {
@@ -237,7 +237,7 @@ func (c *Client) conn(ctx context.Context, addr string, idx int) (*grpc.ClientCo
 	return conn, nil
 }
 
-func mapRPCErr(name string, err error) error {
+func convertRPCError(name string, err error) error {
 	st, ok := status.FromError(err)
 	if !ok {
 		return &CallError{Op: name, Sent: true, Err: err}

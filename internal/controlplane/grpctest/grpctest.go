@@ -31,7 +31,7 @@ func StartMem(t testing.TB) *Node {
 	return Start(t, machine.Config{
 		K: 4, CatchUpEvery: core.Duration(time.Millisecond),
 		Rank: 0, Heartbeat: core.Duration(time.Second),
-	}, exec.NewMemLog(), exec.NewMemObjects())
+	}, exec.NewMemoryLog(), exec.NewMemoryObjects())
 }
 
 // Start boots a node with the given machine config and stores.

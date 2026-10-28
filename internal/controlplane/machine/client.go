@@ -10,7 +10,7 @@ import (
 func (m *Machine) onCPOffer(o core.ControlPlaneDeliver) []core.Action {
 	switch op := o.Op.(type) {
 	case core.CommitSegment:
-		return m.withReplies(m.Offer(ClientOp{
+		return m.withReplies(m.Offer(ClientOperation{
 			Req: o.Req, From: o.From,
 			Cmd: applier.Entry{Kind: applier.KindCommit, Commit: op},
 		}))
@@ -42,7 +42,7 @@ func (m *Machine) readFold(req core.RequestID, fn func() (core.ControlPlaneDone,
 // withReplies turns answers that have a broker From into ControlPlaneReply actions.
 // Unit-test Offers without From stay in m.answers for TakeAnswers.
 func (m *Machine) withReplies(acts []core.Action) []core.Action {
-	var kept []Answer
+	var kept []ReplyToClient
 	for _, a := range m.answers {
 		if a.From.Node == "" {
 			kept = append(kept, a)

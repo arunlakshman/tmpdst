@@ -26,7 +26,7 @@ func realClient(t *testing.T) *Client {
 			K: 4, CatchUpEvery: core.Duration(time.Millisecond),
 			Rank: 0, Heartbeat: core.Duration(time.Second),
 		},
-		Log: exec.NewMemLog(), Objects: exec.NewMemObjects(),
+		Log: exec.NewMemoryLog(), Objects: exec.NewMemoryObjects(),
 		Self: core.NodeInstance{Node: "cp-0"},
 	})
 	if err := n.Start(t.Context()); err != nil {
@@ -165,13 +165,13 @@ func TestMapRPCErrDetail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := mapRPCErr("CommitSegment", st.Err())
+	got := convertRPCError("CommitSegment", st.Err())
 	var be *Error
 	if !errors.As(got, &be) || be.Code != core.ErrConflict {
 		t.Fatalf("got %v", got)
 	}
-	if ce, ok := errors.AsType[*CallError](mapRPCErr("x", errors.New("plain"))); !ok || !ce.Sent {
-		t.Fatalf("plain: %v", mapRPCErr("x", errors.New("plain")))
+	if ce, ok := errors.AsType[*CallError](convertRPCError("x", errors.New("plain"))); !ok || !ce.Sent {
+		t.Fatalf("plain: %v", convertRPCError("x", errors.New("plain")))
 	}
 	for _, tc := range []struct {
 		code codes.Code
@@ -182,18 +182,18 @@ func TestMapRPCErrDetail(t *testing.T) {
 		{codes.NotFound, core.ErrNotFound},
 		{codes.AlreadyExists, core.ErrConflict},
 	} {
-		got := mapRPCErr("op", status.Error(tc.code, "x"))
+		got := convertRPCError("op", status.Error(tc.code, "x"))
 		be, ok := errors.AsType[*Error](got)
 		if !ok || be.Code != tc.want {
 			t.Fatalf("%v: %v", tc.code, got)
 		}
 	}
-	got = mapRPCErr("op", status.Error(codes.DeadlineExceeded, "late"))
+	got = convertRPCError("op", status.Error(codes.DeadlineExceeded, "late"))
 	ce, ok := errors.AsType[*CallError](got)
 	if !ok || ce.Code != codes.DeadlineExceeded {
 		t.Fatalf("deadline: %v", got)
 	}
-	got = mapRPCErr("op", status.Error(codes.Internal, "boom"))
+	got = convertRPCError("op", status.Error(codes.Internal, "boom"))
 	if _, ok := errors.AsType[*CallError](got); !ok {
 		t.Fatalf("internal: %v", got)
 	}

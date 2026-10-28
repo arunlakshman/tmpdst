@@ -56,8 +56,8 @@ func newLogStack(t *testing.T, brokers int) *logStack {
 	if _, err := db.CreateTable(t.Context(), &dynamodb.CreateTableInput{TableName: aws.String("cp")}); err != nil {
 		t.Fatal(err)
 	}
-	log := exec.NewDynLog(db, "cp", exec.DynLogOptions{})
-	objs := exec.NewMemObjects()
+	log := exec.NewDynamoLog(db, "cp", exec.DynamoLogOptions{})
+	objs := exec.NewMemoryObjects()
 	ls := &logStack{}
 	var addrs []string
 	for rank := range 3 {

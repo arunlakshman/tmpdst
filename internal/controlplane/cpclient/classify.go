@@ -23,7 +23,7 @@ type Classifier struct{}
 
 var _ sys.Classifier = Classifier{}
 
-func mutating(a core.IOCall) bool {
+func changesData(a core.IOCall) bool {
 	call, ok := a.(core.ControlPlaneCall)
 	if !ok {
 		return true
@@ -44,7 +44,7 @@ func (Classifier) Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome
 
 func classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
 	maybe := core.NotApplied
-	if mutating(a) {
+	if changesData(a) {
 		maybe = core.MaybeApplied
 	}
 	if be, ok := errors.AsType[*Error](err); ok {
@@ -60,7 +60,7 @@ func classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return core.ErrTimeout, maybe
 	}
-	return timeoutOrIO(err), maybe
+	return isTimeoutOrIOError(err), maybe
 }
 
 func classifyCall(ce *CallError, maybe core.Outcome) (core.ErrCode, core.Outcome) {
@@ -72,19 +72,19 @@ func classifyCall(ce *CallError, maybe core.Outcome) (core.ErrCode, core.Outcome
 	case ce.Code == codes.Canceled || ce.Code == codes.DeadlineExceeded:
 		return core.ErrTimeout, maybe
 	case !ce.Sent:
-		return classifyNotSent(ce.Err), core.NotApplied
+		return classifyBeforeSend(ce.Err), core.NotApplied
 	}
-	return timeoutOrIO(ce.Err), maybe
+	return isTimeoutOrIOError(ce.Err), maybe
 }
 
-func classifyNotSent(err error) core.ErrCode {
+func classifyBeforeSend(err error) core.ErrCode {
 	if isDial(err) {
 		return core.ErrUnavailable
 	}
-	return timeoutOrIO(err)
+	return isTimeoutOrIOError(err)
 }
 
-func timeoutOrIO(err error) core.ErrCode {
+func isTimeoutOrIOError(err error) core.ErrCode {
 	var ne net.Error
 	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
 		return core.ErrTimeout

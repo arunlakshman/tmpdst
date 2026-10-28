@@ -59,8 +59,8 @@ func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
 }
 
 type logDB interface {
-	exec.DB
-	exec.TableAdmin
+	exec.DynamoClient
+	exec.TableManager
 }
 
 type deps struct {
@@ -106,12 +106,12 @@ func openDynLog(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *s
 	}
 	table := f.log.tableName(f.prefix)
 	if f.create {
-		if err := exec.CreateTable(ctx, db, table); err != nil {
+		if err := exec.CreateDynamoTable(ctx, db, table); err != nil {
 			return nil, nil, nop, err
 		}
 	}
-	lg := exec.NewDynLog(db, table, exec.DynLogOptions{TTL: f.log.logTTL})
-	var objs exec.ObjectStore = exec.NewMemObjects()
+	lg := exec.NewDynamoLog(db, table, exec.DynamoLogOptions{TTL: f.log.logTTL})
+	var objs exec.ObjectStore = exec.NewMemoryObjects()
 	if f.log.ckptBucket != "" {
 		store, err := d.objects(ctx, f)
 		if err != nil {

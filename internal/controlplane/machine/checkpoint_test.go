@@ -12,7 +12,7 @@ import (
 func TestRestoreOnStartedThenReady(t *testing.T) {
 	// Build a snapshot at slot 2 with one commit applied.
 	src := newMachine(t, machine.Config{K: 1, Writer: "w"})
-	ap := onlyAppend(t, src.Offer(machine.ClientOp{Req: 1, Cmd: commitCmd("seg", 3)}))
+	ap := onlyAppend(t, src.Offer(machine.ClientOperation{Req: 1, Cmd: commitCmd("seg", 3)}))
 	step(src, core.LogAppendDone{Req: ap.Req, Slot: ap.Slot, Err: core.OK, Outcome: core.Applied})
 	if src.Applied() != 1 {
 		t.Fatalf("Applied = %d, want 1", src.Applied())
@@ -83,7 +83,7 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 		t.Fatalf("ready=%v active=%v", m.Ready(), m.IsActive())
 	}
 	// Commit one slot so applied=1.
-	ap := onlyAppend(t, m.Offer(machine.ClientOp{Req: 1, Cmd: commitCmd("c", 1)}))
+	ap := onlyAppend(t, m.Offer(machine.ClientOperation{Req: 1, Cmd: commitCmd("c", 1)}))
 	step(m, core.LogAppendDone{Req: ap.Req, Slot: ap.Slot, Err: core.OK, Outcome: core.Applied})
 	if m.Applied() != 1 {
 		t.Fatalf("Applied = %d, want 1", m.Applied())
@@ -114,9 +114,9 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 	}
 
 	// Apply more slots and checkpoint again so trim fires.
-	ap2 := onlyAppend(t, m.Offer(machine.ClientOp{Req: 2, Cmd: commitCmd("d", 1)}))
+	ap2 := onlyAppend(t, m.Offer(machine.ClientOperation{Req: 2, Cmd: commitCmd("d", 1)}))
 	step(m, core.LogAppendDone{Req: ap2.Req, Slot: ap2.Slot, Err: core.OK, Outcome: core.Applied})
-	ap3 := onlyAppend(t, m.Offer(machine.ClientOp{Req: 3, Cmd: commitCmd("e", 1)}))
+	ap3 := onlyAppend(t, m.Offer(machine.ClientOperation{Req: 3, Cmd: commitCmd("e", 1)}))
 	step(m, core.LogAppendDone{Req: ap3.Req, Slot: ap3.Slot, Err: core.OK, Outcome: core.Applied})
 	if m.Applied() != 3 {
 		t.Fatalf("Applied = %d, want 3", m.Applied())

@@ -7,10 +7,10 @@ import (
 	"manifester/internal/core"
 )
 
-// ReplaySlot folds one durable log entry into fold. Used for CPTruth (reference
-// replay of the Dynamo log). Client waiters and BugWriterOffsets stamps are
+// ReplayPosition folds one durable log entry into fold. Used for CPTruth (reference
+// replay of the Dynamo log). Client waiters and InjectedBugWriterOffsets stamps are
 // ignored: truth assigns offsets at apply time like a cold replica.
-func ReplaySlot(fold *applier.StateUpdater, slot core.LogPosition, data []byte) error {
+func ReplayPosition(fold *applier.StateUpdater, slot core.LogPosition, data []byte) error {
 	_, _, payload, ok := unwrap(data)
 	if !ok {
 		return fmt.Errorf("machine: truncated log envelope at slot %d", slot)

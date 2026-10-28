@@ -11,15 +11,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 )
 
-// TableAdmin is the part of the DynamoDB client CreateTable uses.
-type TableAdmin interface {
+// TableManager is the part of the DynamoDB client CreateTable uses.
+type TableManager interface {
 	CreateTable(ctx context.Context, in *dynamodb.CreateTableInput, opts ...func(*dynamodb.Options)) (*dynamodb.CreateTableOutput, error)
 	DescribeTable(ctx context.Context, in *dynamodb.DescribeTableInput, opts ...func(*dynamodb.Options)) (*dynamodb.DescribeTableOutput, error)
 }
 
-// CreateTable creates the table (string keys pk and sk, pay-per-request) and
+// CreateDynamoTable creates the table (string keys pk and sk, pay-per-request) and
 // waits for it to be active. An existing table is left alone.
-func CreateTable(ctx context.Context, db TableAdmin, table string) error {
+func CreateDynamoTable(ctx context.Context, db TableManager, table string) error {
 	_, err := db.CreateTable(ctx, &dynamodb.CreateTableInput{
 		TableName: &table,
 		AttributeDefinitions: []types.AttributeDefinition{

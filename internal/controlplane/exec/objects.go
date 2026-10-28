@@ -16,19 +16,19 @@ type ObjectStore interface {
 	List(ctx context.Context, prefix string) ([]string, error)
 }
 
-// MemObjects is an in-memory ObjectStore.
-type MemObjects struct {
+// MemoryObjects is an in-memory ObjectStore.
+type MemoryObjects struct {
 	mu   sync.Mutex
 	data map[string][]byte
 }
 
-// NewMemObjects returns an empty object store.
-func NewMemObjects() *MemObjects {
-	return &MemObjects{data: map[string][]byte{}}
+// NewMemoryObjects returns an empty object store.
+func NewMemoryObjects() *MemoryObjects {
+	return &MemoryObjects{data: map[string][]byte{}}
 }
 
 // Put implements ObjectStore.
-func (o *MemObjects) Put(_ context.Context, key string, data []byte) error {
+func (o *MemoryObjects) Put(_ context.Context, key string, data []byte) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.data[key] = append([]byte(nil), data...)
@@ -36,7 +36,7 @@ func (o *MemObjects) Put(_ context.Context, key string, data []byte) error {
 }
 
 // Get implements ObjectStore.
-func (o *MemObjects) Get(_ context.Context, ref core.SegmentRef) ([]byte, error) {
+func (o *MemoryObjects) Get(_ context.Context, ref core.SegmentRef) ([]byte, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	b, ok := o.data[ref.Key]
@@ -54,7 +54,7 @@ func (o *MemObjects) Get(_ context.Context, ref core.SegmentRef) ([]byte, error)
 }
 
 // Delete implements ObjectStore.
-func (o *MemObjects) Delete(_ context.Context, key string) error {
+func (o *MemoryObjects) Delete(_ context.Context, key string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	delete(o.data, key)
@@ -62,7 +62,7 @@ func (o *MemObjects) Delete(_ context.Context, key string) error {
 }
 
 // List implements ObjectStore.
-func (o *MemObjects) List(_ context.Context, prefix string) ([]string, error) {
+func (o *MemoryObjects) List(_ context.Context, prefix string) ([]string, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	var out []string

@@ -58,13 +58,13 @@ func New(cfg Config) *Node {
 		cfg.Self = core.NodeInstance{Node: "cp"}
 	}
 	if cfg.Clock == nil {
-		cfg.Clock = wallClock{}
+		cfg.Clock = realClock{}
 	}
 	if cfg.Env == nil {
-		cfg.Env = &prodEnv{}
+		cfg.Env = &productionEnvironment{}
 	}
 	if cfg.Log == nil {
-		cfg.Log = exec.NewMemLog()
+		cfg.Log = exec.NewMemoryLog()
 	}
 	if cfg.StopGrace <= 0 {
 		cfg.StopGrace = core.Duration(15e9) // 15s
@@ -220,7 +220,7 @@ func (n *Node) offer(ctx context.Context, cmd applier.Entry) (core.ControlPlaneD
 	}()
 
 	err := n.onLoop(ctx, func(m *machine.Machine) []core.Action {
-		return m.Offer(machine.ClientOp{Req: req, Cmd: cmd})
+		return m.Offer(machine.ClientOperation{Req: req, Cmd: cmd})
 	})
 	if err != nil {
 		return core.ControlPlaneDone{}, err
@@ -280,12 +280,12 @@ func (n *Node) CommitSegment(ctx context.Context, req *cpv1.CommitSegmentRequest
 	d, err := n.offer(ctx, applier.Entry{Kind: applier.KindCommit, Commit: op})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, rpcError(core.ErrTimeout, core.MaybeApplied)
+			return nil, toRPCError(core.ErrTimeout, core.MaybeApplied)
 		}
-		return nil, rpcError(core.ErrIO, core.MaybeApplied)
+		return nil, toRPCError(core.ErrIO, core.MaybeApplied)
 	}
 	if d.Err != core.OK {
-		return nil, rpcError(d.Err, d.Outcome)
+		return nil, toRPCError(d.Err, d.Outcome)
 	}
 	return apiconv.CommitSegmentRespFromCore(core.ResponseAs[core.CommitSegmentResp](d)), nil
 }
@@ -299,10 +299,10 @@ func (n *Node) Lookup(ctx context.Context, req *cpv1.LookupRequest) (*cpv1.Looku
 		return m.Fold().Lookup(op)
 	})
 	if err != nil {
-		return nil, rpcError(core.ErrIO, core.NotApplied)
+		return nil, toRPCError(core.ErrIO, core.NotApplied)
 	}
 	if d.Err != core.OK {
-		return nil, rpcError(d.Err, d.Outcome)
+		return nil, toRPCError(d.Err, d.Outcome)
 	}
 	return apiconv.LookupRespFromCore(core.ResponseAs[core.FindSegmentsResp](d)), nil
 }
@@ -316,10 +316,10 @@ func (n *Node) DescribeTopics(ctx context.Context, req *cpv1.DescribeTopicsReque
 		return m.Fold().Describe(op)
 	})
 	if err != nil {
-		return nil, rpcError(core.ErrIO, core.NotApplied)
+		return nil, toRPCError(core.ErrIO, core.NotApplied)
 	}
 	if d.Err != core.OK {
-		return nil, rpcError(d.Err, d.Outcome)
+		return nil, toRPCError(d.Err, d.Outcome)
 	}
 	return apiconv.DescribeTopicsRespFromCore(core.ResponseAs[core.DescribeTopicsResp](d)), nil
 }
@@ -327,19 +327,19 @@ func (n *Node) DescribeTopics(ctx context.Context, req *cpv1.DescribeTopicsReque
 // CreateTopic implements ControlPlane.
 func (n *Node) CreateTopic(ctx context.Context, req *cpv1.CreateTopicRequest) (*cpv1.CreateTopicResponse, error) {
 	if req == nil {
-		return nil, rpcError(core.ErrInvalid, core.NotApplied)
+		return nil, toRPCError(core.ErrInvalid, core.NotApplied)
 	}
 	d, err := n.offer(ctx, applier.Entry{
 		Kind: applier.KindCreateTopic, Topic: req.Topic, Parts: req.Partitions,
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, rpcError(core.ErrTimeout, core.MaybeApplied)
+			return nil, toRPCError(core.ErrTimeout, core.MaybeApplied)
 		}
-		return nil, rpcError(core.ErrIO, core.MaybeApplied)
+		return nil, toRPCError(core.ErrIO, core.MaybeApplied)
 	}
 	if d.Err != core.OK {
-		return nil, rpcError(d.Err, d.Outcome)
+		return nil, toRPCError(d.Err, d.Outcome)
 	}
 	return &cpv1.CreateTopicResponse{}, nil
 }
@@ -364,16 +364,16 @@ func (n *Node) GetStatus(ctx context.Context, _ *cpv1.GetStatusRequest) (*cpv1.G
 		return nil
 	})
 	if err != nil {
-		return nil, rpcError(core.ErrIO, core.NotApplied)
+		return nil, toRPCError(core.ErrIO, core.NotApplied)
 	}
 	select {
 	case s := <-ch:
 		if !s.ready {
-			return nil, rpcError(core.ErrUnavailable, core.NotApplied)
+			return nil, toRPCError(core.ErrUnavailable, core.NotApplied)
 		}
 		return &cpv1.GetStatusResponse{Role: s.role, AppliedSlot: s.applied, LogTail: s.logTail}, nil
 	case <-ctx.Done():
-		return nil, rpcError(core.ErrTimeout, core.NotApplied)
+		return nil, toRPCError(core.ErrTimeout, core.NotApplied)
 	}
 }
 

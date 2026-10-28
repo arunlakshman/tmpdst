@@ -31,19 +31,19 @@ func (s *Store) exec(ctx context.Context, op core.ControlPlaneOperation) (core.C
 	return s.spec.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone), nil
 }
 
-func execAs[R any](ctx context.Context, s *Store, op core.ControlPlaneOperation) (R, core.ErrCode, error) {
+func executeAs[R any](ctx context.Context, s *Store, op core.ControlPlaneOperation) (R, core.ErrCode, error) {
 	d, err := s.exec(ctx, op)
 	return core.ResponseAs[R](d), d.Err, err
 }
 
 // CommitSegment implements cp.Store.
 func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
-	return execAs[core.CommitSegmentResp](ctx, s, op)
+	return executeAs[core.CommitSegmentResp](ctx, s, op)
 }
 
 // Lookup implements cp.Store.
 func (s *Store) Lookup(ctx context.Context, op core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error) {
-	return execAs[core.FindSegmentsResp](ctx, s, op)
+	return executeAs[core.FindSegmentsResp](ctx, s, op)
 }
 
 // DescribeTopics implements cp.Store.

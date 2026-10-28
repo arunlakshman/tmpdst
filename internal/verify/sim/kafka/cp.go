@@ -29,7 +29,7 @@ func cpFactory(sc sim.SeedConfig, opts Opts) core.MachineFactory {
 			CkptEvery:      core.Duration(lp.CkptEvery) * lp.Tick,
 			CkptMinSlots:   1,
 			KeepSlots:      int64(lp.KeepSlots),
-			Bug:            lp.Bug,
+			InjectedBug:    lp.Bug,
 			WindowSlots:    int64(lp.WindowSlots),
 			TrimStride:     int64(lp.TrimStride),
 			StallProb:      0, // TODO: re-enable with coordinated dual-replica faults

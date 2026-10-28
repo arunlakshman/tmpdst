@@ -5,7 +5,7 @@ import "manifester/internal/controlplane/applier"
 // Timer IDs for role and checkpoint tests.
 const (
 	TimerRole = timerRole
-	TimerCkpt = timerCkpt
+	TimerCkpt = timerCheckpoint
 )
 
 // DecodeGroup exports group decoding for tests (strips the machine envelope).

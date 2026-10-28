@@ -7,16 +7,16 @@ import (
 )
 
 const (
-	timerCkpt = core.TimerID(4)
+	timerCheckpoint = core.TimerID(4)
 
-	defaultCkptKey = "ckpt/latest"
+	defaultCheckpointKey = "ckpt/latest"
 )
 
 func (m *Machine) ckptKey() string {
 	if m.cfg.CkptKey != "" {
 		return m.cfg.CkptKey
 	}
-	return defaultCkptKey
+	return defaultCheckpointKey
 }
 
 func (m *Machine) ckptEnabled() bool {
@@ -28,7 +28,7 @@ func (m *Machine) armCkpt() []core.Action {
 		return nil
 	}
 	m.ckptGen++
-	return []core.Action{core.SetTimer{ID: timerCkpt, Gen: m.ckptGen, After: m.cfg.CkptEvery}}
+	return []core.Action{core.SetTimer{ID: timerCheckpoint, Gen: m.ckptGen, After: m.cfg.CkptEvery}}
 }
 
 func (m *Machine) onCkptTimer(e core.TimerFired) []core.Action {
@@ -109,7 +109,7 @@ func (m *Machine) armCkptRetry() []core.Action {
 		after = 250 * core.Millisecond
 	}
 	m.ckptGen++
-	return []core.Action{core.SetTimer{ID: timerCkpt, Gen: m.ckptGen, After: after}}
+	return []core.Action{core.SetTimer{ID: timerCheckpoint, Gen: m.ckptGen, After: after}}
 }
 
 func (m *Machine) onObjPutDone(d core.ObjectPutDone) []core.Action {
@@ -155,7 +155,7 @@ func (m *Machine) onTrimDone(d core.LogDeleteOldDone) []core.Action {
 	if d.Err == core.OK && d.Outcome == core.Applied {
 		m.trimFloor = through + 1
 		m.env.Reachable("logcp-sim: log trimmed below a checkpoint")
-		if m.cfg.Bug == BugTrimDelete {
+		if m.cfg.InjectedBug == InjectedBugTrimDelete {
 			m.env.Always(false, "logcp-sim: a Put never wins a slot below the trim floor",
 				core.ContextPair{Key: "through", Value: through})
 		}

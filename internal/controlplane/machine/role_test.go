@@ -45,7 +45,7 @@ func TestStandbyRefuseOfferNoAppend(t *testing.T) {
 	if m.IsActive() {
 		t.Fatal("rank 1 became active at boot")
 	}
-	acts := m.Offer(machine.ClientOp{Req: 1, Cmd: commitCmd("k", 1)})
+	acts := m.Offer(machine.ClientOperation{Req: 1, Cmd: commitCmd("k", 1)})
 	if len(acts) != 0 {
 		t.Fatalf("standby Offer returned %v, want no LogAppend", acts)
 	}

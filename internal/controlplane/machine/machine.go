@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	timerCatchUp  = core.TimerID(1)
-	timerHoleFill = core.TimerID(2)
+	timerCatchUp = core.TimerID(1)
+	timerGapFill = core.TimerID(2)
 )
 
 // Machine is the control-plane DSM. Build it with New.
@@ -55,11 +55,11 @@ type Machine struct {
 	ckptPending core.LogPosition // slot of in-flight ObjectPut snapshot
 	ckptData    []byte
 
-	queue      []pendingCmd               // client ops waiting for a commit slot
-	flights    map[core.RequestID]*flight // in-flight commit LogAppends (at most K)
-	waiters    map[string][]pendingCmd
-	answers    []Answer
-	proj       map[core.TopicPartition]core.Offset // BugWriterOffsets projection
+	queue      []waitingCommand                   // client ops waiting for a commit slot
+	flights    map[core.RequestID]*inFlightAppend // in-flight commit LogAppends (at most K)
+	waiters    map[string][]waitingCommand
+	answers    []ReplyToClient
+	proj       map[core.TopicPartition]core.Offset // InjectedBugWriterOffsets projection
 	trimFloor  core.LogPosition                    // slots below are trimmed
 	stallUntil core.NodeTime
 	downUntil  core.NodeTime
@@ -92,8 +92,8 @@ func New(cfg Config) core.MachineFactory {
 			env: env, self: self, cfg: cfg,
 			fold:    applier.NewMem(),
 			buf:     map[core.LogPosition][]byte{},
-			flights: map[core.RequestID]*flight{},
-			waiters: map[string][]pendingCmd{},
+			flights: map[core.RequestID]*inFlightAppend{},
+			waiters: map[string][]waitingCommand{},
 		}
 	}
 }
@@ -203,7 +203,7 @@ func (m *Machine) onTimer(e core.TimerFired) []core.Action {
 			return nil
 		}
 		return m.emitCheckTail()
-	case timerHoleFill:
+	case timerGapFill:
 		if e.Gen != m.holeGen || !m.holeArmed || m.pending != 0 {
 			return nil
 		}
@@ -214,7 +214,7 @@ func (m *Machine) onTimer(e core.TimerFired) []core.Action {
 		return m.emitHoleFill()
 	case timerRole:
 		return m.onRoleTimer(e)
-	case timerCkpt:
+	case timerCheckpoint:
 		return m.onCkptTimer(e)
 	default:
 		return nil
@@ -268,7 +268,7 @@ func (m *Machine) onAppendDone(d core.LogAppendDone) []core.Action {
 	offered := m.fillData
 	m.pending, m.pendingKind = 0, pendingNone
 	m.fillSlot, m.fillData = 0, nil
-	if isTomb(d) {
+	if isDeleted(d) {
 		// Hole fill landed on a trimmed slot: catch-up cannot rewrite tombs
 		// (docs/log-cp-service.md). Restore from checkpoint and rejoin.
 		return m.hitTrimmed()
@@ -336,35 +336,35 @@ func (m *Machine) holeOpen() bool {
 	return !ok
 }
 
-type holePlan uint8
+type gapPlan uint8
 
 const (
-	holePlanWait holePlan = iota
-	holePlanFill
-	holePlanArm
-	holePlanSkip
+	gapPlanWait gapPlan = iota
+	gapPlanFill
+	gapPlanArm
+	gapPlanSkip
 )
 
-func (m *Machine) holeFillPlan() holePlan {
-	if m.cfg.Bug == BugHoleSkip {
-		return holePlanSkip
+func (m *Machine) holeFillPlan() gapPlan {
+	if m.cfg.InjectedBug == InjectedBugHoleSkip {
+		return gapPlanSkip
 	}
 	if m.cfg.HoleAfter <= 0 {
-		return holePlanFill
+		return gapPlanFill
 	}
 	if m.holeArmed {
-		return holePlanWait
+		return gapPlanWait
 	}
-	return holePlanArm
+	return gapPlanArm
 }
 
 func (m *Machine) maybeHoleFill() []core.Action {
 	switch m.holeFillPlan() {
-	case holePlanSkip:
+	case gapPlanSkip:
 		return m.skipHole()
-	case holePlanFill:
+	case gapPlanFill:
 		return m.emitHoleFill()
-	case holePlanArm:
+	case gapPlanArm:
 		return m.armHoleFill()
 	default:
 		return nil
@@ -383,7 +383,7 @@ func (m *Machine) skipHole() []core.Action {
 func (m *Machine) armHoleFill() []core.Action {
 	m.holeGen++
 	m.holeArmed = true
-	return []core.Action{core.SetTimer{ID: timerHoleFill, Gen: m.holeGen, After: m.cfg.HoleAfter}}
+	return []core.Action{core.SetTimer{ID: timerGapFill, Gen: m.holeGen, After: m.cfg.HoleAfter}}
 }
 
 func (m *Machine) emitHoleFill() []core.Action {

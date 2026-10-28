@@ -18,7 +18,7 @@ import (
 
 func TestMemLogRoundTrip(t *testing.T) {
 	ctx := t.Context()
-	l := exec.NewMemLog()
+	l := exec.NewMemoryLog()
 	if _, taken, err := l.Append(ctx, 0, []byte("a")); err != nil || taken {
 		t.Fatalf("append0: taken=%v err=%v", taken, err)
 	}
@@ -54,7 +54,7 @@ func TestMemLogRoundTrip(t *testing.T) {
 
 func TestMemObjects(t *testing.T) {
 	ctx := t.Context()
-	o := exec.NewMemObjects()
+	o := exec.NewMemoryObjects()
 	if err := o.Put(ctx, "k", []byte("hello")); err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestDynLog(t *testing.T) {
 	if _, err := db.CreateTable(ctx, &dynamodb.CreateTableInput{TableName: aws.String("cp")}); err != nil {
 		t.Fatal(err)
 	}
-	l := exec.NewDynLog(db, "cp", exec.DynLogOptions{TTL: time.Hour, Now: func() time.Time { return time.Unix(1_700_000_000, 0) }})
+	l := exec.NewDynamoLog(db, "cp", exec.DynamoLogOptions{TTL: time.Hour, Now: func() time.Time { return time.Unix(1_700_000_000, 0) }})
 	if _, taken, err := l.Append(ctx, 0, []byte("x")); err != nil || taken {
 		t.Fatalf("append: taken=%v err=%v", taken, err)
 	}
@@ -160,7 +160,7 @@ func TestDynLog(t *testing.T) {
 func TestExecutorIOResults(t *testing.T) {
 	ctx := t.Context()
 	in := run.NewInbox(8)
-	ex := exec.New(ctx, exec.Config{LogTimeout: time.Second, ObjTimeout: time.Second}, exec.NewMemLog(), exec.NewMemObjects(), in)
+	ex := exec.New(ctx, exec.Config{LogTimeout: time.Second, ObjTimeout: time.Second}, exec.NewMemoryLog(), exec.NewMemoryObjects(), in)
 	ex.Execute(core.LogAppend{Req: 1, Slot: 0, Data: []byte("a")})
 	ex.Execute(core.ObjectPut{Req: 2, Key: "k", Data: []byte("v")})
 	ex.Execute(core.LogGetEnd{Req: 3})

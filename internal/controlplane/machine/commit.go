@@ -9,39 +9,39 @@ import (
 	"manifester/internal/core"
 )
 
-// groupMagic prefixes a multi-command commit entry so drain can tell it from a
+// groupMarker prefixes a multi-command commit entry so drain can tell it from a
 // single applier.Encode payload (kinds 0..2).
-const groupMagic byte = 0xC5
+const groupMarker byte = 0xC5
 
-// ClientOp is one client command for the commit queue. Prod injects via
+// ClientOperation is one client command for the commit queue. Prod injects via
 // controlplane/server; sim delivers core.ControlPlaneDeliver which becomes Offer here.
-type ClientOp struct {
+type ClientOperation struct {
 	Req  core.RequestID
 	Cmd  applier.Entry     // ID is assigned when the group is built
 	From core.NodeInstance // broker; empty skips ControlPlaneReply (unit tests)
 }
 
-// Answer is the apply-time result for one ClientOp.Req. TakeAnswers drains them.
-type Answer struct {
+// ReplyToClient is the apply-time result for one ClientOperation.Req. TakeAnswers drains them.
+type ReplyToClient struct {
 	Req  core.RequestID
 	From core.NodeInstance
 	Done core.ControlPlaneDone
 }
 
-// pendingCmd is a queued or in-flight client command.
-type pendingCmd struct {
+// waitingCommand is a queued or in-flight client command.
+type waitingCommand struct {
 	req  core.RequestID
 	from core.NodeInstance // broker; namespaces Req across brokers
 	cmd  applier.Entry
 }
 
-// flight is one in-flight commit LogAppend (one of at most K).
-type flight struct {
+// inFlightAppend is one in-inFlightAppend commit LogAppend (one of at most K).
+type inFlightAppend struct {
 	req  core.RequestID
 	slot core.LogPosition
 	id   string
 	data []byte
-	cmds []pendingCmd
+	cmds []waitingCommand
 }
 
 // Offer enqueues a client command and flushes when an in-flight slot is free.
@@ -52,12 +52,12 @@ type flight struct {
 // (no LogAppend). A retry for a key still queued or in flight retargets that
 // waiter to the new Req/From so a bridge timeout cannot orphan the apply
 // answer onto a dead broker RequestID.
-func (m *Machine) Offer(op ClientOp) []core.Action {
+func (m *Machine) Offer(op ClientOperation) []core.Action {
 	if m.exited {
 		return nil
 	}
 	if m.cfg.K <= 0 || !m.canCommit() {
-		m.answers = append(m.answers, Answer{
+		m.answers = append(m.answers, ReplyToClient{
 			Req: op.Req, From: op.From,
 			Done: core.ControlPlaneDone{Req: op.Req, Err: core.ErrUnavailable},
 		})
@@ -67,7 +67,7 @@ func (m *Machine) Offer(op ClientOp) []core.Action {
 		if d, ok, err := m.fold.KnownCommit(op.Cmd.Commit); err == nil && ok {
 			d.Req = op.Req
 			m.env.Reachable("logcp-sim: replayed key answered from the window")
-			m.answers = append(m.answers, Answer{Req: op.Req, From: op.From, Done: d})
+			m.answers = append(m.answers, ReplyToClient{Req: op.Req, From: op.From, Done: d})
 			return nil
 		}
 		if m.retargetCommit(op) {
@@ -75,7 +75,7 @@ func (m *Machine) Offer(op ClientOp) []core.Action {
 		}
 	}
 	if len(m.queue) >= m.cfg.queueMax() {
-		m.answers = append(m.answers, Answer{
+		m.answers = append(m.answers, ReplyToClient{
 			Req: op.Req, From: op.From,
 			Done: core.ControlPlaneDone{Req: op.Req, Err: core.ErrUnavailable},
 		})
@@ -83,7 +83,7 @@ func (m *Machine) Offer(op ClientOp) []core.Action {
 	}
 	cmd := op.Cmd
 	cmd.ID = ""
-	m.queue = append(m.queue, pendingCmd{req: op.Req, from: op.From, cmd: cmd})
+	m.queue = append(m.queue, waitingCommand{req: op.Req, from: op.From, cmd: cmd})
 	return m.flushCommits()
 }
 
@@ -91,9 +91,9 @@ func (m *Machine) Offer(op ClientOp) []core.Action {
 // at this Offer. The prior broker Req timed out at the bridge; the apply must
 // answer the live one. Flight ReqIDs are sorted so map walk order cannot
 // diverge two runs of the same seed.
-func (m *Machine) retargetCommit(op ClientOp) bool {
+func (m *Machine) retargetCommit(op ClientOperation) bool {
 	key := op.Cmd.Commit.SegmentKey
-	retarget := func(c *pendingCmd) bool {
+	retarget := func(c *waitingCommand) bool {
 		if c.cmd.Kind != applier.KindCommit || c.cmd.Commit.SegmentKey != key {
 			return false
 		}
@@ -122,7 +122,7 @@ func (m *Machine) retargetCommit(op ClientOp) bool {
 }
 
 // TakeAnswers returns and clears apply-time answers for prior Offers.
-func (m *Machine) TakeAnswers() []Answer {
+func (m *Machine) TakeAnswers() []ReplyToClient {
 	out := m.answers
 	m.answers = nil
 	return out
@@ -154,7 +154,7 @@ func (m *Machine) emitCommitGroup() []core.Action {
 	if n <= 0 {
 		return nil
 	}
-	cmds := append([]pendingCmd(nil), m.queue[:n]...)
+	cmds := append([]waitingCommand(nil), m.queue[:n]...)
 	m.queue = append(m.queue[:0:0], m.queue[n:]...)
 
 	m.seq++
@@ -163,7 +163,7 @@ func (m *Machine) emitCommitGroup() []core.Action {
 	for i, c := range cmds {
 		e := c.cmd
 		e.ID = id
-		if m.cfg.Bug == BugWriterOffsets && e.Kind == applier.KindCommit {
+		if m.cfg.InjectedBug == InjectedBugWriterOffsets && e.Kind == applier.KindCommit {
 			e.WriterBases = m.projectBases(e.Commit)
 		}
 		entries[i] = e
@@ -176,12 +176,12 @@ func (m *Machine) emitCommitGroup() []core.Action {
 		core.ContextPair{Key: "slot", Value: slot})
 	m.nextReq++
 	req := m.nextReq
-	m.flights[req] = &flight{req: req, slot: slot, id: id, data: data, cmds: cmds}
+	m.flights[req] = &inFlightAppend{req: req, slot: slot, id: id, data: data, cmds: cmds}
 	m.waiters[id] = cmds
 	return []core.Action{core.LogAppend{Req: req, Slot: slot, Data: data}}
 }
 
-// projectBases is BugWriterOffsets: skip one offset per partition so a retry
+// projectBases is InjectedBugWriterOffsets: skip one offset per partition so a retry
 // leaves a gap in the committed log.
 func (m *Machine) projectBases(c core.CommitSegment) []core.Offset {
 	if m.proj == nil {
@@ -209,8 +209,8 @@ func (m *Machine) observeSlot(n core.LogPosition) {
 	m.high = max(m.high, n+1)
 }
 
-func (m *Machine) onCommitAppendDone(d core.LogAppendDone, f *flight) []core.Action {
-	if isTomb(d) {
+func (m *Machine) onCommitAppendDone(d core.LogAppendDone, f *inFlightAppend) []core.Action {
+	if isDeleted(d) {
 		// Slot was trimmed under us; refuse in-flight clients and restore.
 		return m.hitTrimmed()
 	}
@@ -249,26 +249,26 @@ func (m *Machine) onCommitAppendDone(d core.LogAppendDone, f *flight) []core.Act
 }
 
 // retrySameSlot repeats the Put at f.slot (conditional append; slot still ours).
-func (m *Machine) retrySameSlot(f *flight) []core.Action {
+func (m *Machine) retrySameSlot(f *inFlightAppend) []core.Action {
 	m.nextReq++
 	req := m.nextReq
-	m.flights[req] = &flight{req: req, slot: f.slot, id: f.id, data: f.data, cmds: f.cmds}
+	m.flights[req] = &inFlightAppend{req: req, slot: f.slot, id: f.id, data: f.data, cmds: f.cmds}
 	return []core.Action{core.LogAppend{Req: req, Slot: f.slot, Data: f.data}}
 }
 
 // retryFlight appends the same entry (same id and cmds) at the next free slot
 // after another writer won f.slot.
-func (m *Machine) retryFlight(f *flight) []core.Action {
+func (m *Machine) retryFlight(f *inFlightAppend) []core.Action {
 	m.env.Reachable("logcp-sim: lost slot retried at a later slot")
 	slot := m.alloc()
 	m.nextReq++
 	req := m.nextReq
-	m.flights[req] = &flight{req: req, slot: slot, id: f.id, data: f.data, cmds: f.cmds}
+	m.flights[req] = &inFlightAppend{req: req, slot: slot, id: f.id, data: f.data, cmds: f.cmds}
 	return []core.Action{core.LogAppend{Req: req, Slot: slot, Data: f.data}}
 }
 
 func encodeGroup(id string, cmds []applier.Entry) []byte {
-	b := []byte{groupMagic}
+	b := []byte{groupMarker}
 	b = binary.AppendUvarint(b, uint64(len(id)))
 	b = append(b, id...)
 	b = binary.AppendUvarint(b, uint64(len(cmds)))
@@ -286,7 +286,7 @@ func decodeGroup(data []byte) (string, []applier.Entry, bool) {
 		return "", nil, false
 	}
 	data = payload
-	if len(data) == 0 || data[0] != groupMagic {
+	if len(data) == 0 || data[0] != groupMarker {
 		return "", nil, false
 	}
 	rest := data[1:]
@@ -337,7 +337,7 @@ func (m *Machine) applySlot(slot core.LogPosition, data []byte) error {
 	if !ok {
 		return fmt.Errorf("machine: truncated log envelope at slot %d", slot)
 	}
-	enveloped := len(data) > 0 && data[0] == envelopeMagic
+	enveloped := len(data) > 0 && data[0] == envelopeMarker
 	m.observeWriter(slot, rank, writer, enveloped)
 
 	if id, cmds, ok := decodeGroup(payload); ok {
@@ -375,7 +375,7 @@ func (m *Machine) afterApply(slot core.LogPosition) {
 	if stride <= 0 {
 		stride = 16
 	}
-	if m.cfg.Bug == BugPerReplicaWindow && window > 0 {
+	if m.cfg.InjectedBug == InjectedBugPerReplicaWindow && window > 0 {
 		// Mutant: forget by this replica's applied clock, not log stride.
 		_, _ = m.fold.Trim(int64(slot) - window + 1)
 		m.env.Always(false, "logcp-sim: a replica's state equals the replay of the log at its slot",
@@ -402,6 +402,6 @@ func (m *Machine) deliver(id string, dones []core.ControlPlaneDone) {
 				m.env.Reachable("logcp-sim: idempotent replay after takeover")
 			}
 		}
-		m.answers = append(m.answers, Answer{Req: p.req, From: p.from, Done: d})
+		m.answers = append(m.answers, ReplyToClient{Req: p.req, From: p.from, Done: d})
 	}
 }

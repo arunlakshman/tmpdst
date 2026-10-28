@@ -9,7 +9,7 @@ import (
 	"manifester/internal/core"
 )
 
-func rpcError(code core.ErrCode, outcome core.Outcome) error {
+func toRPCError(code core.ErrCode, outcome core.Outcome) error {
 	st := codes.Internal
 	switch code {
 	case core.ErrUnavailable:

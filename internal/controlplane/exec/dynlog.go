@@ -14,61 +14,61 @@ import (
 	"manifester/internal/core"
 )
 
-// DB is the DynamoDB surface DynLog needs.
-type DB interface {
+// DynamoClient is the DynamoDB surface DynamoLog needs.
+type DynamoClient interface {
 	PutItem(ctx context.Context, in *dynamodb.PutItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
 	Query(ctx context.Context, in *dynamodb.QueryInput, opts ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error)
 	BatchWriteItem(ctx context.Context, in *dynamodb.BatchWriteItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error)
 }
 
-// DynLogOptions tune a DynLog.
-type DynLogOptions struct {
+// DynamoLogOptions tune a DynamoLog.
+type DynamoLogOptions struct {
 	TTL     time.Duration
 	Now     func() time.Time
 	StubTTL time.Duration
 }
 
-// DynLog stores opaque machine payloads in one DynamoDB partition
+// DynamoLog stores opaque machine payloads in one DynamoDB partition
 // (pk=LOG, sk=20-digit slot). Bytes in attribute d are not decoded here.
-type DynLog struct {
-	db    DB
+type DynamoLog struct {
+	db    DynamoClient
 	table string
-	o     DynLogOptions
+	o     DynamoLogOptions
 }
 
 const (
-	logPK      = "LOG"
-	slotMax    = "99999999999999999999"
-	tombstoneB = 0xFE
+	logPartitionKey    = "LOG"
+	slotMax            = "99999999999999999999"
+	deletedMarkerBytes = 0xFE
 )
 
-// NewDynLog returns a byte log over table.
-func NewDynLog(db DB, table string, o DynLogOptions) *DynLog {
+// NewDynamoLog returns a byte log over table.
+func NewDynamoLog(db DynamoClient, table string, o DynamoLogOptions) *DynamoLog {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
 	if o.StubTTL == 0 && o.TTL > 0 {
 		o.StubTTL = 30 * 24 * time.Hour
 	}
-	return &DynLog{db: db, table: table, o: o}
+	return &DynamoLog{db: db, table: table, o: o}
 }
 
 func slotKey(n core.LogPosition) string { return fmt.Sprintf("%020d", n) }
-func sv(v string) types.AttributeValue {
+func stringValue(v string) types.AttributeValue {
 	return &types.AttributeValueMemberS{Value: v}
 }
-func nv(v int64) types.AttributeValue {
+func numberValue(v int64) types.AttributeValue {
 	return &types.AttributeValueMemberN{Value: strconv.FormatInt(v, 10)}
 }
 
 // Append implements Log with a conditional PutItem.
-func (l *DynLog) Append(ctx context.Context, slot core.LogPosition, data []byte) ([]byte, bool, error) {
+func (l *DynamoLog) Append(ctx context.Context, slot core.LogPosition, data []byte) ([]byte, bool, error) {
 	it := map[string]types.AttributeValue{
-		"pk": sv(logPK), "sk": sv(slotKey(slot)),
+		"pk": stringValue(logPartitionKey), "sk": stringValue(slotKey(slot)),
 		"d": &types.AttributeValueMemberB{Value: data},
 	}
 	if l.o.TTL > 0 {
-		it["ttl"] = nv(l.o.Now().Add(l.o.TTL).Unix())
+		it["ttl"] = numberValue(l.o.Now().Add(l.o.TTL).Unix())
 	}
 	_, err := l.db.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName:                           &l.table,
@@ -92,12 +92,12 @@ func (l *DynLog) Append(ctx context.Context, slot core.LogPosition, data []byte)
 	return ents[0].Data, true, nil
 }
 
-func (l *DynLog) between(lo, hi string) *dynamodb.QueryInput {
+func (l *DynamoLog) between(lo, hi string) *dynamodb.QueryInput {
 	return &dynamodb.QueryInput{
 		TableName:              &l.table,
 		KeyConditionExpression: aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":p": sv(logPK), ":lo": sv(lo), ":hi": sv(hi),
+			":p": stringValue(logPartitionKey), ":lo": stringValue(lo), ":hi": stringValue(hi),
 		},
 	}
 }
@@ -120,7 +120,7 @@ func itemSlot(it map[string]types.AttributeValue) (core.LogPosition, error) {
 }
 
 // Read implements Log with consistent Queries.
-func (l *DynLog) Read(ctx context.Context, from core.LogPosition, limit int) ([]core.LogEntry, error) {
+func (l *DynamoLog) Read(ctx context.Context, from core.LogPosition, limit int) ([]core.LogEntry, error) {
 	var out []core.LogEntry
 	var start map[string]types.AttributeValue
 	for len(out) < limit {
@@ -139,7 +139,7 @@ func (l *DynLog) Read(ctx context.Context, from core.LogPosition, limit int) ([]
 				return out, err
 			}
 			data := itemData(it)
-			if len(data) == 1 && data[0] == tombstoneB {
+			if len(data) == 1 && data[0] == deletedMarkerBytes {
 				continue
 			}
 			out = append(out, core.LogEntry{Slot: n, Data: append([]byte(nil), data...)})
@@ -152,7 +152,7 @@ func (l *DynLog) Read(ctx context.Context, from core.LogPosition, limit int) ([]
 }
 
 // CheckTail implements Log.
-func (l *DynLog) CheckTail(ctx context.Context) (core.LogPosition, error) {
+func (l *DynamoLog) CheckTail(ctx context.Context) (core.LogPosition, error) {
 	q := l.between(slotKey(0), slotMax)
 	q.ConsistentRead = aws.Bool(true)
 	q.ScanIndexForward = aws.Bool(false)
@@ -166,7 +166,7 @@ func (l *DynLog) CheckTail(ctx context.Context) (core.LogPosition, error) {
 }
 
 // TrimThrough tombstones every slot at or below through.
-func (l *DynLog) TrimThrough(ctx context.Context, through core.LogPosition) error {
+func (l *DynamoLog) TrimThrough(ctx context.Context, through core.LogPosition) error {
 	if through < 0 {
 		return ErrInvalidSlot
 	}
@@ -188,10 +188,10 @@ func (l *DynLog) TrimThrough(ctx context.Context, through core.LogPosition) erro
 		for _, it := range page.Items {
 			item := map[string]types.AttributeValue{
 				"pk": it["pk"], "sk": it["sk"],
-				"d": &types.AttributeValueMemberB{Value: []byte{tombstoneB}},
+				"d": &types.AttributeValueMemberB{Value: []byte{deletedMarkerBytes}},
 			}
 			if l.o.StubTTL > 0 {
-				item["ttl"] = nv(l.o.Now().Add(l.o.StubTTL).Unix())
+				item["ttl"] = numberValue(l.o.Now().Add(l.o.StubTTL).Unix())
 			}
 			reqs = append(reqs, types.WriteRequest{PutRequest: &types.PutRequest{Item: item}})
 		}

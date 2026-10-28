@@ -39,7 +39,7 @@ var _ run.Executor = (*Executor)(nil)
 // New builds an Executor. Cancelling ctx aborts calls in flight.
 func New(ctx context.Context, cfg Config, log Log, objs ObjectStore, sink run.Sink) *Executor {
 	if objs == nil {
-		objs = NewMemObjects()
+		objs = NewMemoryObjects()
 	}
 	return &Executor{ctx: ctx, cfg: cfg.withDefaults(), log: log, objs: objs, sink: sink}
 }

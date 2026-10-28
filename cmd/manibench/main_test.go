@@ -66,7 +66,7 @@ func TestCreateTopic(t *testing.T) {
 			K: 4, CatchUpEvery: core.Duration(time.Millisecond),
 			Rank: 0, Heartbeat: core.Duration(time.Second),
 		},
-		Log: exec.NewMemLog(), Objects: exec.NewMemObjects(),
+		Log: exec.NewMemoryLog(), Objects: exec.NewMemoryObjects(),
 		Self: core.NodeInstance{Node: "cp"},
 	})
 	if err := n.Start(t.Context()); err != nil {

@@ -188,8 +188,8 @@ func TestCPURLListFailsOver(t *testing.T) {
 	})
 	upNode := server.New(server.Config{
 		Machine: machine.Config{K: 4, CatchUpEvery: core.Duration(time.Millisecond), Rank: 0, Heartbeat: core.Duration(time.Second)},
-		Log:     exec.NewMemLog(),
-		Objects: exec.NewMemObjects(),
+		Log:     exec.NewMemoryLog(),
+		Objects: exec.NewMemoryObjects(),
 		Self:    core.NodeInstance{Node: "cp-up"},
 	})
 	if err := upNode.Start(t.Context()); err != nil {

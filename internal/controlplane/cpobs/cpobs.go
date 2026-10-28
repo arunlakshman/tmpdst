@@ -68,20 +68,20 @@ func NewWithLogger(log *slog.Logger) *Metrics {
 	return m
 }
 
-func hist(name, help, label string, b []float64) *prometheus.HistogramVec {
+func histogram(name, help, label string, b []float64) *prometheus.HistogramVec {
 	return prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: "manicp", Name: name, Help: help, Buckets: b}, []string{label})
 }
 
 func (m *Metrics) registerHTTP(secs []float64) {
-	m.handler = hist("handler_seconds", "Whole HTTP handler time (body read to response written), by op.", "op", secs)
-	m.body = hist("request_body_bytes", "HTTP request body size, by op.", "op", prometheus.ExponentialBuckets(64, 4, 10))
+	m.handler = histogram("handler_seconds", "Whole HTTP handler time (body read to response written), by op.", "op", secs)
+	m.body = histogram("request_body_bytes", "HTTP request body size, by op.", "op", prometheus.ExponentialBuckets(64, 4, 10))
 	m.inflight = prometheus.NewGauge(prometheus.GaugeOpts{Namespace: "manicp", Name: "inflight_requests", Help: "HTTP requests being served."})
 	m.callsDone = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Name: "calls_total",
 		Help: "HTTP calls served, by op and outcome (ok, the business error code such as ErrConflict, http_503, http_500)."}, []string{"op", "outcome"})
 }
 
 func (m *Metrics) registerDynamo(secs []float64) {
-	m.dyn = hist("dynamodb_call_seconds", "Time inside one DynamoDB SDK call (TransactWriteItems, GetItem, BatchGetItem, ...).", "call", secs)
+	m.dyn = histogram("dynamodb_call_seconds", "Time inside one DynamoDB SDK call (TransactWriteItems, GetItem, BatchGetItem, ...).", "call", secs)
 	m.consumed = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Subsystem: "dynamo", Name: "consumed_capacity_units_total",
 		Help: "Capacity units DynamoDB reported (ReturnConsumedCapacity=TOTAL), by call and kind (read, write). Absent from servers that do not report it."},
 		[]string{"op", "kind"})
@@ -147,20 +147,20 @@ func (c *Call) addDynamo(d time.Duration, units float64) {
 	}
 }
 
-// summaryEvery is the least time between two cp_summary lines.
-const summaryEvery = time.Second
+// summaryInterval is the least time between two cp_summary lines.
+const summaryInterval = time.Second
 
-// summary aggregates /v1 calls into one INFO line per summaryEvery. There is
+// summary aggregates /v1 calls into one INFO line per summaryInterval. There is
 // no timer: the line is written by the first request that finds the interval
 // over, so an idle process logs nothing and the last partial interval of a
 // run is not written (the metrics have it).
 type summary struct {
 	mu    sync.Mutex
 	start time.Time
-	ops   map[string]*opSum
+	ops   map[string]*operationSummary
 }
 
-type opSum struct {
+type operationSummary struct {
 	n, notOK int64
 	sum, max time.Duration
 }
@@ -168,11 +168,11 @@ type opSum struct {
 func (s *summary) add(log *slog.Logger, op, outcome string, el time.Duration, now time.Time) {
 	s.mu.Lock()
 	if s.ops == nil {
-		s.ops, s.start = map[string]*opSum{}, now
+		s.ops, s.start = map[string]*operationSummary{}, now
 	}
 	o := s.ops[op]
 	if o == nil {
-		o = &opSum{}
+		o = &operationSummary{}
 		s.ops[op] = o
 	}
 	o.n++
@@ -181,23 +181,23 @@ func (s *summary) add(log *slog.Logger, op, outcome string, el time.Duration, no
 	if outcome != "ok" {
 		o.notOK++
 	}
-	if now.Sub(s.start) < summaryEvery {
+	if now.Sub(s.start) < summaryInterval {
 		s.mu.Unlock()
 		return
 	}
 	window, ops := now.Sub(s.start), s.ops
-	s.ops, s.start = map[string]*opSum{}, now
+	s.ops, s.start = map[string]*operationSummary{}, now
 	s.mu.Unlock()
 	names := make([]string, 0, len(ops))
 	for k := range ops {
 		names = append(names, k)
 	}
 	slices.Sort(names)
-	attrs := []any{"event", "cp_summary", "window_ms", ms(window)}
+	attrs := []any{"event", "cp_summary", "window_ms", toMilliseconds(window)}
 	for _, k := range names {
 		o := ops[k]
 		attrs = append(attrs, k, map[string]any{"calls": o.n, "not_ok": o.notOK,
-			"mean_handler_ms": ms(o.sum / time.Duration(o.n)), "max_handler_ms": ms(o.max)})
+			"mean_handler_ms": toMilliseconds(o.sum / time.Duration(o.n)), "max_handler_ms": toMilliseconds(o.max)})
 	}
 	log.Info("cp summary", attrs...)
 }
@@ -240,14 +240,14 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 			}
 			m.sum.add(m.log, op, outcome, el, time.Now())
 			m.log.Log(r.Context(), lvl, "cp call", "event", "cp_call", "op", op, "segment", call.segment, "outcome", outcome,
-				"http_status", sw.status, "handler_ms", ms(el), "dynamo_ms", ms(call.dynamo), "consumed_units", call.units,
+				"http_status", sw.status, "handler_ms", toMilliseconds(el), "dynamo_ms", toMilliseconds(call.dynamo), "consumed_units", call.units,
 				"request_bytes", cb.n, "response_bytes", sw.n)
 		}()
 		next.ServeHTTP(sw, r.WithContext(context.WithValue(r.Context(), callKey{}, call)))
 	})
 }
 
-func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
+func toMilliseconds(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
 
 // statusWriter remembers the status and (small) body so the middleware can
 // report the business error code of an HTTP 200 answer.

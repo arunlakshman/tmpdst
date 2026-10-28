@@ -39,7 +39,7 @@ func TestKConcurrentLogAppend(t *testing.T) {
 	var first []core.LogAppend
 	for i := range k {
 		key := "s" + string(rune('a'+i))
-		acts := m.Offer(machine.ClientOp{Req: core.RequestID(i + 1), Cmd: commitCmd(key, 1)})
+		acts := m.Offer(machine.ClientOperation{Req: core.RequestID(i + 1), Cmd: commitCmd(key, 1)})
 		first = append(first, onlyAppend(t, acts))
 	}
 	if m.InFlightCommits() != k {
@@ -52,7 +52,7 @@ func TestKConcurrentLogAppend(t *testing.T) {
 		}
 		slots[ap.Slot] = true
 	}
-	acts := m.Offer(machine.ClientOp{Req: 99, Cmd: commitCmd("extra", 1)})
+	acts := m.Offer(machine.ClientOperation{Req: 99, Cmd: commitCmd("extra", 1)})
 	if len(acts) != 0 {
 		t.Fatalf("over-K Offer returned %v", acts)
 	}
@@ -88,9 +88,9 @@ func TestGroupPackingCapsAtMaxCmdsPerSlot(t *testing.T) {
 	m := newMachine(t, machine.Config{K: 1, MaxCmdsPerSlot: 3, Writer: "w"})
 	// First Offer flushes alone (low load). Further Offers queue while in flight;
 	// the next flush packs up to MaxCmdsPerSlot, matching logcp flusher take().
-	first := onlyAppend(t, m.Offer(machine.ClientOp{Req: 1, Cmd: commitCmd("g0", 1)}))
+	first := onlyAppend(t, m.Offer(machine.ClientOperation{Req: 1, Cmd: commitCmd("g0", 1)}))
 	for i := 2; i <= 6; i++ {
-		if acts := m.Offer(machine.ClientOp{
+		if acts := m.Offer(machine.ClientOperation{
 			Req: core.RequestID(i),
 			Cmd: commitCmd("g"+string(rune('0'+i-1)), 1),
 		}); len(acts) != 0 {
@@ -127,8 +127,8 @@ func TestGroupPackingCapsAtMaxCmdsPerSlot(t *testing.T) {
 
 func TestMaybeAppliedRetriesSameSlot(t *testing.T) {
 	m := newMachine(t, machine.Config{K: 2, MaxCmdsPerSlot: 1, Writer: "w"})
-	a := onlyAppend(t, m.Offer(machine.ClientOp{Req: 1, Cmd: commitCmd("a", 1)}))
-	b := onlyAppend(t, m.Offer(machine.ClientOp{Req: 2, Cmd: commitCmd("b", 1)}))
+	a := onlyAppend(t, m.Offer(machine.ClientOperation{Req: 1, Cmd: commitCmd("a", 1)}))
+	b := onlyAppend(t, m.Offer(machine.ClientOperation{Req: 2, Cmd: commitCmd("b", 1)}))
 	// b lands first; a times out. Same-slot retry must not leave a hole that
 	// wedges drain past b.
 	step(m, core.LogAppendDone{Req: b.Req, Slot: b.Slot, Err: core.OK, Outcome: core.Applied})
@@ -154,7 +154,7 @@ func TestMaybeAppliedRetriesSameSlot(t *testing.T) {
 
 func TestLostAppendRetriesSameEntryLaterSlot(t *testing.T) {
 	m := newMachine(t, machine.Config{K: 1, MaxCmdsPerSlot: 1, Writer: "w"})
-	ap := onlyAppend(t, m.Offer(machine.ClientOp{Req: 7, Cmd: commitCmd("lost-key", 2)}))
+	ap := onlyAppend(t, m.Offer(machine.ClientOperation{Req: 7, Cmd: commitCmd("lost-key", 2)}))
 	other := machine.EncodeGroupForTest("other/1", []applier.Entry{commitCmd("other-key", 1)})
 
 	acts := step(m, core.LogAppendDone{
@@ -188,7 +188,7 @@ func TestStickySingleAppenderAtMachineLevel(t *testing.T) {
 	m := newMachine(t, machine.Config{K: 2, MaxCmdsPerSlot: 1, Writer: "sticky"})
 	var apps []core.LogAppend
 	for i := range 2 {
-		apps = append(apps, onlyAppend(t, m.Offer(machine.ClientOp{
+		apps = append(apps, onlyAppend(t, m.Offer(machine.ClientOperation{
 			Req: core.RequestID(i + 1),
 			Cmd: commitCmd("st"+string(rune('a'+i)), 1),
 		})))
@@ -215,7 +215,7 @@ func TestStickySingleAppenderAtMachineLevel(t *testing.T) {
 
 func TestOfferRefusedWhenCommitQueueDisabled(t *testing.T) {
 	m := newMachine(t, machine.Config{})
-	if acts := m.Offer(machine.ClientOp{Req: 1, Cmd: commitCmd("x", 1)}); acts != nil {
+	if acts := m.Offer(machine.ClientOperation{Req: 1, Cmd: commitCmd("x", 1)}); acts != nil {
 		t.Fatalf("disabled Offer returned %v", acts)
 	}
 	ans := m.TakeAnswers()
@@ -226,12 +226,12 @@ func TestOfferRefusedWhenCommitQueueDisabled(t *testing.T) {
 
 func TestOfferKnownCommitSkipsAppend(t *testing.T) {
 	m := newMachine(t, machine.Config{K: 1, MaxCmdsPerSlot: 1, Writer: "w"})
-	first := onlyAppend(t, m.Offer(machine.ClientOp{Req: 1, Cmd: commitCmd("known", 2)}))
+	first := onlyAppend(t, m.Offer(machine.ClientOperation{Req: 1, Cmd: commitCmd("known", 2)}))
 	step(m, core.LogAppendDone{Req: first.Req, Slot: first.Slot, Err: core.OK, Outcome: core.Applied})
 	if ans := m.TakeAnswers(); len(ans) != 1 || ans[0].Done.Err != core.OK {
 		t.Fatalf("first answers = %+v", ans)
 	}
-	acts := m.Offer(machine.ClientOp{Req: 2, Cmd: commitCmd("known", 2)})
+	acts := m.Offer(machine.ClientOperation{Req: 2, Cmd: commitCmd("known", 2)})
 	if len(acts) != 0 {
 		t.Fatalf("known Offer returned %v, want immediate answer", acts)
 	}
@@ -247,8 +247,8 @@ func TestOfferKnownCommitSkipsAppend(t *testing.T) {
 
 func TestOfferRetargetsInFlightCommit(t *testing.T) {
 	m := newMachine(t, machine.Config{K: 1, MaxCmdsPerSlot: 1, Writer: "w"})
-	first := onlyAppend(t, m.Offer(machine.ClientOp{Req: 1, Cmd: commitCmd("retry", 1)}))
-	acts := m.Offer(machine.ClientOp{Req: 2, Cmd: commitCmd("retry", 1)})
+	first := onlyAppend(t, m.Offer(machine.ClientOperation{Req: 1, Cmd: commitCmd("retry", 1)}))
+	acts := m.Offer(machine.ClientOperation{Req: 2, Cmd: commitCmd("retry", 1)})
 	if len(acts) != 0 {
 		t.Fatalf("retarget Offer returned %v", acts)
 	}

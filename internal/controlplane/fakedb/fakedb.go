@@ -1,5 +1,5 @@
 // Package fakedb is an in-memory DynamoDB for control-plane log tests: it
-// implements exec.DB faithfully enough for the expressions DynLog uses
+// implements exec.DynamoClient faithfully enough for the expressions DynamoLog uses
 // (conditions, SET updates, key conditions with BETWEEN), with the semantics
 // the log depends on: single-item atomicity, conditional puts, Query paging
 // and ordering, BatchWriteItem UnprocessedItems. It also injects failures. It

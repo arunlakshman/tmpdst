@@ -189,9 +189,9 @@ func (m *Machine) softCrash() []core.Action {
 	return nil
 }
 
-// isTomb reports a LogAppend into a trimmed slot (tombstone): Conflict, Taken,
+// isDeleted reports a LogAppend into a trimmed slot (tombstone): Conflict, Taken,
 // and no Existing bytes (store.go). Empty-delete mutants look like free slots.
-func isTomb(d core.LogAppendDone) bool {
+func isDeleted(d core.LogAppendDone) bool {
 	return d.Err == core.ErrConflict && d.Taken && len(d.Existing) == 0
 }
 
@@ -212,8 +212,8 @@ func (m *Machine) hitTrimmed() []core.Action {
 
 func (m *Machine) clearLocal() {
 	m.queue = nil
-	m.flights = map[core.RequestID]*flight{}
-	m.waiters = map[string][]pendingCmd{}
+	m.flights = map[core.RequestID]*inFlightAppend{}
+	m.waiters = map[string][]waitingCommand{}
 	m.buf = map[core.LogPosition][]byte{}
 	m.pending, m.pendingKind = 0, pendingNone
 	m.proj = nil
@@ -222,8 +222,8 @@ func (m *Machine) clearLocal() {
 }
 
 func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {
-	refuse := func(c pendingCmd) {
-		m.answers = append(m.answers, Answer{
+	refuse := func(c waitingCommand) {
+		m.answers = append(m.answers, ReplyToClient{
 			Req: c.req, From: c.from,
 			Done: core.ControlPlaneDone{Req: c.req, Err: err, Outcome: o},
 		})
@@ -278,7 +278,7 @@ func (m *Machine) emitHeartbeat() []core.Action {
 	m.nextReq++
 	req := m.nextReq
 	slot := m.alloc()
-	m.flights[req] = &flight{req: req, slot: slot, id: id, data: data, cmds: nil}
+	m.flights[req] = &inFlightAppend{req: req, slot: slot, id: id, data: data, cmds: nil}
 	return []core.Action{core.LogAppend{Req: req, Slot: slot, Data: data}}
 }
 

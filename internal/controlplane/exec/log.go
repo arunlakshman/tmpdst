@@ -16,10 +16,10 @@ type Log interface {
 	TrimThrough(ctx context.Context, through core.LogPosition) error
 }
 
-// MemLog is an in-memory Log for tests and -store mem demos.
-type MemLog struct {
+// MemoryLog is an in-memory Log for tests and -store mem demos.
+type MemoryLog struct {
 	mu    sync.Mutex
-	slots []slotRec
+	slots []slotRecord
 }
 
 type slotKind uint8
@@ -27,26 +27,26 @@ type slotKind uint8
 const (
 	slotEmpty slotKind = iota
 	slotEntry
-	slotTomb
+	slotDeleted
 )
 
-type slotRec struct {
+type slotRecord struct {
 	kind slotKind
 	data []byte
 }
 
-// NewMemLog returns an empty in-memory log.
-func NewMemLog() *MemLog { return &MemLog{} }
+// NewMemoryLog returns an empty in-memory log.
+func NewMemoryLog() *MemoryLog { return &MemoryLog{} }
 
-func (m *MemLog) ensure(slot core.LogPosition) {
+func (m *MemoryLog) ensure(slot core.LogPosition) {
 	n := int(slot) + 1
 	if n > len(m.slots) {
-		m.slots = append(m.slots, make([]slotRec, n-len(m.slots))...)
+		m.slots = append(m.slots, make([]slotRecord, n-len(m.slots))...)
 	}
 }
 
 // Append implements Log.
-func (m *MemLog) Append(_ context.Context, slot core.LogPosition, data []byte) ([]byte, bool, error) {
+func (m *MemoryLog) Append(_ context.Context, slot core.LogPosition, data []byte) ([]byte, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if slot < 0 {
@@ -57,15 +57,15 @@ func (m *MemLog) Append(_ context.Context, slot core.LogPosition, data []byte) (
 	switch cur.kind {
 	case slotEntry:
 		return slices.Clone(cur.data), true, nil
-	case slotTomb:
+	case slotDeleted:
 		return nil, true, nil
 	}
-	m.slots[slot] = slotRec{kind: slotEntry, data: slices.Clone(data)}
+	m.slots[slot] = slotRecord{kind: slotEntry, data: slices.Clone(data)}
 	return nil, false, nil
 }
 
 // Read implements Log.
-func (m *MemLog) Read(_ context.Context, from core.LogPosition, limit int) ([]core.LogEntry, error) {
+func (m *MemoryLog) Read(_ context.Context, from core.LogPosition, limit int) ([]core.LogEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if from < 0 || limit < 0 {
@@ -82,7 +82,7 @@ func (m *MemLog) Read(_ context.Context, from core.LogPosition, limit int) ([]co
 }
 
 // CheckTail implements Log.
-func (m *MemLog) CheckTail(context.Context) (core.LogPosition, error) {
+func (m *MemoryLog) CheckTail(context.Context) (core.LogPosition, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i := range slices.Backward(m.slots) {
@@ -94,7 +94,7 @@ func (m *MemLog) CheckTail(context.Context) (core.LogPosition, error) {
 }
 
 // TrimThrough implements Log.
-func (m *MemLog) TrimThrough(_ context.Context, through core.LogPosition) error {
+func (m *MemoryLog) TrimThrough(_ context.Context, through core.LogPosition) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if through < 0 {
@@ -103,7 +103,7 @@ func (m *MemLog) TrimThrough(_ context.Context, through core.LogPosition) error 
 	m.ensure(through)
 	for i := range int(through) + 1 {
 		if m.slots[i].kind == slotEntry {
-			m.slots[i] = slotRec{kind: slotTomb}
+			m.slots[i] = slotRecord{kind: slotDeleted}
 		}
 	}
 	return nil

@@ -18,14 +18,14 @@ var (
 	ErrKilled = errors.New("killed") // graceful stop missed its deadline
 )
 
-// Run delivers Started, then loops: core.ControlFirst picks, At/Wall are
+// Run delivers NodeStarted, then loops: core.ControlFirst picks, At/Wall are
 // stamped at dequeue, Step, actions dispatched in slice order. Returns
-// ErrTripped (wrapped with the cause) on Trip, nil on Exit, ErrStopped on ctx
-// done. When b.Shutdown fires, Run delivers core.Stop{Deadline: Mono+StopGrace}
-// once; if the machine has not emitted Exit by then, Run returns ErrKilled and
+// ErrTripped (wrapped with the cause) on StopForRestart, nil on ShutdownDone, ErrStopped on ctx
+// done. When b.Shutdown fires, Run delivers core.StopRequest{Deadline: Mono+StopGrace}
+// once; if the machine has not emitted ShutdownDone by then, Run returns ErrKilled and
 // the supervisor kills the process. It closes b.Inbox on return so late
 // completions are dropped. This goroutine alone owns the machine.
-func Run(ctx context.Context, b Bundle, exec Executor, f core.Factory, self core.NodeRef) error {
+func Run(ctx context.Context, b Bundle, exec Executor, f core.MachineFactory, self core.NodeInstance) error {
 	in := b.Inbox
 	if in == nil {
 		// A private inbox would be unreachable by the Executor and readers.
@@ -40,16 +40,16 @@ func Run(ctx context.Context, b Bundle, exec Executor, f core.Factory, self core
 	}()
 	m := f(b.Env, self)
 
-	step := func(body core.EventBody) (bool, error) {
+	step := func(body core.EventData) (bool, error) {
 		acts := m.Step(core.Event{At: b.Clock.Mono(), Wall: b.Clock.Wall(), Body: body})
 		return r.dispatch(acts)
 	}
-	if done, err := step(core.Started{Self: self}); done {
+	if done, err := step(core.NodeStarted{Self: self}); done {
 		return err
 	}
 	var policy core.InboxPolicy = core.ControlFirst{}
 	ctrl, data := in.Control(), in.Data()
-	shutdown := b.Shutdown // nil once fired: Stop is delivered exactly once
+	shutdown := b.Shutdown // nil once fired: StopRequest is delivered exactly once
 	var kill <-chan time.Time
 	for {
 		if ctx.Err() != nil { // checked every turn so a busy inbox cannot starve cancel
@@ -58,7 +58,7 @@ func Run(ctx context.Context, b Bundle, exec Executor, f core.Factory, self core
 		select {
 		case <-shutdown:
 			shutdown = nil
-			in.DeliverControl(core.Stop{Deadline: b.Clock.Mono() + core.Time(b.StopGrace)})
+			in.DeliverControl(core.StopRequest{Deadline: b.Clock.Mono() + core.Time(b.StopGrace)})
 			t := time.NewTimer(time.Duration(b.StopGrace))
 			defer t.Stop()
 			kill = t.C
@@ -94,13 +94,13 @@ type runner struct {
 	timers map[core.TimerID]*time.Timer // loop goroutine only
 }
 
-// dispatch runs one Step's actions in order; done reports Trip or Exit.
+// dispatch runs one Step's actions in order; done reports StopForRestart or ShutdownDone.
 func (r *runner) dispatch(acts []core.Action) (bool, error) {
 	for _, a := range acts {
 		switch a := a.(type) {
-		case core.IOAction:
+		case core.IOCall:
 			r.exec.Execute(a)
-		case core.Emit:
+		case core.RecordFact:
 			if r.b.Facts != nil {
 				r.b.Facts(a.Fact)
 			}
@@ -114,9 +114,9 @@ func (r *runner) dispatch(acts []core.Action) (bool, error) {
 			r.b.Conns.PauseReads(a.Conn)
 		case core.ResumeReads:
 			r.b.Conns.ResumeReads(a.Conn)
-		case core.Trip:
+		case core.StopForRestart:
 			return true, fmt.Errorf("%w: %s", ErrTripped, a.Cause)
-		case core.Exit:
+		case core.ShutdownDone:
 			return true, nil
 		default:
 			return true, fmt.Errorf("sys: unknown action %T", a)

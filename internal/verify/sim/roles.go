@@ -7,10 +7,10 @@ import "manifester/internal/core"
 type Process struct {
 	Name    string
 	Count   int
-	Factory core.Factory
+	Factory core.MachineFactory
 	// FactoryFor, when set, replaces Factory and sees this seed's (swarmed)
 	// SeedConfig, so a scenario can vary the process's own tuning per seed.
-	FactoryFor func(sc SeedConfig) core.Factory
+	FactoryFor func(sc SeedConfig) core.MachineFactory
 	// NoAttrition excludes this process from kernel attrition. CP replicas use
 	// LogParams StallProb/CrashProb instead (kafka-log).
 	NoAttrition bool
@@ -32,7 +32,7 @@ type Workload interface {
 // "sim_phase" {phase: U64 of the new Phase}, puts engines into recovery when
 // Settling starts, and then calls OnPhase on each live workload that
 // implements it, in node order. The call is treated like a Step: the returned
-// actions are dispatched the same way (a workload may not Trip or Exit), the
+// actions are dispatched the same way (a workload may not StopForRestart or ShutdownDone), the
 // trace hash folds the call and its actions, and every StateHash is folded
 // after it. It takes no node time and is not an inbox event, so a busy
 // workload hears it immediately. The initial phase (PhaseChaos) is not
@@ -42,7 +42,7 @@ type PhaseAware interface {
 }
 
 // WorkloadFactory builds a fresh workload per seed (never reuse instances).
-type WorkloadFactory func(env core.Env, self core.NodeRef, brokers []core.NodeRef) Workload
+type WorkloadFactory func(env core.Env, self core.NodeInstance, brokers []core.NodeInstance) Workload
 
 // Invariant checks one property (lesson 10). Config.Invariants builds a fresh
 // instance per seed, so there is no Reset. Violations go through View.Assert.
@@ -85,7 +85,7 @@ type View interface {
 // so the invariant surface stays within eight methods.
 type NodeAlive interface {
 	// Alive reports whether ref is the live incarnation of its node.
-	Alive(ref core.NodeRef) bool
+	Alive(ref core.NodeInstance) bool
 }
 
 // ObjectTruth is what the object store really holds, as builtin types only
@@ -127,7 +127,7 @@ const (
 type HistOp struct {
 	ID             core.ID
 	Value          core.ID
-	Client         core.NodeRef
+	Client         core.NodeInstance
 	Op             any
 	InvSeq, RetSeq uint64 // logical order; virtual time ties
 	Invoke, Return Time
@@ -137,7 +137,7 @@ type HistOp struct {
 
 // History is the workload's append-only record of ops.
 type History interface {
-	Invoke(client core.NodeRef, id, value core.ID, op any)
+	Invoke(client core.NodeInstance, id, value core.ID, op any)
 	// Return completes id. It reports false for an unknown or duplicate id
 	// (a protocol failure).
 	Return(id core.ID, result any, o OpOutcome) bool
@@ -158,6 +158,6 @@ type Timeline interface {
 type TimedFact struct {
 	Seq    uint64
 	At     Time
-	Source core.NodeRef // zero for engine facts ("sim_fault")
+	Source core.NodeInstance // zero for engine facts ("sim_fault")
 	Fact   core.Fact
 }

@@ -68,20 +68,20 @@ func (m *naiveControlPlane) createTopic(name string, parts int32) core.ErrCode {
 	return core.OK
 }
 
-func (m *naiveControlPlane) commit(req core.ReqID, op core.CommitSegment) core.CPDone {
+func (m *naiveControlPlane) commit(req core.ReqID, op core.CommitSegment) core.ControlPlaneDone {
 	if old, found := m.segs[op.SegmentKey]; found {
 		if !sameBatches(old.batches, op.Batches) {
-			return core.CPDone{Req: req, Err: core.ErrConflict}
+			return core.ControlPlaneDone{Req: req, Err: core.ErrConflict}
 		}
 		resp := core.CommitSegmentResp{Assigned: append([]core.BatchRange(nil), old.ranges...)}
-		return core.CPDone{Req: req, Resp: resp, Outcome: core.Applied}
+		return core.ControlPlaneDone{Req: req, Resp: resp, Outcome: core.Applied}
 	}
 	if op.SegmentKey == "" || len(op.Batches) == 0 {
-		return core.CPDone{Req: req, Err: core.ErrInvalid}
+		return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
 	}
 	for _, b := range op.Batches {
 		if b.Records <= 0 || b.TP.Topic == "" || b.TP.Partition < 0 {
-			return core.CPDone{Req: req, Err: core.ErrInvalid}
+			return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
 		}
 	}
 	var assigned []core.BatchRange
@@ -96,14 +96,14 @@ func (m *naiveControlPlane) commit(req core.ReqID, op core.CommitSegment) core.C
 	m.segKeys = append(m.segKeys, op.SegmentKey)
 	m.segs[op.SegmentKey] = modelSegment{batches: append([]core.PendingBatch(nil), op.Batches...), ranges: assigned}
 	resp := core.CommitSegmentResp{Assigned: append([]core.BatchRange(nil), assigned...)}
-	return core.CPDone{Req: req, Resp: resp, Outcome: core.Applied}
+	return core.ControlPlaneDone{Req: req, Resp: resp, Outcome: core.Applied}
 }
 
-func (m *naiveControlPlane) lookup(req core.ReqID, op core.Lookup) core.CPDone {
+func (m *naiveControlPlane) lookup(req core.ReqID, op core.FindSegments) core.ControlPlaneDone {
 	if op.From < 0 {
-		return core.CPDone{Req: req, Err: core.ErrInvalid}
+		return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
 	}
-	resp := core.LookupResp{End: m.end(op.TP)}
+	resp := core.FindSegmentsResp{End: m.end(op.TP)}
 	var sum int64
 	for _, r := range m.runs[op.TP] {
 		if r.Base+core.Offset(r.Count)-1 < op.From {
@@ -115,10 +115,10 @@ func (m *naiveControlPlane) lookup(req core.ReqID, op core.Lookup) core.CPDone {
 			break
 		}
 	}
-	return core.CPDone{Req: req, Resp: resp}
+	return core.ControlPlaneDone{Req: req, Resp: resp}
 }
 
-func (m *naiveControlPlane) describe(req core.ReqID, op core.DescribeTopics) core.CPDone {
+func (m *naiveControlPlane) describe(req core.ReqID, op core.DescribeTopics) core.ControlPlaneDone {
 	var names []string
 	for name := range m.topics {
 		names = append(names, name)
@@ -136,7 +136,7 @@ func (m *naiveControlPlane) describe(req core.ReqID, op core.DescribeTopics) cor
 			resp.Topics = append(resp.Topics, core.TopicInfo{Name: name, Partitions: m.topics[name]})
 		}
 	}
-	return core.CPDone{Req: req, Resp: resp}
+	return core.ControlPlaneDone{Req: req, Resp: resp}
 }
 
 // cpModelOp is one operation. Kind is one of create, commit, lookup, describe.
@@ -225,7 +225,7 @@ func genCPModelOp(r *veritastest.Rand, _ int) cpModelOp {
 
 func stepCPModel(s cpModelPair, op cpModelOp) error {
 	const req = core.ReqID(5)
-	var got, want core.CPDone
+	var got, want core.ControlPlaneDone
 	switch op.Kind {
 	case "create":
 		g, w := s.spec.CreateTopic(op.Name, op.Parts), s.model.createTopic(op.Name, op.Parts)
@@ -235,15 +235,15 @@ func stepCPModel(s cpModelPair, op cpModelOp) error {
 		return nil
 	case "commit":
 		cs := core.CommitSegment{SegmentKey: op.Name, Batches: op.Batches}
-		got = s.spec.Exec(core.CPCall{Req: req, Op: cs}).(core.CPDone)
+		got = s.spec.Exec(core.ControlPlaneCall{Req: req, Op: cs}).(core.ControlPlaneDone)
 		want = s.model.commit(req, cs)
 	case "lookup":
-		l := core.Lookup{TP: op.TP, From: core.Offset(op.From), MaxBytes: op.MaxBytes}
-		got = s.spec.Exec(core.CPCall{Req: req, Op: l}).(core.CPDone)
+		l := core.FindSegments{TP: op.TP, From: core.Offset(op.From), MaxBytes: op.MaxBytes}
+		got = s.spec.Exec(core.ControlPlaneCall{Req: req, Op: l}).(core.ControlPlaneDone)
 		want = s.model.lookup(req, l)
 	default:
 		d := core.DescribeTopics{Topics: op.Topics}
-		got = s.spec.Exec(core.CPCall{Req: req, Op: d}).(core.CPDone)
+		got = s.spec.Exec(core.ControlPlaneCall{Req: req, Op: d}).(core.ControlPlaneDone)
 		want = s.model.describe(req, d)
 	}
 	if g, w := fmt.Sprintf("%+v", got), fmt.Sprintf("%+v", want); g != w {

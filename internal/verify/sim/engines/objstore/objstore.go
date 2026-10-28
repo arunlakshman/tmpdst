@@ -32,10 +32,10 @@ func New(f sim.ObjectStoreFaults) *Engine {
 			P503: f.Unavailable503, PTimeout: f.Timeout, PLost: f.LostResponse,
 			Outage: f.Outage, CallerTimeout: f.CallerTimeout,
 		},
-		Spec: func(a core.IOAction) core.Completion { return e.spec.Exec(a) },
-		Mutating: func(a core.IOAction) bool {
+		Spec: func(a core.IOCall) core.IOResult { return e.spec.Exec(a) },
+		Mutating: func(a core.IOCall) bool {
 			switch a.(type) {
-			case core.ObjPut, core.ObjDelete:
+			case core.ObjectPut, core.ObjectDelete:
 				return true
 			}
 			return false
@@ -43,14 +43,14 @@ func New(f sim.ObjectStoreFaults) *Engine {
 		Fail:     fail,
 		Changed:  changed,
 		SpecHash: e.spec.StateHash,
-		Extra: func(r sim.CountedRand, a core.IOAction) (bool, uint64) {
-			if _, ok := a.(core.ObjGet); !ok || !r.Chance(f.GetCorruptProb) {
+		Extra: func(r sim.CountedRand, a core.IOCall) (bool, uint64) {
+			if _, ok := a.(core.ObjectGet); !ok || !r.Chance(f.GetCorruptProb) {
 				return false, 0
 			}
 			return true, r.Uint64()
 		},
-		Finish: func(ctx sim.EngineCtx, c core.Completion, p fakeio.Plan) core.Completion {
-			g, ok := c.(core.ObjGetDone)
+		Finish: func(ctx sim.EngineCtx, c core.IOResult, p fakeio.Plan) core.IOResult {
+			g, ok := c.(core.ObjectGetDone)
 			if !ok || !p.Flag || g.Err != core.OK || len(g.Data) == 0 {
 				return c
 			}
@@ -64,25 +64,25 @@ func New(f sim.ObjectStoreFaults) *Engine {
 	return e
 }
 
-func fail(a core.IOAction, e core.ErrCode, o core.Outcome) core.Completion {
+func fail(a core.IOCall, e core.ErrCode, o core.Outcome) core.IOResult {
 	switch a := a.(type) {
-	case core.ObjPut:
-		return core.ObjPutDone{Req: a.Req, Key: a.Key, Err: e, Outcome: o}
-	case core.ObjGet:
-		return core.ObjGetDone{Req: a.Req, Err: e}
-	case core.ObjDelete:
-		return core.ObjDeleteDone{Req: a.Req, Err: e, Outcome: o}
-	case core.ObjList:
-		return core.ObjListDone{Req: a.Req, Err: e}
+	case core.ObjectPut:
+		return core.ObjectPutDone{Req: a.Req, Key: a.Key, Err: e, Outcome: o}
+	case core.ObjectGet:
+		return core.ObjectGetDone{Req: a.Req, Err: e}
+	case core.ObjectDelete:
+		return core.ObjectDeleteDone{Req: a.Req, Err: e, Outcome: o}
+	case core.ObjectList:
+		return core.ObjectListDone{Req: a.Req, Err: e}
 	}
 	panic("objstore: not an object store action")
 }
 
-func changed(c core.Completion) bool {
+func changed(c core.IOResult) bool {
 	switch c := c.(type) {
-	case core.ObjPutDone:
+	case core.ObjectPutDone:
 		return c.Outcome == core.Applied
-	case core.ObjDeleteDone:
+	case core.ObjectDeleteDone:
 		return c.Outcome == core.Applied
 	}
 	return false
@@ -91,20 +91,20 @@ func changed(c core.Completion) bool {
 // Handles reports whether a is an object store action.
 func (e *Engine) Handles(a core.Action) bool {
 	switch a.(type) {
-	case core.ObjPut, core.ObjGet, core.ObjDelete, core.ObjList:
+	case core.ObjectPut, core.ObjectGet, core.ObjectDelete, core.ObjectList:
 		return true
 	}
 	return false
 }
 
-// Execute starts a; a must be an IOAction (Handles guarantees it).
-func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.Action) {
-	e.Core.Execute(ctx, from, a.(core.IOAction))
+// Execute starts a; a must be an IOCall (Handles guarantees it).
+func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.Action) {
+	e.Core.Execute(ctx, from, a.(core.IOCall))
 }
 
 // Object returns a copy of the stored object.
 func (e *Engine) Object(key string) ([]byte, bool) {
-	g, ok := e.spec.Exec(core.ObjGet{Ref: core.SegmentRef{Key: key}}).(core.ObjGetDone)
+	g, ok := e.spec.Exec(core.ObjectGet{Ref: core.SegmentRef{Key: key}}).(core.ObjectGetDone)
 	if !ok || g.Err != core.OK {
 		return nil, false
 	}

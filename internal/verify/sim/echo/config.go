@@ -13,13 +13,13 @@ import (
 // three engines, attrition and a swarm over the fault families.
 func Config(seeds []uint64) sim.Config { return config(seeds, NewBroker) }
 
-func config(seeds []uint64, brokers core.Factory) sim.Config {
+func config(seeds []uint64, brokers core.MachineFactory) sim.Config {
 	p := campaign.New()
 	p.Network.PartialIOMax = 64
 	return sim.Config{
 		Seeds:     seeds,
 		Processes: []sim.Process{{Name: "broker", Count: 3, Factory: brokers}},
-		Workloads: []sim.WorkloadFactory{func(env core.Env, self core.NodeRef, bs []core.NodeRef) sim.Workload {
+		Workloads: []sim.WorkloadFactory{func(env core.Env, self core.NodeInstance, bs []core.NodeInstance) sim.Workload {
 			return NewWorkload(env, self, bs, Opts{Clients: 4})
 		}},
 		Invariants: []func() sim.Invariant{

@@ -13,14 +13,14 @@ type opKind uint8
 const (
 	opRefresh opKind = iota // DescribeTopics to resolve a topic-cache miss, then resume the request
 	opMeta                  // DescribeTopics answering Metadata
-	opList                  // Lookup for one ListOffsets partition
-	opFetch                 // Lookup, then ranged GETs, for one Fetch partition
+	opList                  // FindSegments for one ListOffsets partition
+	opFetch                 // FindSegments, then ranged GETs, for one Fetch partition
 )
 
 type opState uint8
 
 const (
-	opCP opState = iota // a CPCall is in flight
+	opCP opState = iota // a ControlPlaneCall is in flight
 	opGet
 	opBackoff
 )
@@ -93,18 +93,18 @@ func (b *Broker) startOp(o *op) []core.Action {
 func (b *Broker) issue(o *op) []core.Action {
 	o.req = b.req()
 	if o.state == opGet {
-		return []core.Action{core.ObjGet{Req: o.req, Ref: o.ranges[o.next].Loc}}
+		return []core.Action{core.ObjectGet{Req: o.req, Ref: o.ranges[o.next].Loc}}
 	}
-	var cop core.CPOp
+	var cop core.ControlPlaneOperation
 	switch o.kind {
 	case opRefresh, opMeta:
 		cop = core.DescribeTopics{Topics: o.names}
 	case opList: // only the end offset is wanted: look past the end
-		cop = core.Lookup{TP: o.tp, From: core.Offset(1<<63 - 1), MaxBytes: 1}
+		cop = core.FindSegments{TP: o.tp, From: core.Offset(1<<63 - 1), MaxBytes: 1}
 	case opFetch:
-		cop = core.Lookup{TP: o.tp, From: o.from, MaxBytes: o.maxBytes}
+		cop = core.FindSegments{TP: o.tp, From: o.from, MaxBytes: o.maxBytes}
 	}
-	return []core.Action{core.CPCall{Req: o.req, Op: cop}}
+	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: cop}}
 }
 
 // retryOp backs off and repeats the call, or gives up after MaxAttempts or
@@ -165,7 +165,7 @@ func (b *Broker) failOp(o *op, code kafkaCode) []core.Action {
 	return b.endOp(o)
 }
 
-func (b *Broker) onOpCP(o *op, e core.CPDone) []core.Action {
+func (b *Broker) onOpCP(o *op, e core.ControlPlaneDone) []core.Action {
 	if e.Err == core.ErrInvalid {
 		return b.failOp(o, errUnknownServer)
 	}
@@ -182,7 +182,7 @@ func (b *Broker) onOpCP(o *op, e core.CPDone) []core.Action {
 			b.metaResp(o, r.Topics, errNone)
 			return b.endOp(o)
 		}
-	case core.LookupResp:
+	case core.FindSegmentsResp:
 		switch o.kind {
 		case opList:
 			o.lpart.Offset = int64(r.End)

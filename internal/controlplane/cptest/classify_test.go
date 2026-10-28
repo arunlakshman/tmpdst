@@ -17,9 +17,9 @@ import (
 )
 
 func TestClassifier(t *testing.T) {
-	commit := core.CPCall{Op: core.CommitSegment{}}
-	look := core.CPCall{Op: core.Lookup{}}
-	desc := core.CPCall{Op: core.DescribeTopics{}}
+	commit := core.ControlPlaneCall{Op: core.CommitSegment{}}
+	look := core.ControlPlaneCall{Op: core.FindSegments{}}
+	desc := core.ControlPlaneCall{Op: core.DescribeTopics{}}
 	dial := &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}
 	reset := &net.OpError{Op: "read", Err: syscall.ECONNRESET}
 	dns := &net.DNSError{Err: "no such host", Name: "cp"}
@@ -28,7 +28,7 @@ func TestClassifier(t *testing.T) {
 	}
 	cases := []struct {
 		name string
-		a    core.IOAction
+		a    core.IOCall
 		err  error
 		code core.ErrCode
 		out  core.Outcome
@@ -71,7 +71,7 @@ func TestClassifierLiveDial(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error")
 	}
-	c, o := cpclient.Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, err)
+	c, o := cpclient.Classifier{}.Classify(core.ControlPlaneCall{Op: core.CommitSegment{}}, err)
 	if c != core.ErrUnavailable && c != core.ErrIO {
 		t.Errorf("refused: %v %v (%v)", c, o, err)
 	}

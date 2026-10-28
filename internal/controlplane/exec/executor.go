@@ -24,8 +24,8 @@ func (c Config) withDefaults() Config {
 	return c
 }
 
-// Executor runs Log* and Obj* IOActions on goroutines and delivers exactly
-// one Completion per action to the Sink.
+// Executor runs Log* and Obj* IOCalls on goroutines and delivers exactly
+// one IOResult per action to the Sink.
 type Executor struct {
 	ctx  context.Context
 	cfg  Config
@@ -44,7 +44,7 @@ func New(ctx context.Context, cfg Config, log Log, objs ObjectStore, sink run.Si
 	return &Executor{ctx: ctx, cfg: cfg.withDefaults(), log: log, objs: objs, sink: sink}
 }
 
-func (e *Executor) deliver(c core.Completion) {
+func (e *Executor) deliver(c core.IOResult) {
 	select {
 	case <-e.sink.Closed():
 		return
@@ -54,22 +54,22 @@ func (e *Executor) deliver(c core.Completion) {
 }
 
 // Execute never blocks: it starts a goroutine per action.
-func (e *Executor) Execute(a core.IOAction) {
+func (e *Executor) Execute(a core.IOCall) {
 	go func() { e.deliver(e.run(a)) }()
 }
 
-func (e *Executor) run(a core.IOAction) core.Completion {
+func (e *Executor) run(a core.IOCall) core.IOResult {
 	switch a := a.(type) {
-	case core.LogAppend, core.LogRead, core.LogCheckTail, core.LogTrim:
+	case core.LogAppend, core.LogRead, core.LogGetEnd, core.LogDeleteOld:
 		return e.logIO(a)
-	case core.ObjPut, core.ObjGet, core.ObjDelete, core.ObjList:
+	case core.ObjectPut, core.ObjectGet, core.ObjectDelete, core.ObjectList:
 		return e.objIO(a)
 	default:
 		return core.LogAppendDone{Req: a.ReqID(), Err: core.ErrInvalid, Outcome: core.NotApplied}
 	}
 }
 
-func (e *Executor) logIO(a core.IOAction) core.Completion {
+func (e *Executor) logIO(a core.IOCall) core.IOResult {
 	ctx, cancel := context.WithTimeout(e.ctx, e.cfg.LogTimeout)
 	defer cancel()
 	switch a := a.(type) {
@@ -93,62 +93,62 @@ func (e *Executor) logIO(a core.IOAction) core.Completion {
 			return core.LogReadDone{Req: a.Req, Err: c, Outcome: o}
 		}
 		return core.LogReadDone{Req: a.Req, Entries: ents, Err: core.OK, Outcome: core.Applied}
-	case core.LogCheckTail:
+	case core.LogGetEnd:
 		tail, err := e.log.CheckTail(ctx)
 		if err != nil {
 			c, o := Classify(a, err)
-			return core.LogCheckTailDone{Req: a.Req, Err: c, Outcome: o}
+			return core.LogGetEndDone{Req: a.Req, Err: c, Outcome: o}
 		}
-		return core.LogCheckTailDone{Req: a.Req, Tail: tail, Err: core.OK, Outcome: core.Applied}
-	case core.LogTrim:
+		return core.LogGetEndDone{Req: a.Req, Tail: tail, Err: core.OK, Outcome: core.Applied}
+	case core.LogDeleteOld:
 		err := e.log.TrimThrough(ctx, a.Through)
 		if err != nil {
 			c, o := Classify(a, err)
-			return core.LogTrimDone{Req: a.Req, Err: c, Outcome: o}
+			return core.LogDeleteOldDone{Req: a.Req, Err: c, Outcome: o}
 		}
-		return core.LogTrimDone{Req: a.Req, Err: core.OK, Outcome: core.Applied}
+		return core.LogDeleteOldDone{Req: a.Req, Err: core.OK, Outcome: core.Applied}
 	default:
 		return core.LogAppendDone{Req: a.ReqID(), Err: core.ErrInvalid, Outcome: core.NotApplied}
 	}
 }
 
-func (e *Executor) objIO(a core.IOAction) core.Completion {
+func (e *Executor) objIO(a core.IOCall) core.IOResult {
 	ctx, cancel := context.WithTimeout(e.ctx, e.cfg.ObjTimeout)
 	defer cancel()
 	switch a := a.(type) {
-	case core.ObjPut:
+	case core.ObjectPut:
 		err := e.objs.Put(ctx, a.Key, a.Data)
 		c, o := Classify(a, err)
-		return core.ObjPutDone{Req: a.Req, Key: a.Key, Err: c, Outcome: o}
-	case core.ObjGet:
+		return core.ObjectPutDone{Req: a.Req, Key: a.Key, Err: c, Outcome: o}
+	case core.ObjectGet:
 		return e.objGet(ctx, a)
-	case core.ObjDelete:
+	case core.ObjectDelete:
 		err := e.objs.Delete(ctx, a.Key)
 		c, o := Classify(a, err)
-		return core.ObjDeleteDone{Req: a.Req, Err: c, Outcome: o}
-	case core.ObjList:
+		return core.ObjectDeleteDone{Req: a.Req, Err: c, Outcome: o}
+	case core.ObjectList:
 		return e.objList(ctx, a)
 	default:
-		return core.ObjGetDone{Req: a.ReqID(), Err: core.ErrInvalid}
+		return core.ObjectGetDone{Req: a.ReqID(), Err: core.ErrInvalid}
 	}
 }
 
-//nolint:dupl // ObjGet/ObjList share err-or-value shape with different fields
-func (e *Executor) objGet(ctx context.Context, a core.ObjGet) core.Completion {
+//nolint:dupl // ObjectGet/ObjectList share err-or-value shape with different fields
+func (e *Executor) objGet(ctx context.Context, a core.ObjectGet) core.IOResult {
 	data, err := e.objs.Get(ctx, a.Ref)
 	if err != nil {
 		c, _ := Classify(a, err)
-		return core.ObjGetDone{Req: a.Req, Err: c}
+		return core.ObjectGetDone{Req: a.Req, Err: c}
 	}
-	return core.ObjGetDone{Req: a.Req, Data: data}
+	return core.ObjectGetDone{Req: a.Req, Data: data}
 }
 
-//nolint:dupl // ObjGet/ObjList share err-or-value shape with different fields
-func (e *Executor) objList(ctx context.Context, a core.ObjList) core.Completion {
+//nolint:dupl // ObjectGet/ObjectList share err-or-value shape with different fields
+func (e *Executor) objList(ctx context.Context, a core.ObjectList) core.IOResult {
 	keys, err := e.objs.List(ctx, a.Prefix)
 	if err != nil {
 		c, _ := Classify(a, err)
-		return core.ObjListDone{Req: a.Req, Err: c}
+		return core.ObjectListDone{Req: a.Req, Err: c}
 	}
-	return core.ObjListDone{Req: a.Req, Keys: keys}
+	return core.ObjectListDone{Req: a.Req, Keys: keys}
 }

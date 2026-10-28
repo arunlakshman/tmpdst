@@ -42,7 +42,7 @@ func (s applierSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlan
 	case op.CreateTopic != nil:
 		return observation.ControlPlaneResult{Code: s.a.CreateTopic(op.CreateTopic.Name, op.CreateTopic.Partitions)}, nil
 	case op.Call != nil:
-		done, ok := s.a.Exec(*op.Call).(core.CPDone)
+		done, ok := s.a.Exec(*op.Call).(core.ControlPlaneDone)
 		if !ok {
 			return observation.ControlPlaneResult{}, errors.New("the applier did not return a CPDone")
 		}
@@ -98,7 +98,7 @@ func TestLookupMaxBytesEdges(t *testing.T) {
 						t.Fatalf("Seed %d, operation %d (%s): %s", seed, i, op.Describe(), diff)
 					}
 					if op.Call != nil {
-						if lk, ok := op.Call.Op.(core.Lookup); ok {
+						if lk, ok := op.Call.Op.(core.FindSegments); ok {
 							edgeLookups(t, subject, spec, lk, expected)
 						}
 					}
@@ -118,7 +118,7 @@ func pb(topic string, p int32, n int64) core.PendingBatch {
 		Loc: core.SegmentRef{Key: topic, Off: n * 10, Len: n}}
 }
 
-func mustCommit(t *testing.T, a *applier.Applier, slot int64, op core.CommitSegment) core.CPDone {
+func mustCommit(t *testing.T, a *applier.Applier, slot int64, op core.CommitSegment) core.ControlPlaneDone {
 	t.Helper()
 	d, err := a.Commit(slot, op)
 	if err != nil {
@@ -204,10 +204,10 @@ func TestInvalidAndUnknown(t *testing.T) {
 	if a.CreateTopic("", 1) != core.ErrInvalid || a.CreateTopic("t", 0) != core.ErrInvalid {
 		t.Fatal("CreateTopic must reject empty name and non-positive partitions")
 	}
-	if d := a.Exec(core.CPCall{Op: core.Lookup{From: -1}}).(core.CPDone); d.Err != core.ErrInvalid {
+	if d := a.Exec(core.ControlPlaneCall{Op: core.FindSegments{From: -1}}).(core.ControlPlaneDone); d.Err != core.ErrInvalid {
 		t.Fatalf("Lookup From<0: %+v", d)
 	}
-	if d := a.Exec(core.CPCall{Op: nil}).(core.CPDone); d.Err != core.ErrInvalid {
+	if d := a.Exec(core.ControlPlaneCall{Op: nil}).(core.ControlPlaneDone); d.Err != core.ErrInvalid {
 		t.Fatalf("unknown op: %+v", d)
 	}
 	defer func() {
@@ -215,7 +215,7 @@ func TestInvalidAndUnknown(t *testing.T) {
 			t.Fatal("Exec of a non-CPCall must panic")
 		}
 	}()
-	a.Exec(core.Dial{})
+	a.Exec(core.Connect{})
 }
 
 func TestStoreAdapter(t *testing.T) {
@@ -228,11 +228,11 @@ func TestStoreAdapter(t *testing.T) {
 	if err != nil || c != core.OK || resp.Assigned[0].Base != 0 {
 		t.Fatalf("%+v %v %v", resp, c, err)
 	}
-	lk, c, _ := s.Lookup(ctx, core.Lookup{TP: core.TP("t", 2)})
+	lk, c, _ := s.Lookup(ctx, core.FindSegments{TP: core.TP("t", 2)})
 	if c != core.OK || lk.End != 4 || len(lk.Ranges) != 1 {
 		t.Fatalf("%+v %v", lk, c)
 	}
-	if _, c, _ = s.Lookup(ctx, core.Lookup{From: -1}); c != core.ErrInvalid {
+	if _, c, _ = s.Lookup(ctx, core.FindSegments{From: -1}); c != core.ErrInvalid {
 		t.Fatal(c)
 	}
 	d, err := s.DescribeTopics(ctx, core.DescribeTopics{})
@@ -267,7 +267,7 @@ func TestCommitBatchEqualsSequential(t *testing.T) {
 
 // edgeLookups asks lk again with MaxBytes at, just below and just above every
 // running total of Len in the expected answer.
-func edgeLookups(t *testing.T, subject, spec suites.ControlPlaneSubject, lk core.Lookup, expected observation.ControlPlaneResult) {
+func edgeLookups(t *testing.T, subject, spec suites.ControlPlaneSubject, lk core.FindSegments, expected observation.ControlPlaneResult) {
 	t.Helper()
 	var sum int64
 	for _, r := range expected.Ranges {
@@ -276,7 +276,7 @@ func edgeLookups(t *testing.T, subject, spec suites.ControlPlaneSubject, lk core
 			if sum+e <= 0 {
 				continue
 			}
-			q := generator.NewCall(core.CPCall{Op: core.Lookup{TP: lk.TP, From: lk.From, MaxBytes: int32(sum + e)}})
+			q := generator.NewCall(core.ControlPlaneCall{Op: core.FindSegments{TP: lk.TP, From: lk.From, MaxBytes: int32(sum + e)}})
 			want, _ := spec.Do(q)
 			got, _ := subject.Do(q)
 			if diff := observation.DiffControlPlane(want, got); diff != "" {

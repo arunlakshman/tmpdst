@@ -39,7 +39,7 @@ type Config struct {
 	TakeoverAfter core.Duration
 
 	// CkptEvery is the pause between checkpoint attempts on the appender.
-	// Zero disables the timer; set CkptKey alone to restore on Started.
+	// Zero disables the timer; set CkptKey alone to restore on NodeStarted.
 	CkptEvery core.Duration
 	// CkptMinSlots skips a checkpoint when fewer slots were applied since the
 	// last. Zero means 1.

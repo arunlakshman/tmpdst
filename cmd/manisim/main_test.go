@@ -103,17 +103,17 @@ func TestMergeReports(t *testing.T) {
 	a := sim.Report{
 		Seeds: []sim.SeedResult{{Seed: 1}},
 		Assertions: []sim.AssertionStat{
-			{Prop: core.Prop("inv"), Kind: "always", Checks: 3, Passes: 3},
-			{Prop: core.Prop("cov"), Kind: "sometimes", Checks: 2, Passes: 0},
+			{Prop: core.PropertyID("inv"), Kind: "always", Checks: 3, Passes: 3},
+			{Prop: core.PropertyID("cov"), Kind: "sometimes", Checks: 2, Passes: 0},
 		},
 	}
 	b := sim.Report{
 		Seeds:          []sim.SeedResult{{Seed: 2}},
 		Nondeterminism: []uint64{2},
 		Assertions: []sim.AssertionStat{
-			{Prop: core.Prop("inv"), Kind: "always", Checks: 2, Passes: 1, Seeds: []uint64{2}, FirstSeed: 2, FirstStep: 8},
-			{Prop: core.Prop("cov"), Kind: "sometimes", Checks: 1, Passes: 1, Seeds: []uint64{2}, FirstSeed: 2, FirstStep: 1},
-			{Prop: core.Prop("never"), Kind: "unreachable", Checks: 1, Passes: 1},
+			{Prop: core.PropertyID("inv"), Kind: "always", Checks: 2, Passes: 1, Seeds: []uint64{2}, FirstSeed: 2, FirstStep: 8},
+			{Prop: core.PropertyID("cov"), Kind: "sometimes", Checks: 1, Passes: 1, Seeds: []uint64{2}, FirstSeed: 2, FirstStep: 1},
+			{Prop: core.PropertyID("never"), Kind: "unreachable", Checks: 1, Passes: 1},
 		},
 	}
 	got := mergeReports([]sim.Report{a, b})

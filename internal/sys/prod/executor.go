@@ -47,8 +47,8 @@ func (c ExecConfig) withDefaults() ExecConfig {
 	return c
 }
 
-// Executor is the production sys.Executor: each IOAction runs on its own
-// goroutine under a timeout and yields exactly one Completion on the Sink.
+// Executor is the production sys.Executor: each IOCall runs on its own
+// goroutine under a timeout and yields exactly one IOResult on the Sink.
 // Sends go through the connection's ordered writer queue instead.
 type Executor struct {
 	ctx   context.Context
@@ -68,7 +68,7 @@ func NewExecutor(ctx context.Context, cfg ExecConfig, objs sys.ObjectStore, cp s
 	return &Executor{ctx: ctx, cfg: cfg.withDefaults(), objs: objs, cp: cp, conns: conns, class: class, sink: sink}
 }
 
-func (e *Executor) deliver(c core.Completion) {
+func (e *Executor) deliver(c core.IOResult) {
 	select {
 	case <-e.sink.Closed():
 		return
@@ -78,19 +78,19 @@ func (e *Executor) deliver(c core.Completion) {
 }
 
 // Execute never blocks: it queues a write or starts a goroutine.
-func (e *Executor) Execute(a core.IOAction) {
+func (e *Executor) Execute(a core.IOCall) {
 	switch a := a.(type) {
 	case core.Send:
 		e.send(a)
-	case core.Dial:
-		go e.deliver(core.DialDone{Req: a.Req, Err: core.ErrInvalid}) // brokers reach the CP through CPCall
-	case core.ObjPut, core.ObjGet, core.ObjDelete, core.ObjList:
+	case core.Connect:
+		go e.deliver(core.ConnectDone{Req: a.Req, Err: core.ErrInvalid}) // brokers reach the CP through ControlPlaneCall
+	case core.ObjectPut, core.ObjectGet, core.ObjectDelete, core.ObjectList:
 		go func() { e.deliver(e.object(a)) }()
-	case core.CPCall:
+	case core.ControlPlaneCall:
 		go func() { e.deliver(e.control(a)) }()
 	default:
-		//nolint:forbidigo // impossible: machine emits only known IOAction types
-		panic(fmt.Sprintf("prod: unknown IOAction %T", a))
+		//nolint:forbidigo // impossible: machine emits only known IOCall types
+		panic(fmt.Sprintf("prod: unknown IOCall %T", a))
 	}
 }
 
@@ -128,49 +128,49 @@ func failCode(err error, fail func(error) (core.ErrCode, core.Outcome)) (core.Er
 	return c, true
 }
 
-func (e *Executor) object(a core.IOAction) core.Completion {
+func (e *Executor) object(a core.IOCall) core.IOResult {
 	var n int64
 	switch a := a.(type) {
-	case core.ObjPut:
+	case core.ObjectPut:
 		n = int64(len(a.Data))
-	case core.ObjGet:
+	case core.ObjectGet:
 		n = a.Ref.Len
 	}
 	ctx, cancel := context.WithTimeout(e.ctx, e.cfg.objTimeout(n))
 	defer cancel()
 	fail := func(err error) (core.ErrCode, core.Outcome) { return e.class.Classify(a, err) }
 	switch a := a.(type) {
-	case core.ObjPut:
+	case core.ObjectPut:
 		c, o := mutateOutcome(e.objs.Put(ctx, a.Key, a.Data), fail)
-		return core.ObjPutDone{Req: a.Req, Key: a.Key, Err: c, Outcome: o}
-	case core.ObjGet:
+		return core.ObjectPutDone{Req: a.Req, Key: a.Key, Err: c, Outcome: o}
+	case core.ObjectGet:
 		data, err := e.objs.Get(ctx, a.Ref)
 		if c, bad := failCode(err, fail); bad {
-			return core.ObjGetDone{Req: a.Req, Err: c}
+			return core.ObjectGetDone{Req: a.Req, Err: c}
 		}
-		return core.ObjGetDone{Req: a.Req, Data: data}
-	case core.ObjDelete:
+		return core.ObjectGetDone{Req: a.Req, Data: data}
+	case core.ObjectDelete:
 		c, o := mutateOutcome(e.objs.Delete(ctx, a.Key), fail)
-		return core.ObjDeleteDone{Req: a.Req, Err: c, Outcome: o}
-	case core.ObjList:
+		return core.ObjectDeleteDone{Req: a.Req, Err: c, Outcome: o}
+	case core.ObjectList:
 		keys, err := e.objs.List(ctx, a.Prefix)
 		c, bad := failCode(err, fail)
 		if !bad {
-			return core.ObjListDone{Req: a.Req, Keys: keys}
+			return core.ObjectListDone{Req: a.Req, Keys: keys}
 		}
-		return core.ObjListDone{Req: a.Req, Err: c}
+		return core.ObjectListDone{Req: a.Req, Err: c}
 	default:
-		return core.ObjPutDone{Req: a.ReqID(), Err: core.ErrInvalid}
+		return core.ObjectPutDone{Req: a.ReqID(), Err: core.ErrInvalid}
 	}
 }
 
-func (e *Executor) control(a core.CPCall) core.Completion {
+func (e *Executor) control(a core.ControlPlaneCall) core.IOResult {
 	ctx, cancel := context.WithTimeout(e.ctx, e.cfg.CPTimeout)
 	defer cancel()
 	resp, err := e.cp.Call(ctx, a.Op)
 	if err != nil {
 		c, o := e.class.Classify(a, err)
-		return core.CPDone{Req: a.Req, Err: c, Outcome: o}
+		return core.ControlPlaneDone{Req: a.Req, Err: c, Outcome: o}
 	}
-	return core.CPDone{Req: a.Req, Resp: resp, Outcome: core.Applied}
+	return core.ControlPlaneDone{Req: a.Req, Resp: resp, Outcome: core.Applied}
 }

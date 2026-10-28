@@ -53,7 +53,7 @@ They live at **two layers**. Do not conflate them.
 // sim/kafka/config.go (configLogWith)
 cfg.Processes = append(cfg.Processes, sim.Process{
     Name: "cp", Count: 2, NoAttrition: true,
-    FactoryFor: func(sc sim.SeedConfig) core.Factory { return cpFactory(sc, opts) },
+    FactoryFor: func(sc sim.SeedConfig) core.MachineFactory { return cpFactory(sc, opts) },
 })
 ```
 

@@ -135,7 +135,7 @@ Rules:
 
 ## 3. Two inboxes per node
 
-### 3.1 Classification (a fixed table in `core`: `core.ClassOf(EventBody) Class`)
+### 3.1 Classification (a fixed table in `core`: `core.InboxKindOf(EventData) InboxKind`)
 
 | Event            | Queue       | Why |
 |------------------|-------------|-----|
@@ -225,7 +225,7 @@ Treating `Step` as instantaneous hides everything in §1. So the simulator
 ```
 simNode = {
     sm        core.StateMachine
-    ctrl,data []Entry              // the node's two inboxes, classified by core.ClassOf
+    ctrl,data []Entry              // the node's two inboxes, classified by core.InboxKindOf
     busyUntil sim.Time             // models the loop goroutine being busy
 }
 
@@ -304,7 +304,7 @@ with measured latency bounds) so simulated overload resembles the real thing.
 | Where | What |
 |---|---|
 | `internal/core/action.go` | Actions `PauseReads{Conn}` and `ResumeReads{Conn}`. |
-| `internal/core/inbox.go` | `Class` (`Control`, `Data`) and `ClassOf(EventBody) Class`, the fixed table from §3.1. An unclassified event type panics, so a new event can't silently land in the wrong queue. |
+| `internal/core/inbox.go` | `InboxKind` (`Control`, `Data`) and `InboxKindOf(EventData) InboxKind`, the fixed table from §3.1. An unclassified event type panics, so a new event can't silently land in the wrong queue. |
 | `internal/core/inbox.go` | `Queue` (`Len`, `Pop`) and `InboxPolicy` (`Next(control, data Queue)`), pure and shared by production and the simulator. |
 | `internal/sys/sys.go` | `Sink` split into `DeliverControl` (never blocks) and `DeliverData` (may block). `Conns` gains `PauseReads`/`ResumeReads` so the production executor can park a reader goroutine. |
 | `internal/verify/sim/cost.go` | `CostModel`, `CostParams` (per-event cost, per-byte cost, pause episodes) and `NodeInbox` (a node's simulated two inboxes plus `BusyUntil`). |

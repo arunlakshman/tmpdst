@@ -97,7 +97,7 @@ func mergeStats(all []AssertionStat, agg map[statKey]int, stats []AssertionStat)
 	return all
 }
 
-func addUnreached(all []AssertionStat, expect []core.Prop) []AssertionStat {
+func addUnreached(all []AssertionStat, expect []core.PropertyID) []AssertionStat {
 	for _, p := range expect {
 		found := false
 		for _, a := range all {

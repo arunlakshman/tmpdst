@@ -167,7 +167,7 @@ func controlPlaneInvariant(p *ControlPlanePair) error {
 // checkRuns looks up a whole partition and checks that its runs have no gap
 // and no overlap and that the end offset equals the committed record count.
 func (p *ControlPlanePair) checkRuns(who string, subject ControlPlaneSubject, tp core.TopicPartition) error {
-	result, err := subject.Do(generator.NewCall(core.CPCall{Req: p.nextReq(), Op: core.Lookup{TP: tp}}))
+	result, err := subject.Do(generator.NewCall(core.ControlPlaneCall{Req: p.nextReq(), Op: core.FindSegments{TP: tp}}))
 	if err != nil {
 		return fmt.Errorf("the %s could not look up %v: %w", who, tp, err)
 	}
@@ -191,7 +191,7 @@ func (p *ControlPlanePair) checkRuns(who string, subject ControlPlaneSubject, tp
 }
 
 func (p *ControlPlanePair) checkTopics(who string, subject ControlPlaneSubject) error {
-	result, err := subject.Do(generator.NewCall(core.CPCall{Req: p.nextReq(), Op: core.DescribeTopics{}}))
+	result, err := subject.Do(generator.NewCall(core.ControlPlaneCall{Req: p.nextReq(), Op: core.DescribeTopics{}}))
 	if err != nil {
 		return fmt.Errorf("the %s could not describe the topics: %w", who, err)
 	}

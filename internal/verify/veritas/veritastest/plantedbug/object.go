@@ -35,11 +35,11 @@ func (b ObjectBug) Wrap(correct suites.ObjectSubject) suites.ObjectSubject { ret
 // objectSubject is a subject made from a function. do may call inner.
 type objectSubject struct {
 	inner suites.ObjectSubject
-	do    func(op core.IOAction) (observation.ObjectResult, error)
+	do    func(op core.IOCall) (observation.ObjectResult, error)
 	hash  func() (uint64, bool)
 }
 
-func (s *objectSubject) Do(op core.IOAction) (observation.ObjectResult, error) { return s.do(op) }
+func (s *objectSubject) Do(op core.IOCall) (observation.ObjectResult, error) { return s.do(op) }
 
 func (s *objectSubject) StateHash() (uint64, bool) {
 	if s.hash != nil {
@@ -50,18 +50,18 @@ func (s *objectSubject) StateHash() (uint64, bool) {
 
 // afterObject makes a bug that changes the result after the correct subject has
 // answered. change gets the operation and the correct result.
-func afterObject(name, doc string, change func(op core.IOAction, r observation.ObjectResult) observation.ObjectResult) ObjectBug {
-	return stateful(name, doc, func(suites.ObjectSubject) func(core.IOAction, observation.ObjectResult) observation.ObjectResult {
+func afterObject(name, doc string, change func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult) ObjectBug {
+	return stateful(name, doc, func(suites.ObjectSubject) func(core.IOCall, observation.ObjectResult) observation.ObjectResult {
 		return change
 	})
 }
 
 // stateful makes a bug whose change function keeps state. newChange is called
 // once for each fresh subject.
-func stateful(name, doc string, newChange func(suites.ObjectSubject) func(core.IOAction, observation.ObjectResult) observation.ObjectResult) ObjectBug {
+func stateful(name, doc string, newChange func(suites.ObjectSubject) func(core.IOCall, observation.ObjectResult) observation.ObjectResult) ObjectBug {
 	return NewObjectBug(name, doc, func(inner suites.ObjectSubject) suites.ObjectSubject {
 		change := newChange(inner)
-		return &objectSubject{inner: inner, do: func(op core.IOAction) (observation.ObjectResult, error) {
+		return &objectSubject{inner: inner, do: func(op core.IOCall) (observation.ObjectResult, error) {
 			r, err := inner.Do(op)
 			if err != nil {
 				return r, err
@@ -92,19 +92,19 @@ func ObjectBugs() []ObjectBug {
 func PutKeepsCallerSlice() ObjectBug {
 	return stateful("PutKeepsCallerSlice",
 		"Put keeps the caller's slice instead of a copy, so a later change by the caller changes the stored data.",
-		func(suites.ObjectSubject) func(core.IOAction, observation.ObjectResult) observation.ObjectResult {
+		func(suites.ObjectSubject) func(core.IOCall, observation.ObjectResult) observation.ObjectResult {
 			kept := map[string][]byte{}
-			return func(op core.IOAction, r observation.ObjectResult) observation.ObjectResult {
+			return func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult {
 				switch op := op.(type) {
-				case core.ObjPut:
+				case core.ObjectPut:
 					if r.Code == core.OK {
 						kept[op.Key] = op.Data
 					}
-				case core.ObjDelete:
+				case core.ObjectDelete:
 					if r.Code == core.OK {
 						delete(kept, op.Key)
 					}
-				case core.ObjGet:
+				case core.ObjectGet:
 					data, ok := kept[op.Ref.Key]
 					if !ok || r.Code != core.OK {
 						return r
@@ -127,8 +127,8 @@ func GetRangeEndOffByOne() ObjectBug {
 	return NewObjectBug("GetRangeEndOffByOne",
 		"Get with a length reads one byte past the end of the range.",
 		func(inner suites.ObjectSubject) suites.ObjectSubject {
-			return &objectSubject{inner: inner, do: func(op core.IOAction) (observation.ObjectResult, error) {
-				if get, ok := op.(core.ObjGet); ok && get.Ref.Len > 0 {
+			return &objectSubject{inner: inner, do: func(op core.IOCall) (observation.ObjectResult, error) {
+				if get, ok := op.(core.ObjectGet); ok && get.Ref.Len > 0 {
 					get.Ref.Len++
 					op = get
 				}
@@ -141,8 +141,8 @@ func GetRangeEndOffByOne() ObjectBug {
 func GetOutOfRangeReturnsOK() ObjectBug {
 	return afterObject("GetOutOfRangeReturnsOK",
 		"Get with a range outside the object returns OK and no data instead of ErrInvalid.",
-		func(op core.IOAction, r observation.ObjectResult) observation.ObjectResult {
-			if _, ok := op.(core.ObjGet); ok && r.Code == core.ErrInvalid {
+		func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult {
+			if _, ok := op.(core.ObjectGet); ok && r.Code == core.ErrInvalid {
 				return observation.ObjectResult{}
 			}
 			return r
@@ -153,8 +153,8 @@ func GetOutOfRangeReturnsOK() ObjectBug {
 func ListUnsorted() ObjectBug {
 	return afterObject("ListUnsorted",
 		"List returns the keys in reverse order instead of sorted order.",
-		func(op core.IOAction, r observation.ObjectResult) observation.ObjectResult {
-			if _, ok := op.(core.ObjList); ok {
+		func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult {
+			if _, ok := op.(core.ObjectList); ok {
 				r.Keys = slices.Clone(r.Keys)
 				slices.Reverse(r.Keys)
 			}
@@ -166,19 +166,19 @@ func ListUnsorted() ObjectBug {
 func ListPrefixAsSubstring() ObjectBug {
 	return stateful("ListPrefixAsSubstring",
 		"List matches the prefix anywhere in the key instead of only at the start.",
-		func(suites.ObjectSubject) func(core.IOAction, observation.ObjectResult) observation.ObjectResult {
+		func(suites.ObjectSubject) func(core.IOCall, observation.ObjectResult) observation.ObjectResult {
 			keys := map[string]bool{}
-			return func(op core.IOAction, r observation.ObjectResult) observation.ObjectResult {
+			return func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult {
 				switch op := op.(type) {
-				case core.ObjPut:
+				case core.ObjectPut:
 					if r.Code == core.OK {
 						keys[op.Key] = true
 					}
-				case core.ObjDelete:
+				case core.ObjectDelete:
 					if r.Code == core.OK {
 						delete(keys, op.Key)
 					}
-				case core.ObjList:
+				case core.ObjectList:
 					var found []string
 					for k := range keys {
 						if strings.Contains(k, op.Prefix) {
@@ -197,8 +197,8 @@ func ListPrefixAsSubstring() ObjectBug {
 func DeleteMissingReturnsOK() ObjectBug {
 	return afterObject("DeleteMissingReturnsOK",
 		"Delete of a missing key returns OK instead of ErrNotFound.",
-		func(op core.IOAction, r observation.ObjectResult) observation.ObjectResult {
-			if _, ok := op.(core.ObjDelete); ok && r.Code == core.ErrNotFound {
+		func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult {
+			if _, ok := op.(core.ObjectDelete); ok && r.Code == core.ErrNotFound {
 				return observation.ObjectResult{Outcome: core.Applied}
 			}
 			return r
@@ -209,8 +209,8 @@ func DeleteMissingReturnsOK() ObjectBug {
 func PutEmptyKeyAccepted() ObjectBug {
 	return afterObject("PutEmptyKeyAccepted",
 		"Put with the empty key returns OK instead of ErrInvalid.",
-		func(op core.IOAction, r observation.ObjectResult) observation.ObjectResult {
-			if put, ok := op.(core.ObjPut); ok && put.Key == "" && r.Code == core.ErrInvalid {
+		func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult {
+			if put, ok := op.(core.ObjectPut); ok && put.Key == "" && r.Code == core.ErrInvalid {
 				return observation.ObjectResult{Outcome: core.Applied}
 			}
 			return r
@@ -223,17 +223,17 @@ func PutOverwriteIgnored() ObjectBug {
 		"Put on an existing key answers OK but keeps the old value.",
 		func(inner suites.ObjectSubject) suites.ObjectSubject {
 			exists := map[string]bool{}
-			return &objectSubject{inner: inner, do: func(op core.IOAction) (observation.ObjectResult, error) {
+			return &objectSubject{inner: inner, do: func(op core.IOCall) (observation.ObjectResult, error) {
 				switch op := op.(type) {
-				case core.ObjPut:
+				case core.ObjectPut:
 					if exists[op.Key] {
 						return observation.ObjectResult{Outcome: core.Applied}, nil
 					}
-				case core.ObjDelete:
+				case core.ObjectDelete:
 					delete(exists, op.Key)
 				}
 				r, err := inner.Do(op)
-				if put, ok := op.(core.ObjPut); ok && err == nil && r.Code == core.OK {
+				if put, ok := op.(core.ObjectPut); ok && err == nil && r.Code == core.OK {
 					exists[put.Key] = true
 				}
 				return r, err

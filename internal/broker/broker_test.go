@@ -69,7 +69,7 @@ func TestMetadata(t *testing.T) {
 	if len(r.Topics) != 2 || kafkaCode(r.Topics[0].ErrorCode) != errUnknownTopicOrPart || r.Topics[1].ErrorCode != 0 {
 		t.Fatalf("topics %+v", r.Topics)
 	}
-	for _, cmd := range h.cp.Exec(core.CPCall{Req: 1, Op: core.DescribeTopics{Topics: []string{"nope"}}}).(core.CPDone).Resp.(core.DescribeTopicsResp).Topics {
+	for _, cmd := range h.cp.Exec(core.ControlPlaneCall{Req: 1, Op: core.DescribeTopics{Topics: []string{"nope"}}}).(core.ControlPlaneDone).Resp.(core.DescribeTopicsResp).Topics {
 		t.Fatalf("topic auto-created: %v", cmd)
 	}
 	q.Topics = []kmsg.MetadataRequestTopic{}
@@ -237,7 +237,7 @@ func TestFactImmediatelyBeforeSend(t *testing.T) {
 	h.produceOne(c, e("t", 0, plain(t, "a", "b")))
 	n := 0
 	for i, a := range h.all {
-		e, ok := a.(core.Emit)
+		e, ok := a.(core.RecordFact)
 		if !ok || e.Fact.Name != "produce_acked" {
 			continue
 		}
@@ -262,11 +262,11 @@ func TestGracefulStop(t *testing.T) {
 	if len(h.puts) != 0 {
 		t.Fatal("flushed early")
 	}
-	h.do(core.Stop{Deadline: h.now + core.Time(core.Second)})
+	h.do(core.StopRequest{Deadline: h.now + core.Time(core.Second)})
 	if !h.exited || !h.paused[1] {
 		t.Fatalf("exited=%v paused=%v", h.exited, h.paused[1])
 	}
-	if _, ok := h.all[len(h.all)-1].(core.Exit); !ok {
+	if _, ok := h.all[len(h.all)-1].(core.ShutdownDone); !ok {
 		t.Fatal("Exit is not last")
 	}
 	if r := produced(h.next(c))[0]; r.ErrorCode != 0 || r.BaseOffset != 0 {
@@ -277,7 +277,7 @@ func TestGracefulStop(t *testing.T) {
 	}
 	// Idle broker exits at once.
 	h2 := startedHarness(t, DefaultConfig())
-	h2.do(core.Stop{})
+	h2.do(core.StopRequest{})
 	if !h2.exited {
 		t.Fatal("idle stop")
 	}
@@ -309,9 +309,9 @@ func TestCorruptGetRetried(t *testing.T) {
 		c := h.open(1)
 		h.produceOne(c, e("t", 0, plain(t, "hello")))
 		corrupt := true
-		h.objHook = func(a core.IOAction, run func() core.Completion) core.Completion {
+		h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
 			d := run()
-			if g, ok := d.(core.ObjGetDone); ok && corrupt {
+			if g, ok := d.(core.ObjectGetDone); ok && corrupt {
 				corrupt = false
 				g.Data = append([]byte(nil), g.Data...)
 				g.Data[len(g.Data)-1] ^= 0x55
@@ -345,9 +345,9 @@ func TestFetchGetsExhausted(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.produceOne(c, e("t", 0, plain(t, "hello")))
-	h.objHook = func(a core.IOAction, run func() core.Completion) core.Completion {
+	h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
 		d := run()
-		if g, ok := d.(core.ObjGetDone); ok {
+		if g, ok := d.(core.ObjectGetDone); ok {
 			g.Data = append([]byte(nil), g.Data...)
 			g.Data[len(g.Data)-1] ^= 1
 			return g
@@ -514,12 +514,12 @@ func TestStateHash(t *testing.T) {
 	}
 }
 
-func TestIgnoresStrayCompletions(t *testing.T) {
+func TestIgnoresStrayIOResults(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	before := h.b.StateHash()
-	h.step(core.CPDone{Req: 999})
-	h.step(core.ObjPutDone{Req: 999})
-	h.step(core.ObjGetDone{Req: 999})
+	h.step(core.ControlPlaneDone{Req: 999})
+	h.step(core.ObjectPutDone{Req: 999})
+	h.step(core.ObjectGetDone{Req: 999})
 	h.step(core.SendDone{Req: 1})
 	h.step(core.TimerFired{ID: 77, Gen: 3})
 	if h.b.StateHash() != before {
@@ -604,11 +604,11 @@ func TestCommitRetryAfterMaybeAppliedResendsIdenticalRequest(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	lose := 2
-	h.cpHook = func(a core.CPCall, run func() core.Completion) core.Completion {
+	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
 		if _, ok := a.Op.(core.CommitSegment); ok && lose > 0 {
 			lose--
 			run() // applied, response lost
-			return core.CPDone{Req: a.Req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}
+			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}
 		}
 		return run()
 	}
@@ -709,9 +709,9 @@ func TestCommitSurvivesLongCPOutage(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	down := true
-	h.cpHook = func(a core.CPCall, run func() core.Completion) core.Completion {
+	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
 		if _, ok := a.Op.(core.CommitSegment); ok && down {
-			return core.CPDone{Req: a.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied}
+			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied}
 		}
 		return run()
 	}
@@ -755,9 +755,9 @@ func TestCommitDeadlineFailsSegmentAndReleasesBuffer(t *testing.T) {
 	cfg.CommitDeadline = 5 * core.Second
 	h := startedHarness(t, cfg)
 	c := h.open(1)
-	h.cpHook = func(a core.CPCall, run func() core.Completion) core.Completion {
+	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
 		if _, ok := a.Op.(core.CommitSegment); ok {
-			return core.CPDone{Req: a.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied}
+			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied}
 		}
 		return run()
 	}

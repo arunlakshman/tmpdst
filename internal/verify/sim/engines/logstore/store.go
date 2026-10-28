@@ -36,15 +36,15 @@ func (s *store) ensure(slot core.LogSlot) {
 	}
 }
 
-func (s *store) exec(a core.IOAction) core.Completion {
+func (s *store) exec(a core.IOCall) core.IOResult {
 	switch a := a.(type) {
 	case core.LogAppend:
 		return s.append(a)
 	case core.LogRead:
 		return s.read(a)
-	case core.LogCheckTail:
+	case core.LogGetEnd:
 		return s.checkTail(a)
-	case core.LogTrim:
+	case core.LogDeleteOld:
 		return s.trim(a)
 	}
 	panic("logstore: not a log action")
@@ -84,7 +84,7 @@ func (s *store) read(a core.LogRead) core.LogReadDone {
 	return core.LogReadDone{Req: a.Req, Entries: out, Err: core.OK, Outcome: core.Applied}
 }
 
-func (s *store) checkTail(a core.LogCheckTail) core.LogCheckTailDone {
+func (s *store) checkTail(a core.LogGetEnd) core.LogGetEndDone {
 	tail := core.LogSlot(0)
 	for i, r := range slices.Backward(s.slots) {
 		if r.kind != slotEmpty {
@@ -92,12 +92,12 @@ func (s *store) checkTail(a core.LogCheckTail) core.LogCheckTailDone {
 			break
 		}
 	}
-	return core.LogCheckTailDone{Req: a.Req, Tail: tail, Err: core.OK, Outcome: core.Applied}
+	return core.LogGetEndDone{Req: a.Req, Tail: tail, Err: core.OK, Outcome: core.Applied}
 }
 
-func (s *store) trim(a core.LogTrim) core.LogTrimDone {
+func (s *store) trim(a core.LogDeleteOld) core.LogDeleteOldDone {
 	if a.Through < 0 {
-		return core.LogTrimDone{Req: a.Req, Err: core.ErrInvalid, Outcome: core.NotApplied}
+		return core.LogDeleteOldDone{Req: a.Req, Err: core.ErrInvalid, Outcome: core.NotApplied}
 	}
 	s.ensure(a.Through)
 	kind := slotTomb
@@ -107,7 +107,7 @@ func (s *store) trim(a core.LogTrim) core.LogTrimDone {
 	for i := range int(a.Through) + 1 {
 		s.slots[i] = slotRec{kind: kind}
 	}
-	return core.LogTrimDone{Req: a.Req, Err: core.OK, Outcome: core.Applied}
+	return core.LogDeleteOldDone{Req: a.Req, Err: core.OK, Outcome: core.Applied}
 }
 
 func (s *store) entry(slot core.LogSlot) ([]byte, bool) {

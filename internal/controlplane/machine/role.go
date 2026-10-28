@@ -225,7 +225,7 @@ func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {
 	refuse := func(c pendingCmd) {
 		m.answers = append(m.answers, Answer{
 			Req: c.req, From: c.from,
-			Done: core.CPDone{Req: c.req, Err: err, Outcome: o},
+			Done: core.ControlPlaneDone{Req: c.req, Err: err, Outcome: o},
 		})
 	}
 	// Sort map keys so answer order is stable across runs (TraceHash).

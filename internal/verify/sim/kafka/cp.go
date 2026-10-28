@@ -7,11 +7,11 @@ import (
 )
 
 // cpFactory builds one CP replica machine for kafka-log, seeding workload topics.
-func cpFactory(sc sim.SeedConfig, opts Opts) core.Factory {
+func cpFactory(sc sim.SeedConfig, opts Opts) core.MachineFactory {
 	lp := sc.ControlPlane.Log
 	topics := opts.Topics
 	parts := opts.Partitions
-	return func(env core.Env, self core.NodeRef) core.Machine {
+	return func(env core.Env, self core.NodeInstance) core.Machine {
 		rank := 0
 		if self.Node == "cp-1" {
 			rank = 1

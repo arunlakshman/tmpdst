@@ -11,12 +11,12 @@ import (
 	"manifester/internal/verify/veritas/veritastest"
 )
 
-func put(s *ObjectStore, key, data string) core.ObjPutDone {
-	return s.Exec(core.ObjPut{Req: 1, Key: key, Data: []byte(data)}).(core.ObjPutDone)
+func put(s *ObjectStore, key, data string) core.ObjectPutDone {
+	return s.Exec(core.ObjectPut{Req: 1, Key: key, Data: []byte(data)}).(core.ObjectPutDone)
 }
 
-func get(s *ObjectStore, key string, off, n int64) core.ObjGetDone {
-	return s.Exec(core.ObjGet{Req: 2, Ref: core.SegmentRef{Key: key, Off: off, Len: n}}).(core.ObjGetDone)
+func get(s *ObjectStore, key string, off, n int64) core.ObjectGetDone {
+	return s.Exec(core.ObjectGet{Req: 2, Ref: core.SegmentRef{Key: key, Off: off, Len: n}}).(core.ObjectGetDone)
 }
 
 func TestObjectStoreRangeGet(t *testing.T) {
@@ -52,7 +52,7 @@ func TestObjectStoreRangeGet(t *testing.T) {
 func TestObjectStorePutCopiesAndOverwrites(t *testing.T) {
 	s := NewObjectStore()
 	buf := []byte("xy")
-	s.Exec(core.ObjPut{Key: "k", Data: buf})
+	s.Exec(core.ObjectPut{Key: "k", Data: buf})
 	buf[0] = 'z'
 	d := get(s, "k", 0, 0)
 	d.Data[1] = 'q'
@@ -75,13 +75,13 @@ func TestObjectStoreDeleteAndHash(t *testing.T) {
 	if s.StateHash() == empty {
 		t.Fatal("hash unchanged by put")
 	}
-	if d := s.Exec(core.ObjDelete{Req: 3, Key: "k"}).(core.ObjDeleteDone); d.Err != core.OK || d.Outcome != core.Applied {
+	if d := s.Exec(core.ObjectDelete{Req: 3, Key: "k"}).(core.ObjectDeleteDone); d.Err != core.OK || d.Outcome != core.Applied {
 		t.Fatalf("delete: %+v", d)
 	}
 	if s.StateHash() != empty {
 		t.Fatal("hash not restored by delete")
 	}
-	if d := s.Exec(core.ObjDelete{Req: 4, Key: "k"}).(core.ObjDeleteDone); d.Err != core.ErrNotFound || d.Outcome != core.NotApplied {
+	if d := s.Exec(core.ObjectDelete{Req: 4, Key: "k"}).(core.ObjectDeleteDone); d.Err != core.ErrNotFound || d.Outcome != core.NotApplied {
 		t.Fatalf("delete missing: %+v", d)
 	}
 	if s.StateHash() != empty {
@@ -104,7 +104,7 @@ func TestObjectStoreListOrdering(t *testing.T) {
 		put(s, k, "")
 	}
 	list := func(p string) []string {
-		return s.Exec(core.ObjList{Prefix: p}).(core.ObjListDone).Keys
+		return s.Exec(core.ObjectList{Prefix: p}).(core.ObjectListDone).Keys
 	}
 	if got, want := list(""), []string{"a", "a/1", "a/10", "a/2", "b", "c/1"}; !slices.Equal(got, want) {
 		t.Fatalf("all: %v", got)
@@ -131,11 +131,11 @@ func (m *sliceStore) find(k string) (int, bool) {
 	return i, i < len(m.keys) && m.keys[i] == k
 }
 
-func (m *sliceStore) Exec(a core.IOAction) core.Completion {
+func (m *sliceStore) Exec(a core.IOCall) core.IOResult {
 	switch a := a.(type) {
-	case core.ObjPut:
+	case core.ObjectPut:
 		if a.Key == "" {
-			return core.ObjPutDone{Req: a.Req, Key: a.Key, Err: core.ErrInvalid}
+			return core.ObjectPutDone{Req: a.Req, Key: a.Key, Err: core.ErrInvalid}
 		}
 		i, ok := m.find(a.Key)
 		v := append([]byte{}, a.Data...)
@@ -145,11 +145,11 @@ func (m *sliceStore) Exec(a core.IOAction) core.Completion {
 			m.keys = slices.Insert(m.keys, i, a.Key)
 			m.vals = slices.Insert(m.vals, i, v)
 		}
-		return core.ObjPutDone{Req: a.Req, Key: a.Key, Outcome: core.Applied}
-	case core.ObjGet:
+		return core.ObjectPutDone{Req: a.Req, Key: a.Key, Outcome: core.Applied}
+	case core.ObjectGet:
 		i, ok := m.find(a.Ref.Key)
 		if !ok {
-			return core.ObjGetDone{Req: a.Req, Err: core.ErrNotFound}
+			return core.ObjectGetDone{Req: a.Req, Err: core.ErrNotFound}
 		}
 		v, off := m.vals[i], a.Ref.Off
 		n := int64(len(v)) - off
@@ -157,29 +157,29 @@ func (m *sliceStore) Exec(a core.IOAction) core.Completion {
 			n = a.Ref.Len
 		}
 		if off < 0 || n < 0 || off+n > int64(len(v)) {
-			return core.ObjGetDone{Req: a.Req, Err: core.ErrInvalid}
+			return core.ObjectGetDone{Req: a.Req, Err: core.ErrInvalid}
 		}
-		return core.ObjGetDone{Req: a.Req, Data: append([]byte{}, v[off:off+n]...)}
-	case core.ObjDelete:
+		return core.ObjectGetDone{Req: a.Req, Data: append([]byte{}, v[off:off+n]...)}
+	case core.ObjectDelete:
 		i, ok := m.find(a.Key)
 		if !ok {
-			return core.ObjDeleteDone{Req: a.Req, Err: core.ErrNotFound}
+			return core.ObjectDeleteDone{Req: a.Req, Err: core.ErrNotFound}
 		}
 		m.keys = slices.Delete(m.keys, i, i+1)
 		m.vals = slices.Delete(m.vals, i, i+1)
-		return core.ObjDeleteDone{Req: a.Req, Outcome: core.Applied}
-	case core.ObjList:
+		return core.ObjectDeleteDone{Req: a.Req, Outcome: core.Applied}
+	case core.ObjectList:
 		var out []string
 		for i := sort.SearchStrings(m.keys, a.Prefix); i < len(m.keys) && strings.HasPrefix(m.keys[i], a.Prefix); i++ {
 			out = append(out, m.keys[i])
 		}
-		return core.ObjListDone{Req: a.Req, Keys: out}
+		return core.ObjectListDone{Req: a.Req, Keys: out}
 	}
 	panic("sliceStore: unknown action")
 }
 
 type objExec interface {
-	Exec(core.IOAction) core.Completion
+	Exec(core.IOCall) core.IOResult
 	Keys() []string
 }
 
@@ -187,13 +187,13 @@ type objPair struct{ impl, model objExec }
 
 func (m *sliceStore) Keys() []string { return slices.Clone(m.keys) }
 
-func objCheck(impl func() objExec) veritastest.SpecComparator[*objPair, core.IOAction] {
+func objCheck(impl func() objExec) veritastest.SpecComparator[*objPair, core.IOCall] {
 	keys := []string{"", "a", "a/b", "a/c", "b"}
 	prefixes := []string{"", "a", "a/", "b", "z"}
-	return veritastest.SpecComparator[*objPair, core.IOAction]{
-		Name: "core.IOAction",
+	return veritastest.SpecComparator[*objPair, core.IOCall]{
+		Name: "core.IOCall",
 		New:  func() *objPair { return &objPair{impl(), &sliceStore{}} },
-		Gen: func(r *veritastest.Rand, i int) core.IOAction {
+		Gen: func(r *veritastest.Rand, i int) core.IOCall {
 			req, key := core.ReqID(i+1), keys[r.Intn(len(keys))]
 			switch r.Intn(7) {
 			case 0, 1, 2:
@@ -201,15 +201,15 @@ func objCheck(impl func() objExec) veritastest.SpecComparator[*objPair, core.IOA
 				for j := range data {
 					data[j] = byte('a' + r.Intn(26))
 				}
-				return core.ObjPut{Req: req, Key: key, Data: data}
+				return core.ObjectPut{Req: req, Key: key, Data: data}
 			case 3, 4:
-				return core.ObjGet{Req: req, Ref: core.SegmentRef{Key: key, Off: int64(r.Intn(7) - 1), Len: int64(r.Intn(7) - 1)}}
+				return core.ObjectGet{Req: req, Ref: core.SegmentRef{Key: key, Off: int64(r.Intn(7) - 1), Len: int64(r.Intn(7) - 1)}}
 			case 5:
-				return core.ObjDelete{Req: req, Key: key}
+				return core.ObjectDelete{Req: req, Key: key}
 			}
-			return core.ObjList{Req: req, Prefix: prefixes[r.Intn(len(prefixes))]}
+			return core.ObjectList{Req: req, Prefix: prefixes[r.Intn(len(prefixes))]}
 		},
-		Step: func(p *objPair, op core.IOAction) error {
+		Step: func(p *objPair, op core.IOCall) error {
 			got, want := fmt.Sprintf("%#v", p.impl.Exec(op)), fmt.Sprintf("%#v", p.model.Exec(op))
 			if got != want {
 				return fmt.Errorf("impl %s, model %s", got, want)
@@ -222,15 +222,15 @@ func objCheck(impl func() objExec) veritastest.SpecComparator[*objPair, core.IOA
 			}
 			return nil
 		},
-		Shrink: func(op core.IOAction) []core.IOAction {
+		Shrink: func(op core.IOCall) []core.IOCall {
 			switch op := op.(type) {
-			case core.ObjPut:
+			case core.ObjectPut:
 				if len(op.Data) > 0 {
 					op.Data = nil
-					return []core.IOAction{op}
+					return []core.IOCall{op}
 				}
-			case core.ObjGet:
-				var out []core.IOAction
+			case core.ObjectGet:
+				var out []core.IOCall
 				if op.Ref.Off != 0 {
 					r := op
 					r.Ref.Off = 0
@@ -245,7 +245,7 @@ func objCheck(impl func() objExec) veritastest.SpecComparator[*objPair, core.IOA
 			}
 			return nil
 		},
-		Format: func(op core.IOAction) string { return fmt.Sprintf("%#v", op) },
+		Format: func(op core.IOCall) string { return fmt.Sprintf("%#v", op) },
 		Ops:    60,
 	}
 }
@@ -258,8 +258,8 @@ func TestObjectStoreVsSortedSlice(t *testing.T) {
 // brokenStore ignores Off when Len <= 0.
 type brokenStore struct{ *ObjectStore }
 
-func (b brokenStore) Exec(a core.IOAction) core.Completion {
-	if g, ok := a.(core.ObjGet); ok && g.Ref.Len <= 0 {
+func (b brokenStore) Exec(a core.IOCall) core.IOResult {
+	if g, ok := a.(core.ObjectGet); ok && g.Ref.Len <= 0 {
 		g.Ref.Off = 0
 		return b.ObjectStore.Exec(g)
 	}
@@ -268,7 +268,7 @@ func (b brokenStore) Exec(a core.IOAction) core.Completion {
 
 func TestObjectStoreCheckShrinksPlantedBug(t *testing.T) {
 	c := objCheck(func() objExec { return brokenStore{NewObjectStore()} })
-	var f *veritastest.Failure[core.IOAction]
+	var f *veritastest.Failure[core.IOCall]
 	for seed := uint64(1); f == nil && seed <= 50; seed++ {
 		f = c.RunSeed(seed)
 	}
@@ -278,8 +278,8 @@ func TestObjectStoreCheckShrinksPlantedBug(t *testing.T) {
 	if len(f.Ops) != 2 {
 		t.Fatalf("want put+get, got:\n%s", c.Report(f, ""))
 	}
-	put, ok1 := f.Ops[0].(core.ObjPut)
-	get, ok2 := f.Ops[1].(core.ObjGet)
+	put, ok1 := f.Ops[0].(core.ObjectPut)
+	get, ok2 := f.Ops[1].(core.ObjectGet)
 	// Any put then a to-the-end get at Off > 0 shows it; shrinking empties the
 	// data and zeroes Len.
 	if !ok1 || !ok2 || len(put.Data) != 0 || get.Ref.Off <= 0 || get.Ref.Len != 0 || put.Key != get.Ref.Key {

@@ -10,11 +10,11 @@ import (
 
 func driveToHole(t *testing.T, m *machine.Machine) core.LogAppend {
 	t.Helper()
-	acts := step(m, core.Started{})
+	acts := step(m, core.NodeStarted{})
 	timer := acts[0].(core.SetTimer)
 	acts = step(m, core.TimerFired{ID: timer.ID, Gen: timer.Gen})
-	tail := acts[0].(core.LogCheckTail)
-	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
+	tail := acts[0].(core.LogGetEnd)
+	acts = step(m, core.LogGetEndDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
 	read := acts[0].(core.LogRead)
 	acts = step(m, core.LogReadDone{
 		Req: read.Req, Err: core.OK, Outcome: core.Applied,
@@ -84,14 +84,14 @@ func TestHoleFillTombRestoresFromCheckpoint(t *testing.T) {
 		CatchUpEvery: core.Millisecond, HoleAfter: 0, Writer: "w",
 		CkptKey: "ckpt/t", CkptEvery: core.Second, Rank: 1,
 	})
-	acts := step(m, core.Started{})
-	get := acts[0].(core.ObjGet)
-	acts = step(m, core.ObjGetDone{Req: get.Req, Err: core.ErrNotFound})
+	acts := step(m, core.NodeStarted{})
+	get := acts[0].(core.ObjectGet)
+	acts = step(m, core.ObjectGetDone{Req: get.Req, Err: core.ErrNotFound})
 	// after empty restore: catch-up timer then driveToHole shape
 	timer := acts[0].(core.SetTimer)
 	acts = step(m, core.TimerFired{ID: timer.ID, Gen: timer.Gen})
-	tail := acts[0].(core.LogCheckTail)
-	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
+	tail := acts[0].(core.LogGetEnd)
+	acts = step(m, core.LogGetEndDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
 	read := acts[0].(core.LogRead)
 	acts = step(m, core.LogReadDone{
 		Req: read.Req, Err: core.OK, Outcome: core.Applied,
@@ -111,7 +111,7 @@ func TestHoleFillTombRestoresFromCheckpoint(t *testing.T) {
 	if len(acts) != 1 {
 		t.Fatalf("acts = %v, want ObjGet restore", acts)
 	}
-	if get, ok := acts[0].(core.ObjGet); !ok || get.Ref.Key != "ckpt/t" {
+	if get, ok := acts[0].(core.ObjectGet); !ok || get.Ref.Key != "ckpt/t" {
 		t.Fatalf("act = %#v, want ObjGet ckpt/t", acts[0])
 	}
 }
@@ -121,11 +121,11 @@ func TestHoleFillTimerWaits(t *testing.T) {
 		CatchUpEvery: core.Millisecond,
 		HoleAfter:    5 * core.Millisecond,
 	})
-	acts := step(m, core.Started{})
+	acts := step(m, core.NodeStarted{})
 	timer := acts[0].(core.SetTimer)
 	acts = step(m, core.TimerFired{ID: timer.ID, Gen: timer.Gen})
-	tail := acts[0].(core.LogCheckTail)
-	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
+	tail := acts[0].(core.LogGetEnd)
+	acts = step(m, core.LogGetEndDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
 	read := acts[0].(core.LogRead)
 	acts = step(m, core.LogReadDone{
 		Req: read.Req, Err: core.OK, Outcome: core.Applied,
@@ -152,11 +152,11 @@ func TestHoleFillStaysQuietWhileArmed(t *testing.T) {
 		CatchUpEvery: core.Millisecond,
 		HoleAfter:    5 * core.Millisecond,
 	})
-	acts := step(m, core.Started{})
+	acts := step(m, core.NodeStarted{})
 	catch := acts[0].(core.SetTimer)
 	acts = step(m, core.TimerFired{ID: catch.ID, Gen: catch.Gen})
-	tail := acts[0].(core.LogCheckTail)
-	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
+	tail := acts[0].(core.LogGetEnd)
+	acts = step(m, core.LogGetEndDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
 	read := acts[0].(core.LogRead)
 	acts = step(m, core.LogReadDone{
 		Req: read.Req, Err: core.OK, Outcome: core.Applied,
@@ -168,8 +168,8 @@ func TestHoleFillStaysQuietWhileArmed(t *testing.T) {
 	}
 
 	acts = step(m, core.TimerFired{ID: catch.ID, Gen: catch.Gen})
-	tail = acts[0].(core.LogCheckTail)
-	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
+	tail = acts[0].(core.LogGetEnd)
+	acts = step(m, core.LogGetEndDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
 	if len(acts) != 0 {
 		t.Fatalf("while hole timer armed, catch-up returned %v, want none", acts)
 	}
@@ -184,18 +184,18 @@ func TestHoleFillStaysQuietWhileArmed(t *testing.T) {
 }
 
 func TestHoleFillSkipMutantAdvancesWithoutAppend(t *testing.T) {
-	const prop = core.Prop("logcp-sim: a replica's state equals the replay of the log at its slot")
+	const prop = core.PropertyID("logcp-sim: a replica's state equals the replay of the log at its slot")
 	m, env := newMachineEnv(t, machine.Config{
 		CatchUpEvery: core.Millisecond,
 		HoleAfter:    0,
 		Bug:          machine.BugHoleSkip,
 		Writer:       "w",
 	})
-	acts := step(m, core.Started{})
+	acts := step(m, core.NodeStarted{})
 	timer := acts[0].(core.SetTimer)
 	acts = step(m, core.TimerFired{ID: timer.ID, Gen: timer.Gen})
-	tail := acts[0].(core.LogCheckTail)
-	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
+	tail := acts[0].(core.LogGetEnd)
+	acts = step(m, core.LogGetEndDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
 	read := acts[0].(core.LogRead)
 	acts = step(m, core.LogReadDone{
 		Req: read.Req, Err: core.OK, Outcome: core.Applied,

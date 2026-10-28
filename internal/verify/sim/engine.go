@@ -10,23 +10,23 @@ import "manifester/internal/core"
 // happen in issue order. How a fault resolves (applied or not) may be drawn
 // when it lands.
 type Engine interface {
-	core.Hashable // folded into the trace hash after every step
+	core.HasStateHash // folded into the trace hash after every step
 	Name() string
 	// Handles reports whether this engine executes the given action type. The
-	// simulator routes every action except Emit, timers, Trip and Exit to
-	// exactly one engine. Not only IOActions: the network engine also takes
+	// simulator routes every action except RecordFact, timers, StopForRestart and ShutdownDone to
+	// exactly one engine. Not only IOCalls: the network engine also takes
 	// CloseConn, PauseReads and ResumeReads, which have no completion.
 	Handles(a core.Action) bool
 	// Execute starts an action issued by node `from`. Typical object-store PUT:
 	// schedule "apply" at t1 and "respond" at t2, or drop the response.
-	Execute(ctx EngineCtx, from core.NodeRef, a core.Action)
+	Execute(ctx EngineCtx, from core.NodeInstance, a core.Action)
 	// OnInternal consumes an entry this engine scheduled for itself.
 	OnInternal(ctx EngineCtx, body any)
 	// OnCrash is told that an incarnation died; effects already applied stand.
 	// DropNode removes only entries addressed to the node: engine-internal
 	// apply entries survive, so a PUT or commit already on the wire can land
 	// after the broker dies.
-	OnCrash(ctx EngineCtx, ref core.NodeRef)
+	OnCrash(ctx EngineCtx, ref core.NodeInstance)
 	// EnterRecovery stops generating new faults for actions issued after it;
 	// plans already in flight stand and existing damage is preserved.
 	EnterRecovery()
@@ -44,7 +44,7 @@ type EngineCtx interface {
 	// construct a Lane value. Key convention: "<engine>/<whatever>".
 	Lane(key string) Lane
 	// Deliver schedules a completion or inbound event to a node.
-	Deliver(to core.NodeRef, at Time, lane Lane, body core.EventBody) EntryID
+	Deliver(to core.NodeInstance, at Time, lane Lane, body core.EventData) EntryID
 	// Self schedules an internal entry back to this engine.
 	Self(at Time, lane Lane, body any) EntryID
 	Cancel(id EntryID)
@@ -59,8 +59,8 @@ type EngineCtx interface {
 // implements it; engines type-assert.
 type NodeCurrent interface {
 	// Current returns the live incarnation of a node, ok=false while it is
-	// down. The network engine uses it to route Dial and deliver ConnOpened.
-	Current(node core.NodeID) (ref core.NodeRef, ok bool)
+	// down. The network engine uses it to route Connect and deliver ConnOpened.
+	Current(node core.NodeID) (ref core.NodeInstance, ok bool)
 }
 
 // Latency is a sampled delay distribution.
@@ -89,7 +89,7 @@ type ObjectStoreFaults struct {
 	Unavailable503 float64  // refused before admission: NotApplied
 	Timeout        float64  // caller gives up; the op may or may not apply: MaybeApplied
 	LostResponse   float64  // applied, response never arrives (surfaces as timeout)
-	GetCorruptProb float64  // flip one bit in ObjGetDone.Data; the stored object stays intact
+	GetCorruptProb float64  // flip one bit in ObjectGetDone.Data; the stored object stays intact
 	Outage         Outage
 	CallerTimeout  core.Duration
 }
@@ -165,7 +165,7 @@ type LogStoreFaults struct {
 	Outage         Outage
 	CallerTimeout  core.Duration
 	// Bug selects a logstore mutant (logengine.BugTrimDelete deletes instead of
-	// tombstoning on LogTrim). Zero is none.
+	// tombstoning on LogDeleteOld). Zero is none.
 	Bug uint8
 	// WindowSlots and TrimStride mirror LogParams for CPTruth idempotency trim
 	// during reference replay (decision 48). Zero WindowSlots skips trim.

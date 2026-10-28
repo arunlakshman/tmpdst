@@ -37,7 +37,7 @@ func (i *ackedIsCommitted) Observe(v sim.View) {
 		if !ok {
 			continue
 		}
-		det := []core.Detail{{Key: "offset", Value: a.off}, {Key: "key", Value: a.key}}
+		det := []core.ContextPair{{Key: "offset", Value: a.off}, {Key: "key", Value: a.key}}
 		var loc core.SegmentRef
 		found := false
 		for _, r := range v.CP().Committed(tp()) {
@@ -81,7 +81,7 @@ func (i *readYourAck) Observe(v sim.View) {
 			continue
 		}
 		if prev, dup := i.acked[a.off]; dup {
-			v.Assert().Always(string(prev) == string(a.payload), "echo: an offset is acked with one payload", core.Detail{Key: "offset", Value: a.off})
+			v.Assert().Always(string(prev) == string(a.payload), "echo: an offset is acked with one payload", core.ContextPair{Key: "offset", Value: a.off})
 		}
 		i.acked[a.off] = a.payload
 	}
@@ -102,7 +102,7 @@ func (i *readYourAck) Observe(v sim.View) {
 		if rest, has := strings.CutPrefix(res, "VAL "); has {
 			want, acked := i.acked[g.Offset]
 			v.Assert().Always(acked && rest == string(want), "echo: GET of an acked offset returns the acked payload",
-				core.Detail{Key: "offset", Value: g.Offset}, core.Detail{Key: "got", Value: rest})
+				core.ContextPair{Key: "offset", Value: g.Offset}, core.ContextPair{Key: "got", Value: rest})
 		}
 	}
 }
@@ -118,7 +118,7 @@ func (l *liveness) AtEnd(v sim.View) {
 	v.Assert().Always(ok1 && ok2, "echo: the kernel announced Settling and Settle")
 	from, to := settling+sim.Time(campaign.LivenessGrace), settle
 	for _, op := range v.History().Ops() {
-		v.Assert().Always(op.Outcome != sim.OpPending, "echo: no request pending at end", core.Detail{Key: "op", Value: op.Op})
+		v.Assert().Always(op.Outcome != sim.OpPending, "echo: no request pending at end", core.ContextPair{Key: "op", Value: op.Op})
 		if !ok1 || !ok2 || op.Invoke < from || op.Invoke >= to {
 			continue
 		}
@@ -131,7 +131,7 @@ func (l *liveness) AtEnd(v sim.View) {
 			good = strings.HasPrefix(res, "VAL ") || res == "ERR corrupt"
 		}
 		v.Assert().Always(good, "echo: request invoked in Settling succeeds",
-			core.Detail{Key: "op", Value: op.Op}, core.Detail{Key: "result", Value: res}, core.Detail{Key: "invoke", Value: op.Invoke})
+			core.ContextPair{Key: "op", Value: op.Op}, core.ContextPair{Key: "result", Value: res}, core.ContextPair{Key: "invoke", Value: op.Invoke})
 	}
 	v.Assert().Sometimes(len(v.History().Ops()) > 0, "echo: workload issued requests")
 }
@@ -140,8 +140,8 @@ func (l *liveness) AtEnd(v sim.View) {
 // every fault family and recovery path must fire somewhere in the campaign.
 // The engines and the broker declare these props where the event happens; the
 // list lives here because only the campaign knows what it must see.
-func expectReachable() []core.Prop {
-	return []core.Prop{
+func expectReachable() []core.PropertyID {
+	return []core.PropertyID{
 		"obj 503 injected", "obj timeout injected", "obj lost response injected", "obj outage started", "obj get corrupted",
 		"cp 503 injected", "cp timeout injected", "cp lost response injected", "cp outage started",
 		"net: partition injected", "net: clog injected", "net: random_close injected", "net: black_hole injected",

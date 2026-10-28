@@ -15,8 +15,8 @@ const ms = core.Duration(1_000_000)
 type stub struct{ *Core }
 
 func (s stub) Handles(core.Action) bool { return true }
-func (s stub) Execute(ctx sim.EngineCtx, f core.NodeRef, a core.Action) {
-	s.Core.Execute(ctx, f, a.(core.IOAction))
+func (s stub) Execute(ctx sim.EngineCtx, f core.NodeInstance, a core.Action) {
+	s.Core.Execute(ctx, f, a.(core.IOCall))
 }
 
 func params() Params {
@@ -34,30 +34,30 @@ func TestSpecHashCacheObjectStore(t *testing.T) {
 	spec := veritas.NewObjectStore()
 	c := New(Hooks{
 		Name: "o", Prefix: "obj", Params: params(),
-		Spec: func(a core.IOAction) core.Completion { return spec.Exec(a) },
-		Mutating: func(a core.IOAction) bool {
+		Spec: func(a core.IOCall) core.IOResult { return spec.Exec(a) },
+		Mutating: func(a core.IOCall) bool {
 			switch a.(type) {
-			case core.ObjPut, core.ObjDelete:
+			case core.ObjectPut, core.ObjectDelete:
 				return true
 			}
 			return false
 		},
-		Fail: func(a core.IOAction, e core.ErrCode, o core.Outcome) core.Completion {
+		Fail: func(a core.IOCall, e core.ErrCode, o core.Outcome) core.IOResult {
 			switch a := a.(type) {
-			case core.ObjPut:
-				return core.ObjPutDone{Req: a.Req, Err: e, Outcome: o}
-			case core.ObjDelete:
-				return core.ObjDeleteDone{Req: a.Req, Err: e, Outcome: o}
-			case core.ObjGet:
-				return core.ObjGetDone{Req: a.Req, Err: e}
+			case core.ObjectPut:
+				return core.ObjectPutDone{Req: a.Req, Err: e, Outcome: o}
+			case core.ObjectDelete:
+				return core.ObjectDeleteDone{Req: a.Req, Err: e, Outcome: o}
+			case core.ObjectGet:
+				return core.ObjectGetDone{Req: a.Req, Err: e}
 			}
-			return core.ObjListDone{Req: a.ReqID(), Err: e}
+			return core.ObjectListDone{Req: a.ReqID(), Err: e}
 		},
-		Changed: func(c core.Completion) bool {
+		Changed: func(c core.IOResult) bool {
 			switch c := c.(type) {
-			case core.ObjPutDone:
+			case core.ObjectPutDone:
 				return c.Outcome == core.Applied
-			case core.ObjDeleteDone:
+			case core.ObjectDeleteDone:
 				return c.Outcome == core.Applied
 			}
 			return false
@@ -73,11 +73,11 @@ func TestSpecHashCacheObjectStore(t *testing.T) {
 		req := core.ReqID(i)
 		switch r.Between(0, 4) {
 		case 0, 1:
-			c.Execute(ctx, from, core.ObjPut{Req: req, Key: k, Data: []byte{byte(i)}})
+			c.Execute(ctx, from, core.ObjectPut{Req: req, Key: k, Data: []byte{byte(i)}})
 		case 2:
-			c.Execute(ctx, from, core.ObjDelete{Req: req, Key: k})
+			c.Execute(ctx, from, core.ObjectDelete{Req: req, Key: k})
 		default:
-			c.Execute(ctx, from, core.ObjGet{Req: req, Ref: core.SegmentRef{Key: k}})
+			c.Execute(ctx, from, core.ObjectGet{Req: req, Ref: core.SegmentRef{Key: k}})
 		}
 		if r.Chance(0.3) {
 			ctx.Run()
@@ -96,20 +96,20 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 	spec := veritas.NewControlPlane()
 	c := New(Hooks{
 		Name: "cp", Prefix: "cp", Params: params(),
-		Spec: func(a core.IOAction) core.Completion { return spec.Exec(a) },
-		Mutating: func(a core.IOAction) bool {
-			_, ok := a.(core.CPCall).Op.(core.CommitSegment)
+		Spec: func(a core.IOCall) core.IOResult { return spec.Exec(a) },
+		Mutating: func(a core.IOCall) bool {
+			_, ok := a.(core.ControlPlaneCall).Op.(core.CommitSegment)
 			return ok
 		},
-		Fail: func(a core.IOAction, err core.ErrCode, o core.Outcome) core.Completion {
-			return core.CPDone{Req: a.ReqID(), Err: err, Outcome: o}
+		Fail: func(a core.IOCall, err core.ErrCode, o core.Outcome) core.IOResult {
+			return core.ControlPlaneDone{Req: a.ReqID(), Err: err, Outcome: o}
 		},
-		Changed:  func(c core.Completion) bool { return c.(core.CPDone).Outcome == core.Applied },
+		Changed:  func(c core.IOResult) bool { return c.(core.ControlPlaneDone).Outcome == core.Applied },
 		SpecHash: spec.StateHash,
 	})
 	ctx := enginetest.New(stub{c}, 6)
 	r := sim.NewRand(77)
-	nodes := []core.NodeRef{enginetest.Ref("a"), enginetest.Ref("b"), enginetest.Ref("c")}
+	nodes := []core.NodeInstance{enginetest.Ref("a"), enginetest.Ref("b"), enginetest.Ref("c")}
 	tps := []core.TopicPartition{core.TP("t", 0), core.TP("t", 1)}
 	for _, tp := range tps[:1] {
 		if spec.CreateTopic(tp.Topic, 2) == core.OK {
@@ -126,12 +126,12 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 		switch r.Between(0, 2) {
 		case 0:
 			// Keys repeat (replays, and conflicts when the request differs).
-			c.Execute(ctx, n, core.CPCall{Req: req, Op: core.CommitSegment{
+			c.Execute(ctx, n, core.ControlPlaneCall{Req: req, Op: core.CommitSegment{
 				SegmentKey: string(rune('a' + r.Between(0, 8))),
 				Batches:    []core.PendingBatch{{TP: tps[r.Between(0, 2)], Records: 1 + r.Between(0, 3)}},
 			}})
 		default:
-			c.Execute(ctx, n, core.CPCall{Req: req, Op: core.Lookup{TP: tps[0]}})
+			c.Execute(ctx, n, core.ControlPlaneCall{Req: req, Op: core.FindSegments{TP: tps[0]}})
 		}
 		if r.Chance(0.3) {
 			ctx.Run()

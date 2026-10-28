@@ -64,15 +64,15 @@ func TestControlPlaneConcurrent(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	resp, _ := c.Call(ctx, core.Lookup{TP: tp})
-	if end := resp.(core.LookupResp).End; end != 16 {
+	resp, _ := c.Call(ctx, core.FindSegments{TP: tp})
+	if end := resp.(core.FindSegmentsResp).End; end != 16 {
 		t.Fatalf("end %d", end)
 	}
-	if got := len(resp.(core.LookupResp).Ranges); got != 8 {
+	if got := len(resp.(core.FindSegmentsResp).Ranges); got != 8 {
 		t.Fatalf("%d ranges", got)
 	}
 	next := core.Offset(0)
-	for _, r := range resp.(core.LookupResp).Ranges {
+	for _, r := range resp.(core.FindSegmentsResp).Ranges {
 		if r.Base != next {
 			t.Fatalf("gap or overlap at %d, want %d", r.Base, next)
 		}

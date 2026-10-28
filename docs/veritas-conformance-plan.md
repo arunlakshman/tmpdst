@@ -211,7 +211,7 @@ Files: new `observation/observation.go`, `observation/observation_test.go`.
   and `CPResult{Code, Outcome, Assigned []core.BatchRange, Ranges []core.BatchRange,
   End core.Offset, Topics []core.TopicInfo}` with a `Normalize` that makes
   nil == empty, and `String()` for messages.
-- Converters: from `core.Completion` (spec and sim engines), from `sys` adapter
+- Converters: from `core.IOResult` (spec and sim engines), from `sys` adapter
   returns (`error` -> `ErrCode` via the existing classifiers), from gRPC replies.
 - Acceptance: table tests cover nil/empty, every ErrCode, every Outcome; no
   `%+v` left in the package.

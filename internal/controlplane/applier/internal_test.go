@@ -61,7 +61,7 @@ func TestStoreFailureIsFailStop(t *testing.T) {
 		t.Error("Commit must return the store error")
 	}
 	for name, f := range map[string]func(){
-		"Exec":        func() { a.Exec(core.CPCall{Op: core.DescribeTopics{}}) },
+		"Exec":        func() { a.Exec(core.ControlPlaneCall{Op: core.DescribeTopics{}}) },
 		"CreateTopic": func() { a.CreateTopic("t", 1) },
 		"End":         func() { a.End(core.TP("t", 0)) },
 	} {
@@ -85,7 +85,7 @@ func TestCorruptStoredRecordsPanic(t *testing.T) {
 		tx.Set(idemKey("k"), []byte{0x80})
 	})
 	for name, f := range map[string]func(){
-		"lookup": func() { _, _ = a.Lookup(core.Lookup{TP: tp}) },
+		"lookup": func() { _, _ = a.Lookup(core.FindSegments{TP: tp}) },
 		"replay": func() { _, _ = a.Commit(1, core.CommitSegment{SegmentKey: "k"}) },
 	} {
 		func() {

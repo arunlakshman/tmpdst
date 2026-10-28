@@ -18,7 +18,7 @@ var ErrUnavailable = errors.New("cp: unavailable")
 // core.ErrCode with a nil error; error is infrastructure only.
 type Store interface {
 	CommitSegment(ctx context.Context, op core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error)
-	Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, core.ErrCode, error)
+	Lookup(ctx context.Context, op core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error)
 	DescribeTopics(ctx context.Context, op core.DescribeTopics) (core.DescribeTopicsResp, error)
 	CreateTopic(ctx context.Context, name string, partitions int32) (core.ErrCode, error)
 }

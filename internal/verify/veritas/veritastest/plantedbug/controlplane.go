@@ -87,9 +87,9 @@ func beforeControlPlane(name, doc string, newChange func() func(inner suites.Con
 }
 
 // commitOf returns the CommitSegment of op, if op is one.
-func commitOf(op generator.ControlPlaneOp) (core.CPCall, core.CommitSegment, bool) {
+func commitOf(op generator.ControlPlaneOp) (core.ControlPlaneCall, core.CommitSegment, bool) {
 	if op.Call == nil {
-		return core.CPCall{}, core.CommitSegment{}, false
+		return core.ControlPlaneCall{}, core.CommitSegment{}, false
 	}
 	c, ok := op.Call.Op.(core.CommitSegment)
 	return *op.Call, c, ok
@@ -184,7 +184,7 @@ func PartialApplyOnInvalidBatch() ControlPlaneBug {
 					if valid > 0 && valid < len(commit.Batches) {
 						n++
 						prefix := core.CommitSegment{SegmentKey: commit.SegmentKey + "#partial", Batches: commit.Batches[:valid]}
-						extra := core.CPCall{Req: call.Req + 1<<28 + n, Op: prefix}
+						extra := core.ControlPlaneCall{Req: call.Req + 1<<28 + n, Op: prefix}
 						if _, err := inner.Do(generator.NewCall(extra)); err != nil {
 							return observation.ControlPlaneResult{}, err
 						}
@@ -203,9 +203,9 @@ func LookupMaxBytesUsesGreater() ControlPlaneBug {
 		func() func(suites.ControlPlaneSubject, generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
 			return func(inner suites.ControlPlaneSubject, op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
 				if op.Call != nil {
-					if l, ok := op.Call.Op.(core.Lookup); ok && l.MaxBytes > 0 && l.MaxBytes < 1<<30 {
+					if l, ok := op.Call.Op.(core.FindSegments); ok && l.MaxBytes > 0 && l.MaxBytes < 1<<30 {
 						l.MaxBytes++
-						op = generator.NewCall(core.CPCall{Req: op.Call.Req, Op: l})
+						op = generator.NewCall(core.ControlPlaneCall{Req: op.Call.Req, Op: l})
 					}
 				}
 				return inner.Do(op)
@@ -222,7 +222,7 @@ func LookupSkipsRunContainingFrom() ControlPlaneBug {
 			if op.Call == nil {
 				return r
 			}
-			l, ok := op.Call.Op.(core.Lookup)
+			l, ok := op.Call.Op.(core.FindSegments)
 			if !ok || r.Code != core.OK {
 				return r
 			}
@@ -275,7 +275,7 @@ func TopicPartitionCountShrinks() ControlPlaneBug {
 
 // shrinkCountsForCall updates the own partition counts of the bug after a
 // commit, and replaces the counts in a describe result with them.
-func shrinkCountsForCall(counts map[string]int32, op core.CPOp, r observation.ControlPlaneResult) observation.ControlPlaneResult {
+func shrinkCountsForCall(counts map[string]int32, op core.ControlPlaneOperation, r observation.ControlPlaneResult) observation.ControlPlaneResult {
 	switch op.(type) {
 	case core.CommitSegment:
 		for _, a := range r.Assigned {

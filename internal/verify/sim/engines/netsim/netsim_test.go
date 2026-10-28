@@ -12,23 +12,23 @@ import (
 
 // ---- test doubles ----
 
-type asserts struct{ some map[core.Prop]bool }
+type asserts struct{ some map[core.PropertyID]bool }
 
-func (a *asserts) Always(bool, core.Prop, ...core.Detail)              {}
-func (a *asserts) AlwaysOrUnreachable(bool, core.Prop, ...core.Detail) {}
-func (a *asserts) Sometimes(c bool, p core.Prop) {
+func (a *asserts) Always(bool, core.PropertyID, ...core.ContextPair)              {}
+func (a *asserts) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
+func (a *asserts) Sometimes(c bool, p core.PropertyID) {
 	if c {
 		a.some[p] = true
 	}
 }
-func (a *asserts) Reachable(core.Prop)                   {}
-func (a *asserts) Unreachable(core.Prop, ...core.Detail) {}
+func (a *asserts) Reachable(core.PropertyID)                        {}
+func (a *asserts) Unreachable(core.PropertyID, ...core.ContextPair) {}
 
 type entry struct {
 	at   sim.Time
 	seq  uint64
 	id   sim.EntryID
-	to   core.NodeRef
+	to   core.NodeInstance
 	self bool
 	body any
 }
@@ -42,7 +42,7 @@ type harness struct {
 	now    sim.Time
 	q      []entry
 	seq    uint64
-	live   map[core.NodeID]core.NodeRef
+	live   map[core.NodeID]core.NodeInstance
 	as     *asserts
 	faults []string
 	log    []string
@@ -50,15 +50,15 @@ type harness struct {
 	data   map[string][]byte
 	closed map[string]core.ConnClosed
 	opened map[string]core.ConnOpened
-	dials  map[core.ReqID]core.DialDone
+	dials  map[core.ReqID]core.ConnectDone
 	sends  map[core.ReqID]core.SendDone
 	reqN   core.ReqID
 }
 
 func newHarness(t *testing.T, seed uint64, f sim.NetworkFaults) *harness {
-	return &harness{t: t, eng: New(f), rnd: sim.NewRand(seed), lanes: map[string]sim.Lane{}, live: map[core.NodeID]core.NodeRef{},
-		as: &asserts{some: map[core.Prop]bool{}}, data: map[string][]byte{}, closed: map[string]core.ConnClosed{},
-		opened: map[string]core.ConnOpened{}, dials: map[core.ReqID]core.DialDone{}, sends: map[core.ReqID]core.SendDone{}}
+	return &harness{t: t, eng: New(f), rnd: sim.NewRand(seed), lanes: map[string]sim.Lane{}, live: map[core.NodeID]core.NodeInstance{},
+		as: &asserts{some: map[core.PropertyID]bool{}}, data: map[string][]byte{}, closed: map[string]core.ConnClosed{},
+		opened: map[string]core.ConnOpened{}, dials: map[core.ReqID]core.ConnectDone{}, sends: map[core.ReqID]core.SendDone{}}
 }
 
 func (h *harness) Now() sim.Time         { return h.now }
@@ -81,7 +81,7 @@ func (h *harness) add(e entry) sim.EntryID {
 	h.q = append(h.q, e)
 	return e.id
 }
-func (h *harness) Deliver(to core.NodeRef, at sim.Time, _ sim.Lane, b core.EventBody) sim.EntryID {
+func (h *harness) Deliver(to core.NodeInstance, at sim.Time, _ sim.Lane, b core.EventData) sim.EntryID {
 	return h.add(entry{at: at, to: to, body: b})
 }
 func (h *harness) Self(at sim.Time, _ sim.Lane, b any) sim.EntryID {
@@ -97,20 +97,20 @@ func (h *harness) Cancel(id sim.EntryID) {
 }
 func (h *harness) Fault(kind string, f ...core.Field) { h.faults = append(h.faults, kind) }
 func (h *harness) Assert() core.Assertions            { return h.as }
-func (h *harness) Current(n core.NodeID) (core.NodeRef, bool) {
+func (h *harness) Current(n core.NodeID) (core.NodeInstance, bool) {
 	r, ok := h.live[n]
 	return r, ok
 }
 
 var _ sim.NodeCurrent = (*harness)(nil)
 
-func (h *harness) boot(n string) core.NodeRef {
-	r := core.NodeRef{Node: core.NodeID(n), Inc: core.Incarnation(h.rnd.NewID())}
+func (h *harness) boot(n string) core.NodeInstance {
+	r := core.NodeInstance{Node: core.NodeID(n), Inc: core.BootNumber(h.rnd.NewID())}
 	h.live[r.Node] = r
 	return r
 }
 
-func (h *harness) crash(r core.NodeRef) {
+func (h *harness) crash(r core.NodeInstance) {
 	delete(h.live, r.Node)
 	h.eng.OnCrash(h, r)
 }
@@ -150,7 +150,7 @@ func (h *harness) step() bool {
 	case core.ConnOpened:
 		h.opened[key(n, b.Conn)] = b
 		h.log = append(h.log, fmt.Sprintf("%d %s opened", h.now, key(n, b.Conn)))
-	case core.DialDone:
+	case core.ConnectDone:
 		h.dials[b.Req] = b
 		h.log = append(h.log, fmt.Sprintf("%d dial %d %v %d", h.now, b.Req, b.Err, b.Conn))
 	case core.SendDone:
@@ -189,15 +189,15 @@ func (h *harness) runUntil(t sim.Time) {
 
 func (h *harness) req() core.ReqID { h.reqN++; return h.reqN }
 
-func (h *harness) dial(from core.NodeRef, addr string) (core.DialDone, bool) {
+func (h *harness) dial(from core.NodeInstance, addr string) (core.ConnectDone, bool) {
 	r := h.req()
-	h.eng.Execute(h, from, core.Dial{Req: r, Addr: addr})
+	h.eng.Execute(h, from, core.Connect{Req: r, Addr: addr})
 	h.run()
 	d, ok := h.dials[r]
 	return d, ok
 }
 
-func (h *harness) send(from core.NodeRef, c core.ConnID, data []byte) core.ReqID {
+func (h *harness) send(from core.NodeInstance, c core.ConnID, data []byte) core.ReqID {
 	r := h.req()
 	h.eng.Execute(h, from, core.Send{Req: r, Conn: c, Data: data})
 	return r
@@ -206,7 +206,7 @@ func (h *harness) send(from core.NodeRef, c core.ConnID, data []byte) core.ReqID
 var lat = sim.TwoSpeed{FastMin: 1000, FastMax: 5000, SlowMin: 100000, SlowMax: 200000, SlowProb: 0.1}
 
 // connect dials a->b and returns both conn ids.
-func (h *harness) connect(a, b core.NodeRef) (core.ConnID, core.ConnID) {
+func (h *harness) connect(a, b core.NodeInstance) (core.ConnID, core.ConnID) {
 	d, ok := h.dial(a, string(b.Node))
 	if !ok || d.Err != core.OK {
 		h.t.Fatalf("dial failed: %+v %v", d, ok)

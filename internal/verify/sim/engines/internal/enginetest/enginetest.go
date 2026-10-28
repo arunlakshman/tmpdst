@@ -13,14 +13,14 @@ import (
 // Delivery is one completion handed to a node.
 type Delivery struct {
 	At   sim.Time
-	To   core.NodeRef
-	Body core.EventBody
+	To   core.NodeInstance
+	Body core.EventData
 }
 
 type entry struct {
 	at   sim.Time
 	seq  int
-	to   core.NodeRef // deliver when self is false
+	to   core.NodeInstance // deliver when self is false
 	self bool
 	body any
 	dead bool
@@ -70,7 +70,7 @@ func (c *Ctx) add(e *entry) sim.EntryID {
 }
 
 // Deliver queues an event for a node.
-func (c *Ctx) Deliver(to core.NodeRef, at sim.Time, _ sim.Lane, b core.EventBody) sim.EntryID {
+func (c *Ctx) Deliver(to core.NodeInstance, at sim.Time, _ sim.Lane, b core.EventData) sim.EntryID {
 	return c.add(&entry{at: max(at, c.T), to: to, body: b})
 }
 
@@ -95,9 +95,9 @@ func (c *Ctx) Fault(kind string, _ ...core.Field) { c.Faults = append(c.Faults, 
 func (c *Ctx) Assert() core.Assertions { return asserts{c} }
 
 // Current returns the live incarnation of n.
-func (c *Ctx) Current(n core.NodeID) (core.NodeRef, bool) {
+func (c *Ctx) Current(n core.NodeID) (core.NodeInstance, bool) {
 	if c.Down[n] {
-		return core.NodeRef{}, false
+		return core.NodeInstance{}, false
 	}
 	return Ref(string(n)), true
 }
@@ -105,8 +105,8 @@ func (c *Ctx) Current(n core.NodeID) (core.NodeRef, bool) {
 var _ sim.NodeCurrent = (*Ctx)(nil)
 
 // Ref is the live incarnation of node n in tests.
-func Ref(n string) core.NodeRef {
-	return core.NodeRef{Node: core.NodeID(n), Inc: core.Incarnation{1}}
+func Ref(n string) core.NodeInstance {
+	return core.NodeInstance{Node: core.NodeID(n), Inc: core.BootNumber{1}}
 }
 
 // Crash marks n down and drops its pending deliveries (the scheduler's DropNode).
@@ -174,7 +174,7 @@ func (c *Ctx) step() bool {
 	if e.self {
 		c.eng.OnInternal(c, e.body)
 	} else {
-		c.Delivered = append(c.Delivered, Delivery{At: e.at, To: e.to, Body: e.body.(core.EventBody)})
+		c.Delivered = append(c.Delivered, Delivery{At: e.at, To: e.to, Body: e.body.(core.EventData)})
 	}
 	return true
 }
@@ -190,24 +190,24 @@ func (c *Ctx) Trace() string {
 
 type asserts struct{ c *Ctx }
 
-func (a asserts) Always(cond bool, p core.Prop, _ ...core.Detail) {
+func (a asserts) Always(cond bool, p core.PropertyID, _ ...core.ContextPair) {
 	if !cond {
 		a.c.Violations = append(a.c.Violations, string(p))
 	}
 }
-func (a asserts) AlwaysOrUnreachable(bool, core.Prop, ...core.Detail) {}
-func (a asserts) Sometimes(cond bool, p core.Prop) {
+func (a asserts) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
+func (a asserts) Sometimes(cond bool, p core.PropertyID) {
 	if cond {
 		a.c.Reached = append(a.c.Reached, string(p))
 	}
 }
-func (a asserts) Reachable(p core.Prop)                 { a.c.Reached = append(a.c.Reached, string(p)) }
-func (a asserts) Unreachable(core.Prop, ...core.Detail) {}
+func (a asserts) Reachable(p core.PropertyID)                      { a.c.Reached = append(a.c.Reached, string(p)) }
+func (a asserts) Unreachable(core.PropertyID, ...core.ContextPair) {}
 
 // Find returns the delivered completion for req (nil if none).
-func (c *Ctx) Find(req core.ReqID) core.Completion {
+func (c *Ctx) Find(req core.ReqID) core.IOResult {
 	for _, d := range c.Delivered {
-		if cp, ok := d.Body.(core.Completion); ok && cp.ReqID() == req {
+		if cp, ok := d.Body.(core.IOResult); ok && cp.ReqID() == req {
 			return cp
 		}
 	}

@@ -164,7 +164,7 @@ func (w *Workload) newBatches(c *client) {
 		}
 		data, err := buildBatch(pp, recs, w.pickCodec())
 		if err != nil {
-			w.env.Unreachable("kafka: client batch builds", core.Detail{Key: "err", Value: err.Error()})
+			w.env.Unreachable("kafka: client batch builds", core.ContextPair{Key: "err", Value: err.Error()})
 			continue
 		}
 		b.corrupt = !b.idem && w.env.Intn(corruptEvery) == 0

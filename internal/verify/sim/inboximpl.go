@@ -3,11 +3,11 @@ package sim
 import "manifester/internal/core"
 
 // inboxQueue is one inbox: a FIFO slice implementing core.Queue.
-type inboxQueue struct{ q []core.EventBody }
+type inboxQueue struct{ q []core.EventData }
 
 func (q *inboxQueue) Len() int { return len(q.q) }
 
-func (q *inboxQueue) Pop() (core.EventBody, bool) {
+func (q *inboxQueue) Pop() (core.EventData, bool) {
 	if len(q.q) == 0 {
 		return nil, false
 	}
@@ -31,9 +31,9 @@ func (n *nodeInbox) Control() core.Queue { return &n.ctrl }
 func (n *nodeInbox) Data() core.Queue    { return &n.data }
 func (n *nodeInbox) BusyUntil() Time     { return n.busy }
 
-// Push routes body with core.ClassOf.
-func (n *nodeInbox) Push(body core.EventBody) {
-	if core.ClassOf(body) == core.Control {
+// Push routes body with core.InboxKindOf.
+func (n *nodeInbox) Push(body core.EventData) {
+	if core.InboxKindOf(body) == core.Control {
 		n.ctrl.q = append(n.ctrl.q, body)
 	} else {
 		n.data.q = append(n.data.q, body)
@@ -49,7 +49,7 @@ type defaultCost struct{ p CostParams }
 // draw nothing, so a step is instantaneous.
 func NewCostModel(p CostParams) CostModel { return defaultCost{p} }
 
-func (c defaultCost) Sample(body core.EventBody, r CountedRand) core.Duration {
+func (c defaultCost) Sample(body core.EventData, r CountedRand) core.Duration {
 	d := c.p.PerEvent
 	if b, ok := body.(core.BytesReceived); ok {
 		d += c.p.PerByte * core.Duration(len(b.Data))

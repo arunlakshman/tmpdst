@@ -17,12 +17,12 @@ func base() sim.LogStoreFaults {
 	return sim.LogStoreFaults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}
 }
 
-func setup(f sim.LogStoreFaults, seed uint64) (*logstore.Engine, *enginetest.Ctx, core.NodeRef) {
+func setup(f sim.LogStoreFaults, seed uint64) (*logstore.Engine, *enginetest.Ctx, core.NodeInstance) {
 	e := logstore.New(f)
 	return e, enginetest.New(e, seed), enginetest.Ref("a")
 }
 
-func only[T core.EventBody](t *testing.T, c *enginetest.Ctx) T {
+func only[T core.EventData](t *testing.T, c *enginetest.Ctx) T {
 	t.Helper()
 	if len(c.Delivered) != 1 {
 		t.Fatalf("want 1 delivery, got %d", len(c.Delivered))
@@ -47,7 +47,7 @@ func TestIfAbsentPut(t *testing.T) {
 	if v, ok := e.Entry(3); !ok || string(v) != "first" {
 		t.Fatal(v, ok)
 	}
-	if e.Handles(core.CPCall{}) || !e.Handles(core.LogAppend{}) {
+	if e.Handles(core.ControlPlaneCall{}) || !e.Handles(core.LogAppend{}) {
 		t.Fatal("Handles")
 	}
 }
@@ -100,9 +100,9 @@ func TestOrderedLandings(t *testing.T) {
 			t.Fatalf("entry %d slot %d, want %d", i, ent.Slot, want[i])
 		}
 	}
-	e.Execute(c, a, core.LogCheckTail{Req: 5})
+	e.Execute(c, a, core.LogGetEnd{Req: 5})
 	c.Run()
-	if d := c.Find(5).(core.LogCheckTailDone); d.Tail != 3 || d.Err != core.OK {
+	if d := c.Find(5).(core.LogGetEndDone); d.Tail != 3 || d.Err != core.OK {
 		t.Fatal(d)
 	}
 }
@@ -111,9 +111,9 @@ func TestTrimBlocksRewrite(t *testing.T) {
 	e, c, a := setup(base(), 3)
 	e.Execute(c, a, core.LogAppend{Req: 1, Slot: 1, Data: []byte("x")})
 	c.Run()
-	e.Execute(c, a, core.LogTrim{Req: 2, Through: 1})
+	e.Execute(c, a, core.LogDeleteOld{Req: 2, Through: 1})
 	c.Run()
-	if d := c.Find(2).(core.LogTrimDone); d.Err != core.OK {
+	if d := c.Find(2).(core.LogDeleteOldDone); d.Err != core.OK {
 		t.Fatal(d)
 	}
 	e.Execute(c, a, core.LogAppend{Req: 3, Slot: 1, Data: []byte("y")})
@@ -165,9 +165,9 @@ func TestDeterminism(t *testing.T) {
 			case 1:
 				e.Execute(c, a, core.LogRead{Req: core.ReqID(i), From: 0, Limit: 8})
 			case 2:
-				e.Execute(c, a, core.LogCheckTail{Req: core.ReqID(i)})
+				e.Execute(c, a, core.LogGetEnd{Req: core.ReqID(i)})
 			default:
-				e.Execute(c, a, core.LogTrim{Req: core.ReqID(i), Through: 0})
+				e.Execute(c, a, core.LogDeleteOld{Req: core.ReqID(i), Through: 0})
 			}
 		}
 		mid := e.StateHash()

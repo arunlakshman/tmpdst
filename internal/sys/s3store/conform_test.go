@@ -40,21 +40,21 @@ func codeOf(err error) core.ErrCode {
 // fake nor real S3 can give the hash of the spec, so StateHash says no.
 type storeSubject struct{ store sys.ObjectStore }
 
-func (s storeSubject) Do(op core.IOAction) (observation.ObjectResult, error) {
+func (s storeSubject) Do(op core.IOCall) (observation.ObjectResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	switch op := op.(type) {
-	case core.ObjPut:
+	case core.ObjectPut:
 		return writeResult(s.store.Put(ctx, op.Key, op.Data)), nil
-	case core.ObjGet:
+	case core.ObjectGet:
 		data, err := s.store.Get(ctx, op.Ref)
 		if err != nil {
 			return observation.ObjectResult{Code: codeOf(err)}, nil
 		}
 		return observation.ObjectResult{Data: data}, nil
-	case core.ObjDelete:
+	case core.ObjectDelete:
 		return writeResult(s.store.Delete(ctx, op.Key)), nil
-	case core.ObjList:
+	case core.ObjectList:
 		keys, err := s.store.List(ctx, op.Prefix)
 		if err != nil {
 			return observation.ObjectResult{Code: codeOf(err)}, nil

@@ -87,7 +87,7 @@ type noHashObject struct{ suites.ObjectSubject }
 
 func (noHashObject) StateHash() (uint64, bool) { return 0, false }
 
-func (n noHashObject) Do(op core.IOAction) (observation.ObjectResult, error) {
+func (n noHashObject) Do(op core.IOCall) (observation.ObjectResult, error) {
 	return n.ObjectSubject.Do(op)
 }
 

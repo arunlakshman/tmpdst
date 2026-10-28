@@ -22,16 +22,16 @@ var _ cp.Store = (*Store)(nil)
 // New returns an empty store.
 func New() *Store { return &Store{spec: veritas.NewControlPlane()} }
 
-func (s *Store) exec(ctx context.Context, op core.CPOp) (core.CPDone, error) {
+func (s *Store) exec(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
 	if err := ctx.Err(); err != nil {
-		return core.CPDone{}, err
+		return core.ControlPlaneDone{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.spec.Exec(core.CPCall{Op: op}).(core.CPDone), nil
+	return s.spec.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone), nil
 }
 
-func execAs[R any](ctx context.Context, s *Store, op core.CPOp) (R, core.ErrCode, error) {
+func execAs[R any](ctx context.Context, s *Store, op core.ControlPlaneOperation) (R, core.ErrCode, error) {
 	d, err := s.exec(ctx, op)
 	return core.RespAs[R](d), d.Err, err
 }
@@ -42,8 +42,8 @@ func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.
 }
 
 // Lookup implements cp.Store.
-func (s *Store) Lookup(ctx context.Context, op core.Lookup) (core.LookupResp, core.ErrCode, error) {
-	return execAs[core.LookupResp](ctx, s, op)
+func (s *Store) Lookup(ctx context.Context, op core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error) {
+	return execAs[core.FindSegmentsResp](ctx, s, op)
 }
 
 // DescribeTopics implements cp.Store.

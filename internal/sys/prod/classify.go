@@ -9,18 +9,18 @@ import (
 	"manifester/internal/verify/veritas/vsys"
 )
 
-// Classifier routes by action: CPCall to CP, Obj* to Objects, anything else
+// Classifier routes by action: ControlPlaneCall to CP, Obj* to Objects, anything else
 // is a bug that classifies as ErrIO, MaybeApplied.
 type Classifier struct{ Objects, CP sys.Classifier }
 
 var _ sys.Classifier = Classifier{}
 
 // Classify maps an IO error to an error code and outcome.
-func (c Classifier) Classify(a core.IOAction, err error) (core.ErrCode, core.Outcome) {
+func (c Classifier) Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
 	switch a.(type) {
-	case core.CPCall:
+	case core.ControlPlaneCall:
 		return c.CP.Classify(a, err)
-	case core.ObjPut, core.ObjGet, core.ObjDelete, core.ObjList:
+	case core.ObjectPut, core.ObjectGet, core.ObjectDelete, core.ObjectList:
 		return c.Objects.Classify(a, err)
 	}
 	slog.Error("classify: unexpected action", "action", a, "err", err)
@@ -32,7 +32,7 @@ func (c Classifier) Classify(a core.IOAction, err error) (core.ErrCode, core.Out
 type MemClassifier struct{}
 
 // Classify maps an in-memory store error to an error code and outcome.
-func (MemClassifier) Classify(_ core.IOAction, err error) (core.ErrCode, core.Outcome) {
+func (MemClassifier) Classify(_ core.IOCall, err error) (core.ErrCode, core.Outcome) {
 	if ve, ok := errors.AsType[*vsys.Error](err); ok {
 		return ve.Code, core.NotApplied
 	}

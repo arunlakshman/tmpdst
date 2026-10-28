@@ -30,8 +30,8 @@ type ID [16]byte
 type (
 	// NodeID names a node.
 	NodeID string // stable identity of a broker (or sim workload)
-	// Incarnation identifies one boot of a node.
-	Incarnation ID // fresh per boot; names one run of a node in logs, facts and the runtime
+	// BootNumber identifies one boot of a node.
+	BootNumber ID // fresh per boot; names one run of a node in logs, facts and the runtime
 	// ConnID names a connection.
 	ConnID uint64 // a connection, as seen by one node
 	// ReqID correlates an Action with its completion Event. Unique within one
@@ -48,10 +48,10 @@ type (
 	LogSlot int64
 )
 
-// NodeRef names one specific boot of one node.
-type NodeRef struct {
+// NodeInstance names one specific boot of one node.
+type NodeInstance struct {
 	Node NodeID
-	Inc  Incarnation
+	Inc  BootNumber
 }
 
 // TopicPartition names one partition of a topic.

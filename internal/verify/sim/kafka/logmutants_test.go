@@ -46,7 +46,7 @@ func TestLogMutantsAreCaught(t *testing.T) {
 		name   string
 		bug    uint8
 		window int
-		prop   core.Prop
+		prop   core.PropertyID
 	}{
 		// Truth is log replay (correct assign); the writer stamps gap bases only
 		// into its fold/answers, so acks disagree with CPTruth.
@@ -60,7 +60,7 @@ func TestLogMutantsAreCaught(t *testing.T) {
 		if c.window > 0 {
 			cfg.ControlPlane.Log.WindowSlots = c.window
 		}
-		var props []core.Prop
+		var props []core.PropertyID
 		caught := uint64(0)
 		for s := uint64(1); s <= budget && caught == 0; s++ {
 			if props = violated(cfg, s); len(props) > 0 {

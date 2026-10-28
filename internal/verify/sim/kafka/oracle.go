@@ -85,12 +85,12 @@ func tpName(tp core.TopicPartition) string { return tp.Topic + "/" + strconv.Ito
 // at this position of its batch, never from a definitely rejected batch). A
 // value may appear again only as a retry of its batch; AtEnd bounds the count
 // by the sends.
-func (o *oracle) record(v sim.View, pl *plog, off int64, i int, val string, det []core.Detail) {
+func (o *oracle) record(v sim.View, pl *plog, off int64, i int, val string, det []core.ContextPair) {
 	as := v.Assert()
 	if val == "?" {
 		return
 	}
-	d := append(slices.Clip(det), core.Detail{Key: "offset", Value: off}, core.Detail{Key: "value", Value: val})
+	d := append(slices.Clip(det), core.ContextPair{Key: "offset", Value: off}, core.ContextPair{Key: "value", Value: val})
 	o.seen[val]++
 	c, b, ri, ok := parseVal(val)
 	as.Always(ok && ri == i, "kafka: records of a batch keep their order", d...)
@@ -118,7 +118,7 @@ func (o *oracle) acks(v sim.View) {
 		if !ok1 || !ok2 || !ok3 {
 			continue
 		}
-		det := []core.Detail{{Key: "tp", Value: string(topic) + "/" + strconv.Itoa(int(part))}, {Key: "base", Value: int64(base)},
+		det := []core.ContextPair{{Key: "tp", Value: string(topic) + "/" + strconv.Itoa(int(part))}, {Key: "base", Value: int64(base)},
 			{Key: "count", Value: int64(count)}, {Key: "node", Value: string(tf.Source.Node)}}
 		ti, known := o.idx[core.TP(string(topic), int32(part))]
 		bi, found := -1, false
@@ -153,18 +153,18 @@ func (o *oracle) checkRead(v sim.View, ro ReadOp, rr ReadRes) {
 		from := ro.Parts[i]
 		ti := o.idx[from.TP]
 		pl := o.logs[ti]
-		det := []core.Detail{{Key: "client", Value: ro.Client}, {Key: "tp", Value: tpName(from.TP)}, {Key: "from", Value: from.Off}}
+		det := []core.ContextPair{{Key: "client", Value: ro.Client}, {Key: "tp", Value: tpName(from.TP)}, {Key: "from", Value: from.Off}}
 		as.Always(!part.Corrupt, "kafka: a consumer never receives a corrupt batch", det...)
 		as.Always(part.Code != 1, "kafka: a consumer's fetch is never out of range", det...)
 		if part.Code != 0 {
 			continue
 		}
 		as.Always(part.HWM <= int64(len(pl.vals)), "kafka: a fetch never reports a high watermark above the committed log",
-			append(slices.Clip(det), core.Detail{Key: "hwm", Value: part.HWM})...)
+			append(slices.Clip(det), core.ContextPair{Key: "hwm", Value: part.HWM})...)
 		key := [2]int{ro.Client, ti}
 		as.Always(from.Off == o.cpos[key], "kafka: a consumer resumes exactly where its last read ended", det...)
 		for j, r := range part.Recs {
-			d := append(slices.Clip(det), core.Detail{Key: "offset", Value: r.Off}, core.Detail{Key: "value", Value: r.Val})
+			d := append(slices.Clip(det), core.ContextPair{Key: "offset", Value: r.Off}, core.ContextPair{Key: "value", Value: r.Val})
 			ok := r.Off == from.Off+int64(j)
 			as.Always(ok, "kafka: a consumer sees every offset in order, none skipped", d...)
 			inLog := r.Off >= 0 && r.Off < int64(len(pl.vals)) && r.Off < part.HWM
@@ -196,8 +196,8 @@ func (o *oracle) AtEnd(v sim.View) {
 			// Every send commits at most once (a MaybeApplied commit is retried
 			// under its key), so a batch is in the log at most once per send.
 			as.Always(o.seen[po.Vals[0]] <= max(res.Attempts, 1), "kafka: a batch is committed at most once per send",
-				core.Detail{Key: "tp", Value: tpName(po.TP)}, core.Detail{Key: "value", Value: po.Vals[0]},
-				core.Detail{Key: "times", Value: o.seen[po.Vals[0]]}, core.Detail{Key: "sends", Value: res.Attempts})
+				core.ContextPair{Key: "tp", Value: tpName(po.TP)}, core.ContextPair{Key: "value", Value: po.Vals[0]},
+				core.ContextPair{Key: "times", Value: o.seen[po.Vals[0]]}, core.ContextPair{Key: "sends", Value: res.Attempts})
 		}
 		switch op.Outcome {
 		case sim.OpDefinite:
@@ -205,27 +205,27 @@ func (o *oracle) AtEnd(v sim.View) {
 				off := res.Base + int64(i)
 				same := res.Base >= 0 && off < int64(len(o.logs[ti].vals)) && o.logs[ti].vals[off] == val
 				as.Always(same, "kafka: an acked record is in the log at its acked offset",
-					core.Detail{Key: "tp", Value: tpName(po.TP)}, core.Detail{Key: "offset", Value: off}, core.Detail{Key: "value", Value: val})
+					core.ContextPair{Key: "tp", Value: tpName(po.TP)}, core.ContextPair{Key: "offset", Value: off}, core.ContextPair{Key: "value", Value: val})
 			}
 			// One batch at a time per (client, partition): the next batch is built
 			// after this one was acked, so its acked offset is higher.
 			k := [2]int{po.Client, ti}
 			if prev, had := lastAcked[k]; had {
 				as.Always(res.Base >= prev+1, "kafka: a client's acked batches for a partition are at increasing offsets",
-					core.Detail{Key: "tp", Value: tpName(po.TP)}, core.Detail{Key: "base", Value: res.Base}, core.Detail{Key: "previous", Value: prev})
+					core.ContextPair{Key: "tp", Value: tpName(po.TP)}, core.ContextPair{Key: "base", Value: res.Base}, core.ContextPair{Key: "previous", Value: prev})
 			}
 			lastAcked[k] = res.Base
 		case sim.OpAbandoned:
 			for _, val := range po.Vals {
-				as.Always(o.seen[val] == 0, "kafka: a definitely rejected batch is never committed", core.Detail{Key: "value", Value: val})
+				as.Always(o.seen[val] == 0, "kafka: a definitely rejected batch is never committed", core.ContextPair{Key: "value", Value: val})
 			}
 		}
 	}
 	for c := o.opts.Producers; c < o.opts.Producers+o.opts.Consumers; c++ {
 		for ti, pl := range o.logs {
 			as.Always(o.cpos[[2]int{c, ti}] == int64(len(pl.vals)), "kafka: every consumer caught up with the final log",
-				core.Detail{Key: "client", Value: c}, core.Detail{Key: "tp", Value: tpName(pl.tp)},
-				core.Detail{Key: "pos", Value: o.cpos[[2]int{c, ti}]}, core.Detail{Key: "hwm", Value: int64(len(pl.vals))})
+				core.ContextPair{Key: "client", Value: c}, core.ContextPair{Key: "tp", Value: tpName(pl.tp)},
+				core.ContextPair{Key: "pos", Value: o.cpos[[2]int{c, ti}]}, core.ContextPair{Key: "hwm", Value: int64(len(pl.vals))})
 		}
 	}
 	total := 0

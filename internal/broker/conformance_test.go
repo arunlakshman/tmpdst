@@ -57,7 +57,7 @@ func newC1(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) *c1 {
 	}
 	h := newHarness(t, cfg)
 	h.cp.CreateTopic("u", 3)
-	h.do(core.Started{Self: h.self})
+	h.do(core.NodeStarted{Self: h.self})
 	s := &c1{t: t, h: h, model: map[core.TopicPartition]*veritas.Partition{}, corrupt: corrupt}
 	for _, tp := range c1TPs {
 		s.model[tp] = &veritas.Partition{}
@@ -65,9 +65,9 @@ func newC1(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) *c1 {
 	s.conns = []*client{h.open(1), h.open(2)}
 	if corrupt { // every third GET comes back with a flipped byte
 		gets := 0
-		h.objHook = func(a core.IOAction, run func() core.Completion) core.Completion {
+		h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
 			d := run()
-			if g, ok := d.(core.ObjGetDone); ok && g.Err == core.OK && len(g.Data) > 0 {
+			if g, ok := d.(core.ObjectGetDone); ok && g.Err == core.OK && len(g.Data) > 0 {
 				if gets++; gets%3 == 0 {
 					g.Data = append([]byte(nil), g.Data...)
 					g.Data[len(g.Data)-1] ^= 0x55

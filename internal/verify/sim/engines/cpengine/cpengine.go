@@ -38,21 +38,21 @@ func New(f sim.ControlPlaneFaults) *Engine {
 			P503: f.Unavailable503, PTimeout: f.Timeout, PLost: f.LostResponse,
 			Outage: f.Outage, CallerTimeout: f.CallerTimeout,
 		},
-		Spec: func(a core.IOAction) core.Completion {
-			if c, ok := a.(core.CPCall); ok && e.tooLarge(c.Op) {
-				return core.CPDone{Req: c.Req, Err: core.ErrTooLarge, Outcome: core.NotApplied}
+		Spec: func(a core.IOCall) core.IOResult {
+			if c, ok := a.(core.ControlPlaneCall); ok && e.tooLarge(c.Op) {
+				return core.ControlPlaneDone{Req: c.Req, Err: core.ErrTooLarge, Outcome: core.NotApplied}
 			}
 			return e.spec.Exec(a)
 		},
-		Mutating: func(a core.IOAction) bool {
-			_, ok := a.(core.CPCall).Op.(core.CommitSegment)
+		Mutating: func(a core.IOCall) bool {
+			_, ok := a.(core.ControlPlaneCall).Op.(core.CommitSegment)
 			return ok
 		},
-		Fail: func(a core.IOAction, err core.ErrCode, o core.Outcome) core.Completion {
-			return core.CPDone{Req: a.ReqID(), Err: err, Outcome: o}
+		Fail: func(a core.IOCall, err core.ErrCode, o core.Outcome) core.IOResult {
+			return core.ControlPlaneDone{Req: a.ReqID(), Err: err, Outcome: o}
 		},
 		// A replayed commit is Applied too, so Gen may bump without a change.
-		Changed:  func(c core.Completion) bool { return c.(core.CPDone).Outcome == core.Applied },
+		Changed:  func(c core.IOResult) bool { return c.(core.ControlPlaneDone).Outcome == core.Applied },
 		SpecHash: e.spec.StateHash,
 	})
 	return e
@@ -69,22 +69,22 @@ func (e *Engine) CreateTopic(name string, partitions int32) core.ErrCode {
 
 // Handles reports whether a is a control plane call.
 func (e *Engine) Handles(a core.Action) bool {
-	_, ok := a.(core.CPCall)
+	_, ok := a.(core.ControlPlaneCall)
 	return ok
 }
 
-// Execute starts a, a core.CPCall.
-func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.Action) {
-	e.Core.Execute(ctx, from, a.(core.IOAction))
+// Execute starts a, a core.ControlPlaneCall.
+func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.Action) {
+	e.Core.Execute(ctx, from, a.(core.IOCall))
 }
 
 // Committed returns the committed ranges of tp in offset order.
 func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
-	d := e.spec.Exec(core.CPCall{Op: core.Lookup{TP: tp}}).(core.CPDone)
+	d := e.spec.Exec(core.ControlPlaneCall{Op: core.FindSegments{TP: tp}}).(core.ControlPlaneDone)
 	if d.Err != core.OK {
 		return nil
 	}
-	return d.Resp.(core.LookupResp).Ranges
+	return d.Resp.(core.FindSegmentsResp).Ranges
 }
 
 // HighWatermark is the partition end: the next offset the spec assigns.
@@ -97,7 +97,7 @@ func (e *Engine) HighWatermark(tp core.TopicPartition) core.Offset { return e.sp
 // grows, taken as an upper bound, so it depends on the request and the topic
 // table only. The number of batches does not count. The spec stays
 // limit-free; a refusal reaches it never, so nothing changes.
-func (e *Engine) tooLarge(op core.CPOp) bool {
+func (e *Engine) tooLarge(op core.ControlPlaneOperation) bool {
 	c, ok := op.(core.CommitSegment)
 	if !ok || e.maxItems <= 0 {
 		return false
@@ -110,7 +110,7 @@ func (e *Engine) commitItems(c core.CommitSegment) int {
 	var tps []core.TopicPartition
 	grown := map[string]int32{} // keyed lookups only, never iterated for behaviour
 	topics := 0
-	known := e.spec.Exec(core.CPCall{Op: core.DescribeTopics{}}).(core.CPDone).Resp.(core.DescribeTopicsResp).Topics
+	known := e.spec.Exec(core.ControlPlaneCall{Op: core.DescribeTopics{}}).(core.ControlPlaneDone).Resp.(core.DescribeTopicsResp).Topics
 	for _, b := range c.Batches {
 		if !slices.Contains(tps, b.TP) {
 			tps = append(tps, b.TP)

@@ -37,7 +37,7 @@ type NodeConfig struct {
 	// OnIO, if set, sees every I/O action the broker issues, on the broker's
 	// loop goroutine, before it executes (used to pair segment keys with
 	// segment_sealed facts, see SegmentLog).
-	OnIO func(core.IOAction)
+	OnIO func(core.IOCall)
 	Log  *slog.Logger
 }
 
@@ -85,7 +85,7 @@ func Start(ctx context.Context, cfg NodeConfig) (*Node, error) {
 		Classifier: exec.class, Env: env, Inbox: in, Facts: cfg.Facts,
 		Shutdown: n.stop, StopGrace: core.Duration(cfg.StopGrace),
 	}
-	self := core.NodeRef{Node: core.NodeID(cfg.NodeID), Inc: core.Incarnation(env.NewID())}
+	self := core.NodeInstance{Node: core.NodeID(cfg.NodeID), Inc: core.BootNumber(env.NewID())}
 	go n.run(rctx, b, ex, broker.New(bc), self, cfg.FlushGrace)
 	return n, nil
 }
@@ -144,7 +144,7 @@ func (n *Node) stopOn(shutdown <-chan struct{}) {
 }
 
 // run drives the broker to its end, then closes the network and marks done.
-func (n *Node) run(ctx context.Context, b sys.Bundle, ex sys.Executor, br core.Factory, self core.NodeRef, flush time.Duration) {
+func (n *Node) run(ctx context.Context, b sys.Bundle, ex sys.Executor, br core.MachineFactory, self core.NodeInstance, flush time.Duration) {
 	defer close(n.done)
 	err := sys.Run(ctx, b, ex, br, self)
 	grace := time.Duration(0)
@@ -182,10 +182,10 @@ func (n *Node) String() string { return fmt.Sprintf("broker(%s)", n.addr) }
 // tapExecutor shows each action to a hook, then executes it.
 type tapExecutor struct {
 	sys.Executor
-	tap func(core.IOAction)
+	tap func(core.IOCall)
 }
 
-func (t tapExecutor) Execute(a core.IOAction) {
+func (t tapExecutor) Execute(a core.IOCall) {
 	t.tap(a)
 	t.Executor.Execute(a)
 }

@@ -19,14 +19,14 @@ func findTimer(acts []core.Action, id core.TimerID) (core.SetTimer, bool) {
 
 func bootEmpty(t *testing.T, m *machine.Machine, at core.Time) []core.Action {
 	t.Helper()
-	acts := m.Step(core.Event{At: at, Body: core.Started{}})
+	acts := m.Step(core.Event{At: at, Body: core.NodeStarted{}})
 	timer, ok := acts[0].(core.SetTimer)
 	if !ok {
 		t.Fatalf("Started = %v, want SetTimer", acts)
 	}
 	acts = m.Step(core.Event{At: at, Body: core.TimerFired{ID: timer.ID, Gen: timer.Gen}})
-	tail := acts[0].(core.LogCheckTail)
-	acts = m.Step(core.Event{At: at, Body: core.LogCheckTailDone{
+	tail := acts[0].(core.LogGetEnd)
+	acts = m.Step(core.Event{At: at, Body: core.LogGetEndDone{
 		Req: tail.Req, Tail: 0, Err: core.OK, Outcome: core.Applied,
 	}})
 	if !m.Ready() {
@@ -79,8 +79,8 @@ func TestTakeoverAfterSilence(t *testing.T) {
 	// logcp rule (recent successful pull) holds, then fire the role timer.
 	later := core.Time(take + core.Millisecond)
 	acts = m.Step(core.Event{At: later, Body: core.TimerFired{ID: catch.ID, Gen: catch.Gen}})
-	check := acts[0].(core.LogCheckTail)
-	m.Step(core.Event{At: later, Body: core.LogCheckTailDone{
+	check := acts[0].(core.LogGetEnd)
+	m.Step(core.Event{At: later, Body: core.LogGetEndDone{
 		Req: check.Req, Tail: 0, Err: core.OK, Outcome: core.Applied,
 	}})
 	m.Step(core.Event{At: later, Body: core.TimerFired{ID: role.ID, Gen: role.Gen}})
@@ -115,8 +115,8 @@ func TestFailbackOnLowerRank(t *testing.T) {
 	}
 	at := core.Time(take)
 	acts = m.Step(core.Event{At: at, Body: core.TimerFired{ID: catch.ID, Gen: catch.Gen}})
-	check := acts[0].(core.LogCheckTail)
-	acts = m.Step(core.Event{At: at, Body: core.LogCheckTailDone{
+	check := acts[0].(core.LogGetEnd)
+	acts = m.Step(core.Event{At: at, Body: core.LogGetEndDone{
 		Req: check.Req, Tail: 1, Err: core.OK, Outcome: core.Applied,
 	}})
 	read := acts[0].(core.LogRead)

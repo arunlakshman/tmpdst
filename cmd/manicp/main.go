@@ -189,7 +189,7 @@ func openNode(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *slo
 		Machine: mcfg,
 		Log:     logStore,
 		Objects: objs,
-		Self:    core.NodeRef{Node: core.NodeID(nodeName(f.log))},
+		Self:    core.NodeInstance{Node: core.NodeID(nodeName(f.log))},
 	})
 	sctx, cancel := context.WithTimeout(ctx, f.log.startTimeout)
 	err = n.Start(sctx)

@@ -9,15 +9,15 @@ import (
 
 type stubAssert struct{ sometimes []string }
 
-func (a *stubAssert) Always(bool, core.Prop, ...core.Detail)              {}
-func (a *stubAssert) AlwaysOrUnreachable(bool, core.Prop, ...core.Detail) {}
-func (a *stubAssert) Sometimes(cond bool, p core.Prop) {
+func (a *stubAssert) Always(bool, core.PropertyID, ...core.ContextPair)              {}
+func (a *stubAssert) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
+func (a *stubAssert) Sometimes(cond bool, p core.PropertyID) {
 	if cond {
 		a.sometimes = append(a.sometimes, string(p))
 	}
 }
-func (a *stubAssert) Reachable(core.Prop)                   {}
-func (a *stubAssert) Unreachable(core.Prop, ...core.Detail) {}
+func (a *stubAssert) Reachable(core.PropertyID)                        {}
+func (a *stubAssert) Unreachable(core.PropertyID, ...core.ContextPair) {}
 
 type stubTruth struct{}
 
@@ -31,9 +31,9 @@ func (stubTruth) HighWatermark(core.TopicPartition) core.Offset { return 0 }
 
 type stubHist struct{}
 
-func (stubHist) Invoke(core.NodeRef, core.ID, core.ID, any) {}
-func (stubHist) Return(core.ID, any, sim.OpOutcome) bool    { return false }
-func (stubHist) Ops() []sim.HistOp                          { return nil }
+func (stubHist) Invoke(core.NodeInstance, core.ID, core.ID, any) {}
+func (stubHist) Return(core.ID, any, sim.OpOutcome) bool         { return false }
+func (stubHist) Ops() []sim.HistOp                               { return nil }
 
 type stubView struct {
 	tl sim.Timeline
@@ -86,7 +86,7 @@ func TestSwarm(t *testing.T) {
 func TestPhaseStart(t *testing.T) {
 	t.Parallel()
 	tl := sim.NewTimeline()
-	tl.Append(core.NodeRef{}, 10, core.Fact{
+	tl.Append(core.NodeInstance{}, 10, core.Fact{
 		Name:   "sim_phase",
 		Fields: []core.Field{{Key: "phase", Value: core.U64(uint64(sim.PhaseSettling))}},
 	})
@@ -109,11 +109,11 @@ func TestFaultCoverage(t *testing.T) {
 	inv.Observe(stubView{tl: sim.NewTimeline(), as: &stubAssert{}})
 
 	tl := sim.NewTimeline()
-	tl.Append(core.NodeRef{}, 1, core.Fact{
+	tl.Append(core.NodeInstance{}, 1, core.Fact{
 		Name:   "sim_crashed",
 		Fields: []core.Field{{Key: "cause", Value: core.Str("attrition")}},
 	})
-	tl.Append(core.NodeRef{}, 2, core.Fact{Name: "sim_exited"})
+	tl.Append(core.NodeInstance{}, 2, core.Fact{Name: "sim_exited"})
 	as := &stubAssert{}
 	inv.AtEnd(stubView{tl: tl, as: as})
 	if len(as.sometimes) != 2 {

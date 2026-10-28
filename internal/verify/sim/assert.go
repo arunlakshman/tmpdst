@@ -23,7 +23,7 @@ func isSafety(kind string) bool {
 }
 
 type statKey struct {
-	prop core.Prop
+	prop core.PropertyID
 	kind string
 }
 
@@ -46,7 +46,7 @@ func newAssertions(r *run) *assertions {
 	return &assertions{r: r, idx: map[statKey]int{}, flagged: map[statKey]bool{}}
 }
 
-func (a *assertions) record(kind string, p core.Prop, ok bool, details []core.Detail) {
+func (a *assertions) record(kind string, p core.PropertyID, ok bool, details []core.ContextPair) {
 	k := statKey{p, kind}
 	i, found := a.idx[k]
 	if !found {
@@ -71,7 +71,7 @@ func (a *assertions) record(kind string, p core.Prop, ok bool, details []core.De
 	}
 }
 
-func formatViolation(kind string, details []core.Detail) string {
+func formatViolation(kind string, details []core.ContextPair) string {
 	var b strings.Builder
 	b.WriteString(kind)
 	b.WriteString(" violated")
@@ -81,21 +81,21 @@ func formatViolation(kind string, details []core.Detail) string {
 	return b.String()
 }
 
-func (a *assertions) Always(cond bool, p core.Prop, d ...core.Detail) {
+func (a *assertions) Always(cond bool, p core.PropertyID, d ...core.ContextPair) {
 	a.record(kindAlways, p, cond, d)
 }
-func (a *assertions) AlwaysOrUnreachable(cond bool, p core.Prop, d ...core.Detail) {
+func (a *assertions) AlwaysOrUnreachable(cond bool, p core.PropertyID, d ...core.ContextPair) {
 	a.record(kindAlwaysOrUn, p, cond, d)
 }
-func (a *assertions) Sometimes(cond bool, p core.Prop) { a.record(kindSometimes, p, cond, nil) }
-func (a *assertions) Reachable(p core.Prop)            { a.record(kindReachable, p, true, nil) }
-func (a *assertions) Unreachable(p core.Prop, d ...core.Detail) {
+func (a *assertions) Sometimes(cond bool, p core.PropertyID) { a.record(kindSometimes, p, cond, nil) }
+func (a *assertions) Reachable(p core.PropertyID)            { a.record(kindReachable, p, true, nil) }
+func (a *assertions) Unreachable(p core.PropertyID, d ...core.ContextPair) {
 	a.record(kindUnreach, p, false, d)
 }
 
 var _ core.Assertions = (*assertions)(nil)
 
-// buggify implements core.Buggify. Activation is decided once per site per run
+// buggify implements core.FaultInjector. Activation is decided once per site per run
 // from Derive("buggify/"+site): independent of the run stream, so adding the
 // first site shifts no other draw. Firing draws from the run stream, and only
 // for active sites.
@@ -103,7 +103,7 @@ type buggify struct{ r *run }
 
 const buggifyDefaultP = 0.25
 
-func (b *buggify) active(site core.Site) bool {
+func (b *buggify) active(site core.FaultPointID) bool {
 	if v, ok := b.r.sites[site]; ok {
 		return v
 	}
@@ -112,23 +112,23 @@ func (b *buggify) active(site core.Site) bool {
 	return v
 }
 
-func (b *buggify) Maybe(site core.Site) bool { return b.MaybeP(site, buggifyDefaultP) }
+func (b *buggify) Maybe(site core.FaultPointID) bool { return b.MaybeP(site, buggifyDefaultP) }
 
-func (b *buggify) MaybeP(site core.Site, p float64) bool {
+func (b *buggify) MaybeP(site core.FaultPointID, p float64) bool {
 	return b.active(site) && b.r.rng.Chance(p)
 }
 
-func (b *buggify) Fault(site core.Site, p float64) bool {
+func (b *buggify) Fault(site core.FaultPointID, p float64) bool {
 	return b.r.phase == PhaseChaos && b.MaybeP(site, p)
 }
 
-var _ core.Buggify = (*buggify)(nil)
+var _ core.FaultInjector = (*buggify)(nil)
 
 // env is the core.Env every machine of a seed shares: the run stream, buggify
 // and assertions.
 type env struct {
 	core.Rand
-	core.Buggify
+	core.FaultInjector
 	core.Assertions
 }
 
@@ -146,7 +146,7 @@ func newHistory(now func() Time, bad func(string)) *history {
 	return &history{idx: map[core.ID]int{}, now: now, bad: bad}
 }
 
-func (h *history) Invoke(client core.NodeRef, id, value core.ID, op any) {
+func (h *history) Invoke(client core.NodeInstance, id, value core.ID, op any) {
 	if _, dup := h.idx[id]; dup {
 		h.bad("history: duplicate invoke of an op id")
 		return

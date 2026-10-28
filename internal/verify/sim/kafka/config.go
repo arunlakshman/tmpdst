@@ -30,7 +30,7 @@ func config(seeds []uint64, bug broker.Bug) sim.Config { return configWith(seeds
 
 // ConfigLog is Config against CP replica machines plus logstore (CP-DSM-8,
 // docs/sim-log-engine.md) instead of the veritas-backed cpengine: the same
-// workload, brokers, oracle and fault families. Brokers still emit CPCall; the
+// workload, brokers, oracle and fault families. Brokers still emit ControlPlaneCall; the
 // logengine bridge offers them to cp-* processes. The broker keeps its default
 // segment cap (4096): the log has no commit item limit.
 func ConfigLog(seeds []uint64) sim.Config { return configLog(seeds, broker.BugNone, 0) }
@@ -64,7 +64,7 @@ func configLogWith(seeds []uint64, bug broker.Bug, logBug uint8, opts Opts) sim.
 	}
 	cfg.Processes = append(cfg.Processes, sim.Process{
 		Name: "cp", Count: 2, NoAttrition: true,
-		FactoryFor: func(sc sim.SeedConfig) core.Factory { return cpFactory(sc, opts) },
+		FactoryFor: func(sc sim.SeedConfig) core.MachineFactory { return cpFactory(sc, opts) },
 	})
 	// Bridge deadline covers several logstore Put attempts. Per-append timeout
 	// must clear ApplyLatency SlowMax (200ms) so a slow Put is not a false
@@ -81,8 +81,8 @@ func configLogWith(seeds []uint64, bug broker.Bug, logBug uint8, opts Opts) sim.
 }
 
 // logReachables are the log engine's paths a campaign must reach.
-func logReachables() []core.Prop {
-	return []core.Prop{
+func logReachables() []core.PropertyID {
+	return []core.PropertyID{
 		"logcp-sim: lost slot retried at a later slot",
 		"logcp-sim: hole filled by a no-op",
 		"logcp-sim: Put not answered, same slot repeated",
@@ -98,13 +98,13 @@ func configWith(seeds []uint64, bug broker.Bug, opts Opts) sim.Config {
 	return sim.Config{
 		Seeds:  seeds,
 		Params: brokerConfig(bug),
-		Processes: []sim.Process{{Name: "broker", Count: 3, FactoryFor: func(sc sim.SeedConfig) core.Factory {
+		Processes: []sim.Process{{Name: "broker", Count: 3, FactoryFor: func(sc sim.SeedConfig) core.MachineFactory {
 			return broker.New(sc.Params.(broker.Config))
 		}}},
 		InvariantsFor: func(sc sim.SeedConfig) []sim.Invariant {
 			return []sim.Invariant{newSegmentCaps(sc.Params.(broker.Config), sc.ControlPlane.MaxCommitItems, opts.tps()), &segmentTiming{}}
 		},
-		Workloads: []sim.WorkloadFactory{func(env core.Env, self core.NodeRef, bs []core.NodeRef) sim.Workload {
+		Workloads: []sim.WorkloadFactory{func(env core.Env, self core.NodeInstance, bs []core.NodeInstance) sim.Workload {
 			return NewWorkload(env, self, bs, opts)
 		}},
 		Invariants: []func() sim.Invariant{

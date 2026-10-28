@@ -23,12 +23,12 @@ import (
 // Config wires a Node.
 type Config struct {
 	Machine machine.Config
-	Self    core.NodeRef
+	Self    core.NodeInstance
 	Env     core.Env
 	Clock   run.Clock
 	Log     exec.Log
 	Objects exec.ObjectStore
-	// StopGrace is how long the machine gets after Shutdown to Exit.
+	// StopGrace is how long the machine gets after Shutdown to ShutdownDone.
 	StopGrace core.Duration
 }
 
@@ -43,7 +43,7 @@ type Node struct {
 	health *health.Server
 
 	mu        sync.Mutex
-	waiters   map[core.ReqID]chan core.CPDone
+	waiters   map[core.ReqID]chan core.ControlPlaneDone
 	nextReq   core.ReqID
 	shutdown  chan struct{}
 	loopDone  chan error
@@ -55,7 +55,7 @@ type Node struct {
 // New builds a Node. Call Start then serve gRPC with Register.
 func New(cfg Config) *Node {
 	if cfg.Self.Node == "" {
-		cfg.Self = core.NodeRef{Node: "cp"}
+		cfg.Self = core.NodeInstance{Node: "cp"}
 	}
 	if cfg.Clock == nil {
 		cfg.Clock = wallClock{}
@@ -74,7 +74,7 @@ func New(cfg Config) *Node {
 		inbox:    run.NewInbox(64),
 		inject:   make(chan run.InjectFunc, 64),
 		health:   health.NewServer(),
-		waiters:  map[core.ReqID]chan core.CPDone{},
+		waiters:  map[core.ReqID]chan core.ControlPlaneDone{},
 		shutdown: make(chan struct{}),
 		loopDone: make(chan error, 1),
 	}
@@ -84,7 +84,7 @@ func New(cfg Config) *Node {
 func (n *Node) Health() *health.Server { return n.health }
 
 // Start launches the run loop. Ready flips health to Serving.
-// ctx bounds only the Ready wait; the loop runs until Close (or a Trip/Exit).
+// ctx bounds only the Ready wait; the loop runs until Close (or a StopForRestart/ShutdownDone).
 func (n *Node) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	n.cancel = cancel
@@ -100,7 +100,7 @@ func (n *Node) Start(ctx context.Context) error {
 	}
 	f := machine.New(n.cfg.Machine)
 	go func() {
-		err := run.Run(runCtx, b, ex, func(env core.Env, self core.NodeRef) core.Machine {
+		err := run.Run(runCtx, b, ex, func(env core.Env, self core.NodeInstance) core.Machine {
 			m := f(env, self).(*machine.Machine)
 			n.m.Store(m)
 			return m
@@ -207,9 +207,9 @@ func (n *Node) flushAnswers(m *machine.Machine) {
 	}
 }
 
-func (n *Node) offer(ctx context.Context, cmd applier.Entry) (core.CPDone, error) {
+func (n *Node) offer(ctx context.Context, cmd applier.Entry) (core.ControlPlaneDone, error) {
 	req := n.allocReq()
-	ch := make(chan core.CPDone, 1)
+	ch := make(chan core.ControlPlaneDone, 1)
 	n.mu.Lock()
 	n.waiters[req] = ch
 	n.mu.Unlock()
@@ -223,7 +223,7 @@ func (n *Node) offer(ctx context.Context, cmd applier.Entry) (core.CPDone, error
 		return m.Offer(machine.ClientOp{Req: req, Cmd: cmd})
 	})
 	if err != nil {
-		return core.CPDone{}, err
+		return core.ControlPlaneDone{}, err
 	}
 	// Offer may have answered synchronously (standby / queue full).
 	select {
@@ -236,7 +236,7 @@ func (n *Node) offer(ctx context.Context, cmd applier.Entry) (core.CPDone, error
 		case d := <-ch:
 			return d, nil
 		case <-ctx.Done():
-			return core.CPDone{Req: req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}, ctx.Err()
+			return core.ControlPlaneDone{Req: req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}, ctx.Err()
 		case n.inject <- func() []core.Action {
 			m := n.m.Load()
 			if m != nil {
@@ -248,15 +248,15 @@ func (n *Node) offer(ctx context.Context, cmd applier.Entry) (core.CPDone, error
 	}
 }
 
-func (n *Node) read(ctx context.Context, fn func(m *machine.Machine) (core.CPDone, error)) (core.CPDone, error) {
+func (n *Node) read(ctx context.Context, fn func(m *machine.Machine) (core.ControlPlaneDone, error)) (core.ControlPlaneDone, error) {
 	type result struct {
-		d   core.CPDone
+		d   core.ControlPlaneDone
 		err error
 	}
 	ch := make(chan result, 1)
 	err := n.onLoop(ctx, func(m *machine.Machine) []core.Action {
 		if !m.Ready() {
-			ch <- result{d: core.CPDone{Err: core.ErrUnavailable}}
+			ch <- result{d: core.ControlPlaneDone{Err: core.ErrUnavailable}}
 			return nil
 		}
 		d, e := fn(m)
@@ -264,13 +264,13 @@ func (n *Node) read(ctx context.Context, fn func(m *machine.Machine) (core.CPDon
 		return nil
 	})
 	if err != nil {
-		return core.CPDone{}, err
+		return core.ControlPlaneDone{}, err
 	}
 	select {
 	case r := <-ch:
 		return r.d, r.err
 	case <-ctx.Done():
-		return core.CPDone{Err: core.ErrTimeout, Outcome: core.NotApplied}, ctx.Err()
+		return core.ControlPlaneDone{Err: core.ErrTimeout, Outcome: core.NotApplied}, ctx.Err()
 	}
 }
 
@@ -295,7 +295,7 @@ func (n *Node) CommitSegment(ctx context.Context, req *cpv1.CommitSegmentRequest
 //nolint:dupl // mirror of DescribeTopics; each RPC keeps its own conversion path
 func (n *Node) Lookup(ctx context.Context, req *cpv1.LookupRequest) (*cpv1.LookupResponse, error) {
 	op := apiconv.LookupToCore(req)
-	d, err := n.read(ctx, func(m *machine.Machine) (core.CPDone, error) {
+	d, err := n.read(ctx, func(m *machine.Machine) (core.ControlPlaneDone, error) {
 		return m.Fold().Lookup(op)
 	})
 	if err != nil {
@@ -304,7 +304,7 @@ func (n *Node) Lookup(ctx context.Context, req *cpv1.LookupRequest) (*cpv1.Looku
 	if d.Err != core.OK {
 		return nil, rpcError(d.Err, d.Outcome)
 	}
-	return apiconv.LookupRespFromCore(core.RespAs[core.LookupResp](d)), nil
+	return apiconv.LookupRespFromCore(core.RespAs[core.FindSegmentsResp](d)), nil
 }
 
 // DescribeTopics implements ControlPlane.
@@ -312,7 +312,7 @@ func (n *Node) Lookup(ctx context.Context, req *cpv1.LookupRequest) (*cpv1.Looku
 //nolint:dupl // mirror of Lookup; each RPC keeps its own conversion path
 func (n *Node) DescribeTopics(ctx context.Context, req *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
 	op := apiconv.DescribeTopicsToCore(req)
-	d, err := n.read(ctx, func(m *machine.Machine) (core.CPDone, error) {
+	d, err := n.read(ctx, func(m *machine.Machine) (core.ControlPlaneDone, error) {
 		return m.Fold().Describe(op)
 	})
 	if err != nil {

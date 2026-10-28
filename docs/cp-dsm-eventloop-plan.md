@@ -142,7 +142,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 **Files.**
 
 - [ ] Create `internal/controlplane/machine/` (preferred name under the extractable `internal/controlplane/` root; do not place it under `internal/verify/sim/` or `internal/broker/`).
-- [ ] Create `Step`, `StateHash`, `New` Factory mirroring the broker's `core.Factory` shape.
+- [ ] Create `Step`, `StateHash`, `New` Factory mirroring the broker's `core.MachineFactory` shape.
 - [ ] Create boot handling for `Started` and `Stop` only.
 - [ ] Edit `ops/scripts/ci-determinism.sh` and `ops/tools/detcheck` allow lists so `internal/controlplane/machine` is scanned.
 - [ ] Create package tests for hash stability on no-op completions.

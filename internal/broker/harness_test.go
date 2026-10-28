@@ -40,18 +40,22 @@ func (e *testEnv) NewID() core.ID {
 	}
 	return id
 }
-func (e *testEnv) Maybe(core.Site) bool           { return false }
-func (e *testEnv) MaybeP(core.Site, float64) bool { return false }
-func (e *testEnv) Fault(core.Site, float64) bool  { return false }
-func (e *testEnv) Always(c bool, p core.Prop, _ ...core.Detail) {
+func (e *testEnv) Maybe(core.FaultPointID) bool           { return false }
+func (e *testEnv) MaybeP(core.FaultPointID, float64) bool { return false }
+func (e *testEnv) Fault(core.FaultPointID, float64) bool  { return false }
+func (e *testEnv) Always(c bool, p core.PropertyID, _ ...core.ContextPair) {
 	if !c {
 		e.viol = append(e.viol, string(p))
 	}
 }
-func (e *testEnv) AlwaysOrUnreachable(c bool, p core.Prop, d ...core.Detail) { e.Always(c, p, d...) }
-func (e *testEnv) Sometimes(bool, core.Prop)                                 {}
-func (e *testEnv) Reachable(p core.Prop)                                     { e.reach = append(e.reach, string(p)) }
-func (e *testEnv) Unreachable(p core.Prop, _ ...core.Detail)                 { e.viol = append(e.viol, string(p)) }
+func (e *testEnv) AlwaysOrUnreachable(c bool, p core.PropertyID, d ...core.ContextPair) {
+	e.Always(c, p, d...)
+}
+func (e *testEnv) Sometimes(bool, core.PropertyID) {}
+func (e *testEnv) Reachable(p core.PropertyID)     { e.reach = append(e.reach, string(p)) }
+func (e *testEnv) Unreachable(p core.PropertyID, _ ...core.ContextPair) {
+	e.viol = append(e.viol, string(p))
+}
 
 // client is the test's view of one connection.
 type client struct {
@@ -62,7 +66,7 @@ type client struct {
 	corr int32
 }
 
-// harness drives a Broker synchronously against the veritas specs. Completions
+// harness drives a Broker synchronously against the veritas specs. IOResults
 // are computed when the I/O action is issued and delivered through a queue, so
 // tests can hold them back (holdCP, holdPut) or fault them (cpHook, objHook).
 type harness struct {
@@ -72,24 +76,24 @@ type harness struct {
 	store *veritas.ObjectStore
 	cp    *veritas.ControlPlane
 	cfg   Config
-	self  core.NodeRef
+	self  core.NodeInstance
 	now   core.Time
 
 	// cpHook/objHook may replace an I/O action's outcome; exec runs the spec.
-	cpHook  func(a core.CPCall, exec func() core.Completion) core.Completion
-	objHook func(a core.IOAction, exec func() core.Completion) core.Completion
+	cpHook  func(a core.ControlPlaneCall, exec func() core.IOResult) core.IOResult
+	objHook func(a core.IOCall, exec func() core.IOResult) core.IOResult
 	holdCP  bool
 	holdPut bool
-	held    []core.Completion
+	held    []core.IOResult
 
-	queue   []core.Completion
+	queue   []core.IOResult
 	timers  map[core.TimerID]core.TimerGen
 	clients map[core.ConnID]*client
 	all     []core.Action // every action emitted, in order
 	paused  map[core.ConnID]bool
 	closed  map[core.ConnID]bool
 	exited  bool
-	cpCalls []core.CPOp
+	cpCalls []core.ControlPlaneOperation
 	puts    []string
 }
 
@@ -98,7 +102,7 @@ func newHarness(t *testing.T, cfg Config) *harness {
 		cfg: cfg, timers: map[core.TimerID]core.TimerGen{}, clients: map[core.ConnID]*client{},
 		paused: map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}
 	h.cp.CreateTopic("t", 2)
-	h.self = core.NodeRef{Node: "b1", Inc: core.Incarnation{1}}
+	h.self = core.NodeInstance{Node: "b1", Inc: core.BootNumber{1}}
 	h.b = New(cfg)(h.env, h.self).(*Broker)
 	return h
 }
@@ -106,11 +110,11 @@ func newHarness(t *testing.T, cfg Config) *harness {
 // startedHarness boots the broker.
 func startedHarness(t *testing.T, cfg Config) *harness {
 	h := newHarness(t, cfg)
-	h.do(core.Started{Self: h.self})
+	h.do(core.NodeStarted{Self: h.self})
 	return h
 }
 
-func (h *harness) step(body core.EventBody) []core.Action {
+func (h *harness) step(body core.EventData) []core.Action {
 	h.now += core.Time(core.Millisecond)
 	acts := h.b.Step(core.Event{At: h.now, Wall: core.WallTime(h.now), Body: body})
 	h.all = append(h.all, acts...)
@@ -121,7 +125,7 @@ func (h *harness) step(body core.EventBody) []core.Action {
 }
 
 // do steps body and then delivers queued completions until none is left.
-func (h *harness) do(body core.EventBody) []core.Action {
+func (h *harness) do(body core.EventData) []core.Action {
 	acts := h.step(body)
 	h.run()
 	return acts
@@ -135,9 +139,9 @@ func (h *harness) run() {
 	}
 }
 
-func (h *harness) deliver(c core.Completion) {
-	_, isCP := c.(core.CPDone)
-	_, isPut := c.(core.ObjPutDone)
+func (h *harness) deliver(c core.IOResult) {
+	_, isCP := c.(core.ControlPlaneDone)
+	_, isPut := c.(core.ObjectPutDone)
 	if (isCP && h.holdCP) || (isPut && h.holdPut) {
 		h.held = append(h.held, c)
 		return
@@ -155,16 +159,16 @@ func (h *harness) releaseHeld() {
 
 func (h *harness) exec(a core.Action) {
 	switch a := a.(type) {
-	case core.ObjPut:
+	case core.ObjectPut:
 		h.puts = append(h.puts, a.Key)
-		run := func() core.Completion { return h.store.Exec(a) }
+		run := func() core.IOResult { return h.store.Exec(a) }
 		h.deliver(h.objDone(a, run))
-	case core.ObjGet:
-		run := func() core.Completion { return h.store.Exec(a) }
+	case core.ObjectGet:
+		run := func() core.IOResult { return h.store.Exec(a) }
 		h.deliver(h.objDone(a, run))
-	case core.CPCall:
+	case core.ControlPlaneCall:
 		h.cpCalls = append(h.cpCalls, a.Op)
-		run := func() core.Completion { return h.cp.Exec(a) }
+		run := func() core.IOResult { return h.cp.Exec(a) }
 		if h.cpHook != nil {
 			h.deliver(h.cpHook(a, run))
 		} else {
@@ -190,12 +194,12 @@ func (h *harness) exec(a core.Action) {
 		h.paused[a.Conn] = true
 	case core.ResumeReads:
 		h.paused[a.Conn] = false
-	case core.Exit:
+	case core.ShutdownDone:
 		h.exited = true
 	}
 }
 
-func (h *harness) objDone(a core.IOAction, run func() core.Completion) core.Completion {
+func (h *harness) objDone(a core.IOCall, run func() core.IOResult) core.IOResult {
 	if h.objHook != nil {
 		return h.objHook(a, run)
 	}
@@ -358,7 +362,7 @@ func (h *harness) produceOne(c *client, e ent) kmsg.ProduceResponseTopicPartitio
 func factsNamed(all []core.Action, name string) []core.Fact {
 	var out []core.Fact
 	for _, a := range all {
-		if e, ok := a.(core.Emit); ok && e.Fact.Name == name {
+		if e, ok := a.(core.RecordFact); ok && e.Fact.Name == name {
 			out = append(out, e.Fact)
 		}
 	}

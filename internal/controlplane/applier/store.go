@@ -31,9 +31,9 @@ func (s *Store) CommitSegment(_ context.Context, op core.CommitSegment) (core.Co
 }
 
 // Lookup implements cp.Store.
-func (s *Store) Lookup(_ context.Context, op core.Lookup) (core.LookupResp, core.ErrCode, error) {
+func (s *Store) Lookup(_ context.Context, op core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error) {
 	d, err := s.A.Lookup(op)
-	return core.RespAs[core.LookupResp](d), d.Err, err
+	return core.RespAs[core.FindSegmentsResp](d), d.Err, err
 }
 
 // DescribeTopics implements cp.Store.

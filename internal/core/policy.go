@@ -5,7 +5,7 @@ package core
 type ControlFirst struct{}
 
 // Next pops from control if it is non-empty, otherwise from data.
-func (ControlFirst) Next(control, data Queue) (EventBody, bool) {
+func (ControlFirst) Next(control, data Queue) (EventData, bool) {
 	if control.Len() > 0 {
 		if b, ok := control.Pop(); ok {
 			return b, true

@@ -44,13 +44,13 @@ var lockstepCmds = []applier.Entry{
 	}},
 }
 
-func queryDigest(exec func(core.CPOp) core.CPDone) uint64 {
+func queryDigest(exec func(core.ControlPlaneOperation) core.ControlPlaneDone) uint64 {
 	h := fnv.New64a()
 	d := exec(core.DescribeTopics{}).Resp.(core.DescribeTopicsResp)
 	for _, t := range d.Topics {
 		_, _ = fmt.Fprintf(h, "T%s/%d;", t.Name, t.Partitions)
 		for p := int32(0); p < t.Partitions; p++ {
-			l := exec(core.Lookup{TP: core.TP(t.Name, p)}).Resp.(core.LookupResp)
+			l := exec(core.FindSegments{TP: core.TP(t.Name, p)}).Resp.(core.FindSegmentsResp)
 			_, _ = fmt.Fprintf(h, "P%d/%d:%+v;", p, l.End, l.Ranges)
 		}
 	}
@@ -59,14 +59,14 @@ func queryDigest(exec func(core.CPOp) core.CPDone) uint64 {
 
 // feedContiguous drives catch-up so the machine applies entries in slot order
 // through one ReadDone page (no holes).
-func feedContiguous(t *testing.T, m *machine.Machine, entries []applier.Entry) []core.CPDone {
+func feedContiguous(t *testing.T, m *machine.Machine, entries []applier.Entry) []core.ControlPlaneDone {
 	t.Helper()
-	acts := step(m, core.Started{})
+	acts := step(m, core.NodeStarted{})
 	timer := acts[0].(core.SetTimer)
 	acts = step(m, core.TimerFired{ID: timer.ID, Gen: timer.Gen})
-	tail := acts[0].(core.LogCheckTail)
+	tail := acts[0].(core.LogGetEnd)
 	n := core.LogSlot(len(entries))
-	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: n, Err: core.OK, Outcome: core.Applied})
+	acts = step(m, core.LogGetEndDone{Req: tail.Req, Tail: n, Err: core.OK, Outcome: core.Applied})
 	read := acts[0].(core.LogRead)
 	logs := make([]core.LogEntry, len(entries))
 	for i, e := range entries {
@@ -76,7 +76,7 @@ func feedContiguous(t *testing.T, m *machine.Machine, entries []applier.Entry) [
 	if m.Applied() != n {
 		t.Fatalf("Applied = %d, want %d", m.Applied(), n)
 	}
-	out := make([]core.CPDone, len(entries))
+	out := make([]core.ControlPlaneDone, len(entries))
 	twin := applier.NewMem()
 	t.Cleanup(func() { _ = twin.Close() })
 	for i, e := range entries {
@@ -93,15 +93,15 @@ func TestLockstepMachineVsVeritas(t *testing.T) {
 	orc := veritas.NewControlPlane()
 	machineAnswers := feedContiguous(t, m, lockstepCmds)
 
-	var orcAnswers []core.CPDone
+	var orcAnswers []core.ControlPlaneDone
 	for i, e := range lockstepCmds {
 		switch e.Kind {
 		case applier.KindNoop:
-			orcAnswers = append(orcAnswers, core.CPDone{Req: core.ReqID(i), Outcome: core.Applied})
+			orcAnswers = append(orcAnswers, core.ControlPlaneDone{Req: core.ReqID(i), Outcome: core.Applied})
 		case applier.KindCreateTopic:
-			orcAnswers = append(orcAnswers, core.CPDone{Req: core.ReqID(i), Err: orc.CreateTopic(e.Topic, e.Parts)})
+			orcAnswers = append(orcAnswers, core.ControlPlaneDone{Req: core.ReqID(i), Err: orc.CreateTopic(e.Topic, e.Parts)})
 		case applier.KindCommit:
-			orcAnswers = append(orcAnswers, orc.Exec(core.CPCall{Req: core.ReqID(i), Op: e.Commit}).(core.CPDone))
+			orcAnswers = append(orcAnswers, orc.Exec(core.ControlPlaneCall{Req: core.ReqID(i), Op: e.Commit}).(core.ControlPlaneDone))
 		}
 	}
 
@@ -115,11 +115,11 @@ func TestLockstepMachineVsVeritas(t *testing.T) {
 		}
 	}
 
-	appDig := queryDigest(func(op core.CPOp) core.CPDone {
-		return m.Fold().Exec(core.CPCall{Op: op}).(core.CPDone)
+	appDig := queryDigest(func(op core.ControlPlaneOperation) core.ControlPlaneDone {
+		return m.Fold().Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
 	})
-	orcDig := queryDigest(func(op core.CPOp) core.CPDone {
-		return orc.Exec(core.CPCall{Op: op}).(core.CPDone)
+	orcDig := queryDigest(func(op core.ControlPlaneOperation) core.ControlPlaneDone {
+		return orc.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
 	})
 	if appDig != orcDig {
 		t.Fatalf("query digest: machine fold %x, veritas %x", appDig, orcDig)
@@ -134,11 +134,11 @@ func TestLockstepWithHoleFill(t *testing.T) {
 
 	a := lockstepCmds[2]
 	b := lockstepCmds[3]
-	acts := step(m, core.Started{})
+	acts := step(m, core.NodeStarted{})
 	timer := acts[0].(core.SetTimer)
 	acts = step(m, core.TimerFired{ID: timer.ID, Gen: timer.Gen})
-	tail := acts[0].(core.LogCheckTail)
-	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 3, Err: core.OK, Outcome: core.Applied})
+	tail := acts[0].(core.LogGetEnd)
+	acts = step(m, core.LogGetEndDone{Req: tail.Req, Tail: 3, Err: core.OK, Outcome: core.Applied})
 	read := acts[0].(core.LogRead)
 	acts = step(m, core.LogReadDone{
 		Req: read.Req, Err: core.OK, Outcome: core.Applied,
@@ -156,14 +156,14 @@ func TestLockstepWithHoleFill(t *testing.T) {
 		t.Fatalf("Applied = %d, want 3", m.Applied())
 	}
 
-	_ = orc.Exec(core.CPCall{Req: 0, Op: a.Commit})
-	_ = orc.Exec(core.CPCall{Req: 2, Op: b.Commit})
+	_ = orc.Exec(core.ControlPlaneCall{Req: 0, Op: a.Commit})
+	_ = orc.Exec(core.ControlPlaneCall{Req: 2, Op: b.Commit})
 
-	appDig := queryDigest(func(op core.CPOp) core.CPDone {
-		return m.Fold().Exec(core.CPCall{Op: op}).(core.CPDone)
+	appDig := queryDigest(func(op core.ControlPlaneOperation) core.ControlPlaneDone {
+		return m.Fold().Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
 	})
-	orcDig := queryDigest(func(op core.CPOp) core.CPDone {
-		return orc.Exec(core.CPCall{Op: op}).(core.CPDone)
+	orcDig := queryDigest(func(op core.ControlPlaneOperation) core.ControlPlaneDone {
+		return orc.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
 	})
 	if appDig != orcDig {
 		t.Fatalf("query digest after hole-fill: machine %x, veritas %x", appDig, orcDig)

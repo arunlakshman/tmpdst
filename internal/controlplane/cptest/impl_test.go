@@ -19,19 +19,19 @@ import (
 
 // impl is a control plane as the conformance runner drives it.
 type impl interface {
-	Exec(ctx context.Context, op core.CPOp) (core.CPResp, core.ErrCode, error)
+	Exec(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, core.ErrCode, error)
 	CreateTopic(ctx context.Context, name string, parts int32) (core.ErrCode, error)
 }
 
 // storeImpl drives a cp.Store directly.
 type storeImpl struct{ st cp.Store }
 
-func (s storeImpl) Exec(ctx context.Context, op core.CPOp) (core.CPResp, core.ErrCode, error) {
+func (s storeImpl) Exec(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, core.ErrCode, error) {
 	switch op := op.(type) {
 	case core.CommitSegment:
 		r, c, err := s.st.CommitSegment(ctx, op)
 		return r, c, err
-	case core.Lookup:
+	case core.FindSegments:
 		r, c, err := s.st.Lookup(ctx, op)
 		return r, c, err
 	case core.DescribeTopics:
@@ -48,7 +48,7 @@ func (s storeImpl) CreateTopic(ctx context.Context, name string, parts int32) (c
 // grpcImpl drives a machine node through cpclient.
 type grpcImpl struct{ c *cpclient.Client }
 
-func (h grpcImpl) Exec(ctx context.Context, op core.CPOp) (core.CPResp, core.ErrCode, error) {
+func (h grpcImpl) Exec(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, core.ErrCode, error) {
 	r, err := h.c.Call(ctx, op)
 	return r, errCode(err), nonBusiness(err)
 }
@@ -94,7 +94,7 @@ func (s implSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlaneRe
 		if err != nil || code != core.OK {
 			return observation.ControlPlaneResult{Code: code}, err
 		}
-		done := core.CPDone{Resp: resp}
+		done := core.ControlPlaneDone{Resp: resp}
 		if _, ok := op.Call.Op.(core.CommitSegment); ok {
 			done.Outcome = core.Applied
 		}

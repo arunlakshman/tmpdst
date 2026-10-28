@@ -4,7 +4,7 @@
 //
 // Pipeline of a produce: the batch joins the open segment buffer; a flush
 // (BatchWindow timer or MaxSegmentBytes) encodes it with format.Encode,
-// uploads it (ObjPut) and commits it (CommitSegment); only then is the client
+// uploads it (ObjectPut) and commits it (CommitSegment); only then is the client
 // answered, with a "produce_acked" fact emitted right before the Send.
 // Commits go out strictly in segment order, so a partition's batches get
 // offsets in the order the broker admitted them. Every retry resends the
@@ -31,7 +31,7 @@ const (
 // Broker is the machine. Build it with New.
 type Broker struct {
 	env   core.Env
-	self  core.NodeRef
+	self  core.NodeInstance
 	cfg   Config
 	codec kwire.Codec
 
@@ -57,10 +57,10 @@ type Broker struct {
 	guess      uint64
 }
 
-// New returns the core.Factory of the broker.
-func New(cfg Config) core.Factory {
+// New returns the core.MachineFactory of the broker.
+func New(cfg Config) core.MachineFactory {
 	cfg = cfg.withDefaults()
-	return func(env core.Env, self core.NodeRef) core.Machine {
+	return func(env core.Env, self core.NodeInstance) core.Machine {
 		return &Broker{env: env, self: self, cfg: cfg, nextID: firstID}
 	}
 }
@@ -89,9 +89,9 @@ func (b *Broker) Step(ev core.Event) []core.Action {
 	b.now = ev.At
 	var acts []core.Action
 	switch e := ev.Body.(type) {
-	case core.Started:
+	case core.NodeStarted:
 		b.started = true
-	case core.Stop:
+	case core.StopRequest:
 		acts = b.stop()
 	case core.ConnOpened:
 		acts = b.onOpen(e)
@@ -101,11 +101,11 @@ func (b *Broker) Step(ev core.Event) []core.Action {
 		acts = b.onClosed(e)
 	case core.TimerFired:
 		acts = b.onTimer(e)
-	case core.ObjPutDone:
+	case core.ObjectPutDone:
 		acts = b.onPut(e)
-	case core.ObjGetDone:
+	case core.ObjectGetDone:
 		acts = b.onGet(e)
-	case core.CPDone:
+	case core.ControlPlaneDone:
 		acts = b.onCP(e)
 	}
 	return b.finish(acts)
@@ -123,7 +123,7 @@ func (b *Broker) finish(acts []core.Action) []core.Action {
 // ---- stop ----
 
 // stop stops admission, flushes the open segment and lets in-flight work
-// finish; maybeExit emits Exit once everything is answered.
+// finish; maybeExit emits ShutdownDone once everything is answered.
 func (b *Broker) stop() []core.Action {
 	if b.stopping {
 		return nil
@@ -153,7 +153,7 @@ func (b *Broker) maybeExit(acts []core.Action) []core.Action {
 		acts = append(acts, core.CloseConn{Conn: c.id})
 	}
 	b.conns = nil
-	return append(acts, emit("broker_exited"), core.Exit{})
+	return append(acts, emit("broker_exited"), core.ShutdownDone{})
 }
 
 // ---- admission control ----
@@ -240,7 +240,7 @@ func (b *Broker) segByReq(req core.ReqID, st segState) *segment {
 
 // ---- completions ----
 
-func (b *Broker) onCP(e core.CPDone) []core.Action {
+func (b *Broker) onCP(e core.ControlPlaneDone) []core.Action {
 	if s := b.segByReq(e.Req, segCommit); s != nil {
 		return b.onCommit(s, e)
 	}
@@ -250,22 +250,22 @@ func (b *Broker) onCP(e core.CPDone) []core.Action {
 	return nil
 }
 
-func (b *Broker) onPut(e core.ObjPutDone) []core.Action {
+func (b *Broker) onPut(e core.ObjectPutDone) []core.Action {
 	if s := b.segByReq(e.Req, segPut); s != nil {
 		return b.onPutDone(s, e)
 	}
 	return nil
 }
 
-func (b *Broker) onGet(e core.ObjGetDone) []core.Action {
+func (b *Broker) onGet(e core.ObjectGetDone) []core.Action {
 	if o := b.findOp(e.Req); o != nil && o.state == opGet {
 		return b.onFetchGet(o, e)
 	}
 	return nil
 }
 
-func emit(name string, fs ...core.Field) core.Emit {
-	return core.Emit{Fact: core.Fact{Name: name, Fields: fs}}
+func emit(name string, fs ...core.Field) core.RecordFact {
+	return core.RecordFact{Fact: core.Fact{Name: name, Fields: fs}}
 }
 
 var _ core.Machine = (*Broker)(nil)

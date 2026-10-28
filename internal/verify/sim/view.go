@@ -13,7 +13,7 @@ func (v view) Timeline() Timeline      { return v.r.tl }
 func (v view) History() History        { return v.r.hist }
 func (v view) Assert() core.Assertions { return v.r.as }
 
-func (v view) Alive(ref core.NodeRef) bool {
+func (v view) Alive(ref core.NodeInstance) bool {
 	n := v.r.byName[ref.Node]
 	return n != nil && n.alive && n.ref == ref
 }

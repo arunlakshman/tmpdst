@@ -12,7 +12,7 @@ import (
 type scriptM struct {
 	fn   func(m *scriptM, ev core.Event) []core.Action
 	env  core.Env
-	self core.NodeRef
+	self core.NodeInstance
 	n    int
 	h    uint64
 	gen  core.TimerGen
@@ -25,19 +25,19 @@ func (m *scriptM) Step(ev core.Event) []core.Action {
 }
 func (m *scriptM) StateHash() uint64 { return m.h }
 
-func scripted(fn func(m *scriptM, ev core.Event) []core.Action) core.Factory {
-	return func(env core.Env, self core.NodeRef) core.Machine { return &scriptM{fn: fn, env: env, self: self} }
+func scripted(fn func(m *scriptM, ev core.Event) []core.Action) core.MachineFactory {
+	return func(env core.Env, self core.NodeInstance) core.Machine { return &scriptM{fn: fn, env: env, self: self} }
 }
 
-func fact(name string, v int64) core.Emit {
-	return core.Emit{Fact: core.Fact{Name: name, Fields: []core.Field{{Key: "v", Value: core.I64(v)}}}}
+func fact(name string, v int64) core.RecordFact {
+	return core.RecordFact{Fact: core.Fact{Name: name, Fields: []core.Field{{Key: "v", Value: core.I64(v)}}}}
 }
 
 // ping: timer ping-pong that emits a "started" fact on boot and a "ping" fact
 // per tick, every 10ms.
 func ping(m *scriptM, ev core.Event) []core.Action {
 	switch b := ev.Body.(type) {
-	case core.Started:
+	case core.NodeStarted:
 		m.gen++
 		return []core.Action{fact("started", 0), core.SetTimer{ID: 1, Gen: m.gen, After: 10 * core.Millisecond}}
 	case core.TimerFired:
@@ -53,7 +53,7 @@ func ping(m *scriptM, ev core.Event) []core.Action {
 // ---- test-only engine: echo with latency and a fault coin ----
 
 type echoApply struct {
-	from core.NodeRef
+	from core.NodeInstance
 	req  core.ReqID
 	lost bool
 }
@@ -69,9 +69,9 @@ type echo struct {
 
 func (e *echo) StateHash() uint64          { return e.applied*1000003 + e.lost*7919 + e.crashes }
 func (e *echo) Name() string               { return "echo" }
-func (e *echo) Handles(a core.Action) bool { _, ok := a.(core.ObjPut); return ok }
-func (e *echo) Execute(ctx EngineCtx, from core.NodeRef, a core.Action) {
-	put := a.(core.ObjPut)
+func (e *echo) Handles(a core.Action) bool { _, ok := a.(core.ObjectPut); return ok }
+func (e *echo) Execute(ctx EngineCtx, from core.NodeInstance, a core.Action) {
+	put := a.(core.ObjectPut)
 	lost := !e.recovered && ctx.Rand().Chance(e.lostProb)
 	if lost {
 		ctx.Fault("echo_response_lost")
@@ -82,25 +82,25 @@ func (e *echo) Execute(ctx EngineCtx, from core.NodeRef, a core.Action) {
 func (e *echo) OnInternal(ctx EngineCtx, body any) {
 	a := body.(echoApply)
 	e.applied++
-	done := core.ObjPutDone{Req: a.req, Outcome: core.Applied}
+	done := core.ObjectPutDone{Req: a.req, Outcome: core.Applied}
 	if a.lost {
 		e.lost++
 		done.Err, done.Outcome = core.ErrTimeout, core.MaybeApplied
 	}
 	ctx.Deliver(a.from, ctx.Now()+Time(core.Millisecond), 2, done)
 }
-func (e *echo) OnCrash(ctx EngineCtx, ref core.NodeRef) { e.crashes++ }
-func (e *echo) EnterRecovery()                          { e.recovered = true }
+func (e *echo) OnCrash(ctx EngineCtx, ref core.NodeInstance) { e.crashes++ }
+func (e *echo) EnterRecovery()                               { e.recovered = true }
 
 // echo is also ground truth for Objects().
 func (e *echo) Object(string) ([]byte, bool)    { return nil, false }
 func (e *echo) EachObject(func(string, []byte)) {}
 func (e *echo) Gen() uint64                     { return e.applied }
 
-// putter: every tick sends an ObjPut; emits "put_done" on the completion.
+// putter: every tick sends an ObjectPut; emits "put_done" on the completion.
 func putter(m *scriptM, ev core.Event) []core.Action {
 	switch b := ev.Body.(type) {
-	case core.Started:
+	case core.NodeStarted:
 		m.gen++
 		return []core.Action{fact("started", 0), core.SetTimer{ID: 1, Gen: m.gen, After: 5 * core.Millisecond}}
 	case core.TimerFired:
@@ -109,18 +109,18 @@ func putter(m *scriptM, ev core.Event) []core.Action {
 		}
 		m.gen++
 		return []core.Action{
-			core.ObjPut{Req: core.ReqID(m.n), Key: fmt.Sprint("k", m.n), Data: []byte{byte(m.n)}},
+			core.ObjectPut{Req: core.ReqID(m.n), Key: fmt.Sprint("k", m.n), Data: []byte{byte(m.n)}},
 			core.SetTimer{ID: 1, Gen: m.gen, After: 5 * core.Millisecond},
 		}
-	case core.ObjPutDone:
+	case core.ObjectPutDone:
 		return []core.Action{fact("put_done", int64(b.Err))}
-	case core.Stop:
-		return []core.Action{core.Exit{}}
+	case core.StopRequest:
+		return []core.Action{core.ShutdownDone{}}
 	}
 	return nil
 }
 
-func baseCfg(f core.Factory) Config {
+func baseCfg(f core.MachineFactory) Config {
 	return Config{
 		Seeds:     []uint64{1},
 		Processes: []Process{{Name: "b", Count: 1, Factory: f}},
@@ -137,7 +137,7 @@ func stat(res SeedResult, name string) uint64 {
 	panic("no stat " + name)
 }
 
-func hasFailure(res SeedResult, k FailKind, prop core.Prop) bool {
+func hasFailure(res SeedResult, k FailKind, prop core.PropertyID) bool {
 	for _, f := range res.Failures {
 		if f.Kind == k && (prop == "" || f.Prop == prop) {
 			return true
@@ -149,7 +149,7 @@ func hasFailure(res SeedResult, k FailKind, prop core.Prop) bool {
 // ---- tests ----
 
 func TestStartedIsFirstStep(t *testing.T) {
-	var firsts []core.EventBody
+	var firsts []core.EventData
 	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
 		if m.n == 1 {
 			firsts = append(firsts, ev.Body)
@@ -163,7 +163,7 @@ func TestStartedIsFirstStep(t *testing.T) {
 		t.Fatalf("crashes=%d firsts=%d failures=%+v", res.Crashes, len(firsts), res.Failures)
 	}
 	for _, b := range firsts {
-		if _, ok := b.(core.Started); !ok {
+		if _, ok := b.(core.NodeStarted); !ok {
 			t.Fatalf("first Step was %T", b)
 		}
 	}
@@ -171,8 +171,8 @@ func TestStartedIsFirstStep(t *testing.T) {
 
 func TestScriptedGracefulStop(t *testing.T) {
 	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.Stop); ok {
-			return []core.Action{core.Exit{}}
+		if _, ok := ev.Body.(core.StopRequest); ok {
+			return []core.Action{core.ShutdownDone{}}
 		}
 		return ping(m, ev)
 	})
@@ -185,8 +185,8 @@ func TestScriptedGracefulStop(t *testing.T) {
 }
 
 func TestStartedFirstEvenWithQueuedData(t *testing.T) {
-	// A data event queued before the node's first Step must not overtake Started.
-	var firsts []core.EventBody
+	// A data event queued before the node's first Step must not overtake NodeStarted.
+	var firsts []core.EventData
 	cfg := baseCfg(scripted(func(m *scriptM, ev core.Event) []core.Action {
 		if m.n == 1 {
 			firsts = append(firsts, ev.Body)
@@ -202,15 +202,15 @@ func TestStartedFirstEvenWithQueuedData(t *testing.T) {
 	if len(r.res.Failures) != 0 || len(firsts) != 1 {
 		t.Fatalf("%+v %v", r.res.Failures, firsts)
 	}
-	if _, ok := firsts[0].(core.Started); !ok {
+	if _, ok := firsts[0].(core.NodeStarted); !ok {
 		t.Fatalf("first Step was %T", firsts[0])
 	}
 }
 
 func TestTripNotLastIsProtocolFailure(t *testing.T) {
 	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.Started); ok {
-			return []core.Action{core.Trip{Cause: "x"}, fact("after", 0)}
+		if _, ok := ev.Body.(core.NodeStarted); ok {
+			return []core.Action{core.StopForRestart{Cause: "x"}, fact("after", 0)}
 		}
 		return nil
 	})
@@ -226,12 +226,12 @@ func TestTripLastCrashesAndRestarts(t *testing.T) {
 	boots := 0
 	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
 		switch ev.Body.(type) {
-		case core.Started:
+		case core.NodeStarted:
 			boots++
 			return []core.Action{core.SetTimer{ID: 1, Gen: 1, After: 50 * core.Millisecond}}
 		case core.TimerFired:
 			if boots == 1 {
-				return []core.Action{fact("pre", 0), core.Trip{Cause: "fenced"}}
+				return []core.Action{fact("pre", 0), core.StopForRestart{Cause: "fenced"}}
 			}
 		}
 		return nil
@@ -245,9 +245,9 @@ func TestTripLastCrashesAndRestarts(t *testing.T) {
 }
 
 func TestCrashDropsEntriesAndRestartsWithNewIncarnation(t *testing.T) {
-	var incs []core.Incarnation
+	var incs []core.BootNumber
 	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.Started); ok {
+		if _, ok := ev.Body.(core.NodeStarted); ok {
 			incs = append(incs, m.self.Inc)
 		}
 		return ping(m, ev)
@@ -304,8 +304,8 @@ func (f *fnInvariant) AtEnd(v View) {
 
 func TestStopExitPath(t *testing.T) {
 	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.Stop); ok {
-			return []core.Action{fact("draining", 0), core.Exit{}}
+		if _, ok := ev.Body.(core.StopRequest); ok {
+			return []core.Action{fact("draining", 0), core.ShutdownDone{}}
 		}
 		return ping(m, ev)
 	})
@@ -320,7 +320,7 @@ func TestStopExitPath(t *testing.T) {
 func TestStopDeadlineKill(t *testing.T) {
 	var deadlines []core.Time
 	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if s, ok := ev.Body.(core.Stop); ok {
+		if s, ok := ev.Body.(core.StopRequest); ok {
 			deadlines = append(deadlines, s.Deadline-ev.At)
 			return nil // ignores the Stop
 		}
@@ -401,7 +401,7 @@ func TestPanicRecovery(t *testing.T) {
 		t.Fatalf("HaltOnFirst: steps=%d", halted.Steps)
 	}
 	// A panicking factory is a failure, not a crash of the simulator.
-	cfg = baseCfg(func(core.Env, core.NodeRef) core.Machine { panic("factory") })
+	cfg = baseCfg(func(core.Env, core.NodeInstance) core.Machine { panic("factory") })
 	if r := RunSeed(cfg, 1); !hasFailure(r, FailPanic, "") {
 		t.Fatalf("%+v", r.Failures)
 	}
@@ -409,8 +409,8 @@ func TestPanicRecovery(t *testing.T) {
 
 func TestEngineRouting(t *testing.T) {
 	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.Started); ok {
-			return []core.Action{core.ObjDelete{Req: 1, Key: "k"}}
+		if _, ok := ev.Body.(core.NodeStarted); ok {
+			return []core.Action{core.ObjectDelete{Req: 1, Key: "k"}}
 		}
 		return nil
 	})
@@ -433,18 +433,18 @@ func TestEngineRouting(t *testing.T) {
 
 type echoDel struct{ n string }
 
-func (e *echoDel) StateHash() uint64                            { return 0 }
-func (e *echoDel) Name() string                                 { return e.n }
-func (e *echoDel) Handles(a core.Action) bool                   { _, ok := a.(core.ObjDelete); return ok }
-func (e *echoDel) Execute(EngineCtx, core.NodeRef, core.Action) {}
-func (e *echoDel) OnInternal(EngineCtx, any)                    {}
-func (e *echoDel) OnCrash(EngineCtx, core.NodeRef)              {}
-func (e *echoDel) EnterRecovery()                               {}
+func (e *echoDel) StateHash() uint64                                 { return 0 }
+func (e *echoDel) Name() string                                      { return e.n }
+func (e *echoDel) Handles(a core.Action) bool                        { _, ok := a.(core.ObjectDelete); return ok }
+func (e *echoDel) Execute(EngineCtx, core.NodeInstance, core.Action) {}
+func (e *echoDel) OnInternal(EngineCtx, any)                         {}
+func (e *echoDel) OnCrash(EngineCtx, core.NodeInstance)              {}
+func (e *echoDel) EnterRecovery()                                    {}
 
 func TestClockSkewAndWall(t *testing.T) {
 	var ats []core.Time
 	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.Started); ok {
+		if _, ok := ev.Body.(core.NodeStarted); ok {
 			ats = append(ats, ev.At)
 			if ev.Wall != wallEpoch {
 				t.Errorf("Wall = %d, want the scripted epoch at sim time 0", ev.Wall)
@@ -481,7 +481,7 @@ func TestCostModelQueuesAndControlFirst(t *testing.T) {
 	busy := free
 	busy.Cost = CostParams{PerEvent: 40 * core.Millisecond}
 	bres := RunSeed(busy, 1)
-	if len(order) == 0 || order[0] != "core.Started" {
+	if len(order) == 0 || order[0] != "core.NodeStarted" {
 		t.Fatalf("order: %v", order)
 	}
 	if bres.Steps >= fres.Steps || stat(bres, "wakes") == 0 {
@@ -490,12 +490,12 @@ func TestCostModelQueuesAndControlFirst(t *testing.T) {
 }
 
 func TestWorkloadRole(t *testing.T) {
-	var brokers []core.NodeRef
+	var brokers []core.NodeInstance
 	var w *wl
 	cfg := baseCfg(scripted(ping))
 	cfg.Processes[0].Count = 2
 	cfg.QuiesceEvery = 100 * core.Millisecond
-	cfg.Workloads = []WorkloadFactory{func(env core.Env, self core.NodeRef, b []core.NodeRef) Workload {
+	cfg.Workloads = []WorkloadFactory{func(env core.Env, self core.NodeInstance, b []core.NodeInstance) Workload {
 		brokers = b
 		w = &wl{}
 		return w
@@ -514,8 +514,8 @@ func TestWorkloadRole(t *testing.T) {
 	if w.n == 0 || w.hist == nil || quiesce == 0 {
 		t.Fatalf("workload steps=%d history=%v quiesce=%d", w.n, w.hist != nil, quiesce)
 	}
-	// A workload may not Trip.
-	cfg.Workloads = []WorkloadFactory{func(core.Env, core.NodeRef, []core.NodeRef) Workload { return &wl{trip: true} }}
+	// A workload may not StopForRestart.
+	cfg.Workloads = []WorkloadFactory{func(core.Env, core.NodeInstance, []core.NodeInstance) Workload { return &wl{trip: true} }}
 	cfg.Invariants = nil
 	if res = RunSeed(cfg, 1); !hasFailure(res, FailProtocol, "workload_ended") {
 		t.Fatalf("%+v", res.Failures)
@@ -531,7 +531,7 @@ type wl struct {
 func (w *wl) Step(core.Event) []core.Action {
 	w.n++
 	if w.trip {
-		return []core.Action{core.Trip{Cause: "no"}}
+		return []core.Action{core.StopForRestart{Cause: "no"}}
 	}
 	return nil
 }
@@ -544,7 +544,7 @@ func TestTimerCancel(t *testing.T) {
 	fired := 0
 	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
 		switch ev.Body.(type) {
-		case core.Started:
+		case core.NodeStarted:
 			return []core.Action{core.SetTimer{ID: 7, Gen: 1, After: 10 * core.Millisecond}, core.CancelTimer{ID: 7}}
 		case core.TimerFired:
 			fired++
@@ -638,7 +638,7 @@ func TestCheckDeterminismDetectsDivergence(t *testing.T) {
 	}
 	runs := 0
 	bad := baseCfg(scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.Started); ok {
+		if _, ok := ev.Body.(core.NodeStarted); ok {
 			runs++ // package-level state leaking across runs: the bug the check exists for
 			return []core.Action{core.SetTimer{ID: 1, Gen: 1, After: core.Duration(runs) * core.Millisecond}}
 		}
@@ -713,7 +713,7 @@ func TestPhaseAwareWorkload(t *testing.T) {
 	run := func(emit bool) (SeedResult, *phaseWl, []TimedFact, []TimedFact) {
 		w := &phaseWl{emit: emit}
 		cfg := baseCfg(scripted(ping))
-		cfg.Workloads = []WorkloadFactory{func(core.Env, core.NodeRef, []core.NodeRef) Workload { return w }}
+		cfg.Workloads = []WorkloadFactory{func(core.Env, core.NodeInstance, []core.NodeInstance) Workload { return w }}
 		var sp, wp []TimedFact
 		cfg.Invariants = []func() Invariant{func() Invariant {
 			return &fnInvariant{atEnd: func(v View) {
@@ -754,12 +754,12 @@ func TestExpectReachableAndAssertions(t *testing.T) {
 			v.Assert().Always(true, "fine")
 		}}
 	}}
-	cfg.ExpectReachable = []core.Prop{"hit", "never ran", "also never"}
+	cfg.ExpectReachable = []core.PropertyID{"hit", "never ran", "also never"}
 	rep, err := NewRunner().Run(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var cov []core.Prop
+	var cov []core.PropertyID
 	for _, a := range rep.Coverage {
 		cov = append(cov, a.Prop)
 		if a.Kind != "reachable" || a.Checks != 0 {
@@ -769,7 +769,7 @@ func TestExpectReachableAndAssertions(t *testing.T) {
 	if len(cov) != 2 || cov[0] != "never ran" || cov[1] != "also never" {
 		t.Fatalf("coverage: %v", cov)
 	}
-	got := map[core.Prop]AssertionStat{}
+	got := map[core.PropertyID]AssertionStat{}
 	for _, a := range rep.Assertions {
 		got[a.Prop] = a
 	}

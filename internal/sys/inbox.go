@@ -11,8 +11,8 @@ import (
 // at dataCap that blocks when full. Both drop after Close.
 type Inbox struct {
 	mu      sync.Mutex
-	control []core.EventBody
-	data    []core.EventBody
+	control []core.EventData
+	data    []core.EventData
 	slots   chan struct{} // data capacity semaphore
 	wake    chan struct{} // cap 1: something was enqueued
 	done    chan struct{}
@@ -50,7 +50,7 @@ func (i *Inbox) notify() {
 }
 
 // DeliverControl enqueues a control event; control events are never dropped.
-func (i *Inbox) DeliverControl(b core.EventBody) {
+func (i *Inbox) DeliverControl(b core.EventData) {
 	i.mu.Lock()
 	if i.closed() {
 		i.mu.Unlock()
@@ -62,7 +62,7 @@ func (i *Inbox) DeliverControl(b core.EventBody) {
 }
 
 // DeliverData enqueues a data event, blocking or backpressuring per the data capacity.
-func (i *Inbox) DeliverData(b core.EventBody) {
+func (i *Inbox) DeliverData(b core.EventData) {
 	if i.closed() {
 		return
 	}
@@ -109,7 +109,7 @@ func (q ctrlQ) Len() int {
 	return len(q.i.control)
 }
 
-func (q ctrlQ) Pop() (core.EventBody, bool) {
+func (q ctrlQ) Pop() (core.EventData, bool) {
 	q.i.mu.Lock()
 	defer q.i.mu.Unlock()
 	if len(q.i.control) == 0 {
@@ -129,7 +129,7 @@ func (q dataQ) Len() int {
 	return len(q.i.data)
 }
 
-func (q dataQ) Pop() (core.EventBody, bool) {
+func (q dataQ) Pop() (core.EventData, bool) {
 	q.i.mu.Lock()
 	if len(q.i.data) == 0 {
 		q.i.mu.Unlock()

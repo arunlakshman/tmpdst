@@ -16,8 +16,8 @@ const (
 	// wallEpoch is the scripted UTC at simulation time zero (2023-11-14).
 	wallEpoch core.WallTime = 1_700_000_000 * 1_000_000_000
 
-	// stopGrace is how long a node has to Exit after core.Stop before it is
-	// killed. Node-local Stop.Deadline is the sim deadline plus the node's skew.
+	// stopGrace is how long a node has to ShutdownDone after core.StopRequest before it is
+	// killed. Node-local StopRequest.Deadline is the sim deadline plus the node's skew.
 	stopGrace = 5 * core.Second
 
 	// defaultMaxSteps applies when Config.MaxSteps is 0, so a timer loop at one
@@ -63,11 +63,11 @@ type node struct {
 	name      core.NodeID
 	idx       int
 	workload  bool
-	factory   core.Factory
+	factory   core.MachineFactory
 	wlFactory WorkloadFactory
 	skew      core.Duration
 
-	ref         core.NodeRef
+	ref         core.NodeInstance
 	alive       bool
 	broken      bool // factory failed: never restarted
 	stopping    bool
@@ -117,7 +117,7 @@ type run struct {
 	hist  *history
 	as    *assertions
 	env   env
-	sites map[core.Site]bool
+	sites map[core.FaultPointID]bool
 	invs  []Invariant
 
 	phase Phase
@@ -142,14 +142,14 @@ func RunSeed(cfg Config, seed uint64) SeedResult {
 
 func newRun(cfg Config, seed uint64) *run {
 	r := &run{cfg: cfg, seed: seed, policy: core.ControlFirst{}, trace: newHasher(),
-		byName: map[core.NodeID]*node{}, lanes: map[string]Lane{}, nextLane: 1, byEng: map[string]int{}, sites: map[core.Site]bool{}}
+		byName: map[core.NodeID]*node{}, lanes: map[string]Lane{}, nextLane: 1, byEng: map[string]int{}, sites: map[core.FaultPointID]bool{}}
 	r.res.Seed = seed
 	r.rng = NewRand(seed)
 	r.sched = newSched(r.rng)
 	r.tl = NewTimeline()
 	r.hist = newHistory(func() Time { return r.sched.Now() }, func(m string) { r.fail(FailProtocol, "history", m) })
 	r.as = newAssertions(r)
-	r.env = env{Rand: r.rng, Buggify: &buggify{r}, Assertions: r.as}
+	r.env = env{Rand: r.rng, FaultInjector: &buggify{r}, Assertions: r.as}
 
 	r.sc = SeedConfig{ObjectStore: cfg.ObjectStore, ControlPlane: cfg.ControlPlane,
 		LogStore: cfg.LogStore, Network: cfg.Network, Attrition: cfg.Attrition, Cost: cfg.Cost, Params: cfg.Params}
@@ -194,7 +194,7 @@ func (r *run) local(n *node) core.Time { return core.Time(r.now()) + core.Time(n
 
 func (r *run) wall() core.WallTime { return wallEpoch + core.WallTime(r.now()) }
 
-func (r *run) fail(k FailKind, p core.Prop, msg string) {
+func (r *run) fail(k FailKind, p core.PropertyID, msg string) {
 	r.res.Failures = append(r.res.Failures, Failure{Seed: r.seed, Kind: k, Prop: p, Step: r.steps, At: r.now(), Msg: msg})
 	if r.cfg.HaltOnFirst {
 		r.halt = true
@@ -299,7 +299,7 @@ func (r *run) scheduleCampaign() {
 	for _, sf := range r.cfg.Scripted {
 		switch sf.Kind {
 		case EntryCrash, EntryStop, EntryRestart:
-			r.sched.Schedule(Entry{At: sf.At, Lane: laneSim, Kind: sf.Kind, Target: Target{Node: core.NodeRef{Node: sf.Node}}})
+			r.sched.Schedule(Entry{At: sf.At, Lane: laneSim, Kind: sf.Kind, Target: Target{Node: core.NodeInstance{Node: sf.Node}}})
 		default:
 			r.fail(FailProtocol, "scripted_fault", fmt.Sprintf("unsupported scripted kind %d", sf.Kind))
 		}
@@ -308,10 +308,10 @@ func (r *run) scheduleCampaign() {
 
 func nodeLane(n *node, k uint64) Lane { return laneReserved + 1 + Lane(n.idx)<<8 + Lane(k) }
 
-// boot starts a new incarnation of n: fresh ID, fresh machine, Started queued
+// boot starts a new incarnation of n: fresh ID, fresh machine, NodeStarted queued
 // (control class, so it is the first Step whatever else arrives) and a wakeup.
 func (r *run) boot(n *node) {
-	n.ref = core.NodeRef{Node: n.name, Inc: core.Incarnation(r.rng.NewID())}
+	n.ref = core.NodeInstance{Node: n.name, Inc: core.BootNumber(r.rng.NewID())}
 	n.inbox = &nodeInbox{}
 	n.timers = map[core.TimerID]EntryID{}
 	n.stepped, n.wakePending, n.stopping = 0, false, false
@@ -320,7 +320,7 @@ func (r *run) boot(n *node) {
 	var m core.Machine
 	ok := r.guard("factory "+string(n.name), func() {
 		if n.workload {
-			var brokers []core.NodeRef
+			var brokers []core.NodeInstance
 			for _, b := range r.nodes {
 				if !b.workload {
 					brokers = append(brokers, b.ref)
@@ -352,7 +352,7 @@ func (r *run) boot(n *node) {
 		r.counters[cRestarts]++
 		r.simFact("sim_restarted", core.Field{Key: "node", Value: core.Str(n.name)})
 	}
-	n.inbox.Push(core.Started{Self: n.ref})
+	n.inbox.Push(core.NodeStarted{Self: n.ref})
 	r.ensureWake(n, r.now())
 }
 
@@ -366,13 +366,13 @@ func (r *run) ensureWake(n *node, at Time) {
 
 // ---- facts ----
 
-func (r *run) appendFact(src core.NodeRef, f core.Fact) {
+func (r *run) appendFact(src core.NodeInstance, f core.Fact) {
 	r.tl.Append(src, r.now(), f)
 	r.trace.fact(f)
 }
 
 func (r *run) simFact(name string, fields ...core.Field) {
-	r.appendFact(core.NodeRef{}, core.Fact{Name: name, Fields: fields})
+	r.appendFact(core.NodeInstance{}, core.Fact{Name: name, Fields: fields})
 }
 
 // ---- main loop ----
@@ -417,7 +417,7 @@ func (r *run) foldEntry(e Entry) {
 	h.ref(e.Target.Node)
 	h.Str(e.Target.Engine)
 	switch b := e.Body.(type) {
-	case core.EventBody:
+	case core.EventData:
 		h.event(b)
 	case wake:
 		h.U64(901)
@@ -534,7 +534,7 @@ func (r *run) processDeliver(e Entry) {
 // enqueueDelivery pushes the event body of e onto n's inbox; false (after
 // failing the seed) if the body is not an event.
 func (r *run) enqueueDelivery(n *node, e Entry) bool {
-	body, isEv := e.Body.(core.EventBody)
+	body, isEv := e.Body.(core.EventData)
 	if !isEv {
 		r.fail(FailProtocol, "bad_delivery", fmt.Sprintf("delivery body %T is not an event", e.Body))
 		return false
@@ -564,10 +564,10 @@ func (r *run) processInternal(e Entry) {
 func (r *run) processCrash(e Entry) {
 	r.counters[cSimSteps]++
 	n := r.byName[e.Target.Node.Node]
-	if n == nil || !n.alive || (e.Target.Node.Inc != (core.Incarnation{}) && n.ref != e.Target.Node) {
+	if n == nil || !n.alive || (e.Target.Node.Inc != (core.BootNumber{}) && n.ref != e.Target.Node) {
 		return
 	}
-	if n.stopping && e.Target.Node.Inc != (core.Incarnation{}) {
+	if n.stopping && e.Target.Node.Inc != (core.BootNumber{}) {
 		r.counters[cDeadlineKills]++
 	}
 	r.end(n, endCrash, "crash")
@@ -652,7 +652,7 @@ func (r *run) pump(n *node) {
 		return
 	}
 	r.counters[cNodeSteps]++
-	if _, started := body.(core.Started); n.stepped == 0 && !started {
+	if _, started := body.(core.NodeStarted); n.stepped == 0 && !started {
 		r.fail(FailProtocol, "started_first", fmt.Sprintf("%s: first Step was %T, not Started", n.name, body))
 	}
 	n.stepped++
@@ -697,7 +697,7 @@ func (r *run) dispatch(n *node, acts []core.Action) {
 		last := i == len(acts)-1
 		r.trace.action(a)
 		switch x := a.(type) {
-		case core.Emit:
+		case core.RecordFact:
 			r.appendFact(n.ref, x.Fact)
 		case core.SetTimer:
 			after := max(x.After, 0)
@@ -710,13 +710,13 @@ func (r *run) dispatch(n *node, acts []core.Action) {
 				r.sched.Cancel(id)
 				delete(n.timers, x.ID)
 			}
-		case core.Trip:
+		case core.StopForRestart:
 			if !last {
 				r.fail(FailProtocol, "trip_not_last", string(n.name)+": Trip is not the last action")
 			}
 			r.ender(n, endTrip, x.Cause)
 			return
-		case core.Exit:
+		case core.ShutdownDone:
 			if !last {
 				r.fail(FailProtocol, "exit_not_last", string(n.name)+": Exit is not the last action")
 			}
@@ -796,11 +796,11 @@ func (r *run) end(n *node, how endKind, cause string) {
 	n.m, n.wl, n.inbox, n.timers = nil, nil, &nodeInbox{}, nil
 	a := r.sc.Attrition
 	delay := core.Duration(r.rng.Between(int64(a.RecoveryDelay[0]), int64(a.RecoveryDelay[1])))
-	r.sched.Schedule(Entry{At: r.now() + Time(delay), Lane: laneSim, Kind: EntryRestart, Target: Target{Node: core.NodeRef{Node: n.name}}})
+	r.sched.Schedule(Entry{At: r.now() + Time(delay), Lane: laneSim, Kind: EntryRestart, Target: Target{Node: core.NodeInstance{Node: n.name}}})
 }
 
 // stopNode asks n to shut down gracefully and arms the kill at the deadline.
-// The kill entry is addressed to this incarnation, so ending it first (Exit)
+// The kill entry is addressed to this incarnation, so ending it first (ShutdownDone)
 // drops the kill with everything else.
 func (r *run) stopNode(n *node) {
 	n.stopping = true
@@ -808,12 +808,12 @@ func (r *run) stopNode(n *node) {
 	dl := r.now() + Time(stopGrace)
 	r.sched.Schedule(Entry{At: dl, Lane: laneSim, Kind: EntryCrash, Target: Target{Node: n.ref}})
 	r.simFact("sim_stop_requested", core.Field{Key: "node", Value: core.Str(n.name)})
-	n.inbox.Push(core.Stop{Deadline: core.Time(dl) + core.Time(n.skew)})
+	n.inbox.Push(core.StopRequest{Deadline: core.Time(dl) + core.Time(n.skew)})
 	r.pump(n)
 }
 
 // attrition evaluates one CrashProb roll (Chaos only): pick a live process,
-// then a hard crash or, by weight, a graceful Stop. MaxDead caps processes
+// then a hard crash or, by weight, a graceful StopRequest. MaxDead caps processes
 // that are down or stopping (0 means attrition is off).
 func (r *run) attrition() {
 	a := r.sc.Attrition
@@ -868,7 +868,7 @@ func (c *engineCtx) Lane(key string) Lane {
 	return l
 }
 
-func (c *engineCtx) Deliver(to core.NodeRef, at Time, lane Lane, body core.EventBody) EntryID {
+func (c *engineCtx) Deliver(to core.NodeInstance, at Time, lane Lane, body core.EventData) EntryID {
 	n := c.r.byName[to.Node]
 	if n == nil || !n.alive || n.ref != to {
 		return 0 // addressed to a dead incarnation: dropped, no draw
@@ -890,10 +890,10 @@ func (c *engineCtx) Fault(kind string, fields ...core.Field) {
 
 func (c *engineCtx) Assert() core.Assertions { return c.r.as }
 
-func (c *engineCtx) Current(node core.NodeID) (core.NodeRef, bool) {
+func (c *engineCtx) Current(node core.NodeID) (core.NodeInstance, bool) {
 	n := c.r.byName[node]
 	if n == nil || !n.alive {
-		return core.NodeRef{}, false
+		return core.NodeInstance{}, false
 	}
 	return n.ref, true
 }

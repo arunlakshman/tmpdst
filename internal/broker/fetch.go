@@ -7,7 +7,7 @@ import (
 	"manifester/internal/wire/kwire"
 )
 
-// fetch serves each partition independently: Lookup, then one ranged GET per
+// fetch serves each partition independently: FindSegments, then one ranged GET per
 // committed batch, verified and patched to its committed offset (decision 30).
 // It answers at once, ignoring MinBytes and MaxWait (decision 29).
 func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
@@ -57,7 +57,7 @@ func fillFetchSkeleton(resp *kmsg.FetchResponse, r *kmsg.FetchRequest) {
 
 // onLookup picks the ranges that fit the partition limit (at least one) and
 // starts reading them.
-func (b *Broker) onLookup(o *op, r core.LookupResp) []core.Action {
+func (b *Broker) onLookup(o *op, r core.FindSegmentsResp) []core.Action {
 	o.fpart.HighWatermark, o.fpart.LastStableOffset = int64(r.End), int64(r.End)
 	if o.from > r.End {
 		o.fpart.ErrorCode = int16(errOffsetOutOfRange)
@@ -81,7 +81,7 @@ func (b *Broker) onLookup(o *op, r core.LookupResp) []core.Action {
 // onFetchGet verifies one batch read from the object store. A corrupt GET is
 // never returned: it is retried (the object itself is intact; S3 checksums
 // cover whole objects but not byte ranges, decision 27).
-func (b *Broker) onFetchGet(o *op, e core.ObjGetDone) []core.Action {
+func (b *Broker) onFetchGet(o *op, e core.ObjectGetDone) []core.Action {
 	rg := o.ranges[o.next]
 	if e.Err == core.ErrNotFound { // committed segments are never deleted
 		b.env.Unreachable("broker: committed segment missing")

@@ -7,7 +7,7 @@ import "manifester/internal/core"
 // control/data inboxes; the node picks with core.InboxPolicy and is busy for
 // Sample(...) after each Step. Zero cost reproduces an instantaneous Step.
 type CostModel interface {
-	Sample(body core.EventBody, r CountedRand) core.Duration
+	Sample(body core.EventData, r CountedRand) core.Duration
 }
 
 // CostParams configures the default CostModel. Seeded, swarmable, and
@@ -26,7 +26,7 @@ type CostParams struct {
 type NodeInbox interface {
 	Control() core.Queue
 	Data() core.Queue
-	// Push routes with core.ClassOf.
-	Push(body core.EventBody)
+	// Push routes with core.InboxKindOf.
+	Push(body core.EventData)
 	BusyUntil() Time
 }

@@ -6,10 +6,10 @@
 //     two directions; direction d carries bytes from side d to side 1-d. Each
 //     direction has its own Lane (decision C) and monotone arrival times, so
 //     bytes never reorder even when chunks draw different latencies.
-//   - Dial: live target -> ConnIDs allocated now (per-node counters, never
-//     reused across incarnations), DialDone{OK} to the dialer and
+//   - Connect: live target -> ConnIDs allocated now (per-node counters, never
+//     reused across incarnations), ConnectDone{OK} to the dialer and
 //     ConnOpened to the listener, both after latency. Down target ->
-//     DialDone{ErrConnClosed} after latency. A partitioned pair delays the
+//     ConnectDone{ErrConnClosed} after latency. A partitioned pair delays the
 //     dial until the partition heals.
 //   - Send: SendDone{OK} means accepted, not delivered: it arrives one latency
 //     sample after issue, independent of delivery, pause or faults. Data is
@@ -24,7 +24,7 @@
 //     order on resume. SendDone is NOT held back: the sim does not model the
 //     sender's flow-control window, so backpressure is invisible to senders.
 //     An RST is not held by pause.
-//   - Faults are drawn at issue (Send; Dial draws partition only) and never
+//   - Faults are drawn at issue (Send; Connect draws partition only) and never
 //     after EnterRecovery.
 //     RandomClose: conn aborted by the network, both ends get Abort:true; the
 //     triggering Send gets ErrConnClosed. BlackHole: this direction silently
@@ -74,7 +74,7 @@ type endRef struct {
 }
 
 type end struct {
-	ref    core.NodeRef
+	ref    core.NodeInstance
 	id     core.ConnID
 	closed bool // closed locally, reset, or crashed: no more sends or delivery
 	eof    bool // saw peer FIN
@@ -149,7 +149,7 @@ func (e *Engine) Name() string { return "netsim" }
 // Handles reports whether a is a network action.
 func (e *Engine) Handles(a core.Action) bool {
 	switch a.(type) {
-	case core.Send, core.Dial, core.CloseConn, core.PauseReads, core.ResumeReads:
+	case core.Send, core.Connect, core.CloseConn, core.PauseReads, core.ResumeReads:
 		return true
 	}
 	return false
@@ -300,7 +300,7 @@ func (e *Engine) sendRst(ctx sim.EngineCtx, p *pair, to int, net bool, lat core.
 	d.flight = append(d.flight, item{kind: kRst, seq: d.seq, net: net, id: id})
 }
 
-func (e *Engine) ack(ctx sim.EngineCtx, to core.NodeRef, p *pair, side int, req core.ReqID, conn core.ConnID, err core.ErrCode) {
+func (e *Engine) ack(ctx sim.EngineCtx, to core.NodeInstance, p *pair, side int, req core.ReqID, conn core.ConnID, err core.ErrCode) {
 	var lane sim.Lane
 	if p != nil {
 		lane = ctx.Lane(pairKey(p.id, "ack"+strconv.Itoa(side)))
@@ -313,16 +313,16 @@ func (e *Engine) ack(ctx sim.EngineCtx, to core.NodeRef, p *pair, side int, req 
 func (e *Engine) fault(ctx sim.EngineCtx, kind string, a, b core.NodeID, extra ...core.Field) {
 	fs := append([]core.Field{{Key: "a", Value: core.Str(a)}, {Key: "b", Value: core.Str(b)}}, extra...)
 	ctx.Fault(kind, fs...)
-	ctx.Assert().Sometimes(true, core.Prop("net: "+kind))
-	ctx.Assert().Reachable(core.Prop("net: " + kind + " injected"))
+	ctx.Assert().Sometimes(true, core.PropertyID("net: "+kind))
+	ctx.Assert().Reachable(core.PropertyID("net: " + kind + " injected"))
 }
 
 // ---- Execute ----
 
 // Execute applies a network action issued by node from.
-func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.Action) {
+func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.Action) {
 	switch a := a.(type) {
-	case core.Dial:
+	case core.Connect:
 		e.dial(ctx, from, a)
 	case core.Send:
 		e.send(ctx, from, a)
@@ -340,7 +340,7 @@ func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.Action) {
 	}
 }
 
-func (e *Engine) dial(ctx sim.EngineCtx, from core.NodeRef, a core.Dial) {
+func (e *Engine) dial(ctx sim.EngineCtx, from core.NodeInstance, a core.Connect) {
 	target := core.NodeID(a.Addr)
 	// Partition coin first: it applies to this dial.
 	e.maybePartition(ctx, from.Node, target)
@@ -351,7 +351,7 @@ func (e *Engine) dial(ctx sim.EngineCtx, from core.NodeRef, a core.Dial) {
 	}
 	ref, ok := ctx.(sim.NodeCurrent).Current(target)
 	if !ok {
-		ctx.Deliver(from, at, ctx.Lane("net/misc"), core.DialDone{Req: a.Req, Err: core.ErrConnClosed})
+		ctx.Deliver(from, at, ctx.Lane("net/misc"), core.ConnectDone{Req: a.Req, Err: core.ErrConnClosed})
 		return
 	}
 	e.nextPair++
@@ -367,7 +367,7 @@ func (e *Engine) dial(ctx sim.EngineCtx, from core.NodeRef, a core.Dial) {
 	e.pairs = append(e.pairs, p) // ok is false: hashed on first use
 	e.ends[endKey{from.Node, p.end[0].id}] = endRef{p.id, 0}
 	e.ends[endKey{target, p.end[1].id}] = endRef{p.id, 1}
-	ctx.Deliver(from, at, ctx.Lane(pairKey(p.id, "dial")), core.DialDone{Req: a.Req, Conn: p.end[0].id})
+	ctx.Deliver(from, at, ctx.Lane(pairKey(p.id, "dial")), core.ConnectDone{Req: a.Req, Conn: p.end[0].id})
 	ctx.Deliver(ref, at, p.dirs[0].lane, core.ConnOpened{Conn: p.end[1].id, Peer: string(from.Node)})
 }
 
@@ -389,7 +389,7 @@ func (e *Engine) maybePartition(ctx sim.EngineCtx, a, b core.NodeID) {
 	e.fault(ctx, "partition", l.a, l.b, core.Field{Key: "dur", Value: core.I64(dur)})
 }
 
-func (e *Engine) send(ctx sim.EngineCtx, from core.NodeRef, a core.Send) {
+func (e *Engine) send(ctx sim.EngineCtx, from core.NodeInstance, a core.Send) {
 	p, s := e.lookup(from.Node, a.Conn)
 	if p == nil || p.end[s].ref != from || p.end[s].closed || p.dirs[s].aborted {
 		e.ack(ctx, from, p, s, a.Req, a.Conn, core.ErrConnClosed)
@@ -430,7 +430,7 @@ func (e *Engine) send(ctx sim.EngineCtx, from core.NodeRef, a core.Send) {
 	e.ack(ctx, from, p, s, a.Req, a.Conn, core.OK)
 }
 
-func (e *Engine) closeConn(ctx sim.EngineCtx, from core.NodeRef, a core.CloseConn) {
+func (e *Engine) closeConn(ctx sim.EngineCtx, from core.NodeInstance, a core.CloseConn) {
 	p, s := e.lookup(from.Node, a.Conn)
 	if p == nil || p.end[s].ref != from || p.end[s].closed {
 		return
@@ -545,7 +545,7 @@ func (e *Engine) flush(ctx sim.EngineCtx, p *pair, di int) {
 }
 
 // OnCrash retires every open end at ref; survivors get an RST.
-func (e *Engine) OnCrash(ctx sim.EngineCtx, ref core.NodeRef) {
+func (e *Engine) OnCrash(ctx sim.EngineCtx, ref core.NodeInstance) {
 	// Snapshot: maybeRemove edits e.pairs.
 	ps := append([]*pair(nil), e.pairs...)
 	for _, p := range ps {

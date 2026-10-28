@@ -8,7 +8,7 @@ import (
 
 // ControlPlane is the spec of the control plane as a broker sees it.
 // Wire payloads are controlplane/api/v1 messages (decision 57); this oracle
-// still steps core.CPOp values via CPCall so sim and brokers keep one bridge,
+// still steps core.ControlPlaneOperation values via ControlPlaneCall so sim and brokers keep one bridge,
 // with apiconv at the gRPC edge. Apply logic stays unshared (decision 21).
 // Sequential, fault-free; Outcome is Applied for a state change and NotApplied
 // for errors and reads. Rules:
@@ -37,7 +37,7 @@ import (
 //	DescribeTopics sorted by name; empty request = all; unknown names are
 //	               omitted.
 //
-// Topics can also be made with CreateTopic. Exec panics on a non-CPCall.
+// Topics can also be made with CreateTopic. Exec panics on a non-ControlPlaneCall.
 type ControlPlane struct {
 	segs   map[string]segment
 	parts  map[string]map[int32][]core.BatchRange // topic -> partition -> runs
@@ -84,21 +84,21 @@ func (c *ControlPlane) End(tp core.TopicPartition) core.Offset {
 	return last.Base + core.Offset(last.Count)
 }
 
-// Exec runs one CPCall and returns its CPDone.
-func (c *ControlPlane) Exec(a core.IOAction) core.Completion {
-	call, ok := a.(core.CPCall)
+// Exec runs one ControlPlaneCall and returns its ControlPlaneDone.
+func (c *ControlPlane) Exec(a core.IOCall) core.IOResult {
+	call, ok := a.(core.ControlPlaneCall)
 	if !ok {
 		panic("veritas.ControlPlane: not a CPCall")
 	}
 	switch op := call.Op.(type) {
 	case core.CommitSegment:
 		return c.execCommit(call.Req, op)
-	case core.Lookup:
+	case core.FindSegments:
 		return c.execLookup(call.Req, op)
 	case core.DescribeTopics:
 		return c.execDescribe(call.Req, op)
 	}
-	return core.CPDone{Req: call.Req, Err: core.ErrInvalid}
+	return core.ControlPlaneDone{Req: call.Req, Err: core.ErrInvalid}
 }
 
 // validBatch reports whether b is well formed on its own.
@@ -106,28 +106,28 @@ func validBatch(b core.PendingBatch) bool {
 	return b.Records > 0 && b.TP.Topic != "" && b.TP.Partition >= 0
 }
 
-func (c *ControlPlane) execCommit(req core.ReqID, op core.CommitSegment) core.Completion {
+func (c *ControlPlane) execCommit(req core.ReqID, op core.CommitSegment) core.IOResult {
 	if seg, done := c.segs[op.SegmentKey]; done {
 		return c.replayCommit(req, op, seg)
 	}
 	return c.freshCommit(req, op)
 }
 
-func (c *ControlPlane) replayCommit(req core.ReqID, op core.CommitSegment, seg segment) core.Completion {
+func (c *ControlPlane) replayCommit(req core.ReqID, op core.CommitSegment, seg segment) core.IOResult {
 	if !slices.Equal(seg.batches, op.Batches) {
-		return core.CPDone{Req: req, Err: core.ErrConflict}
+		return core.ControlPlaneDone{Req: req, Err: core.ErrConflict}
 	}
 	resp := core.CommitSegmentResp{Assigned: slices.Clone(seg.ranges)}
-	return core.CPDone{Req: req, Resp: resp, Outcome: core.Applied}
+	return core.ControlPlaneDone{Req: req, Resp: resp, Outcome: core.Applied}
 }
 
-func (c *ControlPlane) freshCommit(req core.ReqID, op core.CommitSegment) core.Completion {
+func (c *ControlPlane) freshCommit(req core.ReqID, op core.CommitSegment) core.IOResult {
 	if op.SegmentKey == "" || len(op.Batches) == 0 {
-		return core.CPDone{Req: req, Err: core.ErrInvalid}
+		return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
 	}
 	for _, b := range op.Batches {
 		if !validBatch(b) {
-			return core.CPDone{Req: req, Err: core.ErrInvalid}
+			return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
 		}
 	}
 	seg := segment{batches: slices.Clone(op.Batches)}
@@ -143,14 +143,14 @@ func (c *ControlPlane) freshCommit(req core.ReqID, op core.CommitSegment) core.C
 	}
 	c.segs[op.SegmentKey] = seg
 	resp := core.CommitSegmentResp{Assigned: slices.Clone(seg.ranges)}
-	return core.CPDone{Req: req, Resp: resp, Outcome: core.Applied}
+	return core.ControlPlaneDone{Req: req, Resp: resp, Outcome: core.Applied}
 }
 
-func (c *ControlPlane) execLookup(req core.ReqID, op core.Lookup) core.Completion {
+func (c *ControlPlane) execLookup(req core.ReqID, op core.FindSegments) core.IOResult {
 	if op.From < 0 {
-		return core.CPDone{Req: req, Err: core.ErrInvalid}
+		return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
 	}
-	resp := core.LookupResp{End: c.End(op.TP)}
+	resp := core.FindSegmentsResp{End: c.End(op.TP)}
 	var bytes int64
 	for _, r := range c.parts[op.TP.Topic][op.TP.Partition] {
 		if r.Base+core.Offset(r.Count) <= op.From {
@@ -162,17 +162,17 @@ func (c *ControlPlane) execLookup(req core.ReqID, op core.Lookup) core.Completio
 			break
 		}
 	}
-	return core.CPDone{Req: req, Resp: resp}
+	return core.ControlPlaneDone{Req: req, Resp: resp}
 }
 
-func (c *ControlPlane) execDescribe(req core.ReqID, op core.DescribeTopics) core.Completion {
+func (c *ControlPlane) execDescribe(req core.ReqID, op core.DescribeTopics) core.IOResult {
 	var resp core.DescribeTopicsResp
 	for _, name := range sortedKeys(c.topics) {
 		if len(op.Topics) == 0 || slices.Contains(op.Topics, name) {
 			resp.Topics = append(resp.Topics, core.TopicInfo{Name: name, Partitions: c.topics[name]})
 		}
 	}
-	return core.CPDone{Req: req, Resp: resp}
+	return core.ControlPlaneDone{Req: req, Resp: resp}
 }
 
 func (c *ControlPlane) append(r core.BatchRange) {

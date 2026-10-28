@@ -108,7 +108,7 @@ type client struct {
 // built, so the oracle can check that acked offsets follow send order.
 type Workload struct {
 	env   core.Env
-	self  core.NodeRef
+	self  core.NodeInstance
 	opts  Opts
 	tps   []core.TopicPartition
 	hist  sim.History
@@ -117,7 +117,7 @@ type Workload struct {
 }
 
 // NewWorkload builds the workload machine.
-func NewWorkload(env core.Env, self core.NodeRef, brokers []core.NodeRef, o Opts) *Workload {
+func NewWorkload(env core.Env, self core.NodeInstance, brokers []core.NodeInstance, o Opts) *Workload {
 	w := &Workload{env: env, self: self, opts: o, tps: o.tps()}
 	w.loop = session.Loop[*client]{
 		Connected: func(c *client) bool { return c.State == session.Up },
@@ -211,7 +211,7 @@ func (w *Workload) send(c *client, kind reqKind, req kmsg.Request) []core.Action
 	h := core.RequestHeader{APIKey: req.Key(), APIVersion: c.ver[kind], CorrelationID: c.corr, ClientID: fmt.Sprintf("c%d", c.ID)}
 	data, err := w.codec.EncodeRequest(h, req)
 	if err != nil {
-		w.env.Unreachable("kafka: client request encodes", core.Detail{Key: "err", Value: err.Error()})
+		w.env.Unreachable("kafka: client request encodes", core.ContextPair{Key: "err", Value: err.Error()})
 		return nil
 	}
 	timeout := w.opts.reqTimeout()

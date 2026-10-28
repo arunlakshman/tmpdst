@@ -18,20 +18,20 @@ func New(kv KV) *Applier { return &Applier{kv: kv} }
 // Close closes the store.
 func (a *Applier) Close() error { return a.kv.Close() }
 
-// Exec runs one CPCall like veritas.ControlPlane.Exec. For a CommitSegment the
+// Exec runs one ControlPlaneCall like veritas.ControlPlane.Exec. For a CommitSegment the
 // call's Req is the log slot (it orders the idempotency window for Trim). A
 // store failure panics.
-func (a *Applier) Exec(act core.IOAction) core.Completion {
-	call, ok := act.(core.CPCall)
+func (a *Applier) Exec(act core.IOCall) core.IOResult {
+	call, ok := act.(core.ControlPlaneCall)
 	if !ok {
 		panic("applier: not a CPCall")
 	}
-	var d core.CPDone
+	var d core.ControlPlaneDone
 	var err error
 	switch op := call.Op.(type) {
 	case core.CommitSegment:
 		d, err = a.Commit(int64(call.Req), op)
-	case core.Lookup:
+	case core.FindSegments:
 		d, err = a.Lookup(op)
 	case core.DescribeTopics:
 		d, err = a.Describe(op)
@@ -46,16 +46,16 @@ func (a *Applier) Exec(act core.IOAction) core.Completion {
 }
 
 // Commit applies a CommitSegment that sits at log slot slot.
-func (a *Applier) Commit(slot int64, op core.CommitSegment) (core.CPDone, error) {
-	var d core.CPDone
+func (a *Applier) Commit(slot int64, op core.CommitSegment) (core.ControlPlaneDone, error) {
+	var d core.ControlPlaneDone
 	err := a.kv.Update(func(tx Tx) { d = commitTx(tx, slot, op) })
 	return d, err
 }
 
 // KnownCommit answers op from the idempotency window when the key is already
 // present. ok is false when the key is unknown (caller must append).
-func (a *Applier) KnownCommit(op core.CommitSegment) (core.CPDone, bool, error) {
-	var d core.CPDone
+func (a *Applier) KnownCommit(op core.CommitSegment) (core.ControlPlaneDone, bool, error) {
+	var d core.ControlPlaneDone
 	var ok bool
 	err := a.kv.View(func(tx Tx) {
 		rec := tx.Get(idemKey(op.SegmentKey))
@@ -78,10 +78,10 @@ type Command struct {
 // the writes of the ones before it) and returns their answers. It is what a
 // replica uses to apply the slots one tail read delivered: the same state as
 // applying them one by one, with far fewer page writes in the store.
-func (a *Applier) CommitBatch(cmds []Command) ([]core.CPDone, error) {
-	var out []core.CPDone
+func (a *Applier) CommitBatch(cmds []Command) ([]core.ControlPlaneDone, error) {
+	var out []core.ControlPlaneDone
 	err := a.kv.Update(func(tx Tx) {
-		out = make([]core.CPDone, len(cmds))
+		out = make([]core.ControlPlaneDone, len(cmds))
 		for i, c := range cmds {
 			out[i] = commitTx(tx, c.Slot, c.Op)
 		}
@@ -90,18 +90,18 @@ func (a *Applier) CommitBatch(cmds []Command) ([]core.CPDone, error) {
 }
 
 // Lookup answers a Lookup from the stored runs.
-func (a *Applier) Lookup(op core.Lookup) (core.CPDone, error) {
+func (a *Applier) Lookup(op core.FindSegments) (core.ControlPlaneDone, error) {
 	if op.From < 0 {
-		return core.CPDone{Err: core.ErrInvalid}, nil
+		return core.ControlPlaneDone{Err: core.ErrInvalid}, nil
 	}
-	var d core.CPDone
+	var d core.ControlPlaneDone
 	err := a.kv.View(func(tx Tx) { d = lookupTx(tx, op) })
 	return d, err
 }
 
 // Describe answers a DescribeTopics.
-func (a *Applier) Describe(op core.DescribeTopics) (core.CPDone, error) {
-	var d core.CPDone
+func (a *Applier) Describe(op core.DescribeTopics) (core.ControlPlaneDone, error) {
+	var d core.ControlPlaneDone
 	err := a.kv.View(func(tx Tx) { d = describeTx(tx, op) })
 	return d, err
 }
@@ -136,21 +136,21 @@ func validCommit(op core.CommitSegment) bool {
 	return op.SegmentKey != "" && len(op.Batches) > 0 && slices.IndexFunc(op.Batches, func(b core.PendingBatch) bool { return !validBatch(b) }) < 0
 }
 
-func commitTx(tx Tx, slot int64, op core.CommitSegment) core.CPDone {
+func commitTx(tx Tx, slot int64, op core.CommitSegment) core.ControlPlaneDone {
 	dig := digest(op.Batches)
 	if rec := tx.Get(idemKey(op.SegmentKey)); rec != nil {
 		return replay(rec, dig, op)
 	}
 	if !validCommit(op) {
-		return core.CPDone{Err: core.ErrInvalid}
+		return core.ControlPlaneDone{Err: core.ErrInvalid}
 	}
 	return storeCommit(tx, slot, op, dig, assign(tx, op.Batches))
 }
 
 // commitWithBases is the BugWriterOffsets apply path: bases come from the
 // writer instead of partition ends.
-func (a *Applier) commitWithBases(slot int64, op core.CommitSegment, bases []core.Offset) core.CPDone {
-	var d core.CPDone
+func (a *Applier) commitWithBases(slot int64, op core.CommitSegment, bases []core.Offset) core.ControlPlaneDone {
+	var d core.ControlPlaneDone
 	err := a.kv.Update(func(tx Tx) {
 		dig := digest(op.Batches)
 		if rec := tx.Get(idemKey(op.SegmentKey)); rec != nil {
@@ -158,7 +158,7 @@ func (a *Applier) commitWithBases(slot int64, op core.CommitSegment, bases []cor
 			return
 		}
 		if !validCommit(op) || len(bases) != len(op.Batches) {
-			d = core.CPDone{Err: core.ErrInvalid}
+			d = core.ControlPlaneDone{Err: core.ErrInvalid}
 			return
 		}
 		d = storeCommit(tx, slot, op, dig, assignAt(tx, op.Batches, bases))
@@ -171,13 +171,13 @@ func (a *Applier) commitWithBases(slot int64, op core.CommitSegment, bases []cor
 
 // replay answers a commit whose key is known: the original ranges, or
 // ErrConflict if the request differs.
-func replay(rec []byte, dig [digestLen]byte, op core.CommitSegment) core.CPDone {
+func replay(rec []byte, dig [digestLen]byte, op core.CommitSegment) core.ControlPlaneDone {
 	was, bases, err := parseIdem(rec)
 	if err != nil {
 		panic(fmt.Errorf("applier: key %q: %w", op.SegmentKey, err))
 	}
 	if was != dig {
-		return core.CPDone{Err: core.ErrConflict}
+		return core.ControlPlaneDone{Err: core.ErrConflict}
 	}
 	if len(bases) != len(op.Batches) {
 		panic(fmt.Errorf("applier: key %q: %w", op.SegmentKey, errCorrupt))
@@ -186,13 +186,13 @@ func replay(rec []byte, dig [digestLen]byte, op core.CommitSegment) core.CPDone 
 	for i, b := range op.Batches {
 		rs[i] = core.BatchRange{TP: b.TP, Base: core.Offset(bases[i]), Count: b.Records, Loc: b.Loc}
 	}
-	return core.CPDone{Resp: core.CommitSegmentResp{Assigned: rs}, Outcome: core.Applied}
+	return core.ControlPlaneDone{Resp: core.CommitSegmentResp{Assigned: rs}, Outcome: core.Applied}
 }
 
-func storeCommit(tx Tx, slot int64, op core.CommitSegment, dig [digestLen]byte, assigned []core.BatchRange) core.CPDone {
+func storeCommit(tx Tx, slot int64, op core.CommitSegment, dig [digestLen]byte, assigned []core.BatchRange) core.ControlPlaneDone {
 	tx.Set(idemKey(op.SegmentKey), idemRecord(slot, dig, assigned))
 	tx.Set(slotKey(slot, op.SegmentKey), []byte{1})
-	return core.CPDone{Resp: core.CommitSegmentResp{Assigned: assigned}, Outcome: core.Applied}
+	return core.ControlPlaneDone{Resp: core.CommitSegmentResp{Assigned: assigned}, Outcome: core.Applied}
 }
 
 // assignPlan is the per-partition end and run built while handing out offsets.
@@ -277,8 +277,8 @@ func growTopic(tx Tx, seen map[string]int32, topic string, n int32) {
 	seen[topic] = cur
 }
 
-func lookupTx(tx Tx, op core.Lookup) core.CPDone {
-	resp := core.LookupResp{End: core.Offset(getUvarint(tx.Get(endKey(op.TP))))}
+func lookupTx(tx Tx, op core.FindSegments) core.ControlPlaneDone {
+	resp := core.FindSegmentsResp{End: core.Offset(getUvarint(tx.Get(endKey(op.TP))))}
 	lo := runKey(op.TP, 0)
 	hi := prefixEnd(tpPrefix(pRun, op.TP))
 	if k, _ := tx.Floor(lo, append(runKey(op.TP, int64(op.From)), 0)); k != nil {
@@ -307,10 +307,10 @@ func lookupTx(tx Tx, op core.Lookup) core.CPDone {
 	if bad != nil {
 		panic(fmt.Errorf("applier: %v: %w", op.TP, bad))
 	}
-	return core.CPDone{Resp: resp}
+	return core.ControlPlaneDone{Resp: resp}
 }
 
-func describeTx(tx Tx, op core.DescribeTopics) core.CPDone {
+func describeTx(tx Tx, op core.DescribeTopics) core.ControlPlaneDone {
 	var resp core.DescribeTopicsResp
 	lo := []byte{pTopic}
 	tx.Ascend(lo, prefixEnd(lo), func(k, v []byte) bool {
@@ -320,5 +320,5 @@ func describeTx(tx Tx, op core.DescribeTopics) core.CPDone {
 		}
 		return true
 	})
-	return core.CPDone{Resp: resp}
+	return core.ControlPlaneDone{Resp: resp}
 }

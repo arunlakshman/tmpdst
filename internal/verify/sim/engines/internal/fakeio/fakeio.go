@@ -36,19 +36,19 @@ type Hooks struct {
 	Prefix string // fault name prefix: "obj" or "cp"
 	Params Params
 	// Spec executes one action on the spec state.
-	Spec func(a core.IOAction) core.Completion
+	Spec func(a core.IOCall) core.IOResult
 	// Mutating reports whether a may change spec state (reads need no landing
 	// when their response is dropped).
-	Mutating func(a core.IOAction) bool
+	Mutating func(a core.IOCall) bool
 	// Fail builds an error completion. Reads ignore the Outcome.
-	Fail func(a core.IOAction, e core.ErrCode, o core.Outcome) core.Completion
+	Fail func(a core.IOCall, e core.ErrCode, o core.Outcome) core.IOResult
 	// Changed reports whether c, the spec's answer, changed spec state.
-	Changed func(c core.Completion) bool
+	Changed func(c core.IOResult) bool
 	// Extra draws optional per-op entropy at issue (outside recovery); the
 	// bool and value are kept on the plan. Nil means none.
-	Extra func(r sim.CountedRand, a core.IOAction) (bool, uint64)
+	Extra func(r sim.CountedRand, a core.IOCall) (bool, uint64)
 	// Finish rewrites the response of a normally answered op (corruption).
-	Finish func(ctx sim.EngineCtx, c core.Completion, p Plan) core.Completion
+	Finish func(ctx sim.EngineCtx, c core.IOResult, p Plan) core.IOResult
 	// SpecHash is the spec's StateHash.
 	SpecHash func() uint64
 }
@@ -68,8 +68,8 @@ const (
 // Plan is one in-flight op.
 type Plan struct {
 	ID     uint64
-	From   core.NodeRef
-	Act    core.IOAction
+	From   core.NodeInstance
+	Act    core.IOCall
 	Kind   Kind
 	T1, T2 sim.Time
 	Flag   bool // Extra's bool
@@ -122,7 +122,7 @@ func (c *Core) EnterRecovery() { c.recovery = true }
 
 // OnCrash does nothing: effects stand and landings stay scheduled; deliveries to the dead
 // incarnation are dropped by the scheduler or skipped at landing.
-func (c *Core) OnCrash(sim.EngineCtx, core.NodeRef) {}
+func (c *Core) OnCrash(sim.EngineCtx, core.NodeInstance) {}
 
 // Draw draws the boundary fault coins (outage, 503, timeout, lost, in that
 // order) and emits the matching fault named pre+"_...". until is the end of
@@ -137,7 +137,7 @@ func (p Params) Draw(ctx sim.EngineCtx, pre string, until *sim.Time, fields ...c
 		}
 		*until = now + sim.Time(d)
 		ctx.Fault(pre+"_outage", core.Field{Key: "dur", Value: core.I64(d)})
-		ctx.Assert().Reachable(core.Prop(pre + " outage started"))
+		ctx.Assert().Reachable(core.PropertyID(pre + " outage started"))
 	}
 	inOutage := now < *until
 	is503, isTimeout, isLost := r.Chance(p.P503), r.Chance(p.PTimeout), r.Chance(p.PLost)
@@ -148,15 +148,15 @@ func (p Params) Draw(ctx sim.EngineCtx, pre string, until *sim.Time, fields ...c
 			cause = "outage"
 		}
 		ctx.Fault(pre+"_503", append(fields, core.Field{Key: "cause", Value: core.Str(cause)})...)
-		ctx.Assert().Reachable(core.Prop(pre + " 503 injected"))
+		ctx.Assert().Reachable(core.PropertyID(pre + " 503 injected"))
 		return Unavailable
 	case isTimeout:
 		ctx.Fault(pre+"_timeout", fields...)
-		ctx.Assert().Reachable(core.Prop(pre + " timeout injected"))
+		ctx.Assert().Reachable(core.PropertyID(pre + " timeout injected"))
 		return Timeout
 	case isLost:
 		ctx.Fault(pre+"_lost_response", fields...)
-		ctx.Assert().Reachable(core.Prop(pre + " lost response injected"))
+		ctx.Assert().Reachable(core.PropertyID(pre + " lost response injected"))
 		return Lost
 	}
 	return Normal
@@ -164,7 +164,7 @@ func (p Params) Draw(ctx sim.EngineCtx, pre string, until *sim.Time, fields ...c
 
 // Execute plans an op. Draw order: fault coins (Draw), apply latency, respond
 // latency, extra.
-func (c *Core) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.IOAction) {
+func (c *Core) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.IOCall) {
 	r, now, p := ctx.Rand(), ctx.Now(), c.h.Params
 	req := core.Field{Key: "req", Value: core.U64(a.ReqID())}
 	kind := Normal
@@ -215,8 +215,8 @@ func (c *Core) OnInternal(ctx sim.EngineCtx, body any) {
 	apply := true
 	if pl.Kind == Timeout {
 		apply = ctx.Rand().Chance(0.5)
-		ctx.Assert().Sometimes(apply, core.Prop(c.h.Prefix+" timed-out op applied"))
-		ctx.Assert().Sometimes(!apply, core.Prop(c.h.Prefix+" timed-out op not applied"))
+		ctx.Assert().Sometimes(apply, core.PropertyID(c.h.Prefix+" timed-out op applied"))
+		ctx.Assert().Sometimes(!apply, core.PropertyID(c.h.Prefix+" timed-out op not applied"))
 	}
 	if !apply {
 		return

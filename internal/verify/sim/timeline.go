@@ -17,7 +17,7 @@ type MemTimeline struct {
 func NewTimeline() *MemTimeline { return &MemTimeline{byName: map[string][]TimedFact{}} }
 
 // Append stamps and records a fact, returning its sequence number (from 1).
-func (t *MemTimeline) Append(source core.NodeRef, at Time, f core.Fact) uint64 {
+func (t *MemTimeline) Append(source core.NodeInstance, at Time, f core.Fact) uint64 {
 	t.seq++
 	t.n++
 	t.byName[f.Name] = append(t.byName[f.Name], TimedFact{Seq: t.seq, At: at, Source: source, Fact: f})

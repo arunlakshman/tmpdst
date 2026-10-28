@@ -1,4 +1,4 @@
-// Package apiconv maps core CPOp/CPResp values to controlplane/api/v1 messages.
+// Package apiconv maps core ControlPlaneOperation/ControlPlaneResponse values to controlplane/api/v1 messages.
 package apiconv
 
 import (
@@ -127,7 +127,7 @@ func CommitSegmentToCore(req *cpv1.CommitSegmentRequest) core.CommitSegment {
 }
 
 // LookupFromCore builds a LookupRequest from a core op.
-func LookupFromCore(op core.Lookup) *cpv1.LookupRequest {
+func LookupFromCore(op core.FindSegments) *cpv1.LookupRequest {
 	return &cpv1.LookupRequest{
 		Tp:       &cpv1.TopicPartition{Topic: op.TP.Topic, Partition: op.TP.Partition},
 		From:     int64(op.From),
@@ -135,12 +135,12 @@ func LookupFromCore(op core.Lookup) *cpv1.LookupRequest {
 	}
 }
 
-// LookupToCore rebuilds a core.Lookup from a request.
-func LookupToCore(req *cpv1.LookupRequest) core.Lookup {
+// LookupToCore rebuilds a core.FindSegments from a request.
+func LookupToCore(req *cpv1.LookupRequest) core.FindSegments {
 	if req == nil {
-		return core.Lookup{}
+		return core.FindSegments{}
 	}
-	op := core.Lookup{From: core.Offset(req.From), MaxBytes: req.MaxBytes}
+	op := core.FindSegments{From: core.Offset(req.From), MaxBytes: req.MaxBytes}
 	if req.Tp != nil {
 		op.TP = core.TP(req.Tp.Topic, req.Tp.Partition)
 	}
@@ -182,7 +182,7 @@ func CommitSegmentRespToCore(r *cpv1.CommitSegmentResponse) core.CommitSegmentRe
 }
 
 // LookupRespFromCore builds a LookupResponse from a core response.
-func LookupRespFromCore(r core.LookupResp) *cpv1.LookupResponse {
+func LookupRespFromCore(r core.FindSegmentsResp) *cpv1.LookupResponse {
 	out := &cpv1.LookupResponse{End: int64(r.End)}
 	for _, br := range r.Ranges {
 		out.Ranges = append(out.Ranges, batchRangeFromCore(br))
@@ -190,12 +190,12 @@ func LookupRespFromCore(r core.LookupResp) *cpv1.LookupResponse {
 	return out
 }
 
-// LookupRespToCore rebuilds a core.LookupResp from a response.
-func LookupRespToCore(r *cpv1.LookupResponse) core.LookupResp {
+// LookupRespToCore rebuilds a core.FindSegmentsResp from a response.
+func LookupRespToCore(r *cpv1.LookupResponse) core.FindSegmentsResp {
 	if r == nil {
-		return core.LookupResp{}
+		return core.FindSegmentsResp{}
 	}
-	out := core.LookupResp{End: core.Offset(r.End)}
+	out := core.FindSegmentsResp{End: core.Offset(r.End)}
 	for _, br := range r.Ranges {
 		out.Ranges = append(out.Ranges, batchRangeToCore(br))
 	}

@@ -52,7 +52,7 @@ func (o *oracle) ingest(v sim.View, pl *plog) {
 	rs := v.CP().Committed(pl.tp)
 	for ; pl.ranges < len(rs); pl.ranges++ {
 		r := rs[pl.ranges]
-		det := []core.Detail{{Key: "tp", Value: pl.tp.Topic + "/" + strconv.Itoa(int(pl.tp.Partition))},
+		det := []core.ContextPair{{Key: "tp", Value: pl.tp.Topic + "/" + strconv.Itoa(int(pl.tp.Partition))},
 			{Key: "base", Value: int64(r.Base)}, {Key: "segment", Value: r.Loc.Key}}
 		v.Assert().Always(int64(r.Base) == int64(len(pl.vals)), "kafka: committed offsets are contiguous", det...)
 		vals := o.readRange(v, r, det)
@@ -65,7 +65,7 @@ func (o *oracle) ingest(v sim.View, pl *plog) {
 		start := int64(len(pl.vals))
 		prev, again := o.locs[r.Loc]
 		v.Assert().Always(!again, "kafka: a stored batch is committed at most once",
-			append(slices.Clip(det), core.Detail{Key: "first_offset", Value: prev})...)
+			append(slices.Clip(det), core.ContextPair{Key: "first_offset", Value: prev})...)
 		o.locs[r.Loc] = start
 		pl.byBase[start] = len(pl.bats)
 		pl.bats = append(pl.bats, lbat{base: start, count: len(vals)})
@@ -76,13 +76,13 @@ func (o *oracle) ingest(v sim.View, pl *plog) {
 		pl.vals = append(pl.vals, vals...)
 	}
 	v.Assert().Always(int64(v.CP().HighWatermark(pl.tp)) == int64(len(pl.vals)),
-		"kafka: the high watermark is the end of the committed log", core.Detail{Key: "tp", Value: pl.tp.Topic + "/" + strconv.Itoa(int(pl.tp.Partition))})
+		"kafka: the high watermark is the end of the committed log", core.ContextPair{Key: "tp", Value: pl.tp.Topic + "/" + strconv.Itoa(int(pl.tp.Partition))})
 }
 
 // checkWhole: a committed range is one produced batch, whole: it starts at
 // record 0 and holds all of the batch's records (a retry duplicates a batch,
 // never part of one).
-func (o *oracle) checkWhole(v sim.View, vals []string, det []core.Detail) {
+func (o *oracle) checkWhole(v sim.View, vals []string, det []core.ContextPair) {
 	if len(vals) == 0 || vals[0] == "?" {
 		return
 	}
@@ -97,7 +97,7 @@ func (o *oracle) checkWhole(v sim.View, vals []string, det []core.Detail) {
 
 // readRange returns the record values of one committed range, or nil after
 // reporting why it is unreadable.
-func (o *oracle) readRange(v sim.View, r core.BatchRange, det []core.Detail) []string {
+func (o *oracle) readRange(v sim.View, r core.BatchRange, det []core.ContextPair) []string {
 	as := v.Assert()
 	obj, ok := v.Objects().Object(r.Loc.Key)
 	as.Always(ok, "kafka: committed segment exists in the object store", det...)

@@ -29,7 +29,7 @@ func startNode(t *testing.T, cfg machine.Config) (cpv1.ControlPlaneClient, healt
 		Machine: cfg,
 		Log:     exec.NewMemLog(),
 		Objects: exec.NewMemObjects(),
-		Self:    core.NodeRef{Node: "cp-0"},
+		Self:    core.NodeInstance{Node: "cp-0"},
 	})
 	ctx := t.Context()
 	if err := n.Start(ctx); err != nil {
@@ -126,7 +126,7 @@ func TestStartCanceledContext(t *testing.T) {
 		Machine: machine.Config{K: 4, CatchUpEvery: core.Duration(time.Hour)},
 		Log:     exec.NewMemLog(),
 		Objects: exec.NewMemObjects(),
-		Self:    core.NodeRef{Node: "cp-0"},
+		Self:    core.NodeInstance{Node: "cp-0"},
 	})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -141,7 +141,7 @@ func TestStartCancelWhileWaiting(t *testing.T) {
 		Machine: machine.Config{K: 4, CatchUpEvery: core.Duration(time.Hour)},
 		Log:     exec.NewMemLog(),
 		Objects: exec.NewMemObjects(),
-		Self:    core.NodeRef{Node: "cp-0"},
+		Self:    core.NodeInstance{Node: "cp-0"},
 	})
 	ctx, cancel := context.WithCancel(t.Context())
 	go func() {

@@ -139,15 +139,15 @@ func diffSentence(field, expected, actual string) string {
 
 // FromObjectCompletion converts an object store completion into a result. It
 // panics on any other completion type, because that is a mistake in the test.
-func FromObjectCompletion(c core.Completion) ObjectResult {
+func FromObjectCompletion(c core.IOResult) ObjectResult {
 	switch d := c.(type) {
-	case core.ObjPutDone:
+	case core.ObjectPutDone:
 		return ObjectResult{Code: d.Err, Outcome: d.Outcome}
-	case core.ObjGetDone:
+	case core.ObjectGetDone:
 		return ObjectResult{Code: d.Err, Data: d.Data}
-	case core.ObjDeleteDone:
+	case core.ObjectDeleteDone:
 		return ObjectResult{Code: d.Err, Outcome: d.Outcome}
-	case core.ObjListDone:
+	case core.ObjectListDone:
 		return ObjectResult{Code: d.Err, Keys: d.Keys}
 	}
 	panic("observation: FromObjectCompletion needs an object store completion, but got " +
@@ -157,13 +157,13 @@ func FromObjectCompletion(c core.Completion) ObjectResult {
 // FromControlPlaneDone converts a control-plane completion into a result. A
 // nil Resp is allowed, because a failed call has no response. It panics on an
 // unknown response type, because that is a mistake in the test.
-func FromControlPlaneDone(d core.CPDone) ControlPlaneResult {
+func FromControlPlaneDone(d core.ControlPlaneDone) ControlPlaneResult {
 	out := ControlPlaneResult{Code: d.Err, Outcome: d.Outcome}
 	switch r := d.Resp.(type) {
 	case nil:
 	case core.CommitSegmentResp:
 		out.Assigned = r.Assigned
-	case core.LookupResp:
+	case core.FindSegmentsResp:
 		out.Ranges = r.Ranges
 		out.End = r.End
 	case core.DescribeTopicsResp:

@@ -25,7 +25,7 @@ func TestCommitSegmentRoundTrip(t *testing.T) {
 }
 
 func TestLookupDescribeRoundTrip(t *testing.T) {
-	lk := core.Lookup{TP: core.TP("t", 2), From: 5, MaxBytes: 100}
+	lk := core.FindSegments{TP: core.TP("t", 2), From: 5, MaxBytes: 100}
 	if got := LookupToCore(LookupFromCore(lk)); got != lk {
 		t.Fatalf("lookup %+v", got)
 	}
@@ -45,7 +45,7 @@ func TestRespRoundTrip(t *testing.T) {
 	if len(got.Assigned) != 1 || got.Assigned[0] != cr.Assigned[0] {
 		t.Fatalf("commit resp %+v", got)
 	}
-	lr := core.LookupResp{Ranges: cr.Assigned, End: 12}
+	lr := core.FindSegmentsResp{Ranges: cr.Assigned, End: 12}
 	lgot := LookupRespToCore(LookupRespFromCore(lr))
 	if lgot.End != 12 || len(lgot.Ranges) != 1 {
 		t.Fatalf("lookup resp %+v", lgot)

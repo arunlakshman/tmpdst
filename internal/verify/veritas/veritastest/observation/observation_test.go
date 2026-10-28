@@ -88,14 +88,14 @@ func TestEveryCodeAndOutcomeIsCompared(t *testing.T) {
 func TestObjectConverters(t *testing.T) {
 	tests := []struct {
 		name string
-		in   core.Completion
+		in   core.IOResult
 		want ObjectResult
 	}{
-		{"put", core.ObjPutDone{Err: core.ErrTimeout, Outcome: core.MaybeApplied}, ObjectResult{Code: core.ErrTimeout, Outcome: core.MaybeApplied}},
-		{"get", core.ObjGetDone{Data: []byte("x")}, ObjectResult{Data: []byte("x")}},
-		{"get not found", core.ObjGetDone{Err: core.ErrNotFound}, ObjectResult{Code: core.ErrNotFound}},
-		{"delete", core.ObjDeleteDone{Outcome: core.Applied}, ObjectResult{Outcome: core.Applied}},
-		{"list", core.ObjListDone{Keys: []string{"a", "b"}}, ObjectResult{Keys: []string{"a", "b"}}},
+		{"put", core.ObjectPutDone{Err: core.ErrTimeout, Outcome: core.MaybeApplied}, ObjectResult{Code: core.ErrTimeout, Outcome: core.MaybeApplied}},
+		{"get", core.ObjectGetDone{Data: []byte("x")}, ObjectResult{Data: []byte("x")}},
+		{"get not found", core.ObjectGetDone{Err: core.ErrNotFound}, ObjectResult{Code: core.ErrNotFound}},
+		{"delete", core.ObjectDeleteDone{Outcome: core.Applied}, ObjectResult{Outcome: core.Applied}},
+		{"list", core.ObjectListDone{Keys: []string{"a", "b"}}, ObjectResult{Keys: []string{"a", "b"}}},
 	}
 	for _, tc := range tests {
 		got := FromObjectCompletion(tc.in)
@@ -120,13 +120,13 @@ func TestControlPlaneConverter(t *testing.T) {
 	br := []core.BatchRange{{TP: core.TopicPartition{Topic: "t", Partition: 1}, Base: 5, Count: 2}}
 	tests := []struct {
 		name string
-		in   core.CPDone
+		in   core.ControlPlaneDone
 		want ControlPlaneResult
 	}{
-		{"nil response", core.CPDone{Err: core.ErrUnavailable}, ControlPlaneResult{Code: core.ErrUnavailable}},
-		{"commit", core.CPDone{Resp: core.CommitSegmentResp{Assigned: br}, Outcome: core.Applied}, ControlPlaneResult{Outcome: core.Applied, Assigned: br}},
-		{"lookup", core.CPDone{Resp: core.LookupResp{Ranges: br, End: 7}}, ControlPlaneResult{Ranges: br, End: 7}},
-		{"describe", core.CPDone{Resp: core.DescribeTopicsResp{Topics: []core.TopicInfo{{Name: "t", Partitions: 3}}}}, ControlPlaneResult{Topics: []core.TopicInfo{{Name: "t", Partitions: 3}}}},
+		{"nil response", core.ControlPlaneDone{Err: core.ErrUnavailable}, ControlPlaneResult{Code: core.ErrUnavailable}},
+		{"commit", core.ControlPlaneDone{Resp: core.CommitSegmentResp{Assigned: br}, Outcome: core.Applied}, ControlPlaneResult{Outcome: core.Applied, Assigned: br}},
+		{"lookup", core.ControlPlaneDone{Resp: core.FindSegmentsResp{Ranges: br, End: 7}}, ControlPlaneResult{Ranges: br, End: 7}},
+		{"describe", core.ControlPlaneDone{Resp: core.DescribeTopicsResp{Topics: []core.TopicInfo{{Name: "t", Partitions: 3}}}}, ControlPlaneResult{Topics: []core.TopicInfo{{Name: "t", Partitions: 3}}}},
 	}
 	for _, tc := range tests {
 		got := FromControlPlaneDone(tc.in)
@@ -142,10 +142,10 @@ func TestControlPlaneConverterPanicsOnUnknownResponse(t *testing.T) {
 			t.Errorf("FromControlPlaneDone did not panic on an unknown response type.")
 		}
 	}()
-	FromControlPlaneDone(core.CPDone{Resp: unknownResp{}})
+	FromControlPlaneDone(core.ControlPlaneDone{Resp: unknownResp{}})
 }
 
-type unknownResp struct{ core.CPResp }
+type unknownResp struct{ core.ControlPlaneResponse }
 
 func TestDiffMessages(t *testing.T) {
 	if msg := Diff(ObjectResult{}, ObjectResult{Data: []byte{}}); msg != "" {

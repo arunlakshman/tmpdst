@@ -1,8 +1,8 @@
-// Package logengine is the sim bridge from broker CPCall to control-plane
+// Package logengine is the sim bridge from broker ControlPlaneCall to control-plane
 // replica processes (CP-DSM-8). Replica apply lives in controlplane/machine;
 // the shared Dynamo log and CPTruth live in sim/engines/logstore. This package
 // keeps boundary faults (503, timeout, lost response, outage) and routes
-// CPOffer/CPReply. Bug constants stay numeric for LogParams.Bug and
+// ControlPlaneDeliver/ControlPlaneReply. Bug constants stay numeric for LogParams.Bug and
 // machine.Config.Bug.
 package logengine
 
@@ -23,7 +23,7 @@ const (
 	BugHoleSkip               // a replica passes an empty slot without a no-op
 )
 
-// Engine bridges CPCall to CP replica nodes via CPOffer/CPReply.
+// Engine bridges ControlPlaneCall to CP replica nodes via ControlPlaneDeliver/ControlPlaneReply.
 type Engine struct {
 	f    sim.ControlPlaneFaults
 	p    sim.LogParams
@@ -51,9 +51,9 @@ type pendKey struct {
 }
 
 type pending struct {
-	from     core.NodeRef
-	op       core.CPOp
-	to       core.NodeRef
+	from     core.NodeInstance
+	op       core.ControlPlaneOperation
+	to       core.NodeInstance
 	failover bool
 	muted    bool
 	deadline sim.EntryID
@@ -78,7 +78,7 @@ func DefaultParams() sim.LogParams {
 		WindowSlots: 1 << 20, TrimStride: 16, CkptEvery: 24, KeepSlots: 8}
 }
 
-// New returns a CPCall bridge. Log knobs are f.Log (zero fields take DefaultParams).
+// New returns a ControlPlaneCall bridge. Log knobs are f.Log (zero fields take DefaultParams).
 func New(f sim.ControlPlaneFaults) *Engine {
 	return &Engine{
 		f: f, p: withDefaults(f.Log), name: "logengine",
@@ -140,10 +140,10 @@ func (e *Engine) Topics() []TopicSeed { return slices.Clone(e.topics) }
 // Name implements sim.Engine.
 func (e *Engine) Name() string { return e.name }
 
-// Handles reports whether a is a CPCall or CPReply.
+// Handles reports whether a is a ControlPlaneCall or ControlPlaneReply.
 func (e *Engine) Handles(a core.Action) bool {
 	switch a.(type) {
-	case core.CPCall, core.CPReply:
+	case core.ControlPlaneCall, core.ControlPlaneReply:
 		return true
 	}
 	return false
@@ -156,7 +156,7 @@ func (e *Engine) StateHash() uint64 { return uint64(len(e.pending)) ^ uint64(len
 func (e *Engine) EnterRecovery() { e.recovery = true }
 
 // OnCrash is a no-op: replica crash is attrition on CP processes.
-func (e *Engine) OnCrash(sim.EngineCtx, core.NodeRef) {}
+func (e *Engine) OnCrash(sim.EngineCtx, core.NodeInstance) {}
 
 // OnInternal handles caller-timeout deadlines.
 func (e *Engine) OnInternal(ctx sim.EngineCtx, body any) {
@@ -170,33 +170,33 @@ func (e *Engine) OnInternal(ctx sim.EngineCtx, body any) {
 		return
 	}
 	p.done = true
-	p.muted = true // late CPReply must not deliver a second answer
+	p.muted = true // late ControlPlaneReply must not deliver a second answer
 	delete(e.pending, key)
-	e.deliver(ctx, p.from, core.CPDone{Req: d.req, Err: core.ErrTimeout, Outcome: core.MaybeApplied})
+	e.deliver(ctx, p.from, core.ControlPlaneDone{Req: d.req, Err: core.ErrTimeout, Outcome: core.MaybeApplied})
 }
 
-// Execute starts a CPCall or lands a CPReply.
-func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.Action) {
+// Execute starts a ControlPlaneCall or lands a ControlPlaneReply.
+func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.Action) {
 	e.now = ctx.Now()
 	switch a := a.(type) {
-	case core.CPCall:
+	case core.ControlPlaneCall:
 		e.execCall(ctx, from, a)
-	case core.CPReply:
+	case core.ControlPlaneReply:
 		e.execReply(ctx, a)
 	default:
 		panic("logengine: not a CP action")
 	}
 }
 
-func (e *Engine) execCall(ctx sim.EngineCtx, from core.NodeRef, call core.CPCall) {
+func (e *Engine) execCall(ctx sim.EngineCtx, from core.NodeInstance, call core.ControlPlaneCall) {
 	k := e.plan(ctx)
 	if k == fakeio.Unavailable {
-		e.deliver(ctx, from, core.CPDone{Req: call.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied})
+		e.deliver(ctx, from, core.ControlPlaneDone{Req: call.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied})
 		return
 	}
-	cp, ok := e.pickCP(ctx, core.NodeRef{})
+	cp, ok := e.pickCP(ctx, core.NodeInstance{})
 	if !ok {
-		e.deliver(ctx, from, core.CPDone{Req: call.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied})
+		e.deliver(ctx, from, core.ControlPlaneDone{Req: call.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied})
 		return
 	}
 	key := pendKey{from.Node, call.Req}
@@ -210,8 +210,8 @@ func (e *Engine) execCall(ctx sim.EngineCtx, from core.NodeRef, call core.CPCall
 	e.offer(ctx, cp, from, call.Req, call.Op)
 }
 
-func (e *Engine) execReply(ctx sim.EngineCtx, r core.CPReply) {
-	// CPReply.To is the broker (machine stamps replyTo from the offer).
+func (e *Engine) execReply(ctx sim.EngineCtx, r core.ControlPlaneReply) {
+	// ControlPlaneReply.To is the broker (machine stamps replyTo from the offer).
 	key := pendKey{r.To.Node, r.Done.Req}
 	p := e.pending[key]
 	if p == nil || p.done {
@@ -233,7 +233,7 @@ func (e *Engine) execReply(ctx sim.EngineCtx, r core.CPReply) {
 		// Lost/timeout fault: never forward the service reply. Answer the broker
 		// now (same ErrTimeout+MaybeApplied the deadline would have sent) so a
 		// cancelled deadline cannot leave the commit hung.
-		e.deliver(ctx, p.from, core.CPDone{
+		e.deliver(ctx, p.from, core.ControlPlaneDone{
 			Req: r.Done.Req, Err: core.ErrTimeout, Outcome: core.MaybeApplied,
 		})
 		return
@@ -242,14 +242,14 @@ func (e *Engine) execReply(ctx sim.EngineCtx, r core.CPReply) {
 	e.deliverAt(ctx, p.from, ctx.Now()+sim.Time(lat), r.Done)
 }
 
-func (e *Engine) offer(ctx sim.EngineCtx, cp, from core.NodeRef, req core.ReqID, op core.CPOp) {
+func (e *Engine) offer(ctx sim.EngineCtx, cp, from core.NodeInstance, req core.ReqID, op core.ControlPlaneOperation) {
 	lat := e.f.ApplyLatency.Sample(ctx.Rand())
 	at := ctx.Now() + sim.Time(lat)
 	ctx.Deliver(cp, at, ctx.Lane("logengine/offer/"+string(cp.Node)),
-		core.CPOffer{From: from, Req: req, Op: op})
+		core.ControlPlaneDeliver{From: from, Req: req, Op: op})
 }
 
-func (e *Engine) pickCP(ctx sim.EngineCtx, exclude core.NodeRef) (core.NodeRef, bool) {
+func (e *Engine) pickCP(ctx sim.EngineCtx, exclude core.NodeInstance) (core.NodeInstance, bool) {
 	refs := e.liveCPs(ctx)
 	for _, ref := range refs {
 		if exclude.Node != "" && ref.Node == exclude.Node {
@@ -257,15 +257,15 @@ func (e *Engine) pickCP(ctx sim.EngineCtx, exclude core.NodeRef) (core.NodeRef, 
 		}
 		return ref, true
 	}
-	return core.NodeRef{}, false
+	return core.NodeInstance{}, false
 }
 
-func (e *Engine) liveCPs(ctx sim.EngineCtx) []core.NodeRef {
+func (e *Engine) liveCPs(ctx sim.EngineCtx) []core.NodeInstance {
 	cur, ok := ctx.(sim.NodeCurrent)
 	if !ok {
 		return nil
 	}
-	var out []core.NodeRef
+	var out []core.NodeInstance
 	for _, name := range []core.NodeID{"cp-0", "cp-1"} {
 		if ref, ok := cur.Current(name); ok {
 			out = append(out, ref)
@@ -282,10 +282,10 @@ func (e *Engine) plan(ctx sim.EngineCtx) fakeio.Kind {
 	return p.Draw(ctx, "cp", &e.until)
 }
 
-func (e *Engine) deliver(ctx sim.EngineCtx, to core.NodeRef, c core.CPDone) {
+func (e *Engine) deliver(ctx sim.EngineCtx, to core.NodeInstance, c core.ControlPlaneDone) {
 	e.deliverAt(ctx, to, ctx.Now(), c)
 }
 
-func (e *Engine) deliverAt(ctx sim.EngineCtx, to core.NodeRef, at sim.Time, c core.CPDone) {
+func (e *Engine) deliverAt(ctx sim.EngineCtx, to core.NodeInstance, at sim.Time, c core.ControlPlaneDone) {
 	ctx.Deliver(to, at, ctx.Lane("logengine/"+string(to.Node)), c)
 }

@@ -109,8 +109,8 @@ func (f *faultCoverage) AtEnd(v sim.View) {
 		}
 		return false
 	}
-	v.Assert().Sometimes(has("sim_crashed", "cause", "attrition"), core.Prop(f.prefix+" fault fired: hard crash"))
-	v.Assert().Sometimes(has("sim_exited", "", ""), core.Prop(f.prefix+" fault fired: graceful stop"))
+	v.Assert().Sometimes(has("sim_crashed", "cause", "attrition"), core.PropertyID(f.prefix+" fault fired: hard crash"))
+	v.Assert().Sometimes(has("sim_exited", "", ""), core.PropertyID(f.prefix+" fault fired: graceful stop"))
 }
 
 // Swarm draws the shared fault knobs from r.

@@ -190,7 +190,7 @@ func TestCPURLListFailsOver(t *testing.T) {
 		Machine: machine.Config{K: 4, CatchUpEvery: core.Duration(time.Millisecond), Rank: 0, Heartbeat: core.Duration(time.Second)},
 		Log:     exec.NewMemLog(),
 		Objects: exec.NewMemObjects(),
-		Self:    core.NodeRef{Node: "cp-up"},
+		Self:    core.NodeInstance{Node: "cp-up"},
 	})
 	if err := upNode.Start(t.Context()); err != nil {
 		t.Fatal(err)

@@ -65,13 +65,13 @@ func (i *segmentCaps) AtEnd(v sim.View) {
 	a := v.Assert()
 	for _, k := range keys {
 		u := segs[k]
-		d := core.Detail{Key: "segment", Value: k}
+		d := core.ContextPair{Key: "segment", Value: k}
 		a.Always(u.batches <= i.cfg.MaxSegmentBatches, "kafka: a committed segment holds at most MaxSegmentBatches batches",
-			d, core.Detail{Key: "batches", Value: u.batches}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentBatches})
+			d, core.ContextPair{Key: "batches", Value: u.batches}, core.ContextPair{Key: "cap", Value: i.cfg.MaxSegmentBatches})
 		a.Always(len(u.parts) <= i.cfg.MaxSegmentPartitions, "kafka: a committed segment spans at most MaxSegmentPartitions partitions",
-			d, core.Detail{Key: "parts", Value: len(u.parts)}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentPartitions})
+			d, core.ContextPair{Key: "parts", Value: len(u.parts)}, core.ContextPair{Key: "cap", Value: i.cfg.MaxSegmentPartitions})
 		a.Always(i.fits(int64(len(u.parts))), "kafka: a committed segment's commit cost (1 + partitions) fits the store's commit item limit",
-			d, core.Detail{Key: "parts", Value: len(u.parts)})
+			d, core.ContextPair{Key: "parts", Value: len(u.parts)})
 	}
 }
 
@@ -80,16 +80,16 @@ func (i *segmentCaps) Observe(v sim.View) {
 		n := func(k string) int64 { x, _ := tf.Fact.Field(k).(core.I64); return int64(x) }
 		a := v.Assert()
 		why, _ := tf.Fact.Field("reason").(core.Str)
-		d := core.Detail{Key: "reason", Value: string(why)}
+		d := core.ContextPair{Key: "reason", Value: string(why)}
 		a.Always(n("batches") <= int64(i.cfg.MaxSegmentBatches), "kafka: a sealed segment holds at most MaxSegmentBatches batches",
-			d, core.Detail{Key: "batches", Value: n("batches")}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentBatches})
+			d, core.ContextPair{Key: "batches", Value: n("batches")}, core.ContextPair{Key: "cap", Value: i.cfg.MaxSegmentBatches})
 		a.Always(n("parts") <= int64(i.cfg.MaxSegmentPartitions), "kafka: a sealed segment spans at most MaxSegmentPartitions partitions",
-			d, core.Detail{Key: "parts", Value: n("parts")}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentPartitions})
+			d, core.ContextPair{Key: "parts", Value: n("parts")}, core.ContextPair{Key: "cap", Value: i.cfg.MaxSegmentPartitions})
 		a.Always(i.fits(n("parts")), "kafka: a sealed segment's implied commit cost (1 + partitions) fits the store's commit item limit",
-			d, core.Detail{Key: "parts", Value: n("parts")})
+			d, core.ContextPair{Key: "parts", Value: n("parts")})
 		a.Always(n("bytes")-n("last") < int64(i.cfg.MaxSegmentBytes), "kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch",
-			d, core.Detail{Key: "bytes", Value: n("bytes")}, core.Detail{Key: "last", Value: n("last")}, core.Detail{Key: "cap", Value: i.cfg.MaxSegmentBytes})
+			d, core.ContextPair{Key: "bytes", Value: n("bytes")}, core.ContextPair{Key: "last", Value: n("last")}, core.ContextPair{Key: "cap", Value: i.cfg.MaxSegmentBytes})
 		a.Always(n("age") <= int64(i.cfg.BatchWindow+timerSlack), "kafka: a segment is sealed within the window of its first batch",
-			d, core.Detail{Key: "age", Value: n("age")}, core.Detail{Key: "window", Value: int64(i.cfg.BatchWindow)})
+			d, core.ContextPair{Key: "age", Value: n("age")}, core.ContextPair{Key: "window", Value: int64(i.cfg.BatchWindow)})
 	}
 }

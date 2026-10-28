@@ -18,16 +18,16 @@ func base() sim.ObjectStoreFaults {
 	return sim.ObjectStoreFaults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}
 }
 
-func setup(f sim.ObjectStoreFaults, seed uint64) (*objstore.Engine, *enginetest.Ctx, core.NodeRef) {
+func setup(f sim.ObjectStoreFaults, seed uint64) (*objstore.Engine, *enginetest.Ctx, core.NodeInstance) {
 	e := objstore.New(f)
 	return e, enginetest.New(e, seed), enginetest.Ref("a")
 }
 
-func put(e *objstore.Engine, c *enginetest.Ctx, from core.NodeRef, req core.ReqID, key, data string) {
-	e.Execute(c, from, core.ObjPut{Req: req, Key: key, Data: []byte(data)})
+func put(e *objstore.Engine, c *enginetest.Ctx, from core.NodeInstance, req core.ReqID, key, data string) {
+	e.Execute(c, from, core.ObjectPut{Req: req, Key: key, Data: []byte(data)})
 }
 
-func only[T core.EventBody](t *testing.T, c *enginetest.Ctx) T {
+func only[T core.EventData](t *testing.T, c *enginetest.Ctx) T {
 	t.Helper()
 	if len(c.Delivered) != 1 {
 		t.Fatalf("want 1 delivery, got %d", len(c.Delivered))
@@ -39,20 +39,20 @@ func TestNormalPutGet(t *testing.T) {
 	e, c, a := setup(base(), 1)
 	put(e, c, a, 1, "k", "hello")
 	c.Run()
-	d := only[core.ObjPutDone](t, c)
+	d := only[core.ObjectPutDone](t, c)
 	if d.Err != core.OK || d.Outcome != core.Applied {
 		t.Fatal(d)
 	}
-	e.Execute(c, a, core.ObjGet{Req: 2, Ref: core.SegmentRef{Key: "k"}})
-	e.Execute(c, a, core.ObjGet{Req: 3, Ref: core.SegmentRef{Key: "nope"}})
+	e.Execute(c, a, core.ObjectGet{Req: 2, Ref: core.SegmentRef{Key: "k"}})
+	e.Execute(c, a, core.ObjectGet{Req: 3, Ref: core.SegmentRef{Key: "nope"}})
 	c.Run()
-	if g := c.Find(2).(core.ObjGetDone); string(g.Data) != "hello" {
+	if g := c.Find(2).(core.ObjectGetDone); string(g.Data) != "hello" {
 		t.Fatal(g)
 	}
-	if g := c.Find(3).(core.ObjGetDone); g.Err != core.ErrNotFound {
+	if g := c.Find(3).(core.ObjectGetDone); g.Err != core.ErrNotFound {
 		t.Fatal(g)
 	}
-	if !e.Handles(core.ObjList{}) || e.Handles(core.CPCall{}) {
+	if !e.Handles(core.ObjectList{}) || e.Handles(core.ControlPlaneCall{}) {
 		t.Fatal("Handles")
 	}
 }
@@ -63,7 +63,7 @@ func Test503(t *testing.T) {
 	e, c, a := setup(f, 1)
 	put(e, c, a, 1, "k", "x")
 	c.Run()
-	d := only[core.ObjPutDone](t, c)
+	d := only[core.ObjectPutDone](t, c)
 	if d.Err != core.ErrUnavailable || d.Outcome != core.NotApplied {
 		t.Fatal(d)
 	}
@@ -84,7 +84,7 @@ func TestOutageWindow(t *testing.T) {
 	put(e, c, a, 2, "k", "x")
 	c.Run()
 	for _, d := range c.Delivered {
-		if p := d.Body.(core.ObjPutDone); p.Err != core.ErrUnavailable || p.Outcome != core.NotApplied {
+		if p := d.Body.(core.ObjectPutDone); p.Err != core.ErrUnavailable || p.Outcome != core.NotApplied {
 			t.Fatal(p)
 		}
 	}
@@ -95,7 +95,7 @@ func TestOutageWindow(t *testing.T) {
 	c.T = 10_000 * sim.Time(ms)
 	put(e, c, a, 3, "k", "x")
 	c.Run()
-	if p := c.Delivered[2].Body.(core.ObjPutDone); p.Err != core.OK {
+	if p := c.Delivered[2].Body.(core.ObjectPutDone); p.Err != core.OK {
 		t.Fatal(p)
 	}
 }
@@ -108,7 +108,7 @@ func TestTimeoutAppliesOrNot(t *testing.T) {
 		e, c, a := setup(f, seed)
 		put(e, c, a, 1, "k", "x")
 		c.Run()
-		d := only[core.ObjPutDone](t, c)
+		d := only[core.ObjectPutDone](t, c)
 		if d.Err != core.ErrTimeout || d.Outcome != core.MaybeApplied || c.Delivered[0].At != sim.Time(f.CallerTimeout) {
 			t.Fatal(d, c.Delivered[0].At)
 		}
@@ -129,7 +129,7 @@ func TestLostResponseStillApplies(t *testing.T) {
 	e, c, a := setup(f, 1)
 	put(e, c, a, 1, "k", "x")
 	c.Run()
-	d := only[core.ObjPutDone](t, c)
+	d := only[core.ObjectPutDone](t, c)
 	if d.Err != core.ErrTimeout || d.Outcome != core.MaybeApplied {
 		t.Fatal(d)
 	}
@@ -137,9 +137,9 @@ func TestLostResponseStillApplies(t *testing.T) {
 		t.Fatal("not applied")
 	}
 	// A lost read still answers exactly once.
-	e.Execute(c, a, core.ObjGet{Req: 2, Ref: core.SegmentRef{Key: "k"}})
+	e.Execute(c, a, core.ObjectGet{Req: 2, Ref: core.SegmentRef{Key: "k"}})
 	c.Run()
-	if g := c.Delivered[1].Body.(core.ObjGetDone); g.Err != core.ErrTimeout {
+	if g := c.Delivered[1].Body.(core.ObjectGetDone); g.Err != core.ErrTimeout {
 		t.Fatal(g)
 	}
 }
@@ -177,15 +177,15 @@ func TestRecoveryStopsFaults(t *testing.T) {
 	e.EnterRecovery()
 	put(e, c, a, 2, "j", "y")
 	c.Run()
-	if p := c.Find(1).(core.ObjPutDone); p.Err != core.ErrUnavailable {
+	if p := c.Find(1).(core.ObjectPutDone); p.Err != core.ErrUnavailable {
 		t.Fatal(p)
 	}
-	if p := c.Find(2).(core.ObjPutDone); p.Err != core.OK || p.Outcome != core.Applied {
+	if p := c.Find(2).(core.ObjectPutDone); p.Err != core.OK || p.Outcome != core.Applied {
 		t.Fatal(p)
 	}
-	e.Execute(c, a, core.ObjGet{Req: 3, Ref: core.SegmentRef{Key: "j"}})
+	e.Execute(c, a, core.ObjectGet{Req: 3, Ref: core.SegmentRef{Key: "j"}})
 	c.Run()
-	if g := c.Find(3).(core.ObjGetDone); g.Err != core.OK || string(g.Data) != "y" {
+	if g := c.Find(3).(core.ObjectGetDone); g.Err != core.OK || string(g.Data) != "y" {
 		t.Fatal(g)
 	}
 }
@@ -196,9 +196,9 @@ func TestGetCorrupt(t *testing.T) {
 	e, c, a := setup(f, 1)
 	put(e, c, a, 1, "k", "hello world")
 	c.Run()
-	e.Execute(c, a, core.ObjGet{Req: 2, Ref: core.SegmentRef{Key: "k"}})
+	e.Execute(c, a, core.ObjectGet{Req: 2, Ref: core.SegmentRef{Key: "k"}})
 	c.Run()
-	g := c.Delivered[1].Body.(core.ObjGetDone)
+	g := c.Delivered[1].Body.(core.ObjectGetDone)
 	if g.Err != core.OK || bytes.Equal(g.Data, []byte("hello world")) || len(g.Data) != 11 {
 		t.Fatal(g)
 	}
@@ -236,12 +236,12 @@ func TestTruthAndGen(t *testing.T) {
 	if !slices.Equal(keys, []string{"a", "b"}) {
 		t.Fatal(keys)
 	}
-	e.Execute(c, a, core.ObjGet{Req: 3, Ref: core.SegmentRef{Key: "a"}})
+	e.Execute(c, a, core.ObjectGet{Req: 3, Ref: core.SegmentRef{Key: "a"}})
 	c.Run()
 	if e.Gen() != g {
 		t.Fatal("read bumped Gen")
 	}
-	e.Execute(c, a, core.ObjDelete{Req: 4, Key: "a"})
+	e.Execute(c, a, core.ObjectDelete{Req: 4, Key: "a"})
 	c.Run()
 	if e.Gen() != g+1 {
 		t.Fatal("delete did not bump Gen")
@@ -261,9 +261,9 @@ func TestDeterminism(t *testing.T) {
 			case 0:
 				put(e, c, a, core.ReqID(i), k, "data-"+k)
 			case 1:
-				e.Execute(c, a, core.ObjGet{Req: core.ReqID(i), Ref: core.SegmentRef{Key: k}})
+				e.Execute(c, a, core.ObjectGet{Req: core.ReqID(i), Ref: core.SegmentRef{Key: k}})
 			default:
-				e.Execute(c, a, core.ObjDelete{Req: core.ReqID(i), Key: k})
+				e.Execute(c, a, core.ObjectDelete{Req: core.ReqID(i), Key: k})
 			}
 		}
 		mid := e.StateHash() // pending plans folded in

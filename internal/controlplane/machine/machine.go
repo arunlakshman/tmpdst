@@ -15,7 +15,7 @@ const (
 // Machine is the control-plane DSM. Build it with New.
 type Machine struct {
 	env  core.Env
-	self core.NodeRef
+	self core.NodeInstance
 	cfg  Config
 
 	started  bool
@@ -52,7 +52,7 @@ type Machine struct {
 
 	ckptSlot    core.LogSlot // newest checkpoint slot (written or restored)
 	ckptAt      core.Time
-	ckptPending core.LogSlot // slot of in-flight ObjPut snapshot
+	ckptPending core.LogSlot // slot of in-flight ObjectPut snapshot
 	ckptData    []byte
 
 	queue      []pendingCmd           // client ops waiting for a commit slot
@@ -85,9 +85,9 @@ const (
 	pendingTrim
 )
 
-// New returns the core.Factory of the control-plane machine.
-func New(cfg Config) core.Factory {
-	return func(env core.Env, self core.NodeRef) core.Machine {
+// New returns the core.MachineFactory of the control-plane machine.
+func New(cfg Config) core.MachineFactory {
+	return func(env core.Env, self core.NodeInstance) core.Machine {
 		return &Machine{
 			env: env, self: self, cfg: cfg,
 			fold:    applier.NewMem(),
@@ -107,7 +107,7 @@ func (m *Machine) Fold() *applier.Applier { return m.fold }
 // Applied is the next slot to apply (slots below are folded).
 func (m *Machine) Applied() core.LogSlot { return m.applied }
 
-// SeedTopic pre-creates a topic on the fold before Started (sim campaign setup).
+// SeedTopic pre-creates a topic on the fold before NodeStarted (sim campaign setup).
 func (m *Machine) SeedTopic(name string, partitions int32) core.ErrCode {
 	err := m.fold.CreateTopic(name, partitions)
 	if err == core.OK {
@@ -123,7 +123,7 @@ func (m *Machine) reseedTopics() {
 }
 
 // Step implements core.StateMachine. Unknown completions and unhandled bodies
-// leave state unchanged. After Exit, every event is a no-op.
+// leave state unchanged. After ShutdownDone, every event is a no-op.
 func (m *Machine) Step(ev core.Event) []core.Action {
 	if m.exited {
 		return nil
@@ -131,25 +131,25 @@ func (m *Machine) Step(ev core.Event) []core.Action {
 	m.now = ev.At
 	var acts []core.Action
 	switch body := ev.Body.(type) {
-	case core.Started:
+	case core.NodeStarted:
 		acts = m.onStarted()
-	case core.Stop:
+	case core.StopRequest:
 		acts = m.stop()
 	case core.TimerFired:
 		acts = m.onTimer(body)
-	case core.LogCheckTailDone:
+	case core.LogGetEndDone:
 		acts = m.onCheckTailDone(body)
 	case core.LogReadDone:
 		acts = m.onReadDone(body)
 	case core.LogAppendDone:
 		acts = m.onAppendDone(body)
-	case core.ObjGetDone:
+	case core.ObjectGetDone:
 		acts = m.onObjGetDone(body)
-	case core.ObjPutDone:
+	case core.ObjectPutDone:
 		acts = m.onObjPutDone(body)
-	case core.LogTrimDone:
+	case core.LogDeleteOldDone:
 		acts = m.onTrimDone(body)
-	case core.CPOffer:
+	case core.ControlPlaneDeliver:
 		return m.onCPOffer(body) // already withReplies
 	default:
 		return nil
@@ -221,7 +221,7 @@ func (m *Machine) onTimer(e core.TimerFired) []core.Action {
 	}
 }
 
-func (m *Machine) onCheckTailDone(d core.LogCheckTailDone) []core.Action {
+func (m *Machine) onCheckTailDone(d core.LogGetEndDone) []core.Action {
 	if d.Req != m.pending || m.pendingKind != pendingTail {
 		return nil
 	}
@@ -376,7 +376,7 @@ func (m *Machine) skipHole() []core.Action {
 	m.applied++
 	m.holeArmed = false
 	m.env.Always(false, "logcp-sim: a replica's state equals the replay of the log at its slot",
-		core.Detail{Key: "slot", Value: m.applied})
+		core.ContextPair{Key: "slot", Value: m.applied})
 	return m.progress()
 }
 
@@ -406,7 +406,7 @@ func (m *Machine) emitCheckTail() []core.Action {
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingTail
-	return []core.Action{core.LogCheckTail{Req: m.pending}}
+	return []core.Action{core.LogGetEnd{Req: m.pending}}
 }
 
 func (m *Machine) emitRead() []core.Action {
@@ -426,18 +426,18 @@ func (m *Machine) armCatchUp() []core.Action {
 
 func (m *Machine) trip(err error) []core.Action {
 	m.exited = true
-	return []core.Action{core.Trip{Cause: err.Error()}}
+	return []core.Action{core.StopForRestart{Cause: err.Error()}}
 }
 
-// stop marks the machine shutting down and emits Exit. With no in-flight work
-// yet that must drain, Exit is immediate (decision 8).
+// stop marks the machine shutting down and emits ShutdownDone. With no in-flight work
+// yet that must drain, ShutdownDone is immediate (decision 8).
 func (m *Machine) stop() []core.Action {
 	if m.stopping {
 		return nil
 	}
 	m.stopping = true
 	m.exited = true
-	return []core.Action{core.Exit{}}
+	return []core.Action{core.ShutdownDone{}}
 }
 
 // StateHash folds every field that influences behaviour, including the applied

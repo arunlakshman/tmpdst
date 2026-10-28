@@ -70,7 +70,7 @@ func newLogStack(t *testing.T, brokers int) *logStack {
 		}
 		n := server.New(server.Config{
 			Machine: cfg, Log: log, Objects: objs,
-			Self: core.NodeRef{Node: core.NodeID(fmt.Sprintf("cp%d", rank))},
+			Self: core.NodeInstance{Node: core.NodeID(fmt.Sprintf("cp%d", rank))},
 		})
 		if err := n.Start(t.Context()); err != nil {
 			t.Fatal(err)

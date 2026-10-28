@@ -9,7 +9,7 @@ import (
 // SegmentLog writes one structured log line per segment lifecycle event, built
 // from the broker's facts (decision 36) so the broker core stays free of
 // logging. The segment_sealed fact carries no segment key; the executor sees
-// the key on the first ObjPut for it, right after the fact and in the same loop
+// the key on the first ObjectPut for it, right after the fact and in the same loop
 // goroutine, so IO pairs them and the sealed line can name the segment.
 //
 // Events (field "event"): segment_sealed, segment_put_done, segment_committed,
@@ -56,8 +56,8 @@ func fs(f core.Fact, k string) string {
 }
 
 // IO notes an action the broker issued (wire to NodeConfig.OnIO).
-func (s *SegmentLog) IO(a core.IOAction) {
-	p, ok := a.(core.ObjPut)
+func (s *SegmentLog) IO(a core.IOCall) {
+	p, ok := a.(core.ObjectPut)
 	if !ok || len(s.pending) == 0 {
 		return
 	}

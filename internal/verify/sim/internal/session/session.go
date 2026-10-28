@@ -91,13 +91,13 @@ func (l *Loop[C]) req() core.ReqID { l.NextReq++; return l.NextReq }
 func (l *Loop[C]) Step(ev core.Event) []core.Action {
 	var acts []core.Action
 	switch e := ev.Body.(type) {
-	case core.Started:
+	case core.NodeStarted:
 		for _, c := range l.Clients {
 			acts = append(acts, l.Dial(c)...)
 		}
 	case core.TimerFired:
 		acts = l.onTimer(e)
-	case core.DialDone:
+	case core.ConnectDone:
 		for _, c := range l.Clients {
 			if s := c.session(); s.State == Dialing && s.DialReq == e.Req {
 				acts = l.onDial(c, e)
@@ -135,10 +135,10 @@ func (l *Loop[C]) Dial(c C) []core.Action {
 	s.State, s.DialReq = Dialing, l.req()
 	addr := string(l.Brokers[(s.ID+s.Dials)%len(l.Brokers)])
 	s.Dials++
-	return []core.Action{core.Dial{Req: s.DialReq, Addr: addr}}
+	return []core.Action{core.Connect{Req: s.DialReq, Addr: addr}}
 }
 
-func (l *Loop[C]) onDial(c C, e core.DialDone) []core.Action {
+func (l *Loop[C]) onDial(c C, e core.ConnectDone) []core.Action {
 	s := c.session()
 	s.DialReq = 0
 	if e.Err != core.OK {

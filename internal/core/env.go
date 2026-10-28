@@ -4,7 +4,7 @@ package core
 // nondeterminism enters the core. Time is NOT here: it arrives on each Event.
 type Env interface {
 	Rand
-	Buggify
+	FaultInjector
 	Assertions
 }
 
@@ -17,27 +17,27 @@ type Rand interface {
 	NewID() ID
 }
 
-// Site is the stable identity of a buggify point. Never interpolate values.
-type Site string
+// FaultPointID is the stable identity of a buggify point. Never interpolate values.
+type FaultPointID string
 
-// Buggify is FoundationDB-style cooperative fault injection (lesson 7).
+// FaultInjector is FoundationDB-style cooperative fault injection (lesson 7).
 // Production implementations always return false.
-type Buggify interface {
+type FaultInjector interface {
 	// Maybe reports whether site fires (per-run activation, then default per-call
 	// probability). Use for rare-but-valid paths; keeps firing in the quiet tail.
-	Maybe(site Site) bool
+	Maybe(site FaultPointID) bool
 	// MaybeP is Maybe with an explicit per-call probability in [0, 1].
-	MaybeP(site Site, p float64) bool
+	MaybeP(site FaultPointID, p float64) bool
 	// Fault is for points that make an operation fail. It never fires once the
 	// simulator has entered recovery mode.
-	Fault(site Site, p float64) bool
+	Fault(site FaultPointID, p float64) bool
 }
 
-// Prop is a stable property ID for an assertion. Never interpolate values.
-type Prop string
+// PropertyID is a stable property ID for an assertion. Never interpolate values.
+type PropertyID string
 
-// Detail is one ordered key/value pair of assertion context.
-type Detail struct {
+// ContextPair is one ordered key/value pair of assertion context.
+type ContextPair struct {
 	Key   string
 	Value any
 }
@@ -45,13 +45,13 @@ type Detail struct {
 // Assertions record and continue; they never panic (lesson 11).
 type Assertions interface {
 	// Always must hold every time it is evaluated and must be reached at least once.
-	Always(cond bool, p Prop, details ...Detail)
+	Always(cond bool, p PropertyID, details ...ContextPair)
 	// AlwaysOrUnreachable must hold whenever reached; not reaching it is fine.
-	AlwaysOrUnreachable(cond bool, p Prop, details ...Detail)
+	AlwaysOrUnreachable(cond bool, p PropertyID, details ...ContextPair)
 	// Sometimes must be true at least once across a campaign.
-	Sometimes(cond bool, p Prop)
+	Sometimes(cond bool, p PropertyID)
 	// Reachable marks a path that must execute at least once across a campaign.
-	Reachable(p Prop)
+	Reachable(p PropertyID)
 	// Unreachable marks a path that must never execute.
-	Unreachable(p Prop, details ...Detail)
+	Unreachable(p PropertyID, details ...ContextPair)
 }

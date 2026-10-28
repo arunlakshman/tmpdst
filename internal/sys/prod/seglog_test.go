@@ -32,10 +32,10 @@ func TestSegmentLogLifecycle(t *testing.T) {
 	const ms = 1_000_000
 	// Two segments sealed back to back, then PUT, then answers.
 	sl.Observe(fact("segment_sealed", "reason", "size", "bytes", 1000, "batches", 3, "parts", 2, "age", 50*ms))
-	sl.IO(core.ObjPut{Key: "k1"})
+	sl.IO(core.ObjectPut{Key: "k1"})
 	sl.Observe(fact("segment_sealed", "reason", "timer", "bytes", 10, "batches", 1, "parts", 1, "age", 200*ms))
-	sl.IO(core.ObjPut{Key: "k2"})
-	sl.IO(core.ObjPut{Key: "k1"}) // a retry must not consume a pending seal
+	sl.IO(core.ObjectPut{Key: "k2"})
+	sl.IO(core.ObjectPut{Key: "k1"}) // a retry must not consume a pending seal
 	sl.Observe(fact("segment_put_done", "segment", "k1", "bytes", 1100, "put_ns", 30*ms, "attempts", 2))
 	sl.Observe(fact("segment_committed", "segment", "k1", "batches", 3, "bytes", 1100, "put_ns", 30*ms,
 		"wait_ns", 5*ms, "commit_ns", 15*ms, "total_ns", 50*ms, "inflight", 1, "buffered", 7))

@@ -164,7 +164,7 @@ func commitLoop(ctx context.Context, c *cpclient.Client, w int, a *acks, n *atom
 // commitRetrying is the broker's rule: the same segment key is retried with a
 // short backoff on any transport failure or 503 until a deadline (the real
 // deadline is 120 s; a takeover takes seconds).
-func commitRetrying(ctx context.Context, c *cpclient.Client, op core.CommitSegment) (core.CPResp, error) {
+func commitRetrying(ctx context.Context, c *cpclient.Client, op core.CommitSegment) (core.ControlPlaneResponse, error) {
 	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	for {
@@ -201,11 +201,11 @@ func partitionsMatch(ctx context.Context, c *cpclient.Client, a *acks) error {
 	for tp, runs := range want {
 		var next int64
 		for next < int64(len(runs))*100 {
-			resp, err := c.Call(ctx, core.Lookup{TP: tp, From: core.Offset(next), MaxBytes: 1 << 30})
+			resp, err := c.Call(ctx, core.FindSegments{TP: tp, From: core.Offset(next), MaxBytes: 1 << 30})
 			if err != nil {
 				return err
 			}
-			lr := resp.(core.LookupResp)
+			lr := resp.(core.FindSegmentsResp)
 			for _, r := range lr.Ranges {
 				if int64(r.Base) != next {
 					return fmt.Errorf("%v: gap or overlap, range at %d, expected %d", tp, r.Base, next)
@@ -316,8 +316,8 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 	}
 	// Restart against the same Dynamo log: catch-up rebuilds fold state.
 	n2 := startLogNode(t, d, "n0", 0, "-ckpt-every", "-1s")
-	resp, err := cpclient.New(n2.addr, nil).Call(t.Context(), core.Lookup{TP: core.TP("t", 0), MaxBytes: 1 << 20})
-	if err != nil || resp.(core.LookupResp).End != 15 {
+	resp, err := cpclient.New(n2.addr, nil).Call(t.Context(), core.FindSegments{TP: core.TP("t", 0), MaxBytes: 1 << 20})
+	if err != nil || resp.(core.FindSegmentsResp).End != 15 {
 		t.Fatalf("after restart: %v %+v\n%s", err, resp, n2.logs.String())
 	}
 	_ = objs

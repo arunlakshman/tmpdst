@@ -105,31 +105,31 @@ func objectCoverage(p Profile) map[string]int {
 }
 
 // classifyObject runs op on the spec and names the cases that it reached.
-func classifyObject(spec *veritas.ObjectStore, op core.IOAction) []string {
+func classifyObject(spec *veritas.ObjectStore, op core.IOCall) []string {
 	done := spec.Exec(op)
 	switch op := op.(type) {
-	case core.ObjPut:
-		if done.(core.ObjPutDone).Err == core.ErrInvalid {
+	case core.ObjectPut:
+		if done.(core.ObjectPutDone).Err == core.ErrInvalid {
 			return []string{"put empty key"}
 		}
 		if len(op.Data) == 0 {
 			return []string{"put accepted", "put empty data"}
 		}
 		return []string{"put accepted"}
-	case core.ObjGet:
-		return classifyGet(op, done.(core.ObjGetDone))
-	case core.ObjDelete:
-		if done.(core.ObjDeleteDone).Err == core.ErrNotFound {
+	case core.ObjectGet:
+		return classifyGet(op, done.(core.ObjectGetDone))
+	case core.ObjectDelete:
+		if done.(core.ObjectDeleteDone).Err == core.ErrNotFound {
 			return []string{"delete missing key"}
 		}
 		return []string{"delete accepted"}
-	case core.ObjList:
-		return classifyList(op, done.(core.ObjListDone))
+	case core.ObjectList:
+		return classifyList(op, done.(core.ObjectListDone))
 	}
 	return nil
 }
 
-func classifyGet(op core.ObjGet, done core.ObjGetDone) []string {
+func classifyGet(op core.ObjectGet, done core.ObjectGetDone) []string {
 	var out []string
 	if op.Ref.Key == "" {
 		out = append(out, "get empty key")
@@ -147,7 +147,7 @@ func classifyGet(op core.ObjGet, done core.ObjGetDone) []string {
 	return out
 }
 
-func classifyList(op core.ObjList, done core.ObjListDone) []string {
+func classifyList(op core.ObjectList, done core.ObjectListDone) []string {
 	var out []string
 	switch {
 	case op.Prefix == "":
@@ -187,11 +187,11 @@ func classifyControlPlane(spec *veritas.ControlPlane, committed map[string]bool,
 		}
 		return []string{"create topic invalid"}
 	}
-	done := spec.Exec(*op.Call).(core.CPDone)
+	done := spec.Exec(*op.Call).(core.ControlPlaneDone)
 	switch o := op.Call.Op.(type) {
 	case core.CommitSegment:
 		return classifyCommit(committed, o, done)
-	case core.Lookup:
+	case core.FindSegments:
 		return classifyLookup(spec, o, done)
 	case core.DescribeTopics:
 		return classifyDescribe(o, done.Resp.(core.DescribeTopicsResp))
@@ -199,7 +199,7 @@ func classifyControlPlane(spec *veritas.ControlPlane, committed map[string]bool,
 	return nil
 }
 
-func classifyCommit(committed map[string]bool, o core.CommitSegment, done core.CPDone) []string {
+func classifyCommit(committed map[string]bool, o core.CommitSegment, done core.ControlPlaneDone) []string {
 	switch done.Err {
 	case core.ErrConflict:
 		return []string{"commit conflict"}
@@ -240,12 +240,12 @@ func invalidCommitCase(o core.CommitSegment) string {
 	return "commit invalid: other"
 }
 
-func classifyLookup(spec *veritas.ControlPlane, o core.Lookup, done core.CPDone) []string {
+func classifyLookup(spec *veritas.ControlPlane, o core.FindSegments, done core.ControlPlaneDone) []string {
 	if done.Err != core.OK {
 		return []string{"lookup From = -1"}
 	}
 	out := []string{"lookup accepted"}
-	resp := done.Resp.(core.LookupResp)
+	resp := done.Resp.(core.FindSegmentsResp)
 	if len(resp.Ranges) == 0 {
 		return out
 	}
@@ -253,7 +253,7 @@ func classifyLookup(spec *veritas.ControlPlane, o core.Lookup, done core.CPDone)
 	if resp.Ranges[0].Base < o.From {
 		out = append(out, "lookup From inside a run")
 	}
-	uncut := spec.Exec(core.CPCall{Op: core.Lookup{TP: o.TP, From: o.From}}).(core.CPDone).Resp.(core.LookupResp)
+	uncut := spec.Exec(core.ControlPlaneCall{Op: core.FindSegments{TP: o.TP, From: o.From}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
 	if len(resp.Ranges) < len(uncut.Ranges) {
 		out = append(out, "lookup MaxBytes cut")
 	}
@@ -292,9 +292,9 @@ func TestSameSeedGivesSameSequence(t *testing.T) {
 	}
 }
 
-func objectSequence(p Profile, seed uint64) []core.IOAction {
+func objectSequence(p Profile, seed uint64) []core.IOCall {
 	r, gen := veritastest.NewRand(seed), ObjectOps(p)
-	var out []core.IOAction
+	var out []core.IOCall
 	for i := range coverageOps {
 		out = append(out, gen(r, i))
 	}
@@ -354,7 +354,7 @@ func TestShrinkMakesProgressAndEnds(t *testing.T) {
 // shrinkObjectToEnd always takes the first candidate. The loop ends only if
 // every candidate is simpler, so a candidate equal to its parent hangs the
 // test, and the step limit turns that hang into a failure.
-func shrinkObjectToEnd(t *testing.T, op core.IOAction) {
+func shrinkObjectToEnd(t *testing.T, op core.IOCall) {
 	t.Helper()
 	for range 1000 {
 		next := ShrinkObjectOp(op)
@@ -401,13 +401,13 @@ func TestFormatIsAGoExpression(t *testing.T) {
 
 func TestFormatExamples(t *testing.T) {
 	cases := []struct{ got, want string }{
-		{FormatObjectOp(core.ObjPut{Req: 1, Key: "a", Data: []byte("hi")}), `core.ObjPut{Req: 1, Key: "a", Data: []byte("hi")}`},
-		{FormatObjectOp(core.ObjPut{Req: 2, Key: "", Data: []byte{}}), `core.ObjPut{Req: 2, Key: "", Data: []byte{}}`},
-		{FormatObjectOp(core.ObjList{Req: 3, Prefix: "a/"}), `core.ObjList{Req: 3, Prefix: "a/"}`},
+		{FormatObjectOp(core.ObjectPut{Req: 1, Key: "a", Data: []byte("hi")}), `core.ObjectPut{Req: 1, Key: "a", Data: []byte("hi")}`},
+		{FormatObjectOp(core.ObjectPut{Req: 2, Key: "", Data: []byte{}}), `core.ObjectPut{Req: 2, Key: "", Data: []byte{}}`},
+		{FormatObjectOp(core.ObjectList{Req: 3, Prefix: "a/"}), `core.ObjectList{Req: 3, Prefix: "a/"}`},
 		{FormatControlPlaneOp(NewCreateTopic("t1", 2)), `generator.NewCreateTopic("t1", 2)`},
 		{
-			FormatControlPlaneOp(NewCall(core.CPCall{Req: 4, Op: core.Lookup{TP: core.TP("t1", 1), From: -1, MaxBytes: 60}})),
-			`generator.NewCall(core.CPCall{Req: 4, Op: core.Lookup{TP: core.TP("t1", 1), From: -1, MaxBytes: 60}})`,
+			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: core.TP("t1", 1), From: -1, MaxBytes: 60}})),
+			`generator.NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: core.TP("t1", 1), From: -1, MaxBytes: 60}})`,
 		},
 	}
 	for _, c := range cases {
@@ -418,7 +418,7 @@ func TestFormatExamples(t *testing.T) {
 }
 
 func TestDescribeNamesTheOperation(t *testing.T) {
-	op := NewCall(core.CPCall{Req: 5, Op: core.CommitSegment{SegmentKey: "s", Batches: make([]core.PendingBatch, 2)}})
+	op := NewCall(core.ControlPlaneCall{Req: 5, Op: core.CommitSegment{SegmentKey: "s", Batches: make([]core.PendingBatch, 2)}})
 	if got, want := op.Describe(), `request 5: commit segment "s" with 2 batches`; got != want {
 		t.Errorf("Describe gave %q, want %q.", got, want)
 	}

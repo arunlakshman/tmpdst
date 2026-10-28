@@ -14,7 +14,7 @@ import (
 // values 401..499. A type without a row panics (fail closed); the tag test
 // scans core/ for types that lack one.
 
-func (h *hasher) ref(r core.NodeRef) {
+func (h *hasher) ref(r core.NodeInstance) {
 	h.Str(string(r.Node))
 	h.Bytes(r.Inc[:])
 }
@@ -33,12 +33,12 @@ func (h *hasher) batchRange(b core.BatchRange) {
 	h.segRef(b.Loc)
 }
 
-func (h *hasher) event(b core.EventBody) {
+func (h *hasher) event(b core.EventData) {
 	switch e := b.(type) {
-	case core.Started:
+	case core.NodeStarted:
 		h.U64(1)
 		h.ref(e.Self)
-	case core.Stop:
+	case core.StopRequest:
 		h.U64(2)
 		h.I64(int64(e.Deadline))
 	case core.ConnOpened:
@@ -58,7 +58,7 @@ func (h *hasher) event(b core.EventBody) {
 		h.U64(uint64(e.Req))
 		h.U64(uint64(e.Conn))
 		h.U64(uint64(e.Err))
-	case core.DialDone:
+	case core.ConnectDone:
 		h.U64(7)
 		h.U64(uint64(e.Req))
 		h.U64(uint64(e.Conn))
@@ -72,25 +72,25 @@ func (h *hasher) event(b core.EventBody) {
 	}
 }
 
-func (h *hasher) eventDone(b core.EventBody) {
+func (h *hasher) eventDone(b core.EventData) {
 	switch e := b.(type) {
-	case core.ObjPutDone:
+	case core.ObjectPutDone:
 		h.U64(9)
 		h.U64(uint64(e.Req))
 		h.Str(e.Key)
 		h.U64(uint64(e.Err))
 		h.U64(uint64(e.Outcome))
-	case core.ObjGetDone:
+	case core.ObjectGetDone:
 		h.U64(10)
 		h.U64(uint64(e.Req))
 		h.Bytes(e.Data)
 		h.U64(uint64(e.Err))
-	case core.ObjDeleteDone:
+	case core.ObjectDeleteDone:
 		h.U64(11)
 		h.U64(uint64(e.Req))
 		h.U64(uint64(e.Err))
 		h.U64(uint64(e.Outcome))
-	case core.ObjListDone:
+	case core.ObjectListDone:
 		h.U64(12)
 		h.U64(uint64(e.Req))
 		h.U64(uint64(e.Err))
@@ -98,13 +98,13 @@ func (h *hasher) eventDone(b core.EventBody) {
 		for _, k := range e.Keys {
 			h.Str(k)
 		}
-	case core.CPDone:
+	case core.ControlPlaneDone:
 		h.U64(13)
 		h.U64(uint64(e.Req))
 		h.U64(uint64(e.Err))
 		h.U64(uint64(e.Outcome))
 		h.cpResp(e.Resp)
-	case core.CPOffer:
+	case core.ControlPlaneDeliver:
 		h.U64(18)
 		h.ref(e.From)
 		h.U64(uint64(e.Req))
@@ -114,7 +114,7 @@ func (h *hasher) eventDone(b core.EventBody) {
 	}
 }
 
-func (h *hasher) eventLogDone(b core.EventBody) {
+func (h *hasher) eventLogDone(b core.EventData) {
 	switch e := b.(type) {
 	case core.LogAppendDone:
 		h.U64(14)
@@ -134,13 +134,13 @@ func (h *hasher) eventLogDone(b core.EventBody) {
 		}
 		h.U64(uint64(e.Err))
 		h.U64(uint64(e.Outcome))
-	case core.LogCheckTailDone:
+	case core.LogGetEndDone:
 		h.U64(16)
 		h.U64(uint64(e.Req))
 		h.I64(int64(e.Tail))
 		h.U64(uint64(e.Err))
 		h.U64(uint64(e.Outcome))
-	case core.LogTrimDone:
+	case core.LogDeleteOldDone:
 		h.U64(17)
 		h.U64(uint64(e.Req))
 		h.U64(uint64(e.Err))
@@ -175,7 +175,7 @@ func (h *hasher) action(a core.Action) {
 	case core.ResumeReads:
 		h.U64(106)
 		h.U64(uint64(x.Conn))
-	case core.Dial:
+	case core.Connect:
 		h.U64(107)
 		h.U64(uint64(x.Req))
 		h.Str(x.Addr)
@@ -186,40 +186,40 @@ func (h *hasher) action(a core.Action) {
 
 func (h *hasher) actionIO(a core.Action) {
 	switch x := a.(type) {
-	case core.ObjPut:
+	case core.ObjectPut:
 		h.U64(108)
 		h.U64(uint64(x.Req))
 		h.Str(x.Key)
 		h.Bytes(x.Data)
-	case core.ObjGet:
+	case core.ObjectGet:
 		h.U64(109)
 		h.U64(uint64(x.Req))
 		h.segRef(x.Ref)
-	case core.ObjDelete:
+	case core.ObjectDelete:
 		h.U64(110)
 		h.U64(uint64(x.Req))
 		h.Str(x.Key)
-	case core.ObjList:
+	case core.ObjectList:
 		h.U64(111)
 		h.U64(uint64(x.Req))
 		h.Str(x.Prefix)
-	case core.CPCall:
+	case core.ControlPlaneCall:
 		h.U64(112)
 		h.U64(uint64(x.Req))
 		h.cpOp(x.Op)
-	case core.CPReply:
+	case core.ControlPlaneReply:
 		h.U64(120)
 		h.ref(x.To)
 		h.U64(uint64(x.Done.Req))
 		h.U64(uint64(x.Done.Err))
 		h.U64(uint64(x.Done.Outcome))
 		h.cpResp(x.Done.Resp)
-	case core.Emit:
+	case core.RecordFact:
 		h.U64(113) // the fact itself is folded when it reaches the timeline
-	case core.Trip:
+	case core.StopForRestart:
 		h.U64(114)
 		h.Str(x.Cause)
-	case core.Exit:
+	case core.ShutdownDone:
 		h.U64(115)
 	default:
 		h.actionLog(a)
@@ -238,10 +238,10 @@ func (h *hasher) actionLog(a core.Action) {
 		h.U64(uint64(x.Req))
 		h.I64(int64(x.From))
 		h.U64(uint64(uint32(x.Limit)))
-	case core.LogCheckTail:
+	case core.LogGetEnd:
 		h.U64(118)
 		h.U64(uint64(x.Req))
-	case core.LogTrim:
+	case core.LogDeleteOld:
 		h.U64(119)
 		h.U64(uint64(x.Req))
 		h.I64(int64(x.Through))
@@ -251,7 +251,7 @@ func (h *hasher) actionLog(a core.Action) {
 }
 
 // cpOp folds an op; nil is tag 200.
-func (h *hasher) cpOp(op core.CPOp) {
+func (h *hasher) cpOp(op core.ControlPlaneOperation) {
 	switch x := op.(type) {
 	case nil:
 		h.U64(200)
@@ -265,7 +265,7 @@ func (h *hasher) cpOp(op core.CPOp) {
 			h.I64(b.Records)
 			h.segRef(b.Loc)
 		}
-	case core.Lookup:
+	case core.FindSegments:
 		h.U64(203)
 		h.Str(x.TP.Topic)
 		h.U64(uint64(uint32(x.TP.Partition)))
@@ -283,7 +283,7 @@ func (h *hasher) cpOp(op core.CPOp) {
 }
 
 // cpResp folds a response; nil (an error completion) is tag 300.
-func (h *hasher) cpResp(r core.CPResp) {
+func (h *hasher) cpResp(r core.ControlPlaneResponse) {
 	switch x := r.(type) {
 	case nil:
 		h.U64(300)
@@ -293,7 +293,7 @@ func (h *hasher) cpResp(r core.CPResp) {
 		for _, b := range x.Assigned {
 			h.batchRange(b)
 		}
-	case core.LookupResp:
+	case core.FindSegmentsResp:
 		h.U64(303)
 		h.U64(uint64(len(x.Ranges)))
 		for _, b := range x.Ranges {

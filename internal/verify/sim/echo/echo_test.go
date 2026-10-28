@@ -71,7 +71,7 @@ func TestDeterminismCanary(t *testing.T) {
 
 // firstCatch runs seeds from 1 and returns the first seed where prop is
 // violated, or 0.
-func firstCatch(cfg sim.Config, n int, prop core.Prop) uint64 {
+func firstCatch(cfg sim.Config, n int, prop core.PropertyID) uint64 {
 	for s := uint64(1); s <= uint64(n); s++ {
 		for _, f := range sim.RunSeed(cfg, s).Failures {
 			if f.Kind == sim.FailViolation && f.Prop == prop {
@@ -82,8 +82,8 @@ func firstCatch(cfg sim.Config, n int, prop core.Prop) uint64 {
 	return 0
 }
 
-func mutantFactory(m mutation) core.Factory {
-	return func(env core.Env, self core.NodeRef) core.Machine {
+func mutantFactory(m mutation) core.MachineFactory {
+	return func(env core.Env, self core.NodeInstance) core.Machine {
 		return &Broker{env: env, self: self, mut: m}
 	}
 }
@@ -93,7 +93,7 @@ func TestMutantsAreCaught(t *testing.T) {
 	cases := []struct {
 		name string
 		m    mutation
-		prop core.Prop
+		prop core.PropertyID
 	}{
 		{"ack before CommitSegment", mutEarlyAck, "echo: acked offset is committed"},
 		{"ack when a commit times out", mutAckOnMaybe, "echo: acked offset is committed"},

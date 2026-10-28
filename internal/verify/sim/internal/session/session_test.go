@@ -38,26 +38,26 @@ func TestLoopDialFailAndReady(t *testing.T) {
 		Lost:  func(*wrap, string) { lost++ },
 	}
 
-	acts := l.Step(core.Event{Body: core.Started{}})
+	acts := l.Step(core.Event{Body: core.NodeStarted{}})
 	if len(acts) != 1 {
 		t.Fatalf("Started acts = %#v", acts)
 	}
-	d, ok := acts[0].(core.Dial)
+	d, ok := acts[0].(core.Connect)
 	if !ok || c.State != Dialing {
 		t.Fatalf("dial = %#v state %d", acts[0], c.State)
 	}
 
-	acts = l.Step(core.Event{Body: core.DialDone{Req: d.Req, Err: core.ErrUnavailable}})
+	acts = l.Step(core.Event{Body: core.ConnectDone{Req: d.Req, Err: core.ErrUnavailable}})
 	if c.State != Backoff || len(acts) != 1 {
 		t.Fatalf("dial fail state=%d acts=%#v", c.State, acts)
 	}
 
 	acts = l.Step(core.Event{Body: core.TimerFired{ID: c.wakeID(), Gen: c.WakeGen}})
-	d, ok = acts[0].(core.Dial)
+	d, ok = acts[0].(core.Connect)
 	if !ok {
 		t.Fatalf("redial = %#v", acts)
 	}
-	_ = l.Step(core.Event{Body: core.DialDone{Req: d.Req, Conn: 7}})
+	_ = l.Step(core.Event{Body: core.ConnectDone{Req: d.Req, Conn: 7}})
 	if c.State != Up || c.Conn != 7 || ready != 1 {
 		t.Fatalf("ready state=%d conn=%d ready=%d", c.State, c.Conn, ready)
 	}

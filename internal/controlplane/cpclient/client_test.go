@@ -27,7 +27,7 @@ func realClient(t *testing.T) *Client {
 			Rank: 0, Heartbeat: core.Duration(time.Second),
 		},
 		Log: exec.NewMemLog(), Objects: exec.NewMemObjects(),
-		Self: core.NodeRef{Node: "cp-0"},
+		Self: core.NodeInstance{Node: "cp-0"},
 	})
 	if err := n.Start(t.Context()); err != nil {
 		t.Fatal(err)
@@ -65,11 +65,11 @@ func TestClientAgainstMachine(t *testing.T) {
 	if as := cs.(core.CommitSegmentResp).Assigned; len(as) != 1 || as[0].Count != 4 {
 		t.Fatalf("assigned %+v", as)
 	}
-	lk, err := c.Call(ctx, core.Lookup{TP: tp, From: 0, MaxBytes: 1000})
+	lk, err := c.Call(ctx, core.FindSegments{TP: tp, From: 0, MaxBytes: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if l := lk.(core.LookupResp); len(l.Ranges) != 1 || l.End != 4 {
+	if l := lk.(core.FindSegmentsResp); len(l.Ranges) != 1 || l.End != 4 {
 		t.Fatalf("lookup %+v", l)
 	}
 	ds, err := c.Call(ctx, core.DescribeTopics{Topics: []string{"t"}})
@@ -116,7 +116,7 @@ func TestCallDialError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	code, out := Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, err)
+	code, out := Classifier{}.Classify(core.ControlPlaneCall{Op: core.CommitSegment{}}, err)
 	if code != core.ErrUnavailable && code != core.ErrIO {
 		t.Errorf("dial: %v %v (%v)", code, out, err)
 	}
@@ -124,21 +124,21 @@ func TestCallDialError(t *testing.T) {
 
 func TestClassifyBusinessAndTimeout(t *testing.T) {
 	be := &Error{Code: core.ErrConflict}
-	code, out := Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, be)
+	code, out := Classifier{}.Classify(core.ControlPlaneCall{Op: core.CommitSegment{}}, be)
 	if code != core.ErrConflict || out != core.NotApplied {
 		t.Fatalf("business: %v %v", code, out)
 	}
 	ce := &CallError{Op: "CommitSegment", Sent: true, Code: codes.DeadlineExceeded, Err: context.DeadlineExceeded}
-	code, out = Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, ce)
+	code, out = Classifier{}.Classify(core.ControlPlaneCall{Op: core.CommitSegment{}}, ce)
 	if code != core.ErrTimeout || out != core.MaybeApplied {
 		t.Fatalf("timeout: %v %v", code, out)
 	}
-	_, out = Classifier{}.Classify(core.CPCall{Op: core.Lookup{}}, ce)
+	_, out = Classifier{}.Classify(core.ControlPlaneCall{Op: core.FindSegments{}}, ce)
 	if out != core.NotApplied {
 		t.Fatalf("read timeout outcome %v", out)
 	}
 	ce = &CallError{Op: "x", Sent: false, Err: syscall.ECONNREFUSED}
-	code, out = Classifier{}.Classify(core.CPCall{Op: core.CommitSegment{}}, ce)
+	code, out = Classifier{}.Classify(core.ControlPlaneCall{Op: core.CommitSegment{}}, ce)
 	if code != core.ErrUnavailable || out != core.NotApplied {
 		t.Fatalf("unsent: %v %v", code, out)
 	}

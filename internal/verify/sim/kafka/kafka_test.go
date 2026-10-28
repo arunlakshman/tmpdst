@@ -80,9 +80,9 @@ func TestDeterminismCanary(t *testing.T) {
 }
 
 // violated returns the violated props of seed, in first-failure order.
-func violated(cfg sim.Config, seed uint64) []core.Prop {
-	var out []core.Prop
-	seen := map[core.Prop]bool{}
+func violated(cfg sim.Config, seed uint64) []core.PropertyID {
+	var out []core.PropertyID
+	seen := map[core.PropertyID]bool{}
 	for _, f := range sim.RunSeed(cfg, seed).Failures {
 		if f.Kind == sim.FailViolation && !seen[f.Prop] {
 			seen[f.Prop] = true
@@ -99,7 +99,7 @@ func TestMutantsAreCaught(t *testing.T) {
 	cases := []struct {
 		name string
 		bug  broker.Bug
-		prop core.Prop
+		prop core.PropertyID
 	}{
 		{"BugEarlyAck: ack before CommitSegment", broker.BugEarlyAck, "kafka: acked range is committed in the control plane"},
 		{"BugFreshKeyOnRetry: a lost commit is retried under a fresh key", broker.BugFreshKeyOnRetry, "kafka: a stored batch is committed at most once"},
@@ -114,7 +114,7 @@ func TestMutantsAreCaught(t *testing.T) {
 	for _, c := range cases {
 		cfg := config(nil, c.bug)
 		caught := uint64(0)
-		var props []core.Prop
+		var props []core.PropertyID
 		for s := uint64(1); s <= budget && caught == 0; s++ {
 			if props = violated(cfg, s); len(props) > 0 {
 				caught = s
@@ -214,18 +214,18 @@ func (e *fakeEnv) NewID() core.ID {
 	id[0], id[1] = byte(e.n), byte(e.n>>8)
 	return id
 }
-func (*fakeEnv) Maybe(core.Site) bool                                { return false }
-func (*fakeEnv) MaybeP(core.Site, float64) bool                      { return false }
-func (*fakeEnv) Fault(core.Site, float64) bool                       { return false }
-func (*fakeEnv) Always(bool, core.Prop, ...core.Detail)              {}
-func (*fakeEnv) AlwaysOrUnreachable(bool, core.Prop, ...core.Detail) {}
-func (*fakeEnv) Sometimes(bool, core.Prop)                           {}
-func (*fakeEnv) Reachable(core.Prop)                                 {}
-func (*fakeEnv) Unreachable(core.Prop, ...core.Detail)               {}
+func (*fakeEnv) Maybe(core.FaultPointID) bool                                   { return false }
+func (*fakeEnv) MaybeP(core.FaultPointID, float64) bool                         { return false }
+func (*fakeEnv) Fault(core.FaultPointID, float64) bool                          { return false }
+func (*fakeEnv) Always(bool, core.PropertyID, ...core.ContextPair)              {}
+func (*fakeEnv) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
+func (*fakeEnv) Sometimes(bool, core.PropertyID)                                {}
+func (*fakeEnv) Reachable(core.PropertyID)                                      {}
+func (*fakeEnv) Unreachable(core.PropertyID, ...core.ContextPair)               {}
 
 type fakeHist struct{ ops []sim.HistOp }
 
-func (h *fakeHist) Invoke(c core.NodeRef, id, v core.ID, op any) {
+func (h *fakeHist) Invoke(c core.NodeInstance, id, v core.ID, op any) {
 	h.ops = append(h.ops, sim.HistOp{ID: id, Value: v, Client: c, Op: op})
 }
 func (h *fakeHist) Return(id core.ID, res any, o sim.OpOutcome) bool {
@@ -244,7 +244,7 @@ func (h *fakeHist) Ops() []sim.HistOp { return h.ops }
 // ambiguous attempt makes it indeterminate.
 func TestFatalProduceErrorGivesUp(t *testing.T) {
 	for _, ambiguous := range []bool{false, true} {
-		w := NewWorkload(&fakeEnv{}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
+		w := NewWorkload(&fakeEnv{}, core.NodeInstance{Node: "w"}, []core.NodeInstance{{Node: "b"}}, DefaultOpts())
 		h := &fakeHist{}
 		w.SetHistory(h)
 		c := w.loop.Clients[0]
@@ -286,7 +286,7 @@ func produceResp(w *Workload, c *client, code int16) *kmsg.ProduceResponse {
 // (even after an ambiguous earlier attempt) and the producer carries on.
 func TestIdemBatchRejectedIsAbandoned(t *testing.T) {
 	for _, ambiguous := range []bool{false, true} {
-		w := NewWorkload(&fakeEnv{}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
+		w := NewWorkload(&fakeEnv{}, core.NodeInstance{Node: "w"}, []core.NodeInstance{{Node: "b"}}, DefaultOpts())
 		h := &fakeHist{}
 		w.SetHistory(h)
 		c := w.loop.Clients[0]
@@ -324,7 +324,7 @@ func (e *rngEnv) Intn(n int) int {
 
 // Only the batches built with idem set carry a producer id on the wire.
 func TestBatchesCarryProducerIDOnlyWhenIdem(t *testing.T) {
-	w := NewWorkload(&rngEnv{x: 88172645463325252}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
+	w := NewWorkload(&rngEnv{x: 88172645463325252}, core.NodeInstance{Node: "w"}, []core.NodeInstance{{Node: "b"}}, DefaultOpts())
 	w.SetHistory(&fakeHist{})
 	c := w.loop.Clients[0]
 	idem, plain := 0, 0
@@ -511,7 +511,7 @@ func (i *widestInv) AtEnd(v sim.View) {
 // The workload sends every codec id (compressed payloads are opaque to the
 // broker but decodable by the simulated consumer), plus damaged batches.
 func TestWorkloadBuildsEveryCodecAndCorruptBatches(t *testing.T) {
-	w := NewWorkload(&rngEnv{x: 88172645463325252}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
+	w := NewWorkload(&rngEnv{x: 88172645463325252}, core.NodeInstance{Node: "w"}, []core.NodeInstance{{Node: "b"}}, DefaultOpts())
 	h := &fakeHist{}
 	w.SetHistory(h)
 	c := w.loop.Clients[0]
@@ -557,7 +557,7 @@ func TestWorkloadBuildsEveryCodecAndCorruptBatches(t *testing.T) {
 // A damaged batch answered CORRUPT_MESSAGE is abandoned as rejected; the same
 // code for a good batch stays fatal.
 func TestCorruptBatchRejectedIsAbandoned(t *testing.T) {
-	w := NewWorkload(&fakeEnv{}, core.NodeRef{Node: "w"}, []core.NodeRef{{Node: "b"}}, DefaultOpts())
+	w := NewWorkload(&fakeEnv{}, core.NodeInstance{Node: "w"}, []core.NodeInstance{{Node: "b"}}, DefaultOpts())
 	h := &fakeHist{}
 	w.SetHistory(h)
 	c := w.loop.Clients[0]

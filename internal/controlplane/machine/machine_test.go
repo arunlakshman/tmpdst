@@ -10,8 +10,8 @@ import (
 
 type alwaysHit struct {
 	cond    bool
-	prop    core.Prop
-	details []core.Detail
+	prop    core.PropertyID
+	details []core.ContextPair
 }
 
 type testEnv struct {
@@ -37,16 +37,16 @@ func (e *testEnv) NewID() core.ID {
 	}
 	return id
 }
-func (e *testEnv) Maybe(core.Site) bool           { return false }
-func (e *testEnv) MaybeP(core.Site, float64) bool { return false }
-func (e *testEnv) Fault(core.Site, float64) bool  { return false }
-func (e *testEnv) Always(cond bool, p core.Prop, details ...core.Detail) {
+func (e *testEnv) Maybe(core.FaultPointID) bool           { return false }
+func (e *testEnv) MaybeP(core.FaultPointID, float64) bool { return false }
+func (e *testEnv) Fault(core.FaultPointID, float64) bool  { return false }
+func (e *testEnv) Always(cond bool, p core.PropertyID, details ...core.ContextPair) {
 	e.always = append(e.always, alwaysHit{cond: cond, prop: p, details: details})
 }
-func (e *testEnv) AlwaysOrUnreachable(bool, core.Prop, ...core.Detail) {}
-func (e *testEnv) Sometimes(bool, core.Prop)                           {}
-func (e *testEnv) Reachable(core.Prop)                                 {}
-func (e *testEnv) Unreachable(core.Prop, ...core.Detail)               {}
+func (e *testEnv) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
+func (e *testEnv) Sometimes(bool, core.PropertyID)                                {}
+func (e *testEnv) Reachable(core.PropertyID)                                      {}
+func (e *testEnv) Unreachable(core.PropertyID, ...core.ContextPair)               {}
 
 func newMachine(t *testing.T, cfg machine.Config) *machine.Machine {
 	t.Helper()
@@ -57,7 +57,7 @@ func newMachine(t *testing.T, cfg machine.Config) *machine.Machine {
 func newMachineEnv(t *testing.T, cfg machine.Config) (*machine.Machine, *testEnv) {
 	t.Helper()
 	env := &testEnv{}
-	m := machine.New(cfg)(env, core.NodeRef{Node: "cp-0"})
+	m := machine.New(cfg)(env, core.NodeInstance{Node: "cp-0"})
 	sm, ok := m.(*machine.Machine)
 	if !ok {
 		t.Fatalf("New returned %T, want *machine.Machine", m)
@@ -65,7 +65,7 @@ func newMachineEnv(t *testing.T, cfg machine.Config) (*machine.Machine, *testEnv
 	return sm, env
 }
 
-func step(m *machine.Machine, body core.EventBody) []core.Action {
+func step(m *machine.Machine, body core.EventData) []core.Action {
 	return m.Step(core.Event{Body: body})
 }
 
@@ -75,22 +75,22 @@ func noop(id string) []byte {
 
 func TestStartedAndStop(t *testing.T) {
 	m := newMachine(t, machine.Config{})
-	if acts := step(m, core.Started{Self: core.NodeRef{Node: "cp-0"}}); acts != nil {
+	if acts := step(m, core.NodeStarted{Self: core.NodeInstance{Node: "cp-0"}}); acts != nil {
 		t.Fatalf("Started returned actions %v", acts)
 	}
 	beforeStop := m.StateHash()
-	acts := step(m, core.Stop{})
+	acts := step(m, core.StopRequest{})
 	if len(acts) != 1 {
 		t.Fatalf("Stop actions = %v, want [Exit]", acts)
 	}
-	if _, ok := acts[0].(core.Exit); !ok {
-		t.Fatalf("Stop action = %T, want core.Exit", acts[0])
+	if _, ok := acts[0].(core.ShutdownDone); !ok {
+		t.Fatalf("Stop action = %T, want core.ShutdownDone", acts[0])
 	}
 	if m.StateHash() == beforeStop {
 		t.Fatal("Stop left StateHash unchanged")
 	}
 	after := m.StateHash()
-	if acts := step(m, core.Stop{}); acts != nil {
+	if acts := step(m, core.StopRequest{}); acts != nil {
 		t.Fatalf("second Stop after Exit returned %v", acts)
 	}
 	if m.StateHash() != after {
@@ -98,18 +98,18 @@ func TestStartedAndStop(t *testing.T) {
 	}
 }
 
-func TestStateHashStableAcrossNoopCompletions(t *testing.T) {
+func TestStateHashStableAcrossNoopIOResults(t *testing.T) {
 	m := newMachine(t, machine.Config{})
-	step(m, core.Started{})
+	step(m, core.NodeStarted{})
 	before := m.StateHash()
-	noops := []core.EventBody{
-		core.CPDone{Req: 999},
-		core.ObjPutDone{Req: 999},
-		core.ObjGetDone{Req: 999},
+	noops := []core.EventData{
+		core.ControlPlaneDone{Req: 999},
+		core.ObjectPutDone{Req: 999},
+		core.ObjectGetDone{Req: 999},
 		core.LogAppendDone{Req: 999},
 		core.LogReadDone{Req: 999},
-		core.LogCheckTailDone{Req: 999},
-		core.LogTrimDone{Req: 999},
+		core.LogGetEndDone{Req: 999},
+		core.LogDeleteOldDone{Req: 999},
 		core.SendDone{Req: 1},
 		core.TimerFired{ID: 77, Gen: 3},
 		core.ConnOpened{Conn: 1},
@@ -122,7 +122,7 @@ func TestStateHashStableAcrossNoopCompletions(t *testing.T) {
 			t.Fatalf("%T changed StateHash", body)
 		}
 	}
-	step(m, core.Started{})
+	step(m, core.NodeStarted{})
 	if m.StateHash() != before {
 		t.Fatal("repeat Started changed StateHash")
 	}
@@ -131,7 +131,7 @@ func TestStateHashStableAcrossNoopCompletions(t *testing.T) {
 func TestStateHashDeterministicAcrossBoots(t *testing.T) {
 	hash := func() uint64 {
 		m := newMachine(t, machine.Config{})
-		step(m, core.Started{})
+		step(m, core.NodeStarted{})
 		return m.StateHash()
 	}
 	if a, b := hash(), hash(); a != b {
@@ -141,15 +141,15 @@ func TestStateHashDeterministicAcrossBoots(t *testing.T) {
 
 func TestNewImplementsFactory(t *testing.T) {
 	f := machine.New(machine.Config{})
-	if f(&testEnv{}, core.NodeRef{Node: "cp-1"}) == nil {
-		t.Fatal("Factory returned nil")
+	if f(&testEnv{}, core.NodeInstance{Node: "cp-1"}) == nil {
+		t.Fatal("MachineFactory returned nil")
 	}
 }
 
 func TestCatchUpAppliesContiguousReads(t *testing.T) {
 	m := newMachine(t, machine.Config{CatchUpEvery: core.Millisecond, ReadLimit: 8})
 
-	acts := step(m, core.Started{})
+	acts := step(m, core.NodeStarted{})
 	if len(acts) != 1 {
 		t.Fatalf("Started actions = %v, want [SetTimer]", acts)
 	}
@@ -162,12 +162,12 @@ func TestCatchUpAppliesContiguousReads(t *testing.T) {
 	if len(acts) != 1 {
 		t.Fatalf("TimerFired actions = %v, want [LogCheckTail]", acts)
 	}
-	tail, ok := acts[0].(core.LogCheckTail)
+	tail, ok := acts[0].(core.LogGetEnd)
 	if !ok || tail.Req == 0 {
 		t.Fatalf("TimerFired action = %T %#v, want LogCheckTail", acts[0], acts[0])
 	}
 
-	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
+	acts = step(m, core.LogGetEndDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
 	if len(acts) != 1 {
 		t.Fatalf("CheckTailDone actions = %v, want [LogRead]", acts)
 	}
@@ -194,7 +194,7 @@ func TestCatchUpAppliesContiguousReads(t *testing.T) {
 	}
 
 	before := m.StateHash()
-	if acts := step(m, core.LogCheckTailDone{Req: 999, Tail: 99, Err: core.OK, Outcome: core.Applied}); acts != nil {
+	if acts := step(m, core.LogGetEndDone{Req: 999, Tail: 99, Err: core.OK, Outcome: core.Applied}); acts != nil {
 		t.Fatalf("foreign CheckTailDone returned %v", acts)
 	}
 	if m.StateHash() != before {
@@ -204,7 +204,7 @@ func TestCatchUpAppliesContiguousReads(t *testing.T) {
 
 func TestCatchUpDisabledByDefault(t *testing.T) {
 	m := newMachine(t, machine.Config{})
-	if acts := step(m, core.Started{}); acts != nil {
+	if acts := step(m, core.NodeStarted{}); acts != nil {
 		t.Fatalf("default Started returned %v", acts)
 	}
 }

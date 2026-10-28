@@ -70,11 +70,11 @@ func (m *cpModel) topicList() []core.TopicInfo {
 // apply runs op on the model. It returns the result that the rules require and
 // whether the state may change. When the second value is false, the state hash of the
 // spec and of the subject must stay the same.
-func (m *cpModel) apply(op core.CPOp) (observation.ControlPlaneResult, bool) {
+func (m *cpModel) apply(op core.ControlPlaneOperation) (observation.ControlPlaneResult, bool) {
 	switch o := op.(type) {
 	case core.CommitSegment:
 		return m.commit(o)
-	case core.Lookup:
+	case core.FindSegments:
 		return m.lookup(o), false
 	case core.DescribeTopics:
 		return m.describe(o), false
@@ -121,7 +121,7 @@ func (m *cpModel) commit(op core.CommitSegment) (observation.ControlPlaneResult,
 	return observation.ControlPlaneResult{Assigned: assigned, Outcome: core.Applied}, true
 }
 
-func (m *cpModel) lookup(op core.Lookup) observation.ControlPlaneResult {
+func (m *cpModel) lookup(op core.FindSegments) observation.ControlPlaneResult {
 	if op.From < 0 {
 		return observation.ControlPlaneResult{Code: core.ErrInvalid}
 	}

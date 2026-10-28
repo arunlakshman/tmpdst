@@ -98,7 +98,7 @@ func TestClassify(t *testing.T) {
 	if code != core.ErrTimeout || out != core.NotApplied {
 		t.Fatalf("deadline read: %v %v", code, out)
 	}
-	code, out = exec.Classify(core.ObjGet{}, exec.ErrNotFound)
+	code, out = exec.Classify(core.ObjectGet{}, exec.ErrNotFound)
 	if code != core.ErrNotFound || out != core.NotApplied {
 		t.Fatalf("not found: %v %v", code, out)
 	}
@@ -106,12 +106,12 @@ func TestClassify(t *testing.T) {
 	if code != core.ErrInvalid || out != core.NotApplied {
 		t.Fatalf("invalid: %v %v", code, out)
 	}
-	code, out = exec.Classify(core.ObjPut{}, errors.New("boom"))
+	code, out = exec.Classify(core.ObjectPut{}, errors.New("boom"))
 	if code != core.ErrIO || out != core.MaybeApplied {
 		t.Fatalf("io: %v %v", code, out)
 	}
 	var ne net.Error = timeoutError{}
-	code, out = exec.Classify(core.LogTrim{}, ne)
+	code, out = exec.Classify(core.LogDeleteOld{}, ne)
 	if code != core.ErrTimeout || out != core.MaybeApplied {
 		t.Fatalf("net timeout: %v %v", code, out)
 	}
@@ -157,23 +157,23 @@ func TestDynLog(t *testing.T) {
 	}
 }
 
-func TestExecutorCompletions(t *testing.T) {
+func TestExecutorIOResults(t *testing.T) {
 	ctx := t.Context()
 	in := run.NewInbox(8)
 	ex := exec.New(ctx, exec.Config{LogTimeout: time.Second, ObjTimeout: time.Second}, exec.NewMemLog(), exec.NewMemObjects(), in)
 	ex.Execute(core.LogAppend{Req: 1, Slot: 0, Data: []byte("a")})
-	ex.Execute(core.ObjPut{Req: 2, Key: "k", Data: []byte("v")})
-	ex.Execute(core.LogCheckTail{Req: 3})
+	ex.Execute(core.ObjectPut{Req: 2, Key: "k", Data: []byte("v")})
+	ex.Execute(core.LogGetEnd{Req: 3})
 	ex.Execute(core.LogRead{Req: 4, From: 0, Limit: 1})
-	ex.Execute(core.ObjGet{Req: 5, Ref: core.SegmentRef{Key: "k", Len: 1}})
-	ex.Execute(core.ObjList{Req: 6, Prefix: "k"})
-	ex.Execute(core.LogTrim{Req: 7, Through: 0})
-	ex.Execute(core.ObjDelete{Req: 8, Key: "k"})
+	ex.Execute(core.ObjectGet{Req: 5, Ref: core.SegmentRef{Key: "k", Len: 1}})
+	ex.Execute(core.ObjectList{Req: 6, Prefix: "k"})
+	ex.Execute(core.LogDeleteOld{Req: 7, Through: 0})
+	ex.Execute(core.ObjectDelete{Req: 8, Key: "k"})
 	deadline := time.Now().Add(2 * time.Second)
 	got := 0
 	for got < 8 && time.Now().Before(deadline) {
 		if b, ok := in.Control().Pop(); ok {
-			if _, ok := b.(core.Completion); ok {
+			if _, ok := b.(core.IOResult); ok {
 				got++
 			}
 			continue

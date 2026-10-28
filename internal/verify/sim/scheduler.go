@@ -17,8 +17,8 @@ type EntryID uint64
 
 // Target says who consumes an entry: a node (by incarnation) or an engine.
 type Target struct {
-	Node   core.NodeRef // set when delivering to a node's StateMachine
-	Engine string       // set when delivering an internal event to an engine
+	Node   core.NodeInstance // set when delivering to a node's StateMachine
+	Engine string            // set when delivering an internal event to an engine
 }
 
 // EntryKind says what an entry is. Append-only (hashed). Crash, Restart, Stop,
@@ -44,7 +44,7 @@ type Entry struct {
 	Lane   Lane
 	Kind   EntryKind
 	Target Target
-	Body   any    // core.EventBody for nodes; engine-private plain data for engines
+	Body   any    // core.EventData for nodes; engine-private plain data for engines
 	Tie    uint64 // drawn by Schedule: exactly one draw per call
 	Seq    uint64 // assigned by Schedule, in call order
 }
@@ -60,7 +60,7 @@ type Scheduler interface {
 	// DropNode removes every pending entry addressed to that incarnation (crash)
 	// and returns how many. Engine-internal entries are not addressed to a node
 	// and survive.
-	DropNode(ref core.NodeRef) int
+	DropNode(ref core.NodeInstance) int
 	// Pop removes and returns the next entry, advancing Now. ok=false when empty.
 	Pop() (e Entry, ok bool)
 	Len() int

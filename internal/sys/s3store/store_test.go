@@ -115,32 +115,32 @@ func TestStoreServerErrors(t *testing.T) {
 		f.inject = func(*http.Request) (int, string) { return c.status, c.code }
 		before := f.calls
 		ops := map[string]struct {
-			act core.IOAction
+			act core.IOCall
 			err error
 		}{}
 		_, gerr := s.Get(ctx, core.SegmentRef{Key: "k"})
 		_, gerr2 := s.Get(ctx, core.SegmentRef{Key: "k", Off: 1, Len: 1})
 		ops["put"] = struct {
-			act core.IOAction
+			act core.IOCall
 			err error
-		}{core.ObjPut{}, s.Put(ctx, "k", []byte("v"))}
+		}{core.ObjectPut{}, s.Put(ctx, "k", []byte("v"))}
 		ops["get"] = struct {
-			act core.IOAction
+			act core.IOCall
 			err error
-		}{core.ObjGet{}, gerr}
+		}{core.ObjectGet{}, gerr}
 		ops["get-range"] = struct {
-			act core.IOAction
+			act core.IOCall
 			err error
-		}{core.ObjGet{}, gerr2}
+		}{core.ObjectGet{}, gerr2}
 		ops["delete"] = struct {
-			act core.IOAction
+			act core.IOCall
 			err error
-		}{core.ObjDelete{}, s.Delete(ctx, "k")}
+		}{core.ObjectDelete{}, s.Delete(ctx, "k")}
 		_, lerr := s.List(ctx, "")
 		ops["list"] = struct {
-			act core.IOAction
+			act core.IOCall
 			err error
-		}{core.ObjList{}, lerr}
+		}{core.ObjectList{}, lerr}
 		if f.calls-before != 5 {
 			t.Errorf("%s: %d requests for 5 calls, the store must not retry", c.name, f.calls-before)
 		}
@@ -176,7 +176,7 @@ func TestStoreTimeout(t *testing.T) {
 	// A deadline hit mid-request surfaces as an SDK ResponseError with status
 	// 0; the classifier treats it as ErrIO/MaybeApplied (the executor's own
 	// timeout, not this path, yields ErrTimeout).
-	code, out := Classifier{}.Classify(core.ObjPut{}, err)
+	code, out := Classifier{}.Classify(core.ObjectPut{}, err)
 	if code != core.ErrIO || out != core.MaybeApplied || !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("timeout: %v %v (%v)", code, out, err)
 	}
@@ -191,7 +191,7 @@ func TestStoreDialAndHTTPClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = s.Put(t.Context(), "k", nil)
-	code, out := Classifier{}.Classify(core.ObjPut{}, err)
+	code, out := Classifier{}.Classify(core.ObjectPut{}, err)
 	if code != core.ErrUnavailable || out != core.NotApplied {
 		t.Errorf("dial: %v %v (%v)", code, out, err)
 	}

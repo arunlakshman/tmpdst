@@ -163,10 +163,10 @@ func TestCommitTooLargeFailsBatches(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	commits := 0
-	h.cpHook = func(a core.CPCall, run func() core.Completion) core.Completion {
+	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
 		if _, ok := a.Op.(core.CommitSegment); ok {
 			commits++
-			return core.CPDone{Req: a.Req, Err: core.ErrTooLarge, Outcome: core.NotApplied}
+			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrTooLarge, Outcome: core.NotApplied}
 		}
 		return run()
 	}
@@ -200,7 +200,7 @@ func TestStopFlushesOpenSegment(t *testing.T) {
 	if len(h.puts) != 0 {
 		t.Fatal("sealed early")
 	}
-	h.do(core.Stop{})
+	h.do(core.StopRequest{})
 	if len(h.puts) != 1 || !h.exited {
 		t.Fatalf("puts %d exited %v", len(h.puts), h.exited)
 	}

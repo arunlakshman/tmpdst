@@ -42,23 +42,23 @@ func (s *ObjectStore) touch(i int) {
 }
 
 // Exec runs one action and returns its completion.
-func (s *ObjectStore) Exec(a core.IOAction) core.Completion {
+func (s *ObjectStore) Exec(a core.IOCall) core.IOResult {
 	switch a := a.(type) {
-	case core.ObjPut:
+	case core.ObjectPut:
 		return s.execPut(a)
-	case core.ObjGet:
+	case core.ObjectGet:
 		return s.execGet(a)
-	case core.ObjDelete:
+	case core.ObjectDelete:
 		return s.execDelete(a)
-	case core.ObjList:
+	case core.ObjectList:
 		return s.execList(a)
 	}
 	panic("veritas.ObjectStore: not an object store action")
 }
 
-func (s *ObjectStore) execPut(a core.ObjPut) core.Completion {
+func (s *ObjectStore) execPut(a core.ObjectPut) core.IOResult {
 	if a.Key == "" {
-		return core.ObjPutDone{Req: a.Req, Key: a.Key, Err: core.ErrInvalid}
+		return core.ObjectPutDone{Req: a.Req, Key: a.Key, Err: core.ErrInvalid}
 	}
 	i, found := slices.BinarySearch(s.keys, a.Key)
 	if !found {
@@ -66,19 +66,19 @@ func (s *ObjectStore) execPut(a core.ObjPut) core.Completion {
 	}
 	s.touch(i)
 	s.objs[a.Key] = clone(a.Data)
-	return core.ObjPutDone{Req: a.Req, Key: a.Key, Outcome: core.Applied}
+	return core.ObjectPutDone{Req: a.Req, Key: a.Key, Outcome: core.Applied}
 }
 
-func (s *ObjectStore) execGet(a core.ObjGet) core.Completion {
+func (s *ObjectStore) execGet(a core.ObjectGet) core.IOResult {
 	data, ok := s.objs[a.Ref.Key]
 	if !ok {
-		return core.ObjGetDone{Req: a.Req, Err: core.ErrNotFound}
+		return core.ObjectGetDone{Req: a.Req, Err: core.ErrNotFound}
 	}
 	got, ok := sliceRange(data, a.Ref)
 	if !ok {
-		return core.ObjGetDone{Req: a.Req, Err: core.ErrInvalid}
+		return core.ObjectGetDone{Req: a.Req, Err: core.ErrInvalid}
 	}
-	return core.ObjGetDone{Req: a.Req, Data: clone(got)}
+	return core.ObjectGetDone{Req: a.Req, Data: clone(got)}
 }
 
 func sliceRange(data []byte, ref core.SegmentRef) ([]byte, bool) {
@@ -92,25 +92,25 @@ func sliceRange(data []byte, ref core.SegmentRef) ([]byte, bool) {
 	return data[ref.Off:end], true
 }
 
-func (s *ObjectStore) execDelete(a core.ObjDelete) core.Completion {
+func (s *ObjectStore) execDelete(a core.ObjectDelete) core.IOResult {
 	if _, ok := s.objs[a.Key]; !ok {
-		return core.ObjDeleteDone{Req: a.Req, Err: core.ErrNotFound}
+		return core.ObjectDeleteDone{Req: a.Req, Err: core.ErrNotFound}
 	}
 	i, _ := slices.BinarySearch(s.keys, a.Key)
 	s.keys = slices.Delete(s.keys, i, i+1)
 	s.touch(i)
 	delete(s.objs, a.Key)
-	return core.ObjDeleteDone{Req: a.Req, Outcome: core.Applied}
+	return core.ObjectDeleteDone{Req: a.Req, Outcome: core.Applied}
 }
 
-func (s *ObjectStore) execList(a core.ObjList) core.Completion {
+func (s *ObjectStore) execList(a core.ObjectList) core.IOResult {
 	var keys []string
 	for _, k := range s.keys {
 		if strings.HasPrefix(k, a.Prefix) {
 			keys = append(keys, k)
 		}
 	}
-	return core.ObjListDone{Req: a.Req, Keys: keys}
+	return core.ObjectListDone{Req: a.Req, Keys: keys}
 }
 
 // Keys returns every key, sorted.

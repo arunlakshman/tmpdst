@@ -16,10 +16,10 @@ func (fakeClock) Wall() core.WallTime { return 9 }
 
 type fakeExec struct {
 	mu  sync.Mutex
-	got []core.IOAction
+	got []core.IOCall
 }
 
-func (e *fakeExec) Execute(a core.IOAction) {
+func (e *fakeExec) Execute(a core.IOCall) {
 	e.mu.Lock()
 	e.got = append(e.got, a)
 	e.mu.Unlock()
@@ -28,7 +28,7 @@ func (e *fakeExec) Execute(a core.IOAction) {
 type fakeMachine struct {
 	mu     sync.Mutex
 	events []core.Event
-	script func(n int, b core.EventBody) []core.Action
+	script func(n int, b core.EventData) []core.Action
 }
 
 func (m *fakeMachine) Step(e core.Event) []core.Action {
@@ -45,32 +45,32 @@ func (m *fakeMachine) StateHash() uint64 { return 0 }
 
 type testEnv struct{}
 
-func (testEnv) Uint64() uint64                                      { return 1 }
-func (testEnv) Intn(n int) int                                      { return 0 }
-func (testEnv) NewID() core.ID                                      { return core.ID{} }
-func (testEnv) Maybe(core.Site) bool                                { return false }
-func (testEnv) MaybeP(core.Site, float64) bool                      { return false }
-func (testEnv) Fault(core.Site, float64) bool                       { return false }
-func (testEnv) Always(bool, core.Prop, ...core.Detail)              {}
-func (testEnv) AlwaysOrUnreachable(bool, core.Prop, ...core.Detail) {}
-func (testEnv) Sometimes(bool, core.Prop)                           {}
-func (testEnv) Reachable(core.Prop)                                 {}
-func (testEnv) Unreachable(core.Prop, ...core.Detail)               {}
+func (testEnv) Uint64() uint64                                                 { return 1 }
+func (testEnv) Intn(n int) int                                                 { return 0 }
+func (testEnv) NewID() core.ID                                                 { return core.ID{} }
+func (testEnv) Maybe(core.FaultPointID) bool                                   { return false }
+func (testEnv) MaybeP(core.FaultPointID, float64) bool                         { return false }
+func (testEnv) Fault(core.FaultPointID, float64) bool                          { return false }
+func (testEnv) Always(bool, core.PropertyID, ...core.ContextPair)              {}
+func (testEnv) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
+func (testEnv) Sometimes(bool, core.PropertyID)                                {}
+func (testEnv) Reachable(core.PropertyID)                                      {}
+func (testEnv) Unreachable(core.PropertyID, ...core.ContextPair)               {}
 
 func TestStartedThenExit(t *testing.T) {
 	m := &fakeMachine{}
-	m.script = func(n int, _ core.EventBody) []core.Action {
+	m.script = func(n int, _ core.EventData) []core.Action {
 		if n == 0 {
-			return []core.Action{core.Exit{}}
+			return []core.Action{core.ShutdownDone{}}
 		}
 		return nil
 	}
 	b := run.Bundle{Clock: fakeClock{}, Env: testEnv{}, Inbox: run.NewInbox(4)}
-	f := func(core.Env, core.NodeRef) core.Machine { return m }
-	if err := run.Run(t.Context(), b, &fakeExec{}, f, core.NodeRef{Node: "cp"}); err != nil {
+	f := func(core.Env, core.NodeInstance) core.Machine { return m }
+	if err := run.Run(t.Context(), b, &fakeExec{}, f, core.NodeInstance{Node: "cp"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := m.events[0].Body.(core.Started); !ok {
+	if _, ok := m.events[0].Body.(core.NodeStarted); !ok {
 		t.Fatalf("first = %T", m.events[0].Body)
 	}
 }
@@ -79,18 +79,18 @@ func TestInjectRunsOnLoop(t *testing.T) {
 	m := &fakeMachine{}
 	inject := make(chan run.InjectFunc, 1)
 	var saw bool
-	m.script = func(n int, body core.EventBody) []core.Action {
+	m.script = func(n int, body core.EventData) []core.Action {
 		if n == 1 {
-			return []core.Action{core.Exit{}}
+			return []core.Action{core.ShutdownDone{}}
 		}
 		return nil
 	}
 	b := run.Bundle{
 		Clock: fakeClock{}, Env: testEnv{}, Inbox: run.NewInbox(4), Inject: inject,
 	}
-	f := func(core.Env, core.NodeRef) core.Machine { return m }
+	f := func(core.Env, core.NodeInstance) core.Machine { return m }
 	done := make(chan error, 1)
-	go func() { done <- run.Run(t.Context(), b, &fakeExec{}, f, core.NodeRef{}) }()
+	go func() { done <- run.Run(t.Context(), b, &fakeExec{}, f, core.NodeInstance{}) }()
 	inject <- func() []core.Action {
 		saw = true
 		b.Inbox.DeliverControl(core.TimerFired{ID: 1})
@@ -113,11 +113,11 @@ func TestWaitIdleThenExit(t *testing.T) {
 	m := &fakeMachine{}
 	inject := make(chan run.InjectFunc)
 	b := run.Bundle{Clock: fakeClock{}, Env: testEnv{}, Inbox: run.NewInbox(4), Inject: inject}
-	f := func(core.Env, core.NodeRef) core.Machine { return m }
+	f := func(core.Env, core.NodeInstance) core.Machine { return m }
 	done := make(chan error, 1)
-	go func() { done <- run.Run(t.Context(), b, &fakeExec{}, f, core.NodeRef{}) }()
+	go func() { done <- run.Run(t.Context(), b, &fakeExec{}, f, core.NodeInstance{}) }()
 	time.Sleep(20 * time.Millisecond) // park in waitIdle
-	inject <- func() []core.Action { return []core.Action{core.Exit{}} }
+	inject <- func() []core.Action { return []core.Action{core.ShutdownDone{}} }
 	select {
 	case err := <-done:
 		if err != nil {
@@ -135,17 +135,17 @@ func TestDeliverDataAndDispatch(t *testing.T) {
 		t.Fatal("data not queued")
 	}
 	m := &fakeMachine{}
-	m.script = func(n int, body core.EventBody) []core.Action {
+	m.script = func(n int, body core.EventData) []core.Action {
 		switch n {
 		case 0: // Started
 			return []core.Action{
 				core.SetTimer{ID: 1, Gen: 1, After: core.Duration(time.Hour)},
 				core.CancelTimer{ID: 1},
-				core.Emit{Fact: core.Fact{}},
+				core.RecordFact{Fact: core.Fact{}},
 				core.LogAppend{Req: 1},
 			}
 		case 1:
-			return []core.Action{core.Exit{}}
+			return []core.Action{core.ShutdownDone{}}
 		}
 		return nil
 	}
@@ -155,7 +155,7 @@ func TestDeliverDataAndDispatch(t *testing.T) {
 		Facts: func(core.Fact) { facts++ },
 	}
 	ex := &fakeExec{}
-	if err := run.Run(t.Context(), b, ex, func(core.Env, core.NodeRef) core.Machine { return m }, core.NodeRef{}); err != nil {
+	if err := run.Run(t.Context(), b, ex, func(core.Env, core.NodeInstance) core.Machine { return m }, core.NodeInstance{}); err != nil {
 		t.Fatal(err)
 	}
 	if facts != 1 || len(ex.got) != 1 {

@@ -29,16 +29,16 @@ func (c *fakeConns) add(s string)                    { c.mu.Lock(); c.log = appe
 
 type fakeExec struct {
 	mu  sync.Mutex
-	got []core.IOAction
+	got []core.IOCall
 }
 
-func (e *fakeExec) Execute(a core.IOAction) { e.mu.Lock(); e.got = append(e.got, a); e.mu.Unlock() }
+func (e *fakeExec) Execute(a core.IOCall) { e.mu.Lock(); e.got = append(e.got, a); e.mu.Unlock() }
 
 // fakeMachine records events and replays script(event index, body).
 type fakeMachine struct {
 	mu     sync.Mutex
 	events []core.Event
-	script func(n int, b core.EventBody) []core.Action
+	script func(n int, b core.EventData) []core.Action
 }
 
 func (m *fakeMachine) Step(e core.Event) []core.Action {
@@ -53,10 +53,10 @@ func (m *fakeMachine) Step(e core.Event) []core.Action {
 }
 func (m *fakeMachine) StateHash() uint64 { return 0 }
 
-func setup(m *fakeMachine) (Bundle, *fakeExec, *fakeConns, core.Factory) {
+func setup(m *fakeMachine) (Bundle, *fakeExec, *fakeConns, core.MachineFactory) {
 	cn := &fakeConns{}
 	b := Bundle{Clock: fakeClock{}, Conns: cn, Inbox: NewInbox(8)}
-	return b, &fakeExec{}, cn, func(core.Env, core.NodeRef) core.Machine { return m }
+	return b, &fakeExec{}, cn, func(core.Env, core.NodeInstance) core.Machine { return m }
 }
 
 func TestStartedFirstControlBeatsData(t *testing.T) {
@@ -65,16 +65,16 @@ func TestStartedFirstControlBeatsData(t *testing.T) {
 	// Preload both queues before Run: data first, then control.
 	b.Inbox.DeliverData(core.ConnOpened{Conn: 1})
 	b.Inbox.DeliverControl(core.TimerFired{ID: 1})
-	m.script = func(n int, body core.EventBody) []core.Action {
+	m.script = func(n int, body core.EventData) []core.Action {
 		if n == 2 {
-			return []core.Action{core.Exit{}}
+			return []core.Action{core.ShutdownDone{}}
 		}
 		return nil
 	}
-	if err := Run(t.Context(), b, ex, f, core.NodeRef{}); err != nil {
+	if err := Run(t.Context(), b, ex, f, core.NodeInstance{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := m.events[0].Body.(core.Started); !ok {
+	if _, ok := m.events[0].Body.(core.NodeStarted); !ok {
 		t.Fatalf("first = %T", m.events[0].Body)
 	}
 	if _, ok := m.events[1].Body.(core.TimerFired); !ok {
@@ -86,11 +86,11 @@ func TestStartedFirstControlBeatsData(t *testing.T) {
 }
 
 func TestTripRunsEarlierActions(t *testing.T) {
-	m := &fakeMachine{script: func(n int, _ core.EventBody) []core.Action {
-		return []core.Action{core.ObjPut{Req: 1}, core.PauseReads{Conn: 2}, core.Trip{Cause: "x"}, core.ObjPut{Req: 2}}
+	m := &fakeMachine{script: func(n int, _ core.EventData) []core.Action {
+		return []core.Action{core.ObjectPut{Req: 1}, core.PauseReads{Conn: 2}, core.StopForRestart{Cause: "x"}, core.ObjectPut{Req: 2}}
 	}}
 	b, ex, cn, f := setup(m)
-	err := Run(t.Context(), b, ex, f, core.NodeRef{})
+	err := Run(t.Context(), b, ex, f, core.NodeInstance{})
 	if !errors.Is(err, ErrTripped) {
 		t.Fatalf("err = %v", err)
 	}
@@ -100,9 +100,9 @@ func TestTripRunsEarlierActions(t *testing.T) {
 }
 
 func TestExitReturnsNilAndLateDeliveryDropped(t *testing.T) {
-	m := &fakeMachine{script: func(int, core.EventBody) []core.Action { return []core.Action{core.Exit{}} }}
+	m := &fakeMachine{script: func(int, core.EventData) []core.Action { return []core.Action{core.ShutdownDone{}} }}
 	b, ex, _, f := setup(m)
-	if err := Run(t.Context(), b, ex, f, core.NodeRef{}); err != nil {
+	if err := Run(t.Context(), b, ex, f, core.NodeInstance{}); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan struct{})
@@ -130,7 +130,7 @@ func TestCtxCancelStops(t *testing.T) {
 	b, ex, _, f := setup(m)
 	ctx, cancel := context.WithCancel(t.Context())
 	res := make(chan error, 1)
-	go func() { res <- Run(ctx, b, ex, f, core.NodeRef{}) }()
+	go func() { res <- Run(ctx, b, ex, f, core.NodeInstance{}) }()
 	cancel()
 	select {
 	case err := <-res:
@@ -147,18 +147,18 @@ func TestTimerFiresAndEmitFact(t *testing.T) {
 	m := &fakeMachine{}
 	b, ex, _, f := setup(m)
 	b.Facts = func(f core.Fact) { facts = append(facts, f) }
-	m.script = func(n int, body core.EventBody) []core.Action {
+	m.script = func(n int, body core.EventData) []core.Action {
 		switch n {
 		case 0:
-			return []core.Action{core.Emit{}, core.SetTimer{ID: 3, Gen: 4, After: core.Duration(time.Millisecond)}}
+			return []core.Action{core.RecordFact{}, core.SetTimer{ID: 3, Gen: 4, After: core.Duration(time.Millisecond)}}
 		default:
 			if tf, ok := body.(core.TimerFired); ok && tf.ID == 3 && tf.Gen == 4 {
-				return []core.Action{core.Exit{}}
+				return []core.Action{core.ShutdownDone{}}
 			}
 		}
 		return nil
 	}
-	if err := Run(t.Context(), b, ex, f, core.NodeRef{}); err != nil {
+	if err := Run(t.Context(), b, ex, f, core.NodeInstance{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(facts) != 1 {
@@ -169,7 +169,7 @@ func TestTimerFiresAndEmitFact(t *testing.T) {
 func TestDispatchTimersAndConns(t *testing.T) {
 	m := &fakeMachine{}
 	b, ex, cn, f := setup(m)
-	m.script = func(n int, _ core.EventBody) []core.Action {
+	m.script = func(n int, _ core.EventData) []core.Action {
 		if n != 0 {
 			return nil
 		}
@@ -180,11 +180,11 @@ func TestDispatchTimersAndConns(t *testing.T) {
 			core.CancelTimer{ID: 99}, // missing
 			core.CloseConn{Conn: 7, Abort: true},
 			core.ResumeReads{Conn: 7},
-			core.Emit{}, // Facts is nil
-			core.Exit{},
+			core.RecordFact{}, // Facts is nil
+			core.ShutdownDone{},
 		}
 	}
-	if err := Run(t.Context(), b, ex, f, core.NodeRef{}); err != nil {
+	if err := Run(t.Context(), b, ex, f, core.NodeInstance{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(cn.log, ","); got != "close,resume" {
@@ -192,13 +192,13 @@ func TestDispatchTimersAndConns(t *testing.T) {
 	}
 }
 
-func stops(m *fakeMachine) (int, core.Stop) {
+func stops(m *fakeMachine) (int, core.StopRequest) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var n int
-	var last core.Stop
+	var last core.StopRequest
 	for _, e := range m.events {
-		if s, ok := e.Body.(core.Stop); ok {
+		if s, ok := e.Body.(core.StopRequest); ok {
 			n++
 			last = s
 		}
@@ -208,9 +208,9 @@ func stops(m *fakeMachine) (int, core.Stop) {
 
 func TestShutdownStopThenExit(t *testing.T) {
 	m := &fakeMachine{}
-	m.script = func(_ int, body core.EventBody) []core.Action {
-		if _, ok := body.(core.Stop); ok {
-			return []core.Action{core.Exit{}}
+	m.script = func(_ int, body core.EventData) []core.Action {
+		if _, ok := body.(core.StopRequest); ok {
+			return []core.Action{core.ShutdownDone{}}
 		}
 		return nil
 	}
@@ -218,7 +218,7 @@ func TestShutdownStopThenExit(t *testing.T) {
 	sd := make(chan struct{})
 	b.Shutdown, b.StopGrace = sd, core.Duration(time.Second)
 	res := make(chan error, 1)
-	go func() { res <- Run(t.Context(), b, ex, f, core.NodeRef{}) }()
+	go func() { res <- Run(t.Context(), b, ex, f, core.NodeInstance{}) }()
 	close(sd)
 	if err := <-res; err != nil {
 		t.Fatal(err)
@@ -235,7 +235,7 @@ func TestShutdownIgnoredKilled(t *testing.T) {
 	sd := make(chan struct{})
 	b.Shutdown, b.StopGrace = sd, core.Duration(50*time.Millisecond)
 	res := make(chan error, 1)
-	go func() { res <- Run(t.Context(), b, ex, f, core.NodeRef{}) }()
+	go func() { res <- Run(t.Context(), b, ex, f, core.NodeInstance{}) }()
 	close(sd)
 	start := time.Now()
 	if err := <-res; !errors.Is(err, ErrKilled) {
@@ -260,7 +260,7 @@ func TestShutdownStopDeliveredOnce(t *testing.T) {
 	for i := range 5 {
 		b.Inbox.DeliverControl(core.TimerFired{ID: core.TimerID(i)})
 	}
-	err := Run(t.Context(), b, ex, f, core.NodeRef{})
+	err := Run(t.Context(), b, ex, f, core.NodeInstance{})
 	if !errors.Is(err, ErrKilled) {
 		t.Fatalf("err = %v", err)
 	}

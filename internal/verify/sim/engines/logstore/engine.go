@@ -1,5 +1,5 @@
 // Package logstore is the simulated Dynamo loglet (CP-DSM-3): an if-absent Put
-// store for LogAppend/LogRead/LogCheckTail/LogTrim, wrapped in the shared
+// store for LogAppend/LogRead/LogGetEnd/LogDeleteOld, wrapped in the shared
 // fakeio fault/timing core. Fault coins and delays are drawn at issue time
 // (decision 14). Every live ReqID gets exactly one completion; a lost answer
 // surfaces as ErrTimeout+MaybeApplied.
@@ -63,17 +63,17 @@ func New(f sim.LogStoreFaults) *Engine {
 	return e
 }
 
-func (e *Engine) specAndTruth(a core.IOAction) core.Completion {
+func (e *Engine) specAndTruth(a core.IOCall) core.IOResult {
 	c := e.spec.exec(a)
 	switch c := c.(type) {
 	case core.LogAppendDone:
 		if c.Err == core.OK && c.Outcome == core.Applied && !c.Taken {
 			e.advanceRef()
 		}
-	case core.LogTrimDone:
+	case core.LogDeleteOldDone:
 		if c.Err == core.OK && c.Outcome == core.Applied {
-			through := a.(core.LogTrim).Through
-			// LogTrim drops durable slots only. The idempotency window is cut on
+			through := a.(core.LogDeleteOld).Through
+			// LogDeleteOld drops durable slots only. The idempotency window is cut on
 			// apply stride (decision 48), same as controlplane/machine.
 			if e.applied <= through {
 				e.applied = through + 1
@@ -117,50 +117,50 @@ func (e *Engine) stateHash() uint64 {
 	return e.spec.stateHash() ^ e.ref.StateHash() ^ e.gen
 }
 
-func mutating(a core.IOAction) bool {
+func mutating(a core.IOCall) bool {
 	switch a.(type) {
-	case core.LogAppend, core.LogTrim:
+	case core.LogAppend, core.LogDeleteOld:
 		return true
 	}
 	return false
 }
 
-func fail(a core.IOAction, err core.ErrCode, o core.Outcome) core.Completion {
+func fail(a core.IOCall, err core.ErrCode, o core.Outcome) core.IOResult {
 	switch a := a.(type) {
 	case core.LogAppend:
 		return core.LogAppendDone{Req: a.Req, Slot: a.Slot, Err: err, Outcome: o}
 	case core.LogRead:
 		return core.LogReadDone{Req: a.Req, Err: err, Outcome: o}
-	case core.LogCheckTail:
-		return core.LogCheckTailDone{Req: a.Req, Err: err, Outcome: o}
-	case core.LogTrim:
-		return core.LogTrimDone{Req: a.Req, Err: err, Outcome: o}
+	case core.LogGetEnd:
+		return core.LogGetEndDone{Req: a.Req, Err: err, Outcome: o}
+	case core.LogDeleteOld:
+		return core.LogDeleteOldDone{Req: a.Req, Err: err, Outcome: o}
 	}
 	panic("logstore: not a log action")
 }
 
-func changed(c core.Completion) bool {
+func changed(c core.IOResult) bool {
 	switch c := c.(type) {
 	case core.LogAppendDone:
 		return c.Outcome == core.Applied && !c.Taken
-	case core.LogTrimDone:
+	case core.LogDeleteOldDone:
 		return c.Outcome == core.Applied
 	}
 	return false
 }
 
-// Handles reports whether a is a log IOAction.
+// Handles reports whether a is a log IOCall.
 func (e *Engine) Handles(a core.Action) bool {
 	switch a.(type) {
-	case core.LogAppend, core.LogRead, core.LogCheckTail, core.LogTrim:
+	case core.LogAppend, core.LogRead, core.LogGetEnd, core.LogDeleteOld:
 		return true
 	}
 	return false
 }
 
-// Execute starts a; a must be a log IOAction (Handles guarantees it).
-func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeRef, a core.Action) {
-	e.Core.Execute(ctx, from, a.(core.IOAction))
+// Execute starts a; a must be a log IOCall (Handles guarantees it).
+func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.Action) {
+	e.Core.Execute(ctx, from, a.(core.IOCall))
 }
 
 // Entry returns a copy of the bytes at slot, or false when empty or tombstoned.
@@ -179,11 +179,11 @@ func (e *Engine) CreateTopic(name string, partitions int32) core.ErrCode {
 
 // Committed implements sim.CPTruth.
 func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
-	d, err := e.ref.Lookup(core.Lookup{TP: tp})
+	d, err := e.ref.Lookup(core.FindSegments{TP: tp})
 	if err != nil || d.Err != core.OK {
 		return nil
 	}
-	return slices.Clone(core.RespAs[core.LookupResp](d).Ranges)
+	return slices.Clone(core.RespAs[core.FindSegmentsResp](d).Ranges)
 }
 
 // HighWatermark implements sim.CPTruth.

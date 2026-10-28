@@ -23,10 +23,10 @@ func (e apiError) ErrorFault() smithy.ErrorFault { return smithy.FaultServer }
 func TestClassify(t *testing.T) {
 	dial := &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}
 	reset := &net.OpError{Op: "read", Err: syscall.ECONNRESET}
-	put, get, del, list := core.ObjPut{}, core.ObjGet{}, core.ObjDelete{}, core.ObjList{}
+	put, get, del, list := core.ObjectPut{}, core.ObjectGet{}, core.ObjectDelete{}, core.ObjectList{}
 	for _, c := range []struct {
 		name string
-		a    core.IOAction
+		a    core.IOCall
 		err  error
 		code core.ErrCode
 		out  core.Outcome

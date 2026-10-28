@@ -28,7 +28,7 @@ func TestIncrementalStateHashMatchesFull(t *testing.T) {
 			case 0, 1:
 				put(s, fmt.Sprintf("seg/%d", r.n(40)), strconv.Itoa(r.n(1000)))
 			case 2:
-				s.Exec(core.ObjDelete{Req: 3, Key: fmt.Sprintf("seg/%d", r.n(40))})
+				s.Exec(core.ObjectDelete{Req: 3, Key: fmt.Sprintf("seg/%d", r.n(40))})
 			default:
 				commit(c, fmt.Sprintf("k/%d", r.n(40)), pb("t", int32(r.n(3)), int64(1+r.n(5))))
 			}

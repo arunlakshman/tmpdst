@@ -14,24 +14,24 @@ import (
 const groupMagic byte = 0xC5
 
 // ClientOp is one client command for the commit queue. Prod injects via
-// controlplane/server; sim delivers core.CPOffer which becomes Offer here.
+// controlplane/server; sim delivers core.ControlPlaneDeliver which becomes Offer here.
 type ClientOp struct {
 	Req  core.ReqID
-	Cmd  applier.Entry // ID is assigned when the group is built
-	From core.NodeRef  // broker; empty skips CPReply (unit tests)
+	Cmd  applier.Entry     // ID is assigned when the group is built
+	From core.NodeInstance // broker; empty skips ControlPlaneReply (unit tests)
 }
 
 // Answer is the apply-time result for one ClientOp.Req. TakeAnswers drains them.
 type Answer struct {
 	Req  core.ReqID
-	From core.NodeRef
-	Done core.CPDone
+	From core.NodeInstance
+	Done core.ControlPlaneDone
 }
 
 // pendingCmd is a queued or in-flight client command.
 type pendingCmd struct {
 	req  core.ReqID
-	from core.NodeRef // broker; namespaces Req across brokers
+	from core.NodeInstance // broker; namespaces Req across brokers
 	cmd  applier.Entry
 }
 
@@ -59,7 +59,7 @@ func (m *Machine) Offer(op ClientOp) []core.Action {
 	if m.cfg.K <= 0 || !m.canCommit() {
 		m.answers = append(m.answers, Answer{
 			Req: op.Req, From: op.From,
-			Done: core.CPDone{Req: op.Req, Err: core.ErrUnavailable},
+			Done: core.ControlPlaneDone{Req: op.Req, Err: core.ErrUnavailable},
 		})
 		return nil
 	}
@@ -77,7 +77,7 @@ func (m *Machine) Offer(op ClientOp) []core.Action {
 	if len(m.queue) >= m.cfg.queueMax() {
 		m.answers = append(m.answers, Answer{
 			Req: op.Req, From: op.From,
-			Done: core.CPDone{Req: op.Req, Err: core.ErrUnavailable},
+			Done: core.ControlPlaneDone{Req: op.Req, Err: core.ErrUnavailable},
 		})
 		return nil
 	}
@@ -173,7 +173,7 @@ func (m *Machine) emitCommitGroup() []core.Action {
 	data := wrap(m.cfg.Rank, m.cfg.writer(), inner)
 	slot := m.alloc()
 	m.env.Always(slot >= m.trimFloor, "logcp-sim: a Put never wins a slot below the trim floor",
-		core.Detail{Key: "slot", Value: slot})
+		core.ContextPair{Key: "slot", Value: slot})
 	m.nextReq++
 	req := m.nextReq
 	m.flights[req] = &flight{req: req, slot: slot, id: id, data: data, cmds: cmds}
@@ -348,7 +348,7 @@ func (m *Machine) applySlot(slot core.LogSlot, data []byte) error {
 				}
 			}
 		}
-		dones := make([]core.CPDone, len(cmds))
+		dones := make([]core.ControlPlaneDone, len(cmds))
 		for i, c := range cmds {
 			dones[i] = m.fold.Apply(int64(slot), c)
 		}
@@ -362,7 +362,7 @@ func (m *Machine) applySlot(slot core.LogSlot, data []byte) error {
 	}
 	// Single-entry catch-up / hole-fill: deliver only if we were waiting on it.
 	if e, err := applier.Decode(payload); err == nil {
-		m.deliver(e.ID, []core.CPDone{d})
+		m.deliver(e.ID, []core.ControlPlaneDone{d})
 	}
 	m.afterApply(slot)
 	return nil
@@ -379,7 +379,7 @@ func (m *Machine) afterApply(slot core.LogSlot) {
 		// Mutant: forget by this replica's applied clock, not log stride.
 		_, _ = m.fold.Trim(int64(slot) - window + 1)
 		m.env.Always(false, "logcp-sim: a replica's state equals the replay of the log at its slot",
-			core.Detail{Key: "window", Value: window})
+			core.ContextPair{Key: "window", Value: window})
 		return
 	}
 	if window > 0 && int64(slot)%stride == 0 && int64(slot) >= window {
@@ -387,14 +387,14 @@ func (m *Machine) afterApply(slot core.LogSlot) {
 	}
 }
 
-func (m *Machine) deliver(id string, dones []core.CPDone) {
+func (m *Machine) deliver(id string, dones []core.ControlPlaneDone) {
 	ps, ok := m.waiters[id]
 	if !ok {
 		return
 	}
 	delete(m.waiters, id)
 	for i, p := range ps {
-		d := core.CPDone{Req: p.req, Err: core.ErrInvalid}
+		d := core.ControlPlaneDone{Req: p.req, Err: core.ErrInvalid}
 		if i < len(dones) {
 			d = dones[i]
 			d.Req = p.req

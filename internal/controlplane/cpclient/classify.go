@@ -13,7 +13,7 @@ import (
 	"manifester/internal/sys"
 )
 
-// Classifier is the sys.Classifier for CPCall (lesson 1). A mutating op
+// Classifier is the sys.Classifier for ControlPlaneCall (lesson 1). A mutating op
 // (CommitSegment) whose request may have reached the server and whose reply
 // is lost or unusable is MaybeApplied; only failures that prove nothing was
 // sent (dial, Unavailable) are NotApplied. Reads are always NotApplied.
@@ -23,26 +23,26 @@ type Classifier struct{}
 
 var _ sys.Classifier = Classifier{}
 
-func mutating(a core.IOAction) bool {
-	call, ok := a.(core.CPCall)
+func mutating(a core.IOCall) bool {
+	call, ok := a.(core.ControlPlaneCall)
 	if !ok {
 		return true
 	}
 	switch call.Op.(type) {
-	case core.Lookup, core.DescribeTopics:
+	case core.FindSegments, core.DescribeTopics:
 		return false
 	}
 	return true
 }
 
 // Classify maps a failed cp call to its error code and outcome.
-func (Classifier) Classify(a core.IOAction, err error) (core.ErrCode, core.Outcome) {
+func (Classifier) Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
 	code, out := classify(a, err)
 	slog.Debug("cp call failed", "action", a, "err", err, "code", code, "outcome", out)
 	return code, out
 }
 
-func classify(a core.IOAction, err error) (core.ErrCode, core.Outcome) {
+func classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
 	maybe := core.NotApplied
 	if mutating(a) {
 		maybe = core.MaybeApplied

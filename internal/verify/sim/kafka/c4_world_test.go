@@ -22,23 +22,25 @@ import (
 // mutate the finished world (c4_faults_test.go).
 
 // failures counts violated Always props (the fake core.Assertions).
-type failures map[core.Prop]int
+type failures map[core.PropertyID]int
 
-func (f failures) Always(c bool, p core.Prop, _ ...core.Detail) {
+func (f failures) Always(c bool, p core.PropertyID, _ ...core.ContextPair) {
 	if !c {
 		f[p]++
 	}
 }
-func (f failures) AlwaysOrUnreachable(c bool, p core.Prop, d ...core.Detail) { f.Always(c, p, d...) }
-func (f failures) Sometimes(bool, core.Prop)                                 {}
-func (f failures) Reachable(core.Prop)                                       {}
-func (f failures) Unreachable(p core.Prop, _ ...core.Detail)                 { f[p]++ }
+func (f failures) AlwaysOrUnreachable(c bool, p core.PropertyID, d ...core.ContextPair) {
+	f.Always(c, p, d...)
+}
+func (f failures) Sometimes(bool, core.PropertyID)                      {}
+func (f failures) Reachable(core.PropertyID)                            {}
+func (f failures) Unreachable(p core.PropertyID, _ ...core.ContextPair) { f[p]++ }
 
 type stats struct{ retries, replays, indetLand, indetNo, rejected, multi int }
 
 type producer struct{ nb int }
 
-type broker struct{ ref core.NodeRef }
+type broker struct{ ref core.NodeInstance }
 
 // world is the fake sim.View plus the spec-side truth it was built from.
 type world struct {
@@ -67,22 +69,24 @@ type world struct {
 	invs []sim.Invariant // live observers, nil in one-shot mode
 }
 
-func (w *world) Step() uint64             { return uint64(len(w.raw)) }
-func (w *world) Now() sim.Time            { return w.now }
-func (w *world) Phase() sim.Phase         { return sim.PhaseSettling }
-func (w *world) Alive(core.NodeRef) bool  { return true }
-func (w *world) Timeline() sim.Timeline   { return w.tl }
-func (w *world) History() sim.History     { return (*hist)(w) }
-func (w *world) Objects() sim.ObjectTruth { return (*objView)(w) }
-func (w *world) CP() sim.CPTruth          { return (*cpView)(w) }
-func (w *world) Assert() core.Assertions  { return w.as }
-func (w *world) touch()                   { w.gen++ }
+func (w *world) Step() uint64                 { return uint64(len(w.raw)) }
+func (w *world) Now() sim.Time                { return w.now }
+func (w *world) Phase() sim.Phase             { return sim.PhaseSettling }
+func (w *world) Alive(core.NodeInstance) bool { return true }
+func (w *world) Timeline() sim.Timeline       { return w.tl }
+func (w *world) History() sim.History         { return (*hist)(w) }
+func (w *world) Objects() sim.ObjectTruth     { return (*objView)(w) }
+func (w *world) CP() sim.CPTruth              { return (*cpView)(w) }
+func (w *world) Assert() core.Assertions      { return w.as }
+func (w *world) touch()                       { w.gen++ }
 
 type hist world
 
-func (h *hist) Invoke(core.NodeRef, core.ID, core.ID, any) { panic("C4: history is built directly") }
-func (h *hist) Return(core.ID, any, sim.OpOutcome) bool    { panic("C4: history is built directly") }
-func (h *hist) Ops() []sim.HistOp                          { return h.ops }
+func (h *hist) Invoke(core.NodeInstance, core.ID, core.ID, any) {
+	panic("C4: history is built directly")
+}
+func (h *hist) Return(core.ID, any, sim.OpOutcome) bool { panic("C4: history is built directly") }
+func (h *hist) Ops() []sim.HistOp                       { return h.ops }
 
 type objView world
 
@@ -110,7 +114,7 @@ func (w *world) rebuildTL() {
 	}
 }
 
-func (w *world) emit(src core.NodeRef, f core.Fact) {
+func (w *world) emit(src core.NodeInstance, f core.Fact) {
 	tf := sim.TimedFact{Seq: uint64(len(w.raw) + 1), At: w.now, Source: src, Fact: f}
 	w.raw = append(w.raw, tf)
 	w.tl.Append(src, w.now, f)
@@ -125,7 +129,7 @@ func (w *world) step() {
 	}
 }
 
-func nodeRef(s string) core.NodeRef { return core.NodeRef{Node: core.NodeID(s)} }
+func nodeRef(s string) core.NodeInstance { return core.NodeInstance{Node: core.NodeID(s)} }
 
 func newWorld(seed uint64, live bool) *world {
 	r := rand.New(rand.NewPCG(seed, 0xc4)) //nolint:gosec // G404: deterministic test/sim PRNG
@@ -247,14 +251,14 @@ func (w *world) commit(items []*item, replay bool) []core.BatchRange {
 	}
 	w.objs[key] = obj
 	op := core.CommitSegment{SegmentKey: key, Batches: pbs}
-	d := w.cp.Exec(core.CPCall{Op: op}).(core.CPDone)
+	d := w.cp.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
 	if d.Err != core.OK {
 		panic(fmt.Sprintf("spec CP refused a commit: %v", d.Err))
 	}
 	as := d.Resp.(core.CommitSegmentResp).Assigned
 	if replay {
 		w.st.replays++
-		d2 := w.cp.Exec(core.CPCall{Op: op}).(core.CPDone)
+		d2 := w.cp.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
 		if d2.Err != core.OK || !slices.Equal(d2.Resp.(core.CommitSegmentResp).Assigned, as) {
 			panic("spec CP: a replayed commit did not return the original answer")
 		}
@@ -272,7 +276,7 @@ func (w *world) commit(items []*item, replay bool) []core.BatchRange {
 		panic(fmt.Sprintf("spec CP assigned %d ranges for %d batches", len(as), len(items)))
 	}
 	for tp := range touched { // map order is irrelevant: independent entries
-		lk := w.cp.Exec(core.CPCall{Op: core.Lookup{TP: tp}}).(core.CPDone).Resp.(core.LookupResp)
+		lk := w.cp.Exec(core.ControlPlaneCall{Op: core.FindSegments{TP: tp}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
 		w.ranges[tp] = lk.Ranges
 		if lk.End != w.parts[tp].HighWatermark() {
 			panic("Partition end != CP end")

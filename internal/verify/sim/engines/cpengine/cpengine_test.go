@@ -19,13 +19,13 @@ func base() sim.ControlPlaneFaults {
 
 var tp = core.TP("t", 0)
 
-func setup(f sim.ControlPlaneFaults, seed uint64) (*cpengine.Engine, *enginetest.Ctx, core.NodeRef) {
+func setup(f sim.ControlPlaneFaults, seed uint64) (*cpengine.Engine, *enginetest.Ctx, core.NodeInstance) {
 	e := cpengine.New(f)
 	return e, enginetest.New(e, seed), enginetest.Ref("a")
 }
 
-func call(e *cpengine.Engine, c *enginetest.Ctx, from core.NodeRef, req core.ReqID, op core.CPOp) {
-	e.Execute(c, from, core.CPCall{Req: req, Op: op})
+func call(e *cpengine.Engine, c *enginetest.Ctx, from core.NodeInstance, req core.ReqID, op core.ControlPlaneOperation) {
+	e.Execute(c, from, core.ControlPlaneCall{Req: req, Op: op})
 }
 
 func commit(key string) core.CommitSegment {
@@ -33,11 +33,13 @@ func commit(key string) core.CommitSegment {
 		Batches: []core.PendingBatch{{TP: tp, Records: 5, Loc: core.SegmentRef{Key: key, Len: 10}}}}
 }
 
-func last(c *enginetest.Ctx) core.CPDone { return c.Delivered[len(c.Delivered)-1].Body.(core.CPDone) }
+func last(c *enginetest.Ctx) core.ControlPlaneDone {
+	return c.Delivered[len(c.Delivered)-1].Body.(core.ControlPlaneDone)
+}
 
 func TestNormalAndTruthful(t *testing.T) {
 	e, c, a := setup(base(), 1)
-	if !e.Handles(core.CPCall{}) || e.Handles(core.ObjPut{}) {
+	if !e.Handles(core.ControlPlaneCall{}) || e.Handles(core.ObjectPut{}) {
 		t.Fatal("Handles")
 	}
 	call(e, c, a, 3, commit("s1"))
@@ -52,12 +54,12 @@ func TestNormalAndTruthful(t *testing.T) {
 	different := commit("s1")
 	different.Batches[0].Records = 6
 	call(e, c, a, 4, different)
-	call(e, c, a, 5, core.Lookup{TP: tp, From: -1})
+	call(e, c, a, 5, core.FindSegments{TP: tp, From: -1})
 	c.Run()
-	if d := c.Find(4).(core.CPDone); d.Err != core.ErrConflict {
+	if d := c.Find(4).(core.ControlPlaneDone); d.Err != core.ErrConflict {
 		t.Fatal("same key, different request:", d)
 	}
-	if d := c.Find(5).(core.CPDone); d.Err != core.ErrInvalid {
+	if d := c.Find(5).(core.ControlPlaneDone); d.Err != core.ErrInvalid {
 		t.Fatal(d)
 	}
 }
@@ -145,7 +147,7 @@ func TestIdempotentRetryAfterLostResponse(t *testing.T) {
 	c.Run()
 	call(e, c, a, 4, commit("s1"))
 	c.Run()
-	d := c.Delivered[len(c.Delivered)-3].Body.(core.CPDone)
+	d := c.Delivered[len(c.Delivered)-3].Body.(core.ControlPlaneDone)
 	r := last(c)
 	if d.Err != core.OK || r.Err != core.OK {
 		t.Fatal(d, r)
@@ -165,7 +167,7 @@ func TestLostCommitThenRetryInSim(t *testing.T) {
 	e2, c2, a2 := setup(f, 1)
 	call(e2, c2, a2, 2, commit("s")) // lost but applied
 	c2.Run()
-	if d := c2.Delivered[0].Body.(core.CPDone); d.Err != core.ErrTimeout || d.Outcome != core.MaybeApplied {
+	if d := c2.Delivered[0].Body.(core.ControlPlaneDone); d.Err != core.ErrTimeout || d.Outcome != core.MaybeApplied {
 		t.Fatal(d)
 	}
 	want := e2.Committed(tp)
@@ -197,10 +199,10 @@ func TestRecoveryStopsFaults(t *testing.T) {
 	e.EnterRecovery()
 	call(e, c, a, 2, commit("s"))
 	c.Run()
-	if d := c.Find(1).(core.CPDone); d.Err != core.ErrUnavailable {
+	if d := c.Find(1).(core.ControlPlaneDone); d.Err != core.ErrUnavailable {
 		t.Fatal("in-flight plan must stand", d)
 	}
-	if d := c.Find(2).(core.CPDone); d.Err != core.OK || d.Resp.(core.CommitSegmentResp).Assigned[0].Base != 0 {
+	if d := c.Find(2).(core.ControlPlaneDone); d.Err != core.OK || d.Resp.(core.CommitSegmentResp).Assigned[0].Base != 0 {
 		t.Fatal(d)
 	}
 }
@@ -217,7 +219,7 @@ func TestDeterminism(t *testing.T) {
 			case 0:
 				call(e, c, a, core.ReqID(i), commit(string(rune('a'+i%7))))
 			default:
-				call(e, c, a, core.ReqID(i), core.Lookup{TP: tp})
+				call(e, c, a, core.ReqID(i), core.FindSegments{TP: tp})
 			}
 		}
 		mid := e.StateHash()
@@ -262,7 +264,7 @@ func TestCommitSizeLimit(t *testing.T) {
 	call(e, c, a, 3, many("many", 400))
 	c.Run()
 	for _, req := range []core.ReqID{2, 3} {
-		if d := c.Find(req).(core.CPDone); d.Err != core.OK {
+		if d := c.Find(req).(core.ControlPlaneDone); d.Err != core.OK {
 			t.Fatal(req, d)
 		}
 	}

@@ -21,8 +21,8 @@ func faults() sim.ControlPlaneFaults {
 
 func TestBridgeHandlesAndDefaults(t *testing.T) {
 	e := logengine.New(faults())
-	if e.Name() != "logengine" || !e.Handles(core.CPCall{}) || !e.Handles(core.CPReply{}) {
-		t.Fatal(e.Name(), e.Handles(core.CPCall{}))
+	if e.Name() != "logengine" || !e.Handles(core.ControlPlaneCall{}) || !e.Handles(core.ControlPlaneReply{}) {
+		t.Fatal(e.Name(), e.Handles(core.ControlPlaneCall{}))
 	}
 	if e.Handles(core.LogAppend{}) {
 		t.Fatal("must not handle log IO")
@@ -35,7 +35,7 @@ func TestBridgeHandlesAndDefaults(t *testing.T) {
 		t.Fatal(e.Topics())
 	}
 	e.EnterRecovery()
-	e.OnCrash(nil, core.NodeRef{})
+	e.OnCrash(nil, core.NodeInstance{})
 }
 
 func TestBridgeUnavailableWithoutCP(t *testing.T) {
@@ -46,12 +46,12 @@ func TestBridgeUnavailableWithoutCP(t *testing.T) {
 	c.Crash("cp-0")
 	c.Crash("cp-1")
 	broker := enginetest.Ref("broker-0")
-	e.Execute(c, broker, core.CPCall{Req: 1, Op: core.Lookup{TP: core.TP("t", 0)}})
+	e.Execute(c, broker, core.ControlPlaneCall{Req: 1, Op: core.FindSegments{TP: core.TP("t", 0)}})
 	c.Run()
 	if len(c.Delivered) != 1 {
 		t.Fatalf("got %d %#v", len(c.Delivered), c.Delivered)
 	}
-	d := c.Delivered[0].Body.(core.CPDone)
+	d := c.Delivered[0].Body.(core.ControlPlaneDone)
 	if d.Err != core.ErrUnavailable {
 		t.Fatal(d)
 	}
@@ -64,12 +64,12 @@ func TestBridgeOfferAndReply(t *testing.T) {
 	e := logengine.New(f)
 	c := enginetest.New(e, 2)
 	broker := enginetest.Ref("broker-0")
-	e.Execute(c, broker, core.CPCall{Req: 7, Op: core.DescribeTopics{}})
+	e.Execute(c, broker, core.ControlPlaneCall{Req: 7, Op: core.DescribeTopics{}})
 	c.RunUntil(sim.Time(10 * ms))
-	var offer core.CPOffer
+	var offer core.ControlPlaneDeliver
 	found := false
 	for _, d := range c.Delivered {
-		if o, ok := d.Body.(core.CPOffer); ok {
+		if o, ok := d.Body.(core.ControlPlaneDeliver); ok {
 			offer, found = o, true
 			break
 		}
@@ -78,13 +78,13 @@ func TestBridgeOfferAndReply(t *testing.T) {
 		t.Fatalf("%#v", c.Delivered)
 	}
 	c.Delivered = nil
-	e.Execute(c, enginetest.Ref("cp-0"), core.CPReply{
-		To: broker, Done: core.CPDone{Req: 7, Err: core.OK, Outcome: core.Applied},
+	e.Execute(c, enginetest.Ref("cp-0"), core.ControlPlaneReply{
+		To: broker, Done: core.ControlPlaneDone{Req: 7, Err: core.OK, Outcome: core.Applied},
 	})
 	c.RunUntil(sim.Time(20 * ms))
 	ok := false
 	for _, d := range c.Delivered {
-		if done, is := d.Body.(core.CPDone); is && done.Req == 7 && done.Err == core.OK {
+		if done, is := d.Body.(core.ControlPlaneDone); is && done.Req == 7 && done.Err == core.OK {
 			ok = true
 		}
 	}
@@ -99,9 +99,9 @@ func TestBridgeFaultCoins(t *testing.T) {
 	e := logengine.New(f)
 	c := enginetest.New(e, 3)
 	broker := enginetest.Ref("b")
-	e.Execute(c, broker, core.CPCall{Req: 1, Op: core.Lookup{}})
+	e.Execute(c, broker, core.ControlPlaneCall{Req: 1, Op: core.FindSegments{}})
 	c.Run()
-	d := c.Delivered[0].Body.(core.CPDone)
+	d := c.Delivered[0].Body.(core.ControlPlaneDone)
 	if d.Err != core.ErrUnavailable || d.Outcome != core.NotApplied {
 		t.Fatal(d)
 	}
@@ -118,16 +118,16 @@ func TestBridgeLostReplyStillTimesOut(t *testing.T) {
 	e := logengine.New(f)
 	c := enginetest.New(e, 5)
 	broker := enginetest.Ref("broker-0")
-	e.Execute(c, broker, core.CPCall{Req: 9, Op: core.Lookup{}})
+	e.Execute(c, broker, core.ControlPlaneCall{Req: 9, Op: core.FindSegments{}})
 	c.RunUntil(sim.Time(10 * ms))
 	c.Delivered = nil
-	e.Execute(c, enginetest.Ref("cp-0"), core.CPReply{
-		To: broker, Done: core.CPDone{Req: 9, Err: core.OK, Outcome: core.Applied},
+	e.Execute(c, enginetest.Ref("cp-0"), core.ControlPlaneReply{
+		To: broker, Done: core.ControlPlaneDone{Req: 9, Err: core.OK, Outcome: core.Applied},
 	})
 	c.RunUntil(sim.Time(20 * ms))
-	var got *core.CPDone
+	var got *core.ControlPlaneDone
 	for _, d := range c.Delivered {
-		if done, ok := d.Body.(core.CPDone); ok && done.Req == 9 {
+		if done, ok := d.Body.(core.ControlPlaneDone); ok && done.Req == 9 {
 			got = &done
 		}
 	}
@@ -143,16 +143,16 @@ func TestBridgeFailoverOnUnavailable(t *testing.T) {
 	e := logengine.New(f)
 	c := enginetest.New(e, 4)
 	broker := enginetest.Ref("broker-1")
-	e.Execute(c, broker, core.CPCall{Req: 3, Op: core.Lookup{}})
+	e.Execute(c, broker, core.ControlPlaneCall{Req: 3, Op: core.FindSegments{}})
 	c.RunUntil(sim.Time(10 * ms))
 	c.Delivered = nil
-	e.Execute(c, enginetest.Ref("cp-0"), core.CPReply{
-		To: broker, Done: core.CPDone{Req: 3, Err: core.ErrUnavailable},
+	e.Execute(c, enginetest.Ref("cp-0"), core.ControlPlaneReply{
+		To: broker, Done: core.ControlPlaneDone{Req: 3, Err: core.ErrUnavailable},
 	})
 	c.RunUntil(sim.Time(20 * ms))
 	found := false
 	for _, d := range c.Delivered {
-		if o, ok := d.Body.(core.CPOffer); ok && o.Req == 3 {
+		if o, ok := d.Body.(core.ControlPlaneDeliver); ok && o.Req == 3 {
 			found = true
 			if d.To.Node != "cp-1" {
 				t.Fatalf("failover to %s", d.To.Node)

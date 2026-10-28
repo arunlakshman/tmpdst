@@ -9,7 +9,7 @@ import (
 )
 
 // Classify maps an executor error for a into ErrCode and Outcome.
-func Classify(a core.IOAction, err error) (core.ErrCode, core.Outcome) {
+func Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
 	if err == nil {
 		return core.OK, core.Applied
 	}
@@ -33,9 +33,9 @@ func Classify(a core.IOAction, err error) (core.ErrCode, core.Outcome) {
 	return core.ErrIO, maybe
 }
 
-func mutating(a core.IOAction) bool {
+func mutating(a core.IOCall) bool {
 	switch a.(type) {
-	case core.LogAppend, core.LogTrim, core.ObjPut, core.ObjDelete:
+	case core.LogAppend, core.LogDeleteOld, core.ObjectPut, core.ObjectDelete:
 		return true
 	}
 	return false

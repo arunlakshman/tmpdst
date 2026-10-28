@@ -11,8 +11,8 @@ import (
 // Operation i carries ReqID i+1. The mix includes the empty key, reads past
 // the end of an object, Len <= 0 (read to the end), and prefixes with and
 // without a slash, because each of these is a place where stores differ.
-func ObjectOps(p Profile) func(r *veritastest.Rand, i int) core.IOAction {
-	return func(r *veritastest.Rand, i int) core.IOAction {
+func ObjectOps(p Profile) func(r *veritastest.Rand, i int) core.IOCall {
+	return func(r *veritastest.Rand, i int) core.IOCall {
 		req := core.ReqID(i + 1)
 		key := pick(r, p.ObjectKeys)
 		if percent(r, p.EmptyKeyPercent) {
@@ -20,14 +20,14 @@ func ObjectOps(p Profile) func(r *veritastest.Rand, i int) core.IOAction {
 		}
 		switch pickWeighted(r, p.PutWeight, p.GetWeight, p.DeleteWeight, p.ListWeight) {
 		case 0:
-			return core.ObjPut{Req: req, Key: key, Data: randomData(r, p.MaxDataLen)}
+			return core.ObjectPut{Req: req, Key: key, Data: randomData(r, p.MaxDataLen)}
 		case 1:
 			ref := core.SegmentRef{Key: key, Off: int64(r.Intn(p.RangeSpan) - 1), Len: int64(r.Intn(p.RangeSpan) - 1)}
-			return core.ObjGet{Req: req, Ref: ref}
+			return core.ObjectGet{Req: req, Ref: ref}
 		case 2:
-			return core.ObjDelete{Req: req, Key: key}
+			return core.ObjectDelete{Req: req, Key: key}
 		}
-		return core.ObjList{Req: req, Prefix: pick(r, p.ObjectPrefixes)}
+		return core.ObjectList{Req: req, Prefix: pick(r, p.ObjectPrefixes)}
 	}
 }
 
@@ -44,59 +44,59 @@ func randomData(r *veritastest.Rand, maxLen int) []byte {
 // ShrinkObjectOp returns simpler versions of op, simplest first: less data, a
 // range that starts at 0 and reads to the end, and a shorter key or prefix.
 // It never returns op itself, so a caller that keeps shrinking always ends.
-func ShrinkObjectOp(op core.IOAction) []core.IOAction {
+func ShrinkObjectOp(op core.IOCall) []core.IOCall {
 	switch op := op.(type) {
-	case core.ObjPut:
+	case core.ObjectPut:
 		return shrinkPut(op)
-	case core.ObjGet:
+	case core.ObjectGet:
 		return shrinkGet(op)
-	case core.ObjDelete:
-		var out []core.IOAction
+	case core.ObjectDelete:
+		var out []core.IOCall
 		for _, k := range shorterStrings(op.Key) {
-			out = append(out, core.ObjDelete{Req: op.Req, Key: k})
+			out = append(out, core.ObjectDelete{Req: op.Req, Key: k})
 		}
 		return out
-	case core.ObjList:
-		var out []core.IOAction
+	case core.ObjectList:
+		var out []core.IOCall
 		for _, p := range shorterStrings(op.Prefix) {
-			out = append(out, core.ObjList{Req: op.Req, Prefix: p})
+			out = append(out, core.ObjectList{Req: op.Req, Prefix: p})
 		}
 		return out
 	}
 	return nil
 }
 
-func shrinkPut(op core.ObjPut) []core.IOAction {
-	var out []core.IOAction
+func shrinkPut(op core.ObjectPut) []core.IOCall {
+	var out []core.IOCall
 	if len(op.Data) > 0 {
-		out = append(out, core.ObjPut{Req: op.Req, Key: op.Key, Data: nil})
+		out = append(out, core.ObjectPut{Req: op.Req, Key: op.Key, Data: nil})
 	}
 	if len(op.Data) > 1 {
-		out = append(out, core.ObjPut{Req: op.Req, Key: op.Key, Data: op.Data[:len(op.Data)/2]})
-		out = append(out, core.ObjPut{Req: op.Req, Key: op.Key, Data: op.Data[:len(op.Data)-1]})
+		out = append(out, core.ObjectPut{Req: op.Req, Key: op.Key, Data: op.Data[:len(op.Data)/2]})
+		out = append(out, core.ObjectPut{Req: op.Req, Key: op.Key, Data: op.Data[:len(op.Data)-1]})
 	}
 	for _, k := range shorterStrings(op.Key) {
-		out = append(out, core.ObjPut{Req: op.Req, Key: k, Data: op.Data})
+		out = append(out, core.ObjectPut{Req: op.Req, Key: k, Data: op.Data})
 	}
 	return out
 }
 
-func shrinkGet(op core.ObjGet) []core.IOAction {
-	var out []core.IOAction
+func shrinkGet(op core.ObjectGet) []core.IOCall {
+	var out []core.IOCall
 	if op.Ref.Len != 0 {
 		ref := op.Ref
 		ref.Len = 0
-		out = append(out, core.ObjGet{Req: op.Req, Ref: ref})
+		out = append(out, core.ObjectGet{Req: op.Req, Ref: ref})
 	}
 	if op.Ref.Off != 0 {
 		ref := op.Ref
 		ref.Off = 0
-		out = append(out, core.ObjGet{Req: op.Req, Ref: ref})
+		out = append(out, core.ObjectGet{Req: op.Req, Ref: ref})
 	}
 	for _, k := range shorterStrings(op.Ref.Key) {
 		ref := op.Ref
 		ref.Key = k
-		out = append(out, core.ObjGet{Req: op.Req, Ref: ref})
+		out = append(out, core.ObjectGet{Req: op.Req, Ref: ref})
 	}
 	return out
 }
@@ -117,16 +117,16 @@ func shorterStrings(s string) []string {
 
 // FormatObjectOp returns op as a Go expression that you can paste into a
 // regression test.
-func FormatObjectOp(op core.IOAction) string {
+func FormatObjectOp(op core.IOCall) string {
 	switch op := op.(type) {
-	case core.ObjPut:
-		return fmt.Sprintf("core.ObjPut{Req: %d, Key: %q%s}", op.Req, op.Key, formatDataField(op.Data))
-	case core.ObjGet:
-		return fmt.Sprintf("core.ObjGet{Req: %d, Ref: %s}", op.Req, formatRef(op.Ref))
-	case core.ObjDelete:
-		return fmt.Sprintf("core.ObjDelete{Req: %d, Key: %q}", op.Req, op.Key)
-	case core.ObjList:
-		return fmt.Sprintf("core.ObjList{Req: %d, Prefix: %q}", op.Req, op.Prefix)
+	case core.ObjectPut:
+		return fmt.Sprintf("core.ObjectPut{Req: %d, Key: %q%s}", op.Req, op.Key, formatDataField(op.Data))
+	case core.ObjectGet:
+		return fmt.Sprintf("core.ObjectGet{Req: %d, Ref: %s}", op.Req, formatRef(op.Ref))
+	case core.ObjectDelete:
+		return fmt.Sprintf("core.ObjectDelete{Req: %d, Key: %q}", op.Req, op.Key)
+	case core.ObjectList:
+		return fmt.Sprintf("core.ObjectList{Req: %d, Prefix: %q}", op.Req, op.Prefix)
 	}
 	return fmt.Sprintf("%#v", op)
 }

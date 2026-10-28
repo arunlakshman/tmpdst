@@ -130,8 +130,8 @@ func (s *sched) Cancel(id EntryID) {
 	}
 }
 
-func (s *sched) DropNode(ref core.NodeRef) int {
-	if ref == (core.NodeRef{}) {
+func (s *sched) DropNode(ref core.NodeInstance) int {
+	if ref == (core.NodeInstance{}) {
 		return 0
 	}
 	n := 0

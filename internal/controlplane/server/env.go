@@ -36,11 +36,11 @@ func (e *prodEnv) NewID() core.ID {
 	}
 	return id
 }
-func (prodEnv) Maybe(core.Site) bool                                { return false }
-func (prodEnv) MaybeP(core.Site, float64) bool                      { return false }
-func (prodEnv) Fault(core.Site, float64) bool                       { return false }
-func (prodEnv) Always(bool, core.Prop, ...core.Detail)              {}
-func (prodEnv) AlwaysOrUnreachable(bool, core.Prop, ...core.Detail) {}
-func (prodEnv) Sometimes(bool, core.Prop)                           {}
-func (prodEnv) Reachable(core.Prop)                                 {}
-func (prodEnv) Unreachable(core.Prop, ...core.Detail)               {}
+func (prodEnv) Maybe(core.FaultPointID) bool                                   { return false }
+func (prodEnv) MaybeP(core.FaultPointID, float64) bool                         { return false }
+func (prodEnv) Fault(core.FaultPointID, float64) bool                          { return false }
+func (prodEnv) Always(bool, core.PropertyID, ...core.ContextPair)              {}
+func (prodEnv) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
+func (prodEnv) Sometimes(bool, core.PropertyID)                                {}
+func (prodEnv) Reachable(core.PropertyID)                                      {}
+func (prodEnv) Unreachable(core.PropertyID, ...core.ContextPair)               {}

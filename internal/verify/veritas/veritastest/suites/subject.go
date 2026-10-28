@@ -17,7 +17,7 @@ import (
 // the same content. It returns ok = false when the subject has no spec hash,
 // for example real S3.
 type ObjectSubject interface {
-	Do(op core.IOAction) (observation.ObjectResult, error)
+	Do(op core.IOCall) (observation.ObjectResult, error)
 	StateHash() (hash uint64, ok bool)
 }
 
@@ -50,7 +50,7 @@ func NewSpecObjectSubject() ObjectSubject {
 	return &specObjectSubject{store: veritas.NewObjectStore()}
 }
 
-func (s *specObjectSubject) Do(op core.IOAction) (observation.ObjectResult, error) {
+func (s *specObjectSubject) Do(op core.IOCall) (observation.ObjectResult, error) {
 	return observation.FromObjectCompletion(s.store.Exec(op)), nil
 }
 
@@ -69,7 +69,7 @@ func (s *specControlPlaneSubject) Do(op generator.ControlPlaneOp) (observation.C
 		code := s.cp.CreateTopic(op.CreateTopic.Name, op.CreateTopic.Partitions)
 		return observation.ControlPlaneResult{Code: code}, nil
 	case op.Call != nil:
-		done, ok := s.cp.Exec(*op.Call).(core.CPDone)
+		done, ok := s.cp.Exec(*op.Call).(core.ControlPlaneDone)
 		if !ok {
 			return observation.ControlPlaneResult{}, errors.New("the spec control plane did not return a CPDone")
 		}

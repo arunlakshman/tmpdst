@@ -26,7 +26,7 @@ func newTestNet(t *testing.T) (*Net, *sys.Inbox) {
 }
 
 // next pops the next data event, waiting up to a second.
-func next(t *testing.T, in *sys.Inbox) core.EventBody {
+func next(t *testing.T, in *sys.Inbox) core.EventData {
 	t.Helper()
 	for end := time.Now().Add(time.Second); time.Now().Before(end); time.Sleep(time.Millisecond) {
 		if b, ok := in.Data().Pop(); ok {

@@ -5,31 +5,31 @@ package core
 type Event struct {
 	At   Time     // node-local monotonic now
 	Wall WallTime // UTC now
-	Body EventBody
+	Body EventData
 }
 
-// EventBody is a closed set of plain-data structs.
-type EventBody interface{ isEvent() }
+// EventData is a closed set of plain-data structs.
+type EventData interface{ isEvent() }
 
-// Completion is the EventBody that answers an IOAction, matched by ReqID. A
+// IOResult is the EventData that answers an IOCall, matched by ReqID. A
 // completion with an unknown, already-finished or wrong-kind ReqID is ignored:
 // no state change (StateHash is unchanged).
-type Completion interface {
-	EventBody
+type IOResult interface {
+	EventData
 	ReqID() ReqID
 }
 
 // ---- lifecycle ----
 
-// Started is the first event of every boot, and always the first Step of every
+// NodeStarted is the first event of every boot, and always the first Step of every
 // incarnation. The node rebuilds what it needs from the control plane and
 // object store; nothing in memory survived.
-type Started struct{ Self NodeRef }
+type NodeStarted struct{ Self NodeInstance }
 
-// Stop asks the node to shut down gracefully by Deadline (node-local time):
-// stop admitting, finish or hand off in-flight work, then emit Exit. If the
-// deadline passes first the runtime kills the node. Class: Control.
-type Stop struct{ Deadline Time }
+// StopRequest asks the node to shut down gracefully by Deadline (node-local time):
+// stop admitting, finish or hand off in-flight work, then emit ShutdownDone. If the
+// deadline passes first the runtime kills the node. InboxKind: Control.
+type StopRequest struct{ Deadline Time }
 
 // ---- network (inbound) ----
 
@@ -59,8 +59,8 @@ type SendDone struct {
 	Err  ErrCode
 }
 
-// DialDone completes a Dial. Conn is valid only when Err == OK.
-type DialDone struct {
+// ConnectDone completes a Connect. Conn is valid only when Err == OK.
+type ConnectDone struct {
 	Req  ReqID
 	Conn ConnID
 	Err  ErrCode
@@ -77,30 +77,30 @@ type TimerFired struct {
 
 // ---- object store completions ----
 
-// ObjPutDone reports that an object PUT finished.
-type ObjPutDone struct {
+// ObjectPutDone reports that an object PUT finished.
+type ObjectPutDone struct {
 	Req     ReqID
 	Key     string
 	Err     ErrCode
 	Outcome Outcome
 }
 
-// ObjGetDone reports that an object GET finished.
-type ObjGetDone struct {
+// ObjectGetDone reports that an object GET finished.
+type ObjectGetDone struct {
 	Req  ReqID
 	Data []byte
 	Err  ErrCode
 }
 
-// ObjDeleteDone reports that an object DELETE finished.
-type ObjDeleteDone struct {
+// ObjectDeleteDone reports that an object DELETE finished.
+type ObjectDeleteDone struct {
 	Req     ReqID
 	Err     ErrCode
 	Outcome Outcome
 }
 
-// ObjListDone reports that an object LIST finished.
-type ObjListDone struct {
+// ObjectListDone reports that an object LIST finished.
+type ObjectListDone struct {
 	Req  ReqID
 	Keys []string // sorted
 	Err  ErrCode
@@ -108,23 +108,23 @@ type ObjListDone struct {
 
 // ---- control plane completions ----
 
-// CPDone reports that a control-plane call finished. Resp is the in-process
+// ControlPlaneDone reports that a control-plane call finished. Resp is the in-process
 // response (nil unless Err == OK). Generated API response messages map through
 // controlplane/apiconv; typed *Response fields wait for the gRPC cutover so
 // core does not import grpc (decision 57).
-type CPDone struct {
+type ControlPlaneDone struct {
 	Req     ReqID
-	Resp    CPResp
+	Resp    ControlPlaneResponse
 	Err     ErrCode
 	Outcome Outcome
 }
 
-// CPOffer delivers one broker CPCall to a control-plane replica process. The
-// sim bridge engine issues this; the machine answers with CPReply actions.
-type CPOffer struct {
-	From NodeRef // broker that issued the CPCall
+// ControlPlaneDeliver delivers one broker ControlPlaneCall to a control-plane replica process. The
+// sim bridge engine issues this; the machine answers with ControlPlaneReply actions.
+type ControlPlaneDeliver struct {
+	From NodeInstance // broker that issued the ControlPlaneCall
 	Req  ReqID
-	Op   CPOp
+	Op   ControlPlaneOperation
 }
 
 // ---- shared command log completions ----
@@ -154,66 +154,66 @@ type LogReadDone struct {
 	Outcome Outcome
 }
 
-// LogCheckTailDone reports the log tail (next slot to write).
-type LogCheckTailDone struct {
+// LogGetEndDone reports the log tail (next slot to write).
+type LogGetEndDone struct {
 	Req     ReqID
 	Tail    LogSlot
 	Err     ErrCode
 	Outcome Outcome
 }
 
-// LogTrimDone reports that a LogTrim finished.
-type LogTrimDone struct {
+// LogDeleteOldDone reports that a LogDeleteOld finished.
+type LogDeleteOldDone struct {
 	Req     ReqID
 	Err     ErrCode
 	Outcome Outcome
 }
 
 // RespAs returns d.Resp asserted to T, or the zero value.
-func RespAs[T any](d CPDone) T {
+func RespAs[T any](d ControlPlaneDone) T {
 	r, _ := d.Resp.(T)
 	return r
 }
 
-func (Started) isEvent()          {}
-func (Stop) isEvent()             {}
-func (DialDone) isEvent()         {}
-func (ConnOpened) isEvent()       {}
-func (BytesReceived) isEvent()    {}
-func (ConnClosed) isEvent()       {}
-func (SendDone) isEvent()         {}
-func (TimerFired) isEvent()       {}
-func (ObjPutDone) isEvent()       {}
-func (ObjGetDone) isEvent()       {}
-func (ObjDeleteDone) isEvent()    {}
-func (ObjListDone) isEvent()      {}
-func (CPDone) isEvent()           {}
-func (CPOffer) isEvent()          {}
-func (LogAppendDone) isEvent()    {}
-func (LogReadDone) isEvent()      {}
-func (LogCheckTailDone) isEvent() {}
-func (LogTrimDone) isEvent()      {}
+func (NodeStarted) isEvent()         {}
+func (StopRequest) isEvent()         {}
+func (ConnectDone) isEvent()         {}
+func (ConnOpened) isEvent()          {}
+func (BytesReceived) isEvent()       {}
+func (ConnClosed) isEvent()          {}
+func (SendDone) isEvent()            {}
+func (TimerFired) isEvent()          {}
+func (ObjectPutDone) isEvent()       {}
+func (ObjectGetDone) isEvent()       {}
+func (ObjectDeleteDone) isEvent()    {}
+func (ObjectListDone) isEvent()      {}
+func (ControlPlaneDone) isEvent()    {}
+func (ControlPlaneDeliver) isEvent() {}
+func (LogAppendDone) isEvent()       {}
+func (LogReadDone) isEvent()         {}
+func (LogGetEndDone) isEvent()       {}
+func (LogDeleteOldDone) isEvent()    {}
 
 // ReqID returns the request this completion answers.
 func (e SendDone) ReqID() ReqID { return e.Req }
 
 // ReqID returns the request this completion answers.
-func (e DialDone) ReqID() ReqID { return e.Req }
+func (e ConnectDone) ReqID() ReqID { return e.Req }
 
 // ReqID returns the request this completion answers.
-func (e ObjPutDone) ReqID() ReqID { return e.Req }
+func (e ObjectPutDone) ReqID() ReqID { return e.Req }
 
 // ReqID returns the request this completion answers.
-func (e ObjGetDone) ReqID() ReqID { return e.Req }
+func (e ObjectGetDone) ReqID() ReqID { return e.Req }
 
 // ReqID returns the request this completion answers.
-func (e ObjDeleteDone) ReqID() ReqID { return e.Req }
+func (e ObjectDeleteDone) ReqID() ReqID { return e.Req }
 
 // ReqID returns the request this completion answers.
-func (e ObjListDone) ReqID() ReqID { return e.Req }
+func (e ObjectListDone) ReqID() ReqID { return e.Req }
 
 // ReqID returns the request this completion answers.
-func (e CPDone) ReqID() ReqID { return e.Req }
+func (e ControlPlaneDone) ReqID() ReqID { return e.Req }
 
 // ReqID returns the request this completion answers.
 func (e LogAppendDone) ReqID() ReqID { return e.Req }
@@ -222,22 +222,22 @@ func (e LogAppendDone) ReqID() ReqID { return e.Req }
 func (e LogReadDone) ReqID() ReqID { return e.Req }
 
 // ReqID returns the request this completion answers.
-func (e LogCheckTailDone) ReqID() ReqID { return e.Req }
+func (e LogGetEndDone) ReqID() ReqID { return e.Req }
 
 // ReqID returns the request this completion answers.
-func (e LogTrimDone) ReqID() ReqID { return e.Req }
+func (e LogDeleteOldDone) ReqID() ReqID { return e.Req }
 
-//nolint:dupl // compile-time Completion assertions; parallel list lives on IOActions
+//nolint:dupl // compile-time IOResult assertions; parallel list lives on IOCalls
 var (
-	_ Completion = SendDone{}
-	_ Completion = DialDone{}
-	_ Completion = ObjPutDone{}
-	_ Completion = ObjGetDone{}
-	_ Completion = ObjDeleteDone{}
-	_ Completion = ObjListDone{}
-	_ Completion = CPDone{}
-	_ Completion = LogAppendDone{}
-	_ Completion = LogReadDone{}
-	_ Completion = LogCheckTailDone{}
-	_ Completion = LogTrimDone{}
+	_ IOResult = SendDone{}
+	_ IOResult = ConnectDone{}
+	_ IOResult = ObjectPutDone{}
+	_ IOResult = ObjectGetDone{}
+	_ IOResult = ObjectDeleteDone{}
+	_ IOResult = ObjectListDone{}
+	_ IOResult = ControlPlaneDone{}
+	_ IOResult = LogAppendDone{}
+	_ IOResult = LogReadDone{}
+	_ IOResult = LogGetEndDone{}
+	_ IOResult = LogDeleteOldDone{}
 )

@@ -52,18 +52,18 @@ func (s *ObjectStore) Put(ctx context.Context, key string, data []byte) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return fail(s.spec.Exec(core.ObjPut{Key: key, Data: data}).(core.ObjPutDone).Err)
+	return fail(s.spec.Exec(core.ObjectPut{Key: key, Data: data}).(core.ObjectPutDone).Err)
 }
 
 // Get returns the bytes referenced by ref.
 func (s *ObjectStore) Get(ctx context.Context, ref core.SegmentRef) ([]byte, error) {
 	return locked(ctx, &s.mu, func() ([]byte, core.ErrCode) {
-		return s.objectBytes(core.ObjGet{Ref: ref})
+		return s.objectBytes(core.ObjectGet{Ref: ref})
 	})
 }
 
-func (s *ObjectStore) objectBytes(a core.ObjGet) ([]byte, core.ErrCode) {
-	d := s.spec.Exec(a).(core.ObjGetDone)
+func (s *ObjectStore) objectBytes(a core.ObjectGet) ([]byte, core.ErrCode) {
+	d := s.spec.Exec(a).(core.ObjectGetDone)
 	return d.Data, d.Err
 }
 
@@ -74,18 +74,18 @@ func (s *ObjectStore) Delete(ctx context.Context, key string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return fail(s.spec.Exec(core.ObjDelete{Key: key}).(core.ObjDeleteDone).Err)
+	return fail(s.spec.Exec(core.ObjectDelete{Key: key}).(core.ObjectDeleteDone).Err)
 }
 
 // List returns the keys that start with prefix.
 func (s *ObjectStore) List(ctx context.Context, prefix string) ([]string, error) {
 	return locked(ctx, &s.mu, func() ([]string, core.ErrCode) {
-		return s.objectKeys(core.ObjList{Prefix: prefix})
+		return s.objectKeys(core.ObjectList{Prefix: prefix})
 	})
 }
 
-func (s *ObjectStore) objectKeys(a core.ObjList) ([]string, core.ErrCode) {
-	d := s.spec.Exec(a).(core.ObjListDone)
+func (s *ObjectStore) objectKeys(a core.ObjectList) ([]string, core.ErrCode) {
+	d := s.spec.Exec(a).(core.ObjectListDone)
 	return d.Keys, d.Err
 }
 
@@ -106,14 +106,14 @@ func (c *ControlPlane) CreateTopic(name string, partitions int32) error {
 }
 
 // Call executes op against the control-plane spec.
-func (c *ControlPlane) Call(ctx context.Context, op core.CPOp) (core.CPResp, error) {
-	return locked(ctx, &c.mu, func() (core.CPResp, core.ErrCode) {
-		return c.callResp(core.CPCall{Op: op})
+func (c *ControlPlane) Call(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, error) {
+	return locked(ctx, &c.mu, func() (core.ControlPlaneResponse, core.ErrCode) {
+		return c.callResp(core.ControlPlaneCall{Op: op})
 	})
 }
 
-func (c *ControlPlane) callResp(a core.CPCall) (core.CPResp, core.ErrCode) {
-	d := c.spec.Exec(a).(core.CPDone)
+func (c *ControlPlane) callResp(a core.ControlPlaneCall) (core.ControlPlaneResponse, core.ErrCode) {
+	d := c.spec.Exec(a).(core.ControlPlaneDone)
 	return d.Resp, d.Err
 }
 

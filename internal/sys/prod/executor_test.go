@@ -31,7 +31,7 @@ type nilConns struct{ *Net }
 
 func (nilConns) WriteAsync(core.ConnID, []byte, func(error)) error { return ErrNoConn }
 
-func wait(t *testing.T, in *sys.Inbox) core.EventBody {
+func wait(t *testing.T, in *sys.Inbox) core.EventData {
 	t.Helper()
 	for end := time.Now().Add(2 * time.Second); time.Now().Before(end); time.Sleep(time.Millisecond) {
 		if b, ok := in.Control().Pop(); ok {
@@ -49,16 +49,16 @@ func TestExecutorCompletesOnceAndNeverBlocks(t *testing.T) {
 	e := NewExecutor(t.Context(), ExecConfig{ObjTimeout: 50 * time.Millisecond}, objs, nil, nilConns{}, cls, in)
 
 	start := time.Now()
-	e.Execute(core.ObjPut{Req: 7, Key: "k"}) // blocked in the store
+	e.Execute(core.ObjectPut{Req: 7, Key: "k"}) // blocked in the store
 	e.Execute(core.Send{Req: 8, Conn: 1, Data: []byte("x")})
 	if time.Since(start) > 20*time.Millisecond {
 		t.Fatal("Execute blocked")
 	}
-	var put core.ObjPutDone
+	var put core.ObjectPutDone
 	var send core.SendDone
 	for range 2 {
 		switch d := wait(t, in).(type) {
-		case core.ObjPutDone:
+		case core.ObjectPutDone:
 			put = d
 		case core.SendDone:
 			send = d
@@ -74,8 +74,8 @@ func TestExecutorCompletesOnceAndNeverBlocks(t *testing.T) {
 		t.Fatal("more than one completion per action")
 	}
 
-	e.Execute(core.ObjGet{Req: 9, Ref: core.SegmentRef{Key: "missing"}})
-	if g := wait(t, in).(core.ObjGetDone); g.Req != 9 || g.Err != core.ErrNotFound {
+	e.Execute(core.ObjectGet{Req: 9, Ref: core.SegmentRef{Key: "missing"}})
+	if g := wait(t, in).(core.ObjectGetDone); g.Req != 9 || g.Err != core.ErrNotFound {
 		t.Errorf("get %+v", g)
 	}
 }
@@ -85,7 +85,7 @@ func TestExecutorDropsAfterClose(t *testing.T) {
 	e := NewExecutor(t.Context(), ExecConfig{}, vsys.NewObjectStore(), nil, nilConns{},
 		Classifier{Objects: MemClassifier{}}, in)
 	in.Close()
-	e.Execute(core.ObjList{Req: 1})
+	e.Execute(core.ObjectList{Req: 1})
 	time.Sleep(30 * time.Millisecond)
 	if _, ok := in.Control().Pop(); ok {
 		t.Fatal("delivered after close")
@@ -94,7 +94,7 @@ func TestExecutorDropsAfterClose(t *testing.T) {
 
 func TestClassifierRoutes(t *testing.T) {
 	c := Classifier{Objects: s3store.Classifier{}, CP: MemClassifier{}}
-	if code, out := c.Classify(core.ObjPut{}, context.DeadlineExceeded); code != core.ErrTimeout || out != core.MaybeApplied {
+	if code, out := c.Classify(core.ObjectPut{}, context.DeadlineExceeded); code != core.ErrTimeout || out != core.MaybeApplied {
 		t.Errorf("obj: %v %v", code, out)
 	}
 	if code, _ := c.Classify(core.Send{}, errors.New("x")); code != core.ErrIO {

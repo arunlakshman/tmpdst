@@ -50,7 +50,7 @@ type Exit struct{}
   event behind it.
 - Invariant to add: a node that emitted `Exit` has no acked-but-uncommitted
   produce.
-- `core.ClassOf` gets a `Stop` row (Control).
+- `core.InboxKindOf` gets a `Stop` row (Control).
 
 ### 1.3 The machine contract includes its hash (decision 9)
 
@@ -155,7 +155,7 @@ type View interface {
 	Step() uint64
 	Now() Time
 	Phase() Phase
-	Alive(core.NodeRef) bool
+	Alive(core.NodeInstance) bool
 	Timeline() Timeline
 	History() History
 	Objects() ObjectTruth
@@ -187,12 +187,12 @@ type CPTruth interface {
 
 ```go
 type Engine interface {
-	core.Hashable // folded into the trace hash after every step
+	core.HasStateHash // folded into the trace hash after every step
 	Name() string
-	Handles(a core.IOAction) bool
-	Execute(ctx EngineCtx, from core.NodeRef, a core.IOAction)
+	Handles(a core.IOCall) bool
+	Execute(ctx EngineCtx, from core.NodeInstance, a core.IOCall)
 	OnInternal(ctx EngineCtx, body any)
-	OnCrash(ctx EngineCtx, ref core.NodeRef)
+	OnCrash(ctx EngineCtx, ref core.NodeInstance)
 	EnterRecovery()
 }
 
@@ -252,7 +252,7 @@ const (
 type HistOp struct {
 	ID             core.ID       // the request
 	Value          core.ID       // the write's identity, shared by its retries
-	Client         core.NodeRef
+	Client         core.NodeInstance
 	Op             any
 	InvSeq, RetSeq uint64        // logical order; virtual time ties
 	Invoke, Return Time
@@ -261,7 +261,7 @@ type HistOp struct {
 }
 
 type History interface {
-	Invoke(client core.NodeRef, id, value core.ID, op any)
+	Invoke(client core.NodeInstance, id, value core.ID, op any)
 	Return(id core.ID, result any, o OpOutcome) bool // false: unknown or duplicate (protocol failure)
 	Ops() []HistOp
 }
@@ -308,7 +308,7 @@ const (
 type Failure struct {
 	Seed uint64
 	Kind FailKind
-	Prop core.Prop
+	Prop core.PropertyID
 	Step uint64
 	At   Time
 	Msg  string
@@ -413,12 +413,12 @@ type Entry struct {
 // panics on an unknown action. Exactly one Completion per IOAction, with the
 // same ReqID, delivered to the Sink and never on the caller's goroutine.
 type Executor interface {
-	Execute(a core.IOAction)
+	Execute(a core.IOCall)
 }
 
 type Sink interface {
-	DeliverControl(body core.EventBody)
-	DeliverData(body core.EventBody)
+	DeliverControl(body core.EventData)
+	DeliverData(body core.EventData)
 	// Closed is closed when the incarnation ends. Later deliveries are dropped,
 	// never block, and never reach the next incarnation.
 	Closed() <-chan struct{}
@@ -427,7 +427,7 @@ type Sink interface {
 // Classify reduces err to plain data. It logs err; the core only sees the
 // code. The Outcome depends on which operation failed, not only on err.
 type Classifier interface {
-	Classify(a core.IOAction, err error) (core.ErrCode, core.Outcome)
+	Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome)
 }
 ```
 
@@ -446,7 +446,7 @@ var (
 // Run delivers Started, then loops: InboxPolicy.Next, stamp At/Wall at
 // dequeue, Step, dispatch actions in order. Returns ErrTripped on Trip, nil
 // on Exit, ErrStopped on ctx done.
-func Run(ctx context.Context, b Bundle, f core.Factory, self core.NodeRef) error
+func Run(ctx context.Context, b Bundle, f core.MachineFactory, self core.NodeInstance) error
 ```
 
 ---
@@ -470,7 +470,7 @@ func Run(ctx context.Context, b Bundle, f core.Factory, self core.NodeRef) error
   - The oracle must not import veritas; C4 is what keeps them independent.
 - **`internal/wire/format/`** (22). Segment object layout (magic, CRC, length) and segment key
   naming, shared by the broker, sim invariants and veritas, under detcheck.
-- **Mutants** (in `sim` tests): `Mutant{Name; Wrap func(core.Factory) core.Factory; Why string}`.
+- **Mutants** (in `sim` tests): `Mutant{Name; Wrap func(core.MachineFactory) core.MachineFactory; Why string}`.
   - Pin a table of first-catch seeds and which check caught each mutant.
   - Mark invariants `BlackBox() bool` to show what clients alone can see.
 

@@ -1,7 +1,7 @@
 package core
 
-// CPOp is a control-plane operation as seen by a broker (decision 3). The wire
-// protocol for new work is gRPC (`controlplane/api/v1`, decision 57); CPOp remains
+// ControlPlaneOperation is a control-plane operation as seen by a broker (decision 3). The wire
+// protocol for new work is gRPC (`controlplane/api/v1`, decision 57); ControlPlaneOperation remains
 // the in-process vocabulary until cutover. The metadata store is still invisible
 // to the broker. The invariants below are not provisional.
 //
@@ -10,10 +10,10 @@ package core
 // assigns offsets (decision 42): the broker never proposes one. How a store
 // stays correct under concurrent committers (a compare-and-set on the run base
 // with an internal retry) is the store's business, not part of this contract.
-type CPOp interface{ isCPOp() }
+type ControlPlaneOperation interface{ isCPOp() }
 
-// CPResp is the answer to a CPOp.
-type CPResp interface{ isCPResp() }
+// ControlPlaneResponse is the answer to a ControlPlaneOperation.
+type ControlPlaneResponse interface{ isCPResp() }
 
 // CommitSegment registers one uploaded object holding batches for many
 // partitions and assigns their offsets atomically: every batch is assigned or
@@ -52,17 +52,17 @@ type BatchRange struct {
 	Loc   SegmentRef
 }
 
-// Lookup finds which segments hold offsets >= From for a partition.
-type Lookup struct {
+// FindSegments finds which segments hold offsets >= From for a partition.
+type FindSegments struct {
 	TP       TopicPartition
 	From     Offset
 	MaxBytes int32
 }
 
-// LookupResp lists the batches holding offsets >= From in offset order. End is
+// FindSegmentsResp lists the batches holding offsets >= From in offset order. End is
 // the partition end offset (the next offset to be assigned, ListOffsets
 // latest), derived from the newest run.
-type LookupResp struct {
+type FindSegmentsResp struct {
 	Ranges []BatchRange
 	End    Offset
 }
@@ -80,9 +80,9 @@ type TopicInfo struct {
 }
 
 func (CommitSegment) isCPOp()  {}
-func (Lookup) isCPOp()         {}
+func (FindSegments) isCPOp()   {}
 func (DescribeTopics) isCPOp() {}
 
 func (CommitSegmentResp) isCPResp()  {}
-func (LookupResp) isCPResp()         {}
+func (FindSegmentsResp) isCPResp()   {}
 func (DescribeTopicsResp) isCPResp() {}

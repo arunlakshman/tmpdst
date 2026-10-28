@@ -58,31 +58,31 @@ func names[T any](m map[string]T) []string {
 func eq(a, b []string) bool { return strings.Join(a, ",") == strings.Join(b, ",") }
 
 func TestEveryCoreTypeHasATag(t *testing.T) {
-	events := map[string]core.EventBody{
-		"Started": core.Started{}, "Stop": core.Stop{}, "ConnOpened": core.ConnOpened{},
+	events := map[string]core.EventData{
+		"NodeStarted": core.NodeStarted{}, "StopRequest": core.StopRequest{}, "ConnOpened": core.ConnOpened{},
 		"BytesReceived": core.BytesReceived{}, "ConnClosed": core.ConnClosed{}, "SendDone": core.SendDone{},
-		"DialDone": core.DialDone{}, "TimerFired": core.TimerFired{}, "ObjPutDone": core.ObjPutDone{},
-		"ObjGetDone": core.ObjGetDone{}, "ObjDeleteDone": core.ObjDeleteDone{}, "ObjListDone": core.ObjListDone{},
-		"CPDone": core.CPDone{}, "CPOffer": core.CPOffer{},
+		"ConnectDone": core.ConnectDone{}, "TimerFired": core.TimerFired{}, "ObjectPutDone": core.ObjectPutDone{},
+		"ObjectGetDone": core.ObjectGetDone{}, "ObjectDeleteDone": core.ObjectDeleteDone{}, "ObjectListDone": core.ObjectListDone{},
+		"ControlPlaneDone": core.ControlPlaneDone{}, "ControlPlaneDeliver": core.ControlPlaneDeliver{},
 		"LogAppendDone": core.LogAppendDone{}, "LogReadDone": core.LogReadDone{},
-		"LogCheckTailDone": core.LogCheckTailDone{}, "LogTrimDone": core.LogTrimDone{},
+		"LogGetEndDone": core.LogGetEndDone{}, "LogDeleteOldDone": core.LogDeleteOldDone{},
 	}
 	actions := map[string]core.Action{
 		"SetTimer": core.SetTimer{}, "CancelTimer": core.CancelTimer{}, "Send": core.Send{},
 		"CloseConn": core.CloseConn{}, "PauseReads": core.PauseReads{}, "ResumeReads": core.ResumeReads{},
-		"Dial": core.Dial{}, "ObjPut": core.ObjPut{}, "ObjGet": core.ObjGet{}, "ObjDelete": core.ObjDelete{},
-		"ObjList": core.ObjList{}, "CPCall": core.CPCall{}, "CPReply": core.CPReply{},
-		"LogAppend": core.LogAppend{}, "LogRead": core.LogRead{}, "LogCheckTail": core.LogCheckTail{},
-		"LogTrim": core.LogTrim{},
-		"Emit":    core.Emit{}, "Trip": core.Trip{}, "Exit": core.Exit{},
+		"Connect": core.Connect{}, "ObjectPut": core.ObjectPut{}, "ObjectGet": core.ObjectGet{}, "ObjectDelete": core.ObjectDelete{},
+		"ObjectList": core.ObjectList{}, "ControlPlaneCall": core.ControlPlaneCall{}, "ControlPlaneReply": core.ControlPlaneReply{},
+		"LogAppend": core.LogAppend{}, "LogRead": core.LogRead{}, "LogGetEnd": core.LogGetEnd{},
+		"LogDeleteOld": core.LogDeleteOld{},
+		"RecordFact":   core.RecordFact{}, "StopForRestart": core.StopForRestart{}, "ShutdownDone": core.ShutdownDone{},
 	}
-	ops := map[string]core.CPOp{
-		"CommitSegment": core.CommitSegment{}, "Lookup": core.Lookup{},
+	ops := map[string]core.ControlPlaneOperation{
+		"CommitSegment": core.CommitSegment{}, "FindSegments": core.FindSegments{},
 		"DescribeTopics": core.DescribeTopics{},
 	}
-	resps := map[string]core.CPResp{
+	resps := map[string]core.ControlPlaneResponse{
 		"CommitSegmentResp": core.CommitSegmentResp{},
-		"LookupResp":        core.LookupResp{}, "DescribeTopicsResp": core.DescribeTopicsResp{},
+		"FindSegmentsResp":  core.FindSegmentsResp{}, "DescribeTopicsResp": core.DescribeTopicsResp{},
 	}
 	fields := map[string]core.FieldValue{
 		"I64": core.I64(0), "U64": core.U64(0), "Str": core.Str(""), "Bool": core.Bool(false), "Bytes": core.Bytes(nil),
@@ -128,9 +128,9 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 	}
 }
 
-// Every core.EventBody must also classify, or the inbox would panic mid-run.
+// Every core.EventData must also classify, or the inbox would panic mid-run.
 func TestTaggedEventsClassify(t *testing.T) {
-	for _, b := range []core.EventBody{core.Started{}, core.Stop{}, core.ConnOpened{}, core.DialDone{}, core.CPDone{}} {
-		_ = core.ClassOf(b)
+	for _, b := range []core.EventData{core.NodeStarted{}, core.StopRequest{}, core.ConnOpened{}, core.ConnectDone{}, core.ControlPlaneDone{}} {
+		_ = core.InboxKindOf(b)
 	}
 }

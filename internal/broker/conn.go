@@ -194,7 +194,7 @@ func (b *Broker) drain(c *conn, acts []core.Action) []core.Action {
 		}
 		// Ack facts go immediately before the Send that carries them (decision 12).
 		for _, f := range s.facts {
-			acts = append(acts, core.Emit{Fact: f})
+			acts = append(acts, core.RecordFact{Fact: f})
 		}
 		acts = append(acts, core.Send{Req: b.req(), Conn: c.id, Data: data})
 	}

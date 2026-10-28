@@ -46,7 +46,7 @@ const (
 type segState uint8
 
 const (
-	segPut segState = iota // ObjPut in flight
+	segPut segState = iota // ObjectPut in flight
 	segPutBackoff
 	segPutDone // uploaded, waiting for its turn to commit
 	segCommit  // CommitSegment in flight
@@ -176,10 +176,10 @@ func (b *Broker) sealBatches(bs []*pbatch) []core.Action {
 
 func (b *Broker) put(s *segment) []core.Action {
 	s.state, s.req = segPut, b.req()
-	return []core.Action{core.ObjPut{Req: s.req, Key: s.key, Data: s.data}}
+	return []core.Action{core.ObjectPut{Req: s.req, Key: s.key, Data: s.data}}
 }
 
-func (b *Broker) onPutDone(s *segment, e core.ObjPutDone) []core.Action {
+func (b *Broker) onPutDone(s *segment, e core.ObjectPutDone) []core.Action {
 	if e.Err == core.ErrInvalid {
 		return b.failSegment(s, errUnknownServer)
 	}
@@ -224,11 +224,11 @@ func (b *Broker) commit(s *segment) []core.Action {
 	if b.cfg.Bug == BugFreshKeyOnRetry && s.attempts > 0 {
 		key = format.SegmentKey(b.env.NewID())
 	}
-	return []core.Action{core.CPCall{Req: s.req, Op: core.CommitSegment{
+	return []core.Action{core.ControlPlaneCall{Req: s.req, Op: core.CommitSegment{
 		SegmentKey: key, Batches: pend}}}
 }
 
-func (b *Broker) onCommit(s *segment, e core.CPDone) []core.Action {
+func (b *Broker) onCommit(s *segment, e core.ControlPlaneDone) []core.Action {
 	switch e.Err {
 	case core.OK:
 		resp, ok := e.Resp.(core.CommitSegmentResp)

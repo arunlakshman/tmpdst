@@ -65,7 +65,7 @@ type op struct {
 // to the control plane, GET reads it back.
 type Broker struct {
 	env  core.Env
-	self core.NodeRef
+	self core.NodeInstance
 	mut  mutation
 
 	nextReq  core.ReqID
@@ -78,8 +78,8 @@ type Broker struct {
 	ops   []*op
 }
 
-// NewBroker is the core.Factory of the echo broker.
-func NewBroker(env core.Env, self core.NodeRef) core.Machine {
+// NewBroker is the core.MachineFactory of the echo broker.
+func NewBroker(env core.Env, self core.NodeInstance) core.Machine {
 	return &Broker{env: env, self: self}
 }
 
@@ -128,7 +128,7 @@ func (b *Broker) drop(o *op) {
 func (b *Broker) Step(ev core.Event) []core.Action {
 	var acts []core.Action
 	switch e := ev.Body.(type) {
-	case core.Stop:
+	case core.StopRequest:
 		acts = b.stop()
 	case core.ConnOpened:
 		if b.stopping {
@@ -147,15 +147,15 @@ func (b *Broker) Step(ev core.Event) []core.Action {
 		}
 	case core.TimerFired:
 		acts = b.onTimer(e)
-	case core.ObjPutDone:
+	case core.ObjectPutDone:
 		if o := b.findReq(e.Req); o != nil && o.state == stPut {
 			acts = b.onPut(o, e)
 		}
-	case core.ObjGetDone:
+	case core.ObjectGetDone:
 		if o := b.findReq(e.Req); o != nil && o.state == stGet {
 			acts = b.onGet(o, e)
 		}
-	case core.CPDone:
+	case core.ControlPlaneDone:
 		acts = b.onCP(e)
 	}
 	return b.finish(acts)
@@ -168,7 +168,7 @@ func (b *Broker) finish(acts []core.Action) []core.Action {
 			acts = append(acts, core.CloseConn{Conn: c.id})
 		}
 		b.conns = nil
-		acts = append(acts, core.Exit{})
+		acts = append(acts, core.ShutdownDone{})
 	}
 	return acts
 }
@@ -312,10 +312,10 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 
 func (b *Broker) put(o *op) []core.Action {
 	o.state, o.req = stPut, b.req()
-	return []core.Action{core.ObjPut{Req: o.req, Key: o.key, Data: o.seg}}
+	return []core.Action{core.ObjectPut{Req: o.req, Key: o.key, Data: o.seg}}
 }
 
-func (b *Broker) onPut(o *op, e core.ObjPutDone) []core.Action {
+func (b *Broker) onPut(o *op, e core.ObjectPutDone) []core.Action {
 	if e.Err != core.OK {
 		return b.retryLater(o, stPut)
 	}
@@ -329,13 +329,13 @@ func (b *Broker) onPut(o *op, e core.ObjPutDone) []core.Action {
 
 func (b *Broker) commit(o *op) []core.Action {
 	o.state, o.req = stCommit, b.req()
-	return []core.Action{core.CPCall{Req: o.req, Op: core.CommitSegment{
+	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: core.CommitSegment{
 		SegmentKey: o.key,
 		Batches:    []core.PendingBatch{{TP: tp(), Records: 1, Loc: o.ref}},
 	}}}
 }
 
-func (b *Broker) onCP(e core.CPDone) []core.Action {
+func (b *Broker) onCP(e core.ControlPlaneDone) []core.Action {
 	o := b.findReq(e.Req)
 	if o == nil {
 		return nil
@@ -349,7 +349,7 @@ func (b *Broker) onCP(e core.CPDone) []core.Action {
 	return nil
 }
 
-func (b *Broker) onCommit(o *op, e core.CPDone) []core.Action {
+func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 	switch {
 	case e.Err == core.OK:
 		resp, ok := e.Resp.(core.CommitSegmentResp)
@@ -383,11 +383,11 @@ func (b *Broker) onCommit(o *op, e core.CPDone) []core.Action {
 
 func (b *Broker) lookup(o *op) []core.Action {
 	o.state, o.req = stLookup, b.req()
-	return []core.Action{core.CPCall{Req: o.req, Op: core.Lookup{TP: tp(), From: o.offset}}}
+	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: core.FindSegments{TP: tp(), From: o.offset}}}
 }
 
-func (b *Broker) onLookup(o *op, e core.CPDone) []core.Action {
-	resp, ok := e.Resp.(core.LookupResp)
+func (b *Broker) onLookup(o *op, e core.ControlPlaneDone) []core.Action {
+	resp, ok := e.Resp.(core.FindSegmentsResp)
 	if e.Err != core.OK || !ok {
 		return b.retryLater(o, stLookup)
 	}
@@ -402,10 +402,10 @@ func (b *Broker) onLookup(o *op, e core.CPDone) []core.Action {
 
 func (b *Broker) get(o *op) []core.Action {
 	o.state, o.req = stGet, b.req()
-	return []core.Action{core.ObjGet{Req: o.req, Ref: core.SegmentRef{Key: o.ref.Key}}}
+	return []core.Action{core.ObjectGet{Req: o.req, Ref: core.SegmentRef{Key: o.ref.Key}}}
 }
 
-func (b *Broker) onGet(o *op, e core.ObjGetDone) []core.Action {
+func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
 	if e.Err != core.OK {
 		if e.Err == core.ErrNotFound { // committed segments are never deleted
 			b.env.Unreachable("echo: committed segment missing")
@@ -437,8 +437,8 @@ func (b *Broker) onGet(o *op, e core.ObjGetDone) []core.Action {
 	return b.reply(o, "VAL "+string(data))
 }
 
-func emit(name string, fs ...core.Field) core.Emit {
-	return core.Emit{Fact: core.Fact{Name: name, Fields: fs}}
+func emit(name string, fs ...core.Field) core.RecordFact {
+	return core.RecordFact{Fact: core.Fact{Name: name, Fields: fs}}
 }
 
 // StateHash folds all state in a fixed order.

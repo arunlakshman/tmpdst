@@ -74,9 +74,9 @@ func TestStartRequiresPieces(t *testing.T) {
 
 func TestStartGracefulStop(t *testing.T) {
 	var mu sync.Mutex
-	var seen []core.IOAction
+	var seen []core.IOCall
 	n, _ := startNode(t, func(c *NodeConfig) {
-		c.OnIO = func(a core.IOAction) { mu.Lock(); seen = append(seen, a); mu.Unlock() }
+		c.OnIO = func(a core.IOCall) { mu.Lock(); seen = append(seen, a); mu.Unlock() }
 	})
 	if n.Addr() == nil || !strings.HasPrefix(n.String(), "broker(127.0.0.1:") {
 		t.Errorf("addr %v string %q", n.Addr(), n.String())

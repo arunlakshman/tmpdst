@@ -17,7 +17,7 @@ func (*liveness) AtEnd(v sim.View) {
 	after := settling + sim.Time(campaign.LivenessGrace)
 	var produced, reads int
 	for _, op := range v.History().Ops() {
-		v.Assert().Always(op.Outcome != sim.OpPending, "kafka: no op pending at end", core.Detail{Key: "op", Value: op.Op})
+		v.Assert().Always(op.Outcome != sim.OpPending, "kafka: no op pending at end", core.ContextPair{Key: "op", Value: op.Op})
 		if !ok || op.Outcome == sim.OpPending {
 			continue
 		}
@@ -26,7 +26,7 @@ func (*liveness) AtEnd(v sim.View) {
 			produced++
 			if op.Return >= after && r.Why != "rejected" {
 				v.Assert().Always(op.Outcome == sim.OpDefinite && r.Base >= 0, "kafka: a produce still running in Settling is acked",
-					core.Detail{Key: "op", Value: op.Op}, core.Detail{Key: "result", Value: r}, core.Detail{Key: "return", Value: op.Return})
+					core.ContextPair{Key: "op", Value: op.Op}, core.ContextPair{Key: "result", Value: r}, core.ContextPair{Key: "return", Value: op.Return})
 			}
 		case ReadRes:
 			reads++
@@ -36,7 +36,7 @@ func (*liveness) AtEnd(v sim.View) {
 					good = good && p.Code == 0
 				}
 				v.Assert().Always(good, "kafka: a fetch invoked in Settling succeeds",
-					core.Detail{Key: "op", Value: op.Op}, core.Detail{Key: "result", Value: r}, core.Detail{Key: "invoke", Value: op.Invoke})
+					core.ContextPair{Key: "op", Value: op.Op}, core.ContextPair{Key: "result", Value: r}, core.ContextPair{Key: "invoke", Value: op.Invoke})
 			}
 		}
 	}
@@ -48,8 +48,8 @@ func (*liveness) AtEnd(v sim.View) {
 // every fault family and recovery path must fire somewhere in the campaign.
 // The engines and the broker declare these props where the event happens; the
 // list lives here because only the campaign knows what it must see.
-func expectReachable() []core.Prop {
-	return []core.Prop{
+func expectReachable() []core.PropertyID {
+	return []core.PropertyID{
 		"obj 503 injected", "obj timeout injected", "obj lost response injected", "obj outage started", "obj get corrupted",
 		"cp 503 injected", "cp timeout injected", "cp lost response injected", "cp outage started",
 		"net: partition injected", "net: clog injected", "net: random_close injected", "net: black_hole injected",

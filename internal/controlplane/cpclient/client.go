@@ -1,5 +1,5 @@
 // Package cpclient is the broker-side adapter for the control plane: a
-// sys.ControlPlane over the gRPC API and the sys.Classifier for CPCall.
+// sys.ControlPlane over the gRPC API and the sys.Classifier for ControlPlaneCall.
 package cpclient
 
 import (
@@ -92,14 +92,14 @@ func (c *Client) Close() error {
 }
 
 // Call performs op. A business error is *Error; other failures are *CallError.
-func (c *Client) Call(ctx context.Context, op core.CPOp) (core.CPResp, error) {
+func (c *Client) Call(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	switch op := op.(type) {
 	case core.CommitSegment:
 		return c.commitSegment(ctx, op)
-	case core.Lookup:
+	case core.FindSegments:
 		return c.lookup(ctx, op)
 	case core.DescribeTopics:
 		return c.describeTopics(ctx, op)
@@ -107,8 +107,8 @@ func (c *Client) Call(ctx context.Context, op core.CPOp) (core.CPResp, error) {
 	return nil, &Error{Code: core.ErrInvalid}
 }
 
-//nolint:dupl // each CPOp keeps its own request/response conversion
-func (c *Client) commitSegment(ctx context.Context, op core.CommitSegment) (core.CPResp, error) {
+//nolint:dupl // each ControlPlaneOperation keeps its own request/response conversion
+func (c *Client) commitSegment(ctx context.Context, op core.CommitSegment) (core.ControlPlaneResponse, error) {
 	var out *cpv1.CommitSegmentResponse
 	err := c.do(ctx, "CommitSegment", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
@@ -121,8 +121,8 @@ func (c *Client) commitSegment(ctx context.Context, op core.CommitSegment) (core
 	return apiconv.CommitSegmentRespToCore(out), nil
 }
 
-//nolint:dupl // each CPOp keeps its own request/response conversion
-func (c *Client) lookup(ctx context.Context, op core.Lookup) (core.CPResp, error) {
+//nolint:dupl // each ControlPlaneOperation keeps its own request/response conversion
+func (c *Client) lookup(ctx context.Context, op core.FindSegments) (core.ControlPlaneResponse, error) {
 	var out *cpv1.LookupResponse
 	err := c.do(ctx, "Lookup", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
@@ -135,8 +135,8 @@ func (c *Client) lookup(ctx context.Context, op core.Lookup) (core.CPResp, error
 	return apiconv.LookupRespToCore(out), nil
 }
 
-//nolint:dupl // each CPOp keeps its own request/response conversion
-func (c *Client) describeTopics(ctx context.Context, op core.DescribeTopics) (core.CPResp, error) {
+//nolint:dupl // each ControlPlaneOperation keeps its own request/response conversion
+func (c *Client) describeTopics(ctx context.Context, op core.DescribeTopics) (core.ControlPlaneResponse, error) {
 	var out *cpv1.DescribeTopicsResponse
 	err := c.do(ctx, "DescribeTopics", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error

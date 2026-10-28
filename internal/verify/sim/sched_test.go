@@ -107,9 +107,9 @@ func TestSchedulerFIFOAfterLaterTime(t *testing.T) {
 
 func TestSchedulerCancelAndDropNode(t *testing.T) {
 	s := NewScheduler(NewRand(1))
-	ref := core.NodeRef{Node: "n", Inc: core.Incarnation{1}}
-	other := core.NodeRef{Node: "n", Inc: core.Incarnation{2}}
-	toNode := func(at Time, r core.NodeRef) Entry {
+	ref := core.NodeInstance{Node: "n", Inc: core.BootNumber{1}}
+	other := core.NodeInstance{Node: "n", Inc: core.BootNumber{2}}
+	toNode := func(at Time, r core.NodeInstance) Entry {
 		return Entry{At: at, Lane: 5, Kind: EntryDeliver, Target: Target{Node: r}, Body: core.TimerFired{}}
 	}
 	s.Schedule(toNode(10, ref))
@@ -123,7 +123,7 @@ func TestSchedulerCancelAndDropNode(t *testing.T) {
 	if n := s.DropNode(ref); n != 2 {
 		t.Fatalf("DropNode = %d", n)
 	}
-	if n := s.DropNode(core.NodeRef{}); n != 0 {
+	if n := s.DropNode(core.NodeInstance{}); n != 0 {
 		t.Fatal("zero ref must drop nothing")
 	}
 	if s.Len() != 2 {
@@ -141,9 +141,9 @@ func TestTimeline(t *testing.T) {
 	f := func(name string, v int64) core.Fact {
 		return core.Fact{Name: name, Fields: []core.Field{{Key: "v", Value: core.I64(v)}}}
 	}
-	tl.Append(core.NodeRef{}, 1, f("a", 1))
-	tl.Append(core.NodeRef{}, 2, f("b", 2))
-	tl.Append(core.NodeRef{}, 3, f("a", 3))
+	tl.Append(core.NodeInstance{}, 1, f("a", 1))
+	tl.Append(core.NodeInstance{}, 2, f("b", 2))
+	tl.Append(core.NodeInstance{}, 3, f("a", 3))
 	got := tl.Since("a", &cur)
 	if len(got) != 2 || got[0].Seq != 1 || got[1].Seq != 3 || got[1].At != 3 {
 		t.Fatalf("%+v", got)
@@ -151,7 +151,7 @@ func TestTimeline(t *testing.T) {
 	if len(tl.Since("a", &cur)) != 0 {
 		t.Fatal("cursor must advance")
 	}
-	tl.Append(core.NodeRef{}, 4, f("a", 4))
+	tl.Append(core.NodeInstance{}, 4, f("a", 4))
 	if got := tl.Since("a", &cur); len(got) != 1 || got[0].Seq != 4 {
 		t.Fatalf("%+v", got)
 	}
@@ -166,7 +166,7 @@ func TestNodeInboxAndCost(t *testing.T) {
 	in.Push(core.BytesReceived{Conn: 1, Data: make([]byte, 100)})
 	in.Push(core.TimerFired{ID: 1})
 	if in.Control().Len() != 1 || in.Data().Len() != 2 {
-		t.Fatal("ClassOf routing")
+		t.Fatal("InboxKindOf routing")
 	}
 	var p core.InboxPolicy = core.ControlFirst{}
 	b, _ := p.Next(in.Control(), in.Data())

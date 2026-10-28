@@ -29,15 +29,15 @@ func TestRestoreOnStartedThenReady(t *testing.T) {
 		CatchUpEvery: core.Millisecond,
 		CkptKey:      "ckpt/latest",
 	})
-	acts := m.Step(core.Event{At: 0, Body: core.Started{}})
+	acts := m.Step(core.Event{At: 0, Body: core.NodeStarted{}})
 	if len(acts) != 1 {
 		t.Fatalf("Started = %v, want ObjGet", acts)
 	}
-	get, ok := acts[0].(core.ObjGet)
+	get, ok := acts[0].(core.ObjectGet)
 	if !ok || get.Ref.Key != "ckpt/latest" {
 		t.Fatalf("Started action = %#v, want ObjGet ckpt/latest", acts[0])
 	}
-	acts = m.Step(core.Event{At: 0, Body: core.ObjGetDone{Req: get.Req, Data: snap, Err: core.OK}})
+	acts = m.Step(core.Event{At: 0, Body: core.ObjectGetDone{Req: get.Req, Data: snap, Err: core.OK}})
 	if m.Applied() != 2 {
 		t.Fatalf("Applied after restore = %d, want 2", m.Applied())
 	}
@@ -46,8 +46,8 @@ func TestRestoreOnStartedThenReady(t *testing.T) {
 	}
 	timer := acts[0].(core.SetTimer)
 	acts = m.Step(core.Event{At: 0, Body: core.TimerFired{ID: timer.ID, Gen: timer.Gen}})
-	tail := acts[0].(core.LogCheckTail)
-	m.Step(core.Event{At: 0, Body: core.LogCheckTailDone{
+	tail := acts[0].(core.LogGetEnd)
+	m.Step(core.Event{At: 0, Body: core.LogGetEndDone{
 		Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied,
 	}})
 	if !m.Ready() {
@@ -69,14 +69,14 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 		KeepSlots:     1,
 		CkptKey:       "ckpt/latest",
 	})
-	// Started, ObjGet miss, catch-up, Ready, active (rank 0).
-	acts := m.Step(core.Event{At: 0, Body: core.Started{}})
-	get := acts[0].(core.ObjGet)
-	acts = m.Step(core.Event{At: 0, Body: core.ObjGetDone{Req: get.Req, Err: core.ErrNotFound}})
+	// NodeStarted, ObjectGet miss, catch-up, Ready, active (rank 0).
+	acts := m.Step(core.Event{At: 0, Body: core.NodeStarted{}})
+	get := acts[0].(core.ObjectGet)
+	acts = m.Step(core.Event{At: 0, Body: core.ObjectGetDone{Req: get.Req, Err: core.ErrNotFound}})
 	timer := acts[0].(core.SetTimer)
 	acts = m.Step(core.Event{At: 0, Body: core.TimerFired{ID: timer.ID, Gen: timer.Gen}})
-	tail := acts[0].(core.LogCheckTail)
-	acts = m.Step(core.Event{At: 0, Body: core.LogCheckTailDone{
+	tail := acts[0].(core.LogGetEnd)
+	acts = m.Step(core.Event{At: 0, Body: core.LogGetEndDone{
 		Req: tail.Req, Tail: 0, Err: core.OK, Outcome: core.Applied,
 	}})
 	if !m.Ready() || !m.IsActive() {
@@ -95,7 +95,7 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 	acts = m.Step(core.Event{At: core.Time(20 * core.Millisecond), Body: core.TimerFired{
 		ID: ckpt.ID, Gen: ckpt.Gen,
 	}})
-	put, ok := acts[0].(core.ObjPut)
+	put, ok := acts[0].(core.ObjectPut)
 	if !ok || put.Key != "ckpt/latest" || len(put.Data) == 0 {
 		t.Fatalf("checkpoint action = %#v, want ObjPut", acts[0])
 	}
@@ -103,12 +103,12 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 	if err != nil || slot != 1 {
 		t.Fatalf("published snapshot slot=%d err=%v, want 1", slot, err)
 	}
-	acts = m.Step(core.Event{At: 0, Body: core.ObjPutDone{
+	acts = m.Step(core.Event{At: 0, Body: core.ObjectPutDone{
 		Req: put.Req, Key: put.Key, Err: core.OK, Outcome: core.Applied,
 	}})
 	// KeepSlots=1, ckptSlot=1: below=0, no trim.
 	if len(acts) != 0 {
-		if _, isTrim := acts[0].(core.LogTrim); isTrim {
+		if _, isTrim := acts[0].(core.LogDeleteOld); isTrim {
 			t.Fatalf("unexpected trim with nothing below keep window: %v", acts)
 		}
 	}
@@ -125,11 +125,11 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 	acts = m.Step(core.Event{At: core.Time(40 * core.Millisecond), Body: core.TimerFired{
 		ID: machine.TimerCkpt, Gen: ckpt.Gen + 1,
 	}})
-	put = acts[0].(core.ObjPut)
-	acts = m.Step(core.Event{At: 0, Body: core.ObjPutDone{
+	put = acts[0].(core.ObjectPut)
+	acts = m.Step(core.Event{At: 0, Body: core.ObjectPutDone{
 		Req: put.Req, Key: put.Key, Err: core.OK, Outcome: core.Applied,
 	}})
-	trim, ok := acts[0].(core.LogTrim)
+	trim, ok := acts[0].(core.LogDeleteOld)
 	if !ok {
 		t.Fatalf("after put actions = %v, want LogTrim", acts)
 	}
@@ -137,7 +137,7 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 	if trim.Through != 1 {
 		t.Fatalf("LogTrim Through = %d, want 1", trim.Through)
 	}
-	m.Step(core.Event{At: 0, Body: core.LogTrimDone{Req: trim.Req, Err: core.OK, Outcome: core.Applied}})
+	m.Step(core.Event{At: 0, Body: core.LogDeleteOldDone{Req: trim.Req, Err: core.OK, Outcome: core.Applied}})
 }
 
 func TestRestoreMissFallsThroughToCatchUp(t *testing.T) {
@@ -145,9 +145,9 @@ func TestRestoreMissFallsThroughToCatchUp(t *testing.T) {
 		CatchUpEvery: core.Millisecond,
 		CkptKey:      "ckpt/latest",
 	})
-	acts := m.Step(core.Event{At: 0, Body: core.Started{}})
-	get := acts[0].(core.ObjGet)
-	acts = m.Step(core.Event{At: 0, Body: core.ObjGetDone{Req: get.Req, Err: core.ErrNotFound}})
+	acts := m.Step(core.Event{At: 0, Body: core.NodeStarted{}})
+	get := acts[0].(core.ObjectGet)
+	acts = m.Step(core.Event{At: 0, Body: core.ObjectGetDone{Req: get.Req, Err: core.ErrNotFound}})
 	if _, ok := acts[0].(core.SetTimer); !ok {
 		t.Fatalf("after miss = %v, want catch-up SetTimer", acts)
 	}

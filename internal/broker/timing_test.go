@@ -55,10 +55,10 @@ func TestPutDoneCountsAttempts(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	failed := false
-	h.objHook = func(a core.IOAction, run func() core.Completion) core.Completion {
-		if p, ok := a.(core.ObjPut); ok && !failed {
+	h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
+		if p, ok := a.(core.ObjectPut); ok && !failed {
 			failed = true
-			return core.ObjPutDone{Req: p.Req, Err: core.ErrUnavailable}
+			return core.ObjectPutDone{Req: p.Req, Err: core.ErrUnavailable}
 		}
 		return run()
 	}

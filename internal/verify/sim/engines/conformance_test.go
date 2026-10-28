@@ -24,14 +24,14 @@ import (
 // after each step.
 //
 // There is no test for the log engine here. The log engine is now only a
-// bridge for CPCall, and it has no replica state machine of its own. Its
+// bridge for ControlPlaneCall, and it has no replica state machine of its own. Its
 // comparison with veritas lives in the lockstep tests of package
 // internal/controlplane/machine (see TestLockstepMachineVsVeritas).
 
 const seedBudget = 50
 
 // completionFor drains the engine queue and returns the completion of req.
-func completionFor(ctx *enginetest.Ctx, req core.ReqID) (core.Completion, error) {
+func completionFor(ctx *enginetest.Ctx, req core.ReqID) (core.IOResult, error) {
 	ctx.Run()
 	c := ctx.Find(req)
 	if c == nil {
@@ -44,7 +44,7 @@ func completionFor(ctx *enginetest.Ctx, req core.ReqID) (core.Completion, error)
 type engineObjectSubject struct {
 	engine *objstore.Engine
 	ctx    *enginetest.Ctx
-	from   core.NodeRef
+	from   core.NodeInstance
 }
 
 func newEngineObjectSubject() suites.ObjectSubject {
@@ -52,7 +52,7 @@ func newEngineObjectSubject() suites.ObjectSubject {
 	return &engineObjectSubject{engine: e, ctx: enginetest.New(e, 1), from: enginetest.Ref("a")}
 }
 
-func (s *engineObjectSubject) Do(op core.IOAction) (observation.ObjectResult, error) {
+func (s *engineObjectSubject) Do(op core.IOCall) (observation.ObjectResult, error) {
 	s.engine.Execute(s.ctx, s.from, op)
 	c, err := completionFor(s.ctx, op.ReqID())
 	if err != nil {
@@ -68,7 +68,7 @@ func (s *engineObjectSubject) StateHash() (uint64, bool) { return s.engine.SpecS
 type engineControlPlaneSubject struct {
 	engine *cpengine.Engine
 	ctx    *enginetest.Ctx
-	from   core.NodeRef
+	from   core.NodeInstance
 }
 
 func newEngineControlPlaneSubject() suites.ControlPlaneSubject {
@@ -87,7 +87,7 @@ func (s *engineControlPlaneSubject) Do(op generator.ControlPlaneOp) (observation
 		if err != nil {
 			return observation.ControlPlaneResult{}, err
 		}
-		done, ok := c.(core.CPDone)
+		done, ok := c.(core.ControlPlaneDone)
 		if !ok {
 			return observation.ControlPlaneResult{}, fmt.Errorf("request %d: the completion is %T, not a CPDone", op.Call.ReqID(), c)
 		}

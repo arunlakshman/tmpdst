@@ -26,7 +26,7 @@ type ObjectStore interface {
 
 // ControlPlane is the HTTP client adapter for the control plane.
 type ControlPlane interface {
-	Call(ctx context.Context, op core.CPOp) (core.CPResp, error)
+	Call(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, error)
 }
 
 // Conns writes to and closes accepted connections. Writes on one connection
@@ -44,30 +44,30 @@ type Conns interface {
 type Classifier interface {
 	// Classify reduces err to plain data. It logs err; the core only sees the
 	// code. The Outcome depends on which operation failed, not only on err.
-	Classify(a core.IOAction, err error) (core.ErrCode, core.Outcome)
+	Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome)
 }
 
 // Sink is the node's pair of inboxes (docs/flow-control.md sec. 3). Callers route
-// with core.ClassOf. The loop picks with core.InboxPolicy and stamps At/Wall
+// with core.InboxKindOf. The loop picks with core.InboxPolicy and stamps At/Wall
 // when it dequeues.
 type Sink interface {
 	// DeliverControl is used by timer callbacks and I/O completion goroutines.
 	// It never blocks: the control queue is bounded by construction.
-	DeliverControl(body core.EventBody)
+	DeliverControl(body core.EventData)
 	// DeliverData is used by connection reader goroutines. It blocks when the
 	// data queue is full (a safety net; real backpressure is PauseReads).
-	DeliverData(body core.EventBody)
+	DeliverData(body core.EventData)
 	// Closed is closed when the incarnation ends. Later deliveries are dropped,
 	// never block, and never reach the next incarnation.
 	Closed() <-chan struct{}
 }
 
-// Executor runs I/O only. The loop handles Emit, timers, Trip, Exit and
-// returns an error on an unknown action. Exactly one Completion per IOAction, with the
+// Executor runs I/O only. The loop handles RecordFact, timers, StopForRestart, ShutdownDone and
+// returns an error on an unknown action. Exactly one IOResult per IOCall, with the
 // same ReqID, delivered to the Sink and never on the caller's goroutine.
 // Execute MUST NOT block: it hands work to goroutines/queues.
 type Executor interface {
-	Execute(a core.IOAction)
+	Execute(a core.IOCall)
 }
 
 // Bundle is everything nondeterministic a production broker process needs.
@@ -77,9 +77,9 @@ type Bundle struct {
 	ControlPlane ControlPlane
 	Conns        Conns
 	Classifier   Classifier
-	Env          core.Env        // crypto-seeded Rand, inert Buggify, logging Assertions
+	Env          core.Env        // crypto-seeded Rand, inert FaultInjector, logging Assertions
 	Inbox        *Inbox          // shared with the Executor and readers; Run closes it on return
-	Facts        func(core.Fact) // optional: receives Emit facts (tracing)
+	Facts        func(core.Fact) // optional: receives RecordFact facts (tracing)
 	Shutdown     <-chan struct{} // optional: closing it asks Run for a graceful stop (see ShutdownOnSignal)
-	StopGrace    core.Duration   // time the machine gets after Shutdown to emit Exit
+	StopGrace    core.Duration   // time the machine gets after Shutdown to emit ShutdownDone
 }

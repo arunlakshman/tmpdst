@@ -39,7 +39,7 @@ func Start(t testing.TB, cfg machine.Config, log exec.Log, objs exec.ObjectStore
 	t.Helper()
 	n := server.New(server.Config{
 		Machine: cfg, Log: log, Objects: objs,
-		Self: core.NodeRef{Node: "cp-0"},
+		Self: core.NodeInstance{Node: "cp-0"},
 	})
 	if err := n.Start(t.Context()); err != nil {
 		t.Fatal(err)

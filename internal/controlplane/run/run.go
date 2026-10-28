@@ -24,10 +24,10 @@ type Clock interface {
 	Wall() core.WallTime
 }
 
-// Executor runs I/O only. Exactly one Completion per IOAction, delivered to
+// Executor runs I/O only. Exactly one IOResult per IOCall, delivered to
 // the Sink and never on the caller's goroutine. Execute MUST NOT block.
 type Executor interface {
-	Execute(a core.IOAction)
+	Execute(a core.IOCall)
 }
 
 // InjectFunc runs on the loop goroutine and returns actions to dispatch
@@ -54,7 +54,7 @@ type Bundle struct {
 // dequeue, Step, actions dispatched in slice order. Returns ErrTripped
 // (wrapped) on Trip, nil on Exit, ErrStopped on ctx done, ErrKilled when
 // StopGrace expires after Shutdown. Closes b.Inbox on return.
-func Run(ctx context.Context, b Bundle, exec Executor, f core.Factory, self core.NodeRef) error {
+func Run(ctx context.Context, b Bundle, exec Executor, f core.MachineFactory, self core.NodeInstance) error {
 	in := b.Inbox
 	if in == nil {
 		return errors.New("controlplane/run: Bundle.Inbox is nil")
@@ -68,11 +68,11 @@ func Run(ctx context.Context, b Bundle, exec Executor, f core.Factory, self core
 		}
 	}()
 
-	step := func(body core.EventBody) (bool, error) {
+	step := func(body core.EventData) (bool, error) {
 		acts := m.Step(core.Event{At: b.Clock.Mono(), Wall: b.Clock.Wall(), Body: body})
 		return r.dispatch(acts)
 	}
-	if done, err := step(core.Started{Self: self}); done {
+	if done, err := step(core.NodeStarted{Self: self}); done {
 		return err
 	}
 	var policy core.InboxPolicy = core.ControlFirst{}
@@ -86,7 +86,7 @@ func Run(ctx context.Context, b Bundle, exec Executor, f core.Factory, self core
 		select {
 		case <-shutdown:
 			shutdown = nil
-			in.DeliverControl(core.Stop{Deadline: b.Clock.Mono() + core.Time(b.StopGrace)})
+			in.DeliverControl(core.StopRequest{Deadline: b.Clock.Mono() + core.Time(b.StopGrace)})
 			t := time.NewTimer(time.Duration(b.StopGrace))
 			defer t.Stop()
 			kill = t.C
@@ -171,9 +171,9 @@ func (r *runner) runInject(fn InjectFunc) (bool, error) {
 func (r *runner) dispatch(acts []core.Action) (bool, error) {
 	for _, a := range acts {
 		switch a := a.(type) {
-		case core.IOAction:
+		case core.IOCall:
 			r.exec.Execute(a)
-		case core.Emit:
+		case core.RecordFact:
 			if r.b.Facts != nil {
 				r.b.Facts(a.Fact)
 			}
@@ -181,10 +181,10 @@ func (r *runner) dispatch(acts []core.Action) (bool, error) {
 			r.setTimer(a)
 		case core.CancelTimer:
 			r.cancelTimer(a.ID)
-		case core.Trip:
+		case core.StopForRestart:
 			r.after()
 			return true, fmt.Errorf("%w: %s", ErrTripped, a.Cause)
-		case core.Exit:
+		case core.ShutdownDone:
 			r.after()
 			return true, nil
 		default:

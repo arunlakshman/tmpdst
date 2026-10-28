@@ -69,17 +69,17 @@ func (m *Machine) maybeCheckpoint() []core.Action {
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingObjPut
-	return []core.Action{core.ObjPut{Req: m.pending, Key: m.ckptKey(), Data: m.ckptData}}
+	return []core.Action{core.ObjectPut{Req: m.pending, Key: m.ckptKey(), Data: m.ckptData}}
 }
 
 func (m *Machine) emitCkptGet() []core.Action {
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingObjGet
-	return []core.Action{core.ObjGet{Req: m.pending, Ref: core.SegmentRef{Key: m.ckptKey()}}}
+	return []core.Action{core.ObjectGet{Req: m.pending, Ref: core.SegmentRef{Key: m.ckptKey()}}}
 }
 
-func (m *Machine) onObjGetDone(d core.ObjGetDone) []core.Action {
+func (m *Machine) onObjGetDone(d core.ObjectGetDone) []core.Action {
 	if d.Req != m.pending || m.pendingKind != pendingObjGet {
 		return nil
 	}
@@ -112,7 +112,7 @@ func (m *Machine) armCkptRetry() []core.Action {
 	return []core.Action{core.SetTimer{ID: timerCkpt, Gen: m.ckptGen, After: after}}
 }
 
-func (m *Machine) onObjPutDone(d core.ObjPutDone) []core.Action {
+func (m *Machine) onObjPutDone(d core.ObjectPutDone) []core.Action {
 	if d.Req != m.pending || m.pendingKind != pendingObjPut {
 		return nil
 	}
@@ -142,10 +142,10 @@ func (m *Machine) emitTrim(ckptSlot core.LogSlot) []core.Action {
 	m.pending = m.nextReq
 	m.pendingKind = pendingTrim
 	m.fillSlot = through // stash Through for onTrimDone
-	return []core.Action{core.LogTrim{Req: m.pending, Through: through}}
+	return []core.Action{core.LogDeleteOld{Req: m.pending, Through: through}}
 }
 
-func (m *Machine) onTrimDone(d core.LogTrimDone) []core.Action {
+func (m *Machine) onTrimDone(d core.LogDeleteOldDone) []core.Action {
 	if d.Req != m.pending || m.pendingKind != pendingTrim {
 		return nil
 	}
@@ -157,7 +157,7 @@ func (m *Machine) onTrimDone(d core.LogTrimDone) []core.Action {
 		m.env.Reachable("logcp-sim: log trimmed below a checkpoint")
 		if m.cfg.Bug == BugTrimDelete {
 			m.env.Always(false, "logcp-sim: a Put never wins a slot below the trim floor",
-				core.Detail{Key: "through", Value: through})
+				core.ContextPair{Key: "through", Value: through})
 		}
 	}
 	return nil

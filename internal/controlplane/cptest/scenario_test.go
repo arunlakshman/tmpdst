@@ -37,8 +37,8 @@ func compareSteps(t *testing.T, subject suites.ControlPlaneSubject, ops []genera
 
 // call wraps a control-plane operation. The request number is not used by the
 // stores, so it is always 1.
-func call(op core.CPOp) generator.ControlPlaneOp {
-	return generator.NewCall(core.CPCall{Req: 1, Op: op})
+func call(op core.ControlPlaneOperation) generator.ControlPlaneOp {
+	return generator.NewCall(core.ControlPlaneCall{Req: 1, Op: op})
 }
 
 // replayOps commits a three-batch, two-partition segment, replays it after the
@@ -65,7 +65,7 @@ func replayOps() []generator.ControlPlaneOp {
 		commit("s3", []core.PendingBatch{{TP: a}}), // invalid: no records
 		commit("s3", batches("s3")),                // the failed key is reusable
 		commit("re", batches("s3")),                // the same batches, a fresh key: new offsets
-		call(core.Lookup{TP: a}), call(core.Lookup{TP: b, From: 6, MaxBytes: 25}),
+		call(core.FindSegments{TP: a}), call(core.FindSegments{TP: b, From: 6, MaxBytes: 25}),
 		call(core.DescribeTopics{}),
 	}
 }
@@ -107,7 +107,7 @@ func manyBatchesOps() []generator.ControlPlaneOp {
 	for _, tp := range []core.TopicPartition{a, b, core.TP("m", 2)} {
 		for from := int64(0); from <= 520; from += 7 {
 			for _, mb := range []int32{0, 1, 25, 300} {
-				ops = append(ops, call(core.Lookup{TP: tp, From: core.Offset(from), MaxBytes: mb}))
+				ops = append(ops, call(core.FindSegments{TP: tp, From: core.Offset(from), MaxBytes: mb}))
 			}
 		}
 	}
@@ -135,8 +135,8 @@ func TestRoundTrip(t *testing.T) {
 	if got := cr.(core.CommitSegmentResp).Assigned; len(got) != 1 || got[0].Base != 0 || got[0].Count != 4 || got[0].Loc != commit.Batches[0].Loc {
 		t.Fatalf("commit: %+v", got)
 	}
-	l, err := c.Call(ctx, core.Lookup{TP: commit.Batches[0].TP})
-	if err != nil || l.(core.LookupResp).End != 4 || len(l.(core.LookupResp).Ranges) != 1 {
+	l, err := c.Call(ctx, core.FindSegments{TP: commit.Batches[0].TP})
+	if err != nil || l.(core.FindSegmentsResp).End != 4 || len(l.(core.FindSegmentsResp).Ranges) != 1 {
 		t.Fatalf("lookup: %+v %v", l, err)
 	}
 	d, err := c.Call(ctx, core.DescribeTopics{})
@@ -149,7 +149,7 @@ func TestRoundTrip(t *testing.T) {
 	if !errors.As(err, &be) || be.Code != core.ErrConflict {
 		t.Fatalf("want ErrConflict, got %v", err)
 	}
-	if code, out := (cpclient.Classifier{}).Classify(core.CPCall{Op: commit}, err); code != core.ErrConflict || out != core.NotApplied {
+	if code, out := (cpclient.Classifier{}).Classify(core.ControlPlaneCall{Op: commit}, err); code != core.ErrConflict || out != core.NotApplied {
 		t.Fatalf("classify: %v %v", code, out)
 	}
 }

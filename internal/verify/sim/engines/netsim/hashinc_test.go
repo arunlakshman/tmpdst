@@ -18,13 +18,13 @@ func TestIncrementalStateHashMatchesFull(t *testing.T) {
 		RandomCloseProb: 0.03, BlackHoleProb: 0.03}
 	for seed := uint64(1); seed <= 40; seed++ {
 		h := newHarness(t, seed, f)
-		nodes := map[string]core.NodeRef{}
+		nodes := map[string]core.NodeInstance{}
 		for _, n := range []string{"a", "b", "c"} {
 			nodes[n] = h.boot(n)
 		}
 		names := []string{"a", "b", "c"}
 		type cn struct {
-			ref  core.NodeRef
+			ref  core.NodeInstance
 			conn core.ConnID
 		}
 		var conns []cn
@@ -41,7 +41,7 @@ func TestIncrementalStateHashMatchesFull(t *testing.T) {
 			case 0:
 				what = "dial"
 				r := h.req()
-				h.eng.Execute(h, a, core.Dial{Req: r, Addr: names[h.rnd.Intn(3)]})
+				h.eng.Execute(h, a, core.Connect{Req: r, Addr: names[h.rnd.Intn(3)]})
 			case 1, 2, 3:
 				what = "send"
 				if len(conns) > 0 {

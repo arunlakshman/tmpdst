@@ -21,7 +21,7 @@ type Attrition struct {
 	// during Chaos.
 	CrashProb   float64
 	CrashWeight float64
-	// GracefulWeight drives core.Stop: a graceful shutdown that ends in core.Exit.
+	// GracefulWeight drives core.StopRequest: a graceful shutdown that ends in core.ShutdownDone.
 	GracefulWeight float64
 	RecoveryDelay  [2]core.Duration
 }
@@ -90,7 +90,7 @@ type Config struct {
 	// code that is never run cannot declare itself; the campaign declares it
 	// here. Report.Coverage lists each one never reached (Kind "reachable",
 	// zero Checks if it never ran at all).
-	ExpectReachable []core.Prop
+	ExpectReachable []core.PropertyID
 	// CheckDeterminism replays every Kth seed and compares
 	// (TraceHash, RandCalls, Steps). 0 = off.
 	CheckDeterminism uint32
@@ -108,7 +108,7 @@ const (
 	FailViolation FailKind = iota
 	// FailInconclusive means the run could not decide.
 	FailInconclusive
-	FailProtocol // Trip/Exit not last, unknown action, reply to unknown request, duplicate completion
+	FailProtocol // StopForRestart/ShutdownDone not last, unknown action, reply to unknown request, duplicate completion
 	FailPanic    // recovered from Step / Factory
 	FailMaxSteps
 	FailNondeterminism
@@ -118,7 +118,7 @@ const (
 type Failure struct {
 	Seed uint64
 	Kind FailKind
-	Prop core.Prop
+	Prop core.PropertyID
 	Step uint64
 	At   Time
 	Msg  string
@@ -164,7 +164,7 @@ type Report struct {
 
 // AssertionStat is the tally of one assertion across a run.
 type AssertionStat struct {
-	Prop      core.Prop
+	Prop      core.PropertyID
 	Kind      string
 	Checks    uint64
 	Passes    uint64

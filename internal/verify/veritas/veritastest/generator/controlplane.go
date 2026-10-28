@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// CreateTopic is the direct topic-creation call. It is not a CPCall because
+// CreateTopic is the direct topic-creation call. It is not a ControlPlaneCall because
 // the control plane takes it outside the broker protocol.
 type CreateTopic struct {
 	Name       string
@@ -17,7 +17,7 @@ type CreateTopic struct {
 // ControlPlaneOp is one control-plane operation. Exactly one field is not nil.
 type ControlPlaneOp struct {
 	CreateTopic *CreateTopic
-	Call        *core.CPCall
+	Call        *core.ControlPlaneCall
 }
 
 // NewCreateTopic returns an operation that creates a topic.
@@ -26,7 +26,7 @@ func NewCreateTopic(name string, partitions int32) ControlPlaneOp {
 }
 
 // NewCall returns an operation that sends call.
-func NewCall(call core.CPCall) ControlPlaneOp { return ControlPlaneOp{Call: &call} }
+func NewCall(call core.ControlPlaneCall) ControlPlaneOp { return ControlPlaneOp{Call: &call} }
 
 // Describe returns a short plain-English text for an operation, for failure
 // messages.
@@ -40,7 +40,7 @@ func (o ControlPlaneOp) Describe() string {
 	switch op := o.Call.Op.(type) {
 	case core.CommitSegment:
 		return fmt.Sprintf("request %d: commit segment %q with %d batches", o.Call.Req, op.SegmentKey, len(op.Batches))
-	case core.Lookup:
+	case core.FindSegments:
 		return fmt.Sprintf("request %d: look up %v from offset %d with max bytes %d", o.Call.Req, op.TP, op.From, op.MaxBytes)
 	case core.DescribeTopics:
 		return fmt.Sprintf("request %d: describe topics %q", o.Call.Req, op.Topics)
@@ -60,11 +60,11 @@ func ControlPlaneOps(p Profile) func(r *veritastest.Rand, i int) ControlPlaneOp 
 		case 0:
 			return genCreateTopic(p, r)
 		case 1:
-			return NewCall(core.CPCall{Req: req, Op: genCommit(p, r)})
+			return NewCall(core.ControlPlaneCall{Req: req, Op: genCommit(p, r)})
 		case 2:
-			return NewCall(core.CPCall{Req: req, Op: genLookup(p, r)})
+			return NewCall(core.ControlPlaneCall{Req: req, Op: genLookup(p, r)})
 		}
-		return NewCall(core.CPCall{Req: req, Op: genDescribe(p, r)})
+		return NewCall(core.ControlPlaneCall{Req: req, Op: genDescribe(p, r)})
 	}
 }
 
@@ -124,7 +124,7 @@ func genInvalidCommit(p Profile, r *veritastest.Rand) core.CommitSegment {
 	return core.CommitSegment{SegmentKey: key, Batches: batches}
 }
 
-func genLookup(p Profile, r *veritastest.Rand) core.Lookup {
+func genLookup(p Profile, r *veritastest.Rand) core.FindSegments {
 	tp := core.TP(pick(r, p.Topics), int32(r.Intn(p.PartitionCount)))
 	from := int64(r.Intn(p.LookupShortSpan))
 	if percent(r, p.LookupLongPercent) {
@@ -133,7 +133,7 @@ func genLookup(p Profile, r *veritastest.Rand) core.Lookup {
 	if percent(r, p.LookupNegativeFromPercent) {
 		from = -1
 	}
-	return core.Lookup{TP: tp, From: core.Offset(from), MaxBytes: pick(r, p.MaxBytesChoices)}
+	return core.FindSegments{TP: tp, From: core.Offset(from), MaxBytes: pick(r, p.MaxBytesChoices)}
 }
 
 func genDescribe(p Profile, r *veritastest.Rand) core.DescribeTopics {
@@ -207,18 +207,18 @@ func ShrinkControlPlaneOp(op ControlPlaneOp) []ControlPlaneOp {
 		return nil
 	}
 	call := *op.Call
-	var ops []core.CPOp
+	var ops []core.ControlPlaneOperation
 	switch o := call.Op.(type) {
 	case core.CommitSegment:
 		ops = shrinkCommit(o)
-	case core.Lookup:
+	case core.FindSegments:
 		ops = shrinkLookup(o)
 	case core.DescribeTopics:
 		ops = shrinkDescribe(o)
 	}
 	out := make([]ControlPlaneOp, 0, len(ops))
 	for _, o := range ops {
-		out = append(out, NewCall(core.CPCall{Req: call.Req, Op: o}))
+		out = append(out, NewCall(core.ControlPlaneCall{Req: call.Req, Op: o}))
 	}
 	return out
 }
@@ -234,8 +234,8 @@ func shrinkCreateTopic(c CreateTopic) []ControlPlaneOp {
 	return out
 }
 
-func shrinkCommit(c core.CommitSegment) []core.CPOp {
-	var out []core.CPOp
+func shrinkCommit(c core.CommitSegment) []core.ControlPlaneOperation {
+	var out []core.ControlPlaneOperation
 	add := func(key string, batches []core.PendingBatch) {
 		out = append(out, core.CommitSegment{SegmentKey: key, Batches: batches})
 	}
@@ -276,28 +276,28 @@ func simplerBatches(batches []core.PendingBatch) ([]core.PendingBatch, bool) {
 	return out, changed
 }
 
-func shrinkLookup(l core.Lookup) []core.CPOp {
-	var out []core.CPOp
+func shrinkLookup(l core.FindSegments) []core.ControlPlaneOperation {
+	var out []core.ControlPlaneOperation
 	if l.MaxBytes != 0 {
-		out = append(out, core.Lookup{TP: l.TP, From: l.From, MaxBytes: 0})
+		out = append(out, core.FindSegments{TP: l.TP, From: l.From, MaxBytes: 0})
 	}
 	if l.From > 0 {
-		out = append(out, core.Lookup{TP: l.TP, From: 0, MaxBytes: l.MaxBytes})
+		out = append(out, core.FindSegments{TP: l.TP, From: 0, MaxBytes: l.MaxBytes})
 	}
 	if l.From > 1 {
-		out = append(out, core.Lookup{TP: l.TP, From: l.From / 2, MaxBytes: l.MaxBytes})
+		out = append(out, core.FindSegments{TP: l.TP, From: l.From / 2, MaxBytes: l.MaxBytes})
 	}
 	if l.TP.Partition > 0 {
-		out = append(out, core.Lookup{TP: core.TP(l.TP.Topic, 0), From: l.From, MaxBytes: l.MaxBytes})
+		out = append(out, core.FindSegments{TP: core.TP(l.TP.Topic, 0), From: l.From, MaxBytes: l.MaxBytes})
 	}
 	for _, t := range shorterStrings(l.TP.Topic) {
-		out = append(out, core.Lookup{TP: core.TP(t, l.TP.Partition), From: l.From, MaxBytes: l.MaxBytes})
+		out = append(out, core.FindSegments{TP: core.TP(t, l.TP.Partition), From: l.From, MaxBytes: l.MaxBytes})
 	}
 	return out
 }
 
-func shrinkDescribe(d core.DescribeTopics) []core.CPOp {
-	var out []core.CPOp
+func shrinkDescribe(d core.DescribeTopics) []core.ControlPlaneOperation {
+	var out []core.ControlPlaneOperation
 	if len(d.Topics) > 0 {
 		out = append(out, core.DescribeTopics{})
 	}
@@ -319,15 +319,15 @@ func FormatControlPlaneOp(op ControlPlaneOp) string {
 	case op.Call == nil:
 		return "generator.ControlPlaneOp{}"
 	}
-	return fmt.Sprintf("generator.NewCall(core.CPCall{Req: %d, Op: %s})", op.Call.Req, formatCPOp(op.Call.Op))
+	return fmt.Sprintf("generator.NewCall(core.ControlPlaneCall{Req: %d, Op: %s})", op.Call.Req, formatCPOp(op.Call.Op))
 }
 
-func formatCPOp(op core.CPOp) string {
+func formatCPOp(op core.ControlPlaneOperation) string {
 	switch op := op.(type) {
 	case core.CommitSegment:
 		return fmt.Sprintf("core.CommitSegment{SegmentKey: %q%s}", op.SegmentKey, formatBatchesField(op.Batches))
-	case core.Lookup:
-		return fmt.Sprintf("core.Lookup{TP: core.TP(%q, %d), From: %d, MaxBytes: %d}", op.TP.Topic, op.TP.Partition, op.From, op.MaxBytes)
+	case core.FindSegments:
+		return fmt.Sprintf("core.FindSegments{TP: core.TP(%q, %d), From: %d, MaxBytes: %d}", op.TP.Topic, op.TP.Partition, op.From, op.MaxBytes)
 	case core.DescribeTopics:
 		if op.Topics == nil {
 			return "core.DescribeTopics{}"

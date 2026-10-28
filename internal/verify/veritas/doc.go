@@ -4,7 +4,7 @@
 // has no faults, it runs one operation at a time, and it keeps plain data. It
 // is short so that a reader can see that it is correct.
 //
-// ObjectStore and ControlPlane answer a core.IOAction with a core.Completion
+// ObjectStore and ControlPlane answer a core.IOCall with a core.IOResult
 // through Exec. Partition has Append and Read. All three have a StateHash.
 //
 // A spec is also used as a test fake (the adapters over the specs are in

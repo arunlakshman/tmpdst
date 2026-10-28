@@ -188,10 +188,10 @@ func NewMem() *Applier { return New(NewMemKV()) }
 
 // Apply folds one log entry at slot into the store. No-ops leave state unchanged.
 // A store failure panics (fail-stop), matching Commit.
-func (a *Applier) Apply(slot int64, e Entry) core.CPDone {
+func (a *Applier) Apply(slot int64, e Entry) core.ControlPlaneDone {
 	switch e.Kind {
 	case KindNoop:
-		return core.CPDone{Req: core.ReqID(slot), Outcome: core.Applied}
+		return core.ControlPlaneDone{Req: core.ReqID(slot), Outcome: core.Applied}
 	case KindCommit:
 		if len(e.WriterBases) == len(e.Commit.Batches) && len(e.WriterBases) > 0 {
 			d := a.commitWithBases(slot, e.Commit, e.WriterBases)
@@ -205,17 +205,17 @@ func (a *Applier) Apply(slot int64, e Entry) core.CPDone {
 		d.Req = core.ReqID(slot)
 		return d
 	case KindCreateTopic:
-		return core.CPDone{Req: core.ReqID(slot), Err: a.CreateTopic(e.Topic, e.Parts)}
+		return core.ControlPlaneDone{Req: core.ReqID(slot), Err: a.CreateTopic(e.Topic, e.Parts)}
 	default:
-		return core.CPDone{Req: core.ReqID(slot), Err: core.ErrInvalid}
+		return core.ControlPlaneDone{Req: core.ReqID(slot), Err: core.ErrInvalid}
 	}
 }
 
 // ApplyBytes decodes data then Apply. Returns ErrCorrupt without mutating state.
-func (a *Applier) ApplyBytes(slot int64, data []byte) (core.CPDone, error) {
+func (a *Applier) ApplyBytes(slot int64, data []byte) (core.ControlPlaneDone, error) {
 	e, err := Decode(data)
 	if err != nil {
-		return core.CPDone{}, err
+		return core.ControlPlaneDone{}, err
 	}
 	return a.Apply(slot, e), nil
 }

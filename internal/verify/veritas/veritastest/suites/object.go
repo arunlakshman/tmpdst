@@ -44,9 +44,9 @@ func (p *ObjectPair) nextReq() core.ReqID {
 // empty prefix returns the sorted keys of the spec. The suite gives the
 // subject its own copy of the data of a Put and writes over that copy after the
 // call, so a subject that keeps the caller's slice returns wrong data later.
-func ObjectStoreComparator(p generator.Profile, newSubject func() ObjectSubject) veritastest.SpecComparator[*ObjectPair, core.IOAction] {
-	return veritastest.SpecComparator[*ObjectPair, core.IOAction]{
-		Name:          "core.IOAction",
+func ObjectStoreComparator(p generator.Profile, newSubject func() ObjectSubject) veritastest.SpecComparator[*ObjectPair, core.IOCall] {
+	return veritastest.SpecComparator[*ObjectPair, core.IOCall]{
+		Name:          "core.IOCall",
 		New:           func() *ObjectPair { return &ObjectPair{spec: veritas.NewObjectStore(), subject: newSubject()} },
 		Gen:           generator.ObjectOps(p),
 		Step:          objectStep,
@@ -65,7 +65,7 @@ func ObjectStore(t veritastest.Reporter, p generator.Profile, newSubject func() 
 	veritastest.Run(t, ObjectStoreComparator(p, newSubject), opts)
 }
 
-func objectStep(p *ObjectPair, op core.IOAction) error {
+func objectStep(p *ObjectPair, op core.IOCall) error {
 	specResult := observation.FromObjectCompletion(p.spec.Exec(op))
 	subjectOp, overwrite := objectOpForSubject(op)
 	subjectResult, err := p.subject.Do(subjectOp)
@@ -89,8 +89,8 @@ func objectStep(p *ObjectPair, op core.IOAction) error {
 // objectOpForSubject returns op with its own copy of the Put data, and a
 // function that writes over that copy. The copy keeps the generated sequence
 // intact for replay while still testing that the subject copies its input.
-func objectOpForSubject(op core.IOAction) (core.IOAction, func()) {
-	put, ok := op.(core.ObjPut)
+func objectOpForSubject(op core.IOCall) (core.IOCall, func()) {
+	put, ok := op.(core.ObjectPut)
 	if !ok {
 		return op, func() {}
 	}
@@ -103,7 +103,7 @@ func objectOpForSubject(op core.IOAction) (core.IOAction, func()) {
 }
 
 func objectInvariant(p *ObjectPair) error {
-	result, err := p.subject.Do(core.ObjList{Req: p.nextReq()})
+	result, err := p.subject.Do(core.ObjectList{Req: p.nextReq()})
 	if err != nil {
 		return fmt.Errorf("the subject could not list all keys: %w", err)
 	}

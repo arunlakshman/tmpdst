@@ -336,21 +336,51 @@ func (m *Machine) holeOpen() bool {
 	return !ok
 }
 
-func (m *Machine) maybeHoleFill() []core.Action {
+type holePlan uint8
+
+const (
+	holePlanWait holePlan = iota
+	holePlanFill
+	holePlanArm
+	holePlanSkip
+)
+
+func (m *Machine) holeFillPlan() holePlan {
 	if m.cfg.Bug == BugHoleSkip {
-		// Mutant: advance past the hole without a no-op fill.
-		m.applied++
-		m.holeArmed = false
-		m.env.Always(false, "logcp-sim: a replica's state equals the replay of the log at its slot",
-			core.Detail{Key: "slot", Value: m.applied})
-		return m.progress()
+		return holePlanSkip
 	}
 	if m.cfg.HoleAfter <= 0 {
-		return m.emitHoleFill()
+		return holePlanFill
 	}
 	if m.holeArmed {
+		return holePlanWait
+	}
+	return holePlanArm
+}
+
+func (m *Machine) maybeHoleFill() []core.Action {
+	switch m.holeFillPlan() {
+	case holePlanSkip:
+		return m.skipHole()
+	case holePlanFill:
+		return m.emitHoleFill()
+	case holePlanArm:
+		return m.armHoleFill()
+	default:
 		return nil
 	}
+}
+
+func (m *Machine) skipHole() []core.Action {
+	// Mutant: advance past the hole without a no-op fill.
+	m.applied++
+	m.holeArmed = false
+	m.env.Always(false, "logcp-sim: a replica's state equals the replay of the log at its slot",
+		core.Detail{Key: "slot", Value: m.applied})
+	return m.progress()
+}
+
+func (m *Machine) armHoleFill() []core.Action {
 	m.holeGen++
 	m.holeArmed = true
 	return []core.Action{core.SetTimer{ID: timerHoleFill, Gen: m.holeGen, After: m.cfg.HoleAfter}}

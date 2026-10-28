@@ -8,7 +8,16 @@ import (
 	"manifester/core"
 )
 
-type testEnv struct{ n uint64 }
+type alwaysHit struct {
+	cond    bool
+	prop    core.Prop
+	details []core.Detail
+}
+
+type testEnv struct {
+	n      uint64
+	always []alwaysHit
+}
 
 func (e *testEnv) Uint64() uint64 {
 	e.n++
@@ -28,10 +37,12 @@ func (e *testEnv) NewID() core.ID {
 	}
 	return id
 }
-func (e *testEnv) Maybe(core.Site) bool                                { return false }
-func (e *testEnv) MaybeP(core.Site, float64) bool                      { return false }
-func (e *testEnv) Fault(core.Site, float64) bool                       { return false }
-func (e *testEnv) Always(bool, core.Prop, ...core.Detail)              {}
+func (e *testEnv) Maybe(core.Site) bool           { return false }
+func (e *testEnv) MaybeP(core.Site, float64) bool { return false }
+func (e *testEnv) Fault(core.Site, float64) bool  { return false }
+func (e *testEnv) Always(cond bool, p core.Prop, details ...core.Detail) {
+	e.always = append(e.always, alwaysHit{cond: cond, prop: p, details: details})
+}
 func (e *testEnv) AlwaysOrUnreachable(bool, core.Prop, ...core.Detail) {}
 func (e *testEnv) Sometimes(bool, core.Prop)                           {}
 func (e *testEnv) Reachable(core.Prop)                                 {}
@@ -39,12 +50,19 @@ func (e *testEnv) Unreachable(core.Prop, ...core.Detail)               {}
 
 func newMachine(t *testing.T, cfg machine.Config) *machine.Machine {
 	t.Helper()
-	m := machine.New(cfg)(&testEnv{}, core.NodeRef{Node: "cp-0"})
+	m, _ := newMachineEnv(t, cfg)
+	return m
+}
+
+func newMachineEnv(t *testing.T, cfg machine.Config) (*machine.Machine, *testEnv) {
+	t.Helper()
+	env := &testEnv{}
+	m := machine.New(cfg)(env, core.NodeRef{Node: "cp-0"})
 	sm, ok := m.(*machine.Machine)
 	if !ok {
 		t.Fatalf("New returned %T, want *machine.Machine", m)
 	}
-	return sm
+	return sm, env
 }
 
 func step(m *machine.Machine, body core.EventBody) []core.Action {

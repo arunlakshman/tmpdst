@@ -9,10 +9,10 @@ import (
 // kafka_test, which also imports veritas; this package never does).
 
 // NewOracle returns a fresh oracle invariant for o.
-func NewOracle(o Opts) sim.Invariant { return newOracle(o) }
+func NewOracle(o Opts) sim.SafetyRule { return newOracle(o) }
 
 // OracleLog is the log inv (from NewOracle) reconstructed for tp.
-func OracleLog(inv sim.Invariant, tp core.TopicPartition) []string {
+func OracleLog(inv sim.SafetyRule, tp core.TopicPartition) []string {
 	o := inv.(*oracle)
 	return o.logs[o.idx[tp]].vals
 }

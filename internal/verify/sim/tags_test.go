@@ -98,13 +98,13 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 	}
 
 	seen := map[uint64]string{}
-	check := func(name string, fn func(h *hasher)) {
+	check := func(name string, fn func(h *stateHasher)) {
 		defer func() {
 			if x := recover(); x != nil {
 				t.Errorf("%s has no tag: %v", name, x)
 			}
 		}()
-		h := newHasher()
+		h := newStateHasher()
 		fn(&h)
 		if prev, dup := seen[h.Sum()]; dup {
 			t.Errorf("%s and %s hash alike", name, prev)
@@ -112,19 +112,19 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		seen[h.Sum()] = name
 	}
 	for n, v := range events {
-		check("event "+n, func(h *hasher) { h.event(v) })
+		check("event "+n, func(h *stateHasher) { h.event(v) })
 	}
 	for n, v := range actions {
-		check("action "+n, func(h *hasher) { h.action(v) })
+		check("action "+n, func(h *stateHasher) { h.action(v) })
 	}
 	for n, v := range ops {
-		check("cpop "+n, func(h *hasher) { h.cpOp(v) })
+		check("cpop "+n, func(h *stateHasher) { h.cpOp(v) })
 	}
 	for n, v := range resps {
-		check("cpresp "+n, func(h *hasher) { h.cpResp(v) })
+		check("cpresp "+n, func(h *stateHasher) { h.cpResp(v) })
 	}
 	for n, v := range fields {
-		check("field "+n, func(h *hasher) { h.fieldValue(v) })
+		check("field "+n, func(h *stateHasher) { h.fieldValue(v) })
 	}
 }
 

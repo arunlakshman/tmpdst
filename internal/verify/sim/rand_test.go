@@ -131,7 +131,7 @@ func TestReseed(t *testing.T) {
 
 func TestTwoSpeedSample(t *testing.T) {
 	r := NewRand(3)
-	ts := TwoSpeed{FastMin: 10, FastMax: 20, SlowMin: 1000, SlowMax: 2000, SlowProb: 0.5}
+	ts := FastWithRareSlow{FastMin: 10, FastMax: 20, SlowMin: 1000, SlowMax: 2000, SlowProb: 0.5}
 	fast, slow := 0, 0
 	for range 1000 {
 		d := ts.Sample(r)
@@ -148,7 +148,7 @@ func TestTwoSpeedSample(t *testing.T) {
 		t.Fatalf("fast=%d slow=%d", fast, slow)
 	}
 	c := r.Calls()
-	if (TwoSpeed{FastMin: 5, FastMax: 5}).Sample(r) != 5 || r.Calls() != c {
+	if (FastWithRareSlow{FastMin: 5, FastMax: 5}).Sample(r) != 5 || r.Calls() != c {
 		t.Fatal("a degenerate TwoSpeed must draw nothing")
 	}
 }

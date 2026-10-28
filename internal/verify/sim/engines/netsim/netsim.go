@@ -99,7 +99,7 @@ type item struct {
 }
 
 type dir struct {
-	lane      sim.Lane
+	lane      sim.DeliveryLane
 	lastArr   sim.Time
 	clogUntil sim.Time
 	seq       uint64
@@ -232,7 +232,7 @@ func (e *Engine) link(a, b core.NodeID) *link {
 }
 
 // pairExtra is the per-pair permanent extra latency, sampled once on first use.
-func (e *Engine) pairExtra(ctx sim.EngineCtx, a, b core.NodeID) core.Duration {
+func (e *Engine) pairExtra(ctx sim.FakeServiceContext, a, b core.NodeID) core.Duration {
 	l := e.link(a, b)
 	if !l.hasExtra {
 		l.hasExtra = true
@@ -243,13 +243,13 @@ func (e *Engine) pairExtra(ctx sim.EngineCtx, a, b core.NodeID) core.Duration {
 	return l.extra
 }
 
-func (e *Engine) partitioned(ctx sim.EngineCtx, a, b core.NodeID) bool {
+func (e *Engine) partitioned(ctx sim.FakeServiceContext, a, b core.NodeID) bool {
 	l := e.link(a, b)
 	return l.everCut && ctx.Now() < l.healAt
 }
 
 // clearDir drops undelivered data and FIN on d; pending RSTs stand.
-func (e *Engine) clearDir(ctx sim.EngineCtx, d *dir) {
+func (e *Engine) clearDir(ctx sim.FakeServiceContext, d *dir) {
 	keep := func(its []item, cancel bool) []item {
 		var out []item
 		for _, it := range its {
@@ -279,7 +279,7 @@ func (d *dir) arrival(now sim.Time, lat core.Duration) sim.Time {
 }
 
 // enqueue puts a data or FIN item in flight on direction di of p.
-func (e *Engine) enqueue(ctx sim.EngineCtx, p *pair, di int, it item, lat core.Duration) {
+func (e *Engine) enqueue(ctx sim.FakeServiceContext, p *pair, di int, it item, lat core.Duration) {
 	d := &p.dirs[di]
 	d.seq++
 	it.seq = d.seq
@@ -291,7 +291,7 @@ func (e *Engine) enqueue(ctx sim.EngineCtx, p *pair, di int, it item, lat core.D
 
 // sendRst schedules an RST toward side `to` of p (carried on direction 1-to).
 // It lands after anything already in flight on that direction.
-func (e *Engine) sendRst(ctx sim.EngineCtx, p *pair, to int, net bool, lat core.Duration) {
+func (e *Engine) sendRst(ctx sim.FakeServiceContext, p *pair, to int, net bool, lat core.Duration) {
 	di := 1 - to
 	d := &p.dirs[di]
 	d.seq++
@@ -300,8 +300,8 @@ func (e *Engine) sendRst(ctx sim.EngineCtx, p *pair, to int, net bool, lat core.
 	d.flight = append(d.flight, item{kind: kRst, seq: d.seq, net: net, id: id})
 }
 
-func (e *Engine) ack(ctx sim.EngineCtx, to core.NodeInstance, p *pair, side int, req core.RequestID, conn core.ConnID, err core.ErrCode) {
-	var lane sim.Lane
+func (e *Engine) ack(ctx sim.FakeServiceContext, to core.NodeInstance, p *pair, side int, req core.RequestID, conn core.ConnID, err core.ErrCode) {
+	var lane sim.DeliveryLane
 	if p != nil {
 		lane = ctx.Lane(pairKey(p.id, "ack"+strconv.Itoa(side)))
 	} else {
@@ -310,7 +310,7 @@ func (e *Engine) ack(ctx sim.EngineCtx, to core.NodeInstance, p *pair, side int,
 	ctx.Deliver(to, ctx.Now()+sim.Time(e.sample(ctx.Rand())), lane, core.SendDone{Req: req, Conn: conn, Err: err})
 }
 
-func (e *Engine) fault(ctx sim.EngineCtx, kind string, a, b core.NodeID, extra ...core.Field) {
+func (e *Engine) fault(ctx sim.FakeServiceContext, kind string, a, b core.NodeID, extra ...core.Field) {
 	fs := append([]core.Field{{Key: "a", Value: core.Str(a)}, {Key: "b", Value: core.Str(b)}}, extra...)
 	ctx.Fault(kind, fs...)
 	ctx.Assert().Sometimes(true, core.PropertyID("net: "+kind))
@@ -320,7 +320,7 @@ func (e *Engine) fault(ctx sim.EngineCtx, kind string, a, b core.NodeID, extra .
 // ---- Execute ----
 
 // Execute applies a network action issued by node from.
-func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.Action) {
+func (e *Engine) Execute(ctx sim.FakeServiceContext, from core.NodeInstance, a core.Action) {
 	switch a := a.(type) {
 	case core.Connect:
 		e.dial(ctx, from, a)
@@ -340,7 +340,7 @@ func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.Actio
 	}
 }
 
-func (e *Engine) dial(ctx sim.EngineCtx, from core.NodeInstance, a core.Connect) {
+func (e *Engine) dial(ctx sim.FakeServiceContext, from core.NodeInstance, a core.Connect) {
 	target := core.NodeID(a.Addr)
 	// Partition coin first: it applies to this dial.
 	e.maybePartition(ctx, from.Node, target)
@@ -371,7 +371,7 @@ func (e *Engine) dial(ctx sim.EngineCtx, from core.NodeInstance, a core.Connect)
 	ctx.Deliver(ref, at, p.dirs[0].lane, core.ConnOpened{Conn: p.end[1].id, Peer: string(from.Node)})
 }
 
-func (e *Engine) maybePartition(ctx sim.EngineCtx, a, b core.NodeID) {
+func (e *Engine) maybePartition(ctx sim.FakeServiceContext, a, b core.NodeID) {
 	if e.recovery || e.f.PartitionProb <= 0 || a == b {
 		return
 	}
@@ -389,7 +389,7 @@ func (e *Engine) maybePartition(ctx sim.EngineCtx, a, b core.NodeID) {
 	e.fault(ctx, "partition", l.a, l.b, core.Field{Key: "dur", Value: core.I64(dur)})
 }
 
-func (e *Engine) send(ctx sim.EngineCtx, from core.NodeInstance, a core.Send) {
+func (e *Engine) send(ctx sim.FakeServiceContext, from core.NodeInstance, a core.Send) {
 	p, s := e.lookup(from.Node, a.Conn)
 	if p == nil || p.end[s].ref != from || p.end[s].closed || p.dirs[s].aborted {
 		e.ack(ctx, from, p, s, a.Req, a.Conn, core.ErrConnClosed)
@@ -430,7 +430,7 @@ func (e *Engine) send(ctx sim.EngineCtx, from core.NodeInstance, a core.Send) {
 	e.ack(ctx, from, p, s, a.Req, a.Conn, core.OK)
 }
 
-func (e *Engine) closeConn(ctx sim.EngineCtx, from core.NodeInstance, a core.CloseConn) {
+func (e *Engine) closeConn(ctx sim.FakeServiceContext, from core.NodeInstance, a core.CloseConn) {
 	p, s := e.lookup(from.Node, a.Conn)
 	if p == nil || p.end[s].ref != from || p.end[s].closed {
 		return
@@ -454,7 +454,7 @@ func (e *Engine) closeConn(ctx sim.EngineCtx, from core.NodeInstance, a core.Clo
 }
 
 // netAbort resets a conn from the network: both open ends get Abort:true.
-func (e *Engine) netAbort(ctx sim.EngineCtx, p *pair) {
+func (e *Engine) netAbort(ctx sim.FakeServiceContext, p *pair) {
 	for di := range 2 {
 		e.clearDir(ctx, &p.dirs[di])
 		p.dirs[di].aborted = true
@@ -469,7 +469,7 @@ func (e *Engine) netAbort(ctx sim.EngineCtx, p *pair) {
 // ---- internal entries ----
 
 // OnInternal handles an engine-private entry body.
-func (e *Engine) OnInternal(ctx sim.EngineCtx, body any) {
+func (e *Engine) OnInternal(ctx sim.FakeServiceContext, body any) {
 	switch b := body.(type) {
 	case landBody:
 		e.land(ctx, b.Pair, b.Dir, b.Seq)
@@ -488,7 +488,7 @@ func (e *Engine) OnInternal(ctx sim.EngineCtx, body any) {
 	}
 }
 
-func (e *Engine) land(ctx sim.EngineCtx, pid uint64, di int, seq uint64) {
+func (e *Engine) land(ctx sim.FakeServiceContext, pid uint64, di int, seq uint64) {
 	p := e.findPair(pid)
 	if p == nil {
 		return
@@ -506,7 +506,7 @@ func (e *Engine) land(ctx sim.EngineCtx, pid uint64, di int, seq uint64) {
 // flush delivers held items on direction di in order, stopping at a pause or
 // partition (RSTs ignore pause). Data and FIN in a black-holed direction are
 // dropped.
-func (e *Engine) flush(ctx sim.EngineCtx, p *pair, di int) {
+func (e *Engine) flush(ctx sim.FakeServiceContext, p *pair, di int) {
 	d := &p.dirs[di]
 	r := 1 - di
 	re := &p.end[r]
@@ -545,7 +545,7 @@ func (e *Engine) flush(ctx sim.EngineCtx, p *pair, di int) {
 }
 
 // OnCrash retires every open end at ref; survivors get an RST.
-func (e *Engine) OnCrash(ctx sim.EngineCtx, ref core.NodeInstance) {
+func (e *Engine) OnCrash(ctx sim.FakeServiceContext, ref core.NodeInstance) {
 	// Snapshot: maybeRemove edits e.pairs.
 	ps := append([]*pair(nil), e.pairs...)
 	for _, p := range ps {
@@ -649,4 +649,4 @@ func hashPair(h *hasher, p *pair) {
 	}
 }
 
-var _ sim.Engine = (*Engine)(nil)
+var _ sim.FakeService = (*Engine)(nil)

@@ -18,7 +18,7 @@ type CostParams struct {
 	// Pause episodes stand in for Go GC stop-the-world and CPU contention:
 	// with probability PauseProb a step takes an extra Pause sample.
 	PauseProb float64
-	Pause     TwoSpeed
+	Pause     FastWithRareSlow
 }
 
 // NodeInbox is the simulator's model of one node's two inboxes and its busy

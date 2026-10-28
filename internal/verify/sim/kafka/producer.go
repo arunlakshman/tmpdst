@@ -229,15 +229,15 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 			keep = append(keep, b)
 		case b.expect() != 0 && code == b.expect():
 			// Rejected at admission, however many earlier attempts were lost.
-			w.resolve(b, sim.OpAbandoned, ProduceRes{Base: -1, Code: code, Why: "rejected", Attempts: b.attempts})
+			w.resolve(b, sim.OpGivenUp, ProduceRes{Base: -1, Code: code, Why: "rejected", Attempts: b.attempts})
 		case b.idem && code == 0:
 			w.env.Unreachable("kafka: a batch with a producer id is accepted")
-			w.resolve(b, sim.OpDefinite, ProduceRes{Base: base, Attempts: b.attempts})
+			w.resolve(b, sim.OpResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
 		case b.corrupt && code == 0:
 			w.env.Unreachable("kafka: a batch with a bad CRC is accepted")
-			w.resolve(b, sim.OpDefinite, ProduceRes{Base: base, Attempts: b.attempts})
+			w.resolve(b, sim.OpResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
 		case code == 0:
-			w.resolve(b, sim.OpDefinite, ProduceRes{Base: base, Attempts: b.attempts})
+			w.resolve(b, sim.OpResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
 		case ambiguousCode(code):
 			b.ambiguous = true
 			keep = append(keep, b)
@@ -270,9 +270,9 @@ func (w *Workload) resolve(b *batch, out sim.OpOutcome, res ProduceRes) {
 func (w *Workload) giveUp(c *client, why string) []core.Action {
 	p := &c.p
 	for _, b := range p.cur {
-		out := sim.OpAbandoned
+		out := sim.OpGivenUp
 		if b.ambiguous {
-			out = sim.OpIndeterminate
+			out = sim.OpResultUnknown
 		}
 		w.resolve(b, out, ProduceRes{Base: -1, Code: b.lastCode, Why: why, Attempts: b.attempts})
 	}

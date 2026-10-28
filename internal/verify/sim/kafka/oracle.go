@@ -102,7 +102,7 @@ func (o *oracle) record(v sim.View, pl *plog, off int64, i int, val string, det 
 	op := v.History().Ops()[hi]
 	po := op.Op.(ProduceOp)
 	as.Always(po.TP == pl.tp && i < len(po.Vals) && po.Vals[i] == val, "kafka: a record is committed where and as it was produced", d...)
-	as.Always(op.Outcome != sim.OpAbandoned, "kafka: a definitely rejected batch is never committed", d...)
+	as.Always(op.Outcome != sim.OpGivenUp, "kafka: a definitely rejected batch is never committed", d...)
 }
 
 // acks checks each produce_acked fact against the truth at the Step that
@@ -140,7 +140,7 @@ func (o *oracle) reads(v sim.View) {
 			keep = append(keep, i)
 			continue
 		}
-		if ro, ok := op.Op.(ReadOp); ok && op.Outcome == sim.OpDefinite {
+		if ro, ok := op.Op.(ReadOp); ok && op.Outcome == sim.OpResultKnown {
 			o.checkRead(v, ro, op.Result.(ReadRes))
 		}
 	}
@@ -200,7 +200,7 @@ func (o *oracle) AtEnd(v sim.View) {
 				core.ContextPair{Key: "times", Value: o.seen[po.Vals[0]]}, core.ContextPair{Key: "sends", Value: res.Attempts})
 		}
 		switch op.Outcome {
-		case sim.OpDefinite:
+		case sim.OpResultKnown:
 			for i, val := range po.Vals {
 				off := res.Base + int64(i)
 				same := res.Base >= 0 && off < int64(len(o.logs[ti].vals)) && o.logs[ti].vals[off] == val
@@ -215,7 +215,7 @@ func (o *oracle) AtEnd(v sim.View) {
 					core.ContextPair{Key: "tp", Value: tpName(po.TP)}, core.ContextPair{Key: "base", Value: res.Base}, core.ContextPair{Key: "previous", Value: prev})
 			}
 			lastAcked[k] = res.Base
-		case sim.OpAbandoned:
+		case sim.OpGivenUp:
 			for _, val := range po.Vals {
 				as.Always(o.seen[val] == 0, "kafka: a definitely rejected batch is never committed", core.ContextPair{Key: "value", Value: val})
 			}

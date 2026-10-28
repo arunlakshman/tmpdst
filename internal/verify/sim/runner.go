@@ -32,7 +32,7 @@ func validate(cfg Config) error {
 // Determinism check (every CheckDeterminism-th seed, starting with the first):
 // the seed is run again with Log flipped, so the check also proves logging
 // cannot change the hash, and (TraceHash, RandCalls, Steps) must match. A
-// mismatch adds a FailNondeterminism to the seed and lists it in
+// mismatch adds a FailNotRepeatable to the seed and lists it in
 // Report.Nondeterminism.
 //
 // Report.Always lists safety properties (Always, AlwaysOrUnreachable,
@@ -50,17 +50,17 @@ func (runner) Run(cfg Config) (Report, error) {
 	var all []AssertionStat
 	for i, seed := range cfg.Seeds {
 		res, stats := runSeed(cfg, seed)
-		noteDeterminism(cfg, i, seed, &res, &rep)
+		recordRepeatabilityCheck(cfg, i, seed, &res, &rep)
 		rep.Seeds = append(rep.Seeds, res)
-		all = mergeStats(all, agg, stats)
+		all = combineStats(all, agg, stats)
 	}
-	all = addUnreached(all, cfg.ExpectReachable)
+	all = addMissedChecks(all, cfg.ExpectReachable)
 	rep.Assertions = all
-	rep.Always, rep.Coverage = classifyStats(all)
+	rep.Always, rep.Coverage = groupStats(all)
 	return rep, nil
 }
 
-func noteDeterminism(cfg Config, i int, seed uint64, res *SeedResult, rep *Report) {
+func recordRepeatabilityCheck(cfg Config, i int, seed uint64, res *SeedResult, rep *Report) {
 	k := cfg.CheckDeterminism
 	if k == 0 || uint32(i)%k != 0 {
 		return
@@ -69,13 +69,13 @@ func noteDeterminism(cfg Config, i int, seed uint64, res *SeedResult, rep *Repor
 	again.Log = !cfg.Log
 	res2, _ := runSeed(again, seed)
 	if res2.TraceHash != res.TraceHash || res2.RandCalls != res.RandCalls || res2.Steps != res.Steps {
-		res.Failures = append(res.Failures, Failure{Seed: seed, Kind: FailNondeterminism, Prop: "determinism",
+		res.Failures = append(res.Failures, Failure{Seed: seed, Kind: FailNotRepeatable, Prop: "determinism",
 			Step: res.Steps, Msg: "second run of the seed diverged"})
 		rep.Nondeterminism = append(rep.Nondeterminism, seed)
 	}
 }
 
-func mergeStats(all []AssertionStat, agg map[statKey]int, stats []AssertionStat) []AssertionStat {
+func combineStats(all []AssertionStat, agg map[statKey]int, stats []AssertionStat) []AssertionStat {
 	for _, s := range stats {
 		k := statKey{s.Prop, s.Kind}
 		j, ok := agg[k]
@@ -97,22 +97,22 @@ func mergeStats(all []AssertionStat, agg map[statKey]int, stats []AssertionStat)
 	return all
 }
 
-func addUnreached(all []AssertionStat, expect []core.PropertyID) []AssertionStat {
+func addMissedChecks(all []AssertionStat, expect []core.PropertyID) []AssertionStat {
 	for _, p := range expect {
 		found := false
 		for _, a := range all {
-			if a.Kind == kindReachable && a.Prop == p {
+			if a.Kind == kindMustBeReached && a.Prop == p {
 				found = true
 			}
 		}
 		if !found {
-			all = append(all, AssertionStat{Prop: p, Kind: kindReachable})
+			all = append(all, AssertionStat{Prop: p, Kind: kindMustBeReached})
 		}
 	}
 	return all
 }
 
-func classifyStats(all []AssertionStat) ([]AssertionStat, []AssertionStat) {
+func groupStats(all []AssertionStat) ([]AssertionStat, []AssertionStat) {
 	var always, coverage []AssertionStat
 	for _, a := range all {
 		switch {

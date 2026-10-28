@@ -18,22 +18,22 @@ func (v view) Alive(ref core.NodeInstance) bool {
 	return n != nil && n.alive && n.ref == ref
 }
 
-func (v view) Objects() ObjectTruth {
+func (v view) Objects() ObjectStoreRealState {
 	for _, e := range v.r.engines {
-		if t, ok := e.(ObjectTruth); ok {
+		if t, ok := e.(ObjectStoreRealState); ok {
 			return t
 		}
 	}
 	return noObjects{}
 }
 
-func (v view) CP() CPTruth {
+func (v view) CP() ControlPlaneRealState {
 	for _, e := range v.r.engines {
-		if t, ok := e.(CPTruth); ok {
+		if t, ok := e.(ControlPlaneRealState); ok {
 			return t
 		}
 	}
-	return noCP{}
+	return noControlPlane{}
 }
 
 type noObjects struct{}
@@ -42,15 +42,15 @@ func (noObjects) Object(string) ([]byte, bool)    { return nil, false }
 func (noObjects) EachObject(func(string, []byte)) {}
 func (noObjects) Gen() uint64                     { return 0 }
 
-type noCP struct{}
+type noControlPlane struct{}
 
-func (noCP) Committed(core.TopicPartition) []core.BatchRange { return nil }
-func (noCP) HighWatermark(core.TopicPartition) core.Offset   { return 0 }
-func (noCP) Gen() uint64                                     { return 0 }
+func (noControlPlane) Committed(core.TopicPartition) []core.BatchRange { return nil }
+func (noControlPlane) HighWatermark(core.TopicPartition) core.Offset   { return 0 }
+func (noControlPlane) Gen() uint64                                     { return 0 }
 
 var (
-	_ View        = view{}
-	_ NodeAlive   = view{}
-	_ ObjectTruth = noObjects{}
-	_ CPTruth     = noCP{}
+	_ View                  = view{}
+	_ NodeAlive             = view{}
+	_ ObjectStoreRealState  = noObjects{}
+	_ ControlPlaneRealState = noControlPlane{}
 )

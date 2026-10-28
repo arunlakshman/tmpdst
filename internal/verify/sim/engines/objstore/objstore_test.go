@@ -14,7 +14,7 @@ import (
 const ms = core.Duration(1_000_000)
 
 func base() sim.ObjectStoreFaults {
-	ts := sim.TwoSpeed{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
+	ts := sim.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
 	return sim.ObjectStoreFaults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}
 }
 
@@ -77,7 +77,7 @@ func Test503(t *testing.T) {
 
 func TestOutageWindow(t *testing.T) {
 	f := base()
-	f.Outage = sim.Outage{Prob: 1, Dur: [2]core.Duration{100 * ms, 200 * ms}}
+	f.Outage = sim.ServiceOutage{Prob: 1, Dur: [2]core.Duration{100 * ms, 200 * ms}}
 	e, c, a := setup(f, 1)
 	put(e, c, a, 1, "k", "x")
 	c.T = 50 * sim.Time(ms) // still inside
@@ -171,7 +171,7 @@ func TestLandsAfterCrash(t *testing.T) {
 func TestRecoveryStopsFaults(t *testing.T) {
 	f := base()
 	f.Unavailable503, f.Timeout, f.LostResponse, f.GetCorruptProb = 1, 1, 1, 1
-	f.Outage = sim.Outage{Prob: 1, Dur: [2]core.Duration{ms, 2 * ms}}
+	f.Outage = sim.ServiceOutage{Prob: 1, Dur: [2]core.Duration{ms, 2 * ms}}
 	e, c, a := setup(f, 1)
 	put(e, c, a, 1, "k", "x") // faulted, in flight
 	e.EnterRecovery()
@@ -251,7 +251,7 @@ func TestTruthAndGen(t *testing.T) {
 func TestDeterminism(t *testing.T) {
 	f := base()
 	f.Unavailable503, f.Timeout, f.LostResponse, f.GetCorruptProb = 0.2, 0.2, 0.2, 0.3
-	f.Outage = sim.Outage{Prob: 0.05, Dur: [2]core.Duration{10 * ms, 20 * ms}}
+	f.Outage = sim.ServiceOutage{Prob: 0.05, Dur: [2]core.Duration{10 * ms, 20 * ms}}
 	run := func(seed uint64) (string, uint64, uint64) {
 		e, c, a := setup(f, seed)
 		for i := range 60 {

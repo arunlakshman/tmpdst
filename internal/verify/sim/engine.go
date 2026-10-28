@@ -2,14 +2,14 @@ package sim
 
 import "manifester/internal/core"
 
-// Engine simulates one external system (object store, control plane, network).
+// FakeService simulates one external system (object store, control plane, network).
 // It owns that system's state, draws only from the run's CountedRand, and never
 // completes anything synchronously: every result is a scheduled entry.
 //
 // Every fault coin and delay is drawn in Execute, at issue time, so draws
 // happen in issue order. How a fault resolves (applied or not) may be drawn
 // when it lands.
-type Engine interface {
+type FakeService interface {
 	core.HasStateHash // folded into the trace hash after every step
 	Name() string
 	// Handles reports whether this engine executes the given action type. The
@@ -19,21 +19,21 @@ type Engine interface {
 	Handles(a core.Action) bool
 	// Execute starts an action issued by node `from`. Typical object-store PUT:
 	// schedule "apply" at t1 and "respond" at t2, or drop the response.
-	Execute(ctx EngineCtx, from core.NodeInstance, a core.Action)
+	Execute(ctx FakeServiceContext, from core.NodeInstance, a core.Action)
 	// OnInternal consumes an entry this engine scheduled for itself.
-	OnInternal(ctx EngineCtx, body any)
+	OnInternal(ctx FakeServiceContext, body any)
 	// OnCrash is told that an incarnation died; effects already applied stand.
 	// DropNode removes only entries addressed to the node: engine-internal
 	// apply entries survive, so a PUT or commit already on the wire can land
 	// after the broker dies.
-	OnCrash(ctx EngineCtx, ref core.NodeInstance)
+	OnCrash(ctx FakeServiceContext, ref core.NodeInstance)
 	// EnterRecovery stops generating new faults for actions issued after it;
 	// plans already in flight stand and existing damage is preserved.
 	EnterRecovery()
 }
 
-// EngineCtx is what the simulator lends an engine while it runs.
-type EngineCtx interface {
+// FakeServiceContext is what the simulator lends an engine while it runs.
+type FakeServiceContext interface {
 	Now() Time
 	Rand() CountedRand
 	// Lane returns the ordering lane for key, allocated by the kernel on first
@@ -42,11 +42,11 @@ type EngineCtx interface {
 	// whole run; distinct keys never share one, so FIFO ordering (decision C)
 	// holds exactly within a key. Engines obtain every lane here, never
 	// construct a Lane value. Key convention: "<engine>/<whatever>".
-	Lane(key string) Lane
+	Lane(key string) DeliveryLane
 	// Deliver schedules a completion or inbound event to a node.
-	Deliver(to core.NodeInstance, at Time, lane Lane, body core.EventData) EntryID
+	Deliver(to core.NodeInstance, at Time, lane DeliveryLane, body core.EventData) EntryID
 	// Self schedules an internal entry back to this engine.
-	Self(at Time, lane Lane, body any) EntryID
+	Self(at Time, lane DeliveryLane, body any) EntryID
 	Cancel(id EntryID)
 	// Fault records an injected fault on the timeline as a "sim_fault" fact.
 	Fault(kind string, fields ...core.Field)
@@ -54,7 +54,7 @@ type EngineCtx interface {
 	Assert() core.Assertions
 }
 
-// NodeCurrent is the live-incarnation lookup split from EngineCtx so that
+// NodeCurrent is the live-incarnation lookup split from FakeServiceContext so that
 // interface stays within eight methods. Every context the kernel lends
 // implements it; engines type-assert.
 type NodeCurrent interface {
@@ -68,40 +68,40 @@ type Latency interface {
 	Sample(r CountedRand) core.Duration
 }
 
-// TwoSpeed is mostly fast with a rare slow tail (decision D).
-type TwoSpeed struct {
+// FastWithRareSlow is mostly fast with a rare slow tail (decision D).
+type FastWithRareSlow struct {
 	FastMin, FastMax core.Duration
 	SlowMin, SlowMax core.Duration
 	SlowProb         float64
 }
 
-// Outage is a correlated, sustained failure window: every op fails while it
+// ServiceOutage is a correlated, sustained failure window: every op fails while it
 // lasts.
-type Outage struct {
+type ServiceOutage struct {
 	Prob float64
 	Dur  [2]core.Duration
 }
 
 // ObjectStoreFaults are the fault families of the fake object store (decision D).
 type ObjectStoreFaults struct {
-	ApplyLatency   TwoSpeed // issue to effect
-	RespondLatency TwoSpeed // effect to reply
-	Unavailable503 float64  // refused before admission: NotApplied
-	Timeout        float64  // caller gives up; the op may or may not apply: MaybeApplied
-	LostResponse   float64  // applied, response never arrives (surfaces as timeout)
-	GetCorruptProb float64  // flip one bit in ObjectGetDone.Data; the stored object stays intact
-	Outage         Outage
+	ApplyLatency   FastWithRareSlow // issue to effect
+	RespondLatency FastWithRareSlow // effect to reply
+	Unavailable503 float64          // refused before admission: NotApplied
+	Timeout        float64          // caller gives up; the op may or may not apply: MaybeApplied
+	LostResponse   float64          // applied, response never arrives (surfaces as timeout)
+	GetCorruptProb float64          // flip one bit in ObjectGetDone.Data; the stored object stays intact
+	Outage         ServiceOutage
 	CallerTimeout  core.Duration
 }
 
 // ControlPlaneFaults are the fault families of the fake control plane.
 type ControlPlaneFaults struct {
-	ApplyLatency   TwoSpeed
-	RespondLatency TwoSpeed
+	ApplyLatency   FastWithRareSlow
+	RespondLatency FastWithRareSlow
 	Unavailable503 float64
 	Timeout        float64
 	LostResponse   float64 // commit applied, response lost: retry must be idempotent
-	Outage         Outage
+	Outage         ServiceOutage
 	CallerTimeout  core.Duration
 	// MaxCommitItems models a store that commits a segment in one bounded
 	// transaction (DynamoDB: DynamoMaxCommitItems). A CommitSegment that needs
@@ -157,24 +157,24 @@ const DynamoMaxCommitItems = 100
 // Same issue-time draw rules as ObjectStoreFaults (decision 14).
 type LogStoreFaults struct {
 	Enabled        bool
-	ApplyLatency   TwoSpeed
-	RespondLatency TwoSpeed
+	ApplyLatency   FastWithRareSlow
+	RespondLatency FastWithRareSlow
 	Unavailable503 float64
 	Timeout        float64
 	LostResponse   float64
-	Outage         Outage
+	Outage         ServiceOutage
 	CallerTimeout  core.Duration
 	// Bug selects a logstore mutant (logengine.BugTrimDelete deletes instead of
 	// tombstoning on LogDeleteOld). Zero is none.
 	Bug uint8
-	// WindowSlots and TrimStride mirror LogParams for CPTruth idempotency trim
+	// WindowSlots and TrimStride mirror LogParams for ControlPlaneRealState idempotency trim
 	// during reference replay (decision 48). Zero WindowSlots skips trim.
 	WindowSlots, TrimStride int
 }
 
 // NetworkFaults are connection-level faults (lesson 6).
 type NetworkFaults struct {
-	Latency         TwoSpeed
+	Latency         FastWithRareSlow
 	PartialIOMax    int     // max bytes per delivered chunk / accepted write
 	PartitionProb   float64 // sustained, correlated; freezes in-flight bytes
 	PartitionDur    [2]core.Duration

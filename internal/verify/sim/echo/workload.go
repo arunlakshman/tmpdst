@@ -126,14 +126,14 @@ func (w *Workload) onReady(c *client) []core.Action {
 func (w *Workload) OnPhase(p sim.Phase) []core.Action {
 	var acts []core.Action
 	switch p {
-	case sim.PhaseSettling:
+	case sim.PhaseRecovering:
 		for _, c := range w.loop.Clients {
 			c.recycle = true
 			if c.State == csReady { // idle: recycle now
 				acts = append(acts, w.next(c)...)
 			}
 		}
-	case sim.PhaseSettle:
+	case sim.PhaseRecover:
 		w.stopped = true
 	}
 	return acts
@@ -192,14 +192,14 @@ func (w *Workload) onBytes(c *client, data []byte) []core.Action {
 func (w *Workload) reply(c *client, text string) []core.Action {
 	p := c.pend
 	c.pend, c.State = nil, csReady
-	out := sim.OpDefinite
+	out := sim.OpResultKnown
 	if !p.get {
 		if rest, ok := strings.CutPrefix(text, "OK "); ok {
 			if off, err := strconv.ParseInt(rest, 10, 64); err == nil {
 				c.record(off, p.payload)
 			}
 		} else if text == "ERR maybe" {
-			out = sim.OpIndeterminate
+			out = sim.OpResultUnknown
 		}
 	}
 	if w.hist != nil {
@@ -222,9 +222,9 @@ func (c *client) record(off int64, payload string) {
 // lost settles the outstanding request, whose fate is unknown.
 func (w *Workload) lost(c *client, why string) {
 	if p := c.pend; p != nil {
-		out := sim.OpIndeterminate
+		out := sim.OpResultUnknown
 		if p.get {
-			out = sim.OpAbandoned
+			out = sim.OpGivenUp
 		}
 		if w.hist != nil {
 			w.hist.Return(p.id, why, out)
@@ -266,6 +266,6 @@ func (w *Workload) StateHash() uint64 {
 }
 
 var (
-	_ sim.Workload   = (*Workload)(nil)
-	_ sim.PhaseAware = (*Workload)(nil)
+	_ sim.Workload            = (*Workload)(nil)
+	_ sim.ReceivesPhaseChange = (*Workload)(nil)
 )

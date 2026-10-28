@@ -58,7 +58,7 @@ func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Op
 		Unavailable503: lp.PutFail,
 		Timeout:        0,
 		LostResponse:   lp.PutLost,
-		Outage:         sim.Outage{},
+		Outage:         sim.ServiceOutage{},
 		CallerTimeout:  cfg.ControlPlane.CallerTimeout,
 		Bug:            logBug,
 		WindowSlots:    lp.WindowSlots,
@@ -103,19 +103,19 @@ func configWith(seeds []uint64, bug broker.InjectedBug, opts Opts) sim.Config {
 		Processes: []sim.Process{{Name: "broker", Count: 3, FactoryFor: func(sc sim.SeedConfig) core.MachineFactory {
 			return broker.New(sc.Params.(broker.Config))
 		}}},
-		InvariantsFor: func(sc sim.SeedConfig) []sim.Invariant {
-			return []sim.Invariant{newSegmentCaps(sc.Params.(broker.Config), sc.ControlPlane.MaxCommitItems, opts.tps()), &segmentTiming{}}
+		InvariantsFor: func(sc sim.SeedConfig) []sim.SafetyRule {
+			return []sim.SafetyRule{newSegmentCaps(sc.Params.(broker.Config), sc.ControlPlane.MaxCommitItems, opts.tps()), &segmentTiming{}}
 		},
 		Workloads: []sim.WorkloadFactory{func(env core.Environment, self core.NodeInstance, bs []core.NodeInstance) sim.Workload {
 			return NewWorkload(env, self, bs, opts)
 		}},
-		Invariants: []func() sim.Invariant{
-			func() sim.Invariant { return newOracle(opts) },
-			func() sim.Invariant { return &liveness{} },
-			func() sim.Invariant { return campaign.FaultCoverage("kafka:") },
+		Invariants: []func() sim.SafetyRule{
+			func() sim.SafetyRule { return newOracle(opts) },
+			func() sim.SafetyRule { return &liveness{} },
+			func() sim.SafetyRule { return campaign.FaultCoverage("kafka:") },
 		},
-		Engines: func(sc sim.SeedConfig) []sim.Engine {
-			es := []sim.Engine{objstore.New(sc.ObjectStore), controlPlane(sc, opts), netsim.New(sc.Network)}
+		Engines: func(sc sim.SeedConfig) []sim.FakeService {
+			es := []sim.FakeService{objstore.New(sc.ObjectStore), controlPlane(sc, opts), netsim.New(sc.Network)}
 			if sc.LogStore.Enabled {
 				ls := logstore.New(sc.LogStore)
 				for _, t := range opts.Topics {
@@ -140,12 +140,12 @@ func configWith(seeds []uint64, bug broker.InjectedBug, opts Opts) sim.Config {
 
 // topicMaker is a control plane engine that topics can be created in before the run.
 type topicMaker interface {
-	sim.Engine
+	sim.FakeService
 	CreateTopic(name string, partitions int32) core.ErrCode
 }
 
 // controlPlane builds this seed's control plane engine with the workload's topics.
-func controlPlane(sc sim.SeedConfig, opts Opts) sim.Engine {
+func controlPlane(sc sim.SeedConfig, opts Opts) sim.FakeService {
 	var cp topicMaker = cpengine.New(sc.ControlPlane)
 	if sc.ControlPlane.Log.Enabled {
 		cp = logengine.New(sc.ControlPlane)

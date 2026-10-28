@@ -62,7 +62,7 @@ func pick[T any](r *rand.Rand, xs []T) (T, bool) {
 // definiteAt: an acked (OpDefinite) produce landed at base of tp.
 func (w *world) definiteAt(tp core.TopicPartition, base int64) bool {
 	for _, op := range w.ops {
-		if po, ok := op.Op.(kafka.ProduceOp); ok && op.Outcome == sim.OpDefinite && po.TP == tp {
+		if po, ok := op.Op.(kafka.ProduceOp); ok && op.Outcome == sim.OpResultKnown && po.TP == tp {
 			if res := op.Result.(kafka.ProduceRes); res.Base == base {
 				return true
 			}
@@ -134,7 +134,7 @@ func (w *world) setAck(i int, key string, add int64) {
 func (w *world) definiteOps() []int {
 	var out []int
 	for i, op := range w.ops {
-		if _, ok := op.Op.(kafka.ProduceOp); ok && op.Outcome == sim.OpDefinite {
+		if _, ok := op.Op.(kafka.ProduceOp); ok && op.Outcome == sim.OpResultKnown {
 			out = append(out, i)
 		}
 	}
@@ -461,7 +461,7 @@ func faults() []fault {
 		{"record of a definitely rejected batch is present", func(w *world, r *rand.Rand) bool {
 			i, ok := pick(r, w.definiteOps())
 			if ok {
-				w.ops[i].Outcome = sim.OpAbandoned
+				w.ops[i].Outcome = sim.OpGivenUp
 			}
 			return ok
 		}, []core.PropertyID{pRejected}, false},

@@ -14,8 +14,8 @@ type Phases struct {
 	MaxQuietLatency core.Duration
 }
 
-// Attrition kills and restarts broker processes during the chaos window.
-type Attrition struct {
+// NodeKills kills and restarts broker processes during the chaos window.
+type NodeKills struct {
 	MaxDead int
 	// CrashProb is evaluated after each node Step and each engine landing
 	// during Chaos.
@@ -26,53 +26,53 @@ type Attrition struct {
 	RecoveryDelay  [2]core.Duration
 }
 
-// SeedConfig holds the per-seed knobs a Swarm may change.
+// SeedConfig holds the per-seed knobs a RandomSettingsPicker may change.
 type SeedConfig struct {
 	ObjectStore  ObjectStoreFaults
 	ControlPlane ControlPlaneFaults
 	LogStore     LogStoreFaults
 	Network      NetworkFaults
-	Attrition    Attrition
+	Attrition    NodeKills
 	Cost         CostParams
 	// Params is scenario-specific tuning that the kernel never reads: set from
-	// Config.Params, adjusted by a Swarm, read by FactoryFor and InvariantsFor.
+	// Config.Params, adjusted by a RandomSettingsPicker, read by FactoryFor and InvariantsFor.
 	Params any
 }
 
-// Swarm picks this seed's knobs from menus (lesson 9). It draws only from r,
+// RandomSettingsPicker picks this seed's knobs from menus (lesson 9). It draws only from r,
 // which is the run's Derive("swarm") stream, never the run stream itself.
 // Replay re-derives the config from the seed alone.
-type Swarm func(seed uint64, r CountedRand, c *SeedConfig)
+type RandomSettingsPicker func(seed uint64, r CountedRand, c *SeedConfig)
 
-// ScriptedFault is a fault at a fixed time, for regression tests that need a
+// PlannedFault is a fault at a fixed time, for regression tests that need a
 // crash at a specific point.
-type ScriptedFault struct {
+type PlannedFault struct {
 	At   Time
 	Node core.NodeID
 	Kind EntryKind
 }
 
 // Config is one simulation campaign. The per-seed knobs live in SeedConfig;
-// Swarm adjusts a copy per seed.
+// RandomSettingsPicker adjusts a copy per seed.
 type Config struct {
 	Seeds      []uint64
 	Processes  []Process
 	Workloads  []WorkloadFactory
-	Invariants []func() Invariant // fresh per seed
+	Invariants []func() SafetyRule // fresh per seed
 	// InvariantsFor builds more invariants from this seed's (swarmed) config.
-	InvariantsFor func(sc SeedConfig) []Invariant
+	InvariantsFor func(sc SeedConfig) []SafetyRule
 	// Params is the initial SeedConfig.Params of every seed.
 	Params any
 	// Engines builds this seed's engines from its (swarmed) config. Fresh per
-	// seed. Engines that hold ground truth also implement ObjectTruth or
-	// CPTruth; the View finds them by type assertion.
-	Engines      func(sc SeedConfig) []Engine
+	// seed. Engines that hold ground truth also implement ObjectStoreRealState or
+	// ControlPlaneRealState; the View finds them by type assertion.
+	Engines      func(sc SeedConfig) []FakeService
 	ObjectStore  ObjectStoreFaults
 	ControlPlane ControlPlaneFaults
 	LogStore     LogStoreFaults
 	Network      NetworkFaults
-	Attrition    Attrition
-	Swarm        Swarm
+	Attrition    NodeKills
+	Swarm        RandomSettingsPicker
 	Phases       Phases
 	Cost         CostParams // node CPU model; zero = instantaneous Step
 	MaxSteps     uint64     // a seed exceeding it fails with FailMaxSteps
@@ -84,7 +84,7 @@ type Config struct {
 	// QuiesceEvery is the interval between quiesce points, where oracles may
 	// close a window.
 	QuiesceEvery core.Duration
-	Scripted     []ScriptedFault
+	Scripted     []PlannedFault
 	// ExpectReachable lists Reachable properties that must be reached at least
 	// once across the campaign. A Reachable only records when it executes, so
 	// code that is never run cannot declare itself; the campaign declares it
@@ -106,12 +106,12 @@ type FailKind uint8
 const (
 	// FailViolation is a safety/property violation.
 	FailViolation FailKind = iota
-	// FailInconclusive means the run could not decide.
-	FailInconclusive
+	// FailUndecided means the run could not decide.
+	FailUndecided
 	FailProtocol // StopForRestart/ShutdownDone not last, unknown action, reply to unknown request, duplicate completion
 	FailPanic    // recovered from Step / Factory
 	FailMaxSteps
-	FailNondeterminism
+	FailNotRepeatable
 )
 
 // Failure is one recorded failure of a seed.

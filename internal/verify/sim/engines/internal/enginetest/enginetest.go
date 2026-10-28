@@ -38,13 +38,13 @@ type Ctx struct {
 	Violations []string
 	q          []*entry
 	seq        int
-	eng        sim.Engine
-	lanes      map[string]sim.Lane
+	eng        sim.FakeService
+	lanes      map[string]sim.DeliveryLane
 }
 
 // New returns a Ctx bound to eng.
-func New(eng sim.Engine, seed uint64) *Ctx {
-	return &Ctx{R: sim.NewRand(seed), Down: map[core.NodeID]bool{}, eng: eng, lanes: map[string]sim.Lane{}}
+func New(eng sim.FakeService, seed uint64) *Ctx {
+	return &Ctx{R: sim.NewRand(seed), Down: map[core.NodeID]bool{}, eng: eng, lanes: map[string]sim.DeliveryLane{}}
 }
 
 // Now returns the fake clock.
@@ -54,11 +54,11 @@ func (c *Ctx) Now() sim.Time { return c.T }
 func (c *Ctx) Rand() sim.CountedRand { return c.R }
 
 // Lane numbers keys sequentially from 1, like the kernel.
-func (c *Ctx) Lane(key string) sim.Lane {
+func (c *Ctx) Lane(key string) sim.DeliveryLane {
 	if l, ok := c.lanes[key]; ok {
 		return l
 	}
-	l := sim.Lane(len(c.lanes) + 1)
+	l := sim.DeliveryLane(len(c.lanes) + 1)
 	c.lanes[key] = l
 	return l
 }
@@ -70,12 +70,12 @@ func (c *Ctx) add(e *entry) sim.EntryID {
 }
 
 // Deliver queues an event for a node.
-func (c *Ctx) Deliver(to core.NodeInstance, at sim.Time, _ sim.Lane, b core.EventData) sim.EntryID {
+func (c *Ctx) Deliver(to core.NodeInstance, at sim.Time, _ sim.DeliveryLane, b core.EventData) sim.EntryID {
 	return c.add(&entry{at: max(at, c.T), to: to, body: b})
 }
 
 // Self queues an engine-private entry.
-func (c *Ctx) Self(at sim.Time, _ sim.Lane, b any) sim.EntryID {
+func (c *Ctx) Self(at sim.Time, _ sim.DeliveryLane, b any) sim.EntryID {
 	return c.add(&entry{at: max(at, c.T), self: true, body: b})
 }
 

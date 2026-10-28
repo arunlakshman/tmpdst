@@ -60,25 +60,25 @@ type world struct {
 	ranges map[core.TopicPartition][]core.BatchRange
 	hwmAdj map[core.TopicPartition]int64
 	objs   map[string][]byte
-	ops    []sim.HistOp
+	ops    []sim.HistoryOperation
 	raw    []sim.TimedFact
 	tl     *sim.MemTimeline
 	gen    uint64
 	as     failures
 
-	invs []sim.Invariant // live observers, nil in one-shot mode
+	invs []sim.SafetyRule // live observers, nil in one-shot mode
 }
 
-func (w *world) Step() uint64                 { return uint64(len(w.raw)) }
-func (w *world) Now() sim.Time                { return w.now }
-func (w *world) Phase() sim.Phase             { return sim.PhaseSettling }
-func (w *world) Alive(core.NodeInstance) bool { return true }
-func (w *world) Timeline() sim.Timeline       { return w.tl }
-func (w *world) History() sim.History         { return (*hist)(w) }
-func (w *world) Objects() sim.ObjectTruth     { return (*objView)(w) }
-func (w *world) CP() sim.CPTruth              { return (*cpView)(w) }
-func (w *world) Assert() core.Assertions      { return w.as }
-func (w *world) touch()                       { w.gen++ }
+func (w *world) Step() uint64                      { return uint64(len(w.raw)) }
+func (w *world) Now() sim.Time                     { return w.now }
+func (w *world) Phase() sim.Phase                  { return sim.PhaseRecovering }
+func (w *world) Alive(core.NodeInstance) bool      { return true }
+func (w *world) Timeline() sim.Timeline            { return w.tl }
+func (w *world) History() sim.History              { return (*hist)(w) }
+func (w *world) Objects() sim.ObjectStoreRealState { return (*objView)(w) }
+func (w *world) CP() sim.ControlPlaneRealState     { return (*cpView)(w) }
+func (w *world) Assert() core.Assertions           { return w.as }
+func (w *world) touch()                            { w.gen++ }
 
 type hist world
 
@@ -86,7 +86,7 @@ func (h *hist) Invoke(core.NodeInstance, core.ID, core.ID, any) {
 	panic("C4: history is built directly")
 }
 func (h *hist) Return(core.ID, any, sim.OpOutcome) bool { panic("C4: history is built directly") }
-func (h *hist) Ops() []sim.HistOp                       { return h.ops }
+func (h *hist) Ops() []sim.HistoryOperation             { return h.ops }
 
 type objView world
 
@@ -154,7 +154,7 @@ func newWorld(seed uint64, live bool) *world {
 		w.prods = append(w.prods, &producer{})
 	}
 	if live {
-		w.invs = []sim.Invariant{kafka.NewOracle(opts)}
+		w.invs = []sim.SafetyRule{kafka.NewOracle(opts)}
 	}
 	steps := 20 + r.IntN(30)
 	for range steps {
@@ -301,7 +301,7 @@ func (w *world) ack(b *broker, rg core.BatchRange, it *item) {
 }
 
 func (w *world) invoke(it *item, c int) {
-	w.ops = append(w.ops, sim.HistOp{ID: w.newID(), Value: w.newID(), Client: nodeRef(fmt.Sprintf("c%d", c)), Op: it.po,
+	w.ops = append(w.ops, sim.HistoryOperation{ID: w.newID(), Value: w.newID(), Client: nodeRef(fmt.Sprintf("c%d", c)), Op: it.po,
 		InvSeq: uint64(len(w.ops)*2 + 1), Invoke: w.now, Outcome: sim.OpPending})
 	it.op = len(w.ops) - 1
 }
@@ -342,7 +342,7 @@ func (w *world) produceStep(r *rand.Rand) {
 				if r.IntN(2) == 0 {
 					w.ack(b, rg, it)
 				}
-				w.ret(it, kafka.ProduceRes{Base: -1, Code: 7, Attempts: 3}, sim.OpIndeterminate)
+				w.ret(it, kafka.ProduceRes{Base: -1, Code: 7, Attempts: 3}, sim.OpResultUnknown)
 			case fRetry: // the answer was lost: the client resends below
 				if r.IntN(2) == 0 {
 					w.ack(b, rg, it)
@@ -350,7 +350,7 @@ func (w *world) produceStep(r *rand.Rand) {
 				again = append(again, it)
 			default:
 				w.ack(b, rg, it)
-				w.ret(it, kafka.ProduceRes{Base: int64(rg.Base), Attempts: 1}, sim.OpDefinite)
+				w.ret(it, kafka.ProduceRes{Base: int64(rg.Base), Attempts: 1}, sim.OpResultKnown)
 			}
 		}
 		w.step()
@@ -358,7 +358,7 @@ func (w *world) produceStep(r *rand.Rand) {
 			w.st.retries++
 			rg := w.commit([]*item{it}, false)[0]
 			w.ack(b, rg, it)
-			w.ret(it, kafka.ProduceRes{Base: int64(rg.Base), Attempts: 2}, sim.OpDefinite)
+			w.ret(it, kafka.ProduceRes{Base: int64(rg.Base), Attempts: 2}, sim.OpResultKnown)
 			w.step()
 		}
 	}
@@ -366,10 +366,10 @@ func (w *world) produceStep(r *rand.Rand) {
 		switch it.fate {
 		case fIndetNo:
 			w.st.indetNo++
-			w.ret(it, kafka.ProduceRes{Base: -1, Code: 7, Attempts: 3}, sim.OpIndeterminate)
+			w.ret(it, kafka.ProduceRes{Base: -1, Code: 7, Attempts: 3}, sim.OpResultUnknown)
 		case fIdem:
 			w.st.rejected++
-			w.ret(it, kafka.ProduceRes{Base: -1, Code: 42, Why: "rejected", Attempts: 1}, sim.OpAbandoned)
+			w.ret(it, kafka.ProduceRes{Base: -1, Code: 42, Why: "rejected", Attempts: 1}, sim.OpGivenUp)
 		}
 	}
 	w.step()
@@ -401,10 +401,10 @@ func (w *world) read(r *rand.Rand, c int, tis []int) {
 		w.pos[[2]int{c, ti}] = from + int64(len(recs))
 		res.Parts = append(res.Parts, rp)
 	}
-	w.ops = append(w.ops, sim.HistOp{ID: w.newID(), Value: w.newID(), Client: nodeRef(fmt.Sprintf("c%d", c)), Op: ro,
+	w.ops = append(w.ops, sim.HistoryOperation{ID: w.newID(), Value: w.newID(), Client: nodeRef(fmt.Sprintf("c%d", c)), Op: ro,
 		InvSeq: uint64(len(w.ops)*2 + 1), Invoke: w.now, Outcome: sim.OpPending})
 	w.step()
 	op := &w.ops[len(w.ops)-1]
-	op.Result, op.Outcome, op.Return, op.RetSeq = res, sim.OpDefinite, w.now, op.InvSeq+1
+	op.Result, op.Outcome, op.Return, op.RetSeq = res, sim.OpResultKnown, w.now, op.InvSeq+1
 	w.step()
 }

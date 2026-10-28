@@ -61,7 +61,7 @@ type echoApply struct {
 }
 
 type echo struct {
-	lat       TwoSpeed
+	lat       FastWithRareSlow
 	lostProb  float64
 	applied   uint64
 	lost      uint64
@@ -72,7 +72,7 @@ type echo struct {
 func (e *echo) StateHash() uint64          { return e.applied*1000003 + e.lost*7919 + e.crashes }
 func (e *echo) Name() string               { return "echo" }
 func (e *echo) Handles(a core.Action) bool { _, ok := a.(core.ObjectPut); return ok }
-func (e *echo) Execute(ctx EngineCtx, from core.NodeInstance, a core.Action) {
+func (e *echo) Execute(ctx FakeServiceContext, from core.NodeInstance, a core.Action) {
 	put := a.(core.ObjectPut)
 	lost := !e.recovered && ctx.Rand().Chance(e.lostProb)
 	if lost {
@@ -81,7 +81,7 @@ func (e *echo) Execute(ctx EngineCtx, from core.NodeInstance, a core.Action) {
 	}
 	ctx.Self(ctx.Now()+Time(e.lat.Sample(ctx.Rand())), 1, echoApply{from, put.Req, lost})
 }
-func (e *echo) OnInternal(ctx EngineCtx, body any) {
+func (e *echo) OnInternal(ctx FakeServiceContext, body any) {
 	a := body.(echoApply)
 	e.applied++
 	done := core.ObjectPutDone{Req: a.req, Outcome: core.Applied}
@@ -91,8 +91,8 @@ func (e *echo) OnInternal(ctx EngineCtx, body any) {
 	}
 	ctx.Deliver(a.from, ctx.Now()+Time(core.Millisecond), 2, done)
 }
-func (e *echo) OnCrash(ctx EngineCtx, ref core.NodeInstance) { e.crashes++ }
-func (e *echo) EnterRecovery()                               { e.recovered = true }
+func (e *echo) OnCrash(ctx FakeServiceContext, ref core.NodeInstance) { e.crashes++ }
+func (e *echo) EnterRecovery()                                        { e.recovered = true }
 
 // echo is also ground truth for Objects().
 func (e *echo) Object(string) ([]byte, bool)    { return nil, false }
@@ -159,7 +159,7 @@ func TestStartedIsFirstStep(t *testing.T) {
 		return ping(m, ev)
 	})
 	cfg := baseCfg(f)
-	cfg.Scripted = []ScriptedFault{{At: Time(300 * core.Millisecond), Node: "b-0", Kind: EntryCrash}}
+	cfg.Scripted = []PlannedFault{{At: Time(300 * core.Millisecond), Node: "b-0", Kind: EntryCrash}}
 	res := RunSeed(cfg, 1)
 	if len(res.Failures) != 0 || res.Crashes != 1 || len(firsts) != 2 {
 		t.Fatalf("crashes=%d firsts=%d failures=%+v", res.Crashes, len(firsts), res.Failures)
@@ -179,7 +179,7 @@ func TestScriptedGracefulStop(t *testing.T) {
 		return ping(m, ev)
 	})
 	cfg := baseCfg(f)
-	cfg.Scripted = []ScriptedFault{{At: Time(300 * core.Millisecond), Node: "b-0", Kind: EntryStop}}
+	cfg.Scripted = []PlannedFault{{At: Time(300 * core.Millisecond), Node: "b-0", Kind: EntryStop}}
 	res := RunSeed(cfg, 1)
 	if len(res.Failures) != 0 || stat(res, "graceful_stops") != 1 {
 		t.Fatalf("graceful_stops=%d failures=%+v", stat(res, "graceful_stops"), res.Failures)
@@ -255,11 +255,11 @@ func TestCrashDropsEntriesAndRestartsWithNewIncarnation(t *testing.T) {
 		return ping(m, ev)
 	})
 	cfg := baseCfg(f)
-	cfg.Scripted = []ScriptedFault{{At: Time(305 * core.Millisecond), Node: "b-0", Kind: EntryCrash}}
+	cfg.Scripted = []PlannedFault{{At: Time(305 * core.Millisecond), Node: "b-0", Kind: EntryCrash}}
 	cfg.Attrition.RecoveryDelay = [2]core.Duration{100 * core.Millisecond, 100 * core.Millisecond}
 	var crashAt Time
 	var oldPingsAfter int
-	cfg.Invariants = []func() Invariant{func() Invariant {
+	cfg.Invariants = []func() SafetyRule{func() SafetyRule {
 		return &fnInvariant{atEnd: func(v View) {
 			c := v.Timeline().Snapshot("sim_crashed")
 			if len(c) != 1 {
@@ -312,7 +312,7 @@ func TestStopExitPath(t *testing.T) {
 		return ping(m, ev)
 	})
 	cfg := baseCfg(f)
-	cfg.Attrition = Attrition{MaxDead: 1, CrashProb: 1, GracefulWeight: 1, RecoveryDelay: [2]core.Duration{10 * core.Millisecond, 20 * core.Millisecond}}
+	cfg.Attrition = NodeKills{MaxDead: 1, CrashProb: 1, GracefulWeight: 1, RecoveryDelay: [2]core.Duration{10 * core.Millisecond, 20 * core.Millisecond}}
 	res := RunSeed(cfg, 1)
 	if len(res.Failures) != 0 || res.Exits == 0 || res.Crashes != 0 || stat(res, "deadline_kills") != 0 {
 		t.Fatalf("exits=%d crashes=%d %+v", res.Exits, res.Crashes, res.Failures)
@@ -329,12 +329,12 @@ func TestStopDeadlineKill(t *testing.T) {
 		return ping(m, ev)
 	})
 	cfg := baseCfg(f)
-	cfg.Attrition = Attrition{MaxDead: 1, CrashProb: 1, GracefulWeight: 1, RecoveryDelay: [2]core.Duration{10 * core.Millisecond, 10 * core.Millisecond}}
+	cfg.Attrition = NodeKills{MaxDead: 1, CrashProb: 1, GracefulWeight: 1, RecoveryDelay: [2]core.Duration{10 * core.Millisecond, 10 * core.Millisecond}}
 	res := RunSeed(cfg, 1)
 	if len(res.Failures) != 0 || res.Exits != 0 || res.Crashes == 0 || stat(res, "deadline_kills") == 0 {
 		t.Fatalf("exits=%d crashes=%d %+v stats=%+v", res.Exits, res.Crashes, res.Failures, res.Stats)
 	}
-	if len(deadlines) == 0 || deadlines[0] != core.NodeTime(stopGrace) {
+	if len(deadlines) == 0 || deadlines[0] != core.NodeTime(stopWaitTime) {
 		t.Fatalf("deadline offset = %v", deadlines)
 	}
 }
@@ -343,7 +343,7 @@ func TestInvariantsSeeFactsAndReport(t *testing.T) {
 	cfg := baseCfg(scripted(ping))
 	cfg.Seeds = []uint64{1, 2, 3}
 	seen := 0
-	cfg.Invariants = []func() Invariant{func() Invariant {
+	cfg.Invariants = []func() SafetyRule{func() SafetyRule {
 		var cur Cursor
 		return &fnInvariant{
 			observe: func(v View) { seen += len(v.Timeline().Since("ping", &cur)) },
@@ -422,12 +422,12 @@ func TestEngineRouting(t *testing.T) {
 	if !hasFailure(res, FailProtocol, "unrouted_action") {
 		t.Fatalf("no engine: %+v", res.Failures)
 	}
-	cfg.Engines = func(SeedConfig) []Engine { return []Engine{&echoDel{n: "a"}, &echoDel{n: "b"}} }
+	cfg.Engines = func(SeedConfig) []FakeService { return []FakeService{&echoDel{n: "a"}, &echoDel{n: "b"}} }
 	res = RunSeed(cfg, 1)
 	if !hasFailure(res, FailProtocol, "unrouted_action") {
 		t.Fatalf("two engines: %+v", res.Failures)
 	}
-	cfg.Engines = func(SeedConfig) []Engine { return []Engine{&echoDel{n: "a"}} }
+	cfg.Engines = func(SeedConfig) []FakeService { return []FakeService{&echoDel{n: "a"}} }
 	if res = RunSeed(cfg, 1); len(res.Failures) != 0 {
 		t.Fatalf("one engine: %+v", res.Failures)
 	}
@@ -435,20 +435,20 @@ func TestEngineRouting(t *testing.T) {
 
 type echoDel struct{ n string }
 
-func (e *echoDel) StateHash() uint64                                 { return 0 }
-func (e *echoDel) Name() string                                      { return e.n }
-func (e *echoDel) Handles(a core.Action) bool                        { _, ok := a.(core.ObjectDelete); return ok }
-func (e *echoDel) Execute(EngineCtx, core.NodeInstance, core.Action) {}
-func (e *echoDel) OnInternal(EngineCtx, any)                         {}
-func (e *echoDel) OnCrash(EngineCtx, core.NodeInstance)              {}
-func (e *echoDel) EnterRecovery()                                    {}
+func (e *echoDel) StateHash() uint64                                          { return 0 }
+func (e *echoDel) Name() string                                               { return e.n }
+func (e *echoDel) Handles(a core.Action) bool                                 { _, ok := a.(core.ObjectDelete); return ok }
+func (e *echoDel) Execute(FakeServiceContext, core.NodeInstance, core.Action) {}
+func (e *echoDel) OnInternal(FakeServiceContext, any)                         {}
+func (e *echoDel) OnCrash(FakeServiceContext, core.NodeInstance)              {}
+func (e *echoDel) EnterRecovery()                                             {}
 
 func TestClockSkewAndWall(t *testing.T) {
 	var ats []core.NodeTime
 	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
 		if _, ok := ev.Body.(core.NodeStarted); ok {
 			ats = append(ats, ev.At)
-			if ev.Wall != wallEpoch {
+			if ev.Wall != wallClockStart {
 				t.Errorf("Wall = %d, want the scripted epoch at sim time 0", ev.Wall)
 			}
 		}
@@ -503,7 +503,7 @@ func TestWorkloadRole(t *testing.T) {
 		return w
 	}}
 	var quiesce int
-	cfg.Invariants = []func() Invariant{func() Invariant {
+	cfg.Invariants = []func() SafetyRule{func() SafetyRule {
 		return &fnInvariant{atEnd: func(v View) {
 			quiesce = len(v.Timeline().Snapshot("sim_quiesce"))
 			v.Assert().Always(v.History() != nil, "history exists")
@@ -564,16 +564,16 @@ func TestTimerCancel(t *testing.T) {
 func chaosCfg() Config {
 	cfg := baseCfg(scripted(putter))
 	cfg.Processes[0].Count = 3
-	cfg.Engines = func(sc SeedConfig) []Engine {
-		return []Engine{&echo{lat: sc.ObjectStore.ApplyLatency, lostProb: sc.ObjectStore.LostResponse}}
+	cfg.Engines = func(sc SeedConfig) []FakeService {
+		return []FakeService{&echo{lat: sc.ObjectStore.ApplyLatency, lostProb: sc.ObjectStore.LostResponse}}
 	}
 	cfg.ObjectStore = ObjectStoreFaults{
-		ApplyLatency: TwoSpeed{FastMin: core.Millisecond, FastMax: 3 * core.Millisecond, SlowMin: 50 * core.Millisecond, SlowMax: 80 * core.Millisecond, SlowProb: 0.1},
+		ApplyLatency: FastWithRareSlow{FastMin: core.Millisecond, FastMax: 3 * core.Millisecond, SlowMin: 50 * core.Millisecond, SlowMax: 80 * core.Millisecond, SlowProb: 0.1},
 		LostResponse: 0.05,
 	}
 	cfg.Network.ClockSkewMax = 100 * core.Millisecond
-	cfg.Attrition = Attrition{MaxDead: 1, CrashProb: 0.01, CrashWeight: 1, GracefulWeight: 1, RecoveryDelay: [2]core.Duration{10 * core.Millisecond, 50 * core.Millisecond}}
-	cfg.Cost = CostParams{PerEvent: core.Millisecond, PauseProb: 0.05, Pause: TwoSpeed{FastMin: 5 * core.Millisecond, FastMax: 20 * core.Millisecond}}
+	cfg.Attrition = NodeKills{MaxDead: 1, CrashProb: 0.01, CrashWeight: 1, GracefulWeight: 1, RecoveryDelay: [2]core.Duration{10 * core.Millisecond, 50 * core.Millisecond}}
+	cfg.Cost = CostParams{PerEvent: core.Millisecond, PauseProb: 0.05, Pause: FastWithRareSlow{FastMin: 5 * core.Millisecond, FastMax: 20 * core.Millisecond}}
 	cfg.Swarm = func(seed uint64, r CountedRand, c *SeedConfig) {
 		if r.Chance(0.5) {
 			c.ObjectStore.LostResponse = 0
@@ -581,7 +581,7 @@ func chaosCfg() Config {
 		c.Attrition.CrashProb *= float64(1 + r.Intn(3))
 	}
 	cfg.QuiesceEvery = 250 * core.Millisecond
-	cfg.Invariants = []func() Invariant{func() Invariant {
+	cfg.Invariants = []func() SafetyRule{func() SafetyRule {
 		return &fnInvariant{atEnd: func(v View) {
 			v.Assert().Always(v.Objects().Gen() > 0, "engine applied something")
 			v.Assert().Always(len(v.Timeline().Snapshot("put_done")) > 0, "puts complete")
@@ -649,7 +649,7 @@ func TestCheckDeterminismDetectsDivergence(t *testing.T) {
 	bad.Seeds = []uint64{1, 2}
 	bad.CheckDeterminism = 1
 	rep, _ = NewRunner().Run(bad)
-	if len(rep.Nondeterminism) == 0 || !hasFailure(rep.Seeds[0], FailNondeterminism, "") {
+	if len(rep.Nondeterminism) == 0 || !hasFailure(rep.Seeds[0], FailNotRepeatable, "") {
 		t.Fatalf("divergence not detected: %+v", rep.Nondeterminism)
 	}
 }
@@ -668,13 +668,13 @@ func TestReplay(t *testing.T) {
 
 func TestEngineLanesStableDisjointAndDistinct(t *testing.T) {
 	r := newRun(Config{}, 1)
-	c := &engineCtx{r: r, name: "e"}
-	d := &engineCtx{r: r, name: "other"}
-	seen := map[Lane]string{}
+	c := &fakeServiceContext{r: r, name: "e"}
+	d := &fakeServiceContext{r: r, name: "other"}
+	seen := map[DeliveryLane]string{}
 	for i := range 1000 {
 		key := fmt.Sprintf("objstore/node-%d", i)
 		l := c.Lane(key)
-		if l >= laneReserved || l == 0 {
+		if l >= laneForSystem || l == 0 {
 			t.Fatalf("%s: lane %d in or beside the kernel-reserved range", key, l)
 		}
 		if prev, dup := seen[l]; dup {
@@ -690,7 +690,7 @@ func TestEngineLanesStableDisjointAndDistinct(t *testing.T) {
 	if c.Lane("net/misc") == c.Lane("net/heal") {
 		t.Fatal("distinct keys share a lane")
 	}
-	for _, l := range []Lane{laneSim, nodeLane(&node{idx: 3}, 0), nodeLane(&node{idx: 3}, 1)} {
+	for _, l := range []DeliveryLane{laneForSimulator, nodeLane(&node{idx: 3}, 0), nodeLane(&node{idx: 3}, 1)} {
 		if _, clash := seen[l]; clash {
 			t.Fatalf("engine lane collides with reserved lane %d", l)
 		}
@@ -717,7 +717,7 @@ func TestPhaseAwareWorkload(t *testing.T) {
 		cfg := baseCfg(scripted(ping))
 		cfg.Workloads = []WorkloadFactory{func(core.Environment, core.NodeInstance, []core.NodeInstance) Workload { return w }}
 		var sp, wp []TimedFact
-		cfg.Invariants = []func() Invariant{func() Invariant {
+		cfg.Invariants = []func() SafetyRule{func() SafetyRule {
 			return &fnInvariant{atEnd: func(v View) {
 				sp, wp = v.Timeline().Snapshot("sim_phase"), v.Timeline().Snapshot("wl_phase")
 			}}
@@ -728,13 +728,13 @@ func TestPhaseAwareWorkload(t *testing.T) {
 	if len(res.Failures) != 0 {
 		t.Fatalf("%+v", res.Failures)
 	}
-	if len(w.phases) != 2 || w.phases[0] != PhaseSettling || w.phases[1] != PhaseSettle {
+	if len(w.phases) != 2 || w.phases[0] != PhaseRecovering || w.phases[1] != PhaseRecover {
 		t.Fatalf("OnPhase calls: %v", w.phases)
 	}
 	if len(sp) != 2 || sp[0].At != Time(core.Second) || sp[1].At != Time(2*core.Second) {
 		t.Fatalf("sim_phase facts: %+v", sp)
 	}
-	if v, _ := sp[0].Fact.Fields[0].Value.(core.U64); v != core.U64(PhaseSettling) {
+	if v, _ := sp[0].Fact.Fields[0].Value.(core.U64); v != core.U64(PhaseRecovering) {
 		t.Fatalf("phase field: %+v", sp[0].Fact)
 	}
 	if len(wp) != 2 || wp[0].At != sp[0].At {
@@ -750,7 +750,7 @@ func TestPhaseAwareWorkload(t *testing.T) {
 func TestExpectReachableAndAssertions(t *testing.T) {
 	cfg := baseCfg(scripted(ping))
 	cfg.Seeds = []uint64{1, 2}
-	cfg.Invariants = []func() Invariant{func() Invariant {
+	cfg.Invariants = []func() SafetyRule{func() SafetyRule {
 		return &fnInvariant{atEnd: func(v View) {
 			v.Assert().Reachable("hit")
 			v.Assert().Always(true, "fine")

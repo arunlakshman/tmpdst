@@ -6,11 +6,11 @@ import "manifester/internal/core"
 // own skewed core.NodeTime on each Event.
 type Time int64
 
-// Lane is an ordering domain. Entries on one lane at the same Time pop in FIFO
+// DeliveryLane is an ordering domain. Entries on one lane at the same Time pop in FIFO
 // order; entries on different lanes at the same Time are ordered by Tie, a
 // seeded random tie-break (decision C). One lane per connection direction, per engine
 // operation stream, per node timer set.
-type Lane uint64
+type DeliveryLane uint64
 
 // EntryID identifies a scheduled entry so it can be cancelled.
 type EntryID uint64
@@ -29,19 +29,19 @@ type EntryKind uint8
 const (
 	// EntryDeliver is an event to a node.
 	EntryDeliver EntryKind = iota // event to a node
-	// EntryEngineInternal is an engine-private body to an engine.
-	EntryEngineInternal // engine-private body to an engine
+	// EntryFakeServiceStep is an engine-private body to an engine.
+	EntryFakeServiceStep // engine-private body to an engine
 	EntryCrash
 	EntryRestart
 	EntryStop
 	EntryPhase
-	EntryQuiesce
+	EntryRecover
 )
 
 // Entry is one item in the global queue. Pop order is (At, Tie, Seq).
 type Entry struct {
 	At     Time
-	Lane   Lane
+	Lane   DeliveryLane
 	Kind   EntryKind
 	Target Target
 	Body   any    // core.EventData for nodes; engine-private plain data for engines

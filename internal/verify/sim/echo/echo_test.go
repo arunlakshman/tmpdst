@@ -139,7 +139,7 @@ func (i *tallyInv) AtEnd(v sim.View) {
 		if res == "ERR corrupt" {
 			i.t.corrupt++
 		}
-		if op.Outcome == sim.OpIndeterminate {
+		if op.Outcome == sim.OpResultUnknown {
 			i.t.indet++
 		}
 		if len(res) >= 3 && res[:3] == "ERR" {
@@ -156,7 +156,7 @@ func (i *tallyInv) AtEnd(v sim.View) {
 func TestCampaignIsNotVacuous(t *testing.T) {
 	cfg := Config(nil)
 	var tl tally
-	cfg.Invariants = append(cfg.Invariants, func() sim.Invariant { return &tallyInv{ph: cfg.Phases, t: &tl} })
+	cfg.Invariants = append(cfg.Invariants, func() sim.SafetyRule { return &tallyInv{ph: cfg.Phases, t: &tl} })
 	for s := uint64(1); s <= 20; s++ {
 		sim.RunSeed(cfg, s)
 	}

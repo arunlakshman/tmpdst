@@ -22,16 +22,16 @@ func config(seeds []uint64, brokers core.MachineFactory) sim.Config {
 		Workloads: []sim.WorkloadFactory{func(env core.Environment, self core.NodeInstance, bs []core.NodeInstance) sim.Workload {
 			return NewWorkload(env, self, bs, Opts{Clients: 4})
 		}},
-		Invariants: []func() sim.Invariant{
-			func() sim.Invariant { return &ackedIsCommitted{} },
-			func() sim.Invariant { return &readYourAck{acked: map[int64][]byte{}} },
-			func() sim.Invariant { return &liveness{} },
-			func() sim.Invariant { return campaign.FaultCoverage("echo:") },
+		Invariants: []func() sim.SafetyRule{
+			func() sim.SafetyRule { return &ackedIsCommitted{} },
+			func() sim.SafetyRule { return &readYourAck{acked: map[int64][]byte{}} },
+			func() sim.SafetyRule { return &liveness{} },
+			func() sim.SafetyRule { return campaign.FaultCoverage("echo:") },
 		},
-		Engines: func(sc sim.SeedConfig) []sim.Engine {
+		Engines: func(sc sim.SeedConfig) []sim.FakeService {
 			cp := cpengine.New(sc.ControlPlane)
 			cp.CreateTopic(Topic, 1)
-			return []sim.Engine{objstore.New(sc.ObjectStore), cp, netsim.New(sc.Network)}
+			return []sim.FakeService{objstore.New(sc.ObjectStore), cp, netsim.New(sc.Network)}
 		},
 		ObjectStore:      p.ObjectStore,
 		ControlPlane:     p.ControlPlane,

@@ -167,9 +167,9 @@ func (w *Workload) Step(ev core.Event) []core.Action { return w.loop.Step(ev) }
 func (w *Workload) OnPhase(p sim.Phase) []core.Action {
 	for _, c := range w.loop.Clients {
 		switch p {
-		case sim.PhaseSettling:
+		case sim.PhaseRecovering:
 			c.p.noNew = true
-		case sim.PhaseSettle:
+		case sim.PhaseRecover:
 			c.c.drain = true
 		}
 	}
@@ -367,6 +367,6 @@ func (w *Workload) StateHash() uint64 {
 }
 
 var (
-	_ sim.Workload   = (*Workload)(nil)
-	_ sim.PhaseAware = (*Workload)(nil)
+	_ sim.Workload            = (*Workload)(nil)
+	_ sim.ReceivesPhaseChange = (*Workload)(nil)
 )

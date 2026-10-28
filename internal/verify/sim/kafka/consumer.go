@@ -124,7 +124,7 @@ func (w *Workload) onFetch(c *client, r *kmsg.FetchResponse) []core.Action {
 	op := cs.op
 	cs.op = core.ID{}
 	if w.hist != nil {
-		w.hist.Return(op, res, sim.OpDefinite)
+		w.hist.Return(op, res, sim.OpResultKnown)
 	}
 	d := 100 + w.env.Intn(200)
 	if got {
@@ -169,7 +169,7 @@ func (w *Workload) readPart(p kmsg.FetchResponseTopicPartition, pos int64) ReadP
 // abandonFetch closes the outstanding read: it had no effect.
 func (w *Workload) abandonFetch(c *client, why string) {
 	if c.c.op != (core.ID{}) && w.hist != nil {
-		w.hist.Return(c.c.op, ReadRes{Why: why}, sim.OpAbandoned)
+		w.hist.Return(c.c.op, ReadRes{Why: why}, sim.OpGivenUp)
 	}
 	c.c.op = core.ID{}
 }

@@ -27,26 +27,26 @@ type Workload interface {
 	Quiescent() bool
 }
 
-// PhaseAware is an optional Workload interface. At every phase change (into
-// PhaseSettling and into PhaseSettle) the kernel appends the frozen fact
+// ReceivesPhaseChange is an optional Workload interface. At every phase change (into
+// PhaseRecovering and into PhaseRecover) the kernel appends the frozen fact
 // "sim_phase" {phase: U64 of the new Phase}, puts engines into recovery when
 // Settling starts, and then calls OnPhase on each live workload that
 // implements it, in node order. The call is treated like a Step: the returned
 // actions are dispatched the same way (a workload may not StopForRestart or ShutdownDone), the
 // trace hash folds the call and its actions, and every StateHash is folded
 // after it. It takes no node time and is not an inbox event, so a busy
-// workload hears it immediately. The initial phase (PhaseChaos) is not
+// workload hears it immediately. The initial phase (PhaseFaults) is not
 // announced; a workload starts in it. OnPhase must be deterministic, like Step.
-type PhaseAware interface {
+type ReceivesPhaseChange interface {
 	OnPhase(p Phase) []core.Action
 }
 
 // WorkloadFactory builds a fresh workload per seed (never reuse instances).
 type WorkloadFactory func(env core.Environment, self core.NodeInstance, brokers []core.NodeInstance) Workload
 
-// Invariant checks one property (lesson 10). Config.Invariants builds a fresh
+// SafetyRule checks one property (lesson 10). Config.Invariants builds a fresh
 // instance per seed, so there is no Reset. Violations go through View.Assert.
-type Invariant interface {
+type SafetyRule interface {
 	Name() string
 	// Observe runs after every step.
 	Observe(v View)
@@ -59,11 +59,11 @@ type Phase uint8
 
 // Phase values, in run order: Chaos, Settling, Settle.
 const (
-	// PhaseChaos injects faults.
-	PhaseChaos Phase = iota // faults injected
-	// PhaseSettling is recovery mode with nodes alive.
-	PhaseSettling // recovery mode, nodes alive
-	PhaseSettle   // draining remaining events
+	// PhaseFaults injects faults.
+	PhaseFaults Phase = iota // faults injected
+	// PhaseRecovering is recovery mode with nodes alive.
+	PhaseRecovering // recovery mode, nodes alive
+	PhaseRecover    // draining remaining events
 )
 
 // View is what an invariant sees after a step: the fact timeline, the history
@@ -75,8 +75,8 @@ type View interface {
 	Phase() Phase
 	Timeline() Timeline
 	History() History
-	Objects() ObjectTruth
-	CP() CPTruth
+	Objects() ObjectStoreRealState
+	CP() ControlPlaneRealState
 	// Assert is how invariants report.
 	Assert() core.Assertions
 }
@@ -88,17 +88,17 @@ type NodeAlive interface {
 	Alive(ref core.NodeInstance) bool
 }
 
-// ObjectTruth is what the object store really holds, as builtin types only
+// ObjectStoreRealState is what the object store really holds, as builtin types only
 // (anti-corruption layer). Iteration is in sorted key order.
-type ObjectTruth interface {
+type ObjectStoreRealState interface {
 	Object(key string) ([]byte, bool)
 	EachObject(fn func(key string, data []byte))
 	// Gen bumps whenever anything applied changes, so checks can skip steps.
 	Gen() uint64
 }
 
-// CPTruth is what the control plane really committed.
-type CPTruth interface {
+// ControlPlaneRealState is what the control plane really committed.
+type ControlPlaneRealState interface {
 	Committed(tp core.TopicPartition) []core.BatchRange
 	HighWatermark(tp core.TopicPartition) core.Offset
 	// Gen bumps whenever anything applied changes.
@@ -111,20 +111,20 @@ type OpOutcome uint8
 const (
 	// OpPending has no result yet.
 	OpPending OpOutcome = iota
-	// OpDefinite means the result is known; the effect lies inside [Invoke, Return].
-	OpDefinite
-	// OpIndeterminate means the client saw MaybeApplied. The op may take effect at
+	// OpResultKnown means the result is known; the effect lies inside [Invoke, Return].
+	OpResultKnown
+	// OpResultUnknown means the client saw MaybeApplied. The op may take effect at
 	// ANY time after Invoke, including after the client moved on (Jepsen
 	// :info). It never closes; it stays a candidate in every later window.
-	OpIndeterminate
-	// OpAbandoned means the client gave up and will not retry this op id.
-	OpAbandoned
+	OpResultUnknown
+	// OpGivenUp means the client gave up and will not retry this op id.
+	OpGivenUp
 )
 
-// HistOp is one client operation. ID names the request; Value names the
+// HistoryOperation is one client operation. ID names the request; Value names the
 // write's identity and is shared by its retries (idempotent-producer retries
 // are two requests with one Value).
-type HistOp struct {
+type HistoryOperation struct {
 	ID             core.ID
 	Value          core.ID
 	Client         core.NodeInstance
@@ -141,7 +141,7 @@ type History interface {
 	// Return completes id. It reports false for an unknown or duplicate id
 	// (a protocol failure).
 	Return(id core.ID, result any, o OpOutcome) bool
-	Ops() []HistOp
+	Ops() []HistoryOperation
 }
 
 // Cursor marks how far an invariant has read one fact name.

@@ -31,8 +31,8 @@ type Engine struct {
 }
 
 var (
-	_ sim.Engine  = (*Engine)(nil)
-	_ sim.CPTruth = (*Engine)(nil)
+	_ sim.FakeService           = (*Engine)(nil)
+	_ sim.ControlPlaneRealState = (*Engine)(nil)
 )
 
 // New returns an empty logstore with the given faults.
@@ -159,7 +159,7 @@ func (e *Engine) Handles(a core.Action) bool {
 }
 
 // Execute starts a; a must be a log IOCall (Handles guarantees it).
-func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.Action) {
+func (e *Engine) Execute(ctx sim.FakeServiceContext, from core.NodeInstance, a core.Action) {
 	e.Core.Execute(ctx, from, a.(core.IOCall))
 }
 

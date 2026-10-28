@@ -3,7 +3,7 @@ package sim
 import "manifester/internal/core"
 
 // CountedRand is the single seeded stream (lesson 3). Every draw in a run,
-// including engine latencies, fault coins and tie-breaks, comes from it. Swarm
+// including engine latencies, fault coins and tie-breaks, comes from it. RandomSettingsPicker
 // knobs and per-site buggify activation use Derive, never the run stream, so
 // editing a menu or adding a site does not reshuffle every seed.
 type CountedRand interface {

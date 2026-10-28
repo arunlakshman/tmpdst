@@ -17,8 +17,8 @@ type Engine struct {
 }
 
 var (
-	_ sim.Engine      = (*Engine)(nil)
-	_ sim.ObjectTruth = (*Engine)(nil)
+	_ sim.FakeService          = (*Engine)(nil)
+	_ sim.ObjectStoreRealState = (*Engine)(nil)
 )
 
 // New returns an empty store with the given faults.
@@ -49,7 +49,7 @@ func New(f sim.ObjectStoreFaults) *Engine {
 			}
 			return true, r.Uint64()
 		},
-		Finish: func(ctx sim.EngineCtx, c core.IOResult, p fakeio.Plan) core.IOResult {
+		Finish: func(ctx sim.FakeServiceContext, c core.IOResult, p fakeio.Plan) core.IOResult {
 			g, ok := c.(core.ObjectGetDone)
 			if !ok || !p.Flag || g.Err != core.OK || len(g.Data) == 0 {
 				return c
@@ -98,7 +98,7 @@ func (e *Engine) Handles(a core.Action) bool {
 }
 
 // Execute starts a; a must be an IOCall (Handles guarantees it).
-func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.Action) {
+func (e *Engine) Execute(ctx sim.FakeServiceContext, from core.NodeInstance, a core.Action) {
 	e.Core.Execute(ctx, from, a.(core.IOCall))
 }
 

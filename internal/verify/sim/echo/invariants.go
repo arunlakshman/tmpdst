@@ -113,8 +113,8 @@ func (*liveness) Name() string     { return "Liveness" }
 func (*liveness) Observe(sim.View) {}
 
 func (l *liveness) AtEnd(v sim.View) {
-	settling, ok1 := campaign.PhaseStart(v, sim.PhaseSettling)
-	settle, ok2 := campaign.PhaseStart(v, sim.PhaseSettle)
+	settling, ok1 := campaign.PhaseStart(v, sim.PhaseRecovering)
+	settle, ok2 := campaign.PhaseStart(v, sim.PhaseRecover)
 	v.Assert().Always(ok1 && ok2, "echo: the kernel announced Settling and Settle")
 	from, to := settling+sim.Time(campaign.LivenessGrace), settle
 	for _, op := range v.History().Ops() {

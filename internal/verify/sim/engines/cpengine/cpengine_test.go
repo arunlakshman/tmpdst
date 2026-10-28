@@ -13,7 +13,7 @@ import (
 const ms = core.Duration(1_000_000)
 
 func base() sim.ControlPlaneFaults {
-	ts := sim.TwoSpeed{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
+	ts := sim.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
 	return sim.ControlPlaneFaults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}
 }
 
@@ -89,7 +89,9 @@ func TestFaultFamilies(t *testing.T) {
 	}{
 		{"503", func(f *sim.ControlPlaneFaults) { f.Unavailable503 = 1 }, "cp_503", core.ErrUnavailable, core.NotApplied, false, 0},
 		{"lost", func(f *sim.ControlPlaneFaults) { f.LostResponse = 1 }, "cp_lost_response", core.ErrTimeout, core.MaybeApplied, true, sim.Time(1000 * ms)},
-		{"outage", func(f *sim.ControlPlaneFaults) { f.Outage = sim.Outage{Prob: 1, Dur: [2]core.Duration{ms, 2 * ms}} }, "cp_outage", core.ErrUnavailable, core.NotApplied, false, 0},
+		{"outage", func(f *sim.ControlPlaneFaults) {
+			f.Outage = sim.ServiceOutage{Prob: 1, Dur: [2]core.Duration{ms, 2 * ms}}
+		}, "cp_outage", core.ErrUnavailable, core.NotApplied, false, 0},
 	}
 	for _, tc := range cases {
 		f := base()
@@ -193,7 +195,7 @@ func TestLandsAfterCrash(t *testing.T) {
 func TestRecoveryStopsFaults(t *testing.T) {
 	f := base()
 	f.Unavailable503, f.Timeout, f.LostResponse = 1, 1, 1
-	f.Outage = sim.Outage{Prob: 1, Dur: [2]core.Duration{ms, 2 * ms}}
+	f.Outage = sim.ServiceOutage{Prob: 1, Dur: [2]core.Duration{ms, 2 * ms}}
 	e, c, a := setup(f, 1)
 	call(e, c, a, 1, commit("s"))
 	e.EnterRecovery()
@@ -210,7 +212,7 @@ func TestRecoveryStopsFaults(t *testing.T) {
 func TestDeterminism(t *testing.T) {
 	f := base()
 	f.Unavailable503, f.Timeout, f.LostResponse = 0.2, 0.2, 0.2
-	f.Outage = sim.Outage{Prob: 0.05, Dur: [2]core.Duration{10 * ms, 20 * ms}}
+	f.Outage = sim.ServiceOutage{Prob: 0.05, Dur: [2]core.Duration{10 * ms, 20 * ms}}
 	run := func(seed uint64) (string, uint64, uint64) {
 		e, c, a := setup(f, seed)
 		for i := range 60 {

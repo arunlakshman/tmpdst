@@ -12,7 +12,7 @@ import (
 const ms = core.Duration(1_000_000)
 
 func faults() sim.ControlPlaneFaults {
-	ts := sim.TwoSpeed{FastMin: ms, FastMax: 2 * ms}
+	ts := sim.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms}
 	return sim.ControlPlaneFaults{
 		ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 500 * ms,
 		Log: logengine.DefaultParams(),

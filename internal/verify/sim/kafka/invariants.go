@@ -12,7 +12,7 @@ func (*liveness) Name() string     { return "Liveness" }
 func (*liveness) Observe(sim.View) {}
 
 func (*liveness) AtEnd(v sim.View) {
-	settling, ok := campaign.PhaseStart(v, sim.PhaseSettling)
+	settling, ok := campaign.PhaseStart(v, sim.PhaseRecovering)
 	v.Assert().Always(ok, "kafka: the kernel announced Settling")
 	after := settling + sim.Time(campaign.LivenessGrace)
 	var produced, reads int
@@ -25,13 +25,13 @@ func (*liveness) AtEnd(v sim.View) {
 		case ProduceRes:
 			produced++
 			if op.Return >= after && r.Why != "rejected" {
-				v.Assert().Always(op.Outcome == sim.OpDefinite && r.Base >= 0, "kafka: a produce still running in Settling is acked",
+				v.Assert().Always(op.Outcome == sim.OpResultKnown && r.Base >= 0, "kafka: a produce still running in Settling is acked",
 					core.ContextPair{Key: "op", Value: op.Op}, core.ContextPair{Key: "result", Value: r}, core.ContextPair{Key: "return", Value: op.Return})
 			}
 		case ReadRes:
 			reads++
 			if op.Invoke >= after {
-				good := op.Outcome == sim.OpDefinite
+				good := op.Outcome == sim.OpResultKnown
 				for _, p := range r.Parts {
 					good = good && p.Code == 0
 				}

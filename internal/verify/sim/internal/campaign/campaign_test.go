@@ -33,21 +33,21 @@ type stubHist struct{}
 
 func (stubHist) Invoke(core.NodeInstance, core.ID, core.ID, any) {}
 func (stubHist) Return(core.ID, any, sim.OpOutcome) bool         { return false }
-func (stubHist) Ops() []sim.HistOp                               { return nil }
+func (stubHist) Ops() []sim.HistoryOperation                     { return nil }
 
 type stubView struct {
 	tl sim.Timeline
 	as core.Assertions
 }
 
-func (v stubView) Step() uint64             { return 0 }
-func (v stubView) Now() sim.Time            { return 0 }
-func (v stubView) Phase() sim.Phase         { return sim.PhaseChaos }
-func (v stubView) Timeline() sim.Timeline   { return v.tl }
-func (v stubView) History() sim.History     { return stubHist{} }
-func (v stubView) Objects() sim.ObjectTruth { return stubTruth{} }
-func (v stubView) CP() sim.CPTruth          { return stubTruth{} }
-func (v stubView) Assert() core.Assertions  { return v.as }
+func (v stubView) Step() uint64                      { return 0 }
+func (v stubView) Now() sim.Time                     { return 0 }
+func (v stubView) Phase() sim.Phase                  { return sim.PhaseFaults }
+func (v stubView) Timeline() sim.Timeline            { return v.tl }
+func (v stubView) History() sim.History              { return stubHist{} }
+func (v stubView) Objects() sim.ObjectStoreRealState { return stubTruth{} }
+func (v stubView) CP() sim.ControlPlaneRealState     { return stubTruth{} }
+func (v stubView) Assert() core.Assertions           { return v.as }
 
 func TestNewAndPhases(t *testing.T) {
 	t.Parallel()
@@ -88,14 +88,14 @@ func TestPhaseStart(t *testing.T) {
 	tl := sim.NewTimeline()
 	tl.Append(core.NodeInstance{}, 10, core.Fact{
 		Name:   "sim_phase",
-		Fields: []core.Field{{Key: "phase", Value: core.U64(uint64(sim.PhaseSettling))}},
+		Fields: []core.Field{{Key: "phase", Value: core.U64(uint64(sim.PhaseRecovering))}},
 	})
 	v := stubView{tl: tl, as: &stubAssert{}}
-	at, ok := PhaseStart(v, sim.PhaseSettling)
+	at, ok := PhaseStart(v, sim.PhaseRecovering)
 	if !ok || at != 10 {
 		t.Fatalf("PhaseStart Settling = %d, %v", at, ok)
 	}
-	if _, ok := PhaseStart(v, sim.PhaseSettle); ok {
+	if _, ok := PhaseStart(v, sim.PhaseRecover); ok {
 		t.Fatal("PhaseStart Settle unexpectedly found")
 	}
 }

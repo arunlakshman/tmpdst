@@ -15,12 +15,12 @@ const ms = core.Duration(1_000_000)
 type stub struct{ *Core }
 
 func (s stub) Handles(core.Action) bool { return true }
-func (s stub) Execute(ctx sim.EngineCtx, f core.NodeInstance, a core.Action) {
+func (s stub) Execute(ctx sim.FakeServiceContext, f core.NodeInstance, a core.Action) {
 	s.Core.Execute(ctx, f, a.(core.IOCall))
 }
 
 func params() Params {
-	ts := sim.TwoSpeed{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
+	ts := sim.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
 	return Params{Apply: ts, Respond: ts, P503: 0.1, PTimeout: 0.1, PLost: 0.1, CallerTimeout: 1000 * ms}
 }
 

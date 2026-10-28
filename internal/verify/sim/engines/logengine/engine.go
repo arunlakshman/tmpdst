@@ -65,7 +65,7 @@ type deadlineEv struct {
 	req  core.RequestID
 }
 
-var _ sim.Engine = (*Engine)(nil)
+var _ sim.FakeService = (*Engine)(nil)
 
 // DefaultParams are scaled-down production values for a 45 s run.
 func DefaultParams() sim.LogParams {
@@ -156,10 +156,10 @@ func (e *Engine) StateHash() uint64 { return uint64(len(e.pending)) ^ uint64(len
 func (e *Engine) EnterRecovery() { e.recovery = true }
 
 // OnCrash is a no-op: replica crash is attrition on CP processes.
-func (e *Engine) OnCrash(sim.EngineCtx, core.NodeInstance) {}
+func (e *Engine) OnCrash(sim.FakeServiceContext, core.NodeInstance) {}
 
 // OnInternal handles caller-timeout deadlines.
-func (e *Engine) OnInternal(ctx sim.EngineCtx, body any) {
+func (e *Engine) OnInternal(ctx sim.FakeServiceContext, body any) {
 	d, ok := body.(deadlineEv)
 	if !ok {
 		return
@@ -176,7 +176,7 @@ func (e *Engine) OnInternal(ctx sim.EngineCtx, body any) {
 }
 
 // Execute starts a ControlPlaneCall or lands a ControlPlaneReply.
-func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.Action) {
+func (e *Engine) Execute(ctx sim.FakeServiceContext, from core.NodeInstance, a core.Action) {
 	e.now = ctx.Now()
 	switch a := a.(type) {
 	case core.ControlPlaneCall:
@@ -188,7 +188,7 @@ func (e *Engine) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.Actio
 	}
 }
 
-func (e *Engine) execCall(ctx sim.EngineCtx, from core.NodeInstance, call core.ControlPlaneCall) {
+func (e *Engine) execCall(ctx sim.FakeServiceContext, from core.NodeInstance, call core.ControlPlaneCall) {
 	k := e.plan(ctx)
 	if k == fakeio.Unavailable {
 		e.deliver(ctx, from, core.ControlPlaneDone{Req: call.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied})
@@ -210,7 +210,7 @@ func (e *Engine) execCall(ctx sim.EngineCtx, from core.NodeInstance, call core.C
 	e.offer(ctx, cp, from, call.Req, call.Op)
 }
 
-func (e *Engine) execReply(ctx sim.EngineCtx, r core.ControlPlaneReply) {
+func (e *Engine) execReply(ctx sim.FakeServiceContext, r core.ControlPlaneReply) {
 	// ControlPlaneReply.To is the broker (machine stamps replyTo from the offer).
 	key := pendKey{r.To.Node, r.Done.Req}
 	p := e.pending[key]
@@ -242,14 +242,14 @@ func (e *Engine) execReply(ctx sim.EngineCtx, r core.ControlPlaneReply) {
 	e.deliverAt(ctx, p.from, ctx.Now()+sim.Time(lat), r.Done)
 }
 
-func (e *Engine) offer(ctx sim.EngineCtx, cp, from core.NodeInstance, req core.RequestID, op core.ControlPlaneOperation) {
+func (e *Engine) offer(ctx sim.FakeServiceContext, cp, from core.NodeInstance, req core.RequestID, op core.ControlPlaneOperation) {
 	lat := e.f.ApplyLatency.Sample(ctx.Rand())
 	at := ctx.Now() + sim.Time(lat)
 	ctx.Deliver(cp, at, ctx.Lane("logengine/offer/"+string(cp.Node)),
 		core.ControlPlaneDeliver{From: from, Req: req, Op: op})
 }
 
-func (e *Engine) pickCP(ctx sim.EngineCtx, exclude core.NodeInstance) (core.NodeInstance, bool) {
+func (e *Engine) pickCP(ctx sim.FakeServiceContext, exclude core.NodeInstance) (core.NodeInstance, bool) {
 	refs := e.liveCPs(ctx)
 	for _, ref := range refs {
 		if exclude.Node != "" && ref.Node == exclude.Node {
@@ -260,7 +260,7 @@ func (e *Engine) pickCP(ctx sim.EngineCtx, exclude core.NodeInstance) (core.Node
 	return core.NodeInstance{}, false
 }
 
-func (e *Engine) liveCPs(ctx sim.EngineCtx) []core.NodeInstance {
+func (e *Engine) liveCPs(ctx sim.FakeServiceContext) []core.NodeInstance {
 	cur, ok := ctx.(sim.NodeCurrent)
 	if !ok {
 		return nil
@@ -274,7 +274,7 @@ func (e *Engine) liveCPs(ctx sim.EngineCtx) []core.NodeInstance {
 	return out
 }
 
-func (e *Engine) plan(ctx sim.EngineCtx) fakeio.Kind {
+func (e *Engine) plan(ctx sim.FakeServiceContext) fakeio.Kind {
 	if e.recovery {
 		return fakeio.Normal
 	}
@@ -282,10 +282,10 @@ func (e *Engine) plan(ctx sim.EngineCtx) fakeio.Kind {
 	return p.Draw(ctx, "cp", &e.until)
 }
 
-func (e *Engine) deliver(ctx sim.EngineCtx, to core.NodeInstance, c core.ControlPlaneDone) {
+func (e *Engine) deliver(ctx sim.FakeServiceContext, to core.NodeInstance, c core.ControlPlaneDone) {
 	e.deliverAt(ctx, to, ctx.Now(), c)
 }
 
-func (e *Engine) deliverAt(ctx sim.EngineCtx, to core.NodeInstance, at sim.Time, c core.ControlPlaneDone) {
+func (e *Engine) deliverAt(ctx sim.FakeServiceContext, to core.NodeInstance, at sim.Time, c core.ControlPlaneDone) {
 	ctx.Deliver(to, at, ctx.Lane("logengine/"+string(to.Node)), c)
 }

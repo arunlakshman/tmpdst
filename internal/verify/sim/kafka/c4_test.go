@@ -42,7 +42,7 @@ func TestC4OracleDoesNotImportVeritas(t *testing.T) {
 }
 
 // verdict runs a fresh oracle over the finished world: one Observe, AtEnd.
-func verdict(w *world) (failures, sim.Invariant) {
+func verdict(w *world) (failures, sim.SafetyRule) {
 	w.as = failures{}
 	inv := kafka.NewOracle(w.opts)
 	inv.Observe(w)
@@ -52,7 +52,7 @@ func verdict(w *world) (failures, sim.Invariant) {
 
 // sameAsSpec: the oracle's reconstructed log of every partition is exactly
 // what veritas.Partition holds.
-func sameAsSpec(t *testing.T, seed uint64, w *world, inv sim.Invariant) {
+func sameAsSpec(t *testing.T, seed uint64, w *world, inv sim.SafetyRule) {
 	t.Helper()
 	for _, tp := range w.tps {
 		recs, _ := w.parts[tp].Read(0, 0)

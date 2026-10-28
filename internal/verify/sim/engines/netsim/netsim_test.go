@@ -38,7 +38,7 @@ type harness struct {
 	t      *testing.T
 	eng    *Engine
 	rnd    sim.CountedRand
-	lanes  map[string]sim.Lane
+	lanes  map[string]sim.DeliveryLane
 	now    sim.Time
 	q      []entry
 	seq    uint64
@@ -56,18 +56,18 @@ type harness struct {
 }
 
 func newHarness(t *testing.T, seed uint64, f sim.NetworkFaults) *harness {
-	return &harness{t: t, eng: New(f), rnd: sim.NewRand(seed), lanes: map[string]sim.Lane{}, live: map[core.NodeID]core.NodeInstance{},
+	return &harness{t: t, eng: New(f), rnd: sim.NewRand(seed), lanes: map[string]sim.DeliveryLane{}, live: map[core.NodeID]core.NodeInstance{},
 		as: &asserts{some: map[core.PropertyID]bool{}}, data: map[string][]byte{}, closed: map[string]core.ConnClosed{},
 		opened: map[string]core.ConnOpened{}, dials: map[core.RequestID]core.ConnectDone{}, sends: map[core.RequestID]core.SendDone{}}
 }
 
 func (h *harness) Now() sim.Time         { return h.now }
 func (h *harness) Rand() sim.CountedRand { return h.rnd }
-func (h *harness) Lane(key string) sim.Lane {
+func (h *harness) Lane(key string) sim.DeliveryLane {
 	if l, ok := h.lanes[key]; ok {
 		return l
 	}
-	l := sim.Lane(len(h.lanes) + 1)
+	l := sim.DeliveryLane(len(h.lanes) + 1)
 	h.lanes[key] = l
 	return l
 }
@@ -81,10 +81,10 @@ func (h *harness) add(e entry) sim.EntryID {
 	h.q = append(h.q, e)
 	return e.id
 }
-func (h *harness) Deliver(to core.NodeInstance, at sim.Time, _ sim.Lane, b core.EventData) sim.EntryID {
+func (h *harness) Deliver(to core.NodeInstance, at sim.Time, _ sim.DeliveryLane, b core.EventData) sim.EntryID {
 	return h.add(entry{at: at, to: to, body: b})
 }
-func (h *harness) Self(at sim.Time, _ sim.Lane, b any) sim.EntryID {
+func (h *harness) Self(at sim.Time, _ sim.DeliveryLane, b any) sim.EntryID {
 	return h.add(entry{at: at, self: true, body: b})
 }
 func (h *harness) Cancel(id sim.EntryID) {
@@ -203,7 +203,7 @@ func (h *harness) send(from core.NodeInstance, c core.ConnID, data []byte) core.
 	return r
 }
 
-var lat = sim.TwoSpeed{FastMin: 1000, FastMax: 5000, SlowMin: 100000, SlowMax: 200000, SlowProb: 0.1}
+var lat = sim.FastWithRareSlow{FastMin: 1000, FastMax: 5000, SlowMin: 100000, SlowMax: 200000, SlowProb: 0.1}
 
 // connect dials a->b and returns both conn ids.
 func (h *harness) connect(a, b core.NodeInstance) (core.ConnID, core.ConnID) {
@@ -394,7 +394,7 @@ func TestCrashClosesPeers(t *testing.T) {
 }
 
 func TestPartitionFreezesThenHeals(t *testing.T) {
-	f := sim.NetworkFaults{Latency: sim.TwoSpeed{FastMin: 1000, FastMax: 2000}, PartitionProb: 1,
+	f := sim.NetworkFaults{Latency: sim.FastWithRareSlow{FastMin: 1000, FastMax: 2000}, PartitionProb: 1,
 		PartitionDur: [2]core.Duration{1_000_000, 1_000_001}}
 	h := newHarness(t, 6, sim.NetworkFaults{Latency: f.Latency})
 	a, b := h.boot("a"), h.boot("b")

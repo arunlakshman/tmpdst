@@ -165,11 +165,11 @@ func (i *tallyInv) AtEnd(v sim.View) {
 		case ProduceRes:
 			i.t.batches++
 			switch op.Outcome {
-			case sim.OpDefinite:
+			case sim.OpResultKnown:
 				i.t.definite++
-			case sim.OpIndeterminate:
+			case sim.OpResultUnknown:
 				i.t.indet++
-			case sim.OpAbandoned:
+			case sim.OpGivenUp:
 				i.t.abandoned++
 				if r.Why == "rejected" {
 					i.t.rejected++
@@ -193,7 +193,7 @@ func (i *tallyInv) AtEnd(v sim.View) {
 func TestCampaignIsNotVacuous(t *testing.T) {
 	cfg := Config(nil)
 	var tl tally
-	cfg.Invariants = append(cfg.Invariants, func() sim.Invariant { return &tallyInv{&tl} })
+	cfg.Invariants = append(cfg.Invariants, func() sim.SafetyRule { return &tallyInv{&tl} })
 	for s := uint64(1); s <= 20; s++ {
 		sim.RunSeed(cfg, s)
 	}
@@ -223,10 +223,10 @@ func (*fakeEnv) Sometimes(bool, core.PropertyID)                                
 func (*fakeEnv) Reachable(core.PropertyID)                                      {}
 func (*fakeEnv) Unreachable(core.PropertyID, ...core.ContextPair)               {}
 
-type fakeHist struct{ ops []sim.HistOp }
+type fakeHist struct{ ops []sim.HistoryOperation }
 
 func (h *fakeHist) Invoke(c core.NodeInstance, id, v core.ID, op any) {
-	h.ops = append(h.ops, sim.HistOp{ID: id, Value: v, Client: c, Op: op})
+	h.ops = append(h.ops, sim.HistoryOperation{ID: id, Value: v, Client: c, Op: op})
 }
 func (h *fakeHist) Return(id core.ID, res any, o sim.OpOutcome) bool {
 	for i := range h.ops {
@@ -237,7 +237,7 @@ func (h *fakeHist) Return(id core.ID, res any, o sim.OpOutcome) bool {
 	}
 	return false
 }
-func (h *fakeHist) Ops() []sim.HistOp { return h.ops }
+func (h *fakeHist) Ops() []sim.HistoryOperation { return h.ops }
 
 // The real broker never answers a fatal code to a plain batch, so the give-up
 // path is driven by hand: a definite rejection abandons the batch, an earlier
@@ -257,9 +257,9 @@ func TestFatalProduceErrorGivesUp(t *testing.T) {
 			b.ambiguous, b.idem = ambiguous, false
 		}
 		w.onProduce(c, produceResp(w, c, 45))
-		want := sim.OpAbandoned
+		want := sim.OpGivenUp
 		if ambiguous {
-			want = sim.OpIndeterminate
+			want = sim.OpResultUnknown
 		}
 		for i, op := range h.ops {
 			if op.Outcome != want {
@@ -298,7 +298,7 @@ func TestIdemBatchRejectedIsAbandoned(t *testing.T) {
 		acts := w.onProduce(c, produceResp(w, c, codeInvalidRequest))
 		for i, op := range h.ops {
 			res, _ := op.Result.(ProduceRes)
-			if op.Outcome != sim.OpAbandoned || res.Why != "rejected" || res.Base != -1 {
+			if op.Outcome != sim.OpGivenUp || res.Why != "rejected" || res.Base != -1 {
 				t.Errorf("ambiguous=%v op %d: %d %+v", ambiguous, i, op.Outcome, res)
 			}
 		}
@@ -438,7 +438,7 @@ func wideCampaign(t *testing.T, capParts, batches int, log bool) int64 {
 		}
 	}
 	var widest atomic.Int64
-	cfg.Invariants = append(cfg.Invariants, func() sim.Invariant { return &widestInv{&widest, opts.tps()} })
+	cfg.Invariants = append(cfg.Invariants, func() sim.SafetyRule { return &widestInv{&widest, opts.tps()} })
 	rep, err := sim.NewRunner().Run(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -569,7 +569,7 @@ func TestCorruptBatchRejectedIsAbandoned(t *testing.T) {
 	w.onProduce(c, produceResp(w, c, codeCorruptMessage))
 	for i, op := range h.ops {
 		res, _ := op.Result.(ProduceRes)
-		if op.Outcome != sim.OpAbandoned || res.Why != "rejected" {
+		if op.Outcome != sim.OpGivenUp || res.Why != "rejected" {
 			t.Errorf("op %d: %d %+v", i, op.Outcome, res)
 		}
 	}

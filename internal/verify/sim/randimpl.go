@@ -18,8 +18,8 @@ type splitMix struct {
 // NewRand returns a counted SplitMix64 stream seeded with seed.
 func NewRand(seed uint64) CountedRand { return &splitMix{seed: seed, state: seed} }
 
-// mix64 is the SplitMix64 output finalizer (a bijection on uint64).
-func mix64(z uint64) uint64 {
+// mixBits64 is the SplitMix64 output finalizer (a bijection on uint64).
+func mixBits64(z uint64) uint64 {
 	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
 	z = (z ^ (z >> 27)) * 0x94d049bb133111eb
 	return z ^ (z >> 31)
@@ -28,7 +28,7 @@ func mix64(z uint64) uint64 {
 func (r *splitMix) Uint64() uint64 {
 	r.calls++
 	r.state += 0x9e3779b97f4a7c15
-	return mix64(r.state)
+	return mixBits64(r.state)
 }
 
 // below returns a uniform value in [0, bound) without modulo bias (Lemire).
@@ -75,7 +75,7 @@ func (r *splitMix) NewID() core.ID {
 // Derive mixes this stream's seed with FNV-1a(label). It reads no state and
 // draws nothing.
 func (r *splitMix) Derive(label string) CountedRand {
-	return NewRand(mix64(r.seed ^ mix64(fnv1a(label))))
+	return NewRand(mixBits64(r.seed ^ mixBits64(fnv1aHash(label))))
 }
 
 func (r *splitMix) Calls() uint64 { return r.calls }
@@ -83,11 +83,11 @@ func (r *splitMix) Calls() uint64 { return r.calls }
 // Reseed restarts the sequence from seed; Calls keeps counting.
 func (r *splitMix) Reseed(seed uint64) { r.seed, r.state = seed, seed }
 
-func (r *splitMix) Fingerprint() uint64 { return mix64(r.state ^ mix64(r.calls)) }
+func (r *splitMix) Fingerprint() uint64 { return mixBits64(r.state ^ mixBits64(r.calls)) }
 
 // Sample draws one delay: a coin for the slow tail, then a uniform value in
 // the chosen inclusive range. Ranges with Max <= Min draw nothing.
-func (t TwoSpeed) Sample(r CountedRand) core.Duration {
+func (t FastWithRareSlow) Sample(r CountedRand) core.Duration {
 	lo, hi := t.FastMin, t.FastMax
 	if r.Chance(t.SlowProb) {
 		lo, hi = t.SlowMin, t.SlowMax
@@ -100,5 +100,5 @@ func (t TwoSpeed) Sample(r CountedRand) core.Duration {
 
 var (
 	_ CountedRand = (*splitMix)(nil)
-	_ Latency     = TwoSpeed{}
+	_ Latency     = FastWithRareSlow{}
 )

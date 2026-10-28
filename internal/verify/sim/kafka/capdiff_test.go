@@ -55,7 +55,7 @@ func capCampaign(t *testing.T, capParts int) *sealStats {
 		c.Params, c.ControlPlane.MaxCommitItems = prod, 0
 	}
 	st := &sealStats{}
-	cfg.Invariants = append(cfg.Invariants, func() sim.Invariant { return &sealInv{st: st} })
+	cfg.Invariants = append(cfg.Invariants, func() sim.SafetyRule { return &sealInv{st: st} })
 	rep, err := sim.NewRunner().Run(cfg)
 	if err != nil {
 		t.Fatal(err)

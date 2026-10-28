@@ -14,18 +14,18 @@ import (
 // values 401..499. A type without a row panics (fail closed); the tag test
 // scans core/ for types that lack one.
 
-func (h *hasher) ref(r core.NodeInstance) {
+func (h *stateHasher) ref(r core.NodeInstance) {
 	h.Str(string(r.Node))
 	h.Bytes(r.Inc[:])
 }
 
-func (h *hasher) segRef(s core.SegmentRef) {
+func (h *stateHasher) segRef(s core.SegmentRef) {
 	h.Str(s.Key)
 	h.I64(s.Off)
 	h.I64(s.Len)
 }
 
-func (h *hasher) batchRange(b core.BatchRange) {
+func (h *stateHasher) batchRange(b core.BatchRange) {
 	h.Str(b.TP.Topic)
 	h.U64(uint64(uint32(b.TP.Partition)))
 	h.I64(int64(b.Base))
@@ -33,7 +33,7 @@ func (h *hasher) batchRange(b core.BatchRange) {
 	h.segRef(b.Loc)
 }
 
-func (h *hasher) event(b core.EventData) {
+func (h *stateHasher) event(b core.EventData) {
 	switch e := b.(type) {
 	case core.NodeStarted:
 		h.U64(1)
@@ -72,7 +72,7 @@ func (h *hasher) event(b core.EventData) {
 	}
 }
 
-func (h *hasher) eventDone(b core.EventData) {
+func (h *stateHasher) eventDone(b core.EventData) {
 	switch e := b.(type) {
 	case core.ObjectPutDone:
 		h.U64(9)
@@ -114,7 +114,7 @@ func (h *hasher) eventDone(b core.EventData) {
 	}
 }
 
-func (h *hasher) eventLogDone(b core.EventData) {
+func (h *stateHasher) eventLogDone(b core.EventData) {
 	switch e := b.(type) {
 	case core.LogAppendDone:
 		h.U64(14)
@@ -150,7 +150,7 @@ func (h *hasher) eventLogDone(b core.EventData) {
 	}
 }
 
-func (h *hasher) action(a core.Action) {
+func (h *stateHasher) action(a core.Action) {
 	switch x := a.(type) {
 	case core.SetTimer:
 		h.U64(101)
@@ -184,7 +184,7 @@ func (h *hasher) action(a core.Action) {
 	}
 }
 
-func (h *hasher) actionIO(a core.Action) {
+func (h *stateHasher) actionIO(a core.Action) {
 	switch x := a.(type) {
 	case core.ObjectPut:
 		h.U64(108)
@@ -226,7 +226,7 @@ func (h *hasher) actionIO(a core.Action) {
 	}
 }
 
-func (h *hasher) actionLog(a core.Action) {
+func (h *stateHasher) actionLog(a core.Action) {
 	switch x := a.(type) {
 	case core.LogAppend:
 		h.U64(116)
@@ -251,7 +251,7 @@ func (h *hasher) actionLog(a core.Action) {
 }
 
 // cpOp folds an op; nil is tag 200.
-func (h *hasher) cpOp(op core.ControlPlaneOperation) {
+func (h *stateHasher) cpOp(op core.ControlPlaneOperation) {
 	switch x := op.(type) {
 	case nil:
 		h.U64(200)
@@ -283,7 +283,7 @@ func (h *hasher) cpOp(op core.ControlPlaneOperation) {
 }
 
 // cpResp folds a response; nil (an error completion) is tag 300.
-func (h *hasher) cpResp(r core.ControlPlaneResponse) {
+func (h *stateHasher) cpResp(r core.ControlPlaneResponse) {
 	switch x := r.(type) {
 	case nil:
 		h.U64(300)
@@ -312,7 +312,7 @@ func (h *hasher) cpResp(r core.ControlPlaneResponse) {
 	}
 }
 
-func (h *hasher) fieldValue(v core.FieldValue) {
+func (h *stateHasher) fieldValue(v core.FieldValue) {
 	switch x := v.(type) {
 	case core.I64:
 		h.U64(401)
@@ -334,7 +334,7 @@ func (h *hasher) fieldValue(v core.FieldValue) {
 	}
 }
 
-func (h *hasher) fact(f core.Fact) {
+func (h *stateHasher) fact(f core.Fact) {
 	h.U64(501)
 	h.Str(f.Name)
 	h.U64(uint64(len(f.Fields)))

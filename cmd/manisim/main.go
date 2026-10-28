@@ -159,12 +159,12 @@ func rerunSeed(stdout, stderr io.Writer, config func([]uint64) sim.Config, seed 
 }
 
 var failureKindNames = map[sim.FailKind]string{
-	sim.FailViolation:      "violation",
-	sim.FailInconclusive:   "inconclusive",
-	sim.FailProtocol:       "protocol",
-	sim.FailPanic:          "panic",
-	sim.FailMaxSteps:       "max_steps",
-	sim.FailNondeterminism: "nondeterminism",
+	sim.FailViolation:     "violation",
+	sim.FailUndecided:     "inconclusive",
+	sim.FailProtocol:      "protocol",
+	sim.FailPanic:         "panic",
+	sim.FailMaxSteps:      "max_steps",
+	sim.FailNotRepeatable: "nondeterminism",
 }
 
 func kind(k sim.FailKind) string {

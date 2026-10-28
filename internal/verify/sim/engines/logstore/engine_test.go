@@ -13,7 +13,7 @@ import (
 const ms = core.Duration(1_000_000)
 
 func base() sim.LogStoreFaults {
-	ts := sim.TwoSpeed{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
+	ts := sim.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
 	return sim.LogStoreFaults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}
 }
 
@@ -153,7 +153,7 @@ func TestTimeoutMaybeApplied(t *testing.T) {
 func TestDeterminism(t *testing.T) {
 	f := base()
 	f.Unavailable503, f.Timeout, f.LostResponse = 0.2, 0.2, 0.2
-	f.Outage = sim.Outage{Prob: 0.05, Dur: [2]core.Duration{10 * ms, 20 * ms}}
+	f.Outage = sim.ServiceOutage{Prob: 0.05, Dur: [2]core.Duration{10 * ms, 20 * ms}}
 	run := func(seed uint64) (string, uint64, uint64) {
 		e, c, a := setup(f, seed)
 		for i := range 40 {

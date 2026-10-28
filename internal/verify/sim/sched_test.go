@@ -6,8 +6,8 @@ import (
 	"manifester/internal/core"
 )
 
-func entry(at Time, lane Lane, tag uint64) Entry {
-	return Entry{At: at, Lane: lane, Kind: EntryEngineInternal, Target: Target{Engine: "e"}, Body: tag}
+func entry(at Time, lane DeliveryLane, tag uint64) Entry {
+	return Entry{At: at, Lane: lane, Kind: EntryFakeServiceStep, Target: Target{Engine: "e"}, Body: tag}
 }
 
 func drain(s Scheduler) []Entry {
@@ -186,7 +186,7 @@ func TestNodeInboxAndCost(t *testing.T) {
 	if got := m.Sample(core.TimerFired{}, rng); got != 10 {
 		t.Fatalf("cost = %d", got)
 	}
-	pause := NewCostModel(CostParams{PerEvent: 1, PauseProb: 1, Pause: TwoSpeed{FastMin: 500, FastMax: 500}})
+	pause := NewCostModel(CostParams{PerEvent: 1, PauseProb: 1, Pause: FastWithRareSlow{FastMin: 500, FastMax: 500}})
 	if got := pause.Sample(core.TimerFired{}, rng); got != 501 {
 		t.Fatalf("pause cost = %d", got)
 	}

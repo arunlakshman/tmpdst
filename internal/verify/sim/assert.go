@@ -9,17 +9,17 @@ import (
 
 // Assertion kinds as recorded in AssertionStat.Kind. Frozen spellings.
 const (
-	kindAlways     = "always"
-	kindAlwaysOrUn = "always_or_unreachable"
-	kindSometimes  = "sometimes"
-	kindReachable  = "reachable"
-	kindUnreach    = "unreachable"
+	kindMustAlwaysHold    = "always"
+	kindMustHoldIfReached = "always_or_unreachable"
+	kindMustHappenOnce    = "sometimes"
+	kindMustBeReached     = "reachable"
+	kindMustNotBeReached  = "unreachable"
 )
 
 // isSafety reports whether a kind is a violation-style assertion (Report.Always)
 // as opposed to a coverage one (Report.Coverage).
 func isSafety(kind string) bool {
-	return kind == kindAlways || kind == kindAlwaysOrUn || kind == kindUnreach
+	return kind == kindMustAlwaysHold || kind == kindMustHoldIfReached || kind == kindMustNotBeReached
 }
 
 type statKey struct {
@@ -82,28 +82,30 @@ func formatViolation(kind string, details []core.ContextPair) string {
 }
 
 func (a *assertions) Always(cond bool, p core.PropertyID, d ...core.ContextPair) {
-	a.record(kindAlways, p, cond, d)
+	a.record(kindMustAlwaysHold, p, cond, d)
 }
 func (a *assertions) AlwaysOrUnreachable(cond bool, p core.PropertyID, d ...core.ContextPair) {
-	a.record(kindAlwaysOrUn, p, cond, d)
+	a.record(kindMustHoldIfReached, p, cond, d)
 }
-func (a *assertions) Sometimes(cond bool, p core.PropertyID) { a.record(kindSometimes, p, cond, nil) }
-func (a *assertions) Reachable(p core.PropertyID)            { a.record(kindReachable, p, true, nil) }
+func (a *assertions) Sometimes(cond bool, p core.PropertyID) {
+	a.record(kindMustHappenOnce, p, cond, nil)
+}
+func (a *assertions) Reachable(p core.PropertyID) { a.record(kindMustBeReached, p, true, nil) }
 func (a *assertions) Unreachable(p core.PropertyID, d ...core.ContextPair) {
-	a.record(kindUnreach, p, false, d)
+	a.record(kindMustNotBeReached, p, false, d)
 }
 
 var _ core.Assertions = (*assertions)(nil)
 
-// buggify implements core.FaultInjector. Activation is decided once per site per run
-// from Derive("buggify/"+site): independent of the run stream, so adding the
+// faultInjector implements core.FaultInjector. Activation is decided once per site per run
+// from Derive("faultInjector/"+site): independent of the run stream, so adding the
 // first site shifts no other draw. Firing draws from the run stream, and only
 // for active sites.
-type buggify struct{ r *run }
+type faultInjector struct{ r *run }
 
-const buggifyDefaultP = 0.25
+const faultInjectDefaultChance = 0.25
 
-func (b *buggify) active(site core.FaultPointID) bool {
+func (b *faultInjector) active(site core.FaultPointID) bool {
 	if v, ok := b.r.sites[site]; ok {
 		return v
 	}
@@ -112,17 +114,19 @@ func (b *buggify) active(site core.FaultPointID) bool {
 	return v
 }
 
-func (b *buggify) Maybe(site core.FaultPointID) bool { return b.MaybeP(site, buggifyDefaultP) }
+func (b *faultInjector) Maybe(site core.FaultPointID) bool {
+	return b.MaybeP(site, faultInjectDefaultChance)
+}
 
-func (b *buggify) MaybeP(site core.FaultPointID, p float64) bool {
+func (b *faultInjector) MaybeP(site core.FaultPointID, p float64) bool {
 	return b.active(site) && b.r.rng.Chance(p)
 }
 
-func (b *buggify) Fault(site core.FaultPointID, p float64) bool {
-	return b.r.phase == PhaseChaos && b.MaybeP(site, p)
+func (b *faultInjector) Fault(site core.FaultPointID, p float64) bool {
+	return b.r.phase == PhaseFaults && b.MaybeP(site, p)
 }
 
-var _ core.FaultInjector = (*buggify)(nil)
+var _ core.FaultInjector = (*faultInjector)(nil)
 
 // env is the core.Environment every machine of a seed shares: the run stream, buggify
 // and assertions.
@@ -135,7 +139,7 @@ type env struct {
 // history is the simple History: ops in invoke order with logical sequence
 // numbers, stamped with simulation time.
 type history struct {
-	ops []HistOp
+	ops []HistoryOperation
 	idx map[core.ID]int
 	seq uint64
 	now func() Time
@@ -153,7 +157,7 @@ func (h *history) Invoke(client core.NodeInstance, id, value core.ID, op any) {
 	}
 	h.seq++
 	h.idx[id] = len(h.ops)
-	h.ops = append(h.ops, HistOp{ID: id, Value: value, Client: client, Op: op, InvSeq: h.seq, Invoke: h.now(), Outcome: OpPending})
+	h.ops = append(h.ops, HistoryOperation{ID: id, Value: value, Client: client, Op: op, InvSeq: h.seq, Invoke: h.now(), Outcome: OpPending})
 }
 
 func (h *history) Return(id core.ID, result any, o OpOutcome) bool {
@@ -168,6 +172,6 @@ func (h *history) Return(id core.ID, result any, o OpOutcome) bool {
 	return true
 }
 
-func (h *history) Ops() []HistOp { return h.ops }
+func (h *history) Ops() []HistoryOperation { return h.ops }
 
 var _ History = (*history)(nil)

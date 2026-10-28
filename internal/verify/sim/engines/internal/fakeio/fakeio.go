@@ -22,11 +22,11 @@ import (
 
 // Params is the fault and timing config common to both engines.
 type Params struct {
-	Apply, Respond sim.TwoSpeed
+	Apply, Respond sim.FastWithRareSlow
 	P503           float64
 	PTimeout       float64
 	PLost          float64
-	Outage         sim.Outage
+	Outage         sim.ServiceOutage
 	CallerTimeout  core.Duration
 }
 
@@ -48,7 +48,7 @@ type Hooks struct {
 	// bool and value are kept on the plan. Nil means none.
 	Extra func(r sim.CountedRand, a core.IOCall) (bool, uint64)
 	// Finish rewrites the response of a normally answered op (corruption).
-	Finish func(ctx sim.EngineCtx, c core.IOResult, p Plan) core.IOResult
+	Finish func(ctx sim.FakeServiceContext, c core.IOResult, p Plan) core.IOResult
 	// SpecHash is the spec's StateHash.
 	SpecHash func() uint64
 }
@@ -74,7 +74,7 @@ type Plan struct {
 	T1, T2 sim.Time
 	Flag   bool // Extra's bool
 	Bits   uint64
-	Lane   sim.Lane
+	Lane   sim.DeliveryLane
 }
 
 type landBody struct{ ID uint64 }
@@ -122,13 +122,13 @@ func (c *Core) EnterRecovery() { c.recovery = true }
 
 // OnCrash does nothing: effects stand and landings stay scheduled; deliveries to the dead
 // incarnation are dropped by the scheduler or skipped at landing.
-func (c *Core) OnCrash(sim.EngineCtx, core.NodeInstance) {}
+func (c *Core) OnCrash(sim.FakeServiceContext, core.NodeInstance) {}
 
 // Draw draws the boundary fault coins (outage, 503, timeout, lost, in that
 // order) and emits the matching fault named pre+"_...". until is the end of
 // the outage window and is extended when one starts. fields lead the
 // 503/timeout/lost fault fields.
-func (p Params) Draw(ctx sim.EngineCtx, pre string, until *sim.Time, fields ...core.Field) Kind {
+func (p Params) Draw(ctx sim.FakeServiceContext, pre string, until *sim.Time, fields ...core.Field) Kind {
 	r, now := ctx.Rand(), ctx.Now()
 	if now >= *until && r.Chance(p.Outage.Prob) {
 		d := p.Outage.Dur[0]
@@ -164,7 +164,7 @@ func (p Params) Draw(ctx sim.EngineCtx, pre string, until *sim.Time, fields ...c
 
 // Execute plans an op. Draw order: fault coins (Draw), apply latency, respond
 // latency, extra.
-func (c *Core) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.IOCall) {
+func (c *Core) Execute(ctx sim.FakeServiceContext, from core.NodeInstance, a core.IOCall) {
 	r, now, p := ctx.Rand(), ctx.Now(), c.h.Params
 	req := core.Field{Key: "req", Value: core.U64(a.RequestID())}
 	kind := Normal
@@ -196,7 +196,7 @@ func (c *Core) Execute(ctx sim.EngineCtx, from core.NodeInstance, a core.IOCall)
 }
 
 // OnInternal lands one planned op.
-func (c *Core) OnInternal(ctx sim.EngineCtx, body any) {
+func (c *Core) OnInternal(ctx sim.FakeServiceContext, body any) {
 	b, ok := body.(landBody)
 	if !ok {
 		return

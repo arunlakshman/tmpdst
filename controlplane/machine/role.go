@@ -115,22 +115,41 @@ func (m *Machine) roleTick() []core.Action {
 	if acts := m.maybeReplicaFault(); acts != nil || m.crashed || m.now < m.stallUntil {
 		return acts
 	}
-	take := m.cfg.TakeoverAfter
 	switch {
-	case m.active && m.lowerSeen:
+	case m.failbackDue():
 		m.setActive(false)
 		return nil
-	case !m.active && take > 0 &&
-		m.now-m.lastOtherAt > core.Time(take) &&
-		m.now-m.lastPullOK < core.Time(take):
+	case m.takeoverDue():
 		m.setActive(true)
 		return nil
-	case m.active && m.cfg.Heartbeat > 0 &&
-		m.now-m.lastOwnAt > core.Time(m.cfg.Heartbeat) &&
-		len(m.queue) == 0 && len(m.flights) == 0 && m.pending == 0:
+	case m.heartbeatDue():
 		return m.emitHeartbeat()
 	}
 	return nil
+}
+
+func (m *Machine) failbackDue() bool {
+	return m.active && m.lowerSeen
+}
+
+func (m *Machine) takeoverDue() bool {
+	take := m.cfg.TakeoverAfter
+	if m.active || take <= 0 {
+		return false
+	}
+	return m.now-m.lastOtherAt > core.Time(take) &&
+		m.now-m.lastPullOK < core.Time(take)
+}
+
+func (m *Machine) heartbeatDue() bool {
+	hb := m.cfg.Heartbeat
+	if !m.active || hb <= 0 {
+		return false
+	}
+	if m.now-m.lastOwnAt <= core.Time(hb) {
+		return false
+	}
+	return len(m.queue) == 0 && len(m.flights) == 0 && m.pending == 0
 }
 
 func (m *Machine) maybeReplicaFault() []core.Action {

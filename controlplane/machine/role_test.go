@@ -129,3 +129,65 @@ func TestFailbackOnLowerRank(t *testing.T) {
 		t.Fatal("active did not fail back after lower-rank writer")
 	}
 }
+
+func TestHeartbeatEmitsNoopWhenIdle(t *testing.T) {
+	const hb = 5 * core.Millisecond
+	m := newMachine(t, machine.Config{
+		Writer: "w", Rank: 0,
+		CatchUpEvery: core.Millisecond,
+		Heartbeat:    hb,
+	})
+	ready := bootEmpty(t, m, 0)
+	if !m.IsActive() {
+		t.Fatal("rank 0 stayed standby after boot")
+	}
+	role, ok := findTimer(ready, machine.TimerRole)
+	if !ok {
+		t.Fatalf("role timer missing in %v", ready)
+	}
+
+	acts := m.Step(core.Event{At: 0, Body: core.TimerFired{ID: role.ID, Gen: role.Gen}})
+	if ap, ok := findAppend(acts); ok {
+		t.Fatalf("role tick at boot appended %#v, want silence until heartbeat", ap)
+	}
+	role, ok = findTimer(acts, machine.TimerRole)
+	if !ok {
+		t.Fatalf("role rearm missing in %v", acts)
+	}
+
+	due := core.Time(hb + core.Millisecond)
+	acts = m.Step(core.Event{At: due, Body: core.TimerFired{ID: role.ID, Gen: role.Gen}})
+	ap, ok := findAppend(acts)
+	if !ok {
+		t.Fatalf("idle heartbeat actions = %v, want LogAppend", acts)
+	}
+	payload, ok := machine.UnwrapPayload(ap.Data)
+	if !ok {
+		t.Fatal("heartbeat envelope truncated")
+	}
+	got, err := applier.Decode(payload)
+	if err != nil || got.Kind != applier.KindNoop {
+		t.Fatalf("heartbeat payload = %+v %v, want KindNoop", got, err)
+	}
+	if !m.IsActive() {
+		t.Fatal("heartbeat changed role")
+	}
+	role, ok = findTimer(acts, machine.TimerRole)
+	if !ok {
+		t.Fatalf("role rearm after heartbeat missing in %v", acts)
+	}
+
+	acts = m.Step(core.Event{At: due + 1, Body: core.TimerFired{ID: role.ID, Gen: role.Gen}})
+	if ap, ok := findAppend(acts); ok {
+		t.Fatalf("in-flight heartbeat appended again: %#v", ap)
+	}
+}
+
+func findAppend(acts []core.Action) (core.LogAppend, bool) {
+	for _, a := range acts {
+		if ap, ok := a.(core.LogAppend); ok {
+			return ap, true
+		}
+	}
+	return core.LogAppend{}, false
+}

@@ -146,3 +146,76 @@ func TestHoleFillTimerWaits(t *testing.T) {
 		t.Fatalf("hole timer action = %T, want LogAppend", acts[0])
 	}
 }
+
+func TestHoleFillStaysQuietWhileArmed(t *testing.T) {
+	m := newMachine(t, machine.Config{
+		CatchUpEvery: core.Millisecond,
+		HoleAfter:    5 * core.Millisecond,
+	})
+	acts := step(m, core.Started{})
+	catch := acts[0].(core.SetTimer)
+	acts = step(m, core.TimerFired{ID: catch.ID, Gen: catch.Gen})
+	tail := acts[0].(core.LogCheckTail)
+	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
+	read := acts[0].(core.LogRead)
+	acts = step(m, core.LogReadDone{
+		Req: read.Req, Err: core.OK, Outcome: core.Applied,
+		Entries: []core.LogEntry{{Slot: 1, Data: noop("y")}},
+	})
+	holeTimer, ok := acts[0].(core.SetTimer)
+	if !ok || holeTimer.After != 5*core.Millisecond {
+		t.Fatalf("action = %#v, want hole SetTimer", acts[0])
+	}
+
+	acts = step(m, core.TimerFired{ID: catch.ID, Gen: catch.Gen})
+	tail = acts[0].(core.LogCheckTail)
+	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
+	if len(acts) != 0 {
+		t.Fatalf("while hole timer armed, catch-up returned %v, want none", acts)
+	}
+
+	acts = step(m, core.TimerFired{ID: holeTimer.ID, Gen: holeTimer.Gen})
+	if len(acts) != 1 {
+		t.Fatalf("original hole timer actions = %v, want [LogAppend]", acts)
+	}
+	if _, ok := acts[0].(core.LogAppend); !ok {
+		t.Fatalf("original hole timer action = %T, want LogAppend", acts[0])
+	}
+}
+
+func TestHoleFillSkipMutantAdvancesWithoutAppend(t *testing.T) {
+	const prop = core.Prop("logcp-sim: a replica's state equals the replay of the log at its slot")
+	m, env := newMachineEnv(t, machine.Config{
+		CatchUpEvery: core.Millisecond,
+		HoleAfter:    0,
+		Bug:          machine.BugHoleSkip,
+		Writer:       "w",
+	})
+	acts := step(m, core.Started{})
+	timer := acts[0].(core.SetTimer)
+	acts = step(m, core.TimerFired{ID: timer.ID, Gen: timer.Gen})
+	tail := acts[0].(core.LogCheckTail)
+	acts = step(m, core.LogCheckTailDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
+	read := acts[0].(core.LogRead)
+	acts = step(m, core.LogReadDone{
+		Req: read.Req, Err: core.OK, Outcome: core.Applied,
+		Entries: []core.LogEntry{{Slot: 1, Data: noop("late")}},
+	})
+	if _, ok := acts[0].(core.LogAppend); ok {
+		t.Fatalf("skip mutant appended %#v", acts[0])
+	}
+	rd, ok := acts[0].(core.LogRead)
+	if !ok || rd.From != 1 {
+		t.Fatalf("after skip actions = %#v, want LogRead from 1", acts)
+	}
+	if m.Applied() != 1 {
+		t.Fatalf("Applied = %d, want 1", m.Applied())
+	}
+	if len(env.always) != 1 || env.always[0].cond || env.always[0].prop != prop {
+		t.Fatalf("Always = %+v, want one failing %q", env.always, prop)
+	}
+	d := env.always[0].details
+	if len(d) != 1 || d[0].Key != "slot" || d[0].Value != core.LogSlot(1) {
+		t.Fatalf("Always details = %+v, want slot 1 after the advance", d)
+	}
+}

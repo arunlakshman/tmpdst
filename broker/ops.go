@@ -70,12 +70,23 @@ func (b *Broker) dropOp(o *op) {
 	}
 }
 
+func (b *Broker) addOp(o *op) { b.ops = append(b.ops, o) }
+
+func (b *Broker) opByTimer(id core.TimerID) *op {
+	for _, o := range b.ops {
+		if core.TimerID(o.id) == id {
+			return o
+		}
+	}
+	return nil
+}
+
 // startOp registers o as a pending part of its slot and issues its first call.
 func (b *Broker) startOp(o *op) []core.Action {
 	o.id = b.id()
 	o.state = opCP
 	o.s.pending++
-	b.ops = append(b.ops, o)
+	b.addOp(o)
 	return b.issue(o)
 }
 

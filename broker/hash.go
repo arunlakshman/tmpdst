@@ -40,6 +40,16 @@ func (h *hasher) ref(r core.SegmentRef) {
 // StateHash folds everything that influences behaviour, in a fixed order.
 func (b *Broker) StateHash() uint64 {
 	h := newHasher()
+	b.hashScalars(&h)
+	h.topics(b.topics)
+	h.conns(b.conns)
+	h.openSeg(b.open)
+	h.segs(b.segs)
+	h.ops(b.ops)
+	return uint64(h)
+}
+
+func (b *Broker) hashScalars(h *hasher) {
 	h.u64(uint64(b.cfg.Bug))
 	h.bool(b.started)
 	h.u64(uint64(b.nextReq))
@@ -50,21 +60,22 @@ func (b *Broker) StateHash() uint64 {
 	h.u64(uint64(b.bufBytes))
 	h.bool(b.pressure)
 	h.u64(b.guess)
+}
 
-	h.u64(uint64(len(b.topics)))
-	for _, t := range b.topics {
+func (h *hasher) topics(topics []core.TopicInfo) {
+	h.u64(uint64(len(topics)))
+	for _, t := range topics {
 		h.str(t.Name)
 		h.u64(uint64(t.Partitions))
 	}
-	h.conns(b.conns)
-	h.u64(uint64(b.open.gen))
-	h.u64(uint64(b.open.since))
-	h.u64(uint64(b.open.bytes))
-	h.u64(uint64(len(b.open.parts)))
-	h.batches(b.open.batches)
-	h.segs(b.segs)
-	h.ops(b.ops)
-	return uint64(h)
+}
+
+func (h *hasher) openSeg(o openSegment) {
+	h.u64(uint64(o.gen))
+	h.u64(uint64(o.since))
+	h.u64(uint64(o.bytes))
+	h.u64(uint64(len(o.parts)))
+	h.batches(o.batches)
 }
 
 func (h *hasher) conns(conns []*conn) {

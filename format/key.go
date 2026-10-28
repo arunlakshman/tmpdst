@@ -1,6 +1,7 @@
 package format
 
 import (
+	"encoding/hex"
 	"strings"
 
 	"manifester/core"
@@ -15,44 +16,9 @@ import (
 
 const keyPrefix = "seg/"
 
-const hexDigits = "0123456789abcdef"
-
-func putHex(b *strings.Builder, id [16]byte) {
-	for _, c := range id {
-		b.WriteByte(hexDigits[c>>4])
-		b.WriteByte(hexDigits[c&15])
-	}
-}
-
-func parseHex(s string) ([16]byte, bool) {
-	var id [16]byte
-	if len(s) != 32 {
-		return id, false
-	}
-	for i := range id {
-		var v [2]byte
-		for j := range 2 {
-			c := s[2*i+j]
-			switch {
-			case '0' <= c && c <= '9':
-				v[j] = c - '0'
-			case 'a' <= c && c <= 'f':
-				v[j] = c - 'a' + 10
-			default:
-				return id, false
-			}
-		}
-		id[i] = v[0]<<4 | v[1]
-	}
-	return id, true
-}
-
 // SegmentKey names the object of one segment upload.
 func SegmentKey(id core.ID) string {
-	var b strings.Builder
-	b.WriteString(keyPrefix)
-	putHex(&b, id)
-	return b.String()
+	return keyPrefix + hex.EncodeToString(id[:])
 }
 
 // ParseSegmentKey inverts SegmentKey. ok is false for any string SegmentKey
@@ -63,9 +29,12 @@ func ParseSegmentKey(key string) (core.ID, bool) {
 	if !found {
 		return id, false
 	}
-	d, ok := parseHex(rest)
-	if !ok {
-		return id, false
+	if _, err := hex.Decode(id[:], []byte(rest)); err != nil {
+		return core.ID{}, false
 	}
-	return core.ID(d), true
+	// hex.Decode accepts upper case; only the canonical spelling is a key.
+	if SegmentKey(id) != key {
+		return core.ID{}, false
+	}
+	return id, true
 }

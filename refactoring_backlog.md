@@ -28,7 +28,7 @@ Suggested waves: **P0 → P1 → P2 → P3 → P4**.
 | **P3** | Split Phase / Extract Function on hot paths | Makes Extract Class safe |
 | **P4** | Extract Class / polymorphism / ACL finish | Structure after seams exist |
 
-**Next up:** P3 `controlplane/machine` leftovers (`roleTick`, `maybeHoleFill`), or attrition/stall follow-up (`docs/cp-dsm-attrition-stall-followup.md`).
+**Next up:** P3 `controlplane/machine` leftovers (Move Field role clocks, Encapsulate Collection `buf`/waiters, `cpobs.New`), or attrition/stall follow-up (`docs/cp-dsm-attrition-stall-followup.md`).
 
 ---
 
@@ -125,10 +125,10 @@ Do per package **after** P1 types for that package.
 
 Old `logcp` / `logsm` P3 names (`Start`, `catchUp`, `applyBatch`, `Checkpoint`, `TrimBelow`, `withFresh`, `SyncTo`, `holeTick`, `holeDue`, `decodeSlot`, `adv`/`kick`, `setI`/`setI64`, batchwrite retry) are **gone**. DSM already split catch-up / commit / checkpoint / role across files. Do **not** retarget the deleted logsm list onto `Machine`. Remaining smells:
 
-- [ ] **Extract Function** / **Decompose Conditional:** `roleTick` arms — `controlplane/machine/role.go`
+- [x] ~~**Extract Function** / **Decompose Conditional:** `roleTick` arms — `controlplane/machine/role.go`~~
 - [ ] **Move Field:** role clocks (`lastOwnAt` / `lastOtherAt`) off the replica struct if a role collaborator earns its place
 - [ ] **Encapsulate Collection:** `buf` / waiters maps on `Machine`
-- [ ] **Separate Query from Modifier:** `maybeHoleFill` (still decides and emits)
+- [x] ~~**Separate Query from Modifier:** `maybeHoleFill` (still decides and emits)~~
 - [ ] **Extract Function:** `cpobs.New` metrics registration by domain (live registrar; HTTP `Middleware` is test-only husk)
 
 ### controlplane/applier

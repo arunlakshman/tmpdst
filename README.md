@@ -13,7 +13,7 @@ mise install
 
 That installs the pinned toolchain from `mise.toml` (`go`, `golangci-lint`,
 `buf`) and runs `make install-hooks` (mise `postinstall`), which links
-`scripts/githooks/pre-commit` into `.git/hooks/pre-commit`.
+`ops/scripts/githooks/pre-commit` into `.git/hooks/pre-commit`.
 
 Without mise:
 
@@ -29,13 +29,13 @@ make install-hooks   # uses ambient go / golangci-lint on PATH
 |------|------|
 | proto | `make proto` regenerates ignored `*.pb.go` via mise `buf` |
 | fmt-check | `gofmt -l` must be empty |
-| ascii-check | `scripts/ascii-check.sh` |
+| ascii-check | `ops/scripts/ascii-check.sh` |
 | vet | `go vet ./...` |
 | lint | `golangci-lint run ./...` (see `.golangci.yml`) |
 | compile | `go build ./...` |
-| test | unit packages (not `sim/`, not `it/`) |
-| sim | `go test ./sim/...` |
-| it-hermetic | `go test ./it/` (in-process memstore) |
+| test | unit packages (not `internal/verify/sim`, not `test/it`) |
+| sim | `go test ./internal/verify/sim/...` |
+| it-hermetic | `go test ./test/it/` (in-process memstore) |
 | crap | CRAP score ≤ 20 (`docs/crap-gate.md`) |
 
 Every `git commit` runs that gate via the pre-commit hook (with mise:
@@ -54,10 +54,10 @@ make lint
 make crap-strict
 ```
 
-Docker fullstack tests under `it/` skip unless
+Docker fullstack tests under `test/it/` skip unless
 `MANIFESTER_DYNAMO_ENDPOINT` and `MANIFESTER_S3_ENDPOINT` are set
-(`scripts/it-up.sh`). Determinism is a separate gate:
-`scripts/ci-determinism.sh`.
+(`ops/scripts/it-up.sh`). Determinism is a separate gate:
+`ops/scripts/ci-determinism.sh`.
 
 ## Docs
 

@@ -17,15 +17,15 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"manifester/broker"
-	"manifester/controlplane/cpclient"
-	"manifester/core"
-	"manifester/sys"
-	"manifester/sys/awsobs"
-	"manifester/sys/prod"
-	"manifester/sys/runinfo"
-	"manifester/sys/s3store"
-	"manifester/veritas/vsys"
+	"manifester/internal/broker"
+	"manifester/internal/controlplane/cpclient"
+	"manifester/internal/core"
+	"manifester/internal/sys"
+	"manifester/internal/sys/awsobs"
+	"manifester/internal/sys/prod"
+	"manifester/internal/sys/runinfo"
+	"manifester/internal/sys/s3store"
+	"manifester/internal/verify/veritas/vsys"
 )
 
 func main() {

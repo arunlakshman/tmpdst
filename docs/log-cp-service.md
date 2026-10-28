@@ -1,10 +1,10 @@
 # Log-backed control-plane service (stage 2)
 
-Status: production path is `controlplane/machine` + `controlplane/run` + gRPC (`manicp -store dynamolog`,
+Status: production path is `internal/controlplane/machine` + `internal/controlplane/run` + gRPC (`manicp -store dynamolog`,
 decision 55–58). Sim `kafka-log` uses the same machine as CP processes plus `logstore` (CP-DSM-8,
-`docs/sim-log-engine.md`). The goroutine `controlplane/logcp` twin is deleted; DynLog/table helpers
-live in `controlplane/exec`. Decisions 48-52, `docs/design-a-prototype.md` section 8,
-`docs/applier-bakeoff.md`. Tree path is `controlplane/` (decision 56).
+`docs/sim-log-engine.md`). The goroutine `internal/controlplane/logcp` twin is deleted; DynLog/table helpers
+live in `internal/controlplane/exec`. Decisions 48-52, `docs/design-a-prototype.md` section 8,
+`docs/applier-bakeoff.md`. Tree path is `internal/controlplane/` (decision 56).
 
 ## Architecture
 
@@ -36,7 +36,7 @@ reads worked) becomes active. An active node steps down when a writer of a lower
 
 Item: `pk=LOG`, `sk=%020d`, `d` (B) = entry, plus `v`, `w` (writer), `id`, `ts`, `n` (commands), `ttl`. Entry v1:
 version byte, rank, writer, append ID, ts (ms, advisory, never state), count, then each command as
-`controlplane/applier` codec (key table, batches). Zero commands is a no-op (hole fill, heartbeat). Size guard: entry plus 256 B
+`internal/controlplane/applier` codec (key table, batches). Zero commands is a no-op (hole fill, heartbeat). Size guard: entry plus 256 B
 of item overhead <= 350 KB; a single command that cannot fit is answered `ErrTooLarge` and never queued; the group
 stops growing at the guard.
 **Versioning rule (the open question):** the first byte is the format version. A reader that meets a version above

@@ -21,13 +21,13 @@ import (
 	"github.com/aws/smithy-go/middleware"
 	"google.golang.org/grpc"
 
-	"manifester/controlplane/cpobs"
-	"manifester/controlplane/exec"
-	"manifester/controlplane/machine"
-	"manifester/controlplane/server"
-	"manifester/core"
-	"manifester/sys/httppool"
-	"manifester/sys/runinfo"
+	"manifester/internal/controlplane/cpobs"
+	"manifester/internal/controlplane/exec"
+	"manifester/internal/controlplane/machine"
+	"manifester/internal/controlplane/server"
+	"manifester/internal/core"
+	"manifester/internal/sys/httppool"
+	"manifester/internal/sys/runinfo"
 )
 
 func main() {

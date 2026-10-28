@@ -70,11 +70,11 @@ is 90 lines if it is ever needed again.
 
 ## Audit status
 
-- `scripts/audit-dep.sh github.com/cockroachdb/pebble@v1.1.5 github.com/cockroachdb/pebble` ran (network was
+- `ops/scripts/audit-dep.sh github.com/cockroachdb/pebble@v1.1.5 github.com/cockroachdb/pebble` ran (network was
   available). detcheck fails, as expected: goroutines, channels, mutable globals, map ranges, many off-list imports.
 - Record: `docs/dep-audits/github.com/cockroachdb/pebble@v1.1.5.md`. Verdict: **rejected for the deterministic
   packages, accepted at the edge** (`cp/applier/pebblekv` only), like prometheus. No allow-list entry.
-- `scripts/ci-determinism.sh` passes: the applier is outside its package list, and so is Pebble.
+- `ops/scripts/ci-determinism.sh` passes: the applier is outside its package list, and so is Pebble.
 - Not audited: the new transitive modules one by one (they are outside the closure; CI does not require it). A
   supply-chain review of `cockroachdb/errors` and `sentry-go` (pulled for Pebble's error type) is still open.
 

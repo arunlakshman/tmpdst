@@ -18,13 +18,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cpv1 "manifester/controlplane/api/v1"
-	"manifester/controlplane/apiconv"
-	"manifester/controlplane/exec"
-	"manifester/controlplane/machine"
-	"manifester/controlplane/server"
-	"manifester/core"
-	"manifester/sys/runinfo"
+	cpv1 "manifester/internal/controlplane/api/v1"
+	"manifester/internal/controlplane/apiconv"
+	"manifester/internal/controlplane/exec"
+	"manifester/internal/controlplane/machine"
+	"manifester/internal/controlplane/server"
+	"manifester/internal/core"
+	"manifester/internal/sys/runinfo"
 )
 
 func freeAddr(t *testing.T) string {

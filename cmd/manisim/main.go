@@ -13,9 +13,9 @@ import (
 	"runtime"
 	"time"
 
-	"manifester/sim"
-	"manifester/sim/echo"
-	"manifester/sim/kafka"
+	"manifester/internal/verify/sim"
+	"manifester/internal/verify/sim/echo"
+	"manifester/internal/verify/sim/kafka"
 )
 
 // coverageMin is the campaign size from which a never-satisfied Sometimes

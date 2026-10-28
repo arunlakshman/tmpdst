@@ -14,10 +14,10 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/grpc"
 
-	"manifester/controlplane/exec"
-	"manifester/controlplane/machine"
-	"manifester/controlplane/server"
-	"manifester/core"
+	"manifester/internal/controlplane/exec"
+	"manifester/internal/controlplane/machine"
+	"manifester/internal/controlplane/server"
+	"manifester/internal/core"
 )
 
 type fakeProducer struct {

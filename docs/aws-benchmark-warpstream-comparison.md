@@ -6,11 +6,11 @@ Goal: run the benchmark WarpStream published ("WarpStream benchmarks and TCO",
 https://www.warpstream.com/blog/warpstream-benchmarks-and-tco, and the client guidance in
 https://docs.warpstream.com/warpstream/kafka/benchmarking and `.../configure-kafka-client/tuning-for-performance`)
 as closely as this system allows, and say exactly where it differs. The run is driven by
-`deploy/aws/bench/run-omb.sh` (flow in `docs/aws-benchmark-runbook.md`), summarised by `deploy/aws/bench/summarize.py`.
+`ops/deploy/aws/bench/run-omb.sh` (flow in `docs/aws-benchmark-runbook.md`), summarised by `ops/deploy/aws/bench/summarize.py`.
 
 Sources of their figures: the post and the two docs pages above. WarpStream does not publish OMB driver or workload
 files (the workload YAML is inline in the post, the driver settings are listed as prose); the files in
-`deploy/aws/bench/omb/` are our reconstruction of those settings.
+`ops/deploy/aws/bench/omb/` are our reconstruction of those settings.
 
 ## 1. Setup mapping
 
@@ -51,7 +51,7 @@ Client tool notes that matter for fairness:
   behaviour): records may be duplicated (decision 41) and also reordered within a partition. OMB does not check order, so
   the run is unaffected, but state it next to any claim about ordering. Where order matters set
   `max.in.flight.requests.per.connection=1` (at a throughput cost) or accept the reordering.
-- The Kafka driver the repo builds is OMB's, plus `deploy/aws/bench/omb/patches/0001`: (a) every logical topic maps
+- The Kafka driver the repo builds is OMB's, plus `ops/deploy/aws/bench/omb/patches/0001`: (a) every logical topic maps
   to one topic created beforehand through manicp (the broker has no CreateTopics); (b) consumers `assign()` partitions
   statically and never commit; (c) the consumer list is not shuffled so the static split is deterministic;
   (d) optional round-robin pinning of each client to one broker (`--bootstrap-mode balanced`, section 3.5).
@@ -179,7 +179,7 @@ their $3,031, S3 PUT/GET against $1,788/$508, DynamoDB against their $7,541 fee 
 Do not compare totals unless compression and AZ scope are stated.
 
 Pre-run estimate for 1,000,000 msg/s x 1 KiB over 6 brokers, uncompressed bytes, so with lz4 the bytes (not the request counts) are about half (a prediction, to be checked against
-the counters): the segment rule seals at 16 MiB, 200 ms, or 96 distinct partitions (`broker/config.go`). Each
+the counters): the segment rule seals at 16 MiB, 200 ms, or 96 distinct partitions (`internal/broker/config.go`). Each
 producer's batches (~100 KB) walk across all 288 partitions, so a segment reaches the 96-partition cap after about
 117 batches, about 11.7 MB: roughly 83 segments/s cluster-wide, about 83 PUTs/s, or 218 million PUTs a month
 ($1,091 at $0.005/1000), below WarpStream's $1,788. The commit of such a segment is 1 BatchGet + 96 Queries + one

@@ -303,9 +303,9 @@ with measured latency bounds) so simulated overload resembles the real thing.
 
 | Where | What |
 |---|---|
-| `core/action.go` | Actions `PauseReads{Conn}` and `ResumeReads{Conn}`. |
-| `core/inbox.go` | `Class` (`Control`, `Data`) and `ClassOf(EventBody) Class`, the fixed table from §3.1. An unclassified event type panics, so a new event can't silently land in the wrong queue. |
-| `core/inbox.go` | `Queue` (`Len`, `Pop`) and `InboxPolicy` (`Next(control, data Queue)`), pure and shared by production and the simulator. |
-| `sys/sys.go` | `Sink` split into `DeliverControl` (never blocks) and `DeliverData` (may block). `Conns` gains `PauseReads`/`ResumeReads` so the production executor can park a reader goroutine. |
-| `sim/cost.go` | `CostModel`, `CostParams` (per-event cost, per-byte cost, pause episodes) and `NodeInbox` (a node's simulated two inboxes plus `BusyUntil`). |
-| `sim/run.go` | `Config.Cost`. Zero means an instantaneous `Step`. |
+| `internal/core/action.go` | Actions `PauseReads{Conn}` and `ResumeReads{Conn}`. |
+| `internal/core/inbox.go` | `Class` (`Control`, `Data`) and `ClassOf(EventBody) Class`, the fixed table from §3.1. An unclassified event type panics, so a new event can't silently land in the wrong queue. |
+| `internal/core/inbox.go` | `Queue` (`Len`, `Pop`) and `InboxPolicy` (`Next(control, data Queue)`), pure and shared by production and the simulator. |
+| `internal/sys/sys.go` | `Sink` split into `DeliverControl` (never blocks) and `DeliverData` (may block). `Conns` gains `PauseReads`/`ResumeReads` so the production executor can park a reader goroutine. |
+| `internal/verify/sim/cost.go` | `CostModel`, `CostParams` (per-event cost, per-byte cost, pause episodes) and `NodeInbox` (a node's simulated two inboxes plus `BusyUntil`). |
+| `internal/verify/sim/run.go` | `Config.Cost`. Zero means an instantaneous `Step`. |

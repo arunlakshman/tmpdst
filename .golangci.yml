@@ -52,7 +52,7 @@ linters:
       analyze-types: true
       forbid:
         - pattern: ^panic$
-          msg: "return an error; panic is for impossible state in core/ sim/ only (Effective Go, Panic)"
+          msg: "return an error; panic is for impossible state in internal/core and internal/verify/sim only (Effective Go, Panic)"
     funlen:
       lines: 80
       statements: 50
@@ -89,10 +89,10 @@ linters:
     rules:
       - linters: [forbidigo]
         text: 'panic'
-        path: '^(core|sim|tools|veritas)/|_test\.go$'
+        path: '^(internal/core|internal/verify/sim|ops/tools|internal/verify/veritas)/|_test\.go$'
       - linters: [forbidigo]
         text: 'panic'
-        path: '^controlplane/applier/'
+        path: '^internal/controlplane/applier/'
       - linters: [funlen, gocognit, nestif, dupl, interfacebloat]
         path: '_test\.go$'
 formatters:

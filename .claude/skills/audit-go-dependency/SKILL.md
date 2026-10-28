@@ -1,20 +1,20 @@
 ---
 name: audit-go-dependency
-description: Audit a Go module for determinism before the deterministic packages (core/, sim/) may import it, or after bumping its version. Use when adding or upgrading a dependency of core/ or sim/, when detcheck reports an import that is not on the allow-list, or when scripts/ci-determinism.sh reports a missing audit record.
+description: Audit a Go module for determinism before the deterministic packages (internal/core, internal/verify/sim) may import it, or after bumping its version. Use when adding or upgrading a dependency of internal/core or internal/verify/sim, when detcheck reports an import that is not on the allow-list, or when ops/scripts/ci-determinism.sh reports a missing audit record.
 ---
 
 # Audit a Go dependency for determinism
 
-The deterministic packages (`core/`, `sim/`) may import only what is on the
-exact-path allow-list `tools/detcheck/allow.txt`. A third-party module also
+The deterministic packages (`internal/core`, `internal/verify/sim`) may import only what is on the
+exact-path allow-list `ops/tools/detcheck/allow.txt`. A third-party module also
 needs a reviewed record at `docs/dep-audits/<module>@<version>.md`, or CI fails.
-Production-only code (`sys/` adapters such as the AWS SDK and the HTTP client)
+Production-only code (`internal/sys` adapters such as the AWS SDK and the HTTP client)
 needs no determinism audit.
 
 ## Steps
 
 1. **Run the audit script** (it never modifies this repo):
-   `scripts/audit-dep.sh <module>@<version> [package-pattern]`
+   `ops/scripts/audit-dep.sh <module>@<version> [package-pattern]`
    It prints the direct imports, the third-party packages pulled in, detcheck
    findings, manual-review hints, and a checklist.
 
@@ -48,9 +48,9 @@ needs no determinism audit.
    - Write `docs/dep-audits/<module>@<version>.md` using the template in
      `docs/dep-audits/README.md`, with file:line for every finding.
    - Add the **exact** import path(s) our code will use to
-     `tools/detcheck/allow.txt`. Never add a bare prefix like `math`; use
+     `ops/tools/detcheck/allow.txt`. Never add a bare prefix like `math`; use
      `/...` only for a whole subtree you audited.
-   - `go get <module>@<version>` in the repo and run `scripts/ci-determinism.sh`.
+   - `go get <module>@<version>` in the repo and run `ops/scripts/ci-determinism.sh`.
    - Add any rules for our code to `docs/decisions.md`.
 
 7. **On a version bump:** rerun from step 1 for the new version and diff the
@@ -59,6 +59,6 @@ needs no determinism audit.
 
 ## Never
 
-- Never weaken `tools/detcheck` or delete an allow-list check to make CI pass.
+- Never weaken `ops/tools/detcheck` or delete an allow-list check to make CI pass.
 - Never suppress a finding in our code without `//detcheck:ok <reason>`.
 - Never accept a dependency on "it's just a codec": check aliasing and hidden defaults.

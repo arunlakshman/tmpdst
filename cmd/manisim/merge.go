@@ -3,7 +3,7 @@ package main
 import (
 	"sync"
 
-	"manifester/sim"
+	"manifester/internal/verify/sim"
 )
 
 // runSharded runs seeds in jobs contiguous shards on separate goroutines and

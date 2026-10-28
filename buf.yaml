@@ -3,7 +3,7 @@ version: v2
 modules:
   - path: .
     includes:
-      - controlplane/api
+      - internal/controlplane/api
 lint:
   use:
     - STANDARD

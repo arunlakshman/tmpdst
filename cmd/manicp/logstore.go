@@ -7,11 +7,11 @@ import (
 	"os"
 	"time"
 
-	"manifester/controlplane/cpobs"
-	"manifester/controlplane/exec"
-	"manifester/core"
-	"manifester/sys"
-	"manifester/sys/s3store"
+	"manifester/internal/controlplane/cpobs"
+	"manifester/internal/controlplane/exec"
+	"manifester/internal/core"
+	"manifester/internal/sys"
+	"manifester/internal/sys/s3store"
 )
 
 const kindLog = "dynamolog"

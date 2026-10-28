@@ -6,7 +6,7 @@ Known flaky tests and an unstable test environment are in `flaky-tests.md`.
 
 ## Compression
 
-**Done (decision 45).** The broker accepts gzip, snappy, lz4 and zstd and stores and serves the batches as opaque bytes. It validates the header only (magic, CRC, codec id, count against `lastOffsetDelta`) and never decompresses, so there is no codec dependency to audit. Fetch still patches only the base offset and leader epoch (decision 30). `MaxFrame` is 100 MiB so `max.request.size=64000000` fits. The sim workload mixes codecs, the `it/` tests run every codec and kgo's default, and the OMB driver defaults to lz4.
+**Done (decision 45).** The broker accepts gzip, snappy, lz4 and zstd and stores and serves the batches as opaque bytes. It validates the header only (magic, CRC, codec id, count against `lastOffsetDelta`) and never decompresses, so there is no codec dependency to audit. Fetch still patches only the base offset and leader epoch (decision 30). `MaxFrame` is 100 MiB so `max.request.size=64000000` fits. The sim workload mixes codecs, the `test/it/` tests run every codec and kgo's default, and the OMB driver defaults to lz4.
 
 **Open:** an lz4 run of the real OMB build, and of the AWS benchmark, has not happened.
 
@@ -28,20 +28,20 @@ Known flaky tests and an unstable test environment are in `flaky-tests.md`.
 - Lockstep conformance (C3).
 
 **Done when:**
-- Kill-broker tests in `it/` fail over without the client's seed list and without `MetadataMinAge`.
+- Kill-broker tests in `test/it/` fail over without the client's seed list and without `MetadataMinAge`.
 - The sim covers broker membership changes.
 
 ## Go 1.26 and current franz-go
 
-**Why:** `it/` pins franz-go v1.20.7 and kadm v1.17.1. Current franz-go needs Go 1.26 and kmsg v1.15, and the repo is on Go 1.24 with an audit record for kmsg v1.14.0 (decision J).
+**Why:** `test/it/` pins franz-go v1.20.7 and kadm v1.17.1. Current franz-go needs Go 1.26 and kmsg v1.15, and the repo is on Go 1.24 with an audit record for kmsg v1.14.0 (decision J).
 
 **Plan:**
 - Move go.mod to Go 1.26.
-- Bump kmsg and re-run its dependency audit (`scripts/audit-dep.sh`) with a new record.
+- Bump kmsg and re-run its dependency audit (`ops/scripts/audit-dep.sh`) with a new record.
 - Bump franz-go and kadm.
 - Re-check `kwire`'s Supported version table against the new kmsg.
 
-**Done when:** `scripts/ci-determinism.sh`, `go test ./...` (including `it/`) and a 300-seed campaign pass. Trace hashes may change if kmsg encoding changes; review any re-baseline by hand.
+**Done when:** `ops/scripts/ci-determinism.sh`, `go test ./...` (including `test/it/`) and a 300-seed campaign pass. Trace hashes may change if kmsg encoding changes; review any re-baseline by hand.
 
 ## CP range compaction
 

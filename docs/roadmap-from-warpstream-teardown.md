@@ -28,17 +28,17 @@ Status: have / partial / missing / different (deliberately). "T:" = teardown sec
 
 | Area | WarpStream agent per teardown | Ours | Status, evidence |
 |---|---|---|---|
-| Write path | Cross-partition batcher into one file; PUT to bucket, then commit to CP, then ack; 250 ms timer, ~1 MiB compressed default (T:8) | Same shape: seal at 16 MiB or 200 ms window, PUT, `CommitSegment`, ack after slot applied (dec 35, `broker/config.go`: 200 ms, 16 MiB, 4096 partitions, 256 batches) | have. w4 1M: 99 partitions and 15.3 MiB per segment, 23 of 32 seals/s by size |
+| Write path | Cross-partition batcher into one file; PUT to bucket, then commit to CP, then ack; 250 ms timer, ~1 MiB compressed default (T:8) | Same shape: seal at 16 MiB or 200 ms window, PUT, `CommitSegment`, ack after slot applied (dec 35, `internal/broker/config.go`: 200 ms, 16 MiB, 4096 partitions, 256 batches) | have. w4 1M: 99 partitions and 15.3 MiB per segment, 23 of 32 seals/s by size |
 | Commit protocol | `PutFile` carries per-batch shape, CP assigns offsets at apply, returns them; file IDs pre-allocated from CP (T:8, E.5) | CP assigns offsets at apply, contiguous runs (dec 42, 48); key is client-chosen `seg/<random>` (dec 43), idempotent per key | have, different on ID allocation. No CP round trip before PUT, good |
 | Metadata / control plane | Hosted sharded RSM per virtual cluster, 125-RPC API, journal plus snapshots, PITR (T:9, 10) | Own CP: DynamoDB log slots (if-absent), Pebble applier, one appender, hot standby, S3 checkpoint (dec 48-53, `cp/logcp`) | different. w4: append p99 8 ms, 20 to 32 slots/s, CP 0.2 of 4 cores. No PITR, no sharding |
 | CP failover | Leader tracking, cluster migration (T:9.1, F.5) | Standby tails log, slot is the fence (dec 51), `-takeover-after 5s` | have. w4 kill at 500k: ack gap about 8 s, 0 errors. Not tested at 1M |
 | File format | Custom segment: header, pages, footer with per-batch arrays, CRC per page; footer cache (F.2) | Batches stored verbatim plus index; Fetch patches baseOffset and leader epoch, CRC stays valid (dec 30, 43, 45) | have (simpler). No page checksums beyond the batch CRC; no scrub/inspect tool |
 | Object keys | Sharded prefixes by file id (F.1) | Flat `seg/<128-bit random>` | partial. Fine at 32 PUT/s; S3 prefix limits matter at read-path scale (audit S6). AWS guidance is the independent basis |
-| File cache / peer routing | RAM chunk cache, footer cache, AZ-aware peer ring, extra replicas (T:12) | None. Lookup per partition per Fetch, one ranged GET per batch (`broker/fetch.go`), Fetch ignores MinBytes/MaxWait (dec 29) | missing. Audit S3/S6: 20.6k Lookups/s from one idle consumer, 6.5k GET/s at 1 GiB/s |
+| File cache / peer routing | RAM chunk cache, footer cache, AZ-aware peer ring, extra replicas (T:12) | None. Lookup per partition per Fetch, one ranged GET per batch (`internal/broker/fetch.go`), Fetch ignores MinBytes/MaxWait (dec 29) | missing. Audit S3/S6: 20.6k Lookups/s from one idle consumer, 6.5k GET/s at 1 GiB/s |
 | Read path | CP returns pointers (file, index offset, batch), agent range-reads (E.4) | CP `Lookup` returns runs, broker GETs per batch | partial, same idea, no coalescing |
 | Compaction | Planner family, levels and lanes, CP validates the swap (T:15) | None; log trimmed, segments never merged (dec 53) | missing |
 | Retention / GC | Expire, dead-file view, bucket-scanning deadscanner for orphans (T:16) | None. Orphans from failed commits accumulate; bucket lifecycle can delete live `seg/` objects after 3 days (audit S13) | missing, and a correctness hazard |
-| Consumer groups / offsets | In the CP; both classic and KIP-848; batched RPCs (T:9.2c) | None; `kwire/supported.go` serves 5 APIs (Produce, Fetch, ListOffsets, Metadata, ApiVersions); static `assign()` in the benchmark | missing. Audit S19 |
+| Consumer groups / offsets | In the CP; both classic and KIP-848; batched RPCs (T:9.2c) | None; `internal/wire/kwire/supported.go` serves 5 APIs (Produce, Fetch, ListOffsets, Metadata, ApiVersions); static `assign()` in the benchmark | missing. Audit S19 |
 | Transactions / idempotence | CP state, per-batch producer ids in the commit | Rejected on purpose; brokers return INVALID_REQUEST for idempotent batches (dec 41, 44, TODO "not planned") | different (constraint) |
 | Data lake, query, pipelines, schema registry | Same pattern again (35 `DL*` RPCs, DuckDB, Confluent-compatible SR) (T:17) | None | out of scope |
 | Service discovery | Heartbeat to CP, `Discover`, power-of-2 choices, AZ steering via client.id (T:13, 7.2) | Metadata names only the answering broker (dec 29); live-broker list is a TODO needing a heartbeat lease | missing (planned, TODO "Metadata lists every live broker") |
@@ -124,10 +124,10 @@ Checklist. Status: OK / TODO / BLOCKER.
 
 | Item | Status | Finding |
 |---|---|---|
-| LICENSE | BLOCKER | None at repo root. `build/omb/src/LICENSE` is the Apache-2.0 OMB checkout (git-ignored; our `deploy/aws/bench/omb/patches/*` are derivatives and must keep its notice) |
-| README, quickstart | BLOCKER | No root `README.md` (only deploy and api READMEs). Need: what it is, alpha status, "produce-only, no consumer groups", docker-compose quickstart (`deploy/docker-compose.yml` exists), supported APIs |
+| LICENSE | BLOCKER | None at repo root. `build/omb/src/LICENSE` is the Apache-2.0 OMB checkout (git-ignored; our `ops/deploy/aws/bench/omb/patches/*` are derivatives and must keep its notice) |
+| README, quickstart | BLOCKER | No root `README.md` (only deploy and api READMEs). Need: what it is, alpha status, "produce-only, no consumer groups", docker-compose quickstart (`ops/deploy/docker-compose.yml` exists), supported APIs |
 | CONTRIBUTING, SECURITY.md, CODEOWNERS, issue templates | TODO | None exist. Pick DCO (sign-off) over a CLA for an alpha |
-| Public CI | TODO | Workflow lives at `build/ci/determinism.workflow.yml`, not `.github/workflows`, so it is not running. It uses only `go vet`, `go test`, determinism script: no AWS creds needed. Docker-backed `it/` tests skip without Docker; add a service-container job. `make build` includes the CRAP gate (`docs/crap-gate.md`) |
+| Public CI | TODO | Workflow lives at `build/ci/determinism.workflow.yml`, not `.github/workflows`, so it is not running. It uses only `go vet`, `go test`, determinism script: no AWS creds needed. Docker-backed `test/it/` tests skip without Docker; add a service-container job. `make build` includes the CRAP gate (`docs/crap-gate.md`) |
 | Module path | TODO | `module manifester` is not importable (`go get` needs a host path). Rename to `github.com/<org>/<repo>` before tagging; a mechanical change, but it touches every import and nothing hashes the path (verify with the sim hashes) |
 | Versioning | TODO | No tags. Use `v0.1.0-alpha.N`, no compatibility promise; log entry format is versioned (dec 53), which is a real upgrade story only for the CP log |
 | Maintainers | TODO | 192 commits, one author identity (GitHub noreply address, good). Bus factor 1: say so in the README |
@@ -143,7 +143,7 @@ Checklist. Status: OK / TODO / BLOCKER.
 
 ### Third-party audit
 - 16 indirect modules from Pebble: reviewed in `docs/dep-audits/pebble-indirect-modules.md` (all permissive, edge-only,
-  `core/` and `sim/` do not reach them). State this in the README. cockroachdb/errors and sentry-go are linked into
+  `internal/core/` and `internal/verify/sim/` do not reach them). State this in the README. cockroachdb/errors and sentry-go are linked into
   `manicp` (about 1 MB) and make no network call unless `sentry.Init` runs; ours never does.
 - Open advisory: `golang.org/x/text` v0.34.0, GO-2026-5970, reached only via sentry-go; the fix (v0.39.0) needs `go 1.25`.
   Also go.mod says `go 1.24.0` (end of life); release builds already use go1.26.10. Before the first tag, bump the
@@ -167,7 +167,7 @@ Checklist. Status: OK / TODO / BLOCKER.
 - The teardown was never committed (`git log --all` shows no commit touching it). Keep it that way.
 
 ### Wording and competitor risk
-- WarpStream appears 140 times in 30+ tracked files, including source comments (`broker/config.go`, `cmd/manibench`),
+- WarpStream appears 140 times in 30+ tracked files, including source comments (`internal/broker/config.go`, `cmd/manibench`),
   workload file names (`vanity-*`), `docs/aws-benchmark-warpstream-comparison.md` and decision text ("WarpStream style").
   Nominative factual comparison is normally fine. Do: attribute and date every vendor figure ("their blog, Oct 2026"),
   say "our reconstruction of their published settings", add a trademark line (WarpStream, Kafka and others belong to
@@ -175,7 +175,7 @@ Checklist. Status: OK / TODO / BLOCKER.
   symmetric figures; avoid "WarpStream clone/alternative" in the repo description. Rename `vanity` workloads.
 
 ### Reproducibility for outsiders
-- Terraform stack (`deploy/aws/terraform`, region has no default, good) plus runbook and OMB patches at a pinned commit.
+- Terraform stack (`ops/deploy/aws/terraform`, region has no default, good) plus runbook and OMB patches at a pinned commit.
   Needs an AWS account, ap-south-2 availability of m6in, a Grafana Cloud stack (SSM parameters) and SSO. Cost about
   $12.3/h fixed; w4 was about 37 min, estimated $10 to $13 (billing not checked). A realistic 3-run plus soak is $150 to
   $300 (estimate).

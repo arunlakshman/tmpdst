@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"manifester/broker"
-	"manifester/core"
-	"manifester/sys/prod"
+	"manifester/internal/broker"
+	"manifester/internal/core"
+	"manifester/internal/sys/prod"
 )
 
 // tuning is the flag values that shape the segment flush rule and the produce

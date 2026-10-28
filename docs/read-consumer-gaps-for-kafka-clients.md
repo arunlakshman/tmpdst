@@ -4,7 +4,7 @@ Status at 2026-10-22. This page lists what a Kafka client can and cannot do on t
 
 ## What works today
 
-The broker serves five Kafka APIs. `kwire.Supported` in `kwire/supported.go` is the source.
+The broker serves five Kafka APIs. `kwire.Supported` in `internal/wire/kwire/supported.go` is the source.
 
 | API | Key | Versions |
 |---|---|---|
@@ -18,21 +18,21 @@ A client that assigns partitions itself and reads with Fetch can consume. franz-
 
 ## How one Fetch works today
 
-`broker.fetch` in `broker/fetch.go` does the following for each partition:
+`broker.fetch` in `internal/broker/fetch.go` does the following for each partition:
 
-1. The broker sends one `Lookup` call to the control plane. `Lookup` is a `core.CPOp` in `core/controlplane.go`. The call asks for batches at or after the fetch offset, up to the partition byte limit.
+1. The broker sends one `Lookup` call to the control plane. `Lookup` is a `core.CPOp` in `internal/core/controlplane.go`. The call asks for batches at or after the fetch offset, up to the partition byte limit.
 2. The broker reads each returned batch with one ranged S3 GET. Reads within one partition run one at a time, in offset order. `broker.onFetchGet` runs the next GET only after the previous GET returns.
-3. The broker checks length, record count, and CRC for each batch. A bad GET is retried, up to `MaxAttempts`, which defaults to 6 in `broker/config.go`.
+3. The broker checks length, record count, and CRC for each batch. A bad GET is retried, up to `MaxAttempts`, which defaults to 6 in `internal/broker/config.go`.
 4. The broker rewrites base offset and leader epoch with `kwire.PatchBatch`. Both fields sit outside the batch CRC, so the CRC stays valid.
 5. The broker returns the batches. It sets high watermark and last stable offset to the partition end offset from `LookupResp.End`. It sets log start offset to 0.
 
-Byte limits work. `PartitionMaxBytes` bounds one partition. `MaxBytes` bounds the whole response, applied in `broker.finalize` in `broker/conn.go`. A partition that asks for no limit gets `DefaultFetchBytes`, 1 MiB. A response always holds at least one batch per partition, even if that batch exceeds the limit.
+Byte limits work. `PartitionMaxBytes` bounds one partition. `MaxBytes` bounds the whole response, applied in `broker.finalize` in `internal/broker/conn.go`. A partition that asks for no limit gets `DefaultFetchBytes`, 1 MiB. A response always holds at least one batch per partition, even if that batch exceeds the limit.
 
 ## What a group consumer hits first
 
 A client that calls subscribe instead of assign sends FindCoordinator. The broker does not serve FindCoordinator.
 
-`kwire.DecodeRequest` returns `kwire.UnsupportedError` for any key outside the five above, and for a version outside the ranges above. `broker.request` in `broker/conn.go` answers an ApiVersions request with the supported ranges. For any other unsupported request it closes the connection and sends no error response.
+`kwire.DecodeRequest` returns `kwire.UnsupportedError` for any key outside the five above, and for a version outside the ranges above. `broker.request` in `internal/broker/conn.go` answers an ApiVersions request with the supported ranges. For any other unsupported request it closes the connection and sends no error response.
 
 The client sees a dropped connection. It reconnects, asks ApiVersions, sees no group APIs, and fails or retries, depending on the client. No error text on the wire tells the user that groups are missing.
 
@@ -60,13 +60,13 @@ Kafka Connect, Kafka Streams, and ksqlDB need group APIs and, in most setups, tr
 
 | Field or feature | Behavior today | Code |
 |---|---|---|
-| `MinBytes` | Ignored. A Fetch with no new data returns at once, empty. | `broker/fetch.go` states this in its package comment. Decision 29. |
+| `MinBytes` | Ignored. A Fetch with no new data returns at once, empty. | `internal/broker/fetch.go` states this in its package comment. Decision 29. |
 | `MaxWait` | Ignored. The broker never holds a Fetch open. | Same. |
-| Fetch sessions, `SessionId` and `SessionEpoch` | A request with `SessionEpoch` above 0 gets `FETCH_SESSION_ID_NOT_FOUND`. The broker grants no session. Each Fetch sends full topic and partition state. | `broker.fetch` in `broker/fetch.go`. |
+| Fetch sessions, `SessionId` and `SessionEpoch` | A request with `SessionEpoch` above 0 gets `FETCH_SESSION_ID_NOT_FOUND`. The broker grants no session. Each Fetch sends full topic and partition state. | `broker.fetch` in `internal/broker/fetch.go`. |
 | Topic IDs | Fetch version 13 and above use topic IDs. The broker stops at version 12, so clients must use topic names. A Metadata request by topic ID returns `UNKNOWN_TOPIC_ID`. | `kwire.Supported`, `broker.metaResp`. |
 | Isolation level | Read committed and read uncommitted get the same answer. The broker sets last stable offset equal to the end offset and never returns aborted transaction markers. There are no transactions to abort. | `broker.onLookup`. |
 | `CurrentLeaderEpoch` and diverging epochs | The broker writes leader epoch 0 into every batch and into ListOffsets. It returns no diverging epoch. Fencing by leader epoch does not exist. | `kwire.PatchBatch` call in `broker.onFetchGet`. Decision 44. |
-| Timestamp search in ListOffsets | A timestamp other than earliest (-2) or latest (-1) gets error 43, `UNSUPPORTED_FOR_MESSAGE_FORMAT`. A client that seeks by time fails. | `broker.listOffsets` in `broker/metadata.go`. |
+| Timestamp search in ListOffsets | A timestamp other than earliest (-2) or latest (-1) gets error 43, `UNSUPPORTED_FOR_MESSAGE_FORMAT`. A client that seeks by time fails. | `broker.listOffsets` in `internal/broker/metadata.go`. |
 
 ## Read path limits that come from missing caches
 
@@ -138,8 +138,8 @@ Each step has a number to move. Lookup rate per idle consumer for step 1 and 2. 
 
 ## Sources
 
-- `kwire/supported.go` for the API list and versions.
-- `broker/fetch.go`, `broker/ops.go`, `broker/metadata.go`, and `broker/conn.go` for the read path as built.
-- `core/controlplane.go` for the three control plane operations.
+- `internal/wire/kwire/supported.go` for the API list and versions.
+- `internal/broker/fetch.go`, `internal/broker/ops.go`, `internal/broker/metadata.go`, and `internal/broker/conn.go` for the read path as built.
+- `internal/core/controlplane.go` for the three control plane operations.
 - `docs/surprises-audit.md` items S3, S5, S6, and S13 for measured rates.
 - `docs/TODO.md` for accepted work and `docs/roadmap-from-warpstream-teardown.md` sections 1 and 2 for estimates.

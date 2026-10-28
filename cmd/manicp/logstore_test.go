@@ -20,12 +20,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
-	"manifester/controlplane/cpclient"
-	"manifester/controlplane/cpobs"
-	"manifester/controlplane/exec"
-	"manifester/controlplane/fakedb"
-	"manifester/core"
-	"manifester/sys"
+	"manifester/internal/controlplane/cpclient"
+	"manifester/internal/controlplane/cpobs"
+	"manifester/internal/controlplane/exec"
+	"manifester/internal/controlplane/fakedb"
+	"manifester/internal/core"
+	"manifester/internal/sys"
 )
 
 // syncBuf is a log sink safe for the goroutines of several run calls.

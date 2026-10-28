@@ -17,7 +17,7 @@ type pbatch struct {
 	data     []byte
 	records  int64
 	loc      core.SegmentRef
-	answered bool // BugEarlyAck already answered it
+	answered bool // answerPart already ran (early under BugEarlyAck)
 }
 
 // openSegment is the buffer that the next flush seals.
@@ -94,12 +94,13 @@ func (b *Broker) addBatch(pb *pbatch) []core.Action {
 	if !slices.Contains(b.open.parts, pb.tp) {
 		b.open.parts = append(b.open.parts, pb.tp)
 	}
-	if len(b.open.batches) == 1 || b.cfg.Bug == BugTimerFromLastBatch {
-		// since must not move when the mutant re-arms the timer, or the age
-		// invariant cannot catch it.
-		if len(b.open.batches) == 1 {
-			b.open.since = b.now
-		}
+	first := len(b.open.batches) == 1
+	// since must not move when the mutant re-arms the timer, or the age
+	// invariant cannot catch it.
+	if first {
+		b.open.since = b.now
+	}
+	if first || b.cfg.Bug == BugTimerFromLastBatch {
 		b.timerGen++
 		b.open.gen = b.timerGen
 		acts = append(acts, core.SetTimer{ID: timerFlush, Gen: b.timerGen, After: b.cfg.BatchWindow})
@@ -160,7 +161,7 @@ func (b *Broker) sealBatches(bs []*pbatch) []core.Action {
 	if err != nil {
 		b.env.Unreachable("broker: admitted batches cannot be encoded")
 		for _, pb := range bs {
-			b.release(pb, errUnknownServer)
+			b.answerPart(pb, errUnknownServer, core.BatchRange{}, "")
 		}
 		return nil
 	}
@@ -195,8 +196,7 @@ func (b *Broker) onPutDone(s *segment, e core.ObjPutDone) []core.Action {
 	if b.cfg.Bug == BugEarlyAck {
 		for _, pb := range s.batches {
 			b.guess += uint64(pb.records)
-			b.ack(pb, core.BatchRange{TP: pb.tp, Base: core.Offset(b.guess) - core.Offset(pb.records), Count: pb.records}, s.key)
-			pb.answered = true
+			b.answerPart(pb, errNone, core.BatchRange{TP: pb.tp, Base: core.Offset(b.guess) - core.Offset(pb.records), Count: pb.records}, s.key)
 		}
 	}
 	return append(acts, b.pump()...)
@@ -277,7 +277,7 @@ func (b *Broker) committed(s *segment, rs []core.BatchRange) []core.Action {
 		core.Field{Key: "inflight", Value: core.I64(len(b.segs) - 1)},
 		core.Field{Key: "buffered", Value: core.I64(b.bufBytes - s.dataBytes())})}
 	for i, pb := range s.batches {
-		b.ack(pb, rs[i], s.key)
+		b.answerPart(pb, errNone, rs[i], s.key)
 	}
 	return append(acts, b.endSegment(s)...)
 }
@@ -309,7 +309,7 @@ func (b *Broker) failSegment(s *segment, code kafkaCode) []core.Action {
 		core.Field{Key: "inflight", Value: core.I64(len(b.segs) - 1)},
 		core.Field{Key: "buffered", Value: core.I64(b.bufBytes - s.dataBytes())})}
 	for _, pb := range s.batches {
-		b.release(pb, code)
+		b.answerPart(pb, code, core.BatchRange{}, "")
 	}
 	return append(acts, b.endSegment(s)...)
 }
@@ -366,28 +366,24 @@ func (b *Broker) segTimer(s *segment, gen core.TimerGen) []core.Action {
 	return nil
 }
 
-// ack records a success for pb at range r: the response entry, and the
-// "produce_acked" fact that drain emits right before the Send (decision 12).
-func (b *Broker) ack(pb *pbatch, r core.BatchRange, key string) {
+// answerPart answers pb once, with code or, on errNone, with success at range
+// r of segment key. A success also records the "produce_acked" fact that
+// drain emits right before the Send (decision 12).
+func (b *Broker) answerPart(pb *pbatch, code kafkaCode, r core.BatchRange, key string) {
 	if pb.answered {
 		return
 	}
-	pb.part.ErrorCode, pb.part.BaseOffset = int16(errNone), int64(r.Base)
-	pb.s.facts = append(pb.s.facts, core.Fact{Name: "produce_acked", Fields: []core.Field{
-		{Key: "topic", Value: core.Str(pb.tp.Topic)},
-		{Key: "partition", Value: core.I64(pb.tp.Partition)},
-		{Key: "base_offset", Value: core.I64(r.Base)},
-		{Key: "count", Value: core.I64(pb.records)},
-		{Key: "segment", Value: core.Str(key)},
-	}})
-	b.finishPart(pb.s)
-}
-
-// release answers pb with an error code (unless already answered).
-func (b *Broker) release(pb *pbatch, code kafkaCode) {
-	if pb.answered {
-		return
-	}
+	pb.answered = true
 	pb.part.ErrorCode, pb.part.BaseOffset = int16(code), -1
+	if code == errNone {
+		pb.part.BaseOffset = int64(r.Base)
+		pb.s.facts = append(pb.s.facts, core.Fact{Name: "produce_acked", Fields: []core.Field{
+			{Key: "topic", Value: core.Str(pb.tp.Topic)},
+			{Key: "partition", Value: core.I64(pb.tp.Partition)},
+			{Key: "base_offset", Value: core.I64(r.Base)},
+			{Key: "count", Value: core.I64(pb.records)},
+			{Key: "segment", Value: core.Str(key)},
+		}})
+	}
 	b.finishPart(pb.s)
 }

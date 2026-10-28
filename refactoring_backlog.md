@@ -28,7 +28,7 @@ Suggested waves: **P0 → P1 → P2 → P3 → P4**.
 | **P3** | Split Phase / Extract Function on hot paths | Makes Extract Class safe |
 | **P4** | Extract Class / polymorphism / ACL finish | Structure after seams exist |
 
-**Next up:** P3 hot-path clarity (broker `flow`/`addBatch`/`drain`, or `controlplane/machine` `roleTick`/`maybeHoleFill`). Attrition/stall follow-up remains `docs/cp-dsm-attrition-stall-followup.md` (separate from refactor waves).
+**Next up:** P3 `controlplane/machine` leftovers (`roleTick`, `maybeHoleFill`), or attrition/stall follow-up (`docs/cp-dsm-attrition-stall-followup.md`).
 
 ---
 
@@ -108,12 +108,13 @@ Do per package **after** P1 types for that package.
 
 ### broker
 
-- [ ] **Split Phase:** `flow`, `addBatch`, produce/fetch skeleton vs admit, `onFetchGet`, `drain`
+- [x] ~~**Consolidate Conditional Expression:** `ack`/`release` → `answerPart`~~
+- [x] ~~**Split Phase:** `flow` → `updatePressure`/`syncReads`; flatten `addBatch` / `onFetchGet` (+ `intact`); left `drain` alone (already flat)~~
 - [ ] **Extract Function:** backoff, find-by-id, mirror response shape, `checkBatch` groups, metadata topic builder, ApiVersions single path, StateHash folds
 - [ ] **Decompose Conditional:** timers, ListOffsets timestamps, fetch corrupt path (**Guard Clauses**)
 - [ ] **Separate Query from Modifier:** `req`/`id`, `finishPart`
 - [ ] **Encapsulate Collection:** op/conn find-drop
-- [ ] **Consolidate Conditional Expression:** `ack`/`release` → `answerPart`
+- [ ] **Split Phase:** produce/fetch skeleton vs admit (remaining)
 
 ### kwire / format
 

@@ -130,7 +130,7 @@ func NewWorkload(env core.Env, self core.NodeRef, brokers []core.NodeRef, o Opts
 	for _, b := range brokers {
 		w.loop.Brokers = append(w.loop.Brokers, b.Node)
 	}
-	for i := 0; i < o.Producers+o.Consumers; i++ {
+	for i := range o.Producers + o.Consumers {
 		c := &client{Client: session.Client{ID: i}, producer: i < o.Producers}
 		if !c.producer {
 			c.c.pos = make([]int64, len(w.tps))
@@ -336,29 +336,29 @@ func (w *Workload) lost(c *client, why string) {
 
 // StateHash folds all state.
 func (w *Workload) StateHash() uint64 {
-	h := newHasher()
-	h.u64(uint64(w.loop.NextReq))
+	h := core.NewHasher()
+	h.U64(uint64(w.loop.NextReq))
 	for _, c := range w.loop.Clients {
-		h.u64(uint64(c.State))
-		h.u64(uint64(c.stage))
-		h.u64(uint64(c.Conn))
-		h.u64(uint64(c.DialReq))
-		h.u64(uint64(c.SendReq))
-		h.u64(uint64(c.Dials))
-		h.u64(uint64(c.Fails))
-		h.u64(uint64(c.WakeGen))
-		h.u64(uint64(c.ReqGen))
-		h.u64(uint64(c.corr))
+		h.U64(uint64(c.State))
+		h.U64(uint64(c.stage))
+		h.U64(uint64(c.Conn))
+		h.U64(uint64(c.DialReq))
+		h.U64(uint64(c.SendReq))
+		h.U64(uint64(c.Dials))
+		h.U64(uint64(c.Fails))
+		h.U64(uint64(c.WakeGen))
+		h.U64(uint64(c.ReqGen))
+		h.U64(uint64(c.corr))
 		for _, v := range c.ver {
-			h.u64(uint64(v))
+			h.U64(uint64(v))
 		}
 		if c.fr != nil {
-			h.u64(uint64(c.fr.Buffered()))
+			h.U64(uint64(c.fr.Buffered()))
 		}
-		h.bool(c.out != nil)
+		h.Bool(c.out != nil)
 		if c.out != nil {
-			h.u64(uint64(c.out.kind))
-			h.u64(uint64(c.out.h.CorrelationID))
+			h.U64(uint64(c.out.kind))
+			h.U64(uint64(c.out.h.CorrelationID))
 		}
 		c.p.hash(&h)
 		c.c.hash(&h)

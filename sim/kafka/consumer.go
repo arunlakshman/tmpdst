@@ -18,14 +18,14 @@ type consumer struct {
 	done   bool
 }
 
-func (c *consumer) hash(h *hasher) {
+func (c *consumer) hash(h *core.Hasher) {
 	for _, p := range c.pos {
-		h.i64(p)
+		h.I64(p)
 	}
-	h.bool(c.listed)
-	h.bytes(c.op[:])
-	h.bool(c.drain)
-	h.bool(c.done)
+	h.Bool(c.listed)
+	h.Bytes(c.op[:])
+	h.Bool(c.drain)
+	h.Bool(c.done)
 }
 
 func (w *Workload) listReq() *kmsg.ListOffsetsRequest {

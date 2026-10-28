@@ -8,46 +8,24 @@ import (
 
 // hasher is FNV-1a over a canonical byte stream. Every variable-length field
 // is length-prefixed so distinct states cannot collide by concatenation.
-type hasher uint64
+type hasher = core.Hasher
 
-func newHasher() hasher { return 14695981039346656037 }
+func newHasher() hasher { return core.NewHasher() }
 
-func (h *hasher) byte(b byte) { *h = (*h ^ hasher(b)) * 1099511628211 }
-
-func (h *hasher) u64(v uint64) {
-	for i := range 8 {
-		h.byte(byte(v >> (8 * i)))
-	}
+func hashTP(h *hasher, tp core.TopicPartition) {
+	h.Str(tp.Topic)
+	h.U64(uint64(tp.Partition))
 }
 
-func (h *hasher) bytes(b []byte) {
-	h.u64(uint64(len(b)))
-	for _, c := range b {
-		h.byte(c)
-	}
-}
-
-func (h *hasher) str(s string) {
-	h.u64(uint64(len(s)))
-	for i := 0; i < len(s); i++ {
-		h.byte(s[i])
-	}
-}
-
-func (h *hasher) tp(tp core.TopicPartition) {
-	h.str(tp.Topic)
-	h.u64(uint64(tp.Partition))
-}
-
-func (h *hasher) ranges(rs []core.BatchRange) {
-	h.u64(uint64(len(rs)))
+func hashRanges(h *hasher, rs []core.BatchRange) {
+	h.U64(uint64(len(rs)))
 	for _, r := range rs {
-		h.tp(r.TP)
-		h.u64(uint64(r.Base))
-		h.u64(uint64(r.Count))
-		h.str(r.Loc.Key)
-		h.u64(uint64(r.Loc.Off))
-		h.u64(uint64(r.Loc.Len))
+		hashTP(h, r.TP)
+		h.U64(uint64(r.Base))
+		h.U64(uint64(r.Count))
+		h.Str(r.Loc.Key)
+		h.U64(uint64(r.Loc.Off))
+		h.U64(uint64(r.Loc.Len))
 	}
 }
 

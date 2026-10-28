@@ -32,7 +32,9 @@ type Codec struct{}
 
 var _ core.Codec = Codec{}
 
-func malformed(what string) error { return fmt.Errorf("%w: %s", ErrMalformed, what) }
+func malformed(format string, a ...any) error {
+	return fmt.Errorf("%w: %s", ErrMalformed, fmt.Sprintf(format, a...))
+}
 
 // skipTags skips a tagged-field section and returns the bytes after it.
 func skipTags(b []byte) ([]byte, error) {
@@ -127,6 +129,13 @@ func respVersion(h core.RequestHeader) int16 {
 	return h.APIVersion
 }
 
+// respHeaderTags reports whether r's response header carries a tagged-field
+// section: flexible versions do, except ApiVersions, which always uses
+// response header v0.
+func respHeaderTags(h core.RequestHeader, flexible bool) bool {
+	return flexible && h.APIKey != KeyApiVersions
+}
+
 // EncodeResponse returns length prefix + correlation id + [header tags] + body.
 // It sets resp's version (h.APIVersion; v0 for unsupported ApiVersions).
 // ApiVersions always uses response header v0 (no tags).
@@ -138,7 +147,7 @@ func (Codec) EncodeResponse(h core.RequestHeader, resp core.Response) ([]byte, e
 	r.SetVersion(respVersion(h))
 	b := prefix(nil)
 	b = binary.BigEndian.AppendUint32(b, uint32(h.CorrelationID))
-	b = appendFlexibleTag(b, r.IsFlexible() && h.APIKey != KeyApiVersions)
+	b = appendFlexibleTag(b, respHeaderTags(h, r.IsFlexible()))
 	return seal(r.AppendTo(b)), nil
 }
 
@@ -170,14 +179,14 @@ func (Codec) DecodeResponse(h core.RequestHeader, frame []byte) (core.Response, 
 		return nil, malformed("short response header")
 	}
 	if c := int32(binary.BigEndian.Uint32(frame)); c != h.CorrelationID {
-		return nil, malformed(fmt.Sprintf("correlation id %d, want %d", c, h.CorrelationID))
+		return nil, malformed("correlation id %d, want %d", c, h.CorrelationID)
 	}
 	resp := kmsg.ResponseForKey(h.APIKey)
 	if resp == nil {
 		return nil, &UnsupportedError{Key: h.APIKey, Version: h.APIVersion, UnknownKey: true}
 	}
 	resp.SetVersion(respVersion(h))
-	if err := readBody(frame[4:], resp.IsFlexible() && h.APIKey != KeyApiVersions, resp.ReadFrom); err != nil {
+	if err := readBody(frame[4:], respHeaderTags(h, resp.IsFlexible()), resp.ReadFrom); err != nil {
 		return nil, err
 	}
 	return resp, nil

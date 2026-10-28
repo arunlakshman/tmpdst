@@ -106,10 +106,10 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		}()
 		h := newHasher()
 		fn(&h)
-		if prev, dup := seen[h.sum]; dup {
+		if prev, dup := seen[h.Sum()]; dup {
 			t.Errorf("%s and %s hash alike", name, prev)
 		}
-		seen[h.sum] = name
+		seen[h.Sum()] = name
 	}
 	for n, v := range events {
 		check("event "+n, func(h *hasher) { h.event(v) })

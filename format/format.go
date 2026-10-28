@@ -68,24 +68,19 @@ var ErrCorrupt = errors.New("format: corrupt segment")
 var ErrInvalid = errors.New("format: invalid batch")
 
 // Code maps an error from this package to a core.ErrCode: nil is core.OK,
-// ErrCorrupt is core.ErrCorrupt, ErrInvalid is core.ErrInvalid.
+// ErrInvalid is core.ErrInvalid, anything else (ErrCorrupt) is core.ErrCorrupt.
 func Code(err error) core.ErrCode {
 	switch {
 	case err == nil:
 		return core.OK
-	case errors.Is(err, ErrCorrupt):
-		return core.ErrCorrupt
 	case errors.Is(err, ErrInvalid):
 		return core.ErrInvalid
 	}
 	return core.ErrCorrupt
 }
 
-// castagnoli is the CRC32C table; built once (MakeTable is not free).
-var castagnoli = crc32.MakeTable(crc32.Castagnoli)
-
-// Checksum is CRC32C (Castagnoli).
-func Checksum(b []byte) uint32 { return crc32.Checksum(b, castagnoli) }
+// Checksum is CRC32C (Castagnoli); MakeTable returns the cached table.
+func Checksum(b []byte) uint32 { return crc32.Checksum(b, crc32.MakeTable(crc32.Castagnoli)) }
 
 // Batch is one partition's record batch to be written.
 type Batch struct {
@@ -116,9 +111,12 @@ type Segment struct {
 
 const (
 	maxTopic = math.MaxUint16
+	// entryTail is the fixed part of an index entry after the topic bytes:
+	// partition, records, off, len, CRC.
+	entryTail = 4 + 4 + 8 + 8 + 4
 	// minEntry is the smallest encoded index entry (empty topic is rejected
 	// later, but this bound only guards allocation).
-	minEntry = 2 + 4 + 4 + 8 + 8 + 4
+	minEntry = 2 + entryTail
 )
 
 // Encode lays out batches as one object and returns it with one Entry per
@@ -159,7 +157,13 @@ func writeObject(batches []Batch, idx, total int) ([]byte, []Entry) {
 	for i, b := range batches {
 		p += putEntry(body[p:], b, uint64(off))
 		copy(body[off:], b.Data)
-		entries[i] = Entry{b.TP, b.Records, int64(HeaderSize + off), int64(len(b.Data)), Checksum(b.Data)}
+		entries[i] = Entry{
+			TP:      b.TP,
+			Records: b.Records,
+			Off:     int64(HeaderSize + off),
+			Len:     int64(len(b.Data)),
+			CRC:     Checksum(b.Data),
+		}
 		off += len(b.Data)
 	}
 	copy(obj, Magic)
@@ -178,11 +182,11 @@ func putEntry(w []byte, b Batch, off uint64) int {
 	binary.BigEndian.PutUint64(w[n+8:], off)
 	binary.BigEndian.PutUint64(w[n+16:], uint64(len(b.Data)))
 	binary.BigEndian.PutUint32(w[n+24:], Checksum(b.Data))
-	return n + 28
+	return n + entryTail
 }
 
 func corrupt(format string, a ...any) error {
-	return fmt.Errorf("%w: "+format, append([]any{ErrCorrupt}, a...)...)
+	return fmt.Errorf("%w: %s", ErrCorrupt, fmt.Sprintf(format, a...))
 }
 
 // Decode validates a whole object (header, lengths, body CRC, index, every
@@ -192,11 +196,11 @@ func Decode(obj []byte) (Segment, error) {
 	if err != nil {
 		return Segment{}, err
 	}
-	ents, raws, payloadOff, err := decodeIndex(body)
+	idx, payloadOff, err := decodeIndex(body)
 	if err != nil {
 		return Segment{}, err
 	}
-	return attachPayloads(body, ents, raws, payloadOff)
+	return attachPayloads(body, idx, payloadOff)
 }
 
 // decodeHeader checks magic/version/flags/body-len/body-CRC and returns the body.
@@ -223,76 +227,77 @@ func decodeHeader(obj []byte) ([]byte, error) {
 	return body, nil
 }
 
-// indexRaw is one index entry's body-relative payload range.
-type indexRaw struct{ off, n uint64 }
+// indexEntry is a decoded index entry with its body-relative payload range;
+// Entry.Off and Entry.Len are filled once the range is validated.
+type indexEntry struct {
+	Entry
+	off, n uint64
+}
 
-// decodeIndex parses the index and returns entries (CRC filled, Off/Len later),
-// raw ranges, and the body offset where payloads must start.
-func decodeIndex(body []byte) ([]Entry, []indexRaw, uint64, error) {
+// decodeIndex parses the index and returns its entries and the body offset
+// where payloads must start.
+func decodeIndex(body []byte) ([]indexEntry, uint64, error) {
 	if len(body) < 4 {
-		return nil, nil, 0, corrupt("no index")
+		return nil, 0, corrupt("no index")
 	}
 	count := uint64(binary.BigEndian.Uint32(body))
 	if count == 0 || count > uint64(len(body)-4)/minEntry {
-		return nil, nil, 0, corrupt("bad batch count %d", count)
+		return nil, 0, corrupt("bad batch count %d", count)
 	}
-	ents := make([]Entry, 0, count)
-	raws := make([]indexRaw, 0, count)
+	idx := make([]indexEntry, 0, count)
 	p := 4
 	for i := range count {
-		ent, raw, next, err := readIndexEntry(body, p, i)
+		ent, next, err := readIndexEntry(body, p, i)
 		if err != nil {
-			return nil, nil, 0, err
+			return nil, 0, err
 		}
-		ents = append(ents, ent)
-		raws = append(raws, raw)
+		idx = append(idx, ent)
 		p = next
 	}
-	return ents, raws, uint64(p), nil
+	return idx, uint64(p), nil
 }
 
-func readIndexEntry(body []byte, p int, i uint64) (Entry, indexRaw, int, error) {
+func readIndexEntry(body []byte, p int, i uint64) (indexEntry, int, error) {
 	if len(body)-p < 2 {
-		return Entry{}, indexRaw{}, 0, corrupt("truncated index")
+		return indexEntry{}, 0, corrupt("truncated index")
 	}
 	tl := int(binary.BigEndian.Uint16(body[p:]))
-	if tl == 0 || len(body)-p < 2+tl+28 {
-		return Entry{}, indexRaw{}, 0, corrupt("bad index entry %d", i)
+	if tl == 0 || len(body)-p < 2+tl+entryTail {
+		return indexEntry{}, 0, corrupt("bad index entry %d", i)
 	}
 	topic := string(body[p+2 : p+2+tl])
 	q := p + 2 + tl
 	part := int32(binary.BigEndian.Uint32(body[q:]))
 	if part < 0 {
-		return Entry{}, indexRaw{}, 0, corrupt("negative partition in entry %d", i)
+		return indexEntry{}, 0, corrupt("negative partition in entry %d", i)
 	}
-	ent := Entry{
-		TP:      core.TP(topic, part),
-		Records: binary.BigEndian.Uint32(body[q+4:]),
-		CRC:     binary.BigEndian.Uint32(body[q+24:]),
-	}
-	raw := indexRaw{
+	return indexEntry{
+		Entry: Entry{
+			TP:      core.TP(topic, part),
+			Records: binary.BigEndian.Uint32(body[q+4:]),
+			CRC:     binary.BigEndian.Uint32(body[q+24:]),
+		},
 		off: binary.BigEndian.Uint64(body[q+8:]),
 		n:   binary.BigEndian.Uint64(body[q+16:]),
-	}
-	return ent, raw, q + 28, nil
+	}, q + entryTail, nil
 }
 
 // attachPayloads checks contiguous ranges and per-batch CRCs, fills Off/Len,
 // and builds Batches that alias body slices.
-func attachPayloads(body []byte, ents []Entry, raws []indexRaw, next uint64) (Segment, error) {
-	seg := Segment{Entries: ents, Batches: make([]Batch, 0, len(ents))}
-	for i, r := range raws {
+func attachPayloads(body []byte, idx []indexEntry, next uint64) (Segment, error) {
+	seg := Segment{Entries: make([]Entry, 0, len(idx)), Batches: make([]Batch, 0, len(idx))}
+	for i, r := range idx {
 		if r.off != next || r.n == 0 || r.n > uint64(len(body))-r.off {
 			return Segment{}, corrupt("entry %d: bad range off=%d len=%d", i, r.off, r.n)
 		}
 		next = r.off + r.n
 		data := body[r.off:next:next]
-		e := &seg.Entries[i]
-		if Checksum(data) != e.CRC {
+		if Checksum(data) != r.CRC {
 			return Segment{}, corrupt("entry %d: batch CRC mismatch", i)
 		}
-		e.Off, e.Len = int64(HeaderSize+r.off), int64(r.n)
-		seg.Batches = append(seg.Batches, Batch{TP: e.TP, Records: e.Records, Data: data})
+		r.Off, r.Len = int64(HeaderSize+r.off), int64(r.n)
+		seg.Entries = append(seg.Entries, r.Entry)
+		seg.Batches = append(seg.Batches, Batch{TP: r.TP, Records: r.Records, Data: data})
 	}
 	if next != uint64(len(body)) {
 		return Segment{}, corrupt("%d trailing body bytes", uint64(len(body))-next)

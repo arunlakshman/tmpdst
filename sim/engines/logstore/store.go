@@ -118,12 +118,8 @@ func (s *store) entry(slot core.LogSlot) ([]byte, bool) {
 }
 
 func (s *store) stateHash() uint64 {
-	h := uint64(14695981039346656037)
-	mix := func(v uint64) {
-		for i := range 8 {
-			h = (h ^ (v >> (8 * i) & 0xff)) * 1099511628211
-		}
-	}
+	h := core.NewHasher()
+	mix := h.U64
 	mix(uint64(len(s.slots)))
 	for i, r := range s.slots {
 		mix(uint64(i))
@@ -133,5 +129,5 @@ func (s *store) stateHash() uint64 {
 			mix(uint64(b))
 		}
 	}
-	return h
+	return h.Sum()
 }

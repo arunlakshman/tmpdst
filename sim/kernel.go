@@ -180,7 +180,7 @@ func runSeed(cfg Config, seed uint64) (SeedResult, []AssertionStat) {
 	}
 	r.res.Steps = r.steps
 	r.res.RandCalls = r.rng.Calls()
-	r.res.TraceHash = r.trace.sum
+	r.res.TraceHash = r.trace.Sum()
 	for i, name := range counterNames() {
 		r.res.Stats = append(r.res.Stats, Counter{Name: name, N: r.counters[i]})
 	}
@@ -260,7 +260,7 @@ func (r *run) addNodes() {
 		return n
 	}
 	for _, p := range r.cfg.Processes {
-		for i := 0; i < p.Count; i++ {
+		for i := range p.Count {
 			n := add(fmt.Sprintf("%s-%d", p.Name, i), false)
 			n.factory = p.Factory
 			n.noAttrition = p.NoAttrition
@@ -411,19 +411,19 @@ func (r *run) loop() {
 
 func (r *run) foldEntry(e Entry) {
 	h := &r.trace
-	h.i64(int64(e.At))
-	h.u64(uint64(e.Kind))
-	h.u64(uint64(e.Lane))
+	h.I64(int64(e.At))
+	h.U64(uint64(e.Kind))
+	h.U64(uint64(e.Lane))
 	h.ref(e.Target.Node)
-	h.str(e.Target.Engine)
+	h.Str(e.Target.Engine)
 	switch b := e.Body.(type) {
 	case core.EventBody:
 		h.event(b)
 	case wake:
-		h.u64(901)
+		h.U64(901)
 	case phaseChange:
-		h.u64(902)
-		h.u64(uint64(b.to))
+		h.U64(902)
+		h.U64(uint64(b.to))
 	}
 }
 
@@ -431,7 +431,7 @@ func (r *run) foldEntry(e Entry) {
 func (r *run) foldState() {
 	h := &r.trace
 	for _, n := range r.nodes {
-		h.bool(n.alive)
+		h.Bool(n.alive)
 		if !n.alive {
 			continue
 		}
@@ -444,10 +444,10 @@ func (r *run) foldState() {
 		} else if r.cfg.VerifyHashes {
 			r.verifyHash("node "+string(n.name), n.sum, n.m.StateHash)
 		}
-		h.u64(n.sum)
-		h.u64(uint64(len(n.inbox.ctrl.q)))
-		h.u64(uint64(len(n.inbox.data.q)))
-		h.i64(int64(n.inbox.busy))
+		h.U64(n.sum)
+		h.U64(uint64(len(n.inbox.ctrl.q)))
+		h.U64(uint64(len(n.inbox.data.q)))
+		h.I64(int64(n.inbox.busy))
 	}
 	for i, e := range r.engines {
 		if !r.engOK[i] {
@@ -459,7 +459,7 @@ func (r *run) foldState() {
 		} else if r.cfg.VerifyHashes {
 			r.verifyHash("engine "+e.Name(), r.engSum[i], e.StateHash)
 		}
-		h.u64(r.engSum[i])
+		h.U64(r.engSum[i])
 	}
 }
 
@@ -620,9 +620,9 @@ func (r *run) notifyPhase(p Phase) {
 		if !n.workload || !n.alive || !ok {
 			continue
 		}
-		r.trace.str(string(n.name))
-		r.trace.u64(903)
-		r.trace.u64(uint64(p))
+		r.trace.Str(string(n.name))
+		r.trace.U64(903)
+		r.trace.U64(uint64(p))
 		r.logf("on_phase %s %d", n.name, p)
 		n.sumOK = false
 		var acts []core.Action
@@ -656,7 +656,7 @@ func (r *run) pump(n *node) {
 		r.fail(FailProtocol, "started_first", fmt.Sprintf("%s: first Step was %T, not Started", n.name, body))
 	}
 	n.stepped++
-	r.trace.str(string(n.name))
+	r.trace.Str(string(n.name))
 	r.trace.event(body)
 	r.logf("step %s %s", n.name, desc{body})
 	n.sumOK = false

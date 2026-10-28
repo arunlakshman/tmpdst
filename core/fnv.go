@@ -43,3 +43,53 @@ func FnvU64(x, v uint64) uint64 {
 	}
 	return x
 }
+
+// Hasher is a running 64-bit FNV-1a hash (hash/fnv is off the deterministic
+// allow-list). Integers fold as 8 little-endian bytes; strings and byte
+// slices are length-prefixed so adjacent fields cannot run together.
+type Hasher uint64
+
+const (
+	fnvOffset = 14695981039346656037
+	fnvPrime  = fnvP1
+)
+
+// NewHasher returns the FNV-1a offset basis.
+func NewHasher() Hasher { return fnvOffset }
+
+// Sum is the hash so far.
+func (h Hasher) Sum() uint64 { return uint64(h) }
+
+// Byte folds one byte.
+func (h *Hasher) Byte(b byte) { *h = (*h ^ Hasher(b)) * fnvPrime }
+
+// U64 folds v as 8 little-endian bytes.
+func (h *Hasher) U64(v uint64) { *h = Hasher(FnvU64(uint64(*h), v)) }
+
+// I64 folds v as U64 does.
+func (h *Hasher) I64(v int64) { h.U64(uint64(v)) }
+
+// Bool folds 1 or 0 as U64 does.
+func (h *Hasher) Bool(b bool) {
+	if b {
+		h.U64(1)
+	} else {
+		h.U64(0)
+	}
+}
+
+// Str folds the length of s, then its bytes.
+func (h *Hasher) Str(s string) {
+	h.U64(uint64(len(s)))
+	for _, c := range []byte(s) {
+		h.Byte(c)
+	}
+}
+
+// Bytes folds the length of b, then its bytes.
+func (h *Hasher) Bytes(b []byte) {
+	h.U64(uint64(len(b)))
+	for _, c := range b {
+		h.Byte(c)
+	}
+}

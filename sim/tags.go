@@ -15,58 +15,58 @@ import (
 // scans core/ for types that lack one.
 
 func (h *hasher) ref(r core.NodeRef) {
-	h.str(string(r.Node))
-	h.bytes(r.Inc[:])
+	h.Str(string(r.Node))
+	h.Bytes(r.Inc[:])
 }
 
 func (h *hasher) segRef(s core.SegmentRef) {
-	h.str(s.Key)
-	h.i64(s.Off)
-	h.i64(s.Len)
+	h.Str(s.Key)
+	h.I64(s.Off)
+	h.I64(s.Len)
 }
 
 func (h *hasher) batchRange(b core.BatchRange) {
-	h.str(b.TP.Topic)
-	h.u64(uint64(uint32(b.TP.Partition)))
-	h.i64(int64(b.Base))
-	h.i64(b.Count)
+	h.Str(b.TP.Topic)
+	h.U64(uint64(uint32(b.TP.Partition)))
+	h.I64(int64(b.Base))
+	h.I64(b.Count)
 	h.segRef(b.Loc)
 }
 
 func (h *hasher) event(b core.EventBody) {
 	switch e := b.(type) {
 	case core.Started:
-		h.u64(1)
+		h.U64(1)
 		h.ref(e.Self)
 	case core.Stop:
-		h.u64(2)
-		h.i64(int64(e.Deadline))
+		h.U64(2)
+		h.I64(int64(e.Deadline))
 	case core.ConnOpened:
-		h.u64(3)
-		h.u64(uint64(e.Conn))
-		h.str(e.Peer)
+		h.U64(3)
+		h.U64(uint64(e.Conn))
+		h.Str(e.Peer)
 	case core.BytesReceived:
-		h.u64(4)
-		h.u64(uint64(e.Conn))
-		h.bytes(e.Data)
+		h.U64(4)
+		h.U64(uint64(e.Conn))
+		h.Bytes(e.Data)
 	case core.ConnClosed:
-		h.u64(5)
-		h.u64(uint64(e.Conn))
-		h.bool(e.Abort)
+		h.U64(5)
+		h.U64(uint64(e.Conn))
+		h.Bool(e.Abort)
 	case core.SendDone:
-		h.u64(6)
-		h.u64(uint64(e.Req))
-		h.u64(uint64(e.Conn))
-		h.u64(uint64(e.Err))
+		h.U64(6)
+		h.U64(uint64(e.Req))
+		h.U64(uint64(e.Conn))
+		h.U64(uint64(e.Err))
 	case core.DialDone:
-		h.u64(7)
-		h.u64(uint64(e.Req))
-		h.u64(uint64(e.Conn))
-		h.u64(uint64(e.Err))
+		h.U64(7)
+		h.U64(uint64(e.Req))
+		h.U64(uint64(e.Conn))
+		h.U64(uint64(e.Err))
 	case core.TimerFired:
-		h.u64(8)
-		h.u64(uint64(e.ID))
-		h.u64(uint64(e.Gen))
+		h.U64(8)
+		h.U64(uint64(e.ID))
+		h.U64(uint64(e.Gen))
 	default:
 		h.eventDone(b)
 	}
@@ -75,39 +75,39 @@ func (h *hasher) event(b core.EventBody) {
 func (h *hasher) eventDone(b core.EventBody) {
 	switch e := b.(type) {
 	case core.ObjPutDone:
-		h.u64(9)
-		h.u64(uint64(e.Req))
-		h.str(e.Key)
-		h.u64(uint64(e.Err))
-		h.u64(uint64(e.Outcome))
+		h.U64(9)
+		h.U64(uint64(e.Req))
+		h.Str(e.Key)
+		h.U64(uint64(e.Err))
+		h.U64(uint64(e.Outcome))
 	case core.ObjGetDone:
-		h.u64(10)
-		h.u64(uint64(e.Req))
-		h.bytes(e.Data)
-		h.u64(uint64(e.Err))
+		h.U64(10)
+		h.U64(uint64(e.Req))
+		h.Bytes(e.Data)
+		h.U64(uint64(e.Err))
 	case core.ObjDeleteDone:
-		h.u64(11)
-		h.u64(uint64(e.Req))
-		h.u64(uint64(e.Err))
-		h.u64(uint64(e.Outcome))
+		h.U64(11)
+		h.U64(uint64(e.Req))
+		h.U64(uint64(e.Err))
+		h.U64(uint64(e.Outcome))
 	case core.ObjListDone:
-		h.u64(12)
-		h.u64(uint64(e.Req))
-		h.u64(uint64(e.Err))
-		h.u64(uint64(len(e.Keys)))
+		h.U64(12)
+		h.U64(uint64(e.Req))
+		h.U64(uint64(e.Err))
+		h.U64(uint64(len(e.Keys)))
 		for _, k := range e.Keys {
-			h.str(k)
+			h.Str(k)
 		}
 	case core.CPDone:
-		h.u64(13)
-		h.u64(uint64(e.Req))
-		h.u64(uint64(e.Err))
-		h.u64(uint64(e.Outcome))
+		h.U64(13)
+		h.U64(uint64(e.Req))
+		h.U64(uint64(e.Err))
+		h.U64(uint64(e.Outcome))
 		h.cpResp(e.Resp)
 	case core.CPOffer:
-		h.u64(18)
+		h.U64(18)
 		h.ref(e.From)
-		h.u64(uint64(e.Req))
+		h.U64(uint64(e.Req))
 		h.cpOp(e.Op)
 	default:
 		h.eventLogDone(b)
@@ -117,34 +117,34 @@ func (h *hasher) eventDone(b core.EventBody) {
 func (h *hasher) eventLogDone(b core.EventBody) {
 	switch e := b.(type) {
 	case core.LogAppendDone:
-		h.u64(14)
-		h.u64(uint64(e.Req))
-		h.i64(int64(e.Slot))
-		h.bool(e.Taken)
-		h.bytes(e.Existing)
-		h.u64(uint64(e.Err))
-		h.u64(uint64(e.Outcome))
+		h.U64(14)
+		h.U64(uint64(e.Req))
+		h.I64(int64(e.Slot))
+		h.Bool(e.Taken)
+		h.Bytes(e.Existing)
+		h.U64(uint64(e.Err))
+		h.U64(uint64(e.Outcome))
 	case core.LogReadDone:
-		h.u64(15)
-		h.u64(uint64(e.Req))
-		h.u64(uint64(len(e.Entries)))
+		h.U64(15)
+		h.U64(uint64(e.Req))
+		h.U64(uint64(len(e.Entries)))
 		for _, ent := range e.Entries {
-			h.i64(int64(ent.Slot))
-			h.bytes(ent.Data)
+			h.I64(int64(ent.Slot))
+			h.Bytes(ent.Data)
 		}
-		h.u64(uint64(e.Err))
-		h.u64(uint64(e.Outcome))
+		h.U64(uint64(e.Err))
+		h.U64(uint64(e.Outcome))
 	case core.LogCheckTailDone:
-		h.u64(16)
-		h.u64(uint64(e.Req))
-		h.i64(int64(e.Tail))
-		h.u64(uint64(e.Err))
-		h.u64(uint64(e.Outcome))
+		h.U64(16)
+		h.U64(uint64(e.Req))
+		h.I64(int64(e.Tail))
+		h.U64(uint64(e.Err))
+		h.U64(uint64(e.Outcome))
 	case core.LogTrimDone:
-		h.u64(17)
-		h.u64(uint64(e.Req))
-		h.u64(uint64(e.Err))
-		h.u64(uint64(e.Outcome))
+		h.U64(17)
+		h.U64(uint64(e.Req))
+		h.U64(uint64(e.Err))
+		h.U64(uint64(e.Outcome))
 	default:
 		panic(fmt.Sprintf("sim: trace hash: untagged event %T", b))
 	}
@@ -153,32 +153,32 @@ func (h *hasher) eventLogDone(b core.EventBody) {
 func (h *hasher) action(a core.Action) {
 	switch x := a.(type) {
 	case core.SetTimer:
-		h.u64(101)
-		h.u64(uint64(x.ID))
-		h.u64(uint64(x.Gen))
-		h.i64(int64(x.After))
+		h.U64(101)
+		h.U64(uint64(x.ID))
+		h.U64(uint64(x.Gen))
+		h.I64(int64(x.After))
 	case core.CancelTimer:
-		h.u64(102)
-		h.u64(uint64(x.ID))
+		h.U64(102)
+		h.U64(uint64(x.ID))
 	case core.Send:
-		h.u64(103)
-		h.u64(uint64(x.Req))
-		h.u64(uint64(x.Conn))
-		h.bytes(x.Data)
+		h.U64(103)
+		h.U64(uint64(x.Req))
+		h.U64(uint64(x.Conn))
+		h.Bytes(x.Data)
 	case core.CloseConn:
-		h.u64(104)
-		h.u64(uint64(x.Conn))
-		h.bool(x.Abort)
+		h.U64(104)
+		h.U64(uint64(x.Conn))
+		h.Bool(x.Abort)
 	case core.PauseReads:
-		h.u64(105)
-		h.u64(uint64(x.Conn))
+		h.U64(105)
+		h.U64(uint64(x.Conn))
 	case core.ResumeReads:
-		h.u64(106)
-		h.u64(uint64(x.Conn))
+		h.U64(106)
+		h.U64(uint64(x.Conn))
 	case core.Dial:
-		h.u64(107)
-		h.u64(uint64(x.Req))
-		h.str(x.Addr)
+		h.U64(107)
+		h.U64(uint64(x.Req))
+		h.Str(x.Addr)
 	default:
 		h.actionIO(a)
 	}
@@ -187,40 +187,40 @@ func (h *hasher) action(a core.Action) {
 func (h *hasher) actionIO(a core.Action) {
 	switch x := a.(type) {
 	case core.ObjPut:
-		h.u64(108)
-		h.u64(uint64(x.Req))
-		h.str(x.Key)
-		h.bytes(x.Data)
+		h.U64(108)
+		h.U64(uint64(x.Req))
+		h.Str(x.Key)
+		h.Bytes(x.Data)
 	case core.ObjGet:
-		h.u64(109)
-		h.u64(uint64(x.Req))
+		h.U64(109)
+		h.U64(uint64(x.Req))
 		h.segRef(x.Ref)
 	case core.ObjDelete:
-		h.u64(110)
-		h.u64(uint64(x.Req))
-		h.str(x.Key)
+		h.U64(110)
+		h.U64(uint64(x.Req))
+		h.Str(x.Key)
 	case core.ObjList:
-		h.u64(111)
-		h.u64(uint64(x.Req))
-		h.str(x.Prefix)
+		h.U64(111)
+		h.U64(uint64(x.Req))
+		h.Str(x.Prefix)
 	case core.CPCall:
-		h.u64(112)
-		h.u64(uint64(x.Req))
+		h.U64(112)
+		h.U64(uint64(x.Req))
 		h.cpOp(x.Op)
 	case core.CPReply:
-		h.u64(120)
+		h.U64(120)
 		h.ref(x.To)
-		h.u64(uint64(x.Done.Req))
-		h.u64(uint64(x.Done.Err))
-		h.u64(uint64(x.Done.Outcome))
+		h.U64(uint64(x.Done.Req))
+		h.U64(uint64(x.Done.Err))
+		h.U64(uint64(x.Done.Outcome))
 		h.cpResp(x.Done.Resp)
 	case core.Emit:
-		h.u64(113) // the fact itself is folded when it reaches the timeline
+		h.U64(113) // the fact itself is folded when it reaches the timeline
 	case core.Trip:
-		h.u64(114)
-		h.str(x.Cause)
+		h.U64(114)
+		h.Str(x.Cause)
 	case core.Exit:
-		h.u64(115)
+		h.U64(115)
 	default:
 		h.actionLog(a)
 	}
@@ -229,22 +229,22 @@ func (h *hasher) actionIO(a core.Action) {
 func (h *hasher) actionLog(a core.Action) {
 	switch x := a.(type) {
 	case core.LogAppend:
-		h.u64(116)
-		h.u64(uint64(x.Req))
-		h.i64(int64(x.Slot))
-		h.bytes(x.Data)
+		h.U64(116)
+		h.U64(uint64(x.Req))
+		h.I64(int64(x.Slot))
+		h.Bytes(x.Data)
 	case core.LogRead:
-		h.u64(117)
-		h.u64(uint64(x.Req))
-		h.i64(int64(x.From))
-		h.u64(uint64(uint32(x.Limit)))
+		h.U64(117)
+		h.U64(uint64(x.Req))
+		h.I64(int64(x.From))
+		h.U64(uint64(uint32(x.Limit)))
 	case core.LogCheckTail:
-		h.u64(118)
-		h.u64(uint64(x.Req))
+		h.U64(118)
+		h.U64(uint64(x.Req))
 	case core.LogTrim:
-		h.u64(119)
-		h.u64(uint64(x.Req))
-		h.i64(int64(x.Through))
+		h.U64(119)
+		h.U64(uint64(x.Req))
+		h.I64(int64(x.Through))
 	default:
 		panic(fmt.Sprintf("sim: trace hash: untagged action %T", a))
 	}
@@ -254,28 +254,28 @@ func (h *hasher) actionLog(a core.Action) {
 func (h *hasher) cpOp(op core.CPOp) {
 	switch x := op.(type) {
 	case nil:
-		h.u64(200)
+		h.U64(200)
 	case core.CommitSegment:
-		h.u64(202)
-		h.str(x.SegmentKey)
-		h.u64(uint64(len(x.Batches)))
+		h.U64(202)
+		h.Str(x.SegmentKey)
+		h.U64(uint64(len(x.Batches)))
 		for _, b := range x.Batches {
-			h.str(b.TP.Topic)
-			h.u64(uint64(uint32(b.TP.Partition)))
-			h.i64(b.Records)
+			h.Str(b.TP.Topic)
+			h.U64(uint64(uint32(b.TP.Partition)))
+			h.I64(b.Records)
 			h.segRef(b.Loc)
 		}
 	case core.Lookup:
-		h.u64(203)
-		h.str(x.TP.Topic)
-		h.u64(uint64(uint32(x.TP.Partition)))
-		h.i64(int64(x.From))
-		h.u64(uint64(uint32(x.MaxBytes)))
+		h.U64(203)
+		h.Str(x.TP.Topic)
+		h.U64(uint64(uint32(x.TP.Partition)))
+		h.I64(int64(x.From))
+		h.U64(uint64(uint32(x.MaxBytes)))
 	case core.DescribeTopics:
-		h.u64(204)
-		h.u64(uint64(len(x.Topics)))
+		h.U64(204)
+		h.U64(uint64(len(x.Topics)))
 		for _, t := range x.Topics {
-			h.str(t)
+			h.Str(t)
 		}
 	default:
 		panic(fmt.Sprintf("sim: trace hash: untagged CP op %T", op))
@@ -286,26 +286,26 @@ func (h *hasher) cpOp(op core.CPOp) {
 func (h *hasher) cpResp(r core.CPResp) {
 	switch x := r.(type) {
 	case nil:
-		h.u64(300)
+		h.U64(300)
 	case core.CommitSegmentResp:
-		h.u64(302)
-		h.u64(uint64(len(x.Assigned)))
+		h.U64(302)
+		h.U64(uint64(len(x.Assigned)))
 		for _, b := range x.Assigned {
 			h.batchRange(b)
 		}
 	case core.LookupResp:
-		h.u64(303)
-		h.u64(uint64(len(x.Ranges)))
+		h.U64(303)
+		h.U64(uint64(len(x.Ranges)))
 		for _, b := range x.Ranges {
 			h.batchRange(b)
 		}
-		h.i64(int64(x.End))
+		h.I64(int64(x.End))
 	case core.DescribeTopicsResp:
-		h.u64(304)
-		h.u64(uint64(len(x.Topics)))
+		h.U64(304)
+		h.U64(uint64(len(x.Topics)))
 		for _, t := range x.Topics {
-			h.str(t.Name)
-			h.u64(uint64(uint32(t.Partitions)))
+			h.Str(t.Name)
+			h.U64(uint64(uint32(t.Partitions)))
 		}
 	default:
 		panic(fmt.Sprintf("sim: trace hash: untagged CP response %T", r))
@@ -315,31 +315,31 @@ func (h *hasher) cpResp(r core.CPResp) {
 func (h *hasher) fieldValue(v core.FieldValue) {
 	switch x := v.(type) {
 	case core.I64:
-		h.u64(401)
-		h.i64(int64(x))
+		h.U64(401)
+		h.I64(int64(x))
 	case core.U64:
-		h.u64(402)
-		h.u64(uint64(x))
+		h.U64(402)
+		h.U64(uint64(x))
 	case core.Str:
-		h.u64(403)
-		h.str(string(x))
+		h.U64(403)
+		h.Str(string(x))
 	case core.Bool:
-		h.u64(404)
-		h.bool(bool(x))
+		h.U64(404)
+		h.Bool(bool(x))
 	case core.Bytes:
-		h.u64(405)
-		h.bytes(x)
+		h.U64(405)
+		h.Bytes(x)
 	default:
 		panic(fmt.Sprintf("sim: trace hash: untagged field value %T", v))
 	}
 }
 
 func (h *hasher) fact(f core.Fact) {
-	h.u64(501)
-	h.str(f.Name)
-	h.u64(uint64(len(f.Fields)))
+	h.U64(501)
+	h.Str(f.Name)
+	h.U64(uint64(len(f.Fields)))
 	for _, fl := range f.Fields {
-		h.str(fl.Key)
+		h.Str(fl.Key)
 		h.fieldValue(fl.Value)
 	}
 }

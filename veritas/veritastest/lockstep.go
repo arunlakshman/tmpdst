@@ -165,7 +165,7 @@ func (s *shrinkState[Op]) dropChunks() bool {
 	progress := false
 	for size := max(len(s.ops)/2, 1); size >= 1; size /= 2 {
 		for i := 0; i+size <= len(s.ops); {
-			cand := append(append([]Op(nil), s.ops[:i]...), s.ops[i+size:]...)
+			cand := slices.Delete(slices.Clone(s.ops), i, i+size)
 			if s.try(cand) {
 				progress = true
 			} else {

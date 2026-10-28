@@ -24,22 +24,12 @@ const ErrCodeUnsupportedVersion int16 = 35
 // APIRange is an API key and its inclusive supported version range.
 type APIRange struct{ Key, Min, Max int16 }
 
-var (
-	supported = []APIRange{
-		{Key: KeyProduce, Min: 3, Max: 9},
-		{Key: KeyFetch, Min: 4, Max: 12},
-		{Key: KeyListOffsets, Min: 1, Max: 7},
-		{Key: KeyMetadata, Min: 1, Max: 12},
-		{Key: KeyApiVersions, Min: 0, Max: 3},
-	}
-	supportedByKey map[int16]APIRange
-)
-
-func init() {
-	supportedByKey = make(map[int16]APIRange, len(supported))
-	for _, r := range supported {
-		supportedByKey[r.Key] = r
-	}
+var supported = []APIRange{ //nolint:dupl // supported_test.go pins this table with its own copy
+	{Key: KeyProduce, Min: 3, Max: 9},
+	{Key: KeyFetch, Min: 4, Max: 12},
+	{Key: KeyListOffsets, Min: 1, Max: 7},
+	{Key: KeyMetadata, Min: 1, Max: 12},
+	{Key: KeyApiVersions, Min: 0, Max: 3},
 }
 
 // Supported returns the advertised APIs in key order. Produce >= 3 so batches
@@ -51,8 +41,12 @@ func Supported() []APIRange {
 
 // Range returns the supported version range of key.
 func Range(key int16) (APIRange, bool) {
-	r, ok := supportedByKey[key]
-	return r, ok
+	for _, r := range supported {
+		if r.Key == key {
+			return r, true
+		}
+	}
+	return APIRange{}, false
 }
 
 // IsSupported reports whether (key, version) is served.

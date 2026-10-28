@@ -28,3 +28,31 @@ func TestFnvU64MatchesBytewise(t *testing.T) {
 		}
 	}
 }
+
+// TestHasher pins the stream: FNV-1a of "a" and the length-prefixed forms.
+func TestHasher(t *testing.T) {
+	h := NewHasher()
+	h.Byte('a')
+	if got, want := h.Sum(), uint64(0xaf63dc4c8601ec8c); got != want {
+		t.Fatalf("FNV-1a(a) = %#x, want %#x", got, want)
+	}
+	a, b := NewHasher(), NewHasher()
+	a.Str("xy")
+	b.U64(2)
+	b.Byte('x')
+	b.Byte('y')
+	if a != b {
+		t.Fatal("Str is not length prefix + bytes")
+	}
+	c, d := NewHasher(), NewHasher()
+	c.Bytes([]byte("xy"))
+	if c != a {
+		t.Fatal("Bytes differs from Str")
+	}
+	d.Bool(true)
+	e := NewHasher()
+	e.U64(1)
+	if d != e {
+		t.Fatal("Bool(true) is not U64(1)")
+	}
+}

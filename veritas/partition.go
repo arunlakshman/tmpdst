@@ -44,9 +44,9 @@ func (p *Partition) Read(from core.Offset, max int) ([]Record, bool) {
 // StateHash folds every record in order.
 func (p *Partition) StateHash() uint64 {
 	h := newHasher()
-	h.u64(uint64(len(p.recs)))
+	h.U64(uint64(len(p.recs)))
 	for _, r := range p.recs {
-		h.bytes(r)
+		h.Bytes(r)
 	}
 	return uint64(h)
 }

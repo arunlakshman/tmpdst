@@ -121,8 +121,8 @@ func (s *ObjectStore) Keys() []string { return slices.Clone(s.keys) }
 // costs little.
 func (s *ObjectStore) StateHash() uint64 {
 	s.pre = extendPrefix(s.pre, len(s.keys), func(i int, h hasher) hasher {
-		h.str(s.keys[i])
-		h.bytes(s.objs[s.keys[i]])
+		h.Str(s.keys[i])
+		h.Bytes(s.objs[s.keys[i]])
 		return h
 	})
 	return uint64(s.pre[len(s.keys)])
@@ -132,8 +132,8 @@ func (s *ObjectStore) StateHash() uint64 {
 func (s *ObjectStore) fullStateHash() uint64 {
 	h := newHasher()
 	for _, k := range sortedKeys(s.objs) {
-		h.str(k)
-		h.bytes(s.objs[k])
+		h.Str(k)
+		h.Bytes(s.objs[k])
 	}
 	return uint64(h)
 }

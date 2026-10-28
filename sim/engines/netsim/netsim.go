@@ -570,29 +570,15 @@ func (e *Engine) OnCrash(ctx sim.EngineCtx, ref core.NodeRef) {
 
 // ---- hash ----
 
-type hasher uint64
+type hasher = core.Hasher
 
-func (h *hasher) u64(v uint64) { *h = hasher(core.FnvU64(uint64(*h), v)) }
-func (h *hasher) b(v bool) {
-	if v {
-		h.u64(1)
-	} else {
-		h.u64(0)
-	}
-}
-func (h *hasher) str(s string) {
-	h.u64(uint64(len(s)))
-	for i := 0; i < len(s); i++ {
-		*h = (*h ^ hasher(s[i])) * 1099511628211
-	}
-}
-func (h *hasher) items(its []item) {
-	h.u64(uint64(len(its)))
+func hashItems(h *hasher, its []item) {
+	h.U64(uint64(len(its)))
 	for _, it := range its {
-		h.u64(uint64(it.kind))
-		h.u64(uint64(len(it.data)))
-		h.u64(uint64(it.crc))
-		h.b(it.net)
+		h.U64(uint64(it.kind))
+		h.U64(uint64(len(it.data)))
+		h.U64(uint64(it.crc))
+		h.Bool(it.net)
 	}
 }
 
@@ -601,15 +587,15 @@ func (h *hasher) items(its []item) {
 // fold is reused only while the state it starts from is unchanged: a changed
 // pair rehashes itself and the pairs after it.
 func (e *Engine) StateHash() uint64 {
-	h := hasher(14695981039346656037)
-	h.u64(uint64(len(e.pairs)))
+	h := core.NewHasher()
+	h.U64(uint64(len(e.pairs)))
 	for _, p := range e.pairs {
 		if p.ok && p.in == uint64(h) {
 			h = hasher(p.out)
 			continue
 		}
 		p.in = uint64(h)
-		h.pair(p)
+		hashPair(&h, p)
 		p.out, p.ok = uint64(h), true
 	}
 	return e.finishHash(h)
@@ -617,49 +603,49 @@ func (e *Engine) StateHash() uint64 {
 
 // fullStateHash is StateHash without the per-pair cache.
 func (e *Engine) fullStateHash() uint64 {
-	h := hasher(14695981039346656037)
-	h.u64(uint64(len(e.pairs)))
+	h := core.NewHasher()
+	h.U64(uint64(len(e.pairs)))
 	for _, p := range e.pairs {
 		p.in = uint64(h)
-		h.pair(p)
+		hashPair(&h, p)
 		p.out, p.ok = uint64(h), false
 	}
 	return e.finishHash(h)
 }
 
 func (e *Engine) finishHash(h hasher) uint64 {
-	h.u64(uint64(len(e.links)))
+	h.U64(uint64(len(e.links)))
 	for _, l := range e.links {
-		h.str(string(l.a))
-		h.str(string(l.b))
-		h.u64(uint64(l.extra))
-		h.b(l.everCut)
-		h.u64(uint64(l.healAt))
+		h.Str(string(l.a))
+		h.Str(string(l.b))
+		h.U64(uint64(l.extra))
+		h.Bool(l.everCut)
+		h.U64(uint64(l.healAt))
 	}
-	h.b(e.recovery)
+	h.Bool(e.recovery)
 	return uint64(h)
 }
 
-func (h *hasher) pair(p *pair) {
-	h.u64(p.id)
+func hashPair(h *hasher, p *pair) {
+	h.U64(p.id)
 	for s := range 2 {
 		en := &p.end[s]
-		h.str(string(en.ref.Node))
-		h.u64(uint64(len(en.ref.Inc)))
+		h.Str(string(en.ref.Node))
+		h.U64(uint64(len(en.ref.Inc)))
 		for _, c := range en.ref.Inc {
-			h.u64(uint64(c))
+			h.U64(uint64(c))
 		}
-		h.u64(uint64(en.id))
-		h.b(en.closed)
-		h.b(en.eof)
-		h.b(en.paused)
+		h.U64(uint64(en.id))
+		h.Bool(en.closed)
+		h.Bool(en.eof)
+		h.Bool(en.paused)
 		d := &p.dirs[s]
-		h.u64(uint64(d.lastArr))
-		h.u64(uint64(d.clogUntil))
-		h.b(d.aborted)
-		h.b(d.blackhole)
-		h.items(d.flight)
-		h.items(d.held)
+		h.U64(uint64(d.lastArr))
+		h.U64(uint64(d.clogUntil))
+		h.Bool(d.aborted)
+		h.Bool(d.blackhole)
+		hashItems(h, d.flight)
+		hashItems(h, d.held)
 	}
 }
 

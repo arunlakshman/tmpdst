@@ -59,7 +59,7 @@ type client struct {
 	seq     int
 	recycle bool
 	acked   []acked
-	digest  hasher // every ack ever recorded
+	digest  core.Hasher // every ack ever recorded
 	nacked  uint64
 	pend    *pending
 }
@@ -89,8 +89,8 @@ func NewWorkload(env core.Env, self core.NodeRef, brokers []core.NodeRef, o Opts
 	for _, b := range brokers {
 		w.loop.Brokers = append(w.loop.Brokers, b.Node)
 	}
-	for i := 0; i < o.Clients; i++ {
-		w.loop.Clients = append(w.loop.Clients, &client{Client: session.Client{ID: i}, digest: newHasher()})
+	for i := range o.Clients {
+		w.loop.Clients = append(w.loop.Clients, &client{Client: session.Client{ID: i}, digest: core.NewHasher()})
 	}
 	return w
 }
@@ -211,8 +211,8 @@ func (w *Workload) reply(c *client, text string) []core.Action {
 
 func (c *client) record(off int64, payload string) {
 	c.nacked++
-	c.digest.u64(uint64(off))
-	c.digest.str(payload)
+	c.digest.U64(uint64(off))
+	c.digest.Str(payload)
 	c.acked = append(c.acked, acked{off, payload})
 	if len(c.acked) > keepAcked {
 		c.acked = append([]acked(nil), c.acked[1:]...)
@@ -235,31 +235,31 @@ func (w *Workload) lost(c *client, why string) {
 
 // StateHash folds all state.
 func (w *Workload) StateHash() uint64 {
-	h := newHasher()
-	h.bool(w.stopped)
-	h.u64(uint64(w.loop.NextReq))
+	h := core.NewHasher()
+	h.Bool(w.stopped)
+	h.U64(uint64(w.loop.NextReq))
 	for _, c := range w.loop.Clients {
-		h.u64(uint64(c.State))
-		h.u64(uint64(c.Conn))
-		h.u64(uint64(c.DialReq))
-		h.u64(uint64(c.SendReq))
-		h.u64(uint64(c.Dials))
-		h.u64(uint64(c.Fails))
-		h.u64(uint64(c.WakeGen))
-		h.u64(uint64(c.ReqGen))
-		h.bytes(c.fr.buf)
-		h.u64(uint64(c.seq))
-		h.bool(c.recycle)
-		h.u64(uint64(len(c.acked)))
-		h.u64(uint64(c.digest))
-		h.u64(c.nacked)
-		h.bool(c.pend != nil)
+		h.U64(uint64(c.State))
+		h.U64(uint64(c.Conn))
+		h.U64(uint64(c.DialReq))
+		h.U64(uint64(c.SendReq))
+		h.U64(uint64(c.Dials))
+		h.U64(uint64(c.Fails))
+		h.U64(uint64(c.WakeGen))
+		h.U64(uint64(c.ReqGen))
+		h.Bytes(c.fr.buf)
+		h.U64(uint64(c.seq))
+		h.Bool(c.recycle)
+		h.U64(uint64(len(c.acked)))
+		h.U64(uint64(c.digest))
+		h.U64(c.nacked)
+		h.Bool(c.pend != nil)
 		if p := c.pend; p != nil {
-			h.bytes(p.id[:])
-			h.bool(p.get)
-			h.u64(uint64(p.seq))
-			h.str(p.payload)
-			h.u64(uint64(p.off))
+			h.Bytes(p.id[:])
+			h.Bool(p.get)
+			h.U64(uint64(p.seq))
+			h.Str(p.payload)
+			h.U64(uint64(p.off))
 		}
 	}
 	return uint64(h)

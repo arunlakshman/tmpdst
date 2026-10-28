@@ -247,23 +247,15 @@ func (c *Core) OnInternal(ctx sim.EngineCtx, body any) {
 // StateHash folds the spec hash, outage window, recovery flag and pending
 // plans in issue order.
 func (c *Core) StateHash() uint64 {
-	h := uint64(14695981039346656037)
-	mix := func(v uint64) {
-		for i := range 8 {
-			h = (h ^ (v >> (8 * i) & 0xff)) * 1099511628211
-		}
-	}
+	h := core.NewHasher()
+	mix := h.U64
 	mix(c.specStateHash())
 	mix(uint64(c.until))
-	if c.recovery {
-		mix(1)
-	} else {
-		mix(0)
-	}
+	h.Bool(c.recovery)
 	mix(uint64(len(c.plans)))
 	for _, p := range c.plans {
 		mix(p.ID)
-		for i := 0; i < len(p.From.Node); i++ {
+		for i := range len(p.From.Node) {
 			mix(uint64(p.From.Node[i]))
 		}
 		for _, b := range p.From.Inc {
@@ -275,5 +267,5 @@ func (c *Core) StateHash() uint64 {
 		mix(uint64(p.T2))
 		mix(p.Bits)
 	}
-	return h
+	return h.Sum()
 }

@@ -13,9 +13,13 @@ import (
 // magic[16] crc[17:21] attributes[21:23] ... records[61:]. The CRC covers
 // bytes 21 to the end; length counts bytes after offset 12.
 const (
+	lengthOff      = 8
+	epochOff       = 12 // also the size of the base offset + length prefix
+	magicOff       = 16
+	crcOff         = 17
+	crcStart       = 21 // attributes; the CRC covers [crcStart:]
 	batchHeaderLen = 61
-	batchMinLength = batchHeaderLen - 12
-	crcStart       = 21
+	batchMinLength = batchHeaderLen - epochOff
 )
 
 var (
@@ -43,10 +47,8 @@ const (
 	CodecZstd   = 4
 )
 
-// castagnoli is the CRC32C table; built once (MakeTable is not free).
-var castagnoli = crc32.MakeTable(crc32.Castagnoli)
-
-func crc32c(b []byte) uint32 { return crc32.Checksum(b, castagnoli) }
+// crc32c is CRC32C (Castagnoli); MakeTable returns the cached table.
+func crc32c(b []byte) uint32 { return crc32.Checksum(b, crc32.MakeTable(crc32.Castagnoli)) }
 
 // BatchParams are the caller-supplied batch header fields (no clock here).
 type BatchParams struct {
@@ -117,7 +119,7 @@ func assembleBatch(p BatchParams, n int32, body []byte) []byte {
 	rb.NumRecords = n
 	rb.Records = body
 	out := rb.AppendTo(nil)
-	binary.BigEndian.PutUint32(out[17:], crc32c(out[crcStart:]))
+	binary.BigEndian.PutUint32(out[crcOff:], crc32c(out[crcStart:]))
 	return out
 }
 
@@ -151,24 +153,20 @@ func (b Batch) Codec() int { return int(b.Attributes & 7) }
 // It rejects magic != 2 with ErrUnsupportedBatch, a valid-CRC batch with a
 // codec id above CodecZstd with ErrUnknownCodec, and structural or CRC
 // failures with ErrCorrupt. The returned Batch aliases b.
-func ParseBatch(b []byte) (Batch, error) { return parseBatch(b) }
-
-// ParseBatchUnverified is ParseBatch without the CRC check. It exists only so
-// a broker mutant (broker.BugSkipProduceCRC) can model a missing check; real
-// code must use ParseBatch.
-func ParseBatchUnverified(b []byte) (Batch, error) { return parseBatchUnverified(b) }
-
-func parseBatch(b []byte) (Batch, error) {
+func ParseBatch(b []byte) (Batch, error) {
 	if err := checkBatchShape(b); err != nil {
 		return Batch{}, err
 	}
-	if crc32c(b[crcStart:]) != binary.BigEndian.Uint32(b[17:]) {
+	if crc32c(b[crcStart:]) != binary.BigEndian.Uint32(b[crcOff:]) {
 		return Batch{}, fmt.Errorf("%w: crc mismatch", ErrCorrupt)
 	}
 	return decodeBatch(b)
 }
 
-func parseBatchUnverified(b []byte) (Batch, error) {
+// ParseBatchUnverified is ParseBatch without the CRC check. It exists only so
+// a broker mutant (broker.BugSkipProduceCRC) can model a missing check; real
+// code must use ParseBatch.
+func ParseBatchUnverified(b []byte) (Batch, error) {
 	if err := checkBatchShape(b); err != nil {
 		return Batch{}, err
 	}
@@ -176,16 +174,16 @@ func parseBatchUnverified(b []byte) (Batch, error) {
 }
 
 func checkBatchShape(b []byte) error {
-	if len(b) < 17 {
+	if len(b) <= magicOff {
 		return fmt.Errorf("%w: %d bytes", ErrCorrupt, len(b))
 	}
-	if m := int8(b[16]); m != 2 {
+	if m := int8(b[magicOff]); m != 2 {
 		return fmt.Errorf("%w: magic %d", ErrUnsupportedBatch, m)
 	}
 	if len(b) < batchHeaderLen {
 		return fmt.Errorf("%w: %d bytes", ErrCorrupt, len(b))
 	}
-	if l := int32(binary.BigEndian.Uint32(b[8:])); l < batchMinLength || int64(l) != int64(len(b))-12 {
+	if l := int32(binary.BigEndian.Uint32(b[lengthOff:])); l < batchMinLength || int64(l) != int64(len(b))-epochOff {
 		return fmt.Errorf("%w: length %d for %d bytes", ErrCorrupt, l, len(b))
 	}
 	return nil
@@ -193,7 +191,7 @@ func checkBatchShape(b []byte) error {
 
 func decodeBatch(b []byte) (Batch, error) {
 	var out Batch
-	if c := binary.BigEndian.Uint16(b[21:]) & 7; c > CodecZstd {
+	if c := binary.BigEndian.Uint16(b[crcStart:]) & 7; c > CodecZstd {
 		return out, fmt.Errorf("%w: %d", ErrUnknownCodec, c)
 	}
 	var rb kmsg.RecordBatch
@@ -270,14 +268,14 @@ func DecodeRecords(rest []byte, n int32) ([]kmsg.Record, error) {
 func SplitBatches(b []byte) ([][]byte, error) {
 	var out [][]byte
 	for len(b) > 0 {
-		if len(b) < 12 {
+		if len(b) < epochOff {
 			return out, ErrTruncated
 		}
-		l := int64(int32(binary.BigEndian.Uint32(b[8:])))
+		l := int64(int32(binary.BigEndian.Uint32(b[lengthOff:])))
 		if l < batchMinLength {
 			return out, fmt.Errorf("%w: length %d", ErrCorrupt, l)
 		}
-		n := 12 + l
+		n := epochOff + l
 		if n > int64(len(b)) {
 			return out, ErrTruncated
 		}
@@ -305,9 +303,9 @@ func OneBatch(b []byte) ([]byte, error) {
 // valid. An input shorter than 16 bytes is returned as an unchanged copy.
 func PatchBatch(b []byte, baseOffset int64, leaderEpoch int32) []byte {
 	out := append([]byte(nil), b...)
-	if len(out) >= 16 {
+	if len(out) >= magicOff {
 		binary.BigEndian.PutUint64(out, uint64(baseOffset))
-		binary.BigEndian.PutUint32(out[12:], uint32(leaderEpoch))
+		binary.BigEndian.PutUint32(out[epochOff:], uint32(leaderEpoch))
 	}
 	return out
 }

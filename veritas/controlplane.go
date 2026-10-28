@@ -187,8 +187,8 @@ func (c *ControlPlane) append(r core.BatchRange) {
 // topics (sorted by name).
 func (c *ControlPlane) StateHash() uint64 {
 	c.segPre = extendPrefix(c.segPre, len(c.segKeys), func(i int, h hasher) hasher {
-		h.str(c.segKeys[i])
-		h.ranges(c.segs[c.segKeys[i]].ranges)
+		h.Str(c.segKeys[i])
+		hashRanges(&h, c.segs[c.segKeys[i]].ranges)
 		return h
 	})
 	return c.tailHash(c.segPre[len(c.segKeys)])
@@ -198,8 +198,8 @@ func (c *ControlPlane) StateHash() uint64 {
 func (c *ControlPlane) fullStateHash() uint64 {
 	h := newHasher()
 	for _, k := range sortedKeys(c.segs) {
-		h.str(k)
-		h.ranges(c.segs[k].ranges)
+		h.Str(k)
+		hashRanges(&h, c.segs[k].ranges)
 	}
 	return c.tailHash(h)
 }
@@ -207,8 +207,8 @@ func (c *ControlPlane) fullStateHash() uint64 {
 // tailHash folds topics into h.
 func (c *ControlPlane) tailHash(h hasher) uint64 {
 	for _, t := range sortedKeys(c.topics) {
-		h.str(t)
-		h.u64(uint64(c.topics[t]))
+		h.Str(t)
+		h.U64(uint64(c.topics[t]))
 	}
 	return uint64(h)
 }

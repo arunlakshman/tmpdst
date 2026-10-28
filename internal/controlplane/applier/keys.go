@@ -9,11 +9,11 @@ import (
 )
 
 const (
-	prefixTopic = 'T'
-	pEnd        = 'E'
-	prefixRun   = 'R'
-	prefixKey   = 'K'
-	prefixSlot  = 'S'
+	prefixTopic     = 'T'
+	prefixEndOffset = 'E'
+	prefixRun       = 'R'
+	prefixKey       = 'K'
+	prefixSlot      = 'S'
 
 	checksumLength = 16
 	runFormat      = 1
@@ -30,7 +30,7 @@ func topicPartitionPrefix(p byte, tp core.TopicPartition) []byte {
 	return binary.BigEndian.AppendUint32(b, uint32(tp.Partition))
 }
 
-func endKey(tp core.TopicPartition) []byte { return topicPartitionPrefix(pEnd, tp) }
+func endKey(tp core.TopicPartition) []byte { return topicPartitionPrefix(prefixEndOffset, tp) }
 
 func batchRunKey(tp core.TopicPartition, base int64) []byte {
 	return binary.BigEndian.AppendUint64(topicPartitionPrefix(prefixRun, tp), uint64(base))

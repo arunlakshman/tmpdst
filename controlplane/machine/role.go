@@ -183,15 +183,8 @@ func (m *Machine) softCrash() []core.Action {
 	m.booting = true
 	m.crashed = true
 	m.downUntil = m.now + core.Time(betweenDur(m.env, m.cfg.DownDur))
-	m.queue = nil
-	m.flights = map[core.ReqID]*flight{}
-	m.waiters = map[string][]pendingCmd{}
 	m.answers = nil
-	m.buf = map[core.LogSlot][]byte{}
-	m.pending, m.pendingKind = 0, pendingNone
-	m.proj = nil
-	m.fillSlot, m.fillData = 0, nil
-	m.holeArmed = false
+	m.clearLocal()
 	// Refuse client work until afterCrashRestart restores fold + catch-up.
 	return nil
 }
@@ -213,6 +206,11 @@ func (m *Machine) hitTrimmed() []core.Action {
 	m.ready = false
 	m.booting = true
 	m.needsCkpt = true
+	m.clearLocal()
+	return m.afterCrashRestart()
+}
+
+func (m *Machine) clearLocal() {
 	m.queue = nil
 	m.flights = map[core.ReqID]*flight{}
 	m.waiters = map[string][]pendingCmd{}
@@ -221,7 +219,6 @@ func (m *Machine) hitTrimmed() []core.Action {
 	m.proj = nil
 	m.fillSlot, m.fillData = 0, nil
 	m.holeArmed = false
-	return m.afterCrashRestart()
 }
 
 func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {

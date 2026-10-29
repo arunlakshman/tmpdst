@@ -230,7 +230,7 @@ func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {
 	}
 	// Sort map keys so answer order is stable across runs (TraceHash).
 	reqs := make([]core.RequestID, 0, len(m.flights))
-	for req := range m.flights {
+	for req := range m.flights { //detcheck:ok keys are collected, then sorted before use
 		reqs = append(reqs, req)
 	}
 	slices.Sort(reqs)
@@ -246,7 +246,7 @@ func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {
 		refuse(c)
 	}
 	ids := make([]string, 0, len(m.waiters))
-	for id := range m.waiters {
+	for id := range m.waiters { //detcheck:ok keys are collected, then sorted before use
 		if !seen[id] {
 			ids = append(ids, id)
 		}

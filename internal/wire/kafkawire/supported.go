@@ -24,6 +24,7 @@ const ErrCodeUnsupportedVersion int16 = 35
 // APIVersionRange is an API key and its inclusive supported version range.
 type APIVersionRange struct{ Key, Min, Max int16 }
 
+//detcheck:ok read-only table: no code writes to it after start
 var supported = []APIVersionRange{ //nolint:dupl // supported_test.go pins this table with its own copy
 	{Key: KeyProduce, Min: 3, Max: 9},
 	{Key: KeyFetch, Min: 4, Max: 12},

@@ -20,12 +20,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
-	"manifester/internal/controlplane/cpclient"
-	"manifester/internal/controlplane/cpobs"
-	"manifester/internal/controlplane/exec"
-	"manifester/internal/controlplane/fakedb"
+	"manifester/internal/controlplane/controlplaneclient"
+	"manifester/internal/controlplane/controlplanemetrics"
+	"manifester/internal/controlplane/executor"
+	"manifester/internal/controlplane/fakedynamodb"
 	"manifester/internal/core"
-	"manifester/internal/sys"
+	"manifester/internal/system"
 )
 
 // syncBuf is a log sink safe for the goroutines of several run calls.
@@ -54,10 +54,10 @@ type logNode struct {
 	logs   *syncBuf
 }
 
-func fakeDeps(db *fakedb.Fake, objs sys.ObjectStore) deps {
+func fakeDeps(db *fakedynamodb.FakeDynamoDB, objs system.ObjectStore) deps {
 	return deps{
-		db:      func(context.Context, cpFlags, *cpobs.Metrics) (logDB, error) { return db, nil },
-		objects: func(context.Context, cpFlags) (sys.ObjectStore, error) { return objs, nil },
+		db:      func(context.Context, cpFlags, *controlplanemetrics.Metrics) (logDB, error) { return db, nil },
+		objects: func(context.Context, cpFlags) (system.ObjectStore, error) { return objs, nil },
 	}
 }
 
@@ -83,7 +83,7 @@ func waitHealthy(t *testing.T, n *logNode) {
 			t.Fatalf("exited %d before it was healthy\n%s", code, n.logs.String())
 		default:
 		}
-		c := cpclient.New(n.addr, nil)
+		c := controlplaneclient.New(n.addr, nil)
 		st, err := c.GetStatus(t.Context())
 		_ = c.Close()
 		if err == nil && st != nil && st.Role != "" {
@@ -116,7 +116,7 @@ func (n *logNode) stop(t *testing.T) int {
 
 func role(t *testing.T, n *logNode) string {
 	t.Helper()
-	c := cpclient.New(n.addr, nil)
+	c := controlplaneclient.New(n.addr, nil)
 	st, err := c.GetStatus(t.Context())
 	_ = c.Close()
 	if err != nil || st == nil {
@@ -125,9 +125,9 @@ func role(t *testing.T, n *logNode) string {
 	return st.Role
 }
 
-func newFake(t *testing.T) *fakedb.Fake {
+func newFake(t *testing.T) *fakedynamodb.FakeDynamoDB {
 	t.Helper()
-	db := fakedb.New()
+	db := fakedynamodb.New()
 	if _, err := db.CreateTable(t.Context(), &dynamodb.CreateTableInput{TableName: aws.String("manifester_cp")}); err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ type acks struct {
 	rngs map[string][]core.BatchRange // segment key -> assigned
 }
 
-func commitLoop(ctx context.Context, c *cpclient.Client, w int, a *acks, n *atomic.Int64, stop <-chan struct{}) error {
+func commitLoop(ctx context.Context, c *controlplaneclient.Client, w int, a *acks, n *atomic.Int64, stop <-chan struct{}) error {
 	for i := 0; ; i++ {
 		select {
 		case <-stop:
@@ -149,7 +149,7 @@ func commitLoop(ctx context.Context, c *cpclient.Client, w int, a *acks, n *atom
 		}
 		key := fmt.Sprintf("seg/w%d-%06d", w, i)
 		op := core.CommitSegment{SegmentKey: key, Batches: []core.PendingBatch{
-			{TP: core.TP("t", int32(i%3)), Records: 2 + int64(w), Loc: core.SegmentRef{Key: key, Off: 0, Len: 10}}}}
+			{TP: core.NewTopicPartition("t", int32(i%3)), Records: 2 + int64(w), Loc: core.SegmentRef{Key: key, Off: 0, Len: 10}}}}
 		resp, err := commitRetrying(ctx, c, op)
 		if err != nil {
 			return fmt.Errorf("%s: %w", key, err)
@@ -164,7 +164,7 @@ func commitLoop(ctx context.Context, c *cpclient.Client, w int, a *acks, n *atom
 // commitRetrying is the broker's rule: the same segment key is retried with a
 // short backoff on any transport failure or 503 until a deadline (the real
 // deadline is 120 s; a takeover takes seconds).
-func commitRetrying(ctx context.Context, c *cpclient.Client, op core.CommitSegment) (core.CPResp, error) {
+func commitRetrying(ctx context.Context, c *controlplaneclient.Client, op core.CommitSegment) (core.ControlPlaneResponse, error) {
 	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	for {
@@ -172,8 +172,8 @@ func commitRetrying(ctx context.Context, c *cpclient.Client, op core.CommitSegme
 		if err == nil || cctx.Err() != nil {
 			return resp, err
 		}
-		var ce *cpclient.CallError
-		var be *cpclient.Error
+		var ce *controlplaneclient.CallError
+		var be *controlplaneclient.Error
 		retry := errors.As(err, &ce) || (errors.As(err, &be) && be.Code == core.ErrUnavailable)
 		if !retry {
 			return resp, err
@@ -183,7 +183,7 @@ func commitRetrying(ctx context.Context, c *cpclient.Client, op core.CommitSegme
 }
 
 // partitionsMatch reports whether c's fold holds exactly the acked ranges.
-func partitionsMatch(ctx context.Context, c *cpclient.Client, a *acks) error {
+func partitionsMatch(ctx context.Context, c *controlplaneclient.Client, a *acks) error {
 	type run struct{ base, cnt int64 }
 	want := map[core.TopicPartition]map[run]string{}
 	for key, rs := range a.rngs {
@@ -201,11 +201,11 @@ func partitionsMatch(ctx context.Context, c *cpclient.Client, a *acks) error {
 	for tp, runs := range want {
 		var next int64
 		for next < int64(len(runs))*100 {
-			resp, err := c.Call(ctx, core.Lookup{TP: tp, From: core.Offset(next), MaxBytes: 1 << 30})
+			resp, err := c.Call(ctx, core.FindSegments{TP: tp, From: core.Offset(next), MaxBytes: 1 << 30})
 			if err != nil {
 				return err
 			}
-			lr := resp.(core.LookupResp)
+			lr := resp.(core.FindSegmentsResp)
 			for _, r := range lr.Ranges {
 				if int64(r.Base) != next {
 					return fmt.Errorf("%v: gap or overlap, range at %d, expected %d", tp, r.Base, next)
@@ -230,7 +230,7 @@ func partitionsMatch(ctx context.Context, c *cpclient.Client, a *acks) error {
 // waitPartitions retries until the node's fold matches acks (catch-up after takeover).
 func waitPartitions(t *testing.T, addr string, a *acks) {
 	t.Helper()
-	c := cpclient.New(addr, nil)
+	c := controlplaneclient.New(addr, nil)
 	defer func() { _ = c.Close() }()
 	var last error
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
@@ -243,7 +243,7 @@ func waitPartitions(t *testing.T, addr string, a *acks) {
 }
 
 func TestLogStoreThreeNodesTakeover(t *testing.T) {
-	db, objs := newFake(t), exec.NewMemObjects()
+	db, objs := newFake(t), executor.NewMemoryObjects()
 	d := fakeDeps(db, objs)
 	n0 := startLogNode(t, d, "n0", 0)
 	n1 := startLogNode(t, d, "n1", 1)
@@ -252,7 +252,7 @@ func TestLogStoreThreeNodesTakeover(t *testing.T) {
 		t.Fatalf("roles %v", r)
 	}
 	// Brokers' URL list: preferred node first.
-	c := cpclient.New(n0.addr+","+n1.addr+","+n2.addr, nil)
+	c := controlplaneclient.New(n0.addr+","+n1.addr+","+n2.addr, nil)
 	ctx := t.Context()
 	if err := c.CreateTopic(ctx, "t", 3); err != nil {
 		t.Fatal(err)
@@ -296,17 +296,17 @@ func waitCount(t *testing.T, n *atomic.Int64, want int64) {
 }
 
 func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
-	db, objs := newFake(t), exec.NewMemObjects()
+	db, objs := newFake(t), executor.NewMemoryObjects()
 	d := fakeDeps(db, objs)
 	n := startLogNode(t, d, "n0", 0, "-final-checkpoint=true", "-ckpt-every", "-1s")
-	c := cpclient.New(n.addr, nil)
+	c := controlplaneclient.New(n.addr, nil)
 	if err := c.CreateTopic(t.Context(), "t", 1); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 5 {
 		key := fmt.Sprintf("seg/%d", i)
 		_, err := c.Call(t.Context(), core.CommitSegment{SegmentKey: key, Batches: []core.PendingBatch{
-			{TP: core.TP("t", 0), Records: 3, Loc: core.SegmentRef{Key: key, Len: 9}}}})
+			{TP: core.NewTopicPartition("t", 0), Records: 3, Loc: core.SegmentRef{Key: key, Len: 9}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -316,8 +316,8 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 	}
 	// Restart against the same Dynamo log: catch-up rebuilds fold state.
 	n2 := startLogNode(t, d, "n0", 0, "-ckpt-every", "-1s")
-	resp, err := cpclient.New(n2.addr, nil).Call(t.Context(), core.Lookup{TP: core.TP("t", 0), MaxBytes: 1 << 20})
-	if err != nil || resp.(core.LookupResp).End != 15 {
+	resp, err := controlplaneclient.New(n2.addr, nil).Call(t.Context(), core.FindSegments{TP: core.NewTopicPartition("t", 0), MaxBytes: 1 << 20})
+	if err != nil || resp.(core.FindSegmentsResp).End != 15 {
 		t.Fatalf("after restart: %v %+v\n%s", err, resp, n2.logs.String())
 	}
 	_ = objs
@@ -325,7 +325,7 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 }
 
 func TestLogStoreStartupErrors(t *testing.T) {
-	d := fakeDeps(newFake(t), exec.NewMemObjects())
+	d := fakeDeps(newFake(t), executor.NewMemoryObjects())
 	args := []string{"-store", kindLog, "-addr", freeAddr(t), "-metrics-addr", "", "-table", "missing",
 		"-takeover-after", "1s", "-start-timeout", "500ms", "-ckpt-bucket", ""}
 	var logs syncBuf
@@ -340,7 +340,7 @@ func TestLogStoreStartupErrors(t *testing.T) {
 }
 
 func TestLogStoreWithoutBucketWarns(t *testing.T) {
-	d := fakeDeps(newFake(t), exec.NewMemObjects())
+	d := fakeDeps(newFake(t), executor.NewMemoryObjects())
 	n := startLogNode(t, d, "n0", 0, "-ckpt-bucket", "")
 	if code := n.stop(t); code != 0 || !strings.Contains(n.logs.String(), "log_no_checkpoint") {
 		t.Fatalf("code %d\n%s", code, n.logs.String())
@@ -368,7 +368,7 @@ func TestRealDepsBuild(t *testing.T) {
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
 	f, _, _ := parseFlags([]string{"-store", kindLog, "-dynamo-endpoint", "http://127.0.0.1:1", "-ckpt-bucket", "b", "-s3-endpoint", "http://127.0.0.1:1"}, &bytes.Buffer{})
 	d := realDeps()
-	if db, err := d.db(t.Context(), f, cpobs.New()); err != nil || db == nil {
+	if db, err := d.db(t.Context(), f, controlplanemetrics.New()); err != nil || db == nil {
 		t.Fatal(err)
 	}
 	if o, err := d.objects(t.Context(), f); err != nil || o == nil {
@@ -378,13 +378,13 @@ func TestRealDepsBuild(t *testing.T) {
 
 func TestMemStoreOpens(t *testing.T) {
 	f, _, _ := parseFlags([]string{"-store", "mem", "-metrics-addr", ""}, &bytes.Buffer{})
-	n, closeNode, err := openNode(t.Context(), realDeps(), f, cpobs.New(), slog.Default())
+	n, closeNode, err := openNode(t.Context(), realDeps(), f, controlplanemetrics.New(), slog.Default())
 	if err != nil || n == nil {
 		t.Fatal(err)
 	}
 	closeNode()
 	f.kind = "nope"
-	if _, _, err := openNode(t.Context(), realDeps(), f, cpobs.New(), slog.Default()); err == nil {
+	if _, _, err := openNode(t.Context(), realDeps(), f, controlplanemetrics.New(), slog.Default()); err == nil {
 		t.Fatal("unknown store accepted")
 	}
 }

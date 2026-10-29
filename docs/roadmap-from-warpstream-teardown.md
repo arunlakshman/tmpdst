@@ -38,7 +38,7 @@ Status: have / partial / missing / different (deliberately). "T:" = teardown sec
 | Read path | CP returns pointers (file, index offset, batch), agent range-reads (E.4) | CP `Lookup` returns runs, broker GETs per batch | partial, same idea, no coalescing |
 | Compaction | Planner family, levels and lanes, CP validates the swap (T:15) | None; log trimmed, segments never merged (dec 53) | missing |
 | Retention / GC | Expire, dead-file view, bucket-scanning deadscanner for orphans (T:16) | None. Orphans from failed commits accumulate; bucket lifecycle can delete live `seg/` objects after 3 days (audit S13) | missing, and a correctness hazard |
-| Consumer groups / offsets | In the CP; both classic and KIP-848; batched RPCs (T:9.2c) | None; `internal/wire/kwire/supported.go` serves 5 APIs (Produce, Fetch, ListOffsets, Metadata, ApiVersions); static `assign()` in the benchmark | missing. Audit S19 |
+| Consumer groups / offsets | In the CP; both classic and KIP-848; batched RPCs (T:9.2c) | None; `internal/wire/kafkawire/supported.go` serves 5 APIs (Produce, Fetch, ListOffsets, Metadata, ApiVersions); static `assign()` in the benchmark | missing. Audit S19 |
 | Transactions / idempotence | CP state, per-batch producer ids in the commit | Rejected on purpose; brokers return INVALID_REQUEST for idempotent batches (dec 41, 44, TODO "not planned") | different (constraint) |
 | Data lake, query, pipelines, schema registry | Same pattern again (35 `DL*` RPCs, DuckDB, Confluent-compatible SR) (T:17) | None | out of scope |
 | Service discovery | Heartbeat to CP, `Discover`, power-of-2 choices, AZ steering via client.id (T:13, 7.2) | Metadata names only the answering broker (dec 29); live-broker list is a TODO needing a heartbeat lease | missing (planned, TODO "Metadata lists every live broker") |
@@ -127,7 +127,7 @@ Checklist. Status: OK / TODO / BLOCKER.
 | LICENSE | BLOCKER | None at repo root. `build/omb/src/LICENSE` is the Apache-2.0 OMB checkout (git-ignored; our `ops/deploy/aws/bench/omb/patches/*` are derivatives and must keep its notice) |
 | README, quickstart | BLOCKER | No root `README.md` (only deploy and api READMEs). Need: what it is, alpha status, "produce-only, no consumer groups", docker-compose quickstart (`ops/deploy/docker-compose.yml` exists), supported APIs |
 | CONTRIBUTING, SECURITY.md, CODEOWNERS, issue templates | TODO | None exist. Pick DCO (sign-off) over a CLA for an alpha |
-| Public CI | TODO | Workflow lives at `build/ci/determinism.workflow.yml`, not `.github/workflows`, so it is not running. It uses only `go vet`, `go test`, determinism script: no AWS creds needed. Docker-backed `test/it/` tests skip without Docker; add a service-container job. `make build` includes the CRAP gate (`docs/crap-gate.md`) |
+| Public CI | TODO | Workflow lives at `build/ci/determinism.workflow.yml`, not `.github/workflows`, so it is not running. It uses only `go vet`, `go test`, determinism script: no AWS creds needed. Docker-backed `test/integrationtest/` tests skip without Docker; add a service-container job. `make build` includes the CRAP gate (`docs/crap-gate.md`) |
 | Module path | TODO | `module manifester` is not importable (`go get` needs a host path). Rename to `github.com/<org>/<repo>` before tagging; a mechanical change, but it touches every import and nothing hashes the path (verify with the sim hashes) |
 | Versioning | TODO | No tags. Use `v0.1.0-alpha.N`, no compatibility promise; log entry format is versioned (dec 53), which is a real upgrade story only for the CP log |
 | Maintainers | TODO | 192 commits, one author identity (GitHub noreply address, good). Bus factor 1: say so in the README |
@@ -143,7 +143,7 @@ Checklist. Status: OK / TODO / BLOCKER.
 
 ### Third-party audit
 - 16 indirect modules from Pebble: reviewed in `docs/dep-audits/pebble-indirect-modules.md` (all permissive, edge-only,
-  `internal/core/` and `internal/verify/sim/` do not reach them). State this in the README. cockroachdb/errors and sentry-go are linked into
+  `internal/core/` and `internal/verify/simulator/` do not reach them). State this in the README. cockroachdb/errors and sentry-go are linked into
   `manicp` (about 1 MB) and make no network call unless `sentry.Init` runs; ours never does.
 - Open advisory: `golang.org/x/text` v0.34.0, GO-2026-5970, reached only via sentry-go; the fix (v0.39.0) needs `go 1.25`.
   Also go.mod says `go 1.24.0` (end of life); release builds already use go1.26.10. Before the first tag, bump the

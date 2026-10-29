@@ -8,20 +8,20 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/internal/core"
-	"manifester/internal/verify/veritas"
-	"manifester/internal/verify/veritas/veritastest"
-	"manifester/internal/verify/veritas/veritastest/runcontrol"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/verify/speccheck"
+	"manifester/internal/verify/speccheck/checker"
+	"manifester/internal/verify/speccheck/checker/runcontrol"
+	"manifester/internal/wire/kafkawire"
 )
 
 // Conformance C1 tests the REAL broker logic against SIMULATED fakes of the
-// world. The fakes are the veritas spec object store and the veritas spec
+// world. The fakes are the speccheck spec object store and the speccheck spec
 // control plane, and the harness runs without faults. The test sends client
 // requests built with kwire. It compares every ack, fetch and ListOffsets
-// answer with one veritas.Partition per topic partition.
+// answer with one speccheck.Partition per topic partition.
 
-var c1TPs = []core.TopicPartition{core.TP("t", 0), core.TP("t", 1),
-	core.TP("u", 0), core.TP("u", 1), core.TP("u", 2)}
+var c1TPs = []core.TopicPartition{core.NewTopicPartition("t", 0), core.NewTopicPartition("t", 1),
+	core.NewTopicPartition("u", 0), core.NewTopicPartition("u", 1), core.NewTopicPartition("u", 2)}
 
 // An Idem entry carries a producer id. The broker refuses these entries
 // (decision 41), so the test expects an error and no new record.
@@ -45,29 +45,29 @@ type c1 struct {
 	t       *testing.T
 	h       *harness
 	conns   []*client
-	model   map[core.TopicPartition]*veritas.Partition
+	model   map[core.TopicPartition]*speccheck.Partition
 	corrupt bool
 }
 
-func newC1(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) *c1 {
+func newC1(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) *c1 {
 	cfg := DefaultConfig()
-	cfg.Bug = bug
+	cfg.InjectedBug = bug
 	if tune != nil {
 		tune(&cfg)
 	}
 	h := newHarness(t, cfg)
 	h.cp.CreateTopic("u", 3)
-	h.do(core.Started{Self: h.self})
-	s := &c1{t: t, h: h, model: map[core.TopicPartition]*veritas.Partition{}, corrupt: corrupt}
+	h.do(core.NodeStarted{Self: h.self})
+	s := &c1{t: t, h: h, model: map[core.TopicPartition]*speccheck.Partition{}, corrupt: corrupt}
 	for _, tp := range c1TPs {
-		s.model[tp] = &veritas.Partition{}
+		s.model[tp] = &speccheck.Partition{}
 	}
 	s.conns = []*client{h.open(1), h.open(2)}
 	if corrupt { // every third GET comes back with a flipped byte
 		gets := 0
-		h.objHook = func(a core.IOAction, run func() core.Completion) core.Completion {
+		h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
 			d := run()
-			if g, ok := d.(core.ObjGetDone); ok && g.Err == core.OK && len(g.Data) > 0 {
+			if g, ok := d.(core.ObjectGetDone); ok && g.Err == core.OK && len(g.Data) > 0 {
 				if gets++; gets%3 == 0 {
 					g.Data = append([]byte(nil), g.Data...)
 					g.Data[len(g.Data)-1] ^= 0x55
@@ -112,7 +112,7 @@ func (s *c1) await2(c *client, ver int16, req kmsg.Request) (kmsg.Response, erro
 }
 
 type expect struct {
-	err  kafkaCode
+	err  kafkaErrorCode
 	base core.Offset
 	add  [][]byte // appended to the model on success
 	ti   int
@@ -161,7 +161,7 @@ func (s *c1) produce(c *client, op c1op) error {
 	}
 	for i, x := range exps {
 		tp := c1TPs[x.ti]
-		if kafkaCode(got[i].ErrorCode) != x.err || got[i].BaseOffset != int64(x.base) {
+		if kafkaErrorCode(got[i].ErrorCode) != x.err || got[i].BaseOffset != int64(x.base) {
 			return fmt.Errorf("produce %v: error %d base %d, want error %d base %d (model hwm %d)",
 				tp, got[i].ErrorCode, got[i].BaseOffset, x.err, x.base, s.model[tp].HighWatermark())
 		}
@@ -190,7 +190,7 @@ func (s *c1) fetch(c *client, op c1op) error {
 		return fmt.Errorf("fetch %v@%d: hwm %d, want %d", tp, from, p.HighWatermark, hwm)
 	}
 	if from > hwm {
-		if kafkaCode(p.ErrorCode) != errOffsetOutOfRange {
+		if kafkaErrorCode(p.ErrorCode) != errOffsetOutOfRange {
 			return fmt.Errorf("fetch %v@%d beyond hwm %d: error %d", tp, from, hwm, p.ErrorCode)
 		}
 		return nil
@@ -198,7 +198,7 @@ func (s *c1) fetch(c *client, op c1op) error {
 	if p.ErrorCode != 0 || p.LastStableOffset != int64(hwm) || p.LogStartOffset != 0 {
 		return fmt.Errorf("fetch %v@%d: error %d lso %d log start %d", tp, from, p.ErrorCode, p.LastStableOffset, p.LogStartOffset)
 	}
-	bs, err := kwire.SplitBatches(p.RecordBatches)
+	bs, err := kafkawire.SplitBatches(p.RecordBatches)
 	if err != nil {
 		return fmt.Errorf("fetch %v@%d: %w", tp, from, err)
 	}
@@ -213,7 +213,7 @@ func (s *c1) fetch(c *client, op c1op) error {
 	}
 	next := core.Offset(-1)
 	for _, b := range bs {
-		bt, err := kwire.ParseBatch(b) // verifies the CRC
+		bt, err := kafkawire.ParseBatch(b) // verifies the CRC
 		if err != nil {
 			return fmt.Errorf("fetch %v@%d: %w", tp, from, err)
 		}
@@ -281,7 +281,7 @@ func (s *c1) invariant() error {
 	return nil
 }
 
-func genC1(r *veritastest.Rand, i int) c1op {
+func genC1(r *checker.Rand, i int) c1op {
 	op := c1op{Tag: i, Conn: r.Intn(2), TP: r.Intn(len(c1TPs)), From: r.Intn(1 << 10), Small: r.Intn(4) == 0, Last: r.Intn(2) == 0}
 	switch k := r.Intn(20); {
 	case k < 12:
@@ -308,8 +308,8 @@ func shrinkC1(op c1op) []c1op {
 	return out
 }
 
-func c1Check(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) veritastest.SpecComparator[*c1, c1op] {
-	return veritastest.SpecComparator[*c1, c1op]{
+func c1Check(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) checker.SpecChecker[*c1, c1op] {
+	return checker.SpecChecker[*c1, c1op]{
 		Name: "c1op", Ops: 80, MaxShrinkRuns: 300,
 		New:       func() *c1 { return newC1(t, bug, corrupt, tune) },
 		Gen:       genC1,
@@ -322,10 +322,10 @@ func c1Check(t *testing.T, bug Bug, corrupt bool, tune func(*Config)) veritastes
 
 // c1Fail runs the seeds that o chooses and returns the first failure, or nil
 // if every seed passes. A planted-bug test needs the failure as a value, so it
-// cannot use veritastest.Run, which reports the failure to the test itself.
-func c1Fail(t *testing.T, bug Bug, corrupt bool, tune func(*Config), o veritastest.Options) *veritastest.Failure[c1op] {
+// cannot use checker.Run, which reports the failure to the test itself.
+func c1Fail(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config), o checker.Options) *checker.Failure[c1op] {
 	c := c1Check(t, bug, corrupt, tune)
-	try := func(seed uint64) *veritastest.Failure[c1op] {
+	try := func(seed uint64) *checker.Failure[c1op] {
 		f := c.RunSeed(seed)
 		if f != nil {
 			replay := ""
@@ -352,7 +352,7 @@ func c1Fail(t *testing.T, bug Bug, corrupt bool, tune func(*Config), o veritaste
 func TestConformanceBroker(t *testing.T) {
 	for _, corrupt := range []bool{false, true} {
 		t.Run(fmt.Sprintf("corruptGets=%v", corrupt), func(t *testing.T) {
-			veritastest.Run(t, c1Check(t, BugNone, corrupt, nil), runcontrol.Options(t, 100))
+			checker.Run(t, c1Check(t, InjectedBugNone, corrupt, nil), runcontrol.Options(t, 100))
 		})
 	}
 }
@@ -371,7 +371,7 @@ func TestConformanceBrokerSmallSegments(t *testing.T) {
 	for _, name := range []string{"bytes", "batches", "partitions", "all"} {
 		for _, corrupt := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/corruptGets=%v", name, corrupt), func(t *testing.T) {
-				veritastest.Run(t, c1Check(t, BugNone, corrupt, caps[name]), runcontrol.Options(t, 50))
+				checker.Run(t, c1Check(t, InjectedBugNone, corrupt, caps[name]), runcontrol.Options(t, 50))
 			})
 		}
 	}
@@ -381,29 +381,29 @@ func TestConformanceBrokerSmallSegments(t *testing.T) {
 // changes something the harness can observe, so C1 must catch it.
 //
 // C1 cannot catch the other planted bugs, because the client cannot see them
-// in a fault-free run. The simulator tests in internal/verify/sim/kafka catch
-// them: TestMutantsAreCaught in kafka_test.go runs every Bug value and names
+// in a fault-free run. The simulator tests in internal/verify/simulator/kafka catch
+// them: TestMutantsAreCaught in kafka_test.go runs every InjectedBug value and names
 // the invariant that must fail.
-//   - BugNoBatchCap, BugNoPartitionCap, BugSealOffByOne change only where the
+//   - InjectedBugNoBatchCap, InjectedBugNoPartitionCap, InjectedBugSealOffByOne change only where the
 //     broker cuts a segment. The records and offsets stay the same. The sim
 //     invariants on segment size are expected to catch them.
-//   - BugTimerFromLastBatch changes only when the flush timer fires. C1 does
+//   - InjectedBugTimerFromLastBatch changes only when the flush timer fires. C1 does
 //     not check time, so the sim invariant on the flush window must catch it.
-//   - BugFreshKeyOnRetry acts only when a commit is retried, and the C1 harness
+//   - InjectedBugFreshKeyOnRetry acts only when a commit is retried, and the C1 harness
 //     has no faults, so no retry happens. The sim invariant "a stored batch is
 //     committed at most once" must catch it.
-//   - BugSkipProduceCRC matters only for a corrupt produce batch, and the C1
+//   - InjectedBugSkipProduceCRC matters only for a corrupt produce batch, and the C1
 //     generator sends only valid batches. TestSkipProduceCRCMutantAcksCorruptBatch
 //     and the sim invariant "committed batch is intact" must catch it.
 func TestConformanceBrokerCatchesMutants(t *testing.T) {
 	for _, m := range []struct {
 		name    string
-		bug     Bug
+		bug     InjectedBug
 		corrupt bool
 	}{
-		{"BugWrongOffset", BugWrongOffset, false},
-		{"BugServeCorrupt", BugServeCorrupt, true},
-		{"BugEarlyAck", BugEarlyAck, false},
+		{"BugWrongOffset", InjectedBugWrongOffset, false},
+		{"BugServeCorrupt", InjectedBugServeCorrupt, true},
+		{"BugEarlyAck", InjectedBugEarlyAck, false},
 	} {
 		t.Run(m.name, func(t *testing.T) {
 			if c1Fail(t, m.bug, m.corrupt, nil, runcontrol.Options(t, 20)) == nil {

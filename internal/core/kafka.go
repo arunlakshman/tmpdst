@@ -23,9 +23,9 @@ type RequestHeader struct {
 	ClientID      string
 }
 
-// Framer reassembles length-prefixed Kafka frames from a byte stream. One per
+// FrameSplitter reassembles length-prefixed Kafka frames from a byte stream. One per
 // connection; it is part of the owning state machine's state. Pure.
-type Framer interface {
+type FrameSplitter interface {
 	// Push appends data and returns every complete frame now available, in
 	// order. An error means the stream is unrecoverable; close the connection.
 	Push(data []byte) (frames [][]byte, err error)
@@ -33,9 +33,9 @@ type Framer interface {
 	Buffered() int
 }
 
-// Codec decodes requests and encodes responses (broker side) and the reverse
+// KafkaCodec decodes requests and encodes responses (broker side) and the reverse
 // (sim workload side). Pure and deterministic.
-type Codec interface {
+type KafkaCodec interface {
 	DecodeRequest(frame []byte) (RequestHeader, Request, error)
 	EncodeResponse(h RequestHeader, resp Response) ([]byte, error)
 

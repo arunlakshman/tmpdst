@@ -11,13 +11,13 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/exec"
-	"manifester/internal/controlplane/machine"
+	"manifester/internal/controlplane/executor"
 	"manifester/internal/controlplane/server"
+	"manifester/internal/controlplane/statemachine"
 	"manifester/internal/core"
 )
 
-func startNode(t *testing.T, cfg machine.Config) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
+func startNode(t *testing.T, cfg statemachine.Config) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
 	t.Helper()
 	if cfg.K == 0 {
 		cfg.K = 4
@@ -27,9 +27,9 @@ func startNode(t *testing.T, cfg machine.Config) (cpv1.ControlPlaneClient, healt
 	}
 	n := server.New(server.Config{
 		Machine: cfg,
-		Log:     exec.NewMemLog(),
-		Objects: exec.NewMemObjects(),
-		Self:    core.NodeRef{Node: "cp-0"},
+		Log:     executor.NewMemoryLog(),
+		Objects: executor.NewMemoryObjects(),
+		Self:    core.NodeInstance{Node: "cp-0"},
 	})
 	ctx := t.Context()
 	if err := n.Start(ctx); err != nil {
@@ -55,7 +55,7 @@ func startNode(t *testing.T, cfg machine.Config) (cpv1.ControlPlaneClient, healt
 }
 
 func TestHealthServingAfterReady(t *testing.T) {
-	_, hc, stop := startNode(t, machine.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
+	_, hc, stop := startNode(t, statemachine.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
 	defer stop()
 	resp, err := hc.Check(t.Context(), &healthpb.HealthCheckRequest{})
 	if err != nil {
@@ -67,7 +67,7 @@ func TestHealthServingAfterReady(t *testing.T) {
 }
 
 func TestCommitLookupRoundTrip(t *testing.T) {
-	cli, _, stop := startNode(t, machine.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
+	cli, _, stop := startNode(t, statemachine.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
 	defer stop()
 	_, err := cli.CreateTopic(t.Context(), &cpv1.CreateTopicRequest{Topic: "t", Partitions: 2})
 	if err != nil {
@@ -105,7 +105,7 @@ func TestCommitLookupRoundTrip(t *testing.T) {
 }
 
 func TestStandbyCommitUnavailable(t *testing.T) {
-	cli, _, stop := startNode(t, machine.Config{
+	cli, _, stop := startNode(t, statemachine.Config{
 		Rank: 1, Heartbeat: core.Duration(time.Second), TakeoverAfter: core.Duration(time.Hour),
 	})
 	defer stop()
@@ -123,10 +123,10 @@ func TestStandbyCommitUnavailable(t *testing.T) {
 
 func TestStartCanceledContext(t *testing.T) {
 	n := server.New(server.Config{
-		Machine: machine.Config{K: 4, CatchUpEvery: core.Duration(time.Hour)},
-		Log:     exec.NewMemLog(),
-		Objects: exec.NewMemObjects(),
-		Self:    core.NodeRef{Node: "cp-0"},
+		Machine: statemachine.Config{K: 4, CatchUpEvery: core.Duration(time.Hour)},
+		Log:     executor.NewMemoryLog(),
+		Objects: executor.NewMemoryObjects(),
+		Self:    core.NodeInstance{Node: "cp-0"},
 	})
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -138,10 +138,10 @@ func TestStartCanceledContext(t *testing.T) {
 
 func TestStartCancelWhileWaiting(t *testing.T) {
 	n := server.New(server.Config{
-		Machine: machine.Config{K: 4, CatchUpEvery: core.Duration(time.Hour)},
-		Log:     exec.NewMemLog(),
-		Objects: exec.NewMemObjects(),
-		Self:    core.NodeRef{Node: "cp-0"},
+		Machine: statemachine.Config{K: 4, CatchUpEvery: core.Duration(time.Hour)},
+		Log:     executor.NewMemoryLog(),
+		Objects: executor.NewMemoryObjects(),
+		Self:    core.NodeInstance{Node: "cp-0"},
 	})
 	ctx, cancel := context.WithCancel(t.Context())
 	go func() {

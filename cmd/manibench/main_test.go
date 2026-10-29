@@ -14,9 +14,9 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/grpc"
 
-	"manifester/internal/controlplane/exec"
-	"manifester/internal/controlplane/machine"
+	"manifester/internal/controlplane/executor"
 	"manifester/internal/controlplane/server"
+	"manifester/internal/controlplane/statemachine"
 	"manifester/internal/core"
 )
 
@@ -62,12 +62,12 @@ func TestMainRunUsage(t *testing.T) {
 
 func TestCreateTopic(t *testing.T) {
 	n := server.New(server.Config{
-		Machine: machine.Config{
+		Machine: statemachine.Config{
 			K: 4, CatchUpEvery: core.Duration(time.Millisecond),
 			Rank: 0, Heartbeat: core.Duration(time.Second),
 		},
-		Log: exec.NewMemLog(), Objects: exec.NewMemObjects(),
-		Self: core.NodeRef{Node: "cp"},
+		Log: executor.NewMemoryLog(), Objects: executor.NewMemoryObjects(),
+		Self: core.NodeInstance{Node: "cp"},
 	})
 	if err := n.Start(t.Context()); err != nil {
 		t.Fatal(err)

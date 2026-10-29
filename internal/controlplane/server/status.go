@@ -5,11 +5,11 @@ import (
 	"google.golang.org/grpc/status"
 
 	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/apiconv"
+	"manifester/internal/controlplane/apiconvert"
 	"manifester/internal/core"
 )
 
-func rpcError(code core.ErrCode, outcome core.Outcome) error {
+func toRPCError(code core.ErrCode, outcome core.Outcome) error {
 	st := codes.Internal
 	switch code {
 	case core.ErrUnavailable:
@@ -26,8 +26,8 @@ func rpcError(code core.ErrCode, outcome core.Outcome) error {
 		return nil
 	}
 	detail := &cpv1.ErrorDetail{
-		Code:    apiconv.FromCoreErr(code),
-		Outcome: apiconv.FromCoreOutcome(outcome),
+		Code:    apiconvert.FromCoreErr(code),
+		Outcome: apiconvert.FromCoreOutcome(outcome),
 	}
 	s, err := status.New(st, code.String()).WithDetails(detail)
 	if err != nil {

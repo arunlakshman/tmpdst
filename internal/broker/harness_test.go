@@ -7,14 +7,14 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/internal/core"
-	"manifester/internal/verify/veritas"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/verify/speccheck"
+	"manifester/internal/wire/kafkawire"
 )
 
-// testEnv is a seeded core.Env that records assertion violations. It keeps its
-// own SplitMix64 copy and not veritastest.Rand, for two reasons. Uint64 gives
-// the same values as veritastest.Rand, but Intn here uses a plain modulo and
-// veritastest.Rand uses Lemire, so the seeds would change their streams. Also,
+// testEnv is a seeded core.Environment that records assertion violations. It keeps its
+// own SplitMix64 copy and not checker.Rand, for two reasons. Uint64 gives
+// the same values as checker.Rand, but Intn here uses a plain modulo and
+// checker.Rand uses Lemire, so the seeds would change their streams. Also,
 // broker_test.go sets the state field directly to reseed the environment.
 type testEnv struct {
 	state uint64
@@ -40,65 +40,69 @@ func (e *testEnv) NewID() core.ID {
 	}
 	return id
 }
-func (e *testEnv) Maybe(core.Site) bool           { return false }
-func (e *testEnv) MaybeP(core.Site, float64) bool { return false }
-func (e *testEnv) Fault(core.Site, float64) bool  { return false }
-func (e *testEnv) Always(c bool, p core.Prop, _ ...core.Detail) {
+func (e *testEnv) Maybe(core.FaultPointID) bool           { return false }
+func (e *testEnv) MaybeP(core.FaultPointID, float64) bool { return false }
+func (e *testEnv) Fault(core.FaultPointID, float64) bool  { return false }
+func (e *testEnv) Always(c bool, p core.PropertyID, _ ...core.ContextPair) {
 	if !c {
 		e.viol = append(e.viol, string(p))
 	}
 }
-func (e *testEnv) AlwaysOrUnreachable(c bool, p core.Prop, d ...core.Detail) { e.Always(c, p, d...) }
-func (e *testEnv) Sometimes(bool, core.Prop)                                 {}
-func (e *testEnv) Reachable(p core.Prop)                                     { e.reach = append(e.reach, string(p)) }
-func (e *testEnv) Unreachable(p core.Prop, _ ...core.Detail)                 { e.viol = append(e.viol, string(p)) }
+func (e *testEnv) AlwaysOrUnreachable(c bool, p core.PropertyID, d ...core.ContextPair) {
+	e.Always(c, p, d...)
+}
+func (e *testEnv) Sometimes(bool, core.PropertyID) {}
+func (e *testEnv) Reachable(p core.PropertyID)     { e.reach = append(e.reach, string(p)) }
+func (e *testEnv) Unreachable(p core.PropertyID, _ ...core.ContextPair) {
+	e.viol = append(e.viol, string(p))
+}
 
 // client is the test's view of one connection.
 type client struct {
 	id   core.ConnID
-	want []kwire.RequestHeader
+	want []kafkawire.RequestHeader
 	out  [][]byte // response frames (length prefix stripped) not yet decoded
-	fr   *kwire.Framer
+	fr   *kafkawire.Framer
 	corr int32
 }
 
-// harness drives a Broker synchronously against the veritas specs. Completions
+// harness drives a Broker synchronously against the speccheck specs. IOResults
 // are computed when the I/O action is issued and delivered through a queue, so
 // tests can hold them back (holdCP, holdPut) or fault them (cpHook, objHook).
 type harness struct {
 	t     *testing.T
 	b     *Broker
 	env   *testEnv
-	store *veritas.ObjectStore
-	cp    *veritas.ControlPlane
+	store *speccheck.ObjectStore
+	cp    *speccheck.ControlPlane
 	cfg   Config
-	self  core.NodeRef
-	now   core.Time
+	self  core.NodeInstance
+	now   core.NodeTime
 
 	// cpHook/objHook may replace an I/O action's outcome; exec runs the spec.
-	cpHook  func(a core.CPCall, exec func() core.Completion) core.Completion
-	objHook func(a core.IOAction, exec func() core.Completion) core.Completion
+	cpHook  func(a core.ControlPlaneCall, exec func() core.IOResult) core.IOResult
+	objHook func(a core.IOCall, exec func() core.IOResult) core.IOResult
 	holdCP  bool
 	holdPut bool
-	held    []core.Completion
+	held    []core.IOResult
 
-	queue   []core.Completion
-	timers  map[core.TimerID]core.TimerGen
+	queue   []core.IOResult
+	timers  map[core.TimerID]core.TimerVersion
 	clients map[core.ConnID]*client
 	all     []core.Action // every action emitted, in order
 	paused  map[core.ConnID]bool
 	closed  map[core.ConnID]bool
 	exited  bool
-	cpCalls []core.CPOp
+	cpCalls []core.ControlPlaneOperation
 	puts    []string
 }
 
 func newHarness(t *testing.T, cfg Config) *harness {
-	h := &harness{t: t, env: &testEnv{state: 7}, store: veritas.NewObjectStore(), cp: veritas.NewControlPlane(),
-		cfg: cfg, timers: map[core.TimerID]core.TimerGen{}, clients: map[core.ConnID]*client{},
+	h := &harness{t: t, env: &testEnv{state: 7}, store: speccheck.NewObjectStore(), cp: speccheck.NewControlPlane(),
+		cfg: cfg, timers: map[core.TimerID]core.TimerVersion{}, clients: map[core.ConnID]*client{},
 		paused: map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}
 	h.cp.CreateTopic("t", 2)
-	h.self = core.NodeRef{Node: "b1", Inc: core.Incarnation{1}}
+	h.self = core.NodeInstance{Node: "b1", Inc: core.BootNumber{1}}
 	h.b = New(cfg)(h.env, h.self).(*Broker)
 	return h
 }
@@ -106,13 +110,13 @@ func newHarness(t *testing.T, cfg Config) *harness {
 // startedHarness boots the broker.
 func startedHarness(t *testing.T, cfg Config) *harness {
 	h := newHarness(t, cfg)
-	h.do(core.Started{Self: h.self})
+	h.do(core.NodeStarted{Self: h.self})
 	return h
 }
 
-func (h *harness) step(body core.EventBody) []core.Action {
-	h.now += core.Time(core.Millisecond)
-	acts := h.b.Step(core.Event{At: h.now, Wall: core.WallTime(h.now), Body: body})
+func (h *harness) step(body core.EventData) []core.Action {
+	h.now += core.NodeTime(core.Millisecond)
+	acts := h.b.Step(core.Event{At: h.now, Wall: core.RealTime(h.now), Body: body})
 	h.all = append(h.all, acts...)
 	for _, a := range acts {
 		h.exec(a)
@@ -121,7 +125,7 @@ func (h *harness) step(body core.EventBody) []core.Action {
 }
 
 // do steps body and then delivers queued completions until none is left.
-func (h *harness) do(body core.EventBody) []core.Action {
+func (h *harness) do(body core.EventData) []core.Action {
 	acts := h.step(body)
 	h.run()
 	return acts
@@ -135,9 +139,9 @@ func (h *harness) run() {
 	}
 }
 
-func (h *harness) deliver(c core.Completion) {
-	_, isCP := c.(core.CPDone)
-	_, isPut := c.(core.ObjPutDone)
+func (h *harness) deliver(c core.IOResult) {
+	_, isCP := c.(core.ControlPlaneDone)
+	_, isPut := c.(core.ObjectPutDone)
 	if (isCP && h.holdCP) || (isPut && h.holdPut) {
 		h.held = append(h.held, c)
 		return
@@ -155,16 +159,16 @@ func (h *harness) releaseHeld() {
 
 func (h *harness) exec(a core.Action) {
 	switch a := a.(type) {
-	case core.ObjPut:
+	case core.ObjectPut:
 		h.puts = append(h.puts, a.Key)
-		run := func() core.Completion { return h.store.Exec(a) }
+		run := func() core.IOResult { return h.store.Exec(a) }
 		h.deliver(h.objDone(a, run))
-	case core.ObjGet:
-		run := func() core.Completion { return h.store.Exec(a) }
+	case core.ObjectGet:
+		run := func() core.IOResult { return h.store.Exec(a) }
 		h.deliver(h.objDone(a, run))
-	case core.CPCall:
+	case core.ControlPlaneCall:
 		h.cpCalls = append(h.cpCalls, a.Op)
-		run := func() core.Completion { return h.cp.Exec(a) }
+		run := func() core.IOResult { return h.cp.Exec(a) }
 		if h.cpHook != nil {
 			h.deliver(h.cpHook(a, run))
 		} else {
@@ -190,12 +194,12 @@ func (h *harness) exec(a core.Action) {
 		h.paused[a.Conn] = true
 	case core.ResumeReads:
 		h.paused[a.Conn] = false
-	case core.Exit:
+	case core.ShutdownDone:
 		h.exited = true
 	}
 }
 
-func (h *harness) objDone(a core.IOAction, run func() core.Completion) core.Completion {
+func (h *harness) objDone(a core.IOCall, run func() core.IOResult) core.IOResult {
 	if h.objHook != nil {
 		return h.objHook(a, run)
 	}
@@ -232,7 +236,7 @@ func (h *harness) flush() { h.fire(timerFlush) }
 // ---- client side ----
 
 func (h *harness) open(id core.ConnID) *client {
-	c := &client{id: id, fr: kwire.NewFramer(1 << 26)}
+	c := &client{id: id, fr: kafkawire.NewFramer(1 << 26)}
 	h.clients[id] = c
 	h.do(core.ConnOpened{Conn: id, Peer: "test"})
 	return c
@@ -241,8 +245,8 @@ func (h *harness) open(id core.ConnID) *client {
 // frame encodes a request without sending it.
 func (h *harness) frame(c *client, ver int16, req kmsg.Request) []byte {
 	c.corr++
-	hd := kwire.RequestHeader{APIKey: req.Key(), APIVersion: ver, CorrelationID: c.corr, ClientID: "test"}
-	b, err := kwire.Codec{}.EncodeRequest(hd, req)
+	hd := kafkawire.RequestHeader{APIKey: req.Key(), APIVersion: ver, CorrelationID: c.corr, ClientID: "test"}
+	b, err := kafkawire.Codec{}.EncodeRequest(hd, req)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -262,7 +266,7 @@ func (h *harness) next(c *client) kmsg.Response {
 		h.t.Fatalf("conn %d: no response", c.id)
 	}
 	hd := c.want[0]
-	resp, err := kwire.Codec{}.DecodeResponse(hd, c.out[0])
+	resp, err := kafkawire.Codec{}.DecodeResponse(hd, c.out[0])
 	if err != nil {
 		h.t.Fatalf("conn %d: decode %d: %v", c.id, hd.APIKey, err)
 	}
@@ -285,7 +289,7 @@ const (
 	verMetadata = 9
 )
 
-var params = kwire.BatchParams{FirstTimestamp: 1000, MaxTimestamp: 1000}
+var params = kafkawire.BatchParams{FirstTimestamp: 1000, MaxTimestamp: 1000}
 
 // mkBatch builds a batch of len(vals) records; pid -1 means non-idempotent.
 func mkBatch(t testing.TB, pid int64, epoch int16, seq int32, vals ...string) []byte {
@@ -296,7 +300,7 @@ func mkBatch(t testing.TB, pid int64, epoch int16, seq int32, vals ...string) []
 	}
 	p := params
 	p.ProducerID, p.ProducerEpoch, p.BaseSequence = pid, epoch, seq
-	b, err := kwire.BuildBatch(p, recs)
+	b, err := kafkawire.BuildBatch(p, recs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +315,7 @@ type ent struct {
 }
 
 func e(topic string, part int32, rec []byte) ent {
-	return ent{tp: core.TP(topic, part), rec: rec}
+	return ent{tp: core.NewTopicPartition(topic, part), rec: rec}
 }
 
 func prodReq(acks int16, es ...ent) *kmsg.ProduceRequest {
@@ -358,7 +362,7 @@ func (h *harness) produceOne(c *client, e ent) kmsg.ProduceResponseTopicPartitio
 func factsNamed(all []core.Action, name string) []core.Fact {
 	var out []core.Fact
 	for _, a := range all {
-		if e, ok := a.(core.Emit); ok && e.Fact.Name == name {
+		if e, ok := a.(core.RecordFact); ok && e.Fact.Name == name {
 			out = append(out, e.Fact)
 		}
 	}

@@ -18,7 +18,7 @@ for the not-yet-indexed tail from memory. A restarting CP rebuilds that tail fro
 Commit cost no longer depends on partitions per segment. Measured transaction size goes from 31-97 items to 2-8. The
 model puts CP capacity at 200-430 segments/s, against 30-64 needed. DynamoDB writes fall from a predicted ~12.7k WRU/s
 to ~0.6-0.8k WRU/s at 1 GiB/s, which is about $1.0-1.3k/month at us-east-1 on-demand prices. The broker contract
-(`CommitSegment`, `Lookup`) and `internal/verify/veritas/controlplane.go` keep their behaviour. A second sequencer still costs only
+(`CommitSegment`, `Lookup`) and `internal/verify/speccheck/controlplane.go` keep their behaviour. A second sequencer still costs only
 retries. The one new restriction is that **only the active CP may serve `Lookup`**; §5.6 explains why.
 
 ## 1. The problem in numbers (measured, w2, `results/w2`)
@@ -387,7 +387,7 @@ not measured at that size.
 
 ## 8. Impact on the spec, contract, simulator and tests
 
-- **`internal/verify/veritas/controlplane.go`:** behaviour is unchanged. Only the comment changes: "real stores guard step 3 with a
+- **`internal/verify/speccheck/controlplane.go`:** behaviour is unchanged. Only the comment changes: "real stores guard step 3 with a
   compare-and-set on the run base" becomes "on the next slot of a sequenced log". `CommitSegment` and `Lookup` are
   unchanged on the wire and in `core`. Decision 21 holds.
 - **`ErrTooLarge`:** the rule becomes "`G#` blob over ~300 KB or > 98 segments' worth", instead of "1 + partitions > 100".

@@ -2,46 +2,46 @@ package core
 
 import "testing"
 
-func TestLogIOActionsAreIOActions(t *testing.T) {
-	acts := []IOAction{
+func TestLogIOCallsAreIOCalls(t *testing.T) {
+	acts := []IOCall{
 		LogAppend{Req: 1, Slot: 2, Data: []byte("x")},
 		LogRead{Req: 3, From: 0, Limit: 10},
-		LogCheckTail{Req: 4},
-		LogTrim{Req: 5, Through: 1},
+		LogGetEnd{Req: 4},
+		LogDeleteOld{Req: 5, Through: 1},
 	}
 	for _, a := range acts {
-		if a.ReqID() == 0 {
-			t.Fatalf("%T: ReqID zero", a)
+		if a.RequestID() == 0 {
+			t.Fatalf("%T: RequestID zero", a)
 		}
 	}
-	dones := []Completion{
+	dones := []IOResult{
 		LogAppendDone{Req: 1, Slot: 2, Outcome: Applied},
 		LogReadDone{Req: 3, Entries: []LogEntry{{Slot: 0, Data: []byte("x")}}, Outcome: Applied},
-		LogCheckTailDone{Req: 4, Tail: 1, Outcome: Applied},
-		LogTrimDone{Req: 5, Outcome: Applied},
+		LogGetEndDone{Req: 4, Tail: 1, Outcome: Applied},
+		LogDeleteOldDone{Req: 5, Outcome: Applied},
 	}
 	for _, d := range dones {
-		if ClassOf(d) != Control {
-			t.Fatalf("%T: ClassOf = %v, want Control", d, ClassOf(d))
+		if InboxKindOf(d) != Control {
+			t.Fatalf("%T: InboxKindOf = %v, want Control", d, InboxKindOf(d))
 		}
-		if d.ReqID() == 0 {
-			t.Fatalf("%T: ReqID zero", d)
+		if d.RequestID() == 0 {
+			t.Fatalf("%T: RequestID zero", d)
 		}
 	}
 }
 
 func TestCPCallAndCPDoneClassOf(t *testing.T) {
-	call := CPCall{Req: 9, Op: Lookup{TP: TP("t", 1), From: 7}}
-	if call.ReqID() != 9 {
-		t.Fatalf("ReqID = %d", call.ReqID())
+	call := ControlPlaneCall{Req: 9, Op: FindSegments{TP: NewTopicPartition("t", 1), From: 7}}
+	if call.RequestID() != 9 {
+		t.Fatalf("RequestID = %d", call.RequestID())
 	}
-	done := CPDone{Req: 9, Outcome: NotApplied, Err: ErrUnavailable}
-	if ClassOf(done) != Control || done.ReqID() != 9 {
+	done := ControlPlaneDone{Req: 9, Outcome: NotApplied, Err: ErrUnavailable}
+	if InboxKindOf(done) != Control || done.RequestID() != 9 {
 		t.Fatalf("CPDone class/req broken")
 	}
-	offer := CPOffer{From: NodeRef{Node: "b-0"}, Req: 9, Op: call.Op}
-	if ClassOf(offer) != Control {
-		t.Fatalf("CPOffer class = %v", ClassOf(offer))
+	offer := ControlPlaneDeliver{From: NodeInstance{Node: "b-0"}, Req: 9, Op: call.Op}
+	if InboxKindOf(offer) != Control {
+		t.Fatalf("CPOffer class = %v", InboxKindOf(offer))
 	}
-	_ = CPReply{To: offer.From, Done: done}
+	_ = ControlPlaneReply{To: offer.From, Done: done}
 }

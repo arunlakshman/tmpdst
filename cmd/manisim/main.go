@@ -13,14 +13,14 @@ import (
 	"runtime"
 	"time"
 
-	"manifester/internal/verify/sim"
-	"manifester/internal/verify/sim/echo"
-	"manifester/internal/verify/sim/kafka"
+	"manifester/internal/verify/simulator"
+	"manifester/internal/verify/simulator/echo"
+	"manifester/internal/verify/simulator/kafka"
 )
 
-// coverageMin is the campaign size from which a never-satisfied Sometimes
+// minimumCoverage is the campaign size from which a never-satisfied Sometimes
 // property counts as a failure (smaller runs cannot be expected to reach it).
-const coverageMin = 100
+const minimumCoverage = 100
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
@@ -49,7 +49,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 }
 
 // scenarioConfig maps a -scenario name to its config builder.
-func scenarioConfig(name string) (func([]uint64) sim.Config, bool) {
+func scenarioConfig(name string) (func([]uint64) simulator.Config, bool) {
 	switch name {
 	case "kafka":
 		return kafka.Config, true
@@ -75,14 +75,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if o.one >= 0 {
-		return replay(stdout, stderr, config, uint64(o.one))
+		return rerunSeed(stdout, stderr, config, uint64(o.one))
 	}
 	list := make([]uint64, o.seeds)
 	for i := range list {
 		list[i] = o.start + uint64(i)
 	}
 	t0 := time.Now()
-	rep, err := runSharded(config, list, o.jobs)
+	rep, err := runInParts(config, list, o.jobs)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "manisim:", err)
 		return 2
@@ -98,13 +98,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 // failed is the campaign verdict: any failing seed, violated Always property,
 // nondeterminism, or (in a big enough campaign) a coverage gap.
-func failed(rep sim.Report, bad int) bool {
-	return bad > 0 || len(rep.Always) > 0 || len(rep.Nondeterminism) > 0 || (len(rep.Coverage) > 0 && len(rep.Seeds) >= coverageMin)
+func failed(rep simulator.Report, bad int) bool {
+	return bad > 0 || len(rep.Always) > 0 || len(rep.Nondeterminism) > 0 || (len(rep.Coverage) > 0 && len(rep.Seeds) >= minimumCoverage)
 }
 
 // printSeeds prints the per-seed lines and failures; it returns the number of
 // failing seeds and the total steps.
-func printSeeds(w io.Writer, rep sim.Report, o options) (int, uint64) {
+func printSeeds(w io.Writer, rep simulator.Report, o options) (int, uint64) {
 	var bad int
 	var steps uint64
 	for _, s := range rep.Seeds {
@@ -126,7 +126,7 @@ func printSeeds(w io.Writer, rep sim.Report, o options) (int, uint64) {
 }
 
 // printCampaign prints the campaign-wide findings.
-func printCampaign(w io.Writer, rep sim.Report, scenario string) {
+func printCampaign(w io.Writer, rep simulator.Report, scenario string) {
 	for _, a := range rep.Always {
 		_, _ = fmt.Fprintf(w, "VIOLATED %q first at seed %d step %d (%d seeds)\n", a.Prop, a.FirstSeed, a.FirstStep, len(a.Seeds))
 	}
@@ -138,8 +138,8 @@ func printCampaign(w io.Writer, rep sim.Report, scenario string) {
 	}
 }
 
-func replay(stdout, stderr io.Writer, config func([]uint64) sim.Config, seed uint64) int {
-	res, err := sim.NewRunner().Replay(config([]uint64{seed}), seed)
+func rerunSeed(stdout, stderr io.Writer, config func([]uint64) simulator.Config, seed uint64) int {
+	res, err := simulator.NewRunner().Replay(config([]uint64{seed}), seed)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, "manisim:", err)
 		return 2
@@ -158,17 +158,17 @@ func replay(stdout, stderr io.Writer, config func([]uint64) sim.Config, seed uin
 	return 0
 }
 
-var kindNames = map[sim.FailKind]string{
-	sim.FailViolation:      "violation",
-	sim.FailInconclusive:   "inconclusive",
-	sim.FailProtocol:       "protocol",
-	sim.FailPanic:          "panic",
-	sim.FailMaxSteps:       "max_steps",
-	sim.FailNondeterminism: "nondeterminism",
+var failureKindNames = map[simulator.FailKind]string{
+	simulator.FailViolation:     "violation",
+	simulator.FailUndecided:     "inconclusive",
+	simulator.FailProtocol:      "protocol",
+	simulator.FailPanic:         "panic",
+	simulator.FailMaxSteps:      "max_steps",
+	simulator.FailNotRepeatable: "nondeterminism",
 }
 
-func kind(k sim.FailKind) string {
-	if n, ok := kindNames[k]; ok {
+func kind(k simulator.FailKind) string {
+	if n, ok := failureKindNames[k]; ok {
 		return n
 	}
 	return fmt.Sprintf("kind(%d)", k)

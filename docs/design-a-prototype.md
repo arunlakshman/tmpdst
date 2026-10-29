@@ -19,7 +19,7 @@ Labels: **measured** (this machine, Apple M1, Go 1.24), **modelled** (fakedb wit
 | hole-filler | `Replica.Tick/SyncTo` | A slot empty for `HoleAfter` (default 250 ms) while later slots exist gets a no-op via the same conditional append. The original writer loses and retries elsewhere; apply skips the no-op. |
 | `Checkpoint` | `checkpoint.go` | Slot, state hash, ends (grouped by topic, delta coded), sorted 16-byte key hashes. No restore into veritas. |
 | `Store` | `store.go` | `cp.Store` over a replica and committer, for the conformance suite only. |
-| small additions elsewhere | `fakedb`, `internal/verify/veritas/snapshot.go` | fakedb `PutItem` (conditional, `ALL_OLD`, `AfterPut` lost-answer hook); veritas `Ends()` and `SegmentKeys()` (read-only). |
+| small additions elsewhere | `fakedb`, `internal/verify/speccheck/snapshot.go` | fakedb `PutItem` (conditional, `ALL_OLD`, `AfterPut` lost-answer hook); veritas `Ends()` and `SegmentKeys()` (read-only). |
 
 Commands in the log: CommitSegment, CreateTopic (otherwise `DescribeTopics` would diverge between replicas) and no-op.
 The state machine is unchanged `veritas.ControlPlane`: first slot of a key wins, a later equal command is answered from
@@ -187,7 +187,7 @@ over 30) green. No stage touches an existing sim trace hash except stage 3, whic
 | 1. KV applier and lockstep | `cp/applier`: the state machine of decision 49 on an embedded KV store chosen by a bake-off (`docs/applier-bakeoff.md`); commands CommitSegment and CreateTopic, queries Lookup, DescribeTopics, End; runs packed per (partition, segment); per-key digest plus bases for the window; checkpoint, restore and trim by slot. | X2 harness with the applier as every replica's state machine and veritas as the oracle: 100,000 seeds, 0 failures (equal answers, offsets and query digests); `cptest` conformance green against the applier as a `cp.Store`; apply rate well above 430 segments/s at 150 partitions per segment with 40k partitions of state; the store dependency recorded per decisions I and J. |
 | 2. Log-backed CP service (DONE, `docs/log-cp-service.md`) | The `cp/` service on the DynamoDB log through the `cp/logsm` seam: committer with K=4, hole filler, hot standby tailing the log (decision 51, the slot is the fence), sticky routing of commits to one node, checkpoint and trim (trim stays behind the key window), indexer writing `R#` rows every 10 s on a pre-warmed table, fresh Lookup through `CheckTail` with shared (batched) tail reads. | Conformance C3 against the real service on fakedb; a standby takes over after the appender is killed with no lost or duplicated offset; restart from checkpoint plus tail gives the same state digest; Lookup after an ack sees it; unit and race tests for each loop. |
 | 3. Cap 4096 and sim (DONE, `docs/sim-log-engine.md`) | Raise `MaxSegmentPartitions` from 96 to about 4096 (decision 52); add a sim CP engine for the log (Put/Query with latency, lost answers, unknown outcome; replicas as actors with crash and restart from a checkpoint; `HoleAfter` on the virtual clock) next to the S3 engine; veritas stays the oracle over the log's first-slot order. | Every trace hash re-baselined and reviewed by hand (a diff per hash with the cause); 300-seed campaign green; invariants: all live replicas' query digests equal at a quiesced log, an answer derives from the applied slot, no empty slot is passed without a no-op. |
-| 4. Wiring and operations (DONE, below) | `manicp -store` kind for the log, OpenAPI and a CP URL list (or NLB) for brokers with failover to the next URL, `manicp_` observability for apply lag, slot loss, hole fills, checkpoint age, indexer lag, window size. | `test/it/` kill-the-appender test fails over within the budget; metrics documented in `docs/observability.md`; runbook updated. |
+| 4. Wiring and operations (DONE, below) | `manicp -store` kind for the log, OpenAPI and a CP URL list (or NLB) for brokers with failover to the next URL, `manicp_` observability for apply lag, slot loss, hole fills, checkpoint age, indexer lag, window size. | `test/integrationtest/` kill-the-appender test fails over within the budget; metrics documented in `docs/observability.md`; runbook updated. |
 | 5. AWS rerun | 500k, 750k and 1M random clients, no partition affinity, with the production CP (X1/X3/X4 numbers re-measured at that load). | Report in `docs/` with commit rate, commit latency p50/p99, tail-query rate, DynamoDB WRU, failover penalty and cost per GiB; the stage-5 results decide whether the S3 index (TODO) is scheduled. |
 
 ### Stage 2 status
@@ -203,11 +203,11 @@ slot number, and trimming must leave tombstones. Not wired into `cmd/manicp` (st
 ### Stage 4 status
 
 Done. `manicp -store dynamolog` (`cmd/manicp/logstore.go`, flags in `docs/log-cp-service.md`) wires `cp/logcp` to the real DynamoDB client,
-`internal/sys/s3store` checkpoints and Pebble; `-store mem|dynamo` are unchanged (rollback). `manibroker -cp-url a,b` takes the URL list
+`internal/system/s3store` checkpoints and Pebble; `-store mem|dynamo` are unchanged (rollback). `manibroker -cp-url a,b` takes the URL list
 (cpclient: sticky to the last good URL, next URL on a connect error or 503, each once per call; tests for dead URL, standby and
 failback). Tests: `cmd/manicp` runs three nodes in-process over fakedb and an in-memory object store, kills the appender while three
 clients commit through a URL list, and checks every acked range is stored once with contiguous offsets on both survivors;
-restart from a final checkpoint; startup errors. `test/it/TestKillTheAppenderMidProduce`: three logcp nodes over real HTTP, two brokers,
+restart from a final checkpoint; startup errors. `test/integrationtest/TestKillTheAppenderMidProduce`: three logcp nodes over real HTTP, two brokers,
 franz-go produce with idempotence off (decisions 41-44), the active node is crashed mid-stream, acks resume about 2 s later
 (takeover 1.5 s), the standby is active, every acked record is stored once at its acked offset, the survivors' state hashes are equal
 (race-clean, repeated). Terraform: log store default, `cp_standby_count` (1), `cp_takeover_after`, `cp_store` (`dynamo` brings back
@@ -223,7 +223,7 @@ the old transaction store needs `-max-segment-partitions 96` (documented in `int
 the runbook; `ops/deploy/aws/terraform` defaults `broker_extra_args` to it because it still runs `manicp -store dynamo`), and
 refuses a wider segment with `ErrTooLarge` and no write (tested at 4096 partitions in `cp/dynamo`). The broker does not
 learn the limit from the CP: that needs a new endpoint and a contract field, and the CP URL list of stage 4 is the better
-place. `internal/verify/sim/engines/logengine` is the sim log CP (`docs/sim-log-engine.md`); `manisim -scenario kafka-log` runs the whole
+place. `internal/verify/simulator/fakeservices/fakelogservice` is the sim log CP (`docs/sim-log-engine.md`); `manisim -scenario kafka-log` runs the whole
 system on it; four mutants are caught; C2 conformance against veritas passes. The sim's SegmentCaps invariant now uses the
 store's item limit (none for the log store) instead of the constant 100.
 
@@ -237,7 +237,7 @@ seed (same step count, rand calls and trace hash, 0 failing in both):
 | 300 seeds | 0 failing, 5,828,573 steps | identical hash for every seed |
 | 2000 seeds | 0 failing, 40,495,135 steps | identical hash for every seed |
 
-The cap change is exercised by wide workloads instead (`internal/verify/sim/kafka` tests): 128 producers over 256 partitions commit a
+The cap change is exercised by wide workloads instead (`internal/verify/simulator/kafka` tests): 128 producers over 256 partitions commit a
 100-partition segment on the log store (the old store allows at most 96 and would refuse 101 items), and
 `TestCapChangeIsExplainedBySealReasons` shows the only difference at the broker: with the veritas CP and no item limit, 2
 of 265 segments sealed by the 96-partition rule at cap 96 and none at 4096 (they run on to the timer). The new preset

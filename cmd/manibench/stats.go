@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-const mib = 1048576.0
+const bytesPerMebibyte = 1048576.0
 
-// stats aggregates produce results across all clients. Safe for concurrent use.
-type stats struct {
+// latencyStats aggregates produce results across all clients. Safe for concurrent use.
+type latencyStats struct {
 	mu sync.Mutex
 
 	// current interval
@@ -29,12 +29,12 @@ type stats struct {
 	errFirst []string
 }
 
-func newStats() *stats { return &stats{errSeen: map[string]bool{}} }
+func newLatencyStats() *latencyStats { return &latencyStats{errSeen: map[string]bool{}} }
 
 const maxDistinctErrs = 5
 
 // add records one finished record. err != nil counts an error and no latency.
-func (s *stats) add(size int, lat time.Duration, err error) {
+func (s *latencyStats) add(size int, lat time.Duration, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err != nil {
@@ -68,7 +68,7 @@ type interval struct {
 }
 
 // takeInterval returns and resets the interval accumulators.
-func (s *stats) takeInterval() interval {
+func (s *latencyStats) takeInterval() interval {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	iv := interval{N: s.iN, Bytes: s.iBytes, Min: s.iMin, Max: s.iMax}
@@ -90,7 +90,7 @@ func formatInterval(iv interval, elapsed time.Duration, buffered int64) string {
 		secs = 1
 	}
 	return fmt.Sprintf("%d records sent (%.2f MiB), %.2f records/sec (%.2f MiB/sec), %v min latency, %v avg latency, %v max latency, %d buffered records.",
-		iv.N, float64(iv.Bytes)/mib, float64(iv.N)/secs, float64(iv.Bytes)/mib/secs,
+		iv.N, float64(iv.Bytes)/bytesPerMebibyte, float64(iv.N)/secs, float64(iv.Bytes)/bytesPerMebibyte/secs,
 		rd(iv.Min), rd(iv.Avg), rd(iv.Max), buffered)
 }
 
@@ -105,8 +105,8 @@ type summary struct {
 	FirstErrors   []string
 }
 
-// pct returns the nearest-rank percentile of sorted.
-func pct(sorted []time.Duration, p float64) time.Duration {
+// percent returns the nearest-rank percentile of sorted.
+func percent(sorted []time.Duration, p float64) time.Duration {
 	if len(sorted) == 0 {
 		return 0
 	}
@@ -114,7 +114,7 @@ func pct(sorted []time.Duration, p float64) time.Duration {
 	return sorted[min(i, len(sorted)-1)]
 }
 
-func (s *stats) summarize(elapsed time.Duration) summary {
+func (s *latencyStats) summarize(elapsed time.Duration) summary {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sorted := append([]time.Duration(nil), s.lat...)
@@ -128,7 +128,7 @@ func (s *stats) summarize(elapsed time.Duration) summary {
 		}
 		sm.Min, sm.Max = sorted[0], sorted[len(sorted)-1]
 		sm.Avg = sum / time.Duration(len(sorted))
-		sm.P50, sm.P90, sm.P99 = pct(sorted, 50), pct(sorted, 90), pct(sorted, 99)
+		sm.P50, sm.P90, sm.P99 = percent(sorted, 50), percent(sorted, 90), percent(sorted, 99)
 	}
 	return sm
 }
@@ -140,7 +140,7 @@ func formatSummary(sm summary) string {
 	}
 	var out strings.Builder
 	fmt.Fprintf(&out, "SUMMARY: %d records (%.2f MiB) in %v, %.2f records/sec (%.2f MiB/sec)\n",
-		sm.N, float64(sm.Bytes)/mib, sm.Elapsed.Round(time.Millisecond), float64(sm.N)/secs, float64(sm.Bytes)/mib/secs)
+		sm.N, float64(sm.Bytes)/bytesPerMebibyte, sm.Elapsed.Round(time.Millisecond), float64(sm.N)/secs, float64(sm.Bytes)/bytesPerMebibyte/secs)
 	fmt.Fprintf(&out, "latency: min %v avg %v p50 %v p90 %v p99 %v max %v\n",
 		rd(sm.Min), rd(sm.Avg), rd(sm.P50), rd(sm.P90), rd(sm.P99), rd(sm.Max))
 	fmt.Fprintf(&out, "produce errors: %d\n", sm.Errors)

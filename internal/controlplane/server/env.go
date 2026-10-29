@@ -6,29 +6,29 @@ import (
 	"manifester/internal/core"
 )
 
-type wallClock struct{}
+type realClock struct{}
 
-func (wallClock) Mono() core.Time {
-	return core.Time(time.Now().UnixNano())
+func (realClock) Mono() core.NodeTime {
+	return core.NodeTime(time.Now().UnixNano())
 }
-func (wallClock) Wall() core.WallTime {
-	return core.WallTime(time.Now().UnixNano())
+func (realClock) Wall() core.RealTime {
+	return core.RealTime(time.Now().UnixNano())
 }
 
-// prodEnv is a minimal core.Env for production manicp (no buggify).
-type prodEnv struct{ n uint64 }
+// productionEnvironment is a minimal core.Environment for production manicp (no buggify).
+type productionEnvironment struct{ n uint64 }
 
-func (e *prodEnv) Uint64() uint64 {
+func (e *productionEnvironment) Uint64() uint64 {
 	e.n++
 	return e.n
 }
-func (e *prodEnv) Intn(n int) int {
+func (e *productionEnvironment) Intn(n int) int {
 	if n <= 0 {
 		return 0
 	}
 	return int(e.Uint64() % uint64(n))
 }
-func (e *prodEnv) NewID() core.ID {
+func (e *productionEnvironment) NewID() core.ID {
 	var id core.ID
 	u := e.Uint64()
 	for i := range id {
@@ -36,11 +36,11 @@ func (e *prodEnv) NewID() core.ID {
 	}
 	return id
 }
-func (prodEnv) Maybe(core.Site) bool                                { return false }
-func (prodEnv) MaybeP(core.Site, float64) bool                      { return false }
-func (prodEnv) Fault(core.Site, float64) bool                       { return false }
-func (prodEnv) Always(bool, core.Prop, ...core.Detail)              {}
-func (prodEnv) AlwaysOrUnreachable(bool, core.Prop, ...core.Detail) {}
-func (prodEnv) Sometimes(bool, core.Prop)                           {}
-func (prodEnv) Reachable(core.Prop)                                 {}
-func (prodEnv) Unreachable(core.Prop, ...core.Detail)               {}
+func (productionEnvironment) Maybe(core.FaultPointID) bool                                   { return false }
+func (productionEnvironment) MaybeP(core.FaultPointID, float64) bool                         { return false }
+func (productionEnvironment) Fault(core.FaultPointID, float64) bool                          { return false }
+func (productionEnvironment) Always(bool, core.PropertyID, ...core.ContextPair)              {}
+func (productionEnvironment) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
+func (productionEnvironment) Sometimes(bool, core.PropertyID)                                {}
+func (productionEnvironment) Reachable(core.PropertyID)                                      {}
+func (productionEnvironment) Unreachable(core.PropertyID, ...core.ContextPair)               {}

@@ -8,5 +8,5 @@
 //
 // Helpers under this tree (memstore, applier, exec) support tests and the
 // machine's fold and IO. Not deterministic (goroutines, net): it is not
-// checked by ops/tools/detcheck.
+// checked by ops/tools/determinismcheck.
 package controlplane

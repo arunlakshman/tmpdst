@@ -1,11 +1,11 @@
 package core
 
-// ControlFirst is the InboxPolicy of decision G/H: control always wins, data
+// ControlFirstPicker is the InboxPicker of decision G/H: control always wins, data
 // only when control is empty. Stateless, so one value serves any number of nodes.
-type ControlFirst struct{}
+type ControlFirstPicker struct{}
 
 // Next pops from control if it is non-empty, otherwise from data.
-func (ControlFirst) Next(control, data Queue) (EventBody, bool) {
+func (ControlFirstPicker) Next(control, data Inbox) (EventData, bool) {
 	if control.Len() > 0 {
 		if b, ok := control.Pop(); ok {
 			return b, true
@@ -17,4 +17,4 @@ func (ControlFirst) Next(control, data Queue) (EventBody, bool) {
 	return nil, false
 }
 
-var _ InboxPolicy = ControlFirst{}
+var _ InboxPicker = ControlFirstPicker{}

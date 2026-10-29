@@ -4,34 +4,34 @@ import (
 	"manifester/internal/core"
 )
 
-// hasher is FNV-1a; hash/fnv is off the deterministic allow-list.
-type hasher uint64
+// stateHasher is FNV-1a; hash/fnv is off the deterministic allow-list.
+type stateHasher uint64
 
-func newHasher() hasher { return 14695981039346656037 }
+func newStateHasher() stateHasher { return 14695981039346656037 }
 
-func (h *hasher) byte(b byte)  { *h = (*h ^ hasher(b)) * 1099511628211 }
-func (h *hasher) u64(v uint64) { *h = hasher(core.FnvU64(uint64(*h), v)) }
-func (h *hasher) bool(b bool) {
+func (h *stateHasher) byte(b byte)  { *h = (*h ^ stateHasher(b)) * 1099511628211 }
+func (h *stateHasher) u64(v uint64) { *h = stateHasher(core.Fnv64Hash(uint64(*h), v)) }
+func (h *stateHasher) bool(b bool) {
 	if b {
 		h.u64(1)
 	} else {
 		h.u64(0)
 	}
 }
-func (h *hasher) bytes(b []byte) {
+func (h *stateHasher) bytes(b []byte) {
 	h.u64(uint64(len(b)))
 	for _, c := range b {
 		h.byte(c)
 	}
 }
-func (h *hasher) str(s string) {
+func (h *stateHasher) str(s string) {
 	h.u64(uint64(len(s)))
 	for i := 0; i < len(s); i++ {
 		h.byte(s[i])
 	}
 }
 
-func (h *hasher) ref(r core.SegmentRef) {
+func (h *stateHasher) ref(r core.SegmentRef) {
 	h.str(r.Key)
 	h.u64(uint64(r.Off))
 	h.u64(uint64(r.Len))
@@ -39,7 +39,7 @@ func (h *hasher) ref(r core.SegmentRef) {
 
 // StateHash folds everything that influences behaviour, in a fixed order.
 func (b *Broker) StateHash() uint64 {
-	h := newHasher()
+	h := newStateHasher()
 	b.hashScalars(&h)
 	h.topics(b.topics)
 	h.conns(b.conns)
@@ -49,8 +49,8 @@ func (b *Broker) StateHash() uint64 {
 	return uint64(h)
 }
 
-func (b *Broker) hashScalars(h *hasher) {
-	h.u64(uint64(b.cfg.Bug))
+func (b *Broker) hashScalars(h *stateHasher) {
+	h.u64(uint64(b.cfg.InjectedBug))
 	h.bool(b.started)
 	h.u64(uint64(b.nextReq))
 	h.u64(b.nextID)
@@ -62,7 +62,7 @@ func (b *Broker) hashScalars(h *hasher) {
 	h.u64(b.guess)
 }
 
-func (h *hasher) topics(topics []core.TopicInfo) {
+func (h *stateHasher) topics(topics []core.TopicInfo) {
 	h.u64(uint64(len(topics)))
 	for _, t := range topics {
 		h.str(t.Name)
@@ -70,7 +70,7 @@ func (h *hasher) topics(topics []core.TopicInfo) {
 	}
 }
 
-func (h *hasher) openSeg(o openSegment) {
+func (h *stateHasher) openSeg(o openSegment) {
 	h.u64(uint64(o.gen))
 	h.u64(uint64(o.since))
 	h.u64(uint64(o.bytes))
@@ -78,7 +78,7 @@ func (h *hasher) openSeg(o openSegment) {
 	h.batches(o.batches)
 }
 
-func (h *hasher) conns(conns []*conn) {
+func (h *stateHasher) conns(conns []*connection) {
 	h.u64(uint64(len(conns)))
 	for _, c := range conns {
 		h.u64(uint64(c.id))
@@ -100,7 +100,7 @@ func (h *hasher) conns(conns []*conn) {
 	}
 }
 
-func (h *hasher) segs(segs []*segment) {
+func (h *stateHasher) segs(segs []*segment) {
 	h.u64(uint64(len(segs)))
 	for _, s := range segs {
 		h.u64(s.id)
@@ -114,7 +114,7 @@ func (h *hasher) segs(segs []*segment) {
 	}
 }
 
-func (h *hasher) ops(ops []*op) {
+func (h *stateHasher) ops(ops []*operation) {
 	h.u64(uint64(len(ops)))
 	for _, o := range ops {
 		h.u64(o.id)
@@ -146,7 +146,7 @@ func (h *hasher) ops(ops []*op) {
 	}
 }
 
-func (h *hasher) batches(bs []*pbatch) {
+func (h *stateHasher) batches(bs []*partitionBatch) {
 	h.u64(uint64(len(bs)))
 	for _, pb := range bs {
 		h.u64(uint64(pb.s.conn.id))

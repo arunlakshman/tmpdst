@@ -33,9 +33,9 @@ make install-hooks   # uses ambient go / golangci-lint on PATH
 | vet | `go vet ./...` |
 | lint | `golangci-lint run ./...` (see `.golangci.yml`) |
 | compile | `go build ./...` |
-| test | unit packages (not `internal/verify/sim`, not `test/it`) |
-| sim | `go test ./internal/verify/sim/...` |
-| it-hermetic | `go test ./test/it/` (in-process memstore) |
+| test | unit packages (not `internal/verify/simulator`, not `test/integrationtest`) |
+| sim | `go test ./internal/verify/simulator/...` |
+| it-hermetic | `go test ./test/integrationtest/` (in-process memstore) |
 | crap | CRAP score ≤ 20 (`docs/crap-gate.md`) |
 
 Every `git commit` runs that gate via the pre-commit hook (with mise:
@@ -54,10 +54,10 @@ make lint
 make crap-strict
 ```
 
-Docker fullstack tests under `test/it/` skip unless
+Docker fullstack tests under `test/integrationtest/` skip unless
 `MANIFESTER_DYNAMO_ENDPOINT` and `MANIFESTER_S3_ENDPOINT` are set
 (`ops/scripts/it-up.sh`). The import rules for the deterministic packages
-are checked by `go run ./ops/tools/detcheck <packages>`.
+are checked by `go run ./ops/tools/determinismcheck <packages>`.
 
 ## Docs
 

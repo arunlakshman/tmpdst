@@ -16,7 +16,7 @@ func (b *Broker) metadata(s *slot, r *kmsg.MetadataRequest) []core.Action {
 			names = append(names, *t.Topic)
 		}
 	}
-	o := &op{kind: opMeta, s: s, creq: r}
+	o := &operation{kind: opMetadata, s: s, creq: r}
 	if r.Topics != nil {
 		if len(names) == 0 { // nothing to ask: no topics, or only unusable ids
 			b.metaResp(o, nil, errNone)
@@ -29,7 +29,7 @@ func (b *Broker) metadata(s *slot, r *kmsg.MetadataRequest) []core.Action {
 
 // metaResp builds the Metadata response of o from the control plane's topics.
 // A non-zero code (the call failed) marks every requested topic with it.
-func (b *Broker) metaResp(o *op, infos []core.TopicInfo, code kafkaCode) {
+func (b *Broker) metaResp(o *operation, infos []core.TopicInfo, code kafkaErrorCode) {
 	r := o.creq.(*kmsg.MetadataRequest)
 	resp := kmsg.NewPtrMetadataResponse()
 	cluster := "manifester"
@@ -52,7 +52,7 @@ func (b *Broker) metaResp(o *op, infos []core.TopicInfo, code kafkaCode) {
 	o.s.resp = resp
 }
 
-func (b *Broker) metaTopic(name string, infos []core.TopicInfo, code kafkaCode) kmsg.MetadataResponseTopic {
+func (b *Broker) metaTopic(name string, infos []core.TopicInfo, code kafkaErrorCode) kmsg.MetadataResponseTopic {
 	n := name
 	t := kmsg.NewMetadataResponseTopic()
 	t.Topic = &n
@@ -84,7 +84,7 @@ func (b *Broker) listOffsets(s *slot, r *kmsg.ListOffsetsRequest) []core.Action 
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
 			rp := &resp.Topics[i].Partitions[j]
-			acts = append(acts, b.listOne(s, core.TP(t.Topic, p.Partition), p.Timestamp, rp)...)
+			acts = append(acts, b.listOne(s, core.NewTopicPartition(t.Topic, p.Partition), p.Timestamp, rp)...)
 		}
 	}
 	return acts
@@ -112,7 +112,7 @@ func (b *Broker) listOne(s *slot, tp core.TopicPartition, ts int64, rp *kmsg.Lis
 	case ts == -2:
 		rp.Offset = 0
 	case ts == -1:
-		return b.startOp(&op{kind: opList, s: s, tp: tp, lpart: rp})
+		return b.startOp(&operation{kind: opList, s: s, tp: tp, lpart: rp})
 	default:
 		rp.ErrorCode = int16(errUnsupportedForFormat)
 	}

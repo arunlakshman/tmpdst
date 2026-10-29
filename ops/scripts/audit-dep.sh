@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Audit a Go module/package for determinism before the deterministic core
-# (internal/core, internal/verify/sim) may import it. Prints a review report; it does not decide.
+# (internal/core, internal/verify/simulator) may import it. Prints a review report; it does not decide.
 #
 # Usage: scripts/audit-dep.sh <module>[@version] [package-pattern]
 #   scripts/audit-dep.sh github.com/twmb/franz-go/pkg/kmsg@v1.14.0
@@ -32,7 +32,7 @@ version=$(go list -m -f '{{.Version}}' "$mod")
 need_go=$(go mod edit -json | sed -n 's/.*"Go": *"\([^"]*\)".*/\1/p')
 repo_go=$(cd "$repo" && go mod edit -json | sed -n 's/.*"Go": *"\([^"]*\)".*/\1/p')
 toolchain=$(printf '%s\n%s\n' "$need_go" "$repo_go" | sort -V | tail -1)
-(cd "$repo" && GOTOOLCHAIN="go$toolchain+auto" go build -o "$work/detcheck" ./ops/tools/detcheck)
+(cd "$repo" && GOTOOLCHAIN="go$toolchain+auto" go build -o "$work/detcheck" ./ops/tools/determinismcheck)
 export GOTOOLCHAIN="go$toolchain+auto"
 dir=$(go list -m -f '{{.Dir}}' "$mod")
 
@@ -77,5 +77,5 @@ cat <<'CHECK'
 [ ] Encode twice / decode twice gives byte-identical / deeply equal results.
 [ ] Every third-party package listed above has its own audit record.
 [ ] Record written: docs/dep-audits/<module>@<version>.md
-[ ] Exact import path(s) added to ops/tools/detcheck/allow.txt
+[ ] Exact import path(s) added to ops/tools/determinismcheck/allow.txt
 CHECK

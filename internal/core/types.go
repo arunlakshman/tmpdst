@@ -5,13 +5,13 @@ import (
 	"strconv"
 )
 
-// Time is a node-local monotonic instant in nanoseconds. In simulation it
+// NodeTime is a node-local monotonic instant in nanoseconds. In simulation it
 // includes the node's clock skew. Used for deadlines, leases and batch windows.
-type Time int64
+type NodeTime int64
 
-// WallTime is UTC, nanoseconds since the Unix epoch. Used for Kafka
+// RealTime is UTC, nanoseconds since the Unix epoch. Used for Kafka
 // LogAppendTime, credential expiry and anything persisted. Scripted in sim.
-type WallTime int64
+type RealTime int64
 
 // Duration is nanoseconds.
 type Duration int64
@@ -30,28 +30,28 @@ type ID [16]byte
 type (
 	// NodeID names a node.
 	NodeID string // stable identity of a broker (or sim workload)
-	// Incarnation identifies one boot of a node.
-	Incarnation ID // fresh per boot; names one run of a node in logs, facts and the runtime
+	// BootNumber identifies one boot of a node.
+	BootNumber ID // fresh per boot; names one run of a node in logs, facts and the runtime
 	// ConnID names a connection.
 	ConnID uint64 // a connection, as seen by one node
-	// ReqID correlates an Action with its completion Event. Unique within one
+	// RequestID correlates an Action with its completion Event. Unique within one
 	// incarnation only; it must never reach a durable name (object keys come
-	// from Env.NewID()).
-	ReqID uint64
+	// from Environment.NewID()).
+	RequestID uint64
 	// TimerID names a timer.
 	TimerID uint64
-	// TimerGen is a timer generation.
-	TimerGen uint64 // generation: a TimerFired whose Gen is stale is ignored
+	// TimerVersion is a timer generation.
+	TimerVersion uint64 // generation: a TimerFired whose Gen is stale is ignored
 	// Offset is a partition log offset.
 	Offset int64
-	// LogSlot is a position in the replicated command log (loglet).
-	LogSlot int64
+	// LogPosition is a position in the replicated command log (loglet).
+	LogPosition int64
 )
 
-// NodeRef names one specific boot of one node.
-type NodeRef struct {
+// NodeInstance names one specific boot of one node.
+type NodeInstance struct {
 	Node NodeID
-	Inc  Incarnation
+	Inc  BootNumber
 }
 
 // TopicPartition names one partition of a topic.
@@ -60,8 +60,8 @@ type TopicPartition struct {
 	Partition int32
 }
 
-// TP builds a TopicPartition.
-func TP(topic string, partition int32) TopicPartition {
+// NewTopicPartition builds a TopicPartition.
+func NewTopicPartition(topic string, partition int32) TopicPartition {
 	return TopicPartition{Topic: topic, Partition: partition}
 }
 
@@ -81,7 +81,7 @@ type SegmentRef struct {
 //
 // ErrNotFound and ErrConflict are always truthful; engines inject
 // only ErrTimeout, ErrUnavailable, ErrIO and ErrConnClosed. ErrCorrupt comes
-// only from the core's decoder, never from sys.Classifier.
+// only from the core's decoder, never from sys.ErrorClassifier.
 type ErrCode uint16
 
 // ErrCode values.

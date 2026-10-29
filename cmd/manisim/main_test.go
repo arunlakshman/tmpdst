@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"manifester/internal/core"
-	"manifester/internal/verify/sim"
+	"manifester/internal/verify/simulator"
 )
 
 func TestRunEchoCampaign(t *testing.T) {
@@ -55,24 +55,24 @@ func TestRunBadArgs(t *testing.T) {
 }
 
 func TestKind(t *testing.T) {
-	for k, want := range kindNames {
+	for k, want := range failureKindNames {
 		if kind(k) != want {
 			t.Errorf("kind(%v)", k)
 		}
 	}
-	if kind(sim.FailKind(99)) != "kind(99)" {
-		t.Fatal(kind(sim.FailKind(99)))
+	if kind(simulator.FailKind(99)) != "kind(99)" {
+		t.Fatal(kind(simulator.FailKind(99)))
 	}
 }
 
 func TestPrintAndVerdict(t *testing.T) {
-	rep := sim.Report{
-		Seeds: []sim.SeedResult{
-			{Seed: 4, Steps: 10, Failures: []sim.Failure{{Kind: sim.FailPanic, Prop: "p", Step: 3, Msg: "boom"}}},
+	rep := simulator.Report{
+		Seeds: []simulator.SeedResult{
+			{Seed: 4, Steps: 10, Failures: []simulator.Failure{{Kind: simulator.FailPanic, Prop: "p", Step: 3, Msg: "boom"}}},
 			{Seed: 5, Steps: 7},
 		},
-		Always:         []sim.AssertionStat{{Prop: "inv", FirstSeed: 4, FirstStep: 3, Seeds: []uint64{4}}},
-		Coverage:       []sim.AssertionStat{{Prop: "cov", Kind: "sometimes"}},
+		Always:         []simulator.AssertionStat{{Prop: "inv", FirstSeed: 4, FirstStep: 3, Seeds: []uint64{4}}},
+		Coverage:       []simulator.AssertionStat{{Prop: "cov", Kind: "sometimes"}},
 		Nondeterminism: []uint64{9},
 	}
 	var out bytes.Buffer
@@ -86,10 +86,10 @@ func TestPrintAndVerdict(t *testing.T) {
 			t.Errorf("missing %q in\n%s", want, out.String())
 		}
 	}
-	if !failed(rep, 1) || failed(sim.Report{}, 0) {
+	if !failed(rep, 1) || failed(simulator.Report{}, 0) {
 		t.Fatal("verdict")
 	}
-	cov := sim.Report{Coverage: rep.Coverage, Seeds: make([]sim.SeedResult, coverageMin)}
+	cov := simulator.Report{Coverage: rep.Coverage, Seeds: make([]simulator.SeedResult, minimumCoverage)}
 	if !failed(cov, 0) {
 		t.Fatal("coverage gap in a big campaign must fail")
 	}
@@ -100,23 +100,23 @@ func TestPrintAndVerdict(t *testing.T) {
 }
 
 func TestMergeReports(t *testing.T) {
-	a := sim.Report{
-		Seeds: []sim.SeedResult{{Seed: 1}},
-		Assertions: []sim.AssertionStat{
-			{Prop: core.Prop("inv"), Kind: "always", Checks: 3, Passes: 3},
-			{Prop: core.Prop("cov"), Kind: "sometimes", Checks: 2, Passes: 0},
+	a := simulator.Report{
+		Seeds: []simulator.SeedResult{{Seed: 1}},
+		Assertions: []simulator.AssertionStat{
+			{Prop: core.PropertyID("inv"), Kind: "always", Checks: 3, Passes: 3},
+			{Prop: core.PropertyID("cov"), Kind: "sometimes", Checks: 2, Passes: 0},
 		},
 	}
-	b := sim.Report{
-		Seeds:          []sim.SeedResult{{Seed: 2}},
+	b := simulator.Report{
+		Seeds:          []simulator.SeedResult{{Seed: 2}},
 		Nondeterminism: []uint64{2},
-		Assertions: []sim.AssertionStat{
-			{Prop: core.Prop("inv"), Kind: "always", Checks: 2, Passes: 1, Seeds: []uint64{2}, FirstSeed: 2, FirstStep: 8},
-			{Prop: core.Prop("cov"), Kind: "sometimes", Checks: 1, Passes: 1, Seeds: []uint64{2}, FirstSeed: 2, FirstStep: 1},
-			{Prop: core.Prop("never"), Kind: "unreachable", Checks: 1, Passes: 1},
+		Assertions: []simulator.AssertionStat{
+			{Prop: core.PropertyID("inv"), Kind: "always", Checks: 2, Passes: 1, Seeds: []uint64{2}, FirstSeed: 2, FirstStep: 8},
+			{Prop: core.PropertyID("cov"), Kind: "sometimes", Checks: 1, Passes: 1, Seeds: []uint64{2}, FirstSeed: 2, FirstStep: 1},
+			{Prop: core.PropertyID("never"), Kind: "unreachable", Checks: 1, Passes: 1},
 		},
 	}
-	got := mergeReports([]sim.Report{a, b})
+	got := combineReports([]simulator.Report{a, b})
 	if len(got.Seeds) != 2 || len(got.Nondeterminism) != 1 || len(got.Assertions) != 3 {
 		t.Fatalf("%+v", got)
 	}
@@ -128,7 +128,7 @@ func TestMergeReports(t *testing.T) {
 		t.Fatalf("always %+v coverage %+v", got.Always, got.Coverage)
 	}
 	// coverage: sometimes with no seeds anywhere
-	c := mergeReports([]sim.Report{{Assertions: []sim.AssertionStat{{Prop: "x", Kind: "sometimes"}}}})
+	c := combineReports([]simulator.Report{{Assertions: []simulator.AssertionStat{{Prop: "x", Kind: "sometimes"}}}})
 	if len(c.Coverage) != 1 || len(c.Always) != 0 {
 		t.Fatalf("%+v", c)
 	}
@@ -136,11 +136,11 @@ func TestMergeReports(t *testing.T) {
 
 func TestRunSharded(t *testing.T) {
 	cfg, _ := scenarioConfig("echo")
-	rep, err := runSharded(cfg, []uint64{1, 2, 3, 4, 5}, 3)
+	rep, err := runInParts(cfg, []uint64{1, 2, 3, 4, 5}, 3)
 	if err != nil || len(rep.Seeds) != 5 {
 		t.Fatal(len(rep.Seeds), err)
 	}
-	one, err := runSharded(cfg, []uint64{1, 2}, 1)
+	one, err := runInParts(cfg, []uint64{1, 2}, 1)
 	if err != nil || len(one.Seeds) != 2 {
 		t.Fatal(err)
 	}

@@ -14,10 +14,10 @@ const (
 	fnvP8 = (fnvP7 * 1099511628211) % (1 << 64)
 )
 
-// FnvU64 folds v as 8 little-endian FNV-1a bytes into x. A zero byte only
+// Fnv64Hash folds v as 8 little-endian FNV-1a bytes into x. A zero byte only
 // multiplies, so leading zero bytes collapse into one multiply by fnvP^k:
 // same value, ~4x fewer dependent multiplies for the small integers that dominate.
-func FnvU64(x, v uint64) uint64 {
+func Fnv64Hash(x, v uint64) uint64 {
 	n := (bits.Len64(v) + 7) / 8
 	for range n {
 		x = (x ^ (v & 0xff)) * fnvP1
@@ -64,7 +64,7 @@ func (h Hasher) Sum() uint64 { return uint64(h) }
 func (h *Hasher) Byte(b byte) { *h = (*h ^ Hasher(b)) * fnvPrime }
 
 // U64 folds v as 8 little-endian bytes.
-func (h *Hasher) U64(v uint64) { *h = Hasher(FnvU64(uint64(*h), v)) }
+func (h *Hasher) U64(v uint64) { *h = Hasher(Fnv64Hash(uint64(*h), v)) }
 
 // I64 folds v as U64 does.
 func (h *Hasher) I64(v int64) { h.U64(uint64(v)) }

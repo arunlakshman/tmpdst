@@ -4,7 +4,7 @@ Status at 2026-10-22. This page lists what a Kafka client can and cannot do on t
 
 ## What works today
 
-The broker serves five Kafka APIs. `kwire.Supported` in `internal/wire/kwire/supported.go` is the source.
+The broker serves five Kafka APIs. `kwire.Supported` in `internal/wire/kafkawire/supported.go` is the source.
 
 | API | Key | Versions |
 |---|---|---|
@@ -138,7 +138,7 @@ Each step has a number to move. Lookup rate per idle consumer for step 1 and 2. 
 
 ## Sources
 
-- `internal/wire/kwire/supported.go` for the API list and versions.
+- `internal/wire/kafkawire/supported.go` for the API list and versions.
 - `internal/broker/fetch.go`, `internal/broker/ops.go`, `internal/broker/metadata.go`, and `internal/broker/conn.go` for the read path as built.
 - `internal/core/controlplane.go` for the three control plane operations.
 - `docs/surprises-audit.md` items S3, S5, S6, and S13 for measured rates.

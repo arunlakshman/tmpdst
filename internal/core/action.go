@@ -1,19 +1,19 @@
 package core
 
 // Action is output of Step: a request for the outside world to do something.
-// Every I/O action carries a ReqID; its result returns as a completion event.
+// Every I/O action carries a RequestID; its result returns as a completion event.
 //
 // Actions in one slice start in slice order; I/O among them may complete in
 // any order.
 type Action interface{ isAction() }
 
-// IOAction is an Action the outside world executes and answers with exactly one
-// Completion carrying the same ReqID. A live incarnation always gets that
+// IOCall is an Action the outside world executes and answers with exactly one
+// IOResult carrying the same RequestID. A live incarnation always gets that
 // completion: a lost response surfaces as ErrTimeout+MaybeApplied, never as
-// silence. Completions addressed to a dead incarnation are dropped.
-type IOAction interface {
+// silence. IOResults addressed to a dead incarnation are dropped.
+type IOCall interface {
 	Action
-	ReqID() ReqID
+	RequestID() RequestID
 }
 
 // ---- timers ----
@@ -21,7 +21,7 @@ type IOAction interface {
 // SetTimer asks for TimerFired{ID, Gen} after the given duration of node-local time.
 type SetTimer struct {
 	ID    TimerID
-	Gen   TimerGen
+	Gen   TimerVersion
 	After Duration
 }
 
@@ -32,7 +32,7 @@ type CancelTimer struct{ ID TimerID }
 
 // Send writes bytes to a connection, in order with earlier Sends on it.
 type Send struct {
-	Req  ReqID
+	Req  RequestID
 	Conn ConnID
 	Data []byte
 }
@@ -52,169 +52,169 @@ type PauseReads struct{ Conn ConnID }
 // ResumeReads undoes PauseReads.
 type ResumeReads struct{ Conn ConnID }
 
-// Dial opens an outbound connection (used by sim workloads; brokers reach the
-// control plane through CPCall, not raw dials).
-type Dial struct {
-	Req  ReqID
+// Connect opens an outbound connection (used by sim workloads; brokers reach the
+// control plane through ControlPlaneCall, not raw dials).
+type Connect struct {
+	Req  RequestID
 	Addr string
 }
 
 // ---- object store ----
 
-// ObjPut uploads Data under Key.
-type ObjPut struct {
-	Req  ReqID
+// ObjectPut uploads Data under Key.
+type ObjectPut struct {
+	Req  RequestID
 	Key  string // unique per upload, so a MaybeApplied PUT is safe to retry
 	Data []byte
 }
 
-// ObjGet reads the byte range Ref.
-type ObjGet struct {
-	Req ReqID
+// ObjectGet reads the byte range Ref.
+type ObjectGet struct {
+	Req RequestID
 	Ref SegmentRef
 }
 
-// ObjDelete removes the object at Key.
-type ObjDelete struct {
-	Req ReqID
+// ObjectDelete removes the object at Key.
+type ObjectDelete struct {
+	Req RequestID
 	Key string
 }
 
-// ObjList lists the keys under Prefix.
-type ObjList struct {
-	Req    ReqID
+// ObjectList lists the keys under Prefix.
+type ObjectList struct {
+	Req    RequestID
 	Prefix string
 }
 
 // ---- control plane (gRPC wire contract: controlplane/api/v1) ----
 
-// CPCall asks the executor to perform one control-plane RPC. The wire contract
+// ControlPlaneCall asks the executor to perform one control-plane RPC. The wire contract
 // is controlplane/api/v1 (decision 57). Op is the in-process vocabulary brokers
 // and sim use today; controlplane/apiconv maps Op to generated request
 // messages. Typed *Request fields stay off this struct until the gRPC cutover:
 // importing the generated package would pull grpc into core's dep closure and
 // fail the determinism audit.
-type CPCall struct {
-	Req ReqID
-	Op  CPOp
+type ControlPlaneCall struct {
+	Req RequestID
+	Op  ControlPlaneOperation
 }
 
 // ---- shared command log (Dynamo loglet; engine lands in a later PR) ----
 
-// CPReply asks the sim CP bridge to deliver Done to To (the broker that
-// issued the matching CPCall). Production uses gRPC waiters instead.
-type CPReply struct {
-	To   NodeRef
-	Done CPDone
+// ControlPlaneReply asks the sim CP bridge to deliver Done to To (the broker that
+// issued the matching ControlPlaneCall). Production uses gRPC waiters instead.
+type ControlPlaneReply struct {
+	To   NodeInstance
+	Done ControlPlaneDone
 }
 
 // LogAppend is an if-absent put of Data at Slot.
 type LogAppend struct {
-	Req  ReqID
-	Slot LogSlot
+	Req  RequestID
+	Slot LogPosition
 	Data []byte
 }
 
 // LogRead reads up to Limit entries at or after From, in slot order.
 type LogRead struct {
-	Req   ReqID
-	From  LogSlot
+	Req   RequestID
+	From  LogPosition
 	Limit int32
 }
 
-// LogCheckTail reports the highest contiguous written slot plus one (the tail).
-type LogCheckTail struct{ Req ReqID }
+// LogGetEnd reports the highest contiguous written slot plus one (the tail).
+type LogGetEnd struct{ Req RequestID }
 
-// LogTrim tombstones every slot at or below Through. Trimmed slots must not be
+// LogDeleteOld tombstones every slot at or below Through. Trimmed slots must not be
 // rewritten.
-type LogTrim struct {
-	Req     ReqID
-	Through LogSlot
+type LogDeleteOld struct {
+	Req     RequestID
+	Through LogPosition
 }
 
 // ---- lifecycle ----
 
-// Trip asks the runtime to kill this incarnation: the machine's memory can no
+// StopForRestart asks the runtime to kill this incarnation: the machine's memory can no
 // longer be trusted. It is the last action of its Step; the runtime starts the
 // actions before it, then stops. Sim: same path as a crash, counted separately
-// as a trip. Prod: the loop returns ErrTripped and the process exits for its
+// as a trip. Prod: the loop returns ErrStoppedForRestart and the process exits for its
 // supervisor to restart.
-type Trip struct{ Cause string }
+type StopForRestart struct{ Cause string }
 
-// Exit is the last action of a graceful shutdown (see Stop). Like Trip it ends
+// ShutdownDone is the last action of a graceful shutdown (see StopRequest). Like StopForRestart it ends
 // the incarnation, but it is not a fault: the sim counts it as a graceful stop.
-type Exit struct{}
+type ShutdownDone struct{}
 
 // ---- observability ----
 
-// Emit appends a fact to the timeline (sim: invariants read it; prod: tracing).
-type Emit struct{ Fact Fact }
+// RecordFact appends a fact to the timeline (sim: invariants read it; prod: tracing).
+type RecordFact struct{ Fact Fact }
 
-func (SetTimer) isAction()     {}
-func (CancelTimer) isAction()  {}
-func (Send) isAction()         {}
-func (CloseConn) isAction()    {}
-func (PauseReads) isAction()   {}
-func (ResumeReads) isAction()  {}
-func (Dial) isAction()         {}
-func (ObjPut) isAction()       {}
-func (ObjGet) isAction()       {}
-func (ObjDelete) isAction()    {}
-func (ObjList) isAction()      {}
-func (CPCall) isAction()       {}
-func (CPReply) isAction()      {}
-func (LogAppend) isAction()    {}
-func (LogRead) isAction()      {}
-func (LogCheckTail) isAction() {}
-func (LogTrim) isAction()      {}
-func (Emit) isAction()         {}
-func (Trip) isAction()         {}
-func (Exit) isAction()         {}
+func (SetTimer) isAction()          {}
+func (CancelTimer) isAction()       {}
+func (Send) isAction()              {}
+func (CloseConn) isAction()         {}
+func (PauseReads) isAction()        {}
+func (ResumeReads) isAction()       {}
+func (Connect) isAction()           {}
+func (ObjectPut) isAction()         {}
+func (ObjectGet) isAction()         {}
+func (ObjectDelete) isAction()      {}
+func (ObjectList) isAction()        {}
+func (ControlPlaneCall) isAction()  {}
+func (ControlPlaneReply) isAction() {}
+func (LogAppend) isAction()         {}
+func (LogRead) isAction()           {}
+func (LogGetEnd) isAction()         {}
+func (LogDeleteOld) isAction()      {}
+func (RecordFact) isAction()        {}
+func (StopForRestart) isAction()    {}
+func (ShutdownDone) isAction()      {}
 
-// ReqID returns the request this action carries.
-func (a Send) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a Send) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a Dial) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a Connect) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a ObjPut) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a ObjectPut) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a ObjGet) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a ObjectGet) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a ObjDelete) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a ObjectDelete) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a ObjList) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a ObjectList) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a CPCall) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a ControlPlaneCall) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a LogAppend) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a LogAppend) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a LogRead) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a LogRead) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a LogCheckTail) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a LogGetEnd) RequestID() RequestID { return a.Req }
 
-// ReqID returns the request this action carries.
-func (a LogTrim) ReqID() ReqID { return a.Req }
+// RequestID returns the request this action carries.
+func (a LogDeleteOld) RequestID() RequestID { return a.Req }
 
-//nolint:dupl // compile-time IOAction assertions; parallel list lives on Completions
+//nolint:dupl // compile-time IOCall assertions; parallel list lives on IOResults
 var (
-	_ IOAction = Send{}
-	_ IOAction = Dial{}
-	_ IOAction = ObjPut{}
-	_ IOAction = ObjGet{}
-	_ IOAction = ObjDelete{}
-	_ IOAction = ObjList{}
-	_ IOAction = CPCall{}
-	_ IOAction = LogAppend{}
-	_ IOAction = LogRead{}
-	_ IOAction = LogCheckTail{}
-	_ IOAction = LogTrim{}
+	_ IOCall = Send{}
+	_ IOCall = Connect{}
+	_ IOCall = ObjectPut{}
+	_ IOCall = ObjectGet{}
+	_ IOCall = ObjectDelete{}
+	_ IOCall = ObjectList{}
+	_ IOCall = ControlPlaneCall{}
+	_ IOCall = LogAppend{}
+	_ IOCall = LogRead{}
+	_ IOCall = LogGetEnd{}
+	_ IOCall = LogDeleteOld{}
 )

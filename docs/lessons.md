@@ -79,7 +79,7 @@ refreshed. Learning the new epoch is an explicit step.
 Fencing is done by the **epoch**, not the incarnation (decision 34). Every
 boot registers and gets a strictly larger epoch, so an old incarnation always
 holds a stale epoch and the control plane only compares epochs. The
-incarnation makes names unique (segment keys, `NodeRef`) and lets the
+incarnation makes names unique (segment keys, `NodeInstance`) and lets the
 simulator drop completions addressed to a dead boot; it is never compared by
 the control plane.
 

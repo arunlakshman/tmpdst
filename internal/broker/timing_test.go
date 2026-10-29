@@ -21,7 +21,7 @@ func TestSegmentTimingFacts(t *testing.T) {
 	h.holdPut = true
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.send(c, verProduce, prodReq(-1, e("t", 1, plain(t, "b"))))
-	h.now += core.Time(40 * core.Millisecond) // the PUTs take a while
+	h.now += core.NodeTime(40 * core.Millisecond) // the PUTs take a while
 	h.holdPut = false
 	h.releaseHeld()
 	produced(h.next(c))
@@ -55,10 +55,10 @@ func TestPutDoneCountsAttempts(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	failed := false
-	h.objHook = func(a core.IOAction, run func() core.Completion) core.Completion {
-		if p, ok := a.(core.ObjPut); ok && !failed {
+	h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
+		if p, ok := a.(core.ObjectPut); ok && !failed {
 			failed = true
-			return core.ObjPutDone{Req: p.Req, Err: core.ErrUnavailable}
+			return core.ObjectPutDone{Req: p.Req, Err: core.ErrUnavailable}
 		}
 		return run()
 	}
@@ -83,7 +83,7 @@ func TestBackpressureFacts(t *testing.T) {
 	h.holdCP = true
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.flush()
-	h.now += core.Time(30 * core.Millisecond)
+	h.now += core.NodeTime(30 * core.Millisecond)
 	h.holdCP = false
 	h.releaseHeld()
 	produced(h.next(c))

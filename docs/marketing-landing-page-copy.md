@@ -1,15 +1,15 @@
 # Manifester landing page copy
 
 Checked against the repo on 2026-10-21 and the live page at manifester.io.
-Claims use `docs/w4-log-store-results.md`, `docs/decisions.md`, `docs/TODO.md`, and `internal/wire/kwire/supported.go`.
+Claims use `docs/w4-log-store-results.md`, `docs/decisions.md`, `docs/TODO.md`, and `internal/wire/kafkawire/supported.go`.
 
 ## Read this first. Claims audit of the current page
 
 | Current claim | Verdict | Why |
 |---|---|---|
 | Apache 2.0, open source, run it in your own account | Remove today | The repo has no root LICENSE and no root README. `docs/roadmap-from-warpstream-teardown.md` lists both as blockers before any open source announcement. Put this back when the licence file lands. |
-| Your existing Kafka clients, connectors and tooling just work | Soften | `internal/wire/kwire/supported.go` serves 5 APIs. Produce, Fetch, ListOffsets, Metadata, and ApiVersions. There are no consumer groups, no transactions, and no Kafka admin APIs. Producers work. Most connectors need consumer groups. |
-| Clients put their AZ in their client ID, brokers route by zone | Remove today | No zone routing exists in `internal/broker/` or `internal/sys/prod/`. Metadata lists only the broker that answered. That work sits in `docs/TODO.md` under broker membership. |
+| Your existing Kafka clients, connectors and tooling just work | Soften | `internal/wire/kafkawire/supported.go` serves 5 APIs. Produce, Fetch, ListOffsets, Metadata, and ApiVersions. There are no consumer groups, no transactions, and no Kafka admin APIs. Producers work. Most connectors need consumer groups. |
+| Clients put their AZ in their client ID, brokers route by zone | Remove today | No zone routing exists in `internal/broker/` or `internal/system/production/`. Metadata lists only the broker that answered. That work sits in `docs/TODO.md` under broker membership. |
 | Keep days or weeks of retention | Soften | Nothing deletes data yet, and ListOffsets earliest is always 0. Retention and garbage collection are roadmap items. Say storage is cheap. Do not promise a retention feature. |
 | No broker limits | Remove | Every system has limits. The segment caps and the control plane commit rate are documented limits. |
 | Cross-AZ $17,300 a month to $0, retention $14,500 to $1,400 | Keep, with a label | These are model numbers at 100 MB/s, not measured bills. Label the section as a worked example and state the inputs under the table. |

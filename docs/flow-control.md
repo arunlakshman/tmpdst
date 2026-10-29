@@ -46,7 +46,7 @@ The broker never drops a request it has already accepted.
 
 ### How the priority is deterministic and simulation-tested
 
-1. **The policy is a pure function, `core.InboxPolicy.Next(ctrl, data)`, shared
+1. **The policy is a pure function, `core.InboxPicker.Next(ctrl, data)`, shared
    by production and the simulator.** Go's `select` never decides priority,
    because it picks randomly among ready cases. Production reads the control
    queue first without blocking and uses `select` only to sleep when both
@@ -135,7 +135,7 @@ Rules:
 
 ## 3. Two inboxes per node
 
-### 3.1 Classification (a fixed table in `core`: `core.ClassOf(EventBody) Class`)
+### 3.1 Classification (a fixed table in `core`: `core.InboxKindOf(EventData) InboxKind`)
 
 | Event            | Queue       | Why |
 |------------------|-------------|-----|
@@ -192,7 +192,7 @@ Properties:
   differently; correctness must not depend on that interleaving (the simulator
   checks this, §4).
 - **Deterministic given the queue contents.** The policy is a pure function
-  (`core.InboxPolicy`), with no Go `select` deciding priority. In Go, `select`
+  (`core.InboxPicker`), with no Go `select` deciding priority. In Go, `select`
   picks randomly among ready cases, so the production loop drains control with
   non-blocking receives first and only uses a two-way `select` to *sleep* when
   both queues are empty.
@@ -225,13 +225,13 @@ Treating `Step` as instantaneous hides everything in §1. So the simulator
 ```
 simNode = {
     sm        core.StateMachine
-    ctrl,data []Entry              // the node's two inboxes, classified by core.ClassOf
+    ctrl,data []Entry              // the node's two inboxes, classified by core.InboxKindOf
     busyUntil sim.Time             // models the loop goroutine being busy
 }
 
 engines/network deliver → append to node.ctrl or node.data (NOT straight into Step)
 when node is idle and has queued events:
-    ev   := core.InboxPolicy.Next(ctrl, data)     // the SAME code as production
+    ev   := core.InboxPicker.Next(ctrl, data)     // the SAME code as production
     cost := CostModel.Sample(ev, rng)             // seeded
     run Step(ev) at now; node busy until now+cost; actions issued at now
 ```
@@ -304,8 +304,8 @@ with measured latency bounds) so simulated overload resembles the real thing.
 | Where | What |
 |---|---|
 | `internal/core/action.go` | Actions `PauseReads{Conn}` and `ResumeReads{Conn}`. |
-| `internal/core/inbox.go` | `Class` (`Control`, `Data`) and `ClassOf(EventBody) Class`, the fixed table from §3.1. An unclassified event type panics, so a new event can't silently land in the wrong queue. |
+| `internal/core/inbox.go` | `InboxKind` (`Control`, `Data`) and `InboxKindOf(EventData) InboxKind`, the fixed table from §3.1. An unclassified event type panics, so a new event can't silently land in the wrong queue. |
 | `internal/core/inbox.go` | `Queue` (`Len`, `Pop`) and `InboxPolicy` (`Next(control, data Queue)`), pure and shared by production and the simulator. |
-| `internal/sys/sys.go` | `Sink` split into `DeliverControl` (never blocks) and `DeliverData` (may block). `Conns` gains `PauseReads`/`ResumeReads` so the production executor can park a reader goroutine. |
-| `internal/verify/sim/cost.go` | `CostModel`, `CostParams` (per-event cost, per-byte cost, pause episodes) and `NodeInbox` (a node's simulated two inboxes plus `BusyUntil`). |
-| `internal/verify/sim/run.go` | `Config.Cost`. Zero means an instantaneous `Step`. |
+| `internal/system/sys.go` | `Sink` split into `DeliverControl` (never blocks) and `DeliverData` (may block). `Conns` gains `PauseReads`/`ResumeReads` so the production executor can park a reader goroutine. |
+| `internal/verify/simulator/cost.go` | `CostModel`, `CostParams` (per-event cost, per-byte cost, pause episodes) and `NodeInbox` (a node's simulated two inboxes plus `BusyUntil`). |
+| `internal/verify/simulator/run.go` | `Config.Cost`. Zero means an instantaneous `Step`. |

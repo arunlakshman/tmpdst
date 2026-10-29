@@ -6,16 +6,16 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/internal/core"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
-// conn is one client connection. Kafka answers a connection's requests in
+// connection is one client connection. Kafka answers a connection's requests in
 // request order even when they are pipelined, so each request owns a slot in q
 // and only the head is sent, once it is ready.
-type conn struct {
+type connection struct {
 	id      core.ConnID
-	fr      *kwire.Framer
-	rx      hasher // running hash of every byte received (a partial frame is state)
+	fr      *kafkawire.Framer
+	rx      stateHasher // running hash of every byte received (a partial frame is state)
 	q       []*slot
 	paused  bool // PauseReads is in force
 	closing bool // no more requests are read; graceful close once q drains
@@ -25,8 +25,8 @@ type conn struct {
 
 // slot is one request awaiting its response.
 type slot struct {
-	conn    *conn
-	h       kwire.RequestHeader
+	conn    *connection
+	h       kafkawire.RequestHeader
 	resp    core.Response
 	pending int  // parts still outstanding, plus 1 while the handler runs
 	ready   bool // resp is complete
@@ -36,7 +36,7 @@ type slot struct {
 	fetchMax int32
 }
 
-func (b *Broker) findConn(id core.ConnID) *conn {
+func (b *Broker) findConn(id core.ConnID) *connection {
 	for _, c := range b.conns {
 		if c.id == id {
 			return c
@@ -45,7 +45,7 @@ func (b *Broker) findConn(id core.ConnID) *conn {
 	return nil
 }
 
-func (b *Broker) dropConn(c *conn) {
+func (b *Broker) dropConn(c *connection) {
 	c.closed = true
 	for i, x := range b.conns {
 		if x == c {
@@ -55,13 +55,13 @@ func (b *Broker) dropConn(c *conn) {
 	}
 }
 
-func (b *Broker) addConn(c *conn) { b.conns = append(b.conns, c) }
+func (b *Broker) addConn(c *connection) { b.conns = append(b.conns, c) }
 
 func (b *Broker) onOpen(e core.ConnOpened) []core.Action {
 	if b.stopping || b.findConn(e.Conn) != nil {
 		return []core.Action{core.CloseConn{Conn: e.Conn, Abort: true}}
 	}
-	b.addConn(&conn{id: e.Conn, fr: kwire.NewFramer(b.cfg.MaxFrame)})
+	b.addConn(&connection{id: e.Conn, fr: kafkawire.NewFramer(b.cfg.MaxFrame)})
 	return nil
 }
 
@@ -99,7 +99,7 @@ func (b *Broker) onBytes(e core.BytesReceived) []core.Action {
 }
 
 // request decodes one frame and routes it.
-func (b *Broker) request(c *conn, frame []byte) []core.Action {
+func (b *Broker) request(c *connection, frame []byte) []core.Action {
 	h, req, err := b.codec.DecodeRequest(frame)
 	if resp, ok := apiVersionsReply(h, req, err); ok {
 		s := b.newSlot(c, h)
@@ -117,12 +117,12 @@ func (b *Broker) request(c *conn, frame []byte) []core.Action {
 
 // apiVersionsReply is the one ApiVersions answer. An unsupported version of
 // that key still gets the supported range. Every other decode error does not.
-func apiVersionsReply(h kwire.RequestHeader, req core.Request, err error) (*kmsg.ApiVersionsResponse, bool) {
-	if _, ok := errors.AsType[*kwire.UnsupportedError](err); ok && h.APIKey == kwire.KeyApiVersions {
-		return kwire.ApiVersionsResponse(h), true
+func apiVersionsReply(h kafkawire.RequestHeader, req core.Request, err error) (*kmsg.ApiVersionsResponse, bool) {
+	if _, ok := errors.AsType[*kafkawire.UnsupportedError](err); ok && h.APIKey == kafkawire.KeyApiVersions {
+		return kafkawire.ApiVersionsResponse(h), true
 	}
-	if err == nil && req.Key() == kwire.KeyApiVersions {
-		return kwire.ApiVersionsResponse(h), true
+	if err == nil && req.Key() == kafkawire.KeyApiVersions {
+		return kafkawire.ApiVersionsResponse(h), true
 	}
 	return nil, false
 }
@@ -130,7 +130,7 @@ func apiVersionsReply(h kwire.RequestHeader, req core.Request, err error) (*kmsg
 // newSlot reserves the next response position on c. pending starts at 1, the
 // guard released by handle (or finishPart) once the handler has queued all its
 // parts.
-func (b *Broker) newSlot(c *conn, h kwire.RequestHeader) *slot {
+func (b *Broker) newSlot(c *connection, h kafkawire.RequestHeader) *slot {
 	s := &slot{conn: c, h: h, pending: 1}
 	c.q = append(c.q, s)
 	return s
@@ -180,7 +180,7 @@ func (b *Broker) drainDirty(acts []core.Action) []core.Action {
 	return acts
 }
 
-func (b *Broker) drain(c *conn, acts []core.Action) []core.Action {
+func (b *Broker) drain(c *connection, acts []core.Action) []core.Action {
 	for len(c.q) > 0 && c.q[0].ready {
 		s := c.q[0]
 		c.q = c.q[1:]
@@ -194,7 +194,7 @@ func (b *Broker) drain(c *conn, acts []core.Action) []core.Action {
 		}
 		// Ack facts go immediately before the Send that carries them (decision 12).
 		for _, f := range s.facts {
-			acts = append(acts, core.Emit{Fact: f})
+			acts = append(acts, core.RecordFact{Fact: f})
 		}
 		acts = append(acts, core.Send{Req: b.req(), Conn: c.id, Data: data})
 	}

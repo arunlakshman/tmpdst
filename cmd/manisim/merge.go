@@ -3,49 +3,49 @@ package main
 import (
 	"sync"
 
-	"manifester/internal/verify/sim"
+	"manifester/internal/verify/simulator"
 )
 
-// runSharded runs seeds in jobs contiguous shards on separate goroutines and
+// runInParts runs seeds in jobs contiguous shards on separate goroutines and
 // merges the shard reports as one Run would have. A seed's result does not
 // depend on which shard ran it (every seed builds its own world).
-func runSharded(config func([]uint64) sim.Config, seeds []uint64, jobs int) (sim.Report, error) {
+func runInParts(config func([]uint64) simulator.Config, seeds []uint64, jobs int) (simulator.Report, error) {
 	jobs = max(1, min(jobs, len(seeds)))
 	if jobs == 1 {
-		return sim.NewRunner().Run(config(seeds))
+		return simulator.NewRunner().Run(config(seeds))
 	}
-	reps := make([]sim.Report, jobs)
+	reps := make([]simulator.Report, jobs)
 	errs := make([]error, jobs)
 	var wg sync.WaitGroup
 	per := (len(seeds) + jobs - 1) / jobs
 	for j := 0; j < jobs; j++ {
 		lo, hi := min(j*per, len(seeds)), min((j+1)*per, len(seeds))
 		wg.Go(func() {
-			reps[j], errs[j] = sim.NewRunner().Run(config(seeds[lo:hi]))
+			reps[j], errs[j] = simulator.NewRunner().Run(config(seeds[lo:hi]))
 		})
 	}
 	wg.Wait()
 	for _, err := range errs {
 		if err != nil {
-			return sim.Report{}, err
+			return simulator.Report{}, err
 		}
 	}
-	return mergeReports(reps), nil
+	return combineReports(reps), nil
 }
 
 type statKey struct{ prop, kind string }
 
-// mergeReports combines shard reports in shard order: seeds are concatenated,
+// combineReports combines shard reports in shard order: seeds are concatenated,
 // assertion stats are summed per (property, kind), and Always/Coverage are
-// recomputed over the whole campaign by the same rule sim.Runner.Run uses.
-func mergeReports(reps []sim.Report) sim.Report {
-	var out sim.Report
+// recomputed over the whole campaign by the same rule simulator.Runner.Run uses.
+func combineReports(reps []simulator.Report) simulator.Report {
+	var out simulator.Report
 	idx := map[statKey]int{}
 	for _, r := range reps {
 		out.Seeds = append(out.Seeds, r.Seeds...)
 		out.Nondeterminism = append(out.Nondeterminism, r.Nondeterminism...)
 		for _, a := range r.Assertions {
-			mergeAssertion(&out, idx, a)
+			combineAssertion(&out, idx, a)
 		}
 	}
 	for _, a := range out.Assertions {
@@ -54,14 +54,14 @@ func mergeReports(reps []sim.Report) sim.Report {
 	return out
 }
 
-// mergeAssertion adds a's counts and seeds to the (property, kind) entry of out.
-func mergeAssertion(out *sim.Report, idx map[statKey]int, a sim.AssertionStat) {
+// combineAssertion adds a's counts and seeds to the (property, kind) entry of out.
+func combineAssertion(out *simulator.Report, idx map[statKey]int, a simulator.AssertionStat) {
 	k := statKey{string(a.Prop), a.Kind}
 	i, ok := idx[k]
 	if !ok {
 		i = len(out.Assertions)
 		idx[k] = i
-		out.Assertions = append(out.Assertions, sim.AssertionStat{Prop: a.Prop, Kind: a.Kind})
+		out.Assertions = append(out.Assertions, simulator.AssertionStat{Prop: a.Prop, Kind: a.Kind})
 	}
 	m := &out.Assertions[i]
 	m.Checks += a.Checks
@@ -77,7 +77,7 @@ func mergeAssertion(out *sim.Report, idx map[statKey]int, a sim.AssertionStat) {
 
 // classify files a into Always (a safety property with failing seeds) or
 // Coverage (a Sometimes property never satisfied).
-func classify(out *sim.Report, a sim.AssertionStat) {
+func classify(out *simulator.Report, a simulator.AssertionStat) {
 	safety := a.Kind == "always" || a.Kind == "always_or_unreachable" || a.Kind == "unreachable"
 	switch {
 	case safety && len(a.Seeds) > 0:

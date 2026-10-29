@@ -32,7 +32,7 @@ func TestConformanceMemstoreGRPC(t *testing.T) {
 // TestPlantedBugsCaughtMemstore proves that the suite fails when the store has
 // a known bug, so a pass of TestConformanceMemstore means something.
 func TestPlantedBugsCaughtMemstore(t *testing.T) {
-	plantedbug.RequireAllControlPlaneBugsCaught(t, subjectOf(func() impl { return storeImpl{newMem()} }), 100)
+	plantedbug.RequireAllControlPlaneBugsDetected(t, subjectOf(func() impl { return storeImpl{newMem()} }), 100)
 }
 
 var _ cp.Store = newMem()

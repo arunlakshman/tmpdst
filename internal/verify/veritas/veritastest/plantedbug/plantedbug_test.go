@@ -15,24 +15,24 @@ import (
 const seedBudget = 60
 
 func TestCatchObjectBugs(t *testing.T) {
-	plantedbug.RequireAllObjectBugsCaught(t, suites.NewSpecObjectSubject, seedBudget)
+	plantedbug.RequireAllObjectBugsDetected(t, suites.NewSpecObjectSubject, seedBudget)
 }
 
 func TestCatchControlPlaneBugs(t *testing.T) {
-	plantedbug.RequireAllControlPlaneBugsCaught(t, suites.NewSpecControlPlaneSubject, seedBudget)
+	plantedbug.RequireAllControlPlaneBugsDetected(t, suites.NewSpecControlPlaneSubject, seedBudget)
 }
 
 // A wrapper that changes nothing must never be flagged, on any profile.
 func TestNoFalseAlarmObject(t *testing.T) {
 	same := plantedbug.NewObjectBug("Identity", "Changes nothing.", func(s suites.ObjectSubject) suites.ObjectSubject { return s })
-	if c, found := plantedbug.FindObjectCatch(same, suites.NewSpecObjectSubject, seedBudget); found {
+	if c, found := plantedbug.FindObjectDetection(same, suites.NewSpecObjectSubject, seedBudget); found {
 		t.Fatalf("the correct object subject was flagged by profile %s at seed %d.", c.Profile, c.Seed)
 	}
 }
 
 func TestNoFalseAlarmControlPlane(t *testing.T) {
 	same := plantedbug.NewControlPlaneBug("Identity", "Changes nothing.", func(s suites.ControlPlaneSubject) suites.ControlPlaneSubject { return s })
-	if c, found := plantedbug.FindControlPlaneCatch(same, suites.NewSpecControlPlaneSubject, seedBudget); found {
+	if c, found := plantedbug.FindControlPlaneDetection(same, suites.NewSpecControlPlaneSubject, seedBudget); found {
 		t.Fatalf("the correct control plane subject was flagged by profile %s at seed %d.", c.Profile, c.Seed)
 	}
 }
@@ -71,12 +71,12 @@ func (r *recorder) Logf(string, ...any)       {}
 
 func TestRequireCaughtFailsWhenNothingIsCaught(t *testing.T) {
 	rec := &recorder{}
-	plantedbug.RequireCaught(rec, "NeverCaught", func(uint64) bool { return false }, 5)
+	plantedbug.RequireDetected(rec, "NeverCaught", func(uint64) bool { return false }, 5)
 	if len(rec.errors) != 1 || !strings.Contains(rec.errors[0], "NeverCaught was not caught in 5 seeds") {
 		t.Fatalf("RequireCaught gave this output: %v", rec.errors)
 	}
 	rec = &recorder{}
-	plantedbug.RequireCaught(rec, "Caught", func(seed uint64) bool { return seed == 3 }, 5)
+	plantedbug.RequireDetected(rec, "Caught", func(seed uint64) bool { return seed == 3 }, 5)
 	if len(rec.errors) != 0 {
 		t.Fatalf("RequireCaught reported an error for a caught bug: %v", rec.errors)
 	}
@@ -107,7 +107,7 @@ func TestCatchWithoutStateHash(t *testing.T) {
 		if b.Name() == "StateHashDiffers" {
 			continue
 		}
-		c, found := plantedbug.FindObjectCatch(b, newObject, seedBudget)
+		c, found := plantedbug.FindObjectDetection(b, newObject, seedBudget)
 		if !found {
 			t.Errorf("the object bug %s was not caught in %d seeds when the subject has no state hash.", b.Name(), seedBudget)
 			continue
@@ -119,7 +119,7 @@ func TestCatchWithoutStateHash(t *testing.T) {
 		if b.Name() == "StateHashDiffers" {
 			continue
 		}
-		c, found := plantedbug.FindControlPlaneCatch(b, newControlPlane, seedBudget)
+		c, found := plantedbug.FindControlPlaneDetection(b, newControlPlane, seedBudget)
 		if !found {
 			t.Errorf("the control plane bug %s was not caught in %d seeds when the subject has no state hash.", b.Name(), seedBudget)
 			continue

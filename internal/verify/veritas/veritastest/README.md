@@ -16,7 +16,7 @@ Words used here:
 
 ## The packages
 
-`veritastest` (this directory) has `SpecComparator`, `Run` and `Rand`. It
+`veritastest` (this directory) has `SpecChecker`, `Run` and `Rand`. It
 compares a subject with a spec after every step and shrinks a failing
 sequence.
 
@@ -24,7 +24,7 @@ These packages sit under `veritastest/`:
 
 | Package | What it does |
 | --- | --- |
-| `veritastest/generator` | Makes random operations. A `Profile` says how often each kind of operation appears. |
+| `veritastest/generator` | Makes random operations. An `InputProfile` says how often each kind of operation appears. |
 | `veritastest/observation` | Turns a result from the spec, a simulated engine or a real adapter into one common shape, so the results can be compared. |
 | `veritastest/plantedbug` | Wraps a subject and adds a known bug. |
 | `veritastest/runcontrol` | Reads the environment variables that choose the seeds, and builds the replay command. |
@@ -51,7 +51,7 @@ itself: nobody else checks the answer key.
 
 ### 2. Write a generator profile and a coverage test (about 5 minutes)
 
-Put the operation generator in `veritastest/generator`. Add a `Profile` that
+Put the operation generator in `veritastest/generator`. Add an `InputProfile` that
 says how often each kind of operation appears. A generator that never makes a
 replay, a conflict or an invalid request proves little.
 
@@ -64,7 +64,7 @@ Then the same seed always gives the same sequence.
 
 ### 3. Write the suite (about 5 minutes)
 
-Build a `veritastest.SpecComparator`. Set these fields:
+Build a `veritastest.SpecChecker`. Set these fields:
 
 - `New`: a fresh subject and a fresh spec, both empty.
 - `Gen`: your generator.

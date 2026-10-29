@@ -291,5 +291,5 @@ func edgeLookups(t *testing.T, subject, spec suites.ControlPlaneSubject, lk core
 // skips the one bug that only a state hash can show.
 func TestPlantedBugsCaughtApplierMem(t *testing.T) {
 	newCorrect := func() suites.ControlPlaneSubject { return newApplierSubject(t, backends["mem"]) }
-	plantedbug.RequireAllControlPlaneBugsCaught(t, newCorrect, 100)
+	plantedbug.RequireAllControlPlaneBugsDetected(t, newCorrect, 100)
 }

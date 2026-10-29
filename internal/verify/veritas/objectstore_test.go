@@ -187,10 +187,10 @@ type objPair struct{ impl, model objExec }
 
 func (m *sliceStore) Keys() []string { return slices.Clone(m.keys) }
 
-func objCheck(impl func() objExec) veritastest.SpecComparator[*objPair, core.IOCall] {
+func objCheck(impl func() objExec) veritastest.SpecChecker[*objPair, core.IOCall] {
 	keys := []string{"", "a", "a/b", "a/c", "b"}
 	prefixes := []string{"", "a", "a/", "b", "z"}
-	return veritastest.SpecComparator[*objPair, core.IOCall]{
+	return veritastest.SpecChecker[*objPair, core.IOCall]{
 		Name: "core.IOCall",
 		New:  func() *objPair { return &objPair{impl(), &sliceStore{}} },
 		Gen: func(r *veritastest.Rand, i int) core.IOCall {

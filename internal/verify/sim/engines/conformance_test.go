@@ -117,9 +117,9 @@ func TestConformanceCPEngine(t *testing.T) {
 // The suite must find each planted bug even when the correct subject is an
 // engine. This shows the engine comparison is as strong as the spec one.
 func TestConformanceObjStoreCatchesPlantedBugs(t *testing.T) {
-	plantedbug.RequireAllObjectBugsCaught(t, newEngineObjectSubject, seedBudget)
+	plantedbug.RequireAllObjectBugsDetected(t, newEngineObjectSubject, seedBudget)
 }
 
 func TestConformanceCPEngineCatchesPlantedBugs(t *testing.T) {
-	plantedbug.RequireAllControlPlaneBugsCaught(t, newEngineControlPlaneSubject, seedBudget)
+	plantedbug.RequireAllControlPlaneBugsDetected(t, newEngineControlPlaneSubject, seedBudget)
 }

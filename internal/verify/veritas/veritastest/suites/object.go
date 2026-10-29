@@ -15,8 +15,8 @@ import (
 const (
 	// suiteOps is the number of operations in each generated sequence.
 	suiteOps = 120
-	// suiteShrinkRuns is the most sequences that shrinking may run.
-	suiteShrinkRuns = 300
+	// suiteMinimizeRuns is the most sequences that shrinking may run.
+	suiteMinimizeRuns = 300
 	// extraReqBase is the first request number of the extra calls that the
 	// suites make for invariants. Generated operations use small numbers, so
 	// the two groups never share a request number.
@@ -44,23 +44,23 @@ func (p *ObjectPair) nextReq() core.RequestID {
 // empty prefix returns the sorted keys of the spec. The suite gives the
 // subject its own copy of the data of a Put and writes over that copy after the
 // call, so a subject that keeps the caller's slice returns wrong data later.
-func ObjectStoreComparator(p generator.Profile, newSubject func() ObjectSubject) veritastest.SpecComparator[*ObjectPair, core.IOCall] {
-	return veritastest.SpecComparator[*ObjectPair, core.IOCall]{
+func ObjectStoreComparator(p generator.InputProfile, newSubject func() ObjectSubject) veritastest.SpecChecker[*ObjectPair, core.IOCall] {
+	return veritastest.SpecChecker[*ObjectPair, core.IOCall]{
 		Name:          "core.IOCall",
 		New:           func() *ObjectPair { return &ObjectPair{spec: veritas.NewObjectStore(), subject: newSubject()} },
 		Gen:           generator.ObjectOps(p),
 		Step:          objectStep,
 		Invariant:     objectInvariant,
-		Shrink:        generator.ShrinkObjectOp,
+		Shrink:        generator.MinimizeObjectOp,
 		Format:        generator.FormatObjectOp,
 		Ops:           suiteOps,
-		MaxShrinkRuns: suiteShrinkRuns,
+		MaxShrinkRuns: suiteMinimizeRuns,
 	}
 }
 
 // ObjectStore runs the object store suite for profile p on the seeds that opts
 // chooses. A caller runs it once for each profile in AllObjectProfiles.
-func ObjectStore(t veritastest.Reporter, p generator.Profile, newSubject func() ObjectSubject, opts veritastest.Options) {
+func ObjectStore(t veritastest.Reporter, p generator.InputProfile, newSubject func() ObjectSubject, opts veritastest.Options) {
 	t.Helper()
 	veritastest.Run(t, ObjectStoreComparator(p, newSubject), opts)
 }

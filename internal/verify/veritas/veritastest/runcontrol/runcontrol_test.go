@@ -21,9 +21,9 @@ func (f *recordingTB) Fatalf(format string, args ...any) {
 }
 
 func clearEnv(t *testing.T) {
-	t.Setenv(EnvSeeds, "")
-	t.Setenv(EnvSeed, "")
-	t.Setenv(EnvCampaign, "")
+	t.Setenv(EnvSeedListName, "")
+	t.Setenv(EnvSeedName, "")
+	t.Setenv(EnvCampaignName, "")
 }
 
 func TestDefault(t *testing.T) {
@@ -41,7 +41,7 @@ func TestDefault(t *testing.T) {
 
 func TestSeeds(t *testing.T) {
 	clearEnv(t)
-	t.Setenv(EnvSeeds, "7")
+	t.Setenv(EnvSeedListName, "7")
 	o := Options(&recordingTB{TB: t, name: "TestX"}, 25)
 	if o.Seeds != 7 || o.Seed != -1 {
 		t.Fatalf("expected Seeds 7 and Seed -1, got Seeds %d and Seed %d", o.Seeds, o.Seed)
@@ -50,12 +50,12 @@ func TestSeeds(t *testing.T) {
 
 func TestSeed(t *testing.T) {
 	clearEnv(t)
-	t.Setenv(EnvSeed, "0")
+	t.Setenv(EnvSeedName, "0")
 	o := Options(&recordingTB{TB: t, name: "TestX"}, 25)
 	if o.Seed != 0 {
 		t.Fatalf("expected Seed 0, got %d", o.Seed)
 	}
-	t.Setenv(EnvSeed, "42")
+	t.Setenv(EnvSeedName, "42")
 	o = Options(&recordingTB{TB: t, name: "TestX"}, 25)
 	if o.Seed != 42 {
 		t.Fatalf("expected Seed 42, got %d", o.Seed)
@@ -64,7 +64,7 @@ func TestSeed(t *testing.T) {
 
 func TestCampaign(t *testing.T) {
 	clearEnv(t)
-	t.Setenv(EnvCampaign, "50ms")
+	t.Setenv(EnvCampaignName, "50ms")
 	o := Options(&recordingTB{TB: t, name: "TestX"}, 25)
 	if o.Stop == nil {
 		t.Fatalf("expected Stop to be set for a campaign of 50ms")
@@ -80,24 +80,24 @@ func TestCampaign(t *testing.T) {
 
 func TestPrecedence(t *testing.T) {
 	clearEnv(t)
-	t.Setenv(EnvSeeds, "7")
-	t.Setenv(EnvCampaign, "1h")
+	t.Setenv(EnvSeedListName, "7")
+	t.Setenv(EnvCampaignName, "1h")
 	o := Options(&recordingTB{TB: t, name: "TestX"}, 25)
 	if o.Stop == nil || o.Seed != -1 {
 		t.Fatalf("expected the campaign to be set and Seed -1, got Stop set %v and Seed %d", o.Stop != nil, o.Seed)
 	}
-	t.Setenv(EnvSeed, "3")
+	t.Setenv(EnvSeedName, "3")
 	o = Options(&recordingTB{TB: t, name: "TestX"}, 25)
 	if o.Seed != 3 {
-		t.Fatalf("expected %s to win with Seed 3, got %d", EnvSeed, o.Seed)
+		t.Fatalf("expected %s to win with Seed 3, got %d", EnvSeedName, o.Seed)
 	}
 }
 
 func TestBadValues(t *testing.T) {
 	cases := []struct{ name, value string }{
-		{EnvSeeds, "abc"}, {EnvSeeds, "0"}, {EnvSeeds, "-3"}, {EnvSeeds, "1.5"},
-		{EnvSeed, "abc"}, {EnvSeed, "-1"}, {EnvSeed, "2x"},
-		{EnvCampaign, "abc"}, {EnvCampaign, "10"}, {EnvCampaign, "0s"}, {EnvCampaign, "-5s"},
+		{EnvSeedListName, "abc"}, {EnvSeedListName, "0"}, {EnvSeedListName, "-3"}, {EnvSeedListName, "1.5"},
+		{EnvSeedName, "abc"}, {EnvSeedName, "-1"}, {EnvSeedName, "2x"},
+		{EnvCampaignName, "abc"}, {EnvCampaignName, "10"}, {EnvCampaignName, "0s"}, {EnvCampaignName, "-5s"},
 	}
 	for _, c := range cases {
 		clearEnv(t)
@@ -124,8 +124,8 @@ func TestReplayFormat(t *testing.T) {
 }
 
 func TestDescribeNamesAllVariables(t *testing.T) {
-	d := Describe()
-	for _, n := range []string{EnvSeeds, EnvSeed, EnvCampaign} {
+	d := DescribeSettings()
+	for _, n := range []string{EnvSeedListName, EnvSeedName, EnvCampaignName} {
 		if !strings.Contains(d, n) {
 			t.Fatalf("expected Describe to mention %s, got %q", n, d)
 		}

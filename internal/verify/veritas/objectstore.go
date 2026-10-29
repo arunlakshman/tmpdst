@@ -27,7 +27,7 @@ type ObjectStore struct {
 	keys []string // every key, sorted
 	// pre[i] is the StateHash state after folding keys[:i]; len(pre)-1 is how
 	// many are valid. A change at index i truncates it to i+1 entries.
-	pre []hasher
+	pre []stateHasher
 }
 
 // NewObjectStore returns an empty store.
@@ -74,14 +74,14 @@ func (s *ObjectStore) execGet(a core.ObjectGet) core.IOResult {
 	if !ok {
 		return core.ObjectGetDone{Req: a.Req, Err: core.ErrNotFound}
 	}
-	got, ok := sliceRange(data, a.Ref)
+	got, ok := cutRange(data, a.Ref)
 	if !ok {
 		return core.ObjectGetDone{Req: a.Req, Err: core.ErrInvalid}
 	}
 	return core.ObjectGetDone{Req: a.Req, Data: clone(got)}
 }
 
-func sliceRange(data []byte, ref core.SegmentRef) ([]byte, bool) {
+func cutRange(data []byte, ref core.SegmentRef) ([]byte, bool) {
 	end := int64(len(data))
 	if ref.Len > 0 {
 		end = ref.Off + ref.Len
@@ -120,7 +120,7 @@ func (s *ObjectStore) Keys() []string { return slices.Clone(s.keys) }
 // folded prefix a change left intact, so a put near the end of the key order
 // costs little.
 func (s *ObjectStore) StateHash() uint64 {
-	s.pre = extendPrefix(s.pre, len(s.keys), func(i int, h hasher) hasher {
+	s.pre = nextPrefix(s.pre, len(s.keys), func(i int, h stateHasher) stateHasher {
 		h.Str(s.keys[i])
 		h.Bytes(s.objs[s.keys[i]])
 		return h
@@ -130,7 +130,7 @@ func (s *ObjectStore) StateHash() uint64 {
 
 // fullStateHash is StateHash without the prefix cache (for tests).
 func (s *ObjectStore) fullStateHash() uint64 {
-	h := newHasher()
+	h := newStateHasher()
 	for _, k := range sortedKeys(s.objs) {
 		h.Str(k)
 		h.Bytes(s.objs[k])

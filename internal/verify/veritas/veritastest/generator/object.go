@@ -11,14 +11,14 @@ import (
 // Operation i carries RequestID i+1. The mix includes the empty key, reads past
 // the end of an object, Len <= 0 (read to the end), and prefixes with and
 // without a slash, because each of these is a place where stores differ.
-func ObjectOps(p Profile) func(r *veritastest.Rand, i int) core.IOCall {
+func ObjectOps(p InputProfile) func(r *veritastest.Rand, i int) core.IOCall {
 	return func(r *veritastest.Rand, i int) core.IOCall {
 		req := core.RequestID(i + 1)
 		key := pick(r, p.ObjectKeys)
 		if percent(r, p.EmptyKeyPercent) {
 			key = ""
 		}
-		switch pickWeighted(r, p.PutWeight, p.GetWeight, p.DeleteWeight, p.ListWeight) {
+		switch chooseByWeight(r, p.PutWeight, p.GetWeight, p.DeleteWeight, p.ListWeight) {
 		case 0:
 			return core.ObjectPut{Req: req, Key: key, Data: randomData(r, p.MaxDataLen)}
 		case 1:
@@ -41,24 +41,24 @@ func randomData(r *veritastest.Rand, maxLen int) []byte {
 	return data
 }
 
-// ShrinkObjectOp returns simpler versions of op, simplest first: less data, a
+// MinimizeObjectOp returns simpler versions of op, simplest first: less data, a
 // range that starts at 0 and reads to the end, and a shorter key or prefix.
 // It never returns op itself, so a caller that keeps shrinking always ends.
-func ShrinkObjectOp(op core.IOCall) []core.IOCall {
+func MinimizeObjectOp(op core.IOCall) []core.IOCall {
 	switch op := op.(type) {
 	case core.ObjectPut:
-		return shrinkPut(op)
+		return minimizePut(op)
 	case core.ObjectGet:
-		return shrinkGet(op)
+		return minimizeGet(op)
 	case core.ObjectDelete:
 		var out []core.IOCall
-		for _, k := range shorterStrings(op.Key) {
+		for _, k := range shortenStrings(op.Key) {
 			out = append(out, core.ObjectDelete{Req: op.Req, Key: k})
 		}
 		return out
 	case core.ObjectList:
 		var out []core.IOCall
-		for _, p := range shorterStrings(op.Prefix) {
+		for _, p := range shortenStrings(op.Prefix) {
 			out = append(out, core.ObjectList{Req: op.Req, Prefix: p})
 		}
 		return out
@@ -66,7 +66,7 @@ func ShrinkObjectOp(op core.IOCall) []core.IOCall {
 	return nil
 }
 
-func shrinkPut(op core.ObjectPut) []core.IOCall {
+func minimizePut(op core.ObjectPut) []core.IOCall {
 	var out []core.IOCall
 	if len(op.Data) > 0 {
 		out = append(out, core.ObjectPut{Req: op.Req, Key: op.Key, Data: nil})
@@ -75,13 +75,13 @@ func shrinkPut(op core.ObjectPut) []core.IOCall {
 		out = append(out, core.ObjectPut{Req: op.Req, Key: op.Key, Data: op.Data[:len(op.Data)/2]})
 		out = append(out, core.ObjectPut{Req: op.Req, Key: op.Key, Data: op.Data[:len(op.Data)-1]})
 	}
-	for _, k := range shorterStrings(op.Key) {
+	for _, k := range shortenStrings(op.Key) {
 		out = append(out, core.ObjectPut{Req: op.Req, Key: k, Data: op.Data})
 	}
 	return out
 }
 
-func shrinkGet(op core.ObjectGet) []core.IOCall {
+func minimizeGet(op core.ObjectGet) []core.IOCall {
 	var out []core.IOCall
 	if op.Ref.Len != 0 {
 		ref := op.Ref
@@ -93,7 +93,7 @@ func shrinkGet(op core.ObjectGet) []core.IOCall {
 		ref.Off = 0
 		out = append(out, core.ObjectGet{Req: op.Req, Ref: ref})
 	}
-	for _, k := range shorterStrings(op.Ref.Key) {
+	for _, k := range shortenStrings(op.Ref.Key) {
 		ref := op.Ref
 		ref.Key = k
 		out = append(out, core.ObjectGet{Req: op.Req, Ref: ref})
@@ -101,10 +101,10 @@ func shrinkGet(op core.ObjectGet) []core.IOCall {
 	return out
 }
 
-// shorterStrings returns shorter versions of s: the first byte alone, then s
+// shortenStrings returns shorter versions of s: the first byte alone, then s
 // without its last byte. The empty string is not shortened, because an empty
 // key is a different case and not a smaller one.
-func shorterStrings(s string) []string {
+func shortenStrings(s string) []string {
 	var out []string
 	if len(s) > 1 {
 		out = append(out, s[:1])

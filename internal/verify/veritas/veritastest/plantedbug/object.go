@@ -244,25 +244,25 @@ func PutOverwriteIgnored() ObjectBug {
 // ObjectStateHashDiffers reports a wrong state hash. It checks that the suite
 // compares the hash at all.
 func ObjectStateHashDiffers() ObjectBug {
-	return newHashBug(NewObjectBug, withObjectHash)
+	return newHashBug(NewObjectBug, withObjectStateHash)
 }
 
-func withObjectHash(inner suites.ObjectSubject, hash func() (uint64, bool)) suites.ObjectSubject {
+func withObjectStateHash(inner suites.ObjectSubject, hash func() (uint64, bool)) suites.ObjectSubject {
 	return &objectSubject{inner: inner, do: inner.Do, hash: hash}
 }
 
-// FindObjectCatch runs the object store suite on a subject with bug, for every
+// FindObjectDetection runs the object store suite on a subject with bug, for every
 // profile and the seeds 1 to seeds. It returns the first catch. newCorrect must
 // return a fresh correct subject on each call.
-func FindObjectCatch(bug ObjectBug, newCorrect func() suites.ObjectSubject, seeds int) (Catch, bool) {
-	return findSubjectCatch(seeds, newCorrect, bug.Wrap, suites.ObjectStoreComparator)
+func FindObjectDetection(bug ObjectBug, newCorrect func() suites.ObjectSubject, seeds int) (Detection, bool) {
+	return findSubjectDetection(seeds, newCorrect, bug.Wrap, suites.ObjectStoreComparator)
 }
 
-// RequireAllObjectBugsCaught runs every planted object store bug through the
+// RequireAllObjectBugsDetected runs every planted object store bug through the
 // object store suite. It reports an error for each bug that no profile finds
 // within seeds seeds, and it logs the catch table. A subject with no spec hash
 // (for example real S3) cannot show a wrong hash, so that one bug is skipped
 // for such a subject and the log says so.
-func RequireAllObjectBugsCaught(t veritastest.Reporter, newCorrect func() suites.ObjectSubject, seeds int) {
-	requireAllCaught(t, "object store", newCorrect, seeds, ObjectBugs(), FindObjectCatch)
+func RequireAllObjectBugsDetected(t veritastest.Reporter, newCorrect func() suites.ObjectSubject, seeds int) {
+	requireAllDetected(t, "object store", newCorrect, seeds, ObjectBugs(), FindObjectDetection)
 }

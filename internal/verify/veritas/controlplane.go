@@ -47,7 +47,7 @@ type ControlPlane struct {
 	// StateHash state after segKeys[:i]; segPre[0] is the empty state. A
 	// commit at index i truncates it to i+1 entries.
 	segKeys []string
-	segPre  []hasher
+	segPre  []stateHasher
 }
 
 type segment struct {
@@ -186,9 +186,9 @@ func (c *ControlPlane) append(r core.BatchRange) {
 // StateHash folds committed segments (sorted by key, with their ranges) and
 // topics (sorted by name).
 func (c *ControlPlane) StateHash() uint64 {
-	c.segPre = extendPrefix(c.segPre, len(c.segKeys), func(i int, h hasher) hasher {
+	c.segPre = nextPrefix(c.segPre, len(c.segKeys), func(i int, h stateHasher) stateHasher {
 		h.Str(c.segKeys[i])
-		hashRanges(&h, c.segs[c.segKeys[i]].ranges)
+		hashBatchRanges(&h, c.segs[c.segKeys[i]].ranges)
 		return h
 	})
 	return c.tailHash(c.segPre[len(c.segKeys)])
@@ -196,16 +196,16 @@ func (c *ControlPlane) StateHash() uint64 {
 
 // fullStateHash is StateHash without the segment prefix cache (for tests).
 func (c *ControlPlane) fullStateHash() uint64 {
-	h := newHasher()
+	h := newStateHasher()
 	for _, k := range sortedKeys(c.segs) {
 		h.Str(k)
-		hashRanges(&h, c.segs[k].ranges)
+		hashBatchRanges(&h, c.segs[k].ranges)
 	}
 	return c.tailHash(h)
 }
 
 // tailHash folds topics into h.
-func (c *ControlPlane) tailHash(h hasher) uint64 {
+func (c *ControlPlane) tailHash(h stateHasher) uint64 {
 	for _, t := range sortedKeys(c.topics) {
 		h.Str(t)
 		h.U64(uint64(c.topics[t]))

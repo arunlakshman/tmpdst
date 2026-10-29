@@ -130,8 +130,8 @@ func TestConformanceS3(t *testing.T) {
 // fake S3 server has a known bug, so a pass of TestConformanceFake means
 // something.
 func TestPlantedBugsCaught(t *testing.T) {
-	plantedbug.RequireAllObjectBugsCaught(t, newFakeS3Subject(t), 100)
+	plantedbug.RequireAllObjectBugsDetected(t, newFakeS3Subject(t), 100)
 }
 
 // TestPlantedBugsCaughtMem does the same for the in-process fake store.
-func TestPlantedBugsCaughtMem(t *testing.T) { plantedbug.RequireAllObjectBugsCaught(t, newFake, 100) }
+func TestPlantedBugsCaughtMem(t *testing.T) { plantedbug.RequireAllObjectBugsDetected(t, newFake, 100) }

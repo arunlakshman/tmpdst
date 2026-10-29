@@ -35,7 +35,7 @@ func TestShrinkPartitionOp(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := shrinkPartitionOp(c.op)
+			got := minimizePartitionOp(c.op)
 			if !reflect.DeepEqual(got, c.want) {
 				t.Fatalf("the shrink of %#v gave %#v, but the test expected %#v", c.op, got, c.want)
 			}

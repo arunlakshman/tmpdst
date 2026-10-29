@@ -8,8 +8,8 @@ import "manifester/internal/core"
 // is the next offset to be assigned.
 type Partition struct{ recs [][]byte }
 
-// Record is one log entry as read back.
-type Record struct {
+// StoredRecord is one log entry as read back.
+type StoredRecord struct {
 	Offset core.Offset
 	Value  []byte
 }
@@ -30,20 +30,20 @@ func (p *Partition) HighWatermark() core.Offset { return core.Offset(len(p.recs)
 // Read returns up to max records (max <= 0: all) starting at from. ok is
 // false if from is negative or beyond the high watermark (Kafka's
 // OFFSET_OUT_OF_RANGE); from == HighWatermark is ok and empty.
-func (p *Partition) Read(from core.Offset, max int) ([]Record, bool) {
+func (p *Partition) Read(from core.Offset, max int) ([]StoredRecord, bool) {
 	if from < 0 || from > p.HighWatermark() {
 		return nil, false
 	}
-	var recs []Record
+	var recs []StoredRecord
 	for o := from; o < p.HighWatermark() && (max <= 0 || len(recs) < max); o++ {
-		recs = append(recs, Record{Offset: o, Value: clone(p.recs[o])})
+		recs = append(recs, StoredRecord{Offset: o, Value: clone(p.recs[o])})
 	}
 	return recs, true
 }
 
 // StateHash folds every record in order.
 func (p *Partition) StateHash() uint64 {
-	h := newHasher()
+	h := newStateHasher()
 	h.U64(uint64(len(p.recs)))
 	for _, r := range p.recs {
 		h.Bytes(r)

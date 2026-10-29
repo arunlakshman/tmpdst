@@ -45,7 +45,7 @@ var controlPlaneCases = []string{
 
 func TestObjectCoverage(t *testing.T) {
 	table := map[string]map[string]int{}
-	for _, p := range Profiles() {
+	for _, p := range InputProfiles() {
 		table[p.Name] = objectCoverage(p)
 	}
 	reportCoverage(t, "object store", objectCases, table)
@@ -53,7 +53,7 @@ func TestObjectCoverage(t *testing.T) {
 
 func TestControlPlaneCoverage(t *testing.T) {
 	table := map[string]map[string]int{}
-	for _, p := range Profiles() {
+	for _, p := range InputProfiles() {
 		table[p.Name] = controlPlaneCoverage(p)
 	}
 	reportCoverage(t, "control plane", controlPlaneCases, table)
@@ -65,19 +65,19 @@ func reportCoverage(t *testing.T, title string, cases []string, table map[string
 	t.Helper()
 	var b strings.Builder
 	fmt.Fprintf(&b, "coverage of the %s generator, %d seeds of %d operations\n%-38s", title, coverageSeeds, coverageOps, "case")
-	for _, p := range Profiles() {
+	for _, p := range InputProfiles() {
 		fmt.Fprintf(&b, "%14s", p.Name)
 	}
 	b.WriteString("\n")
 	for _, c := range cases {
 		fmt.Fprintf(&b, "%-38s", c)
-		for _, p := range Profiles() {
+		for _, p := range InputProfiles() {
 			fmt.Fprintf(&b, "%14d", table[p.Name][c])
 		}
 		b.WriteString("\n")
 	}
 	t.Log("\n" + b.String())
-	for _, p := range Profiles() {
+	for _, p := range InputProfiles() {
 		for _, c := range cases {
 			if only, ok := onlyProfile[c]; ok && only != p.Name {
 				continue
@@ -89,7 +89,7 @@ func reportCoverage(t *testing.T, title string, cases []string, table map[string
 	}
 }
 
-func objectCoverage(p Profile) map[string]int {
+func objectCoverage(p InputProfile) map[string]int {
 	hits := map[string]int{}
 	gen := ObjectOps(p)
 	for seed := uint64(1); seed <= coverageSeeds; seed++ {
@@ -163,7 +163,7 @@ func classifyList(op core.ObjectList, done core.ObjectListDone) []string {
 	return append(out, "list without keys")
 }
 
-func controlPlaneCoverage(p Profile) map[string]int {
+func controlPlaneCoverage(p InputProfile) map[string]int {
 	hits := map[string]int{}
 	gen := ControlPlaneOps(p)
 	for seed := uint64(1); seed <= coverageSeeds; seed++ {
@@ -277,7 +277,7 @@ func classifyDescribe(o core.DescribeTopics, resp core.DescribeTopicsResp) []str
 }
 
 func TestSameSeedGivesSameSequence(t *testing.T) {
-	for _, p := range Profiles() {
+	for _, p := range InputProfiles() {
 		objA, objB := objectSequence(p, 7), objectSequence(p, 7)
 		if !reflect.DeepEqual(objA, objB) {
 			t.Errorf("profile %s: two runs of the object generator with seed 7 gave different operations.", p.Name)
@@ -292,7 +292,7 @@ func TestSameSeedGivesSameSequence(t *testing.T) {
 	}
 }
 
-func objectSequence(p Profile, seed uint64) []core.IOCall {
+func objectSequence(p InputProfile, seed uint64) []core.IOCall {
 	r, gen := veritastest.NewRand(seed), ObjectOps(p)
 	var out []core.IOCall
 	for i := range coverageOps {
@@ -301,7 +301,7 @@ func objectSequence(p Profile, seed uint64) []core.IOCall {
 	return out
 }
 
-func controlPlaneSequence(p Profile, seed uint64) []string {
+func controlPlaneSequence(p InputProfile, seed uint64) []string {
 	r, gen := veritastest.NewRand(seed), ControlPlaneOps(p)
 	var out []string
 	for i := range coverageOps {
@@ -342,7 +342,7 @@ func TestBatchesReplayAndConflict(t *testing.T) {
 }
 
 func TestShrinkMakesProgressAndEnds(t *testing.T) {
-	for _, p := range Profiles() {
+	for _, p := range InputProfiles() {
 		r, objects, plane := veritastest.NewRand(5), ObjectOps(p), ControlPlaneOps(p)
 		for i := range coverageOps {
 			shrinkObjectToEnd(t, objects(r, i))
@@ -357,7 +357,7 @@ func TestShrinkMakesProgressAndEnds(t *testing.T) {
 func shrinkObjectToEnd(t *testing.T, op core.IOCall) {
 	t.Helper()
 	for range 1000 {
-		next := ShrinkObjectOp(op)
+		next := MinimizeObjectOp(op)
 		if len(next) == 0 {
 			return
 		}
@@ -372,7 +372,7 @@ func shrinkObjectToEnd(t *testing.T, op core.IOCall) {
 func shrinkPlaneToEnd(t *testing.T, op ControlPlaneOp) {
 	t.Helper()
 	for range 1000 {
-		next := ShrinkControlPlaneOp(op)
+		next := MinimizeControlPlaneOp(op)
 		for _, c := range next {
 			if reflect.DeepEqual(c, op) {
 				t.Fatalf("shrinking %s gave the same operation.", FormatControlPlaneOp(op))
@@ -387,7 +387,7 @@ func shrinkPlaneToEnd(t *testing.T, op ControlPlaneOp) {
 }
 
 func TestFormatIsAGoExpression(t *testing.T) {
-	for _, p := range Profiles() {
+	for _, p := range InputProfiles() {
 		r, objects, plane := veritastest.NewRand(9), ObjectOps(p), ControlPlaneOps(p)
 		for i := range coverageOps {
 			for _, text := range []string{FormatObjectOp(objects(r, i)), FormatControlPlaneOp(plane(r, i))} {

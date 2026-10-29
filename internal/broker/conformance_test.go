@@ -308,8 +308,8 @@ func shrinkC1(op c1op) []c1op {
 	return out
 }
 
-func c1Check(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) veritastest.SpecComparator[*c1, c1op] {
-	return veritastest.SpecComparator[*c1, c1op]{
+func c1Check(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) veritastest.SpecChecker[*c1, c1op] {
+	return veritastest.SpecChecker[*c1, c1op]{
 		Name: "c1op", Ops: 80, MaxShrinkRuns: 300,
 		New:       func() *c1 { return newC1(t, bug, corrupt, tune) },
 		Gen:       genC1,

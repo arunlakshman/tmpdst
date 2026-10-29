@@ -7,8 +7,8 @@ import (
 )
 
 // counter has a planted bug: an op >= 50 after an op >= 30 fails.
-func counter() SpecComparator[*int, int] {
-	return SpecComparator[*int, int]{
+func counter() SpecChecker[*int, int] {
+	return SpecChecker[*int, int]{
 		Name: "int",
 		New:  func() *int { return new(int) },
 		Gen:  func(r *Rand, i int) int { return r.Intn(100) },
@@ -47,7 +47,7 @@ func TestShrinkFindsMinimal(t *testing.T) {
 }
 
 func TestInvariantAndPanicFail(t *testing.T) {
-	c := SpecComparator[*int, int]{
+	c := SpecChecker[*int, int]{
 		Name:      "int",
 		New:       func() *int { return new(int) },
 		Gen:       func(r *Rand, i int) int { return i },
@@ -79,7 +79,7 @@ func TestInvariantAndPanicFail(t *testing.T) {
 func TestShrinkAll(t *testing.T) {
 	// Fails when the first two ops sum to >= 14, so lowering all together
 	// walks the sequence down to the boundary.
-	c := SpecComparator[*[]int, int]{
+	c := SpecChecker[*[]int, int]{
 		Name: "int",
 		New:  func() *[]int { return new([]int) },
 		Gen:  func(r *Rand, i int) int { return 20 },

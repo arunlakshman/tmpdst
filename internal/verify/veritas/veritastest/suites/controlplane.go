@@ -16,7 +16,7 @@ type ControlPlanePair struct {
 	spec        *veritas.ControlPlane
 	specSubject ControlPlaneSubject
 	subject     ControlPlaneSubject
-	model       *cpModel
+	model       *controlPlaneModel
 	extra       core.RequestID
 }
 
@@ -50,8 +50,8 @@ func (p *ControlPlanePair) nextReq() core.RequestID {
 //     name, so a partition count never shrinks.
 //   - Commits are all or nothing: an invalid batch in a commit leaves no run
 //     behind, which the run check above finds.
-func ControlPlaneComparator(p generator.Profile, newSubject func() ControlPlaneSubject) veritastest.SpecComparator[*ControlPlanePair, generator.ControlPlaneOp] {
-	return veritastest.SpecComparator[*ControlPlanePair, generator.ControlPlaneOp]{
+func ControlPlaneComparator(p generator.InputProfile, newSubject func() ControlPlaneSubject) veritastest.SpecChecker[*ControlPlanePair, generator.ControlPlaneOp] {
+	return veritastest.SpecChecker[*ControlPlanePair, generator.ControlPlaneOp]{
 		Name: "generator.ControlPlaneOp",
 		New: func() *ControlPlanePair {
 			spec := veritas.NewControlPlane()
@@ -65,17 +65,17 @@ func ControlPlaneComparator(p generator.Profile, newSubject func() ControlPlaneS
 		Gen:           generator.ControlPlaneOps(p),
 		Step:          controlPlaneStep,
 		Invariant:     controlPlaneInvariant,
-		Shrink:        generator.ShrinkControlPlaneOp,
+		Shrink:        generator.MinimizeControlPlaneOp,
 		Format:        generator.FormatControlPlaneOp,
 		Ops:           suiteOps,
-		MaxShrinkRuns: suiteShrinkRuns,
+		MaxShrinkRuns: suiteMinimizeRuns,
 	}
 }
 
 // ControlPlane runs the control plane suite for profile p on the seeds that
 // opts chooses. A caller runs it once for each profile in
 // AllControlPlaneProfiles.
-func ControlPlane(t veritastest.Reporter, p generator.Profile, newSubject func() ControlPlaneSubject, opts veritastest.Options) {
+func ControlPlane(t veritastest.Reporter, p generator.InputProfile, newSubject func() ControlPlaneSubject, opts veritastest.Options) {
 	t.Helper()
 	veritastest.Run(t, ControlPlaneComparator(p, newSubject), opts)
 }

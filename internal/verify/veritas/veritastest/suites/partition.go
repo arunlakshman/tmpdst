@@ -44,7 +44,7 @@ func genPartitionOp(r *veritastest.Rand, _ int) PartitionOp {
 	return PartitionOp{Kind: "hwm"}
 }
 
-func shrinkPartitionOp(op PartitionOp) []PartitionOp {
+func minimizePartitionOp(op PartitionOp) []PartitionOp {
 	var out []PartitionOp
 	switch op.Kind {
 	case "append":
@@ -81,17 +81,17 @@ func cloneBatch(batch [][]byte) [][]byte {
 // value, the high watermark, and the state hash when the subject has one. The
 // suite writes over the batch after Append and over the records after Read, so
 // a subject that shares memory with the caller fails.
-func PartitionComparator(newSubject func() PartitionSubject) veritastest.SpecComparator[*PartitionPair, PartitionOp] {
-	return veritastest.SpecComparator[*PartitionPair, PartitionOp]{
+func PartitionComparator(newSubject func() PartitionSubject) veritastest.SpecChecker[*PartitionPair, PartitionOp] {
+	return veritastest.SpecChecker[*PartitionPair, PartitionOp]{
 		Name:          "suites.PartitionOp",
 		New:           func() *PartitionPair { return &PartitionPair{spec: &veritas.Partition{}, subject: newSubject()} },
 		Gen:           genPartitionOp,
 		Step:          partitionStep,
 		Invariant:     partitionInvariant,
-		Shrink:        shrinkPartitionOp,
+		Shrink:        minimizePartitionOp,
 		Format:        func(op PartitionOp) string { return fmt.Sprintf("%#v", op) },
 		Ops:           suiteOps,
-		MaxShrinkRuns: suiteShrinkRuns,
+		MaxShrinkRuns: suiteMinimizeRuns,
 	}
 }
 
@@ -101,7 +101,7 @@ func Partition(t veritastest.Reporter, newSubject func() PartitionSubject, opts 
 	veritastest.Run(t, PartitionComparator(newSubject), opts)
 }
 
-func scribble(value []byte) {
+func overwriteWithJunk(value []byte) {
 	for i := range value {
 		value[i] = '!'
 	}
@@ -114,7 +114,7 @@ func partitionStep(p *PartitionPair, op PartitionOp) error {
 		specBase := p.spec.Append(specBatch)
 		subjectBase := p.subject.Append(subjectBatch)
 		for _, v := range subjectBatch {
-			scribble(v)
+			overwriteWithJunk(v)
 		}
 		if specBase != subjectBase {
 			return fmt.Errorf("append of %d records returned the base offset %d, but the spec returned %d",
@@ -136,7 +136,7 @@ func partitionRead(p *PartitionPair, op PartitionOp) error {
 	records, ok := p.subject.Read(from, op.Max)
 	defer func() {
 		for _, r := range records {
-			scribble(r.Value)
+			overwriteWithJunk(r.Value)
 		}
 	}()
 	where := fmt.Sprintf("Read(from %d, max %d)", op.From, op.Max)

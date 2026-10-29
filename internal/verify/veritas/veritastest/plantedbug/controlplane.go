@@ -266,16 +266,16 @@ func TopicPartitionCountShrinks() ControlPlaneBug {
 						counts[op.CreateTopic.Name] = op.CreateTopic.Partitions
 					}
 				case op.Call != nil:
-					r = shrinkCountsForCall(counts, op.Call.Op, r)
+					r = minimizeCountsForCall(counts, op.Call.Op, r)
 				}
 				return r
 			}
 		})
 }
 
-// shrinkCountsForCall updates the own partition counts of the bug after a
+// minimizeCountsForCall updates the own partition counts of the bug after a
 // commit, and replaces the counts in a describe result with them.
-func shrinkCountsForCall(counts map[string]int32, op core.ControlPlaneOperation, r observation.ControlPlaneResult) observation.ControlPlaneResult {
+func minimizeCountsForCall(counts map[string]int32, op core.ControlPlaneOperation, r observation.ControlPlaneResult) observation.ControlPlaneResult {
 	switch op.(type) {
 	case core.CommitSegment:
 		for _, a := range r.Assigned {
@@ -295,25 +295,25 @@ func shrinkCountsForCall(counts map[string]int32, op core.ControlPlaneOperation,
 // ControlPlaneStateHashDiffers reports a wrong state hash. It checks that the
 // suite compares the hash at all.
 func ControlPlaneStateHashDiffers() ControlPlaneBug {
-	return newHashBug(NewControlPlaneBug, withControlPlaneHash)
+	return newHashBug(NewControlPlaneBug, withControlPlaneStateHash)
 }
 
-func withControlPlaneHash(inner suites.ControlPlaneSubject, hash func() (uint64, bool)) suites.ControlPlaneSubject {
+func withControlPlaneStateHash(inner suites.ControlPlaneSubject, hash func() (uint64, bool)) suites.ControlPlaneSubject {
 	return &controlPlaneSubject{inner: inner, do: inner.Do, hash: hash}
 }
 
-// FindControlPlaneCatch runs the control plane suite on a subject with bug, for
+// FindControlPlaneDetection runs the control plane suite on a subject with bug, for
 // every profile and the seeds 1 to seeds. It returns the first catch.
 // newCorrect must return a fresh correct subject on each call.
-func FindControlPlaneCatch(bug ControlPlaneBug, newCorrect func() suites.ControlPlaneSubject, seeds int) (Catch, bool) {
-	return findSubjectCatch(seeds, newCorrect, bug.Wrap, suites.ControlPlaneComparator)
+func FindControlPlaneDetection(bug ControlPlaneBug, newCorrect func() suites.ControlPlaneSubject, seeds int) (Detection, bool) {
+	return findSubjectDetection(seeds, newCorrect, bug.Wrap, suites.ControlPlaneComparator)
 }
 
-// RequireAllControlPlaneBugsCaught runs every planted control plane bug through
+// RequireAllControlPlaneBugsDetected runs every planted control plane bug through
 // the control plane suite. It reports an error for each bug that no profile
 // finds within seeds seeds, and it logs the catch table. A subject with no spec
 // hash cannot show a wrong hash, so that one bug is skipped for such a subject
 // and the log says so.
-func RequireAllControlPlaneBugsCaught(t veritastest.Reporter, newCorrect func() suites.ControlPlaneSubject, seeds int) {
-	requireAllCaught(t, "control plane", newCorrect, seeds, ControlPlaneBugs(), FindControlPlaneCatch)
+func RequireAllControlPlaneBugsDetected(t veritastest.Reporter, newCorrect func() suites.ControlPlaneSubject, seeds int) {
+	requireAllDetected(t, "control plane", newCorrect, seeds, ControlPlaneBugs(), FindControlPlaneDetection)
 }

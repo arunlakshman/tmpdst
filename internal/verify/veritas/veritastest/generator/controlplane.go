@@ -53,10 +53,10 @@ func (o ControlPlaneOp) Describe() string {
 // conflict, the same batches under a fresh key, and five kinds of malformed
 // request. Lookups cover From = -1, From inside long runs and MaxBytes cuts.
 // DescribeTopics covers known, unknown and all topics.
-func ControlPlaneOps(p Profile) func(r *veritastest.Rand, i int) ControlPlaneOp {
+func ControlPlaneOps(p InputProfile) func(r *veritastest.Rand, i int) ControlPlaneOp {
 	return func(r *veritastest.Rand, i int) ControlPlaneOp {
 		req := core.RequestID(i + 1)
-		switch pickWeighted(r, p.CreateTopicWeight, p.CommitWeight, p.LookupWeight, p.DescribeWeight) {
+		switch chooseByWeight(r, p.CreateTopicWeight, p.CommitWeight, p.LookupWeight, p.DescribeWeight) {
 		case 0:
 			return genCreateTopic(p, r)
 		case 1:
@@ -68,7 +68,7 @@ func ControlPlaneOps(p Profile) func(r *veritastest.Rand, i int) ControlPlaneOp 
 	}
 }
 
-func genCreateTopic(p Profile, r *veritastest.Rand) ControlPlaneOp {
+func genCreateTopic(p InputProfile, r *veritastest.Rand) ControlPlaneOp {
 	if !percent(r, p.CreateInvalidPercent) {
 		return NewCreateTopic(pick(r, p.Topics), int32(1+r.Intn(p.MaxPartitions)))
 	}
@@ -78,14 +78,14 @@ func genCreateTopic(p Profile, r *veritastest.Rand) ControlPlaneOp {
 	return NewCreateTopic(pick(r, p.Topics), int32(-r.Intn(2)))
 }
 
-func poolKey(p Profile, r *veritastest.Rand) string {
+func poolKey(p InputProfile, r *veritastest.Rand) string {
 	return fmt.Sprintf("seg%d", r.Intn(p.SegmentKeys))
 }
 
 // genCommit picks one kind of commit. A pool key with variant 0 is a first
 // commit the first time and a replay every later time, because Batches gives
 // the same batches for the same key.
-func genCommit(p Profile, r *veritastest.Rand) core.CommitSegment {
+func genCommit(p InputProfile, r *veritastest.Rand) core.CommitSegment {
 	roll := r.Intn(100)
 	switch {
 	case roll < p.InvalidPercent:
@@ -105,7 +105,7 @@ func genCommit(p Profile, r *veritastest.Rand) core.CommitSegment {
 // genInvalidCommit returns a commit that the control plane must reject. It
 // uses a key from a separate "bad" pool, so the key is never committed and
 // the answer is always ErrInvalid and never ErrConflict.
-func genInvalidCommit(p Profile, r *veritastest.Rand) core.CommitSegment {
+func genInvalidCommit(p InputProfile, r *veritastest.Rand) core.CommitSegment {
 	key := fmt.Sprintf("bad%d", r.Intn(4))
 	batches := Batches(p, key, key, 0)
 	at := r.Intn(len(batches))
@@ -124,7 +124,7 @@ func genInvalidCommit(p Profile, r *veritastest.Rand) core.CommitSegment {
 	return core.CommitSegment{SegmentKey: key, Batches: batches}
 }
 
-func genLookup(p Profile, r *veritastest.Rand) core.FindSegments {
+func genLookup(p InputProfile, r *veritastest.Rand) core.FindSegments {
 	tp := core.NewTopicPartition(pick(r, p.Topics), int32(r.Intn(p.PartitionCount)))
 	from := int64(r.Intn(p.LookupShortSpan))
 	if percent(r, p.LookupLongPercent) {
@@ -136,7 +136,7 @@ func genLookup(p Profile, r *veritastest.Rand) core.FindSegments {
 	return core.FindSegments{TP: tp, From: core.Offset(from), MaxBytes: pick(r, p.MaxBytesChoices)}
 }
 
-func genDescribe(p Profile, r *veritastest.Rand) core.DescribeTopics {
+func genDescribe(p InputProfile, r *veritastest.Rand) core.DescribeTopics {
 	var d core.DescribeTopics
 	for j := r.Intn(p.MaxDescribeNames + 1); j > 0; j-- {
 		name := pick(r, p.Topics)
@@ -158,8 +158,8 @@ func genDescribe(p Profile, r *veritastest.Rand) core.DescribeTopics {
 // case. A variant above 0 always gives batches that differ from variant 0:
 // the first batch has more records, and an even variant also adds one batch.
 // This is the "same key, different request" case, which is a conflict.
-func Batches(p Profile, shape, segmentKey string, variant int) []core.PendingBatch {
-	r := veritastest.NewRand(shapeSeed(shape))
+func Batches(p InputProfile, shape, segmentKey string, variant int) []core.PendingBatch {
+	r := veritastest.NewRand(makeSeedShape(shape))
 	n := 1 + r.Intn(p.MaxBatches)
 	if percent(r, p.ManyBatchesPercent) {
 		n = p.ManyBatchesMin + r.Intn(p.ManyBatchesExtra+1)
@@ -177,9 +177,9 @@ func Batches(p Profile, shape, segmentKey string, variant int) []core.PendingBat
 	return out
 }
 
-// shapeSeed turns a shape name into a random seed with the FNV-1a hash. The
+// makeSeedShape turns a shape name into a random seed with the FNV-1a hash. The
 // same name always gives the same seed, and the hash is stable on every run.
-func shapeSeed(shape string) uint64 {
+func makeSeedShape(shape string) uint64 {
 	h := uint64(14695981039346656037)
 	for i := 0; i < len(shape); i++ {
 		h = (h ^ uint64(shape[i])) * 1099511628211
@@ -187,7 +187,7 @@ func shapeSeed(shape string) uint64 {
 	return h
 }
 
-func genBatch(p Profile, r *veritastest.Rand, segmentKey string) core.PendingBatch {
+func genBatch(p InputProfile, r *veritastest.Rand, segmentKey string) core.PendingBatch {
 	topics := p.Topics[:min(p.BatchTopics, len(p.Topics))]
 	return core.PendingBatch{
 		TP:      core.NewTopicPartition(pick(r, topics), int32(r.Intn(p.BatchPartitions))),
@@ -196,13 +196,13 @@ func genBatch(p Profile, r *veritastest.Rand, segmentKey string) core.PendingBat
 	}
 }
 
-// ShrinkControlPlaneOp returns simpler versions of op, simplest first: fewer
+// MinimizeControlPlaneOp returns simpler versions of op, simplest first: fewer
 // batches, smaller counts, smaller offsets and shorter keys. It never returns
 // op itself, so a caller that keeps shrinking always ends.
-func ShrinkControlPlaneOp(op ControlPlaneOp) []ControlPlaneOp {
+func MinimizeControlPlaneOp(op ControlPlaneOp) []ControlPlaneOp {
 	switch {
 	case op.CreateTopic != nil:
-		return shrinkCreateTopic(*op.CreateTopic)
+		return minimizeCreateTopic(*op.CreateTopic)
 	case op.Call == nil:
 		return nil
 	}
@@ -210,11 +210,11 @@ func ShrinkControlPlaneOp(op ControlPlaneOp) []ControlPlaneOp {
 	var ops []core.ControlPlaneOperation
 	switch o := call.Op.(type) {
 	case core.CommitSegment:
-		ops = shrinkCommit(o)
+		ops = minimizeCommit(o)
 	case core.FindSegments:
-		ops = shrinkLookup(o)
+		ops = minimizeLookup(o)
 	case core.DescribeTopics:
-		ops = shrinkDescribe(o)
+		ops = minimizeDescribe(o)
 	}
 	out := make([]ControlPlaneOp, 0, len(ops))
 	for _, o := range ops {
@@ -223,18 +223,18 @@ func ShrinkControlPlaneOp(op ControlPlaneOp) []ControlPlaneOp {
 	return out
 }
 
-func shrinkCreateTopic(c CreateTopic) []ControlPlaneOp {
+func minimizeCreateTopic(c CreateTopic) []ControlPlaneOp {
 	var out []ControlPlaneOp
 	if c.Partitions > 1 {
 		out = append(out, NewCreateTopic(c.Name, 1))
 	}
-	for _, n := range shorterStrings(c.Name) {
+	for _, n := range shortenStrings(c.Name) {
 		out = append(out, NewCreateTopic(n, c.Partitions))
 	}
 	return out
 }
 
-func shrinkCommit(c core.CommitSegment) []core.ControlPlaneOperation {
+func minimizeCommit(c core.CommitSegment) []core.ControlPlaneOperation {
 	var out []core.ControlPlaneOperation
 	add := func(key string, batches []core.PendingBatch) {
 		out = append(out, core.CommitSegment{SegmentKey: key, Batches: batches})
@@ -248,19 +248,19 @@ func shrinkCommit(c core.CommitSegment) []core.ControlPlaneOperation {
 		add(c.SegmentKey, c.Batches[:len(c.Batches)-1])
 		add(c.SegmentKey, c.Batches[1:])
 	}
-	if simpler, changed := simplerBatches(c.Batches); changed {
+	if simpler, changed := simplifyBatches(c.Batches); changed {
 		add(c.SegmentKey, simpler)
 	}
-	for _, k := range shorterStrings(c.SegmentKey) {
+	for _, k := range shortenStrings(c.SegmentKey) {
 		add(k, c.Batches)
 	}
 	return out
 }
 
-// simplerBatches sets every record count above 1 to 1 and every location
+// simplifyBatches sets every record count above 1 to 1 and every location
 // offset and length to 0. It reports false when nothing changed. It does all
 // batches at once, so a commit of 40 batches costs one candidate, not 40.
-func simplerBatches(batches []core.PendingBatch) ([]core.PendingBatch, bool) {
+func simplifyBatches(batches []core.PendingBatch) ([]core.PendingBatch, bool) {
 	out := make([]core.PendingBatch, len(batches))
 	changed := false
 	for i, b := range batches {
@@ -276,7 +276,7 @@ func simplerBatches(batches []core.PendingBatch) ([]core.PendingBatch, bool) {
 	return out, changed
 }
 
-func shrinkLookup(l core.FindSegments) []core.ControlPlaneOperation {
+func minimizeLookup(l core.FindSegments) []core.ControlPlaneOperation {
 	var out []core.ControlPlaneOperation
 	if l.MaxBytes != 0 {
 		out = append(out, core.FindSegments{TP: l.TP, From: l.From, MaxBytes: 0})
@@ -290,13 +290,13 @@ func shrinkLookup(l core.FindSegments) []core.ControlPlaneOperation {
 	if l.TP.Partition > 0 {
 		out = append(out, core.FindSegments{TP: core.NewTopicPartition(l.TP.Topic, 0), From: l.From, MaxBytes: l.MaxBytes})
 	}
-	for _, t := range shorterStrings(l.TP.Topic) {
+	for _, t := range shortenStrings(l.TP.Topic) {
 		out = append(out, core.FindSegments{TP: core.NewTopicPartition(t, l.TP.Partition), From: l.From, MaxBytes: l.MaxBytes})
 	}
 	return out
 }
 
-func shrinkDescribe(d core.DescribeTopics) []core.ControlPlaneOperation {
+func minimizeDescribe(d core.DescribeTopics) []core.ControlPlaneOperation {
 	var out []core.ControlPlaneOperation
 	if len(d.Topics) > 0 {
 		out = append(out, core.DescribeTopics{})
@@ -332,7 +332,7 @@ func formatCPOp(op core.ControlPlaneOperation) string {
 		if op.Topics == nil {
 			return "core.DescribeTopics{}"
 		}
-		return fmt.Sprintf("core.DescribeTopics{Topics: []string{%s}}", quoteAll(op.Topics))
+		return fmt.Sprintf("core.DescribeTopics{Topics: []string{%s}}", quoteEach(op.Topics))
 	}
 	return fmt.Sprintf("%#v", op)
 }
@@ -348,7 +348,7 @@ func formatBatchesField(batches []core.PendingBatch) string {
 	return ", Batches: []core.PendingBatch{" + strings.Join(parts, ", ") + "}"
 }
 
-func quoteAll(items []string) string {
+func quoteEach(items []string) string {
 	parts := make([]string, len(items))
 	for i, s := range items {
 		parts[i] = fmt.Sprintf("%q", s)

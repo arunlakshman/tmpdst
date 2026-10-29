@@ -14,11 +14,11 @@ type Reporter interface {
 	Logf(format string, args ...any)
 }
 
-// SpecComparator compares an implementation with its spec after every step.
+// SpecChecker compares an implementation with its spec after every step.
 // S holds a fresh implementation paired with its spec. Op is one operation.
 // The fields say how to build S, how to make operations, and how to run one
 // operation on both sides.
-type SpecComparator[S, Op any] struct {
+type SpecChecker[S, Op any] struct {
 	// Name is the Go type of Op as written in a regression test, for
 	// example "core.IOCall". It is the first line of the printed sequence.
 	Name string
@@ -58,7 +58,7 @@ type Failure[Op any] struct {
 }
 
 // Generate returns the operations for seed. The same seed gives the same list.
-func (c SpecComparator[S, Op]) Generate(seed uint64) []Op {
+func (c SpecChecker[S, Op]) Generate(seed uint64) []Op {
 	r := NewRand(seed)
 	ops := make([]Op, c.Ops)
 	for i := range ops {
@@ -70,7 +70,7 @@ func (c SpecComparator[S, Op]) Generate(seed uint64) []Op {
 // Replay runs ops on a fresh pair. It returns the index of the first failing
 // operation and its error, or -1 and nil. A panic in Step or Invariant counts
 // as a failure of that operation.
-func (c SpecComparator[S, Op]) Replay(ops []Op) (int, error) {
+func (c SpecChecker[S, Op]) Replay(ops []Op) (int, error) {
 	s := c.New()
 	for i, op := range ops {
 		if err := c.step(s, op); err != nil {
@@ -80,7 +80,7 @@ func (c SpecComparator[S, Op]) Replay(ops []Op) (int, error) {
 	return -1, nil
 }
 
-func (c SpecComparator[S, Op]) step(s S, op Op) (err error) {
+func (c SpecChecker[S, Op]) step(s S, op Op) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = fmt.Errorf("panic: %v", p)
@@ -100,7 +100,7 @@ func (c SpecComparator[S, Op]) step(s S, op Op) (err error) {
 // RunSeed makes the sequence for seed and runs it. If it fails, RunSeed
 // shrinks the sequence and returns the failure. If it passes, RunSeed returns
 // nil.
-func (c SpecComparator[S, Op]) RunSeed(seed uint64) *Failure[Op] {
+func (c SpecChecker[S, Op]) RunSeed(seed uint64) *Failure[Op] {
 	ops := c.Generate(seed)
 	i, err := c.Replay(ops)
 	if err == nil {
@@ -124,12 +124,12 @@ func (c SpecComparator[S, Op]) RunSeed(seed uint64) *Failure[Op] {
 // operation. Every choice follows a fixed order, so the result is the same
 // on every run. Any failure is accepted, not only the first one, because a
 // different failure is also a real bug.
-func (c SpecComparator[S, Op]) shrink(ops []Op, err error) ([]Op, int, error) {
+func (c SpecChecker[S, Op]) shrink(ops []Op, err error) ([]Op, int, error) {
 	budget := c.MaxShrinkRuns
 	if budget == 0 {
 		budget = 5000
 	}
-	s := shrinkState[Op]{ops: ops, err: err, budget: budget, replay: c.Replay}
+	s := minimizeState[Op]{ops: ops, err: err, budget: budget, replay: c.Replay}
 	for progress := true; progress && s.runs < budget; {
 		progress = s.dropChunks()
 		if s.shrinkOne(c.Shrink) {
@@ -142,9 +142,9 @@ func (c SpecComparator[S, Op]) shrink(ops []Op, err error) ([]Op, int, error) {
 	return s.ops, s.runs, s.err
 }
 
-// shrinkState holds the failing sequence while it shrinks. try reports whether
+// minimizeState holds the failing sequence while it shrinks. try reports whether
 // cand fails. If it does, cand becomes the new sequence.
-type shrinkState[Op any] struct {
+type minimizeState[Op any] struct {
 	ops    []Op
 	err    error
 	runs   int
@@ -152,7 +152,7 @@ type shrinkState[Op any] struct {
 	replay func([]Op) (int, error)
 }
 
-func (s *shrinkState[Op]) try(cand []Op) bool {
+func (s *minimizeState[Op]) try(cand []Op) bool {
 	if s.runs >= s.budget {
 		return false
 	}
@@ -165,7 +165,7 @@ func (s *shrinkState[Op]) try(cand []Op) bool {
 	return true
 }
 
-func (s *shrinkState[Op]) dropChunks() bool {
+func (s *minimizeState[Op]) dropChunks() bool {
 	progress := false
 	for size := max(len(s.ops)/2, 1); size >= 1; size /= 2 {
 		for i := 0; i+size <= len(s.ops); {
@@ -180,7 +180,7 @@ func (s *shrinkState[Op]) dropChunks() bool {
 	return progress
 }
 
-func (s *shrinkState[Op]) shrinkOne(shrink func(Op) []Op) bool {
+func (s *minimizeState[Op]) shrinkOne(shrink func(Op) []Op) bool {
 	if shrink == nil {
 		return false
 	}
@@ -201,7 +201,7 @@ func (s *shrinkState[Op]) shrinkOne(shrink func(Op) []Op) bool {
 	return progress
 }
 
-func (s *shrinkState[Op]) shrinkAll(shrinkAll func([]Op) [][]Op) bool {
+func (s *minimizeState[Op]) shrinkAll(shrinkAll func([]Op) [][]Op) bool {
 	if shrinkAll == nil {
 		return false
 	}
@@ -209,7 +209,7 @@ func (s *shrinkState[Op]) shrinkAll(shrinkAll func([]Op) [][]Op) bool {
 }
 
 // Literal returns ops as Go source text of type []c.Name.
-func (c SpecComparator[S, Op]) Literal(ops []Op) string {
+func (c SpecChecker[S, Op]) Literal(ops []Op) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[]%s{\n", c.Name)
 	for _, op := range ops {
@@ -222,7 +222,7 @@ func (c SpecComparator[S, Op]) Literal(ops []Op) string {
 // Report describes f: the seed, how to replay it, and the shrunk sequence.
 // It always prints a replay line. If replay is empty, the line says that no
 // replay command is configured.
-func (c SpecComparator[S, Op]) Report(f *Failure[Op], replay string) string {
+func (c SpecChecker[S, Op]) Report(f *Failure[Op], replay string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "seed %d: operation %d of the shrunk sequence failed: %v\n", f.Seed, len(f.Ops), f.Err)
 	fmt.Fprintf(&b, "(shrunk from %d operations to %d in %d runs)\n", f.Original, len(f.Ops), f.Runs)
@@ -251,7 +251,7 @@ type Options struct {
 
 // Run runs c on the seeds that o chooses. It reports the first failure after
 // shrinking it.
-func Run[S, Op any](t Reporter, c SpecComparator[S, Op], o Options) {
+func Run[S, Op any](t Reporter, c SpecChecker[S, Op], o Options) {
 	t.Helper()
 	report := func(f *Failure[Op]) {
 		t.Helper()

@@ -2,11 +2,11 @@ package generator
 
 import "manifester/internal/verify/veritas/veritastest"
 
-// Profile holds the weights and value ranges of both generators. A weight is
+// InputProfile holds the weights and value ranges of both generators. A weight is
 // a relative chance, so a weight of 0 turns that kind of operation off. A
 // percent is a chance out of 100. The named constructors below are the normal
-// way to get a Profile; change a field only to build a new named profile.
-type Profile struct {
+// way to get a InputProfile; change a field only to build a new named profile.
+type InputProfile struct {
 	// Name is the profile name. Suites use it as the subtest name.
 	Name string
 
@@ -75,16 +75,16 @@ type Profile struct {
 	UnknownTopicPercent int
 }
 
-// Profiles returns every named profile, in a fixed order.
-func Profiles() []Profile {
-	return []Profile{Default(), SmallKeys(), ReplayHeavy(), InvalidHeavy(), ManyBatches(), LookupCuts()}
+// InputProfiles returns every named profile, in a fixed order.
+func InputProfiles() []InputProfile {
+	return []InputProfile{Default(), FewDistinctKeys(), MostlyRepeats(), MostlyInvalid(), ManyBatches(), LookupCuts()}
 }
 
 // Default is the balanced profile: every kind of operation, a few keys and
 // topics, short commits, and a small share of replays, conflicts and invalid
 // requests.
-func Default() Profile {
-	return Profile{
+func Default() InputProfile {
+	return InputProfile{
 		Name:      "default",
 		PutWeight: 3, GetWeight: 2, DeleteWeight: 1, ListWeight: 1,
 		ObjectKeys:      []string{"a", "a/b", "a/c", "b"},
@@ -121,9 +121,9 @@ func Default() Profile {
 	}
 }
 
-// SmallKeys uses two object keys, two segment keys and one batch partition, so
+// FewDistinctKeys uses two object keys, two segment keys and one batch partition, so
 // operations collide on the same key or partition all the time.
-func SmallKeys() Profile {
+func FewDistinctKeys() InputProfile {
 	p := Default()
 	p.Name = "small-keys"
 	p.ObjectKeys = []string{"a", "a/b"}
@@ -137,9 +137,9 @@ func SmallKeys() Profile {
 	return p
 }
 
-// ReplayHeavy has three segment keys and spends most commits on replays,
+// MostlyRepeats has three segment keys and spends most commits on replays,
 // conflicts and the same batches under a fresh key.
-func ReplayHeavy() Profile {
+func MostlyRepeats() InputProfile {
 	p := Default()
 	p.Name = "replay-heavy"
 	p.CreateTopicWeight, p.CommitWeight, p.LookupWeight, p.DescribeWeight = 2, 24, 4, 2
@@ -150,9 +150,9 @@ func ReplayHeavy() Profile {
 	return p
 }
 
-// InvalidHeavy sends many malformed requests: empty keys, short or negative
+// MostlyInvalid sends many malformed requests: empty keys, short or negative
 // ranges, zero records, negative partitions, empty topics and From = -1.
-func InvalidHeavy() Profile {
+func MostlyInvalid() InputProfile {
 	p := Default()
 	p.Name = "invalid-heavy"
 	p.EmptyKeyPercent = 30
@@ -166,7 +166,7 @@ func InvalidHeavy() Profile {
 
 // ManyBatches makes most commits long, with 40 or more batches, so partitions
 // build long runs and one commit touches the same partition many times.
-func ManyBatches() Profile {
+func ManyBatches() InputProfile {
 	p := Default()
 	p.Name = "many-batches"
 	p.SegmentKeys = 6
@@ -178,7 +178,7 @@ func ManyBatches() Profile {
 
 // LookupCuts sends mostly Lookup calls with MaxBytes values that sit on the
 // byte totals of a run, and with From inside long runs.
-func LookupCuts() Profile {
+func LookupCuts() InputProfile {
 	p := Default()
 	p.Name = "lookup-cuts"
 	p.CreateTopicWeight, p.CommitWeight, p.LookupWeight, p.DescribeWeight = 2, 12, 20, 2
@@ -193,9 +193,9 @@ func LookupCuts() Profile {
 	return p
 }
 
-// pickWeighted returns the index of one weight, chosen with a chance in
+// chooseByWeight returns the index of one weight, chosen with a chance in
 // proportion to the weights. The weights must not all be zero.
-func pickWeighted(r *veritastest.Rand, weights ...int) int {
+func chooseByWeight(r *veritastest.Rand, weights ...int) int {
 	total := 0
 	for _, w := range weights {
 		total += w

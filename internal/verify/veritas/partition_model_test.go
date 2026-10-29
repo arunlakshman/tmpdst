@@ -119,7 +119,7 @@ func checkPartitionState(s *partitionPair) error {
 }
 
 func TestPartitionMatchesNaiveModel(t *testing.T) {
-	c := veritastest.SpecComparator[*partitionPair, partitionModelOp]{
+	c := veritastest.SpecChecker[*partitionPair, partitionModelOp]{
 		Name:      "partitionModelOp",
 		New:       func() *partitionPair { return &partitionPair{spec: &Partition{}, twin: &Partition{}} },
 		Gen:       genPartitionModelOp,

@@ -22,7 +22,7 @@ https://www.amazon.science/publications/using-lightweight-formal-methods-to-vali
   it a reference model). The paper's models are about 1% of the implementation.
   Our three specs are about 400 lines of Go.
 - Property-based testing: make random operations, run each on the spec and on
-  the subject, compare the results, check invariants (`veritastest.SpecComparator`).
+  the subject, compare the results, check invariants (`veritastest.SpecChecker`).
 - Split "correct" into separate checks, each with its own tool (C1 to C4 below).
 - Shrink a failing sequence to a small one. The paper cut one failure from 61
   operations to 6.
@@ -84,7 +84,7 @@ failing sequence as a Go list. To add a new spec, follow `veritastest/README.md`
 
 | Path | Purpose |
 | --- | --- |
-| `veritastest/` | `SpecComparator`: compares after every step and shrinks |
+| `veritastest/` | `SpecChecker`: compares after every step and shrinks |
 | `veritastest/generator/` | random operations in named profiles |
 | `veritastest/observation/` | one result shape, so results compare as values |
 | `veritastest/suites/` | shared tests for each spec; they accept any subject |

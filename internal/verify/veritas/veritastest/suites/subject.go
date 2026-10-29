@@ -36,7 +36,7 @@ type ControlPlaneSubject interface {
 // has no spec hash.
 type PartitionSubject interface {
 	Append(batch [][]byte) core.Offset
-	Read(from core.Offset, max int) ([]veritas.Record, bool)
+	Read(from core.Offset, max int) ([]veritas.StoredRecord, bool)
 	HighWatermark() core.Offset
 	StateHash() (hash uint64, ok bool)
 }
@@ -89,7 +89,7 @@ func NewSpecPartitionSubject() PartitionSubject {
 
 func (s *specPartitionSubject) Append(batch [][]byte) core.Offset { return s.p.Append(batch) }
 
-func (s *specPartitionSubject) Read(from core.Offset, max int) ([]veritas.Record, bool) {
+func (s *specPartitionSubject) Read(from core.Offset, max int) ([]veritas.StoredRecord, bool) {
 	return s.p.Read(from, max)
 }
 
@@ -99,8 +99,8 @@ func (s *specPartitionSubject) StateHash() (uint64, bool) { return s.p.StateHash
 
 // AllObjectProfiles returns every generator profile. A caller runs the object
 // store suite once for each profile, as a subtest named after the profile.
-func AllObjectProfiles() []generator.Profile { return generator.Profiles() }
+func AllObjectProfiles() []generator.InputProfile { return generator.InputProfiles() }
 
 // AllControlPlaneProfiles returns every generator profile. A caller runs the
 // control plane suite once for each profile, as a subtest named after it.
-func AllControlPlaneProfiles() []generator.Profile { return generator.Profiles() }
+func AllControlPlaneProfiles() []generator.InputProfile { return generator.InputProfiles() }

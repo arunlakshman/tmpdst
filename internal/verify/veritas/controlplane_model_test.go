@@ -270,7 +270,7 @@ func checkCPModelState(s cpModelPair) error {
 }
 
 func TestControlPlaneMatchesNaiveModel(t *testing.T) {
-	c := veritastest.SpecComparator[cpModelPair, cpModelOp]{
+	c := veritastest.SpecChecker[cpModelPair, cpModelOp]{
 		Name:      "cpModelOp",
 		New:       func() cpModelPair { return cpModelPair{NewControlPlane(), newNaiveControlPlane()} },
 		Gen:       genCPModelOp,

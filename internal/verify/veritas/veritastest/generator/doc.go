@@ -1,7 +1,7 @@
 // Package generator makes the random operations that every conformance suite
 // feeds to a spec and to the subject under test. One generator exists for each
 // spec, so every layer (sim engine, S3 adapter, applier, memstore) sees the
-// same kinds of operations. A Profile changes the weights and the value ranges,
+// same kinds of operations. An InputProfile changes the weights and the value ranges,
 // and the coverage test in this package shows which interesting cases each
 // profile reaches.
 //

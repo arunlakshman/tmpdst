@@ -6,21 +6,21 @@ import (
 	"manifester/internal/core"
 )
 
-// hasher is FNV-1a over a canonical byte stream. Every variable-length field
+// stateHasher is FNV-1a over a canonical byte stream. Every variable-length field
 // is length-prefixed so distinct states cannot collide by concatenation.
-type hasher = core.Hasher
+type stateHasher = core.Hasher
 
-func newHasher() hasher { return core.NewHasher() }
+func newStateHasher() stateHasher { return core.NewHasher() }
 
-func hashTP(h *hasher, tp core.TopicPartition) {
+func hashTopicPartition(h *stateHasher, tp core.TopicPartition) {
 	h.Str(tp.Topic)
 	h.U64(uint64(tp.Partition))
 }
 
-func hashRanges(h *hasher, rs []core.BatchRange) {
+func hashBatchRanges(h *stateHasher, rs []core.BatchRange) {
 	h.U64(uint64(len(rs)))
 	for _, r := range rs {
-		hashTP(h, r.TP)
+		hashTopicPartition(h, r.TP)
 		h.U64(uint64(r.Base))
 		h.U64(uint64(r.Count))
 		h.Str(r.Loc.Key)
@@ -43,11 +43,11 @@ func sortedKeys[V any](m map[string]V) []string {
 // whether it was stored as nil or empty.
 func clone(b []byte) []byte { return append([]byte{}, b...) }
 
-// extendPrefix folds keys[len(pre)-1, n) onto a prefix cache. pre[0] is the
-// empty hasher. step receives the key index and the hash of the keys before it.
-func extendPrefix(pre []hasher, n int, step func(i int, h hasher) hasher) []hasher {
+// nextPrefix folds keys[len(pre)-1, n) onto a prefix cache. pre[0] is the
+// empty stateHasher. step receives the key index and the hash of the keys before it.
+func nextPrefix(pre []stateHasher, n int, step func(i int, h stateHasher) stateHasher) []stateHasher {
 	if len(pre) == 0 {
-		pre = append(pre, newHasher())
+		pre = append(pre, newStateHasher())
 	}
 	for i := len(pre) - 1; i < n; i++ {
 		pre = append(pre, step(i, pre[i]))

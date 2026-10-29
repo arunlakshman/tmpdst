@@ -65,7 +65,12 @@ type Machine struct {
 	downUntil  core.NodeTime
 	crashed    bool
 	needsCkpt  bool // hit a tomb; must restore before catch-up from zero
+	ckptRetry  bool // the last checkpoint read failed; read again before catch-up
 	seeds      []topicSeed
+
+	readWaiters  []readWaiter // lookups and describes waiting for a fresh tail
+	tailsStarted uint64       // tail checks started so far
+	tailRound    uint64       // round of the tail check in flight
 }
 
 type topicSeed struct {
@@ -154,6 +159,7 @@ func (m *Machine) Step(ev core.Event) []core.Action {
 	default:
 		return nil
 	}
+	acts = append(acts, m.serveReads()...)
 	return m.withReplies(acts)
 }
 
@@ -231,6 +237,7 @@ func (m *Machine) onCheckTailDone(d core.LogGetEndDone) []core.Action {
 	}
 	m.notePullOK()
 	m.goalTail = d.Tail
+	m.noteTail(m.tailRound, d.Tail)
 	return m.progress()
 }
 
@@ -406,6 +413,8 @@ func (m *Machine) emitCheckTail() []core.Action {
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingTail
+	m.tailsStarted++
+	m.tailRound = m.tailsStarted
 	return []core.Action{core.LogGetEnd{Req: m.pending}}
 }
 
@@ -463,12 +472,15 @@ func (m *Machine) StateHash() uint64 {
 	h.U64(uint64(m.pendingKind))
 	h.U64(uint64(m.fillSlot))
 	h.Bool(m.holeArmed)
+	h.Bool(m.ckptRetry)
 	h.U64(uint64(m.promoSlot))
 	h.Bool(m.lowerSeen)
 	h.U64(uint64(m.ckptSlot))
 	h.U64(uint64(len(m.queue)))
 	h.U64(uint64(len(m.flights)))
 	h.U64(uint64(len(m.waiters)))
+	h.U64(uint64(len(m.readWaiters)))
+	h.U64(m.tailsStarted)
 	h.U64(uint64(m.cfg.CatchUpEvery))
 	h.U64(uint64(m.cfg.ReadLimit))
 	h.U64(uint64(m.cfg.HoleAfter))

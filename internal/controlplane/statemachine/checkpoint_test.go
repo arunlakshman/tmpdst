@@ -155,3 +155,41 @@ func TestRestoreMissFallsThroughToCatchUp(t *testing.T) {
 		t.Fatalf("Applied = %d, want 0", m.Applied())
 	}
 }
+
+// A checkpoint read with a changed byte is read again, never restored.
+func TestRestoreReadsAgainOnBadCRC(t *testing.T) {
+	src := newMachine(t, statemachine.Config{K: 1, Writer: "w"})
+	var buf bytes.Buffer
+	if err := src.Fold().Snapshot(&buf, 5); err != nil {
+		t.Fatal(err)
+	}
+	bad := bytes.Clone(buf.Bytes())
+	bad[len(bad)/2] ^= 1
+
+	m := newMachine(t, statemachine.Config{K: 1, Writer: "w", CatchUpEvery: core.Millisecond, CkptKey: "ckpt/latest"})
+	get := m.Step(core.Event{Body: core.NodeStarted{}})[0].(core.ObjectGet)
+	acts := m.Step(core.Event{Body: core.ObjectGetDone{Req: get.Req, Data: bad, Err: core.OK}})
+	again, ok := acts[0].(core.ObjectGet)
+	if len(acts) != 1 || !ok || m.Applied() != 0 {
+		t.Fatalf("want one new ObjectGet and nothing restored, got %v, applied %d", acts, m.Applied())
+	}
+	m.Step(core.Event{Body: core.ObjectGetDone{Req: again.Req, Data: buf.Bytes(), Err: core.OK}})
+	if m.Applied() != 5 {
+		t.Fatalf("Applied after a good read = %d, want 5", m.Applied())
+	}
+}
+
+// A failed checkpoint read must not start catch-up from slot 0: the log may be trimmed.
+func TestFailedCheckpointReadIsRetried(t *testing.T) {
+	m := newMachine(t, statemachine.Config{K: 1, Writer: "w", CatchUpEvery: core.Millisecond, CkptKey: "ckpt/latest"})
+	get := m.Step(core.Event{Body: core.NodeStarted{}})[0].(core.ObjectGet)
+	acts := m.Step(core.Event{Body: core.ObjectGetDone{Req: get.Req, Err: core.ErrUnavailable}})
+	timer, ok := findTimer(acts, statemachine.TimerCkpt)
+	if !ok || len(acts) != 1 {
+		t.Fatalf("want one checkpoint retry timer, got %v", acts)
+	}
+	acts = m.Step(core.Event{At: 1, Body: core.TimerFired{ID: timer.ID, Gen: timer.Gen}})
+	if _, ok := acts[0].(core.ObjectGet); !ok || m.Ready() {
+		t.Fatalf("want a new ObjectGet and not Ready, got %v", acts)
+	}
+}

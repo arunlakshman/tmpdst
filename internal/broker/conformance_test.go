@@ -11,7 +11,7 @@ import (
 	"manifester/internal/verify/veritas"
 	"manifester/internal/verify/veritas/veritastest"
 	"manifester/internal/verify/veritas/veritastest/runcontrol"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 // Conformance C1 tests the REAL broker logic against SIMULATED fakes of the
@@ -198,7 +198,7 @@ func (s *c1) fetch(c *client, op c1op) error {
 	if p.ErrorCode != 0 || p.LastStableOffset != int64(hwm) || p.LogStartOffset != 0 {
 		return fmt.Errorf("fetch %v@%d: error %d lso %d log start %d", tp, from, p.ErrorCode, p.LastStableOffset, p.LogStartOffset)
 	}
-	bs, err := kwire.SplitBatches(p.RecordBatches)
+	bs, err := kafkawire.SplitBatches(p.RecordBatches)
 	if err != nil {
 		return fmt.Errorf("fetch %v@%d: %w", tp, from, err)
 	}
@@ -213,7 +213,7 @@ func (s *c1) fetch(c *client, op c1op) error {
 	}
 	next := core.Offset(-1)
 	for _, b := range bs {
-		bt, err := kwire.ParseBatch(b) // verifies the CRC
+		bt, err := kafkawire.ParseBatch(b) // verifies the CRC
 		if err != nil {
 			return fmt.Errorf("fetch %v@%d: %w", tp, from, err)
 		}

@@ -9,8 +9,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/internal/core"
-	"manifester/internal/wire/format"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
+	"manifester/internal/wire/segmentformat"
 )
 
 func TestApiVersions(t *testing.T) {
@@ -21,7 +21,7 @@ func TestApiVersions(t *testing.T) {
 		q.ClientSoftwareName, q.ClientSoftwareVersion = "x", "1"
 		return q
 	}()).(*kmsg.ApiVersionsResponse)
-	if r.ErrorCode != 0 || len(r.ApiKeys) != len(kwire.Supported()) {
+	if r.ErrorCode != 0 || len(r.ApiKeys) != len(kafkawire.Supported()) {
 		t.Fatalf("got %+v", r)
 	}
 	for _, k := range r.ApiKeys {
@@ -30,7 +30,7 @@ func TestApiVersions(t *testing.T) {
 		}
 	}
 	// Unsupported version: raw frame, answered with UNSUPPORTED_VERSION at v0.
-	hd := kwire.RequestHeader{APIKey: kwire.KeyApiVersions, APIVersion: 99, CorrelationID: 77, ClientID: "x"}
+	hd := kafkawire.RequestHeader{APIKey: kafkawire.KeyApiVersions, APIVersion: 99, CorrelationID: 77, ClientID: "x"}
 	c.want = append(c.want, hd)
 	frame := binary.BigEndian.AppendUint16(nil, 18)
 	frame = binary.BigEndian.AppendUint16(frame, 99)
@@ -40,7 +40,7 @@ func TestApiVersions(t *testing.T) {
 	h.do(core.BytesReceived{Conn: 1, Data: binary.BigEndian.AppendUint32(nil, uint32(len(frame)))})
 	h.do(core.BytesReceived{Conn: 1, Data: frame}) // split across chunks
 	u := h.next(c).(*kmsg.ApiVersionsResponse)
-	if u.ErrorCode != kwire.ErrCodeUnsupportedVersion {
+	if u.ErrorCode != kafkawire.ErrCodeUnsupportedVersion {
 		t.Fatalf("error %d", u.ErrorCode)
 	}
 	if h.closed[1] {
@@ -96,24 +96,24 @@ func TestProduceFetchRoundTrip(t *testing.T) {
 		t.Fatalf("results %+v", ps)
 	}
 	p := fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)))
-	bs, err := kwire.SplitBatches(p.RecordBatches)
+	bs, err := kafkawire.SplitBatches(p.RecordBatches)
 	if err != nil || len(bs) != 2 || p.HighWatermark != 5 || p.LastStableOffset != 5 || p.LogStartOffset != 0 {
 		t.Fatalf("fetch: %v %d batches hwm %d", err, len(bs), p.HighWatermark)
 	}
 	for i, want := range []int64{0, 2} {
-		bt, err := kwire.ParseBatch(bs[i])
+		bt, err := kafkawire.ParseBatch(bs[i])
 		if err != nil || bt.BaseOffset != want || bt.PartitionLeaderEpoch != 0 {
 			t.Fatalf("batch %d: %v %+v", i, err, bt)
 		}
 	}
 	// From the middle: the containing batch is returned whole.
 	p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 3, 1<<20)))
-	if bs, _ := kwire.SplitBatches(p.RecordBatches); len(bs) != 1 {
+	if bs, _ := kafkawire.SplitBatches(p.RecordBatches); len(bs) != 1 {
 		t.Fatalf("mid fetch %d batches", len(bs))
 	}
 	// Partition limit: at least one batch, no more than fits.
 	p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1)))
-	if bs, _ := kwire.SplitBatches(p.RecordBatches); len(bs) != 1 {
+	if bs, _ := kafkawire.SplitBatches(p.RecordBatches); len(bs) != 1 {
 		t.Fatalf("limited fetch %d batches", len(bs))
 	}
 	if p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 5, 1<<20))); len(p.RecordBatches) != 0 || p.ErrorCode != 0 || p.HighWatermark != 5 {
@@ -137,7 +137,7 @@ func TestProduceErrors(t *testing.T) {
 	// A transactional batch needs a valid CRC, so build one with the flag.
 	p := params
 	p.Attributes, p.ProducerID, p.ProducerEpoch, p.BaseSequence = 0x10, 1000, 0, 0
-	txn, _ = kwire.BuildBatch(p, []kmsg.Record{{Value: []byte("x")}})
+	txn, _ = kafkawire.BuildBatch(p, []kmsg.Record{{Value: []byte("x")}})
 	two := append(plain(t, "x"), plain(t, "y")...)
 	h.send(c, verProduce, prodReq(-1,
 		e("nope", 0, plain(t, "x")), e("t", 9, plain(t, "x")), e("t", 0, bad),
@@ -327,7 +327,7 @@ func TestCorruptGetRetried(t *testing.T) {
 			h.fireAll()
 		}
 		p := fetched(h.next(c))
-		_, err := kwire.ParseBatch(p.RecordBatches)
+		_, err := kafkawire.ParseBatch(p.RecordBatches)
 		switch bug {
 		case InjectedBugNone:
 			if err != nil || len(factsNamed(h.all, "corruption_detected")) != 1 {
@@ -368,7 +368,7 @@ func TestWrongOffsetMutant(t *testing.T) {
 	c := h.open(1)
 	h.produceOne(c, e("t", 0, plain(t, "a")))
 	p := fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)))
-	if bt, err := kwire.ParseBatch(p.RecordBatches); err != nil || bt.BaseOffset != 1 {
+	if bt, err := kafkawire.ParseBatch(p.RecordBatches); err != nil || bt.BaseOffset != 1 {
 		t.Fatalf("mutant base %v %v", bt.BaseOffset, err)
 	}
 }
@@ -551,8 +551,8 @@ func FuzzBrokerBytes(f *testing.F) {
 
 func mustFrames(t testing.TB) [][]byte {
 	enc := func(ver int16, req kmsg.Request) []byte {
-		hd := kwire.RequestHeader{APIKey: req.Key(), APIVersion: ver, CorrelationID: 1, ClientID: "f"}
-		b, err := kwire.Codec{}.EncodeRequest(hd, req)
+		hd := kafkawire.RequestHeader{APIKey: req.Key(), APIVersion: ver, CorrelationID: 1, ClientID: "f"}
+		b, err := kafkawire.Codec{}.EncodeRequest(hd, req)
 		if err != nil {
 			panic(err)
 		}
@@ -673,7 +673,7 @@ func TestTwoSegmentsInFlightCommitInOrder(t *testing.T) {
 var segKeyRE = regexp.MustCompile(`^seg/[0-9a-f]{32}$`)
 
 // Keys are seg/<32 hex> drawn from the Environment stream: the same seed gives the
-// same keys, and they equal format.SegmentKey of the env's IDs.
+// same keys, and they equal segmentformat.SegmentKey of the env's IDs.
 func TestSegmentKeysAreFlatAndDeterministic(t *testing.T) {
 	run := func() []string {
 		h := startedHarness(t, DefaultConfig())
@@ -689,7 +689,7 @@ func TestSegmentKeysAreFlatAndDeterministic(t *testing.T) {
 	}
 	env := &testEnv{state: 7}
 	for _, k := range a {
-		if !segKeyRE.MatchString(k) || k != format.SegmentKey(env.NewID()) {
+		if !segKeyRE.MatchString(k) || k != segmentformat.SegmentKey(env.NewID()) {
 			t.Fatalf("key %q", k)
 		}
 	}

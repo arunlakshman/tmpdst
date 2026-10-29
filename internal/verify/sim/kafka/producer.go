@@ -9,7 +9,7 @@ import (
 	"manifester/internal/core"
 	"manifester/internal/verify/sim"
 	"manifester/internal/verify/sim/internal/session"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 // batch is one produce batch for one partition, retried unchanged until
@@ -125,7 +125,7 @@ func (w *Workload) pickCodec() int16 {
 	if c := w.env.Intn(6); c >= 2 {
 		return int16(c - 1)
 	}
-	return kwire.CodecNone
+	return kafkawire.CodecNone
 }
 
 // newBatches builds the next request: 1 or 2 batches for distinct partitions.
@@ -158,7 +158,7 @@ func (w *Workload) newBatches(c *client) {
 			recs[i] = kmsg.Record{Value: []byte(v)}
 		}
 		b.idem = w.env.Intn(duplicateCheckEvery) == 0
-		pp := kwire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1, FirstTimestamp: 1, MaxTimestamp: 1}
+		pp := kafkawire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1, FirstTimestamp: 1, MaxTimestamp: 1}
 		if b.idem {
 			pp.ProducerID, pp.ProducerEpoch, pp.BaseSequence = duplicateCheckProducerID, 0, 0
 		}

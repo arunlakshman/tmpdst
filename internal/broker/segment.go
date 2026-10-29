@@ -6,7 +6,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/internal/core"
-	"manifester/internal/wire/format"
+	"manifester/internal/wire/segmentformat"
 )
 
 // partitionBatch is one admitted partition batch on its way to a segment.
@@ -153,11 +153,11 @@ func (b *Broker) seal(why string) []core.Action {
 }
 
 func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
-	fb := make([]format.Batch, len(bs))
+	fb := make([]segmentformat.Batch, len(bs))
 	for i, pb := range bs {
-		fb[i] = format.Batch{TP: pb.tp, Records: uint32(pb.records), Data: pb.data}
+		fb[i] = segmentformat.Batch{TP: pb.tp, Records: uint32(pb.records), Data: pb.data}
 	}
-	data, entries, err := format.Encode(fb)
+	data, entries, err := segmentformat.Encode(fb)
 	if err != nil {
 		b.env.Unreachable("broker: admitted batches cannot be encoded")
 		for _, pb := range bs {
@@ -166,7 +166,7 @@ func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
 		return nil
 	}
 	s := &segment{id: b.id(), batches: bs, data: data,
-		key: format.SegmentKey(b.env.NewID()), sealedAt: b.now}
+		key: segmentformat.SegmentKey(b.env.NewID()), sealedAt: b.now}
 	for i, pb := range bs {
 		pb.loc = entries[i].Ref(s.key)
 	}
@@ -222,7 +222,7 @@ func (b *Broker) commit(s *segment) []core.Action {
 	}
 	key := s.key
 	if b.cfg.InjectedBug == InjectedBugFreshKeyOnRetry && s.attempts > 0 {
-		key = format.SegmentKey(b.env.NewID())
+		key = segmentformat.SegmentKey(b.env.NewID())
 	}
 	return []core.Action{core.ControlPlaneCall{Req: s.req, Op: core.CommitSegment{
 		SegmentKey: key, Batches: pend}}}

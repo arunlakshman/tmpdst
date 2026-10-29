@@ -410,7 +410,7 @@ included. Left running for a day by mistake: about $7.
 
 All `manibroker_*`, `manicp_*` and `node_*` series in the dashboards were checked against the Go code and
 `docs/observability.md` (the `manibroker_s3_*`/`manicp_dynamo_*` families are composed from a Subsystem in
-`internal/sys/awsobs`, confirmed in code). Not confirmed against a live scrape: the CloudWatch series from Alloy's embedded YACE
+`internal/system/awsmetrics`, confirmed in code). Not confirmed against a live scrape: the CloudWatch series from Alloy's embedded YACE
 (`aws_s3_first_byte_latency_average`, `aws_s3_total_request_latency_{average,maximum}`, `aws_s3_{all,put,get}_requests_sum`,
 `aws_s3_{4xx,5xx}_errors_sum`, `aws_dynamodb_successful_request_latency_{average,maximum}`,
 `aws_dynamodb_consumed_{read,write}_capacity_units_sum`, `aws_dynamodb_provisioned_*_capacity_units_average`,

@@ -8,7 +8,7 @@ import (
 
 	"manifester/internal/core"
 	"manifester/internal/verify/veritas"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 // testEnv is a seeded core.Environment that records assertion violations. It keeps its
@@ -60,9 +60,9 @@ func (e *testEnv) Unreachable(p core.PropertyID, _ ...core.ContextPair) {
 // client is the test's view of one connection.
 type client struct {
 	id   core.ConnID
-	want []kwire.RequestHeader
+	want []kafkawire.RequestHeader
 	out  [][]byte // response frames (length prefix stripped) not yet decoded
-	fr   *kwire.Framer
+	fr   *kafkawire.Framer
 	corr int32
 }
 
@@ -236,7 +236,7 @@ func (h *harness) flush() { h.fire(timerFlush) }
 // ---- client side ----
 
 func (h *harness) open(id core.ConnID) *client {
-	c := &client{id: id, fr: kwire.NewFramer(1 << 26)}
+	c := &client{id: id, fr: kafkawire.NewFramer(1 << 26)}
 	h.clients[id] = c
 	h.do(core.ConnOpened{Conn: id, Peer: "test"})
 	return c
@@ -245,8 +245,8 @@ func (h *harness) open(id core.ConnID) *client {
 // frame encodes a request without sending it.
 func (h *harness) frame(c *client, ver int16, req kmsg.Request) []byte {
 	c.corr++
-	hd := kwire.RequestHeader{APIKey: req.Key(), APIVersion: ver, CorrelationID: c.corr, ClientID: "test"}
-	b, err := kwire.Codec{}.EncodeRequest(hd, req)
+	hd := kafkawire.RequestHeader{APIKey: req.Key(), APIVersion: ver, CorrelationID: c.corr, ClientID: "test"}
+	b, err := kafkawire.Codec{}.EncodeRequest(hd, req)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func (h *harness) next(c *client) kmsg.Response {
 		h.t.Fatalf("conn %d: no response", c.id)
 	}
 	hd := c.want[0]
-	resp, err := kwire.Codec{}.DecodeResponse(hd, c.out[0])
+	resp, err := kafkawire.Codec{}.DecodeResponse(hd, c.out[0])
 	if err != nil {
 		h.t.Fatalf("conn %d: decode %d: %v", c.id, hd.APIKey, err)
 	}
@@ -289,7 +289,7 @@ const (
 	verMetadata = 9
 )
 
-var params = kwire.BatchParams{FirstTimestamp: 1000, MaxTimestamp: 1000}
+var params = kafkawire.BatchParams{FirstTimestamp: 1000, MaxTimestamp: 1000}
 
 // mkBatch builds a batch of len(vals) records; pid -1 means non-idempotent.
 func mkBatch(t testing.TB, pid int64, epoch int16, seq int32, vals ...string) []byte {
@@ -300,7 +300,7 @@ func mkBatch(t testing.TB, pid int64, epoch int16, seq int32, vals ...string) []
 	}
 	p := params
 	p.ProducerID, p.ProducerEpoch, p.BaseSequence = pid, epoch, seq
-	b, err := kwire.BuildBatch(p, recs)
+	b, err := kafkawire.BuildBatch(p, recs)
 	if err != nil {
 		t.Fatal(err)
 	}

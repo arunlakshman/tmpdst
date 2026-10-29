@@ -7,7 +7,7 @@ import (
 
 	"manifester/internal/core"
 	"manifester/internal/verify/sim"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 // The oracle's model of one partition's committed log: the control plane's
@@ -110,7 +110,7 @@ func (o *expectedLogChecker) readRange(v sim.View, r core.BatchRange, det []core
 	if !in {
 		return nil
 	}
-	bt, err := kwire.ParseBatch(obj[r.Loc.Off:end])
+	bt, err := kafkawire.ParseBatch(obj[r.Loc.Off:end])
 	as.Always(err == nil, "kafka: committed batch is intact", det...)
 	if err != nil {
 		return nil

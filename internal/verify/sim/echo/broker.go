@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"manifester/internal/core"
-	"manifester/internal/wire/format"
+	"manifester/internal/wire/segmentformat"
 )
 
 // mutation injects a bug for the mutant tests; zero is the real broker.
@@ -238,11 +238,11 @@ func (b *Broker) start(o *op) []core.Action {
 	if o.kind == opGet {
 		return b.lookup(o)
 	}
-	data, entries, err := format.Encode([]format.Batch{{TP: tp(), Records: 1, Data: o.payload}})
+	data, entries, err := segmentformat.Encode([]segmentformat.Batch{{TP: tp(), Records: 1, Data: o.payload}})
 	if err != nil {
 		return b.reply(o, "ERR")
 	}
-	o.key = format.SegmentKey(b.env.NewID())
+	o.key = segmentformat.SegmentKey(b.env.NewID())
 	o.seg, o.ref = data, entries[0].Ref(o.key)
 	return b.put(o)
 }
@@ -413,13 +413,13 @@ func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
 		}
 		return b.retryLater(o, stateGet)
 	}
-	seg, err := format.Decode(e.Data)
+	seg, err := segmentformat.Decode(e.Data)
 	var data []byte
 	if err == nil {
-		err = format.ErrCorrupt
+		err = segmentformat.ErrCorrupt
 		for i, en := range seg.Entries {
 			if en.Off == o.ref.Off && en.Len == o.ref.Len {
-				if data, err = format.VerifyBatch(en, seg.Batches[i].Data); err != nil {
+				if data, err = segmentformat.VerifyBatch(en, seg.Batches[i].Data); err != nil {
 					data = nil
 				}
 				break

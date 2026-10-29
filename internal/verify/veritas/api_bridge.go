@@ -2,7 +2,7 @@ package veritas
 
 import (
 	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/apiconv"
+	"manifester/internal/controlplane/apiconvert"
 	"manifester/internal/core"
 )
 
@@ -12,11 +12,11 @@ import (
 func (c *ControlPlane) ExecRequest(req core.RequestID, msg any) core.ControlPlaneDone {
 	switch m := msg.(type) {
 	case *cpv1.CommitSegmentRequest:
-		return c.Exec(core.ControlPlaneCall{Req: req, Op: apiconv.CommitSegmentToCore(m)}).(core.ControlPlaneDone)
+		return c.Exec(core.ControlPlaneCall{Req: req, Op: apiconvert.CommitSegmentToCore(m)}).(core.ControlPlaneDone)
 	case *cpv1.LookupRequest:
-		return c.Exec(core.ControlPlaneCall{Req: req, Op: apiconv.LookupToCore(m)}).(core.ControlPlaneDone)
+		return c.Exec(core.ControlPlaneCall{Req: req, Op: apiconvert.LookupToCore(m)}).(core.ControlPlaneDone)
 	case *cpv1.DescribeTopicsRequest:
-		return c.Exec(core.ControlPlaneCall{Req: req, Op: apiconv.DescribeTopicsToCore(m)}).(core.ControlPlaneDone)
+		return c.Exec(core.ControlPlaneCall{Req: req, Op: apiconvert.DescribeTopicsToCore(m)}).(core.ControlPlaneDone)
 	case *cpv1.CreateTopicRequest:
 		code := c.CreateTopic(m.GetTopic(), m.GetPartitions())
 		return core.ControlPlaneDone{Req: req, Err: code}

@@ -16,7 +16,7 @@ Re-enable three survival-fault families on `kafka-log` so a campaign can kill/re
 
 ## 2. Why this was deferred
 
-CP-DSM-8 cut brokers over to real `cp-*` `internal/controlplane/machine` processes + `internal/verify/sim/engines/logstore`, with `logengine` as a thin bridge.
+CP-DSM-8 cut brokers over to real `cp-*` `internal/controlplane/statemachine` processes + `internal/verify/sim/engines/logstore`, with `logengine` as a thin bridge.
 
 A technical follow-up then restored **IO** faults (`PutFail` / `PutLost` mirrored onto logstore; bridge boundary faults left live). That alone exposed a drain wedge:
 
@@ -76,7 +76,7 @@ Comment on the flag (`internal/verify/sim/roles.go`):
 
 **What (post–CP-DSM-8):** On each **role timer tick**, if this node is the ready **appender**, `maybeReplicaFault` may set `stallUntil = now + StallDur`. While `now < stallUntil`, `canCommit` is false and `roleTick` is a no-op — no Offer commits, no heartbeat/takeover progress from this node. Reachable: `logcp-sim: replica stalled`. Fact name via env: `logcp_stall`.
 
-Implementation: `internal/controlplane/machine/role.go` (`maybeReplicaFault`, `roleTick`, `canCommit`).
+Implementation: `internal/controlplane/statemachine/role.go` (`maybeReplicaFault`, `roleTick`, `canCommit`).
 
 **Wired off in two places today:**
 
@@ -129,7 +129,7 @@ broker CPCall --> logengine bridge (boundary faults: 503/timeout/lost/outage)
                   CPReply --> bridge --> CPDone to broker
 ```
 
-- Replica apply, roles, hole-fill, checkpoints: **only** in `internal/controlplane/machine`.  
+- Replica apply, roles, hole-fill, checkpoints: **only** in `internal/controlplane/statemachine`.  
 - `internal/verify/sim/engines/logengine` on kafka-log is a **bridge**, not the old monolithic replica engine.  
 - Veritas remains the independent Kafka oracle (decision 21).  
 - Docs: `docs/sim-log-engine.md` (post–CP-DSM-8 rewrite on `toys3`).
@@ -149,7 +149,7 @@ After `cfca8b6`:
 
 ### Critical machine fix already landed (do not undo)
 
-In `internal/controlplane/machine/commit.go` (`cfca8b6`):
+In `internal/controlplane/statemachine/commit.go` (`cfca8b6`):
 
 - **NotApplied and MaybeApplied retry the same slot** (`retrySameSlot`), not `alloc()` a later slot. Abandoning the slot left a permanent hole (progress not armed) and wedged drain.  
 - Commit Offer: fold hit answers immediately; in-flight/queued same `SegmentKey` **retargets** waiter Req/From so a bridge timeout cannot orphan the apply answer onto a dead broker ReqID (flight ReqIDs sorted for determinism).  
@@ -185,7 +185,7 @@ Do **not** flip all three on day one. Prior art: Put coins alone found a wedge.
 
 1. Wire `cp.go` from `lp.StallProb` / `lp.CrashProb`.  
 2. In `swarmLog`, stop zeroing; optionally start with a **reduced** menu (e.g. scale but cap lower than PutFail) before full `{0,0.5,1,2,4}` × defaults.  
-3. Unit: extend `internal/controlplane/machine` role tests for stall → takeover → failback and softCrash → restore (today `role.go` implements this; dedicated campaign-level coverage was thin after the cutover). Old in-engine references: `internal/verify/sim/engines/logengine` takeover/trim/crash tests (pre-bridge) and `TestDeterministic` with Stall/Crash probs.  
+3. Unit: extend `internal/controlplane/statemachine` role tests for stall → takeover → failback and softCrash → restore (today `role.go` implements this; dedicated campaign-level coverage was thin after the cutover). Old in-engine references: `internal/verify/sim/engines/logengine` takeover/trim/crash tests (pre-bridge) and `TestDeterministic` with Stall/Crash probs.  
 4. Bar: `make build`, `go test ./controlplane/machine/...`, kafka-log mutants, then `go run ./cmd/manisim -scenario kafka-log -seeds 300` (prefer `-j 1` once if a seed looks nondeterministic — parallel `-j` flakes were seen during the Put follow-up; confirm with `-j 1` then re-check `-j 8`).  
 5. Expect reachables for `replica stalled` / `replica crashed` / takeover / restore to fire `Sometimes` across the campaign; add them back to `logReachables` / `ExpectReachable` as appropriate.
 
@@ -261,9 +261,9 @@ Out of scope unless they block the bar: third replica, log-wide total outage, Dy
 |---|---|
 | `internal/verify/sim/kafka/config.go` | `configLogWith`, `swarmLog`, timeouts, NoAttrition, reachables |
 | `internal/verify/sim/kafka/cp.go` | Factory wiring; hardcoded Stall/Crash zeros |
-| `internal/controlplane/machine/role.go` | `maybeReplicaFault`, `softCrash`, takeover/failback |
-| `internal/controlplane/machine/commit.go` | same-slot retry, retarget, tomb |
-| `internal/controlplane/machine/config.go` | StallProb/CrashProb field docs |
+| `internal/controlplane/statemachine/role.go` | `maybeReplicaFault`, `softCrash`, takeover/failback |
+| `internal/controlplane/statemachine/commit.go` | same-slot retry, retarget, tomb |
+| `internal/controlplane/statemachine/config.go` | StallProb/CrashProb field docs |
 | `internal/verify/sim/roles.go` | `Process.NoAttrition` |
 | `internal/verify/sim/kernel.go` | `attrition()`, `end()`, restart scheduling |
 | `internal/verify/sim/run.go` | `Attrition` struct |
@@ -277,4 +277,4 @@ Out of scope unless they block the bar: third replica, log-wide total outage, Dy
 
 ## 11. Historical note (pre–CP-DSM-8)
 
-Before the machine cutover, stall/crash lived inside monolithic `internal/verify/sim/engines/logengine` (`faults()` on tick, `stallUntil` / `crash` / `restart` on replicas). Unit tests such as `TestTakeoverReplayAndFailback` and `TestTrimWindowAndRestore` exercised that model. After CP-DSM-8 those semantics moved to `internal/controlplane/machine`; the bridge `logengine` no longer owns replica stall/crash for kafka-log. Prefer machine-level tests and whole-system kafka-log campaigns over resurrecting the old engine tests as the source of truth.
+Before the machine cutover, stall/crash lived inside monolithic `internal/verify/sim/engines/logengine` (`faults()` on tick, `stallUntil` / `crash` / `restart` on replicas). Unit tests such as `TestTakeoverReplayAndFailback` and `TestTrimWindowAndRestore` exercised that model. After CP-DSM-8 those semantics moved to `internal/controlplane/statemachine`; the bridge `logengine` no longer owns replica stall/crash for kafka-log. Prefer machine-level tests and whole-system kafka-log campaigns over resurrecting the old engine tests as the source of truth.

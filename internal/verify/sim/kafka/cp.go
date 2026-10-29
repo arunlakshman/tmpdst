@@ -1,7 +1,7 @@
 package kafka
 
 import (
-	"manifester/internal/controlplane/machine"
+	"manifester/internal/controlplane/statemachine"
 	"manifester/internal/core"
 	"manifester/internal/verify/sim"
 )
@@ -16,7 +16,7 @@ func cpFactory(sc sim.SeedConfig, opts Opts) core.MachineFactory {
 		if self.Node == "cp-1" {
 			rank = 1
 		}
-		cfg := machine.Config{
+		cfg := statemachine.Config{
 			CatchUpEvery:   lp.Tick,
 			ReadLimit:      64,
 			HoleAfter:      lp.HoleAfter,
@@ -37,7 +37,7 @@ func cpFactory(sc sim.SeedConfig, opts Opts) core.MachineFactory {
 			StallDur:       lp.StallDur,
 			DownDur:        lp.DownDur,
 		}
-		m := machine.New(cfg)(env, self).(*machine.Machine)
+		m := statemachine.New(cfg)(env, self).(*statemachine.Machine)
 		for _, t := range topics {
 			_ = m.SeedTopic(t, parts)
 		}

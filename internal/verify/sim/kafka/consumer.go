@@ -5,7 +5,7 @@ import (
 
 	"manifester/internal/core"
 	"manifester/internal/verify/sim"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 // consumer reads every partition from offset 0 with one multi-partition Fetch
@@ -143,12 +143,12 @@ func (w *Workload) readPart(p kmsg.FetchResponseTopicPartition, pos int64) ReadP
 	if p.ErrorCode != 0 {
 		return out
 	}
-	bs, err := kwire.SplitBatches(p.RecordBatches)
+	bs, err := kafkawire.SplitBatches(p.RecordBatches)
 	if err != nil {
 		out.Corrupt = true
 	}
 	for _, raw := range bs {
-		bt, err := kwire.ParseBatch(raw)
+		bt, err := kafkawire.ParseBatch(raw)
 		var recs []kmsg.Record
 		if err == nil {
 			recs, err = batchRecords(bt)

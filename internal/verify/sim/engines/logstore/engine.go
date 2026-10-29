@@ -5,14 +5,14 @@
 // surfaces as ErrTimeout+MaybeApplied.
 //
 // After CP-DSM-8 the engine is also sim.CPTruth: a reference replay of durable
-// slots through controlplane/machine.ReplayPosition (decision 21 / log replay).
+// slots through controlplane/statemachine.ReplayPosition (decision 21 / log replay).
 package logstore
 
 import (
 	"slices"
 
-	"manifester/internal/controlplane/applier"
-	"manifester/internal/controlplane/machine"
+	"manifester/internal/controlplane/statemachine"
+	"manifester/internal/controlplane/stateupdater"
 	"manifester/internal/core"
 	"manifester/internal/verify/sim"
 	"manifester/internal/verify/sim/engines/internal/fakeio"
@@ -23,7 +23,7 @@ type Engine struct {
 	*fakeio.CompletionCore
 	spec *store
 
-	ref         *applier.StateUpdater
+	ref         *stateupdater.StateUpdater
 	applied     core.LogPosition // next slot to fold into ref
 	gen         uint64
 	windowSlots int64
@@ -39,7 +39,7 @@ var (
 func New(f sim.LogStoreFaults) *Engine {
 	e := &Engine{
 		spec:        &store{bug: f.Bug},
-		ref:         applier.NewMem(),
+		ref:         stateupdater.NewMem(),
 		windowSlots: int64(f.WindowSlots),
 		trimStride:  int64(f.TrimStride),
 	}
@@ -91,7 +91,7 @@ func (e *Engine) advanceRef() {
 			return
 		}
 		slot := e.applied
-		if err := machine.ReplayPosition(e.ref, slot, data); err != nil {
+		if err := statemachine.ReplayPosition(e.ref, slot, data); err != nil {
 			// Foreign / test payloads are durable bytes but not CP entries.
 			e.applied++
 			e.gen++

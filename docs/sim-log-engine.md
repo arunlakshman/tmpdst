@@ -1,13 +1,13 @@
 # Sim log engine (CP-DSM-8)
 
-`kafka-log` runs control-plane **replica processes** (`internal/controlplane/machine`) plus the
+`kafka-log` runs control-plane **replica processes** (`internal/controlplane/statemachine`) plus the
 faulting Dynamo loglet (`internal/verify/sim/engines/logstore`). Brokers still emit `CPCall`.
 `internal/verify/sim/engines/logengine` is a thin bridge: boundary faults (503, timeout, lost
 response, outage) and `CPOffer` / `CPReply` routing to `cp-*` nodes (one
 failover hop when a standby refuses). `CPTruth` is reference replay of durable
 logstore slots (`machine.ReplaySlot`). Veritas remains the independent oracle
 (decision 21). Replica apply, roles, hole-fill, and checkpoints live only in
-`internal/controlplane/machine`.
+`internal/controlplane/statemachine`.
 
 Run with `go run ./cmd/manisim -scenario kafka-log -seeds 300` (`kafka.ConfigLog`).
 The veritas-backed preset (`-scenario kafka`) is unchanged.

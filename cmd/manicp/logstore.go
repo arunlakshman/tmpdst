@@ -7,11 +7,11 @@ import (
 	"os"
 	"time"
 
-	"manifester/internal/controlplane/cpobs"
-	"manifester/internal/controlplane/exec"
+	"manifester/internal/controlplane/controlplanemetrics"
+	"manifester/internal/controlplane/executor"
 	"manifester/internal/core"
-	"manifester/internal/sys"
-	"manifester/internal/sys/s3store"
+	"manifester/internal/system"
+	"manifester/internal/system/s3store"
 )
 
 const kindLog = "dynamolog"
@@ -59,21 +59,21 @@ func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
 }
 
 type logDB interface {
-	exec.DynamoClient
-	exec.TableManager
+	executor.DynamoClient
+	executor.TableManager
 }
 
 type deps struct {
-	db      func(ctx context.Context, f cpFlags, m *cpobs.Metrics) (logDB, error)
-	objects func(ctx context.Context, f cpFlags) (sys.ObjectStore, error)
+	db      func(ctx context.Context, f cpFlags, m *controlplanemetrics.Metrics) (logDB, error)
+	objects func(ctx context.Context, f cpFlags) (system.ObjectStore, error)
 }
 
 func realDeps() deps {
 	return deps{
-		db: func(ctx context.Context, f cpFlags, m *cpobs.Metrics) (logDB, error) {
+		db: func(ctx context.Context, f cpFlags, m *controlplanemetrics.Metrics) (logDB, error) {
 			return newDynamo(ctx, f.endpoint, f.region, m.APIOptions())
 		},
-		objects: func(ctx context.Context, f cpFlags) (sys.ObjectStore, error) {
+		objects: func(ctx context.Context, f cpFlags) (system.ObjectStore, error) {
 			return s3store.New(ctx, s3store.Config{Endpoint: f.log.s3Endpoint, Region: f.region,
 				Bucket: f.log.ckptBucket, Prefix: f.log.ckptPrefix, PathStyle: f.log.s3PathStyle})
 		},
@@ -98,7 +98,7 @@ func nodeName(l logFlags) string {
 	return h
 }
 
-func openDynLog(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *slog.Logger) (exec.Log, exec.ObjectStore, func(), error) {
+func openDynLog(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.Metrics, log *slog.Logger) (executor.Log, executor.ObjectStore, func(), error) {
 	nop := func() {}
 	db, err := d.db(ctx, f, m)
 	if err != nil {
@@ -106,12 +106,12 @@ func openDynLog(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *s
 	}
 	table := f.log.tableName(f.prefix)
 	if f.create {
-		if err := exec.CreateDynamoTable(ctx, db, table); err != nil {
+		if err := executor.CreateDynamoTable(ctx, db, table); err != nil {
 			return nil, nil, nop, err
 		}
 	}
-	lg := exec.NewDynamoLog(db, table, exec.DynamoLogOptions{TTL: f.log.logTTL})
-	var objs exec.ObjectStore = exec.NewMemoryObjects()
+	lg := executor.NewDynamoLog(db, table, executor.DynamoLogOptions{TTL: f.log.logTTL})
+	var objs executor.ObjectStore = executor.NewMemoryObjects()
 	if f.log.ckptBucket != "" {
 		store, err := d.objects(ctx, f)
 		if err != nil {
@@ -125,8 +125,8 @@ func openDynLog(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *s
 	return lg, objs, nop, nil
 }
 
-// sysObjects adapts sys.ObjectStore to exec.ObjectStore.
-type sysObjects struct{ s sys.ObjectStore }
+// sysObjects adapts system.ObjectStore to executor.ObjectStore.
+type sysObjects struct{ s system.ObjectStore }
 
 func (a sysObjects) Put(ctx context.Context, key string, data []byte) error {
 	return a.s.Put(ctx, key, data)

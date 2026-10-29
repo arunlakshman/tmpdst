@@ -13,7 +13,7 @@ import (
 	"manifester/internal/core"
 	"manifester/internal/verify/sim"
 	"manifester/internal/verify/sim/internal/session"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 // Opts configures the workload.
@@ -94,7 +94,7 @@ type client struct {
 	session.Client
 	producer bool
 	stage    stage
-	fr       *kwire.Framer
+	fr       *kafkawire.Framer
 	corr     int32
 	ver      [kindCount]int16
 	out      *waitingRequests
@@ -112,7 +112,7 @@ type Workload struct {
 	opts  Opts
 	tps   []core.TopicPartition
 	hist  sim.History
-	codec kwire.Codec
+	codec kafkawire.Codec
 	loop  session.Loop[*client]
 }
 
@@ -177,8 +177,8 @@ func (w *Workload) OnPhase(p sim.Phase) []core.Action {
 }
 
 func (w *Workload) onReady(c *client) []core.Action {
-	c.fr, c.stage, c.out = kwire.NewFramer(maxFrame), stateAPIVersions, nil
-	r, _ := kwire.Range(kwire.KeyApiVersions)
+	c.fr, c.stage, c.out = kafkawire.NewFramer(maxFrame), stateAPIVersions, nil
+	r, _ := kafkawire.Range(kafkawire.KeyApiVersions)
 	c.ver[requestAPIVersions] = r.Min + int16(w.env.Intn(int(r.Max-r.Min)+1))
 	return w.advance(c)
 }
@@ -271,7 +271,7 @@ func (w *Workload) onAPI(c *client, r *kmsg.ApiVersionsResponse) []core.Action {
 	}
 	pick := func(k reqKind, key int16) bool {
 		lo, hi := int16(0), int16(-1)
-		if s, ok := kwire.Range(key); ok {
+		if s, ok := kafkawire.Range(key); ok {
 			lo, hi = s.Min, s.Max
 		}
 		found := false
@@ -286,8 +286,8 @@ func (w *Workload) onAPI(c *client, r *kmsg.ApiVersionsResponse) []core.Action {
 		c.ver[k] = lo + int16(w.env.Intn(int(hi-lo)+1))
 		return true
 	}
-	if !pick(requestMetadata, kwire.KeyMetadata) || !pick(requestListOffsets, kwire.KeyListOffsets) ||
-		!pick(requestProduce, kwire.KeyProduce) || !pick(requestFetch, kwire.KeyFetch) {
+	if !pick(requestMetadata, kafkawire.KeyMetadata) || !pick(requestListOffsets, kafkawire.KeyListOffsets) ||
+		!pick(requestProduce, kafkawire.KeyProduce) || !pick(requestFetch, kafkawire.KeyFetch) {
 		return w.retryStage(c)
 	}
 	c.stage = stateMetadata

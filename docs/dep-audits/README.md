@@ -14,7 +14,7 @@ How to produce one: run `ops/scripts/audit-dep.sh <module>@<version>` and follow
 - Date / auditor:
 - Requires Go:
 - Verdict: ACCEPTED | ACCEPTED WITH RULES | REJECTED
-- Import paths allowed (ops/tools/detcheck/allow.txt):
+- Import paths allowed (ops/tools/determinismcheck/allow.txt):
 
 ## Findings
 | Finding (file:line) | Matters? | Why |

@@ -23,7 +23,7 @@ package vars and `time` in `internal/core/` and `internal/verify/sim/`.
 | 2. Kafka-error translation | proposed | Still open. Kafka codes `err*` are chosen in 16 places in `internal/broker/` (`committed()` has a 4-way switch, `isolate()` picks `errInvalidPIDMapping`, `exhaustCode` in ops) | Valid, small |
 | 6. Six FNV hashers | 6 | Still 6 `hasher` types (`broker`, `veritas`, `internal/verify/sim/echo`, `internal/verify/sim/kafka`, `sim` (struct form), `netsim`) and **4 copies of `fnvU64`** (`internal/broker/hash.go:172`, `internal/verify/sim/hash.go:73`, `internal/verify/sim/kafka/hash.go:48`, `netsim.go:675`), each with its own `fnvu64_test.go` (4 test files). 43 hits of the FNV constants | Unchanged |
 | 6. Three retry skeletons | 3 | 5: `broker.retry` (segments), `broker.retryOp` (ops), `internal/verify/sim/echo.backoff`, `dynamo.commit` loop (`maxAttempts = 20`), `dynamo/store.go:178` (batch-get backoff). Two doubling formulas: `Broker.backoff` and `internal/verify/sim/echo.backoff` | Slightly worse |
-| 5. Fact name constants | string literals | Worse. 18 `emit("...")` sites (15 distinct names) and 36 literal uses of the three best-known names alone, spread over 18 files. Consumers now include `internal/sys/prod/metrics.go`, `internal/sys/prod/seglog.go`, `internal/verify/sim/kafka/segtiming.go`, `segcaps.go`, `invariants.go`, `oracle.go`. Field keys (`put_ns`, `wait_ns`, `commit_ns`, `total_ns`, `inflight`, `buffered`, ...) are literals too; 24 time-field literals in just three consumers | Worse and now operationally risky: a typo silently zeroes a Prometheus series |
+| 5. Fact name constants | string literals | Worse. 18 `emit("...")` sites (15 distinct names) and 36 literal uses of the three best-known names alone, spread over 18 files. Consumers now include `internal/system/production/metrics.go`, `internal/system/production/seglog.go`, `internal/verify/sim/kafka/segtiming.go`, `segcaps.go`, `invariants.go`, `oracle.go`. Field keys (`put_ns`, `wait_ns`, `commit_ns`, `total_ns`, `inflight`, `buffered`, ...) are literals too; 24 time-field literals in just three consumers | Worse and now operationally risky: a typo silently zeroes a Prometheus series |
 | 5. Fact field readers | n/a | 3 independent copies of "find field k in a fact": `prod.field/fi/fs` (`seglog.go:43`), `internal/verify/sim/kafka.fieldOf` (`oracle.go:149`), and an open-coded loop in `prod.Metrics.Observe` (`metrics.go:105,116`) | New duplication |
 | 1. Language drift | glossary proposed | No `docs/glossary.md` exists. `release` still means "answer with error" (`segment.go`), `pbatch`/`op`/`segment`/`BatchRange` unchanged. `BatchRange` is in 51 places and `Base == -1` is the rejection test in 3 | Valid, not started |
 | 3. Value objects | proposed | Not started. `core.SegmentRef` 23 uses, `SegmentKey` 32 uses (all `string`), `core.TopicPartition{` literal built in 55 places | Valid, big blast radius |
@@ -31,9 +31,9 @@ package vars and `time` in `internal/core/` and `internal/verify/sim/`.
 
 New growth since the earlier proposal:
 
-- **Observers.** `internal/sys/prod/metrics.go` (155 lines), `seglog.go` (132), `cp/cpobs` (346), `internal/sys/awsobs` (244),
-  `internal/sys/runinfo` (4 files, about 470). Prometheus names are literals at the construction site
-  (`metricsNS`/`"manicp"` plus a `Name:` string; 17 `Name:` literals in the observers and 19 more in `internal/sys/`
+- **Observers.** `internal/system/production/metrics.go` (155 lines), `seglog.go` (132), `cp/cpobs` (346), `internal/system/awsmetrics` (244),
+  `internal/system/runinfo` (4 files, about 470). Prometheus names are literals at the construction site
+  (`metricsNS`/`"manicp"` plus a `Name:` string; 17 `Name:` literals in the observers and 19 more in `internal/system/`
   and `cp/`). The same names are re-typed in Python and JSON: `ops/deploy/aws/observability/gen/gen_dashboards.py`
   (28 mentions), `bench/summarize.py` (15), `docs/observability.md` (46), dashboards JSON. There is no test
   tying them together.
@@ -60,7 +60,7 @@ New growth since the earlier proposal:
   (commit 30-60 ms, zero throttles). Every performance item below goes through `segment.go`.
 
 Still good (do not touch): `core` as published language, `veritas` as independent spec,
-`internal/controlplane/api/v1` + `apiconv` as the gRPC wire boundary, `internal/wire/format/` and `internal/wire/kwire/` as clean modules,
+`internal/controlplane/api/v1` + `apiconv` as the gRPC wire boundary, `internal/wire/segmentformat/` and `internal/wire/kafkawire/` as clean modules,
 facts as the single observation channel.
 
 ## 2. Quick wins (all S, hash-neutral, parallelizable)
@@ -81,7 +81,7 @@ unchanged because no private field order changes.
 **Q3. Fact name and field constants in `core`.** New `internal/core/factnames.go`:
 `const FactSegmentSealed = "segment_sealed"` and the key constants per fact (`KeyPutNS = "put_ns"`...),
 including a doc comment per fact listing fields in order and a comment "frozen, decision 12". Replace
-literals in `internal/broker/{broker,segment}.go`, `internal/sys/prod/{metrics,seglog}.go`, `internal/verify/sim/kafka/{segtiming,segcaps,
+literals in `internal/broker/{broker,segment}.go`, `internal/system/production/{metrics,seglog}.go`, `internal/verify/sim/kafka/{segtiming,segcaps,
 invariants,oracle}.go`, `internal/verify/sim/echo`. Add `core.FactField(f, key)` (+ `FactI64`, `FactStr`) to kill the three
 field-lookup copies (pure, no maps, detcheck-safe). Add one test in `core` pinning the list of names (a
 sorted slice literal) and one in `broker` that runs a scenario and asserts every `emit` name is in the list.
@@ -89,7 +89,7 @@ Hash: neutral, constants are the same strings. Proof: golden hashes, mutants, pl
 (mechanical; about 100 edits). Conflict risk: `internal/broker/segment.go` **[after compaction]**; consumers can go first.
 
 **Q4. Metric name constants and a contract test.** One file per binary listing names and labels:
-`internal/sys/prod/metricnames.go`, `cp/cpobs/names.go` (exported consts). Add a test that scrapes a registered
+`internal/system/production/metricnames.go`, `cp/cpobs/names.go` (exported consts). Add a test that scrapes a registered
 `Metrics` and checks every const is present; add `scripts/check-metric-names.sh` (grep the const set against
 `gen_dashboards.py`, `summarize.py`, `docs/observability.md`). Hash: none (outside the determinism closure).
 Effort S. Value: dashboards and the bench summarizer break silently today.
@@ -99,7 +99,7 @@ closure, holding what the two mains copy: `Flags` struct (`MetricsAddr`, `LogLev
 `ManifestOut`) with `Register(fs)`, `Setup(service, brokerID) (log, info)`, `ServeMetrics(addr, handler)`,
 `WriteManifest(...)`, `Fatal`. Mains shrink about 45 lines each; `main()` in `manibroker` drops from 160 to
 under 90 together with Q6. Hash: none. Proof: `cmd/manibroker/tuning_test.go`, a flag-help golden test
-(`-h` output unchanged except nothing), `test/it/` hermetic tests, the runbook smoke start. Conflicts: touches
+(`-h` output unchanged except nothing), `test/integrationtest/` hermetic tests, the runbook smoke start. Conflicts: touches
 `cmd/` only; the uncommitted `cmd/manibroker` edits (tuning flags) should be committed first.
 
 **Q6. One effective-config struct.** `tuning` already exists; make it produce `Describe() map[string]any`
@@ -203,7 +203,7 @@ Hash: neutral if the delays are equal.
 
 ### S6. Observer wiring and test harness consolidation (M)
 
-- `internal/sys/prod`: split `metrics.go` into a table of collectors built from the Q4 constants, and make
+- `internal/system/production`: split `metrics.go` into a table of collectors built from the Q4 constants, and make
   `SegmentLog` and `Metrics` consume facts through one `FactSink` fan-out (`main.go` already hand-composes
   `prev`/`segLog`; move the compose into `prod.NodeConfig` as `Facts []func(core.Fact)`).
 - Tests: one `internal/machinetest` (driver: `Step`, `Collect`, `Fact(name)`, `Counter`) replacing the
@@ -216,21 +216,21 @@ Hash: neutral if the delays are equal.
 |---|---|---|---|---|---|---|
 | Q1 | glossary | S | none | neutral | build | none |
 | Q3 | fact constants + field readers | S | low | neutral | golden, mutants, pin test | `segment.go` (broker side after compaction) |
-| Q4 | metric constants + contract test | S | low | neutral | new scrape test | `internal/sys/prod`, `cp/cpobs` |
-| Q5/Q6 | cmd wiring, config describe | S-M | low | neutral | tuning tests, `test/it/`, `-h` golden | `cmd/`, defaults half in `config.go` |
+| Q4 | metric constants + contract test | S | low | neutral | new scrape test | `internal/system/production`, `cp/cpobs` |
+| Q5/Q6 | cmd wiring, config describe | S-M | low | neutral | tuning tests, `test/integrationtest/`, `-h` golden | `cmd/`, defaults half in `config.go` |
 | Q7 | `core.Hasher` | S-M | medium | neutral, proven by golden | golden hashes (the only check) | all hash.go files, 6 packages |
 | Q2 | broker renames | S | low | neutral | golden | `segment.go`, `config.go` |
 | S2 | `kafkaerr.go` | S-M | low | neutral | broker tests, golden | `segment.go` |
 | S1 | pipeline extraction | M | low-med | neutral | golden, 9 mutants same seed, canary, conformance | `segment.go` |
 | S5 | `core.Backoff` | S-M | low | neutral | golden + delay table test | `broker.go`, `internal/verify/sim/echo` |
-| S6 | observer fan-out, test harness | M | low | neutral | existing tests | `internal/sys/prod`, tests |
+| S6 | observer fan-out, test harness | M | low | neutral | existing tests | `internal/system/production`, tests |
 | S3 | commit scheduling modes | L | high | serial neutral, others rebaseline | new mutant + invariants, lockstep | `segment.go`, CP contract |
 | S4 | value objects | L | medium | neutral if verified | golden | every package |
 
 Parallel waves (separate subagents, disjoint files):
 
-- **Wave A (now, safe during compaction):** Q1 (docs only, new file), Q4 (`internal/sys/prod`, `cp/cpobs`; the `cpobs`
-  edits are outside what compaction touches), Q5 (`cmd/`), consumer half of Q3 (`internal/sys/prod/seglog.go`,
+- **Wave A (now, safe during compaction):** Q1 (docs only, new file), Q4 (`internal/system/production`, `cp/cpobs`; the `cpobs`
+  edits are outside what compaction touches), Q5 (`cmd/`), consumer half of Q3 (`internal/system/production/seglog.go`,
   `internal/verify/sim/kafka/*`). These four touch disjoint directories.
 - **Wave B (after compaction merges):** Q3 broker half + Q2 + S2, one agent, one commit each (all in
   `internal/broker/`). In parallel with it, Q7 `core.Hasher` in the other packages except `broker` (`veritas`, `sim*`),
@@ -240,7 +240,7 @@ Parallel waves (separate subagents, disjoint files):
 
 Standard validation for every step: `go vet`, `go test ./...`, `ops/scripts/ci-determinism.sh` (detcheck),
 golden trace hashes unchanged, each mutant caught at the same first seed, `TestDeterminismCanary`, lockstep
-(veritas vs memstore and DynamoDB), and `test/it/` hermetic tests for anything under `cmd/` or `internal/sys/`.
+(veritas vs memstore and DynamoDB), and `test/integrationtest/` hermetic tests for anything under `cmd/` or `internal/system/`.
 
 ## 5. What NOT to do
 
@@ -254,7 +254,7 @@ New:
 
 - **Do not put Prometheus or `slog` into `internal/broker/`.** Decision 36: metrics are facts counted at the edge.
   Q3/Q4 make the facts typed; they must not make the broker aware of metrics.
-- **Do not make `cmd/internal/wiring` import `broker` internals or the sim.** It sits above `internal/sys/prod`.
+- **Do not make `cmd/internal/wiring` import `broker` internals or the sim.** It sits above `internal/system/production`.
 - **Do not unify `broker` segment retry and `ops` retry** into one generic state machine; share only the delay
   function (S5).
 - **Do not share the commit decision code between `veritas` and `cp/dynamo`** to "dedupe" `decide.go`; the
@@ -295,7 +295,7 @@ Applied to the items above; the proposal follows these, and reviewers should hol
    moves verbatim, so S1 must follow it, not precede it).
 3. **Wave B then S1**, then commit pipelining. Commit pipelining/parallel disjoint commits is S3 and needs S1's
    `commitSched`; doing it without S1 means adding the fourth responsibility to a 430-line file.
-4. **Compression** (batch bytes in the segment; touches `internal/wire/format/` and `openSegment.bytes`, `bufBytes`
+4. **Compression** (batch bytes in the segment; touches `internal/wire/segmentformat/` and `openSegment.bytes`, `bufBytes`
    accounting): after S1, because the bytes accounting is centralized by `admit`/`retire`. Hash will change.
 5. **Group commit** (CP contract change) after parallel disjoint commits is measured: it needs the new
    multi-segment CP op, so it is a CP change first (`veritas` spec, then `dynamo`), and conflicts with

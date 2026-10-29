@@ -122,5 +122,5 @@ into a normal test to keep the case forever.
 | C3 adapters vs specs | The S3 adapter and the control-plane stores (in-memory store, gRPC client, applier on MemKV and on Pebble). The S3 test needs `MANIFESTER_S3_ENDPOINT`. | The reference is the spec. |
 | C4 Kafka oracle vs specs | None. | The oracle in `sim/kafka` is checked with histories built from `Partition` and `ControlPlane`. |
 
-C3 is the only check that runs the real code in `internal/sys` and the real
+C3 is the only check that runs the real code in `internal/system` and the real
 control-plane stores.

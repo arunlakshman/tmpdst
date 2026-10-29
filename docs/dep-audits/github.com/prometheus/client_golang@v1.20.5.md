@@ -4,8 +4,8 @@
   has no go.sum entries for the transitive modules, so it stopped at "missing go.sum entry". The imports it listed
   before stopping were read by hand.
 - Requires Go: 1.22.0
-- Verdict: **REJECTED for the deterministic packages**; **ACCEPTED at the edge** (`internal/sys/prod` only).
-- Import paths allowed (ops/tools/detcheck/allow.txt): **none**. Deliberately not added.
+- Verdict: **REJECTED for the deterministic packages**; **ACCEPTED at the edge** (`internal/system/production` only).
+- Import paths allowed (ops/tools/determinismcheck/allow.txt): **none**. Deliberately not added.
 
 ## Findings
 | Finding | Matters? | Why |
@@ -15,7 +15,7 @@
 | Transitive modules: `beorn7/perks`, `cespare/xxhash/v2`, `munnerz/goautoneg`, `prometheus/client_model`, `prometheus/common`, `prometheus/procfs`, `google.golang.org/protobuf` | No | Pulled in for exposition (protobuf model, procfs for the process collector). Outside the determinism closure; `ops/scripts/ci-determinism.sh` does not list them. |
 
 ## Rules for our code
-1. Import it only from `internal/sys/prod` and `cmd/` (the non-deterministic edge). The broker core emits facts
+1. Import it only from `internal/system/production` and `cmd/` (the non-deterministic edge). The broker core emits facts
    (decision 36); `prod.Metrics` turns them into collectors.
 2. No allow-list entry. If a deterministic package ever needs metrics, it emits a fact instead.
 

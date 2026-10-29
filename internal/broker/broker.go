@@ -18,7 +18,7 @@ package broker
 
 import (
 	"manifester/internal/core"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 // Fixed timer ids; retry timers use the id of the segment or op they belong to
@@ -33,7 +33,7 @@ type Broker struct {
 	env   core.Environment
 	self  core.NodeInstance
 	cfg   Config
-	codec kwire.Codec
+	codec kafkawire.Codec
 
 	started bool
 

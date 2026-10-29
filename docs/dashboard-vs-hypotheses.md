@@ -86,7 +86,7 @@ Note "above ~500k": at 500k only 13% of seals are size seals, so the transition 
 | not a throughput limit | pipeline 5: `manibroker_segments_in_flight` mean 0.67 / 0.9 / 1.0 / 1.1 per broker; aws 15 S3 retries/throttles/errors: no series (counters never created); pipeline 6 reads paused 0 | | CONFIRMED |
 | pipeline 1, 4, overview 9, 7, 10: `segment_put`, `seal_to_ack`, `open_age` (le 0.16, 0.32, 0.64) | | p99 prints 0.315-0.319 s in every stage from 500k up: also clipped at a bucket edge (le 0.32), so they can't separate stages | defect |
 
-A better p99 needs finer buckets between 50 and 500 ms (e.g. linear 20 ms steps) in `internal/sys/awsobs/awsobs.go` and `internal/sys/prod/metrics.go`; with the current ones use mean plus the fraction above a bucket edge.
+A better p99 needs finer buckets between 50 and 500 ms (e.g. linear 20 ms steps) in `internal/system/awsmetrics/awsobs.go` and `internal/system/production/metrics.go`; with the current ones use mean plus the fraction above a bucket edge.
 
 ### H6: index lag ~13 s at 1M, drains after load
 

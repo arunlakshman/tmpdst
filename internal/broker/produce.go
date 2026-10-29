@@ -6,7 +6,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/internal/core"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 // produce admits one batch per partition into the open segment. Acks 1 and -1
@@ -58,7 +58,7 @@ func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, 
 	case !b.knows(tp):
 		return nil, errUnknownTopicOrPart
 	}
-	one, err := kwire.RequireSingleBatch(raw)
+	one, err := kafkawire.RequireSingleBatch(raw)
 	if err != nil {
 		return nil, errCorruptMessage
 	}
@@ -75,7 +75,7 @@ func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, 
 // codec, no transaction or control flags, a record count that matches
 // lastOffsetDelta, and no producer id (decision 41). The payload stays opaque;
 // the broker only ever relies on the header count.
-func (b *Broker) checkBatch(one []byte) (kwire.Batch, kafkaErrorCode) {
+func (b *Broker) checkBatch(one []byte) (kafkawire.Batch, kafkaErrorCode) {
 	bt, err := b.parseProduceBatch(one)
 	if err != nil {
 		return bt, b.batchParseCode(err)
@@ -83,18 +83,18 @@ func (b *Broker) checkBatch(one []byte) (kwire.Batch, kafkaErrorCode) {
 	return bt, b.batchPolicy(bt)
 }
 
-func (b *Broker) parseProduceBatch(one []byte) (kwire.Batch, error) {
+func (b *Broker) parseProduceBatch(one []byte) (kafkawire.Batch, error) {
 	if b.cfg.InjectedBug == InjectedBugSkipProduceCRC {
-		return kwire.ParseBatchUnverified(one)
+		return kafkawire.ParseBatchUnverified(one)
 	}
-	return kwire.ParseBatch(one)
+	return kafkawire.ParseBatch(one)
 }
 
 func (b *Broker) batchParseCode(err error) kafkaErrorCode {
 	switch {
-	case errors.Is(err, kwire.ErrUnknownCodec):
+	case errors.Is(err, kafkawire.ErrUnknownCodec):
 		return errUnsupportedCompress
-	case errors.Is(err, kwire.ErrUnsupportedBatch):
+	case errors.Is(err, kafkawire.ErrUnsupportedBatch):
 		return errUnsupportedForFormat
 	default:
 		b.env.Reachable("broker: corrupt produce batch rejected")
@@ -102,7 +102,7 @@ func (b *Broker) batchParseCode(err error) kafkaErrorCode {
 	}
 }
 
-func (b *Broker) batchPolicy(bt kwire.Batch) kafkaErrorCode {
+func (b *Broker) batchPolicy(bt kafkawire.Batch) kafkaErrorCode {
 	switch {
 	case bt.IsTransactional() || bt.IsControl():
 		return errInvalidRequest
@@ -123,13 +123,13 @@ func (b *Broker) batchPolicy(bt kwire.Batch) kafkaErrorCode {
 // are constants: the broker core builds no names at run time.
 func (b *Broker) reachCodec(c int) {
 	switch c {
-	case kwire.CodecGzip:
+	case kafkawire.CodecGzip:
 		b.env.Reachable("broker: gzip batch admitted")
-	case kwire.CodecSnappy:
+	case kafkawire.CodecSnappy:
 		b.env.Reachable("broker: snappy batch admitted")
-	case kwire.CodecLZ4:
+	case kafkawire.CodecLZ4:
 		b.env.Reachable("broker: lz4 batch admitted")
-	case kwire.CodecZstd:
+	case kafkawire.CodecZstd:
 		b.env.Reachable("broker: zstd batch admitted")
 	}
 }

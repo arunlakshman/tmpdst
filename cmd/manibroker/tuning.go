@@ -8,7 +8,7 @@ import (
 
 	"manifester/internal/broker"
 	"manifester/internal/core"
-	"manifester/internal/sys/prod"
+	"manifester/internal/system/production"
 )
 
 // tuning is the flag values that shape the segment flush rule and the produce
@@ -35,7 +35,7 @@ func (t tuning) apply(bc *broker.Config, memLimit uint64) error {
 	bc.MaxSegmentPartitions, bc.MaxSegmentBatches = t.parts, t.batches
 
 	if strings.EqualFold(t.maxBuffered, "auto") {
-		bc.MaxBufferedBytes, bc.ResumeBufferedBytes = prod.AutoBuffered(memLimit)
+		bc.MaxBufferedBytes, bc.ResumeBufferedBytes = production.AutoBuffered(memLimit)
 	} else {
 		m, err := parseSize(t.maxBuffered)
 		if err != nil {

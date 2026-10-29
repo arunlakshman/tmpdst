@@ -12,7 +12,7 @@ import (
 	"manifester/internal/verify/sim"
 	"manifester/internal/verify/sim/kafka"
 	"manifester/internal/verify/veritas"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 // C4 world: a random correct at-least-once Kafka history generated against the
@@ -222,13 +222,13 @@ func (w *world) buildItem(r *rand.Rand, c int, tp core.TopicPartition) *item {
 		vals[i] = fmt.Sprintf("c%d.b%d.r%d|%s", c, p.nb, i, "pad"[:r.IntN(4)])
 		recs[i] = kmsg.Record{Value: []byte(vals[i])}
 	}
-	bp := kwire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1}
+	bp := kafkawire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1}
 	if it.fate == fIdem {
 		bp.ProducerID, bp.ProducerEpoch, bp.BaseSequence = 7, 0, 0
 	}
 	it.pb = core.PendingBatch{TP: tp, Records: int64(n)}
 	var err error
-	if it.bytes, err = kwire.BuildBatch(bp, recs); err != nil {
+	if it.bytes, err = kafkawire.BuildBatch(bp, recs); err != nil {
 		panic(err)
 	}
 	it.po = kafka.ProduceOp{Client: c, Batch: p.nb, TP: tp, Vals: vals, Idem: it.fate == fIdem}

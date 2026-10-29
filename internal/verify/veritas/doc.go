@@ -24,10 +24,10 @@
 //	C3  The real adapters are compared with the specs: the S3 object store
 //	    against ObjectStore, and the control-plane stores (in-memory store,
 //	    gRPC client, applier on MemoryKeyValueStore and on Pebble) against ControlPlane.
-//	    This is the only check that runs the real code in internal/sys and
+//	    This is the only check that runs the real code in internal/system and
 //	    the control-plane stores. The S3 test needs MANIFESTER_S3_ENDPOINT.
-//	    Tests: internal/sys/s3store/conform_test.go and
-//	    internal/controlplane/cptest/conform_test.go.
+//	    Tests: internal/system/s3store/conform_test.go and
+//	    internal/controlplane/controlplanetest/conform_test.go.
 //	C4  The Kafka oracle (in sim/kafka) is compared with Partition and
 //	    ControlPlane. The oracle must accept the histories built from the
 //	    specs and must reject every fault that the test plants in a history.

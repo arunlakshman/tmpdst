@@ -26,7 +26,7 @@ import (
 // There is no test for the log engine here. The log engine is now only a
 // bridge for ControlPlaneCall, and it has no replica state machine of its own. Its
 // comparison with veritas lives in the lockstep tests of package
-// internal/controlplane/machine (see TestLockstepMachineVsVeritas).
+// internal/controlplane/statemachine (see TestLockstepMachineVsVeritas).
 
 const seedBudget = 50
 

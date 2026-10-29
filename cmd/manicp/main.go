@@ -21,13 +21,13 @@ import (
 	"github.com/aws/smithy-go/middleware"
 	"google.golang.org/grpc"
 
-	"manifester/internal/controlplane/cpobs"
-	"manifester/internal/controlplane/exec"
-	"manifester/internal/controlplane/machine"
+	"manifester/internal/controlplane/controlplanemetrics"
+	"manifester/internal/controlplane/executor"
 	"manifester/internal/controlplane/server"
+	"manifester/internal/controlplane/statemachine"
 	"manifester/internal/core"
-	"manifester/internal/sys/httppool"
-	"manifester/internal/sys/runinfo"
+	"manifester/internal/system/httpconnections"
+	"manifester/internal/system/runinfo"
 )
 
 func main() {
@@ -94,7 +94,7 @@ func serve(ctx context.Context, d deps, f cpFlags, fs *flag.FlagSet, stderr io.W
 	log.Info("manicp starting", "event", "start", "run_id_generated", info.RunIDFresh,
 		"go_version", info.GoVersion, "git_dirty", info.GitDirty, "hostname", info.Hostname, "log_level", lvl.String())
 
-	m := cpobs.NewWithLogger(log)
+	m := controlplanemetrics.NewWithLogger(log)
 	runinfo.Register(m.Registry(), "manicp", info)
 	if err := runinfo.ServeMetrics(ctx, log, "manicp", f.metricsAddr, m.Handler()); err != nil {
 		return err
@@ -141,9 +141,9 @@ func serve(ctx context.Context, d deps, f cpFlags, fs *flag.FlagSet, stderr io.W
 	return nil
 }
 
-func openNode(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *slog.Logger) (*server.Node, func(), error) {
+func openNode(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.Metrics, log *slog.Logger) (*server.Node, func(), error) {
 	nop := func() {}
-	mcfg := machine.Config{
+	mcfg := statemachine.Config{
 		// Short catch-up period so Ready (and health Serving) arrives quickly;
 		// subsequent rounds keep the same cadence.
 		CatchUpEvery:  core.Duration(5 * time.Millisecond),
@@ -161,14 +161,14 @@ func openNode(ctx context.Context, d deps, f cpFlags, m *cpobs.Metrics, log *slo
 		mcfg.K = 4
 	}
 
-	var logStore exec.Log
-	var objs exec.ObjectStore
+	var logStore executor.Log
+	var objs executor.ObjectStore
 	var closeStore func()
 	var err error
 	switch f.kind {
 	case "mem":
-		logStore = exec.NewMemoryLog()
-		objs = exec.NewMemoryObjects()
+		logStore = executor.NewMemoryLog()
+		objs = executor.NewMemoryObjects()
 		closeStore = nop
 	case kindLog:
 		logStore, objs, closeStore, err = openDynLog(ctx, d, f, m, log)
@@ -207,7 +207,7 @@ func newDynamo(ctx context.Context, endpoint, region string, apiOpts []func(*mid
 		opts = append(opts, config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
 			"AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "")))
 	}
-	opts = append(opts, config.WithHTTPClient(httppool.ConfigureAWSClient()))
+	opts = append(opts, config.WithHTTPClient(httpconnections.ConfigureAWSClient()))
 	cfg, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return nil, err

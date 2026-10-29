@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"manifester/internal/core"
-	"manifester/internal/sys"
+	"manifester/internal/system"
 	"manifester/internal/verify/veritas"
 )
 
@@ -36,7 +36,7 @@ func locked[T any](ctx context.Context, mu *sync.Mutex, fn func() (T, core.ErrCo
 	return v, fail(code)
 }
 
-// ObjectStore is a sys.ObjectStore over veritas.ObjectStore.
+// ObjectStore is a system.ObjectStore over veritas.ObjectStore.
 type ObjectStore struct {
 	mu   sync.Mutex
 	spec *veritas.ObjectStore
@@ -89,7 +89,7 @@ func (s *ObjectStore) objectKeys(a core.ObjectList) ([]string, core.ErrCode) {
 	return d.Keys, d.Err
 }
 
-// ControlPlane is a sys.ControlPlane over veritas.ControlPlane.
+// ControlPlane is a system.ControlPlane over veritas.ControlPlane.
 type ControlPlane struct {
 	mu   sync.Mutex
 	spec *veritas.ControlPlane
@@ -118,6 +118,6 @@ func (c *ControlPlane) callResp(a core.ControlPlaneCall) (core.ControlPlaneRespo
 }
 
 var (
-	_ sys.ObjectStore  = (*ObjectStore)(nil)
-	_ sys.ControlPlane = (*ControlPlane)(nil)
+	_ system.ObjectStore  = (*ObjectStore)(nil)
+	_ system.ControlPlane = (*ControlPlane)(nil)
 )

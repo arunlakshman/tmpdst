@@ -6,7 +6,7 @@ import (
 	"manifester/internal/core"
 	"manifester/internal/verify/sim"
 	"manifester/internal/verify/sim/internal/campaign"
-	"manifester/internal/wire/format"
+	"manifester/internal/wire/segmentformat"
 )
 
 type ackFact struct {
@@ -52,7 +52,7 @@ func (i *ackedMeansCommitted) Observe(v sim.View) {
 			continue
 		}
 		same := false
-		if seg, err := format.Decode(obj); err == nil {
+		if seg, err := segmentformat.Decode(obj); err == nil {
 			for j, e := range seg.Entries {
 				if e.Off == loc.Off && e.Len == loc.Len {
 					same = string(seg.Batches[j].Data) == string(a.payload)

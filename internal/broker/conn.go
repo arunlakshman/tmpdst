@@ -6,7 +6,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/internal/core"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 // connection is one client connection. Kafka answers a connection's requests in
@@ -14,7 +14,7 @@ import (
 // and only the head is sent, once it is ready.
 type connection struct {
 	id      core.ConnID
-	fr      *kwire.Framer
+	fr      *kafkawire.Framer
 	rx      stateHasher // running hash of every byte received (a partial frame is state)
 	q       []*slot
 	paused  bool // PauseReads is in force
@@ -26,7 +26,7 @@ type connection struct {
 // slot is one request awaiting its response.
 type slot struct {
 	conn    *connection
-	h       kwire.RequestHeader
+	h       kafkawire.RequestHeader
 	resp    core.Response
 	pending int  // parts still outstanding, plus 1 while the handler runs
 	ready   bool // resp is complete
@@ -61,7 +61,7 @@ func (b *Broker) onOpen(e core.ConnOpened) []core.Action {
 	if b.stopping || b.findConn(e.Conn) != nil {
 		return []core.Action{core.CloseConn{Conn: e.Conn, Abort: true}}
 	}
-	b.addConn(&connection{id: e.Conn, fr: kwire.NewFramer(b.cfg.MaxFrame)})
+	b.addConn(&connection{id: e.Conn, fr: kafkawire.NewFramer(b.cfg.MaxFrame)})
 	return nil
 }
 
@@ -117,12 +117,12 @@ func (b *Broker) request(c *connection, frame []byte) []core.Action {
 
 // apiVersionsReply is the one ApiVersions answer. An unsupported version of
 // that key still gets the supported range. Every other decode error does not.
-func apiVersionsReply(h kwire.RequestHeader, req core.Request, err error) (*kmsg.ApiVersionsResponse, bool) {
-	if _, ok := errors.AsType[*kwire.UnsupportedError](err); ok && h.APIKey == kwire.KeyApiVersions {
-		return kwire.ApiVersionsResponse(h), true
+func apiVersionsReply(h kafkawire.RequestHeader, req core.Request, err error) (*kmsg.ApiVersionsResponse, bool) {
+	if _, ok := errors.AsType[*kafkawire.UnsupportedError](err); ok && h.APIKey == kafkawire.KeyApiVersions {
+		return kafkawire.ApiVersionsResponse(h), true
 	}
-	if err == nil && req.Key() == kwire.KeyApiVersions {
-		return kwire.ApiVersionsResponse(h), true
+	if err == nil && req.Key() == kafkawire.KeyApiVersions {
+		return kafkawire.ApiVersionsResponse(h), true
 	}
 	return nil, false
 }
@@ -130,7 +130,7 @@ func apiVersionsReply(h kwire.RequestHeader, req core.Request, err error) (*kmsg
 // newSlot reserves the next response position on c. pending starts at 1, the
 // guard released by handle (or finishPart) once the handler has queued all its
 // parts.
-func (b *Broker) newSlot(c *connection, h kwire.RequestHeader) *slot {
+func (b *Broker) newSlot(c *connection, h kafkawire.RequestHeader) *slot {
 	s := &slot{conn: c, h: h, pending: 1}
 	c.q = append(c.q, s)
 	return s

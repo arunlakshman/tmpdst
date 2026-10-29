@@ -1,8 +1,8 @@
 # Project build. `make` / `make build` is the full gate:
 #   fmt, ascii, vet, lint, compile, unit tests, sim, hermetic it, CRAP.
-# Docker fullstack test/it tests still Skip unless MANIFESTER_*_ENDPOINT are set.
+# Docker fullstack test/integrationtest tests still Skip unless MANIFESTER_*_ENDPOINT are set.
 # The import check for deterministic packages is the detcheck tool:
-# go run ./ops/tools/detcheck <packages>
+# go run ./ops/tools/determinismcheck <packages>
 # Toolchain + commit hook: `mise install` (pins in mise.toml; postinstall runs
 # make install-hooks). Without mise: `make install-hooks` alone.
 
@@ -17,8 +17,8 @@ CRAP_MERGE    ?=
 CRAP_THRESHOLD ?= 20
 CRAP_FLAGS    ?=
 
-# Everything except internal/verify/sim and test/it (those have their own targets).
-UNIT_PKGS = $(shell go list ./... | grep -vE '/verify/sim(/|$$)|/test/it$$')
+# Everything except internal/verify/sim and test/integrationtest (those have their own targets).
+UNIT_PKGS = $(shell go list ./... | grep -vE '/verify/sim(/|$$)|/test/integrationtest$$')
 
 export CRAP_THRESHOLD
 
@@ -81,7 +81,7 @@ compile:
 $(COVER_DIR)/.gitignore:
 	@mkdir -p $(COVER_DIR) && echo '*' > $@
 
-# Unit packages only (not verify/sim, not test/it).
+# Unit packages only (not verify/sim, not test/integrationtest).
 test: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_UNIT) $(UNIT_PKGS)
 
@@ -92,7 +92,7 @@ sim: $(COVER_DIR)/.gitignore
 # Hermetic integration tests (in-process memstore). Fullstack Docker tests
 # in the same package Skip unless MANIFESTER_DYNAMO_ENDPOINT + MANIFESTER_S3_ENDPOINT are set.
 it-hermetic: $(COVER_DIR)/.gitignore
-	go test -coverprofile=$(COVER_IT) ./test/it/
+	go test -coverprofile=$(COVER_IT) ./test/integrationtest/
 
 # All tests without lint/compile/crap.
 test-all: test sim it-hermetic
@@ -108,7 +108,7 @@ crap:
 	@test -f $(COVER_UNIT) || $(MAKE) test
 	@test -f $(COVER_SIM) || $(MAKE) sim
 	@test -f $(COVER_IT) || $(MAKE) it-hermetic
-	go run ./cmd/crapscore -profile $(COVER_UNIT) \
+	go run ./cmd/riskscore -profile $(COVER_UNIT) \
 		-merge-profile $(COVER_SIM),$(COVER_IT)$(if $(CRAP_MERGE),$(comma)$(CRAP_MERGE)) \
 		$(CRAP_FLAGS)
 
@@ -123,6 +123,6 @@ crap-baseline:
 	@test -f $(COVER_UNIT) || $(MAKE) test
 	@test -f $(COVER_SIM) || $(MAKE) sim
 	@test -f $(COVER_IT) || $(MAKE) it-hermetic
-	go run ./cmd/crapscore -profile $(COVER_UNIT) \
+	go run ./cmd/riskscore -profile $(COVER_UNIT) \
 		-merge-profile $(COVER_SIM),$(COVER_IT)$(if $(CRAP_MERGE),$(comma)$(CRAP_MERGE)) \
 		-update-baseline

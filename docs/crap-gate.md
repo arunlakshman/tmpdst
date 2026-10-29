@@ -1,7 +1,7 @@
 # CRAP gate
 
 `make build` ends with a gate that fails when a function is too "crappy". The
-tool is `cmd/crapscore` (standard library only, per the dependency-audit policy,
+tool is `cmd/riskscore` (standard library only, per the dependency-audit policy,
 decision I). The decision record is decision 40 in `decisions.md`.
 
 ## What CRAP is
@@ -65,7 +65,7 @@ to satisfy the number. The published CRAP literature uses 30; this repo gates at
 coverage. The threshold is a flag, so you can choose:
 
     make build CRAP_THRESHOLD=15
-    go run ./cmd/crapscore -profile build/cover.out -threshold 10
+    go run ./cmd/riskscore -profile build/cover.out -threshold 10
 
 Default threshold is **20** (tightened from the published 30). Counts on a
 recent tree (strict, plain `go test ./...`): run `make crap-strict` for the
@@ -81,7 +81,7 @@ full list; expect 0 over 20 when the gate is green.
     make crap-strict    ignore the baseline, print every function, fail on all offenders
     make crap-baseline  rewrite ops/crap-baseline.json (deliberate, reviewable)
 
-Flags of `go run ./cmd/crapscore`: `-profile`, `-merge-profile a,b`,
+Flags of `go run ./cmd/riskscore`: `-profile`, `-merge-profile a,b`,
 `-threshold` (env `CRAP_THRESHOLD`, default 20), `-baseline`, `-update-baseline`,
 `-strict`, `-json`, `-top N` (0 = all), `-tolerance` (default 0.5), `-exclude
 REGEXP` (on the function key), `-root`. Exit codes: 0 ok, 1 gate failed, 2

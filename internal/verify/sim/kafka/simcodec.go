@@ -3,7 +3,7 @@ package kafka
 import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 // The broker never decompresses (decision 45), so the simulated clients need no
@@ -23,24 +23,24 @@ func compressValue(b []byte) []byte {
 func decompressValue(b []byte) []byte { return compressValue(b) } // reverse and xor are involutions
 
 // buildBatch builds a batch of recs with the given codec id (0 = none).
-func buildBatch(pp kwire.BatchParams, recs []kmsg.Record, codec int16) ([]byte, error) {
-	plain, err := kwire.BuildBatch(pp, recs)
-	if err != nil || codec == kwire.CodecNone {
+func buildBatch(pp kafkawire.BatchParams, recs []kmsg.Record, codec int16) ([]byte, error) {
+	plain, err := kafkawire.BuildBatch(pp, recs)
+	if err != nil || codec == kafkawire.CodecNone {
 		return plain, err
 	}
-	bt, err := kwire.ParseBatch(plain)
+	bt, err := kafkawire.ParseBatch(plain)
 	if err != nil {
 		return nil, err
 	}
 	pp.Attributes |= codec
-	return kwire.BuildOpaqueBatch(pp, bt.NumRecords, compressValue(bt.Payload()))
+	return kafkawire.BuildOpaqueBatch(pp, bt.NumRecords, compressValue(bt.Payload()))
 }
 
 // batchRecords decodes a parsed batch's records, undoing compressValue for a compressed
 // batch (what a real client does with its own codec).
-func batchRecords(bt kwire.Batch) ([]kmsg.Record, error) {
-	if bt.Codec() == kwire.CodecNone {
+func batchRecords(bt kafkawire.Batch) ([]kmsg.Record, error) {
+	if bt.Codec() == kafkawire.CodecNone {
 		return bt.Records()
 	}
-	return kwire.DecodeRecords(decompressValue(bt.Payload()), bt.NumRecords)
+	return kafkawire.DecodeRecords(decompressValue(bt.Payload()), bt.NumRecords)
 }

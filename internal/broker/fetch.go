@@ -4,7 +4,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/internal/core"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 // fetch serves each partition independently: FindSegments, then one ranged GET per
@@ -109,7 +109,7 @@ func (b *Broker) acceptFetch(o *operation, data []byte, rg core.BatchRange) []co
 	if b.cfg.InjectedBug == InjectedBugWrongOffset {
 		base++
 	}
-	o.out = append(o.out, kwire.ChangeBatchOffset(data, base, 0)...)
+	o.out = append(o.out, kafkawire.ChangeBatchOffset(data, base, 0)...)
 	o.next++
 	o.attempts, o.corrupt = 0, false
 	if o.next < len(o.ranges) {
@@ -121,6 +121,6 @@ func (b *Broker) acceptFetch(o *operation, data []byte, rg core.BatchRange) []co
 
 // isIntact reports whether data is the one valid batch that rg committed.
 func isIntact(data []byte, rg core.BatchRange) bool {
-	bt, err := kwire.ParseBatch(data)
+	bt, err := kafkawire.ParseBatch(data)
 	return err == nil && int64(len(data)) == rg.Loc.Len && int64(bt.NumRecords) == rg.Count
 }

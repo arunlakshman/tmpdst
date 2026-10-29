@@ -92,7 +92,7 @@ linters:
         path: '^(internal/core|internal/verify/sim|ops/tools|internal/verify/veritas)/|_test\.go$'
       - linters: [forbidigo]
         text: 'panic'
-        path: '^internal/controlplane/applier/'
+        path: '^internal/controlplane/stateupdater/'
       - linters: [funlen, gocognit, nestif, dupl, interfacebloat]
         path: '_test\.go$'
 formatters:

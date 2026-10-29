@@ -19,12 +19,12 @@ import (
 	"google.golang.org/grpc/status"
 
 	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/apiconv"
-	"manifester/internal/controlplane/exec"
-	"manifester/internal/controlplane/machine"
+	"manifester/internal/controlplane/apiconvert"
+	"manifester/internal/controlplane/executor"
 	"manifester/internal/controlplane/server"
+	"manifester/internal/controlplane/statemachine"
 	"manifester/internal/core"
-	"manifester/internal/sys/runinfo"
+	"manifester/internal/system/runinfo"
 )
 
 func freeAddr(t *testing.T) string {
@@ -151,8 +151,8 @@ type unavailCP struct {
 
 func (unavailCP) DescribeTopics(context.Context, *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
 	detail := &cpv1.ErrorDetail{
-		Code:    apiconv.FromCoreErr(core.ErrUnavailable),
-		Outcome: apiconv.FromCoreOutcome(core.NotApplied),
+		Code:    apiconvert.FromCoreErr(core.ErrUnavailable),
+		Outcome: apiconvert.FromCoreOutcome(core.NotApplied),
 	}
 	s, err := status.New(codes.Unavailable, "standby").WithDetails(detail)
 	if err != nil {
@@ -187,9 +187,9 @@ func TestCPURLListFailsOver(t *testing.T) {
 		cpv1.RegisterControlPlaneServer(gs, unavailCP{})
 	})
 	upNode := server.New(server.Config{
-		Machine: machine.Config{K: 4, CatchUpEvery: core.Duration(time.Millisecond), Rank: 0, Heartbeat: core.Duration(time.Second)},
-		Log:     exec.NewMemoryLog(),
-		Objects: exec.NewMemoryObjects(),
+		Machine: statemachine.Config{K: 4, CatchUpEvery: core.Duration(time.Millisecond), Rank: 0, Heartbeat: core.Duration(time.Second)},
+		Log:     executor.NewMemoryLog(),
+		Objects: executor.NewMemoryObjects(),
 		Self:    core.NodeInstance{Node: "cp-up"},
 	})
 	if err := upNode.Start(t.Context()); err != nil {

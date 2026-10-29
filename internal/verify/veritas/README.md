@@ -65,7 +65,7 @@ The rules of each spec are in the comment above its type. Read that first.
 ```bash
 go test ./internal/verify/veritas/... -count=1            # specs and framework
 go test ./internal/broker ./internal/verify/sim/engines \
-        ./internal/sys/s3store ./internal/controlplane/... -count=1   # C1, C2, C3
+        ./internal/system/s3store ./internal/controlplane/... -count=1   # C1, C2, C3
 go test ./internal/verify/sim/kafka -run C4 -count=1      # C4
 ```
 

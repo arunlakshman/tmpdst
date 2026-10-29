@@ -41,7 +41,7 @@ Tests alone are not sufficient verification. A PR is verified only when its unit
   - [ ] CP-DSM-7 after CP-DSM-6.
   - [ ] CP-DSM-8 after CP-DSM-7.
 - [ ] Hold the file boundaries. Each PR's **Files.** section is the only allowed touch set for that owner.
-- [ ] Hold the control-plane autonomy rule on every PR. Packages under `internal/controlplane/` (except explicitly named monorepo adapters) must not import `manifester/broker`, `manifester/sim`, `manifester/sys`, `manifester/cmd`, `manifester/veritas`, `manifester/kwire`, or `manifester/format`. Allowed deps are stdlib, `manifester/core` (future shared module), gRPC/protobuf runtime libs, and other `manifester/controlplane/...` packages including `internal/controlplane/api/v1`. Brokers, sim, veritas, sys, and cmd may import `internal/controlplane/api/v1`. They must not be imported by `internal/controlplane/machine`. Prove each PR with `go list` import checks in that PR's live lanes.
+- [ ] Hold the control-plane autonomy rule on every PR. Packages under `internal/controlplane/` (except explicitly named monorepo adapters) must not import `manifester/broker`, `manifester/sim`, `manifester/sys`, `manifester/cmd`, `manifester/veritas`, `manifester/kwire`, or `manifester/format`. Allowed deps are stdlib, `manifester/core` (future shared module), gRPC/protobuf runtime libs, and other `manifester/controlplane/...` packages including `internal/controlplane/api/v1`. Brokers, sim, veritas, sys, and cmd may import `internal/controlplane/api/v1`. They must not be imported by `internal/controlplane/statemachine`. Prove each PR with `go list` import checks in that PR's live lanes.
 - [ ] Hold the gRPC contract rules from Appendix E on every PR that touches the wire or `CPCall` payloads.
 - [ ] Hold the review gate. CP-DSM-7 and CP-DSM-8 change manicp or kafka-log operator-visible behavior. They wait for the operator's review in chat with screenshots and a video before merge.
 
@@ -141,12 +141,12 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 **Files.**
 
-- [ ] Create `internal/controlplane/machine/` (preferred name under the extractable `internal/controlplane/` root; do not place it under `internal/verify/sim/` or `internal/broker/`).
+- [ ] Create `internal/controlplane/statemachine/` (preferred name under the extractable `internal/controlplane/` root; do not place it under `internal/verify/sim/` or `internal/broker/`).
 - [ ] Create `Step`, `StateHash`, `New` Factory mirroring the broker's `core.MachineFactory` shape.
 - [ ] Create boot handling for `Started` and `Stop` only.
-- [ ] Edit `ops/scripts/ci-determinism.sh` and `ops/tools/detcheck` allow lists so `internal/controlplane/machine` is scanned.
+- [ ] Edit `ops/scripts/ci-determinism.sh` and `ops/tools/determinismcheck` allow lists so `internal/controlplane/statemachine` is scanned.
 - [ ] Create package tests for hash stability on no-op completions.
-- [ ] Create an import-boundary test that fails if `internal/controlplane/machine` imports a forbidden monorepo package.
+- [ ] Create an import-boundary test that fails if `internal/controlplane/statemachine` imports a forbidden monorepo package.
 
 **Build.**
 
@@ -160,7 +160,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] Hash stability and Started/Stop tests in `internal/controlplane/machine`. Run `go test ./controlplane/machine -count=1` and the detcheck script.
+- [ ] Hash stability and Started/Stop tests in `internal/controlplane/statemachine`. Run `go test ./controlplane/machine -count=1` and the detcheck script.
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. Ten lanes on `grok-4.7-high-fast` at the PR head, per the boot recipe.
 
@@ -170,7 +170,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Lane 4. Run `go test ./controlplane/logcp -count=1 -short` if present, else `go test ./controlplane/logcp -count=1 -run TestNew`. Save `logcp-untouched.png`. Pass when `ok`.
 - [ ] Lane 5. Run `go test ./controlplane/logsm -count=1 -run TestX2 -timeout 5m`. Save `logsm-x2.png`. Pass when `ok`.
 - [ ] Lane 6. Run `go test ./sim/engines/logengine -count=1`. Save `logengine.png`. Pass when `ok`.
-- [ ] Lane 7. Confirm `internal/controlplane/machine` imports stay inside the autonomy allow-list. Save `imports.png`. Pass when `go list -f '{{join .Imports "\n"}}' ./controlplane/machine` shows no `manifester/broker`, `manifester/sim`, `manifester/sys`, `manifester/cmd`, `manifester/veritas`, `manifester/kwire`, `manifester/format`, `pebble`, `net/http`, or Dynamo SDK paths.
+- [ ] Lane 7. Confirm `internal/controlplane/statemachine` imports stay inside the autonomy allow-list. Save `imports.png`. Pass when `go list -f '{{join .Imports "\n"}}' ./controlplane/machine` shows no `manifester/broker`, `manifester/sim`, `manifester/sys`, `manifester/cmd`, `manifester/veritas`, `manifester/kwire`, `manifester/format`, `pebble`, `net/http`, or Dynamo SDK paths.
 - [ ] Lane 8. Run `go test ./sys -count=1`. Save `sys.png`. Pass when `ok`.
 - [ ] Lane 9. Run `go vet ./controlplane/machine`. Save `vet.png`. Pass when silent.
 - [ ] Lane 10. Run `gofmt -l controlplane/machine`. Save `gofmt.png`. Pass when empty.
@@ -199,7 +199,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 - [ ] Create `internal/verify/sim/engines/logstore/` (faulting Dynamo log engine for `LogAppend`/`LogRead`/`LogCheckTail`/`LogTrim`).
 - [ ] Edit `internal/verify/sim/engine.go` registration sites or kafka config only as needed to construct it behind a flag.
-- [ ] Edit `internal/controlplane/machine` to emit log IOActions on a timer-driven catch-up sketch that does not yet apply commands.
+- [ ] Edit `internal/controlplane/statemachine` to emit log IOActions on a timer-driven catch-up sketch that does not yet apply commands.
 - [ ] Create engine unit tests for if-absent put, lost answer as `MaybeApplied`, and ordered landings.
 
 **Build.**
@@ -250,8 +250,8 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 **Files.**
 
-- [ ] Edit `internal/controlplane/machine` apply path (rules currently in `internal/controlplane/applier` pure subset and `logsm`/`logcp` replica observe/apply).
-- [ ] Edit or wrap `internal/controlplane/applier` so the pure fold is callable without Pebble.
+- [ ] Edit `internal/controlplane/statemachine` apply path (rules currently in `internal/controlplane/stateupdater` pure subset and `logsm`/`logcp` replica observe/apply).
+- [ ] Edit or wrap `internal/controlplane/stateupdater` so the pure fold is callable without Pebble.
 - [ ] Create lockstep tests machine-vs-veritas for commit sequences.
 - [ ] Do not delete `logcp` loops yet.
 
@@ -303,7 +303,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 **Files.**
 
-- [ ] Edit `internal/controlplane/machine` commit queue, group packing, K in-flight append state.
+- [ ] Edit `internal/controlplane/statemachine` commit queue, group packing, K in-flight append state.
 - [ ] Create tests for lost append retry same entry later slot, and sticky single appender behavior at machine level.
 - [ ] Keep `logcp` production path unchanged.
 
@@ -355,7 +355,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 **Files.**
 
-- [ ] Edit `internal/controlplane/machine` role timers, takeover/failback, checkpoint snapshot publish via `ObjPut`, trim via `LogTrim`.
+- [ ] Edit `internal/controlplane/statemachine` role timers, takeover/failback, checkpoint snapshot publish via `ObjPut`, trim via `LogTrim`.
 - [ ] Create tests for standby refuse, takeover after silence, restore on `Started`.
 - [ ] Still no manicp cutover.
 
@@ -407,14 +407,14 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 **Files.**
 
-- [ ] Create `internal/controlplane/run` as the production event loop twin of `sys.Run`, owned by the extractable `internal/controlplane/` tree.
-- [ ] Create `internal/controlplane/exec` for Dynamo and S3 action execution. Keep AWS SDK imports out of `internal/controlplane/machine`.
+- [ ] Create `internal/controlplane/runloop` as the production event loop twin of `sys.Run`, owned by the extractable `internal/controlplane/` tree.
+- [ ] Create `internal/controlplane/executor` for Dynamo and S3 action execution. Keep AWS SDK imports out of `internal/controlplane/statemachine`.
 - [ ] Create the gRPC server adapter that maps unary RPCs to machine events and maps status+`ErrorDetail` on the way out.
 - [ ] Create the broker-side / executor gRPC client that turns `CPCall` into unary RPCs (plaintext). Preferred address dialing. Standby failover list.
-- [ ] Edit `cmd/manicp` as a thin main only. Flags, listen addr, `internal/controlplane/run` wiring. No protocol logic in cmd.
+- [ ] Edit `cmd/manicp` as a thin main only. Flags, listen addr, `internal/controlplane/runloop` wiring. No protocol logic in cmd.
 - [ ] Delete JSON HTTP `/v1/*` handlers. Hard cut. All tests updated in this PR so the suite stays green.
 - [ ] Move `veritas` (and remaining oracles) onto `internal/controlplane/api/v1` message types. Keep apply logic unshared.
-- [ ] Do not add `internal/controlplane/machine` imports of `manifester/sys`. Inject metrics/runinfo via interfaces if needed.
+- [ ] Do not add `internal/controlplane/statemachine` imports of `manifester/sys`. Inject metrics/runinfo via interfaces if needed.
 
 **Build.**
 
@@ -443,7 +443,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Lane 7. Confirm JSON `/v1/` routes are gone (404 or connection refused on old HTTP). Save `http-gone.png`. Pass when no JSON CP handler remains.
 - [ ] Lane 8. Run metrics export test if still present. Save `metrics.png`. Pass when required series exist or the test is updated and green.
 - [ ] Lane 9. Run detcheck. Save `detcheck.png`. Pass when exit 0.
-- [ ] Lane 10. Run autonomy `go list` on `./internal/controlplane/machine ./controlplane/run ./controlplane/exec` and `gofmt -l cmd/manicp controlplane`. Save `autonomy-gofmt.png`. Pass when forbidden imports are absent and gofmt is clean.
+- [ ] Lane 10. Run autonomy `go list` on `./internal/controlplane/statemachine ./controlplane/run ./controlplane/exec` and `gofmt -l cmd/manicp controlplane`. Save `autonomy-gofmt.png`. Pass when forbidden imports are absent and gofmt is clean.
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
@@ -473,7 +473,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 - [ ] Edit `internal/verify/sim/kafka` config so `kafka-log` runs CP replica processes plus logstore engine.
 - [ ] Delete or gut `internal/verify/sim/engines/logengine` replica/state once mutants and C2 move to the machine.
-- [x] Delete `logcp` goroutine loops and `logcp.Env` scheduler path when unused (retired; SoT is `internal/controlplane/machine` + `exec`).
+- [x] Delete `logcp` goroutine loops and `logcp.Env` scheduler path when unused (retired; SoT is `internal/controlplane/statemachine` + `exec`).
 - [ ] Edit `docs/sim-log-engine.md`, `docs/log-cp-service.md`, `docs/decisions.md`, `refactoring_backlog.md`.
 - [ ] Re-home X2 coverage as kernel seeds where practical.
 
@@ -563,7 +563,7 @@ Leave `logengine.state` forever as a third production-shaped copy after the mach
 
 Put the CP run loop in `sys` next to the broker. Rejected for extractability. A future `cp` module would still need monorepo `sys`.
 
-Let `internal/controlplane/machine` import `sim` helpers for tests. Rejected. Tests that need the kernel live in `internal/verify/sim/...` and import `cp`, not the reverse.
+Let `internal/controlplane/statemachine` import `sim` helpers for tests. Rejected. Tests that need the kernel live in `internal/verify/sim/...` and import `cp`, not the reverse.
 
 ## Appendix C. Risks
 
@@ -573,7 +573,7 @@ CP-DSM-1. Buf plugins drift across machines. Owner pins plugin versions in `inte
 
 CP-DSM-2. Autonomy leaks through a convenience import from `sys` or `sim`. Owner watches the import-boundary test every PR.
 
-CP-DSM-7. Hard cut misses a JSON client in `test/it/` or scripts. Owner greps `/v1/` and old HTTP helpers before code-ready.
+CP-DSM-7. Hard cut misses a JSON client in `test/integrationtest/` or scripts. Owner greps `/v1/` and old HTTP helpers before code-ready.
 
 CP-DSM-3. Fault coins drawn at land time instead of issue time break lesson 14. Owner watches issue-time tests.
 
@@ -581,7 +581,7 @@ CP-DSM-4. Pulling Pebble into the machine fails detcheck and autonomy. Owner wat
 
 CP-DSM-7. HTTP adapter deadlocks waiting for Step. Owner watches healthz and commit lanes under `-race`.
 
-CP-DSM-7. `internal/controlplane/cpclient` today imports `manifester/sys`. Leaving that edge blocks a clean module split. Owner either injects interfaces in this PR or files a follow-up box before program close.
+CP-DSM-7. `internal/controlplane/controlplaneclient` today imports `manifester/sys`. Leaving that edge blocks a clean module split. Owner either injects interfaces in this PR or files a follow-up box before program close.
 
 CP-DSM-8. kafka-log hash and step-count churn. Owner expects hand review of the scenario summary, not silent golden edits. Attrition now kills CP nodes, which changes coverage. Owner watches mutant catch seeds.
 
@@ -595,7 +595,7 @@ Read before editing.
 - `docs/sim-log-engine.md`
 - `docs/log-cp-service.md`
 - `docs/decisions.md` rows 1, 9, 11, 14-23, 48-54, and the new CP-DSM plus autonomy decisions from CP-DSM-1
-- `internal/core/machine.go`, `internal/sys/run.go` (broker reference only), `internal/broker/broker.go`, `internal/verify/sim/kernel.go`
+- `internal/core/machine.go`, `internal/system/run.go` (broker reference only), `internal/broker/broker.go`, `internal/verify/sim/kernel.go`
 - `.scratch/cp-dsm-proto/DECISION.md`
 - Autonomy allow-list in this plan's Spawn owners section
 
@@ -609,7 +609,7 @@ Green-gate commands (from exploration). Prefer these exact lines in PR boxes whe
 
 Control surface. This repo has no in-tree `control-cli` package. Live lanes use the `control-cli` skill from `cursor-team-kit` to drive `go test` and `cmd/manisim` / `cmd/manicp` on the lane VM.
 
-How synthesis. [How explainer CP DSM](987d55ce-7b14-4d23-a542-476071d5bf32) still named `sys.Run` as the prod twin. Superseded by the autonomy amendment. Prod twin is `internal/controlplane/run`.
+How synthesis. [How explainer CP DSM](987d55ce-7b14-4d23-a542-476071d5bf32) still named `sys.Run` as the prod twin. Superseded by the autonomy amendment. Prod twin is `internal/controlplane/runloop`.
 
 File-pointer exploration. [CP DSM file pointers](4692b50a-d28d-4f57-8774-249d11ac7efe). PR-boundary table. [CP DSM PR boundaries](a65ea4cf-785e-4112-bb8e-7c267efa8318). Stack order in this plan wins where the table still put prod under `sys`.
 

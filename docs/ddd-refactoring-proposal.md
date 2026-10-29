@@ -9,7 +9,7 @@ changes.
 ## Summary
 
 - **Already good:** the strategic shape is close to DDD. `core` is the published language, `veritas` the
-  executable spec, `internal/controlplane/api/v1` + `apiconv` the gRPC wire boundary, and `internal/wire/format/` and `internal/wire/kwire/` clean context
+  executable spec, `internal/controlplane/api/v1` + `apiconv` the gRPC wire boundary, and `internal/wire/segmentformat/` and `internal/wire/kafkawire/` clean context
   modules.
 - **Weak spots are tactical:**
   1. The same concept has several names and types.
@@ -62,7 +62,7 @@ Proposed glossary, to go in `docs/glossary.md` and be cited by doc comments:
 | Read path | `internal/broker/fetch.go`, `internal/broker/ops.go` | Same leak: `op.lpart` and `op.fpart`. |
 | Log and idempotence | `internal/core/controlplane.go` (contract), `veritas` (spec), `cp/logsm` and `cp/logcp` (implementation), `cpengine` | Duplicated on purpose (decision 21). |
 | Membership and fencing | `Register` and `broker.trip` | |
-| Object layout | `format`, `veritas.ObjectStore`, `internal/sys/s3store` | Shared kernel. Fine. |
+| Object layout | `format`, `veritas.ObjectStore`, `internal/system/s3store` | Shared kernel. Fine. |
 | Runtime | `core`, `sys`, the sim kernel | |
 | Verification | `sim`, `internal/verify/sim/kafka`, `veritastest`, `detcheck` | |
 
@@ -144,5 +144,5 @@ Use files instead.
 1. Items 1, 5 and 8: documentation and constants.
 2. Item 2: error translation.
 3. Items 6 and 4: one aggregate per commit, golden hashes unchanged each time.
-4. Item 3, after the current `internal/verify/sim/` and `internal/sys/` work has merged.
+4. Item 3, after the current `internal/verify/sim/` and `internal/system/` work has merged.
 5. Item 7, after you choose A or B (A recommended).

@@ -12,22 +12,22 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/apiconv"
-	"manifester/internal/controlplane/applier"
-	"manifester/internal/controlplane/exec"
-	"manifester/internal/controlplane/machine"
-	"manifester/internal/controlplane/run"
+	"manifester/internal/controlplane/apiconvert"
+	"manifester/internal/controlplane/executor"
+	"manifester/internal/controlplane/runloop"
+	"manifester/internal/controlplane/statemachine"
+	"manifester/internal/controlplane/stateupdater"
 	"manifester/internal/core"
 )
 
 // Config wires a Node.
 type Config struct {
-	Machine machine.Config
+	Machine statemachine.Config
 	Self    core.NodeInstance
 	Env     core.Environment
-	Clock   run.Clock
-	Log     exec.Log
-	Objects exec.ObjectStore
+	Clock   runloop.Clock
+	Log     executor.Log
+	Objects executor.ObjectStore
 	// StopGrace is how long the machine gets after Shutdown to ShutdownDone.
 	StopGrace core.Duration
 }
@@ -37,9 +37,9 @@ type Node struct {
 	cpv1.UnimplementedControlPlaneServer
 
 	cfg    Config
-	inbox  *run.Inbox
-	inject chan run.InjectFunc
-	m      atomic.Pointer[machine.Machine]
+	inbox  *runloop.Inbox
+	inject chan runloop.InjectFunc
+	m      atomic.Pointer[statemachine.Machine]
 	health *health.Server
 
 	mu        sync.Mutex
@@ -64,15 +64,15 @@ func New(cfg Config) *Node {
 		cfg.Env = &productionEnvironment{}
 	}
 	if cfg.Log == nil {
-		cfg.Log = exec.NewMemoryLog()
+		cfg.Log = executor.NewMemoryLog()
 	}
 	if cfg.StopGrace <= 0 {
 		cfg.StopGrace = core.Duration(15e9) // 15s
 	}
 	return &Node{
 		cfg:      cfg,
-		inbox:    run.NewInbox(64),
-		inject:   make(chan run.InjectFunc, 64),
+		inbox:    runloop.NewInbox(64),
+		inject:   make(chan runloop.InjectFunc, 64),
 		health:   health.NewServer(),
 		waiters:  map[core.RequestID]chan core.ControlPlaneDone{},
 		shutdown: make(chan struct{}),
@@ -88,20 +88,20 @@ func (n *Node) Health() *health.Server { return n.health }
 func (n *Node) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	n.cancel = cancel
-	ex := exec.New(runCtx, exec.Config{}, n.cfg.Log, n.cfg.Objects, n.inbox)
-	b := run.Dependencies{
+	ex := executor.New(runCtx, executor.Config{}, n.cfg.Log, n.cfg.Objects, n.inbox)
+	b := runloop.Dependencies{
 		Clock: n.cfg.Clock, Env: n.cfg.Env, Inbox: n.inbox,
 		Shutdown: n.shutdown, StopGrace: n.cfg.StopGrace, Inject: n.inject,
 		AfterStep: func(cm core.Machine) {
-			if m, ok := cm.(*machine.Machine); ok {
+			if m, ok := cm.(*statemachine.Machine); ok {
 				n.flushAnswers(m)
 			}
 		},
 	}
-	f := machine.New(n.cfg.Machine)
+	f := statemachine.New(n.cfg.Machine)
 	go func() {
-		err := run.Run(runCtx, b, ex, func(env core.Environment, self core.NodeInstance) core.Machine {
-			m := f(env, self).(*machine.Machine)
+		err := runloop.Run(runCtx, b, ex, func(env core.Environment, self core.NodeInstance) core.Machine {
+			m := f(env, self).(*statemachine.Machine)
 			n.m.Store(m)
 			return m
 		}, n.cfg.Self)
@@ -169,7 +169,7 @@ func (n *Node) allocReq() core.RequestID {
 	return n.nextReq
 }
 
-func (n *Node) onLoop(ctx context.Context, fn func(m *machine.Machine) []core.Action) error {
+func (n *Node) onLoop(ctx context.Context, fn func(m *statemachine.Machine) []core.Action) error {
 	done := make(chan struct{})
 	var runErr error
 	select {
@@ -195,7 +195,7 @@ func (n *Node) onLoop(ctx context.Context, fn func(m *machine.Machine) []core.Ac
 	}
 }
 
-func (n *Node) flushAnswers(m *machine.Machine) {
+func (n *Node) flushAnswers(m *statemachine.Machine) {
 	for _, a := range m.TakeAnswers() {
 		n.mu.Lock()
 		ch := n.waiters[a.Req]
@@ -207,7 +207,7 @@ func (n *Node) flushAnswers(m *machine.Machine) {
 	}
 }
 
-func (n *Node) offer(ctx context.Context, cmd applier.Entry) (core.ControlPlaneDone, error) {
+func (n *Node) offer(ctx context.Context, cmd stateupdater.Entry) (core.ControlPlaneDone, error) {
 	req := n.allocReq()
 	ch := make(chan core.ControlPlaneDone, 1)
 	n.mu.Lock()
@@ -219,8 +219,8 @@ func (n *Node) offer(ctx context.Context, cmd applier.Entry) (core.ControlPlaneD
 		n.mu.Unlock()
 	}()
 
-	err := n.onLoop(ctx, func(m *machine.Machine) []core.Action {
-		return m.Offer(machine.ClientOperation{Req: req, Cmd: cmd})
+	err := n.onLoop(ctx, func(m *statemachine.Machine) []core.Action {
+		return m.Offer(statemachine.ClientOperation{Req: req, Cmd: cmd})
 	})
 	if err != nil {
 		return core.ControlPlaneDone{}, err
@@ -248,13 +248,13 @@ func (n *Node) offer(ctx context.Context, cmd applier.Entry) (core.ControlPlaneD
 	}
 }
 
-func (n *Node) read(ctx context.Context, fn func(m *machine.Machine) (core.ControlPlaneDone, error)) (core.ControlPlaneDone, error) {
+func (n *Node) read(ctx context.Context, fn func(m *statemachine.Machine) (core.ControlPlaneDone, error)) (core.ControlPlaneDone, error) {
 	type result struct {
 		d   core.ControlPlaneDone
 		err error
 	}
 	ch := make(chan result, 1)
-	err := n.onLoop(ctx, func(m *machine.Machine) []core.Action {
+	err := n.onLoop(ctx, func(m *statemachine.Machine) []core.Action {
 		if !m.Ready() {
 			ch <- result{d: core.ControlPlaneDone{Err: core.ErrUnavailable}}
 			return nil
@@ -276,8 +276,8 @@ func (n *Node) read(ctx context.Context, fn func(m *machine.Machine) (core.Contr
 
 // CommitSegment implements ControlPlane.
 func (n *Node) CommitSegment(ctx context.Context, req *cpv1.CommitSegmentRequest) (*cpv1.CommitSegmentResponse, error) {
-	op := apiconv.CommitSegmentToCore(req)
-	d, err := n.offer(ctx, applier.Entry{Kind: applier.KindCommit, Commit: op})
+	op := apiconvert.CommitSegmentToCore(req)
+	d, err := n.offer(ctx, stateupdater.Entry{Kind: stateupdater.KindCommit, Commit: op})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, toRPCError(core.ErrTimeout, core.MaybeApplied)
@@ -287,15 +287,15 @@ func (n *Node) CommitSegment(ctx context.Context, req *cpv1.CommitSegmentRequest
 	if d.Err != core.OK {
 		return nil, toRPCError(d.Err, d.Outcome)
 	}
-	return apiconv.CommitSegmentRespFromCore(core.ResponseAs[core.CommitSegmentResp](d)), nil
+	return apiconvert.CommitSegmentRespFromCore(core.ResponseAs[core.CommitSegmentResp](d)), nil
 }
 
 // Lookup implements ControlPlane.
 //
 //nolint:dupl // mirror of DescribeTopics; each RPC keeps its own conversion path
 func (n *Node) Lookup(ctx context.Context, req *cpv1.LookupRequest) (*cpv1.LookupResponse, error) {
-	op := apiconv.LookupToCore(req)
-	d, err := n.read(ctx, func(m *machine.Machine) (core.ControlPlaneDone, error) {
+	op := apiconvert.LookupToCore(req)
+	d, err := n.read(ctx, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
 		return m.Fold().Lookup(op)
 	})
 	if err != nil {
@@ -304,15 +304,15 @@ func (n *Node) Lookup(ctx context.Context, req *cpv1.LookupRequest) (*cpv1.Looku
 	if d.Err != core.OK {
 		return nil, toRPCError(d.Err, d.Outcome)
 	}
-	return apiconv.LookupRespFromCore(core.ResponseAs[core.FindSegmentsResp](d)), nil
+	return apiconvert.LookupRespFromCore(core.ResponseAs[core.FindSegmentsResp](d)), nil
 }
 
 // DescribeTopics implements ControlPlane.
 //
 //nolint:dupl // mirror of Lookup; each RPC keeps its own conversion path
 func (n *Node) DescribeTopics(ctx context.Context, req *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
-	op := apiconv.DescribeTopicsToCore(req)
-	d, err := n.read(ctx, func(m *machine.Machine) (core.ControlPlaneDone, error) {
+	op := apiconvert.DescribeTopicsToCore(req)
+	d, err := n.read(ctx, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
 		return m.Fold().Describe(op)
 	})
 	if err != nil {
@@ -321,7 +321,7 @@ func (n *Node) DescribeTopics(ctx context.Context, req *cpv1.DescribeTopicsReque
 	if d.Err != core.OK {
 		return nil, toRPCError(d.Err, d.Outcome)
 	}
-	return apiconv.DescribeTopicsRespFromCore(core.ResponseAs[core.DescribeTopicsResp](d)), nil
+	return apiconvert.DescribeTopicsRespFromCore(core.ResponseAs[core.DescribeTopicsResp](d)), nil
 }
 
 // CreateTopic implements ControlPlane.
@@ -329,8 +329,8 @@ func (n *Node) CreateTopic(ctx context.Context, req *cpv1.CreateTopicRequest) (*
 	if req == nil {
 		return nil, toRPCError(core.ErrInvalid, core.NotApplied)
 	}
-	d, err := n.offer(ctx, applier.Entry{
-		Kind: applier.KindCreateTopic, Topic: req.Topic, Parts: req.Partitions,
+	d, err := n.offer(ctx, stateupdater.Entry{
+		Kind: stateupdater.KindCreateTopic, Topic: req.Topic, Parts: req.Partitions,
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -352,7 +352,7 @@ func (n *Node) GetStatus(ctx context.Context, _ *cpv1.GetStatusRequest) (*cpv1.G
 		ready            bool
 	}
 	ch := make(chan st, 1)
-	err := n.onLoop(ctx, func(m *machine.Machine) []core.Action {
+	err := n.onLoop(ctx, func(m *statemachine.Machine) []core.Action {
 		role := "standby"
 		if m.IsActive() {
 			role = "active"

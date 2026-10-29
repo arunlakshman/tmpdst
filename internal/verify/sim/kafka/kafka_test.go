@@ -12,7 +12,7 @@ import (
 	"manifester/internal/verify/sim"
 	"manifester/internal/verify/sim/internal/campaign"
 	"manifester/internal/verify/sim/internal/session"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 func seeds(from uint64, n int) []uint64 {
@@ -335,7 +335,7 @@ func TestBatchesCarryProducerIDOnlyWhenIdem(t *testing.T) {
 			if b.corrupt {
 				continue
 			}
-			bt, err := kwire.ParseBatch(b.data)
+			bt, err := kafkawire.ParseBatch(b.data)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -523,12 +523,12 @@ func TestWorkloadBuildsEveryCodecAndCorruptBatches(t *testing.T) {
 		for _, b := range c.p.cur {
 			if b.corrupt {
 				corrupt++
-				if _, err := kwire.ParseBatch(b.data); err == nil {
+				if _, err := kafkawire.ParseBatch(b.data); err == nil {
 					t.Fatal("corrupt batch parses")
 				}
 				continue
 			}
-			bt, err := kwire.ParseBatch(b.data)
+			bt, err := kafkawire.ParseBatch(b.data)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -544,7 +544,7 @@ func TestWorkloadBuildsEveryCodecAndCorruptBatches(t *testing.T) {
 			seen[bt.Codec()]++
 		}
 	}
-	for codec := kwire.CodecNone; codec <= kwire.CodecZstd; codec++ {
+	for codec := kafkawire.CodecNone; codec <= kafkawire.CodecZstd; codec++ {
 		if seen[codec] == 0 {
 			t.Errorf("codec %d never built: %v", codec, seen)
 		}

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"manifester/internal/core"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)
@@ -27,7 +27,7 @@ func opaque(t testing.TB, c int16, recs int32, n int) []byte {
 		x = x*1664525 + 1013904223
 		pay[i] = byte(x >> 24)
 	}
-	b, err := kwire.BuildOpaqueBatch(p, recs, pay)
+	b, err := kafkawire.BuildOpaqueBatch(p, recs, pay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,11 +48,11 @@ func TestCompressedBatchesStoredVerbatimMixedSegment(t *testing.T) {
 	c := h.open(1)
 	batches := [][]byte{
 		plain(t, "a", "b"),
-		opaque(t, kwire.CodecGzip, 100, 60),
-		opaque(t, kwire.CodecSnappy, 3, 200),
+		opaque(t, kafkawire.CodecGzip, 100, 60),
+		opaque(t, kafkawire.CodecSnappy, 3, 200),
 		plain(t, "c"),
-		opaque(t, kwire.CodecLZ4, 5000, 90),
-		opaque(t, kwire.CodecZstd, 7, 33),
+		opaque(t, kafkawire.CodecLZ4, 5000, 90),
+		opaque(t, kafkawire.CodecZstd, 7, 33),
 	}
 	var es []ent
 	for _, b := range batches {
@@ -66,24 +66,24 @@ func TestCompressedBatchesStoredVerbatimMixedSegment(t *testing.T) {
 	ps := produced(h.next(c))
 	var want int64
 	for i, b := range batches {
-		bt, _ := kwire.ParseBatch(b)
+		bt, _ := kafkawire.ParseBatch(b)
 		if ps[i].ErrorCode != 0 || ps[i].BaseOffset != want {
 			t.Fatalf("batch %d: %+v, want base %d", i, ps[i], want)
 		}
 		want += int64(bt.NumRecords)
 	}
 	p := fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)))
-	got, err := kwire.SplitBatches(p.RecordBatches)
+	got, err := kafkawire.SplitBatches(p.RecordBatches)
 	if err != nil || len(got) != len(batches) || p.HighWatermark != want {
 		t.Fatalf("fetch: %v, %d batches, hwm %d (want %d)", err, len(got), p.HighWatermark, want)
 	}
 	var base int64
 	for i := range batches {
-		bt, err := kwire.ParseBatch(got[i])
+		bt, err := kafkawire.ParseBatch(got[i])
 		if err != nil || bt.BaseOffset != base || !sameButOffset(got[i], batches[i]) {
 			t.Fatalf("batch %d: %v base %d want %d", i, err, bt.BaseOffset, base)
 		}
-		orig, _ := kwire.ParseBatch(batches[i])
+		orig, _ := kafkawire.ParseBatch(batches[i])
 		base += int64(orig.NumRecords)
 	}
 	for _, r := range []string{"gzip", "snappy", "lz4", "zstd"} {
@@ -97,16 +97,16 @@ func TestCompressedBatchesStoredVerbatimMixedSegment(t *testing.T) {
 func TestCompressedBatchRejections(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
-	badCRC := opaque(t, kwire.CodecLZ4, 4, 50)
+	badCRC := opaque(t, kafkawire.CodecLZ4, 4, 50)
 	badCRC[len(badCRC)-1] ^= 1
-	badCount := opaque(t, kwire.CodecZstd, 4, 50)
+	badCount := opaque(t, kafkawire.CodecZstd, 4, 50)
 	binary.BigEndian.PutUint32(badCount[23:], 9) // lastOffsetDelta != numRecords-1
 	binary.BigEndian.PutUint32(badCount[17:], crc(badCount))
-	unknown := opaque(t, kwire.CodecGzip, 4, 50)
+	unknown := opaque(t, kafkawire.CodecGzip, 4, 50)
 	unknown[22] = 5
 	binary.BigEndian.PutUint32(unknown[17:], crc(unknown))
 	h.send(c, verProduce, prodReq(-1,
-		e("t", 0, badCRC), e("t", 0, badCount), e("t", 0, unknown), e("t", 0, opaque(t, kwire.CodecSnappy, 2, 10))))
+		e("t", 0, badCRC), e("t", 0, badCount), e("t", 0, unknown), e("t", 0, opaque(t, kafkawire.CodecSnappy, 2, 10))))
 	h.flush()
 	ps := produced(h.next(c))
 	want := []kafkaErrorCode{errCorruptMessage, errCorruptMessage, errUnsupportedCompress, 0}
@@ -129,14 +129,14 @@ func TestFetchLimitsWithLargeCompressedBatches(t *testing.T) {
 	big := []byte(nil)
 	var es []ent
 	for i := range 3 {
-		big = opaque(t, kwire.CodecZstd, 10, 5000+i)
+		big = opaque(t, kafkawire.CodecZstd, 10, 5000+i)
 		es = append(es, e("t", 0, big))
 	}
 	h.send(c, verProduce, prodReq(-1, es...))
 	h.flush()
 	h.next(c)
 	count := func(max int32) int {
-		bs, err := kwire.SplitBatches(fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, max))).RecordBatches)
+		bs, err := kafkawire.SplitBatches(fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, max))).RecordBatches)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -163,7 +163,7 @@ func TestFetchLimitsWithLargeCompressedBatches(t *testing.T) {
 func TestLargeProduceRequest(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
-	big := opaque(t, kwire.CodecLZ4, 500000, 62_000_000)
+	big := opaque(t, kafkawire.CodecLZ4, 500000, 62_000_000)
 	h.send(c, verProduce, prodReq(-1, e("t", 0, big)))
 	if h.closed[1] {
 		t.Fatal("connection closed on a 62 MB request")
@@ -190,7 +190,7 @@ func TestSkipProduceCRCMutantAcksCorruptBatch(t *testing.T) {
 	cfg.InjectedBug = InjectedBugSkipProduceCRC
 	h := startedHarness(t, cfg)
 	c := h.open(1)
-	bad := opaque(t, kwire.CodecLZ4, 4, 50)
+	bad := opaque(t, kafkawire.CodecLZ4, 4, 50)
 	bad[len(bad)-1] ^= 1
 	if r := h.produceOne(c, e("t", 0, bad)); r.ErrorCode != 0 {
 		t.Fatalf("mutant did not admit the corrupt batch: %d", r.ErrorCode)

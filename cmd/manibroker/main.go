@@ -18,18 +18,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"manifester/internal/broker"
-	"manifester/internal/controlplane/cpclient"
+	"manifester/internal/controlplane/controlplaneclient"
 	"manifester/internal/core"
-	"manifester/internal/sys"
-	"manifester/internal/sys/awsobs"
-	"manifester/internal/sys/prod"
-	"manifester/internal/sys/runinfo"
-	"manifester/internal/sys/s3store"
+	"manifester/internal/system"
+	"manifester/internal/system/awsmetrics"
+	"manifester/internal/system/production"
+	"manifester/internal/system/runinfo"
+	"manifester/internal/system/s3store"
 	"manifester/internal/verify/veritas/vsys"
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stderr, sys.StopOnSignal(syscall.SIGTERM, os.Interrupt)))
+	os.Exit(run(os.Args[1:], os.Stderr, system.StopOnSignal(syscall.SIGTERM, os.Interrupt)))
 }
 
 // brokerFlags are the parsed command-line flags.
@@ -113,13 +113,13 @@ func (f brokerFlags) level() (slog.Level, error) {
 	return runinfo.ParseLevel(f.logLevel)
 }
 
-// nodeConfig builds the prod.NodeConfig that does not depend on the object
+// nodeConfig builds the production.NodeConfig that does not depend on the object
 // store or the listener. m is nil when metrics are disabled.
-func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-chan struct{}) (prod.NodeConfig, *prod.Metrics, uint64, string, error) {
-	cpc := cpclient.New(f.cpURL, nil)
-	cfg := prod.NodeConfig{
+func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-chan struct{}) (production.NodeConfig, *production.Metrics, uint64, string, error) {
+	cpc := controlplaneclient.New(f.cpURL, nil)
+	cfg := production.NodeConfig{
 		NodeID: f.nodeID, Broker: broker.DefaultConfig(), Log: log,
-		ControlPlane: cpc, CPClassify: cpclient.Classifier{},
+		ControlPlane: cpc, CPClassify: controlplaneclient.Classifier{},
 		StopGrace: f.grace,
 	}
 	if cfg.NodeID == "" {
@@ -130,14 +130,14 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 	if f.commitDeadline > 0 {
 		cfg.Broker.CommitDeadline = core.Duration(f.commitDeadline)
 	}
-	var m *prod.Metrics
+	var m *production.Metrics
 	if f.metricsAddr != "" {
-		m = prod.NewMetrics()
+		m = production.NewMetrics()
 		runinfo.Register(m.Registry(), "manibroker", info)
 		cfg.Facts = m.Observe
 		cpc.Observe(m.ObserveCPCall)
 	}
-	segLog := prod.NewSegmentLog(log)
+	segLog := production.NewSegmentLog(log)
 	prev := cfg.Facts
 	cfg.Facts = func(f core.Fact) {
 		if prev != nil {
@@ -146,22 +146,22 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 		segLog.Observe(f)
 	}
 	cfg.OnIO = segLog.IO
-	mem, memSource := prod.MemoryLimit()
+	mem, memSource := production.MemoryLimit()
 	err := f.tn.apply(&cfg.Broker, mem)
 	cfg.Shutdown = shutdown
 	return cfg, m, mem, memSource, err
 }
 
 // openObjects sets cfg.Objects from -objects.
-func openObjects(ctx context.Context, f brokerFlags, cfg *prod.NodeConfig, m *prod.Metrics, log *slog.Logger) error {
+func openObjects(ctx context.Context, f brokerFlags, cfg *production.NodeConfig, m *production.Metrics, log *slog.Logger) error {
 	switch f.objects {
 	case "mem":
-		cfg.Objects, cfg.ObjClassify = vsys.NewObjectStore(), prod.MemoryErrorClassifier{}
+		cfg.Objects, cfg.ObjClassify = vsys.NewObjectStore(), production.MemoryErrorClassifier{}
 		return nil
 	case "s3":
-		var obs *awsobs.Recorder
+		var obs *awsmetrics.Recorder
 		if m != nil {
-			obs = awsobs.New(m.Registry(), "manibroker", "s3", log)
+			obs = awsmetrics.New(m.Registry(), "manibroker", "s3", log)
 		}
 		s, err := s3store.New(ctx, s3store.Config{
 			Endpoint: f.endpoint, Region: f.region, Bucket: f.bucket, Prefix: f.prefix, PathStyle: f.pathStyle, Obs: obs,
@@ -181,7 +181,7 @@ func openObjects(ctx context.Context, f brokerFlags, cfg *prod.NodeConfig, m *pr
 }
 
 // bind opens the Kafka listener and sets the advertised host and port.
-func bind(ctx context.Context, f brokerFlags, cfg *prod.NodeConfig) (net.Listener, string, error) {
+func bind(ctx context.Context, f brokerFlags, cfg *production.NodeConfig) (net.Listener, string, error) {
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", f.listen)
 	if err != nil {
 		return nil, "", err
@@ -253,7 +253,7 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 	if err != nil {
 		return err
 	}
-	n, err := prod.Start(ctx, cfg)
+	n, err := production.Start(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -281,14 +281,14 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 		},
 	)
 	if err := n.Wait(); err != nil {
-		return err // sys.ErrStoppedForRestart, sys.ErrKilledByRuntime, ...
+		return err // system.ErrStoppedForRestart, system.ErrKilledByRuntime, ...
 	}
 	log.Info("manibroker stopped")
 	return nil
 }
 
 // manifestTuning is the manifest's "tuning" object (keys are read by the runbook).
-func manifestTuning(cfg prod.NodeConfig, f brokerFlags, mem uint64, memSource, adv string, ln net.Listener) map[string]any {
+func manifestTuning(cfg production.NodeConfig, f brokerFlags, mem uint64, memSource, adv string, ln net.Listener) map[string]any {
 	bc := cfg.Broker
 	return map[string]any{
 		"segment_bytes": bc.MaxSegmentBytes, "segment_window_ns": int64(bc.BatchWindow),

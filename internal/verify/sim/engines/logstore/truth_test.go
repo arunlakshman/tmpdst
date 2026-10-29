@@ -3,7 +3,7 @@ package logstore_test
 import (
 	"testing"
 
-	"manifester/internal/controlplane/applier"
+	"manifester/internal/controlplane/stateupdater"
 	"manifester/internal/core"
 	"manifester/internal/verify/sim"
 	"manifester/internal/verify/sim/engines/logstore"
@@ -40,7 +40,7 @@ func TestCPTruthReplaysNoopAndTrimStride(t *testing.T) {
 	e, c, a := setup(f, 3)
 	_ = e.CreateTopic("t", 1)
 	for slot := range 6 {
-		inner := applier.Encode(applier.Entry{ID: "n", Kind: applier.KindNoop})
+		inner := stateupdater.Encode(stateupdater.Entry{ID: "n", Kind: stateupdater.KindNoop})
 		e.Execute(c, a, core.LogAppend{Req: core.RequestID(slot + 1), Slot: core.LogPosition(slot), Data: inner})
 		c.Run()
 		c.Delivered = nil

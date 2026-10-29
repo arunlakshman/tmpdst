@@ -10,7 +10,7 @@ import (
 	"manifester/internal/core"
 	"manifester/internal/verify/sim"
 	"manifester/internal/verify/sim/kafka"
-	"manifester/internal/wire/kwire"
+	"manifester/internal/wire/kafkawire"
 )
 
 // Oracle property names (the stable strings sim/kafka reports).
@@ -449,7 +449,7 @@ func faults() []fault {
 
 		{"phantom record never produced", func(w *world, r *rand.Rand) bool {
 			tp, _ := pick(r, w.tps)
-			b, err := kwire.BuildBatch(kwire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1}, recsOf("c0.b99999.r0|ph"))
+			b, err := kafkawire.BuildBatch(kafkawire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1}, recsOf("c0.b99999.r0|ph"))
 			if err != nil {
 				panic(err)
 			}
@@ -482,14 +482,14 @@ func faults() []fault {
 			}
 			rg := &w.ranges[tps[i]][c[i].part]
 			raw := w.objs[rg.Loc.Key][rg.Loc.Off : rg.Loc.Off+rg.Loc.Len]
-			bt, _ := kwire.ParseBatch(raw)
+			bt, _ := kafkawire.ParseBatch(raw)
 			recs, _ := bt.Records()
 			vals := make([]string, len(recs))
 			for j, x := range recs {
 				vals[j] = string(x.Value)
 			}
 			vals[0], vals[1] = vals[1], vals[0]
-			nb, err := kwire.BuildBatch(kwire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1}, recsOf(vals...))
+			nb, err := kafkawire.BuildBatch(kafkawire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1}, recsOf(vals...))
 			if err != nil {
 				panic(err)
 			}
@@ -515,9 +515,9 @@ func faults() []fault {
 			k := c[i].part
 			rg := &rs[k]
 			raw := w.objs[rg.Loc.Key][rg.Loc.Off : rg.Loc.Off+rg.Loc.Len]
-			bt, _ := kwire.ParseBatch(raw)
+			bt, _ := kafkawire.ParseBatch(raw)
 			recs, _ := bt.Records()
-			nb, err := kwire.BuildBatch(kwire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1}, recsOf(string(recs[0].Value)))
+			nb, err := kafkawire.BuildBatch(kafkawire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1}, recsOf(string(recs[0].Value)))
 			if err != nil {
 				panic(err)
 			}

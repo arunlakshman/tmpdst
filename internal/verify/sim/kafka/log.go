@@ -14,17 +14,17 @@ import (
 // committed ranges, with each batch's bytes read from the object store's
 // ground truth. It never consults a spec.
 
-// lbat is one committed batch.
-type lbat struct {
+// loggedBatch is one committed batch.
+type loggedBatch struct {
 	base  int64
 	count int
 }
 
-type plog struct {
+type partitionLog struct {
 	tp     core.TopicPartition
 	idx    int
 	vals   []string // value at each offset ("?" where unreadable)
-	bats   []lbat
+	bats   []loggedBatch
 	byBase map[int64]int // base offset -> index in bats
 	ranges int           // committed ranges consumed so far
 }
@@ -48,7 +48,7 @@ func parseVal(v string) (int, int, int, bool) {
 // ingest reads the committed ranges of pl that it has not seen yet and
 // appends them to the log. Every structural problem is a violation: the log
 // must be contiguous, every segment readable, every batch intact.
-func (o *oracle) ingest(v sim.View, pl *plog) {
+func (o *expectedLogChecker) ingest(v sim.View, pl *partitionLog) {
 	rs := v.CP().Committed(pl.tp)
 	for ; pl.ranges < len(rs); pl.ranges++ {
 		r := rs[pl.ranges]
@@ -68,7 +68,7 @@ func (o *oracle) ingest(v sim.View, pl *plog) {
 			append(slices.Clip(det), core.ContextPair{Key: "first_offset", Value: prev})...)
 		o.locs[r.Loc] = start
 		pl.byBase[start] = len(pl.bats)
-		pl.bats = append(pl.bats, lbat{base: start, count: len(vals)})
+		pl.bats = append(pl.bats, loggedBatch{base: start, count: len(vals)})
 		for i, val := range vals {
 			o.record(v, pl, start+int64(i), i, val, det)
 		}
@@ -82,7 +82,7 @@ func (o *oracle) ingest(v sim.View, pl *plog) {
 // checkWhole: a committed range is one produced batch, whole: it starts at
 // record 0 and holds all of the batch's records (a retry duplicates a batch,
 // never part of one).
-func (o *oracle) checkWhole(v sim.View, vals []string, det []core.ContextPair) {
+func (o *expectedLogChecker) checkWhole(v sim.View, vals []string, det []core.ContextPair) {
 	if len(vals) == 0 || vals[0] == "?" {
 		return
 	}
@@ -97,7 +97,7 @@ func (o *oracle) checkWhole(v sim.View, vals []string, det []core.ContextPair) {
 
 // readRange returns the record values of one committed range, or nil after
 // reporting why it is unreadable.
-func (o *oracle) readRange(v sim.View, r core.BatchRange, det []core.ContextPair) []string {
+func (o *expectedLogChecker) readRange(v sim.View, r core.BatchRange, det []core.ContextPair) []string {
 	as := v.Assert()
 	obj, ok := v.Objects().Object(r.Loc.Key)
 	as.Always(ok, "kafka: committed segment exists in the object store", det...)

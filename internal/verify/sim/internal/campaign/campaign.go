@@ -7,8 +7,8 @@ import (
 	"manifester/internal/verify/sim"
 )
 
-// Preset is the fault-family defaults and phase schedule shared by campaigns.
-type Preset struct {
+// ScenarioPreset is the fault-family defaults and phase schedule shared by campaigns.
+type ScenarioPreset struct {
 	ObjectStore      sim.ObjectStoreFaults
 	ControlPlane     sim.ControlPlaneFaults
 	Network          sim.NetworkFaults
@@ -22,7 +22,7 @@ type Preset struct {
 // Millis is n as a core.Duration in milliseconds.
 func Millis(n int64) core.Duration { return core.Duration(n) * core.Millisecond }
 
-func slow(fmin, fmax, smin, smax int64, p float64) sim.FastWithRareSlow {
+func isSlowCampaign(fmin, fmax, smin, smax int64, p float64) sim.FastWithRareSlow {
 	return sim.FastWithRareSlow{
 		FastMin: Millis(fmin), FastMax: Millis(fmax),
 		SlowMin: Millis(smin), SlowMax: Millis(smax), SlowProb: p,
@@ -37,19 +37,19 @@ func Phases() sim.Phases {
 	}
 }
 
-// New returns a Preset. PartialIOMax and MaxCommitItems stay zero.
-func New() Preset {
-	return Preset{
+// New returns a ScenarioPreset. PartialIOMax and MaxCommitItems stay zero.
+func New() ScenarioPreset {
+	return ScenarioPreset{
 		ObjectStore: sim.ObjectStoreFaults{
-			ApplyLatency:   slow(1, 5, 50, 200, 0.05),
-			RespondLatency: slow(1, 3, 20, 100, 0.05),
+			ApplyLatency:   isSlowCampaign(1, 5, 50, 200, 0.05),
+			RespondLatency: isSlowCampaign(1, 3, 20, 100, 0.05),
 			Unavailable503: 0.03, Timeout: 0.02, LostResponse: 0.02, GetCorruptProb: 0.03,
 			Outage:        sim.ServiceOutage{Prob: 0.002, Dur: [2]core.Duration{Millis(200), 2 * core.Second}},
 			CallerTimeout: Millis(500),
 		},
 		ControlPlane: sim.ControlPlaneFaults{
-			ApplyLatency:   slow(1, 5, 50, 200, 0.05),
-			RespondLatency: slow(1, 3, 20, 100, 0.05),
+			ApplyLatency:   isSlowCampaign(1, 5, 50, 200, 0.05),
+			RespondLatency: isSlowCampaign(1, 3, 20, 100, 0.05),
 			Unavailable503: 0.03, Timeout: 0.02, LostResponse: 0.03,
 			Outage:        sim.ServiceOutage{Prob: 0.002, Dur: [2]core.Duration{Millis(200), 2 * core.Second}},
 			CallerTimeout: Millis(500),
@@ -66,15 +66,15 @@ func New() Preset {
 		},
 		Attrition: sim.NodeKills{MaxDead: 1, CrashProb: 0.0005, CrashWeight: 2, GracefulWeight: 1,
 			RecoveryDelay: [2]core.Duration{Millis(200), Millis(1500)}},
-		Cost:             sim.CostParams{PerEvent: 50 * core.Microsecond, PauseProb: 0.001, Pause: slow(1, 5, 20, 100, 0.1)},
+		Cost:             sim.CostParams{PerEvent: 50 * core.Microsecond, PauseProb: 0.001, Pause: isSlowCampaign(1, 5, 20, 100, 0.1)},
 		Phases:           Phases(),
 		QuiesceEvery:     core.Second,
 		CheckDeterminism: 10,
 	}
 }
 
-// LivenessGrace is the Settling offset used by campaign liveness invariants.
-const LivenessGrace = 6 * core.Second
+// ProgressGraceTime is the Settling offset used by campaign liveness invariants.
+const ProgressGraceTime = 6 * core.Second
 
 // PhaseStart reports when the kernel announced phase p, from its sim_phase fact.
 func PhaseStart(v sim.View, p sim.Phase) (sim.Time, bool) {
@@ -86,9 +86,9 @@ func PhaseStart(v sim.View, p sim.Phase) (sim.Time, bool) {
 	return 0, false
 }
 
-// FaultCoverage reports a hard crash and a graceful stop from kernel facts.
+// FaultCoverageCheck reports a hard crash and a graceful stop from kernel facts.
 // The prefix is the scenario label and includes its trailing colon, as in "echo:".
-func FaultCoverage(prefix string) sim.SafetyRule {
+func FaultCoverageCheck(prefix string) sim.SafetyRule {
 	return &faultCoverage{prefix: prefix}
 }
 

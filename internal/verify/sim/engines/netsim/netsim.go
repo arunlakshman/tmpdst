@@ -53,27 +53,27 @@ type Engine struct {
 	recovery bool
 	nextPair uint64
 	nextConn map[core.NodeID]core.ConnID
-	pairs    []*pair // ascending id
-	ends     map[endKey]endRef
+	pairs    []*connectionPair // ascending id
+	ends     map[connectionEndKey]connectionEndRef
 	links    []*link // sorted by (a, b), a <= b
 }
 
 // New returns a network engine with the given fault menu.
 func New(f sim.NetworkFaults) *Engine {
-	return &Engine{f: f, nextConn: map[core.NodeID]core.ConnID{}, ends: map[endKey]endRef{}}
+	return &Engine{f: f, nextConn: map[core.NodeID]core.ConnID{}, ends: map[connectionEndKey]connectionEndRef{}}
 }
 
-type endKey struct {
+type connectionEndKey struct {
 	node core.NodeID
 	id   core.ConnID
 }
 
-type endRef struct {
+type connectionEndRef struct {
 	pair uint64
 	side int
 }
 
-type end struct {
+type connectionEnd struct {
 	ref    core.NodeInstance
 	id     core.ConnID
 	closed bool // closed locally, reset, or crashed: no more sends or delivery
@@ -84,9 +84,9 @@ type end struct {
 type itemKind uint8
 
 const (
-	kData itemKind = iota
-	kFin
-	kRst
+	kindData itemKind = iota
+	kindClose
+	kindReset
 )
 
 type item struct {
@@ -109,9 +109,9 @@ type dir struct {
 	blackhole bool
 }
 
-type pair struct {
+type connectionPair struct {
 	id   uint64
-	end  [2]end
+	end  [2]connectionEnd
 	dirs [2]dir // dirs[d]: side d -> side 1-d
 
 	// StateHash cache: out is the hash state after folding this pair on top of
@@ -131,17 +131,17 @@ type link struct {
 
 // ---- engine-private entry bodies (plain data) ----
 
-type landBody struct {
+type arriveData struct {
 	Pair uint64
 	Dir  int
 	Seq  uint64
 }
-type rstBody struct {
+type resetData struct {
 	Pair uint64
 	Dir  int
 	Seq  uint64
 }
-type healBody struct{ A, B core.NodeID }
+type networkHealData struct{ A, B core.NodeID }
 
 // Name implements sim.Engine.
 func (e *Engine) Name() string { return "netsim" }
@@ -162,11 +162,11 @@ func (e *Engine) EnterRecovery() { e.recovery = true }
 
 // Lane keys: "net/misc" (dial failures), "net/heal", and per pair
 // "net/<pair>/<dir>" (data, 0 or 1), "net/<pair>/ack<side>", "net/<pair>/dial".
-func pairKey(pair uint64, what string) string {
+func connectionPairKey(pair uint64, what string) string {
 	return "net/" + strconv.FormatUint(pair, 10) + "/" + what
 }
 
-func span(r sim.CountedRand, lo, hi core.Duration) core.Duration {
+func timeSpan(r sim.CountedRand, lo, hi core.Duration) core.Duration {
 	if hi <= lo {
 		return lo
 	}
@@ -179,7 +179,7 @@ func (e *Engine) sample(r sim.CountedRand) core.Duration {
 
 // findPair returns the pair with that id. Every caller may mutate it, so it
 // is marked for rehashing.
-func (e *Engine) findPair(id uint64) *pair {
+func (e *Engine) findPair(id uint64) *connectionPair {
 	i := sort.Search(len(e.pairs), func(i int) bool { return e.pairs[i].id >= id })
 	if i < len(e.pairs) && e.pairs[i].id == id {
 		e.pairs[i].ok = false
@@ -188,8 +188,8 @@ func (e *Engine) findPair(id uint64) *pair {
 	return nil
 }
 
-func (e *Engine) lookup(n core.NodeID, c core.ConnID) (*pair, int) {
-	r, ok := e.ends[endKey{n, c}]
+func (e *Engine) lookup(n core.NodeID, c core.ConnID) (*connectionPair, int) {
+	r, ok := e.ends[connectionEndKey{n, c}]
 	if !ok {
 		return nil, 0
 	}
@@ -200,12 +200,12 @@ func (e *Engine) lookup(n core.NodeID, c core.ConnID) (*pair, int) {
 	return p, r.side
 }
 
-func (e *Engine) maybeRemove(p *pair) {
+func (e *Engine) maybeRemove(p *connectionPair) {
 	if !p.end[0].closed || !p.end[1].closed {
 		return
 	}
 	for s := range 2 {
-		delete(e.ends, endKey{p.end[s].ref.Node, p.end[s].id})
+		delete(e.ends, connectionEndKey{p.end[s].ref.Node, p.end[s].id})
 	}
 	i := sort.Search(len(e.pairs), func(i int) bool { return e.pairs[i].id >= p.id })
 	if i < len(e.pairs) && e.pairs[i] == p {
@@ -237,7 +237,7 @@ func (e *Engine) pairExtra(ctx sim.FakeServiceContext, a, b core.NodeID) core.Du
 	if !l.hasExtra {
 		l.hasExtra = true
 		if m := e.f.PairLatencyMax; m > 0 {
-			l.extra = span(ctx.Rand(), 0, m+1)
+			l.extra = timeSpan(ctx.Rand(), 0, m+1)
 		}
 	}
 	return l.extra
@@ -253,7 +253,7 @@ func (e *Engine) clearDir(ctx sim.FakeServiceContext, d *dir) {
 	keep := func(its []item, cancel bool) []item {
 		var out []item
 		for _, it := range its {
-			if it.kind == kRst {
+			if it.kind == kindReset {
 				out = append(out, it)
 			} else if cancel {
 				ctx.Cancel(it.id)
@@ -279,31 +279,31 @@ func (d *dir) arrival(now sim.Time, lat core.Duration) sim.Time {
 }
 
 // enqueue puts a data or FIN item in flight on direction di of p.
-func (e *Engine) enqueue(ctx sim.FakeServiceContext, p *pair, di int, it item, lat core.Duration) {
+func (e *Engine) enqueue(ctx sim.FakeServiceContext, p *connectionPair, di int, it item, lat core.Duration) {
 	d := &p.dirs[di]
 	d.seq++
 	it.seq = d.seq
 	it.crc = crc32.ChecksumIEEE(it.data)
 	at := d.arrival(ctx.Now(), lat)
-	it.id = ctx.Self(at, d.lane, landBody{p.id, di, it.seq})
+	it.id = ctx.Self(at, d.lane, arriveData{p.id, di, it.seq})
 	d.flight = append(d.flight, it)
 }
 
 // sendRst schedules an RST toward side `to` of p (carried on direction 1-to).
 // It lands after anything already in flight on that direction.
-func (e *Engine) sendRst(ctx sim.FakeServiceContext, p *pair, to int, net bool, lat core.Duration) {
+func (e *Engine) sendRst(ctx sim.FakeServiceContext, p *connectionPair, to int, net bool, lat core.Duration) {
 	di := 1 - to
 	d := &p.dirs[di]
 	d.seq++
 	at := d.arrival(ctx.Now(), lat)
-	id := ctx.Self(at, d.lane, rstBody{p.id, di, d.seq})
-	d.flight = append(d.flight, item{kind: kRst, seq: d.seq, net: net, id: id})
+	id := ctx.Self(at, d.lane, resetData{p.id, di, d.seq})
+	d.flight = append(d.flight, item{kind: kindReset, seq: d.seq, net: net, id: id})
 }
 
-func (e *Engine) ack(ctx sim.FakeServiceContext, to core.NodeInstance, p *pair, side int, req core.RequestID, conn core.ConnID, err core.ErrCode) {
+func (e *Engine) ack(ctx sim.FakeServiceContext, to core.NodeInstance, p *connectionPair, side int, req core.RequestID, conn core.ConnID, err core.ErrCode) {
 	var lane sim.DeliveryLane
 	if p != nil {
-		lane = ctx.Lane(pairKey(p.id, "ack"+strconv.Itoa(side)))
+		lane = ctx.Lane(connectionPairKey(p.id, "ack"+strconv.Itoa(side)))
 	} else {
 		lane = ctx.Lane("net/misc")
 	}
@@ -355,19 +355,19 @@ func (e *Engine) dial(ctx sim.FakeServiceContext, from core.NodeInstance, a core
 		return
 	}
 	e.nextPair++
-	p := &pair{id: e.nextPair}
+	p := &connectionPair{id: e.nextPair}
 	e.nextConn[from.Node]++
 	e.nextConn[target]++
-	p.end[0] = end{ref: from, id: e.nextConn[from.Node]}
-	p.end[1] = end{ref: ref, id: e.nextConn[target]}
-	p.dirs[0].lane = ctx.Lane(pairKey(p.id, "0"))
-	p.dirs[1].lane = ctx.Lane(pairKey(p.id, "1"))
+	p.end[0] = connectionEnd{ref: from, id: e.nextConn[from.Node]}
+	p.end[1] = connectionEnd{ref: ref, id: e.nextConn[target]}
+	p.dirs[0].lane = ctx.Lane(connectionPairKey(p.id, "0"))
+	p.dirs[1].lane = ctx.Lane(connectionPairKey(p.id, "1"))
 	// Data follows the open notice on each direction.
 	p.dirs[0].lastArr, p.dirs[1].lastArr = at, at
 	e.pairs = append(e.pairs, p) // ok is false: hashed on first use
-	e.ends[endKey{from.Node, p.end[0].id}] = endRef{p.id, 0}
-	e.ends[endKey{target, p.end[1].id}] = endRef{p.id, 1}
-	ctx.Deliver(from, at, ctx.Lane(pairKey(p.id, "dial")), core.ConnectDone{Req: a.Req, Conn: p.end[0].id})
+	e.ends[connectionEndKey{from.Node, p.end[0].id}] = connectionEndRef{p.id, 0}
+	e.ends[connectionEndKey{target, p.end[1].id}] = connectionEndRef{p.id, 1}
+	ctx.Deliver(from, at, ctx.Lane(connectionPairKey(p.id, "dial")), core.ConnectDone{Req: a.Req, Conn: p.end[0].id})
 	ctx.Deliver(ref, at, p.dirs[0].lane, core.ConnOpened{Conn: p.end[1].id, Peer: string(from.Node)})
 }
 
@@ -382,10 +382,10 @@ func (e *Engine) maybePartition(ctx sim.FakeServiceContext, a, b core.NodeID) {
 	if !ctx.Rand().Chance(e.f.PartitionProb) {
 		return
 	}
-	dur := span(ctx.Rand(), e.f.PartitionDur[0], e.f.PartitionDur[1])
+	dur := timeSpan(ctx.Rand(), e.f.PartitionDur[0], e.f.PartitionDur[1])
 	l.everCut = true
 	l.healAt = ctx.Now() + sim.Time(dur)
-	ctx.Self(l.healAt, ctx.Lane("net/heal"), healBody{l.a, l.b})
+	ctx.Self(l.healAt, ctx.Lane("net/heal"), networkHealData{l.a, l.b})
 	e.fault(ctx, "partition", l.a, l.b, core.Field{Key: "dur", Value: core.I64(dur)})
 }
 
@@ -411,7 +411,7 @@ func (e *Engine) send(ctx sim.FakeServiceContext, from core.NodeInstance, a core
 		}
 		e.maybePartition(ctx, from.Node, peer)
 		if r.Chance(e.f.ClogProb) {
-			dur := span(r, e.f.ClogDur[0], e.f.ClogDur[1])
+			dur := timeSpan(r, e.f.ClogDur[0], e.f.ClogDur[1])
 			d.clogUntil = ctx.Now() + sim.Time(dur)
 			e.fault(ctx, "clog", from.Node, peer, core.Field{Key: "dur", Value: core.I64(dur)})
 		}
@@ -425,7 +425,7 @@ func (e *Engine) send(ctx sim.FakeServiceContext, from core.NodeInstance, a core
 		}
 		chunk := append([]byte(nil), data[:n]...)
 		data = data[n:]
-		e.enqueue(ctx, p, s, item{kind: kData, data: chunk}, e.sample(r)+extra)
+		e.enqueue(ctx, p, s, item{kind: kindData, data: chunk}, e.sample(r)+extra)
 	}
 	e.ack(ctx, from, p, s, a.Req, a.Conn, core.OK)
 }
@@ -447,14 +447,14 @@ func (e *Engine) closeConn(ctx sim.FakeServiceContext, from core.NodeInstance, a
 			e.sendRst(ctx, p, 1-s, false, lat)
 		}
 	} else if !d.aborted {
-		e.enqueue(ctx, p, s, item{kind: kFin}, lat)
+		e.enqueue(ctx, p, s, item{kind: kindClose}, lat)
 		d.aborted = true // no sends after FIN
 	}
 	e.maybeRemove(p)
 }
 
 // netAbort resets a conn from the network: both open ends get Abort:true.
-func (e *Engine) netAbort(ctx sim.FakeServiceContext, p *pair) {
+func (e *Engine) netAbort(ctx sim.FakeServiceContext, p *connectionPair) {
 	for di := range 2 {
 		e.clearDir(ctx, &p.dirs[di])
 		p.dirs[di].aborted = true
@@ -471,11 +471,11 @@ func (e *Engine) netAbort(ctx sim.FakeServiceContext, p *pair) {
 // OnInternal handles an engine-private entry body.
 func (e *Engine) OnInternal(ctx sim.FakeServiceContext, body any) {
 	switch b := body.(type) {
-	case landBody:
+	case arriveData:
 		e.land(ctx, b.Pair, b.Dir, b.Seq)
-	case rstBody:
+	case resetData:
 		e.land(ctx, b.Pair, b.Dir, b.Seq)
-	case healBody:
+	case networkHealData:
 		for _, p := range e.pairs {
 			a, c := p.end[0].ref.Node, p.end[1].ref.Node
 			if (a == b.A && c == b.B) || (a == b.B && c == b.A) {
@@ -506,20 +506,20 @@ func (e *Engine) land(ctx sim.FakeServiceContext, pid uint64, di int, seq uint64
 // flush delivers held items on direction di in order, stopping at a pause or
 // partition (RSTs ignore pause). Data and FIN in a black-holed direction are
 // dropped.
-func (e *Engine) flush(ctx sim.FakeServiceContext, p *pair, di int) {
+func (e *Engine) flush(ctx sim.FakeServiceContext, p *connectionPair, di int) {
 	d := &p.dirs[di]
 	r := 1 - di
 	re := &p.end[r]
 	for len(d.held) > 0 {
 		it := d.held[0]
-		if it.kind != kRst && d.blackhole {
+		if it.kind != kindReset && d.blackhole {
 			d.held = d.held[1:]
 			continue
 		}
 		if e.partitioned(ctx, p.end[0].ref.Node, p.end[1].ref.Node) {
 			return
 		}
-		if it.kind != kRst && re.paused && !re.closed {
+		if it.kind != kindReset && re.paused && !re.closed {
 			return
 		}
 		d.held = d.held[1:]
@@ -527,12 +527,12 @@ func (e *Engine) flush(ctx sim.FakeServiceContext, p *pair, di int) {
 			continue // locally closed or crashed: dropped
 		}
 		switch it.kind {
-		case kData:
+		case kindData:
 			ctx.Deliver(re.ref, ctx.Now(), d.lane, core.BytesReceived{Conn: re.id, Data: it.data})
-		case kFin:
+		case kindClose:
 			re.eof = true
 			ctx.Deliver(re.ref, ctx.Now(), d.lane, core.ConnClosed{Conn: re.id})
-		case kRst:
+		case kindReset:
 			if it.net || !d.blackhole {
 				re.closed = true
 				e.clearDir(ctx, &p.dirs[r])
@@ -547,7 +547,7 @@ func (e *Engine) flush(ctx sim.FakeServiceContext, p *pair, di int) {
 // OnCrash retires every open end at ref; survivors get an RST.
 func (e *Engine) OnCrash(ctx sim.FakeServiceContext, ref core.NodeInstance) {
 	// Snapshot: maybeRemove edits e.pairs.
-	ps := append([]*pair(nil), e.pairs...)
+	ps := append([]*connectionPair(nil), e.pairs...)
 	for _, p := range ps {
 		for s := range 2 {
 			if p.end[s].ref != ref || p.end[s].closed {
@@ -595,7 +595,7 @@ func (e *Engine) StateHash() uint64 {
 			continue
 		}
 		p.in = uint64(h)
-		hashPair(&h, p)
+		hashConnectionPair(&h, p)
 		p.out, p.ok = uint64(h), true
 	}
 	return e.finishHash(h)
@@ -607,7 +607,7 @@ func (e *Engine) fullStateHash() uint64 {
 	h.U64(uint64(len(e.pairs)))
 	for _, p := range e.pairs {
 		p.in = uint64(h)
-		hashPair(&h, p)
+		hashConnectionPair(&h, p)
 		p.out, p.ok = uint64(h), false
 	}
 	return e.finishHash(h)
@@ -626,7 +626,7 @@ func (e *Engine) finishHash(h hasher) uint64 {
 	return uint64(h)
 }
 
-func hashPair(h *hasher, p *pair) {
+func hashConnectionPair(h *hasher, p *connectionPair) {
 	h.U64(p.id)
 	for s := range 2 {
 		en := &p.end[s]

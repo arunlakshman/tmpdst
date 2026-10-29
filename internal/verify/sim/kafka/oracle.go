@@ -8,7 +8,7 @@ import (
 	"manifester/internal/verify/sim"
 )
 
-// oracle is the invariant that owns the reconstructed logs and every check
+// expectedLogChecker is the invariant that owns the reconstructed logs and every check
 // that reads them (AckedIsCommitted, at-least-once duplicates, NoPhantoms,
 // AckedOrder, ReadsMatchLog, AckedDurable, consumers caught up). Delivery is
 // at-least-once (decision 41): a retried batch may be committed more than once
@@ -18,10 +18,10 @@ import (
 // and Gen() skips steps where the control plane did not change. It reads
 // ground truth only (View.CP, View.Objects, facts, history) and never imports
 // the spec.
-type oracle struct {
+type expectedLogChecker struct {
 	opts Opts
 	tps  []core.TopicPartition
-	logs []*plog
+	logs []*partitionLog
 	idx  map[core.TopicPartition]int
 
 	started       bool
@@ -35,19 +35,19 @@ type oracle struct {
 	cpos          map[[2]int]int64          // (consumer client, partition index) -> next offset it should see
 }
 
-func newOracle(o Opts) *oracle {
-	or := &oracle{opts: o, tps: o.tps(), idx: map[core.TopicPartition]int{}, opIdx: map[[2]int]int{},
+func newOracle(o Opts) *expectedLogChecker {
+	or := &expectedLogChecker{opts: o, tps: o.tps(), idx: map[core.TopicPartition]int{}, opIdx: map[[2]int]int{},
 		seen: map[string]int{}, locs: map[core.SegmentRef]int64{}, cpos: map[[2]int]int64{}}
 	for i, tp := range or.tps {
 		or.idx[tp] = i
-		or.logs = append(or.logs, &plog{tp: tp, idx: i, byBase: map[int64]int{}})
+		or.logs = append(or.logs, &partitionLog{tp: tp, idx: i, byBase: map[int64]int{}})
 	}
 	return or
 }
 
-func (*oracle) Name() string { return "KafkaOracle" }
+func (*expectedLogChecker) Name() string { return "KafkaOracle" }
 
-func (o *oracle) Observe(v sim.View) {
+func (o *expectedLogChecker) Observe(v sim.View) {
 	o.scanOps(v)
 	o.refresh(v)
 	o.acks(v)
@@ -55,7 +55,7 @@ func (o *oracle) Observe(v sim.View) {
 }
 
 // scanOps indexes newly invoked ops.
-func (o *oracle) scanOps(v sim.View) {
+func (o *expectedLogChecker) scanOps(v sim.View) {
 	ops := v.History().Ops()
 	for ; o.nops < len(ops); o.nops++ {
 		if op, ok := ops[o.nops].Op.(ProduceOp); ok {
@@ -66,7 +66,7 @@ func (o *oracle) scanOps(v sim.View) {
 }
 
 // refresh brings every partition's log up to the current truth.
-func (o *oracle) refresh(v sim.View) {
+func (o *expectedLogChecker) refresh(v sim.View) {
 	cg, og := v.CP().Gen(), v.Objects().Gen()
 	if o.started && cg == o.cpGen && og == o.objGen {
 		return
@@ -85,7 +85,7 @@ func tpName(tp core.TopicPartition) string { return tp.Topic + "/" + strconv.Ito
 // at this position of its batch, never from a definitely rejected batch). A
 // value may appear again only as a retry of its batch; AtEnd bounds the count
 // by the sends.
-func (o *oracle) record(v sim.View, pl *plog, off int64, i int, val string, det []core.ContextPair) {
+func (o *expectedLogChecker) record(v sim.View, pl *partitionLog, off int64, i int, val string, det []core.ContextPair) {
 	as := v.Assert()
 	if val == "?" {
 		return
@@ -107,7 +107,7 @@ func (o *oracle) record(v sim.View, pl *plog, off int64, i int, val string, det 
 
 // acks checks each produce_acked fact against the truth at the Step that
 // emitted it.
-func (o *oracle) acks(v sim.View) {
+func (o *expectedLogChecker) acks(v sim.View) {
 	for _, tf := range v.Timeline().Since("produce_acked", &o.ackCur) {
 		f := tf.Fact
 		topic, _ := f.Field("topic").(core.Str)
@@ -131,7 +131,7 @@ func (o *oracle) acks(v sim.View) {
 }
 
 // reads checks every consumer fetch that has just returned.
-func (o *oracle) reads(v sim.View) {
+func (o *expectedLogChecker) reads(v sim.View) {
 	ops := v.History().Ops()
 	keep := o.pend[:0]
 	for _, i := range o.pend {
@@ -147,7 +147,7 @@ func (o *oracle) reads(v sim.View) {
 	o.pend = keep
 }
 
-func (o *oracle) checkRead(v sim.View, ro ReadOp, rr ReadRes) {
+func (o *expectedLogChecker) checkRead(v sim.View, ro ReadOp, rr ReadRes) {
 	as := v.Assert()
 	for i, part := range rr.Parts {
 		from := ro.Parts[i]
@@ -179,7 +179,7 @@ func (o *oracle) checkRead(v sim.View, ro ReadOp, rr ReadRes) {
 	}
 }
 
-func (o *oracle) AtEnd(v sim.View) {
+func (o *expectedLogChecker) AtEnd(v sim.View) {
 	o.scanOps(v)
 	o.refresh(v)
 	as := v.Assert()

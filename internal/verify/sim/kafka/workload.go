@@ -68,24 +68,24 @@ const (
 type stage uint8
 
 const (
-	stAPI stage = iota
-	stMeta
-	stList // consumers: ListOffsets earliest
-	stRun
+	stateAPIVersions stage = iota
+	stateMetadata
+	stateListOffsets // consumers: ListOffsets earliest
+	stateRunning
 )
 
 type reqKind uint8
 
 const (
-	rqAPI reqKind = iota
-	rqMeta
-	rqList
-	rqProduce
-	rqFetch
-	nKinds
+	requestAPIVersions reqKind = iota
+	requestMetadata
+	requestListOffsets
+	requestProduce
+	requestFetch
+	kindCount
 )
 
-type inflight struct {
+type waitingRequests struct {
 	kind reqKind
 	h    core.RequestHeader
 }
@@ -96,8 +96,8 @@ type client struct {
 	stage    stage
 	fr       *kwire.Framer
 	corr     int32
-	ver      [nKinds]int16
-	out      *inflight
+	ver      [kindCount]int16
+	out      *waitingRequests
 	p        producer
 	c        consumer
 }
@@ -120,7 +120,7 @@ type Workload struct {
 func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.NodeInstance, o Opts) *Workload {
 	w := &Workload{env: env, self: self, opts: o, tps: o.tps()}
 	w.loop = session.Loop[*client]{
-		Connected: func(c *client) bool { return c.State == session.Up },
+		Connected: func(c *client) bool { return c.State == session.Connected },
 		Busy:      func(c *client) bool { return c.out != nil },
 		Ready:     w.onReady,
 		Idle:      w.advance,
@@ -177,27 +177,27 @@ func (w *Workload) OnPhase(p sim.Phase) []core.Action {
 }
 
 func (w *Workload) onReady(c *client) []core.Action {
-	c.fr, c.stage, c.out = kwire.NewFramer(maxFrame), stAPI, nil
+	c.fr, c.stage, c.out = kwire.NewFramer(maxFrame), stateAPIVersions, nil
 	r, _ := kwire.Range(kwire.KeyApiVersions)
-	c.ver[rqAPI] = r.Min + int16(w.env.Intn(int(r.Max-r.Min)+1))
+	c.ver[requestAPIVersions] = r.Min + int16(w.env.Intn(int(r.Max-r.Min)+1))
 	return w.advance(c)
 }
 
 // advance sends the request of the client's current stage.
 func (w *Workload) advance(c *client) []core.Action {
 	switch c.stage {
-	case stAPI:
+	case stateAPIVersions:
 		r := kmsg.NewPtrApiVersionsRequest()
 		r.ClientSoftwareName, r.ClientSoftwareVersion = "manisim", "1"
-		return w.send(c, rqAPI, r)
-	case stMeta:
+		return w.send(c, requestAPIVersions, r)
+	case stateMetadata:
 		r := kmsg.NewPtrMetadataRequest()
 		for _, t := range w.opts.Topics {
 			r.Topics = append(r.Topics, kmsg.MetadataRequestTopic{Topic: &t})
 		}
-		return w.send(c, rqMeta, r)
-	case stList:
-		return w.send(c, rqList, w.listReq())
+		return w.send(c, requestMetadata, r)
+	case stateListOffsets:
+		return w.send(c, requestListOffsets, w.listReq())
 	}
 	if c.producer {
 		return w.produceNext(c)
@@ -215,10 +215,10 @@ func (w *Workload) send(c *client, kind reqKind, req kmsg.Request) []core.Action
 		return nil
 	}
 	timeout := w.opts.reqTimeout()
-	if kind == rqFetch {
+	if kind == requestFetch {
 		timeout = fetchWait
 	}
-	c.out = &inflight{kind: kind, h: h}
+	c.out = &waitingRequests{kind: kind, h: h}
 	return w.loop.Request(c, data, timeout)
 }
 
@@ -226,7 +226,7 @@ func (w *Workload) onBytes(c *client, data []byte) []core.Action {
 	frames, err := c.fr.Push(data)
 	var acts []core.Action
 	for _, f := range frames {
-		if c.State != session.Up { // lost while handling an earlier frame
+		if c.State != session.Connected { // lost while handling an earlier frame
 			break
 		}
 		if c.out == nil { // unsolicited reply
@@ -241,7 +241,7 @@ func (w *Workload) onBytes(c *client, data []byte) []core.Action {
 		acts = append(acts, c.Answered())
 		acts = append(acts, w.handle(c, in.kind, resp)...)
 	}
-	if err != nil && c.State == session.Up {
+	if err != nil && c.State == session.Connected {
 		return append(acts, w.loop.Abort(c, "bad_stream")...)
 	}
 	return acts
@@ -286,11 +286,11 @@ func (w *Workload) onAPI(c *client, r *kmsg.ApiVersionsResponse) []core.Action {
 		c.ver[k] = lo + int16(w.env.Intn(int(hi-lo)+1))
 		return true
 	}
-	if !pick(rqMeta, kwire.KeyMetadata) || !pick(rqList, kwire.KeyListOffsets) ||
-		!pick(rqProduce, kwire.KeyProduce) || !pick(rqFetch, kwire.KeyFetch) {
+	if !pick(requestMetadata, kwire.KeyMetadata) || !pick(requestListOffsets, kwire.KeyListOffsets) ||
+		!pick(requestProduce, kwire.KeyProduce) || !pick(requestFetch, kwire.KeyFetch) {
 		return w.retryStage(c)
 	}
-	c.stage = stMeta
+	c.stage = stateMetadata
 	return w.advance(c)
 }
 
@@ -305,9 +305,9 @@ func (w *Workload) onMeta(c *client, r *kmsg.MetadataResponse) []core.Action {
 	}
 	switch {
 	case !c.producer && !c.c.listed:
-		c.stage = stList
+		c.stage = stateListOffsets
 	default:
-		c.stage = stRun
+		c.stage = stateRunning
 	}
 	return w.advance(c)
 }
@@ -316,22 +316,22 @@ func (w *Workload) onMeta(c *client, r *kmsg.MetadataResponse) []core.Action {
 // but harmless answer: the connection stays).
 func (w *Workload) retryStage(c *client) []core.Action {
 	c.Fails++
-	return []core.Action{c.Wake(session.RetryDelay(c.Fails))}
+	return []core.Action{c.Wake(session.RetryWaitTime(c.Fails))}
 }
 
 // lost settles whatever was outstanding, whose fate is unknown.
 func (w *Workload) lost(c *client, why string) {
 	if c.out != nil {
 		switch c.out.kind {
-		case rqProduce:
+		case requestProduce:
 			for _, b := range c.p.cur {
 				b.ambiguous = true
 			}
-		case rqFetch:
+		case requestFetch:
 			w.abandonFetch(c, why)
 		}
 	}
-	c.out, c.fr, c.stage = nil, nil, stAPI
+	c.out, c.fr, c.stage = nil, nil, stateAPIVersions
 }
 
 // StateHash folds all state.

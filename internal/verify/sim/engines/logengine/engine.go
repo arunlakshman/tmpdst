@@ -2,8 +2,8 @@
 // replica processes (CP-DSM-8). Replica apply lives in controlplane/machine;
 // the shared Dynamo log and CPTruth live in sim/engines/logstore. This package
 // keeps boundary faults (503, timeout, lost response, outage) and routes
-// ControlPlaneDeliver/ControlPlaneReply. Bug constants stay numeric for LogParams.Bug and
-// machine.Config.Bug.
+// ControlPlaneDeliver/ControlPlaneReply. InjectedBug constants stay numeric for LogParams.Bug and
+// machine.Config.InjectedBug.
 package logengine
 
 import (
@@ -14,13 +14,13 @@ import (
 	"manifester/internal/verify/sim/engines/internal/fakeio"
 )
 
-// Bug selects a mutant (sim.LogParams.Bug). Each is caught by a property.
+// The InjectedBug constants select a mutant (sim.LogParams.Bug). Each is caught by a property.
 const (
-	BugNone             uint8 = iota
-	BugWriterOffsets          // offsets chosen by the writer instead of by apply
-	BugTrimDelete             // trimmed slots are deleted, not tombstoned
-	BugPerReplicaWindow       // each replica forgets keys on its own clock
-	BugHoleSkip               // a replica passes an empty slot without a no-op
+	InjectedBugNone             uint8 = iota
+	InjectedBugWriterOffsets          // offsets chosen by the writer instead of by apply
+	InjectedBugTrimDelete             // trimmed slots are deleted, not tombstoned
+	InjectedBugPerReplicaWindow       // each replica forgets keys on its own clock
+	InjectedBugHoleSkip               // a replica passes an empty slot without a no-op
 )
 
 // Engine bridges ControlPlaneCall to CP replica nodes via ControlPlaneDeliver/ControlPlaneReply.
@@ -190,7 +190,7 @@ func (e *Engine) Execute(ctx sim.FakeServiceContext, from core.NodeInstance, a c
 
 func (e *Engine) execCall(ctx sim.FakeServiceContext, from core.NodeInstance, call core.ControlPlaneCall) {
 	k := e.plan(ctx)
-	if k == fakeio.Unavailable {
+	if k == fakeio.ReplyUnavailable {
 		e.deliver(ctx, from, core.ControlPlaneDone{Req: call.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied})
 		return
 	}
@@ -200,11 +200,11 @@ func (e *Engine) execCall(ctx sim.FakeServiceContext, from core.NodeInstance, ca
 		return
 	}
 	key := pendKey{from.Node, call.Req}
-	p := &pending{from: from, op: call.Op, to: cp, muted: k == fakeio.Lost || k == fakeio.Timeout}
+	p := &pending{from: from, op: call.Op, to: cp, muted: k == fakeio.ReplyLost || k == fakeio.ReplyTimeout}
 	to := ctx.Now() + sim.Time(max(e.f.CallerTimeout, 500*core.Millisecond))
 	p.deadline = ctx.Self(to, ctx.Lane("logengine/deadline"), deadlineEv{node: from.Node, req: call.Req})
 	e.pending[key] = p
-	if k == fakeio.Timeout && ctx.Rand().Chance(0.5) {
+	if k == fakeio.ReplyTimeout && ctx.Rand().Chance(0.5) {
 		return // never reached the service; deadline answers the broker
 	}
 	e.offer(ctx, cp, from, call.Req, call.Op)
@@ -276,7 +276,7 @@ func (e *Engine) liveCPs(ctx sim.FakeServiceContext) []core.NodeInstance {
 
 func (e *Engine) plan(ctx sim.FakeServiceContext) fakeio.Kind {
 	if e.recovery {
-		return fakeio.Normal
+		return fakeio.ReplyNormal
 	}
 	p := fakeio.Params{P503: e.f.Unavailable503, PTimeout: e.f.Timeout, PLost: e.f.LostResponse, Outage: e.f.Outage}
 	return p.Draw(ctx, "cp", &e.until)

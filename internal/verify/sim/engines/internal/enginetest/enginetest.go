@@ -10,8 +10,8 @@ import (
 	"manifester/internal/verify/sim"
 )
 
-// Delivery is one completion handed to a node.
-type Delivery struct {
+// DeliveredEvent is one completion handed to a node.
+type DeliveredEvent struct {
 	At   sim.Time
 	To   core.NodeInstance
 	Body core.EventData
@@ -31,7 +31,7 @@ type Ctx struct {
 	R         sim.CountedRand
 	T         sim.Time
 	Down      map[core.NodeID]bool // test-only
-	Delivered []Delivery
+	Delivered []DeliveredEvent
 	Faults    []string
 	Reached   []string
 	// Violations lists the properties an Always found false.
@@ -92,7 +92,7 @@ func (c *Ctx) Cancel(id sim.EntryID) {
 func (c *Ctx) Fault(kind string, _ ...core.Field) { c.Faults = append(c.Faults, kind) }
 
 // Assert returns the assertion recorder.
-func (c *Ctx) Assert() core.Assertions { return asserts{c} }
+func (c *Ctx) Assert() core.Assertions { return checks{c} }
 
 // Current returns the live incarnation of n.
 func (c *Ctx) Current(n core.NodeID) (core.NodeInstance, bool) {
@@ -174,7 +174,7 @@ func (c *Ctx) step() bool {
 	if e.self {
 		c.eng.OnInternal(c, e.body)
 	} else {
-		c.Delivered = append(c.Delivered, Delivery{At: e.at, To: e.to, Body: e.body.(core.EventData)})
+		c.Delivered = append(c.Delivered, DeliveredEvent{At: e.at, To: e.to, Body: e.body.(core.EventData)})
 	}
 	return true
 }
@@ -188,21 +188,21 @@ func (c *Ctx) Trace() string {
 	return s.String()
 }
 
-type asserts struct{ c *Ctx }
+type checks struct{ c *Ctx }
 
-func (a asserts) Always(cond bool, p core.PropertyID, _ ...core.ContextPair) {
+func (a checks) Always(cond bool, p core.PropertyID, _ ...core.ContextPair) {
 	if !cond {
 		a.c.Violations = append(a.c.Violations, string(p))
 	}
 }
-func (a asserts) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
-func (a asserts) Sometimes(cond bool, p core.PropertyID) {
+func (a checks) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
+func (a checks) Sometimes(cond bool, p core.PropertyID) {
 	if cond {
 		a.c.Reached = append(a.c.Reached, string(p))
 	}
 }
-func (a asserts) Reachable(p core.PropertyID)                      { a.c.Reached = append(a.c.Reached, string(p)) }
-func (a asserts) Unreachable(core.PropertyID, ...core.ContextPair) {}
+func (a checks) Reachable(p core.PropertyID)                      { a.c.Reached = append(a.c.Reached, string(p)) }
+func (a checks) Unreachable(core.PropertyID, ...core.ContextPair) {}
 
 // Find returns the delivered completion for req (nil if none).
 func (c *Ctx) Find(req core.RequestID) core.IOResult {

@@ -7,11 +7,11 @@ import (
 )
 
 // The broker never decompresses (decision 45), so the simulated clients need no
-// real codec: sqz is a reversible byte scramble that stands in for gzip,
+// real codec: compressValue is a reversible byte scramble that stands in for gzip,
 // snappy, lz4 and zstd. A batch carries the real codec id in its attributes
-// and an sqz'd records section the broker must treat as opaque bytes; only the
+// and an compressValue'd records section the broker must treat as opaque bytes; only the
 // simulated consumer and the oracle undo it.
-func sqz(b []byte) []byte {
+func compressValue(b []byte) []byte {
 	out := make([]byte, len(b))
 	for i, c := range b {
 		out[len(b)-1-i] = c ^ 0xa5
@@ -19,8 +19,8 @@ func sqz(b []byte) []byte {
 	return out
 }
 
-// unsqz is sqz's inverse.
-func unsqz(b []byte) []byte { return sqz(b) } // reverse and xor are involutions
+// decompressValue is compressValue's inverse.
+func decompressValue(b []byte) []byte { return compressValue(b) } // reverse and xor are involutions
 
 // buildBatch builds a batch of recs with the given codec id (0 = none).
 func buildBatch(pp kwire.BatchParams, recs []kmsg.Record, codec int16) ([]byte, error) {
@@ -33,14 +33,14 @@ func buildBatch(pp kwire.BatchParams, recs []kmsg.Record, codec int16) ([]byte, 
 		return nil, err
 	}
 	pp.Attributes |= codec
-	return kwire.BuildOpaqueBatch(pp, bt.NumRecords, sqz(bt.Payload()))
+	return kwire.BuildOpaqueBatch(pp, bt.NumRecords, compressValue(bt.Payload()))
 }
 
-// batchRecords decodes a parsed batch's records, undoing sqz for a compressed
+// batchRecords decodes a parsed batch's records, undoing compressValue for a compressed
 // batch (what a real client does with its own codec).
 func batchRecords(bt kwire.Batch) ([]kmsg.Record, error) {
 	if bt.Codec() == kwire.CodecNone {
 		return bt.Records()
 	}
-	return kwire.DecodeRecords(unsqz(bt.Payload()), bt.NumRecords)
+	return kwire.DecodeRecords(decompressValue(bt.Payload()), bt.NumRecords)
 }

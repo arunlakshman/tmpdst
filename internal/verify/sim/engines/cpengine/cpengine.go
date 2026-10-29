@@ -17,7 +17,7 @@ import (
 
 // Engine is the fake control plane. It is also the sim.CPTruth.
 type Engine struct {
-	*fakeio.Core
+	*fakeio.CompletionCore
 	spec     *veritas.ControlPlane
 	maxItems int // sim.ControlPlaneFaults.MaxCommitItems; 0 = unlimited
 }
@@ -30,7 +30,7 @@ var (
 // New returns an empty control plane with the given faults.
 func New(f sim.ControlPlaneFaults) *Engine {
 	e := &Engine{spec: veritas.NewControlPlane(), maxItems: f.MaxCommitItems}
-	e.Core = fakeio.New(fakeio.Hooks{
+	e.CompletionCore = fakeio.New(fakeio.CompletionHooks{
 		Name:   "cpengine",
 		Prefix: "cp",
 		Params: fakeio.Params{
@@ -75,7 +75,7 @@ func (e *Engine) Handles(a core.Action) bool {
 
 // Execute starts a, a core.ControlPlaneCall.
 func (e *Engine) Execute(ctx sim.FakeServiceContext, from core.NodeInstance, a core.Action) {
-	e.Core.Execute(ctx, from, a.(core.IOCall))
+	e.CompletionCore.Execute(ctx, from, a.(core.IOCall))
 }
 
 // Committed returns the committed ranges of tp in offset order.

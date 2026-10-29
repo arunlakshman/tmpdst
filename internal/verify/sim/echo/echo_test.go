@@ -95,9 +95,9 @@ func TestMutantsAreCaught(t *testing.T) {
 		m    mutation
 		prop core.PropertyID
 	}{
-		{"ack before CommitSegment", mutEarlyAck, "echo: acked offset is committed"},
-		{"ack when a commit times out", mutAckOnMaybe, "echo: acked offset is committed"},
-		{"GET returns a different payload", mutBadRead, "echo: GET of an acked offset returns the acked payload"},
+		{"ack before CommitSegment", bugEarlyAck, "echo: acked offset is committed"},
+		{"ack when a commit times out", bugAckOnMaybe, "echo: acked offset is committed"},
+		{"GET returns a different payload", bugBadRead, "echo: GET of an acked offset returns the acked payload"},
 	}
 	for _, c := range cases {
 		s := firstCatch(config(nil, mutantFactory(c.m)), budget, c.prop)
@@ -107,7 +107,7 @@ func TestMutantsAreCaught(t *testing.T) {
 		}
 		t.Logf("mutant %q first caught by seed %d", c.name, s)
 	}
-	if s := firstCatch(config(nil, mutantFactory(mutNone)), 10, "echo: acked offset is committed"); s != 0 {
+	if s := firstCatch(config(nil, mutantFactory(bugNone)), 10, "echo: acked offset is committed"); s != 0 {
 		t.Errorf("real broker violated AckedIsCommitted at seed %d", s)
 	}
 }
@@ -145,7 +145,7 @@ func (i *tallyInv) AtEnd(v sim.View) {
 		if len(res) >= 3 && res[:3] == "ERR" {
 			i.t.errs++
 		}
-		if op.Invoke >= sim.Time(i.ph.Chaos+campaign.LivenessGrace) {
+		if op.Invoke >= sim.Time(i.ph.Chaos+campaign.ProgressGraceTime) {
 			i.t.window++
 		}
 	}

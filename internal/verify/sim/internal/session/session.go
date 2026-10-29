@@ -7,14 +7,14 @@ package session
 import "manifester/internal/core"
 
 // State is a client's connection state. A scenario may define connected
-// substates of its own at Up and above.
+// substates of its own at Connected and above.
 type State uint8
 
 // The connection states the loop drives.
 const (
-	Backoff State = iota // wake timer pending, then dial
-	Dialing
-	Up
+	WaitingToRetry State = iota // wake timer pending, then dial
+	Connecting
+	Connected
 )
 
 // Client is one client's connection state. A scenario embeds it in its client.
@@ -49,12 +49,12 @@ func (c *Client) Answered() core.Action {
 
 func (c *Client) backoff() core.Action {
 	c.Fails++
-	c.State = Backoff
-	return c.Wake(RetryDelay(c.Fails))
+	c.State = WaitingToRetry
+	return c.Wake(RetryWaitTime(c.Fails))
 }
 
-// RetryDelay is the backoff after n consecutive failures.
-func RetryDelay(n int) core.Duration {
+// RetryWaitTime is the backoff after n consecutive failures.
+func RetryWaitTime(n int) core.Duration {
 	if n > 4 {
 		n = 4
 	}
@@ -74,7 +74,7 @@ type Loop[C member] struct {
 	Connected func(c C) bool
 	// Busy reports that c has a request outstanding.
 	Busy func(c C) bool
-	// Ready runs when c's dial succeeds, with Conn set and State Up.
+	// Ready runs when c's dial succeeds, with Conn set and State Connected.
 	Ready func(c C) []core.Action
 	// Idle runs when c's wake timer fires while connected and not busy.
 	Idle func(c C) []core.Action
@@ -99,7 +99,7 @@ func (l *Loop[C]) Step(ev core.Event) []core.Action {
 		acts = l.onTimer(e)
 	case core.ConnectDone:
 		for _, c := range l.Clients {
-			if s := c.session(); s.State == Dialing && s.DialReq == e.Req {
+			if s := c.session(); s.State == Connecting && s.DialReq == e.Req {
 				acts = l.onDial(c, e)
 			}
 		}
@@ -132,7 +132,7 @@ func (l *Loop[C]) byConn(id core.ConnID) (C, bool) {
 // Dial connects c to the next broker in its rotation.
 func (l *Loop[C]) Dial(c C) []core.Action {
 	s := c.session()
-	s.State, s.DialReq = Dialing, l.req()
+	s.State, s.DialReq = Connecting, l.req()
 	addr := string(l.Brokers[(s.ID+s.Dials)%len(l.Brokers)])
 	s.Dials++
 	return []core.Action{core.Connect{Req: s.DialReq, Addr: addr}}
@@ -144,7 +144,7 @@ func (l *Loop[C]) onDial(c C, e core.ConnectDone) []core.Action {
 	if e.Err != core.OK {
 		return []core.Action{s.backoff()}
 	}
-	s.Conn, s.State = e.Conn, Up
+	s.Conn, s.State = e.Conn, Connected
 	return l.Ready(c)
 }
 
@@ -157,7 +157,7 @@ func (l *Loop[C]) onTimer(e core.TimerFired) []core.Action {
 				return nil
 			}
 			switch {
-			case s.State == Backoff:
+			case s.State == WaitingToRetry:
 				return l.Dial(c)
 			case l.Connected(c) && !l.Busy(c):
 				return l.Idle(c)

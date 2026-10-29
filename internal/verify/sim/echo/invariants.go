@@ -22,15 +22,15 @@ func parseAck(f core.Fact) (ackFact, bool) {
 	return ackFact{int64(o), string(k), p}, ok1 && ok2 && ok3
 }
 
-// ackedIsCommitted: on the Step that acks, the offset is committed in the
+// ackedMeansCommitted: on the Step that acks, the offset is committed in the
 // control plane to a segment that exists in the object store and decodes to
 // the acked payload.
-type ackedIsCommitted struct{ cur sim.Cursor }
+type ackedMeansCommitted struct{ cur sim.Cursor }
 
-func (*ackedIsCommitted) Name() string   { return "AckedIsCommitted" }
-func (*ackedIsCommitted) AtEnd(sim.View) {}
+func (*ackedMeansCommitted) Name() string   { return "AckedIsCommitted" }
+func (*ackedMeansCommitted) AtEnd(sim.View) {}
 
-func (i *ackedIsCommitted) Observe(v sim.View) {
+func (i *ackedMeansCommitted) Observe(v sim.View) {
 	for _, tf := range v.Timeline().Since("echo_acked", &i.cur) {
 		a, ok := parseAck(tf.Fact)
 		v.Assert().Always(ok, "echo: ack fact is well formed")
@@ -63,18 +63,18 @@ func (i *ackedIsCommitted) Observe(v sim.View) {
 	}
 }
 
-// readYourAck: a GET of an acked offset returns the acked payload or an error,
+// readWhatWasAcked: a GET of an acked offset returns the acked payload or an error,
 // never a different payload.
-type readYourAck struct {
+type readWhatWasAcked struct {
 	cur     sim.Cursor
 	acked   map[int64][]byte
 	checked []bool
 }
 
-func (*readYourAck) Name() string   { return "ReadYourAck" }
-func (*readYourAck) AtEnd(sim.View) {}
+func (*readWhatWasAcked) Name() string   { return "ReadYourAck" }
+func (*readWhatWasAcked) AtEnd(sim.View) {}
 
-func (i *readYourAck) Observe(v sim.View) {
+func (i *readWhatWasAcked) Observe(v sim.View) {
 	for _, tf := range v.Timeline().Since("echo_acked", &i.cur) {
 		a, ok := parseAck(tf.Fact)
 		if !ok {
@@ -116,7 +116,7 @@ func (l *liveness) AtEnd(v sim.View) {
 	settling, ok1 := campaign.PhaseStart(v, sim.PhaseRecovering)
 	settle, ok2 := campaign.PhaseStart(v, sim.PhaseRecover)
 	v.Assert().Always(ok1 && ok2, "echo: the kernel announced Settling and Settle")
-	from, to := settling+sim.Time(campaign.LivenessGrace), settle
+	from, to := settling+sim.Time(campaign.ProgressGraceTime), settle
 	for _, op := range v.History().Ops() {
 		v.Assert().Always(op.Outcome != sim.OpPending, "echo: no request pending at end", core.ContextPair{Key: "op", Value: op.Op})
 		if !ok1 || !ok2 || op.Invoke < from || op.Invoke >= to {

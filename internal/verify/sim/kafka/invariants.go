@@ -6,15 +6,15 @@ import (
 	"manifester/internal/verify/sim/internal/campaign"
 )
 
-type liveness struct{}
+type progressCheck struct{}
 
-func (*liveness) Name() string     { return "Liveness" }
-func (*liveness) Observe(sim.View) {}
+func (*progressCheck) Name() string     { return "Liveness" }
+func (*progressCheck) Observe(sim.View) {}
 
-func (*liveness) AtEnd(v sim.View) {
+func (*progressCheck) AtEnd(v sim.View) {
 	settling, ok := campaign.PhaseStart(v, sim.PhaseRecovering)
 	v.Assert().Always(ok, "kafka: the kernel announced Settling")
-	after := settling + sim.Time(campaign.LivenessGrace)
+	after := settling + sim.Time(campaign.ProgressGraceTime)
 	var produced, reads int
 	for _, op := range v.History().Ops() {
 		v.Assert().Always(op.Outcome != sim.OpPending, "kafka: no op pending at end", core.ContextPair{Key: "op", Value: op.Op})

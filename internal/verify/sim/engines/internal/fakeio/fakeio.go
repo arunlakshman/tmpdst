@@ -30,8 +30,8 @@ type Params struct {
 	CallerTimeout  core.Duration
 }
 
-// Hooks is what an engine plugs into the core.
-type Hooks struct {
+// CompletionHooks is what an engine plugs into the core.
+type CompletionHooks struct {
 	Name   string // engine name, also the lane namespace
 	Prefix string // fault name prefix: "obj" or "cp"
 	Params Params
@@ -48,7 +48,7 @@ type Hooks struct {
 	// bool and value are kept on the plan. Nil means none.
 	Extra func(r sim.CountedRand, a core.IOCall) (bool, uint64)
 	// Finish rewrites the response of a normally answered op (corruption).
-	Finish func(ctx sim.FakeServiceContext, c core.IOResult, p Plan) core.IOResult
+	Finish func(ctx sim.FakeServiceContext, c core.IOResult, p CompletionPlan) core.IOResult
 	// SpecHash is the spec's StateHash.
 	SpecHash func() uint64
 }
@@ -56,17 +56,17 @@ type Hooks struct {
 // Kind is how an issued op resolves.
 type Kind uint8
 
-// Kind values: Normal, Unavailable, Timeout and Lost, as commented below.
+// Kind values: ReplyNormal, ReplyUnavailable, ReplyTimeout and ReplyLost, as commented below.
 const (
-	// Normal applies at T1 and responds at T2.
-	Normal      Kind = iota // apply at T1, respond at T2
-	Unavailable             // refused, NotApplied
-	Timeout                 // caller sees timeout; op applies or not (drawn at T1)
-	Lost                    // applies at T1, response never arrives; caller sees timeout
+	// ReplyNormal applies at T1 and responds at T2.
+	ReplyNormal      Kind = iota // apply at T1, respond at T2
+	ReplyUnavailable             // refused, NotApplied
+	ReplyTimeout                 // caller sees timeout; op applies or not (drawn at T1)
+	ReplyLost                    // applies at T1, response never arrives; caller sees timeout
 )
 
-// Plan is one in-flight op.
-type Plan struct {
+// CompletionPlan is one in-flight op.
+type CompletionPlan struct {
 	ID     uint64
 	From   core.NodeInstance
 	Act    core.IOCall
@@ -79,11 +79,11 @@ type Plan struct {
 
 type landBody struct{ ID uint64 }
 
-// Core is the engine state besides the spec.
-type Core struct {
-	h        Hooks
+// CompletionCore is the engine state besides the spec.
+type CompletionCore struct {
+	h        CompletionHooks
 	nextID   uint64
-	plans    []Plan // sorted by ID (append order)
+	plans    []CompletionPlan // sorted by ID (append order)
 	until    sim.Time
 	recovery bool
 	gen      uint64
@@ -93,17 +93,17 @@ type Core struct {
 	specOK   bool
 }
 
-// New returns a Core.
-func New(h Hooks) *Core { return &Core{h: h} }
+// New returns a CompletionCore.
+func New(h CompletionHooks) *CompletionCore { return &CompletionCore{h: h} }
 
 // Gen is the applied-change counter; Bump adds an out-of-band change.
-func (c *Core) Gen() uint64 { return c.gen }
+func (c *CompletionCore) Gen() uint64 { return c.gen }
 
 // Bump records an out-of-band spec change (and invalidates the spec hash cache).
-func (c *Core) Bump() { c.gen++; c.specOK = false }
+func (c *CompletionCore) Bump() { c.gen++; c.specOK = false }
 
 // specStateHash is the spec's StateHash, recomputed only after a mutation.
-func (c *Core) specStateHash() uint64 {
+func (c *CompletionCore) specStateHash() uint64 {
 	if !c.specOK {
 		c.specHash, c.specOK = c.h.SpecHash(), true
 	}
@@ -112,17 +112,17 @@ func (c *Core) specStateHash() uint64 {
 
 // SpecStateHash is the cached spec hash, exported so conformance (C2) can
 // compare it with the spec's own StateHash (a stale cache shows up as a diff).
-func (c *Core) SpecStateHash() uint64 { return c.specStateHash() }
+func (c *CompletionCore) SpecStateHash() uint64 { return c.specStateHash() }
 
 // Name returns the hooks name.
-func (c *Core) Name() string { return c.h.Name }
+func (c *CompletionCore) Name() string { return c.h.Name }
 
 // EnterRecovery stops new faults for later actions.
-func (c *Core) EnterRecovery() { c.recovery = true }
+func (c *CompletionCore) EnterRecovery() { c.recovery = true }
 
 // OnCrash does nothing: effects stand and landings stay scheduled; deliveries to the dead
 // incarnation are dropped by the scheduler or skipped at landing.
-func (c *Core) OnCrash(sim.FakeServiceContext, core.NodeInstance) {}
+func (c *CompletionCore) OnCrash(sim.FakeServiceContext, core.NodeInstance) {}
 
 // Draw draws the boundary fault coins (outage, 503, timeout, lost, in that
 // order) and emits the matching fault named pre+"_...". until is the end of
@@ -149,25 +149,25 @@ func (p Params) Draw(ctx sim.FakeServiceContext, pre string, until *sim.Time, fi
 		}
 		ctx.Fault(pre+"_503", append(fields, core.Field{Key: "cause", Value: core.Str(cause)})...)
 		ctx.Assert().Reachable(core.PropertyID(pre + " 503 injected"))
-		return Unavailable
+		return ReplyUnavailable
 	case isTimeout:
 		ctx.Fault(pre+"_timeout", fields...)
 		ctx.Assert().Reachable(core.PropertyID(pre + " timeout injected"))
-		return Timeout
+		return ReplyTimeout
 	case isLost:
 		ctx.Fault(pre+"_lost_response", fields...)
 		ctx.Assert().Reachable(core.PropertyID(pre + " lost response injected"))
-		return Lost
+		return ReplyLost
 	}
-	return Normal
+	return ReplyNormal
 }
 
 // Execute plans an op. Draw order: fault coins (Draw), apply latency, respond
 // latency, extra.
-func (c *Core) Execute(ctx sim.FakeServiceContext, from core.NodeInstance, a core.IOCall) {
+func (c *CompletionCore) Execute(ctx sim.FakeServiceContext, from core.NodeInstance, a core.IOCall) {
 	r, now, p := ctx.Rand(), ctx.Now(), c.h.Params
 	req := core.Field{Key: "req", Value: core.U64(a.RequestID())}
-	kind := Normal
+	kind := ReplyNormal
 	if !c.recovery {
 		kind = p.Draw(ctx, c.h.Prefix, &c.until, req)
 	}
@@ -180,12 +180,12 @@ func (c *Core) Execute(ctx sim.FakeServiceContext, from core.NodeInstance, a cor
 	}
 
 	c.nextID++
-	pl := Plan{ID: c.nextID, From: from, Act: a, Kind: kind, T1: t1, T2: t2, Flag: flag, Bits: bits, Lane: ctx.Lane(c.h.Name + "/" + string(from.Node))}
+	pl := CompletionPlan{ID: c.nextID, From: from, Act: a, Kind: kind, T1: t1, T2: t2, Flag: flag, Bits: bits, Lane: ctx.Lane(c.h.Name + "/" + string(from.Node))}
 	switch kind {
-	case Unavailable:
+	case ReplyUnavailable:
 		ctx.Deliver(from, t2, pl.Lane, c.h.Fail(a, core.ErrUnavailable, core.NotApplied))
 		return
-	case Timeout, Lost:
+	case ReplyTimeout, ReplyLost:
 		ctx.Deliver(from, now+sim.Time(p.CallerTimeout), pl.Lane, c.h.Fail(a, core.ErrTimeout, core.MaybeApplied))
 		if !c.h.Mutating(a) {
 			return // nothing to apply, nothing to answer
@@ -196,7 +196,7 @@ func (c *Core) Execute(ctx sim.FakeServiceContext, from core.NodeInstance, a cor
 }
 
 // OnInternal lands one planned op.
-func (c *Core) OnInternal(ctx sim.FakeServiceContext, body any) {
+func (c *CompletionCore) OnInternal(ctx sim.FakeServiceContext, body any) {
 	b, ok := body.(landBody)
 	if !ok {
 		return
@@ -213,7 +213,7 @@ func (c *Core) OnInternal(ctx sim.FakeServiceContext, body any) {
 	pl := c.plans[i]
 	c.plans = slices.Delete(c.plans, i, i+1)
 	apply := true
-	if pl.Kind == Timeout {
+	if pl.Kind == ReplyTimeout {
 		apply = ctx.Rand().Chance(0.5)
 		ctx.Assert().Sometimes(apply, core.PropertyID(c.h.Prefix+" timed-out op applied"))
 		ctx.Assert().Sometimes(!apply, core.PropertyID(c.h.Prefix+" timed-out op not applied"))
@@ -228,7 +228,7 @@ func (c *Core) OnInternal(ctx sim.FakeServiceContext, body any) {
 	if c.h.Changed(comp) {
 		c.gen++
 	}
-	if pl.Kind != Normal {
+	if pl.Kind != ReplyNormal {
 		return
 	}
 	if cur, up := ctx.(sim.NodeCurrent).Current(pl.From.Node); !up || cur != pl.From {
@@ -246,7 +246,7 @@ func (c *Core) OnInternal(ctx sim.FakeServiceContext, body any) {
 
 // StateHash folds the spec hash, outage window, recovery flag and pending
 // plans in issue order.
-func (c *Core) StateHash() uint64 {
+func (c *CompletionCore) StateHash() uint64 {
 	h := core.NewHasher()
 	mix := h.U64
 	mix(c.specStateHash())

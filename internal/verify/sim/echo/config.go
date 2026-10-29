@@ -23,10 +23,10 @@ func config(seeds []uint64, brokers core.MachineFactory) sim.Config {
 			return NewWorkload(env, self, bs, Opts{Clients: 4})
 		}},
 		Invariants: []func() sim.SafetyRule{
-			func() sim.SafetyRule { return &ackedIsCommitted{} },
-			func() sim.SafetyRule { return &readYourAck{acked: map[int64][]byte{}} },
+			func() sim.SafetyRule { return &ackedMeansCommitted{} },
+			func() sim.SafetyRule { return &readWhatWasAcked{acked: map[int64][]byte{}} },
 			func() sim.SafetyRule { return &liveness{} },
-			func() sim.SafetyRule { return campaign.FaultCoverage("echo:") },
+			func() sim.SafetyRule { return campaign.FaultCoverageCheck("echo:") },
 		},
 		Engines: func(sc sim.SeedConfig) []sim.FakeService {
 			cp := cpengine.New(sc.ControlPlane)

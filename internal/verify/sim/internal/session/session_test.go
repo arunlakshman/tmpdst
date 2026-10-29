@@ -12,10 +12,10 @@ func (w *wrap) session() *Client { return &w.Client }
 
 func TestRetryDelay(t *testing.T) {
 	t.Parallel()
-	if RetryDelay(1) != 100*core.Millisecond {
-		t.Fatalf("RetryDelay(1) = %d", RetryDelay(1))
+	if RetryWaitTime(1) != 100*core.Millisecond {
+		t.Fatalf("RetryDelay(1) = %d", RetryWaitTime(1))
 	}
-	if RetryDelay(99) != RetryDelay(4) {
+	if RetryWaitTime(99) != RetryWaitTime(4) {
 		t.Fatal("RetryDelay does not cap at 4")
 	}
 }
@@ -27,7 +27,7 @@ func TestLoopDialFailAndReady(t *testing.T) {
 	l := Loop[*wrap]{
 		Brokers:   []core.NodeID{"b0", "b1"},
 		Clients:   []*wrap{c},
-		Connected: func(c *wrap) bool { return c.State == Up },
+		Connected: func(c *wrap) bool { return c.State == Connected },
 		Busy:      func(c *wrap) bool { return false },
 		Ready: func(c *wrap) []core.Action {
 			ready++
@@ -43,12 +43,12 @@ func TestLoopDialFailAndReady(t *testing.T) {
 		t.Fatalf("Started acts = %#v", acts)
 	}
 	d, ok := acts[0].(core.Connect)
-	if !ok || c.State != Dialing {
+	if !ok || c.State != Connecting {
 		t.Fatalf("dial = %#v state %d", acts[0], c.State)
 	}
 
 	acts = l.Step(core.Event{Body: core.ConnectDone{Req: d.Req, Err: core.ErrUnavailable}})
-	if c.State != Backoff || len(acts) != 1 {
+	if c.State != WaitingToRetry || len(acts) != 1 {
 		t.Fatalf("dial fail state=%d acts=%#v", c.State, acts)
 	}
 
@@ -58,19 +58,19 @@ func TestLoopDialFailAndReady(t *testing.T) {
 		t.Fatalf("redial = %#v", acts)
 	}
 	_ = l.Step(core.Event{Body: core.ConnectDone{Req: d.Req, Conn: 7}})
-	if c.State != Up || c.Conn != 7 || ready != 1 {
+	if c.State != Connected || c.Conn != 7 || ready != 1 {
 		t.Fatalf("ready state=%d conn=%d ready=%d", c.State, c.Conn, ready)
 	}
 
 	_ = l.Step(core.Event{Body: core.ConnClosed{Conn: 7}})
-	if c.State != Backoff || lost != 1 {
+	if c.State != WaitingToRetry || lost != 1 {
 		t.Fatalf("closed state=%d lost=%d", c.State, lost)
 	}
 }
 
 func TestLoopRequestTimeout(t *testing.T) {
 	t.Parallel()
-	c := &wrap{Client: Client{ID: 1, State: Up, Conn: 3}}
+	c := &wrap{Client: Client{ID: 1, State: Connected, Conn: 3}}
 	busy := true
 	l := Loop[*wrap]{
 		Brokers:   []core.NodeID{"b0"},
@@ -88,19 +88,19 @@ func TestLoopRequestTimeout(t *testing.T) {
 	}
 	tm := acts[1].(core.SetTimer)
 	acts = l.Step(core.Event{Body: core.TimerFired{ID: tm.ID, Gen: tm.Gen}})
-	if c.State != Backoff || len(acts) < 1 {
+	if c.State != WaitingToRetry || len(acts) < 1 {
 		t.Fatalf("timeout state=%d acts=%#v", c.State, acts)
 	}
 }
 
 func TestLoopIdleAndBytes(t *testing.T) {
 	t.Parallel()
-	c := &wrap{Client: Client{ID: 2, State: Up, Conn: 9}}
+	c := &wrap{Client: Client{ID: 2, State: Connected, Conn: 9}}
 	var idle, bytes int
 	l := Loop[*wrap]{
 		Brokers:   []core.NodeID{"b0"},
 		Clients:   []*wrap{c},
-		Connected: func(c *wrap) bool { return c.State == Up },
+		Connected: func(c *wrap) bool { return c.State == Connected },
 		Busy:      func(*wrap) bool { return false },
 		Ready:     func(*wrap) []core.Action { return nil },
 		Idle: func(*wrap) []core.Action {

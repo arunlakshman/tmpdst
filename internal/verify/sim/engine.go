@@ -143,7 +143,7 @@ type LogParams struct {
 	// evaluated every TrimStride slots. CkptEvery slots between checkpoints;
 	// KeepSlots below a checkpoint stay untrimmed.
 	WindowSlots, TrimStride, CkptEvery, KeepSlots int
-	// Bug selects a mutant of the log engine (logengine.Bug*); 0 = none.
+	// Bug selects a mutant of the log engine (logengine.InjectedBug*); 0 = none.
 	Bug uint8
 }
 
@@ -164,7 +164,7 @@ type LogStoreFaults struct {
 	LostResponse   float64
 	Outage         ServiceOutage
 	CallerTimeout  core.Duration
-	// Bug selects a logstore mutant (logengine.BugTrimDelete deletes instead of
+	// Bug selects a logstore mutant (logengine.InjectedBugTrimDelete deletes instead of
 	// tombstoning on LogDeleteOld). Zero is none.
 	Bug uint8
 	// WindowSlots and TrimStride mirror LogParams for ControlPlaneRealState idempotency trim

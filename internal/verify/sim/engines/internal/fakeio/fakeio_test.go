@@ -11,12 +11,12 @@ import (
 
 const ms = core.Duration(1_000_000)
 
-// stub is a minimal engine around a Core so enginetest can drive it.
-type stub struct{ *Core }
+// stub is a minimal engine around a CompletionCore so enginetest can drive it.
+type stub struct{ *CompletionCore }
 
 func (s stub) Handles(core.Action) bool { return true }
 func (s stub) Execute(ctx sim.FakeServiceContext, f core.NodeInstance, a core.Action) {
-	s.Core.Execute(ctx, f, a.(core.IOCall))
+	s.CompletionCore.Execute(ctx, f, a.(core.IOCall))
 }
 
 func params() Params {
@@ -25,14 +25,14 @@ func params() Params {
 }
 
 // fresh recomputes the state hash with the cache invalidated.
-func fresh(c *Core) uint64 {
+func fresh(c *CompletionCore) uint64 {
 	c.specOK = false
 	return c.StateHash()
 }
 
 func TestSpecHashCacheObjectStore(t *testing.T) {
 	spec := veritas.NewObjectStore()
-	c := New(Hooks{
+	c := New(CompletionHooks{
 		Name: "o", Prefix: "obj", Params: params(),
 		Spec: func(a core.IOCall) core.IOResult { return spec.Exec(a) },
 		Mutating: func(a core.IOCall) bool {
@@ -94,7 +94,7 @@ func TestSpecHashCacheObjectStore(t *testing.T) {
 
 func TestSpecHashCacheControlPlane(t *testing.T) {
 	spec := veritas.NewControlPlane()
-	c := New(Hooks{
+	c := New(CompletionHooks{
 		Name: "cp", Prefix: "cp", Params: params(),
 		Spec: func(a core.IOCall) core.IOResult { return spec.Exec(a) },
 		Mutating: func(a core.IOCall) bool {

@@ -111,8 +111,8 @@ func configWith(seeds []uint64, bug broker.InjectedBug, opts Opts) sim.Config {
 		}},
 		Invariants: []func() sim.SafetyRule{
 			func() sim.SafetyRule { return newOracle(opts) },
-			func() sim.SafetyRule { return &liveness{} },
-			func() sim.SafetyRule { return campaign.FaultCoverage("kafka:") },
+			func() sim.SafetyRule { return &progressCheck{} },
+			func() sim.SafetyRule { return campaign.FaultCoverageCheck("kafka:") },
 		},
 		Engines: func(sc sim.SeedConfig) []sim.FakeService {
 			es := []sim.FakeService{objstore.New(sc.ObjectStore), controlPlane(sc, opts), netsim.New(sc.Network)}

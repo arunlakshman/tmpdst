@@ -8,9 +8,9 @@ import (
 	"manifester/internal/verify/sim"
 )
 
-// timerSlack is how late a flush may fire past its window: a node busy with a
+// timerExtraTime is how late a flush may fire past its window: a node busy with a
 // paused Step (CostParams.Pause, up to 100 ms) runs its timer late.
-const timerSlack = 150 * core.Millisecond
+const timerExtraTime = 150 * core.Millisecond
 
 // segmentCaps checks every sealed segment (the broker's segment_sealed fact)
 // against this seed's flush rule: at most MaxSegmentBatches batches and
@@ -18,7 +18,7 @@ const timerSlack = 150 * core.Millisecond
 // decisions 39, 41, 44) of at most the store's limit (none for the log store), the size rule applied exactly (the bytes
 // before the last batch stayed under MaxSegmentBytes, so a segment overshoots
 // the cap by at most its last batch), and an age of at most the window plus
-// timerSlack. Every committed segment was sealed first.
+// timerExtraTime. Every committed segment was sealed first.
 //
 // AtEnd repeats the partition and batch checks on the control plane's truth,
 // independent of the broker's facts: the committed ranges grouped by segment.
@@ -89,7 +89,7 @@ func (i *segmentCaps) Observe(v sim.View) {
 			d, core.ContextPair{Key: "parts", Value: n("parts")})
 		a.Always(n("bytes")-n("last") < int64(i.cfg.MaxSegmentBytes), "kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch",
 			d, core.ContextPair{Key: "bytes", Value: n("bytes")}, core.ContextPair{Key: "last", Value: n("last")}, core.ContextPair{Key: "cap", Value: i.cfg.MaxSegmentBytes})
-		a.Always(n("age") <= int64(i.cfg.BatchWindow+timerSlack), "kafka: a segment is sealed within the window of its first batch",
+		a.Always(n("age") <= int64(i.cfg.BatchWindow+timerExtraTime), "kafka: a segment is sealed within the window of its first batch",
 			d, core.ContextPair{Key: "age", Value: n("age")}, core.ContextPair{Key: "window", Value: int64(i.cfg.BatchWindow)})
 	}
 }

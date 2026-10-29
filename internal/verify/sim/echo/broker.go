@@ -12,10 +12,10 @@ import (
 type mutation uint8
 
 const (
-	mutNone       mutation = iota
-	mutEarlyAck            // ack once the object is stored, before CommitSegment
-	mutAckOnMaybe          // ack (with a guessed offset) when a commit times out
-	mutBadRead             // GET returns a mangled payload
+	bugNone       mutation = iota
+	bugEarlyAck            // ack once the object is stored, before CommitSegment
+	bugAckOnMaybe          // ack (with a guessed offset) when a commit times out
+	bugBadRead             // GET returns a mangled payload
 )
 
 const maxAttempts = 5
@@ -30,11 +30,11 @@ const (
 type opState uint8
 
 const (
-	stPut opState = iota
-	stCommit
-	stLookup
-	stGet
-	stBackoff
+	statePut opState = iota
+	stateCommit
+	stateLookup
+	stateGet
+	stateRetryWait
 )
 
 type conn struct {
@@ -148,11 +148,11 @@ func (b *Broker) Step(ev core.Event) []core.Action {
 	case core.TimerFired:
 		acts = b.onTimer(e)
 	case core.ObjectPutDone:
-		if o := b.findReq(e.Req); o != nil && o.state == stPut {
+		if o := b.findReq(e.Req); o != nil && o.state == statePut {
 			acts = b.onPut(o, e)
 		}
 	case core.ObjectGetDone:
-		if o := b.findReq(e.Req); o != nil && o.state == stGet {
+		if o := b.findReq(e.Req); o != nil && o.state == stateGet {
 			acts = b.onGet(o, e)
 		}
 	case core.ControlPlaneDone:
@@ -179,7 +179,7 @@ func (b *Broker) stop() []core.Action {
 	b.stopping = true
 	var acts []core.Action
 	for _, o := range append([]*op(nil), b.ops...) {
-		if o.state == stBackoff {
+		if o.state == stateRetryWait {
 			acts = append(acts, b.fail(o)...)
 		}
 	}
@@ -279,7 +279,7 @@ func (b *Broker) retryLater(o *op, again opState) []core.Action {
 	if o.attempts++; o.attempts >= maxAttempts || b.stopping {
 		return b.fail(o)
 	}
-	o.state, o.retry, o.req = stBackoff, again, 0
+	o.state, o.retry, o.req = stateRetryWait, again, 0
 	t, g := b.timer(core.TimerID(o.id), o.attempts)
 	o.gen = g
 	return []core.Action{t}
@@ -290,16 +290,16 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 		if core.TimerID(o.id) != e.ID {
 			continue
 		}
-		if o.state != stBackoff || o.gen != e.Gen {
+		if o.state != stateRetryWait || o.gen != e.Gen {
 			return nil
 		}
 		switch o.retry {
-		case stPut:
+		case statePut:
 			return b.put(o)
-		case stCommit:
+		case stateCommit:
 			b.env.Reachable("echo: commit retried after MaybeApplied")
 			return append([]core.Action{emit("echo_commit_retried", core.Field{Key: "key", Value: core.Str(o.key)})}, b.commit(o)...)
-		case stLookup:
+		case stateLookup:
 			return b.lookup(o)
 		default:
 			return b.get(o)
@@ -311,15 +311,15 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 // ---- PUT ----
 
 func (b *Broker) put(o *op) []core.Action {
-	o.state, o.req = stPut, b.req()
+	o.state, o.req = statePut, b.req()
 	return []core.Action{core.ObjectPut{Req: o.req, Key: o.key, Data: o.seg}}
 }
 
 func (b *Broker) onPut(o *op, e core.ObjectPutDone) []core.Action {
 	if e.Err != core.OK {
-		return b.retryLater(o, stPut)
+		return b.retryLater(o, statePut)
 	}
-	if b.mut == mutEarlyAck && !o.replied {
+	if b.mut == bugEarlyAck && !o.replied {
 		acts := b.ack(o, core.Offset(b.acked))
 		o.replied = true
 		return append(acts, b.commit(o)...)
@@ -328,7 +328,7 @@ func (b *Broker) onPut(o *op, e core.ObjectPutDone) []core.Action {
 }
 
 func (b *Broker) commit(o *op) []core.Action {
-	o.state, o.req = stCommit, b.req()
+	o.state, o.req = stateCommit, b.req()
 	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: core.CommitSegment{
 		SegmentKey: o.key,
 		Batches:    []core.PendingBatch{{TP: tp(), Records: 1, Loc: o.ref}},
@@ -341,9 +341,9 @@ func (b *Broker) onCP(e core.ControlPlaneDone) []core.Action {
 		return nil
 	}
 	switch o.state {
-	case stCommit:
+	case stateCommit:
 		return b.onCommit(o, e)
-	case stLookup:
+	case stateLookup:
 		return b.onLookup(o, e)
 	}
 	return nil
@@ -370,11 +370,11 @@ func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 		return b.reply(o, "ERR")
 	case e.Outcome == core.MaybeApplied:
 		o.maybe = true
-		if b.mut == mutAckOnMaybe {
+		if b.mut == bugAckOnMaybe {
 			b.drop(o)
 			return b.ack(o, core.Offset(b.acked))
 		}
-		return b.retryLater(o, stCommit) // idempotent per SegmentKey (decision 3)
+		return b.retryLater(o, stateCommit) // idempotent per SegmentKey (decision 3)
 	}
 	return b.reply(o, "ERR")
 }
@@ -382,14 +382,14 @@ func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 // ---- GET ----
 
 func (b *Broker) lookup(o *op) []core.Action {
-	o.state, o.req = stLookup, b.req()
+	o.state, o.req = stateLookup, b.req()
 	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: core.FindSegments{TP: tp(), From: o.offset}}}
 }
 
 func (b *Broker) onLookup(o *op, e core.ControlPlaneDone) []core.Action {
 	resp, ok := e.Resp.(core.FindSegmentsResp)
 	if e.Err != core.OK || !ok {
-		return b.retryLater(o, stLookup)
+		return b.retryLater(o, stateLookup)
 	}
 	for _, r := range resp.Ranges {
 		if r.Base <= o.offset && o.offset < r.Base+core.Offset(r.Count) {
@@ -401,7 +401,7 @@ func (b *Broker) onLookup(o *op, e core.ControlPlaneDone) []core.Action {
 }
 
 func (b *Broker) get(o *op) []core.Action {
-	o.state, o.req = stGet, b.req()
+	o.state, o.req = stateGet, b.req()
 	return []core.Action{core.ObjectGet{Req: o.req, Ref: core.SegmentRef{Key: o.ref.Key}}}
 }
 
@@ -411,7 +411,7 @@ func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
 			b.env.Unreachable("echo: committed segment missing")
 			return b.reply(o, "ERR")
 		}
-		return b.retryLater(o, stGet)
+		return b.retryLater(o, stateGet)
 	}
 	seg, err := format.Decode(e.Data)
 	var data []byte
@@ -431,7 +431,7 @@ func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
 		acts := []core.Action{emit("corruption_detected", core.Field{Key: "key", Value: core.Str(o.ref.Key)})}
 		return append(acts, b.reply(o, "ERR corrupt")...)
 	}
-	if b.mut == mutBadRead {
+	if b.mut == bugBadRead {
 		data = append(append([]byte(nil), data...), '!')
 	}
 	return b.reply(o, "VAL "+string(data))

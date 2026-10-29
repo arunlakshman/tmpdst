@@ -64,7 +64,7 @@ func (w *Workload) onList(c *client, r *kmsg.ListOffsetsResponse) []core.Action 
 	if n != len(w.tps) {
 		return w.retryStage(c)
 	}
-	c.c.pos, c.c.listed, c.stage, c.Fails = pos, true, stRun, 0
+	c.c.pos, c.c.listed, c.stage, c.Fails = pos, true, stateRunning, 0
 	return w.advance(c)
 }
 
@@ -96,7 +96,7 @@ func (w *Workload) fetchNext(c *client) []core.Action {
 	if w.hist != nil {
 		w.hist.Invoke(w.self, cs.op, cs.op, op)
 	}
-	return w.send(c, rqFetch, r)
+	return w.send(c, requestFetch, r)
 }
 
 // onFetch parses the answer of each partition (CRC-verified, whole batches,

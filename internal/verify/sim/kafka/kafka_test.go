@@ -248,7 +248,7 @@ func TestFatalProduceErrorGivesUp(t *testing.T) {
 		h := &fakeHist{}
 		w.SetHistory(h)
 		c := w.loop.Clients[0]
-		c.State, c.stage = session.Up, stRun
+		c.State, c.stage = session.Connected, stateRunning
 		w.newBatches(c)
 		if len(h.ops) == 0 || len(c.p.cur) != len(h.ops) {
 			t.Fatalf("no batches built: %d ops", len(h.ops))
@@ -290,7 +290,7 @@ func TestIdemBatchRejectedIsAbandoned(t *testing.T) {
 		h := &fakeHist{}
 		w.SetHistory(h)
 		c := w.loop.Clients[0]
-		c.State, c.stage = session.Up, stRun
+		c.State, c.stage = session.Connected, stateRunning
 		w.newBatches(c)
 		for _, b := range c.p.cur {
 			b.ambiguous, b.idem = ambiguous, true
@@ -341,7 +341,7 @@ func TestBatchesCarryProducerIDOnlyWhenIdem(t *testing.T) {
 			}
 			if b.idem {
 				idem++
-				if bt.ProducerID != idemPID {
+				if bt.ProducerID != duplicateCheckProducerID {
 					t.Fatalf("idem batch has producer id %d", bt.ProducerID)
 				}
 			} else {
@@ -561,7 +561,7 @@ func TestCorruptBatchRejectedIsAbandoned(t *testing.T) {
 	h := &fakeHist{}
 	w.SetHistory(h)
 	c := w.loop.Clients[0]
-	c.State, c.stage = session.Up, stRun
+	c.State, c.stage = session.Connected, stateRunning
 	w.newBatches(c)
 	for _, b := range c.p.cur {
 		b.idem, b.corrupt = false, true

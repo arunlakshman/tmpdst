@@ -26,7 +26,7 @@ type batch struct {
 	ambiguous bool // some attempt ended without a definite answer
 	lastCode  int16
 	dig       uint64 // hash of data, so StateHash does not rescan it
-	idem      bool   // carries producer id idemPID: must be rejected
+	idem      bool   // carries producer id duplicateCheckProducerID: must be rejected
 	corrupt   bool   // payload damaged after the CRC was computed: must be rejected
 }
 
@@ -38,8 +38,8 @@ type producer struct {
 	noNew  bool
 }
 
-// idemPID is the producer id of a deliberately idempotent batch.
-const idemPID = 7
+// duplicateCheckProducerID is the producer id of a deliberately idempotent batch.
+const duplicateCheckProducerID = 7
 
 // codeInvalidRequest is INVALID_REQUEST, the broker's answer to a batch that
 // carries a producer id. codeCorruptMessage is CORRUPT_MESSAGE, its answer to a
@@ -78,22 +78,22 @@ func (p *producer) hash(h *core.Hasher) {
 
 // Kafka codes the producer reacts to.
 const (
-	codeTimedOut     int16 = 7
-	codeStorage      int16 = 56
-	codeUnknown      int16 = -1
-	codeCoordNA      int16 = 15
-	codeUnknownTopic int16 = 3
-	codeLeaderNA     int16 = 5
-	codeNotLeader    int16 = 6
+	codeTimedOut               int16 = 7
+	codeStorage                int16 = 56
+	codeUnknown                int16 = -1
+	codeCoordinatorUnavailable int16 = 15
+	codeUnknownTopic           int16 = 3
+	codeLeaderUnavailable      int16 = 5
+	codeNotLeader              int16 = 6
 )
 
-// ambiguousCode: the broker may still have committed the batch (it gave up
-// waiting). definiteRetriable: the batch was not committed; try again.
-func ambiguousCode(c int16) bool {
-	return c == codeTimedOut || c == codeStorage || c == codeUnknown || c == codeCoordNA
+// unclearResultCode: the broker may still have committed the batch (it gave up
+// waiting). clearlyRetryable: the batch was not committed; try again.
+func unclearResultCode(c int16) bool {
+	return c == codeTimedOut || c == codeStorage || c == codeUnknown || c == codeCoordinatorUnavailable
 }
-func definiteRetriable(c int16) bool {
-	return c == codeUnknownTopic || c == codeLeaderNA || c == codeNotLeader
+func clearlyRetryable(c int16) bool {
+	return c == codeUnknownTopic || c == codeLeaderUnavailable || c == codeNotLeader
 }
 
 func (w *Workload) produceNext(c *client) []core.Action {
@@ -112,11 +112,11 @@ func (w *Workload) produceNext(c *client) []core.Action {
 	return w.sendProduce(c)
 }
 
-// idemEvery: one batch in idemEvery claims a producer id and must be rejected.
+// duplicateCheckEvery: one batch in duplicateCheckEvery claims a producer id and must be rejected.
 // corruptEvery: one batch in corruptEvery is damaged in flight (CRC mismatch).
 const (
-	idemEvery    = 40
-	corruptEvery = 40
+	duplicateCheckEvery = 40
+	corruptEvery        = 40
 )
 
 // pickCodec draws a codec id: none for a third of the batches, otherwise gzip,
@@ -157,10 +157,10 @@ func (w *Workload) newBatches(c *client) {
 			b.vals = append(b.vals, v)
 			recs[i] = kmsg.Record{Value: []byte(v)}
 		}
-		b.idem = w.env.Intn(idemEvery) == 0
+		b.idem = w.env.Intn(duplicateCheckEvery) == 0
 		pp := kwire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1, FirstTimestamp: 1, MaxTimestamp: 1}
 		if b.idem {
-			pp.ProducerID, pp.ProducerEpoch, pp.BaseSequence = idemPID, 0, 0
+			pp.ProducerID, pp.ProducerEpoch, pp.BaseSequence = duplicateCheckProducerID, 0, 0
 		}
 		data, err := buildBatch(pp, recs, w.pickCodec())
 		if err != nil {
@@ -200,7 +200,7 @@ func (w *Workload) sendProduce(c *client) []core.Action {
 			r.Topics = append(r.Topics, kmsg.ProduceRequestTopic{Topic: tp.Topic, Partitions: []kmsg.ProduceRequestTopicPartition{part}})
 		}
 	}
-	return w.send(c, rqProduce, r)
+	return w.send(c, requestProduce, r)
 }
 
 func (w *Workload) think(c *client) core.Action {
@@ -238,10 +238,10 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 			w.resolve(b, sim.OpResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
 		case code == 0:
 			w.resolve(b, sim.OpResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
-		case ambiguousCode(code):
+		case unclearResultCode(code):
 			b.ambiguous = true
 			keep = append(keep, b)
-		case definiteRetriable(code):
+		case clearlyRetryable(code):
 			keep = append(keep, b)
 		default: // corrupt, invalid, ...: not retriable
 			fatal = true
@@ -253,7 +253,7 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 	case fatal:
 		return w.giveUp(c, "fatal produce error")
 	case len(keep) > 0:
-		return []core.Action{c.Wake(session.RetryDelay(keep[0].attempts))}
+		return []core.Action{c.Wake(session.RetryWaitTime(keep[0].attempts))}
 	}
 	c.Fails = 0
 	return []core.Action{w.think(c)}

@@ -61,8 +61,8 @@ func TestNewAndPhases(t *testing.T) {
 	if Millis(5) != 5*core.Millisecond {
 		t.Fatalf("Millis(5) = %d", Millis(5))
 	}
-	if LivenessGrace != 6*core.Second {
-		t.Fatalf("LivenessGrace = %d", LivenessGrace)
+	if ProgressGraceTime != 6*core.Second {
+		t.Fatalf("LivenessGrace = %d", ProgressGraceTime)
 	}
 }
 
@@ -102,7 +102,7 @@ func TestPhaseStart(t *testing.T) {
 
 func TestFaultCoverage(t *testing.T) {
 	t.Parallel()
-	inv := FaultCoverage("echo:")
+	inv := FaultCoverageCheck("echo:")
 	if inv.Name() != "FaultCoverage" {
 		t.Fatalf("Name = %q", inv.Name())
 	}

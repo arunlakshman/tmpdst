@@ -35,9 +35,9 @@ const (
 )
 
 const (
-	csReady = session.Up + iota // wake timer pending (think time)
-	csBusy                      // request outstanding
-	csDone
+	clientReady = session.Connected + iota // wake timer pending (think time)
+	clientBusy                             // request outstanding
+	clientDone
 )
 
 type acked struct {
@@ -79,8 +79,8 @@ type Workload struct {
 func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.NodeInstance, o Opts) *Workload {
 	w := &Workload{env: env, self: self, opts: o}
 	w.loop = session.Loop[*client]{
-		Connected: func(c *client) bool { return c.State == csReady || c.State == csBusy },
-		Busy:      func(c *client) bool { return c.State == csBusy },
+		Connected: func(c *client) bool { return c.State == clientReady || c.State == clientBusy },
+		Busy:      func(c *client) bool { return c.State == clientBusy },
 		Ready:     w.onReady,
 		Idle:      w.next,
 		Bytes:     w.onBytes,
@@ -129,7 +129,7 @@ func (w *Workload) OnPhase(p sim.Phase) []core.Action {
 	case sim.PhaseRecovering:
 		for _, c := range w.loop.Clients {
 			c.recycle = true
-			if c.State == csReady { // idle: recycle now
+			if c.State == clientReady { // idle: recycle now
 				acts = append(acts, w.next(c)...)
 			}
 		}
@@ -142,7 +142,7 @@ func (w *Workload) OnPhase(p sim.Phase) []core.Action {
 // next issues the client's next request, or recycles / stops.
 func (w *Workload) next(c *client) []core.Action {
 	if w.stopped {
-		c.State = csDone
+		c.State = clientDone
 		c.WakeGen++
 		return nil
 	}
@@ -165,7 +165,7 @@ func (w *Workload) next(c *client) []core.Action {
 		p.payload = fmt.Sprintf("c%d-s%d-%s", c.ID, c.seq, strings.Repeat("x", w.env.Intn(48)))
 		op, body = PutOp{c.ID, c.seq, p.payload}, "PUT "+p.payload
 	}
-	c.pend, c.State = p, csBusy
+	c.pend, c.State = p, clientBusy
 	if w.hist != nil {
 		w.hist.Invoke(w.self, p.id, p.id, op)
 	}
@@ -176,7 +176,7 @@ func (w *Workload) onBytes(c *client, data []byte) []core.Action {
 	frames, bad := c.fr.push(data)
 	var acts []core.Action
 	for _, f := range frames {
-		if c.State != csBusy || c.pend == nil {
+		if c.State != clientBusy || c.pend == nil {
 			bad = true // unsolicited reply
 			break
 		}
@@ -191,7 +191,7 @@ func (w *Workload) onBytes(c *client, data []byte) []core.Action {
 // reply completes the outstanding request with the broker's answer.
 func (w *Workload) reply(c *client, text string) []core.Action {
 	p := c.pend
-	c.pend, c.State = nil, csReady
+	c.pend, c.State = nil, clientReady
 	out := sim.OpResultKnown
 	if !p.get {
 		if rest, ok := strings.CutPrefix(text, "OK "); ok {

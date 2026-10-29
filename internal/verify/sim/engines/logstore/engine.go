@@ -20,7 +20,7 @@ import (
 
 // Engine is the fake Dynamo log. Spec state is local; faults come from fakeio.
 type Engine struct {
-	*fakeio.Core
+	*fakeio.CompletionCore
 	spec *store
 
 	ref         *applier.StateUpdater
@@ -46,7 +46,7 @@ func New(f sim.LogStoreFaults) *Engine {
 	if e.trimStride <= 0 {
 		e.trimStride = 16
 	}
-	e.Core = fakeio.New(fakeio.Hooks{
+	e.CompletionCore = fakeio.New(fakeio.CompletionHooks{
 		Name:   "logstore",
 		Prefix: "log",
 		Params: fakeio.Params{
@@ -160,7 +160,7 @@ func (e *Engine) Handles(a core.Action) bool {
 
 // Execute starts a; a must be a log IOCall (Handles guarantees it).
 func (e *Engine) Execute(ctx sim.FakeServiceContext, from core.NodeInstance, a core.Action) {
-	e.Core.Execute(ctx, from, a.(core.IOCall))
+	e.CompletionCore.Execute(ctx, from, a.(core.IOCall))
 }
 
 // Entry returns a copy of the bytes at slot, or false when empty or tombstoned.

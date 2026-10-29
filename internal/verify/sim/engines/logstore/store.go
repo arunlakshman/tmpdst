@@ -12,7 +12,7 @@ type slotKind uint8
 const (
 	slotEmpty slotKind = iota
 	slotEntry
-	slotTomb
+	slotDeleted
 )
 
 type slotRec struct {
@@ -26,7 +26,7 @@ type slotRec struct {
 // tomb), matching DynLog.
 type store struct {
 	slots []slotRec
-	bug   uint8 // logengine.BugTrimDelete empties instead of tombstoning
+	bug   uint8 // logengine.InjectedBugTrimDelete empties instead of tombstoning
 }
 
 func (s *store) ensure(slot core.LogPosition) {
@@ -63,7 +63,7 @@ func (s *store) append(a core.LogAppend) core.LogAppendDone {
 			Existing: slices.Clone(cur.data),
 			Err:      core.OK, Outcome: core.Applied,
 		}
-	case slotTomb:
+	case slotDeleted:
 		return core.LogAppendDone{Req: a.Req, Slot: a.Slot, Taken: true, Err: core.ErrConflict, Outcome: core.NotApplied}
 	}
 	s.slots[a.Slot] = slotRec{kind: slotEntry, data: slices.Clone(a.Data)}
@@ -100,8 +100,8 @@ func (s *store) trim(a core.LogDeleteOld) core.LogDeleteOldDone {
 		return core.LogDeleteOldDone{Req: a.Req, Err: core.ErrInvalid, Outcome: core.NotApplied}
 	}
 	s.ensure(a.Through)
-	kind := slotTomb
-	if s.bug == 2 { // logengine.BugTrimDelete
+	kind := slotDeleted
+	if s.bug == 2 { // logengine.InjectedBugTrimDelete
 		kind = slotEmpty
 	}
 	for i := range int(a.Through) + 1 {

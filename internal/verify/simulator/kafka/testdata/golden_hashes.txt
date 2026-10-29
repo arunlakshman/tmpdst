@@ -1,0 +1,10 @@
+kafka seed=1 steps=14465 rand=70960 hash=0d45e01d5467b460
+kafka seed=2 steps=10850 rand=48745 hash=0c6735ad25a26ce6
+kafka seed=3 steps=16502 rand=68368 hash=a731f5f43dd30f7e
+kafka seed=4 steps=13705 rand=59888 hash=da2522eda7697c14
+kafka seed=5 steps=12946 rand=55829 hash=cc08b3cfabdc192e
+kafka-log seed=1 steps=17787 rand=77044 hash=1b635aa3b5968aca
+kafka-log seed=2 steps=18717 rand=67961 hash=c54182aa9771b2c4
+kafka-log seed=3 steps=31534 rand=121173 hash=d8c3977d93b52fe2
+kafka-log seed=4 steps=24271 rand=92388 hash=ed9c09f9cb485aae
+kafka-log seed=5 steps=19472 rand=76273 hash=53a69d09ff652a28

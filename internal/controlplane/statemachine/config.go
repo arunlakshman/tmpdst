@@ -51,7 +51,7 @@ type Config struct {
 	// before LogTrim. Zero skips trim.
 	KeepSlots int64
 
-	// InjectedBug selects a sim mutant (logengine.Bug* constants). Zero is none.
+	// InjectedBug selects a sim mutant (fakelogservice.Bug* constants). Zero is none.
 	InjectedBug uint8
 	// WindowSlots is the idempotency window length. Keys older than this many
 	// slots are forgotten at TrimStride boundaries (decision 48). Zero skips.
@@ -66,7 +66,7 @@ type Config struct {
 	StallDur, DownDur    [2]core.Duration
 }
 
-// InjectedBug constants match sim/engines/logengine (kept numeric for LogParams.Bug).
+// InjectedBug constants match sim/engines/fakelogservice (kept numeric for LogParams.Bug).
 const (
 	InjectedBugNone             uint8 = iota
 	InjectedBugWriterOffsets          // offsets chosen by the writer instead of by apply

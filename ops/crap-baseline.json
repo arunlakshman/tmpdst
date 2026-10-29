@@ -3,7 +3,7 @@
   "note": "Ratchet baseline for cmd/riskscore. Regenerate: go run ./cmd/riskscore -profile \u003ccover.out\u003e -update-baseline   (or: make crap-baseline); review and commit the diff of crap-baseline.json",
   "functions": {
     "internal/controlplane/statemachine.Machine.roleTick": 56.62,
-    "internal/verify/sim/engines/logengine.Engine.plan": 23.63,
-    "internal/verify/sim/engines/logengine.withDefaults": 20.94
+    "internal/verify/simulator/fakeservices/fakelogservice.Engine.plan": 23.63,
+    "internal/verify/simulator/fakeservices/fakelogservice.withDefaults": 20.94
   }
 }

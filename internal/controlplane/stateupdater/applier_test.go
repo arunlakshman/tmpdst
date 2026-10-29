@@ -10,12 +10,12 @@ import (
 	"manifester/internal/controlplane/stateupdater"
 	"manifester/internal/controlplane/stateupdater/pebblestore"
 	"manifester/internal/core"
-	"manifester/internal/verify/veritas/veritastest"
-	"manifester/internal/verify/veritas/veritastest/generator"
-	"manifester/internal/verify/veritas/veritastest/observation"
-	"manifester/internal/verify/veritas/veritastest/plantedbug"
-	"manifester/internal/verify/veritas/veritastest/runcontrol"
-	"manifester/internal/verify/veritas/veritastest/suites"
+	"manifester/internal/verify/speccheck/checker"
+	"manifester/internal/verify/speccheck/checker/generator"
+	"manifester/internal/verify/speccheck/checker/injectedbug"
+	"manifester/internal/verify/speccheck/checker/observation"
+	"manifester/internal/verify/speccheck/checker/runcontrol"
+	"manifester/internal/verify/speccheck/checker/suites"
 )
 
 func newPebble(t testing.TB) stateupdater.KeyValueStore {
@@ -87,7 +87,7 @@ func TestLookupMaxBytesEdges(t *testing.T) {
 			profile := generator.LookupCuts()
 			ops := generator.ControlPlaneOps(profile)
 			for seed := uint64(1); seed <= uint64(seeds); seed++ {
-				r := veritastest.NewRand(seed)
+				r := checker.NewRand(seed)
 				a, spec := stateupdater.New(mk(t)), suites.NewSpecControlPlaneSubject()
 				subject := applierSubject{a}
 				for i := range 120 {
@@ -291,5 +291,5 @@ func edgeLookups(t *testing.T, subject, spec suites.ControlPlaneSubject, lk core
 // skips the one bug that only a state hash can show.
 func TestPlantedBugsCaughtApplierMem(t *testing.T) {
 	newCorrect := func() suites.ControlPlaneSubject { return newApplierSubject(t, backends["mem"]) }
-	plantedbug.RequireAllControlPlaneBugsDetected(t, newCorrect, 100)
+	injectedbug.RequireAllControlPlaneBugsDetected(t, newCorrect, 100)
 }

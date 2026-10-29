@@ -153,7 +153,7 @@ func (m *Machine) heartbeatDue() bool {
 }
 
 func (m *Machine) maybeReplicaFault() []core.Action {
-	// Only impair the appender so a hot standby can take over (old logengine
+	// Only impair the appender so a hot standby can take over (old fakelogservice
 	// never impaired both replicas at once).
 	if !m.active || !m.ready {
 		return nil

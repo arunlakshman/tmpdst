@@ -141,7 +141,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 **Files.**
 
-- [ ] Create `internal/controlplane/statemachine/` (preferred name under the extractable `internal/controlplane/` root; do not place it under `internal/verify/sim/` or `internal/broker/`).
+- [ ] Create `internal/controlplane/statemachine/` (preferred name under the extractable `internal/controlplane/` root; do not place it under `internal/verify/simulator/` or `internal/broker/`).
 - [ ] Create `Step`, `StateHash`, `New` Factory mirroring the broker's `core.MachineFactory` shape.
 - [ ] Create boot handling for `Started` and `Stop` only.
 - [ ] Edit `ops/scripts/ci-determinism.sh` and `ops/tools/determinismcheck` allow lists so `internal/controlplane/statemachine` is scanned.
@@ -197,8 +197,8 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 **Files.**
 
-- [ ] Create `internal/verify/sim/engines/logstore/` (faulting Dynamo log engine for `LogAppend`/`LogRead`/`LogCheckTail`/`LogTrim`).
-- [ ] Edit `internal/verify/sim/engine.go` registration sites or kafka config only as needed to construct it behind a flag.
+- [ ] Create `internal/verify/simulator/fakeservices/fakelogstore/` (faulting Dynamo log engine for `LogAppend`/`LogRead`/`LogCheckTail`/`LogTrim`).
+- [ ] Edit `internal/verify/simulator/engine.go` registration sites or kafka config only as needed to construct it behind a flag.
 - [ ] Edit `internal/controlplane/statemachine` to emit log IOActions on a timer-driven catch-up sketch that does not yet apply commands.
 - [ ] Create engine unit tests for if-absent put, lost answer as `MaybeApplied`, and ordered landings.
 
@@ -471,8 +471,8 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 **Files.**
 
-- [ ] Edit `internal/verify/sim/kafka` config so `kafka-log` runs CP replica processes plus logstore engine.
-- [ ] Delete or gut `internal/verify/sim/engines/logengine` replica/state once mutants and C2 move to the machine.
+- [ ] Edit `internal/verify/simulator/kafka` config so `kafka-log` runs CP replica processes plus logstore engine.
+- [ ] Delete or gut `internal/verify/simulator/fakeservices/fakelogservice` replica/state once mutants and C2 move to the machine.
 - [x] Delete `logcp` goroutine loops and `logcp.Env` scheduler path when unused (retired; SoT is `internal/controlplane/statemachine` + `exec`).
 - [ ] Edit `docs/sim-log-engine.md`, `docs/log-cp-service.md`, `docs/decisions.md`, `refactoring_backlog.md`.
 - [ ] Re-home X2 coverage as kernel seeds where practical.
@@ -563,7 +563,7 @@ Leave `logengine.state` forever as a third production-shaped copy after the mach
 
 Put the CP run loop in `sys` next to the broker. Rejected for extractability. A future `cp` module would still need monorepo `sys`.
 
-Let `internal/controlplane/statemachine` import `sim` helpers for tests. Rejected. Tests that need the kernel live in `internal/verify/sim/...` and import `cp`, not the reverse.
+Let `internal/controlplane/statemachine` import `sim` helpers for tests. Rejected. Tests that need the kernel live in `internal/verify/simulator/...` and import `cp`, not the reverse.
 
 ## Appendix C. Risks
 
@@ -595,7 +595,7 @@ Read before editing.
 - `docs/sim-log-engine.md`
 - `docs/log-cp-service.md`
 - `docs/decisions.md` rows 1, 9, 11, 14-23, 48-54, and the new CP-DSM plus autonomy decisions from CP-DSM-1
-- `internal/core/machine.go`, `internal/system/run.go` (broker reference only), `internal/broker/broker.go`, `internal/verify/sim/kernel.go`
+- `internal/core/machine.go`, `internal/system/run.go` (broker reference only), `internal/broker/broker.go`, `internal/verify/simulator/kernel.go`
 - `.scratch/cp-dsm-proto/DECISION.md`
 - Autonomy allow-list in this plan's Spawn owners section
 

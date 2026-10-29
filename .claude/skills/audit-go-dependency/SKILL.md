@@ -1,11 +1,11 @@
 ---
 name: audit-go-dependency
-description: Audit a Go module for determinism before the deterministic packages (internal/core, internal/verify/sim) may import it, or after bumping its version. Use when adding or upgrading a dependency of internal/core or internal/verify/sim, when detcheck reports an import that is not on the allow-list, or when a dependency has no audit record under docs/dep-audits.
+description: Audit a Go module for determinism before the deterministic packages (internal/core, internal/verify/simulator) may import it, or after bumping its version. Use when adding or upgrading a dependency of internal/core or internal/verify/simulator, when detcheck reports an import that is not on the allow-list, or when a dependency has no audit record under docs/dep-audits.
 ---
 
 # Audit a Go dependency for determinism
 
-The deterministic packages (`internal/core`, `internal/verify/sim`) may import only what is on the
+The deterministic packages (`internal/core`, `internal/verify/simulator`) may import only what is on the
 exact-path allow-list `ops/tools/determinismcheck/allow.txt`. A third-party module also
 needs a reviewed record at `docs/dep-audits/<module>@<version>.md`, or CI fails.
 Production-only code (`internal/system` adapters such as the AWS SDK and the HTTP client)
@@ -50,7 +50,7 @@ needs no determinism audit.
    - Add the **exact** import path(s) our code will use to
      `ops/tools/determinismcheck/allow.txt`. Never add a bare prefix like `math`; use
      `/...` only for a whole subtree you audited.
-   - `go get <module>@<version>` in the repo and run `go run ./ops/tools/determinismcheck ./internal/core/... ./internal/verify/sim/...`.
+   - `go get <module>@<version>` in the repo and run `go run ./ops/tools/determinismcheck ./internal/core/... ./internal/verify/simulator/...`.
    - Add any rules for our code to `docs/decisions.md`.
 
 7. **On a version bump:** rerun from step 1 for the new version and diff the

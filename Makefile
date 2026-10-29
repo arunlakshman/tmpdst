@@ -17,8 +17,8 @@ CRAP_MERGE    ?=
 CRAP_THRESHOLD ?= 20
 CRAP_FLAGS    ?=
 
-# Everything except internal/verify/sim and test/integrationtest (those have their own targets).
-UNIT_PKGS = $(shell go list ./... | grep -vE '/verify/sim(/|$$)|/test/integrationtest$$')
+# Everything except internal/verify/simulator and test/integrationtest (those have their own targets).
+UNIT_PKGS = $(shell go list ./... | grep -vE '/verify/simulator(/|$$)|/test/integrationtest$$')
 
 export CRAP_THRESHOLD
 
@@ -81,13 +81,13 @@ compile:
 $(COVER_DIR)/.gitignore:
 	@mkdir -p $(COVER_DIR) && echo '*' > $@
 
-# Unit packages only (not verify/sim, not test/integrationtest).
+# Unit packages only (not verify/simulator, not test/integrationtest).
 test: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_UNIT) $(UNIT_PKGS)
 
 # Deterministic simulation packages.
 sim: $(COVER_DIR)/.gitignore
-	go test -coverprofile=$(COVER_SIM) ./internal/verify/sim/...
+	go test -coverprofile=$(COVER_SIM) ./internal/verify/simulator/...
 
 # Hermetic integration tests (in-process memstore). Fullstack Docker tests
 # in the same package Skip unless MANIFESTER_DYNAMO_ENDPOINT + MANIFESTER_S3_ENDPOINT are set.
@@ -98,7 +98,7 @@ it-hermetic: $(COVER_DIR)/.gitignore
 test-all: test sim it-hermetic
 
 # Race detector: too slow for `build` (>10 min on this tree), run on demand.
-# internal/verify/sim/kafka alone needs ~16m under -race on a typical laptop; Go's default
+# internal/verify/simulator/kafka alone needs ~16m under -race on a typical laptop; Go's default
 # 10m package timeout cuts it mid-campaign. Keep this above measured wall time.
 test-race:
 	go test -race -timeout 30m ./...

@@ -3,7 +3,7 @@
 - Date / auditor: 2026-10-20, Claude (Sonnet 5.5). `ops/scripts/audit-dep.sh github.com/cockroachdb/pebble@v1.1.5
   github.com/cockroachdb/pebble` ran to the end (network available); detcheck exited 1, as expected for a storage engine.
 - Requires Go: 1.22.0
-- Verdict: **REJECTED for the deterministic packages** (`internal/core/`, `internal/verify/sim/`, `internal/verify/veritas/`, ...); **ACCEPTED at the edge**
+- Verdict: **REJECTED for the deterministic packages** (`internal/core/`, `internal/verify/simulator/`, `internal/verify/speccheck/`, ...); **ACCEPTED at the edge**
   (`cp/applier/pebblekv` only, decision 49).
 - Import paths allowed (ops/tools/determinismcheck/allow.txt): **none**. Deliberately not added.
 

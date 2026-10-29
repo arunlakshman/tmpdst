@@ -8,17 +8,17 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/internal/core"
-	"manifester/internal/verify/veritas"
-	"manifester/internal/verify/veritas/veritastest"
-	"manifester/internal/verify/veritas/veritastest/runcontrol"
+	"manifester/internal/verify/speccheck"
+	"manifester/internal/verify/speccheck/checker"
+	"manifester/internal/verify/speccheck/checker/runcontrol"
 	"manifester/internal/wire/kafkawire"
 )
 
 // Conformance C1 tests the REAL broker logic against SIMULATED fakes of the
-// world. The fakes are the veritas spec object store and the veritas spec
+// world. The fakes are the speccheck spec object store and the speccheck spec
 // control plane, and the harness runs without faults. The test sends client
 // requests built with kwire. It compares every ack, fetch and ListOffsets
-// answer with one veritas.Partition per topic partition.
+// answer with one speccheck.Partition per topic partition.
 
 var c1TPs = []core.TopicPartition{core.NewTopicPartition("t", 0), core.NewTopicPartition("t", 1),
 	core.NewTopicPartition("u", 0), core.NewTopicPartition("u", 1), core.NewTopicPartition("u", 2)}
@@ -45,7 +45,7 @@ type c1 struct {
 	t       *testing.T
 	h       *harness
 	conns   []*client
-	model   map[core.TopicPartition]*veritas.Partition
+	model   map[core.TopicPartition]*speccheck.Partition
 	corrupt bool
 }
 
@@ -58,9 +58,9 @@ func newC1(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) *c1 
 	h := newHarness(t, cfg)
 	h.cp.CreateTopic("u", 3)
 	h.do(core.NodeStarted{Self: h.self})
-	s := &c1{t: t, h: h, model: map[core.TopicPartition]*veritas.Partition{}, corrupt: corrupt}
+	s := &c1{t: t, h: h, model: map[core.TopicPartition]*speccheck.Partition{}, corrupt: corrupt}
 	for _, tp := range c1TPs {
-		s.model[tp] = &veritas.Partition{}
+		s.model[tp] = &speccheck.Partition{}
 	}
 	s.conns = []*client{h.open(1), h.open(2)}
 	if corrupt { // every third GET comes back with a flipped byte
@@ -281,7 +281,7 @@ func (s *c1) invariant() error {
 	return nil
 }
 
-func genC1(r *veritastest.Rand, i int) c1op {
+func genC1(r *checker.Rand, i int) c1op {
 	op := c1op{Tag: i, Conn: r.Intn(2), TP: r.Intn(len(c1TPs)), From: r.Intn(1 << 10), Small: r.Intn(4) == 0, Last: r.Intn(2) == 0}
 	switch k := r.Intn(20); {
 	case k < 12:
@@ -308,8 +308,8 @@ func shrinkC1(op c1op) []c1op {
 	return out
 }
 
-func c1Check(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) veritastest.SpecChecker[*c1, c1op] {
-	return veritastest.SpecChecker[*c1, c1op]{
+func c1Check(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) checker.SpecChecker[*c1, c1op] {
+	return checker.SpecChecker[*c1, c1op]{
 		Name: "c1op", Ops: 80, MaxShrinkRuns: 300,
 		New:       func() *c1 { return newC1(t, bug, corrupt, tune) },
 		Gen:       genC1,
@@ -322,10 +322,10 @@ func c1Check(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) ve
 
 // c1Fail runs the seeds that o chooses and returns the first failure, or nil
 // if every seed passes. A planted-bug test needs the failure as a value, so it
-// cannot use veritastest.Run, which reports the failure to the test itself.
-func c1Fail(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config), o veritastest.Options) *veritastest.Failure[c1op] {
+// cannot use checker.Run, which reports the failure to the test itself.
+func c1Fail(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config), o checker.Options) *checker.Failure[c1op] {
 	c := c1Check(t, bug, corrupt, tune)
-	try := func(seed uint64) *veritastest.Failure[c1op] {
+	try := func(seed uint64) *checker.Failure[c1op] {
 		f := c.RunSeed(seed)
 		if f != nil {
 			replay := ""
@@ -352,7 +352,7 @@ func c1Fail(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config), o v
 func TestConformanceBroker(t *testing.T) {
 	for _, corrupt := range []bool{false, true} {
 		t.Run(fmt.Sprintf("corruptGets=%v", corrupt), func(t *testing.T) {
-			veritastest.Run(t, c1Check(t, InjectedBugNone, corrupt, nil), runcontrol.Options(t, 100))
+			checker.Run(t, c1Check(t, InjectedBugNone, corrupt, nil), runcontrol.Options(t, 100))
 		})
 	}
 }
@@ -371,7 +371,7 @@ func TestConformanceBrokerSmallSegments(t *testing.T) {
 	for _, name := range []string{"bytes", "batches", "partitions", "all"} {
 		for _, corrupt := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/corruptGets=%v", name, corrupt), func(t *testing.T) {
-				veritastest.Run(t, c1Check(t, InjectedBugNone, corrupt, caps[name]), runcontrol.Options(t, 50))
+				checker.Run(t, c1Check(t, InjectedBugNone, corrupt, caps[name]), runcontrol.Options(t, 50))
 			})
 		}
 	}
@@ -381,7 +381,7 @@ func TestConformanceBrokerSmallSegments(t *testing.T) {
 // changes something the harness can observe, so C1 must catch it.
 //
 // C1 cannot catch the other planted bugs, because the client cannot see them
-// in a fault-free run. The simulator tests in internal/verify/sim/kafka catch
+// in a fault-free run. The simulator tests in internal/verify/simulator/kafka catch
 // them: TestMutantsAreCaught in kafka_test.go runs every InjectedBug value and names
 // the invariant that must fail.
 //   - InjectedBugNoBatchCap, InjectedBugNoPartitionCap, InjectedBugSealOffByOne change only where the

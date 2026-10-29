@@ -10,7 +10,7 @@
 ## Findings
 | Finding | Matters? | Why |
 |---|---|---|
-| `prometheus` imports `time`, `sync`, `sync/atomic`, `os`, `runtime`, `runtime/debug`, `runtime/metrics`, `expvar`, `encoding/json` | Yes | All off the allow-list. Collectors are global-mutable, lock-based and read the clock and the process. They cannot live in `internal/core/`, `internal/broker/` or `internal/verify/sim/`. |
+| `prometheus` imports `time`, `sync`, `sync/atomic`, `os`, `runtime`, `runtime/debug`, `runtime/metrics`, `expvar`, `encoding/json` | Yes | All off the allow-list. Collectors are global-mutable, lock-based and read the clock and the process. They cannot live in `internal/core/`, `internal/broker/` or `internal/verify/simulator/`. |
 | `promhttp` serves HTTP (`net/http`) | Yes | Network I/O, edge only. |
 | Transitive modules: `beorn7/perks`, `cespare/xxhash/v2`, `munnerz/goautoneg`, `prometheus/client_model`, `prometheus/common`, `prometheus/procfs`, `google.golang.org/protobuf` | No | Pulled in for exposition (protobuf model, procfs for the process collector). Outside the determinism closure; `ops/scripts/ci-determinism.sh` does not list them. |
 

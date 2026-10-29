@@ -1,5 +1,5 @@
 // Command detcheck enforces the determinism rules of docs/lessons.md (lesson 12)
-// on the packages that run inside the simulator (internal/core, internal/verify/sim), and is reused by
+// on the packages that run inside the simulator (internal/core, internal/verify/simulator), and is reused by
 // ops/scripts/audit-dep.sh to audit third-party packages before they are allowed in.
 //
 // It reports:

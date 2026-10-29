@@ -3,7 +3,7 @@
 toys3 is a small S3-like store built end to end with the same DST design as
 this repo: a sans-I/O core, a simulator, a production runtime, oracle,
 invariants, mutants, golden traces and reference specs (veritas). This document
-lists the changes it implies for the root contracts in `internal/core/`, `internal/verify/sim/` and
+lists the changes it implies for the root contracts in `internal/core/`, `internal/verify/simulator/` and
 `internal/system/`. The short form of each accepted decision is a row in `decisions.md`
 (rows 7–22). Evidence points into `toys3/` (code) and `toys3/book/` (chapters).
 
@@ -453,7 +453,7 @@ func Run(ctx context.Context, b Bundle, f core.MachineFactory, self core.NodeIns
 
 ## 4. New packages (decisions 21, 22)
 
-- **`internal/verify/veritas/`** (21). Executable specs: sequential, fault-free, short. Each
+- **`internal/verify/speccheck/`** (21). Executable specs: sequential, fault-free, short. Each
   doubles as the unit-test fake and implements the matching `sys` interface.
   - `veritas.ObjectStore`: a map.
   - `veritas.ControlPlane`: CommitSegment idempotent per SegmentKey.

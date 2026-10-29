@@ -6,12 +6,12 @@ Status: proposal only, nothing applied. It supersedes the open items of `ddd-ref
 (deferred by decision 34). Measured on branch `toys3` at commit `ebea3be` plus uncommitted edits.
 
 **Caveat on moving ground.** Another agent is editing `cp/dynamo`, `internal/broker/config.go`, `internal/broker/segment.go`,
-`internal/verify/sim/engines/cpengine`, `veritas` and docs for CP range compaction. Numbers for those areas are mid-change.
+`internal/verify/simulator/fakeservices/fakecontrolplane`, `veritas` and docs for CP range compaction. Numbers for those areas are mid-change.
 Every item touching them is marked **[after compaction]** and must wait for that work to merge.
 
 "Hash-neutral" means no trace hash and no `StateHash` output changes. Frozen: decisions 7, 10, 11, 12
 (fact names), 21 (spec independence), 22, 28, 34; detcheck bans goroutines, channels, map iteration,
-package vars and `time` in `internal/core/` and `internal/verify/sim/`.
+package vars and `time` in `internal/core/` and `internal/verify/simulator/`.
 
 ## 1. Re-measurement of the earlier proposal
 
@@ -21,10 +21,10 @@ package vars and `time` in `internal/core/` and `internal/verify/sim/`.
 | 7. `ErrFenced` split | proposed | Done as decision 34: `BrokerFenced()` / `ProducerFenced()`, 6 call sites, 19 mentions of `ErrFenced` remain | Done |
 | 8. Incarnation fencing | open question | Decided: CP fences by epoch only | Done |
 | 2. Kafka-error translation | proposed | Still open. Kafka codes `err*` are chosen in 16 places in `internal/broker/` (`committed()` has a 4-way switch, `isolate()` picks `errInvalidPIDMapping`, `exhaustCode` in ops) | Valid, small |
-| 6. Six FNV hashers | 6 | Still 6 `hasher` types (`broker`, `veritas`, `internal/verify/sim/echo`, `internal/verify/sim/kafka`, `sim` (struct form), `netsim`) and **4 copies of `fnvU64`** (`internal/broker/hash.go:172`, `internal/verify/sim/hash.go:73`, `internal/verify/sim/kafka/hash.go:48`, `netsim.go:675`), each with its own `fnvu64_test.go` (4 test files). 43 hits of the FNV constants | Unchanged |
-| 6. Three retry skeletons | 3 | 5: `broker.retry` (segments), `broker.retryOp` (ops), `internal/verify/sim/echo.backoff`, `dynamo.commit` loop (`maxAttempts = 20`), `dynamo/store.go:178` (batch-get backoff). Two doubling formulas: `Broker.backoff` and `internal/verify/sim/echo.backoff` | Slightly worse |
-| 5. Fact name constants | string literals | Worse. 18 `emit("...")` sites (15 distinct names) and 36 literal uses of the three best-known names alone, spread over 18 files. Consumers now include `internal/system/production/metrics.go`, `internal/system/production/seglog.go`, `internal/verify/sim/kafka/segtiming.go`, `segcaps.go`, `invariants.go`, `oracle.go`. Field keys (`put_ns`, `wait_ns`, `commit_ns`, `total_ns`, `inflight`, `buffered`, ...) are literals too; 24 time-field literals in just three consumers | Worse and now operationally risky: a typo silently zeroes a Prometheus series |
-| 5. Fact field readers | n/a | 3 independent copies of "find field k in a fact": `prod.field/fi/fs` (`seglog.go:43`), `internal/verify/sim/kafka.fieldOf` (`oracle.go:149`), and an open-coded loop in `prod.Metrics.Observe` (`metrics.go:105,116`) | New duplication |
+| 6. Six FNV hashers | 6 | Still 6 `hasher` types (`broker`, `veritas`, `internal/verify/simulator/echo`, `internal/verify/simulator/kafka`, `sim` (struct form), `netsim`) and **4 copies of `fnvU64`** (`internal/broker/hash.go:172`, `internal/verify/simulator/hash.go:73`, `internal/verify/simulator/kafka/hash.go:48`, `netsim.go:675`), each with its own `fnvu64_test.go` (4 test files). 43 hits of the FNV constants | Unchanged |
+| 6. Three retry skeletons | 3 | 5: `broker.retry` (segments), `broker.retryOp` (ops), `internal/verify/simulator/echo.backoff`, `dynamo.commit` loop (`maxAttempts = 20`), `dynamo/store.go:178` (batch-get backoff). Two doubling formulas: `Broker.backoff` and `internal/verify/simulator/echo.backoff` | Slightly worse |
+| 5. Fact name constants | string literals | Worse. 18 `emit("...")` sites (15 distinct names) and 36 literal uses of the three best-known names alone, spread over 18 files. Consumers now include `internal/system/production/metrics.go`, `internal/system/production/seglog.go`, `internal/verify/simulator/kafka/segtiming.go`, `segcaps.go`, `invariants.go`, `oracle.go`. Field keys (`put_ns`, `wait_ns`, `commit_ns`, `total_ns`, `inflight`, `buffered`, ...) are literals too; 24 time-field literals in just three consumers | Worse and now operationally risky: a typo silently zeroes a Prometheus series |
+| 5. Fact field readers | n/a | 3 independent copies of "find field k in a fact": `prod.field/fi/fs` (`seglog.go:43`), `internal/verify/simulator/kafka.fieldOf` (`oracle.go:149`), and an open-coded loop in `prod.Metrics.Observe` (`metrics.go:105,116`) | New duplication |
 | 1. Language drift | glossary proposed | No `docs/glossary.md` exists. `release` still means "answer with error" (`segment.go`), `pbatch`/`op`/`segment`/`BatchRange` unchanged. `BatchRange` is in 51 places and `Base == -1` is the rejection test in 3 | Valid, not started |
 | 3. Value objects | proposed | Not started. `core.SegmentRef` 23 uses, `SegmentKey` 32 uses (all `string`), `core.TopicPartition{` literal built in 55 places | Valid, big blast radius |
 | 4. Broker aggregates | proposed | `segment.go` now holds 3 types and 20 functions: open buffer, sealed segment state machine (5 states), commit scheduler (`pump`), isolation, retry, ack/release, trip. `bufBytes` is touched in 7 places across 3 files; `slot.pending` in 5 places across 4 files | Worse and more urgent (performance work lands here) |
@@ -50,7 +50,7 @@ New growth since the earlier proposal:
   and `withDefaults` (two places, `config.go:95` and `:130`).
 - **Test helpers.** Duplicated names in `_test.go` files: `step` x3, `setup` x3, `run` x3, `put` x3,
   `newHarness` x3, `commit`, `fact`, `counter`, `report`, `seeds`, `firstCatch`, `ioOfAction` x2 each.
-  `internal/broker/harness_test.go` (406 lines), `internal/verify/sim/engines/internal/fakeio` and `cp/cptest` each carry their own
+  `internal/broker/harness_test.go` (406 lines), `internal/verify/simulator/fakeservices/internal/fakecompletions` and `cp/cptest` each carry their own
   version of "drive a machine, collect actions". Test code is 2,021 lines in `internal/broker/` against 1,949 of source.
 - **Mutants.** 9 `Bug*` modes, 9 `b.cfg.Bug` checks inside production flow control (`addBatch` has three).
   Acceptable (test-only, decision 25) but each new performance feature will want its own mutant.
@@ -81,8 +81,8 @@ unchanged because no private field order changes.
 **Q3. Fact name and field constants in `core`.** New `internal/core/factnames.go`:
 `const FactSegmentSealed = "segment_sealed"` and the key constants per fact (`KeyPutNS = "put_ns"`...),
 including a doc comment per fact listing fields in order and a comment "frozen, decision 12". Replace
-literals in `internal/broker/{broker,segment}.go`, `internal/system/production/{metrics,seglog}.go`, `internal/verify/sim/kafka/{segtiming,segcaps,
-invariants,oracle}.go`, `internal/verify/sim/echo`. Add `core.FactField(f, key)` (+ `FactI64`, `FactStr`) to kill the three
+literals in `internal/broker/{broker,segment}.go`, `internal/system/production/{metrics,seglog}.go`, `internal/verify/simulator/kafka/{segtiming,segcaps,
+invariants,oracle}.go`, `internal/verify/simulator/echo`. Add `core.FactField(f, key)` (+ `FactI64`, `FactStr`) to kill the three
 field-lookup copies (pure, no maps, detcheck-safe). Add one test in `core` pinning the list of names (a
 sorted slice literal) and one in `broker` that runs a scenario and asserts every `emit` name is in the list.
 Hash: neutral, constants are the same strings. Proof: golden hashes, mutants, plus the new pin test. Effort S
@@ -113,7 +113,7 @@ hand-written maps. Keep `broker.DefaultConfig` as the single default source (rem
 `Bytes`, `Bool`) replacing the 6 hashers and 4 `fnvU64` copies and 4 `fnvu64_test.go`. This is allowed:
 `core` is already imported by all, no maps/time. Must produce bit-identical sums: keep the offset basis and
 prime, and keep `sim`'s struct-form `hasher` as a thin wrapper only if its byte order differs (check
-`internal/verify/sim/hash.go` first; if it differs, leave it, document why, and do the other five). Hash: **neutral by
+`internal/verify/simulator/hash.go` first; if it differs, leave it, document why, and do the other five). Hash: **neutral by
 construction, proven by the golden hashes**; this is the one quick win where a mistake changes every hash, so
 the golden test is the whole test. Effort S-M, sequential per package but parallelizable across packages
 after `internal/core/hasher.go` lands.
@@ -149,7 +149,7 @@ Plan, same package, same state, files only (decision 22, and `StateHash` reads p
    (`admit(pb)` / `retire(s)`) so the only writes to `bufBytes` are in one file (today 7 places, 3 files).
 
 Hash: neutral (moves plus one extracted method; field order in `hash.go` untouched). Proof: golden hashes in
-`internal/verify/sim/kafka` and `internal/verify/sim/echo`, all 9 mutants caught at the same first seed, `TestDeterminismCanary`,
+`internal/verify/simulator/kafka` and `internal/verify/simulator/echo`, all 9 mutants caught at the same first seed, `TestDeterminismCanary`,
 `internal/broker/conformance_test.go`, `flush_test.go`, `timing_test.go`. Risk: low-medium; do it as three commits
 (1, 2, 3), each green. **[after compaction]** since the other agent is editing `segment.go`.
 
@@ -180,7 +180,7 @@ Built on S1. Three modes behind `commitSched`:
 Hash: **not neutral** for the non-serial modes (new schedule changes traces); serial mode must stay
 bit-identical, so land the interface first (S1) and the new modes behind a `Config` field defaulting to
 serial. Add a mutant `BugCommitOutOfOrder` (commits overlapping partitions concurrently) that the oracle must
-catch. Needs new invariants in `internal/verify/sim/kafka/invariants.go`: per-partition offsets monotone in seal order.
+catch. Needs new invariants in `internal/verify/simulator/kafka/invariants.go`: per-partition offsets monotone in seal order.
 
 ### S4. Value objects in `core` (M-L, deferred)
 
@@ -194,7 +194,7 @@ independent (decision 21): they convert at the boundary, they do not share the v
 
 ### S5. Retry/backoff helper (S-M)
 
-One pure `core.Backoff{Base, Max}` with `Delay(n)`, used by `Broker.backoff` and `internal/verify/sim/echo.backoff` (same
+One pure `core.Backoff{Base, Max}` with `Delay(n)`, used by `Broker.backoff` and `internal/verify/simulator/echo.backoff` (same
 doubling, same cap; verify identical for n=1..MaxAttempts before swapping). Leave `dynamo` loops on their own
 (real time, jitter, `ctx` sleep: they are edge code and decision 21 keeps them separate); at most share a
 tiny `sleep` in `cp/dynamo`. A shared "retry skeleton" across broker segment vs op is NOT proposed: the two
@@ -207,7 +207,7 @@ Hash: neutral if the delays are equal.
   `SegmentLog` and `Metrics` consume facts through one `FactSink` fan-out (`main.go` already hand-composes
   `prev`/`segLog`; move the compose into `prod.NodeConfig` as `Facts []func(core.Fact)`).
 - Tests: one `internal/machinetest` (driver: `Step`, `Collect`, `Fact(name)`, `Counter`) replacing the
-  duplicated `step/setup/run/put/newHarness` helpers in `broker`, `internal/verify/sim/echo`, `internal/verify/sim/kafka`, `cp/cptest`.
+  duplicated `step/setup/run/put/newHarness` helpers in `broker`, `internal/verify/simulator/echo`, `internal/verify/simulator/kafka`, `cp/cptest`.
   Do not share it with `veritas` (decision 21: spec tests stay independent).
 
 ## 4. Execution order, parallelism, proofs
@@ -222,7 +222,7 @@ Hash: neutral if the delays are equal.
 | Q2 | broker renames | S | low | neutral | golden | `segment.go`, `config.go` |
 | S2 | `kafkaerr.go` | S-M | low | neutral | broker tests, golden | `segment.go` |
 | S1 | pipeline extraction | M | low-med | neutral | golden, 9 mutants same seed, canary, conformance | `segment.go` |
-| S5 | `core.Backoff` | S-M | low | neutral | golden + delay table test | `broker.go`, `internal/verify/sim/echo` |
+| S5 | `core.Backoff` | S-M | low | neutral | golden + delay table test | `broker.go`, `internal/verify/simulator/echo` |
 | S6 | observer fan-out, test harness | M | low | neutral | existing tests | `internal/system/production`, tests |
 | S3 | commit scheduling modes | L | high | serial neutral, others rebaseline | new mutant + invariants, lockstep | `segment.go`, CP contract |
 | S4 | value objects | L | medium | neutral if verified | golden | every package |
@@ -231,7 +231,7 @@ Parallel waves (separate subagents, disjoint files):
 
 - **Wave A (now, safe during compaction):** Q1 (docs only, new file), Q4 (`internal/system/production`, `cp/cpobs`; the `cpobs`
   edits are outside what compaction touches), Q5 (`cmd/`), consumer half of Q3 (`internal/system/production/seglog.go`,
-  `internal/verify/sim/kafka/*`). These four touch disjoint directories.
+  `internal/verify/simulator/kafka/*`). These four touch disjoint directories.
 - **Wave B (after compaction merges):** Q3 broker half + Q2 + S2, one agent, one commit each (all in
   `internal/broker/`). In parallel with it, Q7 `core.Hasher` in the other packages except `broker` (`veritas`, `sim*`),
   then `internal/broker/hash.go` last.
@@ -264,7 +264,7 @@ New:
 - **Do not generalize `core.Hasher` into `hash/fnv` or `maphash`.** The sums are golden; `maphash` is seeded
   per process.
 - **Do not change the flag names or manifest keys** read by the runbook and `summarize.py` while doing Q5/Q6.
-- **Do not edit `cp/dynamo`, `veritas` or `internal/verify/sim/engines/cpengine` until range compaction merges.**
+- **Do not edit `cp/dynamo`, `veritas` or `internal/verify/simulator/fakeservices/fakecontrolplane` until range compaction merges.**
 
 ## 5b. Go idiom check (Effective Go)
 
@@ -290,7 +290,7 @@ Applied to the items above; the proposal follows these, and reviewers should hol
 ## 6. Sequencing against the performance work
 
 1. **Now (while range compaction is in flight):** wave A only. None of it touches `cp/dynamo`, `veritas`,
-   `internal/verify/sim/` engines or `internal/broker/{segment,config}.go`.
+   `internal/verify/simulator/` engines or `internal/broker/{segment,config}.go`.
 2. **Range compaction merges** (reduces commit items; changes the cost model in `commitItems`, which S1
    moves verbatim, so S1 must follow it, not precede it).
 3. **Wave B then S1**, then commit pipelining. Commit pipelining/parallel disjoint commits is S3 and needs S1's

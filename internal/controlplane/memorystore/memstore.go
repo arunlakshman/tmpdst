@@ -1,4 +1,4 @@
-// Package memorystore is a cp.Store over the veritas spec behind a mutex, for
+// Package memorystore is a cp.Store over the speccheck spec behind a mutex, for
 // local development and handler tests.
 package memorystore
 
@@ -8,19 +8,19 @@ import (
 
 	cp "manifester/internal/controlplane"
 	"manifester/internal/core"
-	"manifester/internal/verify/veritas"
+	"manifester/internal/verify/speccheck"
 )
 
-// Store is an in-memory cp.Store backed by the veritas control-plane spec.
+// Store is an in-memory cp.Store backed by the speccheck control-plane spec.
 type Store struct {
 	mu   sync.Mutex
-	spec *veritas.ControlPlane
+	spec *speccheck.ControlPlane
 }
 
 var _ cp.Store = (*Store)(nil)
 
 // New returns an empty store.
-func New() *Store { return &Store{spec: veritas.NewControlPlane()} }
+func New() *Store { return &Store{spec: speccheck.NewControlPlane()} }
 
 func (s *Store) exec(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
 	if err := ctx.Err(); err != nil {

@@ -13,7 +13,7 @@ import (
 var ErrUnavailable = errors.New("cp: unavailable")
 
 // Store is the control-plane state machine behind the gRPC server. It must
-// behave exactly like veritas.ControlPlane (op for op) and be safe for
+// behave exactly like speccheck.ControlPlane (op for op) and be safe for
 // concurrent use by many replicas. A business error is returned as a non-OK
 // core.ErrCode with a nil error; error is infrastructure only.
 type Store interface {

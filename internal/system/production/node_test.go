@@ -12,7 +12,7 @@ import (
 	"manifester/internal/broker"
 	"manifester/internal/core"
 	"manifester/internal/system"
-	"manifester/internal/verify/veritas/vsys"
+	"manifester/internal/verify/speccheck/specsystem"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 )
@@ -25,8 +25,8 @@ func startNode(t *testing.T, mod func(*NodeConfig)) (*Node, NodeConfig) {
 	}
 	cfg := NodeConfig{
 		NodeID: "n1", Broker: broker.DefaultConfig(), Listener: ln,
-		Objects: vsys.NewObjectStore(), ObjClassify: MemoryErrorClassifier{},
-		ControlPlane: vsys.NewControlPlane(), CPClassify: MemoryErrorClassifier{},
+		Objects: specsystem.NewObjectStore(), ObjClassify: MemoryErrorClassifier{},
+		ControlPlane: specsystem.NewControlPlane(), CPClassify: MemoryErrorClassifier{},
 		StopGrace: time.Second, FlushGrace: 50 * time.Millisecond,
 	}
 	if mod != nil {
@@ -58,7 +58,7 @@ func TestStartRequiresPieces(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = ln.Close() }()
-	full := NodeConfig{Listener: ln, Objects: vsys.NewObjectStore(), ControlPlane: vsys.NewControlPlane()}
+	full := NodeConfig{Listener: ln, Objects: specsystem.NewObjectStore(), ControlPlane: specsystem.NewControlPlane()}
 	for name, mod := range map[string]func(*NodeConfig){
 		"listener": func(c *NodeConfig) { c.Listener = nil },
 		"objects":  func(c *NodeConfig) { c.Objects = nil },

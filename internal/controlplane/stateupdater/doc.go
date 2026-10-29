@@ -1,7 +1,7 @@
 // Package stateupdater is the production control-plane state machine of design A
-// (decision 49): the same semantics as veritas.ControlPlane for CommitSegment,
+// (decision 49): the same semantics as speccheck.ControlPlane for CommitSegment,
 // CreateTopic, Lookup, DescribeTopics and End, on an embedded ordered KV store
-// instead of in-memory maps. veritas stays the independent oracle (decision
+// instead of in-memory maps. speccheck stays the independent oracle (decision
 // 21); this package is tested against it in lockstep.
 //
 // It is I/O shell code, outside the determinism closure, but its behaviour is

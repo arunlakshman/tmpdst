@@ -7,14 +7,14 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/internal/core"
-	"manifester/internal/verify/veritas"
+	"manifester/internal/verify/speccheck"
 	"manifester/internal/wire/kafkawire"
 )
 
 // testEnv is a seeded core.Environment that records assertion violations. It keeps its
-// own SplitMix64 copy and not veritastest.Rand, for two reasons. Uint64 gives
-// the same values as veritastest.Rand, but Intn here uses a plain modulo and
-// veritastest.Rand uses Lemire, so the seeds would change their streams. Also,
+// own SplitMix64 copy and not checker.Rand, for two reasons. Uint64 gives
+// the same values as checker.Rand, but Intn here uses a plain modulo and
+// checker.Rand uses Lemire, so the seeds would change their streams. Also,
 // broker_test.go sets the state field directly to reseed the environment.
 type testEnv struct {
 	state uint64
@@ -66,15 +66,15 @@ type client struct {
 	corr int32
 }
 
-// harness drives a Broker synchronously against the veritas specs. IOResults
+// harness drives a Broker synchronously against the speccheck specs. IOResults
 // are computed when the I/O action is issued and delivered through a queue, so
 // tests can hold them back (holdCP, holdPut) or fault them (cpHook, objHook).
 type harness struct {
 	t     *testing.T
 	b     *Broker
 	env   *testEnv
-	store *veritas.ObjectStore
-	cp    *veritas.ControlPlane
+	store *speccheck.ObjectStore
+	cp    *speccheck.ControlPlane
 	cfg   Config
 	self  core.NodeInstance
 	now   core.NodeTime
@@ -98,7 +98,7 @@ type harness struct {
 }
 
 func newHarness(t *testing.T, cfg Config) *harness {
-	h := &harness{t: t, env: &testEnv{state: 7}, store: veritas.NewObjectStore(), cp: veritas.NewControlPlane(),
+	h := &harness{t: t, env: &testEnv{state: 7}, store: speccheck.NewObjectStore(), cp: speccheck.NewControlPlane(),
 		cfg: cfg, timers: map[core.TimerID]core.TimerVersion{}, clients: map[core.ConnID]*client{},
 		paused: map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}
 	h.cp.CreateTopic("t", 2)

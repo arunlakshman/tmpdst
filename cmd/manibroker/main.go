@@ -25,7 +25,7 @@ import (
 	"manifester/internal/system/production"
 	"manifester/internal/system/runinfo"
 	"manifester/internal/system/s3store"
-	"manifester/internal/verify/veritas/vsys"
+	"manifester/internal/verify/speccheck/specsystem"
 )
 
 func main() {
@@ -156,7 +156,7 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 func openObjects(ctx context.Context, f brokerFlags, cfg *production.NodeConfig, m *production.Metrics, log *slog.Logger) error {
 	switch f.objects {
 	case "mem":
-		cfg.Objects, cfg.ObjClassify = vsys.NewObjectStore(), production.MemoryErrorClassifier{}
+		cfg.Objects, cfg.ObjClassify = specsystem.NewObjectStore(), production.MemoryErrorClassifier{}
 		return nil
 	case "s3":
 		var obs *awsmetrics.Recorder

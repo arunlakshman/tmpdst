@@ -6,7 +6,7 @@ import (
 
 	"manifester/internal/core"
 	"manifester/internal/system"
-	"manifester/internal/verify/veritas/vsys"
+	"manifester/internal/verify/speccheck/specsystem"
 )
 
 // Classifier routes by action: ControlPlaneCall to CP, Obj* to Objects, anything else
@@ -27,13 +27,13 @@ func (c Classifier) Classify(a core.IOCall, err error) (core.ErrCode, core.Outco
 	return core.ErrIO, core.MaybeApplied
 }
 
-// MemoryErrorClassifier classifies the in-memory object store (vsys), which fails only
+// MemoryErrorClassifier classifies the in-memory object store (specsystem), which fails only
 // with truthful spec errors.
 type MemoryErrorClassifier struct{}
 
 // Classify maps an in-memory store error to an error code and outcome.
 func (MemoryErrorClassifier) Classify(_ core.IOCall, err error) (core.ErrCode, core.Outcome) {
-	if ve, ok := errors.AsType[*vsys.Error](err); ok {
+	if ve, ok := errors.AsType[*specsystem.Error](err); ok {
 		return ve.Code, core.NotApplied
 	}
 	return core.ErrIO, core.MaybeApplied

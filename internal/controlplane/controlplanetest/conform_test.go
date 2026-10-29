@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	cp "manifester/internal/controlplane"
-	"manifester/internal/verify/veritas/veritastest/plantedbug"
-	"manifester/internal/verify/veritas/veritastest/runcontrol"
-	"manifester/internal/verify/veritas/veritastest/suites"
+	"manifester/internal/verify/speccheck/checker/injectedbug"
+	"manifester/internal/verify/speccheck/checker/runcontrol"
+	"manifester/internal/verify/speccheck/checker/suites"
 )
 
 // Conformance C3 for the control-plane stores: the shared control plane suite
@@ -32,7 +32,7 @@ func TestConformanceMemstoreGRPC(t *testing.T) {
 // TestPlantedBugsCaughtMemstore proves that the suite fails when the store has
 // a known bug, so a pass of TestConformanceMemstore means something.
 func TestPlantedBugsCaughtMemstore(t *testing.T) {
-	plantedbug.RequireAllControlPlaneBugsDetected(t, subjectOf(func() impl { return storeImpl{newMem()} }), 100)
+	injectedbug.RequireAllControlPlaneBugsDetected(t, subjectOf(func() impl { return storeImpl{newMem()} }), 100)
 }
 
 var _ cp.Store = newMem()

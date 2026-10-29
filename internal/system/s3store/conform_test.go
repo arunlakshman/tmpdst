@@ -10,21 +10,21 @@ import (
 
 	"manifester/internal/core"
 	"manifester/internal/system"
-	"manifester/internal/verify/veritas/veritastest/observation"
-	"manifester/internal/verify/veritas/veritastest/plantedbug"
-	"manifester/internal/verify/veritas/veritastest/runcontrol"
-	"manifester/internal/verify/veritas/veritastest/suites"
-	"manifester/internal/verify/veritas/vsys"
+	"manifester/internal/verify/speccheck/checker/injectedbug"
+	"manifester/internal/verify/speccheck/checker/observation"
+	"manifester/internal/verify/speccheck/checker/runcontrol"
+	"manifester/internal/verify/speccheck/checker/suites"
+	"manifester/internal/verify/speccheck/specsystem"
 )
 
 // Conformance C3: the shared object store suite runs on the S3 adapter and on
-// the in-process fake. Both are compared with veritas.ObjectStore.
+// the in-process fake. Both are compared with speccheck.ObjectStore.
 
 // codeOf turns an error of the adapter or of the fake into a core.ErrCode.
 // Any other error counts as ErrIO, as the broker would see it.
 func codeOf(err error) core.ErrCode {
 	var se *Error
-	var ve *vsys.Error
+	var ve *specsystem.Error
 	switch {
 	case err == nil:
 		return core.OK
@@ -75,7 +75,7 @@ func writeResult(err error) observation.ObjectResult {
 
 func (storeSubject) StateHash() (uint64, bool) { return 0, false }
 
-func newFake() suites.ObjectSubject { return storeSubject{vsys.NewObjectStore()} }
+func newFake() suites.ObjectSubject { return storeSubject{specsystem.NewObjectStore()} }
 
 func runProfiles(t *testing.T, newSubject func() suites.ObjectSubject, defaultSeeds int) {
 	for _, profile := range suites.AllObjectProfiles() {
@@ -130,8 +130,10 @@ func TestConformanceS3(t *testing.T) {
 // fake S3 server has a known bug, so a pass of TestConformanceFake means
 // something.
 func TestPlantedBugsCaught(t *testing.T) {
-	plantedbug.RequireAllObjectBugsDetected(t, newFakeS3Subject(t), 100)
+	injectedbug.RequireAllObjectBugsDetected(t, newFakeS3Subject(t), 100)
 }
 
 // TestPlantedBugsCaughtMem does the same for the in-process fake store.
-func TestPlantedBugsCaughtMem(t *testing.T) { plantedbug.RequireAllObjectBugsDetected(t, newFake, 100) }
+func TestPlantedBugsCaughtMem(t *testing.T) {
+	injectedbug.RequireAllObjectBugsDetected(t, newFake, 100)
+}

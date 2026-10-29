@@ -7,9 +7,9 @@ import (
 	"manifester/internal/controlplane/controlplaneclient"
 	"manifester/internal/controlplane/grpctestserver"
 	"manifester/internal/core"
-	"manifester/internal/verify/veritas/veritastest/generator"
-	"manifester/internal/verify/veritas/veritastest/observation"
-	"manifester/internal/verify/veritas/veritastest/suites"
+	"manifester/internal/verify/speccheck/checker/generator"
+	"manifester/internal/verify/speccheck/checker/observation"
+	"manifester/internal/verify/speccheck/checker/suites"
 )
 
 // compareSteps runs the operations one by one on the subject and on a fresh

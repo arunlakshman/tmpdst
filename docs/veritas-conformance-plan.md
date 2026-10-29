@@ -1,7 +1,7 @@
 # Plan: spec-based (veritas) conformance, redesigned as if built today
 
 Status: PROPOSAL for review. Nothing in this plan has been executed.
-Scope: `internal/verify/veritas/**` and every test that runs a veritas check.
+Scope: `internal/verify/speccheck/**` and every test that runs a veritas check.
 Delivery: nine work packages run by subagents, integrated and verified by one
 agent, landed as **one commit** on branch `toys3` (see section 9).
 
@@ -191,7 +191,7 @@ Files: `veritastest/lockstep.go` (+ rename file to `comparator.go`),
 - Add `Failure.ReplayCommand` plumbing: `Options.Replay` becomes required in
   `Run` docs (nil allowed but warned in doc) and `Report` prints it.
 - Doc comment defines "lockstep" in plain words once.
-- Acceptance: `go build ./...` and `go test ./internal/verify/veritas/...` green;
+- Acceptance: `go build ./...` and `go test ./internal/verify/speccheck/...` green;
   zero remaining occurrences of the old names (`grep`).
 - **Barrier**: W2-W8 start only after W1 lands in the working tree.
 
@@ -294,7 +294,7 @@ Files: `broker/conformance_test.go`, `broker/harness_test.go`,
 - Switch to `runcontrol.Options` so seeds/replay work. Replace the broker harness's
   private SplitMix copy with `veritastest.Rand` (G7).
 - Do NOT make C4 import veritas (independence rule). Add a comment-level
-  guard: a test that fails if `oracle.go` imports `internal/verify/veritas`.
+  guard: a test that fails if `oracle.go` imports `internal/verify/speccheck`.
 - Add cross-check test: `veritastest.Rand` stream equals `sim` counted stream
   for the same seed (lives in a test that may import both).
 - Acceptance: C1 planted bugs (`BugWrongOffset`, `BugServeCorrupt`) still caught;

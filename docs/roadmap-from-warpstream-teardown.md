@@ -143,7 +143,7 @@ Checklist. Status: OK / TODO / BLOCKER.
 
 ### Third-party audit
 - 16 indirect modules from Pebble: reviewed in `docs/dep-audits/pebble-indirect-modules.md` (all permissive, edge-only,
-  `internal/core/` and `internal/verify/sim/` do not reach them). State this in the README. cockroachdb/errors and sentry-go are linked into
+  `internal/core/` and `internal/verify/simulator/` do not reach them). State this in the README. cockroachdb/errors and sentry-go are linked into
   `manicp` (about 1 MB) and make no network call unless `sentry.Init` runs; ours never does.
 - Open advisory: `golang.org/x/text` v0.34.0, GO-2026-5970, reached only via sentry-go; the fix (v0.39.0) needs `go 1.25`.
   Also go.mod says `go 1.24.0` (end of life); release builds already use go1.26.10. Before the first tag, bump the

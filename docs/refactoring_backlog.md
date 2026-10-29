@@ -41,8 +41,8 @@ Suggested waves: **P0 → P1 → P2 → P3 → P4**.
 - [x] ~~`parseBatch(..., verifyCRC bool)` — **Remove Flag Argument** — `internal/wire/kafkawire/batch.go` (prefer `parseBatch` / `parseBatchUnverified` or keep public wrappers only)~~
 - [x] ~~`dispatch(..., resolved bool)` — **Remove Flag Argument** — `internal/broker/ops.go` → `dispatch` vs `dispatchAfterRefresh` (or equivalent)~~
 - [x] ~~`retry(s, from segState)` — **Remove Flag Argument** — `internal/broker/segment.go` → keep only `retryPut` / `retryCommit`~~
-- [x] ~~`lost(..., abort bool)` — **Remove Flag Argument** — `internal/verify/sim/kafka/workload.go` + `internal/verify/sim/echo/workload.go` → `lostAbort` / `lostPeerClosed` (or equivalent)~~
-- [x] ~~`hash(cached bool)` — **Remove Flag Argument** — `internal/verify/sim/engines/netsim/netsim.go` → explicit cached vs full methods~~
+- [x] ~~`lost(..., abort bool)` — **Remove Flag Argument** — `internal/verify/simulator/kafka/workload.go` + `internal/verify/simulator/echo/workload.go` → `lostAbort` / `lostPeerClosed` (or equivalent)~~
+- [x] ~~`hash(cached bool)` — **Remove Flag Argument** — `internal/verify/simulator/fakeservices/fakenetwork/netsim.go` → explicit cached vs full methods~~
 - [x] ~~`pull` / `SyncTo` `force bool` — **Remove Flag Argument** — was `logsm/replica.go` (deleted with twin)~~
 - [x] ~~`attempt("won"|"lost"|"error")` — **Remove Flag Argument** / typed result — was `logcp/committer.go` (deleted with twin)~~
 - [x] ~~Redundant `cur = max(cur, n)` after `if n > cur` — **Inline Variable** — `internal/controlplane/stateupdater/applier.go`~~
@@ -90,8 +90,8 @@ Bounded-context merge, Extract Class on Broker/Service/kernel — those are P2�
 
 ### Landed
 
-- [x] ~~Echo ↔ kafka client FSM — **Extract Superclass** / **Form Template Method** — `internal/verify/sim/internal/session` (`Loop` hooks; protocol + StateHash stay in scenarios; TraceHash canaries green)~~
-- [x] ~~Echo ↔ kafka campaign presets — **Parameterize Function** / **Form Template Method** — `internal/verify/sim/internal/campaign` (Swarm `afterKnobs` preserves kafka PartialIOMax draw order; TraceHash canaries matched)~~
+- [x] ~~Echo ↔ kafka client FSM — **Extract Superclass** / **Form Template Method** — `internal/verify/simulator/internal/session` (`Loop` hooks; protocol + StateHash stay in scenarios; TraceHash canaries green)~~
+- [x] ~~Echo ↔ kafka campaign presets — **Parameterize Function** / **Form Template Method** — `internal/verify/simulator/internal/campaign` (Swarm `afterKnobs` preserves kafka PartialIOMax draw order; TraceHash canaries matched)~~
 - [x] ~~Bridge boundary faults — **Form Template Method** — `fakeio.Params.Draw` shared by fakeio Execute and logengine (coin order preserved; TraceHash stable)~~
 - [x] ~~`serveMetrics` + `writeManifest` — **Extract Function** / **Move Function** — `internal/system/runinfo.ServeMetrics` + `Publish` (manicp metrics gains Read/Write/Idle timeouts matching broker)~~
 - [x] ~~Service boot skeleton — **Form Template Method** — same cmds — **not worth it**: after logger setup the two `serve` bodies share no steps; a template needs hooks without deleting branches~~
@@ -222,7 +222,7 @@ Highest leverage themes still live (mapped into waves above):
 
 1. **Extract Class** on god types after seams (P4), especially broker + `internal/controlplane/statemachine`
 2. ~~Shared serve/manifest helpers~~ — **done** (`internal/system/runinfo.ServeMetrics` / `Publish`)
-3. ~~Echo ↔ Kafka client FSM / campaign~~ — **done** (`internal/verify/sim/internal/session`, `internal/verify/sim/internal/campaign`)
+3. ~~Echo ↔ Kafka client FSM / campaign~~ — **done** (`internal/verify/simulator/internal/session`, `internal/verify/simulator/internal/campaign`)
 4. ~~kwire framing + boundary fault Draw~~ — **done** (`appendFlexibleTag`/`readBody`, `fakeio.Params.Draw`)
 5. ~~Share or formally fork logsm ↔ logcp~~ — **done by deletion**; one machine + exec remains
 6. ~~Shared binary reader across log twins~~ — **gone with the twins**

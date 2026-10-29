@@ -19,7 +19,7 @@ Labels: **measured** (this machine, Apple M1, Go 1.24), **modelled** (fakedb wit
 | hole-filler | `Replica.Tick/SyncTo` | A slot empty for `HoleAfter` (default 250 ms) while later slots exist gets a no-op via the same conditional append. The original writer loses and retries elsewhere; apply skips the no-op. |
 | `Checkpoint` | `checkpoint.go` | Slot, state hash, ends (grouped by topic, delta coded), sorted 16-byte key hashes. No restore into veritas. |
 | `Store` | `store.go` | `cp.Store` over a replica and committer, for the conformance suite only. |
-| small additions elsewhere | `fakedb`, `internal/verify/veritas/snapshot.go` | fakedb `PutItem` (conditional, `ALL_OLD`, `AfterPut` lost-answer hook); veritas `Ends()` and `SegmentKeys()` (read-only). |
+| small additions elsewhere | `fakedb`, `internal/verify/speccheck/snapshot.go` | fakedb `PutItem` (conditional, `ALL_OLD`, `AfterPut` lost-answer hook); veritas `Ends()` and `SegmentKeys()` (read-only). |
 
 Commands in the log: CommitSegment, CreateTopic (otherwise `DescribeTopics` would diverge between replicas) and no-op.
 The state machine is unchanged `veritas.ControlPlane`: first slot of a key wins, a later equal command is answered from
@@ -223,7 +223,7 @@ the old transaction store needs `-max-segment-partitions 96` (documented in `int
 the runbook; `ops/deploy/aws/terraform` defaults `broker_extra_args` to it because it still runs `manicp -store dynamo`), and
 refuses a wider segment with `ErrTooLarge` and no write (tested at 4096 partitions in `cp/dynamo`). The broker does not
 learn the limit from the CP: that needs a new endpoint and a contract field, and the CP URL list of stage 4 is the better
-place. `internal/verify/sim/engines/logengine` is the sim log CP (`docs/sim-log-engine.md`); `manisim -scenario kafka-log` runs the whole
+place. `internal/verify/simulator/fakeservices/fakelogservice` is the sim log CP (`docs/sim-log-engine.md`); `manisim -scenario kafka-log` runs the whole
 system on it; four mutants are caught; C2 conformance against veritas passes. The sim's SegmentCaps invariant now uses the
 store's item limit (none for the log store) instead of the constant 100.
 
@@ -237,7 +237,7 @@ seed (same step count, rand calls and trace hash, 0 failing in both):
 | 300 seeds | 0 failing, 5,828,573 steps | identical hash for every seed |
 | 2000 seeds | 0 failing, 40,495,135 steps | identical hash for every seed |
 
-The cap change is exercised by wide workloads instead (`internal/verify/sim/kafka` tests): 128 producers over 256 partitions commit a
+The cap change is exercised by wide workloads instead (`internal/verify/simulator/kafka` tests): 128 producers over 256 partitions commit a
 100-partition segment on the log store (the old store allows at most 96 and would refuse 101 items), and
 `TestCapChangeIsExplainedBySealReasons` shows the only difference at the broker: with the veritas CP and no item limit, 2
 of 265 segments sealed by the 96-partition rule at cap 96 and none at 4096 (they run on to the timer). The new preset

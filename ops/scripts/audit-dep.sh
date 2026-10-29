@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Audit a Go module/package for determinism before the deterministic core
-# (internal/core, internal/verify/sim) may import it. Prints a review report; it does not decide.
+# (internal/core, internal/verify/simulator) may import it. Prints a review report; it does not decide.
 #
 # Usage: scripts/audit-dep.sh <module>[@version] [package-pattern]
 #   scripts/audit-dep.sh github.com/twmb/franz-go/pkg/kmsg@v1.14.0

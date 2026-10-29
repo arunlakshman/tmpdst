@@ -9,7 +9,7 @@ import (
 	"manifester/internal/controlplane/statemachine"
 	"manifester/internal/controlplane/stateupdater"
 	"manifester/internal/core"
-	"manifester/internal/verify/veritas"
+	"manifester/internal/verify/speccheck"
 )
 
 var lockstepCmds = []stateupdater.Entry{
@@ -90,7 +90,7 @@ func feedContiguous(t *testing.T, m *statemachine.Machine, entries []stateupdate
 
 func TestLockstepMachineVsVeritas(t *testing.T) {
 	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, HoleAfter: 0})
-	orc := veritas.NewControlPlane()
+	orc := speccheck.NewControlPlane()
 	machineAnswers := feedContiguous(t, m, lockstepCmds)
 
 	var orcAnswers []core.ControlPlaneDone
@@ -111,7 +111,7 @@ func TestLockstepMachineVsVeritas(t *testing.T) {
 		}
 		got, want := machineAnswers[i], orcAnswers[i]
 		if got.Err != want.Err || !reflect.DeepEqual(got.Resp, want.Resp) {
-			t.Fatalf("slot %d: machine %+v, veritas %+v", i, got, want)
+			t.Fatalf("slot %d: machine %+v, speccheck %+v", i, got, want)
 		}
 	}
 
@@ -122,7 +122,7 @@ func TestLockstepMachineVsVeritas(t *testing.T) {
 		return orc.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
 	})
 	if appDig != orcDig {
-		t.Fatalf("query digest: machine fold %x, veritas %x", appDig, orcDig)
+		t.Fatalf("query digest: machine fold %x, speccheck %x", appDig, orcDig)
 	}
 	t.Logf("lockstep cmds=%d applied=%d foldHash=%x queryDigest=%x",
 		len(lockstepCmds), m.Applied(), m.Fold().StateHash(), appDig)
@@ -130,7 +130,7 @@ func TestLockstepMachineVsVeritas(t *testing.T) {
 
 func TestLockstepWithHoleFill(t *testing.T) {
 	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, HoleAfter: 0})
-	orc := veritas.NewControlPlane()
+	orc := speccheck.NewControlPlane()
 
 	a := lockstepCmds[2]
 	b := lockstepCmds[3]
@@ -166,6 +166,6 @@ func TestLockstepWithHoleFill(t *testing.T) {
 		return orc.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
 	})
 	if appDig != orcDig {
-		t.Fatalf("query digest after hole-fill: machine %x, veritas %x", appDig, orcDig)
+		t.Fatalf("query digest after hole-fill: machine %x, speccheck %x", appDig, orcDig)
 	}
 }

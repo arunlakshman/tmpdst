@@ -12,9 +12,9 @@ import (
 	"manifester/internal/controlplane/grpctestserver"
 	"manifester/internal/controlplane/memorystore"
 	"manifester/internal/core"
-	"manifester/internal/verify/veritas/veritastest/generator"
-	"manifester/internal/verify/veritas/veritastest/observation"
-	"manifester/internal/verify/veritas/veritastest/suites"
+	"manifester/internal/verify/speccheck/checker/generator"
+	"manifester/internal/verify/speccheck/checker/observation"
+	"manifester/internal/verify/speccheck/checker/suites"
 )
 
 // impl is a control plane as the conformance runner drives it.

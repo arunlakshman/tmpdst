@@ -33,8 +33,8 @@ make install-hooks   # uses ambient go / golangci-lint on PATH
 | vet | `go vet ./...` |
 | lint | `golangci-lint run ./...` (see `.golangci.yml`) |
 | compile | `go build ./...` |
-| test | unit packages (not `internal/verify/sim`, not `test/integrationtest`) |
-| sim | `go test ./internal/verify/sim/...` |
+| test | unit packages (not `internal/verify/simulator`, not `test/integrationtest`) |
+| sim | `go test ./internal/verify/simulator/...` |
 | it-hermetic | `go test ./test/integrationtest/` (in-process memstore) |
 | crap | CRAP score ≤ 20 (`docs/crap-gate.md`) |
 

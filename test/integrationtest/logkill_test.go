@@ -24,7 +24,7 @@ import (
 	"manifester/internal/controlplane/statemachine"
 	"manifester/internal/core"
 	"manifester/internal/system/production"
-	"manifester/internal/verify/veritas/vsys"
+	"manifester/internal/verify/speccheck/specsystem"
 )
 
 // cpNode is one machine-backed control-plane node served over gRPC.
@@ -89,7 +89,7 @@ func newLogStack(t *testing.T, brokers int) *logStack {
 		ls.cps = append(ls.cps, cn)
 		addrs = append(addrs, addr)
 	}
-	st := &stack{t: t, cp: controlplaneclient.New(strings.Join(addrs, ","), nil), objs: vsys.NewObjectStore(), objCls: production.MemoryErrorClassifier{},
+	st := &stack{t: t, cp: controlplaneclient.New(strings.Join(addrs, ","), nil), objs: specsystem.NewObjectStore(), objCls: production.MemoryErrorClassifier{},
 		brokers: broker.Config{BatchWindow: core.Duration(20 * time.Millisecond)}}
 	t.Cleanup(func() {
 		for _, n := range st.nodes {

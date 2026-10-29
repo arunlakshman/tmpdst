@@ -1,8 +1,8 @@
 # Sim log engine (CP-DSM-8)
 
 `kafka-log` runs control-plane **replica processes** (`internal/controlplane/statemachine`) plus the
-faulting Dynamo loglet (`internal/verify/sim/engines/logstore`). Brokers still emit `CPCall`.
-`internal/verify/sim/engines/logengine` is a thin bridge: boundary faults (503, timeout, lost
+faulting Dynamo loglet (`internal/verify/simulator/fakeservices/fakelogstore`). Brokers still emit `CPCall`.
+`internal/verify/simulator/fakeservices/fakelogservice` is a thin bridge: boundary faults (503, timeout, lost
 response, outage) and `CPOffer` / `CPReply` routing to `cp-*` nodes (one
 failover hop when a standby refuses). `CPTruth` is reference replay of durable
 logstore slots (`machine.ReplaySlot`). Veritas remains the independent oracle
@@ -36,7 +36,7 @@ retries the same slot (conditional append); abandoning the slot used to wedge
 under stacked retries. Log knobs stay on `sim.LogParams`. Mutants use
 `LogParams.Bug` / `machine.Config.Bug` (and `LogStoreFaults.Bug` for trim-delete).
 
-## Mutants (`internal/verify/sim/kafka/logmutants_test.go`)
+## Mutants (`internal/verify/simulator/kafka/logmutants_test.go`)
 
 | mutant | where | caught by |
 |---|---|---|

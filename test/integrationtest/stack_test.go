@@ -12,7 +12,7 @@ import (
 	"manifester/internal/core"
 	"manifester/internal/system"
 	"manifester/internal/system/production"
-	"manifester/internal/verify/veritas/vsys"
+	"manifester/internal/verify/speccheck/specsystem"
 )
 
 // stack is a control plane, an object store and any number of brokers.
@@ -30,7 +30,7 @@ func newStack(t *testing.T, _ any, objs system.ObjectStore, cls system.ErrorClas
 	t.Helper()
 	gn := grpctestserver.StartMem(t)
 	if objs == nil {
-		objs, cls = vsys.NewObjectStore(), production.MemoryErrorClassifier{}
+		objs, cls = specsystem.NewObjectStore(), production.MemoryErrorClassifier{}
 	}
 	s := &stack{t: t, cp: gn.Client, objs: objs, objCls: cls,
 		brokers: broker.Config{BatchWindow: core.Duration(20 * time.Millisecond)}}

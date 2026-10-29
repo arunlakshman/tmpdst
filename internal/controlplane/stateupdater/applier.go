@@ -18,7 +18,7 @@ func New(kv KeyValueStore) *StateUpdater { return &StateUpdater{kv: kv} }
 // Close closes the store.
 func (a *StateUpdater) Close() error { return a.kv.Close() }
 
-// Exec runs one ControlPlaneCall like veritas.ControlPlane.Exec. For a CommitSegment the
+// Exec runs one ControlPlaneCall like speccheck.ControlPlane.Exec. For a CommitSegment the
 // call's Req is the log slot (it orders the idempotency window for Trim). A
 // store failure panics.
 func (a *StateUpdater) Exec(act core.IOCall) core.IOResult {

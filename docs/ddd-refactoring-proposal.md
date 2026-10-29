@@ -64,7 +64,7 @@ Proposed glossary, to go in `docs/glossary.md` and be cited by doc comments:
 | Membership and fencing | `Register` and `broker.trip` | |
 | Object layout | `format`, `veritas.ObjectStore`, `internal/system/s3store` | Shared kernel. Fine. |
 | Runtime | `core`, `sys`, the sim kernel | |
-| Verification | `sim`, `internal/verify/sim/kafka`, `veritastest`, `detcheck` | |
+| Verification | `sim`, `internal/verify/simulator/kafka`, `veritastest`, `detcheck` | |
 
 **Shared pure "idempotence rules" module?** No for the rules, yes for the vocabulary.
 
@@ -144,5 +144,5 @@ Use files instead.
 1. Items 1, 5 and 8: documentation and constants.
 2. Item 2: error translation.
 3. Items 6 and 4: one aggregate per commit, golden hashes unchanged each time.
-4. Item 3, after the current `internal/verify/sim/` and `internal/system/` work has merged.
+4. Item 3, after the current `internal/verify/simulator/` and `internal/system/` work has merged.
 5. Item 7, after you choose A or B (A recommended).

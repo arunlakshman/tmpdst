@@ -10,10 +10,10 @@ import (
 // Forbidden monorepo and I/O imports for controlplane/machine (decision 56).
 var forbiddenImportPrefixes = []string{
 	"manifester/internal/broker",
-	"manifester/internal/verify/sim",
+	"manifester/internal/verify/simulator",
 	"manifester/internal/system",
 	"manifester/cmd",
-	"manifester/internal/verify/veritas",
+	"manifester/internal/verify/speccheck",
 	"manifester/internal/wire/kafkawire",
 	"manifester/internal/wire/segmentformat",
 	"net/http",

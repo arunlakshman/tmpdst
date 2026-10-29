@@ -3,7 +3,7 @@
 // It implements core.Machine so one Step runs under the sim kernel and a
 // control-plane-owned run loop. This package is an extractable unit under
 // controlplane/ autonomy (decision 56): it may import manifester/internal/core and
-// other controlplane packages, but not broker, sim, sys, cmd, veritas, kwire,
+// other controlplane packages, but not broker, sim, sys, cmd, speccheck, kwire,
 // format, net/http, Pebble, or the Dynamo SDK.
 //
 // Log I/O goes out only as Log* IOCalls. Catch-up reads the log, applies

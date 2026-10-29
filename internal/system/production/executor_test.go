@@ -9,7 +9,7 @@ import (
 	"manifester/internal/core"
 	"manifester/internal/system"
 	"manifester/internal/system/s3store"
-	"manifester/internal/verify/veritas/vsys"
+	"manifester/internal/verify/speccheck/specsystem"
 )
 
 type slowObjs struct {
@@ -44,7 +44,7 @@ func wait(t *testing.T, in *system.Inbox) core.EventData {
 
 func TestExecutorCompletesOnceAndNeverBlocks(t *testing.T) {
 	in := system.NewInbox(8)
-	objs := slowObjs{ObjectStore: vsys.NewObjectStore(), block: make(chan struct{})}
+	objs := slowObjs{ObjectStore: specsystem.NewObjectStore(), block: make(chan struct{})}
 	cls := Classifier{Objects: MemoryErrorClassifier{}, CP: MemoryErrorClassifier{}}
 	e := NewExecutor(t.Context(), ExecConfig{ObjTimeout: 50 * time.Millisecond}, objs, nil, nilConns{}, cls, in)
 
@@ -82,7 +82,7 @@ func TestExecutorCompletesOnceAndNeverBlocks(t *testing.T) {
 
 func TestExecutorDropsAfterClose(t *testing.T) {
 	in := system.NewInbox(8)
-	e := NewExecutor(t.Context(), ExecConfig{}, vsys.NewObjectStore(), nil, nilConns{},
+	e := NewExecutor(t.Context(), ExecConfig{}, specsystem.NewObjectStore(), nil, nilConns{},
 		Classifier{Objects: MemoryErrorClassifier{}}, in)
 	in.Close()
 	e.Execute(core.ObjectList{Req: 1})

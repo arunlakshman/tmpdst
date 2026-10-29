@@ -41,7 +41,7 @@ func (a *StateUpdater) Window() int {
 
 // StateHash is a digest of the materialised state (topics, ends, runs), not of
 // the idempotency window: two appliers that applied the same commands in the
-// same order agree, whatever they trimmed. It is not veritas's StateHash.
+// same order agree, whatever they trimmed. It is not speccheck's StateHash.
 func (a *StateUpdater) StateHash() uint64 {
 	h := fnv.New64a()
 	_ = a.kv.View(func(tx Transaction) {

@@ -1,6 +1,6 @@
 # Dependency audit records
 
-Every third-party module that the deterministic packages (`internal/core/`, `internal/verify/sim/`)
+Every third-party module that the deterministic packages (`internal/core/`, `internal/verify/simulator/`)
 depend on needs a reviewed record here, at exactly
 `docs/dep-audits/<module path>@<version>.md`. `ops/scripts/ci-determinism.sh` fails
 CI when one is missing, so a version bump forces a re-audit.

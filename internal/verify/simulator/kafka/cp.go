@@ -32,8 +32,8 @@ func cpFactory(sc simulator.SeedConfig, opts Opts) core.MachineFactory {
 			InjectedBug:    lp.Bug,
 			WindowSlots:    int64(lp.WindowSlots),
 			TrimStride:     int64(lp.TrimStride),
-			StallProb:      0, // TODO: re-enable with coordinated dual-replica faults
-			CrashProb:      0,
+			StallProb:      lp.StallProb,
+			CrashProb:      lp.CrashProb,
 			StallDur:       lp.StallDur,
 			DownDur:        lp.DownDur,
 		}

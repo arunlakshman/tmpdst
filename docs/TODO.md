@@ -66,6 +66,35 @@ Bringing back idempotent producers (InitProducerId, producer epochs and sequence
 
 **Done when:** a 64-consumer stage at the produce rate runs without Lookup or GET storms, with measured GET/s, Lookup/s and cost per GiB reported in the summary.
 
+## Consumer groups and committed offsets (not scheduled)
+
+**Why:** the broker advertises no group APIs, so any group-based client fails at FindCoordinator (`docs/read-consumer-gaps-for-kafka-clients.md`). This is the largest adoption blocker. It comes after the consumer read path above.
+
+**Plan:**
+- Group state lives in the CP applier. Only two kinds of change are log commands:
+  - Membership changes: Join, Leave, Sync (the leader's assignment) and the new generation.
+  - Offset commits.
+- Heartbeats stay in memory on the active CP. They are never written to the log.
+  - Reason: at 64 consumers and a 3 s heartbeat that is about 21 writes/s. The CP commits only 20 to 32 slots/s today, so this would about double the load. The hot key ceiling is about 200 entries/s (X1).
+- Session expiry needs a deterministic time source. Log entry timestamps are advisory today (decision 53), so the CP must take time from its own clock and write the result (a forced rebalance) as a log command.
+- A member whose heartbeat stops is removed by a log command, and the group rebalances. This is the forced rebalance on member failure.
+- After CP failover the new active CP has no heartbeat memory. Give every member a grace period before it can expire, so a failover does not cause a rebalance of every group.
+- Committed offsets must not live in a topic that needs the read path.
+- Include: FindCoordinator, JoinGroup, SyncGroup, Heartbeat, LeaveGroup, OffsetCommit, OffsetFetch, CreateTopics, DescribeConfigs.
+
+**Do not copy:** the KIP-848 protocol, transactions, producer ids.
+
+**Contract changes:**
+- `core` CP ops.
+- `veritas` spec for group state.
+- `cpengine`.
+- Simulator coverage, including failover during a rebalance.
+
+**Done when:**
+- A franz-go group consumer and `kafka-console-consumer --group` consume with committed offsets.
+- A killed member is removed and its partitions move to the others.
+- A CP failover does not rebalance healthy groups.
+
 ## Per-broker partition ownership: declined
 
 The audit (item 1) showed that at 288 partitions every segment overlaps every other, so the (since removed) single sequencer could not pipeline and its bound is about transactions/s x ~3 segments per transaction. Giving each broker its own partition group would raise the modelled ceiling to 140-191 commits/s, but it breaks the leaderless Metadata design (decision 29). **Declined by the product owner**: brokers stay interchangeable. Revisit only if measured commit rate on real DynamoDB is the limiting factor.

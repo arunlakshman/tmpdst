@@ -128,7 +128,7 @@ All sizes are non-test lines. "Edge" means not deterministic (goroutines, networ
 |---------|------:|-------|--------------|
 | `statemachine` | ~1,700 | pure brain | The `Machine`: catch-up, commit queue, roles, checkpoints, fresh reads |
 | `stateupdater` | ~1,260 | pure fold | Apply entries into an ordered KV; answer Lookup/Describe; snapshot/restore |
-| `stateupdater/pebblestore` | 143 | KV driver | Pebble implementation of the KV seam (**not wired in yet**, see section 12) |
+| `stateupdater/pebblestore` | 143 | KV driver | Pebble implementation of the KV seam. `manicp` passes it to the Machine through `Config.OpenStore` (fixed in `56417bd`, see section 12) |
 | `executor` | ~660 | edge | Run `Log*` and `Object*` actions: `DynamoLog`, `MemoryLog`, object store, error classify |
 | `runloop` | ~370 | edge | The one goroutine that calls `Step`, runs timers, dispatches actions |
 | `server` | ~470 | edge | gRPC `Node`: turns RPCs into `Offer` calls and waits for answers |
@@ -922,9 +922,11 @@ client believes it; the broker (page 01, station 9) retries the same key with ba
 flags -> statemachine.Config {
             CatchUpEvery: 5ms,   K: 4 (-log-k),   Rank, Heartbeat (1s), TakeoverAfter (5s),
             HoleAfter (250ms),   Writer: hostname (-node-name),
-            CkptEvery (5m),      CkptMinSlots (1000),   KeepSlots: window-slots/8 }
--store mem        -> MemoryLog + MemoryObjects
+            CkptEvery (5m),      CkptMinSlots (1000),   KeepSlots: window-slots/8,
+            WindowSlots: window-slots, TrimStride: 1024 }          (see machineConfig in main.go)
+-store mem        -> MemoryLog + MemoryObjects            (fold in memory)
 -store dynamolog  -> DynamoLog (+ optional S3 checkpoints via -ckpt-bucket)
+                     + Pebble state in -pebble-dir        (Config.OpenStore, rebuilt at every start)
 server.New(...).Start(ctx)  -> gRPC server + health + Prometheus (/metrics) + run manifest
 ```
 
@@ -1055,10 +1057,10 @@ re-checked each with `grep`. Please verify them yourself before acting.
 
 **Behaviour findings (1 to 4)**
 
-1. **Idempotency window never trims in production.**
-   `manicp` never sets `WindowSlots`, so `afterApply` never trims the `K` and `S` records.
-   Memory grows with every committed segment, and the "window" of decision 48 is effectively forever.
-   The simulator sets `WindowSlots`, so it cannot see this.
+1. **Idempotency window never trims in production. FIXED (commit `56417bd`).**
+   `manicp` never set `WindowSlots`, so `afterApply` never trimmed the `K` and `S` records.
+   Memory grew with every committed segment, and the "window" of decision 48 was effectively forever.
+   `manicp` now sets `WindowSlots` from `-window-slots` and `TrimStride` to 1024; a test pins it.
 2. **Production reads are not "fresh".**
    The fresh-tail rule (commit `226ea69`) lives in `queueRead` / `serveReads`, reached only from the simulator path.
    `server.Node.Lookup` and `DescribeTopics` read the fold directly after checking `Ready()`.
@@ -1067,10 +1069,10 @@ re-checked each with `grep`. Please verify them yourself before acting.
    `isDeleted` needs `ErrConflict` + `Taken` + empty `Existing`; only the simulator's `fakelogstore` returns that.
    The real executor returns `OK` + `Taken` + `Existing=[0xFE]` (Dynamo) or `nil` (MemoryLog), so `hitTrimmed` never fires from an append.
    A hole-fill onto a tombstone ends in `ErrCorrupt`, then `trip` and a restart: safe, but not the path the simulator tests.
-4. **Pebble is still not wired in.**
-   `statemachine.New` builds `stateupdater.NewMem()`; `pebblestore` is used only by tests and benchmarks.
-   The `-pebble-dir` flag is documented as unused.
-   The `MemoryKeyValueStore` comment still calls Pebble "the chosen production store" with the old name `applier/pebblekv`.
+4. **Pebble was not wired in. FIXED (commit `56417bd`).**
+   The gRPC cutover (`1c3c11b`) had dropped Pebble: the Machine built `stateupdater.NewMem()` and `-pebble-dir` was unused.
+   New `Config.OpenStore` gives the fold its store; `manicp -store dynamolog` opens an empty Pebble store at start and after every restore.
+   The simulator keeps the in-memory store (`OpenStore` is nil), so its trace hashes did not change.
 
 **Smaller points (5 to 9)**
 
@@ -1097,23 +1099,38 @@ re-checked each with `grep`. Please verify them yourself before acting.
 
 Details for each follow.
 
-### 12.1 Pebble is still not plugged in
+### 12.1 Pebble was not plugged in (FIXED in `56417bd`)
 
-As in page 01, section 4. `statemachine.New` builds `stateupdater.NewMem()`. `manicp` has a
-flag `-pebble-dir` whose help text says "unused (machine fold is in-memory); kept for flag
-compatibility". `pebblestore` is used only by tests and benchmarks. The comment above
-`MemoryKeyValueStore` still says "the chosen production store is Pebble (see
-applier/pebblekv)", which uses old names.
+Page 01, section 4, saw this too. Before the fix, `statemachine.New` always built
+`stateupdater.NewMem()`, and the `-pebble-dir` help text said "unused (machine fold is
+in-memory); kept for flag compatibility". History: `git log -S` shows the cutover commit
+`1c3c11b` (2026-10-27) removed the old Pebble code; before it, `manicp -store dynamolog`
+opened Pebble.
 
-### 12.2 `WindowSlots` is never set in `manicp`, so the idempotency window is never trimmed
+How it works now:
+- `statemachine.Config.OpenStore func() (stateupdater.KeyValueStore, error)`. Nil means
+  memory (simulator and tests). The Machine calls it in `New` and again in
+  `afterCrashRestart`, after it has closed the old store. If the first open fails,
+  `NodeStarted` answers `StopForRestart`; if a reopen fails, the node trips the same way.
+- `cmd/manicp/state.go` (`pebbleState`) wipes the directory (only if it holds a Pebble
+  database or nothing: any other content is refused) and opens an empty Pebble store each
+  time. Pebble state is never trusted after a restart; it is rebuilt from the checkpoint
+  and the log. With no `-pebble-dir`, a temporary directory is made and removed at shutdown.
+- The `statemachine` import-boundary test still passes: the Machine never imports Pebble.
+
+### 12.2 `WindowSlots` was never set in `manicp` (FIXED in `56417bd`)
 
 `afterApply` trims `K`/`S` records only if `cfg.WindowSlots > 0`. The simulator sets it
-(`kafka/cp.go`). But `cmd/manicp/main.go` builds the `Config` without `WindowSlots`; the
-flag `-window-slots` only feeds `KeepSlots = windowSlots/8` (log trim). If I read it right,
-in production the fold keeps every `K` and `S` record forever (until a process restart
-rebuilds from a checkpoint, and the checkpoint contains them too). Effects: memory grows
-per committed segment, and the "window" in decision 48 is in practice "forever". The
-simulator would not see this, because it runs with the window on. *Worth checking first.*
+(`kafka/cp.go`), but `cmd/manicp/main.go` built the `Config` without it; the flag
+`-window-slots` only fed `KeepSlots = windowSlots/8` (log trim). So in production the fold
+kept every `K` and `S` record forever (a restart did not help, because the checkpoint
+contains them). The simulator could not see this, because it runs with the window on.
+
+Now `machineConfig(f)` in `cmd/manicp/main.go` sets `WindowSlots: -window-slots` (131072),
+`TrimStride: 1024` and `KeepSlots: -window-slots/8`. The window and the stride are cluster
+constants: every node must use the same values, because the cut is a function of the slot
+number. At the 200 slots/s ceiling, 131072 slots is 655 s, which is at least twice the
+commit deadline plus the checkpoint period.
 
 ### 12.3 Production reads are not "fresh"
 
@@ -1226,7 +1243,8 @@ real and not the standby's own network problem. (10) Broker key reuse, `KnownCom
 `retargetCommit`, the `K` record in `commitTransaction`. (11) Go map order is random; the
 simulator needs the same run for the same seed. (12) `ErrTimeout` with `MAYBE_APPLIED`; the
 entry may still be in the log and will be folded; the retry with the same key is safe.
-(13) They grow without bound because `WindowSlots` is zero, so `afterApply` never trims.
+(13) Before the fix they grew without bound, because `WindowSlots` was zero and `afterApply`
+never trimmed. Now `manicp` sets it, so they are cut every 1024 slots.
 
 ---
 
@@ -1257,6 +1275,6 @@ entry may still be in the log and will be folded; the retry with the same key is
 
 - 03 Fetch and `Lookup`: how a consumer read turns `FindSegments` into ranged S3 `GET`s
 - 04 The simulator for the CP: `kafka-log`, `fakelogstore`, the bridge, and `CPTruth`
-- 05 Plugging Pebble into the Machine: what the `KeyValueStore` seam already gives you, and
-  what restore and snapshot would cost at real sizes
+- 05 Pebble in the Machine at real sizes: what restore, snapshot and one `Update` per command
+  cost (the Machine does not use `CommitBatch` yet)
 - 06 Consumer groups on the CP (`docs/consumer-groups-design.md`): a new entry kind in the log

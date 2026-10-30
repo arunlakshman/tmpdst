@@ -584,12 +584,15 @@ skips the hole without writing a no-op; the simulator must catch it (section 11)
    caller. The old caller is gone; the answer must reach the live one. To make the walk
    deterministic, flight `ReqID`s are collected from the map and **sorted** before use
    (Go map order is random; the simulator would otherwise get different runs per seed).
-5. If `queue` already has `QueueMax` (4096) items -> `ErrUnavailable`.
-6. Else append to `queue` and call `flushCommits()`.
+5. A command that cannot fit in one log entry even alone (more than `MaxEntryBytes`) -> `ErrTooLarge`,
+   never queued. The server maps it to gRPC `ResourceExhausted` with `outcome = NOT_APPLIED`.
+6. If `queue` already has `QueueMax` (4096) items -> `ErrUnavailable`.
+7. Else append to `queue` and call `flushCommits()`.
 
 **Making a group.** `flushCommits` keeps up to `K` appends in flight (4 in `manicp`).
-`emitCommitGroup` takes up to `MaxCmdsPerSlot` (256) queued commands and builds **one**
-log entry:
+`emitCommitGroup` takes up to `MaxCmdsPerSlot` (256) queued commands, **and stops earlier when
+the entry would pass `MaxEntryBytes`** (default 350 KiB, under DynamoDB's 400 KiB item limit).
+It builds **one** log entry:
 
 ```
 id    = "<writer>/<seq>"                    seq++ each time

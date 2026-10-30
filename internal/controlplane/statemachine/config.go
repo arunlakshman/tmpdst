@@ -31,6 +31,11 @@ type Config struct {
 	// QueueMax caps queued client ops before Offer answers ErrUnavailable.
 	// Zero means 4096.
 	QueueMax int
+	// MaxEntryBytes caps the size of one log entry (envelope, group header and
+	// commands). A group stops growing at this size, and one command that does
+	// not fit alone is refused with ErrTooLarge. Zero means 350 KiB, under the
+	// 400 KiB item limit of DynamoDB. It is not part of StateHash.
+	MaxEntryBytes int
 
 	// Rank is the advisory preference (0 preferred). Used for failback.
 	Rank int
@@ -103,6 +108,13 @@ func (c Config) maxCmds() int {
 		return c.MaxCmdsPerSlot
 	}
 	return 256
+}
+
+func (c Config) maxEntryBytes() int {
+	if c.MaxEntryBytes > 0 {
+		return c.MaxEntryBytes
+	}
+	return 350 << 10
 }
 
 func (c Config) queueMax() int {

@@ -105,7 +105,7 @@ func New(cfg Config) core.MachineFactory {
 
 var _ core.Machine = (*Machine)(nil)
 
-// Fold is the in-memory applier after the applied prefix. Tests compare its
+// Fold is the in-memory state updater after the applied prefix. Tests compare its
 // digest to an independent oracle.
 func (m *Machine) Fold() *stateupdater.StateUpdater { return m.fold }
 
@@ -450,7 +450,7 @@ func (m *Machine) stop() []core.Action {
 }
 
 // StateHash folds every field that influences behaviour, including the applied
-// applier digest (comparable across machines that folded the same prefix).
+// state updater digest (comparable across machines that folded the same prefix).
 func (m *Machine) StateHash() uint64 {
 	h := core.NewHasher()
 	h.Bool(m.started)

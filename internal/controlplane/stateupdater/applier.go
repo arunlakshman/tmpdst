@@ -12,7 +12,7 @@ import (
 // be applied by one goroutine in log order; reads may run concurrently.
 type StateUpdater struct{ kv KeyValueStore }
 
-// New returns an applier over kv (empty, or restored from a checkpoint).
+// New returns a state updater over kv (empty, or restored from a checkpoint).
 func New(kv KeyValueStore) *StateUpdater { return &StateUpdater{kv: kv} }
 
 // Close closes the store.
@@ -24,7 +24,7 @@ func (a *StateUpdater) Close() error { return a.kv.Close() }
 func (a *StateUpdater) Exec(act core.IOCall) core.IOResult {
 	call, ok := act.(core.ControlPlaneCall)
 	if !ok {
-		panic("applier: not a CPCall")
+		panic("stateupdater: not a CPCall")
 	}
 	var d core.ControlPlaneDone
 	var err error
@@ -39,7 +39,7 @@ func (a *StateUpdater) Exec(act core.IOCall) core.IOResult {
 		d.Err = core.ErrInvalid
 	}
 	if err != nil {
-		panic(fmt.Errorf("applier: store failed: %w", err))
+		panic(fmt.Errorf("stateupdater: store failed: %w", err))
 	}
 	d.Req = call.Req
 	return d
@@ -113,7 +113,7 @@ func (a *StateUpdater) CreateTopic(name string, partitions int32) core.ErrCode {
 		return core.ErrInvalid
 	}
 	if err := a.kv.Update(func(tx Transaction) { addPartitions(tx, map[string]int32{}, name, partitions) }); err != nil {
-		panic(fmt.Errorf("applier: store failed: %w", err))
+		panic(fmt.Errorf("stateupdater: store failed: %w", err))
 	}
 	return core.OK
 }
@@ -123,7 +123,7 @@ func (a *StateUpdater) End(tp core.TopicPartition) core.Offset {
 	var end core.Offset
 	err := a.kv.View(func(tx Transaction) { end = core.Offset(readVarint(tx.Get(endKey(tp)))) })
 	if err != nil {
-		panic(fmt.Errorf("applier: store failed: %w", err))
+		panic(fmt.Errorf("stateupdater: store failed: %w", err))
 	}
 	return end
 }
@@ -164,7 +164,7 @@ func (a *StateUpdater) commitWithBases(slot int64, op core.CommitSegment, bases 
 		d = storeCommit(tx, slot, op, dig, assignAt(tx, op.Batches, bases))
 	})
 	if err != nil {
-		panic(fmt.Errorf("applier: store failed: %w", err))
+		panic(fmt.Errorf("stateupdater: store failed: %w", err))
 	}
 	return d
 }
@@ -174,13 +174,13 @@ func (a *StateUpdater) commitWithBases(slot int64, op core.CommitSegment, bases 
 func replay(rec []byte, dig [checksumLength]byte, op core.CommitSegment) core.ControlPlaneDone {
 	was, bases, err := parseDuplicateCheck(rec)
 	if err != nil {
-		panic(fmt.Errorf("applier: key %q: %w", op.SegmentKey, err))
+		panic(fmt.Errorf("stateupdater: key %q: %w", op.SegmentKey, err))
 	}
 	if was != dig {
 		return core.ControlPlaneDone{Err: core.ErrConflict}
 	}
 	if len(bases) != len(op.Batches) {
-		panic(fmt.Errorf("applier: key %q: %w", op.SegmentKey, errCorrupt))
+		panic(fmt.Errorf("stateupdater: key %q: %w", op.SegmentKey, errCorrupt))
 	}
 	rs := make([]core.BatchRange, len(op.Batches))
 	for i, b := range op.Batches {
@@ -305,7 +305,7 @@ func lookupTransaction(tx Transaction, op core.FindSegments) core.ControlPlaneDo
 		return true
 	})
 	if bad != nil {
-		panic(fmt.Errorf("applier: %v: %w", op.TP, bad))
+		panic(fmt.Errorf("stateupdater: %v: %w", op.TP, bad))
 	}
 	return core.ControlPlaneDone{Resp: resp}
 }

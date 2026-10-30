@@ -31,7 +31,7 @@ type Entry struct {
 }
 
 // ErrCorrupt means the bytes are not a valid Entry.
-var ErrCorrupt = errors.New("applier: corrupt entry")
+var ErrCorrupt = errors.New("stateupdater: corrupt entry")
 
 type entryEncoder struct {
 	buf []byte
@@ -182,7 +182,7 @@ func (d *entryDecoder) commit() core.CommitSegment {
 	return c
 }
 
-// NewMem returns an applier over an in-memory KV. No Pebble. Suitable for the
+// NewMem returns a state updater over an in-memory KV. No Pebble. Suitable for the
 // DSM Step fold and for tests that need the pure command fold.
 func NewMem() *StateUpdater { return New(NewMemoryKeyValueStore()) }
 
@@ -200,7 +200,7 @@ func (a *StateUpdater) Apply(slot int64, e Entry) core.ControlPlaneDone {
 		}
 		d, err := a.Commit(slot, e.Commit)
 		if err != nil {
-			panic(fmt.Errorf("applier: store failed: %w", err))
+			panic(fmt.Errorf("stateupdater: store failed: %w", err))
 		}
 		d.Req = core.RequestID(slot)
 		return d

@@ -335,7 +335,7 @@ func takeUvarint(b []byte) (uint64, []byte, bool) {
 func (m *Machine) applySlot(slot core.LogPosition, data []byte) error {
 	rank, writer, payload, ok := unwrap(data)
 	if !ok {
-		return fmt.Errorf("machine: truncated log envelope at slot %d", slot)
+		return fmt.Errorf("statemachine: truncated log envelope at slot %d", slot)
 	}
 	enveloped := len(data) > 0 && data[0] == envelopeMarker
 	m.observeWriter(slot, rank, writer, enveloped)

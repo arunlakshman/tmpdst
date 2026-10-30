@@ -13,7 +13,7 @@ import (
 func ReplayPosition(fold *stateupdater.StateUpdater, slot core.LogPosition, data []byte) error {
 	_, _, payload, ok := unwrap(data)
 	if !ok {
-		return fmt.Errorf("machine: truncated log envelope at slot %d", slot)
+		return fmt.Errorf("statemachine: truncated log envelope at slot %d", slot)
 	}
 	if _, cmds, ok := decodeGroup(payload); ok {
 		for _, c := range cmds {

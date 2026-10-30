@@ -26,7 +26,7 @@ const snapshotMarker = "APLR1"
 // restoreChunk is how many bytes of entries one Restore transaction holds.
 const restoreChunk = 8 << 20
 
-var errSnapshot = errors.New("applier: bad checkpoint")
+var errSnapshot = errors.New("stateupdater: bad checkpoint")
 
 // CheckSnapshot reports whether data is a whole checkpoint with a good CRC.
 // Call it before Restore: Restore writes into the store as it reads.

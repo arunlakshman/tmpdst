@@ -30,5 +30,5 @@
 // that handle it.
 //
 // NewMem, Encode/Decode, and Apply/ApplyBytes expose the pure command fold for
-// controlplane/machine Step without Pebble.
+// controlplane/statemachine Step without Pebble.
 package stateupdater

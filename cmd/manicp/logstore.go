@@ -47,7 +47,7 @@ func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
 	fs.DurationVar(&f.startTimeout, "start-timeout", 10*time.Minute, "-store dynamolog: startup budget")
 	fs.DurationVar(&f.heartbeat, "heartbeat", time.Second, "-store dynamolog: idle heartbeat")
 	fs.IntVar(&f.k, "log-k", 4, "-store dynamolog: commit LogAppends in flight")
-	fs.Float64Var(&f.slotRate, "slot-rate", 200, "-store dynamolog: advisory slot rate (unused by machine)")
+	fs.Float64Var(&f.slotRate, "slot-rate", 200, "-store dynamolog: advisory slot rate (unused by the state machine)")
 	fs.DurationVar(&f.holeAfter, "hole-after", 250*time.Millisecond, "-store dynamolog: hole-fill delay")
 	fs.DurationVar(&f.ckptEvery, "ckpt-every", 5*time.Minute, "-store dynamolog: checkpoint period")
 	fs.Int64Var(&f.ckptMinSlots, "ckpt-min-slots", 1000, "-store dynamolog: min slots between checkpoints")

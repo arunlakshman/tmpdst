@@ -57,7 +57,7 @@ type Dependencies struct {
 func Run(ctx context.Context, b Dependencies, exec Executor, f core.MachineFactory, self core.NodeInstance) error {
 	in := b.Inbox
 	if in == nil {
-		return errors.New("controlplane/run: Bundle.Inbox is nil")
+		return errors.New("controlplane/runloop: Bundle.Inbox is nil")
 	}
 	defer in.Close()
 	m := f(b.Env, self)
@@ -189,7 +189,7 @@ func (r *eventLoop) dispatch(acts []core.Action) (bool, error) {
 			return true, nil
 		default:
 			r.after()
-			return true, fmt.Errorf("controlplane/run: unknown action %T", a)
+			return true, fmt.Errorf("controlplane/runloop: unknown action %T", a)
 		}
 	}
 	r.after()

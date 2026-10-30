@@ -8,7 +8,7 @@ import (
 
 // MemoryKeyValueStore is an in-memory KV: a sorted slice copied on every write transaction.
 // It is a test fake for small states. The chosen production store is Pebble
-// (see applier/pebblekv), but the control-plane machine uses MemoryKeyValueStore today.
+// (see stateupdater/pebblestore), but the control-plane machine uses MemoryKeyValueStore today.
 type MemoryKeyValueStore struct {
 	mu sync.RWMutex
 	es []memoryEntry

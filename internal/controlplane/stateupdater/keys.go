@@ -19,7 +19,7 @@ const (
 	runFormat      = 1
 )
 
-var errCorrupt = errors.New("applier: corrupt record")
+var errCorrupt = errors.New("stateupdater: corrupt record")
 
 func topicKey(name string) []byte { return append([]byte{prefixTopic}, name...) }
 

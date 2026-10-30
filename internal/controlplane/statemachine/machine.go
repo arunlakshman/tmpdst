@@ -18,6 +18,8 @@ type Machine struct {
 	self core.NodeInstance
 	cfg  Config
 
+	openErr error // the first store could not open; NodeStarted stops the machine
+
 	started  bool
 	stopping bool
 	exited   bool
@@ -90,12 +92,19 @@ const (
 	pendingTrim
 )
 
-// New returns the core.MachineFactory of the control-plane machine.
+// New returns the core.MachineFactory of the control-plane machine. A factory
+// cannot return an error, so a store that cannot open (Config.OpenStore) is
+// remembered and the machine stops with StopForRestart on NodeStarted: the
+// process cannot serve without its state.
 func New(cfg Config) core.MachineFactory {
 	return func(env core.Environment, self core.NodeInstance) core.Machine {
+		fold, err := cfg.openFold()
+		if err != nil {
+			fold = stateupdater.NewMem() // placeholder; NodeStarted stops the machine
+		}
 		return &Machine{
-			env: env, self: self, cfg: cfg,
-			fold:    stateupdater.NewMem(),
+			env: env, self: self, cfg: cfg, openErr: err,
+			fold:    fold,
 			buf:     map[core.LogPosition][]byte{},
 			flights: map[core.RequestID]*inFlightAppend{},
 			waiters: map[string][]waitingCommand{},
@@ -165,6 +174,9 @@ func (m *Machine) Step(ev core.Event) []core.Action {
 
 func (m *Machine) onStarted() []core.Action {
 	m.started = true
+	if m.openErr != nil {
+		return m.trip(m.openErr)
+	}
 	if m.ckptEnabled() {
 		m.booting = true
 		m.ready = false

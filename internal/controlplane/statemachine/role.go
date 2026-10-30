@@ -265,7 +265,13 @@ func (m *Machine) afterCrashRestart() []core.Action {
 	// An old catch-up timer must not start a tail check while the restore waits:
 	// it would make the node Ready at slot 0 over a trimmed log.
 	m.timerGen++
-	m.fold = stateupdater.NewMem()
+	// Close the old store first: a database may need its directory back.
+	_ = m.fold.Close() // the old state is dropped whether or not close succeeds
+	fold, err := m.cfg.openFold()
+	if err != nil {
+		return m.trip(err)
+	}
+	m.fold = fold
 	m.reseedTopics()
 	m.applied, m.high, m.goalTail = 0, 0, 0
 	m.seq = 0

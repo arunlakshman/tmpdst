@@ -22,6 +22,8 @@ func toRPCError(code core.ErrCode, outcome core.Outcome) error {
 		st = codes.AlreadyExists
 	case core.ErrTimeout:
 		st = codes.DeadlineExceeded
+	case core.ErrTooLarge:
+		st = codes.ResourceExhausted
 	case core.OK:
 		return nil
 	}

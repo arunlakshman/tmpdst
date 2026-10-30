@@ -87,7 +87,7 @@ func (l *DynamoLog) Append(ctx context.Context, slot core.LogPosition, data []by
 	}
 	ents, err := l.Read(ctx, slot, 1)
 	if err != nil || len(ents) == 0 || ents[0].Slot != slot {
-		return nil, false, fmt.Errorf("exec: slot %d taken but unreadable: %w", slot, err)
+		return nil, false, fmt.Errorf("executor: slot %d taken but unreadable: %w", slot, err)
 	}
 	return ents[0].Data, true, nil
 }

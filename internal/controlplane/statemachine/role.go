@@ -182,11 +182,12 @@ func (m *Machine) softCrash() []core.Action {
 	m.ready = false
 	m.booting = true
 	m.crashed = true
+	m.timerGen++ // no catch-up while down
 	m.downUntil = m.now + core.NodeTime(betweenDur(m.env, m.cfg.DownDur))
 	m.answers = nil
 	m.clearLocal()
 	// Refuse client work until afterCrashRestart restores fold + catch-up.
-	return nil
+	return m.refuseReads()
 }
 
 // isDeleted reports a LogAppend into a trimmed slot (tombstone): Conflict, Taken,
@@ -207,7 +208,8 @@ func (m *Machine) hitTrimmed() []core.Action {
 	m.booting = true
 	m.needsCkpt = true
 	m.clearLocal()
-	return m.afterCrashRestart()
+	acts := m.refuseReads()
+	return append(acts, m.afterCrashRestart()...)
 }
 
 func (m *Machine) clearLocal() {
@@ -260,7 +262,16 @@ func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {
 }
 
 func (m *Machine) afterCrashRestart() []core.Action {
-	m.fold = stateupdater.NewMem()
+	// An old catch-up timer must not start a tail check while the restore waits:
+	// it would make the node Ready at slot 0 over a trimmed log.
+	m.timerGen++
+	// Close the old store first: a database may need its directory back.
+	_ = m.fold.Close() // the old state is dropped whether or not close succeeds
+	fold, err := m.cfg.openFold()
+	if err != nil {
+		return m.trip(err)
+	}
+	m.fold = fold
 	m.reseedTopics()
 	m.applied, m.high, m.goalTail = 0, 0, 0
 	m.seq = 0

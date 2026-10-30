@@ -1,6 +1,6 @@
 // Package pebblestore is the production stateupdater.KeyValueStore over Pebble
 // (github.com/cockroachdb/pebble). It is the only package that imports the
-// store. Commits do not fsync: the applier's state is rebuilt from the log and a
+// store. Commits do not fsync: the state updater's state is rebuilt from the log and a
 // checkpoint into a fresh directory, never trusted after a crash.
 package pebblestore
 
@@ -35,7 +35,7 @@ type silentLogger struct{}
 func (silentLogger) Infof(string, ...any)  {}
 func (silentLogger) Errorf(string, ...any) {}
 func (silentLogger) Fatalf(f string, a ...any) {
-	panic(fmt.Sprintf("pebblekv: "+f, a...))
+	panic(fmt.Sprintf("pebblestore: "+f, a...))
 }
 
 // Open opens (creating if needed) the database in dir.
@@ -50,7 +50,7 @@ func Open(dir string, o Options) (*DB, error) {
 	defer cache.Unref()
 	db, err := pebble.Open(dir, &pebble.Options{Cache: cache, MemTableSize: o.MemTableBytes, Logger: silentLogger{}})
 	if err != nil {
-		return nil, fmt.Errorf("pebblekv: %w", err)
+		return nil, fmt.Errorf("pebblestore: %w", err)
 	}
 	return &DB{db: db}, nil
 }

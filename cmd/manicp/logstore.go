@@ -26,12 +26,9 @@ type logFlags struct {
 	rank                     int
 	takeoverAfter, holeAfter time.Duration
 	k                        int
-	slotRate                 float64
 	ckptEvery, logTTL        time.Duration
-	finalCkpt                bool
 	windowSlots              int64
 	pebbleDir                string
-	trimDelete               bool
 	ckptMinSlots             int64
 }
 
@@ -47,15 +44,12 @@ func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
 	fs.DurationVar(&f.startTimeout, "start-timeout", 10*time.Minute, "-store dynamolog: startup budget")
 	fs.DurationVar(&f.heartbeat, "heartbeat", time.Second, "-store dynamolog: idle heartbeat")
 	fs.IntVar(&f.k, "log-k", 4, "-store dynamolog: commit LogAppends in flight")
-	fs.Float64Var(&f.slotRate, "slot-rate", 200, "-store dynamolog: advisory slot rate (unused by machine)")
 	fs.DurationVar(&f.holeAfter, "hole-after", 250*time.Millisecond, "-store dynamolog: hole-fill delay")
 	fs.DurationVar(&f.ckptEvery, "ckpt-every", 5*time.Minute, "-store dynamolog: checkpoint period")
 	fs.Int64Var(&f.ckptMinSlots, "ckpt-min-slots", 1000, "-store dynamolog: min slots between checkpoints")
-	fs.BoolVar(&f.finalCkpt, "final-checkpoint", true, "-store dynamolog: checkpoint on graceful shutdown (best effort)")
-	fs.Int64Var(&f.windowSlots, "window-slots", 131072, "-store dynamolog: idempotency window hint")
+	fs.Int64Var(&f.windowSlots, "window-slots", 131072, "-store dynamolog: idempotency window in log slots; every node must use the same value")
 	fs.DurationVar(&f.logTTL, "log-ttl", 7*24*time.Hour, "-store dynamolog: ttl attribute on log slots")
-	fs.BoolVar(&f.trimDelete, "trim-delete", true, "-store dynamolog: tombstone trimmed slots")
-	fs.StringVar(&f.pebbleDir, "pebble-dir", "", "-store dynamolog: unused (machine fold is in-memory); kept for flag compatibility")
+	fs.StringVar(&f.pebbleDir, "pebble-dir", "", "-store dynamolog: directory of the Pebble state. It is rebuilt from the checkpoint and the log at every start, so it is wiped (only if it holds a Pebble database). Empty: a temporary directory")
 }
 
 type logDB interface {

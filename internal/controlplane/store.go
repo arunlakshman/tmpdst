@@ -3,7 +3,6 @@ package controlplane
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"manifester/internal/core"
 )
@@ -21,15 +20,4 @@ type Store interface {
 	Lookup(ctx context.Context, op core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error)
 	DescribeTopics(ctx context.Context, op core.DescribeTopics) (core.DescribeTopicsResp, error)
 	CreateTopic(ctx context.Context, name string, partitions int32) (core.ErrCode, error)
-}
-
-// ParseErrCode is the inverse of core.ErrCode.String. The retired code (the
-// old ErrFenced slot, decision 44) has no spelling and is skipped.
-func ParseErrCode(s string) (core.ErrCode, bool) {
-	for c := core.OK; c <= core.ErrIO; c++ {
-		if c.String() == s && !strings.HasPrefix(s, "ErrCode(") {
-			return c, true
-		}
-	}
-	return 0, false
 }

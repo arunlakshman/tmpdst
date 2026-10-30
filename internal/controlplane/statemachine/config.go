@@ -1,6 +1,9 @@
 package statemachine
 
-import "manifester/internal/core"
+import (
+	"manifester/internal/controlplane/stateupdater"
+	"manifester/internal/core"
+)
 
 // Config tunes the control-plane machine. Zero value keeps catch-up and the
 // commit queue off (CP-DSM-2 scaffold behaviour). CatchUpEvery > 0 arms
@@ -28,6 +31,11 @@ type Config struct {
 	// QueueMax caps queued client ops before Offer answers ErrUnavailable.
 	// Zero means 4096.
 	QueueMax int
+	// MaxEntryBytes caps the size of one log entry (envelope, group header and
+	// commands). A group stops growing at this size, and one command that does
+	// not fit alone is refused with ErrTooLarge. Zero means 350 KiB, under the
+	// 400 KiB item limit of DynamoDB. It is not part of StateHash.
+	MaxEntryBytes int
 
 	// Rank is the advisory preference (0 preferred). Used for failback.
 	Rank int
@@ -50,6 +58,12 @@ type Config struct {
 	// KeepSlots is how many log slots to keep behind a published checkpoint
 	// before LogTrim. Zero skips trim.
 	KeepSlots int64
+
+	// OpenStore makes the empty key-value store that the fold keeps its state
+	// in. It runs when the machine is built and again after a crash restart or
+	// a trimmed-slot restore, once the old store has been closed. Nil means an
+	// in-memory store. The machine itself never imports a database.
+	OpenStore func() (stateupdater.KeyValueStore, error)
 
 	// InjectedBug selects a sim mutant (fakelogservice.Bug* constants). Zero is none.
 	InjectedBug uint8
@@ -96,9 +110,28 @@ func (c Config) maxCmds() int {
 	return 256
 }
 
+func (c Config) maxEntryBytes() int {
+	if c.MaxEntryBytes > 0 {
+		return c.MaxEntryBytes
+	}
+	return 350 << 10
+}
+
 func (c Config) queueMax() int {
 	if c.QueueMax > 0 {
 		return c.QueueMax
 	}
 	return 4096
+}
+
+// openFold builds a fold over a new empty store: Config.OpenStore, else memory.
+func (c Config) openFold() (*stateupdater.StateUpdater, error) {
+	if c.OpenStore == nil {
+		return stateupdater.NewMem(), nil
+	}
+	kv, err := c.OpenStore()
+	if err != nil {
+		return nil, err
+	}
+	return stateupdater.New(kv), nil
 }

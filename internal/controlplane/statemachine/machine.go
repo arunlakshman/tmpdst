@@ -18,6 +18,8 @@ type Machine struct {
 	self core.NodeInstance
 	cfg  Config
 
+	openErr error // the first store could not open; NodeStarted stops the machine
+
 	started  bool
 	stopping bool
 	exited   bool
@@ -65,7 +67,12 @@ type Machine struct {
 	downUntil  core.NodeTime
 	crashed    bool
 	needsCkpt  bool // hit a tomb; must restore before catch-up from zero
+	ckptRetry  bool // the last checkpoint read failed; read again before catch-up
 	seeds      []topicSeed
+
+	readWaiters  []readWaiter // lookups and describes waiting for a fresh tail
+	tailsStarted uint64       // tail checks started so far
+	tailRound    uint64       // round of the tail check in flight
 }
 
 type topicSeed struct {
@@ -85,12 +92,19 @@ const (
 	pendingTrim
 )
 
-// New returns the core.MachineFactory of the control-plane machine.
+// New returns the core.MachineFactory of the control-plane machine. A factory
+// cannot return an error, so a store that cannot open (Config.OpenStore) is
+// remembered and the machine stops with StopForRestart on NodeStarted: the
+// process cannot serve without its state.
 func New(cfg Config) core.MachineFactory {
 	return func(env core.Environment, self core.NodeInstance) core.Machine {
+		fold, err := cfg.openFold()
+		if err != nil {
+			fold = stateupdater.NewMem() // placeholder; NodeStarted stops the machine
+		}
 		return &Machine{
-			env: env, self: self, cfg: cfg,
-			fold:    stateupdater.NewMem(),
+			env: env, self: self, cfg: cfg, openErr: err,
+			fold:    fold,
 			buf:     map[core.LogPosition][]byte{},
 			flights: map[core.RequestID]*inFlightAppend{},
 			waiters: map[string][]waitingCommand{},
@@ -100,7 +114,7 @@ func New(cfg Config) core.MachineFactory {
 
 var _ core.Machine = (*Machine)(nil)
 
-// Fold is the in-memory applier after the applied prefix. Tests compare its
+// Fold is the in-memory state updater after the applied prefix. Tests compare its
 // digest to an independent oracle.
 func (m *Machine) Fold() *stateupdater.StateUpdater { return m.fold }
 
@@ -154,11 +168,15 @@ func (m *Machine) Step(ev core.Event) []core.Action {
 	default:
 		return nil
 	}
+	acts = append(acts, m.serveReads()...)
 	return m.withReplies(acts)
 }
 
 func (m *Machine) onStarted() []core.Action {
 	m.started = true
+	if m.openErr != nil {
+		return m.trip(m.openErr)
+	}
 	if m.ckptEnabled() {
 		m.booting = true
 		m.ready = false
@@ -231,6 +249,7 @@ func (m *Machine) onCheckTailDone(d core.LogGetEndDone) []core.Action {
 	}
 	m.notePullOK()
 	m.goalTail = d.Tail
+	m.noteTail(m.tailRound, d.Tail)
 	return m.progress()
 }
 
@@ -406,6 +425,8 @@ func (m *Machine) emitCheckTail() []core.Action {
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingTail
+	m.tailsStarted++
+	m.tailRound = m.tailsStarted
 	return []core.Action{core.LogGetEnd{Req: m.pending}}
 }
 
@@ -441,7 +462,7 @@ func (m *Machine) stop() []core.Action {
 }
 
 // StateHash folds every field that influences behaviour, including the applied
-// applier digest (comparable across machines that folded the same prefix).
+// state updater digest (comparable across machines that folded the same prefix).
 func (m *Machine) StateHash() uint64 {
 	h := core.NewHasher()
 	h.Bool(m.started)
@@ -463,12 +484,15 @@ func (m *Machine) StateHash() uint64 {
 	h.U64(uint64(m.pendingKind))
 	h.U64(uint64(m.fillSlot))
 	h.Bool(m.holeArmed)
+	h.Bool(m.ckptRetry)
 	h.U64(uint64(m.promoSlot))
 	h.Bool(m.lowerSeen)
 	h.U64(uint64(m.ckptSlot))
 	h.U64(uint64(len(m.queue)))
 	h.U64(uint64(len(m.flights)))
 	h.U64(uint64(len(m.waiters)))
+	h.U64(uint64(len(m.readWaiters)))
+	h.U64(m.tailsStarted)
 	h.U64(uint64(m.cfg.CatchUpEvery))
 	h.U64(uint64(m.cfg.ReadLimit))
 	h.U64(uint64(m.cfg.HoleAfter))

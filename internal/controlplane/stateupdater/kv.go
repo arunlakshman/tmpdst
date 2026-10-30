@@ -2,7 +2,7 @@ package stateupdater
 
 import "bytes"
 
-// KeyValueStore is the embedded ordered key-value store the applier keeps its state in.
+// KeyValueStore is the embedded ordered key-value store the state updater keeps its state in.
 // It is a deliberately small seam: a read transaction, an atomic write
 // transaction, nothing else. Durability is not required (state is rebuilt from
 // the log and a checkpoint), so an implementation may skip fsync.

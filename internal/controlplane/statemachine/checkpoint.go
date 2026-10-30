@@ -3,6 +3,7 @@ package statemachine
 import (
 	"bytes"
 
+	"manifester/internal/controlplane/stateupdater"
 	"manifester/internal/core"
 )
 
@@ -35,7 +36,7 @@ func (m *Machine) onCkptTimer(e core.TimerFired) []core.Action {
 	if e.Gen != m.ckptGen {
 		return nil
 	}
-	if m.needsCkpt {
+	if m.needsCkpt || m.ckptRetry {
 		return m.emitCkptGet()
 	}
 	if m.cfg.CkptEvery <= 0 {
@@ -51,6 +52,12 @@ func (m *Machine) maybeCheckpoint() []core.Action {
 	}
 	slot := m.applied
 	if slot == 0 {
+		return nil
+	}
+	// A node behind the log tail must not write: its snapshot could replace a
+	// newer one from the other node, and the log below that newer one may
+	// already be trimmed, so a restart could never recover.
+	if m.applied < m.goalTail {
 		return nil
 	}
 	minSlots := m.cfg.CkptMinSlots
@@ -84,6 +91,18 @@ func (m *Machine) onObjGetDone(d core.ObjectGetDone) []core.Action {
 		return nil
 	}
 	m.pending, m.pendingKind = 0, pendingNone
+	if d.Err != core.OK && d.Err != core.ErrNotFound {
+		// The read failed, so we do not know whether a checkpoint exists. The log
+		// may be trimmed, so never catch up from slot 0 on a guess: try again.
+		m.ckptRetry = true
+		return m.armCkptRetry()
+	}
+	m.ckptRetry = false
+	if d.Err == core.OK && len(d.Data) > 0 && stateupdater.CheckSnapshot(d.Data) != nil {
+		// A changed byte in the read: the stored object may be fine. Read it again.
+		m.env.Reachable("logcp-sim: checkpoint read had a bad CRC, read again")
+		return m.emitCkptGet()
+	}
 	if d.Err == core.OK && len(d.Data) > 0 {
 		slot, err := m.fold.Restore(bytes.NewReader(d.Data))
 		if err != nil {

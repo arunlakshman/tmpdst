@@ -125,6 +125,8 @@ func serve(ctx context.Context, d deps, f cpFlags, fs *flag.FlagSet, stderr io.W
 			"rank":            f.log.rank,
 			"takeover_after":  f.log.takeoverAfter.String(),
 			"ckpt_bucket":     f.log.ckptBucket,
+			"pebble_dir":      f.log.pebbleDir,
+			"window_slots":    f.log.windowSlots,
 			"dynamo_endpoint": f.endpoint,
 		}),
 		runinfo.WriteOptions{
@@ -143,23 +145,7 @@ func serve(ctx context.Context, d deps, f cpFlags, fs *flag.FlagSet, stderr io.W
 
 func openNode(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.Metrics, log *slog.Logger) (*server.Node, func(), error) {
 	nop := func() {}
-	mcfg := statemachine.Config{
-		// Short catch-up period so Ready (and health Serving) arrives quickly;
-		// subsequent rounds keep the same cadence.
-		CatchUpEvery:  core.Duration(5 * time.Millisecond),
-		K:             f.log.k,
-		Rank:          f.log.rank,
-		Heartbeat:     core.Duration(f.log.heartbeat),
-		TakeoverAfter: core.Duration(f.log.takeoverAfter),
-		HoleAfter:     core.Duration(f.log.holeAfter),
-		Writer:        nodeName(f.log),
-		CkptEvery:     core.Duration(f.log.ckptEvery),
-		CkptMinSlots:  f.log.ckptMinSlots,
-		KeepSlots:     f.log.windowSlots / 8,
-	}
-	if mcfg.K <= 0 {
-		mcfg.K = 4
-	}
+	mcfg := machineConfig(f)
 
 	var logStore executor.Log
 	var objs executor.ObjectStore
@@ -181,6 +167,14 @@ func openNode(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.Met
 			mcfg.CkptEvery = 0
 			mcfg.KeepSlots = 0
 		}
+		state := &pebbleState{flagDir: f.log.pebbleDir}
+		if err := state.start(); err != nil {
+			closeStore()
+			return nil, nop, err
+		}
+		mcfg.OpenStore = state.openStore
+		closeLog := closeStore
+		closeStore = func() { closeLog(); state.close() }
 	default:
 		return nil, nop, errors.New("unknown -store " + f.kind)
 	}
@@ -199,6 +193,35 @@ func openNode(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.Met
 		return nil, nop, err
 	}
 	return n, func() { _ = n.Close(); closeStore() }, nil
+}
+
+// trimStride is how often, in log slots, the idempotency window is cut. Every
+// node must use the same value (and the same -window-slots): the cut is a
+// function of the slot number, so all replicas forget the same keys.
+const trimStride = 1024
+
+// machineConfig turns the flags into the control-plane machine's settings.
+func machineConfig(f cpFlags) statemachine.Config {
+	mcfg := statemachine.Config{
+		// Short catch-up period so Ready (and health Serving) arrives quickly;
+		// subsequent rounds keep the same cadence.
+		CatchUpEvery:  core.Duration(5 * time.Millisecond),
+		K:             f.log.k,
+		Rank:          f.log.rank,
+		Heartbeat:     core.Duration(f.log.heartbeat),
+		TakeoverAfter: core.Duration(f.log.takeoverAfter),
+		HoleAfter:     core.Duration(f.log.holeAfter),
+		Writer:        nodeName(f.log),
+		CkptEvery:     core.Duration(f.log.ckptEvery),
+		CkptMinSlots:  f.log.ckptMinSlots,
+		KeepSlots:     f.log.windowSlots / 8,
+		WindowSlots:   f.log.windowSlots,
+		TrimStride:    trimStride,
+	}
+	if mcfg.K <= 0 {
+		mcfg.K = 4
+	}
+	return mcfg
 }
 
 func newDynamo(ctx context.Context, endpoint, region string, apiOpts []func(*middleware.Stack) error) (*dynamodb.Client, error) {

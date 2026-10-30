@@ -1053,6 +1053,24 @@ DynamoDB** on a seed and check the outcome. Facts to know (`docs/sim-log-engine.
 These are *observations from reading code*, not a bug list from running anything. I
 re-checked each with `grep`. Please verify them yourself before acting.
 
+### Status at a glance
+
+| # | Finding | Status |
+|--:|---------|--------|
+| 1 | Idempotency window never trims in production | **Fixed**, `56417bd` |
+| 2 | Production reads are not "fresh" | Open |
+| 3 | Trimmed-slot signal differs between simulator and production | Open |
+| 4 | Pebble was not wired in | **Fixed**, `56417bd` |
+| 5 | No backoff on append retry | Open |
+| 6 | Corrupt checkpoint can be re-read forever | Open |
+| 7 | `GetStatus.log_tail` is not the tail | Open |
+| 8 | Stale names in comments and strings | **Fixed**, `da09578` |
+| 9 | Misplaced coverage marker in `afterApply` | Open |
+| 10 | Dead HTTP-era metrics code; gRPC calls are not measured | Open (decision needed) |
+
+Also done in `56417bd`: removed the flags nothing read (`-slot-rate`, `-final-checkpoint`,
+`-trim-delete`) and the unused `ParseErrCode`.
+
 ### Summary of all findings
 
 **Behaviour findings (1 to 4)**
@@ -1074,7 +1092,7 @@ re-checked each with `grep`. Please verify them yourself before acting.
    New `Config.OpenStore` gives the fold its store; `manicp -store dynamolog` opens an empty Pebble store at start and after every restore.
    The simulator keeps the in-memory store (`OpenStore` is nil), so its trace hashes did not change.
 
-**Smaller points (5 to 9)**
+**Smaller points (5 to 10)**
 
 5. **No backoff on append retry.**
    `retrySameSlot` re-emits `LogAppend` at once on any non-`Applied` result.
@@ -1096,6 +1114,12 @@ re-checked each with `grep`. Please verify them yourself before acting.
    `afterApply` starts with `Reachable("replayed key answered from the window")`.
    The same text is already in `Offer`'s `KnownCommit` branch, where it belongs.
    Harmless, but it makes that coverage point easier to satisfy than intended.
+
+10. **Dead HTTP-era metrics code; gRPC calls are not measured.**
+    `controlplanemetrics` still holds `Middleware`, `statusWriter`, `countBody` and the per-request `Call` logging, which wrap an HTTP handler.
+    Since the gRPC cutover (`1c3c11b`) nothing calls them (found with `deadcode`, which lists code no binary can reach).
+    So `manicp_handler_seconds`, `manicp_request_body_bytes`, the in-flight gauge and the "cp call" log lines are never recorded.
+    The better fix is a gRPC interceptor, not deleting the code. Decision needed.
 
 Details for each follow.
 
@@ -1131,6 +1155,17 @@ Now `machineConfig(f)` in `cmd/manicp/main.go` sets `WindowSlots: -window-slots`
 constants: every node must use the same values, because the cut is a function of the slot
 number. At the 200 slots/s ceiling, 131072 slots is 655 s, which is at least twice the
 commit deadline plus the checkpoint period.
+
+### How to find dead code yourself
+
+`golangci-lint` only sees one package at a time, so it cannot tell that an exported function
+is never called. `deadcode` can: it starts from the real `main` functions and lists what no
+binary reaches. It lives in the `golang.org/x/tools` module, which the repo already uses.
+Install it outside the repo so `go.mod` is not changed:
+`GOBIN=/some/dir GOFLAGS=-mod=mod go install golang.org/x/tools/cmd/deadcode@v0.52.0`, then
+`deadcode ./cmd/...`. Run it with `-test` to count tests as roots too (then almost nothing
+is dead, so it is less useful). Code that only tests use is not always garbage (for example
+`stateupdater.Store` is a test helper), so read each hit before you delete.
 
 ### 12.3 Production reads are not "fresh"
 
@@ -1199,6 +1234,8 @@ go test ./internal/controlplane/statemachine -run 'TestCheckpointPublishAndTrim|
 go test ./internal/controlplane/statemachine -run 'TestReadWaitsForFreshTail' -v
 go test ./internal/controlplane/server -run 'TestCommitLookupRoundTrip|TestStandbyCommitUnavailable' -v
 go test ./internal/controlplane/statemachine -run 'TestImportBoundary' -v
+go test ./internal/controlplane/statemachine -run 'TestOpenStore' -v      # the Pebble hook (Config.OpenStore)
+go test ./cmd/manicp -run 'TestPebbleState|TestMachineConfig' -v          # Pebble directory and window settings
 ```
 
 ---

@@ -1,11 +1,15 @@
 # Host tools for `make build` / the pre-commit hook.
 # Bootstrap: install https://mise.jdx.dev then run  mise install
-# (installs go, golangci-lint, and buf; postinstall runs make install-hooks).
+# (installs go, golangci-lint, buf, java, and minio; postinstall runs make install-hooks).
+# Java and minio are only for the e2e script (make e2e-kafka-cli): the Kafka CLI
+# needs Java, and minio is the shared S3 store for the 3-broker check.
 
 [tools]
 go = "1.26.10"
 golangci-lint = "2.15.0"
 buf = "1.47.2"
+java = "corretto-21.0.2.13.1"
+minio = "2025.10.15.17.29.55"
 
 [hooks]
 postinstall = "make install-hooks"

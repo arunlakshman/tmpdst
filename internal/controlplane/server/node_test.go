@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 
 	cpv1 "manifester/internal/controlplane/api/v1"
 	"manifester/internal/controlplane/executor"
@@ -19,6 +21,12 @@ import (
 
 func startNode(t *testing.T, cfg statemachine.Config) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
 	t.Helper()
+	return startNodeWithLease(t, cfg, 0)
+}
+
+// startNodeWithLease is startNode with a broker lease TTL. Zero keeps the default.
+func startNodeWithLease(t *testing.T, cfg statemachine.Config, leaseTTL time.Duration) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
+	t.Helper()
 	if cfg.K == 0 {
 		cfg.K = 4
 	}
@@ -26,10 +34,11 @@ func startNode(t *testing.T, cfg statemachine.Config) (cpv1.ControlPlaneClient, 
 		cfg.CatchUpEvery = core.Duration(time.Millisecond)
 	}
 	n := server.New(server.Config{
-		Machine: cfg,
-		Log:     executor.NewMemoryLog(),
-		Objects: executor.NewMemoryObjects(),
-		Self:    core.NodeInstance{Node: "cp-0"},
+		Machine:        cfg,
+		Log:            executor.NewMemoryLog(),
+		Objects:        executor.NewMemoryObjects(),
+		Self:           core.NodeInstance{Node: "cp-0"},
+		BrokerLeaseTTL: leaseTTL,
 	})
 	ctx := t.Context()
 	if err := n.Start(ctx); err != nil {
@@ -151,5 +160,34 @@ func TestStartCancelWhileWaiting(t *testing.T) {
 	if err := n.Start(ctx); err == nil {
 		_ = n.Close()
 		t.Fatal("expected Start to fail when context cancels during wait")
+	}
+}
+
+// TestExclusiveCreateTopicOverGRPC: a create with fail_if_exists on a topic
+// that exists is AlreadyExists with ERR_CODE_TOPIC_EXISTS, and it changes nothing.
+func TestExclusiveCreateTopicOverGRPC(t *testing.T) {
+	cli, _, stop := startNode(t, statemachine.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
+	defer stop()
+	ctx := t.Context()
+	if _, err := cli.CreateTopic(ctx, &cpv1.CreateTopicRequest{Topic: "x", Partitions: 2, FailIfExists: true}); err != nil {
+		t.Fatalf("new topic: %v", err)
+	}
+	_, err := cli.CreateTopic(ctx, &cpv1.CreateTopicRequest{Topic: "x", Partitions: 5, FailIfExists: true})
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.AlreadyExists {
+		t.Fatalf("existing topic: %v, want AlreadyExists", err)
+	}
+	var detail *cpv1.ErrorDetail
+	for _, d := range st.Details() {
+		if e, ok := d.(*cpv1.ErrorDetail); ok {
+			detail = e
+		}
+	}
+	if detail == nil || detail.Code != cpv1.ErrCode_ERR_CODE_TOPIC_EXISTS {
+		t.Fatalf("detail %+v, want ERR_CODE_TOPIC_EXISTS", detail)
+	}
+	d, err := cli.DescribeTopics(ctx, &cpv1.DescribeTopicsRequest{Topics: []string{"x"}})
+	if err != nil || len(d.Topics) != 1 || d.Topics[0].Partitions != 2 {
+		t.Fatalf("topics %+v %v, want x with 2 partitions", d, err)
 	}
 }

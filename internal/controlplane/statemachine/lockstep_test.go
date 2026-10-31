@@ -42,6 +42,12 @@ var lockstepCmds = []stateupdater.Entry{
 			{TP: core.NewTopicPartition("orders", 1), Records: 4, Loc: core.SegmentRef{Key: "o3", Off: 0, Len: 40}},
 		},
 	}},
+	// Exclusive creates go last, so the indexes above stay the same.
+	{ID: "7", Kind: stateupdater.KindCreateTopicExclusive, Topic: "fresh", Parts: 3},  // new: OK
+	{ID: "8", Kind: stateupdater.KindCreateTopicExclusive, Topic: "fresh", Parts: 1},  // exists: ErrTopicExists
+	{ID: "9", Kind: stateupdater.KindCreateTopicExclusive, Topic: "orders", Parts: 5}, // exists: ErrTopicExists
+	{ID: "10", Kind: stateupdater.KindCreateTopic, Topic: "fresh", Parts: 6},          // plain create: OK, grows it
+	{ID: "11", Kind: stateupdater.KindCreateTopicExclusive, Topic: "", Parts: 1},      // invalid name: ErrInvalid
 }
 
 func queryDigest(exec func(core.ControlPlaneOperation) core.ControlPlaneDone) uint64 {
@@ -98,8 +104,9 @@ func TestLockstepMachineVsVeritas(t *testing.T) {
 		switch e.Kind {
 		case stateupdater.KindNoop:
 			orcAnswers = append(orcAnswers, core.ControlPlaneDone{Req: core.RequestID(i), Outcome: core.Applied})
-		case stateupdater.KindCreateTopic:
-			orcAnswers = append(orcAnswers, core.ControlPlaneDone{Req: core.RequestID(i), Err: orc.CreateTopic(e.Topic, e.Parts)})
+		case stateupdater.KindCreateTopic, stateupdater.KindCreateTopicExclusive:
+			exclusive := e.Kind == stateupdater.KindCreateTopicExclusive
+			orcAnswers = append(orcAnswers, core.ControlPlaneDone{Req: core.RequestID(i), Err: orc.CreateTopicIf(e.Topic, e.Parts, exclusive)})
 		case stateupdater.KindCommit:
 			orcAnswers = append(orcAnswers, orc.Exec(core.ControlPlaneCall{Req: core.RequestID(i), Op: e.Commit}).(core.ControlPlaneDone))
 		}

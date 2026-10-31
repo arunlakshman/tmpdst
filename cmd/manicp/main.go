@@ -42,6 +42,7 @@ type cpFlags struct {
 	create                               bool
 	metricsAddr, logLevel, runID         string
 	manifestOut                          string
+	brokerLeaseTTL                       time.Duration
 	log                                  logFlags
 }
 
@@ -59,6 +60,7 @@ func parseFlags(args []string, stderr io.Writer) (cpFlags, *flag.FlagSet, error)
 	fs.StringVar(&f.logLevel, "log-level", "info", "log level: debug, info, warn, error")
 	fs.StringVar(&f.runID, "run-id", "", "run id stamped on every log line and metric (default $MANIFESTER_RUN_ID)")
 	fs.StringVar(&f.manifestOut, "manifest-out", "", "write a JSON run manifest at startup")
+	fs.DurationVar(&f.brokerLeaseTTL, "broker-lease-ttl", 5*time.Second, "a broker is live for this long after its last heartbeat; brokers beat every -lease-interval (default 1s), so keep this 3x that")
 	registerLogFlags(fs, &f.log)
 	err := fs.Parse(args)
 	return f, fs, err
@@ -180,10 +182,11 @@ func openNode(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.Met
 	}
 
 	n := server.New(server.Config{
-		Machine: mcfg,
-		Log:     logStore,
-		Objects: objs,
-		Self:    core.NodeInstance{Node: core.NodeID(nodeName(f.log))},
+		Machine:        mcfg,
+		Log:            logStore,
+		Objects:        objs,
+		Self:           core.NodeInstance{Node: core.NodeID(nodeName(f.log))},
+		BrokerLeaseTTL: f.brokerLeaseTTL,
 	})
 	sctx, cancel := context.WithTimeout(ctx, f.log.startTimeout)
 	err = n.Start(sctx)

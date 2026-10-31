@@ -101,3 +101,33 @@ func TestClassifierRoutes(t *testing.T) {
 		t.Errorf("other: %v", code)
 	}
 }
+
+// slowCP answers after d, or with the call's context error.
+type slowCP struct{ d time.Duration }
+
+func (s slowCP) Call(ctx context.Context, _ core.ControlPlaneOperation) (core.ControlPlaneResponse, error) {
+	select {
+	case <-time.After(s.d):
+		return core.GroupLeaveResp{}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// A control plane call takes its own Timeout when it has one (group joins wait
+// for a rebalance), and the executor's default otherwise.
+func TestControlPlaneCallOwnTimeout(t *testing.T) {
+	in := system.NewInbox(8)
+	cls := Classifier{Objects: MemoryErrorClassifier{}, CP: MemoryErrorClassifier{}}
+	e := NewExecutor(t.Context(), ExecConfig{CPTimeout: 10 * time.Millisecond}, nil, slowCP{d: 60 * time.Millisecond}, nilConns{}, cls, in)
+
+	e.Execute(core.ControlPlaneCall{Req: 1, Op: core.GroupLeave{Group: "g"}}) // default 10 ms: too slow
+	if d := wait(t, in).(core.ControlPlaneDone); d.Req != 1 || d.Err == core.OK {
+		t.Errorf("default deadline: %+v, want a failure", d)
+	}
+
+	e.Execute(core.ControlPlaneCall{Req: 2, Op: core.GroupLeave{Group: "g"}, Timeout: core.Duration(time.Second)})
+	if d := wait(t, in).(core.ControlPlaneDone); d.Req != 2 || d.Err != core.OK {
+		t.Errorf("own deadline: %+v, want OK", d)
+	}
+}

@@ -31,6 +31,18 @@ func ToCoreErr(c cpv1.ErrCode) core.ErrCode {
 		return core.ErrInvalid
 	case cpv1.ErrCode_ERR_CODE_IO:
 		return core.ErrIO
+	case cpv1.ErrCode_ERR_CODE_UNKNOWN_MEMBER:
+		return core.ErrUnknownMember
+	case cpv1.ErrCode_ERR_CODE_ILLEGAL_GENERATION:
+		return core.ErrIllegalGeneration
+	case cpv1.ErrCode_ERR_CODE_UNKNOWN_PARTITION:
+		return core.ErrUnknownPartition
+	case cpv1.ErrCode_ERR_CODE_REBALANCE_IN_PROGRESS:
+		return core.ErrRebalanceInProgress
+	case cpv1.ErrCode_ERR_CODE_INCONSISTENT_GROUP_PROTOCOL:
+		return core.ErrInconsistentGroupProtocol
+	case cpv1.ErrCode_ERR_CODE_TOPIC_EXISTS:
+		return core.ErrTopicExists
 	default:
 		return core.ErrIO
 	}
@@ -61,6 +73,18 @@ func FromCoreErr(c core.ErrCode) cpv1.ErrCode {
 		return cpv1.ErrCode_ERR_CODE_INVALID
 	case core.ErrIO:
 		return cpv1.ErrCode_ERR_CODE_IO
+	case core.ErrUnknownMember:
+		return cpv1.ErrCode_ERR_CODE_UNKNOWN_MEMBER
+	case core.ErrIllegalGeneration:
+		return cpv1.ErrCode_ERR_CODE_ILLEGAL_GENERATION
+	case core.ErrUnknownPartition:
+		return cpv1.ErrCode_ERR_CODE_UNKNOWN_PARTITION
+	case core.ErrRebalanceInProgress:
+		return cpv1.ErrCode_ERR_CODE_REBALANCE_IN_PROGRESS
+	case core.ErrInconsistentGroupProtocol:
+		return cpv1.ErrCode_ERR_CODE_INCONSISTENT_GROUP_PROTOCOL
+	case core.ErrTopicExists:
+		return cpv1.ErrCode_ERR_CODE_TOPIC_EXISTS
 	default:
 		return cpv1.ErrCode_ERR_CODE_IO
 	}
@@ -224,6 +248,42 @@ func DescribeTopicsRespToCore(r *cpv1.DescribeTopicsResponse) core.DescribeTopic
 		out.Topics = append(out.Topics, core.TopicInfo{Name: t.Name, Partitions: t.Partitions})
 	}
 	return out
+}
+
+// BrokerHeartbeatFromCore builds a BrokerHeartbeatRequest for a broker's own address.
+func BrokerHeartbeatFromCore(b core.BrokerAddr) *cpv1.BrokerHeartbeatRequest {
+	return &cpv1.BrokerHeartbeatRequest{Broker: brokerInfoFromCore(b)}
+}
+
+// BrokerHeartbeatToCore rebuilds the calling broker's address from a request.
+func BrokerHeartbeatToCore(req *cpv1.BrokerHeartbeatRequest) core.BrokerAddr {
+	return brokerInfoToCore(req.GetBroker())
+}
+
+// BrokerHeartbeatRespFromCore builds a BrokerHeartbeatResponse from the live set.
+func BrokerHeartbeatRespFromCore(bs []core.BrokerAddr) *cpv1.BrokerHeartbeatResponse {
+	out := &cpv1.BrokerHeartbeatResponse{}
+	for _, b := range bs {
+		out.Brokers = append(out.Brokers, brokerInfoFromCore(b))
+	}
+	return out
+}
+
+// BrokerHeartbeatRespToCore rebuilds the live set from a response.
+func BrokerHeartbeatRespToCore(r *cpv1.BrokerHeartbeatResponse) []core.BrokerAddr {
+	var out []core.BrokerAddr
+	for _, b := range r.GetBrokers() {
+		out = append(out, brokerInfoToCore(b))
+	}
+	return out
+}
+
+func brokerInfoFromCore(b core.BrokerAddr) *cpv1.BrokerInfo {
+	return &cpv1.BrokerInfo{NodeId: b.NodeID, Host: b.Host, Port: b.Port}
+}
+
+func brokerInfoToCore(b *cpv1.BrokerInfo) core.BrokerAddr {
+	return core.BrokerAddr{NodeID: b.GetNodeId(), Host: b.GetHost(), Port: b.GetPort()}
 }
 
 func batchRangeFromCore(br core.BatchRange) *cpv1.BatchRange {

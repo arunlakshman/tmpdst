@@ -18,12 +18,16 @@ func toRPCError(code core.ErrCode, outcome core.Outcome) error {
 		st = codes.InvalidArgument
 	case core.ErrNotFound:
 		st = codes.NotFound
-	case core.ErrConflict:
+	case core.ErrConflict, core.ErrTopicExists:
 		st = codes.AlreadyExists
 	case core.ErrTimeout:
 		st = codes.DeadlineExceeded
 	case core.ErrTooLarge:
 		st = codes.ResourceExhausted
+	case core.ErrUnknownMember, core.ErrUnknownPartition:
+		st = codes.NotFound
+	case core.ErrIllegalGeneration, core.ErrRebalanceInProgress, core.ErrInconsistentGroupProtocol:
+		st = codes.FailedPrecondition
 	case core.OK:
 		return nil
 	}

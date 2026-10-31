@@ -97,6 +97,9 @@ type ObjectList struct {
 type ControlPlaneCall struct {
 	Req RequestID
 	Op  ControlPlaneOperation
+	// Timeout is the call's deadline. Zero takes the executor's default. Group
+	// joins and syncs wait for a rebalance, so they set a long one.
+	Timeout Duration
 }
 
 // ---- shared command log (Dynamo loglet; engine lands in a later PR) ----

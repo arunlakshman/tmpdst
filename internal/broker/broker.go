@@ -44,8 +44,9 @@ type Broker struct {
 	exited   bool
 
 	conns  []*connection
-	dirty  []*connection    // connections whose queue head may be ready (drained at end of Step)
-	topics []core.TopicInfo // topic cache, refreshed from DescribeTopics on a miss
+	dirty  []*connection     // connections whose queue head may be ready (drained at end of Step)
+	topics []core.TopicInfo  // topic cache, refreshed from DescribeTopics on a miss
+	live   []core.BrokerAddr // live brokers from LiveBrokers; nil means self only
 
 	now        core.NodeTime // At of the event being stepped (set by Step; not state)
 	open       openSegment
@@ -107,6 +108,8 @@ func (b *Broker) Step(ev core.Event) []core.Action {
 		acts = b.onGet(e)
 	case core.ControlPlaneDone:
 		acts = b.onCP(e)
+	case core.LiveBrokers:
+		b.live = e.Brokers
 	}
 	return b.finish(acts)
 }
@@ -129,7 +132,9 @@ func (b *Broker) stop() []core.Action {
 		return nil
 	}
 	b.stopping = true
-	return b.seal(closeOnStop)
+	acts := b.seal(closeOnStop)
+	b.endParked(func(*operation) bool { return true }) // parked Fetches answer now
+	return append(acts, b.failGroupCalls()...)
 }
 
 func (b *Broker) idle() bool {

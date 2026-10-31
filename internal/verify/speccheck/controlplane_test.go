@@ -448,3 +448,46 @@ func TestControlPlaneCheckShrinksPlantedBug(t *testing.T) {
 	}
 	t.Logf("example report:\n%s", c.Report(f, "go test ./speccheck -run TestControlPlaneCheckShrinksPlantedBug"))
 }
+
+func TestCreateTopicOp(t *testing.T) {
+	c := NewControlPlane()
+	if d := call(c, core.CreateTopic{Name: "n", Partitions: 2}); d.Err != core.OK || d.Outcome != core.Applied {
+		t.Fatalf("create: %+v", d)
+	}
+	if d := call(c, core.CreateTopic{Name: "", Partitions: 1}); d.Err != core.ErrInvalid || d.Outcome != core.NotApplied {
+		t.Fatalf("empty name: %+v", d)
+	}
+	if d := call(c, core.CreateTopic{Name: "z", Partitions: 0}); d.Err != core.ErrInvalid {
+		t.Fatalf("zero partitions: %+v", d)
+	}
+	got := call(c, core.DescribeTopics{Topics: []string{"n", "z"}}).Resp.(core.DescribeTopicsResp).Topics
+	if len(got) != 1 || got[0] != (core.TopicInfo{Name: "n", Partitions: 2}) {
+		t.Fatalf("topics %+v", got)
+	}
+}
+
+// TestCreateTopicExclusiveOp: with FailIfExists an existing topic is
+// ErrTopicExists and nothing changes. Without it the create is idempotent.
+func TestCreateTopicExclusiveOp(t *testing.T) {
+	c := NewControlPlane()
+	if d := call(c, core.CreateTopic{Name: "n", Partitions: 2, FailIfExists: true}); d.Err != core.OK || d.Outcome != core.Applied {
+		t.Fatalf("new topic: %+v", d)
+	}
+	h := c.StateHash()
+	if d := call(c, core.CreateTopic{Name: "n", Partitions: 5, FailIfExists: true}); d.Err != core.ErrTopicExists || d.Outcome != core.NotApplied {
+		t.Fatalf("exists: %+v", d)
+	}
+	if c.StateHash() != h {
+		t.Fatal("a failed exclusive create changed the state")
+	}
+	if d := call(c, core.CreateTopic{Name: "n", Partitions: 3}); d.Err != core.OK {
+		t.Fatalf("plain create of an existing topic: %+v", d)
+	}
+	if d := call(c, core.CreateTopic{Name: "", Partitions: 1, FailIfExists: true}); d.Err != core.ErrInvalid {
+		t.Fatalf("empty name with the flag: %+v", d)
+	}
+	got := call(c, core.DescribeTopics{Topics: []string{"n"}}).Resp.(core.DescribeTopicsResp).Topics
+	if len(got) != 1 || got[0].Partitions != 3 {
+		t.Fatalf("topics %+v, want n with 3 partitions", got)
+	}
+}

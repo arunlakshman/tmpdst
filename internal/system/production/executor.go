@@ -165,7 +165,11 @@ func (e *Executor) object(a core.IOCall) core.IOResult {
 }
 
 func (e *Executor) control(a core.ControlPlaneCall) core.IOResult {
-	ctx, cancel := context.WithTimeout(e.ctx, e.cfg.CPTimeout)
+	limit := e.cfg.CPTimeout
+	if a.Timeout > 0 { // group joins and syncs wait for a rebalance (core.ControlPlaneCall)
+		limit = time.Duration(a.Timeout)
+	}
+	ctx, cancel := context.WithTimeout(e.ctx, limit)
 	defer cancel()
 	resp, err := e.cp.Call(ctx, a.Op)
 	if err != nil {

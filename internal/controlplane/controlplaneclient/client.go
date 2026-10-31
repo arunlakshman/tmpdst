@@ -103,6 +103,11 @@ func (c *Client) Call(ctx context.Context, op core.ControlPlaneOperation) (core.
 		return c.lookup(ctx, op)
 	case core.DescribeTopics:
 		return c.describeTopics(ctx, op)
+	case core.CreateTopic:
+		return nil, c.createTopic(ctx, op)
+	case core.GroupJoin, core.GroupSync, core.GroupHeartbeat, core.GroupLeave, core.OffsetCommit,
+		core.OffsetFetch, core.DescribeGroups, core.ListGroups:
+		return c.callGroup(ctx, op)
 	}
 	return nil, &Error{Code: core.ErrInvalid}
 }
@@ -151,10 +156,35 @@ func (c *Client) describeTopics(ctx context.Context, op core.DescribeTopics) (co
 
 // CreateTopic is the dev/test helper over CreateTopic.
 func (c *Client) CreateTopic(ctx context.Context, name string, partitions int32) error {
+	return c.createTopic(ctx, core.CreateTopic{Name: name, Partitions: partitions})
+}
+
+// createTopic sends op. FailIfExists makes the create exclusive.
+func (c *Client) createTopic(ctx context.Context, op core.CreateTopic) error {
 	return c.do(ctx, "CreateTopic", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
-		_, err := cli.CreateTopic(ctx, &cpv1.CreateTopicRequest{Topic: name, Partitions: partitions})
+		_, err := cli.CreateTopic(ctx, &cpv1.CreateTopicRequest{
+			Topic: op.Name, Partitions: op.Partitions, FailIfExists: op.FailIfExists,
+		})
 		return err
 	})
+}
+
+// BrokerHeartbeat renews this broker's lease and returns the live broker set.
+// A standby control plane answers ErrUnavailable, so the call moves to the next
+// address.
+//
+//nolint:dupl // each ControlPlaneOperation keeps its own request/response conversion
+func (c *Client) BrokerHeartbeat(ctx context.Context, self core.BrokerAddr) ([]core.BrokerAddr, error) {
+	var out *cpv1.BrokerHeartbeatResponse
+	err := c.do(ctx, "BrokerHeartbeat", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
+		var e error
+		out, e = cli.BrokerHeartbeat(ctx, apiconvert.BrokerHeartbeatFromCore(self))
+		return e
+	})
+	if err != nil {
+		return nil, err
+	}
+	return apiconvert.BrokerHeartbeatRespToCore(out), nil
 }
 
 // GetStatus calls GetStatus on the preferred address.

@@ -7,8 +7,8 @@ import (
 	"manifester/internal/core"
 )
 
-// ReplayPosition folds one durable log entry into fold. Used for CPTruth (reference
-// replay of the Dynamo log). Client waiters and InjectedBugWriterOffsets stamps are
+// ReplayPosition folds one durable log entry into fold. Used for the reference
+// replay of the Dynamo log. Client waiters and InjectedBugWriterOffsets stamps are
 // ignored: truth assigns offsets at apply time like a cold replica.
 func ReplayPosition(fold *stateupdater.StateUpdater, slot core.LogPosition, data []byte) error {
 	_, _, payload, ok := unwrap(data)

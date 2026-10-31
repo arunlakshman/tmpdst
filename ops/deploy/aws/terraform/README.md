@@ -55,7 +55,7 @@ PutItem/UpdateItem/DeleteItem/ConditionCheckItem/GetItem, all of which are grant
 | `cp_standby_count` | `1` | hot-standby CP hosts (0..2) |
 | `cp_takeover_after` | `5s` | manicp `-takeover-after`; adds to the failover stall, far under the 120 s `-commit-deadline` |
 | `broker_extra_args` | `""` | extra manibroker flags. Empty: brokers take the default `-max-segment-partitions 4096`. |
-| `cp_extra_args` | empty | extra manicp flags (e.g. `-log-k`, `-hole-after`); empty keeps the unit valid for any manicp build |
+| `cp_extra_args` | empty | extra manicp flags (e.g. `-log-k`, `-gap-after`); empty keeps the unit valid for any manicp build |
 | `broker_instance_type` | `m6in.4xlarge` | 16 vCPU / 64 GiB / up to 40 Gbps, as WarpStream's agents |
 | `loadgen_count` | 2 | 1..8 load generator hosts |
 | `loadgen_instance_type` | `m6in.8xlarge` | 32 vCPU / 128 GiB / 50 Gbps, as WarpStream's OMB host |

@@ -258,7 +258,7 @@ func (m *Machine) onCommitAppendDone(d core.LogAppendDone, f *inFlightAppend) []
 	delete(m.inFlightAppends, d.Req)
 	if d.Err != core.OK || d.Outcome != core.Applied {
 		// Conditional put: NotApplied and MaybeApplied both retry the same
-		// slot. Allocating a later slot here used to leave a permanent hole
+		// slot. Allocating a later slot here used to leave a permanent gap
 		// (progress was not armed), wedging drain so every later commit sat
 		// in buf unapplied and brokers saw only bridge timeouts.
 		if d.Outcome == core.MaybeApplied {
@@ -409,7 +409,7 @@ func (m *Machine) applySlot(slot core.LogPosition, data []byte) error {
 	if err != nil {
 		return err
 	}
-	// Single-entry catch-up / hole-fill: deliver only if we were waiting on it.
+	// Single-entry catch-up / gap-fill: deliver only if we were waiting on it.
 	if e, err := stateupdater.Decode(payload); err == nil {
 		m.deliver(e.ID, []core.ControlPlaneDone{d})
 	}

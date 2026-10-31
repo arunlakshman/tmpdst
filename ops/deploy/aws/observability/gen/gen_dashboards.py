@@ -140,11 +140,11 @@ b.panel("Apply lag and standby lag (slots)",
         [q(f'max by (host) (manicp_log_apply_lag_slots{{{R}}})', "apply lag {{host}}"),
          q(f'max by (host) (manicp_log_standby_lag_slots{{{R}}})', "standby lag {{host}}")], "short",
         desc="Slots known to exist but not applied. A standby whose lag grows cannot take over cleanly.")
-b.panel("Hole fills and role changes",
-        [q(f'sum by (host) (rate(manicp_log_hole_fills_total{{{R}}}[{RI}]))', "hole fills/s {{host}}"),
+b.panel("Gap fills and role changes",
+        [q(f'sum by (host) (rate(manicp_log_gap_fills_total{{{R}}}[{RI}]))', "gap fills/s {{host}}"),
          q(f'sum by (host, to) (increase(manicp_log_role_changes_total{{{R}}}[{RI}]))', "role -> {{to}} {{host}}"),
          q(f'max by (host) (manicp_log_active{{{R}}})', "active (1) {{host}}")], "short",
-        desc="Hole fills happen when an appender dies holding a slot; role changes mark a takeover or a failback. The kill-the-appender marker.")
+        desc="Gap fills happen when an appender dies holding a slot; role changes mark a takeover or a failback. The kill-the-appender marker.")
 b.panel("Queue depth, queue wait and refused requests",
         [q(f'max by (host) (manicp_log_queue_depth{{{R}}})', "queue depth {{host}}"),
          q(f'histogram_quantile(0.99, sum by (le, host) (rate(manicp_log_queue_wait_seconds_bucket{{{R}}}[{RI}])))', "queue wait p99 {{host}}"),

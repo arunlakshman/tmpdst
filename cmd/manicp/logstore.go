@@ -17,19 +17,19 @@ import (
 const kindLog = "dynamolog"
 
 type logFlags struct {
-	table                    string
-	heartbeat, startTimeout  time.Duration
-	ckptBucket, ckptPrefix   string
-	s3Endpoint               string
-	s3PathStyle              bool
-	nodeName                 string
-	rank                     int
-	takeoverAfter, holeAfter time.Duration
-	k                        int
-	ckptEvery, logTTL        time.Duration
-	windowSlots              int64
-	pebbleDir                string
-	ckptMinSlots             int64
+	table                   string
+	heartbeat, startTimeout time.Duration
+	ckptBucket, ckptPrefix  string
+	s3Endpoint              string
+	s3PathStyle             bool
+	nodeName                string
+	rank                    int
+	takeoverAfter, gapAfter time.Duration
+	k                       int
+	ckptEvery, logTTL       time.Duration
+	windowSlots             int64
+	pebbleDir               string
+	ckptMinSlots            int64
 }
 
 func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
@@ -44,7 +44,7 @@ func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
 	fs.DurationVar(&f.startTimeout, "start-timeout", 10*time.Minute, "-store dynamolog: startup budget")
 	fs.DurationVar(&f.heartbeat, "heartbeat", time.Second, "-store dynamolog: idle heartbeat")
 	fs.IntVar(&f.k, "log-k", 4, "-store dynamolog: commit LogAppends in flight")
-	fs.DurationVar(&f.holeAfter, "hole-after", 250*time.Millisecond, "-store dynamolog: hole-fill delay")
+	fs.DurationVar(&f.gapAfter, "gap-after", 250*time.Millisecond, "-store dynamolog: gap-fill delay")
 	fs.DurationVar(&f.ckptEvery, "ckpt-every", 5*time.Minute, "-store dynamolog: checkpoint period")
 	fs.Int64Var(&f.ckptMinSlots, "ckpt-min-slots", 1000, "-store dynamolog: min slots between checkpoints")
 	fs.Int64Var(&f.windowSlots, "window-slots", 131072, "-store dynamolog: idempotency window in log slots; every node must use the same value")

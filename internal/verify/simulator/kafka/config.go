@@ -89,7 +89,7 @@ func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Op
 func logReachables() []core.PropertyID {
 	return []core.PropertyID{
 		"logcp-sim: lost slot retried at a later slot",
-		"logcp-sim: hole filled by a no-op",
+		"logcp-sim: gap filled by a no-op",
 		"logcp-sim: Put not answered, same slot repeated",
 		"logcp-sim: replayed key answered from the window",
 		"logcp-sim: log trimmed below a checkpoint",
@@ -180,7 +180,7 @@ func swarmLog(r simulator.CountedRand, c *simulator.SeedConfig) {
 	scale(&l.CrashProb)
 	l.K = []int{2, 4, 8}[r.Intn(3)]
 	l.GroupMax = []int{1, 2, 4, 16}[r.Intn(4)]
-	l.HoleAfter = campaign.Millis([]int64{20, 60, 200}[r.Intn(3)])
+	l.GapAfter = campaign.Millis([]int64{20, 60, 200}[r.Intn(3)])
 	l.TakeoverAfter = campaign.Millis([]int64{600, 900, 1500}[r.Intn(3)])
 	if r.Chance(0.4) {
 		l.CkptEvery, l.KeepSlots, l.TrimStride = []int{8, 16, 24}[r.Intn(3)], []int{16, 32}[r.Intn(2)], 4

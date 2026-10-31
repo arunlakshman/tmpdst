@@ -220,7 +220,7 @@ func (m *Machine) clearLocal() {
 	m.pending, m.pendingKind = 0, pendingNone
 	m.proj = nil
 	m.fillSlot, m.fillData = 0, nil
-	m.holeArmed = false
+	m.gapArmed = false
 }
 
 func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {

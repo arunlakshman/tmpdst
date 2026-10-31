@@ -53,7 +53,7 @@ func TestLogMutantsAreCaught(t *testing.T) {
 		{"offsets computed by the writer, not by apply", fakelogservice.InjectedBugWriterOffsets, 0, "kafka: acked range is committed in the control plane"},
 		{"trimmed slots deleted instead of tombstoned", fakelogservice.InjectedBugTrimDelete, 0, "logcp-sim: a Put never wins a slot below the trim floor"},
 		{"each replica forgets keys on its own pace", fakelogservice.InjectedBugPerReplicaWindow, 40, "logcp-sim: a replica's state equals the replay of the log at its slot"},
-		{"a replica passes an empty slot without a no-op", fakelogservice.InjectedBugHoleSkip, 0, "logcp-sim: a replica's state equals the replay of the log at its slot"},
+		{"a replica passes an empty slot without a no-op", fakelogservice.InjectedBugGapSkip, 0, "logcp-sim: a replica's state equals the replay of the log at its slot"},
 	}
 	for _, c := range cases {
 		cfg := configLog(nil, broker.InjectedBugNone, c.bug)

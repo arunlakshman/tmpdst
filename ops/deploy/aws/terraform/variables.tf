@@ -235,7 +235,7 @@ variable "broker_extra_args" {
 }
 
 variable "cp_extra_args" {
-  description = "Extra flags appended to the manicp command line on every control-plane host (e.g. -log-k, -hole-after). Empty by default so it stays valid for any manicp build."
+  description = "Extra flags appended to the manicp command line on every control-plane host (e.g. -log-k, -gap-after). Empty by default so it stays valid for any manicp build."
   type        = string
   default     = ""
 }

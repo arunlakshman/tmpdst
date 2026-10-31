@@ -7,7 +7,7 @@ import (
 
 // Config tunes the control-plane machine. Zero value keeps catch-up and the
 // commit queue off (CP-DSM-2 scaffold behaviour). CatchUpEvery > 0 arms
-// timer-driven catch-up with slot-ordered apply and hole-fill (CP-DSM-4).
+// timer-driven catch-up with slot-ordered apply and gap-fill (CP-DSM-4).
 // K > 0 arms the commit queue with up to K in-flight LogAppend slots (CP-DSM-5).
 // Heartbeat or TakeoverAfter arms advisory roles (CP-DSM-6). CkptEvery or
 // CkptKey arms checkpoint restore/publish and optional LogTrim.
@@ -16,10 +16,10 @@ type Config struct {
 	CatchUpEvery core.Duration
 	// ReadLimit caps entries per LogRead during catch-up. Zero means 64.
 	ReadLimit int32
-	// HoleAfter is how long the next unapplied slot may stay empty while later
+	// GapAfter is how long the next unapplied slot may stay empty while later
 	// slots are buffered before Step emits a no-op LogAppend. Zero fills at
-	// once when a hole is visible.
-	HoleAfter core.Duration
+	// once when a gap is visible.
+	GapAfter core.Duration
 	// Writer names append IDs (writer/seq). Empty means "cp".
 	Writer string
 
@@ -86,7 +86,7 @@ const (
 	InjectedBugWriterOffsets          // offsets chosen by the writer instead of by apply
 	InjectedBugTrimDelete             // trimmed slots deleted, not tombstoned (logstore)
 	InjectedBugPerReplicaWindow       // each replica forgets keys on its own clock
-	InjectedBugHoleSkip               // pass an empty slot without a no-op fill
+	InjectedBugGapSkip                // pass an empty slot without a no-op fill
 )
 
 func (c Config) readLimit() int32 {

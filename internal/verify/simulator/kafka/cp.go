@@ -19,7 +19,7 @@ func controlPlaneFactory(sc simulator.SeedConfig, opts Opts) core.MachineFactory
 		cfg := statemachine.Config{
 			CatchUpEvery:   lp.Tick,
 			ReadLimit:      64,
-			HoleAfter:      lp.HoleAfter,
+			GapAfter:       lp.GapAfter,
 			Writer:         string(self.Node),
 			K:              lp.K,
 			MaxCmdsPerSlot: lp.GroupMax,

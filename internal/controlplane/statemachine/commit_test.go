@@ -129,11 +129,11 @@ func TestMaybeAppliedRetriesSameSlot(t *testing.T) {
 	m := newMachine(t, statemachine.Config{K: 2, MaxCmdsPerSlot: 1, Writer: "w"})
 	a := onlyAppend(t, m.Offer(statemachine.ClientOperation{Req: 1, Cmd: commitCmd("a", 1)}))
 	b := onlyAppend(t, m.Offer(statemachine.ClientOperation{Req: 2, Cmd: commitCmd("b", 1)}))
-	// b lands first; a times out. Same-slot retry must not leave a hole that
+	// b lands first; a times out. Same-slot retry must not leave a gap that
 	// wedges drain past b.
 	step(m, core.LogAppendDone{Req: b.Req, Slot: b.Slot, Err: core.OK, Outcome: core.Applied})
 	if m.Applied() != 0 {
-		t.Fatalf("Applied = %d before hole filled, want 0", m.Applied())
+		t.Fatalf("Applied = %d before gap filled, want 0", m.Applied())
 	}
 	acts := step(m, core.LogAppendDone{
 		Req: a.Req, Slot: a.Slot, Err: core.ErrTimeout, Outcome: core.MaybeApplied,

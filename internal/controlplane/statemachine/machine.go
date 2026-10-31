@@ -29,22 +29,22 @@ type Machine struct {
 
 	fold *stateupdater.StateUpdater
 
-	now         core.NodeTime
-	timerGen    core.TimerVersion
-	holeGen     core.TimerVersion
-	roleGen     core.TimerVersion
-	ckptGen     core.TimerVersion
-	nextReq     core.RequestID
-	seq         uint64
-	applied     core.LogPosition // next slot to apply
-	goalTail    core.LogPosition // CheckTail answer for the current round
-	high        core.LogPosition // next slot to allocate for commit appends
-	buf         map[core.LogPosition][]byte
-	pending     core.RequestID
-	pendingKind pendingKind
-	fillSlot    core.LogPosition // slot of in-flight hole-fill append
-	fillData    []byte           // bytes we offered for that append
-	holeArmed   bool             // hole timer is outstanding
+	now           core.NodeTime
+	timerGen      core.TimerVersion
+	gapGeneration core.TimerVersion
+	roleGen       core.TimerVersion
+	ckptGen       core.TimerVersion
+	nextReq       core.RequestID
+	seq           uint64
+	applied       core.LogPosition // next slot to apply
+	goalTail      core.LogPosition // CheckTail answer for the current round
+	high          core.LogPosition // next slot to allocate for commit appends
+	buf           map[core.LogPosition][]byte
+	pending       core.RequestID
+	pendingKind   pendingKind
+	fillSlot      core.LogPosition // slot of in-flight gap-fill append
+	fillData      []byte           // bytes we offered for that append
+	gapArmed      bool             // gap timer is outstanding
 
 	lastPullOK  core.NodeTime
 	lastOtherAt core.NodeTime
@@ -222,14 +222,14 @@ func (m *Machine) onTimer(e core.TimerFired) []core.Action {
 		}
 		return m.emitCheckTail()
 	case timerGapFill:
-		if e.Gen != m.holeGen || !m.holeArmed || m.pending != 0 {
+		if e.Gen != m.gapGeneration || !m.gapArmed || m.pending != 0 {
 			return nil
 		}
-		m.holeArmed = false
-		if !m.holeOpen() {
+		m.gapArmed = false
+		if !m.gapOpen() {
 			return m.progress()
 		}
-		return m.emitHoleFill()
+		return m.emitGapFill()
 	case timerRole:
 		return m.onRoleTimer(e)
 	case timerCheckpoint:
@@ -288,7 +288,7 @@ func (m *Machine) onAppendDone(d core.LogAppendDone) []core.Action {
 	m.pending, m.pendingKind = 0, pendingNone
 	m.fillSlot, m.fillData = 0, nil
 	if isDeleted(d) {
-		// Hole fill landed on a trimmed slot: catch-up cannot rewrite tombs
+		// Gap fill landed on a trimmed slot: catch-up cannot rewrite tombs
 		// (docs/log-cp-service.md). Restore from checkpoint and rejoin.
 		return m.hitTrimmed()
 	}
@@ -321,7 +321,7 @@ func (m *Machine) drain() error {
 			return err
 		}
 		m.applied++
-		m.holeArmed = false
+		m.gapArmed = false
 	}
 }
 
@@ -330,13 +330,13 @@ func (m *Machine) progress() []core.Action {
 		return nil
 	}
 	if m.applied < m.goalTail {
-		if m.holeOpen() {
-			return m.maybeHoleFill()
+		if m.gapOpen() {
+			return m.maybeGapFill()
 		}
 		return m.emitRead()
 	}
-	if m.holeOpen() {
-		return m.maybeHoleFill()
+	if m.gapOpen() {
+		return m.maybeGapFill()
 	}
 	if acts := m.maybeBecomeReady(); acts != nil {
 		var out []core.Action
@@ -347,7 +347,7 @@ func (m *Machine) progress() []core.Action {
 	return m.armCatchUp()
 }
 
-func (m *Machine) holeOpen() bool {
+func (m *Machine) gapOpen() bool {
 	if len(m.buf) == 0 {
 		return false
 	}
@@ -364,49 +364,49 @@ const (
 	gapPlanSkip
 )
 
-func (m *Machine) holeFillPlan() gapPlan {
-	if m.cfg.InjectedBug == InjectedBugHoleSkip {
+func (m *Machine) gapFillPlan() gapPlan {
+	if m.cfg.InjectedBug == InjectedBugGapSkip {
 		return gapPlanSkip
 	}
-	if m.cfg.HoleAfter <= 0 {
+	if m.cfg.GapAfter <= 0 {
 		return gapPlanFill
 	}
-	if m.holeArmed {
+	if m.gapArmed {
 		return gapPlanWait
 	}
 	return gapPlanArm
 }
 
-func (m *Machine) maybeHoleFill() []core.Action {
-	switch m.holeFillPlan() {
+func (m *Machine) maybeGapFill() []core.Action {
+	switch m.gapFillPlan() {
 	case gapPlanSkip:
-		return m.skipHole()
+		return m.skipGap()
 	case gapPlanFill:
-		return m.emitHoleFill()
+		return m.emitGapFill()
 	case gapPlanArm:
-		return m.armHoleFill()
+		return m.armGapFill()
 	default:
 		return nil
 	}
 }
 
-func (m *Machine) skipHole() []core.Action {
-	// Mutant: advance past the hole without a no-op fill.
+func (m *Machine) skipGap() []core.Action {
+	// Mutant: advance past the gap without a no-op fill.
 	m.applied++
-	m.holeArmed = false
+	m.gapArmed = false
 	m.env.Always(false, "logcp-sim: a replica's state equals the replay of the log at its slot",
 		core.ContextPair{Key: "slot", Value: m.applied})
 	return m.progress()
 }
 
-func (m *Machine) armHoleFill() []core.Action {
-	m.holeGen++
-	m.holeArmed = true
-	return []core.Action{core.SetTimer{ID: timerGapFill, Gen: m.holeGen, After: m.cfg.HoleAfter}}
+func (m *Machine) armGapFill() []core.Action {
+	m.gapGeneration++
+	m.gapArmed = true
+	return []core.Action{core.SetTimer{ID: timerGapFill, Gen: m.gapGeneration, After: m.cfg.GapAfter}}
 }
 
-func (m *Machine) emitHoleFill() []core.Action {
-	m.env.Reachable("logcp-sim: hole filled by a no-op")
+func (m *Machine) emitGapFill() []core.Action {
+	m.env.Reachable("logcp-sim: gap filled by a no-op")
 	m.seq++
 	inner := stateupdater.Encode(stateupdater.Entry{
 		ID:   fmt.Sprintf("%s/%d", m.cfg.writer(), m.seq),
@@ -472,7 +472,7 @@ func (m *Machine) StateHash() uint64 {
 	h.Bool(m.ready)
 	h.Bool(m.active)
 	h.U64(uint64(m.timerGen))
-	h.U64(uint64(m.holeGen))
+	h.U64(uint64(m.gapGeneration))
 	h.U64(uint64(m.roleGen))
 	h.U64(uint64(m.ckptGen))
 	h.U64(uint64(m.nextReq))
@@ -483,7 +483,7 @@ func (m *Machine) StateHash() uint64 {
 	h.U64(uint64(m.pending))
 	h.U64(uint64(m.pendingKind))
 	h.U64(uint64(m.fillSlot))
-	h.Bool(m.holeArmed)
+	h.Bool(m.gapArmed)
 	h.Bool(m.ckptRetry)
 	h.U64(uint64(m.promoSlot))
 	h.Bool(m.lowerSeen)
@@ -495,7 +495,7 @@ func (m *Machine) StateHash() uint64 {
 	h.U64(m.tailsStarted)
 	h.U64(uint64(m.cfg.CatchUpEvery))
 	h.U64(uint64(m.cfg.ReadLimit))
-	h.U64(uint64(m.cfg.HoleAfter))
+	h.U64(uint64(m.cfg.GapAfter))
 	h.U64(uint64(m.cfg.K))
 	h.U64(uint64(m.cfg.MaxCmdsPerSlot))
 	h.U64(uint64(m.cfg.QueueMax))

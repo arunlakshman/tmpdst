@@ -64,7 +64,7 @@ func queryDigest(exec func(core.ControlPlaneOperation) core.ControlPlaneDone) ui
 }
 
 // feedContiguous drives catch-up so the machine applies entries in slot order
-// through one ReadDone page (no holes).
+// through one ReadDone page (no gaps).
 func feedContiguous(t *testing.T, m *statemachine.Machine, entries []stateupdater.Entry) []core.ControlPlaneDone {
 	t.Helper()
 	acts := step(m, core.NodeStarted{})
@@ -95,7 +95,7 @@ func feedContiguous(t *testing.T, m *statemachine.Machine, entries []stateupdate
 }
 
 func TestLockstepMachineVsVeritas(t *testing.T) {
-	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, HoleAfter: 0})
+	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, GapAfter: 0})
 	orc := speccheck.NewControlPlane()
 	machineAnswers := feedContiguous(t, m, lockstepCmds)
 
@@ -135,8 +135,8 @@ func TestLockstepMachineVsVeritas(t *testing.T) {
 		len(lockstepCmds), m.Applied(), m.Fold().StateHash(), appDig)
 }
 
-func TestLockstepWithHoleFill(t *testing.T) {
-	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, HoleAfter: 0})
+func TestLockstepWithGapFill(t *testing.T) {
+	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, GapAfter: 0})
 	orc := speccheck.NewControlPlane()
 
 	a := lockstepCmds[2]
@@ -173,6 +173,6 @@ func TestLockstepWithHoleFill(t *testing.T) {
 		return orc.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
 	})
 	if appDig != orcDig {
-		t.Fatalf("query digest after hole-fill: machine %x, speccheck %x", appDig, orcDig)
+		t.Fatalf("query digest after gap-fill: machine %x, speccheck %x", appDig, orcDig)
 	}
 }

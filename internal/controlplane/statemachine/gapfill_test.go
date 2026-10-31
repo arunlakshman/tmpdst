@@ -8,7 +8,7 @@ import (
 	"manifester/internal/core"
 )
 
-func driveToHole(t *testing.T, m *statemachine.Machine) core.LogAppend {
+func driveToGap(t *testing.T, m *statemachine.Machine) core.LogAppend {
 	t.Helper()
 	acts := step(m, core.NodeStarted{})
 	timer := acts[0].(core.SetTimer)
@@ -21,21 +21,21 @@ func driveToHole(t *testing.T, m *statemachine.Machine) core.LogAppend {
 		Entries: []core.LogEntry{{Slot: 1, Data: noop("late")}},
 	})
 	if len(acts) != 1 {
-		t.Fatalf("hole actions = %v, want one action", acts)
+		t.Fatalf("gap actions = %v, want one action", acts)
 	}
 	ap, ok := acts[0].(core.LogAppend)
 	if !ok || ap.Slot != 0 {
-		t.Fatalf("hole action = %#v, want LogAppend slot 0", acts[0])
+		t.Fatalf("gap action = %#v, want LogAppend slot 0", acts[0])
 	}
 	return ap
 }
 
-func TestHoleFillEmitsNoopAppend(t *testing.T) {
-	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, HoleAfter: 0, Writer: "w"})
-	ap := driveToHole(t, m)
+func TestGapFillEmitsNoopAppend(t *testing.T) {
+	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, GapAfter: 0, Writer: "w"})
+	ap := driveToGap(t, m)
 	payload, ok := statemachine.UnwrapPayload(ap.Data)
 	if !ok {
-		t.Fatal("hole-fill envelope truncated")
+		t.Fatal("gap-fill envelope truncated")
 	}
 	got, err := stateupdater.Decode(payload)
 	if err != nil || got.Kind != stateupdater.KindNoop {
@@ -56,9 +56,9 @@ func TestHoleFillEmitsNoopAppend(t *testing.T) {
 	}
 }
 
-func TestHoleFillUsesWinnerWhenTaken(t *testing.T) {
-	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, HoleAfter: 0})
-	ap := driveToHole(t, m)
+func TestGapFillUsesWinnerWhenTaken(t *testing.T) {
+	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, GapAfter: 0})
+	ap := driveToGap(t, m)
 	winner := stateupdater.Encode(stateupdater.Entry{
 		ID: "other", Kind: stateupdater.KindCommit,
 		Commit: core.CommitSegment{
@@ -77,17 +77,17 @@ func TestHoleFillUsesWinnerWhenTaken(t *testing.T) {
 	}
 }
 
-func TestHoleFillTombRestoresFromCheckpoint(t *testing.T) {
-	// Lagging replica: LogRead skips a trimmed slot, hole-fill hits the tomb,
+func TestGapFillTombRestoresFromCheckpoint(t *testing.T) {
+	// Lagging replica: LogRead skips a trimmed slot, gap-fill hits the tomb,
 	// machine must restore instead of looping armCatchUp (seed-2 campaign hang).
 	m := newMachine(t, statemachine.Config{
-		CatchUpEvery: core.Millisecond, HoleAfter: 0, Writer: "w",
+		CatchUpEvery: core.Millisecond, GapAfter: 0, Writer: "w",
 		CkptKey: "ckpt/t", CkptEvery: core.Second, Rank: 1,
 	})
 	acts := step(m, core.NodeStarted{})
 	get := acts[0].(core.ObjectGet)
 	acts = step(m, core.ObjectGetDone{Req: get.Req, Err: core.ErrNotFound})
-	// after empty restore: catch-up timer then driveToHole shape
+	// after empty restore: catch-up timer then driveToGap shape
 	timer := acts[0].(core.SetTimer)
 	acts = step(m, core.TimerFired{ID: timer.ID, Gen: timer.Gen})
 	tail := acts[0].(core.LogGetEnd)
@@ -116,10 +116,10 @@ func TestHoleFillTombRestoresFromCheckpoint(t *testing.T) {
 	}
 }
 
-func TestHoleFillTimerWaits(t *testing.T) {
+func TestGapFillTimerWaits(t *testing.T) {
 	m := newMachine(t, statemachine.Config{
 		CatchUpEvery: core.Millisecond,
-		HoleAfter:    5 * core.Millisecond,
+		GapAfter:     5 * core.Millisecond,
 	})
 	acts := step(m, core.NodeStarted{})
 	timer := acts[0].(core.SetTimer)
@@ -132,25 +132,25 @@ func TestHoleFillTimerWaits(t *testing.T) {
 		Entries: []core.LogEntry{{Slot: 1, Data: noop("y")}},
 	})
 	if len(acts) != 1 {
-		t.Fatalf("actions = %v, want [SetTimer hole]", acts)
+		t.Fatalf("actions = %v, want [SetTimer gap]", acts)
 	}
-	holeTimer, ok := acts[0].(core.SetTimer)
-	if !ok || holeTimer.After != 5*core.Millisecond {
-		t.Fatalf("action = %#v, want hole SetTimer", acts[0])
+	gapTimer, ok := acts[0].(core.SetTimer)
+	if !ok || gapTimer.After != 5*core.Millisecond {
+		t.Fatalf("action = %#v, want gap SetTimer", acts[0])
 	}
-	acts = step(m, core.TimerFired{ID: holeTimer.ID, Gen: holeTimer.Gen})
+	acts = step(m, core.TimerFired{ID: gapTimer.ID, Gen: gapTimer.Gen})
 	if len(acts) != 1 {
-		t.Fatalf("hole timer actions = %v, want [LogAppend]", acts)
+		t.Fatalf("gap timer actions = %v, want [LogAppend]", acts)
 	}
 	if _, ok := acts[0].(core.LogAppend); !ok {
-		t.Fatalf("hole timer action = %T, want LogAppend", acts[0])
+		t.Fatalf("gap timer action = %T, want LogAppend", acts[0])
 	}
 }
 
-func TestHoleFillStaysQuietWhileArmed(t *testing.T) {
+func TestGapFillStaysQuietWhileArmed(t *testing.T) {
 	m := newMachine(t, statemachine.Config{
 		CatchUpEvery: core.Millisecond,
-		HoleAfter:    5 * core.Millisecond,
+		GapAfter:     5 * core.Millisecond,
 	})
 	acts := step(m, core.NodeStarted{})
 	catch := acts[0].(core.SetTimer)
@@ -162,33 +162,33 @@ func TestHoleFillStaysQuietWhileArmed(t *testing.T) {
 		Req: read.Req, Err: core.OK, Outcome: core.Applied,
 		Entries: []core.LogEntry{{Slot: 1, Data: noop("y")}},
 	})
-	holeTimer, ok := acts[0].(core.SetTimer)
-	if !ok || holeTimer.After != 5*core.Millisecond {
-		t.Fatalf("action = %#v, want hole SetTimer", acts[0])
+	gapTimer, ok := acts[0].(core.SetTimer)
+	if !ok || gapTimer.After != 5*core.Millisecond {
+		t.Fatalf("action = %#v, want gap SetTimer", acts[0])
 	}
 
 	acts = step(m, core.TimerFired{ID: catch.ID, Gen: catch.Gen})
 	tail = acts[0].(core.LogGetEnd)
 	acts = step(m, core.LogGetEndDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
 	if len(acts) != 0 {
-		t.Fatalf("while hole timer armed, catch-up returned %v, want none", acts)
+		t.Fatalf("while gap timer armed, catch-up returned %v, want none", acts)
 	}
 
-	acts = step(m, core.TimerFired{ID: holeTimer.ID, Gen: holeTimer.Gen})
+	acts = step(m, core.TimerFired{ID: gapTimer.ID, Gen: gapTimer.Gen})
 	if len(acts) != 1 {
-		t.Fatalf("original hole timer actions = %v, want [LogAppend]", acts)
+		t.Fatalf("original gap timer actions = %v, want [LogAppend]", acts)
 	}
 	if _, ok := acts[0].(core.LogAppend); !ok {
-		t.Fatalf("original hole timer action = %T, want LogAppend", acts[0])
+		t.Fatalf("original gap timer action = %T, want LogAppend", acts[0])
 	}
 }
 
-func TestHoleFillSkipMutantAdvancesWithoutAppend(t *testing.T) {
+func TestGapFillSkipMutantAdvancesWithoutAppend(t *testing.T) {
 	const prop = core.PropertyID("logcp-sim: a replica's state equals the replay of the log at its slot")
 	m, env := newMachineEnv(t, statemachine.Config{
 		CatchUpEvery: core.Millisecond,
-		HoleAfter:    0,
-		InjectedBug:  statemachine.InjectedBugHoleSkip,
+		GapAfter:     0,
+		InjectedBug:  statemachine.InjectedBugGapSkip,
 		Writer:       "w",
 	})
 	acts := step(m, core.NodeStarted{})

@@ -8,7 +8,7 @@
 //
 // Log I/O goes out only as Log* IOCalls. Catch-up reads the log, applies
 // entries in slot order through an in-memory state updater fold, and emits no-op
-// LogAppend actions to fill holes. Client commits enter via Offer into a
+// LogAppend actions to fill gaps. Client commits enter via Offer into a
 // bounded queue; flush packs up to MaxCmdsPerSlot commands into one entry and
 // keeps at most K LogAppends in flight. Answers leave via TakeAnswers once the
 // winning slot applies. Advisory roles use timers for heartbeat, takeover, and

@@ -213,7 +213,7 @@ func machineConfig(f cpFlags) statemachine.Config {
 		Rank:          f.log.rank,
 		Heartbeat:     core.Duration(f.log.heartbeat),
 		TakeoverAfter: core.Duration(f.log.takeoverAfter),
-		HoleAfter:     core.Duration(f.log.holeAfter),
+		GapAfter:      core.Duration(f.log.gapAfter),
 		Writer:        nodeName(f.log),
 		CkptEvery:     core.Duration(f.log.ckptEvery),
 		CkptMinSlots:  f.log.ckptMinSlots,

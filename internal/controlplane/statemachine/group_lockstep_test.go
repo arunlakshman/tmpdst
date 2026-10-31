@@ -253,7 +253,7 @@ func groupLockstep(t *testing.T, seed int64, crashAt int, seen map[core.ErrCode]
 // reads with speccheck's state at the end.
 func checkMachineGroups(t *testing.T, r *groupRun, writes []stateupdater.Entry) {
 	t.Helper()
-	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, HoleAfter: 0})
+	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, GapAfter: 0})
 	feedContiguous(t, m, writes)
 	var ops []core.ControlPlaneOperation
 	ops = append(ops, core.ListGroups{})

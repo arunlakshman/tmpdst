@@ -36,7 +36,7 @@ func TestLookupDescribeRoundTrip(t *testing.T) {
 	}
 }
 
-func TestRespRoundTrip(t *testing.T) {
+func TestResponseRoundTrip(t *testing.T) {
 	cr := core.CommitSegmentResp{Assigned: []core.BatchRange{{
 		TP: core.NewTopicPartition("t", 0), Base: 10, Count: 2,
 		Loc: core.SegmentRef{Key: "k", Off: 1, Len: 2},

@@ -94,7 +94,7 @@ func feedContiguous(t *testing.T, m *statemachine.Machine, entries []stateupdate
 	return out
 }
 
-func TestLockstepMachineVsVeritas(t *testing.T) {
+func TestLockstepMachineVsSpecCheck(t *testing.T) {
 	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, GapAfter: 0})
 	orc := speccheck.NewControlPlane()
 	machineAnswers := feedContiguous(t, m, lockstepCmds)

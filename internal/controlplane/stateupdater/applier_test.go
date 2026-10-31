@@ -33,11 +33,11 @@ var backends = map[string]func(testing.TB) stateupdater.KeyValueStore{
 	"pebble": newPebble,
 }
 
-// applierSubject runs the StateUpdater directly as a suite subject. The applier
+// stateUpdaterSubject runs the StateUpdater directly as a suite subject. The applier
 // hash is not the hash of the spec, so StateHash says no.
-type applierSubject struct{ a *stateupdater.StateUpdater }
+type stateUpdaterSubject struct{ a *stateupdater.StateUpdater }
 
-func (s applierSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+func (s stateUpdaterSubject) Do(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 	switch {
 	case op.CreateTopic != nil:
 		return observation.ControlPlaneResult{Code: s.a.CreateTopic(op.CreateTopic.Name, op.CreateTopic.Partitions)}, nil
@@ -51,12 +51,12 @@ func (s applierSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlan
 	return observation.ControlPlaneResult{}, errors.New("the operation has neither CreateTopic nor Call")
 }
 
-func (applierSubject) StateHash() (uint64, bool) { return 0, false }
+func (stateUpdaterSubject) StateHash() (uint64, bool) { return 0, false }
 
-func newApplierSubject(t testing.TB, mk func(testing.TB) stateupdater.KeyValueStore) suites.ControlPlaneSubject {
+func newStateUpdaterSubject(t testing.TB, mk func(testing.TB) stateupdater.KeyValueStore) suites.ControlPlaneSubject {
 	a := stateupdater.New(mk(t))
 	t.Cleanup(func() { _ = a.Close() })
-	return applierSubject{a}
+	return stateUpdaterSubject{a}
 }
 
 // runSuite runs the shared control plane suite on the applier for every
@@ -64,7 +64,7 @@ func newApplierSubject(t testing.TB, mk func(testing.TB) stateupdater.KeyValueSt
 func runSuite(t *testing.T, mk func(testing.TB) stateupdater.KeyValueStore, defaultSeeds int) {
 	for _, profile := range suites.AllControlPlaneProfiles() {
 		t.Run(profile.Name, func(t *testing.T) {
-			suites.ControlPlane(t, profile, func() suites.ControlPlaneSubject { return newApplierSubject(t, mk) },
+			suites.ControlPlane(t, profile, func() suites.ControlPlaneSubject { return newStateUpdaterSubject(t, mk) },
 				runcontrol.Options(t, defaultSeeds))
 		})
 	}
@@ -89,7 +89,7 @@ func TestLookupMaxBytesEdges(t *testing.T) {
 			for seed := uint64(1); seed <= uint64(seeds); seed++ {
 				r := checker.NewRand(seed)
 				a, spec := stateupdater.New(mk(t)), suites.NewSpecControlPlaneSubject()
-				subject := applierSubject{a}
+				subject := stateUpdaterSubject{a}
 				for i := range 120 {
 					op := ops(r, i)
 					expected, _ := spec.Do(op)
@@ -290,7 +290,7 @@ func edgeLookups(t *testing.T, subject, spec suites.ControlPlaneSubject, lk core
 // has a known bug. The applier hash is not the hash of the spec, so the helper
 // skips the one bug that only a state hash can show.
 func TestInjectedBugsCaughtStateUpdaterMem(t *testing.T) {
-	newCorrect := func() suites.ControlPlaneSubject { return newApplierSubject(t, backends["mem"]) }
+	newCorrect := func() suites.ControlPlaneSubject { return newStateUpdaterSubject(t, backends["mem"]) }
 	injectedbug.RequireAllControlPlaneBugsDetected(t, newCorrect, 100)
 }
 

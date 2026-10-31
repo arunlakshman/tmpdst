@@ -49,7 +49,7 @@ func TestLogMutantsAreCaught(t *testing.T) {
 		prop   core.PropertyID
 	}{
 		// Truth is log replay (correct assign); the writer stamps gap bases only
-		// into its fold/answers, so acks disagree with CPTruth.
+		// into its fold/answers, so acks disagree with ControlPlaneRealState.
 		{"offsets computed by the writer, not by apply", fakelogservice.InjectedBugWriterOffsets, 0, "kafka: acked range is committed in the control plane"},
 		{"trimmed slots deleted instead of tombstoned", fakelogservice.InjectedBugTrimDelete, 0, "logcp-sim: a Put never wins a slot below the trim floor"},
 		{"each replica forgets keys on its own pace", fakelogservice.InjectedBugPerReplicaWindow, 40, "logcp-sim: a replica's state equals the replay of the log at its slot"},

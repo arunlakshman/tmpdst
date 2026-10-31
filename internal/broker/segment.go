@@ -60,7 +60,7 @@ type segment struct {
 	key      string
 	data     []byte
 	state    segmentState
-	req      core.RequestID
+	request  core.RequestID
 	gen      core.TimerVersion
 	attempts int
 
@@ -175,8 +175,8 @@ func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
 }
 
 func (b *Broker) put(s *segment) []core.Action {
-	s.state, s.req = segmentUpload, b.nextRequestID()
-	return []core.Action{core.ObjectPut{Req: s.req, Key: s.key, Data: s.data}}
+	s.state, s.request = segmentUpload, b.nextRequestID()
+	return []core.Action{core.ObjectPut{Req: s.request, Key: s.key, Data: s.data}}
 }
 
 func (b *Broker) onPutDone(s *segment, e core.ObjectPutDone) []core.Action {
@@ -187,7 +187,7 @@ func (b *Broker) onPutDone(s *segment, e core.ObjectPutDone) []core.Action {
 		return b.retryPut(s)
 	}
 	attempts := s.attempts + 1
-	s.state, s.req, s.attempts, s.putDoneAt = segmentUploadDone, 0, 0, b.now
+	s.state, s.request, s.attempts, s.putDoneAt = segmentUploadDone, 0, 0, b.now
 	acts := []core.Action{recordFact("segment_put_done",
 		core.Field{Key: "segment", Value: core.Str(s.key)},
 		core.Field{Key: "bytes", Value: core.I64(len(s.data))},
@@ -212,7 +212,7 @@ func (b *Broker) pump() []core.Action {
 }
 
 func (b *Broker) commit(s *segment) []core.Action {
-	s.state, s.req = segmentCommit, b.nextRequestID()
+	s.state, s.request = segmentCommit, b.nextRequestID()
 	if !s.commitStarted {
 		s.commitStarted, s.commitAt = true, b.now
 	}
@@ -224,7 +224,7 @@ func (b *Broker) commit(s *segment) []core.Action {
 	if b.cfg.InjectedBug == InjectedBugFreshKeyOnRetry && s.attempts > 0 {
 		key = segmentformat.SegmentKey(b.env.NewID())
 	}
-	return []core.Action{core.ControlPlaneCall{Req: s.req, Op: core.CommitSegment{
+	return []core.Action{core.ControlPlaneCall{Req: s.request, Op: core.CommitSegment{
 		SegmentKey: key, Batches: pend}}}
 }
 
@@ -321,7 +321,7 @@ func (b *Broker) retryPut(s *segment) []core.Action {
 		b.env.Reachable("broker: segment retries exhausted")
 		return b.failSegment(s, errRequestTimedOut)
 	}
-	s.state, s.req = segmentUploadRetry, 0
+	s.state, s.request = segmentUploadRetry, 0
 	t, g := b.timer(core.TimerID(s.id), s.attempts)
 	s.gen = g
 	return []core.Action{t}
@@ -346,7 +346,7 @@ func (b *Broker) retryCommit(s *segment) []core.Action {
 	d = min(d, b.cfg.CommitRetryMax)
 	d = d/2 + core.Duration(b.env.Intn(int(d/2)+1)) // jitter in [d/2, d]
 	d = min(d, left)
-	s.state, s.req = segmentCommitRetry, 0
+	s.state, s.request = segmentCommitRetry, 0
 	b.timerGen++
 	s.gen = b.timerGen
 	return []core.Action{core.SetTimer{ID: core.TimerID(s.id), Gen: b.timerGen, After: d}}

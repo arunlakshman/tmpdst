@@ -85,7 +85,7 @@ func newMem() cp.Store { return memorystore.New() }
 // hash, so StateHash says no. A commit that succeeds is Applied, as in the spec.
 type implSubject struct{ im impl }
 
-func (s implSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+func (s implSubject) Do(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	switch {

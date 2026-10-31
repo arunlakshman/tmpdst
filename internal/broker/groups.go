@@ -53,8 +53,8 @@ func (b *Broker) groupCall(s *slot, op core.ControlPlaneOperation, timeout core.
 	return b.startOp(&operation{kind: opGroup, s: s, gop: op, gtimeout: timeout, gfill: fill})
 }
 
-// onGroupCP answers a group call that the control plane replied to.
-func (b *Broker) onGroupCP(o *operation, e core.ControlPlaneDone) []core.Action {
+// onGroupControlPlane answers a group call that the control plane replied to.
+func (b *Broker) onGroupControlPlane(o *operation, e core.ControlPlaneDone) []core.Action {
 	o.gfill(e)
 	return b.endOp(o)
 }

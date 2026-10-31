@@ -37,11 +37,11 @@ func (b ControlPlaneBug) Wrap(correct suites.ControlPlaneSubject) suites.Control
 
 type controlPlaneSubject struct {
 	inner suites.ControlPlaneSubject
-	do    func(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error)
+	do    func(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error)
 	hash  func() (uint64, bool)
 }
 
-func (s *controlPlaneSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+func (s *controlPlaneSubject) Do(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 	return s.do(op)
 }
 
@@ -54,7 +54,7 @@ func (s *controlPlaneSubject) StateHash() (uint64, bool) {
 
 // changeFunc changes the result of one operation after the correct subject has
 // answered.
-type changeFunc func(op generator.ControlPlaneOp, r observation.ControlPlaneResult) observation.ControlPlaneResult
+type changeFunc func(op generator.ControlPlaneTestStep, r observation.ControlPlaneResult) observation.ControlPlaneResult
 
 func afterControlPlane(name, doc string, change changeFunc) ControlPlaneBug {
 	return statefulControlPlane(name, doc, func() changeFunc { return change })
@@ -65,7 +65,7 @@ func afterControlPlane(name, doc string, change changeFunc) ControlPlaneBug {
 func statefulControlPlane(name, doc string, newChange func() changeFunc) ControlPlaneBug {
 	return NewControlPlaneBug(name, doc, func(inner suites.ControlPlaneSubject) suites.ControlPlaneSubject {
 		change := newChange()
-		return &controlPlaneSubject{inner: inner, do: func(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+		return &controlPlaneSubject{inner: inner, do: func(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 			r, err := inner.Do(op)
 			if err != nil {
 				return r, err
@@ -77,17 +77,17 @@ func statefulControlPlane(name, doc string, newChange func() changeFunc) Control
 
 // beforeControlPlane makes a bug that changes the operation before the correct
 // subject sees it. change may keep state and may call inner more than once.
-func beforeControlPlane(name, doc string, newChange func() func(inner suites.ControlPlaneSubject, op generator.ControlPlaneOp) (observation.ControlPlaneResult, error)) ControlPlaneBug {
+func beforeControlPlane(name, doc string, newChange func() func(inner suites.ControlPlaneSubject, op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error)) ControlPlaneBug {
 	return NewControlPlaneBug(name, doc, func(inner suites.ControlPlaneSubject) suites.ControlPlaneSubject {
 		change := newChange()
-		return &controlPlaneSubject{inner: inner, do: func(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+		return &controlPlaneSubject{inner: inner, do: func(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 			return change(inner, op)
 		}}
 	})
 }
 
 // commitOf returns the CommitSegment of op, if op is one.
-func commitOf(op generator.ControlPlaneOp) (core.ControlPlaneCall, core.CommitSegment, bool) {
+func commitOf(op generator.ControlPlaneTestStep) (core.ControlPlaneCall, core.CommitSegment, bool) {
 	if op.Call == nil {
 		return core.ControlPlaneCall{}, core.CommitSegment{}, false
 	}
@@ -114,7 +114,7 @@ func ControlPlaneBugs() []ControlPlaneBug {
 func BaseOffByOne() ControlPlaneBug {
 	return afterControlPlane("BaseOffByOne",
 		"A commit returns base offsets that are one too high.",
-		func(op generator.ControlPlaneOp, r observation.ControlPlaneResult) observation.ControlPlaneResult {
+		func(op generator.ControlPlaneTestStep, r observation.ControlPlaneResult) observation.ControlPlaneResult {
 			if _, _, ok := commitOf(op); ok && len(r.Assigned) > 0 {
 				r.Assigned = slices.Clone(r.Assigned)
 				for i := range r.Assigned {
@@ -129,9 +129,9 @@ func BaseOffByOne() ControlPlaneBug {
 func ReplayGivesFreshOffsets() ControlPlaneBug {
 	return beforeControlPlane("ReplayGivesFreshOffsets",
 		"A commit with a repeated segment key gets new offsets instead of the first answer.",
-		func() func(suites.ControlPlaneSubject, generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+		func() func(suites.ControlPlaneSubject, generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 			n := 0
-			return func(inner suites.ControlPlaneSubject, op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+			return func(inner suites.ControlPlaneSubject, op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 				if call, commit, ok := commitOf(op); ok && commit.SegmentKey != "" {
 					n++
 					commit.SegmentKey += "#" + strconv.Itoa(n)
@@ -150,7 +150,7 @@ func ReplayWithDifferentRequestNotRejected() ControlPlaneBug {
 		"A commit that reuses a segment key with different batches returns the first answer instead of ErrConflict.",
 		func() changeFunc {
 			first := map[string][]core.BatchRange{}
-			return func(op generator.ControlPlaneOp, r observation.ControlPlaneResult) observation.ControlPlaneResult {
+			return func(op generator.ControlPlaneTestStep, r observation.ControlPlaneResult) observation.ControlPlaneResult {
 				_, commit, ok := commitOf(op)
 				if !ok {
 					return r
@@ -171,9 +171,9 @@ func ReplayWithDifferentRequestNotRejected() ControlPlaneBug {
 func PartialApplyOnInvalidBatch() ControlPlaneBug {
 	return beforeControlPlane("PartialApplyOnInvalidBatch",
 		"A commit with an invalid batch applies the valid batches before it, instead of nothing.",
-		func() func(suites.ControlPlaneSubject, generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+		func() func(suites.ControlPlaneSubject, generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 			n := core.RequestID(0)
-			return func(inner suites.ControlPlaneSubject, op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+			return func(inner suites.ControlPlaneSubject, op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 				call, commit, ok := commitOf(op)
 				if ok && commit.SegmentKey != "" {
 					valid := 0
@@ -200,8 +200,8 @@ func PartialApplyOnInvalidBatch() ControlPlaneBug {
 func LookupMaxBytesUsesGreater() ControlPlaneBug {
 	return beforeControlPlane("LookupMaxBytesUsesGreater",
 		"Lookup stops when the byte total is greater than MaxBytes, not when it is equal or greater.",
-		func() func(suites.ControlPlaneSubject, generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
-			return func(inner suites.ControlPlaneSubject, op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+		func() func(suites.ControlPlaneSubject, generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
+			return func(inner suites.ControlPlaneSubject, op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 				if op.Call != nil {
 					if l, ok := op.Call.Op.(core.FindSegments); ok && l.MaxBytes > 0 && l.MaxBytes < 1<<30 {
 						l.MaxBytes++
@@ -218,7 +218,7 @@ func LookupMaxBytesUsesGreater() ControlPlaneBug {
 func LookupSkipsRunContainingFrom() ControlPlaneBug {
 	return afterControlPlane("LookupSkipsRunContainingFrom",
 		"Lookup leaves out the run that starts before From but contains offset From.",
-		func(op generator.ControlPlaneOp, r observation.ControlPlaneResult) observation.ControlPlaneResult {
+		func(op generator.ControlPlaneTestStep, r observation.ControlPlaneResult) observation.ControlPlaneResult {
 			if op.Call == nil {
 				return r
 			}
@@ -241,7 +241,7 @@ func LookupSkipsRunContainingFrom() ControlPlaneBug {
 func DescribeUnsorted() ControlPlaneBug {
 	return afterControlPlane("DescribeUnsorted",
 		"DescribeTopics returns the topics in reverse order instead of sorted by name.",
-		func(op generator.ControlPlaneOp, r observation.ControlPlaneResult) observation.ControlPlaneResult {
+		func(op generator.ControlPlaneTestStep, r observation.ControlPlaneResult) observation.ControlPlaneResult {
 			if op.Call != nil {
 				if _, ok := op.Call.Op.(core.DescribeTopics); ok {
 					r.Topics = slices.Clone(r.Topics)
@@ -259,7 +259,7 @@ func TopicPartitionCountShrinks() ControlPlaneBug {
 		"CreateTopic with a smaller count lowers the partition count of the topic instead of keeping the larger one.",
 		func() changeFunc {
 			counts := map[string]int32{}
-			return func(op generator.ControlPlaneOp, r observation.ControlPlaneResult) observation.ControlPlaneResult {
+			return func(op generator.ControlPlaneTestStep, r observation.ControlPlaneResult) observation.ControlPlaneResult {
 				switch {
 				case op.CreateTopic != nil:
 					if r.Code == core.OK {

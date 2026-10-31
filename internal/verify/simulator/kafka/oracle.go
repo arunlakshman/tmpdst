@@ -24,15 +24,15 @@ type expectedLogChecker struct {
 	logs []*partitionLog
 	idx  map[core.TopicPartition]int
 
-	started       bool
-	cpGen, objGen uint64
-	ackCur        simulator.Cursor
-	nops          int
-	opIdx         map[[2]int]int            // (client, batch) -> history index
-	pend          []int                     // history indexes not yet resolved
-	seen          map[string]int            // record value -> number of times committed
-	locs          map[core.SegmentRef]int64 // stored batch -> offset it was committed at
-	cpos          map[[2]int]int64          // (consumer client, partition index) -> next offset it should see
+	started                                  bool
+	controlPlaneGeneration, objectGeneration uint64
+	ackCur                                   simulator.Cursor
+	nops                                     int
+	opIdx                                    map[[2]int]int            // (client, batch) -> history index
+	pend                                     []int                     // history indexes not yet resolved
+	seen                                     map[string]int            // record value -> number of times committed
+	locs                                     map[core.SegmentRef]int64 // stored batch -> offset it was committed at
+	cpos                                     map[[2]int]int64          // (consumer client, partition index) -> next offset it should see
 }
 
 func newOracle(o Opts) *expectedLogChecker {
@@ -68,10 +68,10 @@ func (o *expectedLogChecker) scanOps(v simulator.View) {
 // refresh brings every partition's log up to the current truth.
 func (o *expectedLogChecker) refresh(v simulator.View) {
 	cg, og := v.CP().Gen(), v.Objects().Gen()
-	if o.started && cg == o.cpGen && og == o.objGen {
+	if o.started && cg == o.controlPlaneGeneration && og == o.objectGeneration {
 		return
 	}
-	o.started, o.cpGen, o.objGen = true, cg, og
+	o.started, o.controlPlaneGeneration, o.objectGeneration = true, cg, og
 	for _, pl := range o.logs {
 		if int64(v.CP().HighWatermark(pl.tp)) != int64(len(pl.vals)) || pl.ranges == 0 {
 			o.ingest(v, pl)

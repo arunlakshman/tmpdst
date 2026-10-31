@@ -27,7 +27,7 @@ type ObjectSubject interface {
 // StateHash is like ObjectSubject.StateHash, with speccheck.ControlPlane as the
 // spec.
 type ControlPlaneSubject interface {
-	Do(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error)
+	Do(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error)
 	StateHash() (hash uint64, ok bool)
 }
 
@@ -63,7 +63,7 @@ func NewSpecControlPlaneSubject() ControlPlaneSubject {
 	return &specControlPlaneSubject{cp: speccheck.NewControlPlane()}
 }
 
-func (s *specControlPlaneSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+func (s *specControlPlaneSubject) Do(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 	switch {
 	case op.CreateTopic != nil:
 		code := s.cp.CreateTopic(op.CreateTopic.Name, op.CreateTopic.Partitions)

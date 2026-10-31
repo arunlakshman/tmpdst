@@ -37,11 +37,11 @@ type Broker struct {
 
 	started bool
 
-	nextReq  core.RequestID
-	nextID   uint64
-	timerGen core.TimerVersion
-	stopping bool
-	exited   bool
+	nextRequestNumber core.RequestID
+	nextID            uint64
+	timerGen          core.TimerVersion
+	stopping          bool
+	exited            bool
 
 	conns  []*connection
 	dirty  []*connection     // connections whose queue head may be ready (drained at end of Step)
@@ -66,7 +66,7 @@ func New(cfg Config) core.MachineFactory {
 	}
 }
 
-func (b *Broker) nextRequestID() core.RequestID { b.nextReq++; return b.nextReq }
+func (b *Broker) nextRequestID() core.RequestID { b.nextRequestNumber++; return b.nextRequestNumber }
 func (b *Broker) id() uint64                    { b.nextID++; return b.nextID }
 
 func (b *Broker) backoff(n int) core.Duration {
@@ -236,7 +236,7 @@ func (b *Broker) segmentByRequest(req core.RequestID, st segmentState) *segment 
 		return nil
 	}
 	for _, s := range b.segs {
-		if s.req == req && s.state == st {
+		if s.request == req && s.state == st {
 			return s
 		}
 	}

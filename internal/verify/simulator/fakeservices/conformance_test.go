@@ -26,7 +26,7 @@ import (
 // There is no test for the log engine here. The log engine is now only a
 // bridge for ControlPlaneCall, and it has no replica state machine of its own. Its
 // comparison with speccheck lives in the lockstep tests of package
-// internal/controlplane/statemachine (see TestLockstepMachineVsVeritas).
+// internal/controlplane/statemachine (see TestLockstepMachineVsSpecCheck).
 
 const seedBudget = 50
 
@@ -76,7 +76,7 @@ func newEngineControlPlaneSubject() suites.ControlPlaneSubject {
 	return &engineControlPlaneSubject{engine: e, ctx: fakeservicetest.New(e, 1), from: fakeservicetest.Ref("a")}
 }
 
-func (s *engineControlPlaneSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+func (s *engineControlPlaneSubject) Do(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 	switch {
 	case op.CreateTopic != nil:
 		code := s.engine.CreateTopic(op.CreateTopic.Name, op.CreateTopic.Partitions)

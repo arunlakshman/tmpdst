@@ -197,7 +197,7 @@ func (b *Broker) failOp(o *operation, code kafkaErrorCode) []core.Action {
 
 func (b *Broker) onOpCP(o *operation, e core.ControlPlaneDone) []core.Action {
 	if o.kind == opGroup {
-		return b.onGroupCP(o, e)
+		return b.onGroupControlPlane(o, e)
 	}
 	if o.kind == opCreate {
 		return b.onCreateCP(o, e)

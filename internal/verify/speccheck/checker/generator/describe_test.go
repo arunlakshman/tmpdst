@@ -13,7 +13,7 @@ func TestDescribeEveryOperationKind(t *testing.T) {
 	topic := core.NewTopicPartition("t1", 2)
 	cases := []struct {
 		name string
-		op   ControlPlaneOp
+		op   ControlPlaneTestStep
 		want string
 	}{
 		{
@@ -48,7 +48,7 @@ func TestDescribeEveryOperationKind(t *testing.T) {
 		},
 		{
 			name: "empty operation",
-			op:   ControlPlaneOp{},
+			op:   ControlPlaneTestStep{},
 			want: "empty operation",
 		},
 	}

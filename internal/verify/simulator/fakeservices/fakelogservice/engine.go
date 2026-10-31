@@ -1,6 +1,6 @@
 // Package fakelogservice is the sim bridge from broker ControlPlaneCall to control-plane
 // replica processes (CP-DSM-8). Replica apply lives in controlplane/machine;
-// the shared Dynamo log and CPTruth live in sim/engines/logstore. This package
+// the shared Dynamo log and ControlPlaneRealState live in sim/engines/logstore. This package
 // keeps boundary faults (503, timeout, lost response, outage) and routes
 // ControlPlaneDeliver/ControlPlaneReply. InjectedBug constants stay numeric for LogParams.Bug and
 // machine.Config.InjectedBug.

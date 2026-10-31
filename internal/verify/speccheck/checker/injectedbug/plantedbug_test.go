@@ -95,7 +95,7 @@ type noHashControlPlane struct{ suites.ControlPlaneSubject }
 
 func (noHashControlPlane) StateHash() (uint64, bool) { return 0, false }
 
-func (n noHashControlPlane) Do(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+func (n noHashControlPlane) Do(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 	return n.ControlPlaneSubject.Do(op)
 }
 

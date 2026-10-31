@@ -52,7 +52,7 @@ func (b *Broker) StateHash() uint64 {
 func (b *Broker) hashScalars(h *stateHasher) {
 	h.u64(uint64(b.cfg.InjectedBug))
 	h.bool(b.started)
-	h.u64(uint64(b.nextReq))
+	h.u64(uint64(b.nextRequestNumber))
 	h.u64(b.nextID)
 	h.u64(uint64(b.timerGen))
 	h.bool(b.stopping)
@@ -105,7 +105,7 @@ func (h *stateHasher) hashSegments(segs []*segment) {
 	for _, s := range segs {
 		h.u64(s.id)
 		h.u64(uint64(s.state))
-		h.u64(uint64(s.req))
+		h.u64(uint64(s.request))
 		h.u64(uint64(s.gen))
 		h.u64(uint64(s.attempts))
 		h.str(s.key)

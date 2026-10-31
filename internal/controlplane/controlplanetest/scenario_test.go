@@ -14,7 +14,7 @@ import (
 
 // compareSteps runs the operations one by one on the subject and on a fresh
 // spec. It fails at the first difference.
-func compareSteps(t *testing.T, subject suites.ControlPlaneSubject, ops []generator.ControlPlaneOp) {
+func compareSteps(t *testing.T, subject suites.ControlPlaneSubject, ops []generator.ControlPlaneTestStep) {
 	t.Helper()
 	spec := suites.NewSpecControlPlaneSubject()
 	for i, op := range ops {
@@ -37,14 +37,14 @@ func compareSteps(t *testing.T, subject suites.ControlPlaneSubject, ops []genera
 
 // call wraps a control-plane operation. The request number is not used by the
 // stores, so it is always 1.
-func call(op core.ControlPlaneOperation) generator.ControlPlaneOp {
+func call(op core.ControlPlaneOperation) generator.ControlPlaneTestStep {
 	return generator.NewCall(core.ControlPlaneCall{Req: 1, Op: op})
 }
 
 // replayOps commits a three-batch, two-partition segment, replays it after the
 // ends moved, sends a different request under its key, an invalid request, and
 // a retry of the same batches under a fresh key (new offsets).
-func replayOps() []generator.ControlPlaneOp {
+func replayOps() []generator.ControlPlaneTestStep {
 	a, b := core.NewTopicPartition("w", 0), core.NewTopicPartition("w", 1)
 	batches := func(key string) []core.PendingBatch {
 		return []core.PendingBatch{
@@ -53,10 +53,10 @@ func replayOps() []generator.ControlPlaneOp {
 			{TP: a, Records: 3, Loc: core.SegmentRef{Key: key, Off: 70, Len: 30}},
 		}
 	}
-	commit := func(key string, bs []core.PendingBatch) generator.ControlPlaneOp {
+	commit := func(key string, bs []core.PendingBatch) generator.ControlPlaneTestStep {
 		return call(core.CommitSegment{SegmentKey: key, Batches: bs})
 	}
-	return []generator.ControlPlaneOp{
+	return []generator.ControlPlaneTestStep{
 		commit("s1", batches("s1")),
 		commit("s2", batches("s2")),
 		commit("s1", batches("s1")),                // replay: the original ranges
@@ -78,8 +78,8 @@ func TestReplayMemorystore(t *testing.T) {
 // item per partition and segment), with a replay
 // of a segment, a segment spanning two runs of one partition (two commits), and
 // a Lookup from every offset with and without a byte limit.
-func manyBatchesOps() []generator.ControlPlaneOp {
-	var ops []generator.ControlPlaneOp
+func manyBatchesOps() []generator.ControlPlaneTestStep {
+	var ops []generator.ControlPlaneTestStep
 	a := core.NewTopicPartition("m", 0)
 	b := core.NewTopicPartition("m", 1)
 	var s1, s2 []core.PendingBatch
@@ -100,7 +100,7 @@ func manyBatchesOps() []generator.ControlPlaneOp {
 		{TP: b, Records: 1, Loc: core.SegmentRef{Key: "big2", Off: 27, Len: 9}},
 		{TP: a, Records: 1, Loc: core.SegmentRef{Key: "big2", Off: 36, Len: 9}},
 	}
-	commit := func(key string, bs []core.PendingBatch) generator.ControlPlaneOp {
+	commit := func(key string, bs []core.PendingBatch) generator.ControlPlaneTestStep {
 		return call(core.CommitSegment{SegmentKey: key, Batches: bs})
 	}
 	ops = append(ops, commit("big1", s1), commit("big1", s1), commit("big2", s2), commit("big2", s2),

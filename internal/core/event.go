@@ -120,7 +120,7 @@ type ControlPlaneDone struct {
 }
 
 // ControlPlaneDeliver delivers one broker ControlPlaneCall to a control-plane replica process. The
-// sim bridge engine issues this; the machine answers with ControlPlaneReply actions.
+// simulator bridge engine issues this; the machine answers with ControlPlaneReply actions.
 type ControlPlaneDeliver struct {
 	From NodeInstance // broker that issued the ControlPlaneCall
 	Req  RequestID

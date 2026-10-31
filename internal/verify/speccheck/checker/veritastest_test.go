@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// counter has a planted bug: an op >= 50 after an op >= 30 fails.
+// counter has a injected bug: an op >= 50 after an op >= 30 fails.
 func counter() SpecChecker[*int, int] {
 	return SpecChecker[*int, int]{
 		Name: "int",
@@ -14,7 +14,7 @@ func counter() SpecChecker[*int, int] {
 		Gen:  func(r *Rand, i int) int { return r.Intn(100) },
 		Step: func(armed *int, op int) error {
 			if *armed > 0 && op >= 50 {
-				return errors.New("planted bug")
+				return errors.New("injected bug")
 			}
 			if op >= 30 {
 				*armed = 1
@@ -36,7 +36,7 @@ func TestShrinkFindsMinimal(t *testing.T) {
 	c := counter()
 	f := c.RunSeed(1)
 	if f == nil {
-		t.Fatal("planted bug not found")
+		t.Fatal("injected bug not found")
 	}
 	if got, want := c.Literal(f.Ops), "[]int{\n\t30,\n\t50,\n}"; got != want {
 		t.Fatalf("shrunk to\n%s\nwant\n%s", got, want)

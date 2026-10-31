@@ -29,7 +29,7 @@ func Run(ctx context.Context, b Dependencies, exec Executor, f core.MachineFacto
 	in := b.Inbox
 	if in == nil {
 		// A private inbox would be unreachable by the Executor and readers.
-		return errors.New("sys.Run: Bundle.Inbox is nil")
+		return errors.New("system.Run: Bundle.Inbox is nil")
 	}
 	defer in.Close()
 	r := &eventLoop{b: b, in: in, exec: exec, timers: map[core.TimerID]*time.Timer{}}
@@ -119,7 +119,7 @@ func (r *eventLoop) dispatch(acts []core.Action) (bool, error) {
 		case core.ShutdownDone:
 			return true, nil
 		default:
-			return true, fmt.Errorf("sys: unknown action %T", a)
+			return true, fmt.Errorf("system: unknown action %T", a)
 		}
 	}
 	return false, nil

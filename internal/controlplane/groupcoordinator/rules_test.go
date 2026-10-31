@@ -213,7 +213,7 @@ func TestRebuildKeepsMembersAndExpiresSilent(t *testing.T) {
 	if err := c2.Rebuild(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if v := peek(c2, "g"); v.phase != "Stable" || v.gen != 2 || !slices.Equal(v.members, []string{a, b}) {
+	if v := peek(c2, "g"); v.phase != "Stable" || v.generation != 2 || !slices.Equal(v.members, []string{a, b}) {
 		t.Fatalf("rebuilt g: %+v", v)
 	}
 	if v := peek(c2, "unsynced"); v.phase != "PreparingRebalance" || !slices.Equal(v.members, []string{u}) {
@@ -329,17 +329,17 @@ func TestConcurrentJoinsOneRound(t *testing.T) {
 	}
 	wg.Wait()
 	leader := ""
-	gen := int32(-1)
+	generation := int32(-1)
 	ids := []string{}
 	for i := range n {
 		if errs[i] != nil || res[i].Err != core.OK {
 			t.Fatalf("join %d: %+v %v", i, res[i], errs[i])
 		}
-		if gen == -1 {
-			gen = res[i].Generation
+		if generation == -1 {
+			generation = res[i].Generation
 		}
-		if res[i].Generation != gen || res[i].Protocol != "range" {
-			t.Fatalf("join %d: generation %d, want %d", i, res[i].Generation, gen)
+		if res[i].Generation != generation || res[i].Protocol != "range" {
+			t.Fatalf("join %d: generation %d, want %d", i, res[i].Generation, generation)
 		}
 		if len(res[i].Members) > 0 {
 			leader = res[i].MemberID
@@ -349,8 +349,8 @@ func TestConcurrentJoinsOneRound(t *testing.T) {
 		}
 		ids = append(ids, res[i].MemberID)
 	}
-	if leader == "" || gen != 1 {
-		t.Fatalf("no leader or generation %d", gen)
+	if leader == "" || generation != 1 {
+		t.Fatalf("no leader or generation %d", generation)
 	}
 	var assigns []Assignment
 	for _, id := range ids {
@@ -358,7 +358,7 @@ func TestConcurrentJoinsOneRound(t *testing.T) {
 	}
 	for _, id := range ids {
 		wg.Go(func() {
-			r, err := c.SyncGroup(t.Context(), SyncReq{Group: "g", MemberID: id, Generation: gen, Assignments: assigns})
+			r, err := c.SyncGroup(t.Context(), SyncReq{Group: "g", MemberID: id, Generation: generation, Assignments: assigns})
 			if err != nil || r.Err != core.OK || string(r.Assignment) != "as-"+id {
 				t.Errorf("sync %s: %+v %v", id, r, err)
 			}

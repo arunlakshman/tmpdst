@@ -13,12 +13,12 @@ import (
 
 // view is a read of one group's memory, taken under its mutex.
 type view struct {
-	phase   string
-	gen     int32
-	leader  string
-	members []string
-	joined  map[string]bool // parked JoinGroup
-	synced  map[string]bool // parked SyncGroup
+	phase      string
+	generation int32
+	leader     string
+	members    []string
+	joined     map[string]bool // parked JoinGroup
+	synced     map[string]bool // parked SyncGroup
 }
 
 func peek(c *Coordinator, name string) view {
@@ -32,7 +32,7 @@ func peek(c *Coordinator, name string) view {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	v := view{phase: g.phase.String(), gen: g.generation, leader: g.leader, joined: map[string]bool{}, synced: map[string]bool{}}
+	v := view{phase: g.phase.String(), generation: g.generation, leader: g.leader, joined: map[string]bool{}, synced: map[string]bool{}}
 	for id, m := range g.members {
 		v.members = append(v.members, id)
 		if m.joinWait != nil {
@@ -256,7 +256,7 @@ func TestOneMemberJoinsAndSyncs(t *testing.T) {
 func TestSecondMemberRebalancesStableGroup(t *testing.T) {
 	h := newHarness(t, Config{})
 	a, b := h.stableTwo("g")
-	if v := peek(h.c, "g"); v.phase != "Stable" || v.gen != 2 || v.leader != a {
+	if v := peek(h.c, "g"); v.phase != "Stable" || v.generation != 2 || v.leader != a {
 		t.Fatalf("after two members: %+v", v)
 	}
 	if c := h.c.Heartbeat(t.Context(), HeartbeatReq{Group: "g", MemberID: a, Generation: 2}); c != core.OK {
@@ -314,7 +314,7 @@ func TestLeaveRebalances(t *testing.T) {
 	}
 	// The last member leaves: the group is Empty and keeps its generation.
 	h.c.LeaveGroup(t.Context(), LeaveReq{Group: "g", Members: []string{a}})
-	if v := peek(h.c, "g"); v.phase != "Empty" || v.gen != 3 {
+	if v := peek(h.c, "g"); v.phase != "Empty" || v.generation != 3 {
 		t.Fatalf("after last leave: %+v", v)
 	}
 }

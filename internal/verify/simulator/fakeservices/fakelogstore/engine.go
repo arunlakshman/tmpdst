@@ -4,7 +4,7 @@
 // (decision 14). Every live RequestID gets exactly one completion; a lost answer
 // surfaces as ErrTimeout+MaybeApplied.
 //
-// After CP-DSM-8 the engine is also simulator.CPTruth: a reference replay of durable
+// After CP-DSM-8 the engine is also simulator.ControlPlaneRealState: a reference replay of durable
 // slots through controlplane/statemachine.ReplayPosition (decision 21 / log replay).
 package fakelogstore
 
@@ -177,7 +177,7 @@ func (e *Engine) CreateTopic(name string, partitions int32) core.ErrCode {
 	return err
 }
 
-// Committed implements simulator.CPTruth.
+// Committed implements simulator.ControlPlaneRealState.
 func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
 	d, err := e.ref.Lookup(core.FindSegments{TP: tp})
 	if err != nil || d.Err != core.OK {
@@ -186,10 +186,10 @@ func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
 	return slices.Clone(core.ResponseAs[core.FindSegmentsResp](d).Ranges)
 }
 
-// HighWatermark implements simulator.CPTruth.
+// HighWatermark implements simulator.ControlPlaneRealState.
 func (e *Engine) HighWatermark(tp core.TopicPartition) core.Offset {
 	return e.ref.End(tp)
 }
 
-// Gen implements simulator.CPTruth.
+// Gen implements simulator.ControlPlaneRealState.
 func (e *Engine) Gen() uint64 { return e.gen }

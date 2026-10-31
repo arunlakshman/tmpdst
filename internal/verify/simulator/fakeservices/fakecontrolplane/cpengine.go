@@ -15,7 +15,7 @@ import (
 	"manifester/internal/verify/speccheck"
 )
 
-// Engine is the fake control plane. It is also the simulator.CPTruth.
+// Engine is the fake control plane. It is also the simulator.ControlPlaneRealState.
 type Engine struct {
 	*fakecompletions.CompletionCore
 	spec     *speccheck.ControlPlane

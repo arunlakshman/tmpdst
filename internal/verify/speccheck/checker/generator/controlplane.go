@@ -14,23 +14,25 @@ type CreateTopic struct {
 	Partitions int32
 }
 
-// ControlPlaneOp is one control-plane operation. Exactly one field is not nil.
-type ControlPlaneOp struct {
+// ControlPlaneTestStep is one control-plane operation. Exactly one field is not nil.
+type ControlPlaneTestStep struct {
 	CreateTopic *CreateTopic
 	Call        *core.ControlPlaneCall
 }
 
 // NewCreateTopic returns an operation that creates a topic.
-func NewCreateTopic(name string, partitions int32) ControlPlaneOp {
-	return ControlPlaneOp{CreateTopic: &CreateTopic{Name: name, Partitions: partitions}}
+func NewCreateTopic(name string, partitions int32) ControlPlaneTestStep {
+	return ControlPlaneTestStep{CreateTopic: &CreateTopic{Name: name, Partitions: partitions}}
 }
 
 // NewCall returns an operation that sends call.
-func NewCall(call core.ControlPlaneCall) ControlPlaneOp { return ControlPlaneOp{Call: &call} }
+func NewCall(call core.ControlPlaneCall) ControlPlaneTestStep {
+	return ControlPlaneTestStep{Call: &call}
+}
 
 // Describe returns a short plain-English text for an operation, for failure
 // messages.
-func (o ControlPlaneOp) Describe() string {
+func (o ControlPlaneTestStep) Describe() string {
 	switch {
 	case o.CreateTopic != nil:
 		return fmt.Sprintf("create topic %q with %d partitions", o.CreateTopic.Name, o.CreateTopic.Partitions)
@@ -55,8 +57,8 @@ func (o ControlPlaneOp) Describe() string {
 // conflict, the same batches under a fresh key, and five kinds of malformed
 // request. Lookups cover From = -1, From inside long runs and MaxBytes cuts.
 // DescribeTopics covers known, unknown and all topics.
-func ControlPlaneOps(p InputProfile) func(r *checker.Rand, i int) ControlPlaneOp {
-	return func(r *checker.Rand, i int) ControlPlaneOp {
+func ControlPlaneOps(p InputProfile) func(r *checker.Rand, i int) ControlPlaneTestStep {
+	return func(r *checker.Rand, i int) ControlPlaneTestStep {
 		req := core.RequestID(i + 1)
 		switch chooseByWeight(r, p.CreateTopicWeight, p.CommitWeight, p.LookupWeight, p.DescribeWeight) {
 		case 0:
@@ -75,12 +77,12 @@ func ControlPlaneOps(p InputProfile) func(r *checker.Rand, i int) ControlPlaneOp
 
 // genExclusiveCreate is a CreateTopic call with FailIfExists. It takes its
 // name and count from genCreateTopic, so it also covers the invalid creates.
-func genExclusiveCreate(p InputProfile, r *checker.Rand, req core.RequestID) ControlPlaneOp {
+func genExclusiveCreate(p InputProfile, r *checker.Rand, req core.RequestID) ControlPlaneTestStep {
 	c := genCreateTopic(p, r).CreateTopic
 	return NewCall(core.ControlPlaneCall{Req: req, Op: core.CreateTopic{Name: c.Name, Partitions: c.Partitions, FailIfExists: true}})
 }
 
-func genCreateTopic(p InputProfile, r *checker.Rand) ControlPlaneOp {
+func genCreateTopic(p InputProfile, r *checker.Rand) ControlPlaneTestStep {
 	if !percent(r, p.CreateInvalidPercent) {
 		return NewCreateTopic(pick(r, p.Topics), int32(1+r.Intn(p.MaxPartitions)))
 	}
@@ -211,7 +213,7 @@ func genBatch(p InputProfile, r *checker.Rand, segmentKey string) core.PendingBa
 // MinimizeControlPlaneOp returns simpler versions of op, simplest first: fewer
 // batches, smaller counts, smaller offsets and shorter keys. It never returns
 // op itself, so a caller that keeps shrinking always ends.
-func MinimizeControlPlaneOp(op ControlPlaneOp) []ControlPlaneOp {
+func MinimizeControlPlaneOp(op ControlPlaneTestStep) []ControlPlaneTestStep {
 	switch {
 	case op.CreateTopic != nil:
 		return minimizeCreateTopic(*op.CreateTopic)
@@ -230,15 +232,15 @@ func MinimizeControlPlaneOp(op ControlPlaneOp) []ControlPlaneOp {
 	case core.CreateTopic:
 		ops = minimizeExclusiveCreate(o)
 	}
-	out := make([]ControlPlaneOp, 0, len(ops))
+	out := make([]ControlPlaneTestStep, 0, len(ops))
 	for _, o := range ops {
 		out = append(out, NewCall(core.ControlPlaneCall{Req: call.Req, Op: o}))
 	}
 	return out
 }
 
-func minimizeCreateTopic(c CreateTopic) []ControlPlaneOp {
-	var out []ControlPlaneOp
+func minimizeCreateTopic(c CreateTopic) []ControlPlaneTestStep {
+	var out []ControlPlaneTestStep
 	if c.Partitions > 1 {
 		out = append(out, NewCreateTopic(c.Name, 1))
 	}
@@ -335,12 +337,12 @@ func minimizeDescribe(d core.DescribeTopics) []core.ControlPlaneOperation {
 
 // FormatControlPlaneOp returns op as a Go expression that you can paste into a
 // regression test. The expression needs the packages core and generator.
-func FormatControlPlaneOp(op ControlPlaneOp) string {
+func FormatControlPlaneOp(op ControlPlaneTestStep) string {
 	switch {
 	case op.CreateTopic != nil:
 		return fmt.Sprintf("generator.NewCreateTopic(%q, %d)", op.CreateTopic.Name, op.CreateTopic.Partitions)
 	case op.Call == nil:
-		return "generator.ControlPlaneOp{}"
+		return "generator.ControlPlaneTestStep{}"
 	}
 	return fmt.Sprintf("generator.NewCall(core.ControlPlaneCall{Req: %d, Op: %s})", op.Call.Req, formatCPOp(op.Call.Op))
 }

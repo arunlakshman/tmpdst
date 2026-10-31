@@ -126,14 +126,14 @@ func TestConformanceS3(t *testing.T) {
 	}, 50)
 }
 
-// TestPlantedBugsCaught proves that the suite fails when the adapter on the
+// TestInjectedBugsCaught proves that the suite fails when the adapter on the
 // fake S3 server has a known bug, so a pass of TestConformanceFake means
 // something.
-func TestPlantedBugsCaught(t *testing.T) {
+func TestInjectedBugsCaught(t *testing.T) {
 	injectedbug.RequireAllObjectBugsDetected(t, newFakeS3Subject(t), 100)
 }
 
-// TestPlantedBugsCaughtMem does the same for the in-process fake store.
-func TestPlantedBugsCaughtMem(t *testing.T) {
+// TestInjectedBugsCaughtMem does the same for the in-process fake store.
+func TestInjectedBugsCaughtMem(t *testing.T) {
 	injectedbug.RequireAllObjectBugsDetected(t, newFake, 100)
 }

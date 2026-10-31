@@ -10,7 +10,7 @@ import (
 type NodeTime int64
 
 // RealTime is UTC, nanoseconds since the Unix epoch. Used for Kafka
-// LogAppendTime, credential expiry and anything persisted. Scripted in sim.
+// LogAppendTime, credential expiry and anything persisted. Scripted in simulator.
 type RealTime int64
 
 // Duration is nanoseconds.
@@ -29,7 +29,7 @@ type ID [16]byte
 
 type (
 	// NodeID names a node.
-	NodeID string // stable identity of a broker (or sim workload)
+	NodeID string // stable identity of a broker (or simulator workload)
 	// BootNumber identifies one boot of a node.
 	BootNumber ID // fresh per boot; names one run of a node in logs, facts and the runtime
 	// ConnID names a connection.
@@ -81,7 +81,7 @@ type SegmentRef struct {
 //
 // ErrNotFound and ErrConflict are always truthful; engines inject
 // only ErrTimeout, ErrUnavailable, ErrIO and ErrConnClosed. ErrCorrupt comes
-// only from the core's decoder, never from sys.ErrorClassifier.
+// only from the core's decoder, never from system.ErrorClassifier.
 type ErrCode uint16
 
 // ErrCode values.

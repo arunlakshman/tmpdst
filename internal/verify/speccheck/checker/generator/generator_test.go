@@ -180,7 +180,7 @@ func controlPlaneCoverage(p InputProfile) map[string]int {
 
 // classifyControlPlane runs op on the spec and names the cases that it
 // reached. The committed map holds the segment keys the spec has accepted.
-func classifyControlPlane(spec *speccheck.ControlPlane, committed map[string]bool, op ControlPlaneOp) []string {
+func classifyControlPlane(spec *speccheck.ControlPlane, committed map[string]bool, op ControlPlaneTestStep) []string {
 	if op.CreateTopic != nil {
 		if spec.CreateTopic(op.CreateTopic.Name, op.CreateTopic.Partitions) == core.OK {
 			return []string{"create topic accepted"}
@@ -369,7 +369,7 @@ func shrinkObjectToEnd(t *testing.T, op core.IOCall) {
 	t.Fatalf("shrinking %s did not end.", FormatObjectOp(op))
 }
 
-func shrinkPlaneToEnd(t *testing.T, op ControlPlaneOp) {
+func shrinkPlaneToEnd(t *testing.T, op ControlPlaneTestStep) {
 	t.Helper()
 	for range 1000 {
 		next := MinimizeControlPlaneOp(op)

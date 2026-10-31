@@ -175,7 +175,7 @@ func serveCP(t *testing.T, reg func(*grpc.Server)) string {
 }
 
 // -cp-url takes a list: a dead address and a standby (Unavailable) are skipped in one call.
-func TestCPURLListFailsOver(t *testing.T) {
+func TestControlPlaneURLListFailsOver(t *testing.T) {
 	deadLn, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

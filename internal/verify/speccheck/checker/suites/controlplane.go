@@ -50,9 +50,9 @@ func (p *ControlPlanePair) nextReq() core.RequestID {
 //     name, so a partition count never shrinks.
 //   - Commits are all or nothing: an invalid batch in a commit leaves no run
 //     behind, which the run check above finds.
-func ControlPlaneComparator(p generator.InputProfile, newSubject func() ControlPlaneSubject) checker.SpecChecker[*ControlPlanePair, generator.ControlPlaneOp] {
-	return checker.SpecChecker[*ControlPlanePair, generator.ControlPlaneOp]{
-		Name: "generator.ControlPlaneOp",
+func ControlPlaneComparator(p generator.InputProfile, newSubject func() ControlPlaneSubject) checker.SpecChecker[*ControlPlanePair, generator.ControlPlaneTestStep] {
+	return checker.SpecChecker[*ControlPlanePair, generator.ControlPlaneTestStep]{
+		Name: "generator.ControlPlaneTestStep",
 		New: func() *ControlPlanePair {
 			spec := speccheck.NewControlPlane()
 			return &ControlPlanePair{
@@ -82,7 +82,7 @@ func ControlPlane(t checker.Reporter, p generator.InputProfile, newSubject func(
 
 // diffControlPlane compares two results. For CreateTopic it compares the code
 // only.
-func diffControlPlane(op generator.ControlPlaneOp, expected, actual observation.ControlPlaneResult) string {
+func diffControlPlane(op generator.ControlPlaneTestStep, expected, actual observation.ControlPlaneResult) string {
 	if op.CreateTopic != nil {
 		if expected.Code != actual.Code {
 			return fmt.Sprintf("The field code differs: the expected result has %v, but the actual result has %v.",
@@ -93,7 +93,7 @@ func diffControlPlane(op generator.ControlPlaneOp, expected, actual observation.
 	return observation.DiffControlPlane(expected, actual)
 }
 
-func controlPlaneStep(p *ControlPlanePair, op generator.ControlPlaneOp) error {
+func controlPlaneStep(p *ControlPlanePair, op generator.ControlPlaneTestStep) error {
 	text := generator.FormatControlPlaneOp(op)
 	specBefore, _ := p.specSubject.StateHash()
 	subjectBefore, subjectHasHash := p.subject.StateHash()
@@ -137,7 +137,7 @@ func controlPlaneStep(p *ControlPlanePair, op generator.ControlPlaneOp) error {
 	return nil
 }
 
-func (p *ControlPlanePair) modelApply(op generator.ControlPlaneOp) (observation.ControlPlaneResult, bool) {
+func (p *ControlPlanePair) modelApply(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, bool) {
 	switch {
 	case op.CreateTopic != nil:
 		return p.model.createTopic(op.CreateTopic.Name, op.CreateTopic.Partitions)

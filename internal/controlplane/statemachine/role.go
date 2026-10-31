@@ -149,7 +149,7 @@ func (m *Machine) heartbeatDue() bool {
 	if m.now-m.lastOwnAt <= core.NodeTime(hb) {
 		return false
 	}
-	return len(m.queue) == 0 && len(m.flights) == 0 && m.pending == 0
+	return len(m.queue) == 0 && len(m.inFlightAppends) == 0 && m.pending == 0
 }
 
 func (m *Machine) maybeReplicaFault() []core.Action {
@@ -214,7 +214,7 @@ func (m *Machine) hitTrimmed() []core.Action {
 
 func (m *Machine) clearLocal() {
 	m.queue = nil
-	m.flights = map[core.RequestID]*inFlightAppend{}
+	m.inFlightAppends = map[core.RequestID]*inFlightAppend{}
 	m.waiters = map[string][]waitingCommand{}
 	m.buf = map[core.LogPosition][]byte{}
 	m.pending, m.pendingKind = 0, pendingNone
@@ -231,14 +231,14 @@ func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {
 		})
 	}
 	// Sort map keys so answer order is stable across runs (TraceHash).
-	reqs := make([]core.RequestID, 0, len(m.flights))
-	for req := range m.flights { //detcheck:ok keys are collected, then sorted before use
+	reqs := make([]core.RequestID, 0, len(m.inFlightAppends))
+	for req := range m.inFlightAppends { //detcheck:ok keys are collected, then sorted before use
 		reqs = append(reqs, req)
 	}
 	slices.Sort(reqs)
 	seen := map[string]bool{}
 	for _, req := range reqs {
-		f := m.flights[req]
+		f := m.inFlightAppends[req]
 		seen[f.id] = true
 		for _, c := range f.cmds {
 			refuse(c)
@@ -289,7 +289,7 @@ func (m *Machine) emitHeartbeat() []core.Action {
 	m.nextReq++
 	req := m.nextReq
 	slot := m.alloc()
-	m.flights[req] = &inFlightAppend{req: req, slot: slot, id: id, data: data, cmds: nil}
+	m.inFlightAppends[req] = &inFlightAppend{req: req, slot: slot, id: id, data: data, cmds: nil}
 	return []core.Action{core.LogAppend{Req: req, Slot: slot, Data: data}}
 }
 

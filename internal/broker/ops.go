@@ -107,7 +107,7 @@ func (b *Broker) startOp(o *operation) []core.Action {
 }
 
 func (b *Broker) issue(o *operation) []core.Action {
-	o.req = b.req()
+	o.req = b.nextRequestID()
 	if o.state == opGet {
 		return []core.Action{core.ObjectGet{Req: o.req, Ref: o.ranges[o.next].Loc}}
 	}

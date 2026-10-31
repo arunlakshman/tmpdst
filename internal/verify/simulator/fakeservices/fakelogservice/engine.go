@@ -14,7 +14,7 @@ import (
 	"manifester/internal/verify/simulator/fakeservices/internal/fakecompletions"
 )
 
-// The InjectedBug constants select a mutant (sim.LogParams.Bug). Each is caught by a property.
+// The InjectedBug constants select a mutant (simulator.LogParams.Bug). Each is caught by a property.
 const (
 	InjectedBugNone             uint8 = iota
 	InjectedBugWriterOffsets          // offsets chosen by the writer instead of by apply
@@ -137,7 +137,7 @@ func (e *Engine) CreateTopic(name string, partitions int32) core.ErrCode {
 // Topics returns topics created at setup for CP process factories.
 func (e *Engine) Topics() []TopicSeed { return slices.Clone(e.topics) }
 
-// Name implements sim.Engine.
+// Name implements simulator.Engine.
 func (e *Engine) Name() string { return e.name }
 
 // Handles reports whether a is a ControlPlaneCall or ControlPlaneReply.

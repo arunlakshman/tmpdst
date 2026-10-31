@@ -1,4 +1,4 @@
-// Package memorystore is a cp.Store over the speccheck spec behind a mutex, for
+// Package memorystore is a controlplane.Store over the speccheck spec behind a mutex, for
 // local development and handler tests.
 package memorystore
 
@@ -11,7 +11,7 @@ import (
 	"manifester/internal/verify/speccheck"
 )
 
-// Store is an in-memory cp.Store backed by the speccheck control-plane spec.
+// Store is an in-memory controlplane.Store backed by the speccheck control-plane spec.
 type Store struct {
 	mu   sync.Mutex
 	spec *speccheck.ControlPlane
@@ -36,23 +36,23 @@ func executeAs[R any](ctx context.Context, s *Store, op core.ControlPlaneOperati
 	return core.ResponseAs[R](d), d.Err, err
 }
 
-// CommitSegment implements cp.Store.
+// CommitSegment implements controlplane.Store.
 func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
 	return executeAs[core.CommitSegmentResp](ctx, s, op)
 }
 
-// Lookup implements cp.Store.
+// Lookup implements controlplane.Store.
 func (s *Store) Lookup(ctx context.Context, op core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error) {
 	return executeAs[core.FindSegmentsResp](ctx, s, op)
 }
 
-// DescribeTopics implements cp.Store.
+// DescribeTopics implements controlplane.Store.
 func (s *Store) DescribeTopics(ctx context.Context, op core.DescribeTopics) (core.DescribeTopicsResp, error) {
 	d, err := s.exec(ctx, op)
 	return core.ResponseAs[core.DescribeTopicsResp](d), err
 }
 
-// CreateTopic implements cp.Store.
+// CreateTopic implements controlplane.Store.
 func (s *Store) CreateTopic(ctx context.Context, op core.CreateTopic) (core.ErrCode, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err

@@ -40,7 +40,7 @@ func (i *ackedMeansCommitted) Observe(v simulator.View) {
 		det := []core.ContextPair{{Key: "offset", Value: a.off}, {Key: "key", Value: a.key}}
 		var loc core.SegmentRef
 		found := false
-		for _, r := range v.CP().Committed(tp()) {
+		for _, r := range v.CP().Committed(topicPartition()) {
 			if int64(r.Base) == a.off && r.Count == 1 && r.Loc.Key == a.key {
 				loc, found = r.Loc, true
 			}
@@ -52,10 +52,10 @@ func (i *ackedMeansCommitted) Observe(v simulator.View) {
 			continue
 		}
 		same := false
-		if seg, err := segmentformat.Decode(obj); err == nil {
-			for j, e := range seg.Entries {
+		if segment, err := segmentformat.Decode(obj); err == nil {
+			for j, e := range segment.Entries {
 				if e.Off == loc.Off && e.Len == loc.Len {
-					same = string(seg.Batches[j].Data) == string(a.payload)
+					same = string(segment.Batches[j].Data) == string(a.payload)
 				}
 			}
 		}

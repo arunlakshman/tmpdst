@@ -19,7 +19,7 @@ func (h *stateHasher) ref(r core.NodeInstance) {
 	h.Bytes(r.Inc[:])
 }
 
-func (h *stateHasher) segRef(s core.SegmentRef) {
+func (h *stateHasher) segmentRef(s core.SegmentRef) {
 	h.Str(s.Key)
 	h.I64(s.Off)
 	h.I64(s.Len)
@@ -30,7 +30,7 @@ func (h *stateHasher) batchRange(b core.BatchRange) {
 	h.U64(uint64(uint32(b.TP.Partition)))
 	h.I64(int64(b.Base))
 	h.I64(b.Count)
-	h.segRef(b.Loc)
+	h.segmentRef(b.Loc)
 }
 
 func (h *stateHasher) event(b core.EventData) {
@@ -103,12 +103,12 @@ func (h *stateHasher) eventDone(b core.EventData) {
 		h.U64(uint64(e.Req))
 		h.U64(uint64(e.Err))
 		h.U64(uint64(e.Outcome))
-		h.cpResp(e.Resp)
+		h.controlPlaneResponse(e.Resp)
 	case core.ControlPlaneDeliver:
 		h.U64(18)
 		h.ref(e.From)
 		h.U64(uint64(e.Req))
-		h.cpOp(e.Op)
+		h.controlPlaneOperation(e.Op)
 	default:
 		h.eventLogDone(b)
 	}
@@ -202,7 +202,7 @@ func (h *stateHasher) actionIO(a core.Action) {
 	case core.ObjectGet:
 		h.U64(109)
 		h.U64(uint64(x.Req))
-		h.segRef(x.Ref)
+		h.segmentRef(x.Ref)
 	case core.ObjectDelete:
 		h.U64(110)
 		h.U64(uint64(x.Req))
@@ -214,14 +214,14 @@ func (h *stateHasher) actionIO(a core.Action) {
 	case core.ControlPlaneCall:
 		h.U64(112) // Timeout is not folded: the simulator never sets it
 		h.U64(uint64(x.Req))
-		h.cpOp(x.Op)
+		h.controlPlaneOperation(x.Op)
 	case core.ControlPlaneReply:
 		h.U64(120)
 		h.ref(x.To)
 		h.U64(uint64(x.Done.Req))
 		h.U64(uint64(x.Done.Err))
 		h.U64(uint64(x.Done.Outcome))
-		h.cpResp(x.Done.Resp)
+		h.controlPlaneResponse(x.Done.Resp)
 	case core.RecordFact:
 		h.U64(113) // the fact itself is folded when it reaches the timeline
 	case core.StopForRestart:
@@ -258,8 +258,8 @@ func (h *stateHasher) actionLog(a core.Action) {
 	}
 }
 
-// cpOp folds an op; nil is tag 200.
-func (h *stateHasher) cpOp(op core.ControlPlaneOperation) {
+// controlPlaneOperation folds an op; nil is tag 200.
+func (h *stateHasher) controlPlaneOperation(op core.ControlPlaneOperation) {
 	switch x := op.(type) {
 	case nil:
 		h.U64(200)
@@ -271,7 +271,7 @@ func (h *stateHasher) cpOp(op core.ControlPlaneOperation) {
 			h.Str(b.TP.Topic)
 			h.U64(uint64(uint32(b.TP.Partition)))
 			h.I64(b.Records)
-			h.segRef(b.Loc)
+			h.segmentRef(b.Loc)
 		}
 	case core.FindSegments:
 		h.U64(203)
@@ -294,14 +294,14 @@ func (h *stateHasher) cpOp(op core.ControlPlaneOperation) {
 		h.Str(x.Name)
 		h.U64(uint64(uint32(x.Partitions)))
 	default:
-		if !h.cpGroupOp(op) {
+		if !h.controlPlaneGroupOperation(op) {
 			panic(fmt.Sprintf("sim: trace hash: untagged CP op %T", op))
 		}
 	}
 }
 
-// cpResp folds a response; nil (an error completion) is tag 300.
-func (h *stateHasher) cpResp(r core.ControlPlaneResponse) {
+// controlPlaneResponse folds a response; nil (an error completion) is tag 300.
+func (h *stateHasher) controlPlaneResponse(r core.ControlPlaneResponse) {
 	switch x := r.(type) {
 	case nil:
 		h.U64(300)
@@ -326,7 +326,7 @@ func (h *stateHasher) cpResp(r core.ControlPlaneResponse) {
 			h.U64(uint64(uint32(t.Partitions)))
 		}
 	default:
-		if !h.cpGroupResp(r) {
+		if !h.controlPlaneGroupResponse(r) {
 			panic(fmt.Sprintf("sim: trace hash: untagged CP response %T", r))
 		}
 	}
@@ -384,8 +384,8 @@ func (h *stateHasher) groupMember(m core.GroupMember) {
 	h.Str(string(m.Metadata))
 }
 
-// cpGroupOp folds a group operation. It reports false for other operations.
-func (h *stateHasher) cpGroupOp(op core.ControlPlaneOperation) bool {
+// controlPlaneGroupOperation folds a group operation. It reports false for other operations.
+func (h *stateHasher) controlPlaneGroupOperation(op core.ControlPlaneOperation) bool {
 	switch x := op.(type) {
 	case core.GroupInstall:
 		h.U64(206)
@@ -430,14 +430,14 @@ func (h *stateHasher) cpGroupOp(op core.ControlPlaneOperation) bool {
 			h.partitionOffset(o)
 		}
 	default:
-		return h.cpGroupRead(op) || h.cpGroupCall(op)
+		return h.controlPlaneGroupRead(op) || h.controlPlaneGroupCall(op)
 	}
 	return true
 }
 
-// cpGroupCall folds a broker group call to the control plane (decision Q3).
+// controlPlaneGroupCall folds a broker group call to the control plane (decision Q3).
 // It reports false for other operations.
-func (h *stateHasher) cpGroupCall(op core.ControlPlaneOperation) bool {
+func (h *stateHasher) controlPlaneGroupCall(op core.ControlPlaneOperation) bool {
 	switch x := op.(type) {
 	case core.GroupJoin:
 		h.U64(213)
@@ -486,8 +486,8 @@ func (h *stateHasher) cpGroupCall(op core.ControlPlaneOperation) bool {
 	return true
 }
 
-// cpGroupRead folds a group read. It reports false for other operations.
-func (h *stateHasher) cpGroupRead(op core.ControlPlaneOperation) bool {
+// controlPlaneGroupRead folds a group read. It reports false for other operations.
+func (h *stateHasher) controlPlaneGroupRead(op core.ControlPlaneOperation) bool {
 	switch x := op.(type) {
 	case core.OffsetFetch:
 		h.U64(210)
@@ -508,8 +508,8 @@ func (h *stateHasher) cpGroupRead(op core.ControlPlaneOperation) bool {
 	return true
 }
 
-// cpGroupResp folds a group response. It reports false for other responses.
-func (h *stateHasher) cpGroupResp(r core.ControlPlaneResponse) bool {
+// controlPlaneGroupResponse folds a group response. It reports false for other responses.
+func (h *stateHasher) controlPlaneGroupResponse(r core.ControlPlaneResponse) bool {
 	switch x := r.(type) {
 	case core.OffsetCommitResp:
 		h.U64(305)
@@ -547,14 +547,14 @@ func (h *stateHasher) cpGroupResp(r core.ControlPlaneResponse) bool {
 			h.Str(g.State)
 		}
 	default:
-		return h.cpGroupCallResp(r)
+		return h.controlPlaneGroupCallResponse(r)
 	}
 	return true
 }
 
-// cpGroupCallResp folds the answers of the broker group calls. It reports false
+// controlPlaneGroupCallResponse folds the answers of the broker group calls. It reports false
 // for other responses.
-func (h *stateHasher) cpGroupCallResp(r core.ControlPlaneResponse) bool {
+func (h *stateHasher) controlPlaneGroupCallResponse(r core.ControlPlaneResponse) bool {
 	switch x := r.(type) {
 	case core.GroupJoinResp:
 		h.U64(309)

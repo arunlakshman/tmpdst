@@ -57,18 +57,18 @@ type Machine struct {
 	ckptPending core.LogPosition // slot of in-flight ObjectPut snapshot
 	ckptData    []byte
 
-	queue      []waitingCommand                   // client ops waiting for a commit slot
-	flights    map[core.RequestID]*inFlightAppend // in-flight commit LogAppends (at most K)
-	waiters    map[string][]waitingCommand
-	answers    []ReplyToClient
-	proj       map[core.TopicPartition]core.Offset // InjectedBugWriterOffsets projection
-	trimFloor  core.LogPosition                    // slots below are trimmed
-	stallUntil core.NodeTime
-	downUntil  core.NodeTime
-	crashed    bool
-	needsCkpt  bool // hit a tomb; must restore before catch-up from zero
-	ckptRetry  bool // the last checkpoint read failed; read again before catch-up
-	seeds      []topicSeed
+	queue           []waitingCommand                   // client ops waiting for a commit slot
+	inFlightAppends map[core.RequestID]*inFlightAppend // in-flight commit LogAppends (at most K)
+	waiters         map[string][]waitingCommand
+	answers         []ReplyToClient
+	proj            map[core.TopicPartition]core.Offset // InjectedBugWriterOffsets projection
+	trimFloor       core.LogPosition                    // slots below are trimmed
+	stallUntil      core.NodeTime
+	downUntil       core.NodeTime
+	crashed         bool
+	needsCkpt       bool // hit a tomb; must restore before catch-up from zero
+	ckptRetry       bool // the last checkpoint read failed; read again before catch-up
+	seeds           []topicSeed
 
 	readWaiters  []readWaiter // lookups and describes waiting for a fresh tail
 	tailsStarted uint64       // tail checks started so far
@@ -104,10 +104,10 @@ func New(cfg Config) core.MachineFactory {
 		}
 		return &Machine{
 			env: env, self: self, cfg: cfg, openErr: err,
-			fold:    fold,
-			buf:     map[core.LogPosition][]byte{},
-			flights: map[core.RequestID]*inFlightAppend{},
-			waiters: map[string][]waitingCommand{},
+			fold:            fold,
+			buf:             map[core.LogPosition][]byte{},
+			inFlightAppends: map[core.RequestID]*inFlightAppend{},
+			waiters:         map[string][]waitingCommand{},
 		}
 	}
 }
@@ -164,7 +164,7 @@ func (m *Machine) Step(ev core.Event) []core.Action {
 	case core.LogDeleteOldDone:
 		acts = m.onTrimDone(body)
 	case core.ControlPlaneDeliver:
-		return m.onCPOffer(body) // already withReplies
+		return m.onControlPlaneDeliver(body) // already withReplies
 	default:
 		return nil
 	}
@@ -277,7 +277,7 @@ func (m *Machine) onReadDone(d core.LogReadDone) []core.Action {
 }
 
 func (m *Machine) onAppendDone(d core.LogAppendDone) []core.Action {
-	if f, ok := m.flights[d.Req]; ok {
+	if f, ok := m.inFlightAppends[d.Req]; ok {
 		return m.onCommitAppendDone(d, f)
 	}
 	if d.Req != m.pending || m.pendingKind != pendingAppend {
@@ -489,7 +489,7 @@ func (m *Machine) StateHash() uint64 {
 	h.Bool(m.lowerSeen)
 	h.U64(uint64(m.ckptSlot))
 	h.U64(uint64(len(m.queue)))
-	h.U64(uint64(len(m.flights)))
+	h.U64(uint64(len(m.inFlightAppends)))
 	h.U64(uint64(len(m.waiters)))
 	h.U64(uint64(len(m.readWaiters)))
 	h.U64(m.tailsStarted)

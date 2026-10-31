@@ -18,7 +18,7 @@ import (
 // C4 world: a random correct at-least-once Kafka history generated against the
 // speccheck specs (ControlPlane assigns offsets and replays a committed key,
 // Partition is the expected log; a retried batch is committed again, so it is
-// in the log twice), exposed to the oracle through a fake sim.View. Faults
+// in the log twice), exposed to the oracle through a fake simulator.View. Faults
 // mutate the finished world (c4_faults_test.go).
 
 // failures counts violated Always props (the fake core.Assertions).
@@ -42,7 +42,7 @@ type producer struct{ nb int }
 
 type broker struct{ ref core.NodeInstance }
 
-// world is the fake sim.View plus the spec-side truth it was built from.
+// world is the fake simulator.View plus the spec-side truth it was built from.
 type world struct {
 	opts   kafka.Opts
 	tps    []core.TopicPartition
@@ -76,7 +76,7 @@ func (w *world) Alive(core.NodeInstance) bool            { return true }
 func (w *world) Timeline() simulator.Timeline            { return w.tl }
 func (w *world) History() simulator.History              { return (*hist)(w) }
 func (w *world) Objects() simulator.ObjectStoreRealState { return (*objView)(w) }
-func (w *world) CP() simulator.ControlPlaneRealState     { return (*cpView)(w) }
+func (w *world) CP() simulator.ControlPlaneRealState     { return (*controlPlaneView)(w) }
 func (w *world) Assert() core.Assertions                 { return w.as }
 func (w *world) touch()                                  { w.gen++ }
 
@@ -94,11 +94,11 @@ func (o *objView) Object(k string) ([]byte, bool)  { b, ok := o.objs[k]; return 
 func (o *objView) EachObject(func(string, []byte)) {}
 func (o *objView) Gen() uint64                     { return o.gen }
 
-type cpView world
+type controlPlaneView world
 
-func (c *cpView) Committed(tp core.TopicPartition) []core.BatchRange { return c.ranges[tp] }
-func (c *cpView) Gen() uint64                                        { return c.gen }
-func (c *cpView) HighWatermark(tp core.TopicPartition) core.Offset {
+func (c *controlPlaneView) Committed(tp core.TopicPartition) []core.BatchRange { return c.ranges[tp] }
+func (c *controlPlaneView) Gen() uint64                                        { return c.gen }
+func (c *controlPlaneView) HighWatermark(tp core.TopicPartition) core.Offset {
 	rs := c.ranges[tp]
 	h := int64(0)
 	if len(rs) > 0 {

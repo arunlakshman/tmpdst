@@ -95,8 +95,8 @@ func (m *Metrics) Handler() http.Handler {
 	return promhttp.HandlerFor(m.reg, promhttp.HandlerOpts{})
 }
 
-// ObserveCPCall records one control-plane exchange (wire to cpclient.Client.Observe).
-func (m *Metrics) ObserveCPCall(op string, d time.Duration) {
+// ObserveControlPlaneCall records one control-plane exchange (wire to controlplaneclient.Client.Observe).
+func (m *Metrics) ObserveControlPlaneCall(op string, d time.Duration) {
 	m.cpCall.WithLabelValues(op).Observe(d.Seconds())
 }
 

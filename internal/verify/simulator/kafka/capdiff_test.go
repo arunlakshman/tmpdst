@@ -11,7 +11,7 @@ import (
 
 // sealStats counts sealed segments by reason across a campaign.
 type sealStats struct {
-	segs, parts, byCap, bySize, byTimer, byBatches atomic.Int64
+	segments, parts, byCap, bySize, byTimer, byBatches atomic.Int64
 }
 
 type sealInv struct {
@@ -25,7 +25,7 @@ func (i *sealInv) Observe(v simulator.View) {
 	for _, tf := range v.Timeline().Since("segment_sealed", &i.seal) {
 		n, _ := tf.Fact.Field("parts").(core.I64)
 		why, _ := tf.Fact.Field("reason").(core.Str)
-		i.st.segs.Add(1)
+		i.st.segments.Add(1)
 		i.st.parts.Add(int64(n))
 		switch string(why) {
 		case "partitions":
@@ -74,9 +74,9 @@ func capCampaign(t *testing.T, capParts int) *sealStats {
 func TestCapChangeIsExplainedBySealReasons(t *testing.T) {
 	old, now := capCampaign(t, 96), capCampaign(t, 4096)
 	t.Logf("cap 96:   %d segments, %.1f partitions each, sealed by cap %d size %d timer %d batches %d",
-		old.segs.Load(), float64(old.parts.Load())/float64(old.segs.Load()), old.byCap.Load(), old.bySize.Load(), old.byTimer.Load(), old.byBatches.Load())
+		old.segments.Load(), float64(old.parts.Load())/float64(old.segments.Load()), old.byCap.Load(), old.bySize.Load(), old.byTimer.Load(), old.byBatches.Load())
 	t.Logf("cap 4096: %d segments, %.1f partitions each, sealed by cap %d size %d timer %d batches %d",
-		now.segs.Load(), float64(now.parts.Load())/float64(now.segs.Load()), now.byCap.Load(), now.bySize.Load(), now.byTimer.Load(), now.byBatches.Load())
+		now.segments.Load(), float64(now.parts.Load())/float64(now.segments.Load()), now.byCap.Load(), now.bySize.Load(), now.byTimer.Load(), now.byBatches.Load())
 	if old.byCap.Load() == 0 {
 		t.Error("the 96 cap never sealed a segment: the workload does not exercise it")
 	}

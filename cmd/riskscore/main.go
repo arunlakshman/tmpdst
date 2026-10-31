@@ -1,4 +1,4 @@
-// Command crapscore computes the CRAP (Change Risk Anti-Patterns) score of
+// Command riskscore computes the CRAP (Change Risk Anti-Patterns) score of
 // every Go function from cyclomatic complexity and a coverprofile, and fails
 // when a function is too crappy. See docs/crap-gate.md.
 //
@@ -98,7 +98,7 @@ type config struct {
 }
 
 func parseFlags(args []string, stderr io.Writer) (*config, bool) {
-	fs := flag.NewFlagSet("crapscore", flag.ContinueOnError)
+	fs := flag.NewFlagSet("riskscore", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	c := &config{}
 	fs.StringVar(&c.root, "root", ".", "module root (directory with go.mod)")
@@ -116,7 +116,7 @@ func parseFlags(args []string, stderr io.Writer) (*config, bool) {
 		return nil, false
 	}
 	if c.profile == "" {
-		_, _ = fmt.Fprintln(stderr, "crapscore: -profile is required")
+		_, _ = fmt.Fprintln(stderr, "riskscore: -profile is required")
 		return nil, false
 	}
 	return c, true
@@ -223,21 +223,21 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	funcs, err := analyse(c)
 	if err != nil {
-		_, _ = fmt.Fprintln(stderr, "crapscore:", err)
+		_, _ = fmt.Fprintln(stderr, "riskscore:", err)
 		return 2
 	}
 	if c.update {
 		n, err := writeBaseline(c, funcs)
 		if err != nil {
-			_, _ = fmt.Fprintln(stderr, "crapscore:", err)
+			_, _ = fmt.Fprintln(stderr, "riskscore:", err)
 			return 2
 		}
-		_, _ = fmt.Fprintf(stdout, "crapscore: wrote %s with %d offenders over %.0f\n", c.basePath, n, c.threshold)
+		_, _ = fmt.Fprintf(stdout, "riskscore: wrote %s with %d offenders over %.0f\n", c.basePath, n, c.threshold)
 		return 0
 	}
 	base, warn, err := loadBaseline(c)
 	if err != nil {
-		_, _ = fmt.Fprintln(stderr, "crapscore:", err)
+		_, _ = fmt.Fprintln(stderr, "riskscore:", err)
 		return 2
 	}
 	v := Evaluate(funcs, c.threshold, base, c.tol)
@@ -292,10 +292,10 @@ func writeText(w io.Writer, funcs []*Func, v Result, threshold float64, top int,
 		mode = "strict"
 	}
 	if !v.Failed() {
-		_, _ = fmt.Fprintf(w, "crapscore: OK (%s, threshold %.0f, %d offenders tolerated)\n", mode, threshold, len(v.Offenders))
+		_, _ = fmt.Fprintf(w, "riskscore: OK (%s, threshold %.0f, %d offenders tolerated)\n", mode, threshold, len(v.Offenders))
 		return
 	}
-	_, _ = fmt.Fprintf(w, "\ncrapscore: FAIL (%s, threshold %.0f)\n", mode, threshold)
+	_, _ = fmt.Fprintf(w, "\nriskscore: FAIL (%s, threshold %.0f)\n", mode, threshold)
 	for _, f := range v.New {
 		_, _ = fmt.Fprintf(w, "  over threshold:  %-50s CRAP %.1f (CC %d, cov %.0f%%) %s:%d\n", f.Key, f.RiskScore, f.Complexity, f.Coverage*100, f.File, f.Line)
 	}

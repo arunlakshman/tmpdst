@@ -47,13 +47,13 @@ func (i *segmentCaps) AtEnd(v simulator.View) {
 		parts   []int
 	}
 	var keys []string // first-seen order, so reports are deterministic
-	segs := map[string]*use{}
+	segments := map[string]*use{}
 	for pi, tp := range i.tps {
 		for _, r := range v.CP().Committed(tp) {
-			u := segs[r.Loc.Key]
+			u := segments[r.Loc.Key]
 			if u == nil {
 				u = &use{}
-				segs[r.Loc.Key] = u
+				segments[r.Loc.Key] = u
 				keys = append(keys, r.Loc.Key)
 			}
 			u.batches++
@@ -64,7 +64,7 @@ func (i *segmentCaps) AtEnd(v simulator.View) {
 	}
 	a := v.Assert()
 	for _, k := range keys {
-		u := segs[k]
+		u := segments[k]
 		d := core.ContextPair{Key: "segment", Value: k}
 		a.Always(u.batches <= i.cfg.MaxSegmentBatches, "kafka: a committed segment holds at most MaxSegmentBatches batches",
 			d, core.ContextPair{Key: "batches", Value: u.batches}, core.ContextPair{Key: "cap", Value: i.cfg.MaxSegmentBatches})

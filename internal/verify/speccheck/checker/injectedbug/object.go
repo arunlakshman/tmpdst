@@ -10,7 +10,7 @@ import (
 	"manifester/internal/verify/speccheck/checker/suites"
 )
 
-// ObjectBug is a planted bug for an object store. Wrap returns a subject that
+// ObjectBug is an injected bug for an object store. Wrap returns a subject that
 // behaves like the correct one, except for the bug.
 type ObjectBug struct {
 	name, doc string
@@ -71,7 +71,7 @@ func stateful(name, doc string, newChange func(suites.ObjectSubject) func(core.I
 	})
 }
 
-// ObjectBugs returns every planted object store bug, in a fixed order.
+// ObjectBugs returns every injected object store bug, in a fixed order.
 func ObjectBugs() []ObjectBug {
 	return []ObjectBug{
 		PutKeepsCallerSlice(),
@@ -258,7 +258,7 @@ func FindObjectDetection(bug ObjectBug, newCorrect func() suites.ObjectSubject, 
 	return findSubjectDetection(seeds, newCorrect, bug.Wrap, suites.ObjectStoreComparator)
 }
 
-// RequireAllObjectBugsDetected runs every planted object store bug through the
+// RequireAllObjectBugsDetected runs every injected object store bug through the
 // object store suite. It reports an error for each bug that no profile finds
 // within seeds seeds, and it logs the catch table. A subject with no spec hash
 // (for example real S3) cannot show a wrong hash, so that one bug is skipped

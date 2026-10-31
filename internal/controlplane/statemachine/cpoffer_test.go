@@ -55,9 +55,9 @@ func readOp(t *testing.T, m *statemachine.Machine, timer core.SetTimer, req core
 	return core.ControlPlaneDone{}, timer
 }
 
-// TestOnCPOfferWritesAnswerBroker: each write op goes through the log and the
+// TestOnControlPlaneDeliverWritesAnswerBroker: each write op goes through the log and the
 // broker gets its reply after the slot applies.
-func TestOnCPOfferWritesAnswerBroker(t *testing.T) {
+func TestOnControlPlaneDeliverWritesAnswerBroker(t *testing.T) {
 	m := newMachine(t, statemachine.Config{K: 4, MaxCmdsPerSlot: 1, Writer: "w"})
 
 	// CommitSegment: the reply carries one assignment per batch.
@@ -109,9 +109,9 @@ func TestOnCPOfferWritesAnswerBroker(t *testing.T) {
 	}
 }
 
-// TestOnCPOfferReadsAnswerBroker: each read op gets its answer from the fold
+// TestOnControlPlaneDeliverReadsAnswerBroker: each read op gets its answer from the fold
 // once the node is ready and a fresh tail has applied.
-func TestOnCPOfferReadsAnswerBroker(t *testing.T) {
+func TestOnControlPlaneDeliverReadsAnswerBroker(t *testing.T) {
 	m := newMachine(t, statemachine.Config{
 		K: 1, Writer: "s1", Rank: 1,
 		CatchUpEvery:  core.Millisecond,
@@ -145,9 +145,9 @@ func TestOnCPOfferReadsAnswerBroker(t *testing.T) {
 	}
 }
 
-// TestOnCPOfferUnknownOpInvalid: an op the machine does not know is refused
+// TestOnControlPlaneDeliverUnknownOpInvalid: an op the machine does not know is refused
 // with ErrInvalid and nothing reaches the log.
-func TestOnCPOfferUnknownOpInvalid(t *testing.T) {
+func TestOnControlPlaneDeliverUnknownOpInvalid(t *testing.T) {
 	m := newMachine(t, statemachine.Config{K: 4, Writer: "w"})
 	acts := m.Step(core.Event{Body: core.ControlPlaneDeliver{From: brokerFrom, Req: 9, Op: nil}})
 	if len(acts) != 1 {

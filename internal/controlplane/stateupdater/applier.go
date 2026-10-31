@@ -24,7 +24,7 @@ func (a *StateUpdater) Close() error { return a.kv.Close() }
 func (a *StateUpdater) Exec(act core.IOCall) core.IOResult {
 	call, ok := act.(core.ControlPlaneCall)
 	if !ok {
-		panic("stateupdater: not a CPCall")
+		panic("stateupdater: not a ControlPlaneCall")
 	}
 	var d core.ControlPlaneDone
 	var err error

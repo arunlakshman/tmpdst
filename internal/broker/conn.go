@@ -213,7 +213,7 @@ func (b *Broker) drain(c *connection, acts []core.Action) []core.Action {
 		for _, f := range s.facts {
 			acts = append(acts, core.RecordFact{Fact: f})
 		}
-		acts = append(acts, core.Send{Req: b.req(), Conn: c.id, Data: data})
+		acts = append(acts, core.Send{Req: b.nextRequestID(), Conn: c.id, Data: data})
 	}
 	if c.closing && !c.closed && (len(c.q) == 0 || c.abort) {
 		b.dropConn(c)

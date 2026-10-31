@@ -11,7 +11,7 @@ import (
 	"manifester/internal/verify/speccheck/checker/suites"
 )
 
-// ControlPlaneBug is a planted bug for a control plane. Wrap returns a subject
+// ControlPlaneBug is an injected bug for a control plane. Wrap returns a subject
 // that behaves like the correct one, except for the bug.
 type ControlPlaneBug struct {
 	name, doc string
@@ -95,7 +95,7 @@ func commitOf(op generator.ControlPlaneOp) (core.ControlPlaneCall, core.CommitSe
 	return *op.Call, c, ok
 }
 
-// ControlPlaneBugs returns every planted control plane bug, in a fixed order.
+// ControlPlaneBugs returns every injected control plane bug, in a fixed order.
 func ControlPlaneBugs() []ControlPlaneBug {
 	return []ControlPlaneBug{
 		BaseOffByOne(),
@@ -309,7 +309,7 @@ func FindControlPlaneDetection(bug ControlPlaneBug, newCorrect func() suites.Con
 	return findSubjectDetection(seeds, newCorrect, bug.Wrap, suites.ControlPlaneComparator)
 }
 
-// RequireAllControlPlaneBugsDetected runs every planted control plane bug through
+// RequireAllControlPlaneBugsDetected runs every injected control plane bug through
 // the control plane suite. It reports an error for each bug that no profile
 // finds within seeds seeds, and it logs the catch table. A subject with no spec
 // hash cannot show a wrong hash, so that one bug is skipped for such a subject

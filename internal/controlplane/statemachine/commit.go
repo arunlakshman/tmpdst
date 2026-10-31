@@ -36,7 +36,7 @@ type waitingCommand struct {
 	cmd  stateupdater.Entry
 }
 
-// inFlightAppend is one in-inFlightAppend commit LogAppend (one of at most K).
+// inFlightAppend is one in-flight commit LogAppend (one of at most K).
 type inFlightAppend struct {
 	req  core.RequestID
 	slot core.LogPosition
@@ -97,7 +97,7 @@ func (m *Machine) Offer(op ClientOperation) []core.Action {
 
 // retargetCommit points an in-flight or queued waiter for the same SegmentKey
 // at this Offer. The prior broker Req timed out at the bridge; the apply must
-// answer the live one. Flight ReqIDs are sorted so map walk order cannot
+// answer the live one. In-flight ReqIDs are sorted so map walk order cannot
 // diverge two runs of the same seed.
 func (m *Machine) retargetCommit(op ClientOperation) bool {
 	key := op.Cmd.Commit.SegmentKey
@@ -113,13 +113,13 @@ func (m *Machine) retargetCommit(op ClientOperation) bool {
 			return true
 		}
 	}
-	reqs := make([]core.RequestID, 0, len(m.flights))
-	for req := range m.flights { //detcheck:ok keys are collected, then sorted before use
+	reqs := make([]core.RequestID, 0, len(m.inFlightAppends))
+	for req := range m.inFlightAppends { //detcheck:ok keys are collected, then sorted before use
 		reqs = append(reqs, req)
 	}
 	slices.Sort(reqs)
 	for _, req := range reqs {
-		f := m.flights[req]
+		f := m.inFlightAppends[req]
 		for i := range f.cmds {
 			if retarget(&f.cmds[i]) {
 				return true
@@ -137,7 +137,7 @@ func (m *Machine) TakeAnswers() []ReplyToClient {
 }
 
 // InFlightCommits is the number of live commit LogAppend ReqIDs (at most K).
-func (m *Machine) InFlightCommits() int { return len(m.flights) }
+func (m *Machine) InFlightCommits() int { return len(m.inFlightAppends) }
 
 // QueueDepth is the number of client ops waiting for a commit slot.
 func (m *Machine) QueueDepth() int { return len(m.queue) }
@@ -151,7 +151,7 @@ func (m *Machine) flushCommits() []core.Action {
 		return nil
 	}
 	var acts []core.Action
-	for len(m.flights) < m.cfg.K && len(m.queue) > 0 {
+	for len(m.inFlightAppends) < m.cfg.K && len(m.queue) > 0 {
 		acts = append(acts, m.emitCommitGroup()...)
 	}
 	return acts
@@ -201,7 +201,7 @@ func (m *Machine) emitCommitGroup() []core.Action {
 		core.ContextPair{Key: "bytes", Value: len(data)})
 	m.nextReq++
 	req := m.nextReq
-	m.flights[req] = &inFlightAppend{req: req, slot: slot, id: id, data: data, cmds: cmds}
+	m.inFlightAppends[req] = &inFlightAppend{req: req, slot: slot, id: id, data: data, cmds: cmds}
 	m.waiters[id] = cmds
 	return []core.Action{core.LogAppend{Req: req, Slot: slot, Data: data}}
 }
@@ -255,7 +255,7 @@ func (m *Machine) onCommitAppendDone(d core.LogAppendDone, f *inFlightAppend) []
 		// Slot was trimmed under us; refuse in-flight clients and restore.
 		return m.hitTrimmed()
 	}
-	delete(m.flights, d.Req)
+	delete(m.inFlightAppends, d.Req)
 	if d.Err != core.OK || d.Outcome != core.Applied {
 		// Conditional put: NotApplied and MaybeApplied both retry the same
 		// slot. Allocating a later slot here used to leave a permanent hole
@@ -282,7 +282,7 @@ func (m *Machine) onCommitAppendDone(d core.LogAppendDone, f *inFlightAppend) []
 	}
 	var acts []core.Action
 	if lost {
-		acts = append(acts, m.retryFlight(f)...)
+		acts = append(acts, m.retryInFlightAppend(f)...)
 	}
 	acts = append(acts, m.progress()...)
 	acts = append(acts, m.flushCommits()...)
@@ -293,18 +293,18 @@ func (m *Machine) onCommitAppendDone(d core.LogAppendDone, f *inFlightAppend) []
 func (m *Machine) retrySameSlot(f *inFlightAppend) []core.Action {
 	m.nextReq++
 	req := m.nextReq
-	m.flights[req] = &inFlightAppend{req: req, slot: f.slot, id: f.id, data: f.data, cmds: f.cmds}
+	m.inFlightAppends[req] = &inFlightAppend{req: req, slot: f.slot, id: f.id, data: f.data, cmds: f.cmds}
 	return []core.Action{core.LogAppend{Req: req, Slot: f.slot, Data: f.data}}
 }
 
-// retryFlight appends the same entry (same id and cmds) at the next free slot
+// retryInFlightAppend appends the same entry (same id and cmds) at the next free slot
 // after another writer won f.slot.
-func (m *Machine) retryFlight(f *inFlightAppend) []core.Action {
+func (m *Machine) retryInFlightAppend(f *inFlightAppend) []core.Action {
 	m.env.Reachable("logcp-sim: lost slot retried at a later slot")
 	slot := m.alloc()
 	m.nextReq++
 	req := m.nextReq
-	m.flights[req] = &inFlightAppend{req: req, slot: slot, id: f.id, data: f.data, cmds: f.cmds}
+	m.inFlightAppends[req] = &inFlightAppend{req: req, slot: slot, id: f.id, data: f.data, cmds: f.cmds}
 	return []core.Action{core.LogAppend{Req: req, Slot: slot, Data: f.data}}
 }
 

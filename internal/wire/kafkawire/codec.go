@@ -11,7 +11,7 @@ import (
 )
 
 // ErrMalformed means a frame could not be parsed.
-var ErrMalformed = errors.New("kwire: malformed message")
+var ErrMalformed = errors.New("kafkawire: malformed message")
 
 // UnsupportedError is returned by DecodeRequest, together with the parsed
 // header, for an API key or version outside Supported.
@@ -22,9 +22,9 @@ type UnsupportedError struct {
 
 func (e *UnsupportedError) Error() string {
 	if e.UnknownKey {
-		return fmt.Sprintf("kwire: unsupported api key %d", e.Key)
+		return fmt.Sprintf("kafkawire: unsupported api key %d", e.Key)
 	}
-	return fmt.Sprintf("kwire: unsupported version %d of api key %d", e.Version, e.Key)
+	return fmt.Sprintf("kafkawire: unsupported version %d of api key %d", e.Version, e.Key)
 }
 
 // Codec implements core.KafkaCodec on kmsg. It is stateless.
@@ -142,7 +142,7 @@ func respHeaderTags(h core.RequestHeader, flexible bool) bool {
 func (Codec) EncodeResponse(h core.RequestHeader, resp core.Response) ([]byte, error) {
 	r, ok := resp.(kmsg.Response)
 	if !ok || r.Key() != h.APIKey {
-		return nil, fmt.Errorf("kwire: response %T does not match api key %d", resp, h.APIKey)
+		return nil, fmt.Errorf("kafkawire: response %T does not match api key %d", resp, h.APIKey)
 	}
 	r.SetVersion(respVersion(h))
 	b := readPrefix(nil)
@@ -156,10 +156,10 @@ func (Codec) EncodeResponse(h core.RequestHeader, resp core.Response) ([]byte, e
 func (Codec) EncodeRequest(h core.RequestHeader, req core.Request) ([]byte, error) {
 	r, ok := req.(kmsg.Request)
 	if !ok || r.Key() != h.APIKey {
-		return nil, fmt.Errorf("kwire: request %T does not match api key %d", req, h.APIKey)
+		return nil, fmt.Errorf("kafkawire: request %T does not match api key %d", req, h.APIKey)
 	}
 	if len(h.ClientID) > 1<<15-1 {
-		return nil, errors.New("kwire: client id too long")
+		return nil, errors.New("kafkawire: client id too long")
 	}
 	r.SetVersion(h.APIVersion)
 	b := readPrefix(nil)

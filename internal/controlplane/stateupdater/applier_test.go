@@ -44,7 +44,7 @@ func (s applierSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlan
 	case op.Call != nil:
 		done, ok := s.a.Exec(*op.Call).(core.ControlPlaneDone)
 		if !ok {
-			return observation.ControlPlaneResult{}, errors.New("the applier did not return a CPDone")
+			return observation.ControlPlaneResult{}, errors.New("the applier did not return a ControlPlaneDone")
 		}
 		return observation.FromControlPlaneDone(done), nil
 	}
@@ -212,7 +212,7 @@ func TestInvalidAndUnknown(t *testing.T) {
 	}
 	defer func() {
 		if recover() == nil {
-			t.Fatal("Exec of a non-CPCall must panic")
+			t.Fatal("Exec of a non-ControlPlaneCall must panic")
 		}
 	}()
 	a.Exec(core.Connect{})
@@ -286,10 +286,10 @@ func edgeLookups(t *testing.T, subject, spec suites.ControlPlaneSubject, lk core
 	}
 }
 
-// TestPlantedBugsCaughtApplierMem proves that the suite fails when the applier
+// TestInjectedBugsCaughtStateUpdaterMem proves that the suite fails when the applier
 // has a known bug. The applier hash is not the hash of the spec, so the helper
 // skips the one bug that only a state hash can show.
-func TestPlantedBugsCaughtApplierMem(t *testing.T) {
+func TestInjectedBugsCaughtStateUpdaterMem(t *testing.T) {
 	newCorrect := func() suites.ControlPlaneSubject { return newApplierSubject(t, backends["mem"]) }
 	injectedbug.RequireAllControlPlaneBugsDetected(t, newCorrect, 100)
 }

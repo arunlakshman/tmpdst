@@ -1,4 +1,4 @@
-// Package fakeservicetest is a hand-written sim.EngineCtx for engine tests: a tiny queue ordered by (At, seq).
+// Package fakeservicetest is a hand-written simulator.EngineCtx for engine tests: a tiny queue ordered by (At, seq).
 package fakeservicetest
 
 import (

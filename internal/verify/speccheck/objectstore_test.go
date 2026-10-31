@@ -266,14 +266,14 @@ func (b brokenStore) Exec(a core.IOCall) core.IOResult {
 	return b.ObjectStore.Exec(a)
 }
 
-func TestObjectStoreCheckShrinksPlantedBug(t *testing.T) {
+func TestObjectStoreCheckShrinksInjectedBug(t *testing.T) {
 	c := objCheck(func() objExec { return brokenStore{NewObjectStore()} })
 	var f *checker.Failure[core.IOCall]
 	for seed := uint64(1); f == nil && seed <= 50; seed++ {
 		f = c.RunSeed(seed)
 	}
 	if f == nil {
-		t.Fatal("planted bug not found")
+		t.Fatal("injected bug not found")
 	}
 	if len(f.Ops) != 2 {
 		t.Fatalf("want put+get, got:\n%s", c.Report(f, ""))
@@ -285,5 +285,5 @@ func TestObjectStoreCheckShrinksPlantedBug(t *testing.T) {
 	if !ok1 || !ok2 || len(put.Data) != 0 || get.Ref.Off <= 0 || get.Ref.Len != 0 || put.Key != get.Ref.Key {
 		t.Fatalf("not minimal:\n%s", c.Report(f, ""))
 	}
-	t.Logf("example report:\n%s", c.Report(f, "go test ./speccheck -run TestObjectStoreCheckShrinksPlantedBug"))
+	t.Logf("example report:\n%s", c.Report(f, "go test ./speccheck -run TestObjectStoreCheckShrinksInjectedBug"))
 }

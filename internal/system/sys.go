@@ -1,6 +1,6 @@
 // Package system is the production seam: narrow interfaces over real I/O that the
 // production Executor calls from goroutines. SDK and HTTP types never leak past
-// an adapter. The simulator does NOT implement these; it implements sim.Engine
+// an adapter. The simulator does NOT implement these; it implements simulator.Engine
 // over the same Action/Event vocabulary (docs/lessons.md, section 0).
 package system
 

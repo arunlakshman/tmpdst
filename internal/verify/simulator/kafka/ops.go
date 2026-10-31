@@ -50,7 +50,7 @@ type ReadPart struct {
 	Code    int16
 	HWM     int64
 	Recs    []Rec
-	Corrupt bool // a returned batch failed kwire.ParseBatch (CRC or structure)
+	Corrupt bool // a returned batch failed kafkawire.ParseBatch (CRC or structure)
 }
 
 // Rec is one returned record: its offset and value.

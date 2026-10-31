@@ -30,25 +30,25 @@ func (s nodeGroups) write(ctx context.Context, op core.ControlPlaneOperation) (c
 	return s.n.offer(ctx, entry)
 }
 
-// GroupInstall implements cp.GroupStore.
+// GroupInstall implements controlplane.GroupStore.
 func (s nodeGroups) GroupInstall(ctx context.Context, op core.GroupInstall) (core.ErrCode, error) {
 	d, err := s.write(ctx, op)
 	return d.Err, err
 }
 
-// GroupAssign implements cp.GroupStore.
+// GroupAssign implements controlplane.GroupStore.
 func (s nodeGroups) GroupAssign(ctx context.Context, op core.GroupAssign) (core.ErrCode, error) {
 	d, err := s.write(ctx, op)
 	return d.Err, err
 }
 
-// GroupRemove implements cp.GroupStore.
+// GroupRemove implements controlplane.GroupStore.
 func (s nodeGroups) GroupRemove(ctx context.Context, op core.GroupRemove) (core.ErrCode, error) {
 	d, err := s.write(ctx, op)
 	return d.Err, err
 }
 
-// OffsetCommit implements cp.GroupStore.
+// OffsetCommit implements controlplane.GroupStore.
 func (s nodeGroups) OffsetCommit(ctx context.Context, op core.OffsetCommit) (core.OffsetCommitResp, core.ErrCode, error) {
 	d, err := s.write(ctx, op)
 	return core.ResponseAs[core.OffsetCommitResp](d), d.Err, err
@@ -67,7 +67,7 @@ func readFold(ctx context.Context, n *Node, fn func(*statemachine.Machine) (core
 	return d, nil
 }
 
-// OffsetFetch implements cp.GroupStore.
+// OffsetFetch implements controlplane.GroupStore.
 //
 //nolint:dupl // each call keeps its own conversion
 func (s nodeGroups) OffsetFetch(ctx context.Context, op core.OffsetFetch) (core.OffsetFetchResp, error) {
@@ -77,7 +77,7 @@ func (s nodeGroups) OffsetFetch(ctx context.Context, op core.OffsetFetch) (core.
 	return core.ResponseAs[core.OffsetFetchResp](d), err
 }
 
-// DescribeGroup implements cp.GroupStore.
+// DescribeGroup implements controlplane.GroupStore.
 //
 //nolint:dupl // each call keeps its own conversion
 func (s nodeGroups) DescribeGroup(ctx context.Context, op core.DescribeGroup) (core.DescribeGroupResp, error) {
@@ -87,7 +87,7 @@ func (s nodeGroups) DescribeGroup(ctx context.Context, op core.DescribeGroup) (c
 	return core.ResponseAs[core.DescribeGroupResp](d), err
 }
 
-// ListGroups implements cp.GroupStore.
+// ListGroups implements controlplane.GroupStore.
 //
 //nolint:dupl // each call keeps its own conversion
 func (s nodeGroups) ListGroups(ctx context.Context, op core.ListGroups) (core.ListGroupsResp, error) {
@@ -166,12 +166,12 @@ func groupCtxErr() error {
 // JoinGroup implements ControlPlane.
 //
 //nolint:dupl // each call keeps its own conversion
-func (n *Node) JoinGroup(ctx context.Context, req *cpv1.JoinGroupRequest) (*cpv1.JoinGroupResponse, error) {
+func (n *Node) JoinGroup(ctx context.Context, request *cpv1.JoinGroupRequest) (*cpv1.JoinGroupResponse, error) {
 	c, err := n.groupCoordinator(ctx)
 	if err != nil {
 		return nil, err
 	}
-	r, err := c.JoinGroup(ctx, apiconvert.JoinGroupToCore(req))
+	r, err := c.JoinGroup(ctx, apiconvert.JoinGroupToCore(request))
 	if err != nil {
 		return nil, groupCtxErr()
 	}
@@ -184,12 +184,12 @@ func (n *Node) JoinGroup(ctx context.Context, req *cpv1.JoinGroupRequest) (*cpv1
 // SyncGroup implements ControlPlane.
 //
 //nolint:dupl // each call keeps its own conversion
-func (n *Node) SyncGroup(ctx context.Context, req *cpv1.SyncGroupRequest) (*cpv1.SyncGroupResponse, error) {
+func (n *Node) SyncGroup(ctx context.Context, request *cpv1.SyncGroupRequest) (*cpv1.SyncGroupResponse, error) {
 	c, err := n.groupCoordinator(ctx)
 	if err != nil {
 		return nil, err
 	}
-	r, err := c.SyncGroup(ctx, apiconvert.SyncGroupToCore(req))
+	r, err := c.SyncGroup(ctx, apiconvert.SyncGroupToCore(request))
 	if err != nil {
 		return nil, groupCtxErr()
 	}
@@ -200,33 +200,33 @@ func (n *Node) SyncGroup(ctx context.Context, req *cpv1.SyncGroupRequest) (*cpv1
 }
 
 // GroupHeartbeat implements ControlPlane.
-func (n *Node) GroupHeartbeat(ctx context.Context, req *cpv1.GroupHeartbeatRequest) (*cpv1.GroupHeartbeatResponse, error) {
+func (n *Node) GroupHeartbeat(ctx context.Context, request *cpv1.GroupHeartbeatRequest) (*cpv1.GroupHeartbeatResponse, error) {
 	c, err := n.groupCoordinator(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if code := c.Heartbeat(ctx, apiconvert.HeartbeatToCore(req)); code != core.OK {
+	if code := c.Heartbeat(ctx, apiconvert.HeartbeatToCore(request)); code != core.OK {
 		return nil, toRPCError(code, groupOutcome(code))
 	}
 	return &cpv1.GroupHeartbeatResponse{}, nil
 }
 
 // LeaveGroup implements ControlPlane. The answer has one code per member.
-func (n *Node) LeaveGroup(ctx context.Context, req *cpv1.LeaveGroupRequest) (*cpv1.LeaveGroupResponse, error) {
+func (n *Node) LeaveGroup(ctx context.Context, request *cpv1.LeaveGroupRequest) (*cpv1.LeaveGroupResponse, error) {
 	c, err := n.groupCoordinator(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return apiconvert.LeaveGroupRespFromCore(c.LeaveGroup(ctx, apiconvert.LeaveGroupToCore(req))), nil
+	return apiconvert.LeaveGroupRespFromCore(c.LeaveGroup(ctx, apiconvert.LeaveGroupToCore(request))), nil
 }
 
 // GroupOffsetCommit implements ControlPlane. The answer has one code per partition.
-func (n *Node) GroupOffsetCommit(ctx context.Context, req *cpv1.GroupOffsetCommitRequest) (*cpv1.GroupOffsetCommitResponse, error) {
+func (n *Node) GroupOffsetCommit(ctx context.Context, request *cpv1.GroupOffsetCommitRequest) (*cpv1.GroupOffsetCommitResponse, error) {
 	c, err := n.groupCoordinator(ctx)
 	if err != nil {
 		return nil, err
 	}
-	r, code := c.OffsetCommit(ctx, apiconvert.OffsetCommitToCore(req))
+	r, code := c.OffsetCommit(ctx, apiconvert.OffsetCommitToCore(request))
 	if code != core.OK {
 		return nil, toRPCError(code, groupOutcome(code))
 	}
@@ -234,12 +234,12 @@ func (n *Node) GroupOffsetCommit(ctx context.Context, req *cpv1.GroupOffsetCommi
 }
 
 // GroupOffsetFetch implements ControlPlane.
-func (n *Node) GroupOffsetFetch(ctx context.Context, req *cpv1.GroupOffsetFetchRequest) (*cpv1.GroupOffsetFetchResponse, error) {
+func (n *Node) GroupOffsetFetch(ctx context.Context, request *cpv1.GroupOffsetFetchRequest) (*cpv1.GroupOffsetFetchResponse, error) {
 	c, err := n.groupCoordinator(ctx)
 	if err != nil {
 		return nil, err
 	}
-	r, code := c.OffsetFetch(ctx, apiconvert.OffsetFetchToCore(req))
+	r, code := c.OffsetFetch(ctx, apiconvert.OffsetFetchToCore(request))
 	if code != core.OK {
 		return nil, toRPCError(code, core.NotApplied)
 	}
@@ -247,13 +247,13 @@ func (n *Node) GroupOffsetFetch(ctx context.Context, req *cpv1.GroupOffsetFetchR
 }
 
 // DescribeGroups implements ControlPlane. Any group that fails fails the call.
-func (n *Node) DescribeGroups(ctx context.Context, req *cpv1.DescribeGroupsRequest) (*cpv1.DescribeGroupsResponse, error) {
+func (n *Node) DescribeGroups(ctx context.Context, request *cpv1.DescribeGroupsRequest) (*cpv1.DescribeGroupsResponse, error) {
 	c, err := n.groupCoordinator(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var out []groupcoordinator.GroupDescription
-	for _, name := range apiconvert.DescribeGroupsToCore(req) {
+	for _, name := range apiconvert.DescribeGroupsToCore(request) {
 		d, code := c.DescribeGroup(ctx, name)
 		if code != core.OK {
 			return nil, toRPCError(code, core.NotApplied)

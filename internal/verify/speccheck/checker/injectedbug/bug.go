@@ -9,7 +9,7 @@ import (
 	"manifester/internal/verify/speccheck/checker/suites"
 )
 
-// Detection says how a planted bug was found.
+// Detection says how an injected bug was found.
 type Detection struct {
 	Profile   string // the generator profile that found it
 	Seed      uint64 // the first seed that found it
@@ -18,16 +18,16 @@ type Detection struct {
 
 // RequireDetected runs runOne for the seeds 1 to maxSeeds. runOne returns true
 // when the suite found a failure. RequireDetected reports an error if no seed
-// finds one, because a suite that misses a planted bug cannot be trusted.
+// finds one, because a suite that misses an injected bug cannot be trusted.
 func RequireDetected(t checker.Reporter, name string, runOne func(seed uint64) bool, maxSeeds int) {
 	t.Helper()
 	for seed := uint64(1); seed <= uint64(maxSeeds); seed++ {
 		if runOne(seed) {
-			t.Logf("the planted bug %s was caught by seed %d.", name, seed)
+			t.Logf("the injected bug %s was caught by seed %d.", name, seed)
 			return
 		}
 	}
-	t.Errorf("the planted bug %s was not caught in %d seeds. The suite is too weak for this bug.", name, maxSeeds)
+	t.Errorf("the injected bug %s was not caught in %d seeds. The suite is too weak for this bug.", name, maxSeeds)
 }
 
 // findDetection tries every profile in order. For each profile it runs the seeds 1
@@ -54,7 +54,7 @@ type detectionRow struct {
 func table(title string, rows []detectionRow) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n", title)
-	fmt.Fprintf(&b, "%-40s %-14s %6s %13s\n", "planted bug", "profile", "seed", "shrunk length")
+	fmt.Fprintf(&b, "%-40s %-14s %6s %13s\n", "injected bug", "profile", "seed", "shrunk length")
 	for _, r := range rows {
 		if !r.found {
 			fmt.Fprintf(&b, "%-40s %-14s %6s %13s\n", r.name, "NOT CAUGHT", "-", "-")
@@ -75,12 +75,12 @@ func report(t checker.Reporter, kind string, seeds int, rows []detectionRow) {
 		}
 	}
 	if len(missed) > 0 {
-		t.Errorf("these planted %s bugs were not caught in %d seeds on any profile: %s. The suite is too weak for them.",
+		t.Errorf("these injected %s bugs were not caught in %d seeds on any profile: %s. The suite is too weak for them.",
 			kind, seeds, strings.Join(missed, ", "))
 	}
 }
 
-// stateHashBugName is the name of the planted bug that only a state hash can show.
+// stateHashBugName is the name of the injected bug that only a state hash can show.
 const stateHashBugName = "StateHashDiffers"
 
 // newHashBug makes the StateHashDiffers bug for one kind of subject. newBug is
@@ -132,7 +132,7 @@ func requireAllDetected[Sub interface{ StateHash() (uint64, bool) }, Bug interfa
 	var rows []detectionRow
 	for _, bug := range bugs {
 		if !hasHash && bug.Name() == stateHashBugName {
-			t.Logf("The planted bug %s is skipped because this subject has no spec state hash.", bug.Name())
+			t.Logf("The injected bug %s is skipped because this subject has no spec state hash.", bug.Name())
 			continue
 		}
 		c, found := find(bug, newCorrect, seeds)

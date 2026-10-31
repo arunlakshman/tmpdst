@@ -584,7 +584,7 @@ func faults() []fault {
 }
 
 func (w *world) cp0(tp core.TopicPartition) int64 {
-	return int64((*cpView)(w).HighWatermark(tp)) - w.hwmAdj[tp]
+	return int64((*controlPlaneView)(w).HighWatermark(tp)) - w.hwmAdj[tp]
 }
 
 func indexOf(tps []core.TopicPartition, tp core.TopicPartition) int {

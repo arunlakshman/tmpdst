@@ -23,7 +23,7 @@ type impl interface {
 	CreateTopic(ctx context.Context, op core.CreateTopic) (core.ErrCode, error)
 }
 
-// storeImpl drives a cp.Store directly.
+// storeImpl drives a controlplane.Store directly.
 type storeImpl struct{ st cp.Store }
 
 func (s storeImpl) Exec(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, core.ErrCode, error) {
@@ -48,7 +48,7 @@ func (s storeImpl) CreateTopic(ctx context.Context, op core.CreateTopic) (core.E
 	return s.st.CreateTopic(ctx, op)
 }
 
-// grpcImpl drives a machine node through cpclient.
+// grpcImpl drives a machine node through controlplaneclient.
 type grpcImpl struct{ c *controlplaneclient.Client }
 
 func (h grpcImpl) Exec(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, core.ErrCode, error) {

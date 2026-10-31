@@ -7,7 +7,7 @@ specs, to prove that they behave the same.
 Terms: a **spec** is a short, fault-free program that shows the correct
 behavior. An **oracle** is a checker we trust to say if a result is correct.
 A **subject** is the code under test. A **seed** fixes the random operations,
-so the same seed gives the same test. A **planted bug** is a known bug that a
+so the same seed gives the same test. An **injected bug** is a known bug that a
 test adds on purpose, to prove that the suite can catch it.
 
 ## Where this design comes from
@@ -33,7 +33,7 @@ https://www.amazon.science/publications/using-lightweight-formal-methods-to-vali
 - Run longer to find more (`MANIFESTER_SEEDS`, `MANIFESTER_CAMPAIGN`).
 - A pass is not a proof. Use small limits so that every code path is reached.
 
-**What we added:** planted bugs that every suite must catch, a second checker
+**What we added:** injected bugs that every suite must catch, a second checker
 (the Kafka oracle) that never imports this package, and a whole-system
 simulator.
 

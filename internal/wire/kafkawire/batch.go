@@ -24,17 +24,17 @@ const (
 
 var (
 	// ErrCorrupt means a batch failed structure or CRC validation.
-	ErrCorrupt = errors.New("kwire: corrupt record batch")
+	ErrCorrupt = errors.New("kafkawire: corrupt record batch")
 	// ErrUnsupportedBatch means magic != 2, or Records was called on a
 	// compressed batch (the broker never decompresses).
-	ErrUnsupportedBatch = errors.New("kwire: unsupported record batch")
+	ErrUnsupportedBatch = errors.New("kafkawire: unsupported record batch")
 	// ErrUnknownCodec means the attributes carry a compression codec id above
 	// CodecZstd. Kafka answers it with UNSUPPORTED_COMPRESSION_TYPE.
-	ErrUnknownCodec = errors.New("kwire: unknown compression codec")
+	ErrUnknownCodec = errors.New("kafkawire: unknown compression codec")
 	// ErrTruncated means SplitBatches hit a partial trailing batch.
-	ErrTruncated = errors.New("kwire: truncated record batch")
+	ErrTruncated = errors.New("kafkawire: truncated record batch")
 	// ErrNotSingle means a payload did not hold exactly one batch.
-	ErrNotSingle = errors.New("kwire: expected exactly one record batch")
+	ErrNotSingle = errors.New("kafkawire: expected exactly one record batch")
 )
 
 // Compression codec ids, the low three attribute bits of a v2 batch. The
@@ -66,7 +66,7 @@ type BatchParams struct {
 // offset deltas are the record indexes.
 func BuildBatch(p BatchParams, recs []kmsg.Record) ([]byte, error) {
 	if len(recs) == 0 {
-		return nil, errors.New("kwire: empty batch")
+		return nil, errors.New("kafkawire: empty batch")
 	}
 	if p.Attributes&7 != 0 {
 		return nil, fmt.Errorf("%w: compression requested", ErrUnsupportedBatch)
@@ -96,7 +96,7 @@ func encodeRecords(recs []kmsg.Record) []byte {
 // tests and the simulator; the payload need not decompress.
 func BuildOpaqueBatch(p BatchParams, numRecords int32, payload []byte) ([]byte, error) {
 	if numRecords <= 0 || len(payload) == 0 {
-		return nil, errors.New("kwire: empty batch")
+		return nil, errors.New("kafkawire: empty batch")
 	}
 	if p.Attributes&7 > CodecZstd {
 		return nil, fmt.Errorf("%w: %d", ErrUnknownCodec, p.Attributes&7)

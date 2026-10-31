@@ -19,7 +19,7 @@ import (
 // files and only export_test.go (package kafka, no speccheck) reaches into the
 // oracle. Run: go test ./sim/kafka -run C4
 
-func TestC4OracleDoesNotImportVeritas(t *testing.T) {
+func TestC4OracleDoesNotImportSpecCheck(t *testing.T) {
 	fset := token.NewFileSet()
 	names, err := filepath.Glob("*.go")
 	if err != nil {

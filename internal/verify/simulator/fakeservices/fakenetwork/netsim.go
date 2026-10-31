@@ -143,7 +143,7 @@ type resetData struct {
 }
 type networkHealData struct{ A, B core.NodeID }
 
-// Name implements sim.Engine.
+// Name implements simulator.Engine.
 func (e *Engine) Name() string { return "fakenetwork" }
 
 // Handles reports whether a is a network action.

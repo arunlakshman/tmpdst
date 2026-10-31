@@ -24,14 +24,14 @@ type GetOp struct {
 }
 
 // Opts configures the workload. Phase behavior is not configured: the workload
-// is sim.PhaseAware (see OnPhase).
+// is simulator.PhaseAware (see OnPhase).
 type Opts struct {
 	Clients int
 }
 
 const (
-	reqTimeout = 3 * core.Second
-	keepAcked  = 16 // GET candidates per client
+	requestTimeout = 3 * core.Second
+	keepAcked      = 16 // GET candidates per client
 )
 
 const (
@@ -95,7 +95,7 @@ func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.No
 	return w
 }
 
-// Name implements sim.Workload.
+// Name implements simulator.Workload.
 func (w *Workload) Name() string { return "echo" }
 
 // SetHistory is called by the kernel.
@@ -119,7 +119,7 @@ func (w *Workload) onReady(c *client) []core.Action {
 	return []core.Action{c.Wake(core.Millisecond)}
 }
 
-// OnPhase implements sim.PhaseAware. Entering Settling every client drops its
+// OnPhase implements simulator.PhaseAware. Entering Settling every client drops its
 // connection at its next op boundary (idle ones now), so a connection damaged
 // in Chaos (black-holed, clogged) cannot starve it. Entering Settle (the drain)
 // clients issue nothing new; outstanding requests finish.
@@ -169,7 +169,7 @@ func (w *Workload) next(c *client) []core.Action {
 	if w.hist != nil {
 		w.hist.Invoke(w.self, p.id, p.id, op)
 	}
-	return w.loop.Request(c, appendFrame(nil, body), reqTimeout)
+	return w.loop.Request(c, appendFrame(nil, body), requestTimeout)
 }
 
 func (w *Workload) onBytes(c *client, data []byte) []core.Action {

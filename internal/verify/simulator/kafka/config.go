@@ -69,7 +69,7 @@ func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Op
 	}
 	cfg.Processes = append(cfg.Processes, simulator.Process{
 		Name: "cp", Count: 2,
-		FactoryFor: func(sc simulator.SeedConfig) core.MachineFactory { return cpFactory(sc, opts) },
+		FactoryFor: func(sc simulator.SeedConfig) core.MachineFactory { return controlPlaneFactory(sc, opts) },
 	})
 	// Bridge deadline covers several logstore Put attempts. Per-append timeout
 	// must clear ApplyLatency SlowMax (200ms) so a slow Put is not a false
@@ -112,7 +112,7 @@ func configWith(seeds []uint64, bug broker.InjectedBug, opts Opts) simulator.Con
 			return broker.New(sc.Params.(broker.Config))
 		}}},
 		InvariantsFor: func(sc simulator.SeedConfig) []simulator.SafetyRule {
-			return []simulator.SafetyRule{newSegmentCaps(sc.Params.(broker.Config), sc.ControlPlane.MaxCommitItems, opts.tps()), &segmentTiming{}}
+			return []simulator.SafetyRule{newSegmentCaps(sc.Params.(broker.Config), sc.ControlPlane.MaxCommitItems, opts.topicPartitions()), &segmentTiming{}}
 		},
 		Workloads: []simulator.WorkloadFactory{func(env core.Environment, self core.NodeInstance, bs []core.NodeInstance) simulator.Workload {
 			return NewWorkload(env, self, bs, opts)

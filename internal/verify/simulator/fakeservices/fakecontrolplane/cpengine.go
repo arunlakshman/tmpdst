@@ -15,11 +15,11 @@ import (
 	"manifester/internal/verify/speccheck"
 )
 
-// Engine is the fake control plane. It is also the sim.CPTruth.
+// Engine is the fake control plane. It is also the simulator.CPTruth.
 type Engine struct {
 	*fakecompletions.CompletionCore
 	spec     *speccheck.ControlPlane
-	maxItems int // sim.ControlPlaneFaults.MaxCommitItems; 0 = unlimited
+	maxItems int // simulator.ControlPlaneFaults.MaxCommitItems; 0 = unlimited
 }
 
 var (

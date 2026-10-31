@@ -18,23 +18,23 @@ func (a *StateUpdater) OffsetFetch(op core.OffsetFetch) (core.ControlPlaneDone, 
 func offsetFetchTransaction(tx Transaction, op core.OffsetFetch) core.ControlPlaneDone {
 	var out []core.PartitionOffset
 	if len(op.Partitions) > 0 {
-		for _, tp := range op.Partitions {
-			v := tx.Get(offsetKey(op.Group, tp))
+		for _, topicPartition := range op.Partitions {
+			v := tx.Get(offsetKey(op.Group, topicPartition))
 			if v == nil {
-				out = append(out, core.PartitionOffset{TP: tp, Offset: -1, LeaderEpoch: -1})
+				out = append(out, core.PartitionOffset{TP: topicPartition, Offset: -1, LeaderEpoch: -1})
 				continue
 			}
-			out = append(out, offsetEntry(tp, decodeOffset(op.Group, v)))
+			out = append(out, offsetEntry(topicPartition, decodeOffset(op.Group, v)))
 		}
 		return core.ControlPlaneDone{Resp: core.OffsetFetchResp{Offsets: out}}
 	}
 	lo := groupPrefix(prefixOffset, op.Group)
 	tx.Ascend(lo, prefixEnd(lo), func(k, v []byte) bool {
-		tp, ok := splitTopicPartition(k[len(lo):])
+		topicPartition, ok := splitTopicPartition(k[len(lo):])
 		if !ok {
 			corruptGroup(op.Group)
 		}
-		out = append(out, offsetEntry(tp, decodeOffset(op.Group, v)))
+		out = append(out, offsetEntry(topicPartition, decodeOffset(op.Group, v)))
 		return true
 	})
 	slices.SortFunc(out, func(a, b core.PartitionOffset) int {
@@ -43,8 +43,8 @@ func offsetFetchTransaction(tx Transaction, op core.OffsetFetch) core.ControlPla
 	return core.ControlPlaneDone{Resp: core.OffsetFetchResp{Offsets: out}}
 }
 
-func offsetEntry(tp core.TopicPartition, o offsetRecord) core.PartitionOffset {
-	return core.PartitionOffset{TP: tp, Offset: o.offset, LeaderEpoch: o.epoch, Metadata: o.meta}
+func offsetEntry(topicPartition core.TopicPartition, o offsetRecord) core.PartitionOffset {
+	return core.PartitionOffset{TP: topicPartition, Offset: o.offset, LeaderEpoch: o.epoch, Metadata: o.meta}
 }
 
 // DescribeGroup answers a DescribeGroup.
@@ -58,7 +58,7 @@ func describeGroupTransaction(tx Transaction, op core.DescribeGroup) core.Contro
 		return core.ControlPlaneDone{Resp: core.DescribeGroupResp{}}
 	}
 	members := readMembers(tx, op.Group)
-	resp := core.DescribeGroupResp{
+	response := core.DescribeGroupResp{
 		Exists:             true,
 		Generation:         h.generation,
 		ProtocolType:       h.protoType,
@@ -68,7 +68,7 @@ func describeGroupTransaction(tx Transaction, op core.DescribeGroup) core.Contro
 		State:              groupState(h, len(members)),
 		Members:            members,
 	}
-	return core.ControlPlaneDone{Resp: resp}
+	return core.ControlPlaneDone{Resp: response}
 }
 
 // groupState is the state a group reports: "Empty" with no members, "Stable"

@@ -58,17 +58,17 @@ type harness struct {
 
 // newHarness starts a coordinator over an empty in-memory log. Member ids
 // are m1, m2, ... in the order they are made.
-func newHarness(t *testing.T, cfg Config) *harness {
+func newHarness(t *testing.T, config Config) *harness {
 	t.Helper()
 	h := &harness{t: t, clock: newFakeClock(time.Unix(1000, 0)), session: 10000, next: new(atomic.Int64)}
 	h.store = &stateupdater.Store{A: stateupdater.NewMem()}
-	if cfg.Clock == nil {
-		cfg.Clock = h.clock
+	if config.Clock == nil {
+		config.Clock = h.clock
 	}
-	if cfg.NewID == nil {
-		cfg.NewID = func() string { return fmt.Sprintf("m%d", h.next.Add(1)) }
+	if config.NewID == nil {
+		config.NewID = func() string { return fmt.Sprintf("m%d", h.next.Add(1)) }
 	}
-	h.c = New(cfg, h.store)
+	h.c = New(config, h.store)
 	t.Cleanup(h.c.Close)
 	if err := h.c.Rebuild(t.Context()); err != nil {
 		t.Fatal(err)
@@ -77,8 +77,8 @@ func newHarness(t *testing.T, cfg Config) *harness {
 }
 
 type joinResult struct {
-	resp JoinResp
-	err  error
+	response JoinResp
+	err      error
 }
 
 func (h *harness) joinReq(group, member string, protos ...string) JoinReq {
@@ -99,11 +99,11 @@ func (h *harness) joinReq(group, member string, protos ...string) JoinReq {
 }
 
 // joinAsync calls JoinGroup on its own goroutine.
-func (h *harness) joinAsync(req JoinReq) <-chan joinResult {
+func (h *harness) joinAsync(request JoinReq) <-chan joinResult {
 	ch := make(chan joinResult, 1)
 	go func() {
-		resp, err := h.c.JoinGroup(h.t.Context(), req)
-		ch <- joinResult{resp, err}
+		response, err := h.c.JoinGroup(h.t.Context(), request)
+		ch <- joinResult{response, err}
 	}()
 	return ch
 }
@@ -146,8 +146,8 @@ func (h *harness) sync(group, id string, gen int32, assigns ...Assignment) SyncR
 }
 
 type syncResult struct {
-	resp SyncResp
-	err  error
+	response SyncResp
+	err      error
 }
 
 func (h *harness) syncAsync(group, id string, gen int32, assigns ...Assignment) <-chan syncResult {
@@ -177,8 +177,8 @@ func (h *harness) stableTwo(group string) (string, string) {
 	a, chA := h.join(group)
 	h.clock.Advance(defaultInitialRebalanceDelay)
 	ra := h.recvJoin(chA)
-	if ra.err != nil || ra.resp.Err != core.OK || ra.resp.Generation != 1 {
-		h.t.Fatalf("first join: %+v %v", ra.resp, ra.err)
+	if ra.err != nil || ra.response.Err != core.OK || ra.response.Generation != 1 {
+		h.t.Fatalf("first join: %+v %v", ra.response, ra.err)
 	}
 	if s := h.sync(group, a, 1, Assignment{Member: a, Bytes: []byte("a1")}); s.Err != core.OK {
 		h.t.Fatalf("first sync: %v", s.Err)
@@ -187,16 +187,16 @@ func (h *harness) stableTwo(group string) (string, string) {
 	chA2 := h.rejoin(group, a)
 	rb := h.recvJoin(chB)
 	ra2 := h.recvJoin(chA2)
-	if rb.resp.Err != core.OK || ra2.resp.Err != core.OK || rb.resp.Generation != 2 || ra2.resp.Generation != 2 {
-		h.t.Fatalf("second round: %+v / %+v", rb.resp, ra2.resp)
+	if rb.response.Err != core.OK || ra2.response.Err != core.OK || rb.response.Generation != 2 || ra2.response.Generation != 2 {
+		h.t.Fatalf("second round: %+v / %+v", rb.response, ra2.response)
 	}
 	chS := h.syncAsync(group, b, 2)
 	waitUntil(h.t, func() bool { return peek(h.c, group).synced[b] })
 	if s := h.sync(group, a, 2, Assignment{Member: a, Bytes: []byte("a2")}, Assignment{Member: b, Bytes: []byte("b2")}); s.Err != core.OK {
 		h.t.Fatalf("leader sync: %v", s.Err)
 	}
-	if s := h.recvSync(chS); s.err != nil || s.resp.Err != core.OK || string(s.resp.Assignment) != "b2" {
-		h.t.Fatalf("follower sync: %+v %v", s.resp, s.err)
+	if s := h.recvSync(chS); s.err != nil || s.response.Err != core.OK || string(s.response.Assignment) != "b2" {
+		h.t.Fatalf("follower sync: %+v %v", s.response, s.err)
 	}
 	return a, b
 }
@@ -231,14 +231,14 @@ func TestOneMemberJoinsAndSyncs(t *testing.T) {
 	id, ch := h.join("g")
 	h.clock.Advance(defaultInitialRebalanceDelay)
 	r := h.recvJoin(ch)
-	if r.err != nil || r.resp.Err != core.OK || r.resp.Generation != 1 || r.resp.MemberID != id {
-		t.Fatalf("join: %+v %v", r.resp, r.err)
+	if r.err != nil || r.response.Err != core.OK || r.response.Generation != 1 || r.response.MemberID != id {
+		t.Fatalf("join: %+v %v", r.response, r.err)
 	}
-	if r.resp.Leader != id || r.resp.Protocol != "range" || len(r.resp.Members) != 1 || r.resp.Members[0].ID != id {
-		t.Fatalf("leader answer: %+v", r.resp)
+	if r.response.Leader != id || r.response.Protocol != "range" || len(r.response.Members) != 1 || r.response.Members[0].ID != id {
+		t.Fatalf("leader answer: %+v", r.response)
 	}
-	if string(r.resp.Members[0].Metadata) != "meta-range" {
-		t.Fatalf("metadata: %q", r.resp.Members[0].Metadata)
+	if string(r.response.Members[0].Metadata) != "meta-range" {
+		t.Fatalf("metadata: %q", r.response.Members[0].Metadata)
 	}
 	s := h.sync("g", id, 1, Assignment{Member: id, Bytes: []byte("all")})
 	if s.Err != core.OK || string(s.Assignment) != "all" {
@@ -271,12 +271,12 @@ func TestSecondMemberRebalancesStableGroup(t *testing.T) {
 	chB := h.rejoin("g", b)
 	ra, rb, rc := h.recvJoin(chA), h.recvJoin(chB), h.recvJoin(ch3)
 	for _, r := range []joinResult{ra, rb, rc} {
-		if r.err != nil || r.resp.Err != core.OK || r.resp.Generation != 3 || r.resp.Leader != a {
-			t.Fatalf("round three: %+v %v", r.resp, r.err)
+		if r.err != nil || r.response.Err != core.OK || r.response.Generation != 3 || r.response.Leader != a {
+			t.Fatalf("round three: %+v %v", r.response, r.err)
 		}
 	}
-	if len(ra.resp.Members) != 3 || len(rb.resp.Members) != 0 || len(rc.resp.Members) != 0 {
-		t.Fatalf("only the leader gets the list: %d %d %d", len(ra.resp.Members), len(rb.resp.Members), len(rc.resp.Members))
+	if len(ra.response.Members) != 3 || len(rb.response.Members) != 0 || len(rc.response.Members) != 0 {
+		t.Fatalf("only the leader gets the list: %d %d %d", len(ra.response.Members), len(rb.response.Members), len(rc.response.Members))
 	}
 	if got := storedMembers(t, h, "g"); !slices.Equal(got, []string{a, b, c3}) {
 		t.Fatalf("stored members: %v", got)
@@ -286,7 +286,7 @@ func TestSecondMemberRebalancesStableGroup(t *testing.T) {
 	if s := h.sync("g", a, 3, Assignment{Member: a, Bytes: []byte("a3")}, Assignment{Member: b, Bytes: []byte("b3")}, Assignment{Member: c3, Bytes: []byte("c3")}); s.Err != core.OK {
 		t.Fatalf("leader sync: %+v", s)
 	}
-	if s := h.recvSync(chS); s.resp.Err != core.OK || string(s.resp.Assignment) != "b3" {
+	if s := h.recvSync(chS); s.response.Err != core.OK || string(s.response.Assignment) != "b3" {
 		t.Fatalf("follower sync: %+v", s)
 	}
 	if s := h.sync("g", c3, 3); s.Err != core.OK || string(s.Assignment) != "c3" {
@@ -306,8 +306,8 @@ func TestLeaveRebalances(t *testing.T) {
 	}
 	ch := h.rejoin("g", a)
 	r := h.recvJoin(ch)
-	if r.resp.Err != core.OK || r.resp.Generation != 3 || len(r.resp.Members) != 1 {
-		t.Fatalf("rejoin: %+v", r.resp)
+	if r.response.Err != core.OK || r.response.Generation != 3 || len(r.response.Members) != 1 {
+		t.Fatalf("rejoin: %+v", r.response)
 	}
 	if got := storedMembers(t, h, "g"); !slices.Equal(got, []string{a}) {
 		t.Fatalf("stored: %v", got)
@@ -342,8 +342,8 @@ func TestSessionExpiryRemovesSilentMember(t *testing.T) {
 		t.Fatalf("expired member heartbeat: %v", c)
 	}
 	ch := h.rejoin("g", a)
-	if r := h.recvJoin(ch); r.resp.Err != core.OK || r.resp.Generation != 3 {
-		t.Fatalf("rejoin after expiry: %+v", r.resp)
+	if r := h.recvJoin(ch); r.response.Err != core.OK || r.response.Generation != 3 {
+		t.Fatalf("rejoin after expiry: %+v", r.response)
 	}
 }
 

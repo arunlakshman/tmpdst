@@ -1,5 +1,5 @@
 // Package kafka is the Kafka scenario: sans-I/O Kafka clients (at-least-once
-// producers, no idempotence, and consumers over kwire), an oracle that rebuilds each
+// producers, no idempotence, and consumers over kafkawire), an oracle that rebuilds each
 // partition's committed log from the control plane and object store truth, the
 // invariants over it, and the campaign preset. See docs/decisions.md rows
 // 12-17, 26-31.
@@ -41,14 +41,14 @@ func (o Opts) maxAttempts() int {
 	return maxAttempts
 }
 
-func (o Opts) reqTimeout() core.Duration {
+func (o Opts) requestTimeout() core.Duration {
 	if o.ReqTimeout > 0 {
 		return o.ReqTimeout
 	}
-	return reqTimeout
+	return requestTimeout
 }
 
-func (o Opts) tps() []core.TopicPartition {
+func (o Opts) topicPartitions() []core.TopicPartition {
 	var out []core.TopicPartition
 	for _, t := range o.Topics {
 		for p := int32(0); p < o.Partitions; p++ {
@@ -59,10 +59,10 @@ func (o Opts) tps() []core.TopicPartition {
 }
 
 const (
-	reqTimeout  = 1500 * core.Millisecond // a request with no answer: drop the connection (Kafka does)
-	fetchWait   = 10 * core.Second        // a fetch reads a batch at a time from S3: it is slow on a long log
-	maxAttempts = 3                       // sends of one produce batch before it is abandoned
-	maxFrame    = 8 << 20
+	requestTimeout = 1500 * core.Millisecond // a request with no answer: drop the connection (Kafka does)
+	fetchWait      = 10 * core.Second        // a fetch reads a batch at a time from S3: it is slow on a long log
+	maxAttempts    = 3                       // sends of one produce batch before it is abandoned
+	maxFrame       = 8 << 20
 )
 
 type stage uint8
@@ -74,10 +74,10 @@ const (
 	stateRunning
 )
 
-type reqKind uint8
+type requestKind uint8
 
 const (
-	requestAPIVersions reqKind = iota
+	requestAPIVersions requestKind = iota
 	requestMetadata
 	requestListOffsets
 	requestProduce
@@ -86,7 +86,7 @@ const (
 )
 
 type waitingRequests struct {
-	kind reqKind
+	kind requestKind
 	h    core.RequestHeader
 }
 
@@ -118,7 +118,7 @@ type Workload struct {
 
 // NewWorkload builds the workload machine.
 func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.NodeInstance, o Opts) *Workload {
-	w := &Workload{env: env, self: self, opts: o, tps: o.tps()}
+	w := &Workload{env: env, self: self, opts: o, tps: o.topicPartitions()}
 	w.loop = session.Loop[*client]{
 		Connected: func(c *client) bool { return c.State == session.Connected },
 		Busy:      func(c *client) bool { return c.out != nil },
@@ -140,7 +140,7 @@ func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.No
 	return w
 }
 
-// Name implements sim.Workload.
+// Name implements simulator.Workload.
 func (w *Workload) Name() string { return "kafka" }
 
 // SetHistory is called by the kernel.
@@ -160,7 +160,7 @@ func (w *Workload) Quiescent() bool {
 // Step implements core.StateMachine.
 func (w *Workload) Step(ev core.Event) []core.Action { return w.loop.Step(ev) }
 
-// OnPhase implements sim.PhaseAware. Entering Settling the producers start no
+// OnPhase implements simulator.PhaseAware. Entering Settling the producers start no
 // new batch (in-flight ones finish); the consumers keep reading. Entering
 // Settle (the drain) each consumer stops after a fetch that finds the end of
 // every partition, so no read is outstanding at the end.
@@ -206,7 +206,7 @@ func (w *Workload) advance(c *client) []core.Action {
 }
 
 // send encodes req at the client's version for kind and starts the timeout.
-func (w *Workload) send(c *client, kind reqKind, req kmsg.Request) []core.Action {
+func (w *Workload) send(c *client, kind requestKind, req kmsg.Request) []core.Action {
 	c.corr++
 	h := core.RequestHeader{APIKey: req.Key(), APIVersion: c.ver[kind], CorrelationID: c.corr, ClientID: fmt.Sprintf("c%d", c.ID)}
 	data, err := w.codec.EncodeRequest(h, req)
@@ -214,7 +214,7 @@ func (w *Workload) send(c *client, kind reqKind, req kmsg.Request) []core.Action
 		w.env.Unreachable("kafka: client request encodes", core.ContextPair{Key: "err", Value: err.Error()})
 		return nil
 	}
-	timeout := w.opts.reqTimeout()
+	timeout := w.opts.requestTimeout()
 	if kind == requestFetch {
 		timeout = fetchWait
 	}
@@ -247,7 +247,7 @@ func (w *Workload) onBytes(c *client, data []byte) []core.Action {
 	return acts
 }
 
-func (w *Workload) handle(c *client, k reqKind, resp core.Response) []core.Action {
+func (w *Workload) handle(c *client, k requestKind, resp core.Response) []core.Action {
 	switch r := resp.(type) {
 	case *kmsg.ApiVersionsResponse:
 		return w.onAPI(c, r)
@@ -269,7 +269,7 @@ func (w *Workload) onAPI(c *client, r *kmsg.ApiVersionsResponse) []core.Action {
 	if r.ErrorCode != 0 {
 		return w.retryStage(c)
 	}
-	pick := func(k reqKind, key int16) bool {
+	pick := func(k requestKind, key int16) bool {
 		lo, hi := int16(0), int16(-1)
 		if s, ok := kafkawire.Range(key); ok {
 			lo, hi = s.Min, s.Max

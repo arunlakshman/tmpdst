@@ -10,7 +10,7 @@ import (
 	"manifester/internal/verify/speccheck"
 )
 
-// Engine is the fake object store. It is also the sim.ObjectTruth.
+// Engine is the fake object store. It is also the simulator.ObjectTruth.
 type Engine struct {
 	*fakecompletions.CompletionCore
 	spec *speccheck.ObjectStore

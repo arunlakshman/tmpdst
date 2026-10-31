@@ -5,9 +5,9 @@ import (
 	"manifester/internal/core"
 )
 
-// onCPOffer handles one sim-bridge ControlPlaneDeliver: reads wait for a fresh tail and answer from the fold when
+// onControlPlaneDeliver handles one simulator-bridge ControlPlaneDeliver: reads wait for a fresh tail and answer from the fold when
 // Ready; commits and creates go through Offer and ControlPlaneReply after apply.
-func (m *Machine) onCPOffer(o core.ControlPlaneDeliver) []core.Action {
+func (m *Machine) onControlPlaneDeliver(o core.ControlPlaneDeliver) []core.Action {
 	switch op := o.Op.(type) {
 	case core.CommitSegment:
 		return m.withReplies(m.Offer(ClientOperation{

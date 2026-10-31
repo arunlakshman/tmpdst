@@ -2,7 +2,7 @@
 // control plane for the real concurrency (audit item 4).
 //
 // Go's default keeps 2 idle connections per host, the AWS SDK's 10 and the old
-// cpclient's 16. A caught-up consumer fleet makes tens of thousands of CP
+// controlplaneclient's 16. A caught-up consumer fleet makes tens of thousands of CP
 // requests per second and a broker has hundreds of S3 requests in flight, so
 // with those defaults every burst dials fresh connections and leaves them in
 // TIME_WAIT (16k sockets in six seconds were measured), which exhausts the

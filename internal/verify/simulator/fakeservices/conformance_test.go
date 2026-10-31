@@ -106,7 +106,7 @@ func TestConformanceObjStore(t *testing.T) {
 	}
 }
 
-func TestConformanceCPEngine(t *testing.T) {
+func TestConformanceFakeControlPlane(t *testing.T) {
 	for _, profile := range suites.AllControlPlaneProfiles() {
 		t.Run(profile.Name, func(t *testing.T) {
 			suites.ControlPlane(t, profile, newEngineControlPlaneSubject, runcontrol.Options(t, seedBudget))
@@ -114,12 +114,12 @@ func TestConformanceCPEngine(t *testing.T) {
 	}
 }
 
-// The suite must find each planted bug even when the correct subject is an
+// The suite must find each injected bug even when the correct subject is an
 // engine. This shows the engine comparison is as strong as the spec one.
-func TestConformanceObjStoreCatchesPlantedBugs(t *testing.T) {
+func TestConformanceObjStoreCatchesInjectedBugs(t *testing.T) {
 	injectedbug.RequireAllObjectBugsDetected(t, newEngineObjectSubject, seedBudget)
 }
 
-func TestConformanceCPEngineCatchesPlantedBugs(t *testing.T) {
+func TestConformanceFakeControlPlaneCatchesInjectedBugs(t *testing.T) {
 	injectedbug.RequireAllControlPlaneBugsDetected(t, newEngineControlPlaneSubject, seedBudget)
 }

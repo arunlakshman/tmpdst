@@ -258,25 +258,25 @@ func (c *ControlPlane) groupRemove(op core.GroupRemove) core.ErrCode {
 	return core.OK
 }
 
-func (c *ControlPlane) offsetCommit(req core.RequestID, op core.OffsetCommit) core.ControlPlaneDone {
+func (c *ControlPlane) offsetCommit(request core.RequestID, op core.OffsetCommit) core.ControlPlaneDone {
 	if sizeOffsetCommit(op) > maxGroupCommand {
-		return core.ControlPlaneDone{Req: req, Err: core.ErrTooLarge}
+		return core.ControlPlaneDone{Req: request, Err: core.ErrTooLarge}
 	}
 	g := c.groups[op.Group]
 	switch {
 	case op.Generation >= 0:
 		if g == nil || g.members[op.Member] == nil {
-			return core.ControlPlaneDone{Req: req, Err: core.ErrUnknownMember}
+			return core.ControlPlaneDone{Req: request, Err: core.ErrUnknownMember}
 		}
 		if op.Generation != g.generation {
-			return core.ControlPlaneDone{Req: req, Err: core.ErrIllegalGeneration}
+			return core.ControlPlaneDone{Req: request, Err: core.ErrIllegalGeneration}
 		}
 	case op.Generation == -1 && op.Member == "":
 		if g != nil && len(g.members) > 0 {
-			return core.ControlPlaneDone{Req: req, Err: core.ErrIllegalGeneration}
+			return core.ControlPlaneDone{Req: request, Err: core.ErrIllegalGeneration}
 		}
 	default:
-		return core.ControlPlaneDone{Req: req, Err: core.ErrIllegalGeneration}
+		return core.ControlPlaneDone{Req: request, Err: core.ErrIllegalGeneration}
 	}
 	var errs []core.ErrCode
 	saved := false
@@ -287,7 +287,7 @@ func (c *ControlPlane) offsetCommit(req core.RequestID, op core.OffsetCommit) co
 		}
 		errs = append(errs, code)
 	}
-	done := core.ControlPlaneDone{Req: req, Resp: core.OffsetCommitResp{Errs: errs}}
+	done := core.ControlPlaneDone{Req: request, Resp: core.OffsetCommitResp{Errs: errs}}
 	if saved {
 		done.Outcome = core.Applied
 	}
@@ -368,7 +368,7 @@ func (c *ControlPlane) describeGroup(op core.DescribeGroup) core.DescribeGroupRe
 	if g == nil {
 		return core.DescribeGroupResp{}
 	}
-	resp := core.DescribeGroupResp{
+	response := core.DescribeGroupResp{
 		Exists:             true,
 		Generation:         g.generation,
 		ProtocolType:       g.protoType,
@@ -379,13 +379,13 @@ func (c *ControlPlane) describeGroup(op core.DescribeGroup) core.DescribeGroupRe
 	}
 	for _, id := range sortedKeys(g.members) {
 		m := g.members[id]
-		resp.Members = append(resp.Members, core.GroupMemberInfo{
+		response.Members = append(response.Members, core.GroupMemberInfo{
 			GroupMember:  m.GroupMember,
 			JoinedTimeMs: m.joined,
 			Assignment:   noEmpty(m.assignment),
 		})
 	}
-	return resp
+	return response
 }
 
 func (c *ControlPlane) listGroups() core.ListGroupsResp {

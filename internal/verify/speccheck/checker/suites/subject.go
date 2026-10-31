@@ -44,7 +44,7 @@ type PartitionSubject interface {
 type specObjectSubject struct{ store *speccheck.ObjectStore }
 
 // NewSpecObjectSubject returns a fresh speccheck.ObjectStore as a subject. Use it
-// to run a suite spec against spec, and as the correct subject that a planted
+// to run a suite spec against spec, and as the correct subject that an injected
 // bug wraps.
 func NewSpecObjectSubject() ObjectSubject {
 	return &specObjectSubject{store: speccheck.NewObjectStore()}

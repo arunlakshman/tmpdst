@@ -16,11 +16,11 @@ import (
 // JoinGroup joins a consumer group and waits for the join round to end.
 //
 //nolint:dupl // each group call keeps its own conversion
-func (c *Client) JoinGroup(ctx context.Context, req groupcoordinator.JoinReq) (groupcoordinator.JoinResp, error) {
+func (c *Client) JoinGroup(ctx context.Context, request groupcoordinator.JoinReq) (groupcoordinator.JoinResp, error) {
 	var out *cpv1.JoinGroupResponse
 	err := c.do(ctx, "JoinGroup", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.JoinGroup(ctx, apiconvert.JoinGroupFromCore(req))
+		out, e = cli.JoinGroup(ctx, apiconvert.JoinGroupFromCore(request))
 		return e
 	})
 	if err != nil {
@@ -32,11 +32,11 @@ func (c *Client) JoinGroup(ctx context.Context, req groupcoordinator.JoinReq) (g
 // SyncGroup sends the leader's assignment, or waits for it as a follower.
 //
 //nolint:dupl // each group call keeps its own conversion
-func (c *Client) SyncGroup(ctx context.Context, req groupcoordinator.SyncReq) (groupcoordinator.SyncResp, error) {
+func (c *Client) SyncGroup(ctx context.Context, request groupcoordinator.SyncReq) (groupcoordinator.SyncResp, error) {
 	var out *cpv1.SyncGroupResponse
 	err := c.do(ctx, "SyncGroup", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.SyncGroup(ctx, apiconvert.SyncGroupFromCore(req))
+		out, e = cli.SyncGroup(ctx, apiconvert.SyncGroupFromCore(request))
 		return e
 	})
 	if err != nil {
@@ -46,9 +46,9 @@ func (c *Client) SyncGroup(ctx context.Context, req groupcoordinator.SyncReq) (g
 }
 
 // GroupHeartbeat renews a member's session.
-func (c *Client) GroupHeartbeat(ctx context.Context, req groupcoordinator.HeartbeatReq) error {
+func (c *Client) GroupHeartbeat(ctx context.Context, request groupcoordinator.HeartbeatReq) error {
 	return c.do(ctx, "GroupHeartbeat", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
-		_, err := cli.GroupHeartbeat(ctx, apiconvert.HeartbeatFromCore(req))
+		_, err := cli.GroupHeartbeat(ctx, apiconvert.HeartbeatFromCore(request))
 		return err
 	})
 }
@@ -56,11 +56,11 @@ func (c *Client) GroupHeartbeat(ctx context.Context, req groupcoordinator.Heartb
 // LeaveGroup removes members. It returns one code per member, in request order.
 //
 //nolint:dupl // each group call keeps its own conversion
-func (c *Client) LeaveGroup(ctx context.Context, req groupcoordinator.LeaveReq) ([]core.ErrCode, error) {
+func (c *Client) LeaveGroup(ctx context.Context, request groupcoordinator.LeaveReq) ([]core.ErrCode, error) {
 	var out *cpv1.LeaveGroupResponse
 	err := c.do(ctx, "LeaveGroup", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.LeaveGroup(ctx, apiconvert.LeaveGroupFromCore(req))
+		out, e = cli.LeaveGroup(ctx, apiconvert.LeaveGroupFromCore(request))
 		return e
 	})
 	if err != nil {

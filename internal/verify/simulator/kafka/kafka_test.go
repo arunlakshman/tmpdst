@@ -438,7 +438,7 @@ func wideCampaign(t *testing.T, capParts, batches int, log bool) int64 {
 		}
 	}
 	var widest atomic.Int64
-	cfg.Invariants = append(cfg.Invariants, func() simulator.SafetyRule { return &widestInv{&widest, opts.tps()} })
+	cfg.Invariants = append(cfg.Invariants, func() simulator.SafetyRule { return &widestInv{&widest, opts.topicPartitions()} })
 	rep, err := simulator.NewRunner().Run(cfg)
 	if err != nil {
 		t.Fatal(err)

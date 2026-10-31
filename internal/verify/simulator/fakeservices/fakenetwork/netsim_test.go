@@ -187,10 +187,10 @@ func (h *harness) runUntil(t simulator.Time) {
 	}
 }
 
-func (h *harness) req() core.RequestID { h.reqN++; return h.reqN }
+func (h *harness) nextRequestID() core.RequestID { h.reqN++; return h.reqN }
 
 func (h *harness) dial(from core.NodeInstance, addr string) (core.ConnectDone, bool) {
-	r := h.req()
+	r := h.nextRequestID()
 	h.eng.Execute(h, from, core.Connect{Req: r, Addr: addr})
 	h.run()
 	d, ok := h.dials[r]
@@ -198,7 +198,7 @@ func (h *harness) dial(from core.NodeInstance, addr string) (core.ConnectDone, b
 }
 
 func (h *harness) send(from core.NodeInstance, c core.ConnID, data []byte) core.RequestID {
-	r := h.req()
+	r := h.nextRequestID()
 	h.eng.Execute(h, from, core.Send{Req: r, Conn: c, Data: data})
 	return r
 }

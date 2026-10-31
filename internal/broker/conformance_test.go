@@ -17,7 +17,7 @@ import (
 // Conformance C1 tests the REAL broker logic against SIMULATED fakes of the
 // world. The fakes are the speccheck spec object store and the speccheck spec
 // control plane, and the harness runs without faults. The test sends client
-// requests built with kwire. It compares every ack, fetch and ListOffsets
+// requests built with kafkawire. It compares every ack, fetch and ListOffsets
 // answer with one speccheck.Partition per topic partition.
 
 var c1TPs = []core.TopicPartition{core.NewTopicPartition("t", 0), core.NewTopicPartition("t", 1),
@@ -321,7 +321,7 @@ func c1Check(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) ch
 }
 
 // c1Fail runs the seeds that o chooses and returns the first failure, or nil
-// if every seed passes. A planted-bug test needs the failure as a value, so it
+// if every seed passes. An injected-bug test needs the failure as a value, so it
 // cannot use checker.Run, which reports the failure to the test itself.
 func c1Fail(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config), o checker.Options) *checker.Failure[c1op] {
 	c := c1Check(t, bug, corrupt, tune)
@@ -377,10 +377,10 @@ func TestConformanceBrokerSmallSegments(t *testing.T) {
 	}
 }
 
-// This test shows that the C1 comparison can fail. Each planted bug below
+// This test shows that the C1 comparison can fail. Each injected bug below
 // changes something the harness can observe, so C1 must catch it.
 //
-// C1 cannot catch the other planted bugs, because the client cannot see them
+// C1 cannot catch the other injected bugs, because the client cannot see them
 // in a fault-free run. The simulator tests in internal/verify/simulator/kafka catch
 // them: TestMutantsAreCaught in kafka_test.go runs every InjectedBug value and names
 // the invariant that must fail.

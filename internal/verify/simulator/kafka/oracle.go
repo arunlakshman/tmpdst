@@ -36,7 +36,7 @@ type expectedLogChecker struct {
 }
 
 func newOracle(o Opts) *expectedLogChecker {
-	or := &expectedLogChecker{opts: o, tps: o.tps(), idx: map[core.TopicPartition]int{}, opIdx: map[[2]int]int{},
+	or := &expectedLogChecker{opts: o, tps: o.topicPartitions(), idx: map[core.TopicPartition]int{}, opIdx: map[[2]int]int{},
 		seen: map[string]int{}, locs: map[core.SegmentRef]int64{}, cpos: map[[2]int]int64{}}
 	for i, tp := range or.tps {
 		or.idx[tp] = i
@@ -79,7 +79,9 @@ func (o *expectedLogChecker) refresh(v simulator.View) {
 	}
 }
 
-func tpName(tp core.TopicPartition) string { return tp.Topic + "/" + strconv.Itoa(int(tp.Partition)) }
+func topicPartitionName(tp core.TopicPartition) string {
+	return tp.Topic + "/" + strconv.Itoa(int(tp.Partition))
+}
 
 // record checks one committed record: it was produced (to this partition,
 // at this position of its batch, never from a definitely rejected batch). A
@@ -153,7 +155,7 @@ func (o *expectedLogChecker) checkRead(v simulator.View, ro ReadOp, rr ReadRes) 
 		from := ro.Parts[i]
 		ti := o.idx[from.TP]
 		pl := o.logs[ti]
-		det := []core.ContextPair{{Key: "client", Value: ro.Client}, {Key: "tp", Value: tpName(from.TP)}, {Key: "from", Value: from.Off}}
+		det := []core.ContextPair{{Key: "client", Value: ro.Client}, {Key: "tp", Value: topicPartitionName(from.TP)}, {Key: "from", Value: from.Off}}
 		as.Always(!part.Corrupt, "kafka: a consumer never receives a corrupt batch", det...)
 		as.Always(part.Code != 1, "kafka: a consumer's fetch is never out of range", det...)
 		if part.Code != 0 {
@@ -196,7 +198,7 @@ func (o *expectedLogChecker) AtEnd(v simulator.View) {
 			// Every send commits at most once (a MaybeApplied commit is retried
 			// under its key), so a batch is in the log at most once per send.
 			as.Always(o.seen[po.Vals[0]] <= max(res.Attempts, 1), "kafka: a batch is committed at most once per send",
-				core.ContextPair{Key: "tp", Value: tpName(po.TP)}, core.ContextPair{Key: "value", Value: po.Vals[0]},
+				core.ContextPair{Key: "tp", Value: topicPartitionName(po.TP)}, core.ContextPair{Key: "value", Value: po.Vals[0]},
 				core.ContextPair{Key: "times", Value: o.seen[po.Vals[0]]}, core.ContextPair{Key: "sends", Value: res.Attempts})
 		}
 		switch op.Outcome {
@@ -205,14 +207,14 @@ func (o *expectedLogChecker) AtEnd(v simulator.View) {
 				off := res.Base + int64(i)
 				same := res.Base >= 0 && off < int64(len(o.logs[ti].vals)) && o.logs[ti].vals[off] == val
 				as.Always(same, "kafka: an acked record is in the log at its acked offset",
-					core.ContextPair{Key: "tp", Value: tpName(po.TP)}, core.ContextPair{Key: "offset", Value: off}, core.ContextPair{Key: "value", Value: val})
+					core.ContextPair{Key: "tp", Value: topicPartitionName(po.TP)}, core.ContextPair{Key: "offset", Value: off}, core.ContextPair{Key: "value", Value: val})
 			}
 			// One batch at a time per (client, partition): the next batch is built
 			// after this one was acked, so its acked offset is higher.
 			k := [2]int{po.Client, ti}
 			if prev, had := lastAcked[k]; had {
 				as.Always(res.Base >= prev+1, "kafka: a client's acked batches for a partition are at increasing offsets",
-					core.ContextPair{Key: "tp", Value: tpName(po.TP)}, core.ContextPair{Key: "base", Value: res.Base}, core.ContextPair{Key: "previous", Value: prev})
+					core.ContextPair{Key: "tp", Value: topicPartitionName(po.TP)}, core.ContextPair{Key: "base", Value: res.Base}, core.ContextPair{Key: "previous", Value: prev})
 			}
 			lastAcked[k] = res.Base
 		case simulator.OpGivenUp:
@@ -224,7 +226,7 @@ func (o *expectedLogChecker) AtEnd(v simulator.View) {
 	for c := o.opts.Producers; c < o.opts.Producers+o.opts.Consumers; c++ {
 		for ti, pl := range o.logs {
 			as.Always(o.cpos[[2]int{c, ti}] == int64(len(pl.vals)), "kafka: every consumer caught up with the final log",
-				core.ContextPair{Key: "client", Value: c}, core.ContextPair{Key: "tp", Value: tpName(pl.tp)},
+				core.ContextPair{Key: "client", Value: c}, core.ContextPair{Key: "tp", Value: topicPartitionName(pl.tp)},
 				core.ContextPair{Key: "pos", Value: o.cpos[[2]int{c, ti}]}, core.ContextPair{Key: "hwm", Value: int64(len(pl.vals))})
 		}
 	}

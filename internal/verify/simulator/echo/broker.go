@@ -55,7 +55,7 @@ type op struct {
 	maybe    bool // a commit may have applied
 	replied  bool // mutants only: already acked early
 	payload  []byte
-	seg      []byte
+	segment  []byte
 	key      string
 	ref      core.SegmentRef
 	offset   core.Offset
@@ -83,7 +83,7 @@ func NewBroker(env core.Environment, self core.NodeInstance) core.Machine {
 	return &Broker{env: env, self: self}
 }
 
-func (b *Broker) req() core.RequestID { b.nextReq++; return b.nextReq }
+func (b *Broker) nextRequestID() core.RequestID { b.nextReq++; return b.nextReq }
 
 func backoff(n int) core.Duration {
 	if n > 5 {
@@ -208,7 +208,7 @@ func (b *Broker) send(c core.ConnID, text string) []core.Action {
 	if b.findConn(c) < 0 {
 		return nil
 	}
-	return []core.Action{core.Send{Req: b.req(), Conn: c, Data: appendFrame(nil, text)}}
+	return []core.Action{core.Send{Req: b.nextRequestID(), Conn: c, Data: appendFrame(nil, text)}}
 }
 
 func (b *Broker) request(c *conn, frame string) []core.Action {
@@ -238,12 +238,12 @@ func (b *Broker) start(o *op) []core.Action {
 	if o.kind == opGet {
 		return b.lookup(o)
 	}
-	data, entries, err := segmentformat.Encode([]segmentformat.Batch{{TP: tp(), Records: 1, Data: o.payload}})
+	data, entries, err := segmentformat.Encode([]segmentformat.Batch{{TP: topicPartition(), Records: 1, Data: o.payload}})
 	if err != nil {
 		return b.reply(o, "ERR")
 	}
 	o.key = segmentformat.SegmentKey(b.env.NewID())
-	o.seg, o.ref = data, entries[0].Ref(o.key)
+	o.segment, o.ref = data, entries[0].Ref(o.key)
 	return b.put(o)
 }
 
@@ -311,8 +311,8 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 // ---- PUT ----
 
 func (b *Broker) put(o *op) []core.Action {
-	o.state, o.req = statePut, b.req()
-	return []core.Action{core.ObjectPut{Req: o.req, Key: o.key, Data: o.seg}}
+	o.state, o.req = statePut, b.nextRequestID()
+	return []core.Action{core.ObjectPut{Req: o.req, Key: o.key, Data: o.segment}}
 }
 
 func (b *Broker) onPut(o *op, e core.ObjectPutDone) []core.Action {
@@ -328,10 +328,10 @@ func (b *Broker) onPut(o *op, e core.ObjectPutDone) []core.Action {
 }
 
 func (b *Broker) commit(o *op) []core.Action {
-	o.state, o.req = stateCommit, b.req()
+	o.state, o.req = stateCommit, b.nextRequestID()
 	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: core.CommitSegment{
 		SegmentKey: o.key,
-		Batches:    []core.PendingBatch{{TP: tp(), Records: 1, Loc: o.ref}},
+		Batches:    []core.PendingBatch{{TP: topicPartition(), Records: 1, Loc: o.ref}},
 	}}}
 }
 
@@ -353,7 +353,7 @@ func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 	switch {
 	case e.Err == core.OK:
 		resp, ok := e.Resp.(core.CommitSegmentResp)
-		okShape := ok && len(resp.Assigned) == 1 && resp.Assigned[0].TP == tp() && resp.Assigned[0].Loc == o.ref
+		okShape := ok && len(resp.Assigned) == 1 && resp.Assigned[0].TP == topicPartition() && resp.Assigned[0].Loc == o.ref
 		b.env.Always(okShape, "echo: commit assigns exactly the one batch")
 		if !okShape {
 			return b.reply(o, "ERR maybe")
@@ -382,8 +382,8 @@ func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 // ---- GET ----
 
 func (b *Broker) lookup(o *op) []core.Action {
-	o.state, o.req = stateLookup, b.req()
-	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: core.FindSegments{TP: tp(), From: o.offset}}}
+	o.state, o.req = stateLookup, b.nextRequestID()
+	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: core.FindSegments{TP: topicPartition(), From: o.offset}}}
 }
 
 func (b *Broker) onLookup(o *op, e core.ControlPlaneDone) []core.Action {
@@ -401,7 +401,7 @@ func (b *Broker) onLookup(o *op, e core.ControlPlaneDone) []core.Action {
 }
 
 func (b *Broker) get(o *op) []core.Action {
-	o.state, o.req = stateGet, b.req()
+	o.state, o.req = stateGet, b.nextRequestID()
 	return []core.Action{core.ObjectGet{Req: o.req, Ref: core.SegmentRef{Key: o.ref.Key}}}
 }
 
@@ -413,13 +413,13 @@ func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
 		}
 		return b.retryLater(o, stateGet)
 	}
-	seg, err := segmentformat.Decode(e.Data)
+	segment, err := segmentformat.Decode(e.Data)
 	var data []byte
 	if err == nil {
 		err = segmentformat.ErrCorrupt
-		for i, en := range seg.Entries {
+		for i, en := range segment.Entries {
 			if en.Off == o.ref.Off && en.Len == o.ref.Len {
-				if data, err = segmentformat.VerifyBatch(en, seg.Batches[i].Data); err != nil {
+				if data, err = segmentformat.VerifyBatch(en, segment.Batches[i].Data); err != nil {
 					data = nil
 				}
 				break
@@ -468,7 +468,7 @@ func (b *Broker) StateHash() uint64 {
 		h.Bool(o.maybe)
 		h.Bool(o.replied)
 		h.Bytes(o.payload)
-		h.U64(uint64(len(o.seg)))
+		h.U64(uint64(len(o.segment)))
 		h.Str(o.key)
 		h.Str(o.ref.Key)
 		h.U64(uint64(o.ref.Off))

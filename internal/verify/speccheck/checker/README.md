@@ -10,7 +10,7 @@ Words used here:
 - **oracle**: a checker we trust to say if a result is correct. A spec is the
   oracle for the code that is compared with it.
 - **subject**: the real or simulated code that we compare with the spec.
-- **planted bug**: a known bug that a test adds on purpose, to prove that the
+- **injected bug**: a known bug that a test adds on purpose, to prove that the
   suite can catch it.
 - **shrink**: make a failing case smaller.
 
@@ -80,11 +80,11 @@ Build a `checker.SpecChecker`. Set these fields:
 
 Then call `checker.Run(t, comparator, options)`.
 
-### 4. Add planted bugs (about 5 minutes)
+### 4. Add injected bugs (about 5 minutes)
 
 Use `checker/injectedbug` to wrap the subject with a known bug, for
 example a wrong offset or a lost write. Write a test that runs the suite on the
-wrapped subject and checks that it fails. A suite that cannot catch a planted
+wrapped subject and checks that it fails. A suite that cannot catch an injected
 bug does not protect anything.
 
 ### 5. Set the options with runcontrol (about 2 minutes)

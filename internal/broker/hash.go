@@ -44,7 +44,7 @@ func (b *Broker) StateHash() uint64 {
 	h.topics(b.topics)
 	h.conns(b.conns)
 	h.openSeg(b.open)
-	h.segs(b.segs)
+	h.hashSegments(b.segs)
 	h.ops(b.ops)
 	return uint64(h)
 }
@@ -100,7 +100,7 @@ func (h *stateHasher) conns(conns []*connection) {
 	}
 }
 
-func (h *stateHasher) segs(segs []*segment) {
+func (h *stateHasher) hashSegments(segs []*segment) {
 	h.u64(uint64(len(segs)))
 	for _, s := range segs {
 		h.u64(s.id)

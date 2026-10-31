@@ -14,7 +14,7 @@
 //
 //	C1  The broker state machine runs with no faults, over the ObjectStore
 //	    and ControlPlane specs. Its answers to produce, fetch and ListOffsets
-//	    are compared with Partition. The test also checks that the planted
+//	    are compared with Partition. The test also checks that the injected
 //	    bugs InjectedBugWrongOffset and InjectedBugServeCorrupt are caught.
 //	    Test: internal/broker/conformance_test.go.
 //	C2  Each simulated engine (object store, control plane) runs with all

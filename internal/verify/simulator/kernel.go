@@ -352,7 +352,7 @@ func (r *run) boot(n *node) {
 	n.m, n.alive, n.sumOK = m, true, false
 	if n.boots > 1 {
 		r.counters[countRestarts]++
-		r.simFact("sim_restarted", core.Field{Key: "node", Value: core.Str(n.name)})
+		r.simulatorFact("sim_restarted", core.Field{Key: "node", Value: core.Str(n.name)})
 	}
 	n.inbox.Push(core.NodeStarted{Self: n.ref})
 	r.ensureWake(n, r.now())
@@ -373,7 +373,7 @@ func (r *run) appendFact(src core.NodeInstance, f core.Fact) {
 	r.trace.fact(f)
 }
 
-func (r *run) simFact(name string, fields ...core.Field) {
+func (r *run) simulatorFact(name string, fields ...core.Field) {
 	r.appendFact(core.NodeInstance{}, core.Fact{Name: name, Fields: fields})
 }
 
@@ -580,7 +580,7 @@ func (r *run) processPhase(e Entry) {
 	pc := e.Body.(phaseChange)
 	r.phase = pc.to
 	r.logf("phase %d", pc.to)
-	r.simFact("sim_phase", core.Field{Key: "phase", Value: core.U64(uint64(pc.to))})
+	r.simulatorFact("sim_phase", core.Field{Key: "phase", Value: core.U64(uint64(pc.to))})
 	if pc.to == PhaseRecovering {
 		r.enterRecovery()
 	}
@@ -605,7 +605,7 @@ func (r *run) processQuiesce() {
 			q = false
 		}
 	}
-	r.simFact("sim_quiesce", core.Field{Key: "quiescent", Value: core.Bool(q)})
+	r.simulatorFact("sim_quiesce", core.Field{Key: "quiescent", Value: core.Bool(q)})
 	r.sched.Schedule(Entry{At: r.now() + Time(r.cfg.QuiesceEvery), Lane: laneForSimulator, Kind: EntryRecover})
 }
 
@@ -788,7 +788,7 @@ func (r *run) end(n *node, how endKind, cause string) {
 		name = "sim_exited"
 	}
 	r.logf("%s %s (%s)", name, n.name, cause)
-	r.simFact(name, core.Field{Key: "node", Value: core.Str(n.name)}, core.Field{Key: "cause", Value: core.Str(cause)})
+	r.simulatorFact(name, core.Field{Key: "node", Value: core.Str(n.name)}, core.Field{Key: "cause", Value: core.Str(cause)})
 	for i, e := range r.engines {
 		r.engOK[i] = false
 		if !r.guard("OnCrash "+e.Name(), func() { e.OnCrash(r.engCtx[i], ref) }) {
@@ -809,7 +809,7 @@ func (r *run) stopNode(n *node) {
 	r.counters[countGracefulStops]++
 	dl := r.now() + Time(stopWaitTime)
 	r.sched.Schedule(Entry{At: dl, Lane: laneForSimulator, Kind: EntryCrash, Target: Target{Node: n.ref}})
-	r.simFact("sim_stop_requested", core.Field{Key: "node", Value: core.Str(n.name)})
+	r.simulatorFact("sim_stop_requested", core.Field{Key: "node", Value: core.Str(n.name)})
 	n.inbox.Push(core.StopRequest{Deadline: core.NodeTime(dl) + core.NodeTime(n.skew)})
 	r.pump(n)
 }
@@ -887,7 +887,7 @@ func (c *fakeServiceContext) Cancel(id EntryID) { c.r.sched.Cancel(id) }
 func (c *fakeServiceContext) Fault(kind string, fields ...core.Field) {
 	c.r.counters[countFaults]++
 	fs := append([]core.Field{{Key: "kind", Value: core.Str(kind)}, {Key: "engine", Value: core.Str(c.name)}}, fields...)
-	c.r.simFact("sim_fault", fs...)
+	c.r.simulatorFact("sim_fault", fs...)
 }
 
 func (c *fakeServiceContext) Assert() core.Assertions { return c.r.as }

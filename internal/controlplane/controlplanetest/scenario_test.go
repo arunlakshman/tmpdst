@@ -70,7 +70,9 @@ func replayOps() []generator.ControlPlaneOp {
 	}
 }
 
-func TestReplayMemstore(t *testing.T) { compareSteps(t, implSubject{storeImpl{newMem()}}, replayOps()) }
+func TestReplayMemorystore(t *testing.T) {
+	compareSteps(t, implSubject{storeImpl{newMem()}}, replayOps())
+}
 
 // manyBatchesOps commits segments of many small batches (one DynamoDB range
 // item per partition and segment), with a replay
@@ -114,7 +116,7 @@ func manyBatchesOps() []generator.ControlPlaneOp {
 	return append(ops, call(core.DescribeTopics{}))
 }
 
-func TestManyBatchesMemstore(t *testing.T) {
+func TestManyBatchesMemorystore(t *testing.T) {
 	compareSteps(t, implSubject{storeImpl{newMem()}}, manyBatchesOps())
 }
 

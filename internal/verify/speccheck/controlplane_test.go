@@ -434,19 +434,19 @@ func (b *nonIdempotent) Exec(a core.IOCall) core.IOResult {
 	return b.ControlPlane.Exec(a)
 }
 
-func TestControlPlaneCheckShrinksPlantedBug(t *testing.T) {
+func TestControlPlaneCheckShrinksInjectedBug(t *testing.T) {
 	c := cpCheck(func() cpExec { return &nonIdempotent{ControlPlane: NewControlPlane()} })
 	var f *checker.Failure[cpOp]
 	for seed := uint64(1); f == nil && seed <= 50; seed++ {
 		f = c.RunSeed(seed)
 	}
 	if f == nil {
-		t.Fatal("planted bug not found")
+		t.Fatal("injected bug not found")
 	}
 	if len(f.Ops) != 2 || f.Ops[0].Kind != 0 || f.Ops[1].Kind != 1 || f.Ops[0].Seg != 0 || f.Ops[1].Seg != 0 {
 		t.Fatalf("not minimal (want commit, replay):\n%s", c.Report(f, ""))
 	}
-	t.Logf("example report:\n%s", c.Report(f, "go test ./speccheck -run TestControlPlaneCheckShrinksPlantedBug"))
+	t.Logf("example report:\n%s", c.Report(f, "go test ./speccheck -run TestControlPlaneCheckShrinksInjectedBug"))
 }
 
 func TestCreateTopicOp(t *testing.T) {

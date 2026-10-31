@@ -6,8 +6,8 @@ import (
 	"manifester/internal/verify/simulator"
 )
 
-// cpFactory builds one CP replica machine for kafka-log, seeding workload topics.
-func cpFactory(sc simulator.SeedConfig, opts Opts) core.MachineFactory {
+// controlPlaneFactory builds one CP replica machine for kafka-log, seeding workload topics.
+func controlPlaneFactory(sc simulator.SeedConfig, opts Opts) core.MachineFactory {
 	lp := sc.ControlPlane.Log
 	topics := opts.Topics
 	parts := opts.Partitions

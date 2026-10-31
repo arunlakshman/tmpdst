@@ -20,18 +20,18 @@ func runProfiles(t *testing.T, newImpl func() impl, defaultSeeds int) {
 	}
 }
 
-func TestConformanceMemstore(t *testing.T) {
+func TestConformanceMemorystore(t *testing.T) {
 	runProfiles(t, func() impl { return storeImpl{newMem()} }, 20)
 }
 
 // The gRPC test starts a server for each sequence, so it uses fewer seeds.
-func TestConformanceMemstoreGRPC(t *testing.T) {
+func TestConformanceMemorystoreGRPC(t *testing.T) {
 	runProfiles(t, func() impl { return grpcOver(t) }, 3)
 }
 
-// TestPlantedBugsCaughtMemstore proves that the suite fails when the store has
-// a known bug, so a pass of TestConformanceMemstore means something.
-func TestPlantedBugsCaughtMemstore(t *testing.T) {
+// TestInjectedBugsCaughtMemorystore proves that the suite fails when the store has
+// a known bug, so a pass of TestConformanceMemorystore means something.
+func TestInjectedBugsCaughtMemorystore(t *testing.T) {
 	injectedbug.RequireAllControlPlaneBugsDetected(t, subjectOf(func() impl { return storeImpl{newMem()} }), 100)
 }
 

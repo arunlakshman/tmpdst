@@ -160,13 +160,13 @@ func (c *ControlPlane) replayCommit(req core.RequestID, op core.CommitSegment, s
 	return core.ControlPlaneDone{Req: req, Resp: resp, Outcome: core.Applied}
 }
 
-func (c *ControlPlane) freshCommit(req core.RequestID, op core.CommitSegment) core.IOResult {
+func (c *ControlPlane) freshCommit(request core.RequestID, op core.CommitSegment) core.IOResult {
 	if op.SegmentKey == "" || len(op.Batches) == 0 {
-		return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
+		return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 	}
 	for _, b := range op.Batches {
 		if !validBatch(b) {
-			return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
+			return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 		}
 	}
 	seg := segment{batches: slices.Clone(op.Batches)}
@@ -182,26 +182,26 @@ func (c *ControlPlane) freshCommit(req core.RequestID, op core.CommitSegment) co
 	}
 	c.segs[op.SegmentKey] = seg
 	resp := core.CommitSegmentResp{Assigned: slices.Clone(seg.ranges)}
-	return core.ControlPlaneDone{Req: req, Resp: resp, Outcome: core.Applied}
+	return core.ControlPlaneDone{Req: request, Resp: resp, Outcome: core.Applied}
 }
 
-func (c *ControlPlane) execLookup(req core.RequestID, op core.FindSegments) core.IOResult {
+func (c *ControlPlane) execLookup(request core.RequestID, op core.FindSegments) core.IOResult {
 	if op.From < 0 {
-		return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
+		return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 	}
-	resp := core.FindSegmentsResp{End: c.End(op.TP)}
+	response := core.FindSegmentsResp{End: c.End(op.TP)}
 	var bytes int64
 	for _, r := range c.parts[op.TP.Topic][op.TP.Partition] {
 		if r.Base+core.Offset(r.Count) <= op.From {
 			continue
 		}
-		resp.Ranges = append(resp.Ranges, r)
+		response.Ranges = append(response.Ranges, r)
 		bytes += r.Loc.Len
 		if op.MaxBytes > 0 && bytes >= int64(op.MaxBytes) {
 			break
 		}
 	}
-	return core.ControlPlaneDone{Req: req, Resp: resp}
+	return core.ControlPlaneDone{Req: request, Resp: response}
 }
 
 func (c *ControlPlane) execDescribe(req core.RequestID, op core.DescribeTopics) core.IOResult {

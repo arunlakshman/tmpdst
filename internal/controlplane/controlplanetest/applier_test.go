@@ -10,17 +10,17 @@ import (
 )
 
 // Conformance C3 for the production applier (decision 49): the shared control
-// plane suite runs on cp/applier as a cp.Store. The applier also has its own
-// test with the StateUpdater type directly, in package applier.
+// plane suite runs on controlplane/stateupdater as a controlplane.Store. The applier also has its own
+// test with the StateUpdater type directly, in package stateupdater.
 
-func TestConformanceApplierMem(t *testing.T) {
+func TestConformanceStateUpdaterMem(t *testing.T) {
 	runProfiles(t, func() impl {
 		return storeImpl{&stateupdater.Store{A: stateupdater.New(stateupdater.NewMemoryKeyValueStore())}}
 	}, 20)
 }
 
 // Pebble is slower, so it runs fewer seeds. MANIFESTER_SEEDS still overrides.
-func TestConformanceApplierPebble(t *testing.T) {
+func TestConformanceStateUpdaterPebble(t *testing.T) {
 	dir := t.TempDir()
 	n := 0
 	runProfiles(t, func() impl {

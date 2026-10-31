@@ -175,7 +175,7 @@ func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
 }
 
 func (b *Broker) put(s *segment) []core.Action {
-	s.state, s.req = segmentUpload, b.req()
+	s.state, s.req = segmentUpload, b.nextRequestID()
 	return []core.Action{core.ObjectPut{Req: s.req, Key: s.key, Data: s.data}}
 }
 
@@ -212,7 +212,7 @@ func (b *Broker) pump() []core.Action {
 }
 
 func (b *Broker) commit(s *segment) []core.Action {
-	s.state, s.req = segmentCommit, b.req()
+	s.state, s.req = segmentCommit, b.nextRequestID()
 	if !s.commitStarted {
 		s.commitStarted, s.commitAt = true, b.now
 	}
@@ -352,7 +352,7 @@ func (b *Broker) retryCommit(s *segment) []core.Action {
 	return []core.Action{core.SetTimer{ID: core.TimerID(s.id), Gen: b.timerGen, After: d}}
 }
 
-func (b *Broker) segTimer(s *segment, gen core.TimerVersion) []core.Action {
+func (b *Broker) segmentTimer(s *segment, gen core.TimerVersion) []core.Action {
 	if s.gen != gen {
 		return nil
 	}

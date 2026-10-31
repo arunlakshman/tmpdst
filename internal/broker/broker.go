@@ -1,6 +1,6 @@
 // Package broker is the Kafka broker state machine: stateless, pure and
 // deterministic (core.Machine), with S3 as the data plane and the control
-// plane assigning offsets. The simulator and sys.Run drive the same code.
+// plane assigning offsets. The simulator and system.Run drive the same code.
 //
 // Pipeline of a produce: the batch joins the open segment buffer; a flush
 // (BatchWindow timer or MaxSegmentBytes) encodes it with format.Encode,
@@ -66,8 +66,8 @@ func New(cfg Config) core.MachineFactory {
 	}
 }
 
-func (b *Broker) req() core.RequestID { b.nextReq++; return b.nextReq }
-func (b *Broker) id() uint64          { b.nextID++; return b.nextID }
+func (b *Broker) nextRequestID() core.RequestID { b.nextReq++; return b.nextReq }
+func (b *Broker) id() uint64                    { b.nextID++; return b.nextID }
 
 func (b *Broker) backoff(n int) core.Duration {
 	d := b.cfg.RetryBase
@@ -107,7 +107,7 @@ func (b *Broker) Step(ev core.Event) []core.Action {
 	case core.ObjectGetDone:
 		acts = b.onGet(e)
 	case core.ControlPlaneDone:
-		acts = b.onCP(e)
+		acts = b.onControlPlane(e)
 	case core.LiveBrokers:
 		b.live = e.Brokers
 	}
@@ -206,8 +206,8 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 	if e.ID == timerFlush {
 		return b.onFlushTimer(e)
 	}
-	if s := b.segByTimer(e.ID); s != nil {
-		return b.segTimer(s, e.Gen)
+	if s := b.segmentByTimer(e.ID); s != nil {
+		return b.segmentTimer(s, e.Gen)
 	}
 	if o := b.opByTimer(e.ID); o != nil {
 		return b.opTimer(o, e.Gen)
@@ -222,7 +222,7 @@ func (b *Broker) onFlushTimer(e core.TimerFired) []core.Action {
 	return b.seal(closeOnTimer)
 }
 
-func (b *Broker) segByTimer(id core.TimerID) *segment {
+func (b *Broker) segmentByTimer(id core.TimerID) *segment {
 	for _, s := range b.segs {
 		if core.TimerID(s.id) == id {
 			return s
@@ -231,7 +231,7 @@ func (b *Broker) segByTimer(id core.TimerID) *segment {
 	return nil
 }
 
-func (b *Broker) segByReq(req core.RequestID, st segmentState) *segment {
+func (b *Broker) segmentByRequest(req core.RequestID, st segmentState) *segment {
 	if req == 0 {
 		return nil
 	}
@@ -245,8 +245,8 @@ func (b *Broker) segByReq(req core.RequestID, st segmentState) *segment {
 
 // ---- completions ----
 
-func (b *Broker) onCP(e core.ControlPlaneDone) []core.Action {
-	if s := b.segByReq(e.Req, segmentCommit); s != nil {
+func (b *Broker) onControlPlane(e core.ControlPlaneDone) []core.Action {
+	if s := b.segmentByRequest(e.Req, segmentCommit); s != nil {
 		return b.onCommit(s, e)
 	}
 	if o := b.findOp(e.Req); o != nil && o.state == opControlPlane {
@@ -256,7 +256,7 @@ func (b *Broker) onCP(e core.ControlPlaneDone) []core.Action {
 }
 
 func (b *Broker) onPut(e core.ObjectPutDone) []core.Action {
-	if s := b.segByReq(e.Req, segmentUpload); s != nil {
+	if s := b.segmentByRequest(e.Req, segmentUpload); s != nil {
 		return b.onPutDone(s, e)
 	}
 	return nil

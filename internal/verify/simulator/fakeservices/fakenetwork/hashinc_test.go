@@ -40,13 +40,13 @@ func TestIncrementalStateHashMatchesFull(t *testing.T) {
 			switch h.rnd.Intn(8) {
 			case 0:
 				what = "dial"
-				r := h.req()
+				r := h.nextRequestID()
 				h.eng.Execute(h, a, core.Connect{Req: r, Addr: names[h.rnd.Intn(3)]})
 			case 1, 2, 3:
 				what = "send"
 				if len(conns) > 0 {
 					c := conns[h.rnd.Intn(len(conns))]
-					h.eng.Execute(h, c.ref, core.Send{Req: h.req(), Conn: c.conn, Data: []byte(fmt.Sprint("payload-", i))})
+					h.eng.Execute(h, c.ref, core.Send{Req: h.nextRequestID(), Conn: c.conn, Data: []byte(fmt.Sprint("payload-", i))})
 				}
 			case 4:
 				what = "pause"

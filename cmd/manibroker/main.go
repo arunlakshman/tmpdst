@@ -143,7 +143,7 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 		m = production.NewMetrics()
 		runinfo.Register(m.Registry(), "manibroker", info)
 		cfg.Facts = m.Observe
-		cpc.Observe(m.ObserveCPCall)
+		cpc.Observe(m.ObserveControlPlaneCall)
 	}
 	segLog := production.NewSegmentLog(log)
 	prev := cfg.Facts

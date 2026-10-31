@@ -129,10 +129,10 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		check("action "+n, func(h *stateHasher) { h.action(v) })
 	}
 	for n, v := range ops {
-		check("cpop "+n, func(h *stateHasher) { h.cpOp(v) })
+		check("controlPlaneOperation "+n, func(h *stateHasher) { h.controlPlaneOperation(v) })
 	}
 	for n, v := range resps {
-		check("cpresp "+n, func(h *stateHasher) { h.cpResp(v) })
+		check("controlPlaneResponse "+n, func(h *stateHasher) { h.controlPlaneResponse(v) })
 	}
 	for n, v := range fields {
 		check("field "+n, func(h *stateHasher) { h.fieldValue(v) })

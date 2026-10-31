@@ -75,7 +75,7 @@ func DefaultParams() simulator.LogParams {
 		PutFail: 0.01, PutLost: 0.02, ReadFail: 0.05,
 		StallProb: 0.0002, CrashProb: 0.0001,
 		StallDur: [2]core.Duration{800 * ms, 2500 * ms}, DownDur: [2]core.Duration{300 * ms, 1500 * ms},
-		WindowSlots: 1 << 20, TrimStride: 16, CkptEvery: 24, KeepSlots: 8}
+		WindowSlots: 1 << 20, TrimStride: 16, CheckpointEvery: 24, KeepSlots: 8}
 }
 
 // New returns a ControlPlaneCall bridge. Log knobs are f.Log (zero fields take DefaultParams).
@@ -109,8 +109,8 @@ func withDefaults(p simulator.LogParams) simulator.LogParams {
 	if p.WindowSlots == 0 {
 		p.WindowSlots = d.WindowSlots
 	}
-	if p.CkptEvery == 0 {
-		p.CkptEvery = d.CkptEvery
+	if p.CheckpointEvery == 0 {
+		p.CheckpointEvery = d.CheckpointEvery
 	}
 	if p.KeepSlots == 0 {
 		p.KeepSlots = d.KeepSlots

@@ -1,6 +1,6 @@
 // Package segmentformat is the byte layout of a segment object and the naming of
 // segment keys, shared by the broker, sim invariants and speccheck. It is pure
-// and deterministic (detcheck-clean) and never panics, whatever the input.
+// and deterministic (determinismcheck-clean) and never panics, whatever the input.
 //
 // One segment object is one upload holding batches for many partitions (see
 // core.CommitSegment). All integers are big-endian.

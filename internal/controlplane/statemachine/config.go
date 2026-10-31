@@ -9,8 +9,8 @@ import (
 // commit queue off (CP-DSM-2 scaffold behaviour). CatchUpEvery > 0 arms
 // timer-driven catch-up with slot-ordered apply and gap-fill (CP-DSM-4).
 // K > 0 arms the commit queue with up to K in-flight LogAppend slots (CP-DSM-5).
-// Heartbeat or TakeoverAfter arms advisory roles (CP-DSM-6). CkptEvery or
-// CkptKey arms checkpoint restore/publish and optional LogTrim.
+// Heartbeat or TakeoverAfter arms advisory roles (CP-DSM-6). CheckpointEvery or
+// CheckpointKey arms checkpoint restore/publish and optional LogTrim.
 type Config struct {
 	// CatchUpEvery is the pause between catch-up rounds. Zero disables catch-up.
 	CatchUpEvery core.Duration
@@ -46,15 +46,15 @@ type Config struct {
 	// before promoting. Zero means only Promote flips the role.
 	TakeoverAfter core.Duration
 
-	// CkptEvery is the pause between checkpoint attempts on the appender.
-	// Zero disables the timer; set CkptKey alone to restore on NodeStarted.
-	CkptEvery core.Duration
-	// CkptMinSlots skips a checkpoint when fewer slots were applied since the
+	// CheckpointEvery is the pause between checkpoint attempts on the appender.
+	// Zero disables the timer; set CheckpointKey alone to restore on NodeStarted.
+	CheckpointEvery core.Duration
+	// CheckpointMinSlots skips a checkpoint when fewer slots were applied since the
 	// last. Zero means 1.
-	CkptMinSlots int64
-	// CkptKey is the object-store key for the latest snapshot. Empty means
+	CheckpointMinSlots int64
+	// CheckpointKey is the object-store key for the latest snapshot. Empty means
 	// "ckpt/latest" when checkpointing is enabled.
-	CkptKey string
+	CheckpointKey string
 	// KeepSlots is how many log slots to keep behind a published checkpoint
 	// before LogTrim. Zero skips trim.
 	KeepSlots int64

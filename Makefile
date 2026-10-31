@@ -1,7 +1,7 @@
 # Project build. `make` / `make build` is the full gate:
 #   fmt, ascii, vet, lint, compile, unit tests, sim, hermetic it, Kafka CLI e2e, CRAP.
 # Docker fullstack test/integrationtest tests still Skip unless MANIFESTER_*_ENDPOINT are set.
-# The import check for deterministic packages is the detcheck tool:
+# The import check for deterministic packages is the determinismcheck tool:
 # go run ./ops/tools/determinismcheck <packages>
 # Toolchain + commit hook: `mise install` (pins in mise.toml; postinstall runs
 # make install-hooks). Without mise: `make install-hooks` alone.

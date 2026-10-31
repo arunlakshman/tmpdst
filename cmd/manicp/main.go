@@ -122,14 +122,14 @@ func serve(ctx context.Context, d deps, f cpFlags, fs *flag.FlagSet, stderr io.W
 		ctx,
 		log,
 		runinfo.NewManifest(info, fs, f.region, map[string]any{
-			"table":           f.log.tableName(f.prefix),
-			"store":           f.kind,
-			"rank":            f.log.rank,
-			"takeover_after":  f.log.takeoverAfter.String(),
-			"ckpt_bucket":     f.log.ckptBucket,
-			"pebble_dir":      f.log.pebbleDir,
-			"window_slots":    f.log.windowSlots,
-			"dynamo_endpoint": f.endpoint,
+			"table":             f.log.tableName(f.prefix),
+			"store":             f.kind,
+			"rank":              f.log.rank,
+			"takeover_after":    f.log.takeoverAfter.String(),
+			"checkpoint_bucket": f.log.checkpointBucket,
+			"pebble_dir":        f.log.pebbleDir,
+			"window_slots":      f.log.windowSlots,
+			"dynamo_endpoint":   f.endpoint,
 		}),
 		runinfo.WriteOptions{
 			Dest:   f.manifestOut,
@@ -163,10 +163,10 @@ func openNode(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.Met
 		if err != nil {
 			return nil, nop, err
 		}
-		if f.log.ckptBucket != "" {
-			mcfg.CkptKey = "ckpt/latest"
+		if f.log.checkpointBucket != "" {
+			mcfg.CheckpointKey = "ckpt/latest"
 		} else {
-			mcfg.CkptEvery = 0
+			mcfg.CheckpointEvery = 0
 			mcfg.KeepSlots = 0
 		}
 		state := &pebbleState{flagDir: f.log.pebbleDir}
@@ -208,18 +208,18 @@ func machineConfig(f cpFlags) statemachine.Config {
 	mcfg := statemachine.Config{
 		// Short catch-up period so Ready (and health Serving) arrives quickly;
 		// subsequent rounds keep the same cadence.
-		CatchUpEvery:  core.Duration(5 * time.Millisecond),
-		K:             f.log.k,
-		Rank:          f.log.rank,
-		Heartbeat:     core.Duration(f.log.heartbeat),
-		TakeoverAfter: core.Duration(f.log.takeoverAfter),
-		GapAfter:      core.Duration(f.log.gapAfter),
-		Writer:        nodeName(f.log),
-		CkptEvery:     core.Duration(f.log.ckptEvery),
-		CkptMinSlots:  f.log.ckptMinSlots,
-		KeepSlots:     f.log.windowSlots / 8,
-		WindowSlots:   f.log.windowSlots,
-		TrimStride:    trimStride,
+		CatchUpEvery:       core.Duration(5 * time.Millisecond),
+		K:                  f.log.k,
+		Rank:               f.log.rank,
+		Heartbeat:          core.Duration(f.log.heartbeat),
+		TakeoverAfter:      core.Duration(f.log.takeoverAfter),
+		GapAfter:           core.Duration(f.log.gapAfter),
+		Writer:             nodeName(f.log),
+		CheckpointEvery:    core.Duration(f.log.checkpointEvery),
+		CheckpointMinSlots: f.log.checkpointMinSlots,
+		KeepSlots:          f.log.windowSlots / 8,
+		WindowSlots:        f.log.windowSlots,
+		TrimStride:         trimStride,
 	}
 	if mcfg.K <= 0 {
 		mcfg.K = 4

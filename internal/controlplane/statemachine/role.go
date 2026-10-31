@@ -198,7 +198,7 @@ func isDeleted(d core.LogAppendDone) bool {
 
 // hitTrimmed handles append/fill against a tombstone: refuse clients, drop
 // local log state, and restore from checkpoint (docs/log-cp-service.md).
-// Catch-up from slot 0 after a tomb re-enters the trimmed prefix; needsCkpt
+// Catch-up from slot 0 after a tomb re-enters the trimmed prefix; needsCheckpoint
 // blocks that until a snapshot lands.
 func (m *Machine) hitTrimmed() []core.Action {
 	m.env.Reachable("logcp-sim: replica hit a trimmed slot")
@@ -206,7 +206,7 @@ func (m *Machine) hitTrimmed() []core.Action {
 	m.setActive(false)
 	m.ready = false
 	m.booting = true
-	m.needsCkpt = true
+	m.needsCheckpoint = true
 	m.clearLocal()
 	acts := m.refuseReads()
 	return append(acts, m.afterCrashRestart()...)
@@ -232,7 +232,7 @@ func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {
 	}
 	// Sort map keys so answer order is stable across runs (TraceHash).
 	reqs := make([]core.RequestID, 0, len(m.inFlightAppends))
-	for req := range m.inFlightAppends { //detcheck:ok keys are collected, then sorted before use
+	for req := range m.inFlightAppends { //determinismcheck:ok keys are collected, then sorted before use
 		reqs = append(reqs, req)
 	}
 	slices.Sort(reqs)
@@ -248,7 +248,7 @@ func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {
 		refuse(c)
 	}
 	ids := make([]string, 0, len(m.waiters))
-	for id := range m.waiters { //detcheck:ok keys are collected, then sorted before use
+	for id := range m.waiters { //determinismcheck:ok keys are collected, then sorted before use
 		if !seen[id] {
 			ids = append(ids, id)
 		}
@@ -275,8 +275,8 @@ func (m *Machine) afterCrashRestart() []core.Action {
 	m.reseedTopics()
 	m.applied, m.high, m.goalTail = 0, 0, 0
 	m.seq = 0
-	if m.ckptEnabled() {
-		return m.emitCkptGet()
+	if m.checkpointEnabled() {
+		return m.emitCheckpointGet()
 	}
 	return m.afterRestore()
 }

@@ -12,7 +12,7 @@ cd "$(dirname "$0")/../.."
 
 pkgs=(./internal/core/... ./internal/verify/simulator/... ./internal/wire/segmentformat/... ./internal/wire/kafkawire ./internal/broker/... ./internal/verify/speccheck ./internal/verify/speccheck/checker ./internal/controlplane/statemachine/...)
 
-echo "== detcheck"
+echo "== determinismcheck"
 go run ./ops/tools/determinismcheck "${pkgs[@]}"
 
 echo "== dependency audit records"

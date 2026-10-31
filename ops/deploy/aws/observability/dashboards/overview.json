@@ -1097,7 +1097,7 @@
       "id": 22,
       "type": "timeseries",
       "title": "Checkpoint age (s) and size",
-      "description": "Alert on age above 3 x -ckpt-every (15 min). Only the active node checkpoints.",
+      "description": "Alert on age above 3 x -checkpoint-every (15 min). Only the active node checkpoints.",
       "datasource": {
         "type": "prometheus",
         "uid": "${ds_prom}"

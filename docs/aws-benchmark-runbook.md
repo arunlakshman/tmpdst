@@ -197,8 +197,8 @@ If the CP dies (instance terminated by the max_runtime guard, crash, host failur
 
 What runs: the control plane starts `aws_instance.cp` (rank 0, the preferred appender) and `cp_standby_count`
 (default 1) `aws_instance.cp_standby` (rank 1, a hot standby that tails and applies the log, serves reads, and answers
-commits with 503). Each runs `manicp -store dynamolog -rank R -node-name cp-R -takeover-after 5s -ckpt-bucket <run bucket>
--ckpt-prefix cp/ -pebble-dir /var/lib/manicp/pebble` (`cp_takeover_after`, `cp_extra_args` change them). Brokers get
+commits with 503). Each runs `manicp -store dynamolog -rank R -node-name cp-R -takeover-after 5s -checkpoint-bucket <run bucket>
+-checkpoint-prefix cp/ -pebble-dir /var/lib/manicp/pebble` (`cp_takeover_after`, `cp_extra_args` change them). Brokers get
 `-cp-url http://<rank0>:8080,http://<rank1>:8080` (output `cp_urls`) and the default `-max-segment-partitions 4096`
 (`broker_extra_args` is empty). The DynamoDB table has TTL on `ttl` and warm throughput `ddb_warm_*` (decision 50; X4: a
 cold on-demand table throttles near 4k items/s). Checkpoints are objects under `cp/ckpt/` in the run bucket.

@@ -131,8 +131,8 @@ commands per slot and entry size; apply lag and standby lag; hole fills, role ch
 and refused requests; checkpoint age, size and errors; fresh reads and tail checks.  Alloy (`cp.alloy`) scrapes each CP host's manicp and adds `cp_rank`;
 CloudWatch DynamoDB metrics (`cpcloudwatch.alloy`, now with PutItem and BatchWriteItem operations) are scraped from rank 0 only.
 Log events (INFO unless noted): `log_ready` (node, rank, applied slot, role), `log_role` (active true/false, a takeover or
-failback), `log_final_ckpt`, `log_final_ckpt_failed` (WARN), `log_no_checkpoint` (WARN, no `-ckpt-bucket`). The manifest
-gains `store`, `rank`, `takeover_after`, `ckpt_bucket`. Suggested alerts: `manicp_log_blocked` = 1; checkpoint age above 15 min;
+failback), `log_final_ckpt`, `log_final_ckpt_failed` (WARN), `log_no_checkpoint` (WARN, no `-checkpoint-bucket`). The manifest
+gains `store`, `rank`, `takeover_after`, `checkpoint_bucket`. Suggested alerts: `manicp_log_blocked` = 1; checkpoint age above 15 min;
 `manicp_log_standby_lag_slots` rising; `rate(manicp_log_lost_slots_total)` > 0 for minutes.
 
 ### Useful queries

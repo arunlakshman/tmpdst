@@ -17,25 +17,25 @@ import (
 const kindLog = "dynamolog"
 
 type logFlags struct {
-	table                   string
-	heartbeat, startTimeout time.Duration
-	ckptBucket, ckptPrefix  string
-	s3Endpoint              string
-	s3PathStyle             bool
-	nodeName                string
-	rank                    int
-	takeoverAfter, gapAfter time.Duration
-	k                       int
-	ckptEvery, logTTL       time.Duration
-	windowSlots             int64
-	pebbleDir               string
-	ckptMinSlots            int64
+	table                              string
+	heartbeat, startTimeout            time.Duration
+	checkpointBucket, checkpointPrefix string
+	s3Endpoint                         string
+	s3PathStyle                        bool
+	nodeName                           string
+	rank                               int
+	takeoverAfter, gapAfter            time.Duration
+	k                                  int
+	checkpointEvery, logTTL            time.Duration
+	windowSlots                        int64
+	pebbleDir                          string
+	checkpointMinSlots                 int64
 }
 
 func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
 	fs.StringVar(&f.table, "table", "", "-store dynamolog: DynamoDB table (default <table-prefix>cp)")
-	fs.StringVar(&f.ckptBucket, "ckpt-bucket", "", "-store dynamolog: S3 bucket for checkpoints")
-	fs.StringVar(&f.ckptPrefix, "ckpt-prefix", "cp/", "-store dynamolog: key prefix of checkpoint objects")
+	fs.StringVar(&f.checkpointBucket, "checkpoint-bucket", "", "-store dynamolog: S3 bucket for checkpoints")
+	fs.StringVar(&f.checkpointPrefix, "checkpoint-prefix", "cp/", "-store dynamolog: key prefix of checkpoint objects")
 	fs.StringVar(&f.s3Endpoint, "s3-endpoint", "", "-store dynamolog: S3 endpoint URL")
 	fs.BoolVar(&f.s3PathStyle, "s3-path-style", false, "-store dynamolog: path-style S3 addressing")
 	fs.StringVar(&f.nodeName, "node-name", "", "-store dynamolog: node name (default hostname)")
@@ -45,8 +45,8 @@ func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
 	fs.DurationVar(&f.heartbeat, "heartbeat", time.Second, "-store dynamolog: idle heartbeat")
 	fs.IntVar(&f.k, "log-k", 4, "-store dynamolog: commit LogAppends in flight")
 	fs.DurationVar(&f.gapAfter, "gap-after", 250*time.Millisecond, "-store dynamolog: gap-fill delay")
-	fs.DurationVar(&f.ckptEvery, "ckpt-every", 5*time.Minute, "-store dynamolog: checkpoint period")
-	fs.Int64Var(&f.ckptMinSlots, "ckpt-min-slots", 1000, "-store dynamolog: min slots between checkpoints")
+	fs.DurationVar(&f.checkpointEvery, "checkpoint-every", 5*time.Minute, "-store dynamolog: checkpoint period")
+	fs.Int64Var(&f.checkpointMinSlots, "checkpoint-min-slots", 1000, "-store dynamolog: min slots between checkpoints")
 	fs.Int64Var(&f.windowSlots, "window-slots", 131072, "-store dynamolog: idempotency window in log slots; every node must use the same value")
 	fs.DurationVar(&f.logTTL, "log-ttl", 7*24*time.Hour, "-store dynamolog: ttl attribute on log slots")
 	fs.StringVar(&f.pebbleDir, "pebble-dir", "", "-store dynamolog: directory of the Pebble state. It is rebuilt from the checkpoint and the log at every start, so it is wiped (only if it holds a Pebble database). Empty: a temporary directory")
@@ -69,7 +69,7 @@ func realDeps() deps {
 		},
 		objects: func(ctx context.Context, f cpFlags) (system.ObjectStore, error) {
 			return s3store.New(ctx, s3store.Config{Endpoint: f.log.s3Endpoint, Region: f.region,
-				Bucket: f.log.ckptBucket, Prefix: f.log.ckptPrefix, PathStyle: f.log.s3PathStyle})
+				Bucket: f.log.checkpointBucket, Prefix: f.log.checkpointPrefix, PathStyle: f.log.s3PathStyle})
 		},
 	}
 }
@@ -106,16 +106,16 @@ func openDynLog(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.M
 	}
 	lg := executor.NewDynamoLog(db, table, executor.DynamoLogOptions{TTL: f.log.logTTL})
 	var objs executor.ObjectStore = executor.NewMemoryObjects()
-	if f.log.ckptBucket != "" {
+	if f.log.checkpointBucket != "" {
 		store, err := d.objects(ctx, f)
 		if err != nil {
 			return nil, nil, nop, err
 		}
 		objs = sysObjects{store}
 	} else {
-		log.Warn("no -ckpt-bucket: no checkpoints and no log trim; a restart replays the whole log", "event", "log_no_checkpoint")
+		log.Warn("no -checkpoint-bucket: no checkpoints and no log trim; a restart replays the whole log", "event", "log_no_checkpoint")
 	}
-	log.Info("log store ready", "event", "log_ready", "node", nodeName(f.log), "rank", f.log.rank, "table", table, "ckpt_bucket", f.log.ckptBucket)
+	log.Info("log store ready", "event", "log_ready", "node", nodeName(f.log), "rank", f.log.rank, "table", table, "checkpoint_bucket", f.log.checkpointBucket)
 	return lg, objs, nop, nil
 }
 

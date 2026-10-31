@@ -65,7 +65,7 @@ func startLogNode(t *testing.T, d deps, name string, rank int, extra ...string) 
 	t.Helper()
 	n := &logNode{addr: freeAddr(t), done: make(chan int, 1), logs: &syncBuf{}}
 	args := append([]string{"-store", kindLog, "-addr", n.addr, "-metrics-addr", "", "-node-name", name, "-rank", strconv.Itoa(rank),
-		"-ckpt-bucket", "b", "-takeover-after", "600ms", "-heartbeat", "50ms", "-gap-after", "30ms",
+		"-checkpoint-bucket", "b", "-takeover-after", "600ms", "-heartbeat", "50ms", "-gap-after", "30ms",
 		"-pebble-dir", filepath.Join(t.TempDir(), "pebble")}, extra...)
 	var ctx context.Context
 	ctx, n.cancel = context.WithCancel(t.Context())
@@ -298,7 +298,7 @@ func waitCount(t *testing.T, n *atomic.Int64, want int64) {
 func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 	db, objs := newFake(t), executor.NewMemoryObjects()
 	d := fakeDeps(db, objs)
-	n := startLogNode(t, d, "n0", 0, "-ckpt-every", "-1s")
+	n := startLogNode(t, d, "n0", 0, "-checkpoint-every", "-1s")
 	c := controlplaneclient.New(n.addr, nil)
 	if err := c.CreateTopic(t.Context(), "t", 1); err != nil {
 		t.Fatal(err)
@@ -315,7 +315,7 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 		t.Fatalf("code %d\n%s", code, n.logs.String())
 	}
 	// Restart against the same Dynamo log: catch-up rebuilds fold state.
-	n2 := startLogNode(t, d, "n0", 0, "-ckpt-every", "-1s")
+	n2 := startLogNode(t, d, "n0", 0, "-checkpoint-every", "-1s")
 	resp, err := controlplaneclient.New(n2.addr, nil).Call(t.Context(), core.FindSegments{TP: core.NewTopicPartition("t", 0), MaxBytes: 1 << 20})
 	if err != nil || resp.(core.FindSegmentsResp).End != 15 {
 		t.Fatalf("after restart: %v %+v\n%s", err, resp, n2.logs.String())
@@ -327,7 +327,7 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 func TestLogStoreStartupErrors(t *testing.T) {
 	d := fakeDeps(newFake(t), executor.NewMemoryObjects())
 	args := []string{"-store", kindLog, "-addr", freeAddr(t), "-metrics-addr", "", "-table", "missing",
-		"-takeover-after", "1s", "-start-timeout", "500ms", "-ckpt-bucket", ""}
+		"-takeover-after", "1s", "-start-timeout", "500ms", "-checkpoint-bucket", ""}
 	var logs syncBuf
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
@@ -341,7 +341,7 @@ func TestLogStoreStartupErrors(t *testing.T) {
 
 func TestLogStoreWithoutBucketWarns(t *testing.T) {
 	d := fakeDeps(newFake(t), executor.NewMemoryObjects())
-	n := startLogNode(t, d, "n0", 0, "-ckpt-bucket", "")
+	n := startLogNode(t, d, "n0", 0, "-checkpoint-bucket", "")
 	if code := n.stop(t); code != 0 || !strings.Contains(n.logs.String(), "log_no_checkpoint") {
 		t.Fatalf("code %d\n%s", code, n.logs.String())
 	}
@@ -354,7 +354,7 @@ func TestLogFlagsDefaults(t *testing.T) {
 	}
 	l := f.log
 	if l.takeoverAfter != 5*time.Second || l.k != 4 || l.gapAfter != 250*time.Millisecond ||
-		l.ckptEvery != 5*time.Minute || l.windowSlots != 131072 ||
+		l.checkpointEvery != 5*time.Minute || l.windowSlots != 131072 ||
 		l.heartbeat != time.Second || l.tableName(f.prefix) != "manifester_cp" || nodeName(l) == "" {
 		t.Fatalf("defaults: %+v", l)
 	}
@@ -366,7 +366,7 @@ func TestLogFlagsDefaults(t *testing.T) {
 
 func TestRealDepsBuild(t *testing.T) {
 	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
-	f, _, _ := parseFlags([]string{"-store", kindLog, "-dynamo-endpoint", "http://127.0.0.1:1", "-ckpt-bucket", "b", "-s3-endpoint", "http://127.0.0.1:1"}, &bytes.Buffer{})
+	f, _, _ := parseFlags([]string{"-store", kindLog, "-dynamo-endpoint", "http://127.0.0.1:1", "-checkpoint-bucket", "b", "-s3-endpoint", "http://127.0.0.1:1"}, &bytes.Buffer{})
 	d := realDeps()
 	if db, err := d.db(t.Context(), f, controlplanemetrics.New()); err != nil || db == nil {
 		t.Fatal(err)

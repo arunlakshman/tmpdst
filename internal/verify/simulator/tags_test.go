@@ -100,8 +100,8 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 	}
 	src := scanCore(t)
 	for marker, have := range map[string][]string{
-		"isEvent": names(events), "isAction": names(actions), "isCPOp": names(ops),
-		"isCPResp": names(resps), "isFieldValue": names(fields),
+		"isEvent": names(events), "isAction": names(actions), "isControlPlaneOperation": names(ops),
+		"isControlPlaneResponse": names(resps), "isFieldValue": names(fields),
 	} {
 		if !eq(src[marker], have) {
 			t.Errorf("%s: core declares %v, tag test lists %v", marker, src[marker], have)

@@ -15,7 +15,7 @@ import (
 
 // C4 (speccheck/doc.go): the at-least-once Kafka oracle against the speccheck.Partition and
 // speccheck.ControlPlane specs. The oracle never imports speccheck (decision 21);
-// this external test package may, because detcheck does not read _test.go
+// this external test package may, because determinismcheck does not read _test.go
 // files and only export_test.go (package kafka, no speccheck) reaches into the
 // oracle. Run: go test ./sim/kafka -run C4
 

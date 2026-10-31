@@ -183,7 +183,7 @@ func swarmLog(r simulator.CountedRand, c *simulator.SeedConfig) {
 	l.GapAfter = campaign.Millis([]int64{20, 60, 200}[r.Intn(3)])
 	l.TakeoverAfter = campaign.Millis([]int64{600, 900, 1500}[r.Intn(3)])
 	if r.Chance(0.4) {
-		l.CkptEvery, l.KeepSlots, l.TrimStride = []int{8, 16, 24}[r.Intn(3)], []int{16, 32}[r.Intn(2)], 4
+		l.CheckpointEvery, l.KeepSlots, l.TrimStride = []int{8, 16, 24}[r.Intn(3)], []int{16, 32}[r.Intn(2)], 4
 	}
 	c.LogStore.Unavailable503 = l.PutFail
 	c.LogStore.LostResponse = l.PutLost

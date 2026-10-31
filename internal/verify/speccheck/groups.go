@@ -335,7 +335,7 @@ func (c *ControlPlane) offsetFetch(op core.OffsetFetch) core.OffsetFetchResp {
 // sortedTPs returns the partitions of m in topic and partition order.
 func sortedTPs(m map[core.TopicPartition]committedOffset) []core.TopicPartition {
 	tps := make([]core.TopicPartition, 0, len(m))
-	for tp := range m { //detcheck:ok keys are sorted before use
+	for tp := range m { //determinismcheck:ok keys are sorted before use
 		tps = append(tps, tp)
 	}
 	slices.SortFunc(tps, compareTP)

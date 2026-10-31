@@ -470,9 +470,9 @@ After `ShutdownDone`, `exited` is true and every event is ignored.
 | Log position | `applied, goalTail, high, buf` | `applied` = next slot to fold. `goalTail` = log end seen by the last tail check. `high` = next slot to allocate for a new write. `buf` = slots read but not yet folded |
 | One control I/O | `pending, pendingKind, fillSlot, fillData` | the single in-flight tail/read/hole-fill/checkpoint/trim |
 | Commit I/O | `queue, flights, waiters, answers, seq` | client commands waiting, appends in flight, who to answer |
-| Timers | `timerGen, holeGen, roleGen, ckptGen` | generation numbers (4.3) |
+| Timers | `timerGen, holeGen, roleGen, checkpointGen` | generation numbers (4.3) |
 | Roles | `lastPullOK, lastOtherAt, lastOwnAt, promoSlot, lowerSeen` | evidence for takeover and failback |
-| Checkpoint | `ckptSlot, ckptAt, ckptPending, ckptData, needsCkpt, ckptRetry, trimFloor` | snapshot progress |
+| Checkpoint | `checkpointSlot, checkpointAt, checkpointPending, checkpointData, needsCheckpoint, checkpointRetry, trimFloor` | snapshot progress |
 | Reads | `readWaiters, tailsStarted, tailRound` | reads waiting for a fresh tail |
 | Folded state | `fold *stateupdater.StateUpdater` | the passbook balance |
 
@@ -491,7 +491,7 @@ So the log can be read (catch-up) while commits are being appended. They run in 
 
 There are four timers: `1` catch-up, `2` gap-fill, `3` role, `4` checkpoint. A timer is
 armed as `SetTimer{ID, Gen, After}` with a fresh `Gen`. When `TimerFired{ID, Gen}` comes
-back, the handler checks `e.Gen == m.timerGen` (or `holeGen`, `roleGen`, `ckptGen`). An old
+back, the handler checks `e.Gen == m.timerGen` (or `holeGen`, `roleGen`, `checkpointGen`). An old
 timer has an old `Gen` and does nothing. This beats cancelling: there is no race, and the
 code is easy to replay in the simulator. (The same trick was in page 01, station 3.)
 
@@ -499,9 +499,9 @@ code is easy to replay in the simulator. (The same trick was in page 01, station
 
 ```
 NodeStarted
-   │ checkpointing on (CkptEvery > 0 or CkptKey set)?
+   │ checkpointing on (CheckpointEvery > 0 or CheckpointKey set)?
    ├─ yes: booting=true, ObjectGet "ckpt/latest"
-   │       ├─ read failed (not NotFound)  -> ckptRetry, timer, try again  (never guess: log may be trimmed)
+   │       ├─ read failed (not NotFound)  -> checkpointRetry, timer, try again  (never guess: log may be trimmed)
    │       ├─ NotFound                    -> fresh start, go to catch-up
    │       ├─ bad CRC                     -> read again immediately
    │       └─ good                        -> fold.Restore; applied = checkpoint slot; go to catch-up
@@ -678,11 +678,11 @@ Without these, a restart would replay the whole log and the log would grow forev
 a control I/O is pending; this node is not the appender or not ready; `applied == 0`;
 **`applied < goalTail`** (a node behind the tail must not write: its snapshot could replace
 a newer one, and the log below the newer one may already be trimmed, so a restart could
-never recover); fewer than `CkptMinSlots` slots since the last one.
+never recover); fewer than `CheckpointMinSlots` slots since the last one.
 Otherwise: `fold.Snapshot(slot = applied)` -> `ObjectPut{Key: "ckpt/latest"}`.
 
 **Then trim** (`onObjPutDone` -> `emitTrim`). Only after the object is safely stored:
-`through = ckptSlot - KeepSlots - 1`, emit `LogDeleteOld{Through}`. On success,
+`through = checkpointSlot - KeepSlots - 1`, emit `LogDeleteOld{Through}`. On success,
 `trimFloor = through + 1`. In DynamoDB trim does not delete; it overwrites each slot with a
 one-byte **tombstone** `0xFE` (so a late put-if-absent cannot sneak into the trimmed area).
 
@@ -693,7 +693,7 @@ restore `applied = slot`, and catch-up continues from there.
 
 | Situation | Handler | Result |
 |-----------|---------|--------|
-| Trimmed slot hit by an append or fill | `hitTrimmed` | refuse all clients (`ErrUnavailable + MaybeApplied`), step down, `booting`, `needsCkpt`, wipe local queues, restore from a checkpoint, rejoin |
+| Trimmed slot hit by an append or fill | `hitTrimmed` | refuse all clients (`ErrUnavailable + MaybeApplied`), step down, `booting`, `needsCheckpoint`, wipe local queues, restore from a checkpoint, rejoin |
 | Fold or snapshot fails | `trip(err)` | `exited`, emit `StopForRestart{Cause}`. The loop ends; the process is supposed to be restarted |
 | Simulated stall | `maybeReplicaFault` | `stallUntil`: node cannot commit for a while (active node only, so a standby can take over) |
 | Simulated crash | `softCrash` | `crashed`, `ready=false`, refuse reads, wipe local state; later `afterCrashRestart` rebuilds a fresh fold, reseeds topics, restores checkpoint |
@@ -925,15 +925,15 @@ client believes it; the broker (page 01, station 9) retries the same key with ba
 flags -> statemachine.Config {
             CatchUpEvery: 5ms,   K: 4 (-log-k),   Rank, Heartbeat (1s), TakeoverAfter (5s),
             HoleAfter (250ms),   Writer: hostname (-node-name),
-            CkptEvery (5m),      CkptMinSlots (1000),   KeepSlots: window-slots/8,
+            CheckpointEvery (5m),      CheckpointMinSlots (1000),   KeepSlots: window-slots/8,
             WindowSlots: window-slots, TrimStride: 1024 }          (see machineConfig in main.go)
 -store mem        -> MemoryLog + MemoryObjects            (fold in memory)
--store dynamolog  -> DynamoLog (+ optional S3 checkpoints via -ckpt-bucket)
+-store dynamolog  -> DynamoLog (+ optional S3 checkpoints via -checkpoint-bucket)
                      + Pebble state in -pebble-dir        (Config.OpenStore, rebuilt at every start)
 server.New(...).Start(ctx)  -> gRPC server + health + Prometheus (/metrics) + run manifest
 ```
 
-Without `-ckpt-bucket`, `manicp` turns checkpoints and trim **off** (a `log_no_checkpoint`
+Without `-checkpoint-bucket`, `manicp` turns checkpoints and trim **off** (a `log_no_checkpoint`
 warning is logged): a restart then replays the entire log.
 
 The metrics package `controlplanemetrics` is outside the determinism closure by design
@@ -1007,7 +1007,7 @@ Four lines of defence together: broker key reuse, `KnownCommit`, `retargetCommit
    Commits in flight on N0 either landed (the keys replay on N1) or never will (the retry
    commits them).
 3. N0 comes back. `NodeStarted` -> `ObjectGet ckpt/latest` -> good CRC -> `fold.Restore` ->
-   `applied = ckptSlot`. Catch-up reads from there to the tail. It is `Ready` and, because it is
+   `applied = checkpointSlot`. Catch-up reads from there to the tail. It is `Ready` and, because it is
    rank 0, `setActive(true)`. Then it appends. N1 sees a writer with a *lower rank* at
    `slot >= promoSlot` -> `lowerSeen` -> `failbackDue` -> `setActive(false)`. N1 is a
    standby again.
@@ -1102,7 +1102,7 @@ Also done in `56417bd`: removed the flags nothing read (`-slot-rate`, `-final-ch
    If DynamoDB fails fast (for example connection refused), this is a tight loop.
    Only the executor's return speed limits it.
 6. **Corrupt checkpoint can be re-read forever.**
-   On a bad CRC, `onObjGetDone` calls `emitCkptGet()` again immediately.
+   On a bad CRC, `onObjGetDone` calls `emitCheckpointGet()` again immediately.
    That is fine for a bit flipped in transit.
    For a permanently damaged stored object it repeats with no delay.
 7. **`GetStatus.log_tail` is not the tail.**
@@ -1196,7 +1196,7 @@ than the one the simulator tests.
 - **Append retry has no backoff.** `retrySameSlot` re-emits the `LogAppend` immediately. If
   DynamoDB fails fast (connection refused), this is a tight loop, bounded only by how fast
   the executor returns errors.
-- **Corrupt checkpoint, permanent.** On a bad CRC, `onObjGetDone` calls `emitCkptGet()`
+- **Corrupt checkpoint, permanent.** On a bad CRC, `onObjGetDone` calls `emitCheckpointGet()`
   again at once. Fine for a flipped bit in transit (the comment says so); for a damaged
   stored object it would repeat without delay.
 - **`GetStatus.log_tail`** is set to `m.Applied()`, the same value as `applied_slot`. It is

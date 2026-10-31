@@ -1,4 +1,4 @@
-// Command detcheck enforces the determinism rules of docs/lessons.md (lesson 12)
+// Command determinismcheck enforces the determinism rules of docs/lessons.md (lesson 12)
 // on the packages that run inside the simulator (internal/core, internal/verify/simulator), and is reused by
 // ops/scripts/audit-dep.sh to audit third-party packages before they are allowed in.
 //
@@ -12,7 +12,7 @@
 //
 // A finding is suppressed by a comment on the same or the previous line:
 //
-//	//detcheck:ok <reason>
+//	//determinismcheck:ok <reason>
 //
 // The reason is mandatory. _test.go files are not checked.
 package main
@@ -36,9 +36,9 @@ var builtInAllowedImports string
 
 var allowedImportsFile string
 
-// DeterminismAnalyzer is the detcheck analysis pass.
+// DeterminismAnalyzer is the determinismcheck analysis pass.
 var DeterminismAnalyzer = &analysis.Analyzer{
-	Name: "detcheck",
+	Name: "determinismcheck",
 	Doc:  "reports constructs that break deterministic simulation (see docs/lessons.md, lesson 12)",
 	Run:  run,
 }
@@ -110,7 +110,7 @@ func run(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
-// problemReporter returns a report func that honours //detcheck:ok on the same or
+// problemReporter returns a report func that honours //determinismcheck:ok on the same or
 // the previous line.
 func problemReporter(pass *analysis.Pass, sup map[int]string) func(token.Pos, string, ...any) {
 	return func(pos token.Pos, format string, args ...any) {
@@ -134,7 +134,7 @@ func checkFile(pass *analysis.Pass, f *ast.File, al allowedImports, checks []fil
 	report := problemReporter(pass, sup)
 	for line, reason := range sup { // order irrelevant: the driver sorts diagnostics
 		if reason == "" {
-			pass.Reportf(pass.Fset.File(f.Pos()).LineStart(line), "detcheck:ok needs a reason")
+			pass.Reportf(pass.Fset.File(f.Pos()).LineStart(line), "determinismcheck:ok needs a reason")
 		}
 	}
 	for _, check := range checks {
@@ -220,12 +220,12 @@ func checkReflectMap(pass *analysis.Pass, n *ast.CallExpr, report reportProblemF
 	}
 }
 
-// allowedExceptions maps line -> reason for every //detcheck:ok comment in f.
+// allowedExceptions maps line -> reason for every //determinismcheck:ok comment in f.
 func allowedExceptions(pass *analysis.Pass, f *ast.File) map[int]string {
 	out := map[int]string{}
 	for _, cg := range f.Comments {
 		for _, c := range cg.List {
-			text, ok := strings.CutPrefix(c.Text, "//detcheck:ok")
+			text, ok := strings.CutPrefix(c.Text, "//determinismcheck:ok")
 			if !ok {
 				continue
 			}

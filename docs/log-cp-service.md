@@ -66,10 +66,10 @@ appending at the tail; in-flight entries of the dead node either landed (replays
 (`cpclient` URL list `a,b`, comma separated) move on at connect error or 503, sticky to the last good URL, each URL
 once per call; commit retries carry the same key. Failback is the same in reverse.
 
-**Checkpoint and trim.** Active node, every `CkptEvery` (5 min) and >= `CkptMinSlots` new slots: snapshot of the
+**Checkpoint and trim.** Active node, every `CheckpointEvery` (5 min) and >= `CheckpointMinSlots` new slots: snapshot of the
 applier (window included) tagged with the applied slot read inside the store view, `ckpt/<slot>` to the object store,
 then `CKPT` pointer by conditional put (forward only); keep the pointed object and one older. Then trim: slots below
-`ckpt - KeepSlots` are overwritten with TOMBSTONES (`TrimDelete`), not deleted (finding 2).
+`checkpoint - KeepSlots` are overwritten with TOMBSTONES (`TrimDelete`), not deleted (finding 2).
 Restore on start: pointer, object, sha-256, `applier.Restore`, replay from the checkpoint slot to the tail. A
 damaged object falls back to replay from slot 0 if the log still starts there, else `ErrNoCheckpoint`.
 
@@ -77,10 +77,10 @@ There is no R# index and no row in the table other than `LOG/<slot>` and the `CK
 
 ## `manicp -store dynamolog` (stage 4)
 
-Flags (all `-store dynamolog` only; defaults follow decisions 48-53): `-table` (default `<table-prefix>cp`), `-ckpt-bucket`
-(empty: no checkpoints and no trim, a restart replays the whole log) `-ckpt-prefix cp/` `-s3-endpoint` `-s3-path-style`,
+Flags (all `-store dynamolog` only; defaults follow decisions 48-53): `-table` (default `<table-prefix>cp`), `-checkpoint-bucket`
+(empty: no checkpoints and no trim, a restart replays the whole log) `-checkpoint-prefix cp/` `-s3-endpoint` `-s3-path-style`,
 `-node-name` (hostname) `-rank 0`, `-takeover-after 5s` `-heartbeat 1s` `-hole-after 250ms` `-log-k 4`,
-`-ckpt-every 5m` `-ckpt-min-slots 1000` `-window-slots 131072` (cluster constant), `-log-ttl 168h`, `-pebble-dir` (empty: temporary;
+`-checkpoint-every 5m` `-checkpoint-min-slots 1000` `-window-slots 131072` (cluster constant), `-log-ttl 168h`, `-pebble-dir` (empty: temporary;
 a given directory is wiped at start if it holds a Pebble database, refused if it holds anything else), `-start-timeout 10m`,
 `-create-tables` (dev). `-takeover-after` must be several times `-heartbeat`, and far below the brokers' `-commit-deadline`.
 Start: open Pebble (empty), restore the newest checkpoint, replay to the tail, THEN listen: while that runs the port refuses
@@ -97,7 +97,7 @@ old transaction-based store (removed, decision 54): going back needs an older gi
 
 `Name`, `Rank`; `K`=4, `MaxSlotRate`=200, `MaxCmdsPerSlot`=256, `QueueMax`=4096, `QueueBytesMax`=64 MiB,
 `Heartbeat`=1 s, `TakeoverAfter`=0; `HoleAfter`=250 ms, `TailPoll`=25 ms, `ReadMax`=500, `TailBatch`=10 ms;
-cluster constants `WindowSlots`, `TrimStride` (not flags: nodes must agree); `CkptEvery`=5 min, `CkptMinSlots`=1000,
+cluster constants `WindowSlots`, `TrimStride` (not flags: nodes must agree); `CheckpointEvery`=5 min, `CheckpointMinSlots`=1000,
 `KeepSlots`=WindowSlots, `TrimDelete`; `DynLogOptions.TTL` (set it long: days) and `StubTTL` (30 d).
 
 ## Metrics

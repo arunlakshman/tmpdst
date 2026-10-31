@@ -140,9 +140,9 @@ type LogParams struct {
 	StallProb, CrashProb float64
 	StallDur, DownDur    [2]core.Duration
 	// WindowSlots: a key is forgotten this many slots after its first slot,
-	// evaluated every TrimStride slots. CkptEvery slots between checkpoints;
+	// evaluated every TrimStride slots. CheckpointEvery slots between checkpoints;
 	// KeepSlots below a checkpoint stay untrimmed.
-	WindowSlots, TrimStride, CkptEvery, KeepSlots int
+	WindowSlots, TrimStride, CheckpointEvery, KeepSlots int
 	// Bug selects a mutant of the log engine (fakelogservice.InjectedBug*); 0 = none.
 	Bug uint8
 }

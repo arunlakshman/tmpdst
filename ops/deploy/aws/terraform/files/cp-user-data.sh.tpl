@@ -35,7 +35,7 @@ else
 fi
 # DynamoDB log + Pebble state under /var/lib/manicp (StateDirectory) + checkpoints in the run bucket under cp/.
 # The table (with TTL and warm throughput) is created by Terraform, so no -create-tables.
-STORE_ARGS="-store dynamolog -table ${table_name} -ckpt-bucket $BUCKET -ckpt-prefix cp/ -rank $CP_RANK -node-name cp-$CP_RANK -takeover-after ${cp_takeover_after} -pebble-dir /var/lib/manicp/pebble"
+STORE_ARGS="-store dynamolog -table ${table_name} -checkpoint-bucket $BUCKET -checkpoint-prefix cp/ -rank $CP_RANK -node-name cp-$CP_RANK -takeover-after ${cp_takeover_after} -pebble-dir /var/lib/manicp/pebble"
 
 # Real AWS DynamoDB: no -dynamo-endpoint. Manifest is written as manicp-<run_id>.json (trailing /).
 # Optional extra flags (e.g. slot rate, log-k) come from the cp_extra_args variable.

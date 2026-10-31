@@ -33,7 +33,7 @@ type Machine struct {
 	timerGen      core.TimerVersion
 	gapGeneration core.TimerVersion
 	roleGen       core.TimerVersion
-	ckptGen       core.TimerVersion
+	checkpointGen core.TimerVersion
 	nextReq       core.RequestID
 	seq           uint64
 	applied       core.LogPosition // next slot to apply
@@ -52,10 +52,10 @@ type Machine struct {
 	promoSlot   core.LogPosition
 	lowerSeen   bool
 
-	ckptSlot    core.LogPosition // newest checkpoint slot (written or restored)
-	ckptAt      core.NodeTime
-	ckptPending core.LogPosition // slot of in-flight ObjectPut snapshot
-	ckptData    []byte
+	checkpointSlot    core.LogPosition // newest checkpoint slot (written or restored)
+	checkpointAt      core.NodeTime
+	checkpointPending core.LogPosition // slot of in-flight ObjectPut snapshot
+	checkpointData    []byte
 
 	queue           []waitingCommand                   // client ops waiting for a commit slot
 	inFlightAppends map[core.RequestID]*inFlightAppend // in-flight commit LogAppends (at most K)
@@ -66,8 +66,8 @@ type Machine struct {
 	stallUntil      core.NodeTime
 	downUntil       core.NodeTime
 	crashed         bool
-	needsCkpt       bool // hit a tomb; must restore before catch-up from zero
-	ckptRetry       bool // the last checkpoint read failed; read again before catch-up
+	needsCheckpoint bool // hit a tomb; must restore before catch-up from zero
+	checkpointRetry bool // the last checkpoint read failed; read again before catch-up
 	seeds           []topicSeed
 
 	readWaiters  []readWaiter // lookups and describes waiting for a fresh tail
@@ -177,10 +177,10 @@ func (m *Machine) onStarted() []core.Action {
 	if m.openErr != nil {
 		return m.trip(m.openErr)
 	}
-	if m.ckptEnabled() {
+	if m.checkpointEnabled() {
 		m.booting = true
 		m.ready = false
-		return m.emitCkptGet()
+		return m.emitCheckpointGet()
 	}
 	return m.afterRestore()
 }
@@ -203,7 +203,7 @@ func (m *Machine) finishBoot() []core.Action {
 	}
 	var acts []core.Action
 	acts = append(acts, m.armRole()...)
-	acts = append(acts, m.armCkpt()...)
+	acts = append(acts, m.armCheckpoint()...)
 	return acts
 }
 
@@ -233,7 +233,7 @@ func (m *Machine) onTimer(e core.TimerFired) []core.Action {
 	case timerRole:
 		return m.onRoleTimer(e)
 	case timerCheckpoint:
-		return m.onCkptTimer(e)
+		return m.onCheckpointTimer(e)
 	default:
 		return nil
 	}
@@ -474,7 +474,7 @@ func (m *Machine) StateHash() uint64 {
 	h.U64(uint64(m.timerGen))
 	h.U64(uint64(m.gapGeneration))
 	h.U64(uint64(m.roleGen))
-	h.U64(uint64(m.ckptGen))
+	h.U64(uint64(m.checkpointGen))
 	h.U64(uint64(m.nextReq))
 	h.U64(uint64(m.seq))
 	h.U64(uint64(m.applied))
@@ -484,10 +484,10 @@ func (m *Machine) StateHash() uint64 {
 	h.U64(uint64(m.pendingKind))
 	h.U64(uint64(m.fillSlot))
 	h.Bool(m.gapArmed)
-	h.Bool(m.ckptRetry)
+	h.Bool(m.checkpointRetry)
 	h.U64(uint64(m.promoSlot))
 	h.Bool(m.lowerSeen)
-	h.U64(uint64(m.ckptSlot))
+	h.U64(uint64(m.checkpointSlot))
 	h.U64(uint64(len(m.queue)))
 	h.U64(uint64(len(m.inFlightAppends)))
 	h.U64(uint64(len(m.waiters)))
@@ -502,8 +502,8 @@ func (m *Machine) StateHash() uint64 {
 	h.U64(uint64(m.cfg.Rank))
 	h.U64(uint64(m.cfg.Heartbeat))
 	h.U64(uint64(m.cfg.TakeoverAfter))
-	h.U64(uint64(m.cfg.CkptEvery))
-	h.U64(uint64(m.cfg.CkptMinSlots))
+	h.U64(uint64(m.cfg.CheckpointEvery))
+	h.U64(uint64(m.cfg.CheckpointMinSlots))
 	h.U64(uint64(m.cfg.KeepSlots))
 	h.U64(m.fold.StateHash())
 	return h.Sum()

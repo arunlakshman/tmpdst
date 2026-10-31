@@ -10,10 +10,10 @@ package core
 // assigns offsets (decision 42): the broker never proposes one. How a store
 // stays correct under concurrent committers (a compare-and-set on the run base
 // with an internal retry) is the store's business, not part of this contract.
-type ControlPlaneOperation interface{ isCPOp() }
+type ControlPlaneOperation interface{ isControlPlaneOperation() }
 
 // ControlPlaneResponse is the answer to a ControlPlaneOperation.
-type ControlPlaneResponse interface{ isCPResp() }
+type ControlPlaneResponse interface{ isControlPlaneResponse() }
 
 // CommitSegment registers one uploaded object holding batches for many
 // partitions and assigns their offsets atomically: every batch is assigned or
@@ -305,31 +305,31 @@ type GroupDescription struct {
 // DescribeGroupsResp has one entry per name asked, in request order.
 type DescribeGroupsResp struct{ Groups []GroupDescription }
 
-func (CommitSegment) isCPOp()  {}
-func (FindSegments) isCPOp()   {}
-func (DescribeTopics) isCPOp() {}
-func (CreateTopic) isCPOp()    {}
-func (GroupInstall) isCPOp()   {}
-func (GroupAssign) isCPOp()    {}
-func (GroupRemove) isCPOp()    {}
-func (OffsetCommit) isCPOp()   {}
-func (OffsetFetch) isCPOp()    {}
-func (DescribeGroup) isCPOp()  {}
-func (ListGroups) isCPOp()     {}
-func (GroupJoin) isCPOp()      {}
-func (GroupSync) isCPOp()      {}
-func (GroupHeartbeat) isCPOp() {}
-func (GroupLeave) isCPOp()     {}
-func (DescribeGroups) isCPOp() {}
+func (CommitSegment) isControlPlaneOperation()  {}
+func (FindSegments) isControlPlaneOperation()   {}
+func (DescribeTopics) isControlPlaneOperation() {}
+func (CreateTopic) isControlPlaneOperation()    {}
+func (GroupInstall) isControlPlaneOperation()   {}
+func (GroupAssign) isControlPlaneOperation()    {}
+func (GroupRemove) isControlPlaneOperation()    {}
+func (OffsetCommit) isControlPlaneOperation()   {}
+func (OffsetFetch) isControlPlaneOperation()    {}
+func (DescribeGroup) isControlPlaneOperation()  {}
+func (ListGroups) isControlPlaneOperation()     {}
+func (GroupJoin) isControlPlaneOperation()      {}
+func (GroupSync) isControlPlaneOperation()      {}
+func (GroupHeartbeat) isControlPlaneOperation() {}
+func (GroupLeave) isControlPlaneOperation()     {}
+func (DescribeGroups) isControlPlaneOperation() {}
 
-func (CommitSegmentResp) isCPResp()  {}
-func (FindSegmentsResp) isCPResp()   {}
-func (DescribeTopicsResp) isCPResp() {}
-func (OffsetCommitResp) isCPResp()   {}
-func (OffsetFetchResp) isCPResp()    {}
-func (DescribeGroupResp) isCPResp()  {}
-func (ListGroupsResp) isCPResp()     {}
-func (GroupJoinResp) isCPResp()      {}
-func (GroupSyncResp) isCPResp()      {}
-func (GroupLeaveResp) isCPResp()     {}
-func (DescribeGroupsResp) isCPResp() {}
+func (CommitSegmentResp) isControlPlaneResponse()  {}
+func (FindSegmentsResp) isControlPlaneResponse()   {}
+func (DescribeTopicsResp) isControlPlaneResponse() {}
+func (OffsetCommitResp) isControlPlaneResponse()   {}
+func (OffsetFetchResp) isControlPlaneResponse()    {}
+func (DescribeGroupResp) isControlPlaneResponse()  {}
+func (ListGroupsResp) isControlPlaneResponse()     {}
+func (GroupJoinResp) isControlPlaneResponse()      {}
+func (GroupSyncResp) isControlPlaneResponse()      {}
+func (GroupLeaveResp) isControlPlaneResponse()     {}
+func (DescribeGroupsResp) isControlPlaneResponse() {}

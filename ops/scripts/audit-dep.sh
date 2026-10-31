@@ -27,12 +27,12 @@ go mod init audit >/dev/null 2>&1
 go get "$mod_at" >/dev/null 2>&1 || { echo "go get $mod_at failed" >&2; go get "$mod_at"; exit 1; }
 version=$(go list -m -f '{{.Version}}' "$mod")
 
-# detcheck must be built with a toolchain at least as new as the one the audited
+# determinismcheck must be built with a toolchain at least as new as the one the audited
 # module requires, or it cannot read the compiled standard library it imports.
 need_go=$(go mod edit -json | sed -n 's/.*"Go": *"\([^"]*\)".*/\1/p')
 repo_go=$(cd "$repo" && go mod edit -json | sed -n 's/.*"Go": *"\([^"]*\)".*/\1/p')
 toolchain=$(printf '%s\n%s\n' "$need_go" "$repo_go" | sort -V | tail -1)
-(cd "$repo" && GOTOOLCHAIN="go$toolchain+auto" go build -o "$work/detcheck" ./ops/tools/determinismcheck)
+(cd "$repo" && GOTOOLCHAIN="go$toolchain+auto" go build -o "$work/determinismcheck" ./ops/tools/determinismcheck)
 export GOTOOLCHAIN="go$toolchain+auto"
 dir=$(go list -m -f '{{.Dir}}' "$mod")
 
@@ -40,7 +40,7 @@ section() { printf '\n== %s\n' "$1"; }
 
 echo "# Determinism audit: $mod@$version"
 echo "source: $dir"
-echo "requires go: $need_go (detcheck built with go$toolchain)"
+echo "requires go: $need_go (determinismcheck built with go$toolchain)"
 echo "packages: $pattern"
 
 section "Direct imports (non-test)"
@@ -50,15 +50,15 @@ go list -f '{{.ImportPath}}:{{range .Imports}}
 section "Third-party packages pulled in (each needs its own audit record)"
 go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{if .Module}}  ({{.Module.Path}}@{{.Module.Version}}){{end}}{{end}}' "$pattern" | sed '/^$/d'
 
-section "detcheck findings"
+section "determinismcheck findings"
 set +e
-"$work/detcheck" "$pattern" 2>&1
+"$work/determinismcheck" "$pattern" 2>&1
 rc=$?
 set -e
 case $rc in
   0) echo "(none)";;
   3) ;;  # diagnostics reported above
-  *) echo "detcheck failed with exit $rc" >&2; exit $rc;;
+  *) echo "determinismcheck failed with exit $rc" >&2; exit $rc;;
 esac
 
 section "Manual-review hints (aliasing, unsafe, reflection)"
@@ -70,7 +70,7 @@ grep -n -E 'unsafe\.|reflect\.|\[[^]]*:[^]]*:[^]]*\]|sync\.Pool|time\.|rand\.' \
 
 section "Reviewer checklist"
 cat <<'CHECK'
-[ ] Every detcheck finding is explained as harmless, or the dependency is rejected.
+[ ] Every determinismcheck finding is explained as harmless, or the dependency is rejected.
 [ ] Decoded/returned []byte and strings: copied, or aliasing the input? (3-index slices, unsafe)
 [ ] No hidden defaults: timestamps, random IDs, checksums filled in implicitly?
 [ ] No global mutable state: pools, caches, registries written at runtime?

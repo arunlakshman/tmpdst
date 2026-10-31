@@ -114,7 +114,7 @@ func (m *Machine) retargetCommit(op ClientOperation) bool {
 		}
 	}
 	reqs := make([]core.RequestID, 0, len(m.inFlightAppends))
-	for req := range m.inFlightAppends { //detcheck:ok keys are collected, then sorted before use
+	for req := range m.inFlightAppends { //determinismcheck:ok keys are collected, then sorted before use
 		reqs = append(reqs, req)
 	}
 	slices.Sort(reqs)

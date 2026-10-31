@@ -154,7 +154,7 @@ b.panel("Checkpoint age (s) and size",
         [q(f'max by (host) (manicp_log_checkpoint_age_seconds{{{R}}})', "age s {{host}}"),
          q(f'max by (host) (manicp_log_checkpoint_bytes{{{R}}})', "bytes {{host}}"),
          q(f'sum by (host) (increase(manicp_log_checkpoint_errors_total{{{R}}}[{RI}]))', "errors {{host}}")], "short",
-        desc="Alert on age above 3 x -ckpt-every (15 min). Only the active node checkpoints.")
+        desc="Alert on age above 3 x -checkpoint-every (15 min). Only the active node checkpoints.")
 b.panel("Fresh reads served and tail checks (batching factor)",
         [q(f'sum by (host) (rate(manicp_log_fresh_reads_total{{{R}}}[{RI}]))', "fresh reads/s {{host}}"),
          q(f'sum by (host) (rate(manicp_log_tail_checks_total{{{R}}}[{RI}]))', "tail checks/s {{host}}"),

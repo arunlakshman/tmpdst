@@ -284,7 +284,7 @@ how a node later recognises "this slot is *my* write" (section 4.7).
 
 ### 3.4 `commitTransaction`: the most important function in the package
 
-(`applier.go`.) It runs inside one `Update`, so it is all-or-nothing. In order:
+(`stateupdater.go`.) It runs inside one `Update`, so it is all-or-nothing. In order:
 
 ```
 1. dig := checksum(op.Batches)                 // sha256, first 16 bytes, of the batches (not the key)
@@ -1040,7 +1040,7 @@ DynamoDB** on a seed and check the outcome. Facts to know (`docs/sim-log-engine.
   the faults really reach this code). Text like `"logcp-sim: lost slot retried at a later
   slot"` is a Reachable name. These calls are noise for reading; the simulator uses them.
 - **Oracle.** Veritas (`speccheck.ControlPlane`) is the independent executable spec. Lockstep
-  tests (`statemachine/lockstep_test.go`, `stateupdater/applier_test.go`) feed the same
+  tests (`statemachine/lockstep_test.go`, `stateupdater/stateupdater_test.go`) feed the same
   random commands to both and compare every answer.
 - **`CPTruth`** replays the durable log from slot 0 with `ReplayPosition` (`replay.go`) into
   a fresh fold, ignoring queues and writer-chosen bases. At the end, every live replica's
@@ -1148,7 +1148,7 @@ How it works now:
 ### 12.2 `WindowSlots` was never set in `manicp` (FIXED in `56417bd`)
 
 `afterApply` trims `K`/`S` records only if `cfg.WindowSlots > 0`. The simulator sets it
-(`kafka/cp.go`), but `cmd/manicp/main.go` built the `Config` without it; the flag
+(`kafka/control_plane.go`), but `cmd/manicp/main.go` built the `Config` without it; the flag
 `-window-slots` only fed `KeepSlots = windowSlots/8` (log trim). So in production the fold
 kept every `K` and `S` record forever (a restart did not help, because the checkpoint
 contains them). The simulator could not see this, because it runs with the window on.
@@ -1213,7 +1213,7 @@ than the one the simulator tests.
 ## 13. How to read the code (suggested order, ~2-3 hours)
 
 1. `internal/core/controlplane.go` (the contract) and `core/machine.go`.
-2. `stateupdater/keys.go`, then `applier.go`: `commitTransaction`, `assign`, `replay`,
+2. `stateupdater/keys.go`, then `stateupdater.go`: `commitTransaction`, `assign`, `replay`,
    `lookupTransaction`. Then `entry.go`.
 3. `stateupdater/query.go` (Trim), `snapshot.go` (format comment first).
 4. `statemachine/config.go` (the knobs), then `machine.go`: `Step`, `onStarted`,

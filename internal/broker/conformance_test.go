@@ -10,7 +10,7 @@ import (
 	"manifester/internal/core"
 	"manifester/internal/verify/speccheck"
 	"manifester/internal/verify/speccheck/checker"
-	"manifester/internal/verify/speccheck/checker/runcontrol"
+	"manifester/internal/verify/speccheck/checker/runsettings"
 	"manifester/internal/wire/kafkawire"
 )
 
@@ -352,7 +352,7 @@ func c1Fail(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config), o c
 func TestConformanceBroker(t *testing.T) {
 	for _, corrupt := range []bool{false, true} {
 		t.Run(fmt.Sprintf("corruptGets=%v", corrupt), func(t *testing.T) {
-			checker.Run(t, c1Check(t, InjectedBugNone, corrupt, nil), runcontrol.Options(t, 100))
+			checker.Run(t, c1Check(t, InjectedBugNone, corrupt, nil), runsettings.Options(t, 100))
 		})
 	}
 }
@@ -371,7 +371,7 @@ func TestConformanceBrokerSmallSegments(t *testing.T) {
 	for _, name := range []string{"bytes", "batches", "partitions", "all"} {
 		for _, corrupt := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/corruptGets=%v", name, corrupt), func(t *testing.T) {
-				checker.Run(t, c1Check(t, InjectedBugNone, corrupt, caps[name]), runcontrol.Options(t, 50))
+				checker.Run(t, c1Check(t, InjectedBugNone, corrupt, caps[name]), runsettings.Options(t, 50))
 			})
 		}
 	}
@@ -406,7 +406,7 @@ func TestConformanceBrokerCatchesMutants(t *testing.T) {
 		{"BugEarlyAck", InjectedBugEarlyAck, false},
 	} {
 		t.Run(m.name, func(t *testing.T) {
-			if c1Fail(t, m.bug, m.corrupt, nil, runcontrol.Options(t, 20)) == nil {
+			if c1Fail(t, m.bug, m.corrupt, nil, runsettings.Options(t, 20)) == nil {
 				t.Fatalf("the C1 comparison did not catch %s in 20 seeds.", m.name)
 			}
 		})

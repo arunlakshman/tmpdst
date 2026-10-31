@@ -1,4 +1,4 @@
-// Package runcontrol reads the run settings of a checker comparison from
+// Package runsettings reads the run settings of a checker comparison from
 // environment variables. It turns them into a checker.Options value, so
 // every test package uses the same variable names and the same rules.
 //
@@ -20,4 +20,4 @@
 //   - seed: a number that fixes the random operations, so a run can repeat.
 //   - campaign: a long run that is limited by time and not by a seed count.
 //   - replay: run one failing seed again with the same operations.
-package runcontrol
+package runsettings

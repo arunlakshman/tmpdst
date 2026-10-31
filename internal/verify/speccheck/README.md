@@ -89,7 +89,7 @@ failing sequence as a Go list. To add a new spec, follow `checker/README.md`.
 | `checker/observation/` | one result shape, so results compare as values |
 | `checker/suites/` | shared tests for each spec; they accept any subject |
 | `checker/injectedbug/` | known bugs that every suite must catch |
-| `checker/runcontrol/` | reads the variables above |
+| `checker/runsettings/` | reads the variables above |
 | `specsystem/` | adapters that run production code on top of the specs |
 
 A spec never lets the order of a Go map decide a result, and it uses no clock,

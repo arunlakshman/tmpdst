@@ -86,7 +86,7 @@ Note "above ~500k": at 500k only 13% of seals are size seals, so the transition 
 | not a throughput limit | pipeline 5: `manibroker_segments_in_flight` mean 0.67 / 0.9 / 1.0 / 1.1 per broker; aws 15 S3 retries/throttles/errors: no series (counters never created); pipeline 6 reads paused 0 | | CONFIRMED |
 | pipeline 1, 4, overview 9, 7, 10: `segment_put`, `seal_to_ack`, `open_age` (le 0.16, 0.32, 0.64) | | p99 prints 0.315-0.319 s in every stage from 500k up: also clipped at a bucket edge (le 0.32), so they can't separate stages | defect |
 
-A better p99 needs finer buckets between 50 and 500 ms (e.g. linear 20 ms steps) in `internal/system/awsmetrics/awsobs.go` and `internal/system/production/metrics.go`; with the current ones use mean plus the fraction above a bucket edge.
+A better p99 needs finer buckets between 50 and 500 ms (e.g. linear 20 ms steps) in `internal/system/awsmetrics/awsmetrics.go` and `internal/system/production/metrics.go`; with the current ones use mean plus the fraction above a bucket edge.
 
 ### H6: index lag ~13 s at 1M, drains after load
 
@@ -161,7 +161,7 @@ Generator: `gen/gen_dashboards.py`. Panel ids as in section 1.
 | 5 | overview 27 entries per slot | p50 0.50 / p99 1.0 from interpolating the le=1 bucket; entry bytes shows only p99 (bucket edge 4,096) | replace with means: `sum(rate(manicp_log_entries_per_slot_sum[1m]))/sum(rate(manicp_log_entries_per_slot_count[1m]))` and same for `entry_bytes`; keep `_bucket` p99 only on a separate panel |
 | 6 | pipeline 5 "in flight at seal" | same le=1 interpolation (0.5 / 0.99) | show `avg` (`sum/count`) and `max_over_time(manibroker_segments_in_flight[1m])` |
 | 7 | overview 25 third query | `slot_attempts_total{result="error"}` never exists (result is won/lost), panel blank | `sum by(cp_rank,result)(rate(manicp_log_slot_attempts_total{result!="won"}[$__rate_interval])) or vector(0)` |
-| 8 | aws 15, 18 and overview 30 refused | counters not created until the first event, so "zero" looks like "no data" | add `or vector(0)` to each or pre-register the counters in the Go code (`awsobs`, `cpobs`) |
+| 8 | aws 15, 18 and overview 30 refused | counters not created until the first event, so "zero" looks like "no data" | add `or vector(0)` to each or pre-register the counters in the Go code (`awsmetrics`, `controlplanemetrics`) |
 | 9 | overview 16-23, aws 5, 10, 11, 19, 20, aws 6 | 8 + 7 panels belong to the transaction store or to metrics no build exports (`manicp_dynamodb_call_seconds`, `manicp_commit_prep_seconds`, `manicp_retries_total`, `manicp_commit_attempts_total`, `manicp_dynamo_consumed_capacity_units_total`, `manicp_dynamo_txn_cancel_reasons_total`) | collapse the tx row (`"collapsed": true`), delete the five never-exported ones; or generate the dashboard per store (`-store log` / `dynamo`) |
 | 10 | overview 32 checkpoint | age (s) and bytes (up to 1e8) share one axis, so age is flat | move bytes to a right axis with unit `bytes` (override by name), age to `s` |
 | 11 | aws 2, 3 CW rows, 4 | all zero (section 4) | fix exporter window (section 4) or remove; use `sum(rate(manibroker_s3_attempt_seconds_count{op="PutObject"}[$__rate_interval]))` for PUT/s |

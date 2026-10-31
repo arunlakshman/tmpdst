@@ -27,7 +27,7 @@ These packages sit under `checker/`:
 | `checker/generator` | Makes random operations. An `InputProfile` says how often each kind of operation appears. |
 | `checker/observation` | Turns a result from the spec, a simulated engine or a real adapter into one common shape, so the results can be compared. |
 | `checker/injectedbug` | Wraps a subject and adds a known bug. |
-| `checker/runcontrol` | Reads the environment variables that choose the seeds, and builds the replay command. |
+| `checker/runsettings` | Reads the environment variables that choose the seeds, and builds the replay command. |
 
 ## Steps
 
@@ -87,10 +87,10 @@ example a wrong offset or a lost write. Write a test that runs the suite on the
 wrapped subject and checks that it fails. A suite that cannot catch an injected
 bug does not protect anything.
 
-### 5. Set the options with runcontrol (about 2 minutes)
+### 5. Set the options with runsettings (about 2 minutes)
 
 Do not write `Seeds` and `Seed` by hand. Call
-`runcontrol.Options(t, defaultSeeds)`. It returns the `checker.Options` and
+`runsettings.Options(t, defaultSeeds)`. It returns the `checker.Options` and
 sets the replay command. Pass the result to `checker.Run`.
 
 | Variable | Meaning |

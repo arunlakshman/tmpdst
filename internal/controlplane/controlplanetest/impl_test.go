@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	cp "manifester/internal/controlplane"
+	"manifester/internal/controlplane"
 	"manifester/internal/controlplane/controlplaneclient"
 	"manifester/internal/controlplane/grpctestserver"
 	"manifester/internal/controlplane/memorystore"
@@ -24,7 +24,7 @@ type impl interface {
 }
 
 // storeImpl drives a controlplane.Store directly.
-type storeImpl struct{ st cp.Store }
+type storeImpl struct{ st controlplane.Store }
 
 func (s storeImpl) Exec(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, core.ErrCode, error) {
 	switch op := op.(type) {
@@ -79,7 +79,7 @@ func grpcOver(t testing.TB) impl {
 	return grpcImpl{grpctestserver.StartMem(t).Client}
 }
 
-func newMem() cp.Store { return memorystore.New() }
+func newMem() controlplane.Store { return memorystore.New() }
 
 // implSubject makes an impl usable as a suite subject. The stores keep no spec
 // hash, so StateHash says no. A commit that succeeds is Applied, as in the spec.

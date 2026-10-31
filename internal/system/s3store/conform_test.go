@@ -12,7 +12,7 @@ import (
 	"manifester/internal/system"
 	"manifester/internal/verify/speccheck/checker/injectedbug"
 	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/runcontrol"
+	"manifester/internal/verify/speccheck/checker/runsettings"
 	"manifester/internal/verify/speccheck/checker/suites"
 	"manifester/internal/verify/speccheck/specsystem"
 )
@@ -80,7 +80,7 @@ func newFake() suites.ObjectSubject { return storeSubject{specsystem.NewObjectSt
 func runProfiles(t *testing.T, newSubject func() suites.ObjectSubject, defaultSeeds int) {
 	for _, profile := range suites.AllObjectProfiles() {
 		t.Run(profile.Name, func(t *testing.T) {
-			suites.ObjectStore(t, profile, newSubject, runcontrol.Options(t, defaultSeeds))
+			suites.ObjectStore(t, profile, newSubject, runsettings.Options(t, defaultSeeds))
 		})
 	}
 }

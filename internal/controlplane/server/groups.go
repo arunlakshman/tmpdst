@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	cp "manifester/internal/controlplane"
+	"manifester/internal/controlplane"
 	cpv1 "manifester/internal/controlplane/api/v1"
 	"manifester/internal/controlplane/apiconvert"
 	"manifester/internal/controlplane/groupcoordinator"
@@ -21,7 +21,7 @@ const groupWatchEvery = 100 * time.Millisecond
 // log entry offered to the run loop. A read is answered by the fold.
 type nodeGroups struct{ n *Node }
 
-var _ cp.GroupStore = nodeGroups{}
+var _ controlplane.GroupStore = nodeGroups{}
 
 // write offers one group decision to the log. A business answer comes back in
 // the Done; err is only for the run loop or the context.
@@ -62,7 +62,7 @@ func readFold(ctx context.Context, n *Node, fn func(*statemachine.Machine) (core
 		return core.ControlPlaneDone{}, err
 	}
 	if d.Err != core.OK {
-		return core.ControlPlaneDone{}, cp.ErrUnavailable
+		return core.ControlPlaneDone{}, controlplane.ErrUnavailable
 	}
 	return d, nil
 }

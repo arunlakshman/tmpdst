@@ -6,7 +6,7 @@ import (
 	"context"
 	"sync"
 
-	cp "manifester/internal/controlplane"
+	"manifester/internal/controlplane"
 	"manifester/internal/core"
 	"manifester/internal/verify/speccheck"
 )
@@ -17,7 +17,7 @@ type Store struct {
 	spec *speccheck.ControlPlane
 }
 
-var _ cp.Store = (*Store)(nil)
+var _ controlplane.Store = (*Store)(nil)
 
 // New returns an empty store.
 func New() *Store { return &Store{spec: speccheck.NewControlPlane()} }

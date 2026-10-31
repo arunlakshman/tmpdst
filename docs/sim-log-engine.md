@@ -29,7 +29,7 @@ The veritas-backed preset (`-scenario kafka`) is unchanged.
 Two CP processes (rank 0 preferred appender, rank 1 standby). Three fault
 families are all live: kernel attrition can kill or stop a `cp-*` process (a
 full reboot from the factory), `StallProb` / `CrashProb` stall or soft-crash the
-active replica in process (`cp.go` passes the swarmed values, `swarmLog` scales
+active replica in process (`control_plane.go` passes the swarmed values, `swarmLog` scales
 them), and the bridge and logstore Put fault coins stay live in `swarmLog`.
 Two machine rules make this safe:
 

@@ -44,7 +44,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	cp "manifester/internal/controlplane"
+	"manifester/internal/controlplane"
 	"manifester/internal/core"
 )
 
@@ -150,7 +150,7 @@ type GroupDescription struct {
 // Coordinator serves the group calls on the active node.
 type Coordinator struct {
 	config Config
-	store  cp.GroupStore
+	store  controlplane.GroupStore
 
 	mu     sync.Mutex
 	cur    *term // nil when standby or not rebuilt yet
@@ -167,7 +167,7 @@ type term struct {
 }
 
 // New returns a coordinator over store. It serves nothing until Rebuild.
-func New(config Config, store cp.GroupStore) *Coordinator {
+func New(config Config, store controlplane.GroupStore) *Coordinator {
 	if config.InitialRebalanceDelay <= 0 {
 		config.InitialRebalanceDelay = defaultInitialRebalanceDelay
 	}

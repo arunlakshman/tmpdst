@@ -81,7 +81,7 @@ Implementation: `internal/controlplane/statemachine/role.go` (`maybeReplicaFault
 
 **Wired off in two places today:**
 
-1. `internal/verify/simulator/kafka/cp.go` — factory hard-codes zeros (does not even read swarmed LogParams):
+1. `internal/verify/simulator/kafka/control_plane.go` — factory hard-codes zeros (does not even read swarmed LogParams):
 
 ```go
 StallProb: 0, // TODO: re-enable with coordinated dual-replica faults
@@ -167,7 +167,7 @@ If attrition/stall cause new drain wedges, **start by asking whether a slot was 
 |---|---|---|
 | 1 | `internal/verify/simulator/kafka/config.go` `configLogWith` | `NoAttrition: true` → `false` (or omit) when enabling CP process attrition |
 | 2 | `internal/verify/simulator/kafka/config.go` `swarmLog` | Remove `l.StallProb, l.CrashProb = 0, 0`; restore `scale(&l.StallProb)` / `scale(&l.CrashProb)` (or a safer menu) |
-| 3 | `internal/verify/simulator/kafka/cp.go` | Pass `StallProb: lp.StallProb`, `CrashProb: lp.CrashProb` instead of hardcoded 0; delete the TODO |
+| 3 | `internal/verify/simulator/kafka/control_plane.go` | Pass `StallProb: lp.StallProb`, `CrashProb: lp.CrashProb` instead of hardcoded 0; delete the TODO |
 | 4 | `docs/sim-log-engine.md` | Update the “NoAttrition / StallProb forced off” paragraph when done |
 | 5 | `internal/verify/simulator/kafka/config.go` `logReachables` | Re-add stall/crash/takeover/restore props if the campaign must cover them again (see §7) |
 
@@ -184,7 +184,7 @@ Do **not** flip all three on day one. Prior art: Put coins alone found a wedge.
 
 ### Phase A — soft stall/crash only (keep `NoAttrition: true`)
 
-1. Wire `cp.go` from `lp.StallProb` / `lp.CrashProb`.  
+1. Wire `control_plane.go` from `lp.StallProb` / `lp.CrashProb`.  
 2. In `swarmLog`, stop zeroing; optionally start with a **reduced** menu (e.g. scale but cap lower than PutFail) before full `{0,0.5,1,2,4}` × defaults.  
 3. Unit: extend `internal/controlplane/statemachine` role tests for stall → takeover → failback and softCrash → restore (today `role.go` implements this; dedicated campaign-level coverage was thin after the cutover). Old in-engine references: `internal/verify/simulator/fakeservices/fakelogservice` takeover/trim/crash tests (pre-bridge) and `TestDeterministic` with Stall/Crash probs.  
 4. Bar: `make build`, `go test ./controlplane/machine/...`, kafka-log mutants, then `go run ./cmd/manisim -scenario kafka-log -seeds 300` (prefer `-j 1` once if a seed looks nondeterministic — parallel `-j` flakes were seen during the Put follow-up; confirm with `-j 1` then re-check `-j 8`).  
@@ -235,7 +235,7 @@ Do **not** flip all three on day one. Prior art: Put coins alone found a wedge.
 | Nondeterministic trace hash | Unsorted map walk on retarget/refuse; Fault draw order | Sort ReqIDs (already done in retarget/refuse); swarm draw order in `swarm` then `swarmLog` |
 | Settling liveness failures | Chaos faults still landing; CP down too long | Phases Settling/Settle lengths; MaxDead; RecoveryDelay / DownDur |
 | False MaybeApplied under load | Logstore CallerTimeout ≤ slow ApplyLatency | Keep logstore timeout &lt; bridge and &gt; SlowMax (~200ms) |
-| Campaign “green” but stall never fires | Still hardcoded 0 in `cp.go` or zeroed in `swarmLog` | §5 checklist — both sites must be live |
+| Campaign “green” but stall never fires | Still hardcoded 0 in `control_plane.go` or zeroed in `swarmLog` | §5 checklist — both sites must be live |
 
 ---
 
@@ -249,7 +249,7 @@ All of the following on a tip based on current `toys3`:
 4. `go run ./cmd/manisim -scenario kafka-log -seeds 300` — 0 failing (document `-j` used).  
 5. Swarm can produce non-zero `StallProb`/`CrashProb` for some seeds; with Phase B, CP nodes can appear in `sim_crashed` / graceful stop facts.  
 6. ExpectReachable / Sometimes coverage includes stall, crash, takeover, restore (as designed in §7).  
-7. Docs (`sim-log-engine.md` + this file status) updated; no remaining `StallProb: 0 // TODO` in `cp.go`.  
+7. Docs (`sim-log-engine.md` + this file status) updated; no remaining `StallProb: 0 // TODO` in `control_plane.go`.  
 8. Put/bridge coins remain live (do not re-zero `PutFail`/`PutLost` to hide failures).
 
 Out of scope unless they block the bar: third replica, log-wide total outage, Dynamo throttling realism, exhausting the idempotency window in the default preset (see Limits in `sim-log-engine.md`).
@@ -261,7 +261,7 @@ Out of scope unless they block the bar: third replica, log-wide total outage, Dy
 | Path | Why |
 |---|---|
 | `internal/verify/simulator/kafka/config.go` | `configLogWith`, `swarmLog`, timeouts, NoAttrition, reachables |
-| `internal/verify/simulator/kafka/cp.go` | Factory wiring; hardcoded Stall/Crash zeros |
+| `internal/verify/simulator/kafka/control_plane.go` | Factory wiring; hardcoded Stall/Crash zeros |
 | `internal/controlplane/statemachine/role.go` | `maybeReplicaFault`, `softCrash`, takeover/failback |
 | `internal/controlplane/statemachine/commit.go` | same-slot retry, retarget, tomb |
 | `internal/controlplane/statemachine/config.go` | StallProb/CrashProb field docs |
@@ -292,4 +292,4 @@ The three families are on together with the Put and bridge coins. Turning them o
 
 4. **A lagging node overwrote a newer checkpoint.** After a restart a standby became active while still behind, wrote its old snapshot to `ckpt/latest` over a newer one, and the log below the newer one was already trimmed. Both nodes then looped on tombstones (seed 439). A node now writes a checkpoint only when it has applied the last tail it saw. Limit: this is not a conditional put; a very late stale Put can still overwrite. The proper fix (per-slot checkpoint keys or a conditional write) is a design change, left open.
 
-Other changes: `swarmLog` scales `StallProb` / `CrashProb` again, base values for the log preset are `0.004` / `0.002` so a 20-seed campaign reaches them, `cp.go` passes them, and `logReachables` has standby took over, failback, replica stalled, replica crashed, restored from a checkpoint. `idempotent replay after takeover` and `replica hit a trimmed slot` are not required (too rare). `faultCoverage` is unchanged. Bar: `make build`, kafka-log 300 seeds with 0 failing, log mutants caught, `ci-determinism.sh` passed.
+Other changes: `swarmLog` scales `StallProb` / `CrashProb` again, base values for the log preset are `0.004` / `0.002` so a 20-seed campaign reaches them, `control_plane.go` passes them, and `logReachables` has standby took over, failback, replica stalled, replica crashed, restored from a checkpoint. `idempotent replay after takeover` and `replica hit a trimmed slot` are not required (too rare). `faultCoverage` is unchanged. Bar: `make build`, kafka-log 300 seeds with 0 failing, log mutants caught, `ci-determinism.sh` passed.

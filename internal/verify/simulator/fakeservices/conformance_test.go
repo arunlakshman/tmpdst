@@ -13,7 +13,7 @@ import (
 	"manifester/internal/verify/speccheck/checker/generator"
 	"manifester/internal/verify/speccheck/checker/injectedbug"
 	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/runcontrol"
+	"manifester/internal/verify/speccheck/checker/runsettings"
 	"manifester/internal/verify/speccheck/checker/suites"
 )
 
@@ -101,7 +101,7 @@ func (s *engineControlPlaneSubject) StateHash() (uint64, bool) { return s.engine
 func TestConformanceObjStore(t *testing.T) {
 	for _, profile := range suites.AllObjectProfiles() {
 		t.Run(profile.Name, func(t *testing.T) {
-			suites.ObjectStore(t, profile, newEngineObjectSubject, runcontrol.Options(t, seedBudget))
+			suites.ObjectStore(t, profile, newEngineObjectSubject, runsettings.Options(t, seedBudget))
 		})
 	}
 }
@@ -109,7 +109,7 @@ func TestConformanceObjStore(t *testing.T) {
 func TestConformanceFakeControlPlane(t *testing.T) {
 	for _, profile := range suites.AllControlPlaneProfiles() {
 		t.Run(profile.Name, func(t *testing.T) {
-			suites.ControlPlane(t, profile, newEngineControlPlaneSubject, runcontrol.Options(t, seedBudget))
+			suites.ControlPlane(t, profile, newEngineControlPlaneSubject, runsettings.Options(t, seedBudget))
 		})
 	}
 }

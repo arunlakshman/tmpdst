@@ -14,7 +14,7 @@ import (
 	"manifester/internal/verify/speccheck/checker/generator"
 	"manifester/internal/verify/speccheck/checker/injectedbug"
 	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/runcontrol"
+	"manifester/internal/verify/speccheck/checker/runsettings"
 	"manifester/internal/verify/speccheck/checker/suites"
 )
 
@@ -65,7 +65,7 @@ func runSuite(t *testing.T, mk func(testing.TB) stateupdater.KeyValueStore, defa
 	for _, profile := range suites.AllControlPlaneProfiles() {
 		t.Run(profile.Name, func(t *testing.T) {
 			suites.ControlPlane(t, profile, func() suites.ControlPlaneSubject { return newStateUpdaterSubject(t, mk) },
-				runcontrol.Options(t, defaultSeeds))
+				runsettings.Options(t, defaultSeeds))
 		})
 	}
 }

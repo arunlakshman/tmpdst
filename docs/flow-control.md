@@ -306,6 +306,6 @@ with measured latency bounds) so simulated overload resembles the real thing.
 | `internal/core/action.go` | Actions `PauseReads{Conn}` and `ResumeReads{Conn}`. |
 | `internal/core/inbox.go` | `InboxKind` (`Control`, `Data`) and `InboxKindOf(EventData) InboxKind`, the fixed table from §3.1. An unclassified event type panics, so a new event can't silently land in the wrong queue. |
 | `internal/core/inbox.go` | `Queue` (`Len`, `Pop`) and `InboxPolicy` (`Next(control, data Queue)`), pure and shared by production and the simulator. |
-| `internal/system/sys.go` | `Sink` split into `DeliverControl` (never blocks) and `DeliverData` (may block). `Conns` gains `PauseReads`/`ResumeReads` so the production executor can park a reader goroutine. |
+| `internal/system/system.go` | `Sink` split into `DeliverControl` (never blocks) and `DeliverData` (may block). `Conns` gains `PauseReads`/`ResumeReads` so the production executor can park a reader goroutine. |
 | `internal/verify/simulator/cost.go` | `CostModel`, `CostParams` (per-event cost, per-byte cost, pause episodes) and `NodeInbox` (a node's simulated two inboxes plus `BusyUntil`). |
 | `internal/verify/simulator/run.go` | `Config.Cost`. Zero means an instantaneous `Step`. |

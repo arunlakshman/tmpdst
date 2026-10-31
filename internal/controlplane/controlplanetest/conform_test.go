@@ -3,9 +3,9 @@ package controlplanetest
 import (
 	"testing"
 
-	cp "manifester/internal/controlplane"
+	"manifester/internal/controlplane"
 	"manifester/internal/verify/speccheck/checker/injectedbug"
-	"manifester/internal/verify/speccheck/checker/runcontrol"
+	"manifester/internal/verify/speccheck/checker/runsettings"
 	"manifester/internal/verify/speccheck/checker/suites"
 )
 
@@ -15,7 +15,7 @@ import (
 func runProfiles(t *testing.T, newImpl func() impl, defaultSeeds int) {
 	for _, profile := range suites.AllControlPlaneProfiles() {
 		t.Run(profile.Name, func(t *testing.T) {
-			suites.ControlPlane(t, profile, subjectOf(newImpl), runcontrol.Options(t, defaultSeeds))
+			suites.ControlPlane(t, profile, subjectOf(newImpl), runsettings.Options(t, defaultSeeds))
 		})
 	}
 }
@@ -35,4 +35,4 @@ func TestInjectedBugsCaughtMemorystore(t *testing.T) {
 	injectedbug.RequireAllControlPlaneBugsDetected(t, subjectOf(func() impl { return storeImpl{newMem()} }), 100)
 }
 
-var _ cp.Store = newMem()
+var _ controlplane.Store = newMem()

@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	cp "manifester/internal/controlplane"
+	"manifester/internal/controlplane"
 	"manifester/internal/core"
 )
 
@@ -19,8 +19,8 @@ type Store struct {
 }
 
 var (
-	_ cp.Store      = (*Store)(nil)
-	_ cp.GroupStore = (*Store)(nil)
+	_ controlplane.Store      = (*Store)(nil)
+	_ controlplane.GroupStore = (*Store)(nil)
 )
 
 // CommitSegment implements controlplane.Store.

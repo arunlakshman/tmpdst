@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	cp "manifester/internal/controlplane"
+	"manifester/internal/controlplane"
 	"manifester/internal/controlplane/stateupdater"
 	"manifester/internal/core"
 )
@@ -294,7 +294,7 @@ func TestStoreFailureBreaksTermAndRebuildRecovers(t *testing.T) {
 
 // flakyStore fails GroupInstall on demand.
 type flakyStore struct {
-	cp.GroupStore
+	controlplane.GroupStore
 	failInstall atomic.Bool
 }
 

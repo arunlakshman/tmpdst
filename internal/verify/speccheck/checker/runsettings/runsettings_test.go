@@ -1,4 +1,4 @@
-package runcontrol
+package runsettings
 
 import (
 	"fmt"

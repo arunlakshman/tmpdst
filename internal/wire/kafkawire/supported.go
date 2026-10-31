@@ -11,11 +11,22 @@ type RequestHeader = core.RequestHeader
 
 // API keys the broker serves.
 const (
-	KeyProduce     int16 = 0
-	KeyFetch       int16 = 1
-	KeyListOffsets int16 = 2
-	KeyMetadata    int16 = 3
-	KeyApiVersions int16 = 18 //nolint:revive // Kafka spelling (ApiVersions); renaming breaks sim/ callers
+	KeyProduce         int16 = 0
+	KeyFetch           int16 = 1
+	KeyListOffsets     int16 = 2
+	KeyMetadata        int16 = 3
+	KeyOffsetCommit    int16 = 8
+	KeyOffsetFetch     int16 = 9
+	KeyFindCoordinator int16 = 10
+	KeyJoinGroup       int16 = 11
+	KeyHeartbeat       int16 = 12
+	KeyLeaveGroup      int16 = 13
+	KeySyncGroup       int16 = 14
+	KeyDescribeGroups  int16 = 15
+	KeyListGroups      int16 = 16
+	KeyCreateTopics    int16 = 19
+	KeyDescribeConfigs int16 = 32
+	KeyApiVersions     int16 = 18 //nolint:revive // Kafka spelling (ApiVersions); renaming breaks sim/ callers
 )
 
 // ErrCodeUnsupportedVersion is Kafka's UNSUPPORTED_VERSION error code.
@@ -30,12 +41,25 @@ var supported = []APIVersionRange{ //nolint:dupl // supported_test.go pins this 
 	{Key: KeyFetch, Min: 4, Max: 12},
 	{Key: KeyListOffsets, Min: 1, Max: 7},
 	{Key: KeyMetadata, Min: 1, Max: 12},
+	{Key: KeyCreateTopics, Min: 0, Max: 7},
+	{Key: KeyOffsetCommit, Min: 0, Max: 8},
+	{Key: KeyOffsetFetch, Min: 0, Max: 8},
+	{Key: KeyFindCoordinator, Min: 0, Max: 4},
+	{Key: KeyJoinGroup, Min: 0, Max: 7},
+	{Key: KeyHeartbeat, Min: 0, Max: 4},
+	{Key: KeyLeaveGroup, Min: 0, Max: 5},
+	{Key: KeySyncGroup, Min: 0, Max: 5},
+	{Key: KeyDescribeGroups, Min: 0, Max: 5},
+	{Key: KeyListGroups, Min: 0, Max: 4},
+	{Key: KeyDescribeConfigs, Min: 0, Max: 4},
 	{Key: KeyApiVersions, Min: 0, Max: 3},
 }
 
 // Supported returns the advertised APIs in key order. Produce >= 3 so batches
 // are RecordBatch v2. Produce and Fetch stay below v13, which switches to
-// topic IDs. The result aliases the package registry, so callers must not mutate it.
+// topic IDs. The group APIs are the classic protocol only (decision Q9): no
+// ConsumerGroupHeartbeat. The result aliases the package registry, so callers
+// must not mutate it.
 func Supported() []APIVersionRange {
 	return supported
 }

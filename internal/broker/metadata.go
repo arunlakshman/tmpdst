@@ -1,14 +1,15 @@
 package broker
 
 import (
+	"slices"
+
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"manifester/internal/core"
 )
 
-// metadata answers Metadata (decision 29): this broker is the only broker and
-// the leader of every partition. Topics come from the control plane and are
-// never auto-created.
+// metadata answers Metadata (decision 29): this broker is the leader of every
+// partition. Topics come from the control plane and are never auto-created.
 func (b *Broker) metadata(s *slot, r *kmsg.MetadataRequest) []core.Action {
 	var names []string
 	for _, t := range r.Topics {
@@ -34,7 +35,7 @@ func (b *Broker) metaResp(o *operation, infos []core.TopicInfo, code kafkaErrorC
 	resp := kmsg.NewPtrMetadataResponse()
 	cluster := "manifester"
 	resp.ClusterID, resp.ControllerID = &cluster, b.cfg.BrokerID
-	resp.Brokers = []kmsg.MetadataResponseBroker{{NodeID: b.cfg.BrokerID, Host: b.cfg.Host, Port: b.cfg.Port}}
+	resp.Brokers = b.metaBrokers()
 	if r.Topics == nil { // all topics
 		for _, in := range infos {
 			resp.Topics = append(resp.Topics, b.metaTopic(in.Name, infos, code))
@@ -50,6 +51,41 @@ func (b *Broker) metaResp(o *operation, infos []core.TopicInfo, code kafkaErrorC
 		resp.Topics = append(resp.Topics, b.metaTopic(*rt.Topic, infos, code))
 	}
 	o.s.resp = resp
+}
+
+// metaBrokers lists the live brokers, sorted by node id (Q2). This broker is
+// always in the list, with its own configured address, even when the live set
+// is empty or does not have it yet.
+func (b *Broker) metaBrokers() []kmsg.MetadataResponseBroker {
+	all := b.liveList()
+	out := make([]kmsg.MetadataResponseBroker, 0, len(all))
+	for _, p := range all {
+		out = append(out, kmsg.MetadataResponseBroker{NodeID: p.NodeID, Host: p.Host, Port: p.Port})
+	}
+	return out
+}
+
+// liveList is the live broker set this broker answers with: itself plus the
+// brokers of the last LiveBrokers, sorted by node id. FindCoordinator hashes over
+// it too (coordinator.go), so every answer uses one list.
+func (b *Broker) liveList() []core.BrokerAddr {
+	self := core.BrokerAddr{NodeID: b.cfg.BrokerID, Host: b.cfg.Host, Port: b.cfg.Port}
+	all := []core.BrokerAddr{self}
+	for _, p := range b.live {
+		if p.NodeID != self.NodeID {
+			all = append(all, p)
+		}
+	}
+	slices.SortFunc(all, func(x, y core.BrokerAddr) int {
+		switch {
+		case x.NodeID < y.NodeID:
+			return -1
+		case x.NodeID > y.NodeID:
+			return 1
+		}
+		return 0
+	})
+	return all
 }
 
 func (b *Broker) metaTopic(name string, infos []core.TopicInfo, code kafkaErrorCode) kmsg.MetadataResponseTopic {

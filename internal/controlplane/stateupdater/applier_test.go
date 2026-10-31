@@ -221,7 +221,7 @@ func TestInvalidAndUnknown(t *testing.T) {
 func TestStoreAdapter(t *testing.T) {
 	ctx := t.Context()
 	s := &stateupdater.Store{A: stateupdater.New(stateupdater.NewMemoryKeyValueStore())}
-	if c, err := s.CreateTopic(ctx, "t", 3); c != core.OK || err != nil {
+	if c, err := s.CreateTopic(ctx, core.CreateTopic{Name: "t", Partitions: 3}); c != core.OK || err != nil {
 		t.Fatal(c, err)
 	}
 	resp, c, err := s.CommitSegment(ctx, commit("k", pb("t", 2, 4)))
@@ -313,6 +313,78 @@ func TestSnapshotCRCFindsOneFlippedBit(t *testing.T) {
 		}
 		if _, err := stateupdater.New(stateupdater.NewMemoryKeyValueStore()).Restore(bytes.NewReader(bad)); err == nil {
 			t.Fatalf("Restore accepted a flipped bit at byte %d", i)
+		}
+	}
+}
+
+// TestCreateTopicExclusive runs the create steps in log order on both stores.
+// The exclusive create checks and writes in one step, so a second exclusive
+// create of a name that exists is ErrTopicExists and changes nothing.
+func TestCreateTopicExclusive(t *testing.T) {
+	steps := []struct {
+		name  string
+		op    core.CreateTopic
+		code  core.ErrCode
+		parts int32 // partitions of the topic after the step
+	}{
+		{"exclusive create of a new topic", core.CreateTopic{Name: "t", Partitions: 2, FailIfExists: true}, core.OK, 2},
+		{"exclusive create again", core.CreateTopic{Name: "t", Partitions: 5, FailIfExists: true}, core.ErrTopicExists, 2},
+		{"plain create again is still at least", core.CreateTopic{Name: "t", Partitions: 4}, core.OK, 4},
+		{"plain create never shrinks", core.CreateTopic{Name: "t", Partitions: 1}, core.OK, 4},
+		{"exclusive create after a plain one", core.CreateTopic{Name: "t", Partitions: 1, FailIfExists: true}, core.ErrTopicExists, 4},
+		{"exclusive create of another new topic", core.CreateTopic{Name: "u", Partitions: 1, FailIfExists: true}, core.OK, 1},
+		{"exclusive create, empty name", core.CreateTopic{Name: "", Partitions: 1, FailIfExists: true}, core.ErrInvalid, 0},
+		{"exclusive create, zero partitions", core.CreateTopic{Name: "z", Partitions: 0, FailIfExists: true}, core.ErrInvalid, 0},
+	}
+	for name, mk := range backends {
+		t.Run(name, func(t *testing.T) {
+			a := stateupdater.New(mk(t))
+			t.Cleanup(func() { _ = a.Close() })
+			for i, s := range steps {
+				before := a.StateHash()
+				d := a.Exec(core.ControlPlaneCall{Req: core.RequestID(i), Op: s.op}).(core.ControlPlaneDone)
+				if d.Err != s.code {
+					t.Fatalf("%s: code %v, want %v", s.name, d.Err, s.code)
+				}
+				if s.code != core.OK && a.StateHash() != before {
+					t.Fatalf("%s: the state changed on a failed create", s.name)
+				}
+				if s.code == core.OK && d.Outcome != core.Applied {
+					t.Fatalf("%s: outcome %v, want Applied", s.name, d.Outcome)
+				}
+				if s.parts == 0 {
+					continue
+				}
+				got, err := a.Describe(core.DescribeTopics{Topics: []string{s.op.Name}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if topics := got.Resp.(core.DescribeTopicsResp).Topics; len(topics) != 1 || topics[0].Partitions != s.parts {
+					t.Fatalf("%s: topics %+v, want %d partitions", s.name, topics, s.parts)
+				}
+			}
+		})
+	}
+}
+
+// TestCreateEntryReplay checks that a log entry for an exclusive create gives
+// the same answer on every replay: the answer depends only on the state
+// before the entry.
+func TestCreateEntryReplay(t *testing.T) {
+	entries := []stateupdater.Entry{
+		stateupdater.CreateEntry(core.CreateTopic{Name: "t", Partitions: 2, FailIfExists: true}),
+		stateupdater.CreateEntry(core.CreateTopic{Name: "t", Partitions: 2, FailIfExists: true}),
+		stateupdater.CreateEntry(core.CreateTopic{Name: "t", Partitions: 2}),
+	}
+	want := []core.ErrCode{core.OK, core.ErrTopicExists, core.OK}
+	for run := range 2 {
+		a := stateupdater.NewMem()
+		t.Cleanup(func() { _ = a.Close() })
+		for i, e := range entries {
+			d, err := a.ApplyBytes(int64(i), stateupdater.Encode(e))
+			if err != nil || d.Err != want[i] {
+				t.Fatalf("run %d entry %d: %v %v, want %v", run, i, d.Err, err, want[i])
+			}
 		}
 	}
 }

@@ -2,6 +2,7 @@ package broker
 
 import (
 	"encoding/binary"
+	"fmt"
 	"reflect"
 	"regexp"
 	"testing"
@@ -79,6 +80,57 @@ func TestMetadata(t *testing.T) {
 	}
 }
 
+// brokerLines is one "id host:port" line per broker, for comparing lists.
+func brokerLines(bs []kmsg.MetadataResponseBroker) []string {
+	var out []string
+	for _, b := range bs {
+		out = append(out, fmt.Sprintf("%d %s:%d", b.NodeID, b.Host, b.Port))
+	}
+	return out
+}
+
+func TestMetadataBrokers(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Host, cfg.Port, cfg.BrokerID = "h1", 1234, 5
+	h := startedHarness(t, cfg)
+	c := h.open(1)
+	ask := func() []string {
+		return brokerLines(h.call(c, verMetadata, kmsg.NewPtrMetadataRequest()).(*kmsg.MetadataResponse).Brokers)
+	}
+	self := []string{"5 h1:1234"}
+
+	// No live set yet: self only, as before the lease work.
+	if got := ask(); !reflect.DeepEqual(got, self) {
+		t.Fatalf("no live set: %v", got)
+	}
+
+	// Three live brokers, given out of order. Self keeps its own address even
+	// when the live set has an old address for node 5.
+	h.do(core.LiveBrokers{Brokers: []core.BrokerAddr{
+		{NodeID: 9, Host: "h9", Port: 9092},
+		{NodeID: 5, Host: "old", Port: 1},
+		{NodeID: 2, Host: "h2", Port: 9092},
+	}})
+	want := []string{"2 h2:9092", "5 h1:1234", "9 h9:9092"}
+	if got := ask(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("three live brokers: %v", got)
+	}
+
+	// Only self in the live set.
+	h.do(core.LiveBrokers{Brokers: []core.BrokerAddr{{NodeID: 5, Host: "h1", Port: 1234}}})
+	if got := ask(); !reflect.DeepEqual(got, self) {
+		t.Fatalf("live set of self: %v", got)
+	}
+
+	// An empty live set (stale or the control plane is down): self only.
+	h.do(core.LiveBrokers{Brokers: []core.BrokerAddr{{NodeID: 2, Host: "h2", Port: 9092}}})
+	h.do(core.LiveBrokers{})
+	if got := ask(); !reflect.DeepEqual(got, self) {
+		t.Fatalf("empty live set: %v", got)
+	}
+	h.noViolations()
+}
+
 func TestProduceFetchRoundTrip(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
@@ -116,7 +168,10 @@ func TestProduceFetchRoundTrip(t *testing.T) {
 	if bs, _ := kafkawire.SplitBatches(p.RecordBatches); len(bs) != 1 {
 		t.Fatalf("limited fetch %d batches", len(bs))
 	}
-	if p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 5, 1<<20))); len(p.RecordBatches) != 0 || p.ErrorCode != 0 || p.HighWatermark != 5 {
+	// MaxWait 0: an empty fetch answers at once (the long poll is tested in fetch_test.go).
+	atEnd := fetchReq(core.NewTopicPartition("t", 0), 5, 1<<20)
+	atEnd.MaxWaitMillis = 0
+	if p = fetched(h.call(c, verFetch, atEnd)); len(p.RecordBatches) != 0 || p.ErrorCode != 0 || p.HighWatermark != 5 {
 		t.Fatalf("at HWM: %+v", p)
 	}
 	if p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 6, 1<<20))); kafkaErrorCode(p.ErrorCode) != errOffsetOutOfRange {
@@ -209,7 +264,9 @@ func TestPipelinedResponsesInOrder(t *testing.T) {
 	var chunk []byte
 	chunk = append(chunk, h.frame(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))...)
 	chunk = append(chunk, h.frame(c, 3, kmsg.NewPtrApiVersionsRequest())...)
-	chunk = append(chunk, h.frame(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20))...)
+	pipelined := fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)
+	pipelined.MaxWaitMillis = 0 // answer at once, so the three responses come out in one flush
+	chunk = append(chunk, h.frame(c, verFetch, pipelined)...)
 	h.do(core.BytesReceived{Conn: 1, Data: chunk})
 	if len(c.out) != 0 {
 		t.Fatal("later requests overtook the pending produce")

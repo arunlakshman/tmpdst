@@ -66,6 +66,7 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		"ControlPlaneDone": core.ControlPlaneDone{}, "ControlPlaneDeliver": core.ControlPlaneDeliver{},
 		"LogAppendDone": core.LogAppendDone{}, "LogReadDone": core.LogReadDone{},
 		"LogGetEndDone": core.LogGetEndDone{}, "LogDeleteOldDone": core.LogDeleteOldDone{},
+		"LiveBrokers": core.LiveBrokers{},
 	}
 	actions := map[string]core.Action{
 		"SetTimer": core.SetTimer{}, "CancelTimer": core.CancelTimer{}, "Send": core.Send{},
@@ -78,11 +79,21 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 	}
 	ops := map[string]core.ControlPlaneOperation{
 		"CommitSegment": core.CommitSegment{}, "FindSegments": core.FindSegments{},
-		"DescribeTopics": core.DescribeTopics{},
+		"DescribeTopics": core.DescribeTopics{}, "CreateTopic": core.CreateTopic{},
+		"GroupInstall": core.GroupInstall{}, "GroupAssign": core.GroupAssign{},
+		"GroupRemove": core.GroupRemove{}, "OffsetCommit": core.OffsetCommit{},
+		"OffsetFetch": core.OffsetFetch{}, "DescribeGroup": core.DescribeGroup{},
+		"ListGroups": core.ListGroups{}, "GroupJoin": core.GroupJoin{}, "GroupSync": core.GroupSync{},
+		"GroupHeartbeat": core.GroupHeartbeat{}, "GroupLeave": core.GroupLeave{},
+		"DescribeGroups": core.DescribeGroups{},
 	}
 	resps := map[string]core.ControlPlaneResponse{
 		"CommitSegmentResp": core.CommitSegmentResp{},
 		"FindSegmentsResp":  core.FindSegmentsResp{}, "DescribeTopicsResp": core.DescribeTopicsResp{},
+		"OffsetCommitResp": core.OffsetCommitResp{}, "OffsetFetchResp": core.OffsetFetchResp{},
+		"DescribeGroupResp": core.DescribeGroupResp{}, "ListGroupsResp": core.ListGroupsResp{},
+		"GroupJoinResp": core.GroupJoinResp{}, "GroupSyncResp": core.GroupSyncResp{},
+		"GroupLeaveResp": core.GroupLeaveResp{}, "DescribeGroupsResp": core.DescribeGroupsResp{},
 	}
 	fields := map[string]core.FieldValue{
 		"I64": core.I64(0), "U64": core.U64(0), "Str": core.Str(""), "Bool": core.Bool(false), "Bytes": core.Bytes(nil),

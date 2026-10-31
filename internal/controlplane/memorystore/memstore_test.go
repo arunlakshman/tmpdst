@@ -18,7 +18,7 @@ func batch(tp core.TopicPartition, n int64) core.PendingBatch {
 func TestCommitLookupEnd(t *testing.T) {
 	ctx := t.Context()
 	s := New()
-	if code, err := s.CreateTopic(ctx, "t", 2); code != core.OK || err != nil {
+	if code, err := s.CreateTopic(ctx, core.CreateTopic{Name: "t", Partitions: 2}); code != core.OK || err != nil {
 		t.Fatal(code, err)
 	}
 	r, code, err := s.CommitSegment(ctx, core.CommitSegment{SegmentKey: "k1", Batches: []core.PendingBatch{batch(tpA, 3), batch(tpA, 2)}})

@@ -89,6 +89,10 @@ type Config struct {
 
 	DefaultFetchBytes int32 // partition limit when a Fetch asks for none (<= 0)
 
+	// FetchPollInterval is how often a Fetch part that found no data asks the
+	// control plane again, until the Fetch has MinBytes or MaxWait ends (decision 29, Q8).
+	FetchPollInterval core.Duration
+
 	// InjectedBug is test-only; see InjectedBug.
 	InjectedBug InjectedBug
 }
@@ -110,6 +114,7 @@ func DefaultConfig() Config {
 		MaxBufferedBytes:     64 << 20,
 		ResumeBufferedBytes:  32 << 20,
 		DefaultFetchBytes:    1 << 20,
+		FetchPollInterval:    200 * core.Millisecond,
 	}
 }
 
@@ -160,6 +165,9 @@ func (c Config) withDefaults() Config {
 	if c.DefaultFetchBytes <= 0 {
 		c.DefaultFetchBytes = d.DefaultFetchBytes
 	}
+	if c.FetchPollInterval <= 0 {
+		c.FetchPollInterval = d.FetchPollInterval
+	}
 	return c
 }
 
@@ -174,7 +182,16 @@ const (
 	errLeaderNotAvailable   kafkaErrorCode = 5
 	errNotLeader            kafkaErrorCode = 6
 	errRequestTimedOut      kafkaErrorCode = 7
+	errCoordNotAvailable    kafkaErrorCode = 15
+	errIllegalGeneration    kafkaErrorCode = 22
+	errInconsistentProtocol kafkaErrorCode = 23
+	errInvalidGroupID       kafkaErrorCode = 24
+	errUnknownMemberID      kafkaErrorCode = 25
+	errRebalanceInProgress  kafkaErrorCode = 27
+	errInvalidTopic         kafkaErrorCode = 17
 	errInvalidRequiredAcks  kafkaErrorCode = 21
+	errTopicExists          kafkaErrorCode = 36
+	errInvalidPartitions    kafkaErrorCode = 37
 	errInvalidRequest       kafkaErrorCode = 42
 	errUnsupportedForFormat kafkaErrorCode = 43
 	errKafkaStorage         kafkaErrorCode = 56

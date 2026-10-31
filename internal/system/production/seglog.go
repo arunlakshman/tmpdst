@@ -96,6 +96,9 @@ func (s *SegmentLog) Observe(f core.Fact) {
 			"put_ms", ms(fi(f, "put_ns")), "wait_ms", ms(fi(f, "wait_ns")), "commit_ms", ms(fi(f, "commit_ns")),
 			"total_ms", ms(fi(f, "total_ns")), "put_attempts", si.putAttempts,
 			"in_flight", fi(f, "inflight"), "buffered_bytes", fi(f, "buffered"))
+	case "create_topics_configs_ignored":
+		s.log.Warn("CreateTopics configs ignored: manifester keeps no topic configs", "event", "create_topics_configs_ignored",
+			"topics", fi(f, "topics"))
 	case "segment_failed":
 		key := fs(f, "segment")
 		si := s.take(key)

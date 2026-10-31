@@ -11,10 +11,13 @@ import (
 type operationKind uint8
 
 const (
-	opRefresh  operationKind = iota // DescribeTopics to resolve a topic-cache miss, then resume the request
-	opMetadata                      // DescribeTopics answering Metadata
-	opList                          // FindSegments for one ListOffsets partition
-	opFetch                         // FindSegments, then ranged GETs, for one Fetch partition
+	opRefresh         operationKind = iota // DescribeTopics to resolve a topic-cache miss, then resume the request
+	opMetadata                             // DescribeTopics answering Metadata
+	opList                                 // FindSegments for one ListOffsets partition
+	opFetch                                // FindSegments, then ranged GETs, for one Fetch partition
+	opCreate                               // CreateTopic (exclusive), or DescribeTopics for validateOnly, for one CreateTopics topic
+	opDescribeConfigs                      // DescribeTopics, answering DescribeConfigs for topics
+	opGroup                                // one group call at the control plane (groups.go)
 )
 
 type operationState uint8
@@ -23,6 +26,7 @@ const (
 	opControlPlane operationState = iota // a ControlPlaneCall is in flight
 	opGet
 	opBackoff
+	opWait // a Fetch part parked until its next poll (fetch.go)
 )
 
 // operation is one control-plane / object-store interaction serving a request part.
@@ -45,11 +49,23 @@ type operation struct {
 	maxBytes int32
 	lpart    *kmsg.ListOffsetsResponseTopicPartition
 	fpart    *kmsg.FetchResponseTopicPartition
+	ctopic   *kmsg.CreateTopicsResponseTopic
+	dresp    *kmsg.DescribeConfigsResponse
+
+	create       core.CreateTopic // opCreate: the topic to make
+	validateOnly bool             // opCreate: check, do not create
+	// maybeApplied: opCreate: an earlier try may have taken effect.
+	maybeApplied bool
 
 	ranges  []core.BatchRange
 	next    int
 	out     []byte
 	corrupt bool // the last failure was a corrupt GET
+	held    bool // Fetch part: has its data, waits for the Fetch to fill up (fetch.go)
+
+	gop      core.ControlPlaneOperation  // opGroup: the group call to make
+	gtimeout core.Duration               // opGroup: the call's deadline (0: the default)
+	gfill    func(core.ControlPlaneDone) // opGroup: writes the answer into the response
 }
 
 func (b *Broker) findOp(r core.RequestID) *operation {
@@ -97,14 +113,18 @@ func (b *Broker) issue(o *operation) []core.Action {
 	}
 	var cop core.ControlPlaneOperation
 	switch o.kind {
-	case opRefresh, opMetadata:
+	case opRefresh, opMetadata, opDescribeConfigs:
 		cop = core.DescribeTopics{Topics: o.names}
 	case opList: // only the end offset is wanted: look past the end
 		cop = core.FindSegments{TP: o.tp, From: core.Offset(1<<63 - 1), MaxBytes: 1}
 	case opFetch:
 		cop = core.FindSegments{TP: o.tp, From: o.from, MaxBytes: o.maxBytes}
+	case opCreate:
+		cop = o.createCP()
+	case opGroup:
+		cop = o.gop
 	}
-	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: cop}}
+	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: cop, Timeout: o.gtimeout}}
 }
 
 // retryOp backs off and repeats the call, or gives up after MaxAttempts or
@@ -136,11 +156,17 @@ func (b *Broker) exhaustCode(o *operation) kafkaErrorCode {
 }
 
 func (b *Broker) opTimer(o *operation, gen core.TimerVersion) []core.Action {
-	if o.state != opBackoff || o.gen != gen {
+	if o.gen != gen {
 		return nil
 	}
-	o.state = o.retry
-	return b.issue(o)
+	switch o.state {
+	case opBackoff:
+		o.state = o.retry
+		return b.issue(o)
+	case opWait:
+		return b.pollOp(o)
+	}
+	return nil
 }
 
 // endOp retires o without touching its response.
@@ -161,11 +187,24 @@ func (b *Broker) failOp(o *operation, code kafkaErrorCode) []core.Action {
 		o.lpart.ErrorCode = int16(code)
 	case opFetch:
 		o.fpart.ErrorCode = int16(code)
+	case opCreate:
+		o.ctopic.ErrorCode = int16(code)
+	case opDescribeConfigs:
+		o.failDescribeConfigs(code)
 	}
 	return b.endOp(o)
 }
 
 func (b *Broker) onOpCP(o *operation, e core.ControlPlaneDone) []core.Action {
+	if o.kind == opGroup {
+		return b.onGroupCP(o, e)
+	}
+	if o.kind == opCreate {
+		return b.onCreateCP(o, e)
+	}
+	if r, ok := e.Resp.(core.DescribeTopicsResp); ok && o.kind == opDescribeConfigs && e.Err == core.OK {
+		return b.onDescribeConfigsCP(o, r.Topics)
+	}
 	if e.Err == core.ErrInvalid {
 		return b.failOp(o, errUnknownServer)
 	}
@@ -226,6 +265,13 @@ func (b *Broker) dispatchAfterRefresh(s *slot, req core.Request) []core.Action {
 		return b.fetch(s, r)
 	case *kmsg.ListOffsetsRequest:
 		return b.listOffsets(s, r)
+	case *kmsg.CreateTopicsRequest:
+		return b.createTopics(s, r)
+	case *kmsg.DescribeConfigsRequest:
+		return b.describeConfigs(s, r)
+	}
+	if acts, ok := b.dispatchGroup(s, req); ok {
+		return acts
 	}
 	s.silent, s.conn.closing = true, true
 	return nil

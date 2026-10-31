@@ -7,9 +7,13 @@ import (
 	"manifester/internal/wire/kafkawire"
 )
 
+// maxFetchWait caps MaxWait, so one Fetch cannot hold a connection for long.
+const maxFetchWait = 30 * core.Second
+
 // fetch serves each partition independently: FindSegments, then one ranged GET per
 // committed batch, verified and patched to its committed offset (decision 30).
-// It answers at once, ignoring MinBytes and MaxWait (decision 29).
+// A part that finds no data is parked and polled again (long poll, decision 29
+// and Q8): the Fetch answers once it has MinBytes, or when MaxWait ends.
 func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 	resp := kmsg.NewPtrFetchResponse()
 	s.resp = resp
@@ -18,6 +22,8 @@ func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 		return nil
 	}
 	s.fetchMax = r.MaxBytes
+	s.fetchMin = r.MinBytes
+	s.fetchUntil = b.now + core.NodeTime(fetchWait(r.MaxWaitMillis))
 	fillFetchSkeleton(resp, r)
 	var acts []core.Action
 	for i, t := range r.Topics {
@@ -72,10 +78,90 @@ func (b *Broker) onLookup(o *operation, r core.FindSegmentsResp) []core.Action {
 		total += rg.Loc.Len
 	}
 	if o.from == r.End || len(o.ranges) == 0 {
-		return b.endOp(o)
+		return b.waitOrEnd(o)
 	}
 	o.state, o.attempts, o.next = opGet, 0, 0
 	return b.issue(o)
+}
+
+// fetchWait is how long a Fetch may wait: MaxWait, capped. Zero means answer at once.
+func fetchWait(maxWaitMillis int32) core.Duration {
+	if maxWaitMillis <= 0 {
+		return 0
+	}
+	return min(core.Duration(maxWaitMillis)*core.Millisecond, maxFetchWait)
+}
+
+// fetchOver reports whether a Fetch must answer now: it has MinBytes, its
+// MaxWait is spent, the client is gone, or the broker is stopping.
+func (b *Broker) fetchOver(s *slot) bool {
+	return s.fetchMin <= 0 || s.fetchGot >= int(s.fetchMin) || b.now >= s.fetchUntil ||
+		s.conn.closed || b.stopping
+}
+
+// waitOrEnd parks a part that found no data, or ends it if the Fetch is over.
+func (b *Broker) waitOrEnd(o *operation) []core.Action {
+	if b.fetchOver(o.s) {
+		return b.endOp(o)
+	}
+	b.env.Reachable("broker: fetch parked for a poll")
+	return b.park(o)
+}
+
+// fetchPartData runs when a part has its batches. The bytes count toward
+// MinBytes. If that meets MinBytes, the Fetch answers now: parked parts end
+// too. If not, this part waits with its data (held), and the Fetch answers
+// once MinBytes is reached or MaxWait ends.
+func (b *Broker) fetchPartData(o *operation) []core.Action {
+	s := o.s
+	s.fetchGot += len(o.fpart.RecordBatches)
+	if s.fetchGot >= int(s.fetchMin) {
+		b.endParked(func(p *operation) bool { return p.s == s })
+		return b.endOp(o)
+	}
+	if b.fetchOver(s) {
+		return b.endOp(o)
+	}
+	o.held = true
+	return b.park(o)
+}
+
+// park waits until the next poll of o: FetchPollInterval, or the end of
+// MaxWait if that comes first.
+func (b *Broker) park(o *operation) []core.Action {
+	o.state, o.attempts = opWait, 0
+	after := min(b.cfg.FetchPollInterval, core.Duration(o.s.fetchUntil-b.now))
+	b.timerGen++
+	o.gen = b.timerGen
+	return []core.Action{core.SetTimer{ID: core.TimerID(o.id), Gen: o.gen, After: after}}
+}
+
+// pollOp runs when a parked part's timer fires. A part that holds data only
+// waits for the clock. A part with no data runs its next Lookup, so only the
+// partitions still short are polled.
+func (b *Broker) pollOp(o *operation) []core.Action {
+	if b.fetchOver(o.s) {
+		return b.endOp(o)
+	}
+	if o.held {
+		return b.park(o)
+	}
+	o.state = opControlPlane
+	return b.issue(o)
+}
+
+// endParked ends each parked part that match, with no further polls. A held
+// part ends with the data it holds. Its bytes were counted when it arrived.
+func (b *Broker) endParked(match func(*operation) bool) {
+	var parked []*operation
+	for _, o := range b.ops {
+		if o.state == opWait && match(o) {
+			parked = append(parked, o)
+		}
+	}
+	for _, o := range parked {
+		b.endOp(o)
+	}
 }
 
 // onFetchGet verifies one batch read from the object store. A corrupt GET is
@@ -116,7 +202,7 @@ func (b *Broker) acceptFetch(o *operation, data []byte, rg core.BatchRange) []co
 		return b.issue(o)
 	}
 	o.fpart.RecordBatches = o.out
-	return b.endOp(o)
+	return b.fetchPartData(o)
 }
 
 // isIntact reports whether data is the one valid batch that rg committed.

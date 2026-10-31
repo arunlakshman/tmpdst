@@ -134,6 +134,12 @@ func (h *stateHasher) ops(ops []*operation) {
 		h.u64(uint64(uint32(o.tp.Partition)))
 		h.u64(uint64(o.from))
 		h.u64(uint64(uint32(o.maxBytes)))
+		if o.kind == opCreate { // only create ops carry these, so other hashes stay as they were
+			h.str(o.create.Name)
+			h.u64(uint64(uint32(o.create.Partitions)))
+			h.bool(o.validateOnly)
+			h.bool(o.maybeApplied)
+		}
 		h.u64(uint64(len(o.ranges)))
 		for _, r := range o.ranges {
 			h.u64(uint64(r.Base))

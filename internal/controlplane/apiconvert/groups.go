@@ -131,7 +131,7 @@ func OffsetCommitFromCore(op core.OffsetCommit) *cpv1.GroupOffsetCommitRequest {
 	out := &cpv1.GroupOffsetCommitRequest{Group: op.Group, MemberId: op.Member, Generation: op.Generation}
 	for _, o := range op.Offsets {
 		out.Offsets = append(out.Offsets, &cpv1.PartitionOffsetCommit{
-			Tp: topicPartitionFromCore(o.TP), Offset: o.Offset, LeaderEpoch: o.LeaderEpoch, Metadata: o.Metadata,
+			Tp: topicPartitionFromCore(o.TopicPartition), Offset: o.Offset, LeaderEpoch: o.LeaderEpoch, Metadata: o.Metadata,
 		})
 	}
 	return out
@@ -142,7 +142,7 @@ func OffsetCommitToCore(request *cpv1.GroupOffsetCommitRequest) core.OffsetCommi
 	out := core.OffsetCommit{Group: request.GetGroup(), Member: request.GetMemberId(), Generation: request.GetGeneration()}
 	for _, o := range request.GetOffsets() {
 		out.Offsets = append(out.Offsets, core.PartitionOffset{
-			TP: topicPartitionToCore(o.GetTp()), Offset: o.GetOffset(), LeaderEpoch: o.GetLeaderEpoch(), Metadata: o.GetMetadata(),
+			TopicPartition: topicPartitionToCore(o.GetTp()), Offset: o.GetOffset(), LeaderEpoch: o.GetLeaderEpoch(), Metadata: o.GetMetadata(),
 		})
 	}
 	return out
@@ -289,12 +289,12 @@ func topicPartitionToCore(topicPartition *cpv1.TopicPartition) core.TopicPartiti
 
 func partitionOffsetFromCore(o core.PartitionOffset) *cpv1.PartitionOffset {
 	return &cpv1.PartitionOffset{
-		Tp: topicPartitionFromCore(o.TP), Offset: o.Offset, LeaderEpoch: o.LeaderEpoch, Metadata: o.Metadata,
+		Tp: topicPartitionFromCore(o.TopicPartition), Offset: o.Offset, LeaderEpoch: o.LeaderEpoch, Metadata: o.Metadata,
 	}
 }
 
 func partitionOffsetToCore(o *cpv1.PartitionOffset) core.PartitionOffset {
 	return core.PartitionOffset{
-		TP: topicPartitionToCore(o.GetTp()), Offset: o.GetOffset(), LeaderEpoch: o.GetLeaderEpoch(), Metadata: o.GetMetadata(),
+		TopicPartition: topicPartitionToCore(o.GetTp()), Offset: o.GetOffset(), LeaderEpoch: o.GetLeaderEpoch(), Metadata: o.GetMetadata(),
 	}
 }

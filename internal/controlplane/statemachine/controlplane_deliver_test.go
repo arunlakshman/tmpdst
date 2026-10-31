@@ -64,7 +64,7 @@ func TestOnControlPlaneDeliverWritesAnswerBroker(t *testing.T) {
 	done := writeOp(t, m, 1, core.CommitSegment{
 		SegmentKey: "s1",
 		Batches: []core.PendingBatch{
-			{TP: core.NewTopicPartition("t", 0), Records: 2, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 2}},
+			{TopicPartition: core.NewTopicPartition("t", 0), Records: 2, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 2}},
 		},
 	})
 	if done.Err != core.OK {
@@ -100,7 +100,7 @@ func TestOnControlPlaneDeliverWritesAnswerBroker(t *testing.T) {
 	}
 	if done := writeOp(t, m, 6, core.OffsetCommit{
 		Group: "g", Member: "m1", Generation: 1,
-		Offsets: []core.PartitionOffset{{TP: core.NewTopicPartition("orders", 0), Offset: 7}},
+		Offsets: []core.PartitionOffset{{TopicPartition: core.NewTopicPartition("orders", 0), Offset: 7}},
 	}); done.Err != core.OK {
 		t.Fatalf("offset commit err = %v", done.Err)
 	}
@@ -123,7 +123,7 @@ func TestOnControlPlaneDeliverReadsAnswerBroker(t *testing.T) {
 		t.Fatalf("catch-up timer missing in %v", acts)
 	}
 
-	done, timer := readOp(t, m, timer, 10, core.FindSegments{TP: core.NewTopicPartition("t", 0), From: 0, MaxBytes: 100})
+	done, timer := readOp(t, m, timer, 10, core.FindSegments{TopicPartition: core.NewTopicPartition("t", 0), From: 0, MaxBytes: 100})
 	if _, ok := done.Resp.(core.FindSegmentsResp); !ok {
 		t.Fatalf("find resp = %#v", done.Resp)
 	}

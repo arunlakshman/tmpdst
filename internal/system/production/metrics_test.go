@@ -15,9 +15,9 @@ func fact(name string, kv ...any) core.Fact {
 		var v core.FieldValue
 		switch x := kv[i+1].(type) {
 		case string:
-			v = core.Str(x)
+			v = core.StringValue(x)
 		case int:
-			v = core.I64(x)
+			v = core.Int64Value(x)
 		}
 		f.Fields = append(f.Fields, core.Field{Key: kv[i].(string), Value: v})
 	}

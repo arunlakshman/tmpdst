@@ -79,7 +79,7 @@ const ProgressGraceTime = 6 * core.Second
 // PhaseStart reports when the kernel announced phase p, from its sim_phase fact.
 func PhaseStart(v simulator.View, p simulator.Phase) (simulator.Time, bool) {
 	for _, tf := range v.Timeline().Snapshot("sim_phase") {
-		if ph, ok := tf.Fact.Field("phase").(core.U64); ok && simulator.Phase(ph) == p {
+		if ph, ok := tf.Fact.Field("phase").(core.Uint64Value); ok && simulator.Phase(ph) == p {
 			return tf.At, true
 		}
 	}
@@ -103,7 +103,7 @@ func (f *faultCoverage) AtEnd(v simulator.View) {
 			if key == "" {
 				return true
 			}
-			if s, ok := tf.Fact.Field(key).(core.Str); ok && string(s) == val {
+			if s, ok := tf.Fact.Field(key).(core.StringValue); ok && string(s) == val {
 				return true
 			}
 		}

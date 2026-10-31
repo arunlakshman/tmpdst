@@ -120,23 +120,23 @@ func TestOffsetCommitChecks(t *testing.T) {
 	}
 	tp0 := core.NewTopicPartition("t", 0)
 	response, code := commit(a, 2,
-		core.PartitionOffset{TP: tp0, Offset: 5},
-		core.PartitionOffset{TP: core.NewTopicPartition("t", 9), Offset: 1},
-		core.PartitionOffset{TP: tp0, Offset: -1},
+		core.PartitionOffset{TopicPartition: tp0, Offset: 5},
+		core.PartitionOffset{TopicPartition: core.NewTopicPartition("t", 9), Offset: 1},
+		core.PartitionOffset{TopicPartition: tp0, Offset: -1},
 	)
 	if code != core.OK || !slices.Equal(response.Errs, []core.ErrCode{core.OK, core.ErrUnknownPartition, core.ErrInvalid}) {
 		t.Fatalf("commit: %v %v", code, response.Errs)
 	}
-	if _, code := commit(a, 1, core.PartitionOffset{TP: tp0, Offset: 6}); code != core.ErrIllegalGeneration {
+	if _, code := commit(a, 1, core.PartitionOffset{TopicPartition: tp0, Offset: 6}); code != core.ErrIllegalGeneration {
 		t.Fatalf("wrong generation: %v", code)
 	}
-	if _, code := commit("zz", 2, core.PartitionOffset{TP: tp0, Offset: 6}); code != core.ErrUnknownMember {
+	if _, code := commit("zz", 2, core.PartitionOffset{TopicPartition: tp0, Offset: 6}); code != core.ErrUnknownMember {
 		t.Fatalf("unknown member: %v", code)
 	}
-	if _, code := commit("", -1, core.PartitionOffset{TP: tp0, Offset: 6}); code != core.ErrIllegalGeneration {
+	if _, code := commit("", -1, core.PartitionOffset{TopicPartition: tp0, Offset: 6}); code != core.ErrIllegalGeneration {
 		t.Fatalf("manual commit with members: %v", code)
 	}
-	if _, code := h.c.OffsetCommit(ctx, core.OffsetCommit{Group: "fresh", Generation: -1, Offsets: []core.PartitionOffset{{TP: tp0, Offset: 3}}}); code != core.OK {
+	if _, code := h.c.OffsetCommit(ctx, core.OffsetCommit{Group: "fresh", Generation: -1, Offsets: []core.PartitionOffset{{TopicPartition: tp0, Offset: 3}}}); code != core.OK {
 		t.Fatalf("manual commit, no members: %v", code)
 	}
 	f, code := h.c.OffsetFetch(ctx, core.OffsetFetch{Group: "g", Partitions: []core.TopicPartition{tp0}})

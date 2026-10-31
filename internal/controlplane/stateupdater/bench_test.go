@@ -26,8 +26,8 @@ func benchSegment(rng *rand.Rand, n, parts int) core.CommitSegment {
 		for i := 1 + rng.Intn(2); i > 0; i-- {
 			ln := int64(8000 + rng.Intn(24000))
 			cs.Batches = append(cs.Batches, core.PendingBatch{
-				TP:      core.NewTopicPartition(fmt.Sprintf("topic-%d", p/10000), int32(p%10000)),
-				Records: int64(1 + rng.Intn(50)), Loc: core.SegmentRef{Key: cs.SegmentKey, Off: off, Len: ln}})
+				TopicPartition: core.NewTopicPartition(fmt.Sprintf("topic-%d", p/10000), int32(p%10000)),
+				Records:        int64(1 + rng.Intn(50)), Loc: core.SegmentRef{Key: cs.SegmentKey, Off: off, Len: ln}})
 			off += ln
 		}
 	}

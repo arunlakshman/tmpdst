@@ -48,9 +48,9 @@ func replayOps() []generator.ControlPlaneTestStep {
 	a, b := core.NewTopicPartition("w", 0), core.NewTopicPartition("w", 1)
 	batches := func(key string) []core.PendingBatch {
 		return []core.PendingBatch{
-			{TP: a, Records: 2, Loc: core.SegmentRef{Key: key, Off: 0, Len: 20}},
-			{TP: b, Records: 5, Loc: core.SegmentRef{Key: key, Off: 20, Len: 50}},
-			{TP: a, Records: 3, Loc: core.SegmentRef{Key: key, Off: 70, Len: 30}},
+			{TopicPartition: a, Records: 2, Loc: core.SegmentRef{Key: key, Off: 0, Len: 20}},
+			{TopicPartition: b, Records: 5, Loc: core.SegmentRef{Key: key, Off: 20, Len: 50}},
+			{TopicPartition: a, Records: 3, Loc: core.SegmentRef{Key: key, Off: 70, Len: 30}},
 		}
 	}
 	commit := func(key string, bs []core.PendingBatch) generator.ControlPlaneTestStep {
@@ -59,13 +59,13 @@ func replayOps() []generator.ControlPlaneTestStep {
 	return []generator.ControlPlaneTestStep{
 		commit("s1", batches("s1")),
 		commit("s2", batches("s2")),
-		commit("s1", batches("s1")),                // replay: the original ranges
-		commit("s1", batches("s2")),                // other request under s1: conflict
-		commit("s1", nil),                          // malformed under a committed key: conflict
-		commit("s3", []core.PendingBatch{{TP: a}}), // invalid: no records
-		commit("s3", batches("s3")),                // the failed key is reusable
-		commit("re", batches("s3")),                // the same batches, a fresh key: new offsets
-		call(core.FindSegments{TP: a}), call(core.FindSegments{TP: b, From: 6, MaxBytes: 25}),
+		commit("s1", batches("s1")),                            // replay: the original ranges
+		commit("s1", batches("s2")),                            // other request under s1: conflict
+		commit("s1", nil),                                      // malformed under a committed key: conflict
+		commit("s3", []core.PendingBatch{{TopicPartition: a}}), // invalid: no records
+		commit("s3", batches("s3")),                            // the failed key is reusable
+		commit("re", batches("s3")),                            // the same batches, a fresh key: new offsets
+		call(core.FindSegments{TopicPartition: a}), call(core.FindSegments{TopicPartition: b, From: 6, MaxBytes: 25}),
 		call(core.DescribeTopics{}),
 	}
 }
@@ -88,17 +88,17 @@ func manyBatchesOps() []generator.ControlPlaneTestStep {
 			if tp == b && i%4 != 0 {
 				continue
 			}
-			s1 = append(s1, core.PendingBatch{TP: tp, Records: int64(1 + i%3),
+			s1 = append(s1, core.PendingBatch{TopicPartition: tp, Records: int64(1 + i%3),
 				Loc: core.SegmentRef{Key: "big1", Off: int64(i) * 70, Len: int64(10 + i%5)}})
 		}
 	}
 	// Several batches of one partition around one of another.
 	s2 = []core.PendingBatch{
-		{TP: a, Records: 2, Loc: core.SegmentRef{Key: "big2", Off: 0, Len: 9}},
-		{TP: a, Records: 2, Loc: core.SegmentRef{Key: "big2", Off: 9, Len: 9}},
-		{TP: a, Records: 3, Loc: core.SegmentRef{Key: "big2", Off: 18, Len: 9}},
-		{TP: b, Records: 1, Loc: core.SegmentRef{Key: "big2", Off: 27, Len: 9}},
-		{TP: a, Records: 1, Loc: core.SegmentRef{Key: "big2", Off: 36, Len: 9}},
+		{TopicPartition: a, Records: 2, Loc: core.SegmentRef{Key: "big2", Off: 0, Len: 9}},
+		{TopicPartition: a, Records: 2, Loc: core.SegmentRef{Key: "big2", Off: 9, Len: 9}},
+		{TopicPartition: a, Records: 3, Loc: core.SegmentRef{Key: "big2", Off: 18, Len: 9}},
+		{TopicPartition: b, Records: 1, Loc: core.SegmentRef{Key: "big2", Off: 27, Len: 9}},
+		{TopicPartition: a, Records: 1, Loc: core.SegmentRef{Key: "big2", Off: 36, Len: 9}},
 	}
 	commit := func(key string, bs []core.PendingBatch) generator.ControlPlaneTestStep {
 		return call(core.CommitSegment{SegmentKey: key, Batches: bs})
@@ -109,7 +109,7 @@ func manyBatchesOps() []generator.ControlPlaneTestStep {
 	for _, tp := range []core.TopicPartition{a, b, core.NewTopicPartition("m", 2)} {
 		for from := int64(0); from <= 520; from += 7 {
 			for _, mb := range []int32{0, 1, 25, 300} {
-				ops = append(ops, call(core.FindSegments{TP: tp, From: core.Offset(from), MaxBytes: mb}))
+				ops = append(ops, call(core.FindSegments{TopicPartition: tp, From: core.Offset(from), MaxBytes: mb}))
 			}
 		}
 	}
@@ -128,7 +128,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	commit := core.CommitSegment{SegmentKey: "k", Batches: []core.PendingBatch{
-		{TP: core.NewTopicPartition("t", 1), Records: 4, Loc: core.SegmentRef{Key: "k", Off: 8, Len: 40}},
+		{TopicPartition: core.NewTopicPartition("t", 1), Records: 4, Loc: core.SegmentRef{Key: "k", Off: 8, Len: 40}},
 	}}
 	cr, err := c.Call(ctx, commit)
 	if err != nil {
@@ -137,7 +137,7 @@ func TestRoundTrip(t *testing.T) {
 	if got := cr.(core.CommitSegmentResp).Assigned; len(got) != 1 || got[0].Base != 0 || got[0].Count != 4 || got[0].Loc != commit.Batches[0].Loc {
 		t.Fatalf("commit: %+v", got)
 	}
-	l, err := c.Call(ctx, core.FindSegments{TP: commit.Batches[0].TP})
+	l, err := c.Call(ctx, core.FindSegments{TopicPartition: commit.Batches[0].TopicPartition})
 	if err != nil || l.(core.FindSegmentsResp).End != 4 || len(l.(core.FindSegmentsResp).Ranges) != 1 {
 		t.Fatalf("lookup: %+v %v", l, err)
 	}

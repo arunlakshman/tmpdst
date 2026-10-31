@@ -167,7 +167,7 @@ func controlPlaneInvariant(p *ControlPlanePair) error {
 // checkRuns looks up a whole partition and checks that its runs have no gap
 // and no overlap and that the end offset equals the committed record count.
 func (p *ControlPlanePair) checkRuns(who string, subject ControlPlaneSubject, tp core.TopicPartition) error {
-	result, err := subject.Do(generator.NewCall(core.ControlPlaneCall{Req: p.nextReq(), Op: core.FindSegments{TP: tp}}))
+	result, err := subject.Do(generator.NewCall(core.ControlPlaneCall{Req: p.nextReq(), Op: core.FindSegments{TopicPartition: tp}}))
 	if err != nil {
 		return fmt.Errorf("the %s could not look up %v: %w", who, tp, err)
 	}

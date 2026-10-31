@@ -56,7 +56,7 @@ func TestControlPlaneConcurrent(t *testing.T) {
 		wg.Go(func() {
 			_, err := c.Call(ctx, core.CommitSegment{
 				SegmentKey: string(rune('a' + i)),
-				Batches:    []core.PendingBatch{{TP: tp, Records: 2}},
+				Batches:    []core.PendingBatch{{TopicPartition: tp, Records: 2}},
 			})
 			if err != nil {
 				t.Error(err)
@@ -64,7 +64,7 @@ func TestControlPlaneConcurrent(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	resp, _ := c.Call(ctx, core.FindSegments{TP: tp})
+	resp, _ := c.Call(ctx, core.FindSegments{TopicPartition: tp})
 	if end := resp.(core.FindSegmentsResp).End; end != 16 {
 		t.Fatalf("end %d", end)
 	}
@@ -78,7 +78,7 @@ func TestControlPlaneConcurrent(t *testing.T) {
 		}
 		next += core.Offset(r.Count)
 	}
-	_, err := c.Call(ctx, core.CommitSegment{SegmentKey: "a", Batches: []core.PendingBatch{{TP: tp, Records: 1}}})
+	_, err := c.Call(ctx, core.CommitSegment{SegmentKey: "a", Batches: []core.PendingBatch{{TopicPartition: tp, Records: 1}}})
 	if code(err) != core.ErrConflict {
 		t.Fatalf("different request under a used key: %v", err)
 	}

@@ -303,7 +303,7 @@ func TestFactImmediatelyBeforeSend(t *testing.T) {
 			t.Fatalf("ack fact not followed by Send: %T", h.all[i+1])
 		}
 		f := e.Fact
-		if f.Field("topic") != core.Str("t") || f.Field("base_offset") != core.I64(0) || f.Field("count") != core.I64(2) {
+		if f.Field("topic") != core.StringValue("t") || f.Field("base_offset") != core.Int64Value(0) || f.Field("count") != core.Int64Value(2) {
 			t.Fatalf("fields %v", f.Fields)
 		}
 	}

@@ -226,12 +226,12 @@ func (w *world) buildItem(r *rand.Rand, c int, tp core.TopicPartition) *item {
 	if it.fate == fIdem {
 		bp.ProducerID, bp.ProducerEpoch, bp.BaseSequence = 7, 0, 0
 	}
-	it.pb = core.PendingBatch{TP: tp, Records: int64(n)}
+	it.pb = core.PendingBatch{TopicPartition: tp, Records: int64(n)}
 	var err error
 	if it.bytes, err = kafkawire.BuildBatch(bp, recs); err != nil {
 		panic(err)
 	}
-	it.po = kafka.ProduceOp{Client: c, Batch: p.nb, TP: tp, Vals: vals, Idem: it.fate == fIdem}
+	it.po = kafka.ProduceOp{Client: c, Batch: p.nb, TopicPartition: tp, Vals: vals, Idem: it.fate == fIdem}
 	return it
 }
 
@@ -266,17 +266,17 @@ func (w *world) commit(items []*item, replay bool) []core.BatchRange {
 	touched := map[core.TopicPartition]bool{}
 	for i, rg := range as {
 		if i < len(items) {
-			base := w.parts[rg.TP].Append(valBytes(items[i].po.Vals))
+			base := w.parts[rg.TopicPartition].Append(valBytes(items[i].po.Vals))
 			if base != rg.Base {
 				panic(fmt.Sprintf("Partition base %d != CP base %d", base, rg.Base))
 			}
-			touched[rg.TP] = true
+			touched[rg.TopicPartition] = true
 			continue
 		}
 		panic(fmt.Sprintf("spec CP assigned %d ranges for %d batches", len(as), len(items)))
 	}
 	for tp := range touched { // map order is irrelevant: independent entries
-		lk := w.cp.Exec(core.ControlPlaneCall{Op: core.FindSegments{TP: tp}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
+		lk := w.cp.Exec(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: tp}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
 		w.ranges[tp] = lk.Ranges
 		if lk.End != w.parts[tp].HighWatermark() {
 			panic("Partition end != CP end")
@@ -295,9 +295,9 @@ func valBytes(vs []string) [][]byte {
 
 func (w *world) ack(b *broker, rg core.BatchRange, it *item) {
 	w.emit(b.ref, core.Fact{Name: "produce_acked", Fields: []core.Field{
-		{Key: "topic", Value: core.Str(rg.TP.Topic)}, {Key: "partition", Value: core.I64(rg.TP.Partition)},
-		{Key: "base_offset", Value: core.I64(rg.Base)}, {Key: "count", Value: core.I64(rg.Count)},
-		{Key: "segment", Value: core.Str(rg.Loc.Key)}}})
+		{Key: "topic", Value: core.StringValue(rg.TopicPartition.Topic)}, {Key: "partition", Value: core.Int64Value(rg.TopicPartition.Partition)},
+		{Key: "base_offset", Value: core.Int64Value(rg.Base)}, {Key: "count", Value: core.Int64Value(rg.Count)},
+		{Key: "segment", Value: core.StringValue(rg.Loc.Key)}}})
 }
 
 func (w *world) invoke(it *item, c int) {
@@ -389,7 +389,7 @@ func (w *world) read(r *rand.Rand, c int, tis []int) {
 	for _, ti := range tis {
 		tp := w.tps[ti]
 		from := w.pos[[2]int{c, ti}]
-		ro.Parts = append(ro.Parts, kafka.ReadFrom{TP: tp, Off: from})
+		ro.Parts = append(ro.Parts, kafka.ReadFrom{TopicPartition: tp, Off: from})
 		recs, ok := w.parts[tp].Read(core.Offset(from), 1+r.IntN(4))
 		if !ok {
 			panic("spec Partition refused a read")

@@ -10,10 +10,10 @@ import "manifester/internal/core"
 // the same bytes. Idem marks a batch that claims a producer id (the broker
 // must reject it).
 type ProduceOp struct {
-	Client, Batch int
-	TP            core.TopicPartition
-	Vals          []string
-	Idem          bool
+	Client, Batch  int
+	TopicPartition core.TopicPartition
+	Vals           []string
+	Idem           bool
 }
 
 // ProduceRes is a produce op's result. Base is the acked base offset (-1
@@ -33,8 +33,8 @@ type ReadOp struct {
 
 // ReadFrom names one partition and the offset to fetch from.
 type ReadFrom struct {
-	TP  core.TopicPartition
-	Off int64
+	TopicPartition core.TopicPartition
+	Off            int64
 }
 
 // ReadRes is the Fetch answer, per asked partition in order. Records are the

@@ -132,7 +132,7 @@ func (r *groupRun) commit() core.ControlPlaneOperation {
 		op.Generation = cur.Generation
 	}
 	for range r.rng.IntN(4) {
-		o := core.PartitionOffset{TP: core.NewTopicPartition(r.pick(append(runTopics, "ghost")), int32(r.rng.IntN(4)-1))}
+		o := core.PartitionOffset{TopicPartition: core.NewTopicPartition(r.pick(append(runTopics, "ghost")), int32(r.rng.IntN(4)-1))}
 		o.Offset = int64(r.rng.IntN(10))
 		if r.chance(10) {
 			o.Offset = -1
@@ -142,7 +142,7 @@ func (r *groupRun) commit() core.ControlPlaneOperation {
 		op.Offsets = append(op.Offsets, o)
 	}
 	if r.chance(1) {
-		op.Offsets = append(op.Offsets, core.PartitionOffset{TP: core.NewTopicPartition("orders", 0), Offset: 1,
+		op.Offsets = append(op.Offsets, core.PartitionOffset{TopicPartition: core.NewTopicPartition("orders", 0), Offset: 1,
 			Metadata: strings.Repeat("m", 256<<10)})
 	}
 	return op

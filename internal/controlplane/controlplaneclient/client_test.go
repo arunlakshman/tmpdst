@@ -57,7 +57,7 @@ func TestClientAgainstMachine(t *testing.T) {
 	}
 	tp := core.NewTopicPartition("t", 0)
 	cs, err := c.Call(ctx, core.CommitSegment{SegmentKey: "s1", Batches: []core.PendingBatch{
-		{TP: tp, Records: 4, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 40}},
+		{TopicPartition: tp, Records: 4, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 40}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func TestClientAgainstMachine(t *testing.T) {
 	if as := cs.(core.CommitSegmentResp).Assigned; len(as) != 1 || as[0].Count != 4 {
 		t.Fatalf("assigned %+v", as)
 	}
-	lk, err := c.Call(ctx, core.FindSegments{TP: tp, From: 0, MaxBytes: 1000})
+	lk, err := c.Call(ctx, core.FindSegments{TopicPartition: tp, From: 0, MaxBytes: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestClientAgainstMachine(t *testing.T) {
 	}
 
 	_, err = c.Call(ctx, core.CommitSegment{SegmentKey: "s1", Batches: []core.PendingBatch{
-		{TP: tp, Records: 1, Loc: core.SegmentRef{Key: "s1", Len: 1}},
+		{TopicPartition: tp, Records: 1, Loc: core.SegmentRef{Key: "s1", Len: 1}},
 	}})
 	var be *Error
 	if !errors.As(err, &be) || be.Code != core.ErrConflict {
@@ -111,7 +111,7 @@ func TestCallDialError(t *testing.T) {
 	addr := ln.Addr().String()
 	_ = ln.Close()
 	_, err = New(addr, nil).Call(t.Context(), core.CommitSegment{
-		SegmentKey: "k", Batches: []core.PendingBatch{{TP: core.NewTopicPartition("t", 0), Records: 1}},
+		SegmentKey: "k", Batches: []core.PendingBatch{{TopicPartition: core.NewTopicPartition("t", 0), Records: 1}},
 	})
 	if err == nil {
 		t.Fatal("expected error")

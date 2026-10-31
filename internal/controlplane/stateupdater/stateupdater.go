@@ -159,7 +159,7 @@ func (a *StateUpdater) End(tp core.TopicPartition) core.Offset {
 }
 
 func validBatch(b core.PendingBatch) bool {
-	return b.Records > 0 && b.TP.Topic != "" && b.TP.Partition >= 0
+	return b.Records > 0 && b.TopicPartition.Topic != "" && b.TopicPartition.Partition >= 0
 }
 
 func validCommit(op core.CommitSegment) bool {
@@ -214,7 +214,7 @@ func replay(rec []byte, dig [checksumLength]byte, op core.CommitSegment) core.Co
 	}
 	rs := make([]core.BatchRange, len(op.Batches))
 	for i, b := range op.Batches {
-		rs[i] = core.BatchRange{TP: b.TP, Base: core.Offset(bases[i]), Count: b.Records, Loc: b.Loc}
+		rs[i] = core.BatchRange{TopicPartition: b.TopicPartition, Base: core.Offset(bases[i]), Count: b.Records, Loc: b.Loc}
 	}
 	return core.ControlPlaneDone{Resp: core.CommitSegmentResp{Assigned: rs}, Outcome: core.Applied}
 }
@@ -242,15 +242,15 @@ func newOffsetPlan() *offsetPlan {
 }
 
 func (p *offsetPlan) add(b core.PendingBatch, base int64) core.BatchRange {
-	if !p.seen[b.TP] {
-		p.order = append(p.order, b.TP)
-		p.seen[b.TP] = true
+	if !p.seen[b.TopicPartition] {
+		p.order = append(p.order, b.TopicPartition)
+		p.seen[b.TopicPartition] = true
 	}
-	r := core.BatchRange{TP: b.TP, Base: core.Offset(base), Count: b.Records, Loc: b.Loc}
-	if end := base + b.Records; end > p.ends[b.TP] {
-		p.ends[b.TP] = end
+	r := core.BatchRange{TopicPartition: b.TopicPartition, Base: core.Offset(base), Count: b.Records, Loc: b.Loc}
+	if end := base + b.Records; end > p.ends[b.TopicPartition] {
+		p.ends[b.TopicPartition] = end
 	}
-	p.runs[b.TP] = append(p.runs[b.TP], r)
+	p.runs[b.TopicPartition] = append(p.runs[b.TopicPartition], r)
 	return r
 }
 
@@ -263,9 +263,9 @@ func assign(tx Transaction, bs []core.PendingBatch) []core.BatchRange {
 	p := newOffsetPlan()
 	out := make([]core.BatchRange, 0, len(bs))
 	for _, b := range bs {
-		base := p.ends[b.TP]
-		if !p.seen[b.TP] {
-			base = readVarint(tx.Get(endKey(b.TP)))
+		base := p.ends[b.TopicPartition]
+		if !p.seen[b.TopicPartition] {
+			base = readVarint(tx.Get(endKey(b.TopicPartition)))
 		}
 		out = append(out, p.add(b, base))
 	}
@@ -308,16 +308,16 @@ func addPartitions(tx Transaction, seen map[string]int32, topic string, n int32)
 }
 
 func lookupTransaction(tx Transaction, op core.FindSegments) core.ControlPlaneDone {
-	resp := core.FindSegmentsResp{End: core.Offset(readVarint(tx.Get(endKey(op.TP))))}
-	lo := batchRunKey(op.TP, 0)
-	hi := prefixEnd(topicPartitionPrefix(prefixRun, op.TP))
-	if k, _ := tx.Floor(lo, append(batchRunKey(op.TP, int64(op.From)), 0)); k != nil {
+	resp := core.FindSegmentsResp{End: core.Offset(readVarint(tx.Get(endKey(op.TopicPartition))))}
+	lo := batchRunKey(op.TopicPartition, 0)
+	hi := prefixEnd(topicPartitionPrefix(prefixRun, op.TopicPartition))
+	if k, _ := tx.Floor(lo, append(batchRunKey(op.TopicPartition, int64(op.From)), 0)); k != nil {
 		lo = k // the run holding From starts at or before it
 	}
 	var size int64
 	var bad error
 	tx.Ascend(lo, hi, func(k, v []byte) bool {
-		rs, err := decodeBatchRun(op.TP, batchRunBase(k), v)
+		rs, err := decodeBatchRun(op.TopicPartition, batchRunBase(k), v)
 		if err != nil {
 			bad = err
 			return false
@@ -335,7 +335,7 @@ func lookupTransaction(tx Transaction, op core.FindSegments) core.ControlPlaneDo
 		return true
 	})
 	if bad != nil {
-		panic(fmt.Errorf("stateupdater: %v: %w", op.TP, bad))
+		panic(fmt.Errorf("stateupdater: %v: %w", op.TopicPartition, bad))
 	}
 	return core.ControlPlaneDone{Resp: resp}
 }

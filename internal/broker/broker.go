@@ -171,13 +171,13 @@ func (b *Broker) updatePressure(acts []core.Action) []core.Action {
 		b.pressure, b.pressureAt = true, b.now
 		b.env.Reachable("broker: reads paused by backpressure")
 		acts = append(acts, recordFact("backpressure_on",
-			core.Field{Key: "buffered", Value: core.I64(b.bufBytes)}))
+			core.Field{Key: "buffered", Value: core.Int64Value(b.bufBytes)}))
 	case b.pressure && b.bufBytes <= b.cfg.ResumeBufferedBytes:
 		b.pressure = false
 		b.env.Reachable("broker: reads resumed after backpressure")
 		acts = append(acts, recordFact("backpressure_off",
-			core.Field{Key: "buffered", Value: core.I64(b.bufBytes)},
-			core.Field{Key: "paused_ns", Value: core.I64(b.now - b.pressureAt)}))
+			core.Field{Key: "buffered", Value: core.Int64Value(b.bufBytes)},
+			core.Field{Key: "paused_ns", Value: core.Int64Value(b.now - b.pressureAt)}))
 	}
 	return acts
 }

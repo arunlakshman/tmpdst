@@ -12,7 +12,7 @@ func TestCommitWithWriterBases(t *testing.T) {
 	op := core.CommitSegment{
 		SegmentKey: "seg/1",
 		Batches: []core.PendingBatch{
-			{TP: core.NewTopicPartition("t", 0), Records: 3, Loc: core.SegmentRef{Key: "o", Off: 0, Len: 1}},
+			{TopicPartition: core.NewTopicPartition("t", 0), Records: 3, Loc: core.SegmentRef{Key: "o", Off: 0, Len: 1}},
 		},
 	}
 	d := a.Apply(1, stateupdater.Entry{

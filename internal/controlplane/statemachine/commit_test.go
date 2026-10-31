@@ -15,7 +15,7 @@ func commitCmd(key string, records int64) stateupdater.Entry {
 		Commit: core.CommitSegment{
 			SegmentKey: key,
 			Batches: []core.PendingBatch{
-				{TP: core.NewTopicPartition("t", 0), Records: records, Loc: core.SegmentRef{Key: key, Off: 0, Len: records}},
+				{TopicPartition: core.NewTopicPartition("t", 0), Records: records, Loc: core.SegmentRef{Key: key, Off: 0, Len: records}},
 			},
 		},
 	}

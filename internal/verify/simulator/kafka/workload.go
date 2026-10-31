@@ -337,28 +337,28 @@ func (w *Workload) lost(c *client, why string) {
 // StateHash folds all state.
 func (w *Workload) StateHash() uint64 {
 	h := core.NewHasher()
-	h.U64(uint64(w.loop.NextReq))
+	h.Uint64Value(uint64(w.loop.NextReq))
 	for _, c := range w.loop.Clients {
-		h.U64(uint64(c.State))
-		h.U64(uint64(c.stage))
-		h.U64(uint64(c.Conn))
-		h.U64(uint64(c.DialReq))
-		h.U64(uint64(c.SendReq))
-		h.U64(uint64(c.Dials))
-		h.U64(uint64(c.Fails))
-		h.U64(uint64(c.WakeGen))
-		h.U64(uint64(c.ReqGen))
-		h.U64(uint64(c.corr))
+		h.Uint64Value(uint64(c.State))
+		h.Uint64Value(uint64(c.stage))
+		h.Uint64Value(uint64(c.Conn))
+		h.Uint64Value(uint64(c.DialReq))
+		h.Uint64Value(uint64(c.SendReq))
+		h.Uint64Value(uint64(c.Dials))
+		h.Uint64Value(uint64(c.Fails))
+		h.Uint64Value(uint64(c.WakeGen))
+		h.Uint64Value(uint64(c.ReqGen))
+		h.Uint64Value(uint64(c.corr))
 		for _, v := range c.ver {
-			h.U64(uint64(v))
+			h.Uint64Value(uint64(v))
 		}
 		if c.fr != nil {
-			h.U64(uint64(c.fr.Buffered()))
+			h.Uint64Value(uint64(c.fr.Buffered()))
 		}
 		h.Bool(c.out != nil)
 		if c.out != nil {
-			h.U64(uint64(c.out.kind))
-			h.U64(uint64(c.out.h.CorrelationID))
+			h.Uint64Value(uint64(c.out.kind))
+			h.Uint64Value(uint64(c.out.h.CorrelationID))
 		}
 		c.p.hash(&h)
 		c.c.hash(&h)

@@ -199,7 +199,7 @@ func remove(group string, ids ...string) core.GroupRemove {
 }
 
 func pair(topic string, p int32, off int64) core.PartitionOffset {
-	return core.PartitionOffset{TP: core.NewTopicPartition(topic, p), Offset: off, LeaderEpoch: 7, Metadata: "m"}
+	return core.PartitionOffset{TopicPartition: core.NewTopicPartition(topic, p), Offset: off, LeaderEpoch: 7, Metadata: "m"}
 }
 
 func commitOp(group, member string, gen int32, offs ...core.PartitionOffset) core.OffsetCommit {
@@ -231,8 +231,8 @@ func TestOffsetCommitRules(t *testing.T) {
 			})
 			got := exec(t, a, core.OffsetFetch{Group: "g"}).Resp.(core.OffsetFetchResp)
 			want := []core.PartitionOffset{
-				{TP: core.NewTopicPartition("orders", 0), Offset: 6, LeaderEpoch: 7, Metadata: "m"},
-				{TP: core.NewTopicPartition("orders", 1), Offset: 7, LeaderEpoch: 7, Metadata: "m"},
+				{TopicPartition: core.NewTopicPartition("orders", 0), Offset: 6, LeaderEpoch: 7, Metadata: "m"},
+				{TopicPartition: core.NewTopicPartition("orders", 1), Offset: 7, LeaderEpoch: 7, Metadata: "m"},
 			}
 			if !reflect.DeepEqual(got.Offsets, want) {
 				t.Fatalf("offsets: %+v", got.Offsets)
@@ -265,8 +265,8 @@ func TestOffsetFetchReads(t *testing.T) {
 				core.NewTopicPartition("orders", 0), core.NewTopicPartition("orders", 1),
 			}}).Resp.(core.OffsetFetchResp)
 			want := []core.PartitionOffset{
-				{TP: core.NewTopicPartition("orders", 0), Offset: -1, LeaderEpoch: -1},
-				{TP: core.NewTopicPartition("orders", 1), Offset: 3, LeaderEpoch: 7, Metadata: "m"},
+				{TopicPartition: core.NewTopicPartition("orders", 0), Offset: -1, LeaderEpoch: -1},
+				{TopicPartition: core.NewTopicPartition("orders", 1), Offset: 3, LeaderEpoch: 7, Metadata: "m"},
 			}
 			if !reflect.DeepEqual(got.Offsets, want) {
 				t.Fatalf("asked: %+v", got.Offsets)
@@ -358,7 +358,7 @@ func groupLog() []stateupdater.Entry {
 		entryOf(install("g", 2, "m1", "m1", "m3")),
 		entryOf(commitOp("solo", "", -1, pair("orders", 0, 1))),
 		{Kind: stateupdater.KindCommit, Commit: core.CommitSegment{SegmentKey: "k1", Batches: []core.PendingBatch{
-			{TP: core.NewTopicPartition("orders", 0), Records: 3, Loc: core.SegmentRef{Key: "o1", Off: 0, Len: 9}},
+			{TopicPartition: core.NewTopicPartition("orders", 0), Records: 3, Loc: core.SegmentRef{Key: "o1", Off: 0, Len: 9}},
 		}}},
 	}
 }

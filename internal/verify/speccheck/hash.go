@@ -13,19 +13,19 @@ type stateHasher = core.Hasher
 func newStateHasher() stateHasher { return core.NewHasher() }
 
 func hashTopicPartition(h *stateHasher, tp core.TopicPartition) {
-	h.Str(tp.Topic)
-	h.U64(uint64(tp.Partition))
+	h.StringValue(tp.Topic)
+	h.Uint64Value(uint64(tp.Partition))
 }
 
 func hashBatchRanges(h *stateHasher, rs []core.BatchRange) {
-	h.U64(uint64(len(rs)))
+	h.Uint64Value(uint64(len(rs)))
 	for _, r := range rs {
-		hashTopicPartition(h, r.TP)
-		h.U64(uint64(r.Base))
-		h.U64(uint64(r.Count))
-		h.Str(r.Loc.Key)
-		h.U64(uint64(r.Loc.Off))
-		h.U64(uint64(r.Loc.Len))
+		hashTopicPartition(h, r.TopicPartition)
+		h.Uint64Value(uint64(r.Base))
+		h.Uint64Value(uint64(r.Count))
+		h.StringValue(r.Loc.Key)
+		h.Uint64Value(uint64(r.Loc.Off))
+		h.Uint64Value(uint64(r.Loc.Len))
 	}
 }
 

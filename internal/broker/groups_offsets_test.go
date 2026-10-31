@@ -75,8 +75,8 @@ func fetchRequest(group string, parts ...int32) *kmsg.OffsetFetchRequest {
 func TestOffsetFetchExplicitKeepsRequestOrder(t *testing.T) {
 	h, _ := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
 		return cpOK(core.OffsetFetchResp{Offsets: []core.PartitionOffset{
-			{TP: core.NewTopicPartition("t", 2), Offset: 7, LeaderEpoch: 0},
-			{TP: core.NewTopicPartition("t", 0), Offset: -1, LeaderEpoch: -1},
+			{TopicPartition: core.NewTopicPartition("t", 2), Offset: 7, LeaderEpoch: 0},
+			{TopicPartition: core.NewTopicPartition("t", 0), Offset: -1, LeaderEpoch: -1},
 		}})
 	})
 	r := h.call(h.open(1), 7, fetchRequest("g1", 2, 0)).(*kmsg.OffsetFetchResponse)
@@ -90,8 +90,8 @@ func TestOffsetFetchExplicitKeepsRequestOrder(t *testing.T) {
 func TestOffsetFetchAllCommitted(t *testing.T) {
 	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
 		return cpOK(core.OffsetFetchResp{Offsets: []core.PartitionOffset{
-			{TP: core.NewTopicPartition("t", 0), Offset: 1}, {TP: core.NewTopicPartition("t", 3), Offset: 2},
-			{TP: core.NewTopicPartition("u", 1), Offset: 3},
+			{TopicPartition: core.NewTopicPartition("t", 0), Offset: 1}, {TopicPartition: core.NewTopicPartition("t", 3), Offset: 2},
+			{TopicPartition: core.NewTopicPartition("u", 1), Offset: 3},
 		}})
 	})
 	// An empty topic list (version 2 and up) asks for every committed offset.
@@ -119,7 +119,7 @@ func TestOffsetFetchVersion1EmptyListAnswersNothing(t *testing.T) {
 func TestOffsetFetchBatchedGroups(t *testing.T) {
 	h, _ := withGroupCP(t, DefaultConfig(), func(op core.ControlPlaneOperation) core.ControlPlaneDone {
 		if f := op.(core.OffsetFetch); f.Group == "g2" {
-			return cpOK(core.OffsetFetchResp{Offsets: []core.PartitionOffset{{TP: core.NewTopicPartition("t", 0), Offset: 9}}})
+			return cpOK(core.OffsetFetchResp{Offsets: []core.PartitionOffset{{TopicPartition: core.NewTopicPartition("t", 0), Offset: 9}}})
 		}
 		return cpErr(core.ErrUnavailable)
 	})

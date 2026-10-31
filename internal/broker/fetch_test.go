@@ -25,7 +25,7 @@ func longFetch(minBytes, maxWaitMillis int32, parts ...int32) *kmsg.FetchRequest
 func lookups(h *harness, tp core.TopicPartition) int {
 	n := 0
 	for _, op := range h.cpCalls {
-		if f, ok := op.(core.FindSegments); ok && f.TP == tp {
+		if f, ok := op.(core.FindSegments); ok && f.TopicPartition == tp {
 			n++
 		}
 	}

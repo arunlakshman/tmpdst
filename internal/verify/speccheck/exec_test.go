@@ -20,7 +20,7 @@ func TestExecDispatch(t *testing.T) {
 		outcome core.Outcome
 	}{
 		{"commit", core.CommitSegment{SegmentKey: "s", Batches: []core.PendingBatch{pb("orders", 0, 2)}}, core.OK, core.Applied},
-		{"lookup", core.FindSegments{TP: tp("orders", 0), From: -1}, core.ErrInvalid, core.NotApplied},
+		{"lookup", core.FindSegments{TopicPartition: tp("orders", 0), From: -1}, core.ErrInvalid, core.NotApplied},
 		{"describe topics", core.DescribeTopics{}, core.OK, core.NotApplied},
 		{"create topic", core.CreateTopic{Name: "n", Partitions: 1}, core.OK, core.Applied},
 		{"group install", gInstall("g", 1, "m1", "m1"), core.OK, core.Applied},

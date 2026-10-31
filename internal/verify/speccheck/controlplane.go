@@ -29,7 +29,7 @@ import (
 //	               A failed commit records nothing: its key is reusable.
 //	               The real applier runs commands one at a time in log order,
 //	               so it needs no locking for step 3. The spec is sequential too.
-//	Lookup         From < 0: ErrInvalid. Else the runs of TP whose last offset
+//	Lookup         From < 0: ErrInvalid. Else the runs of TopicPartition whose last offset
 //	               is >= From, in offset order, plus the end offset. MaxBytes > 0
 //	               stops after the batch that takes the summed Loc.Len to
 //	               MaxBytes or more, but always returns one if any match. An
@@ -142,7 +142,7 @@ func (c *ControlPlane) execCreate(req core.RequestID, op core.CreateTopic) core.
 
 // validBatch reports whether b is well formed on its own.
 func validBatch(b core.PendingBatch) bool {
-	return b.Records > 0 && b.TP.Topic != "" && b.TP.Partition >= 0
+	return b.Records > 0 && b.TopicPartition.Topic != "" && b.TopicPartition.Partition >= 0
 }
 
 func (c *ControlPlane) execCommit(req core.RequestID, op core.CommitSegment) core.IOResult {
@@ -171,7 +171,7 @@ func (c *ControlPlane) freshCommit(request core.RequestID, op core.CommitSegment
 	}
 	seg := segment{batches: slices.Clone(op.Batches)}
 	for _, b := range op.Batches {
-		r := core.BatchRange{TP: b.TP, Base: c.End(b.TP), Count: b.Records, Loc: b.Loc}
+		r := core.BatchRange{TopicPartition: b.TopicPartition, Base: c.End(b.TopicPartition), Count: b.Records, Loc: b.Loc}
 		c.append(r)
 		seg.ranges = append(seg.ranges, r)
 	}
@@ -189,9 +189,9 @@ func (c *ControlPlane) execLookup(request core.RequestID, op core.FindSegments) 
 	if op.From < 0 {
 		return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 	}
-	response := core.FindSegmentsResp{End: c.End(op.TP)}
+	response := core.FindSegmentsResp{End: c.End(op.TopicPartition)}
 	var bytes int64
-	for _, r := range c.parts[op.TP.Topic][op.TP.Partition] {
+	for _, r := range c.parts[op.TopicPartition.Topic][op.TopicPartition.Partition] {
 		if r.Base+core.Offset(r.Count) <= op.From {
 			continue
 		}
@@ -215,18 +215,18 @@ func (c *ControlPlane) execDescribe(req core.RequestID, op core.DescribeTopics) 
 }
 
 func (c *ControlPlane) append(r core.BatchRange) {
-	if c.parts[r.TP.Topic] == nil {
-		c.parts[r.TP.Topic] = map[int32][]core.BatchRange{}
+	if c.parts[r.TopicPartition.Topic] == nil {
+		c.parts[r.TopicPartition.Topic] = map[int32][]core.BatchRange{}
 	}
-	c.parts[r.TP.Topic][r.TP.Partition] = append(c.parts[r.TP.Topic][r.TP.Partition], r)
-	c.topics[r.TP.Topic] = max(c.topics[r.TP.Topic], r.TP.Partition+1)
+	c.parts[r.TopicPartition.Topic][r.TopicPartition.Partition] = append(c.parts[r.TopicPartition.Topic][r.TopicPartition.Partition], r)
+	c.topics[r.TopicPartition.Topic] = max(c.topics[r.TopicPartition.Topic], r.TopicPartition.Partition+1)
 }
 
 // StateHash folds committed segments (sorted by key, with their ranges) and
 // topics (sorted by name).
 func (c *ControlPlane) StateHash() uint64 {
 	c.segPre = nextPrefix(c.segPre, len(c.segKeys), func(i int, h stateHasher) stateHasher {
-		h.Str(c.segKeys[i])
+		h.StringValue(c.segKeys[i])
 		hashBatchRanges(&h, c.segs[c.segKeys[i]].ranges)
 		return h
 	})
@@ -237,7 +237,7 @@ func (c *ControlPlane) StateHash() uint64 {
 func (c *ControlPlane) fullStateHash() uint64 {
 	h := newStateHasher()
 	for _, k := range sortedKeys(c.segs) {
-		h.Str(k)
+		h.StringValue(k)
 		hashBatchRanges(&h, c.segs[k].ranges)
 	}
 	return c.tailHash(h)
@@ -246,8 +246,8 @@ func (c *ControlPlane) fullStateHash() uint64 {
 // tailHash folds topics into h.
 func (c *ControlPlane) tailHash(h stateHasher) uint64 {
 	for _, t := range sortedKeys(c.topics) {
-		h.Str(t)
-		h.U64(uint64(c.topics[t]))
+		h.StringValue(t)
+		h.Uint64Value(uint64(c.topics[t]))
 	}
 	return uint64(h)
 }

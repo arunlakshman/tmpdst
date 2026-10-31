@@ -124,15 +124,15 @@ func (m *controlPlaneModel) commit(op core.CommitSegment) (observation.ControlPl
 		return invalid, false
 	}
 	for _, b := range op.Batches {
-		if b.Records <= 0 || b.TP.Topic == "" || b.TP.Partition < 0 {
+		if b.Records <= 0 || b.TopicPartition.Topic == "" || b.TopicPartition.Partition < 0 {
 			return invalid, false
 		}
 	}
 	var assigned []core.BatchRange
 	for _, b := range op.Batches {
-		r := core.BatchRange{TP: b.TP, Base: core.Offset(m.end(b.TP)), Count: b.Records, Loc: b.Loc}
-		m.runs[b.TP] = append(m.runs[b.TP], r)
-		m.topics[b.TP.Topic] = max(m.topics[b.TP.Topic], b.TP.Partition+1)
+		r := core.BatchRange{TopicPartition: b.TopicPartition, Base: core.Offset(m.end(b.TopicPartition)), Count: b.Records, Loc: b.Loc}
+		m.runs[b.TopicPartition] = append(m.runs[b.TopicPartition], r)
+		m.topics[b.TopicPartition.Topic] = max(m.topics[b.TopicPartition.Topic], b.TopicPartition.Partition+1)
 		assigned = append(assigned, r)
 	}
 	m.segments[op.SegmentKey] = controlPlaneModelSegment{batches: slices.Clone(op.Batches), ranges: assigned}
@@ -143,9 +143,9 @@ func (m *controlPlaneModel) lookup(op core.FindSegments) observation.ControlPlan
 	if op.From < 0 {
 		return observation.ControlPlaneResult{Code: core.ErrInvalid}
 	}
-	result := observation.ControlPlaneResult{End: core.Offset(m.end(op.TP))}
+	result := observation.ControlPlaneResult{End: core.Offset(m.end(op.TopicPartition))}
 	var sum int64
-	for _, r := range m.runs[op.TP] {
+	for _, r := range m.runs[op.TopicPartition] {
 		if int64(r.Base)+r.Count-1 < int64(op.From) {
 			continue
 		}

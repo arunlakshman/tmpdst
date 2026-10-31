@@ -10,7 +10,7 @@ func TestCommitSegmentRoundTrip(t *testing.T) {
 	op := core.CommitSegment{
 		SegmentKey: "seg/abc",
 		Batches: []core.PendingBatch{{
-			TP: core.NewTopicPartition("t", 1), Records: 3,
+			TopicPartition: core.NewTopicPartition("t", 1), Records: 3,
 			Loc: core.SegmentRef{Key: "seg/abc", Off: 0, Len: 10},
 		}},
 	}
@@ -19,13 +19,13 @@ func TestCommitSegmentRoundTrip(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 	b := got.Batches[0]
-	if b.TP != op.Batches[0].TP || b.Records != 3 || b.Loc != op.Batches[0].Loc {
+	if b.TopicPartition != op.Batches[0].TopicPartition || b.Records != 3 || b.Loc != op.Batches[0].Loc {
 		t.Fatalf("batch %+v", b)
 	}
 }
 
 func TestLookupDescribeRoundTrip(t *testing.T) {
-	lk := core.FindSegments{TP: core.NewTopicPartition("t", 2), From: 5, MaxBytes: 100}
+	lk := core.FindSegments{TopicPartition: core.NewTopicPartition("t", 2), From: 5, MaxBytes: 100}
 	if got := LookupToCore(LookupFromCore(lk)); got != lk {
 		t.Fatalf("lookup %+v", got)
 	}
@@ -38,7 +38,7 @@ func TestLookupDescribeRoundTrip(t *testing.T) {
 
 func TestResponseRoundTrip(t *testing.T) {
 	cr := core.CommitSegmentResp{Assigned: []core.BatchRange{{
-		TP: core.NewTopicPartition("t", 0), Base: 10, Count: 2,
+		TopicPartition: core.NewTopicPartition("t", 0), Base: 10, Count: 2,
 		Loc: core.SegmentRef{Key: "k", Off: 1, Len: 2},
 	}}}
 	got := CommitSegmentRespToCore(CommitSegmentRespFromCore(cr))

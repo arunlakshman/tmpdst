@@ -18,28 +18,28 @@ var lockstepCmds = []stateupdater.Entry{
 	{ID: "2", Kind: stateupdater.KindCommit, Commit: core.CommitSegment{
 		SegmentKey: "seg-a",
 		Batches: []core.PendingBatch{
-			{TP: core.NewTopicPartition("orders", 0), Records: 3, Loc: core.SegmentRef{Key: "o1", Off: 0, Len: 30}},
-			{TP: core.NewTopicPartition("orders", 1), Records: 2, Loc: core.SegmentRef{Key: "o1", Off: 30, Len: 20}},
+			{TopicPartition: core.NewTopicPartition("orders", 0), Records: 3, Loc: core.SegmentRef{Key: "o1", Off: 0, Len: 30}},
+			{TopicPartition: core.NewTopicPartition("orders", 1), Records: 2, Loc: core.SegmentRef{Key: "o1", Off: 30, Len: 20}},
 		},
 	}},
 	{ID: "3", Kind: stateupdater.KindCommit, Commit: core.CommitSegment{
 		SegmentKey: "seg-b",
 		Batches: []core.PendingBatch{
-			{TP: core.NewTopicPartition("orders", 0), Records: 1, Loc: core.SegmentRef{Key: "o2", Off: 0, Len: 10}},
+			{TopicPartition: core.NewTopicPartition("orders", 0), Records: 1, Loc: core.SegmentRef{Key: "o2", Off: 0, Len: 10}},
 		},
 	}},
 	{ID: "4", Kind: stateupdater.KindCommit, Commit: core.CommitSegment{ // replay
 		SegmentKey: "seg-a",
 		Batches: []core.PendingBatch{
-			{TP: core.NewTopicPartition("orders", 0), Records: 3, Loc: core.SegmentRef{Key: "o1", Off: 0, Len: 30}},
-			{TP: core.NewTopicPartition("orders", 1), Records: 2, Loc: core.SegmentRef{Key: "o1", Off: 30, Len: 20}},
+			{TopicPartition: core.NewTopicPartition("orders", 0), Records: 3, Loc: core.SegmentRef{Key: "o1", Off: 0, Len: 30}},
+			{TopicPartition: core.NewTopicPartition("orders", 1), Records: 2, Loc: core.SegmentRef{Key: "o1", Off: 30, Len: 20}},
 		},
 	}},
 	{ID: "5", Kind: stateupdater.KindNoop},
 	{ID: "6", Kind: stateupdater.KindCommit, Commit: core.CommitSegment{
 		SegmentKey: "seg-c",
 		Batches: []core.PendingBatch{
-			{TP: core.NewTopicPartition("orders", 1), Records: 4, Loc: core.SegmentRef{Key: "o3", Off: 0, Len: 40}},
+			{TopicPartition: core.NewTopicPartition("orders", 1), Records: 4, Loc: core.SegmentRef{Key: "o3", Off: 0, Len: 40}},
 		},
 	}},
 	// Exclusive creates go last, so the indexes above stay the same.
@@ -56,7 +56,7 @@ func queryDigest(exec func(core.ControlPlaneOperation) core.ControlPlaneDone) ui
 	for _, t := range d.Topics {
 		_, _ = fmt.Fprintf(h, "T%s/%d;", t.Name, t.Partitions)
 		for p := int32(0); p < t.Partitions; p++ {
-			l := exec(core.FindSegments{TP: core.NewTopicPartition(t.Name, p)}).Resp.(core.FindSegmentsResp)
+			l := exec(core.FindSegments{TopicPartition: core.NewTopicPartition(t.Name, p)}).Resp.(core.FindSegmentsResp)
 			_, _ = fmt.Fprintf(h, "P%d/%d:%+v;", p, l.End, l.Ranges)
 		}
 	}

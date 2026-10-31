@@ -186,7 +186,7 @@ func (b *Broker) onFetchGet(o *operation, e core.ObjectGetDone) []core.Action {
 func (b *Broker) retryCorrupt(o *operation, rg core.BatchRange) []core.Action {
 	b.env.Reachable("broker: corrupt GET detected")
 	o.corrupt = true
-	acts := []core.Action{recordFact("corruption_detected", core.Field{Key: "segment", Value: core.Str(rg.Loc.Key)})}
+	acts := []core.Action{recordFact("corruption_detected", core.Field{Key: "segment", Value: core.StringValue(rg.Loc.Key)})}
 	return append(acts, b.retryOp(o)...)
 }
 

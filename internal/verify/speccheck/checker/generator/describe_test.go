@@ -28,7 +28,7 @@ func TestDescribeEveryOperationKind(t *testing.T) {
 		},
 		{
 			name: "lookup",
-			op:   NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: topic, From: 7, MaxBytes: 60}}),
+			op:   NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TopicPartition: topic, From: 7, MaxBytes: 60}}),
 			want: fmt.Sprintf("request 4: look up %v from offset 7 with max bytes 60", topic),
 		},
 		{

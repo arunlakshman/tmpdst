@@ -352,7 +352,7 @@ func (r *run) boot(n *node) {
 	n.m, n.alive, n.sumOK = m, true, false
 	if n.boots > 1 {
 		r.counters[countRestarts]++
-		r.simulatorFact("sim_restarted", core.Field{Key: "node", Value: core.Str(n.name)})
+		r.simulatorFact("sim_restarted", core.Field{Key: "node", Value: core.StringValue(n.name)})
 	}
 	n.inbox.Push(core.NodeStarted{Self: n.ref})
 	r.ensureWake(n, r.now())
@@ -413,19 +413,19 @@ func (r *run) loop() {
 
 func (r *run) foldEntry(e Entry) {
 	h := &r.trace
-	h.I64(int64(e.At))
-	h.U64(uint64(e.Kind))
-	h.U64(uint64(e.Lane))
+	h.Int64Value(int64(e.At))
+	h.Uint64Value(uint64(e.Kind))
+	h.Uint64Value(uint64(e.Lane))
 	h.ref(e.Target.Node)
-	h.Str(e.Target.Engine)
+	h.StringValue(e.Target.Engine)
 	switch b := e.Body.(type) {
 	case core.EventData:
 		h.event(b)
 	case wake:
-		h.U64(901)
+		h.Uint64Value(901)
 	case phaseChange:
-		h.U64(902)
-		h.U64(uint64(b.to))
+		h.Uint64Value(902)
+		h.Uint64Value(uint64(b.to))
 	}
 }
 
@@ -446,10 +446,10 @@ func (r *run) foldState() {
 		} else if r.cfg.VerifyHashes {
 			r.verifyHash("node "+string(n.name), n.sum, n.m.StateHash)
 		}
-		h.U64(n.sum)
-		h.U64(uint64(len(n.inbox.ctrl.q)))
-		h.U64(uint64(len(n.inbox.data.q)))
-		h.I64(int64(n.inbox.busy))
+		h.Uint64Value(n.sum)
+		h.Uint64Value(uint64(len(n.inbox.ctrl.q)))
+		h.Uint64Value(uint64(len(n.inbox.data.q)))
+		h.Int64Value(int64(n.inbox.busy))
 	}
 	for i, e := range r.engines {
 		if !r.engOK[i] {
@@ -461,7 +461,7 @@ func (r *run) foldState() {
 		} else if r.cfg.VerifyHashes {
 			r.verifyHash("engine "+e.Name(), r.engSum[i], e.StateHash)
 		}
-		h.U64(r.engSum[i])
+		h.Uint64Value(r.engSum[i])
 	}
 }
 
@@ -580,7 +580,7 @@ func (r *run) processPhase(e Entry) {
 	pc := e.Body.(phaseChange)
 	r.phase = pc.to
 	r.logf("phase %d", pc.to)
-	r.simulatorFact("sim_phase", core.Field{Key: "phase", Value: core.U64(uint64(pc.to))})
+	r.simulatorFact("sim_phase", core.Field{Key: "phase", Value: core.Uint64Value(uint64(pc.to))})
 	if pc.to == PhaseRecovering {
 		r.enterRecovery()
 	}
@@ -622,9 +622,9 @@ func (r *run) notifyPhase(p Phase) {
 		if !n.workload || !n.alive || !ok {
 			continue
 		}
-		r.trace.Str(string(n.name))
-		r.trace.U64(903)
-		r.trace.U64(uint64(p))
+		r.trace.StringValue(string(n.name))
+		r.trace.Uint64Value(903)
+		r.trace.Uint64Value(uint64(p))
 		r.logf("on_phase %s %d", n.name, p)
 		n.sumOK = false
 		var acts []core.Action
@@ -658,7 +658,7 @@ func (r *run) pump(n *node) {
 		r.fail(FailProtocol, "started_first", fmt.Sprintf("%s: first Step was %T, not Started", n.name, body))
 	}
 	n.stepped++
-	r.trace.Str(string(n.name))
+	r.trace.StringValue(string(n.name))
 	r.trace.event(body)
 	r.logf("step %s %s", n.name, description{body})
 	n.sumOK = false
@@ -788,7 +788,7 @@ func (r *run) end(n *node, how endKind, cause string) {
 		name = "sim_exited"
 	}
 	r.logf("%s %s (%s)", name, n.name, cause)
-	r.simulatorFact(name, core.Field{Key: "node", Value: core.Str(n.name)}, core.Field{Key: "cause", Value: core.Str(cause)})
+	r.simulatorFact(name, core.Field{Key: "node", Value: core.StringValue(n.name)}, core.Field{Key: "cause", Value: core.StringValue(cause)})
 	for i, e := range r.engines {
 		r.engOK[i] = false
 		if !r.guard("OnCrash "+e.Name(), func() { e.OnCrash(r.engCtx[i], ref) }) {
@@ -809,7 +809,7 @@ func (r *run) stopNode(n *node) {
 	r.counters[countGracefulStops]++
 	dl := r.now() + Time(stopWaitTime)
 	r.sched.Schedule(Entry{At: dl, Lane: laneForSimulator, Kind: EntryCrash, Target: Target{Node: n.ref}})
-	r.simulatorFact("sim_stop_requested", core.Field{Key: "node", Value: core.Str(n.name)})
+	r.simulatorFact("sim_stop_requested", core.Field{Key: "node", Value: core.StringValue(n.name)})
 	n.inbox.Push(core.StopRequest{Deadline: core.NodeTime(dl) + core.NodeTime(n.skew)})
 	r.pump(n)
 }
@@ -886,7 +886,7 @@ func (c *fakeServiceContext) Cancel(id EntryID) { c.r.sched.Cancel(id) }
 
 func (c *fakeServiceContext) Fault(kind string, fields ...core.Field) {
 	c.r.counters[countFaults]++
-	fs := append([]core.Field{{Key: "kind", Value: core.Str(kind)}, {Key: "engine", Value: core.Str(c.name)}}, fields...)
+	fs := append([]core.Field{{Key: "kind", Value: core.StringValue(kind)}, {Key: "engine", Value: core.StringValue(c.name)}}, fields...)
 	c.r.simulatorFact("sim_fault", fs...)
 }
 

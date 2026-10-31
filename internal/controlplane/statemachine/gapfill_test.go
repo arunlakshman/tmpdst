@@ -63,7 +63,7 @@ func TestGapFillUsesWinnerWhenTaken(t *testing.T) {
 		ID: "other", Kind: stateupdater.KindCommit,
 		Commit: core.CommitSegment{
 			SegmentKey: "win",
-			Batches:    []core.PendingBatch{{TP: core.NewTopicPartition("t", 0), Records: 1, Loc: core.SegmentRef{Key: "o", Off: 0, Len: 1}}},
+			Batches:    []core.PendingBatch{{TopicPartition: core.NewTopicPartition("t", 0), Records: 1, Loc: core.SegmentRef{Key: "o", Off: 0, Len: 1}}},
 		},
 	})
 	step(m, core.LogAppendDone{

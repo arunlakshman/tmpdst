@@ -179,7 +179,7 @@ func (e *Engine) CreateTopic(name string, partitions int32) core.ErrCode {
 
 // Committed implements simulator.ControlPlaneRealState.
 func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
-	d, err := e.ref.Lookup(core.FindSegments{TP: tp})
+	d, err := e.ref.Lookup(core.FindSegments{TopicPartition: tp})
 	if err != nil || d.Err != core.OK {
 		return nil
 	}

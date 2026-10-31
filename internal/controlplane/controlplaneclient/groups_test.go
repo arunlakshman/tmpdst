@@ -162,7 +162,7 @@ func TestClientGroupCallsOverGRPC(t *testing.T) {
 
 	// GroupOffsetCommit: a stale generation is refused, the right one stores.
 	tp := core.NewTopicPartition("t", 0)
-	commit := core.OffsetCommit{Group: "g", Member: a, Generation: 1, Offsets: []core.PartitionOffset{{TP: tp, Offset: 7, Metadata: "m"}}}
+	commit := core.OffsetCommit{Group: "g", Member: a, Generation: 1, Offsets: []core.PartitionOffset{{TopicPartition: tp, Offset: 7, Metadata: "m"}}}
 	_, err = c.GroupOffsetCommit(ctx, commit)
 	groupErr(t, err, core.ErrIllegalGeneration)
 	commit.Generation = 3

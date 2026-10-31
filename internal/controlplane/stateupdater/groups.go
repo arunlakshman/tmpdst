@@ -97,7 +97,7 @@ func offsetCommitSize(op core.OffsetCommit) int {
 	c.num()
 	c.num()
 	for _, o := range op.Offsets {
-		c.str(o.TP.Topic)
+		c.str(o.TopicPartition.Topic)
 		c.num()
 		c.num()
 		c.num()
@@ -388,14 +388,14 @@ func commitOffsets(tx Transaction, op core.OffsetCommit) core.ControlPlaneDone {
 
 // commitOne checks and stores one offset of an OffsetCommit.
 func commitOne(tx Transaction, op core.OffsetCommit, o core.PartitionOffset) core.ErrCode {
-	n := readVarint(tx.Get(topicKey(o.TP.Topic)))
-	if o.TP.Partition < 0 || int64(o.TP.Partition) >= n {
+	n := readVarint(tx.Get(topicKey(o.TopicPartition.Topic)))
+	if o.TopicPartition.Partition < 0 || int64(o.TopicPartition.Partition) >= n {
 		return core.ErrUnknownPartition
 	}
 	if o.Offset < 0 {
 		return core.ErrInvalid
 	}
 	rec := offsetRecord{offset: o.Offset, epoch: o.LeaderEpoch, meta: o.Metadata, time: op.TimeMs}
-	tx.Set(offsetKey(op.Group, o.TP), rec.encode())
+	tx.Set(offsetKey(op.Group, o.TopicPartition), rec.encode())
 	return core.OK
 }

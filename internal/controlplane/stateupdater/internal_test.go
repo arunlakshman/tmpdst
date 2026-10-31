@@ -11,9 +11,9 @@ import (
 func TestRunRoundTripAndCorruption(t *testing.T) {
 	tp := core.NewTopicPartition("t", 3)
 	rs := []core.BatchRange{
-		{TP: tp, Base: 10, Count: 2, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 50}},
-		{TP: tp, Base: 12, Count: 5, Loc: core.SegmentRef{Key: "s1", Off: 50, Len: -1}},
-		{TP: tp, Base: 17, Count: 1, Loc: core.SegmentRef{Key: "s2", Off: 7, Len: 9}},
+		{TopicPartition: tp, Base: 10, Count: 2, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 50}},
+		{TopicPartition: tp, Base: 12, Count: 5, Loc: core.SegmentRef{Key: "s1", Off: 50, Len: -1}},
+		{TopicPartition: tp, Base: 17, Count: 1, Loc: core.SegmentRef{Key: "s2", Off: 7, Len: 9}},
 	}
 	b := encodeBatchRun(rs)
 	got, err := decodeBatchRun(tp, 10, b)
@@ -85,7 +85,7 @@ func TestCorruptStoredRecordsPanic(t *testing.T) {
 		tx.Set(duplicateCheckKey("k"), []byte{0x80})
 	})
 	for name, f := range map[string]func(){
-		"lookup": func() { _, _ = a.Lookup(core.FindSegments{TP: tp}) },
+		"lookup": func() { _, _ = a.Lookup(core.FindSegments{TopicPartition: tp}) },
 		"replay": func() { _, _ = a.Commit(1, core.CommitSegment{SegmentKey: "k"}) },
 	} {
 		func() {

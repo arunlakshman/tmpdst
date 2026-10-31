@@ -30,7 +30,7 @@ func call(e *fakecontrolplane.Engine, c *fakeservicetest.Ctx, from core.NodeInst
 
 func commit(key string) core.CommitSegment {
 	return core.CommitSegment{SegmentKey: key,
-		Batches: []core.PendingBatch{{TP: tp, Records: 5, Loc: core.SegmentRef{Key: key, Len: 10}}}}
+		Batches: []core.PendingBatch{{TopicPartition: tp, Records: 5, Loc: core.SegmentRef{Key: key, Len: 10}}}}
 }
 
 func last(c *fakeservicetest.Ctx) core.ControlPlaneDone {
@@ -54,7 +54,7 @@ func TestNormalAndTruthful(t *testing.T) {
 	different := commit("s1")
 	different.Batches[0].Records = 6
 	call(e, c, a, 4, different)
-	call(e, c, a, 5, core.FindSegments{TP: tp, From: -1})
+	call(e, c, a, 5, core.FindSegments{TopicPartition: tp, From: -1})
 	c.Run()
 	if d := c.Find(4).(core.ControlPlaneDone); d.Err != core.ErrConflict {
 		t.Fatal("same key, different request:", d)
@@ -221,7 +221,7 @@ func TestDeterminism(t *testing.T) {
 			case 0:
 				call(e, c, a, core.RequestID(i), commit(string(rune('a'+i%7))))
 			default:
-				call(e, c, a, core.RequestID(i), core.FindSegments{TP: tp})
+				call(e, c, a, core.RequestID(i), core.FindSegments{TopicPartition: tp})
 			}
 		}
 		mid := e.StateHash()
@@ -256,7 +256,7 @@ func TestCommitSizeLimit(t *testing.T) {
 	parts := func(key string, n int) core.CommitSegment {
 		op := many(key, n)
 		for i := range op.Batches {
-			op.Batches[i].TP.Partition = int32(i)
+			op.Batches[i].TopicPartition.Partition = int32(i)
 		}
 		return op
 	}
@@ -285,14 +285,14 @@ func TestCommitSizeLimit(t *testing.T) {
 	// A grown topic counts: partition 5 of a 4-partition topic is 1 + 1 + 1 = 3
 	// (fits), but one batch each on "u" (new) and "t" partitions 0..1 is 1 + 3 + 1 = 5.
 	grow := commit("g")
-	grow.Batches[0].TP = core.NewTopicPartition("t", 5)
+	grow.Batches[0].TopicPartition = core.NewTopicPartition("t", 5)
 	call(e, c, a, 6, grow)
 	c.Run()
 	if d := last(c); d.Err != core.OK {
 		t.Fatal(d)
 	}
 	mixed := parts("m", 2)
-	mixed.Batches = append(mixed.Batches, core.PendingBatch{TP: core.NewTopicPartition("u", 0), Records: 1})
+	mixed.Batches = append(mixed.Batches, core.PendingBatch{TopicPartition: core.NewTopicPartition("u", 0), Records: 1})
 	call(e, c, a, 7, mixed)
 	c.Run()
 	if d := last(c); d.Err != core.ErrTooLarge {

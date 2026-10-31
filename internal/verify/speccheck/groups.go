@@ -127,7 +127,7 @@ func sizeOffsetCommit(op core.OffsetCommit) int {
 	c.num()
 	c.num()
 	for _, o := range op.Offsets {
-		c.str(o.TP.Topic)
+		c.str(o.TopicPartition.Topic)
 		c.num()
 		c.num()
 		c.num()
@@ -295,7 +295,7 @@ func (c *ControlPlane) offsetCommit(request core.RequestID, op core.OffsetCommit
 }
 
 func (c *ControlPlane) commitOne(op core.OffsetCommit, o core.PartitionOffset) core.ErrCode {
-	if o.TP.Partition < 0 || o.TP.Partition >= c.topics[o.TP.Topic] {
+	if o.TopicPartition.Partition < 0 || o.TopicPartition.Partition >= c.topics[o.TopicPartition.Topic] {
 		return core.ErrUnknownPartition
 	}
 	if o.Offset < 0 {
@@ -307,7 +307,7 @@ func (c *ControlPlane) commitOne(op core.OffsetCommit, o core.PartitionOffset) c
 	if c.offsets[op.Group] == nil {
 		c.offsets[op.Group] = map[core.TopicPartition]committedOffset{}
 	}
-	c.offsets[op.Group][o.TP] = committedOffset{offset: o.Offset, epoch: o.LeaderEpoch, meta: o.Metadata, time: op.TimeMs}
+	c.offsets[op.Group][o.TopicPartition] = committedOffset{offset: o.Offset, epoch: o.LeaderEpoch, meta: o.Metadata, time: op.TimeMs}
 	return core.OK
 }
 
@@ -317,17 +317,17 @@ func (c *ControlPlane) offsetFetch(op core.OffsetFetch) core.OffsetFetchResp {
 	if len(op.Partitions) == 0 {
 		for _, tp := range sortedTPs(committed) {
 			v := committed[tp]
-			out = append(out, core.PartitionOffset{TP: tp, Offset: v.offset, LeaderEpoch: v.epoch, Metadata: v.meta})
+			out = append(out, core.PartitionOffset{TopicPartition: tp, Offset: v.offset, LeaderEpoch: v.epoch, Metadata: v.meta})
 		}
 		return core.OffsetFetchResp{Offsets: out}
 	}
 	for _, tp := range op.Partitions {
 		v, ok := committed[tp]
 		if !ok {
-			out = append(out, core.PartitionOffset{TP: tp, Offset: -1, LeaderEpoch: -1})
+			out = append(out, core.PartitionOffset{TopicPartition: tp, Offset: -1, LeaderEpoch: -1})
 			continue
 		}
-		out = append(out, core.PartitionOffset{TP: tp, Offset: v.offset, LeaderEpoch: v.epoch, Metadata: v.meta})
+		out = append(out, core.PartitionOffset{TopicPartition: tp, Offset: v.offset, LeaderEpoch: v.epoch, Metadata: v.meta})
 	}
 	return core.OffsetFetchResp{Offsets: out}
 }

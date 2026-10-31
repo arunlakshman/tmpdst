@@ -311,7 +311,7 @@ func (e *Engine) ack(ctx simulator.FakeServiceContext, to core.NodeInstance, p *
 }
 
 func (e *Engine) fault(ctx simulator.FakeServiceContext, kind string, a, b core.NodeID, extra ...core.Field) {
-	fs := append([]core.Field{{Key: "a", Value: core.Str(a)}, {Key: "b", Value: core.Str(b)}}, extra...)
+	fs := append([]core.Field{{Key: "a", Value: core.StringValue(a)}, {Key: "b", Value: core.StringValue(b)}}, extra...)
 	ctx.Fault(kind, fs...)
 	ctx.Assert().Sometimes(true, core.PropertyID("net: "+kind))
 	ctx.Assert().Reachable(core.PropertyID("net: " + kind + " injected"))
@@ -386,7 +386,7 @@ func (e *Engine) maybePartition(ctx simulator.FakeServiceContext, a, b core.Node
 	l.everCut = true
 	l.healAt = ctx.Now() + simulator.Time(dur)
 	ctx.Self(l.healAt, ctx.Lane("net/heal"), networkHealData{l.a, l.b})
-	e.fault(ctx, "partition", l.a, l.b, core.Field{Key: "dur", Value: core.I64(dur)})
+	e.fault(ctx, "partition", l.a, l.b, core.Field{Key: "dur", Value: core.Int64Value(dur)})
 }
 
 func (e *Engine) send(ctx simulator.FakeServiceContext, from core.NodeInstance, a core.Send) {
@@ -413,7 +413,7 @@ func (e *Engine) send(ctx simulator.FakeServiceContext, from core.NodeInstance, 
 		if r.Chance(e.f.ClogProb) {
 			dur := timeSpan(r, e.f.ClogDur[0], e.f.ClogDur[1])
 			d.clogUntil = ctx.Now() + simulator.Time(dur)
-			e.fault(ctx, "clog", from.Node, peer, core.Field{Key: "dur", Value: core.I64(dur)})
+			e.fault(ctx, "clog", from.Node, peer, core.Field{Key: "dur", Value: core.Int64Value(dur)})
 		}
 	}
 	extra := e.pairExtra(ctx, from.Node, peer)
@@ -573,11 +573,11 @@ func (e *Engine) OnCrash(ctx simulator.FakeServiceContext, ref core.NodeInstance
 type hasher = core.Hasher
 
 func hashItems(h *hasher, its []item) {
-	h.U64(uint64(len(its)))
+	h.Uint64Value(uint64(len(its)))
 	for _, it := range its {
-		h.U64(uint64(it.kind))
-		h.U64(uint64(len(it.data)))
-		h.U64(uint64(it.crc))
+		h.Uint64Value(uint64(it.kind))
+		h.Uint64Value(uint64(len(it.data)))
+		h.Uint64Value(uint64(it.crc))
 		h.Bool(it.net)
 	}
 }
@@ -588,7 +588,7 @@ func hashItems(h *hasher, its []item) {
 // pair rehashes itself and the pairs after it.
 func (e *Engine) StateHash() uint64 {
 	h := core.NewHasher()
-	h.U64(uint64(len(e.pairs)))
+	h.Uint64Value(uint64(len(e.pairs)))
 	for _, p := range e.pairs {
 		if p.ok && p.in == uint64(h) {
 			h = hasher(p.out)
@@ -604,7 +604,7 @@ func (e *Engine) StateHash() uint64 {
 // fullStateHash is StateHash without the per-pair cache.
 func (e *Engine) fullStateHash() uint64 {
 	h := core.NewHasher()
-	h.U64(uint64(len(e.pairs)))
+	h.Uint64Value(uint64(len(e.pairs)))
 	for _, p := range e.pairs {
 		p.in = uint64(h)
 		hashConnectionPair(&h, p)
@@ -614,34 +614,34 @@ func (e *Engine) fullStateHash() uint64 {
 }
 
 func (e *Engine) finishHash(h hasher) uint64 {
-	h.U64(uint64(len(e.links)))
+	h.Uint64Value(uint64(len(e.links)))
 	for _, l := range e.links {
-		h.Str(string(l.a))
-		h.Str(string(l.b))
-		h.U64(uint64(l.extra))
+		h.StringValue(string(l.a))
+		h.StringValue(string(l.b))
+		h.Uint64Value(uint64(l.extra))
 		h.Bool(l.everCut)
-		h.U64(uint64(l.healAt))
+		h.Uint64Value(uint64(l.healAt))
 	}
 	h.Bool(e.recovery)
 	return uint64(h)
 }
 
 func hashConnectionPair(h *hasher, p *connectionPair) {
-	h.U64(p.id)
+	h.Uint64Value(p.id)
 	for s := range 2 {
 		en := &p.end[s]
-		h.Str(string(en.ref.Node))
-		h.U64(uint64(len(en.ref.Inc)))
+		h.StringValue(string(en.ref.Node))
+		h.Uint64Value(uint64(len(en.ref.Inc)))
 		for _, c := range en.ref.Inc {
-			h.U64(uint64(c))
+			h.Uint64Value(uint64(c))
 		}
-		h.U64(uint64(en.id))
+		h.Uint64Value(uint64(en.id))
 		h.Bool(en.closed)
 		h.Bool(en.eof)
 		h.Bool(en.paused)
 		d := &p.dirs[s]
-		h.U64(uint64(d.lastArr))
-		h.U64(uint64(d.clogUntil))
+		h.Uint64Value(uint64(d.lastArr))
+		h.Uint64Value(uint64(d.clogUntil))
 		h.Bool(d.aborted)
 		h.Bool(d.blackhole)
 		hashItems(h, d.flight)

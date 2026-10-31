@@ -32,7 +32,7 @@ func scripted(fn func(m *scriptM, ev core.Event) []core.Action) core.MachineFact
 }
 
 func fact(name string, v int64) core.RecordFact {
-	return core.RecordFact{Fact: core.Fact{Name: name, Fields: []core.Field{{Key: "v", Value: core.I64(v)}}}}
+	return core.RecordFact{Fact: core.Fact{Name: name, Fields: []core.Field{{Key: "v", Value: core.Int64Value(v)}}}}
 }
 
 // ping: timer ping-pong that emits a "started" fact on boot and a "ping" fact
@@ -734,7 +734,7 @@ func TestPhaseAwareWorkload(t *testing.T) {
 	if len(sp) != 2 || sp[0].At != Time(core.Second) || sp[1].At != Time(2*core.Second) {
 		t.Fatalf("sim_phase facts: %+v", sp)
 	}
-	if v, _ := sp[0].Fact.Fields[0].Value.(core.U64); v != core.U64(PhaseRecovering) {
+	if v, _ := sp[0].Fact.Fields[0].Value.(core.Uint64Value); v != core.Uint64Value(PhaseRecovering) {
 		t.Fatalf("phase field: %+v", sp[0].Fact)
 	}
 	if len(wp) != 2 || wp[0].At != sp[0].At {

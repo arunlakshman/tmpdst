@@ -128,10 +128,10 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 			// Keys repeat (replays, and conflicts when the request differs).
 			c.Execute(ctx, n, core.ControlPlaneCall{Req: req, Op: core.CommitSegment{
 				SegmentKey: string(rune('a' + r.Between(0, 8))),
-				Batches:    []core.PendingBatch{{TP: tps[r.Between(0, 2)], Records: 1 + r.Between(0, 3)}},
+				Batches:    []core.PendingBatch{{TopicPartition: tps[r.Between(0, 2)], Records: 1 + r.Between(0, 3)}},
 			}})
 		default:
-			c.Execute(ctx, n, core.ControlPlaneCall{Req: req, Op: core.FindSegments{TP: tps[0]}})
+			c.Execute(ctx, n, core.ControlPlaneCall{Req: req, Op: core.FindSegments{TopicPartition: tps[0]}})
 		}
 		if r.Chance(0.3) {
 			ctx.Run()

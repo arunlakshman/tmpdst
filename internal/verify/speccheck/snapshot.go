@@ -8,8 +8,8 @@ import (
 
 // PartitionEnd is one partition's next offset.
 type PartitionEnd struct {
-	TP     core.TopicPartition
-	Offset core.Offset
+	TopicPartition core.TopicPartition
+	Offset         core.Offset
 }
 
 // Ends lists every partition that has a run with its end offset, ordered by
@@ -25,7 +25,7 @@ func (c *ControlPlane) Ends() []PartitionEnd {
 		slices.Sort(ps)
 		for _, p := range ps {
 			tp := core.NewTopicPartition(t, p)
-			out = append(out, PartitionEnd{TP: tp, Offset: c.End(tp)})
+			out = append(out, PartitionEnd{TopicPartition: tp, Offset: c.End(tp)})
 		}
 	}
 	return out

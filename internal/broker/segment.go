@@ -140,14 +140,14 @@ func (b *Broker) seal(why string) []core.Action {
 		b.env.Reachable("broker: segment sealed by partition cap")
 	}
 	acts := []core.Action{core.CancelTimer{ID: timerFlush}, recordFact("segment_sealed",
-		core.Field{Key: "reason", Value: core.Str(why)},
-		core.Field{Key: "bytes", Value: core.I64(b.open.bytes)},
-		core.Field{Key: "batches", Value: core.I64(len(bs))},
-		core.Field{Key: "parts", Value: core.I64(len(b.open.parts))},
-		core.Field{Key: "last", Value: core.I64(len(bs[len(bs)-1].data))},
-		core.Field{Key: "age", Value: core.I64(b.now - b.open.since)},
-		core.Field{Key: "inflight", Value: core.I64(len(b.segs) + 1)},
-		core.Field{Key: "buffered", Value: core.I64(b.bufBytes)})}
+		core.Field{Key: "reason", Value: core.StringValue(why)},
+		core.Field{Key: "bytes", Value: core.Int64Value(b.open.bytes)},
+		core.Field{Key: "batches", Value: core.Int64Value(len(bs))},
+		core.Field{Key: "parts", Value: core.Int64Value(len(b.open.parts))},
+		core.Field{Key: "last", Value: core.Int64Value(len(bs[len(bs)-1].data))},
+		core.Field{Key: "age", Value: core.Int64Value(b.now - b.open.since)},
+		core.Field{Key: "inflight", Value: core.Int64Value(len(b.segs) + 1)},
+		core.Field{Key: "buffered", Value: core.Int64Value(b.bufBytes)})}
 	b.open = openSegment{}
 	return append(acts, b.sealBatches(bs)...)
 }
@@ -155,7 +155,7 @@ func (b *Broker) seal(why string) []core.Action {
 func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
 	fb := make([]segmentformat.Batch, len(bs))
 	for i, pb := range bs {
-		fb[i] = segmentformat.Batch{TP: pb.tp, Records: uint32(pb.records), Data: pb.data}
+		fb[i] = segmentformat.Batch{TopicPartition: pb.tp, Records: uint32(pb.records), Data: pb.data}
 	}
 	data, entries, err := segmentformat.Encode(fb)
 	if err != nil {
@@ -189,14 +189,14 @@ func (b *Broker) onPutDone(s *segment, e core.ObjectPutDone) []core.Action {
 	attempts := s.attempts + 1
 	s.state, s.request, s.attempts, s.putDoneAt = segmentUploadDone, 0, 0, b.now
 	acts := []core.Action{recordFact("segment_put_done",
-		core.Field{Key: "segment", Value: core.Str(s.key)},
-		core.Field{Key: "bytes", Value: core.I64(len(s.data))},
-		core.Field{Key: "put_ns", Value: core.I64(b.now - s.sealedAt)},
-		core.Field{Key: "attempts", Value: core.I64(attempts)})}
+		core.Field{Key: "segment", Value: core.StringValue(s.key)},
+		core.Field{Key: "bytes", Value: core.Int64Value(len(s.data))},
+		core.Field{Key: "put_ns", Value: core.Int64Value(b.now - s.sealedAt)},
+		core.Field{Key: "attempts", Value: core.Int64Value(attempts)})}
 	if b.cfg.InjectedBug == InjectedBugEarlyAck {
 		for _, pb := range s.batches {
 			b.guess += uint64(pb.records)
-			b.answerPart(pb, errNone, core.BatchRange{TP: pb.tp, Base: core.Offset(b.guess) - core.Offset(pb.records), Count: pb.records}, s.key)
+			b.answerPart(pb, errNone, core.BatchRange{TopicPartition: pb.tp, Base: core.Offset(b.guess) - core.Offset(pb.records), Count: pb.records}, s.key)
 		}
 	}
 	return append(acts, b.pump()...)
@@ -218,7 +218,7 @@ func (b *Broker) commit(s *segment) []core.Action {
 	}
 	pend := make([]core.PendingBatch, len(s.batches))
 	for i, pb := range s.batches {
-		pend[i] = core.PendingBatch{TP: pb.tp, Records: pb.records, Loc: pb.loc}
+		pend[i] = core.PendingBatch{TopicPartition: pb.tp, Records: pb.records, Loc: pb.loc}
 	}
 	key := s.key
 	if b.cfg.InjectedBug == InjectedBugFreshKeyOnRetry && s.attempts > 0 {
@@ -234,7 +234,7 @@ func (b *Broker) onCommit(s *segment, e core.ControlPlaneDone) []core.Action {
 		resp, ok := e.Resp.(core.CommitSegmentResp)
 		shape := ok && len(resp.Assigned) == len(s.batches)
 		for i := 0; shape && i < len(s.batches); i++ {
-			shape = resp.Assigned[i].TP == s.batches[i].tp
+			shape = resp.Assigned[i].TopicPartition == s.batches[i].tp
 		}
 		b.env.AlwaysOrUnreachable(shape, "broker: commit answers every batch in order")
 		if !shape {
@@ -267,15 +267,15 @@ func (b *Broker) onCommit(s *segment, e core.ControlPlaneDone) []core.Action {
 // the time the uploaded segment queued behind earlier segments' commits.
 func (b *Broker) committed(s *segment, rs []core.BatchRange) []core.Action {
 	acts := []core.Action{recordFact("segment_committed",
-		core.Field{Key: "segment", Value: core.Str(s.key)},
-		core.Field{Key: "batches", Value: core.I64(len(s.batches))},
-		core.Field{Key: "bytes", Value: core.I64(len(s.data))},
-		core.Field{Key: "put_ns", Value: core.I64(s.putDoneAt - s.sealedAt)},
-		core.Field{Key: "wait_ns", Value: core.I64(s.commitAt - s.putDoneAt)},
-		core.Field{Key: "commit_ns", Value: core.I64(b.now - s.commitAt)},
-		core.Field{Key: "total_ns", Value: core.I64(b.now - s.sealedAt)},
-		core.Field{Key: "inflight", Value: core.I64(len(b.segs) - 1)},
-		core.Field{Key: "buffered", Value: core.I64(b.bufBytes - s.dataBytes())})}
+		core.Field{Key: "segment", Value: core.StringValue(s.key)},
+		core.Field{Key: "batches", Value: core.Int64Value(len(s.batches))},
+		core.Field{Key: "bytes", Value: core.Int64Value(len(s.data))},
+		core.Field{Key: "put_ns", Value: core.Int64Value(s.putDoneAt - s.sealedAt)},
+		core.Field{Key: "wait_ns", Value: core.Int64Value(s.commitAt - s.putDoneAt)},
+		core.Field{Key: "commit_ns", Value: core.Int64Value(b.now - s.commitAt)},
+		core.Field{Key: "total_ns", Value: core.Int64Value(b.now - s.sealedAt)},
+		core.Field{Key: "inflight", Value: core.Int64Value(len(b.segs) - 1)},
+		core.Field{Key: "buffered", Value: core.Int64Value(b.bufBytes - s.dataBytes())})}
 	for i, pb := range s.batches {
 		b.answerPart(pb, errNone, rs[i], s.key)
 	}
@@ -303,11 +303,11 @@ func (b *Broker) endSegment(s *segment) []core.Action {
 // failSegment answers every unanswered batch of s with code.
 func (b *Broker) failSegment(s *segment, code kafkaErrorCode) []core.Action {
 	acts := []core.Action{recordFact("segment_failed",
-		core.Field{Key: "segment", Value: core.Str(s.key)},
-		core.Field{Key: "code", Value: core.I64(int64(code))},
-		core.Field{Key: "total_ns", Value: core.I64(b.now - s.sealedAt)},
-		core.Field{Key: "inflight", Value: core.I64(len(b.segs) - 1)},
-		core.Field{Key: "buffered", Value: core.I64(b.bufBytes - s.dataBytes())})}
+		core.Field{Key: "segment", Value: core.StringValue(s.key)},
+		core.Field{Key: "code", Value: core.Int64Value(int64(code))},
+		core.Field{Key: "total_ns", Value: core.Int64Value(b.now - s.sealedAt)},
+		core.Field{Key: "inflight", Value: core.Int64Value(len(b.segs) - 1)},
+		core.Field{Key: "buffered", Value: core.Int64Value(b.bufBytes - s.dataBytes())})}
 	for _, pb := range s.batches {
 		b.answerPart(pb, code, core.BatchRange{}, "")
 	}
@@ -378,11 +378,11 @@ func (b *Broker) answerPart(pb *partitionBatch, code kafkaErrorCode, r core.Batc
 	if code == errNone {
 		pb.part.BaseOffset = int64(r.Base)
 		pb.s.facts = append(pb.s.facts, core.Fact{Name: "produce_acked", Fields: []core.Field{
-			{Key: "topic", Value: core.Str(pb.tp.Topic)},
-			{Key: "partition", Value: core.I64(pb.tp.Partition)},
-			{Key: "base_offset", Value: core.I64(r.Base)},
-			{Key: "count", Value: core.I64(pb.records)},
-			{Key: "segment", Value: core.Str(key)},
+			{Key: "topic", Value: core.StringValue(pb.tp.Topic)},
+			{Key: "partition", Value: core.Int64Value(pb.tp.Partition)},
+			{Key: "base_offset", Value: core.Int64Value(r.Base)},
+			{Key: "count", Value: core.Int64Value(pb.records)},
+			{Key: "segment", Value: core.StringValue(key)},
 		}})
 	}
 	b.finishPart(pb.s)

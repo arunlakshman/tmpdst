@@ -42,16 +42,16 @@ func ms(ns int64) float64 { return float64(ns/10_000) / 100 } // 10 us resolutio
 
 func fi(f core.Fact, k string) int64 {
 	switch x := f.Field(k).(type) {
-	case core.I64:
+	case core.Int64Value:
 		return int64(x)
-	case core.U64:
+	case core.Uint64Value:
 		return int64(x)
 	}
 	return 0
 }
 
 func fs(f core.Fact, k string) string {
-	s, _ := f.Field(k).(core.Str)
+	s, _ := f.Field(k).(core.StringValue)
 	return string(s)
 }
 

@@ -99,9 +99,9 @@ func checksum(bs []core.PendingBatch) [checksumLength]byte {
 func checksumBytes(bs []core.PendingBatch) []byte {
 	n := binary.AppendUvarint(nil, uint64(len(bs)))
 	for _, b := range bs {
-		n = binary.AppendUvarint(n, uint64(len(b.TP.Topic)))
-		n = append(n, b.TP.Topic...)
-		n = binary.AppendVarint(n, int64(b.TP.Partition))
+		n = binary.AppendUvarint(n, uint64(len(b.TopicPartition.Topic)))
+		n = append(n, b.TopicPartition.Topic...)
+		n = binary.AppendVarint(n, int64(b.TopicPartition.Partition))
 		n = binary.AppendVarint(n, b.Records)
 		n = binary.AppendUvarint(n, uint64(len(b.Loc.Key)))
 		n = append(n, b.Loc.Key...)
@@ -242,7 +242,7 @@ func decodeBatchRun(tp core.TopicPartition, base int64, b []byte) ([]core.BatchR
 		if ki >= uint64(len(keys)) {
 			return nil, errCorrupt
 		}
-		out = append(out, core.BatchRange{TP: tp, Base: core.Offset(base), Count: int64(cnt),
+		out = append(out, core.BatchRange{TopicPartition: tp, Base: core.Offset(base), Count: int64(cnt),
 			Loc: core.SegmentRef{Key: keys[ki], Off: off, Len: ln}})
 		base += int64(cnt)
 	}

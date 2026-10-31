@@ -103,7 +103,7 @@ func (o *expectedLogChecker) record(v simulator.View, pl *partitionLog, off int6
 	}
 	op := v.History().Ops()[hi]
 	po := op.Op.(ProduceOp)
-	as.Always(po.TP == pl.tp && i < len(po.Vals) && po.Vals[i] == val, "kafka: a record is committed where and as it was produced", d...)
+	as.Always(po.TopicPartition == pl.tp && i < len(po.Vals) && po.Vals[i] == val, "kafka: a record is committed where and as it was produced", d...)
 	as.Always(op.Outcome != simulator.OpGivenUp, "kafka: a definitely rejected batch is never committed", d...)
 }
 
@@ -112,10 +112,10 @@ func (o *expectedLogChecker) record(v simulator.View, pl *partitionLog, off int6
 func (o *expectedLogChecker) acks(v simulator.View) {
 	for _, tf := range v.Timeline().Since("produce_acked", &o.ackCur) {
 		f := tf.Fact
-		topic, _ := f.Field("topic").(core.Str)
-		part, ok1 := f.Field("partition").(core.I64)
-		base, ok2 := f.Field("base_offset").(core.I64)
-		count, ok3 := f.Field("count").(core.I64)
+		topic, _ := f.Field("topic").(core.StringValue)
+		part, ok1 := f.Field("partition").(core.Int64Value)
+		base, ok2 := f.Field("base_offset").(core.Int64Value)
+		count, ok3 := f.Field("count").(core.Int64Value)
 		v.Assert().Always(ok1 && ok2 && ok3, "kafka: ack fact is well formed")
 		if !ok1 || !ok2 || !ok3 {
 			continue
@@ -153,9 +153,9 @@ func (o *expectedLogChecker) checkRead(v simulator.View, ro ReadOp, rr ReadRes) 
 	as := v.Assert()
 	for i, part := range rr.Parts {
 		from := ro.Parts[i]
-		ti := o.idx[from.TP]
+		ti := o.idx[from.TopicPartition]
 		pl := o.logs[ti]
-		det := []core.ContextPair{{Key: "client", Value: ro.Client}, {Key: "tp", Value: topicPartitionName(from.TP)}, {Key: "from", Value: from.Off}}
+		det := []core.ContextPair{{Key: "client", Value: ro.Client}, {Key: "tp", Value: topicPartitionName(from.TopicPartition)}, {Key: "from", Value: from.Off}}
 		as.Always(!part.Corrupt, "kafka: a consumer never receives a corrupt batch", det...)
 		as.Always(part.Code != 1, "kafka: a consumer's fetch is never out of range", det...)
 		if part.Code != 0 {
@@ -193,12 +193,12 @@ func (o *expectedLogChecker) AtEnd(v simulator.View) {
 			continue
 		}
 		res, _ := op.Result.(ProduceRes)
-		ti := o.idx[po.TP]
+		ti := o.idx[po.TopicPartition]
 		if op.Outcome != simulator.OpPending && len(po.Vals) > 0 {
 			// Every send commits at most once (a MaybeApplied commit is retried
 			// under its key), so a batch is in the log at most once per send.
 			as.Always(o.seen[po.Vals[0]] <= max(res.Attempts, 1), "kafka: a batch is committed at most once per send",
-				core.ContextPair{Key: "tp", Value: topicPartitionName(po.TP)}, core.ContextPair{Key: "value", Value: po.Vals[0]},
+				core.ContextPair{Key: "tp", Value: topicPartitionName(po.TopicPartition)}, core.ContextPair{Key: "value", Value: po.Vals[0]},
 				core.ContextPair{Key: "times", Value: o.seen[po.Vals[0]]}, core.ContextPair{Key: "sends", Value: res.Attempts})
 		}
 		switch op.Outcome {
@@ -207,14 +207,14 @@ func (o *expectedLogChecker) AtEnd(v simulator.View) {
 				off := res.Base + int64(i)
 				same := res.Base >= 0 && off < int64(len(o.logs[ti].vals)) && o.logs[ti].vals[off] == val
 				as.Always(same, "kafka: an acked record is in the log at its acked offset",
-					core.ContextPair{Key: "tp", Value: topicPartitionName(po.TP)}, core.ContextPair{Key: "offset", Value: off}, core.ContextPair{Key: "value", Value: val})
+					core.ContextPair{Key: "tp", Value: topicPartitionName(po.TopicPartition)}, core.ContextPair{Key: "offset", Value: off}, core.ContextPair{Key: "value", Value: val})
 			}
 			// One batch at a time per (client, partition): the next batch is built
 			// after this one was acked, so its acked offset is higher.
 			k := [2]int{po.Client, ti}
 			if prev, had := lastAcked[k]; had {
 				as.Always(res.Base >= prev+1, "kafka: a client's acked batches for a partition are at increasing offsets",
-					core.ContextPair{Key: "tp", Value: topicPartitionName(po.TP)}, core.ContextPair{Key: "base", Value: res.Base}, core.ContextPair{Key: "previous", Value: prev})
+					core.ContextPair{Key: "tp", Value: topicPartitionName(po.TopicPartition)}, core.ContextPair{Key: "base", Value: res.Base}, core.ContextPair{Key: "previous", Value: prev})
 			}
 			lastAcked[k] = res.Base
 		case simulator.OpGivenUp:

@@ -231,9 +231,9 @@ func invalidCommitCase(o core.CommitSegment) string {
 		switch {
 		case b.Records <= 0:
 			return "commit invalid: records <= 0"
-		case b.TP.Partition < 0:
+		case b.TopicPartition.Partition < 0:
 			return "commit invalid: negative partition"
-		case b.TP.Topic == "":
+		case b.TopicPartition.Topic == "":
 			return "commit invalid: empty topic"
 		}
 	}
@@ -253,7 +253,7 @@ func classifyLookup(spec *speccheck.ControlPlane, o core.FindSegments, done core
 	if resp.Ranges[0].Base < o.From {
 		out = append(out, "lookup From inside a run")
 	}
-	uncut := spec.Exec(core.ControlPlaneCall{Op: core.FindSegments{TP: o.TP, From: o.From}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
+	uncut := spec.Exec(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: o.TopicPartition, From: o.From}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
 	if len(resp.Ranges) < len(uncut.Ranges) {
 		out = append(out, "lookup MaxBytes cut")
 	}
@@ -335,7 +335,7 @@ func TestBatchesReplayAndConflict(t *testing.T) {
 			}
 		}
 		moved := Batches(p, key, "other", 0)
-		if len(moved) != len(first) || moved[0].TP != first[0].TP || moved[0].Records != first[0].Records {
+		if len(moved) != len(first) || moved[0].TopicPartition != first[0].TopicPartition || moved[0].Records != first[0].Records {
 			t.Errorf("key %q: the same shape under a new key changed the batches.", key)
 		}
 	}
@@ -406,8 +406,8 @@ func TestFormatExamples(t *testing.T) {
 		{FormatObjectOp(core.ObjectList{Req: 3, Prefix: "a/"}), `core.ObjectList{Req: 3, Prefix: "a/"}`},
 		{FormatControlPlaneOp(NewCreateTopic("t1", 2)), `generator.NewCreateTopic("t1", 2)`},
 		{
-			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: core.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})),
-			`generator.NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: core.TopicPartitionKey("t1", 1), From: -1, MaxBytes: 60}})`,
+			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TopicPartition: core.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})),
+			`generator.NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TopicPartition: core.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})`,
 		},
 	}
 	for _, c := range cases {

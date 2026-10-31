@@ -178,7 +178,7 @@ func PartialApplyOnInvalidBatch() ControlPlaneBug {
 				if ok && commit.SegmentKey != "" {
 					valid := 0
 					for valid < len(commit.Batches) && commit.Batches[valid].Records > 0 &&
-						commit.Batches[valid].TP.Topic != "" && commit.Batches[valid].TP.Partition >= 0 {
+						commit.Batches[valid].TopicPartition.Topic != "" && commit.Batches[valid].TopicPartition.Partition >= 0 {
 						valid++
 					}
 					if valid > 0 && valid < len(commit.Batches) {
@@ -279,7 +279,7 @@ func minimizeCountsForCall(counts map[string]int32, op core.ControlPlaneOperatio
 	switch op.(type) {
 	case core.CommitSegment:
 		for _, a := range r.Assigned {
-			counts[a.TP.Topic] = max(counts[a.TP.Topic], a.TP.Partition+1)
+			counts[a.TopicPartition.Topic] = max(counts[a.TopicPartition.Topic], a.TopicPartition.Partition+1)
 		}
 	case core.DescribeTopics:
 		r.Topics = slices.Clone(r.Topics)

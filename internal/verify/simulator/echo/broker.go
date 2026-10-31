@@ -238,7 +238,7 @@ func (b *Broker) start(o *op) []core.Action {
 	if o.kind == opGet {
 		return b.lookup(o)
 	}
-	data, entries, err := segmentformat.Encode([]segmentformat.Batch{{TP: topicPartition(), Records: 1, Data: o.payload}})
+	data, entries, err := segmentformat.Encode([]segmentformat.Batch{{TopicPartition: topicPartition(), Records: 1, Data: o.payload}})
 	if err != nil {
 		return b.reply(o, "ERR")
 	}
@@ -269,8 +269,8 @@ func (b *Broker) fail(o *op) []core.Action {
 func (b *Broker) ack(o *op, off core.Offset) []core.Action {
 	b.acked++
 	acts := []core.Action{emit("echo_acked",
-		core.Field{Key: "offset", Value: core.I64(off)},
-		core.Field{Key: "key", Value: core.Str(o.key)},
+		core.Field{Key: "offset", Value: core.Int64Value(off)},
+		core.Field{Key: "key", Value: core.StringValue(o.key)},
 		core.Field{Key: "payload", Value: core.Bytes(o.payload)})}
 	return append(acts, b.send(o.conn, "OK "+strconv.FormatInt(int64(off), 10))...)
 }
@@ -298,7 +298,7 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 			return b.put(o)
 		case stateCommit:
 			b.env.Reachable("echo: commit retried after MaybeApplied")
-			return append([]core.Action{emit("echo_commit_retried", core.Field{Key: "key", Value: core.Str(o.key)})}, b.commit(o)...)
+			return append([]core.Action{emit("echo_commit_retried", core.Field{Key: "key", Value: core.StringValue(o.key)})}, b.commit(o)...)
 		case stateLookup:
 			return b.lookup(o)
 		default:
@@ -331,7 +331,7 @@ func (b *Broker) commit(o *op) []core.Action {
 	o.state, o.req = stateCommit, b.nextRequestID()
 	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: core.CommitSegment{
 		SegmentKey: o.key,
-		Batches:    []core.PendingBatch{{TP: topicPartition(), Records: 1, Loc: o.ref}},
+		Batches:    []core.PendingBatch{{TopicPartition: topicPartition(), Records: 1, Loc: o.ref}},
 	}}}
 }
 
@@ -353,7 +353,7 @@ func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 	switch {
 	case e.Err == core.OK:
 		resp, ok := e.Resp.(core.CommitSegmentResp)
-		okShape := ok && len(resp.Assigned) == 1 && resp.Assigned[0].TP == topicPartition() && resp.Assigned[0].Loc == o.ref
+		okShape := ok && len(resp.Assigned) == 1 && resp.Assigned[0].TopicPartition == topicPartition() && resp.Assigned[0].Loc == o.ref
 		b.env.Always(okShape, "echo: commit assigns exactly the one batch")
 		if !okShape {
 			return b.reply(o, "ERR maybe")
@@ -383,7 +383,7 @@ func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 
 func (b *Broker) lookup(o *op) []core.Action {
 	o.state, o.req = stateLookup, b.nextRequestID()
-	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: core.FindSegments{TP: topicPartition(), From: o.offset}}}
+	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: core.FindSegments{TopicPartition: topicPartition(), From: o.offset}}}
 }
 
 func (b *Broker) onLookup(o *op, e core.ControlPlaneDone) []core.Action {
@@ -428,7 +428,7 @@ func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
 	}
 	if err != nil {
 		b.env.Reachable("echo: corruption detected on read")
-		acts := []core.Action{emit("corruption_detected", core.Field{Key: "key", Value: core.Str(o.ref.Key)})}
+		acts := []core.Action{emit("corruption_detected", core.Field{Key: "key", Value: core.StringValue(o.ref.Key)})}
 		return append(acts, b.reply(o, "ERR corrupt")...)
 	}
 	if b.mut == bugBadRead {
@@ -444,36 +444,36 @@ func emit(name string, fs ...core.Field) core.RecordFact {
 // StateHash folds all state in a fixed order.
 func (b *Broker) StateHash() uint64 {
 	h := core.NewHasher()
-	h.U64(uint64(b.nextReq))
-	h.U64(b.nextOp)
-	h.U64(uint64(b.timerGen))
+	h.Uint64Value(uint64(b.nextReq))
+	h.Uint64Value(b.nextOp)
+	h.Uint64Value(uint64(b.timerGen))
 	h.Bool(b.stopping)
-	h.U64(b.acked)
-	h.U64(uint64(b.mut))
-	h.U64(uint64(len(b.conns)))
+	h.Uint64Value(b.acked)
+	h.Uint64Value(uint64(b.mut))
+	h.Uint64Value(uint64(len(b.conns)))
 	for _, c := range b.conns {
-		h.U64(uint64(c.id))
+		h.Uint64Value(uint64(c.id))
 		h.Bytes(c.fr.buf)
 	}
-	h.U64(uint64(len(b.ops)))
+	h.Uint64Value(uint64(len(b.ops)))
 	for _, o := range b.ops {
-		h.U64(o.id)
-		h.U64(uint64(o.conn))
-		h.U64(uint64(o.kind))
-		h.U64(uint64(o.state))
-		h.U64(uint64(o.retry))
-		h.U64(uint64(o.req))
-		h.U64(uint64(o.gen))
-		h.U64(uint64(o.attempts))
+		h.Uint64Value(o.id)
+		h.Uint64Value(uint64(o.conn))
+		h.Uint64Value(uint64(o.kind))
+		h.Uint64Value(uint64(o.state))
+		h.Uint64Value(uint64(o.retry))
+		h.Uint64Value(uint64(o.req))
+		h.Uint64Value(uint64(o.gen))
+		h.Uint64Value(uint64(o.attempts))
 		h.Bool(o.maybe)
 		h.Bool(o.replied)
 		h.Bytes(o.payload)
-		h.U64(uint64(len(o.segment)))
-		h.Str(o.key)
-		h.Str(o.ref.Key)
-		h.U64(uint64(o.ref.Off))
-		h.U64(uint64(o.ref.Len))
-		h.U64(uint64(o.offset))
+		h.Uint64Value(uint64(len(o.segment)))
+		h.StringValue(o.key)
+		h.StringValue(o.ref.Key)
+		h.Uint64Value(uint64(o.ref.Off))
+		h.Uint64Value(uint64(o.ref.Len))
+		h.Uint64Value(uint64(o.offset))
 	}
 	return uint64(h)
 }

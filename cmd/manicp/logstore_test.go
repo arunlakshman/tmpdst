@@ -149,7 +149,7 @@ func commitLoop(ctx context.Context, c *controlplaneclient.Client, w int, a *ack
 		}
 		key := fmt.Sprintf("seg/w%d-%06d", w, i)
 		op := core.CommitSegment{SegmentKey: key, Batches: []core.PendingBatch{
-			{TP: core.NewTopicPartition("t", int32(i%3)), Records: 2 + int64(w), Loc: core.SegmentRef{Key: key, Off: 0, Len: 10}}}}
+			{TopicPartition: core.NewTopicPartition("t", int32(i%3)), Records: 2 + int64(w), Loc: core.SegmentRef{Key: key, Off: 0, Len: 10}}}}
 		resp, err := commitRetrying(ctx, c, op)
 		if err != nil {
 			return fmt.Errorf("%s: %w", key, err)
@@ -188,20 +188,20 @@ func partitionsMatch(ctx context.Context, c *controlplaneclient.Client, a *acks)
 	want := map[core.TopicPartition]map[run]string{}
 	for key, rs := range a.rngs {
 		for _, r := range rs {
-			if want[r.TP] == nil {
-				want[r.TP] = map[run]string{}
+			if want[r.TopicPartition] == nil {
+				want[r.TopicPartition] = map[run]string{}
 			}
 			rn := run{int64(r.Base), r.Count}
-			if prev, dup := want[r.TP][rn]; dup {
-				return fmt.Errorf("%v: %s and %s were both acked offsets %v", r.TP, prev, key, rn)
+			if prev, dup := want[r.TopicPartition][rn]; dup {
+				return fmt.Errorf("%v: %s and %s were both acked offsets %v", r.TopicPartition, prev, key, rn)
 			}
-			want[r.TP][rn] = key
+			want[r.TopicPartition][rn] = key
 		}
 	}
 	for tp, runs := range want {
 		var next int64
 		for next < int64(len(runs))*100 {
-			resp, err := c.Call(ctx, core.FindSegments{TP: tp, From: core.Offset(next), MaxBytes: 1 << 30})
+			resp, err := c.Call(ctx, core.FindSegments{TopicPartition: tp, From: core.Offset(next), MaxBytes: 1 << 30})
 			if err != nil {
 				return err
 			}
@@ -306,7 +306,7 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 	for i := range 5 {
 		key := fmt.Sprintf("seg/%d", i)
 		_, err := c.Call(t.Context(), core.CommitSegment{SegmentKey: key, Batches: []core.PendingBatch{
-			{TP: core.NewTopicPartition("t", 0), Records: 3, Loc: core.SegmentRef{Key: key, Len: 9}}}})
+			{TopicPartition: core.NewTopicPartition("t", 0), Records: 3, Loc: core.SegmentRef{Key: key, Len: 9}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -316,7 +316,7 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 	}
 	// Restart against the same Dynamo log: catch-up rebuilds fold state.
 	n2 := startLogNode(t, d, "n0", 0, "-checkpoint-every", "-1s")
-	resp, err := controlplaneclient.New(n2.addr, nil).Call(t.Context(), core.FindSegments{TP: core.NewTopicPartition("t", 0), MaxBytes: 1 << 20})
+	resp, err := controlplaneclient.New(n2.addr, nil).Call(t.Context(), core.FindSegments{TopicPartition: core.NewTopicPartition("t", 0), MaxBytes: 1 << 20})
 	if err != nil || resp.(core.FindSegmentsResp).End != 15 {
 		t.Fatalf("after restart: %v %+v\n%s", err, resp, n2.logs.String())
 	}

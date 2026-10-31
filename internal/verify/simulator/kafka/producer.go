@@ -62,17 +62,17 @@ func (b *batch) expect() int16 {
 }
 
 func (p *producer) hash(h *core.Hasher) {
-	h.U64(uint64(p.serial))
+	h.Uint64Value(uint64(p.serial))
 	h.Bool(p.noNew)
 	for _, b := range p.cur {
 		h.Bytes(b.id[:])
-		h.U64(uint64(b.tpIdx))
-		h.U64(uint64(b.attempts))
+		h.Uint64Value(uint64(b.tpIdx))
+		h.Uint64Value(uint64(b.attempts))
 		h.Bool(b.ambiguous)
 		h.Bool(b.idem)
 		h.Bool(b.corrupt)
-		h.U64(uint64(b.lastCode))
-		h.U64(b.dig)
+		h.Uint64Value(uint64(b.lastCode))
+		h.Uint64Value(b.dig)
 	}
 }
 
@@ -176,7 +176,7 @@ func (w *Workload) newBatches(c *client) {
 		dh.Bytes(data)
 		b.dig = uint64(dh)
 		if w.hist != nil {
-			w.hist.Invoke(w.self, b.id, b.id, ProduceOp{Client: c.ID, Batch: p.serial, TP: w.tps[idx], Vals: b.vals, Idem: b.idem})
+			w.hist.Invoke(w.self, b.id, b.id, ProduceOp{Client: c.ID, Batch: p.serial, TopicPartition: w.tps[idx], Vals: b.vals, Idem: b.idem})
 		}
 		p.cur = append(p.cur, b)
 	}

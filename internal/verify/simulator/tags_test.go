@@ -96,7 +96,7 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		"GroupLeaveResp": core.GroupLeaveResp{}, "DescribeGroupsResp": core.DescribeGroupsResp{},
 	}
 	fields := map[string]core.FieldValue{
-		"I64": core.I64(0), "U64": core.U64(0), "Str": core.Str(""), "Bool": core.Bool(false), "Bytes": core.Bytes(nil),
+		"Int64Value": core.Int64Value(0), "Uint64Value": core.Uint64Value(0), "StringValue": core.StringValue(""), "Bool": core.Bool(false), "Bytes": core.Bytes(nil),
 	}
 	src := scanCore(t)
 	for marker, have := range map[string][]string{

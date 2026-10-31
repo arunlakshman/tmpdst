@@ -230,12 +230,12 @@ func (m *Machine) projectBases(c core.CommitSegment) []core.Offset {
 	}
 	bases := make([]core.Offset, len(c.Batches))
 	for i, b := range c.Batches {
-		e, ok := m.proj[b.TP]
+		e, ok := m.proj[b.TopicPartition]
 		if !ok {
-			e = m.fold.End(b.TP) + 1 // skip one
+			e = m.fold.End(b.TopicPartition) + 1 // skip one
 		}
 		bases[i] = e
-		m.proj[b.TP] = e + core.Offset(b.Records)
+		m.proj[b.TopicPartition] = e + core.Offset(b.Records)
 	}
 	return bases
 }

@@ -202,8 +202,8 @@ func keysText(keys []string) string {
 func rangesText(ranges []core.BatchRange) string {
 	parts := make([]string, len(ranges))
 	for i, r := range ranges {
-		parts[i] = "{topic " + strconv.Quote(r.TP.Topic) +
-			" partition " + strconv.FormatInt(int64(r.TP.Partition), 10) +
+		parts[i] = "{topic " + strconv.Quote(r.TopicPartition.Topic) +
+			" partition " + strconv.FormatInt(int64(r.TopicPartition.Partition), 10) +
 			" base " + strconv.FormatInt(int64(r.Base), 10) +
 			" count " + strconv.FormatInt(r.Count, 10) +
 			" segment " + strconv.Quote(r.Loc.Key) +

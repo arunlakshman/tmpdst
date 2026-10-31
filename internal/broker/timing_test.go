@@ -8,7 +8,7 @@ import (
 	"manifester/internal/core"
 )
 
-func ns(f core.Fact, k string) int64 { return int64(f.Field(k).(core.I64)) }
+func ns(f core.Fact, k string) int64 { return int64(f.Field(k).(core.Int64Value)) }
 
 // A segment's timing facts add up: put + queue wait + commit = seal-to-commit.
 // The second of two segments uploaded together waits for the first one's commit.

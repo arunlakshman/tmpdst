@@ -80,7 +80,7 @@ func (e *Engine) Execute(ctx simulator.FakeServiceContext, from core.NodeInstanc
 
 // Committed returns the committed ranges of tp in offset order.
 func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
-	d := e.spec.Exec(core.ControlPlaneCall{Op: core.FindSegments{TP: tp}}).(core.ControlPlaneDone)
+	d := e.spec.Exec(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: tp}}).(core.ControlPlaneDone)
 	if d.Err != core.OK {
 		return nil
 	}
@@ -112,20 +112,20 @@ func (e *Engine) commitItems(c core.CommitSegment) int {
 	topics := 0
 	known := e.spec.Exec(core.ControlPlaneCall{Op: core.DescribeTopics{}}).(core.ControlPlaneDone).Resp.(core.DescribeTopicsResp).Topics
 	for _, b := range c.Batches {
-		if !slices.Contains(tps, b.TP) {
-			tps = append(tps, b.TP)
+		if !slices.Contains(tps, b.TopicPartition) {
+			tps = append(tps, b.TopicPartition)
 		}
 		have := int32(0)
 		for _, t := range known {
-			if t.Name == b.TP.Topic {
+			if t.Name == b.TopicPartition.Topic {
 				have = t.Partitions
 			}
 		}
-		if want := b.TP.Partition + 1; want > max(have, grown[b.TP.Topic]) {
-			if _, seen := grown[b.TP.Topic]; !seen {
+		if want := b.TopicPartition.Partition + 1; want > max(have, grown[b.TopicPartition.Topic]) {
+			if _, seen := grown[b.TopicPartition.Topic]; !seen {
 				topics++
 			}
-			grown[b.TP.Topic] = want
+			grown[b.TopicPartition.Topic] = want
 		}
 	}
 	return 1 + len(tps) + topics

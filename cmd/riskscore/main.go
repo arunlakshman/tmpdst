@@ -1,6 +1,6 @@
-// Command riskscore computes the CRAP (Change Risk Anti-Patterns) score of
+// Command riskscore computes the change risk score of
 // every Go function from cyclomatic complexity and a coverprofile, and fails
-// when a function is too crappy. See docs/crap-gate.md.
+// when a function is too risky. See docs/risk-gate.md.
 //
 // Standard library only (dependency-audit policy, decision I).
 package main
@@ -17,10 +17,10 @@ import (
 	"strings"
 )
 
-const rebuildHint = "go run ./cmd/riskscore -profile <cover.out> -update-baseline   (or: make crap-baseline); review and commit the diff of ops/crap-baseline.json"
+const rebuildHint = "go run ./cmd/riskscore -profile <cover.out> -update-baseline   (or: make risk-baseline); review and commit the diff of ops/risk-baseline.json"
 
 // Baseline is the checked-in ratchet file: the offenders that existed when it
-// was generated, with their CRAP at that time.
+// was generated, with their risk score at that time.
 type Baseline struct {
 	Threshold float64            `json:"threshold"`
 	Note      string             `json:"note"`
@@ -31,7 +31,7 @@ type Baseline struct {
 type Result struct {
 	Offenders []*Func  // all functions over the threshold
 	New       []*Func  // not in baseline
-	Worse     []*Func  // in baseline, CRAP grew beyond tolerance
+	Worse     []*Func  // in baseline, risk score grew beyond tolerance
 	Improved  []string // baselined, now fine or better (baseline could be tightened)
 }
 
@@ -104,13 +104,13 @@ func parseFlags(args []string, stderr io.Writer) (*config, bool) {
 	fs.StringVar(&c.root, "root", ".", "module root (directory with go.mod)")
 	fs.StringVar(&c.profile, "profile", "", "coverprofile from go test -coverprofile (required)")
 	fs.StringVar(&c.merge, "merge-profile", "", "comma-separated extra coverprofiles to merge (e.g. from Docker-backed integration tests)")
-	fs.Float64Var(&c.threshold, "threshold", envFloat("CRAP_THRESHOLD", 20), "fail above this CRAP score (env CRAP_THRESHOLD)")
-	fs.StringVar(&c.basePath, "baseline", "ops/crap-baseline.json", "ratchet baseline file")
+	fs.Float64Var(&c.threshold, "threshold", envFloat("RISK_THRESHOLD", 20), "fail above this risk score score (env RISK_THRESHOLD)")
+	fs.StringVar(&c.basePath, "baseline", "ops/risk-baseline.json", "ratchet baseline file")
 	fs.BoolVar(&c.update, "update-baseline", false, "write the baseline from the current offenders and exit 0")
 	fs.BoolVar(&c.strict, "strict", false, "ignore the baseline: fail on every offender")
 	fs.BoolVar(&c.asJSON, "json", false, "machine-readable output")
 	fs.IntVar(&c.top, "top", 25, "rows in the table (0 = all functions)")
-	fs.Float64Var(&c.tol, "tolerance", 0.5, "CRAP increase tolerated for a baselined function")
+	fs.Float64Var(&c.tol, "tolerance", 0.5, "risk score increase tolerated for a baselined function")
 	fs.StringVar(&c.exclude, "exclude", "", "regexp on the function key (dir.Recv.Name) to leave out of analysis")
 	if err := fs.Parse(args); err != nil {
 		return nil, false
@@ -123,7 +123,7 @@ func parseFlags(args []string, stderr io.Writer) (*config, bool) {
 }
 
 // analyse parses the tree, applies the exclude filter and the merged coverage,
-// and returns the functions sorted by CRAP, worst first.
+// and returns the functions sorted by risk score, worst first.
 func analyse(c *config) ([]*Func, error) {
 	funcs, err := ParseTree(c.root)
 	if err != nil {
@@ -271,12 +271,12 @@ func writeText(w io.Writer, funcs []*Func, v Result, threshold float64, top int,
 	if top > 0 && top < n {
 		n = top
 	}
-	_, _ = fmt.Fprintf(w, "%8s %5s %6s  %-52s %s\n", "CRAP", "CC", "COV%", "FUNCTION", "LOCATION")
+	_, _ = fmt.Fprintf(w, "%8s %5s %6s  %-52s %s\n", "RISK", "CC", "COV%", "FUNCTION", "LOCATION")
 	for _, f := range funcs[:n] {
 		_, _ = fmt.Fprintf(w, "%8.1f %5d %5.1f%%  %-52s %s:%d\n", f.RiskScore, f.Complexity, f.Coverage*100, f.Key, f.File, f.Line)
 	}
 	c := counts(funcs)
-	_, _ = fmt.Fprintf(w, "\n%d functions analysed. Functions with CRAP over:", len(funcs))
+	_, _ = fmt.Fprintf(w, "\n%d functions analysed. Functions with risk score over:", len(funcs))
 	for _, t := range reportThresholds {
 		_, _ = fmt.Fprintf(w, "  %.0f: %d", t, c[t])
 	}
@@ -297,10 +297,10 @@ func writeText(w io.Writer, funcs []*Func, v Result, threshold float64, top int,
 	}
 	_, _ = fmt.Fprintf(w, "\nriskscore: FAIL (%s, threshold %.0f)\n", mode, threshold)
 	for _, f := range v.New {
-		_, _ = fmt.Fprintf(w, "  over threshold:  %-50s CRAP %.1f (CC %d, cov %.0f%%) %s:%d\n", f.Key, f.RiskScore, f.Complexity, f.Coverage*100, f.File, f.Line)
+		_, _ = fmt.Fprintf(w, "  over threshold:  %-50s risk score %.1f (CC %d, cov %.0f%%) %s:%d\n", f.Key, f.RiskScore, f.Complexity, f.Coverage*100, f.File, f.Line)
 	}
 	for _, f := range v.Worse {
-		_, _ = fmt.Fprintf(w, "  got worse:       %-50s CRAP %.1f (CC %d, cov %.0f%%) %s:%d\n", f.Key, f.RiskScore, f.Complexity, f.Coverage*100, f.File, f.Line)
+		_, _ = fmt.Fprintf(w, "  got worse:       %-50s risk score %.1f (CC %d, cov %.0f%%) %s:%d\n", f.Key, f.RiskScore, f.Complexity, f.Coverage*100, f.File, f.Line)
 	}
 	_, _ = fmt.Fprintln(w, "Fix: add tests or split the function. Only if the offender is accepted, regenerate the baseline deliberately:")
 	_, _ = fmt.Fprintln(w, "  "+rebuildHint)

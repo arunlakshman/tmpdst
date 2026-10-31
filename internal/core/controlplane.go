@@ -35,9 +35,9 @@ type CommitSegment struct {
 
 // PendingBatch describes one uploaded batch awaiting offset assignment.
 type PendingBatch struct {
-	TP      TopicPartition
-	Records int64 // record count in the batch
-	Loc     SegmentRef
+	TopicPartition TopicPartition
+	Records        int64 // record count in the batch
+	Loc            SegmentRef
 }
 
 // CommitSegmentResp has one entry per request batch, in request order.
@@ -46,17 +46,17 @@ type CommitSegmentResp struct{ Assigned []BatchRange }
 // BatchRange is one batch of a partition's log: records [Base, Base+Count)
 // stored at Loc.
 type BatchRange struct {
-	TP    TopicPartition
-	Base  Offset
-	Count int64
-	Loc   SegmentRef
+	TopicPartition TopicPartition
+	Base           Offset
+	Count          int64
+	Loc            SegmentRef
 }
 
 // FindSegments finds which segments hold offsets >= From for a partition.
 type FindSegments struct {
-	TP       TopicPartition
-	From     Offset
-	MaxBytes int32
+	TopicPartition TopicPartition
+	From           Offset
+	MaxBytes       int32
 }
 
 // FindSegmentsResp lists the batches holding offsets >= From in offset order. End is
@@ -177,10 +177,10 @@ type OffsetCommit struct {
 // PartitionOffset is one committed offset of a group. A read of a partition
 // that has no commit gives Offset -1 and LeaderEpoch -1.
 type PartitionOffset struct {
-	TP          TopicPartition
-	Offset      int64
-	LeaderEpoch int32
-	Metadata    string
+	TopicPartition TopicPartition
+	Offset         int64
+	LeaderEpoch    int32
+	Metadata       string
 }
 
 // OffsetCommitResp has one error per request offset, in request order.

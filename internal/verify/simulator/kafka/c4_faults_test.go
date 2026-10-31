@@ -62,7 +62,7 @@ func pick[T any](r *rand.Rand, xs []T) (T, bool) {
 // definiteAt: an acked (OpDefinite) produce landed at base of tp.
 func (w *world) definiteAt(tp core.TopicPartition, base int64) bool {
 	for _, op := range w.ops {
-		if po, ok := op.Op.(kafka.ProduceOp); ok && op.Outcome == simulator.OpResultKnown && po.TP == tp {
+		if po, ok := op.Op.(kafka.ProduceOp); ok && op.Outcome == simulator.OpResultKnown && po.TopicPartition == tp {
 			if res := op.Result.(kafka.ProduceRes); res.Base == base {
 				return true
 			}
@@ -88,7 +88,7 @@ func (w *world) readParts(ok func(tp core.TopicPartition, p kafka.ReadPart, from
 	for i, op := range w.ops {
 		if ro, isRead := op.Op.(kafka.ReadOp); isRead {
 			for j, p := range op.Result.(kafka.ReadRes).Parts {
-				if ok(ro.Parts[j].TP, p, ro.Parts[j].Off) {
+				if ok(ro.Parts[j].TopicPartition, p, ro.Parts[j].Off) {
 					out = append(out, partRef{i, j})
 				}
 			}
@@ -125,7 +125,7 @@ func (w *world) ackFacts() []int {
 func (w *world) setAck(i int, key string, add int64) {
 	for k, f := range w.raw[i].Fact.Fields {
 		if f.Key == key {
-			w.raw[i].Fact.Fields[k].Value = f.Value.(core.I64) + core.I64(add)
+			w.raw[i].Fact.Fields[k].Value = f.Value.(core.Int64Value) + core.Int64Value(add)
 		}
 	}
 	w.rebuildTL()
@@ -205,7 +205,7 @@ func faults() []fault {
 			}
 			b := w.tps[(indexOf(w.tps, a)+1)%len(w.tps)]
 			d := lastRange(w, a)
-			d.TP, d.Base = b, core.Offset(w.cp0(b))
+			d.TopicPartition, d.Base = b, core.Offset(w.cp0(b))
 			w.ranges[b] = append(w.ranges[b], d)
 			return true
 		}, []core.PropertyID{pLocTwice, pAsProduced}, false},
@@ -314,7 +314,7 @@ func faults() []fault {
 				end := ro.Parts[p.part].Off + int64(len(rp.Recs))
 				for _, q := range w.anyParts() {
 					qo := w.ops[q.op].Op.(kafka.ReadOp)
-					if q.op > p.op && qo.Client == ro.Client && qo.Parts[q.part].TP == ro.Parts[p.part].TP && qo.Parts[q.part].Off == end {
+					if q.op > p.op && qo.Client == ro.Client && qo.Parts[q.part].TopicPartition == ro.Parts[p.part].TopicPartition && qo.Parts[q.part].Off == end {
 						c = append(c, p)
 						break
 					}
@@ -376,7 +376,7 @@ func faults() []fault {
 			ps := w.anyParts() // time order: walk back to find the last read per (client, tp)
 			for _, p := range slices.Backward(ps) {
 				ro := w.ops[p.op].Op.(kafka.ReadOp)
-				k := [2]any{ro.Client, ro.Parts[p.part].TP}
+				k := [2]any{ro.Client, ro.Parts[p.part].TopicPartition}
 				if !seen[k] && len(w.part(p).Recs) > 0 {
 					c = append(c, p)
 				}
@@ -401,13 +401,13 @@ func faults() []fault {
 				return false
 			}
 			po, res := w.ops[i].Op.(kafka.ProduceOp), w.ops[i].Result.(kafka.ProduceRes)
-			rs := w.ranges[po.TP]
+			rs := w.ranges[po.TopicPartition]
 			for k := range rs {
 				if int64(rs[k].Base) == res.Base { // the same bytes stored and committed once more
 					rg := rs[k]
 					raw := w.objs[rg.Loc.Key][rg.Loc.Off : rg.Loc.Off+rg.Loc.Len]
-					rg.Base, rg.Loc = core.Offset(w.cp0(po.TP)), w.put(slices.Clone(raw))
-					w.ranges[po.TP] = append(rs, rg)
+					rg.Base, rg.Loc = core.Offset(w.cp0(po.TopicPartition)), w.put(slices.Clone(raw))
+					w.ranges[po.TopicPartition] = append(rs, rg)
 					return true
 				}
 			}
@@ -432,7 +432,7 @@ func faults() []fault {
 			for x, i := range ds {
 				for _, j := range ds[x+1:] {
 					a, b := w.ops[i].Op.(kafka.ProduceOp), w.ops[j].Op.(kafka.ProduceOp)
-					if a.Client == b.Client && a.TP == b.TP {
+					if a.Client == b.Client && a.TopicPartition == b.TopicPartition {
 						c = append(c, [2]int{i, j})
 					}
 				}
@@ -453,7 +453,7 @@ func faults() []fault {
 			if err != nil {
 				panic(err)
 			}
-			rg := core.BatchRange{TP: tp, Base: core.Offset(w.cp0(tp)), Count: 1, Loc: w.put(b)}
+			rg := core.BatchRange{TopicPartition: tp, Base: core.Offset(w.cp0(tp)), Count: 1, Loc: w.put(b)}
 			w.ranges[tp] = append(w.ranges[tp], rg)
 			return true
 		}, []core.PropertyID{pProduced}, false},

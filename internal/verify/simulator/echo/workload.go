@@ -211,8 +211,8 @@ func (w *Workload) reply(c *client, text string) []core.Action {
 
 func (c *client) record(off int64, payload string) {
 	c.nacked++
-	c.digest.U64(uint64(off))
-	c.digest.Str(payload)
+	c.digest.Uint64Value(uint64(off))
+	c.digest.StringValue(payload)
 	c.acked = append(c.acked, acked{off, payload})
 	if len(c.acked) > keepAcked {
 		c.acked = append([]acked(nil), c.acked[1:]...)
@@ -237,29 +237,29 @@ func (w *Workload) lost(c *client, why string) {
 func (w *Workload) StateHash() uint64 {
 	h := core.NewHasher()
 	h.Bool(w.stopped)
-	h.U64(uint64(w.loop.NextReq))
+	h.Uint64Value(uint64(w.loop.NextReq))
 	for _, c := range w.loop.Clients {
-		h.U64(uint64(c.State))
-		h.U64(uint64(c.Conn))
-		h.U64(uint64(c.DialReq))
-		h.U64(uint64(c.SendReq))
-		h.U64(uint64(c.Dials))
-		h.U64(uint64(c.Fails))
-		h.U64(uint64(c.WakeGen))
-		h.U64(uint64(c.ReqGen))
+		h.Uint64Value(uint64(c.State))
+		h.Uint64Value(uint64(c.Conn))
+		h.Uint64Value(uint64(c.DialReq))
+		h.Uint64Value(uint64(c.SendReq))
+		h.Uint64Value(uint64(c.Dials))
+		h.Uint64Value(uint64(c.Fails))
+		h.Uint64Value(uint64(c.WakeGen))
+		h.Uint64Value(uint64(c.ReqGen))
 		h.Bytes(c.fr.buf)
-		h.U64(uint64(c.seq))
+		h.Uint64Value(uint64(c.seq))
 		h.Bool(c.recycle)
-		h.U64(uint64(len(c.acked)))
-		h.U64(uint64(c.digest))
-		h.U64(c.nacked)
+		h.Uint64Value(uint64(len(c.acked)))
+		h.Uint64Value(uint64(c.digest))
+		h.Uint64Value(c.nacked)
 		h.Bool(c.pend != nil)
 		if p := c.pend; p != nil {
 			h.Bytes(p.id[:])
 			h.Bool(p.get)
-			h.U64(uint64(p.seq))
-			h.Str(p.payload)
-			h.U64(uint64(p.off))
+			h.Uint64Value(uint64(p.seq))
+			h.StringValue(p.payload)
+			h.Uint64Value(uint64(p.off))
 		}
 	}
 	return uint64(h)

@@ -116,9 +116,9 @@ func (b *Broker) issue(o *operation) []core.Action {
 	case opRefresh, opMetadata, opDescribeConfigs:
 		cop = core.DescribeTopics{Topics: o.names}
 	case opList: // only the end offset is wanted: look past the end
-		cop = core.FindSegments{TP: o.tp, From: core.Offset(1<<63 - 1), MaxBytes: 1}
+		cop = core.FindSegments{TopicPartition: o.tp, From: core.Offset(1<<63 - 1), MaxBytes: 1}
 	case opFetch:
-		cop = core.FindSegments{TP: o.tp, From: o.from, MaxBytes: o.maxBytes}
+		cop = core.FindSegments{TopicPartition: o.tp, From: o.from, MaxBytes: o.maxBytes}
 	case opCreate:
 		cop = o.createCP()
 	case opGroup:

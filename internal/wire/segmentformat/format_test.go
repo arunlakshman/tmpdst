@@ -31,7 +31,7 @@ func TestRoundTrip(t *testing.T) {
 	}
 	for i, b := range in {
 		g := seg.Batches[i]
-		if g.TP != b.TP || g.Records != b.Records || !bytes.Equal(g.Data, b.Data) {
+		if g.TopicPartition != b.TopicPartition || g.Records != b.Records || !bytes.Equal(g.Data, b.Data) {
 			t.Fatalf("batch %d mismatch: %+v", i, g)
 		}
 		if seg.Entries[i] != ents[i] {

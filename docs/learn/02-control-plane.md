@@ -162,10 +162,10 @@ Read this file first. It is short. These are the types that cross the CP boundar
 
 ```go
 CommitSegment{ SegmentKey string; Batches []PendingBatch }
-PendingBatch { TP TopicPartition; Records int64; Loc SegmentRef }   // Loc = {Key, Off, Len} in S3
+PendingBatch { TopicPartition TopicPartition; Records int64; Loc SegmentRef }   // Loc = {Key, Off, Len} in S3
 CommitSegmentResp{ Assigned []BatchRange }                          // one per request batch, same order
-BatchRange   { TP; Base Offset; Count int64; Loc SegmentRef }       // offsets [Base, Base+Count)
-FindSegments { TP; From Offset; MaxBytes int32 }
+BatchRange   { TopicPartition; Base Offset; Count int64; Loc SegmentRef }       // offsets [Base, Base+Count)
+FindSegments { TopicPartition; From Offset; MaxBytes int32 }
 FindSegmentsResp{ Ranges []BatchRange; End Offset }                 // End = next offset to be assigned
 ```
 
@@ -318,8 +318,8 @@ under a known key gets `ErrConflict`, which is the correct answer.
 func assign(tx, batches) []BatchRange {
     p := newOffsetPlan()
     for each batch b, in request order:
-        base := p.ends[b.TP]                       // already seen in THIS request? chain from there
-        if !p.seen[b.TP] { base = readVarint(Get(endKey(b.TP))) }   // else read the stored end
+        base := p.ends[b.TopicPartition]                       // already seen in THIS request? chain from there
+        if !p.seen[b.TopicPartition] { base = readVarint(Get(endKey(b.TopicPartition))) }   // else read the stored end
         out = append(out, p.add(b, base))          // range = [base, base+Records); end moves up
     p.write(tx)
     return out

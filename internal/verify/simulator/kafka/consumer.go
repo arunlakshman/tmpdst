@@ -20,7 +20,7 @@ type consumer struct {
 
 func (c *consumer) hash(h *core.Hasher) {
 	for _, p := range c.pos {
-		h.I64(p)
+		h.Int64Value(p)
 	}
 	h.Bool(c.listed)
 	h.Bytes(c.op[:])
@@ -78,7 +78,7 @@ func (w *Workload) fetchNext(c *client) []core.Action {
 	op := ReadOp{Client: c.ID}
 	perPart := int32(1024) << w.env.Intn(6)
 	for i, tp := range w.tps {
-		op.Parts = append(op.Parts, ReadFrom{TP: tp, Off: cs.pos[i]})
+		op.Parts = append(op.Parts, ReadFrom{TopicPartition: tp, Off: cs.pos[i]})
 		part := kmsg.FetchRequestTopicPartition{Partition: tp.Partition, CurrentLeaderEpoch: -1, FetchOffset: cs.pos[i],
 			LastFetchedEpoch: -1, LogStartOffset: -1, PartitionMaxBytes: perPart}
 		added := false

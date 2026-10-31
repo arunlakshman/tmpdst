@@ -41,7 +41,7 @@ func gRemove(group, reason string, ids ...string) core.GroupRemove {
 
 // gPair is one offset of topic partition topic-p, with epoch 7 and metadata "m".
 func gPair(topic string, p int32, off int64) core.PartitionOffset {
-	return core.PartitionOffset{TP: tp(topic, p), Offset: off, LeaderEpoch: 7, Metadata: "m"}
+	return core.PartitionOffset{TopicPartition: tp(topic, p), Offset: off, LeaderEpoch: 7, Metadata: "m"}
 }
 
 func gCommit(group, member string, gen int32, offs ...core.PartitionOffset) core.OffsetCommit {
@@ -241,8 +241,8 @@ func TestOffsetCommitOracle(t *testing.T) {
 	})
 	got := call(c, core.OffsetFetch{Group: "g"}).Resp.(core.OffsetFetchResp)
 	want := []core.PartitionOffset{
-		{TP: tp("orders", 0), Offset: 6, LeaderEpoch: 7, Metadata: "m"},
-		{TP: tp("orders", 1), Offset: 7, LeaderEpoch: 7, Metadata: "m"},
+		{TopicPartition: tp("orders", 0), Offset: 6, LeaderEpoch: 7, Metadata: "m"},
+		{TopicPartition: tp("orders", 1), Offset: 7, LeaderEpoch: 7, Metadata: "m"},
 	}
 	if !reflect.DeepEqual(got.Offsets, want) {
 		t.Fatalf("offsets: %+v", got.Offsets)
@@ -294,17 +294,17 @@ func TestOffsetFetchOracle(t *testing.T) {
 	})
 	all := call(c, core.OffsetFetch{Group: "g"}).Resp.(core.OffsetFetchResp)
 	wantAll := []core.PartitionOffset{
-		{TP: tp("beta", 0), Offset: 4, LeaderEpoch: 7, Metadata: "m"},
-		{TP: tp("orders", 0), Offset: 2, LeaderEpoch: 7, Metadata: "m"},
-		{TP: tp("orders", 1), Offset: 3, LeaderEpoch: 7, Metadata: "m"},
+		{TopicPartition: tp("beta", 0), Offset: 4, LeaderEpoch: 7, Metadata: "m"},
+		{TopicPartition: tp("orders", 0), Offset: 2, LeaderEpoch: 7, Metadata: "m"},
+		{TopicPartition: tp("orders", 1), Offset: 3, LeaderEpoch: 7, Metadata: "m"},
 	}
 	if !reflect.DeepEqual(all.Offsets, wantAll) {
 		t.Fatalf("all: %+v", all.Offsets)
 	}
 	listed := call(c, core.OffsetFetch{Group: "g", Partitions: []core.TopicPartition{tp("orders", 0), tp("zz", 0)}}).Resp.(core.OffsetFetchResp)
 	wantListed := []core.PartitionOffset{
-		{TP: tp("orders", 0), Offset: 2, LeaderEpoch: 7, Metadata: "m"},
-		{TP: tp("zz", 0), Offset: -1, LeaderEpoch: -1},
+		{TopicPartition: tp("orders", 0), Offset: 2, LeaderEpoch: 7, Metadata: "m"},
+		{TopicPartition: tp("zz", 0), Offset: -1, LeaderEpoch: -1},
 	}
 	if !reflect.DeepEqual(listed.Offsets, wantListed) {
 		t.Fatalf("listed: %+v", listed.Offsets)
@@ -314,7 +314,7 @@ func TestOffsetFetchOracle(t *testing.T) {
 		t.Fatalf("unknown group, all: %+v", none.Offsets)
 	}
 	miss := call(c, core.OffsetFetch{Group: "nope", Partitions: []core.TopicPartition{tp("orders", 1)}}).Resp.(core.OffsetFetchResp)
-	if !reflect.DeepEqual(miss.Offsets, []core.PartitionOffset{{TP: tp("orders", 1), Offset: -1, LeaderEpoch: -1}}) {
+	if !reflect.DeepEqual(miss.Offsets, []core.PartitionOffset{{TopicPartition: tp("orders", 1), Offset: -1, LeaderEpoch: -1}}) {
 		t.Fatalf("unknown group, listed: %+v", miss.Offsets)
 	}
 }

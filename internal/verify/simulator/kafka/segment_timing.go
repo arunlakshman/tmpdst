@@ -18,7 +18,7 @@ func (*segmentTiming) Name() string         { return "SegmentTiming" }
 func (*segmentTiming) AtEnd(simulator.View) {}
 
 func (i *segmentTiming) Observe(v simulator.View) {
-	n := func(f core.Fact, k string) int64 { x, _ := f.Field(k).(core.I64); return int64(x) }
+	n := func(f core.Fact, k string) int64 { x, _ := f.Field(k).(core.Int64Value); return int64(x) }
 	a := v.Assert()
 	tl := v.Timeline()
 	for _, tf := range tl.Since("segment_put_done", &i.put) {

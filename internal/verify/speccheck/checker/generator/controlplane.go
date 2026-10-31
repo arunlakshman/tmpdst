@@ -43,7 +43,7 @@ func (o ControlPlaneTestStep) Describe() string {
 	case core.CommitSegment:
 		return fmt.Sprintf("request %d: commit segment %q with %d batches", o.Call.Req, op.SegmentKey, len(op.Batches))
 	case core.FindSegments:
-		return fmt.Sprintf("request %d: look up %v from offset %d with max bytes %d", o.Call.Req, op.TP, op.From, op.MaxBytes)
+		return fmt.Sprintf("request %d: look up %v from offset %d with max bytes %d", o.Call.Req, op.TopicPartition, op.From, op.MaxBytes)
 	case core.DescribeTopics:
 		return fmt.Sprintf("request %d: describe topics %q", o.Call.Req, op.Topics)
 	case core.CreateTopic:
@@ -131,9 +131,9 @@ func genInvalidCommit(p InputProfile, r *checker.Rand) core.CommitSegment {
 	case 2:
 		batches[at].Records = -int64(r.Intn(2))
 	case 3:
-		batches[at].TP.Partition = -1
+		batches[at].TopicPartition.Partition = -1
 	default:
-		batches[at].TP.Topic = ""
+		batches[at].TopicPartition.Topic = ""
 	}
 	return core.CommitSegment{SegmentKey: key, Batches: batches}
 }
@@ -147,7 +147,7 @@ func genLookup(p InputProfile, r *checker.Rand) core.FindSegments {
 	if percent(r, p.LookupNegativeFromPercent) {
 		from = -1
 	}
-	return core.FindSegments{TP: tp, From: core.Offset(from), MaxBytes: pick(r, p.MaxBytesChoices)}
+	return core.FindSegments{TopicPartition: tp, From: core.Offset(from), MaxBytes: pick(r, p.MaxBytesChoices)}
 }
 
 func genDescribe(p InputProfile, r *checker.Rand) core.DescribeTopics {
@@ -204,9 +204,9 @@ func makeSeedShape(shape string) uint64 {
 func genBatch(p InputProfile, r *checker.Rand, segmentKey string) core.PendingBatch {
 	topics := p.Topics[:min(p.BatchTopics, len(p.Topics))]
 	return core.PendingBatch{
-		TP:      core.NewTopicPartition(pick(r, topics), int32(r.Intn(p.BatchPartitions))),
-		Records: 1 + int64(r.Intn(3)),
-		Loc:     core.SegmentRef{Key: segmentKey, Off: int64(r.Intn(4)) * 100, Len: int64(1 + r.Intn(3)*50)},
+		TopicPartition: core.NewTopicPartition(pick(r, topics), int32(r.Intn(p.BatchPartitions))),
+		Records:        1 + int64(r.Intn(3)),
+		Loc:            core.SegmentRef{Key: segmentKey, Off: int64(r.Intn(4)) * 100, Len: int64(1 + r.Intn(3)*50)},
 	}
 }
 
@@ -304,19 +304,19 @@ func simplifyBatches(batches []core.PendingBatch) ([]core.PendingBatch, bool) {
 func minimizeLookup(l core.FindSegments) []core.ControlPlaneOperation {
 	var out []core.ControlPlaneOperation
 	if l.MaxBytes != 0 {
-		out = append(out, core.FindSegments{TP: l.TP, From: l.From, MaxBytes: 0})
+		out = append(out, core.FindSegments{TopicPartition: l.TopicPartition, From: l.From, MaxBytes: 0})
 	}
 	if l.From > 0 {
-		out = append(out, core.FindSegments{TP: l.TP, From: 0, MaxBytes: l.MaxBytes})
+		out = append(out, core.FindSegments{TopicPartition: l.TopicPartition, From: 0, MaxBytes: l.MaxBytes})
 	}
 	if l.From > 1 {
-		out = append(out, core.FindSegments{TP: l.TP, From: l.From / 2, MaxBytes: l.MaxBytes})
+		out = append(out, core.FindSegments{TopicPartition: l.TopicPartition, From: l.From / 2, MaxBytes: l.MaxBytes})
 	}
-	if l.TP.Partition > 0 {
-		out = append(out, core.FindSegments{TP: core.NewTopicPartition(l.TP.Topic, 0), From: l.From, MaxBytes: l.MaxBytes})
+	if l.TopicPartition.Partition > 0 {
+		out = append(out, core.FindSegments{TopicPartition: core.NewTopicPartition(l.TopicPartition.Topic, 0), From: l.From, MaxBytes: l.MaxBytes})
 	}
-	for _, t := range shortenStrings(l.TP.Topic) {
-		out = append(out, core.FindSegments{TP: core.NewTopicPartition(t, l.TP.Partition), From: l.From, MaxBytes: l.MaxBytes})
+	for _, t := range shortenStrings(l.TopicPartition.Topic) {
+		out = append(out, core.FindSegments{TopicPartition: core.NewTopicPartition(t, l.TopicPartition.Partition), From: l.From, MaxBytes: l.MaxBytes})
 	}
 	return out
 }
@@ -354,7 +354,7 @@ func formatCPOp(op core.ControlPlaneOperation) string {
 	case core.CommitSegment:
 		return fmt.Sprintf("core.CommitSegment{SegmentKey: %q%s}", op.SegmentKey, formatBatchesField(op.Batches))
 	case core.FindSegments:
-		return fmt.Sprintf("core.FindSegments{TP: core.TopicPartitionKey(%q, %d), From: %d, MaxBytes: %d}", op.TP.Topic, op.TP.Partition, op.From, op.MaxBytes)
+		return fmt.Sprintf("core.FindSegments{TopicPartition: core.NewTopicPartition(%q, %d), From: %d, MaxBytes: %d}", op.TopicPartition.Topic, op.TopicPartition.Partition, op.From, op.MaxBytes)
 	case core.DescribeTopics:
 		if op.Topics == nil {
 			return "core.DescribeTopics{}"
@@ -370,7 +370,7 @@ func formatBatchesField(batches []core.PendingBatch) string {
 	}
 	parts := make([]string, len(batches))
 	for i, b := range batches {
-		parts[i] = fmt.Sprintf("{TP: core.TopicPartitionKey(%q, %d), Records: %d, Loc: %s}", b.TP.Topic, b.TP.Partition, b.Records, formatRef(b.Loc))
+		parts[i] = fmt.Sprintf("{TopicPartition: core.NewTopicPartition(%q, %d), Records: %d, Loc: %s}", b.TopicPartition.Topic, b.TopicPartition.Partition, b.Records, formatRef(b.Loc))
 	}
 	return ", Batches: []core.PendingBatch{" + strings.Join(parts, ", ") + "}"
 }

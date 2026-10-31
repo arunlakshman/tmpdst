@@ -16,8 +16,8 @@ type ackFact struct {
 }
 
 func parseAck(f core.Fact) (ackFact, bool) {
-	o, ok1 := f.Field("offset").(core.I64)
-	k, ok2 := f.Field("key").(core.Str)
+	o, ok1 := f.Field("offset").(core.Int64Value)
+	k, ok2 := f.Field("key").(core.StringValue)
 	p, ok3 := f.Field("payload").(core.Bytes)
 	return ackFact{int64(o), string(k), p}, ok1 && ok2 && ok3
 }

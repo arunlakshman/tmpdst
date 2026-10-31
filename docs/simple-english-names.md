@@ -114,7 +114,7 @@ Rules used for the right column:
 | `LogSlot` | `LogPosition` |
 | `ReqID` | `RequestID` |
 | `TimerGen` | `TimerVersion` |
-| `TP` | `TopicPartitionKey` |
+| `TP` | `TopicPartition` |
 | `RespAs` | `ResponseAs` |
 | `FnvU64` | `Fnv64Hash` |
 | `fnvP1` … `fnvP8` | `fnvPrimePower1` … `fnvPrimePower8` |

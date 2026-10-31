@@ -26,19 +26,19 @@ var c1TPs = []core.TopicPartition{core.NewTopicPartition("t", 0), core.NewTopicP
 // An Idem entry carries a producer id. The broker refuses these entries
 // (decision 41), so the test expects an error and no new record.
 type c1ent struct {
-	TP, N int
-	Idem  bool
+	TopicPartitionIndex, N int
+	Idem                   bool
 }
 
 type c1op struct {
-	Kind  string // produce, fetch, list
-	Tag   int    // makes values unique
-	Conn  int
-	Ents  []c1ent
-	TP    int
-	From  int
-	Small bool // fetch: partition limit of 1 byte (one batch)
-	Last  bool // list: latest, else earliest
+	Kind                string // produce, fetch, list
+	Tag                 int    // makes values unique
+	Conn                int
+	Ents                []c1ent
+	TopicPartitionIndex int
+	From                int
+	Small               bool // fetch: partition limit of 1 byte (one batch)
+	Last                bool // list: latest, else earliest
 }
 
 type c1 struct {
@@ -123,7 +123,7 @@ func (s *c1) produce(c *client, op c1op) error {
 	var exps []expect
 	seen := map[int]bool{}
 	for j, ce := range op.Ents {
-		ti := ce.TP % len(c1TPs)
+		ti := ce.TopicPartitionIndex % len(c1TPs)
 		if seen[ti] {
 			continue
 		}
@@ -173,7 +173,7 @@ func (s *c1) produce(c *client, op c1op) error {
 }
 
 func (s *c1) fetch(c *client, op c1op) error {
-	tp := c1TPs[op.TP%len(c1TPs)]
+	tp := c1TPs[op.TopicPartitionIndex%len(c1TPs)]
 	m := s.model[tp]
 	hwm := m.HighWatermark()
 	from := core.Offset(op.From % int(hwm+2)) // hwm+1 is out of range
@@ -249,7 +249,7 @@ func (s *c1) fetch(c *client, op c1op) error {
 }
 
 func (s *c1) list(c *client, op c1op) error {
-	tp := c1TPs[op.TP%len(c1TPs)]
+	tp := c1TPs[op.TopicPartitionIndex%len(c1TPs)]
 	ts, want := int64(-2), core.Offset(0)
 	if op.Last {
 		ts, want = -1, s.model[tp].HighWatermark()
@@ -282,12 +282,12 @@ func (s *c1) invariant() error {
 }
 
 func genC1(r *checker.Rand, i int) c1op {
-	op := c1op{Tag: i, Conn: r.Intn(2), TP: r.Intn(len(c1TPs)), From: r.Intn(1 << 10), Small: r.Intn(4) == 0, Last: r.Intn(2) == 0}
+	op := c1op{Tag: i, Conn: r.Intn(2), TopicPartitionIndex: r.Intn(len(c1TPs)), From: r.Intn(1 << 10), Small: r.Intn(4) == 0, Last: r.Intn(2) == 0}
 	switch k := r.Intn(20); {
 	case k < 12:
 		op.Kind = "produce"
 		for n := 1 + r.Intn(2); n > 0; n-- {
-			e := c1ent{TP: r.Intn(len(c1TPs)), N: r.Intn(3), Idem: r.Intn(5) == 0}
+			e := c1ent{TopicPartitionIndex: r.Intn(len(c1TPs)), N: r.Intn(3), Idem: r.Intn(5) == 0}
 			op.Ents = append(op.Ents, e)
 		}
 	case k < 17:

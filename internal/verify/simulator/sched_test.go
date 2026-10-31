@@ -139,7 +139,7 @@ func TestTimeline(t *testing.T) {
 	tl := NewTimeline()
 	var cur, cur2 Cursor
 	f := func(name string, v int64) core.Fact {
-		return core.Fact{Name: name, Fields: []core.Field{{Key: "v", Value: core.I64(v)}}}
+		return core.Fact{Name: name, Fields: []core.Field{{Key: "v", Value: core.Int64Value(v)}}}
 	}
 	tl.Append(core.NodeInstance{}, 1, f("a", 1))
 	tl.Append(core.NodeInstance{}, 2, f("b", 2))

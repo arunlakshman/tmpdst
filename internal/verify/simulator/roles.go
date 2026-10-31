@@ -29,7 +29,7 @@ type Workload interface {
 
 // ReceivesPhaseChange is an optional Workload interface. At every phase change (into
 // PhaseRecovering and into PhaseRecover) the kernel appends the frozen fact
-// "sim_phase" {phase: U64 of the new Phase}, puts engines into recovery when
+// "sim_phase" {phase: Uint64Value of the new Phase}, puts engines into recovery when
 // Settling starts, and then calls OnPhase on each live workload that
 // implements it, in node order. The call is treated like a Step: the returned
 // actions are dispatched the same way (a workload may not StopForRestart or ShutdownDone), the

@@ -84,18 +84,18 @@ func CRC32CChecksum(b []byte) uint32 { return crc32.Checksum(b, crc32.MakeTable(
 
 // Batch is one partition's record batch to be written.
 type Batch struct {
-	TP      core.TopicPartition
-	Records uint32 // record count
-	Data    []byte // opaque Kafka record-batch bytes; non-empty
+	TopicPartition core.TopicPartition
+	Records        uint32 // record count
+	Data           []byte // opaque Kafka record-batch bytes; non-empty
 }
 
 // Entry places one batch inside an object.
 type Entry struct {
-	TP      core.TopicPartition
-	Records uint32
-	Off     int64  // absolute offset of Data in the object
-	Len     int64  // len(Data)
-	CRC     uint32 // CRC32C of Data
+	TopicPartition core.TopicPartition
+	Records        uint32
+	Off            int64  // absolute offset of Data in the object
+	Len            int64  // len(Data)
+	CRC            uint32 // CRC32C of Data
 }
 
 // Ref is the ObjGet range of the entry's bytes in the object stored at key.
@@ -138,10 +138,10 @@ func measureBatches(batches []Batch) (int, int, error) {
 	idx := 4
 	total := 0
 	for i, b := range batches {
-		if b.TP.Topic == "" || len(b.TP.Topic) > maxTopic || b.TP.Partition < 0 || len(b.Data) == 0 {
+		if b.TopicPartition.Topic == "" || len(b.TopicPartition.Topic) > maxTopic || b.TopicPartition.Partition < 0 || len(b.Data) == 0 {
 			return 0, 0, fmt.Errorf("%w: batch %d", ErrInvalid, i)
 		}
-		idx += minEntry + len(b.TP.Topic)
+		idx += minEntry + len(b.TopicPartition.Topic)
 		total += len(b.Data)
 	}
 	return idx, total, nil
@@ -158,11 +158,11 @@ func writeObject(batches []Batch, idx, total int) ([]byte, []Entry) {
 		p += putEntry(body[p:], b, uint64(off))
 		copy(body[off:], b.Data)
 		entries[i] = Entry{
-			TP:      b.TP,
-			Records: b.Records,
-			Off:     int64(HeaderSize + off),
-			Len:     int64(len(b.Data)),
-			CRC:     CRC32CChecksum(b.Data),
+			TopicPartition: b.TopicPartition,
+			Records:        b.Records,
+			Off:            int64(HeaderSize + off),
+			Len:            int64(len(b.Data)),
+			CRC:            CRC32CChecksum(b.Data),
 		}
 		off += len(b.Data)
 	}
@@ -175,9 +175,9 @@ func writeObject(batches []Batch, idx, total int) ([]byte, []Entry) {
 }
 
 func putEntry(w []byte, b Batch, off uint64) int {
-	binary.BigEndian.PutUint16(w, uint16(len(b.TP.Topic)))
-	n := 2 + copy(w[2:], b.TP.Topic)
-	binary.BigEndian.PutUint32(w[n:], uint32(b.TP.Partition))
+	binary.BigEndian.PutUint16(w, uint16(len(b.TopicPartition.Topic)))
+	n := 2 + copy(w[2:], b.TopicPartition.Topic)
+	binary.BigEndian.PutUint32(w[n:], uint32(b.TopicPartition.Partition))
 	binary.BigEndian.PutUint32(w[n+4:], b.Records)
 	binary.BigEndian.PutUint64(w[n+8:], off)
 	binary.BigEndian.PutUint64(w[n+16:], uint64(len(b.Data)))
@@ -273,9 +273,9 @@ func readIndexEntry(body []byte, p int, i uint64) (segmentIndexEntry, int, error
 	}
 	return segmentIndexEntry{
 		Entry: Entry{
-			TP:      core.NewTopicPartition(topic, part),
-			Records: binary.BigEndian.Uint32(body[q+4:]),
-			CRC:     binary.BigEndian.Uint32(body[q+24:]),
+			TopicPartition: core.NewTopicPartition(topic, part),
+			Records:        binary.BigEndian.Uint32(body[q+4:]),
+			CRC:            binary.BigEndian.Uint32(body[q+24:]),
 		},
 		off: binary.BigEndian.Uint64(body[q+8:]),
 		n:   binary.BigEndian.Uint64(body[q+16:]),
@@ -297,7 +297,7 @@ func attachPayloads(body []byte, idx []segmentIndexEntry, next uint64) (Segment,
 		}
 		r.Off, r.Len = int64(HeaderSize+r.off), int64(r.n)
 		seg.Entries = append(seg.Entries, r.Entry)
-		seg.Batches = append(seg.Batches, Batch{TP: r.TP, Records: r.Records, Data: data})
+		seg.Batches = append(seg.Batches, Batch{TopicPartition: r.TopicPartition, Records: r.Records, Data: data})
 	}
 	if next != uint64(len(body)) {
 		return Segment{}, corrupt("%d trailing body bytes", uint64(len(body))-next)

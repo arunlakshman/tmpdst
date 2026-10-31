@@ -25,7 +25,7 @@ func (b *Broker) offsetCommit(s *slot, r *kmsg.OffsetCommitRequest) []core.Actio
 		for _, p := range t.Partitions {
 			rt.Partitions = append(rt.Partitions, kmsg.OffsetCommitResponseTopicPartition{Partition: p.Partition})
 			call.Offsets = append(call.Offsets, core.PartitionOffset{
-				TP: core.NewTopicPartition(t.Topic, p.Partition), Offset: p.Offset,
+				TopicPartition: core.NewTopicPartition(t.Topic, p.Partition), Offset: p.Offset,
 				LeaderEpoch: leaderEpochOf(r.Version, p.LeaderEpoch), Metadata: derefOr(p.Metadata),
 			})
 		}
@@ -203,7 +203,7 @@ func fetchRows(a fetchAsk, got []core.PartitionOffset) []fetchRow {
 }
 
 func rowOf(o core.PartitionOffset) fetchRow {
-	return fetchRow{tp: o.TP, offset: o.Offset, epoch: o.LeaderEpoch, meta: new(o.Metadata)}
+	return fetchRow{tp: o.TopicPartition, offset: o.Offset, epoch: o.LeaderEpoch, meta: new(o.Metadata)}
 }
 
 // setFetchRows writes rows and a group code into the response.

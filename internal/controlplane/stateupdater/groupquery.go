@@ -21,7 +21,7 @@ func offsetFetchTransaction(tx Transaction, op core.OffsetFetch) core.ControlPla
 		for _, topicPartition := range op.Partitions {
 			v := tx.Get(offsetKey(op.Group, topicPartition))
 			if v == nil {
-				out = append(out, core.PartitionOffset{TP: topicPartition, Offset: -1, LeaderEpoch: -1})
+				out = append(out, core.PartitionOffset{TopicPartition: topicPartition, Offset: -1, LeaderEpoch: -1})
 				continue
 			}
 			out = append(out, offsetEntry(topicPartition, decodeOffset(op.Group, v)))
@@ -38,13 +38,13 @@ func offsetFetchTransaction(tx Transaction, op core.OffsetFetch) core.ControlPla
 		return true
 	})
 	slices.SortFunc(out, func(a, b core.PartitionOffset) int {
-		return cmp.Or(strings.Compare(a.TP.Topic, b.TP.Topic), cmp.Compare(a.TP.Partition, b.TP.Partition))
+		return cmp.Or(strings.Compare(a.TopicPartition.Topic, b.TopicPartition.Topic), cmp.Compare(a.TopicPartition.Partition, b.TopicPartition.Partition))
 	})
 	return core.ControlPlaneDone{Resp: core.OffsetFetchResp{Offsets: out}}
 }
 
 func offsetEntry(topicPartition core.TopicPartition, o offsetRecord) core.PartitionOffset {
-	return core.PartitionOffset{TP: topicPartition, Offset: o.offset, LeaderEpoch: o.epoch, Metadata: o.meta}
+	return core.PartitionOffset{TopicPartition: topicPartition, Offset: o.offset, LeaderEpoch: o.epoch, Metadata: o.meta}
 }
 
 // DescribeGroup answers a DescribeGroup.

@@ -88,7 +88,7 @@ func TestPhaseStart(t *testing.T) {
 	tl := simulator.NewTimeline()
 	tl.Append(core.NodeInstance{}, 10, core.Fact{
 		Name:   "sim_phase",
-		Fields: []core.Field{{Key: "phase", Value: core.U64(uint64(simulator.PhaseRecovering))}},
+		Fields: []core.Field{{Key: "phase", Value: core.Uint64Value(uint64(simulator.PhaseRecovering))}},
 	})
 	v := stubView{tl: tl, as: &stubAssert{}}
 	at, ok := PhaseStart(v, simulator.PhaseRecovering)
@@ -111,7 +111,7 @@ func TestFaultCoverage(t *testing.T) {
 	tl := simulator.NewTimeline()
 	tl.Append(core.NodeInstance{}, 1, core.Fact{
 		Name:   "sim_crashed",
-		Fields: []core.Field{{Key: "cause", Value: core.Str("attrition")}},
+		Fields: []core.Field{{Key: "cause", Value: core.StringValue("attrition")}},
 	})
 	tl.Append(core.NodeInstance{}, 2, core.Fact{Name: "sim_exited"})
 	as := &stubAssert{}

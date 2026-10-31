@@ -136,8 +136,8 @@ func (e *entryEncoder) offsetCommit(op core.OffsetCommit) {
 	e.i(op.TimeMs)
 	e.u(uint64(len(op.Offsets)))
 	for _, o := range op.Offsets {
-		e.s(o.TP.Topic)
-		e.i(int64(o.TP.Partition))
+		e.s(o.TopicPartition.Topic)
+		e.i(int64(o.TopicPartition.Partition))
 		e.i(o.Offset)
 		e.i(int64(o.LeaderEpoch))
 		e.s(o.Metadata)
@@ -149,8 +149,8 @@ func (e *entryEncoder) commit(c core.CommitSegment) {
 	head := e.buf
 	e.buf = nil
 	for _, b := range c.Batches {
-		e.u(e.ref(b.TP.Topic))
-		e.i(int64(b.TP.Partition))
+		e.u(e.ref(b.TopicPartition.Topic))
+		e.i(int64(b.TopicPartition.Partition))
 		e.i(b.Records)
 		e.u(e.ref(b.Loc.Key))
 		e.i(b.Loc.Off)
@@ -309,8 +309,8 @@ func (d *entryDecoder) offsetCommit() core.OffsetCommit {
 	op.TimeMs = d.i()
 	for n := d.count(); n > 0 && d.err == nil; n-- {
 		var o core.PartitionOffset
-		o.TP.Topic = d.s()
-		o.TP.Partition = int32(d.i())
+		o.TopicPartition.Topic = d.s()
+		o.TopicPartition.Partition = int32(d.i())
 		o.Offset = d.i()
 		o.LeaderEpoch = int32(d.i())
 		o.Metadata = d.s()
@@ -341,8 +341,8 @@ func (d *entryDecoder) commit() core.CommitSegment {
 	}
 	for ; n > 0 && d.err == nil; n-- {
 		var b core.PendingBatch
-		b.TP.Topic = str()
-		b.TP.Partition = int32(d.i())
+		b.TopicPartition.Topic = str()
+		b.TopicPartition.Partition = int32(d.i())
 		b.Records = d.i()
 		b.Loc.Key = str()
 		b.Loc.Off = d.i()

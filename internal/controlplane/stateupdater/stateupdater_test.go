@@ -114,7 +114,7 @@ func commit(key string, bs ...core.PendingBatch) core.CommitSegment {
 }
 
 func pb(topic string, p int32, n int64) core.PendingBatch {
-	return core.PendingBatch{TP: core.NewTopicPartition(topic, p), Records: n,
+	return core.PendingBatch{TopicPartition: core.NewTopicPartition(topic, p), Records: n,
 		Loc: core.SegmentRef{Key: topic, Off: n * 10, Len: n}}
 }
 
@@ -228,7 +228,7 @@ func TestStoreAdapter(t *testing.T) {
 	if err != nil || c != core.OK || resp.Assigned[0].Base != 0 {
 		t.Fatalf("%+v %v %v", resp, c, err)
 	}
-	lk, c, _ := s.Lookup(ctx, core.FindSegments{TP: core.NewTopicPartition("t", 2)})
+	lk, c, _ := s.Lookup(ctx, core.FindSegments{TopicPartition: core.NewTopicPartition("t", 2)})
 	if c != core.OK || lk.End != 4 || len(lk.Ranges) != 1 {
 		t.Fatalf("%+v %v", lk, c)
 	}
@@ -276,7 +276,7 @@ func edgeLookups(t *testing.T, subject, spec suites.ControlPlaneSubject, lk core
 			if sum+e <= 0 {
 				continue
 			}
-			q := generator.NewCall(core.ControlPlaneCall{Op: core.FindSegments{TP: lk.TP, From: lk.From, MaxBytes: int32(sum + e)}})
+			q := generator.NewCall(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: lk.TopicPartition, From: lk.From, MaxBytes: int32(sum + e)}})
 			want, _ := spec.Do(q)
 			got, _ := subject.Do(q)
 			if diff := observation.DiffControlPlane(want, got); diff != "" {

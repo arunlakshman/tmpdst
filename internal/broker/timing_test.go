@@ -5,7 +5,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func ns(f core.Fact, k string) int64 { return int64(f.Field(k).(core.Int64Value)) }

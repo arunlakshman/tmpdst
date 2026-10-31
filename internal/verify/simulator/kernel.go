@@ -3,7 +3,7 @@ package simulator
 import (
 	"fmt"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Constants of the run model. Lanes at or above laneForSystem belong to the

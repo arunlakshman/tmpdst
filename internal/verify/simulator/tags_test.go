@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // scanCore maps each marker method (isEvent, isAction, ...) to the core types that

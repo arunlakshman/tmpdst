@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"testing"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/controlplane/stateupdater/pebblestore"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/controlplane/stateupdater/pebblestore"
 )
 
 // Conformance C3 for the production applier (decision 49): the shared control
@@ -19,7 +19,7 @@ func TestConformanceStateUpdaterMem(t *testing.T) {
 	}, 20)
 }
 
-// Pebble is slower, so it runs fewer seeds. MANIFESTER_SEEDS still overrides.
+// Pebble is slower, so it runs fewer seeds. MDS_SEEDS still overrides.
 func TestConformanceStateUpdaterPebble(t *testing.T) {
 	dir := t.TempDir()
 	n := 0

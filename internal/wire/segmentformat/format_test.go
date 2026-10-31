@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func sample() []Batch {

@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/fakecontrolplane"
-	"manifester/internal/verify/simulator/fakeservices/fakeobjectstore"
-	"manifester/internal/verify/simulator/fakeservices/internal/fakeservicetest"
-	"manifester/internal/verify/speccheck/checker/generator"
-	"manifester/internal/verify/speccheck/checker/injectedbug"
-	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/runsettings"
-	"manifester/internal/verify/speccheck/checker/suites"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/fakecontrolplane"
+	"mds/internal/verify/simulator/fakeservices/fakeobjectstore"
+	"mds/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"mds/internal/verify/speccheck/checker/generator"
+	"mds/internal/verify/speccheck/checker/injectedbug"
+	"mds/internal/verify/speccheck/checker/observation"
+	"mds/internal/verify/speccheck/checker/runsettings"
+	"mds/internal/verify/speccheck/checker/suites"
 )
 
 // Conformance C2. The engines in this package are SIMULATED components. This

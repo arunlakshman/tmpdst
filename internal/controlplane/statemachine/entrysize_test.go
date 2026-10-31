@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 // dynamoItemLimit is the largest DynamoDB item, in bytes (400 KiB).

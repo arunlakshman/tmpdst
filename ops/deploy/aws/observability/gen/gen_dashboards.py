@@ -12,11 +12,11 @@ RB = 'run_id="$run_id", broker=~"$broker"'
 
 
 def q(expr, legend="", ds=PROM, ref=None):
-    # manibroker_ series carry a `broker` label (Alloy relabel from BROKER_ID); filter them by the
+    # mdsbroker_ series carry a `broker` label (Alloy relabel from BROKER_ID); filter them by the
     # $broker variable. allValue ".*" also matches series without the label (single-broker runs).
     # CloudWatch (aws_*) series are per account/table, not per broker: only run_id.
-    # manicp_ series come from the control-plane hosts and carry no broker label: only run_id.
-    if "manibroker_" in expr and "aws_" not in expr:
+    # mdscontrolplane_ series come from the control-plane hosts and carry no broker label: only run_id.
+    if "mdsbroker_" in expr and "aws_" not in expr:
         expr = expr.replace('run_id="$run_id"', RB)
     return {"expr": expr, "legendFormat": legend, "datasource": ds, "refId": ref or "A"}
 
@@ -24,12 +24,12 @@ def q(expr, legend="", ds=PROM, ref=None):
 class B:
     def __init__(self, title, uid, tags):
         self.d = {
-            "uid": uid, "title": title, "tags": ["manifester"] + tags, "schemaVersion": 39, "version": 1,
+            "uid": uid, "title": title, "tags": ["mds"] + tags, "schemaVersion": 39, "version": 1,
             "editable": True, "timezone": "utc", "refresh": "10s", "time": {"from": "now-30m", "to": "now"},
             "graphTooltip": 1, "panels": [], "annotations": {"list": [
                 {"name": "Run start/end", "datasource": {"type": "grafana", "uid": "-- Grafana --"},
                  "enable": True, "iconColor": "blue",
-                 "target": {"type": "tags", "tags": ["manifester", "run:$run_id"], "limit": 100}}]},
+                 "target": {"type": "tags", "tags": ["mds", "run:$run_id"], "limit": 100}}]},
             "templating": {"list": [
                 {"name": "ds_prom", "type": "datasource", "query": "prometheus", "label": "Prometheus", "current": {}},
                 {"name": "ds_loki", "type": "datasource", "query": "loki", "label": "Loki", "current": {}},
@@ -37,7 +37,7 @@ class B:
                  "query": {"query": "label_values(up, run_id)", "refId": "rid"}, "refresh": 2,
                  "sort": 2, "current": {}},
                 {"name": "broker", "type": "query", "label": "broker", "datasource": PROM, "includeAll": True, "multi": True,
-                 "allValue": ".*", "query": {"query": 'label_values(manibroker_build_info{run_id="$run_id"}, broker)', "refId": "br"},
+                 "allValue": ".*", "query": {"query": 'label_values(mdsbroker_build_info{run_id="$run_id"}, broker)', "refId": "br"},
                  "refresh": 2, "sort": 3, "current": {}},
             ]},
         }
@@ -89,122 +89,122 @@ def hq(metric, qs, sel=R, by="", rng=RI):
 
 
 # ---------------------------------------------------------------- overview
-b = B("Manifester - Overview", "mani-overview", ["overview"])
+b = B("MDS - Overview", "mds-overview", ["overview"])
 # ---- multi-broker block: aggregate, per broker, skew
 b.panel("Aggregate throughput (all selected brokers): committed MB/s and approx msg/s",
-        [q(f'sum(rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}]))', "committed bytes/s"),
-         q(f'sum(rate(manibroker_segment_sealed_batch_bytes_total{{{R}}}[{RI}]))', "sealed batch bytes/s")], "Bps",
+        [q(f'sum(rate(mdsbroker_segment_committed_bytes_total{{{R}}}[{RI}]))', "committed bytes/s"),
+         q(f'sum(rate(mdsbroker_segment_sealed_batch_bytes_total{{{R}}}[{RI}]))', "sealed batch bytes/s")], "Bps",
         desc="Write side, summed over the $broker selection. Read throughput has no broker metric yet; use the OMB consume rate.")
 b.panel("Approx msg/s at 1 KiB per message (sealed batch bytes / 1024)",
-        [q(f'sum(rate(manibroker_segment_sealed_batch_bytes_total{{{R}}}[{RI}])) / 1024', "msg/s (1 KiB records)")], "ops",
+        [q(f'sum(rate(mdsbroker_segment_sealed_batch_bytes_total{{{R}}}[{RI}])) / 1024', "msg/s (1 KiB records)")], "ops",
         desc="There is no per-record counter on the broker: this is exact only for the 1 KiB OMB workloads (batch framing makes it a slight overestimate). The OMB log/JSON is the source of truth for msg/s.")
 b.panel("Per-broker write throughput (committed bytes/s)",
-        [q(f'sum by (broker) (rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}]))', "broker {{broker}}")], "Bps")
+        [q(f'sum by (broker) (rate(mdsbroker_segment_committed_bytes_total{{{R}}}[{RI}]))', "broker {{broker}}")], "Bps")
 b.panel("Skew: share of bytes per broker",
-        [q(f'sum by (broker) (rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}])) / ignoring(broker) group_left sum(rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}]))', "broker {{broker}}")],
+        [q(f'sum by (broker) (rate(mdsbroker_segment_committed_bytes_total{{{R}}}[{RI}])) / ignoring(broker) group_left sum(rate(mdsbroker_segment_committed_bytes_total{{{R}}}[{RI}]))', "broker {{broker}}")],
         "percentunit", desc="Even split is 1/N. Clients stay on the broker they bootstrapped from, so the split follows client placement.")
 b.panel("Skew: max / min broker throughput",
-        [q(f'max(sum by (broker) (rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}]))) / min(sum by (broker) (rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}])))', "max/min"),
-         q(f'max(sum by (broker) (rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}]))) / avg(sum by (broker) (rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}])))', "max/mean")],
+        [q(f'max(sum by (broker) (rate(mdsbroker_segment_committed_bytes_total{{{R}}}[{RI}]))) / min(sum by (broker) (rate(mdsbroker_segment_committed_bytes_total{{{R}}}[{RI}])))', "max/min"),
+         q(f'max(sum by (broker) (rate(mdsbroker_segment_committed_bytes_total{{{R}}}[{RI}]))) / avg(sum by (broker) (rate(mdsbroker_segment_committed_bytes_total{{{R}}}[{RI}])))', "max/mean")],
         "short", desc="1.0 is perfectly even. Needs the brokers selected to all be taking traffic (min of 0 gives +Inf).")
-b.panel("Open client connections per broker", [q(f'manibroker_open_connections{{{R}}}', "broker {{broker}}")], "short",
+b.panel("Open client connections per broker", [q(f'mdsbroker_open_connections{{{R}}}', "broker {{broker}}")], "short",
         desc="Connections follow bootstrap choice (random among bootstrap.servers): the cause of byte skew.")
-b.panel("Produce ack latency p99 per broker", hq("manibroker_segment_seal_to_ack_seconds", [0.99], by="broker"), "s")
-b.panel("Segments per second per broker", [q(f'sum by (broker) (rate(manibroker_segments_committed_total{{{R}}}[{RI}]))', "broker {{broker}}")], "ops")
-b.panel("Produce ack latency (seal to commit answer)", hq("manibroker_segment_seal_to_ack_seconds", [0.5, 0.99]),
+b.panel("Produce ack latency p99 per broker", hq("mdsbroker_segment_seal_to_ack_seconds", [0.99], by="broker"), "s")
+b.panel("Segments per second per broker", [q(f'sum by (broker) (rate(mdsbroker_segments_committed_total{{{R}}}[{RI}]))', "broker {{broker}}")], "ops")
+b.panel("Produce ack latency (seal to commit answer)", hq("mdsbroker_segment_seal_to_ack_seconds", [0.5, 0.99]),
         "s", desc="put + queue wait + commit. Excludes time batches sat in the open segment buffer (see segment open age); "
                   "client-observed latency comes from the load generator.")
-b.panel("Segment open age (first batch to seal)", hq("manibroker_segment_open_age_seconds", [0.5, 0.99]), "s")
+b.panel("Segment open age (first batch to seal)", hq("mdsbroker_segment_open_age_seconds", [0.5, 0.99]), "s")
 b.panel("Throughput: committed segment bytes/s",
-        [q(f'sum(rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}]))', "committed (batch data + index)"),
-         q(f'sum(rate(manibroker_segment_sealed_batch_bytes_total{{{R}}}[{RI}]))', "sealed batch bytes")], "Bps")
+        [q(f'sum(rate(mdsbroker_segment_committed_bytes_total{{{R}}}[{RI}]))', "committed (batch data + index)"),
+         q(f'sum(rate(mdsbroker_segment_sealed_batch_bytes_total{{{R}}}[{RI}]))', "sealed batch bytes")], "Bps")
 b.panel("Segments per second by seal reason",
-        [q(f'sum by (reason) (rate(manibroker_segments_sealed_total{{{R}}}[{RI}]))', "{{reason}}"),
-         q(f'sum(rate(manibroker_segments_failed_total{{{R}}}[{RI}]))', "failed")], "ops")
+        [q(f'sum by (reason) (rate(mdsbroker_segments_sealed_total{{{R}}}[{RI}]))', "{{reason}}"),
+         q(f'sum(rate(mdsbroker_segments_failed_total{{{R}}}[{RI}]))', "failed")], "ops")
 b.panel("Segment size (mean committed bytes per segment)",
-        [q(f'sum(rate(manibroker_segment_committed_bytes_total{{{R}}}[{RI}])) / sum(rate(manibroker_segments_committed_total{{{R}}}[{RI}]))', "mean")], "bytes")
-b.panel("Buffered produce bytes (unacked)", [q(f'manibroker_buffered_bytes{{{R}}}', "buffered")], "bytes")
+        [q(f'sum(rate(mdsbroker_segment_committed_bytes_total{{{R}}}[{RI}])) / sum(rate(mdsbroker_segments_committed_total{{{R}}}[{RI}]))', "mean")], "bytes")
+b.panel("Buffered produce bytes (unacked)", [q(f'mdsbroker_buffered_bytes{{{R}}}', "buffered")], "bytes")
 # ---- control plane: the log store (-store dynamolog, decisions 48-53). One series per CP host (label host, cp_rank).
-b.row("Control plane (log store: manicp_log_*, one series per CP node)")
+b.row("Control plane (log store: mdscontrolplane_log_*, one series per CP node)")
 b.panel("Slot rate (slots/s won) and lost slots",
-        [q(f'sum by (host) (rate(manicp_log_slots_total{{{R}}}[{RI}]))', "slots/s {{host}}"),
-         q(f'sum by (host) (rate(manicp_log_lost_slots_total{{{R}}}[{RI}]))', "lost slots/s {{host}}"),
-         q(f'sum by (host, result) (rate(manicp_log_slot_attempts_total{{{R}, result="error"}}[{RI}]))', "unknown-outcome retries/s {{host}}")], "ops",
+        [q(f'sum by (host) (rate(mdscontrolplane_log_slots_total{{{R}}}[{RI}]))', "slots/s {{host}}"),
+         q(f'sum by (host) (rate(mdscontrolplane_log_lost_slots_total{{{R}}}[{RI}]))', "lost slots/s {{host}}"),
+         q(f'sum by (host, result) (rate(mdscontrolplane_log_slot_attempts_total{{{R}, result="error"}}[{RI}]))', "unknown-outcome retries/s {{host}}")], "ops",
         desc="The active node's slot rate is bounded by -slot-rate (200/s, one hot DynamoDB key). Lost slots stay at 0 with one appender; a burst around a takeover is expected, persistent loss means two appenders.")
-b.panel("Slot append latency (PutItem to definite answer, p50/p99)", hq("manicp_log_append_seconds", [0.5, 0.99], by="host"), "s",
+b.panel("Slot append latency (PutItem to definite answer, p50/p99)", hq("mdscontrolplane_log_append_seconds", [0.5, 0.99], by="host"), "s",
         desc="Includes retries of unknown outcomes. This is the floor of every commit's latency.")
 b.panel("Commands per slot and entry size (p50/p99)",
-        hq("manicp_log_entries_per_slot", [0.5, 0.99], by="host") + hq("manicp_log_entry_bytes", [0.99], by="host"), "short",
+        hq("mdscontrolplane_log_entries_per_slot", [0.5, 0.99], by="host") + hq("mdscontrolplane_log_entry_bytes", [0.99], by="host"), "short",
         desc="Entries per slot grows with load (group commit); 1 at low load. Entry bytes p99 is in bytes, limit 350 KB.")
 b.panel("Apply lag and standby lag (slots)",
-        [q(f'max by (host) (manicp_log_apply_lag_slots{{{R}}})', "apply lag {{host}}"),
-         q(f'max by (host) (manicp_log_standby_lag_slots{{{R}}})', "standby lag {{host}}")], "short",
+        [q(f'max by (host) (mdscontrolplane_log_apply_lag_slots{{{R}}})', "apply lag {{host}}"),
+         q(f'max by (host) (mdscontrolplane_log_standby_lag_slots{{{R}}})', "standby lag {{host}}")], "short",
         desc="Slots known to exist but not applied. A standby whose lag grows cannot take over cleanly.")
 b.panel("Gap fills and role changes",
-        [q(f'sum by (host) (rate(manicp_log_gap_fills_total{{{R}}}[{RI}]))', "gap fills/s {{host}}"),
-         q(f'sum by (host, to) (increase(manicp_log_role_changes_total{{{R}}}[{RI}]))', "role -> {{to}} {{host}}"),
-         q(f'max by (host) (manicp_log_active{{{R}}})', "active (1) {{host}}")], "short",
+        [q(f'sum by (host) (rate(mdscontrolplane_log_gap_fills_total{{{R}}}[{RI}]))', "gap fills/s {{host}}"),
+         q(f'sum by (host, to) (increase(mdscontrolplane_log_role_changes_total{{{R}}}[{RI}]))', "role -> {{to}} {{host}}"),
+         q(f'max by (host) (mdscontrolplane_log_active{{{R}}})', "active (1) {{host}}")], "short",
         desc="Gap fills happen when an appender dies holding a slot; role changes mark a takeover or a failback. The kill-the-appender marker.")
 b.panel("Queue depth, queue wait and refused requests",
-        [q(f'max by (host) (manicp_log_queue_depth{{{R}}})', "queue depth {{host}}"),
-         q(f'histogram_quantile(0.99, sum by (le, host) (rate(manicp_log_queue_wait_seconds_bucket{{{R}}}[{RI}])))', "queue wait p99 {{host}}"),
-         q(f'sum by (host, reason) (rate(manicp_log_rejected_total{{{R}}}[{RI}]))', "refused/s {{reason}} {{host}}")], "short",
+        [q(f'max by (host) (mdscontrolplane_log_queue_depth{{{R}}})', "queue depth {{host}}"),
+         q(f'histogram_quantile(0.99, sum by (le, host) (rate(mdscontrolplane_log_queue_wait_seconds_bucket{{{R}}}[{RI}])))', "queue wait p99 {{host}}"),
+         q(f'sum by (host, reason) (rate(mdscontrolplane_log_rejected_total{{{R}}}[{RI}]))', "refused/s {{reason}} {{host}}")], "short",
         desc="Refusals with reason not_active on a standby are normal (brokers fail over). overloaded means the queue is full.")
 b.panel("Checkpoint age (s) and size",
-        [q(f'max by (host) (manicp_log_checkpoint_age_seconds{{{R}}})', "age s {{host}}"),
-         q(f'max by (host) (manicp_log_checkpoint_bytes{{{R}}})', "bytes {{host}}"),
-         q(f'sum by (host) (increase(manicp_log_checkpoint_errors_total{{{R}}}[{RI}]))', "errors {{host}}")], "short",
+        [q(f'max by (host) (mdscontrolplane_log_checkpoint_age_seconds{{{R}}})', "age s {{host}}"),
+         q(f'max by (host) (mdscontrolplane_log_checkpoint_bytes{{{R}}})', "bytes {{host}}"),
+         q(f'sum by (host) (increase(mdscontrolplane_log_checkpoint_errors_total{{{R}}}[{RI}]))', "errors {{host}}")], "short",
         desc="Alert on age above 3 x -checkpoint-every (15 min). Only the active node checkpoints.")
 b.panel("Fresh reads served and tail checks (batching factor)",
-        [q(f'sum by (host) (rate(manicp_log_fresh_reads_total{{{R}}}[{RI}]))', "fresh reads/s {{host}}"),
-         q(f'sum by (host) (rate(manicp_log_tail_checks_total{{{R}}}[{RI}]))', "tail checks/s {{host}}"),
-         q(f'max by (host) (manicp_log_blocked{{{R}}})', "blocked {{host}}")], "short")
+        [q(f'sum by (host) (rate(mdscontrolplane_log_fresh_reads_total{{{R}}}[{RI}]))', "fresh reads/s {{host}}"),
+         q(f'sum by (host) (rate(mdscontrolplane_log_tail_checks_total{{{R}}}[{RI}]))', "tail checks/s {{host}}"),
+         q(f'max by (host) (mdscontrolplane_log_blocked{{{R}}})', "blocked {{host}}")], "short")
 LOGSEL = '{run_id="$run_id", level=~"warn|warning|error|fatal|dpanic|panic"}'
 b.panel("Logs: level >= warn", [q(LOGSEL, "", LOKI)], w=24, h=10, kind="logs")
 b.save("overview.json")
 
 # ---------------------------------------------------------------- pipeline
-b = B("Manifester - Segment pipeline", "mani-pipeline", ["pipeline"])
+b = B("MDS - Segment pipeline", "mds-pipeline", ["pipeline"])
 for t, m, d in [("PUT (seal to object stored, retries included)", "segment_put_seconds", ""),
                 ("Queue wait (commits strictly in seal order)", "segment_queue_wait_seconds", ""),
                 ("Commit (first CommitSegment to answer, retries included)", "segment_commit_seconds", ""),
                 ("Total (seal to ack)", "segment_seal_to_ack_seconds", "")]:
-    b.panel(t, hq("manibroker_" + m, [0.5, 0.99]), "s")
+    b.panel(t, hq("mdsbroker_" + m, [0.5, 0.99]), "s")
 b.panel("Segments in flight",
-        [q(f'manibroker_segments_in_flight{{{R}}}', "in flight (gauge)"),
-         q(f'histogram_quantile(0.5, sum by (le) (rate(manibroker_segments_in_flight_at_seal_bucket{{{R}}}[{RI}])))', "at seal p50"),
-         q(f'histogram_quantile(0.99, sum by (le) (rate(manibroker_segments_in_flight_at_seal_bucket{{{R}}}[{RI}])))', "at seal p99")],
+        [q(f'mdsbroker_segments_in_flight{{{R}}}', "in flight (gauge)"),
+         q(f'histogram_quantile(0.5, sum by (le) (rate(mdsbroker_segments_in_flight_at_seal_bucket{{{R}}}[{RI}])))', "at seal p50"),
+         q(f'histogram_quantile(0.99, sum by (le) (rate(mdsbroker_segments_in_flight_at_seal_bucket{{{R}}}[{RI}])))', "at seal p99")],
         desc="Above 1 means PUTs overlap.")
 b.panel("Backpressure",
-        [q(f'rate(manibroker_reads_paused_seconds_total{{{R}}}[{RI}])', "fraction of time reads paused"),
-         q(f'manibroker_reads_paused{{{R}}}', "paused now (0/1)")], "percentunit",
+        [q(f'rate(mdsbroker_reads_paused_seconds_total{{{R}}}[{RI}])', "fraction of time reads paused"),
+         q(f'mdsbroker_reads_paused{{{R}}}', "paused now (0/1)")], "percentunit",
         desc="Client reads are paused while unacked produce data exceeds -max-buffered.")
-b.panel("Buffered produce bytes", [q(f'manibroker_buffered_bytes{{{R}}}', "buffered")], "bytes")
+b.panel("Buffered produce bytes", [q(f'mdsbroker_buffered_bytes{{{R}}}', "buffered")], "bytes")
 b.panel("Control-plane call seen by broker, p50/p99 by op",
-        hq("manibroker_cp_call_seconds", [0.5, 0.99], by="op"), "s")
+        hq("mdsbroker_cp_call_seconds", [0.5, 0.99], by="op"), "s")
 b.panel("Client-side produce latency (WarpStream benchmark-producer, p50/p99)",
         hq("warpstream_produce_benchmark_produce_request_duration_seconds", [0.5, 0.99], sel=R + ', job="warpstream_bench"'), "s",
         desc="Only while a warpstream benchmark-producer runs (its Prometheus port 8081). Not available with kafka-producer-perf-test.")
 b.save("pipeline.json")
 
 # --------------------------------------------------------------------- aws
-b = B("Manifester - AWS (S3 and DynamoDB)", "mani-aws", ["aws"])
-b.panel("S3 PUT latency (broker view, seal to stored)", hq("manibroker_segment_put_seconds", [0.5, 0.99]), "s")
+b = B("MDS - AWS (S3 and DynamoDB)", "mds-aws", ["aws"])
+b.panel("S3 PUT latency (broker view, seal to stored)", hq("mdsbroker_segment_put_seconds", [0.5, 0.99]), "s")
 b.panel("S3 latency (CloudWatch request metrics)",
         [q(f'aws_s3_first_byte_latency_average{{{R}}} / 1000', "first byte avg"),
          q(f'aws_s3_total_request_latency_average{{{R}}} / 1000', "total request avg"),
          q(f'aws_s3_total_request_latency_maximum{{{R}}} / 1000', "total request max")], "s",
         desc="Needs the bucket metrics filter (README). 1-minute CloudWatch resolution.")
 b.panel("S3 errors and PUT retries",
-        [q(f'sum(rate(manibroker_segment_put_attempts_total{{{R}}}[{RI}])) - sum(rate(manibroker_segment_put_seconds_count{{{R}}}[{RI}]))', "PUT retries/s (attempts - segments)"),
-         q(f'sum(rate(manibroker_segments_failed_total{{{R}}}[{RI}]))', "failed segments/s"),
+        [q(f'sum(rate(mdsbroker_segment_put_attempts_total{{{R}}}[{RI}])) - sum(rate(mdsbroker_segment_put_seconds_count{{{R}}}[{RI}]))', "PUT retries/s (attempts - segments)"),
+         q(f'sum(rate(mdsbroker_segments_failed_total{{{R}}}[{RI}]))', "failed segments/s"),
          q(f'sum(aws_s3_5xx_errors_sum{{{R}}}) / 60', "S3 5xx/s (CloudWatch)"),
          q(f'sum(aws_s3_4xx_errors_sum{{{R}}}) / 60', "S3 4xx/s (CloudWatch)")], "ops")
 b.panel("S3 requests per second (CloudWatch)",
         [q(f'sum(aws_s3_put_requests_sum{{{R}}}) / 60', "PUT"), q(f'sum(aws_s3_get_requests_sum{{{R}}}) / 60', "GET"),
          q(f'sum(aws_s3_all_requests_sum{{{R}}}) / 60', "all")], "reqps")
-b.panel("DynamoDB call latency inside manicp (p50/p99 by call)",
-        hq("manicp_dynamodb_call_seconds", [0.5, 0.99], by="call"), "s")
+b.panel("DynamoDB call latency inside mdscontrolplane (p50/p99 by call)",
+        hq("mdscontrolplane_dynamodb_call_seconds", [0.5, 0.99], by="call"), "s")
 b.panel("SuccessfulRequestLatency by operation (CloudWatch avg)",
         [q(f'aws_dynamodb_successful_request_latency_average{{{R}}} / 1000', "{{dimension_Operation}}")], "s")
 b.panel("Consumed capacity (CloudWatch, units/s)",
@@ -215,22 +215,22 @@ b.panel("Throttles (CloudWatch, per minute)",
         [q(f'sum(aws_dynamodb_write_throttle_events_sum{{{R}}})', "write throttle events"),
          q(f'sum(aws_dynamodb_read_throttle_events_sum{{{R}}})', "read throttle events"),
          q(f'sum by (dimension_Operation) (aws_dynamodb_throttled_requests_sum{{{R}}})', "throttled {{dimension_Operation}}")], "short")
-b.panel("manicp handler time by op (p99)", hq("manicp_handler_seconds", [0.99], by="op"), "s")
-# SDK-level metrics from sys/awsobs (manibroker_s3_*, manicp_dynamo_*), documented in docs/observability.md.
-for pre, nm in [("manibroker_s3", "S3"), ("manicp_dynamo", "DynamoDB")]:
+b.panel("mdscontrolplane handler time by op (p99)", hq("mdscontrolplane_handler_seconds", [0.99], by="op"), "s")
+# SDK-level metrics from sys/awsobs (mdsbroker_s3_*, mdscontrolplane_dynamo_*), documented in docs/observability.md.
+for pre, nm in [("mdsbroker_s3", "S3"), ("mdscontrolplane_dynamo", "DynamoDB")]:
     b.panel(f"{nm} SDK attempt latency by op (p50/p99, result=ok)", hq(f"{pre}_attempt_seconds", [0.5, 0.99], sel=R + ', result="ok"', by="op"), "s")
     b.panel(f"{nm} SDK whole-call latency by op (retries included, p99)", hq(f"{pre}_operation_seconds", [0.99], by="op,outcome"), "s")
     b.panel(f"{nm} SDK retries, throttles and API errors",
             [q(f'sum by (op) (rate({pre}_retries_total{{{R}}}[{RI}]))', "retries {{op}}"),
              q(f'sum by (op, code) (rate({pre}_throttles_total{{{R}}}[{RI}]))', "throttle {{op}} {{code}}"),
              q(f'sum by (op, code) (rate({pre}_api_errors_total{{{R}}}[{RI}]))', "error {{op}} {{code}}")], "ops")
-b.panel("DynamoDB capacity units consumed per second (manicp, successful calls)",
-        [q(f'sum by (kind) (rate(manicp_dynamo_consumed_capacity_units_total{{{R}}}[{RI}]))', "{{kind}}")], "short")
+b.panel("DynamoDB capacity units consumed per second (mdscontrolplane, successful calls)",
+        [q(f'sum by (kind) (rate(mdscontrolplane_dynamo_consumed_capacity_units_total{{{R}}}[{RI}]))', "{{kind}}")], "short")
 b.save("aws.json")
 
 # ------------------------------------------------------------------- hosts
 H = f'{R}, host=~"$host"'
-b = B("Manifester - Hosts", "mani-hosts", ["hosts"])
+b = B("MDS - Hosts", "mds-hosts", ["hosts"])
 b.d["templating"]["list"] = [v for v in b.d["templating"]["list"] if v["name"] != "broker"]  # per-host already
 b.d["templating"]["list"].append(
     {"name": "host", "type": "query", "label": "host", "datasource": PROM, "includeAll": True, "multi": True,

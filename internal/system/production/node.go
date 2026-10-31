@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"manifester/internal/broker"
-	"manifester/internal/core"
-	"manifester/internal/system"
+	"mds/internal/broker"
+	"mds/internal/core"
+	"mds/internal/system"
 )
 
 // NodeConfig is everything one broker process needs.

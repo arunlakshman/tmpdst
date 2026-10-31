@@ -4,9 +4,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"manifester/internal/broker"
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
+	"mds/internal/broker"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
 )
 
 // sealStats counts sealed segments by reason across a campaign.

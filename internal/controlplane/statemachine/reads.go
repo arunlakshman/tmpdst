@@ -1,6 +1,6 @@
 package statemachine
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // readWaiter is one lookup or describe that waits for a fresh view.
 // A read is answered only after this node has applied the log tail that was

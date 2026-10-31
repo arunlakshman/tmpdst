@@ -6,7 +6,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // groupCP is a fake control plane for the group calls of one test. answer

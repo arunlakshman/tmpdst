@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // A join whose ctx ends while it is parked gets the ctx error, and the

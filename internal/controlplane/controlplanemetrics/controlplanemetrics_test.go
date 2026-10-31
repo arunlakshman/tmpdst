@@ -21,8 +21,8 @@ func TestMiddlewareAndNil(t *testing.T) {
 	m.Call("TransactWriteItems", time.Now())
 	rec := httptest.NewRecorder()
 	m.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
-	for _, want := range []string{`manicp_handler_seconds_count{op="commit-segment"} 1`, `manicp_request_body_bytes_sum{op="commit-segment"} 5`,
-		`manicp_dynamodb_call_seconds_count{call="TransactWriteItems"} 1`, "manicp_inflight_requests 0"} {
+	for _, want := range []string{`mdscontrolplane_handler_seconds_count{op="commit-segment"} 1`, `mdscontrolplane_request_body_bytes_sum{op="commit-segment"} 5`,
+		`mdscontrolplane_dynamodb_call_seconds_count{call="TransactWriteItems"} 1`, "mdscontrolplane_inflight_requests 0"} {
 		if !strings.Contains(rec.Body.String(), want) {
 			t.Errorf("missing %q", want)
 		}
@@ -63,7 +63,7 @@ func TestCallLogLine(t *testing.T) {
 		t.Errorf("timings: %v", l)
 	}
 	out := gather(t, m)
-	for _, want := range []string{`manicp_calls_total{op="commit-segment",outcome="ErrConflict"} 1`} {
+	for _, want := range []string{`mdscontrolplane_calls_total{op="commit-segment",outcome="ErrConflict"} 1`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q", want)
 		}
@@ -77,9 +77,9 @@ func TestConsumedCapacity(t *testing.T) {
 	m.CallCtx(t.Context(), "BatchGetItem", time.Now(), []types.ConsumedCapacity{{CapacityUnits: &half}, {CapacityUnits: &half}})
 	m.CallCtx(t.Context(), "GetItem", time.Now(), nil) // ExtendDB: no capacity
 	out := gather(t, m)
-	for _, want := range []string{`manicp_dynamo_consumed_capacity_units_total{kind="write",op="TransactWriteItems"} 4`,
-		`manicp_dynamo_consumed_capacity_units_total{kind="read",op="BatchGetItem"} 1`,
-		`manicp_dynamo_consumed_capacity_missing_total{op="GetItem"} 1`} {
+	for _, want := range []string{`mdscontrolplane_dynamo_consumed_capacity_units_total{kind="write",op="TransactWriteItems"} 4`,
+		`mdscontrolplane_dynamo_consumed_capacity_units_total{kind="read",op="BatchGetItem"} 1`,
+		`mdscontrolplane_dynamo_consumed_capacity_missing_total{op="GetItem"} 1`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in\n%s", want, out)
 		}
@@ -92,7 +92,7 @@ func TestStatusOutcome(t *testing.T) {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 	}))
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/lookup", nil))
-	if !strings.Contains(gather(t, m), `manicp_calls_total{op="lookup",outcome="http_503"} 1`) {
+	if !strings.Contains(gather(t, m), `mdscontrolplane_calls_total{op="lookup",outcome="http_503"} 1`) {
 		t.Error("503 outcome")
 	}
 }

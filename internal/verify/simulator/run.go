@@ -1,6 +1,6 @@
 package simulator
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // Phases bound fault generation (lesson 8).
 type Phases struct {

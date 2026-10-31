@@ -1,6 +1,6 @@
 # Produce benchmarks (local, single broker)
 
-> **History:** every number in this file was measured before decisions 41-44 (no idempotent producers, no broker fencing, flat segment keys). `manibench` now disables idempotence, the default segment partition cap is 96 and the commit costs 1 + partitions + grown topics. Treat the figures as the old design's.
+> **History:** every number in this file was measured before decisions 41-44 (no idempotent producers, no broker fencing, flat segment keys). `mdsbench` now disables idempotence, the default segment partition cap is 96 and the commit costs 1 + partitions + grown topics. Treat the figures as the old design's.
 
 *Note: the DynamoDB-transaction control plane described here (`-store dynamo`, the sequencer, `cp/dynamo`) was removed (decision 54); the log-based CP is the only one. The commands for setup B and the sequencer benchmark no longer exist; the numbers are a record.*
 
@@ -8,7 +8,7 @@ Measurement only. No broker, CP or core code was changed. Date: 2026-10-17, bran
 
 ## Method
 
-`cmd/manibench benchmark-producer` (franz-go v1.20.7): N independent `kgo.Client`s, idempotent, acks=all, no
+`cmd/mdsbench benchmark-producer` (franz-go v1.20.7): N independent `kgo.Client`s, idempotent, acks=all, no
 compression, `MaxBufferedRecords` 5000 per client, each client produces in a loop that blocks on the buffer.
 Latency = time from `Produce()` to its callback (includes time blocked on a full buffer). Partitioner: kgo
 UniformBytes sticky (64 KiB per partition, then another partition), so all 6 partitions are used with large
@@ -27,11 +27,11 @@ Commands (repo root; binaries built with `go build -o <dir>/bin/<name> ./cmd/<na
 
 ```
 ops/scripts/it-up.sh
-manicp <cp flags above>                       # :8080
-manibroker <broker flags above>               # :9092
-manibench benchmark-producer -topic bench -create-partitions 6 -num-clients 1 -duration 2s   # warm-up, creates topic
-manibench benchmark-producer -topic bench -num-clients {1,8,32} -record-size 1024 -duration 30s -interval 5s
-manibench benchmark-producer -topic bench -num-clients 1 -record-size 100 -duration 30s -interval 5s
+mdscontrolplane <cp flags above>                       # :8080
+mdsbroker <broker flags above>               # :9092
+mdsbench benchmark-producer -topic bench -create-partitions 6 -num-clients 1 -duration 2s   # warm-up, creates topic
+mdsbench benchmark-producer -topic bench -num-clients {1,8,32} -record-size 1024 -duration 30s -interval 5s
+mdsbench benchmark-producer -topic bench -num-clients 1 -record-size 100 -duration 30s -interval 5s
 ops/scripts/it-down.sh
 ```
 
@@ -78,7 +78,7 @@ above are copied from it.
 
 ## CPU (8-client run, samples at 6/12/18/24 s, %CPU of one core)
 
-| Setup | manibroker | manibench | manicp |
+| Setup | mdsbroker | mdsbench | mdscontrolplane |
 |---|---|---|---|
 | A | 106, 103, 95, 104 | 73, 74, 68, 69 | 1-2 |
 | B | 54, 68, 77, 82 | 37, 41, 48, 50 | 5-8 |
@@ -119,7 +119,7 @@ Docker stats after C: extenddb 0.2%, seaweedfs 1.5% (RSS 1.1 GiB), i.e. the back
    with smaller `-buffered-records`.
 5. kgo's own limits: each client has 1 in-flight produce request per broker (default), so one client's throughput
    is bounded by request size / request latency regardless of the broker. 1 client in A (84 MiB/s) is almost
-   entirely this: about 5000 records per 54 ms. Raising `-max-inflight` (flag in manibench, up to 5 with idempotence) would show
+   entirely this: about 5000 records per 54 ms. Raising `-max-inflight` (flag in mdsbench, up to 5 with idempotence) would show
    how much of the 1-client number is kgo; not run (not in the approved plan).
 6. Per-record cost: 100 B records give 75k records/s in A against 86k records/s at 1 KB, so the per-record cost
    is small relative to the per-request/per-batch fixed cost. In C the 100 B run (51k records/s) is faster in
@@ -129,11 +129,11 @@ Docker stats after C: extenddb 0.2%, seaweedfs 1.5% (RSS 1.1 GiB), i.e. the back
 
 ## Window and segment experiment (setup C): not run
 
-`manibroker` has no flag for `BatchWindow`, `MaxSegmentBytes`, `MaxSegmentPartitions` or `MaxBufferedBytes`;
-`cmd/manibroker/main.go` uses `broker.DefaultConfig()` and only overrides `BrokerID`, `Host`, `Port`. Per the
+`mdsbroker` has no flag for `BatchWindow`, `MaxSegmentBytes`, `MaxSegmentPartitions` or `MaxBufferedBytes`;
+`cmd/mdsbroker/main.go` uses `broker.DefaultConfig()` and only overrides `BrokerID`, `Host`, `Port`. Per the
 instructions I did not change broker code. Defaults: BatchWindow 50 ms, MaxSegmentBytes 4 MiB,
 MaxSegmentPartitions 24, MaxAttempts 6, MaxBufferedBytes 64 MiB (resume at 32 MiB). I would expose these as flags
-(a small cmd/manibroker change) and try on C with 8 clients: window 5/10/20 ms, MaxSegmentBytes 1/2/8/16 MiB.
+(a small cmd/mdsbroker change) and try on C with 8 clients: window 5/10/20 ms, MaxSegmentBytes 1/2/8/16 MiB.
 
 ## Speed-up ideas, ranked by evidence
 
@@ -198,9 +198,9 @@ Items 1 to 3 above still apply only as hypotheses.
 
 ## Where the time goes (per-segment metrics, setup C)
 
-Since decision 36 `manibroker` serves Prometheus metrics on `-metrics-addr` (default `:9100`, `/metrics`).
+Since decision 36 `mdsbroker` serves Prometheus metrics on `-metrics-addr` (default `:9100`, `/metrics`).
 
-How to read them (all names `manibroker_...`; histograms in seconds):
+How to read them (all names `mdsbroker_...`; histograms in seconds):
 
 - `segment_put_seconds`: seal to successful PUT (retries included). `segment_queue_wait_seconds`: PUT done, waiting for
   the earlier segments' commits (commits go out one at a time, in seal order). `segment_commit_seconds`: CommitSegment
@@ -252,7 +252,7 @@ Reading:
 
 ## Where the commit time goes (control-plane metrics, setup C)
 
-Decision 37 added `manicp -metrics-addr` (default `:9101`, `/metrics`, prefix `manicp_`) and `manibroker_cp_call_seconds{op}`
+Decision 37 added `mdscontrolplane -metrics-addr` (default `:9101`, `/metrics`, prefix `mdscontrolplane_`) and `mdsbroker_cp_call_seconds{op}`
 (the CP client's send-to-full-response time). Together they split a broker `commit_ns` into client RTT, server handler
 time, DynamoDB calls and the commit's read/decide steps.
 
@@ -267,7 +267,7 @@ Chrome for Testing helper and fseventsd a few %, load average about 4.7 before t
 | segments (timer / 32-batch cap / size), avg size | 181 (51 / 117 / 13), 11.9 MB | 178 (44 / 126 / 8), 11.5 MB |
 | broker `segment_commit_seconds` | 96.3 ms | 116.3 ms |
 | client CPCall RTT (`cp_call_seconds{commit-segment}`) | 96.2 ms | 116.0 ms |
-| manicp handler (`handler_seconds{commit-segment}`) | 95.7 ms | 115.5 ms |
+| mdscontrolplane handler (`handler_seconds{commit-segment}`) | 95.7 ms | 115.5 ms |
 | DynamoDB `TransactWriteItems` | 63.0 ms | 77.2 ms |
 | reads (1 + 3 GetItem, 1 BatchGetItem; `commit_prep{reads}`) | 32.2 ms (GetItem 5.8 each, BatchGet 16.3) | 37.8 ms (6.5 each, 18.8) |
 | decide + build items (`commit_prep{decide_encode}`) | 0.23 ms | 0.28 ms |
@@ -325,12 +325,12 @@ The commit time follows the item count, not the batch count: a 256-batch segment
 
 ## Sequencer (decision 46)
 
-Why: on AWS, 6 brokers each with their own manicp committed ~33 of 288 partitions to one DynamoDB table and lost the
+Why: on AWS, 6 brokers each with their own mdscontrolplane committed ~33 of 288 partitions to one DynamoDB table and lost the
 run-item compare-and-set constantly (387 of 705 attempts cancelled on broker 1, 7 commits gave up after 20 attempts,
-commit_ms up to 11 s). The control plane now owns sequencing: one manicp, one loop, group commit, offsets from memory
+commit_ms up to 11 s). The control plane now owns sequencing: one mdscontrolplane, one loop, group commit, offsets from memory
 (`cp/doc.go`, "Sequencer").
 
-Measurement: `MANIFESTER_SEQ_BENCH=fake|extenddb go test ./cp/cptest -run SequencerBench -v` (8 s per case, 2026-10-19,
+Measurement: `MDS_SEQ_BENCH=fake|extenddb go test ./cp/cptest -run SequencerBench -v` (8 s per case, 2026-10-19,
 Apple laptop, Go 1.24). Six committers loop at the maximum rate; each commit is a segment of 33 random distinct partitions
 of 288 (one batch of 1-5 records each); a 503 is resent under the same key, as a broker does. "before" is six independent
 `dynamo.Store` values on one table (the old path: every commit reads the newest run of each partition and does its own
@@ -369,5 +369,5 @@ Reading it:
   serialise: pipeline 1 and 4 are equal. ExtendDB executes transactions about one at a time, so it shows no gain either.
   Default 4 costs nothing and is kept for deployments where brokers own partition ranges.
 - Steady state costs one transaction per group and no reads (the "before" path does about 23 descending Queries per
-  commit): `manicp_seq_cache_total{cache="end"}` hits dominate after the first touch of each partition.
+  commit): `mdscontrolplane_seq_cache_total{cache="end"}` hits dominate after the first touch of each partition.
 - Not measured here: real DynamoDB (single-digit ms reads, 20-40 ms transactions): the AWS run is the evidence.

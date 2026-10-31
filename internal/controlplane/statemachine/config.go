@@ -1,8 +1,8 @@
 package statemachine
 
 import (
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 // Config tunes the control-plane machine. Zero value keeps catch-up and the

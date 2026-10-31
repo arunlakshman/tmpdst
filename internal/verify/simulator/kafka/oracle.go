@@ -4,8 +4,8 @@ import (
 	"slices"
 	"strconv"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
 )
 
 // expectedLogChecker is the invariant that owns the reconstructed logs and every check

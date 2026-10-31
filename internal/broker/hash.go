@@ -1,7 +1,7 @@
 package broker
 
 import (
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // stateHasher is FNV-1a; hash/fnv is off the deterministic allow-list.

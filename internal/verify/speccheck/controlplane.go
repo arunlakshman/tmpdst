@@ -3,7 +3,7 @@ package speccheck
 import (
 	"slices"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // ControlPlane is the spec of the control plane as a broker sees it.

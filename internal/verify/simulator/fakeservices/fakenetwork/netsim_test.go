@@ -6,8 +6,8 @@ import (
 	"sort"
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
 )
 
 // ---- test doubles ----

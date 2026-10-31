@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Benchmark matrix driver. Runs ON THE LOADGEN HOST (SSM session), or locally
-# with --local against a manibroker/manicp started by hand.
+# with --local against a mdsbroker/mdscontrolplane started by hand.
 #
 #   run-benchmark.sh [--smoke] [--local] [--tool kafka|warpstream] [--reps N]
 #                    [--duration S] [--rate N] [--gap S] [--warmup S] [--cells "c1_1k c8_1k"]
@@ -35,7 +35,7 @@ set -euo pipefail
 
 LOCAL=0 SMOKE=0 TOOL=auto REPS=3 DURATION=60 GAP=15 WARMUP=20
 CELLS="c1_1k c8_1k c32_1k c1_100b" TOPIC="" OUT="" RUN_ID="${RUN_ID:-}"
-SSM_PREFIX="${SSM_PREFIX:-/manifester-bench}"
+SSM_PREFIX="${SSM_PREFIX:-/mds-bench}"
 PARTITIONS=6
 RATE=-1
 
@@ -105,18 +105,18 @@ annotate() { # annotate <tag> <text> [time_end_ms]
   local now end="${3:-}" body
   now=$(($(date +%s) * 1000))
   body=$(jq -nc --argjson t "$now" --arg run "run:$RUN_ID" --arg tag "$1" --arg text "$2" --arg end "$end" \
-    '{time:$t, tags:["manifester",$run,$tag], text:$text} + (if $end != "" then {timeEnd:($end|tonumber)} else {} end)')
+    '{time:$t, tags:["mds",$run,$tag], text:$text} + (if $end != "" then {timeEnd:($end|tonumber)} else {} end)')
   curl -sS -m 10 -X POST "$GRAFANA_URL/api/annotations" -H "Authorization: Bearer $GRAFANA_TOKEN" \
     -H 'Content-Type: application/json' -d "$body" >/dev/null || log "annotation failed (ignored)"
 }
 
 # ---- helpers ---------------------------------------------------------------
-snap_local() { # snap_local <label>: broker + manicp /metrics at this instant
+snap_local() { # snap_local <label>: broker + mdscontrolplane /metrics at this instant
   [ "$LOCAL" -eq 1 ] || return 0
   local ts
   ts=$(date +%s)
   curl -sf -m 5 "$BROKER_METRICS" >"$OUT/metrics/$ts-broker.txt" || log "broker metrics snapshot failed ($1)"
-  curl -sf -m 5 "$CP_METRICS" >"$OUT/metrics/$ts-manicp.txt" || log "manicp metrics snapshot failed ($1)"
+  curl -sf -m 5 "$CP_METRICS" >"$OUT/metrics/$ts-mdscontrolplane.txt" || log "mdscontrolplane metrics snapshot failed ($1)"
 }
 
 wait_ready() {

@@ -1,6 +1,6 @@
 package simulator
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // view is the View invariants get after each step. Ground truth comes from the
 // engines by type assertion; with no such engine the truths are empty.

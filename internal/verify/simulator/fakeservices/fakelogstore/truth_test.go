@@ -3,10 +3,10 @@ package fakelogstore_test
 import (
 	"testing"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/fakelogstore"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/fakelogstore"
 )
 
 func TestControlPlaneRealStateCreateTopic(t *testing.T) {

@@ -1,12 +1,12 @@
-// Control-plane host add-on: this host's manicp. A log-store run has several CP hosts (rank 0 the preferred
-// appender, ranks 1.. hot standbys, decision 51); each scrapes its own manicp and labels it cp_rank (and host).
+// Control-plane host add-on: this host's mdscontrolplane. A log-store run has several CP hosts (rank 0 the preferred
+// appender, ranks 1.. hot standbys, decision 51); each scrapes its own mdscontrolplane and labels it cp_rank (and host).
 // CloudWatch (DynamoDB table metrics) is in cpcloudwatch.alloy, installed on ONE CP host only so the
 // DynamoDB series are not duplicated.
 // Extra environment: CP_RANK (0 for the preferred appender).
 
 discovery.relabel "cp_targets" {
 	targets = [
-		{"__address__" = "127.0.0.1:9101", "job" = "manicp", "service" = "manicp"},
+		{"__address__" = "127.0.0.1:9101", "job" = "mdscontrolplane", "service" = "mdscontrolplane"},
 	]
 
 	rule {

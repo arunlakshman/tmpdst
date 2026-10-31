@@ -117,7 +117,7 @@ func TestBadValues(t *testing.T) {
 func TestReplayFormat(t *testing.T) {
 	clearEnv(t)
 	o := Options(&recordingTB{TB: t, name: "TestTop/sub/deeper"}, 5)
-	want := "MANIFESTER_SEED=9 go test -run '^TestTop$' -count=1 -v ."
+	want := "MDS_SEED=9 go test -run '^TestTop$' -count=1 -v ."
 	if got := o.Replay(9); got != want {
 		t.Fatalf("expected the replay command %q, got %q", want, got)
 	}

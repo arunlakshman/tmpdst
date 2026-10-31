@@ -4,12 +4,12 @@ import (
 	"errors"
 	"testing"
 
-	"manifester/internal/controlplane/controlplaneclient"
-	"manifester/internal/controlplane/grpctestserver"
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker/generator"
-	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/suites"
+	"mds/internal/controlplane/controlplaneclient"
+	"mds/internal/controlplane/grpctestserver"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker/generator"
+	"mds/internal/verify/speccheck/checker/observation"
+	"mds/internal/verify/speccheck/checker/suites"
 )
 
 // compareSteps runs the operations one by one on the subject and on a fresh

@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func code(err error) core.ErrCode {

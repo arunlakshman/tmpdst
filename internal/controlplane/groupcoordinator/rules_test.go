@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/controlplane"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 func TestProtocolMismatch(t *testing.T) {

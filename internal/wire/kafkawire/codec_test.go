@@ -8,7 +8,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func sampleRequest(key, v int16) kmsg.Request {

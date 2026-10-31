@@ -3,7 +3,7 @@ package simulator
 import (
 	"testing"
 
-	"manifester/internal/verify/speccheck/checker"
+	"mds/internal/verify/speccheck/checker"
 )
 
 // checker.Rand is a copy of the simulator stream, so that the speccheck tests do

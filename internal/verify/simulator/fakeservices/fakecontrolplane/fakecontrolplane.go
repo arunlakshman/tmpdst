@@ -9,10 +9,10 @@ package fakecontrolplane
 import (
 	"slices"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/internal/fakecompletions"
-	"manifester/internal/verify/speccheck"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/internal/fakecompletions"
+	"mds/internal/verify/speccheck"
 )
 
 // Engine is the fake control plane. It is also the simulator.ControlPlaneRealState.

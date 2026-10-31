@@ -29,7 +29,7 @@ only partly and Phase 0 must confirm them before anyone acts on them:
 |---|-----|----------|
 | G1 | Generators are copy-pasted. Object-store ops are generated separately in `sim/engines/conformance_test.go`, `sys/s3store/conform_test.go` and (verify) `veritas/objectstore_test.go`. Control-plane ops are generated in `sim/engines`, `controlplane/cptest/conform_test.go`, `veritas/controlplane_test.go`, `applier/applier_test.go`. (`machine/lockstep_test.go` uses 6 fixed commands and has no generator: W0 checked.) The "same key, same shape, replayed" trick (`len(shape)*7+...*131+variant`) is duplicated. | grep + reads |
 | G2 | Results are compared as strings: `fmt.Sprintf("%+v", completion)`, `%v %q`. nil vs empty slices are papered over by comments ("%+v prints nil and empty slices alike"). A real difference can hide, and a failure message is hard to read. | `engines` `render`, `s3store` `step`, `cptest` `show` |
-| G3 | Seed control is not wired. `Options.Seed`, `Options.Stop` (wall-clock campaigns) and `Options.Replay` exist, but every caller passes `Seeds: N, Seed: -1` and no `Replay`, so a failure prints no replay command and replaying one seed means editing the test. | grep: no flag/env use outside `MANIFESTER_S3_ENDPOINT` |
+| G3 | Seed control is not wired. `Options.Seed`, `Options.Stop` (wall-clock campaigns) and `Options.Replay` exist, but every caller passes `Seeds: N, Seed: -1` and no `Replay`, so a failure prints no replay command and replaying one seed means editing the test. | grep: no flag/env use outside `MDS_S3_ENDPOINT` |
 | G4 | Planted-bug coverage is uneven. The broker has `Bug*` mutants and a test that they are caught. The machine has 4 (`logmutants_test.go`); the broker has 9 `Bug` values but its conformance test catches only `BugWrongOffset` and `BugServeCorrupt`. The applier has none of its own (W0 corrected this). C2 (`sim/engines`), C3 (`s3store`, `cptest`) and the `machine` lockstep have none (grep for Bug/Mutant finds nothing), so nothing proves those suites can go red. | grep |
 | G5 | C2 runs with faults off only. Nothing checks that, under injected faults, a completion is either the spec's answer or an allowed fault, with the right `Outcome` (`MaybeApplied`). | `engines/conformance_test.go` header |
 | G6 | `TestConformanceLogEngine` is `t.Skip`; its C2 moved to `machine` lockstep. The skip is a dangling promise. | same file |
@@ -93,7 +93,7 @@ determinism rule; `runcontrol` is edge code (may use `os`, `flag`, `time`, `test
 | Generators | ~8 copies | `generator.ObjectOps`, `generator.ControlPlaneOps` with profiles |
 | Suites | rig/pair/state per site | `suites.*` take `func() Subject` |
 | Planted bugs | broker + applier only | every suite has a planted-bug list and a catch test |
-| Seed control | hard-coded | `MANIFESTER_SEEDS`, `MANIFESTER_SEED`, `MANIFESTER_CAMPAIGN` |
+| Seed control | hard-coded | `MDS_SEEDS`, `MDS_SEED`, `MDS_CAMPAIGN` |
 | Failure output | seed + literal | + exact replay command |
 | Faults | C2 faults-off only | design doc now, implementation as stretch (section 8) |
 | Spec validation | uneven | each spec has an independent model or property set |
@@ -198,10 +198,10 @@ Files: `veritastest/lockstep.go` (+ rename file to `comparator.go`),
 ### W2 - `veritastest/runcontrol` (edge package) (1 agent, parallel)
 Files: new `veritastest/runcontrol/runcontrol.go`, `runcontrol_test.go`.
 - `runcontrol.Options(t, defaultSeeds int, replayCmd func(seed uint64) string)`
-  reads `MANIFESTER_SEEDS` (count), `MANIFESTER_SEED` (single replay),
-  `MANIFESTER_CAMPAIGN` (duration, uses `time`) and returns
+  reads `MDS_SEEDS` (count), `MDS_SEED` (single replay),
+  `MDS_CAMPAIGN` (duration, uses `time`) and returns
   `veritastest.Options`, with the replay command filled in
-  (`MANIFESTER_SEED=<n> go test <pkg> -run <TestName> -v`).
+  (`MDS_SEED=<n> go test <pkg> -run <TestName> -v`).
 - Tests: env parsing, bad values fail loudly, default behaviour unchanged.
 - Acceptance: with no env set, behaviour identical to today's `Seeds: N, Seed: -1`.
 
@@ -277,7 +277,7 @@ Files: `sys/s3store/conform_test.go`, `controlplane/cptest/*_test.go`,
 `controlplane/memstore/*_test.go`, `controlplane/applier/applier_test.go`
 (lockstep part only), `controlplane/machine/lockstep_test.go`.
 - Each becomes a Subject factory feeding `suites.*`: s3store (fake S3 hermetic
-  always; real endpoint when `MANIFESTER_S3_ENDPOINT` set), memstore,
+  always; real endpoint when `MDS_S3_ENDPOINT` set), memstore,
   memstore over gRPC, applier on MemKV, applier on Pebble, machine fold.
 - Keep the scenario tests (`TestReplayMemstore`, `TestManyBatchesMemstore`,
   `TestRoundTrip`) as named regressions, but build them from shrunk literals
@@ -286,7 +286,7 @@ Files: `sys/s3store/conform_test.go`, `controlplane/cptest/*_test.go`,
 - Acceptance: hermetic tests green with no env; env-gated tests still skip
   cleanly when endpoints are absent and are listed in the final report.
 - Risk: Pebble runs are slower; keep their seed counts (15) and make them
-  overridable by `MANIFESTER_SEEDS`.
+  overridable by `MDS_SEEDS`.
 
 ### W8 - C1 broker and C4 oracle touch-up (1 agent, after W2)
 Files: `broker/conformance_test.go`, `broker/harness_test.go`,
@@ -378,7 +378,7 @@ adapters (`vsys` serializes with a mutex today).
 - [ ] No `%+v`/`%v %q` string comparison in any conformance `Step`.
 - [ ] One generator per spec; old copies deleted; coverage test passes.
 - [ ] Every suite has a planted-bug catch test; catch table attached to the PR text.
-- [ ] `MANIFESTER_SEED=n go test <pkg> -run <Test>` replays; failure output
+- [ ] `MDS_SEED=n go test <pkg> -run <Test>` replays; failure output
       prints that exact command.
 - [ ] C4 independence guard test exists and was seen failing once.
 - [ ] No dangling `t.Skip` for conformance (the env-gated real S3/Dynamo ones
@@ -398,7 +398,7 @@ adapters (`vsys` serializes with a mutex today).
 | Determinism gate rejects `runcontrol` | it is a separate edge package outside the deterministic list; confirm with the determinism script (removed later in this PR) |
 | Real S3 / DynamoDB paths cannot run locally | stated in the final report as not run; hermetic fakes cover the logic |
 | Renames collide with parallel edits | W1 is a barrier and lands first |
-| Pebble suites slow the gate | seed counts stay as today; `MANIFESTER_SEEDS` override |
+| Pebble suites slow the gate | seed counts stay as today; `MDS_SEEDS` override |
 | Subagent edits outside its files | each brief lists owned files; W10 diffs the file list against ownership |
 
 ## 11. Decisions I made so you can veto (defaults in bold)

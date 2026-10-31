@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"fmt"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck"
-	"manifester/internal/verify/speccheck/checker"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck"
+	"mds/internal/verify/speccheck/checker"
 )
 
 // PartitionOp is one operation of the partition suite. Kind is "append",

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // phase is the state of a group in memory. It is not logged.

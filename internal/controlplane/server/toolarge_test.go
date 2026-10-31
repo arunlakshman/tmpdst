@@ -7,8 +7,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/statemachine"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/controlplane/statemachine"
 )
 
 func TestCommitTooLargeForOneLogEntry(t *testing.T) {

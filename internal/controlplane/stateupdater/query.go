@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"hash/fnv"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Trim forgets the idempotency records of commands at slots below slot (the

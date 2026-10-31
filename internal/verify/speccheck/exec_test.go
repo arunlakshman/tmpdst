@@ -3,7 +3,7 @@ package speccheck
 import (
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // otherOp is an operation that Exec does not know. The embedded interface

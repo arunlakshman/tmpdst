@@ -5,7 +5,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // createTopics answers CreateTopics (Kafka key 19, decision Q10). Each topic is

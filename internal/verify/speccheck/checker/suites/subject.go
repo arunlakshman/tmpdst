@@ -3,10 +3,10 @@ package suites
 import (
 	"errors"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck"
-	"manifester/internal/verify/speccheck/checker/generator"
-	"manifester/internal/verify/speccheck/checker/observation"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck"
+	"mds/internal/verify/speccheck/checker/generator"
+	"mds/internal/verify/speccheck/checker/observation"
 )
 
 // ObjectSubject is an object store under test. Do runs one operation and

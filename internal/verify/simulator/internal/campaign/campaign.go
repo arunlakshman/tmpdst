@@ -3,8 +3,8 @@
 package campaign
 
 import (
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
 )
 
 // ScenarioPreset is the fault-family defaults and phase schedule shared by campaigns.

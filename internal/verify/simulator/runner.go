@@ -3,7 +3,7 @@ package simulator
 import (
 	"errors"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // runner is the Runner. It runs seeds one after another on the calling

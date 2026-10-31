@@ -1,8 +1,8 @@
 package kafka
 
 import (
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
 )
 
 // segmentTiming checks the timing facts that the production metrics are built

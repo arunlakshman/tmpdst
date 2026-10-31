@@ -11,7 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // DynamoClient is the DynamoDB surface DynamoLog needs.

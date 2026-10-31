@@ -87,7 +87,7 @@ Event with the same `ReqID`.
 
 Because of this, the same Machine runs in two places:
 
-- **Production:** inside `manicp`, driven by `runloop`, with real DynamoDB and S3.
+- **Production:** inside `mdscontrolplane`, driven by `runloop`, with real DynamoDB and S3.
 - **Simulator:** inside `kafka-log` scenario, driven by the sim kernel, with fake
   everything and seeded random faults.
 
@@ -128,7 +128,7 @@ All sizes are non-test lines. "Edge" means not deterministic (goroutines, networ
 |---------|------:|-------|--------------|
 | `statemachine` | ~1,700 | pure brain | The `Machine`: catch-up, commit queue, roles, checkpoints, fresh reads |
 | `stateupdater` | ~1,260 | pure fold | Apply entries into an ordered KV; answer Lookup/Describe; snapshot/restore |
-| `stateupdater/pebblestore` | 143 | KV driver | Pebble implementation of the KV seam. `manicp` passes it to the Machine through `Config.OpenStore` (fixed in `56417bd`, see section 12) |
+| `stateupdater/pebblestore` | 143 | KV driver | Pebble implementation of the KV seam. `mdscontrolplane` passes it to the Machine through `Config.OpenStore` (fixed in `56417bd`, see section 12) |
 | `executor` | ~660 | edge | Run `Log*` and `Object*` actions: `DynamoLog`, `MemoryLog`, object store, error classify |
 | `runloop` | ~370 | edge | The one goroutine that calls `Step`, runs timers, dispatches actions |
 | `server` | ~470 | edge | gRPC `Node`: turns RPCs into `Offer` calls and waits for answers |
@@ -516,7 +516,7 @@ the broker's client moves to the other address.
 
 ### 4.5 Catch-up: reading the log and folding it
 
-This loop runs forever, every `CatchUpEvery` (5 ms in `manicp`):
+This loop runs forever, every `CatchUpEvery` (5 ms in `mdscontrolplane`):
 
 ```
 timerCatchUp fires (if pending == 0)
@@ -563,7 +563,7 @@ Fix: any node may write a **no-op** entry into slot 41 (`emitHoleFill`, a `LogAp
   real bytes back (`d.Taken`, use `d.Existing`) and folds those.
 - If the no-op wins, the slow writer later gets "taken" and re-appends elsewhere.
 
-`HoleAfter` is a patience delay (250 ms in `manicp`). The first time a hole is seen, the
+`HoleAfter` is a patience delay (250 ms in `mdscontrolplane`). The first time a hole is seen, the
 Machine only arms timer 2 (`armHoleFill`). Hole fill happens only if the hole is still
 there when the timer fires. Zero `HoleAfter` fills at once. A mutant (`InjectedBugHoleSkip`)
 skips the hole without writing a no-op; the simulator must catch it (section 11).
@@ -589,7 +589,7 @@ skips the hole without writing a no-op; the simulator must catch it (section 11)
 6. If `queue` already has `QueueMax` (4096) items -> `ErrUnavailable`.
 7. Else append to `queue` and call `flushCommits()`.
 
-**Making a group.** `flushCommits` keeps up to `K` appends in flight (4 in `manicp`).
+**Making a group.** `flushCommits` keeps up to `K` appends in flight (4 in `mdscontrolplane`).
 `emitCommitGroup` takes up to `MaxCmdsPerSlot` (256) queued commands, **and stops earlier when
 the entry would pass `MaxEntryBytes`** (default 350 KiB, under DynamoDB's 400 KiB item limit).
 It builds **one** log entry:
@@ -668,7 +668,7 @@ node can commit (`isAppender` returns true) and no role timer exists.
 
 `observeWriter` sets `lastOwnAt` when the slot's writer name is ours, otherwise
 `lastOtherAt`. That is where the evidence comes from. A node must therefore have a unique
-`Writer` name; `manicp` uses the hostname (`-node-name` overrides).
+`Writer` name; `mdscontrolplane` uses the hostname (`-node-name` overrides).
 
 ### 4.10 Checkpoints and log trim (`checkpoint.go`)
 
@@ -837,7 +837,7 @@ Single goroutine means the Machine needs no mutex. Concurrency is solved by one 
 
 `Node.Start(ctx)` builds an `Executor`, starts `runloop.Run` in a goroutine, then **polls
 by injecting a "ready?" closure** until the Machine reports `Ready()`. Then it flips gRPC
-health to `SERVING`. A 2-minute deadline and the caller's `ctx` bound the wait. `manicp`
+health to `SERVING`. A 2-minute deadline and the caller's `ctx` bound the wait. `mdscontrolplane`
 passes `-start-timeout` (10 min) as `ctx`.
 
 ### 7.2 The waiter dance for a write (`offer`)
@@ -917,9 +917,9 @@ client believes it; the broker (page 01, station 9) retries the same key with ba
 
 ---
 
-## 9. Chapter G - wiring it up: `cmd/manicp`
+## 9. Chapter G - wiring it up: `cmd/mdscontrolplane`
 
-`manicp` is small because everything above is a library.
+`mdscontrolplane` is small because everything above is a library.
 
 ```
 flags -> statemachine.Config {
@@ -933,7 +933,7 @@ flags -> statemachine.Config {
 server.New(...).Start(ctx)  -> gRPC server + health + Prometheus (/metrics) + run manifest
 ```
 
-Without `-checkpoint-bucket`, `manicp` turns checkpoints and trim **off** (a `log_no_checkpoint`
+Without `-checkpoint-bucket`, `mdscontrolplane` turns checkpoints and trim **off** (a `log_no_checkpoint`
 warning is logged): a restart then replays the entire log.
 
 The metrics package `controlplanemetrics` is outside the determinism closure by design
@@ -1020,7 +1020,7 @@ Four lines of defence together: broker key reuse, `KnownCommit`, `retargetCommit
 The Machine was made pure so the simulator can run **two CP replicas plus a faulty fake
 DynamoDB** on a seed and check the outcome. Facts to know (`docs/sim-log-engine.md`):
 
-- Scenario `kafka-log` (`go run ./cmd/manisim -scenario kafka-log -seeds 300`). Brokers emit
+- Scenario `kafka-log` (`go run ./cmd/mdssimulator -scenario kafka-log -seeds 300`). Brokers emit
   `CPCall`; a bridge turns that into `ControlPlaneDeliver` on `cp-0` / `cp-1`.
 - **Faults:** the kernel can kill or stall a CP process; the Machine has its own `StallProb`
   and `CrashProb` (coin flips on each role tick, only for the active node); the bridge can
@@ -1079,9 +1079,9 @@ Also done in `56417bd`: removed the flags nothing read (`-slot-rate`, `-final-ch
 **Behaviour findings (1 to 4)**
 
 1. **Idempotency window never trims in production. FIXED (commit `56417bd`).**
-   `manicp` never set `WindowSlots`, so `afterApply` never trimmed the `K` and `S` records.
+   `mdscontrolplane` never set `WindowSlots`, so `afterApply` never trimmed the `K` and `S` records.
    Memory grew with every committed segment, and the "window" of decision 48 was effectively forever.
-   `manicp` now sets `WindowSlots` from `-window-slots` and `TrimStride` to 1024; a test pins it.
+   `mdscontrolplane` now sets `WindowSlots` from `-window-slots` and `TrimStride` to 1024; a test pins it.
 2. **Production reads are not "fresh".**
    The fresh-tail rule (commit `226ea69`) lives in `queueRead` / `serveReads`, reached only from the simulator path.
    `server.Node.Lookup` and `DescribeTopics` read the fold directly after checking `Ready()`.
@@ -1092,7 +1092,7 @@ Also done in `56417bd`: removed the flags nothing read (`-slot-rate`, `-final-ch
    A hole-fill onto a tombstone ends in `ErrCorrupt`, then `trip` and a restart: safe, but not the path the simulator tests.
 4. **Pebble was not wired in. FIXED (commit `56417bd`).**
    The gRPC cutover (`1c3c11b`) had dropped Pebble: the Machine built `stateupdater.NewMem()` and `-pebble-dir` was unused.
-   New `Config.OpenStore` gives the fold its store; `manicp -store dynamolog` opens an empty Pebble store at start and after every restore.
+   New `Config.OpenStore` gives the fold its store; `mdscontrolplane -store dynamolog` opens an empty Pebble store at start and after every restore.
    The simulator keeps the in-memory store (`OpenStore` is nil), so its trace hashes did not change.
 
 **Smaller points (5 to 10)**
@@ -1121,7 +1121,7 @@ Also done in `56417bd`: removed the flags nothing read (`-slot-rate`, `-final-ch
 10. **Dead HTTP-era metrics code; gRPC calls are not measured.**
     `controlplanemetrics` still holds `Middleware`, `statusWriter`, `countBody` and the per-request `Call` logging, which wrap an HTTP handler.
     Since the gRPC cutover (`1c3c11b`) nothing calls them (found with `deadcode`, which lists code no binary can reach).
-    So `manicp_handler_seconds`, `manicp_request_body_bytes`, the in-flight gauge and the "cp call" log lines are never recorded.
+    So `mdscontrolplane_handler_seconds`, `mdscontrolplane_request_body_bytes`, the in-flight gauge and the "cp call" log lines are never recorded.
     The better fix is a gRPC interceptor, not deleting the code. Decision needed.
 
 Details for each follow.
@@ -1131,7 +1131,7 @@ Details for each follow.
 Page 01, section 4, saw this too. Before the fix, `statemachine.New` always built
 `stateupdater.NewMem()`, and the `-pebble-dir` help text said "unused (machine fold is
 in-memory); kept for flag compatibility". History: `git log -S` shows the cutover commit
-`1c3c11b` (2026-10-27) removed the old Pebble code; before it, `manicp -store dynamolog`
+`1c3c11b` (2026-10-27) removed the old Pebble code; before it, `mdscontrolplane -store dynamolog`
 opened Pebble.
 
 How it works now:
@@ -1139,21 +1139,21 @@ How it works now:
   memory (simulator and tests). The Machine calls it in `New` and again in
   `afterCrashRestart`, after it has closed the old store. If the first open fails,
   `NodeStarted` answers `StopForRestart`; if a reopen fails, the node trips the same way.
-- `cmd/manicp/state.go` (`pebbleState`) wipes the directory (only if it holds a Pebble
+- `cmd/mdscontrolplane/state.go` (`pebbleState`) wipes the directory (only if it holds a Pebble
   database or nothing: any other content is refused) and opens an empty Pebble store each
   time. Pebble state is never trusted after a restart; it is rebuilt from the checkpoint
   and the log. With no `-pebble-dir`, a temporary directory is made and removed at shutdown.
 - The `statemachine` import-boundary test still passes: the Machine never imports Pebble.
 
-### 12.2 `WindowSlots` was never set in `manicp` (FIXED in `56417bd`)
+### 12.2 `WindowSlots` was never set in `mdscontrolplane` (FIXED in `56417bd`)
 
 `afterApply` trims `K`/`S` records only if `cfg.WindowSlots > 0`. The simulator sets it
-(`kafka/control_plane.go`), but `cmd/manicp/main.go` built the `Config` without it; the flag
+(`kafka/control_plane.go`), but `cmd/mdscontrolplane/main.go` built the `Config` without it; the flag
 `-window-slots` only fed `KeepSlots = windowSlots/8` (log trim). So in production the fold
 kept every `K` and `S` record forever (a restart did not help, because the checkpoint
 contains them). The simulator could not see this, because it runs with the window on.
 
-Now `machineConfig(f)` in `cmd/manicp/main.go` sets `WindowSlots: -window-slots` (131072),
+Now `machineConfig(f)` in `cmd/mdscontrolplane/main.go` sets `WindowSlots: -window-slots` (131072),
 `TrimStride: 1024` and `KeepSlots: -window-slots/8`. The window and the stride are cluster
 constants: every node must use the same values, because the cut is a function of the slot
 number. At the 200 slots/s ceiling, 131072 slots is 655 s, which is at least twice the
@@ -1238,7 +1238,7 @@ go test ./internal/controlplane/statemachine -run 'TestReadWaitsForFreshTail' -v
 go test ./internal/controlplane/server -run 'TestCommitLookupRoundTrip|TestStandbyCommitUnavailable' -v
 go test ./internal/controlplane/statemachine -run 'TestImportBoundary' -v
 go test ./internal/controlplane/statemachine -run 'TestOpenStore' -v      # the Pebble hook (Config.OpenStore)
-go test ./cmd/manicp -run 'TestPebbleState|TestMachineConfig' -v          # Pebble directory and window settings
+go test ./cmd/mdscontrolplane -run 'TestPebbleState|TestMachineConfig' -v          # Pebble directory and window settings
 ```
 
 ---
@@ -1265,7 +1265,7 @@ Answer without looking, then verify in the code.
 12. A gRPC call times out inside `Node.offer`. What does the broker learn, and what is the
     state of the write?
 13. (Reality check) What would happen in production to the `K` records over a month of
-    traffic if I read `cmd/manicp/main.go` right?
+    traffic if I read `cmd/mdscontrolplane/main.go` right?
 
 Answers: (1) Same entries, same order, same deterministic code. (2) The put is
 put-if-absent: a retry on the same slot either lands or shows our own id; a new slot could
@@ -1284,7 +1284,7 @@ real and not the standby's own network problem. (10) Broker key reuse, `KnownCom
 simulator needs the same run for the same seed. (12) `ErrTimeout` with `MAYBE_APPLIED`; the
 entry may still be in the log and will be folded; the retry with the same key is safe.
 (13) Before the fix they grew without bound, because `WindowSlots` was zero and `afterApply`
-never trimmed. Now `manicp` sets it, so they are cut every 1024 slots.
+never trimmed. Now `mdscontrolplane` sets it, so they are cut every 1024 slots.
 
 ---
 

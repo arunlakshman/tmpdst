@@ -24,7 +24,7 @@ strings
 unicode/utf8
 
 # this module
-manifester/...
+mds/...
 
 # audited third-party (see docs/dep-audits/)
 github.com/twmb/franz-go/pkg/kmsg

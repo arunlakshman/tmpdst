@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/controlplane/stateupdater/pebblestore"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/controlplane/stateupdater/pebblestore"
 )
 
 func open(t *testing.T) *pebblestore.DB {

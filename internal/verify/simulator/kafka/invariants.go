@@ -1,9 +1,9 @@
 package kafka
 
 import (
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/internal/campaign"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/internal/campaign"
 )
 
 type progressCheck struct{}

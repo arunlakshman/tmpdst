@@ -93,7 +93,7 @@ Bounded-context merge, Extract Class on Broker/Service/kernel — those are P2�
 - [x] ~~Echo ↔ kafka client FSM — **Extract Superclass** / **Form Template Method** — `internal/verify/simulator/internal/session` (`Loop` hooks; protocol + StateHash stay in scenarios; TraceHash canaries green)~~
 - [x] ~~Echo ↔ kafka campaign presets — **Parameterize Function** / **Form Template Method** — `internal/verify/simulator/internal/campaign` (Swarm `afterKnobs` preserves kafka PartialIOMax draw order; TraceHash canaries matched)~~
 - [x] ~~Bridge boundary faults — **Form Template Method** — `fakeio.Params.Draw` shared by fakeio Execute and logengine (coin order preserved; TraceHash stable)~~
-- [x] ~~`serveMetrics` + `writeManifest` — **Extract Function** / **Move Function** — `internal/system/runinfo.ServeMetrics` + `Publish` (manicp metrics gains Read/Write/Idle timeouts matching broker)~~
+- [x] ~~`serveMetrics` + `writeManifest` — **Extract Function** / **Move Function** — `internal/system/runinfo.ServeMetrics` + `Publish` (mdscontrolplane metrics gains Read/Write/Idle timeouts matching broker)~~
 - [x] ~~Service boot skeleton — **Form Template Method** — same cmds — **not worth it**: after logger setup the two `serve` bodies share no steps; a template needs hooks without deleting branches~~
 - [x] ~~ApiVersions / Supported cache — **Substitute Algorithm** — `internal/wire/kafkawire/supported.go` (`supported` table + `supportedByKey`)~~
 - [x] ~~Encode/Decode framing — **Extract Function** — `internal/wire/kafkawire/codec.go` (`appendFlexibleTag`, `readBody`)~~
@@ -143,7 +143,7 @@ Old `logcp` / `logsm` P3 names (`Start`, `catchUp`, `applyBatch`, `Checkpoint`, 
 ### controlplane/cpclient / fakedb / exec
 
 - [x] ~~cpclient HTTP `decode` / Faults / endpoint struct / `errOf` — **obsolete** (gRPC + `apiconv` / `mapRPCErr`; client holds an address list)~~
-- [x] ~~cpobs Middleware observe→log as prod path — **obsolete** (manicp serves gRPC; Middleware only in cpobs tests; live hook is `APIOptions`)~~
+- [x] ~~cpobs Middleware observe→log as prod path — **obsolete** (mdscontrolplane serves gRPC; Middleware only in cpobs tests; live hook is `APIOptions`)~~
 - [x] ~~**Split Phase** / **Extract Function:** `do` times the call. `failover` walks addresses. `doAt` is one attempt.~~
 - [x] ~~**Extract Function:** `rejectCond` is the shared condition check. `clauseValue` reads one SET or ADD clause. `parseKeyRange` is the BETWEEN half of `parseKeyCond`. `writeCount` and `applyWrite` are the BatchWriteItem steps.~~
 - [x] ~~**Decompose Conditional** / **Guard Clauses:** SET versus ADD is `clauseValue`, then the verb. BatchWriteItem holds the last request, otherwise `applyWrite`.~~
@@ -173,7 +173,7 @@ Old `logcp` / `logsm` P3 names (`Start`, `catchUp`, `applyBatch`, `Checkpoint`, 
 
 ### cmd
 
-- [x] ~~**Split Phase:** manibroker and manicp `serve` are already a sequence of named calls (`nodeConfig`, `openObjects`, `bind`, `Start`, `Publish`, `Wait`). `openLog`, manibench `run`, and crapscore `analyse` are the same shape.~~
+- [x] ~~**Split Phase:** mdsbroker and mdscontrolplane `serve` are already a sequence of named calls (`nodeConfig`, `openObjects`, `bind`, `Start`, `Publish`, `Wait`). `openLog`, mdsbench `run`, and crapscore `analyse` are the same shape.~~
 - [x] ~~**Extract Function:** openS3Objects, wireFacts, applySegment/BufferLimits, shouldFinalCheckpoint, Evaluate classify, ParseTree, coverageFor, openClients, formatFailure, fail, ReportView — **not worth it**: the bodies are already those calls, or a helper would have one caller and no second shape.~~
 - [x] ~~**Introduce Parameter Object:** brokerFlags groups, worker, BaselinePolicy, logFlags nesting — **not worth it**: the flag structs are the parameter objects. Nesting them again hides the flag a reader looks up.~~
 - [x] ~~**Preserve Whole Object:** runtimeSnapshot for manifest — **not worth it**: `manifestTuning` already returns the object the manifest stores.~~

@@ -3,7 +3,7 @@ package speccheck
 import (
 	"slices"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Consumer groups (slice 4a). The spec of the group commands and reads. Plain

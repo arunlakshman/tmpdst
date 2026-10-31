@@ -6,8 +6,8 @@ import (
 
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker"
 )
 
 // This file checks the ControlPlane spec against a second, naive model. The

@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"testing"
 
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 func TestRestoreOnStartedThenReady(t *testing.T) {

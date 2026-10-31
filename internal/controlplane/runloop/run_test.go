@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/controlplane/runloop"
-	"manifester/internal/core"
+	"mds/internal/controlplane/runloop"
+	"mds/internal/core"
 )
 
 type fakeClock struct{}

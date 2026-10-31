@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 var tpA = core.NewTopicPartition("t", 0)

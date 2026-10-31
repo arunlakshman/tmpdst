@@ -6,18 +6,18 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/system/s3store"
+	"mds/internal/system/s3store"
 )
 
 // fullStack is brokers over the live machine/gRPC control plane (via newStack)
-// with segment objects in SeaweedFS. Skipped unless MANIFESTER_S3_ENDPOINT is
-// set (scripts/it-up.sh prints it). Dynamo is exercised by manicp -create and
+// with segment objects in SeaweedFS. Skipped unless MDS_S3_ENDPOINT is
+// set (scripts/it-up.sh prints it). Dynamo is exercised by mdscontrolplane -create and
 // by unit tests of exec.CreateTable; this path's unique coverage is real S3.
 func fullStack(t *testing.T) *stack {
 	t.Helper()
-	s3ep := os.Getenv("MANIFESTER_S3_ENDPOINT")
+	s3ep := os.Getenv("MDS_S3_ENDPOINT")
 	if s3ep == "" {
-		t.Skip("MANIFESTER_S3_ENDPOINT not set (scripts/it-up.sh)")
+		t.Skip("MDS_S3_ENDPOINT not set (scripts/it-up.sh)")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()

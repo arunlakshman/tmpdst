@@ -3,10 +3,10 @@ package echo
 import (
 	"strings"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/internal/campaign"
-	"manifester/internal/wire/segmentformat"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/internal/campaign"
+	"mds/internal/wire/segmentformat"
 )
 
 type ackFact struct {

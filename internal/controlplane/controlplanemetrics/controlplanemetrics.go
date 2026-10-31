@@ -24,10 +24,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"manifester/internal/system/awsmetrics"
+	"mds/internal/system/awsmetrics"
 )
 
-// Metrics holds the collectors, all prefixed manicp_.
+// Metrics holds the collectors, all prefixed mdscontrolplane_.
 type Metrics struct {
 	reg *prometheus.Registry
 
@@ -36,7 +36,7 @@ type Metrics struct {
 	body     *prometheus.HistogramVec // op
 	inflight prometheus.Gauge
 
-	// AWS measures every DynamoDB HTTP attempt (manicp_dynamo_*): pass
+	// AWS measures every DynamoDB HTTP attempt (mdscontrolplane_dynamo_*): pass
 	// AWS.APIOptions() to the client.
 	AWS *awsmetrics.Recorder
 
@@ -62,30 +62,30 @@ func NewWithLogger(log *slog.Logger) *Metrics {
 	m := &Metrics{reg: prometheus.NewRegistry(), log: log}
 	m.registerHTTP(secs)
 	m.registerDynamo(secs)
-	m.AWS = awsmetrics.New(m.reg, "manicp", "dynamo", log)
+	m.AWS = awsmetrics.New(m.reg, "mdscontrolplane", "dynamo", log)
 	m.reg.MustRegister(m.consumed, m.noCap, m.callsDone, m.handler, m.dyn, m.body, m.inflight,
 		collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	return m
 }
 
 func histogram(name, help, label string, b []float64) *prometheus.HistogramVec {
-	return prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: "manicp", Name: name, Help: help, Buckets: b}, []string{label})
+	return prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: "mdscontrolplane", Name: name, Help: help, Buckets: b}, []string{label})
 }
 
 func (m *Metrics) registerHTTP(secs []float64) {
 	m.handler = histogram("handler_seconds", "Whole HTTP handler time (body read to response written), by op.", "op", secs)
 	m.body = histogram("request_body_bytes", "HTTP request body size, by op.", "op", prometheus.ExponentialBuckets(64, 4, 10))
-	m.inflight = prometheus.NewGauge(prometheus.GaugeOpts{Namespace: "manicp", Name: "inflight_requests", Help: "HTTP requests being served."})
-	m.callsDone = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Name: "calls_total",
+	m.inflight = prometheus.NewGauge(prometheus.GaugeOpts{Namespace: "mdscontrolplane", Name: "inflight_requests", Help: "HTTP requests being served."})
+	m.callsDone = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "mdscontrolplane", Name: "calls_total",
 		Help: "HTTP calls served, by op and outcome (ok, the business error code such as ErrConflict, http_503, http_500)."}, []string{"op", "outcome"})
 }
 
 func (m *Metrics) registerDynamo(secs []float64) {
 	m.dyn = histogram("dynamodb_call_seconds", "Time inside one DynamoDB SDK call (TransactWriteItems, GetItem, BatchGetItem, ...).", "call", secs)
-	m.consumed = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Subsystem: "dynamo", Name: "consumed_capacity_units_total",
+	m.consumed = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "mdscontrolplane", Subsystem: "dynamo", Name: "consumed_capacity_units_total",
 		Help: "Capacity units DynamoDB reported (ReturnConsumedCapacity=TOTAL), by call and kind (read, write). Absent from servers that do not report it."},
 		[]string{"op", "kind"})
-	m.noCap = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "manicp", Subsystem: "dynamo", Name: "consumed_capacity_missing_total",
+	m.noCap = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: "mdscontrolplane", Subsystem: "dynamo", Name: "consumed_capacity_missing_total",
 		Help: "Successful calls whose response carried no ConsumedCapacity (ExtendDB, local emulators), by call."}, []string{"op"})
 }
 

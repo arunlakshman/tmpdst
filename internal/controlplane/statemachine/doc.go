@@ -2,7 +2,7 @@
 //
 // It implements core.Machine so one Step runs under the sim kernel and a
 // control-plane-owned run loop. This package is an extractable unit under
-// controlplane/ autonomy (decision 56): it may import manifester/internal/core and
+// controlplane/ autonomy (decision 56): it may import mds/internal/core and
 // other controlplane packages, but not broker, simulator, system, cmd, speccheck, kafkawire,
 // format, net/http, Pebble, or the Dynamo SDK.
 //

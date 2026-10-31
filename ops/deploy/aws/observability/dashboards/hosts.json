@@ -1,8 +1,8 @@
 {
-  "uid": "mani-hosts",
-  "title": "Manifester - Hosts",
+  "uid": "mds-hosts",
+  "title": "MDS - Hosts",
   "tags": [
-    "manifester",
+    "mds",
     "hosts"
   ],
   "schemaVersion": 39,
@@ -517,7 +517,7 @@
         "target": {
           "type": "tags",
           "tags": [
-            "manifester",
+            "mds",
             "run:$run_id"
           ],
           "limit": 100

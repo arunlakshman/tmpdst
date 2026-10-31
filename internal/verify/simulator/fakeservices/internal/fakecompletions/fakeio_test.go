@@ -3,10 +3,10 @@ package fakecompletions
 import (
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/internal/fakeservicetest"
-	"manifester/internal/verify/speccheck"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"mds/internal/verify/speccheck"
 )
 
 const ms = core.Duration(1_000_000)

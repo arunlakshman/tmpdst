@@ -5,10 +5,10 @@ import (
 	"slices"
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/fakeobjectstore"
-	"manifester/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/fakeobjectstore"
+	"mds/internal/verify/simulator/fakeservices/internal/fakeservicetest"
 )
 
 const ms = core.Duration(1_000_000)

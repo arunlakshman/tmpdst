@@ -5,8 +5,8 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/core"
+	"mds/internal/wire/kafkawire"
 )
 
 // produce admits one batch per partition into the open segment. Acks 1 and -1

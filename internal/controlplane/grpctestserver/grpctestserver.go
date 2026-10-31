@@ -1,4 +1,4 @@
-// Package grpctestserver starts an in-process manicp-shaped gRPC node for tests.
+// Package grpctestserver starts an in-process mdscontrolplane-shaped gRPC node for tests.
 package grpctestserver
 
 import (
@@ -9,12 +9,12 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/controlplaneclient"
-	"manifester/internal/controlplane/executor"
-	"manifester/internal/controlplane/server"
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/core"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/controlplane/controlplaneclient"
+	"mds/internal/controlplane/executor"
+	"mds/internal/controlplane/server"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/core"
 )
 
 // Node is a started gRPC control-plane node.

@@ -7,9 +7,9 @@ import (
 	"context"
 	"sync"
 
-	"manifester/internal/core"
-	"manifester/internal/system"
-	"manifester/internal/verify/speccheck"
+	"mds/internal/core"
+	"mds/internal/system"
+	"mds/internal/verify/speccheck"
 )
 
 // Error is a spec failure as a Go error; Code is what a Classifier maps it to.

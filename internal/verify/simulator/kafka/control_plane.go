@@ -1,9 +1,9 @@
 package kafka
 
 import (
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
 )
 
 // controlPlaneFactory builds one CP replica machine for kafka-log, seeding workload topics.

@@ -6,7 +6,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // liveTrio is a live set with brokers 2 and 3. Broker 1 is the test broker

@@ -8,7 +8,7 @@ import (
 
 // MemoryKeyValueStore is an in-memory KV: a sorted slice copied on every write transaction.
 // It is the default store of the machine in the simulator and in tests. Production
-// manicp passes Pebble instead (see stateupdater/pebblestore and statemachine.Config.OpenStore).
+// mdscontrolplane passes Pebble instead (see stateupdater/pebblestore and statemachine.Config.OpenStore).
 type MemoryKeyValueStore struct {
 	mu      sync.RWMutex
 	entries []memoryEntry

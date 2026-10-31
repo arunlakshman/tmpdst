@@ -9,9 +9,9 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
-	"manifester/internal/wire/kafkawire"
-	"manifester/internal/wire/segmentformat"
+	"mds/internal/core"
+	"mds/internal/wire/kafkawire"
+	"mds/internal/wire/segmentformat"
 )
 
 func TestApiVersions(t *testing.T) {

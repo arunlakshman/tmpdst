@@ -41,9 +41,9 @@ Tests alone are not sufficient verification. A PR is verified only when its unit
   - [ ] CP-DSM-7 after CP-DSM-6.
   - [ ] CP-DSM-8 after CP-DSM-7.
 - [ ] Hold the file boundaries. Each PR's **Files.** section is the only allowed touch set for that owner.
-- [ ] Hold the control-plane autonomy rule on every PR. Packages under `internal/controlplane/` (except explicitly named monorepo adapters) must not import `manifester/broker`, `manifester/sim`, `manifester/sys`, `manifester/cmd`, `manifester/veritas`, `manifester/kwire`, or `manifester/format`. Allowed deps are stdlib, `manifester/core` (future shared module), gRPC/protobuf runtime libs, and other `manifester/controlplane/...` packages including `internal/controlplane/api/v1`. Brokers, sim, veritas, sys, and cmd may import `internal/controlplane/api/v1`. They must not be imported by `internal/controlplane/statemachine`. Prove each PR with `go list` import checks in that PR's live lanes.
+- [ ] Hold the control-plane autonomy rule on every PR. Packages under `internal/controlplane/` (except explicitly named monorepo adapters) must not import `mds/broker`, `mds/sim`, `mds/sys`, `mds/cmd`, `mds/veritas`, `mds/kwire`, or `mds/format`. Allowed deps are stdlib, `mds/core` (future shared module), gRPC/protobuf runtime libs, and other `mds/controlplane/...` packages including `internal/controlplane/api/v1`. Brokers, sim, veritas, sys, and cmd may import `internal/controlplane/api/v1`. They must not be imported by `internal/controlplane/statemachine`. Prove each PR with `go list` import checks in that PR's live lanes.
 - [ ] Hold the gRPC contract rules from Appendix E on every PR that touches the wire or `CPCall` payloads.
-- [ ] Hold the review gate. CP-DSM-7 and CP-DSM-8 change manicp or kafka-log operator-visible behavior. They wait for the operator's review in chat with screenshots and a video before merge.
+- [ ] Hold the review gate. CP-DSM-7 and CP-DSM-8 change mdscontrolplane or kafka-log operator-visible behavior. They wait for the operator's review in chat with screenshots and a video before merge.
 
 ### PR mechanics, for every PR
 
@@ -66,7 +66,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 - [ ] `git fetch origin <head-branch> && git checkout <head SHA>`.
 - [ ] Install Go toolchain matching `go.mod`. No long-running UI server. Ready when `go env GOROOT` prints.
-- [ ] Deliver input only through `control-cli` commands that run the lane's named `go test` or `go run ./cmd/manisim ...` line. Read-only diagnostics are `go test -c` exit codes and captured stdout/stderr files under `/tmp/swarm-<pr-id>/worker-<n>/`.
+- [ ] Deliver input only through `control-cli` commands that run the lane's named `go test` or `go run ./cmd/mdssimulator ...` line. Read-only diagnostics are `go test -c` exit codes and captured stdout/stderr files under `/tmp/swarm-<pr-id>/worker-<n>/`.
 - [ ] Save every screenshot to `/tmp/swarm-<pr-id>/worker-<n>/<slug>.png` and return the paths with the report. Capture the terminal pane that shows the pass line or failure.
 
 ## Record decisions, rename, and gRPC API scaffold (CP-DSM-1)
@@ -79,7 +79,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Edit `docs/sim-log-engine.md`.
 - [ ] Edit `docs/lessons.md` only if a cross-link is required.
 - [ ] Edit `docs/log-cp-service.md` title paths toward `internal/controlplane/`.
-- [ ] Rename tree `cp/` → `internal/controlplane/` and fix all Go imports. Binary name stays `manicp`.
+- [ ] Rename tree `cp/` → `internal/controlplane/` and fix all Go imports. Binary name stays `mdscontrolplane`.
 - [ ] Create `internal/controlplane/api/v1/*.proto` (`package controlplane.v1`).
 - [ ] Create local-only `internal/controlplane/api/buf.yaml` / `buf.gen.yaml` and a `make proto` target. No Buf Schema Registry.
 - [ ] Generate Go on build via `make proto` (mise-pinned `buf`); gitignore `internal/controlplane/api/v1/*.pb.go`. Do not commit generated files.
@@ -96,11 +96,11 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Add `LogAppend`, `LogRead`, `LogCheckTail`, `LogTrim` IOActions and matching `*Done` completions with `Outcome`.
 - [ ] Extend `ClassOf` for every new `EventBody`.
 - [ ] `make proto` is reproducible on a clean machine with local buf + pinned plugins.
-- [ ] Compile-only for the new machine. No manicp gRPC cutover yet in this PR unless needed for green builds after the rename.
+- [ ] Compile-only for the new machine. No mdscontrolplane gRPC cutover yet in this PR unless needed for green builds after the rename.
 
 **You see.**
 
-- [ ] `make proto` and `go test ./core ./controlplane/api/... -count=1` print `ok`. Imports use `manifester/controlplane/...`. No remaining production import of `manifester/cp/...`.
+- [ ] `make proto` and `go test ./core ./controlplane/api/... -count=1` print `ok`. Imports use `mds/controlplane/...`. No remaining production import of `mds/cp/...`.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
@@ -117,7 +117,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Lane 7. Run `go test ./sim/engines/cpengine -count=1`. Save `cpengine.png`. Pass when `ok`.
 - [ ] Lane 8. Run `go test ./sim/engines/logengine -count=1`. Save `logengine.png`. Pass when `ok`.
 - [ ] Lane 9. Diff `docs/decisions.md` and confirm DSM, autonomy, and gRPC decision rows are present. Save `decision-row.png`. Pass when rows name `internal/controlplane/`, gRPC hard-cut intent, and veritas apply-code independence.
-- [ ] Lane 10. Confirm no `manifester/cp/` imports remain in non-test production packages (`go list` / rg). Save `rename-imports.png`. Pass when the scan is clean.
+- [ ] Lane 10. Confirm no `mds/cp/` imports remain in non-test production packages (`go list` / rg). Save `rename-imports.png`. Pass when the scan is clean.
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
@@ -170,7 +170,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Lane 4. Run `go test ./controlplane/logcp -count=1 -short` if present, else `go test ./controlplane/logcp -count=1 -run TestNew`. Save `logcp-untouched.png`. Pass when `ok`.
 - [ ] Lane 5. Run `go test ./controlplane/logsm -count=1 -run TestX2 -timeout 5m`. Save `logsm-x2.png`. Pass when `ok`.
 - [ ] Lane 6. Run `go test ./sim/engines/logengine -count=1`. Save `logengine.png`. Pass when `ok`.
-- [ ] Lane 7. Confirm `internal/controlplane/statemachine` imports stay inside the autonomy allow-list. Save `imports.png`. Pass when `go list -f '{{join .Imports "\n"}}' ./controlplane/machine` shows no `manifester/broker`, `manifester/sim`, `manifester/sys`, `manifester/cmd`, `manifester/veritas`, `manifester/kwire`, `manifester/format`, `pebble`, `net/http`, or Dynamo SDK paths.
+- [ ] Lane 7. Confirm `internal/controlplane/statemachine` imports stay inside the autonomy allow-list. Save `imports.png`. Pass when `go list -f '{{join .Imports "\n"}}' ./controlplane/machine` shows no `mds/broker`, `mds/sim`, `mds/sys`, `mds/cmd`, `mds/veritas`, `mds/kwire`, `mds/format`, `pebble`, `net/http`, or Dynamo SDK paths.
 - [ ] Lane 8. Run `go test ./sys -count=1`. Save `sys.png`. Pass when `ok`.
 - [ ] Lane 9. Run `go vet ./controlplane/machine`. Save `vet.png`. Pass when silent.
 - [ ] Lane 10. Run `gofmt -l controlplane/machine`. Save `gofmt.png`. Pass when empty.
@@ -224,7 +224,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Lane 5. Run detcheck. Save `detcheck.png`. Pass when exit 0.
 - [ ] Lane 6. Run `go test ./sim/engines/cpengine -count=1`. Save `cpengine.png`. Pass when `ok`.
 - [ ] Lane 7. Run `go test ./broker -count=1`. Save `broker.png`. Pass when `ok`.
-- [ ] Lane 8. Confirm kafka default scenario still builds. Save `manisim-list.png`. Pass when `go run ./cmd/manisim -h` exits 0.
+- [ ] Lane 8. Confirm kafka default scenario still builds. Save `mdssimulator-list.png`. Pass when `go run ./cmd/mdssimulator -h` exits 0.
 - [ ] Lane 9. Run `go test ./sim -count=1 -short` if available. Save `sim-short.png`. Pass when `ok` or skip is documented.
 - [ ] Lane 10. Run `gofmt -l sim/engines/logstore controlplane/machine`. Save `gofmt.png`. Pass when empty.
 
@@ -357,7 +357,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 - [ ] Edit `internal/controlplane/statemachine` role timers, takeover/failback, checkpoint snapshot publish via `ObjPut`, trim via `LogTrim`.
 - [ ] Create tests for standby refuse, takeover after silence, restore on `Started`.
-- [ ] Still no manicp cutover.
+- [ ] Still no mdscontrolplane cutover.
 
 **Build.**
 
@@ -401,7 +401,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Rebased onto current parent after the verdict, patch-id unchanged.
 - [ ] Root appends. Operator lands in stack order.
 
-## Cut over production manicp to gRPC (CP-DSM-7)
+## Cut over production mdscontrolplane to gRPC (CP-DSM-7)
 
 **Depends on.** CP-DSM-6.
 
@@ -411,14 +411,14 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Create `internal/controlplane/executor` for Dynamo and S3 action execution. Keep AWS SDK imports out of `internal/controlplane/statemachine`.
 - [ ] Create the gRPC server adapter that maps unary RPCs to machine events and maps status+`ErrorDetail` on the way out.
 - [ ] Create the broker-side / executor gRPC client that turns `CPCall` into unary RPCs (plaintext). Preferred address dialing. Standby failover list.
-- [ ] Edit `cmd/manicp` as a thin main only. Flags, listen addr, `internal/controlplane/runloop` wiring. No protocol logic in cmd.
+- [ ] Edit `cmd/mdscontrolplane` as a thin main only. Flags, listen addr, `internal/controlplane/runloop` wiring. No protocol logic in cmd.
 - [ ] Delete JSON HTTP `/v1/*` handlers. Hard cut. All tests updated in this PR so the suite stays green.
 - [ ] Move `veritas` (and remaining oracles) onto `internal/controlplane/api/v1` message types. Keep apply logic unshared.
-- [ ] Do not add `internal/controlplane/statemachine` imports of `manifester/sys`. Inject metrics/runinfo via interfaces if needed.
+- [ ] Do not add `internal/controlplane/statemachine` imports of `mds/sys`. Inject metrics/runinfo via interfaces if needed.
 
 **Build.**
 
-- [ ] `manicp` serves gRPC only. `grpc.health.v1` plus `GetStatus`.
+- [ ] `mdscontrolplane` serves gRPC only. `grpc.health.v1` plus `GetStatus`.
 - [ ] Broker prod executor speaks gRPC. Sim engines still fake `CPCall` with the same generated payloads.
 - [ ] Deadline/cancel without a success response maps to `ErrTimeout` + `MaybeApplied`.
 - [ ] X2-style and package tests are green on the machine+gRPC path.
@@ -426,16 +426,16 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 **You see.**
 
-- [ ] `go test ./controlplane/... ./cmd/manicp ./broker ./veritas ./sim/... -count=1` (scoped as CI does) is green, and a grpcurl or Go client CommitSegment against local manicp returns assigned ranges after Ready.
+- [ ] `go test ./controlplane/... ./cmd/mdscontrolplane ./broker ./veritas ./sim/... -count=1` (scoped as CI does) is green, and a grpcurl or Go client CommitSegment against local mdscontrolplane returns assigned ranges after Ready.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] Full control-plane and client tests on gRPC. Run `go test ./controlplane/... ./cmd/manicp ./broker ./veritas -count=1 -timeout 20m`.
+- [ ] Full control-plane and client tests on gRPC. Run `go test ./controlplane/... ./cmd/mdscontrolplane ./broker ./veritas -count=1 -timeout 20m`.
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. Ten lanes on `grok-4.7-high-fast` at the PR head, per the boot recipe.
 
-- [ ] Lane 1. Regression lane against trunk. Run the repo's default `go test` targets that formerly hit JSON CP at trunk, and the gRPC equivalents at head. Save `manicp-regress.png`. Pass when both sides are green for their protocol.
-- [ ] Lane 2. Boot manicp, check `grpc.health.v1` Serving after Ready. Save `grpc-health.png`. Pass when Serving.
+- [ ] Lane 1. Regression lane against trunk. Run the repo's default `go test` targets that formerly hit JSON CP at trunk, and the gRPC equivalents at head. Save `mdscontrolplane-regress.png`. Pass when both sides are green for their protocol.
+- [ ] Lane 2. Boot mdscontrolplane, check `grpc.health.v1` Serving after Ready. Save `grpc-health.png`. Pass when Serving.
 - [ ] Lane 3. Unary CommitSegment against fakedb. Save `commit-grpc.png`. Pass when assigned ranges return under status OK.
 - [ ] Lane 4. Lookup after ack. Save `lookup-grpc.png`. Pass when ranges match.
 - [ ] Lane 5. Standby CommitSegment returns non-OK status with typed `ErrorDetail` (unavailable / refused). Save `standby-status.png`. Pass when detail includes role/blocked info consistent with GetStatus.
@@ -443,7 +443,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Lane 7. Confirm JSON `/v1/` routes are gone (404 or connection refused on old HTTP). Save `http-gone.png`. Pass when no JSON CP handler remains.
 - [ ] Lane 8. Run metrics export test if still present. Save `metrics.png`. Pass when required series exist or the test is updated and green.
 - [ ] Lane 9. Run detcheck. Save `detcheck.png`. Pass when exit 0.
-- [ ] Lane 10. Run autonomy `go list` on `./internal/controlplane/statemachine ./controlplane/run ./controlplane/exec` and `gofmt -l cmd/manicp controlplane`. Save `autonomy-gofmt.png`. Pass when forbidden imports are absent and gofmt is clean.
+- [ ] Lane 10. Run autonomy `go list` on `./internal/controlplane/statemachine ./controlplane/run ./controlplane/exec` and `gofmt -l cmd/mdscontrolplane controlplane`. Save `autonomy-gofmt.png`. Pass when forbidden imports are absent and gofmt is clean.
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
@@ -455,7 +455,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 **Review gate.** The operator reviews before merge.
 
 - [ ] Copy lane 2 and lane 3 screenshots into `docs/media/cp-dsm-7-review-health.png` and `docs/media/cp-dsm-7-review-commit.png`.
-- [ ] Record a 30 to 60 second video of manicp boot plus one gRPC commit on a lane VM. Save it as `docs/media/cp-dsm-7-review.mp4`.
+- [ ] Record a 30 to 60 second video of mdscontrolplane boot plus one gRPC commit on a lane VM. Save it as `docs/media/cp-dsm-7-review.mp4`.
 - [ ] Post the screenshots and the video in chat. Stop at merge-ready. Wait for the operator's click.
 
 **Merge.**
@@ -484,7 +484,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 **You see.**
 
-- [ ] `go run ./cmd/manisim -scenario kafka-log -seeds 300` finishes with 0 failing, and docs describe the machine topology.
+- [ ] `go run ./cmd/mdssimulator -scenario kafka-log -seeds 300` finishes with 0 failing, and docs describe the machine topology.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
@@ -492,20 +492,20 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. Ten lanes on `grok-4.7-high-fast` at the PR head, per the boot recipe.
 
-- [ ] Lane 1. Regression lane against trunk. Run `go run ./cmd/manisim -scenario kafka -seeds 30` at trunk and head. Save `kafka-scenario-regress.png`. Pass when both report 0 failing (veritas CP path must stay identical).
-- [ ] Lane 2. Run `go run ./cmd/manisim -scenario kafka-log -seeds 300`. Save `kafka-log-300.png`. Pass when 0 failing.
+- [ ] Lane 1. Regression lane against trunk. Run `go run ./cmd/mdssimulator -scenario kafka -seeds 30` at trunk and head. Save `kafka-scenario-regress.png`. Pass when both report 0 failing (veritas CP path must stay identical).
+- [ ] Lane 2. Run `go run ./cmd/mdssimulator -scenario kafka-log -seeds 300`. Save `kafka-log-300.png`. Pass when 0 failing.
 - [ ] Lane 3. Run determinism canary for kafka-log (every Kth seed twice). Save `kafka-log-det.png`. Pass when TraceHash matches on the canary seeds.
 - [ ] Lane 4. Run mutant suite. Save `mutants.png`. Pass when each named mutant is caught.
 - [ ] Lane 5. Run C2-style conformance against the machine path. Save `c2.png`. Pass when `ok`.
-- [ ] Lane 6. Run manicp machine path tests. Save `manicp.png`. Pass when `ok`.
+- [ ] Lane 6. Run mdscontrolplane machine path tests. Save `mdscontrolplane.png`. Pass when `ok`.
 - [ ] Lane 7. Confirm `logengine` replica/state is gone or is a thin shim documented as deleted. Save `logengine-gone.png`. Pass when the package no longer owns replica apply.
 - [ ] Lane 8. Run detcheck. Save `detcheck.png`. Pass when exit 0.
-- [ ] Lane 9. Run `go test ./it -count=1 -timeout 30m` if emulator available, else record skip with reason in the lane report and pass the substituted `go test ./controlplane/logcp ./cmd/manicp -count=1 -timeout 20m`. Save `it-or-sub.png`. Pass when `ok` or documented skip plus substitute `ok`.
+- [ ] Lane 9. Run `go test ./it -count=1 -timeout 30m` if emulator available, else record skip with reason in the lane report and pass the substituted `go test ./controlplane/logcp ./cmd/mdscontrolplane -count=1 -timeout 20m`. Save `it-or-sub.png`. Pass when `ok` or documented skip plus substitute `ok`.
 - [ ] Lane 10. Run `gofmt -l sim cp cmd docs`. Save `gofmt.png`. Pass when touched Go files are clean.
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] Metric. `manisim -scenario kafka-log -seeds 30` wall time at trunk (old logengine) and head (machines). Steps count must remain comparable.
+- [ ] Metric. `mdssimulator -scenario kafka-log -seeds 30` wall time at trunk (old logengine) and head (machines). Steps count must remain comparable.
 - [ ] Probe. Interleave trunk and head three times each.
 - [ ] Baseline. Record trunk wall time and steps first.
 - [ ] Rule. Head wall time under trunk times 1.5, and steps within 20 percent of trunk for the same seed set. If topology change makes steps unlike, drop the ratio and require head 30 seeds under 120 s absolute with 0 failing.
@@ -567,7 +567,7 @@ Let `internal/controlplane/statemachine` import `sim` helpers for tests. Rejecte
 
 ## Appendix C. Risks
 
-CP-DSM-1. Rename + proto hard cut leaves a stray `manifester/cp` import or breaks ClassOf. Owner watches rename scan and `make proto`.
+CP-DSM-1. Rename + proto hard cut leaves a stray `mds/cp` import or breaks ClassOf. Owner watches rename scan and `make proto`.
 
 CP-DSM-1. Buf plugins drift across machines. Owner pins plugin versions in `internal/controlplane/api/buf.gen.yaml` / Go tool versions and checks `make proto` on a clean VM.
 
@@ -581,7 +581,7 @@ CP-DSM-4. Pulling Pebble into the machine fails detcheck and autonomy. Owner wat
 
 CP-DSM-7. HTTP adapter deadlocks waiting for Step. Owner watches healthz and commit lanes under `-race`.
 
-CP-DSM-7. `internal/controlplane/controlplaneclient` today imports `manifester/sys`. Leaving that edge blocks a clean module split. Owner either injects interfaces in this PR or files a follow-up box before program close.
+CP-DSM-7. `internal/controlplane/controlplaneclient` today imports `mds/sys`. Leaving that edge blocks a clean module split. Owner either injects interfaces in this PR or files a follow-up box before program close.
 
 CP-DSM-8. kafka-log hash and step-count churn. Owner expects hand review of the scenario summary, not silent golden edits. Attrition now kills CP nodes, which changes coverage. Owner watches mutant catch seeds.
 
@@ -601,13 +601,13 @@ Read before editing.
 
 Green-gate commands (from exploration). Prefer these exact lines in PR boxes when they fit.
 
-- Broker DST. `go test ./sim/kafka -count=1` and `go run ./cmd/manisim -scenario kafka -seeds 300`
+- Broker DST. `go test ./sim/kafka -count=1` and `go run ./cmd/mdssimulator -scenario kafka -seeds 300`
 - Logengine. `go test ./sim/engines/logengine -count=1` and `go test ./sim/engines -run TestConformanceLogEngine -count=1`
 - Logcp X2. `go test ./controlplane/logcp -run 'TestSimSeeds|TestSimIsDeterministic' -count=1` and `LOGCP_SEEDS=20000 go test ./controlplane/logcp -run TestSimSeeds -v`
 - Logsm lockstep. `go test ./controlplane/logsm -run X2Lockstep -count=1` and `LOGSM_SEEDS=100000 LOGSM_PEBBLE_SEEDS=2000 go test ./controlplane/logsm -run X2Lockstep -v -timeout 40m`
-- Kafka-log. `go run ./cmd/manisim -scenario kafka-log -seeds 300`
+- Kafka-log. `go run ./cmd/mdssimulator -scenario kafka-log -seeds 300`
 
-Control surface. This repo has no in-tree `control-cli` package. Live lanes use the `control-cli` skill from `cursor-team-kit` to drive `go test` and `cmd/manisim` / `cmd/manicp` on the lane VM.
+Control surface. This repo has no in-tree `control-cli` package. Live lanes use the `control-cli` skill from `cursor-team-kit` to drive `go test` and `cmd/mdssimulator` / `cmd/mdscontrolplane` on the lane VM.
 
 How synthesis. [How explainer CP DSM](987d55ce-7b14-4d23-a542-476071d5bf32) still named `sys.Run` as the prod twin. Superseded by the autonomy amendment. Prod twin is `internal/controlplane/runloop`.
 
@@ -625,7 +625,7 @@ Settled in the design grill. Bind every wire-facing PR to these rules.
 
 - Vocabulary stays (`CommitSegment`, `Lookup`, `DescribeTopics`, `CreateTopic`). The protocol is the gRPC API. Hand-written `core.CPOp` is no longer the wire contract.
 - `.proto` is the source of truth. Go is generated. Local-only **buf** (Apache-2.0). No Buf Schema Registry.
-- Layout is `internal/controlplane/` and `internal/controlplane/api/v1` with `package controlplane.v1`. Binary name stays `manicp` this wave.
+- Layout is `internal/controlplane/` and `internal/controlplane/api/v1` with `package controlplane.v1`. Binary name stays `mdscontrolplane` this wave.
 - Errors are gRPC status plus typed `ErrorDetail` carrying `ErrCode` and `Outcome`. No OK response with an err field.
 - RPCs are unary for the four ops. Also `GetStatus`. Also standard `grpc.health.v1`.
 - Brokers dial the preferred control-plane address directly. Standby list for failover. No mesh sticky LB on commits.

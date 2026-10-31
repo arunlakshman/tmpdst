@@ -3,9 +3,9 @@ package statemachine_test
 import (
 	"testing"
 
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 type alwaysHit struct {

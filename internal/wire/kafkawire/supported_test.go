@@ -3,7 +3,7 @@ package kafkawire
 import (
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 var wantSupported = []APIVersionRange{

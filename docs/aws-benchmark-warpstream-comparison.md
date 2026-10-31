@@ -20,7 +20,7 @@ files (the workload YAML is inline in the post, the driver settings are listed a
 | Load generator | OpenMessaging Benchmark on m6in.8xlarge, "intentionally overprovisioned" | OMB on `loadgen_count` x m6in.8xlarge, 2 recommended (OMB gives the first half of its workers to producers, the second half to consumers) | yes in type; worker layout is ours |
 | AZs | agents multi-AZ in their cost model; the benchmark itself does not say | all in ONE AZ | no, see section 3 |
 | Object store | S3 (their bucket, same region) | S3 standard bucket, same region | yes |
-| Metadata / coordination | WarpStream hosted control plane (proprietary) | DynamoDB on-demand table behind ONE `manicp` on a dedicated control-plane host: a single sequencer with group commit and an in-memory offset cache (decisions 29, 39, 42, 46) | no |
+| Metadata / coordination | WarpStream hosted control plane (proprietary) | DynamoDB on-demand table behind ONE `mdscontrolplane` on a dedicated control-plane host: a single sequencer with group commit and an in-memory offset cache (decisions 29, 39, 42, 46) | no |
 | Client tool | OMB (Kafka driver) | OMB at a pinned commit, Kafka driver with a small patch (`omb/patches`) | yes, with patch |
 | Topic | 1 topic | 1 topic | yes |
 | Partitions | 288 (also 1152, 4608) | 288 (1152 and 4608 in `workloads/later`) | yes |
@@ -52,7 +52,7 @@ Client tool notes that matter for fairness:
   the run is unaffected, but state it next to any claim about ordering. Where order matters set
   `max.in.flight.requests.per.connection=1` (at a throughput cost) or accept the reordering.
 - The Kafka driver the repo builds is OMB's, plus `ops/deploy/aws/bench/omb/patches/0001`: (a) every logical topic maps
-  to one topic created beforehand through manicp (the broker has no CreateTopics); (b) consumers `assign()` partitions
+  to one topic created beforehand through mdscontrolplane (the broker has no CreateTopics); (b) consumers `assign()` partitions
   statically and never commit; (c) the consumer list is not shuffled so the static split is deterministic;
   (d) optional round-robin pinning of each client to one broker (`--bootstrap-mode balanced`, section 3.5).
   Patch 0002 only removes the unrelated drivers from the build.
@@ -159,13 +159,13 @@ written at a sustained 1 GiB/s: 12,868 / 2,629,800 GiB per month; derived by us,
 Their S3 PUT line implies about 358 million PUTs a month (about 136 per second at $0.005 per 1000), their GET
 line about 1.27 billion GETs (about 480 per second at $0.0004 per 1000).
 
-Ours, per stage window, from the broker and manicp snapshots (counters are exact; no estimate):
+Ours, per stage window, from the broker and mdscontrolplane snapshots (counters are exact; no estimate):
 
 ```
-GiB written      = delta(manibroker_segment_committed_bytes_total) / 2^30
-S3 PUTs          = delta(manibroker_s3_attempt_seconds_count{op=~"Put.*"})        (retries are separate attempts)
-S3 GETs          = delta(manibroker_s3_attempt_seconds_count{op=~"Get.*"})
-WRU, RCU         = delta(manicp_dynamo_consumed_capacity_units_total{kind="write"|"read"})
+GiB written      = delta(mdsbroker_segment_committed_bytes_total) / 2^30
+S3 PUTs          = delta(mdsbroker_s3_attempt_seconds_count{op=~"Put.*"})        (retries are separate attempts)
+S3 GETs          = delta(mdsbroker_s3_attempt_seconds_count{op=~"Get.*"})
+WRU, RCU         = delta(mdscontrolplane_dynamo_consumed_capacity_units_total{kind="write"|"read"})
 S3 $             = PUTs * put_price/1000 + GETs * get_price/1000
 DynamoDB $       = WRU * wru_price/1e6 + RCU * rcu_price/1e6
 compute $        = (brokers * broker_hourly + cp_hourly) * window_hours
@@ -197,9 +197,9 @@ cheaply: check `WRU/s` in the summary against 240 x commits/s.
 ### Control plane: availability caveat
 
 WarpStream's control plane is a hosted, replicated, multi-AZ service run by the vendor. Ours, for this run, is a single
-sequencer node: one manicp on one m6in.xlarge in one AZ (decision 46), the only writer of the sequencing path, with group
+sequencer node: one mdscontrolplane on one m6in.xlarge in one AZ (decision 46), the only writer of the sequencing path, with group
 commit and an in-memory offset cache in front of DynamoDB. That choice is made for performance (the first 6-broker smoke
-run with one manicp per broker saw constant compare-and-set cancellations and commit latency spikes from six writers on one
+run with one mdscontrolplane per broker saw constant compare-and-set cancellations and commit latency spikes from six writers on one
 table). Consequences to state next to any number:
 
 - Availability: if the CP host dies, produce commits stop until it is restarted or replaced (stored segments are kept;
@@ -207,11 +207,11 @@ table). Consequences to state next to any number:
   cluster's writes. WarpStream's published figures carry no such single point of failure, so this run says nothing about
   availability parity.
 - Correctness does not depend on the single instance: DynamoDB conditional writes remain the safety net, so an accidental
-  second manicp costs performance (cancellations) only. No lease or fencing is built.
+  second mdscontrolplane costs performance (cancellations) only. No lease or fencing is built.
 - Throughput: the sequencer is a deliberate single thread; at 1 GiB/s the question the run answers is whether one
   sequencing thread with group commit keeps up (watch queue depth and group size in the "Control plane" table of
   summary.md), not whether a cluster of control-plane nodes scales.
-- Cost: one more instance (about $0.23/hour, 4 vCPU) and no per-broker manicp compute. DynamoDB WRU does NOT drop as
+- Cost: one more instance (about $0.23/hour, 4 vCPU) and no per-broker mdscontrolplane compute. DynamoDB WRU does NOT drop as
   group size grows at this shape: with 288 partitions and random partition spread every segment holds about 96 partitions
   (97 items), any two segments share a partition, and a group is capped at 100 items, so every group holds one segment
   (measured, `docs/surprises-audit.md` S1/S7: group size 1, 1.00 transaction per commit, 240 WRU per commit). The group
@@ -220,7 +220,7 @@ table). Consequences to state next to any number:
   cluster at 1 / transaction latency commits per second (about 430-600k msg/s at the 28-40 ms w1 measured).
 - Failure: a CP restart is not free. Brokers retry a commit for `-commit-deadline` (default 120 s) with capped, jittered
   backoff, so a gap of seconds delays acks (and backpressures producers) but fails nothing; a longer gap fails the segments in
-  flight (REQUEST_TIMED_OUT). systemd restarts manicp after 1 s (`Restart=always`, `RestartSec=1`), and the new process starts
+  flight (REQUEST_TIMED_OUT). systemd restarts mdscontrolplane after 1 s (`Restart=always`, `RestartSec=1`), and the new process starts
   with a cold sequencer cache (a burst of DynamoDB reads). It is not just a cold cache.
 - HA is future work: an active/standby pair with an advisory DynamoDB lease (not needed for correctness) would remove the
   availability gap without changing the data path.

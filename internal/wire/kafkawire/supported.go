@@ -3,7 +3,7 @@ package kafkawire
 import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // RequestHeader is core.RequestHeader.

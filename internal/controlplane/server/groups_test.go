@@ -7,9 +7,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/core"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/core"
 )
 
 // A standby control plane serves no group call: every one answers Unavailable,

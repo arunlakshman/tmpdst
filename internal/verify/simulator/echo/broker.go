@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"manifester/internal/core"
-	"manifester/internal/wire/segmentformat"
+	"mds/internal/core"
+	"mds/internal/wire/segmentformat"
 )
 
 // mutation injects a bug for the mutant tests; zero is the real broker.

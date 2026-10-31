@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/kafka"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/kafka"
 )
 
 // C4 (speccheck/doc.go): the at-least-once Kafka oracle against the speccheck.Partition and

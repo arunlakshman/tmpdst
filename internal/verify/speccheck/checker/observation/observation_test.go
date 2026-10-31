@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 var allCodes = []core.ErrCode{

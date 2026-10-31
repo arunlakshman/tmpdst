@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Group reads (slice 4a). They change nothing, so they are not logged.

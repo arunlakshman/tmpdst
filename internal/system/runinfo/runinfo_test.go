@@ -34,13 +34,13 @@ func TestRunIDPrecedence(t *testing.T) {
 
 func TestLoggerCarriesRunFields(t *testing.T) {
 	var buf bytes.Buffer
-	i := New("manibroker", "r1", 7)
+	i := New("mdsbroker", "r1", 7)
 	NewLogger(&buf, 0, i).Info("hello", "k", 1)
 	var m map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
 		t.Fatal(err)
 	}
-	for k, want := range map[string]any{"run_id": "r1", "service": "manibroker", "broker_id": float64(7), "msg": "hello", "k": float64(1)} {
+	for k, want := range map[string]any{"run_id": "r1", "service": "mdsbroker", "broker_id": float64(7), "msg": "hello", "k": float64(1)} {
 		if m[k] != want {
 			t.Errorf("%s = %v, want %v", k, m[k], want)
 		}
@@ -51,9 +51,9 @@ func TestLoggerCarriesRunFields(t *testing.T) {
 		}
 	}
 	buf.Reset()
-	NewLogger(&buf, 0, New("manicp", "r1", -1)).Info("x")
+	NewLogger(&buf, 0, New("mdscontrolplane", "r1", -1)).Info("x")
 	if strings.Contains(buf.String(), "broker_id") {
-		t.Error("manicp line has broker_id")
+		t.Error("mdscontrolplane line has broker_id")
 	}
 }
 

@@ -6,10 +6,10 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/internal/session"
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/internal/session"
+	"mds/internal/wire/kafkawire"
 )
 
 // batch is one produce batch for one partition, retried unchanged until

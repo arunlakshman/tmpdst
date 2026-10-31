@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/core"
-	"manifester/internal/system"
-	"manifester/internal/verify/speccheck/checker/injectedbug"
-	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/runsettings"
-	"manifester/internal/verify/speccheck/checker/suites"
-	"manifester/internal/verify/speccheck/specsystem"
+	"mds/internal/core"
+	"mds/internal/system"
+	"mds/internal/verify/speccheck/checker/injectedbug"
+	"mds/internal/verify/speccheck/checker/observation"
+	"mds/internal/verify/speccheck/checker/runsettings"
+	"mds/internal/verify/speccheck/checker/suites"
+	"mds/internal/verify/speccheck/specsystem"
 )
 
 // Conformance C3: the shared object store suite runs on the S3 adapter and on
@@ -103,11 +103,11 @@ func newFakeS3Subject(t *testing.T) func() suites.ObjectSubject {
 func TestConformanceFake(t *testing.T) { runProfiles(t, newFakeS3Subject(t), 8) }
 
 // TestConformanceS3 runs against a real S3 endpoint (SeaweedFS) only when
-// MANIFESTER_S3_ENDPOINT is set. Every sequence gets its own key prefix.
+// MDS_S3_ENDPOINT is set. Every sequence gets its own key prefix.
 func TestConformanceS3(t *testing.T) {
-	ep := os.Getenv("MANIFESTER_S3_ENDPOINT")
+	ep := os.Getenv("MDS_S3_ENDPOINT")
 	if ep == "" {
-		t.Skip("The environment variable MANIFESTER_S3_ENDPOINT is not set, so the test of the real S3 endpoint is skipped.")
+		t.Skip("The environment variable MDS_S3_ENDPOINT is not set, so the test of the real S3 endpoint is skipped.")
 	}
 	base := UniqueBucket()
 	n := 0

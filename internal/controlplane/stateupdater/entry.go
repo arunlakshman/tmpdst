@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Entry kinds are the Dynamo loglet payload kinds.

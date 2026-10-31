@@ -3,7 +3,7 @@ package production
 import (
 	"log/slog"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // SegmentLog writes one structured log line per segment lifecycle event, built
@@ -97,7 +97,7 @@ func (s *SegmentLog) Observe(f core.Fact) {
 			"total_ms", ms(fi(f, "total_ns")), "put_attempts", si.putAttempts,
 			"in_flight", fi(f, "inflight"), "buffered_bytes", fi(f, "buffered"))
 	case "create_topics_configs_ignored":
-		s.log.Warn("CreateTopics configs ignored: manifester keeps no topic configs", "event", "create_topics_configs_ignored",
+		s.log.Warn("CreateTopics configs ignored: mds keeps no topic configs", "event", "create_topics_configs_ignored",
 			"topics", fi(f, "topics"))
 	case "segment_failed":
 		key := fs(f, "segment")

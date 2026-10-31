@@ -5,7 +5,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func commitRequest(group string, gen int32, member string, parts ...int32) *kmsg.OffsetCommitRequest {

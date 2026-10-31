@@ -3,7 +3,7 @@
 *Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This document is a record.*
 
 Status: PROTOTYPE and measurements (2026-10-20), not a decision. Idea A of `delos-logdrive-ideas.md`, built under
-`cp/logsm`. It is reachable only from tests: no `-store` kind, no change to `cmd/manicp`, no trace hash changed.
+`cp/logsm`. It is reachable only from tests: no `-store` kind, no change to `cmd/mdscontrolplane`, no trace hash changed.
 Labels: **measured** (this machine, Apple M1, Go 1.24), **modelled** (fakedb with injected latency), **computed**,
 **assumption**. All AWS numbers (X1, X3, X4) are still open: **the PutItem latency in section 4 is an assumption.**
 
@@ -170,7 +170,7 @@ window decision, the compact applier. |
 
 - No AWS call, no real DynamoDB or ExtendDB run: `DynLog` is tested only on fakedb (including `ALL_OLD`, which the real
   service supports; the fallback Query path is covered by a unit test). No X1, X3, X4.
-- No `-store` kind, no wiring into `cmd/manicp`, no sim engine, no change to any existing trace hash or `decisions.md`.
+- No `-store` kind, no wiring into `cmd/mdscontrolplane`, no sim engine, no change to any existing trace hash or `decisions.md`.
 - Checkpoint is encode, decode and load only: no trim of the log, no restore into a replica, no checkpoint to S3.
 - No indexer, no lease or routing for "sticky"; no group commit of several commands into one entry; no striping.
 - Replica restart, more than 3 replicas, clock skew and real time (the model uses real sleeps on one machine,
@@ -187,25 +187,25 @@ over 30) green. No stage touches an existing sim trace hash except stage 3, whic
 | 1. KV applier and lockstep | `cp/applier`: the state machine of decision 49 on an embedded KV store chosen by a bake-off (`docs/applier-bakeoff.md`); commands CommitSegment and CreateTopic, queries Lookup, DescribeTopics, End; runs packed per (partition, segment); per-key digest plus bases for the window; checkpoint, restore and trim by slot. | X2 harness with the applier as every replica's state machine and veritas as the oracle: 100,000 seeds, 0 failures (equal answers, offsets and query digests); `cptest` conformance green against the applier as a `cp.Store`; apply rate well above 430 segments/s at 150 partitions per segment with 40k partitions of state; the store dependency recorded per decisions I and J. |
 | 2. Log-backed CP service (DONE, `docs/log-cp-service.md`) | The `cp/` service on the DynamoDB log through the `cp/logsm` seam: committer with K=4, hole filler, hot standby tailing the log (decision 51, the slot is the fence), sticky routing of commits to one node, checkpoint and trim (trim stays behind the key window), indexer writing `R#` rows every 10 s on a pre-warmed table, fresh Lookup through `CheckTail` with shared (batched) tail reads. | Conformance C3 against the real service on fakedb; a standby takes over after the appender is killed with no lost or duplicated offset; restart from checkpoint plus tail gives the same state digest; Lookup after an ack sees it; unit and race tests for each loop. |
 | 3. Cap 4096 and sim (DONE, `docs/sim-log-engine.md`) | Raise `MaxSegmentPartitions` from 96 to about 4096 (decision 52); add a sim CP engine for the log (Put/Query with latency, lost answers, unknown outcome; replicas as actors with crash and restart from a checkpoint; `HoleAfter` on the virtual clock) next to the S3 engine; veritas stays the oracle over the log's first-slot order. | Every trace hash re-baselined and reviewed by hand (a diff per hash with the cause); 300-seed campaign green; invariants: all live replicas' query digests equal at a quiesced log, an answer derives from the applied slot, no empty slot is passed without a no-op. |
-| 4. Wiring and operations (DONE, below) | `manicp -store` kind for the log, OpenAPI and a CP URL list (or NLB) for brokers with failover to the next URL, `manicp_` observability for apply lag, slot loss, hole fills, checkpoint age, indexer lag, window size. | `test/integrationtest/` kill-the-appender test fails over within the budget; metrics documented in `docs/observability.md`; runbook updated. |
+| 4. Wiring and operations (DONE, below) | `mdscontrolplane -store` kind for the log, OpenAPI and a CP URL list (or NLB) for brokers with failover to the next URL, `mdscontrolplane_` observability for apply lag, slot loss, hole fills, checkpoint age, indexer lag, window size. | `test/integrationtest/` kill-the-appender test fails over within the budget; metrics documented in `docs/observability.md`; runbook updated. |
 | 5. AWS rerun | 500k, 750k and 1M random clients, no partition affinity, with the production CP (X1/X3/X4 numbers re-measured at that load). | Report in `docs/` with commit rate, commit latency p50/p99, tail-query rate, DynamoDB WRU, failover penalty and cost per GiB; the stage-5 results decide whether the S3 index (TODO) is scheduled. |
 
 ### Stage 2 status
 
 Built in `cp/logcp` (service, DynamoDB log, committer with group commit and K=4, hole filler, hot standby with
-advisory roles, checkpoint and tombstone trim, indexer, `manicp_log_*` metrics), `cp/cpclient` (CP URL list and
+advisory roles, checkpoint and tombstone trim, indexer, `mdscontrolplane_log_*` metrics), `cp/cpclient` (CP URL list and
 failover) and `cp/logcp/logcptest`. Exit criteria: cptest conformance against the service (store, HTTP, fakedb) green;
 seeded X2 on the real service, 20,000 seeds, 0 failures (takeover, failback, split brain, crash and restore from a
 checkpoint, trim); `-race` test; restart from checkpoint plus tail gives equal state; Lookup after an ack sees it on
 any node. Two findings changed the design text (decision 53): the idempotency window must be a function of the
-slot number, and trimming must leave tombstones. Not wired into `cmd/manicp` (stage 4).
+slot number, and trimming must leave tombstones. Not wired into `cmd/mdscontrolplane` (stage 4).
 
 ### Stage 4 status
 
-Done. `manicp -store dynamolog` (`cmd/manicp/logstore.go`, flags in `docs/log-cp-service.md`) wires `cp/logcp` to the real DynamoDB client,
-`internal/system/s3store` checkpoints and Pebble; `-store mem|dynamo` are unchanged (rollback). `manibroker -cp-url a,b` takes the URL list
+Done. `mdscontrolplane -store dynamolog` (`cmd/mdscontrolplane/logstore.go`, flags in `docs/log-cp-service.md`) wires `cp/logcp` to the real DynamoDB client,
+`internal/system/s3store` checkpoints and Pebble; `-store mem|dynamo` are unchanged (rollback). `mdsbroker -cp-url a,b` takes the URL list
 (cpclient: sticky to the last good URL, next URL on a connect error or 503, each once per call; tests for dead URL, standby and
-failback). Tests: `cmd/manicp` runs three nodes in-process over fakedb and an in-memory object store, kills the appender while three
+failback). Tests: `cmd/mdscontrolplane` runs three nodes in-process over fakedb and an in-memory object store, kills the appender while three
 clients commit through a URL list, and checks every acked range is stored once with contiguous offsets on both survivors;
 restart from a final checkpoint; startup errors. `test/integrationtest/TestKillTheAppenderMidProduce`: three logcp nodes over real HTTP, two brokers,
 franz-go produce with idempotence off (decisions 41-44), the active node is crashed mid-stream, acks resume about 2 s later
@@ -218,12 +218,12 @@ Failover budget and the broker backoff interplay: runbook A11 (takeover 5 s + ab
 
 ### Stage 3 status
 
-Done (decision 52 note). `broker.Config.MaxSegmentPartitions` and `manibroker -max-segment-partitions` default to 4096;
+Done (decision 52 note). `broker.Config.MaxSegmentPartitions` and `mdsbroker -max-segment-partitions` default to 4096;
 the old transaction store needs `-max-segment-partitions 96` (documented in `internal/broker/config.go`, `cp/doc.go`, the flag help,
-the runbook; `ops/deploy/aws/terraform` defaults `broker_extra_args` to it because it still runs `manicp -store dynamo`), and
+the runbook; `ops/deploy/aws/terraform` defaults `broker_extra_args` to it because it still runs `mdscontrolplane -store dynamo`), and
 refuses a wider segment with `ErrTooLarge` and no write (tested at 4096 partitions in `cp/dynamo`). The broker does not
 learn the limit from the CP: that needs a new endpoint and a contract field, and the CP URL list of stage 4 is the better
-place. `internal/verify/simulator/fakeservices/fakelogservice` is the sim log CP (`docs/sim-log-engine.md`); `manisim -scenario kafka-log` runs the whole
+place. `internal/verify/simulator/fakeservices/fakelogservice` is the sim log CP (`docs/sim-log-engine.md`); `mdssimulator -scenario kafka-log` runs the whole
 system on it; four mutants are caught; C2 conformance against veritas passes. The sim's SegmentCaps invariant now uses the
 store's item limit (none for the log store) instead of the constant 100.
 
@@ -246,6 +246,6 @@ correctness hole in the log design showed up; one property of mine was too stric
 tombstone again when a newer checkpoint trimmed past it, and restarts again: the real invariant is that a checkpoint is
 never below the trim floor, now asserted).
 
-Left for stage 4: `manicp -store` kind for the log, OpenAPI and URL list wiring, the `manicp_log_*` dashboards and alerts,
+Left for stage 4: `mdscontrolplane -store` kind for the log, OpenAPI and URL list wiring, the `mdscontrolplane_log_*` dashboards and alerts,
 and then `broker_extra_args` can drop the 96 flag. Stage 5: the AWS rerun at 500k to 1M (this is where the cap lets
 segments grow past 96 partitions, which the sim workload cannot show).

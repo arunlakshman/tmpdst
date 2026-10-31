@@ -7,7 +7,7 @@ package system
 import (
 	"context"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Clock is read only by the runtime, at inbox dequeue, to stamp Event.At/Wall.

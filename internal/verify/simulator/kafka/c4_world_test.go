@@ -8,11 +8,11 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/kafka"
-	"manifester/internal/verify/speccheck"
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/kafka"
+	"mds/internal/verify/speccheck"
+	"mds/internal/wire/kafkawire"
 )
 
 // C4 world: a random correct at-least-once Kafka history generated against the

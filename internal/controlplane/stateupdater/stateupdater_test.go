@@ -7,15 +7,15 @@ import (
 	"reflect"
 	"testing"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/controlplane/stateupdater/pebblestore"
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker"
-	"manifester/internal/verify/speccheck/checker/generator"
-	"manifester/internal/verify/speccheck/checker/injectedbug"
-	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/runsettings"
-	"manifester/internal/verify/speccheck/checker/suites"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/controlplane/stateupdater/pebblestore"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker"
+	"mds/internal/verify/speccheck/checker/generator"
+	"mds/internal/verify/speccheck/checker/injectedbug"
+	"mds/internal/verify/speccheck/checker/observation"
+	"mds/internal/verify/speccheck/checker/runsettings"
+	"mds/internal/verify/speccheck/checker/suites"
 )
 
 func newPebble(t testing.TB) stateupdater.KeyValueStore {

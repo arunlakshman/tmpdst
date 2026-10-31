@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/internal/session"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/internal/session"
 )
 
 // PutOp and GetOp are the History ops. A PUT result is the reply text, or ""

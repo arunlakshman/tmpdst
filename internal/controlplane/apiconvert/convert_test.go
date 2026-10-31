@@ -3,7 +3,7 @@ package apiconvert
 import (
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func TestCommitSegmentRoundTrip(t *testing.T) {

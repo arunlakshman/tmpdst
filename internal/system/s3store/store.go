@@ -22,10 +22,10 @@ import (
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 
-	"manifester/internal/core"
-	"manifester/internal/system"
-	"manifester/internal/system/awsmetrics"
-	"manifester/internal/system/httpconnections"
+	"mds/internal/core"
+	"mds/internal/system"
+	"mds/internal/system/awsmetrics"
+	"mds/internal/system/httpconnections"
 )
 
 // Config selects the bucket and endpoint. An empty Endpoint is AWS itself.
@@ -38,7 +38,7 @@ type Config struct {
 	// HTTP overrides the HTTP client (tests).
 	HTTP *http.Client
 	// Obs, if set, measures every HTTP attempt of every SDK call
-	// (manibroker_s3_*) and logs failed attempts.
+	// (mdsbroker_s3_*) and logs failed attempts.
 	Obs *awsmetrics.Recorder
 }
 
@@ -79,7 +79,7 @@ func loadOptions(cfg Config) []func(*config.LoadOptions) error {
 	opts := []func(*config.LoadOptions) error{config.WithRegion(cfg.Region)}
 	if cfg.Endpoint != "" && os.Getenv("AWS_ACCESS_KEY_ID") == "" {
 		opts = append(opts, config.WithCredentialsProvider(
-			credentials.NewStaticCredentialsProvider("manifester", "manifester", "")))
+			credentials.NewStaticCredentialsProvider("mds", "mds", "")))
 	}
 	if cfg.HTTP != nil {
 		opts = append(opts, config.WithHTTPClient(cfg.HTTP))
@@ -246,5 +246,5 @@ func notFound(err error) bool {
 
 // UniqueBucket returns a fresh bucket name for a test run.
 func UniqueBucket() string {
-	return fmt.Sprintf("manifester-%d", time.Now().UnixNano())
+	return fmt.Sprintf("mds-%d", time.Now().UnixNano())
 }

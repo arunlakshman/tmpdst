@@ -3,10 +3,10 @@ package kafka
 import (
 	"testing"
 
-	"manifester/internal/broker"
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/fakelogservice"
+	"mds/internal/broker"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/fakelogservice"
 )
 
 func TestLogCampaign(t *testing.T) {

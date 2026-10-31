@@ -2,8 +2,8 @@ package generator
 
 import (
 	"fmt"
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker"
 	"strings"
 )
 

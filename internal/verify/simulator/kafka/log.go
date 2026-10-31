@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/wire/kafkawire"
 )
 
 // The oracle's model of one partition's committed log: the control plane's

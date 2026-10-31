@@ -7,8 +7,8 @@ import (
 	"net"
 	"time"
 
-	"manifester/internal/core"
-	"manifester/internal/system"
+	"mds/internal/core"
+	"mds/internal/system"
 )
 
 // AsyncConnections is the connection set the Executor writes to: system.Connections plus a

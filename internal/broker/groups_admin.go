@@ -6,7 +6,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // DescribeGroups (key 15) and ListGroups (key 16). Admin tools read them. Each

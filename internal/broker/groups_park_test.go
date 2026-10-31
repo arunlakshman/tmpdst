@@ -5,7 +5,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // A JoinGroup waits at the control plane (holdCP). It parks its own

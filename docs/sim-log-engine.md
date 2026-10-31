@@ -9,7 +9,7 @@ logstore slots (`machine.ReplaySlot`). Veritas remains the independent oracle
 (decision 21). Replica apply, roles, hole-fill, and checkpoints live only in
 `internal/controlplane/statemachine`.
 
-Run with `go run ./cmd/manisim -scenario kafka-log -seeds 300` (`kafka.ConfigLog`).
+Run with `go run ./cmd/mdssimulator -scenario kafka-log -seeds 300` (`kafka.ConfigLog`).
 The veritas-backed preset (`-scenario kafka`) is unchanged.
 
 ## Topology

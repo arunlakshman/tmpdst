@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func TestRunRoundTripAndCorruption(t *testing.T) {

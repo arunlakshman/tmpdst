@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // ObjectResult is what an object store call answered. Only the fields that

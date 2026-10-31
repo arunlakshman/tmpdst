@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func newTestStore(t *testing.T, prefix string) (*Store, *fakeS3) {
@@ -198,7 +198,7 @@ func TestStoreDialAndHTTPClient(t *testing.T) {
 	if err := s.EnsureBucket(t.Context()); err == nil {
 		t.Error("EnsureBucket on a dead endpoint succeeded")
 	}
-	if !strings.HasPrefix(UniqueBucket(), "manifester-") {
+	if !strings.HasPrefix(UniqueBucket(), "mds-") {
 		t.Error("UniqueBucket")
 	}
 }

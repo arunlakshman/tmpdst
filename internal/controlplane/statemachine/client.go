@@ -1,8 +1,8 @@
 package statemachine
 
 import (
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 // onControlPlaneDeliver handles one simulator-bridge ControlPlaneDeliver: reads wait for a fresh tail and answer from the fold when

@@ -3,7 +3,7 @@ package fakelogstore
 import (
 	"slices"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // slotKind is the occupancy of one loglet slot.

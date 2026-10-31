@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/controlplane/stateupdater/pebblestore"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/controlplane/stateupdater/pebblestore"
+	"mds/internal/core"
 )
 
 // benchSegment is a commit of parts distinct partitions (1-2 batches each) out

@@ -3,7 +3,7 @@ package broker
 import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // resourceTopic is Kafka's config resource type for topics.

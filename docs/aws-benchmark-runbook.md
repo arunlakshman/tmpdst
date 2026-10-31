@@ -22,8 +22,8 @@ You run apply and destroy; nothing here is automatic. Never run `docker prune` o
 | operator control (topic, workers, start run) | your workstation, through SSM send-command | `ops/deploy/aws/bench/bench-ctl.sh` |
 | OMB workers | every loadgen host, `:8080` (HTTP) and `:9090` (stats) | `ops/deploy/aws/bench/start-omb-workers.sh` |
 | OMB coordinator + stage plan + abort rules | loadgen host 0 (detached) | `ops/deploy/aws/bench/run-omb.sh` |
-| manicp: the log store (`-store dynamolog`) on an active host (rank 0) plus `cp_standby_count` (default 1) hot standbys; `metrics/cp/` (rank 0) and `metrics/cp-<rank>/` snapshots | dedicated control-plane hosts (`cp_instance_type`, default m6in.xlarge), `:8080` | `files/cp-user-data.sh.tpl` |
-| manibroker `/metrics` snapshots every 10 s (`metrics/<broker id>/`) | every broker host (`mb-snapshot.service`) | terraform user-data |
+| mdscontrolplane: the log store (`-store dynamolog`) on an active host (rank 0) plus `cp_standby_count` (default 1) hot standbys; `metrics/cp/` (rank 0) and `metrics/cp-<rank>/` snapshots | dedicated control-plane hosts (`cp_instance_type`, default m6in.xlarge), `:8080` | `files/cp-user-data.sh.tpl` |
+| mdsbroker `/metrics` snapshots every 10 s (`metrics/<broker id>/`) | every broker host (`mb-snapshot.service`) | terraform user-data |
 | summary | your workstation | `ops/deploy/aws/bench/collect-results.sh` -> `results/<run>/summary.md` |
 
 Why topic creation goes through SSM to the control-plane host: OMB cannot create topics (the broker has no CreateTopics),
@@ -42,7 +42,7 @@ Check the instance types exist in your AZ (terraform README, "Variables"); if yo
 
 ```
 open -a Docker                       # macOS, if the daemon is not running
-ops/scripts/build-omb.sh                 # about 5 min the first time (Maven cache lives in docker volume manifester-omb-m2)
+ops/scripts/build-omb.sh                 # about 5 min the first time (Maven cache lives in docker volume mds-omb-m2)
 python3 -I -m unittest discover -s ops/deploy/aws/bench -p 'test_*.py'   # summarize tests, optional
 ```
 The artifact upload command printed by terraform (`artifact_upload_command`) uploads `build/omb/openmessaging-benchmark.tar.gz`
@@ -67,18 +67,18 @@ Apply early: the S3 request metrics take about 15 minutes to show data.
 export AWS_REGION=ap-south-2 RUN_ID=<run_id>
 ops/deploy/aws/bench/bench-ctl.sh worker-status || true          # not started yet: expected "NOT running"
 $(terraform output -json ssm_start_session_brokers | jq -r '.[0]')   # on broker 1:
-  systemctl is-active manibroker mb-snapshot alloy ; curl -s 127.0.0.1:9100/healthz ; pgrep -c manicp   # 0: no manicp on brokers
+  systemctl is-active mdsbroker mb-snapshot alloy ; curl -s 127.0.0.1:9100/healthz ; pgrep -c mdscontrolplane   # 0: no mdscontrolplane on brokers
 $(terraform output -raw ssm_start_session_cp)                         # on the control-plane host:
-  systemctl is-active manicp mb-snapshot alloy ; curl -s 127.0.0.1:8080/healthz ; pgrep -xc manicp   # exactly 1
+  systemctl is-active mdscontrolplane mb-snapshot alloy ; curl -s 127.0.0.1:8080/healthz ; pgrep -xc mdscontrolplane   # exactly 1
 $(terraform output -json ssm_start_session_loadgens | jq -r '.[0]')  # on loadgen 0:
   source /etc/profile.d/bench.sh; echo $BOOTSTRAP $LOADGEN_INDEX $LOADGEN_COUNT; ls /opt/omb/bin /opt/bench
 ```
-Or in one command from the workstation: `ops/deploy/aws/bench/bench-ctl.sh check-cp` (exactly one manicp process on the CP host,
-healthz ok, no manicp on any broker, every broker reaches `<cp_private_ip>:8080`).
+Or in one command from the workstation: `ops/deploy/aws/bench/bench-ctl.sh check-cp` (exactly one mdscontrolplane process on the CP host,
+healthz ok, no mdscontrolplane on any broker, every broker reaches `<cp_private_ip>:8080`).
 Grafana: apply dashboards (`ops/deploy/aws/observability/apply-dashboards.sh`), check `up{run_id="<run>"}` for all six
-`broker` values plus one `manicp` series with `role="cp"`, and that the `$broker` variable of the Overview dashboard lists 1..6.
+`broker` values plus one `mdscontrolplane` series with `role="cp"`, and that the `$broker` variable of the Overview dashboard lists 1..6.
 The Overview "Control plane" row (slot rate, append latency, lost slots, apply and standby lag, queue, DynamoDB WRU)
-reads the active manicp; lost slots should stay near 0 (see A10, A11).
+reads the active mdscontrolplane; lost slots should stay near 0 (see A10, A11).
 
 ### A5. Topic and workers (workstation)
 
@@ -101,13 +101,13 @@ Run the smoke alone first; it prints the pre-flight, the compression decision an
 ops/deploy/aws/bench/bench-ctl.sh run --stages smoke
 ops/deploy/aws/bench/bench-ctl.sh tail 60          # repeat; also: Grafana Overview and Pipeline dashboards
 ```
-Pre-flight (automatic): the control plane is alive (a `metrics/cp/<epoch>-manicp.txt` snapshot in S3 newer than 90 s;
+Pre-flight (automatic): the control plane is alive (a `metrics/cp/<epoch>-mdscontrolplane.txt` snapshot in S3 newer than 90 s;
 loadgens cannot reach the CP over the network by design), Kafka ApiVersions on every broker IP (prints node ids, warns on duplicates), the topic
 is visible on every broker with 288 partitions, the lz4 probe (one 1 KiB record with `compression.type=lz4`; the brokers accept it since decision 45, and a broker that
 rejects it makes the run fall back to `none` with a LOUD "not apples-to-apples" warning). Go only if:
 - [ ] `SMOKE PASS`, achieved >= 80% of 100k msg/s, no errors
 - [ ] every broker shows traffic in Grafana (Overview, "Per-broker write throughput"), skew max/min about 1 in balanced mode
-- [ ] `segments_failed` 0, S3 and DynamoDB throttles 0, `manicp` WRU/s (summary.md "Control plane" table; Overview "Control plane" row) and the mean group size: at 288 partitions with random partition spread a segment holds about 96 partitions (97 items; the cap is `-max-segment-partitions 96` on the old store, see the partition cap note below), so
+- [ ] `segments_failed` 0, S3 and DynamoDB throttles 0, `mdscontrolplane` WRU/s (summary.md "Control plane" table; Overview "Control plane" row) and the mean group size: at 288 partitions with random partition spread a segment holds about 96 partitions (97 items; the cap is `-max-segment-partitions 96` on the old store, see the partition cap note below), so
       every group holds ONE segment (a group is capped at 100 items) and the WRU per commit stays about 240 at any load; expect group size 1 and
       240 x commits/s (comparison doc, section 5; `docs/surprises-audit.md` S1/S7). It would fall only with fewer partitions per segment
 - [ ] control plane: queue depth not growing, canceled groups about 0 (one writer), commit latency steady
@@ -148,7 +148,7 @@ SSM parameters and Grafana tokens if the account is shared.
 ### A8. Checklist (tick in order)
 
 - [ ] OMB artifact built, tarball present; `broker_count = 6`, `loadgen_count = 2`; budget alarm set
-- [ ] apply + artifact upload done; all hosts `bench-bootstrap.done`; 6 brokers up in Grafana; `bench-ctl.sh check-cp` ok (exactly one manicp)
+- [ ] apply + artifact upload done; all hosts `bench-bootstrap.done`; 6 brokers up in Grafana; `bench-ctl.sh check-cp` ok (exactly one mdscontrolplane)
 - [ ] topic `omb-<run>` with 288 partitions; workers running on both loadgens
 - [ ] smoke passes; compression decision noted (`lz4` expected; `none` would NOT be apples-to-apples)
 - [ ] ramp / vanity stages run; ABORT file absent (or understood)
@@ -172,11 +172,11 @@ The control plane is the log store (A11). The old transaction-based store, its s
 removed (decision 54). The bullets below apply to a lone CP, or to losing both nodes of the pair.
 
 If the CP dies (instance terminated by the max_runtime guard, crash, host failure):
-- Symptom: brokers' produce acks stall or fail (the commit step cannot reach `:8080`), `up{job="manicp"}` 0, no new
+- Symptom: brokers' produce acks stall or fail (the commit step cannot reach `:8080`), `up{job="mdscontrolplane"}` 0, no new
   `metrics/cp/` files, `bench-ctl.sh check-cp` fails. Segments already stored in S3 are not lost: they are simply not
   committed (visible) until a CP answers; clients retry per their delivery timeouts.
 - Process died, host alive: the unit has `Restart=always`, `RestartSec=1`, so systemd brings it back in about a second
-  (look at `journalctl -u manicp`; `sudo systemctl restart manicp` by hand if it gave up). The state is all in DynamoDB (log) and S3 (checkpoints),
+  (look at `journalctl -u mdscontrolplane`; `sudo systemctl restart mdscontrolplane` by hand if it gave up). The state is all in DynamoDB (log) and S3 (checkpoints),
   so nothing is lost, but a restart is not free. Real behaviour: (1) every commit that reaches the CP during the gap is
   refused at the connection; the brokers keep retrying it (capped exponential backoff, 20 ms up to 2 s, with jitter) for
   `-commit-deadline` (default 120 s) after the commit's first attempt, so a gap of seconds fails no produce but delays the
@@ -190,15 +190,15 @@ If the CP dies (instance terminated by the max_runtime guard, crash, host failur
   already set, so it boots straight away). The private IP changes, which changes the brokers' user-data (`-cp-url`):
   Terraform replaces the broker hosts too (`user_data_replace_on_change`), which in a benchmark is acceptable but loses the
   run; for a mid-run recovery instead restart the instance in place or re-point a broker by hand
-  (`/etc/systemd/system/manibroker.service`, `-cp-url`, `systemctl daemon-reload && systemctl restart manibroker`).
+  (`/etc/systemd/system/mdsbroker.service`, `-cp-url`, `systemctl daemon-reload && systemctl restart mdsbroker`).
 - After recovery run `check-cp`, then resume or re-run the stage; note the outage in the run notes.
 
 ### A11. The log store (stage 4 default): two CP nodes, run id, killing the appender
 
 What runs: the control plane starts `aws_instance.cp` (rank 0, the preferred appender) and `cp_standby_count`
 (default 1) `aws_instance.cp_standby` (rank 1, a hot standby that tails and applies the log, serves reads, and answers
-commits with 503). Each runs `manicp -store dynamolog -rank R -node-name cp-R -takeover-after 5s -checkpoint-bucket <run bucket>
--checkpoint-prefix cp/ -pebble-dir /var/lib/manicp/pebble` (`cp_takeover_after`, `cp_extra_args` change them). Brokers get
+commits with 503). Each runs `mdscontrolplane -store dynamolog -rank R -node-name cp-R -takeover-after 5s -checkpoint-bucket <run bucket>
+-checkpoint-prefix cp/ -pebble-dir /var/lib/mdscontrolplane/pebble` (`cp_takeover_after`, `cp_extra_args` change them). Brokers get
 `-cp-url http://<rank0>:8080,http://<rank1>:8080` (output `cp_urls`) and the default `-max-segment-partitions 4096`
 (`broker_extra_args` is empty). The DynamoDB table has TTL on `ttl` and warm throughput `ddb_warm_*` (decision 50; X4: a
 cold on-demand table throttles near 4k items/s). Checkpoints are objects under `cp/ckpt/` in the run bucket.
@@ -206,25 +206,25 @@ cold on-demand table throttles near 4k items/s). Checkpoints are objects under `
 Run id: one `run_id` names the bucket, table, tags and every log line (`-run-id`). The table is new per run, so the log starts
 at slot 0. Do not reuse a run id's table with a different `-window-slots` (a cluster constant).
 
-Verify (after apply and upload): `bench-ctl.sh check-cp` (one manicp on each CP host, healthz, brokers reach rank 0) and
+Verify (after apply and upload): `bench-ctl.sh check-cp` (one mdscontrolplane on each CP host, healthz, brokers reach rank 0) and
 `bench-ctl.sh cp-roles` (rank 0 `X-CP-Role: active`, rank 1 `standby`). `s3://<bucket>/results/<run>/metrics/cp/` (rank 0)
 and `metrics/cp-1/` (standby) get a file every 10 s. `summarize.py` reads `metrics/cp/` only: after a failover the active
 node's numbers are in `cp-1/`.
 
 Kill the appender mid-run (the failover measurement): during a stage at steady load, note the time and run
-`bench-ctl.sh kill-appender 60` (SIGKILL manicp on rank 0, held down 60 s, then started again; it comes back as the
+`bench-ctl.sh kill-appender 60` (SIGKILL mdscontrolplane on rank 0, held down 60 s, then started again; it comes back as the
 preferred appender and the standby steps down, so you also measure the failback). Expect, in this order:
 1. brokers' commits fail to connect to rank 0 or reach it reset, and move to rank 1, which answers 503 until it takes
-   over; produce acks stall (`manibroker_segment_commit_seconds` p99 rises, buffered bytes grow, backpressure pauses reads);
-2. after `takeover-after` (5 s) plus the standby's next tail pass rank 1 becomes active (`manicp_log_active` 1,
-   `manicp_log_role_changes_total{to="active"}`, a few `manicp_log_hole_fills_total` if the dead node held a slot, up to
+   over; produce acks stall (`mdsbroker_segment_commit_seconds` p99 rises, buffered bytes grow, backpressure pauses reads);
+2. after `takeover-after` (5 s) plus the standby's next tail pass rank 1 becomes active (`mdscontrolplane_log_active` 1,
+   `mdscontrolplane_log_role_changes_total{to="active"}`, a few `mdscontrolplane_log_hole_fills_total` if the dead node held a slot, up to
    250 ms each) and the stall ends; in-flight commits are replayed by segment key (the window answers them with the original
    offsets), so there are no duplicates and no lost acked data;
 3. when rank 0 restarts it restores the newest checkpoint (or replays) and starts active; rank 1 sees a lower-rank writer
    and demotes (`role_changes_total{to="standby"}`); brokers fail back through a 503 from rank 1.
 Look at: Overview, row "Control plane (log store ...)" (slot rate, append p50/p99, lost slots, apply and standby lag, hole
 fills and role changes, queue/refused, checkpoint age); Pipeline "Commit" p99 and "Segments in flight";
-OMB's own latency chart for the gap; `journalctl -u manicp` on both hosts (`log_role`, `log_ready`, `cp call` WARNs).
+OMB's own latency chart for the gap; `journalctl -u mdscontrolplane` on both hosts (`log_role`, `log_ready`, `cp call` WARNs).
 Budget: an ack gap of `takeover-after` + about 2 s of broker backoff + the 10 s CP call timeout in the worst case (a host
 that drops packets instead of refusing: dial 5 s, then 503 from the standby), far below the 120 s `-commit-deadline`;
 the it/ test measures about 2 s with a 1.5 s takeover on loopback. If a gap approaches the deadline, produces fail with
@@ -232,7 +232,7 @@ REQUEST_TIMED_OUT and the stage is invalid.
 
 There is no rollback to the transaction store (decision 54); going back needs an older git revision.
 
-Standby or whole-CP loss: lose the standby only: nothing visible (alert on `up{job="manicp"}`); the active keeps serving. Lose
+Standby or whole-CP loss: lose the standby only: nothing visible (alert on `up{job="mdscontrolplane"}`); the active keeps serving. Lose
 both: as in A10 (acks stall, everything retried for the deadline). Replace one host with `terraform apply
 -replace=aws_instance.cp_standby[0]` (its IP is in the brokers' user-data, so Terraform replaces the brokers too).
 
@@ -244,9 +244,9 @@ host, one load generator host. Known limits:
 - The broker accepts only non-idempotent producers (decision 41): the harness passes `enable.idempotence=false` to `kafka-producer-perf-test` (Kafka 3.8 defaults to true and would be rejected with INVALID_REQUEST). Keep it if you override `PRODUCER_PROPS`. Results in `docs/aws-benchmark-results-r1.md` predate this change.
 - The load tool is Apache Kafka's `kafka-producer-perf-test`. The WarpStream `benchmark-producer` always compresses
   (no flag to disable); the broker accepts that since decision 45 (earlier brokers answered
-  `UNSUPPORTED_COMPRESSION_TYPE`). Never use `cmd/manibench` for the AWS run.
+  `UNSUPPORTED_COMPRESSION_TYPE`). Never use `cmd/mdsbench` for the AWS run.
 - The broker implements neither CreateTopics nor DescribeConfigs, so `kafka-topics.sh --create/--describe`
-  fail. The control-plane host creates the 6-partition topic `bench-<run_id>` at boot through its loopback manicp API;
+  fail. The control-plane host creates the 6-partition topic `bench-<run_id>` at boot through its loopback mdscontrolplane API;
   the harness only waits for it (`kafka-topics.sh --list` works).
 - Saturating runs (default) make client-side latency mostly client queueing and print no percentiles. Use
   broker-side ack latency (`seal_to_ack`) for saturation, and `--rate N` runs for client p50/p99 below saturation.
@@ -256,7 +256,7 @@ host, one load generator host. Known limits:
 
 - AWS credentials for the target account (region `ap-south-2` in the examples), AWS CLI v2, the Session Manager plugin,
   Terraform >= 1.6, Go, Python 3, `jq`.
-- A Grafana Cloud stack (examples: `https://manifesterio.grafana.net`). Known non-secret values:
+- A Grafana Cloud stack (examples: `https://mdsio.grafana.net`). Known non-secret values:
 
   | what | value |
   |---|---|
@@ -264,13 +264,13 @@ host, one load generator host. Known limits:
   | metrics user | `2644751` |
   | Loki push URL | `https://logs-prod-021.grafana.net/loki/api/v1/push` |
   | Loki user | `1318052` |
-  | stack URL | `https://manifesterio.grafana.net` |
+  | stack URL | `https://mdsio.grafana.net` |
 
 ### Grafana tokens (minimal scopes)
 
 Grafana Cloud portal, your org, Security, Access Policies:
-1. Create access policy `manifester-bench-metrics` with realm = your stack and scope `metrics:write` only. Add a token (expiry: a few days). Save it as `prom_api_key`.
-2. Create access policy `manifester-bench-logs` with scope `logs:write` only. Add a token. Save it as `loki_api_key`.
+1. Create access policy `mds-bench-metrics` with realm = your stack and scope `metrics:write` only. Add a token (expiry: a few days). Save it as `prom_api_key`.
+2. Create access policy `mds-bench-logs` with scope `logs:write` only. Add a token. Save it as `loki_api_key`.
    (One policy with both scopes also works: store the same token in `grafana/api_key` and skip the two above.)
 3. Annotations and dashboards: in the stack, Administration, Users and access, Service accounts, create one with role Editor and a token. Used by the harness (`grafana/annotation_token`) and by `apply-dashboards.sh` (`GRAFANA_API_TOKEN`). Annotations tolerate being absent.
 Never commit tokens; they live only in SSM.
@@ -278,7 +278,7 @@ Never commit tokens; they live only in SSM.
 ### SSM parameters (create once per account/region, before apply)
 
 ```
-R=ap-south-2; P=/manifester-bench/grafana
+R=ap-south-2; P=/mds-bench/grafana
 aws ssm put-parameter --region $R --name $P/remote_write_url --type String       --value 'https://prometheus-prod-36-prod-us-west-0.grafana.net/api/prom/push'
 aws ssm put-parameter --region $R --name $P/user             --type String       --value 2644751
 aws ssm put-parameter --region $R --name $P/prom_api_key     --type SecureString --value "$PROM_TOKEN"
@@ -286,7 +286,7 @@ aws ssm put-parameter --region $R --name $P/loki_url         --type String      
 aws ssm put-parameter --region $R --name $P/loki_user        --type String       --value 1318052
 aws ssm put-parameter --region $R --name $P/loki_api_key     --type SecureString --value "$LOKI_TOKEN"
 # optional (run annotations)
-aws ssm put-parameter --region $R --name $P/url              --type String       --value 'https://manifesterio.grafana.net'
+aws ssm put-parameter --region $R --name $P/url              --type String       --value 'https://mdsio.grafana.net'
 aws ssm put-parameter --region $R --name $P/annotation_token --type SecureString --value "$ANNOTATION_TOKEN"
 ```
 Use `read -rs PROM_TOKEN` style prompts so tokens stay out of shell history.
@@ -307,7 +307,7 @@ From the repo root, right after apply (instances wait up to 45 minutes for `READ
 ```
 $(cd ops/deploy/aws/terraform && terraform output -raw artifact_upload_command)
 ```
-It builds linux/amd64 `manibroker`/`manicp`, uploads them, the observability directory (`artifacts/observability/`)
+It builds linux/amd64 `mdsbroker`/`mdscontrolplane`, uploads them, the observability directory (`artifacts/observability/`)
 and the harness (`artifacts/bench/`), and writes `READY` last.
 
 ## 4. Wait for READY and verify health
@@ -315,11 +315,11 @@ and the harness (`artifacts/bench/`), and writes `READY` last.
 Every host: `ls /var/lib/bench-bootstrap.done` (takes about 3-6 minutes after READY).
 ```
 $(terraform output -raw ssm_start_session_cp)
-  systemctl is-active manicp mb-snapshot alloy ; curl -s 127.0.0.1:8080/healthz ; curl -s 127.0.0.1:9101/healthz
+  systemctl is-active mdscontrolplane mb-snapshot alloy ; curl -s 127.0.0.1:8080/healthz ; curl -s 127.0.0.1:9101/healthz
 $(terraform output -raw ssm_start_session_broker)
-  systemctl is-active manibroker mb-snapshot alloy
+  systemctl is-active mdsbroker mb-snapshot alloy
   curl -s 127.0.0.1:9100/healthz
-  tail -n 30 /var/log/bench-bootstrap.log ; journalctl -u manibroker -n 20 --no-pager
+  tail -n 30 /var/log/bench-bootstrap.log ; journalctl -u mdsbroker -n 20 --no-pager
 $(terraform output -raw ssm_start_session_loadgen)
   systemctl is-active alloy ; ls /opt/bench ; source /etc/profile.d/bench.sh
   kafka-topics.sh --bootstrap-server $BOOTSTRAP --list     # expect bench-<run_id>
@@ -327,12 +327,12 @@ $(terraform output -raw ssm_start_session_loadgen)
 Grafana (stack URL): apply dashboards once from your workstation, with the Editor service-account token:
 ```
 cd ops/deploy/aws/observability
-GRAFANA_URL=https://manifesterio.grafana.net GRAFANA_API_TOKEN=... ./apply-dashboards.sh
+GRAFANA_URL=https://mdsio.grafana.net GRAFANA_API_TOKEN=... ./apply-dashboards.sh
 ```
-Then check: Explore (Prometheus) `up{run_id="<run>"}` shows broker, manicp (role `cp`), node jobs for all hosts with value 1;
-Explore (Loki) `{run_id="<run>"}` shows `manibroker` and `manicp` JSON lines (labels `service`, `level`, `host`);
+Then check: Explore (Prometheus) `up{run_id="<run>"}` shows broker, mdscontrolplane (role `cp`), node jobs for all hosts with value 1;
+Explore (Loki) `{run_id="<run>"}` shows `mdsbroker` and `mdscontrolplane` JSON lines (labels `service`, `level`, `host`);
 dashboards Overview, Pipeline, AWS, Hosts show data for the run (AWS CloudWatch panels lag 2-15 minutes).
-The S3 manifests appear in `s3://<bucket>/results/<run>/manibroker-<run>.json` and `manicp-<run>.json`.
+The S3 manifests appear in `s3://<bucket>/results/<run>/mdsbroker-<run>.json` and `mdscontrolplane-<run>.json`.
 
 ## 5. Smoke test (go/no-go, about 5 minutes, 1 client, 20 s)
 
@@ -345,10 +345,10 @@ It waits for the broker, checks the topic, runs a 5 s warm-up and one 20 s cell 
 - [ ] `SMOKE PASS`; `~/bench-out/<run>/loadgen/c1_1k.r1.c1.out` shows records/sec > 0 and no errors.
 - [ ] Grafana Pipeline dashboard shows the segment rate and `committed bytes` rising during the window; `segments_failed` stays 0.
 - [ ] Loki has no `level=error` lines for the window (Overview log panel).
-- [ ] AWS dashboard: `manibroker_s3_*` and `manicp_dynamo_*` panels show attempts; throttles 0.
-- [ ] `s3://<bucket>/results/<run>/metrics/` is receiving `<broker id>/<epoch>-broker.txt` and `cp/<epoch>-manicp.txt` files (every 10 s).
+- [ ] AWS dashboard: `mdsbroker_s3_*` and `mdscontrolplane_dynamo_*` panels show attempts; throttles 0.
+- [ ] `s3://<bucket>/results/<run>/metrics/` is receiving `<broker id>/<epoch>-broker.txt` and `cp/<epoch>-mdscontrolplane.txt` files (every 10 s).
 - [ ] An annotation "run <run> start" is visible (if you set the annotation parameters).
-If it fails, check `journalctl -u manibroker` on the broker host (a `UNSUPPORTED_*` or S3/DynamoDB permission error shows up there) before spending more.
+If it fails, check `journalctl -u mdsbroker` on the broker host (a `UNSUPPORTED_*` or S3/DynamoDB permission error shows up there) before spending more.
 
 ## 6. Run the matrix
 
@@ -361,7 +361,7 @@ Matrix: warm-up 20 s; cells `c1_1k` (1 client, 1 KB), `c8_1k`, `c32_1k`, `c1_100
 repeated 3 times, 15 s idle between cells; about 17 minutes. Each cell's stdout is saved
 (`loadgen/<cell>.r<N>.c<K>.out`, one file per client), uploaded after every cell to
 `s3://<bucket>/results/<run>/loadgen/`, with Grafana annotations at run start, each cell start and end, and run end.
-manibroker `/metrics` snapshots come from `mb-snapshot.service` on the broker host and manicp's from the same unit on the control-plane host (every 10 s; the SGs open
+mdsbroker `/metrics` snapshots come from `mb-snapshot.service` on the broker host and mdscontrolplane's from the same unit on the control-plane host (every 10 s; the SGs open
 no metrics ports and loadgen has no `ssm:SendCommand`, so a push-to-S3 timer was the simplest option). `summarize.py`
 picks the snapshots around each cell by timestamp.
 Latency run below saturation (optional, afterwards): `run-benchmark.sh --rate 500 --cells "c1_1k c8_1k" --reps 1`
@@ -408,8 +408,8 @@ included. Left running for a day by mistake: about $7.
 
 ## 10. Dashboards: names still unconfirmed
 
-All `manibroker_*`, `manicp_*` and `node_*` series in the dashboards were checked against the Go code and
-`docs/observability.md` (the `manibroker_s3_*`/`manicp_dynamo_*` families are composed from a Subsystem in
+All `mdsbroker_*`, `mdscontrolplane_*` and `node_*` series in the dashboards were checked against the Go code and
+`docs/observability.md` (the `mdsbroker_s3_*`/`mdscontrolplane_dynamo_*` families are composed from a Subsystem in
 `internal/system/awsmetrics`, confirmed in code). Not confirmed against a live scrape: the CloudWatch series from Alloy's embedded YACE
 (`aws_s3_first_byte_latency_average`, `aws_s3_total_request_latency_{average,maximum}`, `aws_s3_{all,put,get}_requests_sum`,
 `aws_s3_{4xx,5xx}_errors_sum`, `aws_dynamodb_successful_request_latency_{average,maximum}`,
@@ -450,9 +450,9 @@ Findings
 
 Both are opt-in; the default WarpStream-style run is unchanged.
 - Partition-affine producers (patch `0004-affine-partitioner.patch`, rebuild the OMB tarball with `ops/scripts/build-omb.sh`): `run-omb.sh --affine`
-  (driver key `maniAffine`) makes producer k, pinned to broker k % 6, write only partitions p with p % 6 == k % 6 (48 each; sticky per
+  (driver key `mdsAffine`) makes producer k, pinned to broker k % 6, write only partitions p with p % 6 == k % 6 (48 each; sticky per
   ~batch.size bytes like the stock partitioner). Needs balanced mode. NOT comparable to WarpStream: label results "partition-affine producers".
-- Segment window: `bench-ctl.sh broker-args -segment-window 1s` adds the flag to every manibroker (systemd drop-in) and restarts them;
+- Segment window: `bench-ctl.sh broker-args -segment-window 1s` adds the flag to every mdsbroker (systemd drop-in) and restarts them;
   `bench-ctl.sh broker-args` with no flags removes the drop-in. (Or set `broker_extra_args` in my.tfvars at apply time.)
 - Partition cap (decision 52): the broker default `-max-segment-partitions` is now 4096, valid only for the log store. The old
   transaction store refused a segment of more than 99 partitions with `ErrTooLarge` and needed `-max-segment-partitions 96`; it is

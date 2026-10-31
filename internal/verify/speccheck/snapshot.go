@@ -3,7 +3,7 @@ package speccheck
 import (
 	"slices"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // PartitionEnd is one partition's next offset.

@@ -71,7 +71,7 @@ A Fetch can wait for data. The rules are:
 
 - `MaxWait` is in milliseconds. The broker caps it at 30 seconds. A `MaxWait` of 0 answers at once, as before.
 - `MinBytes` is the total size the answer must reach. A `MinBytes` of 0 or less answers at once.
-- A partition with no data is polled again with `Lookup` every `FetchPollInterval`. The default is 200 ms. The flag on `manibroker` is `-fetch-poll-interval`. Each poll is one `Lookup` for one partition.
+- A partition with no data is polled again with `Lookup` every `FetchPollInterval`. The default is 200 ms. The flag on `mdsbroker` is `-fetch-poll-interval`. Each poll is one `Lookup` for one partition.
 - A partition that has data keeps it and is not polled again. It waits for the rest of the Fetch.
 - The Fetch answers when its total bytes reach `MinBytes`, or when `MaxWait` ends. The answer holds what the broker has, which can be empty.
 - A parked Fetch ends at once when its connection closes or the broker stops. A stop answers it empty.

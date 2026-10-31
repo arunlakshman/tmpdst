@@ -1,15 +1,15 @@
 package kafka
 
 import (
-	"manifester/internal/broker"
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/fakecontrolplane"
-	"manifester/internal/verify/simulator/fakeservices/fakelogservice"
-	"manifester/internal/verify/simulator/fakeservices/fakelogstore"
-	"manifester/internal/verify/simulator/fakeservices/fakenetwork"
-	"manifester/internal/verify/simulator/fakeservices/fakeobjectstore"
-	"manifester/internal/verify/simulator/internal/campaign"
+	"mds/internal/broker"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/fakecontrolplane"
+	"mds/internal/verify/simulator/fakeservices/fakelogservice"
+	"mds/internal/verify/simulator/fakeservices/fakelogstore"
+	"mds/internal/verify/simulator/fakeservices/fakenetwork"
+	"mds/internal/verify/simulator/fakeservices/fakeobjectstore"
+	"mds/internal/verify/simulator/internal/campaign"
 )
 
 // brokerConfig is the sim-friendly broker: a short flush window so commits

@@ -9,9 +9,9 @@ package fakelogservice
 import (
 	"slices"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/internal/fakecompletions"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/internal/fakecompletions"
 )
 
 // The InjectedBug constants select a mutant (simulator.LogParams.Bug). Each is caught by a property.

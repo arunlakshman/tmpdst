@@ -22,14 +22,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// Overridable at link time: -ldflags "-X manifester/internal/system/runinfo.GitCommit=abc123".
+// Overridable at link time: -ldflags "-X mds/internal/system/runinfo.GitCommit=abc123".
 var (
 	GitCommit = ""
 	Version   = ""
 )
 
 // EnvRunID names the environment variable that supplies the run id.
-const EnvRunID = "MANIFESTER_RUN_ID"
+const EnvRunID = "MDS_RUN_ID"
 
 // Info identifies one process.
 type Info struct {
@@ -46,7 +46,7 @@ type Info struct {
 }
 
 // New builds the Info for service. runID is the -run-id flag; empty falls back
-// to $MANIFESTER_RUN_ID, then to a generated "run-<utc time>-<hex>".
+// to $MDS_RUN_ID, then to a generated "run-<utc time>-<hex>".
 func New(service, runID string, brokerID int) Info {
 	i := Info{Service: service, BrokerID: brokerID, Started: time.Now(), GoVersion: runtime.Version()}
 	if runID == "" {

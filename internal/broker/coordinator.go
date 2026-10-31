@@ -3,7 +3,7 @@ package broker
 import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // FindCoordinator (Kafka key 10, decision Q3). A group is coordinated by one

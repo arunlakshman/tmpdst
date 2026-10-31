@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"manifester/internal/core"
-	"manifester/internal/system"
+	"mds/internal/core"
+	"mds/internal/system"
 )
 
 // ErrNoConn reports a Write or Close on a connection that is gone.

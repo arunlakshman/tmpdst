@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
 )
 
 // TestIncrementalStateHashMatchesFull drives random dials, sends, pauses,

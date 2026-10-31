@@ -1,6 +1,6 @@
-# Manifester landing page copy
+# MDS landing page copy
 
-Checked against the repo on 2026-10-21 and the live page at manifester.io.
+Checked against the repo on 2026-10-21 and the live page at mds.io.
 Claims use `docs/w4-log-store-results.md`, `docs/decisions.md`, `docs/TODO.md`, and `internal/wire/kafkawire/supported.go`.
 
 ## Read this first. Claims audit of the current page
@@ -20,11 +20,11 @@ Claims use `docs/w4-log-store-results.md`, `docs/decisions.md`, `docs/TODO.md`, 
 
 ### Title tag
 
-Kafka on S3. Stateless brokers, no broker disks | Manifester
+Kafka on S3. Stateless brokers, no broker disks | MDS
 
 ### Meta description
 
-Manifester is a Kafka-compatible streaming engine that stores every byte in S3. Stateless brokers, offsets assigned by a control plane, and no replication traffic between brokers. Built for throughput workloads that can take hundreds of milliseconds of latency.
+MDS is a Kafka-compatible streaming engine that stores every byte in S3. Stateless brokers, offsets assigned by a control plane, and no replication traffic between brokers. Built for throughput workloads that can take hundreds of milliseconds of latency.
 
 ### Hero
 
@@ -34,7 +34,7 @@ Kafka, with S3 as the disk.
 
 Subheadline:
 
-Manifester is a Kafka-compatible streaming engine with no broker disks. Brokers batch records into segments, write them to S3, and ack only after a control plane commits the offsets. No replication between brokers. No disks to rebalance, fill, or replace.
+MDS is a Kafka-compatible streaming engine with no broker disks. Brokers batch records into segments, write them to S3, and ack only after a control plane commits the offsets. No replication between brokers. No disks to rebalance, fill, or replace.
 
 Button 1: Join the design partner list
 Button 2: Read the benchmark results
@@ -58,7 +58,7 @@ Source line: One AWS run, short stages, one sample per stage. Numbers are indica
 
 Textbook Kafka at 100 MB/s of ingest writes each byte three times, once per zone. Your bill pays for that three times. Once in cross-zone replication traffic. Once in disk. Once in the brokers you run only to hold history.
 
-Manifester stores each byte once, in S3. S3 handles durability across zones. Brokers hold nothing durable, so compute scales with traffic and storage scales with retention. The two stop moving together.
+MDS stores each byte once, in S3. S3 handles durability across zones. Brokers hold nothing durable, so compute scales with traffic and storage scales with retention. The two stop moving together.
 
 Keep the existing worked example table here. Add this line under it:
 
@@ -82,7 +82,7 @@ So we test the way the system can actually break. Lost S3 responses. Slow tails.
 
 We also plant bugs on purpose. If a test does not catch the planted bug, the test does not count.
 
-Button: How we test Manifester
+Button: How we test MDS
 
 ### A good fit
 
@@ -104,7 +104,7 @@ We would rather lose the deal here than in a proof of concept.
 
 ### From the founder
 
-I am Arun. I am building Manifester in public.
+I am Arun. I am building MDS in public.
 
 Our first control plane used DynamoDB transactions and stopped at about 240k messages per second. We measured it, wrote it down, and replaced it with a log. The replacement held about 998k messages per second in the run above.
 
@@ -148,17 +148,17 @@ Test one variable at a time. Keep the same buttons on all three.
 **Variant A, cost.** Use this as the control. It matches the current page and the search intent.
 
 Headline: Stop paying Kafka to copy your data three times.
-Subheadline: Manifester stores Kafka records once, in S3. Stateless brokers, no replication traffic between zones, and storage priced like object storage instead of replicated disks.
+Subheadline: MDS stores Kafka records once, in S3. Stateless brokers, no replication traffic between zones, and storage priced like object storage instead of replicated disks.
 
 **Variant B, mechanism.** Use this if traffic comes from engineering blogs and Hacker News. Technical readers click on a clear mechanism.
 
 Headline: Kafka, with S3 as the disk.
-Subheadline: Manifester is a Kafka-compatible streaming engine with no broker disks. Brokers batch records into segments, write them to S3, and ack only after a control plane commits the offsets.
+Subheadline: MDS is a Kafka-compatible streaming engine with no broker disks. Brokers batch records into segments, write them to S3, and ack only after a control plane commits the offsets.
 
 **Variant C, trust.** Use this if the audience already knows the object storage Kafka category and distrusts vendor benchmarks.
 
 Headline: A Kafka broker that publishes its bad numbers.
-Subheadline: Manifester stores every byte in S3 and tests the whole cluster in a seeded simulator, crashes included. Benchmarks ship with method and caveats. So does the list of what is not built yet.
+Subheadline: MDS stores every byte in S3 and tests the whole cluster in a seeded simulator, crashes included. Benchmarks ship with method and caveats. So does the list of what is not built yet.
 
 My pick: run B against A. B says what the product is in six words, and the category already taught buyers the cost argument. C works better as the founder section headline than as the hero.
 

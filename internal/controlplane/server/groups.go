@@ -4,13 +4,13 @@ import (
 	"context"
 	"time"
 
-	"manifester/internal/controlplane"
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/apiconvert"
-	"manifester/internal/controlplane/groupcoordinator"
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/controlplane/apiconvert"
+	"mds/internal/controlplane/groupcoordinator"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 // groupWatchEvery is how often the node checks whether it is the active

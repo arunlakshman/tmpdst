@@ -8,10 +8,10 @@
 //
 // Variables, from the strongest to the weakest:
 //
-//   - MANIFESTER_SEED=<n>: run only seed n, where n is 0 or more.
-//   - MANIFESTER_CAMPAIGN=<duration>: run seeds 1, 2, 3 and so on until the
+//   - MDS_SEED=<n>: run only seed n, where n is 0 or more.
+//   - MDS_CAMPAIGN=<duration>: run seeds 1, 2, 3 and so on until the
 //     duration ends, for example 30s or 5m.
-//   - MANIFESTER_SEEDS=<n>: run seeds 1 to n, where n is 1 or more.
+//   - MDS_SEEDS=<n>: run seeds 1 to n, where n is 1 or more.
 //
 // A bad value fails the test at once. The package never ignores a bad value.
 //

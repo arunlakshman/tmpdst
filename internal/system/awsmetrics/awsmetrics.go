@@ -1,8 +1,8 @@
 // Package awsmetrics measures AWS SDK v2 calls with smithy middleware: one
 // observation per HTTP attempt (so retries the SDK hides are visible), one per
 // operation, retries, request bytes and throttling. It lives at the
-// non-deterministic edge and is shared by system/s3store (manibroker_s3_*) and
-// manicp's DynamoDB client (manicp_dynamo_*).
+// non-deterministic edge and is shared by system/s3store (mdsbroker_s3_*) and
+// mdscontrolplane's DynamoDB client (mdscontrolplane_dynamo_*).
 //
 // Every method is safe on a nil *Recorder.
 package awsmetrics
@@ -133,7 +133,7 @@ func Result(ctx context.Context, status int, err error) (string, string) {
 
 type attemptMiddleware struct{ r *Recorder }
 
-func (attemptMiddleware) ID() string { return "manifesterAwsObsAttempt" }
+func (attemptMiddleware) ID() string { return "mdsAwsObsAttempt" }
 
 func (m attemptMiddleware) HandleFinalize(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (
 	middleware.FinalizeOutput, middleware.Metadata, error) {
@@ -196,7 +196,7 @@ func (m attemptMiddleware) HandleFinalize(ctx context.Context, in middleware.Fin
 
 type operationMiddleware struct{ r *Recorder }
 
-func (operationMiddleware) ID() string { return "manifesterAwsObsOperation" }
+func (operationMiddleware) ID() string { return "mdsAwsObsOperation" }
 
 func (m operationMiddleware) HandleFinalize(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (
 	middleware.FinalizeOutput, middleware.Metadata, error) {

@@ -43,8 +43,8 @@ import (
 	"sort"
 	"strconv"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
 )
 
 // Engine is the network engine. Not safe for concurrent use.

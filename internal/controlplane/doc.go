@@ -1,5 +1,5 @@
 // Package controlplane is the control-plane service tree (renamed from cp/).
-// Production manicp serves gRPC via controlplane/server over controlplane/runloop
+// Production mdscontrolplane serves gRPC via controlplane/server over controlplane/runloop
 // and controlplane/statemachine (CP-DSM-7). Brokers dial through controlplane/controlplaneclient.
 //
 // The gRPC wire contract is controlplane/api/v1 (decision 57). Veritas remains

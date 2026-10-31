@@ -2,8 +2,8 @@
 package apiconvert
 
 import (
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/core"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/core"
 )
 
 // ToCoreErr maps a wire ErrCode to core.ErrCode. Unknown values become ErrIO.

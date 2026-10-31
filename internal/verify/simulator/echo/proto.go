@@ -14,7 +14,7 @@ package echo
 import (
 	"encoding/binary"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 const maxFrame = 1 << 20

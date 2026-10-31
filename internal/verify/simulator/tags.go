@@ -3,7 +3,7 @@ package simulator
 import (
 	"fmt"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // The trace-hash tag tables. Every core event, action, control-plane type and

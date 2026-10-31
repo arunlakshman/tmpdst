@@ -3,7 +3,7 @@ package broker
 import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Group APIs (decision Q3). The broker keeps no group state. Each call is one

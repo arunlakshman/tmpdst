@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/verify/simulator"
+	"mds/internal/verify/simulator"
 )
 
 var updateGolden = flag.Bool("update-golden", false, "rewrite testdata/golden_hashes.txt from the current code")

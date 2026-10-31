@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker"
-	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/suites"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker"
+	"mds/internal/verify/speccheck/checker/observation"
+	"mds/internal/verify/speccheck/checker/suites"
 )
 
 func options(t *testing.T, seeds int) checker.Options {

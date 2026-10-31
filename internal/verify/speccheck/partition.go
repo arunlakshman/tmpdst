@@ -1,6 +1,6 @@
 package speccheck
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // Partition is the spec of one Kafka partition: an append-only log of records
 // with a high watermark. Offsets are dense from 0; a record's offset is its

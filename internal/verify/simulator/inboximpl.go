@@ -1,6 +1,6 @@
 package simulator
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // inboxQueue is one inbox: a FIFO slice implementing core.Inbox.
 type inboxQueue struct{ q []core.EventData }

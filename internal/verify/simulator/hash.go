@@ -1,6 +1,6 @@
 package simulator
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // stateHasher is the 64-bit FNV-1a core.Hasher plus the tag-ged folds of tags.go.
 // The trace hash and Derive's label hash are built from it.

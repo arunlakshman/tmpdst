@@ -23,8 +23,8 @@ retries. The one new restriction is that **only the active CP may serve `Lookup`
 
 ## 1. The problem in numbers (measured, w2, `results/w2`)
 
-Per 10 s window, from `results/w2/metrics/cp` (deltas of `manicp_seq_group_items`,
-`manicp_dynamodb_call_seconds{TransactWriteItems}` and consumed WRU):
+Per 10 s window, from `results/w2/metrics/cp` (deltas of `mdscontrolplane_seq_group_items`,
+`mdscontrolplane_dynamodb_call_seconds{TransactWriteItems}` and consumed WRU):
 
 | stage | tx/s | items/tx | tx ms | WRU/tx | segments/tx |
 |---|---|---|---|---|---|
@@ -65,7 +65,7 @@ AWS pricing calculator (§10, E5). All dollar figures below are us-east-1, 730 h
 
 - Brokers stay interchangeable and stateless: no partition ownership (declined) and no broker fencing (decision 44).
 - At-least-once delivery, with no idempotent producers (decision 41).
-- One active manicp sequences, but **correctness never depends on there being only one**: a storage-level CAS remains
+- One active mdscontrolplane sequences, but **correctness never depends on there being only one**: a storage-level CAS remains
   the safety net, and split brain only costs retries.
 - `CommitSegment` stays atomic per segment and idempotent per key. Its `ErrConflict` meaning is unchanged. `Lookup`
   semantics are unchanged.
@@ -187,7 +187,7 @@ bases.
    - **`LOG` slot taken:** another sequencer exists.
      - Reload: `Query LOG sk > last` (consistent), then `BatchGetItem` its `G#`s, then apply them.
      - Rebuild the group at the new seq with recomputed bases.
-     - Count the event in `manicp_seq_log_conflicts_total`.
+     - Count the event in `mdscontrolplane_seq_log_conflicts_total`.
    - **A `G#` exists:** read it, answer that request as a replay or `ErrConflict`, and retry the rest at the same seq.
    - **`TOPICS`:** reload that topic.
    - **Throttling or TransactionConflict before apply:** retry with the state kept.
@@ -422,7 +422,7 @@ not measured at that size.
 | recovery | `CKPT` + `LOG` replay + `G#` batch get, resume a pending plan | 2 |
 | lease and standby | `LEASE` item, cpclient URL list, 503 "not active", broker retriable Fetch code, terraform second CP | 3 |
 | tests | cptest (a)-(d), C3 on ExtendDB, sim cap change and re-baseline | 5 |
-| ops | metrics (`manicp_log_*`, index lag, conflicts), runbook, decision 48 | 1 |
+| ops | metrics (`mdscontrolplane_log_*`, index lag, conflicts), runbook, decision 48 | 1 |
 | **total** | stage 1 alone ≈ 11 days | **~20** |
 
 ## 10. Experiments only AWS can answer (each under $5, run from the CP host on a throwaway table)
@@ -445,7 +445,7 @@ not measured at that size.
 | stage | build | measure on AWS | expected plateau |
 |---|---|---|---|
 | 0 | nothing | E1-E5 (30 min on the next stack) | confirms or kills the latency model |
-| 1 | `LogSequencer` + indexer + tail `Lookup` + recovery, single CP, behind `-commit=log`; broker partition cap raised | ramp 250k, 500k, 750k, 1M produce-only: `manicp_seq` group size, tx ms, WRU/s, index lag, broker queue wait ≈ 0 | **CP not the bound up to ≥ 3x target (modelled).** The next limit becomes visible: broker single-loop CPU (audit S10, ~240 MiB/s laptop ceiling vs ~167 MiB/s logical per broker at 1M), or S3 PUT time. Expect ≥ 750k; 1M likely but unproven |
+| 1 | `LogSequencer` + indexer + tail `Lookup` + recovery, single CP, behind `-commit=log`; broker partition cap raised | ramp 250k, 500k, 750k, 1M produce-only: `mdscontrolplane_seq` group size, tx ms, WRU/s, index lag, broker queue wait ≈ 0 | **CP not the bound up to ≥ 3x target (modelled).** The next limit becomes visible: broker single-loop CPU (audit S10, ~240 MiB/s laptop ceiling vs ~167 MiB/s logical per broker at 1M), or S3 PUT time. Expect ≥ 750k; 1M likely but unproven |
 | 2 | lease + standby + URL list | E6 under 500k load | same throughput; CP loss costs a ~5 s stall instead of a lost run |
 | 3 | consumer path (TODO): long-poll Fetch, `End`/tail from memory (already in L), read cache | vanity with consumers | consume rate; RCU/s per consumer |
 | 4 (only if E1 or stage 1 says so) | ordered per-broker pipelining (`after` key) or variant B | — | lifts the bound of brokers / commit latency |

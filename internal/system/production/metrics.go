@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Metrics turns the broker's timing facts into Prometheus collectors. The
@@ -38,7 +38,7 @@ type Metrics struct {
 	cpCall *prometheus.HistogramVec
 }
 
-const metricsNS = "manibroker"
+const metricsNS = "mdsbroker"
 
 // NewMetrics registers every collector on a private registry (plus the Go
 // runtime and process collectors).

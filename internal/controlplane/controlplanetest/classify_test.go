@@ -12,8 +12,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"manifester/internal/controlplane/controlplaneclient"
-	"manifester/internal/core"
+	"mds/internal/controlplane/controlplaneclient"
+	"mds/internal/core"
 )
 
 func TestClassifier(t *testing.T) {

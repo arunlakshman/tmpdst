@@ -16,8 +16,8 @@ package fakecompletions
 import (
 	"slices"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
 )
 
 // Params is the fault and timing config common to both engines.

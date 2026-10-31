@@ -12,9 +12,9 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/broker"
-	"manifester/internal/controlplane/memorystore"
-	"manifester/internal/core"
+	"mds/internal/broker"
+	"mds/internal/controlplane/memorystore"
+	"mds/internal/core"
 )
 
 func memStack(t *testing.T, brokers int) *stack {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // StateUpdater is the control-plane state machine over a KeyValueStore. Writes (commands) must

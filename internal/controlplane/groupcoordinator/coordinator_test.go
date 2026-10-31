@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 // view is a read of one group's memory, taken under its mutex.

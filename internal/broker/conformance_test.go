@@ -7,11 +7,11 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck"
-	"manifester/internal/verify/speccheck/checker"
-	"manifester/internal/verify/speccheck/checker/runsettings"
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck"
+	"mds/internal/verify/speccheck/checker"
+	"mds/internal/verify/speccheck/checker/runsettings"
+	"mds/internal/wire/kafkawire"
 )
 
 // Conformance C1 tests the REAL broker logic against SIMULATED fakes of the

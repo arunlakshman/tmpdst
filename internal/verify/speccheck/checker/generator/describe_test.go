@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // TestDescribeEveryOperationKind checks the text Describe gives for each kind

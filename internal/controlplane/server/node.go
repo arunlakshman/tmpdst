@@ -11,15 +11,15 @@ import (
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/apiconvert"
-	"manifester/internal/controlplane/executor"
-	"manifester/internal/controlplane/groupcoordinator"
-	"manifester/internal/controlplane/livebrokers"
-	"manifester/internal/controlplane/runloop"
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/controlplane/apiconvert"
+	"mds/internal/controlplane/executor"
+	"mds/internal/controlplane/groupcoordinator"
+	"mds/internal/controlplane/livebrokers"
+	"mds/internal/controlplane/runloop"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 // Config wires a Node.

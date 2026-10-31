@@ -3,7 +3,7 @@ package kafka
 import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/wire/kafkawire"
 )
 
 // The broker never decompresses (decision 45), so the simulated clients need no

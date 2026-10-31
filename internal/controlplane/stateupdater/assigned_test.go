@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 func TestAssignedStates(t *testing.T) {

@@ -25,7 +25,7 @@ Changed while applying (the code uses these, not the table):
 
 Not done on purpose:
 
-- `rd` in `cmd/manibench` (meaning is unclear), `timerRole`, `timerCatchUp`.
+- `rd` in `cmd/mdsbench` (meaning is unclear), `timerRole`, `timerCatchUp`.
 - Struct fields and methods that share a name with a renamed type (for example `sim` `Lane` field).
 - The `CreateTable` method (AWS name), the Makefile target names, string values, and env var names.
 - File names such as `checker/veritastest_test.go` and `fakecontrolplane/cpengine.go`. Rename them when you next edit those files.
@@ -422,7 +422,7 @@ Rules used for the right column:
 | `stats` / `newStats` | `latencyStats` / `newLatencyStats` |
 | `kindNames` | `failureKindNames` |
 | `coverageMin` | `minimumCoverage` |
-| `replay` (manisim) | `rerunSeed` |
+| `replay` (mdssimulator) | `rerunSeed` |
 | `runSharded` | `runInParts` |
 | `mergeReports`, `mergeAssertion` | `combineReports`, `combineAssertion` |
 | `allowList`, `embeddedAllow`, `allowFile` | `allowedImports`, `builtInAllowedImports`, `allowedImportsFile` |

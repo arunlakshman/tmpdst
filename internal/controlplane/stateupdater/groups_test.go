@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 // tooBig is a byte field that makes a group command pass 256 KiB.

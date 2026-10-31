@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Segment keys are "seg/<id hex>": one flat name (decision 43). The ID is a

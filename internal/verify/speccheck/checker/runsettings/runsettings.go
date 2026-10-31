@@ -9,14 +9,14 @@ import (
 
 	"os"
 
-	"manifester/internal/verify/speccheck/checker"
+	"mds/internal/verify/speccheck/checker"
 )
 
 // Names of the environment variables.
 const (
-	EnvSeedListName = "MANIFESTER_SEEDS"
-	EnvSeedName     = "MANIFESTER_SEED"
-	EnvCampaignName = "MANIFESTER_CAMPAIGN"
+	EnvSeedListName = "MDS_SEEDS"
+	EnvSeedName     = "MDS_SEED"
+	EnvCampaignName = "MDS_CAMPAIGN"
 )
 
 // Options reads the environment and returns the options for checker.Run.
@@ -84,6 +84,6 @@ func readSetting(name string) (string, bool) {
 func rerunFunc(testName string) func(seed uint64) string {
 	top, _, _ := strings.Cut(testName, "/")
 	return func(seed uint64) string {
-		return fmt.Sprintf("MANIFESTER_SEED=%d go test -run '^%s$' -count=1 -v .", seed, top)
+		return fmt.Sprintf("MDS_SEED=%d go test -run '^%s$' -count=1 -v .", seed, top)
 	}
 }

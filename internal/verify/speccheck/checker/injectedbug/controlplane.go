@@ -4,11 +4,11 @@ import (
 	"slices"
 	"strconv"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker"
-	"manifester/internal/verify/speccheck/checker/generator"
-	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/suites"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker"
+	"mds/internal/verify/speccheck/checker/generator"
+	"mds/internal/verify/speccheck/checker/observation"
+	"mds/internal/verify/speccheck/checker/suites"
 )
 
 // ControlPlaneBug is an injected bug for a control plane. Wrap returns a subject

@@ -47,7 +47,7 @@ import (
 	"hash/crc32"
 	"math"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 const (

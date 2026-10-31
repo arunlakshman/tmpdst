@@ -12,11 +12,11 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/executor"
-	"manifester/internal/controlplane/server"
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/core"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/controlplane/executor"
+	"mds/internal/controlplane/server"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/core"
 )
 
 func startNode(t *testing.T, cfg statemachine.Config) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {

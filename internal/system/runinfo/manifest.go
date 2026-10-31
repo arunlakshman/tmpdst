@@ -31,7 +31,7 @@ type Manifest struct {
 	Flags       map[string]string `json:"flags"`     // every flag, effective value
 	FlagsSet    []string          `json:"flags_set"` // flags given explicitly
 	Tuning      map[string]any    `json:"tuning,omitempty"`
-	Env         map[string]string `json:"env,omitempty"` // MANIFESTER_*, AWS_REGION, AWS_DEFAULT_REGION, AWS_ENDPOINT*
+	Env         map[string]string `json:"env,omitempty"` // MDS_*, AWS_REGION, AWS_DEFAULT_REGION, AWS_ENDPOINT*
 	PID         int               `json:"pid"`
 	Args        []string          `json:"args"`
 	GOOS        string            `json:"goos"`
@@ -54,7 +54,7 @@ func NewManifest(i Info, fs *flag.FlagSet, region string, tuning map[string]any)
 	sort.Strings(m.FlagsSet)
 	for _, kv := range os.Environ() {
 		k, v, _ := strings.Cut(kv, "=")
-		if strings.HasPrefix(k, "MANIFESTER_") || k == "AWS_REGION" || k == "AWS_DEFAULT_REGION" || strings.HasPrefix(k, "AWS_ENDPOINT") {
+		if strings.HasPrefix(k, "MDS_") || k == "AWS_REGION" || k == "AWS_DEFAULT_REGION" || strings.HasPrefix(k, "AWS_ENDPOINT") {
 			m.Env[k] = v
 		}
 	}

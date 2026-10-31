@@ -6,9 +6,9 @@ import (
 	"context"
 	"sync"
 
-	"manifester/internal/controlplane"
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck"
+	"mds/internal/controlplane"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck"
 )
 
 // Store is an in-memory controlplane.Store backed by the speccheck control-plane spec.

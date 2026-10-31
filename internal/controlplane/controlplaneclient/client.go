@@ -15,10 +15,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/apiconvert"
-	"manifester/internal/core"
-	"manifester/internal/system"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/controlplane/apiconvert"
+	"mds/internal/core"
+	"mds/internal/system"
 )
 
 // Error is a business error answered by the control plane (non-OK status with

@@ -38,7 +38,7 @@ variable "auto_destroy_after" {
 }
 
 variable "broker_count" {
-  description = "Number of stateless broker hosts (each runs manibroker only and points -cp-url at the control-plane URL list), all in the one AZ and sharing one bucket and one table. WarpStream's published benchmark uses 6."
+  description = "Number of stateless broker hosts (each runs mdsbroker only and points -cp-url at the control-plane URL list), all in the one AZ and sharing one bucket and one table. WarpStream's published benchmark uses 6."
   type        = number
   default     = 6
 
@@ -60,19 +60,19 @@ variable "cp_standby_count" {
 }
 
 variable "cp_takeover_after" {
-  description = "manicp -takeover-after on every CP host (Go duration): a standby that saw no slot of another writer for this long becomes active. The idle appender writes a no-op every second, so keep it several seconds; it adds directly to the commit stall of a failover and must stay far under the brokers' 120 s -commit-deadline."
+  description = "mdscontrolplane -takeover-after on every CP host (Go duration): a standby that saw no slot of another writer for this long becomes active. The idle appender writes a no-op every second, so keep it several seconds; it adds directly to the commit stall of a failover and must stay far under the brokers' 120 s -commit-deadline."
   type        = string
   default     = "5s"
 }
 
 variable "cp_instance_type" {
-  description = "Control-plane host type, used for the active node and each standby; each runs only manicp. x86_64 only. 4 vCPU / 16 GiB: the log store keeps its state in Pebble on the root volume and in memory; each host counts 4 vCPUs against the account quota."
+  description = "Control-plane host type, used for the active node and each standby; each runs only mdscontrolplane. x86_64 only. 4 vCPU / 16 GiB: the log store keeps its state in Pebble on the root volume and in memory; each host counts 4 vCPUs against the account quota."
   type        = string
   default     = "m6in.xlarge"
 }
 
 variable "broker_instance_type" {
-  description = "Broker host (manibroker only). x86_64 only: the artifact is linux/amd64. Default matches WarpStream's published agents (16 vCPU / 64 GiB / up to 40 Gbps)."
+  description = "Broker host (mdsbroker only). x86_64 only: the artifact is linux/amd64. Default matches WarpStream's published agents (16 vCPU / 64 GiB / up to 40 Gbps)."
   type        = string
   default     = "m6in.4xlarge"
 }
@@ -124,7 +124,7 @@ variable "ddb_warm_read_units" {
 }
 
 variable "initial_topic_partitions" {
-  description = "Partitions of the topic bench-<run_id> that the control-plane host creates through its loopback manicp at boot (the broker implements no CreateTopics)."
+  description = "Partitions of the topic bench-<run_id> that the control-plane host creates through its loopback mdscontrolplane at boot (the broker implements no CreateTopics)."
   type        = number
   default     = 6
 }
@@ -144,7 +144,7 @@ variable "bucket_expire_days" {
 variable "s3_metrics_filter_id" {
   description = "Id of the whole-bucket S3 request-metrics configuration. CloudWatch exposes it as the FilterId dimension; also passed to Alloy as S3_METRICS_FILTER_ID, so the YACE query and this resource always agree."
   type        = string
-  default     = "manifester-bench"
+  default     = "mds-bench"
 }
 
 variable "budget_usd" {
@@ -160,7 +160,7 @@ variable "budget_email" {
 variable "allowed_ssm_param_prefix" {
   description = "SSM parameter path prefix both hosts may read (GetParameter). Must start with /."
   type        = string
-  default     = "/manifester-bench/"
+  default     = "/mds-bench/"
 
   validation {
     condition     = startswith(var.allowed_ssm_param_prefix, "/")
@@ -171,43 +171,43 @@ variable "allowed_ssm_param_prefix" {
 variable "grafana_remote_write_url_param" {
   description = "SSM parameter NAME holding the Grafana Cloud Prometheus remote_write URL. Must be under allowed_ssm_param_prefix."
   type        = string
-  default     = "/manifester-bench/grafana/remote_write_url"
+  default     = "/mds-bench/grafana/remote_write_url"
 }
 
 variable "grafana_user_param" {
   description = "SSM parameter NAME holding the Grafana Cloud metrics user (instance id)."
   type        = string
-  default     = "/manifester-bench/grafana/user"
+  default     = "/mds-bench/grafana/user"
 }
 
 variable "grafana_api_key_param" {
   description = "SSM parameter NAME of an optional single combined Grafana Cloud token (SecureString), used only for whichever of the two keys below is missing."
   type        = string
-  default     = "/manifester-bench/grafana/api_key"
+  default     = "/mds-bench/grafana/api_key"
 }
 
 variable "grafana_prom_api_key_param" {
   description = "SSM parameter NAME holding the metrics:write token (SecureString)."
   type        = string
-  default     = "/manifester-bench/grafana/prom_api_key"
+  default     = "/mds-bench/grafana/prom_api_key"
 }
 
 variable "grafana_loki_api_key_param" {
   description = "SSM parameter NAME holding the logs:write token (SecureString)."
   type        = string
-  default     = "/manifester-bench/grafana/loki_api_key"
+  default     = "/mds-bench/grafana/loki_api_key"
 }
 
 variable "grafana_loki_url_param" {
   description = "SSM parameter NAME holding the Grafana Cloud Loki push URL (.../loki/api/v1/push)."
   type        = string
-  default     = "/manifester-bench/grafana/loki_url"
+  default     = "/mds-bench/grafana/loki_url"
 }
 
 variable "grafana_loki_user_param" {
   description = "SSM parameter NAME holding the Grafana Cloud Loki user (instance id)."
   type        = string
-  default     = "/manifester-bench/grafana/loki_user"
+  default     = "/mds-bench/grafana/loki_user"
 }
 
 variable "cloudwatch_read_policy_json" {
@@ -229,13 +229,13 @@ variable "kafka_tools_version" {
 }
 
 variable "broker_extra_args" {
-  description = "Extra flags appended to the manibroker command line (e.g. \"-segment-bytes 32MiB\"). Empty by default: brokers take the default -max-segment-partitions 4096."
+  description = "Extra flags appended to the mdsbroker command line (e.g. \"-segment-bytes 32MiB\"). Empty by default: brokers take the default -max-segment-partitions 4096."
   type        = string
   default     = ""
 }
 
 variable "cp_extra_args" {
-  description = "Extra flags appended to the manicp command line on every control-plane host (e.g. -log-k, -gap-after). Empty by default so it stays valid for any manicp build."
+  description = "Extra flags appended to the mdscontrolplane command line on every control-plane host (e.g. -log-k, -gap-after). Empty by default so it stays valid for any mdscontrolplane build."
   type        = string
   default     = ""
 }

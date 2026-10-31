@@ -1,6 +1,6 @@
 # Log-backed control-plane service (stage 2)
 
-Status: production path is `internal/controlplane/statemachine` + `internal/controlplane/runloop` + gRPC (`manicp -store dynamolog`,
+Status: production path is `internal/controlplane/statemachine` + `internal/controlplane/runloop` + gRPC (`mdscontrolplane -store dynamolog`,
 decision 55–58). Sim `kafka-log` uses the same machine as CP processes plus `logstore` (CP-DSM-8,
 `docs/sim-log-engine.md`). The goroutine `internal/controlplane/logcp` twin is deleted; DynLog/table helpers
 live in `internal/controlplane/executor`. Decisions 48-52, `docs/design-a-prototype.md` section 8,
@@ -40,7 +40,7 @@ version byte, rank, writer, append ID, ts (ms, advisory, never state), count, th
 of item overhead <= 350 KB; a single command that cannot fit is answered `ErrTooLarge` and never queued; the group
 stops growing at the guard.
 **Versioning rule (the open question):** the first byte is the format version. A reader that meets a version above
-the format version or a payload it cannot decode STOPS (`Blocked`, 503, `/healthz` 503, `manicp_log_blocked`); it never
+the format version or a payload it cannot decode STOPS (`Blocked`, 503, `/healthz` 503, `mdscontrolplane_log_blocked`); it never
 skips, since skipping forks the state. Upgrade in two deploys: first every node reads v+1, then flip the writers
 (`DynLogOptions.Version`). Going back after the flip needs the old build to understand v+1.
 
@@ -61,7 +61,7 @@ open; a batch starts at least `TailBatch` after the previous. Then wait until ap
 kicked), then answer from Pebble. Works on any node, so standbys scale reads. A hole below the tail waits up to
 `HoleAfter`, then a no-op fills it.
 
-**Failover.** Active dies: the standby promotes after `TakeoverAfter` (the library default is advisory only; `manicp -takeover-after` defaults to 5 s) and starts
+**Failover.** Active dies: the standby promotes after `TakeoverAfter` (the library default is advisory only; `mdscontrolplane -takeover-after` defaults to 5 s) and starts
 appending at the tail; in-flight entries of the dead node either landed (replays answer them) or never will. Brokers
 (`cpclient` URL list `a,b`, comma separated) move on at connect error or 503, sticky to the last good URL, each URL
 once per call; commit retries carry the same key. Failback is the same in reverse.
@@ -75,7 +75,7 @@ damaged object falls back to replay from slot 0 if the log still starts there, e
 
 There is no R# index and no row in the table other than `LOG/<slot>` and the `CKPT` pointer (decision 54). Lookup is answered from Pebble; a future S3 index or reader scale-out would be built from the log.
 
-## `manicp -store dynamolog` (stage 4)
+## `mdscontrolplane -store dynamolog` (stage 4)
 
 Flags (all `-store dynamolog` only; defaults follow decisions 48-53): `-table` (default `<table-prefix>cp`), `-checkpoint-bucket`
 (empty: no checkpoints and no trim, a restart replays the whole log) `-checkpoint-prefix cp/` `-s3-endpoint` `-s3-path-style`,
@@ -102,7 +102,7 @@ cluster constants `WindowSlots`, `TrimStride` (not flags: nodes must agree); `Ch
 
 ## Metrics
 
-`manicp_log_*`, documented in `docs/observability.md`: slot attempts/lost/slots, append and queue-wait seconds,
+`mdscontrolplane_log_*`, documented in `docs/observability.md`: slot attempts/lost/slots, append and queue-wait seconds,
 entries per slot, entry bytes, apply lag, standby lag, hole fills, role and role changes, tail checks and fresh reads,
 apply seconds, window keys, blocked, rejected, checkpoint slot/age/bytes/seconds/errors, trimmed slots.
 

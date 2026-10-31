@@ -1,6 +1,6 @@
 # Project build. `make` / `make build` is the full gate:
 #   fmt, ascii, vet, lint, compile, unit tests, sim, hermetic it, Kafka CLI e2e, change risk score.
-# Docker fullstack test/integrationtest tests still Skip unless MANIFESTER_*_ENDPOINT are set.
+# Docker fullstack test/integrationtest tests still Skip unless MDS_*_ENDPOINT are set.
 # The import check for deterministic packages is the determinismcheck tool:
 # go run ./ops/tools/determinismcheck <packages>
 # Toolchain + commit hook: `mise install` (pins in mise.toml; postinstall runs
@@ -94,13 +94,13 @@ sim: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_SIM) ./internal/verify/simulator/...
 	@$(MAKE) --no-print-directory sim-campaign
 
-# Seed campaigns through cmd/manisim. More seeds: make sim-campaign SIM_SEEDS=2000
+# Seed campaigns through cmd/mdssimulator. More seeds: make sim-campaign SIM_SEEDS=2000
 sim-campaign:
-	go run ./cmd/manisim -scenario kafka -seeds $(SIM_SEEDS)
-	go run ./cmd/manisim -scenario kafka-log -seeds $(SIM_SEEDS)
+	go run ./cmd/mdssimulator -scenario kafka -seeds $(SIM_SEEDS)
+	go run ./cmd/mdssimulator -scenario kafka-log -seeds $(SIM_SEEDS)
 
 # Hermetic integration tests (in-process memstore). Fullstack Docker tests
-# in the same package Skip unless MANIFESTER_DYNAMO_ENDPOINT + MANIFESTER_S3_ENDPOINT are set.
+# in the same package Skip unless MDS_DYNAMO_ENDPOINT + MDS_S3_ENDPOINT are set.
 it-hermetic: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_IT) ./test/integrationtest/
 
@@ -124,7 +124,7 @@ risk:
 
 comma := ,
 
-# E2E: manicp + manibroker driven by the Apache Kafka 3.9.1 CLI (needs Java and minio, see mise.toml; part of build).
+# E2E: mdscontrolplane + mdsbroker driven by the Apache Kafka 3.9.1 CLI (needs Java and minio, see mise.toml; part of build).
 e2e-kafka-cli:
 	bash ops/scripts/e2e-kafka-cli.sh $(E2E_ARGS)
 

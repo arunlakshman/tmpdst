@@ -7,12 +7,12 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/broker"
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/internal/campaign"
-	"manifester/internal/verify/simulator/internal/session"
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/broker"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/internal/campaign"
+	"mds/internal/verify/simulator/internal/session"
+	"mds/internal/wire/kafkawire"
 )
 
 func seeds(from uint64, n int) []uint64 {

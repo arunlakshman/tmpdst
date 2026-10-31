@@ -3,7 +3,7 @@ package speccheck
 import (
 	"slices"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // stateHasher is FNV-1a over a canonical byte stream. Every variable-length field

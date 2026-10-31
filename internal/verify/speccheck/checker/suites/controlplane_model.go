@@ -4,8 +4,8 @@ import (
 	"slices"
 	"strings"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker/observation"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker/observation"
 )
 
 // controlPlaneModel is a second, naive model of the control plane. It is written from

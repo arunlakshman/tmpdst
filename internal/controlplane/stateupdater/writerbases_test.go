@@ -3,8 +3,8 @@ package stateupdater_test
 import (
 	"testing"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 func TestCommitWithWriterBases(t *testing.T) {

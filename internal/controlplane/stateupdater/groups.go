@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Group commands (slice 4a). The fold of GroupInstall, GroupAssign,

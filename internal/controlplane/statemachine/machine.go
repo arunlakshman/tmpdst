@@ -3,8 +3,8 @@ package statemachine
 import (
 	"fmt"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 const (

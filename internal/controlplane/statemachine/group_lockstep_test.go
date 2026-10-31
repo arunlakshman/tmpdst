@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck"
 )
 
 // Random lockstep for the consumer group commands. Each step is a log write or

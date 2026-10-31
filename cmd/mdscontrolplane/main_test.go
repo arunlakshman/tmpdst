@@ -1,0 +1,140 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = ln.Close() }()
+	return ln.Addr().String()
+}
+
+func TestRunServesMemStoreAndStops(t *testing.T) {
+	addr, maddr := freeAddr(t), freeAddr(t)
+	manifest := filepath.Join(t.TempDir(), "m.json")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var logs bytes.Buffer
+	done := make(chan int, 1)
+	go func() {
+		done <- run(ctx, []string{"-addr", addr, "-metrics-addr", maddr, "-run-id", "t1", "-manifest-out", manifest}, &logs)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+maddr+"/metrics", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("metrics port never came up: ", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for {
+		c, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", addr)
+		if err == nil {
+			_ = c.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("cp port never came up")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("code %d\n%s", code, logs.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("did not stop")
+	}
+	for _, want := range []string{"mdscontrolplane starting", "mdscontrolplane listening", "manifest written", "mdscontrolplane stopped"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("missing %q in logs", want)
+		}
+	}
+	if _, err := os.Stat(manifest); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunErrors(t *testing.T) {
+	var logs bytes.Buffer
+	cases := map[string][]string{
+		"bad level":     {"-log-level", "loud"},
+		"unknown store": {"-store", "nope", "-metrics-addr", ""},
+		"bad metrics":   {"-metrics-addr", "256.0.0.1:x"},
+		"bad addr":      {"-metrics-addr", "", "-addr", "256.0.0.1:x"},
+	}
+	for name, args := range cases {
+		logs.Reset()
+		if code := run(t.Context(), args, &logs); code != 1 {
+			t.Errorf("%s: code %d", name, code)
+		}
+	}
+	if code := run(t.Context(), []string{"-bogus"}, &logs); code != 2 {
+		t.Fatal(code)
+	}
+	if code := run(t.Context(), []string{"-h"}, &logs); code != 0 {
+		t.Fatal(code)
+	}
+}
+
+func TestManifestFailureIsNotFatal(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "file")
+	_ = os.WriteFile(f, nil, 0o600)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	var logs bytes.Buffer
+	code := run(ctx, []string{"-addr", freeAddr(t), "-metrics-addr", "", "-manifest-out", filepath.Join(f, "x", "m.json")}, &logs)
+	if code != 0 || !strings.Contains(logs.String(), "manifest_failed") {
+		t.Fatalf("code %d\n%s", code, logs.String())
+	}
+}
+
+func TestCreateTablesFailureExits(t *testing.T) {
+	t.Setenv("AWS_EC2_METADATA_DISABLED", "true")
+	t.Setenv("AWS_ACCESS_KEY_ID", "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-amz-json-1.0")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"__type":"com.amazon.coral.service#ValidationException","message":"fake"}`))
+	}))
+	defer srv.Close()
+	var logs bytes.Buffer
+	args := []string{"-store", kindLog, "-dynamo-endpoint", srv.URL, "-metrics-addr", "", "-create-tables", "-addr", freeAddr(t)}
+	if code := run(t.Context(), args, &logs); code != 1 {
+		t.Fatalf("create-tables against a failing endpoint must exit 1, got %d\n%s", code, logs.String())
+	}
+}
+
+func TestUnknownStoreRejected(t *testing.T) {
+	var logs bytes.Buffer
+	for _, kind := range []string{"dynamo", "nope"} {
+		args := []string{"-store", kind, "-metrics-addr", "", "-addr", freeAddr(t)}
+		if code := run(t.Context(), args, &logs); code != 1 {
+			t.Fatalf("-store %s: code %d\n%s", kind, code, logs.String())
+		}
+	}
+}

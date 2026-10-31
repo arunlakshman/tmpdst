@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"manifester/internal/controlplane"
-	"manifester/internal/core"
+	"mds/internal/controlplane"
+	"mds/internal/core"
 )
 
 // Store is a controlplane.Store over a StateUpdater with a local slot counter: a single

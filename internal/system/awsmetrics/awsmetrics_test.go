@@ -72,7 +72,7 @@ func TestDynamoRetriesAndThrottles(t *testing.T) {
 	defer srv.Close()
 	reg := prometheus.NewRegistry()
 	var logs bytes.Buffer
-	rec := New(reg, "manicp", "dynamo", slog.New(slog.NewJSONHandler(&logs, nil)))
+	rec := New(reg, "mdscontrolplane", "dynamo", slog.New(slog.NewJSONHandler(&logs, nil)))
 	c := dynamodb.New(dynamodb.Options{
 		Region: "us-east-1", BaseEndpoint: aws.String(srv.URL), Credentials: credentials.NewStaticCredentialsProvider("a", "b", ""),
 		APIOptions: rec.APIOptions(), RetryMaxAttempts: 5,
@@ -80,22 +80,22 @@ func TestDynamoRetriesAndThrottles(t *testing.T) {
 	if _, err := c.GetItem(t.Context(), &dynamodb.GetItemInput{TableName: aws.String("t"), Key: map[string]dbtypes.AttributeValue{"pk": &dbtypes.AttributeValueMemberS{Value: "x"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if n := sum(family(t, reg, "manicp_dynamo_attempt_seconds"), map[string]string{"op": "GetItem", "result": "http_400"}); n != 2 {
+	if n := sum(family(t, reg, "mdscontrolplane_dynamo_attempt_seconds"), map[string]string{"op": "GetItem", "result": "http_400"}); n != 2 {
 		t.Errorf("failed attempts = %v, want 2", n)
 	}
-	if n := sum(family(t, reg, "manicp_dynamo_attempt_seconds"), map[string]string{"op": "GetItem", "result": "ok"}); n != 1 {
+	if n := sum(family(t, reg, "mdscontrolplane_dynamo_attempt_seconds"), map[string]string{"op": "GetItem", "result": "ok"}); n != 1 {
 		t.Errorf("ok attempts = %v, want 1", n)
 	}
-	if n := sum(family(t, reg, "manicp_dynamo_retries_total"), map[string]string{"op": "GetItem"}); n != 2 {
+	if n := sum(family(t, reg, "mdscontrolplane_dynamo_retries_total"), map[string]string{"op": "GetItem"}); n != 2 {
 		t.Errorf("retries = %v, want 2", n)
 	}
-	if n := sum(family(t, reg, "manicp_dynamo_throttles_total"), map[string]string{"code": "ThrottlingException"}); n != 2 {
+	if n := sum(family(t, reg, "mdscontrolplane_dynamo_throttles_total"), map[string]string{"code": "ThrottlingException"}); n != 2 {
 		t.Errorf("throttles = %v, want 2", n)
 	}
-	if n := sum(family(t, reg, "manicp_dynamo_operation_seconds"), map[string]string{"op": "GetItem", "outcome": "ok"}); n != 1 {
+	if n := sum(family(t, reg, "mdscontrolplane_dynamo_operation_seconds"), map[string]string{"op": "GetItem", "outcome": "ok"}); n != 1 {
 		t.Errorf("operations = %v, want 1", n)
 	}
-	if n := sum(family(t, reg, "manicp_dynamo_request_bytes"), map[string]string{"op": "GetItem"}); n != 3 {
+	if n := sum(family(t, reg, "mdscontrolplane_dynamo_request_bytes"), map[string]string{"op": "GetItem"}); n != 3 {
 		t.Errorf("request_bytes samples = %v, want 3", n)
 	}
 	if got := strings.Count(logs.String(), `"event":"aws_attempt_failed"`); got != 2 {
@@ -117,7 +117,7 @@ func TestS3Non2xxAndTimeout(t *testing.T) {
 	defer srv.Close()
 	reg := prometheus.NewRegistry()
 	var logs bytes.Buffer
-	rec := New(reg, "manibroker", "s3", slog.New(slog.NewJSONHandler(&logs, nil)))
+	rec := New(reg, "mdsbroker", "s3", slog.New(slog.NewJSONHandler(&logs, nil)))
 	c := s3.New(s3.Options{
 		Region: "us-east-1", BaseEndpoint: aws.String(srv.URL), UsePathStyle: true,
 		Credentials: credentials.NewStaticCredentialsProvider("a", "b", ""),
@@ -133,14 +133,14 @@ func TestS3Non2xxAndTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("want timeout")
 	}
-	att := family(t, reg, "manibroker_s3_attempt_seconds")
+	att := family(t, reg, "mdsbroker_s3_attempt_seconds")
 	if sum(att, map[string]string{"op": "PutObject", "result": "http_503"}) != 1 {
 		t.Errorf("no http_503 attempt")
 	}
 	if sum(att, map[string]string{"op": "PutObject", "result": "timeout"}) != 1 {
 		t.Errorf("no timeout attempt: %v", att)
 	}
-	if sum(family(t, reg, "manibroker_s3_throttles_total"), map[string]string{"code": "SlowDown"}) != 1 {
+	if sum(family(t, reg, "mdsbroker_s3_throttles_total"), map[string]string{"code": "SlowDown"}) != 1 {
 		t.Error("SlowDown not counted as throttle")
 	}
 	if !strings.Contains(logs.String(), `"result":"timeout"`) || !strings.Contains(logs.String(), `"result":"http_503"`) {
@@ -156,7 +156,7 @@ func TestQuietCodesLogAtDebug(t *testing.T) {
 	}))
 	defer srv.Close()
 	var logs bytes.Buffer
-	rec := New(prometheus.NewRegistry(), "manicp", "dynamo", slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	rec := New(prometheus.NewRegistry(), "mdscontrolplane", "dynamo", slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	rec.QuietCodes = map[string]bool{"TransactionCanceledException": true}
 	c := dynamodb.New(dynamodb.Options{Region: "us-east-1", BaseEndpoint: aws.String(srv.URL),
 		Credentials: credentials.NewStaticCredentialsProvider("a", "b", ""), APIOptions: rec.APIOptions()})

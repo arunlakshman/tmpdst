@@ -11,11 +11,11 @@ package fakelogstore
 import (
 	"slices"
 
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/internal/fakecompletions"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/internal/fakecompletions"
 )
 
 // Engine is the fake Dynamo log. Spec state is local; faults come from fakecompletions.

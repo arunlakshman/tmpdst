@@ -3,7 +3,7 @@ package simulator
 import (
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func entry(at Time, lane DeliveryLane, tag uint64) Entry {

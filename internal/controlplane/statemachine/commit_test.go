@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 func commitCmd(key string, records int64) stateupdater.Entry {

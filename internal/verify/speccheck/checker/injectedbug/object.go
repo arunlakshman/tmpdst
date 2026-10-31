@@ -4,10 +4,10 @@ import (
 	"slices"
 	"strings"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker"
-	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/suites"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker"
+	"mds/internal/verify/speccheck/checker/observation"
+	"mds/internal/verify/speccheck/checker/suites"
 )
 
 // ObjectBug is an injected bug for an object store. Wrap returns a subject that

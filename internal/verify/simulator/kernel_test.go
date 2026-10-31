@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // ---- test-only machine: a scriptable state machine ----

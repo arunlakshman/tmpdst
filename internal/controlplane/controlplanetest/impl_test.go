@@ -7,14 +7,14 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/controlplane"
-	"manifester/internal/controlplane/controlplaneclient"
-	"manifester/internal/controlplane/grpctestserver"
-	"manifester/internal/controlplane/memorystore"
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker/generator"
-	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/suites"
+	"mds/internal/controlplane"
+	"mds/internal/controlplane/controlplaneclient"
+	"mds/internal/controlplane/grpctestserver"
+	"mds/internal/controlplane/memorystore"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker/generator"
+	"mds/internal/verify/speccheck/checker/observation"
+	"mds/internal/verify/speccheck/checker/suites"
 )
 
 // impl is a control plane as the conformance runner drives it.

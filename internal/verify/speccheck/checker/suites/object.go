@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"slices"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck"
-	"manifester/internal/verify/speccheck/checker"
-	"manifester/internal/verify/speccheck/checker/generator"
-	"manifester/internal/verify/speccheck/checker/observation"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck"
+	"mds/internal/verify/speccheck/checker"
+	"mds/internal/verify/speccheck/checker/generator"
+	"mds/internal/verify/speccheck/checker/observation"
 )
 
 const (

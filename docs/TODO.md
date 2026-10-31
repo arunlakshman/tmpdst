@@ -12,24 +12,7 @@ Known flaky tests and an unstable test environment are in `flaky-tests.md`.
 
 ## Metadata lists every live broker
 
-**Why:** Metadata lists only the broker that answered (decision 29). Client failover therefore depends on the client's seed list, and with franz-go defaults it takes about 5 s.
-
-**Plan:**
-- The CP keeps each live broker's advertised host, port and broker id. There is no Register and no broker epoch any more (decisions 41-44), so this needs a new heartbeat lease op that carries the node and its address.
-  - A new `DescribeBrokers` op lists brokers whose lease has not expired.
-- Metadata returns all live brokers. Partition leaders are spread over them deterministically, for example by hashing (topic, partition) over the sorted broker ids.
-- Liveness comes from the heartbeat lease with an expiry, decided in the CP. The lease only feeds Metadata; it does not fence anything (commits stay unfenced, decision 44).
-
-**Contract changes:**
-- `core` CP ops.
-- `veritas` spec.
-- `cpengine`.
-- `cp/` service and DynamoDB items.
-- Lockstep conformance (C3).
-
-**Done when:**
-- Kill-broker tests in `test/integrationtest/` fail over without the client's seed list and without `MetadataMinAge`.
-- The sim covers broker membership changes.
+**Done (slice 2 of `consumer-groups-design.md`).** Metadata lists every live broker, sorted by node id. The live set comes from the broker lease heartbeats (`BrokerHeartbeat`) and is memory only on the active control plane. Partition leaders stay on the answering broker (decision 29), so the leader spread in the old plan is declined by decision 29. `ops/scripts/e2e-kafka-cli.sh` checks that a killed broker leaves the list. The `test/integrationtest/` kill-broker tests were not part of that check.
 
 ## Go 1.26 and current franz-go
 

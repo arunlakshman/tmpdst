@@ -84,7 +84,8 @@ type node struct {
 	sum   uint64
 	sumOK bool
 
-	noAttrition bool
+	noAttrition       bool
+	hiddenFromClients bool
 }
 
 type endKind uint8
@@ -264,6 +265,7 @@ func (r *run) addNodes() {
 			n := add(fmt.Sprintf("%s-%d", p.Name, i), false)
 			n.factory = p.Factory
 			n.noAttrition = p.NoAttrition
+			n.hiddenFromClients = p.HiddenFromClients
 			if p.FactoryFor != nil {
 				n.factory = p.FactoryFor(r.sc)
 			}
@@ -324,7 +326,7 @@ func (r *run) boot(n *node) {
 		if n.workload {
 			var brokers []core.NodeInstance
 			for _, b := range r.nodes {
-				if !b.workload {
+				if !b.workload && !b.hiddenFromClients {
 					brokers = append(brokers, b.ref)
 				}
 			}

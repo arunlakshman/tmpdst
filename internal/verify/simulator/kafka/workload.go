@@ -188,7 +188,7 @@ func (w *Workload) advance(c *client) []core.Action {
 	switch c.stage {
 	case stateAPIVersions:
 		r := kmsg.NewPtrApiVersionsRequest()
-		r.ClientSoftwareName, r.ClientSoftwareVersion = "manisim", "1"
+		r.ClientSoftwareName, r.ClientSoftwareVersion = "mdssimulator", "1"
 		return w.send(c, requestAPIVersions, r)
 	case stateMetadata:
 		r := kmsg.NewPtrMetadataRequest()

@@ -10,7 +10,7 @@ import (
 )
 
 func TestLogCampaign(t *testing.T) {
-	n := 20
+	n := 40 // the coverage list needs rare faults (replica stalled); 20 seeds hit it only by luck
 	if testing.Short() {
 		n = 8
 	}

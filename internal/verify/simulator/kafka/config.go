@@ -68,7 +68,7 @@ func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Op
 		TrimStride:     lp.TrimStride,
 	}
 	config.Processes = append(config.Processes, simulator.Process{
-		Name: "cp", Count: 2,
+		Name: "cp", Count: 2, HiddenFromClients: true,
 		FactoryFor: func(sc simulator.SeedConfig) core.MachineFactory { return controlPlaneFactory(sc, opts) },
 	})
 	// Bridge deadline covers several logstore Put attempts. Per-append timeout

@@ -14,6 +14,11 @@ type Process struct {
 	// NoAttrition excludes this process from kernel attrition. CP replicas use
 	// LogParams StallProb/CrashProb instead (kafka-log).
 	NoAttrition bool
+	// HiddenFromClients keeps this process out of the broker list the workload
+	// receives. Set it for services that clients must never dial, such as the
+	// control plane nodes in kafka-log: a client that dials one waits for a
+	// Kafka answer that never comes.
+	HiddenFromClients bool
 }
 
 // Workload is a test driver: a deterministic Kafka client model (kgo cannot run

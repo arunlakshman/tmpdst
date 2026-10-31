@@ -33,7 +33,7 @@ func (b *Broker) metadata(s *slot, r *kmsg.MetadataRequest) []core.Action {
 func (b *Broker) metaResp(o *operation, infos []core.TopicInfo, code kafkaErrorCode) {
 	r := o.creq.(*kmsg.MetadataRequest)
 	response := kmsg.NewPtrMetadataResponse()
-	cluster := "manifester"
+	cluster := "mds"
 	response.ClusterID, response.ControllerID = &cluster, b.config.BrokerID
 	response.Brokers = b.metaBrokers()
 	if r.Topics == nil { // all topics

@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"manifester/internal/core"
-	"manifester/internal/system"
+	"mds/internal/core"
+	"mds/internal/system"
 )
 
 // ErrNoConn reports a Write or Close on a connection that is gone.
@@ -41,11 +41,11 @@ func (c NetConfig) withDefaults() NetConfig {
 // inbox, parked by PauseReads) and one writer goroutine per connection
 // (writes in call order). It implements system.Connections.
 type Net struct {
-	cfg  NetConfig
-	sink system.InboxWriter
-	ln   net.Listener
-	next atomic.Uint64
-	wg   sync.WaitGroup
+	config NetConfig
+	sink   system.InboxWriter
+	ln     net.Listener
+	next   atomic.Uint64
+	wg     sync.WaitGroup
 
 	mu     sync.Mutex
 	conns  map[core.ConnID]*conn
@@ -55,8 +55,8 @@ type Net struct {
 var _ system.Connections = (*Net)(nil)
 
 // NewNet starts accepting on ln. ConnIDs are unique per process and start at 1.
-func NewNet(ln net.Listener, sink system.InboxWriter, cfg NetConfig) *Net {
-	n := &Net{cfg: cfg.withDefaults(), sink: sink, ln: ln, conns: map[core.ConnID]*conn{}}
+func NewNet(ln net.Listener, sink system.InboxWriter, config NetConfig) *Net {
+	n := &Net{config: config.withDefaults(), sink: sink, ln: ln, conns: map[core.ConnID]*conn{}}
 	n.wg.Add(1)
 	go n.accept()
 	return n
@@ -306,7 +306,7 @@ func (c *conn) readLoop() {
 		case <-c.stopped:
 			return
 		}
-		buf := make([]byte, c.n.cfg.ReadBuf)
+		buf := make([]byte, c.n.config.ReadBuf)
 		k, err := c.nc.Read(buf)
 		if k > 0 {
 			c.mu.Lock()
@@ -364,7 +364,7 @@ func (c *conn) writeLoop() {
 			c.closeGracefully()
 			return
 		}
-		_ = c.nc.SetWriteDeadline(time.Now().Add(c.n.cfg.WriteTimeout)) // best-effort teardown
+		_ = c.nc.SetWriteDeadline(time.Now().Add(c.n.config.WriteTimeout)) // best-effort teardown
 		_, err := c.nc.Write(it.data)
 		if it.done != nil {
 			it.done(err)
@@ -388,7 +388,7 @@ func (c *conn) closeGracefully() {
 	if tc, ok := c.nc.(*net.TCPConn); ok {
 		_ = tc.CloseWrite() // best-effort teardown
 	}
-	_ = c.nc.SetReadDeadline(time.Now().Add(c.n.cfg.LingerRead)) // best-effort teardown
+	_ = c.nc.SetReadDeadline(time.Now().Add(c.n.config.LingerRead)) // best-effort teardown
 	c.mu.Lock()
 	c.dead = true
 	c.mu.Unlock()

@@ -1,0 +1,9 @@
+{
+  "threshold": 20,
+  "note": "Ratchet baseline for cmd/riskscore. Regenerate: go run ./cmd/riskscore -profile \u003ccover.out\u003e -update-baseline   (or: make risk-baseline); review and commit the diff of risk-baseline.json",
+  "functions": {
+    "internal/controlplane/statemachine.Machine.roleTick": 56.62,
+    "internal/verify/simulator/fakeservices/fakelogservice.Engine.plan": 23.63,
+    "internal/verify/simulator/fakeservices/fakelogservice.withDefaults": 20.94
+  }
+}

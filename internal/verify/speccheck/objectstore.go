@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // ObjectStore is the spec of the object store: a map from key to bytes.
@@ -121,7 +121,7 @@ func (s *ObjectStore) Keys() []string { return slices.Clone(s.keys) }
 // costs little.
 func (s *ObjectStore) StateHash() uint64 {
 	s.pre = nextPrefix(s.pre, len(s.keys), func(i int, h stateHasher) stateHasher {
-		h.Str(s.keys[i])
+		h.StringValue(s.keys[i])
 		h.Bytes(s.objs[s.keys[i]])
 		return h
 	})
@@ -132,7 +132,7 @@ func (s *ObjectStore) StateHash() uint64 {
 func (s *ObjectStore) fullStateHash() uint64 {
 	h := newStateHasher()
 	for _, k := range sortedKeys(s.objs) {
-		h.Str(k)
+		h.StringValue(k)
 		h.Bytes(s.objs[k])
 	}
 	return uint64(h)

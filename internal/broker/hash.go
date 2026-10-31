@@ -1,7 +1,7 @@
 package broker
 
 import (
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // stateHasher is FNV-1a; hash/fnv is off the deterministic allow-list.
@@ -44,15 +44,15 @@ func (b *Broker) StateHash() uint64 {
 	h.topics(b.topics)
 	h.conns(b.conns)
 	h.openSeg(b.open)
-	h.segs(b.segs)
+	h.hashSegments(b.segs)
 	h.ops(b.ops)
 	return uint64(h)
 }
 
 func (b *Broker) hashScalars(h *stateHasher) {
-	h.u64(uint64(b.cfg.InjectedBug))
+	h.u64(uint64(b.config.InjectedBug))
 	h.bool(b.started)
-	h.u64(uint64(b.nextReq))
+	h.u64(uint64(b.nextRequestNumber))
 	h.u64(b.nextID)
 	h.u64(uint64(b.timerGen))
 	h.bool(b.stopping)
@@ -100,12 +100,12 @@ func (h *stateHasher) conns(conns []*connection) {
 	}
 }
 
-func (h *stateHasher) segs(segs []*segment) {
+func (h *stateHasher) hashSegments(segs []*segment) {
 	h.u64(uint64(len(segs)))
 	for _, s := range segs {
 		h.u64(s.id)
 		h.u64(uint64(s.state))
-		h.u64(uint64(s.req))
+		h.u64(uint64(s.request))
 		h.u64(uint64(s.gen))
 		h.u64(uint64(s.attempts))
 		h.str(s.key)
@@ -121,7 +121,7 @@ func (h *stateHasher) ops(ops []*operation) {
 		h.u64(uint64(o.kind))
 		h.u64(uint64(o.state))
 		h.u64(uint64(o.retry))
-		h.u64(uint64(o.req))
+		h.u64(uint64(o.requestID))
 		h.u64(uint64(o.gen))
 		h.u64(uint64(o.attempts))
 		h.u64(uint64(o.s.conn.id))
@@ -130,8 +130,8 @@ func (h *stateHasher) ops(ops []*operation) {
 		for _, n := range o.names {
 			h.str(n)
 		}
-		h.str(o.tp.Topic)
-		h.u64(uint64(uint32(o.tp.Partition)))
+		h.str(o.topicPartition.Topic)
+		h.u64(uint64(uint32(o.topicPartition.Partition)))
 		h.u64(uint64(o.from))
 		h.u64(uint64(uint32(o.maxBytes)))
 		if o.kind == opCreate { // only create ops carry these, so other hashes stay as they were
@@ -157,8 +157,8 @@ func (h *stateHasher) batches(bs []*partitionBatch) {
 	for _, pb := range bs {
 		h.u64(uint64(pb.s.conn.id))
 		h.u64(uint64(uint32(pb.s.h.CorrelationID)))
-		h.str(pb.tp.Topic)
-		h.u64(uint64(uint32(pb.tp.Partition)))
+		h.str(pb.topicPartition.Topic)
+		h.u64(uint64(uint32(pb.topicPartition.Partition)))
 		h.bytes(pb.data)
 		h.u64(uint64(pb.records))
 		h.ref(pb.loc)

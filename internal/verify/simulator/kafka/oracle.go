@@ -4,8 +4,8 @@ import (
 	"slices"
 	"strconv"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
 )
 
 // expectedLogChecker is the invariant that owns the reconstructed logs and every check
@@ -24,23 +24,23 @@ type expectedLogChecker struct {
 	logs []*partitionLog
 	idx  map[core.TopicPartition]int
 
-	started       bool
-	cpGen, objGen uint64
-	ackCur        simulator.Cursor
-	nops          int
-	opIdx         map[[2]int]int            // (client, batch) -> history index
-	pend          []int                     // history indexes not yet resolved
-	seen          map[string]int            // record value -> number of times committed
-	locs          map[core.SegmentRef]int64 // stored batch -> offset it was committed at
-	cpos          map[[2]int]int64          // (consumer client, partition index) -> next offset it should see
+	started                                  bool
+	controlPlaneGeneration, objectGeneration uint64
+	ackCur                                   simulator.Cursor
+	nops                                     int
+	opIdx                                    map[[2]int]int            // (client, batch) -> history index
+	pend                                     []int                     // history indexes not yet resolved
+	seen                                     map[string]int            // record value -> number of times committed
+	locs                                     map[core.SegmentRef]int64 // stored batch -> offset it was committed at
+	cpos                                     map[[2]int]int64          // (consumer client, partition index) -> next offset it should see
 }
 
 func newOracle(o Opts) *expectedLogChecker {
-	or := &expectedLogChecker{opts: o, tps: o.tps(), idx: map[core.TopicPartition]int{}, opIdx: map[[2]int]int{},
+	or := &expectedLogChecker{opts: o, tps: o.topicPartitions(), idx: map[core.TopicPartition]int{}, opIdx: map[[2]int]int{},
 		seen: map[string]int{}, locs: map[core.SegmentRef]int64{}, cpos: map[[2]int]int64{}}
-	for i, tp := range or.tps {
-		or.idx[tp] = i
-		or.logs = append(or.logs, &partitionLog{tp: tp, idx: i, byBase: map[int64]int{}})
+	for i, topicPartition := range or.tps {
+		or.idx[topicPartition] = i
+		or.logs = append(or.logs, &partitionLog{topicPartition: topicPartition, idx: i, byBase: map[int64]int{}})
 	}
 	return or
 }
@@ -58,8 +58,8 @@ func (o *expectedLogChecker) Observe(v simulator.View) {
 func (o *expectedLogChecker) scanOps(v simulator.View) {
 	ops := v.History().Ops()
 	for ; o.nops < len(ops); o.nops++ {
-		if op, ok := ops[o.nops].Op.(ProduceOp); ok {
-			o.opIdx[[2]int{op.Client, op.Batch}] = o.nops
+		if operation, ok := ops[o.nops].Op.(ProduceOp); ok {
+			o.opIdx[[2]int{operation.Client, operation.Batch}] = o.nops
 		}
 		o.pend = append(o.pend, o.nops)
 	}
@@ -68,18 +68,20 @@ func (o *expectedLogChecker) scanOps(v simulator.View) {
 // refresh brings every partition's log up to the current truth.
 func (o *expectedLogChecker) refresh(v simulator.View) {
 	cg, og := v.CP().Gen(), v.Objects().Gen()
-	if o.started && cg == o.cpGen && og == o.objGen {
+	if o.started && cg == o.controlPlaneGeneration && og == o.objectGeneration {
 		return
 	}
-	o.started, o.cpGen, o.objGen = true, cg, og
+	o.started, o.controlPlaneGeneration, o.objectGeneration = true, cg, og
 	for _, pl := range o.logs {
-		if int64(v.CP().HighWatermark(pl.tp)) != int64(len(pl.vals)) || pl.ranges == 0 {
+		if int64(v.CP().HighWatermark(pl.topicPartition)) != int64(len(pl.vals)) || pl.ranges == 0 {
 			o.ingest(v, pl)
 		}
 	}
 }
 
-func tpName(tp core.TopicPartition) string { return tp.Topic + "/" + strconv.Itoa(int(tp.Partition)) }
+func topicPartitionName(topicPartition core.TopicPartition) string {
+	return topicPartition.Topic + "/" + strconv.Itoa(int(topicPartition.Partition))
+}
 
 // record checks one committed record: it was produced (to this partition,
 // at this position of its batch, never from a definitely rejected batch). A
@@ -99,10 +101,10 @@ func (o *expectedLogChecker) record(v simulator.View, pl *partitionLog, off int6
 	if !ok || !known {
 		return
 	}
-	op := v.History().Ops()[hi]
-	po := op.Op.(ProduceOp)
-	as.Always(po.TP == pl.tp && i < len(po.Vals) && po.Vals[i] == val, "kafka: a record is committed where and as it was produced", d...)
-	as.Always(op.Outcome != simulator.OpGivenUp, "kafka: a definitely rejected batch is never committed", d...)
+	operation := v.History().Ops()[hi]
+	po := operation.Op.(ProduceOp)
+	as.Always(po.TopicPartition == pl.topicPartition && i < len(po.Vals) && po.Vals[i] == val, "kafka: a record is committed where and as it was produced", d...)
+	as.Always(operation.Outcome != simulator.OpGivenUp, "kafka: a definitely rejected batch is never committed", d...)
 }
 
 // acks checks each produce_acked fact against the truth at the Step that
@@ -110,10 +112,10 @@ func (o *expectedLogChecker) record(v simulator.View, pl *partitionLog, off int6
 func (o *expectedLogChecker) acks(v simulator.View) {
 	for _, tf := range v.Timeline().Since("produce_acked", &o.ackCur) {
 		f := tf.Fact
-		topic, _ := f.Field("topic").(core.Str)
-		part, ok1 := f.Field("partition").(core.I64)
-		base, ok2 := f.Field("base_offset").(core.I64)
-		count, ok3 := f.Field("count").(core.I64)
+		topic, _ := f.Field("topic").(core.StringValue)
+		part, ok1 := f.Field("partition").(core.Int64Value)
+		base, ok2 := f.Field("base_offset").(core.Int64Value)
+		count, ok3 := f.Field("count").(core.Int64Value)
 		v.Assert().Always(ok1 && ok2 && ok3, "kafka: ack fact is well formed")
 		if !ok1 || !ok2 || !ok3 {
 			continue
@@ -135,13 +137,13 @@ func (o *expectedLogChecker) reads(v simulator.View) {
 	ops := v.History().Ops()
 	keep := o.pend[:0]
 	for _, i := range o.pend {
-		op := ops[i]
-		if op.Outcome == simulator.OpPending {
+		operation := ops[i]
+		if operation.Outcome == simulator.OpPending {
 			keep = append(keep, i)
 			continue
 		}
-		if ro, ok := op.Op.(ReadOp); ok && op.Outcome == simulator.OpResultKnown {
-			o.checkRead(v, ro, op.Result.(ReadRes))
+		if ro, ok := operation.Op.(ReadOp); ok && operation.Outcome == simulator.OpResultKnown {
+			o.checkRead(v, ro, operation.Result.(ReadRes))
 		}
 	}
 	o.pend = keep
@@ -151,9 +153,9 @@ func (o *expectedLogChecker) checkRead(v simulator.View, ro ReadOp, rr ReadRes) 
 	as := v.Assert()
 	for i, part := range rr.Parts {
 		from := ro.Parts[i]
-		ti := o.idx[from.TP]
+		ti := o.idx[from.TopicPartition]
 		pl := o.logs[ti]
-		det := []core.ContextPair{{Key: "client", Value: ro.Client}, {Key: "tp", Value: tpName(from.TP)}, {Key: "from", Value: from.Off}}
+		det := []core.ContextPair{{Key: "client", Value: ro.Client}, {Key: "tp", Value: topicPartitionName(from.TopicPartition)}, {Key: "from", Value: from.Off}}
 		as.Always(!part.Corrupt, "kafka: a consumer never receives a corrupt batch", det...)
 		as.Always(part.Code != 1, "kafka: a consumer's fetch is never out of range", det...)
 		if part.Code != 0 {
@@ -185,34 +187,34 @@ func (o *expectedLogChecker) AtEnd(v simulator.View) {
 	as := v.Assert()
 	ops := v.History().Ops()
 	lastAcked := map[[2]int]int64{} // (client, partition index) -> base of its newest acked batch
-	for _, op := range ops {
-		po, ok := op.Op.(ProduceOp)
+	for _, operation := range ops {
+		po, ok := operation.Op.(ProduceOp)
 		if !ok {
 			continue
 		}
-		res, _ := op.Result.(ProduceRes)
-		ti := o.idx[po.TP]
-		if op.Outcome != simulator.OpPending && len(po.Vals) > 0 {
+		res, _ := operation.Result.(ProduceRes)
+		ti := o.idx[po.TopicPartition]
+		if operation.Outcome != simulator.OpPending && len(po.Vals) > 0 {
 			// Every send commits at most once (a MaybeApplied commit is retried
 			// under its key), so a batch is in the log at most once per send.
 			as.Always(o.seen[po.Vals[0]] <= max(res.Attempts, 1), "kafka: a batch is committed at most once per send",
-				core.ContextPair{Key: "tp", Value: tpName(po.TP)}, core.ContextPair{Key: "value", Value: po.Vals[0]},
+				core.ContextPair{Key: "tp", Value: topicPartitionName(po.TopicPartition)}, core.ContextPair{Key: "value", Value: po.Vals[0]},
 				core.ContextPair{Key: "times", Value: o.seen[po.Vals[0]]}, core.ContextPair{Key: "sends", Value: res.Attempts})
 		}
-		switch op.Outcome {
+		switch operation.Outcome {
 		case simulator.OpResultKnown:
 			for i, val := range po.Vals {
 				off := res.Base + int64(i)
 				same := res.Base >= 0 && off < int64(len(o.logs[ti].vals)) && o.logs[ti].vals[off] == val
 				as.Always(same, "kafka: an acked record is in the log at its acked offset",
-					core.ContextPair{Key: "tp", Value: tpName(po.TP)}, core.ContextPair{Key: "offset", Value: off}, core.ContextPair{Key: "value", Value: val})
+					core.ContextPair{Key: "tp", Value: topicPartitionName(po.TopicPartition)}, core.ContextPair{Key: "offset", Value: off}, core.ContextPair{Key: "value", Value: val})
 			}
 			// One batch at a time per (client, partition): the next batch is built
 			// after this one was acked, so its acked offset is higher.
 			k := [2]int{po.Client, ti}
 			if prev, had := lastAcked[k]; had {
 				as.Always(res.Base >= prev+1, "kafka: a client's acked batches for a partition are at increasing offsets",
-					core.ContextPair{Key: "tp", Value: tpName(po.TP)}, core.ContextPair{Key: "base", Value: res.Base}, core.ContextPair{Key: "previous", Value: prev})
+					core.ContextPair{Key: "tp", Value: topicPartitionName(po.TopicPartition)}, core.ContextPair{Key: "base", Value: res.Base}, core.ContextPair{Key: "previous", Value: prev})
 			}
 			lastAcked[k] = res.Base
 		case simulator.OpGivenUp:
@@ -224,7 +226,7 @@ func (o *expectedLogChecker) AtEnd(v simulator.View) {
 	for c := o.opts.Producers; c < o.opts.Producers+o.opts.Consumers; c++ {
 		for ti, pl := range o.logs {
 			as.Always(o.cpos[[2]int{c, ti}] == int64(len(pl.vals)), "kafka: every consumer caught up with the final log",
-				core.ContextPair{Key: "client", Value: c}, core.ContextPair{Key: "tp", Value: tpName(pl.tp)},
+				core.ContextPair{Key: "client", Value: c}, core.ContextPair{Key: "tp", Value: topicPartitionName(pl.topicPartition)},
 				core.ContextPair{Key: "pos", Value: o.cpos[[2]int{c, ti}]}, core.ContextPair{Key: "hwm", Value: int64(len(pl.vals))})
 		}
 	}

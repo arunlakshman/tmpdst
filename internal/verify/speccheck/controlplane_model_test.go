@@ -6,8 +6,8 @@ import (
 
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker"
 )
 
 // This file checks the ControlPlane spec against a second, naive model. The
@@ -68,87 +68,87 @@ func (m *naiveControlPlane) createTopic(name string, parts int32) core.ErrCode {
 	return core.OK
 }
 
-func (m *naiveControlPlane) commit(req core.RequestID, op core.CommitSegment) core.ControlPlaneDone {
-	if old, found := m.segs[op.SegmentKey]; found {
-		if !sameBatches(old.batches, op.Batches) {
-			return core.ControlPlaneDone{Req: req, Err: core.ErrConflict}
+func (m *naiveControlPlane) commit(request core.RequestID, operation core.CommitSegment) core.ControlPlaneDone {
+	if old, found := m.segs[operation.SegmentKey]; found {
+		if !sameBatches(old.batches, operation.Batches) {
+			return core.ControlPlaneDone{Req: request, Err: core.ErrConflict}
 		}
-		resp := core.CommitSegmentResp{Assigned: append([]core.BatchRange(nil), old.ranges...)}
-		return core.ControlPlaneDone{Req: req, Resp: resp, Outcome: core.Applied}
+		response := core.CommitSegmentResp{Assigned: append([]core.BatchRange(nil), old.ranges...)}
+		return core.ControlPlaneDone{Req: request, Resp: response, Outcome: core.Applied}
 	}
-	if op.SegmentKey == "" || len(op.Batches) == 0 {
-		return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
+	if operation.SegmentKey == "" || len(operation.Batches) == 0 {
+		return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 	}
-	for _, b := range op.Batches {
-		if b.Records <= 0 || b.TP.Topic == "" || b.TP.Partition < 0 {
-			return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
+	for _, b := range operation.Batches {
+		if b.Records <= 0 || b.TopicPartition.Topic == "" || b.TopicPartition.Partition < 0 {
+			return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 		}
 	}
 	var assigned []core.BatchRange
-	for _, b := range op.Batches {
-		r := core.BatchRange{TP: b.TP, Base: m.end(b.TP), Count: b.Records, Loc: b.Loc}
-		m.runs[b.TP] = append(m.runs[b.TP], r)
-		if b.TP.Partition+1 > m.topics[b.TP.Topic] {
-			m.topics[b.TP.Topic] = b.TP.Partition + 1
+	for _, b := range operation.Batches {
+		r := core.BatchRange{TopicPartition: b.TopicPartition, Base: m.end(b.TopicPartition), Count: b.Records, Loc: b.Loc}
+		m.runs[b.TopicPartition] = append(m.runs[b.TopicPartition], r)
+		if b.TopicPartition.Partition+1 > m.topics[b.TopicPartition.Topic] {
+			m.topics[b.TopicPartition.Topic] = b.TopicPartition.Partition + 1
 		}
 		assigned = append(assigned, r)
 	}
-	m.segKeys = append(m.segKeys, op.SegmentKey)
-	m.segs[op.SegmentKey] = modelSegment{batches: append([]core.PendingBatch(nil), op.Batches...), ranges: assigned}
-	resp := core.CommitSegmentResp{Assigned: append([]core.BatchRange(nil), assigned...)}
-	return core.ControlPlaneDone{Req: req, Resp: resp, Outcome: core.Applied}
+	m.segKeys = append(m.segKeys, operation.SegmentKey)
+	m.segs[operation.SegmentKey] = modelSegment{batches: append([]core.PendingBatch(nil), operation.Batches...), ranges: assigned}
+	response := core.CommitSegmentResp{Assigned: append([]core.BatchRange(nil), assigned...)}
+	return core.ControlPlaneDone{Req: request, Resp: response, Outcome: core.Applied}
 }
 
-func (m *naiveControlPlane) lookup(req core.RequestID, op core.FindSegments) core.ControlPlaneDone {
-	if op.From < 0 {
-		return core.ControlPlaneDone{Req: req, Err: core.ErrInvalid}
+func (m *naiveControlPlane) lookup(request core.RequestID, operation core.FindSegments) core.ControlPlaneDone {
+	if operation.From < 0 {
+		return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 	}
-	resp := core.FindSegmentsResp{End: m.end(op.TP)}
+	response := core.FindSegmentsResp{End: m.end(operation.TopicPartition)}
 	var sum int64
-	for _, r := range m.runs[op.TP] {
-		if r.Base+core.Offset(r.Count)-1 < op.From {
+	for _, r := range m.runs[operation.TopicPartition] {
+		if r.Base+core.Offset(r.Count)-1 < operation.From {
 			continue
 		}
-		resp.Ranges = append(resp.Ranges, r)
+		response.Ranges = append(response.Ranges, r)
 		sum += r.Loc.Len
-		if op.MaxBytes > 0 && sum >= int64(op.MaxBytes) {
+		if operation.MaxBytes > 0 && sum >= int64(operation.MaxBytes) {
 			break
 		}
 	}
-	return core.ControlPlaneDone{Req: req, Resp: resp}
+	return core.ControlPlaneDone{Req: request, Resp: response}
 }
 
-func (m *naiveControlPlane) describe(req core.RequestID, op core.DescribeTopics) core.ControlPlaneDone {
+func (m *naiveControlPlane) describe(request core.RequestID, operation core.DescribeTopics) core.ControlPlaneDone {
 	var names []string
 	for name := range m.topics {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	var resp core.DescribeTopicsResp
+	var response core.DescribeTopicsResp
 	for _, name := range names {
-		wanted := len(op.Topics) == 0
-		for _, w := range op.Topics {
+		wanted := len(operation.Topics) == 0
+		for _, w := range operation.Topics {
 			if w == name {
 				wanted = true
 			}
 		}
 		if wanted {
-			resp.Topics = append(resp.Topics, core.TopicInfo{Name: name, Partitions: m.topics[name]})
+			response.Topics = append(response.Topics, core.TopicInfo{Name: name, Partitions: m.topics[name]})
 		}
 	}
-	return core.ControlPlaneDone{Req: req, Resp: resp}
+	return core.ControlPlaneDone{Req: request, Resp: response}
 }
 
 // cpModelOp is one operation. Kind is one of create, commit, lookup, describe.
 type cpModelOp struct {
-	Kind     string
-	Name     string // topic for create, segment key for commit
-	Parts    int32
-	Batches  []core.PendingBatch
-	TP       core.TopicPartition
-	From     int64
-	MaxBytes int32
-	Topics   []string
+	Kind           string
+	Name           string // topic for create, segment key for commit
+	Parts          int32
+	Batches        []core.PendingBatch
+	TopicPartition core.TopicPartition
+	From           int64
+	MaxBytes       int32
+	Topics         []string
 }
 
 type cpModelPair struct {
@@ -173,7 +173,7 @@ func canonicalBatches(key string) []core.PendingBatch {
 	for j := 0; j <= k%3; j++ {
 		p := core.NewTopicPartition(modelTopics[(k+j)%len(modelTopics)], int32((k+2*j)%3))
 		n := int64(1 + (k+j)%4)
-		bs = append(bs, core.PendingBatch{TP: p, Records: n, Loc: core.SegmentRef{Key: "o" + key, Off: int64(j), Len: n * 10}})
+		bs = append(bs, core.PendingBatch{TopicPartition: p, Records: n, Loc: core.SegmentRef{Key: "o" + key, Off: int64(j), Len: n * 10}})
 	}
 	return bs
 }
@@ -197,7 +197,7 @@ func genCPModelOp(r *checker.Rand, _ int) cpModelOp {
 			bs = nil
 			for n := 0; n <= r.Intn(3); n++ {
 				recs := int64(r.Intn(5)) // 0 is invalid
-				bs = append(bs, core.PendingBatch{TP: modelTP(r), Records: recs, Loc: core.SegmentRef{Key: "x", Len: recs * 7}})
+				bs = append(bs, core.PendingBatch{TopicPartition: modelTP(r), Records: recs, Loc: core.SegmentRef{Key: "x", Len: recs * 7}})
 			}
 		case 2: // invalid pieces
 			switch r.Intn(4) {
@@ -206,15 +206,15 @@ func genCPModelOp(r *checker.Rand, _ int) cpModelOp {
 			case 1:
 				bs = nil
 			case 2:
-				bs[0].TP.Partition = -1
+				bs[0].TopicPartition.Partition = -1
 			default:
-				bs[0].TP.Topic = ""
+				bs[0].TopicPartition.Topic = ""
 			}
 		}
 		return cpModelOp{Kind: "commit", Name: key, Batches: bs}
 	case 6, 7, 8:
 		maxBytes := []int32{0, 1, 25, 60, 1000}[r.Intn(5)]
-		return cpModelOp{Kind: "lookup", TP: modelTP(r), From: int64(r.Intn(12)) - 1, MaxBytes: maxBytes}
+		return cpModelOp{Kind: "lookup", TopicPartition: modelTP(r), From: int64(r.Intn(12)) - 1, MaxBytes: maxBytes}
 	}
 	var names []string
 	for n := r.Intn(3); n > 0; n-- {
@@ -223,31 +223,31 @@ func genCPModelOp(r *checker.Rand, _ int) cpModelOp {
 	return cpModelOp{Kind: "describe", Topics: names}
 }
 
-func stepCPModel(s cpModelPair, op cpModelOp) error {
-	const req = core.RequestID(5)
+func stepCPModel(s cpModelPair, operation cpModelOp) error {
+	const request = core.RequestID(5)
 	var got, want core.ControlPlaneDone
-	switch op.Kind {
+	switch operation.Kind {
 	case "create":
-		g, w := s.spec.CreateTopic(op.Name, op.Parts), s.model.createTopic(op.Name, op.Parts)
+		g, w := s.spec.CreateTopic(operation.Name, operation.Parts), s.model.createTopic(operation.Name, operation.Parts)
 		if g != w {
-			return fmt.Errorf("CreateTopic(%q, %d): the spec returned %v, the model returned %v", op.Name, op.Parts, g, w)
+			return fmt.Errorf("CreateTopic(%q, %d): the spec returned %v, the model returned %v", operation.Name, operation.Parts, g, w)
 		}
 		return nil
 	case "commit":
-		cs := core.CommitSegment{SegmentKey: op.Name, Batches: op.Batches}
-		got = s.spec.Exec(core.ControlPlaneCall{Req: req, Op: cs}).(core.ControlPlaneDone)
-		want = s.model.commit(req, cs)
+		cs := core.CommitSegment{SegmentKey: operation.Name, Batches: operation.Batches}
+		got = s.spec.Exec(core.ControlPlaneCall{Req: request, Op: cs}).(core.ControlPlaneDone)
+		want = s.model.commit(request, cs)
 	case "lookup":
-		l := core.FindSegments{TP: op.TP, From: core.Offset(op.From), MaxBytes: op.MaxBytes}
-		got = s.spec.Exec(core.ControlPlaneCall{Req: req, Op: l}).(core.ControlPlaneDone)
-		want = s.model.lookup(req, l)
+		l := core.FindSegments{TopicPartition: operation.TopicPartition, From: core.Offset(operation.From), MaxBytes: operation.MaxBytes}
+		got = s.spec.Exec(core.ControlPlaneCall{Req: request, Op: l}).(core.ControlPlaneDone)
+		want = s.model.lookup(request, l)
 	default:
-		d := core.DescribeTopics{Topics: op.Topics}
-		got = s.spec.Exec(core.ControlPlaneCall{Req: req, Op: d}).(core.ControlPlaneDone)
-		want = s.model.describe(req, d)
+		d := core.DescribeTopics{Topics: operation.Topics}
+		got = s.spec.Exec(core.ControlPlaneCall{Req: request, Op: d}).(core.ControlPlaneDone)
+		want = s.model.describe(request, d)
 	}
 	if g, w := fmt.Sprintf("%+v", got), fmt.Sprintf("%+v", want); g != w {
-		return fmt.Errorf("%s: the spec returned %s, the model returned %s", op.Kind, g, w)
+		return fmt.Errorf("%s: the spec returned %s, the model returned %s", operation.Kind, g, w)
 	}
 	return nil
 }
@@ -257,9 +257,9 @@ func stepCPModel(s cpModelPair, op cpModelOp) error {
 func checkCPModelState(s cpModelPair) error {
 	for _, t := range modelTopics {
 		for p := range int32(3) {
-			tp := core.NewTopicPartition(t, p)
-			if g, w := s.spec.End(tp), s.model.end(tp); g != w {
-				return fmt.Errorf("End(%v): the spec returned %d, the model returned %d", tp, g, w)
+			topicPartition := core.NewTopicPartition(t, p)
+			if g, w := s.spec.End(topicPartition), s.model.end(topicPartition); g != w {
+				return fmt.Errorf("End(%v): the spec returned %d, the model returned %d", topicPartition, g, w)
 			}
 		}
 	}

@@ -4,9 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 // trackedStore is an in-memory store that remembers whether it was closed.
@@ -60,8 +60,8 @@ func driveToTomb(t *testing.T, m *statemachine.Machine) []core.Action {
 
 func tombConfig(src *storeSource) statemachine.Config {
 	return statemachine.Config{
-		CatchUpEvery: core.Millisecond, HoleAfter: 0, Writer: "w",
-		CkptKey: "ckpt/t", CkptEvery: core.Second, Rank: 1,
+		CatchUpEvery: core.Millisecond, GapAfter: 0, Writer: "w",
+		CheckpointKey: "ckpt/t", CheckpointEvery: core.Second, Rank: 1,
 		OpenStore: src.open,
 	}
 }

@@ -3,9 +3,9 @@ package echo
 import (
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/internal/campaign"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/internal/campaign"
 )
 
 func seeds(from uint64, n int) []uint64 {
@@ -52,13 +52,13 @@ func TestEchoCampaign(t *testing.T) {
 }
 
 func TestDeterminismCanary(t *testing.T) {
-	cfg := Config(nil)
+	config := Config(nil)
 	for seed := uint64(1); seed <= 8; seed++ {
-		a, b := simulator.RunSeed(cfg, seed), simulator.RunSeed(cfg, seed)
+		a, b := simulator.RunSeed(config, seed), simulator.RunSeed(config, seed)
 		if a.TraceHash != b.TraceHash || a.RandCalls != b.RandCalls || a.Steps != b.Steps {
 			t.Fatalf("seed %d diverged: %x/%d/%d vs %x/%d/%d", seed, a.TraceHash, a.RandCalls, a.Steps, b.TraceHash, b.RandCalls, b.Steps)
 		}
-		logged := cfg
+		logged := config
 		logged.Log = true
 		if c := simulator.RunSeed(logged, seed); c.TraceHash != a.TraceHash || c.RandCalls != a.RandCalls || c.Steps != a.Steps {
 			t.Fatalf("seed %d: logging changed the run", seed)
@@ -71,9 +71,9 @@ func TestDeterminismCanary(t *testing.T) {
 
 // firstCatch runs seeds from 1 and returns the first seed where prop is
 // violated, or 0.
-func firstCatch(cfg simulator.Config, n int, prop core.PropertyID) uint64 {
+func firstCatch(config simulator.Config, n int, prop core.PropertyID) uint64 {
 	for s := uint64(1); s <= uint64(n); s++ {
-		for _, f := range simulator.RunSeed(cfg, s).Failures {
+		for _, f := range simulator.RunSeed(config, s).Failures {
 			if f.Kind == simulator.FailViolation && f.Prop == prop {
 				return s
 			}
@@ -125,9 +125,9 @@ func (*tallyInv) Name() string           { return "tally" }
 func (*tallyInv) Observe(simulator.View) {}
 func (i *tallyInv) AtEnd(v simulator.View) {
 	i.t.acks += len(v.Timeline().Snapshot("echo_acked"))
-	for _, op := range v.History().Ops() {
-		res, _ := op.Result.(string)
-		switch op.Op.(type) {
+	for _, operation := range v.History().Ops() {
+		res, _ := operation.Result.(string)
+		switch operation.Op.(type) {
 		case PutOp:
 			i.t.puts++
 		case GetOp:
@@ -139,13 +139,13 @@ func (i *tallyInv) AtEnd(v simulator.View) {
 		if res == "ERR corrupt" {
 			i.t.corrupt++
 		}
-		if op.Outcome == simulator.OpResultUnknown {
+		if operation.Outcome == simulator.OpResultUnknown {
 			i.t.indet++
 		}
 		if len(res) >= 3 && res[:3] == "ERR" {
 			i.t.errs++
 		}
-		if op.Invoke >= simulator.Time(i.ph.Chaos+campaign.ProgressGraceTime) {
+		if operation.Invoke >= simulator.Time(i.ph.Chaos+campaign.ProgressGraceTime) {
 			i.t.window++
 		}
 	}
@@ -154,11 +154,11 @@ func (i *tallyInv) AtEnd(v simulator.View) {
 // The campaign must actually exercise the system: acks, reads, ambiguity,
 // errors and requests inside the liveness window.
 func TestCampaignIsNotVacuous(t *testing.T) {
-	cfg := Config(nil)
+	config := Config(nil)
 	var tl tally
-	cfg.Invariants = append(cfg.Invariants, func() simulator.SafetyRule { return &tallyInv{ph: cfg.Phases, t: &tl} })
+	config.Invariants = append(config.Invariants, func() simulator.SafetyRule { return &tallyInv{ph: config.Phases, t: &tl} })
 	for s := uint64(1); s <= 20; s++ {
-		simulator.RunSeed(cfg, s)
+		simulator.RunSeed(config, s)
 	}
 	t.Logf("20 seeds: %+v", tl)
 	if tl.acks < 500 || tl.vals < 100 || tl.indet == 0 || tl.errs == 0 || tl.corrupt == 0 || tl.window < 200 {
@@ -193,9 +193,9 @@ func TestFramerReassemblesSplitFrames(t *testing.T) {
 
 // Brokers are stateless (decision 44): nothing fences or trips an echo broker.
 func TestNoTripsWithoutFencing(t *testing.T) {
-	cfg := Config(nil)
+	config := Config(nil)
 	for s := uint64(1); s <= 40; s++ {
-		res := simulator.RunSeed(cfg, s)
+		res := simulator.RunSeed(config, s)
 		if res.Trips != 0 || len(res.Failures) != 0 {
 			t.Fatalf("seed %d: trips=%d failures=%+v", s, res.Trips, res.Failures)
 		}
@@ -209,9 +209,9 @@ func TestCachedStateHashMatchesFull(t *testing.T) {
 	if testing.Short() {
 		n = 10
 	}
-	cfg := Config(seeds(1, n))
-	cfg.VerifyHashes = true
-	rep, err := simulator.NewRunner().Run(cfg)
+	config := Config(seeds(1, n))
+	config.VerifyHashes = true
+	rep, err := simulator.NewRunner().Run(config)
 	if err != nil {
 		t.Fatal(err)
 	}

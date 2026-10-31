@@ -34,13 +34,13 @@ func TestRunIDPrecedence(t *testing.T) {
 
 func TestLoggerCarriesRunFields(t *testing.T) {
 	var buf bytes.Buffer
-	i := New("manibroker", "r1", 7)
+	i := New("mdsbroker", "r1", 7)
 	NewLogger(&buf, 0, i).Info("hello", "k", 1)
 	var m map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
 		t.Fatal(err)
 	}
-	for k, want := range map[string]any{"run_id": "r1", "service": "manibroker", "broker_id": float64(7), "msg": "hello", "k": float64(1)} {
+	for k, want := range map[string]any{"run_id": "r1", "service": "mdsbroker", "broker_id": float64(7), "msg": "hello", "k": float64(1)} {
 		if m[k] != want {
 			t.Errorf("%s = %v, want %v", k, m[k], want)
 		}
@@ -51,9 +51,9 @@ func TestLoggerCarriesRunFields(t *testing.T) {
 		}
 	}
 	buf.Reset()
-	NewLogger(&buf, 0, New("manicp", "r1", -1)).Info("x")
+	NewLogger(&buf, 0, New("mdscontrolplane", "r1", -1)).Info("x")
 	if strings.Contains(buf.String(), "broker_id") {
-		t.Error("manicp line has broker_id")
+		t.Error("mdscontrolplane line has broker_id")
 	}
 }
 
@@ -136,14 +136,14 @@ func TestServeMetrics(t *testing.T) {
 		}
 		client := &http.Client{Timeout: time.Second}
 		deadline := time.Now().Add(2 * time.Second)
-		var resp *http.Response
+		var response *http.Response
 		var err error
 		for {
-			req, rerr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+"/healthz", nil)
+			request, rerr := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+"/healthz", nil)
 			if rerr != nil {
 				t.Fatal(rerr)
 			}
-			resp, err = client.Do(req)
+			response, err = client.Do(request)
 			if err == nil {
 				break
 			}
@@ -152,13 +152,13 @@ func TestServeMetrics(t *testing.T) {
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
-		defer func() { _ = resp.Body.Close() }()
-		body, err := io.ReadAll(resp.Body)
+		defer func() { _ = response.Body.Close() }()
+		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if resp.StatusCode != http.StatusOK || string(body) != "ok\n" {
-			t.Fatalf("status %d body %q", resp.StatusCode, body)
+		if response.StatusCode != http.StatusOK || string(body) != "ok\n" {
+			t.Fatalf("status %d body %q", response.StatusCode, body)
 		}
 	})
 }
@@ -290,9 +290,9 @@ func TestPublish(t *testing.T) {
 		dest := filepath.Join(blocked, "sub", "m.json")
 		var buf bytes.Buffer
 		Publish(t.Context(), slog.New(slog.NewJSONHandler(&buf, nil)), manifest(), WriteOptions{Dest: dest})
-		ev := logEvents(t, &buf)
-		failed := ev["manifest_failed"]
-		if ev["manifest"] == nil || failed == nil || ev["manifest_written"] != nil {
+		event := logEvents(t, &buf)
+		failed := event["manifest_failed"]
+		if event["manifest"] == nil || failed == nil || event["manifest_written"] != nil {
 			t.Fatalf("%s", buf.String())
 		}
 		if failed["level"] != "WARN" || failed["dest"] != dest || failed["err"] == "" {
@@ -303,9 +303,9 @@ func TestPublish(t *testing.T) {
 		dest := filepath.Join(t.TempDir(), "m.json")
 		var buf bytes.Buffer
 		Publish(t.Context(), slog.New(slog.NewJSONHandler(&buf, nil)), manifest(), WriteOptions{Dest: dest})
-		ev := logEvents(t, &buf)
-		written := ev["manifest_written"]
-		if ev["manifest"] == nil || written == nil || ev["manifest_failed"] != nil {
+		event := logEvents(t, &buf)
+		written := event["manifest_written"]
+		if event["manifest"] == nil || written == nil || event["manifest_failed"] != nil {
 			t.Fatalf("%s", buf.String())
 		}
 		if written["level"] != "INFO" || written["dest"] != dest {
@@ -333,8 +333,8 @@ func logEvents(t *testing.T, buf *bytes.Buffer) map[string]map[string]any {
 		if err := json.Unmarshal(line, &rec); err != nil {
 			t.Fatal(err)
 		}
-		ev, _ := rec["event"].(string)
-		got[ev] = rec
+		event, _ := rec["event"].(string)
+		got[event] = rec
 	}
 	return got
 }

@@ -4,9 +4,9 @@ import (
 	"errors"
 	"log/slog"
 
-	"manifester/internal/core"
-	"manifester/internal/system"
-	"manifester/internal/verify/speccheck/specsystem"
+	"mds/internal/core"
+	"mds/internal/system"
+	"mds/internal/verify/speccheck/specsystem"
 )
 
 // Classifier routes by action: ControlPlaneCall to CP, Obj* to Objects, anything else

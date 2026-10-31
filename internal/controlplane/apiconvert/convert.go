@@ -2,8 +2,8 @@
 package apiconvert
 
 import (
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/core"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/core"
 )
 
 // ToCoreErr maps a wire ErrCode to core.ErrCode. Unknown values become ErrIO.
@@ -115,73 +115,73 @@ func FromCoreOutcome(o core.Outcome) cpv1.Outcome {
 }
 
 // CommitSegmentFromCore builds a CommitSegmentRequest from a core op.
-func CommitSegmentFromCore(op core.CommitSegment) *cpv1.CommitSegmentRequest {
-	req := &cpv1.CommitSegmentRequest{SegmentKey: op.SegmentKey}
-	for _, b := range op.Batches {
-		req.Batches = append(req.Batches, &cpv1.PendingBatch{
-			Tp:      &cpv1.TopicPartition{Topic: b.TP.Topic, Partition: b.TP.Partition},
+func CommitSegmentFromCore(operation core.CommitSegment) *cpv1.CommitSegmentRequest {
+	request := &cpv1.CommitSegmentRequest{SegmentKey: operation.SegmentKey}
+	for _, b := range operation.Batches {
+		request.Batches = append(request.Batches, &cpv1.PendingBatch{
+			Tp:      &cpv1.TopicPartition{Topic: b.TopicPartition.Topic, Partition: b.TopicPartition.Partition},
 			Records: b.Records,
 			Loc:     &cpv1.SegmentRef{Key: b.Loc.Key, Off: b.Loc.Off, Len: b.Loc.Len},
 		})
 	}
-	return req
+	return request
 }
 
 // CommitSegmentToCore rebuilds a core.CommitSegment from a request.
-func CommitSegmentToCore(req *cpv1.CommitSegmentRequest) core.CommitSegment {
-	if req == nil {
+func CommitSegmentToCore(request *cpv1.CommitSegmentRequest) core.CommitSegment {
+	if request == nil {
 		return core.CommitSegment{}
 	}
-	op := core.CommitSegment{SegmentKey: req.SegmentKey}
-	for _, b := range req.Batches {
+	operation := core.CommitSegment{SegmentKey: request.SegmentKey}
+	for _, b := range request.Batches {
 		if b == nil {
 			continue
 		}
-		var tp core.TopicPartition
+		var topicPartition core.TopicPartition
 		if b.Tp != nil {
-			tp = core.NewTopicPartition(b.Tp.Topic, b.Tp.Partition)
+			topicPartition = core.NewTopicPartition(b.Tp.Topic, b.Tp.Partition)
 		}
 		var loc core.SegmentRef
 		if b.Loc != nil {
 			loc = core.SegmentRef{Key: b.Loc.Key, Off: b.Loc.Off, Len: b.Loc.Len}
 		}
-		op.Batches = append(op.Batches, core.PendingBatch{TP: tp, Records: b.Records, Loc: loc})
+		operation.Batches = append(operation.Batches, core.PendingBatch{TopicPartition: topicPartition, Records: b.Records, Loc: loc})
 	}
-	return op
+	return operation
 }
 
 // LookupFromCore builds a LookupRequest from a core op.
-func LookupFromCore(op core.FindSegments) *cpv1.LookupRequest {
+func LookupFromCore(operation core.FindSegments) *cpv1.LookupRequest {
 	return &cpv1.LookupRequest{
-		Tp:       &cpv1.TopicPartition{Topic: op.TP.Topic, Partition: op.TP.Partition},
-		From:     int64(op.From),
-		MaxBytes: op.MaxBytes,
+		Tp:       &cpv1.TopicPartition{Topic: operation.TopicPartition.Topic, Partition: operation.TopicPartition.Partition},
+		From:     int64(operation.From),
+		MaxBytes: operation.MaxBytes,
 	}
 }
 
 // LookupToCore rebuilds a core.FindSegments from a request.
-func LookupToCore(req *cpv1.LookupRequest) core.FindSegments {
-	if req == nil {
+func LookupToCore(request *cpv1.LookupRequest) core.FindSegments {
+	if request == nil {
 		return core.FindSegments{}
 	}
-	op := core.FindSegments{From: core.Offset(req.From), MaxBytes: req.MaxBytes}
-	if req.Tp != nil {
-		op.TP = core.NewTopicPartition(req.Tp.Topic, req.Tp.Partition)
+	operation := core.FindSegments{From: core.Offset(request.From), MaxBytes: request.MaxBytes}
+	if request.Tp != nil {
+		operation.TopicPartition = core.NewTopicPartition(request.Tp.Topic, request.Tp.Partition)
 	}
-	return op
+	return operation
 }
 
 // DescribeTopicsFromCore builds a DescribeTopicsRequest from a core op.
-func DescribeTopicsFromCore(op core.DescribeTopics) *cpv1.DescribeTopicsRequest {
-	return &cpv1.DescribeTopicsRequest{Topics: append([]string(nil), op.Topics...)}
+func DescribeTopicsFromCore(operation core.DescribeTopics) *cpv1.DescribeTopicsRequest {
+	return &cpv1.DescribeTopicsRequest{Topics: append([]string(nil), operation.Topics...)}
 }
 
 // DescribeTopicsToCore rebuilds a core.DescribeTopics from a request.
-func DescribeTopicsToCore(req *cpv1.DescribeTopicsRequest) core.DescribeTopics {
-	if req == nil {
+func DescribeTopicsToCore(request *cpv1.DescribeTopicsRequest) core.DescribeTopics {
+	if request == nil {
 		return core.DescribeTopics{}
 	}
-	return core.DescribeTopics{Topics: append([]string(nil), req.Topics...)}
+	return core.DescribeTopics{Topics: append([]string(nil), request.Topics...)}
 }
 
 // CommitSegmentRespFromCore builds a CommitSegmentResponse from a core response.
@@ -256,8 +256,8 @@ func BrokerHeartbeatFromCore(b core.BrokerAddr) *cpv1.BrokerHeartbeatRequest {
 }
 
 // BrokerHeartbeatToCore rebuilds the calling broker's address from a request.
-func BrokerHeartbeatToCore(req *cpv1.BrokerHeartbeatRequest) core.BrokerAddr {
-	return brokerInfoToCore(req.GetBroker())
+func BrokerHeartbeatToCore(request *cpv1.BrokerHeartbeatRequest) core.BrokerAddr {
+	return brokerInfoToCore(request.GetBroker())
 }
 
 // BrokerHeartbeatRespFromCore builds a BrokerHeartbeatResponse from the live set.
@@ -288,7 +288,7 @@ func brokerInfoToCore(b *cpv1.BrokerInfo) core.BrokerAddr {
 
 func batchRangeFromCore(br core.BatchRange) *cpv1.BatchRange {
 	return &cpv1.BatchRange{
-		Tp:    &cpv1.TopicPartition{Topic: br.TP.Topic, Partition: br.TP.Partition},
+		Tp:    &cpv1.TopicPartition{Topic: br.TopicPartition.Topic, Partition: br.TopicPartition.Partition},
 		Base:  int64(br.Base),
 		Count: br.Count,
 		Loc:   &cpv1.SegmentRef{Key: br.Loc.Key, Off: br.Loc.Off, Len: br.Loc.Len},
@@ -301,7 +301,7 @@ func batchRangeToCore(br *cpv1.BatchRange) core.BatchRange {
 	}
 	out := core.BatchRange{Base: core.Offset(br.Base), Count: br.Count}
 	if br.Tp != nil {
-		out.TP = core.NewTopicPartition(br.Tp.Topic, br.Tp.Partition)
+		out.TopicPartition = core.NewTopicPartition(br.Tp.Topic, br.Tp.Partition)
 	}
 	if br.Loc != nil {
 		out.Loc = core.SegmentRef{Key: br.Loc.Key, Off: br.Loc.Off, Len: br.Loc.Len}

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func ids(bs []core.BrokerAddr) []int32 {

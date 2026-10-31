@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Assertion kinds as recorded in AssertionStat.Kind. Frozen spellings.
@@ -150,14 +150,14 @@ func newHistory(now func() Time, bad func(string)) *history {
 	return &history{idx: map[core.ID]int{}, now: now, bad: bad}
 }
 
-func (h *history) Invoke(client core.NodeInstance, id, value core.ID, op any) {
+func (h *history) Invoke(client core.NodeInstance, id, value core.ID, operation any) {
 	if _, dup := h.idx[id]; dup {
 		h.bad("history: duplicate invoke of an op id")
 		return
 	}
 	h.seq++
 	h.idx[id] = len(h.ops)
-	h.ops = append(h.ops, HistoryOperation{ID: id, Value: value, Client: client, Op: op, InvSeq: h.seq, Invoke: h.now(), Outcome: OpPending})
+	h.ops = append(h.ops, HistoryOperation{ID: id, Value: value, Client: client, Op: operation, InvSeq: h.seq, Invoke: h.now(), Outcome: OpPending})
 }
 
 func (h *history) Return(id core.ID, result any, o OpOutcome) bool {
@@ -167,8 +167,8 @@ func (h *history) Return(id core.ID, result any, o OpOutcome) bool {
 		return false
 	}
 	h.seq++
-	op := &h.ops[i]
-	op.RetSeq, op.Return, op.Result, op.Outcome = h.seq, h.now(), result, o
+	operation := &h.ops[i]
+	operation.RetSeq, operation.Return, operation.Result, operation.Outcome = h.seq, h.now(), result, o
 	return true
 }
 

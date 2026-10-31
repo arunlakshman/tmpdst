@@ -3,7 +3,7 @@ package broker
 import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Group APIs (decision Q3). The broker keeps no group state. Each call is one
@@ -23,8 +23,8 @@ const groupCallMargin = 10 * core.Second
 const syncWait = 60 * core.Second
 
 // dispatchGroup routes the group APIs. It reports false for other requests.
-func (b *Broker) dispatchGroup(s *slot, req core.Request) ([]core.Action, bool) {
-	switch r := req.(type) {
+func (b *Broker) dispatchGroup(s *slot, request core.Request) ([]core.Action, bool) {
+	switch r := request.(type) {
 	case *kmsg.FindCoordinatorRequest:
 		return b.findCoordinator(s, r), true
 	case *kmsg.JoinGroupRequest:
@@ -49,12 +49,12 @@ func (b *Broker) dispatchGroup(s *slot, req core.Request) ([]core.Action, bool) 
 
 // groupCall starts one group call as a part of slot s. fill writes the answer
 // into the response when the control plane replies. timeout 0 takes the default.
-func (b *Broker) groupCall(s *slot, op core.ControlPlaneOperation, timeout core.Duration, fill func(core.ControlPlaneDone)) []core.Action {
-	return b.startOp(&operation{kind: opGroup, s: s, gop: op, gtimeout: timeout, gfill: fill})
+func (b *Broker) groupCall(s *slot, controlPlaneOperation core.ControlPlaneOperation, timeout core.Duration, fill func(core.ControlPlaneDone)) []core.Action {
+	return b.startOp(&operation{kind: opGroup, s: s, gop: controlPlaneOperation, gtimeout: timeout, gfill: fill})
 }
 
-// onGroupCP answers a group call that the control plane replied to.
-func (b *Broker) onGroupCP(o *operation, e core.ControlPlaneDone) []core.Action {
+// onGroupControlPlane answers a group call that the control plane replied to.
+func (b *Broker) onGroupControlPlane(o *operation, e core.ControlPlaneDone) []core.Action {
 	o.gfill(e)
 	return b.endOp(o)
 }
@@ -100,10 +100,10 @@ func groupErrCode(c core.ErrCode) kafkaErrorCode {
 // end, so it gets the rebalance timeout as its deadline, plus a margin. Version
 // 0 has no rebalance timeout, so the session timeout is used.
 func (b *Broker) joinGroup(s *slot, r *kmsg.JoinGroupRequest) []core.Action {
-	resp := kmsg.NewPtrJoinGroupResponse()
-	s.resp = resp
+	response := kmsg.NewPtrJoinGroupResponse()
+	s.response = response
 	if r.Group == "" {
-		resp.ErrorCode = int16(errInvalidGroupID)
+		response.ErrorCode = int16(errInvalidGroupID)
 		return nil
 	}
 	rebalance := r.RebalanceTimeoutMillis
@@ -119,15 +119,15 @@ func (b *Broker) joinGroup(s *slot, r *kmsg.JoinGroupRequest) []core.Action {
 		call.Protocols = append(call.Protocols, core.GroupProtocol{Name: p.Name, Metadata: p.Metadata})
 	}
 	fill := func(e core.ControlPlaneDone) {
-		resp.ErrorCode = int16(groupErrCode(e.Err))
+		response.ErrorCode = int16(groupErrCode(e.Err))
 		if e.Err != core.OK {
 			return
 		}
 		j := core.ResponseAs[core.GroupJoinResp](e)
-		resp.Generation, resp.LeaderID, resp.MemberID = j.Generation, j.Leader, j.MemberID
-		resp.ProtocolType, resp.Protocol = new(r.ProtocolType), new(j.Protocol)
+		response.Generation, response.LeaderID, response.MemberID = j.Generation, j.Leader, j.MemberID
+		response.ProtocolType, response.Protocol = new(r.ProtocolType), new(j.Protocol)
 		for _, m := range j.Members {
-			resp.Members = append(resp.Members, kmsg.JoinGroupResponseMember{
+			response.Members = append(response.Members, kmsg.JoinGroupResponseMember{
 				MemberID: m.MemberID, InstanceID: optStr(m.GroupInstanceID), ProtocolMetadata: m.Metadata})
 		}
 	}
@@ -138,10 +138,10 @@ func (b *Broker) joinGroup(s *slot, r *kmsg.JoinGroupRequest) []core.Action {
 // assignments. A follower's call waits for the leader, so it gets syncWait as
 // its deadline, plus a margin.
 func (b *Broker) syncGroup(s *slot, r *kmsg.SyncGroupRequest) []core.Action {
-	resp := kmsg.NewPtrSyncGroupResponse()
-	s.resp = resp
+	response := kmsg.NewPtrSyncGroupResponse()
+	s.response = response
 	if r.Group == "" {
-		resp.ErrorCode = int16(errInvalidGroupID)
+		response.ErrorCode = int16(errInvalidGroupID)
 		return nil
 	}
 	call := core.GroupSync{Group: r.Group, MemberID: r.MemberID, Generation: r.Generation}
@@ -149,10 +149,10 @@ func (b *Broker) syncGroup(s *slot, r *kmsg.SyncGroupRequest) []core.Action {
 		call.Assignments = append(call.Assignments, core.GroupAssignment{Member: a.MemberID, Bytes: a.MemberAssignment})
 	}
 	fill := func(e core.ControlPlaneDone) {
-		resp.ErrorCode = int16(groupErrCode(e.Err))
+		response.ErrorCode = int16(groupErrCode(e.Err))
 		if e.Err == core.OK {
-			resp.MemberAssignment = core.ResponseAs[core.GroupSyncResp](e).Assignment
-			resp.ProtocolType, resp.Protocol = r.ProtocolType, r.Protocol
+			response.MemberAssignment = core.ResponseAs[core.GroupSyncResp](e).Assignment
+			response.ProtocolType, response.Protocol = r.ProtocolType, r.Protocol
 		}
 	}
 	return b.groupCall(s, call, syncWait+groupCallMargin, fill)
@@ -161,33 +161,33 @@ func (b *Broker) syncGroup(s *slot, r *kmsg.SyncGroupRequest) []core.Action {
 // heartbeat answers Heartbeat (key 12). A rebalance answers REBALANCE_IN_PROGRESS,
 // which tells the member to rejoin.
 func (b *Broker) heartbeat(s *slot, r *kmsg.HeartbeatRequest) []core.Action {
-	resp := kmsg.NewPtrHeartbeatResponse()
-	s.resp = resp
+	response := kmsg.NewPtrHeartbeatResponse()
+	s.response = response
 	if r.Group == "" {
-		resp.ErrorCode = int16(errInvalidGroupID)
+		response.ErrorCode = int16(errInvalidGroupID)
 		return nil
 	}
 	call := core.GroupHeartbeat{Group: r.Group, MemberID: r.MemberID, Generation: r.Generation}
-	fill := func(e core.ControlPlaneDone) { resp.ErrorCode = int16(groupErrCode(e.Err)) }
+	fill := func(e core.ControlPlaneDone) { response.ErrorCode = int16(groupErrCode(e.Err)) }
 	return b.groupCall(s, call, 0, fill)
 }
 
 // leaveGroup answers LeaveGroup (key 13). Version 0 to 2 name one member
 // (MemberID). Version 3 and up name a list, and each member gets its own code.
 func (b *Broker) leaveGroup(s *slot, r *kmsg.LeaveGroupRequest) []core.Action {
-	resp := kmsg.NewPtrLeaveGroupResponse()
-	s.resp = resp
+	response := kmsg.NewPtrLeaveGroupResponse()
+	s.response = response
 	if r.Group == "" {
-		resp.ErrorCode = int16(errInvalidGroupID)
+		response.ErrorCode = int16(errInvalidGroupID)
 		return nil
 	}
 	var names []string
 	if r.Version < 3 {
-		resp.Members = []kmsg.LeaveGroupResponseMember{{MemberID: r.MemberID}}
+		response.Members = []kmsg.LeaveGroupResponseMember{{MemberID: r.MemberID}}
 		names = []string{r.MemberID}
 	}
 	for _, m := range r.Members {
-		resp.Members = append(resp.Members, kmsg.LeaveGroupResponseMember{MemberID: m.MemberID, InstanceID: m.InstanceID})
+		response.Members = append(response.Members, kmsg.LeaveGroupResponseMember{MemberID: m.MemberID, InstanceID: m.InstanceID})
 		names = append(names, m.MemberID)
 	}
 	if len(names) == 0 {
@@ -196,11 +196,11 @@ func (b *Broker) leaveGroup(s *slot, r *kmsg.LeaveGroupRequest) []core.Action {
 	call := core.GroupLeave{Group: r.Group, Members: names}
 	fill := func(e core.ControlPlaneDone) {
 		codes := core.ResponseAs[core.GroupLeaveResp](e).Errs
-		for i := range resp.Members {
-			resp.Members[i].ErrorCode = int16(groupErrCode(leaveCode(e, codes, i)))
+		for i := range response.Members {
+			response.Members[i].ErrorCode = int16(groupErrCode(leaveCode(e, codes, i)))
 		}
 		if r.Version < 3 { // version 0 to 2 has one top level code
-			resp.ErrorCode = resp.Members[0].ErrorCode
+			response.ErrorCode = response.Members[0].ErrorCode
 		}
 	}
 	return b.groupCall(s, call, 0, fill)
@@ -233,6 +233,6 @@ func optStr(s string) *string {
 	return &s
 }
 
-func millisDuration(ms int32) core.Duration {
-	return core.Duration(ms) * core.Millisecond
+func millisDuration(milliseconds int32) core.Duration {
+	return core.Duration(milliseconds) * core.Millisecond
 }

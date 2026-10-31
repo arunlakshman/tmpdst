@@ -63,7 +63,7 @@ done, and one weakness of L that I found (idea B).
 
 **What changes.** Today L's `G#`/`LOG` entry holds *outputs*: bases computed by the sequencer from in-memory `ends`.
 Instead the log entry holds the **input**: the `CommitSegment` request (partition table, batch locations, key), no bases.
-Every CP replica is a Delos-style learner: it reads the log in order, applies each entry to the `veritas` state machine,
+Every CP replica is a Delos-style learner: it reads the log in order, applies each entry to the `speccheck` state machine,
 and gets identical bases, identical `ErrConflict`/replay answers and identical state. The appender answers the broker
 when its own slot has been applied locally (Delos 4; LogDrive 5.1 "multi-master mode").
 
@@ -81,7 +81,7 @@ when its own slot has been applied locally (Delos 4; LogDrive 5.1 "multi-master 
           +------+------+       +-------------+        +-------------+
                  | answer when own slot applied (bases known)
    Lookup(any replica): checkTail (1 consistent Query, shared by queued lookups) -> catch up -> answer from memory
-   every ~10 min: replica writes CKPT (ends, key set, index cursor) to S3 -> prefixTrim LOG below it
+   every ~10 min: replica writes CHECKPOINT (ends, key set, index cursor) to S3 -> prefixTrim LOG below it
    async: indexer (L's R# runs, or idea B) is a deterministic function of the log, any replica may run it
 ```
 
@@ -100,7 +100,7 @@ slot and gets its bases at apply time (**inferred**, but a direct consequence of
 - The permanent `G#` items go away. Idempotency per key becomes "first occurrence in the log wins", with the key set
   carried in the checkpoint. Keys older than the checkpoint window lose the guarantee, which is a product decision
   (**inferred** risk; decision 41 already allows duplicate records on client retry, and `CommitDeadline` is 120 s).
-- It fits the project: the state machine is `veritas.ControlPlane` (208 lines, only maps, no clock or randomness, so
+- It fits the project: the state machine is `speccheck.ControlPlane` (208 lines, only maps, no clock or randomness, so
   deterministic), the sim can replay one log through N replicas and compare `StateHash`. Decision 21 gets stronger.
 
 **Numbers (computed).** Entry about 3.4 KB at 16 MiB segments (L section 5.1), 4 WRU as a plain Put, 30 segments/s =
@@ -112,8 +112,8 @@ before striping (idea D).
 **Risks and unknowns.**
 - **Contention with several appenders** (decision 46: 387 of 705 attempts cancelled with 6 contenders). With input
   logging a lost slot costs one cheap retried Put, not a lost 97-item transaction (**inferred**), but unmeasured.
-- **Holes.** K in-flight Puts by one writer can leave slot n empty if the writer dies after n+1. Learners apply only the
-  contiguous prefix. A learner that sees a hole older than T fills it with a no-op via `attribute_not_exists`; the
+- **Gaps.** K in-flight Puts by one writer can leave slot n empty if the writer dies after n+1. Learners apply only the
+  contiguous prefix. A learner that sees a gap older than T fills it with a no-op via `attribute_not_exists`; the
   original command then fails its condition and the broker retries under the same key (Corfu-style fill; LogDrive uses
   weakTail with window K for the same problem). Needs sim coverage.
 - **Apply-time errors.** Invalid commands (unknown topic) consume a slot and are rejected at apply. Fine, but changes
@@ -123,9 +123,9 @@ before striping (idea D).
 - **Ordering.** One in-flight segment per broker (L 5.8) keeps seal order equal to slot order for a broker. Unchanged.
 - Latency of a single PutItem of 4 KB versus a 2-3 item transaction is **unknown** (L's E1 measures the second).
 
-### B. Take the per-partition index out of DynamoDB (and fix a hole in L at 40k partitions)
+### B. Take the per-partition index out of DynamoDB (and fix a gap in L at 40k partitions)
 
-**The hole (computed).** L section 7 says index cost is "bounded by bytes, not items": 290 WRU/s. That holds at 288
+**The gap (computed).** L section 7 says index cost is "bounded by bytes, not items": 290 WRU/s. That holds at 288
 partitions because 288 run items carry ~22 batches each. At 40k partitions it does not: a run item costs at least 1 WRU
 however small. 6,450 batches/s over 40k partitions with F=1 s touches 40000 x (1 - e^-0.161) = about 5.9k distinct
 partitions per flush, so about 5.9k WRU/s = **about $9.8k/month**, nearly half of today's $21k. F=10 s gives about 3.2k
@@ -176,7 +176,7 @@ the sim. Do the **interface only** now; build the chain register when a second l
 - **Segment object as the log entry (S3 data-plane append).** Variant 1: the broker gets a slot from the CP, then PUTs
   `log/<slot>` with `If-None-Match`. This is the AtomicLog `acquireSlot` protocol (LogDrive 4). A broker that dies
   after acquiring a slot stalls the window; the paper handles that by sealing the whole log. That breaks decisions 29/44
-  (brokers are cattle) unless the CP fills holes, which adds a hop and a failure mode to the ack path. Variant 2: embed
+  (brokers are cattle) unless the CP fills gaps, which adds a hop and a failure mode to the ack path. Variant 2: embed
   the batch table as a footer so S3 alone can be rescanned (LogDrive 5.2 "reconstruct the system entirely from S3 and
   Conflux"): useful for disaster recovery, but a scan loses the order. The most DynamoDB it could save is the
   ~$0.2-0.5k/month commit cost. Not worth it.
@@ -188,7 +188,7 @@ the sim. Do the **interface only** now; build the chain register when a second l
 
 | # | idea | gain at our bottleneck | build | main unknown |
 |---|---|---|---|---|
-| 1 | A: command log + learner CPs, pipelined | same as L, plus fresh Lookup anywhere, hot standby, no `G#`, no lease | about L's size (L ~20 days; A replaces the tx with Put and adds apply/hole-fill) | single Put latency, contention, hole fill |
+| 1 | A: command log + learner CPs, pipelined | same as L, plus fresh Lookup anywhere, hot standby, no `G#`, no lease | about L's size (L ~20 days; A replaces the tx with Put and adds apply/gap-fill) | single Put latency, contention, gap fill |
 | 2 | B: checkpoint to S3 + trim, index off DynamoDB | removes the 40k-partition index cost ($9.8k to ~$0.3k/month, computed) | checkpoint/trim 3 days; compacted S3 index weeks | index memory, cold Lookup latency |
 | 3 | C: Loglet seam, chain later | insurance, faster takeover | interface 1-2 days | seal check ordering |
 | 4 | D: stripe the order | hot-key insurance only | 2 days when needed | none until E2 |
@@ -206,8 +206,8 @@ the sim. Do the **interface only** now; build the chain register when a second l
 - **X1 (AWS, under $2).** Sequential slots on one pk, `PutItem` 4 KB with `attribute_not_exists`, K = 1, 4, 16 in
   flight, at 30, 64, 128, 250 entries/s, 10 minutes each. Record p50/p99, throttling, and compare with L's E1 and E2. Kills or
   confirms A's latency and hot-key assumptions.
-- **X2 (local, no AWS).** Wrap `veritas.ControlPlane` as a state machine over a command log. Run 3 replicas with
-  random interleavings, duplicate keys, lost slots, holes and a hole-filler. Check `StateHash` equality and the oracle.
+- **X2 (local, no AWS).** Wrap `speccheck.ControlPlane` as a state machine over a command log. Run 3 replicas with
+  random interleavings, duplicate keys, lost slots, gaps and a gap-filler. Check `StateHash` equality and the oracle.
   Also benchmark apply rate in Go (the Delos 5.1 playback limit).
 - **X3 (AWS, under $1).** Consistent `Query` Limit 1 descending and `Query sk > n` at 20/s: latency and RRU; then
   50 ms bus-stand batching of lookups.
@@ -219,7 +219,7 @@ the sim. Do the **interface only** now; build the chain register when a second l
 ## 8. Interaction with project constraints
 
 - **Determinism and sim:** A makes the CP a pure state machine over an ordered input, the best case for deterministic
-  simulation; the new sim surface is the append/hole-fill/tail protocol (Conflux authors report their simulator found
+  simulation; the new sim surface is the append/gap-fill/tail protocol (Conflux authors report their simulator found
   a linearizability bug in their S3 LogDrive and a seal-ordering bug, LogDrive 4.1). Every trace hash changes, as in L.
 - **Decision 29/44:** brokers are untouched; the CP also becomes cattle (any replica works).
 - **Decisions 41-47:** at-least-once stays; key idempotency becomes windowed (a product decision). Decision 46's "one

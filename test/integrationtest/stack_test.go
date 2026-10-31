@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/broker"
-	"manifester/internal/controlplane/controlplaneclient"
-	"manifester/internal/controlplane/grpctestserver"
-	"manifester/internal/core"
-	"manifester/internal/system"
-	"manifester/internal/system/production"
-	"manifester/internal/verify/speccheck/specsystem"
+	"mds/internal/broker"
+	"mds/internal/controlplane/controlplaneclient"
+	"mds/internal/controlplane/grpctestserver"
+	"mds/internal/core"
+	"mds/internal/system"
+	"mds/internal/system/production"
+	"mds/internal/verify/speccheck/specsystem"
 )
 
 // stack is a control plane, an object store and any number of brokers.

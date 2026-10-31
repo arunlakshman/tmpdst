@@ -3,5 +3,5 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 docker compose -f ops/deploy/docker-compose.yml up -d --wait
-echo "export MANIFESTER_DYNAMO_ENDPOINT=http://127.0.0.1:18080"
-echo "export MANIFESTER_S3_ENDPOINT=http://127.0.0.1:8333"
+echo "export MDS_DYNAMO_ENDPOINT=http://127.0.0.1:18080"
+echo "export MDS_S3_ENDPOINT=http://127.0.0.1:8333"

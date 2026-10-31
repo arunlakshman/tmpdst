@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // A join whose ctx ends while it is parked gets the ctx error, and the
@@ -17,15 +17,15 @@ func TestJoinCtxEndsWhileParked(t *testing.T) {
 	id := "m1"
 	done := make(chan joinResult, 1)
 	go func() {
-		resp, err := h.c.JoinGroup(ctx, h.joinReq("g", ""))
-		done <- joinResult{resp, err}
+		response, err := h.c.JoinGroup(ctx, h.joinReq("g", ""))
+		done <- joinResult{response, err}
 	}()
 	waitUntil(t, func() bool { return peek(h.c, "g").joined[id] })
 
 	cancel()
 	r := h.recvJoin(done)
 	if !errors.Is(r.err, context.Canceled) {
-		t.Fatalf("canceled join: %+v %v, want context.Canceled", r.resp, r.err)
+		t.Fatalf("canceled join: %+v %v, want context.Canceled", r.response, r.err)
 	}
 	if peek(h.c, "g").joined[id] {
 		t.Fatal("canceled join is still parked")
@@ -39,8 +39,8 @@ func TestJoinCanceledThenRoundCompletes(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan joinResult, 1)
 	go func() {
-		resp, err := h.c.JoinGroup(ctx, h.joinReq("g", ""))
-		done <- joinResult{resp, err}
+		response, err := h.c.JoinGroup(ctx, h.joinReq("g", ""))
+		done <- joinResult{response, err}
 	}()
 	waitUntil(t, func() bool { return peek(h.c, "g").joined["m1"] })
 	cancel()
@@ -53,8 +53,8 @@ func TestJoinCanceledThenRoundCompletes(t *testing.T) {
 	id, ch := h.join("g")
 	h.clock.Advance(time.Duration(h.session) * time.Millisecond)
 	r := h.recvJoin(ch)
-	if r.err != nil || r.resp.Err != core.OK || r.resp.Generation != 1 || r.resp.MemberID != id {
-		t.Fatalf("second join: %+v %v", r.resp, r.err)
+	if r.err != nil || r.response.Err != core.OK || r.response.Generation != 1 || r.response.MemberID != id {
+		t.Fatalf("second join: %+v %v", r.response, r.err)
 	}
 	if v := peek(h.c, "g"); v.joined[id] {
 		t.Fatalf("after round: %+v", v)

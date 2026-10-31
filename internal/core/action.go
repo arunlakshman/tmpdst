@@ -52,7 +52,7 @@ type PauseReads struct{ Conn ConnID }
 // ResumeReads undoes PauseReads.
 type ResumeReads struct{ Conn ConnID }
 
-// Connect opens an outbound connection (used by sim workloads; brokers reach the
+// Connect opens an outbound connection (used by simulator workloads; brokers reach the
 // control plane through ControlPlaneCall, not raw dials).
 type Connect struct {
 	Req  RequestID
@@ -90,7 +90,7 @@ type ObjectList struct {
 
 // ControlPlaneCall asks the executor to perform one control-plane RPC. The wire contract
 // is controlplane/api/v1 (decision 57). Op is the in-process vocabulary brokers
-// and sim use today; controlplane/apiconv maps Op to generated request
+// and simulator use today; controlplane/apiconvert maps Op to generated request
 // messages. Typed *Request fields stay off this struct until the gRPC cutover:
 // importing the generated package would pull grpc into core's dep closure and
 // fail the determinism audit.
@@ -104,7 +104,7 @@ type ControlPlaneCall struct {
 
 // ---- shared command log (Dynamo loglet; engine lands in a later PR) ----
 
-// ControlPlaneReply asks the sim CP bridge to deliver Done to To (the broker that
+// ControlPlaneReply asks the simulator CP bridge to deliver Done to To (the broker that
 // issued the matching ControlPlaneCall). Production uses gRPC waiters instead.
 type ControlPlaneReply struct {
 	To   NodeInstance
@@ -145,12 +145,12 @@ type LogDeleteOld struct {
 type StopForRestart struct{ Cause string }
 
 // ShutdownDone is the last action of a graceful shutdown (see StopRequest). Like StopForRestart it ends
-// the incarnation, but it is not a fault: the sim counts it as a graceful stop.
+// the incarnation, but it is not a fault: the simulator counts it as a graceful stop.
 type ShutdownDone struct{}
 
 // ---- observability ----
 
-// RecordFact appends a fact to the timeline (sim: invariants read it; prod: tracing).
+// RecordFact appends a fact to the timeline (simulator: invariants read it; prod: tracing).
 type RecordFact struct{ Fact Fact }
 
 func (SetTimer) isAction()          {}

@@ -3,7 +3,7 @@ package speccheck
 import (
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // otherOp is an operation that Exec does not know. The embedded interface
@@ -14,13 +14,13 @@ type otherOp struct{ core.ControlPlaneOperation }
 func TestExecDispatch(t *testing.T) {
 	c := newGroupControl(t)
 	cases := []struct {
-		name    string
-		op      core.ControlPlaneOperation
-		want    core.ErrCode
-		outcome core.Outcome
+		name      string
+		operation core.ControlPlaneOperation
+		want      core.ErrCode
+		outcome   core.Outcome
 	}{
 		{"commit", core.CommitSegment{SegmentKey: "s", Batches: []core.PendingBatch{pb("orders", 0, 2)}}, core.OK, core.Applied},
-		{"lookup", core.FindSegments{TP: tp("orders", 0), From: -1}, core.ErrInvalid, core.NotApplied},
+		{"lookup", core.FindSegments{TopicPartition: tp("orders", 0), From: -1}, core.ErrInvalid, core.NotApplied},
 		{"describe topics", core.DescribeTopics{}, core.OK, core.NotApplied},
 		{"create topic", core.CreateTopic{Name: "n", Partitions: 1}, core.OK, core.Applied},
 		{"group install", gInstall("g", 1, "m1", "m1"), core.OK, core.Applied},
@@ -33,7 +33,7 @@ func TestExecDispatch(t *testing.T) {
 		{"unknown operation", otherOp{}, core.ErrInvalid, core.NotApplied},
 	}
 	for _, tc := range cases {
-		d := call(c, tc.op)
+		d := call(c, tc.operation)
 		if d.Err != tc.want || d.Outcome != tc.outcome {
 			t.Fatalf("%s: err %v outcome %v, want %v %v", tc.name, d.Err, d.Outcome, tc.want, tc.outcome)
 		}

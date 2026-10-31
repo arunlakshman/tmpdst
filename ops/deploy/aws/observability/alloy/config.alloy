@@ -90,7 +90,7 @@ loki.relabel "journal" {
 
 	rule {
 		source_labels = ["__journal__systemd_unit"]
-		regex         = "(manibroker|manicp|loadgen|manibench)[^.]*\\.service"
+		regex         = "(mdsbroker|mdscontrolplane|loadgen|mdsbench)[^.]*\\.service"
 		action        = "keep"
 	}
 

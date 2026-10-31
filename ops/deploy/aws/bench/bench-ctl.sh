@@ -4,20 +4,20 @@
 #
 #   bench-ctl.sh [--tf-dir DIR] [--region R] [--run-id ID] <command> [args]
 #
-#   create-topic [PARTITIONS=288] [TOPIC]   POST /v1/create-topic on the control-plane host's loopback manicp (the ONE
-#                                           manicp, decision 46) through SSM send-command; then describes the topic.
-#   check-cp                                verify the single control plane: exactly one manicp process on the CP host,
-#                                           healthz ok, no manicp on any broker, every broker reaches CP:8080
+#   create-topic [PARTITIONS=288] [TOPIC]   POST /v1/create-topic on the control-plane host's loopback mdscontrolplane (the ONE
+#                                           mdscontrolplane, decision 46) through SSM send-command; then describes the topic.
+#   check-cp                                verify the single control plane: exactly one mdscontrolplane process on the CP host,
+#                                           healthz ok, no mdscontrolplane on any broker, every broker reaches CP:8080
 #   cp-roles                                print /healthz and the X-CP-Role header (active|standby) of every CP host (log store)
-#   kill-appender [DOWN_SECONDS=60]         SIGKILL manicp on the rank-0 CP host, keep it down DOWN_SECONDS, then start it again
+#   kill-appender [DOWN_SECONDS=60]         SIGKILL mdscontrolplane on the rank-0 CP host, keep it down DOWN_SECONDS, then start it again
 #                                           (it fails back as the preferred appender). Runs detached on the host; prints the time and
 #                                           writes results/RUN/markers/kill-appender-<epoch>.txt for summarize.py's failover summary.
 #   start-workers                           run /opt/bench/start-omb-workers.sh on every loadgen host
 #   stop-workers
 #   worker-status
 #   run [run-omb.sh args]                   start run-omb.sh DETACHED on loadgen 0 (log /var/log/omb-run.log)
-#   broker-args [FLAGS...]                  append FLAGS (e.g. -segment-window 1s) to every manibroker's command line through a
-#                                           systemd drop-in and restart manibroker; no FLAGS removes the drop-in (defaults)
+#   broker-args [FLAGS...]                  append FLAGS (e.g. -segment-window 1s) to every mdsbroker's command line through a
+#                                           systemd drop-in and restart mdsbroker; no FLAGS removes the drop-in (defaults)
 #   tail [N=40]                             last N lines of that log
 #   abort                                   touch the STOP file and kill the coordinator on loadgen 0
 #
@@ -85,41 +85,41 @@ case "$cmd" in
     parts=${1:-288}
     topic=${2:-omb-${RUN_ID:?--run-id or RUN_ID, or pass the topic name}}
     [ -n "$CP_INSTANCE_ID" ] || { echo "no control-plane instance: set CP_INSTANCE_ID or use --tf-dir (terraform output cp_instance_id)" >&2; exit 1; }
-    echo "creating $topic with $parts partitions through the control-plane manicp on $CP_INSTANCE_ID"
-    # Hosts have no Kafka CLI (only loadgens do), so verify through manicp's describe-topics; run-omb.sh pre-flight
+    echo "creating $topic with $parts partitions through the control-plane mdscontrolplane on $CP_INSTANCE_ID"
+    # Hosts have no Kafka CLI (only loadgens do), so verify through mdscontrolplane's describe-topics; run-omb.sh pre-flight
     # re-checks over the Kafka port on every broker. ErrInvalid on create means the topic already exists with other settings.
     ssm_run "$CP_INSTANCE_ID" "set -e; curl -sf -m 20 -X POST http://127.0.0.1:8080/v1/create-topic -d '{\"topic\":\"$topic\",\"partitions\":$parts}'; echo; curl -sf -m 20 -X POST http://127.0.0.1:8080/v1/describe-topics -d '{\"topics\":[\"$topic\"]}' | head -c 300; echo" ||
       { echo "create-topic failed" >&2; exit 1; }
     ;;
   check-cp)
     [ -n "$CP_INSTANCE_ID" ] || { echo "no control-plane instance: set CP_INSTANCE_ID or use --tf-dir" >&2; exit 1; }
-    echo "== control-plane host $CP_INSTANCE_ID: exactly one manicp, healthy"
-    ssm_run "$CP_INSTANCE_ID" "n=\$(pgrep -x manicp | wc -l); echo manicp processes: \$n; systemctl is-active manicp mb-snapshot alloy; curl -sf -m 5 http://127.0.0.1:8080/healthz && echo healthz ok; [ \$n -eq 1 ]" ||
+    echo "== control-plane host $CP_INSTANCE_ID: exactly one mdscontrolplane, healthy"
+    ssm_run "$CP_INSTANCE_ID" "n=\$(pgrep -x mdscontrolplane | wc -l); echo mdscontrolplane processes: \$n; systemctl is-active mdscontrolplane mb-snapshot alloy; curl -sf -m 5 http://127.0.0.1:8080/healthz && echo healthz ok; [ \$n -eq 1 ]" ||
       { echo "check-cp FAILED on the control-plane host" >&2; exit 1; }
     for sb in $CP_STANDBY_INSTANCE_IDS; do
-      echo "== standby control-plane host $sb: one manicp, healthy"
-      ssm_run "$sb" "n=\$(pgrep -x manicp | wc -l); echo manicp processes: \$n; systemctl is-active manicp mb-snapshot alloy; curl -sf -m 5 http://127.0.0.1:8080/healthz && echo healthz ok; [ \$n -eq 1 ]" ||
+      echo "== standby control-plane host $sb: one mdscontrolplane, healthy"
+      ssm_run "$sb" "n=\$(pgrep -x mdscontrolplane | wc -l); echo mdscontrolplane processes: \$n; systemctl is-active mdscontrolplane mb-snapshot alloy; curl -sf -m 5 http://127.0.0.1:8080/healthz && echo healthz ok; [ \$n -eq 1 ]" ||
         { echo "check-cp FAILED on standby $sb" >&2; exit 1; }
     done
-    echo "== broker hosts: no manicp, CP reachable${CP_PRIVATE_IP:+ at $CP_PRIVATE_IP:8080}"
-    ssm_run "$BROKER_INSTANCE_IDS" "echo manicp processes: \$(pgrep -x manicp | wc -l); systemctl is-active manibroker; curl -sf -m 5 http://${CP_PRIVATE_IP:-CP_IP_UNKNOWN}:8080/healthz && echo cp reachable" ||
-      { echo "check-cp: a broker cannot reach the CP (or runs manicp)" >&2; exit 1; }
+    echo "== broker hosts: no mdscontrolplane, CP reachable${CP_PRIVATE_IP:+ at $CP_PRIVATE_IP:8080}"
+    ssm_run "$BROKER_INSTANCE_IDS" "echo mdscontrolplane processes: \$(pgrep -x mdscontrolplane | wc -l); systemctl is-active mdsbroker; curl -sf -m 5 http://${CP_PRIVATE_IP:-CP_IP_UNKNOWN}:8080/healthz && echo cp reachable" ||
+      { echo "check-cp: a broker cannot reach the CP (or runs mdscontrolplane)" >&2; exit 1; }
     ;;
   cp-roles)
     # shellcheck disable=SC2086
-    ssm_run "$CP_ALL_IDS" "curl -s -m 5 -D - -o /dev/null http://127.0.0.1:8080/healthz | grep -i -E '^(HTTP|x-cp-role)'; systemctl is-active manicp" ;;
+    ssm_run "$CP_ALL_IDS" "curl -s -m 5 -D - -o /dev/null http://127.0.0.1:8080/healthz | grep -i -E '^(HTTP|x-cp-role)'; systemctl is-active mdscontrolplane" ;;
   kill-appender)
     down=${1:-60}
     [ -n "$CP_INSTANCE_ID" ] || { echo "no control-plane instance: set CP_INSTANCE_ID or use --tf-dir" >&2; exit 1; }
     date -u +"kill at %Y-%m-%dT%H:%M:%SZ (note it for the report)"
-    ssm_run "$CP_INSTANCE_ID" "nohup bash -c '. /etc/manifester/snapshot.env; t=\$(date +%s); echo kill_epoch=\$t | aws s3 cp - s3://\$BUCKET/results/\$RUN_ID/markers/kill-appender-\$t.txt --only-show-errors --region \$AWS_REGION || true; systemctl kill -s SIGKILL manicp; systemctl stop manicp; sleep $down; systemctl start manicp' >/var/log/kill-appender.log 2>&1 & echo killer started" ;;
+    ssm_run "$CP_INSTANCE_ID" "nohup bash -c '. /etc/mds/snapshot.env; t=\$(date +%s); echo kill_epoch=\$t | aws s3 cp - s3://\$BUCKET/results/\$RUN_ID/markers/kill-appender-\$t.txt --only-show-errors --region \$AWS_REGION || true; systemctl kill -s SIGKILL mdscontrolplane; systemctl stop mdscontrolplane; sleep $down; systemctl start mdscontrolplane' >/var/log/kill-appender.log 2>&1 & echo killer started" ;;
   broker-args)
     # Flags later on the command line override earlier ones (Go flag package), so appending is enough.
     flags=$*
     if [ -z "$flags" ]; then
-      ssm_run "$BROKER_INSTANCE_IDS" "rm -rf /etc/systemd/system/manibroker.service.d; systemctl daemon-reload; systemctl restart manibroker; sleep 3; systemctl is-active manibroker; pgrep -a manibroker | cut -c1-400"
+      ssm_run "$BROKER_INSTANCE_IDS" "rm -rf /etc/systemd/system/mdsbroker.service.d; systemctl daemon-reload; systemctl restart mdsbroker; sleep 3; systemctl is-active mdsbroker; pgrep -a mdsbroker | cut -c1-400"
     else
-      ssm_run "$BROKER_INSTANCE_IDS" "set -e; o=\$(grep '^ExecStart=' /etc/systemd/system/manibroker.service); mkdir -p /etc/systemd/system/manibroker.service.d; printf '[Service]\nExecStart=\n%s %s\n' \"\$o\" '$flags' > /etc/systemd/system/manibroker.service.d/bench-args.conf; systemctl daemon-reload; systemctl restart manibroker; sleep 3; systemctl is-active manibroker; pgrep -a manibroker | cut -c1-400"
+      ssm_run "$BROKER_INSTANCE_IDS" "set -e; o=\$(grep '^ExecStart=' /etc/systemd/system/mdsbroker.service); mkdir -p /etc/systemd/system/mdsbroker.service.d; printf '[Service]\nExecStart=\n%s %s\n' \"\$o\" '$flags' > /etc/systemd/system/mdsbroker.service.d/bench-args.conf; systemctl daemon-reload; systemctl restart mdsbroker; sleep 3; systemctl is-active mdsbroker; pgrep -a mdsbroker | cut -c1-400"
     fi
     ;;
   start-workers) ssm_run "$LOADGEN_INSTANCE_IDS" "/opt/bench/start-omb-workers.sh start" ;;

@@ -6,9 +6,9 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck"
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck"
+	"mds/internal/wire/kafkawire"
 )
 
 // testEnv is a seeded core.Environment that records assertion violations. It keeps its
@@ -70,14 +70,14 @@ type client struct {
 // are computed when the I/O action is issued and delivered through a queue, so
 // tests can hold them back (holdCP, holdPut) or fault them (cpHook, objHook).
 type harness struct {
-	t     *testing.T
-	b     *Broker
-	env   *testEnv
-	store *speccheck.ObjectStore
-	cp    *speccheck.ControlPlane
-	cfg   Config
-	self  core.NodeInstance
-	now   core.NodeTime
+	t      *testing.T
+	b      *Broker
+	env    *testEnv
+	store  *speccheck.ObjectStore
+	cp     *speccheck.ControlPlane
+	config Config
+	self   core.NodeInstance
+	now    core.NodeTime
 
 	// cpHook/objHook may replace an I/O action's outcome; exec runs the spec.
 	cpHook  func(a core.ControlPlaneCall, exec func() core.IOResult) core.IOResult
@@ -98,20 +98,20 @@ type harness struct {
 	puts    []string
 }
 
-func newHarness(t *testing.T, cfg Config) *harness {
+func newHarness(t *testing.T, config Config) *harness {
 	h := &harness{t: t, env: &testEnv{state: 7}, store: speccheck.NewObjectStore(), cp: speccheck.NewControlPlane(),
-		cfg: cfg, timers: map[core.TimerID]core.TimerVersion{}, due: map[core.TimerID]core.NodeTime{},
+		config: config, timers: map[core.TimerID]core.TimerVersion{}, due: map[core.TimerID]core.NodeTime{},
 		clients: map[core.ConnID]*client{},
 		paused:  map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}
 	h.cp.CreateTopic("t", 2)
 	h.self = core.NodeInstance{Node: "b1", Inc: core.BootNumber{1}}
-	h.b = New(cfg)(h.env, h.self).(*Broker)
+	h.b = New(config)(h.env, h.self).(*Broker)
 	return h
 }
 
 // startedHarness boots the broker.
-func startedHarness(t *testing.T, cfg Config) *harness {
-	h := newHarness(t, cfg)
+func startedHarness(t *testing.T, config Config) *harness {
+	h := newHarness(t, config)
 	h.do(core.NodeStarted{Self: h.self})
 	return h
 }
@@ -263,10 +263,10 @@ func (h *harness) open(id core.ConnID) *client {
 }
 
 // frame encodes a request without sending it.
-func (h *harness) frame(c *client, ver int16, req kmsg.Request) []byte {
+func (h *harness) frame(c *client, ver int16, request kmsg.Request) []byte {
 	c.corr++
-	hd := kafkawire.RequestHeader{APIKey: req.Key(), APIVersion: ver, CorrelationID: c.corr, ClientID: "test"}
-	b, err := kafkawire.Codec{}.EncodeRequest(hd, req)
+	hd := kafkawire.RequestHeader{APIKey: request.Key(), APIVersion: ver, CorrelationID: c.corr, ClientID: "test"}
+	b, err := kafkawire.Codec{}.EncodeRequest(hd, request)
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -275,8 +275,8 @@ func (h *harness) frame(c *client, ver int16, req kmsg.Request) []byte {
 }
 
 // send writes requests to the broker in one chunk and runs to quiescence.
-func (h *harness) send(c *client, ver int16, req kmsg.Request) {
-	h.do(core.BytesReceived{Conn: c.id, Data: h.frame(c, ver, req)})
+func (h *harness) send(c *client, ver int16, request kmsg.Request) {
+	h.do(core.BytesReceived{Conn: c.id, Data: h.frame(c, ver, request)})
 }
 
 // next decodes the oldest undelivered response on c.
@@ -286,17 +286,17 @@ func (h *harness) next(c *client) kmsg.Response {
 		h.t.Fatalf("conn %d: no response", c.id)
 	}
 	hd := c.want[0]
-	resp, err := kafkawire.Codec{}.DecodeResponse(hd, c.out[0])
+	response, err := kafkawire.Codec{}.DecodeResponse(hd, c.out[0])
 	if err != nil {
 		h.t.Fatalf("conn %d: decode %d: %v", c.id, hd.APIKey, err)
 	}
 	c.want, c.out = c.want[1:], c.out[1:]
-	return resp.(kmsg.Response)
+	return response.(kmsg.Response)
 }
 
-func (h *harness) call(c *client, ver int16, req kmsg.Request) kmsg.Response {
+func (h *harness) call(c *client, ver int16, request kmsg.Request) kmsg.Response {
 	h.t.Helper()
-	h.send(c, ver, req)
+	h.send(c, ver, request)
 	return h.next(c)
 }
 
@@ -330,20 +330,20 @@ func mkBatch(t testing.TB, pid int64, epoch int16, seq int32, vals ...string) []
 func plain(t testing.TB, vals ...string) []byte { return mkBatch(t, -1, -1, -1, vals...) }
 
 type ent struct {
-	tp  core.TopicPartition
-	rec []byte
+	topicPartition core.TopicPartition
+	rec            []byte
 }
 
 func e(topic string, part int32, rec []byte) ent {
-	return ent{tp: core.NewTopicPartition(topic, part), rec: rec}
+	return ent{topicPartition: core.NewTopicPartition(topic, part), rec: rec}
 }
 
 func prodReq(acks int16, es ...ent) *kmsg.ProduceRequest {
 	r := kmsg.NewPtrProduceRequest()
 	r.Acks, r.TimeoutMillis = acks, 1000
 	for _, e := range es {
-		r.Topics = append(r.Topics, kmsg.ProduceRequestTopic{Topic: e.tp.Topic,
-			Partitions: []kmsg.ProduceRequestTopicPartition{{Partition: e.tp.Partition, Records: e.rec}}})
+		r.Topics = append(r.Topics, kmsg.ProduceRequestTopic{Topic: e.topicPartition.Topic,
+			Partitions: []kmsg.ProduceRequestTopicPartition{{Partition: e.topicPartition.Partition, Records: e.rec}}})
 	}
 	return r
 }
@@ -357,11 +357,11 @@ func produced(r kmsg.Response) []kmsg.ProduceResponseTopicPartition {
 	return out
 }
 
-func fetchReq(tp core.TopicPartition, off int64, max int32) *kmsg.FetchRequest {
+func fetchReq(topicPartition core.TopicPartition, off int64, max int32) *kmsg.FetchRequest {
 	r := kmsg.NewPtrFetchRequest()
 	r.MaxBytes, r.MinBytes, r.MaxWaitMillis = 1<<20, 1, 100
-	r.Topics = []kmsg.FetchRequestTopic{{Topic: tp.Topic, Partitions: []kmsg.FetchRequestTopicPartition{
-		{Partition: tp.Partition, FetchOffset: off, PartitionMaxBytes: max, CurrentLeaderEpoch: -1}}}}
+	r.Topics = []kmsg.FetchRequestTopic{{Topic: topicPartition.Topic, Partitions: []kmsg.FetchRequestTopicPartition{
+		{Partition: topicPartition.Partition, FetchOffset: off, PartitionMaxBytes: max, CurrentLeaderEpoch: -1}}}}
 	return r
 }
 

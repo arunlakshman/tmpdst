@@ -1,7 +1,7 @@
 # Project build. `make` / `make build` is the full gate:
-#   fmt, ascii, vet, lint, compile, unit tests, sim, hermetic it, Kafka CLI e2e, CRAP.
-# Docker fullstack test/integrationtest tests still Skip unless MANIFESTER_*_ENDPOINT are set.
-# The import check for deterministic packages is the detcheck tool:
+#   fmt, ascii, vet, lint, compile, unit tests, sim, hermetic it, Kafka CLI e2e, change risk score.
+# Docker fullstack test/integrationtest tests still Skip unless MDS_*_ENDPOINT are set.
+# The import check for deterministic packages is the determinismcheck tool:
 # go run ./ops/tools/determinismcheck <packages>
 # Toolchain + commit hook: `mise install` (pins in mise.toml; postinstall runs
 # make install-hooks). Without mise: `make install-hooks` alone.
@@ -10,19 +10,19 @@ COVER_DIR     ?= build
 COVER_UNIT    ?= $(COVER_DIR)/cover-unit.out
 COVER_SIM     ?= $(COVER_DIR)/cover-sim.out
 COVER_IT      ?= $(COVER_DIR)/cover-it.out
-# Optional extra coverprofile(s), comma separated, merged into the CRAP input
+# Optional extra coverprofile(s), comma separated, merged into the risk score input
 # (e.g. coverage from Docker-backed integration tests).
-CRAP_MERGE    ?=
-# Fail threshold; also settable as CRAP_THRESHOLD in the environment.
-CRAP_THRESHOLD ?= 20
-CRAP_FLAGS    ?=
+RISK_MERGE    ?=
+# Fail threshold; also settable as RISK_THRESHOLD in the environment.
+RISK_THRESHOLD ?= 20
+RISK_FLAGS    ?=
 # Seeds per scenario for the sim campaign.
 SIM_SEEDS     ?= 300
 
 # Everything except internal/verify/simulator and test/integrationtest (those have their own targets).
 UNIT_PKGS = $(shell go list ./... | grep -vE '/verify/simulator(/|$$)|/test/integrationtest$$')
 
-export CRAP_THRESHOLD
+export RISK_THRESHOLD
 
 # Proto plugins (pin versions; local buf, no BSR). Override via env if needed.
 # buf itself comes from mise (`mise install`); plugins still go-install.
@@ -33,10 +33,10 @@ PROTO_GO_VER   ?= v1.35.2
 PROTO_GRPC_VER ?= v1.5.1
 
 .PHONY: build compile test sim it-hermetic test-all test-race sim-campaign \
-	ascii-check lint fmt-check vet crap crap-baseline crap-strict install-hooks proto proto-tools \
+	ascii-check lint fmt-check vet risk risk-baseline risk-strict install-hooks proto proto-tools \
 	e2e-kafka-cli
 
-build: proto fmt-check ascii-check vet lint compile test sim it-hermetic e2e-kafka-cli crap
+build: proto fmt-check ascii-check vet lint compile test sim it-hermetic e2e-kafka-cli risk
 
 # Generate Go from internal/controlplane/api/v1/*.proto into ignored *.pb.go files.
 # Prefer mise-provided buf; plugins via `make proto-tools` (go install).
@@ -94,17 +94,17 @@ sim: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_SIM) ./internal/verify/simulator/...
 	@$(MAKE) --no-print-directory sim-campaign
 
-# Seed campaigns through cmd/manisim. More seeds: make sim-campaign SIM_SEEDS=2000
+# Seed campaigns through cmd/mdssimulator. More seeds: make sim-campaign SIM_SEEDS=2000
 sim-campaign:
-	go run ./cmd/manisim -scenario kafka -seeds $(SIM_SEEDS)
-	go run ./cmd/manisim -scenario kafka-log -seeds $(SIM_SEEDS)
+	go run ./cmd/mdssimulator -scenario kafka -seeds $(SIM_SEEDS)
+	go run ./cmd/mdssimulator -scenario kafka-log -seeds $(SIM_SEEDS)
 
 # Hermetic integration tests (in-process memstore). Fullstack Docker tests
-# in the same package Skip unless MANIFESTER_DYNAMO_ENDPOINT + MANIFESTER_S3_ENDPOINT are set.
+# in the same package Skip unless MDS_DYNAMO_ENDPOINT + MDS_S3_ENDPOINT are set.
 it-hermetic: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_IT) ./test/integrationtest/
 
-# All tests without lint/compile/crap.
+# All tests without lint/compile/risk.
 test-all: test sim it-hermetic
 
 # Race detector: too slow for `build` (>10 min on this tree), run on demand.
@@ -113,30 +113,30 @@ test-all: test sim it-hermetic
 test-race:
 	go test -race -timeout 30m ./...
 
-# CRAP gate: merge unit + sim + hermetic-it coverprofiles.
-crap:
+# Risk gate: merge unit + sim + hermetic-it coverprofiles.
+risk:
 	@test -f $(COVER_UNIT) || $(MAKE) test
 	@test -f $(COVER_SIM) || $(MAKE) sim
 	@test -f $(COVER_IT) || $(MAKE) it-hermetic
 	go run ./cmd/riskscore -profile $(COVER_UNIT) \
-		-merge-profile $(COVER_SIM),$(COVER_IT)$(if $(CRAP_MERGE),$(comma)$(CRAP_MERGE)) \
-		$(CRAP_FLAGS)
+		-merge-profile $(COVER_SIM),$(COVER_IT)$(if $(RISK_MERGE),$(comma)$(RISK_MERGE)) \
+		$(RISK_FLAGS)
 
 comma := ,
 
-# E2E: manicp + manibroker driven by the Apache Kafka 3.9.1 CLI (needs Java and minio, see mise.toml; part of build).
+# E2E: mdscontrolplane + mdsbroker driven by the Apache Kafka 3.9.1 CLI (needs Java and minio, see mise.toml; part of build).
 e2e-kafka-cli:
 	bash ops/scripts/e2e-kafka-cli.sh $(E2E_ARGS)
 
 # Full offender list, ignoring the baseline.
-crap-strict:
-	@$(MAKE) crap CRAP_FLAGS="-strict -top 0 $(CRAP_FLAGS)"
+risk-strict:
+	@$(MAKE) risk RISK_FLAGS="-strict -top 0 $(RISK_FLAGS)"
 
-# Deliberate, reviewable: rewrite ops/crap-baseline.json from the current tree.
-crap-baseline:
+# Deliberate, reviewable: rewrite ops/risk-baseline.json from the current tree.
+risk-baseline:
 	@test -f $(COVER_UNIT) || $(MAKE) test
 	@test -f $(COVER_SIM) || $(MAKE) sim
 	@test -f $(COVER_IT) || $(MAKE) it-hermetic
 	go run ./cmd/riskscore -profile $(COVER_UNIT) \
-		-merge-profile $(COVER_SIM),$(COVER_IT)$(if $(CRAP_MERGE),$(comma)$(CRAP_MERGE)) \
+		-merge-profile $(COVER_SIM),$(COVER_IT)$(if $(RISK_MERGE),$(comma)$(RISK_MERGE)) \
 		-update-baseline

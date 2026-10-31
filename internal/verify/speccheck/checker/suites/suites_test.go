@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker"
-	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/suites"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker"
+	"mds/internal/verify/speccheck/checker/observation"
+	"mds/internal/verify/speccheck/checker/suites"
 )
 
 func options(t *testing.T, seeds int) checker.Options {
@@ -55,9 +55,9 @@ func (r *recorder) Logf(f string, args ...any) { r.logs = append(r.logs, fmt.Spr
 // badObject answers a range outside the object with OK.
 type badObject struct{ suites.ObjectSubject }
 
-func (b badObject) Do(op core.IOCall) (observation.ObjectResult, error) {
-	r, err := b.ObjectSubject.Do(op)
-	if _, ok := op.(core.ObjectGet); ok && r.Code == core.ErrInvalid {
+func (b badObject) Do(operation core.IOCall) (observation.ObjectResult, error) {
+	r, err := b.ObjectSubject.Do(operation)
+	if _, ok := operation.(core.ObjectGet); ok && r.Code == core.ErrInvalid {
 		return observation.ObjectResult{}, nil
 	}
 	return r, err

@@ -6,11 +6,11 @@
 # Output: build/omb/openmessaging-benchmark.tar.gz, extracted on loadgen hosts to /opt/omb:
 #   bin/benchmark  bin/benchmark-worker  lib/*.jar  workloads/  driver-kafka/*.yaml
 # The tarball is built with Docker (pinned maven image, no local Java/Maven needed) from a
-# pinned OMB commit plus ops/deploy/aws/bench/omb/patches/*.patch (the manifester broker has no
+# pinned OMB commit plus ops/deploy/aws/bench/omb/patches/*.patch (the mds broker has no
 # CreateTopics and no consumer groups, see docs/aws-benchmark-warpstream-comparison.md).
 # Only the Kafka driver is built (patch 0002 drops the other drivers from benchmark-framework: their
 # mixed dependency trees (e.g. two jackson-databind versions) break the classpath). Never runs docker prune; the Maven cache lives in the
-# named volume manifester-omb-m2 (remove it by hand if you want it gone).
+# named volume mds-omb-m2 (remove it by hand if you want it gone).
 set -euo pipefail
 
 OMB_REPO=${OMB_REPO:-https://github.com/openmessaging/benchmark}
@@ -40,15 +40,15 @@ for p in "$root"/ops/deploy/aws/bench/omb/patches/*.patch; do
 done
 
 # A fresh named volume is root-owned; the build runs as the invoking user.
-docker volume create manifester-omb-m2 >/dev/null
-docker run --rm -u 0 -v manifester-omb-m2:/m2 "$MAVEN_IMAGE" chmod 777 /m2
+docker volume create mds-omb-m2 >/dev/null
+docker run --rm -u 0 -v mds-omb-m2:/m2 "$MAVEN_IMAGE" chmod 777 /m2
 
 stage=$out/stage
 rm -rf "$stage"
 mkdir -p "$stage"
 # Runs as the invoking user so files are not root-owned; HOME=/tmp keeps Maven's settings writable.
 docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e MAVEN_CONFIG=/tmp/m2 \
-  -v manifester-omb-m2:/tmp/m2 -v "$src":/src -v "$stage":/stage -w /src "$MAVEN_IMAGE" \
+  -v mds-omb-m2:/tmp/m2 -v "$src":/src -v "$stage":/stage -w /src "$MAVEN_IMAGE" \
   bash -euc '
     MVN="mvn -B -ntp -q -Dmaven.repo.local=/tmp/m2/repository -DskipTests -Dmaven.test.skip=true -Dspotless.check.skip=true -Dcheckstyle.skip=true -Dlicense.skip=true -Dspotbugs.skip=true -Dmaven.javadoc.skip=true -Drat.skip=true -Denforcer.skip=true"
     mkdir -p /stage/lib

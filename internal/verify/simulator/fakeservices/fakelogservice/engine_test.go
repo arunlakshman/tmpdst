@@ -3,10 +3,10 @@ package fakelogservice_test
 import (
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/fakelogservice"
-	"manifester/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/fakelogservice"
+	"mds/internal/verify/simulator/fakeservices/internal/fakeservicetest"
 )
 
 const ms = core.Duration(1_000_000)
@@ -46,7 +46,7 @@ func TestBridgeUnavailableWithoutCP(t *testing.T) {
 	c.Crash("cp-0")
 	c.Crash("cp-1")
 	broker := fakeservicetest.Ref("broker-0")
-	e.Execute(c, broker, core.ControlPlaneCall{Req: 1, Op: core.FindSegments{TP: core.NewTopicPartition("t", 0)}})
+	e.Execute(c, broker, core.ControlPlaneCall{Req: 1, Op: core.FindSegments{TopicPartition: core.NewTopicPartition("t", 0)}})
 	c.Run()
 	if len(c.Delivered) != 1 {
 		t.Fatalf("got %d %#v", len(c.Delivered), c.Delivered)

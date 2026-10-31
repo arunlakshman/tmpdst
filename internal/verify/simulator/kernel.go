@@ -3,7 +3,7 @@ package simulator
 import (
 	"fmt"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Constants of the run model. Lanes at or above laneForSystem belong to the
@@ -84,7 +84,8 @@ type node struct {
 	sum   uint64
 	sumOK bool
 
-	noAttrition bool
+	noAttrition       bool
+	hiddenFromClients bool
 }
 
 type endKind uint8
@@ -96,9 +97,9 @@ const (
 )
 
 type run struct {
-	cfg  Config
-	sc   SeedConfig
-	seed uint64
+	config Config
+	sc     SeedConfig
+	seed   uint64
 
 	rng    CountedRand
 	sched  *scheduler
@@ -113,12 +114,12 @@ type run struct {
 	engOK   []bool   // cleared whenever the kernel calls into the engine
 	byEng   map[string]int
 
-	tl    *MemTimeline
-	hist  *history
-	as    *assertions
-	env   env
-	sites map[core.FaultPointID]bool
-	invs  []SafetyRule
+	tl      *MemTimeline
+	history *history
+	as      *assertions
+	env     env
+	sites   map[core.FaultPointID]bool
+	invs    []SafetyRule
 
 	phase Phase
 	steps uint64
@@ -135,35 +136,35 @@ type run struct {
 }
 
 // RunSeed runs one seed to completion and returns its result.
-func RunSeed(cfg Config, seed uint64) SeedResult {
-	res, _ := runSeed(cfg, seed)
+func RunSeed(config Config, seed uint64) SeedResult {
+	res, _ := runSeed(config, seed)
 	return res
 }
 
-func newRun(cfg Config, seed uint64) *run {
-	r := &run{cfg: cfg, seed: seed, policy: core.ControlFirstPicker{}, trace: newStateHasher(),
+func newRun(config Config, seed uint64) *run {
+	r := &run{config: config, seed: seed, policy: core.ControlFirstPicker{}, trace: newStateHasher(),
 		byName: map[core.NodeID]*node{}, lanes: map[string]DeliveryLane{}, nextLane: 1, byEng: map[string]int{}, sites: map[core.FaultPointID]bool{}}
 	r.res.Seed = seed
 	r.rng = NewRand(seed)
 	r.sched = newScheduler(r.rng)
 	r.tl = NewTimeline()
-	r.hist = newHistory(func() Time { return r.sched.Now() }, func(m string) { r.fail(FailProtocol, "history", m) })
+	r.history = newHistory(func() Time { return r.sched.Now() }, func(m string) { r.fail(FailProtocol, "history", m) })
 	r.as = newAssertions(r)
 	r.env = env{Rand: r.rng, FaultInjector: &faultInjector{r}, Assertions: r.as}
 
-	r.sc = SeedConfig{ObjectStore: cfg.ObjectStore, ControlPlane: cfg.ControlPlane,
-		LogStore: cfg.LogStore, Network: cfg.Network, Attrition: cfg.Attrition, Cost: cfg.Cost, Params: cfg.Params}
-	if cfg.Swarm != nil {
-		cfg.Swarm(seed, r.rng.Derive("swarm"), &r.sc)
+	r.sc = SeedConfig{ObjectStore: config.ObjectStore, ControlPlane: config.ControlPlane,
+		LogStore: config.LogStore, Network: config.Network, Attrition: config.Attrition, Cost: config.Cost, Params: config.Params}
+	if config.Swarm != nil {
+		config.Swarm(seed, r.rng.Derive("swarm"), &r.sc)
 	}
 	r.cost = NewCostModel(r.sc.Cost)
-	r.tEnd = Time(cfg.Phases.Chaos + cfg.Phases.Settling + cfg.Phases.Settle)
+	r.tEnd = Time(config.Phases.Chaos + config.Phases.Settling + config.Phases.Settle)
 
 	return r
 }
 
-func runSeed(cfg Config, seed uint64) (SeedResult, []AssertionStat) {
-	r := newRun(cfg, seed)
+func runSeed(config Config, seed uint64) (SeedResult, []AssertionStat) {
+	r := newRun(config, seed)
 	if !r.guard("setup", r.setup) {
 		r.halt = true
 	}
@@ -196,13 +197,13 @@ func (r *run) wall() core.RealTime { return wallClockStart + core.RealTime(r.now
 
 func (r *run) fail(k FailKind, p core.PropertyID, msg string) {
 	r.res.Failures = append(r.res.Failures, Failure{Seed: r.seed, Kind: k, Prop: p, Step: r.steps, At: r.now(), Msg: msg})
-	if r.cfg.HaltOnFirst {
+	if r.config.HaltOnFirst {
 		r.halt = true
 	}
 }
 
 func (r *run) logf(format string, args ...any) {
-	if r.cfg.Log {
+	if r.config.Log {
 		r.res.Log = append(r.res.Log, LogEntry{Step: r.steps, At: r.now(), Text: fmt.Sprintf(format, args...)})
 	}
 }
@@ -229,8 +230,8 @@ func (r *run) setup() {
 }
 
 func (r *run) wireEngines() {
-	if r.cfg.Engines != nil {
-		r.engines = r.cfg.Engines(r.sc)
+	if r.config.Engines != nil {
+		r.engines = r.config.Engines(r.sc)
 	}
 	for i, e := range r.engines {
 		r.byEng[e.Name()] = i
@@ -241,11 +242,11 @@ func (r *run) wireEngines() {
 }
 
 func (r *run) addInvariants() {
-	for _, f := range r.cfg.Invariants {
+	for _, f := range r.config.Invariants {
 		r.invs = append(r.invs, f())
 	}
-	if r.cfg.InvariantsFor != nil {
-		r.invs = append(r.invs, r.cfg.InvariantsFor(r.sc)...)
+	if r.config.InvariantsFor != nil {
+		r.invs = append(r.invs, r.config.InvariantsFor(r.sc)...)
 	}
 }
 
@@ -259,17 +260,18 @@ func (r *run) addNodes() {
 		r.byName[n.name] = n
 		return n
 	}
-	for _, p := range r.cfg.Processes {
+	for _, p := range r.config.Processes {
 		for i := range p.Count {
 			n := add(fmt.Sprintf("%s-%d", p.Name, i), false)
 			n.factory = p.Factory
 			n.noAttrition = p.NoAttrition
+			n.hiddenFromClients = p.HiddenFromClients
 			if p.FactoryFor != nil {
 				n.factory = p.FactoryFor(r.sc)
 			}
 		}
 	}
-	for i, wf := range r.cfg.Workloads {
+	for i, wf := range r.config.Workloads {
 		n := add(fmt.Sprintf("workload-%d", i), true)
 		n.wlFactory = wf
 	}
@@ -289,14 +291,14 @@ func (r *run) bootNodes() {
 }
 
 func (r *run) scheduleCampaign() {
-	at := Time(r.cfg.Phases.Chaos)
+	at := Time(r.config.Phases.Chaos)
 	r.sched.Schedule(Entry{At: at, Lane: laneForSimulator, Kind: EntryPhase, Body: phaseChange{PhaseRecovering}})
-	at += Time(r.cfg.Phases.Settling)
+	at += Time(r.config.Phases.Settling)
 	r.sched.Schedule(Entry{At: at, Lane: laneForSimulator, Kind: EntryPhase, Body: phaseChange{PhaseRecover}})
-	if q := r.cfg.QuiesceEvery; q > 0 {
+	if q := r.config.QuiesceEvery; q > 0 {
 		r.sched.Schedule(Entry{At: Time(q), Lane: laneForSimulator, Kind: EntryRecover})
 	}
-	for _, sf := range r.cfg.Scripted {
+	for _, sf := range r.config.Scripted {
 		switch sf.Kind {
 		case EntryCrash, EntryStop, EntryRestart:
 			r.sched.Schedule(Entry{At: sf.At, Lane: laneForSimulator, Kind: sf.Kind, Target: Target{Node: core.NodeInstance{Node: sf.Node}}})
@@ -324,7 +326,7 @@ func (r *run) boot(n *node) {
 		if n.workload {
 			var brokers []core.NodeInstance
 			for _, b := range r.nodes {
-				if !b.workload {
+				if !b.workload && !b.hiddenFromClients {
 					brokers = append(brokers, b.ref)
 				}
 			}
@@ -347,12 +349,12 @@ func (r *run) boot(n *node) {
 		return
 	}
 	if sh, isH := m.(interface{ SetHistory(History) }); isH {
-		sh.SetHistory(r.hist)
+		sh.SetHistory(r.history)
 	}
 	n.m, n.alive, n.sumOK = m, true, false
 	if n.boots > 1 {
 		r.counters[countRestarts]++
-		r.simFact("sim_restarted", core.Field{Key: "node", Value: core.Str(n.name)})
+		r.simulatorFact("sim_restarted", core.Field{Key: "node", Value: core.StringValue(n.name)})
 	}
 	n.inbox.Push(core.NodeStarted{Self: n.ref})
 	r.ensureWake(n, r.now())
@@ -373,14 +375,14 @@ func (r *run) appendFact(src core.NodeInstance, f core.Fact) {
 	r.trace.fact(f)
 }
 
-func (r *run) simFact(name string, fields ...core.Field) {
+func (r *run) simulatorFact(name string, fields ...core.Field) {
 	r.appendFact(core.NodeInstance{}, core.Fact{Name: name, Fields: fields})
 }
 
 // ---- main loop ----
 
 func (r *run) loop() {
-	maxSteps := r.cfg.MaxSteps
+	maxSteps := r.config.MaxSteps
 	if maxSteps == 0 {
 		maxSteps = defaultMaxSteps
 	}
@@ -413,19 +415,19 @@ func (r *run) loop() {
 
 func (r *run) foldEntry(e Entry) {
 	h := &r.trace
-	h.I64(int64(e.At))
-	h.U64(uint64(e.Kind))
-	h.U64(uint64(e.Lane))
+	h.Int64Value(int64(e.At))
+	h.Uint64Value(uint64(e.Kind))
+	h.Uint64Value(uint64(e.Lane))
 	h.ref(e.Target.Node)
-	h.Str(e.Target.Engine)
+	h.StringValue(e.Target.Engine)
 	switch b := e.Body.(type) {
 	case core.EventData:
 		h.event(b)
 	case wake:
-		h.U64(901)
+		h.Uint64Value(901)
 	case phaseChange:
-		h.U64(902)
-		h.U64(uint64(b.to))
+		h.Uint64Value(902)
+		h.Uint64Value(uint64(b.to))
 	}
 }
 
@@ -443,13 +445,13 @@ func (r *run) foldState() {
 				return
 			}
 			n.sumOK = true
-		} else if r.cfg.VerifyHashes {
+		} else if r.config.VerifyHashes {
 			r.verifyHash("node "+string(n.name), n.sum, n.m.StateHash)
 		}
-		h.U64(n.sum)
-		h.U64(uint64(len(n.inbox.ctrl.q)))
-		h.U64(uint64(len(n.inbox.data.q)))
-		h.I64(int64(n.inbox.busy))
+		h.Uint64Value(n.sum)
+		h.Uint64Value(uint64(len(n.inbox.ctrl.q)))
+		h.Uint64Value(uint64(len(n.inbox.data.q)))
+		h.Int64Value(int64(n.inbox.busy))
 	}
 	for i, e := range r.engines {
 		if !r.engOK[i] {
@@ -458,10 +460,10 @@ func (r *run) foldState() {
 				return
 			}
 			r.engOK[i] = true
-		} else if r.cfg.VerifyHashes {
+		} else if r.config.VerifyHashes {
 			r.verifyHash("engine "+e.Name(), r.engSum[i], e.StateHash)
 		}
-		h.U64(r.engSum[i])
+		h.Uint64Value(r.engSum[i])
 	}
 }
 
@@ -580,7 +582,7 @@ func (r *run) processPhase(e Entry) {
 	pc := e.Body.(phaseChange)
 	r.phase = pc.to
 	r.logf("phase %d", pc.to)
-	r.simFact("sim_phase", core.Field{Key: "phase", Value: core.U64(uint64(pc.to))})
+	r.simulatorFact("sim_phase", core.Field{Key: "phase", Value: core.Uint64Value(uint64(pc.to))})
 	if pc.to == PhaseRecovering {
 		r.enterRecovery()
 	}
@@ -605,8 +607,8 @@ func (r *run) processQuiesce() {
 			q = false
 		}
 	}
-	r.simFact("sim_quiesce", core.Field{Key: "quiescent", Value: core.Bool(q)})
-	r.sched.Schedule(Entry{At: r.now() + Time(r.cfg.QuiesceEvery), Lane: laneForSimulator, Kind: EntryRecover})
+	r.simulatorFact("sim_quiesce", core.Field{Key: "quiescent", Value: core.Bool(q)})
+	r.sched.Schedule(Entry{At: r.now() + Time(r.config.QuiesceEvery), Lane: laneForSimulator, Kind: EntryRecover})
 }
 
 // notifyPhase calls OnPhase on every live ReceivesPhaseChange workload, in node order,
@@ -622,9 +624,9 @@ func (r *run) notifyPhase(p Phase) {
 		if !n.workload || !n.alive || !ok {
 			continue
 		}
-		r.trace.Str(string(n.name))
-		r.trace.U64(903)
-		r.trace.U64(uint64(p))
+		r.trace.StringValue(string(n.name))
+		r.trace.Uint64Value(903)
+		r.trace.Uint64Value(uint64(p))
 		r.logf("on_phase %s %d", n.name, p)
 		n.sumOK = false
 		var acts []core.Action
@@ -658,7 +660,7 @@ func (r *run) pump(n *node) {
 		r.fail(FailProtocol, "started_first", fmt.Sprintf("%s: first Step was %T, not Started", n.name, body))
 	}
 	n.stepped++
-	r.trace.Str(string(n.name))
+	r.trace.StringValue(string(n.name))
 	r.trace.event(body)
 	r.logf("step %s %s", n.name, description{body})
 	n.sumOK = false
@@ -788,7 +790,7 @@ func (r *run) end(n *node, how endKind, cause string) {
 		name = "sim_exited"
 	}
 	r.logf("%s %s (%s)", name, n.name, cause)
-	r.simFact(name, core.Field{Key: "node", Value: core.Str(n.name)}, core.Field{Key: "cause", Value: core.Str(cause)})
+	r.simulatorFact(name, core.Field{Key: "node", Value: core.StringValue(n.name)}, core.Field{Key: "cause", Value: core.StringValue(cause)})
 	for i, e := range r.engines {
 		r.engOK[i] = false
 		if !r.guard("OnCrash "+e.Name(), func() { e.OnCrash(r.engCtx[i], ref) }) {
@@ -809,7 +811,7 @@ func (r *run) stopNode(n *node) {
 	r.counters[countGracefulStops]++
 	dl := r.now() + Time(stopWaitTime)
 	r.sched.Schedule(Entry{At: dl, Lane: laneForSimulator, Kind: EntryCrash, Target: Target{Node: n.ref}})
-	r.simFact("sim_stop_requested", core.Field{Key: "node", Value: core.Str(n.name)})
+	r.simulatorFact("sim_stop_requested", core.Field{Key: "node", Value: core.StringValue(n.name)})
 	n.inbox.Push(core.StopRequest{Deadline: core.NodeTime(dl) + core.NodeTime(n.skew)})
 	r.pump(n)
 }
@@ -886,8 +888,8 @@ func (c *fakeServiceContext) Cancel(id EntryID) { c.r.sched.Cancel(id) }
 
 func (c *fakeServiceContext) Fault(kind string, fields ...core.Field) {
 	c.r.counters[countFaults]++
-	fs := append([]core.Field{{Key: "kind", Value: core.Str(kind)}, {Key: "engine", Value: core.Str(c.name)}}, fields...)
-	c.r.simFact("sim_fault", fs...)
+	allFields := append([]core.Field{{Key: "kind", Value: core.StringValue(kind)}, {Key: "engine", Value: core.StringValue(c.name)}}, fields...)
+	c.r.simulatorFact("sim_fault", allFields...)
 }
 
 func (c *fakeServiceContext) Assert() core.Assertions { return c.r.as }

@@ -15,7 +15,7 @@ Stock upstream OpenMessaging Benchmark (OMB) with the Kafka driver must run a pr
 
 - No source patches to OMB. Only the YAML config changes.
 - Today our OMB build has four patches. Each one is a workaround:
-  - maniBalance pin
+  - mdsBalance pin
   - static assign
   - produce-only wait
   - affine partitioner
@@ -223,7 +223,7 @@ If two brokers have different live sets for a short time, they may name differen
 
 Each slice ends with a check that can fail. A slice that does not pass is not done.
 
-0. **Harness.** Download Kafka CLI 3.9.1 into `.tools/`. Git-ignore `.tools/`. Write `ops/scripts/e2e-kafka-cli.sh`. Run one broker with `-objects mem` and `manicp -store mem`. Run the Kafka CLI produce and consume against it.
+0. **Harness.** Download Kafka CLI 3.9.1 into `.tools/`. Git-ignore `.tools/`. Write `ops/scripts/e2e-kafka-cli.sh`. Run one broker with `-objects mem` and `mdscontrolplane -store mem`. Run the Kafka CLI produce and consume against it.
 1. **CreateTopics.** Add the API (Q10). Check it with `kafka-topics.sh`.
 2. **Broker leases and Metadata brokers list. Done.** Add the lease (Q4) and the full broker list in Metadata (Q2). This needs a shared object store for 3 brokers, so all brokers see the same segments.
 3. **Fetch long poll.** Add `FetchPollInterval` and `MinBytes` and `MaxWait` honoring (Q8). Done.

@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/internal/session"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/internal/session"
 )
 
 // PutOp and GetOp are the History ops. A PUT result is the reply text, or ""
@@ -24,14 +24,14 @@ type GetOp struct {
 }
 
 // Opts configures the workload. Phase behavior is not configured: the workload
-// is sim.PhaseAware (see OnPhase).
+// is simulator.PhaseAware (see OnPhase).
 type Opts struct {
 	Clients int
 }
 
 const (
-	reqTimeout = 3 * core.Second
-	keepAcked  = 16 // GET candidates per client
+	requestTimeout = 3 * core.Second
+	keepAcked      = 16 // GET candidates per client
 )
 
 const (
@@ -66,10 +66,10 @@ type client struct {
 
 // Workload is N closed-loop clients speaking the echo protocol.
 type Workload struct {
-	env  core.Environment
-	self core.NodeInstance
-	opts Opts
-	hist simulator.History
+	env     core.Environment
+	self    core.NodeInstance
+	opts    Opts
+	history simulator.History
 
 	stopped bool // PhaseSettle began: no new requests
 	loop    session.Loop[*client]
@@ -95,11 +95,11 @@ func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.No
 	return w
 }
 
-// Name implements sim.Workload.
+// Name implements simulator.Workload.
 func (w *Workload) Name() string { return "echo" }
 
 // SetHistory is called by the kernel.
-func (w *Workload) SetHistory(h simulator.History) { w.hist = h }
+func (w *Workload) SetHistory(h simulator.History) { w.history = h }
 
 // Quiescent reports that no request is outstanding.
 func (w *Workload) Quiescent() bool {
@@ -112,14 +112,14 @@ func (w *Workload) Quiescent() bool {
 }
 
 // Step implements core.StateMachine.
-func (w *Workload) Step(ev core.Event) []core.Action { return w.loop.Step(ev) }
+func (w *Workload) Step(event core.Event) []core.Action { return w.loop.Step(event) }
 
 func (w *Workload) onReady(c *client) []core.Action {
 	c.Fails, c.fr = 0, framer{}
 	return []core.Action{c.Wake(core.Millisecond)}
 }
 
-// OnPhase implements sim.PhaseAware. Entering Settling every client drops its
+// OnPhase implements simulator.PhaseAware. Entering Settling every client drops its
 // connection at its next op boundary (idle ones now), so a connection damaged
 // in Chaos (black-holed, clogged) cannot starve it. Entering Settle (the drain)
 // clients issue nothing new; outstanding requests finish.
@@ -153,23 +153,23 @@ func (w *Workload) next(c *client) []core.Action {
 		return append(acts, w.loop.Dial(c)...)
 	}
 	p := &pending{id: w.env.NewID()}
-	var op any
+	var operation any
 	var body string
 	if w.env.Intn(3) == 0 && len(c.acked) > 0 {
 		a := c.acked[w.env.Intn(len(c.acked))]
 		p.get, p.off = true, a.off
-		op, body = GetOp{c.ID, a.off}, "GET "+strconv.FormatInt(a.off, 10)
+		operation, body = GetOp{c.ID, a.off}, "GET "+strconv.FormatInt(a.off, 10)
 	} else {
 		c.seq++
 		p.seq = c.seq
 		p.payload = fmt.Sprintf("c%d-s%d-%s", c.ID, c.seq, strings.Repeat("x", w.env.Intn(48)))
-		op, body = PutOp{c.ID, c.seq, p.payload}, "PUT "+p.payload
+		operation, body = PutOp{c.ID, c.seq, p.payload}, "PUT "+p.payload
 	}
 	c.pend, c.State = p, clientBusy
-	if w.hist != nil {
-		w.hist.Invoke(w.self, p.id, p.id, op)
+	if w.history != nil {
+		w.history.Invoke(w.self, p.id, p.id, operation)
 	}
-	return w.loop.Request(c, appendFrame(nil, body), reqTimeout)
+	return w.loop.Request(c, appendFrame(nil, body), requestTimeout)
 }
 
 func (w *Workload) onBytes(c *client, data []byte) []core.Action {
@@ -202,8 +202,8 @@ func (w *Workload) reply(c *client, text string) []core.Action {
 			out = simulator.OpResultUnknown
 		}
 	}
-	if w.hist != nil {
-		w.hist.Return(p.id, text, out)
+	if w.history != nil {
+		w.history.Return(p.id, text, out)
 	}
 	think := core.Duration(200+w.env.Intn(600)) * core.Millisecond
 	return []core.Action{c.Answered(), c.Wake(think)}
@@ -211,8 +211,8 @@ func (w *Workload) reply(c *client, text string) []core.Action {
 
 func (c *client) record(off int64, payload string) {
 	c.nacked++
-	c.digest.U64(uint64(off))
-	c.digest.Str(payload)
+	c.digest.Uint64Value(uint64(off))
+	c.digest.StringValue(payload)
 	c.acked = append(c.acked, acked{off, payload})
 	if len(c.acked) > keepAcked {
 		c.acked = append([]acked(nil), c.acked[1:]...)
@@ -226,8 +226,8 @@ func (w *Workload) lost(c *client, why string) {
 		if p.get {
 			out = simulator.OpGivenUp
 		}
-		if w.hist != nil {
-			w.hist.Return(p.id, why, out)
+		if w.history != nil {
+			w.history.Return(p.id, why, out)
 		}
 	}
 	c.pend, c.fr = nil, framer{}
@@ -237,29 +237,29 @@ func (w *Workload) lost(c *client, why string) {
 func (w *Workload) StateHash() uint64 {
 	h := core.NewHasher()
 	h.Bool(w.stopped)
-	h.U64(uint64(w.loop.NextReq))
+	h.Uint64Value(uint64(w.loop.NextReq))
 	for _, c := range w.loop.Clients {
-		h.U64(uint64(c.State))
-		h.U64(uint64(c.Conn))
-		h.U64(uint64(c.DialReq))
-		h.U64(uint64(c.SendReq))
-		h.U64(uint64(c.Dials))
-		h.U64(uint64(c.Fails))
-		h.U64(uint64(c.WakeGen))
-		h.U64(uint64(c.ReqGen))
+		h.Uint64Value(uint64(c.State))
+		h.Uint64Value(uint64(c.Conn))
+		h.Uint64Value(uint64(c.DialReq))
+		h.Uint64Value(uint64(c.SendReq))
+		h.Uint64Value(uint64(c.Dials))
+		h.Uint64Value(uint64(c.Fails))
+		h.Uint64Value(uint64(c.WakeGen))
+		h.Uint64Value(uint64(c.ReqGen))
 		h.Bytes(c.fr.buf)
-		h.U64(uint64(c.seq))
+		h.Uint64Value(uint64(c.seq))
 		h.Bool(c.recycle)
-		h.U64(uint64(len(c.acked)))
-		h.U64(uint64(c.digest))
-		h.U64(c.nacked)
+		h.Uint64Value(uint64(len(c.acked)))
+		h.Uint64Value(uint64(c.digest))
+		h.Uint64Value(c.nacked)
 		h.Bool(c.pend != nil)
 		if p := c.pend; p != nil {
 			h.Bytes(p.id[:])
 			h.Bool(p.get)
-			h.U64(uint64(p.seq))
-			h.Str(p.payload)
-			h.U64(uint64(p.off))
+			h.Uint64Value(uint64(p.seq))
+			h.StringValue(p.payload)
+			h.Uint64Value(uint64(p.off))
 		}
 	}
 	return uint64(h)

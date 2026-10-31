@@ -21,7 +21,7 @@ type Func struct {
 	EndLine    int     `json:"end_line"`
 	Complexity int     `json:"complexity"`
 	Coverage   float64 `json:"coverage"` // 0..1
-	RiskScore  float64 `json:"crap"`
+	RiskScore  float64 `json:"risk"`
 }
 
 // RiskScore is the Savoia/Evans formula: comp^2 * (1-cov)^3 + comp.

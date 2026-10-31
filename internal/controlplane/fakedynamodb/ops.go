@@ -78,7 +78,7 @@ func (f *FakeDynamoDB) Query(ctx context.Context, in *dynamodb.QueryInput, _ ...
 // rowsAfter is the matching rows in query order, after ExclusiveStartKey.
 func (f *FakeDynamoDB) rowsAfter(t map[string]item, kc keyCondition, in *dynamodb.QueryInput) []item {
 	var rows []item
-	for id := range f.byPK[aws.ToString(in.TableName)][kc.pk] {
+	for id := range f.byPK[aws.ToString(in.TableName)][kc.partitionKey] {
 		if it := t[id]; kc.matches(it) {
 			rows = append(rows, it)
 		}
@@ -93,8 +93,8 @@ func (f *FakeDynamoDB) rowsAfter(t map[string]item, kc keyCondition, in *dynamod
 	start := stringOf(in.ExclusiveStartKey, "sk")
 	forward := in.ScanIndexForward == nil || *in.ScanIndexForward
 	return slices.DeleteFunc(rows, func(it item) bool {
-		sk := stringOf(it, "sk")
-		return (forward && sk <= start) || (!forward && sk >= start)
+		sortKey := stringOf(it, "sk")
+		return (forward && sortKey <= start) || (!forward && sortKey >= start)
 	})
 }
 

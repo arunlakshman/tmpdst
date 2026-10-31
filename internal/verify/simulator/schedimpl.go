@@ -1,6 +1,6 @@
 package simulator
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // queueItem is one pending entry. Cancel and DropNode mark it dead; dead items
 // are discarded lazily when they reach the top of the heap.

@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"strings"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/wire/kafkawire"
 )
 
 // The oracle's model of one partition's committed log: the control plane's
@@ -21,12 +21,12 @@ type loggedBatch struct {
 }
 
 type partitionLog struct {
-	tp     core.TopicPartition
-	idx    int
-	vals   []string // value at each offset ("?" where unreadable)
-	bats   []loggedBatch
-	byBase map[int64]int // base offset -> index in bats
-	ranges int           // committed ranges consumed so far
+	topicPartition core.TopicPartition
+	idx            int
+	vals           []string // value at each offset ("?" where unreadable)
+	bats           []loggedBatch
+	byBase         map[int64]int // base offset -> index in bats
+	ranges         int           // committed ranges consumed so far
 }
 
 // recKey names a record value: client, batch serial, index.
@@ -49,10 +49,10 @@ func parseVal(v string) (int, int, int, bool) {
 // appends them to the log. Every structural problem is a violation: the log
 // must be contiguous, every segment readable, every batch intact.
 func (o *expectedLogChecker) ingest(v simulator.View, pl *partitionLog) {
-	rs := v.CP().Committed(pl.tp)
+	rs := v.CP().Committed(pl.topicPartition)
 	for ; pl.ranges < len(rs); pl.ranges++ {
 		r := rs[pl.ranges]
-		det := []core.ContextPair{{Key: "tp", Value: pl.tp.Topic + "/" + strconv.Itoa(int(pl.tp.Partition))},
+		det := []core.ContextPair{{Key: "tp", Value: pl.topicPartition.Topic + "/" + strconv.Itoa(int(pl.topicPartition.Partition))},
 			{Key: "base", Value: int64(r.Base)}, {Key: "segment", Value: r.Loc.Key}}
 		v.Assert().Always(int64(r.Base) == int64(len(pl.vals)), "kafka: committed offsets are contiguous", det...)
 		vals := o.readRange(v, r, det)
@@ -75,8 +75,8 @@ func (o *expectedLogChecker) ingest(v simulator.View, pl *partitionLog) {
 		o.checkWhole(v, vals, det)
 		pl.vals = append(pl.vals, vals...)
 	}
-	v.Assert().Always(int64(v.CP().HighWatermark(pl.tp)) == int64(len(pl.vals)),
-		"kafka: the high watermark is the end of the committed log", core.ContextPair{Key: "tp", Value: pl.tp.Topic + "/" + strconv.Itoa(int(pl.tp.Partition))})
+	v.Assert().Always(int64(v.CP().HighWatermark(pl.topicPartition)) == int64(len(pl.vals)),
+		"kafka: the high watermark is the end of the committed log", core.ContextPair{Key: "tp", Value: pl.topicPartition.Topic + "/" + strconv.Itoa(int(pl.topicPartition.Partition))})
 }
 
 // checkWhole: a committed range is one produced batch, whole: it starts at

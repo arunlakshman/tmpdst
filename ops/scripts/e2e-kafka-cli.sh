@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end check: run manicp, three manibrokers and a local S3 server (minio,
+# End-to-end check: run mdscontrolplane, three mdsbrokers and a local S3 server (minio,
 # from mise.toml) from this tree, and drive the brokers with the Apache Kafka
 # 3.9.1 CLI tools (fetched by fetch-kafka-cli.sh). The CLI tools need Java (see
 # mise.toml).
@@ -13,7 +13,7 @@ usage() {
 Usage: ops/scripts/e2e-kafka-cli.sh [-v] [--keep]
        ops/scripts/e2e-kafka-cli.sh -h
 
-Runs manicp, three manibrokers and a local minio (S3) from this tree, then runs
+Runs mdscontrolplane, three mdsbrokers and a local minio (S3) from this tree, then runs
 the checks in order with the Apache Kafka 3.9.1 CLI tools. Each check prints
 PASS or FAIL. Needs Java 21 (see mise.toml).
 
@@ -29,7 +29,7 @@ Options:
   Any other flag prints this help and exits 2.
 
 Logs: a new temp dir under ${TMPDIR:-/tmp} named e2e-kafka-cli.XXXXXX. It holds
-manicp.log, minio.log, broker-<id>.log, and one output file per CLI call. When
+mdscontrolplane.log, minio.log, broker-<id>.log, and one output file per CLI call. When
 the run fails (or with --keep), the script prints the paths of the main logs.
 EOF
 }
@@ -59,7 +59,7 @@ done
 
 # Every run gets its own temp dir for binaries and logs.
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/e2e-kafka-cli.XXXXXX")
-CP_LOG=$TMP/manicp.log
+CP_LOG=$TMP/mdscontrolplane.log
 S3_LOG=$TMP/minio.log
 CP_PID=
 S3_PID=
@@ -82,7 +82,7 @@ BROKER_PORTS=("" "" "")
 S3_USER=e2eadmin
 S3_SECRET=e2e-secret-key
 
-# Stop the brokers first (they talk to the control plane), then manicp and minio.
+# Stop the brokers first (they talk to the control plane), then mdscontrolplane and minio.
 stop_stack() {
   local pid i
   if [[ -n $CONSUMER_PID ]] && kill -0 "$CONSUMER_PID" 2>/dev/null; then
@@ -117,9 +117,9 @@ cleanup() {
     rm -rf "$TMP"
   else
     echo "Logs and binaries kept in: $TMP" >&2
-    echo "  manicp:     $CP_LOG" >&2
+    echo "  mdscontrolplane:     $CP_LOG" >&2
     echo "  minio:      $S3_LOG" >&2
-    echo "  manibroker: $TMP/broker-<id>.log" >&2
+    echo "  mdsbroker: $TMP/broker-<id>.log" >&2
   fi
   exit "$status"
 }
@@ -201,8 +201,8 @@ wait_for_port() {
 }
 
 build_binaries() {
-  go build -o "$TMP/manicp" ./cmd/manicp || return 1
-  go build -o "$TMP/manibroker" ./cmd/manibroker || return 1
+  go build -o "$TMP/mdscontrolplane" ./cmd/mdscontrolplane || return 1
+  go build -o "$TMP/mdsbroker" ./cmd/mdsbroker || return 1
 }
 
 # The minio binary: on PATH, else the one mise installs (see mise.toml).
@@ -233,7 +233,7 @@ start_broker() {
   shift
   port=${BROKER_PORTS[id - 1]}
   AWS_ACCESS_KEY_ID=$S3_USER AWS_SECRET_ACCESS_KEY=$S3_SECRET \
-    "$TMP/manibroker" -objects s3 -s3-endpoint "http://127.0.0.1:$S3_PORT" -s3-path-style \
+    "$TMP/mdsbroker" -objects s3 -s3-endpoint "http://127.0.0.1:$S3_PORT" -s3-path-style \
     -broker-id "$id" -listen "127.0.0.1:$port" -cp-url "127.0.0.1:$CP_PORT" \
     -lease-interval 1s -metrics-addr "" "$@" \
     >"$TMP/broker-$id.log" 2>&1 &
@@ -241,7 +241,7 @@ start_broker() {
   wait_for_port "$port" "${BROKER_PIDS[id - 1]}"
 }
 
-# Build, start minio, manicp (in-memory store), and three manibrokers. Broker 1
+# Build, start minio, mdscontrolplane (in-memory store), and three mdsbrokers. Broker 1
 # creates the bucket. Every broker uses the same bucket.
 start_stack() {
   build_binaries || return 1
@@ -252,7 +252,7 @@ start_stack() {
   done
   start_s3 || return 1
 
-  "$TMP/manicp" -store mem -addr "127.0.0.1:$CP_PORT" -metrics-addr "" -broker-lease-ttl 5s \
+  "$TMP/mdscontrolplane" -store mem -addr "127.0.0.1:$CP_PORT" -metrics-addr "" -broker-lease-ttl 5s \
     >"$CP_LOG" 2>&1 &
   CP_PID=$!
   wait_for_port "$CP_PORT" "$CP_PID" || return 1
@@ -402,7 +402,7 @@ check_produce_consume() {
 cp_lookups() {
   local n
   n=$(curl -s "http://127.0.0.1:$BROKER3_METRICS_PORT/metrics" |
-    sed -n 's/^manibroker_cp_call_seconds_count{op="Lookup"} //p' | head -n 1) || true
+    sed -n 's/^mdsbroker_cp_call_seconds_count{op="Lookup"} //p' | head -n 1) || true
   echo "${n:-0}"
 }
 
@@ -757,10 +757,10 @@ main() {
     t1=$(now_s)
     secs=$(awk -v a="$t0" -v b="$t1" 'BEGIN { printf "%.1f", b - a }')
     vlog "  stack started in $secs s"
-    vlog "  manicp: port $CP_PORT, log $CP_LOG"
+    vlog "  mdscontrolplane: port $CP_PORT, log $CP_LOG"
     vlog "  minio: port $S3_PORT, log $S3_LOG"
     for i in 0 1 2; do
-      vlog "  manibroker $((i + 1)): port ${BROKER_PORTS[i]}, log $TMP/broker-$((i + 1)).log"
+      vlog "  mdsbroker $((i + 1)): port ${BROKER_PORTS[i]}, log $TMP/broker-$((i + 1)).log"
     done
   fi
 

@@ -14,7 +14,7 @@
 //
 //	C1  The broker state machine runs with no faults, over the ObjectStore
 //	    and ControlPlane specs. Its answers to produce, fetch and ListOffsets
-//	    are compared with Partition. The test also checks that the planted
+//	    are compared with Partition. The test also checks that the injected
 //	    bugs InjectedBugWrongOffset and InjectedBugServeCorrupt are caught.
 //	    Test: internal/broker/conformance_test.go.
 //	C2  Each simulated engine (object store, control plane) runs with all
@@ -25,7 +25,7 @@
 //	    against ObjectStore, and the control-plane stores (in-memory store,
 //	    gRPC client, applier on MemoryKeyValueStore and on Pebble) against ControlPlane.
 //	    This is the only check that runs the real code in internal/system and
-//	    the control-plane stores. The S3 test needs MANIFESTER_S3_ENDPOINT.
+//	    the control-plane stores. The S3 test needs MDS_S3_ENDPOINT.
 //	    Tests: internal/system/s3store/conform_test.go and
 //	    internal/controlplane/controlplanetest/conform_test.go.
 //	C4  The Kafka oracle (in sim/kafka) is compared with Partition and

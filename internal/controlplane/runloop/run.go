@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 var (

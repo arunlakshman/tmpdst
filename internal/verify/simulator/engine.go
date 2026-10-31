@@ -1,6 +1,6 @@
 package simulator
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // FakeService simulates one external system (object store, control plane, network).
 // It owns that system's state, draws only from the run's CountedRand, and never
@@ -126,11 +126,11 @@ type LogParams struct {
 	K, GroupMax int
 	// Tick is the engine's polling period (tail reads, role checks, flushes).
 	Tick core.Duration
-	// HoleAfter before an empty slot below the tail is filled with a no-op;
+	// GapAfter before an empty slot below the tail is filled with a no-op;
 	// TakeoverAfter without a slot from another writer before the standby
 	// becomes active; PutRetry before an unanswered Put is repeated; Heartbeat
 	// between no-op appends of an idle active node.
-	HoleAfter, TakeoverAfter, PutRetry, Heartbeat core.Duration
+	GapAfter, TakeoverAfter, PutRetry, Heartbeat core.Duration
 	// PutFail: a Put is refused (not applied). PutLost: a Put is applied, its
 	// answer is lost. ReadFail: a replica's tail read fails this tick.
 	PutFail, PutLost, ReadFail float64
@@ -140,9 +140,9 @@ type LogParams struct {
 	StallProb, CrashProb float64
 	StallDur, DownDur    [2]core.Duration
 	// WindowSlots: a key is forgotten this many slots after its first slot,
-	// evaluated every TrimStride slots. CkptEvery slots between checkpoints;
+	// evaluated every TrimStride slots. CheckpointEvery slots between checkpoints;
 	// KeepSlots below a checkpoint stay untrimmed.
-	WindowSlots, TrimStride, CkptEvery, KeepSlots int
+	WindowSlots, TrimStride, CheckpointEvery, KeepSlots int
 	// Bug selects a mutant of the log engine (fakelogservice.InjectedBug*); 0 = none.
 	Bug uint8
 }

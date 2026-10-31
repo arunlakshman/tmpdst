@@ -6,10 +6,10 @@ import (
 	"reflect"
 	"testing"
 
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck"
 )
 
 var lockstepCmds = []stateupdater.Entry{
@@ -18,28 +18,28 @@ var lockstepCmds = []stateupdater.Entry{
 	{ID: "2", Kind: stateupdater.KindCommit, Commit: core.CommitSegment{
 		SegmentKey: "seg-a",
 		Batches: []core.PendingBatch{
-			{TP: core.NewTopicPartition("orders", 0), Records: 3, Loc: core.SegmentRef{Key: "o1", Off: 0, Len: 30}},
-			{TP: core.NewTopicPartition("orders", 1), Records: 2, Loc: core.SegmentRef{Key: "o1", Off: 30, Len: 20}},
+			{TopicPartition: core.NewTopicPartition("orders", 0), Records: 3, Loc: core.SegmentRef{Key: "o1", Off: 0, Len: 30}},
+			{TopicPartition: core.NewTopicPartition("orders", 1), Records: 2, Loc: core.SegmentRef{Key: "o1", Off: 30, Len: 20}},
 		},
 	}},
 	{ID: "3", Kind: stateupdater.KindCommit, Commit: core.CommitSegment{
 		SegmentKey: "seg-b",
 		Batches: []core.PendingBatch{
-			{TP: core.NewTopicPartition("orders", 0), Records: 1, Loc: core.SegmentRef{Key: "o2", Off: 0, Len: 10}},
+			{TopicPartition: core.NewTopicPartition("orders", 0), Records: 1, Loc: core.SegmentRef{Key: "o2", Off: 0, Len: 10}},
 		},
 	}},
 	{ID: "4", Kind: stateupdater.KindCommit, Commit: core.CommitSegment{ // replay
 		SegmentKey: "seg-a",
 		Batches: []core.PendingBatch{
-			{TP: core.NewTopicPartition("orders", 0), Records: 3, Loc: core.SegmentRef{Key: "o1", Off: 0, Len: 30}},
-			{TP: core.NewTopicPartition("orders", 1), Records: 2, Loc: core.SegmentRef{Key: "o1", Off: 30, Len: 20}},
+			{TopicPartition: core.NewTopicPartition("orders", 0), Records: 3, Loc: core.SegmentRef{Key: "o1", Off: 0, Len: 30}},
+			{TopicPartition: core.NewTopicPartition("orders", 1), Records: 2, Loc: core.SegmentRef{Key: "o1", Off: 30, Len: 20}},
 		},
 	}},
 	{ID: "5", Kind: stateupdater.KindNoop},
 	{ID: "6", Kind: stateupdater.KindCommit, Commit: core.CommitSegment{
 		SegmentKey: "seg-c",
 		Batches: []core.PendingBatch{
-			{TP: core.NewTopicPartition("orders", 1), Records: 4, Loc: core.SegmentRef{Key: "o3", Off: 0, Len: 40}},
+			{TopicPartition: core.NewTopicPartition("orders", 1), Records: 4, Loc: core.SegmentRef{Key: "o3", Off: 0, Len: 40}},
 		},
 	}},
 	// Exclusive creates go last, so the indexes above stay the same.
@@ -56,7 +56,7 @@ func queryDigest(exec func(core.ControlPlaneOperation) core.ControlPlaneDone) ui
 	for _, t := range d.Topics {
 		_, _ = fmt.Fprintf(h, "T%s/%d;", t.Name, t.Partitions)
 		for p := int32(0); p < t.Partitions; p++ {
-			l := exec(core.FindSegments{TP: core.NewTopicPartition(t.Name, p)}).Resp.(core.FindSegmentsResp)
+			l := exec(core.FindSegments{TopicPartition: core.NewTopicPartition(t.Name, p)}).Resp.(core.FindSegmentsResp)
 			_, _ = fmt.Fprintf(h, "P%d/%d:%+v;", p, l.End, l.Ranges)
 		}
 	}
@@ -64,7 +64,7 @@ func queryDigest(exec func(core.ControlPlaneOperation) core.ControlPlaneDone) ui
 }
 
 // feedContiguous drives catch-up so the machine applies entries in slot order
-// through one ReadDone page (no holes).
+// through one ReadDone page (no gaps).
 func feedContiguous(t *testing.T, m *statemachine.Machine, entries []stateupdater.Entry) []core.ControlPlaneDone {
 	t.Helper()
 	acts := step(m, core.NodeStarted{})
@@ -94,8 +94,8 @@ func feedContiguous(t *testing.T, m *statemachine.Machine, entries []stateupdate
 	return out
 }
 
-func TestLockstepMachineVsVeritas(t *testing.T) {
-	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, HoleAfter: 0})
+func TestLockstepMachineVsSpecCheck(t *testing.T) {
+	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, GapAfter: 0})
 	orc := speccheck.NewControlPlane()
 	machineAnswers := feedContiguous(t, m, lockstepCmds)
 
@@ -122,11 +122,11 @@ func TestLockstepMachineVsVeritas(t *testing.T) {
 		}
 	}
 
-	appDig := queryDigest(func(op core.ControlPlaneOperation) core.ControlPlaneDone {
-		return m.Fold().Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
+	appDig := queryDigest(func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
+		return m.Fold().Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 	})
-	orcDig := queryDigest(func(op core.ControlPlaneOperation) core.ControlPlaneDone {
-		return orc.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
+	orcDig := queryDigest(func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
+		return orc.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 	})
 	if appDig != orcDig {
 		t.Fatalf("query digest: machine fold %x, speccheck %x", appDig, orcDig)
@@ -135,8 +135,8 @@ func TestLockstepMachineVsVeritas(t *testing.T) {
 		len(lockstepCmds), m.Applied(), m.Fold().StateHash(), appDig)
 }
 
-func TestLockstepWithHoleFill(t *testing.T) {
-	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, HoleAfter: 0})
+func TestLockstepWithGapFill(t *testing.T) {
+	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, GapAfter: 0})
 	orc := speccheck.NewControlPlane()
 
 	a := lockstepCmds[2]
@@ -166,13 +166,13 @@ func TestLockstepWithHoleFill(t *testing.T) {
 	_ = orc.Exec(core.ControlPlaneCall{Req: 0, Op: a.Commit})
 	_ = orc.Exec(core.ControlPlaneCall{Req: 2, Op: b.Commit})
 
-	appDig := queryDigest(func(op core.ControlPlaneOperation) core.ControlPlaneDone {
-		return m.Fold().Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
+	appDig := queryDigest(func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
+		return m.Fold().Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 	})
-	orcDig := queryDigest(func(op core.ControlPlaneOperation) core.ControlPlaneDone {
-		return orc.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
+	orcDig := queryDigest(func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
+		return orc.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 	})
 	if appDig != orcDig {
-		t.Fatalf("query digest after hole-fill: machine %x, speccheck %x", appDig, orcDig)
+		t.Fatalf("query digest after gap-fill: machine %x, speccheck %x", appDig, orcDig)
 	}
 }

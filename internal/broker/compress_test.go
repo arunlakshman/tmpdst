@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/core"
+	"mds/internal/wire/kafkawire"
 )
 
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)
@@ -186,9 +186,9 @@ func TestLargeProduceRequest(t *testing.T) {
 }
 
 func TestSkipProduceCRCMutantAcksCorruptBatch(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.InjectedBug = InjectedBugSkipProduceCRC
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.InjectedBug = InjectedBugSkipProduceCRC
+	h := startedHarness(t, config)
 	c := h.open(1)
 	bad := opaque(t, kafkawire.CodecLZ4, 4, 50)
 	bad[len(bad)-1] ^= 1

@@ -2,8 +2,8 @@ package generator
 
 import (
 	"fmt"
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker"
 	"strings"
 )
 
@@ -14,38 +14,40 @@ type CreateTopic struct {
 	Partitions int32
 }
 
-// ControlPlaneOp is one control-plane operation. Exactly one field is not nil.
-type ControlPlaneOp struct {
+// ControlPlaneTestStep is one control-plane operation. Exactly one field is not nil.
+type ControlPlaneTestStep struct {
 	CreateTopic *CreateTopic
 	Call        *core.ControlPlaneCall
 }
 
 // NewCreateTopic returns an operation that creates a topic.
-func NewCreateTopic(name string, partitions int32) ControlPlaneOp {
-	return ControlPlaneOp{CreateTopic: &CreateTopic{Name: name, Partitions: partitions}}
+func NewCreateTopic(name string, partitions int32) ControlPlaneTestStep {
+	return ControlPlaneTestStep{CreateTopic: &CreateTopic{Name: name, Partitions: partitions}}
 }
 
 // NewCall returns an operation that sends call.
-func NewCall(call core.ControlPlaneCall) ControlPlaneOp { return ControlPlaneOp{Call: &call} }
+func NewCall(call core.ControlPlaneCall) ControlPlaneTestStep {
+	return ControlPlaneTestStep{Call: &call}
+}
 
 // Describe returns a short plain-English text for an operation, for failure
 // messages.
-func (o ControlPlaneOp) Describe() string {
+func (o ControlPlaneTestStep) Describe() string {
 	switch {
 	case o.CreateTopic != nil:
 		return fmt.Sprintf("create topic %q with %d partitions", o.CreateTopic.Name, o.CreateTopic.Partitions)
 	case o.Call == nil:
 		return "empty operation"
 	}
-	switch op := o.Call.Op.(type) {
+	switch operation := o.Call.Op.(type) {
 	case core.CommitSegment:
-		return fmt.Sprintf("request %d: commit segment %q with %d batches", o.Call.Req, op.SegmentKey, len(op.Batches))
+		return fmt.Sprintf("request %d: commit segment %q with %d batches", o.Call.Req, operation.SegmentKey, len(operation.Batches))
 	case core.FindSegments:
-		return fmt.Sprintf("request %d: look up %v from offset %d with max bytes %d", o.Call.Req, op.TP, op.From, op.MaxBytes)
+		return fmt.Sprintf("request %d: look up %v from offset %d with max bytes %d", o.Call.Req, operation.TopicPartition, operation.From, operation.MaxBytes)
 	case core.DescribeTopics:
-		return fmt.Sprintf("request %d: describe topics %q", o.Call.Req, op.Topics)
+		return fmt.Sprintf("request %d: describe topics %q", o.Call.Req, operation.Topics)
 	case core.CreateTopic:
-		return fmt.Sprintf("request %d: create topic %q with %d partitions, failing if it exists", o.Call.Req, op.Name, op.Partitions)
+		return fmt.Sprintf("request %d: create topic %q with %d partitions, failing if it exists", o.Call.Req, operation.Name, operation.Partitions)
 	}
 	return fmt.Sprintf("request %d: %T", o.Call.Req, o.Call.Op)
 }
@@ -55,32 +57,32 @@ func (o ControlPlaneOp) Describe() string {
 // conflict, the same batches under a fresh key, and five kinds of malformed
 // request. Lookups cover From = -1, From inside long runs and MaxBytes cuts.
 // DescribeTopics covers known, unknown and all topics.
-func ControlPlaneOps(p InputProfile) func(r *checker.Rand, i int) ControlPlaneOp {
-	return func(r *checker.Rand, i int) ControlPlaneOp {
-		req := core.RequestID(i + 1)
+func ControlPlaneOps(p InputProfile) func(r *checker.Rand, i int) ControlPlaneTestStep {
+	return func(r *checker.Rand, i int) ControlPlaneTestStep {
+		request := core.RequestID(i + 1)
 		switch chooseByWeight(r, p.CreateTopicWeight, p.CommitWeight, p.LookupWeight, p.DescribeWeight) {
 		case 0:
 			if r.Intn(2) == 0 {
 				return genCreateTopic(p, r)
 			}
-			return genExclusiveCreate(p, r, req)
+			return genExclusiveCreate(p, r, request)
 		case 1:
-			return NewCall(core.ControlPlaneCall{Req: req, Op: genCommit(p, r)})
+			return NewCall(core.ControlPlaneCall{Req: request, Op: genCommit(p, r)})
 		case 2:
-			return NewCall(core.ControlPlaneCall{Req: req, Op: genLookup(p, r)})
+			return NewCall(core.ControlPlaneCall{Req: request, Op: genLookup(p, r)})
 		}
-		return NewCall(core.ControlPlaneCall{Req: req, Op: genDescribe(p, r)})
+		return NewCall(core.ControlPlaneCall{Req: request, Op: genDescribe(p, r)})
 	}
 }
 
 // genExclusiveCreate is a CreateTopic call with FailIfExists. It takes its
 // name and count from genCreateTopic, so it also covers the invalid creates.
-func genExclusiveCreate(p InputProfile, r *checker.Rand, req core.RequestID) ControlPlaneOp {
+func genExclusiveCreate(p InputProfile, r *checker.Rand, request core.RequestID) ControlPlaneTestStep {
 	c := genCreateTopic(p, r).CreateTopic
-	return NewCall(core.ControlPlaneCall{Req: req, Op: core.CreateTopic{Name: c.Name, Partitions: c.Partitions, FailIfExists: true}})
+	return NewCall(core.ControlPlaneCall{Req: request, Op: core.CreateTopic{Name: c.Name, Partitions: c.Partitions, FailIfExists: true}})
 }
 
-func genCreateTopic(p InputProfile, r *checker.Rand) ControlPlaneOp {
+func genCreateTopic(p InputProfile, r *checker.Rand) ControlPlaneTestStep {
 	if !percent(r, p.CreateInvalidPercent) {
 		return NewCreateTopic(pick(r, p.Topics), int32(1+r.Intn(p.MaxPartitions)))
 	}
@@ -129,15 +131,15 @@ func genInvalidCommit(p InputProfile, r *checker.Rand) core.CommitSegment {
 	case 2:
 		batches[at].Records = -int64(r.Intn(2))
 	case 3:
-		batches[at].TP.Partition = -1
+		batches[at].TopicPartition.Partition = -1
 	default:
-		batches[at].TP.Topic = ""
+		batches[at].TopicPartition.Topic = ""
 	}
 	return core.CommitSegment{SegmentKey: key, Batches: batches}
 }
 
 func genLookup(p InputProfile, r *checker.Rand) core.FindSegments {
-	tp := core.NewTopicPartition(pick(r, p.Topics), int32(r.Intn(p.PartitionCount)))
+	topicPartition := core.NewTopicPartition(pick(r, p.Topics), int32(r.Intn(p.PartitionCount)))
 	from := int64(r.Intn(p.LookupShortSpan))
 	if percent(r, p.LookupLongPercent) {
 		from = int64(r.Intn(p.LookupLongSpan))
@@ -145,7 +147,7 @@ func genLookup(p InputProfile, r *checker.Rand) core.FindSegments {
 	if percent(r, p.LookupNegativeFromPercent) {
 		from = -1
 	}
-	return core.FindSegments{TP: tp, From: core.Offset(from), MaxBytes: pick(r, p.MaxBytesChoices)}
+	return core.FindSegments{TopicPartition: topicPartition, From: core.Offset(from), MaxBytes: pick(r, p.MaxBytesChoices)}
 }
 
 func genDescribe(p InputProfile, r *checker.Rand) core.DescribeTopics {
@@ -202,23 +204,23 @@ func makeSeedShape(shape string) uint64 {
 func genBatch(p InputProfile, r *checker.Rand, segmentKey string) core.PendingBatch {
 	topics := p.Topics[:min(p.BatchTopics, len(p.Topics))]
 	return core.PendingBatch{
-		TP:      core.NewTopicPartition(pick(r, topics), int32(r.Intn(p.BatchPartitions))),
-		Records: 1 + int64(r.Intn(3)),
-		Loc:     core.SegmentRef{Key: segmentKey, Off: int64(r.Intn(4)) * 100, Len: int64(1 + r.Intn(3)*50)},
+		TopicPartition: core.NewTopicPartition(pick(r, topics), int32(r.Intn(p.BatchPartitions))),
+		Records:        1 + int64(r.Intn(3)),
+		Loc:            core.SegmentRef{Key: segmentKey, Off: int64(r.Intn(4)) * 100, Len: int64(1 + r.Intn(3)*50)},
 	}
 }
 
 // MinimizeControlPlaneOp returns simpler versions of op, simplest first: fewer
 // batches, smaller counts, smaller offsets and shorter keys. It never returns
 // op itself, so a caller that keeps shrinking always ends.
-func MinimizeControlPlaneOp(op ControlPlaneOp) []ControlPlaneOp {
+func MinimizeControlPlaneOp(operation ControlPlaneTestStep) []ControlPlaneTestStep {
 	switch {
-	case op.CreateTopic != nil:
-		return minimizeCreateTopic(*op.CreateTopic)
-	case op.Call == nil:
+	case operation.CreateTopic != nil:
+		return minimizeCreateTopic(*operation.CreateTopic)
+	case operation.Call == nil:
 		return nil
 	}
-	call := *op.Call
+	call := *operation.Call
 	var ops []core.ControlPlaneOperation
 	switch o := call.Op.(type) {
 	case core.CommitSegment:
@@ -230,15 +232,15 @@ func MinimizeControlPlaneOp(op ControlPlaneOp) []ControlPlaneOp {
 	case core.CreateTopic:
 		ops = minimizeExclusiveCreate(o)
 	}
-	out := make([]ControlPlaneOp, 0, len(ops))
+	out := make([]ControlPlaneTestStep, 0, len(ops))
 	for _, o := range ops {
 		out = append(out, NewCall(core.ControlPlaneCall{Req: call.Req, Op: o}))
 	}
 	return out
 }
 
-func minimizeCreateTopic(c CreateTopic) []ControlPlaneOp {
-	var out []ControlPlaneOp
+func minimizeCreateTopic(c CreateTopic) []ControlPlaneTestStep {
+	var out []ControlPlaneTestStep
 	if c.Partitions > 1 {
 		out = append(out, NewCreateTopic(c.Name, 1))
 	}
@@ -302,19 +304,19 @@ func simplifyBatches(batches []core.PendingBatch) ([]core.PendingBatch, bool) {
 func minimizeLookup(l core.FindSegments) []core.ControlPlaneOperation {
 	var out []core.ControlPlaneOperation
 	if l.MaxBytes != 0 {
-		out = append(out, core.FindSegments{TP: l.TP, From: l.From, MaxBytes: 0})
+		out = append(out, core.FindSegments{TopicPartition: l.TopicPartition, From: l.From, MaxBytes: 0})
 	}
 	if l.From > 0 {
-		out = append(out, core.FindSegments{TP: l.TP, From: 0, MaxBytes: l.MaxBytes})
+		out = append(out, core.FindSegments{TopicPartition: l.TopicPartition, From: 0, MaxBytes: l.MaxBytes})
 	}
 	if l.From > 1 {
-		out = append(out, core.FindSegments{TP: l.TP, From: l.From / 2, MaxBytes: l.MaxBytes})
+		out = append(out, core.FindSegments{TopicPartition: l.TopicPartition, From: l.From / 2, MaxBytes: l.MaxBytes})
 	}
-	if l.TP.Partition > 0 {
-		out = append(out, core.FindSegments{TP: core.NewTopicPartition(l.TP.Topic, 0), From: l.From, MaxBytes: l.MaxBytes})
+	if l.TopicPartition.Partition > 0 {
+		out = append(out, core.FindSegments{TopicPartition: core.NewTopicPartition(l.TopicPartition.Topic, 0), From: l.From, MaxBytes: l.MaxBytes})
 	}
-	for _, t := range shortenStrings(l.TP.Topic) {
-		out = append(out, core.FindSegments{TP: core.NewTopicPartition(t, l.TP.Partition), From: l.From, MaxBytes: l.MaxBytes})
+	for _, t := range shortenStrings(l.TopicPartition.Topic) {
+		out = append(out, core.FindSegments{TopicPartition: core.NewTopicPartition(t, l.TopicPartition.Partition), From: l.From, MaxBytes: l.MaxBytes})
 	}
 	return out
 }
@@ -335,31 +337,31 @@ func minimizeDescribe(d core.DescribeTopics) []core.ControlPlaneOperation {
 
 // FormatControlPlaneOp returns op as a Go expression that you can paste into a
 // regression test. The expression needs the packages core and generator.
-func FormatControlPlaneOp(op ControlPlaneOp) string {
+func FormatControlPlaneOp(operation ControlPlaneTestStep) string {
 	switch {
-	case op.CreateTopic != nil:
-		return fmt.Sprintf("generator.NewCreateTopic(%q, %d)", op.CreateTopic.Name, op.CreateTopic.Partitions)
-	case op.Call == nil:
-		return "generator.ControlPlaneOp{}"
+	case operation.CreateTopic != nil:
+		return fmt.Sprintf("generator.NewCreateTopic(%q, %d)", operation.CreateTopic.Name, operation.CreateTopic.Partitions)
+	case operation.Call == nil:
+		return "generator.ControlPlaneTestStep{}"
 	}
-	return fmt.Sprintf("generator.NewCall(core.ControlPlaneCall{Req: %d, Op: %s})", op.Call.Req, formatCPOp(op.Call.Op))
+	return fmt.Sprintf("generator.NewCall(core.ControlPlaneCall{Req: %d, Op: %s})", operation.Call.Req, formatCPOp(operation.Call.Op))
 }
 
-func formatCPOp(op core.ControlPlaneOperation) string {
-	switch op := op.(type) {
+func formatCPOp(operation core.ControlPlaneOperation) string {
+	switch operation := operation.(type) {
 	case core.CreateTopic:
-		return fmt.Sprintf("core.CreateTopic{Name: %q, Partitions: %d, FailIfExists: %t}", op.Name, op.Partitions, op.FailIfExists)
+		return fmt.Sprintf("core.CreateTopic{Name: %q, Partitions: %d, FailIfExists: %t}", operation.Name, operation.Partitions, operation.FailIfExists)
 	case core.CommitSegment:
-		return fmt.Sprintf("core.CommitSegment{SegmentKey: %q%s}", op.SegmentKey, formatBatchesField(op.Batches))
+		return fmt.Sprintf("core.CommitSegment{SegmentKey: %q%s}", operation.SegmentKey, formatBatchesField(operation.Batches))
 	case core.FindSegments:
-		return fmt.Sprintf("core.FindSegments{TP: core.TopicPartitionKey(%q, %d), From: %d, MaxBytes: %d}", op.TP.Topic, op.TP.Partition, op.From, op.MaxBytes)
+		return fmt.Sprintf("core.FindSegments{TopicPartition: core.NewTopicPartition(%q, %d), From: %d, MaxBytes: %d}", operation.TopicPartition.Topic, operation.TopicPartition.Partition, operation.From, operation.MaxBytes)
 	case core.DescribeTopics:
-		if op.Topics == nil {
+		if operation.Topics == nil {
 			return "core.DescribeTopics{}"
 		}
-		return fmt.Sprintf("core.DescribeTopics{Topics: []string{%s}}", quoteEach(op.Topics))
+		return fmt.Sprintf("core.DescribeTopics{Topics: []string{%s}}", quoteEach(operation.Topics))
 	}
-	return fmt.Sprintf("%#v", op)
+	return fmt.Sprintf("%#v", operation)
 }
 
 func formatBatchesField(batches []core.PendingBatch) string {
@@ -368,7 +370,7 @@ func formatBatchesField(batches []core.PendingBatch) string {
 	}
 	parts := make([]string, len(batches))
 	for i, b := range batches {
-		parts[i] = fmt.Sprintf("{TP: core.TopicPartitionKey(%q, %d), Records: %d, Loc: %s}", b.TP.Topic, b.TP.Partition, b.Records, formatRef(b.Loc))
+		parts[i] = fmt.Sprintf("{TopicPartition: core.NewTopicPartition(%q, %d), Records: %d, Loc: %s}", b.TopicPartition.Topic, b.TopicPartition.Partition, b.Records, formatRef(b.Loc))
 	}
 	return ", Batches: []core.PendingBatch{" + strings.Join(parts, ", ") + "}"
 }

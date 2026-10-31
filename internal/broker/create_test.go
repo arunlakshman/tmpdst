@@ -7,7 +7,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 const verCreate = 7
@@ -156,9 +156,9 @@ func TestCreateTopicsThenMetadataAndProduce(t *testing.T) {
 	h.call(c, verCreate, createReq(false, newTopic("fresh", 3, 3)))
 	r := h.call(c, verMetadata, kmsg.NewPtrMetadataRequest()).(*kmsg.MetadataResponse)
 	var parts int
-	for _, tp := range r.Topics {
-		if tp.Topic != nil && *tp.Topic == "fresh" {
-			parts = len(tp.Partitions)
+	for _, topicPartition := range r.Topics {
+		if topicPartition.Topic != nil && *topicPartition.Topic == "fresh" {
+			parts = len(topicPartition.Partitions)
 		}
 	}
 	if parts != 3 {
@@ -234,7 +234,7 @@ func TestCreateTopicsOneControlPlaneCall(t *testing.T) {
 	if len(h.cpCalls) != 1 {
 		t.Fatalf("%d control plane calls, want 1: %v", len(h.cpCalls), h.cpCalls)
 	}
-	if op, ok := h.cpCalls[0].(core.CreateTopic); !ok || !op.FailIfExists || op.Name != "once" {
+	if operation, ok := h.cpCalls[0].(core.CreateTopic); !ok || !operation.FailIfExists || operation.Name != "once" {
 		t.Fatalf("control plane call %#v, want an exclusive CreateTopic of once", h.cpCalls[0])
 	}
 	h.cpCalls = nil

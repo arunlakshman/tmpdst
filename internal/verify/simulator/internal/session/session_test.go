@@ -3,7 +3,7 @@ package session
 import (
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 type wrap struct{ Client }

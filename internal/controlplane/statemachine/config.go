@@ -1,25 +1,25 @@
 package statemachine
 
 import (
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 // Config tunes the control-plane machine. Zero value keeps catch-up and the
 // commit queue off (CP-DSM-2 scaffold behaviour). CatchUpEvery > 0 arms
-// timer-driven catch-up with slot-ordered apply and hole-fill (CP-DSM-4).
+// timer-driven catch-up with slot-ordered apply and gap-fill (CP-DSM-4).
 // K > 0 arms the commit queue with up to K in-flight LogAppend slots (CP-DSM-5).
-// Heartbeat or TakeoverAfter arms advisory roles (CP-DSM-6). CkptEvery or
-// CkptKey arms checkpoint restore/publish and optional LogTrim.
+// Heartbeat or TakeoverAfter arms advisory roles (CP-DSM-6). CheckpointEvery or
+// CheckpointKey arms checkpoint restore/publish and optional LogTrim.
 type Config struct {
 	// CatchUpEvery is the pause between catch-up rounds. Zero disables catch-up.
 	CatchUpEvery core.Duration
 	// ReadLimit caps entries per LogRead during catch-up. Zero means 64.
 	ReadLimit int32
-	// HoleAfter is how long the next unapplied slot may stay empty while later
+	// GapAfter is how long the next unapplied slot may stay empty while later
 	// slots are buffered before Step emits a no-op LogAppend. Zero fills at
-	// once when a hole is visible.
-	HoleAfter core.Duration
+	// once when a gap is visible.
+	GapAfter core.Duration
 	// Writer names append IDs (writer/seq). Empty means "cp".
 	Writer string
 
@@ -46,15 +46,15 @@ type Config struct {
 	// before promoting. Zero means only Promote flips the role.
 	TakeoverAfter core.Duration
 
-	// CkptEvery is the pause between checkpoint attempts on the appender.
-	// Zero disables the timer; set CkptKey alone to restore on NodeStarted.
-	CkptEvery core.Duration
-	// CkptMinSlots skips a checkpoint when fewer slots were applied since the
+	// CheckpointEvery is the pause between checkpoint attempts on the appender.
+	// Zero disables the timer; set CheckpointKey alone to restore on NodeStarted.
+	CheckpointEvery core.Duration
+	// CheckpointMinSlots skips a checkpoint when fewer slots were applied since the
 	// last. Zero means 1.
-	CkptMinSlots int64
-	// CkptKey is the object-store key for the latest snapshot. Empty means
+	CheckpointMinSlots int64
+	// CheckpointKey is the object-store key for the latest snapshot. Empty means
 	// "ckpt/latest" when checkpointing is enabled.
-	CkptKey string
+	CheckpointKey string
 	// KeepSlots is how many log slots to keep behind a published checkpoint
 	// before LogTrim. Zero skips trim.
 	KeepSlots int64
@@ -86,7 +86,7 @@ const (
 	InjectedBugWriterOffsets          // offsets chosen by the writer instead of by apply
 	InjectedBugTrimDelete             // trimmed slots deleted, not tombstoned (logstore)
 	InjectedBugPerReplicaWindow       // each replica forgets keys on its own clock
-	InjectedBugHoleSkip               // pass an empty slot without a no-op fill
+	InjectedBugGapSkip                // pass an empty slot without a no-op fill
 )
 
 func (c Config) readLimit() int32 {
@@ -129,9 +129,9 @@ func (c Config) openFold() (*stateupdater.StateUpdater, error) {
 	if c.OpenStore == nil {
 		return stateupdater.NewMem(), nil
 	}
-	kv, err := c.OpenStore()
+	keyValue, err := c.OpenStore()
 	if err != nil {
 		return nil, err
 	}
-	return stateupdater.New(kv), nil
+	return stateupdater.New(keyValue), nil
 }

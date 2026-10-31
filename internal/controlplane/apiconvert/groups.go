@@ -1,9 +1,9 @@
 package apiconvert
 
 import (
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/groupcoordinator"
-	"manifester/internal/core"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/controlplane/groupcoordinator"
+	"mds/internal/core"
 )
 
 // Group calls (slice 4b). Each pair maps one request or response both ways.
@@ -23,14 +23,14 @@ func JoinGroupFromCore(r groupcoordinator.JoinReq) *cpv1.JoinGroupRequest {
 }
 
 // JoinGroupToCore rebuilds a join call from a request.
-func JoinGroupToCore(req *cpv1.JoinGroupRequest) groupcoordinator.JoinReq {
+func JoinGroupToCore(request *cpv1.JoinGroupRequest) groupcoordinator.JoinReq {
 	out := groupcoordinator.JoinReq{
-		Group: req.GetGroup(), MemberID: req.GetMemberId(), GroupInstanceID: req.GetGroupInstanceId(),
-		ClientID: req.GetClientId(), ClientHost: req.GetClientHost(),
-		SessionTimeoutMs: req.GetSessionTimeoutMs(), RebalanceTimeoutMs: req.GetRebalanceTimeoutMs(),
-		ProtocolType: req.GetProtocolType(),
+		Group: request.GetGroup(), MemberID: request.GetMemberId(), GroupInstanceID: request.GetGroupInstanceId(),
+		ClientID: request.GetClientId(), ClientHost: request.GetClientHost(),
+		SessionTimeoutMs: request.GetSessionTimeoutMs(), RebalanceTimeoutMs: request.GetRebalanceTimeoutMs(),
+		ProtocolType: request.GetProtocolType(),
 	}
-	for _, p := range req.GetProtocols() {
+	for _, p := range request.GetProtocols() {
 		out.Protocols = append(out.Protocols, groupcoordinator.Protocol{Name: p.GetName(), Metadata: p.GetMetadata()})
 	}
 	return out
@@ -68,11 +68,11 @@ func SyncGroupFromCore(r groupcoordinator.SyncReq) *cpv1.SyncGroupRequest {
 }
 
 // SyncGroupToCore rebuilds a sync call from a request.
-func SyncGroupToCore(req *cpv1.SyncGroupRequest) groupcoordinator.SyncReq {
+func SyncGroupToCore(request *cpv1.SyncGroupRequest) groupcoordinator.SyncReq {
 	out := groupcoordinator.SyncReq{
-		Group: req.GetGroup(), MemberID: req.GetMemberId(), Generation: req.GetGeneration(),
+		Group: request.GetGroup(), MemberID: request.GetMemberId(), Generation: request.GetGeneration(),
 	}
-	for _, a := range req.GetAssignments() {
+	for _, a := range request.GetAssignments() {
 		out.Assignments = append(out.Assignments, groupcoordinator.Assignment{Member: a.GetMemberId(), Bytes: a.GetAssignment()})
 	}
 	return out
@@ -94,8 +94,8 @@ func HeartbeatFromCore(r groupcoordinator.HeartbeatReq) *cpv1.GroupHeartbeatRequ
 }
 
 // HeartbeatToCore rebuilds a heartbeat call from a request.
-func HeartbeatToCore(req *cpv1.GroupHeartbeatRequest) groupcoordinator.HeartbeatReq {
-	return groupcoordinator.HeartbeatReq{Group: req.GetGroup(), MemberID: req.GetMemberId(), Generation: req.GetGeneration()}
+func HeartbeatToCore(request *cpv1.GroupHeartbeatRequest) groupcoordinator.HeartbeatReq {
+	return groupcoordinator.HeartbeatReq{Group: request.GetGroup(), MemberID: request.GetMemberId(), Generation: request.GetGeneration()}
 }
 
 // LeaveGroupFromCore builds a LeaveGroupRequest.
@@ -104,8 +104,8 @@ func LeaveGroupFromCore(r groupcoordinator.LeaveReq) *cpv1.LeaveGroupRequest {
 }
 
 // LeaveGroupToCore rebuilds a leave call from a request.
-func LeaveGroupToCore(req *cpv1.LeaveGroupRequest) groupcoordinator.LeaveReq {
-	return groupcoordinator.LeaveReq{Group: req.GetGroup(), Members: append([]string(nil), req.GetMembers()...)}
+func LeaveGroupToCore(request *cpv1.LeaveGroupRequest) groupcoordinator.LeaveReq {
+	return groupcoordinator.LeaveReq{Group: request.GetGroup(), Members: append([]string(nil), request.GetMembers()...)}
 }
 
 // LeaveGroupRespFromCore builds a LeaveGroupResponse from one code per member.
@@ -127,22 +127,22 @@ func LeaveGroupRespToCore(r *cpv1.LeaveGroupResponse) []core.ErrCode {
 }
 
 // OffsetCommitFromCore builds a GroupOffsetCommitRequest from a commit.
-func OffsetCommitFromCore(op core.OffsetCommit) *cpv1.GroupOffsetCommitRequest {
-	out := &cpv1.GroupOffsetCommitRequest{Group: op.Group, MemberId: op.Member, Generation: op.Generation}
-	for _, o := range op.Offsets {
+func OffsetCommitFromCore(operation core.OffsetCommit) *cpv1.GroupOffsetCommitRequest {
+	out := &cpv1.GroupOffsetCommitRequest{Group: operation.Group, MemberId: operation.Member, Generation: operation.Generation}
+	for _, o := range operation.Offsets {
 		out.Offsets = append(out.Offsets, &cpv1.PartitionOffsetCommit{
-			Tp: topicPartitionFromCore(o.TP), Offset: o.Offset, LeaderEpoch: o.LeaderEpoch, Metadata: o.Metadata,
+			Tp: topicPartitionFromCore(o.TopicPartition), Offset: o.Offset, LeaderEpoch: o.LeaderEpoch, Metadata: o.Metadata,
 		})
 	}
 	return out
 }
 
 // OffsetCommitToCore rebuilds a commit from a request. TimeMs is set by the coordinator.
-func OffsetCommitToCore(req *cpv1.GroupOffsetCommitRequest) core.OffsetCommit {
-	out := core.OffsetCommit{Group: req.GetGroup(), Member: req.GetMemberId(), Generation: req.GetGeneration()}
-	for _, o := range req.GetOffsets() {
+func OffsetCommitToCore(request *cpv1.GroupOffsetCommitRequest) core.OffsetCommit {
+	out := core.OffsetCommit{Group: request.GetGroup(), Member: request.GetMemberId(), Generation: request.GetGeneration()}
+	for _, o := range request.GetOffsets() {
 		out.Offsets = append(out.Offsets, core.PartitionOffset{
-			TP: topicPartitionToCore(o.GetTp()), Offset: o.GetOffset(), LeaderEpoch: o.GetLeaderEpoch(), Metadata: o.GetMetadata(),
+			TopicPartition: topicPartitionToCore(o.GetTp()), Offset: o.GetOffset(), LeaderEpoch: o.GetLeaderEpoch(), Metadata: o.GetMetadata(),
 		})
 	}
 	return out
@@ -167,19 +167,19 @@ func OffsetCommitRespToCore(r *cpv1.GroupOffsetCommitResponse) core.OffsetCommit
 }
 
 // OffsetFetchFromCore builds a GroupOffsetFetchRequest.
-func OffsetFetchFromCore(op core.OffsetFetch) *cpv1.GroupOffsetFetchRequest {
-	out := &cpv1.GroupOffsetFetchRequest{Group: op.Group}
-	for _, tp := range op.Partitions {
-		out.Partitions = append(out.Partitions, topicPartitionFromCore(tp))
+func OffsetFetchFromCore(operation core.OffsetFetch) *cpv1.GroupOffsetFetchRequest {
+	out := &cpv1.GroupOffsetFetchRequest{Group: operation.Group}
+	for _, topicPartition := range operation.Partitions {
+		out.Partitions = append(out.Partitions, topicPartitionFromCore(topicPartition))
 	}
 	return out
 }
 
 // OffsetFetchToCore rebuilds an offset fetch from a request.
-func OffsetFetchToCore(req *cpv1.GroupOffsetFetchRequest) core.OffsetFetch {
-	out := core.OffsetFetch{Group: req.GetGroup()}
-	for _, tp := range req.GetPartitions() {
-		out.Partitions = append(out.Partitions, topicPartitionToCore(tp))
+func OffsetFetchToCore(request *cpv1.GroupOffsetFetchRequest) core.OffsetFetch {
+	out := core.OffsetFetch{Group: request.GetGroup()}
+	for _, topicPartition := range request.GetPartitions() {
+		out.Partitions = append(out.Partitions, topicPartitionToCore(topicPartition))
 	}
 	return out
 }
@@ -208,8 +208,8 @@ func DescribeGroupsFromCore(names []string) *cpv1.DescribeGroupsRequest {
 }
 
 // DescribeGroupsToCore rebuilds the group names of a request.
-func DescribeGroupsToCore(req *cpv1.DescribeGroupsRequest) []string {
-	return append([]string(nil), req.GetGroups()...)
+func DescribeGroupsToCore(request *cpv1.DescribeGroupsRequest) []string {
+	return append([]string(nil), request.GetGroups()...)
 }
 
 // DescribeGroupsRespFromCore builds a DescribeGroupsResponse.
@@ -279,22 +279,22 @@ func ListGroupsRespToCore(r *cpv1.ListGroupsResponse) []core.GroupSummary {
 	return out
 }
 
-func topicPartitionFromCore(tp core.TopicPartition) *cpv1.TopicPartition {
-	return &cpv1.TopicPartition{Topic: tp.Topic, Partition: tp.Partition}
+func topicPartitionFromCore(topicPartition core.TopicPartition) *cpv1.TopicPartition {
+	return &cpv1.TopicPartition{Topic: topicPartition.Topic, Partition: topicPartition.Partition}
 }
 
-func topicPartitionToCore(tp *cpv1.TopicPartition) core.TopicPartition {
-	return core.NewTopicPartition(tp.GetTopic(), tp.GetPartition())
+func topicPartitionToCore(topicPartition *cpv1.TopicPartition) core.TopicPartition {
+	return core.NewTopicPartition(topicPartition.GetTopic(), topicPartition.GetPartition())
 }
 
 func partitionOffsetFromCore(o core.PartitionOffset) *cpv1.PartitionOffset {
 	return &cpv1.PartitionOffset{
-		Tp: topicPartitionFromCore(o.TP), Offset: o.Offset, LeaderEpoch: o.LeaderEpoch, Metadata: o.Metadata,
+		Tp: topicPartitionFromCore(o.TopicPartition), Offset: o.Offset, LeaderEpoch: o.LeaderEpoch, Metadata: o.Metadata,
 	}
 }
 
 func partitionOffsetToCore(o *cpv1.PartitionOffset) core.PartitionOffset {
 	return core.PartitionOffset{
-		TP: topicPartitionToCore(o.GetTp()), Offset: o.GetOffset(), LeaderEpoch: o.GetLeaderEpoch(), Metadata: o.GetMetadata(),
+		TopicPartition: topicPartitionToCore(o.GetTp()), Offset: o.GetOffset(), LeaderEpoch: o.GetLeaderEpoch(), Metadata: o.GetMetadata(),
 	}
 }

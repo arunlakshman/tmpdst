@@ -8,14 +8,14 @@ locals {
   name = "mb-${var.run_id}"
 
   tags = {
-    Project            = "manifester-bench"
+    Project            = "mds-bench"
     RunId              = var.run_id
     Owner              = var.owner
     auto-destroy-after = var.auto_destroy_after
   }
 
-  bucket_name  = "manifester-bench-${var.run_id}-${data.aws_caller_identity.current.account_id}"
-  table_prefix = "manifester_${replace(var.run_id, "-", "_")}_"
+  bucket_name  = "mds-bench-${var.run_id}-${data.aws_caller_identity.current.account_id}"
+  table_prefix = "mds_${replace(var.run_id, "-", "_")}_"
   table_name   = "${local.table_prefix}cp"
 
   # Control plane: rank 0 (aws_instance.cp) is the preferred appender, ranks 1.. (aws_instance.cp_standby) are hot
@@ -101,7 +101,7 @@ resource "aws_vpc_endpoint" "dynamodb" {
 # Alloy agent on each host over loopback, so no metrics ports are opened.
 resource "aws_security_group" "loadgen" {
   name_prefix = "${local.name}-loadgen-"
-  description = "manifester-bench load generators: OMB ports from each other only"
+  description = "mds-bench load generators: OMB ports from each other only"
   vpc_id      = aws_vpc.this.id
   tags        = { Name = "${local.name}-loadgen" }
 
@@ -112,7 +112,7 @@ resource "aws_security_group" "loadgen" {
 
 resource "aws_security_group" "broker" {
   name_prefix = "${local.name}-broker-"
-  description = "manifester-bench broker: Kafka from loadgen only"
+  description = "mds-bench broker: Kafka from loadgen only"
   vpc_id      = aws_vpc.this.id
   tags        = { Name = "${local.name}-broker" }
 
@@ -126,7 +126,7 @@ resource "aws_security_group" "broker" {
 # No metrics ports: Alloy and the snapshotter use loopback.
 resource "aws_security_group" "cp" {
   name_prefix = "${local.name}-cp-"
-  description = "manifester-bench control plane (manicp, active + standbys): 8080 from brokers only"
+  description = "mds-bench control plane (mdscontrolplane, active + standbys): 8080 from brokers only"
   vpc_id      = aws_vpc.this.id
   tags        = { Name = "${local.name}-cp" }
 
@@ -141,7 +141,7 @@ resource "aws_vpc_security_group_ingress_rule" "cp_from_brokers" {
   ip_protocol                  = "tcp"
   from_port                    = 8080
   to_port                      = 8080
-  description                  = "manicp HTTP from brokers"
+  description                  = "mdscontrolplane HTTP from brokers"
 }
 
 resource "aws_vpc_security_group_egress_rule" "cp_all" {
@@ -221,7 +221,7 @@ resource "terraform_data" "ssm_prefix_check" {
 # ---------------------------------------------------------------- budget
 
 resource "aws_budgets_budget" "this" {
-  name         = "manifester-bench-${var.run_id}"
+  name         = "mds-bench-${var.run_id}"
   budget_type  = "COST"
   limit_amount = tostring(var.budget_usd)
   limit_unit   = "USD"

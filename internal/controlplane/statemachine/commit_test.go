@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 func commitCmd(key string, records int64) stateupdater.Entry {
@@ -15,7 +15,7 @@ func commitCmd(key string, records int64) stateupdater.Entry {
 		Commit: core.CommitSegment{
 			SegmentKey: key,
 			Batches: []core.PendingBatch{
-				{TP: core.NewTopicPartition("t", 0), Records: records, Loc: core.SegmentRef{Key: key, Off: 0, Len: records}},
+				{TopicPartition: core.NewTopicPartition("t", 0), Records: records, Loc: core.SegmentRef{Key: key, Off: 0, Len: records}},
 			},
 		},
 	}
@@ -129,11 +129,11 @@ func TestMaybeAppliedRetriesSameSlot(t *testing.T) {
 	m := newMachine(t, statemachine.Config{K: 2, MaxCmdsPerSlot: 1, Writer: "w"})
 	a := onlyAppend(t, m.Offer(statemachine.ClientOperation{Req: 1, Cmd: commitCmd("a", 1)}))
 	b := onlyAppend(t, m.Offer(statemachine.ClientOperation{Req: 2, Cmd: commitCmd("b", 1)}))
-	// b lands first; a times out. Same-slot retry must not leave a hole that
+	// b lands first; a times out. Same-slot retry must not leave a gap that
 	// wedges drain past b.
 	step(m, core.LogAppendDone{Req: b.Req, Slot: b.Slot, Err: core.OK, Outcome: core.Applied})
 	if m.Applied() != 0 {
-		t.Fatalf("Applied = %d before hole filled, want 0", m.Applied())
+		t.Fatalf("Applied = %d before gap filled, want 0", m.Applied())
 	}
 	acts := step(m, core.LogAppendDone{
 		Req: a.Req, Slot: a.Slot, Err: core.ErrTimeout, Outcome: core.MaybeApplied,
@@ -239,8 +239,8 @@ func TestOfferKnownCommitSkipsAppend(t *testing.T) {
 	if len(ans) != 1 || ans[0].Req != 2 || ans[0].Done.Err != core.OK {
 		t.Fatalf("known answers = %+v", ans)
 	}
-	resp, ok := ans[0].Done.Resp.(core.CommitSegmentResp)
-	if !ok || len(resp.Assigned) != 1 || resp.Assigned[0].Count != 2 {
+	response, ok := ans[0].Done.Resp.(core.CommitSegmentResp)
+	if !ok || len(response.Assigned) != 1 || response.Assigned[0].Count != 2 {
 		t.Fatalf("known resp = %+v", ans[0].Done.Resp)
 	}
 }

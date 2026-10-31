@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/core"
-	"manifester/internal/system"
+	"mds/internal/core"
+	"mds/internal/system"
 )
 
 func newTestNet(t *testing.T) (*Net, *system.Inbox) {
@@ -44,7 +44,7 @@ func TestNetOpenReadWriteOrdered(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = c.Close() }()
-	op := next(t, in).(core.ConnOpened)
+	operation := next(t, in).(core.ConnOpened)
 	_, _ = c.Write([]byte("hello"))
 	var got []byte
 	for len(got) < 5 {
@@ -59,7 +59,7 @@ func TestNetOpenReadWriteOrdered(t *testing.T) {
 		chunk := bytes.Repeat([]byte{byte(i)}, 1000)
 		want.Write(chunk)
 		wg.Add(1)
-		if err := n.WriteAsync(op.Conn, chunk, func(err error) {
+		if err := n.WriteAsync(operation.Conn, chunk, func(err error) {
 			if err != nil {
 				t.Error(err)
 			}
@@ -74,7 +74,7 @@ func TestNetOpenReadWriteOrdered(t *testing.T) {
 	}
 	wg.Wait()
 	_ = c.Close()
-	if cc, ok := next(t, in).(core.ConnClosed); !ok || cc.Conn != op.Conn || cc.Abort {
+	if cc, ok := next(t, in).(core.ConnClosed); !ok || cc.Conn != operation.Conn || cc.Abort {
 		t.Fatalf("want graceful ConnClosed, got %+v", cc)
 	}
 }
@@ -83,10 +83,10 @@ func TestNetPauseParksReader(t *testing.T) {
 	n, in := newTestNet(t)
 	c, _ := (&net.Dialer{}).DialContext(t.Context(), "tcp", n.Addr().String())
 	defer func() { _ = c.Close() }()
-	op := next(t, in).(core.ConnOpened)
+	operation := next(t, in).(core.ConnOpened)
 	_, _ = c.Write([]byte("a"))
 	next(t, in)
-	n.PauseReads(op.Conn)
+	n.PauseReads(operation.Conn)
 	// The Read already blocked when we paused may return once more.
 	_, _ = c.Write([]byte("b"))
 	time.Sleep(100 * time.Millisecond)
@@ -98,7 +98,7 @@ func TestNetPauseParksReader(t *testing.T) {
 	if in.Data().Len() != 0 {
 		t.Fatal("reader kept reading while paused")
 	}
-	n.ResumeReads(op.Conn)
+	n.ResumeReads(operation.Conn)
 	if r := next(t, in).(core.BytesReceived); string(r.Data) != "c" {
 		t.Fatalf("got %q after resume", r.Data)
 	}
@@ -108,23 +108,23 @@ func TestNetAbortResetsAndGracefulFlushes(t *testing.T) {
 	n, in := newTestNet(t)
 	c, _ := (&net.Dialer{}).DialContext(t.Context(), "tcp", n.Addr().String())
 	defer func() { _ = c.Close() }()
-	op := next(t, in).(core.ConnOpened)
-	_ = n.Write(op.Conn, []byte("bye"))
-	if err := n.Close(op.Conn, false); err != nil {
+	operation := next(t, in).(core.ConnOpened)
+	_ = n.Write(operation.Conn, []byte("bye"))
+	if err := n.Close(operation.Conn, false); err != nil {
 		t.Fatal(err)
 	}
 	b, err := io.ReadAll(c) // FIN after the queued bytes
 	if err != nil || string(b) != "bye" {
 		t.Fatalf("graceful close: %q %v", b, err)
 	}
-	if err := n.Write(op.Conn, []byte("late")); err == nil {
+	if err := n.Write(operation.Conn, []byte("late")); err == nil {
 		t.Fatal("write after close succeeded")
 	}
 
 	c2, _ := (&net.Dialer{}).DialContext(t.Context(), "tcp", n.Addr().String())
 	defer func() { _ = c2.Close() }()
 	op2 := next(t, in).(core.ConnOpened)
-	if op2.Conn == op.Conn {
+	if op2.Conn == operation.Conn {
 		t.Fatal("ConnID reused")
 	}
 	_ = n.Close(op2.Conn, true)

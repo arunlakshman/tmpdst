@@ -12,29 +12,29 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/executor"
-	"manifester/internal/controlplane/server"
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/core"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/controlplane/executor"
+	"mds/internal/controlplane/server"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/core"
 )
 
-func startNode(t *testing.T, cfg statemachine.Config) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
+func startNode(t *testing.T, config statemachine.Config) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
 	t.Helper()
-	return startNodeWithLease(t, cfg, 0)
+	return startNodeWithLease(t, config, 0)
 }
 
 // startNodeWithLease is startNode with a broker lease TTL. Zero keeps the default.
-func startNodeWithLease(t *testing.T, cfg statemachine.Config, leaseTTL time.Duration) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
+func startNodeWithLease(t *testing.T, config statemachine.Config, leaseTTL time.Duration) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
 	t.Helper()
-	if cfg.K == 0 {
-		cfg.K = 4
+	if config.K == 0 {
+		config.K = 4
 	}
-	if cfg.CatchUpEvery == 0 {
-		cfg.CatchUpEvery = core.Duration(time.Millisecond)
+	if config.CatchUpEvery == 0 {
+		config.CatchUpEvery = core.Duration(time.Millisecond)
 	}
 	n := server.New(server.Config{
-		Machine:        cfg,
+		Machine:        config,
 		Log:            executor.NewMemoryLog(),
 		Objects:        executor.NewMemoryObjects(),
 		Self:           core.NodeInstance{Node: "cp-0"},
@@ -66,12 +66,12 @@ func startNodeWithLease(t *testing.T, cfg statemachine.Config, leaseTTL time.Dur
 func TestHealthServingAfterReady(t *testing.T) {
 	_, hc, stop := startNode(t, statemachine.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
 	defer stop()
-	resp, err := hc.Check(t.Context(), &healthpb.HealthCheckRequest{})
+	response, err := hc.Check(t.Context(), &healthpb.HealthCheckRequest{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Status != healthpb.HealthCheckResponse_SERVING {
-		t.Fatalf("status = %v", resp.Status)
+	if response.Status != healthpb.HealthCheckResponse_SERVING {
+		t.Fatalf("status = %v", response.Status)
 	}
 }
 

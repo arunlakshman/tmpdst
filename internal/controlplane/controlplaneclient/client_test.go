@@ -12,11 +12,11 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/executor"
-	"manifester/internal/controlplane/server"
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/core"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/controlplane/executor"
+	"mds/internal/controlplane/server"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/core"
 )
 
 func realClient(t *testing.T) *Client {
@@ -50,14 +50,14 @@ func TestClientAgainstMachine(t *testing.T) {
 	c := realClient(t)
 	ctx := t.Context()
 	var ops []string
-	c.Observe(func(op string, _ time.Duration) { ops = append(ops, op) })
+	c.Observe(func(operation string, _ time.Duration) { ops = append(ops, operation) })
 
 	if err := c.CreateTopic(ctx, "t", 2); err != nil {
 		t.Fatal(err)
 	}
-	tp := core.NewTopicPartition("t", 0)
+	topicPartition := core.NewTopicPartition("t", 0)
 	cs, err := c.Call(ctx, core.CommitSegment{SegmentKey: "s1", Batches: []core.PendingBatch{
-		{TP: tp, Records: 4, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 40}},
+		{TopicPartition: topicPartition, Records: 4, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 40}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func TestClientAgainstMachine(t *testing.T) {
 	if as := cs.(core.CommitSegmentResp).Assigned; len(as) != 1 || as[0].Count != 4 {
 		t.Fatalf("assigned %+v", as)
 	}
-	lk, err := c.Call(ctx, core.FindSegments{TP: tp, From: 0, MaxBytes: 1000})
+	lk, err := c.Call(ctx, core.FindSegments{TopicPartition: topicPartition, From: 0, MaxBytes: 1000})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestClientAgainstMachine(t *testing.T) {
 	}
 
 	_, err = c.Call(ctx, core.CommitSegment{SegmentKey: "s1", Batches: []core.PendingBatch{
-		{TP: tp, Records: 1, Loc: core.SegmentRef{Key: "s1", Len: 1}},
+		{TopicPartition: topicPartition, Records: 1, Loc: core.SegmentRef{Key: "s1", Len: 1}},
 	}})
 	var be *Error
 	if !errors.As(err, &be) || be.Code != core.ErrConflict {
@@ -111,7 +111,7 @@ func TestCallDialError(t *testing.T) {
 	addr := ln.Addr().String()
 	_ = ln.Close()
 	_, err = New(addr, nil).Call(t.Context(), core.CommitSegment{
-		SegmentKey: "k", Batches: []core.PendingBatch{{TP: core.NewTopicPartition("t", 0), Records: 1}},
+		SegmentKey: "k", Batches: []core.PendingBatch{{TopicPartition: core.NewTopicPartition("t", 0), Records: 1}},
 	})
 	if err == nil {
 		t.Fatal("expected error")
@@ -165,11 +165,11 @@ func TestClientCallCreateTopic(t *testing.T) {
 	if _, err := c.Call(ctx, core.CreateTopic{Name: "made", Partitions: 3}); err != nil {
 		t.Fatal(err)
 	}
-	resp, err := c.Call(ctx, core.DescribeTopics{Topics: []string{"made"}})
+	response, err := c.Call(ctx, core.DescribeTopics{Topics: []string{"made"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := resp.(core.DescribeTopicsResp).Topics; len(got) != 1 || got[0].Partitions != 3 {
+	if got := response.(core.DescribeTopicsResp).Topics; len(got) != 1 || got[0].Partitions != 3 {
 		t.Fatalf("topics %+v", got)
 	}
 	_, err = c.Call(ctx, core.CreateTopic{Name: "", Partitions: 1})

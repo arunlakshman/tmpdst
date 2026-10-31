@@ -1,0 +1,52 @@
+# OMB Kafka driver for the mds broker, mirroring WarpStream's published client settings
+# (https://www.warpstream.com/blog/warpstream-benchmarks-and-tco). Do NOT edit the generated copy;
+# render it with render-driver.sh (run-omb.sh does), which substitutes the @@...@@ markers:
+#   @@BOOTSTRAP@@    comma list ip:9092 of all brokers (or the NLB)
+#   @@COMPRESSION@@  lz4 | none     lz4 is the default (as WarpStream); the broker stores compressed batches as
+#                                      opaque bytes (decision 45). none is only for a broker that rejects lz4 and is NOT
+#                                      apples-to-apples with WarpStream; run-omb.sh prints a loud warning.
+#   @@TOPIC@@ @@CONSUMERS@@ @@CONSUMER_WORKERS@@  see below
+name: Kafka-mds
+driverClass: io.openmessaging.benchmark.driver.kafka.KafkaBenchmarkDriver
+
+# MDS patch (patches/0001): the broker has no CreateTopics and no consumer groups, so the topic is
+# pre-created through the control plane (bench-ctl.sh create-topic), every logical topic maps to it, and
+# consumers assign() a static partition share (consumer k of N takes partitions p % N == k) without committing.
+mdsTopic: @@TOPIC@@
+mdsAssign: true
+mdsConsumersTotal: @@CONSUMERS@@          # = workload consumerPerSubscription
+mdsBalance: @@BALANCE@@                 # true: client k pins to broker (k + loadgen index) % N of bootstrap.servers (stands in for WarpStream service discovery); false: stock random bootstrap choice (binomial skew)
+mdsAffine: @@AFFINE@@                  # EXPERIMENT, default false (patch 0004): producer k writes only partitions p % N == k % N; NOT comparable to WarpStream
+mdsConsumerWorkers: @@CONSUMER_WORKERS@@  # = loadgen count / 2 (OMB gives the second half of the workers the consumers)
+
+# Unused (no CreateTopics), kept because the stock driver requires the keys.
+replicationFactor: 1
+topicConfig: |
+
+commonConfig: |
+  bootstrap.servers=@@BOOTSTRAP@@
+  # WarpStream docs: refresh metadata often so clients notice a broker change.
+  metadata.max.age.ms=60000
+
+# Optional, from WarpStream's tuning guide but NOT in the published OMB config (so off here): max.in.flight.requests.per.connection=1000
+# WarpStream: linger.ms=25 batch.size=100000 buffer.memory=128000000 max.request.size=64000000 compression=lz4
+# enable.idempotence=false is REQUIRED here (decision 41; Kafka 3.8 clients default to true and are rejected).
+# acks=all is the OMB default and what WarpStream's OMB runs use.
+producerConfig: |
+  acks=all
+  enable.idempotence=false
+  linger.ms=25
+  batch.size=100000
+  buffer.memory=128000000
+  max.request.size=64000000
+  compression.type=@@COMPRESSION@@
+
+# WarpStream: auto.offset.reset=earliest enable.auto.commit=true max.partition.fetch.bytes=fetch.max.bytes=100485760.
+# Deviation: the mds broker has no consumer groups (no FindCoordinator/JoinGroup/OffsetCommit), so the
+# patched driver (-Dmds.assign=true) assign()s partitions statically and never commits; enable.auto.commit
+# must therefore be false (a true value needs a group.id).
+consumerConfig: |
+  auto.offset.reset=earliest
+  enable.auto.commit=false
+  max.partition.fetch.bytes=100485760
+  fetch.max.bytes=100485760

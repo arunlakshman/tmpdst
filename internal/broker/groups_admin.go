@@ -6,7 +6,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // DescribeGroups (key 15) and ListGroups (key 16). Admin tools read them. Each
@@ -20,20 +20,20 @@ const authOpsOmitted = math.MinInt32
 // describeGroups answers DescribeGroups. Every name gets an entry, in request
 // order. A group the control plane does not know is "Dead" with no error.
 func (b *Broker) describeGroups(s *slot, r *kmsg.DescribeGroupsRequest) []core.Action {
-	resp := kmsg.NewPtrDescribeGroupsResponse()
-	s.resp = resp
+	response := kmsg.NewPtrDescribeGroupsResponse()
+	s.response = response
 	if len(r.Groups) == 0 {
 		return nil
 	}
-	resp.Groups = make([]kmsg.DescribeGroupsResponseGroup, len(r.Groups))
+	response.Groups = make([]kmsg.DescribeGroupsResponseGroup, len(r.Groups))
 	for i, name := range r.Groups {
-		resp.Groups[i].Group = name
-		resp.Groups[i].AuthorizedOperations = authOpsOmitted
+		response.Groups[i].Group = name
+		response.Groups[i].AuthorizedOperations = authOpsOmitted
 	}
 	fill := func(e core.ControlPlaneDone) {
 		ds := core.ResponseAs[core.DescribeGroupsResp](e).Groups
-		for i := range resp.Groups {
-			g := &resp.Groups[i]
+		for i := range response.Groups {
+			g := &response.Groups[i]
 			switch {
 			case e.Err != core.OK:
 				g.ErrorCode = int16(groupErrCode(e.Err))
@@ -78,10 +78,10 @@ func inStates(filter []string, state string) bool {
 // (FindCoordinator hash), and a states filter (version 4 and up) narrows them.
 // With no other live broker, this broker coordinates every group.
 func (b *Broker) listGroups(s *slot, r *kmsg.ListGroupsRequest) []core.Action {
-	resp := kmsg.NewPtrListGroupsResponse()
-	s.resp = resp
+	response := kmsg.NewPtrListGroupsResponse()
+	s.response = response
 	fill := func(e core.ControlPlaneDone) {
-		resp.ErrorCode = int16(groupErrCode(e.Err))
+		response.ErrorCode = int16(groupErrCode(e.Err))
 		if e.Err != core.OK {
 			return
 		}
@@ -90,7 +90,7 @@ func (b *Broker) listGroups(s *slot, r *kmsg.ListGroupsRequest) []core.Action {
 			if !b.coordinatorIsSelf(g.Name) || !inStates(r.StatesFilter, state) {
 				continue
 			}
-			resp.Groups = append(resp.Groups, kmsg.ListGroupsResponseGroup{Group: g.Name, ProtocolType: g.ProtocolType, GroupState: state})
+			response.Groups = append(response.Groups, kmsg.ListGroupsResponseGroup{Group: g.Name, ProtocolType: g.ProtocolType, GroupState: state})
 		}
 	}
 	return b.groupCall(s, core.ListGroups{}, 0, fill)

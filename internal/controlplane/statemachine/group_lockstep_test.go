@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck"
 )
 
 // Random lockstep for the consumer group commands. Each step is a log write or
@@ -63,20 +63,20 @@ func (r *groupRun) install() core.ControlPlaneOperation {
 	case q < 25:
 		gen = r.rng.Int32N(5)
 	}
-	op := core.GroupInstall{Group: g, ProtocolType: "consumer", Protocol: "range", Generation: gen, TimeMs: r.now}
+	operation := core.GroupInstall{Group: g, ProtocolType: "consumer", Protocol: "range", Generation: gen, TimeMs: r.now}
 	ids := r.subset(r.rng.IntN(4))
 	for _, id := range ids {
-		op.Members = append(op.Members, core.GroupMember{MemberID: id, ClientID: "c-" + id, SessionTimeoutMs: 10000,
+		operation.Members = append(operation.Members, core.GroupMember{MemberID: id, ClientID: "c-" + id, SessionTimeoutMs: 10000,
 			RebalanceTimeoutMs: 30000, Metadata: []byte(strings.Repeat("s", r.rng.IntN(3)))})
 	}
 	if len(ids) > 0 && r.chance(5) {
-		op.Members = append(op.Members, op.Members[0])
+		operation.Members = append(operation.Members, operation.Members[0])
 	}
-	op.Leader = r.pick(runMembers)
+	operation.Leader = r.pick(runMembers)
 	if len(ids) > 0 && r.chance(80) {
-		op.Leader = ids[r.rng.IntN(len(ids))]
+		operation.Leader = ids[r.rng.IntN(len(ids))]
 	}
-	return op
+	return operation
 }
 
 func (r *groupRun) assign() core.ControlPlaneOperation {
@@ -86,22 +86,22 @@ func (r *groupRun) assign() core.ControlPlaneOperation {
 	if !r.chance(80) {
 		gen += int32(r.rng.IntN(3)) - 1
 	}
-	op := core.GroupAssign{Group: g, Generation: gen, Leader: cur.Leader, TimeMs: r.now}
+	operation := core.GroupAssign{Group: g, Generation: gen, Leader: cur.Leader, TimeMs: r.now}
 	if !r.chance(80) {
-		op.Leader = r.pick(runMembers)
+		operation.Leader = r.pick(runMembers)
 	}
 	for _, m := range cur.Members {
 		if r.chance(70) {
-			op.Assignments = append(op.Assignments, core.GroupAssignment{Member: m.MemberID, Bytes: []byte("a-" + m.MemberID)})
+			operation.Assignments = append(operation.Assignments, core.GroupAssignment{Member: m.MemberID, Bytes: []byte("a-" + m.MemberID)})
 		}
 	}
 	if r.chance(10) {
-		op.Assignments = append(op.Assignments, core.GroupAssignment{Member: "zz", Bytes: []byte("z")})
+		operation.Assignments = append(operation.Assignments, core.GroupAssignment{Member: "zz", Bytes: []byte("z")})
 	}
 	if r.chance(1) {
-		op.Assignments = append(op.Assignments, core.GroupAssignment{Member: "zz", Bytes: bytes.Repeat([]byte("x"), 300<<10)})
+		operation.Assignments = append(operation.Assignments, core.GroupAssignment{Member: "zz", Bytes: bytes.Repeat([]byte("x"), 300<<10)})
 	}
-	return op
+	return operation
 }
 
 func (r *groupRun) remove() core.ControlPlaneOperation {
@@ -122,30 +122,30 @@ func (r *groupRun) commit() core.ControlPlaneOperation {
 	case q < 50:
 		gen = int32(r.rng.IntN(6)) - 2
 	}
-	op := core.OffsetCommit{Group: g, Member: r.pick(runMembers), Generation: gen, TimeMs: r.now}
+	operation := core.OffsetCommit{Group: g, Member: r.pick(runMembers), Generation: gen, TimeMs: r.now}
 	if r.chance(15) {
-		op.Member = ""
+		operation.Member = ""
 	}
 	if r.chance(40) && len(cur.Members) > 0 {
 		// a valid managed commit: a real member at the current generation
-		op.Member = cur.Members[r.rng.IntN(len(cur.Members))].MemberID
-		op.Generation = cur.Generation
+		operation.Member = cur.Members[r.rng.IntN(len(cur.Members))].MemberID
+		operation.Generation = cur.Generation
 	}
 	for range r.rng.IntN(4) {
-		o := core.PartitionOffset{TP: core.NewTopicPartition(r.pick(append(runTopics, "ghost")), int32(r.rng.IntN(4)-1))}
+		o := core.PartitionOffset{TopicPartition: core.NewTopicPartition(r.pick(append(runTopics, "ghost")), int32(r.rng.IntN(4)-1))}
 		o.Offset = int64(r.rng.IntN(10))
 		if r.chance(10) {
 			o.Offset = -1
 		}
 		o.LeaderEpoch = int32(r.rng.IntN(3))
 		o.Metadata = strings.Repeat("m", r.rng.IntN(3))
-		op.Offsets = append(op.Offsets, o)
+		operation.Offsets = append(operation.Offsets, o)
 	}
 	if r.chance(1) {
-		op.Offsets = append(op.Offsets, core.PartitionOffset{TP: core.NewTopicPartition("orders", 0), Offset: 1,
+		operation.Offsets = append(operation.Offsets, core.PartitionOffset{TopicPartition: core.NewTopicPartition("orders", 0), Offset: 1,
 			Metadata: strings.Repeat("m", 256<<10)})
 	}
-	return op
+	return operation
 }
 
 func (r *groupRun) write() core.ControlPlaneOperation {
@@ -167,38 +167,38 @@ func (r *groupRun) read() core.ControlPlaneOperation {
 	case 0:
 		return core.DescribeGroup{Group: r.pick(runGroups)}
 	case 1:
-		op := core.OffsetFetch{Group: r.pick(runGroups)}
+		operation := core.OffsetFetch{Group: r.pick(runGroups)}
 		for n := r.rng.IntN(4); n > 0 && r.chance(50); n-- {
-			op.Partitions = append(op.Partitions, core.NewTopicPartition(r.pick(runTopics[:2]), int32(r.rng.IntN(4))))
+			operation.Partitions = append(operation.Partitions, core.NewTopicPartition(r.pick(runTopics[:2]), int32(r.rng.IntN(4))))
 		}
-		return op
+		return operation
 	}
 	return core.ListGroups{}
 }
 
 // entryFor is the log entry of a write.
-func entryFor(t *testing.T, op core.ControlPlaneOperation, slot int) stateupdater.Entry {
+func entryFor(t *testing.T, operation core.ControlPlaneOperation, slot int) stateupdater.Entry {
 	t.Helper()
-	if c, ok := op.(core.CreateTopic); ok {
+	if c, ok := operation.(core.CreateTopic); ok {
 		return stateupdater.CreateEntry(c)
 	}
-	e, ok := stateupdater.GroupEntry(op)
+	e, ok := stateupdater.GroupEntry(operation)
 	if !ok {
-		t.Fatalf("slot %d: %T is not a write", slot, op)
+		t.Fatalf("slot %d: %T is not a write", slot, operation)
 	}
 	return e
 }
 
 // sameAnswer compares two answers. Req is not compared. Slice 1's CreateTopic
 // apply path sets no Outcome, so only its Err is compared.
-func sameAnswer(t *testing.T, where string, op core.ControlPlaneOperation, got, want core.ControlPlaneDone) {
+func sameAnswer(t *testing.T, where string, operation core.ControlPlaneOperation, got, want core.ControlPlaneDone) {
 	t.Helper()
 	got.Req, want.Req = 0, 0
-	if _, ok := op.(core.CreateTopic); ok {
+	if _, ok := operation.(core.CreateTopic); ok {
 		got.Outcome = want.Outcome
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("%s: %T\n got  %+v\n want %+v", where, op, got, want)
+		t.Fatalf("%s: %T\n got  %+v\n want %+v", where, operation, got, want)
 	}
 }
 
@@ -226,22 +226,22 @@ func groupLockstep(t *testing.T, seed int64, crashAt int, seen map[core.ErrCode]
 			}
 		}
 		if r.chance(25) {
-			op := r.read()
-			got := fold.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
-			want := r.orc.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
-			sameAnswer(t, "read", op, got, want)
+			operation := r.read()
+			got := fold.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
+			want := r.orc.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
+			sameAnswer(t, "read", operation, got, want)
 			continue
 		}
-		op := r.write()
+		operation := r.write()
 		slot := len(writes)
-		e := entryFor(t, op, slot)
+		e := entryFor(t, operation, slot)
 		writes = append(writes, e)
 		got := fold.Apply(int64(slot), e)
-		want := r.orc.Exec(core.ControlPlaneCall{Req: core.RequestID(slot), Op: op}).(core.ControlPlaneDone)
-		sameAnswer(t, "write", op, got, want)
+		want := r.orc.Exec(core.ControlPlaneCall{Req: core.RequestID(slot), Op: operation}).(core.ControlPlaneDone)
+		sameAnswer(t, "write", operation, got, want)
 		seen[got.Err]++
-		if resp, ok := got.Resp.(core.OffsetCommitResp); ok {
-			for _, c := range resp.Errs {
+		if response, ok := got.Resp.(core.OffsetCommitResp); ok {
+			for _, c := range response.Errs {
 				seen[c]++
 			}
 		}
@@ -253,17 +253,17 @@ func groupLockstep(t *testing.T, seed int64, crashAt int, seen map[core.ErrCode]
 // reads with speccheck's state at the end.
 func checkMachineGroups(t *testing.T, r *groupRun, writes []stateupdater.Entry) {
 	t.Helper()
-	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, HoleAfter: 0})
+	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, GapAfter: 0})
 	feedContiguous(t, m, writes)
 	var ops []core.ControlPlaneOperation
 	ops = append(ops, core.ListGroups{})
 	for _, g := range runGroups {
 		ops = append(ops, core.DescribeGroup{Group: g}, core.OffsetFetch{Group: g})
 	}
-	for _, op := range ops {
-		got := m.Fold().Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
-		want := r.orc.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
-		sameAnswer(t, "machine read", op, got, want)
+	for _, operation := range ops {
+		got := m.Fold().Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
+		want := r.orc.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
+		sameAnswer(t, "machine read", operation, got, want)
 	}
 }
 

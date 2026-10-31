@@ -15,10 +15,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/apiconvert"
-	"manifester/internal/core"
-	"manifester/internal/system"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/controlplane/apiconvert"
+	"mds/internal/core"
+	"mds/internal/system"
 )
 
 // Error is a business error answered by the control plane (non-OK status with
@@ -52,14 +52,14 @@ type Client struct {
 	addrs []string
 	cur   atomic.Int32
 	dial  func(ctx context.Context, addr string) (*grpc.ClientConn, error)
-	obs   func(op string, d time.Duration)
+	obs   func(operation string, d time.Duration)
 
 	mu    atomic.Pointer[grpc.ClientConn]
 	muIdx atomic.Int32
 }
 
 // Observe sets a callback receiving, per exchange, the op name and duration.
-func (c *Client) Observe(f func(op string, d time.Duration)) { c.obs = f }
+func (c *Client) Observe(f func(operation string, d time.Duration)) { c.obs = f }
 
 var _ system.ControlPlane = (*Client)(nil)
 
@@ -92,32 +92,32 @@ func (c *Client) Close() error {
 }
 
 // Call performs op. A business error is *Error; other failures are *CallError.
-func (c *Client) Call(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, error) {
+func (c *Client) Call(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	switch op := op.(type) {
+	switch operation := operation.(type) {
 	case core.CommitSegment:
-		return c.commitSegment(ctx, op)
+		return c.commitSegment(ctx, operation)
 	case core.FindSegments:
-		return c.lookup(ctx, op)
+		return c.lookup(ctx, operation)
 	case core.DescribeTopics:
-		return c.describeTopics(ctx, op)
+		return c.describeTopics(ctx, operation)
 	case core.CreateTopic:
-		return nil, c.createTopic(ctx, op)
+		return nil, c.createTopic(ctx, operation)
 	case core.GroupJoin, core.GroupSync, core.GroupHeartbeat, core.GroupLeave, core.OffsetCommit,
 		core.OffsetFetch, core.DescribeGroups, core.ListGroups:
-		return c.callGroup(ctx, op)
+		return c.callGroup(ctx, operation)
 	}
 	return nil, &Error{Code: core.ErrInvalid}
 }
 
 //nolint:dupl // each ControlPlaneOperation keeps its own request/response conversion
-func (c *Client) commitSegment(ctx context.Context, op core.CommitSegment) (core.ControlPlaneResponse, error) {
+func (c *Client) commitSegment(ctx context.Context, operation core.CommitSegment) (core.ControlPlaneResponse, error) {
 	var out *cpv1.CommitSegmentResponse
 	err := c.do(ctx, "CommitSegment", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.CommitSegment(ctx, apiconvert.CommitSegmentFromCore(op))
+		out, e = cli.CommitSegment(ctx, apiconvert.CommitSegmentFromCore(operation))
 		return e
 	})
 	if err != nil {
@@ -127,11 +127,11 @@ func (c *Client) commitSegment(ctx context.Context, op core.CommitSegment) (core
 }
 
 //nolint:dupl // each ControlPlaneOperation keeps its own request/response conversion
-func (c *Client) lookup(ctx context.Context, op core.FindSegments) (core.ControlPlaneResponse, error) {
+func (c *Client) lookup(ctx context.Context, operation core.FindSegments) (core.ControlPlaneResponse, error) {
 	var out *cpv1.LookupResponse
 	err := c.do(ctx, "Lookup", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.Lookup(ctx, apiconvert.LookupFromCore(op))
+		out, e = cli.Lookup(ctx, apiconvert.LookupFromCore(operation))
 		return e
 	})
 	if err != nil {
@@ -141,11 +141,11 @@ func (c *Client) lookup(ctx context.Context, op core.FindSegments) (core.Control
 }
 
 //nolint:dupl // each ControlPlaneOperation keeps its own request/response conversion
-func (c *Client) describeTopics(ctx context.Context, op core.DescribeTopics) (core.ControlPlaneResponse, error) {
+func (c *Client) describeTopics(ctx context.Context, operation core.DescribeTopics) (core.ControlPlaneResponse, error) {
 	var out *cpv1.DescribeTopicsResponse
 	err := c.do(ctx, "DescribeTopics", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.DescribeTopics(ctx, apiconvert.DescribeTopicsFromCore(op))
+		out, e = cli.DescribeTopics(ctx, apiconvert.DescribeTopicsFromCore(operation))
 		return e
 	})
 	if err != nil {
@@ -160,10 +160,10 @@ func (c *Client) CreateTopic(ctx context.Context, name string, partitions int32)
 }
 
 // createTopic sends op. FailIfExists makes the create exclusive.
-func (c *Client) createTopic(ctx context.Context, op core.CreateTopic) error {
+func (c *Client) createTopic(ctx context.Context, operation core.CreateTopic) error {
 	return c.do(ctx, "CreateTopic", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		_, err := cli.CreateTopic(ctx, &cpv1.CreateTopicRequest{
-			Topic: op.Name, Partitions: op.Partitions, FailIfExists: op.FailIfExists,
+			Topic: operation.Name, Partitions: operation.Partitions, FailIfExists: operation.FailIfExists,
 		})
 		return err
 	})

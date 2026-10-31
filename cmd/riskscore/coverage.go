@@ -108,7 +108,7 @@ func ModulePath(root string) (string, error) {
 	return "", errors.New("no module line in go.mod")
 }
 
-// Apply fills Coverage and CRAP on every function. A block belongs to a
+// Apply fills Coverage and risk score on every function. A block belongs to a
 // function when it starts inside the function's line range (closures are part
 // of their function). Coverage is covered statements / total statements. A
 // function with no statements in a profiled file counts as fully covered;

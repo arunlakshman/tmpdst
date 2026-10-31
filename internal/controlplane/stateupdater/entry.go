@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Entry kinds are the Dynamo loglet payload kinds.
@@ -88,15 +88,15 @@ func Encode(en Entry) []byte {
 	return e.buf
 }
 
-func (e *entryEncoder) groupInstall(op core.GroupInstall) {
-	e.s(op.Group)
-	e.s(op.ProtocolType)
-	e.s(op.Protocol)
-	e.i(int64(op.Generation))
-	e.s(op.Leader)
-	e.i(op.TimeMs)
-	e.u(uint64(len(op.Members)))
-	for _, m := range op.Members {
+func (e *entryEncoder) groupInstall(operation core.GroupInstall) {
+	e.s(operation.Group)
+	e.s(operation.ProtocolType)
+	e.s(operation.Protocol)
+	e.i(int64(operation.Generation))
+	e.s(operation.Leader)
+	e.i(operation.TimeMs)
+	e.u(uint64(len(operation.Members)))
+	for _, m := range operation.Members {
 		e.s(m.MemberID)
 		e.s(m.ClientID)
 		e.s(m.ClientHost)
@@ -107,37 +107,37 @@ func (e *entryEncoder) groupInstall(op core.GroupInstall) {
 	}
 }
 
-func (e *entryEncoder) groupAssign(op core.GroupAssign) {
-	e.s(op.Group)
-	e.i(int64(op.Generation))
-	e.s(op.Leader)
-	e.i(op.TimeMs)
-	e.u(uint64(len(op.Assignments)))
-	for _, a := range op.Assignments {
+func (e *entryEncoder) groupAssign(operation core.GroupAssign) {
+	e.s(operation.Group)
+	e.i(int64(operation.Generation))
+	e.s(operation.Leader)
+	e.i(operation.TimeMs)
+	e.u(uint64(len(operation.Assignments)))
+	for _, a := range operation.Assignments {
 		e.s(a.Member)
 		e.s(string(a.Bytes))
 	}
 }
 
-func (e *entryEncoder) groupRemove(op core.GroupRemove) {
-	e.s(op.Group)
-	e.i(op.TimeMs)
-	e.s(op.Reason)
-	e.u(uint64(len(op.Members)))
-	for _, m := range op.Members {
+func (e *entryEncoder) groupRemove(operation core.GroupRemove) {
+	e.s(operation.Group)
+	e.i(operation.TimeMs)
+	e.s(operation.Reason)
+	e.u(uint64(len(operation.Members)))
+	for _, m := range operation.Members {
 		e.s(m)
 	}
 }
 
-func (e *entryEncoder) offsetCommit(op core.OffsetCommit) {
-	e.s(op.Group)
-	e.s(op.Member)
-	e.i(int64(op.Generation))
-	e.i(op.TimeMs)
-	e.u(uint64(len(op.Offsets)))
-	for _, o := range op.Offsets {
-		e.s(o.TP.Topic)
-		e.i(int64(o.TP.Partition))
+func (e *entryEncoder) offsetCommit(operation core.OffsetCommit) {
+	e.s(operation.Group)
+	e.s(operation.Member)
+	e.i(int64(operation.Generation))
+	e.i(operation.TimeMs)
+	e.u(uint64(len(operation.Offsets)))
+	for _, o := range operation.Offsets {
+		e.s(o.TopicPartition.Topic)
+		e.i(int64(o.TopicPartition.Partition))
 		e.i(o.Offset)
 		e.i(int64(o.LeaderEpoch))
 		e.s(o.Metadata)
@@ -149,8 +149,8 @@ func (e *entryEncoder) commit(c core.CommitSegment) {
 	head := e.buf
 	e.buf = nil
 	for _, b := range c.Batches {
-		e.u(e.ref(b.TP.Topic))
-		e.i(int64(b.TP.Partition))
+		e.u(e.ref(b.TopicPartition.Topic))
+		e.i(int64(b.TopicPartition.Partition))
 		e.i(b.Records)
 		e.u(e.ref(b.Loc.Key))
 		e.i(b.Loc.Off)
@@ -254,13 +254,13 @@ func (d *entryDecoder) blob() []byte {
 }
 
 func (d *entryDecoder) groupInstall() core.GroupInstall {
-	var op core.GroupInstall
-	op.Group = d.s()
-	op.ProtocolType = d.s()
-	op.Protocol = d.s()
-	op.Generation = int32(d.i())
-	op.Leader = d.s()
-	op.TimeMs = d.i()
+	var operation core.GroupInstall
+	operation.Group = d.s()
+	operation.ProtocolType = d.s()
+	operation.Protocol = d.s()
+	operation.Generation = int32(d.i())
+	operation.Leader = d.s()
+	operation.TimeMs = d.i()
 	for n := d.count(); n > 0 && d.err == nil; n-- {
 		var m core.GroupMember
 		m.MemberID = d.s()
@@ -270,53 +270,53 @@ func (d *entryDecoder) groupInstall() core.GroupInstall {
 		m.SessionTimeoutMs = int32(d.i())
 		m.RebalanceTimeoutMs = int32(d.i())
 		m.Metadata = d.blob()
-		op.Members = append(op.Members, m)
+		operation.Members = append(operation.Members, m)
 	}
-	return op
+	return operation
 }
 
 func (d *entryDecoder) groupAssign() core.GroupAssign {
-	var op core.GroupAssign
-	op.Group = d.s()
-	op.Generation = int32(d.i())
-	op.Leader = d.s()
-	op.TimeMs = d.i()
+	var operation core.GroupAssign
+	operation.Group = d.s()
+	operation.Generation = int32(d.i())
+	operation.Leader = d.s()
+	operation.TimeMs = d.i()
 	for n := d.count(); n > 0 && d.err == nil; n-- {
 		var a core.GroupAssignment
 		a.Member = d.s()
 		a.Bytes = d.blob()
-		op.Assignments = append(op.Assignments, a)
+		operation.Assignments = append(operation.Assignments, a)
 	}
-	return op
+	return operation
 }
 
 func (d *entryDecoder) groupRemove() core.GroupRemove {
-	var op core.GroupRemove
-	op.Group = d.s()
-	op.TimeMs = d.i()
-	op.Reason = d.s()
+	var operation core.GroupRemove
+	operation.Group = d.s()
+	operation.TimeMs = d.i()
+	operation.Reason = d.s()
 	for n := d.count(); n > 0 && d.err == nil; n-- {
-		op.Members = append(op.Members, d.s())
+		operation.Members = append(operation.Members, d.s())
 	}
-	return op
+	return operation
 }
 
 func (d *entryDecoder) offsetCommit() core.OffsetCommit {
-	var op core.OffsetCommit
-	op.Group = d.s()
-	op.Member = d.s()
-	op.Generation = int32(d.i())
-	op.TimeMs = d.i()
+	var operation core.OffsetCommit
+	operation.Group = d.s()
+	operation.Member = d.s()
+	operation.Generation = int32(d.i())
+	operation.TimeMs = d.i()
 	for n := d.count(); n > 0 && d.err == nil; n-- {
 		var o core.PartitionOffset
-		o.TP.Topic = d.s()
-		o.TP.Partition = int32(d.i())
+		o.TopicPartition.Topic = d.s()
+		o.TopicPartition.Partition = int32(d.i())
 		o.Offset = d.i()
 		o.LeaderEpoch = int32(d.i())
 		o.Metadata = d.s()
-		op.Offsets = append(op.Offsets, o)
+		operation.Offsets = append(operation.Offsets, o)
 	}
-	return op
+	return operation
 }
 
 func (d *entryDecoder) commit() core.CommitSegment {
@@ -341,8 +341,8 @@ func (d *entryDecoder) commit() core.CommitSegment {
 	}
 	for ; n > 0 && d.err == nil; n-- {
 		var b core.PendingBatch
-		b.TP.Topic = str()
-		b.TP.Partition = int32(d.i())
+		b.TopicPartition.Topic = str()
+		b.TopicPartition.Partition = int32(d.i())
 		b.Records = d.i()
 		b.Loc.Key = str()
 		b.Loc.Off = d.i()
@@ -412,18 +412,18 @@ func (e Entry) groupOp() core.ControlPlaneOperation {
 }
 
 // CreateEntry is the log entry of a CreateTopic op.
-func CreateEntry(op core.CreateTopic) Entry {
+func CreateEntry(operation core.CreateTopic) Entry {
 	k := KindCreateTopic
-	if op.FailIfExists {
+	if operation.FailIfExists {
 		k = KindCreateTopicExclusive
 	}
-	return Entry{Kind: k, Topic: op.Name, Parts: op.Partitions}
+	return Entry{Kind: k, Topic: operation.Name, Parts: operation.Partitions}
 }
 
 // GroupEntry is the log entry of a group write. It returns false for any
 // other operation.
-func GroupEntry(op core.ControlPlaneOperation) (Entry, bool) {
-	switch x := op.(type) {
+func GroupEntry(operation core.ControlPlaneOperation) (Entry, bool) {
+	switch x := operation.(type) {
 	case core.GroupInstall:
 		return Entry{Kind: KindGroupInstall, Install: x}, true
 	case core.GroupAssign:

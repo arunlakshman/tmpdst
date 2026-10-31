@@ -13,7 +13,7 @@ import (
 	"slices"
 	"time"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Set holds the leases of the brokers that sent a heartbeat recently.

@@ -3,10 +3,10 @@ package echo
 import (
 	"strings"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/internal/campaign"
-	"manifester/internal/wire/segmentformat"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/internal/campaign"
+	"mds/internal/wire/segmentformat"
 )
 
 type ackFact struct {
@@ -16,8 +16,8 @@ type ackFact struct {
 }
 
 func parseAck(f core.Fact) (ackFact, bool) {
-	o, ok1 := f.Field("offset").(core.I64)
-	k, ok2 := f.Field("key").(core.Str)
+	o, ok1 := f.Field("offset").(core.Int64Value)
+	k, ok2 := f.Field("key").(core.StringValue)
 	p, ok3 := f.Field("payload").(core.Bytes)
 	return ackFact{int64(o), string(k), p}, ok1 && ok2 && ok3
 }
@@ -40,7 +40,7 @@ func (i *ackedMeansCommitted) Observe(v simulator.View) {
 		det := []core.ContextPair{{Key: "offset", Value: a.off}, {Key: "key", Value: a.key}}
 		var loc core.SegmentRef
 		found := false
-		for _, r := range v.CP().Committed(tp()) {
+		for _, r := range v.CP().Committed(topicPartition()) {
 			if int64(r.Base) == a.off && r.Count == 1 && r.Loc.Key == a.key {
 				loc, found = r.Loc, true
 			}
@@ -52,10 +52,10 @@ func (i *ackedMeansCommitted) Observe(v simulator.View) {
 			continue
 		}
 		same := false
-		if seg, err := segmentformat.Decode(obj); err == nil {
-			for j, e := range seg.Entries {
+		if segment, err := segmentformat.Decode(obj); err == nil {
+			for j, e := range segment.Entries {
 				if e.Off == loc.Off && e.Len == loc.Len {
-					same = string(seg.Batches[j].Data) == string(a.payload)
+					same = string(segment.Batches[j].Data) == string(a.payload)
 				}
 			}
 		}
@@ -89,13 +89,13 @@ func (i *readWhatWasAcked) Observe(v simulator.View) {
 	for len(i.checked) < len(ops) {
 		i.checked = append(i.checked, false)
 	}
-	for j, op := range ops {
-		if i.checked[j] || op.Outcome == simulator.OpPending {
+	for j, operation := range ops {
+		if i.checked[j] || operation.Outcome == simulator.OpPending {
 			continue
 		}
 		i.checked[j] = true
-		g, ok := op.Op.(GetOp)
-		res, isStr := op.Result.(string)
+		g, ok := operation.Op.(GetOp)
+		res, isStr := operation.Result.(string)
 		if !ok || !isStr {
 			continue
 		}
@@ -117,21 +117,21 @@ func (l *liveness) AtEnd(v simulator.View) {
 	settle, ok2 := campaign.PhaseStart(v, simulator.PhaseRecover)
 	v.Assert().Always(ok1 && ok2, "echo: the kernel announced Settling and Settle")
 	from, to := settling+simulator.Time(campaign.ProgressGraceTime), settle
-	for _, op := range v.History().Ops() {
-		v.Assert().Always(op.Outcome != simulator.OpPending, "echo: no request pending at end", core.ContextPair{Key: "op", Value: op.Op})
-		if !ok1 || !ok2 || op.Invoke < from || op.Invoke >= to {
+	for _, operation := range v.History().Ops() {
+		v.Assert().Always(operation.Outcome != simulator.OpPending, "echo: no request pending at end", core.ContextPair{Key: "op", Value: operation.Op})
+		if !ok1 || !ok2 || operation.Invoke < from || operation.Invoke >= to {
 			continue
 		}
-		res, _ := op.Result.(string)
+		res, _ := operation.Result.(string)
 		good := false
-		switch op.Op.(type) {
+		switch operation.Op.(type) {
 		case PutOp:
 			good = strings.HasPrefix(res, "OK ")
 		case GetOp:
 			good = strings.HasPrefix(res, "VAL ") || res == "ERR corrupt"
 		}
 		v.Assert().Always(good, "echo: request invoked in Settling succeeds",
-			core.ContextPair{Key: "op", Value: op.Op}, core.ContextPair{Key: "result", Value: res}, core.ContextPair{Key: "invoke", Value: op.Invoke})
+			core.ContextPair{Key: "op", Value: operation.Op}, core.ContextPair{Key: "result", Value: res}, core.ContextPair{Key: "invoke", Value: operation.Invoke})
 	}
 	v.Assert().Sometimes(len(v.History().Ops()) > 0, "echo: workload issued requests")
 }

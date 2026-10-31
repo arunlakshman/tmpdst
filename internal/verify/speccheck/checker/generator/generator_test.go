@@ -3,9 +3,9 @@ package generator
 import (
 	"fmt"
 	"go/parser"
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck"
-	"manifester/internal/verify/speccheck/checker"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck"
+	"mds/internal/verify/speccheck/checker"
 	"reflect"
 	"slices"
 	"strings"
@@ -95,8 +95,8 @@ func objectCoverage(p InputProfile) map[string]int {
 	for seed := uint64(1); seed <= coverageSeeds; seed++ {
 		r, spec := checker.NewRand(seed), speccheck.NewObjectStore()
 		for i := range coverageOps {
-			op := gen(r, i)
-			for _, c := range classifyObject(spec, op) {
+			operation := gen(r, i)
+			for _, c := range classifyObject(spec, operation) {
 				hits[c]++
 			}
 		}
@@ -105,33 +105,33 @@ func objectCoverage(p InputProfile) map[string]int {
 }
 
 // classifyObject runs op on the spec and names the cases that it reached.
-func classifyObject(spec *speccheck.ObjectStore, op core.IOCall) []string {
-	done := spec.Exec(op)
-	switch op := op.(type) {
+func classifyObject(spec *speccheck.ObjectStore, operation core.IOCall) []string {
+	done := spec.Exec(operation)
+	switch operation := operation.(type) {
 	case core.ObjectPut:
 		if done.(core.ObjectPutDone).Err == core.ErrInvalid {
 			return []string{"put empty key"}
 		}
-		if len(op.Data) == 0 {
+		if len(operation.Data) == 0 {
 			return []string{"put accepted", "put empty data"}
 		}
 		return []string{"put accepted"}
 	case core.ObjectGet:
-		return classifyGet(op, done.(core.ObjectGetDone))
+		return classifyGet(operation, done.(core.ObjectGetDone))
 	case core.ObjectDelete:
 		if done.(core.ObjectDeleteDone).Err == core.ErrNotFound {
 			return []string{"delete missing key"}
 		}
 		return []string{"delete accepted"}
 	case core.ObjectList:
-		return classifyList(op, done.(core.ObjectListDone))
+		return classifyList(operation, done.(core.ObjectListDone))
 	}
 	return nil
 }
 
-func classifyGet(op core.ObjectGet, done core.ObjectGetDone) []string {
+func classifyGet(operation core.ObjectGet, done core.ObjectGetDone) []string {
 	var out []string
-	if op.Ref.Key == "" {
+	if operation.Ref.Key == "" {
 		out = append(out, "get empty key")
 	}
 	switch done.Err {
@@ -141,18 +141,18 @@ func classifyGet(op core.ObjectGet, done core.ObjectGetDone) []string {
 		return append(out, "get out of range")
 	}
 	out = append(out, "get accepted")
-	if op.Ref.Len <= 0 {
+	if operation.Ref.Len <= 0 {
 		out = append(out, "get to end of object (Len <= 0)")
 	}
 	return out
 }
 
-func classifyList(op core.ObjectList, done core.ObjectListDone) []string {
+func classifyList(operation core.ObjectList, done core.ObjectListDone) []string {
 	var out []string
 	switch {
-	case op.Prefix == "":
+	case operation.Prefix == "":
 		out = append(out, "list empty prefix")
-	case strings.HasSuffix(op.Prefix, "/"):
+	case strings.HasSuffix(operation.Prefix, "/"):
 		out = append(out, "list prefix with slash")
 	default:
 		out = append(out, "list prefix without slash")
@@ -169,8 +169,8 @@ func controlPlaneCoverage(p InputProfile) map[string]int {
 	for seed := uint64(1); seed <= coverageSeeds; seed++ {
 		r, spec, committed := checker.NewRand(seed), speccheck.NewControlPlane(), map[string]bool{}
 		for i := range coverageOps {
-			op := gen(r, i)
-			for _, c := range classifyControlPlane(spec, committed, op) {
+			operation := gen(r, i)
+			for _, c := range classifyControlPlane(spec, committed, operation) {
 				hits[c]++
 			}
 		}
@@ -180,15 +180,15 @@ func controlPlaneCoverage(p InputProfile) map[string]int {
 
 // classifyControlPlane runs op on the spec and names the cases that it
 // reached. The committed map holds the segment keys the spec has accepted.
-func classifyControlPlane(spec *speccheck.ControlPlane, committed map[string]bool, op ControlPlaneOp) []string {
-	if op.CreateTopic != nil {
-		if spec.CreateTopic(op.CreateTopic.Name, op.CreateTopic.Partitions) == core.OK {
+func classifyControlPlane(spec *speccheck.ControlPlane, committed map[string]bool, operation ControlPlaneTestStep) []string {
+	if operation.CreateTopic != nil {
+		if spec.CreateTopic(operation.CreateTopic.Name, operation.CreateTopic.Partitions) == core.OK {
 			return []string{"create topic accepted"}
 		}
 		return []string{"create topic invalid"}
 	}
-	done := spec.Exec(*op.Call).(core.ControlPlaneDone)
-	switch o := op.Call.Op.(type) {
+	done := spec.Exec(*operation.Call).(core.ControlPlaneDone)
+	switch o := operation.Call.Op.(type) {
 	case core.CommitSegment:
 		return classifyCommit(committed, o, done)
 	case core.FindSegments:
@@ -231,9 +231,9 @@ func invalidCommitCase(o core.CommitSegment) string {
 		switch {
 		case b.Records <= 0:
 			return "commit invalid: records <= 0"
-		case b.TP.Partition < 0:
+		case b.TopicPartition.Partition < 0:
 			return "commit invalid: negative partition"
-		case b.TP.Topic == "":
+		case b.TopicPartition.Topic == "":
 			return "commit invalid: empty topic"
 		}
 	}
@@ -245,28 +245,28 @@ func classifyLookup(spec *speccheck.ControlPlane, o core.FindSegments, done core
 		return []string{"lookup From = -1"}
 	}
 	out := []string{"lookup accepted"}
-	resp := done.Resp.(core.FindSegmentsResp)
-	if len(resp.Ranges) == 0 {
+	response := done.Resp.(core.FindSegmentsResp)
+	if len(response.Ranges) == 0 {
 		return out
 	}
 	out = append(out, "lookup with ranges")
-	if resp.Ranges[0].Base < o.From {
+	if response.Ranges[0].Base < o.From {
 		out = append(out, "lookup From inside a run")
 	}
-	uncut := spec.Exec(core.ControlPlaneCall{Op: core.FindSegments{TP: o.TP, From: o.From}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
-	if len(resp.Ranges) < len(uncut.Ranges) {
+	uncut := spec.Exec(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: o.TopicPartition, From: o.From}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
+	if len(response.Ranges) < len(uncut.Ranges) {
 		out = append(out, "lookup MaxBytes cut")
 	}
 	return out
 }
 
-func classifyDescribe(o core.DescribeTopics, resp core.DescribeTopicsResp) []string {
+func classifyDescribe(o core.DescribeTopics, response core.DescribeTopicsResp) []string {
 	if len(o.Topics) == 0 {
 		return []string{"describe all topics"}
 	}
 	var out []string
 	for _, name := range o.Topics {
-		known := slices.ContainsFunc(resp.Topics, func(t core.TopicInfo) bool { return t.Name == name })
+		known := slices.ContainsFunc(response.Topics, func(t core.TopicInfo) bool { return t.Name == name })
 		if known {
 			out = append(out, "describe known topic")
 		} else {
@@ -316,8 +316,8 @@ func TestRequestIDsFollowPosition(t *testing.T) {
 		if got := objects(r, i).RequestID(); got != core.RequestID(i+1) {
 			t.Fatalf("object operation %d has request id %d, want %d.", i, got, i+1)
 		}
-		if op := plane(r, i); op.Call != nil && op.Call.Req != core.RequestID(i+1) {
-			t.Fatalf("control-plane operation %d has request id %d, want %d.", i, op.Call.Req, i+1)
+		if operation := plane(r, i); operation.Call != nil && operation.Call.Req != core.RequestID(i+1) {
+			t.Fatalf("control-plane operation %d has request id %d, want %d.", i, operation.Call.Req, i+1)
 		}
 	}
 }
@@ -335,7 +335,7 @@ func TestBatchesReplayAndConflict(t *testing.T) {
 			}
 		}
 		moved := Batches(p, key, "other", 0)
-		if len(moved) != len(first) || moved[0].TP != first[0].TP || moved[0].Records != first[0].Records {
+		if len(moved) != len(first) || moved[0].TopicPartition != first[0].TopicPartition || moved[0].Records != first[0].Records {
 			t.Errorf("key %q: the same shape under a new key changed the batches.", key)
 		}
 	}
@@ -354,36 +354,36 @@ func TestShrinkMakesProgressAndEnds(t *testing.T) {
 // shrinkObjectToEnd always takes the first candidate. The loop ends only if
 // every candidate is simpler, so a candidate equal to its parent hangs the
 // test, and the step limit turns that hang into a failure.
-func shrinkObjectToEnd(t *testing.T, op core.IOCall) {
+func shrinkObjectToEnd(t *testing.T, operation core.IOCall) {
 	t.Helper()
 	for range 1000 {
-		next := MinimizeObjectOp(op)
+		next := MinimizeObjectOp(operation)
 		if len(next) == 0 {
 			return
 		}
-		if reflect.DeepEqual(next[0], op) {
-			t.Fatalf("shrinking %s gave the same operation.", FormatObjectOp(op))
+		if reflect.DeepEqual(next[0], operation) {
+			t.Fatalf("shrinking %s gave the same operation.", FormatObjectOp(operation))
 		}
-		op = next[0]
+		operation = next[0]
 	}
-	t.Fatalf("shrinking %s did not end.", FormatObjectOp(op))
+	t.Fatalf("shrinking %s did not end.", FormatObjectOp(operation))
 }
 
-func shrinkPlaneToEnd(t *testing.T, op ControlPlaneOp) {
+func shrinkPlaneToEnd(t *testing.T, operation ControlPlaneTestStep) {
 	t.Helper()
 	for range 1000 {
-		next := MinimizeControlPlaneOp(op)
+		next := MinimizeControlPlaneOp(operation)
 		for _, c := range next {
-			if reflect.DeepEqual(c, op) {
-				t.Fatalf("shrinking %s gave the same operation.", FormatControlPlaneOp(op))
+			if reflect.DeepEqual(c, operation) {
+				t.Fatalf("shrinking %s gave the same operation.", FormatControlPlaneOp(operation))
 			}
 		}
 		if len(next) == 0 {
 			return
 		}
-		op = next[0]
+		operation = next[0]
 	}
-	t.Fatalf("shrinking %s did not end.", FormatControlPlaneOp(op))
+	t.Fatalf("shrinking %s did not end.", FormatControlPlaneOp(operation))
 }
 
 func TestFormatIsAGoExpression(t *testing.T) {
@@ -406,8 +406,8 @@ func TestFormatExamples(t *testing.T) {
 		{FormatObjectOp(core.ObjectList{Req: 3, Prefix: "a/"}), `core.ObjectList{Req: 3, Prefix: "a/"}`},
 		{FormatControlPlaneOp(NewCreateTopic("t1", 2)), `generator.NewCreateTopic("t1", 2)`},
 		{
-			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: core.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})),
-			`generator.NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TP: core.TopicPartitionKey("t1", 1), From: -1, MaxBytes: 60}})`,
+			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TopicPartition: core.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})),
+			`generator.NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TopicPartition: core.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})`,
 		},
 	}
 	for _, c := range cases {
@@ -418,8 +418,8 @@ func TestFormatExamples(t *testing.T) {
 }
 
 func TestDescribeNamesTheOperation(t *testing.T) {
-	op := NewCall(core.ControlPlaneCall{Req: 5, Op: core.CommitSegment{SegmentKey: "s", Batches: make([]core.PendingBatch, 2)}})
-	if got, want := op.Describe(), `request 5: commit segment "s" with 2 batches`; got != want {
+	operation := NewCall(core.ControlPlaneCall{Req: 5, Op: core.CommitSegment{SegmentKey: "s", Batches: make([]core.PendingBatch, 2)}})
+	if got, want := operation.Describe(), `request 5: commit segment "s" with 2 batches`; got != want {
 		t.Errorf("Describe gave %q, want %q.", got, want)
 	}
 }

@@ -1,8 +1,8 @@
 {
-  "uid": "mani-overview",
-  "title": "Manifester - Overview",
+  "uid": "mds-overview",
+  "title": "MDS - Overview",
   "tags": [
-    "manifester",
+    "mds",
     "overview"
   ],
   "schemaVersion": 39,
@@ -33,7 +33,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum(rate(mdsbroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "committed bytes/s",
           "datasource": {
             "type": "prometheus",
@@ -42,7 +42,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(rate(manibroker_segment_sealed_batch_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum(rate(mdsbroker_segment_sealed_batch_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "sealed batch bytes/s",
           "datasource": {
             "type": "prometheus",
@@ -88,7 +88,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(manibroker_segment_sealed_batch_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])) / 1024",
+          "expr": "sum(rate(mdsbroker_segment_sealed_batch_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])) / 1024",
           "legendFormat": "msg/s (1 KiB records)",
           "datasource": {
             "type": "prometheus",
@@ -134,7 +134,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (broker) (rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (broker) (rate(mdsbroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "broker {{broker}}",
           "datasource": {
             "type": "prometheus",
@@ -180,7 +180,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (broker) (rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])) / ignoring(broker) group_left sum(rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (broker) (rate(mdsbroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])) / ignoring(broker) group_left sum(rate(mdsbroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "broker {{broker}}",
           "datasource": {
             "type": "prometheus",
@@ -226,7 +226,7 @@
       },
       "targets": [
         {
-          "expr": "max(sum by (broker) (rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))) / min(sum by (broker) (rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "max(sum by (broker) (rate(mdsbroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))) / min(sum by (broker) (rate(mdsbroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
           "legendFormat": "max/min",
           "datasource": {
             "type": "prometheus",
@@ -235,7 +235,7 @@
           "refId": "A"
         },
         {
-          "expr": "max(sum by (broker) (rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))) / avg(sum by (broker) (rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "max(sum by (broker) (rate(mdsbroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))) / avg(sum by (broker) (rate(mdsbroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
           "legendFormat": "max/mean",
           "datasource": {
             "type": "prometheus",
@@ -281,7 +281,7 @@
       },
       "targets": [
         {
-          "expr": "manibroker_open_connections{run_id=\"$run_id\", broker=~\"$broker\"}",
+          "expr": "mdsbroker_open_connections{run_id=\"$run_id\", broker=~\"$broker\"}",
           "legendFormat": "broker {{broker}}",
           "datasource": {
             "type": "prometheus",
@@ -327,7 +327,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (le, broker) (rate(manibroker_segment_seal_to_ack_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, broker) (rate(mdsbroker_segment_seal_to_ack_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
           "legendFormat": "p99 {{broker}}",
           "datasource": {
             "type": "prometheus",
@@ -373,7 +373,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (broker) (rate(manibroker_segments_committed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (broker) (rate(mdsbroker_segments_committed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "broker {{broker}}",
           "datasource": {
             "type": "prometheus",
@@ -419,7 +419,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(manibroker_segment_seal_to_ack_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(mdsbroker_segment_seal_to_ack_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
           "legendFormat": "p50",
           "datasource": {
             "type": "prometheus",
@@ -428,7 +428,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(manibroker_segment_seal_to_ack_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(mdsbroker_segment_seal_to_ack_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
           "legendFormat": "p99",
           "datasource": {
             "type": "prometheus",
@@ -474,7 +474,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(manibroker_segment_open_age_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(mdsbroker_segment_open_age_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
           "legendFormat": "p50",
           "datasource": {
             "type": "prometheus",
@@ -483,7 +483,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(manibroker_segment_open_age_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(mdsbroker_segment_open_age_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
           "legendFormat": "p99",
           "datasource": {
             "type": "prometheus",
@@ -529,7 +529,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum(rate(mdsbroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "committed (batch data + index)",
           "datasource": {
             "type": "prometheus",
@@ -538,7 +538,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(rate(manibroker_segment_sealed_batch_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum(rate(mdsbroker_segment_sealed_batch_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "sealed batch bytes",
           "datasource": {
             "type": "prometheus",
@@ -584,7 +584,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (reason) (rate(manibroker_segments_sealed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (reason) (rate(mdsbroker_segments_sealed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "{{reason}}",
           "datasource": {
             "type": "prometheus",
@@ -593,7 +593,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(rate(manibroker_segments_failed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum(rate(mdsbroker_segments_failed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "failed",
           "datasource": {
             "type": "prometheus",
@@ -639,7 +639,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(manibroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])) / sum(rate(manibroker_segments_committed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum(rate(mdsbroker_segment_committed_bytes_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])) / sum(rate(mdsbroker_segments_committed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "mean",
           "datasource": {
             "type": "prometheus",
@@ -685,7 +685,7 @@
       },
       "targets": [
         {
-          "expr": "manibroker_buffered_bytes{run_id=\"$run_id\", broker=~\"$broker\"}",
+          "expr": "mdsbroker_buffered_bytes{run_id=\"$run_id\", broker=~\"$broker\"}",
           "legendFormat": "buffered",
           "datasource": {
             "type": "prometheus",
@@ -717,7 +717,7 @@
     {
       "id": 15,
       "type": "row",
-      "title": "Control plane (log store: manicp_log_*, one series per CP node)",
+      "title": "Control plane (log store: mdscontrolplane_log_*, one series per CP node)",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -744,7 +744,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (host) (rate(manicp_log_slots_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum by (host) (rate(mdscontrolplane_log_slots_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "slots/s {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -753,7 +753,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum by (host) (rate(manicp_log_lost_slots_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum by (host) (rate(mdscontrolplane_log_lost_slots_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "lost slots/s {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -762,7 +762,7 @@
           "refId": "B"
         },
         {
-          "expr": "sum by (host, result) (rate(manicp_log_slot_attempts_total{run_id=\"$run_id\", result=\"error\"}[$__rate_interval]))",
+          "expr": "sum by (host, result) (rate(mdscontrolplane_log_slot_attempts_total{run_id=\"$run_id\", result=\"error\"}[$__rate_interval]))",
           "legendFormat": "unknown-outcome retries/s {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -808,7 +808,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le, host) (rate(manicp_log_append_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le, host) (rate(mdscontrolplane_log_append_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p50 {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -817,7 +817,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le, host) (rate(manicp_log_append_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, host) (rate(mdscontrolplane_log_append_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p99 {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -863,7 +863,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le, host) (rate(manicp_log_entries_per_slot_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le, host) (rate(mdscontrolplane_log_entries_per_slot_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p50 {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -872,7 +872,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le, host) (rate(manicp_log_entries_per_slot_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, host) (rate(mdscontrolplane_log_entries_per_slot_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p99 {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -881,7 +881,7 @@
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le, host) (rate(manicp_log_entry_bytes_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, host) (rate(mdscontrolplane_log_entry_bytes_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p99 {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -927,7 +927,7 @@
       },
       "targets": [
         {
-          "expr": "max by (host) (manicp_log_apply_lag_slots{run_id=\"$run_id\"})",
+          "expr": "max by (host) (mdscontrolplane_log_apply_lag_slots{run_id=\"$run_id\"})",
           "legendFormat": "apply lag {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -936,7 +936,7 @@
           "refId": "A"
         },
         {
-          "expr": "max by (host) (manicp_log_standby_lag_slots{run_id=\"$run_id\"})",
+          "expr": "max by (host) (mdscontrolplane_log_standby_lag_slots{run_id=\"$run_id\"})",
           "legendFormat": "standby lag {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -968,8 +968,8 @@
     {
       "id": 20,
       "type": "timeseries",
-      "title": "Hole fills and role changes",
-      "description": "Hole fills happen when an appender dies holding a slot; role changes mark a takeover or a failback. The kill-the-appender marker.",
+      "title": "Gap fills and role changes",
+      "description": "Gap fills happen when an appender dies holding a slot; role changes mark a takeover or a failback. The kill-the-appender marker.",
       "datasource": {
         "type": "prometheus",
         "uid": "${ds_prom}"
@@ -982,8 +982,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (host) (rate(manicp_log_hole_fills_total{run_id=\"$run_id\"}[$__rate_interval]))",
-          "legendFormat": "hole fills/s {{host}}",
+          "expr": "sum by (host) (rate(mdscontrolplane_log_gap_fills_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "legendFormat": "gap fills/s {{host}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${ds_prom}"
@@ -991,7 +991,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum by (host, to) (increase(manicp_log_role_changes_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum by (host, to) (increase(mdscontrolplane_log_role_changes_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "role -> {{to}} {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -1000,7 +1000,7 @@
           "refId": "B"
         },
         {
-          "expr": "max by (host) (manicp_log_active{run_id=\"$run_id\"})",
+          "expr": "max by (host) (mdscontrolplane_log_active{run_id=\"$run_id\"})",
           "legendFormat": "active (1) {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -1046,7 +1046,7 @@
       },
       "targets": [
         {
-          "expr": "max by (host) (manicp_log_queue_depth{run_id=\"$run_id\"})",
+          "expr": "max by (host) (mdscontrolplane_log_queue_depth{run_id=\"$run_id\"})",
           "legendFormat": "queue depth {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -1055,7 +1055,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le, host) (rate(manicp_log_queue_wait_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, host) (rate(mdscontrolplane_log_queue_wait_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "queue wait p99 {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -1064,7 +1064,7 @@
           "refId": "B"
         },
         {
-          "expr": "sum by (host, reason) (rate(manicp_log_rejected_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum by (host, reason) (rate(mdscontrolplane_log_rejected_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "refused/s {{reason}} {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -1097,7 +1097,7 @@
       "id": 22,
       "type": "timeseries",
       "title": "Checkpoint age (s) and size",
-      "description": "Alert on age above 3 x -ckpt-every (15 min). Only the active node checkpoints.",
+      "description": "Alert on age above 3 x -checkpoint-every (15 min). Only the active node checkpoints.",
       "datasource": {
         "type": "prometheus",
         "uid": "${ds_prom}"
@@ -1110,7 +1110,7 @@
       },
       "targets": [
         {
-          "expr": "max by (host) (manicp_log_checkpoint_age_seconds{run_id=\"$run_id\"})",
+          "expr": "max by (host) (mdscontrolplane_log_checkpoint_age_seconds{run_id=\"$run_id\"})",
           "legendFormat": "age s {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -1119,7 +1119,7 @@
           "refId": "A"
         },
         {
-          "expr": "max by (host) (manicp_log_checkpoint_bytes{run_id=\"$run_id\"})",
+          "expr": "max by (host) (mdscontrolplane_log_checkpoint_bytes{run_id=\"$run_id\"})",
           "legendFormat": "bytes {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -1128,7 +1128,7 @@
           "refId": "B"
         },
         {
-          "expr": "sum by (host) (increase(manicp_log_checkpoint_errors_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum by (host) (increase(mdscontrolplane_log_checkpoint_errors_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "errors {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -1174,7 +1174,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (host) (rate(manicp_log_fresh_reads_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum by (host) (rate(mdscontrolplane_log_fresh_reads_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "fresh reads/s {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -1183,7 +1183,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum by (host) (rate(manicp_log_tail_checks_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum by (host) (rate(mdscontrolplane_log_tail_checks_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "tail checks/s {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -1192,7 +1192,7 @@
           "refId": "B"
         },
         {
-          "expr": "max by (host) (manicp_log_blocked{run_id=\"$run_id\"})",
+          "expr": "max by (host) (mdscontrolplane_log_blocked{run_id=\"$run_id\"})",
           "legendFormat": "blocked {{host}}",
           "datasource": {
             "type": "prometheus",
@@ -1272,7 +1272,7 @@
         "target": {
           "type": "tags",
           "tags": [
-            "manifester",
+            "mds",
             "run:$run_id"
           ],
           "limit": 100
@@ -1324,7 +1324,7 @@
         "multi": true,
         "allValue": ".*",
         "query": {
-          "query": "label_values(manibroker_build_info{run_id=\"$run_id\"}, broker)",
+          "query": "label_values(mdsbroker_build_info{run_id=\"$run_id\"}, broker)",
           "refId": "br"
         },
         "refresh": 2,

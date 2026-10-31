@@ -4,10 +4,10 @@ import (
 	"slices"
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/fakelogstore"
-	"manifester/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/fakelogstore"
+	"mds/internal/verify/simulator/fakeservices/internal/fakeservicetest"
 )
 
 const ms = core.Duration(1_000_000)
@@ -83,9 +83,9 @@ func TestOrderedLandings(t *testing.T) {
 	e.Execute(c, a, core.LogAppend{Req: 2, Slot: 0, Data: []byte("a")})
 	e.Execute(c, a, core.LogAppend{Req: 3, Slot: 1, Data: []byte("b")})
 	c.Run()
-	for _, req := range []core.RequestID{1, 2, 3} {
-		if d := c.Find(req).(core.LogAppendDone); d.Err != core.OK || d.Taken {
-			t.Fatal(req, d)
+	for _, request := range []core.RequestID{1, 2, 3} {
+		if d := c.Find(request).(core.LogAppendDone); d.Err != core.OK || d.Taken {
+			t.Fatal(request, d)
 		}
 	}
 	e.Execute(c, a, core.LogRead{Req: 4, From: 0, Limit: 10})

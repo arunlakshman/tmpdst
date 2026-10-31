@@ -1,8 +1,8 @@
 {
-  "uid": "mani-aws",
-  "title": "Manifester - AWS (S3 and DynamoDB)",
+  "uid": "mds-aws",
+  "title": "MDS - AWS (S3 and DynamoDB)",
   "tags": [
-    "manifester",
+    "mds",
     "aws"
   ],
   "schemaVersion": 39,
@@ -33,7 +33,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(manibroker_segment_put_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(mdsbroker_segment_put_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
           "legendFormat": "p50",
           "datasource": {
             "type": "prometheus",
@@ -42,7 +42,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(manibroker_segment_put_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(mdsbroker_segment_put_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
           "legendFormat": "p99",
           "datasource": {
             "type": "prometheus",
@@ -152,7 +152,7 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(manibroker_segment_put_attempts_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])) - sum(rate(manibroker_segment_put_seconds_count{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum(rate(mdsbroker_segment_put_attempts_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])) - sum(rate(mdsbroker_segment_put_seconds_count{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "PUT retries/s (attempts - segments)",
           "datasource": {
             "type": "prometheus",
@@ -161,7 +161,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(rate(manibroker_segments_failed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum(rate(mdsbroker_segments_failed_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "failed segments/s",
           "datasource": {
             "type": "prometheus",
@@ -275,7 +275,7 @@
     {
       "id": 5,
       "type": "timeseries",
-      "title": "DynamoDB call latency inside manicp (p50/p99 by call)",
+      "title": "DynamoDB call latency inside mdscontrolplane (p50/p99 by call)",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -289,7 +289,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le, call) (rate(manicp_dynamodb_call_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le, call) (rate(mdscontrolplane_dynamodb_call_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p50 {{call}}",
           "datasource": {
             "type": "prometheus",
@@ -298,7 +298,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le, call) (rate(manicp_dynamodb_call_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, call) (rate(mdscontrolplane_dynamodb_call_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p99 {{call}}",
           "datasource": {
             "type": "prometheus",
@@ -504,7 +504,7 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "manicp handler time by op (p99)",
+      "title": "mdscontrolplane handler time by op (p99)",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -518,7 +518,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(manicp_handler_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(mdscontrolplane_handler_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p99 {{op}}",
           "datasource": {
             "type": "prometheus",
@@ -564,7 +564,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le, op) (rate(manibroker_s3_attempt_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\", result=\"ok\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le, op) (rate(mdsbroker_s3_attempt_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\", result=\"ok\"}[$__rate_interval])))",
           "legendFormat": "p50 {{op}}",
           "datasource": {
             "type": "prometheus",
@@ -573,7 +573,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(manibroker_s3_attempt_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\", result=\"ok\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(mdsbroker_s3_attempt_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\", result=\"ok\"}[$__rate_interval])))",
           "legendFormat": "p99 {{op}}",
           "datasource": {
             "type": "prometheus",
@@ -619,7 +619,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (le, op,outcome) (rate(manibroker_s3_operation_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, op,outcome) (rate(mdsbroker_s3_operation_seconds_bucket{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval])))",
           "legendFormat": "p99 {{op}} {{outcome}}",
           "datasource": {
             "type": "prometheus",
@@ -665,7 +665,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (op) (rate(manibroker_s3_retries_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (op) (rate(mdsbroker_s3_retries_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "retries {{op}}",
           "datasource": {
             "type": "prometheus",
@@ -674,7 +674,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum by (op, code) (rate(manibroker_s3_throttles_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (op, code) (rate(mdsbroker_s3_throttles_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "throttle {{op}} {{code}}",
           "datasource": {
             "type": "prometheus",
@@ -683,7 +683,7 @@
           "refId": "B"
         },
         {
-          "expr": "sum by (op, code) (rate(manibroker_s3_api_errors_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
+          "expr": "sum by (op, code) (rate(mdsbroker_s3_api_errors_total{run_id=\"$run_id\", broker=~\"$broker\"}[$__rate_interval]))",
           "legendFormat": "error {{op}} {{code}}",
           "datasource": {
             "type": "prometheus",
@@ -729,7 +729,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum by (le, op) (rate(manicp_dynamo_attempt_seconds_bucket{run_id=\"$run_id\", result=\"ok\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le, op) (rate(mdscontrolplane_dynamo_attempt_seconds_bucket{run_id=\"$run_id\", result=\"ok\"}[$__rate_interval])))",
           "legendFormat": "p50 {{op}}",
           "datasource": {
             "type": "prometheus",
@@ -738,7 +738,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(manicp_dynamo_attempt_seconds_bucket{run_id=\"$run_id\", result=\"ok\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, op) (rate(mdscontrolplane_dynamo_attempt_seconds_bucket{run_id=\"$run_id\", result=\"ok\"}[$__rate_interval])))",
           "legendFormat": "p99 {{op}}",
           "datasource": {
             "type": "prometheus",
@@ -784,7 +784,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (le, op,outcome) (rate(manicp_dynamo_operation_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le, op,outcome) (rate(mdscontrolplane_dynamo_operation_seconds_bucket{run_id=\"$run_id\"}[$__rate_interval])))",
           "legendFormat": "p99 {{op}} {{outcome}}",
           "datasource": {
             "type": "prometheus",
@@ -830,7 +830,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (op) (rate(manicp_dynamo_retries_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum by (op) (rate(mdscontrolplane_dynamo_retries_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "retries {{op}}",
           "datasource": {
             "type": "prometheus",
@@ -839,7 +839,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum by (op, code) (rate(manicp_dynamo_throttles_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum by (op, code) (rate(mdscontrolplane_dynamo_throttles_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "throttle {{op}} {{code}}",
           "datasource": {
             "type": "prometheus",
@@ -848,7 +848,7 @@
           "refId": "B"
         },
         {
-          "expr": "sum by (op, code) (rate(manicp_dynamo_api_errors_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum by (op, code) (rate(mdscontrolplane_dynamo_api_errors_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "error {{op}} {{code}}",
           "datasource": {
             "type": "prometheus",
@@ -880,7 +880,7 @@
     {
       "id": 16,
       "type": "timeseries",
-      "title": "DynamoDB capacity units consumed per second (manicp, successful calls)",
+      "title": "DynamoDB capacity units consumed per second (mdscontrolplane, successful calls)",
       "description": "",
       "datasource": {
         "type": "prometheus",
@@ -894,7 +894,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (kind) (rate(manicp_dynamo_consumed_capacity_units_total{run_id=\"$run_id\"}[$__rate_interval]))",
+          "expr": "sum by (kind) (rate(mdscontrolplane_dynamo_consumed_capacity_units_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "{{kind}}",
           "datasource": {
             "type": "prometheus",
@@ -937,7 +937,7 @@
         "target": {
           "type": "tags",
           "tags": [
-            "manifester",
+            "mds",
             "run:$run_id"
           ],
           "limit": 100
@@ -989,7 +989,7 @@
         "multi": true,
         "allValue": ".*",
         "query": {
-          "query": "label_values(manibroker_build_info{run_id=\"$run_id\"}, broker)",
+          "query": "label_values(mdsbroker_build_info{run_id=\"$run_id\"}, broker)",
           "refId": "br"
         },
         "refresh": 2,

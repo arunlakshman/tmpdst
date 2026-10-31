@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/broker"
-	"manifester/internal/core"
-	"manifester/internal/system"
-	"manifester/internal/verify/speccheck/specsystem"
+	"mds/internal/broker"
+	"mds/internal/core"
+	"mds/internal/system"
+	"mds/internal/verify/speccheck/specsystem"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 )
@@ -23,22 +23,22 @@ func startNode(t *testing.T, mod func(*NodeConfig)) (*Node, NodeConfig) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := NodeConfig{
+	config := NodeConfig{
 		NodeID: "n1", Broker: broker.DefaultConfig(), Listener: ln,
 		Objects: specsystem.NewObjectStore(), ObjClassify: MemoryErrorClassifier{},
 		ControlPlane: specsystem.NewControlPlane(), CPClassify: MemoryErrorClassifier{},
 		StopGrace: time.Second, FlushGrace: 50 * time.Millisecond,
 	}
 	if mod != nil {
-		mod(&cfg)
+		mod(&config)
 	}
-	n, err := Start(t.Context(), cfg)
+	n, err := Start(t.Context(), config)
 	if err != nil {
 		_ = ln.Close()
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { n.Kill(); <-n.Done() })
-	return n, cfg
+	return n, config
 }
 
 func waitDone(t *testing.T, n *Node) error {
@@ -91,12 +91,12 @@ func TestStartGracefulStop(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = conn.Close() }()
-	req := kmsg.NewPtrMetadataRequest()
-	req.Version, req.Topics = 1, nil
-	body := req.AppendTo(nil)
+	request := kmsg.NewPtrMetadataRequest()
+	request.Version, request.Topics = 1, nil
+	body := request.AppendTo(nil)
 	frame := binary.BigEndian.AppendUint32(nil, uint32(8+2+len(body)))
-	frame = binary.BigEndian.AppendUint16(frame, uint16(req.Key()))
-	frame = binary.BigEndian.AppendUint16(frame, uint16(req.Version))
+	frame = binary.BigEndian.AppendUint16(frame, uint16(request.Key()))
+	frame = binary.BigEndian.AppendUint16(frame, uint16(request.Version))
 	frame = binary.BigEndian.AppendUint32(frame, 7)
 	frame = binary.BigEndian.AppendUint16(frame, 0xffff) // null client id
 	if _, err := conn.Write(append(frame, body...)); err != nil {

@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"fmt"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck"
-	"manifester/internal/verify/speccheck/checker"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck"
+	"mds/internal/verify/speccheck/checker"
 )
 
 // PartitionOp is one operation of the partition suite. Kind is "append",
@@ -44,22 +44,22 @@ func genPartitionOp(r *checker.Rand, _ int) PartitionOp {
 	return PartitionOp{Kind: "hwm"}
 }
 
-func minimizePartitionOp(op PartitionOp) []PartitionOp {
+func minimizePartitionOp(operation PartitionOp) []PartitionOp {
 	var out []PartitionOp
-	switch op.Kind {
+	switch operation.Kind {
 	case "append":
-		if len(op.Batch) > 0 {
+		if len(operation.Batch) > 0 {
 			out = append(out, PartitionOp{Kind: "append"})
 		}
-		if len(op.Batch) > 1 {
-			out = append(out, PartitionOp{Kind: "append", Batch: op.Batch[:1]})
+		if len(operation.Batch) > 1 {
+			out = append(out, PartitionOp{Kind: "append", Batch: operation.Batch[:1]})
 		}
 	case "read":
-		if op.Max != 0 {
-			out = append(out, PartitionOp{Kind: "read", From: op.From})
+		if operation.Max != 0 {
+			out = append(out, PartitionOp{Kind: "read", From: operation.From})
 		}
-		if op.From > 0 {
-			out = append(out, PartitionOp{Kind: "read", From: 0, Max: op.Max})
+		if operation.From > 0 {
+			out = append(out, PartitionOp{Kind: "read", From: 0, Max: operation.Max})
 		}
 	}
 	return out
@@ -89,7 +89,7 @@ func PartitionComparator(newSubject func() PartitionSubject) checker.SpecChecker
 		Step:          partitionStep,
 		Invariant:     partitionInvariant,
 		Shrink:        minimizePartitionOp,
-		Format:        func(op PartitionOp) string { return fmt.Sprintf("%#v", op) },
+		Format:        func(operation PartitionOp) string { return fmt.Sprintf("%#v", operation) },
 		Ops:           suiteOps,
 		MaxShrinkRuns: suiteMinimizeRuns,
 	}
@@ -107,10 +107,10 @@ func overwriteWithJunk(value []byte) {
 	}
 }
 
-func partitionStep(p *PartitionPair, op PartitionOp) error {
-	switch op.Kind {
+func partitionStep(p *PartitionPair, operation PartitionOp) error {
+	switch operation.Kind {
 	case "append":
-		specBatch, subjectBatch := cloneBatch(op.Batch), cloneBatch(op.Batch)
+		specBatch, subjectBatch := cloneBatch(operation.Batch), cloneBatch(operation.Batch)
 		specBase := p.spec.Append(specBatch)
 		subjectBase := p.subject.Append(subjectBatch)
 		for _, v := range subjectBatch {
@@ -118,28 +118,28 @@ func partitionStep(p *PartitionPair, op PartitionOp) error {
 		}
 		if specBase != subjectBase {
 			return fmt.Errorf("append of %d records returned the base offset %d, but the spec returned %d",
-				len(op.Batch), subjectBase, specBase)
+				len(operation.Batch), subjectBase, specBase)
 		}
 	case "hwm":
 		if s, a := p.spec.HighWatermark(), p.subject.HighWatermark(); s != a {
 			return fmt.Errorf("the high watermark is %d, but the spec says %d", a, s)
 		}
 	default:
-		return partitionRead(p, op)
+		return partitionRead(p, operation)
 	}
 	return nil
 }
 
-func partitionRead(p *PartitionPair, op PartitionOp) error {
-	from := core.Offset(op.From)
-	specRecords, specOK := p.spec.Read(from, op.Max)
-	records, ok := p.subject.Read(from, op.Max)
+func partitionRead(p *PartitionPair, operation PartitionOp) error {
+	from := core.Offset(operation.From)
+	specRecords, specOK := p.spec.Read(from, operation.Max)
+	records, ok := p.subject.Read(from, operation.Max)
 	defer func() {
 		for _, r := range records {
 			overwriteWithJunk(r.Value)
 		}
 	}()
-	where := fmt.Sprintf("Read(from %d, max %d)", op.From, op.Max)
+	where := fmt.Sprintf("Read(from %d, max %d)", operation.From, operation.Max)
 	if ok != specOK {
 		return fmt.Errorf("%s returned ok = %v, but the spec returned ok = %v with high watermark %d",
 			where, ok, specOK, p.spec.HighWatermark())

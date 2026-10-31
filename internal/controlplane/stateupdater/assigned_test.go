@@ -5,21 +5,21 @@ import (
 	"reflect"
 	"testing"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 func TestAssignedStates(t *testing.T) {
 	a := stateupdater.New(stateupdater.NewMemoryKeyValueStore())
-	op := commit("k1", pb("a", 0, 3), pb("a", 1, 2))
-	first := mustCommit(t, a, 5, op)
+	operation := commit("k1", pb("a", 0, 3), pb("a", 1, 2))
+	first := mustCommit(t, a, 5, operation)
 	want := first.Resp.(core.CommitSegmentResp).Assigned
 
-	rs, st, err := a.Assigned(5, op)
+	rs, st, err := a.Assigned(5, operation)
 	if err != nil || st != stateupdater.OffsetOwnedHere || !reflect.DeepEqual(rs, want) {
 		t.Fatalf("here: %v %v %+v", err, st, rs)
 	}
-	if _, st, _ = a.Assigned(9, op); st != stateupdater.OffsetOwnedElsewhere { // a replay at a later slot
+	if _, st, _ = a.Assigned(9, operation); st != stateupdater.OffsetOwnedElsewhere { // a replay at a later slot
 		t.Fatalf("other slot: %v", st)
 	}
 	if _, st, _ = a.Assigned(5, commit("k1", pb("a", 0, 4))); st != stateupdater.OffsetOwnedElsewhere { // a conflict
@@ -31,7 +31,7 @@ func TestAssignedStates(t *testing.T) {
 	if _, err = a.Trim(6); err != nil {
 		t.Fatal(err)
 	}
-	if _, st, _ = a.Assigned(5, op); st != stateupdater.OffsetOwnerUnknown { // forgotten by the window
+	if _, st, _ = a.Assigned(5, operation); st != stateupdater.OffsetOwnerUnknown { // forgotten by the window
 		t.Fatalf("trimmed: %v", st)
 	}
 }

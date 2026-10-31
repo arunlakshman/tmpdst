@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/controlplane/stateupdater/pebblestore"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/controlplane/stateupdater/pebblestore"
+	"mds/internal/core"
 )
 
 // benchSegment is a commit of parts distinct partitions (1-2 batches each) out
@@ -26,8 +26,8 @@ func benchSegment(rng *rand.Rand, n, parts int) core.CommitSegment {
 		for i := 1 + rng.Intn(2); i > 0; i-- {
 			ln := int64(8000 + rng.Intn(24000))
 			cs.Batches = append(cs.Batches, core.PendingBatch{
-				TP:      core.NewTopicPartition(fmt.Sprintf("topic-%d", p/10000), int32(p%10000)),
-				Records: int64(1 + rng.Intn(50)), Loc: core.SegmentRef{Key: cs.SegmentKey, Off: off, Len: ln}})
+				TopicPartition: core.NewTopicPartition(fmt.Sprintf("topic-%d", p/10000), int32(p%10000)),
+				Records:        int64(1 + rng.Intn(50)), Loc: core.SegmentRef{Key: cs.SegmentKey, Off: off, Len: ln}})
 			off += ln
 		}
 	}
@@ -38,12 +38,12 @@ func benchSegment(rng *rand.Rand, n, parts int) core.CommitSegment {
 // transaction, onto a store holding 2,000 segments already. The reported
 // segs/s is the apply rate to compare with 430 segments/s (docs/applier-bakeoff.md).
 func BenchmarkApply150(b *testing.B) {
-	kv, err := pebblestore.Open(filepath.Join(b.TempDir(), "state"), pebblestore.Options{})
+	keyValue, err := pebblestore.Open(filepath.Join(b.TempDir(), "state"), pebblestore.Options{})
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer func() { _ = kv.Close() }()
-	a := stateupdater.New(kv)
+	defer func() { _ = keyValue.Close() }()
+	a := stateupdater.New(keyValue)
 	rng := rand.New(rand.NewSource(1)) //nolint:gosec // G404: deterministic test/sim PRNG
 	n := 0
 	apply := func(k int) {

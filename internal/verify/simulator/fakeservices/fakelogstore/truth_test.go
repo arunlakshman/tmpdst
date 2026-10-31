@@ -3,13 +3,13 @@ package fakelogstore_test
 import (
 	"testing"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/fakelogstore"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/fakelogstore"
 )
 
-func TestCPTruthCreateTopic(t *testing.T) {
+func TestControlPlaneRealStateCreateTopic(t *testing.T) {
 	e := fakelogstore.New(base())
 	if e.CreateTopic("t0", 2) != core.OK {
 		t.Fatal("CreateTopic")
@@ -25,7 +25,7 @@ func TestCPTruthCreateTopic(t *testing.T) {
 	}
 }
 
-func TestCPTruthSkipsForeignPayload(t *testing.T) {
+func TestControlPlaneRealStateSkipsForeignPayload(t *testing.T) {
 	e, c, a := setup(base(), 1)
 	e.Execute(c, a, core.LogAppend{Req: 1, Slot: 0, Data: []byte("foreign")})
 	c.Run()
@@ -34,7 +34,7 @@ func TestCPTruthSkipsForeignPayload(t *testing.T) {
 	}
 }
 
-func TestCPTruthReplaysNoopAndTrimStride(t *testing.T) {
+func TestControlPlaneRealStateReplaysNoopAndTrimStride(t *testing.T) {
 	f := base()
 	f.WindowSlots, f.TrimStride = 4, 2
 	e, c, a := setup(f, 3)

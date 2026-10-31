@@ -7,8 +7,8 @@ import (
 	"net"
 	"time"
 
-	"manifester/internal/core"
-	"manifester/internal/system"
+	"mds/internal/core"
+	"mds/internal/system"
 )
 
 // AsyncConnections is the connection set the Executor writes to: system.Connections plus a
@@ -51,21 +51,21 @@ func (c ExecConfig) withDefaults() ExecConfig {
 // goroutine under a timeout and yields exactly one IOResult on the InboxWriter.
 // Sends go through the connection's ordered writer queue instead.
 type Executor struct {
-	ctx   context.Context
-	cfg   ExecConfig
-	objs  system.ObjectStore
-	cp    system.ControlPlane
-	conns AsyncConnections
-	class system.ErrorClassifier
-	sink  system.InboxWriter
+	ctx    context.Context
+	config ExecConfig
+	objs   system.ObjectStore
+	cp     system.ControlPlane
+	conns  AsyncConnections
+	class  system.ErrorClassifier
+	sink   system.InboxWriter
 }
 
 var _ system.Executor = (*Executor)(nil)
 
 // NewExecutor builds an Executor; cancelling ctx aborts calls in flight.
-func NewExecutor(ctx context.Context, cfg ExecConfig, objs system.ObjectStore, cp system.ControlPlane,
+func NewExecutor(ctx context.Context, config ExecConfig, objs system.ObjectStore, cp system.ControlPlane,
 	conns AsyncConnections, class system.ErrorClassifier, sink system.InboxWriter) *Executor {
-	return &Executor{ctx: ctx, cfg: cfg.withDefaults(), objs: objs, cp: cp, conns: conns, class: class, sink: sink}
+	return &Executor{ctx: ctx, config: config.withDefaults(), objs: objs, cp: cp, conns: conns, class: class, sink: sink}
 }
 
 func (e *Executor) deliver(c core.IOResult) {
@@ -136,7 +136,7 @@ func (e *Executor) object(a core.IOCall) core.IOResult {
 	case core.ObjectGet:
 		n = a.Ref.Len
 	}
-	ctx, cancel := context.WithTimeout(e.ctx, e.cfg.objTimeout(n))
+	ctx, cancel := context.WithTimeout(e.ctx, e.config.objTimeout(n))
 	defer cancel()
 	fail := func(err error) (core.ErrCode, core.Outcome) { return e.class.Classify(a, err) }
 	switch a := a.(type) {
@@ -165,16 +165,16 @@ func (e *Executor) object(a core.IOCall) core.IOResult {
 }
 
 func (e *Executor) control(a core.ControlPlaneCall) core.IOResult {
-	limit := e.cfg.CPTimeout
+	limit := e.config.CPTimeout
 	if a.Timeout > 0 { // group joins and syncs wait for a rebalance (core.ControlPlaneCall)
 		limit = time.Duration(a.Timeout)
 	}
 	ctx, cancel := context.WithTimeout(e.ctx, limit)
 	defer cancel()
-	resp, err := e.cp.Call(ctx, a.Op)
+	response, err := e.cp.Call(ctx, a.Op)
 	if err != nil {
 		c, o := e.class.Classify(a, err)
 		return core.ControlPlaneDone{Req: a.Req, Err: c, Outcome: o}
 	}
-	return core.ControlPlaneDone{Req: a.Req, Resp: resp, Outcome: core.Applied}
+	return core.ControlPlaneDone{Req: a.Req, Resp: response, Outcome: core.Applied}
 }

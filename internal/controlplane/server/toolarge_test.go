@@ -7,21 +7,21 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/statemachine"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/controlplane/statemachine"
 )
 
 func TestCommitTooLargeForOneLogEntry(t *testing.T) {
 	cli, _, stop := startNode(t, statemachine.Config{MaxEntryBytes: 2000})
 	defer stop()
-	req := &cpv1.CommitSegmentRequest{SegmentKey: "seg/big"}
+	request := &cpv1.CommitSegmentRequest{SegmentKey: "seg/big"}
 	for i := range 300 {
-		req.Batches = append(req.Batches, &cpv1.PendingBatch{
+		request.Batches = append(request.Batches, &cpv1.PendingBatch{
 			Tp: &cpv1.TopicPartition{Topic: "orders", Partition: int32(i)}, Records: 1,
 			Loc: &cpv1.SegmentRef{Key: "seg/big", Off: int64(i), Len: 1},
 		})
 	}
-	_, err := cli.CommitSegment(t.Context(), req)
+	_, err := cli.CommitSegment(t.Context(), request)
 	st, _ := status.FromError(err)
 	if st.Code() != codes.ResourceExhausted {
 		t.Fatalf("code = %v (%v), want ResourceExhausted", st.Code(), err)

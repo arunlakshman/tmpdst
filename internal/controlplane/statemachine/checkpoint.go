@@ -3,8 +3,8 @@ package statemachine
 import (
 	"bytes"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 const (
@@ -13,37 +13,37 @@ const (
 	defaultCheckpointKey = "ckpt/latest"
 )
 
-func (m *Machine) ckptKey() string {
-	if m.cfg.CkptKey != "" {
-		return m.cfg.CkptKey
+func (m *Machine) checkpointKey() string {
+	if m.config.CheckpointKey != "" {
+		return m.config.CheckpointKey
 	}
 	return defaultCheckpointKey
 }
 
-func (m *Machine) ckptEnabled() bool {
-	return m.cfg.CkptEvery > 0 || m.cfg.CkptKey != ""
+func (m *Machine) checkpointEnabled() bool {
+	return m.config.CheckpointEvery > 0 || m.config.CheckpointKey != ""
 }
 
-func (m *Machine) armCkpt() []core.Action {
-	if m.cfg.CkptEvery <= 0 || m.exited {
+func (m *Machine) armCheckpoint() []core.Action {
+	if m.config.CheckpointEvery <= 0 || m.exited {
 		return nil
 	}
-	m.ckptGen++
-	return []core.Action{core.SetTimer{ID: timerCheckpoint, Gen: m.ckptGen, After: m.cfg.CkptEvery}}
+	m.checkpointGen++
+	return []core.Action{core.SetTimer{ID: timerCheckpoint, Gen: m.checkpointGen, After: m.config.CheckpointEvery}}
 }
 
-func (m *Machine) onCkptTimer(e core.TimerFired) []core.Action {
-	if e.Gen != m.ckptGen {
+func (m *Machine) onCheckpointTimer(e core.TimerFired) []core.Action {
+	if e.Gen != m.checkpointGen {
 		return nil
 	}
-	if m.needsCkpt || m.ckptRetry {
-		return m.emitCkptGet()
+	if m.needsCheckpoint || m.checkpointRetry {
+		return m.emitCheckpointGet()
 	}
-	if m.cfg.CkptEvery <= 0 {
+	if m.config.CheckpointEvery <= 0 {
 		return nil
 	}
 	acts := m.maybeCheckpoint()
-	return append(acts, m.armCkpt()...)
+	return append(acts, m.armCheckpoint()...)
 }
 
 func (m *Machine) maybeCheckpoint() []core.Action {
@@ -60,30 +60,30 @@ func (m *Machine) maybeCheckpoint() []core.Action {
 	if m.applied < m.goalTail {
 		return nil
 	}
-	minSlots := m.cfg.CkptMinSlots
+	minSlots := m.config.CheckpointMinSlots
 	if minSlots <= 0 {
 		minSlots = 1
 	}
-	if int64(slot-m.ckptSlot) < minSlots {
+	if int64(slot-m.checkpointSlot) < minSlots {
 		return nil
 	}
 	var buf bytes.Buffer
 	if err := m.fold.Snapshot(&buf, int64(slot)); err != nil {
 		return m.trip(err)
 	}
-	m.ckptData = buf.Bytes()
-	m.ckptPending = slot
+	m.checkpointData = buf.Bytes()
+	m.checkpointPending = slot
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingObjPut
-	return []core.Action{core.ObjectPut{Req: m.pending, Key: m.ckptKey(), Data: m.ckptData}}
+	return []core.Action{core.ObjectPut{Req: m.pending, Key: m.checkpointKey(), Data: m.checkpointData}}
 }
 
-func (m *Machine) emitCkptGet() []core.Action {
+func (m *Machine) emitCheckpointGet() []core.Action {
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingObjGet
-	return []core.Action{core.ObjectGet{Req: m.pending, Ref: core.SegmentRef{Key: m.ckptKey()}}}
+	return []core.Action{core.ObjectGet{Req: m.pending, Ref: core.SegmentRef{Key: m.checkpointKey()}}}
 }
 
 func (m *Machine) onObjGetDone(d core.ObjectGetDone) []core.Action {
@@ -94,14 +94,14 @@ func (m *Machine) onObjGetDone(d core.ObjectGetDone) []core.Action {
 	if d.Err != core.OK && d.Err != core.ErrNotFound {
 		// The read failed, so we do not know whether a checkpoint exists. The log
 		// may be trimmed, so never catch up from slot 0 on a guess: try again.
-		m.ckptRetry = true
-		return m.armCkptRetry()
+		m.checkpointRetry = true
+		return m.armCheckpointRetry()
 	}
-	m.ckptRetry = false
+	m.checkpointRetry = false
 	if d.Err == core.OK && len(d.Data) > 0 && stateupdater.CheckSnapshot(d.Data) != nil {
 		// A changed byte in the read: the stored object may be fine. Read it again.
 		m.env.Reachable("logcp-sim: checkpoint read had a bad CRC, read again")
-		return m.emitCkptGet()
+		return m.emitCheckpointGet()
 	}
 	if d.Err == core.OK && len(d.Data) > 0 {
 		slot, err := m.fold.Restore(bytes.NewReader(d.Data))
@@ -109,26 +109,26 @@ func (m *Machine) onObjGetDone(d core.ObjectGetDone) []core.Action {
 			return m.trip(err)
 		}
 		m.startAt(core.LogPosition(slot))
-		m.ckptSlot = core.LogPosition(slot)
-		m.needsCkpt = false
+		m.checkpointSlot = core.LogPosition(slot)
+		m.needsCheckpoint = false
 		m.env.Reachable("logcp-sim: replica restored from a checkpoint")
 		return m.afterRestore()
 	}
-	if m.needsCkpt {
+	if m.needsCheckpoint {
 		// Tomb forced a restore but no snapshot yet (or Get failed). Retry;
 		// do not catch up from slot 0 through the trimmed prefix.
-		return m.armCkptRetry()
+		return m.armCheckpointRetry()
 	}
 	return m.afterRestore()
 }
 
-func (m *Machine) armCkptRetry() []core.Action {
-	after := m.cfg.Heartbeat
+func (m *Machine) armCheckpointRetry() []core.Action {
+	after := m.config.Heartbeat
 	if after <= 0 {
 		after = 250 * core.Millisecond
 	}
-	m.ckptGen++
-	return []core.Action{core.SetTimer{ID: timerCheckpoint, Gen: m.ckptGen, After: after}}
+	m.checkpointGen++
+	return []core.Action{core.SetTimer{ID: timerCheckpoint, Gen: m.checkpointGen, After: after}}
 }
 
 func (m *Machine) onObjPutDone(d core.ObjectPutDone) []core.Action {
@@ -136,23 +136,23 @@ func (m *Machine) onObjPutDone(d core.ObjectPutDone) []core.Action {
 		return nil
 	}
 	m.pending, m.pendingKind = 0, pendingNone
-	slot := m.ckptPending
-	m.ckptPending = 0
-	m.ckptData = nil
+	slot := m.checkpointPending
+	m.checkpointPending = 0
+	m.checkpointData = nil
 	if d.Err != core.OK || d.Outcome != core.Applied {
 		return nil
 	}
-	m.ckptSlot = max(m.ckptSlot, slot)
-	m.ckptAt = m.now
+	m.checkpointSlot = max(m.checkpointSlot, slot)
+	m.checkpointAt = m.now
 	return m.emitTrim(slot)
 }
 
-func (m *Machine) emitTrim(ckptSlot core.LogPosition) []core.Action {
-	keep := m.cfg.KeepSlots
+func (m *Machine) emitTrim(checkpointSlot core.LogPosition) []core.Action {
+	keep := m.config.KeepSlots
 	if keep <= 0 {
 		return nil
 	}
-	below := ckptSlot - core.LogPosition(keep)
+	below := checkpointSlot - core.LogPosition(keep)
 	if below <= 0 {
 		return nil
 	}
@@ -174,7 +174,7 @@ func (m *Machine) onTrimDone(d core.LogDeleteOldDone) []core.Action {
 	if d.Err == core.OK && d.Outcome == core.Applied {
 		m.trimFloor = through + 1
 		m.env.Reachable("logcp-sim: log trimmed below a checkpoint")
-		if m.cfg.InjectedBug == InjectedBugTrimDelete {
+		if m.config.InjectedBug == InjectedBugTrimDelete {
 			m.env.Always(false, "logcp-sim: a Put never wins a slot below the trim floor",
 				core.ContextPair{Key: "through", Value: through})
 		}

@@ -1,6 +1,6 @@
 // Package broker is the Kafka broker state machine: stateless, pure and
 // deterministic (core.Machine), with S3 as the data plane and the control
-// plane assigning offsets. The simulator and sys.Run drive the same code.
+// plane assigning offsets. The simulator and system.Run drive the same code.
 //
 // Pipeline of a produce: the batch joins the open segment buffer; a flush
 // (BatchWindow timer or MaxSegmentBytes) encodes it with format.Encode,
@@ -17,8 +17,8 @@
 package broker
 
 import (
-	"manifester/internal/core"
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/core"
+	"mds/internal/wire/kafkawire"
 )
 
 // Fixed timer ids; retry timers use the id of the segment or op they belong to
@@ -30,18 +30,18 @@ const (
 
 // Broker is the machine. Build it with New.
 type Broker struct {
-	env   core.Environment
-	self  core.NodeInstance
-	cfg   Config
-	codec kafkawire.Codec
+	env    core.Environment
+	self   core.NodeInstance
+	config Config
+	codec  kafkawire.Codec
 
 	started bool
 
-	nextReq  core.RequestID
-	nextID   uint64
-	timerGen core.TimerVersion
-	stopping bool
-	exited   bool
+	nextRequestNumber core.RequestID
+	nextID            uint64
+	timerGen          core.TimerVersion
+	stopping          bool
+	exited            bool
 
 	conns  []*connection
 	dirty  []*connection     // connections whose queue head may be ready (drained at end of Step)
@@ -59,22 +59,22 @@ type Broker struct {
 }
 
 // New returns the core.MachineFactory of the broker.
-func New(cfg Config) core.MachineFactory {
-	cfg = cfg.withDefaults()
+func New(config Config) core.MachineFactory {
+	config = config.withDefaults()
 	return func(env core.Environment, self core.NodeInstance) core.Machine {
-		return &Broker{env: env, self: self, cfg: cfg, nextID: firstID}
+		return &Broker{env: env, self: self, config: config, nextID: firstID}
 	}
 }
 
-func (b *Broker) req() core.RequestID { b.nextReq++; return b.nextReq }
-func (b *Broker) id() uint64          { b.nextID++; return b.nextID }
+func (b *Broker) nextRequestID() core.RequestID { b.nextRequestNumber++; return b.nextRequestNumber }
+func (b *Broker) id() uint64                    { b.nextID++; return b.nextID }
 
 func (b *Broker) backoff(n int) core.Duration {
-	d := b.cfg.RetryBase
-	for ; n > 1 && d < b.cfg.RetryMax; n-- {
+	d := b.config.RetryBase
+	for ; n > 1 && d < b.config.RetryMax; n-- {
 		d *= 2
 	}
-	return min(d, b.cfg.RetryMax)
+	return min(d, b.config.RetryMax)
 }
 
 func (b *Broker) timer(id core.TimerID, n int) (core.SetTimer, core.TimerVersion) {
@@ -83,13 +83,13 @@ func (b *Broker) timer(id core.TimerID, n int) (core.SetTimer, core.TimerVersion
 }
 
 // Step implements core.StateMachine.
-func (b *Broker) Step(ev core.Event) []core.Action {
+func (b *Broker) Step(event core.Event) []core.Action {
 	if b.exited {
 		return nil
 	}
-	b.now = ev.At
+	b.now = event.At
 	var acts []core.Action
-	switch e := ev.Body.(type) {
+	switch e := event.Body.(type) {
 	case core.NodeStarted:
 		b.started = true
 	case core.StopRequest:
@@ -107,7 +107,7 @@ func (b *Broker) Step(ev core.Event) []core.Action {
 	case core.ObjectGetDone:
 		acts = b.onGet(e)
 	case core.ControlPlaneDone:
-		acts = b.onCP(e)
+		acts = b.onControlPlane(e)
 	case core.LiveBrokers:
 		b.live = e.Brokers
 	}
@@ -167,17 +167,17 @@ func (b *Broker) maybeExit(acts []core.Action) []core.Action {
 // produce bytes and off once back at the low mark.
 func (b *Broker) updatePressure(acts []core.Action) []core.Action {
 	switch {
-	case !b.pressure && b.bufBytes >= b.cfg.MaxBufferedBytes:
+	case !b.pressure && b.bufBytes >= b.config.MaxBufferedBytes:
 		b.pressure, b.pressureAt = true, b.now
 		b.env.Reachable("broker: reads paused by backpressure")
 		acts = append(acts, recordFact("backpressure_on",
-			core.Field{Key: "buffered", Value: core.I64(b.bufBytes)}))
-	case b.pressure && b.bufBytes <= b.cfg.ResumeBufferedBytes:
+			core.Field{Key: "buffered", Value: core.Int64Value(b.bufBytes)}))
+	case b.pressure && b.bufBytes <= b.config.ResumeBufferedBytes:
 		b.pressure = false
 		b.env.Reachable("broker: reads resumed after backpressure")
 		acts = append(acts, recordFact("backpressure_off",
-			core.Field{Key: "buffered", Value: core.I64(b.bufBytes)},
-			core.Field{Key: "paused_ns", Value: core.I64(b.now - b.pressureAt)}))
+			core.Field{Key: "buffered", Value: core.Int64Value(b.bufBytes)},
+			core.Field{Key: "paused_ns", Value: core.Int64Value(b.now - b.pressureAt)}))
 	}
 	return acts
 }
@@ -206,8 +206,8 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 	if e.ID == timerFlush {
 		return b.onFlushTimer(e)
 	}
-	if s := b.segByTimer(e.ID); s != nil {
-		return b.segTimer(s, e.Gen)
+	if s := b.segmentByTimer(e.ID); s != nil {
+		return b.segmentTimer(s, e.Gen)
 	}
 	if o := b.opByTimer(e.ID); o != nil {
 		return b.opTimer(o, e.Gen)
@@ -222,7 +222,7 @@ func (b *Broker) onFlushTimer(e core.TimerFired) []core.Action {
 	return b.seal(closeOnTimer)
 }
 
-func (b *Broker) segByTimer(id core.TimerID) *segment {
+func (b *Broker) segmentByTimer(id core.TimerID) *segment {
 	for _, s := range b.segs {
 		if core.TimerID(s.id) == id {
 			return s
@@ -231,12 +231,12 @@ func (b *Broker) segByTimer(id core.TimerID) *segment {
 	return nil
 }
 
-func (b *Broker) segByReq(req core.RequestID, st segmentState) *segment {
-	if req == 0 {
+func (b *Broker) segmentByRequest(request core.RequestID, st segmentState) *segment {
+	if request == 0 {
 		return nil
 	}
 	for _, s := range b.segs {
-		if s.req == req && s.state == st {
+		if s.request == request && s.state == st {
 			return s
 		}
 	}
@@ -245,8 +245,8 @@ func (b *Broker) segByReq(req core.RequestID, st segmentState) *segment {
 
 // ---- completions ----
 
-func (b *Broker) onCP(e core.ControlPlaneDone) []core.Action {
-	if s := b.segByReq(e.Req, segmentCommit); s != nil {
+func (b *Broker) onControlPlane(e core.ControlPlaneDone) []core.Action {
+	if s := b.segmentByRequest(e.Req, segmentCommit); s != nil {
 		return b.onCommit(s, e)
 	}
 	if o := b.findOp(e.Req); o != nil && o.state == opControlPlane {
@@ -256,7 +256,7 @@ func (b *Broker) onCP(e core.ControlPlaneDone) []core.Action {
 }
 
 func (b *Broker) onPut(e core.ObjectPutDone) []core.Action {
-	if s := b.segByReq(e.Req, segmentUpload); s != nil {
+	if s := b.segmentByRequest(e.Req, segmentUpload); s != nil {
 		return b.onPutDone(s, e)
 	}
 	return nil

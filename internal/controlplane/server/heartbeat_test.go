@@ -7,9 +7,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/core"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/core"
 )
 
 func hb(id int32, host string, port int32) *cpv1.BrokerHeartbeatRequest {
@@ -23,23 +23,23 @@ func TestBrokerHeartbeatActiveReturnsLiveSet(t *testing.T) {
 	defer stop()
 	ctx := t.Context()
 
-	resp, err := cli.BrokerHeartbeat(ctx, hb(2, "b2", 9092))
+	response, err := cli.BrokerHeartbeat(ctx, hb(2, "b2", 9092))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Brokers) != 1 || resp.Brokers[0].NodeId != 2 || resp.Brokers[0].Host != "b2" {
-		t.Fatalf("first heartbeat brokers = %+v", resp.Brokers)
+	if len(response.Brokers) != 1 || response.Brokers[0].NodeId != 2 || response.Brokers[0].Host != "b2" {
+		t.Fatalf("first heartbeat brokers = %+v", response.Brokers)
 	}
 
-	resp, err = cli.BrokerHeartbeat(ctx, hb(1, "b1", 9093))
+	response, err = cli.BrokerHeartbeat(ctx, hb(1, "b1", 9093))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Brokers) != 2 {
-		t.Fatalf("second heartbeat brokers = %+v, want 2", resp.Brokers)
+	if len(response.Brokers) != 2 {
+		t.Fatalf("second heartbeat brokers = %+v, want 2", response.Brokers)
 	}
-	if resp.Brokers[0].NodeId != 1 || resp.Brokers[0].Port != 9093 || resp.Brokers[1].NodeId != 2 {
-		t.Fatalf("brokers not sorted by node id: %+v", resp.Brokers)
+	if response.Brokers[0].NodeId != 1 || response.Brokers[0].Port != 9093 || response.Brokers[1].NodeId != 2 {
+		t.Fatalf("brokers not sorted by node id: %+v", response.Brokers)
 	}
 }
 
@@ -50,8 +50,8 @@ func TestBrokerHeartbeatInvalidBroker(t *testing.T) {
 	defer stop()
 	ctx := t.Context()
 	cases := []struct {
-		name string
-		req  *cpv1.BrokerHeartbeatRequest
+		name    string
+		request *cpv1.BrokerHeartbeatRequest
 	}{
 		{"zero node id", hb(0, "h", 9092)},
 		{"negative node id", hb(-1, "h", 9092)},
@@ -60,7 +60,7 @@ func TestBrokerHeartbeatInvalidBroker(t *testing.T) {
 		{"no broker", &cpv1.BrokerHeartbeatRequest{}},
 	}
 	for _, c := range cases {
-		_, err := cli.BrokerHeartbeat(ctx, c.req)
+		_, err := cli.BrokerHeartbeat(ctx, c.request)
 		st, ok := status.FromError(err)
 		if !ok || st.Code() != codes.InvalidArgument {
 			t.Fatalf("%s: err = %v, want InvalidArgument", c.name, err)
@@ -94,11 +94,11 @@ func TestBrokerHeartbeatLeaseExpires(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(3 * ttl)
-	resp, err := cli.BrokerHeartbeat(ctx, hb(2, "b2", 9092))
+	response, err := cli.BrokerHeartbeat(ctx, hb(2, "b2", 9092))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resp.Brokers) != 1 || resp.Brokers[0].NodeId != 2 {
-		t.Fatalf("after expiry brokers = %+v, want only broker 2", resp.Brokers)
+	if len(response.Brokers) != 1 || response.Brokers[0].NodeId != 2 {
+		t.Fatalf("after expiry brokers = %+v, want only broker 2", response.Brokers)
 	}
 }

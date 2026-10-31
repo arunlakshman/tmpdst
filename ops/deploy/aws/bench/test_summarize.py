@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Tests for summarize.py: canned OMB JSON (testdata/omb-local-sample.json, a real OMB 0.0.1 result from a
-local run against manibroker) and canned /metrics snapshots in both layouts.
+local run against mdsbroker) and canned /metrics snapshots in both layouts.
 Run: python3 -I -m unittest ops/deploy/aws/bench/test_summarize.py   (or python3 ops/deploy/aws/bench/test_summarize.py)"""
 import argparse
 import io
@@ -20,31 +20,31 @@ START, END = 1000, 1060
 
 def prom(segs, nbytes, puts, gets, wru, rcu, ack_sum=1.0, ack_n=10):
     return f"""# HELP x
-manibroker_segments_committed_total {segs}
-manibroker_segment_committed_bytes_total {nbytes}
-manibroker_segment_put_attempts_total {segs}
-manibroker_segment_put_seconds_sum {segs * 0.07}
-manibroker_segment_put_seconds_count {segs}
-manibroker_segment_queue_wait_seconds_sum 0
-manibroker_segment_queue_wait_seconds_count {segs}
-manibroker_segment_commit_seconds_sum {segs * 0.04}
-manibroker_segment_commit_seconds_count {segs}
-manibroker_segment_seal_to_ack_seconds_sum {ack_sum}
-manibroker_segment_seal_to_ack_seconds_count {ack_n}
-manibroker_s3_throttles_total{{op="PutObject",code="SlowDown"}} 0
-manibroker_s3_attempt_seconds_count{{op="PutObject",result="ok"}} {puts}
-manibroker_s3_attempt_seconds_count{{op="GetObject",result="ok"}} {gets}
-manibroker_s3_request_bytes_sum{{op="PutObject"}} {nbytes}
+mdsbroker_segments_committed_total {segs}
+mdsbroker_segment_committed_bytes_total {nbytes}
+mdsbroker_segment_put_attempts_total {segs}
+mdsbroker_segment_put_seconds_sum {segs * 0.07}
+mdsbroker_segment_put_seconds_count {segs}
+mdsbroker_segment_queue_wait_seconds_sum 0
+mdsbroker_segment_queue_wait_seconds_count {segs}
+mdsbroker_segment_commit_seconds_sum {segs * 0.04}
+mdsbroker_segment_commit_seconds_count {segs}
+mdsbroker_segment_seal_to_ack_seconds_sum {ack_sum}
+mdsbroker_segment_seal_to_ack_seconds_count {ack_n}
+mdsbroker_s3_throttles_total{{op="PutObject",code="SlowDown"}} 0
+mdsbroker_s3_attempt_seconds_count{{op="PutObject",result="ok"}} {puts}
+mdsbroker_s3_attempt_seconds_count{{op="GetObject",result="ok"}} {gets}
+mdsbroker_s3_request_bytes_sum{{op="PutObject"}} {nbytes}
 """
 
 
 def prom_cp(wru, rcu):
-    return f"""manicp_dynamo_consumed_capacity_units_total{{kind="write"}} {wru}
-manicp_dynamo_consumed_capacity_units_total{{kind="read"}} {rcu}
-manicp_dynamo_api_errors_total{{op="PutItem",code="ProvisionedThroughputExceededException"}} 3
-manicp_dynamo_retries_total{{op="Query"}} 1
-manicp_dynamodb_call_seconds_sum 2
-manicp_dynamodb_call_seconds_count 100
+    return f"""mdscontrolplane_dynamo_consumed_capacity_units_total{{kind="write"}} {wru}
+mdscontrolplane_dynamo_consumed_capacity_units_total{{kind="read"}} {rcu}
+mdscontrolplane_dynamo_api_errors_total{{op="PutItem",code="ProvisionedThroughputExceededException"}} 3
+mdscontrolplane_dynamo_retries_total{{op="Query"}} 1
+mdscontrolplane_dynamodb_call_seconds_sum 2
+mdscontrolplane_dynamodb_call_seconds_count 100
 """
 
 
@@ -55,14 +55,14 @@ def write(path, text):
 
 
 def prom_log(scale):
-    return f"""manicp_log_slots_total {700 * scale}
-manicp_log_lost_slots_total {scale}
-manicp_log_role_changes_total{{to="active"}} {scale}
+    return f"""mdscontrolplane_log_slots_total {700 * scale}
+mdscontrolplane_log_lost_slots_total {scale}
+mdscontrolplane_log_role_changes_total{{to="active"}} {scale}
 """
 
 
 def make_run(d, nested=True, brokers=(("1", 6e9), ("2", 3e9), ("3", 1e9)), comp="none", sample_target=5000, cp=None):
-    """cp: None = legacy (a manicp snapshot per broker); "log" / "nolog" = single control plane under metrics/cp/."""
+    """cp: None = legacy (a mdscontrolplane snapshot per broker); "log" / "nolog" = single control plane under metrics/cp/."""
     omb = os.path.join(d, "omb")
     os.makedirs(omb)
     with open(os.path.join(HERE, "testdata", "omb-local-sample.json")) as f:
@@ -78,12 +78,12 @@ def make_run(d, nested=True, brokers=(("1", 6e9), ("2", 3e9), ("3", 1e9)), comp=
         write(os.path.join(base, f"{pre}{START - 5}-broker.txt"), prom(0, 0, 0, 0, 0, 0, 0, 0))
         write(os.path.join(base, f"{pre}{END + 5}-broker.txt"), prom(100, nbytes, 100, 10, 0, 0, 5.0, 100))
         if cp is None:
-            write(os.path.join(base, f"{START - 5}-manicp.txt"), prom_cp(0, 0))
-            write(os.path.join(base, f"{END + 5}-manicp.txt"), prom_cp(20000, 500))
+            write(os.path.join(base, f"{START - 5}-mdscontrolplane.txt"), prom_cp(0, 0))
+            write(os.path.join(base, f"{END + 5}-mdscontrolplane.txt"), prom_cp(20000, 500))
     if cp:
         base = os.path.join(d, "metrics", "cp")
-        write(os.path.join(base, f"{START - 5}-manicp.txt"), prom_cp(0, 0) + (prom_log(0) if cp == "log" else ""))
-        write(os.path.join(base, f"{END + 5}-manicp.txt"), prom_cp(20000, 700) + (prom_log(100) if cp == "log" else ""))
+        write(os.path.join(base, f"{START - 5}-mdscontrolplane.txt"), prom_cp(0, 0) + (prom_log(0) if cp == "log" else ""))
+        write(os.path.join(base, f"{END + 5}-mdscontrolplane.txt"), prom_cp(20000, 700) + (prom_log(100) if cp == "log" else ""))
 
 
 def report(d, **kw):
@@ -235,7 +235,7 @@ class ControlPlaneNodesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             shutil.copytree(FAILOVER, d, dirs_exist_ok=True)
             for f in os.listdir(os.path.join(d, "metrics", "cp-1")):
-                write(os.path.join(d, "metrics", "cp-1", f), "manicp_log_active 0\n")
+                write(os.path.join(d, "metrics", "cp-1", f), "mdscontrolplane_log_active 0\n")
             write(os.path.join(d, "ABORT"), "publish p99 over 60 s\n")
             text, unmet = failover_report(d)
         self.assertIn("NO other node was seen active", text)

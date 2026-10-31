@@ -1,4 +1,4 @@
-# manifester
+# mds
 
 Kafka-protocol brokers and a log-backed control plane (Go).
 
@@ -36,7 +36,7 @@ make install-hooks   # uses ambient go / golangci-lint on PATH
 | test | unit packages (not `internal/verify/simulator`, not `test/integrationtest`) |
 | sim | `go test ./internal/verify/simulator/...` |
 | it-hermetic | `go test ./test/integrationtest/` (in-process memstore) |
-| crap | CRAP score ≤ 20 (`docs/crap-gate.md`) |
+| risk | change risk score <= 20 (`docs/risk-gate.md`) |
 
 Every `git commit` runs that gate via the pre-commit hook (with mise:
 `mise exec -- make build`). Bypass once:
@@ -48,20 +48,20 @@ SKIP_BUILD_HOOK=1 git commit ...
 ## Other targets
 
 ```bash
-make test-all      # unit + sim + hermetic it (no lint/crap)
+make test-all      # unit + sim + hermetic it (no lint/risk)
 make test-race     # go test -race ./... (slow; not in build)
 make lint
-make crap-strict
+make risk-strict
 ```
 
 Docker fullstack tests under `test/integrationtest/` skip unless
-`MANIFESTER_DYNAMO_ENDPOINT` and `MANIFESTER_S3_ENDPOINT` are set
+`MDS_DYNAMO_ENDPOINT` and `MDS_S3_ENDPOINT` are set
 (`ops/scripts/it-up.sh`). The import rules for the deterministic packages
 are checked by `go run ./ops/tools/determinismcheck <packages>`.
 
 ## Docs
 
-- `docs/decisions.md` — design decisions
-- `docs/crap-gate.md` — CRAP threshold and baseline
-- `docs/lint-baseline.md` — golangci-lint policy
-- `docs/aws-benchmark-runbook.md` — AWS bench / deploy
+- `docs/decisions.md` - design decisions
+- `docs/risk-gate.md` - change risk score threshold and baseline
+- `docs/lint-baseline.md` - golangci-lint policy
+- `docs/aws-benchmark-runbook.md` - AWS bench / deploy

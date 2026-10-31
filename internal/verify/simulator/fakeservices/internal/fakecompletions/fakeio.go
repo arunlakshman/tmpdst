@@ -16,8 +16,8 @@ package fakecompletions
 import (
 	"slices"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
 )
 
 // Params is the fault and timing config common to both engines.
@@ -136,7 +136,7 @@ func (p Params) Draw(ctx simulator.FakeServiceContext, pre string, until *simula
 			d = core.Duration(r.Between(int64(p.Outage.Dur[0]), int64(p.Outage.Dur[1])))
 		}
 		*until = now + simulator.Time(d)
-		ctx.Fault(pre+"_outage", core.Field{Key: "dur", Value: core.I64(d)})
+		ctx.Fault(pre+"_outage", core.Field{Key: "dur", Value: core.Int64Value(d)})
 		ctx.Assert().Reachable(core.PropertyID(pre + " outage started"))
 	}
 	inOutage := now < *until
@@ -147,7 +147,7 @@ func (p Params) Draw(ctx simulator.FakeServiceContext, pre string, until *simula
 		if inOutage {
 			cause = "outage"
 		}
-		ctx.Fault(pre+"_503", append(fields, core.Field{Key: "cause", Value: core.Str(cause)})...)
+		ctx.Fault(pre+"_503", append(fields, core.Field{Key: "cause", Value: core.StringValue(cause)})...)
 		ctx.Assert().Reachable(core.PropertyID(pre + " 503 injected"))
 		return ReplyUnavailable
 	case isTimeout:
@@ -166,10 +166,10 @@ func (p Params) Draw(ctx simulator.FakeServiceContext, pre string, until *simula
 // latency, extra.
 func (c *CompletionCore) Execute(ctx simulator.FakeServiceContext, from core.NodeInstance, a core.IOCall) {
 	r, now, p := ctx.Rand(), ctx.Now(), c.h.Params
-	req := core.Field{Key: "req", Value: core.U64(a.RequestID())}
+	request := core.Field{Key: "req", Value: core.Uint64Value(a.RequestID())}
 	kind := ReplyNormal
 	if !c.recovery {
-		kind = p.Draw(ctx, c.h.Prefix, &c.until, req)
+		kind = p.Draw(ctx, c.h.Prefix, &c.until, request)
 	}
 	t1 := now + simulator.Time(p.Apply.Sample(r))
 	t2 := t1 + simulator.Time(p.Respond.Sample(r))
@@ -249,7 +249,7 @@ func (c *CompletionCore) OnInternal(ctx simulator.FakeServiceContext, body any) 
 // plans in issue order.
 func (c *CompletionCore) StateHash() uint64 {
 	h := core.NewHasher()
-	mix := h.U64
+	mix := h.Uint64Value
 	mix(c.specStateHash())
 	mix(uint64(c.until))
 	h.Bool(c.recovery)

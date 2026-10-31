@@ -2,23 +2,23 @@
 # Idempotent Alloy install + config for an EC2 host. Target: Amazon Linux 2023
 # (dnf, systemd, aws cli v2 preinstalled). Run as root from user-data:
 #
-#   RUN=bench-0042 ROLE=broker OBS_DIR=/opt/manifester/deploy/aws/observability \
-#     bash /opt/manifester/deploy/aws/observability/install-alloy.sh
+#   RUN=bench-0042 ROLE=broker OBS_DIR=/opt/mds/deploy/aws/observability \
+#     bash /opt/mds/deploy/aws/observability/install-alloy.sh
 #
 # Inputs (environment):
 #   RUN       run id, becomes the run_id label (required)
 #   ROLE      broker | cp | loadgen (required)
 #   OBS_DIR   directory holding alloy/ (default: this script's directory)
 #   ALLOY_VERSION  rpm version to pin (default below)
-#   SSM_PREFIX     default /manifester-bench (the Terraform allowed_ssm_param_prefix, no trailing /)
+#   SSM_PREFIX     default /mds-bench (the Terraform allowed_ssm_param_prefix, no trailing /)
 #   PARAM_PROM_URL PARAM_PROM_USER PARAM_PROM_KEY PARAM_LOKI_URL PARAM_LOKI_USER PARAM_LOKI_KEY PARAM_API_KEY
 #                  full SSM names; defaults $SSM_PREFIX/grafana/{remote_write_url,user,prom_api_key,loki_url,loki_user,loki_api_key}
 #                  PARAM_API_KEY (grafana/api_key) is a fallback used for whichever key is missing
 #   DDB_TABLE (cp only) S3_BUCKET S3_METRICS_FILTER_ID (broker only); when unset read from SSM
-#                  $SSM_PREFIX/aws/{ddb_table,s3_bucket,s3_metrics_filter_id} (filter default manifester-bench)
+#                  $SSM_PREFIX/aws/{ddb_table,s3_bucket,s3_metrics_filter_id} (filter default mds-bench)
 #   CP_RANK        cp only: 0 = preferred appender, 1.. = hot standbys; becomes the cp_rank label (default 0)
 #   CP_CLOUDWATCH  cp only: 1 installs cpcloudwatch.alloy (DynamoDB table metrics; ONE host per run), default 1 for rank 0, else 0
-#   BROKER_ID      broker only: 1..N, becomes the `broker` label on manibroker/manicp series (default 1)
+#   BROKER_ID      broker only: 1..N, becomes the `broker` label on mdsbroker/mdscontrolplane series (default 1)
 #   PRIVATE_IP     accepted, informational
 #   AWS_REGION     default: instance region from IMDS
 #
@@ -33,7 +33,7 @@ set -euo pipefail
 : "${ROLE:?ROLE is required (broker|cp|loadgen)}"
 case "$ROLE" in broker | cp | loadgen) ;; *) echo "ROLE must be broker, cp or loadgen" >&2; exit 2 ;; esac
 ALLOY_VERSION="${ALLOY_VERSION:-1.10.1}"
-SSM_PREFIX="${SSM_PREFIX:-/manifester-bench}"
+SSM_PREFIX="${SSM_PREFIX:-/mds-bench}"
 SSM_PREFIX="${SSM_PREFIX%/}"
 PARAM_PROM_URL="${PARAM_PROM_URL:-$SSM_PREFIX/grafana/remote_write_url}"
 PARAM_PROM_USER="${PARAM_PROM_USER:-$SSM_PREFIX/grafana/user}"
@@ -107,7 +107,7 @@ if [ "$ROLE" = cp ] && [ -f /etc/alloy/cpcloudwatch.alloy ]; then
 fi
 if [ "$ROLE" = broker ]; then
   s3_bucket=${S3_BUCKET:-$(ssm "$SSM_PREFIX/aws/s3_bucket")}
-  s3_filter=${S3_METRICS_FILTER_ID:-$(ssm "$SSM_PREFIX/aws/s3_metrics_filter_id" manifester-bench)}
+  s3_filter=${S3_METRICS_FILTER_ID:-$(ssm "$SSM_PREFIX/aws/s3_metrics_filter_id" mds-bench)}
 fi
 umask 077
 tmp=$(mktemp /etc/alloy/alloy.env.XXXXXX)

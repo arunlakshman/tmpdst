@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"slices"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 const (
@@ -52,7 +52,7 @@ func (m *Machine) setActive(on bool) {
 }
 
 func (m *Machine) rolesArmed() bool {
-	return m.cfg.Heartbeat > 0 || m.cfg.TakeoverAfter > 0
+	return m.config.Heartbeat > 0 || m.config.TakeoverAfter > 0
 }
 
 func (m *Machine) isAppender() bool {
@@ -73,7 +73,7 @@ func (m *Machine) canCommit() bool {
 }
 
 func (m *Machine) roleEvery() core.Duration {
-	a, b := m.cfg.Heartbeat, m.cfg.TakeoverAfter
+	a, b := m.config.Heartbeat, m.config.TakeoverAfter
 	switch {
 	case a > 0 && b > 0:
 		return min(a, b)
@@ -133,7 +133,7 @@ func (m *Machine) failbackDue() bool {
 }
 
 func (m *Machine) takeoverDue() bool {
-	take := m.cfg.TakeoverAfter
+	take := m.config.TakeoverAfter
 	if m.active || take <= 0 {
 		return false
 	}
@@ -142,14 +142,14 @@ func (m *Machine) takeoverDue() bool {
 }
 
 func (m *Machine) heartbeatDue() bool {
-	hb := m.cfg.Heartbeat
+	hb := m.config.Heartbeat
 	if !m.active || hb <= 0 {
 		return false
 	}
 	if m.now-m.lastOwnAt <= core.NodeTime(hb) {
 		return false
 	}
-	return len(m.queue) == 0 && len(m.flights) == 0 && m.pending == 0
+	return len(m.queue) == 0 && len(m.inFlightAppends) == 0 && m.pending == 0
 }
 
 func (m *Machine) maybeReplicaFault() []core.Action {
@@ -158,12 +158,12 @@ func (m *Machine) maybeReplicaFault() []core.Action {
 	if !m.active || !m.ready {
 		return nil
 	}
-	if m.cfg.StallProb > 0 && m.env.Fault("logcp_stall", m.cfg.StallProb) {
-		m.stallUntil = m.now + core.NodeTime(betweenDur(m.env, m.cfg.StallDur))
+	if m.config.StallProb > 0 && m.env.Fault("logcp_stall", m.config.StallProb) {
+		m.stallUntil = m.now + core.NodeTime(betweenDur(m.env, m.config.StallDur))
 		m.env.Reachable("logcp-sim: replica stalled")
 		return nil
 	}
-	if m.cfg.CrashProb > 0 && m.env.Fault("logcp_crash", m.cfg.CrashProb) {
+	if m.config.CrashProb > 0 && m.env.Fault("logcp_crash", m.config.CrashProb) {
 		return m.softCrash()
 	}
 	return nil
@@ -183,7 +183,7 @@ func (m *Machine) softCrash() []core.Action {
 	m.booting = true
 	m.crashed = true
 	m.timerGen++ // no catch-up while down
-	m.downUntil = m.now + core.NodeTime(betweenDur(m.env, m.cfg.DownDur))
+	m.downUntil = m.now + core.NodeTime(betweenDur(m.env, m.config.DownDur))
 	m.answers = nil
 	m.clearLocal()
 	// Refuse client work until afterCrashRestart restores fold + catch-up.
@@ -198,7 +198,7 @@ func isDeleted(d core.LogAppendDone) bool {
 
 // hitTrimmed handles append/fill against a tombstone: refuse clients, drop
 // local log state, and restore from checkpoint (docs/log-cp-service.md).
-// Catch-up from slot 0 after a tomb re-enters the trimmed prefix; needsCkpt
+// Catch-up from slot 0 after a tomb re-enters the trimmed prefix; needsCheckpoint
 // blocks that until a snapshot lands.
 func (m *Machine) hitTrimmed() []core.Action {
 	m.env.Reachable("logcp-sim: replica hit a trimmed slot")
@@ -206,7 +206,7 @@ func (m *Machine) hitTrimmed() []core.Action {
 	m.setActive(false)
 	m.ready = false
 	m.booting = true
-	m.needsCkpt = true
+	m.needsCheckpoint = true
 	m.clearLocal()
 	acts := m.refuseReads()
 	return append(acts, m.afterCrashRestart()...)
@@ -214,31 +214,31 @@ func (m *Machine) hitTrimmed() []core.Action {
 
 func (m *Machine) clearLocal() {
 	m.queue = nil
-	m.flights = map[core.RequestID]*inFlightAppend{}
+	m.inFlightAppends = map[core.RequestID]*inFlightAppend{}
 	m.waiters = map[string][]waitingCommand{}
 	m.buf = map[core.LogPosition][]byte{}
 	m.pending, m.pendingKind = 0, pendingNone
 	m.proj = nil
 	m.fillSlot, m.fillData = 0, nil
-	m.holeArmed = false
+	m.gapArmed = false
 }
 
 func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {
 	refuse := func(c waitingCommand) {
 		m.answers = append(m.answers, ReplyToClient{
-			Req: c.req, From: c.from,
-			Done: core.ControlPlaneDone{Req: c.req, Err: err, Outcome: o},
+			Req: c.request, From: c.from,
+			Done: core.ControlPlaneDone{Req: c.request, Err: err, Outcome: o},
 		})
 	}
 	// Sort map keys so answer order is stable across runs (TraceHash).
-	reqs := make([]core.RequestID, 0, len(m.flights))
-	for req := range m.flights { //detcheck:ok keys are collected, then sorted before use
-		reqs = append(reqs, req)
+	reqs := make([]core.RequestID, 0, len(m.inFlightAppends))
+	for request := range m.inFlightAppends { //determinismcheck:ok keys are collected, then sorted before use
+		reqs = append(reqs, request)
 	}
 	slices.Sort(reqs)
 	seen := map[string]bool{}
-	for _, req := range reqs {
-		f := m.flights[req]
+	for _, request := range reqs {
+		f := m.inFlightAppends[request]
 		seen[f.id] = true
 		for _, c := range f.cmds {
 			refuse(c)
@@ -248,7 +248,7 @@ func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {
 		refuse(c)
 	}
 	ids := make([]string, 0, len(m.waiters))
-	for id := range m.waiters { //detcheck:ok keys are collected, then sorted before use
+	for id := range m.waiters { //determinismcheck:ok keys are collected, then sorted before use
 		if !seen[id] {
 			ids = append(ids, id)
 		}
@@ -267,7 +267,7 @@ func (m *Machine) afterCrashRestart() []core.Action {
 	m.timerGen++
 	// Close the old store first: a database may need its directory back.
 	_ = m.fold.Close() // the old state is dropped whether or not close succeeds
-	fold, err := m.cfg.openFold()
+	fold, err := m.config.openFold()
 	if err != nil {
 		return m.trip(err)
 	}
@@ -275,34 +275,34 @@ func (m *Machine) afterCrashRestart() []core.Action {
 	m.reseedTopics()
 	m.applied, m.high, m.goalTail = 0, 0, 0
 	m.seq = 0
-	if m.ckptEnabled() {
-		return m.emitCkptGet()
+	if m.checkpointEnabled() {
+		return m.emitCheckpointGet()
 	}
 	return m.afterRestore()
 }
 
 func (m *Machine) emitHeartbeat() []core.Action {
 	m.seq++
-	id := fmt.Sprintf("%s/%d", m.cfg.writer(), m.seq)
+	id := fmt.Sprintf("%s/%d", m.config.writer(), m.seq)
 	inner := stateupdater.Encode(stateupdater.Entry{ID: id, Kind: stateupdater.KindNoop})
-	data := wrap(m.cfg.Rank, m.cfg.writer(), inner)
+	data := wrap(m.config.Rank, m.config.writer(), inner)
 	m.nextReq++
-	req := m.nextReq
+	request := m.nextReq
 	slot := m.alloc()
-	m.flights[req] = &inFlightAppend{req: req, slot: slot, id: id, data: data, cmds: nil}
-	return []core.Action{core.LogAppend{Req: req, Slot: slot, Data: data}}
+	m.inFlightAppends[request] = &inFlightAppend{request: request, slot: slot, id: id, data: data, cmds: nil}
+	return []core.Action{core.LogAppend{Req: request, Slot: slot, Data: data}}
 }
 
 func (m *Machine) observeWriter(slot core.LogPosition, rank int, writer string, enveloped bool) {
 	if !enveloped || writer == "" {
 		return
 	}
-	if writer == m.cfg.writer() {
+	if writer == m.config.writer() {
 		m.lastOwnAt = m.now
 		return
 	}
 	m.lastOtherAt = m.now
-	if slot >= m.promoSlot && rank < m.cfg.Rank {
+	if slot >= m.promoSlot && rank < m.config.Rank {
 		m.lowerSeen = true
 	}
 }

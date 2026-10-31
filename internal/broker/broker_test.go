@@ -9,9 +9,9 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
-	"manifester/internal/wire/kafkawire"
-	"manifester/internal/wire/segmentformat"
+	"mds/internal/core"
+	"mds/internal/wire/kafkawire"
+	"mds/internal/wire/segmentformat"
 )
 
 func TestApiVersions(t *testing.T) {
@@ -50,9 +50,9 @@ func TestApiVersions(t *testing.T) {
 }
 
 func TestMetadata(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Host, cfg.Port, cfg.BrokerID = "h1", 1234, 5
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.Host, config.Port, config.BrokerID = "h1", 1234, 5
+	h := startedHarness(t, config)
 	h.cp.CreateTopic("u", 1)
 	c := h.open(1)
 	all := kmsg.NewPtrMetadataRequest()
@@ -90,9 +90,9 @@ func brokerLines(bs []kmsg.MetadataResponseBroker) []string {
 }
 
 func TestMetadataBrokers(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.Host, cfg.Port, cfg.BrokerID = "h1", 1234, 5
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.Host, config.Port, config.BrokerID = "h1", 1234, 5
+	h := startedHarness(t, config)
 	c := h.open(1)
 	ask := func() []string {
 		return brokerLines(h.call(c, verMetadata, kmsg.NewPtrMetadataRequest()).(*kmsg.MetadataResponse).Brokers)
@@ -220,17 +220,17 @@ func TestTopicCacheRefresh(t *testing.T) {
 	}
 	n := len(h.cpCalls)
 	h.produceOne(c, e("late", 0, plain(t, "y")))
-	for _, op := range h.cpCalls[n:] {
-		if _, ok := op.(core.DescribeTopics); ok {
+	for _, operation := range h.cpCalls[n:] {
+		if _, ok := operation.(core.DescribeTopics); ok {
 			t.Fatal("cache not used")
 		}
 	}
 }
 
 func TestSizeFlushAndPartitionCap(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.MaxSegmentBytes = 100
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.MaxSegmentBytes = 100
+	h := startedHarness(t, config)
 	c := h.open(1)
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a")), e("t", 0, plain(t, "b"))))
 	if len(h.puts) != 1 {
@@ -238,9 +238,9 @@ func TestSizeFlushAndPartitionCap(t *testing.T) {
 	}
 	produced(h.next(c))
 
-	cfg = DefaultConfig()
-	cfg.MaxSegmentPartitions = 2
-	h = startedHarness(t, cfg)
+	config = DefaultConfig()
+	config.MaxSegmentPartitions = 2
+	h = startedHarness(t, config)
 	h.cp.CreateTopic("m", 5)
 	c = h.open(1)
 	h.send(c, verProduce, prodReq(-1, e("m", 0, plain(t, "a")), e("m", 0, plain(t, "a")), e("m", 1, plain(t, "a")), e("m", 2, plain(t, "a"))))
@@ -303,7 +303,7 @@ func TestFactImmediatelyBeforeSend(t *testing.T) {
 			t.Fatalf("ack fact not followed by Send: %T", h.all[i+1])
 		}
 		f := e.Fact
-		if f.Field("topic") != core.Str("t") || f.Field("base_offset") != core.I64(0) || f.Field("count") != core.I64(2) {
+		if f.Field("topic") != core.StringValue("t") || f.Field("base_offset") != core.Int64Value(0) || f.Field("count") != core.Int64Value(2) {
 			t.Fatalf("fields %v", f.Fields)
 		}
 	}
@@ -360,9 +360,9 @@ func TestListOffsets(t *testing.T) {
 
 func TestCorruptGetRetried(t *testing.T) {
 	for _, bug := range []InjectedBug{InjectedBugNone, InjectedBugServeCorrupt} {
-		cfg := DefaultConfig()
-		cfg.InjectedBug = bug
-		h := startedHarness(t, cfg)
+		config := DefaultConfig()
+		config.InjectedBug = bug
+		h := startedHarness(t, config)
 		c := h.open(1)
 		h.produceOne(c, e("t", 0, plain(t, "hello")))
 		corrupt := true
@@ -419,9 +419,9 @@ func TestFetchGetsExhausted(t *testing.T) {
 }
 
 func TestWrongOffsetMutant(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.InjectedBug = InjectedBugWrongOffset
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.InjectedBug = InjectedBugWrongOffset
+	h := startedHarness(t, config)
 	c := h.open(1)
 	h.produceOne(c, e("t", 0, plain(t, "a")))
 	p := fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)))
@@ -431,9 +431,9 @@ func TestWrongOffsetMutant(t *testing.T) {
 }
 
 func TestEarlyAckMutant(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.InjectedBug = InjectedBugEarlyAck
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.InjectedBug = InjectedBugEarlyAck
+	h := startedHarness(t, config)
 	c := h.open(1)
 	h.call(c, verMetadata, kmsg.NewPtrMetadataRequest()) // warm the topic cache
 	h.holdCP = true
@@ -460,9 +460,9 @@ func TestEarlyAckMutant(t *testing.T) {
 }
 
 func TestBackpressure(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.MaxBufferedBytes, cfg.ResumeBufferedBytes = 300, 100
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.MaxBufferedBytes, config.ResumeBufferedBytes = 300, 100
+	h := startedHarness(t, config)
 	c1 := h.open(1)
 	h.open(2)
 	h.call(c1, verMetadata, kmsg.NewPtrMetadataRequest())
@@ -607,9 +607,9 @@ func FuzzBrokerBytes(f *testing.F) {
 }
 
 func mustFrames(t testing.TB) [][]byte {
-	enc := func(ver int16, req kmsg.Request) []byte {
-		hd := kafkawire.RequestHeader{APIKey: req.Key(), APIVersion: ver, CorrelationID: 1, ClientID: "f"}
-		b, err := kafkawire.Codec{}.EncodeRequest(hd, req)
+	enc := func(ver int16, request kmsg.Request) []byte {
+		hd := kafkawire.RequestHeader{APIKey: request.Key(), APIVersion: ver, CorrelationID: 1, ClientID: "f"}
+		b, err := kafkawire.Codec{}.EncodeRequest(hd, request)
 		if err != nil {
 			panic(err)
 		}
@@ -647,8 +647,8 @@ func TestIdempotentBatchRejected(t *testing.T) {
 
 func commitOps(h *harness) []core.CommitSegment {
 	var out []core.CommitSegment
-	for _, op := range h.cpCalls {
-		if cs, ok := op.(core.CommitSegment); ok {
+	for _, operation := range h.cpCalls {
+		if cs, ok := operation.(core.CommitSegment); ok {
 			out = append(out, cs)
 		}
 	}
@@ -808,9 +808,9 @@ func TestCommitSurvivesLongCPOutage(t *testing.T) {
 // Past CommitDeadline the segment fails with REQUEST_TIMED_OUT and its buffer
 // is released.
 func TestCommitDeadlineFailsSegmentAndReleasesBuffer(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.CommitDeadline = 5 * core.Second
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.CommitDeadline = 5 * core.Second
+	h := startedHarness(t, config)
 	c := h.open(1)
 	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
 		if _, ok := a.Op.(core.CommitSegment); ok {

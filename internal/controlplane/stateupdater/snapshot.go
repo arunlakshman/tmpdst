@@ -75,7 +75,7 @@ func (a *StateUpdater) SnapshotAt(w io.Writer, begin func() int64) error {
 	crc := crc32.NewIEEE()
 	bw := bufio.NewWriter(io.MultiWriter(w, crc))
 	var werr error
-	err := a.kv.View(func(tx Transaction) { werr = writeSnapshot(bw, tx, begin) })
+	err := a.keyValue.View(func(transaction Transaction) { werr = writeSnapshot(bw, transaction, begin) })
 	if err = errors.Join(err, werr); err != nil {
 		return err
 	}
@@ -87,12 +87,12 @@ func (a *StateUpdater) SnapshotAt(w io.Writer, begin func() int64) error {
 	return err
 }
 
-func writeSnapshot(bw *bufio.Writer, tx Transaction, begin func() int64) error {
+func writeSnapshot(bw *bufio.Writer, transaction Transaction, begin func() int64) error {
 	// bufio.Writer latches write errors; Flush below reports them.
 	_, _ = bw.WriteString(snapshotMarker)
 	_, _ = bw.Write(binary.AppendVarint(nil, begin()))
 	var werr error
-	tx.Ascend([]byte{0}, nil, func(k, v []byte) bool {
+	transaction.Ascend([]byte{0}, nil, func(k, v []byte) bool {
 		werr = writeEntry(bw, k, v)
 		return werr == nil
 	})
@@ -152,9 +152,9 @@ func (a *StateUpdater) restoreChunk(br *crcReader) (bool, error) {
 			ents, size = append(ents, [2][]byte{k, v}), size+len(k)+len(v)
 		}
 	}
-	return done, a.kv.Update(func(tx Transaction) {
+	return done, a.keyValue.Update(func(transaction Transaction) {
 		for _, e := range ents {
-			tx.Set(e[0], e[1])
+			transaction.Set(e[0], e[1])
 		}
 	})
 }

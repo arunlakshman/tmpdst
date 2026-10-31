@@ -22,14 +22,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// Overridable at link time: -ldflags "-X manifester/internal/system/runinfo.GitCommit=abc123".
+// Overridable at link time: -ldflags "-X mds/internal/system/runinfo.GitCommit=abc123".
 var (
 	GitCommit = ""
 	Version   = ""
 )
 
 // EnvRunID names the environment variable that supplies the run id.
-const EnvRunID = "MANIFESTER_RUN_ID"
+const EnvRunID = "MDS_RUN_ID"
 
 // Info identifies one process.
 type Info struct {
@@ -46,7 +46,7 @@ type Info struct {
 }
 
 // New builds the Info for service. runID is the -run-id flag; empty falls back
-// to $MANIFESTER_RUN_ID, then to a generated "run-<utc time>-<hex>".
+// to $MDS_RUN_ID, then to a generated "run-<utc time>-<hex>".
 func New(service, runID string, brokerID int) Info {
 	i := Info{Service: service, BrokerID: brokerID, Started: time.Now(), GoVersion: runtime.Version()}
 	if runID == "" {
@@ -112,16 +112,16 @@ func NewLogger(w io.Writer, level slog.Level, i Info) *slog.Logger {
 	return slog.New(h).With(attrs...)
 }
 
-// Register adds <ns>_build_info, <ns>_start_time_seconds and
-// <ns>_uptime_seconds to reg.
-func Register(reg prometheus.Registerer, ns string, i Info) {
-	bi := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: ns, Name: "build_info",
+// Register adds <namespace>_build_info, <namespace>_start_time_seconds and
+// <namespace>_uptime_seconds to reg.
+func Register(reg prometheus.Registerer, namespace string, i Info) {
+	bi := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: namespace, Name: "build_info",
 		Help:        "Always 1; the labels identify the build and the run.",
 		ConstLabels: prometheus.Labels{"version": i.Version, "go_version": i.GoVersion, "git_sha": i.GitCommit, "run_id": i.RunID}})
 	bi.Set(1)
-	st := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: ns, Name: "start_time_seconds", Help: "Process start, unix seconds."})
+	st := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: namespace, Name: "start_time_seconds", Help: "Process start, unix seconds."})
 	st.Set(float64(i.Started.UnixNano()) / 1e9)
-	up := prometheus.NewGaugeFunc(prometheus.GaugeOpts{Namespace: ns, Name: "uptime_seconds", Help: "Seconds since process start."},
+	up := prometheus.NewGaugeFunc(prometheus.GaugeOpts{Namespace: namespace, Name: "uptime_seconds", Help: "Seconds since process start."},
 		func() float64 { return time.Since(i.Started).Seconds() })
 	reg.MustRegister(bi, st, up)
 }

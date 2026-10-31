@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 func TestEntryCodecRoundTrip(t *testing.T) {
@@ -16,8 +16,8 @@ func TestEntryCodecRoundTrip(t *testing.T) {
 		{ID: "w/3", Kind: stateupdater.KindCommit, Commit: core.CommitSegment{
 			SegmentKey: "k",
 			Batches: []core.PendingBatch{
-				{TP: core.NewTopicPartition("a", 0), Records: 3, Loc: core.SegmentRef{Key: "o", Off: 7, Len: 30}},
-				{TP: core.NewTopicPartition("a", 1), Records: 1, Loc: core.SegmentRef{Key: "o", Off: 1, Len: 10}},
+				{TopicPartition: core.NewTopicPartition("a", 0), Records: 3, Loc: core.SegmentRef{Key: "o", Off: 7, Len: 30}},
+				{TopicPartition: core.NewTopicPartition("a", 1), Records: 1, Loc: core.SegmentRef{Key: "o", Off: 1, Len: 10}},
 			},
 		}},
 	}
@@ -42,7 +42,7 @@ func TestApplyBytesNoopAndCommit(t *testing.T) {
 		ID: "c", Kind: stateupdater.KindCommit,
 		Commit: core.CommitSegment{
 			SegmentKey: "s1",
-			Batches:    []core.PendingBatch{{TP: core.NewTopicPartition("t", 0), Records: 2, Loc: core.SegmentRef{Key: "o", Off: 0, Len: 8}}},
+			Batches:    []core.PendingBatch{{TopicPartition: core.NewTopicPartition("t", 0), Records: 2, Loc: core.SegmentRef{Key: "o", Off: 0, Len: 8}}},
 		},
 	}))
 	if err != nil || d.Err != core.OK || d.Outcome != core.Applied {

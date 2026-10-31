@@ -32,20 +32,20 @@ type Field struct {
 type FieldValue interface{ isFieldValue() }
 
 type (
-	// I64 is a signed integer field value.
-	I64 int64
-	// U64 is an unsigned integer field value.
-	U64 uint64
-	// Str is a string field value.
-	Str string
+	// Int64Value is a signed integer field value.
+	Int64Value int64
+	// Uint64Value is an unsigned integer field value.
+	Uint64Value uint64
+	// StringValue is a string field value.
+	StringValue string
 	// Bool is a boolean field value.
 	Bool bool
 	// Bytes is a byte-slice field value.
 	Bytes []byte
 )
 
-func (I64) isFieldValue()   {}
-func (U64) isFieldValue()   {}
-func (Str) isFieldValue()   {}
-func (Bool) isFieldValue()  {}
-func (Bytes) isFieldValue() {}
+func (Int64Value) isFieldValue()  {}
+func (Uint64Value) isFieldValue() {}
+func (StringValue) isFieldValue() {}
+func (Bool) isFieldValue()        {}
+func (Bytes) isFieldValue()       {}

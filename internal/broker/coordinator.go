@@ -18,16 +18,16 @@ const (
 
 // findCoordinator answers FindCoordinator. Version 4 asks for many keys at once.
 func (b *Broker) findCoordinator(s *slot, r *kmsg.FindCoordinatorRequest) []core.Action {
-	resp := kmsg.NewPtrFindCoordinatorResponse()
-	s.resp = resp
+	response := kmsg.NewPtrFindCoordinatorResponse()
+	s.response = response
 	if r.Version < 4 {
 		addr, code := b.answerCoordinator(r.CoordinatorKey, r.CoordinatorType)
-		resp.ErrorCode, resp.NodeID, resp.Host, resp.Port = int16(code), addr.NodeID, addr.Host, addr.Port
+		response.ErrorCode, response.NodeID, response.Host, response.Port = int16(code), addr.NodeID, addr.Host, addr.Port
 		return nil
 	}
 	for _, key := range r.CoordinatorKeys {
 		addr, code := b.answerCoordinator(key, r.CoordinatorType)
-		resp.Coordinators = append(resp.Coordinators, kmsg.FindCoordinatorResponseCoordinator{
+		response.Coordinators = append(response.Coordinators, kmsg.FindCoordinatorResponseCoordinator{
 			Key: key, NodeID: addr.NodeID, Host: addr.Host, Port: addr.Port, ErrorCode: int16(code)})
 	}
 	return nil
@@ -70,5 +70,5 @@ func fnv1a32(s string) uint32 {
 
 // coordinatorIsSelf reports whether this broker coordinates group.
 func (b *Broker) coordinatorIsSelf(group string) bool {
-	return b.coordinatorOf(group).NodeID == b.cfg.BrokerID
+	return b.coordinatorOf(group).NodeID == b.config.BrokerID
 }

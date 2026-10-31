@@ -30,9 +30,9 @@ func TestOffsetCommitCodesPerPartition(t *testing.T) {
 			t.Errorf("partition %d: %d, want %d", i, p.ErrorCode, want[i])
 		}
 	}
-	op := g.calls[0].Op.(core.OffsetCommit)
-	if op.Member != "m-1" || op.Generation != 4 || len(op.Offsets) != 3 || op.Offsets[2].Offset != 12 {
-		t.Fatalf("commit call %+v", op)
+	operation := g.calls[0].Op.(core.OffsetCommit)
+	if operation.Member != "m-1" || operation.Generation != 4 || len(operation.Offsets) != 3 || operation.Offsets[2].Offset != 12 {
+		t.Fatalf("commit call %+v", operation)
 	}
 	h.noViolations()
 }
@@ -50,8 +50,8 @@ func TestOffsetCommitWholeCallErrorAndManual(t *testing.T) {
 	}
 	// Version 0 has no generation: a manual commit, -1 with no member.
 	h.call(c, 0, commitRequest("g1", 0, "", 0))
-	if op := g.calls[1].Op.(core.OffsetCommit); op.Generation != -1 || op.Member != "" {
-		t.Fatalf("version 0 commit %+v, want manual", op)
+	if operation := g.calls[1].Op.(core.OffsetCommit); operation.Generation != -1 || operation.Member != "" {
+		t.Fatalf("version 0 commit %+v, want manual", operation)
 	}
 	h.noViolations()
 }
@@ -98,8 +98,8 @@ func TestOffsetFetchAllCommitted(t *testing.T) {
 	all := kmsg.NewPtrOffsetFetchRequest()
 	all.Group = "g1"
 	r := h.call(h.open(1), 7, all).(*kmsg.OffsetFetchResponse)
-	if op := g.calls[0].Op.(core.OffsetFetch); len(op.Partitions) != 0 {
-		t.Fatalf("call %+v, want all", op)
+	if operation := g.calls[0].Op.(core.OffsetFetch); len(operation.Partitions) != 0 {
+		t.Fatalf("call %+v, want all", operation)
 	}
 	if len(r.Topics) != 2 || r.Topics[0].Topic != "t" || len(r.Topics[0].Partitions) != 2 || r.Topics[1].Topic != "u" {
 		t.Fatalf("topics %+v", r.Topics)
@@ -117,8 +117,8 @@ func TestOffsetFetchVersion1EmptyListAnswersNothing(t *testing.T) {
 }
 
 func TestOffsetFetchBatchedGroups(t *testing.T) {
-	h, _ := withGroupCP(t, DefaultConfig(), func(op core.ControlPlaneOperation) core.ControlPlaneDone {
-		if f := op.(core.OffsetFetch); f.Group == "g2" {
+	h, _ := withGroupCP(t, DefaultConfig(), func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
+		if f := operation.(core.OffsetFetch); f.Group == "g2" {
 			return cpOK(core.OffsetFetchResp{Offsets: []core.PartitionOffset{{TopicPartition: core.NewTopicPartition("t", 0), Offset: 9}}})
 		}
 		return cpErr(core.ErrUnavailable)

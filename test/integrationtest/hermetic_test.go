@@ -183,8 +183,8 @@ func TestListOffsetsRequest(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	req := kmsg.NewPtrListOffsetsRequest()
-	req.ReplicaID = -1
+	request := kmsg.NewPtrListOffsetsRequest()
+	request.ReplicaID = -1
 	rt := kmsg.NewListOffsetsRequestTopic()
 	rt.Topic = "orders"
 	for _, ts := range []int64{-1, -2} {
@@ -193,13 +193,13 @@ func TestListOffsetsRequest(t *testing.T) {
 		rp.Timestamp = ts
 		rt.Partitions = append(rt.Partitions, rp)
 	}
-	req.Topics = append(req.Topics, rt)
-	resp, err := req.RequestWith(ctx, cl)
+	request.Topics = append(request.Topics, rt)
+	response, err := request.RequestWith(ctx, cl)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var offs []int64
-	for _, p := range resp.Topics[0].Partitions {
+	for _, p := range response.Topics[0].Partitions {
 		if p.ErrorCode != 0 {
 			t.Fatalf("list offsets: %v", kerr.ErrorForCode(p.ErrorCode))
 		}

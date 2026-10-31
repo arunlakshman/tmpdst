@@ -58,11 +58,11 @@ func New() *FakeDynamoDB {
 func (f *FakeDynamoDB) store(table string, it item) {
 	f.tables[table][itemIDOf(it)] = it
 	pks := f.byPK[table]
-	pk := stringOf(it, "pk")
-	if pks[pk] == nil {
-		pks[pk] = map[string]struct{}{}
+	partitionKey := stringOf(it, "pk")
+	if pks[partitionKey] == nil {
+		pks[partitionKey] = map[string]struct{}{}
 	}
-	pks[pk][itemIDOf(it)] = struct{}{}
+	pks[partitionKey][itemIDOf(it)] = struct{}{}
 }
 
 // remove deletes the item with the key.

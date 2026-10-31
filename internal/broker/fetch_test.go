@@ -22,10 +22,10 @@ func longFetch(minBytes, maxWaitMillis int32, parts ...int32) *kmsg.FetchRequest
 }
 
 // lookups counts the FindSegments calls the broker made for tp.
-func lookups(h *harness, tp core.TopicPartition) int {
+func lookups(h *harness, topicPartition core.TopicPartition) int {
 	n := 0
-	for _, op := range h.cpCalls {
-		if f, ok := op.(core.FindSegments); ok && f.TopicPartition == tp {
+	for _, operation := range h.cpCalls {
+		if f, ok := operation.(core.FindSegments); ok && f.TopicPartition == topicPartition {
 			n++
 		}
 	}
@@ -73,22 +73,22 @@ func TestFetchAnswersAtOnce(t *testing.T) {
 }
 
 func TestFetchDataOnSecondPoll(t *testing.T) {
-	tp := core.NewTopicPartition("t", 0)
+	topicPartition := core.NewTopicPartition("t", 0)
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	w := h.open(2)
 	h.send(c, verFetch, longFetch(1, 500, 0))
-	if len(c.out) != 0 || len(h.timers) != 1 || lookups(h, tp) != 1 {
-		t.Fatalf("parked: %d responses, %d timers, %d lookups", len(c.out), len(h.timers), lookups(h, tp))
+	if len(c.out) != 0 || len(h.timers) != 1 || lookups(h, topicPartition) != 1 {
+		t.Fatalf("parked: %d responses, %d timers, %d lookups", len(c.out), len(h.timers), lookups(h, topicPartition))
 	}
 	h.fireNext() // first poll: still no data
-	if len(c.out) != 0 || lookups(h, tp) != 2 {
-		t.Fatalf("after first poll: %d responses, %d lookups", len(c.out), lookups(h, tp))
+	if len(c.out) != 0 || lookups(h, topicPartition) != 2 {
+		t.Fatalf("after first poll: %d responses, %d lookups", len(c.out), lookups(h, topicPartition))
 	}
 	h.produceOne(w, e("t", 0, plain(t, "a", "b")))
 	h.fireNext() // second poll finds the data
-	if len(c.out) != 1 || lookups(h, tp) != 3 {
-		t.Fatalf("after second poll: %d responses, %d lookups", len(c.out), lookups(h, tp))
+	if len(c.out) != 1 || lookups(h, topicPartition) != 3 {
+		t.Fatalf("after second poll: %d responses, %d lookups", len(c.out), lookups(h, topicPartition))
 	}
 	if p := fetched(h.next(c)); len(p.RecordBatches) == 0 || p.HighWatermark != 2 {
 		t.Fatalf("second poll: %+v", p)
@@ -97,7 +97,7 @@ func TestFetchDataOnSecondPoll(t *testing.T) {
 }
 
 func TestFetchMaxWaitExpiresEmpty(t *testing.T) {
-	tp := core.NewTopicPartition("t", 0)
+	topicPartition := core.NewTopicPartition("t", 0)
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.send(c, verFetch, longFetch(1, 300, 0))
@@ -111,7 +111,7 @@ func TestFetchMaxWaitExpiresEmpty(t *testing.T) {
 	if p := fetched(h.next(c)); len(p.RecordBatches) != 0 || p.ErrorCode != 0 {
 		t.Fatalf("expired fetch: %+v", p)
 	}
-	if n := lookups(h, tp); n != 2 { // the first Lookup and the poll at 200 ms
+	if n := lookups(h, topicPartition); n != 2 { // the first Lookup and the poll at 200 ms
 		t.Fatalf("%d lookups, want 2", n)
 	}
 	h.noViolations()
@@ -166,7 +166,7 @@ func TestFetchPollsOnlyShortPartition(t *testing.T) {
 }
 
 func TestFetchParkedEndsOnClose(t *testing.T) {
-	tp := core.NewTopicPartition("t", 0)
+	topicPartition := core.NewTopicPartition("t", 0)
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.send(c, verFetch, longFetch(1, 500, 0))
@@ -174,11 +174,11 @@ func TestFetchParkedEndsOnClose(t *testing.T) {
 	if len(h.b.ops) != 0 {
 		t.Fatalf("%d parts still parked after the close", len(h.b.ops))
 	}
-	before := lookups(h, tp)
+	before := lookups(h, topicPartition)
 	if len(h.timers) > 0 { // a stale timer must do nothing
 		h.fireNext()
 	}
-	if lookups(h, tp) != before || len(c.out) != 0 {
+	if lookups(h, topicPartition) != before || len(c.out) != 0 {
 		t.Fatal("a closed fetch polled or answered")
 	}
 	h.noViolations()

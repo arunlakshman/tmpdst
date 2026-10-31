@@ -44,26 +44,26 @@ type Recorder struct {
 	lim limiter
 }
 
-// New registers <ns>_<sub>_* on reg. log may be nil (no log lines).
-func New(reg prometheus.Registerer, ns, sub string, log *slog.Logger) *Recorder {
+// New registers <namespace>_<sub>_* on reg. log may be nil (no log lines).
+func New(reg prometheus.Registerer, namespace, sub string, log *slog.Logger) *Recorder {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(discard{}, nil))
 	}
 	secs := prometheus.ExponentialBuckets(0.001, 2, 15) // 1 ms .. 16 s
 	r := &Recorder{log: log.With("aws_service", sub), svc: sub, lim: limiter{perSec: 20}}
-	r.attempt = prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: ns, Subsystem: sub, Name: "attempt_seconds",
+	r.attempt = prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: namespace, Subsystem: sub, Name: "attempt_seconds",
 		Help: "One HTTP attempt of an SDK call (SDK retries are separate attempts), by operation and result: ok, http_<status>, timeout, canceled, network, error.", Buckets: secs},
 		[]string{"op", "result"})
-	r.operation = prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: ns, Subsystem: sub, Name: "operation_seconds",
+	r.operation = prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: namespace, Subsystem: sub, Name: "operation_seconds",
 		Help: "A whole SDK call including SDK retries and backoff, by operation and outcome (ok, error).", Buckets: secs},
 		[]string{"op", "outcome"})
-	r.retries = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: ns, Subsystem: sub, Name: "retries_total",
+	r.retries = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: sub, Name: "retries_total",
 		Help: "Attempts beyond the first of an SDK call, by operation."}, []string{"op"})
-	r.reqBytes = prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: ns, Subsystem: sub, Name: "request_bytes",
+	r.reqBytes = prometheus.NewHistogramVec(prometheus.HistogramOpts{Namespace: namespace, Subsystem: sub, Name: "request_bytes",
 		Help: "HTTP request body size per attempt, by operation.", Buckets: prometheus.ExponentialBuckets(64, 4, 12)}, []string{"op"})
-	r.apiErrs = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: ns, Subsystem: sub, Name: "api_errors_total",
+	r.apiErrs = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: sub, Name: "api_errors_total",
 		Help: "Attempts that ended in an AWS API error, by operation and error code."}, []string{"op", "code"})
-	r.throttles = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: ns, Subsystem: sub, Name: "throttles_total",
+	r.throttles = prometheus.NewCounterVec(prometheus.CounterOpts{Namespace: namespace, Subsystem: sub, Name: "throttles_total",
 		Help: "Attempts rejected for throttling (ProvisionedThroughputExceededException, ThrottlingException, RequestLimitExceeded, SlowDown, HTTP 429/503 throttle codes), by operation and code."},
 		[]string{"op", "code"})
 	reg.MustRegister(r.attempt, r.operation, r.retries, r.reqBytes, r.apiErrs, r.throttles)
@@ -138,13 +138,13 @@ func (attemptMiddleware) ID() string { return "mdsAwsObsAttempt" }
 func (m attemptMiddleware) HandleFinalize(ctx context.Context, in middleware.FinalizeInput, next middleware.FinalizeHandler) (
 	middleware.FinalizeOutput, middleware.Metadata, error) {
 	r := m.r
-	op := awsmw.GetOperationName(ctx)
+	operation := awsmw.GetOperationName(ctx)
 	var bytes int64 = -1
 	target := ""
-	if req, ok := in.Request.(*smithyhttp.Request); ok {
-		bytes = req.ContentLength
-		if req.URL != nil {
-			target = req.URL.Path
+	if request, ok := in.Request.(*smithyhttp.Request); ok {
+		bytes = request.ContentLength
+		if request.URL != nil {
+			target = request.URL.Path
 		}
 	}
 	t0 := time.Now()
@@ -152,8 +152,8 @@ func (m attemptMiddleware) HandleFinalize(ctx context.Context, in middleware.Fin
 	d := time.Since(t0)
 
 	status := 0
-	if resp, ok := awsmw.GetRawResponse(md).(*smithyhttp.Response); ok && resp != nil {
-		status = resp.StatusCode
+	if response, ok := awsmw.GetRawResponse(md).(*smithyhttp.Response); ok && response != nil {
+		status = response.StatusCode
 	}
 	result, code := Result(ctx, status, err)
 	var reqID string
@@ -163,19 +163,19 @@ func (m attemptMiddleware) HandleFinalize(ctx context.Context, in middleware.Fin
 		}
 		reqID = re.ServiceRequestID()
 	}
-	r.attempt.WithLabelValues(op, result).Observe(d.Seconds())
+	r.attempt.WithLabelValues(operation, result).Observe(d.Seconds())
 	if bytes >= 0 {
-		r.reqBytes.WithLabelValues(op).Observe(float64(bytes))
+		r.reqBytes.WithLabelValues(operation).Observe(float64(bytes))
 	}
 	if result == "ok" {
 		return out, md, err
 	}
 	if code != "" {
-		r.apiErrs.WithLabelValues(op, code).Inc()
+		r.apiErrs.WithLabelValues(operation, code).Inc()
 	}
 	throttled := IsTooManyRequests(code)
 	if throttled {
-		r.throttles.WithLabelValues(op, code).Inc()
+		r.throttles.WithLabelValues(operation, code).Inc()
 	}
 	lvl := slog.LevelWarn
 	if r.QuietCodes[code] || result == "canceled" {
@@ -188,7 +188,7 @@ func (m attemptMiddleware) HandleFinalize(ctx context.Context, in middleware.Fin
 			r.log.Warn("aws attempt warnings suppressed", "event", "aws_warn_suppressed", "suppressed", n)
 		}
 	}
-	r.log.Log(ctx, lvl, "aws attempt failed", "event", "aws_attempt_failed", "op", op, "result", result,
+	r.log.Log(ctx, lvl, "aws attempt failed", "event", "aws_attempt_failed", "op", operation, "result", result,
 		"http_status", status, "code", code, "throttled", throttled, "duration_ms", ms(d), "request_bytes", bytes,
 		"target", target, "request_id", reqID, "err", err.Error())
 	return out, md, err
@@ -202,14 +202,14 @@ func (m operationMiddleware) HandleFinalize(ctx context.Context, in middleware.F
 	middleware.FinalizeOutput, middleware.Metadata, error) {
 	t0 := time.Now()
 	out, md, err := next.HandleFinalize(ctx, in)
-	op := awsmw.GetOperationName(ctx)
+	operation := awsmw.GetOperationName(ctx)
 	outcome := "ok"
 	if err != nil {
 		outcome = "error"
 	}
-	m.r.operation.WithLabelValues(op, outcome).Observe(time.Since(t0).Seconds())
+	m.r.operation.WithLabelValues(operation, outcome).Observe(time.Since(t0).Seconds())
 	if ar, ok := retry.GetAttemptResults(md); ok && len(ar.Results) > 1 {
-		m.r.retries.WithLabelValues(op).Add(float64(len(ar.Results) - 1))
+		m.r.retries.WithLabelValues(operation).Add(float64(len(ar.Results) - 1))
 	}
 	return out, md, err
 }

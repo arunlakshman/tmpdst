@@ -234,11 +234,11 @@ func newDynamo(ctx context.Context, endpoint, region string, apiOpts []func(*mid
 			"AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", "")))
 	}
 	opts = append(opts, config.WithHTTPClient(httpconnections.ConfigureAWSClient()))
-	cfg, err := config.LoadDefaultConfig(ctx, opts...)
+	awsConfig, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
-	return dynamodb.NewFromConfig(cfg, func(o *dynamodb.Options) {
+	return dynamodb.NewFromConfig(awsConfig, func(o *dynamodb.Options) {
 		o.APIOptions = append(o.APIOptions, apiOpts...)
 		if endpoint != "" {
 			o.BaseEndpoint = aws.String(endpoint)

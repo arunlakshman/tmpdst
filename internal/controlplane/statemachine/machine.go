@@ -14,9 +14,9 @@ const (
 
 // Machine is the control-plane DSM. Build it with New.
 type Machine struct {
-	env  core.Environment
-	self core.NodeInstance
-	cfg  Config
+	env    core.Environment
+	self   core.NodeInstance
+	config Config
 
 	openErr error // the first store could not open; NodeStarted stops the machine
 
@@ -96,14 +96,14 @@ const (
 // cannot return an error, so a store that cannot open (Config.OpenStore) is
 // remembered and the machine stops with StopForRestart on NodeStarted: the
 // process cannot serve without its state.
-func New(cfg Config) core.MachineFactory {
+func New(config Config) core.MachineFactory {
 	return func(env core.Environment, self core.NodeInstance) core.Machine {
-		fold, err := cfg.openFold()
+		fold, err := config.openFold()
 		if err != nil {
 			fold = stateupdater.NewMem() // placeholder; NodeStarted stops the machine
 		}
 		return &Machine{
-			env: env, self: self, cfg: cfg, openErr: err,
+			env: env, self: self, config: config, openErr: err,
 			fold:            fold,
 			buf:             map[core.LogPosition][]byte{},
 			inFlightAppends: map[core.RequestID]*inFlightAppend{},
@@ -138,13 +138,13 @@ func (m *Machine) reseedTopics() {
 
 // Step implements core.StateMachine. Unknown completions and unhandled bodies
 // leave state unchanged. After ShutdownDone, every event is a no-op.
-func (m *Machine) Step(ev core.Event) []core.Action {
+func (m *Machine) Step(event core.Event) []core.Action {
 	if m.exited {
 		return nil
 	}
-	m.now = ev.At
+	m.now = event.At
 	var acts []core.Action
-	switch body := ev.Body.(type) {
+	switch body := event.Body.(type) {
 	case core.NodeStarted:
 		acts = m.onStarted()
 	case core.StopRequest:
@@ -186,7 +186,7 @@ func (m *Machine) onStarted() []core.Action {
 }
 
 func (m *Machine) afterRestore() []core.Action {
-	if m.cfg.CatchUpEvery > 0 {
+	if m.config.CatchUpEvery > 0 {
 		m.booting = true
 		m.ready = false
 		return m.armCatchUp()
@@ -198,7 +198,7 @@ func (m *Machine) finishBoot() []core.Action {
 	m.booting = false
 	m.ready = true
 	m.lastOtherAt, m.lastPullOK, m.lastOwnAt = m.now, m.now, m.now
-	if m.rolesArmed() && m.cfg.Rank == 0 {
+	if m.rolesArmed() && m.config.Rank == 0 {
 		m.setActive(true)
 	}
 	var acts []core.Action
@@ -217,7 +217,7 @@ func (m *Machine) maybeBecomeReady() []core.Action {
 func (m *Machine) onTimer(e core.TimerFired) []core.Action {
 	switch e.ID {
 	case timerCatchUp:
-		if e.Gen != m.timerGen || m.pending != 0 || m.cfg.CatchUpEvery <= 0 {
+		if e.Gen != m.timerGen || m.pending != 0 || m.config.CatchUpEvery <= 0 {
 			return nil
 		}
 		return m.emitCheckTail()
@@ -365,10 +365,10 @@ const (
 )
 
 func (m *Machine) gapFillPlan() gapPlan {
-	if m.cfg.InjectedBug == InjectedBugGapSkip {
+	if m.config.InjectedBug == InjectedBugGapSkip {
 		return gapPlanSkip
 	}
-	if m.cfg.GapAfter <= 0 {
+	if m.config.GapAfter <= 0 {
 		return gapPlanFill
 	}
 	if m.gapArmed {
@@ -402,17 +402,17 @@ func (m *Machine) skipGap() []core.Action {
 func (m *Machine) armGapFill() []core.Action {
 	m.gapGeneration++
 	m.gapArmed = true
-	return []core.Action{core.SetTimer{ID: timerGapFill, Gen: m.gapGeneration, After: m.cfg.GapAfter}}
+	return []core.Action{core.SetTimer{ID: timerGapFill, Gen: m.gapGeneration, After: m.config.GapAfter}}
 }
 
 func (m *Machine) emitGapFill() []core.Action {
 	m.env.Reachable("logcp-sim: gap filled by a no-op")
 	m.seq++
 	inner := stateupdater.Encode(stateupdater.Entry{
-		ID:   fmt.Sprintf("%s/%d", m.cfg.writer(), m.seq),
+		ID:   fmt.Sprintf("%s/%d", m.config.writer(), m.seq),
 		Kind: stateupdater.KindNoop,
 	})
-	data := wrap(m.cfg.Rank, m.cfg.writer(), inner)
+	data := wrap(m.config.Rank, m.config.writer(), inner)
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingAppend
@@ -434,15 +434,15 @@ func (m *Machine) emitRead() []core.Action {
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingRead
-	return []core.Action{core.LogRead{Req: m.pending, From: m.applied, Limit: m.cfg.readLimit()}}
+	return []core.Action{core.LogRead{Req: m.pending, From: m.applied, Limit: m.config.readLimit()}}
 }
 
 func (m *Machine) armCatchUp() []core.Action {
-	if m.cfg.CatchUpEvery <= 0 {
+	if m.config.CatchUpEvery <= 0 {
 		return nil
 	}
 	m.timerGen++
-	return []core.Action{core.SetTimer{ID: timerCatchUp, Gen: m.timerGen, After: m.cfg.CatchUpEvery}}
+	return []core.Action{core.SetTimer{ID: timerCatchUp, Gen: m.timerGen, After: m.config.CatchUpEvery}}
 }
 
 func (m *Machine) trip(err error) []core.Action {
@@ -493,18 +493,18 @@ func (m *Machine) StateHash() uint64 {
 	h.Uint64Value(uint64(len(m.waiters)))
 	h.Uint64Value(uint64(len(m.readWaiters)))
 	h.Uint64Value(m.tailsStarted)
-	h.Uint64Value(uint64(m.cfg.CatchUpEvery))
-	h.Uint64Value(uint64(m.cfg.ReadLimit))
-	h.Uint64Value(uint64(m.cfg.GapAfter))
-	h.Uint64Value(uint64(m.cfg.K))
-	h.Uint64Value(uint64(m.cfg.MaxCmdsPerSlot))
-	h.Uint64Value(uint64(m.cfg.QueueMax))
-	h.Uint64Value(uint64(m.cfg.Rank))
-	h.Uint64Value(uint64(m.cfg.Heartbeat))
-	h.Uint64Value(uint64(m.cfg.TakeoverAfter))
-	h.Uint64Value(uint64(m.cfg.CheckpointEvery))
-	h.Uint64Value(uint64(m.cfg.CheckpointMinSlots))
-	h.Uint64Value(uint64(m.cfg.KeepSlots))
+	h.Uint64Value(uint64(m.config.CatchUpEvery))
+	h.Uint64Value(uint64(m.config.ReadLimit))
+	h.Uint64Value(uint64(m.config.GapAfter))
+	h.Uint64Value(uint64(m.config.K))
+	h.Uint64Value(uint64(m.config.MaxCmdsPerSlot))
+	h.Uint64Value(uint64(m.config.QueueMax))
+	h.Uint64Value(uint64(m.config.Rank))
+	h.Uint64Value(uint64(m.config.Heartbeat))
+	h.Uint64Value(uint64(m.config.TakeoverAfter))
+	h.Uint64Value(uint64(m.config.CheckpointEvery))
+	h.Uint64Value(uint64(m.config.CheckpointMinSlots))
+	h.Uint64Value(uint64(m.config.KeepSlots))
 	h.Uint64Value(m.fold.StateHash())
 	return h.Sum()
 }

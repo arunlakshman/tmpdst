@@ -52,8 +52,8 @@ func NewManifest(i Info, fs *flag.FlagSet, region string, tuning map[string]any)
 	fs.VisitAll(func(f *flag.Flag) { m.Flags[f.Name] = f.Value.String() })
 	fs.Visit(func(f *flag.Flag) { m.FlagsSet = append(m.FlagsSet, f.Name) })
 	sort.Strings(m.FlagsSet)
-	for _, kv := range os.Environ() {
-		k, v, _ := strings.Cut(kv, "=")
+	for _, keyValue := range os.Environ() {
+		k, v, _ := strings.Cut(keyValue, "=")
 		if strings.HasPrefix(k, "MDS_") || k == "AWS_REGION" || k == "AWS_DEFAULT_REGION" || strings.HasPrefix(k, "AWS_ENDPOINT") {
 			m.Env[k] = v
 		}
@@ -137,11 +137,11 @@ func uploadToS3(ctx context.Context, dest string, body []byte, o WriteOptions) e
 	if o.Region != "" {
 		opts = append(opts, config.WithRegion(o.Region))
 	}
-	cfg, err := config.LoadDefaultConfig(ctx, opts...)
+	awsConfig, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return err
 	}
-	c := s3.NewFromConfig(cfg, func(so *s3.Options) {
+	c := s3.NewFromConfig(awsConfig, func(so *s3.Options) {
 		so.UsePathStyle = o.S3PathStyle
 		if o.S3Endpoint != "" {
 			so.BaseEndpoint = aws.String(o.S3Endpoint)
@@ -173,20 +173,20 @@ func FetchInstanceMetadata(ctx context.Context, endpoint string, timeout time.Du
 	}
 	hc := &http.Client{Timeout: timeout}
 	do := func(method, path string, hdr map[string]string) (string, bool) {
-		req, err := http.NewRequestWithContext(ctx, method, endpoint+path, nil)
+		request, err := http.NewRequestWithContext(ctx, method, endpoint+path, nil)
 		if err != nil {
 			return "", false
 		}
 		for k, v := range hdr {
-			req.Header.Set(k, v)
+			request.Header.Set(k, v)
 		}
-		resp, err := hc.Do(req)
+		response, err := hc.Do(request)
 		if err != nil {
 			return "", false
 		}
-		defer func() { _ = resp.Body.Close() }() // read-only response
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return strings.TrimSpace(string(b)), resp.StatusCode == http.StatusOK
+		defer func() { _ = response.Body.Close() }() // read-only response
+		b, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return strings.TrimSpace(string(b)), response.StatusCode == http.StatusOK
 	}
 	tok, ok := do(http.MethodPut, "/latest/api/token", map[string]string{"X-aws-ec2-metadata-token-ttl-seconds": "60"})
 	if !ok {

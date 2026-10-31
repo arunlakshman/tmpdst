@@ -72,16 +72,16 @@ func (c *cmdSize) str(s string)   { c.n += 4 + len(s) }
 func (c *cmdSize) bytes(b []byte) { c.n += 4 + len(b) }
 func (c *cmdSize) num()           { c.n += 10 }
 
-func sizeInstall(op core.GroupInstall) int {
+func sizeInstall(operation core.GroupInstall) int {
 	c := &cmdSize{n: 16}
-	c.str(op.Group)
-	c.str(op.ProtocolType)
-	c.str(op.Protocol)
+	c.str(operation.Group)
+	c.str(operation.ProtocolType)
+	c.str(operation.Protocol)
 	c.num()
-	c.str(op.Leader)
+	c.str(operation.Leader)
 	c.num()
 	c.num()
-	for _, m := range op.Members {
+	for _, m := range operation.Members {
 		c.str(m.MemberID)
 		c.str(m.ClientID)
 		c.str(m.ClientHost)
@@ -93,40 +93,40 @@ func sizeInstall(op core.GroupInstall) int {
 	return c.n
 }
 
-func sizeAssign(op core.GroupAssign) int {
+func sizeAssign(operation core.GroupAssign) int {
 	c := &cmdSize{n: 16}
-	c.str(op.Group)
+	c.str(operation.Group)
 	c.num()
-	c.str(op.Leader)
+	c.str(operation.Leader)
 	c.num()
 	c.num()
-	for _, a := range op.Assignments {
+	for _, a := range operation.Assignments {
 		c.str(a.Member)
 		c.bytes(a.Bytes)
 	}
 	return c.n
 }
 
-func sizeRemove(op core.GroupRemove) int {
+func sizeRemove(operation core.GroupRemove) int {
 	c := &cmdSize{n: 16}
-	c.str(op.Group)
+	c.str(operation.Group)
 	c.num()
-	c.str(op.Reason)
+	c.str(operation.Reason)
 	c.num()
-	for _, m := range op.Members {
+	for _, m := range operation.Members {
 		c.str(m)
 	}
 	return c.n
 }
 
-func sizeOffsetCommit(op core.OffsetCommit) int {
+func sizeOffsetCommit(operation core.OffsetCommit) int {
 	c := &cmdSize{n: 16}
-	c.str(op.Group)
-	c.str(op.Member)
+	c.str(operation.Group)
+	c.str(operation.Member)
 	c.num()
 	c.num()
 	c.num()
-	for _, o := range op.Offsets {
+	for _, o := range operation.Offsets {
 		c.str(o.TopicPartition.Topic)
 		c.num()
 		c.num()
@@ -144,48 +144,48 @@ func noEmpty(b []byte) []byte {
 }
 
 // groupDone is the answer to a group write that has no response.
-func groupDone(req core.RequestID, code core.ErrCode) core.ControlPlaneDone {
+func groupDone(request core.RequestID, code core.ErrCode) core.ControlPlaneDone {
 	if code != core.OK {
-		return core.ControlPlaneDone{Req: req, Err: code}
+		return core.ControlPlaneDone{Req: request, Err: code}
 	}
-	return core.ControlPlaneDone{Req: req, Outcome: core.Applied}
+	return core.ControlPlaneDone{Req: request, Outcome: core.Applied}
 }
 
-func (c *ControlPlane) groupInstall(op core.GroupInstall) core.ErrCode {
-	if sizeInstall(op) > maxGroupCommand {
+func (c *ControlPlane) groupInstall(operation core.GroupInstall) core.ErrCode {
+	if sizeInstall(operation) > maxGroupCommand {
 		return core.ErrTooLarge
 	}
-	if op.Group == "" || len(op.Members) == 0 {
+	if operation.Group == "" || len(operation.Members) == 0 {
 		return core.ErrInvalid
 	}
 	ids := map[string]bool{}
-	for _, m := range op.Members {
+	for _, m := range operation.Members {
 		if m.MemberID == "" || ids[m.MemberID] {
 			return core.ErrInvalid
 		}
 		ids[m.MemberID] = true
 	}
-	if !ids[op.Leader] {
+	if !ids[operation.Leader] {
 		return core.ErrInvalid
 	}
 	var cur int32
-	if g := c.groups[op.Group]; g != nil {
+	if g := c.groups[operation.Group]; g != nil {
 		cur = g.generation
 	}
-	if op.Generation != cur+1 {
+	if operation.Generation != cur+1 {
 		return core.ErrIllegalGeneration
 	}
 	if c.groups == nil {
 		c.groups = map[string]*groupState{}
 	}
 	g := &groupState{
-		generation: op.Generation,
-		protoType:  op.ProtocolType,
-		protocol:   op.Protocol,
-		leader:     op.Leader,
+		generation: operation.Generation,
+		protoType:  operation.ProtocolType,
+		protocol:   operation.Protocol,
+		leader:     operation.Leader,
 		members:    map[string]*groupMember{},
 	}
-	for _, m := range op.Members {
+	for _, m := range operation.Members {
 		g.members[m.MemberID] = &groupMember{
 			GroupMember: core.GroupMember{
 				MemberID:           m.MemberID,
@@ -196,30 +196,30 @@ func (c *ControlPlane) groupInstall(op core.GroupInstall) core.ErrCode {
 				RebalanceTimeoutMs: m.RebalanceTimeoutMs,
 				Metadata:           noEmpty(m.Metadata),
 			},
-			joined: op.TimeMs,
+			joined: operation.TimeMs,
 		}
 	}
-	c.groups[op.Group] = g
+	c.groups[operation.Group] = g
 	return core.OK
 }
 
-func (c *ControlPlane) groupAssign(op core.GroupAssign) core.ErrCode {
-	if sizeAssign(op) > maxGroupCommand {
+func (c *ControlPlane) groupAssign(operation core.GroupAssign) core.ErrCode {
+	if sizeAssign(operation) > maxGroupCommand {
 		return core.ErrTooLarge
 	}
-	g := c.groups[op.Group]
+	g := c.groups[operation.Group]
 	var cur int32
 	if g != nil {
 		cur = g.generation
 	}
-	if op.Generation != cur {
+	if operation.Generation != cur {
 		return core.ErrIllegalGeneration
 	}
-	if g == nil || op.Leader != g.leader || g.members[op.Leader] == nil {
+	if g == nil || operation.Leader != g.leader || g.members[operation.Leader] == nil {
 		return core.ErrUnknownMember
 	}
 	seen := map[string]bool{}
-	for _, a := range op.Assignments {
+	for _, a := range operation.Assignments {
 		if g.members[a.Member] == nil {
 			return core.ErrUnknownMember
 		}
@@ -231,22 +231,22 @@ func (c *ControlPlane) groupAssign(op core.GroupAssign) core.ErrCode {
 	for _, id := range sortedKeys(g.members) {
 		g.members[id].assignment = nil
 	}
-	for _, a := range op.Assignments {
+	for _, a := range operation.Assignments {
 		g.members[a.Member].assignment = noEmpty(a.Bytes)
 	}
-	g.assignedGen = op.Generation
+	g.assignedGen = operation.Generation
 	return core.OK
 }
 
-func (c *ControlPlane) groupRemove(op core.GroupRemove) core.ErrCode {
-	if sizeRemove(op) > maxGroupCommand {
+func (c *ControlPlane) groupRemove(operation core.GroupRemove) core.ErrCode {
+	if sizeRemove(operation) > maxGroupCommand {
 		return core.ErrTooLarge
 	}
-	g := c.groups[op.Group]
+	g := c.groups[operation.Group]
 	if g == nil {
 		return core.OK
 	}
-	for _, id := range op.Members {
+	for _, id := range operation.Members {
 		delete(g.members, id)
 	}
 	if g.members[g.leader] == nil {
@@ -258,20 +258,20 @@ func (c *ControlPlane) groupRemove(op core.GroupRemove) core.ErrCode {
 	return core.OK
 }
 
-func (c *ControlPlane) offsetCommit(request core.RequestID, op core.OffsetCommit) core.ControlPlaneDone {
-	if sizeOffsetCommit(op) > maxGroupCommand {
+func (c *ControlPlane) offsetCommit(request core.RequestID, operation core.OffsetCommit) core.ControlPlaneDone {
+	if sizeOffsetCommit(operation) > maxGroupCommand {
 		return core.ControlPlaneDone{Req: request, Err: core.ErrTooLarge}
 	}
-	g := c.groups[op.Group]
+	g := c.groups[operation.Group]
 	switch {
-	case op.Generation >= 0:
-		if g == nil || g.members[op.Member] == nil {
+	case operation.Generation >= 0:
+		if g == nil || g.members[operation.Member] == nil {
 			return core.ControlPlaneDone{Req: request, Err: core.ErrUnknownMember}
 		}
-		if op.Generation != g.generation {
+		if operation.Generation != g.generation {
 			return core.ControlPlaneDone{Req: request, Err: core.ErrIllegalGeneration}
 		}
-	case op.Generation == -1 && op.Member == "":
+	case operation.Generation == -1 && operation.Member == "":
 		if g != nil && len(g.members) > 0 {
 			return core.ControlPlaneDone{Req: request, Err: core.ErrIllegalGeneration}
 		}
@@ -280,8 +280,8 @@ func (c *ControlPlane) offsetCommit(request core.RequestID, op core.OffsetCommit
 	}
 	var errs []core.ErrCode
 	saved := false
-	for _, o := range op.Offsets {
-		code := c.commitOne(op, o)
+	for _, o := range operation.Offsets {
+		code := c.commitOne(operation, o)
 		if code == core.OK {
 			saved = true
 		}
@@ -294,7 +294,7 @@ func (c *ControlPlane) offsetCommit(request core.RequestID, op core.OffsetCommit
 	return done
 }
 
-func (c *ControlPlane) commitOne(op core.OffsetCommit, o core.PartitionOffset) core.ErrCode {
+func (c *ControlPlane) commitOne(operation core.OffsetCommit, o core.PartitionOffset) core.ErrCode {
 	if o.TopicPartition.Partition < 0 || o.TopicPartition.Partition >= c.topics[o.TopicPartition.Topic] {
 		return core.ErrUnknownPartition
 	}
@@ -304,30 +304,30 @@ func (c *ControlPlane) commitOne(op core.OffsetCommit, o core.PartitionOffset) c
 	if c.offsets == nil {
 		c.offsets = map[string]map[core.TopicPartition]committedOffset{}
 	}
-	if c.offsets[op.Group] == nil {
-		c.offsets[op.Group] = map[core.TopicPartition]committedOffset{}
+	if c.offsets[operation.Group] == nil {
+		c.offsets[operation.Group] = map[core.TopicPartition]committedOffset{}
 	}
-	c.offsets[op.Group][o.TopicPartition] = committedOffset{offset: o.Offset, epoch: o.LeaderEpoch, meta: o.Metadata, time: op.TimeMs}
+	c.offsets[operation.Group][o.TopicPartition] = committedOffset{offset: o.Offset, epoch: o.LeaderEpoch, meta: o.Metadata, time: operation.TimeMs}
 	return core.OK
 }
 
-func (c *ControlPlane) offsetFetch(op core.OffsetFetch) core.OffsetFetchResp {
+func (c *ControlPlane) offsetFetch(operation core.OffsetFetch) core.OffsetFetchResp {
 	var out []core.PartitionOffset
-	committed := c.offsets[op.Group]
-	if len(op.Partitions) == 0 {
-		for _, tp := range sortedTPs(committed) {
-			v := committed[tp]
-			out = append(out, core.PartitionOffset{TopicPartition: tp, Offset: v.offset, LeaderEpoch: v.epoch, Metadata: v.meta})
+	committed := c.offsets[operation.Group]
+	if len(operation.Partitions) == 0 {
+		for _, topicPartition := range sortedTPs(committed) {
+			v := committed[topicPartition]
+			out = append(out, core.PartitionOffset{TopicPartition: topicPartition, Offset: v.offset, LeaderEpoch: v.epoch, Metadata: v.meta})
 		}
 		return core.OffsetFetchResp{Offsets: out}
 	}
-	for _, tp := range op.Partitions {
-		v, ok := committed[tp]
+	for _, topicPartition := range operation.Partitions {
+		v, ok := committed[topicPartition]
 		if !ok {
-			out = append(out, core.PartitionOffset{TopicPartition: tp, Offset: -1, LeaderEpoch: -1})
+			out = append(out, core.PartitionOffset{TopicPartition: topicPartition, Offset: -1, LeaderEpoch: -1})
 			continue
 		}
-		out = append(out, core.PartitionOffset{TopicPartition: tp, Offset: v.offset, LeaderEpoch: v.epoch, Metadata: v.meta})
+		out = append(out, core.PartitionOffset{TopicPartition: topicPartition, Offset: v.offset, LeaderEpoch: v.epoch, Metadata: v.meta})
 	}
 	return core.OffsetFetchResp{Offsets: out}
 }
@@ -335,8 +335,8 @@ func (c *ControlPlane) offsetFetch(op core.OffsetFetch) core.OffsetFetchResp {
 // sortedTPs returns the partitions of m in topic and partition order.
 func sortedTPs(m map[core.TopicPartition]committedOffset) []core.TopicPartition {
 	tps := make([]core.TopicPartition, 0, len(m))
-	for tp := range m { //determinismcheck:ok keys are sorted before use
-		tps = append(tps, tp)
+	for topicPartition := range m { //determinismcheck:ok keys are sorted before use
+		tps = append(tps, topicPartition)
 	}
 	slices.SortFunc(tps, compareTP)
 	return tps
@@ -363,8 +363,8 @@ func groupStateName(g *groupState) string {
 	return "PreparingSync"
 }
 
-func (c *ControlPlane) describeGroup(op core.DescribeGroup) core.DescribeGroupResp {
-	g := c.groups[op.Group]
+func (c *ControlPlane) describeGroup(operation core.DescribeGroup) core.DescribeGroupResp {
+	g := c.groups[operation.Group]
 	if g == nil {
 		return core.DescribeGroupResp{}
 	}
@@ -389,10 +389,10 @@ func (c *ControlPlane) describeGroup(op core.DescribeGroup) core.DescribeGroupRe
 }
 
 func (c *ControlPlane) listGroups() core.ListGroupsResp {
-	var resp core.ListGroupsResp
+	var response core.ListGroupsResp
 	for _, name := range sortedKeys(c.groups) {
 		g := c.groups[name]
-		resp.Groups = append(resp.Groups, core.GroupSummary{Name: name, ProtocolType: g.protoType, State: groupStateName(g)})
+		response.Groups = append(response.Groups, core.GroupSummary{Name: name, ProtocolType: g.protoType, State: groupStateName(g)})
 	}
-	return resp
+	return response
 }

@@ -28,15 +28,15 @@ var errCorrupt = errors.New("stateupdater: corrupt record")
 func topicKey(name string) []byte { return append([]byte{prefixTopic}, name...) }
 
 // topicPartitionPrefix is the prefix-free key prefix of one partition for kind p.
-func topicPartitionPrefix(p byte, tp core.TopicPartition) []byte {
-	return appendTopicPartition([]byte{p}, tp)
+func topicPartitionPrefix(p byte, topicPartition core.TopicPartition) []byte {
+	return appendTopicPartition([]byte{p}, topicPartition)
 }
 
 // appendTopicPartition appends uvarint(len topic), topic, partition (4, big endian).
-func appendTopicPartition(b []byte, tp core.TopicPartition) []byte {
-	b = binary.AppendUvarint(b, uint64(len(tp.Topic)))
-	b = append(b, tp.Topic...)
-	return binary.BigEndian.AppendUint32(b, uint32(tp.Partition))
+func appendTopicPartition(b []byte, topicPartition core.TopicPartition) []byte {
+	b = binary.AppendUvarint(b, uint64(len(topicPartition.Topic)))
+	b = append(b, topicPartition.Topic...)
+	return binary.BigEndian.AppendUint32(b, uint32(topicPartition.Partition))
 }
 
 // splitTopicPartition reads a partition that appendTopicPartition wrote, with
@@ -65,14 +65,16 @@ func memberKey(group, member string) []byte {
 }
 
 // offsetKey is the O key of one committed partition of a group.
-func offsetKey(group string, tp core.TopicPartition) []byte {
-	return appendTopicPartition(groupPrefix(prefixOffset, group), tp)
+func offsetKey(group string, topicPartition core.TopicPartition) []byte {
+	return appendTopicPartition(groupPrefix(prefixOffset, group), topicPartition)
 }
 
-func endKey(tp core.TopicPartition) []byte { return topicPartitionPrefix(prefixEndOffset, tp) }
+func endKey(topicPartition core.TopicPartition) []byte {
+	return topicPartitionPrefix(prefixEndOffset, topicPartition)
+}
 
-func batchRunKey(tp core.TopicPartition, base int64) []byte {
-	return binary.BigEndian.AppendUint64(topicPartitionPrefix(prefixRun, tp), uint64(base))
+func batchRunKey(topicPartition core.TopicPartition, base int64) []byte {
+	return binary.BigEndian.AppendUint64(topicPartitionPrefix(prefixRun, topicPartition), uint64(base))
 }
 
 func duplicateCheckKey(segKey string) []byte { return append([]byte{prefixKey}, segKey...) }
@@ -219,7 +221,7 @@ func (r *reader) str() string {
 }
 
 // decodeBatchRun unpacks the run of tp that starts at base.
-func decodeBatchRun(tp core.TopicPartition, base int64, b []byte) ([]core.BatchRange, error) {
+func decodeBatchRun(topicPartition core.TopicPartition, base int64, b []byte) ([]core.BatchRange, error) {
 	if len(b) == 0 || b[0] != runFormat {
 		return nil, errCorrupt
 	}
@@ -242,7 +244,7 @@ func decodeBatchRun(tp core.TopicPartition, base int64, b []byte) ([]core.BatchR
 		if ki >= uint64(len(keys)) {
 			return nil, errCorrupt
 		}
-		out = append(out, core.BatchRange{TopicPartition: tp, Base: core.Offset(base), Count: int64(cnt),
+		out = append(out, core.BatchRange{TopicPartition: topicPartition, Base: core.Offset(base), Count: int64(cnt),
 			Loc: core.SegmentRef{Key: keys[ki], Off: off, Len: ln}})
 		base += int64(cnt)
 	}

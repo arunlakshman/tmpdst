@@ -11,14 +11,14 @@ var brokerFrom = core.NodeInstance{Node: "b1"}
 
 // writeOp sends one write op from a broker, lets its log slot apply, and
 // returns the reply the broker gets.
-func writeOp(t *testing.T, m *statemachine.Machine, req core.RequestID, op core.ControlPlaneOperation) core.ControlPlaneDone {
+func writeOp(t *testing.T, m *statemachine.Machine, request core.RequestID, operation core.ControlPlaneOperation) core.ControlPlaneDone {
 	t.Helper()
-	ap := onlyAppend(t, m.Step(core.Event{Body: core.ControlPlaneDeliver{From: brokerFrom, Req: req, Op: op}}))
+	ap := onlyAppend(t, m.Step(core.Event{Body: core.ControlPlaneDeliver{From: brokerFrom, Req: request, Op: operation}}))
 	acts := step(m, core.LogAppendDone{Req: ap.Req, Slot: ap.Slot, Err: core.OK, Outcome: core.Applied})
 	for _, a := range acts {
 		if r, ok := a.(core.ControlPlaneReply); ok && r.To == brokerFrom {
-			if r.Done.Req != req {
-				t.Fatalf("reply req = %d, want %d", r.Done.Req, req)
+			if r.Done.Req != request {
+				t.Fatalf("reply req = %d, want %d", r.Done.Req, request)
 			}
 			return r.Done
 		}
@@ -30,9 +30,9 @@ func writeOp(t *testing.T, m *statemachine.Machine, req core.RequestID, op core.
 // readOp sends one read op from a broker on a ready machine. A read waits for
 // a tail check that starts after it, so this runs catch-up rounds until the
 // reply comes out. It returns the reply and the catch-up timer to use next.
-func readOp(t *testing.T, m *statemachine.Machine, timer core.SetTimer, req core.RequestID, op core.ControlPlaneOperation) (core.ControlPlaneDone, core.SetTimer) {
+func readOp(t *testing.T, m *statemachine.Machine, timer core.SetTimer, request core.RequestID, operation core.ControlPlaneOperation) (core.ControlPlaneDone, core.SetTimer) {
 	t.Helper()
-	if acts := m.Step(core.Event{Body: core.ControlPlaneDeliver{From: brokerFrom, Req: req, Op: op}}); len(acts) != 0 {
+	if acts := m.Step(core.Event{Body: core.ControlPlaneDeliver{From: brokerFrom, Req: request, Op: operation}}); len(acts) != 0 {
 		t.Fatalf("read answered at once: %v", acts)
 	}
 	for range 3 {
@@ -43,7 +43,7 @@ func readOp(t *testing.T, m *statemachine.Machine, timer core.SetTimer, req core
 			timer = next
 		}
 		for _, a := range acts {
-			if r, ok := a.(core.ControlPlaneReply); ok && r.To == brokerFrom && r.Done.Req == req {
+			if r, ok := a.(core.ControlPlaneReply); ok && r.To == brokerFrom && r.Done.Req == request {
 				return r.Done, timer
 			}
 		}
@@ -51,7 +51,7 @@ func readOp(t *testing.T, m *statemachine.Machine, timer core.SetTimer, req core
 			t.Fatalf("no catch-up timer after tail check: %v", acts)
 		}
 	}
-	t.Fatalf("read %d was never answered", req)
+	t.Fatalf("read %d was never answered", request)
 	return core.ControlPlaneDone{}, timer
 }
 
@@ -70,7 +70,7 @@ func TestOnControlPlaneDeliverWritesAnswerBroker(t *testing.T) {
 	if done.Err != core.OK {
 		t.Fatalf("commit err = %v", done.Err)
 	}
-	if resp, ok := done.Resp.(core.CommitSegmentResp); !ok || len(resp.Assigned) != 1 || resp.Assigned[0].Count != 2 {
+	if response, ok := done.Resp.(core.CommitSegmentResp); !ok || len(response.Assigned) != 1 || response.Assigned[0].Count != 2 {
 		t.Fatalf("commit resp = %+v", done.Resp)
 	}
 
@@ -136,7 +136,7 @@ func TestOnControlPlaneDeliverReadsAnswerBroker(t *testing.T) {
 		t.Fatalf("offset fetch resp = %#v", done.Resp)
 	}
 	done, timer = readOp(t, m, timer, 13, core.DescribeGroup{Group: "g"})
-	if resp, ok := done.Resp.(core.DescribeGroupResp); !ok || resp.Exists {
+	if response, ok := done.Resp.(core.DescribeGroupResp); !ok || response.Exists {
 		t.Fatalf("describe group = %#v, want a group that does not exist", done.Resp)
 	}
 	done, _ = readOp(t, m, timer, 14, core.ListGroups{})

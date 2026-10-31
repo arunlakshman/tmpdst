@@ -165,15 +165,15 @@ type operationSummary struct {
 	sum, max time.Duration
 }
 
-func (s *summary) add(log *slog.Logger, op, outcome string, el time.Duration, now time.Time) {
+func (s *summary) add(log *slog.Logger, operation, outcome string, el time.Duration, now time.Time) {
 	s.mu.Lock()
 	if s.ops == nil {
 		s.ops, s.start = map[string]*operationSummary{}, now
 	}
-	o := s.ops[op]
+	o := s.ops[operation]
 	if o == nil {
 		o = &operationSummary{}
-		s.ops[op] = o
+		s.ops[operation] = o
 	}
 	o.n++
 	o.sum += el
@@ -209,9 +209,9 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		op := strings.TrimPrefix(r.URL.Path, "/v1/")
-		if op == r.URL.Path {
-			op = "other"
+		operation := strings.TrimPrefix(r.URL.Path, "/v1/")
+		if operation == r.URL.Path {
+			operation = "other"
 		}
 		m.inflight.Inc()
 		start := time.Now()
@@ -222,13 +222,13 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 		defer func() {
 			el := time.Since(start)
 			m.inflight.Dec()
-			m.handler.WithLabelValues(op).Observe(el.Seconds())
-			m.body.WithLabelValues(op).Observe(float64(cb.n))
-			if op == "other" {
+			m.handler.WithLabelValues(operation).Observe(el.Seconds())
+			m.body.WithLabelValues(operation).Observe(float64(cb.n))
+			if operation == "other" {
 				return
 			}
 			outcome := sw.outcome()
-			m.callsDone.WithLabelValues(op, outcome).Inc()
+			m.callsDone.WithLabelValues(operation, outcome).Inc()
 			call.mu.Lock()
 			defer call.mu.Unlock()
 			// Audit item 9: a consume stage is tens of thousands of requests a
@@ -238,8 +238,8 @@ func (m *Metrics) Middleware(next http.Handler) http.Handler {
 			if sw.status >= 500 {
 				lvl = slog.LevelWarn
 			}
-			m.sum.add(m.log, op, outcome, el, time.Now())
-			m.log.Log(r.Context(), lvl, "cp call", "event", "cp_call", "op", op, "segment", call.segment, "outcome", outcome,
+			m.sum.add(m.log, operation, outcome, el, time.Now())
+			m.log.Log(r.Context(), lvl, "cp call", "event", "cp_call", "op", operation, "segment", call.segment, "outcome", outcome,
 				"http_status", sw.status, "handler_ms", toMilliseconds(el), "dynamo_ms", toMilliseconds(call.dynamo), "consumed_units", call.units,
 				"request_bytes", cb.n, "response_bytes", sw.n)
 		}()

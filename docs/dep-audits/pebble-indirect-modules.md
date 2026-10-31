@@ -2,17 +2,17 @@
 
 Date: 2026-10-21. Auditor: stage-4 agent. Scope: the 16 modules that appeared in `go.mod` as `// indirect` when
 `github.com/cockroachdb/pebble v1.1.5` (decision 49) was added. They are EDGE dependencies: only
-`cp/applier/pebblekv` (and so `cmd/manicp`) imports Pebble. `internal/core/`, `internal/verify/simulator/` and every other deterministic package do not
+`internal/controlplane/stateupdater/pebblestore` (and so `cmd/mdscontrolplane`) imports Pebble. `internal/core/`, `internal/verify/simulator/` and every other deterministic package do not
 reach them (`ops/scripts/ci-determinism.sh` is green), so none needs a per-module determinism record under
 `docs/dep-audits/<module>@<version>.md`; this page is the summary the open item asked for. The Pebble record itself is
 `github.com/cockroachdb/pebble@v1.1.5.md`.
 
 ## The 16 modules
 
-"Linked" is from `go version -m` of the release build (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath ./cmd/manicp`,
-the build `ops/deploy/aws/terraform/scripts/build-and-upload.sh` makes). None is linked into `manibroker`.
+"Linked" is from `go version -m` of the release build (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath ./cmd/mdscontrolplane`,
+the build `ops/deploy/aws/terraform/scripts/build-and-upload.sh` makes). None is linked into `mdsbroker`.
 
-| module | version | license (module cache LICENSE) | size in cache / non-test go files | linked in release manicp |
+| module | version | license (module cache LICENSE) | size in cache / non-test go files | linked in release mdscontrolplane |
 |---|---|---|---|---|
 | github.com/DataDog/zstd | v1.4.5 | BSD-2-Clause | 2.5 MB, bundles C zstd, cgo | NO (cgo only; a `CGO_ENABLED=1` dev build links it) |
 | github.com/cockroachdb/errors | v1.11.3 | Apache-2.0 | 4.1 MB / 85 | yes |
@@ -37,12 +37,12 @@ large mostly because of generated tables; the linked code is a small part (the r
 
 ## cockroachdb/errors and getsentry/sentry-go: really linked?
 
-Yes, both, in the release `manicp`: `go list -deps ./cmd/manicp` shows `cockroachdb/errors` (19 packages) and
-`getsentry/sentry-go` (6 packages). The chain is `cp/applier/pebblekv -> pebble -> cockroachdb/errors ->
+Yes, both, in the release `mdscontrolplane`: `go list -deps ./cmd/mdscontrolplane` shows `cockroachdb/errors` (19 packages) and
+`getsentry/sentry-go` (6 packages). The chain is `internal/controlplane/stateupdater/pebblestore -> pebble -> cockroachdb/errors ->
 withstack/report -> getsentry/sentry-go -> x/text`. Pebble uses `errors` for error wrapping and stack capture;
 `errors` imports sentry-go only to format reports (`errors/report`, `withstack`). Nothing here sends anything: sentry-go
 is a client library with no DSN configured, so it makes no network call and starts no goroutine unless something calls
-`sentry.Init`, and our code never does. They are not in `manibroker`.
+`sentry.Init`, and our code never does. They are not in `mdsbroker`.
 
 Recommendation: keep both. They cannot be dropped without forking Pebble (the import is inside Pebble), and the cost is
 about 1 MB of binary and some supply-chain surface. Do not use them directly from our code. If the surface matters later,
@@ -52,7 +52,7 @@ bbolt alternative recorded in `docs/applier-bakeoff.md`; neither is worth it now
 ## Known advisories
 
 `govulncheck@latest` (it needs Go 1.26, so the Go tool fetched go1.26.10 to run it; nothing was added to this repo's
-`go.mod`) was run in binary mode on the release `manicp` built with the LOCAL toolchain, go1.24.0:
+`go.mod`) was run in binary mode on the release `mdscontrolplane` built with the LOCAL toolchain, go1.24.0:
 
 - 43 findings are reached, from the standard library of go1.24.0 (net/http, crypto/x509, crypto/tls, ...) plus one module.
   All stdlib ones are fixed in later 1.24.x/1.25 releases: building the release binary with a current patch release
@@ -60,10 +60,10 @@ bbolt alternative recorded in `docs/applier-bakeoff.md`; neither is worth it now
   build of the operator's machine) and rerun `govulncheck`.
 - One module finding is reached: `golang.org/x/text v0.34.0`, GO-2026-5970 (infinite loop on invalid input in
   `norm.Form.Properties`), fixed in x/text v0.39.0. It is reached only through sentry-go's rate-limit header parsing,
-  which manicp never runs on untrusted input, so exploitability is nil in practice. Bumping `x/text` to v0.39.0 is a
+  which mdscontrolplane never runs on untrusted input, so exploitability is nil in practice. Bumping `x/text` to v0.39.0 is a
   go.mod change outside this stage's rule; it is left for the product owner (it would also lift the `go` directive
   requirements if x/text needs a newer Go; not checked).
-- 9 more vulnerabilities in imported packages and 15 in required modules are not called by manicp (govulncheck's
+- 9 more vulnerabilities in imported packages and 15 in required modules are not called by mdscontrolplane (govulncheck's
   own classification).
 
 ## Follow-up 2026-10-21: x/text v0.39.0 attempted, NOT applied; release toolchain
@@ -74,19 +74,19 @@ bbolt alternative recorded in `docs/applier-bakeoff.md`; neither is worth it now
   fixes GO-2026-5970 is below go 1.25 (v0.35 to v0.38 not checked individually; the fix is first in v0.39.0 per the advisory).
 - Release toolchain: the newest 1.24 patch, go1.24.13, still shows 25 stdlib findings (1.24 is end of life; fixes are
   only in 1.25.13 and 1.26.9). Building the same code with `GOTOOLCHAIN=go1.26.10` (go.mod unchanged, still `go 1.24.0`)
-  and `govulncheck -mode=binary` on linux/amd64 and linux/arm64 gives: manibroker, no vulnerabilities; manicp, one
+  and `govulncheck -mode=binary` on linux/amd64 and linux/arm64 gives: mdsbroker, no vulnerabilities; mdscontrolplane, one
   finding, GO-2026-5970 (x/text v0.34.0, see above). `ops/deploy/aws/terraform/scripts/build-and-upload.sh` now defaults
   `GOTOOLCHAIN` to go1.26.10 (override with the environment).
 
 ## Recommendation
 
 Accept all 16 as edge dependencies, record no per-module determinism audits (they are outside the closure), and keep
-`detcheck`'s allow-list unchanged. Do not import any of them from `internal/core/` or `internal/verify/simulator/`. Re-run this page's commands when
+`determinismcheck`'s allow-list unchanged. Do not import any of them from `internal/core/` or `internal/verify/simulator/`. Re-run this page's commands when
 Pebble is bumped.
 
 ## Evidence
 
-    go list -deps ./cmd/manicp | grep -E 'cockroachdb|sentry|gogo|snappy|x/text'
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/manicp-linux ./cmd/manicp && go version -m /tmp/manicp-linux
-    go run golang.org/x/vuln/cmd/govulncheck@latest -mode=binary /tmp/manicp-linux
+    go list -deps ./cmd/mdscontrolplane | grep -E 'cockroachdb|sentry|gogo|snappy|x/text'
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o /tmp/mdscontrolplane-linux ./cmd/mdscontrolplane && go version -m /tmp/mdscontrolplane-linux
+    go run golang.org/x/vuln/cmd/govulncheck@latest -mode=binary /tmp/mdscontrolplane-linux
     go mod why golang.org/x/text/unicode/norm

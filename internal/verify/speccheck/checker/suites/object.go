@@ -65,12 +65,12 @@ func ObjectStore(t checker.Reporter, p generator.InputProfile, newSubject func()
 	checker.Run(t, ObjectStoreComparator(p, newSubject), opts)
 }
 
-func objectStep(p *ObjectPair, op core.IOCall) error {
-	specResult := observation.FromObjectCompletion(p.spec.Exec(op))
-	subjectOp, overwrite := objectOpForSubject(op)
+func objectStep(p *ObjectPair, operation core.IOCall) error {
+	specResult := observation.FromObjectCompletion(p.spec.Exec(operation))
+	subjectOp, overwrite := objectOpForSubject(operation)
 	subjectResult, err := p.subject.Do(subjectOp)
 	overwrite()
-	text := generator.FormatObjectOp(op)
+	text := generator.FormatObjectOp(operation)
 	if err != nil {
 		return fmt.Errorf("the subject could not run %s: %w", text, err)
 	}
@@ -89,10 +89,10 @@ func objectStep(p *ObjectPair, op core.IOCall) error {
 // objectOpForSubject returns op with its own copy of the Put data, and a
 // function that writes over that copy. The copy keeps the generated sequence
 // intact for replay while still testing that the subject copies its input.
-func objectOpForSubject(op core.IOCall) (core.IOCall, func()) {
-	put, ok := op.(core.ObjectPut)
+func objectOpForSubject(operation core.IOCall) (core.IOCall, func()) {
+	put, ok := operation.(core.ObjectPut)
 	if !ok {
-		return op, func() {}
+		return operation, func() {}
 	}
 	put.Data = bytes.Clone(put.Data)
 	return put, func() {

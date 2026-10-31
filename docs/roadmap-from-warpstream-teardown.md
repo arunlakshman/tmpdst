@@ -30,7 +30,7 @@ Status: have / partial / missing / different (deliberately). "T:" = teardown sec
 |---|---|---|---|
 | Write path | Cross-partition batcher into one file; PUT to bucket, then commit to CP, then ack; 250 ms timer, ~1 MiB compressed default (T:8) | Same shape: seal at 16 MiB or 200 ms window, PUT, `CommitSegment`, ack after slot applied (dec 35, `internal/broker/config.go`: 200 ms, 16 MiB, 4096 partitions, 256 batches) | have. w4 1M: 99 partitions and 15.3 MiB per segment, 23 of 32 seals/s by size |
 | Commit protocol | `PutFile` carries per-batch shape, CP assigns offsets at apply, returns them; file IDs pre-allocated from CP (T:8, E.5) | CP assigns offsets at apply, contiguous runs (dec 42, 48); key is client-chosen `seg/<random>` (dec 43), idempotent per key | have, different on ID allocation. No CP round trip before PUT, good |
-| Metadata / control plane | Hosted sharded RSM per virtual cluster, 125-RPC API, journal plus snapshots, PITR (T:9, 10) | Own CP: DynamoDB log slots (if-absent), Pebble applier, one appender, hot standby, S3 checkpoint (dec 48-53, `cp/logcp`) | different. w4: append p99 8 ms, 20 to 32 slots/s, CP 0.2 of 4 cores. No PITR, no sharding |
+| Metadata / control plane | Hosted sharded RSM per virtual cluster, 125-RPC API, journal plus snapshots, PITR (T:9, 10) | Own CP: DynamoDB log slots (if-absent), Pebble state updater, one appender, hot standby, S3 checkpoint (dec 48-53, `cmd/mdscontrolplane/logstore.go`) | different. w4: append p99 8 ms, 20 to 32 slots/s, CP 0.2 of 4 cores. No PITR, no sharding |
 | CP failover | Leader tracking, cluster migration (T:9.1, F.5) | Standby tails log, slot is the fence (dec 51), `-takeover-after 5s` | have. w4 kill at 500k: ack gap about 8 s, 0 errors. Not tested at 1M |
 | File format | Custom segment: header, pages, footer with per-batch arrays, CRC per page; footer cache (F.2) | Batches stored verbatim plus index; Fetch patches baseOffset and leader epoch, CRC stays valid (dec 30, 43, 45) | have (simpler). No page checksums beyond the batch CRC; no scrub/inspect tool |
 | Object keys | Sharded prefixes by file id (F.1) | Flat `seg/<128-bit random>` | partial. Fine at 32 PUT/s; S3 prefix limits matter at read-path scale (audit S6). AWS guidance is the independent basis |
@@ -45,7 +45,7 @@ Status: have / partial / missing / different (deliberately). "T:" = teardown sec
 | Auth / ACL | SASL PLAIN/SCRAM/OAUTH, mTLS, SPIFFE, ACL logs (T:19) | None: no SASL, no TLS, no ACL (audit S19) | missing |
 | Observability | Prometheus on the agent, CP utilisation gauge, push telemetry by default (T:18) | Strong: facts-based metrics, JSON logs with run id, slot/index/lag series (dec 36-38, `docs/observability.md`). No CP utilisation gauge yet | have, no phone-home (good) |
 | Deployment | One static binary, flags and env, 5-min drain, roles (proxy, jobs) | Two binaries (`mdsbroker`, `mdscontrolplane`), Terraform bench stack, graceful `Stop` in core (dec 8) | partial. No role split, no drain-on-discovery yet |
-| Chaos / determinism | Fault-injection env var in the binary (App A) | Deterministic simulation with faulting engines; `kafka-log`: 2,000 seeds, 0 failing, 50.7 M steps (`docs/sim-log-engine.md`); detcheck gate | have, stronger than anything in the teardown |
+| Chaos / determinism | Fault-injection env var in the binary (App A) | Deterministic simulation with faulting engines; `kafka-log`: 2,000 seeds, 0 failing, 50.7 M steps (`docs/sim-log-engine.md`); determinismcheck gate | have, stronger than anything in the teardown |
 
 ## 2. Top 5 takeaways for the roadmap
 
@@ -88,11 +88,11 @@ Ranked by value over effort. Dependencies: 1 and 2 can start now in parallel; 3 
 - Plan: heartbeat lease and `DescribeBrokers` (TODO design), Metadata lists live brokers with deterministic leader
   spread, optional AZ hint in client id, drain on `Stop`; try `-takeover-after 2s`; run the kill test at 1M.
 - REVISIT: decision 29 says each broker names only itself; listing all brokers changes Metadata semantics, not
-  interchangeability. Contract change touches core, veritas, cpengine, lockstep; hashes re-baseline.
+  interchangeability. Contract change touches core, speccheck, fakecontrolplane, lockstep; hashes re-baseline.
 ### 4. Consumer groups, offsets and minimal admin APIs (about 35 to 45 ed)
 - Measured need: 5 APIs advertised today, so any group-based client fails ("broker is too old"). This is the largest
   adoption blocker; the Kafka protocol spec is the independent basis, we do not need the teardown's API list.
-- Design: group state in the applier; only membership changes and offset commits are log commands. Heartbeats stay in
+- Design: group state in the state updater; only membership changes and offset commits are log commands. Heartbeats stay in
   memory on the active CP: at 64 consumers and a 3 s heartbeat that is 21/s, roughly doubling the 20 to 32 slots/s we
   run today, and the hot key ceiling is about 200 entries/s (X1). Needs a deterministic time source for session expiry
   (log entry timestamps are advisory today: dec 53). After failover give all members a grace period.
@@ -109,7 +109,7 @@ Ranked by value over effort. Dependencies: 1 and 2 can start now in parallel; 3 
   against about 380 if 16 MiB-equivalent; GETs 100x worse for catch-up reads and long retention. Index lag at 1M is 10 to
   13 s (bar was 10 s), so index and runs are already background-written.
 - Plan: single-level time-window merge per partition range; a new log command swaps run pointers atomically, validated by
-  the applier (the sound idea in teardown T:15, also in public docs). Log format bump uses the two-deploy rule (dec 53).
+  the state updater (the sound idea in teardown T:15, also in public docs). Log format bump uses the two-deploy rule (dec 53).
 - Regression risks: rewrite cost is one read plus one write of all data (about 490 MiB/s committed each way at 1M, in-AZ
   traffic is free but broker NIC and CPU are not); keep it off the `Step` goroutine (audit S10); fetches racing a swap need
   the item 2 grace period.
@@ -127,7 +127,7 @@ Checklist. Status: OK / TODO / BLOCKER.
 | LICENSE | BLOCKER | None at repo root. `build/omb/src/LICENSE` is the Apache-2.0 OMB checkout (git-ignored; our `ops/deploy/aws/bench/omb/patches/*` are derivatives and must keep its notice) |
 | README, quickstart | BLOCKER | No root `README.md` (only deploy and api READMEs). Need: what it is, alpha status, "produce-only, no consumer groups", docker-compose quickstart (`ops/deploy/docker-compose.yml` exists), supported APIs |
 | CONTRIBUTING, SECURITY.md, CODEOWNERS, issue templates | TODO | None exist. Pick DCO (sign-off) over a CLA for an alpha |
-| Public CI | TODO | Workflow lives at `build/ci/determinism.workflow.yml`, not `.github/workflows`, so it is not running. It uses only `go vet`, `go test`, determinism script: no AWS creds needed. Docker-backed `test/integrationtest/` tests skip without Docker; add a service-container job. `make build` includes the CRAP gate (`docs/crap-gate.md`) |
+| Public CI | TODO | Workflow lives at `build/ci/determinism.workflow.yml`, not `.github/workflows`, so it is not running. It uses only `go vet`, `go test`, determinism script: no AWS creds needed. Docker-backed `test/integrationtest/` tests skip without Docker; add a service-container job. `make build` includes the risk gate (`docs/risk-gate.md`) |
 | Module path | TODO | `module mds` is not importable (`go get` needs a host path). Rename to `github.com/<org>/<repo>` before tagging; a mechanical change, but it touches every import and nothing hashes the path (verify with the sim hashes) |
 | Versioning | TODO | No tags. Use `v0.1.0-alpha.N`, no compatibility promise; log entry format is versioned (dec 53), which is a real upgrade story only for the CP log |
 | Maintainers | TODO | 192 commits, one author identity (GitHub noreply address, good). Bus factor 1: say so in the README |

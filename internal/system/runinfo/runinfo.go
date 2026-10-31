@@ -112,16 +112,16 @@ func NewLogger(w io.Writer, level slog.Level, i Info) *slog.Logger {
 	return slog.New(h).With(attrs...)
 }
 
-// Register adds <ns>_build_info, <ns>_start_time_seconds and
-// <ns>_uptime_seconds to reg.
-func Register(reg prometheus.Registerer, ns string, i Info) {
-	bi := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: ns, Name: "build_info",
+// Register adds <namespace>_build_info, <namespace>_start_time_seconds and
+// <namespace>_uptime_seconds to reg.
+func Register(reg prometheus.Registerer, namespace string, i Info) {
+	bi := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: namespace, Name: "build_info",
 		Help:        "Always 1; the labels identify the build and the run.",
 		ConstLabels: prometheus.Labels{"version": i.Version, "go_version": i.GoVersion, "git_sha": i.GitCommit, "run_id": i.RunID}})
 	bi.Set(1)
-	st := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: ns, Name: "start_time_seconds", Help: "Process start, unix seconds."})
+	st := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: namespace, Name: "start_time_seconds", Help: "Process start, unix seconds."})
 	st.Set(float64(i.Started.UnixNano()) / 1e9)
-	up := prometheus.NewGaugeFunc(prometheus.GaugeOpts{Namespace: ns, Name: "uptime_seconds", Help: "Seconds since process start."},
+	up := prometheus.NewGaugeFunc(prometheus.GaugeOpts{Namespace: namespace, Name: "uptime_seconds", Help: "Seconds since process start."},
 		func() float64 { return time.Since(i.Started).Seconds() })
 	reg.MustRegister(bi, st, up)
 }

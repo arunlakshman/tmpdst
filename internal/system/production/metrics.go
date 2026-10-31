@@ -44,7 +44,7 @@ const metricsNS = "mdsbroker"
 // runtime and process collectors).
 func NewMetrics() *Metrics {
 	secs := prometheus.ExponentialBuckets(0.005, 2, 14) // 5 ms .. 41 s
-	hist := func(name, help string) prometheus.Histogram {
+	history := func(name, help string) prometheus.Histogram {
 		return prometheus.NewHistogram(prometheus.HistogramOpts{Namespace: metricsNS, Name: name, Help: help, Buckets: secs})
 	}
 	counter := func(name, help string) prometheus.Counter {
@@ -55,13 +55,13 @@ func NewMetrics() *Metrics {
 	}
 	m := &Metrics{
 		reg:           prometheus.NewRegistry(),
-		putSeconds:    hist("segment_put_seconds", "Seal to successful object PUT, retries and backoff included."),
-		commitSeconds: hist("segment_commit_seconds", "First CommitSegment issued to its answer, retries included."),
-		waitSeconds: hist("segment_queue_wait_seconds",
+		putSeconds:    history("segment_put_seconds", "Seal to successful object PUT, retries and backoff included."),
+		commitSeconds: history("segment_commit_seconds", "First CommitSegment issued to its answer, retries included."),
+		waitSeconds: history("segment_queue_wait_seconds",
 			"Uploaded segment waiting for earlier segments to commit (commits run strictly in seal order)."),
-		ackSeconds: hist("segment_seal_to_ack_seconds",
+		ackSeconds: history("segment_seal_to_ack_seconds",
 			"Seal to commit answer: put + queue wait + commit. Excludes the time the batches sat in the open buffer."),
-		ageSeconds: hist("segment_open_age_seconds", "Time from a segment's first batch to its seal."),
+		ageSeconds: history("segment_open_age_seconds", "Time from a segment's first batch to its seal."),
 		inflightAtSeal: prometheus.NewHistogram(prometheus.HistogramOpts{Namespace: metricsNS, Name: "segments_in_flight_at_seal",
 			Help:    "Segments sealed and not yet answered, counting the one just sealed. Above 1 means PUTs overlap.",
 			Buckets: []float64{1, 2, 3, 4, 6, 8, 12, 16, 32}}),
@@ -96,11 +96,11 @@ func (m *Metrics) Handler() http.Handler {
 }
 
 // ObserveControlPlaneCall records one control-plane exchange (wire to controlplaneclient.Client.Observe).
-func (m *Metrics) ObserveControlPlaneCall(op string, d time.Duration) {
-	m.cpCall.WithLabelValues(op).Observe(d.Seconds())
+func (m *Metrics) ObserveControlPlaneCall(operation string, d time.Duration) {
+	m.cpCall.WithLabelValues(operation).Observe(d.Seconds())
 }
 
-func seconds(ns int64) float64 { return float64(ns) / 1e9 }
+func seconds(nanoseconds int64) float64 { return float64(nanoseconds) / 1e9 }
 
 // Observe consumes one broker fact; facts it does not know are ignored.
 func (m *Metrics) Observe(f core.Fact) {

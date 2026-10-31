@@ -91,8 +91,8 @@ func (c *ControlPlane) CreateTopicIf(name string, partitions int32, failIfExists
 }
 
 // End is the next offset of tp: the end of its newest run (0 if unknown).
-func (c *ControlPlane) End(tp core.TopicPartition) core.Offset {
-	rs := c.parts[tp.Topic][tp.Partition]
+func (c *ControlPlane) End(topicPartition core.TopicPartition) core.Offset {
+	rs := c.parts[topicPartition.Topic][topicPartition.Partition]
 	if len(rs) == 0 {
 		return 0
 	}
@@ -106,38 +106,38 @@ func (c *ControlPlane) Exec(a core.IOCall) core.IOResult {
 	if !ok {
 		panic("speccheck.ControlPlane: not a CPCall")
 	}
-	switch op := call.Op.(type) {
+	switch operation := call.Op.(type) {
 	case core.CommitSegment:
-		return c.execCommit(call.Req, op)
+		return c.execCommit(call.Req, operation)
 	case core.FindSegments:
-		return c.execLookup(call.Req, op)
+		return c.execLookup(call.Req, operation)
 	case core.DescribeTopics:
-		return c.execDescribe(call.Req, op)
+		return c.execDescribe(call.Req, operation)
 	case core.CreateTopic:
-		return c.execCreate(call.Req, op)
+		return c.execCreate(call.Req, operation)
 	case core.GroupInstall:
-		return groupDone(call.Req, c.groupInstall(op))
+		return groupDone(call.Req, c.groupInstall(operation))
 	case core.GroupAssign:
-		return groupDone(call.Req, c.groupAssign(op))
+		return groupDone(call.Req, c.groupAssign(operation))
 	case core.GroupRemove:
-		return groupDone(call.Req, c.groupRemove(op))
+		return groupDone(call.Req, c.groupRemove(operation))
 	case core.OffsetCommit:
-		return c.offsetCommit(call.Req, op)
+		return c.offsetCommit(call.Req, operation)
 	case core.OffsetFetch:
-		return core.ControlPlaneDone{Req: call.Req, Resp: c.offsetFetch(op)}
+		return core.ControlPlaneDone{Req: call.Req, Resp: c.offsetFetch(operation)}
 	case core.DescribeGroup:
-		return core.ControlPlaneDone{Req: call.Req, Resp: c.describeGroup(op)}
+		return core.ControlPlaneDone{Req: call.Req, Resp: c.describeGroup(operation)}
 	case core.ListGroups:
 		return core.ControlPlaneDone{Req: call.Req, Resp: c.listGroups()}
 	}
 	return core.ControlPlaneDone{Req: call.Req, Err: core.ErrInvalid}
 }
 
-func (c *ControlPlane) execCreate(req core.RequestID, op core.CreateTopic) core.IOResult {
-	if code := c.CreateTopicIf(op.Name, op.Partitions, op.FailIfExists); code != core.OK {
-		return core.ControlPlaneDone{Req: req, Err: code}
+func (c *ControlPlane) execCreate(request core.RequestID, operation core.CreateTopic) core.IOResult {
+	if code := c.CreateTopicIf(operation.Name, operation.Partitions, operation.FailIfExists); code != core.OK {
+		return core.ControlPlaneDone{Req: request, Err: code}
 	}
-	return core.ControlPlaneDone{Req: req, Outcome: core.Applied}
+	return core.ControlPlaneDone{Req: request, Outcome: core.Applied}
 }
 
 // validBatch reports whether b is well formed on its own.
@@ -145,73 +145,73 @@ func validBatch(b core.PendingBatch) bool {
 	return b.Records > 0 && b.TopicPartition.Topic != "" && b.TopicPartition.Partition >= 0
 }
 
-func (c *ControlPlane) execCommit(req core.RequestID, op core.CommitSegment) core.IOResult {
-	if seg, done := c.segs[op.SegmentKey]; done {
-		return c.replayCommit(req, op, seg)
+func (c *ControlPlane) execCommit(request core.RequestID, operation core.CommitSegment) core.IOResult {
+	if committed, done := c.segs[operation.SegmentKey]; done {
+		return c.replayCommit(request, operation, committed)
 	}
-	return c.freshCommit(req, op)
+	return c.freshCommit(request, operation)
 }
 
-func (c *ControlPlane) replayCommit(req core.RequestID, op core.CommitSegment, seg segment) core.IOResult {
-	if !slices.Equal(seg.batches, op.Batches) {
-		return core.ControlPlaneDone{Req: req, Err: core.ErrConflict}
+func (c *ControlPlane) replayCommit(request core.RequestID, operation core.CommitSegment, committed segment) core.IOResult {
+	if !slices.Equal(committed.batches, operation.Batches) {
+		return core.ControlPlaneDone{Req: request, Err: core.ErrConflict}
 	}
-	resp := core.CommitSegmentResp{Assigned: slices.Clone(seg.ranges)}
-	return core.ControlPlaneDone{Req: req, Resp: resp, Outcome: core.Applied}
+	response := core.CommitSegmentResp{Assigned: slices.Clone(committed.ranges)}
+	return core.ControlPlaneDone{Req: request, Resp: response, Outcome: core.Applied}
 }
 
-func (c *ControlPlane) freshCommit(request core.RequestID, op core.CommitSegment) core.IOResult {
-	if op.SegmentKey == "" || len(op.Batches) == 0 {
+func (c *ControlPlane) freshCommit(request core.RequestID, operation core.CommitSegment) core.IOResult {
+	if operation.SegmentKey == "" || len(operation.Batches) == 0 {
 		return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 	}
-	for _, b := range op.Batches {
+	for _, b := range operation.Batches {
 		if !validBatch(b) {
 			return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 		}
 	}
-	seg := segment{batches: slices.Clone(op.Batches)}
-	for _, b := range op.Batches {
+	newSegment := segment{batches: slices.Clone(operation.Batches)}
+	for _, b := range operation.Batches {
 		r := core.BatchRange{TopicPartition: b.TopicPartition, Base: c.End(b.TopicPartition), Count: b.Records, Loc: b.Loc}
 		c.append(r)
-		seg.ranges = append(seg.ranges, r)
+		newSegment.ranges = append(newSegment.ranges, r)
 	}
-	i, _ := slices.BinarySearch(c.segKeys, op.SegmentKey)
-	c.segKeys = slices.Insert(c.segKeys, i, op.SegmentKey)
+	i, _ := slices.BinarySearch(c.segKeys, operation.SegmentKey)
+	c.segKeys = slices.Insert(c.segKeys, i, operation.SegmentKey)
 	if len(c.segPre) > i+1 {
 		c.segPre = c.segPre[:i+1]
 	}
-	c.segs[op.SegmentKey] = seg
-	resp := core.CommitSegmentResp{Assigned: slices.Clone(seg.ranges)}
-	return core.ControlPlaneDone{Req: request, Resp: resp, Outcome: core.Applied}
+	c.segs[operation.SegmentKey] = newSegment
+	response := core.CommitSegmentResp{Assigned: slices.Clone(newSegment.ranges)}
+	return core.ControlPlaneDone{Req: request, Resp: response, Outcome: core.Applied}
 }
 
-func (c *ControlPlane) execLookup(request core.RequestID, op core.FindSegments) core.IOResult {
-	if op.From < 0 {
+func (c *ControlPlane) execLookup(request core.RequestID, operation core.FindSegments) core.IOResult {
+	if operation.From < 0 {
 		return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 	}
-	response := core.FindSegmentsResp{End: c.End(op.TopicPartition)}
+	response := core.FindSegmentsResp{End: c.End(operation.TopicPartition)}
 	var bytes int64
-	for _, r := range c.parts[op.TopicPartition.Topic][op.TopicPartition.Partition] {
-		if r.Base+core.Offset(r.Count) <= op.From {
+	for _, r := range c.parts[operation.TopicPartition.Topic][operation.TopicPartition.Partition] {
+		if r.Base+core.Offset(r.Count) <= operation.From {
 			continue
 		}
 		response.Ranges = append(response.Ranges, r)
 		bytes += r.Loc.Len
-		if op.MaxBytes > 0 && bytes >= int64(op.MaxBytes) {
+		if operation.MaxBytes > 0 && bytes >= int64(operation.MaxBytes) {
 			break
 		}
 	}
 	return core.ControlPlaneDone{Req: request, Resp: response}
 }
 
-func (c *ControlPlane) execDescribe(req core.RequestID, op core.DescribeTopics) core.IOResult {
-	var resp core.DescribeTopicsResp
+func (c *ControlPlane) execDescribe(request core.RequestID, operation core.DescribeTopics) core.IOResult {
+	var response core.DescribeTopicsResp
 	for _, name := range sortedKeys(c.topics) {
-		if len(op.Topics) == 0 || slices.Contains(op.Topics, name) {
-			resp.Topics = append(resp.Topics, core.TopicInfo{Name: name, Partitions: c.topics[name]})
+		if len(operation.Topics) == 0 || slices.Contains(operation.Topics, name) {
+			response.Topics = append(response.Topics, core.TopicInfo{Name: name, Partitions: c.topics[name]})
 		}
 	}
-	return core.ControlPlaneDone{Req: req, Resp: resp}
+	return core.ControlPlaneDone{Req: request, Resp: response}
 }
 
 func (c *ControlPlane) append(r core.BatchRange) {

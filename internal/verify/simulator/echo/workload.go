@@ -66,10 +66,10 @@ type client struct {
 
 // Workload is N closed-loop clients speaking the echo protocol.
 type Workload struct {
-	env  core.Environment
-	self core.NodeInstance
-	opts Opts
-	hist simulator.History
+	env     core.Environment
+	self    core.NodeInstance
+	opts    Opts
+	history simulator.History
 
 	stopped bool // PhaseSettle began: no new requests
 	loop    session.Loop[*client]
@@ -99,7 +99,7 @@ func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.No
 func (w *Workload) Name() string { return "echo" }
 
 // SetHistory is called by the kernel.
-func (w *Workload) SetHistory(h simulator.History) { w.hist = h }
+func (w *Workload) SetHistory(h simulator.History) { w.history = h }
 
 // Quiescent reports that no request is outstanding.
 func (w *Workload) Quiescent() bool {
@@ -112,7 +112,7 @@ func (w *Workload) Quiescent() bool {
 }
 
 // Step implements core.StateMachine.
-func (w *Workload) Step(ev core.Event) []core.Action { return w.loop.Step(ev) }
+func (w *Workload) Step(event core.Event) []core.Action { return w.loop.Step(event) }
 
 func (w *Workload) onReady(c *client) []core.Action {
 	c.Fails, c.fr = 0, framer{}
@@ -153,21 +153,21 @@ func (w *Workload) next(c *client) []core.Action {
 		return append(acts, w.loop.Dial(c)...)
 	}
 	p := &pending{id: w.env.NewID()}
-	var op any
+	var operation any
 	var body string
 	if w.env.Intn(3) == 0 && len(c.acked) > 0 {
 		a := c.acked[w.env.Intn(len(c.acked))]
 		p.get, p.off = true, a.off
-		op, body = GetOp{c.ID, a.off}, "GET "+strconv.FormatInt(a.off, 10)
+		operation, body = GetOp{c.ID, a.off}, "GET "+strconv.FormatInt(a.off, 10)
 	} else {
 		c.seq++
 		p.seq = c.seq
 		p.payload = fmt.Sprintf("c%d-s%d-%s", c.ID, c.seq, strings.Repeat("x", w.env.Intn(48)))
-		op, body = PutOp{c.ID, c.seq, p.payload}, "PUT "+p.payload
+		operation, body = PutOp{c.ID, c.seq, p.payload}, "PUT "+p.payload
 	}
 	c.pend, c.State = p, clientBusy
-	if w.hist != nil {
-		w.hist.Invoke(w.self, p.id, p.id, op)
+	if w.history != nil {
+		w.history.Invoke(w.self, p.id, p.id, operation)
 	}
 	return w.loop.Request(c, appendFrame(nil, body), requestTimeout)
 }
@@ -202,8 +202,8 @@ func (w *Workload) reply(c *client, text string) []core.Action {
 			out = simulator.OpResultUnknown
 		}
 	}
-	if w.hist != nil {
-		w.hist.Return(p.id, text, out)
+	if w.history != nil {
+		w.history.Return(p.id, text, out)
 	}
 	think := core.Duration(200+w.env.Intn(600)) * core.Millisecond
 	return []core.Action{c.Answered(), c.Wake(think)}
@@ -226,8 +226,8 @@ func (w *Workload) lost(c *client, why string) {
 		if p.get {
 			out = simulator.OpGivenUp
 		}
-		if w.hist != nil {
-			w.hist.Return(p.id, why, out)
+		if w.history != nil {
+			w.history.Return(p.id, why, out)
 		}
 	}
 	c.pend, c.fr = nil, framer{}

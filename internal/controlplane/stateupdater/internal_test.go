@@ -9,21 +9,21 @@ import (
 )
 
 func TestRunRoundTripAndCorruption(t *testing.T) {
-	tp := core.NewTopicPartition("t", 3)
+	topicPartition := core.NewTopicPartition("t", 3)
 	rs := []core.BatchRange{
-		{TopicPartition: tp, Base: 10, Count: 2, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 50}},
-		{TopicPartition: tp, Base: 12, Count: 5, Loc: core.SegmentRef{Key: "s1", Off: 50, Len: -1}},
-		{TopicPartition: tp, Base: 17, Count: 1, Loc: core.SegmentRef{Key: "s2", Off: 7, Len: 9}},
+		{TopicPartition: topicPartition, Base: 10, Count: 2, Loc: core.SegmentRef{Key: "s1", Off: 0, Len: 50}},
+		{TopicPartition: topicPartition, Base: 12, Count: 5, Loc: core.SegmentRef{Key: "s1", Off: 50, Len: -1}},
+		{TopicPartition: topicPartition, Base: 17, Count: 1, Loc: core.SegmentRef{Key: "s2", Off: 7, Len: 9}},
 	}
 	b := encodeBatchRun(rs)
-	got, err := decodeBatchRun(tp, 10, b)
+	got, err := decodeBatchRun(topicPartition, 10, b)
 	if err != nil || len(got) != 3 || got[2] != rs[2] || got[1] != rs[1] {
 		t.Fatalf("round trip: %+v %v", got, err)
 	}
 	bad := [][]byte{nil, {9}, b[:len(b)-1], append(append([]byte{}, b...), 0), {runFormat, 0xFF}, {runFormat, 1, 5, 'a'},
 		{runFormat, 0, 200}, {runFormat, 1, 1, 'k', 1, 5, 1, 0, 0}, {runFormat, 100}}
 	for i, x := range bad {
-		if _, err := decodeBatchRun(tp, 0, x); !errors.Is(err, errCorrupt) {
+		if _, err := decodeBatchRun(topicPartition, 0, x); !errors.Is(err, errCorrupt) {
 			t.Errorf("case %d: err %v", i, err)
 		}
 	}
@@ -78,14 +78,14 @@ func TestStoreFailureIsFailStop(t *testing.T) {
 
 func TestCorruptStoredRecordsPanic(t *testing.T) {
 	a := New(NewMemoryKeyValueStore())
-	tp := core.NewTopicPartition("t", 0)
-	_ = a.kv.Update(func(tx Transaction) {
-		tx.Set(batchRunKey(tp, 0), []byte{9, 9})
-		tx.Set(endKey(tp), []byte{5})
-		tx.Set(duplicateCheckKey("k"), []byte{0x80})
+	topicPartition := core.NewTopicPartition("t", 0)
+	_ = a.keyValue.Update(func(transaction Transaction) {
+		transaction.Set(batchRunKey(topicPartition, 0), []byte{9, 9})
+		transaction.Set(endKey(topicPartition), []byte{5})
+		transaction.Set(duplicateCheckKey("k"), []byte{0x80})
 	})
 	for name, f := range map[string]func(){
-		"lookup": func() { _, _ = a.Lookup(core.FindSegments{TopicPartition: tp}) },
+		"lookup": func() { _, _ = a.Lookup(core.FindSegments{TopicPartition: topicPartition}) },
 		"replay": func() { _, _ = a.Commit(1, core.CommitSegment{SegmentKey: "k"}) },
 	} {
 		func() {

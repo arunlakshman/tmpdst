@@ -106,9 +106,9 @@ func (c *ControlPlane) CreateTopic(name string, partitions int32) error {
 }
 
 // Call executes op against the control-plane spec.
-func (c *ControlPlane) Call(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, error) {
+func (c *ControlPlane) Call(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneResponse, error) {
 	return locked(ctx, &c.mu, func() (core.ControlPlaneResponse, core.ErrCode) {
-		return c.callResp(core.ControlPlaneCall{Op: op})
+		return c.callResp(core.ControlPlaneCall{Op: operation})
 	})
 }
 

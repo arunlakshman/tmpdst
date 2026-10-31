@@ -62,13 +62,13 @@ func TestKafkaCampaign(t *testing.T) {
 }
 
 func TestDeterminismCanary(t *testing.T) {
-	cfg := Config(nil)
+	config := Config(nil)
 	for seed := uint64(1); seed <= 3; seed++ {
-		a, b := simulator.RunSeed(cfg, seed), simulator.RunSeed(cfg, seed)
+		a, b := simulator.RunSeed(config, seed), simulator.RunSeed(config, seed)
 		if a.TraceHash != b.TraceHash || a.RandCalls != b.RandCalls || a.Steps != b.Steps {
 			t.Fatalf("seed %d diverged: %x/%d/%d vs %x/%d/%d", seed, a.TraceHash, a.RandCalls, a.Steps, b.TraceHash, b.RandCalls, b.Steps)
 		}
-		logged := cfg
+		logged := config
 		logged.Log = true
 		if c := simulator.RunSeed(logged, seed); c.TraceHash != a.TraceHash || c.RandCalls != a.RandCalls || c.Steps != a.Steps {
 			t.Fatalf("seed %d: logging changed the run", seed)
@@ -80,10 +80,10 @@ func TestDeterminismCanary(t *testing.T) {
 }
 
 // violated returns the violated props of seed, in first-failure order.
-func violated(cfg simulator.Config, seed uint64) []core.PropertyID {
+func violated(config simulator.Config, seed uint64) []core.PropertyID {
 	var out []core.PropertyID
 	seen := map[core.PropertyID]bool{}
-	for _, f := range simulator.RunSeed(cfg, seed).Failures {
+	for _, f := range simulator.RunSeed(config, seed).Failures {
 		if f.Kind == simulator.FailViolation && !seen[f.Prop] {
 			seen[f.Prop] = true
 			out = append(out, f.Prop)
@@ -112,11 +112,11 @@ func TestMutantsAreCaught(t *testing.T) {
 		{"BugSealOffByOne: size rule applied one batch late", broker.InjectedBugSealOffByOne, "kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch"},
 	}
 	for _, c := range cases {
-		cfg := config(nil, c.bug)
+		testConfig := config(nil, c.bug)
 		caught := uint64(0)
 		var props []core.PropertyID
 		for s := uint64(1); s <= budget && caught == 0; s++ {
-			if props = violated(cfg, s); len(props) > 0 {
+			if props = violated(testConfig, s); len(props) > 0 {
 				caught = s
 			}
 		}
@@ -160,11 +160,11 @@ func (i *tallyInv) AtEnd(v simulator.View) {
 		i.t.ackFacts++
 		_ = tf
 	}
-	for _, op := range v.History().Ops() {
-		switch r := op.Result.(type) {
+	for _, operation := range v.History().Ops() {
+		switch r := operation.Result.(type) {
 		case ProduceRes:
 			i.t.batches++
-			switch op.Outcome {
+			switch operation.Outcome {
 			case simulator.OpResultKnown:
 				i.t.definite++
 			case simulator.OpResultUnknown:
@@ -191,11 +191,11 @@ func (i *tallyInv) AtEnd(v simulator.View) {
 // ambiguous outcomes, deliberately idempotent batches rejected by the broker,
 // and reads.
 func TestCampaignIsNotVacuous(t *testing.T) {
-	cfg := Config(nil)
+	config := Config(nil)
 	var tl tally
-	cfg.Invariants = append(cfg.Invariants, func() simulator.SafetyRule { return &tallyInv{&tl} })
+	config.Invariants = append(config.Invariants, func() simulator.SafetyRule { return &tallyInv{&tl} })
 	for s := uint64(1); s <= 20; s++ {
-		simulator.RunSeed(cfg, s)
+		simulator.RunSeed(config, s)
 	}
 	t.Logf("20 seeds: %+v", tl)
 	if tl.definite < 2000 || tl.indet == 0 || tl.retried == 0 || tl.rejected == 0 || tl.readRecs < 2000 {
@@ -225,8 +225,8 @@ func (*fakeEnv) Unreachable(core.PropertyID, ...core.ContextPair)               
 
 type fakeHist struct{ ops []simulator.HistoryOperation }
 
-func (h *fakeHist) Invoke(c core.NodeInstance, id, v core.ID, op any) {
-	h.ops = append(h.ops, simulator.HistoryOperation{ID: id, Value: v, Client: c, Op: op})
+func (h *fakeHist) Invoke(c core.NodeInstance, id, v core.ID, operation any) {
+	h.ops = append(h.ops, simulator.HistoryOperation{ID: id, Value: v, Client: c, Op: operation})
 }
 func (h *fakeHist) Return(id core.ID, res any, o simulator.OpOutcome) bool {
 	for i := range h.ops {
@@ -261,9 +261,9 @@ func TestFatalProduceErrorGivesUp(t *testing.T) {
 		if ambiguous {
 			want = simulator.OpResultUnknown
 		}
-		for i, op := range h.ops {
-			if op.Outcome != want {
-				t.Errorf("ambiguous=%v op %d: outcome %d, want %d", ambiguous, i, op.Outcome, want)
+		for i, operation := range h.ops {
+			if operation.Outcome != want {
+				t.Errorf("ambiguous=%v op %d: outcome %d, want %d", ambiguous, i, operation.Outcome, want)
 			}
 		}
 		if len(c.p.cur) != 0 {
@@ -273,13 +273,13 @@ func TestFatalProduceErrorGivesUp(t *testing.T) {
 }
 
 func produceResp(w *Workload, c *client, code int16) *kmsg.ProduceResponse {
-	resp := kmsg.NewPtrProduceResponse()
+	response := kmsg.NewPtrProduceResponse()
 	for _, b := range c.p.cur {
-		tp := w.tps[b.tpIdx]
-		resp.Topics = append(resp.Topics, kmsg.ProduceResponseTopic{Topic: tp.Topic,
-			Partitions: []kmsg.ProduceResponseTopicPartition{{Partition: tp.Partition, ErrorCode: code, BaseOffset: -1}}})
+		topicPartition := w.tps[b.tpIdx]
+		response.Topics = append(response.Topics, kmsg.ProduceResponseTopic{Topic: topicPartition.Topic,
+			Partitions: []kmsg.ProduceResponseTopicPartition{{Partition: topicPartition.Partition, ErrorCode: code, BaseOffset: -1}}})
 	}
-	return resp
+	return response
 }
 
 // A batch that claims a producer id is resolved as rejected on INVALID_REQUEST
@@ -296,10 +296,10 @@ func TestIdemBatchRejectedIsAbandoned(t *testing.T) {
 			b.ambiguous, b.idem = ambiguous, true
 		}
 		acts := w.onProduce(c, produceResp(w, c, codeInvalidRequest))
-		for i, op := range h.ops {
-			res, _ := op.Result.(ProduceRes)
-			if op.Outcome != simulator.OpGivenUp || res.Why != "rejected" || res.Base != -1 {
-				t.Errorf("ambiguous=%v op %d: %d %+v", ambiguous, i, op.Outcome, res)
+		for i, operation := range h.ops {
+			res, _ := operation.Result.(ProduceRes)
+			if operation.Outcome != simulator.OpGivenUp || res.Why != "rejected" || res.Base != -1 {
+				t.Errorf("ambiguous=%v op %d: %d %+v", ambiguous, i, operation.Outcome, res)
 			}
 		}
 		if len(c.p.cur) != 0 || len(acts) == 0 {
@@ -365,9 +365,9 @@ func TestCachedStateHashMatchesFull(t *testing.T) {
 		n = 6
 	}
 	ss := seeds(1, n)
-	cfg := Config(ss)
-	cfg.VerifyHashes = true
-	rep, err := simulator.NewRunner().Run(cfg)
+	config := Config(ss)
+	config.VerifyHashes = true
+	rep, err := simulator.NewRunner().Run(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,9 +390,9 @@ func TestCachedStateHashMatchesFull(t *testing.T) {
 // commit limit too (tight on half the seeds: 1 + the cap), not only caught by
 // the cap invariants.
 func TestCommitLimitRefusesUncappedSegment(t *testing.T) {
-	cfg := config(nil, broker.InjectedBugNoPartitionCap)
+	testConfig := config(nil, broker.InjectedBugNoPartitionCap)
 	for s := uint64(1); s <= 40; s++ {
-		if slices.Contains(violated(cfg, s), "broker: segment exceeds the control plane's commit size") {
+		if slices.Contains(violated(testConfig, s), "broker: segment exceeds the control plane's commit size") {
 			return
 		}
 	}
@@ -410,19 +410,19 @@ func wideCampaign(t *testing.T, capParts, batches int, log bool) int64 {
 	prod.MaxSegmentPartitions, prod.MaxSegmentBatches = capParts, batches
 	prod.MaxBufferedBytes, prod.ResumeBufferedBytes = 64<<20, 32<<20
 	opts := Opts{Producers: 128, Consumers: 1, Topics: []string{"a", "b"}, Partitions: 64}
-	cfg := configWith(seeds(1, 2), broker.InjectedBugNone, opts)
+	config := configWith(seeds(1, 2), broker.InjectedBugNone, opts)
 	items := simulator.DynamoMaxCommitItems
 	if log {
 		opts.Partitions = 128
-		cfg = configLogWith(seeds(1, 2), broker.InjectedBugNone, 0, opts)
+		config = configLogWith(seeds(1, 2), broker.InjectedBugNone, 0, opts)
 		items = 0
-		cfg.ControlPlane.CallerTimeout = 800 * core.Millisecond
-		cfg.LogStore.CallerTimeout = 800 * core.Millisecond
-		cfg.Phases = campaign.Phases()
+		config.ControlPlane.CallerTimeout = 800 * core.Millisecond
+		config.LogStore.CallerTimeout = 800 * core.Millisecond
+		config.Phases = campaign.Phases()
 	}
-	cfg.Params = prod
-	inner := cfg.Swarm
-	cfg.Swarm = func(seed uint64, r simulator.CountedRand, c *simulator.SeedConfig) {
+	config.Params = prod
+	inner := config.Swarm
+	config.Swarm = func(seed uint64, r simulator.CountedRand, c *simulator.SeedConfig) {
 		inner(seed, r, c)
 		c.Params, c.ControlPlane.MaxCommitItems = prod, items
 		if log {
@@ -438,8 +438,8 @@ func wideCampaign(t *testing.T, capParts, batches int, log bool) int64 {
 		}
 	}
 	var widest atomic.Int64
-	cfg.Invariants = append(cfg.Invariants, func() simulator.SafetyRule { return &widestInv{&widest, opts.topicPartitions()} })
-	rep, err := simulator.NewRunner().Run(cfg)
+	config.Invariants = append(config.Invariants, func() simulator.SafetyRule { return &widestInv{&widest, opts.topicPartitions()} })
+	rep, err := simulator.NewRunner().Run(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -490,12 +490,12 @@ func (*widestInv) Name() string           { return "widest" }
 func (*widestInv) Observe(simulator.View) {}
 func (i *widestInv) AtEnd(v simulator.View) {
 	parts := map[string]map[core.TopicPartition]bool{}
-	for _, tp := range i.tps {
-		for _, r := range v.CP().Committed(tp) {
+	for _, topicPartition := range i.tps {
+		for _, r := range v.CP().Committed(topicPartition) {
 			if parts[r.Loc.Key] == nil {
 				parts[r.Loc.Key] = map[core.TopicPartition]bool{}
 			}
-			parts[r.Loc.Key][tp] = true
+			parts[r.Loc.Key][topicPartition] = true
 		}
 	}
 	for _, m := range parts {
@@ -567,10 +567,10 @@ func TestCorruptBatchRejectedIsAbandoned(t *testing.T) {
 		b.idem, b.corrupt = false, true
 	}
 	w.onProduce(c, produceResp(w, c, codeCorruptMessage))
-	for i, op := range h.ops {
-		res, _ := op.Result.(ProduceRes)
-		if op.Outcome != simulator.OpGivenUp || res.Why != "rejected" {
-			t.Errorf("op %d: %d %+v", i, op.Outcome, res)
+	for i, operation := range h.ops {
+		res, _ := operation.Result.(ProduceRes)
+		if operation.Outcome != simulator.OpGivenUp || res.Why != "rejected" {
+			t.Errorf("op %d: %d %+v", i, operation.Outcome, res)
 		}
 	}
 	if len(c.p.cur) != 0 {

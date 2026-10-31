@@ -122,11 +122,11 @@ func TestLockstepMachineVsSpecCheck(t *testing.T) {
 		}
 	}
 
-	appDig := queryDigest(func(op core.ControlPlaneOperation) core.ControlPlaneDone {
-		return m.Fold().Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
+	appDig := queryDigest(func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
+		return m.Fold().Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 	})
-	orcDig := queryDigest(func(op core.ControlPlaneOperation) core.ControlPlaneDone {
-		return orc.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
+	orcDig := queryDigest(func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
+		return orc.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 	})
 	if appDig != orcDig {
 		t.Fatalf("query digest: machine fold %x, speccheck %x", appDig, orcDig)
@@ -166,11 +166,11 @@ func TestLockstepWithGapFill(t *testing.T) {
 	_ = orc.Exec(core.ControlPlaneCall{Req: 0, Op: a.Commit})
 	_ = orc.Exec(core.ControlPlaneCall{Req: 2, Op: b.Commit})
 
-	appDig := queryDigest(func(op core.ControlPlaneOperation) core.ControlPlaneDone {
-		return m.Fold().Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
+	appDig := queryDigest(func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
+		return m.Fold().Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 	})
-	orcDig := queryDigest(func(op core.ControlPlaneOperation) core.ControlPlaneDone {
-		return orc.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
+	orcDig := queryDigest(func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
+		return orc.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 	})
 	if appDig != orcDig {
 		t.Fatalf("query digest after gap-fill: machine %x, speccheck %x", appDig, orcDig)

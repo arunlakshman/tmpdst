@@ -204,8 +204,8 @@ func TestGapFillSkipMutantAdvancesWithoutAppend(t *testing.T) {
 	if _, ok := acts[0].(core.LogAppend); ok {
 		t.Fatalf("skip mutant appended %#v", acts[0])
 	}
-	rd, ok := acts[0].(core.LogRead)
-	if !ok || rd.From != 1 {
+	logRead, ok := acts[0].(core.LogRead)
+	if !ok || logRead.From != 1 {
 		t.Fatalf("after skip actions = %#v, want LogRead from 1", acts)
 	}
 	if m.Applied() != 1 {

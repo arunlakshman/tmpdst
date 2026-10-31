@@ -19,7 +19,7 @@ func s(v string) types.AttributeValue { return &types.AttributeValueMemberS{Valu
 func n(v int) types.AttributeValue {
 	return &types.AttributeValueMemberN{Value: strconv.Itoa(v)}
 }
-func k(pk, sk string) item { return item{"pk": s(pk), "sk": s(sk)} }
+func k(partitionKey, sortKey string) item { return item{"pk": s(partitionKey), "sk": s(sortKey)} }
 
 func fresh(t *testing.T) *FakeDynamoDB {
 	t.Helper()
@@ -194,8 +194,8 @@ func sks(o *dynamodb.QueryOutput) []string {
 
 func TestQuery(t *testing.T) {
 	f := fresh(t)
-	for _, sk := range []string{"1", "2", "3", "4", "5"} {
-		f.Put("t", k("p", sk))
+	for _, sortKey := range []string{"1", "2", "3", "4", "5"} {
+		f.Put("t", k("p", sortKey))
 	}
 	f.Put("t", k("q", "9"))
 	all := item{":p": s("p")}
@@ -254,8 +254,8 @@ func TestQueryNewest(t *testing.T) {
 	if err != nil || len(o.Items) != 0 || o.LastEvaluatedKey != nil {
 		t.Fatalf("empty partition: %v %v", o, err)
 	}
-	for _, sk := range []string{"00000000000000000000", "00000000000000000007", "00000000000000000012"} {
-		f.Put("t", k("p", sk))
+	for _, sortKey := range []string{"00000000000000000000", "00000000000000000007", "00000000000000000012"} {
+		f.Put("t", k("p", sortKey))
 	}
 	f.Put("t", k("q", "99999999999999999999"))
 	o, err = query(f, "pk = :p", vals, back, aws.Int32(1), nil)
@@ -294,8 +294,8 @@ func TestPutIfAbsentOneWinner(t *testing.T) {
 
 func TestPutItem(t *testing.T) {
 	f := fresh(t)
-	put := func(sk, v string, old bool) error {
-		in := &dynamodb.PutItemInput{TableName: aws.String("t"), Item: item{"pk": s("p"), "sk": s(sk), "v": s(v)},
+	put := func(sortKey, v string, old bool) error {
+		in := &dynamodb.PutItemInput{TableName: aws.String("t"), Item: item{"pk": s("p"), "sk": s(sortKey), "v": s(v)},
 			ConditionExpression: aws.String("attribute_not_exists(pk)")}
 		if old {
 			in.ReturnValuesOnConditionCheckFailure = types.ReturnValuesOnConditionCheckFailureAllOld
@@ -339,11 +339,11 @@ func TestPutItem(t *testing.T) {
 
 func TestBatchWriteItem(t *testing.T) {
 	f := fresh(t)
-	put := func(sk string) types.WriteRequest {
-		return types.WriteRequest{PutRequest: &types.PutRequest{Item: k("p", sk)}}
+	put := func(sortKey string) types.WriteRequest {
+		return types.WriteRequest{PutRequest: &types.PutRequest{Item: k("p", sortKey)}}
 	}
-	del := func(sk string) types.WriteRequest {
-		return types.WriteRequest{DeleteRequest: &types.DeleteRequest{Key: k("p", sk)}}
+	del := func(sortKey string) types.WriteRequest {
+		return types.WriteRequest{DeleteRequest: &types.DeleteRequest{Key: k("p", sortKey)}}
 	}
 	call := func(reqs ...types.WriteRequest) (*dynamodb.BatchWriteItemOutput, error) {
 		return f.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{RequestItems: map[string][]types.WriteRequest{"t": reqs}})

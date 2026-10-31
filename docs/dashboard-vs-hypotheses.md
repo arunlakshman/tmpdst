@@ -15,7 +15,7 @@ The Loki panel (overview 34) was not exercised.
 |---|---|---|
 | overview (`mds-overview`) | 1-14 throughput, skew, connections, ack latency, open age, segments/s, seal reason, segment size, buffered | all populated |
 | | 16-23 "transaction store" row: groups/s, queue, group size, tx latency, queue wait, cancels, WRU, cache hit | all empty or 0 (mdscontrolplane_seq_* are 0/absent with `cp_store=log`); 8 dead panels |
-| | 25-33 "log store" row: slots/lost, append, entries/entry bytes, apply/standby lag, hole fills/role, queue/refused, index, checkpoint, fresh reads | populated (defects in 25, 27, 29, 31, 32) |
+| | 25-33 "log store" row: slots/lost, append, entries/entry bytes, apply/standby lag, gap fills/role, queue/refused, index, checkpoint, fresh reads | populated (defects in 25, 27, 29, 31, 32) |
 | | 34 Loki warn+ logs | not exercised |
 | pipeline (`mds-pipeline`) | 1-8 PUT, queue wait, commit, seal-to-ack, in flight, backpressure, buffered, cp_call | populated |
 | | 9 client-side produce latency (`warpstream_produce_benchmark_*`) | EMPTY: OMB was the load tool, `up{job="warpstream_bench"}` is 0 on both loadgens |
@@ -54,14 +54,14 @@ The same panel cannot be compared across runs: the tx row is empty with the log 
 
 Side finding: `mdscontrolplane_dynamo_api_errors_total{code=ConditionalCheckFailedException, op=UpdateItem}` 0.05 to 0.08/s in every stage (also idle, aws 18 error row). Not a slot problem (PutItem has none); presumably the lease/heartbeat update. Not exported with a reason in the doc ("kind not exported"): now known.
 
-### H3: ~32 slots/s at 1M, ~1 entry per slot, lost 0, hole fills 0, append p99 ~8 ms
+### H3: ~32 slots/s at 1M, ~1 entry per slot, lost 0, gap fills 0, append p99 ~8 ms
 
 | panel | query | smoke / 500k / 750k / 1M | verdict |
 |---|---|---|---|
 | overview 25 slots/s (rank 0) | `sum by(host)(rate(mdscontrolplane_log_slots_total))` | 13.4 / 17.5 / 25.3 / 29.7 (doc 24.2 / 19.8 / 28.2 / 31.8; my smoke window is partly ramp) | CONFIRMED (30 vs 32; same ratio to segments: 30.1 seg/s) |
 | overview 25 lost slots | `rate(mdscontrolplane_log_lost_slots_total)` | 0 in all load stages. Kill test: 1 lost slot, on rank 1 at 00:08:27-45 (failback), not at the kill | CONFIRMED for steady state |
 | overview 27 entries per slot | panel shows p50 0.50 / p99 0.99-1.04 | true mean `sum/count` = 0.96 / 0.99 / 1.00 / 1.01 | CONFIRMED, but the panel is misleading (first bucket is le=1: interpolation from 0 prints 0.5) |
-| overview 29 hole fills | `rate(mdscontrolplane_log_hole_fills_total)` | 0 all stages and kill test | CONFIRMED |
+| overview 29 gap fills | `rate(mdscontrolplane_log_gap_fills_total)` | 0 all stages and kill test | CONFIRMED |
 | overview 26 append p50 / p99 | `histogram_quantile` on le 0.004, 0.008, 0.016 | p50 3.1 / 3.2 / 3.6 / 4.2 ms; p99 9.7 / 7.9 / 7.9 / 7.95 ms (clipped at the le=0.008 edge; 0.03% of appends are above 16 ms at 1M) | CONFIRMED (p99 "at most ~8 ms") |
 | overview 30 queue depth / wait p99 | | depth max 0 (0.07 mean at 1M), wait p99 6.4-7.1 ms (bucket) | CONFIRMED |
 
@@ -108,7 +108,7 @@ A better p99 needs finer buckets between 50 and 500 ms (e.g. linear 20 ms steps)
 | overview 30 refused/s `not_active` | rank 1: 0.8/s at 07:35 only | CONFIRMED (503s while taking over) |
 | overview 9 / pipeline 3-4 seal-to-ack, commit p99 | 1 m rate: 0.317-0.319 s and commit 19-21 ms: the stall is NOT visible. In the 40 s after the kill only ~9 of ~766 acks were slow (1.2%), diluted to < 1% by the 1 m window; a 30 s `increase` gives p99 7.2 s | defect: the ack gap cannot be seen on any latency panel |
 | overview 14 / pipeline 7 buffered | sum rose to 139 MB at 07:30 (from 50 MB), back to ~50 MB at 07:35 | CONFIRMED |
-| lost / hole / standby lag | lost 1 at failback only; hole fills 0; standby lag 0; `blocked` 0 | CONFIRMED |
+| lost / gap / standby lag | lost 1 at failback only; gap fills 0; standby lag 0; `blocked` 0 | CONFIRMED |
 
 ### H8: the load generator is the closest limit
 

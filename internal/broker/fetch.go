@@ -15,42 +15,42 @@ const maxFetchWait = 30 * core.Second
 // A part that finds no data is parked and polled again (long poll, decision 29
 // and Q8): the Fetch answers once it has MinBytes, or when MaxWait ends.
 func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
-	resp := kmsg.NewPtrFetchResponse()
-	s.resp = resp
+	response := kmsg.NewPtrFetchResponse()
+	s.response = response
 	if r.SessionEpoch > 0 { // incremental sessions are never granted
-		resp.ErrorCode = int16(errFetchSessionNotFound)
+		response.ErrorCode = int16(errFetchSessionNotFound)
 		return nil
 	}
 	s.fetchMax = r.MaxBytes
 	s.fetchMin = r.MinBytes
 	s.fetchUntil = b.now + core.NodeTime(fetchWait(r.MaxWaitMillis))
-	fillFetchSkeleton(resp, r)
+	fillFetchSkeleton(response, r)
 	var acts []core.Action
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
-			rp := &resp.Topics[i].Partitions[j]
-			tp := core.NewTopicPartition(t.Topic, p.Partition)
+			rp := &response.Topics[i].Partitions[j]
+			topicPartition := core.NewTopicPartition(t.Topic, p.Partition)
 			switch {
-			case !b.knows(tp):
+			case !b.knows(topicPartition):
 				rp.ErrorCode = int16(errUnknownTopicOrPart)
 			case p.FetchOffset < 0:
 				rp.ErrorCode = int16(errOffsetOutOfRange)
 			default:
 				lim := p.PartitionMaxBytes
 				if lim <= 0 {
-					lim = b.cfg.DefaultFetchBytes
+					lim = b.config.DefaultFetchBytes
 				}
-				acts = append(acts, b.startOp(&operation{kind: opFetch, s: s, tp: tp, from: core.Offset(p.FetchOffset), maxBytes: lim, fpart: rp})...)
+				acts = append(acts, b.startOp(&operation{kind: opFetch, s: s, topicPartition: topicPartition, from: core.Offset(p.FetchOffset), maxBytes: lim, fpart: rp})...)
 			}
 		}
 	}
 	return acts
 }
 
-func fillFetchSkeleton(resp *kmsg.FetchResponse, r *kmsg.FetchRequest) {
-	resp.Topics = make([]kmsg.FetchResponseTopic, len(r.Topics))
+func fillFetchSkeleton(response *kmsg.FetchResponse, r *kmsg.FetchRequest) {
+	response.Topics = make([]kmsg.FetchResponseTopic, len(r.Topics))
 	for i, t := range r.Topics {
-		rt := &resp.Topics[i]
+		rt := &response.Topics[i]
 		rt.Topic = t.Topic
 		rt.Partitions = make([]kmsg.FetchResponseTopicPartition, len(t.Partitions))
 		for j := range t.Partitions {
@@ -130,7 +130,7 @@ func (b *Broker) fetchPartData(o *operation) []core.Action {
 // MaxWait if that comes first.
 func (b *Broker) park(o *operation) []core.Action {
 	o.state, o.attempts = opWait, 0
-	after := min(b.cfg.FetchPollInterval, core.Duration(o.s.fetchUntil-b.now))
+	after := min(b.config.FetchPollInterval, core.Duration(o.s.fetchUntil-b.now))
 	b.timerGen++
 	o.gen = b.timerGen
 	return []core.Action{core.SetTimer{ID: core.TimerID(o.id), Gen: o.gen, After: after}}
@@ -177,7 +177,7 @@ func (b *Broker) onFetchGet(o *operation, e core.ObjectGetDone) []core.Action {
 		o.corrupt = false
 		return b.retryOp(o)
 	}
-	if b.cfg.InjectedBug != InjectedBugServeCorrupt && !isIntact(e.Data, rg) {
+	if b.config.InjectedBug != InjectedBugServeCorrupt && !isIntact(e.Data, rg) {
 		return b.retryCorrupt(o, rg)
 	}
 	return b.acceptFetch(o, e.Data, rg)
@@ -192,7 +192,7 @@ func (b *Broker) retryCorrupt(o *operation, rg core.BatchRange) []core.Action {
 
 func (b *Broker) acceptFetch(o *operation, data []byte, rg core.BatchRange) []core.Action {
 	base := int64(rg.Base)
-	if b.cfg.InjectedBug == InjectedBugWrongOffset {
+	if b.config.InjectedBug == InjectedBugWrongOffset {
 		base++
 	}
 	o.out = append(o.out, kafkawire.ChangeBatchOffset(data, base, 0)...)

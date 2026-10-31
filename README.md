@@ -36,7 +36,7 @@ make install-hooks   # uses ambient go / golangci-lint on PATH
 | test | unit packages (not `internal/verify/simulator`, not `test/integrationtest`) |
 | sim | `go test ./internal/verify/simulator/...` |
 | it-hermetic | `go test ./test/integrationtest/` (in-process memstore) |
-| risk | change risk score ≤ 20 (`docs/risk-gate.md`) |
+| risk | change risk score <= 20 (`docs/risk-gate.md`) |
 
 Every `git commit` runs that gate via the pre-commit hook (with mise:
 `mise exec -- make build`). Bypass once:
@@ -61,7 +61,7 @@ are checked by `go run ./ops/tools/determinismcheck <packages>`.
 
 ## Docs
 
-- `docs/decisions.md` — design decisions
-- `docs/risk-gate.md` — change risk score threshold and baseline
-- `docs/lint-baseline.md` — golangci-lint policy
-- `docs/aws-benchmark-runbook.md` — AWS bench / deploy
+- `docs/decisions.md` - design decisions
+- `docs/risk-gate.md` - change risk score threshold and baseline
+- `docs/lint-baseline.md` - golangci-lint policy
+- `docs/aws-benchmark-runbook.md` - AWS bench / deploy

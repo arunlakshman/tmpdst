@@ -25,11 +25,11 @@ func TestConformanceStateUpdaterPebble(t *testing.T) {
 	n := 0
 	runProfiles(t, func() impl {
 		n++
-		kv, err := pebblestore.Open(filepath.Join(dir, strconv.Itoa(n)), pebblestore.Options{CacheBytes: 8 << 20, MemTableBytes: 4 << 20})
+		keyValue, err := pebblestore.Open(filepath.Join(dir, strconv.Itoa(n)), pebblestore.Options{CacheBytes: 8 << 20, MemTableBytes: 4 << 20})
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Cleanup(func() { _ = kv.Close() })
-		return storeImpl{&stateupdater.Store{A: stateupdater.New(kv)}}
+		t.Cleanup(func() { _ = keyValue.Close() })
+		return storeImpl{&stateupdater.Store{A: stateupdater.New(keyValue)}}
 	}, 3)
 }

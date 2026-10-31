@@ -25,14 +25,14 @@ func wave(t *testing.T, d doer, url string, n int, arrived *atomic.Int64) {
 	var wg sync.WaitGroup
 	for range n {
 		wg.Go(func() {
-			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-			resp, err := d.Do(req)
+			request, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			response, err := d.Do(request)
 			if err != nil {
 				t.Error(err)
 				return
 			}
-			_, _ = io.Copy(io.Discard, resp.Body)
-			_ = resp.Body.Close()
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
 		})
 	}
 	wg.Wait()

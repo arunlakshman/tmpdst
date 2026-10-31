@@ -25,9 +25,9 @@ func TestLogCampaign(t *testing.T) {
 }
 
 func TestLogDeterminismCanary(t *testing.T) {
-	cfg := ConfigLog(nil)
+	config := ConfigLog(nil)
 	for seed := uint64(1); seed <= 3; seed++ {
-		a, b := simulator.RunSeed(cfg, seed), simulator.RunSeed(cfg, seed)
+		a, b := simulator.RunSeed(config, seed), simulator.RunSeed(config, seed)
 		if a.TraceHash != b.TraceHash || a.RandCalls != b.RandCalls || a.Steps != b.Steps {
 			t.Fatalf("seed %d diverged", seed)
 		}
@@ -56,14 +56,14 @@ func TestLogMutantsAreCaught(t *testing.T) {
 		{"a replica passes an empty slot without a no-op", fakelogservice.InjectedBugGapSkip, 0, "logcp-sim: a replica's state equals the replay of the log at its slot"},
 	}
 	for _, c := range cases {
-		cfg := configLog(nil, broker.InjectedBugNone, c.bug)
+		config := configLog(nil, broker.InjectedBugNone, c.bug)
 		if c.window > 0 {
-			cfg.ControlPlane.Log.WindowSlots = c.window
+			config.ControlPlane.Log.WindowSlots = c.window
 		}
 		var props []core.PropertyID
 		caught := uint64(0)
 		for s := uint64(1); s <= budget && caught == 0; s++ {
-			if props = violated(cfg, s); len(props) > 0 {
+			if props = violated(config, s); len(props) > 0 {
 				caught = s
 			}
 		}

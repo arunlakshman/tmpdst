@@ -11,8 +11,8 @@ import (
 
 var tpA = core.NewTopicPartition("t", 0)
 
-func batch(tp core.TopicPartition, n int64) core.PendingBatch {
-	return core.PendingBatch{TopicPartition: tp, Records: n, Loc: core.SegmentRef{Key: "o", Len: n * 10}}
+func batch(topicPartition core.TopicPartition, n int64) core.PendingBatch {
+	return core.PendingBatch{TopicPartition: topicPartition, Records: n, Loc: core.SegmentRef{Key: "o", Len: n * 10}}
 }
 
 func TestCommitLookupEnd(t *testing.T) {

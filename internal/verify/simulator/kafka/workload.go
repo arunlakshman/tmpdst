@@ -107,13 +107,13 @@ type client struct {
 // resolved (acked or abandoned) before the next one for that partition is
 // built, so the oracle can check that acked offsets follow send order.
 type Workload struct {
-	env   core.Environment
-	self  core.NodeInstance
-	opts  Opts
-	tps   []core.TopicPartition
-	hist  simulator.History
-	codec kafkawire.Codec
-	loop  session.Loop[*client]
+	env     core.Environment
+	self    core.NodeInstance
+	opts    Opts
+	tps     []core.TopicPartition
+	history simulator.History
+	codec   kafkawire.Codec
+	loop    session.Loop[*client]
 }
 
 // NewWorkload builds the workload machine.
@@ -144,7 +144,7 @@ func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.No
 func (w *Workload) Name() string { return "kafka" }
 
 // SetHistory is called by the kernel.
-func (w *Workload) SetHistory(h simulator.History) { w.hist = h }
+func (w *Workload) SetHistory(h simulator.History) { w.history = h }
 
 // Quiescent reports that no produce batch is unresolved. Consumers poll
 // forever and do not count.
@@ -158,7 +158,7 @@ func (w *Workload) Quiescent() bool {
 }
 
 // Step implements core.StateMachine.
-func (w *Workload) Step(ev core.Event) []core.Action { return w.loop.Step(ev) }
+func (w *Workload) Step(event core.Event) []core.Action { return w.loop.Step(event) }
 
 // OnPhase implements simulator.PhaseAware. Entering Settling the producers start no
 // new batch (in-flight ones finish); the consumers keep reading. Entering
@@ -206,10 +206,10 @@ func (w *Workload) advance(c *client) []core.Action {
 }
 
 // send encodes req at the client's version for kind and starts the timeout.
-func (w *Workload) send(c *client, kind requestKind, req kmsg.Request) []core.Action {
+func (w *Workload) send(c *client, kind requestKind, request kmsg.Request) []core.Action {
 	c.corr++
-	h := core.RequestHeader{APIKey: req.Key(), APIVersion: c.ver[kind], CorrelationID: c.corr, ClientID: fmt.Sprintf("c%d", c.ID)}
-	data, err := w.codec.EncodeRequest(h, req)
+	h := core.RequestHeader{APIKey: request.Key(), APIVersion: c.ver[kind], CorrelationID: c.corr, ClientID: fmt.Sprintf("c%d", c.ID)}
+	data, err := w.codec.EncodeRequest(h, request)
 	if err != nil {
 		w.env.Unreachable("kafka: client request encodes", core.ContextPair{Key: "err", Value: err.Error()})
 		return nil
@@ -233,13 +233,13 @@ func (w *Workload) onBytes(c *client, data []byte) []core.Action {
 			return append(acts, w.loop.Abort(c, "bad_stream")...)
 		}
 		in := c.out
-		resp, derr := w.codec.DecodeResponse(in.h, f)
+		response, derr := w.codec.DecodeResponse(in.h, f)
 		if derr != nil {
 			return append(acts, w.loop.Abort(c, "bad_response")...)
 		}
 		c.out = nil
 		acts = append(acts, c.Answered())
-		acts = append(acts, w.handle(c, in.kind, resp)...)
+		acts = append(acts, w.handle(c, in.kind, response)...)
 	}
 	if err != nil && c.State == session.Connected {
 		return append(acts, w.loop.Abort(c, "bad_stream")...)
@@ -247,8 +247,8 @@ func (w *Workload) onBytes(c *client, data []byte) []core.Action {
 	return acts
 }
 
-func (w *Workload) handle(c *client, k requestKind, resp core.Response) []core.Action {
-	switch r := resp.(type) {
+func (w *Workload) handle(c *client, k requestKind, response core.Response) []core.Action {
+	switch r := response.(type) {
 	case *kmsg.ApiVersionsResponse:
 		return w.onAPI(c, r)
 	case *kmsg.MetadataResponse:

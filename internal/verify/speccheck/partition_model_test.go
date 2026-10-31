@@ -44,19 +44,19 @@ func genPartitionModelOp(r *checker.Rand, _ int) partitionModelOp {
 	return partitionModelOp{Kind: "hwm"}
 }
 
-func stepPartitionModel(s *partitionPair, op partitionModelOp) error {
-	switch op.Kind {
+func stepPartitionModel(s *partitionPair, operation partitionModelOp) error {
+	switch operation.Kind {
 	case "append":
 		wantBase := core.Offset(len(s.model))
-		input := make([][]byte, len(op.Batch))
-		for i, v := range op.Batch {
+		input := make([][]byte, len(operation.Batch))
+		for i, v := range operation.Batch {
 			input[i] = bytes.Clone(v)
 			s.model = append(s.model, bytes.Clone(v))
 		}
 		if got := s.spec.Append(input); got != wantBase {
 			return fmt.Errorf("Append returned base offset %d, the model expected %d", got, wantBase)
 		}
-		s.twin.Append(op.Batch)
+		s.twin.Append(operation.Batch)
 		// The caller changes its own bytes after Append. The spec must not see it.
 		for _, v := range input {
 			for i := range v {
@@ -68,37 +68,37 @@ func stepPartitionModel(s *partitionPair, op partitionModelOp) error {
 			return fmt.Errorf("HighWatermark is %d, the model expected %d", got, want)
 		}
 	default:
-		return checkPartitionRead(s, op)
+		return checkPartitionRead(s, operation)
 	}
 	return nil
 }
 
-func checkPartitionRead(s *partitionPair, op partitionModelOp) error {
-	recs, ok := s.spec.Read(core.Offset(op.From), op.Max)
-	wantOK := op.From >= 0 && op.From <= int64(len(s.model))
+func checkPartitionRead(s *partitionPair, operation partitionModelOp) error {
+	recs, ok := s.spec.Read(core.Offset(operation.From), operation.Max)
+	wantOK := operation.From >= 0 && operation.From <= int64(len(s.model))
 	if ok != wantOK {
-		return fmt.Errorf("Read(from %d, max %d): ok is %v, the model expected %v (high watermark %d)", op.From, op.Max, ok, wantOK, len(s.model))
+		return fmt.Errorf("Read(from %d, max %d): ok is %v, the model expected %v (high watermark %d)", operation.From, operation.Max, ok, wantOK, len(s.model))
 	}
 	if !ok {
 		if recs != nil {
-			return fmt.Errorf("Read(from %d, max %d): ok is false but %d records came back", op.From, op.Max, len(recs))
+			return fmt.Errorf("Read(from %d, max %d): ok is false but %d records came back", operation.From, operation.Max, len(recs))
 		}
 		return nil
 	}
 	var want [][]byte
-	for i := op.From; i < int64(len(s.model)); i++ {
-		if op.Max > 0 && len(want) == op.Max {
+	for i := operation.From; i < int64(len(s.model)); i++ {
+		if operation.Max > 0 && len(want) == operation.Max {
 			break
 		}
 		want = append(want, s.model[i])
 	}
 	if len(recs) != len(want) {
-		return fmt.Errorf("Read(from %d, max %d): got %d records, the model expected %d", op.From, op.Max, len(recs), len(want))
+		return fmt.Errorf("Read(from %d, max %d): got %d records, the model expected %d", operation.From, operation.Max, len(recs), len(want))
 	}
 	for i, r := range recs {
-		if r.Offset != core.Offset(op.From)+core.Offset(i) || !bytes.Equal(r.Value, want[i]) {
+		if r.Offset != core.Offset(operation.From)+core.Offset(i) || !bytes.Equal(r.Value, want[i]) {
 			return fmt.Errorf("Read(from %d, max %d): record %d is offset %d value %q, the model expected offset %d value %q",
-				op.From, op.Max, i, r.Offset, r.Value, op.From+int64(i), want[i])
+				operation.From, operation.Max, i, r.Offset, r.Value, operation.From+int64(i), want[i])
 		}
 		// The caller changes the returned bytes. The log must not change.
 		for j := range r.Value {

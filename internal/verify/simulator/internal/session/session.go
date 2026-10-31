@@ -88,9 +88,9 @@ type Loop[C member] struct {
 func (l *Loop[C]) nextRequestID() core.RequestID { l.NextReq++; return l.NextReq }
 
 // Step handles the connection events of ev.
-func (l *Loop[C]) Step(ev core.Event) []core.Action {
+func (l *Loop[C]) Step(event core.Event) []core.Action {
 	var acts []core.Action
-	switch e := ev.Body.(type) {
+	switch e := event.Body.(type) {
 	case core.NodeStarted:
 		for _, c := range l.Clients {
 			acts = append(acts, l.Dial(c)...)

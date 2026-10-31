@@ -65,17 +65,17 @@ func TestRunMemBrokerStartsAndStops(t *testing.T) {
 	}()
 	waitDial(t, listen)
 	waitDial(t, maddr)
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+maddr+"/metrics", nil)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+maddr+"/metrics", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var body bytes.Buffer
-	_, _ = body.ReadFrom(resp.Body)
-	_ = resp.Body.Close()
+	_, _ = body.ReadFrom(response.Body)
+	_ = response.Body.Close()
 	if !strings.Contains(body.String(), "mdsbroker_open_connections") {
 		t.Error("open_connections gauge missing")
 	}
@@ -202,11 +202,11 @@ func TestControlPlaneURLListFailsOver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, _, _, _, err := nodeConfig(f, slog.New(slog.NewTextHandler(io.Discard, nil)), runinfo.New("mdsbroker", "t", 1), nil)
+	config, _, _, _, err := nodeConfig(f, slog.New(slog.NewTextHandler(io.Discard, nil)), runinfo.New("mdsbroker", "t", 1), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cfg.ControlPlane.Call(t.Context(), core.DescribeTopics{}); err != nil {
+	if _, err := config.ControlPlane.Call(t.Context(), core.DescribeTopics{}); err != nil {
 		t.Fatalf("call through a dead url and a standby: %v", err)
 	}
 }

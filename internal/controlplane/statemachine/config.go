@@ -129,9 +129,9 @@ func (c Config) openFold() (*stateupdater.StateUpdater, error) {
 	if c.OpenStore == nil {
 		return stateupdater.NewMem(), nil
 	}
-	kv, err := c.OpenStore()
+	keyValue, err := c.OpenStore()
 	if err != nil {
 		return nil, err
 	}
-	return stateupdater.New(kv), nil
+	return stateupdater.New(keyValue), nil
 }

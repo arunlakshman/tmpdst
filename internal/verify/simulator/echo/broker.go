@@ -49,7 +49,7 @@ type op struct {
 	kind     opKind
 	state    opState
 	retry    opState // what a backoff restarts
-	req      core.RequestID
+	request  core.RequestID
 	gen      core.TimerVersion
 	attempts int
 	maybe    bool // a commit may have applied
@@ -108,7 +108,7 @@ func (b *Broker) findConn(id core.ConnID) int {
 
 func (b *Broker) findReq(r core.RequestID) *op {
 	for _, o := range b.ops {
-		if o.req == r && o.req != 0 {
+		if o.request == r && o.request != 0 {
 			return o
 		}
 	}
@@ -125,9 +125,9 @@ func (b *Broker) drop(o *op) {
 }
 
 // Step implements core.StateMachine.
-func (b *Broker) Step(ev core.Event) []core.Action {
+func (b *Broker) Step(event core.Event) []core.Action {
 	var acts []core.Action
-	switch e := ev.Body.(type) {
+	switch e := event.Body.(type) {
 	case core.StopRequest:
 		acts = b.stop()
 	case core.ConnOpened:
@@ -279,7 +279,7 @@ func (b *Broker) retryLater(o *op, again opState) []core.Action {
 	if o.attempts++; o.attempts >= maxAttempts || b.stopping {
 		return b.fail(o)
 	}
-	o.state, o.retry, o.req = stateRetryWait, again, 0
+	o.state, o.retry, o.request = stateRetryWait, again, 0
 	t, g := b.timer(core.TimerID(o.id), o.attempts)
 	o.gen = g
 	return []core.Action{t}
@@ -311,8 +311,8 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 // ---- PUT ----
 
 func (b *Broker) put(o *op) []core.Action {
-	o.state, o.req = statePut, b.nextRequestID()
-	return []core.Action{core.ObjectPut{Req: o.req, Key: o.key, Data: o.segment}}
+	o.state, o.request = statePut, b.nextRequestID()
+	return []core.Action{core.ObjectPut{Req: o.request, Key: o.key, Data: o.segment}}
 }
 
 func (b *Broker) onPut(o *op, e core.ObjectPutDone) []core.Action {
@@ -328,8 +328,8 @@ func (b *Broker) onPut(o *op, e core.ObjectPutDone) []core.Action {
 }
 
 func (b *Broker) commit(o *op) []core.Action {
-	o.state, o.req = stateCommit, b.nextRequestID()
-	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: core.CommitSegment{
+	o.state, o.request = stateCommit, b.nextRequestID()
+	return []core.Action{core.ControlPlaneCall{Req: o.request, Op: core.CommitSegment{
 		SegmentKey: o.key,
 		Batches:    []core.PendingBatch{{TopicPartition: topicPartition(), Records: 1, Loc: o.ref}},
 	}}}
@@ -352,13 +352,13 @@ func (b *Broker) onCP(e core.ControlPlaneDone) []core.Action {
 func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 	switch {
 	case e.Err == core.OK:
-		resp, ok := e.Resp.(core.CommitSegmentResp)
-		okShape := ok && len(resp.Assigned) == 1 && resp.Assigned[0].TopicPartition == topicPartition() && resp.Assigned[0].Loc == o.ref
+		response, ok := e.Resp.(core.CommitSegmentResp)
+		okShape := ok && len(response.Assigned) == 1 && response.Assigned[0].TopicPartition == topicPartition() && response.Assigned[0].Loc == o.ref
 		b.env.Always(okShape, "echo: commit assigns exactly the one batch")
 		if !okShape {
 			return b.reply(o, "ERR maybe")
 		}
-		off := resp.Assigned[0].Base
+		off := response.Assigned[0].Base
 		b.drop(o)
 		if o.replied {
 			return nil
@@ -382,16 +382,16 @@ func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 // ---- GET ----
 
 func (b *Broker) lookup(o *op) []core.Action {
-	o.state, o.req = stateLookup, b.nextRequestID()
-	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: core.FindSegments{TopicPartition: topicPartition(), From: o.offset}}}
+	o.state, o.request = stateLookup, b.nextRequestID()
+	return []core.Action{core.ControlPlaneCall{Req: o.request, Op: core.FindSegments{TopicPartition: topicPartition(), From: o.offset}}}
 }
 
 func (b *Broker) onLookup(o *op, e core.ControlPlaneDone) []core.Action {
-	resp, ok := e.Resp.(core.FindSegmentsResp)
+	response, ok := e.Resp.(core.FindSegmentsResp)
 	if e.Err != core.OK || !ok {
 		return b.retryLater(o, stateLookup)
 	}
-	for _, r := range resp.Ranges {
+	for _, r := range response.Ranges {
 		if r.Base <= o.offset && o.offset < r.Base+core.Offset(r.Count) {
 			o.ref = r.Loc
 			return b.get(o)
@@ -401,8 +401,8 @@ func (b *Broker) onLookup(o *op, e core.ControlPlaneDone) []core.Action {
 }
 
 func (b *Broker) get(o *op) []core.Action {
-	o.state, o.req = stateGet, b.nextRequestID()
-	return []core.Action{core.ObjectGet{Req: o.req, Ref: core.SegmentRef{Key: o.ref.Key}}}
+	o.state, o.request = stateGet, b.nextRequestID()
+	return []core.Action{core.ObjectGet{Req: o.request, Ref: core.SegmentRef{Key: o.ref.Key}}}
 }
 
 func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
@@ -437,8 +437,8 @@ func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
 	return b.reply(o, "VAL "+string(data))
 }
 
-func emit(name string, fs ...core.Field) core.RecordFact {
-	return core.RecordFact{Fact: core.Fact{Name: name, Fields: fs}}
+func emit(name string, fields ...core.Field) core.RecordFact {
+	return core.RecordFact{Fact: core.Fact{Name: name, Fields: fields}}
 }
 
 // StateHash folds all state in a fixed order.
@@ -462,7 +462,7 @@ func (b *Broker) StateHash() uint64 {
 		h.Uint64Value(uint64(o.kind))
 		h.Uint64Value(uint64(o.state))
 		h.Uint64Value(uint64(o.retry))
-		h.Uint64Value(uint64(o.req))
+		h.Uint64Value(uint64(o.request))
 		h.Uint64Value(uint64(o.gen))
 		h.Uint64Value(uint64(o.attempts))
 		h.Bool(o.maybe)

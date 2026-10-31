@@ -12,8 +12,8 @@ import (
 // connection only: another connection is answered at once, and the answers
 // of one connection keep their request order.
 func TestParkedJoinDoesNotBlockOtherConnections(t *testing.T) {
-	h, _ := withGroupCP(t, DefaultConfig(), func(op core.ControlPlaneOperation) core.ControlPlaneDone {
-		if _, ok := op.(core.GroupJoin); ok {
+	h, _ := withGroupCP(t, DefaultConfig(), func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
+		if _, ok := operation.(core.GroupJoin); ok {
 			return cpOK(core.GroupJoinResp{MemberID: "m-1", Leader: "m-1", Generation: 1})
 		}
 		return cpOK(nil)

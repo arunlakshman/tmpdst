@@ -242,11 +242,11 @@ func (c *Coordinator) openRound(t *term, g *group, initial bool) {
 
 // maxRebalance is the largest rebalance timeout of the members.
 func (c *Coordinator) maxRebalance(g *group) time.Duration {
-	var ms int32
+	var milliseconds int32
 	for _, m := range g.members {
-		ms = max(ms, m.rebalanceMs)
+		milliseconds = max(milliseconds, m.rebalanceMs)
 	}
-	return time.Duration(ms) * time.Millisecond
+	return time.Duration(milliseconds) * time.Millisecond
 }
 
 // extendRound moves the deadline when a member with a longer rebalance timeout joins.

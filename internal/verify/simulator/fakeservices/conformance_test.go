@@ -31,11 +31,11 @@ import (
 const seedBudget = 50
 
 // completionFor drains the engine queue and returns the completion of req.
-func completionFor(ctx *fakeservicetest.Ctx, req core.RequestID) (core.IOResult, error) {
+func completionFor(ctx *fakeservicetest.Ctx, request core.RequestID) (core.IOResult, error) {
 	ctx.Run()
-	c := ctx.Find(req)
+	c := ctx.Find(request)
 	if c == nil {
-		return nil, fmt.Errorf("request %d: the engine queue was drained but no completion arrived", req)
+		return nil, fmt.Errorf("request %d: the engine queue was drained but no completion arrived", request)
 	}
 	return c, nil
 }
@@ -52,9 +52,9 @@ func newEngineObjectSubject() suites.ObjectSubject {
 	return &engineObjectSubject{engine: e, ctx: fakeservicetest.New(e, 1), from: fakeservicetest.Ref("a")}
 }
 
-func (s *engineObjectSubject) Do(op core.IOCall) (observation.ObjectResult, error) {
-	s.engine.Execute(s.ctx, s.from, op)
-	c, err := completionFor(s.ctx, op.RequestID())
+func (s *engineObjectSubject) Do(operation core.IOCall) (observation.ObjectResult, error) {
+	s.engine.Execute(s.ctx, s.from, operation)
+	c, err := completionFor(s.ctx, operation.RequestID())
 	if err != nil {
 		return observation.ObjectResult{}, err
 	}
@@ -76,20 +76,20 @@ func newEngineControlPlaneSubject() suites.ControlPlaneSubject {
 	return &engineControlPlaneSubject{engine: e, ctx: fakeservicetest.New(e, 1), from: fakeservicetest.Ref("a")}
 }
 
-func (s *engineControlPlaneSubject) Do(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
+func (s *engineControlPlaneSubject) Do(operation generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 	switch {
-	case op.CreateTopic != nil:
-		code := s.engine.CreateTopic(op.CreateTopic.Name, op.CreateTopic.Partitions)
+	case operation.CreateTopic != nil:
+		code := s.engine.CreateTopic(operation.CreateTopic.Name, operation.CreateTopic.Partitions)
 		return observation.ControlPlaneResult{Code: code}, nil
-	case op.Call != nil:
-		s.engine.Execute(s.ctx, s.from, *op.Call)
-		c, err := completionFor(s.ctx, op.Call.RequestID())
+	case operation.Call != nil:
+		s.engine.Execute(s.ctx, s.from, *operation.Call)
+		c, err := completionFor(s.ctx, operation.Call.RequestID())
 		if err != nil {
 			return observation.ControlPlaneResult{}, err
 		}
 		done, ok := c.(core.ControlPlaneDone)
 		if !ok {
-			return observation.ControlPlaneResult{}, fmt.Errorf("request %d: the completion is %T, not a CPDone", op.Call.RequestID(), c)
+			return observation.ControlPlaneResult{}, fmt.Errorf("request %d: the completion is %T, not a CPDone", operation.Call.RequestID(), c)
 		}
 		return observation.FromControlPlaneDone(done), nil
 	}

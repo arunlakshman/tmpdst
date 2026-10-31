@@ -91,7 +91,7 @@ backpressure. That has three defects:
 2. **It cannot be simulation-tested.** The simulator calls `Step` directly and
    has no inbox, so the overload path never runs under test.
 3. **It causes head-of-line blocking of the events that free memory.** A flood
-   of `BytesReceived` delays `ObjPutDone` → `CPDone` → ack. Those completions are
+   of `BytesReceived` delays `ObjPutDone` -> `CPDone` -> ack. Those completions are
    what release buffered bytes. Memory stays high, so we throttle more and queues
    get longer. That is a **metastable spiral**: the system can stay stuck after
    the load spike that caused it is gone.
@@ -116,8 +116,8 @@ buffered = bytes in open batch
 | Level  | Trigger (defaults, tunable)                                  | Broker behavior |
 |--------|--------------------------------------------------------------|-----------------|
 | Normal | `buffered < SoftLimit` (64 MB) and client within quota        | Accept. |
-| Soft   | `buffered ≥ SoftLimit`, or the client's byte-rate quota exceeded | Accept the request, answer with `ThrottleTimeMs > 0` in the Produce response (Kafka's native mechanism, honored by kgo and the Java client), **and** emit `PauseReads{Conn}` plus a timer to `ResumeReads` after that throttle time. KIP-219 semantics: respond, then mute. |
-| Hard   | `buffered ≥ HardLimit` (128 MB)                               | Emit `PauseReads` for **every** client connection. Resume all when `buffered < SoftLimit` (hysteresis), driven by completions. |
+| Soft   | `buffered >= SoftLimit`, or the client's byte-rate quota exceeded | Accept the request, answer with `ThrottleTimeMs > 0` in the Produce response (Kafka's native mechanism, honored by kgo and the Java client), **and** emit `PauseReads{Conn}` plus a timer to `ResumeReads` after that throttle time. KIP-219 semantics: respond, then mute. |
+| Hard   | `buffered >= HardLimit` (128 MB)                               | Emit `PauseReads` for **every** client connection. Resume all when `buffered < SoftLimit` (hysteresis), driven by completions. |
 
 Rules:
 - **Never drop an admitted request.** Every admitted request eventually gets a
@@ -161,7 +161,7 @@ actions, its own timers) goes to the control queue.
 - **Control queue: unbounded type, bounded by construction.** Every control event
   is the result of an action the state machine already emitted, and the state
   machine caps those:
-  `controlMax ≤ MaxInflightFlushes·2 (PUT + commit) + MaxInflightFetches
+  `controlMax <= MaxInflightFlushes-2 (PUT + commit) + MaxInflightFetches
   + MaxOutstandingSends + live timers + 1`.
   Because it can't overflow, its senders (I/O goroutines, timer callbacks)
   **never block**, which removes the loop/sender deadlock risk.
@@ -173,12 +173,12 @@ actions, its own timers) goes to the control queue.
 
 ```
 Policy (pure function of the two queues' contents and a counter):
-  1. If control is non-empty → take the head of control.
-  2. Else if data is non-empty → take the head of data, increment burst.
+  1. If control is non-empty -> take the head of control.
+  2. Else if data is non-empty -> take the head of data, increment burst.
   3. After every DataBurst (default 64) consecutive data events, re-check
      control before taking more data (already implied by rule 1, since control
      is checked before every pick).
-  4. If both are empty → block until either becomes non-empty.
+  4. If both are empty -> block until either becomes non-empty.
 ```
 
 Properties:
@@ -190,7 +190,7 @@ Properties:
 - **Per-connection order is preserved,** because each connection's events are in
   one first-in-first-out queue. Control and data events may interleave
   differently; correctness must not depend on that interleaving (the simulator
-  checks this, §4).
+  checks this, section 4).
 - **Deterministic given the queue contents.** The policy is a pure function
   (`core.InboxPicker`), with no Go `select` deciding priority. In Go, `select`
   picks randomly among ready cases, so the production loop drains control with
@@ -217,7 +217,7 @@ simulator runs.
 
 ## 4. Making it deterministic and simulation-testable
 
-Treating `Step` as instantaneous hides everything in §1. So the simulator
+Treating `Step` as instantaneous hides everything in section 1. So the simulator
 **models each node's inboxes and CPU time**, using the same pure policy code.
 
 ### 4.1 Node model in the simulator
@@ -226,17 +226,17 @@ Treating `Step` as instantaneous hides everything in §1. So the simulator
 simNode = {
     sm        core.StateMachine
     ctrl,data []Entry              // the node's two inboxes, classified by core.InboxKindOf
-    busyUntil sim.Time             // models the loop goroutine being busy
+    busyUntil simulator.Time             // models the loop goroutine being busy
 }
 
-engines/network deliver → append to node.ctrl or node.data (NOT straight into Step)
+engines/network deliver -> append to node.ctrl or node.data (NOT straight into Step)
 when node is idle and has queued events:
     ev   := core.InboxPicker.Next(ctrl, data)     // the SAME code as production
     cost := CostModel.Sample(ev, rng)             // seeded
     run Step(ev) at now; node busy until now+cost; actions issued at now
 ```
 
-**CostModel** (seeded, swarmable, buggify-able), part of `sim.Config`:
+**CostModel** (seeded, swarmable, buggify-able), part of `simulator.Config`:
 - a base cost per event plus a cost per byte for `BytesReceived` (decoding,
   copying into the batch);
 - rare **pause episodes**: a burst of slow steps that stands in for a Go GC
@@ -304,7 +304,7 @@ with measured latency bounds) so simulated overload resembles the real thing.
 | Where | What |
 |---|---|
 | `internal/core/action.go` | Actions `PauseReads{Conn}` and `ResumeReads{Conn}`. |
-| `internal/core/inbox.go` | `InboxKind` (`Control`, `Data`) and `InboxKindOf(EventData) InboxKind`, the fixed table from §3.1. An unclassified event type panics, so a new event can't silently land in the wrong queue. |
+| `internal/core/inbox.go` | `InboxKind` (`Control`, `Data`) and `InboxKindOf(EventData) InboxKind`, the fixed table from section 3.1. An unclassified event type panics, so a new event can't silently land in the wrong queue. |
 | `internal/core/inbox.go` | `Queue` (`Len`, `Pop`) and `InboxPolicy` (`Next(control, data Queue)`), pure and shared by production and the simulator. |
 | `internal/system/system.go` | `Sink` split into `DeliverControl` (never blocks) and `DeliverData` (may block). `Conns` gains `PauseReads`/`ResumeReads` so the production executor can park a reader goroutine. |
 | `internal/verify/simulator/cost.go` | `CostModel`, `CostParams` (per-event cost, per-byte cost, pause episodes) and `NodeInbox` (a node's simulated two inboxes plus `BusyUntil`). |

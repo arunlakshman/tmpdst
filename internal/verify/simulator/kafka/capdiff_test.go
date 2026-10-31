@@ -50,15 +50,15 @@ func capCampaign(t *testing.T, capParts int) *sealStats {
 	// Fetch long poll (slice 3) changed the timing, so the cap binds on fewer
 	// segments. More seeds keep it in the sample.
 	opts := Opts{Producers: 128, Consumers: 1, Topics: []string{"a", "b"}, Partitions: 128}
-	cfg := configWith(seeds(1, 6), broker.InjectedBugNone, opts)
-	inner := cfg.Swarm
-	cfg.Swarm = func(seed uint64, r simulator.CountedRand, c *simulator.SeedConfig) {
+	config := configWith(seeds(1, 6), broker.InjectedBugNone, opts)
+	inner := config.Swarm
+	config.Swarm = func(seed uint64, r simulator.CountedRand, c *simulator.SeedConfig) {
 		inner(seed, r, c)
 		c.Params, c.ControlPlane.MaxCommitItems = prod, 0
 	}
 	st := &sealStats{}
-	cfg.Invariants = append(cfg.Invariants, func() simulator.SafetyRule { return &sealInv{st: st} })
-	rep, err := simulator.NewRunner().Run(cfg)
+	config.Invariants = append(config.Invariants, func() simulator.SafetyRule { return &sealInv{st: st} })
+	rep, err := simulator.NewRunner().Run(config)
 	if err != nil {
 		t.Fatal(err)
 	}

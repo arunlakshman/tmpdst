@@ -24,8 +24,8 @@ func setup(f simulator.ControlPlaneFaults, seed uint64) (*fakecontrolplane.Engin
 	return e, fakeservicetest.New(e, seed), fakeservicetest.Ref("a")
 }
 
-func call(e *fakecontrolplane.Engine, c *fakeservicetest.Ctx, from core.NodeInstance, req core.RequestID, op core.ControlPlaneOperation) {
-	e.Execute(c, from, core.ControlPlaneCall{Req: req, Op: op})
+func call(e *fakecontrolplane.Engine, c *fakeservicetest.Ctx, from core.NodeInstance, request core.RequestID, operation core.ControlPlaneOperation) {
+	e.Execute(c, from, core.ControlPlaneCall{Req: request, Op: operation})
 }
 
 func commit(key string) core.CommitSegment {
@@ -247,27 +247,27 @@ func TestCommitSizeLimit(t *testing.T) {
 	e, c, a := setup(f, 1)
 	e.CreateTopic("t", 4)
 	many := func(key string, n int) core.CommitSegment {
-		op := commit(key)
+		operation := commit(key)
 		for i := 1; i < n; i++ {
-			op.Batches = append(op.Batches, op.Batches[0])
+			operation.Batches = append(operation.Batches, operation.Batches[0])
 		}
-		return op
+		return operation
 	}
 	parts := func(key string, n int) core.CommitSegment {
-		op := many(key, n)
-		for i := range op.Batches {
-			op.Batches[i].TopicPartition.Partition = int32(i)
+		operation := many(key, n)
+		for i := range operation.Batches {
+			operation.Batches[i].TopicPartition.Partition = int32(i)
 		}
-		return op
+		return operation
 	}
 	// One item for the segment and one run per distinct partition, so the
 	// number of batches does not count: 1 + 1 = 2 for 4 batches or 400.
 	call(e, c, a, 2, many("ok", 4))
 	call(e, c, a, 3, many("many", 400))
 	c.Run()
-	for _, req := range []core.RequestID{2, 3} {
-		if d := c.Find(req).(core.ControlPlaneDone); d.Err != core.OK {
-			t.Fatal(req, d)
+	for _, request := range []core.RequestID{2, 3} {
+		if d := c.Find(request).(core.ControlPlaneDone); d.Err != core.OK {
+			t.Fatal(request, d)
 		}
 	}
 	// 3 partitions = 1 + 3 = 4 fits; 4 partitions = 5 is refused and changes nothing.

@@ -490,23 +490,23 @@ func fillCodes(errs []core.ErrCode, code core.ErrCode) []core.ErrCode {
 
 // OffsetCommit stores committed offsets. A member's commit counts as its
 // heartbeat. The log checks the generation and the member.
-func (c *Coordinator) OffsetCommit(_ context.Context, op core.OffsetCommit) (core.OffsetCommitResp, core.ErrCode) {
+func (c *Coordinator) OffsetCommit(_ context.Context, operation core.OffsetCommit) (core.OffsetCommitResp, core.ErrCode) {
 	t := c.enter()
 	if t == nil {
 		return core.OffsetCommitResp{}, core.ErrUnavailable
 	}
-	if op.Member != "" {
-		if g := c.group(t, op.Group, false); g != nil && t.lockLive(g) {
-			if m := g.members[op.Member]; m != nil {
+	if operation.Member != "" {
+		if g := c.group(t, operation.Group, false); g != nil && t.lockLive(g) {
+			if m := g.members[operation.Member]; m != nil {
 				c.armSession(t, g, m)
 			}
 			g.mu.Unlock()
 		}
 	}
-	op.TimeMs = c.nowMs()
+	operation.TimeMs = c.nowMs()
 	ctx, cancel := c.writeCtx(t)
 	defer cancel()
-	response, code, err := c.store.OffsetCommit(ctx, op)
+	response, code, err := c.store.OffsetCommit(ctx, operation)
 	if err != nil {
 		return core.OffsetCommitResp{}, core.ErrUnavailable
 	}
@@ -517,12 +517,12 @@ func (c *Coordinator) OffsetCommit(_ context.Context, op core.OffsetCommit) (cor
 }
 
 // OffsetFetch reads committed offsets. It is not logged.
-func (c *Coordinator) OffsetFetch(_ context.Context, op core.OffsetFetch) (core.OffsetFetchResp, core.ErrCode) {
+func (c *Coordinator) OffsetFetch(_ context.Context, operation core.OffsetFetch) (core.OffsetFetchResp, core.ErrCode) {
 	t := c.enter()
 	if t == nil {
 		return core.OffsetFetchResp{}, core.ErrUnavailable
 	}
-	response, err := c.store.OffsetFetch(t.ctx, op)
+	response, err := c.store.OffsetFetch(t.ctx, operation)
 	if err != nil {
 		return core.OffsetFetchResp{}, core.ErrUnavailable
 	}

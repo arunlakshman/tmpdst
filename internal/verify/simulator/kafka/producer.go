@@ -175,8 +175,8 @@ func (w *Workload) newBatches(c *client) {
 		dh := core.NewHasher()
 		dh.Bytes(data)
 		b.dig = uint64(dh)
-		if w.hist != nil {
-			w.hist.Invoke(w.self, b.id, b.id, ProduceOp{Client: c.ID, Batch: p.serial, TopicPartition: w.tps[idx], Vals: b.vals, Idem: b.idem})
+		if w.history != nil {
+			w.history.Invoke(w.self, b.id, b.id, ProduceOp{Client: c.ID, Batch: p.serial, TopicPartition: w.tps[idx], Vals: b.vals, Idem: b.idem})
 		}
 		p.cur = append(p.cur, b)
 	}
@@ -187,17 +187,17 @@ func (w *Workload) sendProduce(c *client) []core.Action {
 	r.Acks, r.TimeoutMillis = -1, 1000
 	for _, b := range c.p.cur {
 		b.attempts++
-		tp := w.tps[b.tpIdx]
-		part := kmsg.ProduceRequestTopicPartition{Partition: tp.Partition, Records: b.data}
+		topicPartition := w.tps[b.tpIdx]
+		part := kmsg.ProduceRequestTopicPartition{Partition: topicPartition.Partition, Records: b.data}
 		added := false
 		for i := range r.Topics {
-			if r.Topics[i].Topic == tp.Topic {
+			if r.Topics[i].Topic == topicPartition.Topic {
 				r.Topics[i].Partitions = append(r.Topics[i].Partitions, part)
 				added = true
 			}
 		}
 		if !added {
-			r.Topics = append(r.Topics, kmsg.ProduceRequestTopic{Topic: tp.Topic, Partitions: []kmsg.ProduceRequestTopicPartition{part}})
+			r.Topics = append(r.Topics, kmsg.ProduceRequestTopic{Topic: topicPartition.Topic, Partitions: []kmsg.ProduceRequestTopicPartition{part}})
 		}
 	}
 	return w.send(c, requestProduce, r)
@@ -213,11 +213,11 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 	var keep []*batch
 	fatal := false
 	for _, b := range p.cur {
-		tp := w.tps[b.tpIdx]
+		topicPartition := w.tps[b.tpIdx]
 		code, base, found := codeUnknown, int64(-1), false
 		for _, t := range r.Topics {
 			for _, pr := range t.Partitions {
-				if t.Topic == tp.Topic && pr.Partition == tp.Partition {
+				if t.Topic == topicPartition.Topic && pr.Partition == topicPartition.Partition {
 					code, base, found = pr.ErrorCode, pr.BaseOffset, true
 				}
 			}
@@ -260,8 +260,8 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 }
 
 func (w *Workload) resolve(b *batch, out simulator.OpOutcome, res ProduceRes) {
-	if w.hist != nil {
-		w.hist.Return(b.id, res, out)
+	if w.history != nil {
+		w.history.Return(b.id, res, out)
 	}
 }
 

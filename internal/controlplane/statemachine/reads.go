@@ -8,17 +8,17 @@ import "mds/internal/core"
 // Without it a standby could answer from an old fold and show a consumer an
 // end offset below what was already acked.
 type readWaiter struct {
-	req   core.RequestID
-	from  core.NodeInstance
-	read  func() (core.ControlPlaneDone, error)
-	round uint64           // first tail check that started after the read arrived
-	goal  core.LogPosition // tail seen by that check; valid when haveGoal
-	have  bool
+	request core.RequestID
+	from    core.NodeInstance
+	read    func() (core.ControlPlaneDone, error)
+	round   uint64           // first tail check that started after the read arrived
+	goal    core.LogPosition // tail seen by that check; valid when haveGoal
+	have    bool
 }
 
 // queueRead holds a read until a tail check that starts after now has been applied.
-func (m *Machine) queueRead(req core.RequestID, from core.NodeInstance, read func() (core.ControlPlaneDone, error)) {
-	m.readWaiters = append(m.readWaiters, readWaiter{req: req, from: from, read: read, round: m.tailsStarted + 1})
+func (m *Machine) queueRead(request core.RequestID, from core.NodeInstance, read func() (core.ControlPlaneDone, error)) {
+	m.readWaiters = append(m.readWaiters, readWaiter{request: request, from: from, read: read, round: m.tailsStarted + 1})
 }
 
 // noteTail gives the waiters covered by tail check `round` their goal slot.
@@ -43,7 +43,7 @@ func (m *Machine) serveReads() []core.Action {
 			keep = append(keep, w)
 			continue
 		}
-		acts = append(acts, core.ControlPlaneReply{To: w.from, Done: m.readDone(w.req, w.read)})
+		acts = append(acts, core.ControlPlaneReply{To: w.from, Done: m.readDone(w.request, w.read)})
 	}
 	m.readWaiters = keep
 	return acts
@@ -54,17 +54,17 @@ func (m *Machine) serveReads() []core.Action {
 func (m *Machine) refuseReads() []core.Action {
 	var acts []core.Action
 	for _, w := range m.readWaiters {
-		acts = append(acts, core.ControlPlaneReply{To: w.from, Done: core.ControlPlaneDone{Req: w.req, Err: core.ErrUnavailable}})
+		acts = append(acts, core.ControlPlaneReply{To: w.from, Done: core.ControlPlaneDone{Req: w.request, Err: core.ErrUnavailable}})
 	}
 	m.readWaiters = nil
 	return acts
 }
 
-func (m *Machine) readDone(req core.RequestID, read func() (core.ControlPlaneDone, error)) core.ControlPlaneDone {
+func (m *Machine) readDone(request core.RequestID, read func() (core.ControlPlaneDone, error)) core.ControlPlaneDone {
 	d, err := read()
 	if err != nil {
-		return core.ControlPlaneDone{Req: req, Err: core.ErrIO}
+		return core.ControlPlaneDone{Req: request, Err: core.ErrIO}
 	}
-	d.Req = req
+	d.Req = request
 	return d
 }

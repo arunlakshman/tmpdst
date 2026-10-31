@@ -58,61 +58,61 @@ type Node struct {
 
 // Start wires the broker to its adapters and runs it until Stop, Kill or a
 // failure. The returned Node's Wait gives system.Run's error.
-func Start(ctx context.Context, cfg NodeConfig) (*Node, error) {
-	if cfg.Listener == nil || cfg.Objects == nil || cfg.ControlPlane == nil {
+func Start(ctx context.Context, config NodeConfig) (*Node, error) {
+	if config.Listener == nil || config.Objects == nil || config.ControlPlane == nil {
 		return nil, errors.New("prod.Start: Listener, Objects and ControlPlane are required")
 	}
-	cfg = withDefaults(cfg)
-	bc, err := advertised(cfg.Broker, cfg.Listener)
+	config = withDefaults(config)
+	bc, err := advertised(config.Broker, config.Listener)
 	if err != nil {
 		return nil, err
 	}
-	env, err := NewEnv(cfg.Log)
+	env, err := NewEnv(config.Log)
 	if err != nil {
 		return nil, err
 	}
 	rctx, kill := context.WithCancel(ctx)
-	in := system.NewInbox(cfg.DataInbox)
-	if cfg.Lease != nil {
+	in := system.NewInbox(config.DataInbox)
+	if config.Lease != nil {
 		self := core.BrokerAddr{NodeID: bc.BrokerID, Host: bc.Host, Port: bc.Port}
-		go leaseLoop(rctx, in, cfg.Lease, self, cfg.LeaseInterval, cfg.Log)
+		go leaseLoop(rctx, in, config.Lease, self, config.LeaseInterval, config.Log)
 	}
-	nt := NewNet(cfg.Listener, in, cfg.Net)
-	n := &Node{addr: cfg.Listener.Addr(), net: nt, stop: make(chan struct{}), done: make(chan struct{}), kill: kill}
-	exec := NewExecutor(rctx, cfg.Exec, cfg.Objects, cfg.ControlPlane, nt,
-		Classifier{Objects: cfg.ObjClassify, CP: cfg.CPClassify}, in)
+	nt := NewNet(config.Listener, in, config.Net)
+	n := &Node{addr: config.Listener.Addr(), net: nt, stop: make(chan struct{}), done: make(chan struct{}), kill: kill}
+	exec := NewExecutor(rctx, config.Exec, config.Objects, config.ControlPlane, nt,
+		Classifier{Objects: config.ObjClassify, CP: config.CPClassify}, in)
 	var ex system.Executor = exec
-	if cfg.OnIO != nil {
-		ex = hookedExecutor{exec, cfg.OnIO}
+	if config.OnIO != nil {
+		ex = hookedExecutor{exec, config.OnIO}
 	}
-	if cfg.Shutdown != nil {
-		go n.stopOn(cfg.Shutdown)
+	if config.Shutdown != nil {
+		go n.stopOn(config.Shutdown)
 	}
 	b := system.Dependencies{
-		Clock: NewClock(), Objects: cfg.Objects, ControlPlane: cfg.ControlPlane, Connections: nt,
-		Classifier: exec.class, Env: env, Inbox: in, Facts: cfg.Facts,
-		Shutdown: n.stop, StopGrace: core.Duration(cfg.StopGrace),
+		Clock: NewClock(), Objects: config.Objects, ControlPlane: config.ControlPlane, Connections: nt,
+		Classifier: exec.class, Env: env, Inbox: in, Facts: config.Facts,
+		Shutdown: n.stop, StopGrace: core.Duration(config.StopGrace),
 	}
-	self := core.NodeInstance{Node: core.NodeID(cfg.NodeID), Inc: core.BootNumber(env.NewID())}
-	go n.run(rctx, b, ex, broker.New(bc), self, cfg.FlushGrace)
+	self := core.NodeInstance{Node: core.NodeID(config.NodeID), Inc: core.BootNumber(env.NewID())}
+	go n.run(rctx, b, ex, broker.New(bc), self, config.FlushGrace)
 	return n, nil
 }
 
 // withDefaults fills the zero grace periods and inbox size.
-func withDefaults(cfg NodeConfig) NodeConfig {
-	if cfg.StopGrace <= 0 {
-		cfg.StopGrace = 10 * time.Second
+func withDefaults(config NodeConfig) NodeConfig {
+	if config.StopGrace <= 0 {
+		config.StopGrace = 10 * time.Second
 	}
-	if cfg.FlushGrace <= 0 {
-		cfg.FlushGrace = 5 * time.Second
+	if config.FlushGrace <= 0 {
+		config.FlushGrace = 5 * time.Second
 	}
-	if cfg.DataInbox <= 0 {
-		cfg.DataInbox = 1024
+	if config.DataInbox <= 0 {
+		config.DataInbox = 1024
 	}
-	if cfg.LeaseInterval <= 0 {
-		cfg.LeaseInterval = time.Second
+	if config.LeaseInterval <= 0 {
+		config.LeaseInterval = time.Second
 	}
-	return cfg
+	return config
 }
 
 // advertised fills the broker's advertised host and port from the listener.

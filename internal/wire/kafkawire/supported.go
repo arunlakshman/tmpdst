@@ -85,12 +85,12 @@ func IsSupported(key, version int16) bool {
 // UNSUPPORTED_VERSION; EncodeResponse then encodes it as v0, as Kafka does.
 // Set the other fields (ThrottleMillis) as needed.
 func ApiVersionsResponse(h RequestHeader) *kmsg.ApiVersionsResponse { //nolint:revive // Kafka spelling (ApiVersions); renaming breaks sim/ callers
-	resp := kmsg.NewPtrApiVersionsResponse()
+	response := kmsg.NewPtrApiVersionsResponse()
 	if !IsSupported(KeyApiVersions, h.APIVersion) {
-		resp.ErrorCode = ErrCodeUnsupportedVersion
+		response.ErrorCode = ErrCodeUnsupportedVersion
 	}
 	for _, r := range supported {
-		resp.ApiKeys = append(resp.ApiKeys, kmsg.ApiVersionsResponseApiKey{ApiKey: r.Key, MinVersion: r.Min, MaxVersion: r.Max})
+		response.ApiKeys = append(response.ApiKeys, kmsg.ApiVersionsResponseApiKey{ApiKey: r.Key, MinVersion: r.Min, MaxVersion: r.Max})
 	}
-	return resp
+	return response
 }

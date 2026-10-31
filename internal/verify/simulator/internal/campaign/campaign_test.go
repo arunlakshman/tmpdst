@@ -69,18 +69,18 @@ func TestNewAndPhases(t *testing.T) {
 func TestSwarm(t *testing.T) {
 	t.Parallel()
 	p := New()
-	cfg := &simulator.SeedConfig{
+	config := &simulator.SeedConfig{
 		ObjectStore:  p.ObjectStore,
 		ControlPlane: p.ControlPlane,
 		Network:      p.Network,
 		Attrition:    p.Attrition,
 	}
 	called := false
-	Swarm(simulator.NewRand(1), cfg, func() { called = true })
+	Swarm(simulator.NewRand(1), config, func() { called = true })
 	if !called {
 		t.Fatal("afterKnobs not called")
 	}
-	Swarm(simulator.NewRand(2), cfg, nil)
+	Swarm(simulator.NewRand(2), config, nil)
 }
 
 func TestPhaseStart(t *testing.T) {

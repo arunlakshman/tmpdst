@@ -22,23 +22,23 @@ func gm(id string) core.GroupMember {
 }
 
 func install(group string, gen int32, leader string, ids ...string) core.GroupInstall {
-	op := core.GroupInstall{Group: group, ProtocolType: "consumer", Protocol: "range", Generation: gen, Leader: leader, TimeMs: 1000}
+	operation := core.GroupInstall{Group: group, ProtocolType: "consumer", Protocol: "range", Generation: gen, Leader: leader, TimeMs: 1000}
 	for _, id := range ids {
-		op.Members = append(op.Members, gm(id))
+		operation.Members = append(operation.Members, gm(id))
 	}
-	return op
+	return operation
 }
 
-func exec(t testing.TB, a *stateupdater.StateUpdater, op core.ControlPlaneOperation) core.ControlPlaneDone {
+func exec(t testing.TB, a *stateupdater.StateUpdater, operation core.ControlPlaneOperation) core.ControlPlaneDone {
 	t.Helper()
-	return a.Exec(core.ControlPlaneCall{Req: 1, Op: op}).(core.ControlPlaneDone)
+	return a.Exec(core.ControlPlaneCall{Req: 1, Op: operation}).(core.ControlPlaneDone)
 }
 
 // step is one call and its expected error.
 type step struct {
-	name string
-	op   core.ControlPlaneOperation
-	want core.ErrCode
+	name      string
+	operation core.ControlPlaneOperation
+	want      core.ErrCode
 	// errs, when set, is the per-offset answer of an OffsetCommit.
 	errs []core.ErrCode
 }
@@ -46,7 +46,7 @@ type step struct {
 func runSteps(t *testing.T, a *stateupdater.StateUpdater, steps []step) {
 	t.Helper()
 	for _, s := range steps {
-		d := exec(t, a, s.op)
+		d := exec(t, a, s.operation)
 		if d.Err != s.want {
 			t.Fatalf("%s: err %v, want %v", s.name, d.Err, s.want)
 		}
@@ -106,9 +106,9 @@ func TestGroupInstallRules(t *testing.T) {
 	}
 }
 
-func withMetadata(op core.GroupInstall, b []byte) core.GroupInstall {
-	op.Members[0].Metadata = b
-	return op
+func withMetadata(operation core.GroupInstall, b []byte) core.GroupInstall {
+	operation.Members[0].Metadata = b
+	return operation
 }
 
 func TestGroupAssignRules(t *testing.T) {
@@ -138,16 +138,16 @@ func TestGroupAssignRules(t *testing.T) {
 }
 
 func assign(group string, gen int32, leader string, pairs ...string) core.GroupAssign {
-	op := core.GroupAssign{Group: group, Generation: gen, Leader: leader, TimeMs: 2000}
+	operation := core.GroupAssign{Group: group, Generation: gen, Leader: leader, TimeMs: 2000}
 	for i := 0; i+1 < len(pairs); i += 2 {
-		op.Assignments = append(op.Assignments, core.GroupAssignment{Member: pairs[i], Bytes: []byte(pairs[i+1])})
+		operation.Assignments = append(operation.Assignments, core.GroupAssignment{Member: pairs[i], Bytes: []byte(pairs[i+1])})
 	}
-	return op
+	return operation
 }
 
-func withBytes(op core.GroupAssign, b []byte) core.GroupAssign {
-	op.Assignments[0].Bytes = b
-	return op
+func withBytes(operation core.GroupAssign, b []byte) core.GroupAssign {
+	operation.Assignments[0].Bytes = b
+	return operation
 }
 
 func TestGroupRemoveRules(t *testing.T) {
@@ -248,9 +248,9 @@ func TestOffsetCommitRules(t *testing.T) {
 	}
 }
 
-func withMeta(op core.OffsetCommit, b []byte) core.OffsetCommit {
-	op.Offsets[0].Metadata = string(b)
-	return op
+func withMeta(operation core.OffsetCommit, b []byte) core.OffsetCommit {
+	operation.Offsets[0].Metadata = string(b)
+	return operation
 }
 
 func TestOffsetFetchReads(t *testing.T) {
@@ -363,8 +363,8 @@ func groupLog() []stateupdater.Entry {
 	}
 }
 
-func entryOf(op core.ControlPlaneOperation) stateupdater.Entry {
-	e, ok := stateupdater.GroupEntry(op)
+func entryOf(operation core.ControlPlaneOperation) stateupdater.Entry {
+	e, ok := stateupdater.GroupEntry(operation)
 	if !ok {
 		panic("not a group op")
 	}
@@ -406,11 +406,11 @@ func TestGroupCheckpointRoundTrip(t *testing.T) {
 	if !bytes.Equal(data, snapshotBytes(t, b)) {
 		t.Fatal("restored checkpoint is not the same bytes")
 	}
-	for _, op := range []core.ControlPlaneOperation{
+	for _, operation := range []core.ControlPlaneOperation{
 		core.DescribeGroup{Group: "g"}, core.OffsetFetch{Group: "g"}, core.ListGroups{}, core.OffsetFetch{Group: "solo"},
 	} {
-		if got, want := exec(t, b, op), exec(t, a, op); !reflect.DeepEqual(got, want) {
-			t.Fatalf("%T after restore: %+v, want %+v", op, got, want)
+		if got, want := exec(t, b, operation), exec(t, a, operation); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%T after restore: %+v, want %+v", operation, got, want)
 		}
 	}
 }
@@ -449,9 +449,9 @@ func TestGroupStoreAdapter(t *testing.T) {
 	if code, err := s.GroupAssign(ctx, assign("g", 1, "m1", "m1", "a")); code != core.ErrUnknownMember || err != nil {
 		t.Fatalf("assign after remove: %v %v", code, err)
 	}
-	resp, code, err := s.OffsetCommit(ctx, commitOp("g", "", -1, pair("orders", 0, 3)))
-	if code != core.OK || err != nil || len(resp.Errs) != 1 || resp.Errs[0] != core.ErrUnknownPartition {
-		t.Fatalf("commit to a topic that does not exist: %+v %v %v", resp, code, err)
+	response, code, err := s.OffsetCommit(ctx, commitOp("g", "", -1, pair("orders", 0, 3)))
+	if code != core.OK || err != nil || len(response.Errs) != 1 || response.Errs[0] != core.ErrUnknownPartition {
+		t.Fatalf("commit to a topic that does not exist: %+v %v %v", response, code, err)
 	}
 	if _, err := s.OffsetFetch(ctx, core.OffsetFetch{Group: "g"}); err != nil {
 		t.Fatal(err)

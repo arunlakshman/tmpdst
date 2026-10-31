@@ -48,16 +48,16 @@ func (e *testEnv) Sometimes(bool, core.PropertyID)                              
 func (e *testEnv) Reachable(core.PropertyID)                                      {}
 func (e *testEnv) Unreachable(core.PropertyID, ...core.ContextPair)               {}
 
-func newMachine(t *testing.T, cfg statemachine.Config) *statemachine.Machine {
+func newMachine(t *testing.T, config statemachine.Config) *statemachine.Machine {
 	t.Helper()
-	m, _ := newMachineEnv(t, cfg)
+	m, _ := newMachineEnv(t, config)
 	return m
 }
 
-func newMachineEnv(t *testing.T, cfg statemachine.Config) (*statemachine.Machine, *testEnv) {
+func newMachineEnv(t *testing.T, config statemachine.Config) (*statemachine.Machine, *testEnv) {
 	t.Helper()
 	env := &testEnv{}
-	m := statemachine.New(cfg)(env, core.NodeInstance{Node: "cp-0"})
+	m := statemachine.New(config)(env, core.NodeInstance{Node: "cp-0"})
 	sm, ok := m.(*statemachine.Machine)
 	if !ok {
 		t.Fatalf("New returned %T, want *statemachine.Machine", m)

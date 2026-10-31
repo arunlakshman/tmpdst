@@ -127,9 +127,9 @@ func LeaveGroupRespToCore(r *cpv1.LeaveGroupResponse) []core.ErrCode {
 }
 
 // OffsetCommitFromCore builds a GroupOffsetCommitRequest from a commit.
-func OffsetCommitFromCore(op core.OffsetCommit) *cpv1.GroupOffsetCommitRequest {
-	out := &cpv1.GroupOffsetCommitRequest{Group: op.Group, MemberId: op.Member, Generation: op.Generation}
-	for _, o := range op.Offsets {
+func OffsetCommitFromCore(operation core.OffsetCommit) *cpv1.GroupOffsetCommitRequest {
+	out := &cpv1.GroupOffsetCommitRequest{Group: operation.Group, MemberId: operation.Member, Generation: operation.Generation}
+	for _, o := range operation.Offsets {
 		out.Offsets = append(out.Offsets, &cpv1.PartitionOffsetCommit{
 			Tp: topicPartitionFromCore(o.TopicPartition), Offset: o.Offset, LeaderEpoch: o.LeaderEpoch, Metadata: o.Metadata,
 		})
@@ -167,9 +167,9 @@ func OffsetCommitRespToCore(r *cpv1.GroupOffsetCommitResponse) core.OffsetCommit
 }
 
 // OffsetFetchFromCore builds a GroupOffsetFetchRequest.
-func OffsetFetchFromCore(op core.OffsetFetch) *cpv1.GroupOffsetFetchRequest {
-	out := &cpv1.GroupOffsetFetchRequest{Group: op.Group}
-	for _, topicPartition := range op.Partitions {
+func OffsetFetchFromCore(operation core.OffsetFetch) *cpv1.GroupOffsetFetchRequest {
+	out := &cpv1.GroupOffsetFetchRequest{Group: operation.Group}
+	for _, topicPartition := range operation.Partitions {
 		out.Partitions = append(out.Partitions, topicPartitionFromCore(topicPartition))
 	}
 	return out

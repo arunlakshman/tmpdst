@@ -14,8 +14,8 @@ import (
 // it is a manual commit (generation -1, no member), as is generation -1 at
 // any version.
 func (b *Broker) offsetCommit(s *slot, r *kmsg.OffsetCommitRequest) []core.Action {
-	resp := kmsg.NewPtrOffsetCommitResponse()
-	s.resp = resp
+	response := kmsg.NewPtrOffsetCommitResponse()
+	s.response = response
 	call := core.OffsetCommit{Group: r.Group, Generation: -1}
 	if r.Version >= 1 {
 		call.Member, call.Generation = r.MemberID, r.Generation
@@ -29,9 +29,9 @@ func (b *Broker) offsetCommit(s *slot, r *kmsg.OffsetCommitRequest) []core.Actio
 				LeaderEpoch: leaderEpochOf(r.Version, p.LeaderEpoch), Metadata: derefOr(p.Metadata),
 			})
 		}
-		resp.Topics = append(resp.Topics, rt)
+		response.Topics = append(response.Topics, rt)
 	}
-	parts := commitParts(resp)
+	parts := commitParts(response)
 	if r.Group == "" {
 		setCommitCodes(parts, errInvalidGroupID)
 		return nil
@@ -65,11 +65,11 @@ func leaderEpochOf(version int16, epoch int32) int32 {
 }
 
 // commitParts lists the partitions of a commit response, in request order.
-func commitParts(resp *kmsg.OffsetCommitResponse) []*kmsg.OffsetCommitResponseTopicPartition {
+func commitParts(response *kmsg.OffsetCommitResponse) []*kmsg.OffsetCommitResponseTopicPartition {
 	var out []*kmsg.OffsetCommitResponseTopicPartition
-	for i := range resp.Topics {
-		for j := range resp.Topics[i].Partitions {
-			out = append(out, &resp.Topics[i].Partitions[j])
+	for i := range response.Topics {
+		for j := range response.Topics[i].Partitions {
+			out = append(out, &response.Topics[i].Partitions[j])
 		}
 	}
 	return out
@@ -108,24 +108,24 @@ func newFetchAsk(version int16, name string, topics []askTopic) fetchAsk {
 
 // fetchRow is one partition of an OffsetFetch answer.
 type fetchRow struct {
-	tp     core.TopicPartition
-	offset int64
-	epoch  int32
-	meta   *string
-	code   kafkaErrorCode
+	topicPartition core.TopicPartition
+	offset         int64
+	epoch          int32
+	meta           *string
+	code           kafkaErrorCode
 }
 
 // offsetFetch answers OffsetFetch. Version 8 asks for several groups, one
 // control plane call each. Version 0 to 7 ask for one group.
 func (b *Broker) offsetFetch(s *slot, r *kmsg.OffsetFetchRequest) []core.Action {
-	resp := kmsg.NewPtrOffsetFetchResponse()
-	s.resp = resp
+	response := kmsg.NewPtrOffsetFetchResponse()
+	s.response = response
 	batched := r.Version >= 8
 	var asks []fetchAsk
 	if batched {
-		resp.Groups = make([]kmsg.OffsetFetchResponseGroup, len(r.Groups))
+		response.Groups = make([]kmsg.OffsetFetchResponseGroup, len(r.Groups))
 		for i, g := range r.Groups {
-			resp.Groups[i].Group = g.Group
+			response.Groups[i].Group = g.Group
 			var topics []askTopic
 			for _, t := range g.Topics {
 				topics = append(topics, askTopic{topic: t.Topic, parts: t.Partitions})
@@ -141,16 +141,16 @@ func (b *Broker) offsetFetch(s *slot, r *kmsg.OffsetFetchRequest) []core.Action 
 	}
 	var acts []core.Action
 	for i, a := range asks {
-		acts = append(acts, b.fetchGroup(s, resp, i, batched, a)...)
+		acts = append(acts, b.fetchGroup(s, response, i, batched, a)...)
 	}
 	return acts
 }
 
 // fetchGroup answers one group of an OffsetFetch. Its answer goes to group idx
 // (version 8) or to the whole response (earlier versions).
-func (b *Broker) fetchGroup(s *slot, resp *kmsg.OffsetFetchResponse, idx int, batched bool, a fetchAsk) []core.Action {
+func (b *Broker) fetchGroup(s *slot, response *kmsg.OffsetFetchResponse, idx int, batched bool, a fetchAsk) []core.Action {
 	set := func(rows []fetchRow, code kafkaErrorCode) {
-		setFetchRows(resp, idx, batched, rows, code)
+		setFetchRows(response, idx, batched, rows, code)
 	}
 	switch {
 	case a.name == "":
@@ -175,8 +175,8 @@ func (b *Broker) fetchGroup(s *slot, resp *kmsg.OffsetFetchResponse, idx int, ba
 // answer has no partition to list.
 func errRows(a fetchAsk, code kafkaErrorCode) []fetchRow {
 	var rows []fetchRow
-	for _, tp := range a.want {
-		rows = append(rows, fetchRow{tp: tp, offset: -1, epoch: -1, code: code})
+	for _, topicPartition := range a.want {
+		rows = append(rows, fetchRow{topicPartition: topicPartition, offset: -1, epoch: -1, code: code})
 	}
 	return rows
 }
@@ -192,35 +192,35 @@ func fetchRows(a fetchAsk, got []core.PartitionOffset) []fetchRow {
 		return rows
 	}
 	rows := make([]fetchRow, 0, len(a.want))
-	for i, tp := range a.want {
+	for i, topicPartition := range a.want {
 		if i < len(got) {
 			rows = append(rows, rowOf(got[i]))
 			continue
 		}
-		rows = append(rows, fetchRow{tp: tp, offset: -1, epoch: -1})
+		rows = append(rows, fetchRow{topicPartition: topicPartition, offset: -1, epoch: -1})
 	}
 	return rows
 }
 
 func rowOf(o core.PartitionOffset) fetchRow {
-	return fetchRow{tp: o.TopicPartition, offset: o.Offset, epoch: o.LeaderEpoch, meta: new(o.Metadata)}
+	return fetchRow{topicPartition: o.TopicPartition, offset: o.Offset, epoch: o.LeaderEpoch, meta: new(o.Metadata)}
 }
 
 // setFetchRows writes rows and a group code into the response.
-func setFetchRows(resp *kmsg.OffsetFetchResponse, idx int, batched bool, rows []fetchRow, code kafkaErrorCode) {
+func setFetchRows(response *kmsg.OffsetFetchResponse, idx int, batched bool, rows []fetchRow, code kafkaErrorCode) {
 	if batched {
-		g := &resp.Groups[idx]
+		g := &response.Groups[idx]
 		g.Topics, g.ErrorCode = groupTopics(rows), int16(code)
 		return
 	}
-	resp.Topics, resp.ErrorCode = fetchTopics(rows), int16(code)
+	response.Topics, response.ErrorCode = fetchTopics(rows), int16(code)
 }
 
 // splitTopics groups consecutive rows of one topic.
 func splitTopics(rows []fetchRow) [][]fetchRow {
 	var out [][]fetchRow
 	for i, r := range rows {
-		if i == 0 || rows[i-1].tp.Topic != r.tp.Topic {
+		if i == 0 || rows[i-1].topicPartition.Topic != r.topicPartition.Topic {
 			out = append(out, nil)
 		}
 		out[len(out)-1] = append(out[len(out)-1], r)
@@ -232,10 +232,10 @@ func splitTopics(rows []fetchRow) [][]fetchRow {
 func fetchTopics(rows []fetchRow) []kmsg.OffsetFetchResponseTopic {
 	var out []kmsg.OffsetFetchResponseTopic
 	for _, grp := range splitTopics(rows) {
-		t := kmsg.OffsetFetchResponseTopic{Topic: grp[0].tp.Topic}
+		t := kmsg.OffsetFetchResponseTopic{Topic: grp[0].topicPartition.Topic}
 		for _, r := range grp {
 			t.Partitions = append(t.Partitions, kmsg.OffsetFetchResponseTopicPartition{
-				Partition: r.tp.Partition, Offset: r.offset, LeaderEpoch: r.epoch, Metadata: r.meta, ErrorCode: int16(r.code)})
+				Partition: r.topicPartition.Partition, Offset: r.offset, LeaderEpoch: r.epoch, Metadata: r.meta, ErrorCode: int16(r.code)})
 		}
 		out = append(out, t)
 	}
@@ -246,10 +246,10 @@ func fetchTopics(rows []fetchRow) []kmsg.OffsetFetchResponseTopic {
 func groupTopics(rows []fetchRow) []kmsg.OffsetFetchResponseGroupTopic {
 	var out []kmsg.OffsetFetchResponseGroupTopic
 	for _, grp := range splitTopics(rows) {
-		t := kmsg.OffsetFetchResponseGroupTopic{Topic: grp[0].tp.Topic}
+		t := kmsg.OffsetFetchResponseGroupTopic{Topic: grp[0].topicPartition.Topic}
 		for _, r := range grp {
 			t.Partitions = append(t.Partitions, kmsg.OffsetFetchResponseGroupTopicPartition{
-				Partition: r.tp.Partition, Offset: r.offset, LeaderEpoch: r.epoch, Metadata: r.meta, ErrorCode: int16(r.code)})
+				Partition: r.topicPartition.Partition, Offset: r.offset, LeaderEpoch: r.epoch, Metadata: r.meta, ErrorCode: int16(r.code)})
 		}
 		out = append(out, t)
 	}

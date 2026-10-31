@@ -310,7 +310,7 @@ The r1 AWS run (`docs/aws-benchmark-results-r1.md`) averaged 5 to 8 MiB per segm
 16 MiB, and the serial commit stage was the ceiling. The DynamoDB commit now writes one range run item per (partition,
 segment), and `MaxSegmentBatches` is 256, so the byte cap (16 MiB) or the 200 ms timer should seal instead; the counter
 `segments_sealed_total{reason}` shows it (`batches` should disappear, `items` appears only with very many idempotent
-producers per segment). Not re-run on AWS. Local commit cost, `go test -run X -bench Commit ./cp/dynamo` on ExtendDB
+producers per segment). Not re-run on AWS. Local commit cost, the `-bench Commit` test of the removed `cp/dynamo` package on ExtendDB
 (`ops/scripts/it-up.sh`; M1; one idempotent producer per partition; 200 commits each):
 
 | segment | items before | commit before | items after | commit after |
@@ -328,9 +328,9 @@ The commit time follows the item count, not the batch count: a 256-batch segment
 Why: on AWS, 6 brokers each with their own mdscontrolplane committed ~33 of 288 partitions to one DynamoDB table and lost the
 run-item compare-and-set constantly (387 of 705 attempts cancelled on broker 1, 7 commits gave up after 20 attempts,
 commit_ms up to 11 s). The control plane now owns sequencing: one mdscontrolplane, one loop, group commit, offsets from memory
-(`cp/doc.go`, "Sequencer").
+(the removed sequencer, once in `cp/doc.go`).
 
-Measurement: `MDS_SEQ_BENCH=fake|extenddb go test ./cp/cptest -run SequencerBench -v` (8 s per case, 2026-10-19,
+Measurement: `MDS_SEQ_BENCH=fake|extenddb go test ./internal/controlplane/controlplanetest -run SequencerBench -v` (the test was removed with the sequencer; 8 s per case, 2026-10-19,
 Apple laptop, Go 1.24). Six committers loop at the maximum rate; each commit is a segment of 33 random distinct partitions
 of 288 (one batch of 1-5 records each); a 503 is resent under the same key, as a broker does. "before" is six independent
 `dynamo.Store` values on one table (the old path: every commit reads the newest run of each partition and does its own

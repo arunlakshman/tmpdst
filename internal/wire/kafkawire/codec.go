@@ -80,15 +80,15 @@ func (Codec) DecodeRequest(frame []byte) (core.RequestHeader, core.Request, erro
 		_, known := Range(h.APIKey)
 		return h, nil, &UnsupportedError{Key: h.APIKey, Version: h.APIVersion, UnknownKey: !known}
 	}
-	req := kmsg.RequestForKey(h.APIKey)
-	if req == nil {
+	request := kmsg.RequestForKey(h.APIKey)
+	if request == nil {
 		return h, nil, &UnsupportedError{Key: h.APIKey, Version: h.APIVersion, UnknownKey: true}
 	}
-	req.SetVersion(h.APIVersion)
-	if err := readBody(rest, req.IsFlexible(), req.ReadFrom); err != nil {
+	request.SetVersion(h.APIVersion)
+	if err := readBody(rest, request.IsFlexible(), request.ReadFrom); err != nil {
 		return h, nil, err
 	}
-	return h, req, nil
+	return h, request, nil
 }
 
 // readBody skips the header tagged fields when flexible, then reads the body.
@@ -137,12 +137,12 @@ func respHeaderTags(h core.RequestHeader, flexible bool) bool {
 }
 
 // EncodeResponse returns length prefix + correlation id + [header tags] + body.
-// It sets resp's version (h.APIVersion; v0 for unsupported ApiVersions).
+// It sets response's version (h.APIVersion; v0 for unsupported ApiVersions).
 // ApiVersions always uses response header v0 (no tags).
-func (Codec) EncodeResponse(h core.RequestHeader, resp core.Response) ([]byte, error) {
-	r, ok := resp.(kmsg.Response)
+func (Codec) EncodeResponse(h core.RequestHeader, response core.Response) ([]byte, error) {
+	r, ok := response.(kmsg.Response)
 	if !ok || r.Key() != h.APIKey {
-		return nil, fmt.Errorf("kafkawire: response %T does not match api key %d", resp, h.APIKey)
+		return nil, fmt.Errorf("kafkawire: response %T does not match api key %d", response, h.APIKey)
 	}
 	r.SetVersion(respVersion(h))
 	b := readPrefix(nil)
@@ -151,12 +151,12 @@ func (Codec) EncodeResponse(h core.RequestHeader, resp core.Response) ([]byte, e
 	return finishBatch(r.AppendTo(b)), nil
 }
 
-// EncodeRequest returns length prefix + request header + body, setting req's
+// EncodeRequest returns length prefix + request header + body, setting request's
 // version to h.APIVersion. The client id is encoded as a (non-null) string.
-func (Codec) EncodeRequest(h core.RequestHeader, req core.Request) ([]byte, error) {
-	r, ok := req.(kmsg.Request)
+func (Codec) EncodeRequest(h core.RequestHeader, request core.Request) ([]byte, error) {
+	r, ok := request.(kmsg.Request)
 	if !ok || r.Key() != h.APIKey {
-		return nil, fmt.Errorf("kafkawire: request %T does not match api key %d", req, h.APIKey)
+		return nil, fmt.Errorf("kafkawire: request %T does not match api key %d", request, h.APIKey)
 	}
 	if len(h.ClientID) > 1<<15-1 {
 		return nil, errors.New("kafkawire: client id too long")
@@ -181,13 +181,13 @@ func (Codec) DecodeResponse(h core.RequestHeader, frame []byte) (core.Response, 
 	if c := int32(binary.BigEndian.Uint32(frame)); c != h.CorrelationID {
 		return nil, malformed("correlation id %d, want %d", c, h.CorrelationID)
 	}
-	resp := kmsg.ResponseForKey(h.APIKey)
-	if resp == nil {
+	response := kmsg.ResponseForKey(h.APIKey)
+	if response == nil {
 		return nil, &UnsupportedError{Key: h.APIKey, Version: h.APIVersion, UnknownKey: true}
 	}
-	resp.SetVersion(respVersion(h))
-	if err := readBody(frame[4:], respHeaderTags(h, resp.IsFlexible()), resp.ReadFrom); err != nil {
+	response.SetVersion(respVersion(h))
+	if err := readBody(frame[4:], respHeaderTags(h, response.IsFlexible()), response.ReadFrom); err != nil {
 		return nil, err
 	}
-	return resp, nil
+	return response, nil
 }

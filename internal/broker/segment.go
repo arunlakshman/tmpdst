@@ -11,13 +11,13 @@ import (
 
 // partitionBatch is one admitted partition batch on its way to a segment.
 type partitionBatch struct {
-	s        *slot
-	part     *kmsg.ProduceResponseTopicPartition
-	tp       core.TopicPartition
-	data     []byte
-	records  int64
-	loc      core.SegmentRef
-	answered bool // answerPart already ran (early under InjectedBugEarlyAck)
+	s              *slot
+	part           *kmsg.ProduceResponseTopicPartition
+	topicPartition core.TopicPartition
+	data           []byte
+	records        int64
+	loc            core.SegmentRef
+	answered       bool // answerPart already ran (early under InjectedBugEarlyAck)
 }
 
 // openSegment is the buffer that the next flush seals.
@@ -91,8 +91,8 @@ func (b *Broker) addBatch(pb *partitionBatch) []core.Action {
 	b.open.batches = append(b.open.batches, pb)
 	b.open.bytes += len(pb.data)
 	b.bufBytes += len(pb.data)
-	if !slices.Contains(b.open.parts, pb.tp) {
-		b.open.parts = append(b.open.parts, pb.tp)
+	if !slices.Contains(b.open.parts, pb.topicPartition) {
+		b.open.parts = append(b.open.parts, pb.topicPartition)
 	}
 	first := len(b.open.batches) == 1
 	// since must not move when the mutant re-arms the timer, or the age
@@ -100,21 +100,21 @@ func (b *Broker) addBatch(pb *partitionBatch) []core.Action {
 	if first {
 		b.open.since = b.now
 	}
-	if first || b.cfg.InjectedBug == InjectedBugTimerFromLastBatch {
+	if first || b.config.InjectedBug == InjectedBugTimerFromLastBatch {
 		b.timerGen++
 		b.open.gen = b.timerGen
-		acts = append(acts, core.SetTimer{ID: timerFlush, Gen: b.timerGen, After: b.cfg.BatchWindow})
+		acts = append(acts, core.SetTimer{ID: timerFlush, Gen: b.timerGen, After: b.config.BatchWindow})
 	}
 	sizeBytes := b.open.bytes
-	if b.cfg.InjectedBug == InjectedBugSealOffByOne {
+	if b.config.InjectedBug == InjectedBugSealOffByOne {
 		sizeBytes = before
 	}
 	switch {
-	case sizeBytes >= b.cfg.MaxSegmentBytes:
+	case sizeBytes >= b.config.MaxSegmentBytes:
 		return append(acts, b.seal(closeOnSize)...)
-	case len(b.open.parts) >= b.cfg.MaxSegmentPartitions && b.cfg.InjectedBug != InjectedBugNoPartitionCap:
+	case len(b.open.parts) >= b.config.MaxSegmentPartitions && b.config.InjectedBug != InjectedBugNoPartitionCap:
 		return append(acts, b.seal(closeOnPartitions)...)
-	case len(b.open.batches) >= b.cfg.MaxSegmentBatches && b.cfg.InjectedBug != InjectedBugNoBatchCap:
+	case len(b.open.batches) >= b.config.MaxSegmentBatches && b.config.InjectedBug != InjectedBugNoBatchCap:
 		return append(acts, b.seal(closeOnBatches)...)
 	}
 	return acts
@@ -155,7 +155,7 @@ func (b *Broker) seal(why string) []core.Action {
 func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
 	fb := make([]segmentformat.Batch, len(bs))
 	for i, pb := range bs {
-		fb[i] = segmentformat.Batch{TopicPartition: pb.tp, Records: uint32(pb.records), Data: pb.data}
+		fb[i] = segmentformat.Batch{TopicPartition: pb.topicPartition, Records: uint32(pb.records), Data: pb.data}
 	}
 	data, entries, err := segmentformat.Encode(fb)
 	if err != nil {
@@ -193,10 +193,10 @@ func (b *Broker) onPutDone(s *segment, e core.ObjectPutDone) []core.Action {
 		core.Field{Key: "bytes", Value: core.Int64Value(len(s.data))},
 		core.Field{Key: "put_ns", Value: core.Int64Value(b.now - s.sealedAt)},
 		core.Field{Key: "attempts", Value: core.Int64Value(attempts)})}
-	if b.cfg.InjectedBug == InjectedBugEarlyAck {
+	if b.config.InjectedBug == InjectedBugEarlyAck {
 		for _, pb := range s.batches {
 			b.guess += uint64(pb.records)
-			b.answerPart(pb, errNone, core.BatchRange{TopicPartition: pb.tp, Base: core.Offset(b.guess) - core.Offset(pb.records), Count: pb.records}, s.key)
+			b.answerPart(pb, errNone, core.BatchRange{TopicPartition: pb.topicPartition, Base: core.Offset(b.guess) - core.Offset(pb.records), Count: pb.records}, s.key)
 		}
 	}
 	return append(acts, b.pump()...)
@@ -218,10 +218,10 @@ func (b *Broker) commit(s *segment) []core.Action {
 	}
 	pend := make([]core.PendingBatch, len(s.batches))
 	for i, pb := range s.batches {
-		pend[i] = core.PendingBatch{TopicPartition: pb.tp, Records: pb.records, Loc: pb.loc}
+		pend[i] = core.PendingBatch{TopicPartition: pb.topicPartition, Records: pb.records, Loc: pb.loc}
 	}
 	key := s.key
-	if b.cfg.InjectedBug == InjectedBugFreshKeyOnRetry && s.attempts > 0 {
+	if b.config.InjectedBug == InjectedBugFreshKeyOnRetry && s.attempts > 0 {
 		key = segmentformat.SegmentKey(b.env.NewID())
 	}
 	return []core.Action{core.ControlPlaneCall{Req: s.request, Op: core.CommitSegment{
@@ -231,21 +231,21 @@ func (b *Broker) commit(s *segment) []core.Action {
 func (b *Broker) onCommit(s *segment, e core.ControlPlaneDone) []core.Action {
 	switch e.Err {
 	case core.OK:
-		resp, ok := e.Resp.(core.CommitSegmentResp)
-		shape := ok && len(resp.Assigned) == len(s.batches)
+		response, ok := e.Resp.(core.CommitSegmentResp)
+		shape := ok && len(response.Assigned) == len(s.batches)
 		for i := 0; shape && i < len(s.batches); i++ {
-			shape = resp.Assigned[i].TopicPartition == s.batches[i].tp
+			shape = response.Assigned[i].TopicPartition == s.batches[i].topicPartition
 		}
 		b.env.AlwaysOrUnreachable(shape, "broker: commit answers every batch in order")
 		if !shape {
 			return b.failSegment(s, errUnknownServer)
 		}
-		if s.attempts >= b.cfg.MaxAttempts {
+		if s.attempts >= b.config.MaxAttempts {
 			// Past the old six-attempt budget (audit item 8): the outage was
 			// ridden out instead of failing the segment.
 			b.env.Reachable("broker: commit succeeded after the old retry budget")
 		}
-		return b.committed(s, resp.Assigned)
+		return b.committed(s, response.Assigned)
 	case core.ErrInvalid:
 		return b.failSegment(s, errUnknownServer)
 	case core.ErrConflict:
@@ -316,7 +316,7 @@ func (b *Broker) failSegment(s *segment, code kafkaErrorCode) []core.Action {
 
 // retryPut backs off and repeats the PUT under the same key.
 func (b *Broker) retryPut(s *segment) []core.Action {
-	if s.attempts++; s.attempts >= b.cfg.MaxAttempts {
+	if s.attempts++; s.attempts >= b.config.MaxAttempts {
 		// The write may still land later: unbounded MaybeApplied (decision 15).
 		b.env.Reachable("broker: segment retries exhausted")
 		return b.failSegment(s, errRequestTimedOut)
@@ -333,17 +333,17 @@ func (b *Broker) retryPut(s *segment) []core.Action {
 // limit. Past the deadline the segment fails; the write may still land later
 // (decision 15).
 func (b *Broker) retryCommit(s *segment) []core.Action {
-	left := b.cfg.CommitDeadline - core.Duration(b.now-s.commitAt)
+	left := b.config.CommitDeadline - core.Duration(b.now-s.commitAt)
 	if left <= 0 {
 		b.env.Reachable("broker: commit deadline exceeded")
 		return b.failSegment(s, errRequestTimedOut)
 	}
 	s.attempts++
-	d := b.cfg.RetryBase
-	for n := s.attempts; n > 1 && d < b.cfg.CommitRetryMax; n-- {
+	d := b.config.RetryBase
+	for n := s.attempts; n > 1 && d < b.config.CommitRetryMax; n-- {
 		d *= 2
 	}
-	d = min(d, b.cfg.CommitRetryMax)
+	d = min(d, b.config.CommitRetryMax)
 	d = d/2 + core.Duration(b.env.Intn(int(d/2)+1)) // jitter in [d/2, d]
 	d = min(d, left)
 	s.state, s.request = segmentCommitRetry, 0
@@ -378,8 +378,8 @@ func (b *Broker) answerPart(pb *partitionBatch, code kafkaErrorCode, r core.Batc
 	if code == errNone {
 		pb.part.BaseOffset = int64(r.Base)
 		pb.s.facts = append(pb.s.facts, core.Fact{Name: "produce_acked", Fields: []core.Field{
-			{Key: "topic", Value: core.StringValue(pb.tp.Topic)},
-			{Key: "partition", Value: core.Int64Value(pb.tp.Partition)},
+			{Key: "topic", Value: core.StringValue(pb.topicPartition.Topic)},
+			{Key: "partition", Value: core.Int64Value(pb.topicPartition.Partition)},
 			{Key: "base_offset", Value: core.Int64Value(r.Base)},
 			{Key: "count", Value: core.Int64Value(pb.records)},
 			{Key: "segment", Value: core.StringValue(key)},

@@ -12,14 +12,14 @@ import (
 // produce admits one batch per partition into the open segment. Acks 1 and -1
 // both mean "committed" (acks=0 never gets here: the connection is closed).
 func (b *Broker) produce(s *slot, r *kmsg.ProduceRequest) []core.Action {
-	resp := produceSkeleton(r)
-	s.resp = resp
+	response := produceSkeleton(r)
+	s.response = response
 	var acts []core.Action
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
-			rp := &resp.Topics[i].Partitions[j]
-			tp := core.NewTopicPartition(t.Topic, p.Partition)
-			pb, code := b.admit(s, r, tp, p.Records, rp)
+			rp := &response.Topics[i].Partitions[j]
+			topicPartition := core.NewTopicPartition(t.Topic, p.Partition)
+			pb, code := b.admit(s, r, topicPartition, p.Records, rp)
 			if code != errNone {
 				rp.ErrorCode = int16(code)
 				continue
@@ -32,10 +32,10 @@ func (b *Broker) produce(s *slot, r *kmsg.ProduceRequest) []core.Action {
 }
 
 func produceSkeleton(r *kmsg.ProduceRequest) *kmsg.ProduceResponse {
-	resp := kmsg.NewPtrProduceResponse()
-	resp.Topics = make([]kmsg.ProduceResponseTopic, len(r.Topics))
+	response := kmsg.NewPtrProduceResponse()
+	response.Topics = make([]kmsg.ProduceResponseTopic, len(r.Topics))
 	for i, t := range r.Topics {
-		rt := &resp.Topics[i]
+		rt := &response.Topics[i]
 		rt.Topic = t.Topic
 		rt.Partitions = make([]kmsg.ProduceResponseTopicPartition, len(t.Partitions))
 		for j, p := range t.Partitions {
@@ -44,18 +44,18 @@ func produceSkeleton(r *kmsg.ProduceRequest) *kmsg.ProduceResponse {
 			rp.Partition, rp.BaseOffset, rp.LogStartOffset = p.Partition, -1, 0
 		}
 	}
-	return resp
+	return response
 }
 
 // admit validates one partition's payload and returns the batch to buffer, or
 // the Kafka error code that answers the partition.
-func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, raw []byte, rp *kmsg.ProduceResponseTopicPartition) (*partitionBatch, kafkaErrorCode) {
+func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, topicPartition core.TopicPartition, raw []byte, rp *kmsg.ProduceResponseTopicPartition) (*partitionBatch, kafkaErrorCode) {
 	switch {
 	case r.Acks != 0 && r.Acks != 1 && r.Acks != -1:
 		return nil, errInvalidRequiredAcks
 	case r.TransactionID != nil:
 		return nil, errInvalidRequest
-	case !b.knows(tp):
+	case !b.knows(topicPartition):
 		return nil, errUnknownTopicOrPart
 	}
 	one, err := kafkawire.RequireSingleBatch(raw)
@@ -67,7 +67,7 @@ func (b *Broker) admit(s *slot, r *kmsg.ProduceRequest, tp core.TopicPartition, 
 		return nil, code
 	}
 	b.reachCodec(bt.Codec())
-	return &partitionBatch{s: s, part: rp, tp: tp, data: one, records: int64(bt.NumRecords)}, errNone
+	return &partitionBatch{s: s, part: rp, topicPartition: topicPartition, data: one, records: int64(bt.NumRecords)}, errNone
 }
 
 // checkBatch validates one batch's header without decompressing it
@@ -84,7 +84,7 @@ func (b *Broker) checkBatch(one []byte) (kafkawire.Batch, kafkaErrorCode) {
 }
 
 func (b *Broker) parseProduceBatch(one []byte) (kafkawire.Batch, error) {
-	if b.cfg.InjectedBug == InjectedBugSkipProduceCRC {
+	if b.config.InjectedBug == InjectedBugSkipProduceCRC {
 		return kafkawire.ParseBatchUnverified(one)
 	}
 	return kafkawire.ParseBatch(one)

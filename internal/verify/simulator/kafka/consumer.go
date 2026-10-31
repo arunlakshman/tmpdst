@@ -11,11 +11,11 @@ import (
 // consumer reads every partition from offset 0 with one multi-partition Fetch
 // at a time. pos is the next offset wanted per partition.
 type consumer struct {
-	pos    []int64
-	listed bool
-	op     core.ID // outstanding ReadOp, zero when none
-	drain  bool    // PhaseSettle began: stop once a fetch finds the end of every partition
-	done   bool
+	pos       []int64
+	listed    bool
+	operation core.ID // outstanding ReadOp, zero when none
+	drain     bool    // PhaseSettle began: stop once a fetch finds the end of every partition
+	done      bool
 }
 
 func (c *consumer) hash(h *core.Hasher) {
@@ -23,7 +23,7 @@ func (c *consumer) hash(h *core.Hasher) {
 		h.Int64Value(p)
 	}
 	h.Bool(c.listed)
-	h.Bytes(c.op[:])
+	h.Bytes(c.operation[:])
 	h.Bool(c.drain)
 	h.Bool(c.done)
 }
@@ -31,17 +31,17 @@ func (c *consumer) hash(h *core.Hasher) {
 func (w *Workload) listReq() *kmsg.ListOffsetsRequest {
 	r := kmsg.NewPtrListOffsetsRequest()
 	r.ReplicaID = -1
-	for _, tp := range w.tps {
-		part := kmsg.ListOffsetsRequestTopicPartition{Partition: tp.Partition, CurrentLeaderEpoch: -1, Timestamp: -2}
+	for _, topicPartition := range w.tps {
+		part := kmsg.ListOffsetsRequestTopicPartition{Partition: topicPartition.Partition, CurrentLeaderEpoch: -1, Timestamp: -2}
 		added := false
 		for i := range r.Topics {
-			if r.Topics[i].Topic == tp.Topic {
+			if r.Topics[i].Topic == topicPartition.Topic {
 				r.Topics[i].Partitions = append(r.Topics[i].Partitions, part)
 				added = true
 			}
 		}
 		if !added {
-			r.Topics = append(r.Topics, kmsg.ListOffsetsRequestTopic{Topic: tp.Topic, Partitions: []kmsg.ListOffsetsRequestTopicPartition{part}})
+			r.Topics = append(r.Topics, kmsg.ListOffsetsRequestTopic{Topic: topicPartition.Topic, Partitions: []kmsg.ListOffsetsRequestTopicPartition{part}})
 		}
 	}
 	return r
@@ -51,10 +51,10 @@ func (w *Workload) listReq() *kmsg.ListOffsetsRequest {
 func (w *Workload) onList(c *client, r *kmsg.ListOffsetsResponse) []core.Action {
 	n := 0
 	pos := make([]int64, len(w.tps))
-	for i, tp := range w.tps {
+	for i, topicPartition := range w.tps {
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				if t.Topic == tp.Topic && p.Partition == tp.Partition && p.ErrorCode == 0 && p.Offset >= 0 {
+				if t.Topic == topicPartition.Topic && p.Partition == topicPartition.Partition && p.ErrorCode == 0 && p.Offset >= 0 {
 					pos[i] = p.Offset
 					n++
 				}
@@ -75,26 +75,26 @@ func (w *Workload) fetchNext(c *client) []core.Action {
 	}
 	r := kmsg.NewPtrFetchRequest()
 	r.MaxWaitMillis, r.MinBytes, r.MaxBytes, r.SessionEpoch = 100, 1, 1<<20, -1
-	op := ReadOp{Client: c.ID}
+	operation := ReadOp{Client: c.ID}
 	perPart := int32(1024) << w.env.Intn(6)
-	for i, tp := range w.tps {
-		op.Parts = append(op.Parts, ReadFrom{TopicPartition: tp, Off: cs.pos[i]})
-		part := kmsg.FetchRequestTopicPartition{Partition: tp.Partition, CurrentLeaderEpoch: -1, FetchOffset: cs.pos[i],
+	for i, topicPartition := range w.tps {
+		operation.Parts = append(operation.Parts, ReadFrom{TopicPartition: topicPartition, Off: cs.pos[i]})
+		part := kmsg.FetchRequestTopicPartition{Partition: topicPartition.Partition, CurrentLeaderEpoch: -1, FetchOffset: cs.pos[i],
 			LastFetchedEpoch: -1, LogStartOffset: -1, PartitionMaxBytes: perPart}
 		added := false
 		for j := range r.Topics {
-			if r.Topics[j].Topic == tp.Topic {
+			if r.Topics[j].Topic == topicPartition.Topic {
 				r.Topics[j].Partitions = append(r.Topics[j].Partitions, part)
 				added = true
 			}
 		}
 		if !added {
-			r.Topics = append(r.Topics, kmsg.FetchRequestTopic{Topic: tp.Topic, Partitions: []kmsg.FetchRequestTopicPartition{part}})
+			r.Topics = append(r.Topics, kmsg.FetchRequestTopic{Topic: topicPartition.Topic, Partitions: []kmsg.FetchRequestTopicPartition{part}})
 		}
 	}
-	cs.op = w.env.NewID()
-	if w.hist != nil {
-		w.hist.Invoke(w.self, cs.op, cs.op, op)
+	cs.operation = w.env.NewID()
+	if w.history != nil {
+		w.history.Invoke(w.self, cs.operation, cs.operation, operation)
 	}
 	return w.send(c, requestFetch, r)
 }
@@ -105,12 +105,12 @@ func (w *Workload) onFetch(c *client, r *kmsg.FetchResponse) []core.Action {
 	cs := &c.c
 	res := ReadRes{Parts: make([]ReadPart, len(w.tps))}
 	got, atEnd := false, true
-	for i, tp := range w.tps {
+	for i, topicPartition := range w.tps {
 		part := &res.Parts[i]
 		part.Code = codeUnknown
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				if t.Topic == tp.Topic && p.Partition == tp.Partition {
+				if t.Topic == topicPartition.Topic && p.Partition == topicPartition.Partition {
 					*part = w.readPart(p, cs.pos[i])
 				}
 			}
@@ -121,10 +121,10 @@ func (w *Workload) onFetch(c *client, r *kmsg.FetchResponse) []core.Action {
 		}
 		atEnd = atEnd && part.Code == 0 && !part.Corrupt && cs.pos[i] >= part.HWM
 	}
-	op := cs.op
-	cs.op = core.ID{}
-	if w.hist != nil {
-		w.hist.Return(op, res, simulator.OpResultKnown)
+	operation := cs.operation
+	cs.operation = core.ID{}
+	if w.history != nil {
+		w.history.Return(operation, res, simulator.OpResultKnown)
 	}
 	d := 100 + w.env.Intn(200)
 	if got {
@@ -168,8 +168,8 @@ func (w *Workload) readPart(p kmsg.FetchResponseTopicPartition, pos int64) ReadP
 
 // abandonFetch closes the outstanding read: it had no effect.
 func (w *Workload) abandonFetch(c *client, why string) {
-	if c.c.op != (core.ID{}) && w.hist != nil {
-		w.hist.Return(c.c.op, ReadRes{Why: why}, simulator.OpGivenUp)
+	if c.c.operation != (core.ID{}) && w.history != nil {
+		w.history.Return(c.c.operation, ReadRes{Why: why}, simulator.OpGivenUp)
 	}
-	c.c.op = core.ID{}
+	c.c.operation = core.ID{}
 }

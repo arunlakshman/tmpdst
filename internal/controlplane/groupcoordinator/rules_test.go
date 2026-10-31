@@ -298,11 +298,11 @@ type flakyStore struct {
 	failInstall atomic.Bool
 }
 
-func (f *flakyStore) GroupInstall(ctx context.Context, op core.GroupInstall) (core.ErrCode, error) {
+func (f *flakyStore) GroupInstall(ctx context.Context, operation core.GroupInstall) (core.ErrCode, error) {
 	if f.failInstall.Load() {
 		return core.OK, errors.New("log down")
 	}
-	return f.GroupStore.GroupInstall(ctx, op)
+	return f.GroupStore.GroupInstall(ctx, operation)
 }
 
 // TestConcurrentJoinsOneRound starts eight joins at once on the real clock.

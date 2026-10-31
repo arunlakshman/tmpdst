@@ -166,10 +166,10 @@ func (p Params) Draw(ctx simulator.FakeServiceContext, pre string, until *simula
 // latency, extra.
 func (c *CompletionCore) Execute(ctx simulator.FakeServiceContext, from core.NodeInstance, a core.IOCall) {
 	r, now, p := ctx.Rand(), ctx.Now(), c.h.Params
-	req := core.Field{Key: "req", Value: core.Uint64Value(a.RequestID())}
+	request := core.Field{Key: "req", Value: core.Uint64Value(a.RequestID())}
 	kind := ReplyNormal
 	if !c.recovery {
-		kind = p.Draw(ctx, c.h.Prefix, &c.until, req)
+		kind = p.Draw(ctx, c.h.Prefix, &c.until, request)
 	}
 	t1 := now + simulator.Time(p.Apply.Sample(r))
 	t2 := t1 + simulator.Time(p.Respond.Sample(r))

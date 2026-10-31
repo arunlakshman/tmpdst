@@ -61,7 +61,7 @@ func newLogStack(t *testing.T, brokers int) *logStack {
 	ls := &logStack{}
 	var addrs []string
 	for rank := range 3 {
-		cfg := statemachine.Config{
+		config := statemachine.Config{
 			K: 4, CatchUpEvery: core.Duration(5 * time.Millisecond),
 			Rank: rank, Heartbeat: core.Duration(100 * time.Millisecond),
 			TakeoverAfter: core.Duration(1500 * time.Millisecond),
@@ -69,7 +69,7 @@ func newLogStack(t *testing.T, brokers int) *logStack {
 			Writer:        fmt.Sprintf("cp%d", rank),
 		}
 		n := server.New(server.Config{
-			Machine: cfg, Log: log, Objects: objs,
+			Machine: config, Log: log, Objects: objs,
 			Self: core.NodeInstance{Node: core.NodeID(fmt.Sprintf("cp%d", rank))},
 		})
 		if err := n.Start(t.Context()); err != nil {
@@ -114,8 +114,8 @@ func retryDial(f func() error) error {
 }
 
 func isDialErr(err error) bool {
-	var op *net.OpError
-	return (errors.As(err, &op) && op.Op == "dial") || errors.Is(err, syscall.EADDRNOTAVAIL)
+	var operation *net.OpError
+	return (errors.As(err, &operation) && operation.Op == "dial") || errors.Is(err, syscall.EADDRNOTAVAIL)
 }
 
 func roleOf(t *testing.T, n *cpNode) string {

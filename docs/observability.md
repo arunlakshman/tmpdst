@@ -104,12 +104,12 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `mdscontrolplane_build_info`, `_start_time_seconds`, `_uptime_seconds` | | | As for the broker. |
 | `go_*`, `process_*` | | | Runtime and process collectors. |
 
-#### Log-backed control plane (`mdscontrolplane_log_*`, `cp/logcp`; exported by `mdscontrolplane -store dynamolog` since stage 4; one series per CP node, Alloy adds `host` and `cp_rank`)
+#### Log-backed control plane (`mdscontrolplane_log_*`, `cmd/mdscontrolplane/logstore.go`; exported by `mdscontrolplane -store dynamolog` since stage 4; one series per CP node, Alloy adds `host` and `cp_rank`)
 
 | name | type | labels | meaning |
 |---|---|---|---|
 | `mdscontrolplane_log_slot_attempts_total` | counter | `result` (`won`, `lost`, `error`) | Slot append attempts. `error` is an unknown outcome retried at the same slot. |
-| `mdscontrolplane_log_lost_slots_total` | counter | | Slots lost to another writer or a hole filler. Persistently nonzero: two appenders. |
+| `mdscontrolplane_log_lost_slots_total` | counter | | Slots lost to another writer or a gap filler. Persistently nonzero: two appenders. |
 | `mdscontrolplane_log_slots_total` | counter | | Slots this node won; `rate()` is the slot rate (budget about 200/s). |
 | `mdscontrolplane_log_append_seconds` | histogram | | One slot append to a definite answer. |
 | `mdscontrolplane_log_entries_per_slot`, `mdscontrolplane_log_entry_bytes` | histogram | | Commands grouped in a slot; encoded size (limit 350 KB). |
@@ -117,21 +117,21 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `mdscontrolplane_log_rejected_total` | counter | `reason` (`not_active`, `overloaded`, `blocked`, `too_large`) | Refused requests. |
 | `mdscontrolplane_log_applied_slot`, `mdscontrolplane_log_apply_lag_slots`, `mdscontrolplane_log_standby_lag_slots` | gauge | | Position; slots known but not applied; same on a standby. Standby lag growing means it cannot take over cleanly. |
 | `mdscontrolplane_log_apply_seconds` | histogram | | One apply batch. |
-| `mdscontrolplane_log_hole_fills_total` | counter | | No-ops this node wrote. |
+| `mdscontrolplane_log_gap_fills_total` | counter | | No-ops this node wrote. |
 | `mdscontrolplane_log_tail_reads_total` | counter | `result` | Tail reads of the replica loop. |
 | `mdscontrolplane_log_tail_checks_total`, `mdscontrolplane_log_fresh_reads_total`, `mdscontrolplane_log_fresh_wait_seconds` | counter, counter, histogram | `result` | Tail checks for fresh reads; reads served (ratio is the batching factor); their wait. |
 | `mdscontrolplane_log_active`, `mdscontrolplane_log_role_changes_total` | gauge, counter | `to` | Advisory role. Flapping is a sign of a bad `TakeoverAfter`. |
 | `mdscontrolplane_log_window_keys` | gauge | | Segment keys in the idempotency window. |
 | `mdscontrolplane_log_blocked` | gauge | | 1: the node cannot apply (unknown format, store failure, trimmed); alert. |
-| `mdscontrolplane_log_checkpoint_slot`, `_checkpoint_age_seconds`, `_checkpoint_bytes`, `_checkpoint_seconds`, `_checkpoint_errors_total` | | | Checkpoints; alert on age above 3 x `CkptEvery`. |
+| `mdscontrolplane_log_checkpoint_slot`, `_checkpoint_age_seconds`, `_checkpoint_bytes`, `_checkpoint_seconds`, `_checkpoint_errors_total` | | | Checkpoints; alert on age above 3 x `CheckpointEvery`. |
 | `mdscontrolplane_log_trimmed_slots_total` | counter | | Slots tombstoned behind the checkpoint. |
 
 Dashboard (Overview, row "Control plane (log store ...)", `gen_dashboards.py`): slot rate and lost slots; append latency p50/p99;
-commands per slot and entry size; apply lag and standby lag; hole fills, role changes and the active gauge; queue depth, queue wait
+commands per slot and entry size; apply lag and standby lag; gap fills, role changes and the active gauge; queue depth, queue wait
 and refused requests; checkpoint age, size and errors; fresh reads and tail checks.  Alloy (`cp.alloy`) scrapes each CP host's mdscontrolplane and adds `cp_rank`;
 CloudWatch DynamoDB metrics (`cpcloudwatch.alloy`, now with PutItem and BatchWriteItem operations) are scraped from rank 0 only.
 Log events (INFO unless noted): `log_ready` (node, rank, applied slot, role), `log_role` (active true/false, a takeover or
-failback), `log_final_ckpt`, `log_final_ckpt_failed` (WARN), `log_no_checkpoint` (WARN, no `-checkpoint-bucket`). The manifest
+failback), `log_no_checkpoint` (WARN, no `-checkpoint-bucket`). The manifest
 gains `store`, `rank`, `takeover_after`, `checkpoint_bucket`. Suggested alerts: `mdscontrolplane_log_blocked` = 1; checkpoint age above 15 min;
 `mdscontrolplane_log_standby_lag_slots` rising; `rate(mdscontrolplane_log_lost_slots_total)` > 0 for minutes.
 

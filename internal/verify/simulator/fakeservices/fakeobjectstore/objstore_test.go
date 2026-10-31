@@ -23,8 +23,8 @@ func setup(f simulator.ObjectStoreFaults, seed uint64) (*fakeobjectstore.Engine,
 	return e, fakeservicetest.New(e, seed), fakeservicetest.Ref("a")
 }
 
-func put(e *fakeobjectstore.Engine, c *fakeservicetest.Ctx, from core.NodeInstance, req core.RequestID, key, data string) {
-	e.Execute(c, from, core.ObjectPut{Req: req, Key: key, Data: []byte(data)})
+func put(e *fakeobjectstore.Engine, c *fakeservicetest.Ctx, from core.NodeInstance, request core.RequestID, key, data string) {
+	e.Execute(c, from, core.ObjectPut{Req: request, Key: key, Data: []byte(data)})
 }
 
 func only[T core.EventData](t *testing.T, c *fakeservicetest.Ctx) T {

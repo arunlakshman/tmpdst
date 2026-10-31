@@ -101,9 +101,9 @@ func TestFindCoordinatorKeysAndTypes(t *testing.T) {
 	}
 
 	// A transaction coordinator is not supported.
-	tx := kmsg.NewPtrFindCoordinatorRequest()
-	tx.CoordinatorKey, tx.CoordinatorType = "t1", coordTransaction
-	if r := h.call(c, 3, tx).(*kmsg.FindCoordinatorResponse); kafkaErrorCode(r.ErrorCode) != errCoordNotAvailable {
+	transaction := kmsg.NewPtrFindCoordinatorRequest()
+	transaction.CoordinatorKey, transaction.CoordinatorType = "t1", coordTransaction
+	if r := h.call(c, 3, transaction).(*kmsg.FindCoordinatorResponse); kafkaErrorCode(r.ErrorCode) != errCoordNotAvailable {
 		t.Errorf("transaction: error %d, want 15", r.ErrorCode)
 	}
 	// An empty group id on version 0 to 3.
@@ -116,9 +116,9 @@ func TestFindCoordinatorKeysAndTypes(t *testing.T) {
 // listGroupsFrom asks broker id for its groups (version 4, no filter).
 func listGroupsFrom(t *testing.T, id int32, live []core.BrokerAddr, groups []core.GroupSummary) map[string]int {
 	t.Helper()
-	cfg := DefaultConfig()
-	cfg.BrokerID = id
-	h, _ := withGroupCP(t, cfg, func(core.ControlPlaneOperation) core.ControlPlaneDone {
+	config := DefaultConfig()
+	config.BrokerID = id
+	h, _ := withGroupCP(t, config, func(core.ControlPlaneOperation) core.ControlPlaneDone {
 		return cpOK(core.ListGroupsResp{Groups: groups})
 	})
 	h.do(core.LiveBrokers{Brokers: live})

@@ -87,16 +87,16 @@ type noHashObject struct{ suites.ObjectSubject }
 
 func (noHashObject) StateHash() (uint64, bool) { return 0, false }
 
-func (n noHashObject) Do(op core.IOCall) (observation.ObjectResult, error) {
-	return n.ObjectSubject.Do(op)
+func (n noHashObject) Do(operation core.IOCall) (observation.ObjectResult, error) {
+	return n.ObjectSubject.Do(operation)
 }
 
 type noHashControlPlane struct{ suites.ControlPlaneSubject }
 
 func (noHashControlPlane) StateHash() (uint64, bool) { return 0, false }
 
-func (n noHashControlPlane) Do(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
-	return n.ControlPlaneSubject.Do(op)
+func (n noHashControlPlane) Do(operation generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
+	return n.ControlPlaneSubject.Do(operation)
 }
 
 // Without a state hash, every bug that changes answers must still be caught by

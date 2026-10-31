@@ -83,7 +83,7 @@ Same idea as page 01, section 0.1. The brain of the CP (`statemachine.Machine`) 
 opens a socket and never reads a clock. It gets an **Event**, and returns **Actions**
 ("append this to slot 41", "read log from slot 30", "put this checkpoint object", "set a
 timer"). Real I/O is done by a different layer, and its result comes back later as another
-Event with the same `ReqID`.
+Event with the same `Req`.
 
 Because of this, the same Machine runs in two places:
 
@@ -94,21 +94,21 @@ Because of this, the same Machine runs in two places:
 ### 0.5 The package is built in layers, and the layers are not allowed to cheat
 
 ```
-        brokers (gRPC)                                  ┐
-             │                                          │ the "edge": real
-   controlplaneclient ──► api/v1 + apiconvert ──► server (Node)   goroutines,
-                                                     │   │          real network
-                                  inject work        ▼   │
+        brokers (gRPC)                                  +
+             |                                          | the "edge": real
+   controlplaneclient --> api/v1 + apiconvert --> server (Node)   goroutines,
+                                                     |   |          real network
+                                  inject work        v   |
                                               runloop (one goroutine)
-                                                     │  Step(Event)
-                                                     ▼
-   ┌─────────────────────────── statemachine (Machine) ──────────────────┐
-   │ pure: no I/O, no clock, no goroutines. Emits Log* / Object* actions │
-   └──────────────────────────┬──────────────────────────────────────────┘
-                              │ folds entries into
-                              ▼
+                                                     |  Step(Event)
+                                                     v
+   +--------------------------- statemachine (Machine) ------------------+
+   | pure: no I/O, no clock, no goroutines. Emits Log* / Object* actions |
+   +--------------------------+------------------------------------------+
+                              | folds entries into
+                              v
                      stateupdater (the fold: T/E/R/K/S keys in a KV)
-                              ▲
+                              ^
    actions run by:  executor (DynamoLog, MemoryLog, object store)
 ```
 
@@ -138,21 +138,21 @@ All sizes are non-test lines. "Edge" means not deterministic (goroutines, networ
 | `memorystore`, `fakedynamodb`, `grpctestserver`, `controlplanetest` | | test helpers | in-memory stores, fake DynamoDB, conformance tests |
 | `store.go`, `doc.go` (root) | | | `Store` interface (the shape every CP backend must have) |
 
-**Name map from page 01.** Page 01 was written before the "simple names" refactor. When
-you see an old name in page 01 or in an old comment, translate:
+**Name map.** Page 01 uses the current names. Older comments and notes may still use the
+old names. Translate them with this table:
 
 | Old name (page 01, old comments) | Current name |
 |----------------------------------|--------------|
-| `machine` | `statemachine` |
+| `machine` (package) | `statemachine` |
 | `applier` / `Applier` | `stateupdater` / `StateUpdater` |
-| `applier.KV` | `stateupdater.KeyValueStore` |
-| `commitTx` | `commitTransaction` |
 | `exec` | `executor` |
 | `run` (`controlplane/run`) | `runloop` |
 | `cpclient` | `controlplaneclient` |
 | `memkv` / `MemKV` | `MemoryKeyValueStore` |
 | `pebblekv` package | `pebblestore` package (file is still `pebblekv.go`) |
-| `fold.Apply`, `fold` | same: "fold" is the `StateUpdater` held in `Machine.fold` |
+| `CPTruth` | `ControlPlaneRealState` |
+| `ReplaySlot` | `ReplayPosition` |
+| `fold` | still `fold`: the `StateUpdater` held in `Machine.fold` |
 
 ---
 
@@ -194,10 +194,10 @@ landed". The caller must be allowed to retry **the same request** and be safe. T
 exactly why idempotency per `SegmentKey` exists. Keep this in your head: almost every
 complicated branch in this package is about turning `MaybeApplied` into a safe retry.
 
-`store.go` at the package root defines `cp.Store`, the four-method interface every
+`store.go` at the package root defines `Store`, the four-method interface every
 backend promises (`CommitSegment`, `Lookup`, `DescribeTopics`, `CreateTopic`). It is the
 shape that the conformance tests (`controlplanetest`) compare against the executable spec
-`speccheck.ControlPlane` ("veritas").
+`speccheck.ControlPlane` ("speccheck").
 
 ---
 
@@ -243,12 +243,12 @@ Every key starts with one letter that says what kind it is. All keys of one kind
 | Letter | Key | Value | Used for |
 |:------:|-----|-------|----------|
 | `T` | `T` + topic name | uvarint partition count | topic list (Describe) |
-| `E` | `E` + tp | uvarint **end offset** (next offset to give) | where to start the next batch |
-| `R` | `R` + tp + base (8 bytes) | packed **run** | where the bytes of each batch are (Lookup) |
+| `E` | `E` + topic partition | uvarint **end offset** (next offset to give) | where to start the next batch |
+| `R` | `R` + topic partition + base (8 bytes) | packed **run** | where the bytes of each batch are (Lookup) |
 | `K` | `K` + segment key | slot + 16-byte digest + one base per batch | idempotency record |
 | `S` | `S` + slot (8 bytes) + segment key | `0x01` | index so Trim finds old `K` by slot |
 
-`tp` (topic-partition) is encoded as `uvarint(len(topic))`, then the topic bytes, then the
+`topicPartition` (topic-partition) is encoded as `uvarint(len(topic))`, then the topic bytes, then the
 partition as 4 bytes big-endian. Big-endian is chosen so that byte order equals number
 order, which makes range scans return partitions and offsets in numeric order.
 
@@ -261,14 +261,14 @@ value 03                                       uvarint 3
 
 An `R` key adds 8 more bytes at the end: the run's **base offset**, big-endian. Since runs
 for one partition sort by base, "the run that holds offset 100" is simply the last key at
-or below `R tp 100`. That is what `Floor` is for.
+or below `R topicPartition 100`. That is what `Floor` is for.
 
 ### 3.3 The entry: what a log slot contains (`entry.go`)
 
 A log slot holds an `Entry`, one of three kinds:
 
 ```go
-KindNoop         // changes nothing. Used by heartbeat and hole-fill.
+KindNoop         // changes nothing. Used by heartbeat and gap-fill.
 KindCommit       // a CommitSegment
 KindCreateTopic  // topic name + partition count
 ```
@@ -329,8 +329,8 @@ func assign(tx, batches) []BatchRange {
 `offsetPlan` collects, per partition, the new end and the list of ranges. Then
 `writeAssign` writes, for each touched partition, in this one transaction:
 
-1. `E tp` = new end offset.
-2. `R tp base` = one **packed run** with all the batches this commit gave that partition.
+1. `E topicPartition` = new end offset.
+2. `R topicPartition base` = one **packed run** with all the batches this commit gave that partition.
    Key base is the base of the *first* batch.
 3. `T topic` = partition count raised to at least `partition+1` (`addPartitions`). This is
    how a topic grows if a commit names a partition that is higher than known. It never shrinks.
@@ -351,18 +351,18 @@ per batch: uvarint key-index, uvarint count, varint off, varint len
 ```
 
 The run does **not** store each batch's base offset. The base of batch 0 is in the key
-(`R tp base`), and the base of batch `n+1` is the base of batch `n` plus its count. The
+(`R topicPartition base`), and the base of batch `n+1` is the base of batch `n` plus its count. The
 decoder just adds counts as it walks. This is why offsets are contiguous *by construction*
 inside a run: there is nowhere to write a gap.
 
 ### 3.8 Reads: `Lookup` and `Describe`
 
-`Lookup(tp, From, MaxBytes)`:
+`Lookup(topicPartition, From, MaxBytes)`:
 
-1. `End` = value of `E tp`.
-2. Find the starting run: `Floor` on keys between `R tp 0` and `R tp From` gives the last
+1. `End` = value of `E topicPartition`.
+2. Find the starting run: `Floor` on keys between `R topicPartition 0` and `R topicPartition From` gives the last
    run that starts at or before `From`. (The run holding offset `From` may start earlier.)
-3. `Ascend` from there to the end of the `R tp` prefix. Decode each run, skip batches that
+3. `Ascend` from there to the end of the `R topicPartition` prefix. Decode each run, skip batches that
    end at or before `From`, collect the rest.
 4. Stop when collected bytes (`Loc.Len` sum) reach `MaxBytes` (if `MaxBytes > 0`). It may
    exceed by one batch. The first batch is always returned.
@@ -418,7 +418,7 @@ which emits `StopForRestart`.
 | `CommitBatch(cmds)` | Apply many commands in ONE store transaction. Same result as one by one, fewer page writes. |
 | `StateHash()` | Digest of `T`, `E`, `R` only (skips `K`, `S`). Two replicas that applied the same commands agree even if they trimmed differently. |
 | `Assigned(slot, op)` | After the fact: "did this command own its key at this slot?" (`OffsetOwnedHere / Elsewhere / Unknown`). For an indexer. |
-| `Store` (`store.go`) | A `cp.Store` over a StateUpdater with a local counter and no log. For conformance tests and tools. |
+| `Store` (`store.go`) | A `Store` over a StateUpdater with a local counter and no log. For conformance tests and tools. |
 | `Apply(slot, Entry)` | Switch on `Kind`. Used by the Machine. |
 | `KnownCommit(op)` | Read-only "is this key already in the window?" Used by the Machine's fast path (4.8). |
 
@@ -451,7 +451,7 @@ func (m *Machine) Step(ev core.Event) []core.Action {
     case ObjectGetDone:        onObjGetDone(body)        // checkpoint read finished
     case ObjectPutDone:        onObjPutDone(body)        // checkpoint write finished
     case LogDeleteOldDone:     onTrimDone(body)
-    case ControlPlaneDeliver:  onCPOffer(body)           // sim only: a broker's call
+    case ControlPlaneDeliver:  onControlPlaneDeliver(body)           // sim only: a broker's call
     }
     acts = append(acts, m.serveReads()...)               // after every event: answer ready reads
     return m.withReplies(acts)                           // turn answers into ControlPlaneReply (sim)
@@ -468,9 +468,9 @@ After `ShutdownDone`, `exited` is true and every event is ignored.
 |-------|--------|---------|
 | Lifecycle | `started, booting, ready, active, stopping, exited, crashed` | where in life the node is |
 | Log position | `applied, goalTail, high, buf` | `applied` = next slot to fold. `goalTail` = log end seen by the last tail check. `high` = next slot to allocate for a new write. `buf` = slots read but not yet folded |
-| One control I/O | `pending, pendingKind, fillSlot, fillData` | the single in-flight tail/read/hole-fill/checkpoint/trim |
-| Commit I/O | `queue, flights, waiters, answers, seq` | client commands waiting, appends in flight, who to answer |
-| Timers | `timerGen, holeGen, roleGen, checkpointGen` | generation numbers (4.3) |
+| One control I/O | `pending, pendingKind, fillSlot, fillData` | the single in-flight tail/read/gap-fill/checkpoint/trim |
+| Commit I/O | `queue, inFlightAppends, waiters, answers, seq` | client commands waiting, appends in flight, who to answer |
+| Timers | `timerGen, gapGeneration, roleGen, checkpointGen` | generation numbers (4.3) |
 | Roles | `lastPullOK, lastOtherAt, lastOwnAt, promoSlot, lowerSeen` | evidence for takeover and failback |
 | Checkpoint | `checkpointSlot, checkpointAt, checkpointPending, checkpointData, needsCheckpoint, checkpointRetry, trimFloor` | snapshot progress |
 | Reads | `readWaiters, tailsStarted, tailRound` | reads waiting for a fresh tail |
@@ -478,12 +478,12 @@ After `ShutdownDone`, `exited` is true and every event is ignored.
 
 **Two lanes of I/O.** This is the key to the file layout:
 
-- **`pending` lane** (at most one at a time): tail check, log read, hole-fill append,
+- **`pending` lane** (at most one at a time): tail check, log read, gap-fill append,
   checkpoint get/put, trim. Request IDs come from `nextReq`. The Machine ignores any
   completion whose `Req` and kind do not match `pending`/`pendingKind`. A stale
   completion is simply dropped.
-- **`flights` lane** (up to `K` at a time): client-commit appends. Each has its own
-  `ReqID` in the `flights` map.
+- **`inFlightAppends` lane** (up to `K` at a time): client-commit appends. Each has its own
+  `Req` in the `inFlightAppends` map.
 
 So the log can be read (catch-up) while commits are being appended. They run in parallel.
 
@@ -491,7 +491,7 @@ So the log can be read (catch-up) while commits are being appended. They run in 
 
 There are four timers: `1` catch-up, `2` gap-fill, `3` role, `4` checkpoint. A timer is
 armed as `SetTimer{ID, Gen, After}` with a fresh `Gen`. When `TimerFired{ID, Gen}` comes
-back, the handler checks `e.Gen == m.timerGen` (or `holeGen`, `roleGen`, `checkpointGen`). An old
+back, the handler checks `e.Gen == m.timerGen` (or `gapGeneration`, `roleGen`, `checkpointGen`). An old
 timer has an old `Gen` and does nothing. This beats cancelling: there is no race, and the
 code is easy to replay in the simulator. (The same trick was in page 01, station 3.)
 
@@ -499,13 +499,13 @@ code is easy to replay in the simulator. (The same trick was in page 01, station
 
 ```
 NodeStarted
-   │ checkpointing on (CheckpointEvery > 0 or CheckpointKey set)?
-   ├─ yes: booting=true, ObjectGet "ckpt/latest"
-   │       ├─ read failed (not NotFound)  -> checkpointRetry, timer, try again  (never guess: log may be trimmed)
-   │       ├─ NotFound                    -> fresh start, go to catch-up
-   │       ├─ bad CRC                     -> read again immediately
-   │       └─ good                        -> fold.Restore; applied = checkpoint slot; go to catch-up
-   └─ no : go to catch-up
+   | checkpointing on (CheckpointEvery > 0 or CheckpointKey set)?
+   +- yes: booting=true, ObjectGet "ckpt/latest"
+   |       +- read failed (not NotFound)  -> checkpointRetry, timer, try again  (never guess: log may be trimmed)
+   |       +- NotFound                    -> fresh start, go to catch-up
+   |       +- bad CRC                     -> read again immediately
+   |       +- good                        -> fold.Restore; applied = checkpoint slot; go to catch-up
+   +- no : go to catch-up
 catch-up:  LogGetEnd -> goalTail ; LogRead(from applied) ... drain ... until applied >= goalTail
 finishBoot: booting=false, ready=true; rank 0 becomes active; arm role timer and checkpoint timer
 ```
@@ -526,7 +526,7 @@ LogGetEndDone{Tail}
   -> progress()
 progress():
    if applied < goalTail:
-        if a hole is open (buf has later slots but not buf[applied]) -> hole fill (4.6)
+        if a gap is open (buf has later slots but not buf[applied]) -> gap fill (4.6)
         else                                                          -> emitRead: LogRead{From: applied, Limit: 64}
    else if booting and nothing pending -> finishBoot  (Ready)
    else                                                          -> re-arm the catch-up timer
@@ -550,28 +550,28 @@ for {
 **Strictly in slot order, stopping at the first gap.** This one loop is why every replica
 reaches the same state.
 
-### 4.6 Holes and hole-fill
+### 4.6 Gaps and gap-fill
 
-A **hole** is a slot that stays empty while later slots are already written. How? A writer
+A **gap** is a slot that stays empty while later slots are already written. How? A writer
 picked slot 41, then crashed before its put. Another writer already wrote slot 42. Now
 `applied=41` can never move.
 
-Fix: any node may write a **no-op** entry into slot 41 (`emitHoleFill`, a `LogAppend` with
+Fix: any node may write a **no-op** entry into slot 41 (`emitGapFill`, a `LogAppend` with
 `KindNoop`). It is also put-if-absent, so:
 
 - If the original writer is just slow and writes first, the no-op loses. The node gets the
   real bytes back (`d.Taken`, use `d.Existing`) and folds those.
 - If the no-op wins, the slow writer later gets "taken" and re-appends elsewhere.
 
-`HoleAfter` is a patience delay (250 ms in `mdscontrolplane`). The first time a hole is seen, the
-Machine only arms timer 2 (`armHoleFill`). Hole fill happens only if the hole is still
-there when the timer fires. Zero `HoleAfter` fills at once. A mutant (`InjectedBugHoleSkip`)
-skips the hole without writing a no-op; the simulator must catch it (section 11).
+`GapAfter` is a patience delay (250 ms in `mdscontrolplane`). The first time a gap is seen, the
+Machine only arms timer 2 (`armGapFill`). Gap fill happens only if the gap is still
+there when the timer fires. Zero `GapAfter` fills at once. A mutant (`InjectedBugGapSkip`)
+skips the gap without writing a no-op; the simulator must catch it (section 11).
 
 ### 4.7 The commit write path
 
 **Front door:** `Offer(ClientOperation)` (`commit.go`). Prod calls it from `server.Node` via
-`runloop` inject. The simulator reaches it through `onCPOffer`. In order:
+`runloop` inject. The simulator reaches it through `onControlPlaneDeliver`. In order:
 
 1. `exited` -> nothing.
 2. `K <= 0` or `!canCommit()` -> answer `ErrUnavailable` at once. `canCommit` is false while
@@ -582,7 +582,7 @@ skips the hole without writing a no-op; the simulator must catch it (section 11)
 4. Else **`retargetCommit`**: is the same `SegmentKey` already queued or in flight (the
    broker timed out and retried)? Then re-point that waiter's `Req`/`From` to the new
    caller. The old caller is gone; the answer must reach the live one. To make the walk
-   deterministic, flight `ReqID`s are collected from the map and **sorted** before use
+   deterministic, in-flight `Req`s are collected from the map and **sorted** before use
    (Go map order is random; the simulator would otherwise get different runs per seed).
 5. A command that cannot fit in one log entry even alone (more than `MaxEntryBytes`) -> `ErrTooLarge`,
    never queued. The server maps it to gRPC `ResourceExhausted` with `outcome = NOT_APPLIED`.
@@ -596,7 +596,7 @@ It builds **one** log entry:
 
 ```
 id    = "<writer>/<seq>"                    seq++ each time
-inner = 0xC5 | uvarint len(id) | id | uvarint n | n × ( uvarint len(enc) | enc )     <- encodeGroup
+inner = 0xC5 | uvarint len(id) | id | uvarint n | n x ( uvarint len(enc) | enc )     <- encodeGroup
 data  = 0xC7 | uvarint rank | uvarint len(writer) | writer | inner                    <- wrap (envelope)
 slot  = alloc()  =  max(high, applied) , then high = slot + 1
 emits LogAppend{Req, Slot, Data}
@@ -614,7 +614,7 @@ emits LogAppend{Req, Slot, Data}
 |-----------------|---------|--------------|
 | `Err=OK, Outcome=Applied, Taken=false` | we won the slot | `buf[slot] = our bytes`, `drain()` |
 | `Taken=true`, `Existing` has **our** group id | we already wrote it (our own earlier retry landed) | `buf[slot] = Existing`, `drain()` |
-| `Taken=true`, `Existing` has **another** id | we lost the slot | `buf[slot] = Existing` (their bytes!), `drain()`, then `retryFlight`: same group, **new slot** |
+| `Taken=true`, `Existing` has **another** id | we lost the slot | `buf[slot] = Existing` (their bytes!), `drain()`, then `retryInFlightAppend`: same group, **new slot** |
 | `Err != OK` or `Outcome != Applied` (timeout, 5xx; `MaybeApplied` or `NotApplied`) | unknown | `retrySameSlot`: the same bytes to the **same slot** |
 | trimmed slot (see 4.11 and section 12) | slot was deleted under us | `hitTrimmed` |
 
@@ -622,7 +622,7 @@ Why retry the **same** slot on an unknown result? Because the put is put-if-abse
 first try had landed, the retry sees "taken" with our own id and knows it won. If it had
 not landed, the retry wins. Moving to a *new* slot would risk the first one landing too,
 and the same group would be applied twice. (A comment in the code records that an older
-version moved on and left a permanent hole that wedged all commits.)
+version moved on and left a permanent gap that wedged all commits.)
 
 "Is it mine?" is answered by `groupIDMatches(data, id)`: decode the group header and compare
 the id string. That is why the id is inside the entry.
@@ -639,7 +639,7 @@ if id, cmds, ok := decodeGroup(payload); ok {
     for each cmd: dones[i] = fold.Apply(slot, cmd)     // THE OFFSETS ARE DECIDED HERE
     deliver(id, dones)                                 // match dones[i] to waiters[id][i]
 } else {
-    d := fold.ApplyBytes(slot, payload)                // single entry (hole-fill, heartbeat, old format)
+    d := fold.ApplyBytes(slot, payload)                // single entry (gap-fill, heartbeat, old format)
 }
 afterApply(slot)                                       // maybe Trim the idempotency window
 ```
@@ -661,7 +661,7 @@ node can commit (`isAppender` returns true) and no role timer exists.
 |-------|------|
 | Start | At `finishBoot`, **rank 0** becomes `active`. Higher ranks are **standby**. |
 | Standby | Tails the log, folds, serves reads. Refuses writes with `ErrUnavailable`. |
-| Heartbeat | An active node idle for `Heartbeat` (no queue, flights or pending) appends a no-op. This proves liveness to standbys. |
+| Heartbeat | An active node idle for `Heartbeat` (no queue, no in-flight appends or pending) appends a no-op. This proves liveness to standbys. |
 | Takeover | A standby promotes itself when (a) it saw no slot from *another writer* for `TakeoverAfter` **and** (b) its own log reads succeeded within that time. Rule (b) stops a standby from taking over just because *it* is cut off. |
 | Failback | An active node steps down when a *lower-rank* writer appends at or after `promoSlot` (the slot where this node became active). `lowerSeen` is set by `observeWriter`. |
 | Fence | None of the above is a lock. If two nodes are active at once, they race for slots, one of them loses each time, and the loser retries. This costs retries, not correctness. |
@@ -716,7 +716,7 @@ check that *starts after* now). `noteTail(round, tail)` gives it a goal slot. `s
 (called at the end of every `Step`) answers waiters with `applied >= goal`. Not ready or
 crashed? `refuseReads` answers `ErrUnavailable` so the caller tries the other node.
 
-**Important reality check:** this machinery is reached only by `onCPOffer`, the *simulator*
+**Important reality check:** this machinery is reached only by `onControlPlaneDeliver`, the *simulator*
 front door. In production, `server.Node.Lookup` reads the fold directly (section 12.3).
 
 ### 4.13 The envelope, the group, and what the log really holds
@@ -730,7 +730,7 @@ C7 [rank] [writer-len] [writer...]          envelope
       [len2] [entry2 bytes...]
 ```
 
-A *no-op* (hole-fill, heartbeat) is `C7 ... ` + a single `stateupdater.Encode` with kind 0
+A *no-op* (gap-fill, heartbeat) is `C7 ... ` + a single `stateupdater.Encode` with kind 0
 and no group marker. `applySlot` handles both: group path or single-entry path.
 
 ---
@@ -780,7 +780,7 @@ optional `ttl`.
 | `TrimThrough` | `Query` (pk, sk only) in pages of 25, then `BatchWriteItem` | Overwrites rows with `d = 0xFE` and a `ttl` stub (30 days) |
 
 The consistent read matters: an eventually consistent read could miss a slot that was
-already won, which would look like a hole.
+already won, which would look like a gap.
 
 ### 5.3 Turning errors into `(ErrCode, Outcome)` (`classify.go`)
 
@@ -848,7 +848,7 @@ Machine is single-threaded.
 ```
 handler goroutine                                       loop goroutine
 -----------------                                       --------------
-req := allocReq()                      (fresh ReqID)
+req := allocReq()                      (fresh request ID)
 ch  := make(chan Done, 1)
 waiters[req] = ch                      (under mutex)
 onLoop(fn): send closure to inject --------------------> runs fn: m.Offer(ClientOperation{req, cmd})
@@ -895,7 +895,7 @@ would not tell the broker whether the write might have happened.
   `core.Outcome`; number 5 (the old `ErrFenced`) is retired and left as a gap.
 - **`apiconvert`** has the two-way converters (`CommitSegmentToCore`,
   `CommitSegmentFromCore`, ...). Unknown wire error values become `ErrIO`. Keeping this a
-  separate package means the independent oracle (veritas) can share the schema types without
+  separate package means the independent oracle (speccheck) can share the schema types without
   sharing apply code (decision 21).
 - **`controlplaneclient.Client`** (`client.go`) is what the broker uses. It takes a
   comma-separated address list.
@@ -924,7 +924,7 @@ client believes it; the broker (page 01, station 9) retries the same key with ba
 ```
 flags -> statemachine.Config {
             CatchUpEvery: 5ms,   K: 4 (-log-k),   Rank, Heartbeat (1s), TakeoverAfter (5s),
-            HoleAfter (250ms),   Writer: hostname (-node-name),
+            GapAfter (250ms),   Writer: hostname (-node-name),
             CheckpointEvery (5m),      CheckpointMinSlots (1000),   KeepSlots: window-slots/8,
             WindowSlots: window-slots, TrimStride: 1024 }          (see machineConfig in main.go)
 -store mem        -> MemoryLog + MemoryObjects            (fold in memory)
@@ -948,13 +948,13 @@ The metrics package `controlplanemetrics` is outside the determinism closure by 
 Setup: one active node (`rank 0`), `K=4`, log empty, topic `orders` has 2 partitions
 (already created by `CreateTopic` at slot 0).
 
-1. gRPC `CommitSegment{key=seg/9f3c, [A: orders-0 × 3 records, B: orders-1 × 2 records]}`
+1. gRPC `CommitSegment{key=seg/9f3c, [A: orders-0 x 3 records, B: orders-1 x 2 records]}`
    arrives. `Node.CommitSegment` converts it and calls `offer`.
 2. `offer` registers `waiters[req=7]`, injects `m.Offer`. `Offer`: ready, active -> not in
    fold (`KnownCommit` false) -> not queued -> queue has room -> `queue=[cmd]` ->
    `flushCommits` -> `emitCommitGroup`:
    `id="host/3"`, `slot = max(high=1, applied=1) = 1`, `high=2`,
-   returns `LogAppend{Req: 12, Slot: 1, Data: C7…C5…}`.
+   returns `LogAppend{Req: 12, Slot: 1, Data: C7...C5...}`.
 3. `runloop.dispatch` -> `Executor.Execute` -> goroutine -> `DynamoLog.Append` -> `PutItem`
    with `attribute_not_exists` succeeds -> `LogAppendDone{Req 12, Err OK, Applied, Taken false}`
    lands in the control lane.
@@ -976,7 +976,7 @@ Nodes N0 (active) and N1 (just promoted after N0 went quiet). Both pick slot 50.
    `executor` returns `LogAppendDone{Taken: true, Existing: N0's bytes}`.
 3. N1: `onCommitAppendDone` -> `lost = !groupIDMatches(existing, "n1/4")` = true.
    `buf[50] = Existing` (N0's bytes), `drain()` folds N0's group (N1 has no waiters for `n0/9`, so
-   no reply, just state). Then `retryFlight`: same group `n1/4`, `alloc()` -> slot 51. A new `LogAppend`.
+   no reply, just state). Then `retryInFlightAppend`: same group `n1/4`, `alloc()` -> slot 51. A new `LogAppend`.
 4. Both nodes folded slot 50 with the same bytes -> same offsets. N1's commits get offsets
    *after* N0's. The simulator tracks this branch with `Reachable("logcp-sim: lost slot retried at a later slot")`:
 it wants every campaign to hit it at least once.
@@ -1021,7 +1021,7 @@ The Machine was made pure so the simulator can run **two CP replicas plus a faul
 DynamoDB** on a seed and check the outcome. Facts to know (`docs/sim-log-engine.md`):
 
 - Scenario `kafka-log` (`go run ./cmd/mdssimulator -scenario kafka-log -seeds 300`). Brokers emit
-  `CPCall`; a bridge turns that into `ControlPlaneDeliver` on `cp-0` / `cp-1`.
+  `ControlPlaneCall`; a bridge turns that into `ControlPlaneDeliver` on `cp-0` / `cp-1`.
 - **Faults:** the kernel can kill or stall a CP process; the Machine has its own `StallProb`
   and `CrashProb` (coin flips on each role tick, only for the active node); the bridge can
   return 503, time out, or lose a response; the fake log can fail a put at random.
@@ -1033,16 +1033,16 @@ DynamoDB** on a seed and check the outcome. Facts to know (`docs/sim-log-engine.
 | `InjectedBugWriterOffsets` | the writer picks the base, skipping one offset per partition | a replica's state no longer equals "replay of the log" |
 | `InjectedBugTrimDelete` | trimmed slots are really deleted, not tombstoned | "a Put never wins a slot below the trim floor" |
 | `InjectedBugPerReplicaWindow` | each replica forgets keys on its own clock | state divergence |
-| `InjectedBugHoleSkip` | skip a hole without a no-op | state divergence |
+| `InjectedBugGapSkip` | skip a gap without a no-op | state divergence |
 
 - **Properties.** `env.Always(...)` is something that must be true every time.
   `env.Reachable(...)` is something that must be true at least once across the campaign (so
   the faults really reach this code). Text like `"logcp-sim: lost slot retried at a later
   slot"` is a Reachable name. These calls are noise for reading; the simulator uses them.
-- **Oracle.** Veritas (`speccheck.ControlPlane`) is the independent executable spec. Lockstep
+- **Oracle.** The speccheck package (`speccheck.ControlPlane`) is the independent executable spec. Lockstep
   tests (`statemachine/lockstep_test.go`, `stateupdater/stateupdater_test.go`) feed the same
   random commands to both and compare every answer.
-- **`CPTruth`** replays the durable log from slot 0 with `ReplayPosition` (`replay.go`) into
+- **`ControlPlaneRealState`** replays the durable log from slot 0 with `ReplayPosition` (`replay.go`) into
   a fresh fold, ignoring queues and writer-chosen bases. At the end, every live replica's
   digest must equal that of the log replayed cold.
 - **Trace hash pins.** The last commits (`c1725af`, `39ebcdd`) pin the trace hash of five
@@ -1089,7 +1089,7 @@ Also done in `56417bd`: removed the flags nothing read (`-slot-rate`, `-final-ch
 3. **Trimmed-slot signal differs between simulator and production.**
    `isDeleted` needs `ErrConflict` + `Taken` + empty `Existing`; only the simulator's `fakelogstore` returns that.
    The real executor returns `OK` + `Taken` + `Existing=[0xFE]` (Dynamo) or `nil` (MemoryLog), so `hitTrimmed` never fires from an append.
-   A hole-fill onto a tombstone ends in `ErrCorrupt`, then `trip` and a restart: safe, but not the path the simulator tests.
+   A gap-fill onto a tombstone ends in `ErrCorrupt`, then `trip` and a restart: safe, but not the path the simulator tests.
 4. **Pebble was not wired in. FIXED (commit `56417bd`).**
    The gRPC cutover (`1c3c11b`) had dropped Pebble: the Machine built `stateupdater.NewMem()` and `-pebble-dir` was unused.
    New `Config.OpenStore` gives the fold its store; `mdscontrolplane -store dynamolog` opens an empty Pebble store at start and after every restore.
@@ -1110,7 +1110,7 @@ Also done in `56417bd`: removed the flags nothing read (`-slot-rate`, `-final-ch
    Operators cannot see replication lag from it.
    It should use `goalTail` or a real tail check.
 8. **Stale names in comments and strings. FINISHED (commit `da09578`).**
-   Package `doc.go` said `controlplane/run`, `controlplane/machine`, `cpclient`, `applier`, `exec`.
+   Package `doc.go` said `controlplane/run`, `controlplane/statemachine`, `controlplaneclient`, `applier`, `exec`.
    Error strings said `"applier:"` and `"machine:"`; `-slot-rate` was "unused by machine".
    All now use the new names; no logic, file name or identifier changed.
 9. **Misplaced coverage marker in `afterApply`.**
@@ -1173,7 +1173,7 @@ is dead, so it is less useful). Code that only tests use is not always garbage (
 ### 12.3 Production reads are not "fresh"
 
 Section 4.12 describes the fresh-tail rule (commit `226ea69`). It lives in `queueRead` /
-`serveReads` and is reached only from `onCPOffer` (simulator). `server.Node.read` calls
+`serveReads` and is reached only from `onControlPlaneDeliver` (simulator). `server.Node.read` calls
 `m.Fold().Lookup(...)` directly after checking `Ready()`. On the **active** node this is
 fine: it only acks a commit after folding it, so it never serves a stale answer for its own
 commits. On a **standby** (after failover, or a client that tries the second address) the
@@ -1185,7 +1185,7 @@ small, but the sim and prod behave differently here.
 `isDeleted(d)` is `Err == ErrConflict && Taken && len(Existing) == 0`. Only the simulator's
 `fakelogstore` returns that shape. The real executor returns `Err=OK, Taken=true` with
 `Existing = [0xFE]` (Dynamo) or `nil` (MemoryLog). So in production `hitTrimmed` does not
-fire from an append. A hole-fill onto a tombstone would put `0xFE` into `buf`, and
+fire from an append. A gap-fill onto a tombstone would put `0xFE` into `buf`, and
 `ApplyBytes` would fail with `ErrCorrupt`, so `drain` returns the error and `trip` stops the
 process (restart then restores from the checkpoint). A commit append onto a tombstone is
 seen as "lost" and retried at a later slot. Both end safely, but through a different path
@@ -1202,7 +1202,7 @@ than the one the simulator tests.
 - **`GetStatus.log_tail`** is set to `m.Applied()`, the same value as `applied_slot`. It is
   not the real tail.
 - **Stale names (FINISHED, commit `da09578`)** in comments and strings: package `doc.go` mentioned `controlplane/run`,
-  `controlplane/machine`, `cpclient`, `applier`, `exec`; error texts say `"applier:"` and
+  `controlplane/statemachine`, `controlplaneclient`, `applier`, `exec`; error texts say `"applier:"` and
   `"machine:"`; `-slot-rate` is "unused by machine".
 - **`afterApply`** starts with a `Reachable("replayed key answered from the window")`
   that looks like it belongs in `Offer`'s `KnownCommit` branch (where the same text also
@@ -1225,14 +1225,14 @@ than the one the simulator tests.
 8. `controlplaneclient/client.go` last.
 
 **Noise you can skip on a first pass:** `InjectedBug*` branches, `env.Always/Reachable/
-Unreachable` calls, `StateHash` bodies, `//detcheck:ok` comments (they mark map walks that
+Unreachable` calls, `StateHash` bodies, `//determinismcheck:ok` comments (they mark map walks that
 sort first), `controlplanemetrics`, `fakedynamodb`.
 
 **Run these (all pass today):**
 
 ```
 go test ./internal/controlplane/statemachine -run 'TestKConcurrentLogAppend|TestLostAppendRetriesSameEntryLaterSlot|TestOfferKnownCommitSkipsAppend|TestOfferRetargetsInFlightCommit' -v
-go test ./internal/controlplane/statemachine -run 'TestHoleFillEmitsNoopAppend|TestTakeoverAfterSilence|TestFailbackOnLowerRank' -v
+go test ./internal/controlplane/statemachine -run 'TestGapFillEmitsNoopAppend|TestTakeoverAfterSilence|TestFailbackOnLowerRank' -v
 go test ./internal/controlplane/statemachine -run 'TestCheckpointPublishAndTrim|TestRestoreReadsAgainOnBadCRC' -v
 go test ./internal/controlplane/statemachine -run 'TestReadWaitsForFreshTail' -v
 go test ./internal/controlplane/server -run 'TestCommitLookupRoundTrip|TestStandbyCommitUnavailable' -v
@@ -1258,10 +1258,10 @@ Answer without looking, then verify in the code.
    when the append succeeds?
 6. What does `Trim` delete and what does it never delete? What happens to a key after Trim?
 7. Why must a checkpoint be written only by a node whose `applied >= goalTail`?
-8. What is the difference between the `pending` lane and the `flights` lane?
+8. What is the difference between the `pending` lane and the `inFlightAppends` lane?
 9. What makes a standby take over, and why must its own log reads be healthy too?
 10. List the four defences that make a retried commit safe.
-11. Why does the Machine collect map keys and sort them before walking `flights`?
+11. Why does the Machine collect map keys and sort them before walking `inFlightAppends`?
 12. A gRPC call times out inside `Node.offer`. What does the broker learn, and what is the
     state of the write?
 13. (Reality check) What would happen in production to the `K` records over a month of
@@ -1271,13 +1271,13 @@ Answers: (1) Same entries, same order, same deterministic code. (2) The put is
 put-if-absent: a retry on the same slot either lands or shows our own id; a new slot could
 double-apply. (3) The group id inside the entry (`groupIDMatches`); the winner's bytes go
 into `buf[slot]` and are folded, then the group is re-appended at a later slot
-(`retryFlight`). (4) Hole fill: after `HoleAfter` any node puts a no-op into the empty slot.
+(`retryInFlightAppend`). (4) Gap fill: after `GapAfter` any node puts a no-op into the empty slot.
 (5) `applySlot` -> `deliver` -> `answers` -> `AfterStep` -> `flushAnswers`. Append can retry,
 lose or land twice; only apply is the same on every replica. (6) It drops `K` and `S`
 records below the slot; never `E`, `R`, `T`; the key then commits again as a new segment.
 (7) A behind node could overwrite a newer snapshot, and the log below the newer snapshot may
 be trimmed, so recovery would be impossible. (8) `pending` is one at a time for catch-up,
-hole fill, checkpoint and trim; `flights` is up to `K` commit appends in parallel.
+gap fill, checkpoint and trim; `inFlightAppends` is up to `K` commit appends in parallel.
 (9) Silence from other writers for `TakeoverAfter`; healthy own reads prove the silence is
 real and not the standby's own network problem. (10) Broker key reuse, `KnownCommit`,
 `retargetCommit`, the `K` record in `commitTransaction`. (11) Go map order is random; the
@@ -1301,7 +1301,7 @@ never trimmed. Now `mdscontrolplane` sets it, so they are cut every 1024 slots.
 | Put-if-absent | Write that succeeds only if the slot is empty: the only consensus rule |
 | Appender / active / standby | The advisory writer role / the node that has it / a node that only reads |
 | Rank | Preference number. 0 is preferred, used for failback |
-| Hole | An empty slot below a written slot; filled with a no-op |
+| Gap | An empty slot below a written slot; filled with a no-op |
 | Tombstone | A trimmed slot, overwritten with the byte `0xFE` |
 | Checkpoint | Snapshot of the fold at one slot, stored as `ckpt/latest` |
 | Window | How long a `SegmentKey` is remembered, equal to how long its `K` record is kept |
@@ -1314,7 +1314,7 @@ never trimmed. Now `mdscontrolplane` sets it, so they are cut every 1024 slots.
 ## 16. Next pages I'd suggest
 
 - 03 Fetch and `Lookup`: how a consumer read turns `FindSegments` into ranged S3 `GET`s
-- 04 The simulator for the CP: `kafka-log`, `fakelogstore`, the bridge, and `CPTruth`
+- 04 The simulator for the CP: `kafka-log`, `fakelogstore`, the bridge, and `ControlPlaneRealState`
 - 05 Pebble in the Machine at real sizes: what restore, snapshot and one `Update` per command
   cost (the Machine does not use `CommitBatch` yet)
 - 06 Consumer groups on the CP (`docs/consumer-groups-design.md`): a new entry kind in the log

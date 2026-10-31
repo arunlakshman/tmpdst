@@ -65,8 +65,8 @@ func NewTopicPartition(topic string, partition int32) TopicPartition {
 	return TopicPartition{Topic: topic, Partition: partition}
 }
 
-func (tp TopicPartition) String() string {
-	return fmt.Sprintf("%s-%d", tp.Topic, tp.Partition)
+func (topicPartition TopicPartition) String() string {
+	return fmt.Sprintf("%s-%d", topicPartition.Topic, topicPartition.Partition)
 }
 
 // SegmentRef is a byte range inside an object in the object store.

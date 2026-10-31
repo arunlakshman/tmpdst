@@ -82,8 +82,8 @@ func ControlPlane(t checker.Reporter, p generator.InputProfile, newSubject func(
 
 // diffControlPlane compares two results. For CreateTopic it compares the code
 // only.
-func diffControlPlane(op generator.ControlPlaneTestStep, expected, actual observation.ControlPlaneResult) string {
-	if op.CreateTopic != nil {
+func diffControlPlane(operation generator.ControlPlaneTestStep, expected, actual observation.ControlPlaneResult) string {
+	if operation.CreateTopic != nil {
 		if expected.Code != actual.Code {
 			return fmt.Sprintf("The field code differs: the expected result has %v, but the actual result has %v.",
 				expected.Code, actual.Code)
@@ -93,26 +93,26 @@ func diffControlPlane(op generator.ControlPlaneTestStep, expected, actual observ
 	return observation.DiffControlPlane(expected, actual)
 }
 
-func controlPlaneStep(p *ControlPlanePair, op generator.ControlPlaneTestStep) error {
-	text := generator.FormatControlPlaneOp(op)
+func controlPlaneStep(p *ControlPlanePair, operation generator.ControlPlaneTestStep) error {
+	text := generator.FormatControlPlaneOp(operation)
 	specBefore, _ := p.specSubject.StateHash()
 	subjectBefore, subjectHasHash := p.subject.StateHash()
 
-	specResult, err := p.specSubject.Do(op)
+	specResult, err := p.specSubject.Do(operation)
 	if err != nil {
 		return fmt.Errorf("the spec could not run %s: %w", text, err)
 	}
-	subjectResult, err := p.subject.Do(op)
+	subjectResult, err := p.subject.Do(operation)
 	if err != nil {
 		return fmt.Errorf("the subject could not run %s: %w", text, err)
 	}
-	if diff := diffControlPlane(op, specResult, subjectResult); diff != "" {
+	if diff := diffControlPlane(operation, specResult, subjectResult); diff != "" {
 		return fmt.Errorf("for %s: %s The spec result is: %s. The subject result is: %s",
 			text, diff, specResult.Describe(), subjectResult.Describe())
 	}
 
-	expected, changed := p.modelApply(op)
-	if diff := diffControlPlane(op, expected, specResult); diff != "" {
+	expected, changed := p.modelApply(operation)
+	if diff := diffControlPlane(operation, expected, specResult); diff != "" {
 		return fmt.Errorf("for %s: the spec disagrees with the naive model. %s The model result is: %s. The spec result is: %s",
 			text, diff, expected.Describe(), specResult.Describe())
 	}
@@ -137,12 +137,12 @@ func controlPlaneStep(p *ControlPlanePair, op generator.ControlPlaneTestStep) er
 	return nil
 }
 
-func (p *ControlPlanePair) modelApply(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, bool) {
+func (p *ControlPlanePair) modelApply(operation generator.ControlPlaneTestStep) (observation.ControlPlaneResult, bool) {
 	switch {
-	case op.CreateTopic != nil:
-		return p.model.createTopic(op.CreateTopic.Name, op.CreateTopic.Partitions)
-	case op.Call != nil:
-		return p.model.apply(op.Call.Op)
+	case operation.CreateTopic != nil:
+		return p.model.createTopic(operation.CreateTopic.Name, operation.CreateTopic.Partitions)
+	case operation.Call != nil:
+		return p.model.apply(operation.Call.Op)
 	}
 	return observation.ControlPlaneResult{Code: core.ErrInvalid}, false
 }
@@ -152,8 +152,8 @@ func controlPlaneInvariant(p *ControlPlanePair) error {
 		name    string
 		subject ControlPlaneSubject
 	}{{"spec", p.specSubject}, {"subject", p.subject}} {
-		for _, tp := range p.model.partitions() {
-			if err := p.checkRuns(who.name, who.subject, tp); err != nil {
+		for _, topicPartition := range p.model.partitions() {
+			if err := p.checkRuns(who.name, who.subject, topicPartition); err != nil {
 				return err
 			}
 		}
@@ -166,26 +166,26 @@ func controlPlaneInvariant(p *ControlPlanePair) error {
 
 // checkRuns looks up a whole partition and checks that its runs have no gap
 // and no overlap and that the end offset equals the committed record count.
-func (p *ControlPlanePair) checkRuns(who string, subject ControlPlaneSubject, tp core.TopicPartition) error {
-	result, err := subject.Do(generator.NewCall(core.ControlPlaneCall{Req: p.nextReq(), Op: core.FindSegments{TopicPartition: tp}}))
+func (p *ControlPlanePair) checkRuns(who string, subject ControlPlaneSubject, topicPartition core.TopicPartition) error {
+	result, err := subject.Do(generator.NewCall(core.ControlPlaneCall{Req: p.nextReq(), Op: core.FindSegments{TopicPartition: topicPartition}}))
 	if err != nil {
-		return fmt.Errorf("the %s could not look up %v: %w", who, tp, err)
+		return fmt.Errorf("the %s could not look up %v: %w", who, topicPartition, err)
 	}
 	if result.Code != core.OK {
-		return fmt.Errorf("the %s returned the code %v for a lookup of %v from offset 0, but it must return OK", who, result.Code, tp)
+		return fmt.Errorf("the %s returned the code %v for a lookup of %v from offset 0, but it must return OK", who, result.Code, topicPartition)
 	}
-	committed := p.model.end(tp)
+	committed := p.model.end(topicPartition)
 	next, sum := core.Offset(0), int64(0)
 	for i, r := range result.Ranges {
 		if r.Base != next {
 			return fmt.Errorf("the %s returned run %d of %v at offset %d, but the previous run ends at %d, so offsets are not contiguous",
-				who, i, tp, r.Base, next)
+				who, i, topicPartition, r.Base, next)
 		}
 		next, sum = r.Base+core.Offset(r.Count), sum+r.Count
 	}
 	if result.End != next || int64(result.End) != committed || sum != committed {
 		return fmt.Errorf("the %s returned for %v the end offset %d, the end of the last run %d and %d records in the runs, but %d records were committed",
-			who, tp, result.End, next, sum, committed)
+			who, topicPartition, result.End, next, sum, committed)
 	}
 	return nil
 }

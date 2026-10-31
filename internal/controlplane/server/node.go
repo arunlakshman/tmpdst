@@ -47,7 +47,7 @@ const defaultBrokerLeaseTTL = 5 * time.Second
 type Node struct {
 	cpv1.UnimplementedControlPlaneServer
 
-	cfg    Config
+	config Config
 	inbox  *runloop.Inbox
 	inject chan runloop.InjectFunc
 	m      atomic.Pointer[statemachine.Machine]
@@ -66,37 +66,37 @@ type Node struct {
 }
 
 // New builds a Node. Call Start then serve gRPC with Register.
-func New(cfg Config) *Node {
-	if cfg.Self.Node == "" {
-		cfg.Self = core.NodeInstance{Node: "cp"}
+func New(config Config) *Node {
+	if config.Self.Node == "" {
+		config.Self = core.NodeInstance{Node: "cp"}
 	}
-	if cfg.Clock == nil {
-		cfg.Clock = realClock{}
+	if config.Clock == nil {
+		config.Clock = realClock{}
 	}
-	if cfg.Env == nil {
-		cfg.Env = &productionEnvironment{}
+	if config.Env == nil {
+		config.Env = &productionEnvironment{}
 	}
-	if cfg.Log == nil {
-		cfg.Log = executor.NewMemoryLog()
+	if config.Log == nil {
+		config.Log = executor.NewMemoryLog()
 	}
-	if cfg.StopGrace <= 0 {
-		cfg.StopGrace = core.Duration(15e9) // 15s
+	if config.StopGrace <= 0 {
+		config.StopGrace = core.Duration(15e9) // 15s
 	}
-	if cfg.BrokerLeaseTTL <= 0 {
-		cfg.BrokerLeaseTTL = defaultBrokerLeaseTTL
+	if config.BrokerLeaseTTL <= 0 {
+		config.BrokerLeaseTTL = defaultBrokerLeaseTTL
 	}
 	n := &Node{
-		cfg:      cfg,
+		config:   config,
 		inbox:    runloop.NewInbox(64),
 		inject:   make(chan runloop.InjectFunc, 64),
 		health:   health.NewServer(),
-		leases:   livebrokers.New(cfg.BrokerLeaseTTL),
+		leases:   livebrokers.New(config.BrokerLeaseTTL),
 		waiters:  map[core.RequestID]chan core.ControlPlaneDone{},
 		shutdown: make(chan struct{}),
 		loopDone: make(chan error, 1),
 	}
 	n.groups = groupcoordinator.New(groupcoordinator.Config{
-		InitialRebalanceDelay: cfg.GroupInitialRebalanceDelay,
+		InitialRebalanceDelay: config.GroupInitialRebalanceDelay,
 	}, nodeGroups{n: n})
 	return n
 }
@@ -109,24 +109,24 @@ func (n *Node) Health() *health.Server { return n.health }
 func (n *Node) Start(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	n.cancel = cancel
-	ex := executor.New(runCtx, executor.Config{}, n.cfg.Log, n.cfg.Objects, n.inbox)
+	ex := executor.New(runCtx, executor.Config{}, n.config.Log, n.config.Objects, n.inbox)
 	b := runloop.Dependencies{
-		Clock: n.cfg.Clock, Env: n.cfg.Env, Inbox: n.inbox,
-		Shutdown: n.shutdown, StopGrace: n.cfg.StopGrace, Inject: n.inject,
+		Clock: n.config.Clock, Env: n.config.Env, Inbox: n.inbox,
+		Shutdown: n.shutdown, StopGrace: n.config.StopGrace, Inject: n.inject,
 		AfterStep: func(cm core.Machine) {
 			if m, ok := cm.(*statemachine.Machine); ok {
 				n.flushAnswers(m)
 			}
 		},
 	}
-	f := statemachine.New(n.cfg.Machine)
+	f := statemachine.New(n.config.Machine)
 	go n.watchGroups(runCtx)
 	go func() {
 		err := runloop.Run(runCtx, b, ex, func(env core.Environment, self core.NodeInstance) core.Machine {
 			m := f(env, self).(*statemachine.Machine)
 			n.m.Store(m)
 			return m
-		}, n.cfg.Self)
+		}, n.config.Self)
 		n.health.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
 		n.loopDone <- err
 	}()
@@ -231,19 +231,19 @@ func (n *Node) flushAnswers(m *statemachine.Machine) {
 }
 
 func (n *Node) offer(ctx context.Context, cmd stateupdater.Entry) (core.ControlPlaneDone, error) {
-	req := n.allocReq()
+	request := n.allocReq()
 	ch := make(chan core.ControlPlaneDone, 1)
 	n.mu.Lock()
-	n.waiters[req] = ch
+	n.waiters[request] = ch
 	n.mu.Unlock()
 	defer func() {
 		n.mu.Lock()
-		delete(n.waiters, req)
+		delete(n.waiters, request)
 		n.mu.Unlock()
 	}()
 
 	err := n.onLoop(ctx, func(m *statemachine.Machine) []core.Action {
-		return m.Offer(statemachine.ClientOperation{Req: req, Cmd: cmd})
+		return m.Offer(statemachine.ClientOperation{Req: request, Cmd: cmd})
 	})
 	if err != nil {
 		return core.ControlPlaneDone{}, err
@@ -259,7 +259,7 @@ func (n *Node) offer(ctx context.Context, cmd stateupdater.Entry) (core.ControlP
 		case d := <-ch:
 			return d, nil
 		case <-ctx.Done():
-			return core.ControlPlaneDone{Req: req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}, ctx.Err()
+			return core.ControlPlaneDone{Req: request, Err: core.ErrTimeout, Outcome: core.MaybeApplied}, ctx.Err()
 		case n.inject <- func() []core.Action {
 			m := n.m.Load()
 			if m != nil {
@@ -298,9 +298,9 @@ func (n *Node) read(ctx context.Context, fn func(m *statemachine.Machine) (core.
 }
 
 // CommitSegment implements ControlPlane.
-func (n *Node) CommitSegment(ctx context.Context, req *cpv1.CommitSegmentRequest) (*cpv1.CommitSegmentResponse, error) {
-	op := apiconvert.CommitSegmentToCore(req)
-	d, err := n.offer(ctx, stateupdater.Entry{Kind: stateupdater.KindCommit, Commit: op})
+func (n *Node) CommitSegment(ctx context.Context, request *cpv1.CommitSegmentRequest) (*cpv1.CommitSegmentResponse, error) {
+	operation := apiconvert.CommitSegmentToCore(request)
+	d, err := n.offer(ctx, stateupdater.Entry{Kind: stateupdater.KindCommit, Commit: operation})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, toRPCError(core.ErrTimeout, core.MaybeApplied)
@@ -316,10 +316,10 @@ func (n *Node) CommitSegment(ctx context.Context, req *cpv1.CommitSegmentRequest
 // Lookup implements ControlPlane.
 //
 //nolint:dupl // mirror of DescribeTopics; each RPC keeps its own conversion path
-func (n *Node) Lookup(ctx context.Context, req *cpv1.LookupRequest) (*cpv1.LookupResponse, error) {
-	op := apiconvert.LookupToCore(req)
+func (n *Node) Lookup(ctx context.Context, request *cpv1.LookupRequest) (*cpv1.LookupResponse, error) {
+	operation := apiconvert.LookupToCore(request)
 	d, err := n.read(ctx, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
-		return m.Fold().Lookup(op)
+		return m.Fold().Lookup(operation)
 	})
 	if err != nil {
 		return nil, toRPCError(core.ErrIO, core.NotApplied)
@@ -333,10 +333,10 @@ func (n *Node) Lookup(ctx context.Context, req *cpv1.LookupRequest) (*cpv1.Looku
 // DescribeTopics implements ControlPlane.
 //
 //nolint:dupl // mirror of Lookup; each RPC keeps its own conversion path
-func (n *Node) DescribeTopics(ctx context.Context, req *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
-	op := apiconvert.DescribeTopicsToCore(req)
+func (n *Node) DescribeTopics(ctx context.Context, request *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
+	operation := apiconvert.DescribeTopicsToCore(request)
 	d, err := n.read(ctx, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
-		return m.Fold().Describe(op)
+		return m.Fold().Describe(operation)
 	})
 	if err != nil {
 		return nil, toRPCError(core.ErrIO, core.NotApplied)
@@ -348,12 +348,12 @@ func (n *Node) DescribeTopics(ctx context.Context, req *cpv1.DescribeTopicsReque
 }
 
 // CreateTopic implements ControlPlane.
-func (n *Node) CreateTopic(ctx context.Context, req *cpv1.CreateTopicRequest) (*cpv1.CreateTopicResponse, error) {
-	if req == nil {
+func (n *Node) CreateTopic(ctx context.Context, request *cpv1.CreateTopicRequest) (*cpv1.CreateTopicResponse, error) {
+	if request == nil {
 		return nil, toRPCError(core.ErrInvalid, core.NotApplied)
 	}
 	d, err := n.offer(ctx, stateupdater.CreateEntry(core.CreateTopic{
-		Name: req.Topic, Partitions: req.Partitions, FailIfExists: req.FailIfExists,
+		Name: request.Topic, Partitions: request.Partitions, FailIfExists: request.FailIfExists,
 	}))
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -403,8 +403,8 @@ func (n *Node) GetStatus(ctx context.Context, _ *cpv1.GetStatusRequest) (*cpv1.G
 // BrokerHeartbeat implements ControlPlane. It renews the caller's lease and
 // returns the live broker set (Q4). Only the active node keeps the set, so a
 // standby answers Unavailable and the broker client tries the next address.
-func (n *Node) BrokerHeartbeat(ctx context.Context, req *cpv1.BrokerHeartbeatRequest) (*cpv1.BrokerHeartbeatResponse, error) {
-	b := apiconvert.BrokerHeartbeatToCore(req)
+func (n *Node) BrokerHeartbeat(ctx context.Context, request *cpv1.BrokerHeartbeatRequest) (*cpv1.BrokerHeartbeatResponse, error) {
+	b := apiconvert.BrokerHeartbeatToCore(request)
 	if b.NodeID <= 0 || b.Host == "" || b.Port <= 0 {
 		return nil, toRPCError(core.ErrInvalid, core.NotApplied)
 	}

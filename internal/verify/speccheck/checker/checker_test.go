@@ -12,20 +12,20 @@ func counter() SpecChecker[*int, int] {
 		Name: "int",
 		New:  func() *int { return new(int) },
 		Gen:  func(r *Rand, i int) int { return r.Intn(100) },
-		Step: func(armed *int, op int) error {
-			if *armed > 0 && op >= 50 {
+		Step: func(armed *int, operation int) error {
+			if *armed > 0 && operation >= 50 {
 				return errors.New("injected bug")
 			}
-			if op >= 30 {
+			if operation >= 30 {
 				*armed = 1
 			}
 			return nil
 		},
-		Shrink: func(op int) []int {
-			if op == 0 {
+		Shrink: func(operation int) []int {
+			if operation == 0 {
 				return nil
 			}
-			return []int{0, op / 2, op - 1}
+			return []int{0, operation / 2, operation - 1}
 		},
 		Format: strconv.Itoa,
 		Ops:    50,
@@ -51,7 +51,7 @@ func TestInvariantAndPanicFail(t *testing.T) {
 		Name:      "int",
 		New:       func() *int { return new(int) },
 		Gen:       func(r *Rand, i int) int { return i },
-		Step:      func(s *int, op int) error { *s += op; return nil },
+		Step:      func(s *int, operation int) error { *s += operation; return nil },
 		Invariant: func(s *int) error { return nil },
 		Format:    strconv.Itoa,
 		Ops:       5,
@@ -70,7 +70,7 @@ func TestInvariantAndPanicFail(t *testing.T) {
 		t.Fatalf("invariant not reported: %+v", f)
 	}
 	c.Invariant = nil
-	c.Step = func(s *int, op int) error { panic("boom") }
+	c.Step = func(s *int, operation int) error { panic("boom") }
 	if f := c.RunSeed(1); f == nil || len(f.Ops) != 1 || f.Err.Error() != "panic: boom" {
 		t.Fatalf("panic not reported: %+v", f)
 	}
@@ -83,8 +83,8 @@ func TestShrinkAll(t *testing.T) {
 		Name: "int",
 		New:  func() *[]int { return new([]int) },
 		Gen:  func(r *Rand, i int) int { return 20 },
-		Step: func(s *[]int, op int) error {
-			*s = append(*s, op)
+		Step: func(s *[]int, operation int) error {
+			*s = append(*s, operation)
 			if len(*s) == 2 && (*s)[0]+(*s)[1] >= 14 {
 				return errors.New("bad")
 			}

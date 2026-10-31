@@ -93,9 +93,9 @@ func waitHealthy(t *testing.T, n *logNode) {
 		if err != nil {
 			continue
 		}
-		resp, err := healthpb.NewHealthClient(conn).Check(t.Context(), &healthpb.HealthCheckRequest{})
+		response, err := healthpb.NewHealthClient(conn).Check(t.Context(), &healthpb.HealthCheckRequest{})
 		_ = conn.Close()
-		if err == nil && resp.Status == healthpb.HealthCheckResponse_SERVING {
+		if err == nil && response.Status == healthpb.HealthCheckResponse_SERVING {
 			return
 		}
 	}
@@ -148,14 +148,14 @@ func commitLoop(ctx context.Context, c *controlplaneclient.Client, w int, a *ack
 		default:
 		}
 		key := fmt.Sprintf("seg/w%d-%06d", w, i)
-		op := core.CommitSegment{SegmentKey: key, Batches: []core.PendingBatch{
+		operation := core.CommitSegment{SegmentKey: key, Batches: []core.PendingBatch{
 			{TopicPartition: core.NewTopicPartition("t", int32(i%3)), Records: 2 + int64(w), Loc: core.SegmentRef{Key: key, Off: 0, Len: 10}}}}
-		resp, err := commitRetrying(ctx, c, op)
+		response, err := commitRetrying(ctx, c, operation)
 		if err != nil {
 			return fmt.Errorf("%s: %w", key, err)
 		}
 		a.mu.Lock()
-		a.rngs[key] = resp.(core.CommitSegmentResp).Assigned
+		a.rngs[key] = response.(core.CommitSegmentResp).Assigned
 		a.mu.Unlock()
 		n.Add(1)
 	}
@@ -164,19 +164,19 @@ func commitLoop(ctx context.Context, c *controlplaneclient.Client, w int, a *ack
 // commitRetrying is the broker's rule: the same segment key is retried with a
 // short backoff on any transport failure or 503 until a deadline (the real
 // deadline is 120 s; a takeover takes seconds).
-func commitRetrying(ctx context.Context, c *controlplaneclient.Client, op core.CommitSegment) (core.ControlPlaneResponse, error) {
+func commitRetrying(ctx context.Context, c *controlplaneclient.Client, operation core.CommitSegment) (core.ControlPlaneResponse, error) {
 	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	for {
-		resp, err := c.Call(cctx, op)
+		response, err := c.Call(cctx, operation)
 		if err == nil || cctx.Err() != nil {
-			return resp, err
+			return response, err
 		}
 		var ce *controlplaneclient.CallError
 		var be *controlplaneclient.Error
 		retry := errors.As(err, &ce) || (errors.As(err, &be) && be.Code == core.ErrUnavailable)
 		if !retry {
-			return resp, err
+			return response, err
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -198,20 +198,20 @@ func partitionsMatch(ctx context.Context, c *controlplaneclient.Client, a *acks)
 			want[r.TopicPartition][rn] = key
 		}
 	}
-	for tp, runs := range want {
+	for topicPartition, runs := range want {
 		var next int64
 		for next < int64(len(runs))*100 {
-			resp, err := c.Call(ctx, core.FindSegments{TopicPartition: tp, From: core.Offset(next), MaxBytes: 1 << 30})
+			response, err := c.Call(ctx, core.FindSegments{TopicPartition: topicPartition, From: core.Offset(next), MaxBytes: 1 << 30})
 			if err != nil {
 				return err
 			}
-			lr := resp.(core.FindSegmentsResp)
+			lr := response.(core.FindSegmentsResp)
 			for _, r := range lr.Ranges {
 				if int64(r.Base) != next {
-					return fmt.Errorf("%v: gap or overlap, range at %d, expected %d", tp, r.Base, next)
+					return fmt.Errorf("%v: gap or overlap, range at %d, expected %d", topicPartition, r.Base, next)
 				}
 				if _, ok := runs[run{int64(r.Base), r.Count}]; !ok {
-					return fmt.Errorf("%v: stored range [%d,+%d) was never acked", tp, r.Base, r.Count)
+					return fmt.Errorf("%v: stored range [%d,+%d) was never acked", topicPartition, r.Base, r.Count)
 				}
 				delete(runs, run{int64(r.Base), r.Count})
 				next += r.Count
@@ -221,7 +221,7 @@ func partitionsMatch(ctx context.Context, c *controlplaneclient.Client, a *acks)
 			}
 		}
 		if len(runs) != 0 {
-			return fmt.Errorf("%v: %d acked ranges are lost: %v", tp, len(runs), runs)
+			return fmt.Errorf("%v: %d acked ranges are lost: %v", topicPartition, len(runs), runs)
 		}
 	}
 	return nil
@@ -316,9 +316,9 @@ func TestLogStoreRestartFromFinalCheckpoint(t *testing.T) {
 	}
 	// Restart against the same Dynamo log: catch-up rebuilds fold state.
 	n2 := startLogNode(t, d, "n0", 0, "-checkpoint-every", "-1s")
-	resp, err := controlplaneclient.New(n2.addr, nil).Call(t.Context(), core.FindSegments{TopicPartition: core.NewTopicPartition("t", 0), MaxBytes: 1 << 20})
-	if err != nil || resp.(core.FindSegmentsResp).End != 15 {
-		t.Fatalf("after restart: %v %+v\n%s", err, resp, n2.logs.String())
+	response, err := controlplaneclient.New(n2.addr, nil).Call(t.Context(), core.FindSegments{TopicPartition: core.NewTopicPartition("t", 0), MaxBytes: 1 << 20})
+	if err != nil || response.(core.FindSegmentsResp).End != 15 {
+		t.Fatalf("after restart: %v %+v\n%s", err, response, n2.logs.String())
 	}
 	_ = objs
 	n2.stop(t)

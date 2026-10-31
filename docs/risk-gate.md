@@ -44,9 +44,9 @@ the profile (a package with no tests) counts as 0%.
 Skipped tests: `go test ./...` includes Docker-backed tests that skip without
 their environment. The gate measures "what plain `go test ./...` covers", which
 is stable on any machine, so every backend-facing package has Docker-free tests:
-cp/logcp runs against an in-memory fake DynamoDB (cp/fakedb, checked
-against the log state machine by the cptest conformance suite), sys/s3store against a fake
-S3, cp/cpclient and cp against httptest, the cmd mains through a testable `run`. To count integration
+the control plane runs against an in-memory fake DynamoDB (`internal/controlplane/fakedynamodb`, checked
+against the log state machine by the `internal/controlplane/controlplanetest` conformance suite), `internal/system/s3store` against a fake
+S3, `internal/controlplane/controlplaneclient` and the control plane server against httptest, the cmd mains through a testable `run`. To count integration
 coverage, pass an extra profile and merge it (counts are summed per block):
 
     make risk RISK_MERGE=build/it-cover.out
@@ -73,10 +73,10 @@ full list; expect 0 over 20 when the gate is green.
 
 ## Running
 
-    make build          fmt, ascii, vet, lint, compile, unit test, sim, hermetic it, risk
-    make test           unit packages only (excludes sim/ and it/)
-    make sim            go test ./sim/...
-    make it-hermetic    go test ./it/ (Docker fullstack Skips without endpoints)
+    make build          fmt, ascii, vet, lint, compile, unit test, sim, hermetic it, Kafka CLI e2e, risk
+    make test           unit packages only (excludes internal/verify/simulator and test/integrationtest)
+    make sim            go test ./internal/verify/simulator/...
+    make it-hermetic    go test ./test/integrationtest/ (Docker fullstack Skips without endpoints)
     make risk           change risk score gate on merged unit+sim+it coverprofiles
     make risk-strict    ignore the baseline, print every function, fail on all offenders
     make risk-baseline  rewrite ops/risk-baseline.json (deliberate, reviewable)
@@ -86,12 +86,12 @@ Flags of `go run ./cmd/riskscore`: `-profile`, `-merge-profile a,b`,
 `-strict`, `-json`, `-top N` (0 = all), `-tolerance` (default 0.5), `-exclude
 REGEXP` (on the function key), `-root`. Exit codes: 0 ok, 1 gate failed, 2
 usage or input error. Generated files, `_test.go`, `vendor`, `testdata`, hidden
-directories and nested modules (toys3/minikv) are skipped. No functions are
+directories and nested modules (any directory with its own go.mod) are skipped. No functions are
 excluded by default. The baseline is empty: the gate fails on any function over
 the threshold.
 
 The determinism gate stays separate. To run it in `make build`, add
-`./scripts/ci-determinism.sh` as a step before `risk` in the `build` recipe.
+`ops/scripts/ci-determinism.sh` as a step before `risk` in the `build` recipe.
 
 ## Reading the output
 

@@ -20,12 +20,12 @@ import (
 
 func newPebble(t testing.TB) stateupdater.KeyValueStore {
 	t.Helper()
-	kv, err := pebblestore.Open(filepath.Join(t.TempDir(), "state"), pebblestore.Options{CacheBytes: 8 << 20, MemTableBytes: 4 << 20})
+	keyValue, err := pebblestore.Open(filepath.Join(t.TempDir(), "state"), pebblestore.Options{CacheBytes: 8 << 20, MemTableBytes: 4 << 20})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = kv.Close() })
-	return kv
+	t.Cleanup(func() { _ = keyValue.Close() })
+	return keyValue
 }
 
 var backends = map[string]func(testing.TB) stateupdater.KeyValueStore{
@@ -37,12 +37,12 @@ var backends = map[string]func(testing.TB) stateupdater.KeyValueStore{
 // hash is not the hash of the spec, so StateHash says no.
 type stateUpdaterSubject struct{ a *stateupdater.StateUpdater }
 
-func (s stateUpdaterSubject) Do(op generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
+func (s stateUpdaterSubject) Do(operation generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 	switch {
-	case op.CreateTopic != nil:
-		return observation.ControlPlaneResult{Code: s.a.CreateTopic(op.CreateTopic.Name, op.CreateTopic.Partitions)}, nil
-	case op.Call != nil:
-		done, ok := s.a.Exec(*op.Call).(core.ControlPlaneDone)
+	case operation.CreateTopic != nil:
+		return observation.ControlPlaneResult{Code: s.a.CreateTopic(operation.CreateTopic.Name, operation.CreateTopic.Partitions)}, nil
+	case operation.Call != nil:
+		done, ok := s.a.Exec(*operation.Call).(core.ControlPlaneDone)
 		if !ok {
 			return observation.ControlPlaneResult{}, errors.New("the applier did not return a ControlPlaneDone")
 		}
@@ -91,14 +91,14 @@ func TestLookupMaxBytesEdges(t *testing.T) {
 				a, spec := stateupdater.New(mk(t)), suites.NewSpecControlPlaneSubject()
 				subject := stateUpdaterSubject{a}
 				for i := range 120 {
-					op := ops(r, i)
-					expected, _ := spec.Do(op)
-					actual, _ := subject.Do(op)
+					operation := ops(r, i)
+					expected, _ := spec.Do(operation)
+					actual, _ := subject.Do(operation)
 					if diff := observation.DiffControlPlane(expected, actual); diff != "" {
-						t.Fatalf("Seed %d, operation %d (%s): %s", seed, i, op.Describe(), diff)
+						t.Fatalf("Seed %d, operation %d (%s): %s", seed, i, operation.Describe(), diff)
 					}
-					if op.Call != nil {
-						if lk, ok := op.Call.Op.(core.FindSegments); ok {
+					if operation.Call != nil {
+						if lk, ok := operation.Call.Op.(core.FindSegments); ok {
 							edgeLookups(t, subject, spec, lk, expected)
 						}
 					}
@@ -118,9 +118,9 @@ func pb(topic string, p int32, n int64) core.PendingBatch {
 		Loc: core.SegmentRef{Key: topic, Off: n * 10, Len: n}}
 }
 
-func mustCommit(t *testing.T, a *stateupdater.StateUpdater, slot int64, op core.CommitSegment) core.ControlPlaneDone {
+func mustCommit(t *testing.T, a *stateupdater.StateUpdater, slot int64, operation core.CommitSegment) core.ControlPlaneDone {
 	t.Helper()
-	d, err := a.Commit(slot, op)
+	d, err := a.Commit(slot, operation)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,9 +224,9 @@ func TestStoreAdapter(t *testing.T) {
 	if c, err := s.CreateTopic(ctx, core.CreateTopic{Name: "t", Partitions: 3}); c != core.OK || err != nil {
 		t.Fatal(c, err)
 	}
-	resp, c, err := s.CommitSegment(ctx, commit("k", pb("t", 2, 4)))
-	if err != nil || c != core.OK || resp.Assigned[0].Base != 0 {
-		t.Fatalf("%+v %v %v", resp, c, err)
+	response, c, err := s.CommitSegment(ctx, commit("k", pb("t", 2, 4)))
+	if err != nil || c != core.OK || response.Assigned[0].Base != 0 {
+		t.Fatalf("%+v %v %v", response, c, err)
 	}
 	lk, c, _ := s.Lookup(ctx, core.FindSegments{TopicPartition: core.NewTopicPartition("t", 2)})
 	if c != core.OK || lk.End != 4 || len(lk.Ranges) != 1 {
@@ -322,10 +322,10 @@ func TestSnapshotCRCFindsOneFlippedBit(t *testing.T) {
 // create of a name that exists is ErrTopicExists and changes nothing.
 func TestCreateTopicExclusive(t *testing.T) {
 	steps := []struct {
-		name  string
-		op    core.CreateTopic
-		code  core.ErrCode
-		parts int32 // partitions of the topic after the step
+		name      string
+		operation core.CreateTopic
+		code      core.ErrCode
+		parts     int32 // partitions of the topic after the step
 	}{
 		{"exclusive create of a new topic", core.CreateTopic{Name: "t", Partitions: 2, FailIfExists: true}, core.OK, 2},
 		{"exclusive create again", core.CreateTopic{Name: "t", Partitions: 5, FailIfExists: true}, core.ErrTopicExists, 2},
@@ -342,7 +342,7 @@ func TestCreateTopicExclusive(t *testing.T) {
 			t.Cleanup(func() { _ = a.Close() })
 			for i, s := range steps {
 				before := a.StateHash()
-				d := a.Exec(core.ControlPlaneCall{Req: core.RequestID(i), Op: s.op}).(core.ControlPlaneDone)
+				d := a.Exec(core.ControlPlaneCall{Req: core.RequestID(i), Op: s.operation}).(core.ControlPlaneDone)
 				if d.Err != s.code {
 					t.Fatalf("%s: code %v, want %v", s.name, d.Err, s.code)
 				}
@@ -355,7 +355,7 @@ func TestCreateTopicExclusive(t *testing.T) {
 				if s.parts == 0 {
 					continue
 				}
-				got, err := a.Describe(core.DescribeTopics{Topics: []string{s.op.Name}})
+				got, err := a.Describe(core.DescribeTopics{Topics: []string{s.operation.Name}})
 				if err != nil {
 					t.Fatal(err)
 				}

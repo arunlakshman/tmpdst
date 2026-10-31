@@ -14,9 +14,9 @@ func ns(f core.Fact, k string) int64 { return int64(f.Field(k).(core.Int64Value)
 // The second of two segments uploaded together waits for the first one's commit.
 func TestSegmentTimingFacts(t *testing.T) {
 	n := len(plain(t, "a"))
-	cfg := DefaultConfig()
-	cfg.MaxSegmentBytes = n // every batch is a segment
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.MaxSegmentBytes = n // every batch is a segment
+	h := startedHarness(t, config)
 	c := h.open(1)
 	h.holdPut = true
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
@@ -75,9 +75,9 @@ func TestPutDoneCountsAttempts(t *testing.T) {
 // Backpressure facts bracket the pause and report its duration.
 func TestBackpressureFacts(t *testing.T) {
 	n := len(plain(t, "a"))
-	cfg := DefaultConfig()
-	cfg.MaxBufferedBytes, cfg.ResumeBufferedBytes = n, 0
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.MaxBufferedBytes, config.ResumeBufferedBytes = n, 0
+	h := startedHarness(t, config)
 	c := h.open(1)
 	h.call(c, verMetadata, kmsg.NewPtrMetadataRequest())
 	h.holdCP = true

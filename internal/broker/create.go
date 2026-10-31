@@ -19,14 +19,14 @@ import (
 // ignored, and one warning fact is logged per request that has any. Topic ids
 // are not kept, so v7 answers the zero id.
 func (b *Broker) createTopics(s *slot, r *kmsg.CreateTopicsRequest) []core.Action {
-	resp := kmsg.NewPtrCreateTopicsResponse()
-	resp.Topics = make([]kmsg.CreateTopicsResponseTopic, len(r.Topics))
-	s.resp = resp
+	response := kmsg.NewPtrCreateTopicsResponse()
+	response.Topics = make([]kmsg.CreateTopicsResponseTopic, len(r.Topics))
+	s.response = response
 	var acts []core.Action
 	withConfigs := 0
 	var names []string
 	for i, t := range r.Topics {
-		rt := &resp.Topics[i]
+		rt := &response.Topics[i]
 		rt.Topic, rt.NumPartitions, rt.ReplicationFactor = t.Topic, -1, -1
 		rt.Configs = []kmsg.CreateTopicsResponseTopicConfig{} // v5+ clients need a list, not null
 		if len(t.Configs) > 0 {

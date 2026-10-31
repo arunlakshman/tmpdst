@@ -121,50 +121,50 @@ func (f brokerFlags) level() (slog.Level, error) {
 // store or the listener. m is nil when metrics are disabled.
 func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-chan struct{}) (production.NodeConfig, *production.Metrics, uint64, string, error) {
 	cpc := controlplaneclient.New(f.cpURL, nil)
-	cfg := production.NodeConfig{
+	config := production.NodeConfig{
 		NodeID: f.nodeID, Broker: broker.DefaultConfig(), Log: log,
 		ControlPlane: cpc, CPClassify: controlplaneclient.Classifier{},
 		StopGrace: f.grace,
 		Lease:     cpc, LeaseInterval: f.leaseInterval,
 	}
-	if cfg.NodeID == "" {
-		cfg.NodeID = fmt.Sprintf("broker-%d", f.brokerID)
+	if config.NodeID == "" {
+		config.NodeID = fmt.Sprintf("broker-%d", f.brokerID)
 	}
-	cfg.Broker.BrokerID = int32(f.brokerID)
-	cfg.Exec.ObjTimeout = f.objTimeout
+	config.Broker.BrokerID = int32(f.brokerID)
+	config.Exec.ObjTimeout = f.objTimeout
 	if f.commitDeadline > 0 {
-		cfg.Broker.CommitDeadline = core.Duration(f.commitDeadline)
+		config.Broker.CommitDeadline = core.Duration(f.commitDeadline)
 	}
 	if f.fetchPollInterval > 0 {
-		cfg.Broker.FetchPollInterval = core.Duration(f.fetchPollInterval)
+		config.Broker.FetchPollInterval = core.Duration(f.fetchPollInterval)
 	}
 	var m *production.Metrics
 	if f.metricsAddr != "" {
 		m = production.NewMetrics()
 		runinfo.Register(m.Registry(), "mdsbroker", info)
-		cfg.Facts = m.Observe
+		config.Facts = m.Observe
 		cpc.Observe(m.ObserveControlPlaneCall)
 	}
 	segLog := production.NewSegmentLog(log)
-	prev := cfg.Facts
-	cfg.Facts = func(f core.Fact) {
+	prev := config.Facts
+	config.Facts = func(f core.Fact) {
 		if prev != nil {
 			prev(f)
 		}
 		segLog.Observe(f)
 	}
-	cfg.OnIO = segLog.IO
+	config.OnIO = segLog.IO
 	mem, memSource := production.MemoryLimit()
-	err := f.tn.apply(&cfg.Broker, mem)
-	cfg.Shutdown = shutdown
-	return cfg, m, mem, memSource, err
+	err := f.tn.apply(&config.Broker, mem)
+	config.Shutdown = shutdown
+	return config, m, mem, memSource, err
 }
 
 // openObjects sets cfg.Objects from -objects.
-func openObjects(ctx context.Context, f brokerFlags, cfg *production.NodeConfig, m *production.Metrics, log *slog.Logger) error {
+func openObjects(ctx context.Context, f brokerFlags, config *production.NodeConfig, m *production.Metrics, log *slog.Logger) error {
 	switch f.objects {
 	case "mem":
-		cfg.Objects, cfg.ObjClassify = specsystem.NewObjectStore(), production.MemoryErrorClassifier{}
+		config.Objects, config.ObjClassify = specsystem.NewObjectStore(), production.MemoryErrorClassifier{}
 		return nil
 	case "s3":
 		var obs *awsmetrics.Recorder
@@ -182,19 +182,19 @@ func openObjects(ctx context.Context, f brokerFlags, cfg *production.NodeConfig,
 				return err
 			}
 		}
-		cfg.Objects, cfg.ObjClassify = s, s3store.Classifier{}
+		config.Objects, config.ObjClassify = s, s3store.Classifier{}
 		return nil
 	}
 	return errors.New("unknown -objects " + f.objects)
 }
 
 // bind opens the Kafka listener and sets the advertised host and port.
-func bind(ctx context.Context, f brokerFlags, cfg *production.NodeConfig) (net.Listener, string, error) {
+func bind(ctx context.Context, f brokerFlags, config *production.NodeConfig) (net.Listener, string, error) {
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", f.listen)
 	if err != nil {
 		return nil, "", err
 	}
-	cfg.Listener = ln
+	config.Listener = ln
 	adv := f.advertise
 	if adv == "" {
 		adv = ln.Addr().String()
@@ -204,7 +204,7 @@ func bind(ctx context.Context, f brokerFlags, cfg *production.NodeConfig) (net.L
 		_ = ln.Close() // already returning the original error
 		return nil, "", err
 	}
-	cfg.Broker.Host, cfg.Broker.Port = host, port
+	config.Broker.Host, config.Broker.Port = host, port
 	return ln, adv, nil
 }
 
@@ -245,11 +245,11 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 		"git_dirty", info.GitDirty, "hostname", info.Hostname, "log_level", lvl.String())
 
 	ctx := context.Background()
-	cfg, m, mem, memSource, err := nodeConfig(f, log, info, shutdown)
+	config, m, mem, memSource, err := nodeConfig(f, log, info, shutdown)
 	if err != nil {
 		return err
 	}
-	if err := openObjects(ctx, f, &cfg, m, log); err != nil {
+	if err := openObjects(ctx, f, &config, m, log); err != nil {
 		return err
 	}
 	if m != nil {
@@ -257,11 +257,11 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 			return err
 		}
 	}
-	ln, adv, err := bind(ctx, f, &cfg)
+	ln, adv, err := bind(ctx, f, &config)
 	if err != nil {
 		return err
 	}
-	n, err := production.Start(ctx, cfg)
+	n, err := production.Start(ctx, config)
 	if err != nil {
 		return err
 	}
@@ -270,7 +270,7 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 			Help: "Open Kafka client connections."}, func() float64 { return float64(n.OpenConns()) }))
 	}
 	log.Info("mdsbroker listening", "addr", ln.Addr().String(), "advertised", adv, "objects", f.objects)
-	bc := cfg.Broker
+	bc := config.Broker
 	log.Info("mdsbroker tuning",
 		"segment_bytes", bc.MaxSegmentBytes, "segment_window", time.Duration(bc.BatchWindow),
 		"max_segment_partitions", bc.MaxSegmentPartitions, "max_segment_batches", bc.MaxSegmentBatches,
@@ -279,7 +279,7 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 	runinfo.Publish(
 		ctx,
 		log,
-		runinfo.NewManifest(info, fs, f.region, manifestTuning(cfg, f, mem, memSource, adv, ln)),
+		runinfo.NewManifest(info, fs, f.region, manifestTuning(config, f, mem, memSource, adv, ln)),
 		runinfo.WriteOptions{
 			Dest:        f.manifestOut,
 			Region:      f.region,
@@ -296,13 +296,13 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 }
 
 // manifestTuning is the manifest's "tuning" object (keys are read by the runbook).
-func manifestTuning(cfg production.NodeConfig, f brokerFlags, mem uint64, memSource, adv string, ln net.Listener) map[string]any {
-	bc := cfg.Broker
+func manifestTuning(config production.NodeConfig, f brokerFlags, mem uint64, memSource, adv string, ln net.Listener) map[string]any {
+	bc := config.Broker
 	return map[string]any{
 		"segment_bytes": bc.MaxSegmentBytes, "segment_window_ns": int64(bc.BatchWindow),
 		"max_segment_partitions": bc.MaxSegmentPartitions, "max_segment_batches": bc.MaxSegmentBatches,
 		"max_buffered_bytes": bc.MaxBufferedBytes, "resume_buffered_bytes": bc.ResumeBufferedBytes,
 		"obj_timeout_ns": int64(f.objTimeout), "memory_bytes": mem, "memory_source": memSource,
-		"node_id": cfg.NodeID, "advertised": adv, "listen": ln.Addr().String(),
+		"node_id": config.NodeID, "advertised": adv, "listen": ln.Addr().String(),
 	}
 }

@@ -89,13 +89,13 @@ func (i *readWhatWasAcked) Observe(v simulator.View) {
 	for len(i.checked) < len(ops) {
 		i.checked = append(i.checked, false)
 	}
-	for j, op := range ops {
-		if i.checked[j] || op.Outcome == simulator.OpPending {
+	for j, operation := range ops {
+		if i.checked[j] || operation.Outcome == simulator.OpPending {
 			continue
 		}
 		i.checked[j] = true
-		g, ok := op.Op.(GetOp)
-		res, isStr := op.Result.(string)
+		g, ok := operation.Op.(GetOp)
+		res, isStr := operation.Result.(string)
 		if !ok || !isStr {
 			continue
 		}
@@ -117,21 +117,21 @@ func (l *liveness) AtEnd(v simulator.View) {
 	settle, ok2 := campaign.PhaseStart(v, simulator.PhaseRecover)
 	v.Assert().Always(ok1 && ok2, "echo: the kernel announced Settling and Settle")
 	from, to := settling+simulator.Time(campaign.ProgressGraceTime), settle
-	for _, op := range v.History().Ops() {
-		v.Assert().Always(op.Outcome != simulator.OpPending, "echo: no request pending at end", core.ContextPair{Key: "op", Value: op.Op})
-		if !ok1 || !ok2 || op.Invoke < from || op.Invoke >= to {
+	for _, operation := range v.History().Ops() {
+		v.Assert().Always(operation.Outcome != simulator.OpPending, "echo: no request pending at end", core.ContextPair{Key: "op", Value: operation.Op})
+		if !ok1 || !ok2 || operation.Invoke < from || operation.Invoke >= to {
 			continue
 		}
-		res, _ := op.Result.(string)
+		res, _ := operation.Result.(string)
 		good := false
-		switch op.Op.(type) {
+		switch operation.Op.(type) {
 		case PutOp:
 			good = strings.HasPrefix(res, "OK ")
 		case GetOp:
 			good = strings.HasPrefix(res, "VAL ") || res == "ERR corrupt"
 		}
 		v.Assert().Always(good, "echo: request invoked in Settling succeeds",
-			core.ContextPair{Key: "op", Value: op.Op}, core.ContextPair{Key: "result", Value: res}, core.ContextPair{Key: "invoke", Value: op.Invoke})
+			core.ContextPair{Key: "op", Value: operation.Op}, core.ContextPair{Key: "result", Value: res}, core.ContextPair{Key: "invoke", Value: operation.Invoke})
 	}
 	v.Assert().Sometimes(len(v.History().Ops()) > 0, "echo: workload issued requests")
 }

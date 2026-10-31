@@ -38,9 +38,9 @@ func TestDefaultFlushRule(t *testing.T) {
 // The size rule seals when the open segment reaches the cap, not before.
 func TestSizeRuleSealsAtExactlyTheCap(t *testing.T) {
 	n := len(plain(t, "a"))
-	cfg := DefaultConfig()
-	cfg.MaxSegmentBytes = 3 * n
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.MaxSegmentBytes = 3 * n
+	h := startedHarness(t, config)
 	c := h.open(1)
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a")), e("t", 0, plain(t, "a"))))
 	if len(h.puts) != 0 {
@@ -59,9 +59,9 @@ func TestSizeRuleSealsAtExactlyTheCap(t *testing.T) {
 
 // A batch larger than the cap is sealed alone, at once.
 func TestOversizeBatchSealedAlone(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.MaxSegmentBytes = 10
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.MaxSegmentBytes = 10
+	h := startedHarness(t, config)
 	c := h.open(1)
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	if len(h.puts) != 1 {
@@ -122,9 +122,9 @@ func TestFlushTimerRearms(t *testing.T) {
 }
 
 func TestBatchCapSeals(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.MaxSegmentBatches = 32
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.MaxSegmentBatches = 32
+	h := startedHarness(t, config)
 	c := h.open(1)
 	var es []ent
 	for i := range 31 {
@@ -146,9 +146,9 @@ func TestBatchCapSeals(t *testing.T) {
 }
 
 func TestPartitionCapReason(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.MaxSegmentPartitions = 2
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.MaxSegmentPartitions = 2
+	h := startedHarness(t, config)
 	c := h.open(1)
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a")), e("t", 0, plain(t, "a")), e("t", 1, plain(t, "a"))))
 	if r := sealReasons(h); len(r) != 1 || r[0] != "partitions" || len(h.puts) != 1 {
@@ -217,12 +217,12 @@ func TestStopFlushesOpenSegment(t *testing.T) {
 // the byte cap.
 func TestManySmallBatchesSealAtByteCapNotBatchCap(t *testing.T) {
 	n := len(plain(t, "a"))
-	cfg := DefaultConfig()
-	if cfg.MaxSegmentBatches < 200 {
-		t.Fatalf("default batch cap %d", cfg.MaxSegmentBatches)
+	config := DefaultConfig()
+	if config.MaxSegmentBatches < 200 {
+		t.Fatalf("default batch cap %d", config.MaxSegmentBatches)
 	}
-	cfg.MaxSegmentBytes = 200 * n
-	h := startedHarness(t, cfg)
+	config.MaxSegmentBytes = 200 * n
+	h := startedHarness(t, config)
 	c := h.open(1)
 	var es []ent
 	for i := range 199 {

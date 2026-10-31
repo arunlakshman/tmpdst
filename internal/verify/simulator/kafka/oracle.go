@@ -38,9 +38,9 @@ type expectedLogChecker struct {
 func newOracle(o Opts) *expectedLogChecker {
 	or := &expectedLogChecker{opts: o, tps: o.topicPartitions(), idx: map[core.TopicPartition]int{}, opIdx: map[[2]int]int{},
 		seen: map[string]int{}, locs: map[core.SegmentRef]int64{}, cpos: map[[2]int]int64{}}
-	for i, tp := range or.tps {
-		or.idx[tp] = i
-		or.logs = append(or.logs, &partitionLog{tp: tp, idx: i, byBase: map[int64]int{}})
+	for i, topicPartition := range or.tps {
+		or.idx[topicPartition] = i
+		or.logs = append(or.logs, &partitionLog{topicPartition: topicPartition, idx: i, byBase: map[int64]int{}})
 	}
 	return or
 }
@@ -58,8 +58,8 @@ func (o *expectedLogChecker) Observe(v simulator.View) {
 func (o *expectedLogChecker) scanOps(v simulator.View) {
 	ops := v.History().Ops()
 	for ; o.nops < len(ops); o.nops++ {
-		if op, ok := ops[o.nops].Op.(ProduceOp); ok {
-			o.opIdx[[2]int{op.Client, op.Batch}] = o.nops
+		if operation, ok := ops[o.nops].Op.(ProduceOp); ok {
+			o.opIdx[[2]int{operation.Client, operation.Batch}] = o.nops
 		}
 		o.pend = append(o.pend, o.nops)
 	}
@@ -73,14 +73,14 @@ func (o *expectedLogChecker) refresh(v simulator.View) {
 	}
 	o.started, o.controlPlaneGeneration, o.objectGeneration = true, cg, og
 	for _, pl := range o.logs {
-		if int64(v.CP().HighWatermark(pl.tp)) != int64(len(pl.vals)) || pl.ranges == 0 {
+		if int64(v.CP().HighWatermark(pl.topicPartition)) != int64(len(pl.vals)) || pl.ranges == 0 {
 			o.ingest(v, pl)
 		}
 	}
 }
 
-func topicPartitionName(tp core.TopicPartition) string {
-	return tp.Topic + "/" + strconv.Itoa(int(tp.Partition))
+func topicPartitionName(topicPartition core.TopicPartition) string {
+	return topicPartition.Topic + "/" + strconv.Itoa(int(topicPartition.Partition))
 }
 
 // record checks one committed record: it was produced (to this partition,
@@ -101,10 +101,10 @@ func (o *expectedLogChecker) record(v simulator.View, pl *partitionLog, off int6
 	if !ok || !known {
 		return
 	}
-	op := v.History().Ops()[hi]
-	po := op.Op.(ProduceOp)
-	as.Always(po.TopicPartition == pl.tp && i < len(po.Vals) && po.Vals[i] == val, "kafka: a record is committed where and as it was produced", d...)
-	as.Always(op.Outcome != simulator.OpGivenUp, "kafka: a definitely rejected batch is never committed", d...)
+	operation := v.History().Ops()[hi]
+	po := operation.Op.(ProduceOp)
+	as.Always(po.TopicPartition == pl.topicPartition && i < len(po.Vals) && po.Vals[i] == val, "kafka: a record is committed where and as it was produced", d...)
+	as.Always(operation.Outcome != simulator.OpGivenUp, "kafka: a definitely rejected batch is never committed", d...)
 }
 
 // acks checks each produce_acked fact against the truth at the Step that
@@ -137,13 +137,13 @@ func (o *expectedLogChecker) reads(v simulator.View) {
 	ops := v.History().Ops()
 	keep := o.pend[:0]
 	for _, i := range o.pend {
-		op := ops[i]
-		if op.Outcome == simulator.OpPending {
+		operation := ops[i]
+		if operation.Outcome == simulator.OpPending {
 			keep = append(keep, i)
 			continue
 		}
-		if ro, ok := op.Op.(ReadOp); ok && op.Outcome == simulator.OpResultKnown {
-			o.checkRead(v, ro, op.Result.(ReadRes))
+		if ro, ok := operation.Op.(ReadOp); ok && operation.Outcome == simulator.OpResultKnown {
+			o.checkRead(v, ro, operation.Result.(ReadRes))
 		}
 	}
 	o.pend = keep
@@ -187,21 +187,21 @@ func (o *expectedLogChecker) AtEnd(v simulator.View) {
 	as := v.Assert()
 	ops := v.History().Ops()
 	lastAcked := map[[2]int]int64{} // (client, partition index) -> base of its newest acked batch
-	for _, op := range ops {
-		po, ok := op.Op.(ProduceOp)
+	for _, operation := range ops {
+		po, ok := operation.Op.(ProduceOp)
 		if !ok {
 			continue
 		}
-		res, _ := op.Result.(ProduceRes)
+		res, _ := operation.Result.(ProduceRes)
 		ti := o.idx[po.TopicPartition]
-		if op.Outcome != simulator.OpPending && len(po.Vals) > 0 {
+		if operation.Outcome != simulator.OpPending && len(po.Vals) > 0 {
 			// Every send commits at most once (a MaybeApplied commit is retried
 			// under its key), so a batch is in the log at most once per send.
 			as.Always(o.seen[po.Vals[0]] <= max(res.Attempts, 1), "kafka: a batch is committed at most once per send",
 				core.ContextPair{Key: "tp", Value: topicPartitionName(po.TopicPartition)}, core.ContextPair{Key: "value", Value: po.Vals[0]},
 				core.ContextPair{Key: "times", Value: o.seen[po.Vals[0]]}, core.ContextPair{Key: "sends", Value: res.Attempts})
 		}
-		switch op.Outcome {
+		switch operation.Outcome {
 		case simulator.OpResultKnown:
 			for i, val := range po.Vals {
 				off := res.Base + int64(i)
@@ -226,7 +226,7 @@ func (o *expectedLogChecker) AtEnd(v simulator.View) {
 	for c := o.opts.Producers; c < o.opts.Producers+o.opts.Consumers; c++ {
 		for ti, pl := range o.logs {
 			as.Always(o.cpos[[2]int{c, ti}] == int64(len(pl.vals)), "kafka: every consumer caught up with the final log",
-				core.ContextPair{Key: "client", Value: c}, core.ContextPair{Key: "tp", Value: topicPartitionName(pl.tp)},
+				core.ContextPair{Key: "client", Value: c}, core.ContextPair{Key: "tp", Value: topicPartitionName(pl.topicPartition)},
 				core.ContextPair{Key: "pos", Value: o.cpos[[2]int{c, ti}]}, core.ContextPair{Key: "hwm", Value: int64(len(pl.vals))})
 		}
 	}

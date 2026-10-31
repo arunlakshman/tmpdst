@@ -178,8 +178,8 @@ func (e *Engine) CreateTopic(name string, partitions int32) core.ErrCode {
 }
 
 // Committed implements simulator.ControlPlaneRealState.
-func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
-	d, err := e.ref.Lookup(core.FindSegments{TopicPartition: tp})
+func (e *Engine) Committed(topicPartition core.TopicPartition) []core.BatchRange {
+	d, err := e.ref.Lookup(core.FindSegments{TopicPartition: topicPartition})
 	if err != nil || d.Err != core.OK {
 		return nil
 	}
@@ -187,8 +187,8 @@ func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
 }
 
 // HighWatermark implements simulator.ControlPlaneRealState.
-func (e *Engine) HighWatermark(tp core.TopicPartition) core.Offset {
-	return e.ref.End(tp)
+func (e *Engine) HighWatermark(topicPartition core.TopicPartition) core.Offset {
+	return e.ref.End(topicPartition)
 }
 
 // Gen implements simulator.ControlPlaneRealState.

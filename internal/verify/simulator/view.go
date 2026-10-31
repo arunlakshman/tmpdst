@@ -10,7 +10,7 @@ func (v view) Step() uint64            { return v.r.steps }
 func (v view) Now() Time               { return v.r.now() }
 func (v view) Phase() Phase            { return v.r.phase }
 func (v view) Timeline() Timeline      { return v.r.tl }
-func (v view) History() History        { return v.r.hist }
+func (v view) History() History        { return v.r.history }
 func (v view) Assert() core.Assertions { return v.r.as }
 
 func (v view) Alive(ref core.NodeInstance) bool {

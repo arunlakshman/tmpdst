@@ -35,10 +35,10 @@ func StartMem(t testing.TB) *Node {
 }
 
 // Start boots a node with the given machine config and stores.
-func Start(t testing.TB, cfg statemachine.Config, log executor.Log, objs executor.ObjectStore) *Node {
+func Start(t testing.TB, config statemachine.Config, log executor.Log, objs executor.ObjectStore) *Node {
 	t.Helper()
 	n := server.New(server.Config{
-		Machine: cfg, Log: log, Objects: objs,
+		Machine: config, Log: log, Objects: objs,
 		Self: core.NodeInstance{Node: "cp-0"},
 	})
 	if err := n.Start(t.Context()); err != nil {

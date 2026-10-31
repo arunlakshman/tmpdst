@@ -300,19 +300,19 @@ func (e *Engine) sendRst(ctx simulator.FakeServiceContext, p *connectionPair, to
 	d.flight = append(d.flight, item{kind: kindReset, seq: d.seq, net: net, id: id})
 }
 
-func (e *Engine) ack(ctx simulator.FakeServiceContext, to core.NodeInstance, p *connectionPair, side int, req core.RequestID, conn core.ConnID, err core.ErrCode) {
+func (e *Engine) ack(ctx simulator.FakeServiceContext, to core.NodeInstance, p *connectionPair, side int, request core.RequestID, conn core.ConnID, err core.ErrCode) {
 	var lane simulator.DeliveryLane
 	if p != nil {
 		lane = ctx.Lane(connectionPairKey(p.id, "ack"+strconv.Itoa(side)))
 	} else {
 		lane = ctx.Lane("net/misc")
 	}
-	ctx.Deliver(to, ctx.Now()+simulator.Time(e.sample(ctx.Rand())), lane, core.SendDone{Req: req, Conn: conn, Err: err})
+	ctx.Deliver(to, ctx.Now()+simulator.Time(e.sample(ctx.Rand())), lane, core.SendDone{Req: request, Conn: conn, Err: err})
 }
 
 func (e *Engine) fault(ctx simulator.FakeServiceContext, kind string, a, b core.NodeID, extra ...core.Field) {
-	fs := append([]core.Field{{Key: "a", Value: core.StringValue(a)}, {Key: "b", Value: core.StringValue(b)}}, extra...)
-	ctx.Fault(kind, fs...)
+	fields := append([]core.Field{{Key: "a", Value: core.StringValue(a)}, {Key: "b", Value: core.StringValue(b)}}, extra...)
+	ctx.Fault(kind, fields...)
 	ctx.Assert().Sometimes(true, core.PropertyID("net: "+kind))
 	ctx.Assert().Reachable(core.PropertyID("net: " + kind + " injected"))
 }

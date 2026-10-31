@@ -17,28 +17,28 @@ import (
 func compareSteps(t *testing.T, subject suites.ControlPlaneSubject, ops []generator.ControlPlaneTestStep) {
 	t.Helper()
 	spec := suites.NewSpecControlPlaneSubject()
-	for i, op := range ops {
-		expected, err := spec.Do(op)
+	for i, operation := range ops {
+		expected, err := spec.Do(operation)
 		if err != nil {
-			t.Fatalf("The spec could not run operation %d (%s): %v", i, op.Describe(), err)
+			t.Fatalf("The spec could not run operation %d (%s): %v", i, operation.Describe(), err)
 		}
-		actual, err := subject.Do(op)
+		actual, err := subject.Do(operation)
 		if err != nil {
-			t.Fatalf("The subject could not run operation %d (%s): %v", i, op.Describe(), err)
+			t.Fatalf("The subject could not run operation %d (%s): %v", i, operation.Describe(), err)
 		}
-		if op.CreateTopic != nil {
+		if operation.CreateTopic != nil {
 			expected, actual = observation.ControlPlaneResult{Code: expected.Code}, observation.ControlPlaneResult{Code: actual.Code}
 		}
 		if diff := observation.DiffControlPlane(expected, actual); diff != "" {
-			t.Fatalf("For operation %d (%s): %s", i, op.Describe(), diff)
+			t.Fatalf("For operation %d (%s): %s", i, operation.Describe(), diff)
 		}
 	}
 }
 
 // call wraps a control-plane operation. The request number is not used by the
 // stores, so it is always 1.
-func call(op core.ControlPlaneOperation) generator.ControlPlaneTestStep {
-	return generator.NewCall(core.ControlPlaneCall{Req: 1, Op: op})
+func call(operation core.ControlPlaneOperation) generator.ControlPlaneTestStep {
+	return generator.NewCall(core.ControlPlaneCall{Req: 1, Op: operation})
 }
 
 // replayOps commits a three-batch, two-partition segment, replays it after the
@@ -84,11 +84,11 @@ func manyBatchesOps() []generator.ControlPlaneTestStep {
 	b := core.NewTopicPartition("m", 1)
 	var s1, s2 []core.PendingBatch
 	for i := range 200 { // 200 batches for a, interleaved with b
-		for _, tp := range []core.TopicPartition{a, b} {
-			if tp == b && i%4 != 0 {
+		for _, topicPartition := range []core.TopicPartition{a, b} {
+			if topicPartition == b && i%4 != 0 {
 				continue
 			}
-			s1 = append(s1, core.PendingBatch{TopicPartition: tp, Records: int64(1 + i%3),
+			s1 = append(s1, core.PendingBatch{TopicPartition: topicPartition, Records: int64(1 + i%3),
 				Loc: core.SegmentRef{Key: "big1", Off: int64(i) * 70, Len: int64(10 + i%5)}})
 		}
 	}
@@ -106,10 +106,10 @@ func manyBatchesOps() []generator.ControlPlaneTestStep {
 	ops = append(ops, commit("big1", s1), commit("big1", s1), commit("big2", s2), commit("big2", s2),
 		commit("big3", s1), // a second run on each partition, right after the first
 		commit("big1", s2)) // same key, other batches: conflict
-	for _, tp := range []core.TopicPartition{a, b, core.NewTopicPartition("m", 2)} {
+	for _, topicPartition := range []core.TopicPartition{a, b, core.NewTopicPartition("m", 2)} {
 		for from := int64(0); from <= 520; from += 7 {
 			for _, mb := range []int32{0, 1, 25, 300} {
-				ops = append(ops, call(core.FindSegments{TopicPartition: tp, From: core.Offset(from), MaxBytes: mb}))
+				ops = append(ops, call(core.FindSegments{TopicPartition: topicPartition, From: core.Offset(from), MaxBytes: mb}))
 			}
 		}
 	}

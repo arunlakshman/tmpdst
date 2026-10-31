@@ -22,42 +22,42 @@ var _ controlplane.Store = (*Store)(nil)
 // New returns an empty store.
 func New() *Store { return &Store{spec: speccheck.NewControlPlane()} }
 
-func (s *Store) exec(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
+func (s *Store) exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
 	if err := ctx.Err(); err != nil {
 		return core.ControlPlaneDone{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.spec.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone), nil
+	return s.spec.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone), nil
 }
 
-func executeAs[R any](ctx context.Context, s *Store, op core.ControlPlaneOperation) (R, core.ErrCode, error) {
-	d, err := s.exec(ctx, op)
+func executeAs[R any](ctx context.Context, s *Store, operation core.ControlPlaneOperation) (R, core.ErrCode, error) {
+	d, err := s.exec(ctx, operation)
 	return core.ResponseAs[R](d), d.Err, err
 }
 
 // CommitSegment implements controlplane.Store.
-func (s *Store) CommitSegment(ctx context.Context, op core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
-	return executeAs[core.CommitSegmentResp](ctx, s, op)
+func (s *Store) CommitSegment(ctx context.Context, operation core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
+	return executeAs[core.CommitSegmentResp](ctx, s, operation)
 }
 
 // Lookup implements controlplane.Store.
-func (s *Store) Lookup(ctx context.Context, op core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error) {
-	return executeAs[core.FindSegmentsResp](ctx, s, op)
+func (s *Store) Lookup(ctx context.Context, operation core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error) {
+	return executeAs[core.FindSegmentsResp](ctx, s, operation)
 }
 
 // DescribeTopics implements controlplane.Store.
-func (s *Store) DescribeTopics(ctx context.Context, op core.DescribeTopics) (core.DescribeTopicsResp, error) {
-	d, err := s.exec(ctx, op)
+func (s *Store) DescribeTopics(ctx context.Context, operation core.DescribeTopics) (core.DescribeTopicsResp, error) {
+	d, err := s.exec(ctx, operation)
 	return core.ResponseAs[core.DescribeTopicsResp](d), err
 }
 
 // CreateTopic implements controlplane.Store.
-func (s *Store) CreateTopic(ctx context.Context, op core.CreateTopic) (core.ErrCode, error) {
+func (s *Store) CreateTopic(ctx context.Context, operation core.CreateTopic) (core.ErrCode, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.spec.CreateTopicIf(op.Name, op.Partitions, op.FailIfExists), nil
+	return s.spec.CreateTopicIf(operation.Name, operation.Partitions, operation.FailIfExists), nil
 }

@@ -14,22 +14,22 @@ const (
 )
 
 func (m *Machine) checkpointKey() string {
-	if m.cfg.CheckpointKey != "" {
-		return m.cfg.CheckpointKey
+	if m.config.CheckpointKey != "" {
+		return m.config.CheckpointKey
 	}
 	return defaultCheckpointKey
 }
 
 func (m *Machine) checkpointEnabled() bool {
-	return m.cfg.CheckpointEvery > 0 || m.cfg.CheckpointKey != ""
+	return m.config.CheckpointEvery > 0 || m.config.CheckpointKey != ""
 }
 
 func (m *Machine) armCheckpoint() []core.Action {
-	if m.cfg.CheckpointEvery <= 0 || m.exited {
+	if m.config.CheckpointEvery <= 0 || m.exited {
 		return nil
 	}
 	m.checkpointGen++
-	return []core.Action{core.SetTimer{ID: timerCheckpoint, Gen: m.checkpointGen, After: m.cfg.CheckpointEvery}}
+	return []core.Action{core.SetTimer{ID: timerCheckpoint, Gen: m.checkpointGen, After: m.config.CheckpointEvery}}
 }
 
 func (m *Machine) onCheckpointTimer(e core.TimerFired) []core.Action {
@@ -39,7 +39,7 @@ func (m *Machine) onCheckpointTimer(e core.TimerFired) []core.Action {
 	if m.needsCheckpoint || m.checkpointRetry {
 		return m.emitCheckpointGet()
 	}
-	if m.cfg.CheckpointEvery <= 0 {
+	if m.config.CheckpointEvery <= 0 {
 		return nil
 	}
 	acts := m.maybeCheckpoint()
@@ -60,7 +60,7 @@ func (m *Machine) maybeCheckpoint() []core.Action {
 	if m.applied < m.goalTail {
 		return nil
 	}
-	minSlots := m.cfg.CheckpointMinSlots
+	minSlots := m.config.CheckpointMinSlots
 	if minSlots <= 0 {
 		minSlots = 1
 	}
@@ -123,7 +123,7 @@ func (m *Machine) onObjGetDone(d core.ObjectGetDone) []core.Action {
 }
 
 func (m *Machine) armCheckpointRetry() []core.Action {
-	after := m.cfg.Heartbeat
+	after := m.config.Heartbeat
 	if after <= 0 {
 		after = 250 * core.Millisecond
 	}
@@ -148,7 +148,7 @@ func (m *Machine) onObjPutDone(d core.ObjectPutDone) []core.Action {
 }
 
 func (m *Machine) emitTrim(checkpointSlot core.LogPosition) []core.Action {
-	keep := m.cfg.KeepSlots
+	keep := m.config.KeepSlots
 	if keep <= 0 {
 		return nil
 	}
@@ -174,7 +174,7 @@ func (m *Machine) onTrimDone(d core.LogDeleteOldDone) []core.Action {
 	if d.Err == core.OK && d.Outcome == core.Applied {
 		m.trimFloor = through + 1
 		m.env.Reachable("logcp-sim: log trimmed below a checkpoint")
-		if m.cfg.InjectedBug == InjectedBugTrimDelete {
+		if m.config.InjectedBug == InjectedBugTrimDelete {
 			m.env.Always(false, "logcp-sim: a Put never wins a slot below the trim floor",
 				core.ContextPair{Key: "through", Value: through})
 		}

@@ -188,19 +188,19 @@ func addNumbers(cur, delta types.AttributeValue) (types.AttributeValue, error) {
 
 // keyCondition is a parsed key condition: partition pk, optionally sk in [lo, hi].
 type keyCondition struct {
-	pk       string
-	lo, hi   string
-	hasRange bool
+	partitionKey string
+	lo, hi       string
+	hasRange     bool
 }
 
 func parseKeyCond(expr string, vals item) (keyCondition, error) {
 	parts := strings.Split(expr, " AND ")
 	var kc keyCondition
-	pk, ok := valueOf(strings.Fields(parts[0]), "pk", "=", vals)
+	partitionKey, ok := valueOf(strings.Fields(parts[0]), "pk", "=", vals)
 	if !ok || (len(parts) != 1 && len(parts) != 3) {
 		return kc, validation("unsupported key condition %q", expr)
 	}
-	kc.pk = pk
+	kc.partitionKey = partitionKey
 	if len(parts) == 1 {
 		return kc, nil
 	}
@@ -218,8 +218,8 @@ func parseKeyRange(kc keyCondition, parts []string, vals item, expr string) (key
 }
 
 // valueOf matches "<name> <op> :v" and resolves :v to a string.
-func valueOf(f []string, name, op string, vals item) (string, bool) {
-	if len(f) != 3 || (name != "" && (f[0] != name || f[1] != op)) {
+func valueOf(f []string, name, operation string, vals item) (string, bool) {
+	if len(f) != 3 || (name != "" && (f[0] != name || f[1] != operation)) {
 		return "", false
 	}
 	s, ok := vals[f[2]].(*types.AttributeValueMemberS)
@@ -230,9 +230,9 @@ func valueOf(f []string, name, op string, vals item) (string, bool) {
 }
 
 func (kc keyCondition) matches(it item) bool {
-	if stringOf(it, "pk") != kc.pk {
+	if stringOf(it, "pk") != kc.partitionKey {
 		return false
 	}
-	sk := stringOf(it, "sk")
-	return !kc.hasRange || (sk >= kc.lo && sk <= kc.hi)
+	sortKey := stringOf(it, "sk")
+	return !kc.hasRange || (sortKey >= kc.lo && sortKey <= kc.hi)
 }

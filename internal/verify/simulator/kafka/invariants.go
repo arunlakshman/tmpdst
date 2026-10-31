@@ -16,27 +16,27 @@ func (*progressCheck) AtEnd(v simulator.View) {
 	v.Assert().Always(ok, "kafka: the kernel announced Settling")
 	after := settling + simulator.Time(campaign.ProgressGraceTime)
 	var produced, reads int
-	for _, op := range v.History().Ops() {
-		v.Assert().Always(op.Outcome != simulator.OpPending, "kafka: no op pending at end", core.ContextPair{Key: "op", Value: op.Op})
-		if !ok || op.Outcome == simulator.OpPending {
+	for _, operation := range v.History().Ops() {
+		v.Assert().Always(operation.Outcome != simulator.OpPending, "kafka: no op pending at end", core.ContextPair{Key: "op", Value: operation.Op})
+		if !ok || operation.Outcome == simulator.OpPending {
 			continue
 		}
-		switch r := op.Result.(type) {
+		switch r := operation.Result.(type) {
 		case ProduceRes:
 			produced++
-			if op.Return >= after && r.Why != "rejected" {
-				v.Assert().Always(op.Outcome == simulator.OpResultKnown && r.Base >= 0, "kafka: a produce still running in Settling is acked",
-					core.ContextPair{Key: "op", Value: op.Op}, core.ContextPair{Key: "result", Value: r}, core.ContextPair{Key: "return", Value: op.Return})
+			if operation.Return >= after && r.Why != "rejected" {
+				v.Assert().Always(operation.Outcome == simulator.OpResultKnown && r.Base >= 0, "kafka: a produce still running in Settling is acked",
+					core.ContextPair{Key: "op", Value: operation.Op}, core.ContextPair{Key: "result", Value: r}, core.ContextPair{Key: "return", Value: operation.Return})
 			}
 		case ReadRes:
 			reads++
-			if op.Invoke >= after {
-				good := op.Outcome == simulator.OpResultKnown
+			if operation.Invoke >= after {
+				good := operation.Outcome == simulator.OpResultKnown
 				for _, p := range r.Parts {
 					good = good && p.Code == 0
 				}
 				v.Assert().Always(good, "kafka: a fetch invoked in Settling succeeds",
-					core.ContextPair{Key: "op", Value: op.Op}, core.ContextPair{Key: "result", Value: r}, core.ContextPair{Key: "invoke", Value: op.Invoke})
+					core.ContextPair{Key: "op", Value: operation.Op}, core.ContextPair{Key: "result", Value: r}, core.ContextPair{Key: "invoke", Value: operation.Invoke})
 			}
 		}
 	}

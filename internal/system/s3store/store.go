@@ -60,42 +60,42 @@ var _ system.ObjectStore = (*Store)(nil)
 
 // New builds a store. With a custom endpoint and no AWS credentials in the
 // environment it uses a static dummy key (SeaweedFS runs without auth).
-func New(ctx context.Context, cfg Config) (*Store, error) {
-	if cfg.Region == "" {
-		cfg.Region = "us-east-1"
+func New(ctx context.Context, storeConfig Config) (*Store, error) {
+	if storeConfig.Region == "" {
+		storeConfig.Region = "us-east-1"
 	}
-	opts := loadOptions(cfg)
-	if cfg.HTTP == nil {
+	opts := loadOptions(storeConfig)
+	if storeConfig.HTTP == nil {
 		opts = append(opts, config.WithHTTPClient(httpconnections.ConfigureAWSClient()))
 	}
 	ac, err := config.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return nil, err
 	}
-	return &Store{c: s3.NewFromConfig(ac, clientOptions(cfg)), bucket: cfg.Bucket, prefix: cfg.Prefix}, nil
+	return &Store{c: s3.NewFromConfig(ac, clientOptions(storeConfig)), bucket: storeConfig.Bucket, prefix: storeConfig.Prefix}, nil
 }
 
-func loadOptions(cfg Config) []func(*config.LoadOptions) error {
-	opts := []func(*config.LoadOptions) error{config.WithRegion(cfg.Region)}
-	if cfg.Endpoint != "" && os.Getenv("AWS_ACCESS_KEY_ID") == "" {
+func loadOptions(storeConfig Config) []func(*config.LoadOptions) error {
+	opts := []func(*config.LoadOptions) error{config.WithRegion(storeConfig.Region)}
+	if storeConfig.Endpoint != "" && os.Getenv("AWS_ACCESS_KEY_ID") == "" {
 		opts = append(opts, config.WithCredentialsProvider(
 			credentials.NewStaticCredentialsProvider("mds", "mds", "")))
 	}
-	if cfg.HTTP != nil {
-		opts = append(opts, config.WithHTTPClient(cfg.HTTP))
+	if storeConfig.HTTP != nil {
+		opts = append(opts, config.WithHTTPClient(storeConfig.HTTP))
 	}
 	return opts
 }
 
-func clientOptions(cfg Config) func(*s3.Options) {
+func clientOptions(storeConfig Config) func(*s3.Options) {
 	return func(o *s3.Options) {
-		o.UsePathStyle = cfg.PathStyle
+		o.UsePathStyle = storeConfig.PathStyle
 		o.Retryer = aws.NopRetryer{} // the broker owns retries
-		o.APIOptions = append(o.APIOptions, cfg.Obs.APIOptions()...)
+		o.APIOptions = append(o.APIOptions, storeConfig.Obs.APIOptions()...)
 		o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
-		if cfg.Endpoint != "" {
-			o.BaseEndpoint = aws.String(cfg.Endpoint)
+		if storeConfig.Endpoint != "" {
+			o.BaseEndpoint = aws.String(storeConfig.Endpoint)
 		}
 	}
 }

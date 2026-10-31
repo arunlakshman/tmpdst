@@ -16,7 +16,7 @@ func controlPlaneFactory(sc simulator.SeedConfig, opts Opts) core.MachineFactory
 		if self.Node == "cp-1" {
 			rank = 1
 		}
-		cfg := statemachine.Config{
+		config := statemachine.Config{
 			CatchUpEvery:       lp.Tick,
 			ReadLimit:          64,
 			GapAfter:           lp.GapAfter,
@@ -37,7 +37,7 @@ func controlPlaneFactory(sc simulator.SeedConfig, opts Opts) core.MachineFactory
 			StallDur:           lp.StallDur,
 			DownDur:            lp.DownDur,
 		}
-		m := statemachine.New(cfg)(env, self).(*statemachine.Machine)
+		m := statemachine.New(config)(env, self).(*statemachine.Machine)
 		for _, t := range topics {
 			_ = m.SeedTopic(t, parts)
 		}

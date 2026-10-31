@@ -9,17 +9,17 @@ import (
 	"mds/internal/core"
 )
 
-func fact(name string, kv ...any) core.Fact {
+func fact(name string, keyValue ...any) core.Fact {
 	f := core.Fact{Name: name}
-	for i := 0; i+1 < len(kv); i += 2 {
+	for i := 0; i+1 < len(keyValue); i += 2 {
 		var v core.FieldValue
-		switch x := kv[i+1].(type) {
+		switch x := keyValue[i+1].(type) {
 		case string:
 			v = core.StringValue(x)
 		case int:
 			v = core.Int64Value(x)
 		}
-		f.Fields = append(f.Fields, core.Field{Key: kv[i].(string), Value: v})
+		f.Fields = append(f.Fields, core.Field{Key: keyValue[i].(string), Value: v})
 	}
 	return f
 }

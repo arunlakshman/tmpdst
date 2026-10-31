@@ -7,19 +7,19 @@ import (
 )
 
 func TestCommitSegmentRoundTrip(t *testing.T) {
-	op := core.CommitSegment{
+	operation := core.CommitSegment{
 		SegmentKey: "seg/abc",
 		Batches: []core.PendingBatch{{
 			TopicPartition: core.NewTopicPartition("t", 1), Records: 3,
 			Loc: core.SegmentRef{Key: "seg/abc", Off: 0, Len: 10},
 		}},
 	}
-	got := CommitSegmentToCore(CommitSegmentFromCore(op))
-	if got.SegmentKey != op.SegmentKey || len(got.Batches) != 1 {
+	got := CommitSegmentToCore(CommitSegmentFromCore(operation))
+	if got.SegmentKey != operation.SegmentKey || len(got.Batches) != 1 {
 		t.Fatalf("got %+v", got)
 	}
 	b := got.Batches[0]
-	if b.TopicPartition != op.Batches[0].TopicPartition || b.Records != 3 || b.Loc != op.Batches[0].Loc {
+	if b.TopicPartition != operation.Batches[0].TopicPartition || b.Records != 3 || b.Loc != operation.Batches[0].Loc {
 		t.Fatalf("batch %+v", b)
 	}
 }

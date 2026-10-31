@@ -35,13 +35,13 @@ func TestRunServesMemStoreAndStops(t *testing.T) {
 	}()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+maddr+"/metrics", nil)
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+maddr+"/metrics", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		response, err := http.DefaultClient.Do(request)
 		if err == nil {
-			_ = resp.Body.Close()
+			_ = response.Body.Close()
 			break
 		}
 		if time.Now().After(deadline) {

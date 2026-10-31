@@ -60,10 +60,10 @@ func pick[T any](r *rand.Rand, xs []T) (T, bool) {
 }
 
 // definiteAt: an acked (OpDefinite) produce landed at base of tp.
-func (w *world) definiteAt(tp core.TopicPartition, base int64) bool {
-	for _, op := range w.ops {
-		if po, ok := op.Op.(kafka.ProduceOp); ok && op.Outcome == simulator.OpResultKnown && po.TopicPartition == tp {
-			if res := op.Result.(kafka.ProduceRes); res.Base == base {
+func (w *world) definiteAt(topicPartition core.TopicPartition, base int64) bool {
+	for _, operation := range w.ops {
+		if po, ok := operation.Op.(kafka.ProduceOp); ok && operation.Outcome == simulator.OpResultKnown && po.TopicPartition == topicPartition {
+			if res := operation.Result.(kafka.ProduceRes); res.Base == base {
 				return true
 			}
 		}
@@ -73,21 +73,21 @@ func (w *world) definiteAt(tp core.TopicPartition, base int64) bool {
 
 func (w *world) tpsWith(min int) []core.TopicPartition {
 	var out []core.TopicPartition
-	for _, tp := range w.tps {
-		if len(w.ranges[tp]) >= min {
-			out = append(out, tp)
+	for _, topicPartition := range w.tps {
+		if len(w.ranges[topicPartition]) >= min {
+			out = append(out, topicPartition)
 		}
 	}
 	return out
 }
 
-type partRef struct{ op, part int }
+type partRef struct{ operation, part int }
 
-func (w *world) readParts(ok func(tp core.TopicPartition, p kafka.ReadPart, from int64) bool) []partRef {
+func (w *world) readParts(ok func(topicPartition core.TopicPartition, p kafka.ReadPart, from int64) bool) []partRef {
 	var out []partRef
-	for i, op := range w.ops {
-		if ro, isRead := op.Op.(kafka.ReadOp); isRead {
-			for j, p := range op.Result.(kafka.ReadRes).Parts {
+	for i, operation := range w.ops {
+		if ro, isRead := operation.Op.(kafka.ReadOp); isRead {
+			for j, p := range operation.Result.(kafka.ReadRes).Parts {
 				if ok(ro.Parts[j].TopicPartition, p, ro.Parts[j].Off) {
 					out = append(out, partRef{i, j})
 				}
@@ -98,13 +98,13 @@ func (w *world) readParts(ok func(tp core.TopicPartition, p kafka.ReadPart, from
 }
 
 func (w *world) part(p partRef) *kafka.ReadPart {
-	return &w.ops[p.op].Result.(kafka.ReadRes).Parts[p.part]
+	return &w.ops[p.operation].Result.(kafka.ReadRes).Parts[p.part]
 }
 
 // finalParts: reads that ended at the end of the final log.
 func (w *world) finalParts() []partRef {
-	return w.readParts(func(tp core.TopicPartition, p kafka.ReadPart, from int64) bool {
-		return p.Code == 0 && p.HWM == int64(w.parts[tp].HighWatermark())
+	return w.readParts(func(topicPartition core.TopicPartition, p kafka.ReadPart, from int64) bool {
+		return p.Code == 0 && p.HWM == int64(w.parts[topicPartition].HighWatermark())
 	})
 }
 
@@ -133,8 +133,8 @@ func (w *world) setAck(i int, key string, add int64) {
 
 func (w *world) definiteOps() []int {
 	var out []int
-	for i, op := range w.ops {
-		if _, ok := op.Op.(kafka.ProduceOp); ok && op.Outcome == simulator.OpResultKnown {
+	for i, operation := range w.ops {
+		if _, ok := operation.Op.(kafka.ProduceOp); ok && operation.Outcome == simulator.OpResultKnown {
 			out = append(out, i)
 		}
 	}
@@ -142,8 +142,8 @@ func (w *world) definiteOps() []int {
 }
 
 // swapAdj swaps log entries i and i+1 of tp, keeping offsets contiguous.
-func (w *world) swapAdj(tp core.TopicPartition, i int) {
-	rs := w.ranges[tp]
+func (w *world) swapAdj(topicPartition core.TopicPartition, i int) {
+	rs := w.ranges[topicPartition]
 	a, b := rs[i], rs[i+1]
 	na, nb := b, a
 	na.Base, nb.Base = a.Base, a.Base+core.Offset(b.Count)
@@ -151,14 +151,14 @@ func (w *world) swapAdj(tp core.TopicPartition, i int) {
 }
 
 // adjPairs lists (tp, i) with entries i, i+1 passing ok.
-func (w *world) adjPairs(ok func(tp core.TopicPartition, a, b core.BatchRange) bool) ([]partRef, []core.TopicPartition) {
+func (w *world) adjPairs(ok func(topicPartition core.TopicPartition, a, b core.BatchRange) bool) ([]partRef, []core.TopicPartition) {
 	var out []partRef
 	var tps []core.TopicPartition
-	for _, tp := range w.tps {
-		rs := w.ranges[tp]
+	for _, topicPartition := range w.tps {
+		rs := w.ranges[topicPartition]
 		for i := 0; i+1 < len(rs); i++ {
-			if ok(tp, rs[i], rs[i+1]) {
-				out, tps = append(out, partRef{0, i}), append(tps, tp)
+			if ok(topicPartition, rs[i], rs[i+1]) {
+				out, tps = append(out, partRef{0, i}), append(tps, topicPartition)
 			}
 		}
 	}
@@ -180,21 +180,21 @@ func recsOf(vals ...string) []kmsg.Record {
 	return out
 }
 
-func lastRange(w *world, tp core.TopicPartition) core.BatchRange {
-	rs := w.ranges[tp]
+func lastRange(w *world, topicPartition core.TopicPartition) core.BatchRange {
+	rs := w.ranges[topicPartition]
 	return rs[len(rs)-1]
 }
 
 func faults() []fault {
 	return []fault{
 		{"duplicated record in the log", func(w *world, r *rand.Rand) bool {
-			tp, ok := pick(r, w.tpsWith(1))
+			topicPartition, ok := pick(r, w.tpsWith(1))
 			if !ok {
 				return false
 			}
-			d := lastRange(w, tp)
-			d.Base = core.Offset(w.cp0(tp))
-			w.ranges[tp] = append(w.ranges[tp], d)
+			d := lastRange(w, topicPartition)
+			d.Base = core.Offset(w.cp0(topicPartition))
+			w.ranges[topicPartition] = append(w.ranges[topicPartition], d)
 			return true
 		}, []core.PropertyID{pLocTwice}, false},
 
@@ -212,14 +212,14 @@ func faults() []fault {
 
 		{"acked record missing (last range dropped)", func(w *world, r *rand.Rand) bool {
 			var c []core.TopicPartition
-			for _, tp := range w.tpsWith(1) {
-				if w.definiteAt(tp, int64(lastRange(w, tp).Base)) {
-					c = append(c, tp)
+			for _, topicPartition := range w.tpsWith(1) {
+				if w.definiteAt(topicPartition, int64(lastRange(w, topicPartition).Base)) {
+					c = append(c, topicPartition)
 				}
 			}
-			tp, ok := pick(r, c)
+			topicPartition, ok := pick(r, c)
 			if ok {
-				w.ranges[tp] = w.ranges[tp][:len(w.ranges[tp])-1]
+				w.ranges[topicPartition] = w.ranges[topicPartition][:len(w.ranges[topicPartition])-1]
 			}
 			return ok
 		}, []core.PropertyID{pAckInCP, pAckedAt}, false},
@@ -227,10 +227,10 @@ func faults() []fault {
 		{"acked record missing (middle range dropped, offsets closed up)", func(w *world, r *rand.Rand) bool {
 			var c []partRef
 			var tps []core.TopicPartition
-			for _, tp := range w.tpsWith(3) {
-				for k, rg := range w.ranges[tp][:len(w.ranges[tp])-1] {
-					if w.definiteAt(tp, int64(rg.Base)) {
-						c, tps = append(c, partRef{0, k}), append(tps, tp)
+			for _, topicPartition := range w.tpsWith(3) {
+				for k, rg := range w.ranges[topicPartition][:len(w.ranges[topicPartition])-1] {
+					if w.definiteAt(topicPartition, int64(rg.Base)) {
+						c, tps = append(c, partRef{0, k}), append(tps, topicPartition)
 					}
 				}
 			}
@@ -238,14 +238,14 @@ func faults() []fault {
 				return false
 			}
 			i := r.IntN(len(c))
-			tp, k := tps[i], c[i].part
-			rs := w.ranges[tp]
+			topicPartition, k := tps[i], c[i].part
+			rs := w.ranges[topicPartition]
 			gone := rs[k]
 			rs = append(rs[:k:k], rs[k+1:]...)
 			for j := k; j < len(rs); j++ {
 				rs[j].Base -= core.Offset(gone.Count)
 			}
-			w.ranges[tp] = rs
+			w.ranges[topicPartition] = rs
 			return true
 		}, []core.PropertyID{pAckedAt}, false},
 
@@ -260,7 +260,9 @@ func faults() []fault {
 		}, []core.PropertyID{pAckedAt}, false},
 
 		{"records swapped in the log", func(w *world, r *rand.Rand) bool {
-			ps, tps := w.adjPairs(func(tp core.TopicPartition, a, b core.BatchRange) bool { return w.definiteAt(tp, int64(a.Base)) })
+			ps, tps := w.adjPairs(func(topicPartition core.TopicPartition, a, b core.BatchRange) bool {
+				return w.definiteAt(topicPartition, int64(a.Base))
+			})
 			i, ok := pick(r, seq(len(ps)))
 			if ok {
 				w.swapAdj(tps[i], ps[i].part)
@@ -269,11 +271,11 @@ func faults() []fault {
 		}, []core.PropertyID{pAckedAt}, false},
 
 		{"offset gap", func(w *world, r *rand.Rand) bool {
-			tp, ok := pick(r, w.tpsWith(1))
+			topicPartition, ok := pick(r, w.tpsWith(1))
 			if !ok {
 				return false
 			}
-			rs := w.ranges[tp]
+			rs := w.ranges[topicPartition]
 			for j := r.IntN(len(rs)); j < len(rs); j++ {
 				rs[j].Base++
 			}
@@ -310,11 +312,11 @@ func faults() []fault {
 		{"consumer skips an offset between reads", func(w *world, r *rand.Rand) bool {
 			var c []partRef
 			for _, p := range w.readParts(func(_ core.TopicPartition, p kafka.ReadPart, _ int64) bool { return len(p.Recs) > 0 }) {
-				ro, rp := w.ops[p.op].Op.(kafka.ReadOp), w.part(p)
+				ro, rp := w.ops[p.operation].Op.(kafka.ReadOp), w.part(p)
 				end := ro.Parts[p.part].Off + int64(len(rp.Recs))
 				for _, q := range w.anyParts() {
-					qo := w.ops[q.op].Op.(kafka.ReadOp)
-					if q.op > p.op && qo.Client == ro.Client && qo.Parts[q.part].TopicPartition == ro.Parts[p.part].TopicPartition && qo.Parts[q.part].Off == end {
+					qo := w.ops[q.operation].Op.(kafka.ReadOp)
+					if q.operation > p.operation && qo.Client == ro.Client && qo.Parts[q.part].TopicPartition == ro.Parts[p.part].TopicPartition && qo.Parts[q.part].Off == end {
 						c = append(c, p)
 						break
 					}
@@ -375,7 +377,7 @@ func faults() []fault {
 			seen := map[[2]any]bool{}
 			ps := w.anyParts() // time order: walk back to find the last read per (client, tp)
 			for _, p := range slices.Backward(ps) {
-				ro := w.ops[p.op].Op.(kafka.ReadOp)
+				ro := w.ops[p.operation].Op.(kafka.ReadOp)
 				k := [2]any{ro.Client, ro.Parts[p.part].TopicPartition}
 				if !seen[k] && len(w.part(p).Recs) > 0 {
 					c = append(c, p)
@@ -415,11 +417,11 @@ func faults() []fault {
 		}, []core.PropertyID{pPerSend}, false},
 
 		{"offsets overlap", func(w *world, r *rand.Rand) bool {
-			tp, ok := pick(r, w.tpsWith(2))
+			topicPartition, ok := pick(r, w.tpsWith(2))
 			if !ok {
 				return false
 			}
-			rs := w.ranges[tp]
+			rs := w.ranges[topicPartition]
 			for j := 1 + r.IntN(len(rs)-1); j < len(rs); j++ {
 				rs[j].Base--
 			}
@@ -448,13 +450,13 @@ func faults() []fault {
 		}, []core.PropertyID{pAckOrder, pAckedAt}, false},
 
 		{"phantom record never produced", func(w *world, r *rand.Rand) bool {
-			tp, _ := pick(r, w.tps)
+			topicPartition, _ := pick(r, w.tps)
 			b, err := kafkawire.BuildBatch(kafkawire.BatchParams{ProducerID: -1, ProducerEpoch: -1, BaseSequence: -1}, recsOf("c0.b99999.r0|ph"))
 			if err != nil {
 				panic(err)
 			}
-			rg := core.BatchRange{TopicPartition: tp, Base: core.Offset(w.cp0(tp)), Count: 1, Loc: w.put(b)}
-			w.ranges[tp] = append(w.ranges[tp], rg)
+			rg := core.BatchRange{TopicPartition: topicPartition, Base: core.Offset(w.cp0(topicPartition)), Count: 1, Loc: w.put(b)}
+			w.ranges[topicPartition] = append(w.ranges[topicPartition], rg)
 			return true
 		}, []core.PropertyID{pProduced}, false},
 
@@ -469,10 +471,10 @@ func faults() []fault {
 		{"records of a batch out of order", func(w *world, r *rand.Rand) bool {
 			var c []partRef
 			var tps []core.TopicPartition
-			for _, tp := range w.tps {
-				for k, rg := range w.ranges[tp] {
+			for _, topicPartition := range w.tps {
+				for k, rg := range w.ranges[topicPartition] {
 					if rg.Count >= 2 {
-						c, tps = append(c, partRef{0, k}), append(tps, tp)
+						c, tps = append(c, partRef{0, k}), append(tps, topicPartition)
 					}
 				}
 			}
@@ -500,10 +502,10 @@ func faults() []fault {
 		{"a retry commits only part of a batch", func(w *world, r *rand.Rand) bool {
 			var c []partRef
 			var tps []core.TopicPartition
-			for _, tp := range w.tps {
-				for k, rg := range w.ranges[tp] {
+			for _, topicPartition := range w.tps {
+				for k, rg := range w.ranges[topicPartition] {
 					if rg.Count >= 2 {
-						c, tps = append(c, partRef{0, k}), append(tps, tp)
+						c, tps = append(c, partRef{0, k}), append(tps, topicPartition)
 					}
 				}
 			}
@@ -530,28 +532,28 @@ func faults() []fault {
 		}, []core.PropertyID{pOneBatch}, false},
 
 		{"corrupt batch bytes in a segment", func(w *world, r *rand.Rand) bool {
-			tp, ok := pick(r, w.tpsWith(1))
+			topicPartition, ok := pick(r, w.tpsWith(1))
 			if ok {
-				rg := lastRange(w, tp)
+				rg := lastRange(w, topicPartition)
 				w.objs[rg.Loc.Key][rg.Loc.Off+rg.Loc.Len-1] ^= 0xff
 			}
 			return ok
 		}, []core.PropertyID{pIntact}, false},
 
 		{"segment object missing", func(w *world, r *rand.Rand) bool {
-			tp, ok := pick(r, w.tpsWith(1))
+			topicPartition, ok := pick(r, w.tpsWith(1))
 			if ok {
-				delete(w.objs, lastRange(w, tp).Loc.Key)
+				delete(w.objs, lastRange(w, topicPartition).Loc.Key)
 			}
 			return ok
 		}, []core.PropertyID{pSegment}, false},
 
 		{"committed range runs past its segment", func(w *world, r *rand.Rand) bool {
-			tp, ok := pick(r, w.tpsWith(1))
+			topicPartition, ok := pick(r, w.tpsWith(1))
 			if !ok {
 				return false
 			}
-			rg := lastRange(w, tp)
+			rg := lastRange(w, topicPartition)
 			if o := w.objs[rg.Loc.Key]; rg.Loc.Off+rg.Loc.Len == int64(len(o)) {
 				w.objs[rg.Loc.Key] = o[:len(o)-1]
 				return true
@@ -560,36 +562,36 @@ func faults() []fault {
 		}, []core.PropertyID{pInside}, false},
 
 		{"committed count differs from the batch", func(w *world, r *rand.Rand) bool {
-			tp, ok := pick(r, w.tpsWith(1))
+			topicPartition, ok := pick(r, w.tpsWith(1))
 			if ok {
-				w.ranges[tp][len(w.ranges[tp])-1].Count++
+				w.ranges[topicPartition][len(w.ranges[topicPartition])-1].Count++
 			}
 			return ok
 		}, []core.PropertyID{pCount}, false},
 
 		{"high watermark above the log", func(w *world, r *rand.Rand) bool {
-			tp, _ := pick(r, w.tps)
-			w.hwmAdj[tp] = 1
+			topicPartition, _ := pick(r, w.tps)
+			w.hwmAdj[topicPartition] = 1
 			return true
 		}, []core.PropertyID{pHWM}, false},
 
 		{"high watermark below the log", func(w *world, r *rand.Rand) bool {
-			tp, ok := pick(r, w.tpsWith(1))
+			topicPartition, ok := pick(r, w.tpsWith(1))
 			if ok {
-				w.hwmAdj[tp] = -1
+				w.hwmAdj[topicPartition] = -1
 			}
 			return ok
 		}, []core.PropertyID{pHWM}, false},
 	}
 }
 
-func (w *world) cp0(tp core.TopicPartition) int64 {
-	return int64((*controlPlaneView)(w).HighWatermark(tp)) - w.hwmAdj[tp]
+func (w *world) cp0(topicPartition core.TopicPartition) int64 {
+	return int64((*controlPlaneView)(w).HighWatermark(topicPartition)) - w.hwmAdj[topicPartition]
 }
 
-func indexOf(tps []core.TopicPartition, tp core.TopicPartition) int {
+func indexOf(tps []core.TopicPartition, topicPartition core.TopicPartition) int {
 	for i, x := range tps {
-		if x == tp {
+		if x == topicPartition {
 			return i
 		}
 	}

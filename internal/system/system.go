@@ -26,7 +26,7 @@ type ObjectStore interface {
 
 // ControlPlane is the HTTP client adapter for the control plane.
 type ControlPlane interface {
-	Call(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, error)
+	Call(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneResponse, error)
 }
 
 // Connections writes to and closes accepted connections. Writes on one connection

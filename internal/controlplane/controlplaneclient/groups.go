@@ -72,11 +72,11 @@ func (c *Client) LeaveGroup(ctx context.Context, request groupcoordinator.LeaveR
 // GroupOffsetCommit stores committed offsets. It returns one code per partition.
 //
 //nolint:dupl // each group call keeps its own conversion
-func (c *Client) GroupOffsetCommit(ctx context.Context, op core.OffsetCommit) (core.OffsetCommitResp, error) {
+func (c *Client) GroupOffsetCommit(ctx context.Context, operation core.OffsetCommit) (core.OffsetCommitResp, error) {
 	var out *cpv1.GroupOffsetCommitResponse
 	err := c.do(ctx, "GroupOffsetCommit", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.GroupOffsetCommit(ctx, apiconvert.OffsetCommitFromCore(op))
+		out, e = cli.GroupOffsetCommit(ctx, apiconvert.OffsetCommitFromCore(operation))
 		return e
 	})
 	if err != nil {
@@ -88,11 +88,11 @@ func (c *Client) GroupOffsetCommit(ctx context.Context, op core.OffsetCommit) (c
 // GroupOffsetFetch reads committed offsets.
 //
 //nolint:dupl // each group call keeps its own conversion
-func (c *Client) GroupOffsetFetch(ctx context.Context, op core.OffsetFetch) (core.OffsetFetchResp, error) {
+func (c *Client) GroupOffsetFetch(ctx context.Context, operation core.OffsetFetch) (core.OffsetFetchResp, error) {
 	var out *cpv1.GroupOffsetFetchResponse
 	err := c.do(ctx, "GroupOffsetFetch", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.GroupOffsetFetch(ctx, apiconvert.OffsetFetchFromCore(op))
+		out, e = cli.GroupOffsetFetch(ctx, apiconvert.OffsetFetchFromCore(operation))
 		return e
 	})
 	if err != nil {
@@ -133,32 +133,32 @@ func (c *Client) ListGroups(ctx context.Context) ([]core.GroupSummary, error) {
 
 // callGroup performs one group operation of the broker (Call). A business
 // error comes back as *Error, as for every other call.
-func (c *Client) callGroup(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, error) {
-	switch op := op.(type) {
+func (c *Client) callGroup(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneResponse, error) {
+	switch operation := operation.(type) {
 	case core.GroupJoin:
-		r, err := c.JoinGroup(ctx, joinReq(op))
+		r, err := c.JoinGroup(ctx, joinReq(operation))
 		if err != nil {
 			return nil, err
 		}
 		return joinResp(r), nil
 	case core.GroupSync:
-		r, err := c.SyncGroup(ctx, syncReq(op))
+		r, err := c.SyncGroup(ctx, syncReq(operation))
 		if err != nil {
 			return nil, err
 		}
 		return core.GroupSyncResp{Assignment: r.Assignment}, nil
 	case core.GroupHeartbeat:
-		return nil, c.GroupHeartbeat(ctx, groupcoordinator.HeartbeatReq{Group: op.Group, MemberID: op.MemberID, Generation: op.Generation})
+		return nil, c.GroupHeartbeat(ctx, groupcoordinator.HeartbeatReq{Group: operation.Group, MemberID: operation.MemberID, Generation: operation.Generation})
 	case core.GroupLeave:
-		errs, err := c.LeaveGroup(ctx, groupcoordinator.LeaveReq{Group: op.Group, Members: op.Members})
+		errs, err := c.LeaveGroup(ctx, groupcoordinator.LeaveReq{Group: operation.Group, Members: operation.Members})
 		if err != nil {
 			return nil, err
 		}
 		return core.GroupLeaveResp{Errs: errs}, nil
 	case core.OffsetCommit:
-		return c.GroupOffsetCommit(ctx, op)
+		return c.GroupOffsetCommit(ctx, operation)
 	case core.OffsetFetch:
-		return c.GroupOffsetFetch(ctx, op)
+		return c.GroupOffsetFetch(ctx, operation)
 	case core.ListGroups:
 		gs, err := c.ListGroups(ctx)
 		if err != nil {
@@ -166,7 +166,7 @@ func (c *Client) callGroup(ctx context.Context, op core.ControlPlaneOperation) (
 		}
 		return core.ListGroupsResp{Groups: gs}, nil
 	case core.DescribeGroups:
-		ds, err := c.DescribeGroups(ctx, op.Groups)
+		ds, err := c.DescribeGroups(ctx, operation.Groups)
 		if err != nil {
 			return nil, err
 		}
@@ -175,14 +175,14 @@ func (c *Client) callGroup(ctx context.Context, op core.ControlPlaneOperation) (
 	return nil, &Error{Code: core.ErrInvalid}
 }
 
-func joinReq(op core.GroupJoin) groupcoordinator.JoinReq {
+func joinReq(operation core.GroupJoin) groupcoordinator.JoinReq {
 	r := groupcoordinator.JoinReq{
-		Group: op.Group, MemberID: op.MemberID, GroupInstanceID: op.GroupInstanceID,
-		ClientID: op.ClientID, ClientHost: op.ClientHost,
-		SessionTimeoutMs: op.SessionTimeoutMs, RebalanceTimeoutMs: op.RebalanceTimeoutMs,
-		ProtocolType: op.ProtocolType,
+		Group: operation.Group, MemberID: operation.MemberID, GroupInstanceID: operation.GroupInstanceID,
+		ClientID: operation.ClientID, ClientHost: operation.ClientHost,
+		SessionTimeoutMs: operation.SessionTimeoutMs, RebalanceTimeoutMs: operation.RebalanceTimeoutMs,
+		ProtocolType: operation.ProtocolType,
 	}
-	for _, p := range op.Protocols {
+	for _, p := range operation.Protocols {
 		r.Protocols = append(r.Protocols, groupcoordinator.Protocol{Name: p.Name, Metadata: p.Metadata})
 	}
 	return r
@@ -196,9 +196,9 @@ func joinResp(r groupcoordinator.JoinResp) core.GroupJoinResp {
 	return out
 }
 
-func syncReq(op core.GroupSync) groupcoordinator.SyncReq {
-	r := groupcoordinator.SyncReq{Group: op.Group, MemberID: op.MemberID, Generation: op.Generation}
-	for _, a := range op.Assignments {
+func syncReq(operation core.GroupSync) groupcoordinator.SyncReq {
+	r := groupcoordinator.SyncReq{Group: operation.Group, MemberID: operation.MemberID, Generation: operation.Generation}
+	for _, a := range operation.Assignments {
 		r.Assignments = append(r.Assignments, groupcoordinator.Assignment{Member: a.Member, Bytes: a.Bytes})
 	}
 	return r

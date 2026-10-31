@@ -99,8 +99,8 @@ type ObjectStoreRealState interface {
 
 // ControlPlaneRealState is what the control plane really committed.
 type ControlPlaneRealState interface {
-	Committed(tp core.TopicPartition) []core.BatchRange
-	HighWatermark(tp core.TopicPartition) core.Offset
+	Committed(topicPartition core.TopicPartition) []core.BatchRange
+	HighWatermark(topicPartition core.TopicPartition) core.Offset
 	// Gen bumps whenever anything applied changes.
 	Gen() uint64
 }
@@ -137,7 +137,7 @@ type HistoryOperation struct {
 
 // History is the workload's append-only record of ops.
 type History interface {
-	Invoke(client core.NodeInstance, id, value core.ID, op any)
+	Invoke(client core.NodeInstance, id, value core.ID, operation any)
 	// Return completes id. It reports false for an unknown or duplicate id
 	// (a protocol failure).
 	Return(id core.ID, result any, o OpOutcome) bool

@@ -46,28 +46,28 @@ func configLog(seeds []uint64, bug broker.InjectedBug, logBug uint8) simulator.C
 }
 
 func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Opts) simulator.Config {
-	cfg := configWith(seeds, bug, opts)
-	cfg.ControlPlane.Log = fakelogservice.DefaultParams()
-	cfg.ControlPlane.Log.Bug = logBug
+	config := configWith(seeds, bug, opts)
+	config.ControlPlane.Log = fakelogservice.DefaultParams()
+	config.ControlPlane.Log.Bug = logBug
 	// A replica stall or crash is rolled on each role tick of the active node.
 	// Raise the defaults so a short campaign (20 seeds) still reaches both.
-	cfg.ControlPlane.Log.StallProb, cfg.ControlPlane.Log.CrashProb = 0.004, 0.002
-	cfg.ControlPlane.MaxCommitItems = 0
-	lp := cfg.ControlPlane.Log
-	cfg.LogStore = simulator.LogStoreFaults{
+	config.ControlPlane.Log.StallProb, config.ControlPlane.Log.CrashProb = 0.004, 0.002
+	config.ControlPlane.MaxCommitItems = 0
+	lp := config.ControlPlane.Log
+	config.LogStore = simulator.LogStoreFaults{
 		Enabled:        true,
-		ApplyLatency:   cfg.ControlPlane.ApplyLatency,
-		RespondLatency: cfg.ControlPlane.RespondLatency,
+		ApplyLatency:   config.ControlPlane.ApplyLatency,
+		RespondLatency: config.ControlPlane.RespondLatency,
 		Unavailable503: lp.PutFail,
 		Timeout:        0,
 		LostResponse:   lp.PutLost,
 		Outage:         simulator.ServiceOutage{},
-		CallerTimeout:  cfg.ControlPlane.CallerTimeout,
+		CallerTimeout:  config.ControlPlane.CallerTimeout,
 		Bug:            logBug,
 		WindowSlots:    lp.WindowSlots,
 		TrimStride:     lp.TrimStride,
 	}
-	cfg.Processes = append(cfg.Processes, simulator.Process{
+	config.Processes = append(config.Processes, simulator.Process{
 		Name: "cp", Count: 2,
 		FactoryFor: func(sc simulator.SeedConfig) core.MachineFactory { return controlPlaneFactory(sc, opts) },
 	})
@@ -75,14 +75,14 @@ func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Op
 	// must clear ApplyLatency SlowMax (200ms) so a slow Put is not a false
 	// MaybeApplied; keep it below the bridge so PutFail can still retry inside
 	// one CommitSegment.
-	cfg.ControlPlane.CallerTimeout = 1500 * core.Millisecond
-	cfg.LogStore.CallerTimeout = 500 * core.Millisecond
-	ph := cfg.Phases
+	config.ControlPlane.CallerTimeout = 1500 * core.Millisecond
+	config.LogStore.CallerTimeout = 500 * core.Millisecond
+	ph := config.Phases
 	ph.Settling = 25 * core.Second
 	ph.Settle = 20 * core.Second
-	cfg.Phases = ph
-	cfg.ExpectReachable = append(cfg.ExpectReachable, logReachables()...)
-	return cfg
+	config.Phases = ph
+	config.ExpectReachable = append(config.ExpectReachable, logReachables()...)
+	return config
 }
 
 // logReachables are the log engine's paths a campaign must reach.

@@ -285,7 +285,7 @@ func readIndexEntry(body []byte, p int, i uint64) (segmentIndexEntry, int, error
 // attachPayloads checks contiguous ranges and per-batch CRCs, fills Off/Len,
 // and builds Batches that alias body slices.
 func attachPayloads(body []byte, idx []segmentIndexEntry, next uint64) (Segment, error) {
-	seg := Segment{Entries: make([]Entry, 0, len(idx)), Batches: make([]Batch, 0, len(idx))}
+	segment := Segment{Entries: make([]Entry, 0, len(idx)), Batches: make([]Batch, 0, len(idx))}
 	for i, r := range idx {
 		if r.off != next || r.n == 0 || r.n > uint64(len(body))-r.off {
 			return Segment{}, corrupt("entry %d: bad range off=%d len=%d", i, r.off, r.n)
@@ -296,13 +296,13 @@ func attachPayloads(body []byte, idx []segmentIndexEntry, next uint64) (Segment,
 			return Segment{}, corrupt("entry %d: batch CRC mismatch", i)
 		}
 		r.Off, r.Len = int64(HeaderSize+r.off), int64(r.n)
-		seg.Entries = append(seg.Entries, r.Entry)
-		seg.Batches = append(seg.Batches, Batch{TopicPartition: r.TopicPartition, Records: r.Records, Data: data})
+		segment.Entries = append(segment.Entries, r.Entry)
+		segment.Batches = append(segment.Batches, Batch{TopicPartition: r.TopicPartition, Records: r.Records, Data: data})
 	}
 	if next != uint64(len(body)) {
 		return Segment{}, corrupt("%d trailing body bytes", uint64(len(body))-next)
 	}
-	return seg, nil
+	return segment, nil
 }
 
 // VerifyBatch checks bytes fetched with Entry.Ref against the entry: right

@@ -38,7 +38,7 @@ func NewSegmentLog(log *slog.Logger) *SegmentLog {
 	return &SegmentLog{log: log, segs: map[string]*segmentInfo{}}
 }
 
-func ms(ns int64) float64 { return float64(ns/10_000) / 100 } // 10 us resolution
+func ms(nanoseconds int64) float64 { return float64(nanoseconds/10_000) / 100 } // 10 us resolution
 
 func fi(f core.Fact, k string) int64 {
 	switch x := f.Field(k).(type) {

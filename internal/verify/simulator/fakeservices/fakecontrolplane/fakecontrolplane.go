@@ -79,8 +79,8 @@ func (e *Engine) Execute(ctx simulator.FakeServiceContext, from core.NodeInstanc
 }
 
 // Committed returns the committed ranges of tp in offset order.
-func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
-	d := e.spec.Exec(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: tp}}).(core.ControlPlaneDone)
+func (e *Engine) Committed(topicPartition core.TopicPartition) []core.BatchRange {
+	d := e.spec.Exec(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: topicPartition}}).(core.ControlPlaneDone)
 	if d.Err != core.OK {
 		return nil
 	}
@@ -88,7 +88,9 @@ func (e *Engine) Committed(tp core.TopicPartition) []core.BatchRange {
 }
 
 // HighWatermark is the partition end: the next offset the spec assigns.
-func (e *Engine) HighWatermark(tp core.TopicPartition) core.Offset { return e.spec.End(tp) }
+func (e *Engine) HighWatermark(topicPartition core.TopicPartition) core.Offset {
+	return e.spec.End(topicPartition)
+}
 
 // tooLarge reports whether op is a CommitSegment that a store with a bounded
 // transaction would refuse. The count is the arithmetic of the removed DynamoDB-transaction store (decisions 39,
@@ -97,8 +99,8 @@ func (e *Engine) HighWatermark(tp core.TopicPartition) core.Offset { return e.sp
 // grows, taken as an upper bound, so it depends on the request and the topic
 // table only. The number of batches does not count. The spec stays
 // limit-free; a refusal reaches it never, so nothing changes.
-func (e *Engine) tooLarge(op core.ControlPlaneOperation) bool {
-	c, ok := op.(core.CommitSegment)
+func (e *Engine) tooLarge(operation core.ControlPlaneOperation) bool {
+	c, ok := operation.(core.CommitSegment)
 	if !ok || e.maxItems <= 0 {
 		return false
 	}

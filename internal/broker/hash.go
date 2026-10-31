@@ -50,7 +50,7 @@ func (b *Broker) StateHash() uint64 {
 }
 
 func (b *Broker) hashScalars(h *stateHasher) {
-	h.u64(uint64(b.cfg.InjectedBug))
+	h.u64(uint64(b.config.InjectedBug))
 	h.bool(b.started)
 	h.u64(uint64(b.nextRequestNumber))
 	h.u64(b.nextID)
@@ -121,7 +121,7 @@ func (h *stateHasher) ops(ops []*operation) {
 		h.u64(uint64(o.kind))
 		h.u64(uint64(o.state))
 		h.u64(uint64(o.retry))
-		h.u64(uint64(o.req))
+		h.u64(uint64(o.requestID))
 		h.u64(uint64(o.gen))
 		h.u64(uint64(o.attempts))
 		h.u64(uint64(o.s.conn.id))
@@ -130,8 +130,8 @@ func (h *stateHasher) ops(ops []*operation) {
 		for _, n := range o.names {
 			h.str(n)
 		}
-		h.str(o.tp.Topic)
-		h.u64(uint64(uint32(o.tp.Partition)))
+		h.str(o.topicPartition.Topic)
+		h.u64(uint64(uint32(o.topicPartition.Partition)))
 		h.u64(uint64(o.from))
 		h.u64(uint64(uint32(o.maxBytes)))
 		if o.kind == opCreate { // only create ops carry these, so other hashes stay as they were
@@ -157,8 +157,8 @@ func (h *stateHasher) batches(bs []*partitionBatch) {
 	for _, pb := range bs {
 		h.u64(uint64(pb.s.conn.id))
 		h.u64(uint64(uint32(pb.s.h.CorrelationID)))
-		h.str(pb.tp.Topic)
-		h.u64(uint64(uint32(pb.tp.Partition)))
+		h.str(pb.topicPartition.Topic)
+		h.u64(uint64(uint32(pb.topicPartition.Partition)))
 		h.bytes(pb.data)
 		h.u64(uint64(pb.records))
 		h.ref(pb.loc)

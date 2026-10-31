@@ -32,25 +32,25 @@ const (
 // operation is one control-plane / object-store interaction serving a request part.
 // It retries with backoff; a part never fails silently.
 type operation struct {
-	id       uint64
-	kind     operationKind
-	state    operationState
-	retry    operationState // state a backoff returns to
-	req      core.RequestID
-	gen      core.TimerVersion
-	attempts int
-	s        *slot
+	id        uint64
+	kind      operationKind
+	state     operationState
+	retry     operationState // state a backoff returns to
+	requestID core.RequestID
+	gen       core.TimerVersion
+	attempts  int
+	s         *slot
 
 	names []string // refresh, meta: topics asked
 	creq  core.Request
 
-	tp       core.TopicPartition
-	from     core.Offset
-	maxBytes int32
-	lpart    *kmsg.ListOffsetsResponseTopicPartition
-	fpart    *kmsg.FetchResponseTopicPartition
-	ctopic   *kmsg.CreateTopicsResponseTopic
-	dresp    *kmsg.DescribeConfigsResponse
+	topicPartition core.TopicPartition
+	from           core.Offset
+	maxBytes       int32
+	lpart          *kmsg.ListOffsetsResponseTopicPartition
+	fpart          *kmsg.FetchResponseTopicPartition
+	ctopic         *kmsg.CreateTopicsResponseTopic
+	dresp          *kmsg.DescribeConfigsResponse
 
 	create       core.CreateTopic // opCreate: the topic to make
 	validateOnly bool             // opCreate: check, do not create
@@ -70,7 +70,7 @@ type operation struct {
 
 func (b *Broker) findOp(r core.RequestID) *operation {
 	for _, o := range b.ops {
-		if o.req == r && o.req != 0 {
+		if o.requestID == r && o.requestID != 0 {
 			return o
 		}
 	}
@@ -107,24 +107,24 @@ func (b *Broker) startOp(o *operation) []core.Action {
 }
 
 func (b *Broker) issue(o *operation) []core.Action {
-	o.req = b.nextRequestID()
+	o.requestID = b.nextRequestID()
 	if o.state == opGet {
-		return []core.Action{core.ObjectGet{Req: o.req, Ref: o.ranges[o.next].Loc}}
+		return []core.Action{core.ObjectGet{Req: o.requestID, Ref: o.ranges[o.next].Loc}}
 	}
 	var cop core.ControlPlaneOperation
 	switch o.kind {
 	case opRefresh, opMetadata, opDescribeConfigs:
 		cop = core.DescribeTopics{Topics: o.names}
 	case opList: // only the end offset is wanted: look past the end
-		cop = core.FindSegments{TopicPartition: o.tp, From: core.Offset(1<<63 - 1), MaxBytes: 1}
+		cop = core.FindSegments{TopicPartition: o.topicPartition, From: core.Offset(1<<63 - 1), MaxBytes: 1}
 	case opFetch:
-		cop = core.FindSegments{TopicPartition: o.tp, From: o.from, MaxBytes: o.maxBytes}
+		cop = core.FindSegments{TopicPartition: o.topicPartition, From: o.from, MaxBytes: o.maxBytes}
 	case opCreate:
 		cop = o.createCP()
 	case opGroup:
 		cop = o.gop
 	}
-	return []core.Action{core.ControlPlaneCall{Req: o.req, Op: cop, Timeout: o.gtimeout}}
+	return []core.Action{core.ControlPlaneCall{Req: o.requestID, Op: cop, Timeout: o.gtimeout}}
 }
 
 // retryOp backs off and repeats the call, or gives up after MaxAttempts or
@@ -133,11 +133,11 @@ func (b *Broker) retryOp(o *operation) []core.Action {
 	if o.s.conn.closed {
 		return b.endOp(o)
 	}
-	if o.attempts++; o.attempts >= b.cfg.MaxAttempts {
+	if o.attempts++; o.attempts >= b.config.MaxAttempts {
 		b.env.Reachable("broker: request retries exhausted")
 		return b.failOp(o, b.exhaustCode(o))
 	}
-	o.retry, o.state, o.req = o.state, opBackoff, 0
+	o.retry, o.state, o.requestID = o.state, opBackoff, 0
 	t, g := b.timer(core.TimerID(o.id), o.attempts)
 	o.gen = g
 	return []core.Action{t}
@@ -236,23 +236,23 @@ func (b *Broker) onOpCP(o *operation, e core.ControlPlaneDone) []core.Action {
 // ---- dispatch ----
 
 // handle runs a fresh request.
-func (b *Broker) handle(s *slot, req core.Request) []core.Action {
-	acts := b.dispatch(s, req)
+func (b *Broker) handle(s *slot, request core.Request) []core.Action {
+	acts := b.dispatch(s, request)
 	b.finishPart(s) // release the construction guard
 	return acts
 }
 
 // dispatch runs a request, refreshing the topic cache first when needed.
-func (b *Broker) dispatch(s *slot, req core.Request) []core.Action {
-	if names := b.missing(req); len(names) > 0 {
-		return b.startOp(&operation{kind: opRefresh, s: s, names: names, creq: req})
+func (b *Broker) dispatch(s *slot, request core.Request) []core.Action {
+	if names := b.missing(request); len(names) > 0 {
+		return b.startOp(&operation{kind: opRefresh, s: s, names: names, creq: request})
 	}
-	return b.dispatchAfterRefresh(s, req)
+	return b.dispatchAfterRefresh(s, request)
 }
 
 // dispatchAfterRefresh runs a request without trying another topic-cache refresh.
-func (b *Broker) dispatchAfterRefresh(s *slot, req core.Request) []core.Action {
-	switch r := req.(type) {
+func (b *Broker) dispatchAfterRefresh(s *slot, request core.Request) []core.Action {
+	switch r := request.(type) {
 	case *kmsg.MetadataRequest:
 		return b.metadata(s, r)
 	case *kmsg.ProduceRequest:
@@ -270,7 +270,7 @@ func (b *Broker) dispatchAfterRefresh(s *slot, req core.Request) []core.Action {
 	case *kmsg.DescribeConfigsRequest:
 		return b.describeConfigs(s, r)
 	}
-	if acts, ok := b.dispatchGroup(s, req); ok {
+	if acts, ok := b.dispatchGroup(s, request); ok {
 		return acts
 	}
 	s.silent, s.conn.closing = true, true
@@ -290,10 +290,10 @@ func (b *Broker) resume(o *operation) []core.Action {
 
 // ---- topic cache ----
 
-func (b *Broker) knows(tp core.TopicPartition) bool {
+func (b *Broker) knows(topicPartition core.TopicPartition) bool {
 	for _, t := range b.topics {
-		if t.Name == tp.Topic {
-			return tp.Partition >= 0 && tp.Partition < t.Partitions
+		if t.Name == topicPartition.Topic {
+			return topicPartition.Partition >= 0 && topicPartition.Partition < t.Partitions
 		}
 	}
 	return false
@@ -316,18 +316,18 @@ func (b *Broker) merge(infos []core.TopicInfo) {
 }
 
 // missing lists the topics of req (once each) that the cache cannot resolve.
-func (b *Broker) missing(req core.Request) []string {
+func (b *Broker) missing(request core.Request) []string {
 	var out []string
-	add := func(tp core.TopicPartition) {
-		if b.knows(tp) {
+	add := func(topicPartition core.TopicPartition) {
+		if b.knows(topicPartition) {
 			return
 		}
-		if slices.Contains(out, tp.Topic) {
+		if slices.Contains(out, topicPartition.Topic) {
 			return
 		}
-		out = append(out, tp.Topic)
+		out = append(out, topicPartition.Topic)
 	}
-	switch r := req.(type) {
+	switch r := request.(type) {
 	case *kmsg.ProduceRequest:
 		if r.Acks == 0 {
 			return nil

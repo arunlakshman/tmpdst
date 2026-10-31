@@ -3,7 +3,7 @@
 *Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This document is a record.*
 
 Status: PROPOSAL (2026-10-20). Nothing here is built. No code or other doc changed. Evidence labels as in
-`surprises-audit.md`: **measured** (AWS run w2), **modelled** (local fakedb experiment, §6), **computed**, **suspected**.
+`surprises-audit.md`: **measured** (AWS run w2), **modelled** (local fakedb experiment, section 6), **computed**, **suspected**.
 
 ## 0. Recommendation in one paragraph
 
@@ -19,7 +19,7 @@ Commit cost no longer depends on partitions per segment. Measured transaction si
 model puts CP capacity at 200-430 segments/s, against 30-64 needed. DynamoDB writes fall from a predicted ~12.7k WRU/s
 to ~0.6-0.8k WRU/s at 1 GiB/s, which is about $1.0-1.3k/month at us-east-1 on-demand prices. The broker contract
 (`CommitSegment`, `Lookup`) and `internal/verify/speccheck/controlplane.go` keep their behaviour. A second sequencer still costs only
-retries. The one new restriction is that **only the active CP may serve `Lookup`**; §5.6 explains why.
+retries. The one new restriction is that **only the active CP may serve `Lookup`**; section 5.6 explains why.
 
 ## 1. The problem in numbers (measured, w2, `results/w2`)
 
@@ -32,7 +32,7 @@ Per 10 s window, from `results/w2/metrics/cp` (deltas of `mdscontrolplane_seq_gr
 | ramp 250k | 18.0 | 55 | 44 | 168 | 1.00 |
 | ramp 500k (aborted) | 15.5-16.1 | 82 | 65-67 | 209-221 | 1.12-1.22 |
 
-- **Transaction latency grows with items.** The fit is **tx_ms ≈ 8 + 0.7 x items** (31→30, 55→47, 82→65). On top of
+- **Transaction latency grows with items.** The fit is **tx_ms ~ 8 + 0.7 x items** (31->30, 55->47, 82->65). On top of
   that, one group runs at a time, because every segment shares partitions with every other one, so the sequencer cannot
   pipeline (decision 46).
 - **The cluster is bounded at about 1/tx segments/s.** The broker commits one segment at a time, in seal order. At 500k
@@ -40,13 +40,13 @@ Per 10 s window, from `results/w2/metrics/cp` (deltas of `mdscontrolplane_seq_gr
 - **WRU per transaction is about 2 x items, plus about 40 for the JSON `G#` blob.** Request bodies average 11.3 KB per commit.
 - **About 94 batches per segment** (11.3 KB body / ~120 B of JSON per batch), over 31-55 distinct partitions.
 
-**What 1 GiB/s means (computed).** Use the measured Java batch shape (79.5 KB lz4, 155 records; audit §2.3). 1M msg/s is
+**What 1 GiB/s means (computed).** Use the measured Java batch shape (79.5 KB lz4, 155 records; audit section 2.3). 1M msg/s is
 **6,450 batches/s and ~500 MB/s stored**. At 250k, w2 stored 124 MB/s, so 1M would store ~495 MB/s.
 - 16 MiB segments: **~30 segments/s** of ~215 batches, touching ~150 partitions each.
 - 200 ms windows with 12 brokers, or 8 MB segments: **~64 segments/s** of ~100 batches.
 - Today's partition cap of 96 seals first: ~117 batches and 9.4 MB, so **~53 segments/s of 97-item transactions**.
 
-At 76 ms per transaction that is 13 tx/s. Today's layout is therefore capped at ~13 x 117 x 155 ≈ **240k msg/s**, which
+At 76 ms per transaction that is 13 tx/s. Today's layout is therefore capped at ~13 x 117 x 155 ~ **240k msg/s**, which
 is the plateau w2 hit.
 
 ## 2. Pricing assumption
@@ -59,7 +59,7 @@ item. A plain `PutItem` or `BatchWriteItem` costs 1 WRU per KB. Storage costs $0
 high. The repo's "$43-59k/month" corresponds to **$21-30k/month** at today's price.
 
 The **ap-south-2 price was not verified**. Asia Pacific regions usually list 10-20% above us-east-1; check it with the
-AWS pricing calculator (§10, E5). All dollar figures below are us-east-1, 730 h/month. Multiply by your region's ratio.
+AWS pricing calculator (section 10, E5). All dollar figures below are us-east-1, 730 h/month. Multiply by your region's ratio.
 
 ## 3. Constraints kept
 
@@ -84,10 +84,10 @@ random segments of P partitions out of 288, the union is `288 x (1-(1-P/288)^k)`
 The work per second is therefore at least the number of distinct (partition, segment) pairs, which is ~3.8k-6.4k items/s
 at 1 GiB/s. That needs **38-64 full transactions/s, against the 13-16 measured**. Getting there needs 3-5 transactions in
 flight, and they must be on disjoint partitions, which random segments never are (audit S1). Chaining transactions on
-one partition without waiting would leave an offset hole whenever an earlier one fails. Allowing more commits in flight
+one partition without waiting would leave an offset gap whenever an earlier one fails. Allowing more commits in flight
 per broker only moves the queue from the broker to the CP.
 
-Cost: 6.4k items x 2 WRU plus the `G#` blobs ≈ **12.7k WRU/s ≈ $21k/month**. **Plateau: ~240k msg/s (measured and
+Cost: 6.4k items x 2 WRU plus the `G#` blobs ~ **12.7k WRU/s ~ $21k/month**. **Plateau: ~240k msg/s (measured and
 modelled).** This is a dead end. The run items have to leave the transaction.
 
 ### A: G# items plus a per-topic "ends" item (CAS by version); asynchronous index
@@ -119,7 +119,7 @@ is a recovery that is ~1 s faster.
     itself racy under split brain.
   - That breaks "idempotent per key" exactly in the case the safety net exists for.
 
-**Kept as a fallback** if E1 shows that small transactions are much slower than `PutItem` (§11).
+**Kept as a fallback** if E1 shows that small transactions are much slower than `PutItem` (section 11).
 
 ### D: other alternatives considered
 
@@ -147,7 +147,7 @@ is a recovery that is ~1 s faster.
 | `LOG` | `<seq %020d>` | `keys` (the group's segment keys in queue order), `ep`, `ttl` (now + 7 d) | commit transaction | sync, condition `attribute_not_exists(pk)` |
 | `TOPICS` | `<topic>` | `parts` | commit transaction (rare) / CreateTopic | as today |
 | `R#<topic>#<p>` | `<base %020d>` | `base cnt runs` (today's run format, `runs.go`) | indexer | async, `BatchWriteItem`, unconditional |
-| `CKPT` | `-` | `seq` (indexed through), `plan` (pending range c..h, or none), `ends` (packed per topic/partition, at `seq`), `ver` | indexer | async, `UpdateItem` with condition `ver = :v` |
+| `CHECKPOINT` | `-` | `seq` (indexed through), `plan` (pending range c..h, or none), `ends` (packed per topic/partition, at `seq`), `ver` | indexer | async, `UpdateItem` with condition `ver = :v` |
 | `LEASE` | `-` | `owner`, `ep`, `exp` (ms) | active/standby CP | heartbeat, conditional |
 
 **`G#` format.** It holds:
@@ -159,8 +159,8 @@ That is ~3.4 KB for a 16 MiB segment (150 partitions, 215 batches) and ~1.7 KB f
 from it: bases chain in request order. The request needed for the `ErrConflict` comparison is the same data without the
 bases.
 
-**`LOG` item.** It lists keys only, ~0.1-1 KB. Every `LOG` write goes to one partition key. At ≤ 85 tx/s x 2 WRU that is
-≤ 170 WCU/s, below the 1,000 WCU/s per-key limit, and suspected safe (E2).
+**`LOG` item.** It lists keys only, ~0.1-1 KB. Every `LOG` write goes to one partition key. At <= 85 tx/s x 2 WRU that is
+<= 170 WCU/s, below the 1,000 WCU/s per-key limit, and suspected safe (E2).
 
 **`LOG` TTL.** 7 days, with an alarm if index lag exceeds a minute. The TTL must never delete unindexed entries.
 
@@ -172,9 +172,9 @@ bases.
    - A key that is already in flight attaches to that commit.
 2. **Group formation.** One loop, **one transaction in flight**. The group takes queued requests in order, within these
    limits:
-   - k ≤ 98 segments;
-   - k + 1 + grown topics ≤ 100 items;
-   - total `G#` bytes ≤ 1 MiB (the transaction limit is 4 MB).
+   - k <= 98 segments;
+   - k + 1 + grown topics <= 100 items;
+   - total `G#` bytes <= 1 MiB (the transaction limit is 4 MB).
 
    No artificial wait. Bases come from `ends` in memory, in queue order, and `ends` is advanced tentatively.
 3. **The transaction:**
@@ -203,30 +203,30 @@ then lost to another writer, slot n+1 can still succeed, and its offsets were co
 The CAS on slot n+1 cannot see slot n. A single-item condition cannot express "after my n", and a `ConditionCheck` on n
 inside the n+1 transaction races with the transaction that writes n. With one transaction in flight, contiguity proves
 the writer's view: a successful `LOG/n` means the writer saw slots `0..n-1` exactly. Throughput instead comes from
-group size, and §6 shows that is ample.
+group size, and section 6 shows that is ample.
 
 ### 5.3 Indexer (same process, active CP only)
 
 Every F = 1 s, or when the tail exceeds 50k batches:
-1. **Plan.** Let c = `CKPT.seq` and h = the last acknowledged seq. Set `CKPT.plan = (c, h]` with a CAS on `ver`.
+1. **Plan.** Let c = `CHECKPOINT.seq` and h = the last acknowledged seq. Set `CHECKPOINT.plan = (c, h]` with a CAS on `ver`.
 2. **Compute.** One run item per partition touched in (c, h], at `base` = the partition's end at c, containing that
    partition's batches in log order. This is **deterministic** from the log and the `G#` items.
 3. **Write.** `BatchWriteItem`: 25 items per call, ~8 calls in parallel, retry `UnprocessedItems`.
-4. **Advance.** `CKPT.seq = h`, `ends` = ends at h, `plan = none`, with a CAS on `ver`.
-5. **Trim** the in-memory tail of entries with seq ≤ h, after a grace period of one `Lookup` timeout.
+4. **Advance.** `CHECKPOINT.seq = h`, `ends` = ends at h, `plan = none`, with a CAS on `ver`.
+5. **Trim** the in-memory tail of entries with seq <= h, after a grace period of one `Lookup` timeout.
 
 A pending `plan` found at recovery, or by a second indexer, is **completed with the same range**. Every writer therefore
-produces byte-identical items, so a duplicate index writer is harmless. Run items already written above `CKPT` but not
+produces byte-identical items, so a duplicate index writer is harmless. Run items already written above `CHECKPOINT` but not
 yet covered by it are ignored by `Lookup` (5.4).
 
 ### 5.4 Lookup and Fetch
 
-**Active CP.** It keeps `idxEnd[p]` (ends at `CKPT.seq`), the tail (runs after it), and `end[p]`.
+**Active CP.** It keeps `idxEnd[p]` (ends at `CHECKPOINT.seq`), the tail (runs after it), and `end[p]`.
 
 | case | how `Lookup(TP, From, MaxBytes)` is answered |
 |---|---|
-| From ≥ idxEnd[p] (consumers at the head, ListOffsets latest) | **from memory, with no DynamoDB read**. This also removes the `End` Query that audit S3 counted. |
-| From < idxEnd[p] | Query `R#` runs in [From, idxEnd[p]) as today, drop anything ≥ idxEnd[p], then append tail runs until MaxBytes |
+| From >= idxEnd[p] (consumers at the head, ListOffsets latest) | **from memory, with no DynamoDB read**. This also removes the `End` Query that audit S3 counted. |
+| From < idxEnd[p] | Query `R#` runs in [From, idxEnd[p]) as today, drop anything >= idxEnd[p], then append tail runs until MaxBytes |
 
 **Consistency.** The active CP's answer equals the spec. Every acknowledged commit is in its memory before the ack, and
 every older one is either in memory or indexed. So a consumer can read a record right after its ack, through any broker,
@@ -240,12 +240,12 @@ report a smaller `End`. `internal/broker/fetch.go:58` answers `From > End` with 
 ### 5.5 Recovery (start, or takeover by a standby)
 
 1. Acquire the lease (5.7).
-2. Get `CKPT`. If a `plan` is pending, finish it.
-3. `Query LOG sk > CKPT.seq` (consistent, paged).
+2. Get `CHECKPOINT`. If a `plan` is pending, finish it.
+3. `Query LOG sk > CHECKPOINT.seq` (consistent, paged).
 4. `BatchGetItem` those entries' `G#` items, then apply them in order. That rebuilds `end`, the tail and the recent-key LRU.
 5. Set `seq = last + 1` and serve.
 
-Size: with F = 1 s and a healthy indexer the replay is ≤ ~100 entries and ≤ 300 KB of reads, well under a second
+Size: with F = 1 s and a healthy indexer the replay is <= ~100 entries and <= 300 KB of reads, well under a second
 (suspected; E6 measures it). Older segment keys stay idempotent through their permanent `G#` items: a conditional put
 fails, `G#` is read, and the request is answered as a replay.
 
@@ -254,10 +254,10 @@ fails, `G#` is read, and the request is answered as a replay.
 Two CPs X and Y both commit:
 - Each transaction needs the next `LOG` slot, so only one can take slot n.
 - The loser reloads the winner's entries before it assigns anything.
-- **Offsets are never duplicated and never holed.** That follows from contiguity plus the CAS.
+- **Offsets are never duplicated and never gapped.** That follows from contiguity plus the CAS.
 - **A segment key is never committed twice**, because its `G#` condition is in the same transaction.
 - The cost is retries, exactly as today.
-- Two indexers converge on one plan through the `CKPT` CAS and write identical items.
+- Two indexers converge on one plan through the `CHECKPOINT` CAS and write identical items.
 
 **One guarantee is weaker than today.** Today any CP reads DynamoDB directly, so `Lookup` is fresh everywhere. Under L:
 
@@ -283,10 +283,10 @@ The commit path does not depend on clocks.
   in flight either lands, and the new active finds it by the slot CAS, or it does not.
 - `ep` is diagnostic only: it is written into `LOG`/`G#` but never compared for safety.
 
-Brokers get a **list** of CP URLs (`-cp-url a,b`) or a health-checked NLB / DNS name. cpclient tries the next URL on a
+Brokers get a **list** of CP URLs (`-cp-url a,b`) or a health-checked NLB / DNS name. controlplaneclient tries the next URL on a
 refused connection or on 503 "not active".
 
-Expected failover: ~3 s lease expiry + under 1 s of replay ≈ 4-5 s of stalled acks. That is far below
+Expected failover: ~3 s lease expiry + under 1 s of replay ~ 4-5 s of stalled acks. That is far below
 `CommitDeadline` (120 s), so **no produce fails**. Today a lost host means minutes and failed produces (runbook A10).
 Without a standby, L behaves like today plus a sub-second replay at restart.
 
@@ -299,7 +299,7 @@ Kafka clients rely on that ordering when retries are off. Buffer accounting rele
 number of brokers.
 
 **What L needs.** At 64 segments/s over 6 brokers, each broker needs 10.7 commits/s, which means a commit latency of
-≤ 93 ms. The modelled latency is 15-28 ms, and 54 ms in the pessimistic case (§6). At 12 brokers the requirement is
+<= 93 ms. The modelled latency is 15-28 ms, and 54 ms in the pessimistic case (section 6). At 12 brokers the requirement is
 looser. **So keep the rule.**
 
 **What the broker must guarantee** (it already does):
@@ -320,7 +320,7 @@ spec rule, so it should be built only if E1 shows commit latency above ~90 ms.
 
 ## 6. Local model (fakedb with a latency model fitted to w2)
 
-**Program.** `commitmodel` lives in the session scratchpad and is not committed. It wraps `cp/dynamo/fakedb` to sleep
+**Program.** `commitmodel` lives in the session scratchpad and is not committed. It wraps `internal/controlplane/fakedynamodb` to sleep
 **8 + 0.7 x items ms** per `TransactWriteItems` and 4 ms per read. N brokers seal segments open-loop at the offered rate
 with random phases, and each broker commits one segment at a time in seal order. Ten seconds per row.
 - `seq` runs today's real `dynamo.Sequencer`.
@@ -345,7 +345,7 @@ with random phases, and each broker commits one segment at a time in seal order.
 - **The model reproduces the w2 plateau.** For today's layout it gives 21 segments/s at 55 partitions; w2 measured 16-18.
   Treat the model as about 20% optimistic, since it has no network jitter.
 - **At the 1 GiB/s shape today's layout falls to 12 segments/s (~220k msg/s)**, because of 97-item transactions.
-- **L holds 30-128 segments/s with p99 commit ≤ 25 ms.** It saturates only when every broker is waiting: 432/s =
+- **L holds 30-128 segments/s with p99 commit <= 25 ms.** It saturates only when every broker is waiting: 432/s =
   12 brokers / 28 ms, which is the one-in-flight bound of 5.8, not a CP bound.
 - **With pessimistic latency, L still delivers 219 segments/s, which is 3.4x the 64/s needed.**
 
@@ -358,16 +358,16 @@ with random phases, and each broker commits one segment at a time in seal order.
 |---|---|---|---|
 | transactions/s needed | 53 (achievable: ~13) | ~25 (modelled) | ~42 (modelled) |
 | items per transaction | 97 | 2.2 | 2.5 |
-| commit WRU/s | ~12.7k (S7: 240 per commit) | 30 x 8 (`G#` 3.4 KB) + 25 x 2 (`LOG`) ≈ 290 | 64 x 4 + 42 x 2 ≈ 340 |
-| index WRU/s (F = 1 s) | (in the transaction) | 288 run items/s x 1-1.5 KB ≈ 300-450 | same |
-| CKPT, LEASE | 0 | ~3 | ~3 |
+| commit WRU/s | ~12.7k (S7: 240 per commit) | 30 x 8 (`G#` 3.4 KB) + 25 x 2 (`LOG`) ~ 290 | 64 x 4 + 42 x 2 ~ 340 |
+| index WRU/s (F = 1 s) | (in the transaction) | 288 run items/s x 1-1.5 KB ~ 300-450 | same |
+| CHECKPOINT, LEASE | 0 | ~3 | ~3 |
 | **total WRU/s** | **~12.7k** | **~0.6-0.75k** | **~0.65-0.8k** |
 | **$/month, us-east-1 at $0.625/M** | **~$21k** ($42k at the repo's $1.25) | **~$1.0-1.2k** | **~$1.1-1.3k** |
 | added ack latency (commit) | 35-60 ms, then seconds of queue | 15-25 ms modelled | same |
 
 Notes on the index row:
 - The index cost is bounded by bytes, not items. That is 6,450 batches/s x ~45 bytes (including the segment-key table)
-  ≈ 290 KB/s ≈ 290 WRU/s.
+  ~ 290 KB/s ~ 290 WRU/s.
 - F only removes per-item rounding: F = 5 s brings it near ~300 WRU/s, at the price of a 5x larger tail and replay.
 
 Reads in steady state are ~0: no reads on commit, and the head of the log is served from memory.
@@ -382,7 +382,7 @@ Storage grows by ~8-16 GB/month (`G#` plus runs; no GC, audit S13), about $2-4/m
   queries for caught-up consumers.
 
 **Ack latency target (suspected).** Publish p50 at 250k was 446 ms: linger 25 ms + window 200 ms + PUT 93 ms + commit
-55 ms + client queueing. L cuts the commit share to ~20 ms. p99 ≤ 1 s depends on S3 PUT p99 for 16 MiB objects, which is
+55 ms + client queueing. L cuts the commit share to ~20 ms. p99 <= 1 s depends on S3 PUT p99 for 16 MiB objects, which is
 not measured at that size.
 
 ## 8. Impact on the spec, contract, simulator and tests
@@ -393,17 +393,17 @@ not measured at that size.
 - **`ErrTooLarge`:** the rule becomes "`G#` blob over ~300 KB or > 98 segments' worth", instead of "1 + partitions > 100".
   The spec never modelled it (decision 32).
 - **sim:**
-  - `cpengine`'s `MaxCommitItems` rule becomes a batch/byte bound.
+  - `fakecontrolplane`'s `MaxCommitItems` rule becomes a batch/byte bound.
   - The broker's `MaxSegmentPartitions` default changes.
-  - So every sim/kafka trace hash changes. Re-baseline, review the golden file, and keep the
+  - So every internal/verify/simulator/kafka trace hash changes. Re-baseline, review the golden file, and keep the
     `SegmentCaps`/`BugNoPartitionCap` mutants (or retire them if the cap goes).
   - The oracle does not change.
-- **cp/cptest:**
+- **internal/controlplane/controlplanetest:**
   - The lockstep conformance (C3) runs the new store against the spec on fakedb and ExtendDB.
   - Add **(a)** two L sequencers on one table with random interleavings and injected faults (lost answers via
     `AfterApply`, cancellations via `BeforeTransact`). Checker: per-partition offsets are contiguous and unique, each
     key is committed once, and `Lookup` equals the spec.
-  - Add **(b)** a crash at every step: after the transaction, after `plan`, mid `BatchWriteItem`, before the `CKPT`
+  - Add **(b)** a crash at every step: after the transaction, after `plan`, mid `BatchWriteItem`, before the `CHECKPOINT`
     advance. Restart and compare `StateHash` with the spec.
   - Add **(c)** `Lookup` during index lag, and a 503 from a non-active CP.
   - Add **(d)** idempotent replay after restart, using the `G#` path.
@@ -418,12 +418,12 @@ not measured at that size.
 |---|---|---|
 | cp/dynamo `LogSequencer` | queue and group loop (reused from seq*.go), binary `G#`, `LOG` slot transaction, token, cancel/unknown handling | 4 |
 | tail and `Lookup` merge | in-memory tail, `idxEnd`, `End` from memory, active-only serving | 2 |
-| indexer | plan/write/advance with `CKPT`, `BatchWriteItem`, fakedb support | 3 |
-| recovery | `CKPT` + `LOG` replay + `G#` batch get, resume a pending plan | 2 |
-| lease and standby | `LEASE` item, cpclient URL list, 503 "not active", broker retriable Fetch code, terraform second CP | 3 |
-| tests | cptest (a)-(d), C3 on ExtendDB, sim cap change and re-baseline | 5 |
+| indexer | plan/write/advance with `CHECKPOINT`, `BatchWriteItem`, fakedb support | 3 |
+| recovery | `CHECKPOINT` + `LOG` replay + `G#` batch get, resume a pending plan | 2 |
+| lease and standby | `LEASE` item, controlplaneclient URL list, 503 "not active", broker retriable Fetch code, terraform second CP | 3 |
+| tests | controlplanetest (a)-(d), C3 on ExtendDB, sim cap change and re-baseline | 5 |
 | ops | metrics (`mdscontrolplane_log_*`, index lag, conflicts), runbook, decision 48 | 1 |
-| **total** | stage 1 alone ≈ 11 days | **~20** |
+| **total** | stage 1 alone ~ 11 days | **~20** |
 
 ## 10. Experiments only AWS can answer (each under $5, run from the CP host on a throwaway table)
 
@@ -445,10 +445,10 @@ not measured at that size.
 | stage | build | measure on AWS | expected plateau |
 |---|---|---|---|
 | 0 | nothing | E1-E5 (30 min on the next stack) | confirms or kills the latency model |
-| 1 | `LogSequencer` + indexer + tail `Lookup` + recovery, single CP, behind `-commit=log`; broker partition cap raised | ramp 250k, 500k, 750k, 1M produce-only: `mdscontrolplane_seq` group size, tx ms, WRU/s, index lag, broker queue wait ≈ 0 | **CP not the bound up to ≥ 3x target (modelled).** The next limit becomes visible: broker single-loop CPU (audit S10, ~240 MiB/s laptop ceiling vs ~167 MiB/s logical per broker at 1M), or S3 PUT time. Expect ≥ 750k; 1M likely but unproven |
+| 1 | `LogSequencer` + indexer + tail `Lookup` + recovery, single CP, behind `-commit=log`; broker partition cap raised | ramp 250k, 500k, 750k, 1M produce-only: `mdscontrolplane_seq` group size, tx ms, WRU/s, index lag, broker queue wait ~ 0 | **CP not the bound up to >= 3x target (modelled).** The next limit becomes visible: broker single-loop CPU (audit S10, ~240 MiB/s laptop ceiling vs ~167 MiB/s logical per broker at 1M), or S3 PUT time. Expect >= 750k; 1M likely but unproven |
 | 2 | lease + standby + URL list | E6 under 500k load | same throughput; CP loss costs a ~5 s stall instead of a lost run |
 | 3 | consumer path (TODO): long-poll Fetch, `End`/tail from memory (already in L), read cache | vanity with consumers | consume rate; RCU/s per consumer |
-| 4 (only if E1 or stage 1 says so) | ordered per-broker pipelining (`after` key) or variant B | — | lifts the bound of brokers / commit latency |
+| 4 (only if E1 or stage 1 says so) | ordered per-broker pipelining (`after` key) or variant B | - | lifts the bound of brokers / commit latency |
 
 ## 12. What would change this recommendation
 
@@ -459,7 +459,7 @@ not measured at that size.
 - **The product owner requires `Lookup` from any CP to be as fresh as the active one.** Then the index must be written in
   the commit, and we are back to item cost growing with partitions (design C or D1), or to every CP reading the log
   head on each `Lookup`.
-- **Topics with many thousands of partitions, or many topics per group.** `CKPT.ends` needs paging, and grown-topic
+- **Topics with many thousands of partitions, or many topics per group.** `CHECKPOINT.ends` needs paging, and grown-topic
   items eat into the 100-item budget. Revisit with D5 (sequencer per topic).
 - **Measured broker CPU, not the CP, caps below 1M** after stage 1. Then broker work comes first; this design does not
   help there.

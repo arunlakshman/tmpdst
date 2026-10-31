@@ -239,8 +239,8 @@ func TestOfferKnownCommitSkipsAppend(t *testing.T) {
 	if len(ans) != 1 || ans[0].Req != 2 || ans[0].Done.Err != core.OK {
 		t.Fatalf("known answers = %+v", ans)
 	}
-	resp, ok := ans[0].Done.Resp.(core.CommitSegmentResp)
-	if !ok || len(resp.Assigned) != 1 || resp.Assigned[0].Count != 2 {
+	response, ok := ans[0].Done.Resp.(core.CommitSegmentResp)
+	if !ok || len(response.Assigned) != 1 || response.Assigned[0].Count != 2 {
 		t.Fatalf("known resp = %+v", ans[0].Done.Resp)
 	}
 }

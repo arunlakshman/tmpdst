@@ -13,7 +13,7 @@ import (
 // gives the answer to each call. Every call is recorded, with its deadline.
 type groupCP struct {
 	calls  []core.ControlPlaneCall
-	answer func(op core.ControlPlaneOperation) core.ControlPlaneDone
+	answer func(operation core.ControlPlaneOperation) core.ControlPlaneDone
 }
 
 func (g *groupCP) hook(a core.ControlPlaneCall, _ func() core.IOResult) core.IOResult {
@@ -24,15 +24,15 @@ func (g *groupCP) hook(a core.ControlPlaneCall, _ func() core.IOResult) core.IOR
 }
 
 // cpOK is a successful answer. cpErr is a failed one.
-func cpOK(resp core.ControlPlaneResponse) core.ControlPlaneDone {
-	return core.ControlPlaneDone{Resp: resp}
+func cpOK(response core.ControlPlaneResponse) core.ControlPlaneDone {
+	return core.ControlPlaneDone{Resp: response}
 }
 func cpErr(code core.ErrCode) core.ControlPlaneDone { return core.ControlPlaneDone{Err: code} }
 
 // withGroupCP starts a broker whose group calls are answered by answer.
-func withGroupCP(t *testing.T, cfg Config, answer func(core.ControlPlaneOperation) core.ControlPlaneDone) (*harness, *groupCP) {
+func withGroupCP(t *testing.T, config Config, answer func(core.ControlPlaneOperation) core.ControlPlaneDone) (*harness, *groupCP) {
 	t.Helper()
-	h := startedHarness(t, cfg)
+	h := startedHarness(t, config)
 	g := &groupCP{answer: answer}
 	h.cpHook = g.hook
 	return h, g
@@ -75,9 +75,9 @@ func TestJoinGroupSuccess(t *testing.T) {
 	}
 	// The call is the join, with the client host from the peer and the
 	// rebalance timeout plus the margin as its deadline.
-	op := g.calls[0].Op.(core.GroupJoin)
-	if op.Group != "g1" || op.ClientHost != "/test" || op.RebalanceTimeoutMs != 30000 || len(op.Protocols) != 1 {
-		t.Fatalf("join call %+v", op)
+	operation := g.calls[0].Op.(core.GroupJoin)
+	if operation.Group != "g1" || operation.ClientHost != "/test" || operation.RebalanceTimeoutMs != 30000 || len(operation.Protocols) != 1 {
+		t.Fatalf("join call %+v", operation)
 	}
 	if want := core.Duration(40 * time.Second); g.calls[0].Timeout != want {
 		t.Fatalf("deadline %v, want 40s", time.Duration(g.calls[0].Timeout))
@@ -105,8 +105,8 @@ func TestJoinGroupEmptyGroupIsInvalid(t *testing.T) {
 }
 
 func TestSyncGroupLeaderAndFollower(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(op core.ControlPlaneOperation) core.ControlPlaneDone {
-		if s, ok := op.(core.GroupSync); ok && s.MemberID == "m-1" {
+	h, g := withGroupCP(t, DefaultConfig(), func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
+		if s, ok := operation.(core.GroupSync); ok && s.MemberID == "m-1" {
 			return cpOK(core.GroupSyncResp{})
 		}
 		return cpOK(core.GroupSyncResp{Assignment: []byte("for-m-2")})
@@ -138,8 +138,8 @@ func TestHeartbeatAnswers(t *testing.T) {
 	if r := h.call(c, 4, heartbeatRequest("g1", "m-1", 4)).(*kmsg.HeartbeatResponse); r.ErrorCode != 0 {
 		t.Fatalf("heartbeat %d", r.ErrorCode)
 	}
-	if op := g.calls[0].Op.(core.GroupHeartbeat); op.Group != "g1" || op.Generation != 4 || g.calls[0].Timeout != 0 {
-		t.Fatalf("heartbeat call %+v timeout %d", op, g.calls[0].Timeout)
+	if operation := g.calls[0].Op.(core.GroupHeartbeat); operation.Group != "g1" || operation.Generation != 4 || g.calls[0].Timeout != 0 {
+		t.Fatalf("heartbeat call %+v timeout %d", operation, g.calls[0].Timeout)
 	}
 	h.noViolations()
 }

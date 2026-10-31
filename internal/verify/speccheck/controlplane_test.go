@@ -11,8 +11,8 @@ import (
 
 func tp(t string, p int32) core.TopicPartition { return core.NewTopicPartition(t, p) }
 
-func call(c *ControlPlane, op core.ControlPlaneOperation) core.ControlPlaneDone {
-	return c.Exec(core.ControlPlaneCall{Req: 9, Op: op}).(core.ControlPlaneDone)
+func call(c *ControlPlane, operation core.ControlPlaneOperation) core.ControlPlaneDone {
+	return c.Exec(core.ControlPlaneCall{Req: 9, Op: operation}).(core.ControlPlaneDone)
 }
 
 func commit(c *ControlPlane, key string, bs ...core.PendingBatch) core.ControlPlaneDone {
@@ -276,16 +276,16 @@ var cpTPs = []core.TopicPartition{tp("t", 0), tp("t", 1), tp("u", 0)}
 
 // segBatches is a fixed function of the segment index (and alt), so a replay
 // of a key carries the very same batches.
-func segBatches(seg int, alt bool) []core.PendingBatch {
+func segBatches(segmentIndex int, alt bool) []core.PendingBatch {
 	var bs []core.PendingBatch
-	for i := 0; i <= seg%3; i++ {
-		p := cpTPs[(seg+i)%3]
-		n := int64(1 + (seg+i)%4)
+	for i := 0; i <= segmentIndex%3; i++ {
+		p := cpTPs[(segmentIndex+i)%3]
+		n := int64(1 + (segmentIndex+i)%4)
 		if alt {
 			n++
 		}
 		b := pb(p.Topic, p.Partition, n)
-		b.Loc.Key = fmt.Sprintf("obj%d", seg)
+		b.Loc.Key = fmt.Sprintf("obj%d", segmentIndex)
 		bs = append(bs, b)
 	}
 	return bs
@@ -305,8 +305,8 @@ func cpCheck(impl func() cpExec) checker.SpecChecker[*cpState, cpOp] {
 			return o
 		},
 		Step: func(s *cpState, o cpOp) error {
-			do := func(op core.ControlPlaneOperation) core.ControlPlaneDone {
-				return s.cp.Exec(core.ControlPlaneCall{Req: 1, Op: op}).(core.ControlPlaneDone)
+			do := func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
+				return s.cp.Exec(core.ControlPlaneCall{Req: 1, Op: operation}).(core.ControlPlaneDone)
 			}
 			key := fmt.Sprintf("seg%d", o.Seg)
 			switch o.Kind {

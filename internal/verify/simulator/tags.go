@@ -259,8 +259,8 @@ func (h *stateHasher) actionLog(a core.Action) {
 }
 
 // controlPlaneOperation folds an op; nil is tag 200.
-func (h *stateHasher) controlPlaneOperation(op core.ControlPlaneOperation) {
-	switch x := op.(type) {
+func (h *stateHasher) controlPlaneOperation(operation core.ControlPlaneOperation) {
+	switch x := operation.(type) {
 	case nil:
 		h.Uint64Value(200)
 	case core.CommitSegment:
@@ -294,8 +294,8 @@ func (h *stateHasher) controlPlaneOperation(op core.ControlPlaneOperation) {
 		h.StringValue(x.Name)
 		h.Uint64Value(uint64(uint32(x.Partitions)))
 	default:
-		if !h.controlPlaneGroupOperation(op) {
-			panic(fmt.Sprintf("sim: trace hash: untagged CP op %T", op))
+		if !h.controlPlaneGroupOperation(operation) {
+			panic(fmt.Sprintf("sim: trace hash: untagged CP op %T", operation))
 		}
 	}
 }
@@ -385,8 +385,8 @@ func (h *stateHasher) groupMember(m core.GroupMember) {
 }
 
 // controlPlaneGroupOperation folds a group operation. It reports false for other operations.
-func (h *stateHasher) controlPlaneGroupOperation(op core.ControlPlaneOperation) bool {
-	switch x := op.(type) {
+func (h *stateHasher) controlPlaneGroupOperation(operation core.ControlPlaneOperation) bool {
+	switch x := operation.(type) {
 	case core.GroupInstall:
 		h.Uint64Value(206)
 		h.StringValue(x.Group)
@@ -430,15 +430,15 @@ func (h *stateHasher) controlPlaneGroupOperation(op core.ControlPlaneOperation) 
 			h.partitionOffset(o)
 		}
 	default:
-		return h.controlPlaneGroupRead(op) || h.controlPlaneGroupCall(op)
+		return h.controlPlaneGroupRead(operation) || h.controlPlaneGroupCall(operation)
 	}
 	return true
 }
 
 // controlPlaneGroupCall folds a broker group call to the control plane (decision Q3).
 // It reports false for other operations.
-func (h *stateHasher) controlPlaneGroupCall(op core.ControlPlaneOperation) bool {
-	switch x := op.(type) {
+func (h *stateHasher) controlPlaneGroupCall(operation core.ControlPlaneOperation) bool {
+	switch x := operation.(type) {
 	case core.GroupJoin:
 		h.Uint64Value(213)
 		h.StringValue(x.Group)
@@ -487,15 +487,15 @@ func (h *stateHasher) controlPlaneGroupCall(op core.ControlPlaneOperation) bool 
 }
 
 // controlPlaneGroupRead folds a group read. It reports false for other operations.
-func (h *stateHasher) controlPlaneGroupRead(op core.ControlPlaneOperation) bool {
-	switch x := op.(type) {
+func (h *stateHasher) controlPlaneGroupRead(operation core.ControlPlaneOperation) bool {
+	switch x := operation.(type) {
 	case core.OffsetFetch:
 		h.Uint64Value(210)
 		h.StringValue(x.Group)
 		h.Uint64Value(uint64(len(x.Partitions)))
-		for _, tp := range x.Partitions {
-			h.StringValue(tp.Topic)
-			h.Uint64Value(uint64(uint32(tp.Partition)))
+		for _, topicPartition := range x.Partitions {
+			h.StringValue(topicPartition.Topic)
+			h.Uint64Value(uint64(uint32(topicPartition.Partition)))
 		}
 	case core.DescribeGroup:
 		h.Uint64Value(211)

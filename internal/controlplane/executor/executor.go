@@ -27,21 +27,21 @@ func (c Config) withDefaults() Config {
 // Executor runs Log* and Obj* IOCalls on goroutines and delivers exactly
 // one IOResult per action to the InboxWriter.
 type Executor struct {
-	ctx  context.Context
-	cfg  Config
-	log  Log
-	objs ObjectStore
-	sink runloop.InboxWriter
+	ctx    context.Context
+	config Config
+	log    Log
+	objs   ObjectStore
+	sink   runloop.InboxWriter
 }
 
 var _ runloop.Executor = (*Executor)(nil)
 
 // New builds an Executor. Cancelling ctx aborts calls in flight.
-func New(ctx context.Context, cfg Config, log Log, objs ObjectStore, sink runloop.InboxWriter) *Executor {
+func New(ctx context.Context, config Config, log Log, objs ObjectStore, sink runloop.InboxWriter) *Executor {
 	if objs == nil {
 		objs = NewMemoryObjects()
 	}
-	return &Executor{ctx: ctx, cfg: cfg.withDefaults(), log: log, objs: objs, sink: sink}
+	return &Executor{ctx: ctx, config: config.withDefaults(), log: log, objs: objs, sink: sink}
 }
 
 func (e *Executor) deliver(c core.IOResult) {
@@ -70,7 +70,7 @@ func (e *Executor) run(a core.IOCall) core.IOResult {
 }
 
 func (e *Executor) logIO(a core.IOCall) core.IOResult {
-	ctx, cancel := context.WithTimeout(e.ctx, e.cfg.LogTimeout)
+	ctx, cancel := context.WithTimeout(e.ctx, e.config.LogTimeout)
 	defer cancel()
 	switch a := a.(type) {
 	case core.LogAppend:
@@ -113,7 +113,7 @@ func (e *Executor) logIO(a core.IOCall) core.IOResult {
 }
 
 func (e *Executor) objIO(a core.IOCall) core.IOResult {
-	ctx, cancel := context.WithTimeout(e.ctx, e.cfg.ObjTimeout)
+	ctx, cancel := context.WithTimeout(e.ctx, e.config.ObjTimeout)
 	defer cancel()
 	switch a := a.(type) {
 	case core.ObjectPut:

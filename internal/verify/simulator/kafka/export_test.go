@@ -12,7 +12,7 @@ import (
 func NewOracle(o Opts) simulator.SafetyRule { return newOracle(o) }
 
 // OracleLog is the log inv (from NewOracle) reconstructed for tp.
-func OracleLog(inv simulator.SafetyRule, tp core.TopicPartition) []string {
+func OracleLog(inv simulator.SafetyRule, topicPartition core.TopicPartition) []string {
 	o := inv.(*expectedLogChecker)
-	return o.logs[o.idx[tp]].vals
+	return o.logs[o.idx[topicPartition]].vals
 }

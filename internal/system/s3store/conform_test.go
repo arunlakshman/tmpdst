@@ -40,28 +40,28 @@ func codeOf(err error) core.ErrCode {
 // fake nor real S3 can give the hash of the spec, so StateHash says no.
 type storeSubject struct{ store system.ObjectStore }
 
-func (s storeSubject) Do(op core.IOCall) (observation.ObjectResult, error) {
+func (s storeSubject) Do(operation core.IOCall) (observation.ObjectResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	switch op := op.(type) {
+	switch call := operation.(type) {
 	case core.ObjectPut:
-		return writeResult(s.store.Put(ctx, op.Key, op.Data)), nil
+		return writeResult(s.store.Put(ctx, call.Key, call.Data)), nil
 	case core.ObjectGet:
-		data, err := s.store.Get(ctx, op.Ref)
+		data, err := s.store.Get(ctx, call.Ref)
 		if err != nil {
 			return observation.ObjectResult{Code: codeOf(err)}, nil
 		}
 		return observation.ObjectResult{Data: data}, nil
 	case core.ObjectDelete:
-		return writeResult(s.store.Delete(ctx, op.Key)), nil
+		return writeResult(s.store.Delete(ctx, call.Key)), nil
 	case core.ObjectList:
-		keys, err := s.store.List(ctx, op.Prefix)
+		keys, err := s.store.List(ctx, call.Prefix)
 		if err != nil {
 			return observation.ObjectResult{Code: codeOf(err)}, nil
 		}
 		return observation.ObjectResult{Keys: keys}, nil
 	}
-	return observation.ObjectResult{}, fmt.Errorf("the operation type %T is not an object store operation", op)
+	return observation.ObjectResult{}, fmt.Errorf("the operation type %T is not an object store operation", operation)
 }
 
 // writeResult follows the spec: a write that succeeds is Applied, and a write

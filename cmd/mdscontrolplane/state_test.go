@@ -28,9 +28,9 @@ func TestMachineConfigSetsTheIdempotencyWindow(t *testing.T) {
 }
 
 // topicCount asks a store how many topics it holds.
-func topicCount(t *testing.T, kv stateupdater.KeyValueStore) int {
+func topicCount(t *testing.T, keyValue stateupdater.KeyValueStore) int {
 	t.Helper()
-	d, err := stateupdater.New(kv).Describe(core.DescribeTopics{})
+	d, err := stateupdater.New(keyValue).Describe(core.DescribeTopics{})
 	if err != nil {
 		t.Fatal(err)
 	}

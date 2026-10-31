@@ -12,9 +12,9 @@ type stateHasher = core.Hasher
 
 func newStateHasher() stateHasher { return core.NewHasher() }
 
-func hashTopicPartition(h *stateHasher, tp core.TopicPartition) {
-	h.StringValue(tp.Topic)
-	h.Uint64Value(uint64(tp.Partition))
+func hashTopicPartition(h *stateHasher, topicPartition core.TopicPartition) {
+	h.StringValue(topicPartition.Topic)
+	h.Uint64Value(uint64(topicPartition.Partition))
 }
 
 func hashBatchRanges(h *stateHasher, rs []core.BatchRange) {

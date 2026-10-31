@@ -30,10 +30,10 @@ const (
 
 // Broker is the machine. Build it with New.
 type Broker struct {
-	env   core.Environment
-	self  core.NodeInstance
-	cfg   Config
-	codec kafkawire.Codec
+	env    core.Environment
+	self   core.NodeInstance
+	config Config
+	codec  kafkawire.Codec
 
 	started bool
 
@@ -59,10 +59,10 @@ type Broker struct {
 }
 
 // New returns the core.MachineFactory of the broker.
-func New(cfg Config) core.MachineFactory {
-	cfg = cfg.withDefaults()
+func New(config Config) core.MachineFactory {
+	config = config.withDefaults()
 	return func(env core.Environment, self core.NodeInstance) core.Machine {
-		return &Broker{env: env, self: self, cfg: cfg, nextID: firstID}
+		return &Broker{env: env, self: self, config: config, nextID: firstID}
 	}
 }
 
@@ -70,11 +70,11 @@ func (b *Broker) nextRequestID() core.RequestID { b.nextRequestNumber++; return 
 func (b *Broker) id() uint64                    { b.nextID++; return b.nextID }
 
 func (b *Broker) backoff(n int) core.Duration {
-	d := b.cfg.RetryBase
-	for ; n > 1 && d < b.cfg.RetryMax; n-- {
+	d := b.config.RetryBase
+	for ; n > 1 && d < b.config.RetryMax; n-- {
 		d *= 2
 	}
-	return min(d, b.cfg.RetryMax)
+	return min(d, b.config.RetryMax)
 }
 
 func (b *Broker) timer(id core.TimerID, n int) (core.SetTimer, core.TimerVersion) {
@@ -83,13 +83,13 @@ func (b *Broker) timer(id core.TimerID, n int) (core.SetTimer, core.TimerVersion
 }
 
 // Step implements core.StateMachine.
-func (b *Broker) Step(ev core.Event) []core.Action {
+func (b *Broker) Step(event core.Event) []core.Action {
 	if b.exited {
 		return nil
 	}
-	b.now = ev.At
+	b.now = event.At
 	var acts []core.Action
-	switch e := ev.Body.(type) {
+	switch e := event.Body.(type) {
 	case core.NodeStarted:
 		b.started = true
 	case core.StopRequest:
@@ -167,12 +167,12 @@ func (b *Broker) maybeExit(acts []core.Action) []core.Action {
 // produce bytes and off once back at the low mark.
 func (b *Broker) updatePressure(acts []core.Action) []core.Action {
 	switch {
-	case !b.pressure && b.bufBytes >= b.cfg.MaxBufferedBytes:
+	case !b.pressure && b.bufBytes >= b.config.MaxBufferedBytes:
 		b.pressure, b.pressureAt = true, b.now
 		b.env.Reachable("broker: reads paused by backpressure")
 		acts = append(acts, recordFact("backpressure_on",
 			core.Field{Key: "buffered", Value: core.Int64Value(b.bufBytes)}))
-	case b.pressure && b.bufBytes <= b.cfg.ResumeBufferedBytes:
+	case b.pressure && b.bufBytes <= b.config.ResumeBufferedBytes:
 		b.pressure = false
 		b.env.Reachable("broker: reads resumed after backpressure")
 		acts = append(acts, recordFact("backpressure_off",
@@ -231,12 +231,12 @@ func (b *Broker) segmentByTimer(id core.TimerID) *segment {
 	return nil
 }
 
-func (b *Broker) segmentByRequest(req core.RequestID, st segmentState) *segment {
-	if req == 0 {
+func (b *Broker) segmentByRequest(request core.RequestID, st segmentState) *segment {
+	if request == 0 {
 		return nil
 	}
 	for _, s := range b.segs {
-		if s.request == req && s.state == st {
+		if s.request == request && s.state == st {
 			return s
 		}
 	}

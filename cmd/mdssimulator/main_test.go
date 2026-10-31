@@ -135,12 +135,12 @@ func TestMergeReports(t *testing.T) {
 }
 
 func TestRunSharded(t *testing.T) {
-	cfg, _ := scenarioConfig("echo")
-	rep, err := runInParts(cfg, []uint64{1, 2, 3, 4, 5}, 3)
+	echoConfig, _ := scenarioConfig("echo")
+	rep, err := runInParts(echoConfig, []uint64{1, 2, 3, 4, 5}, 3)
 	if err != nil || len(rep.Seeds) != 5 {
 		t.Fatal(len(rep.Seeds), err)
 	}
-	one, err := runInParts(cfg, []uint64{1, 2}, 1)
+	one, err := runInParts(echoConfig, []uint64{1, 2}, 1)
 	if err != nil || len(one.Seeds) != 2 {
 		t.Fatal(err)
 	}

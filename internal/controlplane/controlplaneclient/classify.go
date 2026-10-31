@@ -94,11 +94,11 @@ func isTimeoutOrIOError(err error) core.ErrCode {
 
 func isDial(err error) bool {
 	var dns *net.DNSError
-	var op *net.OpError
+	var operation *net.OpError
 	switch {
 	case errors.As(err, &dns):
 		return true
-	case errors.As(err, &op) && op.Op == "dial":
+	case errors.As(err, &operation) && operation.Op == "dial":
 		return true
 	}
 	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH)

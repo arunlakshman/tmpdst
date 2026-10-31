@@ -13,13 +13,13 @@ type runner struct{}
 // NewRunner returns the default Runner.
 func NewRunner() Runner { return runner{} }
 
-func validate(cfg Config) error {
-	for _, p := range cfg.Processes {
+func validate(config Config) error {
+	for _, p := range config.Processes {
 		if p.Factory == nil && p.FactoryFor == nil {
 			return errors.New("sim: process " + p.Name + " has no Factory")
 		}
 	}
-	for _, w := range cfg.Workloads {
+	for _, w := range config.Workloads {
 		if w == nil {
 			return errors.New("sim: nil WorkloadFactory")
 		}
@@ -41,32 +41,32 @@ func validate(cfg Config) error {
 // the campaign. A Reachable that is never executed is never recorded, so it
 // appears there only if listed in Config.ExpectReachable (as an unreached stat
 // with zero Checks). Report.Assertions holds every stat.
-func (runner) Run(cfg Config) (Report, error) {
-	if err := validate(cfg); err != nil {
+func (runner) Run(config Config) (Report, error) {
+	if err := validate(config); err != nil {
 		return Report{}, err
 	}
 	var rep Report
 	agg := map[statKey]int{}
 	var all []AssertionStat
-	for i, seed := range cfg.Seeds {
-		res, stats := runSeed(cfg, seed)
-		recordRepeatabilityCheck(cfg, i, seed, &res, &rep)
+	for i, seed := range config.Seeds {
+		res, stats := runSeed(config, seed)
+		recordRepeatabilityCheck(config, i, seed, &res, &rep)
 		rep.Seeds = append(rep.Seeds, res)
 		all = combineStats(all, agg, stats)
 	}
-	all = addMissedChecks(all, cfg.ExpectReachable)
+	all = addMissedChecks(all, config.ExpectReachable)
 	rep.Assertions = all
 	rep.Always, rep.Coverage = groupStats(all)
 	return rep, nil
 }
 
-func recordRepeatabilityCheck(cfg Config, i int, seed uint64, res *SeedResult, rep *Report) {
-	k := cfg.CheckDeterminism
+func recordRepeatabilityCheck(config Config, i int, seed uint64, res *SeedResult, rep *Report) {
+	k := config.CheckDeterminism
 	if k == 0 || uint32(i)%k != 0 {
 		return
 	}
-	again := cfg
-	again.Log = !cfg.Log
+	again := config
+	again.Log = !config.Log
 	res2, _ := runSeed(again, seed)
 	if res2.TraceHash != res.TraceHash || res2.RandCalls != res.RandCalls || res2.Steps != res.Steps {
 		res.Failures = append(res.Failures, Failure{Seed: seed, Kind: FailNotRepeatable, Prop: "determinism",
@@ -128,12 +128,12 @@ func groupStats(all []AssertionStat) ([]AssertionStat, []AssertionStat) {
 // Replay runs one seed with HaltOnFirst and full logging. For a seed that
 // passes, neither changes the TraceHash; a failing seed stops at its first
 // failure, so its hash covers the prefix up to there.
-func (runner) Replay(cfg Config, seed uint64) (SeedResult, error) {
-	if err := validate(cfg); err != nil {
+func (runner) Replay(config Config, seed uint64) (SeedResult, error) {
+	if err := validate(config); err != nil {
 		return SeedResult{}, err
 	}
-	cfg.HaltOnFirst, cfg.Log = true, true
-	return RunSeed(cfg, seed), nil
+	config.HaltOnFirst, config.Log = true, true
+	return RunSeed(config, seed), nil
 }
 
 var _ Runner = runner{}

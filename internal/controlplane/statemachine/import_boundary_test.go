@@ -22,8 +22,8 @@ var forbiddenImportPrefixes = []string{
 }
 
 func TestImportBoundary(t *testing.T) {
-	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedImports}
-	pkgs, err := packages.Load(cfg, "mds/internal/controlplane/statemachine")
+	config := &packages.Config{Mode: packages.NeedName | packages.NeedImports}
+	pkgs, err := packages.Load(config, "mds/internal/controlplane/statemachine")
 	if err != nil {
 		t.Fatalf("packages.Load: %v", err)
 	}

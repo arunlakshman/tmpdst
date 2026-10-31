@@ -14,17 +14,17 @@ import (
 func (a *StateUpdater) Trim(slot int64) (int, error) {
 	hi := binary.BigEndian.AppendUint64([]byte{prefixSlot}, uint64(slot))
 	var dropped int
-	err := a.kv.Update(func(tx Transaction) {
-		var sk [][]byte
-		tx.Ascend([]byte{prefixSlot}, hi, func(k, _ []byte) bool {
-			sk = append(sk, bytes.Clone(k))
+	err := a.keyValue.Update(func(transaction Transaction) {
+		var keysToDrop [][]byte
+		transaction.Ascend([]byte{prefixSlot}, hi, func(k, _ []byte) bool {
+			keysToDrop = append(keysToDrop, bytes.Clone(k))
 			return true
 		})
-		for _, k := range sk {
-			tx.Delete(duplicateCheckKey(string(k[9:])))
-			tx.Delete(k)
+		for _, k := range keysToDrop {
+			transaction.Delete(duplicateCheckKey(string(k[9:])))
+			transaction.Delete(k)
 		}
-		dropped = len(sk)
+		dropped = len(keysToDrop)
 	})
 	return dropped, err
 }
@@ -32,9 +32,9 @@ func (a *StateUpdater) Trim(slot int64) (int, error) {
 // Window is the number of segment keys currently remembered.
 func (a *StateUpdater) Window() int {
 	var n int
-	_ = a.kv.View(func(tx Transaction) {
+	_ = a.keyValue.View(func(transaction Transaction) {
 		lo := []byte{prefixSlot}
-		tx.Ascend(lo, prefixEnd(lo), func(_, _ []byte) bool { n++; return true })
+		transaction.Ascend(lo, prefixEnd(lo), func(_, _ []byte) bool { n++; return true })
 	})
 	return n
 }
@@ -44,8 +44,8 @@ func (a *StateUpdater) Window() int {
 // same order agree, whatever they trimmed. It is not speccheck's StateHash.
 func (a *StateUpdater) StateHash() uint64 {
 	h := fnv.New64a()
-	_ = a.kv.View(func(tx Transaction) {
-		tx.Ascend([]byte{0}, nil, func(k, v []byte) bool {
+	_ = a.keyValue.View(func(transaction Transaction) {
+		transaction.Ascend([]byte{0}, nil, func(k, v []byte) bool {
 			if k[0] != prefixKey && k[0] != prefixSlot {
 				if _, err := h.Write(binary.AppendUvarint(nil, uint64(len(k)))); err != nil {
 					return false
@@ -77,20 +77,20 @@ const (
 	OffsetOwnedHere
 )
 
-// Assigned reports the ranges op was given if it is the first commit of its
+// Assigned reports the ranges operation was given if it is the first commit of its
 // key at slot, rebuilt from the key's record. An indexer uses it to write the
 // run rows of a slot after the fact.
-func (a *StateUpdater) Assigned(slot int64, op core.CommitSegment) ([]core.BatchRange, AssignState, error) {
+func (a *StateUpdater) Assigned(slot int64, operation core.CommitSegment) ([]core.BatchRange, AssignState, error) {
 	var rs []core.BatchRange
 	var st AssignState
-	err := a.kv.View(func(tx Transaction) {
-		rec := tx.Get(duplicateCheckKey(op.SegmentKey))
+	err := a.keyValue.View(func(transaction Transaction) {
+		rec := transaction.Get(duplicateCheckKey(operation.SegmentKey))
 		if rec == nil {
 			return
 		}
 		st = OffsetOwnedElsewhere
 		first, _ := binary.Uvarint(rec)
-		d := replay(rec, checksum(op.Batches), op)
+		d := replay(rec, checksum(operation.Batches), operation)
 		if int64(first) != slot || d.Err != core.OK {
 			return
 		}

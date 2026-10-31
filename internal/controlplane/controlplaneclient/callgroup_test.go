@@ -42,14 +42,14 @@ func TestCallGroupTransportErrors(t *testing.T) {
 		core.DescribeGroups{Groups: []string{"g"}},
 		core.ListGroups{},
 	}
-	for _, op := range ops {
-		resp, err := c.callGroup(ctx, op)
+	for _, operation := range ops {
+		response, err := c.callGroup(ctx, operation)
 		if err == nil {
-			t.Fatalf("%T: no error, resp %+v", op, resp)
+			t.Fatalf("%T: no error, resp %+v", operation, response)
 		}
-		_ = resp // OffsetCommit returns a zero response with its error, so the answer is not checked
-		if code, _ := (Classifier{}).Classify(core.ControlPlaneCall{Op: op}, err); code == core.OK {
-			t.Fatalf("%T: classified as OK: %v", op, err)
+		_ = response // OffsetCommit returns a zero response with its error, so the answer is not checked
+		if code, _ := (Classifier{}).Classify(core.ControlPlaneCall{Op: operation}, err); code == core.OK {
+			t.Fatalf("%T: classified as OK: %v", operation, err)
 		}
 	}
 }
@@ -61,18 +61,18 @@ func TestCallGroupAnswers(t *testing.T) {
 	if _, err := c.JoinGroup(ctx, joinOf("g-ans", "")); err != nil {
 		t.Fatal(err)
 	}
-	resp, err := c.callGroup(ctx, core.ListGroups{})
+	response, err := c.callGroup(ctx, core.ListGroups{})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if gs := resp.(core.ListGroupsResp).Groups; len(gs) != 1 || gs[0].Name != "g-ans" {
+	if gs := response.(core.ListGroupsResp).Groups; len(gs) != 1 || gs[0].Name != "g-ans" {
 		t.Fatalf("list answer %+v", gs)
 	}
-	resp, err = c.callGroup(ctx, core.DescribeGroups{Groups: []string{"g-ans", "g-none"}})
+	response, err = c.callGroup(ctx, core.DescribeGroups{Groups: []string{"g-ans", "g-none"}})
 	if err != nil {
 		t.Fatalf("describe: %v", err)
 	}
-	if ds := resp.(core.DescribeGroupsResp).Groups; len(ds) != 2 || !ds[0].Exists || ds[1].Exists {
+	if ds := response.(core.DescribeGroupsResp).Groups; len(ds) != 2 || !ds[0].Exists || ds[1].Exists {
 		t.Fatalf("describe answer %+v", ds)
 	}
 }
@@ -101,16 +101,16 @@ func TestCallGroupBusinessErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A sync from a member that is not in the group.
-	resp, err := c.callGroup(ctx, core.GroupSync{Group: "g-biz", MemberID: "nobody", Generation: j.Generation})
+	response, err := c.callGroup(ctx, core.GroupSync{Group: "g-biz", MemberID: "nobody", Generation: j.Generation})
 	groupErr(t, err, core.ErrUnknownMember)
-	if resp != nil {
-		t.Fatalf("sync resp %+v with error", resp)
+	if response != nil {
+		t.Fatalf("sync resp %+v with error", response)
 	}
 	// A join that offers another protocol type than the group uses.
-	resp, err = c.callGroup(ctx, core.GroupJoin{Group: "g-biz", ClientID: "c", ProtocolType: "other",
+	response, err = c.callGroup(ctx, core.GroupJoin{Group: "g-biz", ClientID: "c", ProtocolType: "other",
 		Protocols: []core.GroupProtocol{{Name: "range", Metadata: []byte("m")}}})
-	if err == nil || resp != nil {
-		t.Fatalf("join with other protocol type: resp %+v err %v", resp, err)
+	if err == nil || response != nil {
+		t.Fatalf("join with other protocol type: resp %+v err %v", response, err)
 	}
 }
 

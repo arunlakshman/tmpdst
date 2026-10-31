@@ -21,8 +21,8 @@ const goldenSeeds = 5
 // control plane scenario (kafka-log) and returns one line per seed.
 func goldenLines() []string {
 	scenarios := []struct {
-		name string
-		cfg  simulator.Config
+		name   string
+		config simulator.Config
 	}{
 		{"kafka", Config(nil)},
 		{"kafka-log", ConfigLog(nil)},
@@ -30,7 +30,7 @@ func goldenLines() []string {
 	var out []string
 	for _, sc := range scenarios {
 		for seed := uint64(1); seed <= goldenSeeds; seed++ {
-			r := simulator.RunSeed(sc.cfg, seed)
+			r := simulator.RunSeed(sc.config, seed)
 			out = append(out, fmt.Sprintf("%s seed=%d steps=%d rand=%d hash=%016x", sc.name, seed, r.Steps, r.RandCalls, r.TraceHash))
 		}
 	}

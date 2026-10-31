@@ -38,12 +38,12 @@ func benchSegment(rng *rand.Rand, n, parts int) core.CommitSegment {
 // transaction, onto a store holding 2,000 segments already. The reported
 // segs/s is the apply rate to compare with 430 segments/s (docs/applier-bakeoff.md).
 func BenchmarkApply150(b *testing.B) {
-	kv, err := pebblestore.Open(filepath.Join(b.TempDir(), "state"), pebblestore.Options{})
+	keyValue, err := pebblestore.Open(filepath.Join(b.TempDir(), "state"), pebblestore.Options{})
 	if err != nil {
 		b.Fatal(err)
 	}
-	defer func() { _ = kv.Close() }()
-	a := stateupdater.New(kv)
+	defer func() { _ = keyValue.Close() }()
+	a := stateupdater.New(keyValue)
 	rng := rand.New(rand.NewSource(1)) //nolint:gosec // G404: deterministic test/sim PRNG
 	n := 0
 	apply := func(k int) {

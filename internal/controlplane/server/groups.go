@@ -25,32 +25,32 @@ var _ controlplane.GroupStore = nodeGroups{}
 
 // write offers one group decision to the log. A business answer comes back in
 // the Done; err is only for the run loop or the context.
-func (s nodeGroups) write(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
-	entry, _ := stateupdater.GroupEntry(op)
+func (s nodeGroups) write(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
+	entry, _ := stateupdater.GroupEntry(operation)
 	return s.n.offer(ctx, entry)
 }
 
 // GroupInstall implements controlplane.GroupStore.
-func (s nodeGroups) GroupInstall(ctx context.Context, op core.GroupInstall) (core.ErrCode, error) {
-	d, err := s.write(ctx, op)
+func (s nodeGroups) GroupInstall(ctx context.Context, operation core.GroupInstall) (core.ErrCode, error) {
+	d, err := s.write(ctx, operation)
 	return d.Err, err
 }
 
 // GroupAssign implements controlplane.GroupStore.
-func (s nodeGroups) GroupAssign(ctx context.Context, op core.GroupAssign) (core.ErrCode, error) {
-	d, err := s.write(ctx, op)
+func (s nodeGroups) GroupAssign(ctx context.Context, operation core.GroupAssign) (core.ErrCode, error) {
+	d, err := s.write(ctx, operation)
 	return d.Err, err
 }
 
 // GroupRemove implements controlplane.GroupStore.
-func (s nodeGroups) GroupRemove(ctx context.Context, op core.GroupRemove) (core.ErrCode, error) {
-	d, err := s.write(ctx, op)
+func (s nodeGroups) GroupRemove(ctx context.Context, operation core.GroupRemove) (core.ErrCode, error) {
+	d, err := s.write(ctx, operation)
 	return d.Err, err
 }
 
 // OffsetCommit implements controlplane.GroupStore.
-func (s nodeGroups) OffsetCommit(ctx context.Context, op core.OffsetCommit) (core.OffsetCommitResp, core.ErrCode, error) {
-	d, err := s.write(ctx, op)
+func (s nodeGroups) OffsetCommit(ctx context.Context, operation core.OffsetCommit) (core.OffsetCommitResp, core.ErrCode, error) {
+	d, err := s.write(ctx, operation)
 	return core.ResponseAs[core.OffsetCommitResp](d), d.Err, err
 }
 
@@ -70,9 +70,9 @@ func readFold(ctx context.Context, n *Node, fn func(*statemachine.Machine) (core
 // OffsetFetch implements controlplane.GroupStore.
 //
 //nolint:dupl // each call keeps its own conversion
-func (s nodeGroups) OffsetFetch(ctx context.Context, op core.OffsetFetch) (core.OffsetFetchResp, error) {
+func (s nodeGroups) OffsetFetch(ctx context.Context, operation core.OffsetFetch) (core.OffsetFetchResp, error) {
 	d, err := readFold(ctx, s.n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
-		return m.Fold().OffsetFetch(op)
+		return m.Fold().OffsetFetch(operation)
 	})
 	return core.ResponseAs[core.OffsetFetchResp](d), err
 }
@@ -80,9 +80,9 @@ func (s nodeGroups) OffsetFetch(ctx context.Context, op core.OffsetFetch) (core.
 // DescribeGroup implements controlplane.GroupStore.
 //
 //nolint:dupl // each call keeps its own conversion
-func (s nodeGroups) DescribeGroup(ctx context.Context, op core.DescribeGroup) (core.DescribeGroupResp, error) {
+func (s nodeGroups) DescribeGroup(ctx context.Context, operation core.DescribeGroup) (core.DescribeGroupResp, error) {
 	d, err := readFold(ctx, s.n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
-		return m.Fold().DescribeGroup(op)
+		return m.Fold().DescribeGroup(operation)
 	})
 	return core.ResponseAs[core.DescribeGroupResp](d), err
 }
@@ -90,9 +90,9 @@ func (s nodeGroups) DescribeGroup(ctx context.Context, op core.DescribeGroup) (c
 // ListGroups implements controlplane.GroupStore.
 //
 //nolint:dupl // each call keeps its own conversion
-func (s nodeGroups) ListGroups(ctx context.Context, op core.ListGroups) (core.ListGroupsResp, error) {
+func (s nodeGroups) ListGroups(ctx context.Context, operation core.ListGroups) (core.ListGroupsResp, error) {
 	d, err := readFold(ctx, s.n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
-		return m.Fold().ListGroups(op)
+		return m.Fold().ListGroups(operation)
 	})
 	return core.ResponseAs[core.ListGroupsResp](d), err
 }

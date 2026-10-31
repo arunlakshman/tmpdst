@@ -34,9 +34,9 @@ func (m *MemoryKeyValueStore) View(fn func(Transaction)) error {
 func (m *MemoryKeyValueStore) Update(fn func(Transaction)) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	tx := &memoryTransaction{entries: slices.Clone(m.entries)}
-	fn(tx)
-	m.entries = tx.entries
+	transaction := &memoryTransaction{entries: slices.Clone(m.entries)}
+	fn(transaction)
+	m.entries = transaction.entries
 	return nil
 }
 

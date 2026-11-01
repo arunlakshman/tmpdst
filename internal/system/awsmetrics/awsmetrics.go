@@ -100,6 +100,13 @@ func IsTooManyRequests(code string) bool {
 	return false
 }
 
+// isTimeout reports whether the attempt timed out, by its error or by its context.
+func isTimeout(ctx context.Context, err error) bool {
+	var ne net.Error
+	return errors.Is(err, context.DeadlineExceeded) || ctx.Err() == context.DeadlineExceeded ||
+		(errors.As(err, &ne) && ne.Timeout())
+}
+
 // Result classifies an attempt's outcome for the "result" label and returns the
 // HTTP status (0 if none) and API error code ("" if none).
 func Result(ctx context.Context, status int, err error) (string, string) {
@@ -121,7 +128,7 @@ func Result(ctx context.Context, status int, err error) (string, string) {
 	switch {
 	case status != 0:
 		return "http_" + strconv.Itoa(status), code
-	case errors.Is(err, context.DeadlineExceeded) || ctx.Err() == context.DeadlineExceeded || (errors.As(err, &ne) && ne.Timeout()):
+	case isTimeout(ctx, err):
 		return "timeout", code
 	case errors.Is(err, context.Canceled):
 		return "canceled", code
@@ -182,9 +189,11 @@ func (m attemptMiddleware) HandleFinalize(ctx context.Context, in middleware.Fin
 		lvl = slog.LevelDebug
 	}
 	if lvl == slog.LevelWarn {
-		if n, ok := r.lim.allow(time.Now()); !ok {
+		n, ok := r.lim.allow(time.Now())
+		if !ok {
 			return out, md, err
-		} else if n > 0 {
+		}
+		if n > 0 {
 			r.log.Warn("aws attempt warnings suppressed", "event", "aws_warn_suppressed", "suppressed", n)
 		}
 	}

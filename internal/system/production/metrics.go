@@ -44,7 +44,7 @@ const metricsNS = "mdsbroker"
 // runtime and process collectors).
 func NewMetrics() *Metrics {
 	secs := prometheus.ExponentialBuckets(0.005, 2, 14) // 5 ms .. 41 s
-	history := func(name, help string) prometheus.Histogram {
+	histogram := func(name, help string) prometheus.Histogram {
 		return prometheus.NewHistogram(prometheus.HistogramOpts{Namespace: metricsNS, Name: name, Help: help, Buckets: secs})
 	}
 	counter := func(name, help string) prometheus.Counter {
@@ -55,13 +55,13 @@ func NewMetrics() *Metrics {
 	}
 	m := &Metrics{
 		reg:           prometheus.NewRegistry(),
-		putSeconds:    history("segment_put_seconds", "Seal to successful object PUT, retries and backoff included."),
-		commitSeconds: history("segment_commit_seconds", "First CommitSegment issued to its answer, retries included."),
-		waitSeconds: history("segment_queue_wait_seconds",
+		putSeconds:    histogram("segment_put_seconds", "Seal to successful object PUT, retries and backoff included."),
+		commitSeconds: histogram("segment_commit_seconds", "First CommitSegment issued to its answer, retries included."),
+		waitSeconds: histogram("segment_queue_wait_seconds",
 			"Uploaded segment waiting for earlier segments to commit (commits run strictly in seal order)."),
-		ackSeconds: history("segment_seal_to_ack_seconds",
+		ackSeconds: histogram("segment_seal_to_ack_seconds",
 			"Seal to commit answer: put + queue wait + commit. Excludes the time the batches sat in the open buffer."),
-		ageSeconds: history("segment_open_age_seconds", "Time from a segment's first batch to its seal."),
+		ageSeconds: histogram("segment_open_age_seconds", "Time from a segment's first batch to its seal."),
 		inflightAtSeal: prometheus.NewHistogram(prometheus.HistogramOpts{Namespace: metricsNS, Name: "segments_in_flight_at_seal",
 			Help:    "Segments sealed and not yet answered, counting the one just sealed. Above 1 means PUTs overlap.",
 			Buckets: []float64{1, 2, 3, 4, 6, 8, 12, 16, 32}}),
@@ -102,6 +102,12 @@ func (m *Metrics) ObserveControlPlaneCall(operation string, d time.Duration) {
 
 func seconds(nanoseconds int64) float64 { return float64(nanoseconds) / 1e9 }
 
+// setLevels sets the in-flight and buffered gauges from the fact fields.
+func (m *Metrics) setLevels(n func(string) int64) {
+	m.inflight.Set(float64(n("inflight")))
+	m.buffered.Set(float64(n("buffered")))
+}
+
 // Observe consumes one broker fact; facts it does not know are ignored.
 func (m *Metrics) Observe(f core.Fact) {
 	n := func(k string) int64 {
@@ -119,8 +125,7 @@ func (m *Metrics) Observe(f core.Fact) {
 		m.ageSeconds.Observe(seconds(n("age")))
 		m.inflightAtSeal.Observe(float64(n("inflight")))
 		m.partitions.Observe(float64(n("parts")))
-		m.inflight.Set(float64(n("inflight")))
-		m.buffered.Set(float64(n("buffered")))
+		m.setLevels(n)
 	case "segment_put_done":
 		m.putSeconds.Observe(seconds(n("put_ns")))
 		m.putAttempts.Add(float64(n("attempts")))
@@ -130,13 +135,11 @@ func (m *Metrics) Observe(f core.Fact) {
 		m.ackSeconds.Observe(seconds(n("total_ns")))
 		m.committedSegs.Inc()
 		m.committedByte.Add(float64(n("bytes")))
-		m.inflight.Set(float64(n("inflight")))
-		m.buffered.Set(float64(n("buffered")))
+		m.setLevels(n)
 	case "segment_failed":
 		m.failedSegs.Inc()
 		m.ackSeconds.Observe(seconds(n("total_ns")))
-		m.inflight.Set(float64(n("inflight")))
-		m.buffered.Set(float64(n("buffered")))
+		m.setLevels(n)
 	case "backpressure_on":
 		m.paused.Set(1)
 		m.buffered.Set(float64(n("buffered")))

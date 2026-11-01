@@ -3,10 +3,10 @@ package statemachine
 import "encoding/binary"
 
 // envelopeMarker prefixes machine-emitted log payloads with advisory rank and
-// writer so apply can drive takeover/failback without changing applier codecs.
+// writer so apply can drive takeover/failback without changing stateupdater codecs.
 const envelopeMarker byte = 0xC7
 
-// wrap stamps rank and writer onto an inner payload (group or applier.Encode).
+// wrap stamps rank and writer onto an inner payload (group or stateupdater.Encode).
 func wrap(rank int, writer string, payload []byte) []byte {
 	b := []byte{envelopeMarker}
 	b = binary.AppendUvarint(b, uint64(rank))

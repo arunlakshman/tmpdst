@@ -79,8 +79,8 @@ There is no R# index and no row in the table other than `LOG/<slot>` and the `CK
 
 Flags (all `-store dynamolog` only; defaults follow decisions 48-53): `-table` (default `<table-prefix>cp`), `-ckpt-bucket`
 (empty: no checkpoints and no trim, a restart replays the whole log) `-ckpt-prefix cp/` `-s3-endpoint` `-s3-path-style`,
-`-node-name` (hostname) `-rank 0`, `-takeover-after 5s` `-heartbeat 1s` `-hole-after 250ms` `-log-k 4` `-slot-rate 200`,
-`-ckpt-every 5m` `-ckpt-min-slots 1000` `-final-checkpoint=true`, `-window-slots 131072` (cluster constant), `-log-ttl 168h`, `-trim-delete=true`, `-pebble-dir` (empty: temporary;
+`-node-name` (hostname) `-rank 0`, `-takeover-after 5s` `-heartbeat 1s` `-hole-after 250ms` `-log-k 4`,
+`-ckpt-every 5m` `-ckpt-min-slots 1000` `-window-slots 131072` (cluster constant), `-log-ttl 168h`, `-pebble-dir` (empty: temporary;
 a given directory is wiped at start if it holds a Pebble database, refused if it holds anything else), `-start-timeout 10m`,
 `-create-tables` (dev). `-takeover-after` must be several times `-heartbeat`, and far below the brokers' `-commit-deadline`.
 Start: open Pebble (empty), restore the newest checkpoint, replay to the tail, THEN listen: while that runs the port refuses

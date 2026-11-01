@@ -16,6 +16,8 @@ CRAP_MERGE    ?=
 # Fail threshold; also settable as CRAP_THRESHOLD in the environment.
 CRAP_THRESHOLD ?= 20
 CRAP_FLAGS    ?=
+# Seeds per scenario for the sim campaign.
+SIM_SEEDS     ?= 300
 
 # Everything except internal/verify/simulator and test/integrationtest (those have their own targets).
 UNIT_PKGS = $(shell go list ./... | grep -vE '/verify/simulator(/|$$)|/test/integrationtest$$')
@@ -30,7 +32,7 @@ PROTOC_GEN_GRPC ?= protoc-gen-go-grpc
 PROTO_GO_VER   ?= v1.35.2
 PROTO_GRPC_VER ?= v1.5.1
 
-.PHONY: build compile test sim it-hermetic test-all test-race \
+.PHONY: build compile test sim it-hermetic test-all test-race sim-campaign \
 	ascii-check lint fmt-check vet crap crap-baseline crap-strict install-hooks proto proto-tools
 
 build: proto fmt-check ascii-check vet lint compile test sim it-hermetic crap
@@ -85,9 +87,16 @@ $(COVER_DIR)/.gitignore:
 test: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_UNIT) $(UNIT_PKGS)
 
-# Deterministic simulation packages.
+# Deterministic simulation packages, then a seed campaign for the broker
+# (scenario kafka) and for the log-backed control plane (scenario kafka-log).
 sim: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_SIM) ./internal/verify/simulator/...
+	@$(MAKE) --no-print-directory sim-campaign
+
+# Seed campaigns through cmd/manisim. More seeds: make sim-campaign SIM_SEEDS=2000
+sim-campaign:
+	go run ./cmd/manisim -scenario kafka -seeds $(SIM_SEEDS)
+	go run ./cmd/manisim -scenario kafka-log -seeds $(SIM_SEEDS)
 
 # Hermetic integration tests (in-process memstore). Fullstack Docker tests
 # in the same package Skip unless MANIFESTER_DYNAMO_ENDPOINT + MANIFESTER_S3_ENDPOINT are set.

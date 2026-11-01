@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"slices"
+	"strings"
 
 	"manifester/internal/controlplane/stateupdater"
 	"manifester/internal/core"
@@ -73,6 +74,13 @@ func (m *Machine) Offer(op ClientOperation) []core.Action {
 		if m.retargetCommit(op) {
 			return nil
 		}
+	}
+	if !m.fitsAlone(op.Cmd) {
+		m.answers = append(m.answers, ReplyToClient{
+			Req: op.Req, From: op.From,
+			Done: core.ControlPlaneDone{Req: op.Req, Err: core.ErrTooLarge},
+		})
+		return nil
 	}
 	if len(m.queue) >= m.cfg.queueMax() {
 		m.answers = append(m.answers, ReplyToClient{
@@ -150,35 +158,68 @@ func (m *Machine) flushCommits() []core.Action {
 }
 
 func (m *Machine) emitCommitGroup() []core.Action {
-	n := min(m.cfg.maxCmds(), len(m.queue))
-	if n <= 0 {
+	limit := min(m.cfg.maxCmds(), len(m.queue))
+	if limit <= 0 {
 		return nil
 	}
+	m.seq++
+	id := fmt.Sprintf("%s/%d", m.cfg.writer(), m.seq)
+
+	// Take commands while the entry stays under MaxEntryBytes. The first one
+	// always goes: Offer already refused any command that cannot fit alone.
+	encoded := make([][]byte, 0, limit)
+	size := m.entryFixedBytes(id)
+	for _, c := range m.queue[:limit] {
+		e := c.cmd
+		e.ID = id
+		enc := stateupdater.Encode(e)
+		cost := len(enc) + binary.MaxVarintLen32
+		if len(encoded) > 0 && size+cost > m.cfg.maxEntryBytes() {
+			break
+		}
+		size += cost
+		encoded = append(encoded, enc)
+	}
+	n := len(encoded)
 	cmds := append([]waitingCommand(nil), m.queue[:n]...)
 	m.queue = append(m.queue[:0:0], m.queue[n:]...)
 
-	m.seq++
-	id := fmt.Sprintf("%s/%d", m.cfg.writer(), m.seq)
-	entries := make([]stateupdater.Entry, len(cmds))
-	for i, c := range cmds {
-		e := c.cmd
+	for i := range cmds {
+		e := cmds[i].cmd
 		e.ID = id
 		if m.cfg.InjectedBug == InjectedBugWriterOffsets && e.Kind == stateupdater.KindCommit {
 			e.WriterBases = m.projectBases(e.Commit)
 		}
-		entries[i] = e
 		cmds[i].cmd = e
 	}
-	inner := encodeGroup(id, entries)
+	inner := encodeGroupParts(id, encoded)
 	data := wrap(m.cfg.Rank, m.cfg.writer(), inner)
 	slot := m.alloc()
 	m.env.Always(slot >= m.trimFloor, "logcp-sim: a Put never wins a slot below the trim floor",
 		core.ContextPair{Key: "slot", Value: slot})
+	m.env.Always(len(data) <= m.cfg.maxEntryBytes() || n == 1, "logcp-sim: a group entry stays under the byte cap",
+		core.ContextPair{Key: "bytes", Value: len(data)})
 	m.nextReq++
 	req := m.nextReq
 	m.flights[req] = &inFlightAppend{req: req, slot: slot, id: id, data: data, cmds: cmds}
 	m.waiters[id] = cmds
 	return []core.Action{core.LogAppend{Req: req, Slot: slot, Data: data}}
+}
+
+// entryFixedBytes is the most bytes one entry adds around its commands: the
+// envelope, the group marker, the id, and the two counts. Each command also
+// costs a length prefix, which emitCommitGroup adds per command.
+func (m *Machine) entryFixedBytes(id string) int {
+	return len(wrap(m.cfg.Rank, m.cfg.writer(), nil)) + 1 + binary.MaxVarintLen64 + len(id) + binary.MaxVarintLen64
+}
+
+// fitsAlone reports whether cmd fits in a log entry of its own. The id is
+// sized for the largest sequence number, so a command that fits now fits later.
+func (m *Machine) fitsAlone(cmd stateupdater.Entry) bool {
+	id := m.cfg.writer() + "/" + strings.Repeat("9", 20)
+	cmd.ID = id
+	size := m.entryFixedBytes(id) + len(stateupdater.Encode(cmd)) + binary.MaxVarintLen32
+	return size <= m.cfg.maxEntryBytes()
 }
 
 // projectBases is InjectedBugWriterOffsets: skip one offset per partition so a retry
@@ -268,12 +309,20 @@ func (m *Machine) retryFlight(f *inFlightAppend) []core.Action {
 }
 
 func encodeGroup(id string, cmds []stateupdater.Entry) []byte {
+	encoded := make([][]byte, len(cmds))
+	for i, c := range cmds {
+		encoded[i] = stateupdater.Encode(c)
+	}
+	return encodeGroupParts(id, encoded)
+}
+
+// encodeGroupParts packs commands that are already encoded.
+func encodeGroupParts(id string, encoded [][]byte) []byte {
 	b := []byte{groupMarker}
 	b = binary.AppendUvarint(b, uint64(len(id)))
 	b = append(b, id...)
-	b = binary.AppendUvarint(b, uint64(len(cmds)))
-	for _, c := range cmds {
-		enc := stateupdater.Encode(c)
+	b = binary.AppendUvarint(b, uint64(len(encoded)))
+	for _, enc := range encoded {
 		b = binary.AppendUvarint(b, uint64(len(enc)))
 		b = append(b, enc...)
 	}
@@ -335,7 +384,7 @@ func takeUvarint(b []byte) (uint64, []byte, bool) {
 func (m *Machine) applySlot(slot core.LogPosition, data []byte) error {
 	rank, writer, payload, ok := unwrap(data)
 	if !ok {
-		return fmt.Errorf("machine: truncated log envelope at slot %d", slot)
+		return fmt.Errorf("statemachine: truncated log envelope at slot %d", slot)
 	}
 	enveloped := len(data) > 0 && data[0] == envelopeMarker
 	m.observeWriter(slot, rank, writer, enveloped)

@@ -26,10 +26,25 @@ The veritas-backed preset (`-scenario kafka`) is unchanged.
                    CPReply --> bridge --> CPDone to broker
 ```
 
-Two CP processes (rank 0 preferred appender, rank 1 standby). CP processes are
-`NoAttrition`; `StallProb` / `CrashProb` stay forced off in `swarmLog`
-(in-process stall/crash and CP attrition are a separate follow-up). Bridge and
-logstore Put fault coins stay live in `swarmLog`. A MaybeApplied commit Put
+Two CP processes (rank 0 preferred appender, rank 1 standby). Three fault
+families are all live: kernel attrition can kill or stop a `cp-*` process (a
+full reboot from the factory), `StallProb` / `CrashProb` stall or soft-crash the
+active replica in process (`cp.go` passes the swarmed values, `swarmLog` scales
+them), and the bridge and logstore Put fault coins stay live in `swarmLog`.
+Two machine rules make this safe:
+
+- A lookup or describe is "fresh" (`reads.go`): the replica reads the log tail
+  after the read arrived and answers only when it has applied that tail. A
+  standby that served its old fold made a consumer see an end offset below an
+  acked one ("fetch out of range"). A replica that is not ready, crashes, or
+  hits a trimmed slot refuses its waiting reads, so the bridge fails over.
+- A checkpoint ends with a CRC-32. The sim flips a bit in some object reads
+  (`GetCorruptProb`), and a restored checkpoint with a changed byte silently
+  lost offsets after a process restart. `CheckSnapshot` is run before
+  `Restore`; on a bad CRC the replica reads the object again.
+- Only a node that has applied the last tail it saw writes a checkpoint, and a
+  failed checkpoint read is retried (never catch up from slot 0 on a guess), so
+  a lagging node cannot overwrite a newer checkpoint after the log was trimmed. A MaybeApplied commit Put
 retries the same slot (conditional append); abandoning the slot used to wedge
 `drain` so later commits never applied. `ConfigLog` also raises bridge
 `CallerTimeout`, shortens per-Put logstore timeout, and extends Settling/Settle
@@ -49,6 +64,8 @@ C2-style conformance for the machine path is `go test ./controlplane/machine -ru
 
 ## Reachables
 
-Campaign expect-reachables still use the `logcp-sim:` property names (hole fill,
-takeover, trim, restore, …). Coverage under attrition and fault swarm is part of
-the CP-DSM-8 live lanes.
+Campaign expect-reachables use the `logcp-sim:` property names (`logReachables`
+in `kafka/config.go`): hole fill, same-slot Put, window replay, trim, standby
+took over, failback, replica stalled, replica crashed, restore from a checkpoint.
+Not required in the default campaign: `idempotent replay after takeover` (too rare
+in 300 seeds) and `replica hit a trimmed slot`.

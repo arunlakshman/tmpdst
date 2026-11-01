@@ -49,6 +49,9 @@ func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Op
 	cfg := configWith(seeds, bug, opts)
 	cfg.ControlPlane.Log = fakelogservice.DefaultParams()
 	cfg.ControlPlane.Log.Bug = logBug
+	// A replica stall or crash is rolled on each role tick of the active node.
+	// Raise the defaults so a short campaign (20 seeds) still reaches both.
+	cfg.ControlPlane.Log.StallProb, cfg.ControlPlane.Log.CrashProb = 0.004, 0.002
 	cfg.ControlPlane.MaxCommitItems = 0
 	lp := cfg.ControlPlane.Log
 	cfg.LogStore = simulator.LogStoreFaults{
@@ -65,7 +68,7 @@ func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Op
 		TrimStride:     lp.TrimStride,
 	}
 	cfg.Processes = append(cfg.Processes, simulator.Process{
-		Name: "cp", Count: 2, NoAttrition: true,
+		Name: "cp", Count: 2,
 		FactoryFor: func(sc simulator.SeedConfig) core.MachineFactory { return cpFactory(sc, opts) },
 	})
 	// Bridge deadline covers several logstore Put attempts. Per-append timeout
@@ -90,6 +93,11 @@ func logReachables() []core.PropertyID {
 		"logcp-sim: Put not answered, same slot repeated",
 		"logcp-sim: replayed key answered from the window",
 		"logcp-sim: log trimmed below a checkpoint",
+		"logcp-sim: standby took over",
+		"logcp-sim: failback, the standby stepped down",
+		"logcp-sim: replica stalled",
+		"logcp-sim: replica crashed",
+		"logcp-sim: replica restored from a checkpoint",
 	}
 }
 
@@ -168,7 +176,8 @@ func swarmLog(r simulator.CountedRand, c *simulator.SeedConfig) {
 	scale(&l.PutFail)
 	scale(&l.PutLost)
 	scale(&l.ReadFail)
-	l.StallProb, l.CrashProb = 0, 0
+	scale(&l.StallProb)
+	scale(&l.CrashProb)
 	l.K = []int{2, 4, 8}[r.Intn(3)]
 	l.GroupMax = []int{1, 2, 4, 16}[r.Intn(4)]
 	l.HoleAfter = campaign.Millis([]int64{20, 60, 200}[r.Intn(3)])

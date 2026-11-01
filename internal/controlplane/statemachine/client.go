@@ -5,7 +5,7 @@ import (
 	"manifester/internal/core"
 )
 
-// onCPOffer handles one sim-bridge ControlPlaneDeliver: reads answer from the fold when
+// onCPOffer handles one sim-bridge ControlPlaneDeliver: reads wait for a fresh tail and answer from the fold when
 // Ready; commits and creates go through Offer and ControlPlaneReply after apply.
 func (m *Machine) onCPOffer(o core.ControlPlaneDeliver) []core.Action {
 	switch op := o.Op.(type) {
@@ -15,28 +15,22 @@ func (m *Machine) onCPOffer(o core.ControlPlaneDeliver) []core.Action {
 			Cmd: stateupdater.Entry{Kind: stateupdater.KindCommit, Commit: op},
 		}))
 	case core.FindSegments:
-		return []core.Action{core.ControlPlaneReply{To: o.From, Done: m.readFold(o.Req, func() (core.ControlPlaneDone, error) {
-			return m.fold.Lookup(op)
-		})}}
+		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.Lookup(op) })
 	case core.DescribeTopics:
-		return []core.Action{core.ControlPlaneReply{To: o.From, Done: m.readFold(o.Req, func() (core.ControlPlaneDone, error) {
-			return m.fold.Describe(op)
-		})}}
+		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.Describe(op) })
 	default:
 		return []core.Action{core.ControlPlaneReply{To: o.From, Done: core.ControlPlaneDone{Req: o.Req, Err: core.ErrInvalid}}}
 	}
 }
 
-func (m *Machine) readFold(req core.RequestID, fn func() (core.ControlPlaneDone, error)) core.ControlPlaneDone {
+// offerRead queues a read behind a fresh tail check. A node that is not Ready
+// refuses at once so the bridge tries the other replica.
+func (m *Machine) offerRead(o core.ControlPlaneDeliver, read func() (core.ControlPlaneDone, error)) []core.Action {
 	if !m.Ready() {
-		return core.ControlPlaneDone{Req: req, Err: core.ErrUnavailable}
+		return []core.Action{core.ControlPlaneReply{To: o.From, Done: core.ControlPlaneDone{Req: o.Req, Err: core.ErrUnavailable}}}
 	}
-	d, err := fn()
-	if err != nil {
-		return core.ControlPlaneDone{Req: req, Err: core.ErrIO}
-	}
-	d.Req = req
-	return d
+	m.queueRead(o.Req, o.From, read)
+	return nil
 }
 
 // withReplies turns answers that have a broker From into ControlPlaneReply actions.

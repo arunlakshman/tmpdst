@@ -293,3 +293,26 @@ func TestPlantedBugsCaughtApplierMem(t *testing.T) {
 	newCorrect := func() suites.ControlPlaneSubject { return newApplierSubject(t, backends["mem"]) }
 	injectedbug.RequireAllControlPlaneBugsDetected(t, newCorrect, 100)
 }
+
+func TestSnapshotCRCFindsOneFlippedBit(t *testing.T) {
+	a := stateupdater.New(stateupdater.NewMemoryKeyValueStore())
+	mustCommit(t, a, 0, commit("k", pb("a", 0, 2)))
+	var buf bytes.Buffer
+	if err := a.Snapshot(&buf, 1); err != nil {
+		t.Fatal(err)
+	}
+	good := buf.Bytes()
+	if err := stateupdater.CheckSnapshot(good); err != nil {
+		t.Fatalf("good checkpoint refused: %v", err)
+	}
+	for i := range good {
+		bad := bytes.Clone(good)
+		bad[i] ^= 1
+		if stateupdater.CheckSnapshot(bad) == nil {
+			t.Fatalf("CheckSnapshot accepted a flipped bit at byte %d", i)
+		}
+		if _, err := stateupdater.New(stateupdater.NewMemoryKeyValueStore()).Restore(bytes.NewReader(bad)); err == nil {
+			t.Fatalf("Restore accepted a flipped bit at byte %d", i)
+		}
+	}
+}

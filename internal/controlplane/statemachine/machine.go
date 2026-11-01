@@ -56,6 +56,12 @@ type Machine struct {
 	checkpointAt      core.NodeTime
 	checkpointPending core.LogPosition // slot of in-flight ObjectPut snapshot
 	checkpointData    []byte
+	// The checkpoint lane: the snapshot upload, then the log trim, one request at
+	// a time, on its own request id. It never uses pending, so a slow upload
+	// cannot block catch-up and catch-up cannot block the checkpoint.
+	checkpointRequest core.RequestID // in-flight request of the lane; 0 means idle
+	checkpointStage   checkpointStage
+	trimThrough       core.LogPosition // Through of the in-flight trim
 
 	queue           []waitingCommand                   // client ops waiting for a commit slot
 	inFlightAppends map[core.RequestID]*inFlightAppend // in-flight commit LogAppends (at most K)
@@ -88,8 +94,14 @@ const (
 	pendingRead
 	pendingAppend
 	pendingObjGet
-	pendingObjPut
-	pendingTrim
+)
+
+// checkpointStage says which request the checkpoint lane is waiting for.
+type checkpointStage uint8
+
+const (
+	stageUpload checkpointStage = iota + 1
+	stageTrim
 )
 
 // New returns the core.MachineFactory of the control-plane machine. A factory
@@ -488,6 +500,7 @@ func (m *Machine) StateHash() uint64 {
 	h.Uint64Value(uint64(m.promoSlot))
 	h.Bool(m.lowerSeen)
 	h.Uint64Value(uint64(m.checkpointSlot))
+	h.Uint64Value(uint64(m.checkpointRequest))
 	h.Uint64Value(uint64(len(m.queue)))
 	h.Uint64Value(uint64(len(m.inFlightAppends)))
 	h.Uint64Value(uint64(len(m.waiters)))

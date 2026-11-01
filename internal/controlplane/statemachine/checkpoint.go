@@ -67,8 +67,6 @@ func (k pendingKind) String() string {
 		return "log_append"
 	case pendingObjGet:
 		return "checkpoint_get"
-	case pendingObjPut:
-		return "checkpoint_put"
 	}
 	return "none"
 }
@@ -87,8 +85,8 @@ func (m *Machine) decide(written bool, reason string) {
 
 func (m *Machine) maybeCheckpoint() []core.Action {
 	switch {
-	case m.pending != 0:
-		m.decide(false, "control_io_pending")
+	case m.checkpointRequest != 0:
+		m.decide(false, "checkpoint_in_flight")
 		return nil
 	case !m.isAppender():
 		m.decide(false, "not_appender")
@@ -125,9 +123,8 @@ func (m *Machine) maybeCheckpoint() []core.Action {
 	m.checkpointData = buf.Bytes()
 	m.checkpointPending = slot
 	m.nextReq++
-	m.pending = m.nextReq
-	m.pendingKind = pendingObjPut
-	return []core.Action{core.ObjectPut{Req: m.pending, Key: m.checkpointKey(), Data: m.checkpointData}}
+	m.checkpointRequest, m.checkpointStage = m.nextReq, stageUpload
+	return []core.Action{core.ObjectPut{Req: m.checkpointRequest, Key: m.checkpointKey(), Data: m.checkpointData}}
 }
 
 func (m *Machine) emitCheckpointGet() []core.Action {
@@ -183,10 +180,10 @@ func (m *Machine) armCheckpointRetry() []core.Action {
 }
 
 func (m *Machine) onObjPutDone(d core.ObjectPutDone) []core.Action {
-	if d.Req != m.pending || m.pendingKind != pendingObjPut {
+	if m.checkpointRequest == 0 || d.Req != m.checkpointRequest || m.checkpointStage != stageUpload {
 		return nil
 	}
-	m.pending, m.pendingKind = 0, pendingNone
+	m.checkpointRequest, m.checkpointStage = 0, 0
 	slot := m.checkpointPending
 	m.checkpointPending = 0
 	m.checkpointData = nil
@@ -209,19 +206,17 @@ func (m *Machine) emitTrim(checkpointSlot core.LogPosition) []core.Action {
 	}
 	through := below - 1
 	m.nextReq++
-	m.pending = m.nextReq
-	m.pendingKind = pendingTrim
-	m.fillSlot = through // stash Through for onTrimDone
-	return []core.Action{core.LogDeleteOld{Req: m.pending, Through: through}}
+	m.checkpointRequest, m.checkpointStage = m.nextReq, stageTrim
+	m.trimThrough = through
+	return []core.Action{core.LogDeleteOld{Req: m.checkpointRequest, Through: through}}
 }
 
 func (m *Machine) onTrimDone(d core.LogDeleteOldDone) []core.Action {
-	if d.Req != m.pending || m.pendingKind != pendingTrim {
+	if m.checkpointRequest == 0 || d.Req != m.checkpointRequest || m.checkpointStage != stageTrim {
 		return nil
 	}
-	through := m.fillSlot
-	m.pending, m.pendingKind = 0, pendingNone
-	m.fillSlot = 0
+	through := m.trimThrough
+	m.checkpointRequest, m.checkpointStage, m.trimThrough = 0, 0, 0
 	if d.Err == core.OK && d.Outcome == core.Applied {
 		m.trimFloor = through + 1
 		m.env.Reachable("logcp-sim: log trimmed below a checkpoint")

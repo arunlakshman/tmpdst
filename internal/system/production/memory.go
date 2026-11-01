@@ -82,14 +82,7 @@ func parseMemTotal(s string) (uint64, bool) {
 func AutoBuffered(limit uint64) (int, int) {
 	m := uint64(MinBufferedBytes)
 	if limit != 0 {
-		m = min(maxInt64(limit/16, MinBufferedBytes), MaxBufferedCap)
+		m = min(max(limit/16, MinBufferedBytes), MaxBufferedCap)
 	}
 	return int(m), int(m / 2)
-}
-
-func maxInt64(a, b uint64) uint64 {
-	if a > b {
-		return a
-	}
-	return b
 }

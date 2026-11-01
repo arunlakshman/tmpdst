@@ -500,7 +500,7 @@ code is easy to replay in the simulator. (The same trick was in page 01, station
 ```
 NodeStarted
    | checkpointing on (CheckpointEvery > 0 or CheckpointKey set)?
-   +- yes: booting=true, ObjectGet "ckpt/latest"
+   +- yes: booting=true, ObjectGet "checkpoint/latest"
    |       +- read failed (not NotFound)  -> checkpointRetry, timer, try again  (never guess: log may be trimmed)
    |       +- NotFound                    -> fresh start, go to catch-up
    |       +- bad CRC                     -> read again immediately
@@ -679,7 +679,7 @@ a control I/O is pending; this node is not the appender or not ready; `applied =
 **`applied < goalTail`** (a node behind the tail must not write: its snapshot could replace
 a newer one, and the log below the newer one may already be trimmed, so a restart could
 never recover); fewer than `CheckpointMinSlots` slots since the last one.
-Otherwise: `fold.Snapshot(slot = applied)` -> `ObjectPut{Key: "ckpt/latest"}`.
+Otherwise: `fold.Snapshot(slot = applied)` -> `ObjectPut{Key: "checkpoint/latest"}`.
 
 **Then trim** (`onObjPutDone` -> `emitTrim`). Only after the object is safely stored:
 `through = checkpointSlot - KeepSlots - 1`, emit `LogDeleteOld{Through}`. On success,
@@ -1006,7 +1006,7 @@ Four lines of defence together: broker key reuse, `KnownCommit`, `retargetCommit
 2. Brokers' client sees `Unavailable` from N0's address, moves to N1. N1 accepts commits.
    Commits in flight on N0 either landed (the keys replay on N1) or never will (the retry
    commits them).
-3. N0 comes back. `NodeStarted` -> `ObjectGet ckpt/latest` -> good CRC -> `fold.Restore` ->
+3. N0 comes back. `NodeStarted` -> `ObjectGet checkpoint/latest` -> good CRC -> `fold.Restore` ->
    `applied = checkpointSlot`. Catch-up reads from there to the tail. It is `Ready` and, because it is
    rank 0, `setActive(true)`. Then it appends. N1 sees a writer with a *lower rank* at
    `slot >= promoSlot` -> `lowerSeen` -> `failbackDue` -> `setActive(false)`. N1 is a
@@ -1303,7 +1303,7 @@ never trimmed. Now `mdscontrolplane` sets it, so they are cut every 1024 slots.
 | Rank | Preference number. 0 is preferred, used for failback |
 | Gap | An empty slot below a written slot; filled with a no-op |
 | Tombstone | A trimmed slot, overwritten with the byte `0xFE` |
-| Checkpoint | Snapshot of the fold at one slot, stored as `ckpt/latest` |
+| Checkpoint | Snapshot of the fold at one slot, stored as `checkpoint/latest` |
 | Window | How long a `SegmentKey` is remembered, equal to how long its `K` record is kept |
 | Run | Packed record (`R` key) of the contiguous batches one commit gave one partition |
 | Outcome | `NotApplied`, `MaybeApplied`, `Applied`: did the write happen? |

@@ -10,7 +10,7 @@ import (
 const (
 	timerCheckpoint = core.TimerID(4)
 
-	defaultCheckpointKey = "ckpt/latest"
+	defaultCheckpointKey = "checkpoint/latest"
 )
 
 func (m *Machine) checkpointKey() string {

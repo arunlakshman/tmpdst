@@ -164,7 +164,7 @@ func openNode(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.Met
 			return nil, nop, err
 		}
 		if f.log.checkpointBucket != "" {
-			mcfg.CheckpointKey = "ckpt/latest"
+			mcfg.CheckpointKey = "checkpoint/latest"
 		} else {
 			mcfg.CheckpointEvery = 0
 			mcfg.KeepSlots = 0

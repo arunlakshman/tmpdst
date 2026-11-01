@@ -82,7 +82,7 @@ func TestGapFillTombRestoresFromCheckpoint(t *testing.T) {
 	// machine must restore instead of looping armCatchUp (seed-2 campaign hang).
 	m := newMachine(t, statemachine.Config{
 		CatchUpEvery: core.Millisecond, GapAfter: 0, Writer: "w",
-		CheckpointKey: "ckpt/t", CheckpointEvery: core.Second, Rank: 1,
+		CheckpointKey: "checkpoint/t", CheckpointEvery: core.Second, Rank: 1,
 	})
 	acts := step(m, core.NodeStarted{})
 	get := acts[0].(core.ObjectGet)
@@ -111,8 +111,8 @@ func TestGapFillTombRestoresFromCheckpoint(t *testing.T) {
 	if len(acts) != 1 {
 		t.Fatalf("acts = %v, want ObjGet restore", acts)
 	}
-	if get, ok := acts[0].(core.ObjectGet); !ok || get.Ref.Key != "ckpt/t" {
-		t.Fatalf("act = %#v, want ObjGet ckpt/t", acts[0])
+	if get, ok := acts[0].(core.ObjectGet); !ok || get.Ref.Key != "checkpoint/t" {
+		t.Fatalf("act = %#v, want ObjGet checkpoint/t", acts[0])
 	}
 }
 

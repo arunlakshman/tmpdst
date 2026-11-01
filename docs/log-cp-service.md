@@ -22,8 +22,7 @@ live in `internal/controlplane/executor`. Decisions 48-52, `docs/design-a-protot
                        (PutItem,           |  contiguous slots, batches never cross
                         attr_not_exists)   v  a trim boundary
    DynamoDB  LOG/<slot>  <--read--  StateUpdater.CommitBatch (Pebble)  --> answers to waiters (by entry ID)
-   CKPT                                    |
-   S3  ckpt/<slot>   <-- checkpoint loop --+
+   S3  checkpoint/latest  <-- checkpoint loop --+
 ```
 
 Roles are advisory (decision 51). Rank 0 starts active; others are standbys that tail, apply and serve fresh reads
@@ -67,13 +66,12 @@ appending at the tail; in-flight entries of the dead node either landed (replays
 once per call; commit retries carry the same key. Failback is the same in reverse.
 
 **Checkpoint and trim.** Active node, every `CheckpointEvery` (5 min) and >= `CheckpointMinSlots` new slots: snapshot of the
-StateUpdater (window included) tagged with the applied slot read inside the store view, `ckpt/<slot>` to the object store,
-then `CKPT` pointer by conditional put (forward only); keep the pointed object and one older. Then trim: slots below
+StateUpdater (window included) tagged with the applied slot read inside the store view, `checkpoint/latest` to the object store (one fixed key, overwritten each time; there is no pointer row in the table). Then trim: slots below
 `checkpoint - KeepSlots` are overwritten with TOMBSTONES (`TrimDelete`), not deleted (finding 2).
-Restore on start: pointer, object, sha-256, `StateUpdater.Restore`, replay from the checkpoint slot to the tail. A
-damaged object falls back to replay from slot 0 if the log still starts there, else `ErrNoCheckpoint`.
+Restore on start: read `checkpoint/latest`, check it, `StateUpdater.Restore`, replay from the checkpoint slot to the tail. A
+damaged object falls back to replay from slot 0 if the log still starts there, else the node cannot start. (There is no `ErrNoCheckpoint` error in the code yet.)
 
-There is no R# index and no row in the table other than `LOG/<slot>` and the `CKPT` pointer (decision 54). Lookup is answered from Pebble; a future S3 index or reader scale-out would be built from the log.
+There is no R# index and no row in the table other than `LOG/<slot>` (decision 54). Lookup is answered from Pebble; a future S3 index or reader scale-out would be built from the log.
 
 ## `mdscontrolplane -store dynamolog` (stage 4)
 

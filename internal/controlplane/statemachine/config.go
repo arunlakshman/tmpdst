@@ -53,7 +53,7 @@ type Config struct {
 	// last. Zero means 1.
 	CheckpointMinSlots int64
 	// CheckpointKey is the object-store key for the latest snapshot. Empty means
-	// "ckpt/latest" when checkpointing is enabled.
+	// "checkpoint/latest" when checkpointing is enabled.
 	CheckpointKey string
 	// KeepSlots is how many log slots to keep behind a published checkpoint
 	// before LogTrim. Zero skips trim.

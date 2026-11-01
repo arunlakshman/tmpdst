@@ -27,15 +27,15 @@ func TestRestoreOnStartedThenReady(t *testing.T) {
 	m := newMachine(t, statemachine.Config{
 		K: 1, Writer: "w",
 		CatchUpEvery:  core.Millisecond,
-		CheckpointKey: "ckpt/latest",
+		CheckpointKey: "checkpoint/latest",
 	})
 	acts := m.Step(core.Event{At: 0, Body: core.NodeStarted{}})
 	if len(acts) != 1 {
 		t.Fatalf("Started = %v, want ObjGet", acts)
 	}
 	get, ok := acts[0].(core.ObjectGet)
-	if !ok || get.Ref.Key != "ckpt/latest" {
-		t.Fatalf("Started action = %#v, want ObjGet ckpt/latest", acts[0])
+	if !ok || get.Ref.Key != "checkpoint/latest" {
+		t.Fatalf("Started action = %#v, want ObjGet checkpoint/latest", acts[0])
 	}
 	acts = m.Step(core.Event{At: 0, Body: core.ObjectGetDone{Req: get.Req, Data: snap, Err: core.OK}})
 	if m.Applied() != 2 {
@@ -67,7 +67,7 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 		CheckpointEvery:    10 * core.Millisecond,
 		CheckpointMinSlots: 1,
 		KeepSlots:          1,
-		CheckpointKey:      "ckpt/latest",
+		CheckpointKey:      "checkpoint/latest",
 	})
 	// NodeStarted, ObjectGet miss, catch-up, Ready, active (rank 0).
 	acts := m.Step(core.Event{At: 0, Body: core.NodeStarted{}})
@@ -96,7 +96,7 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 		ID: checkpoint.ID, Gen: checkpoint.Gen,
 	}})
 	put, ok := acts[0].(core.ObjectPut)
-	if !ok || put.Key != "ckpt/latest" || len(put.Data) == 0 {
+	if !ok || put.Key != "checkpoint/latest" || len(put.Data) == 0 {
 		t.Fatalf("checkpoint action = %#v, want ObjPut", acts[0])
 	}
 	slot, err := stateupdater.NewMem().Restore(bytes.NewReader(put.Data))
@@ -143,7 +143,7 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 func TestRestoreMissFallsThroughToCatchUp(t *testing.T) {
 	m := newMachine(t, statemachine.Config{
 		CatchUpEvery:  core.Millisecond,
-		CheckpointKey: "ckpt/latest",
+		CheckpointKey: "checkpoint/latest",
 	})
 	acts := m.Step(core.Event{At: 0, Body: core.NodeStarted{}})
 	get := acts[0].(core.ObjectGet)
@@ -166,7 +166,7 @@ func TestRestoreReadsAgainOnBadCRC(t *testing.T) {
 	bad := bytes.Clone(buf.Bytes())
 	bad[len(bad)/2] ^= 1
 
-	m := newMachine(t, statemachine.Config{K: 1, Writer: "w", CatchUpEvery: core.Millisecond, CheckpointKey: "ckpt/latest"})
+	m := newMachine(t, statemachine.Config{K: 1, Writer: "w", CatchUpEvery: core.Millisecond, CheckpointKey: "checkpoint/latest"})
 	get := m.Step(core.Event{Body: core.NodeStarted{}})[0].(core.ObjectGet)
 	acts := m.Step(core.Event{Body: core.ObjectGetDone{Req: get.Req, Data: bad, Err: core.OK}})
 	again, ok := acts[0].(core.ObjectGet)
@@ -181,7 +181,7 @@ func TestRestoreReadsAgainOnBadCRC(t *testing.T) {
 
 // A failed checkpoint read must not start catch-up from slot 0: the log may be trimmed.
 func TestFailedCheckpointReadIsRetried(t *testing.T) {
-	m := newMachine(t, statemachine.Config{K: 1, Writer: "w", CatchUpEvery: core.Millisecond, CheckpointKey: "ckpt/latest"})
+	m := newMachine(t, statemachine.Config{K: 1, Writer: "w", CatchUpEvery: core.Millisecond, CheckpointKey: "checkpoint/latest"})
 	get := m.Step(core.Event{Body: core.NodeStarted{}})[0].(core.ObjectGet)
 	acts := m.Step(core.Event{Body: core.ObjectGetDone{Req: get.Req, Err: core.ErrUnavailable}})
 	timer, ok := findTimer(acts, statemachine.TimerCheckpoint)

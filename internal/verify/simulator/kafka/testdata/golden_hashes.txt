@@ -3,8 +3,8 @@ kafka seed=2 steps=8872 rand=40503 hash=e51038048892e7a1
 kafka seed=3 steps=20453 rand=77332 hash=acbb949244582686
 kafka seed=4 steps=12085 rand=50914 hash=9f70f7c2b1e92bc2
 kafka seed=5 steps=13490 rand=56933 hash=a71871f39ccdc7de
-kafka-log seed=1 steps=20986 rand=90714 hash=3044c4ec1d02ecda
-kafka-log seed=2 steps=28606 rand=104616 hash=42bcaf731b912e5b
-kafka-log seed=3 steps=26111 rand=101629 hash=cdf84bec992c70a8
-kafka-log seed=4 steps=25756 rand=96322 hash=3db158de853b3b49
-kafka-log seed=5 steps=23399 rand=93030 hash=940c7b7fb1027ccd
+kafka-log seed=1 steps=20986 rand=90714 hash=f3aa72f69620d2d4
+kafka-log seed=2 steps=28606 rand=104616 hash=3a839da18fed178b
+kafka-log seed=3 steps=26111 rand=101629 hash=1be747e457d71538
+kafka-log seed=4 steps=25756 rand=96322 hash=f934428c9763012d
+kafka-log seed=5 steps=23399 rand=93030 hash=c2fb03b220e8c296

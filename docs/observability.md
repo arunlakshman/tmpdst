@@ -123,8 +123,8 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `mdscontrolplane_log_active`, `mdscontrolplane_log_role_changes_total` | gauge, counter | `to` | Advisory role. Flapping is a sign of a bad `TakeoverAfter`. |
 | `mdscontrolplane_log_window_keys` | gauge | | Segment keys in the idempotency window. |
 | `mdscontrolplane_log_blocked` | gauge | | 1: the node cannot apply (unknown format, store failure, trimmed); alert. |
-| `mdscontrolplane_log_checkpoint_slot`, `_checkpoint_age_seconds`, `_checkpoint_bytes`, `_checkpoint_seconds`, `_checkpoint_errors_total` | | | Checkpoints; alert on age above 3 x `CheckpointEvery`. |
-| `mdscontrolplane_log_trimmed_slots_total` | counter | | Slots tombstoned behind the checkpoint. |
+| `mdscontrolplane_log_checkpoint_slot`, `_checkpoint_age_seconds`, `_checkpoint_bytes`, `_checkpoint_seconds`, `_checkpoint_errors_total` | | | Checkpoints; alert on age above 3 x `CheckpointEvery`. **Not built yet: the code does not export this metric.** |
+| `mdscontrolplane_log_trimmed_slots_total` | counter | | Slots tombstoned behind the checkpoint. **Not built yet: the code does not export this metric.** |
 
 Dashboard (Overview, row "Control plane (log store ...)", `gen_dashboards.py`): slot rate and lost slots; append latency p50/p99;
 commands per slot and entry size; apply lag and standby lag; gap fills, role changes and the active gauge; queue depth, queue wait

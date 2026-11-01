@@ -61,7 +61,7 @@ func driveToTomb(t *testing.T, m *statemachine.Machine) []core.Action {
 func tombConfig(src *storeSource) statemachine.Config {
 	return statemachine.Config{
 		CatchUpEvery: core.Millisecond, GapAfter: 0, Writer: "w",
-		CheckpointKey: "ckpt/t", CheckpointEvery: core.Second, Rank: 1,
+		CheckpointKey: "checkpoint/t", CheckpointEvery: core.Second, Rank: 1,
 		OpenStore: src.open,
 	}
 }

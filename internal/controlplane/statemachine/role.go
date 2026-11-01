@@ -40,7 +40,6 @@ func (m *Machine) setActive(on bool) {
 	m.active = on
 	if on {
 		m.promoSlot = max(m.high, m.applied)
-		m.lowerSeen = false
 		m.lastOtherAt = m.now
 		if !was && m.ready {
 			m.env.Reachable("logcp-sim: standby took over")

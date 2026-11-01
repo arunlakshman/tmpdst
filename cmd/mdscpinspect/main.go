@@ -40,6 +40,8 @@ func main() {
 	region := flag.String("region", "ap-south-2", "AWS region")
 	verbose := flag.Bool("v", false, "one line per log slot")
 	oneSlot := flag.Int64("slot", -1, "show every command inside this slot")
+	head := flag.Int("head", 0, "show the first N log slots, decoded")
+	tail := flag.Int("tail", 0, "show the last N log slots, decoded")
 	doCheck := flag.Bool("check", false, "verify the stored log and checkpoint; exit 1 if any check fails")
 	checkpointKey := flag.String("checkpoint-key", "cp/checkpoint/latest", "S3 key of the checkpoint")
 	flag.Parse()
@@ -53,7 +55,7 @@ func main() {
 		runChecks(ctx, rows, s3Client, *bucket, *checkpointKey)
 		return
 	}
-	report(rows, *verbose, *oneSlot)
+	report(rows, *verbose, *oneSlot, *head, *tail)
 	if *bucket != "" {
 		listBucket(ctx, s3Client, *bucket)
 	}
@@ -105,7 +107,7 @@ type slotInfo struct {
 	bad     string
 }
 
-func report(rows []row, verbose bool, oneSlot int64) {
+func report(rows []row, verbose bool, oneSlot int64, head, tail int) {
 	slots, other := decodeRows(rows)
 	fmt.Printf("== DynamoDB: %d items, %d log slots\n", len(rows), len(slots))
 	for k, n := range other {
@@ -133,6 +135,24 @@ func report(rows []row, verbose bool, oneSlot int64) {
 			if s.slot == oneSlot {
 				printSlotDetail(s)
 			}
+		}
+	}
+	printEnds(slots, head, tail)
+}
+
+// printEnds shows the first and last few slots with every command decoded.
+func printEnds(slots []slotInfo, head, tail int) {
+	if head > 0 {
+		fmt.Printf("== first %d slots\n", min(head, len(slots)))
+		for _, s := range slots[:min(head, len(slots))] {
+			printSlotDetail(s)
+		}
+	}
+	if tail > 0 {
+		from := max(0, len(slots)-tail)
+		fmt.Printf("== last %d slots\n", len(slots)-from)
+		for _, s := range slots[from:] {
+			printSlotDetail(s)
 		}
 	}
 }

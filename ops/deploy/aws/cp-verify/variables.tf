@@ -27,3 +27,15 @@ variable "log_ttl_days" {
   type        = number
   default     = 1
 }
+
+variable "instance_type" {
+  description = "EC2 instance type for the test host. It must be an arm64 type, because the AMI is arm64."
+  type        = string
+  default     = "t4g.small"
+}
+
+variable "enable_throttle_table" {
+  description = "When true, make a small provisioned DynamoDB table (1 read, 1 write) to test throttling."
+  type        = bool
+  default     = false
+}

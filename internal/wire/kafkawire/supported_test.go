@@ -11,6 +11,17 @@ var wantSupported = []APIVersionRange{
 	{Key: KeyFetch, Min: 4, Max: 12},
 	{Key: KeyListOffsets, Min: 1, Max: 7},
 	{Key: KeyMetadata, Min: 1, Max: 12},
+	{Key: KeyCreateTopics, Min: 0, Max: 7},
+	{Key: KeyOffsetCommit, Min: 0, Max: 8},
+	{Key: KeyOffsetFetch, Min: 0, Max: 8},
+	{Key: KeyFindCoordinator, Min: 0, Max: 4},
+	{Key: KeyJoinGroup, Min: 0, Max: 7},
+	{Key: KeyHeartbeat, Min: 0, Max: 4},
+	{Key: KeyLeaveGroup, Min: 0, Max: 5},
+	{Key: KeySyncGroup, Min: 0, Max: 5},
+	{Key: KeyDescribeGroups, Min: 0, Max: 5},
+	{Key: KeyListGroups, Min: 0, Max: 4},
+	{Key: KeyDescribeConfigs, Min: 0, Max: 4},
 	{Key: KeyApiVersions, Min: 0, Max: 3},
 }
 
@@ -38,6 +49,9 @@ func TestRange(t *testing.T) {
 	if got, ok := Range(22); ok || got != (APIVersionRange{}) {
 		t.Fatalf("Range(22) = %+v, %v", got, ok)
 	}
+	if got, ok := Range(68); ok || got != (APIVersionRange{}) { // ConsumerGroupHeartbeat: KIP-848, not served
+		t.Fatalf("Range(68) = %+v, %v", got, ok)
+	}
 }
 
 func TestIsSupported(t *testing.T) {
@@ -49,6 +63,10 @@ func TestIsSupported(t *testing.T) {
 		want    bool
 	}{
 		{name: "unsupported key", key: 22, version: 0, want: false},
+		{name: "group heartbeat KIP-848 not served", key: 68, version: 0, want: false},
+		{name: "join group above max", key: KeyJoinGroup, version: 8, want: false},
+		{name: "offset fetch batched max", key: KeyOffsetFetch, version: 8, want: true},
+		{name: "list groups v4", key: KeyListGroups, version: 4, want: true},
 		{name: "below min", key: KeyProduce, version: 2, want: false},
 		{name: "above max", key: KeyFetch, version: 13, want: false},
 		{name: "exact min", key: KeyProduce, version: 3, want: true},

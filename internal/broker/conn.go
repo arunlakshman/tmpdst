@@ -2,6 +2,7 @@ package broker
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
@@ -17,10 +18,11 @@ type connection struct {
 	fr      *kafkawire.Framer
 	rx      stateHasher // running hash of every byte received (a partial frame is state)
 	q       []*slot
-	paused  bool // PauseReads is in force
-	closing bool // no more requests are read; graceful close once q drains
-	abort   bool // close with RST
-	closed  bool // CloseConn issued or peer gone; answers are dropped
+	paused  bool   // PauseReads is in force
+	closing bool   // no more requests are read; graceful close once q drains
+	abort   bool   // close with RST
+	closed  bool   // CloseConn issued or peer gone; answers are dropped
+	host    string // client host, from the peer address (JoinGroup's ClientHost)
 }
 
 // slot is one request awaiting its response.
@@ -34,6 +36,11 @@ type slot struct {
 	facts   []core.Fact
 	// fetchMax is the Fetch request's total byte limit (<= 0: none).
 	fetchMax int32
+	// Fetch long poll (fetch.go): the Fetch waits for fetchMin bytes until
+	// fetchUntil. fetchGot counts the bytes its ended parts returned.
+	fetchMin   int32
+	fetchUntil core.NodeTime
+	fetchGot   int
 }
 
 func (b *Broker) findConn(id core.ConnID) *connection {
@@ -61,7 +68,7 @@ func (b *Broker) onOpen(e core.ConnOpened) []core.Action {
 	if b.stopping || b.findConn(e.Conn) != nil {
 		return []core.Action{core.CloseConn{Conn: e.Conn, Abort: true}}
 	}
-	b.addConn(&connection{id: e.Conn, fr: kafkawire.NewFramer(b.cfg.MaxFrame)})
+	b.addConn(&connection{id: e.Conn, fr: kafkawire.NewFramer(b.cfg.MaxFrame), host: peerHost(e.Peer)})
 	return nil
 }
 
@@ -71,6 +78,7 @@ func (b *Broker) onClosed(e core.ConnClosed) []core.Action {
 		return nil
 	}
 	b.dropConn(c)
+	b.endParked(func(o *operation) bool { return o.s.conn == c })
 	if !e.Abort {
 		return []core.Action{core.CloseConn{Conn: c.id}}
 	}
@@ -96,6 +104,15 @@ func (b *Broker) onBytes(e core.BytesReceived) []core.Action {
 	}
 	b.dirty = append(b.dirty, c)
 	return acts
+}
+
+// peerHost is the host part of a peer address "host:port". Kafka shows a
+// client host with a leading slash, so it is returned that way.
+func peerHost(peer string) string {
+	if i := strings.LastIndexByte(peer, ':'); i >= 0 {
+		peer = peer[:i]
+	}
+	return "/" + peer
 }
 
 // request decodes one frame and routes it.

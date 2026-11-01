@@ -27,13 +27,17 @@ type NodeConfig struct {
 	ControlPlane system.ControlPlane
 	CPClassify   system.ErrorClassifier
 
-	Shutdown   <-chan struct{} // optional; closing it is Node.Stop
-	StopGrace  time.Duration   // time the broker gets to finish in-flight work (10s)
-	FlushGrace time.Duration   // time writers get to flush after a graceful exit (5s)
-	DataInbox  int             // data queue capacity (1024)
-	Net        NetConfig
-	Exec       ExecConfig
-	Facts      func(core.Fact)
+	Shutdown  <-chan struct{} // optional; closing it is Node.Stop
+	StopGrace time.Duration   // time the broker gets to finish in-flight work (10s)
+	// Lease, if set, sends a heartbeat every LeaseInterval and feeds the live
+	// broker set to Metadata. Nil: no heartbeat, Metadata lists this broker only.
+	Lease         LeaseClient
+	LeaseInterval time.Duration // heartbeat interval (1s)
+	FlushGrace    time.Duration // time writers get to flush after a graceful exit (5s)
+	DataInbox     int           // data queue capacity (1024)
+	Net           NetConfig
+	Exec          ExecConfig
+	Facts         func(core.Fact)
 	// OnIO, if set, sees every I/O action the broker issues, on the broker's
 	// loop goroutine, before it executes (used to pair segment keys with
 	// segment_sealed facts, see SegmentLog).
@@ -69,6 +73,10 @@ func Start(ctx context.Context, cfg NodeConfig) (*Node, error) {
 	}
 	rctx, kill := context.WithCancel(ctx)
 	in := system.NewInbox(cfg.DataInbox)
+	if cfg.Lease != nil {
+		self := core.BrokerAddr{NodeID: bc.BrokerID, Host: bc.Host, Port: bc.Port}
+		go leaseLoop(rctx, in, cfg.Lease, self, cfg.LeaseInterval, cfg.Log)
+	}
 	nt := NewNet(cfg.Listener, in, cfg.Net)
 	n := &Node{addr: cfg.Listener.Addr(), net: nt, stop: make(chan struct{}), done: make(chan struct{}), kill: kill}
 	exec := NewExecutor(rctx, cfg.Exec, cfg.Objects, cfg.ControlPlane, nt,
@@ -100,6 +108,9 @@ func withDefaults(cfg NodeConfig) NodeConfig {
 	}
 	if cfg.DataInbox <= 0 {
 		cfg.DataInbox = 1024
+	}
+	if cfg.LeaseInterval <= 0 {
+		cfg.LeaseInterval = time.Second
 	}
 	return cfg
 }

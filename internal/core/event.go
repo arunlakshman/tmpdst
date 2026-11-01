@@ -169,6 +169,22 @@ type LogDeleteOldDone struct {
 	Outcome Outcome
 }
 
+// ---- broker live set ----
+
+// BrokerAddr is one broker's advertised address, as Metadata lists it.
+type BrokerAddr struct {
+	NodeID int32
+	Host   string
+	Port   int32
+}
+
+// LiveBrokers gives the broker the live broker set from the control plane. The
+// production shell sends it after each heartbeat, and sends an empty list when
+// the set is stale (the control plane is down). The broker keeps the last list
+// and answers Metadata with it. Metadata always lists the broker itself, so an
+// empty list means "self only". The simulator never sends it. InboxKind: Control.
+type LiveBrokers struct{ Brokers []BrokerAddr }
+
 // ResponseAs returns d.Resp asserted to T, or the zero value.
 func ResponseAs[T any](d ControlPlaneDone) T {
 	r, _ := d.Resp.(T)
@@ -193,6 +209,7 @@ func (LogAppendDone) isEvent()       {}
 func (LogReadDone) isEvent()         {}
 func (LogGetEndDone) isEvent()       {}
 func (LogDeleteOldDone) isEvent()    {}
+func (LiveBrokers) isEvent()         {}
 
 // RequestID returns the request this completion answers.
 func (e SendDone) RequestID() RequestID { return e.Req }

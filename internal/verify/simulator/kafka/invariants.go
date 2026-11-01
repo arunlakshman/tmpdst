@@ -55,6 +55,7 @@ func expectReachable() []core.PropertyID {
 		"net: partition injected", "net: clog injected", "net: random_close injected", "net: black_hole injected",
 		"broker: commit retried", "broker: commit succeeded after the old retry budget",
 		"broker: corrupt GET detected",
+		"broker: fetch parked for a poll",
 		"broker: reads paused by backpressure",
 		"broker: reads resumed after backpressure",
 		"broker: segment sealed by size", "broker: segment sealed by timer",

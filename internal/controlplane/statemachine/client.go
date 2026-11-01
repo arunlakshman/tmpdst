@@ -18,6 +18,20 @@ func (m *Machine) onCPOffer(o core.ControlPlaneDeliver) []core.Action {
 		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.Lookup(op) })
 	case core.DescribeTopics:
 		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.Describe(op) })
+	case core.CreateTopic:
+		return m.withReplies(m.Offer(ClientOperation{
+			Req: o.Req, From: o.From,
+			Cmd: stateupdater.CreateEntry(op),
+		}))
+	case core.OffsetFetch:
+		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.OffsetFetch(op) })
+	case core.DescribeGroup:
+		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.DescribeGroup(op) })
+	case core.ListGroups:
+		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.ListGroups(op) })
+	case core.GroupInstall, core.GroupAssign, core.GroupRemove, core.OffsetCommit:
+		cmd, _ := stateupdater.GroupEntry(op)
+		return m.withReplies(m.Offer(ClientOperation{Req: o.Req, From: o.From, Cmd: cmd}))
 	default:
 		return []core.Action{core.ControlPlaneReply{To: o.From, Done: core.ControlPlaneDone{Req: o.Req, Err: core.ErrInvalid}}}
 	}

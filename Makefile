@@ -1,5 +1,5 @@
 # Project build. `make` / `make build` is the full gate:
-#   fmt, ascii, vet, lint, compile, unit tests, sim, hermetic it, CRAP.
+#   fmt, ascii, vet, lint, compile, unit tests, sim, hermetic it, Kafka CLI e2e, CRAP.
 # Docker fullstack test/integrationtest tests still Skip unless MANIFESTER_*_ENDPOINT are set.
 # The import check for deterministic packages is the detcheck tool:
 # go run ./ops/tools/determinismcheck <packages>
@@ -33,9 +33,10 @@ PROTO_GO_VER   ?= v1.35.2
 PROTO_GRPC_VER ?= v1.5.1
 
 .PHONY: build compile test sim it-hermetic test-all test-race sim-campaign \
-	ascii-check lint fmt-check vet crap crap-baseline crap-strict install-hooks proto proto-tools
+	ascii-check lint fmt-check vet crap crap-baseline crap-strict install-hooks proto proto-tools \
+	e2e-kafka-cli
 
-build: proto fmt-check ascii-check vet lint compile test sim it-hermetic crap
+build: proto fmt-check ascii-check vet lint compile test sim it-hermetic e2e-kafka-cli crap
 
 # Generate Go from internal/controlplane/api/v1/*.proto into ignored *.pb.go files.
 # Prefer mise-provided buf; plugins via `make proto-tools` (go install).
@@ -122,6 +123,10 @@ crap:
 		$(CRAP_FLAGS)
 
 comma := ,
+
+# E2E: manicp + manibroker driven by the Apache Kafka 3.9.1 CLI (needs Java and minio, see mise.toml; part of build).
+e2e-kafka-cli:
+	bash ops/scripts/e2e-kafka-cli.sh $(E2E_ARGS)
 
 # Full offender list, ignoring the baseline.
 crap-strict:

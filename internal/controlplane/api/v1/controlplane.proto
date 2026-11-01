@@ -13,6 +13,15 @@ service ControlPlane {
   rpc DescribeTopics(DescribeTopicsRequest) returns (DescribeTopicsResponse);
   rpc CreateTopic(CreateTopicRequest) returns (CreateTopicResponse);
   rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc BrokerHeartbeat(BrokerHeartbeatRequest) returns (BrokerHeartbeatResponse);
+  rpc JoinGroup(JoinGroupRequest) returns (JoinGroupResponse);
+  rpc SyncGroup(SyncGroupRequest) returns (SyncGroupResponse);
+  rpc GroupHeartbeat(GroupHeartbeatRequest) returns (GroupHeartbeatResponse);
+  rpc LeaveGroup(LeaveGroupRequest) returns (LeaveGroupResponse);
+  rpc GroupOffsetCommit(GroupOffsetCommitRequest) returns (GroupOffsetCommitResponse);
+  rpc GroupOffsetFetch(GroupOffsetFetchRequest) returns (GroupOffsetFetchResponse);
+  rpc DescribeGroups(DescribeGroupsRequest) returns (DescribeGroupsResponse);
+  rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse);
 }
 
 // ErrCode mirrors core.ErrCode spellings for the wire. Numbers are stable.
@@ -28,6 +37,12 @@ enum ErrCode {
   ERR_CODE_CORRUPT = 8;
   ERR_CODE_INVALID = 9;
   ERR_CODE_IO = 10;
+  ERR_CODE_UNKNOWN_MEMBER = 11;
+  ERR_CODE_ILLEGAL_GENERATION = 12;
+  ERR_CODE_UNKNOWN_PARTITION = 13;
+  ERR_CODE_REBALANCE_IN_PROGRESS = 14;
+  ERR_CODE_INCONSISTENT_GROUP_PROTOCOL = 15;
+  ERR_CODE_TOPIC_EXISTS = 16;
 }
 
 // Outcome mirrors core.Outcome.
@@ -103,6 +118,8 @@ message DescribeTopicsResponse {
 message CreateTopicRequest {
   string topic = 1;
   int32 partitions = 2;
+  // When true the create fails with ERR_CODE_TOPIC_EXISTS if the topic exists.
+  bool fail_if_exists = 3;
 }
 
 message CreateTopicResponse {}
@@ -113,4 +130,177 @@ message GetStatusResponse {
   string role = 1;
   int64 applied_slot = 2;
   int64 log_tail = 3;
+}
+
+// BrokerInfo is the advertised address of one broker (Metadata brokers[]).
+message BrokerInfo {
+  int32 node_id = 1;
+  string host = 2;
+  int32 port = 3;
+}
+
+// BrokerHeartbeatRequest renews the lease of the calling broker. Only the
+// active control plane keeps the live set (decision Q4, Q7b).
+message BrokerHeartbeatRequest {
+  BrokerInfo broker = 1;
+}
+
+// BrokerHeartbeatResponse lists every live broker, sorted by node id.
+message BrokerHeartbeatResponse {
+  repeated BrokerInfo brokers = 1;
+}
+
+// Group calls (classic protocol, decision Q9). Only the active control plane
+// serves them; a standby answers Unavailable. Business errors come as a
+// non-OK status with ErrorDetail, except LeaveGroup and GroupOffsetCommit,
+// which return one code per member or partition.
+
+// GroupProtocol is one protocol a member supports, with its metadata.
+message GroupProtocol {
+  string name = 1;
+  bytes metadata = 2;
+}
+
+message JoinGroupRequest {
+  string group = 1;
+  string member_id = 2;
+  string group_instance_id = 3;
+  string client_id = 4;
+  string client_host = 5;
+  int32 session_timeout_ms = 6;
+  int32 rebalance_timeout_ms = 7;
+  string protocol_type = 8;
+  repeated GroupProtocol protocols = 9;
+}
+
+// GroupMember is one member of the join result. Only the leader gets the list.
+message GroupMember {
+  string member_id = 1;
+  string group_instance_id = 2;
+  bytes metadata = 3;
+}
+
+message JoinGroupResponse {
+  string member_id = 1;
+  int32 generation = 2;
+  string protocol = 3;
+  string leader = 4;
+  repeated GroupMember members = 5;
+}
+
+// GroupAssignment is the assignment bytes of one member (sent by the leader).
+message GroupAssignment {
+  string member_id = 1;
+  bytes assignment = 2;
+}
+
+message SyncGroupRequest {
+  string group = 1;
+  string member_id = 2;
+  int32 generation = 3;
+  repeated GroupAssignment assignments = 4;
+}
+
+message SyncGroupResponse {
+  bytes assignment = 1;
+}
+
+message GroupHeartbeatRequest {
+  string group = 1;
+  string member_id = 2;
+  int32 generation = 3;
+}
+
+message GroupHeartbeatResponse {}
+
+message LeaveGroupRequest {
+  string group = 1;
+  repeated string members = 2;
+}
+
+// LeaveGroupResponse has one code per request member, in request order.
+message LeaveGroupResponse {
+  repeated ErrCode errs = 1;
+}
+
+message PartitionOffsetCommit {
+  TopicPartition tp = 1;
+  int64 offset = 2;
+  int32 leader_epoch = 3;
+  string metadata = 4;
+}
+
+message GroupOffsetCommitRequest {
+  string group = 1;
+  string member_id = 2;
+  int32 generation = 3;
+  repeated PartitionOffsetCommit offsets = 4;
+}
+
+// GroupOffsetCommitResponse has one code per request partition, in request order.
+message GroupOffsetCommitResponse {
+  repeated ErrCode errs = 1;
+}
+
+message GroupOffsetFetchRequest {
+  string group = 1;
+  // Empty means every committed partition.
+  repeated TopicPartition partitions = 2;
+}
+
+message PartitionOffset {
+  TopicPartition tp = 1;
+  int64 offset = 2;
+  int32 leader_epoch = 3;
+  string metadata = 4;
+}
+
+message GroupOffsetFetchResponse {
+  repeated PartitionOffset offsets = 1;
+}
+
+message DescribeGroupsRequest {
+  repeated string groups = 1;
+}
+
+message GroupMemberInfo {
+  string member_id = 1;
+  string client_id = 2;
+  string client_host = 3;
+  string group_instance_id = 4;
+  int32 session_timeout_ms = 5;
+  int32 rebalance_timeout_ms = 6;
+  int64 joined_time_ms = 7;
+  bytes metadata = 8;
+  bytes assignment = 9;
+}
+
+// GroupDescription is one group of DescribeGroups. Exists is false for a group
+// that was never installed; the other fields are then empty.
+message GroupDescription {
+  string name = 1;
+  bool exists = 2;
+  int32 generation = 3;
+  string protocol_type = 4;
+  string protocol = 5;
+  string leader = 6;
+  int32 assigned_generation = 7;
+  string state = 8;
+  repeated GroupMemberInfo members = 9;
+}
+
+message DescribeGroupsResponse {
+  repeated GroupDescription groups = 1;
+}
+
+message ListGroupsRequest {}
+
+message GroupSummary {
+  string name = 1;
+  string protocol_type = 2;
+  string state = 3;
+}
+
+message ListGroupsResponse {
+  repeated GroupSummary groups = 1;
 }

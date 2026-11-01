@@ -227,6 +227,7 @@ func (c *CompletionCore) OnInternal(ctx simulator.FakeServiceContext, body any) 
 	}
 	if c.h.Changed(comp) {
 		c.gen++
+		c.specOK = false // a change Mutating did not name (a CreateTopic call) must not leave a stale hash
 	}
 	if pl.Kind != ReplyNormal {
 		return

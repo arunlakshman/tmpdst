@@ -53,11 +53,11 @@ func (s *Store) DescribeTopics(ctx context.Context, op core.DescribeTopics) (cor
 }
 
 // CreateTopic implements cp.Store.
-func (s *Store) CreateTopic(ctx context.Context, name string, partitions int32) (core.ErrCode, error) {
+func (s *Store) CreateTopic(ctx context.Context, op core.CreateTopic) (core.ErrCode, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.spec.CreateTopic(name, partitions), nil
+	return s.spec.CreateTopicIf(op.Name, op.Partitions, op.FailIfExists), nil
 }

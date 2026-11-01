@@ -34,6 +34,59 @@ func sampleRequest(key, v int16) kmsg.Request {
 		n := "t"
 		r.Topics = []kmsg.MetadataRequestTopic{{Topic: &n}}
 		return r
+	case KeyDescribeConfigs:
+		r := kmsg.NewPtrDescribeConfigsRequest()
+		r.Resources = []kmsg.DescribeConfigsRequestResource{{ResourceType: 2, ResourceName: "t"}}
+		return r
+	case KeyCreateTopics:
+		r := kmsg.NewPtrCreateTopicsRequest()
+		r.TimeoutMillis, r.ValidateOnly = 5000, true
+		r.Topics = []kmsg.CreateTopicsRequestTopic{{Topic: "t", NumPartitions: 3, ReplicationFactor: -1,
+			Configs: []kmsg.CreateTopicsRequestTopicConfig{{Name: "retention.ms", Value: new("1000")}}}}
+		return r
+	case KeyOffsetCommit:
+		r := kmsg.NewPtrOffsetCommitRequest()
+		r.Group, r.Generation, r.MemberID = "g", 4, "m-1"
+		r.Topics = []kmsg.OffsetCommitRequestTopic{{Topic: "t", Partitions: []kmsg.OffsetCommitRequestTopicPartition{{Partition: 1, Offset: 7, LeaderEpoch: -1}}}}
+		return r
+	case KeyOffsetFetch:
+		r := kmsg.NewPtrOffsetFetchRequest()
+		r.Group = "g"
+		r.Topics = []kmsg.OffsetFetchRequestTopic{{Topic: "t", Partitions: []int32{0, 1}}}
+		r.Groups = []kmsg.OffsetFetchRequestGroup{{Group: "g", Topics: []kmsg.OffsetFetchRequestGroupTopic{{Topic: "t", Partitions: []int32{0}}}}}
+		return r
+	case KeyFindCoordinator:
+		r := kmsg.NewPtrFindCoordinatorRequest()
+		r.CoordinatorKey, r.CoordinatorType = "g", 0
+		r.CoordinatorKeys = []string{"g", "h"}
+		return r
+	case KeyJoinGroup:
+		r := kmsg.NewPtrJoinGroupRequest()
+		r.Group, r.SessionTimeoutMillis, r.RebalanceTimeoutMillis, r.ProtocolType = "g", 10000, 30000, "consumer"
+		r.Protocols = []kmsg.JoinGroupRequestProtocol{{Name: "range", Metadata: []byte("sub")}}
+		return r
+	case KeyHeartbeat:
+		r := kmsg.NewPtrHeartbeatRequest()
+		r.Group, r.Generation, r.MemberID = "g", 2, "m-1"
+		return r
+	case KeyLeaveGroup:
+		r := kmsg.NewPtrLeaveGroupRequest()
+		r.Group = "g"
+		r.Members = []kmsg.LeaveGroupRequestMember{{MemberID: "m-1"}}
+		return r
+	case KeySyncGroup:
+		r := kmsg.NewPtrSyncGroupRequest()
+		r.Group, r.Generation, r.MemberID = "g", 2, "m-1"
+		r.GroupAssignment = []kmsg.SyncGroupRequestGroupAssignment{{MemberID: "m-1", MemberAssignment: []byte("a")}}
+		return r
+	case KeyDescribeGroups:
+		r := kmsg.NewPtrDescribeGroupsRequest()
+		r.Groups = []string{"g"}
+		return r
+	case KeyListGroups:
+		r := kmsg.NewPtrListGroupsRequest()
+		r.StatesFilter = []string{"Stable"}
+		return r
 	default: // KeyApiVersions
 		r := kmsg.NewPtrApiVersionsRequest()
 		if v >= 3 {
@@ -63,6 +116,60 @@ func sampleResponse(key int16, h core.RequestHeader) kmsg.Response {
 		r.Brokers = []kmsg.MetadataResponseBroker{{NodeID: 1, Host: "h", Port: 9092}}
 		t := "t"
 		r.Topics = []kmsg.MetadataResponseTopic{{Topic: &t, Partitions: []kmsg.MetadataResponseTopicPartition{{Partition: 0, Leader: 1, Replicas: []int32{1}, ISR: []int32{1}}}}}
+		return r
+	case KeyDescribeConfigs:
+		r := kmsg.NewPtrDescribeConfigsResponse()
+		msg := "unknown topic"
+		r.Resources = []kmsg.DescribeConfigsResponseResource{
+			{ResourceType: 2, ResourceName: "t", Configs: []kmsg.DescribeConfigsResponseResourceConfig{}},
+			{ResourceType: 2, ResourceName: "u", ErrorCode: 3, ErrorMessage: &msg},
+		}
+		return r
+	case KeyCreateTopics:
+		r := kmsg.NewPtrCreateTopicsResponse()
+		msg := "partitions must be at least 1"
+		r.Topics = []kmsg.CreateTopicsResponseTopic{
+			{Topic: "t", NumPartitions: 3, ReplicationFactor: 1},
+			{Topic: "u", ErrorCode: 37, ErrorMessage: &msg, NumPartitions: -1, ReplicationFactor: -1},
+		}
+		return r
+	case KeyOffsetCommit:
+		r := kmsg.NewPtrOffsetCommitResponse()
+		r.Topics = []kmsg.OffsetCommitResponseTopic{{Topic: "t", Partitions: []kmsg.OffsetCommitResponseTopicPartition{{Partition: 1, ErrorCode: 22}}}}
+		return r
+	case KeyOffsetFetch:
+		r := kmsg.NewPtrOffsetFetchResponse()
+		r.Topics = []kmsg.OffsetFetchResponseTopic{{Topic: "t", Partitions: []kmsg.OffsetFetchResponseTopicPartition{{Partition: 0, Offset: -1, LeaderEpoch: -1, ErrorCode: 0}}}}
+		r.Groups = []kmsg.OffsetFetchResponseGroup{{Group: "g", Topics: []kmsg.OffsetFetchResponseGroupTopic{{Topic: "t", Partitions: []kmsg.OffsetFetchResponseGroupTopicPartition{{Partition: 0, Offset: 5, LeaderEpoch: 0, ErrorCode: 0}}}}}}
+		return r
+	case KeyFindCoordinator:
+		r := kmsg.NewPtrFindCoordinatorResponse()
+		r.NodeID, r.Host, r.Port = 2, "h", 9092
+		r.Coordinators = []kmsg.FindCoordinatorResponseCoordinator{{Key: "g", NodeID: 2, Host: "h", Port: 9092}}
+		return r
+	case KeyJoinGroup:
+		r := kmsg.NewPtrJoinGroupResponse()
+		r.Generation, r.LeaderID, r.MemberID = 3, "m-1", "m-1"
+		r.Members = []kmsg.JoinGroupResponseMember{{MemberID: "m-1", ProtocolMetadata: []byte("sub")}}
+		return r
+	case KeyHeartbeat:
+		return kmsg.NewPtrHeartbeatResponse()
+	case KeyLeaveGroup:
+		r := kmsg.NewPtrLeaveGroupResponse()
+		r.Members = []kmsg.LeaveGroupResponseMember{{MemberID: "m-1", ErrorCode: 25}}
+		return r
+	case KeySyncGroup:
+		r := kmsg.NewPtrSyncGroupResponse()
+		r.MemberAssignment = []byte("a")
+		return r
+	case KeyDescribeGroups:
+		r := kmsg.NewPtrDescribeGroupsResponse()
+		r.Groups = []kmsg.DescribeGroupsResponseGroup{{Group: "g", State: "Stable", ProtocolType: "consumer", Protocol: "range",
+			Members: []kmsg.DescribeGroupsResponseGroupMember{{MemberID: "m-1", ClientID: "c", ClientHost: "/h", ProtocolMetadata: []byte("sub"), MemberAssignment: []byte("a")}}}}
+		return r
+	case KeyListGroups:
+		r := kmsg.NewPtrListGroupsResponse()
+		r.Groups = []kmsg.ListGroupsResponseGroup{{Group: "g", ProtocolType: "consumer", GroupState: "Stable"}}
 		return r
 	default: // KeyApiVersions
 		return ApiVersionsResponse(h)

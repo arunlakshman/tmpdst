@@ -88,6 +88,7 @@ type harness struct {
 
 	queue   []core.IOResult
 	timers  map[core.TimerID]core.TimerVersion
+	due     map[core.TimerID]core.NodeTime // when each armed timer is due (fireNext)
 	clients map[core.ConnID]*client
 	all     []core.Action // every action emitted, in order
 	paused  map[core.ConnID]bool
@@ -99,8 +100,9 @@ type harness struct {
 
 func newHarness(t *testing.T, cfg Config) *harness {
 	h := &harness{t: t, env: &testEnv{state: 7}, store: speccheck.NewObjectStore(), cp: speccheck.NewControlPlane(),
-		cfg: cfg, timers: map[core.TimerID]core.TimerVersion{}, clients: map[core.ConnID]*client{},
-		paused: map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}
+		cfg: cfg, timers: map[core.TimerID]core.TimerVersion{}, due: map[core.TimerID]core.NodeTime{},
+		clients: map[core.ConnID]*client{},
+		paused:  map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}
 	h.cp.CreateTopic("t", 2)
 	h.self = core.NodeInstance{Node: "b1", Inc: core.BootNumber{1}}
 	h.b = New(cfg)(h.env, h.self).(*Broker)
@@ -176,6 +178,7 @@ func (h *harness) exec(a core.Action) {
 		}
 	case core.SetTimer:
 		h.timers[a.ID] = a.Gen
+		h.due[a.ID] = h.now + core.NodeTime(a.After)
 	case core.CancelTimer:
 		delete(h.timers, a.ID)
 	case core.Send:
@@ -229,6 +232,23 @@ func (h *harness) fireAll() {
 		slices.Sort(ids)
 		h.fire(ids[0])
 	}
+}
+
+// fireNext moves the clock to the earliest armed timer and fires it. Ties go
+// to the lower id, so the order is the same on every run.
+func (h *harness) fireNext() {
+	var first core.TimerID
+	found := false
+	for id := range h.timers {
+		if !found || h.due[id] < h.due[first] || (h.due[id] == h.due[first] && id < first) {
+			first, found = id, true
+		}
+	}
+	if !found {
+		h.t.Fatal("no timer armed")
+	}
+	h.now = max(h.now, h.due[first])
+	h.fire(first)
 }
 
 func (h *harness) flush() { h.fire(timerFlush) }

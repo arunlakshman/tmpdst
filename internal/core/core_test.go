@@ -27,6 +27,8 @@ func TestErrCodeString(t *testing.T) {
 		ErrNotFound: "ErrNotFound", ErrConflict: "ErrConflict",
 		ErrConnClosed: "ErrConnClosed", ErrTooLarge: "ErrTooLarge",
 		ErrCorrupt: "ErrCorrupt", ErrInvalid: "ErrInvalid", ErrIO: "ErrIO",
+		ErrUnknownMember: "ErrUnknownMember", ErrIllegalGeneration: "ErrIllegalGeneration",
+		ErrUnknownPartition: "ErrUnknownPartition", ErrTopicExists: "ErrTopicExists",
 		ErrCode(999): "ErrCode(999)",
 	}
 	for c, s := range want {

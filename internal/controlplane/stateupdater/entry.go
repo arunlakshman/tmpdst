@@ -13,6 +13,13 @@ const (
 	KindNoop Kind = iota
 	KindCommit
 	KindCreateTopic
+	KindGroupInstall
+	KindGroupAssign
+	KindGroupRemove
+	KindOffsetCommit
+	// KindCreateTopicExclusive is CreateTopic with FailIfExists. It is a new
+	// kind, not a flag on KindCreateTopic, so old log entries keep their bytes.
+	KindCreateTopicExclusive
 )
 
 // Kind is the type of a log entry.
@@ -23,8 +30,14 @@ type Entry struct {
 	ID     string
 	Kind   Kind
 	Commit core.CommitSegment // KindCommit
-	Topic  string             // KindCreateTopic
-	Parts  int32              // KindCreateTopic
+	Topic  string             // KindCreateTopic, KindCreateTopicExclusive
+	Parts  int32              // KindCreateTopic, KindCreateTopicExclusive
+	// Group commands (KindGroupInstall, KindGroupAssign, KindGroupRemove,
+	// KindOffsetCommit). Only the field of the kind is used.
+	Install core.GroupInstall
+	Assign  core.GroupAssign
+	Remove  core.GroupRemove
+	Offsets core.OffsetCommit
 	// WriterBases, when set and equal in length to Commit.Batches, forces those
 	// bases at apply (sim BugWriterOffsets). Not on the wire.
 	WriterBases []core.Offset
@@ -60,11 +73,75 @@ func Encode(en Entry) []byte {
 	switch en.Kind {
 	case KindCommit:
 		e.commit(en.Commit)
-	case KindCreateTopic:
+	case KindCreateTopic, KindCreateTopicExclusive:
 		e.s(en.Topic)
 		e.i(int64(en.Parts))
+	case KindGroupInstall:
+		e.groupInstall(en.Install)
+	case KindGroupAssign:
+		e.groupAssign(en.Assign)
+	case KindGroupRemove:
+		e.groupRemove(en.Remove)
+	case KindOffsetCommit:
+		e.offsetCommit(en.Offsets)
 	}
 	return e.buf
+}
+
+func (e *entryEncoder) groupInstall(op core.GroupInstall) {
+	e.s(op.Group)
+	e.s(op.ProtocolType)
+	e.s(op.Protocol)
+	e.i(int64(op.Generation))
+	e.s(op.Leader)
+	e.i(op.TimeMs)
+	e.u(uint64(len(op.Members)))
+	for _, m := range op.Members {
+		e.s(m.MemberID)
+		e.s(m.ClientID)
+		e.s(m.ClientHost)
+		e.s(m.GroupInstanceID)
+		e.i(int64(m.SessionTimeoutMs))
+		e.i(int64(m.RebalanceTimeoutMs))
+		e.s(string(m.Metadata))
+	}
+}
+
+func (e *entryEncoder) groupAssign(op core.GroupAssign) {
+	e.s(op.Group)
+	e.i(int64(op.Generation))
+	e.s(op.Leader)
+	e.i(op.TimeMs)
+	e.u(uint64(len(op.Assignments)))
+	for _, a := range op.Assignments {
+		e.s(a.Member)
+		e.s(string(a.Bytes))
+	}
+}
+
+func (e *entryEncoder) groupRemove(op core.GroupRemove) {
+	e.s(op.Group)
+	e.i(op.TimeMs)
+	e.s(op.Reason)
+	e.u(uint64(len(op.Members)))
+	for _, m := range op.Members {
+		e.s(m)
+	}
+}
+
+func (e *entryEncoder) offsetCommit(op core.OffsetCommit) {
+	e.s(op.Group)
+	e.s(op.Member)
+	e.i(int64(op.Generation))
+	e.i(op.TimeMs)
+	e.u(uint64(len(op.Offsets)))
+	for _, o := range op.Offsets {
+		e.s(o.TP.Topic)
+		e.i(int64(o.TP.Partition))
+		e.i(o.Offset)
+		e.i(int64(o.LeaderEpoch))
+		e.s(o.Metadata)
+	}
 }
 
 func (e *entryEncoder) commit(c core.CommitSegment) {
@@ -134,9 +211,17 @@ func Decode(b []byte) (Entry, error) {
 	case KindNoop:
 	case KindCommit:
 		en.Commit = d.commit()
-	case KindCreateTopic:
+	case KindCreateTopic, KindCreateTopicExclusive:
 		en.Topic = d.s()
 		en.Parts = int32(d.i())
+	case KindGroupInstall:
+		en.Install = d.groupInstall()
+	case KindGroupAssign:
+		en.Assign = d.groupAssign()
+	case KindGroupRemove:
+		en.Remove = d.groupRemove()
+	case KindOffsetCommit:
+		en.Offsets = d.offsetCommit()
 	default:
 		d.err = ErrCorrupt
 	}
@@ -147,6 +232,91 @@ func Decode(b []byte) (Entry, error) {
 		return Entry{}, d.err
 	}
 	return en, nil
+}
+
+// count reads a list length; each item takes at least one byte.
+func (d *entryDecoder) count() int {
+	n := d.u()
+	if n > uint64(len(d.b)) {
+		d.err = ErrCorrupt
+		return 0
+	}
+	return int(n)
+}
+
+// blob reads a byte field; an empty one is nil.
+func (d *entryDecoder) blob() []byte {
+	s := d.s()
+	if s == "" {
+		return nil
+	}
+	return []byte(s)
+}
+
+func (d *entryDecoder) groupInstall() core.GroupInstall {
+	var op core.GroupInstall
+	op.Group = d.s()
+	op.ProtocolType = d.s()
+	op.Protocol = d.s()
+	op.Generation = int32(d.i())
+	op.Leader = d.s()
+	op.TimeMs = d.i()
+	for n := d.count(); n > 0 && d.err == nil; n-- {
+		var m core.GroupMember
+		m.MemberID = d.s()
+		m.ClientID = d.s()
+		m.ClientHost = d.s()
+		m.GroupInstanceID = d.s()
+		m.SessionTimeoutMs = int32(d.i())
+		m.RebalanceTimeoutMs = int32(d.i())
+		m.Metadata = d.blob()
+		op.Members = append(op.Members, m)
+	}
+	return op
+}
+
+func (d *entryDecoder) groupAssign() core.GroupAssign {
+	var op core.GroupAssign
+	op.Group = d.s()
+	op.Generation = int32(d.i())
+	op.Leader = d.s()
+	op.TimeMs = d.i()
+	for n := d.count(); n > 0 && d.err == nil; n-- {
+		var a core.GroupAssignment
+		a.Member = d.s()
+		a.Bytes = d.blob()
+		op.Assignments = append(op.Assignments, a)
+	}
+	return op
+}
+
+func (d *entryDecoder) groupRemove() core.GroupRemove {
+	var op core.GroupRemove
+	op.Group = d.s()
+	op.TimeMs = d.i()
+	op.Reason = d.s()
+	for n := d.count(); n > 0 && d.err == nil; n-- {
+		op.Members = append(op.Members, d.s())
+	}
+	return op
+}
+
+func (d *entryDecoder) offsetCommit() core.OffsetCommit {
+	var op core.OffsetCommit
+	op.Group = d.s()
+	op.Member = d.s()
+	op.Generation = int32(d.i())
+	op.TimeMs = d.i()
+	for n := d.count(); n > 0 && d.err == nil; n-- {
+		var o core.PartitionOffset
+		o.TP.Topic = d.s()
+		o.TP.Partition = int32(d.i())
+		o.Offset = d.i()
+		o.LeaderEpoch = int32(d.i())
+		o.Metadata = d.s()
+		op.Offsets = append(op.Offsets, o)
+	}
+	return op
 }
 
 func (d *entryDecoder) commit() core.CommitSegment {
@@ -204,8 +374,16 @@ func (a *StateUpdater) Apply(slot int64, e Entry) core.ControlPlaneDone {
 		}
 		d.Req = core.RequestID(slot)
 		return d
-	case KindCreateTopic:
-		return core.ControlPlaneDone{Req: core.RequestID(slot), Err: a.CreateTopic(e.Topic, e.Parts)}
+	case KindCreateTopic, KindCreateTopicExclusive:
+		err := a.CreateTopicIf(e.Topic, e.Parts, e.Kind == KindCreateTopicExclusive)
+		return core.ControlPlaneDone{Req: core.RequestID(slot), Err: err}
+	case KindGroupInstall, KindGroupAssign, KindGroupRemove, KindOffsetCommit:
+		d, err := a.groupWrite(e.groupOp())
+		if err != nil {
+			panic(fmt.Errorf("stateupdater: store failed: %w", err))
+		}
+		d.Req = core.RequestID(slot)
+		return d
 	default:
 		return core.ControlPlaneDone{Req: core.RequestID(slot), Err: core.ErrInvalid}
 	}
@@ -218,4 +396,42 @@ func (a *StateUpdater) ApplyBytes(slot int64, data []byte) (core.ControlPlaneDon
 		return core.ControlPlaneDone{}, err
 	}
 	return a.Apply(slot, e), nil
+}
+
+// groupOp is the group command of a group entry.
+func (e Entry) groupOp() core.ControlPlaneOperation {
+	switch e.Kind {
+	case KindGroupInstall:
+		return e.Install
+	case KindGroupAssign:
+		return e.Assign
+	case KindGroupRemove:
+		return e.Remove
+	}
+	return e.Offsets
+}
+
+// CreateEntry is the log entry of a CreateTopic op.
+func CreateEntry(op core.CreateTopic) Entry {
+	k := KindCreateTopic
+	if op.FailIfExists {
+		k = KindCreateTopicExclusive
+	}
+	return Entry{Kind: k, Topic: op.Name, Parts: op.Partitions}
+}
+
+// GroupEntry is the log entry of a group write. It returns false for any
+// other operation.
+func GroupEntry(op core.ControlPlaneOperation) (Entry, bool) {
+	switch x := op.(type) {
+	case core.GroupInstall:
+		return Entry{Kind: KindGroupInstall, Install: x}, true
+	case core.GroupAssign:
+		return Entry{Kind: KindGroupAssign, Assign: x}, true
+	case core.GroupRemove:
+		return Entry{Kind: KindGroupRemove, Remove: x}, true
+	case core.OffsetCommit:
+		return Entry{Kind: KindOffsetCommit, Offsets: x}, true
+	}
+	return Entry{}, false
 }

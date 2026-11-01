@@ -20,7 +20,7 @@ import (
 // impl is a control plane as the conformance runner drives it.
 type impl interface {
 	Exec(ctx context.Context, op core.ControlPlaneOperation) (core.ControlPlaneResponse, core.ErrCode, error)
-	CreateTopic(ctx context.Context, name string, parts int32) (core.ErrCode, error)
+	CreateTopic(ctx context.Context, op core.CreateTopic) (core.ErrCode, error)
 }
 
 // storeImpl drives a cp.Store directly.
@@ -37,12 +37,15 @@ func (s storeImpl) Exec(ctx context.Context, op core.ControlPlaneOperation) (cor
 	case core.DescribeTopics:
 		r, err := s.st.DescribeTopics(ctx, op)
 		return r, core.OK, err
+	case core.CreateTopic:
+		code, err := s.st.CreateTopic(ctx, op)
+		return nil, code, err
 	}
 	return nil, 0, fmt.Errorf("unknown op %T", op)
 }
 
-func (s storeImpl) CreateTopic(ctx context.Context, name string, parts int32) (core.ErrCode, error) {
-	return s.st.CreateTopic(ctx, name, parts)
+func (s storeImpl) CreateTopic(ctx context.Context, op core.CreateTopic) (core.ErrCode, error) {
+	return s.st.CreateTopic(ctx, op)
 }
 
 // grpcImpl drives a machine node through cpclient.
@@ -53,8 +56,8 @@ func (h grpcImpl) Exec(ctx context.Context, op core.ControlPlaneOperation) (core
 	return r, errCode(err), nonBusiness(err)
 }
 
-func (h grpcImpl) CreateTopic(ctx context.Context, name string, parts int32) (core.ErrCode, error) {
-	err := h.c.CreateTopic(ctx, name, parts)
+func (h grpcImpl) CreateTopic(ctx context.Context, op core.CreateTopic) (core.ErrCode, error) {
+	_, err := h.c.Call(ctx, op)
 	return errCode(err), nonBusiness(err)
 }
 
@@ -87,7 +90,7 @@ func (s implSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlaneRe
 	defer cancel()
 	switch {
 	case op.CreateTopic != nil:
-		code, err := s.im.CreateTopic(ctx, op.CreateTopic.Name, op.CreateTopic.Partitions)
+		code, err := s.im.CreateTopic(ctx, core.CreateTopic{Name: op.CreateTopic.Name, Partitions: op.CreateTopic.Partitions})
 		return observation.ControlPlaneResult{Code: code}, err
 	case op.Call != nil:
 		resp, code, err := s.im.Exec(ctx, op.Call.Op)
@@ -95,7 +98,8 @@ func (s implSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlaneRe
 			return observation.ControlPlaneResult{Code: code}, err
 		}
 		done := core.ControlPlaneDone{Resp: resp}
-		if _, ok := op.Call.Op.(core.CommitSegment); ok {
+		switch op.Call.Op.(type) {
+		case core.CommitSegment, core.CreateTopic:
 			done.Outcome = core.Applied
 		}
 		return observation.FromControlPlaneDone(done), nil

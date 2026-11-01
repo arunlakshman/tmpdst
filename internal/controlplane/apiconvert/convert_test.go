@@ -62,6 +62,8 @@ func TestErrOutcomeMaps(t *testing.T) {
 		core.OK, core.ErrTimeout, core.ErrUnavailable, core.ErrNotFound,
 		core.ErrConflict, core.ErrConnClosed, core.ErrTooLarge, core.ErrCorrupt,
 		core.ErrInvalid, core.ErrIO,
+		core.ErrUnknownMember, core.ErrIllegalGeneration, core.ErrUnknownPartition,
+		core.ErrRebalanceInProgress, core.ErrInconsistentGroupProtocol, core.ErrTopicExists,
 	} {
 		if ToCoreErr(FromCoreErr(c)) != c {
 			t.Fatalf("err %v", c)

@@ -78,8 +78,26 @@ func (m *controlPlaneModel) apply(op core.ControlPlaneOperation) (observation.Co
 		return m.lookup(o), false
 	case core.DescribeTopics:
 		return m.describe(o), false
+	case core.CreateTopic:
+		return m.createTopicCall(o)
 	}
 	return observation.ControlPlaneResult{Code: core.ErrInvalid}, false
+}
+
+// createTopicCall is a CreateTopic call. An OK answer has Outcome Applied, as
+// the spec gives. With FailIfExists, a topic that is already there is
+// ErrTopicExists and nothing changes.
+func (m *controlPlaneModel) createTopicCall(op core.CreateTopic) (observation.ControlPlaneResult, bool) {
+	if op.Name != "" && op.Partitions > 0 && op.FailIfExists {
+		if _, there := m.topics[op.Name]; there {
+			return observation.ControlPlaneResult{Code: core.ErrTopicExists}, false
+		}
+	}
+	r, changed := m.createTopic(op.Name, op.Partitions)
+	if r.Code == core.OK {
+		r.Outcome = core.Applied
+	}
+	return r, changed
 }
 
 func (m *controlPlaneModel) createTopic(name string, partitions int32) (observation.ControlPlaneResult, bool) {

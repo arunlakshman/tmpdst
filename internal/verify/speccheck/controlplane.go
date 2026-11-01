@@ -36,6 +36,9 @@ import (
 //	               unknown partition is empty, End 0.
 //	DescribeTopics sorted by name; empty request = all; unknown names are
 //	               omitted.
+//	CreateTopic    ErrInvalid for an empty name or partitions <= 0. With
+//	               FailIfExists, an existing topic is ErrTopicExists and no
+//	               change. Otherwise it is OK and never shrinks the topic.
 //
 // Topics can also be made with CreateTopic. Exec panics on a non-ControlPlaneCall.
 type ControlPlane struct {
@@ -48,6 +51,9 @@ type ControlPlane struct {
 	// commit at index i truncates it to i+1 entries.
 	segKeys []string
 	segPre  []stateHasher
+
+	groups  map[string]*groupState                             // consumer groups by name
+	offsets map[string]map[core.TopicPartition]committedOffset // committed offsets by group
 }
 
 type segment struct {
@@ -67,8 +73,18 @@ func NewControlPlane() *ControlPlane {
 // CreateTopic creates name with at least partitions partitions (it never
 // shrinks one). ErrInvalid for an empty name or partitions <= 0.
 func (c *ControlPlane) CreateTopic(name string, partitions int32) core.ErrCode {
+	return c.CreateTopicIf(name, partitions, false)
+}
+
+// CreateTopicIf is CreateTopic. With failIfExists, a topic that is already
+// there gives ErrTopicExists and nothing changes. The check comes after the
+// ErrInvalid check.
+func (c *ControlPlane) CreateTopicIf(name string, partitions int32, failIfExists bool) core.ErrCode {
 	if name == "" || partitions <= 0 {
 		return core.ErrInvalid
+	}
+	if _, there := c.topics[name]; there && failIfExists {
+		return core.ErrTopicExists
 	}
 	c.topics[name] = max(c.topics[name], partitions)
 	return core.OK
@@ -97,8 +113,31 @@ func (c *ControlPlane) Exec(a core.IOCall) core.IOResult {
 		return c.execLookup(call.Req, op)
 	case core.DescribeTopics:
 		return c.execDescribe(call.Req, op)
+	case core.CreateTopic:
+		return c.execCreate(call.Req, op)
+	case core.GroupInstall:
+		return groupDone(call.Req, c.groupInstall(op))
+	case core.GroupAssign:
+		return groupDone(call.Req, c.groupAssign(op))
+	case core.GroupRemove:
+		return groupDone(call.Req, c.groupRemove(op))
+	case core.OffsetCommit:
+		return c.offsetCommit(call.Req, op)
+	case core.OffsetFetch:
+		return core.ControlPlaneDone{Req: call.Req, Resp: c.offsetFetch(op)}
+	case core.DescribeGroup:
+		return core.ControlPlaneDone{Req: call.Req, Resp: c.describeGroup(op)}
+	case core.ListGroups:
+		return core.ControlPlaneDone{Req: call.Req, Resp: c.listGroups()}
 	}
 	return core.ControlPlaneDone{Req: call.Req, Err: core.ErrInvalid}
+}
+
+func (c *ControlPlane) execCreate(req core.RequestID, op core.CreateTopic) core.IOResult {
+	if code := c.CreateTopicIf(op.Name, op.Partitions, op.FailIfExists); code != core.OK {
+		return core.ControlPlaneDone{Req: req, Err: code}
+	}
+	return core.ControlPlaneDone{Req: req, Outcome: core.Applied}
 }
 
 // validBatch reports whether b is well formed on its own.

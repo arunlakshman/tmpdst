@@ -97,6 +97,13 @@ const (
 	ErrCorrupt
 	ErrInvalid // malformed request; never retried
 	ErrIO      // anything else from the outside world
+
+	ErrUnknownMember             // group member id or group leader is not a member
+	ErrIllegalGeneration         // group generation does not match the one asked for
+	ErrUnknownPartition          // topic or partition does not exist
+	ErrRebalanceInProgress       // group is rebalancing; rejoin (slice 4b)
+	ErrInconsistentGroupProtocol // members have no protocol in common, or a wrong protocol type (slice 4b)
+	ErrTopicExists               // CreateTopic with FailIfExists: the topic is already there
 )
 
 // Outcome states what a completion proves about side effects (lesson 1).
@@ -134,6 +141,18 @@ func (e ErrCode) String() string {
 		return "ErrInvalid"
 	case ErrIO:
 		return "ErrIO"
+	case ErrUnknownMember:
+		return "ErrUnknownMember"
+	case ErrIllegalGeneration:
+		return "ErrIllegalGeneration"
+	case ErrUnknownPartition:
+		return "ErrUnknownPartition"
+	case ErrRebalanceInProgress:
+		return "ErrRebalanceInProgress"
+	case ErrInconsistentGroupProtocol:
+		return "ErrInconsistentGroupProtocol"
+	case ErrTopicExists:
+		return "ErrTopicExists"
 	}
 	return "ErrCode(" + strconv.FormatUint(uint64(e), 10) + ")"
 }

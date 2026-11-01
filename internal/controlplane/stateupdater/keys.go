@@ -1,6 +1,7 @@
 package stateupdater
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -14,6 +15,9 @@ const (
 	prefixRun       = 'R'
 	prefixKey       = 'K'
 	prefixSlot      = 'S'
+	prefixGroup     = 'G'
+	prefixMember    = 'M'
+	prefixOffset    = 'O'
 
 	checksumLength = 16
 	runFormat      = 1
@@ -25,9 +29,44 @@ func topicKey(name string) []byte { return append([]byte{prefixTopic}, name...) 
 
 // topicPartitionPrefix is the prefix-free key prefix of one partition for kind p.
 func topicPartitionPrefix(p byte, tp core.TopicPartition) []byte {
-	b := binary.AppendUvarint([]byte{p}, uint64(len(tp.Topic)))
+	return appendTopicPartition([]byte{p}, tp)
+}
+
+// appendTopicPartition appends uvarint(len topic), topic, partition (4, big endian).
+func appendTopicPartition(b []byte, tp core.TopicPartition) []byte {
+	b = binary.AppendUvarint(b, uint64(len(tp.Topic)))
 	b = append(b, tp.Topic...)
 	return binary.BigEndian.AppendUint32(b, uint32(tp.Partition))
+}
+
+// splitTopicPartition reads a partition that appendTopicPartition wrote, with
+// nothing after it.
+func splitTopicPartition(b []byte) (core.TopicPartition, bool) {
+	r := &reader{b: b, ok: true}
+	topic := r.str()
+	if !r.ok || len(r.b) != 4 {
+		return core.TopicPartition{}, false
+	}
+	return core.TopicPartition{Topic: topic, Partition: int32(binary.BigEndian.Uint32(r.b))}, true
+}
+
+// groupKey is the G key of a group: its header.
+func groupKey(group string) []byte { return append([]byte{prefixGroup}, group...) }
+
+// groupPrefix is the prefix-free key prefix of one group for kind p.
+func groupPrefix(p byte, group string) []byte {
+	b := binary.AppendUvarint([]byte{p}, uint64(len(group)))
+	return append(b, group...)
+}
+
+// memberKey is the M key of one member of a group.
+func memberKey(group, member string) []byte {
+	return append(groupPrefix(prefixMember, group), member...)
+}
+
+// offsetKey is the O key of one committed partition of a group.
+func offsetKey(group string, tp core.TopicPartition) []byte {
+	return appendTopicPartition(groupPrefix(prefixOffset, group), tp)
 }
 
 func endKey(tp core.TopicPartition) []byte { return topicPartitionPrefix(prefixEndOffset, tp) }
@@ -153,6 +192,17 @@ func (r *reader) sv() int64 {
 		r.ok = false
 		return 0
 	}
+	r.b = r.b[n:]
+	return v
+}
+
+func (r *reader) blob() []byte {
+	n := r.uv()
+	if n > uint64(len(r.b)) {
+		r.ok = false
+		return nil
+	}
+	v := bytes.Clone(r.b[:n])
 	r.b = r.b[n:]
 	return v
 }

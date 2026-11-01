@@ -35,6 +35,19 @@ func (a *StateUpdater) Exec(act core.IOCall) core.IOResult {
 		d, err = a.Lookup(op)
 	case core.DescribeTopics:
 		d, err = a.Describe(op)
+	case core.CreateTopic:
+		d.Err = a.CreateTopicIf(op.Name, op.Partitions, op.FailIfExists)
+		if d.Err == core.OK {
+			d.Outcome = core.Applied
+		}
+	case core.GroupInstall, core.GroupAssign, core.GroupRemove, core.OffsetCommit:
+		d, err = a.groupWrite(op)
+	case core.OffsetFetch:
+		d, err = a.OffsetFetch(op)
+	case core.DescribeGroup:
+		d, err = a.DescribeGroup(op)
+	case core.ListGroups:
+		d, err = a.ListGroups(op)
 	default:
 		d.Err = core.ErrInvalid
 	}
@@ -100,6 +113,8 @@ func (a *StateUpdater) Lookup(op core.FindSegments) (core.ControlPlaneDone, erro
 }
 
 // Describe answers a DescribeTopics.
+//
+//nolint:dupl // same shape as groupWrite, but a read transaction
 func (a *StateUpdater) Describe(op core.DescribeTopics) (core.ControlPlaneDone, error) {
 	var d core.ControlPlaneDone
 	err := a.kv.View(func(tx Transaction) { d = describeTransaction(tx, op) })
@@ -109,13 +124,28 @@ func (a *StateUpdater) Describe(op core.DescribeTopics) (core.ControlPlaneDone, 
 // CreateTopic creates name with at least partitions partitions (never
 // shrinks). ErrInvalid for an empty name or partitions <= 0.
 func (a *StateUpdater) CreateTopic(name string, partitions int32) core.ErrCode {
+	return a.CreateTopicIf(name, partitions, false)
+}
+
+// CreateTopicIf is CreateTopic. With failIfExists, an existing topic gives
+// ErrTopicExists and nothing changes. The check and the write are one
+// transaction, so the answer depends only on the state before this command.
+func (a *StateUpdater) CreateTopicIf(name string, partitions int32, failIfExists bool) core.ErrCode {
 	if name == "" || partitions <= 0 {
 		return core.ErrInvalid
 	}
-	if err := a.kv.Update(func(tx Transaction) { addPartitions(tx, map[string]int32{}, name, partitions) }); err != nil {
+	code := core.OK
+	err := a.kv.Update(func(tx Transaction) {
+		if failIfExists && tx.Get(topicKey(name)) != nil {
+			code = core.ErrTopicExists
+			return
+		}
+		addPartitions(tx, map[string]int32{}, name, partitions)
+	})
+	if err != nil {
 		panic(fmt.Errorf("stateupdater: store failed: %w", err))
 	}
-	return core.OK
+	return code
 }
 
 // End is the next offset of tp (0 if unknown).

@@ -29,7 +29,7 @@ func changesData(a core.IOCall) bool {
 		return true
 	}
 	switch call.Op.(type) {
-	case core.FindSegments, core.DescribeTopics:
+	case core.FindSegments, core.DescribeTopics, core.OffsetFetch, core.DescribeGroups, core.ListGroups:
 		return false
 	}
 	return true

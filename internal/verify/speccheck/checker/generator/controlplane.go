@@ -44,6 +44,8 @@ func (o ControlPlaneOp) Describe() string {
 		return fmt.Sprintf("request %d: look up %v from offset %d with max bytes %d", o.Call.Req, op.TP, op.From, op.MaxBytes)
 	case core.DescribeTopics:
 		return fmt.Sprintf("request %d: describe topics %q", o.Call.Req, op.Topics)
+	case core.CreateTopic:
+		return fmt.Sprintf("request %d: create topic %q with %d partitions, failing if it exists", o.Call.Req, op.Name, op.Partitions)
 	}
 	return fmt.Sprintf("request %d: %T", o.Call.Req, o.Call.Op)
 }
@@ -58,7 +60,10 @@ func ControlPlaneOps(p InputProfile) func(r *checker.Rand, i int) ControlPlaneOp
 		req := core.RequestID(i + 1)
 		switch chooseByWeight(r, p.CreateTopicWeight, p.CommitWeight, p.LookupWeight, p.DescribeWeight) {
 		case 0:
-			return genCreateTopic(p, r)
+			if r.Intn(2) == 0 {
+				return genCreateTopic(p, r)
+			}
+			return genExclusiveCreate(p, r, req)
 		case 1:
 			return NewCall(core.ControlPlaneCall{Req: req, Op: genCommit(p, r)})
 		case 2:
@@ -66,6 +71,13 @@ func ControlPlaneOps(p InputProfile) func(r *checker.Rand, i int) ControlPlaneOp
 		}
 		return NewCall(core.ControlPlaneCall{Req: req, Op: genDescribe(p, r)})
 	}
+}
+
+// genExclusiveCreate is a CreateTopic call with FailIfExists. It takes its
+// name and count from genCreateTopic, so it also covers the invalid creates.
+func genExclusiveCreate(p InputProfile, r *checker.Rand, req core.RequestID) ControlPlaneOp {
+	c := genCreateTopic(p, r).CreateTopic
+	return NewCall(core.ControlPlaneCall{Req: req, Op: core.CreateTopic{Name: c.Name, Partitions: c.Partitions, FailIfExists: true}})
 }
 
 func genCreateTopic(p InputProfile, r *checker.Rand) ControlPlaneOp {
@@ -215,6 +227,8 @@ func MinimizeControlPlaneOp(op ControlPlaneOp) []ControlPlaneOp {
 		ops = minimizeLookup(o)
 	case core.DescribeTopics:
 		ops = minimizeDescribe(o)
+	case core.CreateTopic:
+		ops = minimizeExclusiveCreate(o)
 	}
 	out := make([]ControlPlaneOp, 0, len(ops))
 	for _, o := range ops {
@@ -230,6 +244,15 @@ func minimizeCreateTopic(c CreateTopic) []ControlPlaneOp {
 	}
 	for _, n := range shortenStrings(c.Name) {
 		out = append(out, NewCreateTopic(n, c.Partitions))
+	}
+	return out
+}
+
+// minimizeExclusiveCreate is minimizeCreateTopic for a call with FailIfExists.
+func minimizeExclusiveCreate(c core.CreateTopic) []core.ControlPlaneOperation {
+	var out []core.ControlPlaneOperation
+	for _, m := range minimizeCreateTopic(CreateTopic{Name: c.Name, Partitions: c.Partitions}) {
+		out = append(out, core.CreateTopic{Name: m.CreateTopic.Name, Partitions: m.CreateTopic.Partitions, FailIfExists: true})
 	}
 	return out
 }
@@ -324,6 +347,8 @@ func FormatControlPlaneOp(op ControlPlaneOp) string {
 
 func formatCPOp(op core.ControlPlaneOperation) string {
 	switch op := op.(type) {
+	case core.CreateTopic:
+		return fmt.Sprintf("core.CreateTopic{Name: %q, Partitions: %d, FailIfExists: %t}", op.Name, op.Partitions, op.FailIfExists)
 	case core.CommitSegment:
 		return fmt.Sprintf("core.CommitSegment{SegmentKey: %q%s}", op.SegmentKey, formatBatchesField(op.Batches))
 	case core.FindSegments:

@@ -12,6 +12,7 @@ func TestEntryCodecRoundTrip(t *testing.T) {
 	es := []stateupdater.Entry{
 		{ID: "w/1", Kind: stateupdater.KindNoop},
 		{ID: "w/2", Kind: stateupdater.KindCreateTopic, Topic: "t", Parts: 5},
+		{ID: "w/2x", Kind: stateupdater.KindCreateTopicExclusive, Topic: "t", Parts: 5},
 		{ID: "w/3", Kind: stateupdater.KindCommit, Commit: core.CommitSegment{
 			SegmentKey: "k",
 			Batches: []core.PendingBatch{

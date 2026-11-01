@@ -47,8 +47,10 @@ func capCampaign(t *testing.T, capParts int) *sealStats {
 	prod := broker.DefaultConfig()
 	prod.MaxSegmentPartitions, prod.MaxSegmentBatches = capParts, 1024
 	prod.MaxBufferedBytes, prod.ResumeBufferedBytes = 64<<20, 32<<20
+	// Fetch long poll (slice 3) changed the timing, so the cap binds on fewer
+	// segments. More seeds keep it in the sample.
 	opts := Opts{Producers: 128, Consumers: 1, Topics: []string{"a", "b"}, Partitions: 128}
-	cfg := configWith(seeds(1, 2), broker.InjectedBugNone, opts)
+	cfg := configWith(seeds(1, 6), broker.InjectedBugNone, opts)
 	inner := cfg.Swarm
 	cfg.Swarm = func(seed uint64, r simulator.CountedRand, c *simulator.SeedConfig) {
 		inner(seed, r, c)

@@ -45,6 +45,8 @@ type brokerFlags struct {
 	tn                tuning
 	objTimeout, grace time.Duration
 	commitDeadline    time.Duration
+	fetchPollInterval time.Duration
+	leaseInterval     time.Duration
 	metricsAddr       string
 	debug             bool
 	logLevel, runID   string
@@ -77,7 +79,9 @@ func parseFlags(args []string, stderr io.Writer) (brokerFlags, *flag.FlagSet, er
 	fs.StringVar(&tn.resumeBuffered, "resume-buffered", "", "resume reads below this (default: half of -max-buffered)")
 	fs.DurationVar(&f.objTimeout, "obj-timeout", 30*time.Second, "base timeout of an object-store call; large bodies get extra time at 2 MiB/s")
 	fs.DurationVar(&f.commitDeadline, "commit-deadline", time.Duration(dflt.CommitDeadline), "keep retrying a segment's control-plane commit (capped exponential backoff with jitter) this long after its first attempt, then fail its produce requests; keep under the producers' delivery.timeout.ms")
+	fs.DurationVar(&f.fetchPollInterval, "fetch-poll-interval", time.Duration(dflt.FetchPollInterval), "a Fetch that finds no data asks the control plane again this often, until it has MinBytes or its MaxWait ends (each poll is one Lookup per waiting partition)")
 	fs.DurationVar(&f.grace, "stop-grace", 10*time.Second, "time to finish in-flight work after SIGTERM")
+	fs.DurationVar(&f.leaseInterval, "lease-interval", time.Second, "heartbeat to the control plane this often; the control plane drops a broker after 3 missed beats' worth of silence (its -broker-lease-ttl, default 5s)")
 	fs.StringVar(&f.metricsAddr, "metrics-addr", ":9100", "serve Prometheus metrics on /metrics at this address (empty: disabled)")
 	fs.BoolVar(&f.debug, "debug", false, "debug logging (same as -log-level debug)")
 	fs.StringVar(&f.logLevel, "log-level", "info", "log level: debug, info, warn, error (JSON lines on stderr; segment lines are one per sealed/put/committed segment, so warn keeps failures only)")
@@ -121,6 +125,7 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 		NodeID: f.nodeID, Broker: broker.DefaultConfig(), Log: log,
 		ControlPlane: cpc, CPClassify: controlplaneclient.Classifier{},
 		StopGrace: f.grace,
+		Lease:     cpc, LeaseInterval: f.leaseInterval,
 	}
 	if cfg.NodeID == "" {
 		cfg.NodeID = fmt.Sprintf("broker-%d", f.brokerID)
@@ -129,6 +134,9 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 	cfg.Exec.ObjTimeout = f.objTimeout
 	if f.commitDeadline > 0 {
 		cfg.Broker.CommitDeadline = core.Duration(f.commitDeadline)
+	}
+	if f.fetchPollInterval > 0 {
+		cfg.Broker.FetchPollInterval = core.Duration(f.fetchPollInterval)
 	}
 	var m *production.Metrics
 	if f.metricsAddr != "" {

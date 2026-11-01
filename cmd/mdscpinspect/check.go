@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"mds/internal/controlplane/stateupdater"
+	"mds/internal/controlplane/stateupdater/pebblestore"
 	"mds/internal/core"
 )
 
@@ -132,14 +133,26 @@ type slotEntry struct {
 	entry stateupdater.Entry
 }
 
-func newFold() *stateupdater.StateUpdater {
-	return stateupdater.New(stateupdater.NewMemoryKeyValueStore())
+// newFold makes an empty fold on a Pebble store in a temporary folder. The memory store
+// is too slow for a real log (each insert moves the whole array, so 50,000 commits take
+// minutes). The returned function closes the store and removes the folder.
+func newFold() (*stateupdater.StateUpdater, func()) {
+	dir, err := os.MkdirTemp("", "mdscpinspect-fold-")
+	check(err)
+	store, err := pebblestore.Open(dir, pebblestore.Options{})
+	check(err)
+	fold := stateupdater.New(store)
+	return fold, func() {
+		_ = fold.Close()
+		_ = os.RemoveAll(dir)
+	}
 }
 
 // checkFullReplay folds the whole log into an empty store and compares the
 // result with a number we count ourselves from the entries.
 func checkFullReplay(c *checker, slots []slotInfo, entries []slotEntry) {
-	fold := newFold()
+	fold, closeFold := newFold()
+	defer closeFold()
 	wanted := map[core.TopicPartition]int64{}
 	seen := map[string]bool{}
 	topicOf := map[string]bool{}
@@ -203,7 +216,8 @@ func checkCheckpoint(ctx context.Context, c *checker, client *s3.Client, bucket,
 	if crcErr != nil {
 		return
 	}
-	fold := newFold()
+	fold, closeFold := newFold()
+	defer closeFold()
 	checkpointSlot, err := fold.Restore(bytes.NewReader(data))
 	c.check("checkpoint restores", err == nil, fmt.Sprintf("covers slots before %d, err=%v", checkpointSlot, err))
 	if err != nil {

@@ -7,12 +7,13 @@ NODE=cp0
 GRPC=18080
 METRICS=19101
 
-"$CPV_ROOT/scripts/reset.sh"
+"$CPV_ROOT/scripts/reset.sh" || { echo "RESET FAILED: the experiment did not start"; exit 2; }
 ACKED="$CPV_ROOT/results/e0-acked.jsonl"
 : >"$ACKED"
 
 started=$(now_ms)
-node.sh start $NODE 0 $GRPC $METRICS -checkpoint-every 30s -checkpoint-min-slots 200
+# -window-slots is huge so the log is NOT trimmed: the acked-key checks need the whole log.
+node.sh start $NODE 0 $GRPC $METRICS -checkpoint-every 30s -checkpoint-min-slots 200 -window-slots 1000000000
 node.sh wait-ready $NODE 60 || true
 ready_s=$(python3 -c "print(round(($(now_ms) - $started)/1000.0, 1))")
 
@@ -42,6 +43,8 @@ mdscpinspect -check -region "$REGION" -table "$TABLE" -bucket "$BUCKET" -acked "
   >"$CPV_ROOT/results/e0-inspect.txt" 2>&1
 check_failed=$(grep -c '^FAIL' "$CPV_ROOT/results/e0-inspect.txt" || true)
 criterion "A1 to A5: mdscpinspect -check -acked passes" "$([ "$check_failed" = 0 ] && echo 1 || echo 0)" "failed_lines=$check_failed"
+skips=$(grep -c '^SKIP' "$CPV_ROOT/results/e0-inspect.txt" || true)
+criterion "no check was skipped (a skip hides a check)" "$([ "$skips" = 0 ] && echo 1 || echo 0)" "skipped=$skips"
 verdict E0
 rc=$?
 ACKED_FILE="$ACKED" EXTRA_FILES="$VERDICT_FILE $CPV_ROOT/results/e0-load.out $CPV_ROOT/results/e0-inspect.txt" collect.sh e0

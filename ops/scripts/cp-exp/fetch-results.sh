@@ -25,7 +25,7 @@ if [[ $# -eq 0 ]]; then
 fi
 
 name=$1
-if ! [[ $name =~ ^[a-z][a-z0-9-]*$ ]]; then
+if ! [[ $name =~ ^[A-Za-z][A-Za-z0-9-]*$ ]]; then
   echo "error: bad experiment name '$name'" >&2
   exit 2
 fi

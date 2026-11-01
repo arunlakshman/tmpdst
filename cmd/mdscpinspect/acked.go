@@ -125,7 +125,8 @@ func distinctAcked(acked []ackedCommit) ([]ackedCommit, int) {
 // foldKeys applies the log entries in order to an empty state, and records the
 // answer to every commit of every key.
 func foldKeys(entries []slotEntry) map[string]*foldedKey {
-	fold := newFold()
+	fold, closeFold := newFold()
+	defer closeFold()
 	keys := map[string]*foldedKey{}
 	for _, se := range entries {
 		done := fold.Apply(se.slot, se.entry)

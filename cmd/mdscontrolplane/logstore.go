@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log/slog"
 	"os"
@@ -125,8 +126,16 @@ type sysObjects struct{ s system.ObjectStore }
 func (a sysObjects) Put(ctx context.Context, key string, data []byte) error {
 	return a.s.Put(ctx, key, data)
 }
+
+// Get turns the S3 "not found" answer into executor.ErrNotFound. The machine
+// reads this error as "no checkpoint yet, start fresh". Any other error means
+// "try again later", so without this a new bucket would make boot wait forever.
 func (a sysObjects) Get(ctx context.Context, ref core.SegmentRef) ([]byte, error) {
-	return a.s.Get(ctx, ref)
+	data, err := a.s.Get(ctx, ref)
+	if storeErr, ok := errors.AsType[*s3store.Error](err); ok && storeErr.Code == core.ErrNotFound {
+		return nil, executor.ErrNotFound
+	}
+	return data, err
 }
 func (a sysObjects) Delete(ctx context.Context, key string) error { return a.s.Delete(ctx, key) }
 func (a sysObjects) List(ctx context.Context, prefix string) ([]string, error) {

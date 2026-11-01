@@ -206,6 +206,7 @@ const trimStride = 1024
 // machineConfig turns the flags into the control-plane machine's settings.
 func machineConfig(f cpFlags) statemachine.Config {
 	mcfg := statemachine.Config{
+		OnCheckpointDecision: logCheckpointDecision,
 		// Short catch-up period so Ready (and health Serving) arrives quickly;
 		// subsequent rounds keep the same cadence.
 		CatchUpEvery:       core.Duration(5 * time.Millisecond),
@@ -244,4 +245,19 @@ func newDynamo(ctx context.Context, endpoint, region string, apiOpts []func(*mid
 			o.BaseEndpoint = aws.String(endpoint)
 		}
 	}), nil
+}
+
+// logCheckpointDecision writes one log line each time the checkpoint timer
+// fires, so an operator can see why a checkpoint was or was not written.
+func logCheckpointDecision(d statemachine.CheckpointDecision) {
+	attrs := []any{
+		"event", "checkpoint_decision", "written", d.Written, "reason", d.Reason,
+		"applied", d.Applied, "goal_tail", d.GoalTail, "last_checkpoint", d.LastCheckpoint,
+		"min_slots", d.MinSlots, "in_flight", d.PendingKind,
+	}
+	if d.Written {
+		slog.Info("checkpoint started", attrs...)
+		return
+	}
+	slog.Info("checkpoint skipped", attrs...)
 }

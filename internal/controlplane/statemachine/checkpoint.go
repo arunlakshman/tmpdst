@@ -46,18 +46,65 @@ func (m *Machine) onCheckpointTimer(e core.TimerFired) []core.Action {
 	return append(acts, m.armCheckpoint()...)
 }
 
+// CheckpointDecision says what the checkpoint timer did and why.
+type CheckpointDecision struct {
+	Written        bool   // true: a checkpoint write was started
+	Reason         string // why it was skipped; "ok" when written
+	Applied        int64  // slots folded so far
+	GoalTail       int64  // newest slot seen in the log
+	LastCheckpoint int64  // slot of the last checkpoint written by this node
+	MinSlots       int64  // slots needed since the last checkpoint
+	PendingKind    string // the control I/O in flight, if any
+}
+
+func (k pendingKind) String() string {
+	switch k {
+	case pendingTail:
+		return "tail_check"
+	case pendingRead:
+		return "log_read"
+	case pendingAppend:
+		return "log_append"
+	case pendingObjGet:
+		return "checkpoint_get"
+	}
+	return "none"
+}
+
+// decide reports one checkpoint decision to the optional observer.
+func (m *Machine) decide(written bool, reason string) {
+	if m.config.OnCheckpointDecision == nil {
+		return
+	}
+	m.config.OnCheckpointDecision(CheckpointDecision{
+		Written: written, Reason: reason,
+		Applied: int64(m.applied), GoalTail: int64(m.goalTail), LastCheckpoint: int64(m.checkpointSlot),
+		MinSlots: m.config.CheckpointMinSlots, PendingKind: m.pendingKind.String(),
+	})
+}
+
 func (m *Machine) maybeCheckpoint() []core.Action {
-	if m.pending != 0 || !m.isAppender() || !m.ready {
+	switch {
+	case m.checkpointRequest != 0:
+		m.decide(false, "checkpoint_in_flight")
+		return nil
+	case !m.isAppender():
+		m.decide(false, "not_appender")
+		return nil
+	case !m.ready:
+		m.decide(false, "not_ready")
 		return nil
 	}
 	slot := m.applied
 	if slot == 0 {
+		m.decide(false, "nothing_applied")
 		return nil
 	}
 	// A node behind the log tail must not write: its snapshot could replace a
 	// newer one from the other node, and the log below that newer one may
 	// already be trimmed, so a restart could never recover.
 	if m.applied < m.goalTail {
+		m.decide(false, "behind_tail")
 		return nil
 	}
 	minSlots := m.config.CheckpointMinSlots
@@ -65,18 +112,19 @@ func (m *Machine) maybeCheckpoint() []core.Action {
 		minSlots = 1
 	}
 	if int64(slot-m.checkpointSlot) < minSlots {
+		m.decide(false, "too_few_new_slots")
 		return nil
 	}
 	var buf bytes.Buffer
 	if err := m.fold.Snapshot(&buf, int64(slot)); err != nil {
 		return m.trip(err)
 	}
+	m.decide(true, "ok")
 	m.checkpointData = buf.Bytes()
 	m.checkpointPending = slot
 	m.nextReq++
-	m.pending = m.nextReq
-	m.pendingKind = pendingObjPut
-	return []core.Action{core.ObjectPut{Req: m.pending, Key: m.checkpointKey(), Data: m.checkpointData}}
+	m.checkpointRequest, m.checkpointStage = m.nextReq, stageUpload
+	return []core.Action{core.ObjectPut{Req: m.checkpointRequest, Key: m.checkpointKey(), Data: m.checkpointData}}
 }
 
 func (m *Machine) emitCheckpointGet() []core.Action {
@@ -132,10 +180,10 @@ func (m *Machine) armCheckpointRetry() []core.Action {
 }
 
 func (m *Machine) onObjPutDone(d core.ObjectPutDone) []core.Action {
-	if d.Req != m.pending || m.pendingKind != pendingObjPut {
+	if m.checkpointRequest == 0 || d.Req != m.checkpointRequest || m.checkpointStage != stageUpload {
 		return nil
 	}
-	m.pending, m.pendingKind = 0, pendingNone
+	m.checkpointRequest, m.checkpointStage = 0, 0
 	slot := m.checkpointPending
 	m.checkpointPending = 0
 	m.checkpointData = nil
@@ -158,19 +206,17 @@ func (m *Machine) emitTrim(checkpointSlot core.LogPosition) []core.Action {
 	}
 	through := below - 1
 	m.nextReq++
-	m.pending = m.nextReq
-	m.pendingKind = pendingTrim
-	m.fillSlot = through // stash Through for onTrimDone
-	return []core.Action{core.LogDeleteOld{Req: m.pending, Through: through}}
+	m.checkpointRequest, m.checkpointStage = m.nextReq, stageTrim
+	m.trimThrough = through
+	return []core.Action{core.LogDeleteOld{Req: m.checkpointRequest, Through: through}}
 }
 
 func (m *Machine) onTrimDone(d core.LogDeleteOldDone) []core.Action {
-	if d.Req != m.pending || m.pendingKind != pendingTrim {
+	if m.checkpointRequest == 0 || d.Req != m.checkpointRequest || m.checkpointStage != stageTrim {
 		return nil
 	}
-	through := m.fillSlot
-	m.pending, m.pendingKind = 0, pendingNone
-	m.fillSlot = 0
+	through := m.trimThrough
+	m.checkpointRequest, m.checkpointStage, m.trimThrough = 0, 0, 0
 	if d.Err == core.OK && d.Outcome == core.Applied {
 		m.trimFloor = through + 1
 		m.env.Reachable("logcp-sim: log trimmed below a checkpoint")

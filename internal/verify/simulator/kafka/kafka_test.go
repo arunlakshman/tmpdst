@@ -414,7 +414,7 @@ func wideCampaign(t *testing.T, capParts, batches int, log bool) int64 {
 	items := simulator.DynamoMaxCommitItems
 	if log {
 		opts.Partitions = 128
-		config = configLogWith(seeds(1, 2), broker.InjectedBugNone, 0, opts)
+		config = configLogWith(seeds(1, 6), broker.InjectedBugNone, 0, opts)
 		items = 0
 		config.ControlPlane.CallerTimeout = 800 * core.Millisecond
 		config.LogStore.CallerTimeout = 800 * core.Millisecond

@@ -221,6 +221,8 @@ func (m *Machine) clearLocal() {
 	m.proj = nil
 	m.fillSlot, m.fillData = 0, nil
 	m.gapArmed = false
+	m.checkpointRequest, m.checkpointStage, m.trimThrough = 0, 0, 0
+	m.checkpointPending, m.checkpointData = 0, nil
 }
 
 func (m *Machine) refuseClients(err core.ErrCode, o core.Outcome) {

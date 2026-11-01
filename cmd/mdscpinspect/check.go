@@ -23,7 +23,19 @@ const (
 )
 
 // checker prints one PASS or FAIL line per check and remembers failures.
-type checker struct{ failed int }
+// Lines go to out, or to standard output when out is nil (tests set out).
+type checker struct {
+	failed int
+	out    io.Writer
+}
+
+func (c *checker) printf(format string, args ...any) {
+	w := c.out
+	if w == nil {
+		w = os.Stdout
+	}
+	_, _ = fmt.Fprintf(w, format, args...)
+}
 
 func (c *checker) check(name string, ok bool, detail string) {
 	status := "PASS"
@@ -31,14 +43,15 @@ func (c *checker) check(name string, ok bool, detail string) {
 		status = "FAIL"
 		c.failed++
 	}
-	fmt.Printf("%s  %-52s %s\n", status, name, detail)
+	c.printf("%s  %-52s %s\n", status, name, detail)
 }
 
-func (c *checker) note(name, detail string) { fmt.Printf("SKIP  %-52s %s\n", name, detail) }
+func (c *checker) note(name, detail string) { c.printf("SKIP  %-52s %s\n", name, detail) }
 
 // runChecks verifies the stored log by itself, without asking the control plane.
+// ackedPath is the optional acked file from mdscpverify; "" skips the acked checks.
 // It exits with status 1 when any check fails.
-func runChecks(ctx context.Context, rows []row, s3Client *s3.Client, bucket, checkpointKey string) {
+func runChecks(ctx context.Context, rows []row, s3Client *s3.Client, bucket, checkpointKey, ackedPath string) {
 	slots, _ := decodeRows(rows)
 	c := &checker{}
 	fmt.Printf("== checks on %d log slots\n", len(slots))
@@ -53,6 +66,9 @@ func runChecks(ctx context.Context, rows []row, s3Client *s3.Client, bucket, che
 		c.note("full replay checks", "log has trimmed slots; only checkpoint plus tail can be replayed")
 	} else {
 		checkFullReplay(c, slots, entries)
+	}
+	if ackedPath != "" {
+		checkAcked(c, ackedPath, entries, trimmed)
 	}
 	if bucket != "" {
 		checkCheckpoint(ctx, c, s3Client, bucket, checkpointKey, slots, trimmed)

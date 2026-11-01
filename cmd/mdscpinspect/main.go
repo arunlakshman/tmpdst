@@ -44,6 +44,7 @@ func main() {
 	tail := flag.Int("tail", 0, "show the last N log slots, decoded")
 	doCheck := flag.Bool("check", false, "verify the stored log and checkpoint; exit 1 if any check fails")
 	checkpointKey := flag.String("checkpoint-key", "cp/checkpoint/latest", "S3 key of the checkpoint")
+	ackedPath := flag.String("acked", "", "with -check: the acked file that mdscpverify -acked-out wrote; checks that every acked commit is in the log with the same offsets")
 	flag.Parse()
 
 	ctx := context.Background()
@@ -52,7 +53,7 @@ func main() {
 	rows := readAll(ctx, dynamodb.NewFromConfig(awsConfig), *table)
 	s3Client := s3.NewFromConfig(awsConfig)
 	if *doCheck {
-		runChecks(ctx, rows, s3Client, *bucket, *checkpointKey)
+		runChecks(ctx, rows, s3Client, *bucket, *checkpointKey, *ackedPath)
 		return
 	}
 	report(rows, *verbose, *oneSlot, *head, *tail)

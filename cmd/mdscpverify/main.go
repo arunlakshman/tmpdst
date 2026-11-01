@@ -1,21 +1,30 @@
 // Command mdscpverify drives a running control plane over gRPC and checks the
 // answers. It needs no broker and no Kafka client.
 //
-// Smoke checks (a first small step):
-//  1. wait until the control plane is ready (GetStatus answers)
-//  2. create a topic
-//  3. commit many segments over several partitions
-//  4. send the same commits again: the answers must be identical (idempotency)
-//  5. per partition: offsets are contiguous, never overlap, and the end offset
-//     equals the number of records that were acked
+// Two modes:
 //
-// Exit code 0 means every check passed. Not part of the determinism gate.
+//	-mode smoke (default): a few checks on a fresh topic
+//	 1. wait until the control plane is ready (GetStatus answers)
+//	 2. create a topic
+//	 3. commit many segments over several partitions
+//	 4. send the same commits again: the answers must be identical (idempotency)
+//	 5. per partition: offsets are contiguous, never overlap, and the end offset
+//	    equals the number of records that were acked
+//
+//	-mode load: keep committing for -duration with -workers workers. A commit
+//	 that fails in a way that may be retried is sent again with the same key
+//	 until it is acked. Every ack is written to -acked-out, for mdscpinspect
+//	 -check -acked. Used in failure experiments (nodes killed during the load).
+//
+// Exit code 0 means every check passed (smoke) or no commit failed (load).
+// Not part of the determinism gate.
 package main
 
 import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
 	"time"
@@ -25,19 +34,41 @@ import (
 )
 
 func main() {
+	mode := flag.String("mode", "smoke", "smoke (checks) or load (sustained commits with retries)")
 	target := flag.String("cp", "127.0.0.1:8080", "control plane address(es), comma separated")
-	topic := flag.String("topic", fmt.Sprintf("verify-%d", time.Now().Unix()), "topic name to create")
+	topic := flag.String("topic", "", "topic name (smoke default: verify-<unix time>; load default: verify-load)")
 	partitions := flag.Int("partitions", 4, "number of partitions")
-	commits := flag.Int("commits", 50, "number of segment commits")
+	commits := flag.Int("commits", 50, "smoke: number of segment commits")
 	batchesPer := flag.Int("batches", 3, "batches in each commit")
 	records := flag.Int64("records", 10, "records in each batch")
+	duration := flag.Duration("duration", 60*time.Second, "load: how long to keep committing")
+	workers := flag.Int("workers", 4, "load: concurrent committers")
+	rate := flag.Float64("rate", 0, "load: total commits per second (0 = as fast as possible)")
+	runID := flag.String("run-id", time.Now().UTC().Format("20060102-150405"), "load: part of every segment key, so keys are unique per run")
+	ackedOut := flag.String("acked-out", "", "load: append one JSON line per acked commit to this file")
 	flag.Parse()
 
-	if err := run(*target, *topic, int32(*partitions), *commits, *batchesPer, *records); err != nil {
-		fmt.Fprintln(os.Stderr, "FAIL:", err)
-		os.Exit(1)
+	switch *mode {
+	case "smoke":
+		name := *topic
+		if name == "" {
+			name = fmt.Sprintf("verify-%d", time.Now().Unix())
+		}
+		if err := run(*target, name, int32(*partitions), *commits, *batchesPer, *records); err != nil {
+			fmt.Fprintln(os.Stderr, "FAIL:", err)
+			os.Exit(1)
+		}
+		fmt.Println("PASS")
+	case "load":
+		os.Exit(runLoadMain(loadConfig{
+			target: *target, topic: *topic, partitions: int32(*partitions),
+			batches: *batchesPer, records: *records, runID: *runID,
+			workers: *workers, duration: *duration, rate: *rate, ackedOut: *ackedOut,
+		}))
+	default:
+		fmt.Fprintf(os.Stderr, "FAIL: unknown -mode %q (want smoke or load)\n", *mode)
+		os.Exit(2)
 	}
-	fmt.Println("PASS")
 }
 
 func run(target, topic string, partitions int32, commits, batchesPer int, records int64) error {
@@ -46,7 +77,7 @@ func run(target, topic string, partitions int32, commits, batchesPer int, record
 	client := controlplaneclient.New(target, nil)
 	defer func() { _ = client.Close() }()
 
-	if err := waitReady(ctx, client); err != nil {
+	if err := waitReady(ctx, client, os.Stdout); err != nil {
 		return err
 	}
 	if err := client.CreateTopic(ctx, topic, partitions); err != nil {
@@ -83,12 +114,14 @@ func run(target, topic string, partitions int32, commits, batchesPer int, record
 	return checkOffsets(ctx, client, topic, partitions, acked)
 }
 
-func waitReady(ctx context.Context, client *controlplaneclient.Client) error {
+// waitReady polls GetStatus until the control plane answers, and reports the
+// status line to out.
+func waitReady(ctx context.Context, client *controlplaneclient.Client, out io.Writer) error {
 	for {
 		status, err := client.GetStatus(ctx)
 		if err == nil {
-			fmt.Printf("control plane role=%s applied_slot=%d log_tail=%d\n", status.Role, status.AppliedSlot, status.LogTail)
-			return nil
+			_, writeErr := fmt.Fprintf(out, "control plane role=%s applied_slot=%d log_tail=%d\n", status.Role, status.AppliedSlot, status.LogTail)
+			return writeErr
 		}
 		select {
 		case <-ctx.Done():

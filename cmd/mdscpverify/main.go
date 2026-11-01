@@ -34,7 +34,7 @@ import (
 )
 
 func main() {
-	mode := flag.String("mode", "smoke", "smoke (checks) or load (sustained commits with retries)")
+	mode := flag.String("mode", "smoke", "smoke, load (sustained commits with retries), ready, ends (compare cluster end offsets with -acked), big (one oversized commit)")
 	target := flag.String("cp", "127.0.0.1:8080", "control plane address(es), comma separated")
 	topic := flag.String("topic", "", "topic name (smoke default: verify-<unix time>; load default: verify-load)")
 	partitions := flag.Int("partitions", 4, "number of partitions")
@@ -46,6 +46,8 @@ func main() {
 	rate := flag.Float64("rate", 0, "load: total commits per second (0 = as fast as possible)")
 	runID := flag.String("run-id", time.Now().UTC().Format("20060102-150405"), "load: part of every segment key, so keys are unique per run")
 	ackedOut := flag.String("acked-out", "", "load: append one JSON line per acked commit to this file")
+	ackedIn := flag.String("acked", "", "ends: the acked file written by a load run")
+	bigBatches := flag.Int("big-batches", 40000, "big: batches in the oversized commit")
 	flag.Parse()
 
 	switch *mode {
@@ -65,8 +67,22 @@ func main() {
 			batches: *batchesPer, records: *records, runID: *runID,
 			workers: *workers, duration: *duration, rate: *rate, ackedOut: *ackedOut,
 		}))
+	case "ready":
+		os.Exit(runReadyMain(*target))
+	case "ends":
+		if *ackedIn == "" {
+			fmt.Fprintln(os.Stderr, "FAIL: -mode ends needs -acked FILE")
+			os.Exit(2)
+		}
+		os.Exit(runEndsMain(*target, *ackedIn))
+	case "big":
+		name := *topic
+		if name == "" {
+			name = "verify-big"
+		}
+		os.Exit(runBigMain(*target, name, *bigBatches))
 	default:
-		fmt.Fprintf(os.Stderr, "FAIL: unknown -mode %q (want smoke or load)\n", *mode)
+		fmt.Fprintf(os.Stderr, "FAIL: unknown -mode %q (want smoke, load, ready, ends or big)\n", *mode)
 		os.Exit(2)
 	}
 }

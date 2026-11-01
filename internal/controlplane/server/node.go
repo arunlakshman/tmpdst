@@ -130,6 +130,13 @@ func (n *Node) Start(ctx context.Context) error {
 		n.health.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
 		n.loopDone <- err
 	}()
+	return n.waitReady(ctx, cancel)
+}
+
+// waitReady waits until the machine is ready, then sets health to SERVING.
+// It gives up when ctx ends, when the loop exits, or after two minutes.
+// On a give-up it calls cancel and waits for the loop to stop.
+func (n *Node) waitReady(ctx context.Context, cancel context.CancelFunc) error {
 	fail := func(err error) error {
 		cancel()
 		loopErr := <-n.loopDone

@@ -3,7 +3,6 @@ package stateupdater
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 
 	"mds/internal/core"
 )
@@ -369,9 +368,7 @@ func (a *StateUpdater) Apply(slot int64, e Entry) core.ControlPlaneDone {
 			return d
 		}
 		d, err := a.Commit(slot, e.Commit)
-		if err != nil {
-			panic(fmt.Errorf("stateupdater: store failed: %w", err))
-		}
+		mustStore(err)
 		d.Req = core.RequestID(slot)
 		return d
 	case KindCreateTopic, KindCreateTopicExclusive:
@@ -379,9 +376,7 @@ func (a *StateUpdater) Apply(slot int64, e Entry) core.ControlPlaneDone {
 		return core.ControlPlaneDone{Req: core.RequestID(slot), Err: err}
 	case KindGroupInstall, KindGroupAssign, KindGroupRemove, KindOffsetCommit:
 		d, err := a.groupWrite(e.groupOp())
-		if err != nil {
-			panic(fmt.Errorf("stateupdater: store failed: %w", err))
-		}
+		mustStore(err)
 		d.Req = core.RequestID(slot)
 		return d
 	default:

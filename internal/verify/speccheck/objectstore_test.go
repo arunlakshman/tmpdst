@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker"
 )
 
 func put(s *ObjectStore, key, data string) core.ObjectPutDone {
@@ -194,23 +194,23 @@ func objCheck(impl func() objExec) checker.SpecChecker[*objPair, core.IOCall] {
 		Name: "core.IOCall",
 		New:  func() *objPair { return &objPair{impl(), &sliceStore{}} },
 		Gen: func(r *checker.Rand, i int) core.IOCall {
-			req, key := core.RequestID(i+1), keys[r.Intn(len(keys))]
+			request, key := core.RequestID(i+1), keys[r.Intn(len(keys))]
 			switch r.Intn(7) {
 			case 0, 1, 2:
 				data := make([]byte, r.Intn(5))
 				for j := range data {
 					data[j] = byte('a' + r.Intn(26))
 				}
-				return core.ObjectPut{Req: req, Key: key, Data: data}
+				return core.ObjectPut{Req: request, Key: key, Data: data}
 			case 3, 4:
-				return core.ObjectGet{Req: req, Ref: core.SegmentRef{Key: key, Off: int64(r.Intn(7) - 1), Len: int64(r.Intn(7) - 1)}}
+				return core.ObjectGet{Req: request, Ref: core.SegmentRef{Key: key, Off: int64(r.Intn(7) - 1), Len: int64(r.Intn(7) - 1)}}
 			case 5:
-				return core.ObjectDelete{Req: req, Key: key}
+				return core.ObjectDelete{Req: request, Key: key}
 			}
-			return core.ObjectList{Req: req, Prefix: prefixes[r.Intn(len(prefixes))]}
+			return core.ObjectList{Req: request, Prefix: prefixes[r.Intn(len(prefixes))]}
 		},
-		Step: func(p *objPair, op core.IOCall) error {
-			got, want := fmt.Sprintf("%#v", p.impl.Exec(op)), fmt.Sprintf("%#v", p.model.Exec(op))
+		Step: func(p *objPair, operation core.IOCall) error {
+			got, want := fmt.Sprintf("%#v", p.impl.Exec(operation)), fmt.Sprintf("%#v", p.model.Exec(operation))
 			if got != want {
 				return fmt.Errorf("impl %s, model %s", got, want)
 			}
@@ -222,22 +222,22 @@ func objCheck(impl func() objExec) checker.SpecChecker[*objPair, core.IOCall] {
 			}
 			return nil
 		},
-		Shrink: func(op core.IOCall) []core.IOCall {
-			switch op := op.(type) {
+		Shrink: func(operation core.IOCall) []core.IOCall {
+			switch operation := operation.(type) {
 			case core.ObjectPut:
-				if len(op.Data) > 0 {
-					op.Data = nil
-					return []core.IOCall{op}
+				if len(operation.Data) > 0 {
+					operation.Data = nil
+					return []core.IOCall{operation}
 				}
 			case core.ObjectGet:
 				var out []core.IOCall
-				if op.Ref.Off != 0 {
-					r := op
+				if operation.Ref.Off != 0 {
+					r := operation
 					r.Ref.Off = 0
 					out = append(out, r)
 				}
-				if op.Ref.Len != 0 {
-					r := op
+				if operation.Ref.Len != 0 {
+					r := operation
 					r.Ref.Len = 0
 					out = append(out, r)
 				}
@@ -245,7 +245,7 @@ func objCheck(impl func() objExec) checker.SpecChecker[*objPair, core.IOCall] {
 			}
 			return nil
 		},
-		Format: func(op core.IOCall) string { return fmt.Sprintf("%#v", op) },
+		Format: func(operation core.IOCall) string { return fmt.Sprintf("%#v", operation) },
 		Ops:    60,
 	}
 }
@@ -266,14 +266,14 @@ func (b brokenStore) Exec(a core.IOCall) core.IOResult {
 	return b.ObjectStore.Exec(a)
 }
 
-func TestObjectStoreCheckShrinksPlantedBug(t *testing.T) {
+func TestObjectStoreCheckShrinksInjectedBug(t *testing.T) {
 	c := objCheck(func() objExec { return brokenStore{NewObjectStore()} })
 	var f *checker.Failure[core.IOCall]
 	for seed := uint64(1); f == nil && seed <= 50; seed++ {
 		f = c.RunSeed(seed)
 	}
 	if f == nil {
-		t.Fatal("planted bug not found")
+		t.Fatal("injected bug not found")
 	}
 	if len(f.Ops) != 2 {
 		t.Fatalf("want put+get, got:\n%s", c.Report(f, ""))
@@ -285,5 +285,5 @@ func TestObjectStoreCheckShrinksPlantedBug(t *testing.T) {
 	if !ok1 || !ok2 || len(put.Data) != 0 || get.Ref.Off <= 0 || get.Ref.Len != 0 || put.Key != get.Ref.Key {
 		t.Fatalf("not minimal:\n%s", c.Report(f, ""))
 	}
-	t.Logf("example report:\n%s", c.Report(f, "go test ./speccheck -run TestObjectStoreCheckShrinksPlantedBug"))
+	t.Logf("example report:\n%s", c.Report(f, "go test ./speccheck -run TestObjectStoreCheckShrinksInjectedBug"))
 }

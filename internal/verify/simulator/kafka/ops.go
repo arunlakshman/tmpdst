@@ -1,6 +1,6 @@
 package kafka
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // History ops. One ProduceOp covers a batch and all its retries (HistOp.ID and
 // Value are the batch's id); one ReadOp is one Fetch request.
@@ -10,10 +10,10 @@ import "manifester/internal/core"
 // the same bytes. Idem marks a batch that claims a producer id (the broker
 // must reject it).
 type ProduceOp struct {
-	Client, Batch int
-	TP            core.TopicPartition
-	Vals          []string
-	Idem          bool
+	Client, Batch  int
+	TopicPartition core.TopicPartition
+	Vals           []string
+	Idem           bool
 }
 
 // ProduceRes is a produce op's result. Base is the acked base offset (-1
@@ -33,8 +33,8 @@ type ReadOp struct {
 
 // ReadFrom names one partition and the offset to fetch from.
 type ReadFrom struct {
-	TP  core.TopicPartition
-	Off int64
+	TopicPartition core.TopicPartition
+	Off            int64
 }
 
 // ReadRes is the Fetch answer, per asked partition in order. Records are the
@@ -50,7 +50,7 @@ type ReadPart struct {
 	Code    int16
 	HWM     int64
 	Recs    []Rec
-	Corrupt bool // a returned batch failed kwire.ParseBatch (CRC or structure)
+	Corrupt bool // a returned batch failed kafkawire.ParseBatch (CRC or structure)
 }
 
 // Rec is one returned record: its offset and value.

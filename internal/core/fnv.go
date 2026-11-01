@@ -63,24 +63,24 @@ func (h Hasher) Sum() uint64 { return uint64(h) }
 // Byte folds one byte.
 func (h *Hasher) Byte(b byte) { *h = (*h ^ Hasher(b)) * fnvPrime }
 
-// U64 folds v as 8 little-endian bytes.
-func (h *Hasher) U64(v uint64) { *h = Hasher(Fnv64Hash(uint64(*h), v)) }
+// Uint64Value folds v as 8 little-endian bytes.
+func (h *Hasher) Uint64Value(v uint64) { *h = Hasher(Fnv64Hash(uint64(*h), v)) }
 
-// I64 folds v as U64 does.
-func (h *Hasher) I64(v int64) { h.U64(uint64(v)) }
+// Int64Value folds v as Uint64Value does.
+func (h *Hasher) Int64Value(v int64) { h.Uint64Value(uint64(v)) }
 
-// Bool folds 1 or 0 as U64 does.
+// Bool folds 1 or 0 as Uint64Value does.
 func (h *Hasher) Bool(b bool) {
 	if b {
-		h.U64(1)
+		h.Uint64Value(1)
 	} else {
-		h.U64(0)
+		h.Uint64Value(0)
 	}
 }
 
-// Str folds the length of s, then its bytes.
-func (h *Hasher) Str(s string) {
-	h.U64(uint64(len(s)))
+// StringValue folds the length of s, then its bytes.
+func (h *Hasher) StringValue(s string) {
+	h.Uint64Value(uint64(len(s)))
 	for _, c := range []byte(s) {
 		h.Byte(c)
 	}
@@ -88,7 +88,7 @@ func (h *Hasher) Str(s string) {
 
 // Bytes folds the length of b, then its bytes.
 func (h *Hasher) Bytes(b []byte) {
-	h.U64(uint64(len(b)))
+	h.Uint64Value(uint64(len(b)))
 	for _, c := range b {
 		h.Byte(c)
 	}

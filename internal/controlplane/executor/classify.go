@@ -5,7 +5,7 @@ import (
 	"errors"
 	"net"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Classify maps an executor error for a into ErrCode and Outcome.

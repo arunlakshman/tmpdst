@@ -8,7 +8,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func sampleRequest(key, v int16) kmsg.Request {
@@ -190,8 +190,8 @@ func TestRoundTripAllAPIs(t *testing.T) {
 	for _, r := range Supported() {
 		for _, v := range []int16{r.Min, r.Max} {
 			h := core.RequestHeader{APIKey: r.Key, APIVersion: v, CorrelationID: 1000 + int32(v), ClientID: "cli"}
-			req := sampleRequest(r.Key, v)
-			wire, err := c.EncodeRequest(h, req)
+			request := sampleRequest(r.Key, v)
+			wire, err := c.EncodeRequest(h, request)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -202,21 +202,21 @@ func TestRoundTripAllAPIs(t *testing.T) {
 			if err != nil || gh != h {
 				t.Fatalf("key %d v%d: %+v %v", r.Key, v, gh, err)
 			}
-			if !bytes.Equal(greq.(kmsg.Request).AppendTo(nil), req.AppendTo(nil)) {
-				t.Fatalf("key %d v%d: request differs\n%+v\n%+v", r.Key, v, greq, req)
+			if !bytes.Equal(greq.(kmsg.Request).AppendTo(nil), request.AppendTo(nil)) {
+				t.Fatalf("key %d v%d: request differs\n%+v\n%+v", r.Key, v, greq, request)
 			}
-			resp := sampleResponse(r.Key, h)
-			rw, err := c.EncodeResponse(h, resp)
+			response := sampleResponse(r.Key, h)
+			rw, err := c.EncodeResponse(h, response)
 			if err != nil {
 				t.Fatal(err)
 			}
 			gresp, err := c.DecodeResponse(h, oneFrame(t, rw))
-			if err != nil || !bytes.Equal(gresp.(kmsg.Response).AppendTo(nil), resp.AppendTo(nil)) {
-				t.Fatalf("key %d v%d: response %v\n%+v\n%+v", r.Key, v, err, gresp, resp)
+			if err != nil || !bytes.Equal(gresp.(kmsg.Response).AppendTo(nil), response.AppendTo(nil)) {
+				t.Fatalf("key %d v%d: response %v\n%+v\n%+v", r.Key, v, err, gresp, response)
 			}
 			// determinism
-			wire2, _ := c.EncodeRequest(h, req)
-			rw2, _ := c.EncodeResponse(h, resp)
+			wire2, _ := c.EncodeRequest(h, request)
+			rw2, _ := c.EncodeResponse(h, response)
 			if !bytes.Equal(wire, wire2) || !bytes.Equal(rw, rw2) {
 				t.Fatalf("key %d v%d: encoding not deterministic", r.Key, v)
 			}
@@ -259,9 +259,9 @@ func TestUnsupported(t *testing.T) {
 		key, v  int16
 		unknown bool
 	}{{KeyApiVersions, 4, false}, {KeyApiVersions, 99, false}, {KeyProduce, 2, false}, {KeyFetch, 13, false}, {KeyApiVersions, -1, false}, {50, 0, true}, {-3, 0, true}} {
-		h, req, err := c.DecodeRequest(append(hdr(tc.key, tc.v), 1, 2, 3))
+		h, request, err := c.DecodeRequest(append(hdr(tc.key, tc.v), 1, 2, 3))
 		var ue *UnsupportedError
-		if !errors.As(err, &ue) || ue.UnknownKey != tc.unknown || ue.Key != tc.key || ue.Version != tc.v || req != nil {
+		if !errors.As(err, &ue) || ue.UnknownKey != tc.unknown || ue.Key != tc.key || ue.Version != tc.v || request != nil {
 			t.Fatalf("%+v: %v", tc, err)
 		}
 		if h.CorrelationID != 42 || h.ClientID != "id" || h.APIKey != tc.key || h.APIVersion != tc.v {
@@ -270,11 +270,11 @@ func TestUnsupported(t *testing.T) {
 	}
 	// Broker answer to ApiVersions v99: error 35, encoded as v0, client decodes it.
 	h := core.RequestHeader{APIKey: KeyApiVersions, APIVersion: 99, CorrelationID: 42}
-	resp := ApiVersionsResponse(h)
-	if resp.ErrorCode != ErrCodeUnsupportedVersion || len(resp.ApiKeys) != len(Supported()) {
-		t.Fatalf("%+v", resp)
+	response := ApiVersionsResponse(h)
+	if response.ErrorCode != ErrCodeUnsupportedVersion || len(response.ApiKeys) != len(Supported()) {
+		t.Fatalf("%+v", response)
 	}
-	rw, err := c.EncodeResponse(h, resp)
+	rw, err := c.EncodeResponse(h, response)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,8 +314,8 @@ func FuzzDecodeRequest(f *testing.F) {
 		f.Add(w[4:])
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		if _, req, err := c.DecodeRequest(data); err == nil {
-			_, _ = c.EncodeRequest(core.RequestHeader{APIKey: req.Key(), APIVersion: req.GetVersion()}, req)
+		if _, request, err := c.DecodeRequest(data); err == nil {
+			_, _ = c.EncodeRequest(core.RequestHeader{APIKey: request.Key(), APIVersion: request.GetVersion()}, request)
 		}
 		for _, r := range Supported() {
 			_, _ = c.DecodeResponse(core.RequestHeader{APIKey: r.Key, APIVersion: r.Max}, data)
@@ -335,8 +335,8 @@ func TestInitProducerIDNotSupported(t *testing.T) {
 		}
 	}
 	var c Codec
-	req := kmsg.NewPtrInitProducerIDRequest()
-	wire, err := c.EncodeRequest(core.RequestHeader{APIKey: 22, APIVersion: 0, CorrelationID: 1}, req)
+	request := kmsg.NewPtrInitProducerIDRequest()
+	wire, err := c.EncodeRequest(core.RequestHeader{APIKey: 22, APIVersion: 0, CorrelationID: 1}, request)
 	if err == nil {
 		if _, _, err = c.DecodeRequest(oneFrame(t, wire)); err == nil {
 			t.Fatal("key 22 decoded")

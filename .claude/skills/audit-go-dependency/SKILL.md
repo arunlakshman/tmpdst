@@ -1,6 +1,6 @@
 ---
 name: audit-go-dependency
-description: Audit a Go module for determinism before the deterministic packages (internal/core, internal/verify/simulator) may import it, or after bumping its version. Use when adding or upgrading a dependency of internal/core or internal/verify/simulator, when detcheck reports an import that is not on the allow-list, or when a dependency has no audit record under docs/dep-audits.
+description: Audit a Go module for determinism before the deterministic packages (internal/core, internal/verify/simulator) may import it, or after bumping its version. Use when adding or upgrading a dependency of internal/core or internal/verify/simulator, when determinismcheck reports an import that is not on the allow-list, or when a dependency has no audit record under docs/dep-audits.
 ---
 
 # Audit a Go dependency for determinism
@@ -15,10 +15,10 @@ needs no determinism audit.
 
 1. **Run the audit script** (it never modifies this repo):
    `ops/scripts/audit-dep.sh <module>@<version> [package-pattern]`
-   It prints the direct imports, the third-party packages pulled in, detcheck
+   It prints the direct imports, the third-party packages pulled in, determinismcheck
    findings, manual-review hints, and a checklist.
 
-2. **Review every detcheck finding.** For each, decide whether it can affect
+2. **Review every determinismcheck finding.** For each, decide whether it can affect
    behavior across runs of the same seed:
    - imports of `time`, `math/rand`, `crypto/rand`, `os`, `net`, `sync`,
      `runtime`, `hash/maphash`, `maps`: find every call site;
@@ -60,5 +60,5 @@ needs no determinism audit.
 ## Never
 
 - Never weaken `ops/tools/determinismcheck` or delete an allow-list check to make CI pass.
-- Never suppress a finding in our code without `//detcheck:ok <reason>`.
+- Never suppress a finding in our code without `//determinismcheck:ok <reason>`.
 - Never accept a dependency on "it's just a codec": check aliasing and hidden defaults.

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func newTestStore(t *testing.T, prefix string) (*Store, *fakeS3) {
@@ -144,18 +144,18 @@ func TestStoreServerErrors(t *testing.T) {
 		if f.calls-before != 5 {
 			t.Errorf("%s: %d requests for 5 calls, the store must not retry", c.name, f.calls-before)
 		}
-		for name, op := range ops {
-			if op.err == nil {
+		for name, operation := range ops {
+			if operation.err == nil {
 				t.Errorf("%s/%s: no error", c.name, name)
 				continue
 			}
-			code, out := Classifier{}.Classify(op.act, op.err)
+			code, out := Classifier{}.Classify(operation.act, operation.err)
 			wantOut := c.out
 			if name == "get" || name == "get-range" || name == "list" {
 				wantOut = core.NotApplied
 			}
 			if code != c.want || out != wantOut {
-				t.Errorf("%s/%s: %v %v, want %v %v (%v)", c.name, name, code, out, c.want, wantOut, op.err)
+				t.Errorf("%s/%s: %v %v, want %v %v (%v)", c.name, name, code, out, c.want, wantOut, operation.err)
 			}
 		}
 	}
@@ -198,7 +198,7 @@ func TestStoreDialAndHTTPClient(t *testing.T) {
 	if err := s.EnsureBucket(t.Context()); err == nil {
 		t.Error("EnsureBucket on a dead endpoint succeeded")
 	}
-	if !strings.HasPrefix(UniqueBucket(), "manifester-") {
+	if !strings.HasPrefix(UniqueBucket(), "mds-") {
 		t.Error("UniqueBucket")
 	}
 }

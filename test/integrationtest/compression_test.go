@@ -9,7 +9,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/wire/kafkawire"
 )
 
 // codecCase is one producer compression setting. id is the codec id expected
@@ -79,19 +79,19 @@ func runCompression(t *testing.T, s *stack) {
 // the producer's codec id, with the broker's patched offsets.
 func checkStoredCodec(ctx context.Context, t *testing.T, cl *kgo.Client, topic string, cc codecCase) {
 	t.Helper()
-	req := kmsg.NewPtrFetchRequest()
-	req.MaxBytes, req.MaxWaitMillis = 8<<20, 100
+	request := kmsg.NewPtrFetchRequest()
+	request.MaxBytes, request.MaxWaitMillis = 8<<20, 100
 	rt := kmsg.NewFetchRequestTopic()
 	rt.Topic = topic
 	rp := kmsg.NewFetchRequestTopicPartition()
 	rp.PartitionMaxBytes, rp.CurrentLeaderEpoch = 8<<20, -1
 	rt.Partitions = append(rt.Partitions, rp)
-	req.Topics = append(req.Topics, rt)
-	resp, err := cl.Request(ctx, req)
+	request.Topics = append(request.Topics, rt)
+	response, err := cl.Request(ctx, request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := resp.(*kmsg.FetchResponse).Topics[0].Partitions[0].RecordBatches
+	raw := response.(*kmsg.FetchResponse).Topics[0].Partitions[0].RecordBatches
 	bs, err := kafkawire.SplitBatches(raw)
 	if err != nil || len(bs) == 0 {
 		t.Fatalf("%s: raw fetch: %v, %d batches", cc.name, err, len(bs))

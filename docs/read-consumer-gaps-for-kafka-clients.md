@@ -4,7 +4,7 @@ Status at 2026-10-31. This page lists what a Kafka client can and cannot do on t
 
 ## What works today
 
-The broker serves sixteen Kafka APIs. `kwire.Supported` in `internal/wire/kafkawire/supported.go` is the source.
+The broker serves sixteen Kafka APIs. `kafkawire.Supported` in `internal/wire/kafkawire/supported.go` is the source.
 
 | API | Key | Versions |
 |---|---|---|
@@ -60,7 +60,7 @@ Known limits of the group API:
 1. The broker sends one `Lookup` call to the control plane. `Lookup` is a `core.CPOp` in `internal/core/controlplane.go`. The call asks for batches at or after the fetch offset, up to the partition byte limit.
 2. The broker reads each returned batch with one ranged S3 GET. Reads within one partition run one at a time, in offset order. `broker.onFetchGet` runs the next GET only after the previous GET returns.
 3. The broker checks length, record count, and CRC for each batch. A bad GET is retried, up to `MaxAttempts`, which defaults to 6 in `internal/broker/config.go`.
-4. The broker rewrites base offset and leader epoch with `kwire.PatchBatch`. Both fields sit outside the batch CRC, so the CRC stays valid.
+4. The broker rewrites base offset and leader epoch with `kafkawire.ChangeBatchOffset`. Both fields sit outside the batch CRC, so the CRC stays valid.
 5. The broker returns the batches. It sets high watermark and last stable offset to the partition end offset from `LookupResp.End`. It sets log start offset to 0.
 
 Byte limits work. `PartitionMaxBytes` bounds one partition. `MaxBytes` bounds the whole response, applied in `broker.finalize` in `internal/broker/conn.go`. A partition that asks for no limit gets `DefaultFetchBytes`, 1 MiB. A response always holds at least one batch per partition, even if that batch exceeds the limit.
@@ -71,7 +71,7 @@ A Fetch can wait for data. The rules are:
 
 - `MaxWait` is in milliseconds. The broker caps it at 30 seconds. A `MaxWait` of 0 answers at once, as before.
 - `MinBytes` is the total size the answer must reach. A `MinBytes` of 0 or less answers at once.
-- A partition with no data is polled again with `Lookup` every `FetchPollInterval`. The default is 200 ms. The flag on `manibroker` is `-fetch-poll-interval`. Each poll is one `Lookup` for one partition.
+- A partition with no data is polled again with `Lookup` every `FetchPollInterval`. The default is 200 ms. The flag on `mdsbroker` is `-fetch-poll-interval`. Each poll is one `Lookup` for one partition.
 - A partition that has data keeps it and is not polled again. It waits for the rest of the Fetch.
 - The Fetch answers when its total bytes reach `MinBytes`, or when `MaxWait` ends. The answer holds what the broker has, which can be empty.
 - A parked Fetch ends at once when its connection closes or the broker stops. A stop answers it empty.
@@ -85,7 +85,7 @@ The wait is a timer, not a wake-up. The broker learns of a commit only at its ne
 
 ## Unsupported requests
 
-A request outside the table in `kwire.Supported` gets no answer. Its key or version is not served (for example ConsumerGroupHeartbeat, key 68). `kwire.DecodeRequest` returns `kwire.UnsupportedError` for it. `broker.request` in `internal/broker/conn.go` closes the connection with no error text. Only an ApiVersions request gets an answer.
+A request outside the table in `kafkawire.Supported` gets no answer. Its key or version is not served (for example ConsumerGroupHeartbeat, key 68). `Codec.DecodeRequest` returns `kafkawire.UnsupportedError` for it. `broker.request` in `internal/broker/conn.go` closes the connection with no error text. Only an ApiVersions request gets an answer.
 
 ## Missing Kafka APIs
 
@@ -105,9 +105,9 @@ Kafka Connect, Kafka Streams, and ksqlDB need transactional producers as well, a
 | Field or feature | Behavior today | Code |
 |---|---|---|
 | Fetch sessions, `SessionId` and `SessionEpoch` | A request with `SessionEpoch` above 0 gets `FETCH_SESSION_ID_NOT_FOUND`. The broker grants no session. Each Fetch sends full topic and partition state. | `broker.fetch` in `internal/broker/fetch.go`. |
-| Topic IDs | Fetch version 13 and above use topic IDs. The broker stops at version 12, so clients must use topic names. A Metadata request by topic ID returns `UNKNOWN_TOPIC_ID`. | `kwire.Supported`, `broker.metaResp`. |
+| Topic IDs | Fetch version 13 and above use topic IDs. The broker stops at version 12, so clients must use topic names. A Metadata request by topic ID returns `UNKNOWN_TOPIC_ID`. | `kafkawire.Supported`, `broker.metaResp`. |
 | Isolation level | Read committed and read uncommitted get the same answer. The broker sets last stable offset equal to the end offset and never returns aborted transaction markers. There are no transactions to abort. | `broker.onLookup`. |
-| `CurrentLeaderEpoch` and diverging epochs | The broker writes leader epoch 0 into every batch and into ListOffsets. It returns no diverging epoch. Fencing by leader epoch does not exist. | `kwire.PatchBatch` call in `broker.onFetchGet`. Decision 44. |
+| `CurrentLeaderEpoch` and diverging epochs | The broker writes leader epoch 0 into every batch and into ListOffsets. It returns no diverging epoch. Fencing by leader epoch does not exist. | `kafkawire.ChangeBatchOffset` call in `broker.acceptFetch`. Decision 44. |
 | Timestamp search in ListOffsets | A timestamp other than earliest (-2) or latest (-1) gets error 43, `UNSUPPORTED_FOR_MESSAGE_FORMAT`. A client that seeks by time fails. | `broker.listOffsets` in `internal/broker/metadata.go`. |
 
 ## Read path limits that come from missing caches

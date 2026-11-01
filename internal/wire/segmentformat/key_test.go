@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func TestKeyRoundTrip(t *testing.T) {

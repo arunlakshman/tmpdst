@@ -1,6 +1,6 @@
 package simulator
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // Process describes a system-under-test role (the broker). Built fresh from the
 // factory on every boot; nothing in memory survives a crash.
@@ -14,6 +14,11 @@ type Process struct {
 	// NoAttrition excludes this process from kernel attrition. CP replicas use
 	// LogParams StallProb/CrashProb instead (kafka-log).
 	NoAttrition bool
+	// HiddenFromClients keeps this process out of the broker list the workload
+	// receives. Set it for services that clients must never dial, such as the
+	// control plane nodes in kafka-log: a client that dials one waits for a
+	// Kafka answer that never comes.
+	HiddenFromClients bool
 }
 
 // Workload is a test driver: a deterministic Kafka client model (kgo cannot run
@@ -29,7 +34,7 @@ type Workload interface {
 
 // ReceivesPhaseChange is an optional Workload interface. At every phase change (into
 // PhaseRecovering and into PhaseRecover) the kernel appends the frozen fact
-// "sim_phase" {phase: U64 of the new Phase}, puts engines into recovery when
+// "sim_phase" {phase: Uint64Value of the new Phase}, puts engines into recovery when
 // Settling starts, and then calls OnPhase on each live workload that
 // implements it, in node order. The call is treated like a Step: the returned
 // actions are dispatched the same way (a workload may not StopForRestart or ShutdownDone), the
@@ -99,8 +104,8 @@ type ObjectStoreRealState interface {
 
 // ControlPlaneRealState is what the control plane really committed.
 type ControlPlaneRealState interface {
-	Committed(tp core.TopicPartition) []core.BatchRange
-	HighWatermark(tp core.TopicPartition) core.Offset
+	Committed(topicPartition core.TopicPartition) []core.BatchRange
+	HighWatermark(topicPartition core.TopicPartition) core.Offset
 	// Gen bumps whenever anything applied changes.
 	Gen() uint64
 }
@@ -137,7 +142,7 @@ type HistoryOperation struct {
 
 // History is the workload's append-only record of ops.
 type History interface {
-	Invoke(client core.NodeInstance, id, value core.ID, op any)
+	Invoke(client core.NodeInstance, id, value core.ID, operation any)
 	// Return completes id. It reports false for an unknown or duplicate id
 	// (a protocol failure).
 	Return(id core.ID, result any, o OpOutcome) bool

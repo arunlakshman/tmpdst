@@ -3,7 +3,7 @@ package server
 import (
 	"time"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 type realClock struct{}
@@ -15,7 +15,7 @@ func (realClock) Wall() core.RealTime {
 	return core.RealTime(time.Now().UnixNano())
 }
 
-// productionEnvironment is a minimal core.Environment for production manicp (no buggify).
+// productionEnvironment is a minimal core.Environment for production mdscontrolplane (no buggify).
 type productionEnvironment struct{ n uint64 }
 
 func (e *productionEnvironment) Uint64() uint64 {

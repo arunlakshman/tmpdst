@@ -10,9 +10,9 @@ import (
 // forever.
 func TestShrinkPartitionOp(t *testing.T) {
 	cases := []struct {
-		name string
-		op   PartitionOp
-		want []PartitionOp
+		name      string
+		operation PartitionOp
+		want      []PartitionOp
 	}{
 		{"append with two batches",
 			PartitionOp{Kind: "append", Batch: [][]byte{[]byte("a"), []byte("b")}},
@@ -35,13 +35,13 @@ func TestShrinkPartitionOp(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := minimizePartitionOp(c.op)
+			got := minimizePartitionOp(c.operation)
 			if !reflect.DeepEqual(got, c.want) {
-				t.Fatalf("the shrink of %#v gave %#v, but the test expected %#v", c.op, got, c.want)
+				t.Fatalf("the shrink of %#v gave %#v, but the test expected %#v", c.operation, got, c.want)
 			}
 			for _, g := range got {
-				if reflect.DeepEqual(g, c.op) {
-					t.Fatalf("the shrink of %#v returned the same operation", c.op)
+				if reflect.DeepEqual(g, c.operation) {
+					t.Fatalf("the shrink of %#v returned the same operation", c.operation)
 				}
 			}
 		})

@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/fakecontrolplane"
-	"manifester/internal/verify/simulator/fakeservices/fakeobjectstore"
-	"manifester/internal/verify/simulator/fakeservices/internal/fakeservicetest"
-	"manifester/internal/verify/speccheck/checker/generator"
-	"manifester/internal/verify/speccheck/checker/injectedbug"
-	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/runcontrol"
-	"manifester/internal/verify/speccheck/checker/suites"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/fakecontrolplane"
+	"mds/internal/verify/simulator/fakeservices/fakeobjectstore"
+	"mds/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"mds/internal/verify/speccheck/checker/generator"
+	"mds/internal/verify/speccheck/checker/injectedbug"
+	"mds/internal/verify/speccheck/checker/observation"
+	"mds/internal/verify/speccheck/checker/runsettings"
+	"mds/internal/verify/speccheck/checker/suites"
 )
 
 // Conformance C2. The engines in this package are SIMULATED components. This
@@ -26,16 +26,16 @@ import (
 // There is no test for the log engine here. The log engine is now only a
 // bridge for ControlPlaneCall, and it has no replica state machine of its own. Its
 // comparison with speccheck lives in the lockstep tests of package
-// internal/controlplane/statemachine (see TestLockstepMachineVsVeritas).
+// internal/controlplane/statemachine (see TestLockstepMachineVsSpecCheck).
 
 const seedBudget = 50
 
 // completionFor drains the engine queue and returns the completion of req.
-func completionFor(ctx *fakeservicetest.Ctx, req core.RequestID) (core.IOResult, error) {
+func completionFor(ctx *fakeservicetest.Ctx, request core.RequestID) (core.IOResult, error) {
 	ctx.Run()
-	c := ctx.Find(req)
+	c := ctx.Find(request)
 	if c == nil {
-		return nil, fmt.Errorf("request %d: the engine queue was drained but no completion arrived", req)
+		return nil, fmt.Errorf("request %d: the engine queue was drained but no completion arrived", request)
 	}
 	return c, nil
 }
@@ -52,9 +52,9 @@ func newEngineObjectSubject() suites.ObjectSubject {
 	return &engineObjectSubject{engine: e, ctx: fakeservicetest.New(e, 1), from: fakeservicetest.Ref("a")}
 }
 
-func (s *engineObjectSubject) Do(op core.IOCall) (observation.ObjectResult, error) {
-	s.engine.Execute(s.ctx, s.from, op)
-	c, err := completionFor(s.ctx, op.RequestID())
+func (s *engineObjectSubject) Do(operation core.IOCall) (observation.ObjectResult, error) {
+	s.engine.Execute(s.ctx, s.from, operation)
+	c, err := completionFor(s.ctx, operation.RequestID())
 	if err != nil {
 		return observation.ObjectResult{}, err
 	}
@@ -76,20 +76,20 @@ func newEngineControlPlaneSubject() suites.ControlPlaneSubject {
 	return &engineControlPlaneSubject{engine: e, ctx: fakeservicetest.New(e, 1), from: fakeservicetest.Ref("a")}
 }
 
-func (s *engineControlPlaneSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+func (s *engineControlPlaneSubject) Do(operation generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 	switch {
-	case op.CreateTopic != nil:
-		code := s.engine.CreateTopic(op.CreateTopic.Name, op.CreateTopic.Partitions)
+	case operation.CreateTopic != nil:
+		code := s.engine.CreateTopic(operation.CreateTopic.Name, operation.CreateTopic.Partitions)
 		return observation.ControlPlaneResult{Code: code}, nil
-	case op.Call != nil:
-		s.engine.Execute(s.ctx, s.from, *op.Call)
-		c, err := completionFor(s.ctx, op.Call.RequestID())
+	case operation.Call != nil:
+		s.engine.Execute(s.ctx, s.from, *operation.Call)
+		c, err := completionFor(s.ctx, operation.Call.RequestID())
 		if err != nil {
 			return observation.ControlPlaneResult{}, err
 		}
 		done, ok := c.(core.ControlPlaneDone)
 		if !ok {
-			return observation.ControlPlaneResult{}, fmt.Errorf("request %d: the completion is %T, not a CPDone", op.Call.RequestID(), c)
+			return observation.ControlPlaneResult{}, fmt.Errorf("request %d: the completion is %T, not a CPDone", operation.Call.RequestID(), c)
 		}
 		return observation.FromControlPlaneDone(done), nil
 	}
@@ -101,25 +101,25 @@ func (s *engineControlPlaneSubject) StateHash() (uint64, bool) { return s.engine
 func TestConformanceObjStore(t *testing.T) {
 	for _, profile := range suites.AllObjectProfiles() {
 		t.Run(profile.Name, func(t *testing.T) {
-			suites.ObjectStore(t, profile, newEngineObjectSubject, runcontrol.Options(t, seedBudget))
+			suites.ObjectStore(t, profile, newEngineObjectSubject, runsettings.Options(t, seedBudget))
 		})
 	}
 }
 
-func TestConformanceCPEngine(t *testing.T) {
+func TestConformanceFakeControlPlane(t *testing.T) {
 	for _, profile := range suites.AllControlPlaneProfiles() {
 		t.Run(profile.Name, func(t *testing.T) {
-			suites.ControlPlane(t, profile, newEngineControlPlaneSubject, runcontrol.Options(t, seedBudget))
+			suites.ControlPlane(t, profile, newEngineControlPlaneSubject, runsettings.Options(t, seedBudget))
 		})
 	}
 }
 
-// The suite must find each planted bug even when the correct subject is an
+// The suite must find each injected bug even when the correct subject is an
 // engine. This shows the engine comparison is as strong as the spec one.
-func TestConformanceObjStoreCatchesPlantedBugs(t *testing.T) {
+func TestConformanceObjStoreCatchesInjectedBugs(t *testing.T) {
 	injectedbug.RequireAllObjectBugsDetected(t, newEngineObjectSubject, seedBudget)
 }
 
-func TestConformanceCPEngineCatchesPlantedBugs(t *testing.T) {
+func TestConformanceFakeControlPlaneCatchesInjectedBugs(t *testing.T) {
 	injectedbug.RequireAllControlPlaneBugsDetected(t, newEngineControlPlaneSubject, seedBudget)
 }

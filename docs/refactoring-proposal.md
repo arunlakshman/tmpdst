@@ -33,16 +33,16 @@ New growth since the earlier proposal:
 
 - **Observers.** `internal/system/production/metrics.go` (155 lines), `seglog.go` (132), `cp/cpobs` (346), `internal/system/awsmetrics` (244),
   `internal/system/runinfo` (4 files, about 470). Prometheus names are literals at the construction site
-  (`metricsNS`/`"manicp"` plus a `Name:` string; 17 `Name:` literals in the observers and 19 more in `internal/system/`
+  (`metricsNS`/`"mdscontrolplane"` plus a `Name:` string; 17 `Name:` literals in the observers and 19 more in `internal/system/`
   and `cp/`). The same names are re-typed in Python and JSON: `ops/deploy/aws/observability/gen/gen_dashboards.py`
   (28 mentions), `bench/summarize.py` (15), `docs/observability.md` (46), dashboards JSON. There is no test
   tying them together.
-- **Command wiring.** `cmd/manibroker/main.go` is 206 lines; `main()` is 160 lines, the longest function in the
-  repo. `cmd/manicp/main.go` `main()` is 86 lines. Copy-pasted between the two: `-metrics-addr` flag plus
+- **Command wiring.** `cmd/mdsbroker/main.go` is 206 lines; `main()` is 160 lines, the longest function in the
+  repo. `cmd/mdscontrolplane/main.go` `main()` is 86 lines. Copy-pasted between the two: `-metrics-addr` flag plus
   listen/`http.Serve(runinfo.Mux(...))` goroutine, `-log-level`, `-run-id`, `-manifest-out` (identical 190-char
   help strings), `runinfo.New`/`NewLogger`/`slog.SetDefault`/"starting" log with 6 identical attributes,
   manifest write and log block (`writeManifest` in the broker, inlined in the CP), `fatal()`. About 45 lines
-  in each binary. `manibench` and `manisim` have their own `main` plus `flag` parsing.
+  in each binary. `mdsbench` and `mdssimulator` have their own `main` plus `flag` parsing.
 - **Tuning flags.** Six flags (`-segment-bytes`, `-segment-window`, `-max-segment-*`, `-max-buffered`,
   `-resume-buffered`) exist in four spellings: flag definition, `tuning` struct, `apply`, the "tuning" log
   line, and the manifest map (`main.go` lines 174-186 repeat all of them twice, with different key names:
@@ -97,15 +97,15 @@ Effort S. Value: dashboards and the bench summarizer break silently today.
 **Q5. `cmd/internal/wiring` (shared observer and process wiring).** New package, outside the deterministic
 closure, holding what the two mains copy: `Flags` struct (`MetricsAddr`, `LogLevel`, `RunID`,
 `ManifestOut`) with `Register(fs)`, `Setup(service, brokerID) (log, info)`, `ServeMetrics(addr, handler)`,
-`WriteManifest(...)`, `Fatal`. Mains shrink about 45 lines each; `main()` in `manibroker` drops from 160 to
-under 90 together with Q6. Hash: none. Proof: `cmd/manibroker/tuning_test.go`, a flag-help golden test
+`WriteManifest(...)`, `Fatal`. Mains shrink about 45 lines each; `main()` in `mdsbroker` drops from 160 to
+under 90 together with Q6. Hash: none. Proof: `cmd/mdsbroker/tuning_test.go`, a flag-help golden test
 (`-h` output unchanged except nothing), `test/integrationtest/` hermetic tests, the runbook smoke start. Conflicts: touches
-`cmd/` only; the uncommitted `cmd/manibroker` edits (tuning flags) should be committed first.
+`cmd/` only; the uncommitted `cmd/mdsbroker` edits (tuning flags) should be committed first.
 
 **Q6. One effective-config struct.** `tuning` already exists; make it produce `Describe() map[string]any`
 (one key set, one unit convention) used by both the "tuning" log line and the manifest; delete the two
 hand-written maps. Keep `broker.DefaultConfig` as the single default source (remove duplicate defaults in
-`withDefaults` by having it merge from `DefaultConfig`). Files: `cmd/manibroker/{main,tuning}.go`,
+`withDefaults` by having it merge from `DefaultConfig`). Files: `cmd/mdsbroker/{main,tuning}.go`,
 `internal/broker/config.go` **[after compaction]** for the defaults half. Risk: the manifest key names are read by
 `summarize.py`/`collect-results`; keep the existing keys (add `_ns` suffix rule to the test).
 

@@ -12,7 +12,7 @@ fi
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
-echo "pre-commit: make build (fmt, ascii, vet, lint, compile, test, sim, it-hermetic, e2e-kafka-cli, crap)" >&2
+echo "pre-commit: make build (fmt, ascii, vet, lint, compile, test, sim, it-hermetic, e2e-kafka-cli, risk)" >&2
 if command -v mise >/dev/null 2>&1; then
 	mise exec -- make build
 else

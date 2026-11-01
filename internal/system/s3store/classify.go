@@ -10,8 +10,8 @@ import (
 
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 
-	"manifester/internal/core"
-	"manifester/internal/system"
+	"mds/internal/core"
+	"mds/internal/system"
 )
 
 // Classifier is the system.ErrorClassifier for Obj* actions (lesson 1). Only PUT and
@@ -71,11 +71,11 @@ func classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
 // isDial reports a failure to establish a connection (nothing was sent).
 func isDial(err error) bool {
 	var dns *net.DNSError
-	var op *net.OpError
+	var operation *net.OpError
 	switch {
 	case errors.As(err, &dns):
 		return true
-	case errors.As(err, &op) && op.Op == "dial":
+	case errors.As(err, &operation) && operation.Op == "dial":
 		return true
 	}
 	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH)

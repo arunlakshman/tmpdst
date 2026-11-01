@@ -1,4 +1,4 @@
-// Package fakeservicetest is a hand-written sim.EngineCtx for engine tests: a tiny queue ordered by (At, seq).
+// Package fakeservicetest is a hand-written simulator.EngineCtx for engine tests: a tiny queue ordered by (At, seq).
 package fakeservicetest
 
 import (
@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
 )
 
 // DeliveredEvent is one completion handed to a node.
@@ -205,9 +205,9 @@ func (a checks) Reachable(p core.PropertyID)                      { a.c.Reached 
 func (a checks) Unreachable(core.PropertyID, ...core.ContextPair) {}
 
 // Find returns the delivered completion for req (nil if none).
-func (c *Ctx) Find(req core.RequestID) core.IOResult {
+func (c *Ctx) Find(request core.RequestID) core.IOResult {
 	for _, d := range c.Delivered {
-		if cp, ok := d.Body.(core.IOResult); ok && cp.RequestID() == req {
+		if cp, ok := d.Body.(core.IOResult); ok && cp.RequestID() == request {
 			return cp
 		}
 	}

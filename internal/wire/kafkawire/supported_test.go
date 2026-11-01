@@ -3,7 +3,7 @@ package kafkawire
 import (
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 var wantSupported = []APIVersionRange{
@@ -100,15 +100,15 @@ func TestApiVersionsResponse(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			resp := ApiVersionsResponse(core.RequestHeader{APIKey: KeyApiVersions, APIVersion: tt.version})
-			if resp.ErrorCode != tt.err {
-				t.Fatalf("ErrorCode = %d, want %d", resp.ErrorCode, tt.err)
+			response := ApiVersionsResponse(core.RequestHeader{APIKey: KeyApiVersions, APIVersion: tt.version})
+			if response.ErrorCode != tt.err {
+				t.Fatalf("ErrorCode = %d, want %d", response.ErrorCode, tt.err)
 			}
-			if len(resp.ApiKeys) != len(wantSupported) {
-				t.Fatalf("ApiKeys length %d, want %d", len(resp.ApiKeys), len(wantSupported))
+			if len(response.ApiKeys) != len(wantSupported) {
+				t.Fatalf("ApiKeys length %d, want %d", len(response.ApiKeys), len(wantSupported))
 			}
 			for i, want := range wantSupported {
-				got := resp.ApiKeys[i]
+				got := response.ApiKeys[i]
 				if got.ApiKey != want.Key || got.MinVersion != want.Min || got.MaxVersion != want.Max {
 					t.Fatalf("ApiKeys[%d] = key %d min %d max %d, want key %d min %d max %d",
 						i, got.ApiKey, got.MinVersion, got.MaxVersion, want.Key, want.Min, want.Max)

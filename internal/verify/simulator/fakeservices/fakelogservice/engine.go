@@ -1,6 +1,6 @@
 // Package fakelogservice is the sim bridge from broker ControlPlaneCall to control-plane
 // replica processes (CP-DSM-8). Replica apply lives in controlplane/machine;
-// the shared Dynamo log and CPTruth live in sim/engines/logstore. This package
+// the shared Dynamo log and ControlPlaneRealState live in sim/engines/logstore. This package
 // keeps boundary faults (503, timeout, lost response, outage) and routes
 // ControlPlaneDeliver/ControlPlaneReply. InjectedBug constants stay numeric for LogParams.Bug and
 // machine.Config.InjectedBug.
@@ -9,18 +9,18 @@ package fakelogservice
 import (
 	"slices"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/internal/fakecompletions"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/internal/fakecompletions"
 )
 
-// The InjectedBug constants select a mutant (sim.LogParams.Bug). Each is caught by a property.
+// The InjectedBug constants select a mutant (simulator.LogParams.Bug). Each is caught by a property.
 const (
 	InjectedBugNone             uint8 = iota
 	InjectedBugWriterOffsets          // offsets chosen by the writer instead of by apply
 	InjectedBugTrimDelete             // trimmed slots are deleted, not tombstoned
 	InjectedBugPerReplicaWindow       // each replica forgets keys on its own clock
-	InjectedBugHoleSkip               // a replica passes an empty slot without a no-op
+	InjectedBugGapSkip                // a replica passes an empty slot without a no-op
 )
 
 // Engine bridges ControlPlaneCall to CP replica nodes via ControlPlaneDeliver/ControlPlaneReply.
@@ -46,36 +46,36 @@ type TopicSeed struct {
 // pendKey namespaces broker ReqIDs: each broker allocates ReqIDs from its own
 // counter, so Req alone collides across brokers.
 type pendKey struct {
-	node core.NodeID
-	req  core.RequestID
+	node    core.NodeID
+	request core.RequestID
 }
 
 type pending struct {
-	from     core.NodeInstance
-	op       core.ControlPlaneOperation
-	to       core.NodeInstance
-	failover bool
-	muted    bool
-	deadline simulator.EntryID
-	done     bool
+	from      core.NodeInstance
+	operation core.ControlPlaneOperation
+	to        core.NodeInstance
+	failover  bool
+	muted     bool
+	deadline  simulator.EntryID
+	done      bool
 }
 
 type deadlineEv struct {
-	node core.NodeID
-	req  core.RequestID
+	node    core.NodeID
+	request core.RequestID
 }
 
 var _ simulator.FakeService = (*Engine)(nil)
 
 // DefaultParams are scaled-down production values for a 45 s run.
 func DefaultParams() simulator.LogParams {
-	ms := core.Millisecond
-	return simulator.LogParams{Enabled: true, K: 4, GroupMax: 4, Tick: 10 * ms,
-		HoleAfter: 60 * ms, TakeoverAfter: 600 * ms, PutRetry: 80 * ms, Heartbeat: 250 * ms,
+	milliseconds := core.Millisecond
+	return simulator.LogParams{Enabled: true, K: 4, GroupMax: 4, Tick: 10 * milliseconds,
+		GapAfter: 60 * milliseconds, TakeoverAfter: 600 * milliseconds, PutRetry: 80 * milliseconds, Heartbeat: 250 * milliseconds,
 		PutFail: 0.01, PutLost: 0.02, ReadFail: 0.05,
 		StallProb: 0.0002, CrashProb: 0.0001,
-		StallDur: [2]core.Duration{800 * ms, 2500 * ms}, DownDur: [2]core.Duration{300 * ms, 1500 * ms},
-		WindowSlots: 1 << 20, TrimStride: 16, CkptEvery: 24, KeepSlots: 8}
+		StallDur: [2]core.Duration{800 * milliseconds, 2500 * milliseconds}, DownDur: [2]core.Duration{300 * milliseconds, 1500 * milliseconds},
+		WindowSlots: 1 << 20, TrimStride: 16, CheckpointEvery: 24, KeepSlots: 8}
 }
 
 // New returns a ControlPlaneCall bridge. Log knobs are f.Log (zero fields take DefaultParams).
@@ -97,8 +97,8 @@ func withDefaults(p simulator.LogParams) simulator.LogParams {
 	if p.Tick == 0 {
 		p.Tick = d.Tick
 	}
-	if p.HoleAfter == 0 {
-		p.HoleAfter = d.HoleAfter
+	if p.GapAfter == 0 {
+		p.GapAfter = d.GapAfter
 	}
 	if p.TakeoverAfter == 0 {
 		p.TakeoverAfter = d.TakeoverAfter
@@ -109,8 +109,8 @@ func withDefaults(p simulator.LogParams) simulator.LogParams {
 	if p.WindowSlots == 0 {
 		p.WindowSlots = d.WindowSlots
 	}
-	if p.CkptEvery == 0 {
-		p.CkptEvery = d.CkptEvery
+	if p.CheckpointEvery == 0 {
+		p.CheckpointEvery = d.CheckpointEvery
 	}
 	if p.KeepSlots == 0 {
 		p.KeepSlots = d.KeepSlots
@@ -137,7 +137,7 @@ func (e *Engine) CreateTopic(name string, partitions int32) core.ErrCode {
 // Topics returns topics created at setup for CP process factories.
 func (e *Engine) Topics() []TopicSeed { return slices.Clone(e.topics) }
 
-// Name implements sim.Engine.
+// Name implements simulator.Engine.
 func (e *Engine) Name() string { return e.name }
 
 // Handles reports whether a is a ControlPlaneCall or ControlPlaneReply.
@@ -172,7 +172,7 @@ func (e *Engine) OnInternal(ctx simulator.FakeServiceContext, body any) {
 	p.done = true
 	p.muted = true // late ControlPlaneReply must not deliver a second answer
 	delete(e.pending, key)
-	e.deliver(ctx, p.from, core.ControlPlaneDone{Req: d.req, Err: core.ErrTimeout, Outcome: core.MaybeApplied})
+	e.deliver(ctx, p.from, core.ControlPlaneDone{Req: d.request, Err: core.ErrTimeout, Outcome: core.MaybeApplied})
 }
 
 // Execute starts a ControlPlaneCall or lands a ControlPlaneReply.
@@ -200,9 +200,9 @@ func (e *Engine) execCall(ctx simulator.FakeServiceContext, from core.NodeInstan
 		return
 	}
 	key := pendKey{from.Node, call.Req}
-	p := &pending{from: from, op: call.Op, to: cp, muted: k == fakecompletions.ReplyLost || k == fakecompletions.ReplyTimeout}
+	p := &pending{from: from, operation: call.Op, to: cp, muted: k == fakecompletions.ReplyLost || k == fakecompletions.ReplyTimeout}
 	to := ctx.Now() + simulator.Time(max(e.f.CallerTimeout, 500*core.Millisecond))
-	p.deadline = ctx.Self(to, ctx.Lane("fakelogservice/deadline"), deadlineEv{node: from.Node, req: call.Req})
+	p.deadline = ctx.Self(to, ctx.Lane("fakelogservice/deadline"), deadlineEv{node: from.Node, request: call.Req})
 	e.pending[key] = p
 	if k == fakecompletions.ReplyTimeout && ctx.Rand().Chance(0.5) {
 		return // never reached the service; deadline answers the broker
@@ -222,7 +222,7 @@ func (e *Engine) execReply(ctx simulator.FakeServiceContext, r core.ControlPlane
 		if other, ok := e.pickCP(ctx, p.to); ok {
 			p.failover = true
 			p.to = other
-			e.offer(ctx, other, p.from, r.Done.Req, p.op)
+			e.offer(ctx, other, p.from, r.Done.Req, p.operation)
 			return
 		}
 	}
@@ -242,11 +242,11 @@ func (e *Engine) execReply(ctx simulator.FakeServiceContext, r core.ControlPlane
 	e.deliverAt(ctx, p.from, ctx.Now()+simulator.Time(lat), r.Done)
 }
 
-func (e *Engine) offer(ctx simulator.FakeServiceContext, cp, from core.NodeInstance, req core.RequestID, op core.ControlPlaneOperation) {
+func (e *Engine) offer(ctx simulator.FakeServiceContext, cp, from core.NodeInstance, request core.RequestID, operation core.ControlPlaneOperation) {
 	lat := e.f.ApplyLatency.Sample(ctx.Rand())
 	at := ctx.Now() + simulator.Time(lat)
 	ctx.Deliver(cp, at, ctx.Lane("fakelogservice/offer/"+string(cp.Node)),
-		core.ControlPlaneDeliver{From: from, Req: req, Op: op})
+		core.ControlPlaneDeliver{From: from, Req: request, Op: operation})
 }
 
 func (e *Engine) pickCP(ctx simulator.FakeServiceContext, exclude core.NodeInstance) (core.NodeInstance, bool) {

@@ -1,6 +1,6 @@
 package simulator
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // Time is global simulation time. Nodes never see it directly; they see their
 // own skewed core.NodeTime on each Event.

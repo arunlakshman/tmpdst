@@ -14,10 +14,10 @@
 # Default: smoke,vanity-produce. A recommended careful path: smoke,ramp,vanity-produce, then vanity.
 #
 # --bootstrap-mode balanced (default): each OMB producer/consumer is pinned to one broker round-robin (WarpStream's service
-# discovery balances connections; a manifester broker names only itself in Metadata). random: stock client behaviour
+# discovery balances connections; a mds broker names only itself in Metadata). random: stock client behaviour
 # (binomial skew, see docs/aws-benchmark-warpstream-comparison.md).
 #
-# Prerequisites (bench-ctl.sh does them from the workstation): topic created through the control-plane manicp with the
+# Prerequisites (bench-ctl.sh does them from the workstation): topic created through the control-plane mdscontrolplane with the
 # right partition count (OMB cannot: no CreateTopics), OMB workers running on all loadgen hosts.
 #
 # --affine: EXPERIMENT (patch 0004), default off: producer k writes only partitions p % N == k % N (N = brokers), so each
@@ -30,7 +30,7 @@
 #
 # Output: $OUT (default ~/bench-out/$RUN_ID)/omb/<stage>.json (OMB result), <stage>.log (coordinator log),
 # driver-<stage>.yaml, stages.tsv; synced to s3://$BUCKET/results/$RUN_ID/omb/ after each stage.
-# manibroker /metrics snapshots come from mb-snapshot.service on every broker host (metrics/<broker id>/), manicp's from
+# mdsbroker /metrics snapshots come from mb-snapshot.service on every broker host (metrics/<broker id>/), mdscontrolplane's from
 # the single control-plane host (metrics/cp/), every 10 s.
 set -euo pipefail
 
@@ -104,20 +104,20 @@ log "run_id=$RUN_ID brokers=$nbrokers topic=$TOPIC partitions=$PARTITIONS loadge
 [ "$total_min" -le "$MAX_MIN" ] || { log "REFUSING: estimated $total_min min > --max-minutes $MAX_MIN (cost guard)"; exit 2; }
 
 # ---- pre-flight ---------------------------------------------------------------------------------
-# The active manicp pushes metrics/cp/<epoch>-manicp.txt every 10 s; loadgens cannot reach it on 8080
+# The active mdscontrolplane pushes metrics/cp/<epoch>-mdscontrolplane.txt every 10 s; loadgens cannot reach it on 8080
 # (closed on purpose) but can list the bucket. A fresh snapshot means it is up; a missing one means no CP.
 check_cp() {
   local last now age
-  last=$(aws s3 ls "s3://$BUCKET/results/$RUN_ID/metrics/cp/" 2>/dev/null | awk '{print $4}' | sed -n 's/^\([0-9]*\)-manicp\.txt$/\1/p' | sort -n | tail -n 1)
+  last=$(aws s3 ls "s3://$BUCKET/results/$RUN_ID/metrics/cp/" 2>/dev/null | awk '{print $4}' | sed -n 's/^\([0-9]*\)-mdscontrolplane\.txt$/\1/p' | sort -n | tail -n 1)
   if [ -z "$last" ]; then log "  control plane: NO metrics/cp/ snapshot in s3://$BUCKET/results/$RUN_ID/ (CP host down or still booting: bench-ctl.sh check-cp)"; return 1; fi
   now=$(date +%s); age=$((now - last))
-  if [ "$age" -gt 90 ]; then log "  control plane: newest manicp snapshot is ${age}s old (CP dead or stuck: see the runbook)"; return 1; fi
-  log "  control plane: manicp snapshot ${age}s old (up)"
+  if [ "$age" -gt 90 ]; then log "  control plane: newest mdscontrolplane snapshot is ${age}s old (CP dead or stuck: see the runbook)"; return 1; fi
+  log "  control plane: mdscontrolplane snapshot ${age}s old (up)"
 }
 
 preflight() {
   local ip n ids="" fail=0 out
-  log "pre-flight: control plane (single manicp)"
+  log "pre-flight: control plane (single mdscontrolplane)"
   check_cp || fail=1
   log "pre-flight: Kafka metadata on every broker ($nbrokers)"
   for ip in $brokers; do
@@ -230,7 +230,7 @@ for st in "${STAGE_LIST[@]}"; do
   start=$(date +%s)
   args=(--drivers "$drv" --output "$OUT/omb/$st.json")
   [ "$nworkers" -le 1 ] || args+=(--workers "$workers")
-  HEAP_OPTS="${OMB_COORD_HEAP:--Xms2g -Xmx2g}" JAVA_TOOL_OPTIONS="-Dmani.worker.index=0 -Dmani.loadgen.index=0" \
+  HEAP_OPTS="${OMB_COORD_HEAP:--Xms2g -Xmx2g}" JAVA_TOOL_OPTIONS="-Dmds.worker.index=0 -Dmds.loadgen.index=0" \
     bin/benchmark "${args[@]}" "$f" >"$OUT/omb/$st.log" 2>&1 &
   pid=$!
   GROW=0 PREVB=0 off=0 reason=""

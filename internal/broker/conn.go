@@ -6,8 +6,8 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/core"
+	"mds/internal/wire/kafkawire"
 )
 
 // connection is one client connection. Kafka answers a connection's requests in
@@ -27,13 +27,13 @@ type connection struct {
 
 // slot is one request awaiting its response.
 type slot struct {
-	conn    *connection
-	h       kafkawire.RequestHeader
-	resp    core.Response
-	pending int  // parts still outstanding, plus 1 while the handler runs
-	ready   bool // resp is complete
-	silent  bool // no response is sent (acks=0)
-	facts   []core.Fact
+	conn     *connection
+	h        kafkawire.RequestHeader
+	response core.Response
+	pending  int  // parts still outstanding, plus 1 while the handler runs
+	ready    bool // resp is complete
+	silent   bool // no response is sent (acks=0)
+	facts    []core.Fact
 	// fetchMax is the Fetch request's total byte limit (<= 0: none).
 	fetchMax int32
 	// Fetch long poll (fetch.go): the Fetch waits for fetchMin bytes until
@@ -68,7 +68,7 @@ func (b *Broker) onOpen(e core.ConnOpened) []core.Action {
 	if b.stopping || b.findConn(e.Conn) != nil {
 		return []core.Action{core.CloseConn{Conn: e.Conn, Abort: true}}
 	}
-	b.addConn(&connection{id: e.Conn, fr: kafkawire.NewFramer(b.cfg.MaxFrame), host: peerHost(e.Peer)})
+	b.addConn(&connection{id: e.Conn, fr: kafkawire.NewFramer(b.config.MaxFrame), host: peerHost(e.Peer)})
 	return nil
 }
 
@@ -117,10 +117,10 @@ func peerHost(peer string) string {
 
 // request decodes one frame and routes it.
 func (b *Broker) request(c *connection, frame []byte) []core.Action {
-	h, req, err := b.codec.DecodeRequest(frame)
-	if resp, ok := apiVersionsReply(h, req, err); ok {
+	h, request, err := b.codec.DecodeRequest(frame)
+	if response, ok := apiVersionsReply(h, request, err); ok {
 		s := b.newSlot(c, h)
-		s.resp = resp
+		s.response = response
 		b.finishPart(s)
 		return nil
 	}
@@ -129,16 +129,16 @@ func (b *Broker) request(c *connection, frame []byte) []core.Action {
 		return nil
 	}
 	s := b.newSlot(c, h)
-	return b.handle(s, req)
+	return b.handle(s, request)
 }
 
 // apiVersionsReply is the one ApiVersions answer. An unsupported version of
 // that key still gets the supported range. Every other decode error does not.
-func apiVersionsReply(h kafkawire.RequestHeader, req core.Request, err error) (*kmsg.ApiVersionsResponse, bool) {
+func apiVersionsReply(h kafkawire.RequestHeader, request core.Request, err error) (*kmsg.ApiVersionsResponse, bool) {
 	if _, ok := errors.AsType[*kafkawire.UnsupportedError](err); ok && h.APIKey == kafkawire.KeyApiVersions {
 		return kafkawire.ApiVersionsResponse(h), true
 	}
-	if err == nil && req.Key() == kafkawire.KeyApiVersions {
+	if err == nil && request.Key() == kafkawire.KeyApiVersions {
 		return kafkawire.ApiVersionsResponse(h), true
 	}
 	return nil, false
@@ -170,7 +170,7 @@ func (b *Broker) readySlot(s *slot) {
 
 // finalize applies request-wide limits before the response is encoded.
 func (b *Broker) finalize(s *slot) {
-	r, ok := s.resp.(*kmsg.FetchResponse)
+	r, ok := s.response.(*kmsg.FetchResponse)
 	if !ok || s.fetchMax <= 0 {
 		return
 	}
@@ -204,7 +204,7 @@ func (b *Broker) drain(c *connection, acts []core.Action) []core.Action {
 		if c.closed || s.silent {
 			continue
 		}
-		data, err := b.codec.EncodeResponse(s.h, s.resp)
+		data, err := b.codec.EncodeResponse(s.h, s.response)
 		if err != nil {
 			c.closing, c.abort = true, true
 			continue
@@ -213,7 +213,7 @@ func (b *Broker) drain(c *connection, acts []core.Action) []core.Action {
 		for _, f := range s.facts {
 			acts = append(acts, core.RecordFact{Fact: f})
 		}
-		acts = append(acts, core.Send{Req: b.req(), Conn: c.id, Data: data})
+		acts = append(acts, core.Send{Req: b.nextRequestID(), Conn: c.id, Data: data})
 	}
 	if c.closing && !c.closed && (len(c.q) == 0 || c.abort) {
 		b.dropConn(c)

@@ -3,16 +3,16 @@ index 91b7ac5..f45fbdc 100644
 --- a/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/Config.java
 +++ b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/Config.java
 @@ -40,4 +40,11 @@ public class Config {
-      * skewed because every manifester broker answers Metadata with itself as leader of all partitions.
+      * skewed because every mds broker answers Metadata with itself as leader of all partitions.
       */
-     public boolean maniBalance;
+     public boolean mdsBalance;
 +
 +    /**
-+     * Experiment, default off: partition-affine producers (ManiAffinePartitioner). Producer k, pinned to bootstrap
-+     * entry k % N (needs maniBalance), writes only partitions p with p % N == k % N, so each broker's segments hold
++     * Experiment, default off: partition-affine producers (MdsAffinePartitioner). Producer k, pinned to bootstrap
++     * entry k % N (needs mdsBalance), writes only partitions p with p % N == k % N, so each broker's segments hold
 +     * a disjoint partition set. NOT comparable to WarpStream's run.
 +     */
-+    public boolean maniAffine;
++    public boolean mdsAffine;
  }
 diff --git a/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkDriver.java b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/KafkaBenchmarkDriver.java
 index 86cd2ad..ec341fe 100644
@@ -21,22 +21,22 @@ index 86cd2ad..ec341fe 100644
 @@ -115,6 +115,10 @@ public class KafkaBenchmarkDriver implements BenchmarkDriver {
              new java.util.concurrent.atomic.AtomicInteger();
  
-     private Properties maniPin(Properties in) {
-+        return maniPin(in, false);
+     private Properties mdsPin(Properties in) {
++        return mdsPin(in, false);
 +    }
 +
-+    private Properties maniPin(Properties in, boolean producer) {
-         if (!config.maniBalance) {
++    private Properties mdsPin(Properties in, boolean producer) {
+         if (!config.mdsBalance) {
              return in;
          }
 @@ -123,6 +127,11 @@ public class KafkaBenchmarkDriver implements BenchmarkDriver {
          Properties out = new Properties();
          in.forEach((key, value) -> out.put(key, value));
          out.put("bootstrap.servers", servers[k % servers.length].trim());
-+        if (producer && config.maniAffine) {
-+            out.put("partitioner.class", ManiAffinePartitioner.class.getName());
-+            out.put("mani.affine.mod", String.valueOf(servers.length));
-+            out.put("mani.affine.slot", String.valueOf(k % servers.length));
++        if (producer && config.mdsAffine) {
++            out.put("partitioner.class", MdsAffinePartitioner.class.getName());
++            out.put("mds.affine.mod", String.valueOf(servers.length));
++            out.put("mds.affine.slot", String.valueOf(k % servers.length));
 +        }
          return out;
      }
@@ -45,16 +45,16 @@ index 86cd2ad..ec341fe 100644
  
      @Override
      public CompletableFuture<BenchmarkProducer> createProducer(String topic) {
--        KafkaProducer<String, byte[]> kafkaProducer = new KafkaProducer<>(maniPin(producerProperties));
-+        KafkaProducer<String, byte[]> kafkaProducer = new KafkaProducer<>(maniPin(producerProperties, true));
+-        KafkaProducer<String, byte[]> kafkaProducer = new KafkaProducer<>(mdsPin(producerProperties));
++        KafkaProducer<String, byte[]> kafkaProducer = new KafkaProducer<>(mdsPin(producerProperties, true));
          BenchmarkProducer benchmarkProducer =
-                 new KafkaBenchmarkProducer(kafkaProducer, config.maniTopic != null ? config.maniTopic : topic);
+                 new KafkaBenchmarkProducer(kafkaProducer, config.mdsTopic != null ? config.mdsTopic : topic);
          try {
-diff --git a/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/ManiAffinePartitioner.java b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/ManiAffinePartitioner.java
+diff --git a/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/MdsAffinePartitioner.java b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/MdsAffinePartitioner.java
 new file mode 100644
 index 0000000..65ad120
 --- /dev/null
-+++ b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/ManiAffinePartitioner.java
++++ b/driver-kafka/src/main/java/io/openmessaging/benchmark/driver/kafka/MdsAffinePartitioner.java
 @@ -0,0 +1,59 @@
 +/*
 + * Licensed under the Apache License, Version 2.0 (the "License");
@@ -77,12 +77,12 @@ index 0000000..65ad120
 +import org.apache.kafka.common.Cluster;
 +
 +/**
-+ * Manifester experiment (opt-in, maniAffine): partition-affine producers. A producer writes only the
-+ * partitions p with p % mani.affine.mod == mani.affine.slot, so each broker's segments carry a disjoint
++ * MDS experiment (opt-in, mdsAffine): partition-affine producers. A producer writes only the
++ * partitions p with p % mds.affine.mod == mds.affine.slot, so each broker's segments carry a disjoint
 + * partition set. Within that set it is sticky like the stock partitioner for null keys: it stays on one
 + * partition until about batch.size bytes were produced, then moves to the next. The key is ignored.
 + */
-+public class ManiAffinePartitioner implements Partitioner {
++public class MdsAffinePartitioner implements Partitioner {
 +    private int mod = 1;
 +    private int slot = 0;
 +    private long stickBytes = 100000;
@@ -91,8 +91,8 @@ index 0000000..65ad120
 +
 +    @Override
 +    public void configure(Map<String, ?> configs) {
-+        mod = Integer.parseInt(String.valueOf(configs.get("mani.affine.mod")));
-+        slot = Integer.parseInt(String.valueOf(configs.get("mani.affine.slot")));
++        mod = Integer.parseInt(String.valueOf(configs.get("mds.affine.mod")));
++        slot = Integer.parseInt(String.valueOf(configs.get("mds.affine.slot")));
 +        Object b = configs.get("batch.size");
 +        if (b != null) {
 +            stickBytes = Long.parseLong(String.valueOf(b));

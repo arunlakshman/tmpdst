@@ -3,7 +3,7 @@ package broker
 import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // resourceTopic is Kafka's config resource type for topics.
@@ -13,11 +13,11 @@ const resourceTopic = kmsg.ConfigResourceType(2)
 // kafka-topics.sh --describe needs. The broker keeps no topic configs, so an
 // existing topic gets an empty config list. Other resource types are refused.
 func (b *Broker) describeConfigs(s *slot, r *kmsg.DescribeConfigsRequest) []core.Action {
-	resp := kmsg.NewPtrDescribeConfigsResponse()
-	resp.Resources = make([]kmsg.DescribeConfigsResponseResource, len(r.Resources))
+	response := kmsg.NewPtrDescribeConfigsResponse()
+	response.Resources = make([]kmsg.DescribeConfigsResponseResource, len(r.Resources))
 	var names []string
 	for i, res := range r.Resources {
-		rr := &resp.Resources[i]
+		rr := &response.Resources[i]
 		rr.ResourceType, rr.ResourceName = res.ResourceType, res.ResourceName
 		if res.ResourceType != resourceTopic {
 			setResourceError(rr, errInvalidRequest, "only topic configs are served")
@@ -25,11 +25,11 @@ func (b *Broker) describeConfigs(s *slot, r *kmsg.DescribeConfigsRequest) []core
 		}
 		names = append(names, res.ResourceName)
 	}
-	s.resp = resp
+	s.response = response
 	if len(names) == 0 { // nothing to ask: DescribeTopics with no names would list every topic
 		return nil
 	}
-	return b.startOp(&operation{kind: opDescribeConfigs, s: s, names: names, dresp: resp})
+	return b.startOp(&operation{kind: opDescribeConfigs, s: s, names: names, dresp: response})
 }
 
 // onDescribeConfigsCP fills the answer of a DescribeConfigs op from the topics the

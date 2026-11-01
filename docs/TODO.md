@@ -22,13 +22,13 @@ Known flaky tests and an unstable test environment are in `flaky-tests.md`.
 - Move go.mod to Go 1.26.
 - Bump kmsg and re-run its dependency audit (`ops/scripts/audit-dep.sh`) with a new record.
 - Bump franz-go and kadm.
-- Re-check `kwire`'s Supported version table against the new kmsg.
+- Re-check `kafkawire`'s Supported version table against the new kmsg.
 
 **Done when:** `ops/scripts/ci-determinism.sh`, `go test ./...` (including `test/integrationtest/`) and a 300-seed campaign pass. Trace hashes may change if kmsg encoding changes; review any re-baseline by hand.
 
 ## CP range compaction
 
-**DONE** (decision 39; the DynamoDB-transaction store it applied to was removed, decision 54). The DynamoDB commit stored one range run item per (partition, segment) instead of one per batch, so the commit costs 2 + 2 x partitions + producer states + grown topics items whatever the number of batches. `MaxSegmentBatches` default is 256; the new `MaxSegmentItems` (96) bounds the producer states, the one remaining per-batch growth. The abstract contract (core, veritas) did not change; `cp/dynamo` and the sim CP engine's `MaxCommitItems` arithmetic agree, and `cp/cptest` covers segments with many small batches.
+**DONE** (decision 39; the DynamoDB-transaction store it applied to was removed, decision 54). The DynamoDB commit stored one range run item per (partition, segment) instead of one per batch, so the commit costs 2 + 2 x partitions + producer states + grown topics items whatever the number of batches. `MaxSegmentBatches` default is 256; the new `MaxSegmentItems` (96) bounds the producer states, the one remaining per-batch growth. The abstract contract (core, speccheck) did not change; the removed DynamoDB store and the sim CP engine's `MaxCommitItems` arithmetic agreed, and `internal/controlplane/controlplanetest` covers segments with many small batches.
 
 The producer-state follow-up is gone: the S# items no longer exist (decisions 41-44), so a commit costs 1 + partitions + grown topics and `MaxSegmentPartitions` (96) is the only item bound.
 
@@ -58,12 +58,12 @@ The audit (item 1) showed that at 288 partitions every segment overlaps every ot
 **Why:** with design A (decisions 48-50) the control plane's materialised state (partition ends, runs for Lookup, the key window) is rebuilt from the DynamoDB log plus a checkpoint, and the `R#` index rows were written to DynamoDB every 10 s (that writer was removed with the old store, decision 54, so today nothing is indexed outside memory). That is fine for hours of retention. Memory and DynamoDB item cost grow with retention (about 6 GB per hour of index-able batches at 6,450 batches/s, 5.6 GB per day with a compact index), so long retention needs the index out of the CP's memory and out of DynamoDB. The Conflux model (idea B of `docs/delos-logdrive-ideas.md`) does this: the log is short, state lives in object storage.
 
 **Plan:**
-- The applier checkpoints its state to S3 (a checkpoint object per slot, written by the appender or the standby, never required for safety).
+- The state updater checkpoints its state to S3 (a checkpoint object per slot, written by the appender or the standby, never required for safety).
 - The index becomes immutable index files in S3 (runs per partition range, packed like the old `R#` run rows), written by the indexer, listed by a small manifest in the checkpoint.
 - The log is trimmed behind the newest checkpoint, but never closer than the key window (decision 48: window = log retention, at least 2 x `CommitDeadline` plus the checkpoint interval).
 - A Lookup below the in-memory tail reads the index file for that partition range; the newest runs stay in memory.
 - A restart loads the latest checkpoint and replays the log tail; there are no `R#` rows in DynamoDB any more (decision 54).
 
-**Contract changes:** none for brokers (Lookup keeps its shape). `cp/` service, indexer, checkpoint format, the sim CP engine for the log.
+**Contract changes:** none for brokers (Lookup keeps its shape). `internal/controlplane/` service, indexer, checkpoint format, the sim CP engine for the log.
 
 **Done when:** a CP restarts from an S3 checkpoint plus a short log tail with the index larger than memory; Lookup tail latency is reported for in-memory and S3-resident ranges; the log holds minutes, not hours; the sim covers a restart from a checkpoint.

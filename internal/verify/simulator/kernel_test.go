@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // ---- test-only machine: a scriptable state machine ----
 
 type scriptM struct {
-	fn   func(m *scriptM, ev core.Event) []core.Action
+	fn   func(m *scriptM, event core.Event) []core.Action
 	env  core.Environment
 	self core.NodeInstance
 	n    int
@@ -18,27 +18,27 @@ type scriptM struct {
 	gen  core.TimerVersion
 }
 
-func (m *scriptM) Step(ev core.Event) []core.Action {
+func (m *scriptM) Step(event core.Event) []core.Action {
 	m.n++
 	m.h = m.h*31 + uint64(m.n)
-	return m.fn(m, ev)
+	return m.fn(m, event)
 }
 func (m *scriptM) StateHash() uint64 { return m.h }
 
-func scripted(fn func(m *scriptM, ev core.Event) []core.Action) core.MachineFactory {
+func scripted(fn func(m *scriptM, event core.Event) []core.Action) core.MachineFactory {
 	return func(env core.Environment, self core.NodeInstance) core.Machine {
 		return &scriptM{fn: fn, env: env, self: self}
 	}
 }
 
 func fact(name string, v int64) core.RecordFact {
-	return core.RecordFact{Fact: core.Fact{Name: name, Fields: []core.Field{{Key: "v", Value: core.I64(v)}}}}
+	return core.RecordFact{Fact: core.Fact{Name: name, Fields: []core.Field{{Key: "v", Value: core.Int64Value(v)}}}}
 }
 
 // ping: timer ping-pong that emits a "started" fact on boot and a "ping" fact
 // per tick, every 10ms.
-func ping(m *scriptM, ev core.Event) []core.Action {
-	switch b := ev.Body.(type) {
+func ping(m *scriptM, event core.Event) []core.Action {
+	switch b := event.Body.(type) {
 	case core.NodeStarted:
 		m.gen++
 		return []core.Action{fact("started", 0), core.SetTimer{ID: 1, Gen: m.gen, After: 10 * core.Millisecond}}
@@ -55,9 +55,9 @@ func ping(m *scriptM, ev core.Event) []core.Action {
 // ---- test-only engine: echo with latency and a fault coin ----
 
 type echoApply struct {
-	from core.NodeInstance
-	req  core.RequestID
-	lost bool
+	from    core.NodeInstance
+	request core.RequestID
+	lost    bool
 }
 
 type echo struct {
@@ -84,7 +84,7 @@ func (e *echo) Execute(ctx FakeServiceContext, from core.NodeInstance, a core.Ac
 func (e *echo) OnInternal(ctx FakeServiceContext, body any) {
 	a := body.(echoApply)
 	e.applied++
-	done := core.ObjectPutDone{Req: a.req, Outcome: core.Applied}
+	done := core.ObjectPutDone{Req: a.request, Outcome: core.Applied}
 	if a.lost {
 		e.lost++
 		done.Err, done.Outcome = core.ErrTimeout, core.MaybeApplied
@@ -100,8 +100,8 @@ func (e *echo) EachObject(func(string, []byte)) {}
 func (e *echo) Gen() uint64                     { return e.applied }
 
 // putter: every tick sends an ObjectPut; emits "put_done" on the completion.
-func putter(m *scriptM, ev core.Event) []core.Action {
-	switch b := ev.Body.(type) {
+func putter(m *scriptM, event core.Event) []core.Action {
+	switch b := event.Body.(type) {
 	case core.NodeStarted:
 		m.gen++
 		return []core.Action{fact("started", 0), core.SetTimer{ID: 1, Gen: m.gen, After: 5 * core.Millisecond}}
@@ -152,15 +152,15 @@ func hasFailure(res SeedResult, k FailKind, prop core.PropertyID) bool {
 
 func TestStartedIsFirstStep(t *testing.T) {
 	var firsts []core.EventData
-	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
+	f := scripted(func(m *scriptM, event core.Event) []core.Action {
 		if m.n == 1 {
-			firsts = append(firsts, ev.Body)
+			firsts = append(firsts, event.Body)
 		}
-		return ping(m, ev)
+		return ping(m, event)
 	})
-	cfg := baseCfg(f)
-	cfg.Scripted = []PlannedFault{{At: Time(300 * core.Millisecond), Node: "b-0", Kind: EntryCrash}}
-	res := RunSeed(cfg, 1)
+	config := baseCfg(f)
+	config.Scripted = []PlannedFault{{At: Time(300 * core.Millisecond), Node: "b-0", Kind: EntryCrash}}
+	res := RunSeed(config, 1)
 	if len(res.Failures) != 0 || res.Crashes != 1 || len(firsts) != 2 {
 		t.Fatalf("crashes=%d firsts=%d failures=%+v", res.Crashes, len(firsts), res.Failures)
 	}
@@ -172,15 +172,15 @@ func TestStartedIsFirstStep(t *testing.T) {
 }
 
 func TestScriptedGracefulStop(t *testing.T) {
-	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.StopRequest); ok {
+	f := scripted(func(m *scriptM, event core.Event) []core.Action {
+		if _, ok := event.Body.(core.StopRequest); ok {
 			return []core.Action{core.ShutdownDone{}}
 		}
-		return ping(m, ev)
+		return ping(m, event)
 	})
-	cfg := baseCfg(f)
-	cfg.Scripted = []PlannedFault{{At: Time(300 * core.Millisecond), Node: "b-0", Kind: EntryStop}}
-	res := RunSeed(cfg, 1)
+	config := baseCfg(f)
+	config.Scripted = []PlannedFault{{At: Time(300 * core.Millisecond), Node: "b-0", Kind: EntryStop}}
+	res := RunSeed(config, 1)
 	if len(res.Failures) != 0 || stat(res, "graceful_stops") != 1 {
 		t.Fatalf("graceful_stops=%d failures=%+v", stat(res, "graceful_stops"), res.Failures)
 	}
@@ -189,13 +189,13 @@ func TestScriptedGracefulStop(t *testing.T) {
 func TestStartedFirstEvenWithQueuedData(t *testing.T) {
 	// A data event queued before the node's first Step must not overtake NodeStarted.
 	var firsts []core.EventData
-	cfg := baseCfg(scripted(func(m *scriptM, ev core.Event) []core.Action {
+	config := baseCfg(scripted(func(m *scriptM, event core.Event) []core.Action {
 		if m.n == 1 {
-			firsts = append(firsts, ev.Body)
+			firsts = append(firsts, event.Body)
 		}
 		return nil
 	}))
-	r := newRun(cfg, 1)
+	r := newRun(config, 1)
 	r.setup()
 	n := r.byName["b-0"]
 	n.inbox.Push(core.ConnOpened{Conn: 1})
@@ -210,15 +210,15 @@ func TestStartedFirstEvenWithQueuedData(t *testing.T) {
 }
 
 func TestTripNotLastIsProtocolFailure(t *testing.T) {
-	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.NodeStarted); ok {
+	f := scripted(func(m *scriptM, event core.Event) []core.Action {
+		if _, ok := event.Body.(core.NodeStarted); ok {
 			return []core.Action{core.StopForRestart{Cause: "x"}, fact("after", 0)}
 		}
 		return nil
 	})
-	cfg := baseCfg(f)
-	cfg.HaltOnFirst = true // a zero RecoveryDelay would crash-loop at one instant
-	res := RunSeed(cfg, 1)
+	config := baseCfg(f)
+	config.HaltOnFirst = true // a zero RecoveryDelay would crash-loop at one instant
+	res := RunSeed(config, 1)
 	if !hasFailure(res, FailProtocol, "trip_not_last") || res.Trips == 0 {
 		t.Fatalf("%+v trips=%d", res.Failures, res.Trips)
 	}
@@ -226,8 +226,8 @@ func TestTripNotLastIsProtocolFailure(t *testing.T) {
 
 func TestTripLastCrashesAndRestarts(t *testing.T) {
 	boots := 0
-	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		switch ev.Body.(type) {
+	f := scripted(func(m *scriptM, event core.Event) []core.Action {
+		switch event.Body.(type) {
 		case core.NodeStarted:
 			boots++
 			return []core.Action{core.SetTimer{ID: 1, Gen: 1, After: 50 * core.Millisecond}}
@@ -238,9 +238,9 @@ func TestTripLastCrashesAndRestarts(t *testing.T) {
 		}
 		return nil
 	})
-	cfg := baseCfg(f)
-	cfg.Attrition.RecoveryDelay = [2]core.Duration{20 * core.Millisecond, 30 * core.Millisecond}
-	res := RunSeed(cfg, 1)
+	config := baseCfg(f)
+	config.Attrition.RecoveryDelay = [2]core.Duration{20 * core.Millisecond, 30 * core.Millisecond}
+	res := RunSeed(config, 1)
 	if len(res.Failures) != 0 || res.Trips != 1 || res.Crashes != 0 || boots != 2 {
 		t.Fatalf("trips=%d crashes=%d boots=%d %+v", res.Trips, res.Crashes, boots, res.Failures)
 	}
@@ -248,18 +248,18 @@ func TestTripLastCrashesAndRestarts(t *testing.T) {
 
 func TestCrashDropsEntriesAndRestartsWithNewIncarnation(t *testing.T) {
 	var incs []core.BootNumber
-	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.NodeStarted); ok {
+	f := scripted(func(m *scriptM, event core.Event) []core.Action {
+		if _, ok := event.Body.(core.NodeStarted); ok {
 			incs = append(incs, m.self.Inc)
 		}
-		return ping(m, ev)
+		return ping(m, event)
 	})
-	cfg := baseCfg(f)
-	cfg.Scripted = []PlannedFault{{At: Time(305 * core.Millisecond), Node: "b-0", Kind: EntryCrash}}
-	cfg.Attrition.RecoveryDelay = [2]core.Duration{100 * core.Millisecond, 100 * core.Millisecond}
+	config := baseCfg(f)
+	config.Scripted = []PlannedFault{{At: Time(305 * core.Millisecond), Node: "b-0", Kind: EntryCrash}}
+	config.Attrition.RecoveryDelay = [2]core.Duration{100 * core.Millisecond, 100 * core.Millisecond}
 	var crashAt Time
 	var oldPingsAfter int
-	cfg.Invariants = []func() SafetyRule{func() SafetyRule {
+	config.Invariants = []func() SafetyRule{func() SafetyRule {
 		return &fnInvariant{atEnd: func(v View) {
 			c := v.Timeline().Snapshot("sim_crashed")
 			if len(c) != 1 {
@@ -275,7 +275,7 @@ func TestCrashDropsEntriesAndRestartsWithNewIncarnation(t *testing.T) {
 			v.Assert().Always(len(v.Timeline().Snapshot("started")) == 2, "restarted once")
 		}}
 	}}
-	res := RunSeed(cfg, 1)
+	res := RunSeed(config, 1)
 	if len(res.Failures) != 0 || res.Crashes != 1 || len(incs) != 2 || incs[0] == incs[1] {
 		t.Fatalf("%+v crashes=%d incs=%v", res.Failures, res.Crashes, incs)
 	}
@@ -305,15 +305,15 @@ func (f *fnInvariant) AtEnd(v View) {
 }
 
 func TestStopExitPath(t *testing.T) {
-	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.StopRequest); ok {
+	f := scripted(func(m *scriptM, event core.Event) []core.Action {
+		if _, ok := event.Body.(core.StopRequest); ok {
 			return []core.Action{fact("draining", 0), core.ShutdownDone{}}
 		}
-		return ping(m, ev)
+		return ping(m, event)
 	})
-	cfg := baseCfg(f)
-	cfg.Attrition = NodeKills{MaxDead: 1, CrashProb: 1, GracefulWeight: 1, RecoveryDelay: [2]core.Duration{10 * core.Millisecond, 20 * core.Millisecond}}
-	res := RunSeed(cfg, 1)
+	config := baseCfg(f)
+	config.Attrition = NodeKills{MaxDead: 1, CrashProb: 1, GracefulWeight: 1, RecoveryDelay: [2]core.Duration{10 * core.Millisecond, 20 * core.Millisecond}}
+	res := RunSeed(config, 1)
 	if len(res.Failures) != 0 || res.Exits == 0 || res.Crashes != 0 || stat(res, "deadline_kills") != 0 {
 		t.Fatalf("exits=%d crashes=%d %+v", res.Exits, res.Crashes, res.Failures)
 	}
@@ -321,16 +321,16 @@ func TestStopExitPath(t *testing.T) {
 
 func TestStopDeadlineKill(t *testing.T) {
 	var deadlines []core.NodeTime
-	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if s, ok := ev.Body.(core.StopRequest); ok {
-			deadlines = append(deadlines, s.Deadline-ev.At)
+	f := scripted(func(m *scriptM, event core.Event) []core.Action {
+		if s, ok := event.Body.(core.StopRequest); ok {
+			deadlines = append(deadlines, s.Deadline-event.At)
 			return nil // ignores the Stop
 		}
-		return ping(m, ev)
+		return ping(m, event)
 	})
-	cfg := baseCfg(f)
-	cfg.Attrition = NodeKills{MaxDead: 1, CrashProb: 1, GracefulWeight: 1, RecoveryDelay: [2]core.Duration{10 * core.Millisecond, 10 * core.Millisecond}}
-	res := RunSeed(cfg, 1)
+	config := baseCfg(f)
+	config.Attrition = NodeKills{MaxDead: 1, CrashProb: 1, GracefulWeight: 1, RecoveryDelay: [2]core.Duration{10 * core.Millisecond, 10 * core.Millisecond}}
+	res := RunSeed(config, 1)
 	if len(res.Failures) != 0 || res.Exits != 0 || res.Crashes == 0 || stat(res, "deadline_kills") == 0 {
 		t.Fatalf("exits=%d crashes=%d %+v stats=%+v", res.Exits, res.Crashes, res.Failures, res.Stats)
 	}
@@ -340,10 +340,10 @@ func TestStopDeadlineKill(t *testing.T) {
 }
 
 func TestInvariantsSeeFactsAndReport(t *testing.T) {
-	cfg := baseCfg(scripted(ping))
-	cfg.Seeds = []uint64{1, 2, 3}
+	config := baseCfg(scripted(ping))
+	config.Seeds = []uint64{1, 2, 3}
 	seen := 0
-	cfg.Invariants = []func() SafetyRule{func() SafetyRule {
+	config.Invariants = []func() SafetyRule{func() SafetyRule {
 		var cur Cursor
 		return &fnInvariant{
 			observe: func(v View) { seen += len(v.Timeline().Since("ping", &cur)) },
@@ -356,7 +356,7 @@ func TestInvariantsSeeFactsAndReport(t *testing.T) {
 			},
 		}
 	}}
-	rep, err := NewRunner().Run(cfg)
+	rep, err := NewRunner().Run(config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,58 +377,58 @@ func TestInvariantsSeeFactsAndReport(t *testing.T) {
 }
 
 func TestMaxSteps(t *testing.T) {
-	cfg := baseCfg(scripted(ping))
-	cfg.MaxSteps = 20
-	res := RunSeed(cfg, 1)
+	config := baseCfg(scripted(ping))
+	config.MaxSteps = 20
+	res := RunSeed(config, 1)
 	if !hasFailure(res, FailMaxSteps, "") || res.Steps != 20 {
 		t.Fatalf("steps=%d %+v", res.Steps, res.Failures)
 	}
 }
 
 func TestPanicRecovery(t *testing.T) {
-	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
+	f := scripted(func(m *scriptM, event core.Event) []core.Action {
 		if m.n == 3 {
 			panic("boom")
 		}
-		return ping(m, ev)
+		return ping(m, event)
 	})
 	res := RunSeed(baseCfg(f), 1)
 	if !hasFailure(res, FailPanic, "") || res.Crashes == 0 || res.Steps < 100 {
 		t.Fatalf("crashes=%d steps=%d %+v", res.Crashes, res.Steps, res.Failures)
 	}
-	cfg := baseCfg(f)
-	cfg.HaltOnFirst = true
-	halted := RunSeed(cfg, 1)
+	config := baseCfg(f)
+	config.HaltOnFirst = true
+	halted := RunSeed(config, 1)
 	if !hasFailure(halted, FailPanic, "") || halted.Steps >= res.Steps || halted.Steps > 10 {
 		t.Fatalf("HaltOnFirst: steps=%d", halted.Steps)
 	}
 	// A panicking factory is a failure, not a crash of the simulator.
-	cfg = baseCfg(func(core.Environment, core.NodeInstance) core.Machine { panic("factory") })
-	if r := RunSeed(cfg, 1); !hasFailure(r, FailPanic, "") {
+	config = baseCfg(func(core.Environment, core.NodeInstance) core.Machine { panic("factory") })
+	if r := RunSeed(config, 1); !hasFailure(r, FailPanic, "") {
 		t.Fatalf("%+v", r.Failures)
 	}
 }
 
 func TestEngineRouting(t *testing.T) {
-	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.NodeStarted); ok {
+	f := scripted(func(m *scriptM, event core.Event) []core.Action {
+		if _, ok := event.Body.(core.NodeStarted); ok {
 			return []core.Action{core.ObjectDelete{Req: 1, Key: "k"}}
 		}
 		return nil
 	})
-	cfg := baseCfg(f)
-	cfg.HaltOnFirst = true
-	res := RunSeed(cfg, 1)
+	config := baseCfg(f)
+	config.HaltOnFirst = true
+	res := RunSeed(config, 1)
 	if !hasFailure(res, FailProtocol, "unrouted_action") {
 		t.Fatalf("no engine: %+v", res.Failures)
 	}
-	cfg.Engines = func(SeedConfig) []FakeService { return []FakeService{&echoDel{n: "a"}, &echoDel{n: "b"}} }
-	res = RunSeed(cfg, 1)
+	config.Engines = func(SeedConfig) []FakeService { return []FakeService{&echoDel{n: "a"}, &echoDel{n: "b"}} }
+	res = RunSeed(config, 1)
 	if !hasFailure(res, FailProtocol, "unrouted_action") {
 		t.Fatalf("two engines: %+v", res.Failures)
 	}
-	cfg.Engines = func(SeedConfig) []FakeService { return []FakeService{&echoDel{n: "a"}} }
-	if res = RunSeed(cfg, 1); len(res.Failures) != 0 {
+	config.Engines = func(SeedConfig) []FakeService { return []FakeService{&echoDel{n: "a"}} }
+	if res = RunSeed(config, 1); len(res.Failures) != 0 {
 		t.Fatalf("one engine: %+v", res.Failures)
 	}
 }
@@ -445,19 +445,19 @@ func (e *echoDel) EnterRecovery()                                             {}
 
 func TestClockSkewAndWall(t *testing.T) {
 	var ats []core.NodeTime
-	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.NodeStarted); ok {
-			ats = append(ats, ev.At)
-			if ev.Wall != wallClockStart {
-				t.Errorf("Wall = %d, want the scripted epoch at sim time 0", ev.Wall)
+	f := scripted(func(m *scriptM, event core.Event) []core.Action {
+		if _, ok := event.Body.(core.NodeStarted); ok {
+			ats = append(ats, event.At)
+			if event.Wall != wallClockStart {
+				t.Errorf("Wall = %d, want the scripted epoch at sim time 0", event.Wall)
 			}
 		}
 		return nil
 	})
-	cfg := baseCfg(f)
-	cfg.Processes[0].Count = 6
-	cfg.Network.ClockSkewMax = 100 * core.Millisecond
-	RunSeed(cfg, 1)
+	config := baseCfg(f)
+	config.Processes[0].Count = 6
+	config.Network.ClockSkewMax = 100 * core.Millisecond
+	RunSeed(config, 1)
 	distinct := map[core.NodeTime]bool{}
 	for _, a := range ats {
 		if a < 0 || a > core.NodeTime(100*core.Millisecond) {
@@ -472,9 +472,9 @@ func TestClockSkewAndWall(t *testing.T) {
 
 func TestCostModelQueuesAndControlFirst(t *testing.T) {
 	var order []string
-	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		order = append(order, fmt.Sprintf("%T", ev.Body))
-		return ping(m, ev)
+	f := scripted(func(m *scriptM, event core.Event) []core.Action {
+		order = append(order, fmt.Sprintf("%T", event.Body))
+		return ping(m, event)
 	})
 	free := baseCfg(f)
 	free.Phases = Phases{Chaos: 200 * core.Millisecond, Settle: core.Second}
@@ -494,40 +494,40 @@ func TestCostModelQueuesAndControlFirst(t *testing.T) {
 func TestWorkloadRole(t *testing.T) {
 	var brokers []core.NodeInstance
 	var w *wl
-	cfg := baseCfg(scripted(ping))
-	cfg.Processes[0].Count = 2
-	cfg.QuiesceEvery = 100 * core.Millisecond
-	cfg.Workloads = []WorkloadFactory{func(env core.Environment, self core.NodeInstance, b []core.NodeInstance) Workload {
+	config := baseCfg(scripted(ping))
+	config.Processes[0].Count = 2
+	config.QuiesceEvery = 100 * core.Millisecond
+	config.Workloads = []WorkloadFactory{func(env core.Environment, self core.NodeInstance, b []core.NodeInstance) Workload {
 		brokers = b
 		w = &wl{}
 		return w
 	}}
 	var quiesce int
-	cfg.Invariants = []func() SafetyRule{func() SafetyRule {
+	config.Invariants = []func() SafetyRule{func() SafetyRule {
 		return &fnInvariant{atEnd: func(v View) {
 			quiesce = len(v.Timeline().Snapshot("sim_quiesce"))
 			v.Assert().Always(v.History() != nil, "history exists")
 		}}
 	}}
-	res := RunSeed(cfg, 1)
+	res := RunSeed(config, 1)
 	if len(res.Failures) != 0 || len(brokers) != 2 || brokers[0].Node != "b-0" || brokers[1].Node != "b-1" {
 		t.Fatalf("%+v %v", res.Failures, brokers)
 	}
-	if w.n == 0 || w.hist == nil || quiesce == 0 {
-		t.Fatalf("workload steps=%d history=%v quiesce=%d", w.n, w.hist != nil, quiesce)
+	if w.n == 0 || w.history == nil || quiesce == 0 {
+		t.Fatalf("workload steps=%d history=%v quiesce=%d", w.n, w.history != nil, quiesce)
 	}
 	// A workload may not StopForRestart.
-	cfg.Workloads = []WorkloadFactory{func(core.Environment, core.NodeInstance, []core.NodeInstance) Workload { return &wl{trip: true} }}
-	cfg.Invariants = nil
-	if res = RunSeed(cfg, 1); !hasFailure(res, FailProtocol, "workload_ended") {
+	config.Workloads = []WorkloadFactory{func(core.Environment, core.NodeInstance, []core.NodeInstance) Workload { return &wl{trip: true} }}
+	config.Invariants = nil
+	if res = RunSeed(config, 1); !hasFailure(res, FailProtocol, "workload_ended") {
 		t.Fatalf("%+v", res.Failures)
 	}
 }
 
 type wl struct {
-	n    int
-	trip bool
-	hist History
+	n       int
+	trip    bool
+	history History
 }
 
 func (w *wl) Step(core.Event) []core.Action {
@@ -540,12 +540,12 @@ func (w *wl) Step(core.Event) []core.Action {
 func (w *wl) StateHash() uint64    { return uint64(w.n) }
 func (w *wl) Name() string         { return "wl" }
 func (w *wl) Quiescent() bool      { return true }
-func (w *wl) SetHistory(h History) { w.hist = h }
+func (w *wl) SetHistory(h History) { w.history = h }
 
 func TestTimerCancel(t *testing.T) {
 	fired := 0
-	f := scripted(func(m *scriptM, ev core.Event) []core.Action {
-		switch ev.Body.(type) {
+	f := scripted(func(m *scriptM, event core.Event) []core.Action {
+		switch event.Body.(type) {
 		case core.NodeStarted:
 			return []core.Action{core.SetTimer{ID: 7, Gen: 1, After: 10 * core.Millisecond}, core.CancelTimer{ID: 7}}
 		case core.TimerFired:
@@ -562,43 +562,43 @@ func TestTimerCancel(t *testing.T) {
 // ---- determinism ----
 
 func chaosCfg() Config {
-	cfg := baseCfg(scripted(putter))
-	cfg.Processes[0].Count = 3
-	cfg.Engines = func(sc SeedConfig) []FakeService {
+	config := baseCfg(scripted(putter))
+	config.Processes[0].Count = 3
+	config.Engines = func(sc SeedConfig) []FakeService {
 		return []FakeService{&echo{lat: sc.ObjectStore.ApplyLatency, lostProb: sc.ObjectStore.LostResponse}}
 	}
-	cfg.ObjectStore = ObjectStoreFaults{
+	config.ObjectStore = ObjectStoreFaults{
 		ApplyLatency: FastWithRareSlow{FastMin: core.Millisecond, FastMax: 3 * core.Millisecond, SlowMin: 50 * core.Millisecond, SlowMax: 80 * core.Millisecond, SlowProb: 0.1},
 		LostResponse: 0.05,
 	}
-	cfg.Network.ClockSkewMax = 100 * core.Millisecond
-	cfg.Attrition = NodeKills{MaxDead: 1, CrashProb: 0.01, CrashWeight: 1, GracefulWeight: 1, RecoveryDelay: [2]core.Duration{10 * core.Millisecond, 50 * core.Millisecond}}
-	cfg.Cost = CostParams{PerEvent: core.Millisecond, PauseProb: 0.05, Pause: FastWithRareSlow{FastMin: 5 * core.Millisecond, FastMax: 20 * core.Millisecond}}
-	cfg.Swarm = func(seed uint64, r CountedRand, c *SeedConfig) {
+	config.Network.ClockSkewMax = 100 * core.Millisecond
+	config.Attrition = NodeKills{MaxDead: 1, CrashProb: 0.01, CrashWeight: 1, GracefulWeight: 1, RecoveryDelay: [2]core.Duration{10 * core.Millisecond, 50 * core.Millisecond}}
+	config.Cost = CostParams{PerEvent: core.Millisecond, PauseProb: 0.05, Pause: FastWithRareSlow{FastMin: 5 * core.Millisecond, FastMax: 20 * core.Millisecond}}
+	config.Swarm = func(seed uint64, r CountedRand, c *SeedConfig) {
 		if r.Chance(0.5) {
 			c.ObjectStore.LostResponse = 0
 		}
 		c.Attrition.CrashProb *= float64(1 + r.Intn(3))
 	}
-	cfg.QuiesceEvery = 250 * core.Millisecond
-	cfg.Invariants = []func() SafetyRule{func() SafetyRule {
+	config.QuiesceEvery = 250 * core.Millisecond
+	config.Invariants = []func() SafetyRule{func() SafetyRule {
 		return &fnInvariant{atEnd: func(v View) {
 			v.Assert().Always(v.Objects().Gen() > 0, "engine applied something")
 			v.Assert().Always(len(v.Timeline().Snapshot("put_done")) > 0, "puts complete")
 		}}
 	}}
-	return cfg
+	return config
 }
 
 func TestDeterminismCanary(t *testing.T) {
-	cfg := chaosCfg()
+	config := chaosCfg()
 	var prev SeedResult
 	for seed := uint64(1); seed <= 12; seed++ {
-		a, b := RunSeed(cfg, seed), RunSeed(cfg, seed)
+		a, b := RunSeed(config, seed), RunSeed(config, seed)
 		if a.TraceHash != b.TraceHash || a.RandCalls != b.RandCalls || a.Steps != b.Steps {
 			t.Fatalf("seed %d diverged: %x/%d/%d vs %x/%d/%d", seed, a.TraceHash, a.RandCalls, a.Steps, b.TraceHash, b.RandCalls, b.Steps)
 		}
-		logged := cfg
+		logged := config
 		logged.Log = true
 		c := RunSeed(logged, seed)
 		if c.TraceHash != a.TraceHash || c.RandCalls != a.RandCalls || c.Steps != a.Steps || len(c.Log) == 0 {
@@ -615,11 +615,11 @@ func TestDeterminismCanary(t *testing.T) {
 }
 
 func TestChaosExercisesTheKernel(t *testing.T) {
-	cfg := chaosCfg()
+	config := chaosCfg()
 	var crashes, exits int
 	var faults, deadline uint64
 	for seed := uint64(1); seed <= 12; seed++ {
-		r := RunSeed(cfg, seed)
+		r := RunSeed(config, seed)
 		crashes += r.Crashes
 		exits += r.Exits
 		faults += stat(r, "faults")
@@ -631,16 +631,16 @@ func TestChaosExercisesTheKernel(t *testing.T) {
 }
 
 func TestCheckDeterminismDetectsDivergence(t *testing.T) {
-	cfg := chaosCfg()
-	cfg.Seeds = []uint64{1, 2, 3, 4}
-	cfg.CheckDeterminism = 2
-	rep, err := NewRunner().Run(cfg)
+	config := chaosCfg()
+	config.Seeds = []uint64{1, 2, 3, 4}
+	config.CheckDeterminism = 2
+	rep, err := NewRunner().Run(config)
 	if err != nil || len(rep.Nondeterminism) != 0 {
 		t.Fatalf("clean config flagged: %v %v", err, rep.Nondeterminism)
 	}
 	runs := 0
-	bad := baseCfg(scripted(func(m *scriptM, ev core.Event) []core.Action {
-		if _, ok := ev.Body.(core.NodeStarted); ok {
+	bad := baseCfg(scripted(func(m *scriptM, event core.Event) []core.Action {
+		if _, ok := event.Body.(core.NodeStarted); ok {
 			runs++ // package-level state leaking across runs: the bug the check exists for
 			return []core.Action{core.SetTimer{ID: 1, Gen: 1, After: core.Duration(runs) * core.Millisecond}}
 		}
@@ -655,9 +655,9 @@ func TestCheckDeterminismDetectsDivergence(t *testing.T) {
 }
 
 func TestReplay(t *testing.T) {
-	cfg := chaosCfg()
-	plain := RunSeed(cfg, 5)
-	rep, err := NewRunner().Replay(cfg, 5)
+	config := chaosCfg()
+	plain := RunSeed(config, 5)
+	rep, err := NewRunner().Replay(config, 5)
 	if err != nil || rep.TraceHash != plain.TraceHash || len(rep.Log) == 0 {
 		t.Fatalf("replay: %v hash %x vs %x log %d", err, rep.TraceHash, plain.TraceHash, len(rep.Log))
 	}
@@ -714,15 +714,15 @@ func (w *phaseWl) OnPhase(p Phase) []core.Action {
 func TestPhaseAwareWorkload(t *testing.T) {
 	run := func(emit bool) (SeedResult, *phaseWl, []TimedFact, []TimedFact) {
 		w := &phaseWl{emit: emit}
-		cfg := baseCfg(scripted(ping))
-		cfg.Workloads = []WorkloadFactory{func(core.Environment, core.NodeInstance, []core.NodeInstance) Workload { return w }}
+		config := baseCfg(scripted(ping))
+		config.Workloads = []WorkloadFactory{func(core.Environment, core.NodeInstance, []core.NodeInstance) Workload { return w }}
 		var sp, wp []TimedFact
-		cfg.Invariants = []func() SafetyRule{func() SafetyRule {
+		config.Invariants = []func() SafetyRule{func() SafetyRule {
 			return &fnInvariant{atEnd: func(v View) {
 				sp, wp = v.Timeline().Snapshot("sim_phase"), v.Timeline().Snapshot("wl_phase")
 			}}
 		}}
-		return RunSeed(cfg, 1), w, sp, wp
+		return RunSeed(config, 1), w, sp, wp
 	}
 	res, w, sp, wp := run(true)
 	if len(res.Failures) != 0 {
@@ -734,7 +734,7 @@ func TestPhaseAwareWorkload(t *testing.T) {
 	if len(sp) != 2 || sp[0].At != Time(core.Second) || sp[1].At != Time(2*core.Second) {
 		t.Fatalf("sim_phase facts: %+v", sp)
 	}
-	if v, _ := sp[0].Fact.Fields[0].Value.(core.U64); v != core.U64(PhaseRecovering) {
+	if v, _ := sp[0].Fact.Fields[0].Value.(core.Uint64Value); v != core.Uint64Value(PhaseRecovering) {
 		t.Fatalf("phase field: %+v", sp[0].Fact)
 	}
 	if len(wp) != 2 || wp[0].At != sp[0].At {
@@ -748,16 +748,16 @@ func TestPhaseAwareWorkload(t *testing.T) {
 }
 
 func TestExpectReachableAndAssertions(t *testing.T) {
-	cfg := baseCfg(scripted(ping))
-	cfg.Seeds = []uint64{1, 2}
-	cfg.Invariants = []func() SafetyRule{func() SafetyRule {
+	config := baseCfg(scripted(ping))
+	config.Seeds = []uint64{1, 2}
+	config.Invariants = []func() SafetyRule{func() SafetyRule {
 		return &fnInvariant{atEnd: func(v View) {
 			v.Assert().Reachable("hit")
 			v.Assert().Always(true, "fine")
 		}}
 	}}
-	cfg.ExpectReachable = []core.PropertyID{"hit", "never ran", "also never"}
-	rep, err := NewRunner().Run(cfg)
+	config.ExpectReachable = []core.PropertyID{"hit", "never ran", "also never"}
+	rep, err := NewRunner().Run(config)
 	if err != nil {
 		t.Fatal(err)
 	}

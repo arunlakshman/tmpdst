@@ -5,7 +5,7 @@ import (
 	"slices"
 	"sync"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Log is a byte-oriented shared loglet. Slots hold opaque machine payloads.

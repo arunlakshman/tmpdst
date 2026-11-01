@@ -1,4 +1,4 @@
-module manifester
+module mds
 
 go 1.26.0
 

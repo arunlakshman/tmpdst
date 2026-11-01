@@ -1,5 +1,5 @@
 #!/bin/bash
-# manifester-bench load generator ${loadgen_index}: Java 17, Kafka CLI tools, WarpStream CLI
+# mds-bench load generator ${loadgen_index}: Java 17, Kafka CLI tools, WarpStream CLI
 # (best effort), OpenMessaging Benchmark (if uploaded), bench harness, Alloy.
 set -euxo pipefail
 exec > >(tee -a /var/log/bench-bootstrap.log) 2>&1

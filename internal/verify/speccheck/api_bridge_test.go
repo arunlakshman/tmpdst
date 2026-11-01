@@ -3,8 +3,8 @@ package speccheck
 import (
 	"testing"
 
-	cpv1 "manifester/internal/controlplane/api/v1"
-	"manifester/internal/core"
+	cpv1 "mds/internal/controlplane/api/v1"
+	"mds/internal/core"
 )
 
 func TestExecRequestAPITypes(t *testing.T) {

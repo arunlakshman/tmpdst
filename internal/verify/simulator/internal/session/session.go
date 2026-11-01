@@ -4,7 +4,7 @@
 // the connection belongs to the scenario, through the Loop hooks.
 package session
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // State is a client's connection state. A scenario may define connected
 // substates of its own at Connected and above.
@@ -32,8 +32,8 @@ type Client struct {
 
 func (c *Client) session() *Client { return c }
 
-func (c *Client) wakeID() core.TimerID { return core.TimerID(1 + c.ID*2) }
-func (c *Client) reqID() core.TimerID  { return core.TimerID(2 + c.ID*2) }
+func (c *Client) wakeID() core.TimerID    { return core.TimerID(1 + c.ID*2) }
+func (c *Client) requestID() core.TimerID { return core.TimerID(2 + c.ID*2) }
 
 // Wake arms the client's wake timer, replacing any pending one.
 func (c *Client) Wake(d core.Duration) core.Action {
@@ -44,7 +44,7 @@ func (c *Client) Wake(d core.Duration) core.Action {
 // Answered settles the outstanding request, so its timeout no longer fires.
 func (c *Client) Answered() core.Action {
 	c.ReqGen++
-	return core.CancelTimer{ID: c.reqID()}
+	return core.CancelTimer{ID: c.requestID()}
 }
 
 func (c *Client) backoff() core.Action {
@@ -85,12 +85,12 @@ type Loop[C member] struct {
 	Lost func(c C, why string)
 }
 
-func (l *Loop[C]) req() core.RequestID { l.NextReq++; return l.NextReq }
+func (l *Loop[C]) nextRequestID() core.RequestID { l.NextReq++; return l.NextReq }
 
 // Step handles the connection events of ev.
-func (l *Loop[C]) Step(ev core.Event) []core.Action {
+func (l *Loop[C]) Step(event core.Event) []core.Action {
 	var acts []core.Action
-	switch e := ev.Body.(type) {
+	switch e := event.Body.(type) {
 	case core.NodeStarted:
 		for _, c := range l.Clients {
 			acts = append(acts, l.Dial(c)...)
@@ -132,7 +132,7 @@ func (l *Loop[C]) byConn(id core.ConnID) (C, bool) {
 // Dial connects c to the next broker in its rotation.
 func (l *Loop[C]) Dial(c C) []core.Action {
 	s := c.session()
-	s.State, s.DialReq = Connecting, l.req()
+	s.State, s.DialReq = Connecting, l.nextRequestID()
 	addr := string(l.Brokers[(s.ID+s.Dials)%len(l.Brokers)])
 	s.Dials++
 	return []core.Action{core.Connect{Req: s.DialReq, Addr: addr}}
@@ -163,7 +163,7 @@ func (l *Loop[C]) onTimer(e core.TimerFired) []core.Action {
 				return l.Idle(c)
 			}
 			return nil
-		case s.reqID():
+		case s.requestID():
 			if e.Gen != s.ReqGen || !l.Busy(c) {
 				return nil
 			}
@@ -176,11 +176,11 @@ func (l *Loop[C]) onTimer(e core.TimerFired) []core.Action {
 // Request sends data on c's connection and starts its timeout.
 func (l *Loop[C]) Request(c C, data []byte, timeout core.Duration) []core.Action {
 	s := c.session()
-	s.SendReq = l.req()
+	s.SendReq = l.nextRequestID()
 	s.ReqGen++
 	return []core.Action{
 		core.Send{Req: s.SendReq, Conn: s.Conn, Data: data},
-		core.SetTimer{ID: s.reqID(), Gen: s.ReqGen, After: timeout},
+		core.SetTimer{ID: s.requestID(), Gen: s.ReqGen, After: timeout},
 	}
 }
 
@@ -196,5 +196,5 @@ func (l *Loop[C]) lost(c C, why string, acts []core.Action) []core.Action {
 	s := c.session()
 	s.Conn = 0
 	s.ReqGen++
-	return append(acts, core.CancelTimer{ID: s.reqID()}, s.backoff())
+	return append(acts, core.CancelTimer{ID: s.requestID()}, s.backoff())
 }

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func sample() []Batch {
@@ -22,20 +22,20 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seg, err := Decode(obj)
+	segment, err := Decode(obj)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(seg.Batches) != len(in) {
-		t.Fatalf("got %d batches", len(seg.Batches))
+	if len(segment.Batches) != len(in) {
+		t.Fatalf("got %d batches", len(segment.Batches))
 	}
 	for i, b := range in {
-		g := seg.Batches[i]
-		if g.TP != b.TP || g.Records != b.Records || !bytes.Equal(g.Data, b.Data) {
+		g := segment.Batches[i]
+		if g.TopicPartition != b.TopicPartition || g.Records != b.Records || !bytes.Equal(g.Data, b.Data) {
 			t.Fatalf("batch %d mismatch: %+v", i, g)
 		}
-		if seg.Entries[i] != ents[i] {
-			t.Fatalf("entry %d: decode %+v encode %+v", i, seg.Entries[i], ents[i])
+		if segment.Entries[i] != ents[i] {
+			t.Fatalf("entry %d: decode %+v encode %+v", i, segment.Entries[i], ents[i])
 		}
 		// independent ranged fetch
 		ref := ents[i].Ref("k")
@@ -146,7 +146,7 @@ func FuzzDecode(f *testing.F) {
 	f.Add(obj[:HeaderSize])
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, b []byte) {
-		seg, err := Decode(b)
+		segment, err := Decode(b)
 		if err != nil {
 			if !errors.Is(err, ErrCorrupt) {
 				t.Fatalf("non-corrupt error: %v", err)
@@ -154,7 +154,7 @@ func FuzzDecode(f *testing.F) {
 			return
 		}
 		// A valid object re-encodes to identical bytes (canonical).
-		out, _, err := Encode(seg.Batches)
+		out, _, err := Encode(segment.Batches)
 		if err != nil || !bytes.Equal(out, b) {
 			t.Fatalf("not canonical: %v", err)
 		}

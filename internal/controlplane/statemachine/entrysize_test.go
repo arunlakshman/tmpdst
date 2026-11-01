@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
 // dynamoItemLimit is the largest DynamoDB item, in bytes (400 KiB).
@@ -17,7 +17,7 @@ func sizedCommit(key string, batches int) stateupdater.Entry {
 	bs := make([]core.PendingBatch, batches)
 	for i := range bs {
 		bs[i] = core.PendingBatch{
-			TP: core.NewTopicPartition("orders", int32(i)), Records: 100,
+			TopicPartition: core.NewTopicPartition("orders", int32(i)), Records: 100,
 			Loc: core.SegmentRef{Key: key, Off: int64(i) * 1000, Len: 1000},
 		}
 	}

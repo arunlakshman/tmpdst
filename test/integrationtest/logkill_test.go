@@ -16,15 +16,15 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/grpc"
 
-	"manifester/internal/broker"
-	"manifester/internal/controlplane/controlplaneclient"
-	"manifester/internal/controlplane/executor"
-	"manifester/internal/controlplane/fakedynamodb"
-	"manifester/internal/controlplane/server"
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/core"
-	"manifester/internal/system/production"
-	"manifester/internal/verify/speccheck/specsystem"
+	"mds/internal/broker"
+	"mds/internal/controlplane/controlplaneclient"
+	"mds/internal/controlplane/executor"
+	"mds/internal/controlplane/fakedynamodb"
+	"mds/internal/controlplane/server"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/core"
+	"mds/internal/system/production"
+	"mds/internal/verify/speccheck/specsystem"
 )
 
 // cpNode is one machine-backed control-plane node served over gRPC.
@@ -61,15 +61,15 @@ func newLogStack(t *testing.T, brokers int) *logStack {
 	ls := &logStack{}
 	var addrs []string
 	for rank := range 3 {
-		cfg := statemachine.Config{
+		config := statemachine.Config{
 			K: 4, CatchUpEvery: core.Duration(5 * time.Millisecond),
 			Rank: rank, Heartbeat: core.Duration(100 * time.Millisecond),
 			TakeoverAfter: core.Duration(1500 * time.Millisecond),
-			HoleAfter:     core.Duration(100 * time.Millisecond),
+			GapAfter:      core.Duration(100 * time.Millisecond),
 			Writer:        fmt.Sprintf("cp%d", rank),
 		}
 		n := server.New(server.Config{
-			Machine: cfg, Log: log, Objects: objs,
+			Machine: config, Log: log, Objects: objs,
 			Self: core.NodeInstance{Node: core.NodeID(fmt.Sprintf("cp%d", rank))},
 		})
 		if err := n.Start(t.Context()); err != nil {
@@ -114,8 +114,8 @@ func retryDial(f func() error) error {
 }
 
 func isDialErr(err error) bool {
-	var op *net.OpError
-	return (errors.As(err, &op) && op.Op == "dial") || errors.Is(err, syscall.EADDRNOTAVAIL)
+	var operation *net.OpError
+	return (errors.As(err, &operation) && operation.Op == "dial") || errors.Is(err, syscall.EADDRNOTAVAIL)
 }
 
 func roleOf(t *testing.T, n *cpNode) string {

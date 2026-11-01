@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // Group commands (slice 4a). The fold of GroupInstall, GroupAssign,
@@ -42,16 +42,16 @@ func (c *cmdSize) str(s string)   { c.n += 4 + len(s) }
 func (c *cmdSize) bytes(b []byte) { c.n += 4 + len(b) }
 func (c *cmdSize) num()           { c.n += 10 }
 
-func installSize(op core.GroupInstall) int {
+func installSize(operation core.GroupInstall) int {
 	c := &cmdSize{n: 16}
-	c.str(op.Group)
-	c.str(op.ProtocolType)
-	c.str(op.Protocol)
+	c.str(operation.Group)
+	c.str(operation.ProtocolType)
+	c.str(operation.Protocol)
 	c.num()
-	c.str(op.Leader)
+	c.str(operation.Leader)
 	c.num()
 	c.num()
-	for _, m := range op.Members {
+	for _, m := range operation.Members {
 		c.str(m.MemberID)
 		c.str(m.ClientID)
 		c.str(m.ClientHost)
@@ -63,41 +63,41 @@ func installSize(op core.GroupInstall) int {
 	return c.n
 }
 
-func assignSize(op core.GroupAssign) int {
+func assignSize(operation core.GroupAssign) int {
 	c := &cmdSize{n: 16}
-	c.str(op.Group)
+	c.str(operation.Group)
 	c.num()
-	c.str(op.Leader)
+	c.str(operation.Leader)
 	c.num()
 	c.num()
-	for _, a := range op.Assignments {
+	for _, a := range operation.Assignments {
 		c.str(a.Member)
 		c.bytes(a.Bytes)
 	}
 	return c.n
 }
 
-func removeSize(op core.GroupRemove) int {
+func removeSize(operation core.GroupRemove) int {
 	c := &cmdSize{n: 16}
-	c.str(op.Group)
+	c.str(operation.Group)
 	c.num()
-	c.str(op.Reason)
+	c.str(operation.Reason)
 	c.num()
-	for _, m := range op.Members {
+	for _, m := range operation.Members {
 		c.str(m)
 	}
 	return c.n
 }
 
-func offsetCommitSize(op core.OffsetCommit) int {
+func offsetCommitSize(operation core.OffsetCommit) int {
 	c := &cmdSize{n: 16}
-	c.str(op.Group)
-	c.str(op.Member)
+	c.str(operation.Group)
+	c.str(operation.Member)
 	c.num()
 	c.num()
 	c.num()
-	for _, o := range op.Offsets {
-		c.str(o.TP.Topic)
+	for _, o := range operation.Offsets {
+		c.str(o.TopicPartition.Topic)
 		c.num()
 		c.num()
 		c.num()
@@ -194,16 +194,16 @@ func decodeOffset(group string, b []byte) offsetRecord {
 }
 
 // groupTransaction runs one group write in tx.
-func groupTransaction(tx Transaction, op core.ControlPlaneOperation) core.ControlPlaneDone {
-	switch x := op.(type) {
+func groupTransaction(transaction Transaction, operation core.ControlPlaneOperation) core.ControlPlaneDone {
+	switch x := operation.(type) {
 	case core.GroupInstall:
-		return groupAnswer(installGroup(tx, x))
+		return groupAnswer(installGroup(transaction, x))
 	case core.GroupAssign:
-		return groupAnswer(assignGroup(tx, x))
+		return groupAnswer(assignGroup(transaction, x))
 	case core.GroupRemove:
-		return groupAnswer(removeGroup(tx, x))
+		return groupAnswer(removeGroup(transaction, x))
 	case core.OffsetCommit:
-		return commitOffsets(tx, x)
+		return commitOffsets(transaction, x)
 	}
 	return core.ControlPlaneDone{Err: core.ErrInvalid}
 }
@@ -219,15 +219,15 @@ func groupAnswer(code core.ErrCode) core.ControlPlaneDone {
 // groupWrite runs one group write in its own transaction.
 //
 //nolint:dupl // same shape as the reads, but in a write transaction
-func (a *StateUpdater) groupWrite(op core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
+func (a *StateUpdater) groupWrite(operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
 	var d core.ControlPlaneDone
-	err := a.kv.Update(func(tx Transaction) { d = groupTransaction(tx, op) })
+	err := a.keyValue.Update(func(transaction Transaction) { d = groupTransaction(transaction, operation) })
 	return d, err
 }
 
 // readHeader returns the header of group; found is false when it was never installed.
-func readHeader(tx Transaction, group string) (groupHeader, bool) {
-	v := tx.Get(groupKey(group))
+func readHeader(transaction Transaction, group string) (groupHeader, bool) {
+	v := transaction.Get(groupKey(group))
 	if v == nil {
 		return groupHeader{}, false
 	}
@@ -235,10 +235,10 @@ func readHeader(tx Transaction, group string) (groupHeader, bool) {
 }
 
 // memberKeys lists the M keys of a group, in member id order.
-func memberKeys(tx Transaction, group string) [][]byte {
+func memberKeys(transaction Transaction, group string) [][]byte {
 	var keys [][]byte
 	lo := groupPrefix(prefixMember, group)
-	tx.Ascend(lo, prefixEnd(lo), func(k, _ []byte) bool {
+	transaction.Ascend(lo, prefixEnd(lo), func(k, _ []byte) bool {
 		keys = append(keys, append([]byte(nil), k...))
 		return true
 	})
@@ -246,69 +246,69 @@ func memberKeys(tx Transaction, group string) [][]byte {
 }
 
 // readMembers lists the members of a group, sorted by member id.
-func readMembers(tx Transaction, group string) []core.GroupMemberInfo {
+func readMembers(transaction Transaction, group string) []core.GroupMemberInfo {
 	var out []core.GroupMemberInfo
 	lo := groupPrefix(prefixMember, group)
-	tx.Ascend(lo, prefixEnd(lo), func(k, v []byte) bool {
+	transaction.Ascend(lo, prefixEnd(lo), func(k, v []byte) bool {
 		out = append(out, decodeMember(group, string(k[len(lo):]), v))
 		return true
 	})
 	return out
 }
 
-func installGroup(tx Transaction, op core.GroupInstall) core.ErrCode {
-	if installSize(op) > maxGroupCommand {
+func installGroup(transaction Transaction, operation core.GroupInstall) core.ErrCode {
+	if installSize(operation) > maxGroupCommand {
 		return core.ErrTooLarge
 	}
-	if !validInstall(op) {
+	if !validInstall(operation) {
 		return core.ErrInvalid
 	}
-	h, _ := readHeader(tx, op.Group)
-	if op.Generation != h.generation+1 {
+	h, _ := readHeader(transaction, operation.Group)
+	if operation.Generation != h.generation+1 {
 		return core.ErrIllegalGeneration
 	}
-	for _, k := range memberKeys(tx, op.Group) {
-		tx.Delete(k)
+	for _, k := range memberKeys(transaction, operation.Group) {
+		transaction.Delete(k)
 	}
-	for _, m := range op.Members {
-		info := core.GroupMemberInfo{GroupMember: m, JoinedTimeMs: op.TimeMs}
-		tx.Set(memberKey(op.Group, m.MemberID), encodeMember(info))
+	for _, m := range operation.Members {
+		info := core.GroupMemberInfo{GroupMember: m, JoinedTimeMs: operation.TimeMs}
+		transaction.Set(memberKey(operation.Group, m.MemberID), encodeMember(info))
 	}
-	next := groupHeader{generation: op.Generation, protoType: op.ProtocolType, protocol: op.Protocol, leader: op.Leader}
-	tx.Set(groupKey(op.Group), next.encode())
+	next := groupHeader{generation: operation.Generation, protoType: operation.ProtocolType, protocol: operation.Protocol, leader: operation.Leader}
+	transaction.Set(groupKey(operation.Group), next.encode())
 	return core.OK
 }
 
 // validInstall checks the shape of a join result: a group name, members with
 // unique non-empty ids, and a leader that is one of them.
-func validInstall(op core.GroupInstall) bool {
-	if op.Group == "" || len(op.Members) == 0 {
+func validInstall(operation core.GroupInstall) bool {
+	if operation.Group == "" || len(operation.Members) == 0 {
 		return false
 	}
 	ids := map[string]bool{}
-	for _, m := range op.Members {
+	for _, m := range operation.Members {
 		if m.MemberID == "" || ids[m.MemberID] {
 			return false
 		}
 		ids[m.MemberID] = true
 	}
-	return ids[op.Leader]
+	return ids[operation.Leader]
 }
 
-func assignGroup(tx Transaction, op core.GroupAssign) core.ErrCode {
-	if assignSize(op) > maxGroupCommand {
+func assignGroup(transaction Transaction, operation core.GroupAssign) core.ErrCode {
+	if assignSize(operation) > maxGroupCommand {
 		return core.ErrTooLarge
 	}
-	h, found := readHeader(tx, op.Group)
-	if op.Generation != h.generation {
+	h, found := readHeader(transaction, operation.Group)
+	if operation.Generation != h.generation {
 		return core.ErrIllegalGeneration
 	}
-	if !found || op.Leader != h.leader || tx.Get(memberKey(op.Group, op.Leader)) == nil {
+	if !found || operation.Leader != h.leader || transaction.Get(memberKey(operation.Group, operation.Leader)) == nil {
 		return core.ErrUnknownMember
 	}
 	want := map[string][]byte{}
-	for _, a := range op.Assignments {
-		if tx.Get(memberKey(op.Group, a.Member)) == nil {
+	for _, a := range operation.Assignments {
+		if transaction.Get(memberKey(operation.Group, a.Member)) == nil {
 			return core.ErrUnknownMember
 		}
 		if _, dup := want[a.Member]; dup {
@@ -316,57 +316,57 @@ func assignGroup(tx Transaction, op core.GroupAssign) core.ErrCode {
 		}
 		want[a.Member] = a.Bytes
 	}
-	for _, m := range readMembers(tx, op.Group) {
+	for _, m := range readMembers(transaction, operation.Group) {
 		m.Assignment = blobOrNil(want[m.MemberID])
-		tx.Set(memberKey(op.Group, m.MemberID), encodeMember(m))
+		transaction.Set(memberKey(operation.Group, m.MemberID), encodeMember(m))
 	}
-	h.assignedGen = op.Generation
-	tx.Set(groupKey(op.Group), h.encode())
+	h.assignedGen = operation.Generation
+	transaction.Set(groupKey(operation.Group), h.encode())
 	return core.OK
 }
 
-func removeGroup(tx Transaction, op core.GroupRemove) core.ErrCode {
-	if removeSize(op) > maxGroupCommand {
+func removeGroup(transaction Transaction, operation core.GroupRemove) core.ErrCode {
+	if removeSize(operation) > maxGroupCommand {
 		return core.ErrTooLarge
 	}
-	h, found := readHeader(tx, op.Group)
+	h, found := readHeader(transaction, operation.Group)
 	if !found {
 		return core.OK
 	}
-	left := len(memberKeys(tx, op.Group))
-	for _, id := range op.Members {
-		k := memberKey(op.Group, id)
-		if tx.Get(k) != nil {
-			tx.Delete(k)
+	left := len(memberKeys(transaction, operation.Group))
+	for _, id := range operation.Members {
+		k := memberKey(operation.Group, id)
+		if transaction.Get(k) != nil {
+			transaction.Delete(k)
 			left--
 		}
 	}
-	if tx.Get(memberKey(op.Group, h.leader)) == nil {
+	if transaction.Get(memberKey(operation.Group, h.leader)) == nil {
 		h.leader = ""
 	}
 	if left == 0 {
 		h.leader = ""
 		h.assignedGen = 0
 	}
-	tx.Set(groupKey(op.Group), h.encode())
+	transaction.Set(groupKey(operation.Group), h.encode())
 	return core.OK
 }
 
-func commitOffsets(tx Transaction, op core.OffsetCommit) core.ControlPlaneDone {
-	if offsetCommitSize(op) > maxGroupCommand {
+func commitOffsets(transaction Transaction, operation core.OffsetCommit) core.ControlPlaneDone {
+	if offsetCommitSize(operation) > maxGroupCommand {
 		return core.ControlPlaneDone{Err: core.ErrTooLarge}
 	}
-	h, found := readHeader(tx, op.Group)
+	h, found := readHeader(transaction, operation.Group)
 	switch {
-	case op.Generation >= 0:
-		if !found || tx.Get(memberKey(op.Group, op.Member)) == nil {
+	case operation.Generation >= 0:
+		if !found || transaction.Get(memberKey(operation.Group, operation.Member)) == nil {
 			return core.ControlPlaneDone{Err: core.ErrUnknownMember}
 		}
-		if op.Generation != h.generation {
+		if operation.Generation != h.generation {
 			return core.ControlPlaneDone{Err: core.ErrIllegalGeneration}
 		}
-	case op.Generation == -1 && op.Member == "":
-		if len(memberKeys(tx, op.Group)) > 0 {
+	case operation.Generation == -1 && operation.Member == "":
+		if len(memberKeys(transaction, operation.Group)) > 0 {
 			return core.ControlPlaneDone{Err: core.ErrIllegalGeneration}
 		}
 	default:
@@ -374,8 +374,8 @@ func commitOffsets(tx Transaction, op core.OffsetCommit) core.ControlPlaneDone {
 	}
 	var errs []core.ErrCode
 	saved := false
-	for _, o := range op.Offsets {
-		code := commitOne(tx, op, o)
+	for _, o := range operation.Offsets {
+		code := commitOne(transaction, operation, o)
 		saved = saved || code == core.OK
 		errs = append(errs, code)
 	}
@@ -387,15 +387,15 @@ func commitOffsets(tx Transaction, op core.OffsetCommit) core.ControlPlaneDone {
 }
 
 // commitOne checks and stores one offset of an OffsetCommit.
-func commitOne(tx Transaction, op core.OffsetCommit, o core.PartitionOffset) core.ErrCode {
-	n := readVarint(tx.Get(topicKey(o.TP.Topic)))
-	if o.TP.Partition < 0 || int64(o.TP.Partition) >= n {
+func commitOne(transaction Transaction, operation core.OffsetCommit, o core.PartitionOffset) core.ErrCode {
+	n := readVarint(transaction.Get(topicKey(o.TopicPartition.Topic)))
+	if o.TopicPartition.Partition < 0 || int64(o.TopicPartition.Partition) >= n {
 		return core.ErrUnknownPartition
 	}
 	if o.Offset < 0 {
 		return core.ErrInvalid
 	}
-	rec := offsetRecord{offset: o.Offset, epoch: o.LeaderEpoch, meta: o.Metadata, time: op.TimeMs}
-	tx.Set(offsetKey(op.Group, o.TP), rec.encode())
+	rec := offsetRecord{offset: o.Offset, epoch: o.LeaderEpoch, meta: o.Metadata, time: operation.TimeMs}
+	transaction.Set(offsetKey(operation.Group, o.TopicPartition), rec.encode())
 	return core.OK
 }

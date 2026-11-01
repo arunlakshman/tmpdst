@@ -8,17 +8,17 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/kafka"
-	"manifester/internal/verify/speccheck"
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/kafka"
+	"mds/internal/verify/speccheck"
+	"mds/internal/wire/kafkawire"
 )
 
 // C4 world: a random correct at-least-once Kafka history generated against the
 // speccheck specs (ControlPlane assigns offsets and replays a committed key,
 // Partition is the expected log; a retried batch is committed again, so it is
-// in the log twice), exposed to the oracle through a fake sim.View. Faults
+// in the log twice), exposed to the oracle through a fake simulator.View. Faults
 // mutate the finished world (c4_faults_test.go).
 
 // failures counts violated Always props (the fake core.Assertions).
@@ -42,7 +42,7 @@ type producer struct{ nb int }
 
 type broker struct{ ref core.NodeInstance }
 
-// world is the fake sim.View plus the spec-side truth it was built from.
+// world is the fake simulator.View plus the spec-side truth it was built from.
 type world struct {
 	opts   kafka.Opts
 	tps    []core.TopicPartition
@@ -76,7 +76,7 @@ func (w *world) Alive(core.NodeInstance) bool            { return true }
 func (w *world) Timeline() simulator.Timeline            { return w.tl }
 func (w *world) History() simulator.History              { return (*hist)(w) }
 func (w *world) Objects() simulator.ObjectStoreRealState { return (*objView)(w) }
-func (w *world) CP() simulator.ControlPlaneRealState     { return (*cpView)(w) }
+func (w *world) CP() simulator.ControlPlaneRealState     { return (*controlPlaneView)(w) }
 func (w *world) Assert() core.Assertions                 { return w.as }
 func (w *world) touch()                                  { w.gen++ }
 
@@ -94,17 +94,19 @@ func (o *objView) Object(k string) ([]byte, bool)  { b, ok := o.objs[k]; return 
 func (o *objView) EachObject(func(string, []byte)) {}
 func (o *objView) Gen() uint64                     { return o.gen }
 
-type cpView world
+type controlPlaneView world
 
-func (c *cpView) Committed(tp core.TopicPartition) []core.BatchRange { return c.ranges[tp] }
-func (c *cpView) Gen() uint64                                        { return c.gen }
-func (c *cpView) HighWatermark(tp core.TopicPartition) core.Offset {
-	rs := c.ranges[tp]
+func (c *controlPlaneView) Committed(topicPartition core.TopicPartition) []core.BatchRange {
+	return c.ranges[topicPartition]
+}
+func (c *controlPlaneView) Gen() uint64 { return c.gen }
+func (c *controlPlaneView) HighWatermark(topicPartition core.TopicPartition) core.Offset {
+	rs := c.ranges[topicPartition]
 	h := int64(0)
 	if len(rs) > 0 {
 		h = int64(rs[len(rs)-1].Base) + rs[len(rs)-1].Count
 	}
-	return core.Offset(h + c.hwmAdj[tp])
+	return core.Offset(h + c.hwmAdj[topicPartition])
 }
 
 func (w *world) rebuildTL() {
@@ -142,9 +144,9 @@ func newWorld(seed uint64, live bool) *world {
 	for _, t := range opts.Topics {
 		w.cp.CreateTopic(t, opts.Partitions)
 		for p := int32(0); p < opts.Partitions; p++ {
-			tp := core.NewTopicPartition(t, p)
-			w.tps = append(w.tps, tp)
-			w.parts[tp] = &speccheck.Partition{}
+			topicPartition := core.NewTopicPartition(t, p)
+			w.tps = append(w.tps, topicPartition)
+			w.parts[topicPartition] = &speccheck.Partition{}
 		}
 	}
 	for i := range 3 {
@@ -182,12 +184,12 @@ func (w *world) newID() core.ID {
 }
 
 type item struct {
-	op    int // index in w.ops
-	po    kafka.ProduceOp
-	p     *producer
-	fate  int
-	bytes []byte
-	pb    core.PendingBatch
+	operation int // index in w.ops
+	po        kafka.ProduceOp
+	p         *producer
+	fate      int
+	bytes     []byte
+	pb        core.PendingBatch
 }
 
 const (
@@ -199,7 +201,7 @@ const (
 	fIdem      // claims a producer id: the broker rejects it, never committed
 )
 
-func (w *world) buildItem(r *rand.Rand, c int, tp core.TopicPartition) *item {
+func (w *world) buildItem(r *rand.Rand, c int, topicPartition core.TopicPartition) *item {
 	p := w.prods[c]
 	it := &item{p: p, fate: fNormal}
 	switch x := r.IntN(18); {
@@ -226,12 +228,12 @@ func (w *world) buildItem(r *rand.Rand, c int, tp core.TopicPartition) *item {
 	if it.fate == fIdem {
 		bp.ProducerID, bp.ProducerEpoch, bp.BaseSequence = 7, 0, 0
 	}
-	it.pb = core.PendingBatch{TP: tp, Records: int64(n)}
+	it.pb = core.PendingBatch{TopicPartition: topicPartition, Records: int64(n)}
 	var err error
 	if it.bytes, err = kafkawire.BuildBatch(bp, recs); err != nil {
 		panic(err)
 	}
-	it.po = kafka.ProduceOp{Client: c, Batch: p.nb, TP: tp, Vals: vals, Idem: it.fate == fIdem}
+	it.po = kafka.ProduceOp{Client: c, Batch: p.nb, TopicPartition: topicPartition, Vals: vals, Idem: it.fate == fIdem}
 	return it
 }
 
@@ -250,15 +252,15 @@ func (w *world) commit(items []*item, replay bool) []core.BatchRange {
 		pbs = append(pbs, it.pb)
 	}
 	w.objs[key] = obj
-	op := core.CommitSegment{SegmentKey: key, Batches: pbs}
-	d := w.cp.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
+	operation := core.CommitSegment{SegmentKey: key, Batches: pbs}
+	d := w.cp.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 	if d.Err != core.OK {
 		panic(fmt.Sprintf("spec CP refused a commit: %v", d.Err))
 	}
 	as := d.Resp.(core.CommitSegmentResp).Assigned
 	if replay {
 		w.st.replays++
-		d2 := w.cp.Exec(core.ControlPlaneCall{Op: op}).(core.ControlPlaneDone)
+		d2 := w.cp.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 		if d2.Err != core.OK || !slices.Equal(d2.Resp.(core.CommitSegmentResp).Assigned, as) {
 			panic("spec CP: a replayed commit did not return the original answer")
 		}
@@ -266,19 +268,19 @@ func (w *world) commit(items []*item, replay bool) []core.BatchRange {
 	touched := map[core.TopicPartition]bool{}
 	for i, rg := range as {
 		if i < len(items) {
-			base := w.parts[rg.TP].Append(valBytes(items[i].po.Vals))
+			base := w.parts[rg.TopicPartition].Append(valBytes(items[i].po.Vals))
 			if base != rg.Base {
 				panic(fmt.Sprintf("Partition base %d != CP base %d", base, rg.Base))
 			}
-			touched[rg.TP] = true
+			touched[rg.TopicPartition] = true
 			continue
 		}
 		panic(fmt.Sprintf("spec CP assigned %d ranges for %d batches", len(as), len(items)))
 	}
-	for tp := range touched { // map order is irrelevant: independent entries
-		lk := w.cp.Exec(core.ControlPlaneCall{Op: core.FindSegments{TP: tp}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
-		w.ranges[tp] = lk.Ranges
-		if lk.End != w.parts[tp].HighWatermark() {
+	for topicPartition := range touched { // map order is irrelevant: independent entries
+		lk := w.cp.Exec(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: topicPartition}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
+		w.ranges[topicPartition] = lk.Ranges
+		if lk.End != w.parts[topicPartition].HighWatermark() {
 			panic("Partition end != CP end")
 		}
 	}
@@ -295,20 +297,20 @@ func valBytes(vs []string) [][]byte {
 
 func (w *world) ack(b *broker, rg core.BatchRange, it *item) {
 	w.emit(b.ref, core.Fact{Name: "produce_acked", Fields: []core.Field{
-		{Key: "topic", Value: core.Str(rg.TP.Topic)}, {Key: "partition", Value: core.I64(rg.TP.Partition)},
-		{Key: "base_offset", Value: core.I64(rg.Base)}, {Key: "count", Value: core.I64(rg.Count)},
-		{Key: "segment", Value: core.Str(rg.Loc.Key)}}})
+		{Key: "topic", Value: core.StringValue(rg.TopicPartition.Topic)}, {Key: "partition", Value: core.Int64Value(rg.TopicPartition.Partition)},
+		{Key: "base_offset", Value: core.Int64Value(rg.Base)}, {Key: "count", Value: core.Int64Value(rg.Count)},
+		{Key: "segment", Value: core.StringValue(rg.Loc.Key)}}})
 }
 
 func (w *world) invoke(it *item, c int) {
 	w.ops = append(w.ops, simulator.HistoryOperation{ID: w.newID(), Value: w.newID(), Client: nodeRef(fmt.Sprintf("c%d", c)), Op: it.po,
 		InvSeq: uint64(len(w.ops)*2 + 1), Invoke: w.now, Outcome: simulator.OpPending})
-	it.op = len(w.ops) - 1
+	it.operation = len(w.ops) - 1
 }
 
 func (w *world) ret(it *item, res kafka.ProduceRes, o simulator.OpOutcome) {
-	op := &w.ops[it.op]
-	op.Result, op.Outcome, op.Return, op.RetSeq = res, o, w.now, op.InvSeq+1
+	operation := &w.ops[it.operation]
+	operation.Result, operation.Outcome, operation.Return, operation.RetSeq = res, o, w.now, operation.InvSeq+1
 }
 
 func (w *world) produceStep(r *rand.Rand) {
@@ -387,14 +389,14 @@ func (w *world) read(r *rand.Rand, c int, tis []int) {
 	ro := kafka.ReadOp{Client: c}
 	var res kafka.ReadRes
 	for _, ti := range tis {
-		tp := w.tps[ti]
+		topicPartition := w.tps[ti]
 		from := w.pos[[2]int{c, ti}]
-		ro.Parts = append(ro.Parts, kafka.ReadFrom{TP: tp, Off: from})
-		recs, ok := w.parts[tp].Read(core.Offset(from), 1+r.IntN(4))
+		ro.Parts = append(ro.Parts, kafka.ReadFrom{TopicPartition: topicPartition, Off: from})
+		recs, ok := w.parts[topicPartition].Read(core.Offset(from), 1+r.IntN(4))
 		if !ok {
 			panic("spec Partition refused a read")
 		}
-		rp := kafka.ReadPart{HWM: int64(w.parts[tp].HighWatermark())}
+		rp := kafka.ReadPart{HWM: int64(w.parts[topicPartition].HighWatermark())}
 		for _, x := range recs {
 			rp.Recs = append(rp.Recs, kafka.Rec{Off: int64(x.Offset), Val: string(x.Value)})
 		}
@@ -404,7 +406,7 @@ func (w *world) read(r *rand.Rand, c int, tis []int) {
 	w.ops = append(w.ops, simulator.HistoryOperation{ID: w.newID(), Value: w.newID(), Client: nodeRef(fmt.Sprintf("c%d", c)), Op: ro,
 		InvSeq: uint64(len(w.ops)*2 + 1), Invoke: w.now, Outcome: simulator.OpPending})
 	w.step()
-	op := &w.ops[len(w.ops)-1]
-	op.Result, op.Outcome, op.Return, op.RetSeq = res, simulator.OpResultKnown, w.now, op.InvSeq+1
+	operation := &w.ops[len(w.ops)-1]
+	operation.Result, operation.Outcome, operation.Return, operation.RetSeq = res, simulator.OpResultKnown, w.now, operation.InvSeq+1
 	w.step()
 }

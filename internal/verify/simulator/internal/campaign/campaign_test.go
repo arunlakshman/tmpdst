@@ -3,8 +3,8 @@ package campaign
 import (
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
 )
 
 type stubAssert struct{ sometimes []string }
@@ -69,18 +69,18 @@ func TestNewAndPhases(t *testing.T) {
 func TestSwarm(t *testing.T) {
 	t.Parallel()
 	p := New()
-	cfg := &simulator.SeedConfig{
+	config := &simulator.SeedConfig{
 		ObjectStore:  p.ObjectStore,
 		ControlPlane: p.ControlPlane,
 		Network:      p.Network,
 		Attrition:    p.Attrition,
 	}
 	called := false
-	Swarm(simulator.NewRand(1), cfg, func() { called = true })
+	Swarm(simulator.NewRand(1), config, func() { called = true })
 	if !called {
 		t.Fatal("afterKnobs not called")
 	}
-	Swarm(simulator.NewRand(2), cfg, nil)
+	Swarm(simulator.NewRand(2), config, nil)
 }
 
 func TestPhaseStart(t *testing.T) {
@@ -88,7 +88,7 @@ func TestPhaseStart(t *testing.T) {
 	tl := simulator.NewTimeline()
 	tl.Append(core.NodeInstance{}, 10, core.Fact{
 		Name:   "sim_phase",
-		Fields: []core.Field{{Key: "phase", Value: core.U64(uint64(simulator.PhaseRecovering))}},
+		Fields: []core.Field{{Key: "phase", Value: core.Uint64Value(uint64(simulator.PhaseRecovering))}},
 	})
 	v := stubView{tl: tl, as: &stubAssert{}}
 	at, ok := PhaseStart(v, simulator.PhaseRecovering)
@@ -111,7 +111,7 @@ func TestFaultCoverage(t *testing.T) {
 	tl := simulator.NewTimeline()
 	tl.Append(core.NodeInstance{}, 1, core.Fact{
 		Name:   "sim_crashed",
-		Fields: []core.Field{{Key: "cause", Value: core.Str("attrition")}},
+		Fields: []core.Field{{Key: "cause", Value: core.StringValue("attrition")}},
 	})
 	tl.Append(core.NodeInstance{}, 2, core.Fact{Name: "sim_exited"})
 	as := &stubAssert{}

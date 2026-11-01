@@ -5,7 +5,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // metadata answers Metadata (decision 29): this broker is the leader of every
@@ -32,25 +32,25 @@ func (b *Broker) metadata(s *slot, r *kmsg.MetadataRequest) []core.Action {
 // A non-zero code (the call failed) marks every requested topic with it.
 func (b *Broker) metaResp(o *operation, infos []core.TopicInfo, code kafkaErrorCode) {
 	r := o.creq.(*kmsg.MetadataRequest)
-	resp := kmsg.NewPtrMetadataResponse()
-	cluster := "manifester"
-	resp.ClusterID, resp.ControllerID = &cluster, b.cfg.BrokerID
-	resp.Brokers = b.metaBrokers()
+	response := kmsg.NewPtrMetadataResponse()
+	cluster := "mds"
+	response.ClusterID, response.ControllerID = &cluster, b.config.BrokerID
+	response.Brokers = b.metaBrokers()
 	if r.Topics == nil { // all topics
 		for _, in := range infos {
-			resp.Topics = append(resp.Topics, b.metaTopic(in.Name, infos, code))
+			response.Topics = append(response.Topics, b.metaTopic(in.Name, infos, code))
 		}
 	}
 	for _, rt := range r.Topics {
 		if rt.Topic == nil { // topic ids are not supported
 			t := kmsg.NewMetadataResponseTopic()
 			t.TopicID, t.ErrorCode = rt.TopicID, int16(errUnknownTopicID)
-			resp.Topics = append(resp.Topics, t)
+			response.Topics = append(response.Topics, t)
 			continue
 		}
-		resp.Topics = append(resp.Topics, b.metaTopic(*rt.Topic, infos, code))
+		response.Topics = append(response.Topics, b.metaTopic(*rt.Topic, infos, code))
 	}
-	o.s.resp = resp
+	o.s.response = response
 }
 
 // metaBrokers lists the live brokers, sorted by node id (Q2). This broker is
@@ -69,7 +69,7 @@ func (b *Broker) metaBrokers() []kmsg.MetadataResponseBroker {
 // brokers of the last LiveBrokers, sorted by node id. FindCoordinator hashes over
 // it too (coordinator.go), so every answer uses one list.
 func (b *Broker) liveList() []core.BrokerAddr {
-	self := core.BrokerAddr{NodeID: b.cfg.BrokerID, Host: b.cfg.Host, Port: b.cfg.Port}
+	self := core.BrokerAddr{NodeID: b.config.BrokerID, Host: b.config.Host, Port: b.config.Port}
 	all := []core.BrokerAddr{self}
 	for _, p := range b.live {
 		if p.NodeID != self.NodeID {
@@ -98,8 +98,8 @@ func (b *Broker) metaTopic(name string, infos []core.TopicInfo, code kafkaErrorC
 		}
 		for p := int32(0); p < in.Partitions; p++ {
 			mp := kmsg.NewMetadataResponseTopicPartition()
-			mp.Partition, mp.Leader, mp.LeaderEpoch = p, b.cfg.BrokerID, 0
-			mp.Replicas, mp.ISR = []int32{b.cfg.BrokerID}, []int32{b.cfg.BrokerID}
+			mp.Partition, mp.Leader, mp.LeaderEpoch = p, b.config.BrokerID, 0
+			mp.Replicas, mp.ISR = []int32{b.config.BrokerID}, []int32{b.config.BrokerID}
 			t.Partitions = append(t.Partitions, mp)
 		}
 		return t
@@ -114,12 +114,12 @@ func (b *Broker) metaTopic(name string, infos []core.TopicInfo, code kafkaErrorC
 // listOffsets serves earliest (always 0, no retention) and latest (the end
 // offset); other timestamps are unsupported (decision 29).
 func (b *Broker) listOffsets(s *slot, r *kmsg.ListOffsetsRequest) []core.Action {
-	resp := listOffsetsSkeleton(r)
-	s.resp = resp
+	response := listOffsetsSkeleton(r)
+	s.response = response
 	var acts []core.Action
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
-			rp := &resp.Topics[i].Partitions[j]
+			rp := &response.Topics[i].Partitions[j]
 			acts = append(acts, b.listOne(s, core.NewTopicPartition(t.Topic, p.Partition), p.Timestamp, rp)...)
 		}
 	}
@@ -127,10 +127,10 @@ func (b *Broker) listOffsets(s *slot, r *kmsg.ListOffsetsRequest) []core.Action 
 }
 
 func listOffsetsSkeleton(r *kmsg.ListOffsetsRequest) *kmsg.ListOffsetsResponse {
-	resp := kmsg.NewPtrListOffsetsResponse()
-	resp.Topics = make([]kmsg.ListOffsetsResponseTopic, len(r.Topics))
+	response := kmsg.NewPtrListOffsetsResponse()
+	response.Topics = make([]kmsg.ListOffsetsResponseTopic, len(r.Topics))
 	for i, t := range r.Topics {
-		rt := &resp.Topics[i]
+		rt := &response.Topics[i]
 		rt.Topic = t.Topic
 		rt.Partitions = make([]kmsg.ListOffsetsResponseTopicPartition, len(t.Partitions))
 		for j := range t.Partitions {
@@ -138,17 +138,17 @@ func listOffsetsSkeleton(r *kmsg.ListOffsetsRequest) *kmsg.ListOffsetsResponse {
 			rp.Partition, rp.Timestamp, rp.Offset, rp.LeaderEpoch = t.Partitions[j].Partition, -1, -1, 0
 		}
 	}
-	return resp
+	return response
 }
 
-func (b *Broker) listOne(s *slot, tp core.TopicPartition, ts int64, rp *kmsg.ListOffsetsResponseTopicPartition) []core.Action {
+func (b *Broker) listOne(s *slot, topicPartition core.TopicPartition, ts int64, rp *kmsg.ListOffsetsResponseTopicPartition) []core.Action {
 	switch {
-	case !b.knows(tp):
+	case !b.knows(topicPartition):
 		rp.ErrorCode = int16(errUnknownTopicOrPart)
 	case ts == -2:
 		rp.Offset = 0
 	case ts == -1:
-		return b.startOp(&operation{kind: opList, s: s, tp: tp, lpart: rp})
+		return b.startOp(&operation{kind: opList, s: s, topicPartition: topicPartition, lpart: rp})
 	default:
 		rp.ErrorCode = int16(errUnsupportedForFormat)
 	}

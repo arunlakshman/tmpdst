@@ -37,22 +37,22 @@ func TestHasher(t *testing.T) {
 		t.Fatalf("FNV-1a(a) = %#x, want %#x", got, want)
 	}
 	a, b := NewHasher(), NewHasher()
-	a.Str("xy")
-	b.U64(2)
+	a.StringValue("xy")
+	b.Uint64Value(2)
 	b.Byte('x')
 	b.Byte('y')
 	if a != b {
-		t.Fatal("Str is not length prefix + bytes")
+		t.Fatal("StringValue is not length prefix + bytes")
 	}
 	c, d := NewHasher(), NewHasher()
 	c.Bytes([]byte("xy"))
 	if c != a {
-		t.Fatal("Bytes differs from Str")
+		t.Fatal("Bytes differs from StringValue")
 	}
 	d.Bool(true)
 	e := NewHasher()
-	e.U64(1)
+	e.Uint64Value(1)
 	if d != e {
-		t.Fatal("Bool(true) is not U64(1)")
+		t.Fatal("Bool(true) is not Uint64Value(1)")
 	}
 }

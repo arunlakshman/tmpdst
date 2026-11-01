@@ -122,11 +122,11 @@ Honest read of the performance row: we have not matched their headline. The old 
    Their control-plane cost and capacity both track batch/file count, and the file bound is 4 MiB at a 250 ms timer.
    Ours seals 5 MiB average at 200 ms, about 5 seals/s per broker, 27 to 30 cluster-wide at 500k. Under design A, at the
    1 GiB/s target that is 30 to 64 commits/s against an X1 hot-key ceiling near 200/s. Test: sweep `BatchWindow` 200 vs 400 ms
-   and `MaxSegmentBytes` at 250k and 500k, watch `manibroker_segments_sealed_total` by reason (the w2 doc says the seal-reason
+   and `MaxSegmentBytes` at 250k and 500k, watch `mdsbroker_segments_sealed_total` by reason (the w2 doc says the seal-reason
    metric was missing; add it first).
 2. **Publish a control-plane capacity formula like theirs (adopt).** partitions x flushes/s x AZs gave them a concrete
    alarm (400k batches/s). Ours should be: commits/s x entries per commit versus the 200/s hot-key ceiling (5 WRU per
-   4 KiB+ entry; 4 KiB or smaller entries would reach about 250/s). Expose a utilisation gauge 0 to 1 on manicp. Free to build.
+   4 KiB+ entry; 4 KiB or smaller entries would reach about 250/s). Expose a utilisation gauge 0 to 1 on mdscontrolplane. Free to build.
 3. **Keep idempotency out, but decide the ordering story (do not copy their feature yet).** Their own docs call turning
    idempotency off the way to scale (agents then merge batches). We already did that (decision 41). The gap is
    reordering with in-flight above 1. Cheapest fix if needed: their approach, a last-5 window by sequence, was a CP
@@ -134,7 +134,7 @@ Honest read of the performance row: we have not matched their headline. The old 
    `max.in.flight=5` under injected PUT retries in the simulator before paying for it.
 4. **Single appender is a conscious tradeoff, same as theirs in spirit (keep, but measure failover).** They run one
    consensus-backed store per cluster that "cannot be scaled further"; we run one appender with a warm standby. Test cheaply:
-   kill the active manicp during an OMB stage and record the ack gap against the 120 s `-commit-deadline`. No AWS beyond the
+   kill the active mdscontrolplane during an OMB stage and record the ack gap against the 120 s `-commit-deadline`. No AWS beyond the
    next run needed.
 5. **Compaction is the thing we lack and they have (build later, not now).** Without it, a partition read touches many
    segments (each holds about 5 MiB across up to 288 partitions). Their design makes read cost per partition viable.
@@ -158,7 +158,7 @@ Honest read of the performance row: we have not matched their headline. The old 
 |---|---|---|
 | Add seal-reason and entries/commit metrics, rerun w2 stages 100k/250k/500k | existing harness | takeaway 1, 2 |
 | `BatchWindow` 200 vs 400 ms at 250k | one stage each | commits/s vs latency tradeoff vs their 250 ms |
-| Kill active manicp mid-stage | one stage | takeaway 4, failover gap |
+| Kill active mdscontrolplane mid-stage | one stage | takeaway 4, failover gap |
 | Simulator: retry storm with in-flight 5, count reorders | none (sim) | takeaway 3 |
 | Index arithmetic: partition bytes per segment at 288/4096 | none | takeaway 5 |
 

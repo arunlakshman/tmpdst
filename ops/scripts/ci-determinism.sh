@@ -12,7 +12,7 @@ cd "$(dirname "$0")/../.."
 
 pkgs=(./internal/core/... ./internal/verify/simulator/... ./internal/wire/segmentformat/... ./internal/wire/kafkawire ./internal/broker/... ./internal/verify/speccheck ./internal/verify/speccheck/checker ./internal/controlplane/statemachine/...)
 
-echo "== detcheck"
+echo "== determinismcheck"
 go run ./ops/tools/determinismcheck "${pkgs[@]}"
 
 echo "== dependency audit records"
@@ -21,7 +21,7 @@ echo "== dependency audit records"
 # edge, so we do not follow imports into it: grpc, protobuf and their
 # dependencies are not audited here. The packages still may import it for type
 # definitions only (decision 57).
-edge=manifester/internal/controlplane/api/v1
+edge=mds/internal/controlplane/api/v1
 roots=$(go list "${pkgs[@]}" | tr '\n' ' ')
 missing=0
 while read -r modver; do

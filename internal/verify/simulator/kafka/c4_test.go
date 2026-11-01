@@ -9,17 +9,17 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/kafka"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/kafka"
 )
 
 // C4 (speccheck/doc.go): the at-least-once Kafka oracle against the speccheck.Partition and
 // speccheck.ControlPlane specs. The oracle never imports speccheck (decision 21);
-// this external test package may, because detcheck does not read _test.go
+// this external test package may, because determinismcheck does not read _test.go
 // files and only export_test.go (package kafka, no speccheck) reaches into the
 // oracle. Run: go test ./sim/kafka -run C4
 
-func TestC4OracleDoesNotImportVeritas(t *testing.T) {
+func TestC4OracleDoesNotImportSpecCheck(t *testing.T) {
 	fset := token.NewFileSet()
 	names, err := filepath.Glob("*.go")
 	if err != nil {
@@ -54,14 +54,14 @@ func verdict(w *world) (failures, simulator.SafetyRule) {
 // what speccheck.Partition holds.
 func sameAsSpec(t *testing.T, seed uint64, w *world, inv simulator.SafetyRule) {
 	t.Helper()
-	for _, tp := range w.tps {
-		recs, _ := w.parts[tp].Read(0, 0)
+	for _, topicPartition := range w.tps {
+		recs, _ := w.parts[topicPartition].Read(0, 0)
 		want := make([]string, len(recs))
 		for i, r := range recs {
 			want[i] = string(r.Value)
 		}
-		if got := kafka.OracleLog(inv, tp); !slices.Equal(got, want) {
-			t.Fatalf("seed %d %v: oracle log %v, Partition %v", seed, tp, got, want)
+		if got := kafka.OracleLog(inv, topicPartition); !slices.Equal(got, want) {
+			t.Fatalf("seed %d %v: oracle log %v, Partition %v", seed, topicPartition, got, want)
 		}
 	}
 }
@@ -86,8 +86,8 @@ func TestC4AcceptsCorrectHistories(t *testing.T) {
 			t.Fatalf("seed %d: one-shot oracle rejected a correct history: %v", seed, f)
 		}
 		sameAsSpec(t, seed, w2, inv)
-		for _, tp := range w2.tps {
-			maxLog = max(maxLog, int(w2.parts[tp].HighWatermark()))
+		for _, topicPartition := range w2.tps {
+			maxLog = max(maxLog, int(w2.parts[topicPartition].HighWatermark()))
 		}
 		s := w2.st
 		tot = stats{tot.retries + s.retries, tot.replays + s.replays, tot.indetLand + s.indetLand, tot.indetNo + s.indetNo,

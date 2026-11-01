@@ -3,10 +3,10 @@ package fakecompletions
 import (
 	"testing"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/internal/fakeservicetest"
-	"manifester/internal/verify/speccheck"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"mds/internal/verify/speccheck"
 )
 
 const ms = core.Duration(1_000_000)
@@ -70,14 +70,14 @@ func TestSpecHashCacheObjectStore(t *testing.T) {
 	for i := range 400 {
 		ctx.T += simulator.Time(ms)
 		k := string(rune('a' + r.Between(0, 6)))
-		req := core.RequestID(i)
+		request := core.RequestID(i)
 		switch r.Between(0, 4) {
 		case 0, 1:
-			c.Execute(ctx, from, core.ObjectPut{Req: req, Key: k, Data: []byte{byte(i)}})
+			c.Execute(ctx, from, core.ObjectPut{Req: request, Key: k, Data: []byte{byte(i)}})
 		case 2:
-			c.Execute(ctx, from, core.ObjectDelete{Req: req, Key: k})
+			c.Execute(ctx, from, core.ObjectDelete{Req: request, Key: k})
 		default:
-			c.Execute(ctx, from, core.ObjectGet{Req: req, Ref: core.SegmentRef{Key: k}})
+			c.Execute(ctx, from, core.ObjectGet{Req: request, Ref: core.SegmentRef{Key: k}})
 		}
 		if r.Chance(0.3) {
 			ctx.Run()
@@ -111,8 +111,8 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 	r := simulator.NewRand(77)
 	nodes := []core.NodeInstance{fakeservicetest.Ref("a"), fakeservicetest.Ref("b"), fakeservicetest.Ref("c")}
 	tps := []core.TopicPartition{core.NewTopicPartition("t", 0), core.NewTopicPartition("t", 1)}
-	for _, tp := range tps[:1] {
-		if spec.CreateTopic(tp.Topic, 2) == core.OK {
+	for _, topicPartition := range tps[:1] {
+		if spec.CreateTopic(topicPartition.Topic, 2) == core.OK {
 			c.Bump()
 		}
 	}
@@ -122,16 +122,16 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 	for i := range 400 {
 		ctx.T += simulator.Time(ms)
 		n := nodes[r.Between(0, 3)]
-		req := core.RequestID(i)
+		request := core.RequestID(i)
 		switch r.Between(0, 2) {
 		case 0:
 			// Keys repeat (replays, and conflicts when the request differs).
-			c.Execute(ctx, n, core.ControlPlaneCall{Req: req, Op: core.CommitSegment{
+			c.Execute(ctx, n, core.ControlPlaneCall{Req: request, Op: core.CommitSegment{
 				SegmentKey: string(rune('a' + r.Between(0, 8))),
-				Batches:    []core.PendingBatch{{TP: tps[r.Between(0, 2)], Records: 1 + r.Between(0, 3)}},
+				Batches:    []core.PendingBatch{{TopicPartition: tps[r.Between(0, 2)], Records: 1 + r.Between(0, 3)}},
 			}})
 		default:
-			c.Execute(ctx, n, core.ControlPlaneCall{Req: req, Op: core.FindSegments{TP: tps[0]}})
+			c.Execute(ctx, n, core.ControlPlaneCall{Req: request, Op: core.FindSegments{TopicPartition: tps[0]}})
 		}
 		if r.Chance(0.3) {
 			ctx.Run()

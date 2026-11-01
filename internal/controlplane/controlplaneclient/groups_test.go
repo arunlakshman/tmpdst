@@ -9,11 +9,11 @@ import (
 
 	"google.golang.org/grpc"
 
-	"manifester/internal/controlplane/executor"
-	"manifester/internal/controlplane/groupcoordinator"
-	"manifester/internal/controlplane/server"
-	"manifester/internal/controlplane/statemachine"
-	"manifester/internal/core"
+	"mds/internal/controlplane/executor"
+	"mds/internal/controlplane/groupcoordinator"
+	"mds/internal/controlplane/server"
+	"mds/internal/controlplane/statemachine"
+	"mds/internal/core"
 )
 
 // realGroupClient starts an active node with a short initial rebalance delay.
@@ -111,8 +111,8 @@ func TestClientGroupCallsOverGRPC(t *testing.T) {
 
 	// A second member makes the first one rebalance. Both rejoin.
 	type joinOut struct {
-		resp groupcoordinator.JoinResp
-		err  error
+		response groupcoordinator.JoinResp
+		err      error
 	}
 	bDone := make(chan joinOut, 1)
 	go func() {
@@ -129,10 +129,10 @@ func TestClientGroupCallsOverGRPC(t *testing.T) {
 		t.Fatalf("rejoin a: %+v %v", ra, err)
 	}
 	rb := <-bDone
-	if rb.err != nil || rb.resp.Generation != 2 {
-		t.Fatalf("join b: %+v %v", rb.resp, rb.err)
+	if rb.err != nil || rb.response.Generation != 2 {
+		t.Fatalf("join b: %+v %v", rb.response, rb.err)
 	}
-	b := rb.resp.MemberID
+	b := rb.response.MemberID
 	sbDone := make(chan groupcoordinator.SyncResp, 1)
 	go func() {
 		r, _ := c.SyncGroup(ctx, groupcoordinator.SyncReq{Group: "g", MemberID: b, Generation: 2})
@@ -161,8 +161,8 @@ func TestClientGroupCallsOverGRPC(t *testing.T) {
 	}
 
 	// GroupOffsetCommit: a stale generation is refused, the right one stores.
-	tp := core.NewTopicPartition("t", 0)
-	commit := core.OffsetCommit{Group: "g", Member: a, Generation: 1, Offsets: []core.PartitionOffset{{TP: tp, Offset: 7, Metadata: "m"}}}
+	topicPartition := core.NewTopicPartition("t", 0)
+	commit := core.OffsetCommit{Group: "g", Member: a, Generation: 1, Offsets: []core.PartitionOffset{{TopicPartition: topicPartition, Offset: 7, Metadata: "m"}}}
 	_, err = c.GroupOffsetCommit(ctx, commit)
 	groupErr(t, err, core.ErrIllegalGeneration)
 	commit.Generation = 3
@@ -172,7 +172,7 @@ func TestClientGroupCallsOverGRPC(t *testing.T) {
 	}
 
 	// GroupOffsetFetch: one partition, then all partitions.
-	f, err := c.GroupOffsetFetch(ctx, core.OffsetFetch{Group: "g", Partitions: []core.TopicPartition{tp}})
+	f, err := c.GroupOffsetFetch(ctx, core.OffsetFetch{Group: "g", Partitions: []core.TopicPartition{topicPartition}})
 	if err != nil || len(f.Offsets) != 1 || f.Offsets[0].Offset != 7 || f.Offsets[0].Metadata != "m" {
 		t.Fatalf("fetch: %+v %v", f, err)
 	}
@@ -215,12 +215,12 @@ func TestCallRoutesGroupOperations(t *testing.T) {
 	c := realGroupClient(t)
 	ctx := t.Context()
 
-	resp, err := c.Call(ctx, core.GroupJoin{Group: "g-call", ClientID: "cli", SessionTimeoutMs: 10000, RebalanceTimeoutMs: 10000,
+	response, err := c.Call(ctx, core.GroupJoin{Group: "g-call", ClientID: "cli", SessionTimeoutMs: 10000, RebalanceTimeoutMs: 10000,
 		ProtocolType: "consumer", Protocols: []core.GroupProtocol{{Name: "range", Metadata: []byte("sub")}}})
 	if err != nil {
 		t.Fatalf("join: %v", err)
 	}
-	j := resp.(core.GroupJoinResp)
+	j := response.(core.GroupJoinResp)
 	if j.MemberID == "" || j.Leader != j.MemberID || j.Generation != 1 || len(j.Members) != 1 {
 		t.Fatalf("join answer %+v", j)
 	}
@@ -237,28 +237,28 @@ func TestCallRoutesGroupOperations(t *testing.T) {
 	_, err = c.Call(ctx, core.GroupHeartbeat{Group: "g-call", MemberID: "nobody", Generation: 1})
 	groupErr(t, err, core.ErrUnknownMember)
 
-	resp, err = c.Call(ctx, core.DescribeGroups{Groups: []string{"g-call", "g-none"}})
+	response, err = c.Call(ctx, core.DescribeGroups{Groups: []string{"g-call", "g-none"}})
 	if err != nil {
 		t.Fatalf("describe: %v", err)
 	}
-	ds := resp.(core.DescribeGroupsResp).Groups
+	ds := response.(core.DescribeGroupsResp).Groups
 	if len(ds) != 2 || !ds[0].Exists || ds[0].Name != "g-call" || ds[1].Exists {
 		t.Fatalf("describe answer %+v", ds)
 	}
 
-	resp, err = c.Call(ctx, core.GroupLeave{Group: "g-call", Members: []string{j.MemberID, "nobody"}})
+	response, err = c.Call(ctx, core.GroupLeave{Group: "g-call", Members: []string{j.MemberID, "nobody"}})
 	if err != nil {
 		t.Fatalf("leave: %v", err)
 	}
-	if errs := resp.(core.GroupLeaveResp).Errs; len(errs) != 2 || errs[0] != core.OK || errs[1] != core.ErrUnknownMember {
+	if errs := response.(core.GroupLeaveResp).Errs; len(errs) != 2 || errs[0] != core.OK || errs[1] != core.ErrUnknownMember {
 		t.Fatalf("leave codes %v", errs)
 	}
 
-	resp, err = c.Call(ctx, core.OffsetFetch{Group: "g-call"})
+	response, err = c.Call(ctx, core.OffsetFetch{Group: "g-call"})
 	if err != nil {
 		t.Fatalf("offset fetch: %v", err)
 	}
-	if len(resp.(core.OffsetFetchResp).Offsets) != 0 {
-		t.Fatalf("offset fetch answer %+v, want none", resp)
+	if len(response.(core.OffsetFetchResp).Offsets) != 0 {
+		t.Fatalf("offset fetch answer %+v, want none", response)
 	}
 }

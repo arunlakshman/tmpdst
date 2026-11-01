@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 var allCodes = []core.ErrCode{
@@ -117,7 +117,7 @@ func TestObjectConverterPanicsOnOtherType(t *testing.T) {
 }
 
 func TestControlPlaneConverter(t *testing.T) {
-	br := []core.BatchRange{{TP: core.TopicPartition{Topic: "t", Partition: 1}, Base: 5, Count: 2}}
+	br := []core.BatchRange{{TopicPartition: core.TopicPartition{Topic: "t", Partition: 1}, Base: 5, Count: 2}}
 	tests := []struct {
 		name string
 		in   core.ControlPlaneDone

@@ -1,36 +1,36 @@
 package statemachine
 
 import (
-	"manifester/internal/controlplane/stateupdater"
-	"manifester/internal/core"
+	"mds/internal/controlplane/stateupdater"
+	"mds/internal/core"
 )
 
-// onCPOffer handles one sim-bridge ControlPlaneDeliver: reads wait for a fresh tail and answer from the fold when
+// onControlPlaneDeliver handles one simulator-bridge ControlPlaneDeliver: reads wait for a fresh tail and answer from the fold when
 // Ready; commits and creates go through Offer and ControlPlaneReply after apply.
-func (m *Machine) onCPOffer(o core.ControlPlaneDeliver) []core.Action {
-	switch op := o.Op.(type) {
+func (m *Machine) onControlPlaneDeliver(o core.ControlPlaneDeliver) []core.Action {
+	switch operation := o.Op.(type) {
 	case core.CommitSegment:
 		return m.withReplies(m.Offer(ClientOperation{
 			Req: o.Req, From: o.From,
-			Cmd: stateupdater.Entry{Kind: stateupdater.KindCommit, Commit: op},
+			Cmd: stateupdater.Entry{Kind: stateupdater.KindCommit, Commit: operation},
 		}))
 	case core.FindSegments:
-		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.Lookup(op) })
+		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.Lookup(operation) })
 	case core.DescribeTopics:
-		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.Describe(op) })
+		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.Describe(operation) })
 	case core.CreateTopic:
 		return m.withReplies(m.Offer(ClientOperation{
 			Req: o.Req, From: o.From,
-			Cmd: stateupdater.CreateEntry(op),
+			Cmd: stateupdater.CreateEntry(operation),
 		}))
 	case core.OffsetFetch:
-		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.OffsetFetch(op) })
+		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.OffsetFetch(operation) })
 	case core.DescribeGroup:
-		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.DescribeGroup(op) })
+		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.DescribeGroup(operation) })
 	case core.ListGroups:
-		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.ListGroups(op) })
+		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.ListGroups(operation) })
 	case core.GroupInstall, core.GroupAssign, core.GroupRemove, core.OffsetCommit:
-		cmd, _ := stateupdater.GroupEntry(op)
+		cmd, _ := stateupdater.GroupEntry(operation)
 		return m.withReplies(m.Offer(ClientOperation{Req: o.Req, From: o.From, Cmd: cmd}))
 	default:
 		return []core.Action{core.ControlPlaneReply{To: o.From, Done: core.ControlPlaneDone{Req: o.Req, Err: core.ErrInvalid}}}

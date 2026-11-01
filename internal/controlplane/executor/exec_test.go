@@ -10,10 +10,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
-	"manifester/internal/controlplane/executor"
-	"manifester/internal/controlplane/fakedynamodb"
-	"manifester/internal/controlplane/runloop"
-	"manifester/internal/core"
+	"mds/internal/controlplane/executor"
+	"mds/internal/controlplane/fakedynamodb"
+	"mds/internal/controlplane/runloop"
+	"mds/internal/core"
 )
 
 func TestMemLogRoundTrip(t *testing.T) {

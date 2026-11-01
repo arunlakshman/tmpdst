@@ -48,7 +48,7 @@ resource "aws_s3_bucket_metric" "all" {
 # Log-store table: <prefix>cp, pk (S) hash,
 # sk (S) range, pay-per-request, plus TTL on the "ttl" attribute (the log store stamps every LOG slot with it, a
 # backstop behind checkpoint + tombstone trim: docs/log-cp-service.md) and warm throughput (X4: a cold on-demand
-# table throttles at about 4,000 items/s). manicp runs without -create-tables.
+# table throttles at about 4,000 items/s). mdscontrolplane runs without -create-tables.
 resource "aws_dynamodb_table" "cp" {
   name         = local.table_name
   billing_mode = "PAY_PER_REQUEST"
@@ -62,7 +62,7 @@ resource "aws_dynamodb_table" "cp" {
     write_units_per_second = var.ddb_warm_write_units
   }
 
-  # Epoch-seconds attribute set by manicp -store dynamolog (-log-ttl, default 7 days) on LOG slots. Items without
+  # Epoch-seconds attribute set by mdscontrolplane -store dynamolog (-log-ttl, default 7 days) on LOG slots. Items without
   # it (pointers, checkpoint rows) never expire.
   ttl {
     attribute_name = "ttl"

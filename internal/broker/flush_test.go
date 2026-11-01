@@ -3,7 +3,7 @@ package broker
 import (
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 func flushTimers(h *harness) []core.SetTimer {
@@ -19,7 +19,7 @@ func flushTimers(h *harness) []core.SetTimer {
 func sealReasons(h *harness) []string {
 	var out []string
 	for _, f := range factsNamed(h.all, "segment_sealed") {
-		out = append(out, string(f.Field("reason").(core.Str)))
+		out = append(out, string(f.Field("reason").(core.StringValue)))
 	}
 	return out
 }
@@ -38,9 +38,9 @@ func TestDefaultFlushRule(t *testing.T) {
 // The size rule seals when the open segment reaches the cap, not before.
 func TestSizeRuleSealsAtExactlyTheCap(t *testing.T) {
 	n := len(plain(t, "a"))
-	cfg := DefaultConfig()
-	cfg.MaxSegmentBytes = 3 * n
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.MaxSegmentBytes = 3 * n
+	h := startedHarness(t, config)
 	c := h.open(1)
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a")), e("t", 0, plain(t, "a"))))
 	if len(h.puts) != 0 {
@@ -59,9 +59,9 @@ func TestSizeRuleSealsAtExactlyTheCap(t *testing.T) {
 
 // A batch larger than the cap is sealed alone, at once.
 func TestOversizeBatchSealedAlone(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.MaxSegmentBytes = 10
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.MaxSegmentBytes = 10
+	h := startedHarness(t, config)
 	c := h.open(1)
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	if len(h.puts) != 1 {
@@ -90,10 +90,10 @@ func TestTimerRuleFromFirstBatch(t *testing.T) {
 		t.Fatalf("%d puts after the timer", len(h.puts))
 	}
 	f := factsNamed(h.all, "segment_sealed")
-	if len(f) != 1 || f[0].Field("reason").(core.Str) != "timer" || f[0].Field("batches").(core.I64) != 3 {
+	if len(f) != 1 || f[0].Field("reason").(core.StringValue) != "timer" || f[0].Field("batches").(core.Int64Value) != 3 {
 		t.Fatalf("%+v", f)
 	}
-	if age := f[0].Field("age").(core.I64); age <= 0 {
+	if age := f[0].Field("age").(core.Int64Value); age <= 0 {
 		t.Fatalf("age %d", age)
 	}
 	for range 3 {
@@ -122,9 +122,9 @@ func TestFlushTimerRearms(t *testing.T) {
 }
 
 func TestBatchCapSeals(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.MaxSegmentBatches = 32
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.MaxSegmentBatches = 32
+	h := startedHarness(t, config)
 	c := h.open(1)
 	var es []ent
 	for i := range 31 {
@@ -146,9 +146,9 @@ func TestBatchCapSeals(t *testing.T) {
 }
 
 func TestPartitionCapReason(t *testing.T) {
-	cfg := DefaultConfig()
-	cfg.MaxSegmentPartitions = 2
-	h := startedHarness(t, cfg)
+	config := DefaultConfig()
+	config.MaxSegmentPartitions = 2
+	h := startedHarness(t, config)
 	c := h.open(1)
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a")), e("t", 0, plain(t, "a")), e("t", 1, plain(t, "a"))))
 	if r := sealReasons(h); len(r) != 1 || r[0] != "partitions" || len(h.puts) != 1 {
@@ -217,12 +217,12 @@ func TestStopFlushesOpenSegment(t *testing.T) {
 // the byte cap.
 func TestManySmallBatchesSealAtByteCapNotBatchCap(t *testing.T) {
 	n := len(plain(t, "a"))
-	cfg := DefaultConfig()
-	if cfg.MaxSegmentBatches < 200 {
-		t.Fatalf("default batch cap %d", cfg.MaxSegmentBatches)
+	config := DefaultConfig()
+	if config.MaxSegmentBatches < 200 {
+		t.Fatalf("default batch cap %d", config.MaxSegmentBatches)
 	}
-	cfg.MaxSegmentBytes = 200 * n
-	h := startedHarness(t, cfg)
+	config.MaxSegmentBytes = 200 * n
+	h := startedHarness(t, config)
 	c := h.open(1)
 	var es []ent
 	for i := range 199 {
@@ -237,10 +237,10 @@ func TestManySmallBatchesSealAtByteCapNotBatchCap(t *testing.T) {
 		t.Fatalf("reasons %v puts %d", r, len(h.puts))
 	}
 	f := factsNamed(h.all, "segment_sealed")[0]
-	if b := f.Field("batches").(core.I64); b != 200 {
+	if b := f.Field("batches").(core.Int64Value); b != 200 {
 		t.Fatalf("%d batches in the segment", b)
 	}
-	if n := f.Field("parts").(core.I64); n != 2 {
+	if n := f.Field("parts").(core.Int64Value); n != 2 {
 		t.Fatalf("%d partitions in the segment, want 2", n)
 	}
 	h.next(c)

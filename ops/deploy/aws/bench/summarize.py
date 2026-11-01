@@ -7,12 +7,12 @@ usage: summarize.py RESULTS_DIR [--out FILE] [--broker-hourly USD] [--s3-put-per
 RESULTS_DIR is ./results/<run_id> (collect-results.sh) or a --local output dir:
     loadgen/cells.tsv, loadgen/<cell>.rN.*.out|.prom   written by run-benchmark.sh (Kafka perf-test harness)
     omb/stages.tsv, omb/run.json, omb/<stage>.json     written by run-omb.sh (OpenMessaging Benchmark)
-    metrics/<epoch>-{broker,manicp}.txt                Prometheus text snapshots, ONE broker (legacy layout)
+    metrics/<epoch>-{broker,mdscontrolplane}.txt                Prometheus text snapshots, ONE broker (legacy layout)
     metrics/<broker_id>/<epoch>-broker.txt             one directory per broker (multi-broker layout)
-    metrics/cp/<epoch>-manicp.txt                      the active control-plane manicp: DynamoDB and log-store side
-    metrics/cp-<rank>/<epoch>-manicp.txt               standby control-plane nodes; every metrics/cp[-N] dir is read
+    metrics/cp/<epoch>-mdscontrolplane.txt                      the active control-plane mdscontrolplane: DynamoDB and log-store side
+    metrics/cp-<rank>/<epoch>-mdscontrolplane.txt               standby control-plane nodes; every metrics/cp[-N] dir is read
     markers/kill-appender-<epoch>.txt                  written by bench-ctl.sh kill-appender (epoch = kill time); drives the failover summary
-    metrics/<broker_id>/<epoch>-manicp.txt             older layout, one manicp per broker (still read)
+    metrics/<broker_id>/<epoch>-mdscontrolplane.txt             older layout, one mdscontrolplane per broker (still read)
 Both layouts are read; a flat file is attributed to broker "1". With several brokers the Kafka harness
 cells sum the per-broker deltas.
 
@@ -215,14 +215,14 @@ MARKER = re.compile(r"kill-appender-(\d+)\.txt$")
 
 
 def cp_active_samples(snaps):
-    """-> {node: [(ts, active 0/1/None)]} from manicp_log_active (None: snapshot has no log-store metrics)."""
+    """-> {node: [(ts, active 0/1/None)]} from mdscontrolplane_log_active (None: snapshot has no log-store metrics)."""
     out = {}
     for n in cp_ids(snaps):
         rows = []
-        for ts, path in sorted(snaps["manicp"][n].items()):
+        for ts, path in sorted(snaps["mdscontrolplane"][n].items()):
             snap = parse_prom(path)
-            has = any(k[0] == "manicp_log_active" for k in snap)
-            rows.append((ts, int(total(snap, "manicp_log_active") > 0.5) if has else None))
+            has = any(k[0] == "mdscontrolplane_log_active" for k in snap)
+            rows.append((ts, int(total(snap, "mdscontrolplane_log_active") > 0.5) if has else None))
         out[n] = rows
     return out
 
@@ -257,7 +257,7 @@ def ack_increments(snaps):
     for bid, tm in snaps["broker"].items():
         prev = None
         for ts in sorted(tm):
-            c = total(parse_prom(tm[ts]), "manibroker_segment_seal_to_ack_seconds_count")
+            c = total(parse_prom(tm[ts]), "mdsbroker_segment_seal_to_ack_seconds_count")
             if prev is not None:
                 out.append((prev[0], ts, max(0.0, c - prev[1])))
             prev = (ts, c)
@@ -275,7 +275,7 @@ def failover_lines(rundir, snaps, stages, digest, samples, runs):
         before = [r for r in runs if r[1] <= t]
         prior = max(before, key=lambda r: r[2])[0] if before else None
         lines.append(f"Appender kill at {utc(t)} UTC (epoch {t}):")
-        lines.append(f"- active before the kill: {prior or 'unknown (no manicp_log_active before T)'}")
+        lines.append(f"- active before the kill: {prior or 'unknown (no mdscontrolplane_log_active before T)'}")
         down = [(n, max((ts for ts, _ in rows if ts <= t), default=None), min((ts for ts, _ in rows if ts > t), default=None))
                 for n, rows in samples.items() if n == prior]
         for n, last, first in down:
@@ -287,7 +287,7 @@ def failover_lines(rundir, snaps, stages, digest, samples, runs):
             lines.append(f"- takeover: {r[0]} first seen active at {utc(r[1])} UTC, {r[1] - t} s after the kill (at most; resolution 10 s)")
         else:
             lines.append("- takeover: NO other node was seen active after the kill")
-            unmet.append(f"kill at {utc(t)} UTC: no standby took over (no manicp_log_active=1 on another node)")
+            unmet.append(f"kill at {utc(t)} UTC: no standby took over (no mdscontrolplane_log_active=1 on another node)")
         back = [r for r in runs if r[1] > t and r[0] == prior]
         lines.append(f"- failback: {prior} active again at {utc(min(back, key=lambda r: r[1])[1])} UTC" if back and prior else "- failback: not seen")
         fa = [(a, b) for a, b, d in inc if a >= t and d > 0]
@@ -325,9 +325,9 @@ def roles_section(w, snaps, stages, rundir, digest):
     runs = active_runs(samples)
     w("## Control-plane nodes: active role and failover\n")
     if not has_log:
-        w("Snapshots of " + ", ".join(ids) + " carry no manicp_log_active (not the log store): roles unknown.\n")
+        w("Snapshots of " + ", ".join(ids) + " carry no mdscontrolplane_log_active (not the log store): roles unknown.\n")
         return []
-    w("From manicp_log_active in " + ", ".join(f"metrics/{n}/" for n in ids) + " (10 s snapshots; a gap of more than %d s ends a run). `active/snapshots` counts snapshots in the stage window.\n" % SNAP_GAP)
+    w("From mdscontrolplane_log_active in " + ", ".join(f"metrics/{n}/" for n in ids) + " (10 s snapshots; a gap of more than %d s ends a run). `active/snapshots` counts snapshots in the stage window.\n" % SNAP_GAP)
     w("| stage | " + " | ".join(f"{n} active/snapshots" for n in ids) + " | slots/s | lost slots | role changes |")
     w("|---|" + "---|" * (len(ids) + 3))
     for st in stages:
@@ -471,7 +471,7 @@ def omb_report(w, args, rundir, snaps):
         tot = sum(m.get("bytes", 0) for m in per_b.values())
         w(f"### {st['stage']}\n")
         w("Window = snapshots around the stage (warm-up included, up to one 10 s snapshot interval of slack each side). put = seal to stored in S3; queue = waiting for earlier commits; commit = CommitSegment round trip; ack = seal to answer.\n")
-        # DynamoDB columns only for the older one-manicp-per-broker layout; with the single control plane they live in the CP table.
+        # DynamoDB columns only for the older one-mdscontrolplane-per-broker layout; with the single control plane they live in the CP table.
         legacy = any("ddb_wru" in m for m in per_b.values())
         w("| broker | committed MB/s | share | seg/s | put ms | queue ms | commit ms | ack ms | S3 PUT/s | S3 GET/s | S3 thr | S3 err | S3 retry |"
           + (" DDB thr | DDB err | DDB retry | WRU/s | RCU/s |" if legacy else ""))
@@ -489,11 +489,11 @@ def omb_report(w, args, rundir, snaps):
     # ---- control plane
     w("## Control plane (log store), per stage\n")
     if not cp_win:
-        w("No metrics/cp/ snapshots (older run with one manicp per broker, or the CP snapshotter was down): DynamoDB numbers are in the per-broker tables when present.\n")
+        w("No metrics/cp/ snapshots (older run with one mdscontrolplane per broker, or the CP snapshotter was down): DynamoDB numbers are in the per-broker tables when present.\n")
     else:
         w("From metrics/cp*/ (all control-plane nodes, summed; only the active one moves counters). Deltas between the snapshots around each stage. "
           "slots = LOG slots appended to DynamoDB; lost = slots another writer won; role changes = active/standby flips. "
-          "`-` = the snapshots carry no manicp_log_* metrics.\n")
+          "`-` = the snapshots carry no mdscontrolplane_log_* metrics.\n")
         w("| stage | slots/s | lost slots | role changes | DDB thr | DDB err | DDB retry | WRU/s | RCU/s | DDB call ms |")
         w("|---|---|---|---|---|---|---|---|---|---|")
         for st in stages:
@@ -604,7 +604,7 @@ def omb_report(w, args, rundir, snaps):
         "single availability zone vs WarpStream's multi-AZ cost model (no inter-AZ transfer is exercised here, so their inter-AZ comparison against Kafka does not carry over)",
         "durability/availability scope: one AZ, stateless brokers; no zone-failure test (WarpStream scales 6 -> 3 agents mid-run; not done here)",
         "Fetch ignores MinBytes/MaxWait (answers immediately) and consumers use static assign() without groups or offset commits",
-        "OMB 'Kafka-manifester' driver patched (fixed topic, no CreateTopics, no shuffle): see ops/deploy/aws/bench/omb/patches",
+        "OMB 'Kafka-mds' driver patched (fixed topic, no CreateTopics, no shuffle): see ops/deploy/aws/bench/omb/patches",
     ]
     w("Measured from this run:\n")
     for u in unmet or ["none"]:
@@ -622,7 +622,7 @@ def load_snapshots(mdir):
     snaps = collections.defaultdict(lambda: collections.defaultdict(dict))
     if not os.path.isdir(mdir):
         return snaps
-    pat = re.compile(r"(\d+)-(broker|manicp)\.txt$")
+    pat = re.compile(r"(\d+)-(broker|mdscontrolplane)\.txt$")
     for fn in os.listdir(mdir):
         full = os.path.join(mdir, fn)
         if os.path.isdir(full):
@@ -672,72 +672,72 @@ def broker_window(snaps, bid, start, end):
     if bb:
         a, b = parse_prom(snaps["broker"][bid][bb[0]]), parse_prom(snaps["broker"][bid][bb[1]])
         m["win"] = max(1, bb[1] - bb[0])
-        m["segs"] = delta(a, b, "manibroker_segments_committed_total")
-        m["bytes"] = delta(a, b, "manibroker_segment_committed_bytes_total")
-        for key, base in (("put", "manibroker_segment_put_seconds"), ("queue", "manibroker_segment_queue_wait_seconds"),
-                          ("commit", "manibroker_segment_commit_seconds"), ("ack", "manibroker_segment_seal_to_ack_seconds")):
+        m["segs"] = delta(a, b, "mdsbroker_segments_committed_total")
+        m["bytes"] = delta(a, b, "mdsbroker_segment_committed_bytes_total")
+        for key, base in (("put", "mdsbroker_segment_put_seconds"), ("queue", "mdsbroker_segment_queue_wait_seconds"),
+                          ("commit", "mdsbroker_segment_commit_seconds"), ("ack", "mdsbroker_segment_seal_to_ack_seconds")):
             m[key + "_s"] = delta(a, b, base + "_sum")
             m[key + "_n"] = delta(a, b, base + "_count")
-        m["s3_thr"] = delta(a, b, "manibroker_s3_throttles_total")
-        m["s3_err"] = delta(a, b, "manibroker_s3_api_errors_total") + delta(a, b, "manibroker_segments_failed_total")
-        m["s3_retry"] = delta(a, b, "manibroker_segment_put_attempts_total") - m["segs"]
-        m["s3_put"] = delta_op(a, b, "manibroker_s3_attempt_seconds_count", "put")
-        m["s3_get"] = delta_op(a, b, "manibroker_s3_attempt_seconds_count", "get")
-        m["s3_put_bytes"] = delta_op(a, b, "manibroker_s3_request_bytes_sum", "put")
-    cc = bracket(snaps["manicp"].get(bid, {}), start, end) if snaps["manicp"].get(bid) else None
+        m["s3_thr"] = delta(a, b, "mdsbroker_s3_throttles_total")
+        m["s3_err"] = delta(a, b, "mdsbroker_s3_api_errors_total") + delta(a, b, "mdsbroker_segments_failed_total")
+        m["s3_retry"] = delta(a, b, "mdsbroker_segment_put_attempts_total") - m["segs"]
+        m["s3_put"] = delta_op(a, b, "mdsbroker_s3_attempt_seconds_count", "put")
+        m["s3_get"] = delta_op(a, b, "mdsbroker_s3_attempt_seconds_count", "get")
+        m["s3_put_bytes"] = delta_op(a, b, "mdsbroker_s3_request_bytes_sum", "put")
+    cc = bracket(snaps["mdscontrolplane"].get(bid, {}), start, end) if snaps["mdscontrolplane"].get(bid) else None
     if cc:
-        a, b = parse_prom(snaps["manicp"][bid][cc[0]]), parse_prom(snaps["manicp"][bid][cc[1]])
-        m["ddb_thr"] = delta(a, b, "manicp_dynamo_throttles_total")
-        m["ddb_err"] = delta(a, b, "manicp_dynamo_api_errors_total")
-        m["ddb_retry"] = delta(a, b, "manicp_dynamo_retries_total")
-        m["ddb_wru"] = delta(a, b, "manicp_dynamo_consumed_capacity_units_total", kind="write")
-        m["ddb_rcu"] = delta(a, b, "manicp_dynamo_consumed_capacity_units_total", kind="read")
-        m["ddb_call_s"] = delta(a, b, "manicp_dynamodb_call_seconds_sum")
-        m["ddb_call_n"] = delta(a, b, "manicp_dynamodb_call_seconds_count")
+        a, b = parse_prom(snaps["mdscontrolplane"][bid][cc[0]]), parse_prom(snaps["mdscontrolplane"][bid][cc[1]])
+        m["ddb_thr"] = delta(a, b, "mdscontrolplane_dynamo_throttles_total")
+        m["ddb_err"] = delta(a, b, "mdscontrolplane_dynamo_api_errors_total")
+        m["ddb_retry"] = delta(a, b, "mdscontrolplane_dynamo_retries_total")
+        m["ddb_wru"] = delta(a, b, "mdscontrolplane_dynamo_consumed_capacity_units_total", kind="write")
+        m["ddb_rcu"] = delta(a, b, "mdscontrolplane_dynamo_consumed_capacity_units_total", kind="read")
+        m["ddb_call_s"] = delta(a, b, "mdscontrolplane_dynamodb_call_seconds_sum")
+        m["ddb_call_n"] = delta(a, b, "mdscontrolplane_dynamodb_call_seconds_count")
     return m or None
 
 
-CP = "cp"  # metrics/cp/: the first control-plane manicp; standbys of the log store are metrics/cp-1/, cp-2/, ...
+CP = "cp"  # metrics/cp/: the first control-plane mdscontrolplane; standbys of the log store are metrics/cp-1/, cp-2/, ...
 CP_DIR = re.compile(r"cp(-\d+)?$")
 
 
 def cp_ids(snaps):
     """Control-plane node dirs (cp, cp-1, ...) in rank order."""
-    ids = [k for k in snaps["manicp"] if CP_DIR.match(k)]
+    ids = [k for k in snaps["mdscontrolplane"] if CP_DIR.match(k)]
     return sorted(ids, key=lambda x: int(x[3:]) if len(x) > 2 else -1)
 
 
 def broker_ids(snaps):
-    """Broker ids (manibroker snapshots, or legacy per-broker manicp dirs); the cp dirs are not brokers."""
-    return sorted((set(snaps["broker"]) | set(snaps["manicp"])) - set(cp_ids(snaps)), key=lambda x: (len(x), x))
+    """Broker ids (mdsbroker snapshots, or legacy per-broker mdscontrolplane dirs); the cp dirs are not brokers."""
+    return sorted((set(snaps["broker"]) | set(snaps["mdscontrolplane"])) - set(cp_ids(snaps)), key=lambda x: (len(x), x))
 
 
 def cp_node_window(tm, start, end):
     """Deltas of ONE control-plane node's snapshots (tm = {ts: path}) around [start, end]; None without a bracket.
-    manicp_log_* keys appear only when the snapshots carry the log-store metrics."""
+    mdscontrolplane_log_* keys appear only when the snapshots carry the log-store metrics."""
     cc = bracket(tm, start, end) if tm else None
     if not cc:
         return None
     a, b = parse_prom(tm[cc[0]]), parse_prom(tm[cc[1]])
     m = {"win": max(1, cc[1] - cc[0])}
-    m["ddb_thr"] = delta(a, b, "manicp_dynamo_throttles_total")
-    m["ddb_err"] = delta(a, b, "manicp_dynamo_api_errors_total")
-    m["ddb_retry"] = delta(a, b, "manicp_dynamo_retries_total")
-    m["ddb_wru"] = delta(a, b, "manicp_dynamo_consumed_capacity_units_total", kind="write")
-    m["ddb_rcu"] = delta(a, b, "manicp_dynamo_consumed_capacity_units_total", kind="read")
-    m["ddb_call_s"] = delta(a, b, "manicp_dynamodb_call_seconds_sum")
-    m["ddb_call_n"] = delta(a, b, "manicp_dynamodb_call_seconds_count")
-    if any(n.startswith("manicp_log_") for (n, _l) in b):  # log store: slot rate, lost slots, role flips
-        m["log_slots"] = delta(a, b, "manicp_log_slots_total")
-        m["log_lost"] = delta(a, b, "manicp_log_lost_slots_total")
-        m["log_role_changes"] = delta(a, b, "manicp_log_role_changes_total")
+    m["ddb_thr"] = delta(a, b, "mdscontrolplane_dynamo_throttles_total")
+    m["ddb_err"] = delta(a, b, "mdscontrolplane_dynamo_api_errors_total")
+    m["ddb_retry"] = delta(a, b, "mdscontrolplane_dynamo_retries_total")
+    m["ddb_wru"] = delta(a, b, "mdscontrolplane_dynamo_consumed_capacity_units_total", kind="write")
+    m["ddb_rcu"] = delta(a, b, "mdscontrolplane_dynamo_consumed_capacity_units_total", kind="read")
+    m["ddb_call_s"] = delta(a, b, "mdscontrolplane_dynamodb_call_seconds_sum")
+    m["ddb_call_n"] = delta(a, b, "mdscontrolplane_dynamodb_call_seconds_count")
+    if any(n.startswith("mdscontrolplane_log_") for (n, _l) in b):  # log store: slot rate, lost slots, role flips
+        m["log_slots"] = delta(a, b, "mdscontrolplane_log_slots_total")
+        m["log_lost"] = delta(a, b, "mdscontrolplane_log_lost_slots_total")
+        m["log_role_changes"] = delta(a, b, "mdscontrolplane_log_role_changes_total")
     return m
 
 
 def cp_window(snaps, start, end):
     """Control-plane deltas summed over all cp nodes (only the active one moves counters; a restarted node's counters
     reset, so its delta in the stage of the restart is a lower bound). None when no node has a bracket."""
-    ws = [w for w in (cp_node_window(snaps["manicp"].get(n), start, end) for n in cp_ids(snaps)) if w]
+    ws = [w for w in (cp_node_window(snaps["mdscontrolplane"].get(n), start, end) for n in cp_ids(snaps)) if w]
     return sum_windows(ws) if ws else None
 
 

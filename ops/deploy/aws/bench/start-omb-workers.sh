@@ -7,7 +7,7 @@
 #
 # OMB gives the FIRST half of the workers (by --workers order) to producers and the LAST half
 # (W - W/2) to consumers; the Kafka driver patch needs this host's index among the consumer workers,
-# passed as -Dmani.worker.index.
+# passed as -Dmds.worker.index.
 set -euo pipefail
 cmd=${1:-start}
 # shellcheck disable=SC1091
@@ -40,7 +40,7 @@ idx=$((LOADGEN_INDEX - producers))
 [ "$idx" -ge 0 ] || idx=0   # a producer-only worker never builds consumers
 # Heap: 64 producers x buffer.memory 128 MB can need 8 GB across the producer workers.
 export HEAP_OPTS="${OMB_WORKER_HEAP:--Xms16g -Xmx16g}"
-export JVM_OPTS="${JVM_OPTS:-} -Dmani.worker.index=$idx -Dmani.loadgen.index=$LOADGEN_INDEX"
+export JVM_OPTS="${JVM_OPTS:-} -Dmds.worker.index=$idx -Dmds.loadgen.index=$LOADGEN_INDEX"
 cd "$OMB"
 nohup bin/benchmark-worker --port 8080 --stats-port 9090 >>"$LOG" 2>&1 &
 echo $! >"$PIDF"

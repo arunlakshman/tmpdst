@@ -110,7 +110,7 @@ type ObjectListDone struct {
 
 // ControlPlaneDone reports that a control-plane call finished. Resp is the in-process
 // response (nil unless Err == OK). Generated API response messages map through
-// controlplane/apiconv; typed *Response fields wait for the gRPC cutover so
+// controlplane/apiconvert; typed *Response fields wait for the gRPC cutover so
 // core does not import grpc (decision 57).
 type ControlPlaneDone struct {
 	Req     RequestID
@@ -120,7 +120,7 @@ type ControlPlaneDone struct {
 }
 
 // ControlPlaneDeliver delivers one broker ControlPlaneCall to a control-plane replica process. The
-// sim bridge engine issues this; the machine answers with ControlPlaneReply actions.
+// simulator bridge engine issues this; the machine answers with ControlPlaneReply actions.
 type ControlPlaneDeliver struct {
 	From NodeInstance // broker that issued the ControlPlaneCall
 	Req  RequestID

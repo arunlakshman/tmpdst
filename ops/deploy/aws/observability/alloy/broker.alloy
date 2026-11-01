@@ -1,10 +1,10 @@
-// Broker host add-on: manibroker and CloudWatch (S3 request metrics). manicp and the DynamoDB metrics live on the
+// Broker host add-on: mdsbroker and CloudWatch (S3 request metrics). mdscontrolplane and the DynamoDB metrics live on the
 // single control-plane host (cp.alloy).
 // Extra environment: BROKER_ID (label `broker`, 1..N), S3_BUCKET, S3_METRICS_FILTER_ID, AWS_REGION. AWS credentials come from the instance role.
 
 discovery.relabel "broker_targets" {
 	targets = [
-		{"__address__" = "127.0.0.1:9100", "job" = "manibroker", "service" = "manibroker"},
+		{"__address__" = "127.0.0.1:9100", "job" = "mdsbroker", "service" = "mdsbroker"},
 	]
 
 	rule {

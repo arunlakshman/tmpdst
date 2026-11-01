@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/core"
-	"manifester/internal/system"
+	"mds/internal/core"
+	"mds/internal/system"
 )
 
 // fakeLease answers the first beats with live and then fails, or always fails.

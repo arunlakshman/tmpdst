@@ -3,14 +3,14 @@ package kafka
 import (
 	"testing"
 
-	"manifester/internal/broker"
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/fakelogservice"
+	"mds/internal/broker"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/fakelogservice"
 )
 
 func TestLogCampaign(t *testing.T) {
-	n := 20
+	n := 40 // the coverage list needs rare faults (replica stalled); 20 seeds hit it only by luck
 	if testing.Short() {
 		n = 8
 	}
@@ -25,9 +25,9 @@ func TestLogCampaign(t *testing.T) {
 }
 
 func TestLogDeterminismCanary(t *testing.T) {
-	cfg := ConfigLog(nil)
+	config := ConfigLog(nil)
 	for seed := uint64(1); seed <= 3; seed++ {
-		a, b := simulator.RunSeed(cfg, seed), simulator.RunSeed(cfg, seed)
+		a, b := simulator.RunSeed(config, seed), simulator.RunSeed(config, seed)
 		if a.TraceHash != b.TraceHash || a.RandCalls != b.RandCalls || a.Steps != b.Steps {
 			t.Fatalf("seed %d diverged", seed)
 		}
@@ -49,21 +49,21 @@ func TestLogMutantsAreCaught(t *testing.T) {
 		prop   core.PropertyID
 	}{
 		// Truth is log replay (correct assign); the writer stamps gap bases only
-		// into its fold/answers, so acks disagree with CPTruth.
+		// into its fold/answers, so acks disagree with ControlPlaneRealState.
 		{"offsets computed by the writer, not by apply", fakelogservice.InjectedBugWriterOffsets, 0, "kafka: acked range is committed in the control plane"},
 		{"trimmed slots deleted instead of tombstoned", fakelogservice.InjectedBugTrimDelete, 0, "logcp-sim: a Put never wins a slot below the trim floor"},
 		{"each replica forgets keys on its own pace", fakelogservice.InjectedBugPerReplicaWindow, 40, "logcp-sim: a replica's state equals the replay of the log at its slot"},
-		{"a replica passes an empty slot without a no-op", fakelogservice.InjectedBugHoleSkip, 0, "logcp-sim: a replica's state equals the replay of the log at its slot"},
+		{"a replica passes an empty slot without a no-op", fakelogservice.InjectedBugGapSkip, 0, "logcp-sim: a replica's state equals the replay of the log at its slot"},
 	}
 	for _, c := range cases {
-		cfg := configLog(nil, broker.InjectedBugNone, c.bug)
+		config := configLog(nil, broker.InjectedBugNone, c.bug)
 		if c.window > 0 {
-			cfg.ControlPlane.Log.WindowSlots = c.window
+			config.ControlPlane.Log.WindowSlots = c.window
 		}
 		var props []core.PropertyID
 		caught := uint64(0)
 		for s := uint64(1); s <= budget && caught == 0; s++ {
-			if props = violated(cfg, s); len(props) > 0 {
+			if props = violated(config, s); len(props) > 0 {
 				caught = s
 			}
 		}

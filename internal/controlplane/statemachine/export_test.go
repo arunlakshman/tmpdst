@@ -1,11 +1,11 @@
 package statemachine
 
-import "manifester/internal/controlplane/stateupdater"
+import "mds/internal/controlplane/stateupdater"
 
 // Timer IDs for role and checkpoint tests.
 const (
-	TimerRole = timerRole
-	TimerCkpt = timerCheckpoint
+	TimerRole       = timerRole
+	TimerCheckpoint = timerCheckpoint
 )
 
 // DecodeGroup exports group decoding for tests (strips the machine envelope).

@@ -3,10 +3,10 @@ package suites
 import (
 	"errors"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck"
-	"manifester/internal/verify/speccheck/checker/generator"
-	"manifester/internal/verify/speccheck/checker/observation"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck"
+	"mds/internal/verify/speccheck/checker/generator"
+	"mds/internal/verify/speccheck/checker/observation"
 )
 
 // ObjectSubject is an object store under test. Do runs one operation and
@@ -17,7 +17,7 @@ import (
 // the same content. It returns ok = false when the subject has no spec hash,
 // for example real S3.
 type ObjectSubject interface {
-	Do(op core.IOCall) (observation.ObjectResult, error)
+	Do(operation core.IOCall) (observation.ObjectResult, error)
 	StateHash() (hash uint64, ok bool)
 }
 
@@ -27,7 +27,7 @@ type ObjectSubject interface {
 // StateHash is like ObjectSubject.StateHash, with speccheck.ControlPlane as the
 // spec.
 type ControlPlaneSubject interface {
-	Do(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error)
+	Do(operation generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error)
 	StateHash() (hash uint64, ok bool)
 }
 
@@ -44,14 +44,14 @@ type PartitionSubject interface {
 type specObjectSubject struct{ store *speccheck.ObjectStore }
 
 // NewSpecObjectSubject returns a fresh speccheck.ObjectStore as a subject. Use it
-// to run a suite spec against spec, and as the correct subject that a planted
+// to run a suite spec against spec, and as the correct subject that an injected
 // bug wraps.
 func NewSpecObjectSubject() ObjectSubject {
 	return &specObjectSubject{store: speccheck.NewObjectStore()}
 }
 
-func (s *specObjectSubject) Do(op core.IOCall) (observation.ObjectResult, error) {
-	return observation.FromObjectCompletion(s.store.Exec(op)), nil
+func (s *specObjectSubject) Do(operation core.IOCall) (observation.ObjectResult, error) {
+	return observation.FromObjectCompletion(s.store.Exec(operation)), nil
 }
 
 func (s *specObjectSubject) StateHash() (uint64, bool) { return s.store.StateHash(), true }
@@ -63,13 +63,13 @@ func NewSpecControlPlaneSubject() ControlPlaneSubject {
 	return &specControlPlaneSubject{cp: speccheck.NewControlPlane()}
 }
 
-func (s *specControlPlaneSubject) Do(op generator.ControlPlaneOp) (observation.ControlPlaneResult, error) {
+func (s *specControlPlaneSubject) Do(operation generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 	switch {
-	case op.CreateTopic != nil:
-		code := s.cp.CreateTopic(op.CreateTopic.Name, op.CreateTopic.Partitions)
+	case operation.CreateTopic != nil:
+		code := s.cp.CreateTopic(operation.CreateTopic.Name, operation.CreateTopic.Partitions)
 		return observation.ControlPlaneResult{Code: code}, nil
-	case op.Call != nil:
-		done, ok := s.cp.Exec(*op.Call).(core.ControlPlaneDone)
+	case operation.Call != nil:
+		done, ok := s.cp.Exec(*operation.Call).(core.ControlPlaneDone)
 		if !ok {
 			return observation.ControlPlaneResult{}, errors.New("the spec control plane did not return a CPDone")
 		}

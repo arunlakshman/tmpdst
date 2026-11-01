@@ -1,6 +1,6 @@
 package generator
 
-import "manifester/internal/verify/speccheck/checker"
+import "mds/internal/verify/speccheck/checker"
 
 // InputProfile holds the weights and value ranges of both generators. A weight is
 // a relative chance, so a weight of 0 turns that kind of operation off. A

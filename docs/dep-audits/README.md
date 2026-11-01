@@ -30,6 +30,6 @@ How to produce one: run `ops/scripts/audit-dep.sh <module>@<version>` and follow
 1. ...
 
 ## Evidence
-- detcheck output summary
+- determinismcheck output summary
 - encode/decode twice, separate processes: identical?
 ```

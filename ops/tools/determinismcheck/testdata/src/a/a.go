@@ -12,7 +12,7 @@ var _ = sort.Ints
 
 var counter int // want `package-level variable counter`
 
-var cache = map[string]int{} //detcheck:ok read-only lookup table, never written
+var cache = map[string]int{} //determinismcheck:ok read-only lookup table, never written
 
 func Bad(m map[string]int, ch chan int) { // want `channel type`
 	go func() {}()     // want `go statement`
@@ -27,7 +27,7 @@ func Bad(m map[string]int, ch chan int) { // want `channel type`
 
 func Good(m map[string]int) []string {
 	keys := make([]string, 0, len(m))
-	//detcheck:ok collecting keys to sort; order does not escape
+	//determinismcheck:ok collecting keys to sort; order does not escape
 	for k := range m {
 		keys = append(keys, k)
 	}

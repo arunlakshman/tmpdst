@@ -1,0 +1,5 @@
+mdscontrolplane_log_active 0
+mdscontrolplane_log_slots_total 0
+mdscontrolplane_log_lost_slots_total 0
+mdscontrolplane_log_role_changes_total{to="active"} 0
+mdscontrolplane_log_role_changes_total{to="standby"} 0

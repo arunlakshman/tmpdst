@@ -32,7 +32,7 @@
 
 ## Evidence
 
-- detcheck findings are exactly the rows above (reflect/unsafe/context imports,
+- determinismcheck findings are exactly the rows above (reflect/unsafe/context imports,
   the sorted map range, one package-level var).
 - ProduceRequest v9/v11 and FetchResponse v11/v12/v16 encode byte-identically
   twice; decode twice gives `reflect.DeepEqual` results; re-encode round-trips;

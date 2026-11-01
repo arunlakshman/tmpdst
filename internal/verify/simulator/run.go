@@ -1,6 +1,6 @@
 package simulator
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // Phases bound fault generation (lesson 8).
 type Phases struct {
@@ -175,8 +175,8 @@ type AssertionStat struct {
 
 // Runner executes a campaign on one goroutine per seed.
 type Runner interface {
-	Run(cfg Config) (Report, error)
+	Run(config Config) (Report, error)
 	// Replay runs one seed with HaltOnFirst and full logging. Neither may change
 	// the seed's TraceHash.
-	Replay(cfg Config, seed uint64) (SeedResult, error)
+	Replay(config Config, seed uint64) (SeedResult, error)
 }

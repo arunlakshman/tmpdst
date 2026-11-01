@@ -1,6 +1,6 @@
 package simulator
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // CostModel says how long a node's loop goroutine stays busy for one Step
 // (docs/flow-control.md sec. 4.1). Deliveries go into the node's simulated

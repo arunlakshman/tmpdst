@@ -43,7 +43,7 @@ func TestComplexity(t *testing.T) {
 	}
 }
 
-func TestCRAPFormula(t *testing.T) {
+func TestRiskScoreFormula(t *testing.T) {
 	if got := RiskScore(10, 1); got != 10 {
 		t.Errorf("full coverage: %v", got)
 	}
@@ -174,7 +174,7 @@ func TestExitCodesAndRatchet(t *testing.T) {
 	base := filepath.Join(root, "base.json")
 	common := []string{"-root", root, "-profile", prof, "-baseline", base}
 
-	// uncovered has CRAP 6: fine at 20, offender at 5.
+	// uncovered has risk score 6: fine at 20, offender at 5.
 	if code, out := runTool(t, append(common, "-threshold", "20")...); code != 0 {
 		t.Fatalf("threshold 20 should pass (code %d): %s", code, out)
 	}

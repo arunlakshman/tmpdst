@@ -12,8 +12,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"manifester/internal/controlplane/controlplaneclient"
-	"manifester/internal/core"
+	"mds/internal/controlplane/controlplaneclient"
+	"mds/internal/core"
 )
 
 func TestClassifier(t *testing.T) {
@@ -66,7 +66,7 @@ func TestClassifierLiveDial(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	_, err := controlplaneclient.New(addr, nil).Call(ctx, core.CommitSegment{SegmentKey: "k", Batches: []core.PendingBatch{
-		{TP: core.NewTopicPartition("t", 0), Records: 1},
+		{TopicPartition: core.NewTopicPartition("t", 0), Records: 1},
 	}})
 	if err == nil {
 		t.Fatal("want error")

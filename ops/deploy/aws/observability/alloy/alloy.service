@@ -2,7 +2,7 @@
 # shadows the packaged unit. Configuration is the directory /etc/alloy/
 # (config.alloy + <role>.alloy). Secrets live in /etc/alloy/alloy.env (0600).
 [Unit]
-Description=Grafana Alloy (manifester benchmark telemetry)
+Description=Grafana Alloy (mds benchmark telemetry)
 Documentation=https://grafana.com/docs/alloy/latest/
 Wants=network-online.target
 After=network-online.target

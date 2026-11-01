@@ -4,13 +4,13 @@
 package fakeobjectstore
 
 import (
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/fakeservices/internal/fakecompletions"
-	"manifester/internal/verify/speccheck"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/fakeservices/internal/fakecompletions"
+	"mds/internal/verify/speccheck"
 )
 
-// Engine is the fake object store. It is also the sim.ObjectTruth.
+// Engine is the fake object store. It is also the simulator.ObjectTruth.
 type Engine struct {
 	*fakecompletions.CompletionCore
 	spec *speccheck.ObjectStore
@@ -56,7 +56,7 @@ func New(f simulator.ObjectStoreFaults) *Engine {
 			}
 			bit := p.Bits % uint64(len(g.Data)*8)
 			g.Data[bit/8] ^= 1 << (bit % 8) // Data is the spec's copy
-			ctx.Fault("obj_get_corrupt", core.Field{Key: "req", Value: core.U64(g.Req)}, core.Field{Key: "bit", Value: core.U64(bit)})
+			ctx.Fault("obj_get_corrupt", core.Field{Key: "req", Value: core.Uint64Value(g.Req)}, core.Field{Key: "bit", Value: core.Uint64Value(bit)})
 			ctx.Assert().Reachable("obj get corrupted")
 			return g
 		},

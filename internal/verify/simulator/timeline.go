@@ -2,7 +2,7 @@ package simulator
 
 import "slices"
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // MemTimeline is the in-memory append-only Timeline: one log in append order
 // plus a per-name index, so an invariant reading one fact name never scans the

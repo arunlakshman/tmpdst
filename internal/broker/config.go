@@ -1,6 +1,6 @@
 package broker
 
-import "manifester/internal/core"
+import "mds/internal/core"
 
 // InjectedBug selects a deliberately broken behaviour for mutant tests. TEST ONLY: the
 // zero value is the real broker and production code must never set it.

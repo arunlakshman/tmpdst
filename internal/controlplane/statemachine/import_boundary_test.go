@@ -9,21 +9,21 @@ import (
 
 // Forbidden monorepo and I/O imports for controlplane/machine (decision 56).
 var forbiddenImportPrefixes = []string{
-	"manifester/internal/broker",
-	"manifester/internal/verify/simulator",
-	"manifester/internal/system",
-	"manifester/cmd",
-	"manifester/internal/verify/speccheck",
-	"manifester/internal/wire/kafkawire",
-	"manifester/internal/wire/segmentformat",
+	"mds/internal/broker",
+	"mds/internal/verify/simulator",
+	"mds/internal/system",
+	"mds/cmd",
+	"mds/internal/verify/speccheck",
+	"mds/internal/wire/kafkawire",
+	"mds/internal/wire/segmentformat",
 	"net/http",
 	"github.com/cockroachdb/pebble",
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb",
 }
 
 func TestImportBoundary(t *testing.T) {
-	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedImports}
-	pkgs, err := packages.Load(cfg, "manifester/internal/controlplane/statemachine")
+	config := &packages.Config{Mode: packages.NeedName | packages.NeedImports}
+	pkgs, err := packages.Load(config, "mds/internal/controlplane/statemachine")
 	if err != nil {
 		t.Fatalf("packages.Load: %v", err)
 	}

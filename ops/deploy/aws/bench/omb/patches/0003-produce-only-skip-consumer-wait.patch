@@ -5,7 +5,7 @@
  
      private void ensureTopicsAreReady() throws IOException {
 +        if (workload.consumerPerSubscription == 0) {
-+            // manifester patch: produce-only workloads have no consumers to wait for (stock OMB would wait for
++            // mds patch: produce-only workloads have no consumers to wait for (stock OMB would wait for
 +            // messagesReceived >= 1 and time out after 60 s).
 +            log.info("No consumers: skipping the readiness wait");
 +            return;

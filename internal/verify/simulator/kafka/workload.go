@@ -1,5 +1,5 @@
 // Package kafka is the Kafka scenario: sans-I/O Kafka clients (at-least-once
-// producers, no idempotence, and consumers over kwire), an oracle that rebuilds each
+// producers, no idempotence, and consumers over kafkawire), an oracle that rebuilds each
 // partition's committed log from the control plane and object store truth, the
 // invariants over it, and the campaign preset. See docs/decisions.md rows
 // 12-17, 26-31.
@@ -10,10 +10,10 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/simulator"
-	"manifester/internal/verify/simulator/internal/session"
-	"manifester/internal/wire/kafkawire"
+	"mds/internal/core"
+	"mds/internal/verify/simulator"
+	"mds/internal/verify/simulator/internal/session"
+	"mds/internal/wire/kafkawire"
 )
 
 // Opts configures the workload.
@@ -41,14 +41,14 @@ func (o Opts) maxAttempts() int {
 	return maxAttempts
 }
 
-func (o Opts) reqTimeout() core.Duration {
+func (o Opts) requestTimeout() core.Duration {
 	if o.ReqTimeout > 0 {
 		return o.ReqTimeout
 	}
-	return reqTimeout
+	return requestTimeout
 }
 
-func (o Opts) tps() []core.TopicPartition {
+func (o Opts) topicPartitions() []core.TopicPartition {
 	var out []core.TopicPartition
 	for _, t := range o.Topics {
 		for p := int32(0); p < o.Partitions; p++ {
@@ -59,10 +59,10 @@ func (o Opts) tps() []core.TopicPartition {
 }
 
 const (
-	reqTimeout  = 1500 * core.Millisecond // a request with no answer: drop the connection (Kafka does)
-	fetchWait   = 10 * core.Second        // a fetch reads a batch at a time from S3: it is slow on a long log
-	maxAttempts = 3                       // sends of one produce batch before it is abandoned
-	maxFrame    = 8 << 20
+	requestTimeout = 1500 * core.Millisecond // a request with no answer: drop the connection (Kafka does)
+	fetchWait      = 10 * core.Second        // a fetch reads a batch at a time from S3: it is slow on a long log
+	maxAttempts    = 3                       // sends of one produce batch before it is abandoned
+	maxFrame       = 8 << 20
 )
 
 type stage uint8
@@ -74,10 +74,10 @@ const (
 	stateRunning
 )
 
-type reqKind uint8
+type requestKind uint8
 
 const (
-	requestAPIVersions reqKind = iota
+	requestAPIVersions requestKind = iota
 	requestMetadata
 	requestListOffsets
 	requestProduce
@@ -86,7 +86,7 @@ const (
 )
 
 type waitingRequests struct {
-	kind reqKind
+	kind requestKind
 	h    core.RequestHeader
 }
 
@@ -107,18 +107,18 @@ type client struct {
 // resolved (acked or abandoned) before the next one for that partition is
 // built, so the oracle can check that acked offsets follow send order.
 type Workload struct {
-	env   core.Environment
-	self  core.NodeInstance
-	opts  Opts
-	tps   []core.TopicPartition
-	hist  simulator.History
-	codec kafkawire.Codec
-	loop  session.Loop[*client]
+	env     core.Environment
+	self    core.NodeInstance
+	opts    Opts
+	tps     []core.TopicPartition
+	history simulator.History
+	codec   kafkawire.Codec
+	loop    session.Loop[*client]
 }
 
 // NewWorkload builds the workload machine.
 func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.NodeInstance, o Opts) *Workload {
-	w := &Workload{env: env, self: self, opts: o, tps: o.tps()}
+	w := &Workload{env: env, self: self, opts: o, tps: o.topicPartitions()}
 	w.loop = session.Loop[*client]{
 		Connected: func(c *client) bool { return c.State == session.Connected },
 		Busy:      func(c *client) bool { return c.out != nil },
@@ -140,11 +140,11 @@ func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.No
 	return w
 }
 
-// Name implements sim.Workload.
+// Name implements simulator.Workload.
 func (w *Workload) Name() string { return "kafka" }
 
 // SetHistory is called by the kernel.
-func (w *Workload) SetHistory(h simulator.History) { w.hist = h }
+func (w *Workload) SetHistory(h simulator.History) { w.history = h }
 
 // Quiescent reports that no produce batch is unresolved. Consumers poll
 // forever and do not count.
@@ -158,9 +158,9 @@ func (w *Workload) Quiescent() bool {
 }
 
 // Step implements core.StateMachine.
-func (w *Workload) Step(ev core.Event) []core.Action { return w.loop.Step(ev) }
+func (w *Workload) Step(event core.Event) []core.Action { return w.loop.Step(event) }
 
-// OnPhase implements sim.PhaseAware. Entering Settling the producers start no
+// OnPhase implements simulator.PhaseAware. Entering Settling the producers start no
 // new batch (in-flight ones finish); the consumers keep reading. Entering
 // Settle (the drain) each consumer stops after a fetch that finds the end of
 // every partition, so no read is outstanding at the end.
@@ -188,7 +188,7 @@ func (w *Workload) advance(c *client) []core.Action {
 	switch c.stage {
 	case stateAPIVersions:
 		r := kmsg.NewPtrApiVersionsRequest()
-		r.ClientSoftwareName, r.ClientSoftwareVersion = "manisim", "1"
+		r.ClientSoftwareName, r.ClientSoftwareVersion = "mdssimulator", "1"
 		return w.send(c, requestAPIVersions, r)
 	case stateMetadata:
 		r := kmsg.NewPtrMetadataRequest()
@@ -206,15 +206,15 @@ func (w *Workload) advance(c *client) []core.Action {
 }
 
 // send encodes req at the client's version for kind and starts the timeout.
-func (w *Workload) send(c *client, kind reqKind, req kmsg.Request) []core.Action {
+func (w *Workload) send(c *client, kind requestKind, request kmsg.Request) []core.Action {
 	c.corr++
-	h := core.RequestHeader{APIKey: req.Key(), APIVersion: c.ver[kind], CorrelationID: c.corr, ClientID: fmt.Sprintf("c%d", c.ID)}
-	data, err := w.codec.EncodeRequest(h, req)
+	h := core.RequestHeader{APIKey: request.Key(), APIVersion: c.ver[kind], CorrelationID: c.corr, ClientID: fmt.Sprintf("c%d", c.ID)}
+	data, err := w.codec.EncodeRequest(h, request)
 	if err != nil {
 		w.env.Unreachable("kafka: client request encodes", core.ContextPair{Key: "err", Value: err.Error()})
 		return nil
 	}
-	timeout := w.opts.reqTimeout()
+	timeout := w.opts.requestTimeout()
 	if kind == requestFetch {
 		timeout = fetchWait
 	}
@@ -233,13 +233,13 @@ func (w *Workload) onBytes(c *client, data []byte) []core.Action {
 			return append(acts, w.loop.Abort(c, "bad_stream")...)
 		}
 		in := c.out
-		resp, derr := w.codec.DecodeResponse(in.h, f)
+		response, derr := w.codec.DecodeResponse(in.h, f)
 		if derr != nil {
 			return append(acts, w.loop.Abort(c, "bad_response")...)
 		}
 		c.out = nil
 		acts = append(acts, c.Answered())
-		acts = append(acts, w.handle(c, in.kind, resp)...)
+		acts = append(acts, w.handle(c, in.kind, response)...)
 	}
 	if err != nil && c.State == session.Connected {
 		return append(acts, w.loop.Abort(c, "bad_stream")...)
@@ -247,8 +247,8 @@ func (w *Workload) onBytes(c *client, data []byte) []core.Action {
 	return acts
 }
 
-func (w *Workload) handle(c *client, k reqKind, resp core.Response) []core.Action {
-	switch r := resp.(type) {
+func (w *Workload) handle(c *client, k requestKind, response core.Response) []core.Action {
+	switch r := response.(type) {
 	case *kmsg.ApiVersionsResponse:
 		return w.onAPI(c, r)
 	case *kmsg.MetadataResponse:
@@ -269,7 +269,7 @@ func (w *Workload) onAPI(c *client, r *kmsg.ApiVersionsResponse) []core.Action {
 	if r.ErrorCode != 0 {
 		return w.retryStage(c)
 	}
-	pick := func(k reqKind, key int16) bool {
+	pick := func(k requestKind, key int16) bool {
 		lo, hi := int16(0), int16(-1)
 		if s, ok := kafkawire.Range(key); ok {
 			lo, hi = s.Min, s.Max
@@ -337,28 +337,28 @@ func (w *Workload) lost(c *client, why string) {
 // StateHash folds all state.
 func (w *Workload) StateHash() uint64 {
 	h := core.NewHasher()
-	h.U64(uint64(w.loop.NextReq))
+	h.Uint64Value(uint64(w.loop.NextReq))
 	for _, c := range w.loop.Clients {
-		h.U64(uint64(c.State))
-		h.U64(uint64(c.stage))
-		h.U64(uint64(c.Conn))
-		h.U64(uint64(c.DialReq))
-		h.U64(uint64(c.SendReq))
-		h.U64(uint64(c.Dials))
-		h.U64(uint64(c.Fails))
-		h.U64(uint64(c.WakeGen))
-		h.U64(uint64(c.ReqGen))
-		h.U64(uint64(c.corr))
+		h.Uint64Value(uint64(c.State))
+		h.Uint64Value(uint64(c.stage))
+		h.Uint64Value(uint64(c.Conn))
+		h.Uint64Value(uint64(c.DialReq))
+		h.Uint64Value(uint64(c.SendReq))
+		h.Uint64Value(uint64(c.Dials))
+		h.Uint64Value(uint64(c.Fails))
+		h.Uint64Value(uint64(c.WakeGen))
+		h.Uint64Value(uint64(c.ReqGen))
+		h.Uint64Value(uint64(c.corr))
 		for _, v := range c.ver {
-			h.U64(uint64(v))
+			h.Uint64Value(uint64(v))
 		}
 		if c.fr != nil {
-			h.U64(uint64(c.fr.Buffered()))
+			h.Uint64Value(uint64(c.fr.Buffered()))
 		}
 		h.Bool(c.out != nil)
 		if c.out != nil {
-			h.U64(uint64(c.out.kind))
-			h.U64(uint64(c.out.h.CorrelationID))
+			h.Uint64Value(uint64(c.out.kind))
+			h.Uint64Value(uint64(c.out.h.CorrelationID))
 		}
 		c.p.hash(&h)
 		c.c.hash(&h)

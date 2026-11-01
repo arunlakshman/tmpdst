@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // ErrBadFrame means the stream carried an invalid length; it is unrecoverable.
-var ErrBadFrame = errors.New("kwire: bad frame length")
+var ErrBadFrame = errors.New("kafkawire: bad frame length")
 
 // Framer reassembles 4-byte big-endian length-prefixed frames. It implements
 // core.FrameSplitter. After an error every later Push returns the same error.

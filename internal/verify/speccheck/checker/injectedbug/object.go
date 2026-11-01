@@ -4,13 +4,13 @@ import (
 	"slices"
 	"strings"
 
-	"manifester/internal/core"
-	"manifester/internal/verify/speccheck/checker"
-	"manifester/internal/verify/speccheck/checker/observation"
-	"manifester/internal/verify/speccheck/checker/suites"
+	"mds/internal/core"
+	"mds/internal/verify/speccheck/checker"
+	"mds/internal/verify/speccheck/checker/observation"
+	"mds/internal/verify/speccheck/checker/suites"
 )
 
-// ObjectBug is a planted bug for an object store. Wrap returns a subject that
+// ObjectBug is an injected bug for an object store. Wrap returns a subject that
 // behaves like the correct one, except for the bug.
 type ObjectBug struct {
 	name, doc string
@@ -35,11 +35,13 @@ func (b ObjectBug) Wrap(correct suites.ObjectSubject) suites.ObjectSubject { ret
 // objectSubject is a subject made from a function. do may call inner.
 type objectSubject struct {
 	inner suites.ObjectSubject
-	do    func(op core.IOCall) (observation.ObjectResult, error)
+	do    func(operation core.IOCall) (observation.ObjectResult, error)
 	hash  func() (uint64, bool)
 }
 
-func (s *objectSubject) Do(op core.IOCall) (observation.ObjectResult, error) { return s.do(op) }
+func (s *objectSubject) Do(operation core.IOCall) (observation.ObjectResult, error) {
+	return s.do(operation)
+}
 
 func (s *objectSubject) StateHash() (uint64, bool) {
 	if s.hash != nil {
@@ -50,7 +52,7 @@ func (s *objectSubject) StateHash() (uint64, bool) {
 
 // afterObject makes a bug that changes the result after the correct subject has
 // answered. change gets the operation and the correct result.
-func afterObject(name, doc string, change func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult) ObjectBug {
+func afterObject(name, doc string, change func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult) ObjectBug {
 	return stateful(name, doc, func(suites.ObjectSubject) func(core.IOCall, observation.ObjectResult) observation.ObjectResult {
 		return change
 	})
@@ -61,17 +63,17 @@ func afterObject(name, doc string, change func(op core.IOCall, r observation.Obj
 func stateful(name, doc string, newChange func(suites.ObjectSubject) func(core.IOCall, observation.ObjectResult) observation.ObjectResult) ObjectBug {
 	return NewObjectBug(name, doc, func(inner suites.ObjectSubject) suites.ObjectSubject {
 		change := newChange(inner)
-		return &objectSubject{inner: inner, do: func(op core.IOCall) (observation.ObjectResult, error) {
-			r, err := inner.Do(op)
+		return &objectSubject{inner: inner, do: func(operation core.IOCall) (observation.ObjectResult, error) {
+			r, err := inner.Do(operation)
 			if err != nil {
 				return r, err
 			}
-			return change(op, r), nil
+			return change(operation, r), nil
 		}}
 	})
 }
 
-// ObjectBugs returns every planted object store bug, in a fixed order.
+// ObjectBugs returns every injected object store bug, in a fixed order.
 func ObjectBugs() []ObjectBug {
 	return []ObjectBug{
 		PutKeepsCallerSlice(),
@@ -94,27 +96,27 @@ func PutKeepsCallerSlice() ObjectBug {
 		"Put keeps the caller's slice instead of a copy, so a later change by the caller changes the stored data.",
 		func(suites.ObjectSubject) func(core.IOCall, observation.ObjectResult) observation.ObjectResult {
 			kept := map[string][]byte{}
-			return func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult {
-				switch op := op.(type) {
+			return func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult {
+				switch operation := operation.(type) {
 				case core.ObjectPut:
 					if r.Code == core.OK {
-						kept[op.Key] = op.Data
+						kept[operation.Key] = operation.Data
 					}
 				case core.ObjectDelete:
 					if r.Code == core.OK {
-						delete(kept, op.Key)
+						delete(kept, operation.Key)
 					}
 				case core.ObjectGet:
-					data, ok := kept[op.Ref.Key]
+					data, ok := kept[operation.Ref.Key]
 					if !ok || r.Code != core.OK {
 						return r
 					}
 					end := int64(len(data))
-					if op.Ref.Len > 0 {
-						end = op.Ref.Off + op.Ref.Len
+					if operation.Ref.Len > 0 {
+						end = operation.Ref.Off + operation.Ref.Len
 					}
-					if op.Ref.Off >= 0 && op.Ref.Off <= end && end <= int64(len(data)) {
-						r.Data = slices.Clone(data[op.Ref.Off:end])
+					if operation.Ref.Off >= 0 && operation.Ref.Off <= end && end <= int64(len(data)) {
+						r.Data = slices.Clone(data[operation.Ref.Off:end])
 					}
 				}
 				return r
@@ -127,12 +129,12 @@ func GetRangeEndOffByOne() ObjectBug {
 	return NewObjectBug("GetRangeEndOffByOne",
 		"Get with a length reads one byte past the end of the range.",
 		func(inner suites.ObjectSubject) suites.ObjectSubject {
-			return &objectSubject{inner: inner, do: func(op core.IOCall) (observation.ObjectResult, error) {
-				if get, ok := op.(core.ObjectGet); ok && get.Ref.Len > 0 {
+			return &objectSubject{inner: inner, do: func(operation core.IOCall) (observation.ObjectResult, error) {
+				if get, ok := operation.(core.ObjectGet); ok && get.Ref.Len > 0 {
 					get.Ref.Len++
-					op = get
+					operation = get
 				}
-				return inner.Do(op)
+				return inner.Do(operation)
 			}}
 		})
 }
@@ -141,8 +143,8 @@ func GetRangeEndOffByOne() ObjectBug {
 func GetOutOfRangeReturnsOK() ObjectBug {
 	return afterObject("GetOutOfRangeReturnsOK",
 		"Get with a range outside the object returns OK and no data instead of ErrInvalid.",
-		func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult {
-			if _, ok := op.(core.ObjectGet); ok && r.Code == core.ErrInvalid {
+		func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult {
+			if _, ok := operation.(core.ObjectGet); ok && r.Code == core.ErrInvalid {
 				return observation.ObjectResult{}
 			}
 			return r
@@ -153,8 +155,8 @@ func GetOutOfRangeReturnsOK() ObjectBug {
 func ListUnsorted() ObjectBug {
 	return afterObject("ListUnsorted",
 		"List returns the keys in reverse order instead of sorted order.",
-		func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult {
-			if _, ok := op.(core.ObjectList); ok {
+		func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult {
+			if _, ok := operation.(core.ObjectList); ok {
 				r.Keys = slices.Clone(r.Keys)
 				slices.Reverse(r.Keys)
 			}
@@ -168,20 +170,20 @@ func ListPrefixAsSubstring() ObjectBug {
 		"List matches the prefix anywhere in the key instead of only at the start.",
 		func(suites.ObjectSubject) func(core.IOCall, observation.ObjectResult) observation.ObjectResult {
 			keys := map[string]bool{}
-			return func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult {
-				switch op := op.(type) {
+			return func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult {
+				switch operation := operation.(type) {
 				case core.ObjectPut:
 					if r.Code == core.OK {
-						keys[op.Key] = true
+						keys[operation.Key] = true
 					}
 				case core.ObjectDelete:
 					if r.Code == core.OK {
-						delete(keys, op.Key)
+						delete(keys, operation.Key)
 					}
 				case core.ObjectList:
 					var found []string
 					for k := range keys {
-						if strings.Contains(k, op.Prefix) {
+						if strings.Contains(k, operation.Prefix) {
 							found = append(found, k)
 						}
 					}
@@ -197,8 +199,8 @@ func ListPrefixAsSubstring() ObjectBug {
 func DeleteMissingReturnsOK() ObjectBug {
 	return afterObject("DeleteMissingReturnsOK",
 		"Delete of a missing key returns OK instead of ErrNotFound.",
-		func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult {
-			if _, ok := op.(core.ObjectDelete); ok && r.Code == core.ErrNotFound {
+		func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult {
+			if _, ok := operation.(core.ObjectDelete); ok && r.Code == core.ErrNotFound {
 				return observation.ObjectResult{Outcome: core.Applied}
 			}
 			return r
@@ -209,8 +211,8 @@ func DeleteMissingReturnsOK() ObjectBug {
 func PutEmptyKeyAccepted() ObjectBug {
 	return afterObject("PutEmptyKeyAccepted",
 		"Put with the empty key returns OK instead of ErrInvalid.",
-		func(op core.IOCall, r observation.ObjectResult) observation.ObjectResult {
-			if put, ok := op.(core.ObjectPut); ok && put.Key == "" && r.Code == core.ErrInvalid {
+		func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult {
+			if put, ok := operation.(core.ObjectPut); ok && put.Key == "" && r.Code == core.ErrInvalid {
 				return observation.ObjectResult{Outcome: core.Applied}
 			}
 			return r
@@ -223,17 +225,17 @@ func PutOverwriteIgnored() ObjectBug {
 		"Put on an existing key answers OK but keeps the old value.",
 		func(inner suites.ObjectSubject) suites.ObjectSubject {
 			exists := map[string]bool{}
-			return &objectSubject{inner: inner, do: func(op core.IOCall) (observation.ObjectResult, error) {
-				switch op := op.(type) {
+			return &objectSubject{inner: inner, do: func(operation core.IOCall) (observation.ObjectResult, error) {
+				switch operation := operation.(type) {
 				case core.ObjectPut:
-					if exists[op.Key] {
+					if exists[operation.Key] {
 						return observation.ObjectResult{Outcome: core.Applied}, nil
 					}
 				case core.ObjectDelete:
-					delete(exists, op.Key)
+					delete(exists, operation.Key)
 				}
-				r, err := inner.Do(op)
-				if put, ok := op.(core.ObjectPut); ok && err == nil && r.Code == core.OK {
+				r, err := inner.Do(operation)
+				if put, ok := operation.(core.ObjectPut); ok && err == nil && r.Code == core.OK {
 					exists[put.Key] = true
 				}
 				return r, err
@@ -258,7 +260,7 @@ func FindObjectDetection(bug ObjectBug, newCorrect func() suites.ObjectSubject, 
 	return findSubjectDetection(seeds, newCorrect, bug.Wrap, suites.ObjectStoreComparator)
 }
 
-// RequireAllObjectBugsDetected runs every planted object store bug through the
+// RequireAllObjectBugsDetected runs every injected object store bug through the
 // object store suite. It reports an error for each bug that no profile finds
 // within seeds seeds, and it logs the catch table. A subject with no spec hash
 // (for example real S3) cannot show a wrong hash, so that one bug is skipped

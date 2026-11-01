@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // scanCore maps each marker method (isEvent, isAction, ...) to the core types that
@@ -96,12 +96,12 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		"GroupLeaveResp": core.GroupLeaveResp{}, "DescribeGroupsResp": core.DescribeGroupsResp{},
 	}
 	fields := map[string]core.FieldValue{
-		"I64": core.I64(0), "U64": core.U64(0), "Str": core.Str(""), "Bool": core.Bool(false), "Bytes": core.Bytes(nil),
+		"Int64Value": core.Int64Value(0), "Uint64Value": core.Uint64Value(0), "StringValue": core.StringValue(""), "Bool": core.Bool(false), "Bytes": core.Bytes(nil),
 	}
 	src := scanCore(t)
 	for marker, have := range map[string][]string{
-		"isEvent": names(events), "isAction": names(actions), "isCPOp": names(ops),
-		"isCPResp": names(resps), "isFieldValue": names(fields),
+		"isEvent": names(events), "isAction": names(actions), "isControlPlaneOperation": names(ops),
+		"isControlPlaneResponse": names(resps), "isFieldValue": names(fields),
 	} {
 		if !eq(src[marker], have) {
 			t.Errorf("%s: core declares %v, tag test lists %v", marker, src[marker], have)
@@ -129,10 +129,10 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		check("action "+n, func(h *stateHasher) { h.action(v) })
 	}
 	for n, v := range ops {
-		check("cpop "+n, func(h *stateHasher) { h.cpOp(v) })
+		check("controlPlaneOperation "+n, func(h *stateHasher) { h.controlPlaneOperation(v) })
 	}
 	for n, v := range resps {
-		check("cpresp "+n, func(h *stateHasher) { h.cpResp(v) })
+		check("controlPlaneResponse "+n, func(h *stateHasher) { h.controlPlaneResponse(v) })
 	}
 	for n, v := range fields {
 		check("field "+n, func(h *stateHasher) { h.fieldValue(v) })

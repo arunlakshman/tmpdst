@@ -29,19 +29,19 @@ type SpecChecker[S, Op any] struct {
 	Gen func(r *Rand, i int) Op
 	// Step applies op to the implementation and to the spec. It returns an
 	// error that describes any difference between the two results.
-	Step func(s S, op Op) error
+	Step func(s S, operation Op) error
 	// Invariant, if set, runs after every Step and checks a rule that must
 	// always hold.
 	Invariant func(s S) error
 	// Shrink, if set, returns simpler versions of op. The simplest comes first.
-	Shrink func(op Op) []Op
+	Shrink func(operation Op) []Op
 	// ShrinkAll, if set, returns simpler versions of a whole sequence. The
 	// simplest comes first. Use it for a change that keeps the failure only
 	// if it is made in every operation, such as renaming one path everywhere.
 	// Each candidate must differ from ops. Otherwise shrinking never ends.
 	ShrinkAll func(ops []Op) [][]Op
 	// Format returns op as Go source text.
-	Format func(op Op) string
+	Format func(operation Op) string
 	// Ops is the number of operations in each generated sequence.
 	Ops int
 	// MaxShrinkRuns is the most sequences shrinking may run. Zero means 5000.
@@ -72,21 +72,21 @@ func (c SpecChecker[S, Op]) Generate(seed uint64) []Op {
 // as a failure of that operation.
 func (c SpecChecker[S, Op]) Replay(ops []Op) (int, error) {
 	s := c.New()
-	for i, op := range ops {
-		if err := c.step(s, op); err != nil {
+	for i, operation := range ops {
+		if err := c.step(s, operation); err != nil {
 			return i, err
 		}
 	}
 	return -1, nil
 }
 
-func (c SpecChecker[S, Op]) step(s S, op Op) (err error) {
+func (c SpecChecker[S, Op]) step(s S, operation Op) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = fmt.Errorf("panic: %v", p)
 		}
 	}()
-	if err := c.Step(s, op); err != nil {
+	if err := c.Step(s, operation); err != nil {
 		return err
 	}
 	if c.Invariant != nil {
@@ -212,8 +212,8 @@ func (s *minimizeState[Op]) shrinkAll(shrinkAll func([]Op) [][]Op) bool {
 func (c SpecChecker[S, Op]) Literal(ops []Op) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[]%s{\n", c.Name)
-	for _, op := range ops {
-		fmt.Fprintf(&b, "\t%s,\n", c.Format(op))
+	for _, operation := range ops {
+		fmt.Fprintf(&b, "\t%s,\n", c.Format(operation))
 	}
 	b.WriteString("}")
 	return b.String()

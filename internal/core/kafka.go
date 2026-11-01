@@ -37,8 +37,8 @@ type FrameSplitter interface {
 // (sim workload side). Pure and deterministic.
 type KafkaCodec interface {
 	DecodeRequest(frame []byte) (RequestHeader, Request, error)
-	EncodeResponse(h RequestHeader, resp Response) ([]byte, error)
+	EncodeResponse(h RequestHeader, response Response) ([]byte, error)
 
-	EncodeRequest(h RequestHeader, req Request) ([]byte, error)
+	EncodeRequest(h RequestHeader, request Request) ([]byte, error)
 	DecodeResponse(h RequestHeader, frame []byte) (Response, error)
 }

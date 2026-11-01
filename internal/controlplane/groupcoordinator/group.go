@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // phase is the state of a group in memory. It is not logged.
@@ -36,11 +36,11 @@ func (p phase) String() string {
 	return "unknown"
 }
 
-// slot is one armed timer. disarm moves gen on, so a callback that fires
-// late sees an old gen and does nothing.
+// slot is one armed timer. disarm moves version on, so a callback that fires
+// late sees an old version and does nothing.
 type slot struct {
-	t   Timer
-	gen uint64
+	t       Timer
+	version uint64
 }
 
 func (s *slot) disarm() {
@@ -48,14 +48,14 @@ func (s *slot) disarm() {
 		s.t.Stop()
 		s.t = nil
 	}
-	s.gen++
+	s.version++
 }
 
-// arm sets s to call fire(gen) after d. The caller holds the group mutex.
-func arm(clock Clock, s *slot, d time.Duration, fire func(gen uint64)) {
+// arm sets s to call fire(version) after d. The caller holds the group mutex.
+func arm(clock Clock, s *slot, d time.Duration, fire func(version uint64)) {
 	s.disarm()
-	gen := s.gen
-	s.t = clock.AfterFunc(d, func() { fire(gen) })
+	version := s.version
+	s.t = clock.AfterFunc(d, func() { fire(version) })
 }
 
 // group is the memory of one group. Its mutex guards every field.
@@ -170,14 +170,14 @@ func (c *Coordinator) load(t *term, g *group, d core.DescribeGroupResp) {
 
 // joinLocked does one join under the group mutex. It returns the answer at
 // once when the join fails, or the channel the call waits on.
-func (c *Coordinator) joinLocked(t *term, g *group, req JoinReq, id string) (JoinResp, chan JoinResp) {
+func (c *Coordinator) joinLocked(t *term, g *group, request JoinReq, id string) (JoinResp, chan JoinResp) {
 	if len(g.members) == 0 {
-		g.protoType = req.ProtocolType
-	} else if req.ProtocolType != g.protoType {
+		g.protoType = request.ProtocolType
+	} else if request.ProtocolType != g.protoType {
 		return JoinResp{Err: core.ErrInconsistentGroupProtocol}, nil
 	}
 	m, known := g.members[id]
-	if !known && req.MemberID != "" {
+	if !known && request.MemberID != "" {
 		return JoinResp{Err: core.ErrUnknownMember}, nil
 	}
 	if !known {
@@ -185,15 +185,15 @@ func (c *Coordinator) joinLocked(t *term, g *group, req JoinReq, id string) (Joi
 		m = &member{id: id, joinSeq: g.joinSeq}
 		g.members[id] = m
 	}
-	m.clientID = req.ClientID
-	m.clientHost = req.ClientHost
-	m.instanceID = req.GroupInstanceID
-	m.sessionMs = req.SessionTimeoutMs
-	m.rebalanceMs = req.RebalanceTimeoutMs
+	m.clientID = request.ClientID
+	m.clientHost = request.ClientHost
+	m.instanceID = request.GroupInstanceID
+	m.sessionMs = request.SessionTimeoutMs
+	m.rebalanceMs = request.RebalanceTimeoutMs
 	if m.rebalanceMs <= 0 {
 		m.rebalanceMs = m.sessionMs
 	}
-	m.protocols = copyProtocols(req.Protocols)
+	m.protocols = copyProtocols(request.Protocols)
 	ch := make(chan JoinResp, 1)
 	if m.joinWait != nil {
 		// A newer join from the same member replaces the older call.
@@ -220,7 +220,7 @@ func (c *Coordinator) joinLocked(t *term, g *group, req JoinReq, id string) (Joi
 // here too: its parked syncs get ErrRebalanceInProgress. An initial round
 // also waits for the delay.
 func (c *Coordinator) openRound(t *term, g *group, initial bool) {
-	now := c.cfg.Clock.Now()
+	now := c.config.Clock.Now()
 	g.phase = phasePrep
 	g.initial = initial
 	g.delayDone = false
@@ -242,11 +242,11 @@ func (c *Coordinator) openRound(t *term, g *group, initial bool) {
 
 // maxRebalance is the largest rebalance timeout of the members.
 func (c *Coordinator) maxRebalance(g *group) time.Duration {
-	var ms int32
+	var milliseconds int32
 	for _, m := range g.members {
-		ms = max(ms, m.rebalanceMs)
+		milliseconds = max(milliseconds, m.rebalanceMs)
 	}
-	return time.Duration(ms) * time.Millisecond
+	return time.Duration(milliseconds) * time.Millisecond
 }
 
 // extendRound moves the deadline when a member with a longer rebalance timeout joins.
@@ -259,17 +259,17 @@ func (c *Coordinator) extendRound(t *term, g *group) {
 }
 
 func (c *Coordinator) armRound(t *term, g *group) {
-	left := g.deadlineAt.Sub(c.cfg.Clock.Now())
-	arm(c.cfg.Clock, &g.round, left, func(gen uint64) { c.onRound(t, g, gen) })
+	left := g.deadlineAt.Sub(c.config.Clock.Now())
+	arm(c.config.Clock, &g.round, left, func(version uint64) { c.onRound(t, g, version) })
 }
 
 // armDelay waits the initial delay again. It never passes the round deadline.
 func (c *Coordinator) armDelay(t *term, g *group) {
-	d := c.cfg.InitialRebalanceDelay
-	if left := g.deadlineAt.Sub(c.cfg.Clock.Now()); left < d {
+	d := c.config.InitialRebalanceDelay
+	if left := g.deadlineAt.Sub(c.config.Clock.Now()); left < d {
 		d = left
 	}
-	arm(c.cfg.Clock, &g.delay, d, func(gen uint64) { c.onDelay(t, g, gen) })
+	arm(c.config.Clock, &g.delay, d, func(version uint64) { c.onDelay(t, g, version) })
 }
 
 // maybeComplete ends the join round when every known member has rejoined,
@@ -387,15 +387,15 @@ func (c *Coordinator) completeRound(t *term, g *group) {
 
 // applyInstall moves the group to CompletingRebalance after a logged install
 // and answers the parked joins. Only the leader gets the member list.
-func (c *Coordinator) applyInstall(t *term, g *group, gen int32, proto, leader string, ids []string, metas map[string][]byte) {
-	g.generation = gen
+func (c *Coordinator) applyInstall(t *term, g *group, generation int32, proto, leader string, ids []string, metas map[string][]byte) {
+	g.generation = generation
 	g.protocol = proto
 	g.leader = leader
 	g.phase = phaseCompleting
 	g.initial = false
 	g.delayDone = false
 	g.delay.disarm()
-	g.roundStart = c.cfg.Clock.Now()
+	g.roundStart = c.config.Clock.Now()
 	g.deadlineAt = g.roundStart.Add(c.maxRebalance(g))
 	c.armRound(t, g)
 	list := make([]Member, 0, len(ids))
@@ -410,20 +410,20 @@ func (c *Coordinator) applyInstall(t *term, g *group, gen int32, proto, leader s
 		if m.joinWait == nil {
 			continue
 		}
-		resp := JoinResp{Generation: gen, Protocol: proto, Leader: leader, MemberID: id}
+		response := JoinResp{Generation: generation, Protocol: proto, Leader: leader, MemberID: id}
 		if id == leader {
-			resp.Members = list
+			response.Members = list
 		}
-		m.joinWait <- resp
+		m.joinWait <- response
 		m.joinWait = nil
 	}
 }
 
 // answerJoins gives every parked join the same answer.
-func answerJoins(g *group, resp JoinResp) {
+func answerJoins(g *group, response JoinResp) {
 	for _, m := range g.members {
 		if m.joinWait != nil {
-			m.joinWait <- resp
+			m.joinWait <- response
 			m.joinWait = nil
 		}
 	}
@@ -503,9 +503,9 @@ func (c *Coordinator) leaderSync(t *term, g *group, m *member, assigns []Assignm
 			mm.syncWait = nil
 		}
 	}
-	resp := SyncResp{Assignment: copyBytes(m.assignment)}
+	response := SyncResp{Assignment: copyBytes(m.assignment)}
 	g.mu.Unlock()
-	return resp
+	return response
 }
 
 // waitJoin waits for the round to end, the term to end, or ctx to end.
@@ -562,17 +562,17 @@ func (c *Coordinator) armSession(t *term, g *group, m *member) {
 }
 
 func (c *Coordinator) armSessionFor(t *term, g *group, m *member, d time.Duration) {
-	arm(c.cfg.Clock, &m.sess, d, func(gen uint64) { c.onSession(t, g, m, gen) })
+	arm(c.config.Clock, &m.sess, d, func(version uint64) { c.onSession(t, g, m, version) })
 }
 
 // onSession expires a member that was silent for its whole session timeout.
 // The removal is logged first. A failed write tries again later.
-func (c *Coordinator) onSession(t *term, g *group, m *member, gen uint64) {
+func (c *Coordinator) onSession(t *term, g *group, m *member, version uint64) {
 	if !t.lockLive(g) {
 		return
 	}
 	defer g.mu.Unlock()
-	if gen != m.sess.gen || g.members[m.id] != m {
+	if version != m.sess.version || g.members[m.id] != m {
 		return
 	}
 	ctx, cancel := c.writeCtx(t)
@@ -588,12 +588,12 @@ func (c *Coordinator) onSession(t *term, g *group, m *member, gen uint64) {
 
 // onRound fires at the round deadline. A round ends with the members that
 // joined. A sync wait that timed out sends the group back to a join round.
-func (c *Coordinator) onRound(t *term, g *group, gen uint64) {
+func (c *Coordinator) onRound(t *term, g *group, version uint64) {
 	if !t.lockLive(g) {
 		return
 	}
 	defer g.mu.Unlock()
-	if gen != g.round.gen {
+	if version != g.round.version {
 		return
 	}
 	switch g.phase {
@@ -605,12 +605,12 @@ func (c *Coordinator) onRound(t *term, g *group, gen uint64) {
 }
 
 // onDelay fires when the initial delay of a new group passed with no new member.
-func (c *Coordinator) onDelay(t *term, g *group, gen uint64) {
+func (c *Coordinator) onDelay(t *term, g *group, version uint64) {
 	if !t.lockLive(g) {
 		return
 	}
 	defer g.mu.Unlock()
-	if gen != g.delay.gen || g.phase != phasePrep {
+	if version != g.delay.version || g.phase != phasePrep {
 		return
 	}
 	g.delayDone = true

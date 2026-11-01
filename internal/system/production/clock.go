@@ -1,13 +1,13 @@
 // Package production is the production runtime around system.Run: clock, env, executor,
-// TCP connections and the wiring shared by cmd/manibroker and the integration
+// TCP connections and the wiring shared by cmd/mdsbroker and the integration
 // tests. It is nondeterministic by design and is not in the determinism gate.
 package production
 
 import (
 	"time"
 
-	"manifester/internal/core"
-	"manifester/internal/system"
+	"mds/internal/core"
+	"mds/internal/system"
 )
 
 // Clock is the process clock: Mono counts from the clock's creation using

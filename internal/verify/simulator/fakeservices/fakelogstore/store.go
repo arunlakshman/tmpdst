@@ -3,7 +3,7 @@ package fakelogstore
 import (
 	"slices"
 
-	"manifester/internal/core"
+	"mds/internal/core"
 )
 
 // slotKind is the occupancy of one loglet slot.
@@ -119,7 +119,7 @@ func (s *store) entry(slot core.LogPosition) ([]byte, bool) {
 
 func (s *store) stateHash() uint64 {
 	h := core.NewHasher()
-	mix := h.U64
+	mix := h.Uint64Value
 	mix(uint64(len(s.slots)))
 	for i, r := range s.slots {
 		mix(uint64(i))

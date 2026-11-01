@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"manifester/internal/core"
-	"manifester/internal/system"
-	"manifester/internal/system/s3store"
-	"manifester/internal/verify/speccheck/specsystem"
+	"mds/internal/core"
+	"mds/internal/system"
+	"mds/internal/system/s3store"
+	"mds/internal/verify/speccheck/specsystem"
 )
 
 type slowObjs struct {

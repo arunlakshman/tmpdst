@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package controlplane.v1;
 
-option go_package = "manifester/internal/controlplane/api/v1;controlplanev1";
+option go_package = "mds/internal/controlplane/api/v1;controlplanev1";
 
 // ControlPlane is the broker-facing unary API. Non-OK RPCs return a gRPC
 // status with ErrorDetail. Success returns the response message only.

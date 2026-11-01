@@ -22,6 +22,10 @@ type Config struct {
 	GapAfter core.Duration
 	// Writer names append IDs (writer/seq). Empty means "cp".
 	Writer string
+	// OnCheckpointDecision, when set, is told every time the checkpoint timer
+	// fires: whether a checkpoint was started or skipped, and why. It only
+	// reports; it must not touch the machine. The simulator leaves it nil.
+	OnCheckpointDecision func(CheckpointDecision)
 
 	// K is the max number of commit LogAppends in flight. Zero disables the
 	// commit queue (Offer refuses).

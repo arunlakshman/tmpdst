@@ -46,18 +46,67 @@ func (m *Machine) onCheckpointTimer(e core.TimerFired) []core.Action {
 	return append(acts, m.armCheckpoint()...)
 }
 
+// CheckpointDecision says what the checkpoint timer did and why.
+type CheckpointDecision struct {
+	Written        bool   // true: a checkpoint write was started
+	Reason         string // why it was skipped; "ok" when written
+	Applied        int64  // slots folded so far
+	GoalTail       int64  // newest slot seen in the log
+	LastCheckpoint int64  // slot of the last checkpoint written by this node
+	MinSlots       int64  // slots needed since the last checkpoint
+	PendingKind    string // the control I/O in flight, if any
+}
+
+func (k pendingKind) String() string {
+	switch k {
+	case pendingTail:
+		return "tail_check"
+	case pendingRead:
+		return "log_read"
+	case pendingAppend:
+		return "log_append"
+	case pendingObjGet:
+		return "checkpoint_get"
+	case pendingObjPut:
+		return "checkpoint_put"
+	}
+	return "none"
+}
+
+// decide reports one checkpoint decision to the optional observer.
+func (m *Machine) decide(written bool, reason string) {
+	if m.config.OnCheckpointDecision == nil {
+		return
+	}
+	m.config.OnCheckpointDecision(CheckpointDecision{
+		Written: written, Reason: reason,
+		Applied: int64(m.applied), GoalTail: int64(m.goalTail), LastCheckpoint: int64(m.checkpointSlot),
+		MinSlots: m.config.CheckpointMinSlots, PendingKind: m.pendingKind.String(),
+	})
+}
+
 func (m *Machine) maybeCheckpoint() []core.Action {
-	if m.pending != 0 || !m.isAppender() || !m.ready {
+	switch {
+	case m.pending != 0:
+		m.decide(false, "control_io_pending")
+		return nil
+	case !m.isAppender():
+		m.decide(false, "not_appender")
+		return nil
+	case !m.ready:
+		m.decide(false, "not_ready")
 		return nil
 	}
 	slot := m.applied
 	if slot == 0 {
+		m.decide(false, "nothing_applied")
 		return nil
 	}
 	// A node behind the log tail must not write: its snapshot could replace a
 	// newer one from the other node, and the log below that newer one may
 	// already be trimmed, so a restart could never recover.
 	if m.applied < m.goalTail {
+		m.decide(false, "behind_tail")
 		return nil
 	}
 	minSlots := m.config.CheckpointMinSlots
@@ -65,12 +114,14 @@ func (m *Machine) maybeCheckpoint() []core.Action {
 		minSlots = 1
 	}
 	if int64(slot-m.checkpointSlot) < minSlots {
+		m.decide(false, "too_few_new_slots")
 		return nil
 	}
 	var buf bytes.Buffer
 	if err := m.fold.Snapshot(&buf, int64(slot)); err != nil {
 		return m.trip(err)
 	}
+	m.decide(true, "ok")
 	m.checkpointData = buf.Bytes()
 	m.checkpointPending = slot
 	m.nextReq++

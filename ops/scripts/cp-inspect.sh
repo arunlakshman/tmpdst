@@ -3,6 +3,7 @@
 #   ops/scripts/cp-inspect.sh            summary
 #   ops/scripts/cp-inspect.sh -v         one line per log slot
 #   ops/scripts/cp-inspect.sh -slot 17   everything inside slot 17
+#   ops/scripts/cp-inspect.sh -check     PASS/FAIL checks on the log and the checkpoint; exit 1 on failure
 # Needs: aws sso login --profile hydsandbox
 set -euo pipefail
 cd "$(dirname "$0")/../.."

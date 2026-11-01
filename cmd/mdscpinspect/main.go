@@ -40,15 +40,22 @@ func main() {
 	region := flag.String("region", "ap-south-2", "AWS region")
 	verbose := flag.Bool("v", false, "one line per log slot")
 	oneSlot := flag.Int64("slot", -1, "show every command inside this slot")
+	doCheck := flag.Bool("check", false, "verify the stored log and checkpoint; exit 1 if any check fails")
+	checkpointKey := flag.String("checkpoint-key", "cp/checkpoint/latest", "S3 key of the checkpoint")
 	flag.Parse()
 
 	ctx := context.Background()
 	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(*region))
 	check(err)
 	rows := readAll(ctx, dynamodb.NewFromConfig(awsConfig), *table)
+	s3Client := s3.NewFromConfig(awsConfig)
+	if *doCheck {
+		runChecks(ctx, rows, s3Client, *bucket, *checkpointKey)
+		return
+	}
 	report(rows, *verbose, *oneSlot)
 	if *bucket != "" {
-		listBucket(ctx, s3.NewFromConfig(awsConfig), *bucket)
+		listBucket(ctx, s3Client, *bucket)
 	}
 }
 

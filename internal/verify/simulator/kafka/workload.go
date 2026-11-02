@@ -10,10 +10,10 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
-	"mds/internal/verify/simulator/internal/session"
-	"mds/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/verify/simulator/internal/session"
+	"github.com/manifesterio/mds/internal/wire/kafkawire"
 )
 
 // Opts configures the workload.

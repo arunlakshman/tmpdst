@@ -9,7 +9,7 @@ import (
 
 	"os"
 
-	"mds/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker"
 )
 
 // Names of the environment variables.

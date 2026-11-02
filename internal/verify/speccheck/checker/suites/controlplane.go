@@ -3,11 +3,11 @@ package suites
 import (
 	"fmt"
 
-	"mds/internal/core"
-	"mds/internal/verify/speccheck"
-	"mds/internal/verify/speccheck/checker"
-	"mds/internal/verify/speccheck/checker/generator"
-	"mds/internal/verify/speccheck/checker/observation"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/speccheck"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/generator"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/observation"
 )
 
 // ControlPlanePair is a fresh spec, a fresh subject and a naive model of the

@@ -3,7 +3,7 @@ package broker
 import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // OffsetCommit (key 8) and OffsetFetch (key 9). Offsets live in the control

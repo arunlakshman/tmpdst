@@ -4,9 +4,9 @@ import (
 	"errors"
 	"testing"
 
-	"mds/internal/controlplane/statemachine"
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // trackedStore is an in-memory store that remembers whether it was closed.

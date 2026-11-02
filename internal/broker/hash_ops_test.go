@@ -5,7 +5,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // heldHash runs do on a started broker whose control-plane replies are held,

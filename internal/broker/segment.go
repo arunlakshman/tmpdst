@@ -5,8 +5,8 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"mds/internal/core"
-	"mds/internal/wire/segmentformat"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/wire/segmentformat"
 )
 
 // partitionBatch is one admitted partition batch on its way to a segment.

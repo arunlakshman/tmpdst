@@ -1,6 +1,6 @@
 package kafka
 
-import "mds/internal/core"
+import "github.com/manifesterio/mds/internal/core"
 
 // History ops. One ProduceOp covers a batch and all its retries (HistOp.ID and
 // Value are the batch's id); one ReadOp is one Fetch request.

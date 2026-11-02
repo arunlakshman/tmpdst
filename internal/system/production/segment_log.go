@@ -3,7 +3,7 @@ package production
 import (
 	"log/slog"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // SegmentLog writes one structured log line per segment lifecycle event, built

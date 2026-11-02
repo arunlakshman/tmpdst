@@ -9,8 +9,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"mds/internal/core"
-	"mds/internal/system"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
 )
 
 // Classifier is the system.ErrorClassifier for ControlPlaneCall (lesson 1). A mutating op

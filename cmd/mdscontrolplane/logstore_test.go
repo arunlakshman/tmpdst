@@ -20,12 +20,12 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
-	"mds/internal/controlplane/controlplaneclient"
-	"mds/internal/controlplane/controlplanemetrics"
-	"mds/internal/controlplane/executor"
-	"mds/internal/controlplane/fakedynamodb"
-	"mds/internal/core"
-	"mds/internal/system"
+	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanemetrics"
+	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/fakedynamodb"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
 )
 
 // syncBuf is a log sink safe for the goroutines of several run calls.

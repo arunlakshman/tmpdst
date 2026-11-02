@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"testing"
 
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/controlplane/stateupdater/pebblestore"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater/pebblestore"
 )
 
 // Conformance C3 for the production applier (decision 49): the shared control

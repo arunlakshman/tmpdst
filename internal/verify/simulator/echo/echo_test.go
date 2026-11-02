@@ -3,9 +3,9 @@ package echo
 import (
 	"testing"
 
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
-	"mds/internal/verify/simulator/internal/campaign"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/verify/simulator/internal/campaign"
 )
 
 func seeds(from uint64, n int) []uint64 {

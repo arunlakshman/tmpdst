@@ -3,8 +3,8 @@ package statemachine_test
 import (
 	"testing"
 
-	"mds/internal/controlplane/statemachine"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // A read that arrives while a tail check is in flight waits for the NEXT check.

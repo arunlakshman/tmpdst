@@ -3,8 +3,8 @@ package broker
 import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"mds/internal/core"
-	"mds/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/wire/kafkawire"
 )
 
 // maxFetchWait caps MaxWait, so one Fetch cannot hold a connection for long.

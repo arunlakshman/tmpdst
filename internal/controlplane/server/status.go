@@ -4,9 +4,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cpv1 "mds/internal/controlplane/api/v1"
-	"mds/internal/controlplane/apiconvert"
-	"mds/internal/core"
+	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
+	"github.com/manifesterio/mds/internal/controlplane/apiconvert"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func toRPCError(code core.ErrCode, outcome core.Outcome) error {

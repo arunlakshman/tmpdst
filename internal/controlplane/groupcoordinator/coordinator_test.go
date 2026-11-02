@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // view is a read of one group's memory, taken under its mutex.

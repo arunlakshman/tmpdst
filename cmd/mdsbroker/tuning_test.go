@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"mds/internal/broker"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/broker"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func defaults() tuning {

@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
 )
 
 // DeliveredEvent is one completion handed to a node.

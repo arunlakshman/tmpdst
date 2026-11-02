@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"mds/internal/core"
-	"mds/internal/wire/segmentformat"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/wire/segmentformat"
 )
 
 // mutation injects a bug for the mutant tests; zero is the real broker.

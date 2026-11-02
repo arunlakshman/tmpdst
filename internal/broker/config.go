@@ -3,7 +3,7 @@ package broker
 import (
 	"cmp"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // InjectedBug selects a deliberately broken behaviour for mutant tests. TEST ONLY: the

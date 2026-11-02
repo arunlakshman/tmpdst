@@ -9,11 +9,11 @@ import (
 	"os"
 	"time"
 
-	"mds/internal/controlplane/controlplanemetrics"
-	"mds/internal/controlplane/executor"
-	"mds/internal/core"
-	"mds/internal/system"
-	"mds/internal/system/s3store"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanemetrics"
+	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
+	"github.com/manifesterio/mds/internal/system/s3store"
 )
 
 const kindLog = "dynamolog"

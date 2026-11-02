@@ -8,7 +8,7 @@ import (
 	"math/rand/v2"
 	"sync"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // Env is the production core.Environment: crypto-seeded randomness, inert buggify and

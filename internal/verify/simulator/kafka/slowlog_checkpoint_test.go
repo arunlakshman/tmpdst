@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"mds/internal/controlplane/statemachine"
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
-	"mds/internal/verify/simulator/fakeservices/fakelogstore"
-	"mds/internal/verify/simulator/fakeservices/fakeobjectstore"
+	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakelogstore"
+	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakeobjectstore"
 )
 
 // A healthy log store that is merely slow: every log call takes about 19 ms of

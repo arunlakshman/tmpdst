@@ -3,7 +3,7 @@
 **Status:** DONE on branch `feat/cp-stacked-faults` (2026-10-29). CP process attrition, `StallProb` and `CrashProb` are all live in `kafka-log`. See section 12 for what was fixed on the way.  
 **History:** deferred after CP-DSM stack land (`toys3` tip `bf460bd`, PR #9 / `cfca8b6`).  
 **Owner:** unassigned - pick up independently using this doc.  
-**Related:** `docs/sim-log-engine.md`, `.audit/cp-dsm-stack.tsv`, commit `cfca8b6`.
+**Related:** `docs/sim-log-engine.md`, commit `cfca8b6`.
 
 This is **not** "add new knobs." The knobs and machine paths already exist. The work is to **turn them on under the post-CP-DSM-8 topology**, keep the kafka-log campaign green, and restore the reachables that were dropped while they were forced off.
 
@@ -201,7 +201,6 @@ Do **not** flip all three on day one. Prior art: Put coins alone found a wedge.
 ### Phase C - docs + audit
 
 - Update `docs/sim-log-engine.md`.  
-- Append a row to `.audit/cp-dsm-stack.tsv` (or a new audit file) with tip SHA and bar results.  
 - Close this follow-up.
 
 ---
@@ -271,7 +270,6 @@ Out of scope unless they block the bar: third replica, log-wide total outage, Dy
 | `internal/verify/simulator/engine.go` | `LogParams` Stall/Crash/Put field docs |
 | `internal/verify/simulator/kafka/invariants.go` | `faultCoverage` |
 | `docs/sim-log-engine.md` | Topology + deferred note |
-| `.audit/cp-dsm-stack.tsv` | Program history |
 | Commit `cfca8b6` | Put/bridge restore + explicit "Stall/Crash and NoAttrition stay deferred" |
 
 ---

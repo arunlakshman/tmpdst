@@ -3,7 +3,7 @@ package speccheck
 import (
 	"testing"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func TestPartition(t *testing.T) {

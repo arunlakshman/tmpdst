@@ -3,10 +3,10 @@ package controlplanetest
 import (
 	"testing"
 
-	"mds/internal/controlplane"
-	"mds/internal/verify/speccheck/checker/injectedbug"
-	"mds/internal/verify/speccheck/checker/runsettings"
-	"mds/internal/verify/speccheck/checker/suites"
+	"github.com/manifesterio/mds/internal/controlplane"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/injectedbug"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/runsettings"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/suites"
 )
 
 // Conformance C3 for the control-plane stores: the shared control plane suite

@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // Entry kinds are the Dynamo loglet payload kinds.

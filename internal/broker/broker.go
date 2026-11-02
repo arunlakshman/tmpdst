@@ -17,8 +17,8 @@
 package broker
 
 import (
-	"mds/internal/core"
-	"mds/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/wire/kafkawire"
 )
 
 // Fixed timer ids; retry timers use the id of the segment or op they belong to

@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mds/internal/core"
-	"mds/internal/system"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
 )
 
 // ErrNoConn reports a Write or Close on a connection that is gone.

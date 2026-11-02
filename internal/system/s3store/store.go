@@ -23,10 +23,10 @@ import (
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 
-	"mds/internal/core"
-	"mds/internal/system"
-	"mds/internal/system/awsmetrics"
-	"mds/internal/system/httpconnections"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
+	"github.com/manifesterio/mds/internal/system/awsmetrics"
+	"github.com/manifesterio/mds/internal/system/httpconnections"
 )
 
 // Config selects the bucket and endpoint. An empty Endpoint is AWS itself.

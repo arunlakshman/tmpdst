@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // gBig is a byte string that makes a group command pass 256 KiB.

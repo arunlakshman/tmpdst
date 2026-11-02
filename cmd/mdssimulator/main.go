@@ -13,9 +13,9 @@ import (
 	"runtime"
 	"time"
 
-	"mds/internal/verify/simulator"
-	"mds/internal/verify/simulator/echo"
-	"mds/internal/verify/simulator/kafka"
+	"github.com/manifesterio/mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/verify/simulator/echo"
+	"github.com/manifesterio/mds/internal/verify/simulator/kafka"
 )
 
 // minimumCoverage is the campaign size from which a never-satisfied Sometimes

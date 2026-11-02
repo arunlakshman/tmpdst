@@ -1,6 +1,6 @@
 package simulator
 
-import "mds/internal/core"
+import "github.com/manifesterio/mds/internal/core"
 
 // CountedRand is the single seeded stream (lesson 3). Every draw in a run,
 // including engine latencies, fault coins and tie-breaks, comes from it. RandomSettingsPicker

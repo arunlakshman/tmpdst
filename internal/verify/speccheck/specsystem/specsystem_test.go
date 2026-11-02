@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func code(err error) core.ErrCode {

@@ -7,7 +7,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // ErrMalformed means a frame could not be parsed.

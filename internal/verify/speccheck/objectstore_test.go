@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"mds/internal/core"
-	"mds/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker"
 )
 
 func put(s *ObjectStore, key, data string) core.ObjectPutDone {

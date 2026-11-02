@@ -4,7 +4,7 @@ import (
 	"errors"
 	"slices"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // runner is the Runner. It runs seeds one after another on the calling

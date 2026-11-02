@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // ObjectResult is what an object store call answered. Only the fields that

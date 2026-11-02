@@ -9,7 +9,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"mds/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/internal/wire/kafkawire"
 )
 
 // codecCase is one producer compression setting. id is the codec id expected

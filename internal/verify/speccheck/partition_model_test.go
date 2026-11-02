@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"mds/internal/core"
-	"mds/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker"
 )
 
 // This file checks Partition against a naive model: a plain slice of values.

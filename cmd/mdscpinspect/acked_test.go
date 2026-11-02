@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // honestAcked is what mdscpverify would write for honestLog: one line per acked commit.

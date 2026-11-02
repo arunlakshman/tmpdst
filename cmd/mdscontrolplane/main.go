@@ -21,13 +21,13 @@ import (
 	"github.com/aws/smithy-go/middleware"
 	"google.golang.org/grpc"
 
-	"mds/internal/controlplane/controlplanemetrics"
-	"mds/internal/controlplane/executor"
-	"mds/internal/controlplane/server"
-	"mds/internal/controlplane/statemachine"
-	"mds/internal/core"
-	"mds/internal/system/httpconnections"
-	"mds/internal/system/runinfo"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanemetrics"
+	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/server"
+	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system/httpconnections"
+	"github.com/manifesterio/mds/internal/system/runinfo"
 )
 
 func main() {

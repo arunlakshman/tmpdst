@@ -6,7 +6,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // metadata answers Metadata (decision 29): this broker is the leader of every

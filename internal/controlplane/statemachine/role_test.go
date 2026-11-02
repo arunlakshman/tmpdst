@@ -3,9 +3,9 @@ package statemachine_test
 import (
 	"testing"
 
-	"mds/internal/controlplane/statemachine"
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func findTimer(acts []core.Action, id core.TimerID) (core.SetTimer, bool) {

@@ -4,9 +4,9 @@ import (
 	"errors"
 	"log/slog"
 
-	"mds/internal/core"
-	"mds/internal/system"
-	"mds/internal/verify/speccheck/specsystem"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
+	"github.com/manifesterio/mds/internal/verify/speccheck/specsystem"
 )
 
 // Classifier routes by action: ControlPlaneCall to CP, Obj* to Objects, anything else

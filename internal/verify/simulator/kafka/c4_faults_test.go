@@ -7,10 +7,10 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
-	"mds/internal/verify/simulator/kafka"
-	"mds/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/verify/simulator/kafka"
+	"github.com/manifesterio/mds/internal/wire/kafkawire"
 )
 
 // Oracle property names (the stable strings sim/kafka reports).

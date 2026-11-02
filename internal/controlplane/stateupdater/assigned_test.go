@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func TestAssignedStates(t *testing.T) {

@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
-	"mds/internal/verify/simulator/internal/session"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/verify/simulator/internal/session"
 )
 
 // PutOp and GetOp are the History ops. A PUT result is the reply text, or ""

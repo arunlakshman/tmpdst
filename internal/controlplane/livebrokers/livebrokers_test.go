@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func ids(bs []core.BrokerAddr) []int32 {

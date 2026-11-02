@@ -39,7 +39,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	"mds/internal/controlplane/controlplaneclient"
+	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
 )
 
 func main() { os.Exit(mainRun(os.Args[1:], os.Stdout, os.Stderr, newKgoClient)) }

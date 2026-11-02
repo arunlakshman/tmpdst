@@ -4,10 +4,10 @@ import (
 	"slices"
 	"testing"
 
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
-	"mds/internal/verify/simulator/fakeservices/fakecontrolplane"
-	"mds/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakecontrolplane"
+	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/internal/fakeservicetest"
 )
 
 const ms = core.Duration(1_000_000)

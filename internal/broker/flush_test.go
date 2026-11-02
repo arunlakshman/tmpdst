@@ -3,7 +3,7 @@ package broker
 import (
 	"testing"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func flushTimers(h *harness) []core.SetTimer {

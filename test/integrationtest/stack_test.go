@@ -6,13 +6,13 @@ import (
 	"testing"
 	"time"
 
-	"mds/internal/broker"
-	"mds/internal/controlplane/controlplaneclient"
-	"mds/internal/controlplane/grpctestserver"
-	"mds/internal/core"
-	"mds/internal/system"
-	"mds/internal/system/production"
-	"mds/internal/verify/speccheck/specsystem"
+	"github.com/manifesterio/mds/internal/broker"
+	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
+	"github.com/manifesterio/mds/internal/controlplane/grpctestserver"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
+	"github.com/manifesterio/mds/internal/system/production"
+	"github.com/manifesterio/mds/internal/verify/speccheck/specsystem"
 )
 
 // stack is a control plane, an object store and any number of brokers.

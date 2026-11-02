@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"mds/internal/broker"
-	"mds/internal/core"
-	"mds/internal/system"
+	"github.com/manifesterio/mds/internal/broker"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
 )
 
 // NodeConfig is everything one broker process needs.

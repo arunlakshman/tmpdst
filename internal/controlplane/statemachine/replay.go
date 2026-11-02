@@ -3,8 +3,8 @@ package statemachine
 import (
 	"fmt"
 
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // ReplayPosition folds one durable log entry into fold. Used for the reference

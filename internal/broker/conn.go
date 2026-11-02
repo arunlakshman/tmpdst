@@ -6,8 +6,8 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"mds/internal/core"
-	"mds/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/wire/kafkawire"
 )
 
 // connection is one client connection. Kafka answers a connection's requests in

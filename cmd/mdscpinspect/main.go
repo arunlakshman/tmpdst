@@ -26,7 +26,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
 )
 
 const (

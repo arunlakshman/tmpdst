@@ -7,8 +7,8 @@ import (
 	"net"
 	"time"
 
-	"mds/internal/core"
-	"mds/internal/system"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
 )
 
 // AsyncConnections is the connection set the Executor writes to: system.Connections plus a

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/controlplane/stateupdater/pebblestore"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater/pebblestore"
 )
 
 // pebbleState hands the control-plane machine its Pebble store. The store is

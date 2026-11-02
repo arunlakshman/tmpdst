@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"testing"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // lcg is a tiny deterministic generator for op sequences.

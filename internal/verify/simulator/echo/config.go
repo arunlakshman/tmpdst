@@ -1,12 +1,12 @@
 package echo
 
 import (
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
-	"mds/internal/verify/simulator/fakeservices/fakecontrolplane"
-	"mds/internal/verify/simulator/fakeservices/fakenetwork"
-	"mds/internal/verify/simulator/fakeservices/fakeobjectstore"
-	"mds/internal/verify/simulator/internal/campaign"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakecontrolplane"
+	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakenetwork"
+	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakeobjectstore"
+	"github.com/manifesterio/mds/internal/verify/simulator/internal/campaign"
 )
 
 // Config is the echo campaign preset: 3 brokers, 1 workload of 4 clients, all

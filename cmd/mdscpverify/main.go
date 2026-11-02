@@ -30,8 +30,8 @@ import (
 	"reflect"
 	"time"
 
-	"mds/internal/controlplane/controlplaneclient"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func main() {

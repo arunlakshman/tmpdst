@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"mds/internal/core"
-	"mds/internal/system"
-	"mds/internal/system/s3store"
-	"mds/internal/verify/speccheck/specsystem"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
+	"github.com/manifesterio/mds/internal/system/s3store"
+	"github.com/manifesterio/mds/internal/verify/speccheck/specsystem"
 )
 
 type slowObjs struct {

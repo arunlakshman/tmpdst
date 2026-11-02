@@ -10,8 +10,8 @@ import (
 
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 
-	"mds/internal/core"
-	"mds/internal/system"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
 )
 
 // Classifier is the system.ErrorClassifier for Obj* actions (lesson 1). Only PUT and

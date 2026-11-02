@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"mds/internal/core"
-	"mds/internal/verify/speccheck/checker/generator"
-	"mds/internal/verify/speccheck/checker/injectedbug"
-	"mds/internal/verify/speccheck/checker/observation"
-	"mds/internal/verify/speccheck/checker/suites"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/generator"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/injectedbug"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/observation"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/suites"
 )
 
 const seedBudget = 60

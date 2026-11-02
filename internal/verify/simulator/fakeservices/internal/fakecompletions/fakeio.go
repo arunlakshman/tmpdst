@@ -16,8 +16,8 @@ package fakecompletions
 import (
 	"slices"
 
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
 )
 
 // Params is the fault and timing config common to both engines.
@@ -238,10 +238,7 @@ func (c *CompletionCore) OnInternal(ctx simulator.FakeServiceContext, body any) 
 	if c.h.Finish != nil {
 		comp = c.h.Finish(ctx, comp, pl)
 	}
-	at := pl.T2
-	if at < ctx.Now() {
-		at = ctx.Now()
-	}
+	at := max(pl.T2, ctx.Now())
 	ctx.Deliver(pl.From, at, pl.Lane, comp)
 }
 

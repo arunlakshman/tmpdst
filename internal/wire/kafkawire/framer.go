@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // ErrBadFrame means the stream carried an invalid length; it is unrecoverable.

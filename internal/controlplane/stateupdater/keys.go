@@ -6,7 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 const (

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"mds/internal/system/s3store"
+	"github.com/manifesterio/mds/internal/system/s3store"
 )
 
 // fullStack is brokers over the live machine/gRPC control plane (via newStack)

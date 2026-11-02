@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func logRow(slot int64, data []byte) row {

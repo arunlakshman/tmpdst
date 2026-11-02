@@ -9,7 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
-	"mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/executor"
 )
 
 // tableAdmin is a scripted TableManager: create is the CreateTable result and

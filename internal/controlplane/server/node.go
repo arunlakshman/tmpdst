@@ -11,15 +11,15 @@ import (
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
-	cpv1 "mds/internal/controlplane/api/v1"
-	"mds/internal/controlplane/apiconvert"
-	"mds/internal/controlplane/executor"
-	"mds/internal/controlplane/groupcoordinator"
-	"mds/internal/controlplane/livebrokers"
-	"mds/internal/controlplane/runloop"
-	"mds/internal/controlplane/statemachine"
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/core"
+	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
+	"github.com/manifesterio/mds/internal/controlplane/apiconvert"
+	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
+	"github.com/manifesterio/mds/internal/controlplane/livebrokers"
+	"github.com/manifesterio/mds/internal/controlplane/runloop"
+	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // Config wires a Node.

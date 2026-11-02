@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"mds/internal/core"
-	"mds/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker"
 )
 
 func tp(t string, p int32) core.TopicPartition { return core.NewTopicPartition(t, p) }

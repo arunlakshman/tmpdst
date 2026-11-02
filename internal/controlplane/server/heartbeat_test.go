@@ -7,9 +7,9 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cpv1 "mds/internal/controlplane/api/v1"
-	"mds/internal/controlplane/statemachine"
-	"mds/internal/core"
+	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
+	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func hb(id int32, host string, port int32) *cpv1.BrokerHeartbeatRequest {

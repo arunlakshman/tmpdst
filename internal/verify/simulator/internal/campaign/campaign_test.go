@@ -3,8 +3,8 @@ package campaign
 import (
 	"testing"
 
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
 )
 
 type stubAssert struct{ sometimes []string }

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func lines(t *testing.T, b *bytes.Buffer) []map[string]any {

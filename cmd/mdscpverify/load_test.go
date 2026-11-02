@@ -11,8 +11,8 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"mds/internal/controlplane/controlplaneclient"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // fakeCaller fails its first failures calls with failure (every call when

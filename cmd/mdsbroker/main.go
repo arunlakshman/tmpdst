@@ -2,6 +2,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -127,9 +128,7 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 		StopGrace: f.grace,
 		Lease:     cpc, LeaseInterval: f.leaseInterval,
 	}
-	if config.NodeID == "" {
-		config.NodeID = fmt.Sprintf("broker-%d", f.brokerID)
-	}
+	config.NodeID = cmp.Or(config.NodeID, fmt.Sprintf("broker-%d", f.brokerID))
 	config.Broker.BrokerID = int32(f.brokerID)
 	config.Exec.ObjTimeout = f.objTimeout
 	if f.commitDeadline > 0 {
@@ -195,10 +194,7 @@ func bind(ctx context.Context, f brokerFlags, config *production.NodeConfig) (ne
 		return nil, "", err
 	}
 	config.Listener = ln
-	adv := f.advertise
-	if adv == "" {
-		adv = ln.Addr().String()
-	}
+	adv := cmp.Or(f.advertise, ln.Addr().String())
 	host, port, err := advertisedPort(adv)
 	if err != nil {
 		_ = ln.Close() // already returning the original error

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -76,10 +77,7 @@ func realDeps() deps {
 }
 
 func (l logFlags) tableName(prefix string) string {
-	if l.table != "" {
-		return l.table
-	}
-	return prefix + "cp"
+	return cmp.Or(l.table, prefix+"cp")
 }
 
 func nodeName(l logFlags) string {

@@ -21,6 +21,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"flag"
 	"fmt"
@@ -52,10 +53,7 @@ func main() {
 
 	switch *mode {
 	case "smoke":
-		name := *topic
-		if name == "" {
-			name = fmt.Sprintf("verify-%d", time.Now().Unix())
-		}
+		name := cmp.Or(*topic, fmt.Sprintf("verify-%d", time.Now().Unix()))
 		if err := run(*target, name, int32(*partitions), *commits, *batchesPer, *records); err != nil {
 			fmt.Fprintln(os.Stderr, "FAIL:", err)
 			os.Exit(1)
@@ -76,10 +74,7 @@ func main() {
 		}
 		os.Exit(runEndsMain(*target, *ackedIn))
 	case "big":
-		name := *topic
-		if name == "" {
-			name = "verify-big"
-		}
+		name := cmp.Or(*topic, "verify-big")
 		os.Exit(runBigMain(*target, name, *bigBatches))
 	default:
 		fmt.Fprintf(os.Stderr, "FAIL: unknown -mode %q (want smoke, load, ready, ends or big)\n", *mode)

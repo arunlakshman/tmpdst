@@ -7,16 +7,16 @@
 #                                    starts with EXPERIMENT. Folders are named
 #                                    NAME-UTCSTAMP, e.g. kill9-20261101T120000Z
 # Env (optional):
-#   BUCKET            default mds-cpverify-cpv1-478483354994
-#   AWS_PROFILE_NAME  laptop AWS profile, default hydsandbox
+#   BUCKET            default in onbox/defaults.sh
+#   AWS_PROFILE_NAME  laptop AWS profile, default in onbox/defaults.sh
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(dirname "$0")/onbox/defaults.sh"
 
 # Go to the repo root. This script is in ops/scripts/cp-exp/.
 cd "$(dirname "$0")/../../.."
 
-BUCKET="${BUCKET:-mds-cpverify-cpv1-478483354994}"
-PROFILE="${AWS_PROFILE_NAME:-hydsandbox}"
-REGION="ap-south-2"
+PROFILE="$AWS_PROFILE_NAME"
 DEST="build/results"
 
 if [[ $# -eq 0 ]]; then

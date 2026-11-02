@@ -10,15 +10,16 @@
 #   INSTANCE_ID       instance id. Default: terraform output instance_id
 #                     in ops/deploy/aws/cp-verify
 #   TIMEOUT_SECONDS   time limit on the box, default 600
-#   AWS_PROFILE_NAME  laptop AWS profile, default hydsandbox
+#   AWS_PROFILE_NAME  laptop AWS profile, default in onbox/defaults.sh
 #
 # Output limit: SSM returns at most 24000 characters of stdout and of
 # stderr. Longer output is cut. Then read the full output in S3 with
 # fetch-results.sh.
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(dirname "$0")/onbox/defaults.sh"
 
-REGION="ap-south-2"
-PROFILE="${AWS_PROFILE_NAME:-hydsandbox}"
+PROFILE="$AWS_PROFILE_NAME"
 TIMEOUT="${TIMEOUT_SECONDS:-600}"
 SSM_LIMIT=24000
 

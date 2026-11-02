@@ -22,13 +22,10 @@ set -euo pipefail
 unset AWS_PROFILE AWS_DEFAULT_PROFILE   # the box uses its IAM role, not a profile
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-CPV_ROOT="${CPV_ROOT:-/opt/cpv}"
+. "$SCRIPT_DIR/defaults.sh"
 BIN_DIR="${BIN_DIR:-$CPV_ROOT/bin}"
 
-# Defaults. The values in $CPV_ROOT/env replace them when that file exists.
-REGION="ap-south-2"
-TABLE_PREFIX="mds_cpv1_"
-BUCKET="mds-cpverify-cpv1-478483354994"
+# The values in $CPV_ROOT/env replace the defaults when that file exists.
 if [[ -f $CPV_ROOT/env ]]; then
   . "$CPV_ROOT/env"
 fi

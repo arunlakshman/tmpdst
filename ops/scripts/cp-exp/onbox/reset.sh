@@ -2,7 +2,7 @@
 # Empty the log table and the checkpoint prefix so an experiment starts clean.
 # It keeps the table and the bucket. It keeps bin/, scripts/ and results/ in the bucket.
 set -euo pipefail
-CPV_ROOT="${CPV_ROOT:-/opt/cpv}"
+. "$(dirname "$0")/defaults.sh"
 # shellcheck disable=SC1091
 . "$CPV_ROOT/env"
 unset AWS_PROFILE

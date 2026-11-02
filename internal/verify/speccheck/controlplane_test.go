@@ -278,7 +278,7 @@ var cpTPs = []core.TopicPartition{tp("t", 0), tp("t", 1), tp("u", 0)}
 // of a key carries the very same batches.
 func segBatches(segmentIndex int, alt bool) []core.PendingBatch {
 	var bs []core.PendingBatch
-	for i := 0; i <= segmentIndex%3; i++ {
+	for i := range segmentIndex%3 + 1 {
 		p := cpTPs[(segmentIndex+i)%3]
 		n := int64(1 + (segmentIndex+i)%4)
 		if alt {

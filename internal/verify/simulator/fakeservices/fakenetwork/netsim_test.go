@@ -3,7 +3,7 @@ package fakenetwork
 import (
 	"bytes"
 	"fmt"
-	"sort"
+	"slices"
 	"testing"
 
 	"mds/internal/core"
@@ -460,7 +460,7 @@ func scenario(seed uint64) ([]string, uint64) {
 	}
 	h.eng.Execute(h, a, core.CloseConn{Conn: d.Conn})
 	h.run()
-	sort.Strings(h.faults)
+	slices.Sort(h.faults)
 	return append(h.log, h.faults...), h.eng.StateHash()
 }
 

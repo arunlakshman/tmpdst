@@ -1,6 +1,7 @@
 package speccheck
 
 import (
+	"maps"
 	"slices"
 
 	"mds/internal/core"
@@ -334,12 +335,7 @@ func (c *ControlPlane) offsetFetch(operation core.OffsetFetch) core.OffsetFetchR
 
 // sortedTPs returns the partitions of m in topic and partition order.
 func sortedTPs(m map[core.TopicPartition]committedOffset) []core.TopicPartition {
-	tps := make([]core.TopicPartition, 0, len(m))
-	for topicPartition := range m { //determinismcheck:ok keys are sorted before use
-		tps = append(tps, topicPartition)
-	}
-	slices.SortFunc(tps, compareTP)
-	return tps
+	return slices.SortedFunc(maps.Keys(m), compareTP)
 }
 
 func compareTP(a, b core.TopicPartition) int {

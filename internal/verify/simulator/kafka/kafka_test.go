@@ -128,11 +128,7 @@ func TestMutantsAreCaught(t *testing.T) {
 		if caught > soon {
 			t.Errorf("mutant %q caught only at seed %d (want <= %d)", c.name, caught, soon)
 		}
-		found := false
-		for _, p := range props {
-			found = found || p == c.prop
-		}
-		if !found {
+		if !slices.Contains(props, c.prop) {
 			t.Errorf("mutant %q: %q not among %v", c.name, c.prop, props)
 		}
 	}

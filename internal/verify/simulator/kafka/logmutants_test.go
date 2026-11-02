@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"slices"
 	"testing"
 
 	"mds/internal/broker"
@@ -73,11 +74,7 @@ func TestLogMutantsAreCaught(t *testing.T) {
 		case caught > soon:
 			t.Errorf("mutant %q caught only at seed %d (want <= %d)", c.name, caught, soon)
 		}
-		found := false
-		for _, p := range props {
-			found = found || p == c.prop
-		}
-		if caught > 0 && !found {
+		if caught > 0 && !slices.Contains(props, c.prop) {
 			t.Errorf("mutant %q: %q not among %v", c.name, c.prop, props)
 		}
 	}

@@ -1,8 +1,10 @@
 package kafka
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -66,15 +68,12 @@ func (t *checkpointTally) busySkips() int {
 
 // reasonLine lists the decision reasons, most common first.
 func (t *checkpointTally) reasonLine() string {
-	keys := make([]string, 0, len(t.reasons))
-	for k := range t.reasons {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if t.reasons[keys[i]] != t.reasons[keys[j]] {
-			return t.reasons[keys[i]] > t.reasons[keys[j]]
+	keys := slices.Collect(maps.Keys(t.reasons))
+	slices.SortFunc(keys, func(a, b string) int {
+		if c := cmp.Compare(t.reasons[b], t.reasons[a]); c != 0 {
+			return c
 		}
-		return keys[i] < keys[j]
+		return cmp.Compare(a, b)
 	})
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {

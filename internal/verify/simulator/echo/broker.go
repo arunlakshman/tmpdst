@@ -1,6 +1,8 @@
 package echo
 
 import (
+	"bytes"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -176,7 +178,7 @@ func (b *Broker) finish(acts []core.Action) []core.Action {
 func (b *Broker) stop() []core.Action {
 	b.stopping = true
 	var acts []core.Action
-	for _, o := range append([]*op(nil), b.ops...) {
+	for _, o := range slices.Clone(b.ops) {
 		if o.state == stateRetryWait {
 			acts = append(acts, b.fail(o)...)
 		}
@@ -430,7 +432,7 @@ func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
 		return append(acts, b.reply(o, "ERR corrupt")...)
 	}
 	if b.mut == bugBadRead {
-		data = append(append([]byte(nil), data...), '!')
+		data = append(bytes.Clone(data), '!')
 	}
 	return b.reply(o, "VAL "+string(data))
 }

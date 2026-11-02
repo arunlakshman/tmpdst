@@ -1,6 +1,7 @@
 package speccheck
 
 import (
+	"maps"
 	"slices"
 
 	"mds/internal/core"
@@ -31,12 +32,7 @@ func hashBatchRanges(h *stateHasher, rs []core.BatchRange) {
 
 // sortedKeys returns m's keys in order, the only way specs walk a map.
 func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m { //determinismcheck:ok keys are sorted before use
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
-	return keys
+	return slices.Sorted(maps.Keys(m))
 }
 
 // clone copies b; the result is never nil, so empty data reads back the same

@@ -2,6 +2,7 @@ package simulator
 
 import (
 	"errors"
+	"slices"
 
 	"mds/internal/core"
 )
@@ -99,12 +100,9 @@ func combineStats(all []AssertionStat, agg map[statKey]int, stats []AssertionSta
 
 func addMissedChecks(all []AssertionStat, expect []core.PropertyID) []AssertionStat {
 	for _, p := range expect {
-		found := false
-		for _, a := range all {
-			if a.Kind == kindMustBeReached && a.Prop == p {
-				found = true
-			}
-		}
+		found := slices.ContainsFunc(all, func(a AssertionStat) bool {
+			return a.Kind == kindMustBeReached && a.Prop == p
+		})
 		if !found {
 			all = append(all, AssertionStat{Prop: p, Kind: kindMustBeReached})
 		}

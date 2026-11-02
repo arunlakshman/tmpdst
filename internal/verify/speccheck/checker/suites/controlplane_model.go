@@ -1,8 +1,8 @@
 package suites
 
 import (
+	"cmp"
 	"slices"
-	"strings"
 
 	"mds/internal/core"
 	"mds/internal/verify/speccheck/checker/observation"
@@ -49,7 +49,7 @@ func (m *controlPlaneModel) partitions() []core.TopicPartition {
 		out = append(out, topicPartition)
 	}
 	slices.SortFunc(out, func(a, b core.TopicPartition) int {
-		if c := strings.Compare(a.Topic, b.Topic); c != 0 {
+		if c := cmp.Compare(a.Topic, b.Topic); c != 0 {
 			return c
 		}
 		return int(a.Partition) - int(b.Partition)
@@ -63,7 +63,7 @@ func (m *controlPlaneModel) topicList() []core.TopicInfo {
 	for name, n := range m.topics {
 		out = append(out, core.TopicInfo{Name: name, Partitions: n})
 	}
-	slices.SortFunc(out, func(a, b core.TopicInfo) int { return strings.Compare(a.Name, b.Name) })
+	slices.SortFunc(out, func(a, b core.TopicInfo) int { return cmp.Compare(a.Name, b.Name) })
 	return out
 }
 

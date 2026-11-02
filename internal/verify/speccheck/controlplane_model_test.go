@@ -2,7 +2,8 @@ package speccheck
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 
 	"testing"
 
@@ -73,7 +74,7 @@ func (m *naiveControlPlane) commit(request core.RequestID, operation core.Commit
 		if !sameBatches(old.batches, operation.Batches) {
 			return core.ControlPlaneDone{Req: request, Err: core.ErrConflict}
 		}
-		response := core.CommitSegmentResp{Assigned: append([]core.BatchRange(nil), old.ranges...)}
+		response := core.CommitSegmentResp{Assigned: slices.Clone(old.ranges)}
 		return core.ControlPlaneDone{Req: request, Resp: response, Outcome: core.Applied}
 	}
 	if operation.SegmentKey == "" || len(operation.Batches) == 0 {
@@ -94,8 +95,8 @@ func (m *naiveControlPlane) commit(request core.RequestID, operation core.Commit
 		assigned = append(assigned, r)
 	}
 	m.segKeys = append(m.segKeys, operation.SegmentKey)
-	m.segs[operation.SegmentKey] = modelSegment{batches: append([]core.PendingBatch(nil), operation.Batches...), ranges: assigned}
-	response := core.CommitSegmentResp{Assigned: append([]core.BatchRange(nil), assigned...)}
+	m.segs[operation.SegmentKey] = modelSegment{batches: slices.Clone(operation.Batches), ranges: assigned}
+	response := core.CommitSegmentResp{Assigned: slices.Clone(assigned)}
 	return core.ControlPlaneDone{Req: request, Resp: response, Outcome: core.Applied}
 }
 
@@ -119,19 +120,10 @@ func (m *naiveControlPlane) lookup(request core.RequestID, operation core.FindSe
 }
 
 func (m *naiveControlPlane) describe(request core.RequestID, operation core.DescribeTopics) core.ControlPlaneDone {
-	var names []string
-	for name := range m.topics {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(m.topics))
 	var response core.DescribeTopicsResp
 	for _, name := range names {
-		wanted := len(operation.Topics) == 0
-		for _, w := range operation.Topics {
-			if w == name {
-				wanted = true
-			}
-		}
+		wanted := len(operation.Topics) == 0 || slices.Contains(operation.Topics, name)
 		if wanted {
 			response.Topics = append(response.Topics, core.TopicInfo{Name: name, Partitions: m.topics[name]})
 		}
@@ -170,7 +162,7 @@ func modelTP(r *checker.Rand) core.TopicPartition {
 func canonicalBatches(key string) []core.PendingBatch {
 	k := int(key[1] - '0')
 	var bs []core.PendingBatch
-	for j := 0; j <= k%3; j++ {
+	for j := range k%3 + 1 {
 		p := core.NewTopicPartition(modelTopics[(k+j)%len(modelTopics)], int32((k+2*j)%3))
 		n := int64(1 + (k+j)%4)
 		bs = append(bs, core.PendingBatch{TopicPartition: p, Records: n, Loc: core.SegmentRef{Key: "o" + key, Off: int64(j), Len: n * 10}})

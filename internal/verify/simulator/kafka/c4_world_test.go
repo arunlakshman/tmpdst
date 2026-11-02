@@ -152,7 +152,7 @@ func newWorld(seed uint64, live bool) *world {
 	for i := range 3 {
 		w.brks = append(w.brks, &broker{ref: nodeRef(fmt.Sprintf("b%d", i))})
 	}
-	for i := 0; i < opts.Producers; i++ {
+	for range opts.Producers {
 		w.prods = append(w.prods, &producer{})
 	}
 	if live {

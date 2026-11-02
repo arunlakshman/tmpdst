@@ -1,6 +1,7 @@
 package checker
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -226,9 +227,7 @@ func (c SpecChecker[S, Op]) Report(f *Failure[Op], replay string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "seed %d: operation %d of the shrunk sequence failed: %v\n", f.Seed, len(f.Ops), f.Err)
 	fmt.Fprintf(&b, "(shrunk from %d operations to %d in %d runs)\n", f.Original, len(f.Ops), f.Runs)
-	if replay == "" {
-		replay = "not configured (set Options.Replay)"
-	}
+	replay = cmp.Or(replay, "not configured (set Options.Replay)")
 	fmt.Fprintf(&b, "replay: %s\n", replay)
 	fmt.Fprintf(&b, "shrunk sequence:\n%s", c.Literal(f.Ops))
 	return b.String()

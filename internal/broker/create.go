@@ -125,11 +125,9 @@ func (b *Broker) onCreateCP(o *operation, e core.ControlPlaneDone) []core.Action
 		}
 		return b.retryOp(o)
 	case o.validateOnly:
-		for _, t := range core.ResponseAs[core.DescribeTopicsResp](e).Topics {
-			if t.Name == o.create.Name {
-				setTopicError(o.ctopic, errTopicExists, "topic already exists")
-				return b.endOp(o)
-			}
+		if hasTopic(core.ResponseAs[core.DescribeTopicsResp](e).Topics, o.create.Name) {
+			setTopicError(o.ctopic, errTopicExists, "topic already exists")
+			return b.endOp(o)
 		}
 	}
 	return b.createdOK(o)

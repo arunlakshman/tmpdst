@@ -181,8 +181,9 @@ func (b *Broker) leaveGroup(s *slot, r *kmsg.LeaveGroupRequest) []core.Action {
 		response.ErrorCode = int16(errInvalidGroupID)
 		return nil
 	}
+	oneCode := r.Version < 3 // version 0 to 2 has one top level code
 	var names []string
-	if r.Version < 3 {
+	if oneCode {
 		response.Members = []kmsg.LeaveGroupResponseMember{{MemberID: r.MemberID}}
 		names = []string{r.MemberID}
 	}
@@ -199,7 +200,7 @@ func (b *Broker) leaveGroup(s *slot, r *kmsg.LeaveGroupRequest) []core.Action {
 		for i := range response.Members {
 			response.Members[i].ErrorCode = int16(groupErrCode(leaveCode(e, codes, i)))
 		}
-		if r.Version < 3 { // version 0 to 2 has one top level code
+		if oneCode {
 			response.ErrorCode = response.Members[0].ErrorCode
 		}
 	}

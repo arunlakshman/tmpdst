@@ -95,7 +95,7 @@ func clientOptions(storeConfig Config) func(*s3.Options) {
 		o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
 		if storeConfig.Endpoint != "" {
-			o.BaseEndpoint = aws.String(storeConfig.Endpoint)
+			o.BaseEndpoint = new(storeConfig.Endpoint)
 		}
 	}
 }
@@ -111,7 +111,7 @@ func (s *Store) EnsureBucket(ctx context.Context) error {
 	return err
 }
 
-func (s *Store) key(k string) *string { return aws.String(s.prefix + k) }
+func (s *Store) key(k string) *string { return new(s.prefix + k) }
 
 // Put writes data under key.
 func (s *Store) Put(ctx context.Context, key string, data []byte) error {
@@ -120,7 +120,7 @@ func (s *Store) Put(ctx context.Context, key string, data []byte) error {
 	}
 	_, err := s.c.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: &s.bucket, Key: s.key(key),
-		Body: bytes.NewReader(data), ContentLength: aws.Int64(int64(len(data))),
+		Body: bytes.NewReader(data), ContentLength: new(int64(len(data))),
 	})
 	return err
 }
@@ -145,9 +145,9 @@ func (s *Store) Get(ctx context.Context, ref core.SegmentRef) ([]byte, error) {
 func rangeHeader(ref core.SegmentRef) *string {
 	switch {
 	case ref.Len > 0:
-		return aws.String(fmt.Sprintf("bytes=%d-%d", ref.Off, ref.Off+ref.Len-1))
+		return new(fmt.Sprintf("bytes=%d-%d", ref.Off, ref.Off+ref.Len-1))
 	case ref.Off > 0:
-		return aws.String(fmt.Sprintf("bytes=%d-", ref.Off))
+		return new(fmt.Sprintf("bytes=%d-", ref.Off))
 	}
 	return nil
 }
@@ -215,7 +215,7 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 // List returns the keys that start with prefix.
 func (s *Store) List(ctx context.Context, prefix string) ([]string, error) {
 	var keys []string
-	p := s3.NewListObjectsV2Paginator(s.c, &s3.ListObjectsV2Input{Bucket: &s.bucket, Prefix: aws.String(s.prefix + prefix)})
+	p := s3.NewListObjectsV2Paginator(s.c, &s3.ListObjectsV2Input{Bucket: &s.bucket, Prefix: new(s.prefix + prefix)})
 	for p.HasMorePages() {
 		page, err := p.NextPage(ctx)
 		if err != nil {

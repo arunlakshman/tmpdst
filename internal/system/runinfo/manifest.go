@@ -144,12 +144,12 @@ func uploadToS3(ctx context.Context, dest string, body []byte, o WriteOptions) e
 	c := s3.NewFromConfig(awsConfig, func(so *s3.Options) {
 		so.UsePathStyle = o.S3PathStyle
 		if o.S3Endpoint != "" {
-			so.BaseEndpoint = aws.String(o.S3Endpoint)
+			so.BaseEndpoint = new(o.S3Endpoint)
 		}
 		so.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 	})
-	_, err = c.PutObject(ctx, &s3.PutObjectInput{Bucket: &u.Host, Key: aws.String(strings.TrimPrefix(u.Path, "/")),
-		Body: bytes.NewReader(body), ContentType: aws.String("application/json")})
+	_, err = c.PutObject(ctx, &s3.PutObjectInput{Bucket: &u.Host, Key: new(strings.TrimPrefix(u.Path, "/")),
+		Body: bytes.NewReader(body), ContentType: new("application/json")})
 	return err
 }
 

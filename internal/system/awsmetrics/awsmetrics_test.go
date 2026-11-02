@@ -74,10 +74,10 @@ func TestDynamoRetriesAndThrottles(t *testing.T) {
 	var logs bytes.Buffer
 	rec := New(reg, "mdscontrolplane", "dynamo", slog.New(slog.NewJSONHandler(&logs, nil)))
 	c := dynamodb.New(dynamodb.Options{
-		Region: "us-east-1", BaseEndpoint: aws.String(srv.URL), Credentials: credentials.NewStaticCredentialsProvider("a", "b", ""),
+		Region: "us-east-1", BaseEndpoint: new(srv.URL), Credentials: credentials.NewStaticCredentialsProvider("a", "b", ""),
 		APIOptions: rec.APIOptions(), RetryMaxAttempts: 5,
 	})
-	if _, err := c.GetItem(t.Context(), &dynamodb.GetItemInput{TableName: aws.String("t"), Key: map[string]dbtypes.AttributeValue{"pk": &dbtypes.AttributeValueMemberS{Value: "x"}}}); err != nil {
+	if _, err := c.GetItem(t.Context(), &dynamodb.GetItemInput{TableName: new("t"), Key: map[string]dbtypes.AttributeValue{"pk": &dbtypes.AttributeValueMemberS{Value: "x"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if n := sum(family(t, reg, "mdscontrolplane_dynamo_attempt_seconds"), map[string]string{"op": "GetItem", "result": "http_400"}); n != 2 {
@@ -119,17 +119,17 @@ func TestS3Non2xxAndTimeout(t *testing.T) {
 	var logs bytes.Buffer
 	rec := New(reg, "mdsbroker", "s3", slog.New(slog.NewJSONHandler(&logs, nil)))
 	c := s3.New(s3.Options{
-		Region: "us-east-1", BaseEndpoint: aws.String(srv.URL), UsePathStyle: true,
+		Region: "us-east-1", BaseEndpoint: new(srv.URL), UsePathStyle: true,
 		Credentials: credentials.NewStaticCredentialsProvider("a", "b", ""),
 		APIOptions:  rec.APIOptions(), Retryer: aws.NopRetryer{},
 	})
-	_, err := c.PutObject(t.Context(), &s3.PutObjectInput{Bucket: aws.String("b"), Key: aws.String("k"), Body: strings.NewReader("hello")})
+	_, err := c.PutObject(t.Context(), &s3.PutObjectInput{Bucket: new("b"), Key: new("k"), Body: strings.NewReader("hello")})
 	if err == nil {
 		t.Fatal("want error")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
-	_, err = c.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String("b"), Key: aws.String("slow"), Body: strings.NewReader("hello")})
+	_, err = c.PutObject(ctx, &s3.PutObjectInput{Bucket: new("b"), Key: new("slow"), Body: strings.NewReader("hello")})
 	if err == nil {
 		t.Fatal("want timeout")
 	}
@@ -158,7 +158,7 @@ func TestQuietCodesLogAtDebug(t *testing.T) {
 	var logs bytes.Buffer
 	rec := New(prometheus.NewRegistry(), "mdscontrolplane", "dynamo", slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
 	rec.QuietCodes = map[string]bool{"TransactionCanceledException": true}
-	c := dynamodb.New(dynamodb.Options{Region: "us-east-1", BaseEndpoint: aws.String(srv.URL),
+	c := dynamodb.New(dynamodb.Options{Region: "us-east-1", BaseEndpoint: new(srv.URL),
 		Credentials: credentials.NewStaticCredentialsProvider("a", "b", ""), APIOptions: rec.APIOptions()})
 	_, _ = c.TransactWriteItems(t.Context(), &dynamodb.TransactWriteItemsInput{})
 	if logs.Len() != 0 {

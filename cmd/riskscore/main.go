@@ -6,13 +6,14 @@
 package main
 
 import (
+	"cmp"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -72,7 +73,7 @@ func Evaluate(funcs []*Func, threshold float64, base *Baseline, tol float64) Res
 				v.Improved = append(v.Improved, fmt.Sprintf("%s: %.1f -> %.1f", f.Key, old, f.RiskScore))
 			}
 		}
-		sort.Strings(v.Improved)
+		slices.Sort(v.Improved)
 	}
 	return v
 }
@@ -136,7 +137,7 @@ func analyse(c *config) ([]*Func, error) {
 	if err := applyCoverage(c, funcs); err != nil {
 		return nil, err
 	}
-	sort.SliceStable(funcs, func(i, j int) bool { return funcs[i].RiskScore > funcs[j].RiskScore })
+	slices.SortStableFunc(funcs, func(a, b *Func) int { return cmp.Compare(b.RiskScore, a.RiskScore) })
 	return funcs, nil
 }
 

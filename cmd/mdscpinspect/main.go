@@ -8,6 +8,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"flag"
@@ -15,7 +16,6 @@ import (
 	"maps"
 	"os"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -175,7 +175,7 @@ func decodeRows(rows []row) ([]slotInfo, map[string]int) {
 		info.slot, info.size = n, len(r.data)
 		slots = append(slots, info)
 	}
-	sort.Slice(slots, func(i, j int) bool { return slots[i].slot < slots[j].slot })
+	slices.SortFunc(slots, func(a, b slotInfo) int { return cmp.Compare(a.slot, b.slot) })
 	return slots, other
 }
 

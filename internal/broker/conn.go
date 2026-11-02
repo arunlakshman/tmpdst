@@ -190,7 +190,7 @@ func (b *Broker) finalize(s *slot) {
 // drainDirty sends every ready head slot, in order per connection, and closes
 // connections that are done.
 func (b *Broker) drainDirty(acts []core.Action) []core.Action {
-	for i := 0; i < len(b.dirty); i++ {
+	for i := range len(b.dirty) {
 		acts = b.drain(b.dirty[i], acts)
 	}
 	b.dirty = b.dirty[:0]

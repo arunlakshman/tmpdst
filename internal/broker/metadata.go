@@ -94,7 +94,7 @@ func (b *Broker) metaTopic(name string, infos []core.TopicInfo, code kafkaErrorC
 		if in.Name != name {
 			continue
 		}
-		for p := int32(0); p < in.Partitions; p++ {
+		for p := range in.Partitions {
 			mp := kmsg.NewMetadataResponseTopicPartition()
 			mp.Partition, mp.Leader, mp.LeaderEpoch = p, b.config.BrokerID, 0
 			mp.Replicas, mp.ISR = []int32{b.config.BrokerID}, []int32{b.config.BrokerID}

@@ -131,7 +131,7 @@ func (s *c1) produce(c *client, operation c1op) error {
 		topicPartition := c1TPs[ti]
 		m := s.model[topicPartition]
 		var vals []string
-		for k := 0; k <= ce.N%3; k++ {
+		for k := range ce.N%3 + 1 {
 			vals = append(vals, fmt.Sprintf("%d.%d.%d", operation.Tag, j, k))
 		}
 		x := expect{ti: ti}

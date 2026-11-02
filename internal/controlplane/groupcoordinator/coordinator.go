@@ -37,6 +37,7 @@
 package groupcoordinator
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"errors"
@@ -560,5 +561,5 @@ func copyBytes(b []byte) []byte {
 	if len(b) == 0 {
 		return nil
 	}
-	return append([]byte(nil), b...)
+	return bytes.Clone(b)
 }

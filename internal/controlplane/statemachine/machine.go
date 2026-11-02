@@ -1,6 +1,7 @@
 package statemachine
 
 import (
+	"bytes"
 	"fmt"
 
 	"mds/internal/controlplane/stateupdater"
@@ -278,7 +279,7 @@ func (m *Machine) onReadDone(d core.LogReadDone) []core.Action {
 		if e.Slot < m.applied {
 			continue
 		}
-		m.buf[e.Slot] = append([]byte(nil), e.Data...)
+		m.buf[e.Slot] = bytes.Clone(e.Data)
 		m.observeSlot(e.Slot)
 	}
 	if err := m.drain(); err != nil {
@@ -309,7 +310,7 @@ func (m *Machine) onAppendDone(d core.LogAppendDone) []core.Action {
 	}
 	data := offered
 	if d.Taken {
-		data = append([]byte(nil), d.Existing...)
+		data = bytes.Clone(d.Existing)
 	}
 	m.observeSlot(slot)
 	if slot >= m.applied {

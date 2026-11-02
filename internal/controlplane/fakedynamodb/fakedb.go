@@ -98,7 +98,7 @@ func (f *FakeDynamoDB) capacity(table string) *types.ConsumedCapacity {
 	if !f.ReportCapacity {
 		return nil
 	}
-	return &types.ConsumedCapacity{TableName: aws.String(table), CapacityUnits: aws.Float64(1)}
+	return &types.ConsumedCapacity{TableName: new(table), CapacityUnits: aws.Float64(1)}
 }
 
 func (f *FakeDynamoDB) capacities(table string) []types.ConsumedCapacity {
@@ -112,7 +112,7 @@ func (f *FakeDynamoDB) capacities(table string) []types.ConsumedCapacity {
 func (f *FakeDynamoDB) table(name *string) (map[string]item, error) {
 	t, ok := f.tables[aws.ToString(name)]
 	if !ok {
-		return nil, &types.ResourceNotFoundException{Message: aws.String("table not found: " + aws.ToString(name))}
+		return nil, &types.ResourceNotFoundException{Message: new("table not found: " + aws.ToString(name))}
 	}
 	return t, nil
 }
@@ -147,7 +147,7 @@ func (f *FakeDynamoDB) CreateTable(ctx context.Context, in *dynamodb.CreateTable
 	defer f.mu.Unlock()
 	name := aws.ToString(in.TableName)
 	if _, ok := f.tables[name]; ok {
-		return nil, &types.ResourceInUseException{Message: aws.String("table exists: " + name)}
+		return nil, &types.ResourceInUseException{Message: new("table exists: " + name)}
 	}
 	f.tables[name] = map[string]item{}
 	f.byPK[name] = map[string]map[string]struct{}{}

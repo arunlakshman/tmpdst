@@ -1,6 +1,7 @@
 package stateupdater
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 
@@ -111,7 +112,7 @@ func blobOrNil(b []byte) []byte {
 	if len(b) == 0 {
 		return nil
 	}
-	return append([]byte(nil), b...)
+	return bytes.Clone(b)
 }
 
 func corruptGroup(group string) {
@@ -239,7 +240,7 @@ func memberKeys(transaction Transaction, group string) [][]byte {
 	var keys [][]byte
 	lo := groupPrefix(prefixMember, group)
 	transaction.Ascend(lo, prefixEnd(lo), func(k, _ []byte) bool {
-		keys = append(keys, append([]byte(nil), k...))
+		keys = append(keys, bytes.Clone(k))
 		return true
 	})
 	return keys

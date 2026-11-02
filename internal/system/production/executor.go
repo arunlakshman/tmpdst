@@ -102,11 +102,11 @@ func (e *Executor) send(a core.Send) {
 }
 
 func sendErr(err error) core.ErrCode {
-	var ne net.Error
+	ne, isNet := errors.AsType[net.Error](err)
 	switch {
 	case err == nil:
 		return core.OK
-	case errors.As(err, &ne) && ne.Timeout():
+	case isNet && ne.Timeout():
 		return core.ErrTimeout
 	}
 	return core.ErrConnClosed

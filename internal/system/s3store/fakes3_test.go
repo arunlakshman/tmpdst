@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -113,7 +113,7 @@ func (f *fakeS3) list(w http.ResponseWriter, r *http.Request, bucket string) {
 			keys = append(keys, k)
 		}
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	type content struct{ Key string }
 	res := struct {
 		XMLName     xml.Name `xml:"ListBucketResult"`

@@ -102,9 +102,11 @@ func IsTooManyRequests(code string) bool {
 
 // isTimeout reports whether the attempt timed out, by its error or by its context.
 func isTimeout(ctx context.Context, err error) bool {
-	var ne net.Error
-	return errors.Is(err, context.DeadlineExceeded) || ctx.Err() == context.DeadlineExceeded ||
-		(errors.As(err, &ne) && ne.Timeout())
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return true
+	}
+	ne, ok := errors.AsType[net.Error](err)
+	return ok && ne.Timeout()
 }
 
 // Result classifies an attempt's outcome for the "result" label and returns the
@@ -120,11 +122,10 @@ func Result(ctx context.Context, status int, err error) (string, string) {
 		}
 		return "http_" + strconv.Itoa(status), ""
 	}
-	var re *awshttp.ResponseError
-	if status == 0 && errors.As(err, &re) {
+	if re, ok := errors.AsType[*awshttp.ResponseError](err); ok && status == 0 {
 		status = re.HTTPStatusCode()
 	}
-	var ne net.Error
+	_, isNet := errors.AsType[net.Error](err)
 	switch {
 	case status != 0:
 		return "http_" + strconv.Itoa(status), code
@@ -132,7 +133,7 @@ func Result(ctx context.Context, status int, err error) (string, string) {
 		return "timeout", code
 	case errors.Is(err, context.Canceled):
 		return "canceled", code
-	case errors.As(err, &ne):
+	case isNet:
 		return "network", code
 	}
 	return "error", code

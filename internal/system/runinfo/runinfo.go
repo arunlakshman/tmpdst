@@ -5,6 +5,7 @@
 package runinfo
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -49,9 +50,7 @@ type Info struct {
 // to $MDS_RUN_ID, then to a generated "run-<utc time>-<hex>".
 func New(service, runID string, brokerID int) Info {
 	i := Info{Service: service, BrokerID: brokerID, Started: time.Now(), GoVersion: runtime.Version()}
-	if runID == "" {
-		runID = os.Getenv(EnvRunID)
-	}
+	runID = cmp.Or(runID, os.Getenv(EnvRunID))
 	if runID == "" {
 		var b [4]byte
 		_, _ = rand.Read(b[:])
@@ -82,13 +81,7 @@ func build() (string, string, bool) {
 			}
 		}
 	}
-	if version == "" {
-		version = "unknown"
-	}
-	if sha == "" {
-		sha = "unknown"
-	}
-	return version, sha, dirty
+	return cmp.Or(version, "unknown"), cmp.Or(sha, "unknown"), dirty
 }
 
 // ParseLevel maps debug|info|warn|error to a slog level.

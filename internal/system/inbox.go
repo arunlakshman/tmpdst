@@ -10,27 +10,32 @@ import (
 // by construction: the machine caps in-flight work) and a data queue bounded
 // at dataCap that blocks when full. Both drop after Close.
 type Inbox struct {
-	mu      sync.Mutex
-	control []core.EventData
-	data    []core.EventData
-	slots   chan struct{} // data capacity semaphore
-	wake    chan struct{} // cap 1: something was enqueued
-	done    chan struct{}
-	once    sync.Once
+	mu        sync.Mutex
+	control   []core.EventData
+	data      []core.EventData
+	slots     chan struct{} // data capacity semaphore
+	wake      chan struct{} // cap 1: something was enqueued
+	done      chan struct{}
+	closeOnce func()
 }
 
 var _ InboxWriter = (*Inbox)(nil)
 
 // NewInbox returns an Inbox whose data queue holds at most dataCap events.
 func NewInbox(dataCap int) *Inbox {
-	if dataCap < 1 {
-		dataCap = 1
-	}
-	return &Inbox{
+	dataCap = max(1, dataCap)
+	i := &Inbox{
 		slots: make(chan struct{}, dataCap),
 		wake:  make(chan struct{}, 1),
 		done:  make(chan struct{}),
 	}
+	i.closeOnce = sync.OnceFunc(func() {
+		i.mu.Lock()
+		close(i.done)
+		i.control, i.data = nil, nil
+		i.mu.Unlock()
+	})
+	return i
 }
 
 func (i *Inbox) closed() bool {
@@ -87,12 +92,7 @@ func (i *Inbox) Closed() <-chan struct{} { return i.done }
 // Close ends the incarnation: pending and later deliveries are dropped and
 // blocked data senders are released.
 func (i *Inbox) Close() {
-	i.once.Do(func() {
-		i.mu.Lock()
-		close(i.done)
-		i.control, i.data = nil, nil
-		i.mu.Unlock()
-	})
+	i.closeOnce()
 }
 
 // Control and Data are the two queues as core.Inbox views for the policy.

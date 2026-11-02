@@ -2,6 +2,7 @@ package runinfo
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"flag"
@@ -13,7 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,7 +52,7 @@ func NewManifest(i Info, fs *flag.FlagSet, region string, tuning map[string]any)
 		NumCPU: runtime.NumCPU(), GOMAXPROCS: runtime.GOMAXPROCS(0)}
 	fs.VisitAll(func(f *flag.Flag) { m.Flags[f.Name] = f.Value.String() })
 	fs.Visit(func(f *flag.Flag) { m.FlagsSet = append(m.FlagsSet, f.Name) })
-	sort.Strings(m.FlagsSet)
+	slices.Sort(m.FlagsSet)
 	for _, keyValue := range os.Environ() {
 		k, v, _ := strings.Cut(keyValue, "=")
 		if strings.HasPrefix(k, "MDS_") || k == "AWS_REGION" || k == "AWS_DEFAULT_REGION" || strings.HasPrefix(k, "AWS_ENDPOINT") {
@@ -165,9 +166,7 @@ func ExpandDestination(d string, i Info) string {
 // FetchInstanceMetadata reads a few IMDSv2 fields. It returns nil when the endpoint is not
 // reachable (not on EC2), after at most one short timeout.
 func FetchInstanceMetadata(ctx context.Context, endpoint string, timeout time.Duration) map[string]string {
-	if endpoint == "" {
-		endpoint = "http://169.254.169.254"
-	}
+	endpoint = cmp.Or(endpoint, "http://169.254.169.254")
 	if timeout <= 0 {
 		timeout = 300 * time.Millisecond
 	}

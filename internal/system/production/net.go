@@ -4,7 +4,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,8 +59,7 @@ var _ system.Connections = (*Net)(nil)
 // NewNet starts accepting on ln. ConnIDs are unique per process and start at 1.
 func NewNet(ln net.Listener, sink system.InboxWriter, config NetConfig) *Net {
 	n := &Net{config: config.withDefaults(), sink: sink, ln: ln, conns: map[core.ConnID]*conn{}}
-	n.wg.Add(1)
-	go n.accept()
+	n.wg.Go(n.accept)
 	return n
 }
 
@@ -73,7 +74,6 @@ func (n *Net) OpenConns() int {
 func (n *Net) Addr() net.Addr { return n.ln.Addr() }
 
 func (n *Net) accept() {
-	defer n.wg.Done()
 	for {
 		nc, err := n.ln.Accept()
 		if err != nil {
@@ -99,9 +99,8 @@ func (n *Net) accept() {
 		default:
 		}
 		n.sink.DeliverData(core.ConnOpened{Conn: c.id, Peer: nc.RemoteAddr().String()})
-		n.wg.Add(2)
-		go c.readLoop()
-		go c.writeLoop()
+		n.wg.Go(c.readLoop)
+		n.wg.Go(c.writeLoop)
 	}
 }
 
@@ -176,10 +175,7 @@ func (n *Net) Shutdown(grace time.Duration) {
 	case <-time.After(grace):
 	}
 	n.mu.Lock()
-	left := make([]*conn, 0, len(n.conns))
-	for _, c := range n.conns {
-		left = append(left, c)
-	}
+	left := slices.Collect(maps.Values(n.conns))
 	n.mu.Unlock()
 	for _, c := range left {
 		c.abort(true)
@@ -289,7 +285,6 @@ func (c *conn) abort(byCore bool) {
 }
 
 func (c *conn) readLoop() {
-	defer c.n.wg.Done()
 	defer c.finish()
 	for {
 		c.mu.Lock()
@@ -337,7 +332,6 @@ func (c *conn) finish() {
 }
 
 func (c *conn) writeLoop() {
-	defer c.n.wg.Done()
 	defer close(c.stopped)
 	for {
 		c.mu.Lock()

@@ -6,13 +6,14 @@ package s3store
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -61,9 +62,7 @@ var _ system.ObjectStore = (*Store)(nil)
 // New builds a store. With a custom endpoint and no AWS credentials in the
 // environment it uses a static dummy key (SeaweedFS runs without auth).
 func New(ctx context.Context, storeConfig Config) (*Store, error) {
-	if storeConfig.Region == "" {
-		storeConfig.Region = "us-east-1"
-	}
+	storeConfig.Region = cmp.Or(storeConfig.Region, "us-east-1")
 	opts := loadOptions(storeConfig)
 	if storeConfig.HTTP == nil {
 		opts = append(opts, config.WithHTTPClient(httpconnections.ConfigureAWSClient()))
@@ -103,9 +102,9 @@ func clientOptions(storeConfig Config) func(*s3.Options) {
 // EnsureBucket creates the bucket if it does not exist (dev and tests).
 func (s *Store) EnsureBucket(ctx context.Context) error {
 	_, err := s.c.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &s.bucket})
-	var own *s3types.BucketAlreadyOwnedByYou
-	var exists *s3types.BucketAlreadyExists
-	if errors.As(err, &own) || errors.As(err, &exists) {
+	_, own := errors.AsType[*s3types.BucketAlreadyOwnedByYou](err)
+	_, exists := errors.AsType[*s3types.BucketAlreadyExists](err)
+	if own || exists {
 		return nil
 	}
 	return err
@@ -225,7 +224,7 @@ func (s *Store) List(ctx context.Context, prefix string) ([]string, error) {
 			keys = append(keys, aws.ToString(o.Key)[len(s.prefix):])
 		}
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return keys, nil
 }
 

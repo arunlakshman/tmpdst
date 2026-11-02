@@ -61,8 +61,8 @@ func classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
 		}
 		return core.ErrIO, maybe
 	}
-	var ne net.Error
-	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
+	ne, isNet := errors.AsType[net.Error](err)
+	if errors.Is(err, context.DeadlineExceeded) || (isNet && ne.Timeout()) {
 		return core.ErrTimeout, maybe
 	}
 	return core.ErrIO, maybe
@@ -70,12 +70,12 @@ func classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
 
 // isDial reports a failure to establish a connection (nothing was sent).
 func isDial(err error) bool {
-	var dns *net.DNSError
-	var operation *net.OpError
+	_, isDNS := errors.AsType[*net.DNSError](err)
+	operation, isOp := errors.AsType[*net.OpError](err)
 	switch {
-	case errors.As(err, &dns):
+	case isDNS:
 		return true
-	case errors.As(err, &operation) && operation.Op == "dial":
+	case isOp && operation.Op == "dial":
 		return true
 	}
 	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH)

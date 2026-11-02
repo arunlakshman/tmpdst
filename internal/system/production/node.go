@@ -1,6 +1,7 @@
 package production
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -47,13 +48,13 @@ type NodeConfig struct {
 
 // Node is a running broker.
 type Node struct {
-	addr net.Addr
-	net  *Net
-	stop chan struct{}
-	once sync.Once
-	done chan struct{}
-	err  error
-	kill context.CancelFunc
+	addr     net.Addr
+	net      *Net
+	stop     chan struct{}
+	stopOnce func()
+	done     chan struct{}
+	err      error
+	kill     context.CancelFunc
 }
 
 // Start wires the broker to its adapters and runs it until Stop, Kill or a
@@ -78,7 +79,9 @@ func Start(ctx context.Context, config NodeConfig) (*Node, error) {
 		go leaseLoop(rctx, in, config.Lease, self, config.LeaseInterval, config.Log)
 	}
 	nt := NewNet(config.Listener, in, config.Net)
-	n := &Node{addr: config.Listener.Addr(), net: nt, stop: make(chan struct{}), done: make(chan struct{}), kill: kill}
+	stop := make(chan struct{})
+	n := &Node{addr: config.Listener.Addr(), net: nt, stop: stop, stopOnce: sync.OnceFunc(func() { close(stop) }),
+		done: make(chan struct{}), kill: kill}
 	exec := NewExecutor(rctx, config.Exec, config.Objects, config.ControlPlane, nt,
 		Classifier{Objects: config.ObjClassify, CP: config.CPClassify}, in)
 	var ex system.Executor = exec
@@ -131,9 +134,7 @@ func advertised(bc broker.Config, ln net.Listener) (broker.Config, error) {
 			return bc, err
 		}
 	}
-	if bc.Host == "" {
-		bc.Host = "127.0.0.1"
-	}
+	bc.Host = cmp.Or(bc.Host, "127.0.0.1")
 	return bc, nil
 }
 
@@ -171,7 +172,7 @@ func (n *Node) run(ctx context.Context, b system.Dependencies, ex system.Executo
 func (n *Node) Addr() net.Addr { return n.addr }
 
 // Stop asks for a graceful stop: in-flight produces finish and are answered.
-func (n *Node) Stop() { n.once.Do(func() { close(n.stop) }) }
+func (n *Node) Stop() { n.stopOnce() }
 
 // Kill stops the broker at once, resetting every connection (a crash).
 func (n *Node) Kill() { n.kill() }

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
 )
 
 // TestIncrementalStateHashMatchesFull drives random dials, sends, pauses,
@@ -46,7 +46,7 @@ func TestIncrementalStateHashMatchesFull(t *testing.T) {
 				what = "send"
 				if len(conns) > 0 {
 					c := conns[h.rnd.Intn(len(conns))]
-					h.eng.Execute(h, c.ref, core.Send{Req: h.nextRequestID(), Conn: c.conn, Data: []byte(fmt.Sprint("payload-", i))})
+					h.eng.Execute(h, c.ref, core.Send{Req: h.nextRequestID(), Conn: c.conn, Data: fmt.Append(nil, "payload-", i)})
 				}
 			case 4:
 				what = "pause"

@@ -1,5 +1,6 @@
 # Project build. `make` / `make build` is the full gate:
-#   fmt, ascii, vet, lint, compile, unit tests, sim, hermetic it, Kafka CLI e2e, change risk score.
+#   fmt, ascii, vet, lint, modernize-check, compile, unit tests, sim, hermetic it,
+#   Kafka CLI e2e, change risk score.
 # Docker fullstack test/integrationtest tests still Skip unless MDS_*_ENDPOINT are set.
 # The import check for deterministic packages is the determinismcheck tool:
 # go run ./ops/tools/determinismcheck <packages>
@@ -33,10 +34,10 @@ PROTO_GO_VER   ?= v1.35.2
 PROTO_GRPC_VER ?= v1.5.1
 
 .PHONY: build compile test sim it-hermetic test-all test-race sim-campaign \
-	ascii-check lint fmt-check vet risk risk-baseline risk-strict install-hooks proto proto-tools \
-	e2e-kafka-cli
+	ascii-check lint modernize-check modernize fmt-check vet risk risk-baseline risk-strict \
+	install-hooks proto proto-tools e2e-kafka-cli
 
-build: proto fmt-check ascii-check vet lint compile test sim it-hermetic e2e-kafka-cli risk
+build: proto fmt-check ascii-check vet lint modernize-check compile test sim it-hermetic e2e-kafka-cli risk
 
 # Generate Go from internal/controlplane/api/v1/*.proto into ignored *.pb.go files.
 # Prefer mise-provided buf; plugins via `make proto-tools` (go install).
@@ -73,6 +74,15 @@ vet:
 # See docs/lint-baseline.md.
 lint:
 	golangci-lint run ./...
+
+# Built-in go fix modernizers (range-int, waitgroup.Go, errors.AsType, etc.).
+# Diff-only: fails the gate if the tree is not already modernized; does not rewrite.
+modernize-check:
+	go fix -diff ./...
+
+# Apply the same modernizers locally (review the diff before committing).
+modernize:
+	go fix ./...
 
 # No non-ASCII characters in code files (ops/scripts/ascii-check.sh).
 ascii-check:

@@ -15,15 +15,15 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/grpc"
 
-	"mds/internal/broker"
-	"mds/internal/controlplane/controlplaneclient"
-	"mds/internal/controlplane/executor"
-	"mds/internal/controlplane/fakedynamodb"
-	"mds/internal/controlplane/server"
-	"mds/internal/controlplane/statemachine"
-	"mds/internal/core"
-	"mds/internal/system/production"
-	"mds/internal/verify/speccheck/specsystem"
+	"github.com/manifesterio/mds/internal/broker"
+	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
+	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/fakedynamodb"
+	"github.com/manifesterio/mds/internal/controlplane/server"
+	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system/production"
+	"github.com/manifesterio/mds/internal/verify/speccheck/specsystem"
 )
 
 // cpNode is one machine-backed control-plane node served over gRPC.

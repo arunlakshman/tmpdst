@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // ErrUnavailable is the infrastructure error for throttling, overload and

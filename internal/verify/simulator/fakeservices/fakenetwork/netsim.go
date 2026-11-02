@@ -45,8 +45,8 @@ import (
 	"sort"
 	"strconv"
 
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
 )
 
 // Engine is the network engine. Not safe for concurrent use.

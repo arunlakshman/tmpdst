@@ -2,10 +2,10 @@ package generator
 
 import (
 	"fmt"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/speccheck"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker"
 	"go/parser"
-	"mds/internal/core"
-	"mds/internal/verify/speccheck"
-	"mds/internal/verify/speccheck/checker"
 	"reflect"
 	"slices"
 	"strings"

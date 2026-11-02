@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
-	"mds/internal/controlplane/executor"
-	"mds/internal/core"
-	"mds/internal/system"
-	"mds/internal/system/s3store"
+	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
+	"github.com/manifesterio/mds/internal/system/s3store"
 )
 
 // missingObjectStore answers every Get like a real S3 bucket with no such key.

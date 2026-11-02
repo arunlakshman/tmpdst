@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // scanCore maps each marker method (isEvent, isAction, ...) to the core types that

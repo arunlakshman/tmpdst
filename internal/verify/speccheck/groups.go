@@ -1,10 +1,9 @@
 package speccheck
 
 import (
-	"maps"
 	"slices"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // Consumer groups (slice 4a). The spec of the group commands and reads. Plain
@@ -335,7 +334,12 @@ func (c *ControlPlane) offsetFetch(operation core.OffsetFetch) core.OffsetFetchR
 
 // sortedTPs returns the partitions of m in topic and partition order.
 func sortedTPs(m map[core.TopicPartition]committedOffset) []core.TopicPartition {
-	return slices.SortedFunc(maps.Keys(m), compareTP)
+	keys := make([]core.TopicPartition, 0, len(m))
+	for tp := range m { //determinismcheck:ok keys are sorted before use
+		keys = append(keys, tp)
+	}
+	slices.SortFunc(keys, compareTP)
+	return keys
 }
 
 func compareTP(a, b core.TopicPartition) int {

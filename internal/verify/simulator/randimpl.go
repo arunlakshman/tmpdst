@@ -3,7 +3,7 @@ package simulator
 import (
 	"math/bits"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // splitMix is the run's counted stream: SplitMix64 with a draw counter. One

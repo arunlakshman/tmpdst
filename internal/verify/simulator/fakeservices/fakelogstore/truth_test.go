@@ -3,10 +3,10 @@ package fakelogstore_test
 import (
 	"testing"
 
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
-	"mds/internal/verify/simulator/fakeservices/fakelogstore"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakelogstore"
 )
 
 func TestControlPlaneRealStateCreateTopic(t *testing.T) {

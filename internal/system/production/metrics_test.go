@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func fact(name string, keyValue ...any) core.Fact {

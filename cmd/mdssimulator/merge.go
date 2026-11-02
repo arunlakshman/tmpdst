@@ -3,7 +3,7 @@ package main
 import (
 	"sync"
 
-	"mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/verify/simulator"
 )
 
 // runInParts runs seeds in jobs contiguous shards on separate goroutines and

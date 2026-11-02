@@ -1,6 +1,6 @@
 package simulator
 
-import "mds/internal/core"
+import "github.com/manifesterio/mds/internal/core"
 
 // FakeService simulates one external system (object store, control plane, network).
 // It owns that system's state, draws only from the run's CountedRand, and never

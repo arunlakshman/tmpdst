@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"mds/internal/broker"
-	"mds/internal/core"
-	"mds/internal/system/production"
+	"github.com/manifesterio/mds/internal/broker"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system/production"
 )
 
 // tuning is the flag values that shape the segment flush rule and the produce

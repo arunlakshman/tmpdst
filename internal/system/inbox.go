@@ -3,7 +3,7 @@ package system
 import (
 	"sync"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // Inbox is the InboxWriter: a control queue that never blocks its senders (bounded

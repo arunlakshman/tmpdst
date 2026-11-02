@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"mds/internal/core"
-	"mds/internal/system"
-	"mds/internal/verify/speccheck/checker/injectedbug"
-	"mds/internal/verify/speccheck/checker/observation"
-	"mds/internal/verify/speccheck/checker/runsettings"
-	"mds/internal/verify/speccheck/checker/suites"
-	"mds/internal/verify/speccheck/specsystem"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/injectedbug"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/observation"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/runsettings"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/suites"
+	"github.com/manifesterio/mds/internal/verify/speccheck/specsystem"
 )
 
 // Conformance C3: the shared object store suite runs on the S3 adapter and on

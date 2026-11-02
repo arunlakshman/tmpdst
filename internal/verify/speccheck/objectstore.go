@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // ObjectStore is the spec of the object store: a map from key to bytes.

@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"mds/internal/controlplane/runloop"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/runloop"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // Config bounds each kind of I/O. Zero fields take the defaults.

@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func TestEntryCodecRoundTrip(t *testing.T) {

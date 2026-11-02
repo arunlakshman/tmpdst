@@ -41,7 +41,7 @@ Tests alone are not sufficient verification. A PR is verified only when its unit
   - [ ] CP-DSM-7 after CP-DSM-6.
   - [ ] CP-DSM-8 after CP-DSM-7.
 - [ ] Hold the file boundaries. Each PR's **Files.** section is the only allowed touch set for that owner.
-- [ ] Hold the control-plane autonomy rule on every PR. Packages under `internal/controlplane/` (except explicitly named monorepo adapters) must not import `mds/broker`, `mds/sim`, `mds/sys`, `mds/cmd`, `mds/veritas`, `mds/kwire`, or `mds/format`. Allowed deps are stdlib, `mds/core` (future shared module), gRPC/protobuf runtime libs, and other `mds/controlplane/...` packages including `internal/controlplane/api/v1`. Brokers, sim, veritas, sys, and cmd may import `internal/controlplane/api/v1`. They must not be imported by `internal/controlplane/statemachine`. Prove each PR with `go list` import checks in that PR's live lanes.
+- [ ] Hold the control-plane autonomy rule on every PR. Packages under `internal/controlplane/` (except explicitly named monorepo adapters) must not import `mds/broker`, `mds/sim`, `mds/sys`, `github.com/manifesterio/mds/cmd`, `mds/veritas`, `mds/kwire`, or `mds/format`. Allowed deps are stdlib, `mds/core` (future shared module), gRPC/protobuf runtime libs, and other `mds/controlplane/...` packages including `internal/controlplane/api/v1`. Brokers, sim, veritas, sys, and cmd may import `internal/controlplane/api/v1`. They must not be imported by `internal/controlplane/statemachine`. Prove each PR with `go list` import checks in that PR's live lanes.
 - [ ] Hold the gRPC contract rules from Appendix E on every PR that touches the wire or `CPCall` payloads.
 - [ ] Hold the review gate. CP-DSM-7 and CP-DSM-8 change mdscontrolplane or kafka-log operator-visible behavior. They wait for the operator's review in chat with screenshots and a video before merge.
 
@@ -170,7 +170,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Lane 4. Run `go test ./controlplane/logcp -count=1 -short` if present, else `go test ./controlplane/logcp -count=1 -run TestNew`. Save `logcp-untouched.png`. Pass when `ok`.
 - [ ] Lane 5. Run `go test ./controlplane/logsm -count=1 -run TestX2 -timeout 5m`. Save `logsm-x2.png`. Pass when `ok`.
 - [ ] Lane 6. Run `go test ./sim/engines/logengine -count=1`. Save `logengine.png`. Pass when `ok`.
-- [ ] Lane 7. Confirm `internal/controlplane/statemachine` imports stay inside the autonomy allow-list. Save `imports.png`. Pass when `go list -f '{{join .Imports "\n"}}' ./controlplane/machine` shows no `mds/broker`, `mds/sim`, `mds/sys`, `mds/cmd`, `mds/veritas`, `mds/kwire`, `mds/format`, `pebble`, `net/http`, or Dynamo SDK paths.
+- [ ] Lane 7. Confirm `internal/controlplane/statemachine` imports stay inside the autonomy allow-list. Save `imports.png`. Pass when `go list -f '{{join .Imports "\n"}}' ./controlplane/machine` shows no `mds/broker`, `mds/sim`, `mds/sys`, `github.com/manifesterio/mds/cmd`, `mds/veritas`, `mds/kwire`, `mds/format`, `pebble`, `net/http`, or Dynamo SDK paths.
 - [ ] Lane 8. Run `go test ./sys -count=1`. Save `sys.png`. Pass when `ok`.
 - [ ] Lane 9. Run `go vet ./controlplane/machine`. Save `vet.png`. Pass when silent.
 - [ ] Lane 10. Run `gofmt -l controlplane/machine`. Save `gofmt.png`. Pass when empty.

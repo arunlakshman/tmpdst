@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"mds/internal/verify/speccheck/checker"
-	"mds/internal/verify/speccheck/checker/generator"
-	"mds/internal/verify/speccheck/checker/suites"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/generator"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/suites"
 )
 
 // Detection says how an injected bug was found.

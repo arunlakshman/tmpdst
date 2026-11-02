@@ -3,10 +3,10 @@ package controlplaneclient
 import (
 	"context"
 
-	cpv1 "mds/internal/controlplane/api/v1"
-	"mds/internal/controlplane/apiconvert"
-	"mds/internal/controlplane/groupcoordinator"
-	"mds/internal/core"
+	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
+	"github.com/manifesterio/mds/internal/controlplane/apiconvert"
+	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // Group calls (slice 4b). A JoinGroup or SyncGroup can block for a whole

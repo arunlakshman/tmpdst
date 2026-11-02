@@ -1,6 +1,6 @@
 package statemachine
 
-import "mds/internal/controlplane/stateupdater"
+import "github.com/manifesterio/mds/internal/controlplane/stateupdater"
 
 // Timer IDs for role and checkpoint tests.
 const (

@@ -128,7 +128,7 @@ Checklist. Status: OK / TODO / BLOCKER.
 | README, quickstart | BLOCKER | No root `README.md` (only deploy and api READMEs). Need: what it is, alpha status, "produce-only, no consumer groups", docker-compose quickstart (`ops/deploy/docker-compose.yml` exists), supported APIs |
 | CONTRIBUTING, SECURITY.md, CODEOWNERS, issue templates | TODO | None exist. Pick DCO (sign-off) over a CLA for an alpha |
 | Public CI | TODO | Workflow lives at `build/ci/determinism.workflow.yml`, not `.github/workflows`, so it is not running. It uses only `go vet`, `go test`, determinism script: no AWS creds needed. Docker-backed `test/integrationtest/` tests skip without Docker; add a service-container job. `make build` includes the risk gate (`docs/risk-gate.md`) |
-| Module path | TODO | `module mds` is not importable (`go get` needs a host path). Rename to `github.com/<org>/<repo>` before tagging; a mechanical change, but it touches every import and nothing hashes the path (verify with the sim hashes) |
+| Module path | DONE | Renamed from `mds` to `github.com/manifesterio/mds`; every import updated; nothing hashes the path |
 | Versioning | TODO | No tags. Use `v0.1.0-alpha.N`, no compatibility promise; log entry format is versioned (dec 53), which is a real upgrade story only for the CP log |
 | Maintainers | TODO | 192 commits, one author identity (GitHub noreply address, good). Bus factor 1: say so in the README |
 | Name | CAUTION | "mds": web search found no trademark, but an existing GitHub/PyPI project `SatelliteQE/mds` (Red Hat subscription manifest tool, different domain). Not a blocker; do a USPTO/EUIPO search with a lawyer and consider a distinctive repo name. Use "Kafka" only descriptively with the Apache trademark notice |
@@ -162,8 +162,8 @@ Checklist. Status: OK / TODO / BLOCKER.
   w4 doc says "git-ignored", which is wrong). Add to `.gitignore` now.
 - Emails: only `example.com`; commits use the GitHub noreply address. No hostnames or instance/VPC ids in history.
 - Remedy: rewrite with `git filter-repo --replace-text` before the first public push (history is 14 MB, rewrite is cheap),
-  or publish from a fresh squashed repo and keep this one as the private design record. The remote `origin` is
-  `github.com/arunlakshman/tmpdst`: confirm it is private; if it was ever public, treat the identifiers as already out.
+  or publish from a fresh squashed repo and keep this one as the private design record. The working repo before the move to
+  `github.com/manifesterio/mds` was private; the public repo must start from rewritten or squashed history.
 - The teardown was never committed (`git log --all` shows no commit touching it). Keep it that way.
 
 ### Wording and competitor risk

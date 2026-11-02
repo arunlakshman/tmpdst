@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"time"
 
-	"mds/internal/core"
-	"mds/internal/system"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
 )
 
 // LeaseClient is the control plane call behind a broker's heartbeat (Q4). It

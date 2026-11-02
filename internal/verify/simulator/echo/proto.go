@@ -15,7 +15,7 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 const maxFrame = 1 << 20

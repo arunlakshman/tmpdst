@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"mds/internal/core"
-	"mds/internal/system"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
 )
 
 func newTestNet(t *testing.T) (*Net, *system.Inbox) {

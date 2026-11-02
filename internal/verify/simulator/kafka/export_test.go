@@ -1,8 +1,8 @@
 package kafka
 
 import (
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
 )
 
 // Test-only hooks for the C4 conformance check (c4_test.go, package

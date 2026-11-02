@@ -9,11 +9,11 @@ import (
 
 	"google.golang.org/grpc"
 
-	"mds/internal/controlplane/executor"
-	"mds/internal/controlplane/groupcoordinator"
-	"mds/internal/controlplane/server"
-	"mds/internal/controlplane/statemachine"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
+	"github.com/manifesterio/mds/internal/controlplane/server"
+	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // realGroupClient starts an active node with a short initial rebalance delay.

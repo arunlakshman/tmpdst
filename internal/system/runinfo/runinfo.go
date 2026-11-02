@@ -23,7 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// Overridable at link time: -ldflags "-X mds/internal/system/runinfo.GitCommit=abc123".
+// Overridable at link time: -ldflags "-X github.com/manifesterio/mds/internal/system/runinfo.GitCommit=abc123".
 var (
 	GitCommit = ""
 	Version   = ""

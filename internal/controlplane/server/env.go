@@ -3,7 +3,7 @@ package server
 import (
 	"time"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 type realClock struct{}

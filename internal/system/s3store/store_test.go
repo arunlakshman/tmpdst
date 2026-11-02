@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 func newTestStore(t *testing.T, prefix string) (*Store, *fakeS3) {

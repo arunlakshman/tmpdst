@@ -7,9 +7,9 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"mds/internal/core"
-	"mds/internal/verify/speccheck"
-	"mds/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/speccheck"
+	"github.com/manifesterio/mds/internal/wire/kafkawire"
 )
 
 // testEnv is a seeded core.Environment that records assertion violations. It keeps its

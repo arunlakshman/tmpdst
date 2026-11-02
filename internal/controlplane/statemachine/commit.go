@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // groupMarker prefixes a multi-command commit entry so drain can tell it from a

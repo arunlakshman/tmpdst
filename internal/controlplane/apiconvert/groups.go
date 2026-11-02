@@ -3,9 +3,9 @@ package apiconvert
 import (
 	"slices"
 
-	cpv1 "mds/internal/controlplane/api/v1"
-	"mds/internal/controlplane/groupcoordinator"
-	"mds/internal/core"
+	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
+	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // Group calls (slice 4b). Each pair maps one request or response both ways.

@@ -6,8 +6,8 @@ import (
 	"slices"
 	"testing"
 
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
 )
 
 // ---- test doubles ----
@@ -448,7 +448,7 @@ func scenario(seed uint64) ([]string, uint64) {
 	d, _ := h.dial(a, "b")
 	cb := h.lastOpened("b")
 	for i := range 30 {
-		h.send(a, d.Conn, []byte(fmt.Sprintf("msg-%d-%d", seed, i)))
+		h.send(a, d.Conn, fmt.Appendf(nil, "msg-%d-%d", seed, i))
 		h.send(b, cb, []byte("reply"))
 		h.runUntil(h.now + simulator.Time(h.rnd.Intn(30000)))
 		if i == 15 {

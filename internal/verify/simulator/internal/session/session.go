@@ -4,7 +4,7 @@
 // the connection belongs to the scenario, through the Loop hooks.
 package session
 
-import "mds/internal/core"
+import "github.com/manifesterio/mds/internal/core"
 
 // State is a client's connection state. A scenario may define connected
 // substates of its own at Connected and above.

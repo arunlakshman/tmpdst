@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/controlplane/stateupdater/pebblestore"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater/pebblestore"
 )
 
 func open(t *testing.T) *pebblestore.DB {

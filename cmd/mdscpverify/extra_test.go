@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // Records are added per partition, a repeated key counts once, and a cut last line is ignored.

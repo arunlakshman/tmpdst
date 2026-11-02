@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"mds/internal/core"
-	"mds/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/wire/kafkawire"
 )
 
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)

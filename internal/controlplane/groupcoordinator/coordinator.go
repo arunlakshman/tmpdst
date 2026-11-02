@@ -45,8 +45,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mds/internal/controlplane"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // Config holds the coordinator settings. A zero field takes its default.

@@ -47,7 +47,7 @@ import (
 	"hash/crc32"
 	"math"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 const (

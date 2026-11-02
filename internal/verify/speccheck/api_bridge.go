@@ -1,9 +1,9 @@
 package speccheck
 
 import (
-	cpv1 "mds/internal/controlplane/api/v1"
-	"mds/internal/controlplane/apiconvert"
-	"mds/internal/core"
+	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
+	"github.com/manifesterio/mds/internal/controlplane/apiconvert"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // ExecRequest runs a generated CommitSegment/FindSegments/DescribeTopics request

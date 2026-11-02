@@ -15,9 +15,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/controlplane/stateupdater/pebblestore"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater/pebblestore"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 const (

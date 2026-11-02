@@ -10,7 +10,7 @@ import (
 
 	"github.com/aws/smithy-go"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 type apiError struct{ code string }

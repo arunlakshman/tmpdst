@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // Assertion kinds as recorded in AssertionStat.Kind. Frozen spellings.

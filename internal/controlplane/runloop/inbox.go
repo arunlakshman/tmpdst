@@ -3,7 +3,7 @@ package runloop
 import (
 	"sync"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // InboxWriter is the completion target for executors and timer callbacks.

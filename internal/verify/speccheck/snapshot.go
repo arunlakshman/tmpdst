@@ -1,10 +1,9 @@
 package speccheck
 
 import (
-	"maps"
 	"slices"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // PartitionEnd is one partition's next offset.
@@ -19,7 +18,11 @@ type PartitionEnd struct {
 func (c *ControlPlane) Ends() []PartitionEnd {
 	var out []PartitionEnd
 	for _, t := range sortedKeys(c.parts) {
-		ps := slices.Sorted(maps.Keys(c.parts[t]))
+		var ps []int32
+		for p := range c.parts[t] { //determinismcheck:ok keys are sorted before use
+			ps = append(ps, p)
+		}
+		slices.Sort(ps)
 		for _, p := range ps {
 			topicPartition := core.NewTopicPartition(t, p)
 			out = append(out, PartitionEnd{TopicPartition: topicPartition, Offset: c.End(topicPartition)})

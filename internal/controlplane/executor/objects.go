@@ -5,11 +5,11 @@ import (
 	"context"
 	"sync"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // ObjectStore is the checkpoint object store (S3 in prod). Defined here so
-// controlplane packages do not import mds/sys.
+// controlplane packages do not import github.com/manifesterio/mds/internal/system.
 type ObjectStore interface {
 	Put(ctx context.Context, key string, data []byte) error
 	Get(ctx context.Context, ref core.SegmentRef) ([]byte, error)

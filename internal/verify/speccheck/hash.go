@@ -1,10 +1,9 @@
 package speccheck
 
 import (
-	"maps"
 	"slices"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // stateHasher is FNV-1a over a canonical byte stream. Every variable-length field
@@ -32,7 +31,12 @@ func hashBatchRanges(h *stateHasher, rs []core.BatchRange) {
 
 // sortedKeys returns m's keys in order, the only way specs walk a map.
 func sortedKeys[V any](m map[string]V) []string {
-	return slices.Sorted(maps.Keys(m))
+	keys := make([]string, 0, len(m))
+	for k := range m { //determinismcheck:ok keys are sorted before use
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 // clone copies b; the result is never nil, so empty data reads back the same

@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"mds/internal/broker"
-	"mds/internal/core"
-	"mds/internal/system"
-	"mds/internal/verify/speccheck/specsystem"
+	"github.com/manifesterio/mds/internal/broker"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
+	"github.com/manifesterio/mds/internal/verify/speccheck/specsystem"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 )

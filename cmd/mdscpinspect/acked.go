@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strings"
 
-	"mds/internal/controlplane/stateupdater"
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // The four acked checks. Their names are used for PASS, FAIL and SKIP lines.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // deadClient points at an address where nothing listens, so every call fails

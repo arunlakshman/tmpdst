@@ -18,15 +18,15 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"mds/internal/broker"
-	"mds/internal/controlplane/controlplaneclient"
-	"mds/internal/core"
-	"mds/internal/system"
-	"mds/internal/system/awsmetrics"
-	"mds/internal/system/production"
-	"mds/internal/system/runinfo"
-	"mds/internal/system/s3store"
-	"mds/internal/verify/speccheck/specsystem"
+	"github.com/manifesterio/mds/internal/broker"
+	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system"
+	"github.com/manifesterio/mds/internal/system/awsmetrics"
+	"github.com/manifesterio/mds/internal/system/production"
+	"github.com/manifesterio/mds/internal/system/runinfo"
+	"github.com/manifesterio/mds/internal/system/s3store"
+	"github.com/manifesterio/mds/internal/verify/speccheck/specsystem"
 )
 
 func main() {

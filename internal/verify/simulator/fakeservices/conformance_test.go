@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"testing"
 
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
-	"mds/internal/verify/simulator/fakeservices/fakecontrolplane"
-	"mds/internal/verify/simulator/fakeservices/fakeobjectstore"
-	"mds/internal/verify/simulator/fakeservices/internal/fakeservicetest"
-	"mds/internal/verify/speccheck/checker/generator"
-	"mds/internal/verify/speccheck/checker/injectedbug"
-	"mds/internal/verify/speccheck/checker/observation"
-	"mds/internal/verify/speccheck/checker/runsettings"
-	"mds/internal/verify/speccheck/checker/suites"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakecontrolplane"
+	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakeobjectstore"
+	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/generator"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/injectedbug"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/observation"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/runsettings"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker/suites"
 )
 
 // Conformance C2. The engines in this package are SIMULATED components. This

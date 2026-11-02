@@ -3,9 +3,9 @@ package kafka
 import (
 	"slices"
 
-	"mds/internal/broker"
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/broker"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
 )
 
 // timerExtraTime is how late a flush may fire past its window: a node busy with a

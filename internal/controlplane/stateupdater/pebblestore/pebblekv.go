@@ -12,7 +12,7 @@ import (
 
 	"github.com/cockroachdb/pebble"
 
-	"mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
 )
 
 // Options sizes the store. Zero values mean the defaults (64 MiB each).

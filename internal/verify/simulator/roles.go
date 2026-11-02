@@ -1,6 +1,6 @@
 package simulator
 
-import "mds/internal/core"
+import "github.com/manifesterio/mds/internal/core"
 
 // Process describes a system-under-test role (the broker). Built fresh from the
 // factory on every boot; nothing in memory survives a crash.

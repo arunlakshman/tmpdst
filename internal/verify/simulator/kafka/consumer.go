@@ -3,9 +3,9 @@ package kafka
 import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"mds/internal/core"
-	"mds/internal/verify/simulator"
-	"mds/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/wire/kafkawire"
 )
 
 // consumer reads every partition from offset 0 with one multi-partition Fetch

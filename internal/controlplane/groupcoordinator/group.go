@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"mds/internal/core"
+	"github.com/manifesterio/mds/internal/core"
 )
 
 // phase is the state of a group in memory. It is not logged.

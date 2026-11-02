@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"testing"
@@ -69,7 +70,7 @@ func newC1(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) *c1 
 			d := run()
 			if g, ok := d.(core.ObjectGetDone); ok && g.Err == core.OK && len(g.Data) > 0 {
 				if gets++; gets%3 == 0 {
-					g.Data = append([]byte(nil), g.Data...)
+					g.Data = bytes.Clone(g.Data)
 					g.Data[len(g.Data)-1] ^= 0x55
 					return g
 				}

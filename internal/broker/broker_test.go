@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"reflect"
@@ -369,7 +370,7 @@ func TestCorruptGetRetried(t *testing.T) {
 			d := run()
 			if g, ok := d.(core.ObjectGetDone); ok && corrupt {
 				corrupt = false
-				g.Data = append([]byte(nil), g.Data...)
+				g.Data = bytes.Clone(g.Data)
 				g.Data[len(g.Data)-1] ^= 0x55
 				return g
 			}
@@ -404,7 +405,7 @@ func TestFetchGetsExhausted(t *testing.T) {
 	h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
 		d := run()
 		if g, ok := d.(core.ObjectGetDone); ok {
-			g.Data = append([]byte(nil), g.Data...)
+			g.Data = bytes.Clone(g.Data)
 			g.Data[len(g.Data)-1] ^= 1
 			return g
 		}

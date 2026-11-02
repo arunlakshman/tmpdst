@@ -1,6 +1,8 @@
 package broker
 
 import (
+	"slices"
+
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"mds/internal/core"
@@ -66,10 +68,7 @@ func setResourceError(rr *kmsg.DescribeConfigsResponseResource, code kafkaErrorC
 }
 
 func hasTopic(infos []core.TopicInfo, name string) bool {
-	for _, in := range infos {
-		if in.Name == name {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(infos, func(in core.TopicInfo) bool {
+		return in.Name == name
+	})
 }

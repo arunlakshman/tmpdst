@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"cmp"
 	"slices"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
@@ -76,13 +77,7 @@ func (b *Broker) liveList() []core.BrokerAddr {
 		}
 	}
 	slices.SortFunc(all, func(x, y core.BrokerAddr) int {
-		switch {
-		case x.NodeID < y.NodeID:
-			return -1
-		case x.NodeID > y.NodeID:
-			return 1
-		}
-		return 0
+		return cmp.Compare(x.NodeID, y.NodeID)
 	})
 	return all
 }

@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"maps"
 	"slices"
 	"testing"
 
@@ -225,12 +226,7 @@ func (h *harness) fireAll() {
 		if n > 1000 {
 			h.t.Fatal("timers never settle")
 		}
-		var ids []core.TimerID
-		for id := range h.timers {
-			ids = append(ids, id)
-		}
-		slices.Sort(ids)
-		h.fire(ids[0])
+		h.fire(slices.Sorted(maps.Keys(h.timers))[0])
 	}
 }
 

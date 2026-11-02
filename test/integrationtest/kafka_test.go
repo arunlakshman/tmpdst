@@ -84,7 +84,7 @@ func (s *sent) promise(r *kgo.Record, err error) {
 }
 
 func value(topic string, p int32, i int) []byte {
-	return []byte(fmt.Sprintf("%s/%d/%06d", topic, p, i))
+	return fmt.Appendf(nil, "%s/%d/%06d", topic, p, i)
 }
 
 // produce sends n records to every partition of every topic (partition

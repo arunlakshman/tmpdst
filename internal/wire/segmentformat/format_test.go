@@ -57,7 +57,7 @@ func TestRoundTrip(t *testing.T) {
 func TestVerifyBatchCorrupt(t *testing.T) {
 	obj, ents, _ := Encode(sample())
 	e := ents[0]
-	b := append([]byte(nil), obj[e.Off:e.Off+e.Len]...)
+	b := bytes.Clone(obj[e.Off : e.Off+e.Len])
 	b[0] ^= 1
 	if _, err := VerifyBatch(e, b); !errors.Is(err, ErrCorrupt) {
 		t.Fatal(err)
@@ -92,7 +92,7 @@ func TestFlipEveryByte(t *testing.T) {
 	obj, _, _ := Encode(sample())
 	for i := range obj {
 		for bit := range 8 {
-			c := append([]byte(nil), obj...)
+			c := bytes.Clone(obj)
 			c[i] ^= 1 << bit
 			_, err := Decode(c)
 			if !errors.Is(err, ErrCorrupt) || Code(err) != core.ErrCorrupt {
@@ -121,7 +121,7 @@ func TestTruncation(t *testing.T) {
 func TestSpecificClasses(t *testing.T) {
 	obj, _, _ := Encode(sample())
 	mut := func(f func([]byte)) error {
-		c := append([]byte(nil), obj...)
+		c := bytes.Clone(obj)
 		f(c)
 		_, err := Decode(c)
 		return err

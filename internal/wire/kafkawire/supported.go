@@ -67,12 +67,11 @@ func Supported() []APIVersionRange {
 
 // Range returns the supported version range of key.
 func Range(key int16) (APIVersionRange, bool) {
-	for _, r := range supported {
-		if r.Key == key {
-			return r, true
-		}
+	i := slices.IndexFunc(supported, func(r APIVersionRange) bool { return r.Key == key })
+	if i < 0 {
+		return APIVersionRange{}, false
 	}
-	return APIVersionRange{}, false
+	return supported[i], true
 }
 
 // IsSupported reports whether (key, version) is served.

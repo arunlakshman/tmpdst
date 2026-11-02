@@ -172,9 +172,9 @@ func commitRetrying(ctx context.Context, c *controlplaneclient.Client, operation
 		if err == nil || cctx.Err() != nil {
 			return response, err
 		}
-		var ce *controlplaneclient.CallError
-		var be *controlplaneclient.Error
-		retry := errors.As(err, &ce) || (errors.As(err, &be) && be.Code == core.ErrUnavailable)
+		_, isCallErr := errors.AsType[*controlplaneclient.CallError](err)
+		be, isErr := errors.AsType[*controlplaneclient.Error](err)
+		retry := isCallErr || (isErr && be.Code == core.ErrUnavailable)
 		if !retry {
 			return response, err
 		}

@@ -1,5 +1,7 @@
 package core
 
+import "slices"
+
 // Fact is a structured, append-only observation (lesson 10). Name is a stable
 // constant ("segment_committed", "produce_acked"). Fields are ordered.
 //
@@ -14,12 +16,11 @@ type Fact struct {
 
 // Field returns the value for key, or nil if absent.
 func (f Fact) Field(key string) FieldValue {
-	for _, x := range f.Fields {
-		if x.Key == key {
-			return x.Value
-		}
+	i := slices.IndexFunc(f.Fields, func(x Field) bool { return x.Key == key })
+	if i < 0 {
+		return nil
 	}
-	return nil
+	return f.Fields[i].Value
 }
 
 // Field is one named value of a Fact.

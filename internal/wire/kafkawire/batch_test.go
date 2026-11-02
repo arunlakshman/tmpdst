@@ -81,7 +81,7 @@ func TestBatchRejects(t *testing.T) {
 		t.Fatal("empty payload accepted")
 	}
 	b, _ := BuildBatch(testParams, []kmsg.Record{{Value: []byte("hello")}})
-	flip := func(i int) []byte { c := append([]byte(nil), b...); c[i] ^= 1; return c }
+	flip := func(i int) []byte { c := bytes.Clone(b); c[i] ^= 1; return c }
 	if _, err := ParseBatch(flip(len(b) - 1)); !errors.Is(err, ErrCorrupt) {
 		t.Fatalf("body flip: %v", err)
 	}
@@ -94,14 +94,14 @@ func TestBatchRejects(t *testing.T) {
 	if _, err := ParseBatch(b[:len(b)-1]); !errors.Is(err, ErrCorrupt) {
 		t.Fatalf("truncated: %v", err)
 	}
-	if _, err := ParseBatch(append(append([]byte(nil), b...), 0)); !errors.Is(err, ErrCorrupt) {
+	if _, err := ParseBatch(append(bytes.Clone(b), 0)); !errors.Is(err, ErrCorrupt) {
 		t.Fatalf("trailing: %v", err)
 	}
 }
 
 func TestPatchBatch(t *testing.T) {
 	b, _ := BuildBatch(testParams, []kmsg.Record{{Value: []byte("x")}, {Value: []byte("y")}})
-	orig := append([]byte(nil), b...)
+	orig := bytes.Clone(b)
 	p := ChangeBatchOffset(b, 1<<40+5, 9)
 	if !bytes.Equal(b, orig) {
 		t.Fatal("input mutated")
@@ -209,7 +209,7 @@ func TestOpaqueCompressedBatch(t *testing.T) {
 		if err != nil || patched.BaseOffset != 1<<33 {
 			t.Fatalf("patched compressed batch: %v", err)
 		}
-		bad := append([]byte(nil), b...)
+		bad := bytes.Clone(b)
 		bad[len(bad)-1] ^= 0x80
 		if _, err := ParseBatch(bad); !errors.Is(err, ErrCorrupt) {
 			t.Fatalf("codec %d corrupt payload: %v", codec, err)
@@ -219,18 +219,18 @@ func TestOpaqueCompressedBatch(t *testing.T) {
 
 func TestOpaqueBatchHeaderChecks(t *testing.T) {
 	b, _ := BuildOpaqueBatch(BatchParams{Attributes: CodecLZ4, ProducerID: -1}, 3, []byte("zzzz"))
-	unk := append([]byte(nil), b...)
+	unk := bytes.Clone(b)
 	unk[22] = 6 // codec 6, CRC recomputed: valid CRC, unknown codec
 	if _, err := ParseBatch(refix(unk)); !errors.Is(err, ErrUnknownCodec) {
 		t.Fatalf("unknown codec: %v", err)
 	}
-	neg := append([]byte(nil), b...)
+	neg := bytes.Clone(b)
 	binary.BigEndian.PutUint32(neg[57:], uint32(0xffffffff)) // numRecords -1
 	if _, err := ParseBatch(refix(neg)); !errors.Is(err, ErrCorrupt) {
 		t.Fatalf("negative count: %v", err)
 	}
 	plain, _ := BuildBatch(testParams, []kmsg.Record{{Value: []byte("a")}})
-	many := append([]byte(nil), plain...)
+	many := bytes.Clone(plain)
 	binary.BigEndian.PutUint32(many[57:], 1000)
 	if _, err := ParseBatch(refix(many)); !errors.Is(err, ErrCorrupt) {
 		t.Fatalf("count above payload bytes (plain): %v", err)

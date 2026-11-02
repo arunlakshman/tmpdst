@@ -1,6 +1,7 @@
 package kafkawire
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -43,7 +44,7 @@ func (f *Framer) Push(data []byte) ([][]byte, error) {
 		if len(f.buf)-off-4 < int(n) {
 			break
 		}
-		frames = append(frames, append([]byte(nil), f.buf[off+4:off+4+int(n)]...))
+		frames = append(frames, bytes.Clone(f.buf[off+4:off+4+int(n)]))
 		off += 4 + int(n)
 	}
 	f.buf = f.buf[:copy(f.buf, f.buf[off:])]

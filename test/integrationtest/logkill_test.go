@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/grpc"
@@ -53,7 +52,7 @@ type logStack struct {
 func newLogStack(t *testing.T, brokers int) *logStack {
 	t.Helper()
 	db := fakedynamodb.New()
-	if _, err := db.CreateTable(t.Context(), &dynamodb.CreateTableInput{TableName: aws.String("cp")}); err != nil {
+	if _, err := db.CreateTable(t.Context(), &dynamodb.CreateTableInput{TableName: new("cp")}); err != nil {
 		t.Fatal(err)
 	}
 	log := executor.NewDynamoLog(db, "cp", executor.DynamoLogOptions{})
@@ -114,8 +113,8 @@ func retryDial(f func() error) error {
 }
 
 func isDialErr(err error) bool {
-	var operation *net.OpError
-	return (errors.As(err, &operation) && operation.Op == "dial") || errors.Is(err, syscall.EADDRNOTAVAIL)
+	operation, ok := errors.AsType[*net.OpError](err)
+	return (ok && operation.Op == "dial") || errors.Is(err, syscall.EADDRNOTAVAIL)
 }
 
 func roleOf(t *testing.T, n *cpNode) string {

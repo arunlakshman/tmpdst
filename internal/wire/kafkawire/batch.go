@@ -1,6 +1,7 @@
 package kafkawire
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -310,7 +311,7 @@ func RequireSingleBatch(b []byte) ([]byte, error) {
 // leader epoch (12..15) rewritten. Both lie outside the CRC, which stays
 // valid. An input shorter than 16 bytes is returned as an unchanged copy.
 func ChangeBatchOffset(b []byte, baseOffset int64, leaderEpoch int32) []byte {
-	out := append([]byte(nil), b...)
+	out := bytes.Clone(b)
 	if len(out) >= magicOffset {
 		binary.BigEndian.PutUint64(out, uint64(baseOffset))
 		binary.BigEndian.PutUint32(out[epochOffset:], uint32(leaderEpoch))

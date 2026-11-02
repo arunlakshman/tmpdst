@@ -12,6 +12,7 @@
 package echo
 
 import (
+	"bytes"
 	"encoding/binary"
 
 	"mds/internal/core"
@@ -45,7 +46,7 @@ func (f *framer) push(d []byte) ([]string, bool) {
 			break
 		}
 		frames = append(frames, string(f.buf[4:4+n]))
-		f.buf = append([]byte(nil), f.buf[4+n:]...)
+		f.buf = bytes.Clone(f.buf[4+n:])
 	}
 	return frames, false
 }

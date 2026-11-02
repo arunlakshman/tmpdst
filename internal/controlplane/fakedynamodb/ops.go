@@ -145,7 +145,7 @@ func rejectCond(expr *string, vals, cur item) error {
 		return err
 	}
 	if !ok {
-		return &types.ConditionalCheckFailedException{Message: aws.String("The conditional request failed")}
+		return &types.ConditionalCheckFailedException{Message: new("The conditional request failed")}
 	}
 	return nil
 }

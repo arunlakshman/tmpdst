@@ -6,13 +6,14 @@ package s3store
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -61,9 +62,7 @@ var _ system.ObjectStore = (*Store)(nil)
 // New builds a store. With a custom endpoint and no AWS credentials in the
 // environment it uses a static dummy key (SeaweedFS runs without auth).
 func New(ctx context.Context, storeConfig Config) (*Store, error) {
-	if storeConfig.Region == "" {
-		storeConfig.Region = "us-east-1"
-	}
+	storeConfig.Region = cmp.Or(storeConfig.Region, "us-east-1")
 	opts := loadOptions(storeConfig)
 	if storeConfig.HTTP == nil {
 		opts = append(opts, config.WithHTTPClient(httpconnections.ConfigureAWSClient()))
@@ -95,7 +94,7 @@ func clientOptions(storeConfig Config) func(*s3.Options) {
 		o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
 		if storeConfig.Endpoint != "" {
-			o.BaseEndpoint = aws.String(storeConfig.Endpoint)
+			o.BaseEndpoint = new(storeConfig.Endpoint)
 		}
 	}
 }
@@ -103,15 +102,15 @@ func clientOptions(storeConfig Config) func(*s3.Options) {
 // EnsureBucket creates the bucket if it does not exist (dev and tests).
 func (s *Store) EnsureBucket(ctx context.Context) error {
 	_, err := s.c.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &s.bucket})
-	var own *s3types.BucketAlreadyOwnedByYou
-	var exists *s3types.BucketAlreadyExists
-	if errors.As(err, &own) || errors.As(err, &exists) {
+	_, own := errors.AsType[*s3types.BucketAlreadyOwnedByYou](err)
+	_, exists := errors.AsType[*s3types.BucketAlreadyExists](err)
+	if own || exists {
 		return nil
 	}
 	return err
 }
 
-func (s *Store) key(k string) *string { return aws.String(s.prefix + k) }
+func (s *Store) key(k string) *string { return new(s.prefix + k) }
 
 // Put writes data under key.
 func (s *Store) Put(ctx context.Context, key string, data []byte) error {
@@ -120,7 +119,7 @@ func (s *Store) Put(ctx context.Context, key string, data []byte) error {
 	}
 	_, err := s.c.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: &s.bucket, Key: s.key(key),
-		Body: bytes.NewReader(data), ContentLength: aws.Int64(int64(len(data))),
+		Body: bytes.NewReader(data), ContentLength: new(int64(len(data))),
 	})
 	return err
 }
@@ -145,9 +144,9 @@ func (s *Store) Get(ctx context.Context, ref core.SegmentRef) ([]byte, error) {
 func rangeHeader(ref core.SegmentRef) *string {
 	switch {
 	case ref.Len > 0:
-		return aws.String(fmt.Sprintf("bytes=%d-%d", ref.Off, ref.Off+ref.Len-1))
+		return new(fmt.Sprintf("bytes=%d-%d", ref.Off, ref.Off+ref.Len-1))
 	case ref.Off > 0:
-		return aws.String(fmt.Sprintf("bytes=%d-", ref.Off))
+		return new(fmt.Sprintf("bytes=%d-", ref.Off))
 	}
 	return nil
 }
@@ -215,7 +214,7 @@ func (s *Store) Delete(ctx context.Context, key string) error {
 // List returns the keys that start with prefix.
 func (s *Store) List(ctx context.Context, prefix string) ([]string, error) {
 	var keys []string
-	p := s3.NewListObjectsV2Paginator(s.c, &s3.ListObjectsV2Input{Bucket: &s.bucket, Prefix: aws.String(s.prefix + prefix)})
+	p := s3.NewListObjectsV2Paginator(s.c, &s3.ListObjectsV2Input{Bucket: &s.bucket, Prefix: new(s.prefix + prefix)})
 	for p.HasMorePages() {
 		page, err := p.NextPage(ctx)
 		if err != nil {
@@ -225,7 +224,7 @@ func (s *Store) List(ctx context.Context, prefix string) ([]string, error) {
 			keys = append(keys, aws.ToString(o.Key)[len(s.prefix):])
 		}
 	}
-	sort.Strings(keys)
+	slices.Sort(keys)
 	return keys, nil
 }
 

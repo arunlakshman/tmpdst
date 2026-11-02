@@ -1,7 +1,9 @@
 package observation
 
 import (
+	"bytes"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -34,11 +36,11 @@ func (r ObjectResult) Normalize() ObjectResult {
 	out := r
 	out.Data = nil
 	if len(r.Data) > 0 {
-		out.Data = append([]byte(nil), r.Data...)
+		out.Data = bytes.Clone(r.Data)
 	}
 	out.Keys = nil
 	if len(r.Keys) > 0 {
-		out.Keys = append([]string(nil), r.Keys...)
+		out.Keys = slices.Clone(r.Keys)
 	}
 	return out
 }
@@ -51,7 +53,7 @@ func (r ControlPlaneResult) Normalize() ControlPlaneResult {
 	out.Ranges = copyRanges(r.Ranges)
 	out.Topics = nil
 	if len(r.Topics) > 0 {
-		out.Topics = append([]core.TopicInfo(nil), r.Topics...)
+		out.Topics = slices.Clone(r.Topics)
 	}
 	return out
 }
@@ -60,7 +62,7 @@ func copyRanges(in []core.BatchRange) []core.BatchRange {
 	if len(in) == 0 {
 		return nil
 	}
-	return append([]core.BatchRange(nil), in...)
+	return slices.Clone(in)
 }
 
 // Equal reports whether both results are the same after Normalize.

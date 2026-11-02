@@ -26,7 +26,7 @@ func (h *stateHasher) bytes(b []byte) {
 }
 func (h *stateHasher) str(s string) {
 	h.u64(uint64(len(s)))
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		h.byte(s[i])
 	}
 }

@@ -20,8 +20,7 @@ func Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return core.ErrTimeout, maybe
 	}
-	var ne net.Error
-	if errors.As(err, &ne) && ne.Timeout() {
+	if ne, ok := errors.AsType[net.Error](err); ok && ne.Timeout() {
 		return core.ErrTimeout, maybe
 	}
 	if errors.Is(err, ErrNotFound) {

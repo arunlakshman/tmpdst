@@ -260,8 +260,8 @@ func TestUnsupported(t *testing.T) {
 		unknown bool
 	}{{KeyApiVersions, 4, false}, {KeyApiVersions, 99, false}, {KeyProduce, 2, false}, {KeyFetch, 13, false}, {KeyApiVersions, -1, false}, {50, 0, true}, {-3, 0, true}} {
 		h, request, err := c.DecodeRequest(append(hdr(tc.key, tc.v), 1, 2, 3))
-		var ue *UnsupportedError
-		if !errors.As(err, &ue) || ue.UnknownKey != tc.unknown || ue.Key != tc.key || ue.Version != tc.v || request != nil {
+		ue, ok := errors.AsType[*UnsupportedError](err)
+		if !ok || ue.UnknownKey != tc.unknown || ue.Key != tc.key || ue.Version != tc.v || request != nil {
 			t.Fatalf("%+v: %v", tc, err)
 		}
 		if h.CorrelationID != 42 || h.ClientID != "id" || h.APIKey != tc.key || h.APIVersion != tc.v {

@@ -1,6 +1,8 @@
 package broker
 
 import (
+	"slices"
+
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"mds/internal/core"
@@ -64,7 +66,7 @@ func (b *Broker) onGroupControlPlane(o *operation, e core.ControlPlaneDone) []co
 // ignored: the operations are gone, so findOp finds nothing.
 func (b *Broker) failGroupCalls() []core.Action {
 	var acts []core.Action
-	for _, o := range append([]*operation(nil), b.ops...) {
+	for _, o := range slices.Clone(b.ops) {
 		if o.kind == opGroup && o.state == opControlPlane {
 			o.gfill(core.ControlPlaneDone{Err: core.ErrUnavailable})
 			acts = append(acts, b.endOp(o)...)
@@ -231,7 +233,7 @@ func optStr(s string) *string {
 	if s == "" {
 		return nil
 	}
-	return &s
+	return new(s)
 }
 
 func millisDuration(milliseconds int32) core.Duration {

@@ -18,7 +18,7 @@ func runInParts(config func([]uint64) simulator.Config, seeds []uint64, jobs int
 	errs := make([]error, jobs)
 	var wg sync.WaitGroup
 	per := (len(seeds) + jobs - 1) / jobs
-	for j := 0; j < jobs; j++ {
+	for j := range jobs {
 		lo, hi := min(j*per, len(seeds)), min((j+1)*per, len(seeds))
 		wg.Go(func() {
 			reps[j], errs[j] = simulator.NewRunner().Run(config(seeds[lo:hi]))

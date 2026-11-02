@@ -85,20 +85,18 @@ func classifyBeforeSend(err error) core.ErrCode {
 }
 
 func isTimeoutOrIOError(err error) core.ErrCode {
-	var ne net.Error
-	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
+	ne, isNetErr := errors.AsType[net.Error](err)
+	if errors.Is(err, context.DeadlineExceeded) || (isNetErr && ne.Timeout()) {
 		return core.ErrTimeout
 	}
 	return core.ErrIO
 }
 
 func isDial(err error) bool {
-	var dns *net.DNSError
-	var operation *net.OpError
-	switch {
-	case errors.As(err, &dns):
+	if _, ok := errors.AsType[*net.DNSError](err); ok {
 		return true
-	case errors.As(err, &operation) && operation.Op == "dial":
+	}
+	if operation, ok := errors.AsType[*net.OpError](err); ok && operation.Op == "dial" {
 		return true
 	}
 	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH)

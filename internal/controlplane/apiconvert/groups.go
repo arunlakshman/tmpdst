@@ -1,6 +1,8 @@
 package apiconvert
 
 import (
+	"slices"
+
 	cpv1 "mds/internal/controlplane/api/v1"
 	"mds/internal/controlplane/groupcoordinator"
 	"mds/internal/core"
@@ -100,12 +102,12 @@ func HeartbeatToCore(request *cpv1.GroupHeartbeatRequest) groupcoordinator.Heart
 
 // LeaveGroupFromCore builds a LeaveGroupRequest.
 func LeaveGroupFromCore(r groupcoordinator.LeaveReq) *cpv1.LeaveGroupRequest {
-	return &cpv1.LeaveGroupRequest{Group: r.Group, Members: append([]string(nil), r.Members...)}
+	return &cpv1.LeaveGroupRequest{Group: r.Group, Members: slices.Clone(r.Members)}
 }
 
 // LeaveGroupToCore rebuilds a leave call from a request.
 func LeaveGroupToCore(request *cpv1.LeaveGroupRequest) groupcoordinator.LeaveReq {
-	return groupcoordinator.LeaveReq{Group: request.GetGroup(), Members: append([]string(nil), request.GetMembers()...)}
+	return groupcoordinator.LeaveReq{Group: request.GetGroup(), Members: slices.Clone(request.GetMembers())}
 }
 
 // LeaveGroupRespFromCore builds a LeaveGroupResponse from one code per member.
@@ -204,12 +206,12 @@ func OffsetFetchRespToCore(r *cpv1.GroupOffsetFetchResponse) core.OffsetFetchRes
 
 // DescribeGroupsFromCore builds a DescribeGroupsRequest from group names.
 func DescribeGroupsFromCore(names []string) *cpv1.DescribeGroupsRequest {
-	return &cpv1.DescribeGroupsRequest{Groups: append([]string(nil), names...)}
+	return &cpv1.DescribeGroupsRequest{Groups: slices.Clone(names)}
 }
 
 // DescribeGroupsToCore rebuilds the group names of a request.
 func DescribeGroupsToCore(request *cpv1.DescribeGroupsRequest) []string {
-	return append([]string(nil), request.GetGroups()...)
+	return slices.Clone(request.GetGroups())
 }
 
 // DescribeGroupsRespFromCore builds a DescribeGroupsResponse.

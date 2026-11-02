@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"mds/internal/core"
 	"mds/internal/verify/speccheck/checker"
+	"slices"
 	"strings"
 )
 
@@ -195,7 +196,7 @@ func Batches(p InputProfile, shape, segmentKey string, variant int) []core.Pendi
 // same name always gives the same seed, and the hash is stable on every run.
 func makeSeedShape(shape string) uint64 {
 	h := uint64(14695981039346656037)
-	for i := 0; i < len(shape); i++ {
+	for i := range len(shape) {
 		h = (h ^ uint64(shape[i])) * 1099511628211
 	}
 	return h
@@ -328,7 +329,7 @@ func minimizeDescribe(d core.DescribeTopics) []core.ControlPlaneOperation {
 	}
 	if len(d.Topics) > 1 {
 		for i := range d.Topics {
-			rest := append(append([]string(nil), d.Topics[:i]...), d.Topics[i+1:]...)
+			rest := slices.Concat(d.Topics[:i], d.Topics[i+1:])
 			out = append(out, core.DescribeTopics{Topics: rest})
 		}
 	}

@@ -1,6 +1,7 @@
 package statemachine
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"slices"
@@ -271,7 +272,7 @@ func (m *Machine) onCommitAppendDone(d core.LogAppendDone, f *inFlightAppend) []
 	data := f.data
 	lost := false
 	if d.Taken {
-		data = append([]byte(nil), d.Existing...)
+		data = bytes.Clone(d.Existing)
 		lost = !groupIDMatches(data, f.id)
 	}
 	if f.slot >= m.applied {

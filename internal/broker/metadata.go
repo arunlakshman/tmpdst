@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"cmp"
 	"slices"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
@@ -33,8 +34,7 @@ func (b *Broker) metadata(s *slot, r *kmsg.MetadataRequest) []core.Action {
 func (b *Broker) metaResp(o *operation, infos []core.TopicInfo, code kafkaErrorCode) {
 	r := o.creq.(*kmsg.MetadataRequest)
 	response := kmsg.NewPtrMetadataResponse()
-	cluster := "mds"
-	response.ClusterID, response.ControllerID = &cluster, b.config.BrokerID
+	response.ClusterID, response.ControllerID = new("mds"), b.config.BrokerID
 	response.Brokers = b.metaBrokers()
 	if r.Topics == nil { // all topics
 		for _, in := range infos {
@@ -77,26 +77,19 @@ func (b *Broker) liveList() []core.BrokerAddr {
 		}
 	}
 	slices.SortFunc(all, func(x, y core.BrokerAddr) int {
-		switch {
-		case x.NodeID < y.NodeID:
-			return -1
-		case x.NodeID > y.NodeID:
-			return 1
-		}
-		return 0
+		return cmp.Compare(x.NodeID, y.NodeID)
 	})
 	return all
 }
 
 func (b *Broker) metaTopic(name string, infos []core.TopicInfo, code kafkaErrorCode) kmsg.MetadataResponseTopic {
-	n := name
 	t := kmsg.NewMetadataResponseTopic()
-	t.Topic = &n
+	t.Topic = new(name)
 	for _, in := range infos {
 		if in.Name != name {
 			continue
 		}
-		for p := int32(0); p < in.Partitions; p++ {
+		for p := range in.Partitions {
 			mp := kmsg.NewMetadataResponseTopicPartition()
 			mp.Partition, mp.Leader, mp.LeaderEpoch = p, b.config.BrokerID, 0
 			mp.Replicas, mp.ISR = []int32{b.config.BrokerID}, []int32{b.config.BrokerID}

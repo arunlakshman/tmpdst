@@ -1,6 +1,7 @@
 package speccheck
 
 import (
+	"maps"
 	"slices"
 
 	"mds/internal/core"
@@ -18,11 +19,7 @@ type PartitionEnd struct {
 func (c *ControlPlane) Ends() []PartitionEnd {
 	var out []PartitionEnd
 	for _, t := range sortedKeys(c.parts) {
-		ps := make([]int32, 0, len(c.parts[t]))
-		for p := range c.parts[t] { //determinismcheck:ok partitions are sorted before use
-			ps = append(ps, p)
-		}
-		slices.Sort(ps)
+		ps := slices.Sorted(maps.Keys(c.parts[t]))
 		for _, p := range ps {
 			topicPartition := core.NewTopicPartition(t, p)
 			out = append(out, PartitionEnd{TopicPartition: topicPartition, Offset: c.End(topicPartition)})

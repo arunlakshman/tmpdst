@@ -23,14 +23,13 @@ import (
 // codeOf turns an error of the adapter or of the fake into a core.ErrCode.
 // Any other error counts as ErrIO, as the broker would see it.
 func codeOf(err error) core.ErrCode {
-	var se *Error
-	var ve *specsystem.Error
-	switch {
-	case err == nil:
+	if err == nil {
 		return core.OK
-	case errors.As(err, &se):
+	}
+	if se, ok := errors.AsType[*Error](err); ok {
 		return se.Code
-	case errors.As(err, &ve):
+	}
+	if ve, ok := errors.AsType[*specsystem.Error](err); ok {
 		return ve.Code
 	}
 	return core.ErrIO

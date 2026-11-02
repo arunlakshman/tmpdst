@@ -4,8 +4,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 
@@ -41,18 +42,13 @@ func scanCore(t *testing.T) map[string][]string {
 		}
 	}
 	for k := range out {
-		sort.Strings(out[k])
+		slices.Sort(out[k])
 	}
 	return out
 }
 
 func names[T any](m map[string]T) []string {
-	var out []string
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
+	return slices.Sorted(maps.Keys(m))
 }
 
 func eq(a, b []string) bool { return strings.Join(a, ",") == strings.Join(b, ",") }

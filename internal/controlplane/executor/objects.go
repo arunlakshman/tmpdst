@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"sync"
 
@@ -31,7 +32,7 @@ func NewMemoryObjects() *MemoryObjects {
 func (o *MemoryObjects) Put(_ context.Context, key string, data []byte) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.data[key] = append([]byte(nil), data...)
+	o.data[key] = bytes.Clone(data)
 	return nil
 }
 

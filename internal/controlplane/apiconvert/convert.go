@@ -2,6 +2,8 @@
 package apiconvert
 
 import (
+	"slices"
+
 	cpv1 "mds/internal/controlplane/api/v1"
 	"mds/internal/core"
 )
@@ -173,7 +175,7 @@ func LookupToCore(request *cpv1.LookupRequest) core.FindSegments {
 
 // DescribeTopicsFromCore builds a DescribeTopicsRequest from a core op.
 func DescribeTopicsFromCore(operation core.DescribeTopics) *cpv1.DescribeTopicsRequest {
-	return &cpv1.DescribeTopicsRequest{Topics: append([]string(nil), operation.Topics...)}
+	return &cpv1.DescribeTopicsRequest{Topics: slices.Clone(operation.Topics)}
 }
 
 // DescribeTopicsToCore rebuilds a core.DescribeTopics from a request.
@@ -181,7 +183,7 @@ func DescribeTopicsToCore(request *cpv1.DescribeTopicsRequest) core.DescribeTopi
 	if request == nil {
 		return core.DescribeTopics{}
 	}
-	return core.DescribeTopics{Topics: append([]string(nil), request.Topics...)}
+	return core.DescribeTopics{Topics: slices.Clone(request.Topics)}
 }
 
 // CommitSegmentRespFromCore builds a CommitSegmentResponse from a core response.

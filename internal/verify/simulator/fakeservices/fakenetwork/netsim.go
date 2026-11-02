@@ -39,7 +39,9 @@
 package fakenetwork
 
 import (
+	"bytes"
 	"hash/crc32"
+	"slices"
 	"sort"
 	"strconv"
 
@@ -214,9 +216,7 @@ func (e *Engine) maybeRemove(p *connectionPair) {
 }
 
 func (e *Engine) link(a, b core.NodeID) *link {
-	if a > b {
-		a, b = b, a
-	}
+	a, b = min(a, b), max(a, b)
 	i := sort.Search(len(e.links), func(i int) bool {
 		l := e.links[i]
 		return l.a > a || (l.a == a && l.b >= b)
@@ -423,7 +423,7 @@ func (e *Engine) send(ctx simulator.FakeServiceContext, from core.NodeInstance, 
 		if m := e.f.PartialIOMax; m > 0 && n > m {
 			n = min(int(r.Between(1, int64(m)+1)), len(data))
 		}
-		chunk := append([]byte(nil), data[:n]...)
+		chunk := bytes.Clone(data[:n])
 		data = data[n:]
 		e.enqueue(ctx, p, s, item{kind: kindData, data: chunk}, e.sample(r)+extra)
 	}
@@ -547,7 +547,7 @@ func (e *Engine) flush(ctx simulator.FakeServiceContext, p *connectionPair, di i
 // OnCrash retires every open end at ref; survivors get an RST.
 func (e *Engine) OnCrash(ctx simulator.FakeServiceContext, ref core.NodeInstance) {
 	// Snapshot: maybeRemove edits e.pairs.
-	ps := append([]*connectionPair(nil), e.pairs...)
+	ps := slices.Clone(e.pairs)
 	for _, p := range ps {
 		for s := range 2 {
 			if p.end[s].ref != ref || p.end[s].closed {

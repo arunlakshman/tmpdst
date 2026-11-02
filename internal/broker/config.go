@@ -1,6 +1,10 @@
 package broker
 
-import "mds/internal/core"
+import (
+	"cmp"
+
+	"mds/internal/core"
+)
 
 // InjectedBug selects a deliberately broken behaviour for mutant tests. TEST ONLY: the
 // zero value is the real broker and production code must never set it.
@@ -120,12 +124,8 @@ func DefaultConfig() Config {
 
 func (c Config) withDefaults() Config {
 	d := DefaultConfig()
-	if c.Host == "" {
-		c.Host = d.Host
-	}
-	if c.Port == 0 {
-		c.Port = d.Port
-	}
+	c.Host = cmp.Or(c.Host, d.Host)
+	c.Port = cmp.Or(c.Port, d.Port)
 	if c.MaxFrame <= 0 {
 		c.MaxFrame = d.MaxFrame
 	}

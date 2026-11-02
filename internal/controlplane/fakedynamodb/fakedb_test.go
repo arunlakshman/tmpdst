@@ -41,8 +41,8 @@ func upd(key item, expr string, cond string, vals item) *dynamodb.UpdateItemInpu
 
 func TestTables(t *testing.T) {
 	f := fresh(t)
-	var inUse *types.ResourceInUseException
-	if _, err := f.CreateTable(ctx, &dynamodb.CreateTableInput{TableName: aws.String("t")}); !errors.As(err, &inUse) {
+	_, err := f.CreateTable(ctx, &dynamodb.CreateTableInput{TableName: aws.String("t")})
+	if _, ok := errors.AsType[*types.ResourceInUseException](err); !ok {
 		t.Fatalf("create twice: %v", err)
 	}
 	d, err := f.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: aws.String("t")})
@@ -52,14 +52,16 @@ func TestTables(t *testing.T) {
 	if _, err := f.DeleteTable(ctx, &dynamodb.DeleteTableInput{TableName: aws.String("t")}); err != nil {
 		t.Fatal(err)
 	}
-	var nf *types.ResourceNotFoundException
-	if _, err := f.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: aws.String("t")}); !errors.As(err, &nf) {
+	_, err = f.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: aws.String("t")})
+	if _, ok := errors.AsType[*types.ResourceNotFoundException](err); !ok {
 		t.Fatalf("describe deleted: %v", err)
 	}
-	if _, err := f.DeleteTable(ctx, &dynamodb.DeleteTableInput{TableName: aws.String("t")}); !errors.As(err, &nf) {
+	_, err = f.DeleteTable(ctx, &dynamodb.DeleteTableInput{TableName: aws.String("t")})
+	if _, ok := errors.AsType[*types.ResourceNotFoundException](err); !ok {
 		t.Fatalf("delete deleted: %v", err)
 	}
-	if _, err := f.GetItem(ctx, &dynamodb.GetItemInput{TableName: aws.String("t"), Key: k("a", "b")}); !errors.As(err, &nf) {
+	_, err = f.GetItem(ctx, &dynamodb.GetItemInput{TableName: aws.String("t"), Key: k("a", "b")})
+	if _, ok := errors.AsType[*types.ResourceNotFoundException](err); !ok {
 		t.Fatalf("get from deleted: %v", err)
 	}
 }
@@ -105,14 +107,15 @@ func TestUpdateItem(t *testing.T) {
 		_, err := f.UpdateItem(ctx, upd(k("TOPICS", "x"), "SET parts = :n", cond, item{":n": n(v)}))
 		return err
 	}
-	var ccf *types.ConditionalCheckFailedException
 	if err := set(3); err != nil {
 		t.Fatal(err)
 	}
-	if err := set(3); !errors.As(err, &ccf) {
+	err = set(3)
+	if _, ok := errors.AsType[*types.ConditionalCheckFailedException](err); !ok {
 		t.Fatalf("equal: %v", err)
 	}
-	if err := set(2); !errors.As(err, &ccf) {
+	err = set(2)
+	if _, ok := errors.AsType[*types.ConditionalCheckFailedException](err); !ok {
 		t.Fatalf("lower: %v", err)
 	}
 	if err := set(4); err != nil {
@@ -306,12 +309,14 @@ func TestPutItem(t *testing.T) {
 	if err := put("1", "a", true); err != nil {
 		t.Fatal(err)
 	}
-	var cc *types.ConditionalCheckFailedException
 	err := put("1", "b", true)
-	if !errors.As(err, &cc) || cc.Item["v"].(*types.AttributeValueMemberS).Value != "a" {
+	cc, ok := errors.AsType[*types.ConditionalCheckFailedException](err)
+	if !ok || cc.Item["v"].(*types.AttributeValueMemberS).Value != "a" {
 		t.Fatalf("second put: %v %+v", err, cc)
 	}
-	if err := put("1", "b", false); !errors.As(err, &cc) || cc.Item != nil {
+	err = put("1", "b", false)
+	cc, ok = errors.AsType[*types.ConditionalCheckFailedException](err)
+	if !ok || cc.Item != nil {
 		t.Fatalf("no old item expected: %v", err)
 	}
 	if got := f.Item("t", k("p", "1"))["v"].(*types.AttributeValueMemberS).Value; got != "a" {
@@ -327,8 +332,8 @@ func TestPutItem(t *testing.T) {
 	}
 	f.Fail = nil
 	bad := &dynamodb.PutItemInput{TableName: aws.String("nope"), Item: k("p", "9")}
-	var nf *types.ResourceNotFoundException
-	if _, err := f.PutItem(ctx, bad); !errors.As(err, &nf) {
+	_, err = f.PutItem(ctx, bad)
+	if _, ok := errors.AsType[*types.ResourceNotFoundException](err); !ok {
 		t.Fatalf("missing table: %v", err)
 	}
 	bad = &dynamodb.PutItemInput{TableName: aws.String("t"), Item: k("p", "9"), ConditionExpression: aws.String("size(x) > 1")}

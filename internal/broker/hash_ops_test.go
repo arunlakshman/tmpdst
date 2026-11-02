@@ -35,7 +35,7 @@ func TestStateHashInFlightOps(t *testing.T) {
 		return func(h *harness) {
 			c := h.open(1)
 			r := kmsg.NewPtrMetadataRequest()
-			r.Topics = []kmsg.MetadataRequestTopic{{Topic: &topic}}
+			r.Topics = []kmsg.MetadataRequestTopic{{Topic: new(topic)}}
 			h.send(c, verMetadata, r)
 		}
 	}

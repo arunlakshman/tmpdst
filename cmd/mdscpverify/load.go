@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -88,9 +89,7 @@ type ackedLine struct {
 
 // runLoadMain runs one load, prints the summary line on stdout, and returns the exit code.
 func runLoadMain(cfg loadConfig) int {
-	if cfg.topic == "" {
-		cfg.topic = defaultLoadTopic
-	}
+	cfg.topic = cmp.Or(cfg.topic, defaultLoadTopic)
 	if err := cfg.validate(); err != nil {
 		fmt.Fprintln(os.Stderr, "FAIL:", err)
 		return 2

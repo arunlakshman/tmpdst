@@ -93,7 +93,7 @@ func validTopicName(name string) bool {
 
 func setTopicError(rt *kmsg.CreateTopicsResponseTopic, code kafkaErrorCode, msg string) {
 	rt.ErrorCode = int16(code)
-	rt.ErrorMessage = &msg
+	rt.ErrorMessage = new(msg)
 }
 
 // createCP is the control plane call of a create op. A real create is one

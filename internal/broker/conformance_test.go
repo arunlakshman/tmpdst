@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"testing"
@@ -69,7 +70,7 @@ func newC1(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) *c1 
 			d := run()
 			if g, ok := d.(core.ObjectGetDone); ok && g.Err == core.OK && len(g.Data) > 0 {
 				if gets++; gets%3 == 0 {
-					g.Data = append([]byte(nil), g.Data...)
+					g.Data = bytes.Clone(g.Data)
 					g.Data[len(g.Data)-1] ^= 0x55
 					return g
 				}
@@ -131,7 +132,7 @@ func (s *c1) produce(c *client, operation c1op) error {
 		topicPartition := c1TPs[ti]
 		m := s.model[topicPartition]
 		var vals []string
-		for k := 0; k <= ce.N%3; k++ {
+		for k := range ce.N%3 + 1 {
 			vals = append(vals, fmt.Sprintf("%d.%d.%d", operation.Tag, j, k))
 		}
 		x := expect{ti: ti}

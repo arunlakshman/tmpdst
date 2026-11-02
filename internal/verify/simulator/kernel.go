@@ -693,9 +693,7 @@ func (r *run) pump(n *node) {
 		r.halt = true
 		return
 	}
-	if cost < 0 {
-		cost = 0
-	}
+	cost = max(cost, 0)
 	n.inbox.busy = now + Time(cost)
 	if !n.inbox.empty() {
 		r.ensureWake(n, n.inbox.busy)

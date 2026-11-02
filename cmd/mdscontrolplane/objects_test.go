@@ -21,7 +21,7 @@ func (missingObjectStore) Get(context.Context, core.SegmentRef) ([]byte, error) 
 // like a read failure, the machine retries forever and a new bucket never boots.
 func TestMissingCheckpointIsNotFound(t *testing.T) {
 	objects := sysObjects{missingObjectStore{}}
-	_, err := objects.Get(context.Background(), core.SegmentRef{Key: "checkpoint/latest"})
+	_, err := objects.Get(t.Context(), core.SegmentRef{Key: "checkpoint/latest"})
 	code, _ := executor.Classify(core.ObjectGet{}, err)
 	if code != core.ErrNotFound {
 		t.Fatalf("missing object classified as %v, want ErrNotFound", code)

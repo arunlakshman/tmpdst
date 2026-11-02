@@ -26,8 +26,8 @@ func newTestStore(t *testing.T, prefix string) (*Store, *fakeS3) {
 
 func wantCode(t *testing.T, err error, code core.ErrCode) {
 	t.Helper()
-	var se *Error
-	if !errors.As(err, &se) || se.Code != code {
+	se, ok := errors.AsType[*Error](err)
+	if !ok || se.Code != code {
 		t.Fatalf("want %v, got %v", code, err)
 	}
 }

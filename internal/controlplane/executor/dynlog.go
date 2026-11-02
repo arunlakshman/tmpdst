@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -73,14 +74,14 @@ func (l *DynamoLog) Append(ctx context.Context, slot core.LogPosition, data []by
 	_, err := l.db.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName:                           &l.table,
 		Item:                                it,
-		ConditionExpression:                 aws.String("attribute_not_exists(pk)"),
+		ConditionExpression:                 new("attribute_not_exists(pk)"),
 		ReturnValuesOnConditionCheckFailure: types.ReturnValuesOnConditionCheckFailureAllOld,
 	})
-	var cc *types.ConditionalCheckFailedException
+	cc, isCC := errors.AsType[*types.ConditionalCheckFailedException](err)
 	switch {
 	case err == nil:
 		return nil, false, nil
-	case !errors.As(err, &cc):
+	case !isCC:
 		return nil, false, err
 	case cc.Item != nil:
 		return itemData(cc.Item), true, nil
@@ -95,7 +96,7 @@ func (l *DynamoLog) Append(ctx context.Context, slot core.LogPosition, data []by
 func (l *DynamoLog) between(lo, hi string) *dynamodb.QueryInput {
 	return &dynamodb.QueryInput{
 		TableName:              &l.table,
-		KeyConditionExpression: aws.String("pk = :p AND sk BETWEEN :lo AND :hi"),
+		KeyConditionExpression: new("pk = :p AND sk BETWEEN :lo AND :hi"),
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":p": stringValue(logPartitionKey), ":lo": stringValue(lo), ":hi": stringValue(hi),
 		},
@@ -142,7 +143,7 @@ func (l *DynamoLog) Read(ctx context.Context, from core.LogPosition, limit int) 
 			if len(data) == 1 && data[0] == deletedMarkerBytes {
 				continue
 			}
-			out = append(out, core.LogEntry{Slot: n, Data: append([]byte(nil), data...)})
+			out = append(out, core.LogEntry{Slot: n, Data: bytes.Clone(data)})
 		}
 		if start = page.LastEvaluatedKey; start == nil {
 			break
@@ -174,7 +175,7 @@ func (l *DynamoLog) TrimThrough(ctx context.Context, through core.LogPosition) e
 	var start map[string]types.AttributeValue
 	for {
 		q := l.between(slotKey(0), slotKey(through))
-		q.ProjectionExpression = aws.String("pk, sk")
+		q.ProjectionExpression = new("pk, sk")
 		q.Limit = aws.Int32(batch)
 		q.ExclusiveStartKey = start
 		page, err := l.db.Query(ctx, q)

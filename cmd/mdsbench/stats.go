@@ -117,10 +117,10 @@ func percent(sorted []time.Duration, p float64) time.Duration {
 func (s *latencyStats) summarize(elapsed time.Duration) summary {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sorted := append([]time.Duration(nil), s.lat...)
+	sorted := slices.Clone(s.lat)
 	slices.Sort(sorted)
 	sm := summary{N: int64(len(sorted)), Bytes: s.bytes, Elapsed: elapsed, Errors: s.errCount,
-		FirstErrors: append([]string(nil), s.errFirst...)}
+		FirstErrors: slices.Clone(s.errFirst)}
 	if len(sorted) > 0 {
 		var sum time.Duration
 		for _, d := range sorted {

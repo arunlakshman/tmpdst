@@ -2,6 +2,7 @@ package echo
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -215,7 +216,7 @@ func (c *client) record(off int64, payload string) {
 	c.digest.StringValue(payload)
 	c.acked = append(c.acked, acked{off, payload})
 	if len(c.acked) > keepAcked {
-		c.acked = append([]acked(nil), c.acked[1:]...)
+		c.acked = slices.Clone(c.acked[1:])
 	}
 }
 

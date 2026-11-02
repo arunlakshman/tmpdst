@@ -82,32 +82,28 @@ BROKER_PORTS=("" "" "")
 S3_USER=e2eadmin
 S3_SECRET=e2e-secret-key
 
+# Stop process $1 with SIGTERM if it is still running, then wait for it to exit.
+# An empty pid is skipped.
+stop_pid() {
+  local pid=$1
+  if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  fi
+}
+
 # Stop the brokers first (they talk to the control plane), then mdscontrolplane and minio.
 stop_stack() {
   local pid i
-  if [[ -n $CONSUMER_PID ]] && kill -0 "$CONSUMER_PID" 2>/dev/null; then
-    kill -TERM "$CONSUMER_PID" 2>/dev/null || true
-    wait "$CONSUMER_PID" 2>/dev/null || true
-  fi
+  stop_pid "$CONSUMER_PID"
   for pid in "${GROUP_PIDS[@]}"; do
-    if kill -0 "$pid" 2>/dev/null; then
-      kill -TERM "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-    fi
+    stop_pid "$pid"
   done
   for i in 0 1 2; do
-    pid=${BROKER_PIDS[i]}
-    if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
-      kill -TERM "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-    fi
+    stop_pid "${BROKER_PIDS[i]}"
   done
-  for pid in "$CP_PID" "$S3_PID"; do
-    if [[ -n $pid ]] && kill -0 "$pid" 2>/dev/null; then
-      kill -TERM "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-    fi
-  done
+  stop_pid "$CP_PID"
+  stop_pid "$S3_PID"
 }
 
 cleanup() {
@@ -274,6 +270,13 @@ kafka_topics() {
 
 TOPIC=e2e-basic
 PARTS=3
+REPLICATION=3
+
+# Create topic $1 with $2 partitions and REPLICATION copies of each partition.
+# Output goes to file $3. Returns the CLI exit code, so the caller decides if it failed.
+create_topic() {
+  kafka_topics "$3" "$3" --create --topic "$1" --partitions "$2" --replication-factor "$REPLICATION"
+}
 
 # Print the ids of the brokers that Metadata lists, sorted, space separated.
 # The bootstrap is the broker on port $1. kafka-broker-api-versions.sh asks
@@ -303,8 +306,7 @@ check_three_brokers_listed() {
 
 # Create the topic with Kafka CreateTopics (kafka-topics.sh --create).
 check_create_topic() {
-  kafka_topics "$TMP/create.out" "$TMP/create.out" --create --topic "$TOPIC" \
-    --partitions "$PARTS" --replication-factor 3 || {
+  create_topic "$TOPIC" "$PARTS" "$TMP/create.out" || {
     echo "--create failed, see $TMP/create.out" >&2
     return 1
   }
@@ -340,8 +342,7 @@ check_describe_topic() {
 
 # A second create must fail: the topic already exists (TOPIC_ALREADY_EXISTS).
 check_create_again_fails() {
-  if kafka_topics "$TMP/create-again.out" "$TMP/create-again.out" --create --topic "$TOPIC" \
-    --partitions "$PARTS" --replication-factor 3; then
+  if create_topic "$TOPIC" "$PARTS" "$TMP/create-again.out"; then
     echo "second --create of $TOPIC succeeded, want TOPIC_ALREADY_EXISTS" >&2
     return 1
   fi
@@ -419,8 +420,7 @@ LONGPOLL=e2e-longpoll
 # producer returns (its acks). The consumer keeps running for the idle check.
 check_long_poll_wakes() {
   local sent=$TMP/longpoll-sent.txt out=$TMP/longpoll.out base i n t0 t1
-  kafka_topics "$TMP/longpoll-create.out" "$TMP/longpoll-create.out" --create \
-    --topic "$LONGPOLL" --partitions 1 --replication-factor 3 || {
+  create_topic "$LONGPOLL" 1 "$TMP/longpoll-create.out" || {
     echo "--create $LONGPOLL failed, see $TMP/longpoll-create.out" >&2
     return 1
   }
@@ -515,8 +515,7 @@ GROUP_TOPIC=e2e-groups
 # consumer commits when it exits (auto commit on close).
 check_group_consume() {
   local sent=$TMP/group-sent.txt got=$TMP/group-g1.txt n count
-  kafka_topics "$TMP/group-create.out" "$TMP/group-create.out" --create --topic "$GROUP_TOPIC" \
-    --partitions "$PARTS" --replication-factor 3 || {
+  create_topic "$GROUP_TOPIC" "$PARTS" "$TMP/group-create.out" || {
     echo "--create $GROUP_TOPIC failed, see $TMP/group-create.out" >&2
     return 1
   }

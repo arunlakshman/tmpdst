@@ -86,9 +86,7 @@ func NewBroker(env core.Environment, self core.NodeInstance) core.Machine {
 func (b *Broker) nextRequestID() core.RequestID { b.nextReq++; return b.nextReq }
 
 func backoff(n int) core.Duration {
-	if n > 5 {
-		n = 5
-	}
+	n = min(n, 5)
 	return 20 * core.Millisecond << n
 }
 

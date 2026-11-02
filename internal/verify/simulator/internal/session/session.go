@@ -55,9 +55,7 @@ func (c *Client) backoff() core.Action {
 
 // RetryWaitTime is the backoff after n consecutive failures.
 func RetryWaitTime(n int) core.Duration {
-	if n > 4 {
-		n = 4
-	}
+	n = min(n, 4)
 	return 50 * core.Millisecond << n
 }
 

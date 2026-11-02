@@ -214,9 +214,7 @@ func (e *Engine) maybeRemove(p *connectionPair) {
 }
 
 func (e *Engine) link(a, b core.NodeID) *link {
-	if a > b {
-		a, b = b, a
-	}
+	a, b = min(a, b), max(a, b)
 	i := sort.Search(len(e.links), func(i int) bool {
 		l := e.links[i]
 		return l.a > a || (l.a == a && l.b >= b)

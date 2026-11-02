@@ -266,13 +266,19 @@ func counts(funcs []*Func) map[float64]int {
 	return m
 }
 
-func writeText(w io.Writer, funcs []*Func, v Result, threshold float64, top int, strict bool, warn string) {
-	n := len(funcs)
-	if top > 0 && top < n {
-		n = top
+// topFuncs returns the first top functions. It returns all of them when top
+// is 0 or not smaller than the count.
+func topFuncs(funcs []*Func, top int) []*Func {
+	if top > 0 && top < len(funcs) {
+		return funcs[:top]
 	}
+	return funcs
+}
+
+func writeText(w io.Writer, funcs []*Func, v Result, threshold float64, top int, strict bool, warn string) {
+	shown := topFuncs(funcs, top)
 	_, _ = fmt.Fprintf(w, "%8s %5s %6s  %-52s %s\n", "RISK", "CC", "COV%", "FUNCTION", "LOCATION")
-	for _, f := range funcs[:n] {
+	for _, f := range shown {
 		_, _ = fmt.Fprintf(w, "%8.1f %5d %5.1f%%  %-52s %s:%d\n", f.RiskScore, f.Complexity, f.Coverage*100, f.Key, f.File, f.Line)
 	}
 	c := counts(funcs)
@@ -307,10 +313,7 @@ func writeText(w io.Writer, funcs []*Func, v Result, threshold float64, top int,
 }
 
 func writeJSON(w io.Writer, funcs []*Func, v Result, threshold float64, top int, strict bool, warn string) {
-	n := len(funcs)
-	if top > 0 && top < n {
-		n = top
-	}
+	shown := topFuncs(funcs, top)
 	c := map[string]int{}
 	for t, k := range counts(funcs) {
 		c[strconv.FormatFloat(t, 'f', -1, 64)] = k
@@ -319,7 +322,7 @@ func writeJSON(w io.Writer, funcs []*Func, v Result, threshold float64, top int,
 		"threshold": threshold, "strict": strict, "ok": !v.Failed(), "warning": warn,
 		"analysed": len(funcs), "over": c,
 		"new": keys(v.New), "worse": keys(v.Worse), "improved": v.Improved,
-		"functions": funcs[:n],
+		"functions": shown,
 	}
 	data, _ := json.MarshalIndent(out, "", "  ")
 	_, _ = fmt.Fprintln(w, string(data))

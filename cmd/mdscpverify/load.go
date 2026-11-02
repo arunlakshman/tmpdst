@@ -197,16 +197,9 @@ func loadKey(runID string, worker int, sequence int64) string {
 // buildLoadCommit makes the commit with that key. Its batches rotate over the partitions.
 func buildLoadCommit(cfg loadConfig, worker int, sequence int64) core.CommitSegment {
 	key := loadKey(cfg.runID, worker, sequence)
-	operation := core.CommitSegment{SegmentKey: key}
-	for b := range cfg.batches {
-		partition := int32((sequence + int64(worker) + int64(b)) % int64(cfg.partitions))
-		operation.Batches = append(operation.Batches, core.PendingBatch{
-			TopicPartition: core.NewTopicPartition(cfg.topic, partition),
-			Records:        cfg.records,
-			Loc:            core.SegmentRef{Key: key, Off: int64(b) * 1000, Len: 1000},
-		})
-	}
-	return operation
+	return makeCommit(cfg.topic, key, cfg.batches, cfg.records, func(b int) int32 {
+		return int32((sequence + int64(worker) + int64(b)) % int64(cfg.partitions))
+	})
 }
 
 // classifyFailure names a failed call for errors_by_kind. It also says whether

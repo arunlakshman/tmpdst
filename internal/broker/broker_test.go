@@ -64,8 +64,7 @@ func TestMetadata(t *testing.T) {
 		t.Fatalf("topics %+v", r.Topics)
 	}
 	q := kmsg.NewPtrMetadataRequest()
-	a, b := "t", "nope"
-	q.Topics = []kmsg.MetadataRequestTopic{{Topic: &b}, {Topic: &a}}
+	q.Topics = []kmsg.MetadataRequestTopic{{Topic: new("nope")}, {Topic: new("t")}}
 	r = h.call(c, verMetadata, q).(*kmsg.MetadataResponse)
 	if len(r.Topics) != 2 || kafkaErrorCode(r.Topics[0].ErrorCode) != errUnknownTopicOrPart || r.Topics[1].ErrorCode != 0 {
 		t.Fatalf("topics %+v", r.Topics)

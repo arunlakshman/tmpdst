@@ -61,7 +61,7 @@ func (o *operation) failDescribeConfigs(code kafkaErrorCode) {
 func setResourceError(rr *kmsg.DescribeConfigsResponseResource, code kafkaErrorCode, msg string) {
 	rr.ErrorCode = int16(code)
 	if msg != "" {
-		rr.ErrorMessage = &msg
+		rr.ErrorMessage = new(msg)
 	}
 }
 

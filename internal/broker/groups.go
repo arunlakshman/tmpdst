@@ -231,7 +231,7 @@ func optStr(s string) *string {
 	if s == "" {
 		return nil
 	}
-	return &s
+	return new(s)
 }
 
 func millisDuration(milliseconds int32) core.Duration {

@@ -33,8 +33,7 @@ func (b *Broker) metadata(s *slot, r *kmsg.MetadataRequest) []core.Action {
 func (b *Broker) metaResp(o *operation, infos []core.TopicInfo, code kafkaErrorCode) {
 	r := o.creq.(*kmsg.MetadataRequest)
 	response := kmsg.NewPtrMetadataResponse()
-	cluster := "mds"
-	response.ClusterID, response.ControllerID = &cluster, b.config.BrokerID
+	response.ClusterID, response.ControllerID = new("mds"), b.config.BrokerID
 	response.Brokers = b.metaBrokers()
 	if r.Topics == nil { // all topics
 		for _, in := range infos {
@@ -89,9 +88,8 @@ func (b *Broker) liveList() []core.BrokerAddr {
 }
 
 func (b *Broker) metaTopic(name string, infos []core.TopicInfo, code kafkaErrorCode) kmsg.MetadataResponseTopic {
-	n := name
 	t := kmsg.NewMetadataResponseTopic()
-	t.Topic = &n
+	t.Topic = new(name)
 	for _, in := range infos {
 		if in.Name != name {
 			continue

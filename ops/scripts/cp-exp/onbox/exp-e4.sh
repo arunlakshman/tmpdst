@@ -12,9 +12,7 @@ R="$CPV_ROOT/results"
 PART_MIN="${PART_MIN:-10}"
 TOTAL_MIN=$(( PART_MIN * 3 ))
 RATE=100
-ADDR0=18080; MET0=19101
-ADDR1=18081; MET1=19102
-FLAGS=(-checkpoint-every 60s -checkpoint-min-slots 200 -window-slots 8192 -takeover-after 5s -heartbeat 1s)
+FLAGS=(-checkpoint-every 60s -window-slots 8192 "${NODE_FLAGS[@]}")
 SAMPLES="$R/e4-samples.csv"
 ACKED="$R/e4-acked.jsonl"
 
@@ -24,15 +22,15 @@ echo "minute,node,rss_kb,pebble_kb,applied_slot,log_tail,put_item,query" >"$SAMP
 
 rss_kb() { ps -o rss= -p "$(cat "$CPV_ROOT/run/$1.pid")" 2>/dev/null | tr -d ' '; }
 pebble_kb() { du -sk "$CPV_ROOT/data/$1" 2>/dev/null | cut -f1; }
-count_op() { # count_op PORT OP : DynamoDB attempts so far for one operation
-  curl -s -m 3 "http://127.0.0.1:$1/metrics" | awk -v op="$2" '$0 ~ "dynamo_attempt_seconds_count\\{op=\"" op "\"" { s += $2 } END { print s + 0 }'
-}
 sample_node() { # sample_node MINUTE NAME GRPC METRICS
   local status applied tail
   status=$(mdscpverify -mode ready -cp "127.0.0.1:$3" 2>/dev/null)
   applied=$(echo "$status" | sed -n 's/.*applied_slot=\([0-9]*\).*/\1/p')
   tail=$(echo "$status" | sed -n 's/.*log_tail=\([0-9]*\).*/\1/p')
-  echo "$1,$2,$(rss_kb "$2"),$(pebble_kb "$2"),${applied:-0},${tail:-0},$(count_op "$4" PutItem),$(count_op "$4" Query)" >>"$SAMPLES"
+  local put query
+  put=$(metric_sum "$4" 'dynamo_attempt_seconds_count{op="PutItem"')
+  query=$(metric_sum "$4" 'dynamo_attempt_seconds_count{op="Query"')
+  echo "$1,$2,$(rss_kb "$2"),$(pebble_kb "$2"),${applied:-0},${tail:-0},$put,$query" >>"$SAMPLES"
 }
 sample_all() {
   sample_node "$1" cp0 $ADDR0 $MET0
@@ -117,7 +115,7 @@ check_failed=$(grep -c '^FAIL' "$R/e4-inspect.txt" || true)
 skips=$(grep '^SKIP' "$R/e4-inspect.txt" | sed 's/  */ /g' | tr '\n' ';')
 min_checkpoints=$(( TOTAL_MIN / 3 - 2 ))
 
-criterion "load: failed = 0 in all 3 parts" "$([ "$failed" = 0 ] && echo 1 || echo 0)" "acked=$acked failed=$failed"
+expect "load: failed = 0 in all 3 parts" "acked=$acked failed=$failed" [ "$failed" = 0 ]
 criterion "p99 of the last part <= 1.5 x the first part" "$(ratio_ok "$p99_c" "$p99_a" 1.5)" "p99 first=${p99_a}ms last=${p99_c}ms (p50 ${p50_a} -> ${p50_c})"
 criterion "longest stall in any part <= 5 s (trim stall test)" "$(le "$stall_max" 5000)" "max_stall=${stall_max}ms"
 for node in cp0 cp1; do
@@ -126,14 +124,14 @@ for node in cp0 cp1; do
   d_warm=$(column "$WARM" $node 4); d_end=$(column "$TOTAL_MIN" $node 4)
   criterion "$node Pebble size bounded (end <= 1.5 x minute $WARM)" "$(ratio_ok "$d_end" "$d_warm" 1.5)" "minute $WARM=${d_warm}KB end=${d_end}KB"
 done
-criterion "checkpoints written at least once per 3 periods" "$([ "$written" -ge "$min_checkpoints" ] && echo 1 || echo 0)" "written=$written needed>=$min_checkpoints"
+expect "checkpoints written at least once per 3 periods" "written=$written needed>=$min_checkpoints" [ "$written" -ge "$min_checkpoints" ]
 criterion "latest checkpoint is fresh (<= 180 s old)" "$(le "$CHECKPOINT_AGE" 180)" "age=${CHECKPOINT_AGE}s"
-criterion "the log was trimmed (tombstones exist)" "$([ "$TRIMMED" -gt 0 ] && echo 1 || echo 0)" "trimmed_slots=$TRIMMED live_slots=$LIVE"
+expect "the log was trimmed (tombstones exist)" "trimmed_slots=$TRIMMED live_slots=$LIVE" [ "$TRIMMED" -gt 0 ]
 criterion "standby caught up (applied within 50 of tail)" "$(le "$(( ${tail1:-0} - ${applied1:-0} ))" 50)" "applied=$applied1 tail=$tail1"
-criterion "live end offsets equal records acked (mode ends)" "$([ "$ENDS_RC" = 0 ] && echo 1 || echo 0)" "$(tail -2 "$R/e4-ends.txt" | head -1)"
-criterion "A1, A2, A3, A5: mdscpinspect -check -acked has no FAIL" "$([ "$check_failed" = 0 ] && echo 1 || echo 0)" "failed_lines=$check_failed"
-criterion "A6: no ERROR line in node logs" "$([ "$errors" = 0 ] && echo 1 || echo 0)" "count=$errors"
-criterion "A7: no checkpoint skipped for control_io_pending" "$([ "$busy" = 0 ] && echo 1 || echo 0)" "count=$busy"
+expect "live end offsets equal records acked (mode ends)" "$(tail -2 "$R/e4-ends.txt" | head -1)" [ "$ENDS_RC" = 0 ]
+expect "A1, A2, A3, A5: mdscpinspect -check -acked has no FAIL" "failed_lines=$check_failed" [ "$check_failed" = 0 ]
+expect "A6: no ERROR line in node logs" "count=$errors" [ "$errors" = 0 ]
+expect "A7: no checkpoint skipped for control_io_pending" "count=$busy" [ "$busy" = 0 ]
 echo "info: skipped checks (expected on a trimmed log): $skips" | tee -a "$VERDICT_FILE"
 echo "info: DynamoDB attempts at the end (cp0 PutItem, Query; cp1 PutItem, Query):" | tee -a "$VERDICT_FILE"
 tail -n 2 "$SAMPLES" | tee -a "$VERDICT_FILE"

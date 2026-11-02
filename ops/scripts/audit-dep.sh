@@ -27,13 +27,18 @@ go mod init audit >/dev/null 2>&1
 go get "$mod_at" >/dev/null 2>&1 || { echo "go get $mod_at failed" >&2; go get "$mod_at"; exit 1; }
 version=$(go list -m -f '{{.Version}}' "$mod")
 
+# Print the Go version that the go.mod in directory $1 requires (for example 1.22.3).
+go_version() {
+  (cd "$1" && go mod edit -json | sed -n 's/.*"Go": *"\([^"]*\)".*/\1/p')
+}
+
 # determinismcheck must be built with a toolchain at least as new as the one the audited
 # module requires, or it cannot read the compiled standard library it imports.
-need_go=$(go mod edit -json | sed -n 's/.*"Go": *"\([^"]*\)".*/\1/p')
-repo_go=$(cd "$repo" && go mod edit -json | sed -n 's/.*"Go": *"\([^"]*\)".*/\1/p')
+need_go=$(go_version "$work")
+repo_go=$(go_version "$repo")
 toolchain=$(printf '%s\n%s\n' "$need_go" "$repo_go" | sort -V | tail -1)
-(cd "$repo" && GOTOOLCHAIN="go$toolchain+auto" go build -o "$work/determinismcheck" ./ops/tools/determinismcheck)
 export GOTOOLCHAIN="go$toolchain+auto"
+(cd "$repo" && go build -o "$work/determinismcheck" ./ops/tools/determinismcheck)
 dir=$(go list -m -f '{{.Dir}}' "$mod")
 
 section() { printf '\n== %s\n' "$1"; }

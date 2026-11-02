@@ -151,11 +151,18 @@ func waitReady(ctx context.Context, client *controlplaneclient.Client, out io.Wr
 // so the replay in step 4 sends exactly the same commit.
 func buildCommit(topic string, partitions int32, i, batchesPer int, records int64) core.CommitSegment {
 	key := fmt.Sprintf("verify/%s/segment-%06d", topic, i)
+	return makeCommit(topic, key, batchesPer, records, func(b int) int32 {
+		return int32((i + b) % int(partitions))
+	})
+}
+
+// makeCommit builds a commit with the given segment key and batches. The
+// partition of batch b comes from partitionOf.
+func makeCommit(topic, key string, batches int, records int64, partitionOf func(b int) int32) core.CommitSegment {
 	operation := core.CommitSegment{SegmentKey: key}
-	for b := range batchesPer {
-		partition := int32((i + b) % int(partitions))
+	for b := range batches {
 		operation.Batches = append(operation.Batches, core.PendingBatch{
-			TopicPartition: core.NewTopicPartition(topic, partition),
+			TopicPartition: core.NewTopicPartition(topic, partitionOf(b)),
 			Records:        records,
 			Loc:            core.SegmentRef{Key: key, Off: int64(b) * 1000, Len: 1000},
 		})

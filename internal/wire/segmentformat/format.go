@@ -123,11 +123,11 @@ const (
 // batch, in order. It returns ErrInvalid for an empty list, an empty topic or
 // payload, a topic longer than 65535 bytes, or a negative partition.
 func Encode(batches []Batch) ([]byte, []Entry, error) {
-	idx, total, err := measureBatches(batches)
+	indexLen, total, err := measureBatches(batches)
 	if err != nil {
 		return nil, nil, err
 	}
-	obj, entries := writeObject(batches, idx, total)
+	obj, entries := writeObject(batches, indexLen, total)
 	return obj, entries, nil
 }
 
@@ -135,25 +135,25 @@ func measureBatches(batches []Batch) (int, int, error) {
 	if len(batches) == 0 || uint64(len(batches)) > math.MaxUint32 {
 		return 0, 0, fmt.Errorf("%w: %d batches", ErrInvalid, len(batches))
 	}
-	idx := 4
+	indexLen := 4
 	total := 0
 	for i, b := range batches {
 		if b.TopicPartition.Topic == "" || len(b.TopicPartition.Topic) > maxTopic || b.TopicPartition.Partition < 0 || len(b.Data) == 0 {
 			return 0, 0, fmt.Errorf("%w: batch %d", ErrInvalid, i)
 		}
-		idx += minEntry + len(b.TopicPartition.Topic)
+		indexLen += minEntry + len(b.TopicPartition.Topic)
 		total += len(b.Data)
 	}
-	return idx, total, nil
+	return indexLen, total, nil
 }
 
-func writeObject(batches []Batch, idx, total int) ([]byte, []Entry) {
-	bodyLen := idx + total
+func writeObject(batches []Batch, indexLen, total int) ([]byte, []Entry) {
+	bodyLen := indexLen + total
 	obj := make([]byte, HeaderSize+bodyLen)
 	body := obj[HeaderSize:]
 	binary.BigEndian.PutUint32(body, uint32(len(batches)))
 	entries := make([]Entry, len(batches))
-	p, off := 4, idx
+	p, off := 4, indexLen
 	for i, b := range batches {
 		p += putEntry(body[p:], b, uint64(off))
 		copy(body[off:], b.Data)
@@ -167,10 +167,10 @@ func writeObject(batches []Batch, idx, total int) ([]byte, []Entry) {
 		off += len(b.Data)
 	}
 	copy(obj, FileMarker)
-	binary.BigEndian.PutUint16(obj[4:], Version)
-	// obj[6:8] flags = 0
-	binary.BigEndian.PutUint64(obj[8:], uint64(bodyLen))
-	binary.BigEndian.PutUint32(obj[16:], CRC32CChecksum(body))
+	binary.BigEndian.PutUint16(obj[hdrVersion:], Version)
+	// flags at hdrFlags stay 0
+	binary.BigEndian.PutUint64(obj[hdrBodyLen:], uint64(bodyLen))
+	binary.BigEndian.PutUint32(obj[hdrBodyCRC:], CRC32CChecksum(body))
 	return obj, entries
 }
 
@@ -178,12 +178,30 @@ func putEntry(w []byte, b Batch, off uint64) int {
 	binary.BigEndian.PutUint16(w, uint16(len(b.TopicPartition.Topic)))
 	n := 2 + copy(w[2:], b.TopicPartition.Topic)
 	binary.BigEndian.PutUint32(w[n:], uint32(b.TopicPartition.Partition))
-	binary.BigEndian.PutUint32(w[n+4:], b.Records)
-	binary.BigEndian.PutUint64(w[n+8:], off)
-	binary.BigEndian.PutUint64(w[n+16:], uint64(len(b.Data)))
-	binary.BigEndian.PutUint32(w[n+24:], CRC32CChecksum(b.Data))
+	binary.BigEndian.PutUint32(w[n+entryRecords:], b.Records)
+	binary.BigEndian.PutUint64(w[n+entryOff:], off)
+	binary.BigEndian.PutUint64(w[n+entryLen:], uint64(len(b.Data)))
+	binary.BigEndian.PutUint32(w[n+entryCRC:], CRC32CChecksum(b.Data))
 	return n + entryTail
 }
+
+// Byte offsets of the header fields, from the start of the object. The magic
+// is at offset 0.
+const (
+	hdrVersion = 4
+	hdrFlags   = 6
+	hdrBodyLen = 8
+	hdrBodyCRC = 16
+)
+
+// Byte offsets of the index entry fields after the topic bytes. The partition
+// is at offset 0. Each offset is from the start of the entry's partition field.
+const (
+	entryRecords = 4
+	entryOff     = 8
+	entryLen     = 16
+	entryCRC     = 24
+)
 
 func corrupt(format string, a ...any) error {
 	return fmt.Errorf("%w: %s", ErrCorrupt, fmt.Sprintf(format, a...))
@@ -211,17 +229,17 @@ func decodeHeader(obj []byte) ([]byte, error) {
 	if string(obj[:4]) != FileMarker {
 		return nil, corrupt("bad magic")
 	}
-	if v := binary.BigEndian.Uint16(obj[4:]); v != Version {
+	if v := binary.BigEndian.Uint16(obj[hdrVersion:]); v != Version {
 		return nil, corrupt("unsupported version %d", v)
 	}
-	if f := binary.BigEndian.Uint16(obj[6:]); f != 0 {
+	if f := binary.BigEndian.Uint16(obj[hdrFlags:]); f != 0 {
 		return nil, corrupt("unknown flags %#x", f)
 	}
-	if bl := binary.BigEndian.Uint64(obj[8:]); bl != uint64(len(obj)-HeaderSize) {
+	if bl := binary.BigEndian.Uint64(obj[hdrBodyLen:]); bl != uint64(len(obj)-HeaderSize) {
 		return nil, corrupt("body length %d, have %d bytes", bl, len(obj)-HeaderSize)
 	}
 	body := obj[HeaderSize:]
-	if binary.BigEndian.Uint32(obj[16:]) != CRC32CChecksum(body) {
+	if binary.BigEndian.Uint32(obj[hdrBodyCRC:]) != CRC32CChecksum(body) {
 		return nil, corrupt("body CRC mismatch")
 	}
 	return body, nil
@@ -274,11 +292,11 @@ func readIndexEntry(body []byte, p int, i uint64) (segmentIndexEntry, int, error
 	return segmentIndexEntry{
 		Entry: Entry{
 			TopicPartition: core.NewTopicPartition(topic, part),
-			Records:        binary.BigEndian.Uint32(body[q+4:]),
-			CRC:            binary.BigEndian.Uint32(body[q+24:]),
+			Records:        binary.BigEndian.Uint32(body[q+entryRecords:]),
+			CRC:            binary.BigEndian.Uint32(body[q+entryCRC:]),
 		},
-		off: binary.BigEndian.Uint64(body[q+8:]),
-		n:   binary.BigEndian.Uint64(body[q+16:]),
+		off: binary.BigEndian.Uint64(body[q+entryOff:]),
+		n:   binary.BigEndian.Uint64(body[q+entryLen:]),
 	}, q + entryTail, nil
 }
 

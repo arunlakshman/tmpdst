@@ -23,13 +23,11 @@
 set -euo pipefail
 unset AWS_PROFILE AWS_DEFAULT_PROFILE   # the box uses its IAM role, not a profile
 
-CPV_ROOT="${CPV_ROOT:-/opt/cpv}"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+. "$SCRIPT_DIR/defaults.sh"
 BIN_DIR="${BIN_DIR:-$CPV_ROOT/bin}"
 
-# Defaults. The values in $CPV_ROOT/env replace them when that file exists.
-REGION="ap-south-2"
-TABLE_PREFIX="mds_cpv1_"
-BUCKET="mds-cpverify-cpv1-478483354994"
+# The values in $CPV_ROOT/env replace the defaults when that file exists.
 if [[ -f $CPV_ROOT/env ]]; then
   . "$CPV_ROOT/env"
 fi
@@ -196,8 +194,21 @@ cmd_start() {
   echo "started $name: pid $pid, grpc port $grpc, metrics port $metrics, log $log"
 }
 
+# wait_stopped NAME TRIES : check the node every 0.1 s, up to TRIES times.
+# Returns 0 when it is stopped, 1 when it still runs after the last try.
+wait_stopped() {
+  local i
+  for i in $(seq 1 "$2"); do
+    if [[ $(node_state "$1") == stopped ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  return 1
+}
+
 cmd_stop() {
-  local name=${1:-} state pid i
+  local name=${1:-} state pid
   check_name "$name"
   state=$(node_state "$name")
   if [[ $state == stopped ]]; then
@@ -210,33 +221,27 @@ cmd_stop() {
     kill -CONT "$pid" 2>/dev/null || true
   fi
   kill -TERM "$pid" 2>/dev/null || true
-  for i in $(seq 1 100); do
-    if [[ $(node_state "$name") == stopped ]]; then
-      rm -f "$(pid_file "$name")"
-      echo "stopped $name"
-      return 0
-    fi
-    sleep 0.1
-  done
+  if wait_stopped "$name" 100; then
+    rm -f "$(pid_file "$name")"
+    echo "stopped $name"
+    return 0
+  fi
   die "$name is still running 10 s after SIGTERM. To force it: node.sh kill9 $name"
 }
 
 cmd_kill9() {
-  local name=${1:-} pid i
+  local name=${1:-} pid
   check_name "$name"
   if [[ $(node_state "$name") == stopped ]]; then
     die "$name is not running"
   fi
   pid=$(read_pid "$name")
   kill -KILL "$pid" 2>/dev/null || true
-  for i in $(seq 1 50); do
-    if [[ $(node_state "$name") == stopped ]]; then
-      rm -f "$(pid_file "$name")"
-      echo "killed $name (SIGKILL)"
-      return 0
-    fi
-    sleep 0.1
-  done
+  if wait_stopped "$name" 50; then
+    rm -f "$(pid_file "$name")"
+    echo "killed $name (SIGKILL)"
+    return 0
+  fi
   die "$name did not die after SIGKILL"
 }
 

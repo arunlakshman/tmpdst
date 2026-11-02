@@ -43,11 +43,22 @@ const (
 	counterCount
 )
 
-func counterNames() []string {
-	return []string{
-		"node_steps", "engine_steps", "sim_steps", "deliveries", "dropped_stale",
-		"dropped_by_crash", "timers_set", "timers_cancelled", "faults", "wakes",
-		"restarts", "graceful_stops", "deadline_kills",
+// counterNames gives the output name of each counter, by its index constant.
+func counterNames() [counterCount]string {
+	return [counterCount]string{
+		countNodeSteps:        "node_steps",
+		countFakeServiceSteps: "engine_steps",
+		countSimulatorSteps:   "sim_steps",
+		countDeliveries:       "deliveries",
+		countDroppedStale:     "dropped_stale",
+		countDroppedByCrash:   "dropped_by_crash",
+		countTimersSet:        "timers_set",
+		countTimersCancelled:  "timers_cancelled",
+		countFaults:           "faults",
+		countWakeUps:          "wakes",
+		countRestarts:         "restarts",
+		countGracefulStops:    "graceful_stops",
+		countDeadlineKills:    "deadline_kills",
 	}
 }
 

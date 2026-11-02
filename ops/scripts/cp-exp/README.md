@@ -9,9 +9,9 @@ The box has no SSH. Everything goes through AWS SSM and S3.
 1. `build.sh`: cross compile the three tools into `build/linux-arm64/`.
 2. `push.sh`: upload the binaries to `s3://BUCKET/bin/` and the on-box scripts
    to `s3://BUCKET/scripts/`.
-3. `box.sh "aws s3 cp s3://BUCKET/scripts/install.sh /tmp/cpv-install.sh --region ap-south-2 && bash /tmp/cpv-install.sh"`:
-   install on the box (first time, and after each push). Use the bucket name from
-   `push.sh`. Installs into `/opt/cpv`.
+3. `push.sh` prints the install command. Run it with `box.sh`: it copies the
+   scripts folder to `/tmp/cpv-bootstrap` and runs `install.sh` from there.
+   Do this first time, and after each push. Installs into `/opt/cpv`.
 4. Run an experiment script on the box, for example
    `box.sh "bash /opt/cpv/scripts/NAME.sh"`, or
    `box.sh -f ops/scripts/cp-exp/onbox/NAME.sh` for a one-off script.
@@ -28,6 +28,8 @@ output is in the S3 results.
 - On the box (`onbox/`, installed to `/opt/cpv/scripts`): `install.sh`,
   `node.sh` (start, stop, kill, freeze, wipe, status, wait-ready),
   `collect.sh` (gather logs, metrics and checks, then upload).
+- `onbox/defaults.sh` holds the region, table prefix, bucket, root folder and
+  laptop profile. Every script sources it. Change the defaults there only.
 
 ## Rule
 

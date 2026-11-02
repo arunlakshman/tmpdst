@@ -48,11 +48,11 @@ func skipTaggedFields(b []byte) ([]byte, error) {
 			return nil, malformed("tag id")
 		}
 		b = b[k:]
-		sz, k := binary.Uvarint(b)
-		if k <= 0 || sz > uint64(len(b)-k) {
+		sz, sizeLen := binary.Uvarint(b)
+		if sizeLen <= 0 || sz > uint64(len(b)-sizeLen) {
 			return nil, malformed("tag size")
 		}
-		b = b[k+int(sz):]
+		b = b[sizeLen+int(sz):]
 	}
 	return b, nil
 }

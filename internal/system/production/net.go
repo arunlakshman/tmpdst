@@ -228,10 +228,7 @@ func (c *conn) enqueue(it item) error {
 	}
 	c.q = append(c.q, it)
 	c.mu.Unlock()
-	select {
-	case c.wake <- struct{}{}:
-	default:
-	}
+	c.signalWriter()
 	return nil
 }
 
@@ -288,10 +285,7 @@ func (c *conn) abort(byCore bool) {
 			it.done(net.ErrClosed)
 		}
 	}
-	select {
-	case c.wake <- struct{}{}:
-	default:
-	}
+	c.signalWriter()
 }
 
 func (c *conn) readLoop() {

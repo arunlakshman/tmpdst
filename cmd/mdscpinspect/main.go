@@ -12,7 +12,9 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -210,12 +212,7 @@ func printTotals(slots []slotInfo) {
 	printCounts("   commands by kind", kinds)
 	printCounts("   slots by writer", writers)
 	fmt.Println("   records committed per topic/partition (the end offset must equal this):")
-	names := make([]string, 0, len(records))
-	for k := range records {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	for _, k := range names {
+	for _, k := range slices.Sorted(maps.Keys(records)) {
 		fmt.Printf("     %-28s %d\n", k, records[k])
 	}
 }
@@ -301,12 +298,7 @@ func listBucket(ctx context.Context, client *s3.Client, bucket string) {
 
 func printCounts(title string, counts map[string]int) {
 	fmt.Println(title + ":")
-	names := make([]string, 0, len(counts))
-	for k := range counts {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	for _, k := range names {
+	for _, k := range slices.Sorted(maps.Keys(counts)) {
 		fmt.Printf("     %-28s %d\n", k, counts[k])
 	}
 }

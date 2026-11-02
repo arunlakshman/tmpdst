@@ -18,6 +18,14 @@ func New(keyValue KeyValueStore) *StateUpdater { return &StateUpdater{keyValue: 
 // Close closes the store.
 func (a *StateUpdater) Close() error { return a.keyValue.Close() }
 
+// mustStore panics when a store call failed. This is on purpose: the
+// state updater stops (fail-stop) instead of going on with bad state.
+func mustStore(err error) {
+	if err != nil {
+		panic(fmt.Errorf("stateupdater: store failed: %w", err))
+	}
+}
+
 // Exec runs one ControlPlaneCall like speccheck.ControlPlane.Exec. For a CommitSegment the
 // call's Req is the log slot (it orders the idempotency window for Trim). A
 // store failure panics.
@@ -51,9 +59,7 @@ func (a *StateUpdater) Exec(act core.IOCall) core.IOResult {
 	default:
 		d.Err = core.ErrInvalid
 	}
-	if err != nil {
-		panic(fmt.Errorf("stateupdater: store failed: %w", err))
-	}
+	mustStore(err)
 	d.Req = call.Req
 	return d
 }
@@ -142,9 +148,7 @@ func (a *StateUpdater) CreateTopicIf(name string, partitions int32, failIfExists
 		}
 		addPartitions(transaction, map[string]int32{}, name, partitions)
 	})
-	if err != nil {
-		panic(fmt.Errorf("stateupdater: store failed: %w", err))
-	}
+	mustStore(err)
 	return code
 }
 
@@ -152,9 +156,7 @@ func (a *StateUpdater) CreateTopicIf(name string, partitions int32, failIfExists
 func (a *StateUpdater) End(topicPartition core.TopicPartition) core.Offset {
 	var end core.Offset
 	err := a.keyValue.View(func(transaction Transaction) { end = core.Offset(readVarint(transaction.Get(endKey(topicPartition)))) })
-	if err != nil {
-		panic(fmt.Errorf("stateupdater: store failed: %w", err))
-	}
+	mustStore(err)
 	return end
 }
 
@@ -193,9 +195,7 @@ func (a *StateUpdater) commitWithBases(slot int64, operation core.CommitSegment,
 		}
 		d = storeCommit(transaction, slot, operation, dig, assignAt(transaction, operation.Batches, bases))
 	})
-	if err != nil {
-		panic(fmt.Errorf("stateupdater: store failed: %w", err))
-	}
+	mustStore(err)
 	return d
 }
 

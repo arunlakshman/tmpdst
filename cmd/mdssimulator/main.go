@@ -118,7 +118,7 @@ func printSeeds(w io.Writer, rep simulator.Report, o options) (int, uint64) {
 		}
 		bad++
 		for _, f := range s.Failures {
-			_, _ = fmt.Fprintf(w, "FAIL seed %d: %s (%s) step=%d at=%v: %s\n", s.Seed, kind(f.Kind), f.Prop, f.Step, time.Duration(f.At), f.Msg)
+			_, _ = fmt.Fprintf(w, "FAIL seed %d: %s\n", s.Seed, failureText(f))
 		}
 		_, _ = fmt.Fprintf(w, "  repro: go run ./cmd/mdssimulator -scenario %s -seed %d\n", o.scenario, s.Seed)
 	}
@@ -150,7 +150,7 @@ func rerunSeed(stdout, stderr io.Writer, config func([]uint64) simulator.Config,
 	_, _ = fmt.Fprintf(stdout, "seed %d: steps=%d rand=%d hash=%016x crashes=%d trips=%d exits=%d\n",
 		seed, res.Steps, res.RandCalls, res.TraceHash, res.Crashes, res.Trips, res.Exits)
 	for _, f := range res.Failures {
-		_, _ = fmt.Fprintf(stdout, "FAIL %s (%s) step=%d at=%v: %s\n", kind(f.Kind), f.Prop, f.Step, time.Duration(f.At), f.Msg)
+		_, _ = fmt.Fprintf(stdout, "FAIL %s\n", failureText(f))
 	}
 	if len(res.Failures) > 0 {
 		return 1
@@ -172,4 +172,9 @@ func kind(k simulator.FailKind) string {
 		return n
 	}
 	return fmt.Sprintf("kind(%d)", k)
+}
+
+// failureText is the part of a FAIL line after the word FAIL (and after the seed, if printed).
+func failureText(f simulator.Failure) string {
+	return fmt.Sprintf("%s (%s) step=%d at=%v: %s", kind(f.Kind), f.Prop, f.Step, time.Duration(f.At), f.Msg)
 }

@@ -7,22 +7,19 @@ set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 
 R="$CPV_ROOT/results"
-ADDR0=18080; MET0=19101
-ADDR1=18081; MET1=19102
-TAKEOVER=5   # seconds, same as -takeover-after below
-FLAGS=(-checkpoint-every 30s -checkpoint-min-slots 200 -window-slots 1000000000 -takeover-after ${TAKEOVER}s -heartbeat 1s)
+FLAGS=(-checkpoint-every 30s -window-slots 1000000000 "${NODE_FLAGS[@]}")
 ACKED_A="$R/e1-acked-a.jsonl"; ACKED_B="$R/e1-acked-b.jsonl"; ACKED_ALL="$R/e1-acked-all.jsonl"
 
 "$CPV_ROOT/scripts/reset.sh" || { echo "RESET FAILED: the experiment did not start"; exit 2; }
 : >"$ACKED_A"; : >"$ACKED_B"
 
-# ready_ms NAME GRPC : wait until the node answers, print milliseconds since the call
+# wait_ms NAME : wait until the node answers, print milliseconds since the call
 wait_ms() {
   local t0; t0=$(now_ms)
   node.sh wait-ready "$1" 180 >/dev/null 2>&1 || echo "NOT-READY" >&2
   echo $(( $(now_ms) - t0 ))
 }
-query_count() { curl -s "http://127.0.0.1:$1/metrics" | grep 'dynamo_attempt_seconds_count{op="Query"' | awk '{s+=$2} END {print s+0}'; }
+query_count() { metric_sum "$1" 'dynamo_attempt_seconds_count{op="Query"'; }
 log_tail() { mdscpverify -mode ready -cp "127.0.0.1:$1" 2>/dev/null | sed -n 's/.*log_tail=\([0-9]*\).*/\1/p'; }
 
 echo "== start cp0 (rank 0) and cp1 (rank 1)"
@@ -108,19 +105,19 @@ check_failed=$(grep -c '^FAIL' "$R/e1-inspect.txt" || true)
 skips=$(grep -c '^SKIP' "$R/e1-inspect.txt" || true)
 replay_floor=$(( ${TAIL_B:-0} / 64 / 4 ))
 
-criterion "load A (through kill and restart): failed = 0" "$([ "$failed_a" = 0 ] && echo 1 || echo 0)" "acked=$acked_a failed=$failed_a retries=$retries_a"
+expect "load A (through kill and restart): failed = 0" "acked=$acked_a failed=$failed_a retries=$retries_a" [ "$failed_a" = 0 ]
 criterion "longest stall <= takeover-after + 5 s" "$(le "$stall_a" $(( (TAKEOVER + 5) * 1000 )))" "max_stall=${stall_a}ms"
-criterion "the standby took over (cp1 wrote slots)" "$([ -n "$(grep -m1 'writer=cp1' "$R/e1-slots.txt")" ] && echo 1 || echo 0)" "writer changes: $TRANSITIONS"
-criterion "no writer ping-pong in phases A and B (<= 2 changes)" "$([ "$N_TRANSITIONS" -le 2 ] && echo 1 || echo 0)" "changes=$N_TRANSITIONS"
+expect "the standby took over (cp1 wrote slots)" "writer changes: $TRANSITIONS" [ -n "$(grep -m1 'writer=cp1' "$R/e1-slots.txt")" ]
+expect "no writer ping-pong in phases A and B (<= 2 changes)" "changes=$N_TRANSITIONS" [ "$N_TRANSITIONS" -le 2 ]
 criterion "phase B: cp0 ready within 60 s on a wiped disk" "$(le "$READY_B_MS" 60000)" "${READY_B_MS}ms"
-criterion "phase B: cp0 restored from the checkpoint (few Query calls)" "$([ "$QUERIES_B" -le "$replay_floor" ] && echo 1 || echo 0)" "queries=$QUERIES_B, a full replay needs >= $((${TAIL_B:-0} / 64)), limit=$replay_floor"
+expect "phase B: cp0 restored from the checkpoint (few Query calls)" "queries=$QUERIES_B, a full replay needs >= $((${TAIL_B:-0} / 64)), limit=$replay_floor" [ "$QUERIES_B" -le "$replay_floor" ]
 criterion "phase C: both nodes ready within 120 s" "$(le "$(( READY_C0_MS > READY_C1_MS ? READY_C0_MS : READY_C1_MS ))" 120000)" "cp0=${READY_C0_MS}ms cp1=${READY_C1_MS}ms"
-criterion "load B after the full outage: failed = 0" "$([ "$failed_b" = 0 ] && echo 1 || echo 0)" "acked=$acked_b failed=$failed_b"
-criterion "live end offsets equal records acked (mode ends)" "$([ "$ENDS_RC" = 0 ] && echo 1 || echo 0)" "$(tail -2 "$R/e1-ends.txt" | head -1)"
-criterion "A1 to A5: mdscpinspect -check -acked passes" "$([ "$check_failed" = 0 ] && echo 1 || echo 0)" "failed_lines=$check_failed"
-criterion "no check was skipped" "$([ "$skips" = 0 ] && echo 1 || echo 0)" "skipped=$skips"
-criterion "A6: no ERROR line in node logs" "$([ "$errors" = 0 ] && echo 1 || echo 0)" "count=$errors"
-criterion "A7: no checkpoint skipped for control_io_pending" "$([ "$busy" = 0 ] && echo 1 || echo 0)" "count=$busy"
+expect "load B after the full outage: failed = 0" "acked=$acked_b failed=$failed_b" [ "$failed_b" = 0 ]
+expect "live end offsets equal records acked (mode ends)" "$(tail -2 "$R/e1-ends.txt" | head -1)" [ "$ENDS_RC" = 0 ]
+expect "A1 to A5: mdscpinspect -check -acked passes" "failed_lines=$check_failed" [ "$check_failed" = 0 ]
+expect "no check was skipped" "skipped=$skips" [ "$skips" = 0 ]
+expect "A6: no ERROR line in node logs" "count=$errors" [ "$errors" = 0 ]
+expect "A7: no checkpoint skipped for control_io_pending" "count=$busy" [ "$busy" = 0 ]
 verdict E1
 rc=$?
 ACKED_FILE="$ACKED_ALL" EXTRA_FILES="$VERDICT_FILE $R/e1-load-a.out $R/e1-load-b.out $R/e1-ends.txt $R/e1-inspect.txt $R/e1-slots.txt" collect.sh e1 >/dev/null 2>&1

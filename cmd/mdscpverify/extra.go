@@ -2,13 +2,16 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -77,15 +80,9 @@ func runEndsMain(target, ackedPath string) int {
 	client := controlplaneclient.New(target, nil)
 	defer func() { _ = client.Close() }()
 
-	partitions := make([]core.TopicPartition, 0, len(totals))
-	for tp := range totals {
-		partitions = append(partitions, tp)
-	}
-	sort.Slice(partitions, func(i, j int) bool {
-		if partitions[i].Topic != partitions[j].Topic {
-			return partitions[i].Topic < partitions[j].Topic
-		}
-		return partitions[i].Partition < partitions[j].Partition
+	partitions := slices.Collect(maps.Keys(totals))
+	slices.SortFunc(partitions, func(a, b core.TopicPartition) int {
+		return cmp.Or(strings.Compare(a.Topic, b.Topic), cmp.Compare(a.Partition, b.Partition))
 	})
 	wrong := 0
 	for _, tp := range partitions {
@@ -115,7 +112,7 @@ func runBigMain(target, topic string, bigBatches int) int {
 	defer cancel()
 	client := controlplaneclient.New(target, nil)
 	defer func() { _ = client.Close() }()
-	if _, err := waitStatus(ctx, client); err != nil {
+	if err := waitReady(ctx, client, io.Discard); err != nil {
 		fmt.Fprintln(os.Stderr, "FAIL:", err)
 		return 1
 	}
@@ -158,18 +155,4 @@ func runBigMain(target, topic string, bigBatches int) int {
 	fmt.Println("normal commit after the big one: acked")
 	fmt.Println("PASS")
 	return 0
-}
-
-func waitStatus(ctx context.Context, client *controlplaneclient.Client) (string, error) {
-	for {
-		status, err := client.GetStatus(ctx)
-		if err == nil {
-			return status.Role, nil
-		}
-		select {
-		case <-ctx.Done():
-			return "", fmt.Errorf("control plane never became ready: %w", err)
-		case <-time.After(time.Second):
-		}
-	}
 }

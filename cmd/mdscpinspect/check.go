@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -63,16 +66,17 @@ func runChecks(ctx context.Context, rows []row, s3Client *s3.Client, bucket, che
 
 	trimmed := checkStructure(c, rows, slots)
 	entries := orderedEntries(slots)
+	var replayHash uint64 // zero when no full replay was done
 	if trimmed {
 		c.note("full replay checks", "log has trimmed slots; only checkpoint plus tail can be replayed")
 	} else {
-		checkFullReplay(c, slots, entries)
+		replayHash = checkFullReplay(c, slots, entries)
 	}
 	if ackedPath != "" {
 		checkAcked(c, ackedPath, entries, trimmed)
 	}
 	if bucket != "" {
-		checkCheckpoint(ctx, c, s3Client, bucket, checkpointKey, slots, trimmed)
+		checkCheckpoint(ctx, c, s3Client, bucket, checkpointKey, slots, trimmed, replayHash)
 	}
 
 	fmt.Printf("== %d check(s) failed\n", c.failed)
@@ -149,8 +153,9 @@ func newFold() (*stateupdater.StateUpdater, func()) {
 }
 
 // checkFullReplay folds the whole log into an empty store and compares the
-// result with a number we count ourselves from the entries.
-func checkFullReplay(c *checker, slots []slotInfo, entries []slotEntry) {
+// result with a number we count ourselves from the entries. It returns the
+// state hash of the replay.
+func checkFullReplay(c *checker, slots []slotInfo, entries []slotEntry) uint64 {
 	fold, closeFold := newFold()
 	defer closeFold()
 	wanted := map[core.TopicPartition]int64{}
@@ -171,15 +176,9 @@ func checkFullReplay(c *checker, slots []slotInfo, entries []slotEntry) {
 			}
 		}
 	}
-	keys := make([]core.TopicPartition, 0, len(wanted))
-	for k := range wanted {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		if keys[i].Topic != keys[j].Topic {
-			return keys[i].Topic < keys[j].Topic
-		}
-		return keys[i].Partition < keys[j].Partition
+	keys := slices.Collect(maps.Keys(wanted))
+	slices.SortFunc(keys, func(a, b core.TopicPartition) int {
+		return cmp.Or(strings.Compare(a.Topic, b.Topic), cmp.Compare(a.Partition, b.Partition))
 	})
 	wrong := 0
 	for _, k := range keys {
@@ -191,15 +190,13 @@ func checkFullReplay(c *checker, slots []slotInfo, entries []slotEntry) {
 	c.check("replayed end offset == records in log, per partition", wrong == 0, fmt.Sprintf("%d partition(s) checked, %d wrong", len(keys), wrong))
 	c.check("distinct segment keys committed", len(seen) > 0, strconv.Itoa(len(seen)))
 	fmt.Printf("      full replay state hash: %016x\n", fold.StateHash())
-	replayHash = fold.StateHash()
+	return fold.StateHash()
 }
-
-// replayHash is the state hash after a full replay; zero when it was not done.
-var replayHash uint64
 
 // checkCheckpoint reads the S3 checkpoint, checks its CRC, restores it, replays
 // the log after it, and compares the state with the full replay.
-func checkCheckpoint(ctx context.Context, c *checker, client *s3.Client, bucket, key string, slots []slotInfo, trimmed bool) {
+// replayHash is the hash of that full replay; zero when it was not done.
+func checkCheckpoint(ctx context.Context, c *checker, client *s3.Client, bucket, key string, slots []slotInfo, trimmed bool, replayHash uint64) {
 	out, err := client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
 	if err != nil {
 		c.check("checkpoint object exists in S3", false, fmt.Sprintf("%s: %v", key, err))

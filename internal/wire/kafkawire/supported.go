@@ -1,6 +1,8 @@
 package kafkawire
 
 import (
+	"slices"
+
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"mds/internal/core"
@@ -58,10 +60,9 @@ var supported = []APIVersionRange{ //nolint:dupl // supported_test.go pins this 
 // Supported returns the advertised APIs in key order. Produce >= 3 so batches
 // are RecordBatch v2. Produce and Fetch stay below v13, which switches to
 // topic IDs. The group APIs are the classic protocol only (decision Q9): no
-// ConsumerGroupHeartbeat. The result aliases the package registry, so callers
-// must not mutate it.
+// ConsumerGroupHeartbeat. The result is a copy, so callers may change it.
 func Supported() []APIVersionRange {
-	return supported
+	return slices.Clone(supported)
 }
 
 // Range returns the supported version range of key.

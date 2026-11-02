@@ -4,16 +4,16 @@
 #
 # Usage: ops/scripts/cp-exp/push.sh
 # Env (optional):
-#   BUCKET            default mds-cpverify-cpv1-478483354994
-#   AWS_PROFILE_NAME  laptop AWS profile, default hydsandbox
+#   BUCKET            default in onbox/defaults.sh
+#   AWS_PROFILE_NAME  laptop AWS profile, default in onbox/defaults.sh
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(dirname "$0")/onbox/defaults.sh"
 
 # Go to the repo root. This script is in ops/scripts/cp-exp/.
 cd "$(dirname "$0")/../../.."
 
-BUCKET="${BUCKET:-mds-cpverify-cpv1-478483354994}"
-PROFILE="${AWS_PROFILE_NAME:-hydsandbox}"
-REGION="ap-south-2"
+PROFILE="$AWS_PROFILE_NAME"
 BIN_SRC="build/linux-arm64"
 SCRIPTS_SRC="ops/scripts/cp-exp/onbox"
 
@@ -38,4 +38,4 @@ aws s3 sync "$SCRIPTS_SRC/" "s3://$BUCKET/scripts/" --profile "$PROFILE" --regio
 
 echo
 echo "done. The first time (or after a change), on the box run install.sh:"
-echo "  ops/scripts/cp-exp/box.sh \"aws s3 cp s3://$BUCKET/scripts/install.sh /tmp/cpv-install.sh --region $REGION && bash /tmp/cpv-install.sh\""
+echo "  ops/scripts/cp-exp/box.sh \"rm -rf /tmp/cpv-bootstrap && aws s3 cp --recursive s3://$BUCKET/scripts/ /tmp/cpv-bootstrap/ --region $REGION && bash /tmp/cpv-bootstrap/install.sh\""

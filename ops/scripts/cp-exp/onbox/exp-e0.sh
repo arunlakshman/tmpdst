@@ -4,8 +4,6 @@
 set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 NODE=cp0
-GRPC=18080
-METRICS=19101
 
 "$CPV_ROOT/scripts/reset.sh" || { echo "RESET FAILED: the experiment did not start"; exit 2; }
 ACKED="$CPV_ROOT/results/e0-acked.jsonl"
@@ -13,11 +11,11 @@ ACKED="$CPV_ROOT/results/e0-acked.jsonl"
 
 started=$(now_ms)
 # -window-slots is huge so the log is NOT trimmed: the acked-key checks need the whole log.
-node.sh start $NODE 0 $GRPC $METRICS -checkpoint-every 30s -checkpoint-min-slots 200 -window-slots 1000000000
+node.sh start $NODE 0 $ADDR0 $MET0 -checkpoint-every 30s -checkpoint-min-slots 200 -window-slots 1000000000
 node.sh wait-ready $NODE 60 || true
 ready_s=$(python3 -c "print(round(($(now_ms) - $started)/1000.0, 1))")
 
-mdscpverify -mode load -cp 127.0.0.1:$GRPC -duration 60s -workers 4 -acked-out "$ACKED" \
+mdscpverify -mode load -cp 127.0.0.1:$ADDR0 -duration 60s -workers 4 -acked-out "$ACKED" \
   >"$CPV_ROOT/results/e0-load.out" 2>"$CPV_ROOT/results/e0-load.err"
 summary=$(last_summary "$CPV_ROOT/results/e0-load.out")
 sleep 35 # one more checkpoint timer fire after the load
@@ -30,21 +28,21 @@ written=$(decisions | grep -c '"written":true' || true)
 busy=$(decisions | grep -c 'control_io_pending' || true)
 
 criterion "node ready within 30 s" "$(le "$ready_s" 30)" "${ready_s}s"
-criterion "load: failed = 0" "$([ "$failed" = 0 ] && echo 1 || echo 0)" "acked=$acked failed=$failed"
+expect "load: failed = 0" "acked=$acked failed=$failed" [ "$failed" = 0 ]
 criterion "load: p50 <= 20 ms (provisional)" "$(le "$p50" 20)" "p50=${p50}ms"
 criterion "load: p99 <= 150 ms (provisional)" "$(le "$p99" 150)" "p99=${p99}ms"
-criterion "at least one checkpoint written" "$([ "$written" -ge 1 ] && echo 1 || echo 0)" "written=$written"
-criterion "A7: no checkpoint skipped for control_io_pending" "$([ "$busy" = 0 ] && echo 1 || echo 0)" "count=$busy"
+expect "at least one checkpoint written" "written=$written" [ "$written" -ge 1 ]
+expect "A7: no checkpoint skipped for control_io_pending" "count=$busy" [ "$busy" = 0 ]
 errors=$(count_in_logs '"level":"ERROR"')
-criterion "A6: no ERROR line in node logs" "$([ "$errors" = 0 ] && echo 1 || echo 0)" "count=$errors"
+expect "A6: no ERROR line in node logs" "count=$errors" [ "$errors" = 0 ]
 
 node.sh stop $NODE
 mdscpinspect -check -region "$REGION" -table "$TABLE" -bucket "$BUCKET" -acked "$ACKED" \
   >"$CPV_ROOT/results/e0-inspect.txt" 2>&1
 check_failed=$(grep -c '^FAIL' "$CPV_ROOT/results/e0-inspect.txt" || true)
-criterion "A1 to A5: mdscpinspect -check -acked passes" "$([ "$check_failed" = 0 ] && echo 1 || echo 0)" "failed_lines=$check_failed"
+expect "A1 to A5: mdscpinspect -check -acked passes" "failed_lines=$check_failed" [ "$check_failed" = 0 ]
 skips=$(grep -c '^SKIP' "$CPV_ROOT/results/e0-inspect.txt" || true)
-criterion "no check was skipped (a skip hides a check)" "$([ "$skips" = 0 ] && echo 1 || echo 0)" "skipped=$skips"
+expect "no check was skipped (a skip hides a check)" "skipped=$skips" [ "$skips" = 0 ]
 verdict E0
 rc=$?
 ACKED_FILE="$ACKED" EXTRA_FILES="$VERDICT_FILE $CPV_ROOT/results/e0-load.out $CPV_ROOT/results/e0-inspect.txt" collect.sh e0

@@ -301,17 +301,12 @@ func (b *Broker) knows(topicPartition core.TopicPartition) bool {
 
 func (b *Broker) merge(infos []core.TopicInfo) {
 	for _, in := range infos {
-		found := false
-		for i := range b.topics {
-			if b.topics[i].Name == in.Name {
-				b.topics[i].Partitions = max(b.topics[i].Partitions, in.Partitions)
-				found = true
-				break
-			}
-		}
-		if !found {
+		i := slices.IndexFunc(b.topics, func(t core.TopicInfo) bool { return t.Name == in.Name })
+		if i < 0 {
 			b.topics = append(b.topics, in)
+			continue
 		}
+		b.topics[i].Partitions = max(b.topics[i].Partitions, in.Partitions)
 	}
 }
 

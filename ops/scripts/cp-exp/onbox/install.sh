@@ -6,15 +6,20 @@
 # Safe to run again. Files are replaced by rename, so a node that is
 # running keeps its old binary until it is restarted.
 #
+# Run it from a folder that also holds defaults.sh (push.sh prints the
+# command: it copies the whole scripts folder to /tmp/cpv-bootstrap first).
+#
 # Usage: install.sh
 # Env (optional): BUCKET, CPV_ROOT
 set -euo pipefail
 unset AWS_PROFILE AWS_DEFAULT_PROFILE   # the box uses its IAM role, not a profile
 
-BUCKET="${BUCKET:-mds-cpverify-cpv1-478483354994}"
-CPV_ROOT="${CPV_ROOT:-/opt/cpv}"
-REGION="ap-south-2"
-TABLE_PREFIX="mds_cpv1_"
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+if [[ ! -f $SCRIPT_DIR/defaults.sh ]]; then
+  echo "error: defaults.sh is not next to install.sh in $SCRIPT_DIR. Use the command from push.sh." >&2
+  exit 1
+fi
+. "$SCRIPT_DIR/defaults.sh"
 
 if ! command -v aws >/dev/null 2>&1; then
   echo "error: aws CLI not found" >&2

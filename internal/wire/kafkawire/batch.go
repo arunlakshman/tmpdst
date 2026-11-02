@@ -47,6 +47,14 @@ const (
 	CodecZstd   = 4
 )
 
+// Attribute bits of a v2 batch. codecMask selects the codec id (the low three
+// bits). flagTransactional and flagControl are single bits above it.
+const (
+	codecMask         = 7
+	flagTransactional = 0x10
+	flagControl       = 0x20
+)
+
 // crc32cChecksum is CRC32C (Castagnoli); MakeTable returns the cached table.
 func crc32cChecksum(b []byte) uint32 { return crc32.Checksum(b, crc32.MakeTable(crc32.Castagnoli)) }
 
@@ -68,7 +76,7 @@ func BuildBatch(p BatchParams, recs []kmsg.Record) ([]byte, error) {
 	if len(recs) == 0 {
 		return nil, errors.New("kafkawire: empty batch")
 	}
-	if p.Attributes&7 != 0 {
+	if p.Attributes&codecMask != 0 {
 		return nil, fmt.Errorf("%w: compression requested", ErrUnsupportedBatch)
 	}
 	return assembleBatch(p, int32(len(recs)), encodeRecords(recs)), nil
@@ -98,8 +106,8 @@ func BuildOpaqueBatch(p BatchParams, numRecords int32, payload []byte) ([]byte, 
 	if numRecords <= 0 || len(payload) == 0 {
 		return nil, errors.New("kafkawire: empty batch")
 	}
-	if p.Attributes&7 > CodecZstd {
-		return nil, fmt.Errorf("%w: %d", ErrUnknownCodec, p.Attributes&7)
+	if p.Attributes&codecMask > CodecZstd {
+		return nil, fmt.Errorf("%w: %d", ErrUnknownCodec, p.Attributes&codecMask)
 	}
 	return assembleBatch(p, numRecords, payload), nil
 }
@@ -141,13 +149,13 @@ type Batch struct {
 }
 
 // IsTransactional reports the transactional attribute flag bit.
-func (b Batch) IsTransactional() bool { return b.Attributes&0x10 != 0 }
+func (b Batch) IsTransactional() bool { return b.Attributes&flagTransactional != 0 }
 
 // IsControl reports the control attribute flag bit.
-func (b Batch) IsControl() bool { return b.Attributes&0x20 != 0 }
+func (b Batch) IsControl() bool { return b.Attributes&flagControl != 0 }
 
 // Codec is the compression codec id (CodecNone .. CodecZstd).
-func (b Batch) Codec() int { return int(b.Attributes & 7) }
+func (b Batch) Codec() int { return int(b.Attributes & codecMask) }
 
 // ParseBatch parses and verifies exactly one batch without decompressing it.
 // It rejects magic != 2 with ErrUnsupportedBatch, a valid-CRC batch with a
@@ -191,14 +199,14 @@ func checkBatchShape(b []byte) error {
 
 func decodeBatch(b []byte) (Batch, error) {
 	var out Batch
-	if c := binary.BigEndian.Uint16(b[crcStart:]) & 7; c > CodecZstd {
+	if c := binary.BigEndian.Uint16(b[crcStart:]) & codecMask; c > CodecZstd {
 		return out, fmt.Errorf("%w: %d", ErrUnknownCodec, c)
 	}
 	var rb kmsg.RecordBatch
 	if err := rb.ReadFrom(b); err != nil {
 		return out, fmt.Errorf("%w: %w", ErrCorrupt, err)
 	}
-	if !countFits(rb.Attributes&7 != 0, rb.NumRecords, len(rb.Records)) {
+	if !countFits(rb.Attributes&codecMask != 0, rb.NumRecords, len(rb.Records)) {
 		return out, fmt.Errorf("%w: %d records in %d bytes", ErrCorrupt, rb.NumRecords, len(rb.Records))
 	}
 	return Batch{

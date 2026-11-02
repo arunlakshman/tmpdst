@@ -120,9 +120,9 @@ type fetchRow struct {
 func (b *Broker) offsetFetch(s *slot, r *kmsg.OffsetFetchRequest) []core.Action {
 	response := kmsg.NewPtrOffsetFetchResponse()
 	s.response = response
-	batched := r.Version >= 8
 	var asks []fetchAsk
-	if batched {
+	var set rowSetter // chosen once, by version
+	if r.Version >= 8 {
 		response.Groups = make([]kmsg.OffsetFetchResponseGroup, len(r.Groups))
 		for i, g := range r.Groups {
 			response.Groups[i].Group = g.Group
@@ -132,41 +132,48 @@ func (b *Broker) offsetFetch(s *slot, r *kmsg.OffsetFetchRequest) []core.Action 
 			}
 			asks = append(asks, newFetchAsk(r.Version, g.Group, topics))
 		}
+		set = func(idx int, rows []fetchRow, code kafkaErrorCode) {
+			setGroupRows(response, idx, rows, code)
+		}
 	} else {
 		var topics []askTopic
 		for _, t := range r.Topics {
 			topics = append(topics, askTopic{topic: t.Topic, parts: t.Partitions})
 		}
 		asks = []fetchAsk{newFetchAsk(r.Version, r.Group, topics)}
+		set = func(_ int, rows []fetchRow, code kafkaErrorCode) {
+			setTopicRows(response, rows, code)
+		}
 	}
 	var acts []core.Action
 	for i, a := range asks {
-		acts = append(acts, b.fetchGroup(s, response, i, batched, a)...)
+		acts = append(acts, b.fetchGroup(s, set, i, a)...)
 	}
 	return acts
 }
 
+// rowSetter writes the rows and the code of group idx into the response.
+// Version 8 has one slot per group. Earlier versions have one slot for all.
+type rowSetter func(idx int, rows []fetchRow, code kafkaErrorCode)
+
 // fetchGroup answers one group of an OffsetFetch. Its answer goes to group idx
 // (version 8) or to the whole response (earlier versions).
-func (b *Broker) fetchGroup(s *slot, response *kmsg.OffsetFetchResponse, idx int, batched bool, a fetchAsk) []core.Action {
-	set := func(rows []fetchRow, code kafkaErrorCode) {
-		setFetchRows(response, idx, batched, rows, code)
-	}
+func (b *Broker) fetchGroup(s *slot, set rowSetter, idx int, a fetchAsk) []core.Action {
 	switch {
 	case a.name == "":
-		set(errRows(a, errInvalidGroupID), errInvalidGroupID)
+		set(idx, errRows(a, errInvalidGroupID), errInvalidGroupID)
 		return nil
 	case !a.all && len(a.want) == 0: // nothing asked
-		set(nil, errNone)
+		set(idx, nil, errNone)
 		return nil
 	}
 	fill := func(e core.ControlPlaneDone) {
 		if e.Err != core.OK {
 			code := groupErrCode(e.Err)
-			set(errRows(a, code), code)
+			set(idx, errRows(a, code), code)
 			return
 		}
-		set(fetchRows(a, core.ResponseAs[core.OffsetFetchResp](e).Offsets), errNone)
+		set(idx, fetchRows(a, core.ResponseAs[core.OffsetFetchResp](e).Offsets), errNone)
 	}
 	return b.groupCall(s, core.OffsetFetch{Group: a.name, Partitions: a.want}, 0, fill)
 }
@@ -176,9 +183,14 @@ func (b *Broker) fetchGroup(s *slot, response *kmsg.OffsetFetchResponse, idx int
 func errRows(a fetchAsk, code kafkaErrorCode) []fetchRow {
 	var rows []fetchRow
 	for _, topicPartition := range a.want {
-		rows = append(rows, fetchRow{topicPartition: topicPartition, offset: -1, epoch: -1, code: code})
+		rows = append(rows, unknownRow(topicPartition, code))
 	}
 	return rows
+}
+
+// unknownRow is a partition with no committed offset: offset -1, epoch -1.
+func unknownRow(topicPartition core.TopicPartition, code kafkaErrorCode) fetchRow {
+	return fetchRow{topicPartition: topicPartition, offset: -1, epoch: -1, code: code}
 }
 
 // fetchRows turns the control plane answer into rows. A list of partitions
@@ -197,7 +209,7 @@ func fetchRows(a fetchAsk, got []core.PartitionOffset) []fetchRow {
 			rows = append(rows, rowOf(got[i]))
 			continue
 		}
-		rows = append(rows, fetchRow{topicPartition: topicPartition, offset: -1, epoch: -1})
+		rows = append(rows, unknownRow(topicPartition, errNone))
 	}
 	return rows
 }
@@ -206,13 +218,14 @@ func rowOf(o core.PartitionOffset) fetchRow {
 	return fetchRow{topicPartition: o.TopicPartition, offset: o.Offset, epoch: o.LeaderEpoch, meta: new(o.Metadata)}
 }
 
-// setFetchRows writes rows and a group code into the response.
-func setFetchRows(response *kmsg.OffsetFetchResponse, idx int, batched bool, rows []fetchRow, code kafkaErrorCode) {
-	if batched {
-		g := &response.Groups[idx]
-		g.Topics, g.ErrorCode = groupTopics(rows), int16(code)
-		return
-	}
+// setGroupRows writes rows and a code into group idx (version 8).
+func setGroupRows(response *kmsg.OffsetFetchResponse, idx int, rows []fetchRow, code kafkaErrorCode) {
+	g := &response.Groups[idx]
+	g.Topics, g.ErrorCode = groupTopics(rows), int16(code)
+}
+
+// setTopicRows writes rows and a code into the whole response (versions 0 to 7).
+func setTopicRows(response *kmsg.OffsetFetchResponse, rows []fetchRow, code kafkaErrorCode) {
 	response.Topics, response.ErrorCode = fetchTopics(rows), int16(code)
 }
 

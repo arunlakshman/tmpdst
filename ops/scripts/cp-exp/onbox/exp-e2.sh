@@ -7,18 +7,15 @@ set -uo pipefail
 . "$(dirname "$0")/lib.sh"
 
 R="$CPV_ROOT/results"
-ADDR0=18080; MET0=19101
-ADDR1=18081; MET1=19102
-TAKEOVER=5
 FREEZE_SECONDS=$(( TAKEOVER + 10 ))
-FLAGS=(-checkpoint-every 30s -checkpoint-min-slots 200 -window-slots 1000000000 -takeover-after ${TAKEOVER}s -heartbeat 1s)
+FLAGS=(-checkpoint-every 30s -window-slots 1000000000 "${NODE_FLAGS[@]}")
 ACKED="$R/e2-acked.jsonl"
 
 "$CPV_ROOT/scripts/reset.sh" || { echo "RESET FAILED: the experiment did not start"; exit 2; }
 : >"$ACKED"
 
 conflicts() { # conflicts METRICS_PORT : failed conditional writes (HTTP 400) seen by a node
-  curl -s -m 3 "http://127.0.0.1:$1/metrics" | grep 'dynamo_attempt_seconds_count{op="PutItem",result="http_400"' | awk '{s+=$2} END {print s+0}'
+  metric_sum "$1" 'dynamo_attempt_seconds_count{op="PutItem",result="http_400"'
 }
 
 echo "== start cp0 (rank 0) and cp1 (rank 1)"
@@ -87,16 +84,16 @@ busy=$(decisions | grep -c 'control_io_pending' || true)
 check_failed=$(grep -c '^FAIL' "$R/e2-inspect.txt" || true)
 skips=$(grep -c '^SKIP' "$R/e2-inspect.txt" || true)
 
-criterion "load: failed = 0" "$([ "$failed" = 0 ] && echo 1 || echo 0)" "acked=$acked failed=$failed retries=$retries"
+expect "load: failed = 0" "acked=$acked failed=$failed retries=$retries" [ "$failed" = 0 ]
 criterion "longest stall <= takeover-after + 5 s" "$(le "$stall" $(( (TAKEOVER + 5) * 1000 )))" "max_stall=${stall}ms"
-criterion "the standby took over (cp1 wrote slots)" "$([ -n "$(grep -m1 'writer=cp1' "$R/e2-slots.txt")" ] && echo 1 || echo 0)" "runs: $RUNS"
-criterion "writer changes <= 4 (the E1 failback pattern, issue 24)" "$([ "$N_CHANGES" -le 4 ] && echo 1 || echo 0)" "changes=$N_CHANGES"
-criterion "cp0 alone: live end offsets equal records acked" "$([ "$ENDS0" = 0 ] && echo 1 || echo 0)" "rc=$ENDS0"
-criterion "cp1 alone: live end offsets equal records acked" "$([ "$ENDS1" = 0 ] && echo 1 || echo 0)" "rc=$ENDS1"
-criterion "A1 to A5: mdscpinspect -check -acked passes" "$([ "$check_failed" = 0 ] && echo 1 || echo 0)" "failed_lines=$check_failed"
-criterion "no check was skipped" "$([ "$skips" = 0 ] && echo 1 || echo 0)" "skipped=$skips"
-criterion "A6: no ERROR line in node logs" "$([ "$errors" = 0 ] && echo 1 || echo 0)" "count=$errors"
-criterion "A7: no checkpoint skipped for control_io_pending" "$([ "$busy" = 0 ] && echo 1 || echo 0)" "count=$busy"
+expect "the standby took over (cp1 wrote slots)" "runs: $RUNS" [ -n "$(grep -m1 'writer=cp1' "$R/e2-slots.txt")" ]
+expect "writer changes <= 4 (the E1 failback pattern, issue 24)" "changes=$N_CHANGES" [ "$N_CHANGES" -le 4 ]
+expect "cp0 alone: live end offsets equal records acked" "rc=$ENDS0" [ "$ENDS0" = 0 ]
+expect "cp1 alone: live end offsets equal records acked" "rc=$ENDS1" [ "$ENDS1" = 0 ]
+expect "A1 to A5: mdscpinspect -check -acked passes" "failed_lines=$check_failed" [ "$check_failed" = 0 ]
+expect "no check was skipped" "skipped=$skips" [ "$skips" = 0 ]
+expect "A6: no ERROR line in node logs" "count=$errors" [ "$errors" = 0 ]
+expect "A7: no checkpoint skipped for control_io_pending" "count=$busy" [ "$busy" = 0 ]
 verdict E2
 rc=$?
 ACKED_FILE="$ACKED" EXTRA_FILES="$VERDICT_FILE $R/e2-load.out $R/e2-ends-cp0.txt $R/e2-ends-cp1.txt $R/e2-inspect.txt $R/e2-slots.txt" collect.sh e2 >/dev/null 2>&1

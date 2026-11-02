@@ -83,8 +83,8 @@ func TestClientAgainstMachine(t *testing.T) {
 	_, err = c.Call(ctx, core.CommitSegment{SegmentKey: "s1", Batches: []core.PendingBatch{
 		{TopicPartition: topicPartition, Records: 1, Loc: core.SegmentRef{Key: "s1", Len: 1}},
 	}})
-	var be *Error
-	if !errors.As(err, &be) || be.Code != core.ErrConflict {
+	be, ok := errors.AsType[*Error](err)
+	if !ok || be.Code != core.ErrConflict {
 		t.Fatalf("want conflict, got %v", err)
 	}
 }
@@ -97,8 +97,8 @@ func TestCallCtxAndUnknownOp(t *testing.T) {
 		t.Fatalf("canceled ctx: %v", err)
 	}
 	_, err := c.Call(t.Context(), nil)
-	var be *Error
-	if !errors.As(err, &be) || be.Code != core.ErrInvalid {
+	be, ok := errors.AsType[*Error](err)
+	if !ok || be.Code != core.ErrInvalid {
 		t.Fatalf("unknown op: %v", err)
 	}
 }
@@ -187,8 +187,8 @@ func TestMapRPCErrDetail(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := convertRPCError("CommitSegment", st.Err())
-	var be *Error
-	if !errors.As(got, &be) || be.Code != core.ErrConflict {
+	be, ok := errors.AsType[*Error](got)
+	if !ok || be.Code != core.ErrConflict {
 		t.Fatalf("got %v", got)
 	}
 	if ce, ok := errors.AsType[*CallError](convertRPCError("x", errors.New("plain"))); !ok || !ce.Sent {

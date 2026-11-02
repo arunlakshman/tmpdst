@@ -76,11 +76,11 @@ func (l *DynamoLog) Append(ctx context.Context, slot core.LogPosition, data []by
 		ConditionExpression:                 aws.String("attribute_not_exists(pk)"),
 		ReturnValuesOnConditionCheckFailure: types.ReturnValuesOnConditionCheckFailureAllOld,
 	})
-	var cc *types.ConditionalCheckFailedException
+	cc, isCC := errors.AsType[*types.ConditionalCheckFailedException](err)
 	switch {
 	case err == nil:
 		return nil, false, nil
-	case !errors.As(err, &cc):
+	case !isCC:
 		return nil, false, err
 	case cc.Item != nil:
 		return itemData(cc.Item), true, nil

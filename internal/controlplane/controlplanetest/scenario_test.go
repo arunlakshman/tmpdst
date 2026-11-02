@@ -147,8 +147,8 @@ func TestRoundTrip(t *testing.T) {
 	}
 	commit.Batches[0].Records = 9
 	_, err = c.Call(ctx, commit)
-	var be *controlplaneclient.Error
-	if !errors.As(err, &be) || be.Code != core.ErrConflict {
+	be, ok := errors.AsType[*controlplaneclient.Error](err)
+	if !ok || be.Code != core.ErrConflict {
 		t.Fatalf("want ErrConflict, got %v", err)
 	}
 	if code, out := (controlplaneclient.Classifier{}).Classify(core.ControlPlaneCall{Op: commit}, err); code != core.ErrConflict || out != core.NotApplied {

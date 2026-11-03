@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "mdscontrolplane.name" . }}
+  labels:
+    {{- include "mdscontrolplane.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "mdscontrolplane.labels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "mdscontrolplane.labels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mdscontrolplane
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - -addr=:{{ .Values.service.grpcPort }}
+            - -metrics-addr=:{{ .Values.service.metricsPort }}
+            - -store={{ .Values.controlPlane.store }}
+            - -log-level={{ .Values.controlPlane.logLevel }}
+            {{- range .Values.controlPlane.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.service.grpcPort }}
+            - name: metrics
+              containerPort: {{ .Values.service.metricsPort }}
+          readinessProbe:
+            grpc:
+              port: {{ .Values.service.grpcPort }}
+            periodSeconds: 5
+          livenessProbe:
+            grpc:
+              port: {{ .Values.service.grpcPort }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

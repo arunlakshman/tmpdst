@@ -1,0 +1,27 @@
+image:
+  repository: mdscontrolplane
+  tag: dev
+  pullPolicy: IfNotPresent
+
+# One replica: the default "mem" store keeps state inside the pod, so a second
+# pod would be a separate, empty control plane.
+replicaCount: 1
+
+controlPlane:
+  # mem, dynamolog or postgres. See `mdscontrolplane -help`.
+  store: mem
+  logLevel: info
+  # Extra command line flags, for example ["-region=us-west-2"].
+  extraArgs: []
+
+service:
+  type: ClusterIP
+  grpcPort: 8080
+  metricsPort: 9101
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi

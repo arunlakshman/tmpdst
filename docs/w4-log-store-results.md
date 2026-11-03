@@ -1,5 +1,7 @@
 # W4: the log store at 500k, 750k and 1M msg/s (random clients, 288 partitions)
 
+*Superseded in part by decision 63: roles are an epoch claim with a fence entry, and failback is removed. The text below is kept as it was written.*
+
 *Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This document is a record.*
 
 Run w4, 2026-10-20/21, ap-south-2a, account 478483354994. Stack: 6 brokers m6in.4xlarge, 2 loadgens m6in.8xlarge (loadgen 0 produced, loadgen 1 idle),

@@ -26,13 +26,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
+	"github.com/manifesterio/mds/internal/controlplane/statemachine"
 	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
 )
 
-const (
-	envelopeMarker = 0xC7 // rank and writer name in front of a payload
-	groupMarker    = 0xC5 // several commands in one slot
-)
+// groupMarker starts a slot with several commands. The envelope (epoch and
+// writer name in front of a payload) has no marker here: statemachine.EntryWriter
+// checks it, and its marker byte is private to that package.
+const groupMarker = 0xC5
 
 var kindNames = []string{"noop", "commit", "create-topic", "group-install", "group-assign", "group-remove", "offset-commit", "create-topic-exclusive"}
 
@@ -45,17 +46,20 @@ func main() {
 	head := flag.Int("head", 0, "show the first N log slots, decoded")
 	tail := flag.Int("tail", 0, "show the last N log slots, decoded")
 	doCheck := flag.Bool("check", false, "verify the stored log and checkpoint; exit 1 if any check fails")
-	checkpointKey := flag.String("checkpoint-key", "cp/checkpoint/latest", "S3 key of the checkpoint")
+	checkpointPrefix := flag.String("checkpoint-prefix", "cp/checkpoint/", "S3 key prefix of the checkpoints; the newest one is checked")
 	ackedPath := flag.String("acked", "", "with -check: the acked file that mdscpverify -acked-out wrote; checks that every acked commit is in the log with the same offsets")
 	flag.Parse()
 
 	ctx := context.Background()
 	awsConfig, err := config.LoadDefaultConfig(ctx, config.WithRegion(*region))
 	check(err)
-	rows := readAll(ctx, dynamodb.NewFromConfig(awsConfig), *table)
+	db := dynamodb.NewFromConfig(awsConfig)
+	rows := readAll(ctx, db, *table)
+	meta := readMeta(ctx, db, *table)
+	printMeta(meta)
 	s3Client := s3.NewFromConfig(awsConfig)
 	if *doCheck {
-		runChecks(ctx, rows, s3Client, *bucket, *checkpointKey, *ackedPath)
+		runChecks(ctx, rows, meta, s3Client, *bucket, *checkpointPrefix, *ackedPath)
 		return
 	}
 	report(rows, *verbose, *oneSlot, *head, *tail)
@@ -101,13 +105,14 @@ func readAll(ctx context.Context, db *dynamodb.Client, table string) []row {
 
 // slotInfo is one decoded log slot.
 type slotInfo struct {
-	slot    int64
-	size    int
-	rank    uint64
-	writer  string
-	grouped bool
-	entries []stateupdater.Entry
-	bad     string
+	slot      int64
+	size      int
+	epoch     uint64 // writer epoch from the envelope; 0 when there is none
+	writer    string // writer name from the envelope
+	enveloped bool   // false for entries written without an envelope
+	grouped   bool
+	entries   []stateupdater.Entry
+	bad       string
 }
 
 func report(rows []row, verbose bool, oneSlot int64, head, tail int) {
@@ -119,7 +124,7 @@ func report(rows []row, verbose bool, oneSlot int64, head, tail int) {
 	if len(slots) == 0 {
 		return
 	}
-	printGaps(slots)
+	printMissingSlots(slots)
 	printTotals(slots)
 	for _, r := range rows {
 		if r.partitionKey == "LOG" && r.ttl > 0 {
@@ -179,15 +184,15 @@ func decodeRows(rows []row) ([]slotInfo, map[string]int) {
 	return slots, other
 }
 
-func printGaps(slots []slotInfo) {
-	gaps := 0
+func printMissingSlots(slots []slotInfo) {
+	missing := 0
 	for i := 1; i < len(slots); i++ {
 		if slots[i].slot != slots[i-1].slot+1 {
-			gaps++
-			fmt.Printf("   GAP between slot %d and %d\n", slots[i-1].slot, slots[i].slot)
+			missing++
+			fmt.Printf("   MISSING slots between %d and %d\n", slots[i-1].slot, slots[i].slot)
 		}
 	}
-	fmt.Printf("   slots %d .. %d, gaps: %d\n", slots[0].slot, slots[len(slots)-1].slot, gaps)
+	fmt.Printf("   slots %d .. %d, missing: %d\n", slots[0].slot, slots[len(slots)-1].slot, missing)
 }
 
 func printTotals(slots []slotInfo) {
@@ -197,7 +202,7 @@ func printTotals(slots []slotInfo) {
 	for _, s := range slots {
 		bytes += s.size
 		biggest = max(biggest, s.size)
-		writers[fmt.Sprintf("%s(rank %d)", s.writer, s.rank)]++
+		writers[fmt.Sprintf("%s(epoch %d)", s.writer, s.epoch)]++
 		if s.bad != "" {
 			bad++
 		}
@@ -232,21 +237,19 @@ func printSlot(s slotInfo) {
 	for _, e := range s.entries {
 		kinds.WriteString(" " + kindName(e.Kind))
 	}
-	fmt.Printf("   slot %-6d %5d bytes  writer=%s rank=%d group=%v commands=%d%s %s\n", s.slot, s.size, s.writer, s.rank, s.grouped, len(s.entries), kinds.String(), s.bad)
+	fmt.Printf("   slot %-6d %5d bytes  writer=%s epoch=%d group=%v commands=%d%s %s\n", s.slot, s.size, s.writer, s.epoch, s.grouped, len(s.entries), kinds.String(), s.bad)
 }
 
 // decodeSlot understands the two wrappers the state machine writes:
-// 0xC7 [rank] [writer-length] [writer] then either 0xC5 [id] [count] ([length] [entry])... or one entry.
+// 0xC7 [epoch] [writer-length] [writer] then either 0xC5 [id] [count] ([length] [entry])... or one entry.
+// The epoch and writer come from statemachine.EntryWriter, the same decoder the node uses.
 func decodeSlot(data []byte) slotInfo {
 	info := slotInfo{}
-	if len(data) > 0 && data[0] == envelopeMarker {
-		rank, rest, ok := uvarint(data[1:])
-		n, rest, ok2 := uvarint(rest)
-		if !ok || !ok2 || n > uint64(len(rest)) {
-			info.bad = "BAD envelope"
-			return info
-		}
-		info.rank, info.writer = rank, string(rest[:n])
+	info.epoch, info.writer, info.enveloped = statemachine.EntryWriter(data)
+	if info.enveloped {
+		// EntryWriter has checked the header, so the payload starts after the writer name.
+		_, rest, _ := uvarint(data[1:]) // epoch
+		n, rest, _ := uvarint(rest)     // writer name length
 		data = rest[n:]
 	}
 	if len(data) > 0 && data[0] == groupMarker {

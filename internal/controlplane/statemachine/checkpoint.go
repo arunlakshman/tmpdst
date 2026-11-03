@@ -2,6 +2,7 @@ package statemachine
 
 import (
 	"bytes"
+	"fmt"
 
 	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
 	"github.com/manifesterio/mds/internal/core"
@@ -10,18 +11,26 @@ import (
 const (
 	timerCheckpoint = core.TimerID(4)
 
-	defaultCheckpointKey = "checkpoint/latest"
+	defaultCheckpointPrefix = "checkpoint/"
 )
 
-func (m *Machine) checkpointKey() string {
-	if m.config.CheckpointKey != "" {
-		return m.config.CheckpointKey
+// checkpointKeyFor names the object that holds the snapshot taken at slot.
+// Every checkpoint has its own key, so a late or repeated upload can only
+// rewrite the same bytes and never replaces a newer snapshot. The slot has a
+// fixed width, so the last key in a sorted list is the newest checkpoint.
+func (m *Machine) checkpointKeyFor(slot core.LogPosition) string {
+	return fmt.Sprintf("%s%020d", m.checkpointPrefix(), slot)
+}
+
+func (m *Machine) checkpointPrefix() string {
+	if m.config.CheckpointPrefix != "" {
+		return m.config.CheckpointPrefix
 	}
-	return defaultCheckpointKey
+	return defaultCheckpointPrefix
 }
 
 func (m *Machine) checkpointEnabled() bool {
-	return m.config.CheckpointEvery > 0 || m.config.CheckpointKey != ""
+	return m.config.CheckpointEvery > 0 || m.config.CheckpointPrefix != ""
 }
 
 func (m *Machine) armCheckpoint() []core.Action {
@@ -37,7 +46,7 @@ func (m *Machine) onCheckpointTimer(e core.TimerFired) []core.Action {
 		return nil
 	}
 	if m.needsCheckpoint || m.checkpointRetry {
-		return m.emitCheckpointGet()
+		return m.emitCheckpointList()
 	}
 	if m.config.CheckpointEvery <= 0 {
 		return nil
@@ -63,8 +72,8 @@ func (k pendingKind) String() string {
 		return "tail_check"
 	case pendingRead:
 		return "log_read"
-	case pendingAppend:
-		return "log_append"
+	case pendingObjList:
+		return "checkpoint_list"
 	case pendingObjGet:
 		return "checkpoint_get"
 	}
@@ -124,14 +133,51 @@ func (m *Machine) maybeCheckpoint() []core.Action {
 	m.checkpointPending = slot
 	m.nextReq++
 	m.checkpointRequest, m.checkpointStage = m.nextReq, stageUpload
-	return []core.Action{core.ObjectPut{Req: m.checkpointRequest, Key: m.checkpointKey(), Data: m.checkpointData}}
+	return []core.Action{core.ObjectPut{Req: m.checkpointRequest, Key: m.checkpointKeyFor(slot), Data: m.checkpointData}}
 }
 
-func (m *Machine) emitCheckpointGet() []core.Action {
+// emitCheckpointList starts a restore: find the newest checkpoint object.
+func (m *Machine) emitCheckpointList() []core.Action {
+	m.nextReq++
+	m.pending = m.nextReq
+	m.pendingKind = pendingObjList
+	return []core.Action{core.ObjectList{Req: m.pending, Prefix: m.checkpointPrefix()}}
+}
+
+func (m *Machine) emitCheckpointGet(key string) []core.Action {
+	m.restoreKey = key
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingObjGet
-	return []core.Action{core.ObjectGet{Req: m.pending, Ref: core.SegmentRef{Key: m.checkpointKey()}}}
+	return []core.Action{core.ObjectGet{Req: m.pending, Ref: core.SegmentRef{Key: key}}}
+}
+
+func (m *Machine) onObjListDone(d core.ObjectListDone) []core.Action {
+	if d.Req != m.pending || m.pendingKind != pendingObjList {
+		return nil
+	}
+	m.pending, m.pendingKind = 0, pendingNone
+	if d.Err != core.OK {
+		// The list failed, so we do not know whether a checkpoint exists. The
+		// log may be trimmed, so never catch up from slot 0 on a guess: try again.
+		m.checkpointRetry = true
+		return m.armCheckpointRetry()
+	}
+	if len(d.Keys) == 0 {
+		return m.noCheckpointFound()
+	}
+	return m.emitCheckpointGet(d.Keys[len(d.Keys)-1])
+}
+
+// noCheckpointFound handles a restore that found no checkpoint object.
+func (m *Machine) noCheckpointFound() []core.Action {
+	m.checkpointRetry = false
+	if m.needsCheckpoint {
+		// The log was trimmed under us but no snapshot is there (yet). Retry;
+		// do not catch up from slot 0 through the trimmed prefix.
+		return m.armCheckpointRetry()
+	}
+	return m.afterRestore()
 }
 
 func (m *Machine) onObjGetDone(d core.ObjectGetDone) []core.Action {
@@ -139,19 +185,21 @@ func (m *Machine) onObjGetDone(d core.ObjectGetDone) []core.Action {
 		return nil
 	}
 	m.pending, m.pendingKind = 0, pendingNone
-	if d.Err != core.OK && d.Err != core.ErrNotFound {
-		// The read failed, so we do not know whether a checkpoint exists. The log
-		// may be trimmed, so never catch up from slot 0 on a guess: try again.
+	if d.Err == core.ErrNotFound {
+		// Listed a moment ago and gone now: a newer checkpoint replaced it.
+		return m.emitCheckpointList()
+	}
+	if d.Err != core.OK {
 		m.checkpointRetry = true
 		return m.armCheckpointRetry()
 	}
 	m.checkpointRetry = false
-	if d.Err == core.OK && len(d.Data) > 0 && stateupdater.CheckSnapshot(d.Data) != nil {
+	if len(d.Data) > 0 && stateupdater.CheckSnapshot(d.Data) != nil {
 		// A changed byte in the read: the stored object may be fine. Read it again.
 		m.env.Reachable("logcp-sim: checkpoint read had a bad CRC, read again")
-		return m.emitCheckpointGet()
+		return m.emitCheckpointGet(m.restoreKey)
 	}
-	if d.Err == core.OK && len(d.Data) > 0 {
+	if len(d.Data) > 0 {
 		slot, err := m.fold.Restore(bytes.NewReader(d.Data))
 		if err != nil {
 			return m.trip(err)
@@ -162,12 +210,7 @@ func (m *Machine) onObjGetDone(d core.ObjectGetDone) []core.Action {
 		m.env.Reachable("logcp-sim: replica restored from a checkpoint")
 		return m.afterRestore()
 	}
-	if m.needsCheckpoint {
-		// Tomb forced a restore but no snapshot yet (or Get failed). Retry;
-		// do not catch up from slot 0 through the trimmed prefix.
-		return m.armCheckpointRetry()
-	}
-	return m.afterRestore()
+	return m.noCheckpointFound()
 }
 
 func (m *Machine) armCheckpointRetry() []core.Action {
@@ -190,9 +233,17 @@ func (m *Machine) onObjPutDone(d core.ObjectPutDone) []core.Action {
 	if d.Err != core.OK || d.Outcome != core.Applied {
 		return nil
 	}
+	previous := m.checkpointSlot
 	m.checkpointSlot = max(m.checkpointSlot, slot)
 	m.checkpointAt = m.now
-	return m.emitTrim(slot)
+	acts := m.emitTrim(slot)
+	if previous > 0 && previous < slot {
+		// The older snapshot is no longer needed. Fire and forget: a failed
+		// delete only leaves one extra object, and restore picks the newest.
+		m.nextReq++
+		acts = append(acts, core.ObjectDelete{Req: m.nextReq, Key: m.checkpointKeyFor(previous)})
+	}
+	return acts
 }
 
 func (m *Machine) emitTrim(checkpointSlot core.LogPosition) []core.Action {
@@ -220,10 +271,6 @@ func (m *Machine) onTrimDone(d core.LogDeleteOldDone) []core.Action {
 	if d.Err == core.OK && d.Outcome == core.Applied {
 		m.trimFloor = through + 1
 		m.env.Reachable("logcp-sim: log trimmed below a checkpoint")
-		if m.config.InjectedBug == InjectedBugTrimDelete {
-			m.env.Always(false, "logcp-sim: a Put never wins a slot below the trim floor",
-				core.ContextPair{Key: "through", Value: through})
-		}
 	}
 	return nil
 }

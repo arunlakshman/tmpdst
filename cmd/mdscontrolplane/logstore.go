@@ -26,8 +26,8 @@ type logFlags struct {
 	s3PathStyle                        bool
 	nodeName                           string
 	rank                               int
-	takeoverAfter, gapAfter            time.Duration
-	k                                  int
+	takeoverAfter                      time.Duration
+	takeoverRankStep                   time.Duration
 	checkpointEvery, logTTL            time.Duration
 	windowSlots                        int64
 	pebbleDir                          string
@@ -43,10 +43,9 @@ func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
 	fs.StringVar(&f.nodeName, "node-name", "", "-store dynamolog: node name (default hostname)")
 	fs.IntVar(&f.rank, "rank", 0, "-store dynamolog: 0 is the preferred appender")
 	fs.DurationVar(&f.takeoverAfter, "takeover-after", 5*time.Second, "-store dynamolog: standby takeover silence")
+	fs.DurationVar(&f.takeoverRankStep, "takeover-rank-step", time.Second, "-store dynamolog: each rank waits this much longer before it claims the write role")
 	fs.DurationVar(&f.startTimeout, "start-timeout", 10*time.Minute, "-store dynamolog: startup budget")
 	fs.DurationVar(&f.heartbeat, "heartbeat", time.Second, "-store dynamolog: idle heartbeat")
-	fs.IntVar(&f.k, "log-k", 4, "-store dynamolog: commit LogAppends in flight")
-	fs.DurationVar(&f.gapAfter, "gap-after", 250*time.Millisecond, "-store dynamolog: gap-fill delay")
 	fs.DurationVar(&f.checkpointEvery, "checkpoint-every", 5*time.Minute, "-store dynamolog: checkpoint period")
 	fs.Int64Var(&f.checkpointMinSlots, "checkpoint-min-slots", 1000, "-store dynamolog: min slots between checkpoints")
 	fs.Int64Var(&f.windowSlots, "window-slots", 131072, "-store dynamolog: idempotency window in log slots; every node must use the same value")

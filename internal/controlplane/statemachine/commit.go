@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -37,7 +38,7 @@ type waitingCommand struct {
 	cmd     stateupdater.Entry
 }
 
-// inFlightAppend is one in-flight commit LogAppend (one of at most K).
+// inFlightAppend is one in-flight commit LogAppend (at most one).
 type inFlightAppend struct {
 	request core.RequestID
 	slot    core.LogPosition
@@ -58,7 +59,7 @@ func (m *Machine) Offer(operation ClientOperation) []core.Action {
 	if m.exited {
 		return nil
 	}
-	if m.config.K <= 0 || !m.canCommit() {
+	if !m.canCommit() {
 		m.answers = append(m.answers, ReplyToClient{
 			Req: operation.Req, From: operation.From,
 			Done: core.ControlPlaneDone{Req: operation.Req, Err: core.ErrUnavailable},
@@ -137,14 +138,14 @@ func (m *Machine) TakeAnswers() []ReplyToClient {
 	return out
 }
 
-// InFlightCommits is the number of live commit LogAppend ReqIDs (at most K).
+// InFlightCommits is the number of live commit LogAppend ReqIDs (at most one).
 func (m *Machine) InFlightCommits() int { return len(m.inFlightAppends) }
 
 // QueueDepth is the number of client ops waiting for a commit slot.
 func (m *Machine) QueueDepth() int { return len(m.queue) }
 
 func (m *Machine) flushCommits() []core.Action {
-	if m.config.K <= 0 || m.exited || m.booting {
+	if m.exited || m.booting {
 		return nil
 	}
 	// Demote still drains a non-empty queue; Offer already refused new work.
@@ -152,7 +153,7 @@ func (m *Machine) flushCommits() []core.Action {
 		return nil
 	}
 	var acts []core.Action
-	for len(m.inFlightAppends) < m.config.K && len(m.queue) > 0 {
+	for len(m.inFlightAppends) == 0 && len(m.queue) > 0 {
 		acts = append(acts, m.emitCommitGroup()...)
 	}
 	return acts
@@ -164,7 +165,7 @@ func (m *Machine) emitCommitGroup() []core.Action {
 		return nil
 	}
 	m.seq++
-	id := fmt.Sprintf("%s/%d", m.config.writer(), m.seq)
+	id := fmt.Sprintf("%s/e%d/%d", m.config.writer(), m.epoch, m.seq)
 
 	// Take commands while the entry stays under MaxEntryBytes. The first one
 	// always goes: Offer already refused any command that cannot fit alone.
@@ -194,7 +195,7 @@ func (m *Machine) emitCommitGroup() []core.Action {
 		cmds[i].cmd = e
 	}
 	inner := encodeGroupParts(id, encoded)
-	data := wrap(m.config.Rank, m.config.writer(), inner)
+	data := wrap(m.epoch, m.config.writer(), inner)
 	slot := m.alloc()
 	m.env.Always(slot >= m.trimFloor, "logcp-sim: a Put never wins a slot below the trim floor",
 		core.ContextPair{Key: "slot", Value: slot})
@@ -211,7 +212,7 @@ func (m *Machine) emitCommitGroup() []core.Action {
 // envelope, the group marker, the id, and the two counts. Each command also
 // costs a length prefix, which emitCommitGroup adds per command.
 func (m *Machine) entryFixedBytes(id string) int {
-	return len(wrap(m.config.Rank, m.config.writer(), nil)) + 1 + binary.MaxVarintLen64 + len(id) + binary.MaxVarintLen64
+	return len(wrap(math.MaxUint64, m.config.writer(), nil)) + 1 + binary.MaxVarintLen64 + len(id) + binary.MaxVarintLen64
 }
 
 // fitsAlone reports whether cmd fits in a log entry of its own. The id is
@@ -224,7 +225,7 @@ func (m *Machine) fitsAlone(cmd stateupdater.Entry) bool {
 }
 
 // projectBases is InjectedBugWriterOffsets: skip one offset per partition so a retry
-// leaves a gap in the committed log.
+// leaves an empty slot in the committed log.
 func (m *Machine) projectBases(c core.CommitSegment) []core.Offset {
 	if m.proj == nil {
 		m.proj = map[core.TopicPartition]core.Offset{}
@@ -252,16 +253,16 @@ func (m *Machine) observeSlot(n core.LogPosition) {
 }
 
 func (m *Machine) onCommitAppendDone(d core.LogAppendDone, f *inFlightAppend) []core.Action {
-	if isDeleted(d) {
-		// Slot was trimmed under us; refuse in-flight clients and restore.
+	if isBelowFloor(d) {
+		// The slot is at or below the floor of the log: this node is far behind
+		// and the put is not a commit. Refuse the clients and restore.
 		return m.hitTrimmed()
 	}
 	delete(m.inFlightAppends, d.Req)
 	if d.Err != core.OK || d.Outcome != core.Applied {
 		// Conditional put: NotApplied and MaybeApplied both retry the same
-		// slot. Allocating a later slot here used to leave a permanent gap
-		// (progress was not armed), wedging drain so every later commit sat
-		// in buf unapplied and brokers saw only bridge timeouts.
+		// slot. Allocating a later slot here would leave an empty slot, and
+		// drain would stop there for good.
 		if d.Outcome == core.MaybeApplied {
 			m.env.Reachable("logcp-sim: Put not answered, same slot repeated")
 		}
@@ -282,6 +283,10 @@ func (m *Machine) onCommitAppendDone(d core.LogAppendDone, f *inFlightAppend) []
 		return m.trip(err)
 	}
 	var acts []core.Action
+	if m.fencedFlag {
+		acts = m.stepDown()
+		return append(acts, m.progress()...)
+	}
 	if lost {
 		acts = append(acts, m.retryInFlightAppend(f)...)
 	}
@@ -383,12 +388,17 @@ func takeUvarint(b []byte) (uint64, []byte, bool) {
 }
 
 func (m *Machine) applySlot(slot core.LogPosition, data []byte) error {
-	rank, writer, payload, ok := unwrap(data)
+	epoch, writer, payload, ok := unwrap(data)
 	if !ok {
 		return fmt.Errorf("statemachine: truncated log envelope at slot %d", slot)
 	}
 	enveloped := len(data) > 0 && data[0] == envelopeMarker
-	m.observeWriter(slot, rank, writer, enveloped)
+	m.observeWriter(epoch, writer, enveloped)
+	if m.epoch > 0 && !m.active && enveloped && writer == m.config.writer() && epoch == m.epoch {
+		// Our fence entry is applied: this node is the writer now.
+		m.active = true
+		m.env.Reachable("logcp-sim: standby took over")
+	}
 
 	if id, cmds, ok := decodeGroup(payload); ok {
 		if ps, ok := m.waiters[id]; ok {
@@ -410,7 +420,7 @@ func (m *Machine) applySlot(slot core.LogPosition, data []byte) error {
 	if err != nil {
 		return err
 	}
-	// Single-entry catch-up / gap-fill: deliver only if we were waiting on it.
+	// Single-entry catch-up: deliver only if we were waiting on it.
 	if e, err := stateupdater.Decode(payload); err == nil {
 		m.deliver(e.ID, []core.ControlPlaneDone{d})
 	}

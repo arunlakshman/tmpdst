@@ -1,6 +1,8 @@
 # Simple English names
 
 This table is for maintainers who read English as a second language.
+Note: the deleted-marker rows below are historical (decision 62 removed the marker; trim now deletes rows).
+
 Left column: the name in the code today. Right column: a plainer name.
 
 How the list was made: a script read all 299 Go files and found 4,246 names

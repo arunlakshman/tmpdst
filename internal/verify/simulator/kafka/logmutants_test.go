@@ -47,19 +47,26 @@ func TestLogMutantsAreCaught(t *testing.T) {
 		name   string
 		bug    uint8
 		window int
+		tune   func(*simulator.Config) // makes the failure frequent; nil keeps the defaults
 		prop   core.PropertyID
 	}{
-		// Truth is log replay (correct assign); the writer stamps gap bases only
+		// Truth is log replay (correct assign); the writer stamps missing-slot bases only
 		// into its fold/answers, so acks disagree with ControlPlaneRealState.
-		{"offsets computed by the writer, not by apply", fakelogservice.InjectedBugWriterOffsets, 0, "kafka: acked range is committed in the control plane"},
-		{"trimmed slots deleted instead of tombstoned", fakelogservice.InjectedBugTrimDelete, 0, "logcp-sim: a Put never wins a slot below the trim floor"},
-		{"each replica forgets keys on its own pace", fakelogservice.InjectedBugPerReplicaWindow, 40, "logcp-sim: a replica's state equals the replay of the log at its slot"},
-		{"a replica passes an empty slot without a no-op", fakelogservice.InjectedBugGapSkip, 0, "logcp-sim: a replica's state equals the replay of the log at its slot"},
+		{"offsets computed by the writer, not by apply", fakelogservice.InjectedBugWriterOffsets, 0, nil, "kafka: acked range is committed in the control plane"},
+		{"each replica forgets keys on its own pace", fakelogservice.InjectedBugPerReplicaWindow, 40, nil, "logcp-sim: a replica's state equals the replay of the log at its slot"},
+		// A put that the log store applies seconds after it was sent: by then the
+		// other node has taken over and trimmed past the slot, so the put lands in a
+		// deleted slot. A short takeover, a short keep window and a slow tail on
+		// the store make that happen often.
+		{"put at or below the floor answered as success", fakelogservice.InjectedBugNoFloorCheck, 0, slowPutsAfterTakeover, "kafka: a consumer reads the committed value at each offset"},
 	}
 	for _, c := range cases {
 		config := configLog(nil, broker.InjectedBugNone, c.bug)
 		if c.window > 0 {
 			config.ControlPlane.Log.WindowSlots = c.window
+		}
+		if c.tune != nil {
+			c.tune(&config)
 		}
 		var props []core.PropertyID
 		caught := uint64(0)
@@ -76,6 +83,34 @@ func TestLogMutantsAreCaught(t *testing.T) {
 		}
 		if caught > 0 && !slices.Contains(props, c.prop) {
 			t.Errorf("mutant %q: %q not among %v", c.name, c.prop, props)
+		}
+	}
+}
+
+// slowPutsAfterTakeover makes a log put land seconds after it was sent. By then
+// the other node has taken over and trimmed past the slot. A short takeover
+// wait, a short keep window and a slow tail on the log store make that happen
+// often.
+func slowPutsAfterTakeover(c *simulator.Config) {
+	l := &c.ControlPlane.Log
+	l.TakeoverAfter = 300 * core.Millisecond
+	l.CheckpointEvery, l.KeepSlots, l.TrimStride = 8, 4, 4
+	c.LogStore.ApplyLatency.SlowProb = 0.005
+	c.LogStore.ApplyLatency.SlowMin, c.LogStore.ApplyLatency.SlowMax = 2000*core.Millisecond, 4000*core.Millisecond
+}
+
+// The real protocol (epoch fence and floor) keeps every property under the same
+// slow-put pressure that the no-floor-check mutant fails under.
+func TestLogSlowPutsAfterTakeoverStayClean(t *testing.T) {
+	config := configLog(nil, broker.InjectedBugNone, fakelogservice.InjectedBugNone)
+	slowPutsAfterTakeover(&config)
+	n := uint64(40)
+	if testing.Short() {
+		n = 10
+	}
+	for s := uint64(1); s <= n; s++ {
+		if props := violated(config, s); len(props) > 0 {
+			t.Fatalf("seed %d violated %v with the real protocol", s, props)
 		}
 	}
 }

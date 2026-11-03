@@ -6,7 +6,7 @@ The control plane (`-store dynamolog`, `internal/controlplane/statemachine` + `e
 
 | pk | sk | attributes | what it is |
 |---|---|---|---|
-| `LOG` | slot, 20 digits | `d` B (entry: version byte, rank, writer, append id, ts, count, commands), `v`, `w` writer, `id`, `ts`, `n` commands, `ttl` | one item per log slot, written with `attribute_not_exists(pk)`: the slot is the fence. Zero commands is a no-op (heartbeat, hole fill). Trimmed slots are overwritten with a tombstone stub. `ttl` (epoch s, `-log-ttl` 7 d) lets the table's TTL expire old slots. |
+| `LOG` | slot, 20 digits | `d` B (entry: version byte, rank, writer, append id, ts, count, commands), `v`, `w` writer, `id`, `ts`, `n` commands, `ttl` | one item per log slot, written with `attribute_not_exists(pk)`: the slot is the fence. Zero commands is a no-op (heartbeat, hole fill). Trimmed slots are deleted (decision 62; before, they were overwritten with a deleted-marker stub). `ttl` (epoch s, `-log-ttl` 7 d) lets the table's TTL expire old slots. |
 | `CKPT` | `-` | `ck_slot` N, `ck_key` S, `ck_size` N, `ck_sum` S (sha-256), `ck_ts` N (ms) | forward-only conditional put; the object is `cp/ckpt/<slot>` in the checkpoint bucket. |
 
 There are no `G#` idempotency items (the idempotency window lives in the applier and is a function of the slot number), no per-partition run rows and no topic rows: topics and offsets live in the log and in each node's Pebble state, and are rebuilt from the checkpoint plus the log after it.

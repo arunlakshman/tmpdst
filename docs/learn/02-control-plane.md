@@ -74,8 +74,9 @@ That one rule is the whole safety story:
 - If a node thinks it is the boss but is not (a "zombie"), it can only waste effort. It
   cannot corrupt anything, because it still has to win each slot.
 
-The code calls the "boss" an **appender** and calls roles **advisory**: a hint to avoid
-fighting, not a lock. The slot put is the real fence.
+The code calls the "boss" an **appender**. The writer role is an **epoch** (decision 63): a standby claims the next
+epoch with a conditional update on `META/WRITER`, and a fence entry at the tail stops an old writer. The slot put is still
+the rule for each slot, and a floor check stops a write into a deleted slot.
 
 ### 0.4 The CP is itself a `Step(Event) []Action` machine
 
@@ -471,7 +472,7 @@ After `ShutdownDone`, `exited` is true and every event is ignored.
 | One control I/O | `pending, pendingKind, fillSlot, fillData` | the single in-flight tail/read/gap-fill/checkpoint/trim |
 | Commit I/O | `queue, inFlightAppends, waiters, answers, seq` | client commands waiting, appends in flight, who to answer |
 | Timers | `timerGen, gapGeneration, roleGen, checkpointGen` | generation numbers (4.3) |
-| Roles | `lastPullOK, lastOtherAt, lastOwnAt, promoSlot, lowerSeen` | evidence for takeover and failback |
+| Roles | `lastPullOK, lastOtherAt, lastOwnAt, promoSlot, lowerSeen` | evidence for takeover (failback is removed, decision 63) |
 | Checkpoint | `checkpointSlot, checkpointAt, checkpointPending, checkpointData, needsCheckpoint, checkpointRetry, trimFloor` | snapshot progress |
 | Reads | `readWaiters, tailsStarted, tailRound` | reads waiting for a fresh tail |
 | Folded state | `fold *stateupdater.StateUpdater` | the passbook balance |
@@ -499,10 +500,12 @@ code is easy to replay in the simulator. (The same trick was in page 01, station
 
 ```
 NodeStarted
-   | checkpointing on (CheckpointEvery > 0 or CheckpointKey set)?
-   +- yes: booting=true, ObjectGet "checkpoint/latest"
+   | checkpointing on (CheckpointEvery > 0 or CheckpointPrefix set)?
+   +- yes: booting=true, ObjectList "checkpoint/" (prefix); take the last key in sorted order (the newest)
+   |       +- list failed                 -> checkpointRetry, timer, try again  (never start from slot 0 on a list error)
+   |       +- empty list                  -> fresh start, go to catch-up
+   |       +- ObjectGet of that key: NotFound (already replaced) -> list again
    |       +- read failed (not NotFound)  -> checkpointRetry, timer, try again  (never guess: log may be trimmed)
-   |       +- NotFound                    -> fresh start, go to catch-up
    |       +- bad CRC                     -> read again immediately
    |       +- good                        -> fold.Restore; applied = checkpoint slot; go to catch-up
    +- no : go to catch-up
@@ -595,16 +598,16 @@ the entry would pass `MaxEntryBytes`** (default 350 KiB, under DynamoDB's 400 Ki
 It builds **one** log entry:
 
 ```
-id    = "<writer>/<seq>"                    seq++ each time
+id    = "<writer>/e<epoch>/<seq>"           seq++ each time
 inner = 0xC5 | uvarint len(id) | id | uvarint n | n x ( uvarint len(enc) | enc )     <- encodeGroup
-data  = 0xC7 | uvarint rank | uvarint len(writer) | writer | inner                    <- wrap (envelope)
+data  = 0xC8 | uvarint epoch | uvarint len(writer) | writer | inner                    <- wrap (envelope)
 slot  = alloc()  =  max(high, applied) , then high = slot + 1
 emits LogAppend{Req, Slot, Data}
 ```
 
 - `0xC5` marks a **group**: many client commands in one slot. This is what makes 100
   brokers' commits cost one DynamoDB `PutItem`, not 100.
-- `0xC7` marks the **envelope**: advisory rank and writer name. It is how a node
+- `0xC8` marks the **envelope**: the writer epoch and writer name. It is how a node
   recognises "who wrote this slot" (4.10) without changing the fold's own codec.
 - `waiters[id] = cmds` remembers whom to answer.
 
@@ -633,8 +636,8 @@ The answer to a commit is produced **only when its slot is folded**, never when 
 succeeds. In `applySlot`:
 
 ```go
-rank, writer, payload := unwrap(data)
-observeWriter(slot, rank, writer)                      // role evidence
+epoch, writer, payload, _ := unwrap(data)
+observeWriter(slot, epoch, writer)                     // role evidence
 if id, cmds, ok := decodeGroup(payload); ok {
     for each cmd: dones[i] = fold.Apply(slot, cmd)     // THE OFFSETS ARE DECIDED HERE
     deliver(id, dones)                                 // match dones[i] to waiters[id][i]
@@ -652,7 +655,7 @@ This answers a question that page 01 left half open: **why offsets are assigned 
 not at append.** Appending can retry, lose, or land twice at different slots. Applying is
 the one step that is identical on every replica.
 
-### 4.9 Roles: who writes (all advisory)
+### 4.9 Roles: who writes (by epoch)
 
 Roles are on when `Heartbeat > 0` or `TakeoverAfter > 0` (`rolesArmed`). Otherwise every
 node can commit (`isAppender` returns true) and no role timer exists.
@@ -662,9 +665,9 @@ node can commit (`isAppender` returns true) and no role timer exists.
 | Start | At `finishBoot`, **rank 0** becomes `active`. Higher ranks are **standby**. |
 | Standby | Tails the log, folds, serves reads. Refuses writes with `ErrUnavailable`. |
 | Heartbeat | An active node idle for `Heartbeat` (no queue, no in-flight appends or pending) appends a no-op. This proves liveness to standbys. |
-| Takeover | A standby promotes itself when (a) it saw no slot from *another writer* for `TakeoverAfter` **and** (b) its own log reads succeeded within that time. Rule (b) stops a standby from taking over just because *it* is cut off. |
-| Failback | An active node steps down when a *lower-rank* writer appends at or after `promoSlot` (the slot where this node became active). `lowerSeen` is set by `observeWriter`. |
-| Fence | None of the above is a lock. If two nodes are active at once, they race for slots, one of them loses each time, and the loser retries. This costs retries, not correctness. |
+| Takeover | A standby claims the next epoch when (a) it saw no slot from *another writer* for `TakeoverAfter` (plus `TakeoverRankStep` per rank) **and** (b) its own log reads succeeded within that time. Rule (b) stops a standby from taking over just because *it* is cut off. The claim is a conditional update on `META/WRITER`. Then the node writes a fence entry at the tail and accepts commits once it has caught up. |
+| Step down | A node that sees a newer epoch (in a slot it applies, or in the entry that took its slot) steps down. It answers its waiting clients with `ErrUnavailable` (unknown outcome), keeps reading, and waits a full silence period before it can claim again. Failback is removed (decision 63). |
+| Fence | The epoch and the fence entry. Two nodes can both think they write for a moment, but the older epoch fails its next put, steps down, and writes nothing more. |
 
 `observeWriter` sets `lastOwnAt` when the slot's writer name is ours, otherwise
 `lastOtherAt`. That is where the evidence comes from. A node must therefore have a unique
@@ -679,12 +682,12 @@ a control I/O is pending; this node is not the appender or not ready; `applied =
 **`applied < goalTail`** (a node behind the tail must not write: its snapshot could replace
 a newer one, and the log below the newer one may already be trimmed, so a restart could
 never recover); fewer than `CheckpointMinSlots` slots since the last one.
-Otherwise: `fold.Snapshot(slot = applied)` -> `ObjectPut{Key: "checkpoint/latest"}`.
+Otherwise: `fold.Snapshot(slot = applied)` -> `ObjectPut{Key: "checkpoint/<20-digit slot>"}` (one object per slot, decision 62). When the put is done, the node deletes the previous checkpoint object it knows (no wait; a failed delete only leaves one extra object).
 
 **Then trim** (`onObjPutDone` -> `emitTrim`). Only after the object is safely stored:
 `through = checkpointSlot - KeepSlots - 1`, emit `LogDeleteOld{Through}`. On success,
-`trimFloor = through + 1`. In DynamoDB trim does not delete; it overwrites each slot with a
-one-byte **tombstone** `0xFE` (so a late put-if-absent cannot sneak into the trimmed area).
+`trimFloor = through + 1`. In DynamoDB trim really deletes the rows (`BatchWriteItem` with `DeleteRequest`, decision 62).
+Before decision 62, trim overwrote each slot with a one-byte deleted marker `0xFE` so a late put-if-absent could not sneak into the trimmed area. That marker is gone; the residual risk is in decision 62.
 
 **Restore** is section 4.4. The checkpoint slot is "first slot not covered", so after
 restore `applied = slot`, and catch-up continues from there.
@@ -724,7 +727,7 @@ front door. In production, `server.Node.Lookup` reads the fold directly (section
 For a commit slot the bytes in DynamoDB are:
 
 ```
-C7 [rank] [writer-len] [writer...]          envelope
+C8 [epoch] [writer-len] [writer...]          envelope
    C5 [id-len] [id...] [n]                  group header
       [len1] [entry1 bytes...]              each entry = stateupdater.Encode (kind, id, key table, batches)
       [len2] [entry2 bytes...]
@@ -775,9 +778,9 @@ optional `ttl`.
 | Operation | DynamoDB call | Notes |
 |-----------|--------------|-------|
 | `Append` | `PutItem` with `attribute_not_exists(pk)` and `ReturnValuesOnConditionCheckFailure=ALL_OLD` | On "condition failed" the old item arrives **in the error**: no extra read. If the item is missing from the error, it falls back to one `Read` |
-| `Read` | `Query` `sk BETWEEN from AND max`, **`ConsistentRead`**, forward | Skips tombstones. Pages until `limit` |
+| `Read` | `Query` `sk BETWEEN from AND max`, **`ConsistentRead`**, forward | Returns only live rows. Pages until `limit` |
 | `CheckTail` | `Query` same range, **backwards**, `Limit 1`, consistent | `last slot + 1` |
-| `TrimThrough` | `Query` (pk, sk only) in pages of 25, then `BatchWriteItem` | Overwrites rows with `d = 0xFE` and a `ttl` stub (30 days) |
+| `TrimThrough` | `Query` (pk, sk only) in pages of 25, then `BatchWriteItem` of `DeleteRequest`s (unprocessed items retried) | Deletes the rows (decision 62) |
 
 The consistent read matters: an eventually consistent read could miss a slot that was
 already won, which would look like a gap.
@@ -923,7 +926,7 @@ client believes it; the broker (page 01, station 9) retries the same key with ba
 
 ```
 flags -> statemachine.Config {
-            CatchUpEvery: 5ms,   K: 4 (-log-k),   Rank, Heartbeat (1s), TakeoverAfter (5s),
+            CatchUpEvery: 5ms,   K: 4 (-log-k),   Rank, Heartbeat (1s), TakeoverAfter (5s), TakeoverRankStep (1s),
             GapAfter (250ms),   Writer: hostname (-node-name),
             CheckpointEvery (5m),      CheckpointMinSlots (1000),   KeepSlots: window-slots/8,
             WindowSlots: window-slots, TrimStride: 1024 }          (see machineConfig in main.go)
@@ -1002,16 +1005,15 @@ Four lines of defence together: broker key reuse, `KnownCommit`, `retargetCommit
 ### Trace D - the active node dies and restarts
 
 1. N0 dies. N1 stops seeing slots from N0 (`lastOtherAt` ages). After `TakeoverAfter` with
-   healthy reads of its own, `takeoverDue` is true -> `setActive(true)`, `promoSlot = max(high, applied)`.
+   healthy reads of its own, `takeoverDue` is true -> N1 claims the next epoch (conditional update on `META/WRITER`),
+   writes a fence entry at the tail, and becomes the writer once it has caught up.
 2. Brokers' client sees `Unavailable` from N0's address, moves to N1. N1 accepts commits.
    Commits in flight on N0 either landed (the keys replay on N1) or never will (the retry
    commits them).
-3. N0 comes back. `NodeStarted` -> `ObjectGet checkpoint/latest` -> good CRC -> `fold.Restore` ->
-   `applied = checkpointSlot`. Catch-up reads from there to the tail. It is `Ready` and, because it is
-   rank 0, `setActive(true)`. Then it appends. N1 sees a writer with a *lower rank* at
-   `slot >= promoSlot` -> `lowerSeen` -> `failbackDue` -> `setActive(false)`. N1 is a
-   standby again.
-4. For a short time both are active. They race for slots; the loser re-appends. Nothing breaks.
+3. N0 comes back. `NodeStarted` -> list `checkpoint/`, `ObjectGet` the last key -> good CRC -> `fold.Restore` ->
+   `applied = checkpointSlot`. Catch-up reads from there to the tail. N0 becomes `ready` only after the restore and a tail
+   check. It does not claim while N1 writes its heartbeats, so N0 stays a standby and N1 stays the writer.
+4. If N0 claims a newer epoch later (after N1 is silent), N1 sees that epoch in a slot and steps down (decision 63).
 
 ---
 
@@ -1031,7 +1033,7 @@ DynamoDB** on a seed and check the outcome. Facts to know (`docs/sim-log-engine.
 | Mutant | What is broken | Caught by |
 |--------|----------------|-----------|
 | `InjectedBugWriterOffsets` | the writer picks the base, skipping one offset per partition | a replica's state no longer equals "replay of the log" |
-| `InjectedBugTrimDelete` | trimmed slots are really deleted, not tombstoned | "a Put never wins a slot below the trim floor" |
+| ~~`InjectedBugTrimDelete`~~ | removed with decision 62 (trim is a plain delete now; value 2 retired) | was: "a Put never wins a slot below the trim floor", which stays as a detector |
 | `InjectedBugPerReplicaWindow` | each replica forgets keys on its own clock | state divergence |
 | `InjectedBugGapSkip` | skip a gap without a no-op | state divergence |
 
@@ -1086,10 +1088,10 @@ Also done in `56417bd`: removed the flags nothing read (`-slot-rate`, `-final-ch
    The fresh-tail rule (commit `226ea69`) lives in `queueRead` / `serveReads`, reached only from the simulator path.
    `server.Node.Lookup` and `DescribeTopics` read the fold directly after checking `Ready()`.
    A lagging standby can serve a stale end offset; the active node is safe.
-3. **Trimmed-slot signal differs between simulator and production.**
+3. **Trimmed-slot signal differs between simulator and production.** *(Superseded by decision 62: trim deletes rows, so there is no `0xFE` marker and no deleted-marker path.)*
    `isDeleted` needs `ErrConflict` + `Taken` + empty `Existing`; only the simulator's `fakelogstore` returns that.
    The real executor returns `OK` + `Taken` + `Existing=[0xFE]` (Dynamo) or `nil` (MemoryLog), so `hitTrimmed` never fires from an append.
-   A gap-fill onto a tombstone ends in `ErrCorrupt`, then `trip` and a restart: safe, but not the path the simulator tests.
+   A gap-fill onto a deleted marker ends in `ErrCorrupt`, then `trip` and a restart: safe, but not the path the simulator tests.
 4. **Pebble was not wired in. FIXED (commit `56417bd`).**
    The gRPC cutover (`1c3c11b`) had dropped Pebble: the Machine built `stateupdater.NewMem()` and `-pebble-dir` was unused.
    New `Config.OpenStore` gives the fold its store; `mdscontrolplane -store dynamolog` opens an empty Pebble store at start and after every restore.
@@ -1182,12 +1184,14 @@ small, but the sim and prod behave differently here.
 
 ### 12.4 The trimmed-slot signal differs between sim and prod
 
+*Superseded by decision 62. Trim now deletes rows. The text below describes the OLD deleted-marker behaviour.*
+
 `isDeleted(d)` is `Err == ErrConflict && Taken && len(Existing) == 0`. Only the simulator's
 `fakelogstore` returns that shape. The real executor returns `Err=OK, Taken=true` with
 `Existing = [0xFE]` (Dynamo) or `nil` (MemoryLog). So in production `hitTrimmed` does not
-fire from an append. A gap-fill onto a tombstone would put `0xFE` into `buf`, and
+fire from an append. A gap-fill onto a deleted marker would put `0xFE` into `buf`, and
 `ApplyBytes` would fail with `ErrCorrupt`, so `drain` returns the error and `trip` stops the
-process (restart then restores from the checkpoint). A commit append onto a tombstone is
+process (restart then restores from the checkpoint). A commit append onto a deleted marker is
 seen as "lost" and retried at a later slot. Both end safely, but through a different path
 than the one the simulator tests.
 
@@ -1232,7 +1236,7 @@ sort first), `controlplanemetrics`, `fakedynamodb`.
 
 ```
 go test ./internal/controlplane/statemachine -run 'TestKConcurrentLogAppend|TestLostAppendRetriesSameEntryLaterSlot|TestOfferKnownCommitSkipsAppend|TestOfferRetargetsInFlightCommit' -v
-go test ./internal/controlplane/statemachine -run 'TestGapFillEmitsNoopAppend|TestTakeoverAfterSilence|TestFailbackOnLowerRank' -v
+go test ./internal/controlplane/statemachine -run 'TestGapFillEmitsNoopAppend|TestTakeoverAfterSilence' -v
 go test ./internal/controlplane/statemachine -run 'TestCheckpointPublishAndTrim|TestRestoreReadsAgainOnBadCRC' -v
 go test ./internal/controlplane/statemachine -run 'TestReadWaitsForFreshTail' -v
 go test ./internal/controlplane/server -run 'TestCommitLookupRoundTrip|TestStandbyCommitUnavailable' -v
@@ -1296,14 +1300,14 @@ never trimmed. Now `mdscontrolplane` sets it, so they are cut every 1024 slots.
 | Log / slot | The shared ordered list of entries / one position in it |
 | Entry | The bytes in a slot: a no-op, a commit, or a create-topic |
 | Group | Many client commands packed in one entry (marker `0xC5`) |
-| Envelope | Rank and writer name wrapped around an entry (marker `0xC7`) |
+| Envelope | Epoch and writer name wrapped around an entry (marker `0xC8`) |
 | Fold | The state built by applying entries in slot order (`StateUpdater`) |
 | Put-if-absent | Write that succeeds only if the slot is empty: the only consensus rule |
-| Appender / active / standby | The advisory writer role / the node that has it / a node that only reads |
-| Rank | Preference number. 0 is preferred, used for failback |
+| Appender / active / standby | The writer role (an epoch) / the node that has it / a node that only reads |
+| Rank | Preference number. 0 is preferred; higher ranks wait longer before they claim (`TakeoverRankStep`) |
 | Gap | An empty slot below a written slot; filled with a no-op |
-| Tombstone | A trimmed slot, overwritten with the byte `0xFE` |
-| Checkpoint | Snapshot of the fold at one slot, stored as `checkpoint/latest` |
+| Trimmed slot | A slot below the trim floor, deleted from the table (before decision 62 it held the byte `0xFE`) |
+| Checkpoint | Snapshot of the fold at one slot, stored as its own object `checkpoint/<20-digit slot>` (before decision 62 one object, `checkpoint/latest`) |
 | Window | How long a `SegmentKey` is remembered, equal to how long its `K` record is kept |
 | Run | Packed record (`R` key) of the contiguous batches one commit gave one partition |
 | Outcome | `NotApplied`, `MaybeApplied`, `Applied`: did the write happen? |

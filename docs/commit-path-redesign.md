@@ -468,7 +468,7 @@ not measured at that size.
 
 1. **Accept an asynchronous index with active-only `Lookup`.** A non-active CP answers 503 and the client retries. The
    only weaker guarantee is Lookup freshness during a dual-active window (5.6); offsets and idempotency are unchanged.
-2. **Active/standby CP with an advisory DynamoDB lease, and a CP URL list (or NLB) on brokers**, in stage 2. The
+2. **Active/standby CP with an advisory DynamoDB lease (built as an epoch claim, decision 63), and a CP URL list (or NLB) on brokers**, in stage 2. The
    alternative is to stay single-CP and accept minutes of outage on host loss.
 3. **Lift the broker's partition cap** (96 to 4096; segments seal by size or timer), and accept a sim trace-hash
    re-baseline.

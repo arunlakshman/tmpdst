@@ -89,6 +89,25 @@ func (m *Metrics) registerDynamo(secs []float64) {
 		Help: "Successful calls whose response carried no ConsumedCapacity (ExtendDB, local emulators), by call."}, []string{"op"})
 }
 
+// RegisterLogRole exports this node's write role: mdscontrolplane_log_epoch (the
+// writer epoch it holds, 0 when it is a standby) and
+// mdscontrolplane_log_step_downs_total (how often it stepped down after seeing a
+// newer epoch). Call it once. read runs at every scrape, so it must return
+// copies and must not wait on the run loop.
+func (m *Metrics) RegisterLogRole(read func() (epoch, stepDowns uint64)) {
+	if m == nil {
+		return
+	}
+	m.reg.MustRegister(
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{Namespace: "mdscontrolplane", Name: "log_epoch",
+			Help: "Writer epoch this node holds in the log; 0 when it is a standby."},
+			func() float64 { e, _ := read(); return float64(e) }),
+		prometheus.NewCounterFunc(prometheus.CounterOpts{Namespace: "mdscontrolplane", Name: "log_step_downs_total",
+			Help: "Times this node stopped being the writer because it saw a newer epoch."},
+			func() float64 { _, d := read(); return float64(d) }),
+	)
+}
+
 // Handler serves the registry in the Prometheus text format.
 func (m *Metrics) Handler() http.Handler { return promhttp.HandlerFor(m.reg, promhttp.HandlerOpts{}) }
 

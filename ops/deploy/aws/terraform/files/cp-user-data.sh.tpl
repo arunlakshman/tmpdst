@@ -38,7 +38,7 @@ fi
 STORE_ARGS="-store dynamolog -table ${table_name} -checkpoint-bucket $BUCKET -checkpoint-prefix cp/ -rank $CP_RANK -node-name cp-$CP_RANK -takeover-after ${cp_takeover_after} -pebble-dir /var/lib/mdscontrolplane/pebble"
 
 # Real AWS DynamoDB: no -dynamo-endpoint. Manifest is written as mdscontrolplane-<run_id>.json (trailing /).
-# Optional extra flags (e.g. slot rate, log-k) come from the cp_extra_args variable.
+# Optional extra flags (e.g. slot rate) come from the cp_extra_args variable.
 cat > /etc/systemd/system/mdscontrolplane.service <<UNIT
 [Unit]
 Description=mdscontrolplane (control plane, rank $CP_RANK)

@@ -39,7 +39,7 @@ metadata store are plain S3 + DynamoDB rather than WarpStream's.
 | Security groups | Control plane: 8080 from the broker SG only, no other inbound (bench-ctl reaches it with SSM send-command; loadgen to CP is closed). Broker: 9092 from the loadgen SG (plus the subnet CIDR for NLB health checks when `use_nlb`); nothing else, no inter-broker rule. Loadgen: self-referencing TCP 8080, 8081 and 9090-9099 (OMB worker HTTP and stats) and nothing from outside. No SSH. Metrics are scraped by Alloy on each host over loopback; the broker hosts push /metrics snapshots to S3. |
 | S3 `mds-bench-<run_id>-<account>` | force_destroy, public access blocked, SSE-S3, everything expires after `bucket_expire_days`, whole-bucket request metrics (`FilterId=mds-bench`, variable `s3_metrics_filter_id`, also handed to Alloy) |
 | DynamoDB `mds_<run_id>_cp` | Log-store schema: `pk` S hash, `sk` S range, on-demand with `warm_throughput` (default 30,000 write / 30,000 read units/s). Created here, so every mdscontrolplane runs **without** `-create-tables` and the role has no CreateTable/DeleteTable. |
-| IAM | Control plane: table RW, bucket list + read `artifacts/*` + write `results/*` (manifest, snapshots), SSM params, SSM core, CloudWatch read. Broker: bucket RW, table RW, SSM params under the prefix, SSM core, CloudWatch read (from `../observability/iam-cloudwatch-read.json` if present, else `-var cloudwatch_read_policy_json`). Loadgen: SSM, read `artifacts/*`, write `results/*`. |
+| IAM | Control plane: table RW (GetItem and UpdateItem also cover the `META/WRITER` and `META/FLOOR` items), bucket list + read `artifacts/*` + write `results/*` (manifest, snapshots), SSM params, SSM core, CloudWatch read. Broker: bucket RW, table RW, SSM params under the prefix, SSM core, CloudWatch read (from `../observability/iam-cloudwatch-read.json` if present, else `-var cloudwatch_read_policy_json`). Loadgen: SSM, read `artifacts/*`, write `results/*`. |
 | Budget | 80% actual and 100% forecast emails. Account-wide (no tag filter, because cost-allocation tags need manual activation), so set `budget_usd` accordingly. |
 
 TransactWriteItems/TransactGetItems have no IAM actions; they are authorized by
@@ -55,7 +55,7 @@ PutItem/UpdateItem/DeleteItem/ConditionCheckItem/GetItem, all of which are grant
 | `cp_standby_count` | `1` | hot-standby CP hosts (0..2) |
 | `cp_takeover_after` | `5s` | mdscontrolplane `-takeover-after`; adds to the failover stall, far under the 120 s `-commit-deadline` |
 | `broker_extra_args` | `""` | extra mdsbroker flags. Empty: brokers take the default `-max-segment-partitions 4096`. |
-| `cp_extra_args` | empty | extra mdscontrolplane flags (e.g. `-log-k`, `-gap-after`); empty keeps the unit valid for any mdscontrolplane build |
+| `cp_extra_args` | empty | extra mdscontrolplane flags; empty keeps the unit valid for any mdscontrolplane build |
 | `broker_instance_type` | `m6in.4xlarge` | 16 vCPU / 64 GiB / up to 40 Gbps, as WarpStream's agents |
 | `loadgen_count` | 2 | 1..8 load generator hosts |
 | `loadgen_instance_type` | `m6in.8xlarge` | 32 vCPU / 128 GiB / 50 Gbps, as WarpStream's OMB host |

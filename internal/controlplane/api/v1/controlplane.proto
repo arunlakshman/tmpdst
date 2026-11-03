@@ -130,6 +130,11 @@ message GetStatusResponse {
   string role = 1;
   int64 applied_slot = 2;
   int64 log_tail = 3;
+  // epoch is the writer epoch this node holds; 0 when it is a standby.
+  uint64 epoch = 4;
+  // step_downs counts how many times this node stopped being the writer
+  // because it saw a newer epoch.
+  uint64 step_downs = 5;
 }
 
 // BrokerInfo is the advertised address of one broker (Metadata brokers[]).

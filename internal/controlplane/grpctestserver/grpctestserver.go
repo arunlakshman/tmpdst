@@ -29,8 +29,8 @@ type Node struct {
 func StartMem(t testing.TB) *Node {
 	t.Helper()
 	return Start(t, statemachine.Config{
-		K: 4, CatchUpEvery: core.Duration(time.Millisecond),
-		Rank: 0, Heartbeat: core.Duration(time.Second),
+		CatchUpEvery: core.Duration(time.Millisecond),
+		Rank:         0, Heartbeat: core.Duration(time.Second),
 	}, executor.NewMemoryLog(), executor.NewMemoryObjects())
 }
 

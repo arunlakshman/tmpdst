@@ -134,7 +134,7 @@ Success criteria
 - `failed = 0`; p99 commit latency in the last 10 minutes is within 1.5 x the first 10 minutes.
 - RSS after warm-up (10 min) grows by no more than 20 % until the end; Pebble dir size is bounded (does not grow with every slot after trim starts).
 - Checkpoints: at least one written every 3 x `checkpoint-every`.
-- Trim: tombstone slots (0xFE) exist below checkpoint minus keep; no gap in the live part.
+- Trim: deleted-marker slots (0xFE) existed below checkpoint minus keep; no gap in the live part. *Superseded by decision 62: trim now deletes rows.*
 - A1, A2, A3, A5, A6, A7 pass (A4 full replay is skipped when the log is trimmed; the checkpoint plus tail check is used).
 - Consumed read and write units are within 20 % of the estimate from E0 x time.
 

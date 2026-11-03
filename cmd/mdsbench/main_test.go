@@ -63,8 +63,8 @@ func TestMainRunUsage(t *testing.T) {
 func TestCreateTopic(t *testing.T) {
 	n := server.New(server.Config{
 		Machine: statemachine.Config{
-			K: 4, CatchUpEvery: core.Duration(time.Millisecond),
-			Rank: 0, Heartbeat: core.Duration(time.Second),
+			CatchUpEvery: core.Duration(time.Millisecond),
+			Rank:         0, Heartbeat: core.Duration(time.Second),
 		},
 		Log: executor.NewMemoryLog(), Objects: executor.NewMemoryObjects(),
 		Self: core.NodeInstance{Node: "cp"},

@@ -212,16 +212,14 @@ and `metrics/cp-1/` (standby) get a file every 10 s. `summarize.py` reads `metri
 node's numbers are in `cp-1/`.
 
 Kill the appender mid-run (the failover measurement): during a stage at steady load, note the time and run
-`bench-ctl.sh kill-appender 60` (SIGKILL mdscontrolplane on rank 0, held down 60 s, then started again; it comes back as the
-preferred appender and the standby steps down, so you also measure the failback). Expect, in this order:
+`bench-ctl.sh kill-appender 60` (SIGKILL mdscontrolplane on rank 0, held down 60 s, then started again; it comes back as a standby, so the kill measures one takeover; there is no failback, decision 63). Expect, in this order:
 1. brokers' commits fail to connect to rank 0 or reach it reset, and move to rank 1, which answers 503 until it takes
    over; produce acks stall (`mdsbroker_segment_commit_seconds` p99 rises, buffered bytes grow, backpressure pauses reads);
 2. after `takeover-after` (5 s) plus the standby's next tail pass rank 1 becomes active (`mdscontrolplane_log_active` 1,
-   `mdscontrolplane_log_role_changes_total{to="active"}`, a few `mdscontrolplane_log_gap_fills_total` if the dead node held a slot, up to
-   250 ms each) and the stall ends; in-flight commits are replayed by segment key (the window answers them with the original
+   `mdscontrolplane_log_role_changes_total{to="active"}`; the dead node's slot is written or not, and no gap fill is needed, since the gap filler was removed in decision 61) and the stall ends; in-flight commits are replayed by segment key (the window answers them with the original
    offsets), so there are no duplicates and no lost acked data;
-3. when rank 0 restarts it restores the newest checkpoint (or replays) and starts active; rank 1 sees a lower-rank writer
-   and demotes (`role_changes_total{to="standby"}`); brokers fail back through a 503 from rank 1.
+3. when rank 0 restarts it restores the newest checkpoint (or replays) and stays a standby. Rank 1 writes a heartbeat every
+   second, so rank 0 does not claim the epoch. Brokers stay on rank 1 (sticky to the last good URL).
 Look at: Overview, row "Control plane (log store ...)" (slot rate, append p50/p99, lost slots, apply and standby lag, gap
 fills and role changes, queue/refused, checkpoint age); Pipeline "Commit" p99 and "Segments in flight";
 OMB's own latency chart for the gap; `journalctl -u mdscontrolplane` on both hosts (`log_role`, `log_ready`, `cp call` WARNs).

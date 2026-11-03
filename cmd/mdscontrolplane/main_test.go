@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -59,6 +60,23 @@ func TestRunServesMemStoreAndStops(t *testing.T) {
 			t.Fatal("cp port never came up")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	// The role metrics are registered after the node starts, so scrape again now
+	// that the gRPC port is up.
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+maddr+"/metrics", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metricsText, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	for _, want := range []string{"mdscontrolplane_log_epoch", "mdscontrolplane_log_step_downs_total"} {
+		if !strings.Contains(string(metricsText), want) {
+			t.Errorf("metrics missing %q", want)
+		}
 	}
 	cancel()
 	select {

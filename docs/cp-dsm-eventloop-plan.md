@@ -1,5 +1,7 @@
 # CP DSM and event-loop plan
 
+*Superseded in part by decision 63: roles are an epoch claim with a fence entry, and failback is removed. The text below is kept as it was written.*
+
 Move the log control plane onto the broker's `core.Machine` shape so one `Step` runs under the sim kernel and a control-plane-owned run loop. Brokers keep speaking `CPCall` whose payloads are generated gRPC API types. The wire protocol is gRPC plus protobuf (hard cut off JSON HTTP). The shared Dynamo log becomes an engine. Veritas stays the independent oracle but shares the generated schema types. The `internal/controlplane/` tree is an autonomous extractable unit. PR ids run CP-DSM-1 through CP-DSM-8.
 
 ## How to read this
@@ -379,7 +381,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Lane 3. Run failback unit. Save `failback.png`. Pass when preferred rank resumes.
 - [ ] Lane 4. Run restore-on-Started unit. Save `restore.png`. Pass when Ready follows catch-up.
 - [ ] Lane 5. Run standby refuse unit. Save `standby-refuse.png`. Pass when no LogAppend is emitted.
-- [ ] Lane 6. Run trim tombstone unit. Save `trim.png`. Pass when trim floor cannot be overwritten.
+- [ ] Lane 6. Run trim deleted-marker unit. *Superseded in part: trim now deletes rows (decision 62).* Save `trim.png`. Pass when trim floor cannot be overwritten.
 - [ ] Lane 7. Run full `go test ./controlplane/machine -count=1`. Save `machine.png`. Pass when `ok`.
 - [ ] Lane 8. Run detcheck. Save `detcheck.png`. Pass when exit 0.
 - [ ] Lane 9. Run `go test ./sim/engines/logengine -count=1`. Save `logengine.png`. Pass when `ok`.

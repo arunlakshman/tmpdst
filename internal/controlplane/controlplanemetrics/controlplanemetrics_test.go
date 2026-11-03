@@ -136,3 +136,17 @@ func TestFailureStaysWarn(t *testing.T) {
 		t.Fatalf("%s", buf.String())
 	}
 }
+
+// The role collectors read whatever the server reports at scrape time.
+func TestLogRoleMetrics(t *testing.T) {
+	m := New()
+	m.RegisterLogRole(func() (uint64, uint64) { return 7, 2 })
+	out := gather(t, m)
+	for _, want := range []string{"mdscontrolplane_log_epoch 7", "mdscontrolplane_log_step_downs_total 2"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	var nm *Metrics
+	nm.RegisterLogRole(func() (uint64, uint64) { return 1, 1 })
+}

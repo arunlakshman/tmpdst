@@ -27,9 +27,6 @@ func startNode(t *testing.T, config statemachine.Config) (cpv1.ControlPlaneClien
 // startNodeWithLease is startNode with a broker lease TTL. Zero keeps the default.
 func startNodeWithLease(t *testing.T, config statemachine.Config, leaseTTL time.Duration) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
 	t.Helper()
-	if config.K == 0 {
-		config.K = 4
-	}
 	if config.CatchUpEvery == 0 {
 		config.CatchUpEvery = core.Duration(time.Millisecond)
 	}
@@ -111,6 +108,10 @@ func TestCommitLookupRoundTrip(t *testing.T) {
 	if st.Role != "active" {
 		t.Fatalf("role = %q", st.Role)
 	}
+	// The node wrote commits, so it holds an epoch; it has never stepped down.
+	if st.Epoch == 0 || st.StepDowns != 0 {
+		t.Fatalf("epoch = %d, step_downs = %d; want an epoch and no step-down", st.Epoch, st.StepDowns)
+	}
 }
 
 func TestStandbyCommitUnavailable(t *testing.T) {
@@ -132,7 +133,7 @@ func TestStandbyCommitUnavailable(t *testing.T) {
 
 func TestStartCanceledContext(t *testing.T) {
 	n := server.New(server.Config{
-		Machine: statemachine.Config{K: 4, CatchUpEvery: core.Duration(time.Hour)},
+		Machine: statemachine.Config{CatchUpEvery: core.Duration(time.Hour)},
 		Log:     executor.NewMemoryLog(),
 		Objects: executor.NewMemoryObjects(),
 		Self:    core.NodeInstance{Node: "cp-0"},
@@ -147,7 +148,7 @@ func TestStartCanceledContext(t *testing.T) {
 
 func TestStartCancelWhileWaiting(t *testing.T) {
 	n := server.New(server.Config{
-		Machine: statemachine.Config{K: 4, CatchUpEvery: core.Duration(time.Hour)},
+		Machine: statemachine.Config{CatchUpEvery: core.Duration(time.Hour)},
 		Log:     executor.NewMemoryLog(),
 		Objects: executor.NewMemoryObjects(),
 		Self:    core.NodeInstance{Node: "cp-0"},

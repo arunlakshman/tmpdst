@@ -63,6 +63,11 @@ type Node struct {
 	cancel    context.CancelFunc
 	closeOnce sync.Once
 	closeErr  error
+
+	// epoch and stepDowns are copies of the machine's write role. The run loop
+	// stores them after every step, so a metrics scrape never waits on the loop.
+	epoch     atomic.Uint64
+	stepDowns atomic.Uint64
 }
 
 // New builds a Node. Call Start then serve gRPC with Register.
@@ -116,6 +121,8 @@ func (n *Node) Start(ctx context.Context) error {
 		AfterStep: func(cm core.Machine) {
 			if m, ok := cm.(*statemachine.Machine); ok {
 				n.flushAnswers(m)
+				n.epoch.Store(m.Epoch())
+				n.stepDowns.Store(m.StepDowns())
 			}
 		},
 	}
@@ -131,6 +138,12 @@ func (n *Node) Start(ctx context.Context) error {
 		n.loopDone <- err
 	}()
 	return n.waitReady(ctx, cancel)
+}
+
+// LogRole returns the writer epoch this node holds (0 when it is a standby) and
+// how many times it stepped down. It reads copies, so it never waits on the run loop.
+func (n *Node) LogRole() (uint64, uint64) {
+	return n.epoch.Load(), n.stepDowns.Load()
 }
 
 // waitReady waits until the machine is ready, then sets health to SERVING.
@@ -379,6 +392,7 @@ func (n *Node) GetStatus(ctx context.Context, _ *cpv1.GetStatusRequest) (*cpv1.G
 	type st struct {
 		role             string
 		applied, logTail int64
+		epoch, stepDowns uint64
 		ready            bool
 	}
 	ch := make(chan st, 1)
@@ -389,7 +403,7 @@ func (n *Node) GetStatus(ctx context.Context, _ *cpv1.GetStatusRequest) (*cpv1.G
 		}
 		ch <- st{
 			role: role, applied: int64(m.Applied()), logTail: int64(m.Applied()),
-			ready: m.Ready(),
+			epoch: m.Epoch(), stepDowns: m.StepDowns(), ready: m.Ready(),
 		}
 		return nil
 	})
@@ -401,7 +415,8 @@ func (n *Node) GetStatus(ctx context.Context, _ *cpv1.GetStatusRequest) (*cpv1.G
 		if !s.ready {
 			return nil, toRPCError(core.ErrUnavailable, core.NotApplied)
 		}
-		return &cpv1.GetStatusResponse{Role: s.role, AppliedSlot: s.applied, LogTail: s.logTail}, nil
+		return &cpv1.GetStatusResponse{Role: s.role, AppliedSlot: s.applied, LogTail: s.logTail,
+			Epoch: s.epoch, StepDowns: s.stepDowns}, nil
 	case <-ctx.Done():
 		return nil, toRPCError(core.ErrTimeout, core.NotApplied)
 	}

@@ -1,5 +1,7 @@
 # Follow-up: CP attrition + StallProb / CrashProb (stacked faults)
 
+*Superseded in part by decision 63: roles are an epoch claim with a fence entry, and failback is removed. The text below is kept as it was written.*
+
 **Status:** DONE on branch `feat/cp-stacked-faults` (2026-10-29). CP process attrition, `StallProb` and `CrashProb` are all live in `kafka-log`. See section 12 for what was fixed on the way.  
 **History:** deferred after CP-DSM stack land (`toys3` tip `bf460bd`, PR #9 / `cfca8b6`).  
 **Owner:** unassigned - pick up independently using this doc.  
@@ -288,6 +290,6 @@ The three families are on together with the Put and bridge coins. Turning them o
 2. **Silent bad checkpoint.** The sim flips a bit in some object reads. A restored checkpoint with a changed byte lost offsets (seed 29). The checkpoint now ends with a CRC-32 (`stateupdater.CheckSnapshot`); on a bad CRC the node reads the object again.
 3. **Ready at slot 0 over a trimmed log.** A failed checkpoint read fell back to catch-up from slot 0, and an old catch-up timer could start a tail check while the restore waited. Now a failed read is retried (`ckptRetry`), and the catch-up timer is invalidated on crash and restart.
 
-4. **A lagging node overwrote a newer checkpoint.** After a restart a standby became active while still behind, wrote its old snapshot to `checkpoint/latest` over a newer one, and the log below the newer one was already trimmed. Both nodes then looped on tombstones (seed 439). A node now writes a checkpoint only when it has applied the last tail it saw. Limit: this is not a conditional put; a very late stale Put can still overwrite. The proper fix (per-slot checkpoint keys or a conditional write) is a design change, left open.
+4. **A lagging node overwrote a newer checkpoint.** After a restart a standby became active while still behind, wrote its old snapshot to `checkpoint/latest` over a newer one, and the log below the newer one was already trimmed. Both nodes then looped on deleted markers (seed 439). A node now writes a checkpoint only when it has applied the last tail it saw. Limit: this is not a conditional put; a very late stale Put can still overwrite. The proper fix (per-slot checkpoint keys or a conditional write) is a design change, left open. *Superseded: per-slot checkpoint keys are built (decision 62); `checkpoint/latest` no longer exists.*
 
 Other changes: `swarmLog` scales `StallProb` / `CrashProb` again, base values for the log preset are `0.004` / `0.002` so a 20-seed campaign reaches them, `control_plane.go` passes them, and `logReachables` has standby took over, failback, replica stalled, replica crashed, restored from a checkpoint. `idempotent replay after takeover` and `replica hit a trimmed slot` are not required (too rare). `faultCoverage` is unchanged. Bar: `make build`, kafka-log 300 seeds with 0 failing, log mutants caught, `ci-determinism.sh` passed.

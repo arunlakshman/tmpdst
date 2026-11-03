@@ -25,7 +25,7 @@ func InboxKindOf(b EventData) InboxKind {
 	case NodeStarted, StopRequest, TimerFired, ConnectDone,
 		ObjectPutDone, ObjectGetDone, ObjectDeleteDone, ObjectListDone,
 		ControlPlaneDone, ControlPlaneDeliver,
-		LogAppendDone, LogReadDone, LogGetEndDone, LogDeleteOldDone,
+		LogAppendDone, LogReadDone, LogGetEndDone, LogDeleteOldDone, LogClaimEpochDone,
 		LiveBrokers, SendDone:
 		return Control
 	case ConnOpened, BytesReceived, ConnClosed:

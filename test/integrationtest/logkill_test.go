@@ -61,10 +61,9 @@ func newLogStack(t *testing.T, brokers int) *logStack {
 	var addrs []string
 	for rank := range 3 {
 		config := statemachine.Config{
-			K: 4, CatchUpEvery: core.Duration(5 * time.Millisecond),
-			Rank: rank, Heartbeat: core.Duration(100 * time.Millisecond),
+			CatchUpEvery: core.Duration(5 * time.Millisecond),
+			Rank:         rank, Heartbeat: core.Duration(100 * time.Millisecond),
 			TakeoverAfter: core.Duration(1500 * time.Millisecond),
-			GapAfter:      core.Duration(100 * time.Millisecond),
 			Writer:        fmt.Sprintf("cp%d", rank),
 		}
 		n := server.New(server.Config{

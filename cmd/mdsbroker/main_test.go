@@ -187,7 +187,7 @@ func TestControlPlaneURLListFailsOver(t *testing.T) {
 		cpv1.RegisterControlPlaneServer(gs, unavailCP{})
 	})
 	upNode := server.New(server.Config{
-		Machine: statemachine.Config{K: 4, CatchUpEvery: core.Duration(time.Millisecond), Rank: 0, Heartbeat: core.Duration(time.Second)},
+		Machine: statemachine.Config{CatchUpEvery: core.Duration(time.Millisecond), Rank: 0, Heartbeat: core.Duration(time.Second)},
 		Log:     executor.NewMemoryLog(),
 		Objects: executor.NewMemoryObjects(),
 		Self:    core.NodeInstance{Node: "cp-up"},

@@ -65,7 +65,7 @@ func startLogNode(t *testing.T, d deps, name string, rank int, extra ...string) 
 	t.Helper()
 	n := &logNode{addr: freeAddr(t), done: make(chan int, 1), logs: &syncBuf{}}
 	args := append([]string{"-store", kindLog, "-addr", n.addr, "-metrics-addr", "", "-node-name", name, "-rank", strconv.Itoa(rank),
-		"-checkpoint-bucket", "b", "-takeover-after", "600ms", "-heartbeat", "50ms", "-gap-after", "30ms",
+		"-checkpoint-bucket", "b", "-takeover-after", "600ms", "-heartbeat", "50ms",
 		"-pebble-dir", filepath.Join(t.TempDir(), "pebble")}, extra...)
 	var ctx context.Context
 	ctx, n.cancel = context.WithCancel(t.Context())
@@ -353,7 +353,7 @@ func TestLogFlagsDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	l := f.log
-	if l.takeoverAfter != 5*time.Second || l.k != 4 || l.gapAfter != 250*time.Millisecond ||
+	if l.takeoverAfter != 5*time.Second || l.takeoverRankStep != time.Second ||
 		l.checkpointEvery != 5*time.Minute || l.windowSlots != 131072 ||
 		l.heartbeat != time.Second || l.tableName(f.prefix) != "mds_cp" || nodeName(l) == "" {
 		t.Fatalf("defaults: %+v", l)
@@ -361,6 +361,23 @@ func TestLogFlagsDefaults(t *testing.T) {
 	f.log.table = "x"
 	if f.log.tableName(f.prefix) != "x" {
 		t.Fatal("table override")
+	}
+}
+
+// -takeover-rank-step reaches the machine config as TakeoverRankStep.
+func TestTakeoverRankStepFlag(t *testing.T) {
+	f, _, err := parseFlags([]string{"-store", kindLog, "-takeover-rank-step", "250ms"}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.log.takeoverRankStep != 250*time.Millisecond {
+		t.Fatalf("flag value: %v", f.log.takeoverRankStep)
+	}
+	if got := machineConfig(f).TakeoverRankStep; got != core.Duration(250*time.Millisecond) {
+		t.Fatalf("machine config: %v", got)
+	}
+	if _, _, err := parseFlags([]string{"-takeover-rank-step", "soon"}, &bytes.Buffer{}); err == nil {
+		t.Fatal("a bad duration must be rejected")
 	}
 }
 

@@ -169,6 +169,19 @@ type LogDeleteOldDone struct {
 	Outcome Outcome
 }
 
+// LogClaimEpochDone reports that a LogClaimEpoch finished. Epoch is the new
+// epoch when Won is true, and the epoch stored now when Won is false. Owner is
+// the owner stored with that epoch, so a node whose claim timed out can see
+// that the claim had landed (same Owner, Epoch == Expect+1).
+type LogClaimEpochDone struct {
+	Req     RequestID
+	Epoch   uint64
+	Owner   string
+	Won     bool
+	Err     ErrCode
+	Outcome Outcome
+}
+
 // ---- broker live set ----
 
 // BrokerAddr is one broker's advertised address, as Metadata lists it.
@@ -209,6 +222,7 @@ func (LogAppendDone) isEvent()       {}
 func (LogReadDone) isEvent()         {}
 func (LogGetEndDone) isEvent()       {}
 func (LogDeleteOldDone) isEvent()    {}
+func (LogClaimEpochDone) isEvent()   {}
 func (LiveBrokers) isEvent()         {}
 
 // RequestID returns the request this completion answers.
@@ -244,6 +258,9 @@ func (e LogGetEndDone) RequestID() RequestID { return e.Req }
 // RequestID returns the request this completion answers.
 func (e LogDeleteOldDone) RequestID() RequestID { return e.Req }
 
+// RequestID returns the request this completion answers.
+func (e LogClaimEpochDone) RequestID() RequestID { return e.Req }
+
 //nolint:dupl // compile-time IOResult assertions; parallel list lives on IOCalls
 var (
 	_ IOResult = SendDone{}
@@ -257,4 +274,5 @@ var (
 	_ IOResult = LogReadDone{}
 	_ IOResult = LogGetEndDone{}
 	_ IOResult = LogDeleteOldDone{}
+	_ IOResult = LogClaimEpochDone{}
 )

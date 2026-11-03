@@ -45,7 +45,7 @@ Abort rules: `--abort-p99-ms 60000` (the w3 rule), errors > 0.1%, `run-omb.sh --
 | 3 | 750k | 6 min | >= 712k, p99 < 1.5 s; same CP numbers; slot WRU < 700/s (hot key limit 1000 WRU/s, X1) |
 | - | PAUSE | 3-5 min | re-login to SSO, read stages 1-3 in Grafana before spending the 1M stage |
 | 4 | 1M | 8 min | >= 950k (95% rule), p99 < 2 s, no producer errors, brokers balanced (max/min < 1.5), segments mostly 8-16 MiB |
-| 5 | kill the appender at 500k | 10 min | 1 warm-up, kill at t = 3 min of steady load (`bench-ctl.sh kill-appender 60`, writes the marker `summarize.py` reads), 60 s down, failback; ack gap <= 15 s (5 s takeover + ~2 s backoff + tail pass), 0 errors, no ABORT, rank 0 active again |
+| 5 | kill the appender at 500k | 10 min | 1 warm-up, kill at t = 3 min of steady load (`bench-ctl.sh kill-appender 60`, writes the marker `summarize.py` reads), 60 s down, then rank 0 comes back as a standby (no failback, decision 63); ack gap <= 15 s (5 s takeover + ~2 s backoff + tail pass), 0 errors, no ABORT, rank 0 active again |
 
 Common pass bars (stages 2-4): `index_lag_slots` bounded (< 10 s of slots, not growing); `apply_lag_slots` and `standby_lag_slots` bounded;
 `index_throttles` and `index_unprocessed` about 0; `lost_slots` rate < 1% of slots; `hole_fills` about 0; `blocked` 0;

@@ -90,7 +90,6 @@ func slowLogSeed(seed uint64, logLatency simulator.FastWithRareSlow) (simulator.
 		CatchUpEvery:       slowLogCatchUpEvery,
 		ReadLimit:          64,
 		Writer:             "cp-0",
-		K:                  1,
 		Rank:               0,
 		Heartbeat:          slowLogHeartbeat,
 		CheckpointEvery:    slowLogCheckpointGap,

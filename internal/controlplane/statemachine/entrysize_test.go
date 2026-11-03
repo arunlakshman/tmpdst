@@ -58,7 +58,7 @@ func commandsIn(t *testing.T, ap core.LogAppend) int {
 
 func TestGroupStopsAtTheEntryByteLimit(t *testing.T) {
 	const limit = 20000
-	m := newMachine(t, statemachine.Config{K: 1, MaxEntryBytes: limit})
+	m := newMachine(t, statemachine.Config{MaxEntryBytes: limit})
 	first := onlyAppend(t, m.Offer(statemachine.ClientOperation{Req: 1, Cmd: sizedCommit("seg/0", 50)}))
 	const queued = 80
 	for i := 2; i <= queued+1; i++ {
@@ -81,7 +81,7 @@ func TestGroupStopsAtTheEntryByteLimit(t *testing.T) {
 }
 
 func TestDefaultLimitKeepsEntriesUnderTheDynamoDBItemLimit(t *testing.T) {
-	m := newMachine(t, statemachine.Config{K: 1})
+	m := newMachine(t, statemachine.Config{})
 	first := onlyAppend(t, m.Offer(statemachine.ClientOperation{Req: 1, Cmd: sizedCommit("seg/0", 256)}))
 	const queued = 200 // 256 commands of 256 batches made a 725 KB entry before the limit
 	for i := 2; i <= queued+1; i++ {
@@ -100,7 +100,7 @@ func TestDefaultLimitKeepsEntriesUnderTheDynamoDBItemLimit(t *testing.T) {
 }
 
 func TestCommandTooLargeForOneEntryIsRefused(t *testing.T) {
-	m := newMachine(t, statemachine.Config{K: 1, MaxEntryBytes: 2000})
+	m := newMachine(t, statemachine.Config{MaxEntryBytes: 2000})
 	acts := m.Offer(statemachine.ClientOperation{Req: 7, Cmd: sizedCommit("seg/big", 256)})
 	if len(acts) != 0 {
 		t.Fatalf("a command too large for one entry must not be appended, got %v", acts)

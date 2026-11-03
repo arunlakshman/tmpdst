@@ -49,6 +49,11 @@ func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Op
 	config := configWith(seeds, bug, opts)
 	config.ControlPlane.Log = fakelogservice.DefaultParams()
 	config.ControlPlane.Log.Bug = logBug
+	// Only the no-floor-check mutant lives in the store. Other values stay on the control plane.
+	var storeBug uint8
+	if logBug == fakelogservice.InjectedBugNoFloorCheck {
+		storeBug = logBug
+	}
 	// A replica stall or crash is rolled on each role tick of the active node.
 	// Raise the defaults so a short campaign (20 seeds) still reaches both.
 	config.ControlPlane.Log.StallProb, config.ControlPlane.Log.CrashProb = 0.004, 0.002
@@ -63,7 +68,7 @@ func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Op
 		LostResponse:   lp.PutLost,
 		Outage:         simulator.ServiceOutage{},
 		CallerTimeout:  config.ControlPlane.CallerTimeout,
-		Bug:            logBug,
+		Bug:            storeBug,
 		WindowSlots:    lp.WindowSlots,
 		TrimStride:     lp.TrimStride,
 	}
@@ -89,12 +94,12 @@ func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Op
 func logReachables() []core.PropertyID {
 	return []core.PropertyID{
 		"logcp-sim: lost slot retried at a later slot",
-		"logcp-sim: gap filled by a no-op",
 		"logcp-sim: Put not answered, same slot repeated",
 		"logcp-sim: replayed key answered from the window",
 		"logcp-sim: log trimmed below a checkpoint",
 		"logcp-sim: standby took over",
-		"logcp-sim: failback, the standby stepped down",
+		"logcp-sim: epoch claimed",
+		"logcp-sim: writer fenced, now read-only",
 		"logcp-sim: replica stalled",
 		"logcp-sim: replica crashed",
 		"logcp-sim: replica restored from a checkpoint",
@@ -178,16 +183,13 @@ func swarmLog(r simulator.CountedRand, c *simulator.SeedConfig) {
 	scale(&l.ReadFail)
 	scale(&l.StallProb)
 	scale(&l.CrashProb)
-	l.K = []int{2, 4, 8}[r.Intn(3)]
 	l.GroupMax = []int{1, 2, 4, 16}[r.Intn(4)]
-	l.GapAfter = campaign.Millis([]int64{20, 60, 200}[r.Intn(3)])
 	l.TakeoverAfter = campaign.Millis([]int64{600, 900, 1500}[r.Intn(3)])
 	if r.Chance(0.4) {
 		l.CheckpointEvery, l.KeepSlots, l.TrimStride = []int{8, 16, 24}[r.Intn(3)], []int{16, 32}[r.Intn(2)], 4
 	}
 	c.LogStore.Unavailable503 = l.PutFail
 	c.LogStore.LostResponse = l.PutLost
-	c.LogStore.Bug = l.Bug
 	c.LogStore.WindowSlots = l.WindowSlots
 	c.LogStore.TrimStride = l.TrimStride
 }

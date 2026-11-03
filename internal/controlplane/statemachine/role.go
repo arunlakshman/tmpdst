@@ -12,10 +12,14 @@ const (
 	timerRole = core.TimerID(3)
 )
 
-// Roles are advisory (decision 51): the slot put remains the fence. Rank 0
-// becomes active at Ready; a standby promotes after TakeoverAfter of silence
-// from other writers while its own reads succeed; an active node steps down
-// when a lower-rank writer appends at or after promoSlot.
+// One node holds the write role at a time (docs/writer-fencing-design.md). A
+// node becomes the writer by claiming a new epoch in the log (a compare-and-swap
+// on one item), and then it writes a fence entry at the tail. Every entry it
+// writes carries the epoch. A node that loses a slot to a newer epoch, or that
+// reads an entry from a newer epoch, stops writing and stays a standby: it keeps
+// reading and serving reads. The first node (rank 0) claims at once on an empty
+// log. Every other claim waits for TakeoverAfter of silence from other writers
+// while the node's own reads still work.
 
 // Ready reports that restore (if any) and the first catch-up round finished.
 func (m *Machine) Ready() bool { return m.ready }
@@ -26,28 +30,27 @@ func (m *Machine) Booting() bool { return m.booting }
 // IsActive reports the advisory appender role.
 func (m *Machine) IsActive() bool { return m.active }
 
-// Promote makes this node the advisory appender (tests / operator).
-func (m *Machine) Promote() { m.setActive(true) }
+// Epoch is the writer epoch this node holds. It is zero when the node is not the writer.
+func (m *Machine) Epoch() uint64 { return m.epoch }
+
+// StepDowns is how many times this node stopped being the writer because it saw
+// a newer epoch.
+func (m *Machine) StepDowns() uint64 { return m.stepDowns }
+
+// Promote makes this node the writer at once, without a claim in the log. It is
+// a test and operator hook: it does not fence another writer.
+func (m *Machine) Promote() {
+	m.epoch = m.maxEpochSeen + 1
+	m.maxEpochSeen = m.epoch
+	m.active = true
+}
 
 // Demote makes this node a standby; in-flight appends still finish.
-func (m *Machine) Demote() { m.setActive(false) }
+func (m *Machine) Demote() { m.dropRole() }
 
-func (m *Machine) setActive(on bool) {
-	if m.active == on {
-		return
-	}
-	was := m.active
-	m.active = on
-	if on {
-		m.promoSlot = max(m.high, m.applied)
-		m.lastOtherAt = m.now
-		if !was && m.ready {
-			m.env.Reachable("logcp-sim: standby took over")
-		}
-	} else if was {
-		m.env.Reachable("logcp-sim: failback, the standby stepped down")
-	}
-	m.lowerSeen = false
+// dropRole clears everything that makes this node the writer.
+func (m *Machine) dropRole() {
+	m.epoch, m.active, m.claimReq, m.fencedFlag = 0, false, 0, false
 }
 
 func (m *Machine) rolesArmed() bool {
@@ -115,34 +118,87 @@ func (m *Machine) roleTick() []core.Action {
 		return acts
 	}
 	switch {
-	case m.failbackDue():
-		m.setActive(false)
-		return nil
-	case m.takeoverDue():
-		m.setActive(true)
-		return nil
+	case m.claimDue():
+		return m.emitClaim()
 	case m.heartbeatDue():
 		return m.emitHeartbeat()
 	}
 	return nil
 }
 
-func (m *Machine) failbackDue() bool {
-	return m.active && m.lowerSeen
+// canClaim reports that this node is fully caught up and may ask for the write
+// role. A node that is restoring or catching up never claims and never writes.
+func (m *Machine) canClaim() bool {
+	return m.rolesArmed() && !m.active && m.epoch == 0 && m.claimReq == 0 &&
+		m.ready && !m.booting && !m.crashed && m.now >= m.stallUntil &&
+		m.pending == 0 && !m.checkpointRetry && !m.needsCheckpoint && m.applied >= m.goalTail
 }
 
-func (m *Machine) takeoverDue() bool {
+// claimDue reports that the silence rule says to claim the write role now.
+func (m *Machine) claimDue() bool {
 	take := m.config.TakeoverAfter
-	if m.active || take <= 0 {
+	if take <= 0 || !m.canClaim() {
 		return false
 	}
-	return m.now-m.lastOtherAt > core.NodeTime(take) &&
-		m.now-m.lastPullOK < core.NodeTime(take)
+	wait := core.NodeTime(take) + core.NodeTime(m.config.Rank)*core.NodeTime(m.config.TakeoverRankStep)
+	return m.now-m.lastOtherAt > wait && m.now-m.lastPullOK < core.NodeTime(take)
+}
+
+// claimNow claims at boot for rank 0 when the log has no writer epoch yet.
+func (m *Machine) claimNow() []core.Action {
+	if m.config.Rank != 0 || m.maxEpochSeen != 0 || !m.canClaim() {
+		return nil
+	}
+	return m.emitClaim()
+}
+
+func (m *Machine) emitClaim() []core.Action {
+	m.nextReq++
+	m.claimReq = m.nextReq
+	m.claimExpect = m.maxEpochSeen
+	return []core.Action{core.LogClaimEpoch{Req: m.claimReq, Expect: m.claimExpect, Owner: m.config.writer()}}
+}
+
+// onClaimDone handles the answer to a claim. A won claim makes this node the
+// writer once its fence entry is applied. A lost claim only teaches the node
+// the epoch that is stored now, and it waits a full silence period again.
+func (m *Machine) onClaimDone(d core.LogClaimEpochDone) []core.Action {
+	if m.claimReq == 0 || d.Req != m.claimReq {
+		return nil
+	}
+	m.claimReq = 0
+	if d.Err != core.OK {
+		m.lastOtherAt = m.now
+		return nil
+	}
+	m.maxEpochSeen = max(m.maxEpochSeen, d.Epoch)
+	// A claim that timed out may have landed: the log then shows our own name.
+	if !d.Won && (d.Owner != m.config.writer() || d.Epoch != m.claimExpect+1) {
+		m.lastOtherAt = m.now
+		return nil
+	}
+	m.epoch = d.Epoch
+	m.env.Reachable("logcp-sim: epoch claimed")
+	return m.emitHeartbeat() // the fence entry: a no-op at the tail with the new epoch
+}
+
+// stepDown ends the write role after a newer epoch is seen. The node refuses
+// the clients it was serving, keeps reading, and waits before it claims again.
+func (m *Machine) stepDown() []core.Action {
+	m.env.Reachable("logcp-sim: writer fenced, now read-only")
+	m.stepDowns++
+	m.refuseClients(core.ErrUnavailable, core.MaybeApplied)
+	m.dropRole()
+	m.queue = nil
+	m.inFlightAppends = map[core.RequestID]*inFlightAppend{}
+	m.waiters = map[string][]waitingCommand{}
+	m.lastOtherAt = m.now
+	return nil
 }
 
 func (m *Machine) heartbeatDue() bool {
 	hb := m.config.Heartbeat
-	if !m.active || hb <= 0 {
+	if !m.active || !m.ready || m.booting || hb <= 0 {
 		return false
 	}
 	if m.now-m.lastOwnAt <= core.NodeTime(hb) {
@@ -177,7 +233,7 @@ func betweenDur(r interface{ Intn(int) int }, d [2]core.Duration) core.Duration 
 
 func (m *Machine) softCrash() []core.Action {
 	m.env.Reachable("logcp-sim: replica crashed")
-	m.setActive(false)
+	m.dropRole()
 	m.ready = false
 	m.booting = true
 	m.crashed = true
@@ -189,20 +245,22 @@ func (m *Machine) softCrash() []core.Action {
 	return m.refuseReads()
 }
 
-// isDeleted reports a LogAppend into a trimmed slot (tombstone): Conflict, Taken,
-// and no Existing bytes (store.go). Empty-delete mutants look like free slots.
-func isDeleted(d core.LogAppendDone) bool {
+// isBelowFloor reports a LogAppend that the log refused because its slot is at
+// or below the floor (the trimmed part of the log). The put is not a commit.
+// The log answers it as a conflict with no existing entry; a slot that is taken
+// by a real entry always carries its bytes.
+func isBelowFloor(d core.LogAppendDone) bool {
 	return d.Err == core.ErrConflict && d.Taken && len(d.Existing) == 0
 }
 
-// hitTrimmed handles append/fill against a tombstone: refuse clients, drop
-// local log state, and restore from checkpoint (docs/log-cp-service.md).
-// Catch-up from slot 0 after a tomb re-enters the trimmed prefix; needsCheckpoint
-// blocks that until a snapshot lands.
+// hitTrimmed handles a read that found its next slot trimmed: refuse clients,
+// drop local log state, and restore from the checkpoint. Catch-up from slot 0
+// would re-enter the trimmed prefix, so needsCheckpoint blocks that until a
+// snapshot is found.
 func (m *Machine) hitTrimmed() []core.Action {
 	m.env.Reachable("logcp-sim: replica hit a trimmed slot")
 	m.refuseClients(core.ErrUnavailable, core.MaybeApplied)
-	m.setActive(false)
+	m.dropRole()
 	m.ready = false
 	m.booting = true
 	m.needsCheckpoint = true
@@ -218,8 +276,6 @@ func (m *Machine) clearLocal() {
 	m.buf = map[core.LogPosition][]byte{}
 	m.pending, m.pendingKind = 0, pendingNone
 	m.proj = nil
-	m.fillSlot, m.fillData = 0, nil
-	m.gapArmed = false
 	m.checkpointRequest, m.checkpointStage, m.trimThrough = 0, 0, 0
 	m.checkpointPending, m.checkpointData = 0, nil
 }
@@ -275,18 +331,19 @@ func (m *Machine) afterCrashRestart() []core.Action {
 	m.fold = fold
 	m.reseedTopics()
 	m.applied, m.high, m.goalTail = 0, 0, 0
+	m.tailChecked = false
 	m.seq = 0
 	if m.checkpointEnabled() {
-		return m.emitCheckpointGet()
+		return m.emitCheckpointList()
 	}
 	return m.afterRestore()
 }
 
 func (m *Machine) emitHeartbeat() []core.Action {
 	m.seq++
-	id := fmt.Sprintf("%s/%d", m.config.writer(), m.seq)
+	id := fmt.Sprintf("%s/e%d/%d", m.config.writer(), m.epoch, m.seq)
 	inner := stateupdater.Encode(stateupdater.Entry{ID: id, Kind: stateupdater.KindNoop})
-	data := wrap(m.config.Rank, m.config.writer(), inner)
+	data := wrap(m.epoch, m.config.writer(), inner)
 	m.nextReq++
 	request := m.nextReq
 	slot := m.alloc()
@@ -294,17 +351,18 @@ func (m *Machine) emitHeartbeat() []core.Action {
 	return []core.Action{core.LogAppend{Req: request, Slot: slot, Data: data}}
 }
 
-func (m *Machine) observeWriter(slot core.LogPosition, rank int, writer string, enveloped bool) {
+func (m *Machine) observeWriter(epoch uint64, writer string, enveloped bool) {
 	if !enveloped || writer == "" {
 		return
 	}
+	m.maxEpochSeen = max(m.maxEpochSeen, epoch)
 	if writer == m.config.writer() {
 		m.lastOwnAt = m.now
 		return
 	}
 	m.lastOtherAt = m.now
-	if slot >= m.promoSlot && rank < m.config.Rank {
-		m.lowerSeen = true
+	if m.epoch > 0 && epoch > m.epoch {
+		m.fencedFlag = true
 	}
 }
 

@@ -1,6 +1,10 @@
 # Design A prototype: the control plane over a command log (X2, X5, commit model)
 
+*Superseded in part by decision 63: roles are an epoch claim with a fence entry, and failback is removed. The text below is kept as it was written.*
+
 *Note: the DynamoDB-transaction control plane described here was removed (decision 54); the log-based CP is the only one. This document is a record.*
+
+*Superseded (decision 61): the code has ONE append in flight (K=1, not K=4) and no hole filler. Where this document says hole-filler, HoleAfter, or K in flight, that text describes the prototype only. A missing next slot with later slots present now means a trim.*
 
 Status: PROTOTYPE and measurements (2026-10-20), not a decision. Idea A of `delos-logdrive-ideas.md`, built under
 `cp/logsm`. It is reachable only from tests: no `-store` kind, no change to `cmd/mdscontrolplane`, no trace hash changed.
@@ -15,8 +19,8 @@ Labels: **measured** (this machine, Apple M1, Go 1.24), **modelled** (fakedb wit
 | `MemLog`, `DynLog` | `memlog.go`, `dynlog.go` | `DynLog`: `LOG/<20-digit slot>`, one `PutItem` with `attribute_not_exists(pk)` and `ALL_OLD` on failure, consistent `Query` for Read, descending `Limit 1` for CheckTail. Runs on `cp/dynamo/fakedb`. |
 | entry codec | `codec.go` | Command only: key, batches (topic, partition, records, loc), with a per-entry string table. 150 partitions = 2,970 B, 50 = about 1 KB. Decode 8.7 us. |
 | `Replica` | `replica.go` | A `veritas.ControlPlane` plus `applied`. Applies slots strictly in order through `Exec` (the oracle is not copied). Read-ahead buffer, shared and paced tail read ("bus stand"), `SyncTo`, `Await`, fresh `Read` (CheckTail, apply, answer from memory), `Local` (stale). |
-| `Committer` | `committer.go` | K appends in flight on consecutive slots. A slot lost to another writer is retried at a later slot. An unknown outcome is retried at the SAME slot (conditional, so safe): it either lands or shows who owns the slot (entry ID). Answer only after this replica applied the slot. |
-| hole-filler | `Replica.Tick/SyncTo` | A slot empty for `HoleAfter` (default 250 ms) while later slots exist gets a no-op via the same conditional append. The original writer loses and retries elsewhere; apply skips the no-op. |
+| `Committer` | `committer.go` | K appends in flight on consecutive slots (K>1 modelled; the code now uses K=1). A slot lost to another writer is retried at a later slot. An unknown outcome is retried at the SAME slot (conditional, so safe): it either lands or shows who owns the slot (entry ID). Answer only after this replica applied the slot. |
+| hole-filler | `Replica.Tick/SyncTo` | **Removed in the code (decision 61).** Prototype only: a slot empty for `HoleAfter` (250 ms) got a no-op. The code keeps one append in flight and retries the same slot, so no slot is left empty. |
 | `Checkpoint` | `checkpoint.go` | Slot, state hash, ends (grouped by topic, delta coded), sorted 16-byte key hashes. No restore into veritas. |
 | `Store` | `store.go` | `cp.Store` over a replica and committer, for the conformance suite only. |
 | small additions elsewhere | `fakedb`, `internal/verify/speccheck/snapshot.go` | fakedb `PutItem` (conditional, `ALL_OLD`, `AfterPut` lost-answer hook); veritas `Ends()` and `SegmentKeys()` (read-only). |
@@ -41,6 +45,8 @@ go test ./cp/cptest -run LogSM                              # conformance C3 aga
 ## 3. X2 and X5 results
 
 ### X2: three replicas, random interleavings, faults (PASS)
+
+*Superseded in part (decision 61): the hole-fills column and the HoleAfter checks describe the removed hole filler. The results stay as measured.*
 
 `sim_test.go`: real replicas, committers and hole-fillers; goroutines parked at every log call and wait, and a seeded
 stream picks who runs, so one seed is one interleaving (determinism test: same seed twice gives the same trace hash).
@@ -91,6 +97,8 @@ checkpoint is tiny next to replay: it is the key set, not the ends, that grows.
 
 ## 4. Commit throughput and latency: K in flight versus design L (modelled)
 
+*Note: K>1 modelled; the code now uses K=1 (decision 61).*
+
 Method as `commit-path-redesign.md` section 6: 6 brokers seal 150-partition segments open loop at the offered rate,
 one commit in flight per broker (L 5.8), 2 s warm-up then 8 s measured, counted by completion time. `A pref`: all
 brokers use one replica (sticky routing). `A spread`: 3 replicas with 2 brokers each, all appending to one log (slot
@@ -136,10 +144,10 @@ Reading it:
    A replica that holds the index needs a compact applier, differential-tested against veritas (decision 21 stays).
    A checkpoint-restored replica also cannot rebuild old runs for `Lookup`: it is "tail plus index", not veritas.
 3. **Lost slots are not always "one cheap Put"** (ideas doc, risks): 1-3 Puts per commit when appenders are spread.
-4. **A fresh Lookup can wait for a hole.** If a hole sits below the tail, any fresh read waits up to `HoleAfter` and
-   then writes the no-op; the ideas doc did not name this tail-latency cost.
-5. Transient holes also come from one writer pipelining K Puts (n+1 lands before n), so `HoleAfter` must exceed the
-   Put p99.9, or the filler wastes a Put and the real writer retries (correct, costs latency; X2 exercises both).
+4. *Superseded (decision 61):* **A fresh Lookup can wait for a hole.** If a hole sits below the tail, any fresh read waits up to `HoleAfter` and
+   then writes the no-op. The code has no holes below the tail, so this cost is gone.
+5. *Superseded (decision 61):* Transient holes also come from one writer pipelining K Puts (n+1 lands before n), so `HoleAfter` must exceed the
+   Put p99.9, or the filler wastes a Put and the real writer retries (correct, costs latency; X2 exercises both). The code uses one append in flight.
 6. Smaller: the entry is 2.97 KB at 150 partitions (ideas doc said 3.4 KB); fakedb lacked `PutItem` (added);
    `cp/dynamo.DB` still has no `PutItem` (`logsm` declares its own narrow interface).
 
@@ -148,14 +156,14 @@ Reading it:
 - **Windowed idempotency after trim.** Product decision: guarantee per key for `2 x CommitDeadline` plus checkpoint
   interval, duplicate records beyond it (decision 41 already allows duplicates on retry). A broker whose key is older
   than the window must get a defined answer (not a silent re-commit): `ErrConflict`-like or accepted duplicate.
-- **Hole-filling timeout.** 250 ms is a guess. Needs Put p99.9 from X1; a smaller value raises wasted fills, a larger
+- *Superseded (decision 61): no hole filler, so no hole-filling timeout is needed.* **Hole-filling timeout (old).** 250 ms is a guess. Needs Put p99.9 from X1; a smaller value raises wasted fills, a larger
   one raises Lookup tail latency after a writer death.
 - **Memory for long retention** (finding 2): index in memory is hours, not days; the S3 index (idea B) is needed
   before long retention, and then the replica's state is not veritas.
 - **Apply-rate headroom:** 20x at 430 seg/s on one core with the oracle itself; recheck with a compact applier and
   with decode of real 3 KB items from DynamoDB reads, and with GC pressure of 1.7 MB/s of new state.
 - **What the sim must cover:** a log engine (Put/Query with latency, lost answers, unknown outcome) next to the S3
-  engine; replicas as actors with crash and restart from a checkpoint; `HoleAfter` on the virtual clock with skew;
+  engine; replicas as actors with crash and restart from a checkpoint; `HoleAfter` on the virtual clock with skew (old: the hole filler is removed, decision 61);
   invariants "all live replicas' `StateHash` equal at a quiesced log", "an answer is derived from the applied slot",
   "no empty slot is passed without a no-op"; veritas stays the oracle over the log's first-slot order; every trace
   hash changes (as for L). X2 here is a single-node harness, not that engine.
@@ -163,7 +171,7 @@ Reading it:
 Decision candidate (not added to `decisions.md`): | A? | **The control plane applies a log of commands.** `LOG/<slot>` holds
 the CommitSegment request, never bases; every replica applies it through the veritas state machine and answers only after
 applying the slot; idempotency per key is first slot wins within a window; holes are filled with no-ops after
-`HoleAfter`; appends are sticky to one preferred replica with K=4. Pending: X1 (PutItem latency, throttling), the
+`HoleAfter` (superseded, decision 61: no holes are filled); appends are sticky to one preferred replica with K=4 (the code uses K=1). Pending: X1 (PutItem latency, throttling), the
 window decision, the compact applier. |
 
 ## 7. What was NOT done
@@ -185,20 +193,20 @@ over 30) green. No stage touches an existing sim trace hash except stage 3, whic
 | stage | work | exit criteria |
 |---|---|---|
 | 1. KV applier and lockstep | `cp/applier`: the state machine of decision 49 on an embedded KV store chosen by a bake-off (`docs/applier-bakeoff.md`); commands CommitSegment and CreateTopic, queries Lookup, DescribeTopics, End; runs packed per (partition, segment); per-key digest plus bases for the window; checkpoint, restore and trim by slot. | X2 harness with the applier as every replica's state machine and veritas as the oracle: 100,000 seeds, 0 failures (equal answers, offsets and query digests); `cptest` conformance green against the applier as a `cp.Store`; apply rate well above 430 segments/s at 150 partitions per segment with 40k partitions of state; the store dependency recorded per decisions I and J. |
-| 2. Log-backed CP service (DONE, `docs/log-cp-service.md`) | The `cp/` service on the DynamoDB log through the `cp/logsm` seam: committer with K=4, hole filler, hot standby tailing the log (decision 51, the slot is the fence), sticky routing of commits to one node, checkpoint and trim (trim stays behind the key window), indexer writing `R#` rows every 10 s on a pre-warmed table, fresh Lookup through `CheckTail` with shared (batched) tail reads. | Conformance C3 against the real service on fakedb; a standby takes over after the appender is killed with no lost or duplicated offset; restart from checkpoint plus tail gives the same state digest; Lookup after an ack sees it; unit and race tests for each loop. |
+| 2. Log-backed CP service (DONE, `docs/log-cp-service.md`) | The `cp/` service on the DynamoDB log through the `cp/logsm` seam: committer with K=4 (later K=1), hole filler (later removed, decision 61), hot standby tailing the log (decision 51, the slot is the fence), sticky routing of commits to one node, checkpoint and trim (trim stays behind the key window), indexer writing `R#` rows every 10 s on a pre-warmed table, fresh Lookup through `CheckTail` with shared (batched) tail reads. | Conformance C3 against the real service on fakedb; a standby takes over after the appender is killed with no lost or duplicated offset; restart from checkpoint plus tail gives the same state digest; Lookup after an ack sees it; unit and race tests for each loop. |
 | 3. Cap 4096 and sim (DONE, `docs/sim-log-engine.md`) | Raise `MaxSegmentPartitions` from 96 to about 4096 (decision 52); add a sim CP engine for the log (Put/Query with latency, lost answers, unknown outcome; replicas as actors with crash and restart from a checkpoint; `HoleAfter` on the virtual clock) next to the S3 engine; veritas stays the oracle over the log's first-slot order. | Every trace hash re-baselined and reviewed by hand (a diff per hash with the cause); 300-seed campaign green; invariants: all live replicas' query digests equal at a quiesced log, an answer derives from the applied slot, no empty slot is passed without a no-op. |
-| 4. Wiring and operations (DONE, below) | `mdscontrolplane -store` kind for the log, OpenAPI and a CP URL list (or NLB) for brokers with failover to the next URL, `mdscontrolplane_` observability for apply lag, slot loss, hole fills, checkpoint age, indexer lag, window size. | `test/integrationtest/` kill-the-appender test fails over within the budget; metrics documented in `docs/observability.md`; runbook updated. |
+| 4. Wiring and operations (DONE, below) | `mdscontrolplane -store` kind for the log, OpenAPI and a CP URL list (or NLB) for brokers with failover to the next URL, `mdscontrolplane_` observability for apply lag, slot loss, checkpoint age (hole fills were a metric until decision 61 removed it), indexer lag, window size. | `test/integrationtest/` kill-the-appender test fails over within the budget; metrics documented in `docs/observability.md`; runbook updated. |
 | 5. AWS rerun | 500k, 750k and 1M random clients, no partition affinity, with the production CP (X1/X3/X4 numbers re-measured at that load). | Report in `docs/` with commit rate, commit latency p50/p99, tail-query rate, DynamoDB WRU, failover penalty and cost per GiB; the stage-5 results decide whether the S3 index (TODO) is scheduled. |
 
 ### Stage 2 status
 
-Built in `cp/logcp` (service, DynamoDB log, committer with group commit and K=4, hole filler, hot standby with
-advisory roles, checkpoint and tombstone trim, indexer, `mdscontrolplane_log_*` metrics), `cp/cpclient` (CP URL list and
+Built in `cp/logcp` (service, DynamoDB log, committer with group commit and K=4 (later K=1, decision 61), hole filler (later removed, decision 61), hot standby with
+advisory roles, checkpoint and deleted-marker trim (superseded: trim deletes rows, decision 62), indexer, `mdscontrolplane_log_*` metrics), `cp/cpclient` (CP URL list and
 failover) and `cp/logcp/logcptest`. Exit criteria: cptest conformance against the service (store, HTTP, fakedb) green;
 seeded X2 on the real service, 20,000 seeds, 0 failures (takeover, failback, split brain, crash and restore from a
 checkpoint, trim); `-race` test; restart from checkpoint plus tail gives equal state; Lookup after an ack sees it on
 any node. Two findings changed the design text (decision 53): the idempotency window must be a function of the
-slot number, and trimming must leave tombstones. Not wired into `cmd/mdscontrolplane` (stage 4).
+slot number, and trimming must leave deleted markers (superseded by decision 62: trim now deletes rows). Not wired into `cmd/mdscontrolplane` (stage 4).
 
 ### Stage 4 status
 
@@ -243,7 +251,7 @@ The cap change is exercised by wide workloads instead (`internal/verify/simulato
 of 265 segments sealed by the 96-partition rule at cap 96 and none at 4096 (they run on to the timer). The new preset
 `kafka-log`: 300 seeds 0 failing (7,519,187 steps), 2000 seeds 0 failing (50,734,757 steps, no coverage gap). No
 correctness hole in the log design showed up; one property of mine was too strict (a lagging restored replica may meet a
-tombstone again when a newer checkpoint trimmed past it, and restarts again: the real invariant is that a checkpoint is
+deleted marker again when a newer checkpoint trimmed past it, and restarts again: the real invariant is that a checkpoint is
 never below the trim floor, now asserted).
 
 Left for stage 4: `mdscontrolplane -store` kind for the log, OpenAPI and URL list wiring, the `mdscontrolplane_log_*` dashboards and alerts,

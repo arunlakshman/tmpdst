@@ -29,7 +29,7 @@ func EncodeGroupForTest(id string, cmds []stateupdater.Entry) []byte {
 	return encodeGroup(id, in)
 }
 
-// EncodeEnvelopedForTest wraps an inner payload with rank and writer.
-func EncodeEnvelopedForTest(rank int, writer string, payload []byte) []byte {
-	return wrap(rank, writer, payload)
+// EncodeEnvelopedForTest wraps an inner payload with epoch and writer.
+func EncodeEnvelopedForTest(epoch uint64, writer string, payload []byte) []byte {
+	return wrap(epoch, writer, payload)
 }

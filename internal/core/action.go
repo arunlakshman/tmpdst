@@ -128,8 +128,21 @@ type LogRead struct {
 // LogGetEnd reports the highest contiguous written slot plus one (the tail).
 type LogGetEnd struct{ Req RequestID }
 
-// LogDeleteOld tombstones every slot at or below Through. Trimmed slots must not be
-// rewritten.
+// LogClaimEpoch asks the log to make a node the one writer. The log keeps one
+// writer epoch. The claim succeeds only if the stored epoch still equals
+// Expect (zero when none was stored yet). Then the stored epoch becomes
+// Expect+1 and Owner is recorded. A claim that loses reports the epoch that is
+// stored now. Nothing is written to a log slot.
+type LogClaimEpoch struct {
+	Req    RequestID
+	Expect uint64
+	Owner  string
+}
+
+// LogDeleteOld removes every slot at or below Through. The log first raises its
+// floor to Through, and only then deletes the slots. A LogAppend that puts into
+// a slot at or below the floor is not a commit: the log answers it as a
+// conflict with no existing entry.
 type LogDeleteOld struct {
 	Req     RequestID
 	Through LogPosition
@@ -170,6 +183,7 @@ func (LogAppend) isAction()         {}
 func (LogRead) isAction()           {}
 func (LogGetEnd) isAction()         {}
 func (LogDeleteOld) isAction()      {}
+func (LogClaimEpoch) isAction()     {}
 func (RecordFact) isAction()        {}
 func (StopForRestart) isAction()    {}
 func (ShutdownDone) isAction()      {}
@@ -207,6 +221,9 @@ func (a LogGetEnd) RequestID() RequestID { return a.Req }
 // RequestID returns the request this action carries.
 func (a LogDeleteOld) RequestID() RequestID { return a.Req }
 
+// RequestID returns the request this action carries.
+func (a LogClaimEpoch) RequestID() RequestID { return a.Req }
+
 //nolint:dupl // compile-time IOCall assertions; parallel list lives on IOResults
 var (
 	_ IOCall = Send{}
@@ -220,4 +237,5 @@ var (
 	_ IOCall = LogRead{}
 	_ IOCall = LogGetEnd{}
 	_ IOCall = LogDeleteOld{}
+	_ IOCall = LogClaimEpoch{}
 )

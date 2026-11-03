@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
 	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
 	"github.com/manifesterio/mds/internal/core"
 )
@@ -435,7 +436,7 @@ func TestGroupEntryNotAGroupOp(t *testing.T) {
 
 // TestGroupStoreAdapter runs the group calls through the Store adapter.
 func TestGroupStoreAdapter(t *testing.T) {
-	s := &stateupdater.Store{A: stateupdater.NewMem()}
+	s := &updaterstore.Store{A: stateupdater.NewMem()}
 	ctx := context.Background()
 	if code, err := s.GroupInstall(ctx, install("g", 1, "m1", "m1")); code != core.OK || err != nil {
 		t.Fatalf("install: %v %v", code, err)

@@ -1,4 +1,4 @@
-// Package memorystore is a controlplane.Store over the speccheck spec behind a mutex, for
+// Package memorystore is an in-memory store over the speccheck spec behind a mutex, for
 // local development and handler tests.
 package memorystore
 
@@ -6,18 +6,15 @@ import (
 	"context"
 	"sync"
 
-	"github.com/manifesterio/mds/internal/controlplane"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/verify/speccheck"
 )
 
-// Store is an in-memory controlplane.Store backed by the speccheck control-plane spec.
+// Store is an in-memory store backed by the speccheck control-plane spec.
 type Store struct {
 	mu   sync.Mutex
 	spec *speccheck.ControlPlane
 }
-
-var _ controlplane.Store = (*Store)(nil)
 
 // New returns an empty store.
 func New() *Store { return &Store{spec: speccheck.NewControlPlane()} }
@@ -36,23 +33,23 @@ func executeAs[R any](ctx context.Context, s *Store, operation core.ControlPlane
 	return core.ResponseAs[R](d), d.Err, err
 }
 
-// CommitSegment implements controlplane.Store.
+// CommitSegment answers one store call.
 func (s *Store) CommitSegment(ctx context.Context, operation core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
 	return executeAs[core.CommitSegmentResp](ctx, s, operation)
 }
 
-// Lookup implements controlplane.Store.
+// Lookup answers one store call.
 func (s *Store) Lookup(ctx context.Context, operation core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error) {
 	return executeAs[core.FindSegmentsResp](ctx, s, operation)
 }
 
-// DescribeTopics implements controlplane.Store.
+// DescribeTopics answers one store call.
 func (s *Store) DescribeTopics(ctx context.Context, operation core.DescribeTopics) (core.DescribeTopicsResp, error) {
 	d, err := s.exec(ctx, operation)
 	return core.ResponseAs[core.DescribeTopicsResp](d), err
 }
 
-// CreateTopic implements controlplane.Store.
+// CreateTopic answers one store call.
 func (s *Store) CreateTopic(ctx context.Context, operation core.CreateTopic) (core.ErrCode, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err

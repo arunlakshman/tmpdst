@@ -1,29 +1,30 @@
-package stateupdater
+// Package updaterstore adapts a stateupdater.StateUpdater to the test-only store
+// interfaces. It is test support: the log-backed service applies commands at
+// their real slots, not through this adapter.
+package updaterstore
 
 import (
 	"context"
 	"sync"
 
 	"github.com/manifesterio/mds/internal/controlplane"
+	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
 	"github.com/manifesterio/mds/internal/core"
 )
 
-// Store is a controlplane.Store over a StateUpdater with a local slot counter: a single
-// node, no log. It is for the conformance suite and tools; the log-backed
-// service (stage 2) applies commands at their real slots.
+// Store drives a StateUpdater with a local slot counter: a single node, no log.
+// It is a controlplane.GroupStore, and it has the four segment and topic calls
+// that the conformance suite uses.
 type Store struct {
-	A *StateUpdater
+	A *stateupdater.StateUpdater
 
 	mu   sync.Mutex
 	next int64
 }
 
-var (
-	_ controlplane.Store      = (*Store)(nil)
-	_ controlplane.GroupStore = (*Store)(nil)
-)
+var _ controlplane.GroupStore = (*Store)(nil)
 
-// CommitSegment implements controlplane.Store.
+// CommitSegment applies a commit at the next local slot.
 func (s *Store) CommitSegment(_ context.Context, operation core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
 	s.mu.Lock()
 	slot := s.next
@@ -33,19 +34,19 @@ func (s *Store) CommitSegment(_ context.Context, operation core.CommitSegment) (
 	return core.ResponseAs[core.CommitSegmentResp](d), d.Err, err
 }
 
-// Lookup implements controlplane.Store.
+// Lookup answers a Lookup.
 func (s *Store) Lookup(_ context.Context, operation core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error) {
 	d, err := s.A.Lookup(operation)
 	return core.ResponseAs[core.FindSegmentsResp](d), d.Err, err
 }
 
-// DescribeTopics implements controlplane.Store.
+// DescribeTopics answers a DescribeTopics.
 func (s *Store) DescribeTopics(_ context.Context, operation core.DescribeTopics) (core.DescribeTopicsResp, error) {
 	d, err := s.A.Describe(operation)
 	return core.ResponseAs[core.DescribeTopicsResp](d), err
 }
 
-// CreateTopic implements controlplane.Store.
+// CreateTopic creates a topic.
 func (s *Store) CreateTopic(_ context.Context, operation core.CreateTopic) (core.ErrCode, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -56,7 +57,11 @@ func (s *Store) CreateTopic(_ context.Context, operation core.CreateTopic) (core
 func (s *Store) groupWrite(operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.A.groupWrite(operation)
+	entry, ok := stateupdater.GroupEntry(operation)
+	if !ok {
+		return core.ControlPlaneDone{Err: core.ErrInvalid}, nil
+	}
+	return s.A.Apply(0, entry), nil
 }
 
 // GroupInstall implements controlplane.GroupStore.

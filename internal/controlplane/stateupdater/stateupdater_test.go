@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
 	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
 	"github.com/manifesterio/mds/internal/controlplane/stateupdater/pebblestore"
 	"github.com/manifesterio/mds/internal/core"
@@ -220,7 +221,7 @@ func TestInvalidAndUnknown(t *testing.T) {
 
 func TestStoreAdapter(t *testing.T) {
 	ctx := t.Context()
-	s := &stateupdater.Store{A: stateupdater.New(stateupdater.NewMemoryKeyValueStore())}
+	s := &updaterstore.Store{A: stateupdater.New(stateupdater.NewMemoryKeyValueStore())}
 	if c, err := s.CreateTopic(ctx, core.CreateTopic{Name: "t", Partitions: 3}); c != core.OK || err != nil {
 		t.Fatal(c, err)
 	}

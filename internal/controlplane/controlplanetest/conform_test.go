@@ -3,7 +3,6 @@ package controlplanetest
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/internal/controlplane"
 	"github.com/manifesterio/mds/internal/verify/speccheck/checker/injectedbug"
 	"github.com/manifesterio/mds/internal/verify/speccheck/checker/runsettings"
 	"github.com/manifesterio/mds/internal/verify/speccheck/checker/suites"
@@ -35,4 +34,4 @@ func TestInjectedBugsCaughtMemorystore(t *testing.T) {
 	injectedbug.RequireAllControlPlaneBugsDetected(t, subjectOf(func() impl { return storeImpl{newMem()} }), 100)
 }
 
-var _ controlplane.Store = newMem()
+var _ store = newMem()

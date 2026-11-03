@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/manifesterio/mds/internal/controlplane"
 	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/memorystore"
 	"github.com/manifesterio/mds/internal/core"
@@ -22,8 +21,18 @@ type impl interface {
 	CreateTopic(ctx context.Context, operation core.CreateTopic) (core.ErrCode, error)
 }
 
-// storeImpl drives a controlplane.Store directly.
-type storeImpl struct{ st controlplane.Store }
+// store is the four segment and topic calls, with the same answers as
+// speccheck.ControlPlane. A business error is a non-OK core.ErrCode with a nil
+// error. The error result is for infrastructure failures only.
+type store interface {
+	CommitSegment(ctx context.Context, operation core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error)
+	Lookup(ctx context.Context, operation core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error)
+	DescribeTopics(ctx context.Context, operation core.DescribeTopics) (core.DescribeTopicsResp, error)
+	CreateTopic(ctx context.Context, operation core.CreateTopic) (core.ErrCode, error)
+}
+
+// storeImpl drives a store directly.
+type storeImpl struct{ st store }
 
 func (s storeImpl) Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneResponse, core.ErrCode, error) {
 	switch operation := operation.(type) {
@@ -78,7 +87,7 @@ func grpcOver(t testing.TB) impl {
 	return grpcImpl{StartMem(t).Client}
 }
 
-func newMem() controlplane.Store { return memorystore.New() }
+func newMem() store { return memorystore.New() }
 
 // implSubject makes an impl usable as a suite subject. The stores keep no spec
 // hash, so StateHash says no. A commit that succeeds is Applied, as in the spec.

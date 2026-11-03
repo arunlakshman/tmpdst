@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
 	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
 	"github.com/manifesterio/mds/internal/core"
 )
@@ -49,7 +50,7 @@ func peek(c *Coordinator, name string) view {
 type harness struct {
 	t         *testing.T
 	c         *Coordinator
-	store     *stateupdater.Store
+	store     *updaterstore.Store
 	clock     *fakeClock
 	next      *atomic.Int64
 	session   int32 // session timeout of the members joined by join
@@ -61,7 +62,7 @@ type harness struct {
 func newHarness(t *testing.T, config Config) *harness {
 	t.Helper()
 	h := &harness{t: t, clock: newFakeClock(time.Unix(1000, 0)), session: 10000, next: new(atomic.Int64)}
-	h.store = &stateupdater.Store{A: stateupdater.NewMem()}
+	h.store = &updaterstore.Store{A: stateupdater.NewMem()}
 	if config.Clock == nil {
 		config.Clock = h.clock
 	}

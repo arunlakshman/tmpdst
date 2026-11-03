@@ -5,17 +5,18 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
 	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
 	"github.com/manifesterio/mds/internal/controlplane/stateupdater/pebblestore"
 )
 
 // Conformance C3 for the production applier (decision 49): the shared control
-// plane suite runs on controlplane/stateupdater as a controlplane.Store. The applier also has its own
+// plane suite runs on controlplane/stateupdater through updaterstore. The applier also has its own
 // test with the StateUpdater type directly, in package stateupdater.
 
 func TestConformanceStateUpdaterMem(t *testing.T) {
 	runProfiles(t, func() impl {
-		return storeImpl{&stateupdater.Store{A: stateupdater.New(stateupdater.NewMemoryKeyValueStore())}}
+		return storeImpl{&updaterstore.Store{A: stateupdater.New(stateupdater.NewMemoryKeyValueStore())}}
 	}, 20)
 }
 
@@ -30,6 +31,6 @@ func TestConformanceStateUpdaterPebble(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = keyValue.Close() })
-		return storeImpl{&stateupdater.Store{A: stateupdater.New(keyValue)}}
+		return storeImpl{&updaterstore.Store{A: stateupdater.New(keyValue)}}
 	}, 3)
 }

@@ -27,9 +27,13 @@
 //     inject work. It imports only core and the standard library.
 //   - replica: one node's copy of the replicated log: leader or standby,
 //     catch-up, checkpoint and restore. It implements core.Machine.
-//   - metadata: the control-plane data model (topics, segments, groups and
-//     offsets) and the rules for changing it. It applies commands in order to an
-//     ordered key-value store.
+//   - metadata: the kernel of the replicated state. It sends each operation to
+//     the module that owns it, owns the log format and the checkpoint, and
+//     applies commands in order to an ordered key-value store.
+//   - module: the one interface (Mode, Write, Read) that each context
+//     implements to take part in the replicated state.
+//   - topics: the topics and segments context (CreateTopic, DescribeTopics,
+//     CommitSegment, FindSegments). It owns the T, E, R, K and S keys.
 //   - kv: the small ordered key-value seam under metadata and groups/storage,
 //     with an in-memory store and the record codec they share.
 //   - kv/pebblestore: the Pebble-backed key-value store that
@@ -39,9 +43,9 @@
 //   - executor/dynamolog and executor/sqllog: the DynamoDB and Postgres
 //     implementations of executor.Log. executor/logtest is their shared test
 //     suite.
-//   - groups/storage: how consumer group state is kept in kv (the G, M and O
-//     keys): the fold of the group writes and the group reads. It does not
-//     know about topics.
+//   - groups/storage: the consumer group context in the replicated state (the G,
+//     M and O keys): the fold of the group writes and the group reads. It does
+//     not know about topics.
 //   - groups: the consumer group coordinator of the active node. It
 //     speaks the classic group protocol only.
 //   - controlplanemetrics: the Prometheus instrumentation. It covers HTTP
@@ -56,8 +60,8 @@
 // How they fit together, from the imports:
 //
 //   - server imports runloop, replica, executor and groups.
-//   - replica imports metadata. metadata imports kv and groups/storage.
-//     groups/storage imports kv. executor imports runloop. dynamolog and sqllog
+//   - replica imports metadata. metadata imports module, topics and groups/storage.
+//     topics and groups/storage import module and kv, and not each other. executor imports runloop. dynamolog and sqllog
 //     import executor. Domain packages import no third-party package; see
 //     TestControlPlaneLayers in architecture_test.go.
 //   - controlplaneclient imports api/v1 and wireboundary, and calls the gRPC API.

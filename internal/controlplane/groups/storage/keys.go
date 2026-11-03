@@ -3,7 +3,24 @@
 // (group header), M (member) and O (committed offset). The rules are in
 // internal/verify/speccheck (groups.go), which is the oracle.
 //
-// It does not know about topics. An offset commit asks the caller how many
+// Layout (all keys are prefix-free per kind):
+//
+//	G group                        group header: generation, protocolType,
+//	                               protocol, leader, assignedGeneration
+//	M group member                 one member: clientId, clientHost,
+//	                               groupInstanceId, sessionTimeoutMs,
+//	                               rebalanceTimeoutMs, joinedTimeMs, metadata,
+//	                               assignment (member id is the key tail)
+//	O group tp                     committed offset: offset, leaderEpoch,
+//	                               metadata, commitTimeMs
+//
+// A group in M and O keys is uvarint(len group), group, so the keys of one group
+// are one prefix. Numbers in the values are zigzag varints; strings and byte
+// fields are uvarint length then bytes. Each write is checked before it writes
+// anything. A group command over 256 KiB is ErrTooLarge; the size is counted
+// from the fields, so it is an upper bound of the stored bytes.
+//
+// It implements module.Module. It does not know about topics. An offset commit asks the caller how many
 // partitions a topic has, through the Partitions function.
 package storage
 

@@ -22,11 +22,11 @@ import (
 //   - controlplaneclient/groups.go: the broker-side group calls.
 //   - wireboundary/convert.go: maps group requests and responses to and from the
 //     wire types.
-//   - groups/storage/write.go: the fold of GroupInstall, GroupAssign,
-//     GroupRemove and OffsetCommit, on the key-value store.
+//   - groups/storage/module.go, write.go: the group module: the fold of
+//     GroupInstall, GroupAssign, GroupRemove and OffsetCommit, on the key-value store.
 //   - groups/storage/read.go: the group reads (OffsetFetch, DescribeGroup
 //     and ListGroups).
-//   - metadata/groups.go: connects groups/storage to the metadata store.
+//   - metadata/metadata.go: the kernel routes each group operation to the module.
 //   - metadata/entry.go: the log format of the group entries.
 //   - replica/client.go: passes the group calls to the replica.
 //   - replica/commit.go: encodes and decodes the group entries in the log.
@@ -44,26 +44,19 @@ type nodeGroups struct{ n *Node }
 
 var _ controlplane.GroupStore = nodeGroups{}
 
-// Exec runs one group operation. A write is offered to the log. A read is
+// Exec runs one group operation. A command is offered to the log. A read is
 // answered by the fold.
 func (s nodeGroups) Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
-	switch x := operation.(type) {
-	case core.GroupInstall, core.GroupAssign, core.GroupRemove, core.OffsetCommit:
+	if _, logged := metadata.EntryOf(operation); logged {
 		return s.write(ctx, operation)
-	case core.OffsetFetch:
-		return readFold(ctx, s.n, func(m *replica.Replica) (core.ControlPlaneDone, error) { return m.Metadata().OffsetFetch(x) })
-	case core.DescribeGroup:
-		return readFold(ctx, s.n, func(m *replica.Replica) (core.ControlPlaneDone, error) { return m.Metadata().DescribeGroup(x) })
-	case core.ListGroups:
-		return readFold(ctx, s.n, func(m *replica.Replica) (core.ControlPlaneDone, error) { return m.Metadata().ListGroups(x) })
 	}
-	return core.ControlPlaneDone{Err: core.ErrInvalid}, nil
+	return readFold(ctx, s.n, func(m *replica.Replica) (core.ControlPlaneDone, error) { return m.Metadata().Read(operation) })
 }
 
 // write offers one group decision to the log. A business answer comes back in
 // the Done; err is only for the run loop or the context.
 func (s nodeGroups) write(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
-	entry, _ := metadata.GroupEntry(operation)
+	entry, _ := metadata.EntryOf(operation)
 	return s.n.offer(ctx, entry)
 }
 

@@ -11,8 +11,8 @@ import (
 
 // Group reads (slice 4a). They change nothing, so they are not logged.
 
-// OffsetFetch answers an OffsetFetch. A partition with no commit is -1.
-func OffsetFetch(transaction kv.Transaction, operation core.OffsetFetch) core.ControlPlaneDone {
+// offsetFetch answers an OffsetFetch. A partition with no commit is -1.
+func offsetFetch(transaction kv.Transaction, operation core.OffsetFetch) core.ControlPlaneDone {
 	var out []core.PartitionOffset
 	if len(operation.Partitions) > 0 {
 		for _, topicPartition := range operation.Partitions {
@@ -44,8 +44,8 @@ func offsetEntry(topicPartition core.TopicPartition, o offsetRecord) core.Partit
 	return core.PartitionOffset{TopicPartition: topicPartition, Offset: o.offset, LeaderEpoch: o.epoch, Metadata: o.meta}
 }
 
-// DescribeGroup answers a DescribeGroup.
-func DescribeGroup(transaction kv.Transaction, operation core.DescribeGroup) core.ControlPlaneDone {
+// describeGroup answers a DescribeGroup.
+func describeGroup(transaction kv.Transaction, operation core.DescribeGroup) core.ControlPlaneDone {
 	h, found := readHeader(transaction, operation.Group)
 	if !found {
 		return core.ControlPlaneDone{Resp: core.DescribeGroupResp{}}
@@ -76,8 +76,8 @@ func groupState(h groupHeader, members int) string {
 	return "PreparingSync"
 }
 
-// ListGroups answers a ListGroups: every installed group, sorted by name.
-func ListGroups(transaction kv.Transaction, _ core.ListGroups) core.ControlPlaneDone {
+// listGroups answers a ListGroups: every installed group, sorted by name.
+func listGroups(transaction kv.Transaction, _ core.ListGroups) core.ControlPlaneDone {
 	type row struct {
 		name string
 		h    groupHeader

@@ -359,30 +359,22 @@ func NewMem() *Store { return New(kv.NewMemory()) }
 // Apply folds one log entry at slot into the store. No-ops leave state unchanged.
 // A store failure panics (fail-stop), matching Commit.
 func (a *Store) Apply(slot int64, e Entry) core.ControlPlaneDone {
-	switch e.Kind {
-	case KindNoop:
+	if e.Kind == KindNoop {
 		return core.ControlPlaneDone{Req: core.RequestID(slot), Outcome: core.Applied}
-	case KindCommit:
-		if len(e.WriterBases) == len(e.Commit.Batches) && len(e.WriterBases) > 0 {
-			d := a.commitWithBases(slot, e.Commit, e.WriterBases)
-			d.Req = core.RequestID(slot)
-			return d
-		}
-		d, err := a.Commit(slot, e.Commit)
-		mustStore(err)
+	}
+	if e.Kind == KindCommit && len(e.WriterBases) == len(e.Commit.Batches) && len(e.WriterBases) > 0 {
+		d := a.commitWithBases(slot, e.Commit, e.WriterBases)
 		d.Req = core.RequestID(slot)
 		return d
-	case KindCreateTopic, KindCreateTopicExclusive:
-		err := a.CreateTopicIf(e.Topic, e.Parts, e.Kind == KindCreateTopicExclusive)
-		return core.ControlPlaneDone{Req: core.RequestID(slot), Err: err}
-	case KindGroupInstall, KindGroupAssign, KindGroupRemove, KindOffsetCommit:
-		d, err := a.groupWrite(e.groupOp())
-		mustStore(err)
-		d.Req = core.RequestID(slot)
-		return d
-	default:
+	}
+	operation, ok := e.Operation()
+	if !ok {
 		return core.ControlPlaneDone{Req: core.RequestID(slot), Err: core.ErrInvalid}
 	}
+	d, err := a.Write(slot, operation)
+	mustStore(err)
+	d.Req = core.RequestID(slot)
+	return d
 }
 
 // ApplyBytes decodes data then Apply. Returns ErrCorrupt without mutating state.
@@ -394,17 +386,37 @@ func (a *Store) ApplyBytes(slot int64, data []byte) (core.ControlPlaneDone, erro
 	return a.Apply(slot, e), nil
 }
 
-// groupOp is the group command of a group entry.
-func (e Entry) groupOp() core.ControlPlaneOperation {
+// Operation is the control-plane operation that the entry carries. It is false
+// for a no-op and for an unknown kind.
+func (e Entry) Operation() (core.ControlPlaneOperation, bool) {
 	switch e.Kind {
+	case KindCommit:
+		return e.Commit, true
+	case KindCreateTopic, KindCreateTopicExclusive:
+		return core.CreateTopic{Name: e.Topic, Partitions: e.Parts, FailIfExists: e.Kind == KindCreateTopicExclusive}, true
 	case KindGroupInstall:
-		return e.Install
+		return e.Install, true
 	case KindGroupAssign:
-		return e.Assign
+		return e.Assign, true
 	case KindGroupRemove:
-		return e.Remove
+		return e.Remove, true
+	case KindOffsetCommit:
+		return e.Offsets, true
 	}
-	return e.Offsets
+	return nil, false
+}
+
+// EntryOf is the log entry of a logged operation. It returns false for an
+// operation that is not logged (a read, or an unknown one). Together with
+// Operation it is the only place that maps between operations and log kinds.
+func EntryOf(operation core.ControlPlaneOperation) (Entry, bool) {
+	switch x := operation.(type) {
+	case core.CommitSegment:
+		return Entry{Kind: KindCommit, Commit: x}, true
+	case core.CreateTopic:
+		return CreateEntry(x), true
+	}
+	return GroupEntry(operation)
 }
 
 // CreateEntry is the log entry of a CreateTopic op.

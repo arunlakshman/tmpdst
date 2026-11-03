@@ -1,53 +1,29 @@
-// Package metadata is the control-plane data model and the rules for changing it
-// (decision 49). It was called stateupdater before. It is the production state
-// machine of design A: the same semantics as speccheck.ControlPlane for CommitSegment,
-// CreateTopic, Lookup, DescribeTopics and End, on an embedded ordered KV store
-// instead of in-memory maps. speccheck stays the independent oracle (decision
-// 21); this package is tested against it in lockstep.
+// Package metadata is the kernel of the replicated control-plane state (decision
+// 49). It was called stateupdater before. It is the production state machine of
+// design A: the same semantics as speccheck.ControlPlane, on an embedded ordered
+// KV store instead of in-memory maps. speccheck stays the independent oracle
+// (decision 21); this package is tested against it in lockstep.
+//
+// The kernel holds a list of modules (module.Module): topics for topics and
+// segments, and groups/storage for consumer groups. Each module owns its own
+// key prefixes and its own rules. The kernel does four things:
+//   - It sends every operation to the module that owns it (Mode, Write, Read, Exec).
+//     A new context is a new module in the list, not a new switch.
+//   - It owns the log format of the entries (Entry, Encode, Decode, EntryOf,
+//     Operation) and applies them in log order (Apply, ApplyBytes, CommitBatch).
+//   - It writes and restores the checkpoint (Snapshot, Restore). The checkpoint
+//     carries every key of every module; its format did not change.
+//   - It computes the state hash, which leaves out the idempotency window.
+//
+// The key layout is in the packages that own the keys: T, E, R, K and S in
+// topics, G, M and O in groups/storage.
 //
 // It is I/O shell code, outside the determinism closure, but its behaviour is
 // a pure function of the commands applied in order.
 //
-// Layout (all keys are prefix-free per kind):
-//
-//	T name                         topic -> partition count
-//	E tp                           partition -> end offset (next offset)
-//	R tp base(8, big endian)       one packed run per (partition, segment commit)
-//	K segment-key                  idempotency record: slot, request digest, bases
-//	S slot(8) segment-key          window index, so Trim can drop old K records
-//	G group                        group header: generation, protocolType,
-//	                               protocol, leader, assignedGeneration
-//	M group member                 one member: clientId, clientHost,
-//	                               groupInstanceId, sessionTimeoutMs,
-//	                               rebalanceTimeoutMs, joinedTimeMs, metadata,
-//	                               assignment (member id is the key tail)
-//	O group tp                     committed offset: offset, leaderEpoch,
-//	                               metadata, commitTimeMs
-//
-// where tp is uvarint(len topic), topic, partition (4, big endian), and group
-// in M and O keys is uvarint(len group), group (so the keys of one group are
-// one prefix). Numbers in G, M and O values are zigzag varints; strings and
-// byte fields are uvarint length then bytes. A run holds
-// the contiguous batches one commit assigned to one partition, packed as in
-// cp/dynamo/runs.go (key table, then varints per batch), about 6 B per batch.
-//
-// Idempotency window (decision 48): a K record is kept until Trim drops it,
-// that is for as long as the log keeps the command. A replay inside the window
-// gets the original ranges (rebuilt from the replayed request and the stored
-// bases) or ErrConflict when the request digest differs. After Trim the key is
-// forgotten and the same key commits again as a new segment.
-//
-// A store failure is fail-stop: Exec panics (the replica's memory-equivalent
-// state is no longer trustworthy); the error-returning methods are for callers
-// that handle it.
-//
-// Group commands (decision Q5, Q7, Q11) fold the same way: GroupInstall,
-// GroupAssign, GroupRemove and OffsetCommit are log entries, and OffsetFetch,
-// DescribeGroup and ListGroups are reads. Each write is checked before it
-// writes anything. A group command over 256 KiB is ErrTooLarge; the size is
-// counted from the fields (see cmdSize), so it is an upper bound of the stored
-// bytes. The checkpoint carries G, M and O keys like every other key; its
-// format did not change.
+// A store failure is fail-stop: Exec and Apply panic (the replica's
+// memory-equivalent state is no longer trustworthy); the error-returning
+// methods are for callers that handle it.
 //
 // NewMem, Encode/Decode, and Apply/ApplyBytes expose the pure command fold for
 // controlplane/replica Step without Pebble.

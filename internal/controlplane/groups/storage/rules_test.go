@@ -2,14 +2,13 @@ package storage_test
 
 import (
 	"bytes"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/groupfix"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/kvtest"
 	"github.com/manifesterio/mds/internal/controlplane/kv"
-	"github.com/manifesterio/mds/internal/controlplane/kv/pebblestore"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"
 )
@@ -21,21 +20,6 @@ var (
 	pair     = groupfix.Pair
 	commitOp = groupfix.CommitOp
 )
-
-func newPebble(t testing.TB) kv.Store {
-	t.Helper()
-	keyValue, err := pebblestore.Open(filepath.Join(t.TempDir(), "state"), pebblestore.Options{CacheBytes: 8 << 20, MemTableBytes: 4 << 20})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = keyValue.Close() })
-	return keyValue
-}
-
-var backends = map[string]func(testing.TB) kv.Store{
-	"mem":    func(testing.TB) kv.Store { return kv.NewMemory() },
-	"pebble": newPebble,
-}
 
 // tooBig is a byte field that makes a group command pass 256 KiB.
 var tooBig = bytes.Repeat([]byte{'x'}, 300<<10)
@@ -87,7 +71,7 @@ func describe(t *testing.T, a *metadata.Store, group string) core.DescribeGroupR
 }
 
 func TestGroupInstallRules(t *testing.T) {
-	for name, mk := range backends {
+	for name, mk := range kvtest.Backends {
 		t.Run(name, func(t *testing.T) {
 			a := newGroupStore(t, mk)
 			noLeader := install("g", 1, "m9", "m1", "m2")
@@ -123,7 +107,7 @@ func withMetadata(operation core.GroupInstall, b []byte) core.GroupInstall {
 }
 
 func TestGroupAssignRules(t *testing.T) {
-	for name, mk := range backends {
+	for name, mk := range kvtest.Backends {
 		t.Run(name, func(t *testing.T) {
 			a := newGroupStore(t, mk)
 			runSteps(t, a, []step{
@@ -154,7 +138,7 @@ func withBytes(operation core.GroupAssign, b []byte) core.GroupAssign {
 }
 
 func TestGroupRemoveRules(t *testing.T) {
-	for name, mk := range backends {
+	for name, mk := range kvtest.Backends {
 		t.Run(name, func(t *testing.T) {
 			a := newGroupStore(t, mk)
 			runSteps(t, a, []step{
@@ -175,7 +159,7 @@ func TestGroupRemoveRules(t *testing.T) {
 }
 
 func TestGroupRemoveLeavesEmpty(t *testing.T) {
-	for name, mk := range backends {
+	for name, mk := range kvtest.Backends {
 		t.Run(name, func(t *testing.T) {
 			a := newGroupStore(t, mk)
 			runSteps(t, a, []step{
@@ -198,7 +182,7 @@ func TestGroupRemoveLeavesEmpty(t *testing.T) {
 }
 
 func TestOffsetCommitRules(t *testing.T) {
-	for name, mk := range backends {
+	for name, mk := range kvtest.Backends {
 		t.Run(name, func(t *testing.T) {
 			a := newGroupStore(t, mk)
 			ok, unk, bad := core.OK, core.ErrUnknownPartition, core.ErrInvalid
@@ -245,7 +229,7 @@ func withMeta(operation core.OffsetCommit, b []byte) core.OffsetCommit {
 }
 
 func TestOffsetFetchReads(t *testing.T) {
-	for name, mk := range backends {
+	for name, mk := range kvtest.Backends {
 		t.Run(name, func(t *testing.T) {
 			a := newGroupStore(t, mk)
 			runSteps(t, a, []step{
@@ -274,7 +258,7 @@ func TestOffsetFetchReads(t *testing.T) {
 }
 
 func TestGroupStatesAndList(t *testing.T) {
-	for name, mk := range backends {
+	for name, mk := range kvtest.Backends {
 		t.Run(name, func(t *testing.T) {
 			a := newGroupStore(t, mk)
 			runSteps(t, a, []step{
@@ -298,7 +282,7 @@ func TestGroupStatesAndList(t *testing.T) {
 // the rule counts 101 bytes besides the metadata.
 func TestGroupLimitBoundary(t *testing.T) {
 	const fixed = 101
-	for name, mk := range backends {
+	for name, mk := range kvtest.Backends {
 		t.Run(name, func(t *testing.T) {
 			a := newGroupStore(t, mk)
 			runSteps(t, a, []step{{"install", install("g", 1, "m1", "m1"), core.OK, nil}})
@@ -314,7 +298,7 @@ func TestGroupLimitBoundary(t *testing.T) {
 
 // TestGroupTooLargeWritesNothing checks that a refused command leaves the state as it was.
 func TestGroupTooLargeWritesNothing(t *testing.T) {
-	a := newGroupStore(t, backends["mem"])
+	a := newGroupStore(t, kvtest.Backends["mem"])
 	runSteps(t, a, []step{
 		{"install", install("g", 1, "m1", "m1", "m2"), core.OK, nil},
 		{"assign", assign("g", 1, "m1", "m1", "a"), core.OK, nil},

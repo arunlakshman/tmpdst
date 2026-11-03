@@ -1,4 +1,4 @@
-package metadata
+package topics
 
 import (
 	"crypto/sha256"
@@ -20,7 +20,7 @@ const (
 	runFormat      = 1
 )
 
-var errCorrupt = errors.New("metadata: corrupt record")
+var errCorrupt = errors.New("topics: corrupt record")
 
 func topicKey(name string) []byte { return append([]byte{prefixTopic}, name...) }
 

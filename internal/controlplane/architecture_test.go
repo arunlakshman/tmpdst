@@ -237,7 +237,7 @@ func packageComment(t *testing.T, r repo, dir string) string {
 
 // layerRules say which packages inside the module each control-plane package
 // may import in its non-test files. A package that is not listed here is not
-// checked. The domain packages (kv, groups, groups/storage, metadata, replica)
+// checked. The domain packages (kv, module, topics, groups, groups/storage, metadata, replica)
 // and the executor port may not import any third-party package: the AWS SDK,
 // the Postgres driver and Pebble live in adapters (executor/dynamolog,
 // executor/sqllog, kv/pebblestore).
@@ -246,10 +246,12 @@ var layerRules = []struct {
 	allowed []string // module-relative packages, or "internal/core" and so on
 }{
 	{"internal/controlplane/kv", []string{"internal/core"}},
-	{"internal/controlplane/groups/storage", []string{"internal/controlplane/kv", "internal/core"}},
+	{"internal/controlplane/module", []string{"internal/controlplane/kv", "internal/core"}},
+	{"internal/controlplane/topics", []string{"internal/controlplane/kv", "internal/controlplane/module", "internal/core"}},
+	{"internal/controlplane/groups/storage", []string{"internal/controlplane/kv", "internal/controlplane/module", "internal/core"}},
 	{"internal/controlplane/groups", []string{"internal/controlplane", "internal/core", "internal/system/realclock"}},
-	{"internal/controlplane/metadata", []string{"internal/controlplane/groups/storage", "internal/controlplane/kv", "internal/core"}},
-	{"internal/controlplane/replica", []string{"internal/controlplane/kv", "internal/controlplane/metadata", "internal/core"}},
+	{"internal/controlplane/metadata", []string{"internal/controlplane/groups/storage", "internal/controlplane/kv", "internal/controlplane/module", "internal/controlplane/topics", "internal/core"}},
+	{"internal/controlplane/replica", []string{"internal/controlplane/kv", "internal/controlplane/metadata", "internal/controlplane/module", "internal/core"}},
 	{"internal/controlplane/executor", []string{"internal/controlplane/runloop", "internal/core"}},
 }
 
@@ -305,6 +307,8 @@ func TestLogAdaptersImportOnlyThePort(t *testing.T) {
 // context timeout is not a time call in this sense.
 var timeCallPackages = []string{
 	"internal/controlplane/kv",
+	"internal/controlplane/module",
+	"internal/controlplane/topics",
 	"internal/controlplane/groups",
 	"internal/controlplane/groups/storage",
 	"internal/controlplane/metadata",

@@ -195,9 +195,9 @@ func decodeOffset(group string, b []byte) offsetRecord {
 	return o
 }
 
-// Write runs one group write in transaction. partitions is asked by an offset
+// write runs one group write in transaction. partitions is asked by an offset
 // commit, to check that the partition exists.
-func Write(transaction kv.Transaction, operation core.ControlPlaneOperation, partitions Partitions) core.ControlPlaneDone {
+func write(transaction kv.Transaction, operation core.ControlPlaneOperation, partitions Partitions) core.ControlPlaneDone {
 	switch x := operation.(type) {
 	case core.GroupInstall:
 		return groupAnswer(installGroup(transaction, x))

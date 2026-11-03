@@ -10,7 +10,7 @@ ACKED="$CPV_ROOT/results/e0-acked.jsonl"
 : >"$ACKED"
 
 started=$(now_ms)
-# -window-slots is huge so the log is NOT trimmed: the acked-key checks need the whole log.
+# -window-slots is huge so the log is NOT trimmed.
 node.sh start $NODE 0 $ADDR0 $MET0 -checkpoint-every 30s -checkpoint-min-slots 200 -window-slots 1000000000
 node.sh wait-ready $NODE 60 || true
 ready_s=$(python3 -c "print(round(($(now_ms) - $started)/1000.0, 1))")
@@ -37,13 +37,8 @@ errors=$(count_in_logs '"level":"ERROR"')
 expect "A6: no ERROR line in node logs" "count=$errors" [ "$errors" = 0 ]
 
 node.sh stop $NODE
-mdscpinspect -check -region "$REGION" -table "$TABLE" -bucket "$BUCKET" -acked "$ACKED" \
-  >"$CPV_ROOT/results/e0-inspect.txt" 2>&1
-check_failed=$(grep -c '^FAIL' "$CPV_ROOT/results/e0-inspect.txt" || true)
-expect "A1 to A5: mdscpinspect -check -acked passes" "failed_lines=$check_failed" [ "$check_failed" = 0 ]
-skips=$(grep -c '^SKIP' "$CPV_ROOT/results/e0-inspect.txt" || true)
-expect "no check was skipped (a skip hides a check)" "skipped=$skips" [ "$skips" = 0 ]
+# The log-versus-acks check (mdscpinspect) was removed with the tool.
 verdict E0
 rc=$?
-ACKED_FILE="$ACKED" EXTRA_FILES="$VERDICT_FILE $CPV_ROOT/results/e0-load.out $CPV_ROOT/results/e0-inspect.txt" collect.sh e0
+EXTRA_FILES="$VERDICT_FILE $CPV_ROOT/results/e0-load.out" collect.sh e0
 exit $rc

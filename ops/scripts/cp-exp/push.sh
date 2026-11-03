@@ -23,7 +23,7 @@ if ! command -v aws >/dev/null 2>&1; then
 fi
 
 # Refuse to push when the build is missing.
-for tool in mdscontrolplane mdscpverify mdscpinspect mdscpreset; do
+for tool in mdscontrolplane mdscpverify mdscpreset; do
   if [[ ! -f "$BIN_SRC/$tool" ]]; then
     echo "error: $BIN_SRC/$tool is missing. Run ops/scripts/cp-exp/build.sh first." >&2
     exit 1

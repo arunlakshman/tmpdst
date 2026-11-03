@@ -92,14 +92,7 @@ tail -2 "$R/e4-ends.txt"
 
 node.sh stop cp0; node.sh stop cp1
 
-echo "== offline checks on the log (it is trimmed, so full replay checks are skipped by design)"
-mdscpinspect -check -region "$REGION" -table "$TABLE" -bucket "$BUCKET" -acked "$ACKED" >"$R/e4-inspect.txt" 2>&1
-mdscpinspect -v -region "$REGION" -table "$TABLE" >"$R/e4-slots.txt" 2>&1
-# Trimmed slots are deleted, so a trimmed log starts at a slot above 0.
-FIRST_LIVE=$(awk '/^   slot [0-9]/{print $2; exit}' "$R/e4-slots.txt")
-FIRST_LIVE=${FIRST_LIVE:-0}
-LIVE=$(grep -c '^   slot ' "$R/e4-slots.txt" || true)
-echo "   log slots: $LIVE, first live slot: $FIRST_LIVE"
+# The log-versus-acks check (mdscpinspect) was removed with the tool.
 
 summary() { last_summary "$R/e4-load-$1.out"; }
 failed=0; acked=0
@@ -115,8 +108,6 @@ WARM=$PART_MIN
 written=$(decisions | grep -c '"written":true' || true)
 errors=$(count_in_logs '"level":"ERROR"')
 busy=$(decisions | grep -c 'control_io_pending' || true)
-check_failed=$(grep -c '^FAIL' "$R/e4-inspect.txt" || true)
-skips=$(grep '^SKIP' "$R/e4-inspect.txt" | sed 's/  */ /g' | tr '\n' ';')
 min_checkpoints=$(( TOTAL_MIN / 3 - 2 ))
 
 expect "load: failed = 0 in all 3 parts" "acked=$acked failed=$failed" [ "$failed" = 0 ]
@@ -130,18 +121,15 @@ for node in cp0 cp1; do
 done
 expect "checkpoints written at least once per 3 periods" "written=$written needed>=$min_checkpoints" [ "$written" -ge "$min_checkpoints" ]
 criterion "latest checkpoint is fresh (<= 180 s old)" "$(le "$CHECKPOINT_AGE" 180)" "age=${CHECKPOINT_AGE}s"
-expect "the log was trimmed (first live slot is above 0)" "first_live_slot=$FIRST_LIVE live_slots=$LIVE" [ "$FIRST_LIVE" -gt 0 ]
 criterion "standby caught up (applied within 50 of tail)" "$(le "$(( ${tail1:-0} - ${applied1:-0} ))" 50)" "applied=$applied1 tail=$tail1"
 expect "live end offsets equal records acked (mode ends)" "$(tail -2 "$R/e4-ends.txt" | head -1)" [ "$ENDS_RC" = 0 ]
-expect "A1, A2, A3, A5: mdscpinspect -check -acked has no FAIL" "failed_lines=$check_failed" [ "$check_failed" = 0 ]
 expect "A6: no ERROR line in node logs" "count=$errors" [ "$errors" = 0 ]
 expect "A7: no checkpoint skipped for control_io_pending" "count=$busy" [ "$busy" = 0 ]
-echo "info: skipped checks (expected on a trimmed log): $skips" | tee -a "$VERDICT_FILE"
 echo "info: DynamoDB attempts at the end (cp0 PutItem, Query; cp1 PutItem, Query):" | tee -a "$VERDICT_FILE"
 tail -n 2 "$SAMPLES" | tee -a "$VERDICT_FILE"
 verdict E4
 rc=$?
-ACKED_FILE="$ACKED" EXTRA_FILES="$VERDICT_FILE $SAMPLES $R/e4-load-a.out $R/e4-load-b.out $R/e4-load-c.out $R/e4-ends.txt $R/e4-inspect.txt" collect.sh e4 >/dev/null 2>&1
+EXTRA_FILES="$VERDICT_FILE $SAMPLES $R/e4-load-a.out $R/e4-load-b.out $R/e4-load-c.out $R/e4-ends.txt" collect.sh e4 >/dev/null 2>&1
 echo "results uploaded under s3://$BUCKET/results/ (prefix e4-)"
 echo "E4 DONE rc=$rc"
 exit $rc

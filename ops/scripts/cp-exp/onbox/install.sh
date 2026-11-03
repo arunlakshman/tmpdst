@@ -58,7 +58,7 @@ fetch_into() {
 fetch_into bin "$CPV_ROOT/bin"
 fetch_into scripts "$CPV_ROOT/scripts"
 
-for t in mdscontrolplane mdscpverify mdscpinspect; do
+for t in mdscontrolplane mdscpverify; do
   if [[ ! -x $CPV_ROOT/bin/$t ]]; then
     echo "error: $t is missing from $CPV_ROOT/bin after the download" >&2
     exit 1

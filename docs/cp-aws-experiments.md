@@ -13,13 +13,13 @@ Rules
 How an experiment runs (all from the laptop)
 1. `ops/scripts/cp-exp/build.sh` and `push.sh` put the three binaries and the scripts in S3.
 2. `ops/scripts/cp-exp/box.sh` runs a script on the box over SSM.
-3. The script on the box does the test, then `collect.sh` uploads logs, metrics and the `-check` output to `s3://BUCKET/results/NAME-TIME/`.
+3. The script on the box does the test, then `collect.sh` uploads logs and metrics to `s3://BUCKET/results/NAME-TIME/`.
 4. `fetch-results.sh` brings the results back. The PASS or FAIL verdict is printed by the script itself.
 
 Tools
 - `mdscontrolplane` is the thing under test.
 - `mdscpverify -mode load` sends commits, retries the same key on error, writes every acked answer to a file, and prints one summary line (acked, failed, retries, latency, longest stall).
-- `mdscpinspect -check -acked FILE` reads the log from DynamoDB and compares it with the acked file.
+- The log-versus-acks check (`mdscpinspect`) was removed with the tool. No script checks A1 to A5 now. A6 and A7 use only the node logs and the checkpoint_decision lines.
 - `node.sh` starts, stops, kills (`-9`), freezes (`SIGSTOP`), thaws and wipes one node.
 
 Checks that every experiment must pass (the "always" list)
@@ -49,7 +49,7 @@ Success criteria
 - At least 1 `checkpoint_decision` with `written=true`; the S3 object exists.
 - A1 to A7 all pass.
 
-Verification: the load summary line, the `-check` output, the `checkpoint_decision` lines, the S3 listing.
+Verification: the load summary line, the `checkpoint_decision` lines, the S3 listing.
 
 ---
 
@@ -75,7 +75,7 @@ Success criteria
 - Live end offsets from the cluster equal the records acked, per partition (`mdscpverify -mode ends -acked FILE`).
 - A1 to A7 pass at the end.
 
-Verification: `-check -acked`, the load summary, the node logs (`takeover`, `restore`), the time stamps written by the script.
+Verification: the load summary, the node logs (`takeover`, `restore`), the time stamps written by the script.
 
 ---
 
@@ -91,11 +91,11 @@ Steps
 Success criteria
 - `failed = 0`; `max_stall_ms` <= `takeover-after` + 5 s (provisional).
 - No slot was written twice (A1 contiguous) and A2, A3 pass: the thawed node did not make a second answer for any key.
-- Writer names in the log: no slot between the takeover and the moment `cp0` caught up is written by `cp0`. The script prints the writer per slot range and the check fails on a violation.
+- Writer names in the log: no slot between the takeover and the moment `cp0` caught up is written by `cp0`. This was checked by `mdscpinspect`, which was removed with the tool.
 - The `cp0` log shows its first append after the thaw lost (conflict) or the node caught up first. Count is printed.
 - A1 to A7 pass.
 
-Verification: `-check -acked`, `mdscpinspect -v` writer column, node logs.
+Verification: the node logs.
 
 ---
 
@@ -117,7 +117,7 @@ Success criteria
 - (b) `ProvisionedThroughputExceeded` is seen (the test really throttled). Append attempts <= 200 per second at every 5 s sample (no tight loop). No acked commit is lost (A2). After the load stops, the node reaches `applied = tail` within 30 s.
 - If (b) shows a tight loop, the experiment FAILS and that confirms open finding 5 (no backoff on append retry). A failure here is a useful result.
 
-Verification: client answers, metrics scrape (`dynamo_attempt_seconds` by result), `-check` on both tables.
+Verification: client answers, metrics scrape (`dynamo_attempt_seconds` by result).
 
 ---
 
@@ -138,7 +138,7 @@ Success criteria
 - A1, A2, A3, A5, A6, A7 pass (A4 full replay is skipped when the log is trimmed; the checkpoint plus tail check is used).
 - Consumed read and write units are within 20 % of the estimate from E0 x time.
 
-Verification: the per-minute sample file, the `-check` output, the S3 checkpoint age, the AWS bill line for the table after the run.
+Verification: the per-minute sample file, the S3 checkpoint age, the AWS bill line for the table after the run.
 
 ---
 

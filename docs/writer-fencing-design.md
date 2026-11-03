@@ -184,7 +184,6 @@ A fenced or deposed node:
 | `internal/verify/simulator/fakeservices/fakelogstore`, `fakelogservice` | Store holds epoch and floor. Same `Append`, `ClaimEpoch`, `Trim` semantics. Tags and the engine truth model. New mutants (section 11). |
 | `internal/controlplane/statemachine` | Epoch state and roles (claim, fence entry, read-only). Envelope carries epoch. Entry ids carry epoch. Ready rules (section 8). Writer rules (section 6). `belowFloor` handling reusing `hitTrimmed`. Remove rank-based failback (decision D3). |
 | `cmd/mdscontrolplane` | Flags: none new if possible. Metrics: `epoch`, `fenced_total{reason}`, `floor`. |
-| `cmd/mdscpinspect` | Show epoch and floor; check that no log row exists at or below the floor after a trim completed (stray rows allowed, report count). |
 | `ops/` Terraform | IAM: the control plane role needs `dynamodb:UpdateItem` and `GetItem` on the table (check what is granted today). |
 | `docs/` | `log-cp-service.md`, `decisions.md` (new row), `observability.md`. |
 
@@ -235,7 +234,7 @@ Order matters because later steps need the new types.
 3. **Simulator stores** (agent B): `fakelogstore`, `fakelogservice`, tags, truth engine, mutants, new invariant.
 4. **State machine** (lead): roles, epoch, fence entry, writer rules, ready rules, ids, read-only, tests.
    Agents A and B only start after step 1, and they must not touch `statemachine/`.
-5. **Tools and ops** (agent C): `mdscontrolplane` metrics, `mdscpinspect`, Terraform IAM.
+5. **Tools and ops** (agent C): `mdscontrolplane` metrics, Terraform IAM.
 6. **Docs** (agent D): after code is stable.
 7. **Verify** (lead): unit tests, then 3000-seed and 500-seed campaigns, refresh golden hashes, replay seeds
    1333, 1741, 2318.
@@ -297,5 +296,7 @@ j. **IAM.** The control plane role needs `dynamodb:GetItem` and `dynamodb:Update
 k. **Simulator.** New property: `logcp-sim: one epoch has one writer`. New mutant: `InjectedBugNoFloorCheck` (value 4). Seeds 1333, 1741 and 2318 pass.
 
 l. **Process freeze.** The simulator kernel can freeze a process (`NodeKills.FreezeProb`, `FreezeDur`, `Process.Freezable`). A frozen node takes no step for 1 to 4 seconds, its inbox keeps filling, and its earlier puts still land. This is a real long pause (VM pause or garbage collection), and it exercises the floor check without any mutant. Scenario `-scenario kafka-log-freeze` (`make sim-campaign` runs it). Over 200 seeds, 37 puts from frozen writers were refused at the floor; the mutant `InjectedBugNoFloorCheck` loses acknowledged data in this scenario within a few seeds.
+
+m. **mdscpinspect removed.** The inspect tool was removed by the owner; the epoch, floor and one-writer-per-epoch checks it had are gone. The simulator property 'one epoch has one writer' still covers the last one.
 
 Campaign result: kafka-log seeds 1 to 10000: 0 failing (399.6M steps). kafka seeds 1 to 1000: 0 failing. kafka-log-freeze: see the pull request description for the latest run.

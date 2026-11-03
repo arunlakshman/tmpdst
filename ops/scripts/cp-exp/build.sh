@@ -10,7 +10,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."
 
 OUT_DIR="build/linux-arm64"
-TOOLS="mdscontrolplane mdscpverify mdscpinspect mdscpreset"
+TOOLS="mdscontrolplane mdscpverify mdscpreset"
 
 if ! command -v go >/dev/null 2>&1; then
   echo "error: go is not installed or not on PATH" >&2

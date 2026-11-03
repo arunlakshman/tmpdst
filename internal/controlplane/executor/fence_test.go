@@ -29,7 +29,7 @@ func newDynFake(t *testing.T) *fakedynamodb.FakeDynamoDB {
 	return db
 }
 
-// logKinds are the two Log implementations. Every semantic test runs on both.
+// logKinds are the Log implementations. Every semantic test runs on all of them.
 var logKinds = []struct {
 	name string
 	open func(t *testing.T) executor.Log
@@ -38,6 +38,7 @@ var logKinds = []struct {
 	{"dynamo", func(t *testing.T) executor.Log {
 		return executor.NewDynamoLog(newDynFake(t), "cp", executor.DynamoLogOptions{})
 	}},
+	{"postgres", openPostgresLog}, // skips unless MDS_TEST_POSTGRES_DSN is set
 }
 
 // recDB records the names of the DynamoDB calls it passes on, in order.

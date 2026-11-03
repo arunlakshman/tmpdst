@@ -32,10 +32,14 @@ PROTOC_GEN_GO  ?= protoc-gen-go
 PROTOC_GEN_GRPC ?= protoc-gen-go-grpc
 PROTO_GO_VER   ?= v1.35.2
 PROTO_GRPC_VER ?= v1.5.1
+# Image for make it-postgres (pinned; see ops/scripts/postgres-test.sh).
+POSTGRES_IMAGE ?= postgres:17.11-alpine
+# Extra go test args for make it-postgres, e.g. PG_TEST_ARGS="-v ./internal/controlplane/executor/"
+PG_TEST_ARGS  ?=
 
 .PHONY: build compile test sim it-hermetic test-all test-race sim-campaign \
 	ascii-check lint modernize-check modernize fmt-check vet risk risk-baseline risk-strict \
-	install-hooks proto proto-tools e2e-kafka-cli
+	install-hooks proto proto-tools e2e-kafka-cli it-postgres
 
 build: proto fmt-check ascii-check vet lint modernize-check compile test sim it-hermetic e2e-kafka-cli risk
 
@@ -114,6 +118,10 @@ sim-campaign:
 # in the same package Skip unless MDS_DYNAMO_ENDPOINT + MDS_S3_ENDPOINT are set.
 it-hermetic: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_IT) ./test/integrationtest/
+
+# Log tests against a real PostgreSQL in Docker (needs Docker). Not part of build: the Postgres cases skip when MDS_TEST_POSTGRES_DSN is unset.
+it-postgres:
+	POSTGRES_IMAGE=$(POSTGRES_IMAGE) bash ops/scripts/postgres-test.sh $(PG_TEST_ARGS)
 
 # All tests without lint/compile/risk.
 test-all: test sim it-hermetic

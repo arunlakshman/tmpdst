@@ -107,7 +107,15 @@ a given directory is wiped at start if it holds a Pebble database, refused if it
 `-create-tables` (dev). `-takeover-after` must be several times `-heartbeat`, and far below the brokers' `-commit-deadline`.
 Start: open Pebble (empty), restore the newest checkpoint, replay to the tail, THEN listen: while that runs the port refuses
 connections and brokers use the other URL. `X-CP-Role` is on every response; `/healthz` is 503 until ready or when blocked.
-Shutdown: HTTP drains (15 s), the active node writes a final checkpoint (20 s), loops stop, Pebble closes. `-store mem` is unchanged (the only other value).
+Shutdown: HTTP drains (15 s), the active node writes a final checkpoint (20 s), loops stop, Pebble closes. `-store mem` is unchanged. The other log store is `-store postgres` (below).
+
+## `mdscontrolplane -store postgres`
+
+Status: built and tested for PostgreSQL 17.11. Design, schema, tests and porting notes: [docs/sql-log-backend.md](sql-log-backend.md).
+
+Flags (all `-store postgres` only): `-postgres-dsn` (empty: use the environment variable `MDS_POSTGRES_DSN`, which keeps the password off the command line; the DSN is never logged), `-postgres-prefix mds_` (tables `<prefix>log` and `<prefix>meta`), `-create-tables` (dev). Checkpoint, heartbeat, rank and takeover flags are the same as for `-store dynamolog` (`-checkpoint-bucket`, `-checkpoint-prefix`, `-s3-endpoint`, `-s3-path-style`, `-node-name`, `-rank`, `-takeover-after`, `-takeover-rank-step`, `-heartbeat`, `-checkpoint-every`, `-checkpoint-min-slots`, `-window-slots`, `-pebble-dir`, `-start-timeout`). `-table` and `-log-ttl` do not apply.
+
+Reads must go to the primary database. Do not point the control plane at a read replica.
 
 ### Upgrade
 

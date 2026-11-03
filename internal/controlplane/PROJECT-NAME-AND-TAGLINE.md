@@ -66,8 +66,8 @@ price of about $0.625 per million write units (from memory, not checked).
 
 - The cost claim is for stores that bill per request, such as DynamoDB. On SQL
   stores you pay for instances, so do not promise a cost saving there.
-- "Runs on any store" is a goal. Only the DynamoDB log and the in-memory log
-  exist today. The SQL backends are not built.
+- "Runs on any store" is a goal. The DynamoDB, in-memory and PostgreSQL logs
+  exist today. Other SQL backends are not built.
 - Commands such as `CommitSegment` assign offsets when the log entry is applied.
   Plain get and put cannot express that. A generic release would expose a small
   state-machine API (apply a command, consistent read, compare-and-set) and put

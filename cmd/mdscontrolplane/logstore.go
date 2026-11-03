@@ -3,20 +3,32 @@ package main
 import (
 	"cmp"
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"log/slog"
+	"net/url"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/manifesterio/mds/internal/controlplane/controlplanemetrics"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system"
+	"github.com/manifesterio/mds/internal/system/runinfo"
 	"github.com/manifesterio/mds/internal/system/s3store"
 )
 
-const kindLog = "dynamolog"
+const (
+	kindLog      = "dynamolog"
+	kindPostgres = "postgres"
+)
+
+// postgresDSNEnv is the environment variable that holds the DSN when
+// -postgres-dsn is empty. Using it keeps the password off the command line.
+const postgresDSNEnv = "MDS_POSTGRES_DSN"
 
 type logFlags struct {
 	table                              string
@@ -32,25 +44,49 @@ type logFlags struct {
 	windowSlots                        int64
 	pebbleDir                          string
 	checkpointMinSlots                 int64
+	postgresDSN, postgresPrefix        string
+}
+
+// secretFlag is a string flag whose value is never printed. The run manifest
+// records the value of every flag, and a DSN holds a password.
+type secretFlag struct{ value *string }
+
+func (s secretFlag) String() string {
+	if s.value == nil || *s.value == "" {
+		return ""
+	}
+	return "(set)"
+}
+
+func (s secretFlag) Set(v string) error {
+	*s.value = v
+	return nil
 }
 
 func registerLogFlags(fs *flag.FlagSet, f *logFlags) {
-	fs.StringVar(&f.table, "table", "", "-store dynamolog: DynamoDB table (default <table-prefix>cp)")
-	fs.StringVar(&f.checkpointBucket, "checkpoint-bucket", "", "-store dynamolog: S3 bucket for checkpoints")
-	fs.StringVar(&f.checkpointPrefix, "checkpoint-prefix", "cp/", "-store dynamolog: key prefix of checkpoint objects")
-	fs.StringVar(&f.s3Endpoint, "s3-endpoint", "", "-store dynamolog: S3 endpoint URL")
-	fs.BoolVar(&f.s3PathStyle, "s3-path-style", false, "-store dynamolog: path-style S3 addressing")
-	fs.StringVar(&f.nodeName, "node-name", "", "-store dynamolog: node name (default hostname)")
-	fs.IntVar(&f.rank, "rank", 0, "-store dynamolog: 0 is the preferred appender")
-	fs.DurationVar(&f.takeoverAfter, "takeover-after", 5*time.Second, "-store dynamolog: standby takeover silence")
-	fs.DurationVar(&f.takeoverRankStep, "takeover-rank-step", time.Second, "-store dynamolog: each rank waits this much longer before it claims the write role")
-	fs.DurationVar(&f.startTimeout, "start-timeout", 10*time.Minute, "-store dynamolog: startup budget")
-	fs.DurationVar(&f.heartbeat, "heartbeat", time.Second, "-store dynamolog: idle heartbeat")
-	fs.DurationVar(&f.checkpointEvery, "checkpoint-every", 5*time.Minute, "-store dynamolog: checkpoint period")
-	fs.Int64Var(&f.checkpointMinSlots, "checkpoint-min-slots", 1000, "-store dynamolog: min slots between checkpoints")
-	fs.Int64Var(&f.windowSlots, "window-slots", 131072, "-store dynamolog: idempotency window in log slots; every node must use the same value")
-	fs.DurationVar(&f.logTTL, "log-ttl", 7*24*time.Hour, "-store dynamolog: ttl attribute on log slots")
-	fs.StringVar(&f.pebbleDir, "pebble-dir", "", "-store dynamolog: directory of the Pebble state. It is rebuilt from the checkpoint and the log at every start, so it is wiped (only if it holds a Pebble database). Empty: a temporary directory")
+	fs.StringVar(&f.table, "table", "", "-store dynamolog: DynamoDB table (default <table-prefix>cp). Not used by -store postgres")
+	fs.StringVar(&f.checkpointBucket, "checkpoint-bucket", "", "-store dynamolog or postgres: S3 bucket for checkpoints")
+	fs.StringVar(&f.checkpointPrefix, "checkpoint-prefix", "cp/", "-store dynamolog or postgres: key prefix of checkpoint objects")
+	fs.StringVar(&f.s3Endpoint, "s3-endpoint", "", "-store dynamolog or postgres: S3 endpoint URL")
+	fs.BoolVar(&f.s3PathStyle, "s3-path-style", false, "-store dynamolog or postgres: path-style S3 addressing")
+	fs.StringVar(&f.nodeName, "node-name", "", "-store dynamolog or postgres: node name (default hostname)")
+	fs.IntVar(&f.rank, "rank", 0, "-store dynamolog or postgres: 0 is the preferred appender")
+	fs.DurationVar(&f.takeoverAfter, "takeover-after", 5*time.Second, "-store dynamolog or postgres: standby takeover silence")
+	fs.DurationVar(&f.takeoverRankStep, "takeover-rank-step", time.Second, "-store dynamolog or postgres: each rank waits this much longer before it claims the write role")
+	fs.DurationVar(&f.startTimeout, "start-timeout", 10*time.Minute, "-store dynamolog or postgres: startup budget")
+	fs.DurationVar(&f.heartbeat, "heartbeat", time.Second, "-store dynamolog or postgres: idle heartbeat")
+	fs.DurationVar(&f.checkpointEvery, "checkpoint-every", 5*time.Minute, "-store dynamolog or postgres: checkpoint period")
+	fs.Int64Var(&f.checkpointMinSlots, "checkpoint-min-slots", 1000, "-store dynamolog or postgres: min slots between checkpoints")
+	fs.Int64Var(&f.windowSlots, "window-slots", 131072, "-store dynamolog or postgres: idempotency window in log slots; every node must use the same value")
+	fs.DurationVar(&f.logTTL, "log-ttl", 7*24*time.Hour, "-store dynamolog: ttl attribute on log slots. Not used by -store postgres")
+	fs.StringVar(&f.pebbleDir, "pebble-dir", "", "-store dynamolog or postgres: directory of the Pebble state. It is rebuilt from the checkpoint and the log at every start, so it is wiped (only if it holds a Pebble database). Empty: a temporary directory")
+	fs.Var(secretFlag{&f.postgresDSN}, "postgres-dsn", "-store postgres: connection string, e.g. postgres://user@host:5432/db. Empty: use the environment variable "+postgresDSNEnv+" (this keeps the password off the command line)")
+	fs.StringVar(&f.postgresPrefix, "postgres-prefix", "mds_", "-store postgres: table name prefix. The tables are <prefix>log and <prefix>meta")
+}
+
+// isLogStore reports whether kind is a store with a log (dynamolog or postgres).
+func isLogStore(kind string) bool {
+	return kind == kindLog || kind == kindPostgres
 }
 
 type logDB interface {
@@ -79,6 +115,11 @@ func (l logFlags) tableName(prefix string) string {
 	return cmp.Or(l.table, prefix+"cp")
 }
 
+// resolvedDSN is the PostgreSQL DSN to use: the flag, else the environment.
+func resolvedDSN(l logFlags) string {
+	return cmp.Or(l.postgresDSN, os.Getenv(postgresDSNEnv))
+}
+
 func nodeName(l logFlags) string {
 	if l.nodeName != "" {
 		return l.nodeName
@@ -103,18 +144,105 @@ func openDynLog(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.M
 		}
 	}
 	lg := executor.NewDynamoLog(db, table, executor.DynamoLogOptions{TTL: f.log.logTTL})
-	var objs executor.ObjectStore = executor.NewMemoryObjects()
-	if f.log.checkpointBucket != "" {
-		store, err := d.objects(ctx, f)
-		if err != nil {
-			return nil, nil, nop, err
-		}
-		objs = sysObjects{store}
-	} else {
-		log.Warn("no -checkpoint-bucket: no checkpoints and no log trim; a restart replays the whole log", "event", "log_no_checkpoint")
+	objs, err := openCheckpointObjects(ctx, d, f, log)
+	if err != nil {
+		return nil, nil, nop, err
 	}
 	log.Info("log store ready", "event", "log_ready", "node", nodeName(f.log), "rank", f.log.rank, "table", table, "checkpoint_bucket", f.log.checkpointBucket)
 	return lg, objs, nop, nil
+}
+
+// openCheckpointObjects returns the checkpoint store: S3 when -checkpoint-bucket
+// is set, else memory. Both log stores use it.
+func openCheckpointObjects(ctx context.Context, d deps, f cpFlags, log *slog.Logger) (executor.ObjectStore, error) {
+	if f.log.checkpointBucket == "" {
+		log.Warn("no -checkpoint-bucket: no checkpoints and no log trim; a restart replays the whole log", "event", "log_no_checkpoint")
+		return executor.NewMemoryObjects(), nil
+	}
+	store, err := d.objects(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	return sysObjects{store}, nil
+}
+
+// openPostgresLog opens the PostgreSQL log. Checkpoints work as they do for
+// dynamolog. The DSN is never logged, and it is not in any error this adds.
+func openPostgresLog(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.Metrics, log *slog.Logger) (executor.Log, executor.ObjectStore, func(), error) {
+	nop := func() {}
+	db, err := openSQLDB(ctx, resolvedDSN(f.log))
+	if err != nil {
+		return nil, nil, nop, err
+	}
+	closeDB := func() { _ = db.Close() }
+	lg, objs, err := newSQLStore(ctx, db, d, f, log)
+	if err != nil {
+		closeDB()
+		return nil, nil, nop, err
+	}
+	return lg, objs, closeDB, nil
+}
+
+// openSQLDB opens the PostgreSQL pool. The error for an empty DSN names the two
+// ways to set it, but never shows a value.
+func openSQLDB(ctx context.Context, dsn string) (*sql.DB, error) {
+	if dsn == "" {
+		return nil, errors.New("-store postgres needs -postgres-dsn or " + postgresDSNEnv)
+	}
+	return executor.OpenPostgres(ctx, dsn)
+}
+
+// newSQLStore builds the SQL log over db and the checkpoint store.
+func newSQLStore(ctx context.Context, db *sql.DB, d deps, f cpFlags, log *slog.Logger) (executor.Log, executor.ObjectStore, error) {
+	lg, err := executor.NewSQLLog(db, f.log.postgresPrefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := createSQLTables(ctx, lg, f.create); err != nil {
+		return nil, nil, err
+	}
+	objs, err := openCheckpointObjects(ctx, d, f, log)
+	if err != nil {
+		return nil, nil, err
+	}
+	log.Info("log store ready", "event", "log_ready", "node", nodeName(f.log), "rank", f.log.rank,
+		"postgres", redactDSN(resolvedDSN(f.log)), "prefix", f.log.postgresPrefix, "checkpoint_bucket", f.log.checkpointBucket)
+	return lg, objs, nil
+}
+
+// createSQLTables creates the SQL tables when -create-tables is set.
+func createSQLTables(ctx context.Context, lg *executor.SQLLog, create bool) error {
+	if !create {
+		return nil
+	}
+	return lg.CreateSchema(ctx)
+}
+
+// redactDSN returns only the host, port and database name of a PostgreSQL URL,
+// for logs. The user, the password and the query are left out. A DSN that is
+// not a URL gives "", because then we cannot tell where the password is.
+func redactDSN(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return u.Host + u.Path
+}
+
+// hideDSN takes the DSN out of a run manifest. The manifest copies the MDS_
+// environment variables and the command line, and either one can hold the DSN.
+func hideDSN(m runinfo.Manifest, dsn string) runinfo.Manifest {
+	delete(m.Env, postgresDSNEnv)
+	if dsn == "" {
+		return m
+	}
+	m.Args = slices.Clone(m.Args)
+	for i, arg := range m.Args {
+		if strings.Contains(arg, dsn) {
+			m.Args[i] = "<hidden>"
+		}
+	}
+	return m
 }
 
 // sysObjects adapts system.ObjectStore to executor.ObjectStore.

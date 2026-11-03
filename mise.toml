@@ -3,6 +3,7 @@
 # (installs go, golangci-lint, buf, java, and minio; postinstall runs make install-hooks).
 # Java and minio are only for the e2e script (make e2e-kafka-cli): the Kafka CLI
 # needs Java, and minio is the shared S3 store for the 3-broker check.
+# make it-postgres needs Docker (Docker Desktop or Engine) on the host; mise cannot install it. It runs the pinned image postgres:17.11-alpine, see POSTGRES_IMAGE in the Makefile.
 
 [tools]
 go = "1.26.10"

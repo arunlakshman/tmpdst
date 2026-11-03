@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -26,6 +28,7 @@ import (
 	"github.com/manifesterio/mds/internal/controlplane/fakedynamodb"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system"
+	"github.com/manifesterio/mds/internal/system/runinfo"
 )
 
 // syncBuf is a log sink safe for the goroutines of several run calls.
@@ -63,10 +66,17 @@ func fakeDeps(db *fakedynamodb.FakeDynamoDB, objs system.ObjectStore) deps {
 
 func startLogNode(t *testing.T, d deps, name string, rank int, extra ...string) *logNode {
 	t.Helper()
+	args := append([]string{"-store", kindLog, "-node-name", name, "-rank", strconv.Itoa(rank),
+		"-checkpoint-bucket", "b", "-takeover-after", "600ms", "-heartbeat", "50ms"}, extra...)
+	return startNode(t, d, args)
+}
+
+// startNode runs mdscontrolplane with args and waits until it is healthy. The
+// test adds the listen address, no metrics port and a temporary Pebble dir.
+func startNode(t *testing.T, d deps, args []string) *logNode {
+	t.Helper()
 	n := &logNode{addr: freeAddr(t), done: make(chan int, 1), logs: &syncBuf{}}
-	args := append([]string{"-store", kindLog, "-addr", n.addr, "-metrics-addr", "", "-node-name", name, "-rank", strconv.Itoa(rank),
-		"-checkpoint-bucket", "b", "-takeover-after", "600ms", "-heartbeat", "50ms",
-		"-pebble-dir", filepath.Join(t.TempDir(), "pebble")}, extra...)
+	args = append([]string{"-addr", n.addr, "-metrics-addr", "", "-pebble-dir", filepath.Join(t.TempDir(), "pebble")}, args...)
 	var ctx context.Context
 	ctx, n.cancel = context.WithCancel(t.Context())
 	t.Cleanup(n.cancel)
@@ -403,5 +413,160 @@ func TestMemStoreOpens(t *testing.T) {
 	f.kind = "nope"
 	if _, _, err := openNode(t.Context(), realDeps(), f, controlplanemetrics.New(), slog.Default()); err == nil {
 		t.Fatal("unknown store accepted")
+	}
+}
+
+func TestPostgresFlags(t *testing.T) {
+	t.Setenv(postgresDSNEnv, "")
+	parse := func(args ...string) logFlags {
+		t.Helper()
+		f, _, err := parseFlags(append([]string{"-store", kindPostgres}, args...), &bytes.Buffer{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return f.log
+	}
+	if l := parse(); l.postgresPrefix != "mds_" || resolvedDSN(l) != "" {
+		t.Fatalf("defaults: %+v", l)
+	}
+	// -table and -log-ttl are for dynamolog only; with postgres they are ignored.
+	if l := parse("-postgres-prefix", "x_", "-postgres-dsn", "postgres://u@h/db", "-table", "other", "-log-ttl", "1h"); l.postgresPrefix != "x_" || resolvedDSN(l) != "postgres://u@h/db" {
+		t.Fatalf("flags: %+v", l)
+	}
+	t.Setenv(postgresDSNEnv, "postgres://env@h/db")
+	if got := resolvedDSN(parse()); got != "postgres://env@h/db" {
+		t.Fatalf("env fallback: %q", got)
+	}
+	if got := resolvedDSN(parse("-postgres-dsn", "postgres://flag@h/db")); got != "postgres://flag@h/db" {
+		t.Fatalf("the flag must win over the env: %q", got)
+	}
+}
+
+func TestPostgresNeedsDSN(t *testing.T) {
+	t.Setenv(postgresDSNEnv, "")
+	f, _, _ := parseFlags([]string{"-store", kindPostgres}, &bytes.Buffer{})
+	_, _, _, err := openPostgresLog(t.Context(), realDeps(), f, controlplanemetrics.New(), slog.Default())
+	if err == nil || !strings.Contains(err.Error(), "-postgres-dsn or MDS_POSTGRES_DSN") {
+		t.Fatalf("empty DSN: %v", err)
+	}
+	var logs bytes.Buffer
+	args := []string{"-store", kindPostgres, "-metrics-addr", "", "-addr", freeAddr(t)}
+	if code := run(t.Context(), args, &logs); code != 1 {
+		t.Fatalf("postgres without a DSN: code %d\n%s", code, logs.String())
+	}
+}
+
+func TestRedactDSN(t *testing.T) {
+	cases := []struct{ dsn, want string }{
+		{"postgres://user:hunter2@db.example:5432/mds?sslmode=require&password=hunter2", "db.example:5432/mds"},
+		{"postgres://user:hunter2@db.example/mds", "db.example/mds"},
+		{"postgres://u:hunter2@[::1]:5432/x", "[::1]:5432/x"},
+		{"host=db password=hunter2 dbname=mds", ""},
+		{"hunter2", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		got := redactDSN(c.dsn)
+		if got != c.want || strings.Contains(got, "hunter2") {
+			t.Errorf("redactDSN(%q) = %q, want %q", c.dsn, got, c.want)
+		}
+	}
+}
+
+// The DSN must not show in the flag values, the run manifest, or an open error.
+func TestDSNStaysOutOfFlagsManifestAndErrors(t *testing.T) {
+	const dsn = "postgres://user:hunter2@db.example/mds" //nolint:gosec // G101: a fake password for this test
+	t.Setenv(postgresDSNEnv, dsn)
+	f, fs, err := parseFlags([]string{"-store", kindPostgres, "-postgres-dsn", dsn}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fs.Lookup("postgres-dsn").Value.String(); got != "(set)" {
+		t.Fatalf("flag value shows %q", got)
+	}
+	m := runinfo.NewManifest(runinfo.New("mdscontrolplane", "t", -1), fs, "us-east-1", nil)
+	m.Args = []string{"-store", kindPostgres, "-postgres-dsn", dsn}
+	args := m.Args
+	hidden := hideDSN(m, resolvedDSN(f.log))
+	body, err := json.Marshal(hidden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "hunter2") {
+		t.Fatalf("manifest holds the password: %s", body)
+	}
+	if args[3] != dsn {
+		t.Fatal("hideDSN changed the caller's Args slice")
+	}
+	// Nothing listens on port 1, so the open fails. The error must not show the password.
+	const badDSN = "postgres://user:hunter2@127.0.0.1:1/db?sslmode=disable&connect_timeout=1" //nolint:gosec // G101: a fake password for this test
+	t.Setenv(postgresDSNEnv, "")
+	bad, _, _ := parseFlags([]string{"-store", kindPostgres, "-postgres-dsn", badDSN}, &bytes.Buffer{})
+	_, _, _, err = openPostgresLog(t.Context(), realDeps(), bad, controlplanemetrics.New(), slog.Default())
+	if err == nil || strings.Contains(err.Error(), "hunter2") {
+		t.Fatalf("want an open error without the password, got %v", err)
+	}
+}
+
+// TestPostgresStoreCommitAndLookup runs one node with -store postgres against a
+// real PostgreSQL. It needs MDS_TEST_POSTGRES_DSN, and skips without it.
+func TestPostgresStoreCommitAndLookup(t *testing.T) {
+	dsn := os.Getenv("MDS_TEST_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("MDS_TEST_POSTGRES_DSN is not set")
+	}
+	prefix := fmt.Sprintf("t%d_", time.Now().UnixNano()%1e9)
+	t.Cleanup(func() { dropPostgresTables(t, dsn, prefix) })
+	n := startNode(t, realDeps(), []string{"-store", kindPostgres, "-postgres-dsn", dsn, "-postgres-prefix", prefix,
+		"-create-tables", "-checkpoint-bucket", "", "-node-name", "n0", "-rank", "0"})
+	c := controlplaneclient.New(n.addr, nil)
+	defer func() { _ = c.Close() }()
+	waitRole(t, n, "active")
+	if err := c.CreateTopic(t.Context(), "t", 1); err != nil {
+		t.Fatalf("create topic: %v\n%s", err, n.logs.String())
+	}
+	key := "seg/0"
+	_, err := c.Call(t.Context(), core.CommitSegment{SegmentKey: key, Batches: []core.PendingBatch{
+		{TopicPartition: core.NewTopicPartition("t", 0), Records: 3, Loc: core.SegmentRef{Key: key, Len: 9}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := c.Call(t.Context(), core.FindSegments{TopicPartition: core.NewTopicPartition("t", 0), MaxBytes: 1 << 20})
+	if err != nil || response.(core.FindSegmentsResp).End != 3 {
+		t.Fatalf("lookup after commit: %v %+v\n%s", err, response, n.logs.String())
+	}
+	if code := n.stop(t); code != 0 {
+		t.Fatalf("code %d\n%s", code, n.logs.String())
+	}
+	if strings.Contains(n.logs.String(), dsn) {
+		t.Fatal("the DSN was logged")
+	}
+}
+
+// waitRole waits until the node has the role. A node that is healthy can still
+// be catching up, and it refuses commits until it is active.
+func waitRole(t *testing.T, n *logNode, want string) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if role(t, n) == want {
+			return
+		}
+	}
+	t.Fatalf("role %q, want %q\n%s", role(t, n), want, n.logs.String())
+}
+
+// dropPostgresTables removes the two tables of one test prefix. It runs after
+// the test, so it makes its own context (t.Context is already done by then).
+func dropPostgresTables(t *testing.T, dsn, prefix string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := executor.OpenPostgres(ctx, dsn)
+	if err != nil {
+		t.Errorf("drop tables: %v", err)
+		return
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(ctx, "DROP TABLE IF EXISTS "+prefix+"log, "+prefix+"meta"); err != nil {
+		t.Errorf("drop tables %s: %v", prefix, err)
 	}
 }

@@ -13,13 +13,12 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/internal/broker"
-	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/memorystore"
 	"github.com/manifesterio/mds/internal/core"
 )
 
 func memStack(t *testing.T, brokers int) *stack {
 	t.Helper()
-	s := newStack(t, memorystore.New(), nil, nil)
+	s := newStack(t, nil, nil)
 	s.addBrokers(brokers)
 	return s
 }
@@ -266,7 +265,7 @@ func runKill(t *testing.T, s *stack) {
 // Stop while a produce sits in the open segment: it is flushed, answered,
 // and the broker exits cleanly.
 func TestGracefulStopFlushesProduce(t *testing.T) {
-	s := newStack(t, memorystore.New(), nil, nil)
+	s := newStack(t, nil, nil)
 	s.brokers.BatchWindow = core.Duration(3 * time.Second)
 	s.addBrokers(1)
 	create(s)
@@ -312,7 +311,7 @@ func TestGracefulStopFlushesProduce(t *testing.T) {
 // The broker's own defaults (16 MiB, 200 ms): a lone produce waits out the
 // fixed window, and is answered right after it.
 func TestDefaultFlushRule(t *testing.T) {
-	s := newStack(t, memorystore.New(), nil, nil)
+	s := newStack(t, nil, nil)
 	s.brokers = broker.Config{} // every flush knob at its default
 	s.addBrokers(1)
 	create(s)

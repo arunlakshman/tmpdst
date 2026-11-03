@@ -28,7 +28,7 @@ func fullStack(t *testing.T) *stack {
 	if err := objs.EnsureBucket(ctx); err != nil {
 		t.Fatal(err)
 	}
-	return newStack(t, nil, objs, s3store.Classifier{})
+	return newStack(t, objs, s3store.Classifier{})
 }
 
 func TestFullStackRoundTrip(t *testing.T) {

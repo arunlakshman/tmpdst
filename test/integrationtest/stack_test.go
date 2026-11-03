@@ -25,8 +25,8 @@ type stack struct {
 	brokers broker.Config
 }
 
-// newStack boots an in-process gRPC control plane. st is ignored (kept for call-site shape).
-func newStack(t *testing.T, _ any, objs system.ObjectStore, cls system.ErrorClassifier) *stack {
+// newStack boots an in-process gRPC control plane. A nil objs uses an in-memory object store.
+func newStack(t *testing.T, objs system.ObjectStore, cls system.ErrorClassifier) *stack {
 	t.Helper()
 	gn := controlplanetest.StartMem(t)
 	if objs == nil {

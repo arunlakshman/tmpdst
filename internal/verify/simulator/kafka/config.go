@@ -37,6 +37,35 @@ func config(seeds []uint64, bug broker.InjectedBug) simulator.Config {
 // segment cap (4096): the log has no commit item limit.
 func ConfigLog(seeds []uint64) simulator.Config { return configLog(seeds, broker.InjectedBugNone, 0) }
 
+// ConfigLogFreeze is the log preset plus process freezes. A control plane node
+// is paused for seconds (a long VM pause or garbage collection) and then goes on
+// with its old view. By then the other node has taken over and trimmed past the
+// frozen node's slots, so a put from the frozen node reaches a trimmed slot and
+// the floor check must refuse it. The campaign requires that this path is reached.
+func ConfigLogFreeze(seeds []uint64) simulator.Config {
+	return configLogFreeze(seeds, broker.InjectedBugNone, 0)
+}
+
+func configLogFreeze(seeds []uint64, bug broker.InjectedBug, logBug uint8) simulator.Config {
+	config := configLog(seeds, bug, logBug)
+	withFreezes(&config)
+	config.ExpectReachable = append(config.ExpectReachable, "logcp-sim: put refused at or below the floor")
+	return config
+}
+
+// withFreezes lets the kernel freeze the control plane nodes for 1 to 4 seconds,
+// about 2 to 5 freezes per seed. A freeze is longer than a checkpoint and trim
+// cycle, so the frozen node comes back behind the floor of the log.
+func withFreezes(config *simulator.Config) {
+	config.Attrition.FreezeProb = 0.0004
+	config.Attrition.FreezeDur = [2]core.Duration{1 * core.Second, 4 * core.Second}
+	for i := range config.Processes {
+		if config.Processes[i].Name == "cp" {
+			config.Processes[i].Freezable = true
+		}
+	}
+}
+
 // configLog builds the log preset with a broker mutant and a log engine mutant.
 func configLog(seeds []uint64, bug broker.InjectedBug, logBug uint8) simulator.Config {
 	opts := DefaultOpts()

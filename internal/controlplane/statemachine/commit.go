@@ -256,6 +256,7 @@ func (m *Machine) onCommitAppendDone(d core.LogAppendDone, f *inFlightAppend) []
 	if isBelowFloor(d) {
 		// The slot is at or below the floor of the log: this node is far behind
 		// and the put is not a commit. Refuse the clients and restore.
+		m.env.Reachable("logcp-sim: put refused at or below the floor")
 		return m.hitTrimmed()
 	}
 	delete(m.inFlightAppends, d.Req)

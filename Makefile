@@ -108,6 +108,7 @@ sim: $(COVER_DIR)/.gitignore
 sim-campaign:
 	go run ./cmd/mdssimulator -scenario kafka -seeds $(SIM_SEEDS)
 	go run ./cmd/mdssimulator -scenario kafka-log -seeds $(SIM_SEEDS)
+	go run ./cmd/mdssimulator -scenario kafka-log-freeze -seeds $(SIM_SEEDS)
 
 # Hermetic integration tests (in-process memstore). Fullstack Docker tests
 # in the same package Skip unless MDS_DYNAMO_ENDPOINT + MDS_S3_ENDPOINT are set.

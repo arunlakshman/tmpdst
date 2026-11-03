@@ -14,6 +14,9 @@ type Process struct {
 	// NoAttrition excludes this process from kernel attrition. CP replicas use
 	// LogParams StallProb/CrashProb instead (kafka-log).
 	NoAttrition bool
+	// Freezable lets the kernel freeze this process (NodeKills.FreezeProb). The
+	// process keeps its memory and its in-flight work, and resumes with its old view.
+	Freezable bool
 	// HiddenFromClients keeps this process out of the broker list the workload
 	// receives. Set it for services that clients must never dial, such as the
 	// control plane nodes in kafka-log: a client that dials one waits for a

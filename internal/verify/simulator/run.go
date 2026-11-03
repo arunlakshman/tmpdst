@@ -24,6 +24,11 @@ type NodeKills struct {
 	// GracefulWeight drives core.StopRequest: a graceful shutdown that ends in core.ShutdownDone.
 	GracefulWeight float64
 	RecoveryDelay  [2]core.Duration
+	// FreezeProb is evaluated like CrashProb during Chaos. A freeze pauses one
+	// process that has Process.Freezable set for a time in FreezeDur: it takes no
+	// Step, its inbox keeps filling, and its earlier sends still land. Zero is off.
+	FreezeProb float64
+	FreezeDur  [2]core.Duration
 }
 
 // SeedConfig holds the per-seed knobs a RandomSettingsPicker may change.

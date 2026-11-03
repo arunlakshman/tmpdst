@@ -59,6 +59,9 @@ func TestLogMutantsAreCaught(t *testing.T) {
 		// deleted slot. A short takeover, a short keep window and a slow tail on
 		// the store make that happen often.
 		{"put at or below the floor answered as success", fakelogservice.InjectedBugNoFloorCheck, 0, slowPutsAfterTakeover, "kafka: a consumer reads the committed value at each offset"},
+		// The same mutant, found by freezing a control plane node: it comes back
+		// behind the floor of the log, and its put must be refused there.
+		{"put at or below the floor answered as success (frozen writer)", fakelogservice.InjectedBugNoFloorCheck, 0, withFreezes, "kafka: acked range is committed in the control plane"},
 	}
 	for _, c := range cases {
 		config := configLog(nil, broker.InjectedBugNone, c.bug)

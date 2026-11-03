@@ -296,4 +296,6 @@ j. **IAM.** The control plane role needs `dynamodb:GetItem` and `dynamodb:Update
 
 k. **Simulator.** New property: `logcp-sim: one epoch has one writer`. New mutant: `InjectedBugNoFloorCheck` (value 4). Seeds 1333, 1741 and 2318 pass.
 
-Campaign result: TBD
+l. **Process freeze.** The simulator kernel can freeze a process (`NodeKills.FreezeProb`, `FreezeDur`, `Process.Freezable`). A frozen node takes no step for 1 to 4 seconds, its inbox keeps filling, and its earlier puts still land. This is a real long pause (VM pause or garbage collection), and it exercises the floor check without any mutant. Scenario `-scenario kafka-log-freeze` (`make sim-campaign` runs it). Over 200 seeds, 37 puts from frozen writers were refused at the floor; the mutant `InjectedBugNoFloorCheck` loses acknowledged data in this scenario within a few seeds.
+
+Campaign result: kafka-log seeds 1 to 10000: 0 failing (399.6M steps). kafka seeds 1 to 1000: 0 failing. kafka-log-freeze: see the pull request description for the latest run.

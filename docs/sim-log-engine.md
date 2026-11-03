@@ -14,6 +14,13 @@ logstore slots (`statemachine.ReplayPosition`). The speccheck package remains th
 Run with `go run ./cmd/mdssimulator -scenario kafka-log -seeds 300` (`kafka.ConfigLog`).
 The speccheck-backed preset (`-scenario kafka`) is unchanged.
 
+`-scenario kafka-log-freeze` (`kafka.ConfigLogFreeze`) is the same preset plus process freezes. The kernel
+(`NodeKills.FreezeProb`, `Process.Freezable`) pauses one control plane node for 1 to 4 seconds: it takes no step,
+its inbox keeps filling, and the puts it already sent still land. When it resumes it goes on with its old view,
+after the other node has taken over and trimmed past its slots. About 0.2 such puts per seed reach the floor and
+are refused (`logcp-sim: put refused at or below the floor`); the campaign fails on a coverage gap if that path is
+never reached. The mutant `InjectedBugNoFloorCheck` is caught within a few seeds of this scenario.
+
 ## Topology
 
 ```

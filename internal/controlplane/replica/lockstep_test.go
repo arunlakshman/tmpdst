@@ -13,22 +13,22 @@ import (
 )
 
 var lockstepCmds = []metadata.Entry{
-	{ID: "0", Kind: metadata.KindCreateTopic, Topic: "orders", Parts: 2},
+	{ID: "0", Kind: metadata.KindCreateTopic, Op: core.CreateTopic{Name: "orders", Partitions: 2}},
 	{ID: "1", Kind: metadata.KindNoop},
-	{ID: "2", Kind: metadata.KindCommit, Commit: core.CommitSegment{
+	{ID: "2", Kind: metadata.KindCommit, Op: core.CommitSegment{
 		SegmentKey: "seg-a",
 		Batches: []core.PendingBatch{
 			{TopicPartition: core.NewTopicPartition("orders", 0), Records: 3, Loc: core.SegmentRef{Key: "o1", Off: 0, Len: 30}},
 			{TopicPartition: core.NewTopicPartition("orders", 1), Records: 2, Loc: core.SegmentRef{Key: "o1", Off: 30, Len: 20}},
 		},
 	}},
-	{ID: "3", Kind: metadata.KindCommit, Commit: core.CommitSegment{
+	{ID: "3", Kind: metadata.KindCommit, Op: core.CommitSegment{
 		SegmentKey: "seg-b",
 		Batches: []core.PendingBatch{
 			{TopicPartition: core.NewTopicPartition("orders", 0), Records: 1, Loc: core.SegmentRef{Key: "o2", Off: 0, Len: 10}},
 		},
 	}},
-	{ID: "4", Kind: metadata.KindCommit, Commit: core.CommitSegment{ // replay
+	{ID: "4", Kind: metadata.KindCommit, Op: core.CommitSegment{ // replay
 		SegmentKey: "seg-a",
 		Batches: []core.PendingBatch{
 			{TopicPartition: core.NewTopicPartition("orders", 0), Records: 3, Loc: core.SegmentRef{Key: "o1", Off: 0, Len: 30}},
@@ -36,18 +36,18 @@ var lockstepCmds = []metadata.Entry{
 		},
 	}},
 	{ID: "5", Kind: metadata.KindNoop},
-	{ID: "6", Kind: metadata.KindCommit, Commit: core.CommitSegment{
+	{ID: "6", Kind: metadata.KindCommit, Op: core.CommitSegment{
 		SegmentKey: "seg-c",
 		Batches: []core.PendingBatch{
 			{TopicPartition: core.NewTopicPartition("orders", 1), Records: 4, Loc: core.SegmentRef{Key: "o3", Off: 0, Len: 40}},
 		},
 	}},
 	// Exclusive creates go last, so the indexes above stay the same.
-	{ID: "7", Kind: metadata.KindCreateTopicExclusive, Topic: "fresh", Parts: 3},  // new: OK
-	{ID: "8", Kind: metadata.KindCreateTopicExclusive, Topic: "fresh", Parts: 1},  // exists: ErrTopicExists
-	{ID: "9", Kind: metadata.KindCreateTopicExclusive, Topic: "orders", Parts: 5}, // exists: ErrTopicExists
-	{ID: "10", Kind: metadata.KindCreateTopic, Topic: "fresh", Parts: 6},          // plain create: OK, grows it
-	{ID: "11", Kind: metadata.KindCreateTopicExclusive, Topic: "", Parts: 1},      // invalid name: ErrInvalid
+	{ID: "7", Kind: metadata.KindCreateTopicExclusive, Op: core.CreateTopic{Name: "fresh", Partitions: 3, FailIfExists: true}},  // new: OK
+	{ID: "8", Kind: metadata.KindCreateTopicExclusive, Op: core.CreateTopic{Name: "fresh", Partitions: 1, FailIfExists: true}},  // exists: ErrTopicExists
+	{ID: "9", Kind: metadata.KindCreateTopicExclusive, Op: core.CreateTopic{Name: "orders", Partitions: 5, FailIfExists: true}}, // exists: ErrTopicExists
+	{ID: "10", Kind: metadata.KindCreateTopic, Op: core.CreateTopic{Name: "fresh", Partitions: 6}},                              // plain create: OK, grows it
+	{ID: "11", Kind: metadata.KindCreateTopicExclusive, Op: core.CreateTopic{Name: "", Partitions: 1, FailIfExists: true}},      // invalid name: ErrInvalid
 }
 
 func queryDigest(exec func(core.ControlPlaneOperation) core.ControlPlaneDone) uint64 {
@@ -105,10 +105,10 @@ func TestLockstepMachineVsSpecCheck(t *testing.T) {
 		case metadata.KindNoop:
 			orcAnswers = append(orcAnswers, core.ControlPlaneDone{Req: core.RequestID(i), Outcome: core.Applied})
 		case metadata.KindCreateTopic, metadata.KindCreateTopicExclusive:
-			exclusive := e.Kind == metadata.KindCreateTopicExclusive
-			orcAnswers = append(orcAnswers, core.ControlPlaneDone{Req: core.RequestID(i), Err: orc.CreateTopicIf(e.Topic, e.Parts, exclusive)})
+			create := e.Op.(core.CreateTopic)
+			orcAnswers = append(orcAnswers, core.ControlPlaneDone{Req: core.RequestID(i), Err: orc.CreateTopicIf(create.Name, create.Partitions, create.FailIfExists)})
 		case metadata.KindCommit:
-			orcAnswers = append(orcAnswers, orc.Exec(core.ControlPlaneCall{Req: core.RequestID(i), Op: e.Commit}).(core.ControlPlaneDone))
+			orcAnswers = append(orcAnswers, orc.Exec(core.ControlPlaneCall{Req: core.RequestID(i), Op: e.Op}).(core.ControlPlaneDone))
 		}
 	}
 

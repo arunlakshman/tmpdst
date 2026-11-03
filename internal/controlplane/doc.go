@@ -30,10 +30,12 @@
 //   - replica: one node's copy of the replicated log: leader or standby,
 //     catch-up, checkpoint and restore. It implements core.Machine.
 //   - metadata: the kernel of the replicated state. It sends each operation to
-//     the module that owns it, owns the log format and the checkpoint, and
-//     applies commands in order to an ordered key-value store.
-//   - module: the one interface (Mode, Write, Read) that each context
-//     implements to take part in the replicated state.
+//     the module that owns it, owns the envelope of a log entry (kind and id)
+//     and the checkpoint, and applies commands in order to an ordered
+//     key-value store.
+//   - module: the one interface that each context implements to take part in
+//     the replicated state: Mode, Write and Read, and its own log entry kinds
+//     and their bytes (Kinds, KindOf, Encode, Decode).
 //   - topics: the topics and segments context (CreateTopic, DescribeTopics,
 //     CommitSegment, FindSegments). It owns the T, E, R, K and S keys.
 //   - kv: the small ordered key-value seam under metadata and groups/storage,

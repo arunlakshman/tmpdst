@@ -250,7 +250,7 @@ func TestCommitWithWriterBases(t *testing.T) {
 		},
 	}
 	d := a.Apply(1, metadata.Entry{
-		ID: "w/1", Kind: metadata.KindCommit, Commit: operation,
+		ID: "w/1", Kind: metadata.KindCommit, Op: operation,
 		WriterBases: []core.Offset{5},
 	})
 	if d.Err != core.OK || d.Outcome != core.Applied {

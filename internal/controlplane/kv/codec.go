@@ -28,6 +28,31 @@ func (r *Reader) Rest() []byte { return r.b }
 // Done reports whether every read succeeded and nothing is left over.
 func (r *Reader) Done() bool { return r.ok && len(r.b) == 0 }
 
+// Fail marks the record as bad. A decoder calls it when a value it read breaks a
+// rule of the format, for example an index that is out of range.
+func (r *Reader) Fail() { r.ok = false }
+
+// Count reads the length of a list. Each item takes at least one byte, so a
+// count above the bytes left fails the record, and the caller never allocates
+// for a length that a damaged record made up.
+func (r *Reader) Count() int {
+	n := r.Uvarint()
+	if !r.ok || n > uint64(len(r.b)) {
+		r.ok = false
+		return 0
+	}
+	return int(n)
+}
+
+// Bytes reads a length-prefixed byte field. An empty field is nil.
+func (r *Reader) Bytes() []byte {
+	s := r.String()
+	if s == "" {
+		return nil
+	}
+	return []byte(s)
+}
+
 // Uvarint reads an unsigned varint.
 func (r *Reader) Uvarint() uint64 {
 	v, n := binary.Uvarint(r.b)
@@ -91,3 +116,28 @@ func SplitTopicPartition(b []byte) (core.TopicPartition, bool) {
 	}
 	return core.TopicPartition{Topic: topic, Partition: int32(binary.BigEndian.Uint32(r.Rest()))}, true
 }
+
+// Writer builds a packed record. It writes what Reader reads: varints, and
+// strings and byte fields as uvarint length then bytes.
+type Writer struct{ buf []byte }
+
+// NewWriter returns an empty Writer.
+func NewWriter() *Writer { return &Writer{} }
+
+// Uvarint writes an unsigned varint.
+func (w *Writer) Uvarint(v uint64) { w.buf = binary.AppendUvarint(w.buf, v) }
+
+// Varint writes a signed (zigzag) varint.
+func (w *Writer) Varint(v int64) { w.buf = binary.AppendVarint(w.buf, v) }
+
+// String writes a length-prefixed string. Use it for a byte field too.
+func (w *Writer) String(v string) {
+	w.Uvarint(uint64(len(v)))
+	w.buf = append(w.buf, v...)
+}
+
+// Append adds bytes that are already encoded.
+func (w *Writer) Append(b []byte) { w.buf = append(w.buf, b...) }
+
+// Bytes is the record so far.
+func (w *Writer) Bytes() []byte { return w.buf }

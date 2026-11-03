@@ -182,7 +182,7 @@ func entryFor(t *testing.T, operation core.ControlPlaneOperation, slot int) meta
 	if c, ok := operation.(core.CreateTopic); ok {
 		return metadata.CreateEntry(c)
 	}
-	e, ok := metadata.GroupEntry(operation)
+	e, ok := metadata.EntryOf(operation)
 	if !ok {
 		t.Fatalf("slot %d: %T is not a write", slot, operation)
 	}

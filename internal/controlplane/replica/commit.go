@@ -66,8 +66,8 @@ func (m *Replica) Offer(operation ClientOperation) []core.Action {
 		})
 		return nil
 	}
-	if operation.Cmd.Kind == metadata.KindCommit {
-		if d, ok, err := m.meta.KnownCommit(operation.Cmd.Commit); err == nil && ok {
+	if commit, isCommit := operation.Cmd.CommitSegment(); isCommit {
+		if d, ok, err := m.meta.KnownCommit(commit); err == nil && ok {
 			d.Req = operation.Req
 			m.env.Reachable("logcp-sim: replayed key answered from the window")
 			m.answers = append(m.answers, ReplyToClient{Req: operation.Req, From: operation.From, Done: d})
@@ -102,9 +102,10 @@ func (m *Replica) Offer(operation ClientOperation) []core.Action {
 // answer the live one. In-flight ReqIDs are sorted so map walk order cannot
 // diverge two runs of the same seed.
 func (m *Replica) retargetCommit(operation ClientOperation) bool {
-	key := operation.Cmd.Commit.SegmentKey
+	wanted, _ := operation.Cmd.CommitSegment()
+	key := wanted.SegmentKey
 	retarget := func(c *waitingCommand) bool {
-		if c.cmd.Kind != metadata.KindCommit || c.cmd.Commit.SegmentKey != key {
+		if queued, ok := c.cmd.CommitSegment(); !ok || queued.SegmentKey != key {
 			return false
 		}
 		c.request, c.from = operation.Req, operation.From
@@ -189,8 +190,8 @@ func (m *Replica) emitCommitGroup() []core.Action {
 	for i := range cmds {
 		e := cmds[i].cmd
 		e.ID = id
-		if m.config.InjectedBug == InjectedBugWriterOffsets && e.Kind == metadata.KindCommit {
-			e.WriterBases = m.projectBases(e.Commit)
+		if commit, ok := e.CommitSegment(); ok && m.config.InjectedBug == InjectedBugWriterOffsets {
+			e.WriterBases = m.projectBases(commit)
 		}
 		cmds[i].cmd = e
 	}

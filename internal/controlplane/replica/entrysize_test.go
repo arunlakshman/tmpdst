@@ -21,7 +21,7 @@ func sizedCommit(key string, batches int) metadata.Entry {
 			Loc: core.SegmentRef{Key: key, Off: int64(i) * 1000, Len: 1000},
 		}
 	}
-	return metadata.Entry{Kind: metadata.KindCommit, Commit: core.CommitSegment{SegmentKey: key, Batches: bs}}
+	return metadata.Entry{Kind: metadata.KindCommit, Op: core.CommitSegment{SegmentKey: key, Batches: bs}}
 }
 
 // appendsUntilQueueEmpty finishes each append in turn, so the machine builds

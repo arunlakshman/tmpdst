@@ -127,3 +127,39 @@ func TestTopicPartitionKeyRoundTrip(t *testing.T) {
 		t.Fatal("short topic accepted")
 	}
 }
+
+func TestWriterAndReaderMatch(t *testing.T) {
+	w := kv.NewWriter()
+	w.Uvarint(300)
+	w.Varint(-7)
+	w.String("hi")
+	w.String("") // an empty byte field
+	w.Uvarint(2) // a list of two
+	w.String("a")
+	w.String("b")
+	w.Append([]byte{9})
+	r := kv.NewReader(w.Bytes())
+	if r.Uvarint() != 300 || r.Varint() != -7 || r.String() != "hi" || r.Bytes() != nil || r.Count() != 2 {
+		t.Fatal("values did not round trip")
+	}
+	if r.String() != "a" || r.String() != "b" || r.Uvarint() != 9 || !r.Done() {
+		t.Fatal("list or appended bytes did not round trip")
+	}
+	b := kv.NewReader([]byte{2, 'o', 'k'})
+	if string(b.Bytes()) != "ok" {
+		t.Fatal("a byte field was not read")
+	}
+}
+
+func TestReaderCountAndFail(t *testing.T) {
+	// a count of 5 with 2 bytes left must fail, so a damaged record cannot make a caller allocate
+	r := kv.NewReader([]byte{5, 1, 1})
+	if r.Count() != 0 || r.OK() {
+		t.Fatal("a count above the bytes left must fail")
+	}
+	f := kv.NewReader(nil)
+	f.Fail()
+	if f.OK() || f.Done() {
+		t.Fatal("Fail must mark the record bad")
+	}
+}

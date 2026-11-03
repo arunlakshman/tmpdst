@@ -12,7 +12,7 @@ import (
 func commitCmd(key string, records int64) metadata.Entry {
 	return metadata.Entry{
 		Kind: metadata.KindCommit,
-		Commit: core.CommitSegment{
+		Op: core.CommitSegment{
 			SegmentKey: key,
 			Batches: []core.PendingBatch{
 				{TopicPartition: core.NewTopicPartition("t", 0), Records: records, Loc: core.SegmentRef{Key: key, Off: 0, Len: records}},

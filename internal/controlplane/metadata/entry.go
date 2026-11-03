@@ -1,355 +1,122 @@
 package metadata
 
 import (
-	"encoding/binary"
 	"errors"
 
+	"github.com/manifesterio/mds/internal/controlplane/groups/storage"
 	"github.com/manifesterio/mds/internal/controlplane/kv"
+	"github.com/manifesterio/mds/internal/controlplane/module"
+	"github.com/manifesterio/mds/internal/controlplane/topics"
 	"github.com/manifesterio/mds/internal/core"
 )
 
-// Entry kinds are the Dynamo loglet payload kinds.
-const (
-	KindNoop Kind = iota
-	KindCommit
-	KindCreateTopic
-	KindGroupInstall
-	KindGroupAssign
-	KindGroupRemove
-	KindOffsetCommit
-	// KindCreateTopicExclusive is CreateTopic with FailIfExists. It is a new
-	// kind, not a flag on KindCreateTopic, so old log entries keep their bytes.
-	KindCreateTopicExclusive
-)
+// The log format of an entry is: the kind (uvarint), the id (string), and then
+// the payload. The kernel writes the kind and the id. The module that owns the
+// kind writes and reads the payload, so a new context brings its own encoding
+// and the kernel does not change. The bytes of every kind are fixed by the
+// golden test (TestGoldenEntryBytes): a log written by an older node must be
+// read by a newer one.
 
-// Kind is the type of a log entry.
-type Kind uint8
+// Kind is the kind of a log entry. See module.Kind.
+type Kind = module.Kind
+
+// The entry kinds. The kernel owns the no-op (zero). Each other kind belongs to
+// the module that defines it.
+const (
+	KindNoop                 Kind = 0
+	KindCommit                    = topics.KindCommit
+	KindCreateTopic               = topics.KindCreateTopic
+	KindCreateTopicExclusive      = topics.KindCreateTopicExclusive
+	KindGroupInstall              = storage.KindGroupInstall
+	KindGroupAssign               = storage.KindGroupAssign
+	KindGroupRemove               = storage.KindGroupRemove
+	KindOffsetCommit              = storage.KindOffsetCommit
+)
 
 // Entry is one slot's command payload. KindNoop changes nothing on apply.
 type Entry struct {
-	ID     string
-	Kind   Kind
-	Commit core.CommitSegment // KindCommit
-	Topic  string             // KindCreateTopic, KindCreateTopicExclusive
-	Parts  int32              // KindCreateTopic, KindCreateTopicExclusive
-	// Group commands (KindGroupInstall, KindGroupAssign, KindGroupRemove,
-	// KindOffsetCommit). Only the field of the kind is used.
-	Install core.GroupInstall
-	Assign  core.GroupAssign
-	Remove  core.GroupRemove
-	Offsets core.OffsetCommit
-	// WriterBases, when set and equal in length to Commit.Batches, forces those
-	// bases at apply (sim BugWriterOffsets). Not on the wire.
+	ID   string
+	Kind Kind
+	// Op is the logged operation that the entry carries. It is nil for KindNoop.
+	Op core.ControlPlaneOperation
+	// WriterBases, when set and equal in length to the commit's batches, forces
+	// those bases at apply (sim BugWriterOffsets). Not on the wire.
 	WriterBases []core.Offset
+}
+
+// CommitSegment is the CommitSegment that the entry carries. It is false for any
+// other entry.
+func (e Entry) CommitSegment() (core.CommitSegment, bool) {
+	c, ok := e.Op.(core.CommitSegment)
+	return c, ok
 }
 
 // ErrCorrupt means the bytes are not a valid Entry.
 var ErrCorrupt = errors.New("metadata: corrupt entry")
 
-type entryEncoder struct {
-	buf []byte
-	tab []string
-	idx map[string]int
+// registry is the list of modules, and which module owns each entry kind. Every
+// Store uses the same list, and so does the codec.
+var registry = newRegistry(topics.Module{}, storage.NewModule(topics.PartitionCount))
+
+type modules struct {
+	list  []module.Module
+	owner map[Kind]module.Module
 }
 
-func (e *entryEncoder) u(v uint64) { e.buf = binary.AppendUvarint(e.buf, v) }
-func (e *entryEncoder) i(v int64)  { e.buf = binary.AppendVarint(e.buf, v) }
-func (e *entryEncoder) s(v string) { e.u(uint64(len(v))); e.buf = append(e.buf, v...) }
-
-func (e *entryEncoder) ref(v string) uint64 {
-	if n, ok := e.idx[v]; ok {
-		return uint64(n)
+func newRegistry(list ...module.Module) modules {
+	r := modules{list: list, owner: map[Kind]module.Module{}}
+	for _, m := range list {
+		for _, k := range m.Kinds() {
+			r.owner[k] = m
+		}
 	}
-	e.idx[v] = len(e.tab)
-	e.tab = append(e.tab, v)
-	return uint64(len(e.tab) - 1)
+	return r
+}
+
+// EntryOf is the log entry of a logged operation. It returns false for an
+// operation that is not logged (a read, or an unknown one).
+func EntryOf(operation core.ControlPlaneOperation) (Entry, bool) {
+	for _, m := range registry.list {
+		if kind, ok := m.KindOf(operation); ok {
+			return Entry{Kind: kind, Op: operation}, true
+		}
+	}
+	return Entry{}, false
+}
+
+// CreateEntry is the log entry of a CreateTopic.
+func CreateEntry(operation core.CreateTopic) Entry {
+	e, _ := EntryOf(operation)
+	return e
 }
 
 // Encode serialises an entry.
 func Encode(en Entry) []byte {
-	e := &entryEncoder{idx: map[string]int{}}
-	e.u(uint64(en.Kind))
-	e.s(en.ID)
-	switch en.Kind {
-	case KindCommit:
-		e.commit(en.Commit)
-	case KindCreateTopic, KindCreateTopicExclusive:
-		e.s(en.Topic)
-		e.i(int64(en.Parts))
-	case KindGroupInstall:
-		e.groupInstall(en.Install)
-	case KindGroupAssign:
-		e.groupAssign(en.Assign)
-	case KindGroupRemove:
-		e.groupRemove(en.Remove)
-	case KindOffsetCommit:
-		e.offsetCommit(en.Offsets)
+	w := kv.NewWriter()
+	w.Uvarint(uint64(en.Kind))
+	w.String(en.ID)
+	if m := registry.owner[en.Kind]; m != nil {
+		m.Encode(w, en.Kind, en.Op)
 	}
-	return e.buf
-}
-
-func (e *entryEncoder) groupInstall(operation core.GroupInstall) {
-	e.s(operation.Group)
-	e.s(operation.ProtocolType)
-	e.s(operation.Protocol)
-	e.i(int64(operation.Generation))
-	e.s(operation.Leader)
-	e.i(operation.TimeMs)
-	e.u(uint64(len(operation.Members)))
-	for _, m := range operation.Members {
-		e.s(m.MemberID)
-		e.s(m.ClientID)
-		e.s(m.ClientHost)
-		e.s(m.GroupInstanceID)
-		e.i(int64(m.SessionTimeoutMs))
-		e.i(int64(m.RebalanceTimeoutMs))
-		e.s(string(m.Metadata))
-	}
-}
-
-func (e *entryEncoder) groupAssign(operation core.GroupAssign) {
-	e.s(operation.Group)
-	e.i(int64(operation.Generation))
-	e.s(operation.Leader)
-	e.i(operation.TimeMs)
-	e.u(uint64(len(operation.Assignments)))
-	for _, a := range operation.Assignments {
-		e.s(a.Member)
-		e.s(string(a.Bytes))
-	}
-}
-
-func (e *entryEncoder) groupRemove(operation core.GroupRemove) {
-	e.s(operation.Group)
-	e.i(operation.TimeMs)
-	e.s(operation.Reason)
-	e.u(uint64(len(operation.Members)))
-	for _, m := range operation.Members {
-		e.s(m)
-	}
-}
-
-func (e *entryEncoder) offsetCommit(operation core.OffsetCommit) {
-	e.s(operation.Group)
-	e.s(operation.Member)
-	e.i(int64(operation.Generation))
-	e.i(operation.TimeMs)
-	e.u(uint64(len(operation.Offsets)))
-	for _, o := range operation.Offsets {
-		e.s(o.TopicPartition.Topic)
-		e.i(int64(o.TopicPartition.Partition))
-		e.i(o.Offset)
-		e.i(int64(o.LeaderEpoch))
-		e.s(o.Metadata)
-	}
-}
-
-func (e *entryEncoder) commit(c core.CommitSegment) {
-	e.s(c.SegmentKey)
-	head := e.buf
-	e.buf = nil
-	for _, b := range c.Batches {
-		e.u(e.ref(b.TopicPartition.Topic))
-		e.i(int64(b.TopicPartition.Partition))
-		e.i(b.Records)
-		e.u(e.ref(b.Loc.Key))
-		e.i(b.Loc.Off)
-		e.i(b.Loc.Len)
-	}
-	body := e.buf
-	e.buf = head
-	e.u(uint64(len(e.tab)))
-	for _, t := range e.tab {
-		e.s(t)
-	}
-	e.u(uint64(len(c.Batches)))
-	e.buf = append(e.buf, body...)
-}
-
-type entryDecoder struct {
-	b   []byte
-	err error
-}
-
-func (d *entryDecoder) u() uint64 {
-	v, n := binary.Uvarint(d.b)
-	if n <= 0 {
-		d.err = ErrCorrupt
-		return 0
-	}
-	d.b = d.b[n:]
-	return v
-}
-
-func (d *entryDecoder) i() int64 {
-	v, n := binary.Varint(d.b)
-	if n <= 0 {
-		d.err = ErrCorrupt
-		return 0
-	}
-	d.b = d.b[n:]
-	return v
-}
-
-func (d *entryDecoder) s() string {
-	n := d.u()
-	if d.err != nil || n > uint64(len(d.b)) {
-		d.err = ErrCorrupt
-		return ""
-	}
-	v := string(d.b[:n])
-	d.b = d.b[n:]
-	return v
+	return w.Bytes()
 }
 
 // Decode parses an entry made by Encode.
 func Decode(b []byte) (Entry, error) {
-	d := &entryDecoder{b: b}
-	en := Entry{Kind: Kind(d.u())}
-	en.ID = d.s()
-	switch en.Kind {
-	case KindNoop:
-	case KindCommit:
-		en.Commit = d.commit()
-	case KindCreateTopic, KindCreateTopicExclusive:
-		en.Topic = d.s()
-		en.Parts = int32(d.i())
-	case KindGroupInstall:
-		en.Install = d.groupInstall()
-	case KindGroupAssign:
-		en.Assign = d.groupAssign()
-	case KindGroupRemove:
-		en.Remove = d.groupRemove()
-	case KindOffsetCommit:
-		en.Offsets = d.offsetCommit()
-	default:
-		d.err = ErrCorrupt
+	r := kv.NewReader(b)
+	en := Entry{Kind: Kind(r.Uvarint())}
+	en.ID = r.String()
+	if en.Kind != KindNoop {
+		m := registry.owner[en.Kind]
+		if m == nil {
+			return Entry{}, ErrCorrupt
+		}
+		en.Op = m.Decode(r, en.Kind)
 	}
-	if d.err == nil && len(d.b) != 0 {
-		d.err = ErrCorrupt
-	}
-	if d.err != nil {
-		return Entry{}, d.err
+	if !r.Done() {
+		return Entry{}, ErrCorrupt
 	}
 	return en, nil
-}
-
-// count reads a list length; each item takes at least one byte.
-func (d *entryDecoder) count() int {
-	n := d.u()
-	if n > uint64(len(d.b)) {
-		d.err = ErrCorrupt
-		return 0
-	}
-	return int(n)
-}
-
-// blob reads a byte field; an empty one is nil.
-func (d *entryDecoder) blob() []byte {
-	s := d.s()
-	if s == "" {
-		return nil
-	}
-	return []byte(s)
-}
-
-func (d *entryDecoder) groupInstall() core.GroupInstall {
-	var operation core.GroupInstall
-	operation.Group = d.s()
-	operation.ProtocolType = d.s()
-	operation.Protocol = d.s()
-	operation.Generation = int32(d.i())
-	operation.Leader = d.s()
-	operation.TimeMs = d.i()
-	for n := d.count(); n > 0 && d.err == nil; n-- {
-		var m core.GroupMember
-		m.MemberID = d.s()
-		m.ClientID = d.s()
-		m.ClientHost = d.s()
-		m.GroupInstanceID = d.s()
-		m.SessionTimeoutMs = int32(d.i())
-		m.RebalanceTimeoutMs = int32(d.i())
-		m.Metadata = d.blob()
-		operation.Members = append(operation.Members, m)
-	}
-	return operation
-}
-
-func (d *entryDecoder) groupAssign() core.GroupAssign {
-	var operation core.GroupAssign
-	operation.Group = d.s()
-	operation.Generation = int32(d.i())
-	operation.Leader = d.s()
-	operation.TimeMs = d.i()
-	for n := d.count(); n > 0 && d.err == nil; n-- {
-		var a core.GroupAssignment
-		a.Member = d.s()
-		a.Bytes = d.blob()
-		operation.Assignments = append(operation.Assignments, a)
-	}
-	return operation
-}
-
-func (d *entryDecoder) groupRemove() core.GroupRemove {
-	var operation core.GroupRemove
-	operation.Group = d.s()
-	operation.TimeMs = d.i()
-	operation.Reason = d.s()
-	for n := d.count(); n > 0 && d.err == nil; n-- {
-		operation.Members = append(operation.Members, d.s())
-	}
-	return operation
-}
-
-func (d *entryDecoder) offsetCommit() core.OffsetCommit {
-	var operation core.OffsetCommit
-	operation.Group = d.s()
-	operation.Member = d.s()
-	operation.Generation = int32(d.i())
-	operation.TimeMs = d.i()
-	for n := d.count(); n > 0 && d.err == nil; n-- {
-		var o core.PartitionOffset
-		o.TopicPartition.Topic = d.s()
-		o.TopicPartition.Partition = int32(d.i())
-		o.Offset = d.i()
-		o.LeaderEpoch = int32(d.i())
-		o.Metadata = d.s()
-		operation.Offsets = append(operation.Offsets, o)
-	}
-	return operation
-}
-
-func (d *entryDecoder) commit() core.CommitSegment {
-	c := core.CommitSegment{SegmentKey: d.s()}
-	tab := make([]string, 0, 8)
-	for n := d.u(); n > 0 && d.err == nil; n-- {
-		tab = append(tab, d.s())
-	}
-	n := d.u()
-	if n > uint64(len(d.b)) {
-		d.err = ErrCorrupt
-		return c
-	}
-	c.Batches = make([]core.PendingBatch, 0, n)
-	str := func() string {
-		i := d.u()
-		if i >= uint64(len(tab)) {
-			d.err = ErrCorrupt
-			return ""
-		}
-		return tab[i]
-	}
-	for ; n > 0 && d.err == nil; n-- {
-		var b core.PendingBatch
-		b.TopicPartition.Topic = str()
-		b.TopicPartition.Partition = int32(d.i())
-		b.Records = d.i()
-		b.Loc.Key = str()
-		b.Loc.Off = d.i()
-		b.Loc.Len = d.i()
-		c.Batches = append(c.Batches, b)
-	}
-	return c
 }
 
 // NewMem returns a metadata store over an in-memory KV. No Pebble. Suitable for the
@@ -362,16 +129,15 @@ func (a *Store) Apply(slot int64, e Entry) core.ControlPlaneDone {
 	if e.Kind == KindNoop {
 		return core.ControlPlaneDone{Req: core.RequestID(slot), Outcome: core.Applied}
 	}
-	if e.Kind == KindCommit && len(e.WriterBases) == len(e.Commit.Batches) && len(e.WriterBases) > 0 {
-		d := a.commitWithBases(slot, e.Commit, e.WriterBases)
+	if c, ok := e.Op.(core.CommitSegment); ok && len(e.WriterBases) == len(c.Batches) && len(e.WriterBases) > 0 {
+		d := a.commitWithBases(slot, c, e.WriterBases)
 		d.Req = core.RequestID(slot)
 		return d
 	}
-	operation, ok := e.Operation()
-	if !ok {
+	if e.Op == nil {
 		return core.ControlPlaneDone{Req: core.RequestID(slot), Err: core.ErrInvalid}
 	}
-	d, err := a.Write(slot, operation)
+	d, err := a.Write(slot, e.Op)
 	mustStore(err)
 	d.Req = core.RequestID(slot)
 	return d
@@ -384,62 +150,4 @@ func (a *Store) ApplyBytes(slot int64, data []byte) (core.ControlPlaneDone, erro
 		return core.ControlPlaneDone{}, err
 	}
 	return a.Apply(slot, e), nil
-}
-
-// Operation is the control-plane operation that the entry carries. It is false
-// for a no-op and for an unknown kind.
-func (e Entry) Operation() (core.ControlPlaneOperation, bool) {
-	switch e.Kind {
-	case KindCommit:
-		return e.Commit, true
-	case KindCreateTopic, KindCreateTopicExclusive:
-		return core.CreateTopic{Name: e.Topic, Partitions: e.Parts, FailIfExists: e.Kind == KindCreateTopicExclusive}, true
-	case KindGroupInstall:
-		return e.Install, true
-	case KindGroupAssign:
-		return e.Assign, true
-	case KindGroupRemove:
-		return e.Remove, true
-	case KindOffsetCommit:
-		return e.Offsets, true
-	}
-	return nil, false
-}
-
-// EntryOf is the log entry of a logged operation. It returns false for an
-// operation that is not logged (a read, or an unknown one). Together with
-// Operation it is the only place that maps between operations and log kinds.
-func EntryOf(operation core.ControlPlaneOperation) (Entry, bool) {
-	switch x := operation.(type) {
-	case core.CommitSegment:
-		return Entry{Kind: KindCommit, Commit: x}, true
-	case core.CreateTopic:
-		return CreateEntry(x), true
-	}
-	return GroupEntry(operation)
-}
-
-// CreateEntry is the log entry of a CreateTopic op.
-func CreateEntry(operation core.CreateTopic) Entry {
-	k := KindCreateTopic
-	if operation.FailIfExists {
-		k = KindCreateTopicExclusive
-	}
-	return Entry{Kind: k, Topic: operation.Name, Parts: operation.Partitions}
-}
-
-// GroupEntry is the log entry of a group write. It returns false for any
-// other operation.
-func GroupEntry(operation core.ControlPlaneOperation) (Entry, bool) {
-	switch x := operation.(type) {
-	case core.GroupInstall:
-		return Entry{Kind: KindGroupInstall, Install: x}, true
-	case core.GroupAssign:
-		return Entry{Kind: KindGroupAssign, Assign: x}, true
-	case core.GroupRemove:
-		return Entry{Kind: KindGroupRemove, Remove: x}, true
-	case core.OffsetCommit:
-		return Entry{Kind: KindOffsetCommit, Offsets: x}, true
-	}
-	return Entry{}, false
 }

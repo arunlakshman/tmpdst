@@ -3,7 +3,6 @@ package metadata
 import (
 	"fmt"
 
-	"github.com/manifesterio/mds/internal/controlplane/groups/storage"
 	"github.com/manifesterio/mds/internal/controlplane/kv"
 	"github.com/manifesterio/mds/internal/controlplane/module"
 	"github.com/manifesterio/mds/internal/controlplane/topics"
@@ -21,10 +20,7 @@ type Store struct {
 
 // New returns a metadata store over kv (empty, or restored from a checkpoint).
 func New(keyValue kv.Store) *Store {
-	return &Store{keyValue: keyValue, modules: []module.Module{
-		topics.Module{},
-		storage.NewModule(topics.PartitionCount),
-	}}
+	return &Store{keyValue: keyValue, modules: registry.list}
 }
 
 // Close closes the store.

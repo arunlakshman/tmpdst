@@ -38,21 +38,21 @@ func snapshotBytes(t *testing.T, a *metadata.Store) []byte {
 // groupLog is a command list that uses every group command and a topic.
 func groupLog() []metadata.Entry {
 	return []metadata.Entry{
-		{Kind: metadata.KindCreateTopic, Topic: "orders", Parts: 2},
+		{Kind: metadata.KindCreateTopic, Op: core.CreateTopic{Name: "orders", Partitions: 2}},
 		entryOf(install("g", 1, "m1", "m1", "m2")),
 		entryOf(assign("g", 1, "m1", "m1", "a", "m2", "b")),
 		entryOf(commitOp("g", "m1", 1, pair("orders", 0, 4), pair("orders", 1, 2))),
 		entryOf(remove("g", "m2")),
 		entryOf(install("g", 2, "m1", "m1", "m3")),
 		entryOf(commitOp("solo", "", -1, pair("orders", 0, 1))),
-		{Kind: metadata.KindCommit, Commit: core.CommitSegment{SegmentKey: "k1", Batches: []core.PendingBatch{
+		{Kind: metadata.KindCommit, Op: core.CommitSegment{SegmentKey: "k1", Batches: []core.PendingBatch{
 			{TopicPartition: core.NewTopicPartition("orders", 0), Records: 3, Loc: core.SegmentRef{Key: "o1", Off: 0, Len: 9}},
 		}}},
 	}
 }
 
 func entryOf(operation core.ControlPlaneOperation) metadata.Entry {
-	e, ok := metadata.GroupEntry(operation)
+	e, ok := metadata.EntryOf(operation)
 	if !ok {
 		panic("not a group op")
 	}
@@ -115,9 +115,11 @@ func TestGroupEntryCodecRoundTrip(t *testing.T) {
 	}
 }
 
-func TestGroupEntryNotAGroupOp(t *testing.T) {
-	if _, ok := metadata.GroupEntry(core.CreateTopic{Name: "x", Partitions: 1}); ok {
-		t.Fatal("CreateTopic is not a group entry")
+func TestReadsAreNotLogged(t *testing.T) {
+	for _, operation := range []core.ControlPlaneOperation{core.DescribeTopics{}, core.FindSegments{}, core.OffsetFetch{}, core.DescribeGroup{}, core.ListGroups{}} {
+		if _, ok := metadata.EntryOf(operation); ok {
+			t.Fatalf("%T is a read and has no log entry", operation)
+		}
 	}
 }
 

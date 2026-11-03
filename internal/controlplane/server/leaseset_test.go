@@ -1,4 +1,4 @@
-package livebrokers
+package server
 
 import (
 	"reflect"
@@ -18,7 +18,7 @@ func ids(bs []core.BrokerAddr) []int32 {
 
 func TestRegisterRenewExpire(t *testing.T) {
 	const ttl = 5 * time.Second
-	s := New(ttl)
+	s := newLeaseSet(ttl)
 	t0 := time.Unix(1000, 0)
 	b1 := core.BrokerAddr{NodeID: 1, Host: "h1", Port: 9092}
 
@@ -44,7 +44,7 @@ func TestRegisterRenewExpire(t *testing.T) {
 }
 
 func TestRenewNewAddressReplaces(t *testing.T) {
-	s := New(time.Minute)
+	s := newLeaseSet(time.Minute)
 	t0 := time.Unix(0, 0)
 	s.Renew(core.BrokerAddr{NodeID: 2, Host: "old", Port: 1}, t0)
 	s.Renew(core.BrokerAddr{NodeID: 2, Host: "new", Port: 2}, t0)
@@ -55,7 +55,7 @@ func TestRenewNewAddressReplaces(t *testing.T) {
 }
 
 func TestLiveSortedByNodeID(t *testing.T) {
-	s := New(time.Minute)
+	s := newLeaseSet(time.Minute)
 	t0 := time.Unix(0, 0)
 	for _, id := range []int32{3, 1, 2} {
 		s.Renew(core.BrokerAddr{NodeID: id, Host: "h", Port: 9092}, t0)
@@ -69,7 +69,7 @@ func TestLiveSortedByNodeID(t *testing.T) {
 
 func TestOnlyFreshLeasesLive(t *testing.T) {
 	const ttl = 3 * time.Second
-	s := New(ttl)
+	s := newLeaseSet(ttl)
 	t0 := time.Unix(0, 0)
 	s.Renew(core.BrokerAddr{NodeID: 1, Host: "a"}, t0)
 	s.Renew(core.BrokerAddr{NodeID: 2, Host: "b"}, t0.Add(2*time.Second))

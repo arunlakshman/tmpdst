@@ -44,7 +44,7 @@ the profile (a package with no tests) counts as 0%.
 Skipped tests: `go test ./...` includes Docker-backed tests that skip without
 their environment. The gate measures "what plain `go test ./...` covers", which
 is stable on any machine, so every backend-facing package has Docker-free tests:
-the control plane runs against an in-memory fake DynamoDB (`internal/controlplane/fakedynamodb`, checked
+the control plane runs against an in-memory fake DynamoDB (`internal/controlplane/controlplanetest/fakedynamodb`, checked
 against the log state machine by the `internal/controlplane/controlplanetest` conformance suite), `internal/system/s3store` against a fake
 S3, `internal/controlplane/controlplaneclient` and the control plane server against httptest, the cmd mains through a testable `run`. To count integration
 coverage, pass an extra profile and merge it (counts are summed per block):

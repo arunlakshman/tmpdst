@@ -19,10 +19,10 @@ import (
 	"google.golang.org/grpc/status"
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/apiconvert"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
 	"github.com/manifesterio/mds/internal/controlplane/server"
 	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system/runinfo"
 )
@@ -151,8 +151,8 @@ type unavailCP struct {
 
 func (unavailCP) DescribeTopics(context.Context, *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
 	detail := &cpv1.ErrorDetail{
-		Code:    apiconvert.FromCoreErr(core.ErrUnavailable),
-		Outcome: apiconvert.FromCoreOutcome(core.NotApplied),
+		Code:    wireboundary.FromCoreErr(core.ErrUnavailable),
+		Outcome: wireboundary.FromCoreOutcome(core.NotApplied),
 	}
 	s, err := status.New(codes.Unavailable, "standby").WithDetails(detail)
 	if err != nil {

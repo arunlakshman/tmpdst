@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/apiconvert"
+	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system"
 )
@@ -117,13 +117,13 @@ func (c *Client) commitSegment(ctx context.Context, operation core.CommitSegment
 	var out *cpv1.CommitSegmentResponse
 	err := c.do(ctx, "CommitSegment", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.CommitSegment(ctx, apiconvert.CommitSegmentFromCore(operation))
+		out, e = cli.CommitSegment(ctx, wireboundary.CommitSegmentFromCore(operation))
 		return e
 	})
 	if err != nil {
 		return nil, err
 	}
-	return apiconvert.CommitSegmentRespToCore(out), nil
+	return wireboundary.CommitSegmentRespToCore(out), nil
 }
 
 //nolint:dupl // each ControlPlaneOperation keeps its own request/response conversion
@@ -131,13 +131,13 @@ func (c *Client) lookup(ctx context.Context, operation core.FindSegments) (core.
 	var out *cpv1.LookupResponse
 	err := c.do(ctx, "Lookup", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.Lookup(ctx, apiconvert.LookupFromCore(operation))
+		out, e = cli.Lookup(ctx, wireboundary.LookupFromCore(operation))
 		return e
 	})
 	if err != nil {
 		return nil, err
 	}
-	return apiconvert.LookupRespToCore(out), nil
+	return wireboundary.LookupRespToCore(out), nil
 }
 
 //nolint:dupl // each ControlPlaneOperation keeps its own request/response conversion
@@ -145,13 +145,13 @@ func (c *Client) describeTopics(ctx context.Context, operation core.DescribeTopi
 	var out *cpv1.DescribeTopicsResponse
 	err := c.do(ctx, "DescribeTopics", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.DescribeTopics(ctx, apiconvert.DescribeTopicsFromCore(operation))
+		out, e = cli.DescribeTopics(ctx, wireboundary.DescribeTopicsFromCore(operation))
 		return e
 	})
 	if err != nil {
 		return nil, err
 	}
-	return apiconvert.DescribeTopicsRespToCore(out), nil
+	return wireboundary.DescribeTopicsRespToCore(out), nil
 }
 
 // CreateTopic is the dev/test helper over CreateTopic.
@@ -167,24 +167,6 @@ func (c *Client) createTopic(ctx context.Context, operation core.CreateTopic) er
 		})
 		return err
 	})
-}
-
-// BrokerHeartbeat renews this broker's lease and returns the live broker set.
-// A standby control plane answers ErrUnavailable, so the call moves to the next
-// address.
-//
-//nolint:dupl // each ControlPlaneOperation keeps its own request/response conversion
-func (c *Client) BrokerHeartbeat(ctx context.Context, self core.BrokerAddr) ([]core.BrokerAddr, error) {
-	var out *cpv1.BrokerHeartbeatResponse
-	err := c.do(ctx, "BrokerHeartbeat", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
-		var e error
-		out, e = cli.BrokerHeartbeat(ctx, apiconvert.BrokerHeartbeatFromCore(self))
-		return e
-	})
-	if err != nil {
-		return nil, err
-	}
-	return apiconvert.BrokerHeartbeatRespToCore(out), nil
 }
 
 // GetStatus calls GetStatus on the preferred address.
@@ -275,8 +257,8 @@ func convertRPCError(name string, err error) error {
 	for _, d := range st.Details() {
 		if ed, ok := d.(*cpv1.ErrorDetail); ok {
 			return &Error{
-				Code:    apiconvert.ToCoreErr(ed.Code),
-				Outcome: apiconvert.ToCoreOutcome(ed.Outcome),
+				Code:    wireboundary.ToCoreErr(ed.Code),
+				Outcome: wireboundary.ToCoreOutcome(ed.Outcome),
 			}
 		}
 	}

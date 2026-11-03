@@ -24,8 +24,8 @@ import (
 
 	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
 	"github.com/manifesterio/mds/internal/controlplane/controlplanemetrics"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/fakedynamodb"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
-	"github.com/manifesterio/mds/internal/controlplane/fakedynamodb"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system"
 	"github.com/manifesterio/mds/internal/system/runinfo"

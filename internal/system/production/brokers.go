@@ -1,5 +1,8 @@
 package production
 
+// Broker membership, broker side. The control plane side is
+// controlplane/server/brokers.go, which also lists the other pieces.
+
 import (
 	"context"
 	"log/slog"

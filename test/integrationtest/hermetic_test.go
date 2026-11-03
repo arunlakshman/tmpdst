@@ -13,7 +13,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/internal/broker"
-	"github.com/manifesterio/mds/internal/controlplane/memorystore"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/memorystore"
 	"github.com/manifesterio/mds/internal/core"
 )
 

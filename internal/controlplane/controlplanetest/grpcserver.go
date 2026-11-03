@@ -1,5 +1,4 @@
-// Package grpctestserver starts an in-process mdscontrolplane-shaped gRPC node for tests.
-package grpctestserver
+package controlplanetest
 
 import (
 	"net"

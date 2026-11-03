@@ -48,6 +48,11 @@
 //     handler time, DynamoDB call time, in-flight requests and request sizes.
 //   - controlplanetest: the control-plane tests only.
 //
+// Time: all time comes from one interface, core.Clock (Mono, Wall, AfterFunc).
+// system/realclock is the production clock and system/fakeclock is the one for
+// tests and simulation. The domain and server packages may not call time.Now,
+// time.AfterFunc and the like (TestControlPlaneTimeComesFromClock).
+//
 // How they fit together, from the imports:
 //
 //   - server imports runloop, replica, executor and groups.

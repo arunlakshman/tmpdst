@@ -15,6 +15,7 @@ import (
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system/fakeclock"
 )
 
 func TestProtocolMismatch(t *testing.T) {
@@ -251,13 +252,13 @@ func TestCloseWakesParkedCalls(t *testing.T) {
 	if r, _ := h.c.JoinGroup(t.Context(), h.joinReq("g", "")); r.Err != core.ErrUnavailable {
 		t.Fatalf("join after close: %+v", r)
 	}
-	if n := h.clock.pending(); n != 0 {
+	if n := h.clock.Pending(); n != 0 {
 		t.Fatalf("timers left after close: %d", n)
 	}
 }
 
 func TestStoreFailureBreaksTermAndRebuildRecovers(t *testing.T) {
-	clock := newFakeClock(time.Unix(1000, 0))
+	clock := fakeclock.New(time.Unix(1000, 0))
 	inner := &updaterstore.Store{A: metadata.NewMem()}
 	flaky := &flakyStore{GroupStore: inner}
 	next := new(atomic.Int64)

@@ -17,6 +17,7 @@ import (
 
 	"github.com/manifesterio/mds/internal/controlplane/executor"
 	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system/realclock"
 )
 
 // Client is the DynamoDB surface Log needs. *dynamodb.Client
@@ -32,7 +33,8 @@ type Client interface {
 // Options tune a Log.
 type Options struct {
 	TTL time.Duration
-	Now func() time.Time
+	// Clock is the time source for the row TTL (default: the real clock).
+	Clock core.Clock
 }
 
 // Log stores opaque machine payloads in one DynamoDB partition
@@ -57,8 +59,8 @@ const (
 
 // New returns a byte log over table.
 func New(db Client, table string, o Options) *Log {
-	if o.Now == nil {
-		o.Now = time.Now
+	if o.Clock == nil {
+		o.Clock = realclock.New()
 	}
 	return &Log{db: db, table: table, o: o}
 }
@@ -87,7 +89,7 @@ func (l *Log) Append(ctx context.Context, slot core.LogPosition, data []byte) ([
 		"d": &types.AttributeValueMemberB{Value: data},
 	}
 	if l.o.TTL > 0 {
-		it["ttl"] = numberValue(l.o.Now().Add(l.o.TTL).Unix())
+		it["ttl"] = numberValue(time.Unix(0, int64(l.o.Clock.Wall())).Add(l.o.TTL).Unix())
 	}
 	_, err := l.db.PutItem(ctx, &dynamodb.PutItemInput{
 		TableName:                           &l.table,

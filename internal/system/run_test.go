@@ -15,6 +15,9 @@ type fakeClock struct{}
 
 func (fakeClock) Mono() core.NodeTime { return 7 }
 func (fakeClock) Wall() core.RealTime { return 9 }
+func (fakeClock) AfterFunc(d core.Duration, f func()) core.Timer {
+	return time.AfterFunc(time.Duration(d), f)
+}
 
 type fakeConns struct {
 	mu  sync.Mutex

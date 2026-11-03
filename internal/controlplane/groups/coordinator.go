@@ -47,6 +47,7 @@ import (
 
 	"github.com/manifesterio/mds/internal/controlplane"
 	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system/realclock"
 )
 
 // Config holds the coordinator settings. A zero field takes its default.
@@ -56,8 +57,8 @@ type Config struct {
 	InitialRebalanceDelay time.Duration
 	// WriteTimeout bounds one log write (default 10s).
 	WriteTimeout time.Duration
-	// Clock is the time source (default: the wall clock).
-	Clock Clock
+	// Clock is the time source (default: the real clock).
+	Clock core.Clock
 	// NewID returns a random id for a new member (default: 128 random bits in
 	// uuid form).
 	NewID func() string
@@ -176,7 +177,7 @@ func New(config Config, store controlplane.GroupStore) *Coordinator {
 		config.WriteTimeout = defaultWriteTimeout
 	}
 	if config.Clock == nil {
-		config.Clock = realClock{}
+		config.Clock = realclock.New()
 	}
 	if config.NewID == nil {
 		config.NewID = randomID
@@ -328,7 +329,7 @@ func (c *Coordinator) writeCtx(t *term) (context.Context, context.CancelFunc) {
 }
 
 // nowMs is the coordinator clock in milliseconds, for TimeMs.
-func (c *Coordinator) nowMs() int64 { return c.config.Clock.Now().UnixMilli() }
+func (c *Coordinator) nowMs() int64 { return int64(c.config.Clock.Wall()) / int64(time.Millisecond) }
 
 // newMemberID returns a member id: the client id, a dash, then a random id.
 func (c *Coordinator) newMemberID(clientID string) string {

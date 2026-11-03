@@ -1,19 +1,8 @@
 package server
 
 import (
-	"time"
-
 	"github.com/manifesterio/mds/internal/core"
 )
-
-type realClock struct{}
-
-func (realClock) Mono() core.NodeTime {
-	return core.NodeTime(time.Now().UnixNano())
-}
-func (realClock) Wall() core.RealTime {
-	return core.RealTime(time.Now().UnixNano())
-}
 
 // productionEnvironment is a minimal core.Environment for production mdscontrolplane (no buggify).
 type productionEnvironment struct{ n uint64 }

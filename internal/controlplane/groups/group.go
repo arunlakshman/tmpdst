@@ -39,7 +39,7 @@ func (p phase) String() string {
 // slot is one armed timer. disarm moves version on, so a callback that fires
 // late sees an old version and does nothing.
 type slot struct {
-	t       Timer
+	t       core.Timer
 	version uint64
 }
 
@@ -52,10 +52,10 @@ func (s *slot) disarm() {
 }
 
 // arm sets s to call fire(version) after d. The caller holds the group mutex.
-func arm(clock Clock, s *slot, d time.Duration, fire func(version uint64)) {
+func arm(clock core.Clock, s *slot, d time.Duration, fire func(version uint64)) {
 	s.disarm()
 	version := s.version
-	s.t = clock.AfterFunc(d, func() { fire(version) })
+	s.t = clock.AfterFunc(core.Duration(d), func() { fire(version) })
 }
 
 // group is the memory of one group. Its mutex guards every field.
@@ -69,12 +69,12 @@ type group struct {
 	leader     string
 	members    map[string]*member
 	joinSeq    uint64
-	initial    bool      // the round started from an empty group
-	delayDone  bool      // the initial delay passed
-	roundStart time.Time // start of the round or of the sync wait
-	deadlineAt time.Time // roundStart plus the largest rebalance timeout
-	round      slot      // the deadline of the round or of the sync wait
-	delay      slot      // the initial delay
+	initial    bool          // the round started from an empty group
+	delayDone  bool          // the initial delay passed
+	roundStart core.NodeTime // start of the round or of the sync wait
+	deadlineAt core.NodeTime // roundStart plus the largest rebalance timeout
+	round      slot          // the deadline of the round or of the sync wait
+	delay      slot          // the initial delay
 }
 
 // member is one known member. Its join and sync calls, if any, are parked here.
@@ -220,12 +220,12 @@ func (c *Coordinator) joinLocked(t *term, g *group, request JoinReq, id string) 
 // here too: its parked syncs get ErrRebalanceInProgress. An initial round
 // also waits for the delay.
 func (c *Coordinator) openRound(t *term, g *group, initial bool) {
-	now := c.config.Clock.Now()
+	now := c.config.Clock.Mono()
 	g.phase = phasePrep
 	g.initial = initial
 	g.delayDone = false
 	g.roundStart = now
-	g.deadlineAt = now.Add(c.maxRebalance(g))
+	g.deadlineAt = now + core.NodeTime(c.maxRebalance(g))
 	c.armRound(t, g)
 	if initial {
 		c.armDelay(t, g)
@@ -251,22 +251,22 @@ func (c *Coordinator) maxRebalance(g *group) time.Duration {
 
 // extendRound moves the deadline when a member with a longer rebalance timeout joins.
 func (c *Coordinator) extendRound(t *term, g *group) {
-	until := g.roundStart.Add(c.maxRebalance(g))
-	if until.After(g.deadlineAt) {
+	until := g.roundStart + core.NodeTime(c.maxRebalance(g))
+	if until > g.deadlineAt {
 		g.deadlineAt = until
 		c.armRound(t, g)
 	}
 }
 
 func (c *Coordinator) armRound(t *term, g *group) {
-	left := g.deadlineAt.Sub(c.config.Clock.Now())
+	left := time.Duration(g.deadlineAt - c.config.Clock.Mono())
 	arm(c.config.Clock, &g.round, left, func(version uint64) { c.onRound(t, g, version) })
 }
 
 // armDelay waits the initial delay again. It never passes the round deadline.
 func (c *Coordinator) armDelay(t *term, g *group) {
 	d := c.config.InitialRebalanceDelay
-	if left := g.deadlineAt.Sub(c.config.Clock.Now()); left < d {
+	if left := time.Duration(g.deadlineAt - c.config.Clock.Mono()); left < d {
 		d = left
 	}
 	arm(c.config.Clock, &g.delay, d, func(version uint64) { c.onDelay(t, g, version) })
@@ -395,8 +395,8 @@ func (c *Coordinator) applyInstall(t *term, g *group, generation int32, proto, l
 	g.initial = false
 	g.delayDone = false
 	g.delay.disarm()
-	g.roundStart = c.config.Clock.Now()
-	g.deadlineAt = g.roundStart.Add(c.maxRebalance(g))
+	g.roundStart = c.config.Clock.Mono()
+	g.deadlineAt = g.roundStart + core.NodeTime(c.maxRebalance(g))
 	c.armRound(t, g)
 	list := make([]Member, 0, len(ids))
 	for _, id := range ids {

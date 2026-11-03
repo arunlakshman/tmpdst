@@ -47,7 +47,7 @@ func (n *Node) BrokerHeartbeat(ctx context.Context, request *cpv1.BrokerHeartbea
 			ch <- result{}
 			return nil
 		}
-		now := time.Now()
+		now := n.config.Clock.Mono()
 		n.leases.Renew(b, now)
 		ch <- result{live: n.leases.Live(now), ok: true}
 		return nil
@@ -71,7 +71,7 @@ type leaseSet struct {
 
 type lease struct {
 	addr core.BrokerAddr
-	seen time.Time // time of the last heartbeat
+	seen core.NodeTime // time of the last heartbeat
 }
 
 // newLeaseSet returns an empty set. A lease lives for ttl after its last heartbeat.
@@ -81,16 +81,16 @@ func newLeaseSet(ttl time.Duration) *leaseSet {
 
 // Renew records a heartbeat from b at now. A new address for a known node id
 // replaces the old one.
-func (s *leaseSet) Renew(b core.BrokerAddr, now time.Time) {
+func (s *leaseSet) Renew(b core.BrokerAddr, now core.NodeTime) {
 	s.leases[b.NodeID] = lease{addr: b, seen: now}
 }
 
 // Live drops the leases that expired by now and returns the rest, sorted by
 // node id.
-func (s *leaseSet) Live(now time.Time) []core.BrokerAddr {
+func (s *leaseSet) Live(now core.NodeTime) []core.BrokerAddr {
 	var out []core.BrokerAddr
 	for id, l := range s.leases {
-		if now.Sub(l.seen) >= s.ttl {
+		if time.Duration(now-l.seen) >= s.ttl {
 			delete(s.leases, id)
 			continue
 		}

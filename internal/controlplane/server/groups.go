@@ -95,14 +95,15 @@ func (n *Node) groupRole(ctx context.Context) (bool, error) {
 // takeover, or after a broken write), it rebuilds from the log. A failed
 // rebuild is tried again on the next tick. A standby drops its memory.
 func (n *Node) watchGroups(ctx context.Context) {
-	t := time.NewTicker(groupWatchEvery)
-	defer t.Stop()
 	for {
+		tick := make(chan struct{})
+		timer := n.config.Clock.AfterFunc(core.Duration(groupWatchEvery), func() { close(tick) })
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			n.groups.Stop()
 			return
-		case <-t.C:
+		case <-tick:
 		}
 		active, err := n.groupRole(ctx)
 		if err != nil {

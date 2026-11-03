@@ -19,6 +19,7 @@ import (
 	"github.com/manifesterio/mds/internal/controlplane/runloop"
 	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system/realclock"
 )
 
 // Config wires a Node.
@@ -26,7 +27,7 @@ type Config struct {
 	Machine replica.Config
 	Self    core.NodeInstance
 	Env     core.Environment
-	Clock   runloop.Clock
+	Clock   core.Clock
 	Log     executor.Log
 	Objects executor.ObjectStore
 	// StopGrace is how long the machine gets after Shutdown to ShutdownDone.
@@ -72,7 +73,7 @@ func New(config Config) *Node {
 		config.Self = core.NodeInstance{Node: "cp"}
 	}
 	if config.Clock == nil {
-		config.Clock = realClock{}
+		config.Clock = realclock.New()
 	}
 	if config.Env == nil {
 		config.Env = &productionEnvironment{}
@@ -98,6 +99,7 @@ func New(config Config) *Node {
 	}
 	n.groups = groups.New(groups.Config{
 		InitialRebalanceDelay: config.GroupInitialRebalanceDelay,
+		Clock:                 config.Clock,
 	}, nodeGroups{n: n})
 	return n
 }
@@ -154,7 +156,8 @@ func (n *Node) waitReady(ctx context.Context, cancel context.CancelFunc) error {
 		}
 		return loopErr
 	}
-	deadline := time.NewTimer(2 * time.Minute)
+	timedOut := make(chan struct{})
+	deadline := n.config.Clock.AfterFunc(core.Duration(2*time.Minute), func() { close(timedOut) })
 	defer deadline.Stop()
 	for {
 		done := make(chan struct{})
@@ -178,7 +181,7 @@ func (n *Node) waitReady(ctx context.Context, cancel context.CancelFunc) error {
 				err = errors.New("controlplane/server: run exited before Ready")
 			}
 			return err
-		case <-deadline.C:
+		case <-timedOut:
 			return fail(errors.New("controlplane/server: timed out waiting for Ready"))
 		}
 	}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/manifesterio/mds/internal/core"
 )
@@ -18,12 +17,6 @@ var (
 	ErrKilledByRuntime = errors.New("killed")
 )
 
-// Clock stamps Event.At/Wall at inbox dequeue.
-type Clock interface {
-	Mono() core.NodeTime
-	Wall() core.RealTime
-}
-
 // Executor runs I/O only. Exactly one IOResult per IOCall, delivered to
 // the InboxWriter and never on the caller's goroutine. Execute MUST NOT block.
 type Executor interface {
@@ -36,7 +29,7 @@ type InjectFunc func() []core.Action
 
 // Dependencies is everything nondeterministic a control-plane process needs.
 type Dependencies struct {
-	Clock     Clock
+	Clock     core.Clock
 	Env       core.Environment
 	Inbox     *Inbox
 	Facts     func(core.Fact)
@@ -61,7 +54,7 @@ func Run(ctx context.Context, b Dependencies, exec Executor, f core.MachineFacto
 	}
 	defer in.Close()
 	m := f(b.Env, self)
-	r := &eventLoop{b: b, in: in, exec: exec, m: m, timers: map[core.TimerID]*time.Timer{}}
+	r := &eventLoop{b: b, in: in, exec: exec, m: m, timers: map[core.TimerID]core.Timer{}}
 	defer func() {
 		for _, t := range r.timers {
 			t.Stop()
@@ -78,7 +71,7 @@ func Run(ctx context.Context, b Dependencies, exec Executor, f core.MachineFacto
 	var policy core.InboxPicker = core.ControlFirstPicker{}
 	ctrl, data := in.Control(), in.Data()
 	shutdown := b.Shutdown
-	var kill <-chan time.Time
+	var kill <-chan struct{}
 	for {
 		if ctx.Err() != nil {
 			return ErrStopped
@@ -87,9 +80,10 @@ func Run(ctx context.Context, b Dependencies, exec Executor, f core.MachineFacto
 		case <-shutdown:
 			shutdown = nil
 			in.DeliverControl(core.StopRequest{Deadline: b.Clock.Mono() + core.NodeTime(b.StopGrace)})
-			t := time.NewTimer(time.Duration(b.StopGrace))
+			killed := make(chan struct{})
+			t := b.Clock.AfterFunc(core.Duration(b.StopGrace), func() { close(killed) })
 			defer t.Stop()
-			kill = t.C
+			kill = killed
 		default:
 		}
 		select {
@@ -116,7 +110,7 @@ func Run(ctx context.Context, b Dependencies, exec Executor, f core.MachineFacto
 	}
 }
 
-func (r *eventLoop) waitIdle(ctx context.Context, shutdown *<-chan struct{}, kill <-chan time.Time) (bool, error) {
+func (r *eventLoop) waitIdle(ctx context.Context, shutdown *<-chan struct{}, kill <-chan struct{}) (bool, error) {
 	select {
 	case <-ctx.Done():
 		return true, ErrStopped
@@ -136,7 +130,7 @@ type eventLoop struct {
 	in     *Inbox
 	exec   Executor
 	m      core.Machine
-	timers map[core.TimerID]*time.Timer
+	timers map[core.TimerID]core.Timer
 }
 
 func (r *eventLoop) after() {
@@ -201,7 +195,7 @@ func (r *eventLoop) setTimer(a core.SetTimer) {
 		old.Stop()
 	}
 	id, gen := a.ID, a.Gen
-	r.timers[id] = time.AfterFunc(time.Duration(a.After), func() {
+	r.timers[id] = r.b.Clock.AfterFunc(a.After, func() {
 		r.in.DeliverControl(core.TimerFired{ID: id, Gen: gen})
 	})
 }

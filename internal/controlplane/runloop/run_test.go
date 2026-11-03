@@ -1,18 +1,23 @@
 package runloop_test
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/manifesterio/mds/internal/controlplane/runloop"
 	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system/fakeclock"
 )
 
 type fakeClock struct{}
 
 func (fakeClock) Mono() core.NodeTime { return 7 }
 func (fakeClock) Wall() core.RealTime { return 9 }
+func (fakeClock) AfterFunc(d core.Duration, f func()) core.Timer {
+	return time.AfterFunc(time.Duration(d), f)
+}
 
 type fakeExec struct {
 	mu  sync.Mutex
@@ -160,5 +165,27 @@ func TestDeliverDataAndDispatch(t *testing.T) {
 	}
 	if facts != 1 || len(ex.got) != 1 {
 		t.Fatalf("facts=%d io=%d", facts, len(ex.got))
+	}
+}
+
+// A machine that ignores the stop request is killed when the grace time ends.
+// The grace timer comes from the clock, so the test moves it by hand.
+func TestShutdownGraceExpiryKills(t *testing.T) {
+	clock := fakeclock.New(time.Unix(1000, 0))
+	shutdown := make(chan struct{})
+	b := runloop.Dependencies{
+		Clock: clock, Env: testEnv{}, Inbox: runloop.NewInbox(4),
+		Shutdown: shutdown, StopGrace: core.Duration(time.Second),
+	}
+	f := func(core.Environment, core.NodeInstance) core.Machine { return &fakeMachine{} }
+	done := make(chan error, 1)
+	go func() { done <- runloop.Run(t.Context(), b, &fakeExec{}, f, core.NodeInstance{Node: "cp"}) }()
+	close(shutdown)
+	for clock.Pending() == 0 { // the loop has armed the grace timer
+		time.Sleep(time.Millisecond)
+	}
+	clock.Advance(2 * time.Second)
+	if err := <-done; !errors.Is(err, runloop.ErrKilledByRuntime) {
+		t.Fatalf("got %v, want ErrKilledByRuntime", err)
 	}
 }

@@ -2,6 +2,7 @@ package controlplane
 
 import (
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -246,7 +247,7 @@ var layerRules = []struct {
 }{
 	{"internal/controlplane/kv", []string{"internal/core"}},
 	{"internal/controlplane/groups/storage", []string{"internal/controlplane/kv", "internal/core"}},
-	{"internal/controlplane/groups", []string{"internal/controlplane", "internal/core"}},
+	{"internal/controlplane/groups", []string{"internal/controlplane", "internal/core", "internal/system/realclock"}},
 	{"internal/controlplane/metadata", []string{"internal/controlplane/groups/storage", "internal/controlplane/kv", "internal/core"}},
 	{"internal/controlplane/replica", []string{"internal/controlplane/kv", "internal/controlplane/metadata", "internal/core"}},
 	{"internal/controlplane/executor", []string{"internal/controlplane/runloop", "internal/core"}},
@@ -291,10 +292,51 @@ func TestLogAdaptersImportOnlyThePort(t *testing.T) {
 		}
 		for _, imp := range f.imports {
 			rel, ok := inModule(imp, r.module)
-			if ok && rel != "internal/controlplane/executor" && rel != "internal/core" {
-				t.Errorf("%s imports %q: a log adapter may import only internal/controlplane/executor and internal/core", f.rel, imp)
+			if ok && !slices.Contains([]string{"internal/controlplane/executor", "internal/core", "internal/system/realclock"}, rel) {
+				t.Errorf("%s imports %q: a log adapter may import only internal/controlplane/executor, internal/core and internal/system/realclock", f.rel, imp)
 			}
 		}
+	}
+}
+
+// timeCallPackages are the packages whose non-test files may not call the time
+// functions below. All time comes from core.Clock (see core/clock.go): the real
+// implementation is system/realclock and the test one is system/fakeclock. A
+// context timeout is not a time call in this sense.
+var timeCallPackages = []string{
+	"internal/controlplane/kv",
+	"internal/controlplane/groups",
+	"internal/controlplane/groups/storage",
+	"internal/controlplane/metadata",
+	"internal/controlplane/replica",
+	"internal/controlplane/runloop",
+	"internal/controlplane/server",
+}
+
+var forbiddenTimeCalls = []string{"Now", "Since", "Until", "AfterFunc", "After", "NewTimer", "NewTicker", "Tick", "Sleep"}
+
+// TestControlPlaneTimeComesFromClock: in the packages above, no file calls
+// time.Now, time.AfterFunc, time.NewTimer and the like. They take a core.Clock.
+func TestControlPlaneTimeComesFromClock(t *testing.T) {
+	r := loadRepo(t)
+	for _, f := range r.files {
+		if f.isTest || !slices.Contains(timeCallPackages, f.dir) {
+			continue
+		}
+		parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(r.root, f.rel), nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", f.rel, err)
+		}
+		ast.Inspect(parsed, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "time" && slices.Contains(forbiddenTimeCalls, sel.Sel.Name) {
+				t.Errorf("%s calls time.%s: take a core.Clock instead (core/clock.go)", f.rel, sel.Sel.Name)
+			}
+			return true
+		})
 	}
 }
 

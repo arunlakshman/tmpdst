@@ -15,6 +15,7 @@ import (
 	"github.com/manifesterio/mds/internal/broker"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system"
+	"github.com/manifesterio/mds/internal/system/realclock"
 )
 
 // NodeConfig is everything one broker process needs.
@@ -92,7 +93,7 @@ func Start(ctx context.Context, config NodeConfig) (*Node, error) {
 		go n.stopOn(config.Shutdown)
 	}
 	b := system.Dependencies{
-		Clock: NewClock(), Objects: config.Objects, ControlPlane: config.ControlPlane, Connections: nt,
+		Clock: realclock.New(), Objects: config.Objects, ControlPlane: config.ControlPlane, Connections: nt,
 		Classifier: exec.class, Env: env, Inbox: in, Facts: config.Facts,
 		Shutdown: n.stop, StopGrace: core.Duration(config.StopGrace),
 	}

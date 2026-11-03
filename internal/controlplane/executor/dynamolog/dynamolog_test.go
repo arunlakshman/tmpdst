@@ -16,6 +16,7 @@ import (
 	"github.com/manifesterio/mds/internal/controlplane/executor/dynamolog"
 	"github.com/manifesterio/mds/internal/controlplane/executor/logtest"
 	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/system/fakeclock"
 )
 
 // newDynFake returns a fake DynamoDB with the log table "cp".
@@ -237,7 +238,7 @@ func TestDynLog(t *testing.T) {
 	if _, err := db.CreateTable(ctx, &dynamodb.CreateTableInput{TableName: aws.String("cp")}); err != nil {
 		t.Fatal(err)
 	}
-	l := dynamolog.New(db, "cp", dynamolog.Options{TTL: time.Hour, Now: func() time.Time { return time.Unix(1_700_000_000, 0) }})
+	l := dynamolog.New(db, "cp", dynamolog.Options{TTL: time.Hour, Clock: fakeclock.New(time.Unix(1_700_000_000, 0))})
 	if _, taken, err := l.Append(ctx, 0, []byte("x")); err != nil || taken {
 		t.Fatalf("append: taken=%v err=%v", taken, err)
 	}

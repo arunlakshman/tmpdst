@@ -42,7 +42,7 @@ const groupWatchEvery = 100 * time.Millisecond
 // log entry offered to the run loop. A read is answered by the fold.
 type nodeGroups struct{ n *Node }
 
-var _ controlplane.GroupStore = nodeGroups{}
+var _ groups.Store = nodeGroups{}
 
 // Exec runs one group operation. A command is offered to the log. A read is
 // answered by the fold.
@@ -152,23 +152,29 @@ func groupReplyErr(code core.ErrCode, err error) error {
 	return nil
 }
 
-// groupRPC runs one coordinator call for an RPC. It checks that this node
-// serves groups, runs call, maps a failed answer to an RPC error and converts
-// the answer to the wire type Out.
-func groupRPC[Op, R, Out any](ctx context.Context, n *Node, op Op,
-	call func(*groups.Coordinator, context.Context, Op) (R, error),
-	codeOf func(R) core.ErrCode, convert func(R) Out,
-) (Out, error) {
+// groupReplyCall describes one group RPC whose coordinator call returns the
+// answer and an error, with the business code inside the answer. The error means
+// that the call ended with its context. codeOf reads the code, and convert makes
+// the wire type Out.
+type groupReplyCall[Op, R, Out any] struct {
+	call    func(*groups.Coordinator, context.Context, Op) (R, error)
+	codeOf  func(R) core.ErrCode
+	convert func(R) Out
+}
+
+// run checks that this node serves groups, runs the call, maps a failed answer
+// to an RPC error and converts the answer.
+func (g groupReplyCall[Op, R, Out]) run(ctx context.Context, n *Node, op Op) (Out, error) {
 	var zero Out
 	c, err := n.groupCoordinator(ctx)
 	if err != nil {
 		return zero, err
 	}
-	r, err := call(c, ctx, op)
-	if err := groupReplyErr(codeOf(r), err); err != nil {
+	r, err := g.call(c, ctx, op)
+	if err := groupReplyErr(g.codeOf(r), err); err != nil {
 		return zero, err
 	}
-	return convert(r), nil
+	return g.convert(r), nil
 }
 
 // groupCodeCall describes one group RPC whose coordinator call returns the
@@ -197,6 +203,10 @@ func (g groupCodeCall[Op, R, Out]) run(ctx context.Context, n *Node, op Op) (Out
 }
 
 var (
+	groupJoin = groupReplyCall[groups.JoinReq, groups.JoinResp, *cpv1.JoinGroupResponse]{
+		(*groups.Coordinator).JoinGroup, func(r groups.JoinResp) core.ErrCode { return r.Err }, wireboundary.JoinGroupRespFromCore}
+	groupSync = groupReplyCall[groups.SyncReq, groups.SyncResp, *cpv1.SyncGroupResponse]{
+		(*groups.Coordinator).SyncGroup, func(r groups.SyncResp) core.ErrCode { return r.Err }, wireboundary.SyncGroupRespFromCore}
 	groupOffsetCommit = groupCodeCall[core.OffsetCommit, core.OffsetCommitResp, *cpv1.GroupOffsetCommitResponse]{
 		(*groups.Coordinator).OffsetCommit, groupOutcome, wireboundary.OffsetCommitRespFromCore}
 	groupOffsetFetch = groupCodeCall[core.OffsetFetch, core.OffsetFetchResp, *cpv1.GroupOffsetFetchResponse]{
@@ -210,23 +220,14 @@ var (
 // notApplied is the outcome of a failed read.
 func notApplied(core.ErrCode) core.Outcome { return core.NotApplied }
 
-// joinCode returns the answer code of a join.
-func joinCode(r groups.JoinResp) core.ErrCode { return r.Err }
-
-// syncCode returns the answer code of a sync.
-func syncCode(r groups.SyncResp) core.ErrCode { return r.Err }
-
 // JoinGroup implements ControlPlane.
 func (n *Node) JoinGroup(ctx context.Context, request *cpv1.JoinGroupRequest) (*cpv1.JoinGroupResponse, error) {
-	return groupRPC(ctx, n, wireboundary.JoinGroupToCore(request),
-		(*groups.Coordinator).JoinGroup, joinCode, wireboundary.JoinGroupRespFromCore)
+	return groupJoin.run(ctx, n, wireboundary.JoinGroupToCore(request))
 }
 
 // SyncGroup implements ControlPlane.
 func (n *Node) SyncGroup(ctx context.Context, request *cpv1.SyncGroupRequest) (*cpv1.SyncGroupResponse, error) {
-	operation := wireboundary.SyncGroupToCore(request)
-	return groupRPC(ctx, n, operation,
-		(*groups.Coordinator).SyncGroup, syncCode, wireboundary.SyncGroupRespFromCore)
+	return groupSync.run(ctx, n, wireboundary.SyncGroupToCore(request))
 }
 
 // GroupHeartbeat implements ControlPlane.

@@ -14,6 +14,7 @@ import (
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
 	"github.com/manifesterio/mds/internal/controlplane/groups"
+	"github.com/manifesterio/mds/internal/controlplane/membership"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/runloop"
@@ -48,7 +49,7 @@ type Node struct {
 	inject chan runloop.InjectFunc
 	m      atomic.Pointer[replica.Replica]
 	health *health.Server
-	leases *leaseSet           // run loop only; empty until brokers heartbeat
+	leases *membership.Leases  // run loop only; empty until brokers heartbeat
 	groups *groups.Coordinator // serves group calls while this node is active
 
 	mu        sync.Mutex
@@ -84,14 +85,14 @@ func New(config Config) *Node {
 		config.StopGrace = core.Duration(15e9) // 15s
 	}
 	if config.BrokerLeaseTTL <= 0 {
-		config.BrokerLeaseTTL = defaultBrokerLeaseTTL
+		config.BrokerLeaseTTL = membership.DefaultTTL
 	}
 	n := &Node{
 		config:   config,
 		inbox:    runloop.NewInbox(64),
 		inject:   make(chan runloop.InjectFunc, 64),
 		health:   health.NewServer(),
-		leases:   newLeaseSet(config.BrokerLeaseTTL),
+		leases:   membership.New(config.BrokerLeaseTTL),
 		waiters:  map[core.RequestID]chan core.ControlPlaneDone{},
 		shutdown: make(chan struct{}),
 		loopDone: make(chan error, 1),

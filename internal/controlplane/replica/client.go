@@ -10,12 +10,12 @@ import (
 // Ready; commits and creates go through Offer and ControlPlaneReply after apply.
 func (m *Replica) onControlPlaneDeliver(o core.ControlPlaneDeliver) []core.Action {
 	operation := o.Op
-	switch m.fold.Mode(operation) {
+	switch m.meta.Mode(operation) {
 	case module.Logged:
 		cmd, _ := metadata.EntryOf(operation)
 		return m.withReplies(m.Offer(ClientOperation{Req: o.Req, From: o.From, Cmd: cmd}))
 	case module.ReadOnly:
-		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.fold.Read(operation) })
+		return m.offerRead(o, func() (core.ControlPlaneDone, error) { return m.meta.Read(operation) })
 	default:
 		return []core.Action{core.ControlPlaneReply{To: o.From, Done: core.ControlPlaneDone{Req: o.Req, Err: core.ErrInvalid}}}
 	}

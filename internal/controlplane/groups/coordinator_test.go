@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/metadatastore"
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
-	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system/fakeclock"
@@ -49,10 +49,12 @@ func peek(c *Coordinator, name string) view {
 	return v
 }
 
+var _ Store = (*metadatastore.Store)(nil)
+
 type harness struct {
 	t         *testing.T
 	c         *Coordinator
-	store     *updaterstore.Store
+	store     *metadatastore.Store
 	clock     *fakeclock.Clock
 	next      *atomic.Int64
 	session   int32 // session timeout of the members joined by join
@@ -64,7 +66,7 @@ type harness struct {
 func newHarness(t *testing.T, config Config) *harness {
 	t.Helper()
 	h := &harness{t: t, clock: fakeclock.New(time.Unix(1000, 0)), session: 10000, next: new(atomic.Int64)}
-	h.store = &updaterstore.Store{A: metadata.NewMem()}
+	h.store = &metadatastore.Store{A: metadata.NewMem()}
 	if config.Clock == nil {
 		config.Clock = h.clock
 	}

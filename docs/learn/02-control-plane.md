@@ -1170,7 +1170,7 @@ Install it outside the repo so `go.mod` is not changed:
 `GOBIN=/some/dir GOFLAGS=-mod=mod go install golang.org/x/tools/cmd/deadcode@v0.52.0`, then
 `deadcode ./cmd/...`. Run it with `-test` to count tests as roots too (then almost nothing
 is dead, so it is less useful). Code that only tests use is not always garbage (for example
-`updaterstore.Store` is a test helper), so read each hit before you delete.
+`metadatastore.Store` is a test helper), so read each hit before you delete.
 
 ### 12.3 Production reads are not "fresh"
 

@@ -323,12 +323,12 @@ func (m *Replica) afterCrashRestart() []core.Action {
 	// it would make the node Ready at slot 0 over a trimmed log.
 	m.timerGen++
 	// Close the old store first: a database may need its directory back.
-	_ = m.fold.Close() // the old state is dropped whether or not close succeeds
-	fold, err := m.config.openFold()
+	_ = m.meta.Close() // the old state is dropped whether or not close succeeds
+	meta, err := m.config.openMetadata()
 	if err != nil {
 		return m.trip(err)
 	}
-	m.fold = fold
+	m.meta = meta
 	m.reseedTopics()
 	m.applied, m.high, m.goalTail = 0, 0, 0
 	m.tailChecked = false

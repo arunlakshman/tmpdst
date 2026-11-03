@@ -5,19 +5,19 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/metadatastore"
 	"github.com/manifesterio/mds/internal/controlplane/kv"
 	"github.com/manifesterio/mds/internal/controlplane/kv/pebblestore"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
 )
 
 // Conformance C3 for the production applier (decision 49): the shared control
-// plane suite runs on controlplane/metadata through updaterstore. The applier also has its own
+// plane suite runs on controlplane/metadata through metadatastore. The applier also has its own
 // test with the Store type directly, in package metadata.
 
 func TestConformanceMetadataMem(t *testing.T) {
 	runProfiles(t, func() impl {
-		return &updaterstore.Store{A: metadata.New(kv.NewMemory())}
+		return &metadatastore.Store{A: metadata.New(kv.NewMemory())}
 	}, 20)
 }
 
@@ -32,6 +32,6 @@ func TestConformanceMetadataPebble(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = keyValue.Close() })
-		return &updaterstore.Store{A: metadata.New(keyValue)}
+		return &metadatastore.Store{A: metadata.New(keyValue)}
 	}, 3)
 }

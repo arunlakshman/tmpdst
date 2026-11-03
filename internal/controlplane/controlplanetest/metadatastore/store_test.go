@@ -1,4 +1,4 @@
-package updaterstore
+package metadatastore
 
 import (
 	"context"

@@ -246,10 +246,11 @@ var layerRules = []struct {
 	allowed []string // module-relative packages, or "internal/core" and so on
 }{
 	{"internal/controlplane/kv", []string{"internal/core"}},
+	{"internal/controlplane/membership", []string{"internal/core"}},
 	{"internal/controlplane/module", []string{"internal/controlplane/kv", "internal/core"}},
 	{"internal/controlplane/topics", []string{"internal/controlplane/kv", "internal/controlplane/module", "internal/core"}},
 	{"internal/controlplane/groups/storage", []string{"internal/controlplane/kv", "internal/controlplane/module", "internal/core"}},
-	{"internal/controlplane/groups", []string{"internal/controlplane", "internal/core", "internal/system/realclock"}},
+	{"internal/controlplane/groups", []string{"internal/core", "internal/system/realclock"}},
 	{"internal/controlplane/metadata", []string{"internal/controlplane/groups/storage", "internal/controlplane/kv", "internal/controlplane/module", "internal/controlplane/topics", "internal/core"}},
 	{"internal/controlplane/replica", []string{"internal/controlplane/kv", "internal/controlplane/metadata", "internal/controlplane/module", "internal/core"}},
 	{"internal/controlplane/executor", []string{"internal/controlplane/runloop", "internal/core"}},
@@ -307,6 +308,7 @@ func TestLogAdaptersImportOnlyThePort(t *testing.T) {
 // context timeout is not a time call in this sense.
 var timeCallPackages = []string{
 	"internal/controlplane/kv",
+	"internal/controlplane/membership",
 	"internal/controlplane/module",
 	"internal/controlplane/topics",
 	"internal/controlplane/groups",

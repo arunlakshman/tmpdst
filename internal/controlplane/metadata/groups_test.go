@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/groupfix"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/metadatastore"
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
-	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"
 )
@@ -123,7 +123,7 @@ func TestGroupEntryNotAGroupOp(t *testing.T) {
 
 // TestGroupStoreAdapter runs the group calls through the Store adapter.
 func TestGroupStoreAdapter(t *testing.T) {
-	s := &updaterstore.Store{A: metadata.NewMem()}
+	s := &metadatastore.Store{A: metadata.NewMem()}
 	ctx := context.Background()
 	if code, err := storecall.Code(ctx, s, install("g", 1, "m1", "m1")); code != core.OK || err != nil {
 		t.Fatalf("install: %v %v", code, err)

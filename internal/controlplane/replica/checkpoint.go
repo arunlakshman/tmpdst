@@ -125,7 +125,7 @@ func (m *Replica) maybeCheckpoint() []core.Action {
 		return nil
 	}
 	var buf bytes.Buffer
-	if err := m.fold.Snapshot(&buf, int64(slot)); err != nil {
+	if err := m.meta.Snapshot(&buf, int64(slot)); err != nil {
 		return m.trip(err)
 	}
 	m.decide(true, "ok")
@@ -200,7 +200,7 @@ func (m *Replica) onObjGetDone(d core.ObjectGetDone) []core.Action {
 		return m.emitCheckpointGet(m.restoreKey)
 	}
 	if len(d.Data) > 0 {
-		slot, err := m.fold.Restore(bytes.NewReader(d.Data))
+		slot, err := m.meta.Restore(bytes.NewReader(d.Data))
 		if err != nil {
 			return m.trip(err)
 		}

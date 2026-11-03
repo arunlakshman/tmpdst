@@ -91,7 +91,7 @@ is 90 lines if it is ever needed again.
   prototype, since the seeds are the same). 2,000 seeds on real Pebble stores: 0 failures, 77,942 slots.
 - Sensitivity: two mutants of the state updater (MaxBytes stop `>=` as `>`, a Lookup skip `<=` as `<`) are caught; the first
   was NOT caught until the edge-MaxBytes probes were added.
-- `controlplanetest` conformance (C3), `updaterstore.Store` (the former `controlplane.Store` adapter) against speccheck: `TestConformanceMetadataMem` 200 seeds x
+- `controlplanetest` conformance (C3), `metadatastore.Store` (the former `controlplane.Store` adapter) against speccheck: `TestConformanceMetadataMem` 200 seeds x
   200 ops, `TestConformanceStateUpdaterPebble` 20 x 100. Unit tests: checkpoint and restore (a replay of a window key after
   restore returns the ORIGINAL ranges), trim, damaged checkpoints, corrupt records, store failure is fail-stop.
 - Run: `LOGSM_SEEDS=100000 LOGSM_PEBBLE_SEEDS=2000 go test ./internal/controlplane/replica -run X2Lockstep -v -timeout 40m` (11 minutes).

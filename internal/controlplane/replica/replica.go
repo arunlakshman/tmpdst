@@ -26,7 +26,7 @@ type Replica struct {
 	ready    bool
 	active   bool // advisory appender role
 
-	fold *metadata.Store
+	meta *metadata.Store
 
 	now           core.NodeTime
 	timerGen      core.TimerVersion
@@ -111,13 +111,13 @@ const (
 // process cannot serve without its state.
 func New(config Config) core.MachineFactory {
 	return func(env core.Environment, self core.NodeInstance) core.Machine {
-		fold, err := config.openFold()
+		meta, err := config.openMetadata()
 		if err != nil {
-			fold = metadata.NewMem() // placeholder; NodeStarted stops the machine
+			meta = metadata.NewMem() // placeholder; NodeStarted stops the machine
 		}
 		return &Replica{
 			env: env, self: self, config: config, openErr: err,
-			fold:            fold,
+			meta:            meta,
 			buf:             map[core.LogPosition][]byte{},
 			inFlightAppends: map[core.RequestID]*inFlightAppend{},
 			waiters:         map[string][]waitingCommand{},
@@ -129,14 +129,14 @@ var _ core.Machine = (*Replica)(nil)
 
 // Metadata is the metadata store after the applied prefix. Tests compare its
 // digest to an independent oracle.
-func (m *Replica) Metadata() *metadata.Store { return m.fold }
+func (m *Replica) Metadata() *metadata.Store { return m.meta }
 
 // Applied is the next slot to apply (slots below are folded).
 func (m *Replica) Applied() core.LogPosition { return m.applied }
 
 // SeedTopic pre-creates a topic on the fold before NodeStarted (sim campaign setup).
 func (m *Replica) SeedTopic(name string, partitions int32) core.ErrCode {
-	err := m.fold.CreateTopic(name, partitions)
+	err := m.meta.CreateTopic(name, partitions)
 	if err == core.OK {
 		m.seeds = append(m.seeds, topicSeed{name: name, parts: partitions})
 	}
@@ -145,7 +145,7 @@ func (m *Replica) SeedTopic(name string, partitions int32) core.ErrCode {
 
 func (m *Replica) reseedTopics() {
 	for _, t := range m.seeds {
-		_ = m.fold.CreateTopic(t.name, t.parts)
+		_ = m.meta.CreateTopic(t.name, t.parts)
 	}
 }
 
@@ -431,6 +431,6 @@ func (m *Replica) StateHash() uint64 {
 	h.Uint64Value(uint64(m.config.CheckpointEvery))
 	h.Uint64Value(uint64(m.config.CheckpointMinSlots))
 	h.Uint64Value(uint64(m.config.KeepSlots))
-	h.Uint64Value(m.fold.StateHash())
+	h.Uint64Value(m.meta.StateHash())
 	return h.Sum()
 }

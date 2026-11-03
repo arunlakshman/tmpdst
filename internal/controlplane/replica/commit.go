@@ -67,7 +67,7 @@ func (m *Replica) Offer(operation ClientOperation) []core.Action {
 		return nil
 	}
 	if operation.Cmd.Kind == metadata.KindCommit {
-		if d, ok, err := m.fold.KnownCommit(operation.Cmd.Commit); err == nil && ok {
+		if d, ok, err := m.meta.KnownCommit(operation.Cmd.Commit); err == nil && ok {
 			d.Req = operation.Req
 			m.env.Reachable("logcp-sim: replayed key answered from the window")
 			m.answers = append(m.answers, ReplyToClient{Req: operation.Req, From: operation.From, Done: d})
@@ -234,7 +234,7 @@ func (m *Replica) projectBases(c core.CommitSegment) []core.Offset {
 	for i, b := range c.Batches {
 		e, ok := m.proj[b.TopicPartition]
 		if !ok {
-			e = m.fold.End(b.TopicPartition) + 1 // skip one
+			e = m.meta.End(b.TopicPartition) + 1 // skip one
 		}
 		bases[i] = e
 		m.proj[b.TopicPartition] = e + core.Offset(b.Records)
@@ -411,13 +411,13 @@ func (m *Replica) applySlot(slot core.LogPosition, data []byte) error {
 		}
 		dones := make([]core.ControlPlaneDone, len(cmds))
 		for i, c := range cmds {
-			dones[i] = m.fold.Apply(int64(slot), c)
+			dones[i] = m.meta.Apply(int64(slot), c)
 		}
 		m.deliver(id, dones)
 		m.afterApply(slot)
 		return nil
 	}
-	d, err := m.fold.ApplyBytes(int64(slot), payload)
+	d, err := m.meta.ApplyBytes(int64(slot), payload)
 	if err != nil {
 		return err
 	}
@@ -438,13 +438,13 @@ func (m *Replica) afterApply(slot core.LogPosition) {
 	}
 	if m.config.InjectedBug == InjectedBugPerReplicaWindow && window > 0 {
 		// Mutant: forget by this replica's applied clock, not log stride.
-		_, _ = m.fold.Trim(int64(slot) - window + 1)
+		_, _ = m.meta.Trim(int64(slot) - window + 1)
 		m.env.Always(false, "logcp-sim: a replica's state equals the replay of the log at its slot",
 			core.ContextPair{Key: "window", Value: window})
 		return
 	}
 	if window > 0 && int64(slot)%stride == 0 && int64(slot) >= window {
-		_, _ = m.fold.Trim(int64(slot) - window)
+		_, _ = m.meta.Trim(int64(slot) - window)
 	}
 }
 

@@ -208,26 +208,26 @@ func groupLockstep(t *testing.T, seed int64, crashAt int, seen map[core.ErrCode]
 	t.Helper()
 	rng := rand.New(rand.NewPCG(uint64(seed), 0x6a)) //nolint:gosec // G404: deterministic test PRNG
 	r := &groupRun{rng: rng, orc: speccheck.NewControlPlane(), seen: seen}
-	fold := metadata.NewMem()
-	defer func() { _ = fold.Close() }()
+	meta := metadata.NewMem()
+	defer func() { _ = meta.Close() }()
 	var writes []metadata.Entry
 	const steps = 400
 	for i := range steps {
 		r.now = int64(i) * 10
 		if i == crashAt {
 			var buf bytes.Buffer
-			if err := fold.Snapshot(&buf, int64(len(writes))); err != nil {
+			if err := meta.Snapshot(&buf, int64(len(writes))); err != nil {
 				t.Fatal(err)
 			}
-			_ = fold.Close()
-			fold = metadata.NewMem()
-			if _, err := fold.Restore(&buf); err != nil {
+			_ = meta.Close()
+			meta = metadata.NewMem()
+			if _, err := meta.Restore(&buf); err != nil {
 				t.Fatal(err)
 			}
 		}
 		if r.chance(25) {
 			operation := r.read()
-			got := fold.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
+			got := meta.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 			want := r.orc.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 			sameAnswer(t, "read", operation, got, want)
 			continue
@@ -236,7 +236,7 @@ func groupLockstep(t *testing.T, seed int64, crashAt int, seen map[core.ErrCode]
 		slot := len(writes)
 		e := entryFor(t, operation, slot)
 		writes = append(writes, e)
-		got := fold.Apply(int64(slot), e)
+		got := meta.Apply(int64(slot), e)
 		want := r.orc.Exec(core.ControlPlaneCall{Req: core.RequestID(slot), Op: operation}).(core.ControlPlaneDone)
 		sameAnswer(t, "write", operation, got, want)
 		seen[got.Err]++

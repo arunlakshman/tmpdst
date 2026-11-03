@@ -1,10 +1,11 @@
-package server
+package membership_test
 
 import (
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/manifesterio/mds/internal/controlplane/membership"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -18,7 +19,7 @@ func ids(bs []core.BrokerAddr) []int32 {
 
 func TestRegisterRenewExpire(t *testing.T) {
 	const ttl = 5 * time.Second
-	s := newLeaseSet(ttl)
+	s := membership.New(ttl)
 	t0 := core.NodeTime(1000 * time.Second)
 	b1 := core.BrokerAddr{NodeID: 1, Host: "h1", Port: 9092}
 
@@ -44,7 +45,7 @@ func TestRegisterRenewExpire(t *testing.T) {
 }
 
 func TestRenewNewAddressReplaces(t *testing.T) {
-	s := newLeaseSet(time.Minute)
+	s := membership.New(time.Minute)
 	t0 := core.NodeTime(0)
 	s.Renew(core.BrokerAddr{NodeID: 2, Host: "old", Port: 1}, t0)
 	s.Renew(core.BrokerAddr{NodeID: 2, Host: "new", Port: 2}, t0)
@@ -55,7 +56,7 @@ func TestRenewNewAddressReplaces(t *testing.T) {
 }
 
 func TestLiveSortedByNodeID(t *testing.T) {
-	s := newLeaseSet(time.Minute)
+	s := membership.New(time.Minute)
 	t0 := core.NodeTime(0)
 	for _, id := range []int32{3, 1, 2} {
 		s.Renew(core.BrokerAddr{NodeID: id, Host: "h", Port: 9092}, t0)
@@ -69,7 +70,7 @@ func TestLiveSortedByNodeID(t *testing.T) {
 
 func TestOnlyFreshLeasesLive(t *testing.T) {
 	const ttl = 3 * time.Second
-	s := newLeaseSet(ttl)
+	s := membership.New(ttl)
 	t0 := core.NodeTime(0)
 	s.Renew(core.BrokerAddr{NodeID: 1, Host: "a"}, t0)
 	s.Renew(core.BrokerAddr{NodeID: 2, Host: "b"}, at(t0, 2*time.Second))
@@ -82,3 +83,19 @@ func TestOnlyFreshLeasesLive(t *testing.T) {
 
 // at is the instant d after t0.
 func at(t0 core.NodeTime, d time.Duration) core.NodeTime { return t0 + core.NodeTime(d) }
+
+func TestValid(t *testing.T) {
+	ok := core.BrokerAddr{NodeID: 1, Host: "h", Port: 9092}
+	if !membership.Valid(ok) {
+		t.Fatal("a good address was refused")
+	}
+	for name, b := range map[string]core.BrokerAddr{
+		"no node id": {Host: "h", Port: 9092},
+		"no host":    {NodeID: 1, Port: 9092},
+		"no port":    {NodeID: 1, Host: "h"},
+	} {
+		if membership.Valid(b) {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+}

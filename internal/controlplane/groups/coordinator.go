@@ -3,7 +3,7 @@
 // (decision Q9).
 //
 // The log holds decisions only. A join result, a leader's assignment, a
-// member that left or expired, and an offset commit go through the GroupStore
+// member that left or expired, and an offset commit go through the Store
 // as log entries. Everything else is memory only on the active node: the
 // phase of each group, the parked JoinGroup and SyncGroup calls, heartbeats
 // and session timers (decision Q6). A standby serves no group call.
@@ -45,7 +45,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/manifesterio/mds/internal/controlplane"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system/realclock"
 )
@@ -152,7 +151,7 @@ type GroupDescription struct {
 // Coordinator serves the group calls on the active node.
 type Coordinator struct {
 	config Config
-	store  controlplane.GroupStore
+	store  Store
 
 	mu     sync.Mutex
 	cur    *term // nil when standby or not rebuilt yet
@@ -169,7 +168,7 @@ type term struct {
 }
 
 // New returns a coordinator over store. It serves nothing until Rebuild.
-func New(config Config, store controlplane.GroupStore) *Coordinator {
+func New(config Config, store Store) *Coordinator {
 	if config.InitialRebalanceDelay <= 0 {
 		config.InitialRebalanceDelay = defaultInitialRebalanceDelay
 	}

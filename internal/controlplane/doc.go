@@ -45,11 +45,14 @@
 //   - executor/dynamolog and executor/sqllog: the DynamoDB and Postgres
 //     implementations of executor.Log. executor/logtest is their shared test
 //     suite.
+//   - membership: the broker membership context: which brokers are alive (leases).
+//     Its state is not logged, so it is not a module.
 //   - groups/storage: the consumer group context in the replicated state (the G,
 //     M and O keys): the fold of the group writes and the group reads. It does
 //     not know about topics.
 //   - groups: the consumer group coordinator of the active node. It
-//     speaks the classic group protocol only.
+//     speaks the classic group protocol only. It owns the Store port that the
+//     node implements over the log.
 //   - controlplanemetrics: the Prometheus instrumentation. It covers HTTP
 //     handler time, DynamoDB call time, in-flight requests and request sizes.
 //   - controlplanetest: the control-plane tests only.

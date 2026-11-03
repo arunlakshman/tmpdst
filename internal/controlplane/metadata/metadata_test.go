@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/kvtest"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/metadatastore"
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
-	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
 	"github.com/manifesterio/mds/internal/controlplane/kv"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"
@@ -65,7 +65,7 @@ func TestRestoreRejectsDamage(t *testing.T) {
 
 func TestStoreAdapter(t *testing.T) {
 	ctx := t.Context()
-	s := &updaterstore.Store{A: metadata.New(kv.NewMemory())}
+	s := &metadatastore.Store{A: metadata.New(kv.NewMemory())}
 	if c, err := storecall.Code(ctx, s, core.CreateTopic{Name: "t", Partitions: 3}); c != core.OK || err != nil {
 		t.Fatal(c, err)
 	}

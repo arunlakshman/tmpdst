@@ -20,7 +20,7 @@ import (
 //   - server/groups.go: this file. It holds the gRPC group handlers and the
 //     log and read side of the coordinator (nodeGroups).
 //   - controlplaneclient/groups.go: the broker-side group calls.
-//   - apiconvert/groups.go: maps group requests and responses to and from the
+//   - wireboundary/convert.go: maps group requests and responses to and from the
 //     wire types.
 //   - stateupdater/groups.go: the fold of GroupInstall, GroupAssign,
 //     GroupRemove and OffsetCommit.

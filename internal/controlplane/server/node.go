@@ -17,7 +17,6 @@ import (
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/runloop"
-	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system/realclock"
 )
@@ -313,110 +312,6 @@ func (n *Node) read(ctx context.Context, fn func(m *replica.Replica) (core.Contr
 		return r.d, r.err
 	case <-ctx.Done():
 		return core.ControlPlaneDone{Err: core.ErrTimeout, Outcome: core.NotApplied}, ctx.Err()
-	}
-}
-
-// CommitSegment implements ControlPlane.
-func (n *Node) CommitSegment(ctx context.Context, request *cpv1.CommitSegmentRequest) (*cpv1.CommitSegmentResponse, error) {
-	operation := wireboundary.CommitSegmentToCore(request)
-	d, err := n.offer(ctx, metadata.Entry{Kind: metadata.KindCommit, Commit: operation})
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, toRPCError(core.ErrTimeout, core.MaybeApplied)
-		}
-		return nil, toRPCError(core.ErrIO, core.MaybeApplied)
-	}
-	if d.Err != core.OK {
-		return nil, toRPCError(d.Err, d.Outcome)
-	}
-	return wireboundary.CommitSegmentRespFromCore(core.ResponseAs[core.CommitSegmentResp](d)), nil
-}
-
-// readRPC runs one read on the fold, turns the answer into R and converts it to
-// the wire type Out. The read method and the converter are passed in. A failed
-// read or a failed answer becomes an RPC error.
-func readRPC[R, Op, Out any](ctx context.Context, n *Node, op Op,
-	read func(*metadata.Store, Op) (core.ControlPlaneDone, error),
-	convert func(R) Out,
-) (Out, error) {
-	var zero Out
-	d, err := n.read(ctx, func(m *replica.Replica) (core.ControlPlaneDone, error) {
-		return read(m.Metadata(), op)
-	})
-	if err != nil {
-		return zero, toRPCError(core.ErrIO, core.NotApplied)
-	}
-	if d.Err != core.OK {
-		return zero, toRPCError(d.Err, d.Outcome)
-	}
-	return convert(core.ResponseAs[R](d)), nil
-}
-
-// Lookup implements ControlPlane.
-func (n *Node) Lookup(ctx context.Context, request *cpv1.LookupRequest) (*cpv1.LookupResponse, error) {
-	return readRPC[core.FindSegmentsResp](ctx, n, wireboundary.LookupToCore(request),
-		(*metadata.Store).Lookup, wireboundary.LookupRespFromCore)
-}
-
-// DescribeTopics implements ControlPlane.
-func (n *Node) DescribeTopics(ctx context.Context, request *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
-	operation := wireboundary.DescribeTopicsToCore(request)
-	return readRPC[core.DescribeTopicsResp](ctx, n, operation,
-		(*metadata.Store).Describe, wireboundary.DescribeTopicsRespFromCore)
-}
-
-// CreateTopic implements ControlPlane.
-func (n *Node) CreateTopic(ctx context.Context, request *cpv1.CreateTopicRequest) (*cpv1.CreateTopicResponse, error) {
-	if request == nil {
-		return nil, toRPCError(core.ErrInvalid, core.NotApplied)
-	}
-	d, err := n.offer(ctx, metadata.CreateEntry(core.CreateTopic{
-		Name: request.Topic, Partitions: request.Partitions, FailIfExists: request.FailIfExists,
-	}))
-	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return nil, toRPCError(core.ErrTimeout, core.MaybeApplied)
-		}
-		return nil, toRPCError(core.ErrIO, core.MaybeApplied)
-	}
-	if d.Err != core.OK {
-		return nil, toRPCError(d.Err, d.Outcome)
-	}
-	return &cpv1.CreateTopicResponse{}, nil
-}
-
-// GetStatus implements ControlPlane.
-func (n *Node) GetStatus(ctx context.Context, _ *cpv1.GetStatusRequest) (*cpv1.GetStatusResponse, error) {
-	type st struct {
-		role             string
-		applied, logTail int64
-		epoch, stepDowns uint64
-		ready            bool
-	}
-	ch := make(chan st, 1)
-	err := n.onLoop(ctx, func(m *replica.Replica) []core.Action {
-		role := "standby"
-		if m.IsActive() {
-			role = "active"
-		}
-		ch <- st{
-			role: role, applied: int64(m.Applied()), logTail: int64(m.Applied()),
-			epoch: m.Epoch(), stepDowns: m.StepDowns(), ready: m.Ready(),
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, toRPCError(core.ErrIO, core.NotApplied)
-	}
-	select {
-	case s := <-ch:
-		if !s.ready {
-			return nil, toRPCError(core.ErrUnavailable, core.NotApplied)
-		}
-		return &cpv1.GetStatusResponse{Role: s.role, AppliedSlot: s.applied, LogTail: s.logTail,
-			Epoch: s.epoch, StepDowns: s.stepDowns}, nil
-	case <-ctx.Done():
-		return nil, toRPCError(core.ErrTimeout, core.NotApplied)
 	}
 }
 

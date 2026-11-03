@@ -20,7 +20,7 @@ import (
 //   - server/groups.go: this file. It holds the gRPC group handlers and the
 //     log and read side of the coordinator (nodeGroups).
 //   - controlplaneclient/groups.go: the broker-side group calls.
-//   - wireboundary/convert.go: maps group requests and responses to and from the
+//   - wireboundary/groups.go: maps group requests and responses to and from the
 //     wire types.
 //   - groups/storage/module.go, write.go: the group module: the fold of
 //     GroupInstall, GroupAssign, GroupRemove and OffsetCommit, on the key-value store.
@@ -171,6 +171,45 @@ func groupRPC[Op, R, Out any](ctx context.Context, n *Node, op Op,
 	return convert(r), nil
 }
 
+// groupCodeCall describes one group RPC whose coordinator call returns the
+// answer and a code: how to call the coordinator, what the outcome of a failed
+// code is (it differs between a write and a read), and how to convert the answer
+// to the wire type Out.
+type groupCodeCall[Op, R, Out any] struct {
+	call    func(*groups.Coordinator, context.Context, Op) (R, core.ErrCode)
+	outcome func(core.ErrCode) core.Outcome
+	convert func(R) Out
+}
+
+// run checks that this node serves groups, runs the call, maps a failed code to
+// an RPC error and converts the answer.
+func (g groupCodeCall[Op, R, Out]) run(ctx context.Context, n *Node, op Op) (Out, error) {
+	var zero Out
+	c, err := n.groupCoordinator(ctx)
+	if err != nil {
+		return zero, err
+	}
+	r, code := g.call(c, ctx, op)
+	if code != core.OK {
+		return zero, toRPCError(code, g.outcome(code))
+	}
+	return g.convert(r), nil
+}
+
+var (
+	groupOffsetCommit = groupCodeCall[core.OffsetCommit, core.OffsetCommitResp, *cpv1.GroupOffsetCommitResponse]{
+		(*groups.Coordinator).OffsetCommit, groupOutcome, wireboundary.OffsetCommitRespFromCore}
+	groupOffsetFetch = groupCodeCall[core.OffsetFetch, core.OffsetFetchResp, *cpv1.GroupOffsetFetchResponse]{
+		(*groups.Coordinator).OffsetFetch, notApplied, wireboundary.OffsetFetchRespFromCore}
+	groupList = groupCodeCall[struct{}, []core.GroupSummary, *cpv1.ListGroupsResponse]{
+		func(c *groups.Coordinator, ctx context.Context, _ struct{}) ([]core.GroupSummary, core.ErrCode) {
+			return c.ListGroups(ctx)
+		}, notApplied, wireboundary.ListGroupsRespFromCore}
+)
+
+// notApplied is the outcome of a failed read.
+func notApplied(core.ErrCode) core.Outcome { return core.NotApplied }
+
 // joinCode returns the answer code of a join.
 func joinCode(r groups.JoinResp) core.ErrCode { return r.Err }
 
@@ -213,28 +252,12 @@ func (n *Node) LeaveGroup(ctx context.Context, request *cpv1.LeaveGroupRequest) 
 
 // GroupOffsetCommit implements ControlPlane. The answer has one code per partition.
 func (n *Node) GroupOffsetCommit(ctx context.Context, request *cpv1.GroupOffsetCommitRequest) (*cpv1.GroupOffsetCommitResponse, error) {
-	c, err := n.groupCoordinator(ctx)
-	if err != nil {
-		return nil, err
-	}
-	r, code := c.OffsetCommit(ctx, wireboundary.OffsetCommitToCore(request))
-	if code != core.OK {
-		return nil, toRPCError(code, groupOutcome(code))
-	}
-	return wireboundary.OffsetCommitRespFromCore(r), nil
+	return groupOffsetCommit.run(ctx, n, wireboundary.OffsetCommitToCore(request))
 }
 
 // GroupOffsetFetch implements ControlPlane.
 func (n *Node) GroupOffsetFetch(ctx context.Context, request *cpv1.GroupOffsetFetchRequest) (*cpv1.GroupOffsetFetchResponse, error) {
-	c, err := n.groupCoordinator(ctx)
-	if err != nil {
-		return nil, err
-	}
-	r, code := c.OffsetFetch(ctx, wireboundary.OffsetFetchToCore(request))
-	if code != core.OK {
-		return nil, toRPCError(code, core.NotApplied)
-	}
-	return wireboundary.OffsetFetchRespFromCore(r), nil
+	return groupOffsetFetch.run(ctx, n, wireboundary.OffsetFetchToCore(request))
 }
 
 // DescribeGroups implements ControlPlane. Any group that fails fails the call.
@@ -256,13 +279,5 @@ func (n *Node) DescribeGroups(ctx context.Context, request *cpv1.DescribeGroupsR
 
 // ListGroups implements ControlPlane.
 func (n *Node) ListGroups(ctx context.Context, _ *cpv1.ListGroupsRequest) (*cpv1.ListGroupsResponse, error) {
-	c, err := n.groupCoordinator(ctx)
-	if err != nil {
-		return nil, err
-	}
-	gs, code := c.ListGroups(ctx)
-	if code != core.OK {
-		return nil, toRPCError(code, core.NotApplied)
-	}
-	return wireboundary.ListGroupsRespFromCore(gs), nil
+	return groupList.run(ctx, n, struct{}{})
 }

@@ -21,8 +21,8 @@
 //   - Every ToCore function reads the message with its Get methods, so a nil
 //     or missing part becomes a zero value and never a panic.
 //
-// Everything is in this one file, in this order: error and outcome codes, small
-// shared pieces, data calls, broker heartbeat, consumer group calls. Every call
-// has a FromCore and a ToCore function, side by side. A small helper sits right
-// under the call that uses it.
+// The files follow the contexts: common.go (error and outcome codes, and the
+// pieces that more than one context uses), topics.go, brokers.go and groups.go.
+// Every call has a FromCore and a ToCore function, side by side. A small helper
+// sits right under the call that uses it.
 package wireboundary

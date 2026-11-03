@@ -19,10 +19,12 @@
 //
 //   - api/v1: the gRPC wire contract, defined in controlplane.proto.
 //   - controlplaneclient: the broker-side adapter. It is a system.ControlPlane
-//     over the gRPC API.
+//     over the gRPC API, with one file per context like server.
 //   - wireboundary: the only place that maps between core types and the wire
 //     (api/v1) messages. It holds no logic.
-//   - server: the gRPC adapter for the control-plane machine.
+//   - server: the gRPC adapter for the control-plane machine. It has one file
+//     per context: topics.go, groups.go, brokers.go and status.go. node.go is
+//     only the node's life: start, stop, the run loop and the roles.
 //   - runloop: the production event loop. One goroutine owns Step, timers and
 //     inject work. It imports only core and the standard library.
 //   - replica: one node's copy of the replicated log: leader or standby,

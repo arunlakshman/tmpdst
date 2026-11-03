@@ -3,7 +3,6 @@ package controlplanetest
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 
@@ -15,58 +14,18 @@ import (
 	"github.com/manifesterio/mds/internal/verify/speccheck/checker/suites"
 )
 
-// impl is a control plane as the conformance runner drives it.
+// impl is a control plane as the conformance runner drives it. A business error
+// is the Err of the answer. The error result is for infrastructure failures only.
 type impl interface {
-	Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneResponse, core.ErrCode, error)
-	CreateTopic(ctx context.Context, operation core.CreateTopic) (core.ErrCode, error)
-}
-
-// store is the four segment and topic calls, with the same answers as
-// speccheck.ControlPlane. A business error is a non-OK core.ErrCode with a nil
-// error. The error result is for infrastructure failures only.
-type store interface {
-	CommitSegment(ctx context.Context, operation core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error)
-	Lookup(ctx context.Context, operation core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error)
-	DescribeTopics(ctx context.Context, operation core.DescribeTopics) (core.DescribeTopicsResp, error)
-	CreateTopic(ctx context.Context, operation core.CreateTopic) (core.ErrCode, error)
-}
-
-// storeImpl drives a store directly.
-type storeImpl struct{ st store }
-
-func (s storeImpl) Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneResponse, core.ErrCode, error) {
-	switch operation := operation.(type) {
-	case core.CommitSegment:
-		r, c, err := s.st.CommitSegment(ctx, operation)
-		return r, c, err
-	case core.FindSegments:
-		r, c, err := s.st.Lookup(ctx, operation)
-		return r, c, err
-	case core.DescribeTopics:
-		r, err := s.st.DescribeTopics(ctx, operation)
-		return r, core.OK, err
-	case core.CreateTopic:
-		code, err := s.st.CreateTopic(ctx, operation)
-		return nil, code, err
-	}
-	return nil, 0, fmt.Errorf("unknown op %T", operation)
-}
-
-func (s storeImpl) CreateTopic(ctx context.Context, operation core.CreateTopic) (core.ErrCode, error) {
-	return s.st.CreateTopic(ctx, operation)
+	Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error)
 }
 
 // grpcImpl drives a machine node through controlplaneclient.
 type grpcImpl struct{ c *controlplaneclient.Client }
 
-func (h grpcImpl) Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneResponse, core.ErrCode, error) {
+func (h grpcImpl) Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
 	r, err := h.c.Call(ctx, operation)
-	return r, errCode(err), nonBusiness(err)
-}
-
-func (h grpcImpl) CreateTopic(ctx context.Context, operation core.CreateTopic) (core.ErrCode, error) {
-	_, err := h.c.Call(ctx, operation)
-	return errCode(err), nonBusiness(err)
+	return core.ControlPlaneDone{Resp: r, Err: errCode(err)}, nonBusiness(err)
 }
 
 func errCode(err error) core.ErrCode {
@@ -87,7 +46,7 @@ func grpcOver(t testing.TB) impl {
 	return grpcImpl{StartMem(t).Client}
 }
 
-func newMem() store { return memorystore.New() }
+func newMem() impl { return memorystore.New() }
 
 // implSubject makes an impl usable as a suite subject. The stores keep no spec
 // hash, so StateHash says no. A commit that succeeds is Applied, as in the spec.
@@ -98,14 +57,13 @@ func (s implSubject) Do(operation generator.ControlPlaneTestStep) (observation.C
 	defer cancel()
 	switch {
 	case operation.CreateTopic != nil:
-		code, err := s.im.CreateTopic(ctx, core.CreateTopic{Name: operation.CreateTopic.Name, Partitions: operation.CreateTopic.Partitions})
-		return observation.ControlPlaneResult{Code: code}, err
+		d, err := s.im.Exec(ctx, core.CreateTopic{Name: operation.CreateTopic.Name, Partitions: operation.CreateTopic.Partitions})
+		return observation.ControlPlaneResult{Code: d.Err}, err
 	case operation.Call != nil:
-		response, code, err := s.im.Exec(ctx, operation.Call.Op)
-		if err != nil || code != core.OK {
-			return observation.ControlPlaneResult{Code: code}, err
+		done, err := s.im.Exec(ctx, operation.Call.Op)
+		if err != nil || done.Err != core.OK {
+			return observation.ControlPlaneResult{Code: done.Err}, err
 		}
-		done := core.ControlPlaneDone{Resp: response}
 		switch operation.Call.Op.(type) {
 		case core.CommitSegment, core.CreateTopic:
 			done.Outcome = core.Applied

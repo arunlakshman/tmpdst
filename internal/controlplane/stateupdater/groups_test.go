@@ -3,6 +3,7 @@ package stateupdater_test
 import (
 	"bytes"
 	"context"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
 	"reflect"
 	"strings"
 	"testing"
@@ -438,29 +439,29 @@ func TestGroupEntryNotAGroupOp(t *testing.T) {
 func TestGroupStoreAdapter(t *testing.T) {
 	s := &updaterstore.Store{A: stateupdater.NewMem()}
 	ctx := context.Background()
-	if code, err := s.GroupInstall(ctx, install("g", 1, "m1", "m1")); code != core.OK || err != nil {
+	if code, err := storecall.Code(ctx, s, install("g", 1, "m1", "m1")); code != core.OK || err != nil {
 		t.Fatalf("install: %v %v", code, err)
 	}
-	if code, err := s.GroupAssign(ctx, assign("g", 1, "m1", "m1", "a")); code != core.OK || err != nil {
+	if code, err := storecall.Code(ctx, s, assign("g", 1, "m1", "m1", "a")); code != core.OK || err != nil {
 		t.Fatalf("assign: %v %v", code, err)
 	}
-	if code, err := s.GroupRemove(ctx, remove("g", "m1")); code != core.OK || err != nil {
+	if code, err := storecall.Code(ctx, s, remove("g", "m1")); code != core.OK || err != nil {
 		t.Fatalf("remove: %v %v", code, err)
 	}
-	if code, err := s.GroupAssign(ctx, assign("g", 1, "m1", "m1", "a")); code != core.ErrUnknownMember || err != nil {
+	if code, err := storecall.Code(ctx, s, assign("g", 1, "m1", "m1", "a")); code != core.ErrUnknownMember || err != nil {
 		t.Fatalf("assign after remove: %v %v", code, err)
 	}
-	response, code, err := s.OffsetCommit(ctx, commitOp("g", "", -1, pair("orders", 0, 3)))
+	response, code, err := storecall.Call[core.OffsetCommitResp](ctx, s, commitOp("g", "", -1, pair("orders", 0, 3)))
 	if code != core.OK || err != nil || len(response.Errs) != 1 || response.Errs[0] != core.ErrUnknownPartition {
 		t.Fatalf("commit to a topic that does not exist: %+v %v %v", response, code, err)
 	}
-	if _, err := s.OffsetFetch(ctx, core.OffsetFetch{Group: "g"}); err != nil {
+	if _, err := storecall.Read[core.OffsetFetchResp](ctx, s, core.OffsetFetch{Group: "g"}); err != nil {
 		t.Fatal(err)
 	}
-	if d, err := s.DescribeGroup(ctx, core.DescribeGroup{Group: "g"}); err != nil || d.State != "Empty" {
+	if d, err := storecall.Read[core.DescribeGroupResp](ctx, s, core.DescribeGroup{Group: "g"}); err != nil || d.State != "Empty" {
 		t.Fatalf("describe: %+v %v", d, err)
 	}
-	if ls, err := s.ListGroups(ctx, core.ListGroups{}); err != nil || len(ls.Groups) != 1 {
+	if ls, err := storecall.Read[core.ListGroupsResp](ctx, s, core.ListGroups{}); err != nil || len(ls.Groups) != 1 {
 		t.Fatalf("list: %+v %v", ls, err)
 	}
 }

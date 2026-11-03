@@ -2,6 +2,7 @@ package groupcoordinator
 
 import (
 	"fmt"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -215,7 +216,7 @@ func waitUntil(t *testing.T, cond func() bool) {
 
 func storedMembers(t *testing.T, h *harness, group string) []string {
 	t.Helper()
-	d, err := h.store.DescribeGroup(t.Context(), core.DescribeGroup{Group: group})
+	d, err := storecall.Read[core.DescribeGroupResp](t.Context(), h.store, core.DescribeGroup{Group: group})
 	if err != nil {
 		t.Fatal(err)
 	}

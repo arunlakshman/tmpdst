@@ -3,6 +3,7 @@ package stateupdater_test
 import (
 	"bytes"
 	"errors"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -222,21 +223,21 @@ func TestInvalidAndUnknown(t *testing.T) {
 func TestStoreAdapter(t *testing.T) {
 	ctx := t.Context()
 	s := &updaterstore.Store{A: stateupdater.New(stateupdater.NewMemoryKeyValueStore())}
-	if c, err := s.CreateTopic(ctx, core.CreateTopic{Name: "t", Partitions: 3}); c != core.OK || err != nil {
+	if c, err := storecall.Code(ctx, s, core.CreateTopic{Name: "t", Partitions: 3}); c != core.OK || err != nil {
 		t.Fatal(c, err)
 	}
-	response, c, err := s.CommitSegment(ctx, commit("k", pb("t", 2, 4)))
+	response, c, err := storecall.Call[core.CommitSegmentResp](ctx, s, commit("k", pb("t", 2, 4)))
 	if err != nil || c != core.OK || response.Assigned[0].Base != 0 {
 		t.Fatalf("%+v %v %v", response, c, err)
 	}
-	lk, c, _ := s.Lookup(ctx, core.FindSegments{TopicPartition: core.NewTopicPartition("t", 2)})
+	lk, c, _ := storecall.Call[core.FindSegmentsResp](ctx, s, core.FindSegments{TopicPartition: core.NewTopicPartition("t", 2)})
 	if c != core.OK || lk.End != 4 || len(lk.Ranges) != 1 {
 		t.Fatalf("%+v %v", lk, c)
 	}
-	if _, c, _ = s.Lookup(ctx, core.FindSegments{From: -1}); c != core.ErrInvalid {
+	if _, c, _ = storecall.Call[core.FindSegmentsResp](ctx, s, core.FindSegments{From: -1}); c != core.ErrInvalid {
 		t.Fatal(c)
 	}
-	d, err := s.DescribeTopics(ctx, core.DescribeTopics{})
+	d, err := storecall.Read[core.DescribeTopicsResp](ctx, s, core.DescribeTopics{})
 	if err != nil || len(d.Topics) != 1 || d.Topics[0].Partitions != 3 {
 		t.Fatalf("%+v %v", d, err)
 	}

@@ -187,6 +187,12 @@ func New(config Config, store controlplane.GroupStore) *Coordinator {
 // randomID returns a random id of 128 bits, as text.
 func randomID() string { return rand.Text() }
 
+// write runs one group write on the store and returns its business code.
+func (c *Coordinator) write(ctx context.Context, operation core.ControlPlaneOperation) (core.ErrCode, error) {
+	d, err := c.store.Exec(ctx, operation)
+	return d.Err, err
+}
+
 // Serving reports whether group calls are answered now.
 func (c *Coordinator) Serving() bool { return c.enter() != nil }
 
@@ -201,20 +207,21 @@ func (c *Coordinator) Rebuild(ctx context.Context) error {
 	if closed {
 		return ErrClosed
 	}
-	names, err := c.store.ListGroups(ctx, core.ListGroups{})
+	listed, err := c.store.Exec(ctx, core.ListGroups{})
 	if err != nil {
 		return err
 	}
+	names := core.ResponseAs[core.ListGroupsResp](listed)
 	tctx, cancel := context.WithCancel(context.Background())
 	t := &term{ctx: tctx, cancel: cancel, groups: map[string]*group{}}
 	for _, s := range names.Groups {
-		d, err := c.store.DescribeGroup(ctx, core.DescribeGroup{Group: s.Name})
+		described, err := c.store.Exec(ctx, core.DescribeGroup{Group: s.Name})
 		if err != nil {
 			cancel()
 			return err
 		}
 		g := newGroup(s.Name)
-		c.load(t, g, d)
+		c.load(t, g, core.ResponseAs[core.DescribeGroupResp](described))
 		t.groups[s.Name] = g
 	}
 	c.mu.Lock()
@@ -465,7 +472,7 @@ func (c *Coordinator) LeaveGroup(_ context.Context, request LeaveReq) []core.Err
 		return errs
 	}
 	ctx, cancel := c.writeCtx(t)
-	code, err := c.store.GroupRemove(ctx, core.GroupRemove{Group: g.name, Members: gone, TimeMs: c.nowMs(), Reason: "leave"})
+	code, err := c.write(ctx, core.GroupRemove{Group: g.name, Members: gone, TimeMs: c.nowMs(), Reason: "leave"})
 	cancel()
 	if code = settle(t, code, err); code != core.OK {
 		for i := range errs {
@@ -507,14 +514,14 @@ func (c *Coordinator) OffsetCommit(_ context.Context, operation core.OffsetCommi
 	operation.TimeMs = c.nowMs()
 	ctx, cancel := c.writeCtx(t)
 	defer cancel()
-	response, code, err := c.store.OffsetCommit(ctx, operation)
+	d, err := c.store.Exec(ctx, operation)
 	if err != nil {
 		return core.OffsetCommitResp{}, core.ErrUnavailable
 	}
-	if code != core.OK {
-		return core.OffsetCommitResp{}, code
+	if d.Err != core.OK {
+		return core.OffsetCommitResp{}, d.Err
 	}
-	return response, core.OK
+	return core.ResponseAs[core.OffsetCommitResp](d), core.OK
 }
 
 // OffsetFetch reads committed offsets. It is not logged.
@@ -523,11 +530,11 @@ func (c *Coordinator) OffsetFetch(_ context.Context, operation core.OffsetFetch)
 	if t == nil {
 		return core.OffsetFetchResp{}, core.ErrUnavailable
 	}
-	response, err := c.store.OffsetFetch(t.ctx, operation)
+	d, err := c.store.Exec(t.ctx, operation)
 	if err != nil {
 		return core.OffsetFetchResp{}, core.ErrUnavailable
 	}
-	return response, core.OK
+	return core.ResponseAs[core.OffsetFetchResp](d), core.OK
 }
 
 // DescribeGroup reads one group. It is not logged.
@@ -536,11 +543,11 @@ func (c *Coordinator) DescribeGroup(_ context.Context, group string) (core.Descr
 	if t == nil {
 		return core.DescribeGroupResp{}, core.ErrUnavailable
 	}
-	response, err := c.store.DescribeGroup(t.ctx, core.DescribeGroup{Group: group})
+	d, err := c.store.Exec(t.ctx, core.DescribeGroup{Group: group})
 	if err != nil {
 		return core.DescribeGroupResp{}, core.ErrUnavailable
 	}
-	return response, core.OK
+	return core.ResponseAs[core.DescribeGroupResp](d), core.OK
 }
 
 // ListGroups lists every group in the log. It is not logged.
@@ -549,11 +556,11 @@ func (c *Coordinator) ListGroups(_ context.Context) ([]core.GroupSummary, core.E
 	if t == nil {
 		return nil, core.ErrUnavailable
 	}
-	response, err := c.store.ListGroups(t.ctx, core.ListGroups{})
+	d, err := c.store.Exec(t.ctx, core.ListGroups{})
 	if err != nil {
 		return nil, core.ErrUnavailable
 	}
-	return response.Groups, core.OK
+	return core.ResponseAs[core.ListGroupsResp](d).Groups, core.OK
 }
 
 // copyBytes returns a copy of b. An empty value is nil, as the log returns it.

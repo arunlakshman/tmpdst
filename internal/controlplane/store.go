@@ -11,16 +11,10 @@ import (
 // exhausted optimistic retries. The gRPC server maps it to codes.Unavailable.
 var ErrUnavailable = errors.New("cp: unavailable")
 
-// GroupStore is the consumer group part of the control plane store (slice
-// 4a: the state and its fold, no gRPC yet). It is a separate interface so
-// that Store keeps its four methods. A business error is a non-OK ErrCode
-// with a nil error; error is infrastructure only.
+// GroupStore runs the consumer group operations of the control plane. Exec takes
+// one of GroupInstall, GroupAssign, GroupRemove and OffsetCommit (writes, logged)
+// or OffsetFetch, DescribeGroup and ListGroups (reads, not logged). A business
+// error is the Err of the answer; the error result is infrastructure only.
 type GroupStore interface {
-	GroupInstall(ctx context.Context, operation core.GroupInstall) (core.ErrCode, error)
-	GroupAssign(ctx context.Context, operation core.GroupAssign) (core.ErrCode, error)
-	GroupRemove(ctx context.Context, operation core.GroupRemove) (core.ErrCode, error)
-	OffsetCommit(ctx context.Context, operation core.OffsetCommit) (core.OffsetCommitResp, core.ErrCode, error)
-	OffsetFetch(ctx context.Context, operation core.OffsetFetch) (core.OffsetFetchResp, error)
-	DescribeGroup(ctx context.Context, operation core.DescribeGroup) (core.DescribeGroupResp, error)
-	ListGroups(ctx context.Context, operation core.ListGroups) (core.ListGroupsResp, error)
+	Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error)
 }

@@ -42,35 +42,27 @@ type nodeGroups struct{ n *Node }
 
 var _ controlplane.GroupStore = nodeGroups{}
 
+// Exec runs one group operation. A write is offered to the log. A read is
+// answered by the fold.
+func (s nodeGroups) Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
+	switch x := operation.(type) {
+	case core.GroupInstall, core.GroupAssign, core.GroupRemove, core.OffsetCommit:
+		return s.write(ctx, operation)
+	case core.OffsetFetch:
+		return readFold(ctx, s.n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) { return m.Fold().OffsetFetch(x) })
+	case core.DescribeGroup:
+		return readFold(ctx, s.n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) { return m.Fold().DescribeGroup(x) })
+	case core.ListGroups:
+		return readFold(ctx, s.n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) { return m.Fold().ListGroups(x) })
+	}
+	return core.ControlPlaneDone{Err: core.ErrInvalid}, nil
+}
+
 // write offers one group decision to the log. A business answer comes back in
 // the Done; err is only for the run loop or the context.
 func (s nodeGroups) write(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
 	entry, _ := stateupdater.GroupEntry(operation)
 	return s.n.offer(ctx, entry)
-}
-
-// GroupInstall implements controlplane.GroupStore.
-func (s nodeGroups) GroupInstall(ctx context.Context, operation core.GroupInstall) (core.ErrCode, error) {
-	d, err := s.write(ctx, operation)
-	return d.Err, err
-}
-
-// GroupAssign implements controlplane.GroupStore.
-func (s nodeGroups) GroupAssign(ctx context.Context, operation core.GroupAssign) (core.ErrCode, error) {
-	d, err := s.write(ctx, operation)
-	return d.Err, err
-}
-
-// GroupRemove implements controlplane.GroupStore.
-func (s nodeGroups) GroupRemove(ctx context.Context, operation core.GroupRemove) (core.ErrCode, error) {
-	d, err := s.write(ctx, operation)
-	return d.Err, err
-}
-
-// OffsetCommit implements controlplane.GroupStore.
-func (s nodeGroups) OffsetCommit(ctx context.Context, operation core.OffsetCommit) (core.OffsetCommitResp, core.ErrCode, error) {
-	d, err := s.write(ctx, operation)
-	return core.ResponseAs[core.OffsetCommitResp](d), d.Err, err
 }
 
 // readFold runs one group read on the loop. A node that is not ready answers
@@ -84,30 +76,6 @@ func readFold(ctx context.Context, n *Node, fn func(*statemachine.Machine) (core
 		return core.ControlPlaneDone{}, controlplane.ErrUnavailable
 	}
 	return d, nil
-}
-
-// readGroup runs one group read on the fold and turns the answer into R. The
-// read method is passed in. On an error the result is the zero R.
-func readGroup[R, Op any](ctx context.Context, n *Node, op Op, read func(*stateupdater.StateUpdater, Op) (core.ControlPlaneDone, error)) (R, error) {
-	d, err := readFold(ctx, n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
-		return read(m.Fold(), op)
-	})
-	return core.ResponseAs[R](d), err
-}
-
-// OffsetFetch implements controlplane.GroupStore.
-func (s nodeGroups) OffsetFetch(ctx context.Context, operation core.OffsetFetch) (core.OffsetFetchResp, error) {
-	return readGroup[core.OffsetFetchResp](ctx, s.n, operation, (*stateupdater.StateUpdater).OffsetFetch)
-}
-
-// DescribeGroup implements controlplane.GroupStore.
-func (s nodeGroups) DescribeGroup(ctx context.Context, operation core.DescribeGroup) (core.DescribeGroupResp, error) {
-	return readGroup[core.DescribeGroupResp](ctx, s.n, operation, (*stateupdater.StateUpdater).DescribeGroup)
-}
-
-// ListGroups implements controlplane.GroupStore.
-func (s nodeGroups) ListGroups(ctx context.Context, operation core.ListGroups) (core.ListGroupsResp, error) {
-	return readGroup[core.ListGroupsResp](ctx, s.n, operation, (*stateupdater.StateUpdater).ListGroups)
 }
 
 // groupRole reports whether this node is the active appender and ready.

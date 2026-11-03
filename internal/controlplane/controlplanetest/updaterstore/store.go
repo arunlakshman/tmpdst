@@ -1,6 +1,6 @@
-// Package updaterstore adapts a stateupdater.StateUpdater to the test-only store
-// interfaces. It is test support: the log-backed service applies commands at
-// their real slots, not through this adapter.
+// Package updaterstore runs a stateupdater.StateUpdater as a single node with no
+// log, for tests. The log-backed service applies commands at their real slots,
+// not through this adapter.
 package updaterstore
 
 import (
@@ -12,9 +12,9 @@ import (
 	"github.com/manifesterio/mds/internal/core"
 )
 
-// Store drives a StateUpdater with a local slot counter: a single node, no log.
-// It is a controlplane.GroupStore, and it has the four segment and topic calls
-// that the conformance suite uses.
+// Store drives a StateUpdater with a local slot counter. It is a
+// controlplane.GroupStore, and its Exec also takes the segment and topic
+// operations that the conformance suite sends.
 type Store struct {
 	A *stateupdater.StateUpdater
 
@@ -24,84 +24,38 @@ type Store struct {
 
 var _ controlplane.GroupStore = (*Store)(nil)
 
-// CommitSegment applies a commit at the next local slot.
-func (s *Store) CommitSegment(_ context.Context, operation core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
-	s.mu.Lock()
-	slot := s.next
-	s.next++
-	d, err := s.A.Commit(slot, operation)
-	s.mu.Unlock()
-	return core.ResponseAs[core.CommitSegmentResp](d), d.Err, err
-}
-
-// Lookup answers a Lookup.
-func (s *Store) Lookup(_ context.Context, operation core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error) {
-	d, err := s.A.Lookup(operation)
-	return core.ResponseAs[core.FindSegmentsResp](d), d.Err, err
-}
-
-// DescribeTopics answers a DescribeTopics.
-func (s *Store) DescribeTopics(_ context.Context, operation core.DescribeTopics) (core.DescribeTopicsResp, error) {
-	d, err := s.A.Describe(operation)
-	return core.ResponseAs[core.DescribeTopicsResp](d), err
-}
-
-// CreateTopic creates a topic.
-func (s *Store) CreateTopic(_ context.Context, operation core.CreateTopic) (core.ErrCode, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.A.CreateTopicIf(operation.Name, operation.Partitions, operation.FailIfExists), nil
-}
-
-// groupWrite runs one group write under the store lock, like CreateTopic.
-func (s *Store) groupWrite(operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	entry, ok := stateupdater.GroupEntry(operation)
-	if !ok {
-		return core.ControlPlaneDone{Err: core.ErrInvalid}, nil
+// Exec runs one operation. A business error is the Err of the answer. The error
+// result is for the context and the store.
+func (s *Store) Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
+	if err := ctx.Err(); err != nil {
+		return core.ControlPlaneDone{}, err
 	}
-	return s.A.Apply(0, entry), nil
-}
-
-// GroupInstall implements controlplane.GroupStore.
-func (s *Store) GroupInstall(_ context.Context, operation core.GroupInstall) (core.ErrCode, error) {
-	d, err := s.groupWrite(operation)
-	return d.Err, err
-}
-
-// GroupAssign implements controlplane.GroupStore.
-func (s *Store) GroupAssign(_ context.Context, operation core.GroupAssign) (core.ErrCode, error) {
-	d, err := s.groupWrite(operation)
-	return d.Err, err
-}
-
-// GroupRemove implements controlplane.GroupStore.
-func (s *Store) GroupRemove(_ context.Context, operation core.GroupRemove) (core.ErrCode, error) {
-	d, err := s.groupWrite(operation)
-	return d.Err, err
-}
-
-// OffsetCommit implements controlplane.GroupStore.
-func (s *Store) OffsetCommit(_ context.Context, operation core.OffsetCommit) (core.OffsetCommitResp, core.ErrCode, error) {
-	d, err := s.groupWrite(operation)
-	return core.ResponseAs[core.OffsetCommitResp](d), d.Err, err
-}
-
-// OffsetFetch implements controlplane.GroupStore.
-func (s *Store) OffsetFetch(_ context.Context, operation core.OffsetFetch) (core.OffsetFetchResp, error) {
-	d, err := s.A.OffsetFetch(operation)
-	return core.ResponseAs[core.OffsetFetchResp](d), err
-}
-
-// DescribeGroup implements controlplane.GroupStore.
-func (s *Store) DescribeGroup(_ context.Context, operation core.DescribeGroup) (core.DescribeGroupResp, error) {
-	d, err := s.A.DescribeGroup(operation)
-	return core.ResponseAs[core.DescribeGroupResp](d), err
-}
-
-// ListGroups implements controlplane.GroupStore.
-func (s *Store) ListGroups(_ context.Context, operation core.ListGroups) (core.ListGroupsResp, error) {
-	d, err := s.A.ListGroups(operation)
-	return core.ResponseAs[core.ListGroupsResp](d), err
+	switch x := operation.(type) {
+	case core.CommitSegment:
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		slot := s.next
+		s.next++
+		return s.A.Commit(slot, x)
+	case core.FindSegments:
+		return s.A.Lookup(x)
+	case core.DescribeTopics:
+		return s.A.Describe(x)
+	case core.CreateTopic:
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return core.ControlPlaneDone{Err: s.A.CreateTopicIf(x.Name, x.Partitions, x.FailIfExists)}, nil
+	case core.GroupInstall, core.GroupAssign, core.GroupRemove, core.OffsetCommit:
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		entry, _ := stateupdater.GroupEntry(x)
+		return s.A.Apply(0, entry), nil
+	case core.OffsetFetch:
+		return s.A.OffsetFetch(x)
+	case core.DescribeGroup:
+		return s.A.DescribeGroup(x)
+	case core.ListGroups:
+		return s.A.ListGroups(x)
+	}
+	return core.ControlPlaneDone{Err: core.ErrInvalid}, nil
 }

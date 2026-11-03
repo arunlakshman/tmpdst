@@ -19,42 +19,16 @@ type Store struct {
 // New returns an empty store.
 func New() *Store { return &Store{spec: speccheck.NewControlPlane()} }
 
-func (s *Store) exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
+// Exec runs one operation on the spec. A business error is the Err of the
+// answer. The error result is for the context.
+func (s *Store) Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
 	if err := ctx.Err(); err != nil {
 		return core.ControlPlaneDone{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.spec.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone), nil
-}
-
-func executeAs[R any](ctx context.Context, s *Store, operation core.ControlPlaneOperation) (R, core.ErrCode, error) {
-	d, err := s.exec(ctx, operation)
-	return core.ResponseAs[R](d), d.Err, err
-}
-
-// CommitSegment answers one store call.
-func (s *Store) CommitSegment(ctx context.Context, operation core.CommitSegment) (core.CommitSegmentResp, core.ErrCode, error) {
-	return executeAs[core.CommitSegmentResp](ctx, s, operation)
-}
-
-// Lookup answers one store call.
-func (s *Store) Lookup(ctx context.Context, operation core.FindSegments) (core.FindSegmentsResp, core.ErrCode, error) {
-	return executeAs[core.FindSegmentsResp](ctx, s, operation)
-}
-
-// DescribeTopics answers one store call.
-func (s *Store) DescribeTopics(ctx context.Context, operation core.DescribeTopics) (core.DescribeTopicsResp, error) {
-	d, err := s.exec(ctx, operation)
-	return core.ResponseAs[core.DescribeTopicsResp](d), err
-}
-
-// CreateTopic answers one store call.
-func (s *Store) CreateTopic(ctx context.Context, operation core.CreateTopic) (core.ErrCode, error) {
-	if err := ctx.Err(); err != nil {
-		return 0, err
+	if x, ok := operation.(core.CreateTopic); ok {
+		return core.ControlPlaneDone{Err: s.spec.CreateTopicIf(x.Name, x.Partitions, x.FailIfExists)}, nil
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.spec.CreateTopicIf(operation.Name, operation.Partitions, operation.FailIfExists), nil
+	return s.spec.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone), nil
 }

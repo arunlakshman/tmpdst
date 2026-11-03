@@ -7,8 +7,9 @@
 //   - StartMem and Start (grpcserver.go) run an in-process gRPC control plane node.
 //   - fakedynamodb is an in-memory DynamoDB for the log tests.
 //   - memorystore is an in-memory store over the speccheck spec.
-//   - updaterstore adapts a stateupdater to the store and group-store calls, on a
-//     local slot counter with no log.
+//   - updaterstore runs a stateupdater as one node on a local slot counter with
+//     no log. It is also the GroupStore of the groupcoordinator tests.
+//   - storecall gives tests a typed view of the single Exec method of the stores.
 //
 // Nothing outside tests imports this tree.
 package controlplanetest

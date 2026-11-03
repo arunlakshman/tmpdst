@@ -70,7 +70,7 @@ func replayOps() []generator.ControlPlaneTestStep {
 }
 
 func TestReplayMemorystore(t *testing.T) {
-	compareSteps(t, implSubject{storeImpl{newMem()}}, replayOps())
+	compareSteps(t, implSubject{newMem()}, replayOps())
 }
 
 // manyBatchesOps commits segments of many small batches (one DynamoDB range
@@ -116,7 +116,7 @@ func manyBatchesOps() []generator.ControlPlaneTestStep {
 }
 
 func TestManyBatchesMemorystore(t *testing.T) {
-	compareSteps(t, implSubject{storeImpl{newMem()}}, manyBatchesOps())
+	compareSteps(t, implSubject{newMem()}, manyBatchesOps())
 }
 
 func TestRoundTrip(t *testing.T) {

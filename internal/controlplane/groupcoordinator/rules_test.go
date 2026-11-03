@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -112,7 +113,7 @@ func TestSyncRules(t *testing.T) {
 func TestOffsetCommitChecks(t *testing.T) {
 	h := newHarness(t, Config{})
 	ctx := t.Context()
-	if code, err := h.store.CreateTopic(ctx, core.CreateTopic{Name: "t", Partitions: 2}); err != nil || code != core.OK {
+	if code, err := storecall.Code(ctx, h.store, core.CreateTopic{Name: "t", Partitions: 2}); err != nil || code != core.OK {
 		t.Fatalf("topic: %v %v", code, err)
 	}
 	a, _ := h.stableTwo("g")
@@ -299,11 +300,11 @@ type flakyStore struct {
 	failInstall atomic.Bool
 }
 
-func (f *flakyStore) GroupInstall(ctx context.Context, operation core.GroupInstall) (core.ErrCode, error) {
-	if f.failInstall.Load() {
-		return core.OK, errors.New("log down")
+func (f *flakyStore) Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
+	if _, ok := operation.(core.GroupInstall); ok && f.failInstall.Load() {
+		return core.ControlPlaneDone{}, errors.New("log down")
 	}
-	return f.GroupStore.GroupInstall(ctx, operation)
+	return f.GroupStore.Exec(ctx, operation)
 }
 
 // TestConcurrentJoinsOneRound starts eight joins at once on the real clock.

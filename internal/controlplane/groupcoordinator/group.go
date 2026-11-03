@@ -343,7 +343,7 @@ func (c *Coordinator) completeRound(t *term, g *group) {
 	slices.Sort(gone)
 	if len(gone) > 0 {
 		ctx, cancel := c.writeCtx(t)
-		code, err := c.store.GroupRemove(ctx, core.GroupRemove{Group: g.name, Members: gone, TimeMs: c.nowMs(), Reason: "expire"})
+		code, err := c.write(ctx, core.GroupRemove{Group: g.name, Members: gone, TimeMs: c.nowMs(), Reason: "expire"})
 		cancel()
 		if code = settle(t, code, err); code != core.OK {
 			answerJoins(g, JoinResp{Err: code})
@@ -376,7 +376,7 @@ func (c *Coordinator) completeRound(t *term, g *group) {
 		})
 	}
 	ctx, cancel := c.writeCtx(t)
-	code, err := c.store.GroupInstall(ctx, install)
+	code, err := c.write(ctx, install)
 	cancel()
 	if code = settle(t, code, err); code != core.OK {
 		answerJoins(g, JoinResp{Err: code})
@@ -481,7 +481,7 @@ func (c *Coordinator) leaderSync(t *term, g *group, m *member, assigns []Assignm
 		list = append(list, core.GroupAssignment{Member: a.Member, Bytes: a.Bytes})
 	}
 	ctx, cancel := c.writeCtx(t)
-	code, err := c.store.GroupAssign(ctx, core.GroupAssign{
+	code, err := c.write(ctx, core.GroupAssign{
 		Group: g.name, Generation: g.generation, Leader: m.id, TimeMs: c.nowMs(), Assignments: list,
 	})
 	cancel()
@@ -564,7 +564,7 @@ func (c *Coordinator) onSession(t *term, g *group, m *member, version uint64) {
 		return
 	}
 	ctx, cancel := c.writeCtx(t)
-	code, err := c.store.GroupRemove(ctx, core.GroupRemove{Group: g.name, Members: []string{m.id}, TimeMs: c.nowMs(), Reason: "expire"})
+	code, err := c.write(ctx, core.GroupRemove{Group: g.name, Members: []string{m.id}, TimeMs: c.nowMs(), Reason: "expire"})
 	cancel()
 	if code = settle(t, code, err); code != core.OK {
 		c.armSessionFor(t, g, m, retryAfter)

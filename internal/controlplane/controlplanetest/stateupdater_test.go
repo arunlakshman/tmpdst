@@ -16,7 +16,7 @@ import (
 
 func TestConformanceStateUpdaterMem(t *testing.T) {
 	runProfiles(t, func() impl {
-		return storeImpl{&updaterstore.Store{A: stateupdater.New(stateupdater.NewMemoryKeyValueStore())}}
+		return &updaterstore.Store{A: stateupdater.New(stateupdater.NewMemoryKeyValueStore())}
 	}, 20)
 }
 
@@ -31,6 +31,6 @@ func TestConformanceStateUpdaterPebble(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = keyValue.Close() })
-		return storeImpl{&updaterstore.Store{A: stateupdater.New(keyValue)}}
+		return &updaterstore.Store{A: stateupdater.New(keyValue)}
 	}, 3)
 }

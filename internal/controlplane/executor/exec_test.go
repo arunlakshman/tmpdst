@@ -7,10 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-
-	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/fakedynamodb"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
 	"github.com/manifesterio/mds/internal/controlplane/runloop"
 	"github.com/manifesterio/mds/internal/core"
@@ -119,43 +115,11 @@ func TestClassify(t *testing.T) {
 
 type timeoutError struct{}
 
-func (timeoutError) Error() string   { return "timeout" }
-func (timeoutError) Timeout() bool   { return true }
-func (timeoutError) Temporary() bool { return true }
+func (timeoutError) Error() string { return "timeout" }
 
-func TestDynLog(t *testing.T) {
-	ctx := t.Context()
-	db := fakedynamodb.New()
-	if _, err := db.CreateTable(ctx, &dynamodb.CreateTableInput{TableName: aws.String("cp")}); err != nil {
-		t.Fatal(err)
-	}
-	l := executor.NewDynamoLog(db, "cp", executor.DynamoLogOptions{TTL: time.Hour, Now: func() time.Time { return time.Unix(1_700_000_000, 0) }})
-	if _, taken, err := l.Append(ctx, 0, []byte("x")); err != nil || taken {
-		t.Fatalf("append: taken=%v err=%v", taken, err)
-	}
-	exist, taken, err := l.Append(ctx, 0, []byte("y"))
-	if err != nil || !taken || string(exist) != "x" {
-		t.Fatalf("taken: %q taken=%v err=%v", exist, taken, err)
-	}
-	ents, err := l.Read(ctx, 0, 5)
-	if err != nil || len(ents) != 1 || string(ents[0].Data) != "x" {
-		t.Fatalf("read: %+v %v", ents, err)
-	}
-	tail, err := l.CheckTail(ctx)
-	if err != nil || tail != 1 {
-		t.Fatalf("tail=%d err=%v", tail, err)
-	}
-	if err := l.TrimThrough(ctx, 0); err != nil {
-		t.Fatal(err)
-	}
-	ents, err = l.Read(ctx, 0, 5)
-	if err != nil || len(ents) != 0 {
-		t.Fatalf("after trim: %+v %v", ents, err)
-	}
-	if err := l.TrimThrough(ctx, -1); err == nil {
-		t.Fatal("expected invalid trim")
-	}
-}
+func (timeoutError) Timeout() bool { return true }
+
+func (timeoutError) Temporary() bool { return true }
 
 func TestExecutorIOResults(t *testing.T) {
 	ctx := t.Context()

@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -231,6 +232,70 @@ func packageComment(t *testing.T, r repo, dir string) string {
 		}
 	}
 	return strings.Join(strings.Fields(strings.Join(parts, " ")), " ")
+}
+
+// layerRules say which packages inside the module each control-plane package
+// may import in its non-test files. A package that is not listed here is not
+// checked. The domain packages (kv, groups, groups/storage, metadata, replica)
+// and the executor port may not import any third-party package: the AWS SDK,
+// the Postgres driver and Pebble live in adapters (executor/dynamolog,
+// executor/sqllog, kv/pebblestore).
+var layerRules = []struct {
+	dir     string
+	allowed []string // module-relative packages, or "internal/core" and so on
+}{
+	{"internal/controlplane/kv", []string{"internal/core"}},
+	{"internal/controlplane/groups/storage", []string{"internal/controlplane/kv", "internal/core"}},
+	{"internal/controlplane/groups", []string{"internal/controlplane", "internal/core"}},
+	{"internal/controlplane/metadata", []string{"internal/controlplane/groups/storage", "internal/controlplane/kv", "internal/core"}},
+	{"internal/controlplane/replica", []string{"internal/controlplane/kv", "internal/controlplane/metadata", "internal/core"}},
+	{"internal/controlplane/executor", []string{"internal/controlplane/runloop", "internal/core"}},
+}
+
+// TestControlPlaneLayers: the domain packages depend inward only. Each one may
+// import the packages in layerRules and the standard library, nothing else. So
+// groups cannot import metadata, nothing in the domain can import an adapter
+// (server, controlplaneclient, wireboundary, api/v1), and the port executor
+// cannot import dynamolog or sqllog.
+func TestControlPlaneLayers(t *testing.T) {
+	r := loadRepo(t)
+	for _, rule := range layerRules {
+		for _, f := range r.files {
+			if f.dir != rule.dir || f.isTest {
+				continue
+			}
+			for _, imp := range f.imports {
+				rel, ok := inModule(imp, r.module)
+				if !ok {
+					if strings.Contains(strings.Split(imp, "/")[0], ".") {
+						t.Errorf("%s imports %q: %s may not import a third-party package; put that code in an adapter", f.rel, imp, rule.dir)
+					}
+					continue
+				}
+				if !slices.Contains(rule.allowed, rel) {
+					t.Errorf("%s imports %q: %s may import only %v, the standard library and nothing else", f.rel, imp, rule.dir, rule.allowed)
+				}
+			}
+		}
+	}
+}
+
+// TestLogAdaptersImportOnlyThePort: dynamolog and sqllog implement executor.Log.
+// They may import the port (executor) and core, and no other control-plane package.
+func TestLogAdaptersImportOnlyThePort(t *testing.T) {
+	r := loadRepo(t)
+	adapters := []string{"internal/controlplane/executor/dynamolog", "internal/controlplane/executor/sqllog"}
+	for _, f := range r.files {
+		if f.isTest || !slices.Contains(adapters, f.dir) {
+			continue
+		}
+		for _, imp := range f.imports {
+			rel, ok := inModule(imp, r.module)
+			if ok && rel != "internal/controlplane/executor" && rel != "internal/core" {
+				t.Errorf("%s imports %q: a log adapter may import only internal/controlplane/executor and internal/core", f.rel, imp)
+			}
+		}
+	}
 }
 
 // TestReportControlPlaneImporters only logs. It never fails. It lists the

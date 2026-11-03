@@ -26,6 +26,7 @@ import (
 	"github.com/manifesterio/mds/internal/controlplane/controlplanemetrics"
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/fakedynamodb"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/executor/sqllog"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system"
 	"github.com/manifesterio/mds/internal/system/runinfo"
@@ -560,7 +561,7 @@ func waitRole(t *testing.T, n *logNode, want string) {
 func dropPostgresTables(t *testing.T, dsn, prefix string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	db, err := executor.OpenPostgres(ctx, dsn)
+	db, err := sqllog.OpenPostgres(ctx, dsn)
 	if err != nil {
 		t.Errorf("drop tables: %v", err)
 		return

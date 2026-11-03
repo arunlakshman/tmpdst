@@ -19,6 +19,7 @@ import (
 	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/fakedynamodb"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/executor/dynamolog"
 	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/server"
 	"github.com/manifesterio/mds/internal/core"
@@ -55,7 +56,7 @@ func newLogStack(t *testing.T, brokers int) *logStack {
 	if _, err := db.CreateTable(t.Context(), &dynamodb.CreateTableInput{TableName: new("cp")}); err != nil {
 		t.Fatal(err)
 	}
-	log := executor.NewDynamoLog(db, "cp", executor.DynamoLogOptions{})
+	log := dynamolog.New(db, "cp", dynamolog.Options{})
 	objs := executor.NewMemoryObjects()
 	ls := &logStack{}
 	var addrs []string

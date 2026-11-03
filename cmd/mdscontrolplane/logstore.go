@@ -15,6 +15,8 @@ import (
 
 	"github.com/manifesterio/mds/internal/controlplane/controlplanemetrics"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/executor/dynamolog"
+	"github.com/manifesterio/mds/internal/controlplane/executor/sqllog"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system"
 	"github.com/manifesterio/mds/internal/system/runinfo"
@@ -90,8 +92,8 @@ func isLogStore(kind string) bool {
 }
 
 type logDB interface {
-	executor.DynamoClient
-	executor.TableManager
+	dynamolog.Client
+	dynamolog.TableManager
 }
 
 type deps struct {
@@ -139,11 +141,11 @@ func openDynLog(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.M
 	}
 	table := f.log.tableName(f.prefix)
 	if f.create {
-		if err := executor.CreateDynamoTable(ctx, db, table); err != nil {
+		if err := dynamolog.CreateTable(ctx, db, table); err != nil {
 			return nil, nil, nop, err
 		}
 	}
-	lg := executor.NewDynamoLog(db, table, executor.DynamoLogOptions{TTL: f.log.logTTL})
+	lg := dynamolog.New(db, table, dynamolog.Options{TTL: f.log.logTTL})
 	objs, err := openCheckpointObjects(ctx, d, f, log)
 	if err != nil {
 		return nil, nil, nop, err
@@ -189,12 +191,12 @@ func openSQLDB(ctx context.Context, dsn string) (*sql.DB, error) {
 	if dsn == "" {
 		return nil, errors.New("-store postgres needs -postgres-dsn or " + postgresDSNEnv)
 	}
-	return executor.OpenPostgres(ctx, dsn)
+	return sqllog.OpenPostgres(ctx, dsn)
 }
 
 // newSQLStore builds the SQL log over db and the checkpoint store.
 func newSQLStore(ctx context.Context, db *sql.DB, d deps, f cpFlags, log *slog.Logger) (executor.Log, executor.ObjectStore, error) {
-	lg, err := executor.NewSQLLog(db, f.log.postgresPrefix)
+	lg, err := sqllog.New(db, f.log.postgresPrefix)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -211,7 +213,7 @@ func newSQLStore(ctx context.Context, db *sql.DB, d deps, f cpFlags, log *slog.L
 }
 
 // createSQLTables creates the SQL tables when -create-tables is set.
-func createSQLTables(ctx context.Context, lg *executor.SQLLog, create bool) error {
+func createSQLTables(ctx context.Context, lg *sqllog.Log, create bool) error {
 	if !create {
 		return nil
 	}

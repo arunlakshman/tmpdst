@@ -1,4 +1,6 @@
-package executor
+// Package dynamolog is the DynamoDB implementation of executor.Log. It keeps the
+// AWS SDK out of the packages that only need the Log interface.
+package dynamolog
 
 import (
 	"bytes"
@@ -13,12 +15,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
+	"github.com/manifesterio/mds/internal/controlplane/executor"
 	"github.com/manifesterio/mds/internal/core"
 )
 
-// DynamoClient is the DynamoDB surface DynamoLog needs. *dynamodb.Client
+// Client is the DynamoDB surface Log needs. *dynamodb.Client
 // satisfies it.
-type DynamoClient interface {
+type Client interface {
 	PutItem(ctx context.Context, in *dynamodb.PutItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.PutItemOutput, error)
 	GetItem(ctx context.Context, in *dynamodb.GetItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.GetItemOutput, error)
 	UpdateItem(ctx context.Context, in *dynamodb.UpdateItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.UpdateItemOutput, error)
@@ -26,22 +29,22 @@ type DynamoClient interface {
 	BatchWriteItem(ctx context.Context, in *dynamodb.BatchWriteItemInput, opts ...func(*dynamodb.Options)) (*dynamodb.BatchWriteItemOutput, error)
 }
 
-// DynamoLogOptions tune a DynamoLog.
-type DynamoLogOptions struct {
+// Options tune a Log.
+type Options struct {
 	TTL time.Duration
 	Now func() time.Time
 }
 
-// DynamoLog stores opaque machine payloads in one DynamoDB partition
+// Log stores opaque machine payloads in one DynamoDB partition
 // (pk=LOG, sk=20-digit slot). Bytes in attribute d are not decoded here.
 //
 // The writer epoch and the floor live in another partition (pk=META):
 // sk=WRITER holds epoch and owner, and sk=FLOOR holds floor. The log Query
 // never sees them.
-type DynamoLog struct {
-	db    DynamoClient
+type Log struct {
+	db    Client
 	table string
-	o     DynamoLogOptions
+	o     Options
 }
 
 const (
@@ -52,12 +55,12 @@ const (
 	slotMax          = "99999999999999999999"
 )
 
-// NewDynamoLog returns a byte log over table.
-func NewDynamoLog(db DynamoClient, table string, o DynamoLogOptions) *DynamoLog {
+// New returns a byte log over table.
+func New(db Client, table string, o Options) *Log {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	return &DynamoLog{db: db, table: table, o: o}
+	return &Log{db: db, table: table, o: o}
 }
 
 func slotKey(n core.LogPosition) string { return fmt.Sprintf("%020d", n) }
@@ -78,7 +81,7 @@ func metaKey(sortKey string) map[string]types.AttributeValue {
 
 // Append implements Log with a conditional PutItem. After a put that succeeds
 // it reads the floor. A slot at or below the floor is not a commit (see Log).
-func (l *DynamoLog) Append(ctx context.Context, slot core.LogPosition, data []byte) ([]byte, bool, error) {
+func (l *Log) Append(ctx context.Context, slot core.LogPosition, data []byte) ([]byte, bool, error) {
 	it := map[string]types.AttributeValue{
 		"pk": stringValue(logPartitionKey), "sk": stringValue(slotKey(slot)),
 		"d": &types.AttributeValueMemberB{Value: data},
@@ -128,14 +131,14 @@ func (l *DynamoLog) Append(ctx context.Context, slot core.LogPosition, data []by
 
 // atOrBelowFloor reports whether slot is at or below the floor. It reads the
 // floor with one consistent GetItem.
-func (l *DynamoLog) atOrBelowFloor(ctx context.Context, slot core.LogPosition) (bool, error) {
+func (l *Log) atOrBelowFloor(ctx context.Context, slot core.LogPosition) (bool, error) {
 	floor, ok, err := l.floor(ctx)
 	return ok && int64(slot) <= floor, err
 }
 
 // getMeta reads one META item with a consistent read. It returns nil when the
 // item does not exist.
-func (l *DynamoLog) getMeta(ctx context.Context, sortKey string) (map[string]types.AttributeValue, error) {
+func (l *Log) getMeta(ctx context.Context, sortKey string) (map[string]types.AttributeValue, error) {
 	out, err := l.db.GetItem(ctx, &dynamodb.GetItemInput{
 		TableName: &l.table, Key: metaKey(sortKey), ConsistentRead: aws.Bool(true),
 	})
@@ -147,7 +150,7 @@ func (l *DynamoLog) getMeta(ctx context.Context, sortKey string) (map[string]typ
 
 // floor reads META/FLOOR. ok is false when the item does not exist yet, which
 // means nothing was trimmed.
-func (l *DynamoLog) floor(ctx context.Context) (int64, bool, error) {
+func (l *Log) floor(ctx context.Context) (int64, bool, error) {
 	it, err := l.getMeta(ctx, floorSortKey)
 	if err != nil || it == nil {
 		return 0, false, err
@@ -162,7 +165,7 @@ func (l *DynamoLog) floor(ctx context.Context) (int64, bool, error) {
 
 // raiseFloor moves META/FLOOR up to through. It never moves it down: a
 // ConditionalCheckFailed means a higher floor is already stored, which is fine.
-func (l *DynamoLog) raiseFloor(ctx context.Context, through core.LogPosition) error {
+func (l *Log) raiseFloor(ctx context.Context, through core.LogPosition) error {
 	_, err := l.db.UpdateItem(ctx, &dynamodb.UpdateItemInput{
 		TableName:                 &l.table,
 		Key:                       metaKey(floorSortKey),
@@ -181,7 +184,7 @@ func (l *DynamoLog) raiseFloor(ctx context.Context, through core.LogPosition) er
 }
 
 // ClaimEpoch implements Log with a conditional UpdateItem on META/WRITER.
-func (l *DynamoLog) ClaimEpoch(ctx context.Context, expect uint64, owner string) (uint64, string, bool, error) {
+func (l *Log) ClaimEpoch(ctx context.Context, expect uint64, owner string) (uint64, string, bool, error) {
 	cond := "#epoch = :expect"
 	if expect == 0 {
 		// No epoch stored yet counts as 0.
@@ -233,7 +236,7 @@ func writerOf(it map[string]types.AttributeValue) (uint64, string, error) {
 	return epoch, owner, nil
 }
 
-func (l *DynamoLog) between(lo, hi string) *dynamodb.QueryInput {
+func (l *Log) between(lo, hi string) *dynamodb.QueryInput {
 	return &dynamodb.QueryInput{
 		TableName:              &l.table,
 		KeyConditionExpression: new("pk = :p AND sk BETWEEN :lo AND :hi"),
@@ -254,7 +257,7 @@ func itemData(it map[string]types.AttributeValue) []byte {
 func itemSlot(it map[string]types.AttributeValue) (core.LogPosition, error) {
 	sortKey, ok := it["sk"].(*types.AttributeValueMemberS)
 	if !ok {
-		return 0, ErrInvalidSlot
+		return 0, executor.ErrInvalidSlot
 	}
 	n, err := strconv.ParseInt(sortKey.Value, 10, 64)
 	return core.LogPosition(n), err
@@ -264,7 +267,7 @@ func itemSlot(it map[string]types.AttributeValue) (core.LogPosition, error) {
 // reads the floor after it. Then it drops every row at or below the floor. A
 // stray row (see Append) can be in the Query result, and a trim that raises the
 // floor during the Query is still caught, because the floor is read last.
-func (l *DynamoLog) Read(ctx context.Context, from core.LogPosition, limit int) ([]core.LogEntry, error) {
+func (l *Log) Read(ctx context.Context, from core.LogPosition, limit int) ([]core.LogEntry, error) {
 	var out []core.LogEntry
 	var start map[string]types.AttributeValue
 	for len(out) < limit {
@@ -302,7 +305,7 @@ func (l *DynamoLog) Read(ctx context.Context, from core.LogPosition, limit int) 
 }
 
 // CheckTail implements Log.
-func (l *DynamoLog) CheckTail(ctx context.Context) (core.LogPosition, error) {
+func (l *Log) CheckTail(ctx context.Context) (core.LogPosition, error) {
 	q := l.between(slotKey(0), slotMax)
 	q.ConsistentRead = aws.Bool(true)
 	q.ScanIndexForward = aws.Bool(false)
@@ -318,9 +321,9 @@ func (l *DynamoLog) CheckTail(ctx context.Context) (core.LogPosition, error) {
 // TrimThrough raises the floor to through, and only after that deletes every
 // slot at or below through. A slot must be covered by the floor before it is
 // deleted.
-func (l *DynamoLog) TrimThrough(ctx context.Context, through core.LogPosition) error {
+func (l *Log) TrimThrough(ctx context.Context, through core.LogPosition) error {
 	if through < 0 {
-		return ErrInvalidSlot
+		return executor.ErrInvalidSlot
 	}
 	if err := l.raiseFloor(ctx, through); err != nil {
 		return err
@@ -356,7 +359,7 @@ func (l *DynamoLog) TrimThrough(ctx context.Context, through core.LogPosition) e
 // deleteBatch sends one batch of deletes and repeats the part DynamoDB did not
 // process. It fails if some deletes are still left after a few rounds, so a
 // trim is never reported as done when old slots remain.
-func (l *DynamoLog) deleteBatch(ctx context.Context, reqs []types.WriteRequest) error {
+func (l *Log) deleteBatch(ctx context.Context, reqs []types.WriteRequest) error {
 	const rounds = 5
 	for range rounds {
 		out, err := l.db.BatchWriteItem(ctx, &dynamodb.BatchWriteItemInput{

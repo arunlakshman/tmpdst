@@ -10,6 +10,7 @@ import (
 
 	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/executor/sqllog"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system"
 )
@@ -86,7 +87,7 @@ func TestPostgresThreeNodesTakeoverWithTrim(t *testing.T) {
 // postgresEpochAndFloor reads the two meta rows of one test prefix.
 func postgresEpochAndFloor(t *testing.T, dsn, prefix string) (int64, int64) {
 	t.Helper()
-	db, err := executor.OpenPostgres(t.Context(), dsn)
+	db, err := sqllog.OpenPostgres(t.Context(), dsn)
 	if err != nil {
 		t.Fatal(err)
 	}

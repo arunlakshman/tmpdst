@@ -34,8 +34,11 @@
 //     with an in-memory store and the record codec they share.
 //   - kv/pebblestore: the Pebble-backed key-value store that
 //     metadata uses.
-//   - executor: runs the control-plane IOCalls outside Step. These are Dynamo
-//     log slots and object-store checkpoints.
+//   - executor: runs the control-plane IOCalls outside Step, and owns the Log
+//     and ObjectStore ports.
+//   - executor/dynamolog and executor/sqllog: the DynamoDB and Postgres
+//     implementations of executor.Log. executor/logtest is their shared test
+//     suite.
 //   - groups/storage: how consumer group state is kept in kv (the G, M and O
 //     keys): the fold of the group writes and the group reads. It does not
 //     know about topics.
@@ -49,6 +52,8 @@
 //
 //   - server imports runloop, replica, executor and groups.
 //   - replica imports metadata. metadata imports kv and groups/storage.
-//     groups/storage imports kv. executor imports runloop.
+//     groups/storage imports kv. executor imports runloop. dynamolog and sqllog
+//     import executor. Domain packages import no third-party package; see
+//     TestControlPlaneLayers in architecture_test.go.
 //   - controlplaneclient imports api/v1 and wireboundary, and calls the gRPC API.
 package controlplane

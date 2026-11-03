@@ -4,7 +4,7 @@ Status: built and tested for PostgreSQL 17.11. Other SQL databases are not built
 
 The control plane keeps its log in a store. Until now the stores were DynamoDB
 (`-store dynamolog`) and memory (for tests and demos). This document covers the
-third store, `-store postgres`. The code is in `internal/controlplane/executor/sqllog.go`.
+third store, `-store postgres`. The code is in `internal/controlplane/executor/sqllog/sqllog.go`.
 
 ## 1. The contract a backend must meet
 

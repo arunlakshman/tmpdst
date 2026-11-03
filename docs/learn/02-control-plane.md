@@ -1225,7 +1225,7 @@ than the one the simulator tests.
 5. `replica/commit.go`: `Offer`, `emitCommitGroup`, `onCommitAppendDone`, `applySlot`,
    `deliver`. Then `envelope.go`.
 6. `replica/role.go` and `checkpoint.go`. Then `reads.go`.
-7. `executor/dynlog.go`, `classify.go`; `runloop/run.go`; `server/node.go` (`offer`).
+7. `executor/dynamolog/dynamolog.go`, `classify.go`; `runloop/run.go`; `server/node.go` (`offer`).
 8. `controlplaneclient/client.go` last.
 
 **Noise you can skip on a first pass:** `InjectedBug*` branches, `env.Always/Reachable/

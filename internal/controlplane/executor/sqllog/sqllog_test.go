@@ -1,4 +1,4 @@
-package executor_test
+package sqllog_test
 
 import (
 	"context"
@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/executor/logtest"
+	"github.com/manifesterio/mds/internal/controlplane/executor/sqllog"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -30,21 +32,21 @@ var (
 
 // openPostgres returns a log in its own pair of tables, and the connection for
 // tests that look at the tables directly. The tables are dropped at the end.
-func openPostgres(t *testing.T) (*executor.SQLLog, *sql.DB, string) {
+func openPostgres(t *testing.T) (*sqllog.Log, *sql.DB, string) {
 	t.Helper()
 	dsn := os.Getenv(postgresDSNEnv)
 	if dsn == "" {
 		t.Skip("set " + postgresDSNEnv + " (make it-postgres starts a container) to run the Postgres tests")
 	}
 	sharedPostgres.once.Do(func() {
-		sharedPostgres.db, sharedPostgres.err = executor.OpenPostgres(t.Context(), dsn)
+		sharedPostgres.db, sharedPostgres.err = sqllog.OpenPostgres(t.Context(), dsn)
 	})
 	if sharedPostgres.err != nil {
 		t.Fatal(sharedPostgres.err)
 	}
 	db := sharedPostgres.db
 	prefix := fmt.Sprintf("t%d_%d_", time.Now().UnixNano()%1_000_000_000, postgresTables.Add(1))
-	l, err := executor.NewSQLLog(db, prefix)
+	l, err := sqllog.New(db, prefix)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,12 +66,12 @@ func openPostgresLog(t *testing.T) executor.Log {
 
 func TestSQLLogRejectsABadTablePrefix(t *testing.T) {
 	for _, bad := range []string{"Bad", "1abc", "a-b", "a b", "x;drop table y", "ab\"c"} {
-		if _, err := executor.NewSQLLog(nil, bad); err == nil {
+		if _, err := sqllog.New(nil, bad); err == nil {
 			t.Errorf("prefix %q was accepted", bad)
 		}
 	}
 	for _, ok := range []string{"", "mds_", "cp1_"} {
-		if _, err := executor.NewSQLLog(nil, ok); err != nil {
+		if _, err := sqllog.New(nil, ok); err != nil {
 			t.Errorf("prefix %q was rejected: %v", ok, err)
 		}
 	}
@@ -213,3 +215,5 @@ func TestSQLLogTailIsNeverBelowTheFloor(t *testing.T) {
 		t.Fatalf("after a trim through 10 with no rows: tail %d, %v; want 11", tail, err)
 	}
 }
+
+func TestConformance(t *testing.T) { logtest.Run(t, openPostgresLog) }

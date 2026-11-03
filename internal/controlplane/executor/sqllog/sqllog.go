@@ -1,4 +1,6 @@
-package executor
+// Package sqllog is the SQL (Postgres) implementation of executor.Log. It keeps
+// the pgx driver out of the packages that only need the Log interface.
+package sqllog
 
 import (
 	"context"
@@ -11,10 +13,11 @@ import (
 	// The pgx driver registers itself as "pgx" for database/sql.
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/manifesterio/mds/internal/controlplane/executor"
 	"github.com/manifesterio/mds/internal/core"
 )
 
-// SQLLog is a Log in a SQL database. Today the SQL is for PostgreSQL. A store
+// Log is a Log in a SQL database. Today the SQL is for PostgreSQL. A store
 // for another database changes only the statements below: the Log contract
 // needs put-if-absent on a slot, an ordered consistent range read, and a
 // compare-and-swap of one row.
@@ -30,7 +33,7 @@ import (
 // row to raise the floor. So a put can never land at or below the floor: there
 // are no stray rows (the DynamoDB log needs a check after the put for this).
 // Reads run at read committed on the primary, so they are never stale.
-type SQLLog struct {
+type Log struct {
 	db         *sql.DB
 	stmtCreate [3]string
 	stmts      sqlStatements
@@ -52,14 +55,14 @@ type sqlStatements struct {
 
 var sqlName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,40}$`)
 
-// NewSQLLog returns a log over db. The tables are <prefix>log and <prefix>meta.
+// New returns a log over db. The tables are <prefix>log and <prefix>meta.
 // Call CreateSchema once before the first use. The caller owns db.
-func NewSQLLog(db *sql.DB, prefix string) (*SQLLog, error) {
+func New(db *sql.DB, prefix string) (*Log, error) {
 	if prefix != "" && !sqlName.MatchString(prefix) {
 		return nil, fmt.Errorf("executor: bad SQL table prefix %q (use a-z, 0-9 and _)", prefix)
 	}
 	logTable, metaTable := prefix+"log", prefix+"meta"
-	l := &SQLLog{db: db}
+	l := &Log{db: db}
 	l.stmtCreate = [3]string{
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (slot BIGINT PRIMARY KEY, data BYTEA NOT NULL)`, logTable),
 		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (name TEXT PRIMARY KEY, num BIGINT NOT NULL, txt TEXT NOT NULL DEFAULT '')`, metaTable),
@@ -97,7 +100,7 @@ func OpenPostgres(ctx context.Context, dsn string) (*sql.DB, error) {
 }
 
 // CreateSchema creates the tables and the two meta rows if they are missing.
-func (l *SQLLog) CreateSchema(ctx context.Context) error {
+func (l *Log) CreateSchema(ctx context.Context) error {
 	return l.inTx(ctx, func(tx *sql.Tx) error {
 		for _, statement := range l.stmtCreate {
 			if _, err := tx.ExecContext(ctx, statement); err != nil {
@@ -109,7 +112,7 @@ func (l *SQLLog) CreateSchema(ctx context.Context) error {
 }
 
 // inTx runs fn in a transaction and commits it, or rolls it back on an error.
-func (l *SQLLog) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
+func (l *Log) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 	tx, err := l.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -122,9 +125,9 @@ func (l *SQLLog) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 }
 
 // Append implements Log. See the Log contract for the three outcomes.
-func (l *SQLLog) Append(ctx context.Context, slot core.LogPosition, data []byte) ([]byte, bool, error) {
+func (l *Log) Append(ctx context.Context, slot core.LogPosition, data []byte) ([]byte, bool, error) {
 	if slot < 0 {
-		return nil, false, ErrInvalidSlot
+		return nil, false, executor.ErrInvalidSlot
 	}
 	var existing []byte
 	var taken bool
@@ -139,7 +142,7 @@ func (l *SQLLog) Append(ctx context.Context, slot core.LogPosition, data []byte)
 // appendIn is the body of Append. The shared lock on the floor row stays until
 // the transaction ends, so a trim cannot raise the floor past this slot between
 // the check and the insert.
-func (l *SQLLog) appendIn(ctx context.Context, tx *sql.Tx, slot int64, data []byte) ([]byte, bool, error) {
+func (l *Log) appendIn(ctx context.Context, tx *sql.Tx, slot int64, data []byte) ([]byte, bool, error) {
 	var floor int64
 	if err := tx.QueryRowContext(ctx, l.stmts.lockFloor).Scan(&floor); err != nil {
 		return nil, false, err
@@ -151,7 +154,7 @@ func (l *SQLLog) appendIn(ctx context.Context, tx *sql.Tx, slot int64, data []by
 }
 
 // insertOrRead stores the entry, or returns the bytes that already hold the slot.
-func (l *SQLLog) insertOrRead(ctx context.Context, tx *sql.Tx, slot int64, data []byte) ([]byte, bool, error) {
+func (l *Log) insertOrRead(ctx context.Context, tx *sql.Tx, slot int64, data []byte) ([]byte, bool, error) {
 	stored, err := l.insertSlot(ctx, tx, slot, data)
 	if err != nil || stored {
 		return nil, false, err
@@ -160,7 +163,7 @@ func (l *SQLLog) insertOrRead(ctx context.Context, tx *sql.Tx, slot int64, data 
 	return existing, true, err
 }
 
-func (l *SQLLog) insertSlot(ctx context.Context, tx *sql.Tx, slot int64, data []byte) (bool, error) {
+func (l *Log) insertSlot(ctx context.Context, tx *sql.Tx, slot int64, data []byte) (bool, error) {
 	res, err := tx.ExecContext(ctx, l.stmts.insertSlot, slot, data)
 	if err != nil {
 		return false, err
@@ -169,7 +172,7 @@ func (l *SQLLog) insertSlot(ctx context.Context, tx *sql.Tx, slot int64, data []
 	return n == 1, err
 }
 
-func (l *SQLLog) slotBytes(ctx context.Context, tx *sql.Tx, slot int64) ([]byte, error) {
+func (l *Log) slotBytes(ctx context.Context, tx *sql.Tx, slot int64) ([]byte, error) {
 	var existing []byte
 	err := tx.QueryRowContext(ctx, l.stmts.selectSlot, slot).Scan(&existing)
 	return existing, err
@@ -177,9 +180,9 @@ func (l *SQLLog) slotBytes(ctx context.Context, tx *sql.Tx, slot int64) ([]byte,
 
 // Read implements Log. It is one statement, so the floor and the rows come from
 // the same snapshot.
-func (l *SQLLog) Read(ctx context.Context, from core.LogPosition, limit int) ([]core.LogEntry, error) {
+func (l *Log) Read(ctx context.Context, from core.LogPosition, limit int) ([]core.LogEntry, error) {
 	if from < 0 || limit < 0 {
-		return nil, ErrInvalidSlot
+		return nil, executor.ErrInvalidSlot
 	}
 	rows, err := l.db.QueryContext(ctx, l.stmts.read, int64(from), int64(limit))
 	if err != nil {
@@ -203,7 +206,7 @@ func scanEntries(rows *sql.Rows) ([]core.LogEntry, error) {
 }
 
 // CheckTail implements Log. It is never below floor + 1.
-func (l *SQLLog) CheckTail(ctx context.Context) (core.LogPosition, error) {
+func (l *Log) CheckTail(ctx context.Context) (core.LogPosition, error) {
 	var tail int64
 	if err := l.db.QueryRowContext(ctx, l.stmts.tail).Scan(&tail); err != nil {
 		return 0, err
@@ -213,9 +216,9 @@ func (l *SQLLog) CheckTail(ctx context.Context) (core.LogPosition, error) {
 
 // TrimThrough implements Log. The floor is raised and committed first. Then the
 // slots are deleted in batches, so a long trim never holds a long lock.
-func (l *SQLLog) TrimThrough(ctx context.Context, through core.LogPosition) error {
+func (l *Log) TrimThrough(ctx context.Context, through core.LogPosition) error {
 	if through < 0 {
-		return ErrInvalidSlot
+		return executor.ErrInvalidSlot
 	}
 	if _, err := l.db.ExecContext(ctx, l.stmts.raiseFloor, int64(through)); err != nil {
 		return err
@@ -224,7 +227,7 @@ func (l *SQLLog) TrimThrough(ctx context.Context, through core.LogPosition) erro
 }
 
 // deleteThrough deletes the slots at or below through, one batch at a time.
-func (l *SQLLog) deleteThrough(ctx context.Context, through int64) error {
+func (l *Log) deleteThrough(ctx context.Context, through int64) error {
 	for {
 		n, err := l.deleteBatch(ctx, through)
 		if err != nil || n == 0 {
@@ -233,7 +236,7 @@ func (l *SQLLog) deleteThrough(ctx context.Context, through int64) error {
 	}
 }
 
-func (l *SQLLog) deleteBatch(ctx context.Context, through int64) (int64, error) {
+func (l *Log) deleteBatch(ctx context.Context, through int64) (int64, error) {
 	res, err := l.db.ExecContext(ctx, l.stmts.deleteBatch, through, l.stmts.trimBatchMax)
 	if err != nil {
 		return 0, err
@@ -244,7 +247,7 @@ func (l *SQLLog) deleteBatch(ctx context.Context, through int64) (int64, error) 
 // ClaimEpoch implements Log. The update is the compare-and-swap: two claims with
 // the same expect cannot both match the row, because the second waits for the
 // first and then sees the new epoch.
-func (l *SQLLog) ClaimEpoch(ctx context.Context, expect uint64, owner string) (uint64, string, bool, error) {
+func (l *Log) ClaimEpoch(ctx context.Context, expect uint64, owner string) (uint64, string, bool, error) {
 	var epoch int64
 	var stored string
 	err := l.db.QueryRowContext(ctx, l.stmts.claimEpoch, int64(expect), owner).Scan(&epoch, &stored)

@@ -180,7 +180,7 @@ A fenced or deposed node:
 |---|---|
 | `internal/core` | New action `LogClaimEpoch{Req, Expect}` and event `LogClaimEpochDone{Req, Epoch, Won, Err, Outcome}`. Add to inbox/event lists. Doc update for `LogDeleteOld`: advances the floor, then deletes. |
 | `internal/controlplane/executor` | `Log` interface: add `ClaimEpoch`. `DynamoLog`: `ClaimEpoch` (GetItem + conditional UpdateItem), `Append` does the floor read after a successful put and returns the "below floor" shape, `TrimThrough` raises the floor first. `MemoryLog`: same semantics (replace the old marker). Classify errors. |
-| `internal/controlplane/fakedynamodb` | Check that `UpdateItem` with `epoch = :x` and `attribute_not_exists(floor) OR floor < :n`, and consistent `GetItem`, are supported. Add if not. (To verify.) |
+| `internal/controlplane/controlplanetest/fakedynamodb` | Check that `UpdateItem` with `epoch = :x` and `attribute_not_exists(floor) OR floor < :n`, and consistent `GetItem`, are supported. Add if not. (To verify.) |
 | `internal/verify/simulator/fakeservices/fakelogstore`, `fakelogservice` | Store holds epoch and floor. Same `Append`, `ClaimEpoch`, `Trim` semantics. Tags and the engine truth model. New mutants (section 11). |
 | `internal/controlplane/statemachine` | Epoch state and roles (claim, fence entry, read-only). Envelope carries epoch. Entry ids carry epoch. Ready rules (section 8). Writer rules (section 6). `belowFloor` handling reusing `hitTrimmed`. Remove rank-based failback (decision D3). |
 | `cmd/mdscontrolplane` | Flags: none new if possible. Metrics: `epoch`, `fenced_total{reason}`, `floor`. |

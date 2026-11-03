@@ -13,8 +13,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/fakedynamodb"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
-	"github.com/manifesterio/mds/internal/controlplane/fakedynamodb"
 	"github.com/manifesterio/mds/internal/controlplane/runloop"
 	"github.com/manifesterio/mds/internal/core"
 )

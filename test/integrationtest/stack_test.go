@@ -8,7 +8,7 @@ import (
 
 	"github.com/manifesterio/mds/internal/broker"
 	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
-	"github.com/manifesterio/mds/internal/controlplane/grpctestserver"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system"
 	"github.com/manifesterio/mds/internal/system/production"
@@ -28,7 +28,7 @@ type stack struct {
 // newStack boots an in-process gRPC control plane. st is ignored (kept for call-site shape).
 func newStack(t *testing.T, _ any, objs system.ObjectStore, cls system.ErrorClassifier) *stack {
 	t.Helper()
-	gn := grpctestserver.StartMem(t)
+	gn := controlplanetest.StartMem(t)
 	if objs == nil {
 		objs, cls = specsystem.NewObjectStore(), production.MemoryErrorClassifier{}
 	}

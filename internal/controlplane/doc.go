@@ -10,7 +10,8 @@
 // several packages. Its file is brokers.go in each; the map is at the top of
 // server/brokers.go.
 //
-// Helpers under this tree (memorystore, stateupdater, executor) support tests and the
+// All tests and test support live in controlplanetest (see its doc.go). Helpers under
+// this tree (stateupdater, executor) support the
 // state machine's fold and IO. Not deterministic (goroutines, net): it is not
 // checked by ops/tools/determinismcheck.
 package controlplane

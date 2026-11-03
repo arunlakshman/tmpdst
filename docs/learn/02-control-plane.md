@@ -136,7 +136,7 @@ All sizes are non-test lines. "Edge" means not deterministic (goroutines, networ
 | `api/v1`, `wireboundary` | ~120 + 250 | wire | Protobuf contract and conversion to `core` types |
 | `controlplaneclient` | ~375 | edge (broker side) | gRPC client with failover; error classifier |
 | `controlplanemetrics` | 340 | edge | Prometheus metrics and per-call logs |
-| `memorystore`, `fakedynamodb`, `grpctestserver`, `controlplanetest` | | test helpers | in-memory stores, fake DynamoDB, conformance tests |
+| `controlplanetest` (with `fakedynamodb`, `memorystore` inside) | | tests and test support | gRPC test node, fake DynamoDB, in-memory store, conformance tests |
 | `store.go`, `doc.go` (root) | | | `Store` interface (the shape every CP backend must have) |
 
 **Name map.** Page 01 uses the current names. Older comments and notes may still use the

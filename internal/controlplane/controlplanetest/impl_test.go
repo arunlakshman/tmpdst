@@ -9,8 +9,7 @@ import (
 
 	"github.com/manifesterio/mds/internal/controlplane"
 	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
-	"github.com/manifesterio/mds/internal/controlplane/grpctestserver"
-	"github.com/manifesterio/mds/internal/controlplane/memorystore"
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/memorystore"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/verify/speccheck/checker/generator"
 	"github.com/manifesterio/mds/internal/verify/speccheck/checker/observation"
@@ -76,7 +75,7 @@ func nonBusiness(err error) error {
 }
 
 func grpcOver(t testing.TB) impl {
-	return grpcImpl{grpctestserver.StartMem(t).Client}
+	return grpcImpl{StartMem(t).Client}
 }
 
 func newMem() controlplane.Store { return memorystore.New() }

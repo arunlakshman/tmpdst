@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
-	"github.com/manifesterio/mds/internal/controlplane/grpctestserver"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/verify/speccheck/checker/generator"
 	"github.com/manifesterio/mds/internal/verify/speccheck/checker/observation"
@@ -122,7 +121,7 @@ func TestManyBatchesMemorystore(t *testing.T) {
 
 func TestRoundTrip(t *testing.T) {
 	ctx := t.Context()
-	n := grpctestserver.StartMem(t)
+	n := StartMem(t)
 	c := n.Client
 	if err := c.CreateTopic(ctx, "t", 3); err != nil {
 		t.Fatal(err)

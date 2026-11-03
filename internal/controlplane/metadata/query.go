@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"hash/fnv"
 
+	"github.com/manifesterio/mds/internal/controlplane/kv"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -14,7 +15,7 @@ import (
 func (a *Store) Trim(slot int64) (int, error) {
 	hi := binary.BigEndian.AppendUint64([]byte{prefixSlot}, uint64(slot))
 	var dropped int
-	err := a.keyValue.Update(func(transaction Transaction) {
+	err := a.keyValue.Update(func(transaction kv.Transaction) {
 		var keysToDrop [][]byte
 		transaction.Ascend([]byte{prefixSlot}, hi, func(k, _ []byte) bool {
 			keysToDrop = append(keysToDrop, bytes.Clone(k))
@@ -32,9 +33,9 @@ func (a *Store) Trim(slot int64) (int, error) {
 // Window is the number of segment keys currently remembered.
 func (a *Store) Window() int {
 	var n int
-	_ = a.keyValue.View(func(transaction Transaction) {
+	_ = a.keyValue.View(func(transaction kv.Transaction) {
 		lo := []byte{prefixSlot}
-		transaction.Ascend(lo, prefixEnd(lo), func(_, _ []byte) bool { n++; return true })
+		transaction.Ascend(lo, kv.PrefixEnd(lo), func(_, _ []byte) bool { n++; return true })
 	})
 	return n
 }
@@ -44,7 +45,7 @@ func (a *Store) Window() int {
 // same order agree, whatever they trimmed. It is not speccheck's StateHash.
 func (a *Store) StateHash() uint64 {
 	h := fnv.New64a()
-	_ = a.keyValue.View(func(transaction Transaction) {
+	_ = a.keyValue.View(func(transaction kv.Transaction) {
 		transaction.Ascend([]byte{0}, nil, func(k, v []byte) bool {
 			if k[0] != prefixKey && k[0] != prefixSlot {
 				if _, err := h.Write(binary.AppendUvarint(nil, uint64(len(k)))); err != nil {
@@ -83,7 +84,7 @@ const (
 func (a *Store) Assigned(slot int64, operation core.CommitSegment) ([]core.BatchRange, AssignState, error) {
 	var rs []core.BatchRange
 	var st AssignState
-	err := a.keyValue.View(func(transaction Transaction) {
+	err := a.keyValue.View(func(transaction kv.Transaction) {
 		rec := transaction.Get(duplicateCheckKey(operation.SegmentKey))
 		if rec == nil {
 			return

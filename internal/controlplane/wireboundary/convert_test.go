@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
+	"github.com/manifesterio/mds/internal/controlplane/groups"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -89,23 +89,23 @@ func sameValue(t *testing.T, name string, got, want any) {
 }
 
 func TestGroupRequestsRoundTrip(t *testing.T) {
-	join := groupcoordinator.JoinReq{
+	join := groups.JoinReq{
 		Group: "g", MemberID: "m", GroupInstanceID: "i", ClientID: "c", ClientHost: "h",
 		SessionTimeoutMs: 1, RebalanceTimeoutMs: 2, ProtocolType: "consumer",
-		Protocols: []groupcoordinator.Protocol{{Name: "range", Metadata: []byte{1}}, {Name: "rr", Metadata: []byte{2}}},
+		Protocols: []groups.Protocol{{Name: "range", Metadata: []byte{1}}, {Name: "rr", Metadata: []byte{2}}},
 	}
 	sameValue(t, "join", JoinGroupToCore(JoinGroupFromCore(join)), join)
 
-	sync := groupcoordinator.SyncReq{
+	sync := groups.SyncReq{
 		Group: "g", MemberID: "m", Generation: 3,
-		Assignments: []groupcoordinator.Assignment{{Member: "a", Bytes: []byte{1}}, {Member: "b", Bytes: []byte{2}}},
+		Assignments: []groups.Assignment{{Member: "a", Bytes: []byte{1}}, {Member: "b", Bytes: []byte{2}}},
 	}
 	sameValue(t, "sync", SyncGroupToCore(SyncGroupFromCore(sync)), sync)
 
-	beat := groupcoordinator.HeartbeatReq{Group: "g", MemberID: "m", Generation: 4}
+	beat := groups.HeartbeatReq{Group: "g", MemberID: "m", Generation: 4}
 	sameValue(t, "heartbeat", HeartbeatToCore(HeartbeatFromCore(beat)), beat)
 
-	leave := groupcoordinator.LeaveReq{Group: "g", Members: []string{"a", "b"}}
+	leave := groups.LeaveReq{Group: "g", Members: []string{"a", "b"}}
 	sameValue(t, "leave", LeaveGroupToCore(LeaveGroupFromCore(leave)), leave)
 
 	commit := core.OffsetCommit{
@@ -128,13 +128,13 @@ func TestGroupRequestsRoundTrip(t *testing.T) {
 }
 
 func TestGroupResponsesRoundTrip(t *testing.T) {
-	join := groupcoordinator.JoinResp{
+	join := groups.JoinResp{
 		MemberID: "m", Generation: 3, Protocol: "range", Leader: "l",
-		Members: []groupcoordinator.Member{{ID: "a", InstanceID: "i", Metadata: []byte{1}}, {ID: "b"}},
+		Members: []groups.Member{{ID: "a", InstanceID: "i", Metadata: []byte{1}}, {ID: "b"}},
 	}
 	sameValue(t, "join resp", JoinGroupRespToCore(JoinGroupRespFromCore(join)), join)
 
-	sync := groupcoordinator.SyncResp{Assignment: []byte{7, 8}}
+	sync := groups.SyncResp{Assignment: []byte{7, 8}}
 	sameValue(t, "sync resp", SyncGroupRespToCore(SyncGroupRespFromCore(sync)), sync)
 
 	codes := []core.ErrCode{core.OK, core.ErrUnknownMember}
@@ -148,7 +148,7 @@ func TestGroupResponsesRoundTrip(t *testing.T) {
 	}}
 	sameValue(t, "offset fetch resp", OffsetFetchRespToCore(OffsetFetchRespFromCore(fetch)), fetch)
 
-	described := []groupcoordinator.GroupDescription{{
+	described := []groups.GroupDescription{{
 		Name: "g",
 		DescribeGroupResp: core.DescribeGroupResp{
 			Exists: true, Generation: 2, ProtocolType: "consumer", Protocol: "range",
@@ -184,8 +184,8 @@ func TestNilAndEmptyInputs(t *testing.T) {
 	sameValue(t, "nil commit resp", CommitSegmentRespToCore(nil), core.CommitSegmentResp{})
 	sameValue(t, "nil lookup resp", LookupRespToCore(nil), core.FindSegmentsResp{})
 	sameValue(t, "nil describe resp", DescribeTopicsRespToCore(nil), core.DescribeTopicsResp{})
-	sameValue(t, "nil join", JoinGroupToCore(nil), groupcoordinator.JoinReq{})
-	sameValue(t, "nil join resp", JoinGroupRespToCore(nil), groupcoordinator.JoinResp{})
+	sameValue(t, "nil join", JoinGroupToCore(nil), groups.JoinReq{})
+	sameValue(t, "nil join resp", JoinGroupRespToCore(nil), groups.JoinResp{})
 	sameValue(t, "nil broker heartbeat", BrokerHeartbeatToCore(nil), core.BrokerAddr{})
 	sameValue(t, "empty live set", BrokerHeartbeatRespToCore(BrokerHeartbeatRespFromCore(nil)), []core.BrokerAddr(nil))
 

@@ -13,7 +13,7 @@ import (
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
-	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
+	"github.com/manifesterio/mds/internal/controlplane/groups"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/runloop"
@@ -48,8 +48,8 @@ type Node struct {
 	inject chan runloop.InjectFunc
 	m      atomic.Pointer[replica.Replica]
 	health *health.Server
-	leases *leaseSet                     // run loop only; empty until brokers heartbeat
-	groups *groupcoordinator.Coordinator // serves group calls while this node is active
+	leases *leaseSet           // run loop only; empty until brokers heartbeat
+	groups *groups.Coordinator // serves group calls while this node is active
 
 	mu        sync.Mutex
 	waiters   map[core.RequestID]chan core.ControlPlaneDone
@@ -96,7 +96,7 @@ func New(config Config) *Node {
 		shutdown: make(chan struct{}),
 		loopDone: make(chan error, 1),
 	}
-	n.groups = groupcoordinator.New(groupcoordinator.Config{
+	n.groups = groups.New(groups.Config{
 		InitialRebalanceDelay: config.GroupInitialRebalanceDelay,
 	}, nodeGroups{n: n})
 	return n

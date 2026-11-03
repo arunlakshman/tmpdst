@@ -1,11 +1,11 @@
 package metadata
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 
+	"github.com/manifesterio/mds/internal/controlplane/kv"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -15,9 +15,6 @@ const (
 	prefixRun       = 'R'
 	prefixKey       = 'K'
 	prefixSlot      = 'S'
-	prefixGroup     = 'G'
-	prefixMember    = 'M'
-	prefixOffset    = 'O'
 
 	checksumLength = 16
 	runFormat      = 1
@@ -29,44 +26,7 @@ func topicKey(name string) []byte { return append([]byte{prefixTopic}, name...) 
 
 // topicPartitionPrefix is the prefix-free key prefix of one partition for kind p.
 func topicPartitionPrefix(p byte, topicPartition core.TopicPartition) []byte {
-	return appendTopicPartition([]byte{p}, topicPartition)
-}
-
-// appendTopicPartition appends uvarint(len topic), topic, partition (4, big endian).
-func appendTopicPartition(b []byte, topicPartition core.TopicPartition) []byte {
-	b = binary.AppendUvarint(b, uint64(len(topicPartition.Topic)))
-	b = append(b, topicPartition.Topic...)
-	return binary.BigEndian.AppendUint32(b, uint32(topicPartition.Partition))
-}
-
-// splitTopicPartition reads a partition that appendTopicPartition wrote, with
-// nothing after it.
-func splitTopicPartition(b []byte) (core.TopicPartition, bool) {
-	r := &reader{b: b, ok: true}
-	topic := r.str()
-	if !r.ok || len(r.b) != 4 {
-		return core.TopicPartition{}, false
-	}
-	return core.TopicPartition{Topic: topic, Partition: int32(binary.BigEndian.Uint32(r.b))}, true
-}
-
-// groupKey is the G key of a group: its header.
-func groupKey(group string) []byte { return append([]byte{prefixGroup}, group...) }
-
-// groupPrefix is the prefix-free key prefix of one group for kind p.
-func groupPrefix(p byte, group string) []byte {
-	b := binary.AppendUvarint([]byte{p}, uint64(len(group)))
-	return append(b, group...)
-}
-
-// memberKey is the M key of one member of a group.
-func memberKey(group, member string) []byte {
-	return append(groupPrefix(prefixMember, group), member...)
-}
-
-// offsetKey is the O key of one committed partition of a group.
-func offsetKey(group string, topicPartition core.TopicPartition) []byte {
-	return appendTopicPartition(groupPrefix(prefixOffset, group), topicPartition)
+	return kv.AppendTopicPartition([]byte{p}, topicPartition)
 }
 
 func endKey(topicPartition core.TopicPartition) []byte {
@@ -172,75 +132,27 @@ func encodeBatchRun(rs []core.BatchRange) []byte {
 	return b
 }
 
-// reader is a cursor over a packed record; the first failure sticks.
-type reader struct {
-	b  []byte
-	ok bool
-}
-
-func (r *reader) uv() uint64 {
-	v, n := binary.Uvarint(r.b)
-	if n <= 0 {
-		r.ok = false
-		return 0
-	}
-	r.b = r.b[n:]
-	return v
-}
-
-func (r *reader) sv() int64 {
-	v, n := binary.Varint(r.b)
-	if n <= 0 {
-		r.ok = false
-		return 0
-	}
-	r.b = r.b[n:]
-	return v
-}
-
-func (r *reader) blob() []byte {
-	n := r.uv()
-	if n > uint64(len(r.b)) {
-		r.ok = false
-		return nil
-	}
-	v := bytes.Clone(r.b[:n])
-	r.b = r.b[n:]
-	return v
-}
-
-func (r *reader) str() string {
-	n := r.uv()
-	if n > uint64(len(r.b)) {
-		r.ok = false
-		return ""
-	}
-	s := string(r.b[:n])
-	r.b = r.b[n:]
-	return s
-}
-
 // decodeBatchRun unpacks the run of tp that starts at base.
 func decodeBatchRun(topicPartition core.TopicPartition, base int64, b []byte) ([]core.BatchRange, error) {
 	if len(b) == 0 || b[0] != runFormat {
 		return nil, errCorrupt
 	}
-	r := &reader{b: b[1:], ok: true}
-	nk := r.uv()
-	if nk > uint64(len(r.b)) {
+	r := kv.NewReader(b[1:])
+	nk := r.Uvarint()
+	if nk > uint64(len(r.Rest())) {
 		return nil, errCorrupt
 	}
 	keys := make([]string, 0, nk)
-	for ; nk > 0 && r.ok; nk-- {
-		keys = append(keys, r.str())
+	for ; nk > 0 && r.OK(); nk-- {
+		keys = append(keys, r.String())
 	}
-	n := r.uv()
-	if n > uint64(len(r.b)) {
+	n := r.Uvarint()
+	if n > uint64(len(r.Rest())) {
 		return nil, errCorrupt
 	}
 	out := make([]core.BatchRange, 0, n)
-	for ; n > 0 && r.ok; n-- {
-		ki, cnt, off, ln := r.uv(), r.uv(), r.sv(), r.sv()
+	for ; n > 0 && r.OK(); n-- {
+		ki, cnt, off, ln := r.Uvarint(), r.Uvarint(), r.Varint(), r.Varint()
 		if ki >= uint64(len(keys)) {
 			return nil, errCorrupt
 		}
@@ -248,7 +160,7 @@ func decodeBatchRun(topicPartition core.TopicPartition, base int64, b []byte) ([
 			Loc: core.SegmentRef{Key: keys[ki], Off: off, Len: ln}})
 		base += int64(cnt)
 	}
-	if !r.ok || len(r.b) != 0 {
+	if !r.Done() {
 		return nil, errCorrupt
 	}
 	return out, nil

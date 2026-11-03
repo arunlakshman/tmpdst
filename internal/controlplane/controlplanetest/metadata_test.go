@@ -6,8 +6,9 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
+	"github.com/manifesterio/mds/internal/controlplane/kv"
+	"github.com/manifesterio/mds/internal/controlplane/kv/pebblestore"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
-	"github.com/manifesterio/mds/internal/controlplane/metadata/pebblestore"
 )
 
 // Conformance C3 for the production applier (decision 49): the shared control
@@ -16,7 +17,7 @@ import (
 
 func TestConformanceMetadataMem(t *testing.T) {
 	runProfiles(t, func() impl {
-		return &updaterstore.Store{A: metadata.New(metadata.NewMemoryKeyValueStore())}
+		return &updaterstore.Store{A: metadata.New(kv.NewMemory())}
 	}, 20)
 }
 

@@ -30,11 +30,16 @@
 //   - metadata: the control-plane data model (topics, segments, groups and
 //     offsets) and the rules for changing it. It applies commands in order to an
 //     ordered key-value store.
-//   - metadata/pebblestore: the Pebble-backed key-value store that
+//   - kv: the small ordered key-value seam under metadata and groups/storage,
+//     with an in-memory store and the record codec they share.
+//   - kv/pebblestore: the Pebble-backed key-value store that
 //     metadata uses.
 //   - executor: runs the control-plane IOCalls outside Step. These are Dynamo
 //     log slots and object-store checkpoints.
-//   - groupcoordinator: the consumer group coordinator of the active node. It
+//   - groups/storage: how consumer group state is kept in kv (the G, M and O
+//     keys): the fold of the group writes and the group reads. It does not
+//     know about topics.
+//   - groups: the consumer group coordinator of the active node. It
 //     speaks the classic group protocol only.
 //   - controlplanemetrics: the Prometheus instrumentation. It covers HTTP
 //     handler time, DynamoDB call time, in-flight requests and request sizes.
@@ -42,7 +47,8 @@
 //
 // How they fit together, from the imports:
 //
-//   - server imports runloop, replica, executor and groupcoordinator.
-//   - replica imports metadata. executor imports runloop.
+//   - server imports runloop, replica, executor and groups.
+//   - replica imports metadata. metadata imports kv and groups/storage.
+//     groups/storage imports kv. executor imports runloop.
 //   - controlplaneclient imports api/v1 and wireboundary, and calls the gRPC API.
 package controlplane

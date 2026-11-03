@@ -1,7 +1,7 @@
 # State updater store bake-off: bbolt vs Pebble (stage 1, decision 49)
 
 Status: measured 2026-10-20 on an Apple M1 (8 cores, SSD), Go 1.24. Not AWS. The state updater (`internal/controlplane/metadata`) keeps the
-control-plane state in an embedded ordered KV behind the small `metadata.KeyValueStore` seam (`View`, `Update`, `Get`, `Floor`,
+control-plane state in an embedded ordered KV behind the small `kv.Store` seam (`View`, `Update`, `Get`, `Floor`,
 `Ascend`, `Set`, `Delete`); the same state updater ran on both stores. Sync is off: state is rebuilt from the log plus a
 checkpoint, never trusted after a crash.
 
@@ -73,7 +73,7 @@ is 90 lines if it is ever needed again.
 - `ops/scripts/audit-dep.sh github.com/cockroachdb/pebble@v1.1.5 github.com/cockroachdb/pebble` ran (network was
   available). determinismcheck fails, as expected: goroutines, channels, mutable globals, map ranges, many off-list imports.
 - Record: `docs/dep-audits/github.com/cockroachdb/pebble@v1.1.5.md`. Verdict: **rejected for the deterministic
-  packages, accepted at the edge** (`internal/controlplane/metadata/pebblestore` only), like prometheus. No allow-list entry.
+  packages, accepted at the edge** (`internal/controlplane/kv/pebblestore` only), like prometheus. No allow-list entry.
 - `ops/scripts/ci-determinism.sh` passes: the state updater is outside its package list, and so is Pebble.
 - Not audited: the new transitive modules one by one (they are outside the closure; CI does not require it). A
   supply-chain review of `cockroachdb/errors` and `sentry-go` (pulled for Pebble's error type) is still open.

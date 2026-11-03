@@ -1,12 +1,15 @@
-package metadata
+// Package kv is the small ordered key-value seam under the control-plane
+// metadata: a read transaction, an atomic write transaction, nothing else. It
+// has an in-memory store here and a Pebble-backed store in kv/pebblestore.
+package kv
 
 import "bytes"
 
-// KeyValueStore is the embedded ordered key-value store the metadata store keeps its state in.
+// Store is the embedded ordered key-value store the metadata store keeps its state in.
 // It is a deliberately small seam: a read transaction, an atomic write
 // transaction, nothing else. Durability is not required (state is rebuilt from
 // the log and a checkpoint), so an implementation may skip fsync.
-type KeyValueStore interface {
+type Store interface {
 	// View runs fn on a consistent read-only view.
 	View(fn func(Transaction)) error
 	// Update runs fn as one atomic write transaction, reading its own writes.
@@ -32,9 +35,9 @@ type Transaction interface {
 	Delete(key []byte)
 }
 
-// prefixEnd is the smallest key greater than every key that starts with p
+// PrefixEnd is the smallest key greater than every key that starts with p
 // (nil when there is none).
-func prefixEnd(p []byte) []byte {
+func PrefixEnd(p []byte) []byte {
 	e := bytes.Clone(p)
 	for len(e) > 0 {
 		if e[len(e)-1] != 0xFF {

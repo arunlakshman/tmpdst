@@ -4,14 +4,14 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/manifesterio/mds/internal/controlplane/metadata"
+	"github.com/manifesterio/mds/internal/controlplane/kv"
 	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/core"
 )
 
 // trackedStore is an in-memory store that remembers whether it was closed.
 type trackedStore struct {
-	*metadata.MemoryKeyValueStore
+	*kv.Memory
 	closed bool
 }
 
@@ -26,11 +26,11 @@ type storeSource struct {
 	failOn int // 1-based call number that fails; 0 never fails
 }
 
-func (s *storeSource) open() (metadata.KeyValueStore, error) {
+func (s *storeSource) open() (kv.Store, error) {
 	if s.failOn == len(s.opened)+1 {
 		return nil, errors.New("disk is full")
 	}
-	st := &trackedStore{MemoryKeyValueStore: metadata.NewMemoryKeyValueStore()}
+	st := &trackedStore{Memory: kv.NewMemory()}
 	s.opened = append(s.opened, st)
 	return st, nil
 }

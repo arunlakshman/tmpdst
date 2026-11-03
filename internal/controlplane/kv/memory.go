@@ -1,4 +1,4 @@
-package metadata
+package kv
 
 import (
 	"bytes"
@@ -6,32 +6,32 @@ import (
 	"sync"
 )
 
-// MemoryKeyValueStore is an in-memory KV: a sorted slice copied on every write transaction.
+// Memory is an in-memory KV: a sorted slice copied on every write transaction.
 // It is the default store of the machine in the simulator and in tests. Production
-// mdscontrolplane passes Pebble instead (see metadata/pebblestore and replica.Config.OpenStore).
-type MemoryKeyValueStore struct {
+// mdscontrolplane passes Pebble instead (see kv/pebblestore and replica.Config.OpenStore).
+type Memory struct {
 	mu      sync.RWMutex
 	entries []memoryEntry
 }
 
 type memoryEntry struct{ key, value []byte }
 
-// NewMemoryKeyValueStore returns an empty store.
-func NewMemoryKeyValueStore() *MemoryKeyValueStore { return &MemoryKeyValueStore{} }
+// NewMemory returns an empty store.
+func NewMemory() *Memory { return &Memory{} }
 
-// Close implements KeyValueStore.
-func (m *MemoryKeyValueStore) Close() error { return nil }
+// Close implements Store.
+func (m *Memory) Close() error { return nil }
 
-// View implements KeyValueStore.
-func (m *MemoryKeyValueStore) View(fn func(Transaction)) error {
+// View implements Store.
+func (m *Memory) View(fn func(Transaction)) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	fn(&memoryTransaction{entries: m.entries})
 	return nil
 }
 
-// Update implements KeyValueStore.
-func (m *MemoryKeyValueStore) Update(fn func(Transaction)) error {
+// Update implements Store.
+func (m *Memory) Update(fn func(Transaction)) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	transaction := &memoryTransaction{entries: slices.Clone(m.entries)}

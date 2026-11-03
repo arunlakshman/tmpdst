@@ -2,11 +2,11 @@ package memorystore
 
 import (
 	"context"
-	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
 	"slices"
 	"sync"
 	"testing"
 
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
 	"github.com/manifesterio/mds/internal/core"
 )
 

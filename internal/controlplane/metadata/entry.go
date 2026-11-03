@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 
+	"github.com/manifesterio/mds/internal/controlplane/kv"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -353,7 +354,7 @@ func (d *entryDecoder) commit() core.CommitSegment {
 
 // NewMem returns a metadata store over an in-memory KV. No Pebble. Suitable for the
 // DSM Step fold and for tests that need the pure command fold.
-func NewMem() *Store { return New(NewMemoryKeyValueStore()) }
+func NewMem() *Store { return New(kv.NewMemory()) }
 
 // Apply folds one log entry at slot into the store. No-ops leave state unchanged.
 // A store failure panics (fail-stop), matching Commit.

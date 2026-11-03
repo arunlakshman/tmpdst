@@ -6,7 +6,7 @@ import (
 
 	"github.com/manifesterio/mds/internal/controlplane"
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
+	"github.com/manifesterio/mds/internal/controlplane/groups"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
@@ -15,18 +15,20 @@ import (
 
 // Where the pieces of the consumer group feature live:
 //
-//   - groupcoordinator/coordinator.go, group.go, clock.go: the coordinator
+//   - groups/coordinator.go, group.go, clock.go: the coordinator
 //     logic. It keeps the phase of each group, the parked calls and the timers.
 //   - server/groups.go: this file. It holds the gRPC group handlers and the
 //     log and read side of the coordinator (nodeGroups).
 //   - controlplaneclient/groups.go: the broker-side group calls.
 //   - wireboundary/convert.go: maps group requests and responses to and from the
 //     wire types.
-//   - metadata/groups.go: the fold of GroupInstall, GroupAssign,
-//     GroupRemove and OffsetCommit.
-//   - metadata/groupquery.go: the group reads (OffsetFetch, DescribeGroup
+//   - groups/storage/write.go: the fold of GroupInstall, GroupAssign,
+//     GroupRemove and OffsetCommit, on the key-value store.
+//   - groups/storage/read.go: the group reads (OffsetFetch, DescribeGroup
 //     and ListGroups).
-//   - replica/client.go: passes the group calls to the state machine.
+//   - metadata/groups.go: connects groups/storage to the metadata store.
+//   - metadata/entry.go: the log format of the group entries.
+//   - replica/client.go: passes the group calls to the replica.
 //   - replica/commit.go: encodes and decodes the group entries in the log.
 //   - replica/replay.go: decodes group entries when it replays the log.
 //   - core/controlplane.go: the group types (GroupInstall, GroupAssign,
@@ -119,7 +121,7 @@ func (n *Node) watchGroups(ctx context.Context) {
 
 // groupCoordinator returns the coordinator when this node serves groups now.
 // Otherwise it answers Unavailable, so the client tries the next address.
-func (n *Node) groupCoordinator(ctx context.Context) (*groupcoordinator.Coordinator, error) {
+func (n *Node) groupCoordinator(ctx context.Context) (*groups.Coordinator, error) {
 	active, err := n.groupRole(ctx)
 	if err != nil {
 		return nil, toRPCError(core.ErrIO, core.NotApplied)
@@ -160,7 +162,7 @@ func groupReplyErr(code core.ErrCode, err error) error {
 // serves groups, runs call, maps a failed answer to an RPC error and converts
 // the answer to the wire type Out.
 func groupRPC[Op, R, Out any](ctx context.Context, n *Node, op Op,
-	call func(*groupcoordinator.Coordinator, context.Context, Op) (R, error),
+	call func(*groups.Coordinator, context.Context, Op) (R, error),
 	codeOf func(R) core.ErrCode, convert func(R) Out,
 ) (Out, error) {
 	var zero Out
@@ -176,22 +178,22 @@ func groupRPC[Op, R, Out any](ctx context.Context, n *Node, op Op,
 }
 
 // joinCode returns the answer code of a join.
-func joinCode(r groupcoordinator.JoinResp) core.ErrCode { return r.Err }
+func joinCode(r groups.JoinResp) core.ErrCode { return r.Err }
 
 // syncCode returns the answer code of a sync.
-func syncCode(r groupcoordinator.SyncResp) core.ErrCode { return r.Err }
+func syncCode(r groups.SyncResp) core.ErrCode { return r.Err }
 
 // JoinGroup implements ControlPlane.
 func (n *Node) JoinGroup(ctx context.Context, request *cpv1.JoinGroupRequest) (*cpv1.JoinGroupResponse, error) {
 	return groupRPC(ctx, n, wireboundary.JoinGroupToCore(request),
-		(*groupcoordinator.Coordinator).JoinGroup, joinCode, wireboundary.JoinGroupRespFromCore)
+		(*groups.Coordinator).JoinGroup, joinCode, wireboundary.JoinGroupRespFromCore)
 }
 
 // SyncGroup implements ControlPlane.
 func (n *Node) SyncGroup(ctx context.Context, request *cpv1.SyncGroupRequest) (*cpv1.SyncGroupResponse, error) {
 	operation := wireboundary.SyncGroupToCore(request)
 	return groupRPC(ctx, n, operation,
-		(*groupcoordinator.Coordinator).SyncGroup, syncCode, wireboundary.SyncGroupRespFromCore)
+		(*groups.Coordinator).SyncGroup, syncCode, wireboundary.SyncGroupRespFromCore)
 }
 
 // GroupHeartbeat implements ControlPlane.
@@ -247,13 +249,13 @@ func (n *Node) DescribeGroups(ctx context.Context, request *cpv1.DescribeGroupsR
 	if err != nil {
 		return nil, err
 	}
-	var out []groupcoordinator.GroupDescription
+	var out []groups.GroupDescription
 	for _, name := range wireboundary.DescribeGroupsToCore(request) {
 		d, code := c.DescribeGroup(ctx, name)
 		if code != core.OK {
 			return nil, toRPCError(code, core.NotApplied)
 		}
-		out = append(out, groupcoordinator.GroupDescription{Name: name, DescribeGroupResp: d})
+		out = append(out, groups.GroupDescription{Name: name, DescribeGroupResp: d})
 	}
 	return wireboundary.DescribeGroupsRespFromCore(out), nil
 }

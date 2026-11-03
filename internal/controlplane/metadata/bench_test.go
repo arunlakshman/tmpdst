@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/manifesterio/mds/internal/controlplane/kv/pebblestore"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
-	"github.com/manifesterio/mds/internal/controlplane/metadata/pebblestore"
 	"github.com/manifesterio/mds/internal/core"
 )
 

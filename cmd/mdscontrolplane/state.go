@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/manifesterio/mds/internal/controlplane/metadata"
-	"github.com/manifesterio/mds/internal/controlplane/metadata/pebblestore"
+	"github.com/manifesterio/mds/internal/controlplane/kv"
+	"github.com/manifesterio/mds/internal/controlplane/kv/pebblestore"
 )
 
 // pebbleState hands the control-plane machine its Pebble store. The store is
@@ -37,7 +37,7 @@ func (p *pebbleState) start() error {
 }
 
 // openStore is replica.Config.OpenStore.
-func (p *pebbleState) openStore() (metadata.KeyValueStore, error) {
+func (p *pebbleState) openStore() (kv.Store, error) {
 	p.mu.Lock()
 	if db := p.waiting; db != nil {
 		p.waiting = nil

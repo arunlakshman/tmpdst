@@ -129,7 +129,7 @@ All sizes are non-test lines. "Edge" means not deterministic (goroutines, networ
 |---------|------:|-------|--------------|
 | `replica` | ~1,700 | pure brain | The `Machine`: catch-up, commit queue, roles, checkpoints, fresh reads |
 | `metadata` | ~1,260 | pure fold | Apply entries into an ordered KV; answer Lookup/Describe; snapshot/restore |
-| `metadata/pebblestore` | 143 | KV driver | Pebble implementation of the KV seam. `mdscontrolplane` passes it to the Machine through `Config.OpenStore` (fixed in `56417bd`, see section 12) |
+| `kv/pebblestore` | 143 | KV driver | Pebble implementation of the KV seam. `mdscontrolplane` passes it to the Machine through `Config.OpenStore` (fixed in `56417bd`, see section 12) |
 | `executor` | ~660 | edge | Run `Log*` and `Object*` actions: `DynamoLog`, `MemoryLog`, object store, error classify |
 | `runloop` | ~370 | edge | The one goroutine that calls `Step`, runs timers, dispatches actions |
 | `server` | ~470 | edge | gRPC `Node`: turns RPCs into `Offer` calls and waits for answers |
@@ -1137,7 +1137,7 @@ in-memory); kept for flag compatibility". History: `git log -S` shows the cutove
 opened Pebble.
 
 How it works now:
-- `replica.Config.OpenStore func() (metadata.KeyValueStore, error)`. Nil means
+- `replica.Config.OpenStore func() (kv.Store, error)`. Nil means
   memory (simulator and tests). The Machine calls it in `New` and again in
   `afterCrashRestart`, after it has closed the old store. If the first open fails,
   `NodeStarted` answers `StopForRestart`; if a reopen fails, the node trips the same way.

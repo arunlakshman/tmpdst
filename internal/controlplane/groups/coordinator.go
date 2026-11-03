@@ -1,4 +1,4 @@
-// Package groupcoordinator is the consumer group coordinator of the active
+// Package groups is the consumer group coordinator of the active
 // control plane node (slice 4b). It speaks the classic group protocol only
 // (decision Q9).
 //
@@ -34,7 +34,7 @@
 //
 // Time. Every logged command carries TimeMs from the coordinator clock. The
 // fold never reads a clock (decision Q11).
-package groupcoordinator
+package groups
 
 import (
 	"bytes"
@@ -71,7 +71,7 @@ const (
 )
 
 // ErrClosed is returned by Rebuild after Close.
-var ErrClosed = errors.New("groupcoordinator: closed")
+var ErrClosed = errors.New("groups: closed")
 
 // Protocol is one protocol a member supports, with its metadata.
 type Protocol struct {

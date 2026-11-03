@@ -1,6 +1,7 @@
 package replica
 
 import (
+	"github.com/manifesterio/mds/internal/controlplane/kv"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"
 )
@@ -66,7 +67,7 @@ type Config struct {
 	// in. It runs when the machine is built and again after a crash restart or
 	// a trimmed-slot restore, once the old store has been closed. Nil means an
 	// in-memory store. The machine itself never imports a database.
-	OpenStore func() (metadata.KeyValueStore, error)
+	OpenStore func() (kv.Store, error)
 
 	// InjectedBug selects a sim mutant (fakelogservice.Bug* constants). Zero is none.
 	InjectedBug uint8

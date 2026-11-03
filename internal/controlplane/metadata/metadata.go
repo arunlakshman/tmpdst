@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/manifesterio/mds/internal/controlplane/kv"
 	"github.com/manifesterio/mds/internal/core"
 )
 
-// Store is the control-plane state machine over a KeyValueStore. Writes (commands) must
+// Store is the control-plane state machine over a kv.Store. Writes (commands) must
 // be applied by one goroutine in log order; reads may run concurrently.
-type Store struct{ keyValue KeyValueStore }
+type Store struct{ keyValue kv.Store }
 
 // New returns a metadata store over kv (empty, or restored from a checkpoint).
-func New(keyValue KeyValueStore) *Store { return &Store{keyValue: keyValue} }
+func New(keyValue kv.Store) *Store { return &Store{keyValue: keyValue} }
 
 // Close closes the store.
 func (a *Store) Close() error { return a.keyValue.Close() }
@@ -67,7 +68,7 @@ func (a *Store) Exec(act core.IOCall) core.IOResult {
 // Commit applies a CommitSegment that sits at log slot slot.
 func (a *Store) Commit(slot int64, operation core.CommitSegment) (core.ControlPlaneDone, error) {
 	var d core.ControlPlaneDone
-	err := a.keyValue.Update(func(transaction Transaction) { d = commitTransaction(transaction, slot, operation) })
+	err := a.keyValue.Update(func(transaction kv.Transaction) { d = commitTransaction(transaction, slot, operation) })
 	return d, err
 }
 
@@ -76,7 +77,7 @@ func (a *Store) Commit(slot int64, operation core.CommitSegment) (core.ControlPl
 func (a *Store) KnownCommit(operation core.CommitSegment) (core.ControlPlaneDone, bool, error) {
 	var d core.ControlPlaneDone
 	var ok bool
-	err := a.keyValue.View(func(transaction Transaction) {
+	err := a.keyValue.View(func(transaction kv.Transaction) {
 		rec := transaction.Get(duplicateCheckKey(operation.SegmentKey))
 		if rec == nil {
 			return
@@ -99,7 +100,7 @@ type Command struct {
 // applying them one by one, with far fewer page writes in the store.
 func (a *Store) CommitBatch(cmds []Command) ([]core.ControlPlaneDone, error) {
 	var out []core.ControlPlaneDone
-	err := a.keyValue.Update(func(transaction Transaction) {
+	err := a.keyValue.Update(func(transaction kv.Transaction) {
 		out = make([]core.ControlPlaneDone, len(cmds))
 		for i, c := range cmds {
 			out[i] = commitTransaction(transaction, c.Slot, c.Op)
@@ -114,16 +115,14 @@ func (a *Store) Lookup(operation core.FindSegments) (core.ControlPlaneDone, erro
 		return core.ControlPlaneDone{Err: core.ErrInvalid}, nil
 	}
 	var d core.ControlPlaneDone
-	err := a.keyValue.View(func(transaction Transaction) { d = lookupTransaction(transaction, operation) })
+	err := a.keyValue.View(func(transaction kv.Transaction) { d = lookupTransaction(transaction, operation) })
 	return d, err
 }
 
 // Describe answers a DescribeTopics.
-//
-//nolint:dupl // same shape as groupWrite, but a read transaction
 func (a *Store) Describe(operation core.DescribeTopics) (core.ControlPlaneDone, error) {
 	var d core.ControlPlaneDone
-	err := a.keyValue.View(func(transaction Transaction) { d = describeTransaction(transaction, operation) })
+	err := a.keyValue.View(func(transaction kv.Transaction) { d = describeTransaction(transaction, operation) })
 	return d, err
 }
 
@@ -141,7 +140,7 @@ func (a *Store) CreateTopicIf(name string, partitions int32, failIfExists bool) 
 		return core.ErrInvalid
 	}
 	code := core.OK
-	err := a.keyValue.Update(func(transaction Transaction) {
+	err := a.keyValue.Update(func(transaction kv.Transaction) {
 		if failIfExists && transaction.Get(topicKey(name)) != nil {
 			code = core.ErrTopicExists
 			return
@@ -155,7 +154,9 @@ func (a *Store) CreateTopicIf(name string, partitions int32, failIfExists bool) 
 // End is the next offset of tp (0 if unknown).
 func (a *Store) End(topicPartition core.TopicPartition) core.Offset {
 	var end core.Offset
-	err := a.keyValue.View(func(transaction Transaction) { end = core.Offset(readVarint(transaction.Get(endKey(topicPartition)))) })
+	err := a.keyValue.View(func(transaction kv.Transaction) {
+		end = core.Offset(readVarint(transaction.Get(endKey(topicPartition))))
+	})
 	mustStore(err)
 	return end
 }
@@ -168,7 +169,7 @@ func validCommit(operation core.CommitSegment) bool {
 	return operation.SegmentKey != "" && len(operation.Batches) > 0 && slices.IndexFunc(operation.Batches, func(b core.PendingBatch) bool { return !validBatch(b) }) < 0
 }
 
-func commitTransaction(transaction Transaction, slot int64, operation core.CommitSegment) core.ControlPlaneDone {
+func commitTransaction(transaction kv.Transaction, slot int64, operation core.CommitSegment) core.ControlPlaneDone {
 	dig := checksum(operation.Batches)
 	if rec := transaction.Get(duplicateCheckKey(operation.SegmentKey)); rec != nil {
 		return replay(rec, dig, operation)
@@ -183,7 +184,7 @@ func commitTransaction(transaction Transaction, slot int64, operation core.Commi
 // writer instead of partition ends.
 func (a *Store) commitWithBases(slot int64, operation core.CommitSegment, bases []core.Offset) core.ControlPlaneDone {
 	var d core.ControlPlaneDone
-	err := a.keyValue.Update(func(transaction Transaction) {
+	err := a.keyValue.Update(func(transaction kv.Transaction) {
 		dig := checksum(operation.Batches)
 		if rec := transaction.Get(duplicateCheckKey(operation.SegmentKey)); rec != nil {
 			d = replay(rec, dig, operation)
@@ -219,7 +220,7 @@ func replay(rec []byte, dig [checksumLength]byte, operation core.CommitSegment) 
 	return core.ControlPlaneDone{Resp: core.CommitSegmentResp{Assigned: rs}, Outcome: core.Applied}
 }
 
-func storeCommit(transaction Transaction, slot int64, operation core.CommitSegment, dig [checksumLength]byte, assigned []core.BatchRange) core.ControlPlaneDone {
+func storeCommit(transaction kv.Transaction, slot int64, operation core.CommitSegment, dig [checksumLength]byte, assigned []core.BatchRange) core.ControlPlaneDone {
 	transaction.Set(duplicateCheckKey(operation.SegmentKey), duplicateCheckRecord(slot, dig, assigned))
 	transaction.Set(slotKey(slot, operation.SegmentKey), []byte{1})
 	return core.ControlPlaneDone{Resp: core.CommitSegmentResp{Assigned: assigned}, Outcome: core.Applied}
@@ -254,14 +255,14 @@ func (p *offsetPlan) add(b core.PendingBatch, base int64) core.BatchRange {
 	return r
 }
 
-func (p *offsetPlan) write(transaction Transaction) {
+func (p *offsetPlan) write(transaction kv.Transaction) {
 	writeAssign(transaction, p.order, p.ends, p.runs)
 }
 
 // assign hands out offsets: each batch's Base is its partition's end, in
 // request order, the end then growing by Records. It writes the new ends, one
 // packed run per partition and grown topics, and returns the ranges.
-func assign(transaction Transaction, bs []core.PendingBatch) []core.BatchRange {
+func assign(transaction kv.Transaction, bs []core.PendingBatch) []core.BatchRange {
 	p := newOffsetPlan()
 	out := make([]core.BatchRange, 0, len(bs))
 	for _, b := range bs {
@@ -276,7 +277,7 @@ func assign(transaction Transaction, bs []core.PendingBatch) []core.BatchRange {
 }
 
 // assignAt is assign with writer-chosen bases (BugWriterOffsets).
-func assignAt(transaction Transaction, bs []core.PendingBatch, bases []core.Offset) []core.BatchRange {
+func assignAt(transaction kv.Transaction, bs []core.PendingBatch, bases []core.Offset) []core.BatchRange {
 	p := newOffsetPlan()
 	out := make([]core.BatchRange, 0, len(bs))
 	for i, b := range bs {
@@ -286,7 +287,7 @@ func assignAt(transaction Transaction, bs []core.PendingBatch, bases []core.Offs
 	return out
 }
 
-func writeAssign(transaction Transaction, order []core.TopicPartition, ends map[core.TopicPartition]int64, runs map[core.TopicPartition][]core.BatchRange) {
+func writeAssign(transaction kv.Transaction, order []core.TopicPartition, ends map[core.TopicPartition]int64, runs map[core.TopicPartition][]core.BatchRange) {
 	topics := map[string]int32{}
 	for _, topicPartition := range order {
 		transaction.Set(endKey(topicPartition), writeVarint(ends[topicPartition]))
@@ -297,7 +298,7 @@ func writeAssign(transaction Transaction, order []core.TopicPartition, ends map[
 
 // addPartitions raises topic's partition count to at least n; seen caches the
 // counts read in this transaction.
-func addPartitions(transaction Transaction, seen map[string]int32, topic string, n int32) {
+func addPartitions(transaction kv.Transaction, seen map[string]int32, topic string, n int32) {
 	cur, ok := seen[topic]
 	if !ok {
 		cur = int32(readVarint(transaction.Get(topicKey(topic))))
@@ -309,10 +310,10 @@ func addPartitions(transaction Transaction, seen map[string]int32, topic string,
 	seen[topic] = cur
 }
 
-func lookupTransaction(transaction Transaction, operation core.FindSegments) core.ControlPlaneDone {
+func lookupTransaction(transaction kv.Transaction, operation core.FindSegments) core.ControlPlaneDone {
 	response := core.FindSegmentsResp{End: core.Offset(readVarint(transaction.Get(endKey(operation.TopicPartition))))}
 	lo := batchRunKey(operation.TopicPartition, 0)
-	hi := prefixEnd(topicPartitionPrefix(prefixRun, operation.TopicPartition))
+	hi := kv.PrefixEnd(topicPartitionPrefix(prefixRun, operation.TopicPartition))
 	if k, _ := transaction.Floor(lo, append(batchRunKey(operation.TopicPartition, int64(operation.From)), 0)); k != nil {
 		lo = k // the run holding From starts at or before it
 	}
@@ -342,10 +343,10 @@ func lookupTransaction(transaction Transaction, operation core.FindSegments) cor
 	return core.ControlPlaneDone{Resp: response}
 }
 
-func describeTransaction(transaction Transaction, operation core.DescribeTopics) core.ControlPlaneDone {
+func describeTransaction(transaction kv.Transaction, operation core.DescribeTopics) core.ControlPlaneDone {
 	var response core.DescribeTopicsResp
 	lo := []byte{prefixTopic}
-	transaction.Ascend(lo, prefixEnd(lo), func(k, v []byte) bool {
+	transaction.Ascend(lo, kv.PrefixEnd(lo), func(k, v []byte) bool {
 		name := string(bytes.Clone(k[1:]))
 		if len(operation.Topics) == 0 || slices.Contains(operation.Topics, name) {
 			response.Topics = append(response.Topics, core.TopicInfo{Name: name, Partitions: int32(readVarint(v))})

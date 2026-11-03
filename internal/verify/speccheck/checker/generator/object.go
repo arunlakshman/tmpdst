@@ -2,9 +2,10 @@ package generator
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/verify/speccheck/checker"
-	"strings"
 )
 
 // ObjectOps returns a generator of object store operations for profile p.

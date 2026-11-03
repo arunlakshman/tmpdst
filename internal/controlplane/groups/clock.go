@@ -1,4 +1,4 @@
-package groupcoordinator
+package groups
 
 import "time"
 

@@ -81,7 +81,7 @@ Rules used for the right column:
 | `controlplane/fakedb` | `controlplane/fakedynamodb` |
 | `controlplane/memstore` | `controlplane/memorystore` |
 | `controlplane/grpctest` | `controlplane/grpctestserver` |
-| `applier/pebblekv` | `metadata/pebblestore` |
+| `applier/pebblekv` | `kv/pebblestore` |
 | `wire/format` | `wire/segmentformat` |
 | `wire/kwire` | `wire/kafkawire` |
 | `ops/tools/detcheck` | `ops/tools/determinismcheck` |

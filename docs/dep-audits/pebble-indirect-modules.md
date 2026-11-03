@@ -2,7 +2,7 @@
 
 Date: 2026-10-21. Auditor: stage-4 agent. Scope: the 16 modules that appeared in `go.mod` as `// indirect` when
 `github.com/cockroachdb/pebble v1.1.5` (decision 49) was added. They are EDGE dependencies: only
-`internal/controlplane/metadata/pebblestore` (and so `cmd/mdscontrolplane`) imports Pebble. `internal/core/`, `internal/verify/simulator/` and every other deterministic package do not
+`internal/controlplane/kv/pebblestore` (and so `cmd/mdscontrolplane`) imports Pebble. `internal/core/`, `internal/verify/simulator/` and every other deterministic package do not
 reach them (`ops/scripts/ci-determinism.sh` is green), so none needs a per-module determinism record under
 `docs/dep-audits/<module>@<version>.md`; this page is the summary the open item asked for. The Pebble record itself is
 `github.com/cockroachdb/pebble@v1.1.5.md`.
@@ -38,7 +38,7 @@ large mostly because of generated tables; the linked code is a small part (the r
 ## cockroachdb/errors and getsentry/sentry-go: really linked?
 
 Yes, both, in the release `mdscontrolplane`: `go list -deps ./cmd/mdscontrolplane` shows `cockroachdb/errors` (19 packages) and
-`getsentry/sentry-go` (6 packages). The chain is `internal/controlplane/metadata/pebblestore -> pebble -> cockroachdb/errors ->
+`getsentry/sentry-go` (6 packages). The chain is `internal/controlplane/kv/pebblestore -> pebble -> cockroachdb/errors ->
 withstack/report -> getsentry/sentry-go -> x/text`. Pebble uses `errors` for error wrapping and stack capture;
 `errors` imports sentry-go only to format reports (`errors/report`, `withstack`). Nothing here sends anything: sentry-go
 is a client library with no DSN configured, so it makes no network call and starts no goroutine unless something calls

@@ -1,13 +1,13 @@
-package groupcoordinator
+package groups
 
 import (
 	"fmt"
-	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
 	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"

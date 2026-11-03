@@ -1,23 +1,18 @@
-package metadata
+package storage
 
 import (
 	"cmp"
 	"slices"
 	"strings"
 
+	"github.com/manifesterio/mds/internal/controlplane/kv"
 	"github.com/manifesterio/mds/internal/core"
 )
 
 // Group reads (slice 4a). They change nothing, so they are not logged.
 
 // OffsetFetch answers an OffsetFetch. A partition with no commit is -1.
-func (a *Store) OffsetFetch(operation core.OffsetFetch) (core.ControlPlaneDone, error) {
-	return a.view(func(transaction Transaction) core.ControlPlaneDone {
-		return offsetFetchTransaction(transaction, operation)
-	})
-}
-
-func offsetFetchTransaction(transaction Transaction, operation core.OffsetFetch) core.ControlPlaneDone {
+func OffsetFetch(transaction kv.Transaction, operation core.OffsetFetch) core.ControlPlaneDone {
 	var out []core.PartitionOffset
 	if len(operation.Partitions) > 0 {
 		for _, topicPartition := range operation.Partitions {
@@ -31,8 +26,8 @@ func offsetFetchTransaction(transaction Transaction, operation core.OffsetFetch)
 		return core.ControlPlaneDone{Resp: core.OffsetFetchResp{Offsets: out}}
 	}
 	lo := groupPrefix(prefixOffset, operation.Group)
-	transaction.Ascend(lo, prefixEnd(lo), func(k, v []byte) bool {
-		topicPartition, ok := splitTopicPartition(k[len(lo):])
+	transaction.Ascend(lo, kv.PrefixEnd(lo), func(k, v []byte) bool {
+		topicPartition, ok := kv.SplitTopicPartition(k[len(lo):])
 		if !ok {
 			corruptGroup(operation.Group)
 		}
@@ -50,13 +45,7 @@ func offsetEntry(topicPartition core.TopicPartition, o offsetRecord) core.Partit
 }
 
 // DescribeGroup answers a DescribeGroup.
-func (a *Store) DescribeGroup(operation core.DescribeGroup) (core.ControlPlaneDone, error) {
-	return a.view(func(transaction Transaction) core.ControlPlaneDone {
-		return describeGroupTransaction(transaction, operation)
-	})
-}
-
-func describeGroupTransaction(transaction Transaction, operation core.DescribeGroup) core.ControlPlaneDone {
+func DescribeGroup(transaction kv.Transaction, operation core.DescribeGroup) core.ControlPlaneDone {
 	h, found := readHeader(transaction, operation.Group)
 	if !found {
 		return core.ControlPlaneDone{Resp: core.DescribeGroupResp{}}
@@ -88,25 +77,14 @@ func groupState(h groupHeader, members int) string {
 }
 
 // ListGroups answers a ListGroups: every installed group, sorted by name.
-func (a *Store) ListGroups(operation core.ListGroups) (core.ControlPlaneDone, error) {
-	return a.view(listGroupsTransaction)
-}
-
-// view answers one read in a read transaction.
-func (a *Store) view(fn func(Transaction) core.ControlPlaneDone) (core.ControlPlaneDone, error) {
-	var d core.ControlPlaneDone
-	err := a.keyValue.View(func(transaction Transaction) { d = fn(transaction) })
-	return d, err
-}
-
-func listGroupsTransaction(transaction Transaction) core.ControlPlaneDone {
+func ListGroups(transaction kv.Transaction, _ core.ListGroups) core.ControlPlaneDone {
 	type row struct {
 		name string
 		h    groupHeader
 	}
 	var rows []row
 	lo := []byte{prefixGroup}
-	transaction.Ascend(lo, prefixEnd(lo), func(k, v []byte) bool {
+	transaction.Ascend(lo, kv.PrefixEnd(lo), func(k, v []byte) bool {
 		name := string(k[1:])
 		rows = append(rows, row{name: name, h: decodeHeader(name, v)})
 		return true

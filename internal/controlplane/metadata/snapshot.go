@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+
+	"github.com/manifesterio/mds/internal/controlplane/kv"
 )
 
 // A checkpoint is the whole store at one log slot: replaying the log from that
@@ -75,7 +77,7 @@ func (a *Store) SnapshotAt(w io.Writer, begin func() int64) error {
 	crc := crc32.NewIEEE()
 	bw := bufio.NewWriter(io.MultiWriter(w, crc))
 	var werr error
-	err := a.keyValue.View(func(transaction Transaction) { werr = writeSnapshot(bw, transaction, begin) })
+	err := a.keyValue.View(func(transaction kv.Transaction) { werr = writeSnapshot(bw, transaction, begin) })
 	if err = errors.Join(err, werr); err != nil {
 		return err
 	}
@@ -87,7 +89,7 @@ func (a *Store) SnapshotAt(w io.Writer, begin func() int64) error {
 	return err
 }
 
-func writeSnapshot(bw *bufio.Writer, transaction Transaction, begin func() int64) error {
+func writeSnapshot(bw *bufio.Writer, transaction kv.Transaction, begin func() int64) error {
 	// bufio.Writer latches write errors; Flush below reports them.
 	_, _ = bw.WriteString(snapshotMarker)
 	_, _ = bw.Write(binary.AppendVarint(nil, begin()))
@@ -152,7 +154,7 @@ func (a *Store) restoreChunk(br *crcReader) (bool, error) {
 			ents, size = append(ents, [2][]byte{k, v}), size+len(k)+len(v)
 		}
 	}
-	return done, a.keyValue.Update(func(transaction Transaction) {
+	return done, a.keyValue.Update(func(transaction kv.Transaction) {
 		for _, e := range ents {
 			transaction.Set(e[0], e[1])
 		}

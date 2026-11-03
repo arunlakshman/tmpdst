@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/manifesterio/mds/internal/controlplane/kv"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -42,18 +43,12 @@ func TestIdemRecordCorruption(t *testing.T) {
 	}
 }
 
-func TestPrefixEnd(t *testing.T) {
-	if string(prefixEnd([]byte("ab"))) != "ac" || string(prefixEnd([]byte{'a', 0xFF})) != "b" || prefixEnd([]byte{0xFF}) != nil {
-		t.Fatal("prefixEnd")
-	}
-}
-
 // brokenKV fails every transaction.
 type brokenKV struct{}
 
-func (*brokenKV) View(func(Transaction)) error   { return errors.New("disk gone") }
-func (*brokenKV) Update(func(Transaction)) error { return errors.New("disk gone") }
-func (*brokenKV) Close() error                   { return nil }
+func (*brokenKV) View(func(kv.Transaction)) error   { return errors.New("disk gone") }
+func (*brokenKV) Update(func(kv.Transaction)) error { return errors.New("disk gone") }
+func (*brokenKV) Close() error                      { return nil }
 
 func TestStoreFailureIsFailStop(t *testing.T) {
 	a := New(&brokenKV{})
@@ -77,9 +72,9 @@ func TestStoreFailureIsFailStop(t *testing.T) {
 }
 
 func TestCorruptStoredRecordsPanic(t *testing.T) {
-	a := New(NewMemoryKeyValueStore())
+	a := New(kv.NewMemory())
 	topicPartition := core.NewTopicPartition("t", 0)
-	_ = a.keyValue.Update(func(transaction Transaction) {
+	_ = a.keyValue.Update(func(transaction kv.Transaction) {
 		transaction.Set(batchRunKey(topicPartition, 0), []byte{9, 9})
 		transaction.Set(endKey(topicPartition), []byte{5})
 		transaction.Set(duplicateCheckKey("k"), []byte{0x80})

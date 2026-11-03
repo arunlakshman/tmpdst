@@ -4,7 +4,7 @@ import (
 	"context"
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
+	"github.com/manifesterio/mds/internal/controlplane/groups"
 	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
 )
@@ -14,19 +14,19 @@ import (
 // timeout. A business error comes back as *Error, as for every call here.
 
 // JoinGroup joins a consumer group and waits for the join round to end.
-func (c *Client) JoinGroup(ctx context.Context, request groupcoordinator.JoinReq) (groupcoordinator.JoinResp, error) {
+func (c *Client) JoinGroup(ctx context.Context, request groups.JoinReq) (groups.JoinResp, error) {
 	return callRPC(ctx, c, "JoinGroup", cpv1.ControlPlaneClient.JoinGroup,
 		wireboundary.JoinGroupFromCore(request), wireboundary.JoinGroupRespToCore)
 }
 
 // SyncGroup sends the leader's assignment, or waits for it as a follower.
-func (c *Client) SyncGroup(ctx context.Context, request groupcoordinator.SyncReq) (groupcoordinator.SyncResp, error) {
+func (c *Client) SyncGroup(ctx context.Context, request groups.SyncReq) (groups.SyncResp, error) {
 	return callRPC(ctx, c, "SyncGroup", cpv1.ControlPlaneClient.SyncGroup,
 		wireboundary.SyncGroupFromCore(request), wireboundary.SyncGroupRespToCore)
 }
 
 // GroupHeartbeat renews a member's session.
-func (c *Client) GroupHeartbeat(ctx context.Context, request groupcoordinator.HeartbeatReq) error {
+func (c *Client) GroupHeartbeat(ctx context.Context, request groups.HeartbeatReq) error {
 	return c.do(ctx, "GroupHeartbeat", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		_, err := cli.GroupHeartbeat(ctx, wireboundary.HeartbeatFromCore(request))
 		return err
@@ -34,7 +34,7 @@ func (c *Client) GroupHeartbeat(ctx context.Context, request groupcoordinator.He
 }
 
 // LeaveGroup removes members. It returns one code per member, in request order.
-func (c *Client) LeaveGroup(ctx context.Context, request groupcoordinator.LeaveReq) ([]core.ErrCode, error) {
+func (c *Client) LeaveGroup(ctx context.Context, request groups.LeaveReq) ([]core.ErrCode, error) {
 	return callRPC(ctx, c, "LeaveGroup", cpv1.ControlPlaneClient.LeaveGroup,
 		wireboundary.LeaveGroupFromCore(request), wireboundary.LeaveGroupRespToCore)
 }
@@ -52,7 +52,7 @@ func (c *Client) GroupOffsetFetch(ctx context.Context, operation core.OffsetFetc
 }
 
 // DescribeGroups describes the named groups, in request order.
-func (c *Client) DescribeGroups(ctx context.Context, names []string) ([]groupcoordinator.GroupDescription, error) {
+func (c *Client) DescribeGroups(ctx context.Context, names []string) ([]groups.GroupDescription, error) {
 	return callRPC(ctx, c, "DescribeGroups", cpv1.ControlPlaneClient.DescribeGroups,
 		wireboundary.DescribeGroupsFromCore(names), wireboundary.DescribeGroupsRespToCore)
 }
@@ -88,9 +88,9 @@ func (c *Client) callGroup(ctx context.Context, operation core.ControlPlaneOpera
 		}
 		return core.GroupSyncResp{Assignment: r.Assignment}, nil
 	case core.GroupHeartbeat:
-		return nil, c.GroupHeartbeat(ctx, groupcoordinator.HeartbeatReq{Group: operation.Group, MemberID: operation.MemberID, Generation: operation.Generation})
+		return nil, c.GroupHeartbeat(ctx, groups.HeartbeatReq{Group: operation.Group, MemberID: operation.MemberID, Generation: operation.Generation})
 	case core.GroupLeave:
-		errs, err := c.LeaveGroup(ctx, groupcoordinator.LeaveReq{Group: operation.Group, Members: operation.Members})
+		errs, err := c.LeaveGroup(ctx, groups.LeaveReq{Group: operation.Group, Members: operation.Members})
 		if err != nil {
 			return nil, err
 		}
@@ -115,20 +115,20 @@ func (c *Client) callGroup(ctx context.Context, operation core.ControlPlaneOpera
 	return nil, &Error{Code: core.ErrInvalid}
 }
 
-func joinReq(operation core.GroupJoin) groupcoordinator.JoinReq {
-	r := groupcoordinator.JoinReq{
+func joinReq(operation core.GroupJoin) groups.JoinReq {
+	r := groups.JoinReq{
 		Group: operation.Group, MemberID: operation.MemberID, GroupInstanceID: operation.GroupInstanceID,
 		ClientID: operation.ClientID, ClientHost: operation.ClientHost,
 		SessionTimeoutMs: operation.SessionTimeoutMs, RebalanceTimeoutMs: operation.RebalanceTimeoutMs,
 		ProtocolType: operation.ProtocolType,
 	}
 	for _, p := range operation.Protocols {
-		r.Protocols = append(r.Protocols, groupcoordinator.Protocol{Name: p.Name, Metadata: p.Metadata})
+		r.Protocols = append(r.Protocols, groups.Protocol{Name: p.Name, Metadata: p.Metadata})
 	}
 	return r
 }
 
-func joinResp(r groupcoordinator.JoinResp) core.GroupJoinResp {
+func joinResp(r groups.JoinResp) core.GroupJoinResp {
 	out := core.GroupJoinResp{Generation: r.Generation, Protocol: r.Protocol, Leader: r.Leader, MemberID: r.MemberID}
 	for _, m := range r.Members {
 		out.Members = append(out.Members, core.GroupJoinMember{MemberID: m.ID, GroupInstanceID: m.InstanceID, Metadata: m.Metadata})
@@ -136,15 +136,15 @@ func joinResp(r groupcoordinator.JoinResp) core.GroupJoinResp {
 	return out
 }
 
-func syncReq(operation core.GroupSync) groupcoordinator.SyncReq {
-	r := groupcoordinator.SyncReq{Group: operation.Group, MemberID: operation.MemberID, Generation: operation.Generation}
+func syncReq(operation core.GroupSync) groups.SyncReq {
+	r := groups.SyncReq{Group: operation.Group, MemberID: operation.MemberID, Generation: operation.Generation}
 	for _, a := range operation.Assignments {
-		r.Assignments = append(r.Assignments, groupcoordinator.Assignment{Member: a.Member, Bytes: a.Bytes})
+		r.Assignments = append(r.Assignments, groups.Assignment{Member: a.Member, Bytes: a.Bytes})
 	}
 	return r
 }
 
-func describeGroupsResp(ds []groupcoordinator.GroupDescription) core.DescribeGroupsResp {
+func describeGroupsResp(ds []groups.GroupDescription) core.DescribeGroupsResp {
 	var out core.DescribeGroupsResp
 	for _, d := range ds {
 		out.Groups = append(out.Groups, core.GroupDescription{Name: d.Name, DescribeGroupResp: d.DescribeGroupResp})

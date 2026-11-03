@@ -1,4 +1,4 @@
-// Package pebblestore is the production metadata.KeyValueStore over Pebble
+// Package pebblestore is the production kv.Store over Pebble
 // (github.com/cockroachdb/pebble). It is the only package that imports the
 // store. Commits do not fsync: the metadata store's state is rebuilt from the log and a
 // checkpoint into a fresh directory, never trusted after a crash.
@@ -12,7 +12,7 @@ import (
 
 	"github.com/cockroachdb/pebble"
 
-	"github.com/manifesterio/mds/internal/controlplane/metadata"
+	"github.com/manifesterio/mds/internal/controlplane/kv"
 )
 
 // Options sizes the store. Zero values mean the defaults (64 MiB each).
@@ -21,14 +21,14 @@ type Options struct {
 	MemTableBytes uint64
 }
 
-// DB is a Pebble database used as an metadata.KeyValueStore.
+// DB is a Pebble database used as an kv.Store.
 type DB struct {
 	db   *pebble.DB
 	once sync.Once
 	err  error
 }
 
-var _ metadata.KeyValueStore = (*DB)(nil)
+var _ kv.Store = (*DB)(nil)
 
 type silentLogger struct{}
 
@@ -55,14 +55,14 @@ func Open(dir string, o Options) (*DB, error) {
 	return &DB{db: db}, nil
 }
 
-// Close implements metadata.KeyValueStore; closing twice is harmless.
+// Close implements kv.Store; closing twice is harmless.
 func (d *DB) Close() error {
 	d.once.Do(func() { d.err = d.db.Close() })
 	return d.err
 }
 
-// View implements metadata.KeyValueStore: a snapshot, so a multi-read query is consistent.
-func (d *DB) View(fn func(metadata.Transaction)) error {
+// View implements kv.Store: a snapshot, so a multi-read query is consistent.
+func (d *DB) View(fn func(kv.Transaction)) error {
 	s := d.db.NewSnapshot()
 	defer func() { _ = s.Close() }() // read-only snapshot; nothing to flush
 	t := &txn{get: s.Get, iter: s.NewIter}
@@ -70,9 +70,9 @@ func (d *DB) View(fn func(metadata.Transaction)) error {
 	return t.err
 }
 
-// Update implements metadata.KeyValueStore: an indexed batch (reads see its own writes),
+// Update implements kv.Store: an indexed batch (reads see its own writes),
 // committed without sync.
-func (d *DB) Update(fn func(metadata.Transaction)) error {
+func (d *DB) Update(fn func(kv.Transaction)) error {
 	b := d.db.NewIndexedBatch()
 	defer func() { _ = b.Close() }() // Commit already reported any write error
 	t := &txn{b: b, get: b.Get, iter: b.NewIter}

@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/manifesterio/mds/internal/controlplane/executor"
-	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
+	"github.com/manifesterio/mds/internal/controlplane/groups"
 	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/server"
 	"github.com/manifesterio/mds/internal/core"
@@ -72,11 +72,11 @@ func groupErr(t *testing.T, err error, want core.ErrCode) {
 	}
 }
 
-func joinOf(group, member string) groupcoordinator.JoinReq {
-	return groupcoordinator.JoinReq{
+func joinOf(group, member string) groups.JoinReq {
+	return groups.JoinReq{
 		Group: group, MemberID: member, ClientID: "cli", ClientHost: "h",
 		SessionTimeoutMs: 10000, RebalanceTimeoutMs: 10000, ProtocolType: "consumer",
-		Protocols: []groupcoordinator.Protocol{{Name: "range", Metadata: []byte("m-" + member)}},
+		Protocols: []groups.Protocol{{Name: "range", Metadata: []byte("m-" + member)}},
 	}
 }
 
@@ -96,22 +96,22 @@ func TestClientGroupCallsOverGRPC(t *testing.T) {
 	if len(ja.Members) != 1 || string(ja.Members[0].Metadata) != "m-" || ja.Protocol != "range" {
 		t.Fatalf("leader list: %+v", ja)
 	}
-	sa, err := c.SyncGroup(ctx, groupcoordinator.SyncReq{Group: "g", MemberID: a, Generation: 1,
-		Assignments: []groupcoordinator.Assignment{{Member: a, Bytes: []byte("all")}}})
+	sa, err := c.SyncGroup(ctx, groups.SyncReq{Group: "g", MemberID: a, Generation: 1,
+		Assignments: []groups.Assignment{{Member: a, Bytes: []byte("all")}}})
 	if err != nil || string(sa.Assignment) != "all" {
 		t.Fatalf("sync: %+v %v", sa, err)
 	}
 
 	// Heartbeat: OK for the member, codes for the others.
-	if err := c.GroupHeartbeat(ctx, groupcoordinator.HeartbeatReq{Group: "g", MemberID: a, Generation: 1}); err != nil {
+	if err := c.GroupHeartbeat(ctx, groups.HeartbeatReq{Group: "g", MemberID: a, Generation: 1}); err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
-	groupErr(t, c.GroupHeartbeat(ctx, groupcoordinator.HeartbeatReq{Group: "g", MemberID: "zz", Generation: 1}), core.ErrUnknownMember)
-	groupErr(t, c.GroupHeartbeat(ctx, groupcoordinator.HeartbeatReq{Group: "g", MemberID: a, Generation: 5}), core.ErrIllegalGeneration)
+	groupErr(t, c.GroupHeartbeat(ctx, groups.HeartbeatReq{Group: "g", MemberID: "zz", Generation: 1}), core.ErrUnknownMember)
+	groupErr(t, c.GroupHeartbeat(ctx, groups.HeartbeatReq{Group: "g", MemberID: a, Generation: 5}), core.ErrIllegalGeneration)
 
 	// A second member makes the first one rebalance. Both rejoin.
 	type joinOut struct {
-		response groupcoordinator.JoinResp
+		response groups.JoinResp
 		err      error
 	}
 	bDone := make(chan joinOut, 1)
@@ -120,7 +120,7 @@ func TestClientGroupCallsOverGRPC(t *testing.T) {
 		bDone <- joinOut{r, err}
 	}()
 	waitUntilGroup(t, func() bool {
-		err := c.GroupHeartbeat(ctx, groupcoordinator.HeartbeatReq{Group: "g", MemberID: a, Generation: 1})
+		err := c.GroupHeartbeat(ctx, groups.HeartbeatReq{Group: "g", MemberID: a, Generation: 1})
 		be, ok := errors.AsType[*Error](err)
 		return ok && be.Code == core.ErrRebalanceInProgress
 	})
@@ -133,13 +133,13 @@ func TestClientGroupCallsOverGRPC(t *testing.T) {
 		t.Fatalf("join b: %+v %v", rb.response, rb.err)
 	}
 	b := rb.response.MemberID
-	sbDone := make(chan groupcoordinator.SyncResp, 1)
+	sbDone := make(chan groups.SyncResp, 1)
 	go func() {
-		r, _ := c.SyncGroup(ctx, groupcoordinator.SyncReq{Group: "g", MemberID: b, Generation: 2})
+		r, _ := c.SyncGroup(ctx, groups.SyncReq{Group: "g", MemberID: b, Generation: 2})
 		sbDone <- r
 	}()
-	if _, err := c.SyncGroup(ctx, groupcoordinator.SyncReq{Group: "g", MemberID: a, Generation: 2,
-		Assignments: []groupcoordinator.Assignment{{Member: a, Bytes: []byte("a2")}, {Member: b, Bytes: []byte("b2")}}}); err != nil {
+	if _, err := c.SyncGroup(ctx, groups.SyncReq{Group: "g", MemberID: a, Generation: 2,
+		Assignments: []groups.Assignment{{Member: a, Bytes: []byte("a2")}, {Member: b, Bytes: []byte("b2")}}}); err != nil {
 		t.Fatalf("leader sync: %v", err)
 	}
 	if sb := <-sbDone; string(sb.Assignment) != "b2" {
@@ -147,7 +147,7 @@ func TestClientGroupCallsOverGRPC(t *testing.T) {
 	}
 
 	// LeaveGroup gives one code per member.
-	codes, err := c.LeaveGroup(ctx, groupcoordinator.LeaveReq{Group: "g", Members: []string{b, "nobody"}})
+	codes, err := c.LeaveGroup(ctx, groups.LeaveReq{Group: "g", Members: []string{b, "nobody"}})
 	if err != nil || !slices.Equal(codes, []core.ErrCode{core.OK, core.ErrUnknownMember}) {
 		t.Fatalf("leave: %v %v", codes, err)
 	}
@@ -155,8 +155,8 @@ func TestClientGroupCallsOverGRPC(t *testing.T) {
 	if err != nil || ra3.Generation != 3 || len(ra3.Members) != 1 {
 		t.Fatalf("join after leave: %+v %v", ra3, err)
 	}
-	if s3, err := c.SyncGroup(ctx, groupcoordinator.SyncReq{Group: "g", MemberID: a, Generation: 3,
-		Assignments: []groupcoordinator.Assignment{{Member: a, Bytes: []byte("a3")}}}); err != nil || string(s3.Assignment) != "a3" {
+	if s3, err := c.SyncGroup(ctx, groups.SyncReq{Group: "g", MemberID: a, Generation: 3,
+		Assignments: []groups.Assignment{{Member: a, Bytes: []byte("a3")}}}); err != nil || string(s3.Assignment) != "a3" {
 		t.Fatalf("sync gen 3: %+v %v", s3, err)
 	}
 

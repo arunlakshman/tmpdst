@@ -4,7 +4,7 @@ import (
 	"slices"
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
+	"github.com/manifesterio/mds/internal/controlplane/groups"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -266,99 +266,99 @@ func BrokerHeartbeatRespToCore(r *cpv1.BrokerHeartbeatResponse) []core.BrokerAdd
 // ---- Consumer group calls ----
 
 // JoinGroupFromCore builds a JoinGroupRequest from a join call.
-func JoinGroupFromCore(r groupcoordinator.JoinReq) *cpv1.JoinGroupRequest {
+func JoinGroupFromCore(r groups.JoinReq) *cpv1.JoinGroupRequest {
 	return &cpv1.JoinGroupRequest{
 		Group: r.Group, MemberId: r.MemberID, GroupInstanceId: r.GroupInstanceID,
 		ClientId: r.ClientID, ClientHost: r.ClientHost,
 		SessionTimeoutMs: r.SessionTimeoutMs, RebalanceTimeoutMs: r.RebalanceTimeoutMs,
 		ProtocolType: r.ProtocolType,
-		Protocols: mapSlice(r.Protocols, func(p groupcoordinator.Protocol) *cpv1.GroupProtocol {
+		Protocols: mapSlice(r.Protocols, func(p groups.Protocol) *cpv1.GroupProtocol {
 			return &cpv1.GroupProtocol{Name: p.Name, Metadata: p.Metadata}
 		}),
 	}
 }
 
 // JoinGroupToCore rebuilds a join call from a request.
-func JoinGroupToCore(request *cpv1.JoinGroupRequest) groupcoordinator.JoinReq {
-	return groupcoordinator.JoinReq{
+func JoinGroupToCore(request *cpv1.JoinGroupRequest) groups.JoinReq {
+	return groups.JoinReq{
 		Group: request.GetGroup(), MemberID: request.GetMemberId(), GroupInstanceID: request.GetGroupInstanceId(),
 		ClientID: request.GetClientId(), ClientHost: request.GetClientHost(),
 		SessionTimeoutMs: request.GetSessionTimeoutMs(), RebalanceTimeoutMs: request.GetRebalanceTimeoutMs(),
 		ProtocolType: request.GetProtocolType(),
-		Protocols: mapSlice(request.GetProtocols(), func(p *cpv1.GroupProtocol) groupcoordinator.Protocol {
-			return groupcoordinator.Protocol{Name: p.GetName(), Metadata: p.GetMetadata()}
+		Protocols: mapSlice(request.GetProtocols(), func(p *cpv1.GroupProtocol) groups.Protocol {
+			return groups.Protocol{Name: p.GetName(), Metadata: p.GetMetadata()}
 		}),
 	}
 }
 
 // JoinGroupRespFromCore builds a JoinGroupResponse. The caller checks Err first.
-func JoinGroupRespFromCore(r groupcoordinator.JoinResp) *cpv1.JoinGroupResponse {
+func JoinGroupRespFromCore(r groups.JoinResp) *cpv1.JoinGroupResponse {
 	return &cpv1.JoinGroupResponse{
 		MemberId: r.MemberID, Generation: r.Generation, Protocol: r.Protocol, Leader: r.Leader,
-		Members: mapSlice(r.Members, func(m groupcoordinator.Member) *cpv1.GroupMember {
+		Members: mapSlice(r.Members, func(m groups.Member) *cpv1.GroupMember {
 			return &cpv1.GroupMember{MemberId: m.ID, GroupInstanceId: m.InstanceID, Metadata: m.Metadata}
 		}),
 	}
 }
 
 // JoinGroupRespToCore rebuilds a join answer from a response.
-func JoinGroupRespToCore(r *cpv1.JoinGroupResponse) groupcoordinator.JoinResp {
-	return groupcoordinator.JoinResp{
+func JoinGroupRespToCore(r *cpv1.JoinGroupResponse) groups.JoinResp {
+	return groups.JoinResp{
 		MemberID: r.GetMemberId(), Generation: r.GetGeneration(), Protocol: r.GetProtocol(), Leader: r.GetLeader(),
-		Members: mapSlice(r.GetMembers(), func(m *cpv1.GroupMember) groupcoordinator.Member {
-			return groupcoordinator.Member{ID: m.GetMemberId(), InstanceID: m.GetGroupInstanceId(), Metadata: m.GetMetadata()}
+		Members: mapSlice(r.GetMembers(), func(m *cpv1.GroupMember) groups.Member {
+			return groups.Member{ID: m.GetMemberId(), InstanceID: m.GetGroupInstanceId(), Metadata: m.GetMetadata()}
 		}),
 	}
 }
 
 // SyncGroupFromCore builds a SyncGroupRequest from a sync call.
-func SyncGroupFromCore(r groupcoordinator.SyncReq) *cpv1.SyncGroupRequest {
+func SyncGroupFromCore(r groups.SyncReq) *cpv1.SyncGroupRequest {
 	return &cpv1.SyncGroupRequest{
 		Group: r.Group, MemberId: r.MemberID, Generation: r.Generation,
-		Assignments: mapSlice(r.Assignments, func(a groupcoordinator.Assignment) *cpv1.GroupAssignment {
+		Assignments: mapSlice(r.Assignments, func(a groups.Assignment) *cpv1.GroupAssignment {
 			return &cpv1.GroupAssignment{MemberId: a.Member, Assignment: a.Bytes}
 		}),
 	}
 }
 
 // SyncGroupToCore rebuilds a sync call from a request.
-func SyncGroupToCore(request *cpv1.SyncGroupRequest) groupcoordinator.SyncReq {
-	return groupcoordinator.SyncReq{
+func SyncGroupToCore(request *cpv1.SyncGroupRequest) groups.SyncReq {
+	return groups.SyncReq{
 		Group: request.GetGroup(), MemberID: request.GetMemberId(), Generation: request.GetGeneration(),
-		Assignments: mapSlice(request.GetAssignments(), func(a *cpv1.GroupAssignment) groupcoordinator.Assignment {
-			return groupcoordinator.Assignment{Member: a.GetMemberId(), Bytes: a.GetAssignment()}
+		Assignments: mapSlice(request.GetAssignments(), func(a *cpv1.GroupAssignment) groups.Assignment {
+			return groups.Assignment{Member: a.GetMemberId(), Bytes: a.GetAssignment()}
 		}),
 	}
 }
 
 // SyncGroupRespFromCore builds a SyncGroupResponse. The caller checks Err first.
-func SyncGroupRespFromCore(r groupcoordinator.SyncResp) *cpv1.SyncGroupResponse {
+func SyncGroupRespFromCore(r groups.SyncResp) *cpv1.SyncGroupResponse {
 	return &cpv1.SyncGroupResponse{Assignment: r.Assignment}
 }
 
 // SyncGroupRespToCore rebuilds a sync answer from a response.
-func SyncGroupRespToCore(r *cpv1.SyncGroupResponse) groupcoordinator.SyncResp {
-	return groupcoordinator.SyncResp{Assignment: r.GetAssignment()}
+func SyncGroupRespToCore(r *cpv1.SyncGroupResponse) groups.SyncResp {
+	return groups.SyncResp{Assignment: r.GetAssignment()}
 }
 
 // HeartbeatFromCore builds a GroupHeartbeatRequest.
-func HeartbeatFromCore(r groupcoordinator.HeartbeatReq) *cpv1.GroupHeartbeatRequest {
+func HeartbeatFromCore(r groups.HeartbeatReq) *cpv1.GroupHeartbeatRequest {
 	return &cpv1.GroupHeartbeatRequest{Group: r.Group, MemberId: r.MemberID, Generation: r.Generation}
 }
 
 // HeartbeatToCore rebuilds a heartbeat call from a request.
-func HeartbeatToCore(request *cpv1.GroupHeartbeatRequest) groupcoordinator.HeartbeatReq {
-	return groupcoordinator.HeartbeatReq{Group: request.GetGroup(), MemberID: request.GetMemberId(), Generation: request.GetGeneration()}
+func HeartbeatToCore(request *cpv1.GroupHeartbeatRequest) groups.HeartbeatReq {
+	return groups.HeartbeatReq{Group: request.GetGroup(), MemberID: request.GetMemberId(), Generation: request.GetGeneration()}
 }
 
 // LeaveGroupFromCore builds a LeaveGroupRequest.
-func LeaveGroupFromCore(r groupcoordinator.LeaveReq) *cpv1.LeaveGroupRequest {
+func LeaveGroupFromCore(r groups.LeaveReq) *cpv1.LeaveGroupRequest {
 	return &cpv1.LeaveGroupRequest{Group: r.Group, Members: slices.Clone(r.Members)}
 }
 
 // LeaveGroupToCore rebuilds a leave call from a request.
-func LeaveGroupToCore(request *cpv1.LeaveGroupRequest) groupcoordinator.LeaveReq {
-	return groupcoordinator.LeaveReq{Group: request.GetGroup(), Members: slices.Clone(request.GetMembers())}
+func LeaveGroupToCore(request *cpv1.LeaveGroupRequest) groups.LeaveReq {
+	return groups.LeaveReq{Group: request.GetGroup(), Members: slices.Clone(request.GetMembers())}
 }
 
 // LeaveGroupRespFromCore builds a LeaveGroupResponse from one code per member.
@@ -460,16 +460,16 @@ func DescribeGroupsToCore(request *cpv1.DescribeGroupsRequest) []string {
 }
 
 // DescribeGroupsRespFromCore builds a DescribeGroupsResponse.
-func DescribeGroupsRespFromCore(groups []groupcoordinator.GroupDescription) *cpv1.DescribeGroupsResponse {
+func DescribeGroupsRespFromCore(groups []groups.GroupDescription) *cpv1.DescribeGroupsResponse {
 	return &cpv1.DescribeGroupsResponse{Groups: mapSlice(groups, groupDescriptionFromCore)}
 }
 
 // DescribeGroupsRespToCore rebuilds the described groups from a response.
-func DescribeGroupsRespToCore(r *cpv1.DescribeGroupsResponse) []groupcoordinator.GroupDescription {
+func DescribeGroupsRespToCore(r *cpv1.DescribeGroupsResponse) []groups.GroupDescription {
 	return mapSlice(r.GetGroups(), groupDescriptionToCore)
 }
 
-func groupDescriptionFromCore(g groupcoordinator.GroupDescription) *cpv1.GroupDescription {
+func groupDescriptionFromCore(g groups.GroupDescription) *cpv1.GroupDescription {
 	return &cpv1.GroupDescription{
 		Name: g.Name, Exists: g.Exists, Generation: g.Generation, ProtocolType: g.ProtocolType,
 		Protocol: g.Protocol, Leader: g.Leader, AssignedGeneration: g.AssignedGeneration, State: g.State,
@@ -486,8 +486,8 @@ func groupDescriptionFromCore(g groupcoordinator.GroupDescription) *cpv1.GroupDe
 
 // groupDescriptionToCore fills the embedded DescribeGroupResp by name:
 // Go 1.26 does not allow promoted fields in a struct literal.
-func groupDescriptionToCore(d *cpv1.GroupDescription) groupcoordinator.GroupDescription {
-	return groupcoordinator.GroupDescription{
+func groupDescriptionToCore(d *cpv1.GroupDescription) groups.GroupDescription {
+	return groups.GroupDescription{
 		Name: d.GetName(),
 		DescribeGroupResp: core.DescribeGroupResp{
 			Exists: d.GetExists(), Generation: d.GetGeneration(), ProtocolType: d.GetProtocolType(),

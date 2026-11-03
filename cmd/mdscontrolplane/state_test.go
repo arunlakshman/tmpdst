@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/manifesterio/mds/internal/controlplane/kv"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"
 )
@@ -28,7 +29,7 @@ func TestMachineConfigSetsTheIdempotencyWindow(t *testing.T) {
 }
 
 // topicCount asks a store how many topics it holds.
-func topicCount(t *testing.T, keyValue metadata.KeyValueStore) int {
+func topicCount(t *testing.T, keyValue kv.Store) int {
 	t.Helper()
 	d, err := metadata.New(keyValue).Describe(core.DescribeTopics{})
 	if err != nil {

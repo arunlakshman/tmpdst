@@ -3,14 +3,15 @@ package metadata_test
 import (
 	"bytes"
 	"errors"
-	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
 	"path/filepath"
 	"reflect"
 	"testing"
 
+	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
+	"github.com/manifesterio/mds/internal/controlplane/kv"
+	"github.com/manifesterio/mds/internal/controlplane/kv/pebblestore"
 	"github.com/manifesterio/mds/internal/controlplane/metadata"
-	"github.com/manifesterio/mds/internal/controlplane/metadata/pebblestore"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/verify/speccheck/checker"
 	"github.com/manifesterio/mds/internal/verify/speccheck/checker/generator"
@@ -20,7 +21,7 @@ import (
 	"github.com/manifesterio/mds/internal/verify/speccheck/checker/suites"
 )
 
-func newPebble(t testing.TB) metadata.KeyValueStore {
+func newPebble(t testing.TB) kv.Store {
 	t.Helper()
 	keyValue, err := pebblestore.Open(filepath.Join(t.TempDir(), "state"), pebblestore.Options{CacheBytes: 8 << 20, MemTableBytes: 4 << 20})
 	if err != nil {
@@ -30,8 +31,8 @@ func newPebble(t testing.TB) metadata.KeyValueStore {
 	return keyValue
 }
 
-var backends = map[string]func(testing.TB) metadata.KeyValueStore{
-	"mem":    func(testing.TB) metadata.KeyValueStore { return metadata.NewMemoryKeyValueStore() },
+var backends = map[string]func(testing.TB) kv.Store{
+	"mem":    func(testing.TB) kv.Store { return kv.NewMemory() },
 	"pebble": newPebble,
 }
 
@@ -55,7 +56,7 @@ func (s metadataSubject) Do(operation generator.ControlPlaneTestStep) (observati
 
 func (metadataSubject) StateHash() (uint64, bool) { return 0, false }
 
-func newMetadataSubject(t testing.TB, mk func(testing.TB) metadata.KeyValueStore) suites.ControlPlaneSubject {
+func newMetadataSubject(t testing.TB, mk func(testing.TB) kv.Store) suites.ControlPlaneSubject {
 	a := metadata.New(mk(t))
 	t.Cleanup(func() { _ = a.Close() })
 	return metadataSubject{a}
@@ -63,7 +64,7 @@ func newMetadataSubject(t testing.TB, mk func(testing.TB) metadata.KeyValueStore
 
 // runSuite runs the shared control plane suite on the applier for every
 // profile. Pebble is slower, so it passes a smaller default number of seeds.
-func runSuite(t *testing.T, mk func(testing.TB) metadata.KeyValueStore, defaultSeeds int) {
+func runSuite(t *testing.T, mk func(testing.TB) kv.Store, defaultSeeds int) {
 	for _, profile := range suites.AllControlPlaneProfiles() {
 		t.Run(profile.Name, func(t *testing.T) {
 			suites.ControlPlane(t, profile, func() suites.ControlPlaneSubject { return newMetadataSubject(t, mk) },
@@ -164,7 +165,7 @@ func TestSnapshotRestoreAndReplay(t *testing.T) {
 }
 
 func TestTrimForgetsKeysNotOffsets(t *testing.T) {
-	a := metadata.New(metadata.NewMemoryKeyValueStore())
+	a := metadata.New(kv.NewMemory())
 	mustCommit(t, a, 0, commit("old", pb("a", 0, 5)))
 	mustCommit(t, a, 5, commit("new", pb("a", 0, 5)))
 	h := a.StateHash()
@@ -186,7 +187,7 @@ func TestTrimForgetsKeysNotOffsets(t *testing.T) {
 }
 
 func TestRestoreRejectsDamage(t *testing.T) {
-	a := metadata.New(metadata.NewMemoryKeyValueStore())
+	a := metadata.New(kv.NewMemory())
 	mustCommit(t, a, 0, commit("k", pb("a", 0, 2)))
 	var buf bytes.Buffer
 	if err := a.Snapshot(&buf, 1); err != nil {
@@ -195,14 +196,14 @@ func TestRestoreRejectsDamage(t *testing.T) {
 	good := buf.Bytes()
 	cases := map[string][]byte{"empty": nil, "magic": []byte("XXXXXX"), "no end mark": good[:len(good)-1], "cut": good[:len(good)/2], "header only": good[:6]}
 	for name, b := range cases {
-		if _, err := metadata.New(metadata.NewMemoryKeyValueStore()).Restore(bytes.NewReader(b)); err == nil {
+		if _, err := metadata.New(kv.NewMemory()).Restore(bytes.NewReader(b)); err == nil {
 			t.Errorf("%s: restore accepted a damaged checkpoint", name)
 		}
 	}
 }
 
 func TestInvalidAndUnknown(t *testing.T) {
-	a := metadata.New(metadata.NewMemoryKeyValueStore())
+	a := metadata.New(kv.NewMemory())
 	if a.CreateTopic("", 1) != core.ErrInvalid || a.CreateTopic("t", 0) != core.ErrInvalid {
 		t.Fatal("CreateTopic must reject empty name and non-positive partitions")
 	}
@@ -222,7 +223,7 @@ func TestInvalidAndUnknown(t *testing.T) {
 
 func TestStoreAdapter(t *testing.T) {
 	ctx := t.Context()
-	s := &updaterstore.Store{A: metadata.New(metadata.NewMemoryKeyValueStore())}
+	s := &updaterstore.Store{A: metadata.New(kv.NewMemory())}
 	if c, err := storecall.Code(ctx, s, core.CreateTopic{Name: "t", Partitions: 3}); c != core.OK || err != nil {
 		t.Fatal(c, err)
 	}
@@ -251,7 +252,7 @@ func TestCommitBatchEqualsSequential(t *testing.T) {
 		{Slot: 3, Op: commit("k1", pb("a", 0, 1))},                // conflict
 		{Slot: 4, Op: commit("bad")},
 	}
-	one, many := metadata.New(metadata.NewMemoryKeyValueStore()), metadata.New(metadata.NewMemoryKeyValueStore())
+	one, many := metadata.New(kv.NewMemory()), metadata.New(kv.NewMemory())
 	got, err := many.CommitBatch(cmds)
 	if err != nil {
 		t.Fatal(err)
@@ -297,7 +298,7 @@ func TestInjectedBugsCaughtMetadataMem(t *testing.T) {
 }
 
 func TestSnapshotCRCFindsOneFlippedBit(t *testing.T) {
-	a := metadata.New(metadata.NewMemoryKeyValueStore())
+	a := metadata.New(kv.NewMemory())
 	mustCommit(t, a, 0, commit("k", pb("a", 0, 2)))
 	var buf bytes.Buffer
 	if err := a.Snapshot(&buf, 1); err != nil {
@@ -313,7 +314,7 @@ func TestSnapshotCRCFindsOneFlippedBit(t *testing.T) {
 		if metadata.CheckSnapshot(bad) == nil {
 			t.Fatalf("CheckSnapshot accepted a flipped bit at byte %d", i)
 		}
-		if _, err := metadata.New(metadata.NewMemoryKeyValueStore()).Restore(bytes.NewReader(bad)); err == nil {
+		if _, err := metadata.New(kv.NewMemory()).Restore(bytes.NewReader(bad)); err == nil {
 			t.Fatalf("Restore accepted a flipped bit at byte %d", i)
 		}
 	}

@@ -14,4 +14,32 @@
 // this tree (stateupdater, executor) support the
 // state machine's fold and IO. Not deterministic (goroutines, net): it is not
 // checked by ops/tools/determinismcheck.
+//
+// # Map of the packages
+//
+//   - api/v1: the gRPC wire contract, defined in controlplane.proto.
+//   - controlplaneclient: the broker-side adapter. It is a system.ControlPlane
+//     over the gRPC API.
+//   - server: the gRPC adapter for the control-plane machine.
+//   - runloop: the production event loop. One goroutine owns Step, timers and
+//     inject work. It imports only core and the standard library.
+//   - statemachine: the control-plane replica state machine. It implements
+//     core.Machine.
+//   - stateupdater: the state updater. It applies commands in order to an
+//     ordered key-value store.
+//   - stateupdater/pebblestore: the Pebble-backed key-value store that
+//     stateupdater uses.
+//   - executor: runs the control-plane IOCalls outside Step. These are Dynamo
+//     log slots and object-store checkpoints.
+//   - groupcoordinator: the consumer group coordinator of the active node. It
+//     speaks the classic group protocol only.
+//   - controlplanemetrics: the Prometheus instrumentation. It covers HTTP
+//     handler time, DynamoDB call time, in-flight requests and request sizes.
+//   - controlplanetest: the control-plane tests only.
+//
+// How they fit together, from the imports:
+//
+//   - server imports runloop, statemachine, executor and groupcoordinator.
+//   - statemachine imports stateupdater. executor imports runloop.
+//   - controlplaneclient imports api/v1 and apiconvert, and calls the gRPC API.
 package controlplane

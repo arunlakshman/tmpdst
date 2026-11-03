@@ -37,6 +37,35 @@ func config(seeds []uint64, bug broker.InjectedBug) simulator.Config {
 // segment cap (4096): the log has no commit item limit.
 func ConfigLog(seeds []uint64) simulator.Config { return configLog(seeds, broker.InjectedBugNone, 0) }
 
+// ConfigLogFreeze is the log preset plus process freezes. A control plane node
+// is paused for seconds (a long VM pause or garbage collection) and then goes on
+// with its old view. By then the other node has taken over and trimmed past the
+// frozen node's slots, so a put from the frozen node reaches a trimmed slot and
+// the floor check must refuse it. The campaign requires that this path is reached.
+func ConfigLogFreeze(seeds []uint64) simulator.Config {
+	return configLogFreeze(seeds, broker.InjectedBugNone, 0)
+}
+
+func configLogFreeze(seeds []uint64, bug broker.InjectedBug, logBug uint8) simulator.Config {
+	config := configLog(seeds, bug, logBug)
+	withFreezes(&config)
+	config.ExpectReachable = append(config.ExpectReachable, "logcp-sim: put refused at or below the floor")
+	return config
+}
+
+// withFreezes lets the kernel freeze the control plane nodes for 1 to 4 seconds,
+// about 2 to 5 freezes per seed. A freeze is longer than a checkpoint and trim
+// cycle, so the frozen node comes back behind the floor of the log.
+func withFreezes(config *simulator.Config) {
+	config.Attrition.FreezeProb = 0.0004
+	config.Attrition.FreezeDur = [2]core.Duration{1 * core.Second, 4 * core.Second}
+	for i := range config.Processes {
+		if config.Processes[i].Name == "cp" {
+			config.Processes[i].Freezable = true
+		}
+	}
+}
+
 // configLog builds the log preset with a broker mutant and a log engine mutant.
 func configLog(seeds []uint64, bug broker.InjectedBug, logBug uint8) simulator.Config {
 	opts := DefaultOpts()
@@ -49,6 +78,11 @@ func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Op
 	config := configWith(seeds, bug, opts)
 	config.ControlPlane.Log = fakelogservice.DefaultParams()
 	config.ControlPlane.Log.Bug = logBug
+	// Only the no-floor-check mutant lives in the store. Other values stay on the control plane.
+	var storeBug uint8
+	if logBug == fakelogservice.InjectedBugNoFloorCheck {
+		storeBug = logBug
+	}
 	// A replica stall or crash is rolled on each role tick of the active node.
 	// Raise the defaults so a short campaign (20 seeds) still reaches both.
 	config.ControlPlane.Log.StallProb, config.ControlPlane.Log.CrashProb = 0.004, 0.002
@@ -63,7 +97,7 @@ func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Op
 		LostResponse:   lp.PutLost,
 		Outage:         simulator.ServiceOutage{},
 		CallerTimeout:  config.ControlPlane.CallerTimeout,
-		Bug:            logBug,
+		Bug:            storeBug,
 		WindowSlots:    lp.WindowSlots,
 		TrimStride:     lp.TrimStride,
 	}
@@ -89,12 +123,12 @@ func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Op
 func logReachables() []core.PropertyID {
 	return []core.PropertyID{
 		"logcp-sim: lost slot retried at a later slot",
-		"logcp-sim: gap filled by a no-op",
 		"logcp-sim: Put not answered, same slot repeated",
 		"logcp-sim: replayed key answered from the window",
 		"logcp-sim: log trimmed below a checkpoint",
 		"logcp-sim: standby took over",
-		"logcp-sim: failback, the standby stepped down",
+		"logcp-sim: epoch claimed",
+		"logcp-sim: writer fenced, now read-only",
 		"logcp-sim: replica stalled",
 		"logcp-sim: replica crashed",
 		"logcp-sim: replica restored from a checkpoint",
@@ -178,16 +212,13 @@ func swarmLog(r simulator.CountedRand, c *simulator.SeedConfig) {
 	scale(&l.ReadFail)
 	scale(&l.StallProb)
 	scale(&l.CrashProb)
-	l.K = []int{2, 4, 8}[r.Intn(3)]
 	l.GroupMax = []int{1, 2, 4, 16}[r.Intn(4)]
-	l.GapAfter = campaign.Millis([]int64{20, 60, 200}[r.Intn(3)])
 	l.TakeoverAfter = campaign.Millis([]int64{600, 900, 1500}[r.Intn(3)])
 	if r.Chance(0.4) {
 		l.CheckpointEvery, l.KeepSlots, l.TrimStride = []int{8, 16, 24}[r.Intn(3)], []int{16, 32}[r.Intn(2)], 4
 	}
 	c.LogStore.Unavailable503 = l.PutFail
 	c.LogStore.LostResponse = l.PutLost
-	c.LogStore.Bug = l.Bug
 	c.LogStore.WindowSlots = l.WindowSlots
 	c.LogStore.TrimStride = l.TrimStride
 }

@@ -60,7 +60,7 @@ func (e *Executor) Execute(a core.IOCall) {
 
 func (e *Executor) run(a core.IOCall) core.IOResult {
 	switch a := a.(type) {
-	case core.LogAppend, core.LogRead, core.LogGetEnd, core.LogDeleteOld:
+	case core.LogAppend, core.LogRead, core.LogGetEnd, core.LogDeleteOld, core.LogClaimEpoch:
 		return e.logIO(a)
 	case core.ObjectPut, core.ObjectGet, core.ObjectDelete, core.ObjectList:
 		return e.objIO(a)
@@ -78,6 +78,11 @@ func (e *Executor) logIO(a core.IOCall) core.IOResult {
 		if err != nil {
 			c, o := Classify(a, err)
 			return core.LogAppendDone{Req: a.Req, Slot: a.Slot, Err: c, Outcome: o}
+		}
+		if taken && len(existing) == 0 {
+			// At or below the floor: the put is not a commit. There is no
+			// existing entry to report.
+			return core.LogAppendDone{Req: a.Req, Slot: a.Slot, Taken: true, Err: core.ErrConflict, Outcome: core.NotApplied}
 		}
 		if taken {
 			return core.LogAppendDone{
@@ -107,6 +112,13 @@ func (e *Executor) logIO(a core.IOCall) core.IOResult {
 			return core.LogDeleteOldDone{Req: a.Req, Err: c, Outcome: o}
 		}
 		return core.LogDeleteOldDone{Req: a.Req, Err: core.OK, Outcome: core.Applied}
+	case core.LogClaimEpoch:
+		epoch, owner, won, err := e.log.ClaimEpoch(ctx, a.Expect, a.Owner)
+		if err != nil {
+			c, o := Classify(a, err)
+			return core.LogClaimEpochDone{Req: a.Req, Err: c, Outcome: o}
+		}
+		return core.LogClaimEpochDone{Req: a.Req, Epoch: epoch, Owner: owner, Won: won, Err: core.OK, Outcome: core.Applied}
 	default:
 		return core.LogAppendDone{Req: a.RequestID(), Err: core.ErrInvalid, Outcome: core.NotApplied}
 	}

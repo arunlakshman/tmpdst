@@ -2,7 +2,6 @@ package fakedynamodb
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"strings"
 
@@ -23,10 +22,10 @@ func (f *FakeDynamoDB) UpdateItem(ctx context.Context, in *dynamodb.UpdateItemIn
 		return nil, err
 	}
 	cur := t[itemIDOf(in.Key)]
-	if err := rejectCond(in.ConditionExpression, in.ExpressionAttributeValues, cur); err != nil {
+	if err := rejectCond(in.ConditionExpression, in.ExpressionAttributeNames, in.ExpressionAttributeValues, cur, in.ReturnValuesOnConditionCheckFailure); err != nil {
 		return nil, err
 	}
-	next, set, err := applyUpdate(aws.ToString(in.UpdateExpression), in.ExpressionAttributeValues, in.Key, cur)
+	next, set, err := applyUpdate(aws.ToString(in.UpdateExpression), in.ExpressionAttributeNames, in.ExpressionAttributeValues, in.Key, cur)
 	if err != nil {
 		return nil, err
 	}
@@ -124,10 +123,7 @@ func (f *FakeDynamoDB) PutItem(ctx context.Context, in *dynamodb.PutItemInput, _
 		return nil, err
 	}
 	cur := t[itemIDOf(in.Item)]
-	if err := rejectCond(in.ConditionExpression, in.ExpressionAttributeValues, cur); err != nil {
-		if failed, ok := errors.AsType[*types.ConditionalCheckFailedException](err); ok && in.ReturnValuesOnConditionCheckFailure == types.ReturnValuesOnConditionCheckFailureAllOld {
-			failed.Item = cloneItem(cur)
-		}
+	if err := rejectCond(in.ConditionExpression, in.ExpressionAttributeNames, in.ExpressionAttributeValues, cur, in.ReturnValuesOnConditionCheckFailure); err != nil {
 		return nil, err
 	}
 	f.store(aws.ToString(in.TableName), cloneItem(in.Item))
@@ -139,15 +135,22 @@ func (f *FakeDynamoDB) PutItem(ctx context.Context, in *dynamodb.PutItemInput, _
 	return &dynamodb.PutItemOutput{ConsumedCapacity: f.capacity(aws.ToString(in.TableName))}, nil
 }
 
-func rejectCond(expr *string, vals, cur item) error {
-	ok, err := evalCondition(expr, vals, cur)
+// rejectCond returns a ConditionalCheckFailedException when the condition does
+// not hold. With ALL_OLD the exception carries a copy of the old item, as the
+// service does for PutItem and UpdateItem.
+func rejectCond(expr *string, names map[string]string, vals, cur item, ret types.ReturnValuesOnConditionCheckFailure) error {
+	ok, err := evalCondition(expr, names, vals, cur)
 	if err != nil {
 		return err
 	}
-	if !ok {
-		return &types.ConditionalCheckFailedException{Message: new("The conditional request failed")}
+	if ok {
+		return nil
 	}
-	return nil
+	failed := &types.ConditionalCheckFailedException{Message: new("The conditional request failed")}
+	if ret == types.ReturnValuesOnConditionCheckFailureAllOld {
+		failed.Item = cloneItem(cur)
+	}
+	return failed
 }
 
 // BatchWriteItem applies up to 25 puts and deletes (no conditions, like the

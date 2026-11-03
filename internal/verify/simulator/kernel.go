@@ -40,6 +40,7 @@ const (
 	countRestarts
 	countGracefulStops
 	countDeadlineKills
+	countFreezes
 	counterCount
 )
 
@@ -59,6 +60,7 @@ func counterNames() [counterCount]string {
 		countRestarts:         "restarts",
 		countGracefulStops:    "graceful_stops",
 		countDeadlineKills:    "deadline_kills",
+		countFreezes:          "freezes",
 	}
 }
 
@@ -97,6 +99,8 @@ type node struct {
 
 	noAttrition       bool
 	hiddenFromClients bool
+	freezable         bool // the kernel may freeze this process (see freezeNode)
+	frozenUntil       Time // while now is before this, the process takes no Step
 }
 
 type endKind uint8
@@ -276,6 +280,7 @@ func (r *run) addNodes() {
 			n := add(fmt.Sprintf("%s-%d", p.Name, i), false)
 			n.factory = p.Factory
 			n.noAttrition = p.NoAttrition
+			n.freezable = p.Freezable
 			n.hiddenFromClients = p.HiddenFromClients
 			if p.FactoryFor != nil {
 				n.factory = p.FactoryFor(r.sc)
@@ -414,6 +419,7 @@ func (r *run) loop() {
 		for r.attr > 0 && !r.halt {
 			r.attr--
 			r.attrition()
+			r.freezeNode()
 		}
 		r.foldState()
 		for _, inv := range r.invs {
@@ -807,6 +813,7 @@ func (r *run) end(n *node, how endKind, cause string) {
 		}
 	}
 	n.m, n.wl, n.inbox, n.timers = nil, nil, &nodeInbox{}, nil
+	n.frozenUntil = 0
 	a := r.sc.Attrition
 	delay := core.Duration(r.rng.Between(int64(a.RecoveryDelay[0]), int64(a.RecoveryDelay[1])))
 	r.sched.Schedule(Entry{At: r.now() + Time(delay), Lane: laneForSimulator, Kind: EntryRestart, Target: Target{Node: core.NodeInstance{Node: n.name}}})
@@ -853,6 +860,44 @@ func (r *run) attrition() {
 		return
 	}
 	r.end(n, endCrash, "attrition")
+}
+
+// freezeNode evaluates one FreezeProb roll (Chaos only) and may freeze one
+// process that allows it. A frozen process takes no Step for FreezeDur. Events
+// sent to it queue in its inbox, and what it already started keeps going: a log
+// put it sent can still land. When the freeze ends it handles its queue with its
+// old view of the world, as after a long VM pause or a stop-the-world GC. At most
+// one process is frozen at a time. With FreezeProb zero it draws no randomness,
+// so other scenarios keep their traces.
+func (r *run) freezeNode() {
+	a := r.sc.Attrition
+	if a.FreezeProb <= 0 || r.phase != PhaseFaults || !r.rng.Chance(a.FreezeProb) {
+		return
+	}
+	now := r.now()
+	var candidates []*node
+	for _, n := range r.nodes {
+		if !n.freezable || !n.alive || n.stopping {
+			continue
+		}
+		if n.frozenUntil > now {
+			return
+		}
+		candidates = append(candidates, n)
+	}
+	if len(candidates) == 0 {
+		return
+	}
+	n := candidates[r.rng.Intn(len(candidates))]
+	length := core.Duration(r.rng.Between(int64(a.FreezeDur[0]), int64(a.FreezeDur[1])))
+	n.frozenUntil = now + Time(length)
+	n.inbox.busy = max(n.inbox.busy, n.frozenUntil)
+	r.counters[countFreezes]++
+	r.simulatorFact("sim_frozen", core.Field{Key: "node", Value: core.StringValue(n.name)},
+		core.Field{Key: "ms", Value: core.Int64Value(int64(length / core.Millisecond))})
+	if !n.inbox.empty() {
+		r.ensureWake(n, n.inbox.busy)
+	}
 }
 
 // ---- FakeServiceContext ----

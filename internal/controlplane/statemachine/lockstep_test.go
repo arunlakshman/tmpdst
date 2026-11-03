@@ -95,7 +95,7 @@ func feedContiguous(t *testing.T, m *statemachine.Machine, entries []stateupdate
 }
 
 func TestLockstepMachineVsSpecCheck(t *testing.T) {
-	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, GapAfter: 0})
+	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond})
 	orc := speccheck.NewControlPlane()
 	machineAnswers := feedContiguous(t, m, lockstepCmds)
 
@@ -133,46 +133,4 @@ func TestLockstepMachineVsSpecCheck(t *testing.T) {
 	}
 	t.Logf("lockstep cmds=%d applied=%d foldHash=%x queryDigest=%x",
 		len(lockstepCmds), m.Applied(), m.Fold().StateHash(), appDig)
-}
-
-func TestLockstepWithGapFill(t *testing.T) {
-	m := newMachine(t, statemachine.Config{CatchUpEvery: core.Millisecond, GapAfter: 0})
-	orc := speccheck.NewControlPlane()
-
-	a := lockstepCmds[2]
-	b := lockstepCmds[3]
-	acts := step(m, core.NodeStarted{})
-	timer := acts[0].(core.SetTimer)
-	acts = step(m, core.TimerFired{ID: timer.ID, Gen: timer.Gen})
-	tail := acts[0].(core.LogGetEnd)
-	acts = step(m, core.LogGetEndDone{Req: tail.Req, Tail: 3, Err: core.OK, Outcome: core.Applied})
-	read := acts[0].(core.LogRead)
-	acts = step(m, core.LogReadDone{
-		Req: read.Req, Err: core.OK, Outcome: core.Applied,
-		Entries: []core.LogEntry{
-			{Slot: 0, Data: stateupdater.Encode(a)},
-			{Slot: 2, Data: stateupdater.Encode(b)},
-		},
-	})
-	ap := acts[0].(core.LogAppend)
-	if ap.Slot != 1 {
-		t.Fatalf("fill slot = %d, want 1", ap.Slot)
-	}
-	step(m, core.LogAppendDone{Req: ap.Req, Slot: 1, Err: core.OK, Outcome: core.Applied})
-	if m.Applied() != 3 {
-		t.Fatalf("Applied = %d, want 3", m.Applied())
-	}
-
-	_ = orc.Exec(core.ControlPlaneCall{Req: 0, Op: a.Commit})
-	_ = orc.Exec(core.ControlPlaneCall{Req: 2, Op: b.Commit})
-
-	appDig := queryDigest(func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
-		return m.Fold().Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
-	})
-	orcDig := queryDigest(func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
-		return orc.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
-	})
-	if appDig != orcDig {
-		t.Fatalf("query digest after gap-fill: machine %x, speccheck %x", appDig, orcDig)
-	}
 }

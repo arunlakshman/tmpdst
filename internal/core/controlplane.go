@@ -27,7 +27,9 @@ type ControlPlaneResponse interface{ isControlPlaneResponse() }
 // MUST be idempotent per SegmentKey: a replay of a committed key with an
 // identical request returns the originally assigned ranges, never new ones
 // (so a retry after MaybeApplied is safe); the same key with a different
-// request is ErrConflict. That is the only use of ErrConflict.
+// request is ErrConflict. ErrConflict is also the answer for a LogAppend that
+// the log refused because its slot is at or below the floor (not a commit,
+// Outcome NotApplied). Those are the only two uses.
 type CommitSegment struct {
 	SegmentKey string
 	Batches    []PendingBatch

@@ -8,7 +8,6 @@ func TestPendingKindNames(t *testing.T) {
 		pendingNone:     "none",
 		pendingTail:     "tail_check",
 		pendingRead:     "log_read",
-		pendingAppend:   "log_append",
 		pendingObjGet:   "checkpoint_get",
 		pendingKind(99): "none",
 	}

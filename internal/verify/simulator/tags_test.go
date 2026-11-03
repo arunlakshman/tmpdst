@@ -61,7 +61,7 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		"ObjectGetDone": core.ObjectGetDone{}, "ObjectDeleteDone": core.ObjectDeleteDone{}, "ObjectListDone": core.ObjectListDone{},
 		"ControlPlaneDone": core.ControlPlaneDone{}, "ControlPlaneDeliver": core.ControlPlaneDeliver{},
 		"LogAppendDone": core.LogAppendDone{}, "LogReadDone": core.LogReadDone{},
-		"LogGetEndDone": core.LogGetEndDone{}, "LogDeleteOldDone": core.LogDeleteOldDone{},
+		"LogGetEndDone": core.LogGetEndDone{}, "LogDeleteOldDone": core.LogDeleteOldDone{}, "LogClaimEpochDone": core.LogClaimEpochDone{},
 		"LiveBrokers": core.LiveBrokers{},
 	}
 	actions := map[string]core.Action{
@@ -70,8 +70,8 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		"Connect": core.Connect{}, "ObjectPut": core.ObjectPut{}, "ObjectGet": core.ObjectGet{}, "ObjectDelete": core.ObjectDelete{},
 		"ObjectList": core.ObjectList{}, "ControlPlaneCall": core.ControlPlaneCall{}, "ControlPlaneReply": core.ControlPlaneReply{},
 		"LogAppend": core.LogAppend{}, "LogRead": core.LogRead{}, "LogGetEnd": core.LogGetEnd{},
-		"LogDeleteOld": core.LogDeleteOld{},
-		"RecordFact":   core.RecordFact{}, "StopForRestart": core.StopForRestart{}, "ShutdownDone": core.ShutdownDone{},
+		"LogDeleteOld": core.LogDeleteOld{}, "LogClaimEpoch": core.LogClaimEpoch{},
+		"RecordFact": core.RecordFact{}, "StopForRestart": core.StopForRestart{}, "ShutdownDone": core.ShutdownDone{},
 	}
 	ops := map[string]core.ControlPlaneOperation{
 		"CommitSegment": core.CommitSegment{}, "FindSegments": core.FindSegments{},

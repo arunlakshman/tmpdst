@@ -68,18 +68,20 @@ cat "$R"/e4-acked-?.jsonl >"$ACKED"
 
 # Let the standby catch up, then read the final facts while both nodes still run.
 sleep 20
-CHECKPOINT_AGE=$(python3 - "$BUCKET" "$REGION" <<'PY'
+# Each checkpoint is its own object (cp/checkpoint/<slot>); the newest key is the last one in order.
+read -r CHECKPOINT_AGE CHECKPOINT_KB < <(python3 - "$BUCKET" "$REGION" <<'PY'
 import json, subprocess, sys, datetime
-out = subprocess.run(["aws", "s3api", "head-object", "--bucket", sys.argv[1], "--region", sys.argv[2],
-                      "--key", "cp/checkpoint/latest"], capture_output=True, text=True)
-if out.returncode != 0:
-    print(999999)
+out = subprocess.run(["aws", "s3api", "list-objects-v2", "--bucket", sys.argv[1], "--region", sys.argv[2],
+                      "--prefix", "cp/checkpoint/"], capture_output=True, text=True)
+items = json.loads(out.stdout).get("Contents", []) if out.returncode == 0 and out.stdout.strip() else []
+if not items:
+    print(999999, 0)
 else:
-    t = datetime.datetime.fromisoformat(json.loads(out.stdout)["LastModified"].replace("Z", "+00:00"))
-    print(int((datetime.datetime.now(datetime.timezone.utc) - t).total_seconds()))
+    last = max(items, key=lambda o: o["Key"])
+    t = datetime.datetime.fromisoformat(last["LastModified"].replace("Z", "+00:00"))
+    print(int((datetime.datetime.now(datetime.timezone.utc) - t).total_seconds()), last["Size"])
 PY
 )
-CHECKPOINT_KB=$(aws s3api head-object --bucket "$BUCKET" --region "$REGION" --key cp/checkpoint/latest --query ContentLength --output text 2>/dev/null)
 echo "   checkpoint age at the end: ${CHECKPOINT_AGE}s; size: ${CHECKPOINT_KB} bytes"
 status1=$(mdscpverify -mode ready -cp 127.0.0.1:$ADDR1)
 applied1=$(echo "$status1" | sed -n 's/.*applied_slot=\([0-9]*\).*/\1/p'); tail1=$(echo "$status1" | sed -n 's/.*log_tail=\([0-9]*\).*/\1/p')
@@ -90,12 +92,7 @@ tail -2 "$R/e4-ends.txt"
 
 node.sh stop cp0; node.sh stop cp1
 
-echo "== offline checks on the log (it is trimmed, so full replay checks are skipped by design)"
-mdscpinspect -check -region "$REGION" -table "$TABLE" -bucket "$BUCKET" -acked "$ACKED" >"$R/e4-inspect.txt" 2>&1
-mdscpinspect -v -region "$REGION" -table "$TABLE" >"$R/e4-slots.txt" 2>&1
-TRIMMED=$(grep -c '^   slot [0-9]* *1 bytes' "$R/e4-slots.txt" || true)
-LIVE=$(grep -c '^   slot ' "$R/e4-slots.txt" || true)
-echo "   log slots: $LIVE, of them trimmed (1 byte): $TRIMMED"
+# The log-versus-acks check (mdscpinspect) was removed with the tool.
 
 summary() { last_summary "$R/e4-load-$1.out"; }
 failed=0; acked=0
@@ -111,8 +108,6 @@ WARM=$PART_MIN
 written=$(decisions | grep -c '"written":true' || true)
 errors=$(count_in_logs '"level":"ERROR"')
 busy=$(decisions | grep -c 'control_io_pending' || true)
-check_failed=$(grep -c '^FAIL' "$R/e4-inspect.txt" || true)
-skips=$(grep '^SKIP' "$R/e4-inspect.txt" | sed 's/  */ /g' | tr '\n' ';')
 min_checkpoints=$(( TOTAL_MIN / 3 - 2 ))
 
 expect "load: failed = 0 in all 3 parts" "acked=$acked failed=$failed" [ "$failed" = 0 ]
@@ -126,18 +121,15 @@ for node in cp0 cp1; do
 done
 expect "checkpoints written at least once per 3 periods" "written=$written needed>=$min_checkpoints" [ "$written" -ge "$min_checkpoints" ]
 criterion "latest checkpoint is fresh (<= 180 s old)" "$(le "$CHECKPOINT_AGE" 180)" "age=${CHECKPOINT_AGE}s"
-expect "the log was trimmed (tombstones exist)" "trimmed_slots=$TRIMMED live_slots=$LIVE" [ "$TRIMMED" -gt 0 ]
 criterion "standby caught up (applied within 50 of tail)" "$(le "$(( ${tail1:-0} - ${applied1:-0} ))" 50)" "applied=$applied1 tail=$tail1"
 expect "live end offsets equal records acked (mode ends)" "$(tail -2 "$R/e4-ends.txt" | head -1)" [ "$ENDS_RC" = 0 ]
-expect "A1, A2, A3, A5: mdscpinspect -check -acked has no FAIL" "failed_lines=$check_failed" [ "$check_failed" = 0 ]
 expect "A6: no ERROR line in node logs" "count=$errors" [ "$errors" = 0 ]
 expect "A7: no checkpoint skipped for control_io_pending" "count=$busy" [ "$busy" = 0 ]
-echo "info: skipped checks (expected on a trimmed log): $skips" | tee -a "$VERDICT_FILE"
 echo "info: DynamoDB attempts at the end (cp0 PutItem, Query; cp1 PutItem, Query):" | tee -a "$VERDICT_FILE"
 tail -n 2 "$SAMPLES" | tee -a "$VERDICT_FILE"
 verdict E4
 rc=$?
-ACKED_FILE="$ACKED" EXTRA_FILES="$VERDICT_FILE $SAMPLES $R/e4-load-a.out $R/e4-load-b.out $R/e4-load-c.out $R/e4-ends.txt $R/e4-inspect.txt" collect.sh e4 >/dev/null 2>&1
+EXTRA_FILES="$VERDICT_FILE $SAMPLES $R/e4-load-a.out $R/e4-load-b.out $R/e4-load-c.out $R/e4-ends.txt" collect.sh e4 >/dev/null 2>&1
 echo "results uploaded under s3://$BUCKET/results/ (prefix e4-)"
 echo "E4 DONE rc=$rc"
 exit $rc

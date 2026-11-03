@@ -2,7 +2,6 @@ package statemachine
 
 import (
 	"bytes"
-	"fmt"
 
 	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
 	"github.com/manifesterio/mds/internal/core"
@@ -10,7 +9,6 @@ import (
 
 const (
 	timerCatchUp = core.TimerID(1)
-	timerGapFill = core.TimerID(2)
 )
 
 // Machine is the control-plane DSM. Build it with New.
@@ -32,7 +30,6 @@ type Machine struct {
 
 	now           core.NodeTime
 	timerGen      core.TimerVersion
-	gapGeneration core.TimerVersion
 	roleGen       core.TimerVersion
 	checkpointGen core.TimerVersion
 	nextReq       core.RequestID
@@ -42,16 +39,19 @@ type Machine struct {
 	high          core.LogPosition // next slot to allocate for commit appends
 	buf           map[core.LogPosition][]byte
 	pending       core.RequestID
+	epoch         uint64         // writer epoch this node holds; zero when it is not the writer
+	claimReq      core.RequestID // in-flight LogClaimEpoch; 0 means none
+	claimExpect   uint64         // epoch that claim expected to find
+	fencedFlag    bool           // a newer epoch was seen while applying; step down after the drain
+	stepDowns     uint64         // times this node stopped being the writer because of a newer epoch
+	tailChecked   bool           // a tail check finished since the last restore
+	maxEpochSeen  uint64         // highest writer epoch seen in applied log entries
+	restoreKey    string         // checkpoint object being read
 	pendingKind   pendingKind
-	fillSlot      core.LogPosition // slot of in-flight gap-fill append
-	fillData      []byte           // bytes we offered for that append
-	gapArmed      bool             // gap timer is outstanding
 
 	lastPullOK  core.NodeTime
 	lastOtherAt core.NodeTime
 	lastOwnAt   core.NodeTime
-	promoSlot   core.LogPosition
-	lowerSeen   bool
 
 	checkpointSlot    core.LogPosition // newest checkpoint slot (written or restored)
 	checkpointAt      core.NodeTime
@@ -65,7 +65,7 @@ type Machine struct {
 	trimThrough       core.LogPosition // Through of the in-flight trim
 
 	queue           []waitingCommand                   // client ops waiting for a commit slot
-	inFlightAppends map[core.RequestID]*inFlightAppend // in-flight commit LogAppends (at most K)
+	inFlightAppends map[core.RequestID]*inFlightAppend // in-flight commit LogAppends (at most one)
 	waiters         map[string][]waitingCommand
 	answers         []ReplyToClient
 	proj            map[core.TopicPartition]core.Offset // InjectedBugWriterOffsets projection
@@ -73,7 +73,7 @@ type Machine struct {
 	stallUntil      core.NodeTime
 	downUntil       core.NodeTime
 	crashed         bool
-	needsCheckpoint bool // hit a tomb; must restore before catch-up from zero
+	needsCheckpoint bool // fell behind a trim; must restore before catch-up from zero
 	checkpointRetry bool // the last checkpoint read failed; read again before catch-up
 	seeds           []topicSeed
 
@@ -93,7 +93,7 @@ const (
 	pendingNone pendingKind = iota
 	pendingTail
 	pendingRead
-	pendingAppend
+	pendingObjList
 	pendingObjGet
 )
 
@@ -170,6 +170,10 @@ func (m *Machine) Step(event core.Event) []core.Action {
 		acts = m.onReadDone(body)
 	case core.LogAppendDone:
 		acts = m.onAppendDone(body)
+	case core.LogClaimEpochDone:
+		acts = m.onClaimDone(body)
+	case core.ObjectListDone:
+		acts = m.onObjListDone(body)
 	case core.ObjectGetDone:
 		acts = m.onObjGetDone(body)
 	case core.ObjectPutDone:
@@ -193,7 +197,7 @@ func (m *Machine) onStarted() []core.Action {
 	if m.checkpointEnabled() {
 		m.booting = true
 		m.ready = false
-		return m.emitCheckpointGet()
+		return m.emitCheckpointList()
 	}
 	return m.afterRestore()
 }
@@ -211,10 +215,8 @@ func (m *Machine) finishBoot() []core.Action {
 	m.booting = false
 	m.ready = true
 	m.lastOtherAt, m.lastPullOK, m.lastOwnAt = m.now, m.now, m.now
-	if m.rolesArmed() && m.config.Rank == 0 {
-		m.setActive(true)
-	}
 	var acts []core.Action
+	acts = append(acts, m.claimNow()...)
 	acts = append(acts, m.armRole()...)
 	acts = append(acts, m.armCheckpoint()...)
 	return acts
@@ -222,6 +224,11 @@ func (m *Machine) finishBoot() []core.Action {
 
 func (m *Machine) maybeBecomeReady() []core.Action {
 	if !m.booting || m.pending != 0 || m.applied < m.goalTail {
+		return nil
+	}
+	// A restore is not over until the checkpoint is read and a tail check
+	// finished after it. An append completion alone must never make the node ready.
+	if m.checkpointRetry || m.needsCheckpoint || (m.config.CatchUpEvery > 0 && !m.tailChecked) {
 		return nil
 	}
 	return m.finishBoot()
@@ -234,15 +241,6 @@ func (m *Machine) onTimer(e core.TimerFired) []core.Action {
 			return nil
 		}
 		return m.emitCheckTail()
-	case timerGapFill:
-		if e.Gen != m.gapGeneration || !m.gapArmed || m.pending != 0 {
-			return nil
-		}
-		m.gapArmed = false
-		if !m.gapOpen() {
-			return m.progress()
-		}
-		return m.emitGapFill()
 	case timerRole:
 		return m.onRoleTimer(e)
 	case timerCheckpoint:
@@ -261,6 +259,7 @@ func (m *Machine) onCheckTailDone(d core.LogGetEndDone) []core.Action {
 		return m.armCatchUp()
 	}
 	m.notePullOK()
+	m.tailChecked = true
 	m.goalTail = d.Tail
 	m.noteTail(m.tailRound, d.Tail)
 	return m.progress()
@@ -282,10 +281,21 @@ func (m *Machine) onReadDone(d core.LogReadDone) []core.Action {
 		m.buf[e.Slot] = bytes.Clone(e.Data)
 		m.observeSlot(e.Slot)
 	}
+	// The writer appends one slot at a time and retries a slot until it knows
+	// the result, so the log has no empty slot below its tail. LogRead starts at
+	// m.applied and returns only slots that exist: if the next slot is missing but a
+	// later one exists, this node fell behind a trim.
+	if len(d.Entries) > 0 && m.nextSlotMissing() {
+		return m.hitTrimmed()
+	}
 	if err := m.drain(); err != nil {
 		return m.trip(err)
 	}
-	acts := m.progress()
+	var acts []core.Action
+	if m.fencedFlag {
+		acts = m.stepDown()
+	}
+	acts = append(acts, m.progress()...)
 	return append(acts, m.flushCommits()...)
 }
 
@@ -293,34 +303,7 @@ func (m *Machine) onAppendDone(d core.LogAppendDone) []core.Action {
 	if f, ok := m.inFlightAppends[d.Req]; ok {
 		return m.onCommitAppendDone(d, f)
 	}
-	if d.Req != m.pending || m.pendingKind != pendingAppend {
-		return nil
-	}
-	slot := m.fillSlot
-	offered := m.fillData
-	m.pending, m.pendingKind = 0, pendingNone
-	m.fillSlot, m.fillData = 0, nil
-	if isDeleted(d) {
-		// Gap fill landed on a trimmed slot: catch-up cannot rewrite tombs
-		// (docs/log-cp-service.md). Restore from checkpoint and rejoin.
-		return m.hitTrimmed()
-	}
-	if d.Err != core.OK || d.Outcome != core.Applied {
-		return m.armCatchUp()
-	}
-	data := offered
-	if d.Taken {
-		data = bytes.Clone(d.Existing)
-	}
-	m.observeSlot(slot)
-	if slot >= m.applied {
-		m.buf[slot] = data
-	}
-	if err := m.drain(); err != nil {
-		return m.trip(err)
-	}
-	acts := m.progress()
-	return append(acts, m.flushCommits()...)
+	return nil
 }
 
 func (m *Machine) drain() error {
@@ -334,7 +317,6 @@ func (m *Machine) drain() error {
 			return err
 		}
 		m.applied++
-		m.gapArmed = false
 	}
 }
 
@@ -342,14 +324,8 @@ func (m *Machine) progress() []core.Action {
 	if m.pending != 0 {
 		return nil
 	}
-	if m.applied < m.goalTail {
-		if m.gapOpen() {
-			return m.maybeGapFill()
-		}
+	if m.applied < m.goalTail || m.nextSlotMissing() {
 		return m.emitRead()
-	}
-	if m.gapOpen() {
-		return m.maybeGapFill()
 	}
 	if acts := m.maybeBecomeReady(); acts != nil {
 		var out []core.Action
@@ -360,78 +336,14 @@ func (m *Machine) progress() []core.Action {
 	return m.armCatchUp()
 }
 
-func (m *Machine) gapOpen() bool {
+// nextSlotMissing reports that a later slot is buffered (one of our own
+// appends landed) while the next slot to apply has not been read yet.
+func (m *Machine) nextSlotMissing() bool {
 	if len(m.buf) == 0 {
 		return false
 	}
 	_, ok := m.buf[m.applied]
 	return !ok
-}
-
-type gapPlan uint8
-
-const (
-	gapPlanWait gapPlan = iota
-	gapPlanFill
-	gapPlanArm
-	gapPlanSkip
-)
-
-func (m *Machine) gapFillPlan() gapPlan {
-	if m.config.InjectedBug == InjectedBugGapSkip {
-		return gapPlanSkip
-	}
-	if m.config.GapAfter <= 0 {
-		return gapPlanFill
-	}
-	if m.gapArmed {
-		return gapPlanWait
-	}
-	return gapPlanArm
-}
-
-func (m *Machine) maybeGapFill() []core.Action {
-	switch m.gapFillPlan() {
-	case gapPlanSkip:
-		return m.skipGap()
-	case gapPlanFill:
-		return m.emitGapFill()
-	case gapPlanArm:
-		return m.armGapFill()
-	default:
-		return nil
-	}
-}
-
-func (m *Machine) skipGap() []core.Action {
-	// Mutant: advance past the gap without a no-op fill.
-	m.applied++
-	m.gapArmed = false
-	m.env.Always(false, "logcp-sim: a replica's state equals the replay of the log at its slot",
-		core.ContextPair{Key: "slot", Value: m.applied})
-	return m.progress()
-}
-
-func (m *Machine) armGapFill() []core.Action {
-	m.gapGeneration++
-	m.gapArmed = true
-	return []core.Action{core.SetTimer{ID: timerGapFill, Gen: m.gapGeneration, After: m.config.GapAfter}}
-}
-
-func (m *Machine) emitGapFill() []core.Action {
-	m.env.Reachable("logcp-sim: gap filled by a no-op")
-	m.seq++
-	inner := stateupdater.Encode(stateupdater.Entry{
-		ID:   fmt.Sprintf("%s/%d", m.config.writer(), m.seq),
-		Kind: stateupdater.KindNoop,
-	})
-	data := wrap(m.config.Rank, m.config.writer(), inner)
-	m.nextReq++
-	m.pending = m.nextReq
-	m.pendingKind = pendingAppend
-	m.fillSlot = m.applied
-	m.fillData = data
-	return []core.Action{core.LogAppend{Req: m.pending, Slot: m.fillSlot, Data: data}}
 }
 
 func (m *Machine) emitCheckTail() []core.Action {
@@ -485,7 +397,6 @@ func (m *Machine) StateHash() uint64 {
 	h.Bool(m.ready)
 	h.Bool(m.active)
 	h.Uint64Value(uint64(m.timerGen))
-	h.Uint64Value(uint64(m.gapGeneration))
 	h.Uint64Value(uint64(m.roleGen))
 	h.Uint64Value(uint64(m.checkpointGen))
 	h.Uint64Value(uint64(m.nextReq))
@@ -495,11 +406,14 @@ func (m *Machine) StateHash() uint64 {
 	h.Uint64Value(uint64(m.high))
 	h.Uint64Value(uint64(m.pending))
 	h.Uint64Value(uint64(m.pendingKind))
-	h.Uint64Value(uint64(m.fillSlot))
-	h.Bool(m.gapArmed)
+	h.StringValue(m.restoreKey)
 	h.Bool(m.checkpointRetry)
-	h.Uint64Value(uint64(m.promoSlot))
-	h.Bool(m.lowerSeen)
+	h.Uint64Value(m.epoch)
+	h.Uint64Value(m.maxEpochSeen)
+	h.Uint64Value(uint64(m.claimReq))
+	h.Bool(m.fencedFlag)
+	h.Uint64Value(m.stepDowns)
+	h.Bool(m.tailChecked)
 	h.Uint64Value(uint64(m.checkpointSlot))
 	h.Uint64Value(uint64(m.checkpointRequest))
 	h.Uint64Value(uint64(len(m.queue)))
@@ -509,8 +423,6 @@ func (m *Machine) StateHash() uint64 {
 	h.Uint64Value(m.tailsStarted)
 	h.Uint64Value(uint64(m.config.CatchUpEvery))
 	h.Uint64Value(uint64(m.config.ReadLimit))
-	h.Uint64Value(uint64(m.config.GapAfter))
-	h.Uint64Value(uint64(m.config.K))
 	h.Uint64Value(uint64(m.config.MaxCmdsPerSlot))
 	h.Uint64Value(uint64(m.config.QueueMax))
 	h.Uint64Value(uint64(m.config.Rank))

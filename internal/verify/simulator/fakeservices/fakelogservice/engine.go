@@ -17,10 +17,9 @@ import (
 // The InjectedBug constants select a mutant (simulator.LogParams.Bug). Each is caught by a property.
 const (
 	InjectedBugNone             uint8 = iota
-	InjectedBugWriterOffsets          // offsets chosen by the writer instead of by apply
-	InjectedBugTrimDelete             // trimmed slots are deleted, not tombstoned
-	InjectedBugPerReplicaWindow       // each replica forgets keys on its own clock
-	InjectedBugGapSkip                // a replica passes an empty slot without a no-op
+	InjectedBugWriterOffsets              // offsets chosen by the writer instead of by apply
+	InjectedBugPerReplicaWindow uint8 = 3 // each replica forgets keys on its own clock
+	InjectedBugNoFloorCheck     uint8 = 4 // a put at or below the floor is answered as a normal success
 )
 
 // Engine bridges ControlPlaneCall to CP replica nodes via ControlPlaneDeliver/ControlPlaneReply.
@@ -70,8 +69,8 @@ var _ simulator.FakeService = (*Engine)(nil)
 // DefaultParams are scaled-down production values for a 45 s run.
 func DefaultParams() simulator.LogParams {
 	milliseconds := core.Millisecond
-	return simulator.LogParams{Enabled: true, K: 4, GroupMax: 4, Tick: 10 * milliseconds,
-		GapAfter: 60 * milliseconds, TakeoverAfter: 600 * milliseconds, PutRetry: 80 * milliseconds, Heartbeat: 250 * milliseconds,
+	return simulator.LogParams{Enabled: true, GroupMax: 4, Tick: 10 * milliseconds,
+		TakeoverAfter: 600 * milliseconds, PutRetry: 80 * milliseconds, Heartbeat: 250 * milliseconds,
 		PutFail: 0.01, PutLost: 0.02, ReadFail: 0.05,
 		StallProb: 0.0002, CrashProb: 0.0001,
 		StallDur: [2]core.Duration{800 * milliseconds, 2500 * milliseconds}, DownDur: [2]core.Duration{300 * milliseconds, 1500 * milliseconds},
@@ -88,17 +87,11 @@ func New(f simulator.ControlPlaneFaults) *Engine {
 
 func withDefaults(p simulator.LogParams) simulator.LogParams {
 	d := DefaultParams()
-	if p.K == 0 {
-		p.K = d.K
-	}
 	if p.GroupMax == 0 {
 		p.GroupMax = d.GroupMax
 	}
 	if p.Tick == 0 {
 		p.Tick = d.Tick
-	}
-	if p.GapAfter == 0 {
-		p.GapAfter = d.GapAfter
 	}
 	if p.TakeoverAfter == 0 {
 		p.TakeoverAfter = d.TakeoverAfter

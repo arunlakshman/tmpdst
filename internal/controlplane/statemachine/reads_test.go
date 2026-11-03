@@ -10,7 +10,7 @@ import (
 // A read that arrives while a tail check is in flight waits for the NEXT check.
 func TestReadWaitsForFreshTail(t *testing.T) {
 	m := newMachine(t, statemachine.Config{
-		K: 1, Writer: "s1", Rank: 1,
+		Writer: "s1", Rank: 1,
 		CatchUpEvery:  core.Millisecond,
 		TakeoverAfter: 10 * core.Second,
 	})
@@ -48,7 +48,7 @@ func TestReadWaitsForFreshTail(t *testing.T) {
 
 // A node that is not Ready refuses a read at once, so the bridge can fail over.
 func TestReadRefusedWhenNotReady(t *testing.T) {
-	m := newMachine(t, statemachine.Config{K: 1, Writer: "s1", CatchUpEvery: core.Millisecond})
+	m := newMachine(t, statemachine.Config{Writer: "s1", CatchUpEvery: core.Millisecond})
 	m.Step(core.Event{Body: core.NodeStarted{}})
 	acts := m.Step(core.Event{At: 1, Body: core.ControlPlaneDeliver{
 		From: core.NodeInstance{Node: "b"}, Req: 8, Op: core.DescribeTopics{},

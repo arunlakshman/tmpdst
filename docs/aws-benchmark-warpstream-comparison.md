@@ -222,7 +222,7 @@ table). Consequences to state next to any number:
   backoff, so a gap of seconds delays acks (and backpressures producers) but fails nothing; a longer gap fails the segments in
   flight (REQUEST_TIMED_OUT). systemd restarts mdscontrolplane after 1 s (`Restart=always`, `RestartSec=1`), and the new process starts
   with a cold sequencer cache (a burst of DynamoDB reads). It is not just a cold cache.
-- HA is future work: an active/standby pair with an advisory DynamoDB lease (not needed for correctness) would remove the
+- HA is future work: an active/standby pair with a DynamoDB epoch claim (decision 63; the claim is for correctness, not only for routing) would remove the
   availability gap without changing the data path.
 
 ## 6. Expected spend (estimates)

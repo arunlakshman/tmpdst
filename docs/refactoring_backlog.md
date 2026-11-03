@@ -125,7 +125,7 @@ Do per package **after** P1 types for that package.
 
 Old `logcp` / `logsm` P3 names (`Start`, `catchUp`, `applyBatch`, `Checkpoint`, `TrimBelow`, `withFresh`, `SyncTo`, `holeTick`, `holeDue`, `decodeSlot`, `adv`/`kick`, `setI`/`setI64`, batchwrite retry) are **gone**. DSM already split catch-up / commit / checkpoint / role across files. Do **not** retarget the deleted logsm list onto `Machine`. Remaining smells:
 
-- [x] ~~**Extract Function** / **Decompose Conditional:** `roleTick` asks `failbackDue`, `takeoverDue`, and `heartbeatDue`, then `setActive` or `emitHeartbeat`.~~
+- [x] ~~**Extract Function** / **Decompose Conditional:** `roleTick` asks `failbackDue` (removed by decision 63), `takeoverDue`, and `heartbeatDue`, then `setActive` or `emitHeartbeat`.~~
 - [x] ~~**Move Field:** role clocks stay on `Machine` — **not worth it**: `lastOwnAt` and `lastOtherAt` have one writer (`observeWriter`) and one reader (`takeoverDue`, `heartbeatDue`). A role struct would sit between those two lines.~~
 - [x] ~~**Encapsulate Collection:** `clearLocal` wipes `buf`, `waiters`, and the other in-flight maps that `softCrash` and `hitTrimmed` both reset. A map type does not earn a boundary.~~
 - [x] ~~**Separate Query from Modifier:** `holeFillPlan` chooses wait, fill, arm, or the hole-skip mutant. `maybeHoleFill` applies that choice.~~

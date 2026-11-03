@@ -28,7 +28,7 @@ func TestBridgeHandlesAndDefaults(t *testing.T) {
 		t.Fatal("must not handle log IO")
 	}
 	p := e.Params()
-	if p.K == 0 || !p.Enabled {
+	if !p.Enabled {
 		t.Fatalf("defaults: %+v", p)
 	}
 	if e.CreateTopic("t", 2) != core.OK || len(e.Topics()) != 1 {

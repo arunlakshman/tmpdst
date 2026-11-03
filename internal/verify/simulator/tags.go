@@ -145,6 +145,14 @@ func (h *stateHasher) eventLogDone(b core.EventData) {
 		h.Uint64Value(uint64(e.Req))
 		h.Uint64Value(uint64(e.Err))
 		h.Uint64Value(uint64(e.Outcome))
+	case core.LogClaimEpochDone:
+		h.Uint64Value(20)
+		h.Uint64Value(uint64(e.Req))
+		h.Uint64Value(e.Epoch)
+		h.StringValue(e.Owner)
+		h.Bool(e.Won)
+		h.Uint64Value(uint64(e.Err))
+		h.Uint64Value(uint64(e.Outcome))
 	case core.LiveBrokers:
 		h.Uint64Value(19)
 		h.Uint64Value(uint64(len(e.Brokers)))
@@ -253,6 +261,11 @@ func (h *stateHasher) actionLog(a core.Action) {
 		h.Uint64Value(119)
 		h.Uint64Value(uint64(x.Req))
 		h.Int64Value(int64(x.Through))
+	case core.LogClaimEpoch:
+		h.Uint64Value(121)
+		h.Uint64Value(uint64(x.Req))
+		h.Uint64Value(x.Expect)
+		h.StringValue(x.Owner)
 	default:
 		panic(fmt.Sprintf("sim: trace hash: untagged action %T", a))
 	}

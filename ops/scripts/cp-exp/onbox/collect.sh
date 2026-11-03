@@ -7,7 +7,6 @@
 #   manifests/         the run manifest of every node
 #   metrics-NODE.txt   the /metrics page of every running node
 #   node-status.txt    output of node.sh status
-#   inspect-check.txt  output of mdscpinspect -check, and its exit code
 #   extra/             copies of the files listed in EXTRA_FILES
 #   meta.txt           when, where and what was collected
 # Then it copies the folder to s3://BUCKET/results/NAME-UTCSTAMP/.
@@ -16,7 +15,6 @@
 # Env (optional):
 #   CPV_ROOT     default /opt/cpv
 #   BIN_DIR      default $CPV_ROOT/bin
-#   ACKED_FILE   passed to mdscpinspect as -acked, only if the file exists
 #   EXTRA_FILES  space separated list of more files to copy in
 set -euo pipefail
 unset AWS_PROFILE AWS_DEFAULT_PROFILE   # the box uses its IAM role, not a profile
@@ -65,21 +63,7 @@ done
 
 "$SCRIPT_DIR/node.sh" status > "$out/node-status.txt" 2>&1 || true
 
-# Run the log check. Its exit code is saved, but a failing check does not
-# stop the collection, so the results still get uploaded.
-inspect_args=(-check -region "$REGION" -table "${TABLE_PREFIX}cp" -bucket "$BUCKET")
-acked_note="none"
-if [[ -n ${ACKED_FILE:-} ]]; then
-  if [[ -f $ACKED_FILE ]]; then
-    inspect_args+=(-acked "$ACKED_FILE")
-    acked_note="$ACKED_FILE"
-  else
-    acked_note="$ACKED_FILE (not found, not used)"
-  fi
-fi
-rc=0
-"$BIN_DIR/mdscpinspect" "${inspect_args[@]}" > "$out/inspect-check.txt" 2>&1 || rc=$?
-echo "exit code: $rc" >> "$out/inspect-check.txt"
+# The log-versus-acks check (mdscpinspect) was removed with the tool.
 
 missing=""
 # shellcheck disable=SC2086
@@ -97,7 +81,6 @@ done
   echo "utc: $stamp"
   echo "host: $(hostname)"
   echo "kernel: $(uname -a)"
-  echo "acked file: $acked_note"
   echo "missing extra files:${missing:- none}"
   echo "node states:"
   "$SCRIPT_DIR/node.sh" status

@@ -51,11 +51,11 @@ func parseFlags(args []string, stderr io.Writer) (cpFlags, *flag.FlagSet, error)
 	fs := flag.NewFlagSet("mdscontrolplane", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&f.addr, "addr", ":8080", "gRPC listen address")
-	fs.StringVar(&f.kind, "store", "mem", "mem (in-memory) or dynamolog (Dynamo log + optional S3 checkpoints)")
+	fs.StringVar(&f.kind, "store", "mem", "mem (in-memory), dynamolog (Dynamo log + optional S3 checkpoints) or postgres (PostgreSQL log + optional S3 checkpoints)")
 	fs.StringVar(&f.endpoint, "dynamo-endpoint", "", "DynamoDB endpoint URL (empty: AWS)")
 	fs.StringVar(&f.region, "region", "us-east-1", "AWS region")
 	fs.StringVar(&f.prefix, "table-prefix", "mds_", "DynamoDB table name prefix")
-	fs.BoolVar(&f.create, "create-tables", false, "create the DynamoDB table at startup")
+	fs.BoolVar(&f.create, "create-tables", false, "create the tables at startup: the DynamoDB table with -store dynamolog, the SQL tables with -store postgres")
 	fs.StringVar(&f.metricsAddr, "metrics-addr", ":9101", "serve Prometheus metrics on /metrics (empty: disabled)")
 	fs.StringVar(&f.logLevel, "log-level", "info", "log level: debug, info, warn, error")
 	fs.StringVar(&f.runID, "run-id", "", "run id stamped on every log line and metric (default $MDS_RUN_ID)")
@@ -106,6 +106,7 @@ func serve(ctx context.Context, d deps, f cpFlags, fs *flag.FlagSet, stderr io.W
 		return err
 	}
 	defer closeNode()
+	m.RegisterLogRole(node.LogRole)
 
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", f.addr)
 	if err != nil {
@@ -121,16 +122,18 @@ func serve(ctx context.Context, d deps, f cpFlags, fs *flag.FlagSet, stderr io.W
 	runinfo.Publish(
 		ctx,
 		log,
-		runinfo.NewManifest(info, fs, f.region, map[string]any{
-			"table":             f.log.tableName(f.prefix),
-			"store":             f.kind,
-			"rank":              f.log.rank,
-			"takeover_after":    f.log.takeoverAfter.String(),
-			"checkpoint_bucket": f.log.checkpointBucket,
-			"pebble_dir":        f.log.pebbleDir,
-			"window_slots":      f.log.windowSlots,
-			"dynamo_endpoint":   f.endpoint,
-		}),
+		hideDSN(runinfo.NewManifest(info, fs, f.region, map[string]any{
+			"table":              f.log.tableName(f.prefix),
+			"store":              f.kind,
+			"rank":               f.log.rank,
+			"takeover_after":     f.log.takeoverAfter.String(),
+			"takeover_rank_step": f.log.takeoverRankStep.String(),
+			"checkpoint_bucket":  f.log.checkpointBucket,
+			"pebble_dir":         f.log.pebbleDir,
+			"window_slots":       f.log.windowSlots,
+			"dynamo_endpoint":    f.endpoint,
+			"postgres_prefix":    f.log.postgresPrefix,
+		}), resolvedDSN(f.log)),
 		runinfo.WriteOptions{
 			Dest:   f.manifestOut,
 			Region: f.region,
@@ -160,11 +163,17 @@ func openNode(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.Met
 		closeStore = nop
 	case kindLog:
 		logStore, objs, closeStore, err = openDynLog(ctx, d, f, m, log)
-		if err != nil {
-			return nil, nop, err
-		}
+	case kindPostgres:
+		logStore, objs, closeStore, err = openPostgresLog(ctx, d, f, m, log)
+	default:
+		return nil, nop, errors.New("unknown -store " + f.kind)
+	}
+	if err != nil {
+		return nil, nop, err
+	}
+	if isLogStore(f.kind) {
 		if f.log.checkpointBucket != "" {
-			mcfg.CheckpointKey = "checkpoint/latest"
+			mcfg.CheckpointPrefix = "checkpoint/"
 		} else {
 			mcfg.CheckpointEvery = 0
 			mcfg.KeepSlots = 0
@@ -177,8 +186,6 @@ func openNode(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.Met
 		mcfg.OpenStore = state.openStore
 		closeLog := closeStore
 		closeStore = func() { closeLog(); state.close() }
-	default:
-		return nil, nop, errors.New("unknown -store " + f.kind)
 	}
 
 	n := server.New(server.Config{
@@ -210,20 +217,16 @@ func machineConfig(f cpFlags) statemachine.Config {
 		// Short catch-up period so Ready (and health Serving) arrives quickly;
 		// subsequent rounds keep the same cadence.
 		CatchUpEvery:       core.Duration(5 * time.Millisecond),
-		K:                  f.log.k,
 		Rank:               f.log.rank,
 		Heartbeat:          core.Duration(f.log.heartbeat),
 		TakeoverAfter:      core.Duration(f.log.takeoverAfter),
-		GapAfter:           core.Duration(f.log.gapAfter),
+		TakeoverRankStep:   core.Duration(f.log.takeoverRankStep),
 		Writer:             nodeName(f.log),
 		CheckpointEvery:    core.Duration(f.log.checkpointEvery),
 		CheckpointMinSlots: f.log.checkpointMinSlots,
 		KeepSlots:          f.log.windowSlots / 8,
 		WindowSlots:        f.log.windowSlots,
 		TrimStride:         trimStride,
-	}
-	if mcfg.K <= 0 {
-		mcfg.K = 4
 	}
 	return mcfg
 }

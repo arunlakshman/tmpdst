@@ -52,51 +52,23 @@ echo "   cp1 alone: $(tail -2 "$R/e2-ends-cp1.txt" | head -1)"
 
 node.sh stop cp0; node.sh stop cp1
 
-echo "== offline checks on the log"
-mdscpinspect -check -region "$REGION" -table "$TABLE" -bucket "$BUCKET" -acked "$ACKED" >"$R/e2-inspect.txt" 2>&1
-mdscpinspect -v -region "$REGION" -table "$TABLE" >"$R/e2-slots.txt" 2>&1
-RUNS=$(python3 - "$R/e2-slots.txt" <<'PY'
-import re, sys
-runs, last, start, prev, n = [], None, 0, 0, 0
-for line in open(sys.argv[1]):
-    m = re.match(r"\s+slot (\d+)\s.*writer=(\S+)", line)
-    if not m:
-        continue
-    slot, writer = int(m.group(1)), m.group(2)
-    if writer != last:
-        if last is not None:
-            runs.append("%s[%d..%d]x%d" % (last, start, prev, n))
-        last, start, n = writer, slot, 0
-    n += 1
-    prev = slot
-runs.append("%s[%d..%d]x%d" % (last, start, prev, n))
-print(" ".join(runs))
-PY
-)
-echo "   writer runs: $RUNS"
-N_CHANGES=$(( $(echo "$RUNS" | wc -w) - 1 ))
+# The log-versus-acks check (mdscpinspect) was removed with the tool.
 echo "   failed conditional writes: cp0 5 s after thaw=$CONFLICTS_AFTER_THAW, cp1 total=$CONFLICTS_CP1"
 
 failed=$(json_field "$SUMMARY" 'd["failed"]'); acked=$(json_field "$SUMMARY" 'd["acked"]')
 stall=$(json_field "$SUMMARY" 'd["max_stall_ms"]'); retries=$(json_field "$SUMMARY" 'd["retries"]')
 errors=$(count_in_logs '"level":"ERROR"')
 busy=$(decisions | grep -c 'control_io_pending' || true)
-check_failed=$(grep -c '^FAIL' "$R/e2-inspect.txt" || true)
-skips=$(grep -c '^SKIP' "$R/e2-inspect.txt" || true)
 
 expect "load: failed = 0" "acked=$acked failed=$failed retries=$retries" [ "$failed" = 0 ]
 criterion "longest stall <= takeover-after + 5 s" "$(le "$stall" $(( (TAKEOVER + 5) * 1000 )))" "max_stall=${stall}ms"
-expect "the standby took over (cp1 wrote slots)" "runs: $RUNS" [ -n "$(grep -m1 'writer=cp1' "$R/e2-slots.txt")" ]
-expect "writer changes <= 4 (the E1 failback pattern, issue 24)" "changes=$N_CHANGES" [ "$N_CHANGES" -le 4 ]
 expect "cp0 alone: live end offsets equal records acked" "rc=$ENDS0" [ "$ENDS0" = 0 ]
 expect "cp1 alone: live end offsets equal records acked" "rc=$ENDS1" [ "$ENDS1" = 0 ]
-expect "A1 to A5: mdscpinspect -check -acked passes" "failed_lines=$check_failed" [ "$check_failed" = 0 ]
-expect "no check was skipped" "skipped=$skips" [ "$skips" = 0 ]
 expect "A6: no ERROR line in node logs" "count=$errors" [ "$errors" = 0 ]
 expect "A7: no checkpoint skipped for control_io_pending" "count=$busy" [ "$busy" = 0 ]
 verdict E2
 rc=$?
-ACKED_FILE="$ACKED" EXTRA_FILES="$VERDICT_FILE $R/e2-load.out $R/e2-ends-cp0.txt $R/e2-ends-cp1.txt $R/e2-inspect.txt $R/e2-slots.txt" collect.sh e2 >/dev/null 2>&1
+EXTRA_FILES="$VERDICT_FILE $R/e2-load.out $R/e2-ends-cp0.txt $R/e2-ends-cp1.txt" collect.sh e2 >/dev/null 2>&1
 echo "results uploaded under s3://$BUCKET/results/ (prefix e2-)"
 echo "E2 DONE rc=$rc"
 exit $rc

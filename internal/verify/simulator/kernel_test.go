@@ -785,3 +785,57 @@ func TestExpectReachableAndAssertions(t *testing.T) {
 		t.Fatalf("%+v", rep)
 	}
 }
+
+// maxStepGap is the longest time between two Steps of one process.
+func maxStepGap(times []core.NodeTime) core.NodeTime {
+	var longest core.NodeTime
+	for i := 1; i < len(times); i++ {
+		longest = max(longest, times[i]-times[i-1])
+	}
+	return longest
+}
+
+// A frozen process takes no Step for the whole freeze, and it carries on after
+// it. Without the fault the same process steps every few milliseconds.
+func TestFreezeParksAProcessAndLetsItResume(t *testing.T) {
+	const freeze = 400 * core.Millisecond
+	run := func(prob float64) ([]core.NodeTime, SeedResult) {
+		var times []core.NodeTime
+		f := scripted(func(m *scriptM, event core.Event) []core.Action {
+			times = append(times, event.At)
+			return ping(m, event)
+		})
+		cfg := baseCfg(f)
+		cfg.Processes[0].Freezable = true
+		cfg.Phases = Phases{Chaos: 300 * core.Millisecond, Settling: core.Second, Settle: core.Second}
+		cfg.Attrition = NodeKills{FreezeProb: prob, FreezeDur: [2]core.Duration{freeze, freeze}}
+		res := RunSeed(cfg, 1)
+		return times, res
+	}
+
+	free, freeRes := run(0)
+	if stat(freeRes, "freezes") != 0 || maxStepGap(free) >= core.NodeTime(50*core.Millisecond) {
+		t.Fatalf("without the fault: freezes=%d, longest gap %v", stat(freeRes, "freezes"), maxStepGap(free))
+	}
+
+	frozen, res := run(1)
+	if stat(res, "freezes") == 0 {
+		t.Fatal("no freeze happened with FreezeProb 1")
+	}
+	if got := maxStepGap(frozen); got < core.NodeTime(freeze) {
+		t.Fatalf("longest gap between Steps is %v, want at least the freeze %v", got, freeze)
+	}
+	// The process steps again after the freeze: the last Step is well after the first freeze ends.
+	if last := frozen[len(frozen)-1]; last < core.NodeTime(freeze) {
+		t.Fatalf("process did not resume: last Step at %v", last)
+	}
+}
+
+// A process that is not marked Freezable is never frozen.
+func TestFreezeSkipsProcessesThatDoNotAllowIt(t *testing.T) {
+	cfg := baseCfg(scripted(ping))
+	cfg.Attrition = NodeKills{FreezeProb: 1, FreezeDur: [2]core.Duration{core.Second, core.Second}}
+	if res := RunSeed(cfg, 1); stat(res, "freezes") != 0 {
+		t.Fatalf("froze a process that is not Freezable: %d", stat(res, "freezes"))
+	}
+}

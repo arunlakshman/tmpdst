@@ -34,7 +34,7 @@ func Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome) {
 
 func changesData(a core.IOCall) bool {
 	switch a.(type) {
-	case core.LogAppend, core.LogDeleteOld, core.ObjectPut, core.ObjectDelete:
+	case core.LogAppend, core.LogDeleteOld, core.LogClaimEpoch, core.ObjectPut, core.ObjectDelete:
 		return true
 	}
 	return false

@@ -13,8 +13,9 @@
 //
 //	-mode load: keep committing for -duration with -workers workers. A commit
 //	 that fails in a way that may be retried is sent again with the same key
-//	 until it is acked. Every ack is written to -acked-out, for mdscpinspect
-//	 -check -acked. Used in failure experiments (nodes killed during the load).
+//	 until it is acked. Every ack is written to -acked-out, so a later check can
+//	 compare the acked commits with the log. Used in failure experiments (nodes
+//	 killed during the load).
 //
 // Exit code 0 means every check passed (smoke) or no commit failed (load).
 // Not part of the determinism gate.

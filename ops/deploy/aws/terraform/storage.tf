@@ -47,7 +47,7 @@ resource "aws_s3_bucket_metric" "all" {
 
 # Log-store table: <prefix>cp, pk (S) hash,
 # sk (S) range, pay-per-request, plus TTL on the "ttl" attribute (the log store stamps every LOG slot with it, a
-# backstop behind checkpoint + tombstone trim: docs/log-cp-service.md) and warm throughput (X4: a cold on-demand
+# backstop behind checkpoint + trim: docs/log-cp-service.md) and warm throughput (X4: a cold on-demand
 # table throttles at about 4,000 items/s). mdscontrolplane runs without -create-tables.
 resource "aws_dynamodb_table" "cp" {
   name         = local.table_name

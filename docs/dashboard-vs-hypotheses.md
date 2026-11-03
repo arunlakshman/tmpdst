@@ -1,5 +1,7 @@
 # Dashboards vs hypotheses for the log-based control plane (run w4)
 
+*Superseded in part by decision 63: roles are an epoch claim with a fence entry, and failback is removed. The text below is kept as it was written.*
+
 *Note: this is a record of run w4. The DynamoDB-transaction control plane (`mdscontrolplane_seq_*`, `cp_store=dynamo`) and the log CP's R# index (`mdscontrolplane_log_index_*`) it mentions were removed (decision 54); the log-based CP is the only one.*
 
 Read-only analysis, 2026-10-21. No AWS resources used, no dashboards regenerated except one trivial generator fix (separate commit, section 5).
@@ -56,12 +58,14 @@ Side finding: `mdscontrolplane_dynamo_api_errors_total{code=ConditionalCheckFail
 
 ### H3: ~32 slots/s at 1M, ~1 entry per slot, lost 0, gap fills 0, append p99 ~8 ms
 
+*Note (decision 61): the gap fills check below is for a metric that was removed. The other checks stand.*
+
 | panel | query | smoke / 500k / 750k / 1M | verdict |
 |---|---|---|---|
 | overview 25 slots/s (rank 0) | `sum by(host)(rate(mdscontrolplane_log_slots_total))` | 13.4 / 17.5 / 25.3 / 29.7 (doc 24.2 / 19.8 / 28.2 / 31.8; my smoke window is partly ramp) | CONFIRMED (30 vs 32; same ratio to segments: 30.1 seg/s) |
 | overview 25 lost slots | `rate(mdscontrolplane_log_lost_slots_total)` | 0 in all load stages. Kill test: 1 lost slot, on rank 1 at 00:08:27-45 (failback), not at the kill | CONFIRMED for steady state |
 | overview 27 entries per slot | panel shows p50 0.50 / p99 0.99-1.04 | true mean `sum/count` = 0.96 / 0.99 / 1.00 / 1.01 | CONFIRMED, but the panel is misleading (first bucket is le=1: interpolation from 0 prints 0.5) |
-| overview 29 gap fills | `rate(mdscontrolplane_log_gap_fills_total)` | 0 all stages and kill test | CONFIRMED |
+| overview 29 gap fills | `rate(mdscontrolplane_log_gap_fills_total)` | 0 all stages and kill test | REMOVED: the metric and the gap filler are gone (decision 61). Panel 29 has no data now. |
 | overview 26 append p50 / p99 | `histogram_quantile` on le 0.004, 0.008, 0.016 | p50 3.1 / 3.2 / 3.6 / 4.2 ms; p99 9.7 / 7.9 / 7.9 / 7.95 ms (clipped at the le=0.008 edge; 0.03% of appends are above 16 ms at 1M) | CONFIRMED (p99 "at most ~8 ms") |
 | overview 30 queue depth / wait p99 | | depth max 0 (0.07 mean at 1M), wait p99 6.4-7.1 ms (bucket) | CONFIRMED |
 

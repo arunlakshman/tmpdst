@@ -2,13 +2,6 @@
   "threshold": 20,
   "note": "Ratchet baseline for cmd/riskscore. Regenerate: go run ./cmd/riskscore -profile \u003ccover.out\u003e -update-baseline   (or: make risk-baseline); review and commit the diff of ops/risk-baseline.json",
   "functions": {
-    "cmd/mdscpinspect.checkCheckpoint": 110,
-    "cmd/mdscpinspect.decodeSlot": 88.9,
-    "cmd/mdscpinspect.printEnds": 30,
-    "cmd/mdscpinspect.printTotals": 56,
-    "cmd/mdscpinspect.readAll": 72,
-    "cmd/mdscpinspect.report": 132,
-    "cmd/mdscpinspect.runChecks": 42,
     "cmd/mdscpreset.deleteBatch": 42,
     "cmd/mdscpreset.emptyTable": 42,
     "cmd/mdscpreset.main": 30,

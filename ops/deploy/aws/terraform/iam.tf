@@ -73,6 +73,10 @@ data "aws_iam_policy_document" "cp" {
     resources = ["${aws_s3_bucket.run.arn}/cp/*"]
   }
 
+  # The same table holds the log rows (pk=LOG) and two small items (pk=META):
+  # the writer epoch and the trim floor. The control plane reads them with
+  # GetItem and changes them with UpdateItem (a conditional write), so both
+  # actions must stay in this list.
   statement {
     sid = "ControlPlaneTable"
     actions = [

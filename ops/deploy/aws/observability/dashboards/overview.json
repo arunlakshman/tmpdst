@@ -968,8 +968,8 @@
     {
       "id": 20,
       "type": "timeseries",
-      "title": "Gap fills and role changes",
-      "description": "Gap fills happen when an appender dies holding a slot; role changes mark a takeover or a failback. The kill-the-appender marker.",
+      "title": "Role changes",
+      "description": "Role changes mark a takeover: a standby claims the write role. The kill-the-appender marker.",
       "datasource": {
         "type": "prometheus",
         "uid": "${ds_prom}"
@@ -982,22 +982,13 @@
       },
       "targets": [
         {
-          "expr": "sum by (host) (rate(mdscontrolplane_log_gap_fills_total{run_id=\"$run_id\"}[$__rate_interval]))",
-          "legendFormat": "gap fills/s {{host}}",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${ds_prom}"
-          },
-          "refId": "A"
-        },
-        {
           "expr": "sum by (host, to) (increase(mdscontrolplane_log_role_changes_total{run_id=\"$run_id\"}[$__rate_interval]))",
           "legendFormat": "role -> {{to}} {{host}}",
           "datasource": {
             "type": "prometheus",
             "uid": "${ds_prom}"
           },
-          "refId": "B"
+          "refId": "A"
         },
         {
           "expr": "max by (host) (mdscontrolplane_log_active{run_id=\"$run_id\"})",
@@ -1006,7 +997,7 @@
             "type": "prometheus",
             "uid": "${ds_prom}"
           },
-          "refId": "C"
+          "refId": "B"
         }
       ],
       "fieldConfig": {

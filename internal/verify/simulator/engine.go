@@ -122,15 +122,14 @@ type ControlPlaneFaults struct {
 // down from production (131072, 1024, ...) so a 45 s run crosses them.
 type LogParams struct {
 	Enabled bool
-	// K appends in flight per writer; GroupMax commands per log entry.
-	K, GroupMax int
+	// GroupMax commands per log entry.
+	GroupMax int
 	// Tick is the engine's polling period (tail reads, role checks, flushes).
 	Tick core.Duration
-	// GapAfter before an empty slot below the tail is filled with a no-op;
 	// TakeoverAfter without a slot from another writer before the standby
 	// becomes active; PutRetry before an unanswered Put is repeated; Heartbeat
 	// between no-op appends of an idle active node.
-	GapAfter, TakeoverAfter, PutRetry, Heartbeat core.Duration
+	TakeoverAfter, PutRetry, Heartbeat core.Duration
 	// PutFail: a Put is refused (not applied). PutLost: a Put is applied, its
 	// answer is lost. ReadFail: a replica's tail read fails this tick.
 	PutFail, PutLost, ReadFail float64
@@ -164,8 +163,7 @@ type LogStoreFaults struct {
 	LostResponse   float64
 	Outage         ServiceOutage
 	CallerTimeout  core.Duration
-	// Bug selects a logstore mutant (fakelogservice.InjectedBugTrimDelete deletes instead of
-	// tombstoning on LogDeleteOld). Zero is none.
+	// Bug selects a mutant of the store (fakelogservice.InjectedBugNoFloorCheck). Zero is none.
 	Bug uint8
 	// WindowSlots and TrimStride mirror LogParams for ControlPlaneRealState idempotency trim
 	// during reference replay (decision 48). Zero WindowSlots skips trim.

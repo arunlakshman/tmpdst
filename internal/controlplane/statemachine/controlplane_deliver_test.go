@@ -58,7 +58,7 @@ func readOp(t *testing.T, m *statemachine.Machine, timer core.SetTimer, request 
 // TestOnControlPlaneDeliverWritesAnswerBroker: each write op goes through the log and the
 // broker gets its reply after the slot applies.
 func TestOnControlPlaneDeliverWritesAnswerBroker(t *testing.T) {
-	m := newMachine(t, statemachine.Config{K: 4, MaxCmdsPerSlot: 1, Writer: "w"})
+	m := newMachine(t, statemachine.Config{MaxCmdsPerSlot: 1, Writer: "w"})
 
 	// CommitSegment: the reply carries one assignment per batch.
 	done := writeOp(t, m, 1, core.CommitSegment{
@@ -113,7 +113,7 @@ func TestOnControlPlaneDeliverWritesAnswerBroker(t *testing.T) {
 // once the node is ready and a fresh tail has applied.
 func TestOnControlPlaneDeliverReadsAnswerBroker(t *testing.T) {
 	m := newMachine(t, statemachine.Config{
-		K: 1, Writer: "s1", Rank: 1,
+		Writer: "s1", Rank: 1,
 		CatchUpEvery:  core.Millisecond,
 		TakeoverAfter: 10 * core.Second,
 	})
@@ -148,7 +148,7 @@ func TestOnControlPlaneDeliverReadsAnswerBroker(t *testing.T) {
 // TestOnControlPlaneDeliverUnknownOpInvalid: an op the machine does not know is refused
 // with ErrInvalid and nothing reaches the log.
 func TestOnControlPlaneDeliverUnknownOpInvalid(t *testing.T) {
-	m := newMachine(t, statemachine.Config{K: 4, Writer: "w"})
+	m := newMachine(t, statemachine.Config{Writer: "w"})
 	acts := m.Step(core.Event{Body: core.ControlPlaneDeliver{From: brokerFrom, Req: 9, Op: nil}})
 	if len(acts) != 1 {
 		t.Fatalf("actions = %v, want one reply", acts)

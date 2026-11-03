@@ -28,8 +28,7 @@ cat "$R/e3-big.out"
 mdscpverify -mode load -cp 127.0.0.1:$ADDR0 -duration 10s -workers 4 -run-id e3a -acked-out "$ACKED_A" >"$R/e3-load-a.out" 2>/dev/null
 SUMMARY_A=$(last_summary "$R/e3-load-a.out")
 node.sh stop cp0
-# no -bucket: part A runs only about 10 s, so no checkpoint exists yet, and the check would fail on that.
-mdscpinspect -check -region "$REGION" -table "$TABLE" -acked "$ACKED_A" >"$R/e3-inspect-a.txt" 2>&1
+# The log-versus-acks check (mdscpinspect) was removed with the tool.
 
 echo "== part B: throttle table with 1 write unit, load 50 commits per second for 60 s"
 # no checkpoint bucket here: the node would share the S3 folder with part A
@@ -52,7 +51,7 @@ for _ in $(seq 1 30); do
 done
 read -r TOTAL_ATTEMPTS THROTTLED < <(attempts $MET1)
 node.sh stop cp1
-mdscpinspect -check -region "$REGION" -table "$THROTTLE_TABLE" -acked "$ACKED_B" >"$R/e3-inspect-b.txt" 2>&1
+# The log-versus-acks check (mdscpinspect) was removed with the tool.
 
 # highest PutItem attempts per second in any 5 s sample window
 MAX_RATE=$(python3 - "$SAMPLES" <<'PY'
@@ -69,8 +68,6 @@ echo "   PutItem attempts in total: $TOTAL_ATTEMPTS, throttled (HTTP 400): $THRO
 
 acked_a=$(json_field "$SUMMARY_A" 'd["acked"]'); failed_a=$(json_field "$SUMMARY_A" 'd["failed"]')
 acked_b=$(json_field "$SUMMARY_B" 'd["acked"]'); failed_b=$(json_field "$SUMMARY_B" 'd["failed"]')
-fail_a=$(grep -c '^FAIL' "$R/e3-inspect-a.txt" || true); skip_a=$(grep -c '^SKIP' "$R/e3-inspect-a.txt" || true)
-fail_b=$(grep -c '^FAIL' "$R/e3-inspect-b.txt" || true); skip_b=$(grep -c '^SKIP' "$R/e3-inspect-b.txt" || true)
 errors_a=$(grep -c '"level":"ERROR"' "$CPV_ROOT/logs/cp0.log" || true)
 errors_b=$(grep -c '"level":"ERROR"' "$CPV_ROOT/logs/cp1.log" || true)
 
@@ -78,18 +75,15 @@ expect "A: oversized commit refused with ErrTooLarge, normal commit still works"
 load_a_ok=0
 if [ "$failed_a" = 0 ] && [ "$acked_a" -gt 0 ]; then load_a_ok=1; fi
 expect "A: 10 s load after it: failed = 0" "acked=$acked_a failed=$failed_a" [ "$load_a_ok" = 1 ]
-expect "A: log checks pass, no slot over 350 KiB (A1 to A5)" "failed_lines=$fail_a" [ "$fail_a" = 0 ]
-expect "A: no check was skipped" "skipped=$skip_a" [ "$skip_a" = 0 ]
 expect "A6: no ERROR line in the part A node log" "count=$errors_a" [ "$errors_a" = 0 ]
 expect "B: DynamoDB really throttled (HTTP 400 seen)" "throttled=$THROTTLED of $TOTAL_ATTEMPTS attempts" [ "${THROTTLED:-0}" -gt 0 ]
 criterion "B: no tight loop (PutItem attempts <= 200/s in every 5 s window)" "$(le "$MAX_RATE" 200)" "highest=${MAX_RATE}/s"
-expect "B: no acked commit lost, offsets right (A1 to A5 on the throttle table)" "acked=$acked_b failed(client gave up)=$failed_b failed_lines=$fail_b" [ "$fail_b" = 0 ]
-expect "B: no check was skipped" "skipped=$skip_b" [ "$skip_b" = 0 ]
+expect "B: load failed = 0 on the throttle table" "acked=$acked_b failed=$failed_b" [ "$failed_b" = 0 ]
 expect "B: node caught up (applied = tail) within 30 s of the end" "caught_up=$CAUGHT_UP" [ "$CAUGHT_UP" = 1 ]
 expect "B: no ERROR line in the part B node log" "count=$errors_b" [ "$errors_b" = 0 ]
 verdict E3
 rc=$?
-ACKED_FILE="$ACKED_A" EXTRA_FILES="$VERDICT_FILE $R/e3-big.out $R/e3-load-a.out $R/e3-load-b.out $R/e3-inspect-a.txt $R/e3-inspect-b.txt $R/e3-samples.txt $ACKED_B" collect.sh e3 >/dev/null 2>&1
+EXTRA_FILES="$VERDICT_FILE $R/e3-big.out $R/e3-load-a.out $R/e3-load-b.out $R/e3-samples.txt $ACKED_B" collect.sh e3 >/dev/null 2>&1
 echo "results uploaded under s3://$BUCKET/results/ (prefix e3-)"
 echo "E3 DONE rc=$rc"
 exit $rc

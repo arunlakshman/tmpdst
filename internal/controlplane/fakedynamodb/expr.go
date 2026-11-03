@@ -12,10 +12,36 @@ import (
 //
 //	condition  atom {" OR " atom}; atom: attribute_not_exists(n) | n = :v | n < :v
 //	update     "ADD n :v {, n :v}" | "SET n = :v {, n = :v}"
-//	key cond   "pk = :p" | "pk = :p AND sk BETWEEN :lo AND :hi"
+//	key cond   "pk = :p AND sk BETWEEN :lo AND :hi"
+//	names      "#alias" in a condition or update, resolved with ExpressionAttributeNames
 //
+// A name in reservedWords must be written as an alias, as in the service.
 // Anything else is a ValidationException, so a new expression in the store
 // fails loudly here instead of being silently mis-evaluated.
+
+// reservedWords is a part of the DynamoDB reserved word list: the names the
+// store might plausibly use. It is not the whole list.
+var reservedWords = map[string]bool{
+	"COUNT": true, "DATA": true, "ITEM": true, "ITEMS": true, "KEY": true, "NAME": true,
+	"OWNER": true, "SIZE": true, "STATUS": true, "TIMESTAMP": true, "TTL": true,
+	"TYPE": true, "USER": true, "VALUE": true,
+}
+
+// attrName resolves an attribute name in an expression. "#alias" comes from
+// names. A reserved word without an alias is an error.
+func attrName(name string, names map[string]string) (string, error) {
+	if strings.HasPrefix(name, "#") {
+		real, ok := names[name]
+		if !ok {
+			return "", validation("name %s not provided", name)
+		}
+		return real, nil
+	}
+	if reservedWords[strings.ToUpper(name)] {
+		return "", validation("%s is a reserved word; use an alias", name)
+	}
+	return name, nil
+}
 
 func stringOf(it item, name string) string {
 	v, _ := it[name].(*types.AttributeValueMemberS)
@@ -84,12 +110,12 @@ func compareNumbers(a, b string) (int, error) {
 
 // evalCondition evaluates a ConditionExpression against cur (nil: no such item).
 // A nil expression is true.
-func evalCondition(expr *string, vals item, cur item) (bool, error) {
+func evalCondition(expr *string, names map[string]string, vals item, cur item) (bool, error) {
 	if expr == nil {
 		return true, nil
 	}
 	for alt := range strings.SplitSeq(*expr, " OR ") {
-		ok, err := evalSimpleCondition(strings.TrimSpace(alt), vals, cur)
+		ok, err := evalSimpleCondition(strings.TrimSpace(alt), names, vals, cur)
 		if ok || err != nil {
 			return ok, err
 		}
@@ -97,20 +123,28 @@ func evalCondition(expr *string, vals item, cur item) (bool, error) {
 	return false, nil
 }
 
-func evalSimpleCondition(atom string, vals, cur item) (bool, error) {
+func evalSimpleCondition(atom string, names map[string]string, vals, cur item) (bool, error) {
 	if name, ok := strings.CutPrefix(atom, "attribute_not_exists("); ok {
-		_, has := cur[strings.TrimSuffix(name, ")")]
+		attr, err := attrName(strings.TrimSuffix(name, ")"), names)
+		if err != nil {
+			return false, err
+		}
+		_, has := cur[attr]
 		return !has, nil
 	}
 	f := strings.Fields(atom)
 	if len(f) != 3 || (f[1] != "=" && f[1] != "<") {
 		return false, validation("unsupported condition %q", atom)
 	}
+	attr, err := attrName(f[0], names)
+	if err != nil {
+		return false, err
+	}
 	want, ok := vals[f[2]]
 	if !ok {
 		return false, validation("value %s not provided", f[2])
 	}
-	have, ok := cur[f[0]]
+	have, ok := cur[attr]
 	if !ok {
 		return false, nil
 	}
@@ -120,7 +154,7 @@ func evalSimpleCondition(atom string, vals, cur item) (bool, error) {
 
 // applyUpdate applies an UpdateExpression to a copy of cur (nil: a new item
 // with key) and returns it with the names of the attributes it set.
-func applyUpdate(expr string, vals item, key, cur item) (item, []string, error) {
+func applyUpdate(expr string, names map[string]string, vals item, key, cur item) (item, []string, error) {
 	out := cloneItem(cur)
 	var set []string
 	if out == nil {
@@ -131,7 +165,7 @@ func applyUpdate(expr string, vals item, key, cur item) (item, []string, error) 
 		return nil, nil, validation("unsupported update %q", expr)
 	}
 	for clause := range strings.SplitSeq(rest, ",") {
-		name, err := applyClause(verb, strings.Fields(clause), vals, out)
+		name, err := applyClause(verb, strings.Fields(clause), names, vals, out)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -141,8 +175,12 @@ func applyUpdate(expr string, vals item, key, cur item) (item, []string, error) 
 }
 
 // applyClause applies "n = :v" (SET) or "n :v" (ADD) to it and returns n.
-func applyClause(verb string, f []string, vals, it item) (string, error) {
-	name, v, err := clauseValue(verb, f, vals)
+func applyClause(verb string, f []string, names map[string]string, vals, it item) (string, error) {
+	raw, v, err := clauseValue(verb, f, vals)
+	if err != nil {
+		return "", err
+	}
+	name, err := attrName(raw, names)
 	if err != nil {
 		return "", err
 	}
@@ -155,6 +193,7 @@ func applyClause(verb string, f []string, vals, it item) (string, error) {
 	return name, err
 }
 
+// clauseValue splits a SET or ADD clause into its name (not resolved) and value.
 func clauseValue(verb string, f []string, vals item) (string, types.AttributeValue, error) {
 	if verb == "SET" && len(f) == 3 && f[1] == "=" {
 		f = []string{f[0], f[2]}

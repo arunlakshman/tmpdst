@@ -1,5 +1,5 @@
 // Package fakelogstore is the simulated Dynamo loglet (CP-DSM-3): an if-absent Put
-// store for LogAppend/LogRead/LogGetEnd/LogDeleteOld, wrapped in the shared
+// store for LogAppend/LogRead/LogGetEnd/LogDeleteOld/LogClaimEpoch, wrapped in the shared
 // fakecompletions fault/timing core. Fault coins and delays are drawn at issue time
 // (decision 14). Every live RequestID gets exactly one completion; a lost answer
 // surfaces as ErrTimeout+MaybeApplied.
@@ -15,6 +15,7 @@ import (
 	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/verify/simulator"
+	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakelogservice"
 	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/internal/fakecompletions"
 )
 
@@ -28,6 +29,11 @@ type Engine struct {
 	gen         uint64
 	windowSlots int64
 	trimStride  int64
+
+	// asserts is the recorder of the landing op being applied (set by OnInternal).
+	asserts core.Assertions
+	// writers maps each epoch seen in the truth to the one writer name of that epoch.
+	writers map[uint64]string
 }
 
 var (
@@ -38,10 +44,11 @@ var (
 // New returns an empty logstore with the given faults.
 func New(f simulator.LogStoreFaults) *Engine {
 	e := &Engine{
-		spec:        &store{bug: f.Bug},
+		spec:        newStore(f.Bug == fakelogservice.InjectedBugNoFloorCheck),
 		ref:         stateupdater.NewMem(),
 		windowSlots: int64(f.WindowSlots),
 		trimStride:  int64(f.TrimStride),
+		writers:     map[uint64]string{},
 	}
 	if e.trimStride <= 0 {
 		e.trimStride = 16
@@ -84,6 +91,34 @@ func (e *Engine) specAndTruth(a core.IOCall) core.IOResult {
 	return c
 }
 
+// OnInternal lands one planned op. The truth engine reports through the assertion
+// recorder of this context, so the recorder is lent to it for the landing only.
+func (e *Engine) OnInternal(ctx simulator.FakeServiceContext, body any) {
+	e.asserts = ctx.Assert()
+	e.CompletionCore.OnInternal(ctx, body)
+	e.asserts = nil
+}
+
+// checkOneWriter checks the rule "one epoch has one writer" for an entry that the
+// truth replays. An entry with no envelope, or with epoch 0 (no writer claimed
+// yet), is skipped.
+func (e *Engine) checkOneWriter(slot core.LogPosition, data []byte) {
+	epoch, writer, ok := statemachine.EntryWriter(data)
+	if !ok || epoch == 0 {
+		return
+	}
+	first, seen := e.writers[epoch]
+	if !seen {
+		e.writers[epoch] = writer
+		first = writer
+	}
+	e.asserts.Always(first == writer, "logcp-sim: one epoch has one writer",
+		core.ContextPair{Key: "epoch", Value: epoch},
+		core.ContextPair{Key: "slot", Value: slot},
+		core.ContextPair{Key: "writer", Value: writer},
+		core.ContextPair{Key: "first_writer", Value: first})
+}
+
 func (e *Engine) advanceRef() {
 	for {
 		data, ok := e.spec.entry(e.applied)
@@ -91,6 +126,7 @@ func (e *Engine) advanceRef() {
 			return
 		}
 		slot := e.applied
+		e.checkOneWriter(slot, data)
 		if err := statemachine.ReplayPosition(e.ref, slot, data); err != nil {
 			// Foreign / test payloads are durable bytes but not CP entries.
 			e.applied++
@@ -119,7 +155,7 @@ func (e *Engine) stateHash() uint64 {
 
 func mutating(a core.IOCall) bool {
 	switch a.(type) {
-	case core.LogAppend, core.LogDeleteOld:
+	case core.LogAppend, core.LogDeleteOld, core.LogClaimEpoch:
 		return true
 	}
 	return false
@@ -135,6 +171,8 @@ func fail(a core.IOCall, err core.ErrCode, o core.Outcome) core.IOResult {
 		return core.LogGetEndDone{Req: a.Req, Err: err, Outcome: o}
 	case core.LogDeleteOld:
 		return core.LogDeleteOldDone{Req: a.Req, Err: err, Outcome: o}
+	case core.LogClaimEpoch:
+		return core.LogClaimEpochDone{Req: a.Req, Err: err, Outcome: o}
 	}
 	panic("logstore: not a log action")
 }
@@ -145,6 +183,8 @@ func changed(c core.IOResult) bool {
 		return c.Outcome == core.Applied && !c.Taken
 	case core.LogDeleteOldDone:
 		return c.Outcome == core.Applied
+	case core.LogClaimEpochDone:
+		return c.Outcome == core.Applied && c.Won
 	}
 	return false
 }
@@ -152,7 +192,7 @@ func changed(c core.IOResult) bool {
 // Handles reports whether a is a log IOCall.
 func (e *Engine) Handles(a core.Action) bool {
 	switch a.(type) {
-	case core.LogAppend, core.LogRead, core.LogGetEnd, core.LogDeleteOld:
+	case core.LogAppend, core.LogRead, core.LogGetEnd, core.LogDeleteOld, core.LogClaimEpoch:
 		return true
 	}
 	return false
@@ -163,9 +203,15 @@ func (e *Engine) Execute(ctx simulator.FakeServiceContext, from core.NodeInstanc
 	e.CompletionCore.Execute(ctx, from, a.(core.IOCall))
 }
 
-// Entry returns a copy of the bytes at slot, or false when empty or tombstoned.
+// Entry returns a copy of the bytes at slot, or false when the slot is empty or
+// at or below the floor.
 func (e *Engine) Entry(slot core.LogPosition) ([]byte, bool) {
 	return e.spec.entry(slot)
+}
+
+// Epoch returns the stored writer epoch and its owner.
+func (e *Engine) Epoch() (uint64, string) {
+	return e.spec.epoch, e.spec.owner
 }
 
 // CreateTopic seeds a topic on the reference fold before the run.

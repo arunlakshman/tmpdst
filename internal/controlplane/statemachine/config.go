@@ -7,19 +7,15 @@ import (
 
 // Config tunes the control-plane machine. Zero value keeps catch-up and the
 // commit queue off (CP-DSM-2 scaffold behaviour). CatchUpEvery > 0 arms
-// timer-driven catch-up with slot-ordered apply and gap-fill (CP-DSM-4).
-// K > 0 arms the commit queue with up to K in-flight LogAppend slots (CP-DSM-5).
+// timer-driven catch-up with slot-ordered apply (CP-DSM-4). The commit queue
+// keeps one LogAppend in flight (CP-DSM-5).
 // Heartbeat or TakeoverAfter arms advisory roles (CP-DSM-6). CheckpointEvery or
-// CheckpointKey arms checkpoint restore/publish and optional LogTrim.
+// CheckpointPrefix arms checkpoint restore/publish and optional LogTrim.
 type Config struct {
 	// CatchUpEvery is the pause between catch-up rounds. Zero disables catch-up.
 	CatchUpEvery core.Duration
 	// ReadLimit caps entries per LogRead during catch-up. Zero means 64.
 	ReadLimit int32
-	// GapAfter is how long the next unapplied slot may stay empty while later
-	// slots are buffered before Step emits a no-op LogAppend. Zero fills at
-	// once when a gap is visible.
-	GapAfter core.Duration
 	// Writer names append IDs (writer/seq). Empty means "cp".
 	Writer string
 	// OnCheckpointDecision, when set, is told every time the checkpoint timer
@@ -27,9 +23,6 @@ type Config struct {
 	// reports; it must not touch the machine. The simulator leaves it nil.
 	OnCheckpointDecision func(CheckpointDecision)
 
-	// K is the max number of commit LogAppends in flight. Zero disables the
-	// commit queue (Offer refuses).
-	K int
 	// MaxCmdsPerSlot caps commands packed into one commit append. Zero means 256.
 	MaxCmdsPerSlot int
 	// QueueMax caps queued client ops before Offer answers ErrUnavailable.
@@ -41,24 +34,30 @@ type Config struct {
 	// 400 KiB item limit of DynamoDB. It is not part of StateHash.
 	MaxEntryBytes int
 
-	// Rank is the advisory preference (0 preferred). Used for failback.
+	// Rank orders nodes for the first claim: rank 0 claims at once on an empty
+	// log, and every other claim waits TakeoverAfter + Rank*TakeoverRankStep.
 	Rank int
 	// Heartbeat is how long an idle active node waits before a no-op append.
 	// Zero disables heartbeat (and, with TakeoverAfter 0, roles).
 	Heartbeat core.Duration
 	// TakeoverAfter is how long a standby waits with no other-writer slot
-	// before promoting. Zero means only Promote flips the role.
+	// before it claims the write role. Zero means only Promote flips the role.
 	TakeoverAfter core.Duration
+	// TakeoverRankStep is added to TakeoverAfter once per rank, so the standbys
+	// of a lower rank claim first. Zero gives every rank the same wait.
+	TakeoverRankStep core.Duration
 
 	// CheckpointEvery is the pause between checkpoint attempts on the appender.
-	// Zero disables the timer; set CheckpointKey alone to restore on NodeStarted.
+	// Zero disables the timer; set CheckpointPrefix alone to restore on NodeStarted.
 	CheckpointEvery core.Duration
 	// CheckpointMinSlots skips a checkpoint when fewer slots were applied since the
 	// last. Zero means 1.
 	CheckpointMinSlots int64
-	// CheckpointKey is the object-store key for the latest snapshot. Empty means
-	// "checkpoint/latest" when checkpointing is enabled.
-	CheckpointKey string
+	// CheckpointPrefix is the object-store key prefix of the snapshots. Each
+	// snapshot is stored under prefix + the 20-digit slot it was taken at, and
+	// restore reads the newest. Empty means "checkpoint/" when checkpointing is
+	// enabled.
+	CheckpointPrefix string
 	// KeepSlots is how many log slots to keep behind a published checkpoint
 	// before LogTrim. Zero skips trim.
 	KeepSlots int64
@@ -88,9 +87,8 @@ type Config struct {
 const (
 	InjectedBugNone             uint8 = iota
 	InjectedBugWriterOffsets          // offsets chosen by the writer instead of by apply
-	InjectedBugTrimDelete             // trimmed slots deleted, not tombstoned (logstore)
+	_                                 // 2 is retired (it was the trim-delete mutant)
 	InjectedBugPerReplicaWindow       // each replica forgets keys on its own clock
-	InjectedBugGapSkip                // pass an empty slot without a no-op fill
 )
 
 func (c Config) readLimit() int32 {

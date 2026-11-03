@@ -33,38 +33,27 @@ func onlyAppend(t *testing.T, acts []core.Action) core.LogAppend {
 	return ap
 }
 
-func TestKConcurrentLogAppend(t *testing.T) {
-	const k = 3
-	m := newMachine(t, statemachine.Config{K: k, MaxCmdsPerSlot: 1, Writer: "w"})
-	var first []core.LogAppend
-	for i := range k {
-		key := "s" + string(rune('a'+i))
-		acts := m.Offer(statemachine.ClientOperation{Req: core.RequestID(i + 1), Cmd: commitCmd(key, 1)})
-		first = append(first, onlyAppend(t, acts))
-	}
-	if m.InFlightCommits() != k {
-		t.Fatalf("in-flight = %d, want %d", m.InFlightCommits(), k)
-	}
-	slots := map[core.LogPosition]bool{}
-	for _, ap := range first {
-		if slots[ap.Slot] {
-			t.Fatalf("duplicate slot %d among concurrent appends", ap.Slot)
+func TestOneLogAppendInFlight(t *testing.T) {
+	m := newMachine(t, statemachine.Config{MaxCmdsPerSlot: 1, Writer: "w"})
+	first := onlyAppend(t, m.Offer(statemachine.ClientOperation{Req: 1, Cmd: commitCmd("sa", 1)}))
+	for i, key := range []string{"sb", "sc"} {
+		acts := m.Offer(statemachine.ClientOperation{Req: core.RequestID(i + 2), Cmd: commitCmd(key, 1)})
+		if len(acts) != 0 {
+			t.Fatalf("Offer while one append is in flight returned %v", acts)
 		}
-		slots[ap.Slot] = true
 	}
-	acts := m.Offer(statemachine.ClientOperation{Req: 99, Cmd: commitCmd("extra", 1)})
-	if len(acts) != 0 {
-		t.Fatalf("over-K Offer returned %v", acts)
+	if m.InFlightCommits() != 1 {
+		t.Fatalf("in-flight = %d, want 1", m.InFlightCommits())
 	}
-	if m.QueueDepth() != 1 {
-		t.Fatalf("queue depth = %d, want 1", m.QueueDepth())
+	if m.QueueDepth() != 2 {
+		t.Fatalf("queue depth = %d, want 2", m.QueueDepth())
 	}
 	if ans := m.TakeAnswers(); len(ans) != 0 {
 		t.Fatalf("answers before apply: %v", ans)
 	}
 
-	acts = step(m, core.LogAppendDone{
-		Req: first[0].Req, Slot: first[0].Slot, Err: core.OK, Outcome: core.Applied,
+	acts := step(m, core.LogAppendDone{
+		Req: first.Req, Slot: first.Slot, Err: core.OK, Outcome: core.Applied,
 	})
 	if m.Applied() != 1 {
 		t.Fatalf("Applied = %d, want 1", m.Applied())
@@ -73,19 +62,16 @@ func TestKConcurrentLogAppend(t *testing.T) {
 	if len(ans) != 1 || ans[0].Req != 1 || ans[0].Done.Err != core.OK {
 		t.Fatalf("answers after first apply = %+v", ans)
 	}
-	if len(acts) != 1 {
-		t.Fatalf("after first done actions = %v, want one LogAppend for queued op", acts)
+	next := onlyAppend(t, acts)
+	if next.Slot != first.Slot+1 {
+		t.Fatalf("next slot = %d, want %d", next.Slot, first.Slot+1)
 	}
-	if _, ok := acts[0].(core.LogAppend); !ok {
-		t.Fatalf("action = %T, want LogAppend", acts[0])
-	}
-	if m.InFlightCommits() != k {
-		t.Fatalf("in-flight after refill = %d, want %d", m.InFlightCommits(), k)
+	if m.InFlightCommits() != 1 {
+		t.Fatalf("in-flight after refill = %d, want 1", m.InFlightCommits())
 	}
 }
-
 func TestGroupPackingCapsAtMaxCmdsPerSlot(t *testing.T) {
-	m := newMachine(t, statemachine.Config{K: 1, MaxCmdsPerSlot: 3, Writer: "w"})
+	m := newMachine(t, statemachine.Config{MaxCmdsPerSlot: 3, Writer: "w"})
 	// First Offer flushes alone (low load). Further Offers queue while in flight;
 	// the next flush packs up to MaxCmdsPerSlot, matching logcp flusher take().
 	first := onlyAppend(t, m.Offer(statemachine.ClientOperation{Req: 1, Cmd: commitCmd("g0", 1)}))
@@ -126,15 +112,8 @@ func TestGroupPackingCapsAtMaxCmdsPerSlot(t *testing.T) {
 }
 
 func TestMaybeAppliedRetriesSameSlot(t *testing.T) {
-	m := newMachine(t, statemachine.Config{K: 2, MaxCmdsPerSlot: 1, Writer: "w"})
+	m := newMachine(t, statemachine.Config{MaxCmdsPerSlot: 1, Writer: "w"})
 	a := onlyAppend(t, m.Offer(statemachine.ClientOperation{Req: 1, Cmd: commitCmd("a", 1)}))
-	b := onlyAppend(t, m.Offer(statemachine.ClientOperation{Req: 2, Cmd: commitCmd("b", 1)}))
-	// b lands first; a times out. Same-slot retry must not leave a gap that
-	// wedges drain past b.
-	step(m, core.LogAppendDone{Req: b.Req, Slot: b.Slot, Err: core.OK, Outcome: core.Applied})
-	if m.Applied() != 0 {
-		t.Fatalf("Applied = %d before gap filled, want 0", m.Applied())
-	}
 	acts := step(m, core.LogAppendDone{
 		Req: a.Req, Slot: a.Slot, Err: core.ErrTimeout, Outcome: core.MaybeApplied,
 	})
@@ -143,17 +122,15 @@ func TestMaybeAppliedRetriesSameSlot(t *testing.T) {
 		t.Fatalf("MaybeApplied retry slot %d, want same slot %d", retry.Slot, a.Slot)
 	}
 	step(m, core.LogAppendDone{Req: retry.Req, Slot: retry.Slot, Err: core.OK, Outcome: core.Applied})
-	if m.Applied() != 2 {
-		t.Fatalf("Applied = %d, want 2", m.Applied())
+	if m.Applied() != 1 {
+		t.Fatalf("Applied = %d, want 1", m.Applied())
 	}
-	ans := m.TakeAnswers()
-	if len(ans) != 2 {
-		t.Fatalf("answers = %d, want 2 (drain unwedged)", len(ans))
+	if ans := m.TakeAnswers(); len(ans) != 1 {
+		t.Fatalf("answers = %d, want 1", len(ans))
 	}
 }
-
 func TestLostAppendRetriesSameEntryLaterSlot(t *testing.T) {
-	m := newMachine(t, statemachine.Config{K: 1, MaxCmdsPerSlot: 1, Writer: "w"})
+	m := newMachine(t, statemachine.Config{MaxCmdsPerSlot: 1, Writer: "w"})
 	ap := onlyAppend(t, m.Offer(statemachine.ClientOperation{Req: 7, Cmd: commitCmd("lost-key", 2)}))
 	other := statemachine.EncodeGroupForTest("other/1", []stateupdater.Entry{commitCmd("other-key", 1)})
 
@@ -185,14 +162,13 @@ func TestLostAppendRetriesSameEntryLaterSlot(t *testing.T) {
 }
 
 func TestStickySingleAppenderAtMachineLevel(t *testing.T) {
-	m := newMachine(t, statemachine.Config{K: 2, MaxCmdsPerSlot: 1, Writer: "sticky"})
+	m := newMachine(t, statemachine.Config{MaxCmdsPerSlot: 1, Writer: "sticky"})
 	var apps []core.LogAppend
-	for i := range 2 {
-		apps = append(apps, onlyAppend(t, m.Offer(statemachine.ClientOperation{
-			Req: core.RequestID(i + 1),
-			Cmd: commitCmd("st"+string(rune('a'+i)), 1),
-		})))
-	}
+	acts := m.Offer(statemachine.ClientOperation{Req: 1, Cmd: commitCmd("sta", 1)})
+	apps = append(apps, onlyAppend(t, acts))
+	m.Offer(statemachine.ClientOperation{Req: 2, Cmd: commitCmd("stb", 1)})
+	acts = step(m, core.LogAppendDone{Req: apps[0].Req, Slot: apps[0].Slot, Err: core.OK, Outcome: core.Applied})
+	apps = append(apps, onlyAppend(t, acts))
 	if apps[0].Slot == apps[1].Slot {
 		t.Fatal("sticky appender allocated the same slot twice")
 	}
@@ -205,7 +181,6 @@ func TestStickySingleAppenderAtMachineLevel(t *testing.T) {
 			t.Fatalf("entry id %q, want sticky/ prefix (single writer)", id)
 		}
 	}
-	step(m, core.LogAppendDone{Req: apps[0].Req, Slot: apps[0].Slot, Err: core.OK, Outcome: core.Applied})
 	step(m, core.LogAppendDone{Req: apps[1].Req, Slot: apps[1].Slot, Err: core.OK, Outcome: core.Applied})
 	ans := m.TakeAnswers()
 	if len(ans) != 2 {
@@ -213,19 +188,8 @@ func TestStickySingleAppenderAtMachineLevel(t *testing.T) {
 	}
 }
 
-func TestOfferRefusedWhenCommitQueueDisabled(t *testing.T) {
-	m := newMachine(t, statemachine.Config{})
-	if acts := m.Offer(statemachine.ClientOperation{Req: 1, Cmd: commitCmd("x", 1)}); acts != nil {
-		t.Fatalf("disabled Offer returned %v", acts)
-	}
-	ans := m.TakeAnswers()
-	if len(ans) != 1 || ans[0].Done.Err != core.ErrUnavailable {
-		t.Fatalf("answers = %+v, want ErrUnavailable", ans)
-	}
-}
-
 func TestOfferKnownCommitSkipsAppend(t *testing.T) {
-	m := newMachine(t, statemachine.Config{K: 1, MaxCmdsPerSlot: 1, Writer: "w"})
+	m := newMachine(t, statemachine.Config{MaxCmdsPerSlot: 1, Writer: "w"})
 	first := onlyAppend(t, m.Offer(statemachine.ClientOperation{Req: 1, Cmd: commitCmd("known", 2)}))
 	step(m, core.LogAppendDone{Req: first.Req, Slot: first.Slot, Err: core.OK, Outcome: core.Applied})
 	if ans := m.TakeAnswers(); len(ans) != 1 || ans[0].Done.Err != core.OK {
@@ -246,7 +210,7 @@ func TestOfferKnownCommitSkipsAppend(t *testing.T) {
 }
 
 func TestOfferRetargetsInFlightCommit(t *testing.T) {
-	m := newMachine(t, statemachine.Config{K: 1, MaxCmdsPerSlot: 1, Writer: "w"})
+	m := newMachine(t, statemachine.Config{MaxCmdsPerSlot: 1, Writer: "w"})
 	first := onlyAppend(t, m.Offer(statemachine.ClientOperation{Req: 1, Cmd: commitCmd("retry", 1)}))
 	acts := m.Offer(statemachine.ClientOperation{Req: 2, Cmd: commitCmd("retry", 1)})
 	if len(acts) != 0 {

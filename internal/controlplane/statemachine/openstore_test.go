@@ -40,28 +40,24 @@ func (s *storeSource) open() (stateupdater.KeyValueStore, error) {
 func driveToTomb(t *testing.T, m *statemachine.Machine) []core.Action {
 	t.Helper()
 	acts := step(m, core.NodeStarted{})
-	get := acts[0].(core.ObjectGet)
-	acts = step(m, core.ObjectGetDone{Req: get.Req, Err: core.ErrNotFound})
+	list := acts[0].(core.ObjectList)
+	acts = step(m, core.ObjectListDone{Req: list.Req})
 	timer := acts[0].(core.SetTimer)
 	acts = step(m, core.TimerFired{ID: timer.ID, Gen: timer.Gen})
 	tail := acts[0].(core.LogGetEnd)
 	acts = step(m, core.LogGetEndDone{Req: tail.Req, Tail: 2, Err: core.OK, Outcome: core.Applied})
 	read := acts[0].(core.LogRead)
-	acts = step(m, core.LogReadDone{
+	// Slot 0 is missing but slot 1 exists: the node is behind a trim.
+	return step(m, core.LogReadDone{
 		Req: read.Req, Err: core.OK, Outcome: core.Applied,
 		Entries: []core.LogEntry{{Slot: 1, Data: noop("late")}},
-	})
-	ap := acts[0].(core.LogAppend)
-	return step(m, core.LogAppendDone{
-		Req: ap.Req, Slot: 0, Taken: true, Existing: nil,
-		Err: core.ErrConflict, Outcome: core.NotApplied,
 	})
 }
 
 func tombConfig(src *storeSource) statemachine.Config {
 	return statemachine.Config{
-		CatchUpEvery: core.Millisecond, GapAfter: 0, Writer: "w",
-		CheckpointKey: "checkpoint/t", CheckpointEvery: core.Second, Rank: 1,
+		CatchUpEvery: core.Millisecond, Writer: "w",
+		CheckpointPrefix: "checkpoint/t/", CheckpointEvery: core.Second, Rank: 1,
 		OpenStore: src.open,
 	}
 }
@@ -82,7 +78,7 @@ func TestOpenStoreRunsAtBuildAndAfterRestore(t *testing.T) {
 	if src.opened[1].closed {
 		t.Error("the new store must stay open")
 	}
-	if _, ok := acts[0].(core.ObjectGet); !ok {
+	if _, ok := acts[0].(core.ObjectList); !ok {
 		t.Fatalf("act = %#v, want the checkpoint read", acts[0])
 	}
 }

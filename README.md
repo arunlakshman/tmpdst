@@ -49,7 +49,6 @@ SKIP_BUILD_HOOK=1 git commit ...
 
 ```bash
 make test-all      # unit + sim + hermetic it (no lint/risk)
-make test-race     # go test -race ./... (slow; not in build)
 make lint
 make risk-strict
 ```

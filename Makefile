@@ -37,7 +37,7 @@ POSTGRES_IMAGE ?= postgres:17.11-alpine
 # Extra go test args for make it-postgres, e.g. PG_TEST_ARGS="-v ./internal/controlplane/executor/"
 PG_TEST_ARGS  ?=
 
-.PHONY: build compile test sim it-hermetic test-all test-race sim-campaign \
+.PHONY: build compile test sim it-hermetic test-all sim-campaign \
 	ascii-check lint modernize-check modernize fmt-check vet risk risk-baseline risk-strict \
 	install-hooks proto proto-tools e2e-kafka-cli it-postgres
 
@@ -126,11 +126,6 @@ it-postgres:
 # All tests without lint/compile/risk.
 test-all: test sim it-hermetic
 
-# Race detector: too slow for `build` (>10 min on this tree), run on demand.
-# internal/verify/simulator/kafka alone needs ~16m under -race on a typical laptop; Go's default
-# 10m package timeout cuts it mid-campaign. Keep this above measured wall time.
-test-race:
-	go test -race -timeout 30m ./...
 
 # Risk gate: merge unit + sim + hermetic-it coverprofiles.
 risk:

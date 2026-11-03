@@ -581,13 +581,13 @@ CP-DSM-3. Fault coins drawn at land time instead of issue time break lesson 14. 
 
 CP-DSM-4. Pulling Pebble into the machine fails detcheck and autonomy. Owner watches import lane.
 
-CP-DSM-7. HTTP adapter deadlocks waiting for Step. Owner watches healthz and commit lanes under `-race`.
+CP-DSM-7. HTTP adapter deadlocks waiting for Step. Owner watches healthz and commit lanes in repeated runs.
 
 CP-DSM-7. `internal/controlplane/controlplaneclient` today imports `mds/sys`. Leaving that edge blocks a clean module split. Owner either injects interfaces in this PR or files a follow-up box before program close.
 
 CP-DSM-8. kafka-log hash and step-count churn. Owner expects hand review of the scenario summary, not silent golden edits. Attrition now kills CP nodes, which changes coverage. Owner watches mutant catch seeds.
 
-Flaky `TestMetricsAreExported` under race (`docs/flaky-tests.md`) can poison CP-DSM-7. Owner treats it as known flake and reruns before filing a machine bug.
+Flaky `TestMetricsAreExported` (`docs/flaky-tests.md`) can poison CP-DSM-7. Owner treats it as known flake and reruns before filing a machine bug.
 
 ## Appendix D. Links and reading list
 

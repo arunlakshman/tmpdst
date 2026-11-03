@@ -13,6 +13,25 @@ import (
 	"github.com/manifesterio/mds/internal/core"
 )
 
+// Where the pieces of the consumer group feature live:
+//
+//   - groupcoordinator/coordinator.go, group.go, clock.go: the coordinator
+//     logic. It keeps the phase of each group, the parked calls and the timers.
+//   - server/groups.go: this file. It holds the gRPC group handlers and the
+//     log and read side of the coordinator (nodeGroups).
+//   - controlplaneclient/groups.go: the broker-side group calls.
+//   - apiconvert/groups.go: maps group requests and responses to and from the
+//     wire types.
+//   - stateupdater/groups.go: the fold of GroupInstall, GroupAssign,
+//     GroupRemove and OffsetCommit.
+//   - stateupdater/groupquery.go: the group reads (OffsetFetch, DescribeGroup
+//     and ListGroups).
+//   - statemachine/client.go: passes the group calls to the state machine.
+//   - statemachine/commit.go: encodes and decodes the group entries in the log.
+//   - statemachine/replay.go: decodes group entries when it replays the log.
+//   - core/controlplane.go: the group types (GroupInstall, GroupAssign,
+//     GroupRemove, OffsetCommit and the others).
+
 // groupWatchEvery is how often the node checks whether it is the active
 // appender, and so whether the group coordinator should serve.
 const groupWatchEvery = 100 * time.Millisecond

@@ -329,38 +329,37 @@ func (n *Node) CommitSegment(ctx context.Context, request *cpv1.CommitSegmentReq
 	return wireboundary.CommitSegmentRespFromCore(core.ResponseAs[core.CommitSegmentResp](d)), nil
 }
 
-// Lookup implements ControlPlane.
-//
-//nolint:dupl // mirror of DescribeTopics; each RPC keeps its own conversion path
-func (n *Node) Lookup(ctx context.Context, request *cpv1.LookupRequest) (*cpv1.LookupResponse, error) {
-	operation := wireboundary.LookupToCore(request)
+// readRPC runs one read on the fold, turns the answer into R and converts it to
+// the wire type Out. The read method and the converter are passed in. A failed
+// read or a failed answer becomes an RPC error.
+func readRPC[R, Op, Out any](ctx context.Context, n *Node, op Op,
+	read func(*stateupdater.StateUpdater, Op) (core.ControlPlaneDone, error),
+	convert func(R) Out,
+) (Out, error) {
+	var zero Out
 	d, err := n.read(ctx, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
-		return m.Fold().Lookup(operation)
+		return read(m.Fold(), op)
 	})
 	if err != nil {
-		return nil, toRPCError(core.ErrIO, core.NotApplied)
+		return zero, toRPCError(core.ErrIO, core.NotApplied)
 	}
 	if d.Err != core.OK {
-		return nil, toRPCError(d.Err, d.Outcome)
+		return zero, toRPCError(d.Err, d.Outcome)
 	}
-	return wireboundary.LookupRespFromCore(core.ResponseAs[core.FindSegmentsResp](d)), nil
+	return convert(core.ResponseAs[R](d)), nil
+}
+
+// Lookup implements ControlPlane.
+func (n *Node) Lookup(ctx context.Context, request *cpv1.LookupRequest) (*cpv1.LookupResponse, error) {
+	return readRPC[core.FindSegmentsResp](ctx, n, wireboundary.LookupToCore(request),
+		(*stateupdater.StateUpdater).Lookup, wireboundary.LookupRespFromCore)
 }
 
 // DescribeTopics implements ControlPlane.
-//
-//nolint:dupl // mirror of Lookup; each RPC keeps its own conversion path
 func (n *Node) DescribeTopics(ctx context.Context, request *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
 	operation := wireboundary.DescribeTopicsToCore(request)
-	d, err := n.read(ctx, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
-		return m.Fold().Describe(operation)
-	})
-	if err != nil {
-		return nil, toRPCError(core.ErrIO, core.NotApplied)
-	}
-	if d.Err != core.OK {
-		return nil, toRPCError(d.Err, d.Outcome)
-	}
-	return wireboundary.DescribeTopicsRespFromCore(core.ResponseAs[core.DescribeTopicsResp](d)), nil
+	return readRPC[core.DescribeTopicsResp](ctx, n, operation,
+		(*stateupdater.StateUpdater).Describe, wireboundary.DescribeTopicsRespFromCore)
 }
 
 // CreateTopic implements ControlPlane.

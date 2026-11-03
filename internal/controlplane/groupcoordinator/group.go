@@ -508,51 +508,39 @@ func (c *Coordinator) leaderSync(t *term, g *group, m *member, assigns []Assignm
 	return response
 }
 
-// waitJoin waits for the round to end, the term to end, or ctx to end.
+// waitReply waits for an answer on ch. It stops early when the term ends or
+// when ctx ends. The answer type T is different for each caller.
 //
-//nolint:dupl // same shape as the other wait, with its own answer type
-func waitJoin(ctx context.Context, t *term, g *group, id string, ch chan JoinResp) (JoinResp, error) {
+// If ctx ends first, the member stops waiting: its wait field is cleared, but
+// only when it still holds ch. Then any answer that already came in is taken,
+// and ctx.Err() is returned.
+//
+// If the term ends first, the answer is unavailable.
+//
+// waitField returns the member field that holds the wait channel.
+func waitReply[T any](ctx context.Context, t *term, g *group, id string, ch chan T, unavailable T, waitField func(m *member) *chan T) (T, error) {
 	select {
 	case r := <-ch:
 		return r, nil
 	case <-t.ctx.Done():
-		return JoinResp{Err: core.ErrUnavailable}, nil
+		return unavailable, nil
 	case <-ctx.Done():
+		// Take the group lock to change the member safely.
 		g.mu.Lock()
-		if m := g.members[id]; m != nil && m.joinWait == ch {
-			m.joinWait = nil
+		if m := g.members[id]; m != nil {
+			if p := waitField(m); *p == ch {
+				*p = nil
+			}
 		}
 		g.mu.Unlock()
+		// Take an answer that arrived just now, if there is one.
 		select {
 		case r := <-ch:
 			return r, nil
 		default:
 		}
-		return JoinResp{}, ctx.Err()
-	}
-}
-
-// waitSync waits for the leader's sync, the term to end, or ctx to end.
-//
-//nolint:dupl // same shape as the other wait, with its own answer type
-func waitSync(ctx context.Context, t *term, g *group, id string, ch chan SyncResp) (SyncResp, error) {
-	select {
-	case r := <-ch:
-		return r, nil
-	case <-t.ctx.Done():
-		return SyncResp{Err: core.ErrUnavailable}, nil
-	case <-ctx.Done():
-		g.mu.Lock()
-		if m := g.members[id]; m != nil && m.syncWait == ch {
-			m.syncWait = nil
-		}
-		g.mu.Unlock()
-		select {
-		case r := <-ch:
-			return r, nil
-		default:
-		}
-		return SyncResp{}, ctx.Err()
+		var zero T
+		return zero, ctx.Err()
 	}
 }
 

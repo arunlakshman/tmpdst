@@ -354,7 +354,7 @@ func (c *Coordinator) JoinGroup(ctx context.Context, request JoinReq) (JoinResp,
 	if ch == nil {
 		return response, nil
 	}
-	return waitJoin(ctx, t, g, id, ch)
+	return waitReply(ctx, t, g, id, ch, JoinResp{Err: core.ErrUnavailable}, func(m *member) *chan JoinResp { return &m.joinWait })
 }
 
 // SyncGroup sends the leader's assignment, or waits for it as a follower. It
@@ -396,7 +396,7 @@ func (c *Coordinator) SyncGroup(ctx context.Context, request SyncReq) (SyncResp,
 		}
 		m.syncWait = ch
 		g.mu.Unlock()
-		return waitSync(ctx, t, g, m.id, ch)
+		return waitReply(ctx, t, g, m.id, ch, SyncResp{Err: core.ErrUnavailable}, func(m *member) *chan SyncResp { return &m.syncWait })
 	case phasePrep:
 		g.mu.Unlock()
 		return SyncResp{Err: core.ErrRebalanceInProgress}, nil

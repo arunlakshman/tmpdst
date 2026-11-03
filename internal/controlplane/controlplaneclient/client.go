@@ -112,46 +112,19 @@ func (c *Client) Call(ctx context.Context, operation core.ControlPlaneOperation)
 	return nil, &Error{Code: core.ErrInvalid}
 }
 
-//nolint:dupl // each ControlPlaneOperation keeps its own request/response conversion
 func (c *Client) commitSegment(ctx context.Context, operation core.CommitSegment) (core.ControlPlaneResponse, error) {
-	var out *cpv1.CommitSegmentResponse
-	err := c.do(ctx, "CommitSegment", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
-		var e error
-		out, e = cli.CommitSegment(ctx, wireboundary.CommitSegmentFromCore(operation))
-		return e
-	})
-	if err != nil {
-		return nil, err
-	}
-	return wireboundary.CommitSegmentRespToCore(out), nil
+	return callOp(ctx, c, "CommitSegment", cpv1.ControlPlaneClient.CommitSegment,
+		wireboundary.CommitSegmentFromCore(operation), wireboundary.CommitSegmentRespToCore)
 }
 
-//nolint:dupl // each ControlPlaneOperation keeps its own request/response conversion
 func (c *Client) lookup(ctx context.Context, operation core.FindSegments) (core.ControlPlaneResponse, error) {
-	var out *cpv1.LookupResponse
-	err := c.do(ctx, "Lookup", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
-		var e error
-		out, e = cli.Lookup(ctx, wireboundary.LookupFromCore(operation))
-		return e
-	})
-	if err != nil {
-		return nil, err
-	}
-	return wireboundary.LookupRespToCore(out), nil
+	return callOp(ctx, c, "Lookup", cpv1.ControlPlaneClient.Lookup,
+		wireboundary.LookupFromCore(operation), wireboundary.LookupRespToCore)
 }
 
-//nolint:dupl // each ControlPlaneOperation keeps its own request/response conversion
 func (c *Client) describeTopics(ctx context.Context, operation core.DescribeTopics) (core.ControlPlaneResponse, error) {
-	var out *cpv1.DescribeTopicsResponse
-	err := c.do(ctx, "DescribeTopics", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
-		var e error
-		out, e = cli.DescribeTopics(ctx, wireboundary.DescribeTopicsFromCore(operation))
-		return e
-	})
-	if err != nil {
-		return nil, err
-	}
-	return wireboundary.DescribeTopicsRespToCore(out), nil
+	return callOp(ctx, c, "DescribeTopics", cpv1.ControlPlaneClient.DescribeTopics,
+		wireboundary.DescribeTopicsFromCore(operation), wireboundary.DescribeTopicsRespToCore)
 }
 
 // CreateTopic is the dev/test helper over CreateTopic.
@@ -178,6 +151,36 @@ func (c *Client) GetStatus(ctx context.Context) (*cpv1.GetStatusResponse, error)
 		return e
 	})
 	return out, err
+}
+
+// callOp is callRPC for the calls that return a core.ControlPlaneResponse.
+// On error it returns a nil interface, not a typed zero value.
+func callOp[Req, Resp any, Out core.ControlPlaneResponse](ctx context.Context, c *Client, name string,
+	rpc func(cpv1.ControlPlaneClient, context.Context, Req, ...grpc.CallOption) (Resp, error), in Req, toCore func(Resp) Out,
+) (core.ControlPlaneResponse, error) {
+	r, err := callRPC(ctx, c, name, rpc, in, toCore)
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+// callRPC runs one RPC through do and converts the reply to the core type.
+// On error it returns the zero value and the error.
+func callRPC[Req, Resp, Out any](ctx context.Context, c *Client, name string,
+	rpc func(cpv1.ControlPlaneClient, context.Context, Req, ...grpc.CallOption) (Resp, error), in Req, toCore func(Resp) Out,
+) (Out, error) {
+	var zero Out
+	var out Resp
+	err := c.do(ctx, name, func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
+		var e error
+		out, e = rpc(cli, ctx, in)
+		return e
+	})
+	if err != nil {
+		return zero, err
+	}
+	return toCore(out), nil
 }
 
 func (c *Client) do(ctx context.Context, name string, fn func(context.Context, cpv1.ControlPlaneClient) error) error {

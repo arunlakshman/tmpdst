@@ -86,34 +86,28 @@ func readFold(ctx context.Context, n *Node, fn func(*statemachine.Machine) (core
 	return d, nil
 }
 
-// OffsetFetch implements controlplane.GroupStore.
-//
-//nolint:dupl // each call keeps its own conversion
-func (s nodeGroups) OffsetFetch(ctx context.Context, operation core.OffsetFetch) (core.OffsetFetchResp, error) {
-	d, err := readFold(ctx, s.n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
-		return m.Fold().OffsetFetch(operation)
+// readGroup runs one group read on the fold and turns the answer into R. The
+// read method is passed in. On an error the result is the zero R.
+func readGroup[R, Op any](ctx context.Context, n *Node, op Op, read func(*stateupdater.StateUpdater, Op) (core.ControlPlaneDone, error)) (R, error) {
+	d, err := readFold(ctx, n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
+		return read(m.Fold(), op)
 	})
-	return core.ResponseAs[core.OffsetFetchResp](d), err
+	return core.ResponseAs[R](d), err
+}
+
+// OffsetFetch implements controlplane.GroupStore.
+func (s nodeGroups) OffsetFetch(ctx context.Context, operation core.OffsetFetch) (core.OffsetFetchResp, error) {
+	return readGroup[core.OffsetFetchResp](ctx, s.n, operation, (*stateupdater.StateUpdater).OffsetFetch)
 }
 
 // DescribeGroup implements controlplane.GroupStore.
-//
-//nolint:dupl // each call keeps its own conversion
 func (s nodeGroups) DescribeGroup(ctx context.Context, operation core.DescribeGroup) (core.DescribeGroupResp, error) {
-	d, err := readFold(ctx, s.n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
-		return m.Fold().DescribeGroup(operation)
-	})
-	return core.ResponseAs[core.DescribeGroupResp](d), err
+	return readGroup[core.DescribeGroupResp](ctx, s.n, operation, (*stateupdater.StateUpdater).DescribeGroup)
 }
 
 // ListGroups implements controlplane.GroupStore.
-//
-//nolint:dupl // each call keeps its own conversion
 func (s nodeGroups) ListGroups(ctx context.Context, operation core.ListGroups) (core.ListGroupsResp, error) {
-	d, err := readFold(ctx, s.n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
-		return m.Fold().ListGroups(operation)
-	})
-	return core.ResponseAs[core.ListGroupsResp](d), err
+	return readGroup[core.ListGroupsResp](ctx, s.n, operation, (*stateupdater.StateUpdater).ListGroups)
 }
 
 // groupRole reports whether this node is the active appender and ready.
@@ -182,40 +176,54 @@ func groupCtxErr() error {
 	return toRPCError(core.ErrTimeout, core.MaybeApplied)
 }
 
-// JoinGroup implements ControlPlane.
-//
-//nolint:dupl // each call keeps its own conversion
-func (n *Node) JoinGroup(ctx context.Context, request *cpv1.JoinGroupRequest) (*cpv1.JoinGroupResponse, error) {
+// groupReplyErr maps a coordinator answer to an RPC error. A call that
+// ended with its context gives a timeout. A failed answer gives its code.
+func groupReplyErr(code core.ErrCode, err error) error {
+	if err != nil {
+		return groupCtxErr()
+	}
+	if code != core.OK {
+		return toRPCError(code, groupOutcome(code))
+	}
+	return nil
+}
+
+// groupRPC runs one coordinator call for an RPC. It checks that this node
+// serves groups, runs call, maps a failed answer to an RPC error and converts
+// the answer to the wire type Out.
+func groupRPC[Op, R, Out any](ctx context.Context, n *Node, op Op,
+	call func(*groupcoordinator.Coordinator, context.Context, Op) (R, error),
+	codeOf func(R) core.ErrCode, convert func(R) Out,
+) (Out, error) {
+	var zero Out
 	c, err := n.groupCoordinator(ctx)
 	if err != nil {
-		return nil, err
+		return zero, err
 	}
-	r, err := c.JoinGroup(ctx, wireboundary.JoinGroupToCore(request))
-	if err != nil {
-		return nil, groupCtxErr()
+	r, err := call(c, ctx, op)
+	if err := groupReplyErr(codeOf(r), err); err != nil {
+		return zero, err
 	}
-	if r.Err != core.OK {
-		return nil, toRPCError(r.Err, groupOutcome(r.Err))
-	}
-	return wireboundary.JoinGroupRespFromCore(r), nil
+	return convert(r), nil
+}
+
+// joinCode returns the answer code of a join.
+func joinCode(r groupcoordinator.JoinResp) core.ErrCode { return r.Err }
+
+// syncCode returns the answer code of a sync.
+func syncCode(r groupcoordinator.SyncResp) core.ErrCode { return r.Err }
+
+// JoinGroup implements ControlPlane.
+func (n *Node) JoinGroup(ctx context.Context, request *cpv1.JoinGroupRequest) (*cpv1.JoinGroupResponse, error) {
+	return groupRPC(ctx, n, wireboundary.JoinGroupToCore(request),
+		(*groupcoordinator.Coordinator).JoinGroup, joinCode, wireboundary.JoinGroupRespFromCore)
 }
 
 // SyncGroup implements ControlPlane.
-//
-//nolint:dupl // each call keeps its own conversion
 func (n *Node) SyncGroup(ctx context.Context, request *cpv1.SyncGroupRequest) (*cpv1.SyncGroupResponse, error) {
-	c, err := n.groupCoordinator(ctx)
-	if err != nil {
-		return nil, err
-	}
-	r, err := c.SyncGroup(ctx, wireboundary.SyncGroupToCore(request))
-	if err != nil {
-		return nil, groupCtxErr()
-	}
-	if r.Err != core.OK {
-		return nil, toRPCError(r.Err, groupOutcome(r.Err))
-	}
-	return wireboundary.SyncGroupRespFromCore(r), nil
+	operation := wireboundary.SyncGroupToCore(request)
+	return groupRPC(ctx, n, operation,
+		(*groupcoordinator.Coordinator).SyncGroup, syncCode, wireboundary.SyncGroupRespFromCore)
 }
 
 // GroupHeartbeat implements ControlPlane.

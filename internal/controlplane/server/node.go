@@ -14,16 +14,16 @@ import (
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
 	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
+	"github.com/manifesterio/mds/internal/controlplane/metadata"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/runloop"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
-	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
 	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
 )
 
 // Config wires a Node.
 type Config struct {
-	Machine statemachine.Config
+	Machine replica.Config
 	Self    core.NodeInstance
 	Env     core.Environment
 	Clock   runloop.Clock
@@ -46,7 +46,7 @@ type Node struct {
 	config Config
 	inbox  *runloop.Inbox
 	inject chan runloop.InjectFunc
-	m      atomic.Pointer[statemachine.Machine]
+	m      atomic.Pointer[replica.Replica]
 	health *health.Server
 	leases *leaseSet                     // run loop only; empty until brokers heartbeat
 	groups *groupcoordinator.Coordinator // serves group calls while this node is active
@@ -115,18 +115,18 @@ func (n *Node) Start(ctx context.Context) error {
 		Clock: n.config.Clock, Env: n.config.Env, Inbox: n.inbox,
 		Shutdown: n.shutdown, StopGrace: n.config.StopGrace, Inject: n.inject,
 		AfterStep: func(cm core.Machine) {
-			if m, ok := cm.(*statemachine.Machine); ok {
+			if m, ok := cm.(*replica.Replica); ok {
 				n.flushAnswers(m)
 				n.epoch.Store(m.Epoch())
 				n.stepDowns.Store(m.StepDowns())
 			}
 		},
 	}
-	f := statemachine.New(n.config.Machine)
+	f := replica.New(n.config.Machine)
 	go n.watchGroups(runCtx)
 	go func() {
 		err := runloop.Run(runCtx, b, ex, func(env core.Environment, self core.NodeInstance) core.Machine {
-			m := f(env, self).(*statemachine.Machine)
+			m := f(env, self).(*replica.Replica)
 			n.m.Store(m)
 			return m
 		}, n.config.Self)
@@ -208,7 +208,7 @@ func (n *Node) allocReq() core.RequestID {
 	return n.nextReq
 }
 
-func (n *Node) onLoop(ctx context.Context, fn func(m *statemachine.Machine) []core.Action) error {
+func (n *Node) onLoop(ctx context.Context, fn func(m *replica.Replica) []core.Action) error {
 	done := make(chan struct{})
 	var runErr error
 	select {
@@ -234,7 +234,7 @@ func (n *Node) onLoop(ctx context.Context, fn func(m *statemachine.Machine) []co
 	}
 }
 
-func (n *Node) flushAnswers(m *statemachine.Machine) {
+func (n *Node) flushAnswers(m *replica.Replica) {
 	for _, a := range m.TakeAnswers() {
 		n.mu.Lock()
 		ch := n.waiters[a.Req]
@@ -246,7 +246,7 @@ func (n *Node) flushAnswers(m *statemachine.Machine) {
 	}
 }
 
-func (n *Node) offer(ctx context.Context, cmd stateupdater.Entry) (core.ControlPlaneDone, error) {
+func (n *Node) offer(ctx context.Context, cmd metadata.Entry) (core.ControlPlaneDone, error) {
 	request := n.allocReq()
 	ch := make(chan core.ControlPlaneDone, 1)
 	n.mu.Lock()
@@ -258,8 +258,8 @@ func (n *Node) offer(ctx context.Context, cmd stateupdater.Entry) (core.ControlP
 		n.mu.Unlock()
 	}()
 
-	err := n.onLoop(ctx, func(m *statemachine.Machine) []core.Action {
-		return m.Offer(statemachine.ClientOperation{Req: request, Cmd: cmd})
+	err := n.onLoop(ctx, func(m *replica.Replica) []core.Action {
+		return m.Offer(replica.ClientOperation{Req: request, Cmd: cmd})
 	})
 	if err != nil {
 		return core.ControlPlaneDone{}, err
@@ -287,13 +287,13 @@ func (n *Node) offer(ctx context.Context, cmd stateupdater.Entry) (core.ControlP
 	}
 }
 
-func (n *Node) read(ctx context.Context, fn func(m *statemachine.Machine) (core.ControlPlaneDone, error)) (core.ControlPlaneDone, error) {
+func (n *Node) read(ctx context.Context, fn func(m *replica.Replica) (core.ControlPlaneDone, error)) (core.ControlPlaneDone, error) {
 	type result struct {
 		d   core.ControlPlaneDone
 		err error
 	}
 	ch := make(chan result, 1)
-	err := n.onLoop(ctx, func(m *statemachine.Machine) []core.Action {
+	err := n.onLoop(ctx, func(m *replica.Replica) []core.Action {
 		if !m.Ready() {
 			ch <- result{d: core.ControlPlaneDone{Err: core.ErrUnavailable}}
 			return nil
@@ -316,7 +316,7 @@ func (n *Node) read(ctx context.Context, fn func(m *statemachine.Machine) (core.
 // CommitSegment implements ControlPlane.
 func (n *Node) CommitSegment(ctx context.Context, request *cpv1.CommitSegmentRequest) (*cpv1.CommitSegmentResponse, error) {
 	operation := wireboundary.CommitSegmentToCore(request)
-	d, err := n.offer(ctx, stateupdater.Entry{Kind: stateupdater.KindCommit, Commit: operation})
+	d, err := n.offer(ctx, metadata.Entry{Kind: metadata.KindCommit, Commit: operation})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, toRPCError(core.ErrTimeout, core.MaybeApplied)
@@ -333,12 +333,12 @@ func (n *Node) CommitSegment(ctx context.Context, request *cpv1.CommitSegmentReq
 // the wire type Out. The read method and the converter are passed in. A failed
 // read or a failed answer becomes an RPC error.
 func readRPC[R, Op, Out any](ctx context.Context, n *Node, op Op,
-	read func(*stateupdater.StateUpdater, Op) (core.ControlPlaneDone, error),
+	read func(*metadata.Store, Op) (core.ControlPlaneDone, error),
 	convert func(R) Out,
 ) (Out, error) {
 	var zero Out
-	d, err := n.read(ctx, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
-		return read(m.Fold(), op)
+	d, err := n.read(ctx, func(m *replica.Replica) (core.ControlPlaneDone, error) {
+		return read(m.Metadata(), op)
 	})
 	if err != nil {
 		return zero, toRPCError(core.ErrIO, core.NotApplied)
@@ -352,14 +352,14 @@ func readRPC[R, Op, Out any](ctx context.Context, n *Node, op Op,
 // Lookup implements ControlPlane.
 func (n *Node) Lookup(ctx context.Context, request *cpv1.LookupRequest) (*cpv1.LookupResponse, error) {
 	return readRPC[core.FindSegmentsResp](ctx, n, wireboundary.LookupToCore(request),
-		(*stateupdater.StateUpdater).Lookup, wireboundary.LookupRespFromCore)
+		(*metadata.Store).Lookup, wireboundary.LookupRespFromCore)
 }
 
 // DescribeTopics implements ControlPlane.
 func (n *Node) DescribeTopics(ctx context.Context, request *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
 	operation := wireboundary.DescribeTopicsToCore(request)
 	return readRPC[core.DescribeTopicsResp](ctx, n, operation,
-		(*stateupdater.StateUpdater).Describe, wireboundary.DescribeTopicsRespFromCore)
+		(*metadata.Store).Describe, wireboundary.DescribeTopicsRespFromCore)
 }
 
 // CreateTopic implements ControlPlane.
@@ -367,7 +367,7 @@ func (n *Node) CreateTopic(ctx context.Context, request *cpv1.CreateTopicRequest
 	if request == nil {
 		return nil, toRPCError(core.ErrInvalid, core.NotApplied)
 	}
-	d, err := n.offer(ctx, stateupdater.CreateEntry(core.CreateTopic{
+	d, err := n.offer(ctx, metadata.CreateEntry(core.CreateTopic{
 		Name: request.Topic, Partitions: request.Partitions, FailIfExists: request.FailIfExists,
 	}))
 	if err != nil {
@@ -391,7 +391,7 @@ func (n *Node) GetStatus(ctx context.Context, _ *cpv1.GetStatusRequest) (*cpv1.G
 		ready            bool
 	}
 	ch := make(chan st, 1)
-	err := n.onLoop(ctx, func(m *statemachine.Machine) []core.Action {
+	err := n.onLoop(ctx, func(m *replica.Replica) []core.Action {
 		role := "standby"
 		if m.IsActive() {
 			role = "active"

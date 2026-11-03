@@ -8,11 +8,11 @@ import (
 	"google.golang.org/grpc/status"
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 )
 
 func TestCommitTooLargeForOneLogEntry(t *testing.T) {
-	cli, _, stop := startNode(t, statemachine.Config{MaxEntryBytes: 2000})
+	cli, _, stop := startNode(t, replica.Config{MaxEntryBytes: 2000})
 	defer stop()
 	request := &cpv1.CommitSegmentRequest{SegmentKey: "seg/big"}
 	for i := range 300 {

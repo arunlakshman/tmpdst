@@ -20,8 +20,8 @@ import (
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/server"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
 	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system/runinfo"
@@ -187,7 +187,7 @@ func TestControlPlaneURLListFailsOver(t *testing.T) {
 		cpv1.RegisterControlPlaneServer(gs, unavailCP{})
 	})
 	upNode := server.New(server.Config{
-		Machine: statemachine.Config{CatchUpEvery: core.Duration(time.Millisecond), Rank: 0, Heartbeat: core.Duration(time.Second)},
+		Machine: replica.Config{CatchUpEvery: core.Duration(time.Millisecond), Rank: 0, Heartbeat: core.Duration(time.Second)},
 		Log:     executor.NewMemoryLog(),
 		Objects: executor.NewMemoryObjects(),
 		Self:    core.NodeInstance{Node: "cp-up"},

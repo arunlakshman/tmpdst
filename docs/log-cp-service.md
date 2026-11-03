@@ -1,6 +1,6 @@
 # Log-backed control-plane service (stage 2)
 
-Status: production path is `internal/controlplane/statemachine` + `internal/controlplane/runloop` + gRPC (`mdscontrolplane -store dynamolog`,
+Status: production path is `internal/controlplane/replica` + `internal/controlplane/runloop` + gRPC (`mdscontrolplane -store dynamolog`,
 decision 55-58). Sim `kafka-log` uses the same state machine as CP processes plus `logstore` (CP-DSM-8,
 `docs/sim-log-engine.md`). The goroutine `internal/controlplane/logcp` twin is deleted; DynamoLog/table helpers
 live in `internal/controlplane/executor`. Decisions 48-52, `docs/design-a-prototype.md` section 8,
@@ -21,7 +21,7 @@ live in `internal/controlplane/executor`. Decisions 48-52, `docs/design-a-protot
                   +--> Log.Append ---> replica: buffer -----> wait applied >= tail
                        (PutItem,           |  contiguous slots, batches never cross
                         attr_not_exists)   v  a trim boundary
-   DynamoDB  LOG/<slot>  <--read--  StateUpdater.CommitBatch (Pebble)  --> answers to waiters (by entry ID)
+   DynamoDB  LOG/<slot>  <--read--  Store.CommitBatch (Pebble)  --> answers to waiters (by entry ID)
    S3  checkpoint/<slot>  <-- checkpoint loop --+
 ```
 
@@ -41,7 +41,7 @@ Only one epoch owns the log at a time (section 16 of `docs/writer-fencing-design
 
 Item: `pk=LOG`, `sk=%020d`, `d` (B) = entry, plus `v`, `w` (writer), `id`, `ts`, `n` (commands), `ttl`. Entry v1:
 envelope (first byte 0xC8; it carries the epoch and the writer), rank, append ID, ts (ms, advisory, never state), count, then each command as
-`internal/controlplane/stateupdater` codec (key table, batches). Zero commands is a no-op (heartbeat only; gap fills were removed, decision 61). Size guard: entry plus 256 B
+`internal/controlplane/metadata` codec (key table, batches). Zero commands is a no-op (heartbeat only; gap fills were removed, decision 61). Size guard: entry plus 256 B
 of item overhead <= 350 KB; a single command that cannot fit is answered `ErrTooLarge` and never queued; the group
 stops growing at the guard.
 **Versioning rule (the open question):** the first byte is the format version. A reader that meets a version above
@@ -56,7 +56,7 @@ skips, since skipping forks the state. Upgrade in two deploys: first every node 
 `max(high, applied)` with `attribute_not_exists`. Unknown outcome: retry the SAME slot (it lands, or the loser sees
 whose it is). Lost slot (another writer): the loser gets the winner from the failed condition
 (`ALL_OLD`, no extra read) and appends the same entry at a later slot; no offset was computed from a view. The caller
-is answered when the replica has applied the slot, from the `StateUpdater` output, by entry ID. Only ONE append is in
+is answered when the replica has applied the slot, from the `Store` output, by entry ID. Only ONE append is in
 flight (K=1; the old K=4 pipelining was removed, decision 61).
 **Window (deviation, see below).** A key is forgotten `WindowSlots` (131,072) after its first slot, evaluated at
 every `TrimStride` (1,024) boundary by the apply loop: a function of the log, so all nodes forget alike. At the 200
@@ -79,7 +79,7 @@ on at connect error or 503, sticky to the last good URL, each URL once per call;
 There is no failback: a planned handover is just a takeover.
 
 **Checkpoint and trim.** Active node, every `CheckpointEvery` (5 min) and >= `CheckpointMinSlots` new slots: snapshot of the
-StateUpdater (window included) tagged with the applied slot read inside the store view. It is stored as its own object
+Store (window included) tagged with the applied slot read inside the store view. It is stored as its own object
 `checkpoint/<20-digit slot>` under `CheckpointPrefix` (decision 62). There is no pointer row in the table. After the new
 object is stored, the node deletes the previous checkpoint object it knows (fire and forget: a failed delete only leaves one
 extra object). Then trim: the node first raises `META/FLOOR` to the trim point (`checkpoint - KeepSlots`, a conditional update that only moves up),
@@ -91,7 +91,7 @@ plain delete; decision 63 added the floor, because a plain delete alone lost ack
 never replace a newer one. (The old single key `checkpoint/latest` let a lagging node overwrite a newer checkpoint: seeds 439 and 1741.)
 
 Restore on start: LIST the prefix, take the last key in sorted order (the newest, since the slot has a fixed width), read it,
-check it, `StateUpdater.Restore`, replay from the checkpoint slot to the tail. If that object was already replaced (not found),
+check it, `Store.Restore`, replay from the checkpoint slot to the tail. If that object was already replaced (not found),
 list again. A list error is retried; restore never starts from slot 0 because of a list error. A damaged object falls back
 to replay from slot 0 if the log still starts there, else the node cannot start. (There is no `ErrNoCheckpoint` error in the code yet.)
 
@@ -123,7 +123,7 @@ Rolling the log format forward: two deploys (decision 53). Decision 63 (epoch en
 table per run (as in the benchmark) or a new table name starts empty and topics are created again. There is no rollback to the
 old transaction-based store (removed, decision 54): going back needs an older git revision and a different table.
 
-## Config (`statemachine.Config`)
+## Config (`replica.Config`)
 
 `Name`, `Rank`; one append in flight (no `K`, decision 61); `MaxSlotRate`=200, `MaxCmdsPerSlot`=256, `QueueMax`=4096, `QueueBytesMax`=64 MiB,
 `Heartbeat`=1 s, `TakeoverAfter`=0, `TakeoverRankStep`=1 s; `TailPoll`=25 ms, `ReadMax`=500, `TailBatch`=10 ms;

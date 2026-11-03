@@ -80,7 +80,7 @@ the rule for each slot, and a floor check stops a write into a deleted slot.
 
 ### 0.4 The CP is itself a `Step(Event) []Action` machine
 
-Same idea as page 01, section 0.1. The brain of the CP (`statemachine.Machine`) never
+Same idea as page 01, section 0.1. The brain of the CP (`replica.Replica`) never
 opens a socket and never reads a clock. It gets an **Event**, and returns **Actions**
 ("append this to slot 41", "read log from slot 30", "put this checkpoint object", "set a
 timer"). Real I/O is done by a different layer, and its result comes back later as another
@@ -103,18 +103,18 @@ Because of this, the same Machine runs in two places:
                                               runloop (one goroutine)
                                                      |  Step(Event)
                                                      v
-   +--------------------------- statemachine (Machine) ------------------+
+   +--------------------------- replica (Machine) ------------------+
    | pure: no I/O, no clock, no goroutines. Emits Log* / Object* actions |
    +--------------------------+------------------------------------------+
                               | folds entries into
                               v
-                     stateupdater (the fold: T/E/R/K/S keys in a KV)
+                     metadata (the fold: T/E/R/K/S keys in a KV)
                               ^
    actions run by:  executor (DynamoLog, MemoryLog, object store)
 ```
 
-There is a **test that enforces the walls**: `statemachine/import_boundary_test.go` fails
-if `statemachine` imports the broker, the simulator, `net/http`, Pebble, the DynamoDB SDK
+There is a **test that enforces the walls**: `replica/import_boundary_test.go` fails
+if `replica` imports the broker, the simulator, `net/http`, Pebble, the DynamoDB SDK
 and a few more (decision 56). This is why the CP is "already standalone": the Machine can
 be lifted out of this repo because it depends only on `internal/core` and its sibling
 packages.
@@ -127,9 +127,9 @@ All sizes are non-test lines. "Edge" means not deterministic (goroutines, networ
 
 | Package | Lines | Layer | One-line job |
 |---------|------:|-------|--------------|
-| `statemachine` | ~1,700 | pure brain | The `Machine`: catch-up, commit queue, roles, checkpoints, fresh reads |
-| `stateupdater` | ~1,260 | pure fold | Apply entries into an ordered KV; answer Lookup/Describe; snapshot/restore |
-| `stateupdater/pebblestore` | 143 | KV driver | Pebble implementation of the KV seam. `mdscontrolplane` passes it to the Machine through `Config.OpenStore` (fixed in `56417bd`, see section 12) |
+| `replica` | ~1,700 | pure brain | The `Machine`: catch-up, commit queue, roles, checkpoints, fresh reads |
+| `metadata` | ~1,260 | pure fold | Apply entries into an ordered KV; answer Lookup/Describe; snapshot/restore |
+| `metadata/pebblestore` | 143 | KV driver | Pebble implementation of the KV seam. `mdscontrolplane` passes it to the Machine through `Config.OpenStore` (fixed in `56417bd`, see section 12) |
 | `executor` | ~660 | edge | Run `Log*` and `Object*` actions: `DynamoLog`, `MemoryLog`, object store, error classify |
 | `runloop` | ~370 | edge | The one goroutine that calls `Step`, runs timers, dispatches actions |
 | `server` | ~470 | edge | gRPC `Node`: turns RPCs into `Offer` calls and waits for answers |
@@ -144,8 +144,8 @@ old names. Translate them with this table:
 
 | Old name (page 01, old comments) | Current name |
 |----------------------------------|--------------|
-| `machine` (package) | `statemachine` |
-| `applier` / `Applier` | `stateupdater` / `StateUpdater` |
+| `machine` (package) | `replica` |
+| `applier` / `Applier` | `metadata` / `Store` |
 | `exec` | `executor` |
 | `run` (`controlplane/run`) | `runloop` |
 | `cpclient` | `controlplaneclient` |
@@ -153,7 +153,7 @@ old names. Translate them with this table:
 | `pebblekv` package | `pebblestore` package (file is still `pebblekv.go`) |
 | `CPTruth` | `ControlPlaneRealState` |
 | `ReplaySlot` | `ReplayPosition` |
-| `fold` | still `fold`: the `StateUpdater` held in `Machine.fold` |
+| `fold` | still `fold`: the `Store` held in `Machine.fold` |
 
 ---
 
@@ -202,7 +202,7 @@ shape that the conformance tests (`controlplanetest`) compare against the execut
 
 ---
 
-## 3. Chapter A - `stateupdater`: the fold (where offsets are born)
+## 3. Chapter A - `metadata`: the fold (where offsets are born)
 
 Start here. It is the heart, and it is plain, synchronous Go with no events.
 
@@ -285,7 +285,7 @@ how a node later recognises "this slot is *my* write" (section 4.7).
 
 ### 3.4 `commitTransaction`: the most important function in the package
 
-(`stateupdater.go`.) It runs inside one `Update`, so it is all-or-nothing. In order:
+(`metadata.go`.) It runs inside one `Update`, so it is all-or-nothing. In order:
 
 ```
 1. dig := checksum(op.Batches)                 // sha256, first 16 bytes, of the batches (not the key)
@@ -419,20 +419,20 @@ which emits `StopForRestart`.
 | `CommitBatch(cmds)` | Apply many commands in ONE store transaction. Same result as one by one, fewer page writes. |
 | `StateHash()` | Digest of `T`, `E`, `R` only (skips `K`, `S`). Two replicas that applied the same commands agree even if they trimmed differently. |
 | `Assigned(slot, op)` | After the fact: "did this command own its key at this slot?" (`OffsetOwnedHere / Elsewhere / Unknown`). For an indexer. |
-| `Store` (`store.go`) | A `Store` over a StateUpdater with a local counter and no log. For conformance tests and tools. |
+| `Store` (`store.go`) | A `Store` over a Store with a local counter and no log. For conformance tests and tools. |
 | `Apply(slot, Entry)` | Switch on `Kind`. Used by the Machine. |
 | `KnownCommit(op)` | Read-only "is this key already in the window?" Used by the Machine's fast path (4.8). |
 
 **Try it:**
 
 ```
-go test ./internal/controlplane/stateupdater -run 'TestTrimForgetsKeysNotOffsets|TestAssignedStates' -v
-go test ./internal/controlplane/stateupdater -run 'TestLockstepMem' -v     # fold vs the oracle
+go test ./internal/controlplane/metadata -run 'TestTrimForgetsKeysNotOffsets|TestAssignedStates' -v
+go test ./internal/controlplane/metadata -run 'TestLockstepMem' -v     # fold vs the oracle
 ```
 
 ---
 
-## 4. Chapter B - `statemachine`: the brain
+## 4. Chapter B - `replica`: the brain
 
 This is the biggest and hardest part. Read slowly. Files: `machine.go` (events, catch-up),
 `commit.go` (queue, groups, apply), `role.go` (roles, faults, trimmed-slot handling),
@@ -475,7 +475,7 @@ After `ShutdownDone`, `exited` is true and every event is ignored.
 | Roles | `lastPullOK, lastOtherAt, lastOwnAt, promoSlot, lowerSeen` | evidence for takeover (failback is removed, decision 63) |
 | Checkpoint | `checkpointSlot, checkpointAt, checkpointPending, checkpointData, needsCheckpoint, checkpointRetry, trimFloor` | snapshot progress |
 | Reads | `readWaiters, tailsStarted, tailRound` | reads waiting for a fresh tail |
-| Folded state | `fold *stateupdater.StateUpdater` | the passbook balance |
+| Folded state | `fold *metadata.Store` | the passbook balance |
 
 **Two lanes of I/O.** This is the key to the file layout:
 
@@ -702,7 +702,7 @@ restore `applied = slot`, and catch-up continues from there.
 | Simulated crash | `softCrash` | `crashed`, `ready=false`, refuse reads, wipe local state; later `afterCrashRestart` rebuilds a fresh fold, reseeds topics, restores checkpoint |
 | Graceful stop | `stop` | `exited`, `ShutdownDone` |
 
-`clearLocal` and `afterCrashRestart` set `fold = stateupdater.NewMem()` again. A crash in
+`clearLocal` and `afterCrashRestart` set `fold = metadata.NewMem()` again. A crash in
 the sim is a real "memory wiped" crash.
 
 ### 4.12 Fresh reads (`reads.go`)
@@ -729,11 +729,11 @@ For a commit slot the bytes in DynamoDB are:
 ```
 C8 [epoch] [writer-len] [writer...]          envelope
    C5 [id-len] [id...] [n]                  group header
-      [len1] [entry1 bytes...]              each entry = stateupdater.Encode (kind, id, key table, batches)
+      [len1] [entry1 bytes...]              each entry = metadata.Encode (kind, id, key table, batches)
       [len2] [entry2 bytes...]
 ```
 
-A *no-op* (gap-fill, heartbeat) is `C7 ... ` + a single `stateupdater.Encode` with kind 0
+A *no-op* (gap-fill, heartbeat) is `C7 ... ` + a single `metadata.Encode` with kind 0
 and no group marker. `applySlot` handles both: group path or single-entry path.
 
 ---
@@ -925,7 +925,7 @@ client believes it; the broker (page 01, station 9) retries the same key with ba
 `mdscontrolplane` is small because everything above is a library.
 
 ```
-flags -> statemachine.Config {
+flags -> replica.Config {
             CatchUpEvery: 5ms,   K: 4 (-log-k),   Rank, Heartbeat (1s), TakeoverAfter (5s), TakeoverRankStep (1s),
             GapAfter (250ms),   Writer: hostname (-node-name),
             CheckpointEvery (5m),      CheckpointMinSlots (1000),   KeepSlots: window-slots/8,
@@ -984,7 +984,7 @@ Nodes N0 (active) and N1 (just promoted after N0 went quiet). Both pick slot 50.
    *after* N0's. The simulator tracks this branch with `Reachable("logcp-sim: lost slot retried at a later slot")`:
 it wants every campaign to hit it at least once.
 
-Run: `go test ./internal/controlplane/statemachine -run TestLostAppendRetriesSameEntryLaterSlot -v`.
+Run: `go test ./internal/controlplane/replica -run TestLostAppendRetriesSameEntryLaterSlot -v`.
 
 ### Trace C - the reply was lost
 
@@ -1042,7 +1042,7 @@ DynamoDB** on a seed and check the outcome. Facts to know (`docs/sim-log-engine.
   the faults really reach this code). Text like `"logcp-sim: lost slot retried at a later
   slot"` is a Reachable name. These calls are noise for reading; the simulator uses them.
 - **Oracle.** The speccheck package (`speccheck.ControlPlane`) is the independent executable spec. Lockstep
-  tests (`statemachine/lockstep_test.go`, `stateupdater/stateupdater_test.go`) feed the same
+  tests (`replica/lockstep_test.go`, `metadata/metadata_test.go`) feed the same
   random commands to both and compare every answer.
 - **`ControlPlaneRealState`** replays the durable log from slot 0 with `ReplayPosition` (`replay.go`) into
   a fresh fold, ignoring queues and writer-chosen bases. At the end, every live replica's
@@ -1093,7 +1093,7 @@ Also done in `56417bd`: removed the flags nothing read (`-slot-rate`, `-final-ch
    The real executor returns `OK` + `Taken` + `Existing=[0xFE]` (Dynamo) or `nil` (MemoryLog), so `hitTrimmed` never fires from an append.
    A gap-fill onto a deleted marker ends in `ErrCorrupt`, then `trip` and a restart: safe, but not the path the simulator tests.
 4. **Pebble was not wired in. FIXED (commit `56417bd`).**
-   The gRPC cutover (`1c3c11b`) had dropped Pebble: the Machine built `stateupdater.NewMem()` and `-pebble-dir` was unused.
+   The gRPC cutover (`1c3c11b`) had dropped Pebble: the Machine built `metadata.NewMem()` and `-pebble-dir` was unused.
    New `Config.OpenStore` gives the fold its store; `mdscontrolplane -store dynamolog` opens an empty Pebble store at start and after every restore.
    The simulator keeps the in-memory store (`OpenStore` is nil), so its trace hashes did not change.
 
@@ -1112,7 +1112,7 @@ Also done in `56417bd`: removed the flags nothing read (`-slot-rate`, `-final-ch
    Operators cannot see replication lag from it.
    It should use `goalTail` or a real tail check.
 8. **Stale names in comments and strings. FINISHED (commit `da09578`).**
-   Package `doc.go` said `controlplane/run`, `controlplane/statemachine`, `controlplaneclient`, `applier`, `exec`.
+   Package `doc.go` said `controlplane/run`, `controlplane/replica`, `controlplaneclient`, `applier`, `exec`.
    Error strings said `"applier:"` and `"machine:"`; `-slot-rate` was "unused by machine".
    All now use the new names; no logic, file name or identifier changed.
 9. **Misplaced coverage marker in `afterApply`.**
@@ -1130,14 +1130,14 @@ Details for each follow.
 
 ### 12.1 Pebble was not plugged in (FIXED in `56417bd`)
 
-Page 01, section 4, saw this too. Before the fix, `statemachine.New` always built
-`stateupdater.NewMem()`, and the `-pebble-dir` help text said "unused (machine fold is
+Page 01, section 4, saw this too. Before the fix, `replica.New` always built
+`metadata.NewMem()`, and the `-pebble-dir` help text said "unused (machine fold is
 in-memory); kept for flag compatibility". History: `git log -S` shows the cutover commit
 `1c3c11b` (2026-10-27) removed the old Pebble code; before it, `mdscontrolplane -store dynamolog`
 opened Pebble.
 
 How it works now:
-- `statemachine.Config.OpenStore func() (stateupdater.KeyValueStore, error)`. Nil means
+- `replica.Config.OpenStore func() (metadata.KeyValueStore, error)`. Nil means
   memory (simulator and tests). The Machine calls it in `New` and again in
   `afterCrashRestart`, after it has closed the old store. If the first open fails,
   `NodeStarted` answers `StopForRestart`; if a reopen fails, the node trips the same way.
@@ -1145,7 +1145,7 @@ How it works now:
   database or nothing: any other content is refused) and opens an empty Pebble store each
   time. Pebble state is never trusted after a restart; it is rebuilt from the checkpoint
   and the log. With no `-pebble-dir`, a temporary directory is made and removed at shutdown.
-- The `statemachine` import-boundary test still passes: the Machine never imports Pebble.
+- The `replica` import-boundary test still passes: the Machine never imports Pebble.
 
 ### 12.2 `WindowSlots` was never set in `mdscontrolplane` (FIXED in `56417bd`)
 
@@ -1170,7 +1170,7 @@ Install it outside the repo so `go.mod` is not changed:
 `GOBIN=/some/dir GOFLAGS=-mod=mod go install golang.org/x/tools/cmd/deadcode@v0.52.0`, then
 `deadcode ./cmd/...`. Run it with `-test` to count tests as roots too (then almost nothing
 is dead, so it is less useful). Code that only tests use is not always garbage (for example
-`stateupdater.Store` is a test helper), so read each hit before you delete.
+`updaterstore.Store` is a test helper), so read each hit before you delete.
 
 ### 12.3 Production reads are not "fresh"
 
@@ -1206,7 +1206,7 @@ than the one the simulator tests.
 - **`GetStatus.log_tail`** is set to `m.Applied()`, the same value as `applied_slot`. It is
   not the real tail.
 - **Stale names (FINISHED, commit `da09578`)** in comments and strings: package `doc.go` mentioned `controlplane/run`,
-  `controlplane/statemachine`, `controlplaneclient`, `applier`, `exec`; error texts say `"applier:"` and
+  `controlplane/replica`, `controlplaneclient`, `applier`, `exec`; error texts say `"applier:"` and
   `"machine:"`; `-slot-rate` is "unused by machine".
 - **`afterApply`** starts with a `Reachable("replayed key answered from the window")`
   that looks like it belongs in `Offer`'s `KnownCommit` branch (where the same text also
@@ -1217,14 +1217,14 @@ than the one the simulator tests.
 ## 13. How to read the code (suggested order, ~2-3 hours)
 
 1. `internal/core/controlplane.go` (the contract) and `core/machine.go`.
-2. `stateupdater/keys.go`, then `stateupdater.go`: `commitTransaction`, `assign`, `replay`,
+2. `metadata/keys.go`, then `metadata.go`: `commitTransaction`, `assign`, `replay`,
    `lookupTransaction`. Then `entry.go`.
-3. `stateupdater/query.go` (Trim), `snapshot.go` (format comment first).
-4. `statemachine/config.go` (the knobs), then `machine.go`: `Step`, `onStarted`,
+3. `metadata/query.go` (Trim), `snapshot.go` (format comment first).
+4. `replica/config.go` (the knobs), then `machine.go`: `Step`, `onStarted`,
    `onReadDone`, `drain`, `progress`.
-5. `statemachine/commit.go`: `Offer`, `emitCommitGroup`, `onCommitAppendDone`, `applySlot`,
+5. `replica/commit.go`: `Offer`, `emitCommitGroup`, `onCommitAppendDone`, `applySlot`,
    `deliver`. Then `envelope.go`.
-6. `statemachine/role.go` and `checkpoint.go`. Then `reads.go`.
+6. `replica/role.go` and `checkpoint.go`. Then `reads.go`.
 7. `executor/dynlog.go`, `classify.go`; `runloop/run.go`; `server/node.go` (`offer`).
 8. `controlplaneclient/client.go` last.
 
@@ -1235,13 +1235,13 @@ sort first), `controlplanemetrics`, `fakedynamodb`.
 **Run these (all pass today):**
 
 ```
-go test ./internal/controlplane/statemachine -run 'TestKConcurrentLogAppend|TestLostAppendRetriesSameEntryLaterSlot|TestOfferKnownCommitSkipsAppend|TestOfferRetargetsInFlightCommit' -v
-go test ./internal/controlplane/statemachine -run 'TestGapFillEmitsNoopAppend|TestTakeoverAfterSilence' -v
-go test ./internal/controlplane/statemachine -run 'TestCheckpointPublishAndTrim|TestRestoreReadsAgainOnBadCRC' -v
-go test ./internal/controlplane/statemachine -run 'TestReadWaitsForFreshTail' -v
+go test ./internal/controlplane/replica -run 'TestKConcurrentLogAppend|TestLostAppendRetriesSameEntryLaterSlot|TestOfferKnownCommitSkipsAppend|TestOfferRetargetsInFlightCommit' -v
+go test ./internal/controlplane/replica -run 'TestGapFillEmitsNoopAppend|TestTakeoverAfterSilence' -v
+go test ./internal/controlplane/replica -run 'TestCheckpointPublishAndTrim|TestRestoreReadsAgainOnBadCRC' -v
+go test ./internal/controlplane/replica -run 'TestReadWaitsForFreshTail' -v
 go test ./internal/controlplane/server -run 'TestCommitLookupRoundTrip|TestStandbyCommitUnavailable' -v
-go test ./internal/controlplane/statemachine -run 'TestImportBoundary' -v
-go test ./internal/controlplane/statemachine -run 'TestOpenStore' -v      # the Pebble hook (Config.OpenStore)
+go test ./internal/controlplane/replica -run 'TestImportBoundary' -v
+go test ./internal/controlplane/replica -run 'TestOpenStore' -v      # the Pebble hook (Config.OpenStore)
 go test ./cmd/mdscontrolplane -run 'TestPebbleState|TestMachineConfig' -v          # Pebble directory and window settings
 ```
 
@@ -1301,7 +1301,7 @@ never trimmed. Now `mdscontrolplane` sets it, so they are cut every 1024 slots.
 | Entry | The bytes in a slot: a no-op, a commit, or a create-topic |
 | Group | Many client commands packed in one entry (marker `0xC5`) |
 | Envelope | Epoch and writer name wrapped around an entry (marker `0xC8`) |
-| Fold | The state built by applying entries in slot order (`StateUpdater`) |
+| Fold | The state built by applying entries in slot order (`Store`) |
 | Put-if-absent | Write that succeeds only if the slot is empty: the only consensus rule |
 | Appender / active / standby | The writer role (an epoch) / the node that has it / a node that only reads |
 | Rank | Preference number. 0 is preferred; higher ranks wait longer before they claim (`TakeoverRankStep`) |

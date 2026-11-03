@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # CI gate for the deterministic packages (internal/core, internal/verify/simulator, internal/wire/segmentformat, internal/verify/speccheck except
 # its system adapters in internal/verify/speccheck/specsystem, plus internal/wire/kafkawire, internal/broker, and
-# internal/controlplane/statemachine). See docs/decisions.md (I, 55, 56).
+# internal/controlplane/replica). See docs/decisions.md (I, 55, 56).
 #   1. determinismcheck: exact-path import allow-list plus banned constructs.
 #   2. Every third-party module they depend on has a reviewed audit record
 #      for the exact version in go.mod (so a version bump forces a re-audit).
@@ -10,7 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-pkgs=(./internal/core/... ./internal/verify/simulator/... ./internal/wire/segmentformat/... ./internal/wire/kafkawire ./internal/broker/... ./internal/verify/speccheck ./internal/verify/speccheck/checker ./internal/controlplane/statemachine/...)
+pkgs=(./internal/core/... ./internal/verify/simulator/... ./internal/wire/segmentformat/... ./internal/wire/kafkawire ./internal/broker/... ./internal/verify/speccheck ./internal/verify/speccheck/checker ./internal/controlplane/replica/...)
 
 echo "== determinismcheck"
 go run ./ops/tools/determinismcheck "${pkgs[@]}"

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/verify/simulator"
 	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakelogstore"
@@ -42,7 +42,7 @@ type checkpointTally struct {
 	firstWrite   bool
 }
 
-func (t *checkpointTally) record(d statemachine.CheckpointDecision) {
+func (t *checkpointTally) record(d replica.CheckpointDecision) {
 	t.fires++
 	t.reasons[d.Reason]++
 	if d.Written {
@@ -86,7 +86,7 @@ func (t *checkpointTally) reasonLine() string {
 // given log store latency and returns what its checkpoint timer did.
 func slowLogSeed(seed uint64, logLatency simulator.FastWithRareSlow) (simulator.SeedResult, *checkpointTally) {
 	tally := &checkpointTally{reasons: map[string]int{}, pendingKinds: map[string]int{}}
-	machineConfig := statemachine.Config{
+	machineConfig := replica.Config{
 		CatchUpEvery:       slowLogCatchUpEvery,
 		ReadLimit:          64,
 		Writer:             "cp-0",
@@ -94,7 +94,7 @@ func slowLogSeed(seed uint64, logLatency simulator.FastWithRareSlow) (simulator.
 		Heartbeat:          slowLogHeartbeat,
 		CheckpointEvery:    slowLogCheckpointGap,
 		CheckpointMinSlots: 1,
-		OnCheckpointDecision: func(d statemachine.CheckpointDecision) {
+		OnCheckpointDecision: func(d replica.CheckpointDecision) {
 			tally.record(d)
 		},
 	}
@@ -102,7 +102,7 @@ func slowLogSeed(seed uint64, logLatency simulator.FastWithRareSlow) (simulator.
 		Processes: []simulator.Process{{
 			Name: "cp", Count: 1, NoAttrition: true,
 			FactoryFor: func(simulator.SeedConfig) core.MachineFactory {
-				return statemachine.New(machineConfig)
+				return replica.New(machineConfig)
 			},
 		}},
 		Engines: func(sc simulator.SeedConfig) []simulator.FakeService {

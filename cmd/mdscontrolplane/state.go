@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
-	"github.com/manifesterio/mds/internal/controlplane/stateupdater/pebblestore"
+	"github.com/manifesterio/mds/internal/controlplane/metadata"
+	"github.com/manifesterio/mds/internal/controlplane/metadata/pebblestore"
 )
 
 // pebbleState hands the control-plane machine its Pebble store. The store is
@@ -36,8 +36,8 @@ func (p *pebbleState) start() error {
 	return nil
 }
 
-// openStore is statemachine.Config.OpenStore.
-func (p *pebbleState) openStore() (stateupdater.KeyValueStore, error) {
+// openStore is replica.Config.OpenStore.
+func (p *pebbleState) openStore() (metadata.KeyValueStore, error) {
 	p.mu.Lock()
 	if db := p.waiting; db != nil {
 		p.waiting = nil

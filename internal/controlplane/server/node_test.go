@@ -14,18 +14,18 @@ import (
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/server"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
 	"github.com/manifesterio/mds/internal/core"
 )
 
-func startNode(t *testing.T, config statemachine.Config) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
+func startNode(t *testing.T, config replica.Config) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
 	t.Helper()
 	return startNodeWithLease(t, config, 0)
 }
 
 // startNodeWithLease is startNode with a broker lease TTL. Zero keeps the default.
-func startNodeWithLease(t *testing.T, config statemachine.Config, leaseTTL time.Duration) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
+func startNodeWithLease(t *testing.T, config replica.Config, leaseTTL time.Duration) (cpv1.ControlPlaneClient, healthpb.HealthClient, func()) {
 	t.Helper()
 	if config.CatchUpEvery == 0 {
 		config.CatchUpEvery = core.Duration(time.Millisecond)
@@ -61,7 +61,7 @@ func startNodeWithLease(t *testing.T, config statemachine.Config, leaseTTL time.
 }
 
 func TestHealthServingAfterReady(t *testing.T) {
-	_, hc, stop := startNode(t, statemachine.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
+	_, hc, stop := startNode(t, replica.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
 	defer stop()
 	response, err := hc.Check(t.Context(), &healthpb.HealthCheckRequest{})
 	if err != nil {
@@ -73,7 +73,7 @@ func TestHealthServingAfterReady(t *testing.T) {
 }
 
 func TestCommitLookupRoundTrip(t *testing.T) {
-	cli, _, stop := startNode(t, statemachine.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
+	cli, _, stop := startNode(t, replica.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
 	defer stop()
 	_, err := cli.CreateTopic(t.Context(), &cpv1.CreateTopicRequest{Topic: "t", Partitions: 2})
 	if err != nil {
@@ -115,7 +115,7 @@ func TestCommitLookupRoundTrip(t *testing.T) {
 }
 
 func TestStandbyCommitUnavailable(t *testing.T) {
-	cli, _, stop := startNode(t, statemachine.Config{
+	cli, _, stop := startNode(t, replica.Config{
 		Rank: 1, Heartbeat: core.Duration(time.Second), TakeoverAfter: core.Duration(time.Hour),
 	})
 	defer stop()
@@ -133,7 +133,7 @@ func TestStandbyCommitUnavailable(t *testing.T) {
 
 func TestStartCanceledContext(t *testing.T) {
 	n := server.New(server.Config{
-		Machine: statemachine.Config{CatchUpEvery: core.Duration(time.Hour)},
+		Machine: replica.Config{CatchUpEvery: core.Duration(time.Hour)},
 		Log:     executor.NewMemoryLog(),
 		Objects: executor.NewMemoryObjects(),
 		Self:    core.NodeInstance{Node: "cp-0"},
@@ -148,7 +148,7 @@ func TestStartCanceledContext(t *testing.T) {
 
 func TestStartCancelWhileWaiting(t *testing.T) {
 	n := server.New(server.Config{
-		Machine: statemachine.Config{CatchUpEvery: core.Duration(time.Hour)},
+		Machine: replica.Config{CatchUpEvery: core.Duration(time.Hour)},
 		Log:     executor.NewMemoryLog(),
 		Objects: executor.NewMemoryObjects(),
 		Self:    core.NodeInstance{Node: "cp-0"},
@@ -167,7 +167,7 @@ func TestStartCancelWhileWaiting(t *testing.T) {
 // TestExclusiveCreateTopicOverGRPC: a create with fail_if_exists on a topic
 // that exists is AlreadyExists with ERR_CODE_TOPIC_EXISTS, and it changes nothing.
 func TestExclusiveCreateTopicOverGRPC(t *testing.T) {
-	cli, _, stop := startNode(t, statemachine.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
+	cli, _, stop := startNode(t, replica.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
 	defer stop()
 	ctx := t.Context()
 	if _, err := cli.CreateTopic(ctx, &cpv1.CreateTopicRequest{Topic: "x", Partitions: 2, FailIfExists: true}); err != nil {

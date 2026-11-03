@@ -182,7 +182,7 @@ A fenced or deposed node:
 | `internal/controlplane/executor` | `Log` interface: add `ClaimEpoch`. `DynamoLog`: `ClaimEpoch` (GetItem + conditional UpdateItem), `Append` does the floor read after a successful put and returns the "below floor" shape, `TrimThrough` raises the floor first. `MemoryLog`: same semantics (replace the old marker). Classify errors. |
 | `internal/controlplane/controlplanetest/fakedynamodb` | Check that `UpdateItem` with `epoch = :x` and `attribute_not_exists(floor) OR floor < :n`, and consistent `GetItem`, are supported. Add if not. (To verify.) |
 | `internal/verify/simulator/fakeservices/fakelogstore`, `fakelogservice` | Store holds epoch and floor. Same `Append`, `ClaimEpoch`, `Trim` semantics. Tags and the engine truth model. New mutants (section 11). |
-| `internal/controlplane/statemachine` | Epoch state and roles (claim, fence entry, read-only). Envelope carries epoch. Entry ids carry epoch. Ready rules (section 8). Writer rules (section 6). `belowFloor` handling reusing `hitTrimmed`. Remove rank-based failback (decision D3). |
+| `internal/controlplane/replica` | Epoch state and roles (claim, fence entry, read-only). Envelope carries epoch. Entry ids carry epoch. Ready rules (section 8). Writer rules (section 6). `belowFloor` handling reusing `hitTrimmed`. Remove rank-based failback (decision D3). |
 | `cmd/mdscontrolplane` | Flags: none new if possible. Metrics: `epoch`, `fenced_total{reason}`, `floor`. |
 | `ops/` Terraform | IAM: the control plane role needs `dynamodb:UpdateItem` and `GetItem` on the table (check what is granted today). |
 | `docs/` | `log-cp-service.md`, `decisions.md` (new row), `observability.md`. |
@@ -192,7 +192,7 @@ version, then switch the writers. (See decision D5.)
 
 ## 11. Test and verification plan
 
-New deterministic tests (statemachine, executor, fakelogstore):
+New deterministic tests (replica, executor, fakelogstore):
 
 - Takeover wins and loses (two standbys race); the loser stays standby and writes nothing.
 - Fence entry collision: the old writer fills the tail first; the new writer retries.
@@ -233,7 +233,7 @@ Order matters because later steps need the new types.
 2. **Executor** (agent A): `Log` interface, `DynamoLog`, `MemoryLog`, `fakedynamodb` support, classify. Tests.
 3. **Simulator stores** (agent B): `fakelogstore`, `fakelogservice`, tags, truth engine, mutants, new invariant.
 4. **State machine** (lead): roles, epoch, fence entry, writer rules, ready rules, ids, read-only, tests.
-   Agents A and B only start after step 1, and they must not touch `statemachine/`.
+   Agents A and B only start after step 1, and they must not touch `replica/`.
 5. **Tools and ops** (agent C): `mdscontrolplane` metrics, Terraform IAM.
 6. **Docs** (agent D): after code is stable.
 7. **Verify** (lead): unit tests, then 3000-seed and 500-seed campaigns, refresh golden hashes, replay seeds

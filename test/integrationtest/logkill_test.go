@@ -19,8 +19,8 @@ import (
 	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/fakedynamodb"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/server"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system/production"
 	"github.com/manifesterio/mds/internal/verify/speccheck/specsystem"
@@ -60,7 +60,7 @@ func newLogStack(t *testing.T, brokers int) *logStack {
 	ls := &logStack{}
 	var addrs []string
 	for rank := range 3 {
-		config := statemachine.Config{
+		config := replica.Config{
 			CatchUpEvery: core.Duration(5 * time.Millisecond),
 			Rank:         rank, Heartbeat: core.Duration(100 * time.Millisecond),
 			TakeoverAfter: core.Duration(1500 * time.Millisecond),

@@ -7,8 +7,8 @@ import (
 	"github.com/manifesterio/mds/internal/controlplane"
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
 	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
-	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/metadata"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
 )
@@ -22,13 +22,13 @@ import (
 //   - controlplaneclient/groups.go: the broker-side group calls.
 //   - wireboundary/convert.go: maps group requests and responses to and from the
 //     wire types.
-//   - stateupdater/groups.go: the fold of GroupInstall, GroupAssign,
+//   - metadata/groups.go: the fold of GroupInstall, GroupAssign,
 //     GroupRemove and OffsetCommit.
-//   - stateupdater/groupquery.go: the group reads (OffsetFetch, DescribeGroup
+//   - metadata/groupquery.go: the group reads (OffsetFetch, DescribeGroup
 //     and ListGroups).
-//   - statemachine/client.go: passes the group calls to the state machine.
-//   - statemachine/commit.go: encodes and decodes the group entries in the log.
-//   - statemachine/replay.go: decodes group entries when it replays the log.
+//   - replica/client.go: passes the group calls to the state machine.
+//   - replica/commit.go: encodes and decodes the group entries in the log.
+//   - replica/replay.go: decodes group entries when it replays the log.
 //   - core/controlplane.go: the group types (GroupInstall, GroupAssign,
 //     GroupRemove, OffsetCommit and the others).
 
@@ -49,11 +49,11 @@ func (s nodeGroups) Exec(ctx context.Context, operation core.ControlPlaneOperati
 	case core.GroupInstall, core.GroupAssign, core.GroupRemove, core.OffsetCommit:
 		return s.write(ctx, operation)
 	case core.OffsetFetch:
-		return readFold(ctx, s.n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) { return m.Fold().OffsetFetch(x) })
+		return readFold(ctx, s.n, func(m *replica.Replica) (core.ControlPlaneDone, error) { return m.Metadata().OffsetFetch(x) })
 	case core.DescribeGroup:
-		return readFold(ctx, s.n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) { return m.Fold().DescribeGroup(x) })
+		return readFold(ctx, s.n, func(m *replica.Replica) (core.ControlPlaneDone, error) { return m.Metadata().DescribeGroup(x) })
 	case core.ListGroups:
-		return readFold(ctx, s.n, func(m *statemachine.Machine) (core.ControlPlaneDone, error) { return m.Fold().ListGroups(x) })
+		return readFold(ctx, s.n, func(m *replica.Replica) (core.ControlPlaneDone, error) { return m.Metadata().ListGroups(x) })
 	}
 	return core.ControlPlaneDone{Err: core.ErrInvalid}, nil
 }
@@ -61,13 +61,13 @@ func (s nodeGroups) Exec(ctx context.Context, operation core.ControlPlaneOperati
 // write offers one group decision to the log. A business answer comes back in
 // the Done; err is only for the run loop or the context.
 func (s nodeGroups) write(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
-	entry, _ := stateupdater.GroupEntry(operation)
+	entry, _ := metadata.GroupEntry(operation)
 	return s.n.offer(ctx, entry)
 }
 
 // readFold runs one group read on the loop. A node that is not ready answers
 // with an error, so the coordinator refuses the call.
-func readFold(ctx context.Context, n *Node, fn func(*statemachine.Machine) (core.ControlPlaneDone, error)) (core.ControlPlaneDone, error) {
+func readFold(ctx context.Context, n *Node, fn func(*replica.Replica) (core.ControlPlaneDone, error)) (core.ControlPlaneDone, error) {
 	d, err := n.read(ctx, fn)
 	if err != nil {
 		return core.ControlPlaneDone{}, err
@@ -81,7 +81,7 @@ func readFold(ctx context.Context, n *Node, fn func(*statemachine.Machine) (core
 // groupRole reports whether this node is the active appender and ready.
 func (n *Node) groupRole(ctx context.Context) (bool, error) {
 	active := false
-	err := n.onLoop(ctx, func(m *statemachine.Machine) []core.Action {
+	err := n.onLoop(ctx, func(m *replica.Replica) []core.Action {
 		active = m.IsActive() && m.Ready()
 		return nil
 	})

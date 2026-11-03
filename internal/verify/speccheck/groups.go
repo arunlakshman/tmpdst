@@ -7,7 +7,7 @@ import (
 )
 
 // Consumer groups (slice 4a). The spec of the group commands and reads. Plain
-// maps, one rule per step, no code shared with stateupdater (decision 21).
+// maps, one rule per step, no code shared with metadata (decision 21).
 //
 //	Size       A group command over 256 KiB is ErrTooLarge. Size counts the
 //	           fields: 16 for the command, 4 + length for each string or byte

@@ -13,7 +13,7 @@ import (
 
 	"github.com/manifesterio/mds/internal/controlplane"
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
-	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -258,7 +258,7 @@ func TestCloseWakesParkedCalls(t *testing.T) {
 
 func TestStoreFailureBreaksTermAndRebuildRecovers(t *testing.T) {
 	clock := newFakeClock(time.Unix(1000, 0))
-	inner := &updaterstore.Store{A: stateupdater.NewMem()}
+	inner := &updaterstore.Store{A: metadata.NewMem()}
 	flaky := &flakyStore{GroupStore: inner}
 	next := new(atomic.Int64)
 	c := New(Config{Clock: clock, NewID: func() string { return fmt.Sprintf("m%d", next.Add(1)) }}, flaky)
@@ -310,7 +310,7 @@ func (f *flakyStore) Exec(ctx context.Context, operation core.ControlPlaneOperat
 // TestConcurrentJoinsOneRound starts eight joins at once on the real clock.
 // They must end in one round with one leader, and every member syncs.
 func TestConcurrentJoinsOneRound(t *testing.T) {
-	c := New(Config{InitialRebalanceDelay: 200 * time.Millisecond}, &updaterstore.Store{A: stateupdater.NewMem()})
+	c := New(Config{InitialRebalanceDelay: 200 * time.Millisecond}, &updaterstore.Store{A: metadata.NewMem()})
 	t.Cleanup(c.Close)
 	if err := c.Rebuild(t.Context()); err != nil {
 		t.Fatal(err)

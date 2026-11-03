@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -28,9 +28,9 @@ func TestMachineConfigSetsTheIdempotencyWindow(t *testing.T) {
 }
 
 // topicCount asks a store how many topics it holds.
-func topicCount(t *testing.T, keyValue stateupdater.KeyValueStore) int {
+func topicCount(t *testing.T, keyValue metadata.KeyValueStore) int {
 	t.Helper()
-	d, err := stateupdater.New(keyValue).Describe(core.DescribeTopics{})
+	d, err := metadata.New(keyValue).Describe(core.DescribeTopics{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestPebbleStateReopensEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code := stateupdater.New(first).CreateTopic("orders", 2); code != core.OK {
+	if code := metadata.New(first).CreateTopic("orders", 2); code != core.OK {
 		t.Fatalf("CreateTopic code = %v", code)
 	}
 	if n := topicCount(t, first); n != 1 {

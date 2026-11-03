@@ -11,8 +11,8 @@ import (
 
 	"github.com/manifesterio/mds/internal/controlplane/executor"
 	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/server"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -20,7 +20,7 @@ import (
 func realGroupClient(t *testing.T) *Client {
 	t.Helper()
 	n := server.New(server.Config{
-		Machine: statemachine.Config{
+		Machine: replica.Config{
 			CatchUpEvery: core.Duration(time.Millisecond),
 			Rank:         0, Heartbeat: core.Duration(time.Second),
 		},

@@ -23,8 +23,8 @@ import (
 
 	"github.com/manifesterio/mds/internal/controlplane/controlplanemetrics"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/server"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system/httpconnections"
 	"github.com/manifesterio/mds/internal/system/runinfo"
@@ -211,8 +211,8 @@ func openNode(ctx context.Context, d deps, f cpFlags, m *controlplanemetrics.Met
 const trimStride = 1024
 
 // machineConfig turns the flags into the control-plane machine's settings.
-func machineConfig(f cpFlags) statemachine.Config {
-	mcfg := statemachine.Config{
+func machineConfig(f cpFlags) replica.Config {
+	mcfg := replica.Config{
 		OnCheckpointDecision: logCheckpointDecision,
 		// Short catch-up period so Ready (and health Serving) arrives quickly;
 		// subsequent rounds keep the same cadence.
@@ -252,7 +252,7 @@ func newDynamo(ctx context.Context, endpoint, region string, apiOpts []func(*mid
 
 // logCheckpointDecision writes one log line each time the checkpoint timer
 // fires, so an operator can see why a checkpoint was or was not written.
-func logCheckpointDecision(d statemachine.CheckpointDecision) {
+func logCheckpointDecision(d replica.CheckpointDecision) {
 	attrs := []any{
 		"event", "checkpoint_decision", "written", d.Written, "reason", d.Reason,
 		"applied", d.Applied, "goal_tail", d.GoalTail, "last_checkpoint", d.LastCheckpoint,

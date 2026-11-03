@@ -15,8 +15,8 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/server"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -62,7 +62,7 @@ func TestMainRunUsage(t *testing.T) {
 
 func TestCreateTopic(t *testing.T) {
 	n := server.New(server.Config{
-		Machine: statemachine.Config{
+		Machine: replica.Config{
 			CatchUpEvery: core.Duration(time.Millisecond),
 			Rank:         0, Heartbeat: core.Duration(time.Second),
 		},

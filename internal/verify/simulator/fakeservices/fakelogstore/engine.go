@@ -5,14 +5,14 @@
 // surfaces as ErrTimeout+MaybeApplied.
 //
 // After CP-DSM-8 the engine is also simulator.ControlPlaneRealState: a reference replay of durable
-// slots through controlplane/statemachine.ReplayPosition (decision 21 / log replay).
+// slots through controlplane/replica.ReplayPosition (decision 21 / log replay).
 package fakelogstore
 
 import (
 	"slices"
 
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
-	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/metadata"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/verify/simulator"
 	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakelogservice"
@@ -24,7 +24,7 @@ type Engine struct {
 	*fakecompletions.CompletionCore
 	spec *store
 
-	ref         *stateupdater.StateUpdater
+	ref         *metadata.Store
 	applied     core.LogPosition // next slot to fold into ref
 	gen         uint64
 	windowSlots int64
@@ -45,7 +45,7 @@ var (
 func New(f simulator.LogStoreFaults) *Engine {
 	e := &Engine{
 		spec:        newStore(f.Bug == fakelogservice.InjectedBugNoFloorCheck),
-		ref:         stateupdater.NewMem(),
+		ref:         metadata.NewMem(),
 		windowSlots: int64(f.WindowSlots),
 		trimStride:  int64(f.TrimStride),
 		writers:     map[uint64]string{},
@@ -103,7 +103,7 @@ func (e *Engine) OnInternal(ctx simulator.FakeServiceContext, body any) {
 // truth replays. An entry with no envelope, or with epoch 0 (no writer claimed
 // yet), is skipped.
 func (e *Engine) checkOneWriter(slot core.LogPosition, data []byte) {
-	epoch, writer, ok := statemachine.EntryWriter(data)
+	epoch, writer, ok := replica.EntryWriter(data)
 	if !ok || epoch == 0 {
 		return
 	}
@@ -127,7 +127,7 @@ func (e *Engine) advanceRef() {
 		}
 		slot := e.applied
 		e.checkOneWriter(slot, data)
-		if err := statemachine.ReplayPosition(e.ref, slot, data); err != nil {
+		if err := replica.ReplayPosition(e.ref, slot, data); err != nil {
 			// Foreign / test payloads are durable bytes but not CP entries.
 			e.applied++
 			e.gen++

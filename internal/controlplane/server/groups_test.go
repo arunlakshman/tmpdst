@@ -8,14 +8,14 @@ import (
 	"google.golang.org/grpc/status"
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/core"
 )
 
 // A standby control plane serves no group call: every one answers Unavailable,
 // so the client tries the next address (same rule as BrokerHeartbeat).
 func TestStandbyGroupCallsUnavailable(t *testing.T) {
-	cli, _, stop := startNode(t, statemachine.Config{
+	cli, _, stop := startNode(t, replica.Config{
 		Rank: 1, Heartbeat: core.Duration(time.Second), TakeoverAfter: core.Duration(time.Hour),
 	})
 	defer stop()

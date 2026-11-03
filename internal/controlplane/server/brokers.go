@@ -21,7 +21,7 @@ import (
 	"time"
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
 )
@@ -42,7 +42,7 @@ func (n *Node) BrokerHeartbeat(ctx context.Context, request *cpv1.BrokerHeartbea
 		ok   bool
 	}
 	ch := make(chan result, 1)
-	err := n.onLoop(ctx, func(m *statemachine.Machine) []core.Action {
+	err := n.onLoop(ctx, func(m *replica.Replica) []core.Action {
 		if !m.IsActive() || !m.Ready() {
 			ch <- result{}
 			return nil

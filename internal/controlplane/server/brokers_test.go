@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -19,7 +19,7 @@ func hb(id int32, host string, port int32) *cpv1.BrokerHeartbeatRequest {
 // TestBrokerHeartbeatActiveReturnsLiveSet: the active node renews each
 // caller and answers with every live broker, sorted by node id.
 func TestBrokerHeartbeatActiveReturnsLiveSet(t *testing.T) {
-	cli, _, stop := startNode(t, statemachine.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
+	cli, _, stop := startNode(t, replica.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
 	defer stop()
 	ctx := t.Context()
 
@@ -46,7 +46,7 @@ func TestBrokerHeartbeatActiveReturnsLiveSet(t *testing.T) {
 // TestBrokerHeartbeatInvalidBroker: a broker with no node id, no host or no
 // port is rejected as InvalidArgument before it reaches the run loop.
 func TestBrokerHeartbeatInvalidBroker(t *testing.T) {
-	cli, _, stop := startNode(t, statemachine.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
+	cli, _, stop := startNode(t, replica.Config{Rank: 0, Heartbeat: core.Duration(time.Second)})
 	defer stop()
 	ctx := t.Context()
 	cases := []struct {
@@ -71,7 +71,7 @@ func TestBrokerHeartbeatInvalidBroker(t *testing.T) {
 // TestBrokerHeartbeatStandbyUnavailable: only the active node keeps the live
 // set, so a standby answers Unavailable and the broker tries another address.
 func TestBrokerHeartbeatStandbyUnavailable(t *testing.T) {
-	cli, _, stop := startNode(t, statemachine.Config{
+	cli, _, stop := startNode(t, replica.Config{
 		Rank: 1, Heartbeat: core.Duration(time.Second), TakeoverAfter: core.Duration(time.Hour),
 	})
 	defer stop()
@@ -86,7 +86,7 @@ func TestBrokerHeartbeatStandbyUnavailable(t *testing.T) {
 // of the live set after the lease TTL. The node uses the real clock here.
 func TestBrokerHeartbeatLeaseExpires(t *testing.T) {
 	const ttl = 150 * time.Millisecond
-	cli, _, stop := startNodeWithLease(t, statemachine.Config{Rank: 0, Heartbeat: core.Duration(time.Second)}, ttl)
+	cli, _, stop := startNodeWithLease(t, replica.Config{Rank: 0, Heartbeat: core.Duration(time.Second)}, ttl)
 	defer stop()
 	ctx := t.Context()
 

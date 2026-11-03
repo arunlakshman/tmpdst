@@ -3,7 +3,7 @@ package fakelogstore_test
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/verify/simulator"
 	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakelogstore"
@@ -40,7 +40,7 @@ func TestControlPlaneRealStateReplaysNoopAndTrimStride(t *testing.T) {
 	e, c, a := setup(f, 3)
 	_ = e.CreateTopic("t", 1)
 	for slot := range 6 {
-		inner := stateupdater.Encode(stateupdater.Entry{ID: "n", Kind: stateupdater.KindNoop})
+		inner := metadata.Encode(metadata.Entry{ID: "n", Kind: metadata.KindNoop})
 		e.Execute(c, a, core.LogAppend{Req: core.RequestID(slot + 1), Slot: core.LogPosition(slot), Data: inner})
 		c.Run()
 		c.Delivered = nil

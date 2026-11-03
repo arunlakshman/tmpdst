@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
-	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/metadata"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/verify/simulator"
 	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakelogservice"
@@ -211,7 +211,7 @@ func claim(e *fakelogstore.Engine, c *fakeservicetest.Ctx, a core.NodeInstance, 
 }
 
 // envelope builds a log payload with the machine envelope: marker, epoch, writer
-// name, then the inner payload. The marker must match statemachine's envelope
+// name, then the inner payload. The marker must match replica's envelope
 // marker, and TestEnvelopeHelperMatchesStatemachine checks it.
 func envelope(epoch uint64, writer string, inner []byte) []byte {
 	b := []byte{0xC8}
@@ -222,11 +222,11 @@ func envelope(epoch uint64, writer string, inner []byte) []byte {
 }
 
 func noop() []byte {
-	return stateupdater.Encode(stateupdater.Entry{ID: "n", Kind: stateupdater.KindNoop})
+	return metadata.Encode(metadata.Entry{ID: "n", Kind: metadata.KindNoop})
 }
 
 func TestEnvelopeHelperMatchesStatemachine(t *testing.T) {
-	epoch, writer, ok := statemachine.EntryWriter(envelope(3, "cp-1", noop()))
+	epoch, writer, ok := replica.EntryWriter(envelope(3, "cp-1", noop()))
 	if !ok || epoch != 3 || writer != "cp-1" {
 		t.Fatal(epoch, writer, ok)
 	}

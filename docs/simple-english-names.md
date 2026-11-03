@@ -72,8 +72,8 @@ Rules used for the right column:
 | `httppool` | `httpconnections` |
 | `controlplane/exec` | `controlplane/executor` |
 | `controlplane/run` | `controlplane/runloop` |
-| `controlplane/applier` | `controlplane/stateupdater` |
-| `controlplane/machine` | `controlplane/statemachine` |
+| `controlplane/applier` | `controlplane/metadata` |
+| `controlplane/machine` | `controlplane/replica` |
 | `controlplane/cpclient` | `controlplane/controlplaneclient` |
 | `controlplane/cpobs` | `controlplane/controlplanemetrics` |
 | `controlplane/cptest` | `controlplane/controlplanetest` |
@@ -81,7 +81,7 @@ Rules used for the right column:
 | `controlplane/fakedb` | `controlplane/fakedynamodb` |
 | `controlplane/memstore` | `controlplane/memorystore` |
 | `controlplane/grpctest` | `controlplane/grpctestserver` |
-| `applier/pebblekv` | `stateupdater/pebblestore` |
+| `applier/pebblekv` | `metadata/pebblestore` |
 | `wire/format` | `wire/segmentformat` |
 | `wire/kwire` | `wire/kafkawire` |
 | `ops/tools/detcheck` | `ops/tools/determinismcheck` |
@@ -171,7 +171,7 @@ Rules used for the right column:
 | `Tx` | `Transaction` |
 | `KV` | `KeyValueStore` |
 | `MemKV` | `MemoryKeyValueStore` |
-| `Applier` | `StateUpdater` |
+| `Applier` | `Store` |
 | `assignPlan` | `offsetPlan` |
 | `AssignHere` / `AssignElsewhere` / `AssignUnknown` | `OffsetOwnedHere` / `OffsetOwnedElsewhere` / `OffsetOwnerUnknown` |
 | `idemKey`, `idemRecord`, `parseIdem` | `duplicateCheckKey`, `duplicateCheckRecord`, `parseDuplicateCheck` |

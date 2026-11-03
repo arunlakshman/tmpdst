@@ -11,8 +11,8 @@ import (
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
 	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/server"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -27,14 +27,14 @@ type Node struct {
 // StartMem boots a rank-0 machine over an in-memory log.
 func StartMem(t testing.TB) *Node {
 	t.Helper()
-	return Start(t, statemachine.Config{
+	return Start(t, replica.Config{
 		CatchUpEvery: core.Duration(time.Millisecond),
 		Rank:         0, Heartbeat: core.Duration(time.Second),
 	}, executor.NewMemoryLog(), executor.NewMemoryObjects())
 }
 
 // Start boots a node with the given machine config and stores.
-func Start(t testing.TB, config statemachine.Config, log executor.Log, objs executor.ObjectStore) *Node {
+func Start(t testing.TB, config replica.Config, log executor.Log, objs executor.ObjectStore) *Node {
 	t.Helper()
 	n := server.New(server.Config{
 		Machine: config, Log: log, Objects: objs,

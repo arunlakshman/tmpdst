@@ -5,11 +5,11 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/storecall"
-	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"
 )
 
-func newStore() *Store { return &Store{A: stateupdater.NewMem()} }
+func newStore() *Store { return &Store{A: metadata.NewMem()} }
 
 func TestSegmentAndTopicOperations(t *testing.T) {
 	ctx := t.Context()

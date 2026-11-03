@@ -1,6 +1,6 @@
 // Package controlplane is the control-plane service tree (renamed from cp/).
 // Production mdscontrolplane serves gRPC via controlplane/server over controlplane/runloop
-// and controlplane/statemachine (CP-DSM-7). Brokers dial through controlplane/controlplaneclient.
+// and controlplane/replica (CP-DSM-7). Brokers dial through controlplane/controlplaneclient.
 //
 // The gRPC wire contract is controlplane/api/v1 (decision 57). Veritas remains
 // the independent oracle and shares schema types via wireboundary, not apply code
@@ -11,7 +11,7 @@
 // server/brokers.go.
 //
 // All tests and test support live in controlplanetest (see its doc.go). Helpers under
-// this tree (stateupdater, executor) support the
+// this tree (metadata, executor) support the
 // state machine's fold and IO. Not deterministic (goroutines, net): it is not
 // checked by ops/tools/determinismcheck.
 //
@@ -25,12 +25,13 @@
 //   - server: the gRPC adapter for the control-plane machine.
 //   - runloop: the production event loop. One goroutine owns Step, timers and
 //     inject work. It imports only core and the standard library.
-//   - statemachine: the control-plane replica state machine. It implements
-//     core.Machine.
-//   - stateupdater: the state updater. It applies commands in order to an
+//   - replica: one node's copy of the replicated log: leader or standby,
+//     catch-up, checkpoint and restore. It implements core.Machine.
+//   - metadata: the control-plane data model (topics, segments, groups and
+//     offsets) and the rules for changing it. It applies commands in order to an
 //     ordered key-value store.
-//   - stateupdater/pebblestore: the Pebble-backed key-value store that
-//     stateupdater uses.
+//   - metadata/pebblestore: the Pebble-backed key-value store that
+//     metadata uses.
 //   - executor: runs the control-plane IOCalls outside Step. These are Dynamo
 //     log slots and object-store checkpoints.
 //   - groupcoordinator: the consumer group coordinator of the active node. It
@@ -41,7 +42,7 @@
 //
 // How they fit together, from the imports:
 //
-//   - server imports runloop, statemachine, executor and groupcoordinator.
-//   - statemachine imports stateupdater. executor imports runloop.
+//   - server imports runloop, replica, executor and groupcoordinator.
+//   - replica imports metadata. executor imports runloop.
 //   - controlplaneclient imports api/v1 and wireboundary, and calls the gRPC API.
 package controlplane

@@ -1,7 +1,7 @@
 package kafka
 
 import (
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
+	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/verify/simulator"
 )
@@ -16,7 +16,7 @@ func controlPlaneFactory(sc simulator.SeedConfig, opts Opts) core.MachineFactory
 		if self.Node == "cp-1" {
 			rank = 1
 		}
-		config := statemachine.Config{
+		config := replica.Config{
 			CatchUpEvery:       lp.Tick,
 			ReadLimit:          64,
 			Writer:             string(self.Node),
@@ -35,7 +35,7 @@ func controlPlaneFactory(sc simulator.SeedConfig, opts Opts) core.MachineFactory
 			StallDur:           lp.StallDur,
 			DownDur:            lp.DownDur,
 		}
-		m := statemachine.New(config)(env, self).(*statemachine.Machine)
+		m := replica.New(config)(env, self).(*replica.Replica)
 		for _, t := range topics {
 			_ = m.SeedTopic(t, parts)
 		}

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/internal/controlplane/controlplanetest/updaterstore"
-	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -63,7 +63,7 @@ type harness struct {
 func newHarness(t *testing.T, config Config) *harness {
 	t.Helper()
 	h := &harness{t: t, clock: newFakeClock(time.Unix(1000, 0)), session: 10000, next: new(atomic.Int64)}
-	h.store = &updaterstore.Store{A: stateupdater.NewMem()}
+	h.store = &updaterstore.Store{A: metadata.NewMem()}
 	if config.Clock == nil {
 		config.Clock = h.clock
 	}

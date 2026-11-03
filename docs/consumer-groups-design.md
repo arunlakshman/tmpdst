@@ -101,7 +101,7 @@ If two brokers have different live sets for a short time, they may name differen
 
 **Decision.**
 
-- These are commands in the CP log. The state updater folds them (`internal/controlplane/stateupdater`):
+- These are commands in the CP log. The state updater folds them (`internal/controlplane/metadata`):
   - Join
   - Leave
   - Sync assignment
@@ -237,7 +237,7 @@ Each slice ends with a check that can fail. A slice that does not pass is not do
 
 **Status of slice 3.** Done. Fetch long poll (Q8). A Fetch part that finds no data is parked. It polls again every `FetchPollInterval`, and each poll is one `Lookup` for that partition. A part with data holds it while the Fetch is short of `MinBytes`. The Fetch answers when `MinBytes` is reached or `MaxWait` ends. The waits are the broker's own timers, so the core stays deterministic. A parked Fetch ends at once on a connection close or a stop. The simulator consumers send `MaxWait` 100, so their trace hashes changed. With the long poll off, the hashes match the old file, so the cause is this change alone. The hashes were updated. `ops/scripts/e2e-kafka-cli.sh` checks the wake-up time (5 lines within 2 s) and the idle `Lookup` rate (29 in 5 s from one idle consumer, limit 60). No new decision row: this follows Q8.
 
-**Status of slice 4a.** Done. The group state and its log commands are in `internal/controlplane/stateupdater` (keys `G`, `M`, `O`), with the oracle in `internal/verify/speccheck/groups.go`. The checks are a table test per command, a random lockstep run with a checkpoint restore in the middle, and a replay test. Not done here: the broker forwarding (slice 5). See "Group log commands".
+**Status of slice 4a.** Done. The group state and its log commands are in `internal/controlplane/metadata` (keys `G`, `M`, `O`), with the oracle in `internal/verify/speccheck/groups.go`. The checks are a table test per command, a random lockstep run with a checkpoint restore in the middle, and a replay test. Not done here: the broker forwarding (slice 5). See "Group log commands".
 
 **Status of slice 4b.** Done. The group coordinator is in `internal/controlplane/groupcoordinator`. It runs on the active control plane node only. The gRPC group calls are in the control plane API, and a standby answers them Unavailable. See "Group coordinator".
 

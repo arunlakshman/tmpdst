@@ -1,4 +1,4 @@
-// Package updaterstore runs a stateupdater.StateUpdater as a single node with no
+// Package updaterstore runs a metadata.Store as a single node with no
 // log, for tests. The log-backed service applies commands at their real slots,
 // not through this adapter.
 package updaterstore
@@ -8,15 +8,15 @@ import (
 	"sync"
 
 	"github.com/manifesterio/mds/internal/controlplane"
-	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/core"
 )
 
-// Store drives a StateUpdater with a local slot counter. It is a
+// Store drives a Store with a local slot counter. It is a
 // controlplane.GroupStore, and its Exec also takes the segment and topic
 // operations that the conformance suite sends.
 type Store struct {
-	A *stateupdater.StateUpdater
+	A *metadata.Store
 
 	mu   sync.Mutex
 	next int64
@@ -48,7 +48,7 @@ func (s *Store) Exec(ctx context.Context, operation core.ControlPlaneOperation) 
 	case core.GroupInstall, core.GroupAssign, core.GroupRemove, core.OffsetCommit:
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		entry, _ := stateupdater.GroupEntry(x)
+		entry, _ := metadata.GroupEntry(x)
 		return s.A.Apply(0, entry), nil
 	case core.OffsetFetch:
 		return s.A.OffsetFetch(x)

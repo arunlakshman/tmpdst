@@ -5,7 +5,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/apiconvert"
+	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -32,8 +32,8 @@ func toRPCError(code core.ErrCode, outcome core.Outcome) error {
 		return nil
 	}
 	detail := &cpv1.ErrorDetail{
-		Code:    apiconvert.FromCoreErr(code),
-		Outcome: apiconvert.FromCoreOutcome(outcome),
+		Code:    wireboundary.FromCoreErr(code),
+		Outcome: wireboundary.FromCoreOutcome(outcome),
 	}
 	s, err := status.New(st, code.String()).WithDetails(detail)
 	if err != nil {

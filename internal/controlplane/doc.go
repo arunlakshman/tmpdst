@@ -3,8 +3,12 @@
 // and controlplane/statemachine (CP-DSM-7). Brokers dial through controlplane/controlplaneclient.
 //
 // The gRPC wire contract is controlplane/api/v1 (decision 57). Veritas remains
-// the independent oracle and shares schema types via apiconvert, not apply code
+// the independent oracle and shares schema types via wireboundary, not apply code
 // (decision 21).
+//
+// Broker membership (heartbeat and the live broker set) is one feature in
+// several packages. Its file is brokers.go in each; the map is at the top of
+// server/brokers.go.
 //
 // Helpers under this tree (memorystore, stateupdater, executor) support tests and the
 // state machine's fold and IO. Not deterministic (goroutines, net): it is not

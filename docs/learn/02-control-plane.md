@@ -97,7 +97,7 @@ Because of this, the same Machine runs in two places:
 ```
         brokers (gRPC)                                  +
              |                                          | the "edge": real
-   controlplaneclient --> api/v1 + apiconvert --> server (Node)   goroutines,
+   controlplaneclient --> api/v1 + wireboundary --> server (Node)   goroutines,
                                                      |   |          real network
                                   inject work        v   |
                                               runloop (one goroutine)
@@ -133,7 +133,7 @@ All sizes are non-test lines. "Edge" means not deterministic (goroutines, networ
 | `executor` | ~660 | edge | Run `Log*` and `Object*` actions: `DynamoLog`, `MemoryLog`, object store, error classify |
 | `runloop` | ~370 | edge | The one goroutine that calls `Step`, runs timers, dispatches actions |
 | `server` | ~470 | edge | gRPC `Node`: turns RPCs into `Offer` calls and waits for answers |
-| `api/v1`, `apiconvert` | ~120 + 250 | wire | Protobuf contract and conversion to `core` types |
+| `api/v1`, `wireboundary` | ~120 + 250 | wire | Protobuf contract and conversion to `core` types |
 | `controlplaneclient` | ~375 | edge (broker side) | gRPC client with failover; error classifier |
 | `controlplanemetrics` | 340 | edge | Prometheus metrics and per-call logs |
 | `memorystore`, `fakedynamodb`, `grpctestserver`, `controlplanetest` | | test helpers | in-memory stores, fake DynamoDB, conformance tests |
@@ -896,7 +896,7 @@ would not tell the broker whether the write might have happened.
 
 - **`api/v1/controlplane.proto`** is the contract. Enums mirror `core.ErrCode` and
   `core.Outcome`; number 5 (the old `ErrFenced`) is retired and left as a gap.
-- **`apiconvert`** has the two-way converters (`CommitSegmentToCore`,
+- **`wireboundary`** has the two-way converters (`CommitSegmentToCore`,
   `CommitSegmentFromCore`, ...). Unknown wire error values become `ErrIO`. Keeping this a
   separate package means the independent oracle (speccheck) can share the schema types without
   sharing apply code (decision 21).

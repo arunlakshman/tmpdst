@@ -12,13 +12,12 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/apiconvert"
 	"github.com/manifesterio/mds/internal/controlplane/executor"
 	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
-	"github.com/manifesterio/mds/internal/controlplane/livebrokers"
 	"github.com/manifesterio/mds/internal/controlplane/runloop"
 	"github.com/manifesterio/mds/internal/controlplane/statemachine"
 	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -40,9 +39,6 @@ type Config struct {
 	GroupInitialRebalanceDelay time.Duration
 }
 
-// defaultBrokerLeaseTTL is the lease length when Config leaves it zero.
-const defaultBrokerLeaseTTL = 5 * time.Second
-
 // Node owns the machine run loop and serves ControlPlane RPCs.
 type Node struct {
 	cpv1.UnimplementedControlPlaneServer
@@ -52,7 +48,7 @@ type Node struct {
 	inject chan runloop.InjectFunc
 	m      atomic.Pointer[statemachine.Machine]
 	health *health.Server
-	leases *livebrokers.Set              // run loop only; empty until brokers heartbeat
+	leases *leaseSet                     // run loop only; empty until brokers heartbeat
 	groups *groupcoordinator.Coordinator // serves group calls while this node is active
 
 	mu        sync.Mutex
@@ -95,7 +91,7 @@ func New(config Config) *Node {
 		inbox:    runloop.NewInbox(64),
 		inject:   make(chan runloop.InjectFunc, 64),
 		health:   health.NewServer(),
-		leases:   livebrokers.New(config.BrokerLeaseTTL),
+		leases:   newLeaseSet(config.BrokerLeaseTTL),
 		waiters:  map[core.RequestID]chan core.ControlPlaneDone{},
 		shutdown: make(chan struct{}),
 		loopDone: make(chan error, 1),
@@ -319,7 +315,7 @@ func (n *Node) read(ctx context.Context, fn func(m *statemachine.Machine) (core.
 
 // CommitSegment implements ControlPlane.
 func (n *Node) CommitSegment(ctx context.Context, request *cpv1.CommitSegmentRequest) (*cpv1.CommitSegmentResponse, error) {
-	operation := apiconvert.CommitSegmentToCore(request)
+	operation := wireboundary.CommitSegmentToCore(request)
 	d, err := n.offer(ctx, stateupdater.Entry{Kind: stateupdater.KindCommit, Commit: operation})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
@@ -330,14 +326,14 @@ func (n *Node) CommitSegment(ctx context.Context, request *cpv1.CommitSegmentReq
 	if d.Err != core.OK {
 		return nil, toRPCError(d.Err, d.Outcome)
 	}
-	return apiconvert.CommitSegmentRespFromCore(core.ResponseAs[core.CommitSegmentResp](d)), nil
+	return wireboundary.CommitSegmentRespFromCore(core.ResponseAs[core.CommitSegmentResp](d)), nil
 }
 
 // Lookup implements ControlPlane.
 //
 //nolint:dupl // mirror of DescribeTopics; each RPC keeps its own conversion path
 func (n *Node) Lookup(ctx context.Context, request *cpv1.LookupRequest) (*cpv1.LookupResponse, error) {
-	operation := apiconvert.LookupToCore(request)
+	operation := wireboundary.LookupToCore(request)
 	d, err := n.read(ctx, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
 		return m.Fold().Lookup(operation)
 	})
@@ -347,14 +343,14 @@ func (n *Node) Lookup(ctx context.Context, request *cpv1.LookupRequest) (*cpv1.L
 	if d.Err != core.OK {
 		return nil, toRPCError(d.Err, d.Outcome)
 	}
-	return apiconvert.LookupRespFromCore(core.ResponseAs[core.FindSegmentsResp](d)), nil
+	return wireboundary.LookupRespFromCore(core.ResponseAs[core.FindSegmentsResp](d)), nil
 }
 
 // DescribeTopics implements ControlPlane.
 //
 //nolint:dupl // mirror of Lookup; each RPC keeps its own conversion path
 func (n *Node) DescribeTopics(ctx context.Context, request *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
-	operation := apiconvert.DescribeTopicsToCore(request)
+	operation := wireboundary.DescribeTopicsToCore(request)
 	d, err := n.read(ctx, func(m *statemachine.Machine) (core.ControlPlaneDone, error) {
 		return m.Fold().Describe(operation)
 	})
@@ -364,7 +360,7 @@ func (n *Node) DescribeTopics(ctx context.Context, request *cpv1.DescribeTopicsR
 	if d.Err != core.OK {
 		return nil, toRPCError(d.Err, d.Outcome)
 	}
-	return apiconvert.DescribeTopicsRespFromCore(core.ResponseAs[core.DescribeTopicsResp](d)), nil
+	return wireboundary.DescribeTopicsRespFromCore(core.ResponseAs[core.DescribeTopicsResp](d)), nil
 }
 
 // CreateTopic implements ControlPlane.
@@ -420,39 +416,6 @@ func (n *Node) GetStatus(ctx context.Context, _ *cpv1.GetStatusRequest) (*cpv1.G
 	case <-ctx.Done():
 		return nil, toRPCError(core.ErrTimeout, core.NotApplied)
 	}
-}
-
-// BrokerHeartbeat implements ControlPlane. It renews the caller's lease and
-// returns the live broker set (Q4). Only the active node keeps the set, so a
-// standby answers Unavailable and the broker client tries the next address.
-func (n *Node) BrokerHeartbeat(ctx context.Context, request *cpv1.BrokerHeartbeatRequest) (*cpv1.BrokerHeartbeatResponse, error) {
-	b := apiconvert.BrokerHeartbeatToCore(request)
-	if b.NodeID <= 0 || b.Host == "" || b.Port <= 0 {
-		return nil, toRPCError(core.ErrInvalid, core.NotApplied)
-	}
-	type result struct {
-		live []core.BrokerAddr
-		ok   bool
-	}
-	ch := make(chan result, 1)
-	err := n.onLoop(ctx, func(m *statemachine.Machine) []core.Action {
-		if !m.IsActive() || !m.Ready() {
-			ch <- result{}
-			return nil
-		}
-		now := time.Now()
-		n.leases.Renew(b, now)
-		ch <- result{live: n.leases.Live(now), ok: true}
-		return nil
-	})
-	if err != nil {
-		return nil, toRPCError(core.ErrIO, core.NotApplied)
-	}
-	r := <-ch
-	if !r.ok {
-		return nil, toRPCError(core.ErrUnavailable, core.NotApplied)
-	}
-	return apiconvert.BrokerHeartbeatRespFromCore(r.live), nil
 }
 
 // Register attaches the ControlPlane service and health to s.

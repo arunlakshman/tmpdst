@@ -6,10 +6,10 @@ import (
 
 	"github.com/manifesterio/mds/internal/controlplane"
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/apiconvert"
 	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
 	"github.com/manifesterio/mds/internal/controlplane/statemachine"
 	"github.com/manifesterio/mds/internal/controlplane/stateupdater"
+	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -171,14 +171,14 @@ func (n *Node) JoinGroup(ctx context.Context, request *cpv1.JoinGroupRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	r, err := c.JoinGroup(ctx, apiconvert.JoinGroupToCore(request))
+	r, err := c.JoinGroup(ctx, wireboundary.JoinGroupToCore(request))
 	if err != nil {
 		return nil, groupCtxErr()
 	}
 	if r.Err != core.OK {
 		return nil, toRPCError(r.Err, groupOutcome(r.Err))
 	}
-	return apiconvert.JoinGroupRespFromCore(r), nil
+	return wireboundary.JoinGroupRespFromCore(r), nil
 }
 
 // SyncGroup implements ControlPlane.
@@ -189,14 +189,14 @@ func (n *Node) SyncGroup(ctx context.Context, request *cpv1.SyncGroupRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	r, err := c.SyncGroup(ctx, apiconvert.SyncGroupToCore(request))
+	r, err := c.SyncGroup(ctx, wireboundary.SyncGroupToCore(request))
 	if err != nil {
 		return nil, groupCtxErr()
 	}
 	if r.Err != core.OK {
 		return nil, toRPCError(r.Err, groupOutcome(r.Err))
 	}
-	return apiconvert.SyncGroupRespFromCore(r), nil
+	return wireboundary.SyncGroupRespFromCore(r), nil
 }
 
 // GroupHeartbeat implements ControlPlane.
@@ -205,7 +205,7 @@ func (n *Node) GroupHeartbeat(ctx context.Context, request *cpv1.GroupHeartbeatR
 	if err != nil {
 		return nil, err
 	}
-	if code := c.Heartbeat(ctx, apiconvert.HeartbeatToCore(request)); code != core.OK {
+	if code := c.Heartbeat(ctx, wireboundary.HeartbeatToCore(request)); code != core.OK {
 		return nil, toRPCError(code, groupOutcome(code))
 	}
 	return &cpv1.GroupHeartbeatResponse{}, nil
@@ -217,7 +217,7 @@ func (n *Node) LeaveGroup(ctx context.Context, request *cpv1.LeaveGroupRequest) 
 	if err != nil {
 		return nil, err
 	}
-	return apiconvert.LeaveGroupRespFromCore(c.LeaveGroup(ctx, apiconvert.LeaveGroupToCore(request))), nil
+	return wireboundary.LeaveGroupRespFromCore(c.LeaveGroup(ctx, wireboundary.LeaveGroupToCore(request))), nil
 }
 
 // GroupOffsetCommit implements ControlPlane. The answer has one code per partition.
@@ -226,11 +226,11 @@ func (n *Node) GroupOffsetCommit(ctx context.Context, request *cpv1.GroupOffsetC
 	if err != nil {
 		return nil, err
 	}
-	r, code := c.OffsetCommit(ctx, apiconvert.OffsetCommitToCore(request))
+	r, code := c.OffsetCommit(ctx, wireboundary.OffsetCommitToCore(request))
 	if code != core.OK {
 		return nil, toRPCError(code, groupOutcome(code))
 	}
-	return apiconvert.OffsetCommitRespFromCore(r), nil
+	return wireboundary.OffsetCommitRespFromCore(r), nil
 }
 
 // GroupOffsetFetch implements ControlPlane.
@@ -239,11 +239,11 @@ func (n *Node) GroupOffsetFetch(ctx context.Context, request *cpv1.GroupOffsetFe
 	if err != nil {
 		return nil, err
 	}
-	r, code := c.OffsetFetch(ctx, apiconvert.OffsetFetchToCore(request))
+	r, code := c.OffsetFetch(ctx, wireboundary.OffsetFetchToCore(request))
 	if code != core.OK {
 		return nil, toRPCError(code, core.NotApplied)
 	}
-	return apiconvert.OffsetFetchRespFromCore(r), nil
+	return wireboundary.OffsetFetchRespFromCore(r), nil
 }
 
 // DescribeGroups implements ControlPlane. Any group that fails fails the call.
@@ -253,14 +253,14 @@ func (n *Node) DescribeGroups(ctx context.Context, request *cpv1.DescribeGroupsR
 		return nil, err
 	}
 	var out []groupcoordinator.GroupDescription
-	for _, name := range apiconvert.DescribeGroupsToCore(request) {
+	for _, name := range wireboundary.DescribeGroupsToCore(request) {
 		d, code := c.DescribeGroup(ctx, name)
 		if code != core.OK {
 			return nil, toRPCError(code, core.NotApplied)
 		}
 		out = append(out, groupcoordinator.GroupDescription{Name: name, DescribeGroupResp: d})
 	}
-	return apiconvert.DescribeGroupsRespFromCore(out), nil
+	return wireboundary.DescribeGroupsRespFromCore(out), nil
 }
 
 // ListGroups implements ControlPlane.
@@ -273,5 +273,5 @@ func (n *Node) ListGroups(ctx context.Context, _ *cpv1.ListGroupsRequest) (*cpv1
 	if code != core.OK {
 		return nil, toRPCError(code, core.NotApplied)
 	}
-	return apiconvert.ListGroupsRespFromCore(gs), nil
+	return wireboundary.ListGroupsRespFromCore(gs), nil
 }

@@ -4,8 +4,8 @@ import (
 	"context"
 
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/apiconvert"
 	"github.com/manifesterio/mds/internal/controlplane/groupcoordinator"
+	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -20,13 +20,13 @@ func (c *Client) JoinGroup(ctx context.Context, request groupcoordinator.JoinReq
 	var out *cpv1.JoinGroupResponse
 	err := c.do(ctx, "JoinGroup", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.JoinGroup(ctx, apiconvert.JoinGroupFromCore(request))
+		out, e = cli.JoinGroup(ctx, wireboundary.JoinGroupFromCore(request))
 		return e
 	})
 	if err != nil {
 		return groupcoordinator.JoinResp{}, err
 	}
-	return apiconvert.JoinGroupRespToCore(out), nil
+	return wireboundary.JoinGroupRespToCore(out), nil
 }
 
 // SyncGroup sends the leader's assignment, or waits for it as a follower.
@@ -36,19 +36,19 @@ func (c *Client) SyncGroup(ctx context.Context, request groupcoordinator.SyncReq
 	var out *cpv1.SyncGroupResponse
 	err := c.do(ctx, "SyncGroup", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.SyncGroup(ctx, apiconvert.SyncGroupFromCore(request))
+		out, e = cli.SyncGroup(ctx, wireboundary.SyncGroupFromCore(request))
 		return e
 	})
 	if err != nil {
 		return groupcoordinator.SyncResp{}, err
 	}
-	return apiconvert.SyncGroupRespToCore(out), nil
+	return wireboundary.SyncGroupRespToCore(out), nil
 }
 
 // GroupHeartbeat renews a member's session.
 func (c *Client) GroupHeartbeat(ctx context.Context, request groupcoordinator.HeartbeatReq) error {
 	return c.do(ctx, "GroupHeartbeat", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
-		_, err := cli.GroupHeartbeat(ctx, apiconvert.HeartbeatFromCore(request))
+		_, err := cli.GroupHeartbeat(ctx, wireboundary.HeartbeatFromCore(request))
 		return err
 	})
 }
@@ -60,13 +60,13 @@ func (c *Client) LeaveGroup(ctx context.Context, request groupcoordinator.LeaveR
 	var out *cpv1.LeaveGroupResponse
 	err := c.do(ctx, "LeaveGroup", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.LeaveGroup(ctx, apiconvert.LeaveGroupFromCore(request))
+		out, e = cli.LeaveGroup(ctx, wireboundary.LeaveGroupFromCore(request))
 		return e
 	})
 	if err != nil {
 		return nil, err
 	}
-	return apiconvert.LeaveGroupRespToCore(out), nil
+	return wireboundary.LeaveGroupRespToCore(out), nil
 }
 
 // GroupOffsetCommit stores committed offsets. It returns one code per partition.
@@ -76,13 +76,13 @@ func (c *Client) GroupOffsetCommit(ctx context.Context, operation core.OffsetCom
 	var out *cpv1.GroupOffsetCommitResponse
 	err := c.do(ctx, "GroupOffsetCommit", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.GroupOffsetCommit(ctx, apiconvert.OffsetCommitFromCore(operation))
+		out, e = cli.GroupOffsetCommit(ctx, wireboundary.OffsetCommitFromCore(operation))
 		return e
 	})
 	if err != nil {
 		return core.OffsetCommitResp{}, err
 	}
-	return apiconvert.OffsetCommitRespToCore(out), nil
+	return wireboundary.OffsetCommitRespToCore(out), nil
 }
 
 // GroupOffsetFetch reads committed offsets.
@@ -92,13 +92,13 @@ func (c *Client) GroupOffsetFetch(ctx context.Context, operation core.OffsetFetc
 	var out *cpv1.GroupOffsetFetchResponse
 	err := c.do(ctx, "GroupOffsetFetch", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.GroupOffsetFetch(ctx, apiconvert.OffsetFetchFromCore(operation))
+		out, e = cli.GroupOffsetFetch(ctx, wireboundary.OffsetFetchFromCore(operation))
 		return e
 	})
 	if err != nil {
 		return core.OffsetFetchResp{}, err
 	}
-	return apiconvert.OffsetFetchRespToCore(out), nil
+	return wireboundary.OffsetFetchRespToCore(out), nil
 }
 
 // DescribeGroups describes the named groups, in request order.
@@ -108,13 +108,13 @@ func (c *Client) DescribeGroups(ctx context.Context, names []string) ([]groupcoo
 	var out *cpv1.DescribeGroupsResponse
 	err := c.do(ctx, "DescribeGroups", func(ctx context.Context, cli cpv1.ControlPlaneClient) error {
 		var e error
-		out, e = cli.DescribeGroups(ctx, apiconvert.DescribeGroupsFromCore(names))
+		out, e = cli.DescribeGroups(ctx, wireboundary.DescribeGroupsFromCore(names))
 		return e
 	})
 	if err != nil {
 		return nil, err
 	}
-	return apiconvert.DescribeGroupsRespToCore(out), nil
+	return wireboundary.DescribeGroupsRespToCore(out), nil
 }
 
 // ListGroups lists the groups in the log, sorted by name.
@@ -128,7 +128,7 @@ func (c *Client) ListGroups(ctx context.Context) ([]core.GroupSummary, error) {
 	if err != nil {
 		return nil, err
 	}
-	return apiconvert.ListGroupsRespToCore(out), nil
+	return wireboundary.ListGroupsRespToCore(out), nil
 }
 
 // callGroup performs one group operation of the broker (Call). A business

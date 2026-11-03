@@ -2,7 +2,7 @@ package speccheck
 
 import (
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/apiconvert"
+	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
 )
 
@@ -12,11 +12,11 @@ import (
 func (c *ControlPlane) ExecRequest(request core.RequestID, msg any) core.ControlPlaneDone {
 	switch m := msg.(type) {
 	case *cpv1.CommitSegmentRequest:
-		return c.Exec(core.ControlPlaneCall{Req: request, Op: apiconvert.CommitSegmentToCore(m)}).(core.ControlPlaneDone)
+		return c.Exec(core.ControlPlaneCall{Req: request, Op: wireboundary.CommitSegmentToCore(m)}).(core.ControlPlaneDone)
 	case *cpv1.LookupRequest:
-		return c.Exec(core.ControlPlaneCall{Req: request, Op: apiconvert.LookupToCore(m)}).(core.ControlPlaneDone)
+		return c.Exec(core.ControlPlaneCall{Req: request, Op: wireboundary.LookupToCore(m)}).(core.ControlPlaneDone)
 	case *cpv1.DescribeTopicsRequest:
-		return c.Exec(core.ControlPlaneCall{Req: request, Op: apiconvert.DescribeTopicsToCore(m)}).(core.ControlPlaneDone)
+		return c.Exec(core.ControlPlaneCall{Req: request, Op: wireboundary.DescribeTopicsToCore(m)}).(core.ControlPlaneDone)
 	case *cpv1.CreateTopicRequest:
 		code := c.CreateTopic(m.GetTopic(), m.GetPartitions())
 		return core.ControlPlaneDone{Req: request, Err: code}

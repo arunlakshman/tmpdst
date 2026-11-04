@@ -7,7 +7,6 @@ import (
 	"github.com/manifesterio/mds/internal/controlplane"
 	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
 	"github.com/manifesterio/mds/internal/controlplane/groups"
-	"github.com/manifesterio/mds/internal/controlplane/metadata"
 	"github.com/manifesterio/mds/internal/controlplane/replica"
 	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
 	"github.com/manifesterio/mds/internal/core"
@@ -18,7 +17,8 @@ import (
 //   - groups/coordinator.go, group.go, clock.go: the coordinator
 //     logic. It keeps the phase of each group, the parked calls and the timers.
 //   - server/groups.go: this file. It holds the gRPC group handlers and the
-//     log and read side of the coordinator (nodeGroups).
+//     log and read side of the coordinator (nodeGroups, over Node.Exec in
+//     server/topics.go).
 //   - controlplaneclient/groups.go: the broker-side group calls.
 //   - wireboundary/groups.go: maps group requests and responses to and from the
 //     wire types.
@@ -38,32 +38,19 @@ import (
 // appender, and so whether the group coordinator should serve.
 const groupWatchEvery = 100 * time.Millisecond
 
-// nodeGroups is the log and read side of the group coordinator. A write is a
-// log entry offered to the run loop. A read is answered by the fold.
+// nodeGroups is the log and read side of the group coordinator. It is Node.Exec
+// plus one rule: a node that is not ready answers a read with an error, so the
+// coordinator refuses the call.
 type nodeGroups struct{ n *Node }
 
 var _ groups.Store = nodeGroups{}
 
-// Exec runs one group operation. A command is offered to the log. A read is
-// answered by the fold.
+// Exec runs one group operation through Node.Exec.
 func (s nodeGroups) Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
-	if _, logged := metadata.EntryOf(operation); logged {
-		return s.write(ctx, operation)
+	d, err := s.n.Exec(ctx, operation)
+	if isCommand(operation) {
+		return d, err
 	}
-	return readFold(ctx, s.n, func(m *replica.Replica) (core.ControlPlaneDone, error) { return m.Metadata().Read(operation) })
-}
-
-// write offers one group decision to the log. A business answer comes back in
-// the Done; err is only for the run loop or the context.
-func (s nodeGroups) write(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
-	entry, _ := metadata.EntryOf(operation)
-	return s.n.offer(ctx, entry)
-}
-
-// readFold runs one group read on the loop. A node that is not ready answers
-// with an error, so the coordinator refuses the call.
-func readFold(ctx context.Context, n *Node, fn func(*replica.Replica) (core.ControlPlaneDone, error)) (core.ControlPlaneDone, error) {
-	d, err := n.read(ctx, fn)
 	if err != nil {
 		return core.ControlPlaneDone{}, err
 	}

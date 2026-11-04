@@ -16,24 +16,40 @@ import (
 // runOperation (a command goes to the log, a read is answered by the fold), and
 // converts the answer. The client side is controlplaneclient/topics.go.
 
-// runOperation runs one module operation for an RPC and maps a failure to the
-// RPC error. A command is offered to the log: a call that ends with its context
-// may have been applied, so it is MaybeApplied. A read is answered by the fold
-// of this node: a failed read changed nothing, so it is NotApplied.
-func (n *Node) runOperation(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
+// isCommand reports whether operation is written to the log. Any other
+// operation is a read, answered by the fold.
+func isCommand(operation core.ControlPlaneOperation) bool {
+	_, logged := metadata.EntryOf(operation)
+	return logged
+}
+
+// Exec runs one operation and is the only place that splits commands from reads.
+// A command is offered to the log. A read is answered by the fold of this node.
+// A business error is the Err of the answer; the error result is for the run
+// loop and the context. Node is the log and read side of the group coordinator
+// (through nodeGroups) and of every topics RPC.
+func (n *Node) Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
 	if entry, logged := metadata.EntryOf(operation); logged {
-		d, err := n.offer(ctx, entry)
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return d, toRPCError(core.ErrTimeout, core.MaybeApplied)
-			}
-			return d, toRPCError(core.ErrIO, core.MaybeApplied)
-		}
-		return d, answerError(d)
+		return n.offer(ctx, entry)
 	}
-	d, err := n.read(ctx, func(m *replica.Replica) (core.ControlPlaneDone, error) { return m.Metadata().Read(operation) })
+	return n.read(ctx, func(m *replica.Replica) (core.ControlPlaneDone, error) { return m.Metadata().Read(operation) })
+}
+
+var _ core.OperationRunner = (*Node)(nil)
+
+// runOperation runs one module operation for an RPC and maps a failure to the
+// RPC error. A call that ends with its context may have been applied, so for a
+// command it is MaybeApplied. A failed read changed nothing, so it is NotApplied.
+func (n *Node) runOperation(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error) {
+	d, err := n.Exec(ctx, operation)
 	if err != nil {
-		return d, toRPCError(core.ErrIO, core.NotApplied)
+		if !isCommand(operation) {
+			return d, toRPCError(core.ErrIO, core.NotApplied)
+		}
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return d, toRPCError(core.ErrTimeout, core.MaybeApplied)
+		}
+		return d, toRPCError(core.ErrIO, core.MaybeApplied)
 	}
 	return d, answerError(d)
 }

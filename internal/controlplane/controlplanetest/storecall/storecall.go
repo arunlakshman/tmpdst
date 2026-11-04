@@ -8,9 +8,7 @@ import (
 )
 
 // Executor is anything with the single Exec method of the test stores.
-type Executor interface {
-	Exec(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneDone, error)
-}
+type Executor = core.OperationRunner
 
 // Call runs an operation that has a response and a business code.
 func Call[R any](ctx context.Context, s Executor, operation core.ControlPlaneOperation) (R, core.ErrCode, error) {

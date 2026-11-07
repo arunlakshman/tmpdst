@@ -2,14 +2,21 @@ package integrationtest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 )
+
+func isDialErr(err error) bool {
+	operation, ok := errors.AsType[*net.OpError](err)
+	return (ok && operation.Op == "dial") || errors.Is(err, syscall.EADDRNOTAVAIL)
+}
 
 type tp struct {
 	topic string

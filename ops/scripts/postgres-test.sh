@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Runs the Postgres-backed log tests against a throwaway PostgreSQL in Docker.
+# Runs Postgres-backed tests against a throwaway PostgreSQL in Docker.
+# Control-plane executor Postgres tests moved to mds-controlplane
+# (docs/cp-extraction.md). Pass package paths explicitly, e.g.:
+#   make it-postgres PG_TEST_ARGS='./path/to/pkg/'
 # It starts one container on a free local port, waits until Postgres answers,
 # sets MDS_TEST_POSTGRES_DSN, runs go test, and then removes the container.
 # The container is removed even when a test fails or you press Ctrl+C.
@@ -22,8 +25,8 @@ Usage: ops/scripts/postgres-test.sh [go test args...]
 Starts a throwaway PostgreSQL in Docker, runs go test with MDS_TEST_POSTGRES_DSN
 set to that server, then removes the container.
 
-With no arguments it runs:
-  go test -count=1 -timeout 300s ./internal/controlplane/executor/ ./cmd/mdscontrolplane/
+With no arguments it prints a note and exits 0 (CP Postgres tests live in
+mds-controlplane). Pass go test package args to run something else.
 
 Environment:
   POSTGRES_IMAGE   Image to run (default postgres:17.11-alpine)
@@ -117,7 +120,9 @@ echo "PostgreSQL is ready."
 # (f) Run the tests against that server.
 export MDS_TEST_POSTGRES_DSN="$DSN"
 if [[ $# -eq 0 ]]; then
-  set -- ./internal/controlplane/executor/ ./cmd/mdscontrolplane/
+  echo "postgres-test: no package args; control-plane Postgres tests moved to mds-controlplane (docs/cp-extraction.md)."
+  echo "DSN is set for a manual run: $DSN"
+  exit 0
 fi
 
 # (g) Keep go test's exit status. The EXIT trap then removes the container.

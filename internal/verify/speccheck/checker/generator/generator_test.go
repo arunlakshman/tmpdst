@@ -2,14 +2,15 @@ package generator
 
 import (
 	"fmt"
-	"github.com/manifesterio/mds/internal/core"
-	"github.com/manifesterio/mds/internal/verify/speccheck"
-	"github.com/manifesterio/mds/internal/verify/speccheck/checker"
 	"go/parser"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/speccheck"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker"
 )
 
 const (

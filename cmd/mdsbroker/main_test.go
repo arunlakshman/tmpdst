@@ -18,11 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cpv1 "github.com/manifesterio/mds/internal/controlplane/api/v1"
-	"github.com/manifesterio/mds/internal/controlplane/executor"
-	"github.com/manifesterio/mds/internal/controlplane/server"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
-	"github.com/manifesterio/mds/internal/controlplane/wireboundary"
+	cpv1 "github.com/manifesterio/mds/api/controlplane/v1"
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/system/runinfo"
 )
@@ -151,14 +147,22 @@ type unavailCP struct {
 
 func (unavailCP) DescribeTopics(context.Context, *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
 	detail := &cpv1.ErrorDetail{
-		Code:    wireboundary.FromCoreErr(core.ErrUnavailable),
-		Outcome: wireboundary.FromCoreOutcome(core.NotApplied),
+		Code:    cpv1.ErrCode_ERR_CODE_UNAVAILABLE,
+		Outcome: cpv1.Outcome_OUTCOME_NOT_APPLIED,
 	}
 	s, err := status.New(codes.Unavailable, "standby").WithDetails(detail)
 	if err != nil {
 		return nil, status.Error(codes.Unavailable, "standby")
 	}
 	return nil, s.Err()
+}
+
+type okCP struct {
+	cpv1.UnimplementedControlPlaneServer
+}
+
+func (okCP) DescribeTopics(context.Context, *cpv1.DescribeTopicsRequest) (*cpv1.DescribeTopicsResponse, error) {
+	return &cpv1.DescribeTopicsResponse{}, nil
 }
 
 func serveCP(t *testing.T, reg func(*grpc.Server)) string {
@@ -186,17 +190,9 @@ func TestControlPlaneURLListFailsOver(t *testing.T) {
 	standby := serveCP(t, func(gs *grpc.Server) {
 		cpv1.RegisterControlPlaneServer(gs, unavailCP{})
 	})
-	upNode := server.New(server.Config{
-		Machine: statemachine.Config{CatchUpEvery: core.Duration(time.Millisecond), Rank: 0, Heartbeat: core.Duration(time.Second)},
-		Log:     executor.NewMemoryLog(),
-		Objects: executor.NewMemoryObjects(),
-		Self:    core.NodeInstance{Node: "cp-up"},
+	up := serveCP(t, func(gs *grpc.Server) {
+		cpv1.RegisterControlPlaneServer(gs, okCP{})
 	})
-	if err := upNode.Start(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = upNode.Close() })
-	up := serveCP(t, upNode.Register)
 
 	f, _, err := parseFlags([]string{"-cp-url", dead + "," + standby + "," + up}, &bytes.Buffer{})
 	if err != nil {

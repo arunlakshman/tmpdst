@@ -57,7 +57,7 @@ Final checks: every replica applied the whole log with the same `StateHash`; aga
 veritas) per-partition runs are dense from 0 with no overlap and equal to the model; every answer a writer saw
 agrees with the model (replay equals the first answer, `ErrConflict` only for a differing payload, `ErrInvalid` only
 for an invalid command). Also: `cptest` conformance C3 (`TestConformanceLogSMMem` 100 seeds x 200 ops,
-`...FakeDB` 20 x 100) and a real-goroutine test over fakedb with latency, lost answers and lost writes under `-race`.
+`...FakeDB` 20 x 100) and a real-goroutine test over fakedb with latency, lost answers and lost writes.
 
 | seeds | failed | slots | writer deaths (holes) | lost slots | unknown-outcome retries | hole-fills |
 |---|---|---|---|---|---|---|
@@ -204,7 +204,7 @@ Built in `cp/logcp` (service, DynamoDB log, committer with group commit and K=4 
 advisory roles, checkpoint and deleted-marker trim (superseded: trim deletes rows, decision 62), indexer, `mdscontrolplane_log_*` metrics), `cp/cpclient` (CP URL list and
 failover) and `cp/logcp/logcptest`. Exit criteria: cptest conformance against the service (store, HTTP, fakedb) green;
 seeded X2 on the real service, 20,000 seeds, 0 failures (takeover, failback, split brain, crash and restore from a
-checkpoint, trim); `-race` test; restart from checkpoint plus tail gives equal state; Lookup after an ack sees it on
+checkpoint, trim); a real-goroutine test; restart from checkpoint plus tail gives equal state; Lookup after an ack sees it on
 any node. Two findings changed the design text (decision 53): the idempotency window must be a function of the
 slot number, and trimming must leave deleted markers (superseded by decision 62: trim now deletes rows). Not wired into `cmd/mdscontrolplane` (stage 4).
 

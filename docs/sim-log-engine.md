@@ -2,14 +2,14 @@
 
 *Superseded in part by decision 63: roles are an epoch claim with a fence entry, and failback is removed. The text below is kept as it was written.*
 
-`kafka-log` runs control-plane **replica processes** (`internal/controlplane/statemachine`) plus the
+`kafka-log` runs control-plane **replica processes** (`internal/controlplane/replica`) plus the
 faulting Dynamo loglet (`internal/verify/simulator/fakeservices/fakelogstore`). Brokers still emit `ControlPlaneCall`.
 `internal/verify/simulator/fakeservices/fakelogservice` is a thin bridge: boundary faults (503, timeout, lost
 response, outage) and `ControlPlaneDeliver` / `ControlPlaneReply` routing to `cp-*` nodes (one
 failover hop when a standby refuses). `ControlPlaneRealState` is reference replay of durable
-logstore slots (`statemachine.ReplayPosition`). The speccheck package remains the independent oracle
+logstore slots (`replica.ReplayPosition`). The speccheck package remains the independent oracle
 (decision 21). Replica apply, roles, gap-fill, and checkpoints live only in
-`internal/controlplane/statemachine`.
+`internal/controlplane/replica`.
 
 Run with `go run ./cmd/mdssimulator -scenario kafka-log -seeds 300` (`kafka.ConfigLog`).
 The speccheck-backed preset (`-scenario kafka`) is unchanged.
@@ -58,7 +58,7 @@ retries the same slot (conditional append); abandoning the slot used to wedge
 `drain` so later commits never applied. `ConfigLog` also raises bridge
 `CallerTimeout`, shortens per-Put logstore timeout, and extends Settling/Settle
 under stacked retries. Log knobs stay on `simulator.LogParams`. Mutants use
-`LogParams.Bug` / `statemachine.Config.InjectedBug` (and `LogStoreFaults.Bug` for trim-delete; that mutant was removed with decision 62).
+`LogParams.Bug` / `replica.Config.InjectedBug` (and `LogStoreFaults.Bug` for trim-delete; that mutant was removed with decision 62).
 
 ## Mutants (`internal/verify/simulator/kafka/logmutants_test.go`)
 
@@ -69,7 +69,7 @@ under stacked retries. Log knobs stay on `simulator.LogParams`. Mutants use
 | `InjectedBugPerReplicaWindow` | state machine apply | `logcp-sim: a replica's state equals the replay of the log at its slot` |
 | `InjectedBugGapSkip` | state machine gap-fill (removed, decision 61: the mutant is history) | same digest property |
 
-C2-style conformance for the state machine path is `go test ./internal/controlplane/statemachine -run Lockstep`.
+C2-style conformance for the state machine path is `go test ./internal/controlplane/replica -run Lockstep`.
 
 ## Reachables
 

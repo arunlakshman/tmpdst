@@ -19,7 +19,7 @@ Re-enable three survival-fault families on `kafka-log` so a campaign can kill/re
 
 ## 2. Why this was deferred
 
-CP-DSM-8 cut brokers over to real `cp-*` `internal/controlplane/statemachine` processes + `internal/verify/simulator/fakeservices/fakelogstore`, with `fakelogservice` as a thin bridge.
+CP-DSM-8 cut brokers over to real `cp-*` `internal/controlplane/replica` processes + `internal/verify/simulator/fakeservices/fakelogstore`, with `fakelogservice` as a thin bridge.
 
 A technical follow-up then restored **IO** faults (`PutFail` / `PutLost` mirrored onto logstore; bridge boundary faults left live). That alone exposed a drain wedge:
 
@@ -79,7 +79,7 @@ Comment on the flag (`internal/verify/simulator/roles.go`):
 
 **What (post-CP-DSM-8):** On each **role timer tick**, if this node is the ready **appender**, `maybeReplicaFault` may set `stallUntil = now + StallDur`. While `now < stallUntil`, `canCommit` is false and `roleTick` is a no-op - no Offer commits, no heartbeat/takeover progress from this node. Reachable: `logcp-sim: replica stalled`. Fact name via env: `logcp_stall`.
 
-Implementation: `internal/controlplane/statemachine/role.go` (`maybeReplicaFault`, `roleTick`, `canCommit`).
+Implementation: `internal/controlplane/replica/role.go` (`maybeReplicaFault`, `roleTick`, `canCommit`).
 
 **Wired off in two places today:**
 
@@ -123,7 +123,7 @@ Default if re-enabled: `CrashProb: 0.0001`, `DownDur: [300ms, 1500ms]`.
 ```
 broker CPCall --> fakelogservice bridge (boundary faults: 503/timeout/lost/outage)
                      |
-                  CPOffer to cp-0 / cp-1 (internal/controlplane/statemachine)
+                  CPOffer to cp-0 / cp-1 (internal/controlplane/replica)
                      |
                   Offer / fold / LogAppend|LogRead|LogTrim|Obj*
                      |
@@ -132,7 +132,7 @@ broker CPCall --> fakelogservice bridge (boundary faults: 503/timeout/lost/outag
                   CPReply --> bridge --> CPDone to broker
 ```
 
-- Replica apply, roles, gap-fill, checkpoints: **only** in `internal/controlplane/statemachine`.  
+- Replica apply, roles, gap-fill, checkpoints: **only** in `internal/controlplane/replica`.  
 - `internal/verify/simulator/fakeservices/fakelogservice` on kafka-log is a **bridge**, not the old monolithic replica engine.  
 - Speccheck remains the independent Kafka oracle (decision 21).  
 - Docs: `docs/sim-log-engine.md` (post-CP-DSM-8 rewrite on `toys3`).
@@ -152,7 +152,7 @@ After `cfca8b6`:
 
 ### Critical machine fix already landed (do not undo)
 
-In `internal/controlplane/statemachine/commit.go` (`cfca8b6`):
+In `internal/controlplane/replica/commit.go` (`cfca8b6`):
 
 - **NotApplied and MaybeApplied retry the same slot** (`retrySameSlot`), not `alloc()` a later slot. Abandoning the slot left a permanent gap (progress not armed) and wedged drain.  
 - Commit Offer: fold hit answers immediately; in-flight/queued same `SegmentKey` **retargets** waiter Req/From so a bridge timeout cannot orphan the apply answer onto a dead broker ReqID (flight ReqIDs sorted for determinism).  
@@ -188,8 +188,8 @@ Do **not** flip all three on day one. Prior art: Put coins alone found a wedge.
 
 1. Wire `control_plane.go` from `lp.StallProb` / `lp.CrashProb`.  
 2. In `swarmLog`, stop zeroing; optionally start with a **reduced** menu (e.g. scale but cap lower than PutFail) before full `{0,0.5,1,2,4}` x defaults.  
-3. Unit: extend `internal/controlplane/statemachine` role tests for stall -> takeover -> failback and softCrash -> restore (today `role.go` implements this; dedicated campaign-level coverage was thin after the cutover). Old in-engine references: `internal/verify/simulator/fakeservices/fakelogservice` takeover/trim/crash tests (pre-bridge) and `TestDeterministic` with Stall/Crash probs.  
-4. Bar: `make build`, `go test ./internal/controlplane/statemachine/...`, kafka-log mutants, then `go run ./cmd/mdssimulator -scenario kafka-log -seeds 300` (prefer `-j 1` once if a seed looks nondeterministic - parallel `-j` flakes were seen during the Put follow-up; confirm with `-j 1` then re-check `-j 8`).  
+3. Unit: extend `internal/controlplane/replica` role tests for stall -> takeover -> failback and softCrash -> restore (today `role.go` implements this; dedicated campaign-level coverage was thin after the cutover). Old in-engine references: `internal/verify/simulator/fakeservices/fakelogservice` takeover/trim/crash tests (pre-bridge) and `TestDeterministic` with Stall/Crash probs.  
+4. Bar: `make build`, `go test ./internal/controlplane/replica/...`, kafka-log mutants, then `go run ./cmd/mdssimulator -scenario kafka-log -seeds 300` (prefer `-j 1` once if a seed looks nondeterministic - parallel `-j` flakes were seen during the Put follow-up; confirm with `-j 1` then re-check `-j 8`).  
 5. Expect reachables for `replica stalled` / `replica crashed` / takeover / restore to fire `Sometimes` across the campaign; add them back to `logReachables` / `ExpectReachable` as appropriate.
 
 ### Phase B - CP process attrition (`NoAttrition: false`)
@@ -245,7 +245,7 @@ Do **not** flip all three on day one. Prior art: Put coins alone found a wedge.
 All of the following on a tip based on current `toys3`:
 
 1. `make build` green.  
-2. `go test ./internal/controlplane/statemachine/...` green (add/extend stall & softCrash tests if missing).  
+2. `go test ./internal/controlplane/replica/...` green (add/extend stall & softCrash tests if missing).  
 3. Log mutants: `go test ./internal/verify/simulator/kafka/ -run LogMutant` (or project's usual mutant target) green.  
 4. `go run ./cmd/mdssimulator -scenario kafka-log -seeds 300` - 0 failing (document `-j` used).  
 5. Swarm can produce non-zero `StallProb`/`CrashProb` for some seeds; with Phase B, CP nodes can appear in `sim_crashed` / graceful stop facts.  
@@ -263,9 +263,9 @@ Out of scope unless they block the bar: third replica, log-wide total outage, Dy
 |---|---|
 | `internal/verify/simulator/kafka/config.go` | `configLogWith`, `swarmLog`, timeouts, NoAttrition, reachables |
 | `internal/verify/simulator/kafka/control_plane.go` | Factory wiring; hardcoded Stall/Crash zeros |
-| `internal/controlplane/statemachine/role.go` | `maybeReplicaFault`, `softCrash`, takeover/failback |
-| `internal/controlplane/statemachine/commit.go` | same-slot retry, retarget, tomb |
-| `internal/controlplane/statemachine/config.go` | StallProb/CrashProb field docs |
+| `internal/controlplane/replica/role.go` | `maybeReplicaFault`, `softCrash`, takeover/failback |
+| `internal/controlplane/replica/commit.go` | same-slot retry, retarget, tomb |
+| `internal/controlplane/replica/config.go` | StallProb/CrashProb field docs |
 | `internal/verify/simulator/roles.go` | `Process.NoAttrition` |
 | `internal/verify/simulator/kernel.go` | `attrition()`, `end()`, restart scheduling |
 | `internal/verify/simulator/run.go` | `Attrition` struct |
@@ -278,7 +278,7 @@ Out of scope unless they block the bar: third replica, log-wide total outage, Dy
 
 ## 11. Historical note (pre-CP-DSM-8)
 
-Before the machine cutover, stall/crash lived inside monolithic `internal/verify/simulator/fakeservices/fakelogservice` (`faults()` on tick, `stallUntil` / `crash` / `restart` on replicas). Unit tests such as `TestTakeoverReplayAndFailback` and `TestTrimWindowAndRestore` exercised that model. After CP-DSM-8 those semantics moved to `internal/controlplane/statemachine`; the bridge `fakelogservice` no longer owns replica stall/crash for kafka-log. Prefer machine-level tests and whole-system kafka-log campaigns over resurrecting the old engine tests as the source of truth.
+Before the machine cutover, stall/crash lived inside monolithic `internal/verify/simulator/fakeservices/fakelogservice` (`faults()` on tick, `stallUntil` / `crash` / `restart` on replicas). Unit tests such as `TestTakeoverReplayAndFailback` and `TestTrimWindowAndRestore` exercised that model. After CP-DSM-8 those semantics moved to `internal/controlplane/replica`; the bridge `fakelogservice` no longer owns replica stall/crash for kafka-log. Prefer machine-level tests and whole-system kafka-log campaigns over resurrecting the old engine tests as the source of truth.
 
 ---
 
@@ -286,8 +286,8 @@ Before the machine cutover, stall/crash lived inside monolithic `internal/verify
 
 The three families are on together with the Put and bridge coins. Turning them on found three real problems, all fixed in product code:
 
-1. **Stale reads from a standby.** `FindSegments` / `DescribeTopics` answered from the fold of any Ready node. After the active node was down, the lagging standby answered with an end offset below an acked one, and a consumer got "fetch out of range". Reads are now fresh (`statemachine/reads.go`): read the tail after the read arrived, answer when applied. A node that crashes or hits a trimmed slot refuses its waiting reads so the bridge fails over.
-2. **Silent bad checkpoint.** The sim flips a bit in some object reads. A restored checkpoint with a changed byte lost offsets (seed 29). The checkpoint now ends with a CRC-32 (`stateupdater.CheckSnapshot`); on a bad CRC the node reads the object again.
+1. **Stale reads from a standby.** `FindSegments` / `DescribeTopics` answered from the fold of any Ready node. After the active node was down, the lagging standby answered with an end offset below an acked one, and a consumer got "fetch out of range". Reads are now fresh (`replica/reads.go`): read the tail after the read arrived, answer when applied. A node that crashes or hits a trimmed slot refuses its waiting reads so the bridge fails over.
+2. **Silent bad checkpoint.** The sim flips a bit in some object reads. A restored checkpoint with a changed byte lost offsets (seed 29). The checkpoint now ends with a CRC-32 (`metadata.CheckSnapshot`); on a bad CRC the node reads the object again.
 3. **Ready at slot 0 over a trimmed log.** A failed checkpoint read fell back to catch-up from slot 0, and an old catch-up timer could start a tail check while the restore waited. Now a failed read is retried (`ckptRetry`), and the catch-up timer is invalidated on crash and restart.
 
 4. **A lagging node overwrote a newer checkpoint.** After a restart a standby became active while still behind, wrote its old snapshot to `checkpoint/latest` over a newer one, and the log below the newer one was already trimmed. Both nodes then looped on deleted markers (seed 439). A node now writes a checkpoint only when it has applied the last tail it saw. Limit: this is not a conditional put; a very late stale Put can still overwrite. The proper fix (per-slot checkpoint keys or a conditional write) is a design change, left open. *Superseded: per-slot checkpoint keys are built (decision 62); `checkpoint/latest` no longer exists.*

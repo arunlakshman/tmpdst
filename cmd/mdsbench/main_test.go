@@ -14,10 +14,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/grpc"
 
-	"github.com/manifesterio/mds/internal/controlplane/executor"
-	"github.com/manifesterio/mds/internal/controlplane/server"
-	"github.com/manifesterio/mds/internal/controlplane/statemachine"
-	"github.com/manifesterio/mds/internal/core"
+	cpv1 "github.com/manifesterio/mds/api/controlplane/v1"
 )
 
 type fakeProducer struct {
@@ -60,26 +57,23 @@ func TestMainRunUsage(t *testing.T) {
 	}
 }
 
+type createTopicCP struct {
+	cpv1.UnimplementedControlPlaneServer
+}
+
+func (createTopicCP) CreateTopic(context.Context, *cpv1.CreateTopicRequest) (*cpv1.CreateTopicResponse, error) {
+	return &cpv1.CreateTopicResponse{}, nil
+}
+
 func TestCreateTopic(t *testing.T) {
-	n := server.New(server.Config{
-		Machine: statemachine.Config{
-			CatchUpEvery: core.Duration(time.Millisecond),
-			Rank:         0, Heartbeat: core.Duration(time.Second),
-		},
-		Log: executor.NewMemoryLog(), Objects: executor.NewMemoryObjects(),
-		Self: core.NodeInstance{Node: "cp"},
-	})
-	if err := n.Start(t.Context()); err != nil {
-		t.Fatal(err)
-	}
 	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	gs := grpc.NewServer()
-	n.Register(gs)
+	cpv1.RegisterControlPlaneServer(gs, createTopicCP{})
 	go func() { _ = gs.Serve(ln) }()
-	t.Cleanup(func() { gs.Stop(); _ = n.Close() })
+	t.Cleanup(gs.Stop)
 	addr := ln.Addr().String()
 	if err := createTopic(t.Context(), addr, "tt", 3); err != nil {
 		t.Fatal(err)

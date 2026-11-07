@@ -1,0 +1,7 @@
+.git
+build
+results
+deploy
+docs
+.tools
+**/*.pb.go

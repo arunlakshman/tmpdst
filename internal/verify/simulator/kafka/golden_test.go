@@ -17,15 +17,15 @@ const goldenFile = "testdata/golden_hashes.txt"
 // goldenSeeds is how many seeds, from seed 1, are pinned for each scenario.
 const goldenSeeds = 5
 
-// goldenLines runs the pinned seeds of the broker scenario (kafka) and of the
-// control plane scenario (kafka-log) and returns one line per seed.
+// goldenLines runs the pinned seeds of the broker scenario (kafka) and returns
+// one line per seed. kafka-log golden lines are deferred until CP reconnect
+// (docs/cp-extraction.md).
 func goldenLines() []string {
 	scenarios := []struct {
 		name   string
 		config simulator.Config
 	}{
 		{"kafka", Config(nil)},
-		{"kafka-log", ConfigLog(nil)},
 	}
 	var out []string
 	for _, sc := range scenarios {

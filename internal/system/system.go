@@ -10,12 +10,6 @@ import (
 	"github.com/manifesterio/mds/internal/core"
 )
 
-// Clock is read only by the runtime, at inbox dequeue, to stamp Event.At/Wall.
-type Clock interface {
-	Mono() core.NodeTime
-	Wall() core.RealTime
-}
-
 // ObjectStore is the S3 adapter.
 type ObjectStore interface {
 	Put(ctx context.Context, key string, data []byte) error
@@ -72,7 +66,7 @@ type Executor interface {
 
 // Dependencies is everything nondeterministic a production broker process needs.
 type Dependencies struct {
-	Clock        Clock
+	Clock        core.Clock
 	Objects      ObjectStore
 	ControlPlane ControlPlane
 	Connections  Connections

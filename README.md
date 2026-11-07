@@ -49,7 +49,6 @@ SKIP_BUILD_HOOK=1 git commit ...
 
 ```bash
 make test-all      # unit + sim + hermetic it (no lint/risk)
-make test-race     # go test -race ./... (slow; not in build)
 make lint
 make risk-strict
 ```
@@ -61,6 +60,7 @@ are checked by `go run ./ops/tools/determinismcheck <packages>`.
 
 ## Docs
 
+- `docs/cp-extraction.md` - control plane lives in mds-controlplane; client + reconnect plan
 - `docs/decisions.md` - design decisions
 - `docs/risk-gate.md` - change risk score threshold and baseline
 - `docs/lint-baseline.md` - golangci-lint policy

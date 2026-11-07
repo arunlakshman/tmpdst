@@ -83,7 +83,7 @@ WarpStream replaces Kafka's broker-and-disks design with three planes, and this 
 
 The five ideas that explain everything else in this document:
 
-1. **The agent is stateless; the control plane is the system.** An agent holds no durable state. Everything Kafka normally keeps on broker disks — partition logs, offsets, consumer-group state, producer (idempotence/transaction) state, topic config, ACLs, schemas — is a record in a hosted replicated state machine the code calls the **Virtual Cluster**. The agent binary even embeds that state machine (`pkg/stream/statemachine`, ~9,400 symbols, §10) because `local` mode must *be* the control plane, in memory.
+1. **The agent is stateless; the control plane is the system.** An agent holds no durable state. Everything Kafka normally keeps on broker disks — partition logs, offsets, consumer-group state, producer (idempotence/transaction) state, topic config, ACLs, schemas — is a record in a hosted replicated state machine the code calls the **Virtual Cluster**. The agent binary even embeds that state machine (`pkg/stream/replica`, ~9,400 symbols, §10) because `local` mode must *be* the control plane, in memory.
 
 2. **Object storage is the log; the control plane is the log's index and history.** Record bytes are batched across *many topic-partitions into one immutable file*, PUT to the customer's bucket, and **only then** committed to the control plane via a `PutFile` RPC carrying the file's per-partition batch ranges. The control plane assigns offsets *at commit time* and appends the file to its indexed history. A produce is acked only after both steps. Reads are the mirror image: ask the control plane "which files hold offsets ≥ X?" (`GetFiles`), then range-GET those files (usually from a peer agent's RAM cache, not from S3).
 
@@ -145,7 +145,7 @@ Because it is not stripped, `go tool nm` exposes the full internal package archi
 | Package (under `github.com/warpstreamlabs/warpstream/`) | Symbols | What it is (detail in §6) |
 |---|---:|---|
 | `pkg/stream/pb/streampb` | 10,789 | Protobuf types for the agent↔control-plane stream API (requests/responses, file metadata, datalake `DL*`) |
-| `pkg/stream/statemachine` (+`/datalake`) | 9,397 (+1,528) | The Virtual Cluster state machine itself: files, streams, groups, producers, transactions, schemas |
+| `pkg/stream/replica` (+`/datalake`) | 9,397 (+1,528) | The Virtual Cluster state machine itself: files, streams, groups, producers, transactions, schemas |
 | `pkg/stream/pb/agentpoolpb` | 4,633 | Protobuf for the agent-pool/jobs protocol (job inputs/outputs, heartbeats, agent stats) |
 | `pkg/diagnostics/…` | ~2,800 | Metrics/diagnostics collection, scrapers, forwarders to the backend |
 | `pkg/kafka/types` | 2,609 | Kafka wire protocol types |
@@ -280,7 +280,7 @@ What this proves [RUN]: (a) the in-memory control plane is a real, working Virtu
                                           retries, per-region endpoint         │
 ┌──────────────────────────────────────────────────────────────────────────────▼─────────────┐
 │                        WARPSTREAM HOSTED CONTROL PLANE (not in this image)                  │
-│  Per-cluster "Virtual Cluster" replicated state machine (pkg/stream/statemachine, pkg/rsm): │
+│  Per-cluster "Virtual Cluster" replicated state machine (pkg/stream/replica, pkg/rsm): │
 │  streams(=topics/partitions) · file index & file metadata · offset assignment · producers   │
 │  (idempotence, txns) · consumer groups · ACLs · schemas · KV · jobs queue · feature flags   │
 │  Agent pool: heartbeats, discovery registry, job scheduling, compaction planning authority  │
@@ -349,7 +349,7 @@ services/agent/agent          agent bootstrap: Run(), NewStreamClient(), AzLoade
   ├─ pkg/schemaregistry (+ byocschemaregistry)   SR server & validation
   ├─ pkg/acls, pkg/transaction, pkg/ratelimit, pkg/featureflags …
   └─ (shared with the backend / local mode)
-       pkg/stream/statemachine   the Virtual Cluster state machine
+       pkg/stream/replica   the Virtual Cluster state machine
        pkg/rsm, pkg/rsmy         replicated-state-machine framework
        pkg/warpcluster           RSM/agent-pool actor routing
        nola/virtual              virtual (in-memory) environment for local/playground
@@ -359,7 +359,7 @@ Three structural observations:
 
 1. **The agent is a client of an interface, not of a network address.** `pkg/streamclient` defines the CP contract; `httpStreamClient` implements it over HTTPS for production, and the batching layer depends on an abstraction (`streamclient.FastListStreamClient`, visible in `pkg/processor` generics [BIN]). `local` mode substitutes the embedded RSM. This is why the smoke test in §3.3 works unchanged.
 
-2. **The state machine is a library, linked — not a separate process the agent shells to.** `pkg/stream/statemachine.StreamReplica` (374 methods [BIN]) plus `pkg/rsm.Proposer/LogStore/SnapshotStore` is a complete consensus-replicated store. Its presence in an "agent" binary is explained by `local`/`playground`/tests and by code sharing with the hosted backend (`pkg/warpcluster.RouteRSM`, `rsmActor.handleProposeV2` [BIN] are unmistakably server-side handlers). Do not conclude production agents run consensus — in `agent` mode the CP is remote and reached via `httpStreamClient` (flags `-metadataURL`/`-region`/`-agentKey` would be meaningless otherwise) [INF, strongly anchored].
+2. **The state machine is a library, linked — not a separate process the agent shells to.** `pkg/stream/replica.StreamReplica` (374 methods [BIN]) plus `pkg/rsm.Proposer/LogStore/SnapshotStore` is a complete consensus-replicated store. Its presence in an "agent" binary is explained by `local`/`playground`/tests and by code sharing with the hosted backend (`pkg/warpcluster.RouteRSM`, `rsmActor.handleProposeV2` [BIN] are unmistakably server-side handlers). Do not conclude production agents run consensus — in `agent` mode the CP is remote and reached via `httpStreamClient` (flags `-metadataURL`/`-region`/`-agentKey` would be meaningless otherwise) [INF, strongly anchored].
 
 3. **Everything background is a "job".** `pkg/jobs.Runner` + `agentpoolpb` job types (§14) unify compaction, dead-scanning, datalake maintenance, pipelines, queries, schema migration, metrics publishing and more behind one poll/ack protocol. The CP is therefore not just a metadata store but a **scheduler**, and the agent fleet is its worker pool.
 
@@ -486,7 +486,7 @@ The hosted CP is not shipped in this image — but its *state machine* is, becau
 
 ### 10.1 A replicated state machine per virtual cluster
 
-`pkg/rsm` provides the generic machinery: a `Proposer` (batches proposals, `compressAndWrapBatch`, tracks replica lag), a `LogStore` (`AppendEntry(WithAutoIndex)`, `ReadEntries`, `peerAwareLogStore` with peer-first reads), a `SnapshotStore` (snapshot reader/writer), and replica management with snapshots and catch-up (`cloneStateMachineViaSnapshot`, `loadSnapshotIntoAllReplicas`). `pkg/stream/statemachine` is the *application*: `StreamReplica` applies commands against state whose snapshot surface (`SnapshotReader/Writer.Load*/Write*` [BIN]) enumerates the entire domain model:
+`pkg/rsm` provides the generic machinery: a `Proposer` (batches proposals, `compressAndWrapBatch`, tracks replica lag), a `LogStore` (`AppendEntry(WithAutoIndex)`, `ReadEntries`, `peerAwareLogStore` with peer-first reads), a `SnapshotStore` (snapshot reader/writer), and replica management with snapshots and catch-up (`cloneStateMachineViaSnapshot`, `loadSnapshotIntoAllReplicas`). `pkg/stream/replica` is the *application*: `StreamReplica` applies commands against state whose snapshot surface (`SnapshotReader/Writer.Load*/Write*` [BIN]) enumerates the entire domain model:
 
 `Stream`, `DeletedStream`, `StreamNameIndex`, **`FileMetadata`, `FileIndex`**, `FileIDs`, `Pointer` (compaction pointers), `GroupState`, `GroupOffset`, group-type-consumer members/heartbeats/target-assignments, `Producer`, `Sequence`, `Shards`, `KVStoreItem/KVStoreMetadata`, `TimestampIndex`, `MetricSample`, `ClusterConfiguration`, `HyperlakeSnapshot`, datalake tables/snapshots/files.
 
@@ -806,7 +806,7 @@ See §2.2/§6. Method: `go tool nm` on the unstripped binary, aggregating `githu
 | **Ripcord / lightning** | Optional path that keeps ingesting with CP unreachable, replaying into the CP later |
 | **Orbit** | Proxying/federation against external (non-WarpStream) Kafka clusters |
 | **Tableflow** | The datalake personality: topics → Iceberg tables (`DL*` APIs) |
-| **RSM** | Replicated state machine (`pkg/rsm` framework; `pkg/stream/statemachine` application) — the Virtual Cluster's implementation shape |
+| **RSM** | Replicated state machine (`pkg/rsm` framework; `pkg/stream/replica` application) — the Virtual Cluster's implementation shape |
 
 
 ## Appendix E — Control-plane RPC signatures (extracted protobuf descriptors) [BIN]

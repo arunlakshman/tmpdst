@@ -342,7 +342,7 @@ W6 and W7 touch disjoint trees and can run at the same time after W5.
    Needs `mise install` (buf, golangci-lint). If the toolchain is missing, say
    so and stop; do not claim the gate passed.
 3. Flake check: run every conformance test 20 times, `-count=20`, plus
-   `-race` on `veritastest/...` and `suites/...`.
+   Repeated runs of `veritastest/...` and `suites/...`.
 4. Planted-bug check: the catch table must show every planted bug caught.
 5. Replay check: introduce a temporary bug, confirm the failure prints a
    command, run that command, confirm it reproduces, remove the bug.

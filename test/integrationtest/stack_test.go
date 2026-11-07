@@ -7,40 +7,29 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/internal/broker"
-	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
-	"github.com/manifesterio/mds/internal/controlplane/controlplanetest"
-	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/cpclient"
 	"github.com/manifesterio/mds/internal/system"
 	"github.com/manifesterio/mds/internal/system/production"
-	"github.com/manifesterio/mds/internal/verify/speccheck/specsystem"
 )
 
 // stack is a control plane, an object store and any number of brokers.
 type stack struct {
 	t       *testing.T
-	cp      *controlplaneclient.Client
+	cp      *cpclient.Client
 	objs    system.ObjectStore
 	objCls  system.ErrorClassifier
 	nodes   []*production.Node
 	brokers broker.Config
 }
 
-// newStack boots an in-process gRPC control plane. A nil objs uses an in-memory object store.
+// newStack used to boot an in-process gRPC control plane. That server now lives
+// in mds-controlplane; hermetic IT that needs it skips until reconnect.
 func newStack(t *testing.T, objs system.ObjectStore, cls system.ErrorClassifier) *stack {
 	t.Helper()
-	gn := controlplanetest.StartMem(t)
-	if objs == nil {
-		objs, cls = specsystem.NewObjectStore(), production.MemoryErrorClassifier{}
-	}
-	s := &stack{t: t, cp: gn.Client, objs: objs, objCls: cls,
-		brokers: broker.Config{BatchWindow: core.Duration(20 * time.Millisecond)}}
-	t.Cleanup(func() {
-		for _, n := range s.nodes {
-			n.Kill()
-			<-n.Done()
-		}
-	})
-	return s
+	t.Skip("control plane extracted to mds-controlplane; reconnect later")
+	_ = objs
+	_ = cls
+	return nil
 }
 
 // addBroker starts a broker on 127.0.0.1:0 and returns it with its address.
@@ -55,7 +44,7 @@ func (s *stack) addBroker() *production.Node {
 	n, err := production.Start(s.t.Context(), production.NodeConfig{
 		NodeID: "broker-" + string(rune('a'+len(s.nodes))), Broker: bc, Listener: ln,
 		Objects: s.objs, ObjClassify: s.objCls,
-		ControlPlane: s.cp, CPClassify: controlplaneclient.Classifier{},
+		ControlPlane: s.cp, CPClassify: cpclient.Classifier{},
 		StopGrace: 5 * time.Second, FlushGrace: 5 * time.Second,
 	})
 	if err != nil {

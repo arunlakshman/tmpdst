@@ -1,7 +1,7 @@
 # State updater store bake-off: bbolt vs Pebble (stage 1, decision 49)
 
-Status: measured 2026-10-20 on an Apple M1 (8 cores, SSD), Go 1.24. Not AWS. The state updater (`internal/controlplane/stateupdater`) keeps the
-control-plane state in an embedded ordered KV behind the small `stateupdater.KeyValueStore` seam (`View`, `Update`, `Get`, `Floor`,
+Status: measured 2026-10-20 on an Apple M1 (8 cores, SSD), Go 1.24. Not AWS. The state updater (`internal/controlplane/metadata`) keeps the
+control-plane state in an embedded ordered KV behind the small `kv.Store` seam (`View`, `Update`, `Get`, `Floor`,
 `Ascend`, `Set`, `Delete`); the same state updater ran on both stores. Sync is off: state is rebuilt from the log plus a
 checkpoint, never trusted after a crash.
 
@@ -11,7 +11,7 @@ checkpoint, never trusted after a crash.
   batches per segment), segment key `seg/<32 hex>`, batch Len 8-32 KB.
 - Preload 10,000 or 20,000 segments (2.25 M or 4.5 M batches, 6 to 12 minutes of traffic at 6,450 batches/s), then
   measure 5,000 more. One goroutine applies, as a replica does. "group" is how many commands share one transaction
-  (`StateUpdater.CommitBatch`; a replica applies the slots one tail read delivered together).
+  (`Store.CommitBatch`; a replica applies the slots one tail read delivered together).
 - Target from the task: well above 430 segments/s.
 
 ## Results (measured)
@@ -27,7 +27,7 @@ checkpoint, never trusted after a crash.
 bbolt falls as the state grows (a copy-on-write B+tree rewrites a leaf page per random partition per transaction:
 45-75 k partition-updates/s) and only reaches the 430/s target when 8 or more commands share a transaction, with no
 margin. Pebble is 3-5x faster and flat (150-200 k partition-updates/s). The in-repo benchmark
-(`go test ./internal/controlplane/stateupdater -run xxx -bench Apply150 -benchtime 5000x`, default options, group 8) gives **1,099 segments/s**,
+(`go test ./internal/controlplane/metadata -run xxx -bench Apply150 -benchtime 5000x`, default options, group 8) gives **1,099 segments/s**,
 2.6x the target. Apply time is 0.8 ms per 150-partition segment.
 
 | other, 20k-segment state (4.5 M batches) | bbolt | Pebble |
@@ -73,28 +73,28 @@ is 90 lines if it is ever needed again.
 - `ops/scripts/audit-dep.sh github.com/cockroachdb/pebble@v1.1.5 github.com/cockroachdb/pebble` ran (network was
   available). determinismcheck fails, as expected: goroutines, channels, mutable globals, map ranges, many off-list imports.
 - Record: `docs/dep-audits/github.com/cockroachdb/pebble@v1.1.5.md`. Verdict: **rejected for the deterministic
-  packages, accepted at the edge** (`internal/controlplane/stateupdater/pebblestore` only), like prometheus. No allow-list entry.
+  packages, accepted at the edge** (`internal/controlplane/kv/pebblestore` only), like prometheus. No allow-list entry.
 - `ops/scripts/ci-determinism.sh` passes: the state updater is outside its package list, and so is Pebble.
 - Not audited: the new transitive modules one by one (they are outside the closure; CI does not require it). A
   supply-chain review of `cockroachdb/errors` and `sentry-go` (pulled for Pebble's error type) is still open.
 
 ## Lockstep against speccheck
 
-- `internal/controlplane/statemachine` X2 harness (`lockstep_test.go`): the same seeded interleavings, faults and 3 replicas as X2, with the
-  state updater as every replica's state machine (`statemachine.Machine`) and speccheck beside it as the oracle. Every apply
+- `internal/controlplane/replica` X2 harness (`lockstep_test.go`): the same seeded interleavings, faults and 3 replicas as X2, with the
+  state updater as every replica's state machine (`replica.Replica`) and speccheck beside it as the oracle. Every apply
   and read is answered by both and compared (CPDone equal, including `ErrConflict`, `ErrInvalid`, replays, MaxBytes
   stops); after each commit, `End` and Lookups with MaxBytes at, below and above each running total of Len are
   compared on the touched partitions; at the end a digest of the public queries (DescribeTopics, End and all runs
-  of all partitions) must be equal, and the three replicas' `StateUpdater.StateHash` must agree (it is not speccheck's
+  of all partitions) must be equal, and the three replicas' `Store.StateHash` must agree (it is not speccheck's
   `StateHash`).
 - **100,000 seeds (1..100000), memory KV: 0 failures, 3.91 M slots** (the same slot count as the X2 run of the
   prototype, since the seeds are the same). 2,000 seeds on real Pebble stores: 0 failures, 77,942 slots.
 - Sensitivity: two mutants of the state updater (MaxBytes stop `>=` as `>`, a Lookup skip `<=` as `<`) are caught; the first
   was NOT caught until the edge-MaxBytes probes were added.
-- `controlplanetest` conformance (C3), `stateupdater.Store` as a `controlplane.Store` against speccheck: `TestConformanceStateUpdaterMem` 200 seeds x
+- `controlplanetest` conformance (C3), `metadatastore.Store` (the former `controlplane.Store` adapter) against speccheck: `TestConformanceMetadataMem` 200 seeds x
   200 ops, `TestConformanceStateUpdaterPebble` 20 x 100. Unit tests: checkpoint and restore (a replay of a window key after
   restore returns the ORIGINAL ranges), trim, damaged checkpoints, corrupt records, store failure is fail-stop.
-- Run: `LOGSM_SEEDS=100000 LOGSM_PEBBLE_SEEDS=2000 go test ./internal/controlplane/statemachine -run X2Lockstep -v -timeout 40m` (11 minutes).
+- Run: `LOGSM_SEEDS=100000 LOGSM_PEBBLE_SEEDS=2000 go test ./internal/controlplane/replica -run X2Lockstep -v -timeout 40m` (11 minutes).
 
 ## Not done
 

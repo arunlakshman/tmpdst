@@ -2,10 +2,11 @@ package generator
 
 import (
 	"fmt"
-	"github.com/manifesterio/mds/internal/core"
-	"github.com/manifesterio/mds/internal/verify/speccheck/checker"
 	"slices"
 	"strings"
+
+	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/verify/speccheck/checker"
 )
 
 // CreateTopic is the direct topic-creation call. It is not a ControlPlaneCall because

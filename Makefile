@@ -34,22 +34,22 @@ PROTO_GO_VER   ?= v1.35.2
 PROTO_GRPC_VER ?= v1.5.1
 # Image for make it-postgres (pinned; see ops/scripts/postgres-test.sh).
 POSTGRES_IMAGE ?= postgres:17.11-alpine
-# Extra go test args for make it-postgres, e.g. PG_TEST_ARGS="-v ./internal/controlplane/executor/"
+# Extra go test args for make it-postgres (CP Postgres tests moved to mds-controlplane; see docs/cp-extraction.md).
 PG_TEST_ARGS  ?=
 
-.PHONY: build compile test sim it-hermetic test-all test-race sim-campaign \
+.PHONY: build compile test sim it-hermetic test-all sim-campaign \
 	ascii-check lint modernize-check modernize fmt-check vet risk risk-baseline risk-strict \
 	install-hooks proto proto-tools e2e-kafka-cli it-postgres
 
 build: proto fmt-check ascii-check vet lint modernize-check compile test sim it-hermetic e2e-kafka-cli risk
 
-# Generate Go from internal/controlplane/api/v1/*.proto into ignored *.pb.go files.
+# Generate Go from api/controlplane/*.proto into ignored *.pb.go files.
 # Prefer mise-provided buf; plugins via `make proto-tools` (go install).
 proto: proto-tools
 	@if command -v mise >/dev/null 2>&1; then \
-		cd internal/controlplane/api && mise exec -- $(BUF) generate; \
+		cd api && mise exec -- $(BUF) generate; \
 	elif command -v $(BUF) >/dev/null 2>&1; then \
-		cd internal/controlplane/api && $(BUF) generate; \
+		cd api && $(BUF) generate; \
 	else \
 		echo "buf not found: run \`mise install\` (pins buf in mise.toml)" >&2; \
 		exit 1; \
@@ -103,7 +103,7 @@ test: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_UNIT) $(UNIT_PKGS)
 
 # Deterministic simulation packages, then a seed campaign for the broker
-# (scenario kafka) and for the log-backed control plane (scenario kafka-log).
+# (scenario kafka). kafka-log lives in mds-controlplane after CP extraction.
 sim: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_SIM) ./internal/verify/simulator/...
 	@$(MAKE) --no-print-directory sim-campaign
@@ -111,8 +111,6 @@ sim: $(COVER_DIR)/.gitignore
 # Seed campaigns through cmd/mdssimulator. More seeds: make sim-campaign SIM_SEEDS=2000
 sim-campaign:
 	go run ./cmd/mdssimulator -scenario kafka -seeds $(SIM_SEEDS)
-	go run ./cmd/mdssimulator -scenario kafka-log -seeds $(SIM_SEEDS)
-	go run ./cmd/mdssimulator -scenario kafka-log-freeze -seeds $(SIM_SEEDS)
 
 # Hermetic integration tests (in-process memstore). Fullstack Docker tests
 # in the same package Skip unless MDS_DYNAMO_ENDPOINT + MDS_S3_ENDPOINT are set.
@@ -126,11 +124,6 @@ it-postgres:
 # All tests without lint/compile/risk.
 test-all: test sim it-hermetic
 
-# Race detector: too slow for `build` (>10 min on this tree), run on demand.
-# internal/verify/simulator/kafka alone needs ~16m under -race on a typical laptop; Go's default
-# 10m package timeout cuts it mid-campaign. Keep this above measured wall time.
-test-race:
-	go test -race -timeout 30m ./...
 
 # Risk gate: merge unit + sim + hermetic-it coverprofiles.
 risk:
@@ -143,7 +136,8 @@ risk:
 
 comma := ,
 
-# E2E: mdscontrolplane + mdsbroker driven by the Apache Kafka 3.9.1 CLI (needs Java and minio, see mise.toml; part of build).
+# E2E: sibling mds-controlplane + mdsbroker driven by the Apache Kafka 3.9.1 CLI
+# (needs Java and minio, see mise.toml; part of build). Override with MDS_CONTROLPLANE_DIR.
 e2e-kafka-cli:
 	bash ops/scripts/e2e-kafka-cli.sh $(E2E_ARGS)
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# End-to-end check: run mdscontrolplane, three mdsbrokers and a local S3 server (minio,
-# from mise.toml) from this tree, and drive the brokers with the Apache Kafka
-# 3.9.1 CLI tools (fetched by fetch-kafka-cli.sh). The CLI tools need Java (see
-# mise.toml).
-# Not part of `make build`: run it with `make e2e-kafka-cli`. Pass flags with
-# `make e2e-kafka-cli E2E_ARGS=-v`, or run this script directly. See --help.
+# End-to-end check: run mdscontrolplane (from the sibling mds-controlplane repo),
+# three mdsbrokers and a local S3 server (minio, from mise.toml) from this tree,
+# and drive the brokers with the Apache Kafka 3.9.1 CLI tools (fetched by
+# fetch-kafka-cli.sh). The CLI tools need Java (see mise.toml).
+# Override CP source with MDS_CONTROLPLANE_DIR. Part of `make build` via
+# e2e-kafka-cli. Pass flags with `make e2e-kafka-cli E2E_ARGS=-v`. See --help.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -13,9 +13,10 @@ usage() {
 Usage: ops/scripts/e2e-kafka-cli.sh [-v] [--keep]
        ops/scripts/e2e-kafka-cli.sh -h
 
-Runs mdscontrolplane, three mdsbrokers and a local minio (S3) from this tree, then runs
-the checks in order with the Apache Kafka 3.9.1 CLI tools. Each check prints
-PASS or FAIL. Needs Java 21 (see mise.toml).
+Runs mdscontrolplane (sibling ../mds-controlplane, or MDS_CONTROLPLANE_DIR),
+three mdsbrokers and a local minio (S3) from this tree, then runs the checks
+in order with the Apache Kafka 3.9.1 CLI tools. Each check prints PASS or FAIL.
+Needs Java 21 (see mise.toml).
 
 Options:
   -v, --verbose  For each check, print its header, the Kafka CLI command line
@@ -197,7 +198,16 @@ wait_for_port() {
 }
 
 build_binaries() {
-  go build -o "$TMP/mdscontrolplane" ./cmd/mdscontrolplane || return 1
+  local cp_dir="${MDS_CONTROLPLANE_DIR:-}"
+  if [[ -z $cp_dir ]]; then
+    cp_dir="$(cd "$(dirname "$0")/../../.." && pwd)/mds-controlplane"
+  fi
+  if [[ ! -d $cp_dir/cmd/mdscontrolplane ]]; then
+    echo "mds-controlplane not found at $cp_dir (set MDS_CONTROLPLANE_DIR)" >&2
+    return 1
+  fi
+  # Stubs are gitignored there; generate then build the CP binary into our temp dir.
+  (cd "$cp_dir" && make generate && go build -o "$TMP/mdscontrolplane" ./cmd/mdscontrolplane) || return 1
   go build -o "$TMP/mdsbroker" ./cmd/mdsbroker || return 1
 }
 
@@ -255,7 +265,7 @@ start_stack() {
 
   start_broker 1 -s3-create-bucket || return 1
   start_broker 2 || return 1
-  # Broker 3 serves the idle consumer, so its metrics count that consumer's Lookups.
+  # Broker 3 serves the idle consumer, so its metrics count that consumer's FindSegments.
   BROKER3_METRICS_PORT=$(free_port) || return 1
   start_broker 3 -metrics-addr "127.0.0.1:$BROKER3_METRICS_PORT" || return 1
 }
@@ -398,12 +408,12 @@ check_produce_consume() {
   fi
 }
 
-# Print how many control plane Lookups broker 3 has made (its metrics: one
-# cp_call_seconds sample per gRPC call). Prints 0 before the first one.
+# Print how many control plane FindSegments calls broker 3 has made (its
+# metrics: one cp_call_seconds sample per gRPC call). Prints 0 before the first.
 cp_lookups() {
   local n
   n=$(curl -s "http://127.0.0.1:$BROKER3_METRICS_PORT/metrics" |
-    sed -n 's/^mdsbroker_cp_call_seconds_count{op="Lookup"} //p' | head -n 1) || true
+    sed -n 's/^mdsbroker_cp_call_seconds_count{op="FindSegments"} //p' | head -n 1) || true
   echo "${n:-0}"
 }
 

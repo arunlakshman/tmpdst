@@ -60,6 +60,7 @@ are checked by `go run ./ops/tools/determinismcheck <packages>`.
 
 ## Docs
 
+- `docs/cp-extraction.md` - control plane lives in mds-controlplane; client + reconnect plan
 - `docs/decisions.md` - design decisions
 - `docs/risk-gate.md` - change risk score threshold and baseline
 - `docs/lint-baseline.md` - golangci-lint policy

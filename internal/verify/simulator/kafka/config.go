@@ -5,8 +5,6 @@ import (
 	"github.com/manifesterio/mds/internal/core"
 	"github.com/manifesterio/mds/internal/verify/simulator"
 	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakecontrolplane"
-	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakelogservice"
-	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakelogstore"
 	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakenetwork"
 	"github.com/manifesterio/mds/internal/verify/simulator/fakeservices/fakeobjectstore"
 	"github.com/manifesterio/mds/internal/verify/simulator/internal/campaign"
@@ -28,111 +26,6 @@ func Config(seeds []uint64) simulator.Config { return config(seeds, broker.Injec
 
 func config(seeds []uint64, bug broker.InjectedBug) simulator.Config {
 	return configWith(seeds, bug, DefaultOpts())
-}
-
-// ConfigLog is Config against CP replica machines plus logstore (CP-DSM-8,
-// docs/sim-log-engine.md) instead of the speccheck-backed fakecontrolplane: the same
-// workload, brokers, oracle and fault families. Brokers still emit ControlPlaneCall; the
-// fakelogservice bridge offers them to cp-* processes. The broker keeps its default
-// segment cap (4096): the log has no commit item limit.
-func ConfigLog(seeds []uint64) simulator.Config { return configLog(seeds, broker.InjectedBugNone, 0) }
-
-// ConfigLogFreeze is the log preset plus process freezes. A control plane node
-// is paused for seconds (a long VM pause or garbage collection) and then goes on
-// with its old view. By then the other node has taken over and trimmed past the
-// frozen node's slots, so a put from the frozen node reaches a trimmed slot and
-// the floor check must refuse it. The campaign requires that this path is reached.
-func ConfigLogFreeze(seeds []uint64) simulator.Config {
-	return configLogFreeze(seeds, broker.InjectedBugNone, 0)
-}
-
-func configLogFreeze(seeds []uint64, bug broker.InjectedBug, logBug uint8) simulator.Config {
-	config := configLog(seeds, bug, logBug)
-	withFreezes(&config)
-	config.ExpectReachable = append(config.ExpectReachable, "logcp-sim: put refused at or below the floor")
-	return config
-}
-
-// withFreezes lets the kernel freeze the control plane nodes for 1 to 4 seconds,
-// about 2 to 5 freezes per seed. A freeze is longer than a checkpoint and trim
-// cycle, so the frozen node comes back behind the floor of the log.
-func withFreezes(config *simulator.Config) {
-	config.Attrition.FreezeProb = 0.0004
-	config.Attrition.FreezeDur = [2]core.Duration{1 * core.Second, 4 * core.Second}
-	for i := range config.Processes {
-		if config.Processes[i].Name == "cp" {
-			config.Processes[i].Freezable = true
-		}
-	}
-}
-
-// configLog builds the log preset with a broker mutant and a log engine mutant.
-func configLog(seeds []uint64, bug broker.InjectedBug, logBug uint8) simulator.Config {
-	opts := DefaultOpts()
-	// Stacked bridge + logstore retries need more produce sends than speccheck.
-	opts.MaxAttempts = 16
-	return configLogWith(seeds, bug, logBug, opts)
-}
-
-func configLogWith(seeds []uint64, bug broker.InjectedBug, logBug uint8, opts Opts) simulator.Config {
-	config := configWith(seeds, bug, opts)
-	config.ControlPlane.Log = fakelogservice.DefaultParams()
-	config.ControlPlane.Log.Bug = logBug
-	// Only the no-floor-check mutant lives in the store. Other values stay on the control plane.
-	var storeBug uint8
-	if logBug == fakelogservice.InjectedBugNoFloorCheck {
-		storeBug = logBug
-	}
-	// A replica stall or crash is rolled on each role tick of the active node.
-	// Raise the defaults so a short campaign (20 seeds) still reaches both.
-	config.ControlPlane.Log.StallProb, config.ControlPlane.Log.CrashProb = 0.004, 0.002
-	config.ControlPlane.MaxCommitItems = 0
-	lp := config.ControlPlane.Log
-	config.LogStore = simulator.LogStoreFaults{
-		Enabled:        true,
-		ApplyLatency:   config.ControlPlane.ApplyLatency,
-		RespondLatency: config.ControlPlane.RespondLatency,
-		Unavailable503: lp.PutFail,
-		Timeout:        0,
-		LostResponse:   lp.PutLost,
-		Outage:         simulator.ServiceOutage{},
-		CallerTimeout:  config.ControlPlane.CallerTimeout,
-		Bug:            storeBug,
-		WindowSlots:    lp.WindowSlots,
-		TrimStride:     lp.TrimStride,
-	}
-	config.Processes = append(config.Processes, simulator.Process{
-		Name: "cp", Count: 2, HiddenFromClients: true,
-		FactoryFor: func(sc simulator.SeedConfig) core.MachineFactory { return controlPlaneFactory(sc, opts) },
-	})
-	// Bridge deadline covers several logstore Put attempts. Per-append timeout
-	// must clear ApplyLatency SlowMax (200ms) so a slow Put is not a false
-	// MaybeApplied; keep it below the bridge so PutFail can still retry inside
-	// one CommitSegment.
-	config.ControlPlane.CallerTimeout = 1500 * core.Millisecond
-	config.LogStore.CallerTimeout = 500 * core.Millisecond
-	ph := config.Phases
-	ph.Settling = 25 * core.Second
-	ph.Settle = 20 * core.Second
-	config.Phases = ph
-	config.ExpectReachable = append(config.ExpectReachable, logReachables()...)
-	return config
-}
-
-// logReachables are the log engine's paths a campaign must reach.
-func logReachables() []core.PropertyID {
-	return []core.PropertyID{
-		"logcp-sim: lost slot retried at a later slot",
-		"logcp-sim: Put not answered, same slot repeated",
-		"logcp-sim: replayed key answered from the window",
-		"logcp-sim: log trimmed below a checkpoint",
-		"logcp-sim: standby took over",
-		"logcp-sim: epoch claimed",
-		"logcp-sim: writer fenced, now read-only",
-		"logcp-sim: replica stalled",
-		"logcp-sim: replica crashed",
-		"logcp-sim: replica restored from a checkpoint",
-	}
 }
 
 func configWith(seeds []uint64, bug broker.InjectedBug, opts Opts) simulator.Config {
@@ -157,15 +50,7 @@ func configWith(seeds []uint64, bug broker.InjectedBug, opts Opts) simulator.Con
 			func() simulator.SafetyRule { return campaign.FaultCoverageCheck("kafka:") },
 		},
 		Engines: func(sc simulator.SeedConfig) []simulator.FakeService {
-			es := []simulator.FakeService{fakeobjectstore.New(sc.ObjectStore), controlPlane(sc, opts), fakenetwork.New(sc.Network)}
-			if sc.LogStore.Enabled {
-				ls := fakelogstore.New(sc.LogStore)
-				for _, t := range opts.Topics {
-					ls.CreateTopic(t, opts.Partitions)
-				}
-				es = append(es, ls)
-			}
-			return es
+			return []simulator.FakeService{fakeobjectstore.New(sc.ObjectStore), controlPlane(sc, opts), fakenetwork.New(sc.Network)}
 		},
 		ObjectStore:      p.ObjectStore,
 		ControlPlane:     p.ControlPlane,
@@ -187,40 +72,13 @@ type topicMaker interface {
 }
 
 // controlPlane builds this seed's control plane engine with the workload's topics.
+// Log-backed kafka-log (replica + fakelogstore) moved to mds-controlplane; see docs/cp-extraction.md.
 func controlPlane(sc simulator.SeedConfig, opts Opts) simulator.FakeService {
-	var cp topicMaker = fakecontrolplane.New(sc.ControlPlane)
-	if sc.ControlPlane.Log.Enabled {
-		cp = fakelogservice.New(sc.ControlPlane)
-	}
+	cp := topicMaker(fakecontrolplane.New(sc.ControlPlane))
 	for _, t := range opts.Topics {
 		cp.CreateTopic(t, opts.Partitions)
 	}
 	return cp
-}
-
-// swarmLog picks this seed's log control plane knobs. It draws after every
-// other swarm decision, and only for the log preset, so the speccheck-backed
-// preset keeps its draws.
-func swarmLog(r simulator.CountedRand, c *simulator.SeedConfig) {
-	l := &c.ControlPlane.Log
-	scale := func(p *float64) {
-		menu := [...]float64{0, 0.5, 1, 2, 4}
-		*p = min(*p*menu[r.Intn(len(menu))], 0.4)
-	}
-	scale(&l.PutFail)
-	scale(&l.PutLost)
-	scale(&l.ReadFail)
-	scale(&l.StallProb)
-	scale(&l.CrashProb)
-	l.GroupMax = []int{1, 2, 4, 16}[r.Intn(4)]
-	l.TakeoverAfter = campaign.Millis([]int64{600, 900, 1500}[r.Intn(3)])
-	if r.Chance(0.4) {
-		l.CheckpointEvery, l.KeepSlots, l.TrimStride = []int{8, 16, 24}[r.Intn(3)], []int{16, 32}[r.Intn(2)], 4
-	}
-	c.LogStore.Unavailable503 = l.PutFail
-	c.LogStore.LostResponse = l.PutLost
-	c.LogStore.WindowSlots = l.WindowSlots
-	c.LogStore.TrimStride = l.TrimStride
 }
 
 func swarm(_ uint64, r simulator.CountedRand, c *simulator.SeedConfig) {
@@ -233,9 +91,6 @@ func swarm(_ uint64, r simulator.CountedRand, c *simulator.SeedConfig) {
 		}
 	})
 	swarmBroker(r, c)
-	if c.ControlPlane.Log.Enabled {
-		swarmLog(r, c)
-	}
 }
 
 func swarmBroker(r simulator.CountedRand, c *simulator.SeedConfig) {

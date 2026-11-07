@@ -23,10 +23,9 @@ import (
 // each operation, and its cached spec hash must equal the spec state hash
 // after each step.
 //
-// There is no test for the log engine here. The log engine is now only a
-// bridge for ControlPlaneCall, and it has no replica state machine of its own. Its
-// comparison with speccheck lives in the lockstep tests of package
-// internal/controlplane/replica (see TestLockstepMachineVsSpecCheck).
+// There is no test for the log bridge here. kafka-log (replica + fakelogstore)
+// moved to mds-controlplane with the control plane extraction; see
+// docs/cp-extraction.md. Non-log kafka uses fakecontrolplane against speccheck.
 
 const seedBudget = 50
 

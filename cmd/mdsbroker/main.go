@@ -19,8 +19,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/manifesterio/mds/internal/broker"
-	"github.com/manifesterio/mds/internal/controlplane/controlplaneclient"
 	"github.com/manifesterio/mds/internal/core"
+	"github.com/manifesterio/mds/internal/cpclient"
 	"github.com/manifesterio/mds/internal/system"
 	"github.com/manifesterio/mds/internal/system/awsmetrics"
 	"github.com/manifesterio/mds/internal/system/production"
@@ -121,10 +121,10 @@ func (f brokerFlags) level() (slog.Level, error) {
 // nodeConfig builds the production.NodeConfig that does not depend on the object
 // store or the listener. m is nil when metrics are disabled.
 func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-chan struct{}) (production.NodeConfig, *production.Metrics, uint64, string, error) {
-	cpc := controlplaneclient.New(f.cpURL, nil)
+	cpc := cpclient.New(f.cpURL, nil)
 	config := production.NodeConfig{
 		NodeID: f.nodeID, Broker: broker.DefaultConfig(), Log: log,
-		ControlPlane: cpc, CPClassify: controlplaneclient.Classifier{},
+		ControlPlane: cpc, CPClassify: cpclient.Classifier{},
 		StopGrace: f.grace,
 		Lease:     cpc, LeaseInterval: f.leaseInterval,
 	}

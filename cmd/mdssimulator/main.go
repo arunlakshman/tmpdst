@@ -42,7 +42,7 @@ func parseOptions(args []string, stderr io.Writer) (options, error) {
 	fs.Uint64Var(&o.start, "start", 1, "first seed")
 	fs.Int64Var(&o.one, "seed", -1, "replay this one seed with its log printed")
 	fs.BoolVar(&o.verbose, "v", false, "print one line per seed")
-	fs.StringVar(&o.scenario, "scenario", "kafka", "scenario: kafka, kafka-log (log-backed control plane), kafka-log-freeze (the same plus long process freezes) or echo")
+	fs.StringVar(&o.scenario, "scenario", "kafka", "scenario: kafka or echo (kafka-log deferred: control plane extracted to mds-controlplane)")
 	fs.IntVar(&o.jobs, "j", runtime.NumCPU(), "seed shards to run in parallel")
 	err := fs.Parse(args)
 	return o, err
@@ -53,10 +53,8 @@ func scenarioConfig(name string) (func([]uint64) simulator.Config, bool) {
 	switch name {
 	case "kafka":
 		return kafka.Config, true
-	case "kafka-log":
-		return kafka.ConfigLog, true
-	case "kafka-log-freeze":
-		return kafka.ConfigLogFreeze, true
+	case "kafka-log", "kafka-log-freeze":
+		return nil, false
 	case "echo":
 		return echo.Config, true
 	}
@@ -73,7 +71,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	config, ok := scenarioConfig(o.scenario)
 	if !ok {
-		_, _ = fmt.Fprintf(stderr, "mdssimulator: unknown scenario %q (want kafka, kafka-log, kafka-log-freeze or echo)\n", o.scenario)
+		if o.scenario == "kafka-log" || o.scenario == "kafka-log-freeze" {
+			_, _ = fmt.Fprintf(stderr, "mdssimulator: scenario %q needs external mds-controlplane (kafka-log sim deferred; see docs/cp-extraction.md)\n", o.scenario)
+			return 2
+		}
+		_, _ = fmt.Fprintf(stderr, "mdssimulator: unknown scenario %q (want kafka or echo)\n", o.scenario)
 		return 2
 	}
 	if o.one >= 0 {

@@ -1,5 +1,5 @@
 # Exact import paths the deterministic packages (internal/core, internal/verify/simulator, internal/broker, internal/wire/kafkawire,
-# internal/wire/segmentformat, internal/verify/speccheck, internal/controlplane/replica) may import.
+# internal/wire/segmentformat, internal/verify/speccheck) may import.
 # Matching is EXACT. A trailing "/..." also allows every subpackage.
 # Adding a line requires a dependency audit (scripts/audit-dep.sh) and, for a
 # third-party module, a record under docs/dep-audits/.

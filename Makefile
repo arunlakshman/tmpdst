@@ -6,9 +6,13 @@
 # The commit hook (ops/githooks/pre-commit) runs `make build`.
 # Bypass once: SKIP_BUILD_HOOK=1 git commit ...
 
-.PHONY: build generate test sim sim-campaign determinism install-hooks
+.PHONY: build check-deps test-deps-guard generate test sim sim-campaign determinism install-hooks
 
+# The first step of build is the dependency order check (ops/scripts/check-module-deps.sh).
+# Its own test (test-deps-guard) runs right after it.
 build:
+	$(MAKE) check-deps
+	$(MAKE) test-deps-guard
 	$(MAKE) -C dst build
 	$(MAKE) -C shared build
 	$(MAKE) -C controlplane build
@@ -16,6 +20,13 @@ build:
 	mkdir -p bin
 	cd controlplane && go build -o ../bin/mdscontrolplane ./cmd/mdscontrolplane
 	cd broker && go build -o ../bin/mdsbroker ./cmd/mdsbroker
+
+# Checks that no module requires a module to its right (dst <- shared <- controlplane <- broker).
+check-deps:
+	bash ops/scripts/check-module-deps.sh
+
+test-deps-guard:
+	bash ops/scripts/check-module-deps_test.sh
 
 # Only the control plane generates Go (the proto lives in controlplane/api). The broker imports it.
 generate:

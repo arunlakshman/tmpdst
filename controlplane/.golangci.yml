@@ -17,6 +17,7 @@ linters:
   default: none
   enable:
     - errcheck
+    - depguard
     - govet
     - staticcheck
     - revive
@@ -43,6 +44,13 @@ linters:
     - modernize
     - perfsprint
   settings:
+    depguard:
+      rules:
+        main:
+          list-mode: lax
+          deny:
+            - pkg: "github.com/manifesterio/mds/broker"
+              desc: "controlplane must not import broker (order: dst <- shared <- controlplane <- broker)"
     gosec:
       excludes:
         - G115

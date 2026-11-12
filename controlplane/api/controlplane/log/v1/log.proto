@@ -1,0 +1,199 @@
+syntax = "proto3";
+
+package controlplane.log.v1;
+
+import "controlplane/options/v1/options.proto";
+import "controlplane/shared/v1/shared.proto";
+
+option go_package = "github.com/manifesterio/mds/controlplane/api/controlplane/log/v1;logv1";
+option (controlplane.options.v1.no_converters) = true;
+
+// The messages in this file are internal. They describe the group operations
+// that go into the replicated log and the answers of the group reads. They are
+// NOT part of the ControlPlane service and are never sent over gRPC. They live
+// in the .proto so that the .proto is the one source of the contract value types:
+// the plugin protoc-gen-mdswire writes the Go structs of package contract from
+// them (and no converters, see no_converters above).
+// This package imports controlplane.shared.v1 only, never the service package.
+//
+// Entry, CommitSegment and CreateTopic are the bytes of the log itself.
+// metadb.Encode writes an Entry with deterministic marshaling, and
+// metadb.Decode reads it back. They have no plugin options: metadb converts
+// them to the contract types by hand (metadb/entry_codec.go). No message
+// that an Entry holds has a map field, because the order of a map in the bytes
+// is not fixed.
+
+// Entry is one entry of the replicated log: an id and at most one command. An
+// entry with no command is a no-op (the replica writes those as heartbeats and
+// fences). The field numbers of Entry stay below 16, so the first byte of an
+// entry is never the group marker (0xC5) or the envelope marker (0xC8) that the
+// replica puts in front of entries.
+message Entry {
+  string id = 1;
+  oneof command {
+    CommitSegment commit_segment = 2;
+    CreateTopic create_topic = 3;
+    GroupInstall group_install = 4;
+    GroupAssign group_assign = 5;
+    GroupRemove group_remove = 6;
+    OffsetCommit offset_commit = 7;
+  }
+}
+
+// CommitSegment is the command of contract.CommitSegment: it registers one
+// uploaded object. The offsets of its batches are not in the command; they are
+// decided when the command is applied.
+message CommitSegment {
+  string segment_key = 1;
+  repeated controlplane.shared.v1.PendingBatch batches = 2;
+}
+
+// CreateTopic is the command of contract.CreateTopic.
+message CreateTopic {
+  string name = 1;
+  int32 partitions = 2;
+  bool fail_if_exists = 3;
+}
+
+// GroupMember is one member of a consumer group, as the join phase gives it.
+// Metadata is the subscription of the protocol the group chose.
+message GroupMember {
+  option (controlplane.options.v1.go_struct) = "contract.GroupMember";
+  string member_id = 1;
+  string client_id = 2;
+  string client_host = 3;
+  string group_instance_id = 4;
+  int32 session_timeout_ms = 5;
+  int32 rebalance_timeout_ms = 6;
+  bytes metadata = 7;
+}
+
+// GroupMemberInfo is a member as the state keeps it: its join time and the
+// assignment the leader stored for it (empty until GroupAssign).
+message GroupMemberInfo {
+  option (controlplane.options.v1.go_struct) = "contract.GroupMemberInfo";
+  GroupMember member = 1 [(controlplane.options.v1.go_embed) = true];
+  int64 joined_time_ms = 2;
+  bytes assignment = 3;
+}
+
+// GroupAssignment is the assignment bytes of one member.
+message GroupAssignment {
+  option (controlplane.options.v1.go_struct) = "contract.GroupAssignment";
+  string member = 1;
+  bytes data = 2 [(controlplane.options.v1.go_name) = "Bytes"];
+}
+
+// GroupInstall is the result of a join phase. It starts generation
+// Generation with exactly Members and clears every assignment. Generation
+// must be the current generation + 1 (a new group is at generation 0), else
+// ErrIllegalGeneration. Members must be non-empty, Leader must be one of
+// them, and member ids must be unique (else ErrInvalid). The reply has no
+// response.
+message GroupInstall {
+  option (controlplane.options.v1.go_struct) = "contract.GroupInstall";
+  string group = 1;
+  string protocol_type = 2;
+  string protocol = 3;
+  int32 generation = 4;
+  string leader = 5;
+  int64 time_ms = 6;
+  repeated GroupMember members = 7;
+}
+
+// GroupAssign stores the leader's assignment (SyncGroup) for generation
+// Generation. Generation must be the current one (else ErrIllegalGeneration),
+// Leader must be the group leader (else ErrUnknownMember), and every member
+// in Assignments must be a member (else ErrUnknownMember). Every member
+// gets the bytes listed for it, or none. The reply has no response.
+message GroupAssign {
+  option (controlplane.options.v1.go_struct) = "contract.GroupAssign";
+  string group = 1;
+  int32 generation = 2;
+  string leader = 3;
+  int64 time_ms = 4;
+  repeated GroupAssignment assignments = 5;
+}
+
+// GroupRemove removes members from a group (a leave, or a logged expiry).
+// Unknown members are ignored. Reason is "leave" or "expire" and is kept
+// nowhere. The generation does not change. The reply has no response.
+message GroupRemove {
+  option (controlplane.options.v1.go_struct) = "contract.GroupRemove";
+  string group = 1;
+  repeated string members = 2;
+  int64 time_ms = 3;
+  string reason = 4;
+}
+
+// DescribeGroup reads one group. A group that was never installed has
+// Exists false. State is "Empty" with no members, "Stable" when the stored
+// assignment is for the current generation, else "PreparingSync".
+message DescribeGroup {
+  option (controlplane.options.v1.go_struct) = "contract.DescribeGroup";
+  string group = 1;
+}
+
+// DescribeGroupResponse answers DescribeGroup. Members are sorted by member id.
+message DescribeGroupResponse {
+  option (controlplane.options.v1.go_struct) = "contract.DescribeGroupResp";
+  bool exists = 1;
+  int32 generation = 2;
+  string protocol_type = 3;
+  string protocol = 4;
+  string leader = 5;
+  int32 assigned_generation = 6;
+  string state = 7;
+  repeated GroupMemberInfo members = 8;
+}
+
+// OffsetCommit stores committed offsets for a group. Generation >= 0 is a
+// managed commit: the group must exist (else ErrUnknownMember), Member must
+// be a member (else ErrUnknownMember) and Generation must be the current one
+// (else ErrIllegalGeneration). Generation -1 with an empty Member is a manual
+// commit, allowed only when the group has no members (else
+// ErrIllegalGeneration). Any other generation is ErrIllegalGeneration.
+// Each offset is checked alone: an unknown partition gets ErrUnknownPartition
+// and an offset below 0 gets ErrInvalid, and the others still commit.
+message OffsetCommit {
+  option (controlplane.options.v1.go_struct) = "contract.OffsetCommit";
+  string group = 1;
+  string member = 2;
+  int32 generation = 3;
+  // The wire request has no time; the server sets time_ms when it logs the
+  // command.
+  int64 time_ms = 4;
+  repeated controlplane.shared.v1.PartitionOffset offsets = 5;
+}
+
+// OffsetCommitResponse has one error per request offset, in request order.
+message OffsetCommitResponse {
+  option (controlplane.options.v1.go_struct) = "contract.OffsetCommitResp";
+  // The codes are runtime error codes (the wire message carries them as an enum).
+  repeated int32 errs = 1 [(controlplane.options.v1.go_type) = "runtime.ErrCode"];
+}
+
+// OffsetFetch reads committed offsets of a group. Empty Partitions means
+// every committed partition, sorted by topic and partition.
+message OffsetFetch {
+  option (controlplane.options.v1.go_struct) = "contract.OffsetFetch";
+  string group = 1;
+  repeated controlplane.shared.v1.TopicPartition partitions = 2;
+}
+
+// OffsetFetchResponse has one entry per partition, in the order asked.
+message OffsetFetchResponse {
+  option (controlplane.options.v1.go_struct) = "contract.OffsetFetchResp";
+  repeated controlplane.shared.v1.PartitionOffset offsets = 1;
+}
+
+// ListGroups lists every group that was ever installed.
+message ListGroups {
+  option (controlplane.options.v1.go_struct) = "contract.ListGroups";
+}
+
+// ListGroupsResponse answers ListGroups, sorted by group name.
+message ListGroupsResponse {
+  option (controlplane.options.v1.go_struct) = "contract.ListGroupsResp";
+  repeated controlplane.shared.v1.GroupSummary groups = 1;
+}

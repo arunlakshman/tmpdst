@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package controlplane.options.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/manifesterio/mds/controlplane/api/controlplane/options/v1;optionsv1";
+
+// The options in this file tell the protoc plugin protoc-gen-mdswire
+// (ops/tools/protoc-gen-mdswire) which messages become plain Go value types and
+// how. buf runs the plugin with the other plugins (see buf.gen.yaml), and it
+// writes three files that are not in git:
+//
+//   internal/controlplane/contract/wire_types_gen.go  the structs of package contract
+//   internal/controlplane/domain/rebalance/wire_types_gen.go  the structs of package rebalance
+//   internal/controlplane/wire/wire_gen.go            <Message>ToCore and <Message>FromCore
+//
+// The plugin looks only at messages with go_struct or go_existing. Every message
+// field of such a message must have one of the two as well.
+//
+// The leading comment of a message with go_struct is the doc comment of its
+// struct. When the comment starts with the message name, the Go type name is put
+// in its place. Field comments are not copied.
+//
+// Go types are always written with their package, such as "contract.Offset". The
+// plugin knows the packages contract, rebalance and runtime.
+
+extend google.protobuf.FileOptions {
+  // no_converters gives the messages of the file a struct but no converters,
+  // because they are never sent over gRPC.
+  bool no_converters = 51001;
+}
+
+extend google.protobuf.MessageOptions {
+  // go_struct is the struct that the plugin writes for the message, such as
+  // "contract.CommitSegment". Its package is contract or rebalance.
+  string go_struct = 51001;
+  // go_existing is a Go type that is declared somewhere else, by hand or by the
+  // go_struct of another message, such as "runtime.SegmentRef". The plugin
+  // writes only the converters to and from it.
+  string go_existing = 51002;
+}
+
+extend google.protobuf.FieldOptions {
+  // go_name is the name of the field in the Go type. Without it, the name is the
+  // field name in Go style: member_id becomes MemberID.
+  string go_name = 51001;
+  // go_type is a named Go type for an integer or enum field, such as
+  // "contract.Offset" or "runtime.ErrCode". An enum field must have it.
+  string go_type = 51002;
+  // go_embed makes the field an embedded field of the struct.
+  bool go_embed = 51003;
+}

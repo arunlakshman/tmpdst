@@ -1,67 +1,51 @@
 # mds
 
-Kafka-protocol brokers and a log-backed control plane (Go).
+MDS is a Kafka-protocol broker and a control plane, written in Go. It also has a library for
+deterministic simulation testing. All code is in this one repo.
 
-## Bootstrap
+## Modules
+
+The repo has four Go modules. Each module is a folder with its own `go.mod`.
+
+- `dst/` - the deterministic simulation library. It has no product words (no Kafka, no S3).
+- `shared/` - code that both products use and that has no product words (AWS metrics, HTTP settings, run info).
+- `controlplane/` - the control plane: metadata, topics, consumer groups, and the replicated log that stores them.
+- `broker/` - the Kafka-protocol broker. It talks to the control plane through its client.
+
+## Dependency picture
+
+    dst <- shared <- controlplane <- broker
+
+A module may import only the modules to its left. `make check-deps` checks this rule.
+
+## Build
 
 1. Install [mise](https://mise.jdx.dev).
 2. From the repo root:
 
-```bash
-mise install
-```
+        mise install      # go, golangci-lint, buf, java, minio; also installs the pre-commit hook
+        make build        # the full gate for all four modules, then the two binaries
 
-That installs the pinned toolchain from `mise.toml` (`go`, `golangci-lint`,
-`buf`) and runs `make install-hooks` (mise `postinstall`), which links
-`ops/scripts/githooks/pre-commit` into `.git/hooks/pre-commit`.
+The root `Makefile` only calls the `Makefile` of each module, in the order above.
 
-Without mise:
+Other root targets: `make generate`, `make test`, `make sim`, `make sim-campaign`,
+`make determinism`, `make install-hooks`, `make check-deps`.
 
-```bash
-make install-hooks   # uses ambient go / golangci-lint on PATH
-```
+The commit hook (`ops/githooks/pre-commit`) runs `make build`.
 
-## Build gate
+## Binaries
 
-`make` / `make build` is the full gate, in order:
+`make build` writes two binaries to `bin/`:
 
-| Step | What |
-|------|------|
-| proto | `make proto` regenerates ignored `*.pb.go` via mise `buf` |
-| fmt-check | `gofmt -l` must be empty |
-| ascii-check | `ops/scripts/ascii-check.sh` |
-| vet | `go vet ./...` |
-| lint | `golangci-lint run ./...` (see `.golangci.yml`) |
-| compile | `go build ./...` |
-| test | unit packages (not `internal/verify/simulator`, not `test/integrationtest`) |
-| sim | `go test ./internal/verify/simulator/...` |
-| it-hermetic | `go test ./test/integrationtest/` (in-process memstore) |
-| risk | change risk score <= 20 (`docs/risk-gate.md`) |
+- `bin/mdscontrolplane` - the control plane
+- `bin/mdsbroker` - the broker
 
-Every `git commit` runs that gate via the pre-commit hook (with mise:
-`mise exec -- make build`). Bypass once:
+## Read more
 
-```bash
-SKIP_BUILD_HOOK=1 git commit ...
-```
+Each module has its own `README.md`.
 
-## Other targets
+## Roadmap
 
-```bash
-make test-all      # unit + sim + hermetic it (no lint/risk)
-make lint
-make risk-strict
-```
-
-Docker fullstack tests under `test/integrationtest/` skip unless
-`MDS_DYNAMO_ENDPOINT` and `MDS_S3_ENDPOINT` are set
-(`ops/scripts/it-up.sh`). The import rules for the deterministic packages
-are checked by `go run ./ops/tools/determinismcheck <packages>`.
-
-## Docs
-
-- `docs/cp-extraction.md` - control plane lives in mds-controlplane; client + reconnect plan
-- `docs/decisions.md` - design decisions
-- `docs/risk-gate.md` - change risk score threshold and baseline
-- `docs/lint-baseline.md` - golangci-lint policy
-- `docs/aws-benchmark-runbook.md` - AWS bench / deploy
+- network model - not started
+- disk and crash-state model - not started
+- linearizability checker - not started

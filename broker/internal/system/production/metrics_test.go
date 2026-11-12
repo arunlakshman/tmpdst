@@ -1,0 +1,83 @@
+package production
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/manifesterio/mds/broker/internal/core"
+)
+
+func fact(name string, keyValue ...any) core.Fact {
+	f := core.Fact{Name: name}
+	for i := 0; i+1 < len(keyValue); i += 2 {
+		var v core.FieldValue
+		switch x := keyValue[i+1].(type) {
+		case string:
+			v = core.StringValue(x)
+		case int:
+			v = core.Int64Value(x)
+		}
+		f.Fields = append(f.Fields, core.Field{Key: keyValue[i].(string), Value: v})
+	}
+	return f
+}
+
+func scrape(t *testing.T, m *Metrics) string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	m.Handler().ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/metrics", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	return rec.Body.String()
+}
+
+func TestMetricsFromFacts(t *testing.T) {
+	m := NewMetrics()
+	const ms = 1_000_000
+	m.Observe(fact("segment_sealed", "reason", "size", "bytes", 1000, "parts", 3, "age", 100*ms, "inflight", 2, "buffered", 5000))
+	m.Observe(fact("segment_sealed", "reason", "timer", "bytes", 500, "parts", 100, "age", 200*ms, "inflight", 1, "buffered", 5500))
+	m.Observe(fact("segment_put_done", "put_ns", 40*ms, "attempts", 2))
+	m.Observe(fact("segment_committed", "put_ns", 40*ms, "wait_ns", 60*ms, "commit_ns", 10*ms, "total_ns", 110*ms,
+		"bytes", 1100, "inflight", 1, "buffered", 4500))
+	m.Observe(fact("segment_failed", "total_ns", 7*ms, "inflight", 0, "buffered", 0))
+	m.Observe(fact("backpressure_on", "buffered", 9000))
+	out := scrape(t, m)
+	for _, want := range []string{
+		`mdsbroker_segments_sealed_total{reason="size"} 1`,
+		`mdsbroker_segments_sealed_total{reason="timer"} 1`,
+		`mdsbroker_segment_sealed_batch_bytes_total 1500`,
+		`mdsbroker_segment_put_seconds_count 1`,
+		`mdsbroker_segment_put_seconds_sum 0.04`,
+		`mdsbroker_segment_put_attempts_total 2`,
+		`mdsbroker_segment_queue_wait_seconds_sum 0.06`,
+		`mdsbroker_segment_commit_seconds_sum 0.01`,
+		`mdsbroker_segment_seal_to_ack_seconds_count 2`, // committed and failed
+		`mdsbroker_segments_in_flight_at_seal_bucket{le="1"} 1`,
+		`mdsbroker_segments_in_flight_at_seal_bucket{le="2"} 2`,
+		`mdsbroker_segment_partitions_bucket{le="2"} 0`,
+		`mdsbroker_segment_partitions_bucket{le="4"} 1`,
+		`mdsbroker_segment_partitions_bucket{le="128"} 2`,
+		`mdsbroker_segment_partitions_sum 103`,
+		`mdsbroker_segments_committed_total 1`,
+		`mdsbroker_segment_committed_bytes_total 1100`,
+		`mdsbroker_segments_failed_total 1`,
+		`mdsbroker_segments_in_flight 0`,
+		`mdsbroker_buffered_bytes 9000`,
+		`mdsbroker_reads_paused 1`,
+	} {
+		if !strings.Contains(out, want+"\n") {
+			t.Errorf("missing %q", want)
+		}
+	}
+	m.Observe(fact("backpressure_off", "buffered", 100, "paused_ns", 1500*ms))
+	m.Observe(fact("produce_acked")) // unknown facts are ignored
+	out = scrape(t, m)
+	for _, want := range []string{`mdsbroker_reads_paused 0`, `mdsbroker_reads_paused_seconds_total 1.5`} {
+		if !strings.Contains(out, want+"\n") {
+			t.Errorf("missing %q", want)
+		}
+	}
+}

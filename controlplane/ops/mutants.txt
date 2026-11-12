@@ -1,0 +1,264 @@
+# Mutants for make mutants (see ops/tools/mutate).
+#
+# A mutant is one exact text replacement in one real source file. The tool applies
+# it to a copy of the tree and runs the test command. The mutant is killed when
+# the command fails. If a mutant survives, or its old text is not in the file
+# exactly once, make mutants fails.
+#
+#   mutant NAME            a short name, used in the output and for -only
+#   file PATH              the source file, from the repository root
+#   run COMMAND            the narrowest test command that kills it (no shell). A
+#                          conformance test runs with no seed: test/conformance Run
+#                          makes more rounds of checks until every answer that an
+#                          operation aims at was seen, so a kill does not depend on
+#                          luck. A fixed seed would turn that off.
+#   @@ old                 the old text, exactly, one or more lines
+#   @@ new                 the new text
+#   @@ end
+#
+# The bugs that need a broken environment, not broken code, stay as test doubles:
+# a crash that loses answered writes (TestDoubleCrashLosesAnsweredWrites) and no
+# data after a failure (TestDoubleNoDataAfterFailure), both in
+# test/conformance/doubles_test.go, and the simulator bugs log-overwrite and
+# claim-always-wins in the fake log. The rebalance mutants at the end that run
+# the simulator are real code bugs that only show under faults.
+#
+# The conformance mutants run TestMetadataMemory: it is the target with the most
+# checks (the Pebble one runs fewer, and the wire has no group operations).
+
+# A replay of a known segment key is committed again as a new segment, with new offsets.
+mutant segment-replay-new-offsets
+file internal/controlplane/domain/topic/decide.go
+run go test ./test/conformance -run ^TestMetadataMemory$ -count=1
+@@ old
+	dig := checksum(operation.Batches)
+	if rec, ok := view.Commit(operation.SegmentKey); ok {
+		assigned, code := replay(rec, dig, operation)
+		return nil, assigned, code
+	}
+	if !validCommit(operation) {
+@@ new
+	dig := checksum(operation.Batches)
+	if rec, ok := view.Commit(operation.SegmentKey); ok && false {
+		assigned, code := replay(rec, dig, operation)
+		return nil, assigned, code
+	}
+	if !validCommit(operation) {
+@@ end
+
+# The stop rule of FindSegments is off by one: it stops after MaxBytes, not at it.
+mutant find-segments-stop-off-by-one
+file internal/controlplane/domain/topic/tables.go
+run go test ./test/conformance -run ^TestMetadataMemory$ -count=1
+@@ old
+			if operation.MaxBytes > 0 && size >= int64(operation.MaxBytes) {
+@@ new
+			if operation.MaxBytes > 0 && size > int64(operation.MaxBytes) {
+@@ end
+
+# DescribeTopics answers in reverse name order.
+mutant describe-topics-not-sorted
+file internal/controlplane/domain/topic/tables.go
+run go test ./test/conformance -run ^TestMetadataMemory$ -count=1
+@@ old
+		return true
+	})
+	return runtime.ControlPlaneDone{Resp: response}
+}
+@@ new
+		return true
+	})
+	slices.Reverse(response.Topics)
+	return runtime.ControlPlaneDone{Resp: response}
+}
+@@ end
+
+# writer-offsets: the offsets are not taken from the partition end at apply, but
+# from a base that is one too high (as if the writer had picked it from stale
+# state before the append), so every commit leaves a gap in the committed log.
+mutant writer-offsets
+file internal/controlplane/domain/topic/decide.go
+run go test ./internal/verify/simulator -run ^TestScenariosPass$ -count=1
+@@ old
+			base = view.End(b.TopicPartition)
+@@ new
+			base = view.End(b.TopicPartition) + 1
+@@ end
+
+# per-replica-window: each replica forgets idempotency keys on its own clock, not
+# at a stride of the log.
+mutant per-replica-window
+file internal/controlplane/replica/commit.go
+run go test ./internal/controlplane/replica -run ^TestWindowForgetsKeysOnlyOnLogStride$ -count=1
+@@ old
+	if window > 0 && int64(slot)%stride == 0 && int64(slot) >= window {
+		_, _ = m.meta.Trim(int64(slot) - window)
+	}
+@@ new
+	if window > 0 {
+		_, _ = m.meta.Trim(int64(slot) - window + 1)
+	}
+@@ end
+
+# Group state: the generation check of GroupAssign is dropped.
+mutant group-assign-generation-unchecked
+file internal/controlplane/domain/group/decide.go
+run go test ./test/conformance -run ^TestMetadataMemory$ -count=1
+@@ old
+	if operation.Generation != h.Generation {
+		return nil, runtime.ErrIllegalGeneration
+	}
+	if !found || operation.Leader != h.Leader
+@@ new
+	if !found || operation.Leader != h.Leader
+@@ end
+
+# Group state: GroupAssign accepts an assignment for a member that is not in the group.
+mutant group-assign-unknown-member
+file internal/controlplane/domain/group/decide.go
+run go test ./test/conformance -run ^TestMetadataMemory$ -count=1
+@@ old
+		if !view.HasMember(operation.Group, a.Member) {
+			return nil, runtime.ErrUnknownMember
+		}
+		if _, dup := want[a.Member]; dup {
+@@ new
+		if _, dup := want[a.Member]; dup {
+@@ end
+
+# Group state: OffsetCommit does not check that the member is in the group.
+mutant offset-commit-member-unchecked
+file internal/controlplane/domain/group/decide.go
+run go test ./test/conformance -run ^TestMetadataMemory$ -count=1
+@@ old
+		if !found || !view.HasMember(operation.Group, operation.Member) {
+@@ new
+		if !found {
+@@ end
+
+# The rebalance mutants run TestRebalanceMachine: the machine of domain/rebalance
+# against the rebalance model, with a fake log, timers and failed writes.
+
+# A done round does not raise the generation in memory: the answers name the old one.
+mutant rebalance-generation-not-raised
+file internal/controlplane/domain/rebalance/join.go
+run go test ./test/conformance -run ^TestRebalanceMachine$ -count=1
+@@ old
+	g.generation, g.protocol, g.leader = op.Generation, op.Protocol, op.Leader
+@@ new
+	g.protocol, g.leader = op.Protocol, op.Leader
+@@ end
+
+# The leader's sync answers each parked follower before its assignment is logged.
+mutant rebalance-follower-answered-before-logged
+file internal/controlplane/domain/rebalance/sync.go
+run go test ./test/conformance -run ^TestRebalanceMachine$ -count=1
+@@ old
+	m.startWrite(s, g, op, assignWrite{call: in.Call, op: op})
+@@ new
+	sy := g.phase.(*syncing)
+	for _, mm := range g.members {
+		if call, ok := sy.syncs[mm.id]; ok {
+			delete(sy.syncs, mm.id)
+			var b []byte
+			if i := slices.IndexFunc(list, func(a contract.GroupAssignment) bool { return a.Member == mm.id }); i >= 0 {
+				b = clone(list[i].Bytes)
+			}
+			m.reply(call, runtime.OK, SyncAnswer{Assignment: b})
+			m.touch(mm)
+		}
+	}
+	m.startWrite(s, g, op, assignWrite{call: in.Call, op: op})
+@@ end
+
+# A member whose session ends is not removed: its session starts again.
+mutant rebalance-expired-member-kept
+file internal/controlplane/domain/rebalance/timers.go
+run go test ./test/conformance -run ^TestRebalanceMachine$ -count=1
+@@ old
+	m.remove(s, g, []string{mm.id}, removeWrite{cause: causeSession})
+@@ new
+	m.touch(mm)
+@@ end
+
+# When the term ends, a parked join or sync gets no answer.
+mutant rebalance-parked-call-not-answered
+file internal/controlplane/domain/rebalance/write.go
+run go test ./test/conformance -run ^TestRebalanceMachine$ -count=1
+@@ old
+		if call, ok := g.parked(mm); ok {
+			m.reply(call, runtime.ErrUnavailable, nil)
+		}
+@@ new
+		if _, ok := g.parked(mm); ok {
+			continue
+		}
+@@ end
+
+# After the role is lost the machine keeps its memory and goes on serving.
+mutant rebalance-state-kept-after-role-loss
+file internal/controlplane/domain/rebalance/machine.go
+run go test ./test/conformance -run ^TestRebalanceMachine$ -count=1
+@@ old
+			m.dropMemory(s, nil)
+			m.state = &standby{}
+@@ new
+			m.dropMemory(s, nil)
+@@ end
+
+# The rebalance bugs below show only under faults (a takeover, a fenced writer,
+# a write that fails), and only the simulator kills them: the machine runs
+# there beside a real replica, which answers late, steps down with writes in
+# flight, and changes its role while the machine loads. The unit tests and the
+# conformance target answer every write and read at once, so they do not see
+# the first two at all. The basic scenario (no faults) passes with each of them.
+
+# Request ids start again at each load (a takeover or a broken term), so they
+# repeat in one run of the machine: a late answer of a write of the last term
+# can be taken for the answer of a new request. The host checks that request
+# ids never repeat (docs/rebalance.md sections 3 and 9).
+mutant rebalance-request-ids-repeat
+file internal/controlplane/domain/rebalance/load.go
+run go test ./internal/verify/simulator -run ^TestScenariosPass$ -count=1
+@@ old
+	l := &loading{fresh: fresh,
+@@ new
+	m.nextReq = 0
+	l := &loading{fresh: fresh,
+@@ end
+
+# A role loss that comes while the machine loads is ignored: the load ends and
+# the machine serves, and answers calls OK, on a node that is not the writer.
+mutant rebalance-role-loss-ignored-while-loading
+file internal/controlplane/domain/rebalance/load.go
+run go test ./internal/verify/simulator -run ^TestScenariosPass$ -count=1
+@@ old
+	case RoleChanged:
+		if !in.Active {
+			m.stop(&l.retry)
+			m.state = &standby{}
+		}
+	case ReplicaReply:
+		m.loadReply(l, in)
+@@ new
+	case ReplicaReply:
+		m.loadReply(l, in)
+@@ end
+
+# A group write that the replica refused (ErrUnavailable, as when it steps down
+# with the write in flight) is taken as applied: the joins of the round are
+# answered with a generation that is not in the log, and another node installs
+# the same generation with another leader. The conformance target sees this one
+# too; the unit tests do not.
+mutant rebalance-refused-write-applied
+file internal/controlplane/domain/rebalance/write.go
+run go test ./internal/verify/simulator -run ^TestScenariosPass$ -count=1
+@@ old
+	switch done.Err {
+	case runtime.OK:
+		m.applied(s, g, w)
+@@ new
+	switch done.Err {
+	case runtime.OK, runtime.ErrUnavailable:
+		m.applied(s, g, w)
+@@ end

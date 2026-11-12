@@ -10,6 +10,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/trace"
 )
@@ -166,7 +167,7 @@ func (w *Workload) newBatches(c *client) {
 		}
 		data, err := buildBatch(pp, recs, w.pickCodec())
 		if err != nil {
-			w.env.Unreachable("kafka: client batch builds", core.ContextPair{Key: "err", Value: err.Error()})
+			w.env.Unreachable(clientBatchBuilds, assert.Pair{Key: "err", Value: err.Error()})
 			continue
 		}
 		b.corrupt = !b.idem && w.env.Intn(corruptEvery) == 0
@@ -233,10 +234,10 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 			// Rejected at admission, however many earlier attempts were lost.
 			w.resolve(b, simulator.OpGivenUp, ProduceRes{Base: -1, Code: code, Why: "rejected", Attempts: b.attempts})
 		case b.idem && code == 0:
-			w.env.Unreachable("kafka: a batch with a producer id is accepted")
+			w.env.Unreachable(batchWithProducerIDAccepted)
 			w.resolve(b, simulator.OpResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
 		case b.corrupt && code == 0:
-			w.env.Unreachable("kafka: a batch with a bad CRC is accepted")
+			w.env.Unreachable(batchWithBadCRCAccepted)
 			w.resolve(b, simulator.OpResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
 		case code == 0:
 			w.resolve(b, simulator.OpResultKnown, ProduceRes{Base: base, Attempts: b.attempts})

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 )
 
@@ -103,17 +102,17 @@ func TestMergeReports(t *testing.T) {
 	a := simulator.Report{
 		Seeds: []simulator.SeedResult{{Seed: 1}},
 		Assertions: []simulator.AssertionStat{
-			{Prop: core.PropertyID("inv"), Kind: "always", Checks: 3, Passes: 3},
-			{Prop: core.PropertyID("cov"), Kind: "sometimes", Checks: 2, Passes: 0},
+			{Prop: string("inv"), Kind: "always", Checks: 3, Passes: 3},
+			{Prop: string("cov"), Kind: "sometimes", Checks: 2, Passes: 0},
 		},
 	}
 	b := simulator.Report{
 		Seeds:          []simulator.SeedResult{{Seed: 2}},
 		Nondeterminism: []uint64{2},
 		Assertions: []simulator.AssertionStat{
-			{Prop: core.PropertyID("inv"), Kind: "always", Checks: 2, Passes: 1, Seeds: []uint64{2}, FirstSeed: 2, FirstStep: 8},
-			{Prop: core.PropertyID("cov"), Kind: "sometimes", Checks: 1, Passes: 1, Seeds: []uint64{2}, FirstSeed: 2, FirstStep: 1},
-			{Prop: core.PropertyID("never"), Kind: "unreachable", Checks: 1, Passes: 1},
+			{Prop: string("inv"), Kind: "always", Checks: 2, Passes: 1, Seeds: []uint64{2}, FirstSeed: 2, FirstStep: 8},
+			{Prop: string("cov"), Kind: "sometimes", Checks: 1, Passes: 1, Seeds: []uint64{2}, FirstSeed: 2, FirstStep: 1},
+			{Prop: string("never"), Kind: "unreachable", Checks: 1, Passes: 1},
 		},
 	}
 	got := combineReports([]simulator.Report{a, b})

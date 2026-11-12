@@ -170,12 +170,12 @@ func (b *Broker) updatePressure(acts []core.Action) []core.Action {
 	switch {
 	case !b.pressure && b.bufBytes >= b.config.MaxBufferedBytes:
 		b.pressure, b.pressureAt = true, b.now
-		b.env.Reachable("broker: reads paused by backpressure")
+		b.env.Reachable(readsPausedByBackpressure)
 		acts = append(acts, recordFact("backpressure_on",
 			machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes)}))
 	case b.pressure && b.bufBytes <= b.config.ResumeBufferedBytes:
 		b.pressure = false
-		b.env.Reachable("broker: reads resumed after backpressure")
+		b.env.Reachable(readsResumedAfterBackpressure)
 		acts = append(acts, recordFact("backpressure_off",
 			machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes)},
 			machine.Field{Key: "paused_ns", Value: machine.Int64Value(b.now - b.pressureAt)}))

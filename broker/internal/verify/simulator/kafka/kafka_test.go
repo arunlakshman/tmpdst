@@ -12,6 +12,8 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -80,9 +82,9 @@ func TestDeterminismCanary(t *testing.T) {
 }
 
 // violated returns the violated props of seed, in first-failure order.
-func violated(config simulator.Config, seed uint64) []core.PropertyID {
-	var out []core.PropertyID
-	seen := map[core.PropertyID]bool{}
+func violated(config simulator.Config, seed uint64) []string {
+	var out []string
+	seen := map[string]bool{}
 	for _, f := range simulator.RunSeed(config, seed).Failures {
 		if f.Kind == simulator.FailViolation && !seen[f.Prop] {
 			seen[f.Prop] = true
@@ -99,7 +101,7 @@ func TestMutantsAreCaught(t *testing.T) {
 	cases := []struct {
 		name string
 		bug  broker.InjectedBug
-		prop core.PropertyID
+		prop string
 	}{
 		{"BugEarlyAck: ack before CommitSegment", broker.InjectedBugEarlyAck, "kafka: acked range is committed in the control plane"},
 		{"BugFreshKeyOnRetry: a lost commit is retried under a fresh key", broker.InjectedBugFreshKeyOnRetry, "kafka: a stored batch is committed at most once"},
@@ -114,7 +116,7 @@ func TestMutantsAreCaught(t *testing.T) {
 	for _, c := range cases {
 		testConfig := config(nil, c.bug)
 		caught := uint64(0)
-		var props []core.PropertyID
+		var props []string
 		for s := uint64(1); s <= budget && caught == 0; s++ {
 			if props = violated(testConfig, s); len(props) > 0 {
 				caught = s
@@ -210,14 +212,14 @@ func (e *fakeEnv) NewID() machine.ID {
 	id[0], id[1] = byte(e.n), byte(e.n>>8)
 	return id
 }
-func (*fakeEnv) Maybe(core.FaultPointID) bool                                   { return false }
-func (*fakeEnv) MaybeP(core.FaultPointID, float64) bool                         { return false }
-func (*fakeEnv) Fault(core.FaultPointID, float64) bool                          { return false }
-func (*fakeEnv) Always(bool, core.PropertyID, ...core.ContextPair)              {}
-func (*fakeEnv) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
-func (*fakeEnv) Sometimes(bool, core.PropertyID)                                {}
-func (*fakeEnv) Reachable(core.PropertyID)                                      {}
-func (*fakeEnv) Unreachable(core.PropertyID, ...core.ContextPair)               {}
+func (*fakeEnv) Maybe(fault.NamedSite) bool                                           { return false }
+func (*fakeEnv) MaybeP(fault.NamedSite, float64) bool                                 { return false }
+func (*fakeEnv) Fault(fault.NamedSite, float64) bool                                  { return false }
+func (*fakeEnv) Always(bool, assert.Always, ...assert.Pair)                           {}
+func (*fakeEnv) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {}
+func (*fakeEnv) Sometimes(bool, assert.Sometimes)                                     {}
+func (*fakeEnv) Reachable(assert.Reachable)                                           {}
+func (*fakeEnv) Unreachable(assert.Unreachable, ...assert.Pair)                       {}
 
 type fakeHist struct{ ops []simulator.HistoryOperation }
 

@@ -27,7 +27,7 @@ func config(seeds []uint64, brokers core.MachineFactory) simulator.Config {
 			func() simulator.SafetyRule { return &ackedMeansCommitted{} },
 			func() simulator.SafetyRule { return &readWhatWasAcked{acked: map[int64][]byte{}} },
 			func() simulator.SafetyRule { return &liveness{} },
-			func() simulator.SafetyRule { return campaign.FaultCoverageCheck("echo:") },
+			func() simulator.SafetyRule { return campaign.FaultCoverageCheck(campaign.EchoFaultCoverage) },
 		},
 		Engines: func(sc simulator.SeedConfig) []simulator.FakeService {
 			cp := fakecontrolplane.New(sc.ControlPlane)

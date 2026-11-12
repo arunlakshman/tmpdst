@@ -5,6 +5,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/internal/spec"
+	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/rng"
 )
 
@@ -16,16 +17,16 @@ type everyOther struct {
 	fired map[string]int
 }
 
-func newEveryOther(sites ...string) *everyOther {
+func newEveryOther(sites ...fault.NamedSite) *everyOther {
 	f := &everyOther{on: map[string]bool{}, calls: map[string]int{}, fired: map[string]int{}}
 	for _, s := range sites {
-		f.on[s] = true
+		f.on[s.Name()] = true
 	}
 	return f
 }
 
-func (f *everyOther) Maybe(site runtime.FaultPointID) bool {
-	s := string(site)
+func (f *everyOther) Maybe(site fault.NamedSite) bool {
+	s := site.Name()
 	if !f.on[s] {
 		return false
 	}
@@ -37,8 +38,8 @@ func (f *everyOther) Maybe(site runtime.FaultPointID) bool {
 	return false
 }
 
-func (f *everyOther) MaybeP(site runtime.FaultPointID, _ float64) bool { return f.Maybe(site) }
-func (f *everyOther) Fault(runtime.FaultPointID, float64) bool         { return false }
+func (f *everyOther) MaybeP(site fault.NamedSite, _ float64) bool { return f.Maybe(site) }
+func (f *everyOther) Fault(fault.NamedSite, float64) bool         { return false }
 
 // The sites that do not move time must not change any reply.
 func TestSitesKeepTheReplies(t *testing.T) {
@@ -76,9 +77,9 @@ func TestSitesKeepTheReplies(t *testing.T) {
 		{sec + delay + 5*sec, nil, nil}, // both sessions end: both are removed
 	})
 	h.check("expired", h.phase("g"), stateEmpty)
-	for _, site := range []string{SiteStaleTimer, SiteDuplicateReply, SiteLateDrain, SiteLoadRetry} {
-		if f.fired[site] == 0 {
-			t.Errorf("site %s never fired", site)
+	for _, site := range []fault.NamedSite{SiteStaleTimer, SiteDuplicateReply, SiteLateDrain, SiteLoadRetry} {
+		if f.fired[site.Name()] == 0 {
+			t.Errorf("site %s never fired", site.Name())
 		}
 	}
 }
@@ -92,5 +93,5 @@ func TestSiteTimerLate(t *testing.T) {
 		{delay, nil, nil},
 		{delay + lateMax, nil, []string{"1 OK gen=1 proto=range leader=m1 id=m1 members=[m1:meta-range]"}},
 	})
-	h.check("fired", f.fired[SiteTimerLate] > 0, true)
+	h.check("fired", f.fired[SiteTimerLate.Name()] > 0, true)
 }

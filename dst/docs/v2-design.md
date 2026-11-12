@@ -1948,3 +1948,69 @@ written, and the smallest change that was made.
 4. **`ref` is written twice** (`core.foldInstance` and the kernel's `stateHasher.ref`),
    because `machine.NodeInstance` has no `Fold` method. T1.12 can add one to
    `dst/machine` when the kernel moves.
+
+### T1.6c (dead Log* values)
+
+1. **Only the dead values were deleted.** `LogAppend`, `LogRead`, `LogGetEnd`,
+   `LogDeleteOld`, `LogClaimEpoch`, their five `...Done` events, `LogEntry`,
+   `LogPosition`, their `Fold` and `Tag` methods, their rows in `InboxKindOf`, their cases
+   in the old tag table (`tags_oracle_test.go`), their sample values in `tags_test.go`
+   and `core/logio_test.go`. The tags 14 to 17, 20 (events) and 116 to 119, 121 (actions)
+   are retired and not used again (a note in `core/fold.go`).
+2. **`fakelogservice` and `LogParams` stay (decision D4 does not apply).** They are not
+   the log actions. They are the bridge that carries `ControlPlaneCall` to the control
+   plane replica processes, and the kafka scenario uses them. One line of
+   `fakelogservice/engine_test.go` checked that the bridge does not handle `LogAppend`;
+   it now checks `ObjectPut`.
+3. **No golden hash moved**, as expected: the kafka and echo scenarios never produce
+   these values. No RE-PIN.
+
+### T1.6d (assertions and buggify sites as declared values)
+
+1. **`Rand` stays in `core` and `runtime`; `Faults` and `Assertions` are the dst types.**
+   `core.Environment` and `runtime.Environment` are now
+   `interface{ Rand; machine.Faults; machine.Assertions }`. `PropertyID`,
+   `ContextPair`, `FaultPointID`, `FaultInjector` and `Assertions` are deleted from
+   `core` and `runtime`. Section 3.2 moves `Rand` too, but `machine.Rand` has `Between`
+   and `Chance`, and the broker `Between` excludes its upper end (section 8.1). The
+   product `Rand` has neither, so the broker machines cannot reach the wrong one. The
+   `Rand` move is done together with the kernels (T1.11, T1.12).
+2. **Reports use plain strings.** `AssertionStat.Prop`, `Failure.Prop` and
+   `Config.ExpectReachable` of the broker simulator are `string` (they were
+   `core.PropertyID`). They hold the name of a declared value.
+3. **Where the handles are.** One `assertions.go` per package that uses them (broker
+   `internal/broker`, `echo`, `kafka`, `fakenetwork`, `fakeobjectstore`; control plane
+   `replica`, the simulator), and small tables where a name used to be built with `+`:
+   `fakecompletions` (prefix "obj" and "cp", 6 names each), `fakenetwork` (4 fault
+   kinds, 2 names each), `campaign` (`EchoFaultCoverage`, `KafkaFaultCoverage`), and
+   the control plane simulator (`violation` and `verdict` take an `assert.Always`; the
+   names are written out in full with the prefix "sim: "). The control plane buggify
+   sites are `replica/sites.go` (`logcp_stall`, `logcp_crash`), `rebalance/sites.go` (5)
+   and `simulator/sites.go` (3). `SiteNames()` stays and returns the names of the
+   handles, so the cpsim report is the same.
+4. **Names did not change.** Every name is the string that the call site had. The five
+   cpsim campaign hashes, the golden pins and the cpsim 300-seed report (assertion
+   names, checks and passes) are the same as the baseline.
+5. **`determinismcheck` and the handles.** A package-level variable is a finding for
+   `determinismcheck` in `core`, `runtime` and the simulators. Each handle line has
+   `//determinismcheck:ok catalog handle, set once at start`. The broker allow-list got
+   `dst/assert` and `dst/fault`. A rule "a variable of a dst/assert or dst/fault handle
+   type is fine" in `determinismcheck` would remove about 160 comments.
+6. **`dst/check` still builds names with a prefix.** `Checker.NoHole` and `check.Replay`
+   record "sim: log has no hole" and "sim: log entries decode" from `Prefix + name`.
+   Section 10.1 wants `check.NewChecker` to declare them. That is not done in dst yet,
+   so the control plane simulator declares both names with `var _ = assert.NewAlways(...)`
+   to put them in the catalog. The simulator does not call `Checker.Verdict` any more.
+7. **Catalog and `expectedReachable` (decision D5).** The control plane catalog has 30
+   Reachable names, `expectedReachable` has 27. The three extra are the three that
+   section 10.3 lists. The catalog also has 30 Always names. 15 of them (the `violation`
+   names, such as "sim: run ends") are recorded only when they fail, so a campaign never
+   checks them. Under the rule "an Always with zero checks is never checked" (10.3) they
+   would all be reported. T1.11 must decide: record them once at the end, or leave them
+   out of that rule.
+8. **Fault sites that `SiteNames()` does not list.** `logcp_stall` and `logcp_crash` are
+   `Fault` sites. `fault.Injector.Sites()` does not count `Fault` sites, so
+   `fault.Sites()` (the catalog) would report them as "never fired". T1.11 must handle
+   this when it replaces `SiteNames()` with the catalog.
+9. **The broker has no buggify site.** No broker code calls `Maybe`, `MaybeP` or `Fault`
+   (section 8.2), so the broker catalog has none.

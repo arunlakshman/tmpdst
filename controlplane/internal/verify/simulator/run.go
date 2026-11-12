@@ -57,7 +57,7 @@ func (s *sim) runUntil(stop func() bool) {
 			return true
 		}
 		if s.steps() >= maxSteps {
-			s.violation("run ends", "more than %d steps", maxSteps)
+			s.violation(runEnds, "more than %d steps", maxSteps)
 			return true
 		}
 		return false
@@ -93,7 +93,7 @@ func (s *sim) quietPhase() {
 		return waited >= maxQuiet || (waited >= minQuiet && !s.clients.busy() && s.converged() && s.groupsSettled())
 	})
 	s.stats.QuietMs = (s.now() - start) / int64(machine.Millisecond)
-	s.verdict(s.converged(), "live replicas converge", "after %dms of quiet the replicas did not reach the end of the log together: %s", s.stats.QuietMs, s.describeNodes())
+	s.verdict(s.converged(), liveReplicasConverge, "after %dms of quiet the replicas did not reach the end of the log together: %s", s.stats.QuietMs, s.describeNodes())
 	if s.consumers != nil {
 		s.oracle.checkGroupsSettled(s.consumers)
 	}
@@ -168,7 +168,7 @@ func (s *sim) finish() {
 func (s *sim) checkSameState() {
 	for _, n := range s.nodes {
 		if r := n.replica(); n.up && r != nil {
-			s.verdict(s.store.quietAfter(r.Applied()), "live replicas converge", "%s is at slot %d and misses commands of the log", n.name(), r.Applied())
+			s.verdict(s.store.quietAfter(r.Applied()), liveReplicasConverge, "%s is at slot %d and misses commands of the log", n.name(), r.Applied())
 		}
 	}
 }

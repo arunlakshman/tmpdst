@@ -7,6 +7,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/campaign"
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
+	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -34,11 +35,11 @@ func (*ackedMeansCommitted) AtEnd(simulator.View) {}
 func (i *ackedMeansCommitted) Observe(v simulator.View) {
 	for _, tf := range v.Timeline().Since("echo_acked", &i.cur) {
 		a, ok := parseAck(tf.Fact)
-		v.Assert().Always(ok, "echo: ack fact is well formed")
+		v.Assert().Always(ok, ackFactWellFormed)
 		if !ok {
 			continue
 		}
-		det := []core.ContextPair{{Key: "offset", Value: a.off}, {Key: "key", Value: a.key}}
+		det := []assert.Pair{{Key: "offset", Value: a.off}, {Key: "key", Value: a.key}}
 		var loc core.SegmentRef
 		found := false
 		for _, r := range v.CP().Committed(topicPartition()) {
@@ -46,9 +47,9 @@ func (i *ackedMeansCommitted) Observe(v simulator.View) {
 				loc, found = r.Loc, true
 			}
 		}
-		v.Assert().Always(found, "echo: acked offset is committed", det...)
+		v.Assert().Always(found, ackedOffsetCommitted, det...)
 		obj, have := v.Objects().Object(a.key)
-		v.Assert().Always(have, "echo: acked segment exists in the object store", det...)
+		v.Assert().Always(have, ackedSegmentExistsObjectStore, det...)
 		if !found || !have {
 			continue
 		}
@@ -60,7 +61,7 @@ func (i *ackedMeansCommitted) Observe(v simulator.View) {
 				}
 			}
 		}
-		v.Assert().Always(same, "echo: acked segment holds the acked payload", det...)
+		v.Assert().Always(same, ackedSegmentHoldsAckedPayload, det...)
 	}
 }
 
@@ -82,7 +83,7 @@ func (i *readWhatWasAcked) Observe(v simulator.View) {
 			continue
 		}
 		if prev, dup := i.acked[a.off]; dup {
-			v.Assert().Always(string(prev) == string(a.payload), "echo: an offset is acked with one payload", core.ContextPair{Key: "offset", Value: a.off})
+			v.Assert().Always(string(prev) == string(a.payload), offsetAckedOnePayload, assert.Pair{Key: "offset", Value: a.off})
 		}
 		i.acked[a.off] = a.payload
 	}
@@ -102,8 +103,8 @@ func (i *readWhatWasAcked) Observe(v simulator.View) {
 		}
 		if rest, has := strings.CutPrefix(res, "VAL "); has {
 			want, acked := i.acked[g.Offset]
-			v.Assert().Always(acked && rest == string(want), "echo: GET of an acked offset returns the acked payload",
-				core.ContextPair{Key: "offset", Value: g.Offset}, core.ContextPair{Key: "got", Value: rest})
+			v.Assert().Always(acked && rest == string(want), getReturnsAckedPayload,
+				assert.Pair{Key: "offset", Value: g.Offset}, assert.Pair{Key: "got", Value: rest})
 		}
 	}
 }
@@ -116,10 +117,10 @@ func (*liveness) Observe(simulator.View) {}
 func (l *liveness) AtEnd(v simulator.View) {
 	settling, ok1 := campaign.PhaseStart(v, simulator.PhaseRecovering)
 	settle, ok2 := campaign.PhaseStart(v, simulator.PhaseRecover)
-	v.Assert().Always(ok1 && ok2, "echo: the kernel announced Settling and Settle")
+	v.Assert().Always(ok1 && ok2, kernelAnnouncedSettlingAndSettle)
 	from, to := settling+simulator.Time(campaign.ProgressGraceTime), settle
 	for _, operation := range v.History().Ops() {
-		v.Assert().Always(operation.Outcome != simulator.OpPending, "echo: no request pending at end", core.ContextPair{Key: "op", Value: operation.Op})
+		v.Assert().Always(operation.Outcome != simulator.OpPending, noRequestPendingAtEnd, assert.Pair{Key: "op", Value: operation.Op})
 		if !ok1 || !ok2 || operation.Invoke < from || operation.Invoke >= to {
 			continue
 		}
@@ -131,18 +132,18 @@ func (l *liveness) AtEnd(v simulator.View) {
 		case GetOp:
 			good = strings.HasPrefix(res, "VAL ") || res == "ERR corrupt"
 		}
-		v.Assert().Always(good, "echo: request invoked in Settling succeeds",
-			core.ContextPair{Key: "op", Value: operation.Op}, core.ContextPair{Key: "result", Value: res}, core.ContextPair{Key: "invoke", Value: operation.Invoke})
+		v.Assert().Always(good, requestInSettlingSucceeds,
+			assert.Pair{Key: "op", Value: operation.Op}, assert.Pair{Key: "result", Value: res}, assert.Pair{Key: "invoke", Value: operation.Invoke})
 	}
-	v.Assert().Sometimes(len(v.History().Ops()) > 0, "echo: workload issued requests")
+	v.Assert().Sometimes(len(v.History().Ops()) > 0, workloadIssuedRequests)
 }
 
 // expectReachable is the campaign's coverage contract (Config.ExpectReachable):
 // every fault family and recovery path must fire somewhere in the campaign.
 // The engines and the broker declare these props where the event happens; the
 // list lives here because only the campaign knows what it must see.
-func expectReachable() []core.PropertyID {
-	return []core.PropertyID{
+func expectReachable() []string {
+	return []string{
 		"obj 503 injected", "obj timeout injected", "obj lost response injected", "obj outage started", "obj get corrupted",
 		"cp 503 injected", "cp timeout injected", "cp lost response injected", "cp outage started",
 		"net: partition injected", "net: clog injected", "net: random_close injected", "net: black_hole injected",

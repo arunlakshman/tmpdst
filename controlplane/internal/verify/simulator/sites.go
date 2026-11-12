@@ -13,16 +13,16 @@ import (
 // switched on for some runs and off for others, and when on it fires now and
 // then (dst fault.Injector.Maybe). The names are stable plain strings: a report
 // and a replay refer to them.
-const (
+var (
 	// SiteLogSlowAnswer: the log applies the call, and the reply comes back late.
-	SiteLogSlowAnswer = "sim.log.slow-answer"
+	SiteLogSlowAnswer = fault.NewSite("sim.log.slow-answer") //determinismcheck:ok catalog handle, set once at start
 	// SiteLogShortPage: a LogRead returns fewer entries than it could (at least
 	// one). LogRead promises "up to Limit", and the reader asks again from the
 	// slot after the last entry it got.
-	SiteLogShortPage = "sim.log.short-read-page"
+	SiteLogShortPage = fault.NewSite("sim.log.short-read-page") //determinismcheck:ok catalog handle, set once at start
 	// SiteObjectsSlowAnswer: the object store applies the call, and the reply
 	// comes back late.
-	SiteObjectsSlowAnswer = "sim.objects.slow-answer"
+	SiteObjectsSlowAnswer = fault.NewSite("sim.objects.slow-answer") //determinismcheck:ok catalog handle, set once at start
 )
 
 // slowAnswer is the extra delay of the reply to call: zero, or (when the site
@@ -33,7 +33,7 @@ func (st *storage) slowAnswer(r *rng.Rand, call runtime.IOCall) machine.Duration
 	if isLogCall(call) {
 		site = SiteLogSlowAnswer
 	}
-	if !st.s.env.inj.Maybe(fault.Site(site)) {
+	if !st.s.env.inj.Maybe(fault.Site(site.Name())) {
 		return 0
 	}
 	return machine.Duration(r.Between(int64(slowMin), int64(slowMax)))
@@ -42,7 +42,7 @@ func (st *storage) slowAnswer(r *rng.Rand, call runtime.IOCall) machine.Duration
 // shortPage may cut a page of log entries to a shorter one that still has the
 // first entry. The reader asks again from where the page ended.
 func (st *storage) shortPage(ents []runtime.LogEntry) []runtime.LogEntry {
-	if len(ents) < 2 || !st.s.env.inj.Maybe(fault.Site(SiteLogShortPage)) {
+	if len(ents) < 2 || !st.s.env.inj.Maybe(fault.Site(SiteLogShortPage.Name())) {
 		return ents
 	}
 	return ents[:1+st.s.rand.Intn(len(ents)-1)]
@@ -60,5 +60,5 @@ func isLogCall(call runtime.IOCall) bool {
 // order: the sites of the simulator, then the sites of the rebalance machine
 // (domain/rebalance sites.go), which gets the fault injector of the run.
 func SiteNames() []string {
-	return append([]string{SiteLogSlowAnswer, SiteLogShortPage, SiteObjectsSlowAnswer}, rebalance.SiteNames()...)
+	return append([]string{SiteLogSlowAnswer.Name(), SiteLogShortPage.Name(), SiteObjectsSlowAnswer.Name()}, rebalance.SiteNames()...)
 }

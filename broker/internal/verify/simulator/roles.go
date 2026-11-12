@@ -89,7 +89,7 @@ type View interface {
 	Objects() ObjectStoreRealState
 	CP() ControlPlaneRealState
 	// Assert is how invariants report.
-	Assert() core.Assertions
+	Assert() machine.Assertions
 }
 
 // NodeAlive reports whether one incarnation is up. It is separate from View

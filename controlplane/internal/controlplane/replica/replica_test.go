@@ -15,8 +15,8 @@ import (
 
 type alwaysHit struct {
 	cond    bool
-	prop    runtime.PropertyID
-	details []runtime.ContextPair
+	prop    string
+	details []assert.Pair
 }
 
 type testEnv struct {
@@ -42,16 +42,16 @@ func (e *testEnv) NewID() machine.ID {
 	}
 	return id
 }
-func (e *testEnv) Maybe(runtime.FaultPointID) bool           { return false }
-func (e *testEnv) MaybeP(runtime.FaultPointID, float64) bool { return false }
-func (e *testEnv) Fault(runtime.FaultPointID, float64) bool  { return false }
-func (e *testEnv) Always(cond bool, p runtime.PropertyID, details ...runtime.ContextPair) {
-	e.always = append(e.always, alwaysHit{cond: cond, prop: p, details: details})
+func (e *testEnv) Maybe(fault.NamedSite) bool           { return false }
+func (e *testEnv) MaybeP(fault.NamedSite, float64) bool { return false }
+func (e *testEnv) Fault(fault.NamedSite, float64) bool  { return false }
+func (e *testEnv) Always(cond bool, p assert.Always, details ...assert.Pair) {
+	e.always = append(e.always, alwaysHit{cond: cond, prop: p.Name(), details: details})
 }
-func (e *testEnv) AlwaysOrUnreachable(bool, runtime.PropertyID, ...runtime.ContextPair) {}
-func (e *testEnv) Sometimes(bool, runtime.PropertyID)                                   {}
-func (e *testEnv) Reachable(runtime.PropertyID)                                         {}
-func (e *testEnv) Unreachable(runtime.PropertyID, ...runtime.ContextPair)               {}
+func (e *testEnv) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {}
+func (e *testEnv) Sometimes(bool, assert.Sometimes)                                     {}
+func (e *testEnv) Reachable(assert.Reachable)                                           {}
+func (e *testEnv) Unreachable(assert.Unreachable, ...assert.Pair)                       {}
 
 // timerView is what a test reads from a timer request: which timer, its
 // generation, and when it fires.

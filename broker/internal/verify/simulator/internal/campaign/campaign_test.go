@@ -5,20 +5,21 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
 type stubAssert struct{ sometimes []string }
 
-func (a *stubAssert) Always(bool, core.PropertyID, ...core.ContextPair)              {}
-func (a *stubAssert) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
-func (a *stubAssert) Sometimes(cond bool, p core.PropertyID) {
+func (a *stubAssert) Always(bool, assert.Always, ...assert.Pair)                           {}
+func (a *stubAssert) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {}
+func (a *stubAssert) Sometimes(cond bool, p assert.Sometimes) {
 	if cond {
-		a.sometimes = append(a.sometimes, string(p))
+		a.sometimes = append(a.sometimes, p.Name())
 	}
 }
-func (a *stubAssert) Reachable(core.PropertyID)                        {}
-func (a *stubAssert) Unreachable(core.PropertyID, ...core.ContextPair) {}
+func (a *stubAssert) Reachable(assert.Reachable)                     {}
+func (a *stubAssert) Unreachable(assert.Unreachable, ...assert.Pair) {}
 
 type stubTruth struct{}
 
@@ -38,7 +39,7 @@ func (stubHist) Ops() []simulator.HistoryOperation                        { retu
 
 type stubView struct {
 	tl simulator.Timeline
-	as core.Assertions
+	as machine.Assertions
 }
 
 func (v stubView) Step() uint64                            { return 0 }
@@ -48,7 +49,7 @@ func (v stubView) Timeline() simulator.Timeline            { return v.tl }
 func (v stubView) History() simulator.History              { return stubHist{} }
 func (v stubView) Objects() simulator.ObjectStoreRealState { return stubTruth{} }
 func (v stubView) CP() simulator.ControlPlaneRealState     { return stubTruth{} }
-func (v stubView) Assert() core.Assertions                 { return v.as }
+func (v stubView) Assert() machine.Assertions              { return v.as }
 
 func TestNewAndPhases(t *testing.T) {
 	t.Parallel()
@@ -103,7 +104,7 @@ func TestPhaseStart(t *testing.T) {
 
 func TestFaultCoverage(t *testing.T) {
 	t.Parallel()
-	inv := FaultCoverageCheck("echo:")
+	inv := FaultCoverageCheck(EchoFaultCoverage)
 	if inv.Name() != "FaultCoverage" {
 		t.Fatalf("Name = %q", inv.Name())
 	}

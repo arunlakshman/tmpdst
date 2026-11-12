@@ -197,7 +197,7 @@ func (m *Replica) onObjGetDone(d runtime.ObjectGetDone) []any {
 	m.checkpointRetry = false
 	if len(d.Data) > 0 && metadb.CheckSnapshot(d.Data) != nil {
 		// A changed byte in the read: the stored object may be fine. Read it again.
-		m.env.Reachable("logcp-sim: checkpoint read had a bad CRC, read again")
+		m.env.Reachable(checkpointReadBadCRC)
 		return m.emitCheckpointGet(m.restoreKey)
 	}
 	if len(d.Data) > 0 {
@@ -208,7 +208,7 @@ func (m *Replica) onObjGetDone(d runtime.ObjectGetDone) []any {
 		m.startAt(runtime.LogPosition(slot))
 		m.checkpointSlot = runtime.LogPosition(slot)
 		m.needsCheckpoint = false
-		m.env.Reachable("logcp-sim: replica restored from a checkpoint")
+		m.env.Reachable(replicaRestoredFromCheckpoint)
 		return m.afterRestore()
 	}
 	return m.noCheckpointFound()
@@ -271,7 +271,7 @@ func (m *Replica) onTrimDone(d runtime.LogDeleteOldDone) []any {
 	m.checkpointRequest, m.checkpointStage, m.trimThrough = 0, 0, 0
 	if d.Err == runtime.OK && d.Outcome == runtime.Applied {
 		m.trimFloor = through + 1
-		m.env.Reachable("logcp-sim: log trimmed below a checkpoint")
+		m.env.Reachable(logTrimmedBelowCheckpoint)
 	}
 	return nil
 }

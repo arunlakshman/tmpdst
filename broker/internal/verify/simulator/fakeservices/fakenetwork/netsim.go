@@ -312,11 +312,11 @@ func (e *Engine) ack(ctx simulator.FakeServiceContext, to machine.NodeInstance, 
 	ctx.Deliver(to, ctx.Now()+simulator.Time(e.sample(ctx.Rand())), lane, core.SendDone{Req: request, Conn: conn, Err: err})
 }
 
-func (e *Engine) fault(ctx simulator.FakeServiceContext, kind string, a, b machine.NodeID, extra ...machine.Field) {
+func (e *Engine) fault(ctx simulator.FakeServiceContext, kind netFault, a, b machine.NodeID, extra ...machine.Field) {
 	fields := append([]machine.Field{{Key: "a", Value: machine.StringValue(a)}, {Key: "b", Value: machine.StringValue(b)}}, extra...)
-	ctx.Fault(kind, fields...)
-	ctx.Assert().Sometimes(true, core.PropertyID("net: "+kind))
-	ctx.Assert().Reachable(core.PropertyID("net: " + kind + " injected"))
+	ctx.Fault(kind.name, fields...)
+	ctx.Assert().Sometimes(true, kind.happened)
+	ctx.Assert().Reachable(kind.injected)
 }
 
 // ---- Execute ----
@@ -388,7 +388,7 @@ func (e *Engine) maybePartition(ctx simulator.FakeServiceContext, a, b machine.N
 	l.everCut = true
 	l.healAt = ctx.Now() + simulator.Time(dur)
 	ctx.Self(l.healAt, ctx.Lane("net/heal"), networkHealData{l.a, l.b})
-	e.fault(ctx, "partition", l.a, l.b, machine.Field{Key: "dur", Value: machine.Int64Value(dur)})
+	e.fault(ctx, faultPartition, l.a, l.b, machine.Field{Key: "dur", Value: machine.Int64Value(dur)})
 }
 
 func (e *Engine) send(ctx simulator.FakeServiceContext, from machine.NodeInstance, a core.Send) {
@@ -402,20 +402,20 @@ func (e *Engine) send(ctx simulator.FakeServiceContext, from machine.NodeInstanc
 	d := &p.dirs[s]
 	if !e.recovery {
 		if r.Chance(e.f.RandomCloseProb) {
-			e.fault(ctx, "random_close", from.Node, peer)
+			e.fault(ctx, faultRandomClose, from.Node, peer)
 			e.netAbort(ctx, p)
 			e.ack(ctx, from, p, s, a.Req, a.Conn, core.ErrConnClosed)
 			return
 		}
 		if r.Chance(e.f.BlackHoleProb) && !d.blackhole {
 			d.blackhole = true
-			e.fault(ctx, "black_hole", from.Node, peer)
+			e.fault(ctx, faultBlackHole, from.Node, peer)
 		}
 		e.maybePartition(ctx, from.Node, peer)
 		if r.Chance(e.f.ClogProb) {
 			dur := timeSpan(r, e.f.ClogDur[0], e.f.ClogDur[1])
 			d.clogUntil = ctx.Now() + simulator.Time(dur)
-			e.fault(ctx, "clog", from.Node, peer, machine.Field{Key: "dur", Value: machine.Int64Value(dur)})
+			e.fault(ctx, faultClog, from.Node, peer, machine.Field{Key: "dur", Value: machine.Int64Value(dur)})
 		}
 	}
 	extra := e.pairExtra(ctx, from.Node, peer)
@@ -486,7 +486,7 @@ func (e *Engine) OnInternal(ctx simulator.FakeServiceContext, body any) {
 				e.flush(ctx, p, 1)
 			}
 		}
-		ctx.Assert().Sometimes(true, "net: partition healed")
+		ctx.Assert().Sometimes(true, partitionHealed)
 	}
 }
 
@@ -565,7 +565,7 @@ func (e *Engine) OnCrash(ctx simulator.FakeServiceContext, ref machine.NodeInsta
 				e.sendRst(ctx, p, 1-s, true, e.sample(ctx.Rand()))
 			}
 			e.maybeRemove(p)
-			ctx.Assert().Sometimes(true, "net: crash reset a peer")
+			ctx.Assert().Sometimes(true, crashResetPeer)
 		}
 	}
 }

@@ -261,7 +261,7 @@ func (st *storage) committed(slot runtime.LogPosition, data []byte) {
 		return
 	}
 	if first, ok := st.epochWriter.Note(epoch, writer); !ok {
-		st.s.violation("one writer per epoch", "epoch %d has entries from %q and from %q (slot %d)", epoch, first, writer, slot)
+		st.s.violation(oneWriterPerEpoch, "epoch %d has entries from %q and from %q (slot %d)", epoch, first, writer, slot)
 	}
 }
 
@@ -275,7 +275,7 @@ func (st *storage) applyClaim(c runtime.LogClaimEpoch) runtime.IOResult {
 	}
 	if won {
 		if first, ok := st.epochOwner.Note(epoch, owner); !ok {
-			st.s.violation("one writer per epoch", "epoch %d was won by %q and by %q", epoch, first, owner)
+			st.s.violation(oneWriterPerEpoch, "epoch %d was won by %q and by %q", epoch, first, owner)
 		}
 	}
 	return runtime.LogClaimEpochDone{Req: c.Req, Epoch: epoch, Owner: owner, Won: won, Err: runtime.OK, Outcome: runtime.Applied}

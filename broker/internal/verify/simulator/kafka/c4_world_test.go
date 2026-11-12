@@ -13,6 +13,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -22,20 +23,22 @@ import (
 // in the log twice), exposed to the oracle through a fake simulator.View. Faults
 // mutate the finished world (c4_faults_test.go).
 
-// failures counts violated Always props (the fake core.Assertions).
-type failures map[core.PropertyID]int
+// failures counts violated Always props (the fake machine.Assertions).
+type failures map[string]int
 
-func (f failures) Always(c bool, p core.PropertyID, _ ...core.ContextPair) {
+func (f failures) Always(c bool, p assert.Always, _ ...assert.Pair) {
 	if !c {
-		f[p]++
+		f[p.Name()]++
 	}
 }
-func (f failures) AlwaysOrUnreachable(c bool, p core.PropertyID, d ...core.ContextPair) {
-	f.Always(c, p, d...)
+func (f failures) AlwaysOrUnreachable(c bool, p assert.AlwaysOrUnreachable, _ ...assert.Pair) {
+	if !c {
+		f[p.Name()]++
+	}
 }
-func (f failures) Sometimes(bool, core.PropertyID)                      {}
-func (f failures) Reachable(core.PropertyID)                            {}
-func (f failures) Unreachable(p core.PropertyID, _ ...core.ContextPair) { f[p]++ }
+func (f failures) Sometimes(bool, assert.Sometimes)                   {}
+func (f failures) Reachable(assert.Reachable)                         {}
+func (f failures) Unreachable(p assert.Unreachable, _ ...assert.Pair) { f[p.Name()]++ }
 
 type stats struct{ retries, replays, indetLand, indetNo, rejected, multi int }
 
@@ -78,7 +81,7 @@ func (w *world) Timeline() simulator.Timeline            { return w.tl }
 func (w *world) History() simulator.History              { return (*hist)(w) }
 func (w *world) Objects() simulator.ObjectStoreRealState { return (*objView)(w) }
 func (w *world) CP() simulator.ControlPlaneRealState     { return (*controlPlaneView)(w) }
-func (w *world) Assert() core.Assertions                 { return w.as }
+func (w *world) Assert() machine.Assertions              { return w.as }
 func (w *world) touch()                                  { w.gen++ }
 
 type hist world

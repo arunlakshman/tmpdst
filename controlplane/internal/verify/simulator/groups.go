@@ -45,7 +45,7 @@ func groupsID(idx int) dstsim.ProcessID { return dstsim.ProcessID(fmt.Sprintf("r
 // machineConfig is the machine config of node idx, with the times scaled down
 // like replicaConfig. faults is the fault injector of the run, so the buggify
 // sites of the machine fire and are counted (production passes nil).
-func machineConfig(idx int, faults runtime.FaultInjector) rebalance.Config {
+func machineConfig(idx int, faults machine.Faults) rebalance.Config {
 	return rebalance.Config{
 		ID:               groupsID(idx),
 		InitialDelay:     300 * machine.Millisecond,
@@ -295,11 +295,11 @@ func (h *groupHost) outbound(outs []any) []any {
 			}
 		case rebalance.Reply:
 			if o.Err == runtime.OK && !h.told {
-				h.s.violation("a machine answers only with the role", "%s: the machine answered call %d OK after it was told that it lost the role", h.n.name(), o.Call)
+				h.s.violation(machineAnswersOnlyWithRole, "%s: the machine answered call %d OK after it was told that it lost the role", h.n.name(), o.Call)
 			}
 			out = append(out, groupReply{node: h.n.idx, reply: o})
 		default:
-			h.s.violation("known action", "the rebalance machine of %s returned %T", h.n.name(), o)
+			h.s.violation(knownAction, "the rebalance machine of %s returned %T", h.n.name(), o)
 		}
 	}
 	return out
@@ -308,7 +308,7 @@ func (h *groupHost) outbound(outs []any) []any {
 // newRequest notes a request id of the machine. It must be new in this boot.
 func (h *groupHost) newRequest(req machine.RequestID) {
 	if h.sent[req] {
-		h.s.violation("request ids never repeat", "%s: the machine sent request %d twice in one run", h.n.name(), req)
+		h.s.violation(requestIDsNeverRepeat, "%s: the machine sent request %d twice in one run", h.n.name(), req)
 	}
 	h.sent[req] = true
 }
@@ -354,10 +354,10 @@ func (h *groupHost) deadline(call rebalance.CallID, gc *groupCall) {
 	}
 	delete(h.calls, call)
 	h.gone[call] = true
-	h.s.env.Reachable("rebalance-sim: a call is abandoned")
+	h.s.env.Reachable(callAbandoned)
 	h.deliver(rebalance.CallAbandoned{Call: call})
 	if !gc.try.onPurpose && gc.try.quiet {
-		h.s.violation("every call gets an answer", "%s: %s sent call %d in the quiet tail and had no answer after %dms",
+		h.s.violation(everyCallGetsAnswer, "%s: %s sent call %d in the quiet tail and had no answer after %dms",
 			h.n.name(), gc.try.c.name, call, gc.try.deadline/machine.Millisecond)
 	}
 	gc.try.answered(runtime.ErrTimeout, nil)
@@ -373,10 +373,10 @@ func (h *groupHost) answer(r rebalance.Reply) {
 	gc, ok := h.calls[r.Call]
 	if !ok {
 		if h.gone[r.Call] {
-			h.s.env.Reachable("rebalance-sim: a late reply to an abandoned call is dropped")
+			h.s.env.Reachable(lateReplyAbandonedCallDropped)
 			return
 		}
-		h.s.violation("every call gets one answer", "%s: the machine answered call %d, which does not wait for an answer", h.n.name(), r.Call)
+		h.s.violation(everyCallGetsOneAnswer, "%s: the machine answered call %d, which does not wait for an answer", h.n.name(), r.Call)
 		return
 	}
 	delete(h.calls, r.Call)
@@ -405,18 +405,18 @@ func (h *groupHost) note(in any, outs []any) {
 	case runtime.TimerFired:
 		switch {
 		case o.freshList && h.timers[uint64(in.ID)]:
-			env.Reachable("rebalance-sim: the write timer ends the term")
+			env.Reachable(writeTimerEndsTerm)
 		case o.sentRead:
-			env.Reachable("rebalance-sim: a refused load read is sent again")
+			env.Reachable(refusedLoadReadSentAgain)
 		}
 	case rebalance.ReplicaReply:
 		if o.freshList {
-			env.Reachable("rebalance-sim: a failed write ends the term")
+			env.Reachable(failedWriteEndsTerm)
 		}
 		h.noteRead(in)
 	case rebalance.RoleChanged:
 		if !in.Active && o.unavailable {
-			env.Reachable("rebalance-sim: the role is lost while calls wait")
+			env.Reachable(roleLostWhileCallsWait)
 		}
 	}
 }
@@ -466,9 +466,9 @@ func (h *groupHost) noteRead(in rebalance.ReplicaReply) {
 		return
 	}
 	if r.list && r.fresh {
-		h.s.env.Reachable("rebalance-sim: groups are read again from a fresh tail")
+		h.s.env.Reachable(groupsReadAgainFromFreshTail)
 	}
 	if d, ok := in.Done.Resp.(contract.DescribeGroupResp); ok && r.load && !r.fresh && len(d.Members) > 0 {
-		h.s.env.Reachable("rebalance-sim: a takeover loads a group with members")
+		h.s.env.Reachable(takeoverLoadsGroupMembers)
 	}
 }

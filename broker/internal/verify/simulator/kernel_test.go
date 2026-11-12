@@ -78,7 +78,7 @@ func (e *echo) Execute(ctx FakeServiceContext, from machine.NodeInstance, a core
 	lost := !e.recovered && ctx.Rand().Chance(e.lostProb)
 	if lost {
 		ctx.Fault("echo_response_lost")
-		ctx.Assert().Sometimes(true, "echo lost a response")
+		ctx.Assert().Sometimes(true, echoLostResponse)
 	}
 	ctx.Self(ctx.Now()+Time(e.lat.Sample(ctx.Rand())), 1, echoApply{from, put.Req, lost})
 }
@@ -140,7 +140,7 @@ func stat(res SeedResult, name string) uint64 {
 	panic("no stat " + name)
 }
 
-func hasFailure(res SeedResult, k FailKind, prop core.PropertyID) bool {
+func hasFailure(res SeedResult, k FailKind, prop string) bool {
 	for _, f := range res.Failures {
 		if f.Kind == k && (prop == "" || f.Prop == prop) {
 			return true
@@ -264,7 +264,7 @@ func TestCrashDropsEntriesAndRestartsWithNewIncarnation(t *testing.T) {
 		return &fnInvariant{atEnd: func(v View) {
 			c := v.Timeline().Snapshot("sim_crashed")
 			if len(c) != 1 {
-				v.Assert().Always(false, "one crash fact")
+				v.Assert().Always(false, oneCrashFact)
 				return
 			}
 			crashAt = c[0].At
@@ -273,7 +273,7 @@ func TestCrashDropsEntriesAndRestartsWithNewIncarnation(t *testing.T) {
 					oldPingsAfter++
 				}
 			}
-			v.Assert().Always(len(v.Timeline().Snapshot("started")) == 2, "restarted once")
+			v.Assert().Always(len(v.Timeline().Snapshot("started")) == 2, restartedOnce)
 		}}
 	}}
 	res := RunSeed(config, 1)
@@ -349,11 +349,11 @@ func TestInvariantsSeeFactsAndReport(t *testing.T) {
 		return &fnInvariant{
 			observe: func(v View) { seen += len(v.Timeline().Since("ping", &cur)) },
 			atEnd: func(v View) {
-				v.Assert().Always(len(v.Timeline().Snapshot("ping")) > 0, "saw pings")
-				v.Assert().Always(false, "always broken")
-				v.Assert().Sometimes(false, "never true")
-				v.Assert().Sometimes(true, "pings happen")
-				v.Assert().Reachable("end reached")
+				v.Assert().Always(len(v.Timeline().Snapshot("ping")) > 0, sawPings)
+				v.Assert().Always(false, alwaysBroken)
+				v.Assert().Sometimes(false, neverTrue)
+				v.Assert().Sometimes(true, pingsHappen)
+				v.Assert().Reachable(endReached)
 			},
 		}
 	}}
@@ -507,7 +507,7 @@ func TestWorkloadRole(t *testing.T) {
 	config.Invariants = []func() SafetyRule{func() SafetyRule {
 		return &fnInvariant{atEnd: func(v View) {
 			quiesce = len(v.Timeline().Snapshot("sim_quiesce"))
-			v.Assert().Always(v.History() != nil, "history exists")
+			v.Assert().Always(v.History() != nil, historyExists)
 		}}
 	}}
 	res := RunSeed(config, 1)
@@ -584,8 +584,8 @@ func chaosCfg() Config {
 	config.QuiesceEvery = 250 * machine.Millisecond
 	config.Invariants = []func() SafetyRule{func() SafetyRule {
 		return &fnInvariant{atEnd: func(v View) {
-			v.Assert().Always(v.Objects().Gen() > 0, "engine applied something")
-			v.Assert().Always(len(v.Timeline().Snapshot("put_done")) > 0, "puts complete")
+			v.Assert().Always(v.Objects().Gen() > 0, engineAppliedSomething)
+			v.Assert().Always(len(v.Timeline().Snapshot("put_done")) > 0, putsComplete)
 		}}
 	}}
 	return config
@@ -753,16 +753,16 @@ func TestExpectReachableAndAssertions(t *testing.T) {
 	config.Seeds = []uint64{1, 2}
 	config.Invariants = []func() SafetyRule{func() SafetyRule {
 		return &fnInvariant{atEnd: func(v View) {
-			v.Assert().Reachable("hit")
-			v.Assert().Always(true, "fine")
+			v.Assert().Reachable(hit)
+			v.Assert().Always(true, fine)
 		}}
 	}}
-	config.ExpectReachable = []core.PropertyID{"hit", "never ran", "also never"}
+	config.ExpectReachable = []string{"hit", "never ran", "also never"}
 	rep, err := NewRunner().Run(config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var cov []core.PropertyID
+	var cov []string
 	for _, a := range rep.Coverage {
 		cov = append(cov, a.Prop)
 		if a.Kind != "reachable" || a.Checks != 0 {
@@ -772,7 +772,7 @@ func TestExpectReachableAndAssertions(t *testing.T) {
 	if len(cov) != 2 || cov[0] != "never ran" || cov[1] != "also never" {
 		t.Fatalf("coverage: %v", cov)
 	}
-	got := map[core.PropertyID]AssertionStat{}
+	got := map[string]AssertionStat{}
 	for _, a := range rep.Assertions {
 		got[a.Prop] = a
 	}

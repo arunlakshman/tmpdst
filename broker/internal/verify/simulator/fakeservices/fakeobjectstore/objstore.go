@@ -58,7 +58,7 @@ func New(f simulator.ObjectStoreFaults) *Engine {
 			bit := p.Bits % uint64(len(g.Data)*8)
 			g.Data[bit/8] ^= 1 << (bit % 8) // Data is the spec's copy
 			ctx.Fault("obj_get_corrupt", machine.Field{Key: "req", Value: machine.Uint64Value(g.Req)}, machine.Field{Key: "bit", Value: machine.Uint64Value(bit)})
-			ctx.Assert().Reachable("obj get corrupted")
+			ctx.Assert().Reachable(objGetCorrupted)
 			return g
 		},
 	})

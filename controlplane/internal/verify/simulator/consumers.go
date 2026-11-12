@@ -231,9 +231,9 @@ func (p *consumerPool) expiring(rm contract.GroupRemove) {
 			continue
 		}
 		if c.silentIn == needSync {
-			p.s.env.Reachable("rebalance-sim: a member that never synced is removed")
+			p.s.env.Reachable(memberNeverSyncedRemoved)
 		} else {
-			p.s.env.Reachable("rebalance-sim: a silent member is removed")
+			p.s.env.Reachable(silentMemberRemoved)
 		}
 	}
 }
@@ -550,7 +550,7 @@ func (c *consumer) handle(op *groupOp, code runtime.ErrCode, body rebalance.Answ
 		}
 	case callLeave:
 		if a, ok := body.(rebalance.LeaveAnswer); ok && code == runtime.OK && len(a.Errs) == 1 && a.Errs[0] == runtime.OK {
-			c.pool.s.env.Reachable("rebalance-sim: a leave removes a member")
+			c.pool.s.env.Reachable(leaveRemovesMember)
 		}
 		c.member, c.stage = "", needJoin
 		c.later(machine.Duration(c.pool.s.rand.Between(int64(200*machine.Millisecond), int64(machine.Second))))
@@ -579,7 +579,7 @@ func (c *consumer) handle(op *groupOp, code runtime.ErrCode, body rebalance.Answ
 // code means the group is in a new round.
 func (c *consumer) rejoin(kind callKind, code runtime.ErrCode) {
 	if kind == callHeartbeat && code == runtime.ErrRebalanceInProgress {
-		c.pool.s.env.Reachable("rebalance-sim: a heartbeat is told to join again")
+		c.pool.s.env.Reachable(heartbeatToldJoinAgain)
 	}
 	if code == runtime.ErrUnknownMember {
 		c.member = ""

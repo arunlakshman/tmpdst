@@ -218,17 +218,23 @@ func (s *sim) addFailure(property, detail string) {
 }
 
 // violation records a broken property. The run goes on.
-func (s *sim) violation(property, format string, args ...any) {
-	s.env.Always(false, runtime.PropertyID("sim: "+property), runtime.ContextPair{Key: "detail", Value: fmt.Sprintf(format, args...)})
+func (s *sim) violation(property assert.Always, format string, args ...any) {
+	s.env.Always(false, property, assert.Pair{Key: "detail", Value: fmt.Sprintf(format, args...)})
 }
 
-// check returns the checker that records verdicts as "sim: ..." properties.
+// check returns the checker of dst/check. It records its own verdicts (a log with
+// no hole, log entries that decode) as "sim: ..." properties.
 func (s *sim) check() check.Checker { return check.Checker{Log: s.env.log, Prefix: "sim: "} }
 
 // verdict records a check. It returns ok, so the caller can skip work after a failure.
 // Callers on a hot path test the condition first and call violation themselves.
-func (s *sim) verdict(ok bool, property, format string, args ...any) bool {
-	return s.check().Verdict(ok, property, format, args...)
+func (s *sim) verdict(ok bool, property assert.Always, format string, args ...any) bool {
+	if ok {
+		s.env.Always(true, property)
+		return true
+	}
+	s.env.Always(false, property, assert.Pair{Key: "detail", Value: fmt.Sprintf(format, args...)})
+	return false
 }
 
 func (s *sim) noteBoot(n *simNode) {
@@ -301,7 +307,7 @@ func (s *sim) checkNode(n *simNode) {
 	}
 	if e := r.Epoch(); e > 0 {
 		if first, ok := s.holders.Note(e, n.idx); !ok {
-			s.violation("one writer per epoch", "epoch %d is held by cp-%d and by cp-%d", e, first, n.idx)
+			s.violation(oneWriterPerEpoch, "epoch %d is held by cp-%d and by cp-%d", e, first, n.idx)
 		}
 	}
 	applied := r.Applied()
@@ -311,6 +317,6 @@ func (s *sim) checkNode(n *simNode) {
 	s.applied[n.idx], s.fresh[n.idx] = applied, false
 	h := r.Metadata().StateHash()
 	if prevHash, prevNode, ok := s.prefixes.Note(check.Slot(applied), h, n.idx); !ok {
-		s.violation("replicas agree on every slot", "after %d slots, cp-%d has state %x but cp-%d had %x", applied, n.idx, h, prevNode, prevHash)
+		s.violation(replicasAgreeEverySlot, "after %d slots, cp-%d has state %x but cp-%d had %x", applied, n.idx, h, prevNode, prevHash)
 	}
 }

@@ -54,7 +54,7 @@ type FakeServiceContext interface {
 	// Fault records an injected fault on the timeline as a "sim_fault" fact.
 	Fault(kind string, fields ...machine.Field)
 	// Assert records fault coverage ("lost CP response happened").
-	Assert() core.Assertions
+	Assert() machine.Assertions
 }
 
 // NodeCurrent is the live-incarnation lookup split from FakeServiceContext so that

@@ -14,6 +14,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/trace"
 )
@@ -213,7 +214,7 @@ func (w *Workload) send(c *client, kind requestKind, request kmsg.Request) []cor
 	h := core.RequestHeader{APIKey: request.Key(), APIVersion: c.ver[kind], CorrelationID: c.corr, ClientID: fmt.Sprintf("c%d", c.ID)}
 	data, err := w.codec.EncodeRequest(h, request)
 	if err != nil {
-		w.env.Unreachable("kafka: client request encodes", core.ContextPair{Key: "err", Value: err.Error()})
+		w.env.Unreachable(clientRequestEncodes, assert.Pair{Key: "err", Value: err.Error()})
 		return nil
 	}
 	timeout := w.opts.requestTimeout()

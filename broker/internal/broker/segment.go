@@ -129,16 +129,16 @@ func (b *Broker) seal(why string) []core.Action {
 	bs := b.open.batches
 	switch why {
 	case closeOnSize:
-		b.env.Reachable("broker: segment sealed by size")
+		b.env.Reachable(segmentSealedSize)
 		if len(bs) == 1 {
-			b.env.Reachable("broker: oversize batch sealed alone")
+			b.env.Reachable(oversizeBatchSealedAlone)
 		}
 	case closeOnTimer:
-		b.env.Reachable("broker: segment sealed by timer")
+		b.env.Reachable(segmentSealedTimer)
 	case closeOnBatches:
-		b.env.Reachable("broker: segment sealed by batch cap")
+		b.env.Reachable(segmentSealedBatchCap)
 	case closeOnPartitions:
-		b.env.Reachable("broker: segment sealed by partition cap")
+		b.env.Reachable(segmentSealedPartitionCap)
 	}
 	acts := []core.Action{core.CancelTimer{ID: timerFlush}, recordFact("segment_sealed",
 		machine.Field{Key: "reason", Value: machine.StringValue(why)},
@@ -160,7 +160,7 @@ func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
 	}
 	data, entries, err := segmentformat.Encode(fb)
 	if err != nil {
-		b.env.Unreachable("broker: admitted batches cannot be encoded")
+		b.env.Unreachable(admittedBatchCannotEncode)
 		for _, pb := range bs {
 			b.answerPart(pb, errUnknownServer, core.BatchRange{}, "")
 		}
@@ -237,25 +237,25 @@ func (b *Broker) onCommit(s *segment, e core.ControlPlaneDone) []core.Action {
 		for i := 0; shape && i < len(s.batches); i++ {
 			shape = response.Assigned[i].TopicPartition == s.batches[i].topicPartition
 		}
-		b.env.AlwaysOrUnreachable(shape, "broker: commit answers every batch in order")
+		b.env.AlwaysOrUnreachable(shape, commitAnswersEveryBatchOrder)
 		if !shape {
 			return b.failSegment(s, errUnknownServer)
 		}
 		if s.attempts >= b.config.MaxAttempts {
 			// Past the old six-attempt budget (audit item 8): the outage was
 			// ridden out instead of failing the segment.
-			b.env.Reachable("broker: commit succeeded after the old retry budget")
+			b.env.Reachable(commitSucceededAfterOldRetryBudget)
 		}
 		return b.committed(s, response.Assigned)
 	case core.ErrInvalid:
 		return b.failSegment(s, errUnknownServer)
 	case core.ErrConflict:
 		// The same key with a different request: a broker bug, not a race.
-		b.env.Unreachable("broker: commit key reused with a different request")
+		b.env.Unreachable(commitKeyReusedDifferentRequest)
 		return b.failSegment(s, errUnknownServer)
 	case core.ErrTooLarge:
 		// The segment exceeds the CP's commit limit; retrying cannot help.
-		b.env.Unreachable("broker: segment exceeds the control plane's commit size")
+		b.env.Unreachable(segmentExceedsCommitSize)
 		return b.failSegment(s, errUnknownServer)
 	}
 	// MaybeApplied or a transient error: resend the identical request under
@@ -319,7 +319,7 @@ func (b *Broker) failSegment(s *segment, code kafkaErrorCode) []core.Action {
 func (b *Broker) retryPut(s *segment) []core.Action {
 	if s.attempts++; s.attempts >= b.config.MaxAttempts {
 		// The write may still land later: unbounded MaybeApplied (decision 15).
-		b.env.Reachable("broker: segment retries exhausted")
+		b.env.Reachable(segmentRetriesExhausted)
 		return b.failSegment(s, errRequestTimedOut)
 	}
 	s.state, s.request = segmentUploadRetry, 0
@@ -336,7 +336,7 @@ func (b *Broker) retryPut(s *segment) []core.Action {
 func (b *Broker) retryCommit(s *segment) []core.Action {
 	left := b.config.CommitDeadline - machine.Duration(b.now-s.commitAt)
 	if left <= 0 {
-		b.env.Reachable("broker: commit deadline exceeded")
+		b.env.Reachable(commitDeadlineExceeded)
 		return b.failSegment(s, errRequestTimedOut)
 	}
 	s.attempts++
@@ -361,7 +361,7 @@ func (b *Broker) segmentTimer(s *segment, gen machine.TimerVersion) []core.Actio
 	case segmentUploadRetry:
 		return b.put(s)
 	case segmentCommitRetry:
-		b.env.Reachable("broker: commit retried")
+		b.env.Reachable(commitRetried)
 		return b.commit(s)
 	}
 	return nil

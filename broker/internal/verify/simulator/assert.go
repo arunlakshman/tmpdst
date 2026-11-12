@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -24,11 +26,11 @@ func isSafety(kind string) bool {
 }
 
 type statKey struct {
-	prop core.PropertyID
+	prop string
 	kind string
 }
 
-// assertions implements core.Assertions for one seed. It records and continues
+// assertions implements machine.Assertions for one seed. It records and continues
 // (lesson 11): a violated Always becomes a FailViolation (the first per
 // property per seed; later ones only bump Checks) and the run goes on.
 //
@@ -47,7 +49,7 @@ func newAssertions(r *run) *assertions {
 	return &assertions{r: r, idx: map[statKey]int{}, flagged: map[statKey]bool{}}
 }
 
-func (a *assertions) record(kind string, p core.PropertyID, ok bool, details []core.ContextPair) {
+func (a *assertions) record(kind, p string, ok bool, details []assert.Pair) {
 	k := statKey{p, kind}
 	i, found := a.idx[k]
 	if !found {
@@ -72,7 +74,7 @@ func (a *assertions) record(kind string, p core.PropertyID, ok bool, details []c
 	}
 }
 
-func formatViolation(kind string, details []core.ContextPair) string {
+func formatViolation(kind string, details []assert.Pair) string {
 	var b strings.Builder
 	b.WriteString(kind)
 	b.WriteString(" violated")
@@ -82,59 +84,59 @@ func formatViolation(kind string, details []core.ContextPair) string {
 	return b.String()
 }
 
-func (a *assertions) Always(cond bool, p core.PropertyID, d ...core.ContextPair) {
-	a.record(kindMustAlwaysHold, p, cond, d)
+func (a *assertions) Always(cond bool, p assert.Always, d ...assert.Pair) {
+	a.record(kindMustAlwaysHold, p.Name(), cond, d)
 }
-func (a *assertions) AlwaysOrUnreachable(cond bool, p core.PropertyID, d ...core.ContextPair) {
-	a.record(kindMustHoldIfReached, p, cond, d)
+func (a *assertions) AlwaysOrUnreachable(cond bool, p assert.AlwaysOrUnreachable, d ...assert.Pair) {
+	a.record(kindMustHoldIfReached, p.Name(), cond, d)
 }
-func (a *assertions) Sometimes(cond bool, p core.PropertyID) {
-	a.record(kindMustHappenOnce, p, cond, nil)
+func (a *assertions) Sometimes(cond bool, p assert.Sometimes) {
+	a.record(kindMustHappenOnce, p.Name(), cond, nil)
 }
-func (a *assertions) Reachable(p core.PropertyID) { a.record(kindMustBeReached, p, true, nil) }
-func (a *assertions) Unreachable(p core.PropertyID, d ...core.ContextPair) {
-	a.record(kindMustNotBeReached, p, false, d)
+func (a *assertions) Reachable(p assert.Reachable) { a.record(kindMustBeReached, p.Name(), true, nil) }
+func (a *assertions) Unreachable(p assert.Unreachable, d ...assert.Pair) {
+	a.record(kindMustNotBeReached, p.Name(), false, d)
 }
 
-var _ core.Assertions = (*assertions)(nil)
+var _ machine.Assertions = (*assertions)(nil)
 
-// faultInjector implements core.FaultInjector. Activation is decided once per site per run
-// from Derive("faultInjector/"+site): independent of the run stream, so adding the
+// faultInjector implements machine.Faults. Activation is decided once per site per run
+// from Derive("buggify/"+site): independent of the run stream, so adding the
 // first site shifts no other draw. Firing draws from the run stream, and only
 // for active sites.
 type faultInjector struct{ r *run }
 
 const faultInjectDefaultChance = 0.25
 
-func (b *faultInjector) active(site core.FaultPointID) bool {
+func (b *faultInjector) active(site fault.NamedSite) bool {
 	if v, ok := b.r.sites[site]; ok {
 		return v
 	}
-	v := b.r.rng.Derive("buggify/" + string(site)).Chance(0.5)
+	v := b.r.rng.Derive("buggify/" + site.Name()).Chance(0.5)
 	b.r.sites[site] = v
 	return v
 }
 
-func (b *faultInjector) Maybe(site core.FaultPointID) bool {
+func (b *faultInjector) Maybe(site fault.NamedSite) bool {
 	return b.MaybeP(site, faultInjectDefaultChance)
 }
 
-func (b *faultInjector) MaybeP(site core.FaultPointID, p float64) bool {
+func (b *faultInjector) MaybeP(site fault.NamedSite, p float64) bool {
 	return b.active(site) && b.r.rng.Chance(p)
 }
 
-func (b *faultInjector) Fault(site core.FaultPointID, p float64) bool {
+func (b *faultInjector) Fault(site fault.NamedSite, p float64) bool {
 	return b.r.phase == PhaseFaults && b.MaybeP(site, p)
 }
 
-var _ core.FaultInjector = (*faultInjector)(nil)
+var _ machine.Faults = (*faultInjector)(nil)
 
 // env is the core.Environment every machine of a seed shares: the run stream, buggify
 // and assertions.
 type env struct {
 	core.Rand
-	core.FaultInjector
-	core.Assertions
+	machine.Faults
+	machine.Assertions
 }
 
 // history is the simple History: ops in invoke order with logical sequence

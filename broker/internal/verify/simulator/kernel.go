@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -134,7 +135,7 @@ type run struct {
 	history *history
 	as      *assertions
 	env     env
-	sites   map[core.FaultPointID]bool
+	sites   map[fault.NamedSite]bool
 	invs    []SafetyRule
 
 	phase Phase
@@ -159,14 +160,14 @@ func RunSeed(config Config, seed uint64) SeedResult {
 
 func newRun(config Config, seed uint64) *run {
 	r := &run{config: config, seed: seed, policy: core.ControlFirstPicker{}, trace: newStateHasher(),
-		byName: map[machine.NodeID]*node{}, lanes: map[string]DeliveryLane{}, nextLane: 1, byEng: map[string]int{}, sites: map[core.FaultPointID]bool{}}
+		byName: map[machine.NodeID]*node{}, lanes: map[string]DeliveryLane{}, nextLane: 1, byEng: map[string]int{}, sites: map[fault.NamedSite]bool{}}
 	r.res.Seed = seed
 	r.rng = NewRand(seed)
 	r.sched = newScheduler(r.rng)
 	r.tl = NewTimeline()
 	r.history = newHistory(func() Time { return r.sched.Now() }, func(m string) { r.fail(FailProtocol, "history", m) })
 	r.as = newAssertions(r)
-	r.env = env{Rand: r.rng, FaultInjector: &faultInjector{r}, Assertions: r.as}
+	r.env = env{Rand: r.rng, Faults: &faultInjector{r}, Assertions: r.as}
 
 	r.sc = SeedConfig{ObjectStore: config.ObjectStore, ControlPlane: config.ControlPlane,
 		LogStore: config.LogStore, Network: config.Network, Attrition: config.Attrition, Cost: config.Cost, Params: config.Params}
@@ -213,7 +214,7 @@ func (r *run) local(n *node) machine.NodeTime {
 
 func (r *run) wall() machine.RealTime { return wallClockStart + machine.RealTime(r.now()) }
 
-func (r *run) fail(k FailKind, p core.PropertyID, msg string) {
+func (r *run) fail(k FailKind, p string, msg string) {
 	r.res.Failures = append(r.res.Failures, Failure{Seed: r.seed, Kind: k, Prop: p, Step: r.steps, At: r.now(), Msg: msg})
 	if r.config.HaltOnFirst {
 		r.halt = true
@@ -949,7 +950,7 @@ func (c *fakeServiceContext) Fault(kind string, fields ...machine.Field) {
 	c.r.simulatorFact("sim_fault", allFields...)
 }
 
-func (c *fakeServiceContext) Assert() core.Assertions { return c.r.as }
+func (c *fakeServiceContext) Assert() machine.Assertions { return c.r.as }
 
 func (c *fakeServiceContext) Current(node machine.NodeID) (machine.NodeInstance, bool) {
 	n := c.r.byName[node]

@@ -18,9 +18,49 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/trace"
 )
+
+// faultAsserts are the assertions of one fake service. The object store has the
+// prefix "obj" and the control plane has the prefix "cp".
+type faultAsserts struct {
+	outage, unavailable, timeout, lost assert.Reachable
+	applied, notApplied                assert.Sometimes
+}
+
+// The two sets of assertions. Each name is written out in full, as the catalog
+// needs it, and does not change.
+var (
+	objAsserts = faultAsserts{ //determinismcheck:ok catalog handles, set once at start
+		outage:      assert.NewReachable("obj outage started"),
+		unavailable: assert.NewReachable("obj 503 injected"),
+		timeout:     assert.NewReachable("obj timeout injected"),
+		lost:        assert.NewReachable("obj lost response injected"),
+		applied:     assert.NewSometimes("obj timed-out op applied"),
+		notApplied:  assert.NewSometimes("obj timed-out op not applied"),
+	}
+	cpAsserts = faultAsserts{ //determinismcheck:ok catalog handles, set once at start
+		outage:      assert.NewReachable("cp outage started"),
+		unavailable: assert.NewReachable("cp 503 injected"),
+		timeout:     assert.NewReachable("cp timeout injected"),
+		lost:        assert.NewReachable("cp lost response injected"),
+		applied:     assert.NewSometimes("cp timed-out op applied"),
+		notApplied:  assert.NewSometimes("cp timed-out op not applied"),
+	}
+)
+
+// assertsFor returns the assertions of the service with the given prefix.
+func assertsFor(prefix string) faultAsserts {
+	switch prefix {
+	case "obj":
+		return objAsserts
+	case "cp":
+		return cpAsserts
+	}
+	panic("fakecompletions: unknown fault prefix " + prefix)
+}
 
 // Params is the fault and timing config common to both engines.
 type Params struct {
@@ -132,6 +172,7 @@ func (c *CompletionCore) OnCrash(simulator.FakeServiceContext, machine.NodeInsta
 // 503/timeout/lost fault fields.
 func (p Params) Draw(ctx simulator.FakeServiceContext, pre string, until *simulator.Time, fields ...machine.Field) Kind {
 	r, now := ctx.Rand(), ctx.Now()
+	names := assertsFor(pre)
 	if now >= *until && r.Chance(p.Outage.Prob) {
 		d := p.Outage.Dur[0]
 		if p.Outage.Dur[1] > d {
@@ -139,7 +180,7 @@ func (p Params) Draw(ctx simulator.FakeServiceContext, pre string, until *simula
 		}
 		*until = now + simulator.Time(d)
 		ctx.Fault(pre+"_outage", machine.Field{Key: "dur", Value: machine.Int64Value(d)})
-		ctx.Assert().Reachable(core.PropertyID(pre + " outage started"))
+		ctx.Assert().Reachable(names.outage)
 	}
 	inOutage := now < *until
 	is503, isTimeout, isLost := r.Chance(p.P503), r.Chance(p.PTimeout), r.Chance(p.PLost)
@@ -150,15 +191,15 @@ func (p Params) Draw(ctx simulator.FakeServiceContext, pre string, until *simula
 			cause = "outage"
 		}
 		ctx.Fault(pre+"_503", append(fields, machine.Field{Key: "cause", Value: machine.StringValue(cause)})...)
-		ctx.Assert().Reachable(core.PropertyID(pre + " 503 injected"))
+		ctx.Assert().Reachable(names.unavailable)
 		return ReplyUnavailable
 	case isTimeout:
 		ctx.Fault(pre+"_timeout", fields...)
-		ctx.Assert().Reachable(core.PropertyID(pre + " timeout injected"))
+		ctx.Assert().Reachable(names.timeout)
 		return ReplyTimeout
 	case isLost:
 		ctx.Fault(pre+"_lost_response", fields...)
-		ctx.Assert().Reachable(core.PropertyID(pre + " lost response injected"))
+		ctx.Assert().Reachable(names.lost)
 		return ReplyLost
 	}
 	return ReplyNormal
@@ -217,8 +258,9 @@ func (c *CompletionCore) OnInternal(ctx simulator.FakeServiceContext, body any) 
 	apply := true
 	if pl.Kind == ReplyTimeout {
 		apply = ctx.Rand().Chance(0.5)
-		ctx.Assert().Sometimes(apply, core.PropertyID(c.h.Prefix+" timed-out op applied"))
-		ctx.Assert().Sometimes(!apply, core.PropertyID(c.h.Prefix+" timed-out op not applied"))
+		names := assertsFor(c.h.Prefix)
+		ctx.Assert().Sometimes(apply, names.applied)
+		ctx.Assert().Sometimes(!apply, names.notApplied)
 	}
 	if !apply {
 		return

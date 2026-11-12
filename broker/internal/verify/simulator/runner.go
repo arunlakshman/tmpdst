@@ -3,8 +3,6 @@ package simulator
 import (
 	"errors"
 	"slices"
-
-	"github.com/manifesterio/mds/broker/internal/core"
 )
 
 // runner is the Runner. It runs seeds one after another on the calling
@@ -98,7 +96,7 @@ func combineStats(all []AssertionStat, agg map[statKey]int, stats []AssertionSta
 	return all
 }
 
-func addMissedChecks(all []AssertionStat, expect []core.PropertyID) []AssertionStat {
+func addMissedChecks(all []AssertionStat, expect []string) []AssertionStat {
 	for _, p := range expect {
 		found := slices.ContainsFunc(all, func(a AssertionStat) bool {
 			return a.Kind == kindMustBeReached && a.Prop == p

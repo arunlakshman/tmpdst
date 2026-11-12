@@ -1,7 +1,6 @@
 package simulator
 
 import (
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -98,7 +97,7 @@ type Config struct {
 	// code that is never run cannot declare itself; the campaign declares it
 	// here. Report.Coverage lists each one never reached (Kind "reachable",
 	// zero Checks if it never ran at all).
-	ExpectReachable []core.PropertyID
+	ExpectReachable []string
 	// CheckDeterminism replays every Kth seed and compares
 	// (TraceHash, RandCalls, Steps). 0 = off.
 	CheckDeterminism uint32
@@ -126,7 +125,7 @@ const (
 type Failure struct {
 	Seed uint64
 	Kind FailKind
-	Prop core.PropertyID
+	Prop string
 	Step uint64
 	At   Time
 	Msg  string
@@ -172,7 +171,7 @@ type Report struct {
 
 // AssertionStat is the tally of one assertion across a run.
 type AssertionStat struct {
-	Prop      core.PropertyID
+	Prop      string
 	Kind      string
 	Checks    uint64
 	Passes    uint64

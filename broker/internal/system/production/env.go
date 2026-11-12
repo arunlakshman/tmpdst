@@ -9,6 +9,8 @@ import (
 	"sync"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -55,39 +57,41 @@ func (e *Env) NewID() machine.ID {
 }
 
 // Maybe never takes the optional branch in production.
-func (*Env) Maybe(core.FaultPointID) bool { return false }
+func (*Env) Maybe(fault.NamedSite) bool { return false }
 
 // MaybeP never takes the optional branch in production.
-func (*Env) MaybeP(core.FaultPointID, float64) bool { return false }
+func (*Env) MaybeP(fault.NamedSite, float64) bool { return false }
 
 // Fault never injects a fault in production.
-func (*Env) Fault(core.FaultPointID, float64) bool { return false }
+func (*Env) Fault(fault.NamedSite, float64) bool { return false }
 
 // Sometimes is a no-op in production.
-func (*Env) Sometimes(bool, core.PropertyID) {}
+func (*Env) Sometimes(bool, assert.Sometimes) {}
 
 // Reachable is a no-op in production.
-func (*Env) Reachable(core.PropertyID) {}
+func (*Env) Reachable(assert.Reachable) {}
 
 // Always reports a violation of p when cond is false.
-func (e *Env) Always(cond bool, p core.PropertyID, d ...core.ContextPair) {
+func (e *Env) Always(cond bool, p assert.Always, d ...assert.Pair) {
 	if !cond {
-		e.violated("always", p, d)
+		e.violated("always", p.Name(), d)
 	}
 }
 
 // AlwaysOrUnreachable reports a violation of p when cond is false.
-func (e *Env) AlwaysOrUnreachable(cond bool, p core.PropertyID, d ...core.ContextPair) {
+func (e *Env) AlwaysOrUnreachable(cond bool, p assert.AlwaysOrUnreachable, d ...assert.Pair) {
 	if !cond {
-		e.violated("always_or_unreachable", p, d)
+		e.violated("always_or_unreachable", p.Name(), d)
 	}
 }
 
 // Unreachable reports a violation of p.
-func (e *Env) Unreachable(p core.PropertyID, d ...core.ContextPair) { e.violated("unreachable", p, d) }
+func (e *Env) Unreachable(p assert.Unreachable, d ...assert.Pair) {
+	e.violated("unreachable", p.Name(), d)
+}
 
-func (e *Env) violated(kind string, p core.PropertyID, d []core.ContextPair) {
-	args := []any{"kind", kind, "prop", string(p)}
+func (e *Env) violated(kind, name string, d []assert.Pair) {
+	args := []any{"kind", kind, "prop", name}
 	for _, x := range d {
 		args = append(args, x.Key, x.Value)
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -93,7 +94,7 @@ func (c *Ctx) Cancel(id simulator.EntryID) {
 func (c *Ctx) Fault(kind string, _ ...machine.Field) { c.Faults = append(c.Faults, kind) }
 
 // Assert returns the assertion recorder.
-func (c *Ctx) Assert() core.Assertions { return checks{c} }
+func (c *Ctx) Assert() machine.Assertions { return checks{c} }
 
 // Current returns the live incarnation of n.
 func (c *Ctx) Current(n machine.NodeID) (machine.NodeInstance, bool) {
@@ -191,19 +192,19 @@ func (c *Ctx) Trace() string {
 
 type checks struct{ c *Ctx }
 
-func (a checks) Always(cond bool, p core.PropertyID, _ ...core.ContextPair) {
+func (a checks) Always(cond bool, p assert.Always, _ ...assert.Pair) {
 	if !cond {
-		a.c.Violations = append(a.c.Violations, string(p))
+		a.c.Violations = append(a.c.Violations, p.Name())
 	}
 }
-func (a checks) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
-func (a checks) Sometimes(cond bool, p core.PropertyID) {
+func (a checks) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {}
+func (a checks) Sometimes(cond bool, p assert.Sometimes) {
 	if cond {
-		a.c.Reached = append(a.c.Reached, string(p))
+		a.c.Reached = append(a.c.Reached, p.Name())
 	}
 }
-func (a checks) Reachable(p core.PropertyID)                      { a.c.Reached = append(a.c.Reached, string(p)) }
-func (a checks) Unreachable(core.PropertyID, ...core.ContextPair) {}
+func (a checks) Reachable(p assert.Reachable)                   { a.c.Reached = append(a.c.Reached, p.Name()) }
+func (a checks) Unreachable(assert.Unreachable, ...assert.Pair) {}
 
 // Find returns the delivered completion for req (nil if none).
 func (c *Ctx) Find(request machine.RequestID) core.IOResult {

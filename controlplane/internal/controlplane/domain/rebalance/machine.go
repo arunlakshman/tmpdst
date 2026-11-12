@@ -32,7 +32,7 @@ type Config struct {
 	LoadRetry machine.Duration
 	// Faults are the buggify sites (sites.go). Nil means none fire: production
 	// passes nil, the simulator passes its fault injector.
-	Faults runtime.FaultInjector
+	Faults machine.Faults
 }
 
 // Machine is the group coordinator of one node.

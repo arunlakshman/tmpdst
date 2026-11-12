@@ -299,7 +299,7 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 		case statePut:
 			return b.put(o)
 		case stateCommit:
-			b.env.Reachable("echo: commit retried after MaybeApplied")
+			b.env.Reachable(commitRetriedAfterMaybeApplied)
 			return append([]core.Action{emit("echo_commit_retried", machine.Field{Key: "key", Value: machine.StringValue(o.key)})}, b.commit(o)...)
 		case stateLookup:
 			return b.lookup(o)
@@ -356,7 +356,7 @@ func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 	case e.Err == core.OK:
 		response, ok := e.Resp.(core.CommitSegmentResp)
 		okShape := ok && len(response.Assigned) == 1 && response.Assigned[0].TopicPartition == topicPartition() && response.Assigned[0].Loc == o.ref
-		b.env.Always(okShape, "echo: commit assigns exactly the one batch")
+		b.env.Always(okShape, commitAssignsExactlyOneBatch)
 		if !okShape {
 			return b.reply(o, "ERR maybe")
 		}
@@ -368,7 +368,7 @@ func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 		return b.ack(o, off)
 	case e.Err == core.ErrConflict:
 		// The same key with a different request: a broker bug, not a race.
-		b.env.Unreachable("echo: commit key reused with a different request")
+		b.env.Unreachable(commitKeyReusedDifferentRequest)
 		return b.reply(o, "ERR")
 	case e.Outcome == core.MaybeApplied:
 		o.maybe = true
@@ -410,7 +410,7 @@ func (b *Broker) get(o *op) []core.Action {
 func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
 	if e.Err != core.OK {
 		if e.Err == core.ErrNotFound { // committed segments are never deleted
-			b.env.Unreachable("echo: committed segment missing")
+			b.env.Unreachable(committedSegmentMissing)
 			return b.reply(o, "ERR")
 		}
 		return b.retryLater(o, stateGet)
@@ -429,7 +429,7 @@ func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
 		}
 	}
 	if err != nil {
-		b.env.Reachable("echo: corruption detected on read")
+		b.env.Reachable(corruptionDetectedRead)
 		acts := []core.Action{emit("corruption_detected", machine.Field{Key: "key", Value: machine.StringValue(o.ref.Key)})}
 		return append(acts, b.reply(o, "ERR corrupt")...)
 	}

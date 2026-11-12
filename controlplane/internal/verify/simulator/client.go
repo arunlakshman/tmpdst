@@ -191,7 +191,7 @@ func (c *client) answered(d runtime.ControlPlaneDone, prefix runtime.LogPosition
 	if op.attempts >= limit {
 		s.stats.GaveUp++
 		if op.final {
-			s.violation("final reads are answered", "node cp-%d did not answer %T in the quiet tail (last error %v)", op.node, op.op, d.Err)
+			s.violation(finalReadsAnswered, "node cp-%d did not answer %T in the quiet tail (last error %v)", op.node, op.op, d.Err)
 		}
 		c.finish()
 		return

@@ -6,6 +6,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -66,13 +67,13 @@ func (i *segmentCaps) AtEnd(v simulator.View) {
 	a := v.Assert()
 	for _, k := range keys {
 		u := segments[k]
-		d := core.ContextPair{Key: "segment", Value: k}
-		a.Always(u.batches <= i.config.MaxSegmentBatches, "kafka: a committed segment holds at most MaxSegmentBatches batches",
-			d, core.ContextPair{Key: "batches", Value: u.batches}, core.ContextPair{Key: "cap", Value: i.config.MaxSegmentBatches})
-		a.Always(len(u.parts) <= i.config.MaxSegmentPartitions, "kafka: a committed segment spans at most MaxSegmentPartitions partitions",
-			d, core.ContextPair{Key: "parts", Value: len(u.parts)}, core.ContextPair{Key: "cap", Value: i.config.MaxSegmentPartitions})
-		a.Always(i.fits(int64(len(u.parts))), "kafka: a committed segment's commit cost (1 + partitions) fits the store's commit item limit",
-			d, core.ContextPair{Key: "parts", Value: len(u.parts)})
+		d := assert.Pair{Key: "segment", Value: k}
+		a.Always(u.batches <= i.config.MaxSegmentBatches, committedSegmentWithinBatchCap,
+			d, assert.Pair{Key: "batches", Value: u.batches}, assert.Pair{Key: "cap", Value: i.config.MaxSegmentBatches})
+		a.Always(len(u.parts) <= i.config.MaxSegmentPartitions, committedSegmentWithinPartitionCap,
+			d, assert.Pair{Key: "parts", Value: len(u.parts)}, assert.Pair{Key: "cap", Value: i.config.MaxSegmentPartitions})
+		a.Always(i.fits(int64(len(u.parts))), committedSegmentCommitCostFits,
+			d, assert.Pair{Key: "parts", Value: len(u.parts)})
 	}
 }
 
@@ -81,16 +82,16 @@ func (i *segmentCaps) Observe(v simulator.View) {
 		n := func(k string) int64 { x, _ := tf.Fact.Field(k).(machine.Int64Value); return int64(x) }
 		a := v.Assert()
 		why, _ := tf.Fact.Field("reason").(machine.StringValue)
-		d := core.ContextPair{Key: "reason", Value: string(why)}
-		a.Always(n("batches") <= int64(i.config.MaxSegmentBatches), "kafka: a sealed segment holds at most MaxSegmentBatches batches",
-			d, core.ContextPair{Key: "batches", Value: n("batches")}, core.ContextPair{Key: "cap", Value: i.config.MaxSegmentBatches})
-		a.Always(n("parts") <= int64(i.config.MaxSegmentPartitions), "kafka: a sealed segment spans at most MaxSegmentPartitions partitions",
-			d, core.ContextPair{Key: "parts", Value: n("parts")}, core.ContextPair{Key: "cap", Value: i.config.MaxSegmentPartitions})
-		a.Always(i.fits(n("parts")), "kafka: a sealed segment's implied commit cost (1 + partitions) fits the store's commit item limit",
-			d, core.ContextPair{Key: "parts", Value: n("parts")})
-		a.Always(n("bytes")-n("last") < int64(i.config.MaxSegmentBytes), "kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch",
-			d, core.ContextPair{Key: "bytes", Value: n("bytes")}, core.ContextPair{Key: "last", Value: n("last")}, core.ContextPair{Key: "cap", Value: i.config.MaxSegmentBytes})
-		a.Always(n("age") <= int64(i.config.BatchWindow+timerExtraTime), "kafka: a segment is sealed within the window of its first batch",
-			d, core.ContextPair{Key: "age", Value: n("age")}, core.ContextPair{Key: "window", Value: int64(i.config.BatchWindow)})
+		d := assert.Pair{Key: "reason", Value: string(why)}
+		a.Always(n("batches") <= int64(i.config.MaxSegmentBatches), sealedSegmentWithinBatchCap,
+			d, assert.Pair{Key: "batches", Value: n("batches")}, assert.Pair{Key: "cap", Value: i.config.MaxSegmentBatches})
+		a.Always(n("parts") <= int64(i.config.MaxSegmentPartitions), sealedSegmentWithinPartitionCap,
+			d, assert.Pair{Key: "parts", Value: n("parts")}, assert.Pair{Key: "cap", Value: i.config.MaxSegmentPartitions})
+		a.Always(i.fits(n("parts")), sealedSegmentCommitCostFits,
+			d, assert.Pair{Key: "parts", Value: n("parts")})
+		a.Always(n("bytes")-n("last") < int64(i.config.MaxSegmentBytes), sealedSegmentOvershootsBytesByLastBatch,
+			d, assert.Pair{Key: "bytes", Value: n("bytes")}, assert.Pair{Key: "last", Value: n("last")}, assert.Pair{Key: "cap", Value: i.config.MaxSegmentBytes})
+		a.Always(n("age") <= int64(i.config.BatchWindow+timerExtraTime), segmentSealedWithinBatchWindow,
+			d, assert.Pair{Key: "age", Value: n("age")}, assert.Pair{Key: "window", Value: int64(i.config.BatchWindow)})
 	}
 }

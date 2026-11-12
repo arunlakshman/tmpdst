@@ -10,6 +10,8 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -42,21 +44,23 @@ func (e *testEnv) NewID() machine.ID {
 	}
 	return id
 }
-func (e *testEnv) Maybe(core.FaultPointID) bool           { return false }
-func (e *testEnv) MaybeP(core.FaultPointID, float64) bool { return false }
-func (e *testEnv) Fault(core.FaultPointID, float64) bool  { return false }
-func (e *testEnv) Always(c bool, p core.PropertyID, _ ...core.ContextPair) {
+func (e *testEnv) Maybe(fault.NamedSite) bool           { return false }
+func (e *testEnv) MaybeP(fault.NamedSite, float64) bool { return false }
+func (e *testEnv) Fault(fault.NamedSite, float64) bool  { return false }
+func (e *testEnv) Always(c bool, p assert.Always, _ ...assert.Pair) {
 	if !c {
-		e.viol = append(e.viol, string(p))
+		e.viol = append(e.viol, p.Name())
 	}
 }
-func (e *testEnv) AlwaysOrUnreachable(c bool, p core.PropertyID, d ...core.ContextPair) {
-	e.Always(c, p, d...)
+func (e *testEnv) AlwaysOrUnreachable(c bool, p assert.AlwaysOrUnreachable, _ ...assert.Pair) {
+	if !c {
+		e.viol = append(e.viol, p.Name())
+	}
 }
-func (e *testEnv) Sometimes(bool, core.PropertyID) {}
-func (e *testEnv) Reachable(p core.PropertyID)     { e.reach = append(e.reach, string(p)) }
-func (e *testEnv) Unreachable(p core.PropertyID, _ ...core.ContextPair) {
-	e.viol = append(e.viol, string(p))
+func (e *testEnv) Sometimes(bool, assert.Sometimes) {}
+func (e *testEnv) Reachable(p assert.Reachable)     { e.reach = append(e.reach, p.Name()) }
+func (e *testEnv) Unreachable(p assert.Unreachable, _ ...assert.Pair) {
+	e.viol = append(e.viol, p.Name())
 }
 
 // client is the test's view of one connection.

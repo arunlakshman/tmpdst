@@ -42,53 +42,42 @@ func (e *env) NewID() machine.ID {
 	return id
 }
 
-// Maybe implements runtime.FaultInjector.
-func (e *env) Maybe(site runtime.FaultPointID) bool {
-	return e.inj.Maybe(fault.Site(site))
+// Maybe implements machine.Faults.
+func (e *env) Maybe(site fault.NamedSite) bool {
+	return e.inj.Maybe(fault.Site(site.Name()))
 }
 
-// MaybeP implements runtime.FaultInjector.
-func (e *env) MaybeP(site runtime.FaultPointID, p float64) bool {
-	return e.inj.MaybeP(fault.Site(site), p)
+// MaybeP implements machine.Faults.
+func (e *env) MaybeP(site fault.NamedSite, p float64) bool {
+	return e.inj.MaybeP(fault.Site(site.Name()), p)
 }
 
-// Fault implements runtime.FaultInjector.
-func (e *env) Fault(site runtime.FaultPointID, p float64) bool {
-	return e.inj.Fault(fault.Site(site), p)
+// Fault implements machine.Faults.
+func (e *env) Fault(site fault.NamedSite, p float64) bool {
+	return e.inj.Fault(fault.Site(site.Name()), p)
 }
 
-func toPairs(details []runtime.ContextPair) []assert.Pair {
-	if len(details) == 0 {
-		return nil
-	}
-	out := make([]assert.Pair, len(details))
-	for i, d := range details {
-		out[i] = assert.Pair{Key: d.Key, Value: d.Value}
-	}
-	return out
+// Always implements machine.Assertions.
+func (e *env) Always(cond bool, p assert.Always, details ...assert.Pair) {
+	e.log.Always(cond, assert.Property(p.Name()), details...)
 }
 
-// Always implements runtime.Assertions.
-func (e *env) Always(cond bool, p runtime.PropertyID, details ...runtime.ContextPair) {
-	e.log.Always(cond, assert.Property(p), toPairs(details)...)
+// AlwaysOrUnreachable implements machine.Assertions.
+func (e *env) AlwaysOrUnreachable(cond bool, p assert.AlwaysOrUnreachable, details ...assert.Pair) {
+	e.log.AlwaysOrUnreachable(cond, assert.Property(p.Name()), details...)
 }
 
-// AlwaysOrUnreachable implements runtime.Assertions.
-func (e *env) AlwaysOrUnreachable(cond bool, p runtime.PropertyID, details ...runtime.ContextPair) {
-	e.log.AlwaysOrUnreachable(cond, assert.Property(p), toPairs(details)...)
+// Sometimes implements machine.Assertions.
+func (e *env) Sometimes(cond bool, p assert.Sometimes) {
+	e.log.Sometimes(cond, assert.Property(p.Name()))
 }
 
-// Sometimes implements runtime.Assertions.
-func (e *env) Sometimes(cond bool, p runtime.PropertyID) {
-	e.log.Sometimes(cond, assert.Property(p))
+// Reachable implements machine.Assertions.
+func (e *env) Reachable(p assert.Reachable) {
+	e.log.Reachable(assert.Property(p.Name()))
 }
 
-// Reachable implements runtime.Assertions.
-func (e *env) Reachable(p runtime.PropertyID) {
-	e.log.Reachable(assert.Property(p))
-}
-
-// Unreachable implements runtime.Assertions.
-func (e *env) Unreachable(p runtime.PropertyID, details ...runtime.ContextPair) {
-	e.log.Unreachable(assert.Property(p), toPairs(details)...)
+// Unreachable implements machine.Assertions.
+func (e *env) Unreachable(p assert.Unreachable, details ...assert.Pair) {
+	e.log.Unreachable(assert.Property(p.Name()), details...)
 }

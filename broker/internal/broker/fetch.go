@@ -105,7 +105,7 @@ func (b *Broker) waitOrEnd(o *operation) []core.Action {
 	if b.fetchOver(o.s) {
 		return b.endOp(o)
 	}
-	b.env.Reachable("broker: fetch parked for a poll")
+	b.env.Reachable(fetchParkedForPoll)
 	return b.park(o)
 }
 
@@ -171,7 +171,7 @@ func (b *Broker) endParked(match func(*operation) bool) {
 func (b *Broker) onFetchGet(o *operation, e core.ObjectGetDone) []core.Action {
 	rg := o.ranges[o.next]
 	if e.Err == core.ErrNotFound { // committed segments are never deleted
-		b.env.Unreachable("broker: committed segment missing")
+		b.env.Unreachable(committedSegmentMissing)
 		return b.failOp(o, errKafkaStorage)
 	}
 	if e.Err != core.OK {
@@ -185,7 +185,7 @@ func (b *Broker) onFetchGet(o *operation, e core.ObjectGetDone) []core.Action {
 }
 
 func (b *Broker) retryCorrupt(o *operation, rg core.BatchRange) []core.Action {
-	b.env.Reachable("broker: corrupt GET detected")
+	b.env.Reachable(corruptGetDetected)
 	o.corrupt = true
 	acts := []core.Action{recordFact("corruption_detected", machine.Field{Key: "segment", Value: machine.StringValue(rg.Loc.Key)})}
 	return append(acts, b.retryOp(o)...)

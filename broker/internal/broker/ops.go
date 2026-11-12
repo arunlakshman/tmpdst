@@ -135,7 +135,7 @@ func (b *Broker) retryOp(o *operation) []core.Action {
 		return b.endOp(o)
 	}
 	if o.attempts++; o.attempts >= b.config.MaxAttempts {
-		b.env.Reachable("broker: request retries exhausted")
+		b.env.Reachable(requestRetriesExhausted)
 		return b.failOp(o, b.exhaustCode(o))
 	}
 	o.retry, o.state, o.requestID = o.state, opBackoff, 0

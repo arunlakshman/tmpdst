@@ -205,7 +205,7 @@ func (n *simNode) outbound(acts []any) ([]any, bool) {
 		case runtime.IOCall:
 			out = append(out, a)
 		default:
-			n.s.violation("known action", "node %s returned %T", n.name(), a)
+			n.s.violation(knownAction, "node %s returned %T", n.name(), a)
 		}
 	}
 	return out, false

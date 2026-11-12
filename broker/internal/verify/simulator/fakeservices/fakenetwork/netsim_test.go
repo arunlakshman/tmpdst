@@ -8,22 +8,23 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
 // ---- test doubles ----
 
-type asserts struct{ some map[core.PropertyID]bool }
+type asserts struct{ some map[string]bool }
 
-func (a *asserts) Always(bool, core.PropertyID, ...core.ContextPair)              {}
-func (a *asserts) AlwaysOrUnreachable(bool, core.PropertyID, ...core.ContextPair) {}
-func (a *asserts) Sometimes(c bool, p core.PropertyID) {
+func (a *asserts) Always(bool, assert.Always, ...assert.Pair)                           {}
+func (a *asserts) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {}
+func (a *asserts) Sometimes(c bool, p assert.Sometimes) {
 	if c {
-		a.some[p] = true
+		a.some[p.Name()] = true
 	}
 }
-func (a *asserts) Reachable(core.PropertyID)                        {}
-func (a *asserts) Unreachable(core.PropertyID, ...core.ContextPair) {}
+func (a *asserts) Reachable(assert.Reachable)                     {}
+func (a *asserts) Unreachable(assert.Unreachable, ...assert.Pair) {}
 
 type entry struct {
 	at   simulator.Time
@@ -58,7 +59,7 @@ type harness struct {
 
 func newHarness(t *testing.T, seed uint64, f simulator.NetworkFaults) *harness {
 	return &harness{t: t, eng: New(f), rnd: simulator.NewRand(seed), lanes: map[string]simulator.DeliveryLane{}, live: map[machine.NodeID]machine.NodeInstance{},
-		as: &asserts{some: map[core.PropertyID]bool{}}, data: map[string][]byte{}, closed: map[string]core.ConnClosed{},
+		as: &asserts{some: map[string]bool{}}, data: map[string][]byte{}, closed: map[string]core.ConnClosed{},
 		opened: map[string]core.ConnOpened{}, dials: map[machine.RequestID]core.ConnectDone{}, sends: map[machine.RequestID]core.SendDone{}}
 }
 
@@ -97,7 +98,7 @@ func (h *harness) Cancel(id simulator.EntryID) {
 	}
 }
 func (h *harness) Fault(kind string, f ...machine.Field) { h.faults = append(h.faults, kind) }
-func (h *harness) Assert() core.Assertions               { return h.as }
+func (h *harness) Assert() machine.Assertions            { return h.as }
 func (h *harness) Current(n machine.NodeID) (machine.NodeInstance, bool) {
 	r, ok := h.live[n]
 	return r, ok

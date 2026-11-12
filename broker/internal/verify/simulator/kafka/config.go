@@ -48,7 +48,7 @@ func configWith(seeds []uint64, bug broker.InjectedBug, opts Opts) simulator.Con
 		Invariants: []func() simulator.SafetyRule{
 			func() simulator.SafetyRule { return newOracle(opts) },
 			func() simulator.SafetyRule { return &progressCheck{} },
-			func() simulator.SafetyRule { return campaign.FaultCoverageCheck("kafka:") },
+			func() simulator.SafetyRule { return campaign.FaultCoverageCheck(campaign.KafkaFaultCoverage) },
 		},
 		Engines: func(sc simulator.SeedConfig) []simulator.FakeService {
 			return []simulator.FakeService{fakeobjectstore.New(sc.ObjectStore), controlPlane(sc, opts), fakenetwork.New(sc.Network)}

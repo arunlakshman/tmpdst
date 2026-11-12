@@ -176,14 +176,14 @@ func (m *Replica) onClaimDone(d runtime.LogClaimEpochDone) []any {
 		return nil
 	}
 	m.epoch = d.Epoch
-	m.env.Reachable("logcp-sim: epoch claimed")
+	m.env.Reachable(epochClaimed)
 	return m.emitHeartbeat() // the fence entry: a no-op at the tail with the new epoch
 }
 
 // stepDown ends the write role after a newer epoch is seen. The node refuses
 // the clients it was serving, keeps reading, and waits before it claims again.
 func (m *Replica) stepDown() []any {
-	m.env.Reachable("logcp-sim: writer fenced, now read-only")
+	m.env.Reachable(writerFencedNowReadOnly)
 	m.stepDowns++
 	m.refuseClients(runtime.ErrUnavailable, runtime.MaybeApplied)
 	m.dropRole()
@@ -211,12 +211,12 @@ func (m *Replica) maybeReplicaFault() []any {
 	if !m.active || !m.ready {
 		return nil
 	}
-	if m.config.StallProb > 0 && m.env.Fault("logcp_stall", m.config.StallProb) {
+	if m.config.StallProb > 0 && m.env.Fault(siteStall, m.config.StallProb) {
 		m.stallUntil = m.now + machine.NodeTime(betweenDur(m.env, m.config.StallDur))
-		m.env.Reachable("logcp-sim: replica stalled")
+		m.env.Reachable(replicaStalled)
 		return nil
 	}
-	if m.config.CrashProb > 0 && m.env.Fault("logcp_crash", m.config.CrashProb) {
+	if m.config.CrashProb > 0 && m.env.Fault(siteCrash, m.config.CrashProb) {
 		return m.softCrash()
 	}
 	return nil
@@ -230,7 +230,7 @@ func betweenDur(r interface{ Intn(int) int }, d [2]machine.Duration) machine.Dur
 }
 
 func (m *Replica) softCrash() []any {
-	m.env.Reachable("logcp-sim: replica crashed")
+	m.env.Reachable(replicaCrashed)
 	m.dropRole()
 	m.ready = false
 	m.booting = true
@@ -256,7 +256,7 @@ func isBelowFloor(d runtime.LogAppendDone) bool {
 // would re-enter the trimmed prefix, so needsCheckpoint blocks that until a
 // snapshot is found.
 func (m *Replica) hitTrimmed() []any {
-	m.env.Reachable("logcp-sim: replica hit a trimmed slot")
+	m.env.Reachable(replicaHitTrimmedSlot)
 	m.refuseClients(runtime.ErrUnavailable, runtime.MaybeApplied)
 	m.dropRole()
 	m.ready = false

@@ -3,8 +3,8 @@
 package campaign
 
 import (
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -87,13 +87,31 @@ func PhaseStart(v simulator.View, p simulator.Phase) (simulator.Time, bool) {
 	return 0, false
 }
 
-// FaultCoverageCheck reports a hard crash and a graceful stop from kernel facts.
-// The prefix is the scenario label and includes its trailing colon, as in "echo:".
-func FaultCoverageCheck(prefix string) simulator.SafetyRule {
-	return &faultCoverage{prefix: prefix}
+// FaultCoverage names the two assertions that FaultCoverageCheck records for one
+// scenario.
+type FaultCoverage struct {
+	HardCrash    assert.Sometimes
+	GracefulStop assert.Sometimes
 }
 
-type faultCoverage struct{ prefix string }
+// The fault coverage assertions of the two scenarios.
+var (
+	EchoFaultCoverage = FaultCoverage{ //determinismcheck:ok catalog handles, set once at start
+		HardCrash:    assert.NewSometimes("echo: fault fired: hard crash"),
+		GracefulStop: assert.NewSometimes("echo: fault fired: graceful stop"),
+	}
+	KafkaFaultCoverage = FaultCoverage{ //determinismcheck:ok catalog handles, set once at start
+		HardCrash:    assert.NewSometimes("kafka: fault fired: hard crash"),
+		GracefulStop: assert.NewSometimes("kafka: fault fired: graceful stop"),
+	}
+)
+
+// FaultCoverageCheck reports a hard crash and a graceful stop from kernel facts.
+func FaultCoverageCheck(names FaultCoverage) simulator.SafetyRule {
+	return &faultCoverage{names: names}
+}
+
+type faultCoverage struct{ names FaultCoverage }
 
 func (*faultCoverage) Name() string           { return "FaultCoverage" }
 func (*faultCoverage) Observe(simulator.View) {}
@@ -110,8 +128,8 @@ func (f *faultCoverage) AtEnd(v simulator.View) {
 		}
 		return false
 	}
-	v.Assert().Sometimes(has("sim_crashed", "cause", "attrition"), core.PropertyID(f.prefix+" fault fired: hard crash"))
-	v.Assert().Sometimes(has("sim_exited", "", ""), core.PropertyID(f.prefix+" fault fired: graceful stop"))
+	v.Assert().Sometimes(has("sim_crashed", "cause", "attrition"), f.names.HardCrash)
+	v.Assert().Sometimes(has("sim_exited", "", ""), f.names.GracefulStop)
 }
 
 // Swarm draws the shared fault knobs from r.

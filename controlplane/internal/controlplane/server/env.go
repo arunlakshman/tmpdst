@@ -1,7 +1,8 @@
 package server
 
 import (
-	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -26,11 +27,11 @@ func (e *productionEnvironment) NewID() machine.ID {
 	}
 	return id
 }
-func (productionEnvironment) Maybe(runtime.FaultPointID) bool                                      { return false }
-func (productionEnvironment) MaybeP(runtime.FaultPointID, float64) bool                            { return false }
-func (productionEnvironment) Fault(runtime.FaultPointID, float64) bool                             { return false }
-func (productionEnvironment) Always(bool, runtime.PropertyID, ...runtime.ContextPair)              {}
-func (productionEnvironment) AlwaysOrUnreachable(bool, runtime.PropertyID, ...runtime.ContextPair) {}
-func (productionEnvironment) Sometimes(bool, runtime.PropertyID)                                   {}
-func (productionEnvironment) Reachable(runtime.PropertyID)                                         {}
-func (productionEnvironment) Unreachable(runtime.PropertyID, ...runtime.ContextPair)               {}
+func (productionEnvironment) Maybe(fault.NamedSite) bool                                           { return false }
+func (productionEnvironment) MaybeP(fault.NamedSite, float64) bool                                 { return false }
+func (productionEnvironment) Fault(fault.NamedSite, float64) bool                                  { return false }
+func (productionEnvironment) Always(bool, assert.Always, ...assert.Pair)                           {}
+func (productionEnvironment) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {}
+func (productionEnvironment) Sometimes(bool, assert.Sometimes)                                     {}
+func (productionEnvironment) Reachable(assert.Reachable)                                           {}
+func (productionEnvironment) Unreachable(assert.Unreachable, ...assert.Pair)                       {}

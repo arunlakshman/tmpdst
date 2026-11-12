@@ -23,9 +23,10 @@
 - `broker/go.mod` was edited by hand in T0.6, and it was already not tidy before (x/tools, x/mod, x/sync, dynamodb). Check each module with `GOWORK=off go build ./...` before a release.
 - Standalone `make -C broker build` needs the control plane generated files. Run root `make generate` first.
 
-## 5. `make it` does not pass on Podman yet
+## 5. `make it` on Podman needs two local settings
 
-- Run on 2026-11-12 with a temporary `docker` link to podman (the `docker` command is only a shell alias, so `make` cannot see it).
-- The dynamodb-local container did not start in 300 seconds: `create container: context deadline exceeded`. Other packages passed.
-- Not checked further. Possible causes: Podman VM has 2 GiB of memory, slow image pull, or testcontainers settings for Podman.
-- The Makefile messages still say "Docker".
+- Result on 2026-11-12: `make it` PASSES (exit 0, all packages ok) with the two settings below.
+- The `docker` command must exist. On this Mac it is only a shell alias, so `make` cannot see it. Put a link named `docker` to `podman` early in PATH.
+- Set `TESTCONTAINERS_RYUK_DISABLED=true`. Without it the test library looks for a network named `bridge`, and Podman calls its default network `podman`.
+- Pull the images first (dynamodb-local 3.1.0, seaweedfs 4.48, postgres 17.11-alpine): the first pull is slow and the tests give up after 300 seconds.
+- Later: make this work without these settings, and change the "Docker" words in the Makefile messages to Podman.

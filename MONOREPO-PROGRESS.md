@@ -10,7 +10,7 @@ T0.5 | done | 4919ee6 | shared/ with awsmetrics, httpconnections, runinfo; root 
 T0.6 | done | e789990 | one proto in controlplane/api; protos were equal; root make build + broker e2e green | architecture_test.go import rules adjusted (outside Touch, forced by move); broker go.mod edited by hand, check with GOWORK=off before release
 T0.8 | done | 3e2b302 | check-module-deps.sh first in make build + guard test; build exit 0 | depguard rules added in dst/shared/controlplane, config accepted but a real hit not proven; shell guard is the enforced check
 T0.9 | done | 942dfa8 | root README with Roadmap, module READMEs, doc paths, Podman wording | many old design docs still name old paths (listed as stale in the T0.9 report)
-T0.10 | done with 1 gap | (this commit) | see below | make it NOT PASSED
+T0.10 | done | (this commit) | see below | make it passes on Podman with 2 local settings (ISSUES.md 5)
 
 P0 stage gate (2026-11-12):
 - build exit 0; cpsim300, kafka300 and golden pins equal baseline
@@ -19,11 +19,10 @@ P0 stage gate (2026-11-12):
 - race: controlplane make test-race RACE_RUNS=3 ok; dst make test ok
 - determinism: dst ok, controlplane ok, broker red (known, ISSUES.md)
 - test count (go test ./... -list . | wc -l): dst 102, shared 21, controlplane 310, broker 480 = 913; baseline 938. Lower because duplicate tests were deleted (one copy of awsmetrics, httpconnections, runinfo; one determinismcheck test set)
-- make it: NOT PASSED. Podman machine is up, but the dynamodb-local container did not start in 300s ("create container: context deadline exceeded"). Other packages ok. Likely Podman setup (2 GiB VM, image pull, testcontainers) - not checked further.
+- make it: PASSED on Podman (images pre-pulled, docker link to podman, TESTCONTAINERS_RYUK_DISABLED=true). First try failed only because the images were not downloaded yet.
 
 ## Deferred
 
-- `it` gate (cd controlplane && make it): NOT RUN (Docker daemon not reachable; docker is podman).
 
 ## User decisions
 

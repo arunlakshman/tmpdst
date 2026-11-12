@@ -25,7 +25,6 @@ func InboxKindOf(b EventData) machine.Class {
 	case NodeStarted, StopRequest, TimerFired, ConnectDone,
 		ObjectPutDone, ObjectGetDone, ObjectDeleteDone, ObjectListDone,
 		ControlPlaneDone, ControlPlaneDeliver,
-		LogAppendDone, LogReadDone, LogGetEndDone, LogDeleteOldDone, LogClaimEpochDone,
 		LiveBrokers, SendDone:
 		return machine.Control
 	case ConnOpened, BytesReceived, ConnClosed:

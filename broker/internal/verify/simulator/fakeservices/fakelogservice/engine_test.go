@@ -25,8 +25,8 @@ func TestBridgeHandlesAndDefaults(t *testing.T) {
 	if e.Name() != "fakelogservice" || !e.Handles(core.ControlPlaneCall{}) || !e.Handles(core.ControlPlaneReply{}) {
 		t.Fatal(e.Name(), e.Handles(core.ControlPlaneCall{}))
 	}
-	if e.Handles(core.LogAppend{}) {
-		t.Fatal("must not handle log IO")
+	if e.Handles(core.ObjectPut{}) {
+		t.Fatal("must not handle object IO")
 	}
 	p := e.Params()
 	if !p.Enabled {

@@ -10,7 +10,6 @@ func TestClassOfCoversEveryEvent(t *testing.T) {
 	control := []EventData{
 		NodeStarted{}, StopRequest{}, TimerFired{}, SendDone{}, ConnectDone{},
 		ObjectPutDone{}, ObjectGetDone{}, ObjectDeleteDone{}, ObjectListDone{}, ControlPlaneDone{},
-		LogAppendDone{}, LogReadDone{}, LogGetEndDone{}, LogDeleteOldDone{},
 	}
 	data := []EventData{ConnOpened{}, BytesReceived{}, ConnClosed{}}
 	for _, b := range control {

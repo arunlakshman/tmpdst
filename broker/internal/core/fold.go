@@ -23,6 +23,10 @@ import (
 //	field values              401 to 499 (in dst/machine)
 //	facts                     501        (in dst/machine)
 //
+// Retired tags: 14 to 17 and 20 (events) and 116 to 119 and 121 (actions) were the
+// shared command log values (LogAppend and its relatives). They were deleted. The
+// numbers are not used again.
+//
 // The interfaces include Fold, so a new case without it does not compile. Before,
 // the simulator had a table of 600 lines (verify/simulator/tags.go) that gave the
 // same numbers, and it panicked for a case without a row.

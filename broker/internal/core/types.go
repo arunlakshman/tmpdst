@@ -14,8 +14,6 @@ type (
 	ConnID uint64 // a connection, as seen by one node
 	// Offset is a partition log offset.
 	Offset int64
-	// LogPosition is a position in the replicated command log (loglet).
-	LogPosition int64
 )
 
 // TopicPartition names one partition of a topic.

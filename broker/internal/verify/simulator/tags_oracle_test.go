@@ -120,50 +120,6 @@ func (h *stateHasher) oldEventDone(b core.EventData) {
 		h.oldRef(e.From)
 		h.Uint64(uint64(e.Req))
 		h.oldControlPlaneOperation(e.Op)
-	default:
-		h.oldEventLogDone(b)
-	}
-}
-
-func (h *stateHasher) oldEventLogDone(b core.EventData) {
-	switch e := b.(type) {
-	case core.LogAppendDone:
-		h.Uint64(14)
-		h.Uint64(uint64(e.Req))
-		h.Int64(int64(e.Slot))
-		h.Bool(e.Taken)
-		h.Bytes(e.Existing)
-		h.Uint64(uint64(e.Err))
-		h.Uint64(uint64(e.Outcome))
-	case core.LogReadDone:
-		h.Uint64(15)
-		h.Uint64(uint64(e.Req))
-		h.Uint64(uint64(len(e.Entries)))
-		for _, ent := range e.Entries {
-			h.Int64(int64(ent.Slot))
-			h.Bytes(ent.Data)
-		}
-		h.Uint64(uint64(e.Err))
-		h.Uint64(uint64(e.Outcome))
-	case core.LogGetEndDone:
-		h.Uint64(16)
-		h.Uint64(uint64(e.Req))
-		h.Int64(int64(e.Tail))
-		h.Uint64(uint64(e.Err))
-		h.Uint64(uint64(e.Outcome))
-	case core.LogDeleteOldDone:
-		h.Uint64(17)
-		h.Uint64(uint64(e.Req))
-		h.Uint64(uint64(e.Err))
-		h.Uint64(uint64(e.Outcome))
-	case core.LogClaimEpochDone:
-		h.Uint64(20)
-		h.Uint64(uint64(e.Req))
-		h.Uint64(e.Epoch)
-		h.String(e.Owner)
-		h.Bool(e.Won)
-		h.Uint64(uint64(e.Err))
-		h.Uint64(uint64(e.Outcome))
 	case core.LiveBrokers:
 		h.Uint64(19)
 		h.Uint64(uint64(len(e.Brokers)))
@@ -248,35 +204,6 @@ func (h *stateHasher) oldActionIO(a core.Action) {
 		h.String(x.Cause)
 	case core.ShutdownDone:
 		h.Uint64(115)
-	default:
-		h.oldActionLog(a)
-	}
-}
-
-func (h *stateHasher) oldActionLog(a core.Action) {
-	switch x := a.(type) {
-	case core.LogAppend:
-		h.Uint64(116)
-		h.Uint64(uint64(x.Req))
-		h.Int64(int64(x.Slot))
-		h.Bytes(x.Data)
-	case core.LogRead:
-		h.Uint64(117)
-		h.Uint64(uint64(x.Req))
-		h.Int64(int64(x.From))
-		h.Uint64(uint64(uint32(x.Limit)))
-	case core.LogGetEnd:
-		h.Uint64(118)
-		h.Uint64(uint64(x.Req))
-	case core.LogDeleteOld:
-		h.Uint64(119)
-		h.Uint64(uint64(x.Req))
-		h.Int64(int64(x.Through))
-	case core.LogClaimEpoch:
-		h.Uint64(121)
-		h.Uint64(uint64(x.Req))
-		h.Uint64(x.Expect)
-		h.String(x.Owner)
 	default:
 		panic(fmt.Sprintf("sim: trace hash: untagged action %T", a))
 	}

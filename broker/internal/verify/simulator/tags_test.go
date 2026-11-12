@@ -84,14 +84,7 @@ func sampleEvents() map[string]core.EventData {
 		"ControlPlaneDeliver": core.ControlPlaneDeliver{
 			From: sampleInstance, Req: 11, Op: core.CreateTopic{Name: "t", Partitions: 3, FailIfExists: true},
 		},
-		"LogAppendDone": core.LogAppendDone{Req: 1, Slot: -1, Taken: true, Existing: []byte("e"), Err: core.ErrConflict, Outcome: core.NotApplied},
-		"LogReadDone": core.LogReadDone{
-			Req: 1, Entries: []core.LogEntry{{Slot: 2, Data: []byte("a")}, {Slot: 3}}, Err: core.OK, Outcome: core.Applied,
-		},
-		"LogGetEndDone":     core.LogGetEndDone{Req: 1, Tail: 8, Err: core.OK, Outcome: core.Applied},
-		"LogDeleteOldDone":  core.LogDeleteOldDone{Req: 1, Err: core.ErrIO, Outcome: core.MaybeApplied},
-		"LogClaimEpochDone": core.LogClaimEpochDone{Req: 1, Epoch: 6, Owner: "o", Won: true, Err: core.OK, Outcome: core.Applied},
-		"LiveBrokers":       core.LiveBrokers{Brokers: []core.BrokerAddr{{NodeID: 1, Host: "h", Port: 9092}, {NodeID: -1}}},
+		"LiveBrokers": core.LiveBrokers{Brokers: []core.BrokerAddr{{NodeID: 1, Host: "h", Port: 9092}, {NodeID: -1}}},
 	}
 }
 
@@ -108,10 +101,7 @@ func sampleActions() map[string]core.Action {
 		"ControlPlaneReply": core.ControlPlaneReply{
 			To: sampleInstance, Done: core.ControlPlaneDone{Req: 2, Resp: core.ListGroupsResp{}, Err: core.OK, Outcome: core.Applied},
 		},
-		"LogAppend": core.LogAppend{Req: 1, Slot: 2, Data: []byte("l")}, "LogRead": core.LogRead{Req: 1, From: 2, Limit: -1},
-		"LogGetEnd": core.LogGetEnd{Req: 1}, "LogDeleteOld": core.LogDeleteOld{Req: 1, Through: 9},
-		"LogClaimEpoch": core.LogClaimEpoch{Req: 1, Expect: 2, Owner: "o"},
-		"RecordFact":    core.RecordFact{Fact: machine.Fact{Name: "f"}}, "StopForRestart": core.StopForRestart{Cause: "why"},
+		"RecordFact": core.RecordFact{Fact: machine.Fact{Name: "f"}}, "StopForRestart": core.StopForRestart{Cause: "why"},
 		"ShutdownDone": core.ShutdownDone{},
 	}
 }

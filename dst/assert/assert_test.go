@@ -43,11 +43,45 @@ func TestSometimesReachableUnreachable(t *testing.T) {
 	if cov["path"].Kind != assert.KindReachable || cov["path"].Checks != 1 || cov["path"].Passes != 1 {
 		t.Fatalf("path %#v", cov["path"])
 	}
-	if cov["alias"].Kind != assert.KindAlways {
-		t.Fatalf("alias kind %s", cov["alias"].Kind)
+	if cov["alias"].Kind != assert.KindAlwaysOrUnreachable || cov["alias"].Passes != 1 {
+		t.Fatalf("alias %#v", cov["alias"])
+	}
+	if cov["never"].Kind != assert.KindUnreachable || cov["never"].Checks != 1 || cov["never"].Passes != 0 {
+		t.Fatalf("never %#v", cov["never"])
 	}
 	if len(fails) != 1 || fails[0] != "never|reached an Unreachable point why=1" {
 		t.Fatalf("fails = %v", fails)
+	}
+}
+
+func TestAlwaysOrUnreachableFails(t *testing.T) {
+	var fails []string
+	l := assert.New(func(property, detail string) { fails = append(fails, property+"|"+detail) })
+	l.AlwaysOrUnreachable(false, "x", assert.Pair{Key: "k", Value: 2})
+	if len(fails) != 1 || fails[0] != "x|k=2" {
+		t.Fatalf("fails = %v", fails)
+	}
+}
+
+// FirstStep is the step of the first failed safety check, or of the first
+// passed coverage check.
+func TestFirstStep(t *testing.T) {
+	step := uint64(0)
+	l := assert.New(nil)
+	l.SetStepCounter(func() uint64 { return step })
+	step = 3
+	l.Always(true, "safe")
+	l.Sometimes(false, "rare")
+	step = 5
+	l.Always(false, "safe")
+	l.Sometimes(true, "rare")
+	step = 9
+	l.Always(false, "safe")
+	l.Sometimes(true, "rare")
+	l.Reachable("here")
+	cov := l.Coverage()
+	if cov["safe"].FirstStep != 5 || cov["rare"].FirstStep != 5 || cov["here"].FirstStep != 9 {
+		t.Fatalf("first steps: %+v", cov)
 	}
 }
 

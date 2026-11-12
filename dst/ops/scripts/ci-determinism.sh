@@ -4,6 +4,7 @@
 # Not in the gate (they use goroutines, wall time or files on purpose):
 #   campaign (parallel seeds), syncclock, realclock, golden (files), model and
 #   mutant (testing), examples.
+# The dst v2 packages machine and kernel are in the gate.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -15,6 +16,8 @@ pkgs=(
   ./fault
   ./clock
   ./check
+  ./machine
+  ./kernel
 )
 
 echo "== determinismcheck"

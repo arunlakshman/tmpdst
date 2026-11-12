@@ -11,7 +11,43 @@ This module is a folder of the MDS monorepo. It imports no other module of the r
 From the repo root: `make -C dst build`. It runs format, ASCII, vet, lint, modernize, the tests and the
 determinism check. The determinism tool is in `cmd/determinismcheck`.
 
-## Contract packages
+## dst v2 (new)
+
+dst v2 is the typed kernel of [docs/v2-design.md](docs/v2-design.md). It lives beside the old `sim` and
+`eng` packages until both products move to it (plan tasks T1.11 and T1.12); then the old packages are
+deleted.
+
+| Package | Role |
+|---|---|
+| `machine` | The machine contract: `Machine[In, Out]` (`Step(now, in) []Out`, `StateHash`), `Factory`, `Env` (random stream, buggify, assertions), time types, node names, boot numbers, `Fact`. Product machine code imports only this package. |
+| `kernel` | The simulation world: `Spawn` nodes, `AddService` services, typed `Addr[In]` and `Ref[In]`, a `Router[In]` per Step, `Send` / `SendOn` / `Call`, timers, lanes (`Lanes[K]`), two inboxes per node, the cost model, phases, incarnations, crash / restart / stop / pause, attrition, rules, the fact timeline and the trace hash. |
+
+### How to run a machine on the kernel
+
+1. Give the machine an input sum type and an output sum type: an interface with an unexported marker
+   method and a `//sumtype:decl` comment. Every case has a `Fold(h *trace.Hash)` method that writes a
+   fixed tag number, then the fields.
+2. Implement `machine.Machine[In, Out]`.
+3. `w := kernel.New(kernel.Config{Seed: seed})`, then `kernel.AddService(w, svc)` and
+   `addr := kernel.Spawn(w, kernel.NodeSpec[In, Out]{Name, New, Route, ...})`.
+4. `Route` is one type switch over every case of `Out`. Each case calls `r.SetTimer`, `r.End`,
+   `kernel.Send(r, addr, msg)`, `kernel.Call(r, service, req)`, and so on. The `gochecksumtype` linter
+   fails the build when a case is missing.
+5. `w.RunUntil(nil)` and `res := w.Finish()`. The same seed gives the same `res.Hash`.
+
+Go infers a type parameter from every argument, and the types must be the same. So when a message is
+a concrete case, convert it to the sum type: `kernel.Send(r, server, serverIn(putRequest(x)))`, or
+write the type: `kernel.Inject[tin](w, a, 0, note{"x"})`.
+
+`examples/v2/kv` and `examples/v2/kvchaos` are the two examples on v2 (new copies of the old
+examples, with golden hashes).
+
+Assertions and buggify sites are declared once, in package-level var blocks:
+`var oneWriter = assert.NewAlways("sim: one writer per epoch")`,
+`var slowAnswer = fault.NewSite("store: slow answer")`. The declarations form a catalog
+(`assert.Catalog`, `fault.Sites`), so a campaign can list what was never reached or never fired.
+
+## Contract packages (old)
 
 Wire these first.
 
@@ -38,12 +74,12 @@ The runner handles control types first, then tries engines in register order unt
 
 | Package | Role |
 |---|---|
-| `rng` | SplitMix64 stream (`Uint64`, `Intn`, `Float64`, `Chance`, `Between`, `Calls`, `Bytes`) |
+| `rng` | SplitMix64 stream (`Uint64`, `Intn`, `Float64`, `Chance`, `Between`, `Calls`, `Bytes`), and `Derive(label)` for an independent stream that draws nothing |
 | `sched` | Virtual mono clock and `(at, tie, seq)` event heap |
 | `clock` | Wall offset over `sched`, `AfterFunc` / `Advance` on the same heap |
 | `trace` | Running FNV-1a `Hash`, optional `Ring[T]` |
-| `assert` | Always / Sometimes / Reachable / Unreachable with coverage |
-| `fault` | Maybe / MaybeP / Fault with per-site latch and Quiet |
+| `assert` | Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable with coverage; typed handles and the catalog |
+| `fault` | Maybe / MaybeP / Fault with per-site latch and Quiet; declared sites (`NewSite`) and the catalog |
 | `campaign` | Parallel seed runner. Folds per-seed hashes in seed order and merges coverage. |
 | `check` | The log oracle of a simulator (`Replay`, `NoHole`, `Holders`, `Prefixes`, `Monotonic`, `Converged`) and the crash checks by hand (`Persistence`, `ForwardProgress`, `DirtyReboot`) |
 | `check/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |

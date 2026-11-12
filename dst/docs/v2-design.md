@@ -1778,3 +1778,59 @@ Each has my recommendation. Please answer yes, no, or the other option.
   the old one fire). Recommend: **replace**.
 - **D8. Assertion kinds**: `assert.Log` records the broker's five kinds. The
   control plane report does not change (it uses only three). Recommend: **yes**.
+
+## 19. Changes found while building
+
+Notes from the tasks that build this design. Each one says what did not work as
+written, and the smallest change that was made.
+
+### T1.2 (kernel)
+
+1. **`fault.Site` cannot be the new typed handle yet.** Section 10.2 names the new
+   handle `fault.Site`, and section 16.2 keeps the old string type `fault.Site`
+   until T1.16. Go cannot have two types with one name, and the control plane
+   uses the string type today (`fault.Site(site)`). The typed handle is named
+   `fault.NamedSite` (made by `fault.NewSite`, as designed). `machine.Faults`
+   takes `fault.NamedSite`. T1.16, which deletes the string type, may rename
+   `NamedSite` to `Site`.
+2. **Type inference needs the sum type for every generic call, not only `Call`.**
+   Section 4.2 says this for `Call`. It is the same for `Send`, `SendOn`, `Inject`
+   and `InjectOn`: Go infers `In` from the address and from the message, and both
+   must give the same type. Write `kernel.Send(r, to, serverIn(putRequest(x)))` or
+   `kernel.Inject[tin](w, a, 0, note{})`. Methods (`Router.SetTimer`,
+   `ServiceContext.Deliver`) are not generic functions, so they take a case as it is.
+3. **No `any` in the kernel, also for `recover()`.** `recover()` returns `any`, so
+   `x := recover()` would be a variable of type `any`. The kernel writes
+   `fmt.Sprint(recover())` inside the deferred function instead, and uses a "done"
+   flag to know that a panic happened.
+4. **FirstStep needs a step counter.** `assert.Log` gets
+   `SetStepCounter(func() uint64)`, and `assert.Coverage` gets the field
+   `FirstStep` (section 10.1). The kernel gives it `World.Steps`.
+5. **The determinism gate forbids package-level variables.** The catalog of
+   `assert` and `fault` is a package-level map, written only while packages
+   initialize; it has a `//determinismcheck:ok` comment. Note for T1.6: the
+   typed handles in product packages (`var x = assert.NewAlways(...)`) are
+   package-level variables too, and broker `core` and control plane `runtime` are
+   in their determinism gates. T1.6 needs a `//determinismcheck:ok` comment on
+   those var blocks, or a small change to `determinismcheck` that accepts
+   variables of the handle types.
+6. **A one-case sum in tests.** `gocritic` (singleCaseSwitch) asks to replace a
+   type switch with one case by an `if`, and `gochecksumtype` checks only
+   switches. The kernel tests give their request sum a second case (`idle`)
+   instead of turning the linter off.
+7. **Small choices the design left open** (no behavior that a scenario uses):
+   - the queue entry kinds keep the broker numbers (deliver 0, service step 1,
+     kill 2, restart 3, phase 5) and add host task 7;
+   - the counter "freezes" is gone with freeze; the other counter names and their
+     order are the broker ones;
+   - a timer that fired is removed from the table of pending timers, so a later
+     `CancelTimer` of its id is not counted;
+   - the kill at the end of a graceful stop has the cause "stop deadline"; the
+     `sim_fault` fact names the service with the key "service";
+   - `Crash` or `Stop` of a driver, a second node or service with one name, a
+     `Stop` of a node without `StopMsg`, and using a `Router` after its Step are
+     protocol failures;
+   - `Spawn` every node before `Start`; a node spawned later stays down until
+     `Boot`. `RunUntil` calls `Start` if it was not called;
+   - a pause ends with the incarnation (as the control plane pause does today);
+   - `machine.End` has a `String` method for log lines.

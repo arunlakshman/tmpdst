@@ -46,7 +46,7 @@ Add one file in `internal/verify/speccheck`, for example `myspec.go`.
 Then write a second, naive model made of plain maps or slices, from the rules
 in the doc comment only. Do not copy the spec code. Compare the spec with the
 model on random operations. See `controlplane_model_test.go` and
-`partition_model_test.go` in `internal/verify/speccheck`. This checks the spec
+`broker_model_test.go` in `internal/verify/speccheck`. This checks the spec
 itself: nobody else checks the answer key.
 
 ### 2. Write a generator profile and a coverage test (about 5 minutes)
@@ -117,10 +117,10 @@ into a normal test to keep the case forever.
 
 | Check | Real component | Simulated component or spec |
 | --- | --- | --- |
-| C1 broker vs Partition | The broker state machine (`internal/broker`). | The object store and the control plane are the specs `speccheck.ObjectStore` and `speccheck.ControlPlane`. The reference is `speccheck.Partition`. |
+| C1 broker vs Broker spec | The broker state machine (`internal/broker`). | The object store and the control plane are the specs `speccheck.ObjectStore` and `speccheck.ControlPlane`. The reference is `speccheck.Broker`. |
 | C2 simulated engines vs specs | None. | The simulated engines (`simulator/fakeservices`) run with all faults off. The reference is the spec. |
 | C3 adapters vs specs | The S3 adapter and the control-plane stores (in-memory store, gRPC client, applier on MemKV and on Pebble). The S3 test needs `MDS_S3_ENDPOINT`. | The reference is the spec. |
-| C4 Kafka oracle vs specs | None. | The oracle in `sim/kafka` is checked with histories built from `Partition` and `ControlPlane`. |
+| C4 Kafka oracle vs specs | None. | The oracle in `sim/kafka` is checked with histories built from `Broker` and `ControlPlane`. |
 
 C3 is the only check that runs the real code in `internal/system` and the real
 control-plane stores.

@@ -9,23 +9,23 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
 )
 
-// PartitionOp is one operation of the partition suite. Kind is "append",
+// BrokerOp is one operation of the broker suite. Kind is "append",
 // "read" or "hwm" (high watermark). Batch is used by append. From and Max are
 // used by read.
-type PartitionOp struct {
+type BrokerOp struct {
 	Kind  string
 	Batch [][]byte
 	From  int64
 	Max   int
 }
 
-// PartitionPair is a fresh spec and a fresh subject of the partition suite.
-type PartitionPair struct {
-	spec    *speccheck.Partition
-	subject PartitionSubject
+// BrokerPair is a fresh spec and a fresh subject of the broker suite.
+type BrokerPair struct {
+	spec    *speccheck.Broker
+	subject BrokerSubject
 }
 
-func genPartitionOp(r *checker.Rand, _ int) PartitionOp {
+func genBrokerOp(r *checker.Rand, _ int) BrokerOp {
 	switch r.Intn(5) {
 	case 0, 1:
 		var batch [][]byte
@@ -36,30 +36,30 @@ func genPartitionOp(r *checker.Rand, _ int) PartitionOp {
 			}
 			batch = append(batch, value)
 		}
-		return PartitionOp{Kind: "append", Batch: batch}
+		return BrokerOp{Kind: "append", Batch: batch}
 	case 2, 3:
 		// From is chosen around the edges: negative, inside, at the end, past it.
-		return PartitionOp{Kind: "read", From: int64(r.Intn(14)) - 2, Max: r.Intn(6) - 1}
+		return BrokerOp{Kind: "read", From: int64(r.Intn(14)) - 2, Max: r.Intn(6) - 1}
 	}
-	return PartitionOp{Kind: "hwm"}
+	return BrokerOp{Kind: "hwm"}
 }
 
-func minimizePartitionOp(operation PartitionOp) []PartitionOp {
-	var out []PartitionOp
+func minimizeBrokerOp(operation BrokerOp) []BrokerOp {
+	var out []BrokerOp
 	switch operation.Kind {
 	case "append":
 		if len(operation.Batch) > 0 {
-			out = append(out, PartitionOp{Kind: "append"})
+			out = append(out, BrokerOp{Kind: "append"})
 		}
 		if len(operation.Batch) > 1 {
-			out = append(out, PartitionOp{Kind: "append", Batch: operation.Batch[:1]})
+			out = append(out, BrokerOp{Kind: "append", Batch: operation.Batch[:1]})
 		}
 	case "read":
 		if operation.Max != 0 {
-			out = append(out, PartitionOp{Kind: "read", From: operation.From})
+			out = append(out, BrokerOp{Kind: "read", From: operation.From})
 		}
 		if operation.From > 0 {
-			out = append(out, PartitionOp{Kind: "read", From: 0, Max: operation.Max})
+			out = append(out, BrokerOp{Kind: "read", From: 0, Max: operation.Max})
 		}
 	}
 	return out
@@ -76,29 +76,29 @@ func cloneBatch(batch [][]byte) [][]byte {
 	return out
 }
 
-// PartitionComparator returns the comparator of the partition suite. Checks:
+// BrokerComparator returns the comparator of the broker suite. Checks:
 // the base offset of Append, whether Read is in range, every record offset and
 // value, the high watermark, and the state hash when the subject has one. The
 // suite writes over the batch after Append and over the records after Read, so
 // a subject that shares memory with the caller fails.
-func PartitionComparator(newSubject func() PartitionSubject) checker.SpecChecker[*PartitionPair, PartitionOp] {
-	return checker.SpecChecker[*PartitionPair, PartitionOp]{
-		Name:          "suites.PartitionOp",
-		New:           func() *PartitionPair { return &PartitionPair{spec: &speccheck.Partition{}, subject: newSubject()} },
-		Gen:           genPartitionOp,
-		Step:          partitionStep,
-		Invariant:     partitionInvariant,
-		Shrink:        minimizePartitionOp,
-		Format:        func(operation PartitionOp) string { return fmt.Sprintf("%#v", operation) },
+func BrokerComparator(newSubject func() BrokerSubject) checker.SpecChecker[*BrokerPair, BrokerOp] {
+	return checker.SpecChecker[*BrokerPair, BrokerOp]{
+		Name:          "suites.BrokerOp",
+		New:           func() *BrokerPair { return &BrokerPair{spec: &speccheck.Broker{}, subject: newSubject()} },
+		Gen:           genBrokerOp,
+		Step:          brokerStep,
+		Invariant:     brokerInvariant,
+		Shrink:        minimizeBrokerOp,
+		Format:        func(operation BrokerOp) string { return fmt.Sprintf("%#v", operation) },
 		Ops:           suiteOps,
 		MaxShrinkRuns: suiteMinimizeRuns,
 	}
 }
 
-// Partition runs the partition suite on the seeds that opts chooses.
-func Partition(t checker.Reporter, newSubject func() PartitionSubject, opts checker.Options) {
+// Broker runs the broker suite on the seeds that opts chooses.
+func Broker(t checker.Reporter, newSubject func() BrokerSubject, opts checker.Options) {
 	t.Helper()
-	checker.Run(t, PartitionComparator(newSubject), opts)
+	checker.Run(t, BrokerComparator(newSubject), opts)
 }
 
 func overwriteWithJunk(value []byte) {
@@ -107,7 +107,7 @@ func overwriteWithJunk(value []byte) {
 	}
 }
 
-func partitionStep(p *PartitionPair, operation PartitionOp) error {
+func brokerStep(p *BrokerPair, operation BrokerOp) error {
 	switch operation.Kind {
 	case "append":
 		specBatch, subjectBatch := cloneBatch(operation.Batch), cloneBatch(operation.Batch)
@@ -125,12 +125,12 @@ func partitionStep(p *PartitionPair, operation PartitionOp) error {
 			return fmt.Errorf("the high watermark is %d, but the spec says %d", a, s)
 		}
 	default:
-		return partitionRead(p, operation)
+		return brokerRead(p, operation)
 	}
 	return nil
 }
 
-func partitionRead(p *PartitionPair, operation PartitionOp) error {
+func brokerRead(p *BrokerPair, operation BrokerOp) error {
 	from := core.Offset(operation.From)
 	specRecords, specOK := p.spec.Read(from, operation.Max)
 	records, ok := p.subject.Read(from, operation.Max)
@@ -157,7 +157,7 @@ func partitionRead(p *PartitionPair, operation PartitionOp) error {
 	return nil
 }
 
-func partitionInvariant(p *PartitionPair) error {
+func brokerInvariant(p *BrokerPair) error {
 	if s, a := p.spec.HighWatermark(), p.subject.HighWatermark(); s != a {
 		return fmt.Errorf("the high watermark is %d, but the spec says %d", a, s)
 	}

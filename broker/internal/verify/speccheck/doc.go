@@ -1,11 +1,12 @@
 // Package speccheck holds the specs of the outside world: the object store
-// (ObjectStore), the control plane (ControlPlane) and one Kafka partition
-// (Partition). A spec is a small program that shows the correct behavior. It
+// (ObjectStore), the control plane (ControlPlane) and the broker (Broker).
+// A spec is a small program that shows the correct behavior. It
 // has no faults, it runs one operation at a time, and it keeps plain data. It
 // is short so that a reader can see that it is correct.
 //
 // ObjectStore and ControlPlane answer a core.IOCall with a core.IOResult
-// through Exec. Partition has Append and Read. All three have a StateHash.
+// through Exec. Broker has Append and Read, for one Kafka partition. All three
+// have a StateHash.
 //
 // A spec is also used as a test fake (the adapters over the specs are in
 // speccheck/specsystem). The main use is as an oracle: a checker we trust to say if a
@@ -14,7 +15,7 @@
 //
 //	C1  The broker state machine runs with no faults, over the ObjectStore
 //	    and ControlPlane specs. Its answers to produce, fetch and ListOffsets
-//	    are compared with Partition. The test also checks that the injected
+//	    are compared with Broker. The test also checks that the injected
 //	    bugs InjectedBugWrongOffset and InjectedBugServeCorrupt are caught.
 //	    Test: internal/broker/conformance_test.go.
 //	C2  Each simulated engine (object store, control plane) runs with all
@@ -26,7 +27,7 @@
 //	    moved to mds-controlplane with the CP extraction (docs/cp-extraction.md).
 //	    The S3 test needs MDS_S3_ENDPOINT.
 //	    Test: internal/system/s3store/conform_test.go.
-//	C4  The Kafka oracle (in sim/kafka) is compared with Partition and
+//	C4  The Kafka oracle (in sim/kafka) is compared with Broker and
 //	    ControlPlane. The oracle must accept the histories built from the
 //	    specs and must reject every fault that the test plants in a history.
 //	    The oracle never imports this package. C4 keeps the two independent.
@@ -36,21 +37,21 @@
 // real code and which side is simulated or a spec.
 //
 //	check | what is tested                    | compared with        | real or simulated
-//	C1    | broker answers (produce, fetch,   | Partition            | broker code is real;
+//	C1    | broker answers (produce, fetch,   | Broker               | broker code is real;
 //	      | ListOffsets)                      |                      | storage and control plane are specs
 //	C2    | simulated object store and        | ObjectStore and      | engines are simulated;
 //	      | control plane, faults off         | ControlPlane         | specs are the reference
 //	C3    | S3 adapter; control-plane stores  | ObjectStore and      | adapters are real code (S3 needs
 //	      |                                   | ControlPlane         | a live endpoint); specs are the reference
-//	C4    | Kafka oracle (accepts and         | Partition and        | oracle is simulation-side code;
+//	C4    | Kafka oracle (accepts and         | Broker and           | oracle is simulation-side code;
 //	      | rejects histories)                | ControlPlane         | specs are the reference
 //
 // The specs themselves are checked in this package. The unit tests check each
 // rule. ObjectStore is compared with a sorted-slice model. ControlPlane is
 // compared with a naive model made of maps and loops (controlplane_model_test.go)
 // and its invariants are checked: offsets are contiguous, the end offset equals
-// the committed counts, and a repeated commit gives the same answer. Partition
-// is compared with a slice model (partition_model_test.go).
+// the committed counts, and a repeated commit gives the same answer. Broker
+// is compared with a slice model (broker_model_test.go).
 //
 // Terms:
 //

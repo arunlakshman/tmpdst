@@ -11,7 +11,14 @@ type Event struct {
 }
 
 // EventData is a closed set of plain-data structs.
-type EventData interface{ isEvent() }
+//
+// Every case has Tag and Fold (event_fold.go): they write the case into the trace hash.
+type EventData interface {
+	isEvent()
+	// Tag is the frozen number of the case in the trace hash.
+	Tag() uint64
+	machine.Message
+}
 
 // IOResult is the EventData that answers an IOCall, matched by RequestID. A
 // completion with an unknown, already-finished or wrong-kind RequestID is ignored:

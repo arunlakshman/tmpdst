@@ -7,7 +7,14 @@ import "github.com/manifesterio/mds/dst/machine"
 //
 // Actions in one slice start in slice order; I/O among them may complete in
 // any order.
-type Action interface{ isAction() }
+//
+// Every case has Tag and Fold (action_fold.go): they write the case into the trace hash.
+type Action interface {
+	isAction()
+	// Tag is the frozen number of the case in the trace hash.
+	Tag() uint64
+	machine.Message
+}
 
 // IOCall is an Action the outside world executes and answers with exactly one
 // IOResult carrying the same RequestID. A live incarnation always gets that

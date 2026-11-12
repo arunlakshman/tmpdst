@@ -1919,3 +1919,32 @@ written, and the smallest change that was made.
 6. **The broker determinism script already failed before this task.**
    `broker/internal/core/operation_runner.go` imports `context`, which is not on the
    allow-list. The script is not part of `make build`. This task adds no new finding.
+
+### T1.6b (Fold and Tag on the broker core values)
+
+1. **The methods are in four new files, not in the files of the types.** Section 9.2
+   says "next to its type". Each of `event.go`, `action.go` and `controlplane.go`
+   already has 200 to 340 lines, so the methods are in `event_fold.go`,
+   `action_fold.go` and `controlplane_fold.go` (same package, same order as the
+   types). The small helpers (node instance, segment range, group member and so on)
+   and the "none" tags 200 and 300 are in `fold.go`. The three long files have a
+   file-level `nolint:dupl`, because the methods are flat lists of fields.
+2. **The sum interfaces embed `machine.Message`.** `EventData`, `Action`,
+   `ControlPlaneOperation` and `ControlPlaneResponse` now list `Tag() uint64` and
+   `Fold` (through `machine.Message`), so a new case without them does not compile.
+   `//sumtype:decl` is not added yet. The broker lint already has the setting that a
+   `default` branch does not make a switch exhaustive, and many switches over these
+   sums have a `default`; they are rewritten when the broker machine moves to the v2
+   contract (T1.12).
+3. **`tags.go` is four small functions; the old table is a test.** The kernel calls
+   `ref`, `event`, `action` and `fact`, and they call `Fold`. The old 600-line table is
+   kept as `tags_oracle_test.go` (methods renamed `old...`). The golden hashes prove the
+   same bytes only for the cases the kafka scenario produces. The oracle test folds a
+   value of every case, with every field set, both ways, and the results must be equal.
+   It also covers the cases that no scenario produces (the dead `Log*` values, most group
+   operations). `tags_test.go` checks that every tag is in its range and that no two
+   cases share a tag. Its list of cases is checked against the `isEvent`-style methods
+   of `core` (a scan of the source), not by an exhaustive switch.
+4. **`ref` is written twice** (`core.foldInstance` and the kernel's `stateHasher.ref`),
+   because `machine.NodeInstance` has no `Fold` method. T1.12 can add one to
+   `dst/machine` when the kernel moves.

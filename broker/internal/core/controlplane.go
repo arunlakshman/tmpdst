@@ -1,5 +1,7 @@
 package core
 
+import "github.com/manifesterio/mds/dst/machine"
+
 // ControlPlaneOperation is a control-plane operation as seen by a broker (decision 3). The wire
 // protocol for new work is gRPC (`controlplane/api/v1`, decision 57); ControlPlaneOperation remains
 // the in-process vocabulary until cutover. The metadata store is still invisible
@@ -10,10 +12,22 @@ package core
 // assigns offsets (decision 42): the broker never proposes one. How a store
 // stays correct under concurrent committers (a compare-and-set on the run base
 // with an internal retry) is the store's business, not part of this contract.
-type ControlPlaneOperation interface{ isControlPlaneOperation() }
+//
+// Every case has Tag and Fold (controlplane_fold.go): they write the case into the trace hash.
+type ControlPlaneOperation interface {
+	isControlPlaneOperation()
+	// Tag is the frozen number of the case in the trace hash.
+	Tag() uint64
+	machine.Message
+}
 
 // ControlPlaneResponse is the answer to a ControlPlaneOperation.
-type ControlPlaneResponse interface{ isControlPlaneResponse() }
+type ControlPlaneResponse interface {
+	isControlPlaneResponse()
+	// Tag is the frozen number of the case in the trace hash.
+	Tag() uint64
+	machine.Message
+}
 
 // CommitSegment registers one uploaded object holding batches for many
 // partitions and assigns their offsets atomically: every batch is assigned or

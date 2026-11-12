@@ -13,7 +13,7 @@ cd "$(dirname "$0")/../.."
 pkgs=(./internal/core/... ./internal/verify/simulator/... ./internal/wire/segmentformat/... ./internal/wire/kafkawire ./internal/broker/... ./internal/verify/speccheck ./internal/verify/speccheck/checker)
 
 echo "== determinismcheck"
-go run ./ops/tools/determinismcheck "${pkgs[@]}"
+go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ops/determinism-allow.txt "${pkgs[@]}"
 
 echo "== dependency audit records"
 # Only code that the deterministic packages really run needs an audit record.

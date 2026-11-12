@@ -1,9 +1,11 @@
 // Command determinismcheck enforces the determinism rules of docs/lessons.md (lesson 12)
-// on the packages that run inside the simulator (internal/core, internal/verify/simulator), and is reused by
-// ops/scripts/audit-dep.sh to audit third-party packages before they are allowed in.
+// on the deterministic packages of a module (the packages listed in that module's
+// ops/scripts/ci-determinism.sh). One tool serves dst, controlplane and broker. Each module passes
+// its own import allow-list with -allow. The broker's ops/scripts/audit-dep.sh reuses the tool
+// to audit third-party packages before they are allowed in.
 //
 // It reports:
-//   - imports not on the exact-path allow-list (allow.txt, embedded);
+//   - imports not on the exact-path allow-list (the file given with -allow);
 //   - go statements, channel types, sends, receives and select statements;
 //   - range over a map (Go randomizes map iteration order);
 //   - reflect map iteration (Value.MapKeys / Value.MapRange);
@@ -19,7 +21,7 @@ package main
 
 import (
 	"bufio"
-	_ "embed"
+	"errors"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -31,9 +33,6 @@ import (
 	"golang.org/x/tools/go/analysis/singlechecker"
 )
 
-//go:embed allow.txt
-var builtInAllowedImports string
-
 var allowedImportsFile string
 
 // DeterminismAnalyzer is the determinismcheck analysis pass.
@@ -44,7 +43,7 @@ var DeterminismAnalyzer = &analysis.Analyzer{
 }
 
 func init() {
-	DeterminismAnalyzer.Flags.StringVar(&allowedImportsFile, "allow", "", "import allow-list file (default: the embedded allow.txt)")
+	DeterminismAnalyzer.Flags.StringVar(&allowedImportsFile, "allow", "", "import allow-list file (required)")
 }
 
 func main() { singlechecker.Main(DeterminismAnalyzer) }
@@ -67,14 +66,14 @@ func (a allowedImports) allows(path string) bool {
 }
 
 func loadAllow() (allowedImports, error) {
-	text := builtInAllowedImports
-	if allowedImportsFile != "" {
-		b, err := os.ReadFile(allowedImportsFile) //nolint:gosec // G304: path is an explicit CLI argument
-		if err != nil {
-			return allowedImports{}, err
-		}
-		text = string(b)
+	if allowedImportsFile == "" {
+		return allowedImports{}, errors.New("determinismcheck: the -allow flag (import allow-list file) is required")
 	}
+	b, err := os.ReadFile(allowedImportsFile) //nolint:gosec // G304: path is an explicit CLI argument
+	if err != nil {
+		return allowedImports{}, err
+	}
+	text := string(b)
 	al := allowedImports{exact: map[string]bool{}}
 	sc := bufio.NewScanner(strings.NewReader(text))
 	for sc.Scan() {

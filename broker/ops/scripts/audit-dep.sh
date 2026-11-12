@@ -38,7 +38,7 @@ need_go=$(go_version "$work")
 repo_go=$(go_version "$repo")
 toolchain=$(printf '%s\n%s\n' "$need_go" "$repo_go" | sort -V | tail -1)
 export GOTOOLCHAIN="go$toolchain+auto"
-(cd "$repo" && go build -o "$work/determinismcheck" ./ops/tools/determinismcheck)
+(cd "$repo" && go build -o "$work/determinismcheck" github.com/manifesterio/mds/dst/cmd/determinismcheck)
 dir=$(go list -m -f '{{.Dir}}' "$mod")
 
 section() { printf '\n== %s\n' "$1"; }
@@ -57,7 +57,7 @@ go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{if .Module}}  ({{.Module.
 
 section "determinismcheck findings"
 set +e
-"$work/determinismcheck" "$pattern" 2>&1
+"$work/determinismcheck" -allow "$repo/ops/determinism-allow.txt" "$pattern" 2>&1
 rc=$?
 set -e
 case $rc in
@@ -82,5 +82,5 @@ cat <<'CHECK'
 [ ] Encode twice / decode twice gives byte-identical / deeply equal results.
 [ ] Every third-party package listed above has its own audit record.
 [ ] Record written: docs/dep-audits/<module>@<version>.md
-[ ] Exact import path(s) added to ops/tools/determinismcheck/allow.txt
+[ ] Exact import path(s) added to ops/determinism-allow.txt
 CHECK

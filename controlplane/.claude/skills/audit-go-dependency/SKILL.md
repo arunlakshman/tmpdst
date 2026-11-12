@@ -6,7 +6,7 @@ description: Audit a Go module for determinism before the deterministic packages
 # Audit a Go dependency for determinism
 
 The deterministic packages (`internal/runtime`, `internal/verify/simulator`) may import only what is on the
-exact-path allow-list `ops/tools/determinismcheck/allow.txt`. A third-party module also
+exact-path allow-list `ops/determinism-allow.txt`. A third-party module also
 needs a reviewed record at `docs/dep-audits/<module>@<version>.md`, or CI fails.
 Production-only code (`internal/system` adapters such as the AWS SDK and the HTTP client)
 needs no determinism audit.
@@ -48,9 +48,9 @@ needs no determinism audit.
    - Write `docs/dep-audits/<module>@<version>.md` using the template in
      `docs/dep-audits/README.md`, with file:line for every finding.
    - Add the **exact** import path(s) our code will use to
-     `ops/tools/determinismcheck/allow.txt`. Never add a bare prefix like `math`; use
+     `ops/determinism-allow.txt`. Never add a bare prefix like `math`; use
      `/...` only for a whole subtree you audited.
-   - `go get <module>@<version>` in the repo and run `go run ./ops/tools/determinismcheck ./internal/runtime/... ./internal/verify/simulator/...`.
+   - `go get <module>@<version>` in the repo and run `go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ops/determinism-allow.txt ./internal/runtime/... ./internal/verify/simulator/...`.
    - Add any rules for our code to `docs/decisions.md`.
 
 7. **On a version bump:** rerun from step 1 for the new version and diff the
@@ -59,6 +59,6 @@ needs no determinism audit.
 
 ## Never
 
-- Never weaken `ops/tools/determinismcheck` or delete an allow-list check to make CI pass.
+- Never weaken `dst/cmd/determinismcheck` or delete an allow-list check to make CI pass.
 - Never suppress a finding in our code without `//determinismcheck:ok <reason>`.
 - Never accept a dependency on "it's just a codec": check aliasing and hidden defaults.

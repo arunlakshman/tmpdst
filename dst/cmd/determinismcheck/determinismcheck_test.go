@@ -9,6 +9,10 @@ import (
 )
 
 func TestDetcheck(t *testing.T) {
+	// The testdata is checked with the allow list of dst (the same list the old embedded one had).
+	old := allowedImportsFile
+	defer func() { allowedImportsFile = old }()
+	allowedImportsFile = filepath.Join("..", "..", "ops", "determinism-allow.txt")
 	analysistest.Run(t, analysistest.TestData(), DeterminismAnalyzer, "a")
 }
 
@@ -38,7 +42,7 @@ func TestLoadAllowFile(t *testing.T) {
 		t.Fatal("want error")
 	}
 	allowedImportsFile = ""
-	if al, err := loadAllow(); err != nil || len(al.exact)+len(al.prefix) == 0 {
-		t.Fatal(err)
+	if _, err := loadAllow(); err == nil {
+		t.Fatal("want error when -allow is not given")
 	}
 }

@@ -59,30 +59,6 @@ proto-tools:
 	@command -v $(PROTOC_GEN_GO) >/dev/null || go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTO_GO_VER)
 	@command -v $(PROTOC_GEN_GRPC) >/dev/null || go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTO_GRPC_VER)
 
-fmt-check:
-	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
-
-vet:
-	go vet ./...
-
-# Effective Go rules via .golangci.yml. Any finding fails the build (exit 1).
-# See docs/lint-baseline.md.
-lint:
-	golangci-lint run ./...
-
-# Built-in go fix modernizers (range-int, waitgroup.Go, errors.AsType, etc.).
-# Diff-only: fails the gate if the tree is not already modernized; does not rewrite.
-modernize-check:
-	go fix -diff ./...
-
-# Apply the same modernizers locally (review the diff before committing).
-modernize:
-	go fix ./...
-
-# No non-ASCII characters in code files (ops/scripts/ascii-check.sh).
-ascii-check:
-	@ops/scripts/ascii-check.sh
-
 compile:
 	go build ./...
 
@@ -144,3 +120,5 @@ risk-baseline:
 	go run ./cmd/riskscore -profile $(COVER_UNIT) \
 		-merge-profile $(COVER_SIM),$(COVER_IT)$(if $(RISK_MERGE),$(comma)$(RISK_MERGE)) \
 		-update-baseline
+
+include ../make/common.mk

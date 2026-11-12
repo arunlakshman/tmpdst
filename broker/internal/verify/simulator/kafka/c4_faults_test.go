@@ -11,6 +11,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -152,7 +153,7 @@ func (w *world) swapAdj(topicPartition core.TopicPartition, i int) {
 }
 
 // adjPairs lists (tp, i) with entries i, i+1 passing ok.
-func (w *world) adjPairs(ok func(topicPartition core.TopicPartition, a, b core.BatchRange) bool) ([]partRef, []core.TopicPartition) {
+func (w *world) adjPairs(ok func(topicPartition core.TopicPartition, a, b contract.BatchRange) bool) ([]partRef, []core.TopicPartition) {
 	var out []partRef
 	var tps []core.TopicPartition
 	for _, topicPartition := range w.tps {
@@ -181,7 +182,7 @@ func recsOf(vals ...string) []kmsg.Record {
 	return out
 }
 
-func lastRange(w *world, topicPartition core.TopicPartition) core.BatchRange {
+func lastRange(w *world, topicPartition core.TopicPartition) contract.BatchRange {
 	rs := w.ranges[topicPartition]
 	return rs[len(rs)-1]
 }
@@ -261,7 +262,7 @@ func faults() []fault {
 		}, []string{pAckedAt}, false},
 
 		{"records swapped in the log", func(w *world, r *rand.Rand) bool {
-			ps, tps := w.adjPairs(func(topicPartition core.TopicPartition, a, b core.BatchRange) bool {
+			ps, tps := w.adjPairs(func(topicPartition core.TopicPartition, a, b contract.BatchRange) bool {
 				return w.definiteAt(topicPartition, int64(a.Base))
 			})
 			i, ok := pick(r, seq(len(ps)))
@@ -456,7 +457,7 @@ func faults() []fault {
 			if err != nil {
 				panic(err)
 			}
-			rg := core.BatchRange{TopicPartition: topicPartition, Base: core.Offset(w.cp0(topicPartition)), Count: 1, Loc: w.put(b)}
+			rg := contract.BatchRange{TopicPartition: topicPartition, Base: core.Offset(w.cp0(topicPartition)), Count: 1, Loc: w.put(b)}
 			w.ranges[topicPartition] = append(w.ranges[topicPartition], rg)
 			return true
 		}, []string{pProduced}, false},

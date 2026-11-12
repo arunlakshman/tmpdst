@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // ObjectResult is what an object store call answered. Only the fields that
@@ -24,10 +25,10 @@ type ObjectResult struct {
 type ControlPlaneResult struct {
 	Code     core.ErrCode
 	Outcome  core.Outcome
-	Assigned []core.BatchRange
-	Ranges   []core.BatchRange
+	Assigned []contract.BatchRange
+	Ranges   []contract.BatchRange
 	End      core.Offset
-	Topics   []core.TopicInfo
+	Topics   []contract.TopicInfo
 }
 
 // Normalize returns a copy where an empty slice is nil. A store may return
@@ -58,7 +59,7 @@ func (r ControlPlaneResult) Normalize() ControlPlaneResult {
 	return out
 }
 
-func copyRanges(in []core.BatchRange) []core.BatchRange {
+func copyRanges(in []contract.BatchRange) []contract.BatchRange {
 	if len(in) == 0 {
 		return nil
 	}
@@ -163,12 +164,12 @@ func FromControlPlaneDone(d core.ControlPlaneDone) ControlPlaneResult {
 	out := ControlPlaneResult{Code: d.Err, Outcome: d.Outcome}
 	switch r := d.Resp.(type) {
 	case nil:
-	case core.CommitSegmentResp:
+	case contract.CommitSegmentResp:
 		out.Assigned = r.Assigned
-	case core.FindSegmentsResp:
+	case contract.FindSegmentsResp:
 		out.Ranges = r.Ranges
 		out.End = r.End
-	case core.DescribeTopicsResp:
+	case contract.DescribeTopicsResp:
 		out.Topics = r.Topics
 	default:
 		panic("observation: FromControlPlaneDone does not know the response type " +
@@ -201,7 +202,7 @@ func keysText(keys []string) string {
 	return "(len " + strconv.Itoa(len(keys)) + ") [" + strings.Join(parts, ", ") + "]"
 }
 
-func rangesText(ranges []core.BatchRange) string {
+func rangesText(ranges []contract.BatchRange) string {
 	parts := make([]string, len(ranges))
 	for i, r := range ranges {
 		parts[i] = "{topic " + strconv.Quote(r.TopicPartition.Topic) +
@@ -215,7 +216,7 @@ func rangesText(ranges []core.BatchRange) string {
 	return "(len " + strconv.Itoa(len(ranges)) + ") [" + strings.Join(parts, ", ") + "]"
 }
 
-func topicsText(topics []core.TopicInfo) string {
+func topicsText(topics []contract.TopicInfo) string {
 	parts := make([]string, len(topics))
 	for i, t := range topics {
 		parts[i] = "{name " + strconv.Quote(t.Name) +

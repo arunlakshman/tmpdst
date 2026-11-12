@@ -5,6 +5,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 )
@@ -26,7 +27,7 @@ type stubTruth struct{}
 func (stubTruth) Object(string) ([]byte, bool)    { return nil, false }
 func (stubTruth) EachObject(func(string, []byte)) {}
 func (stubTruth) Gen() uint64                     { return 0 }
-func (stubTruth) Committed(core.TopicPartition) []core.BatchRange {
+func (stubTruth) Committed(core.TopicPartition) []contract.BatchRange {
 	return nil
 }
 func (stubTruth) HighWatermark(core.TopicPartition) core.Offset { return 0 }

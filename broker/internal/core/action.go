@@ -1,6 +1,9 @@
 package core
 
-import "github.com/manifesterio/mds/dst/machine"
+import (
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/machine"
+)
 
 // Action is output of Step: a request for the outside world to do something.
 // Every I/O action carries a RequestID; its result returns as a completion event.
@@ -105,7 +108,7 @@ type ObjectList struct {
 // fail the determinism audit.
 type ControlPlaneCall struct {
 	Req machine.RequestID
-	Op  ControlPlaneOperation
+	Op  contract.Operation
 	// Timeout is the call's deadline. Zero takes the executor's default. Group
 	// joins and syncs wait for a rebalance, so they set a long one.
 	Timeout machine.Duration

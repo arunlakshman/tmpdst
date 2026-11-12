@@ -1,16 +1,16 @@
-package cpclient
+package client
 
 import (
 	"context"
 
-	"github.com/manifesterio/mds/broker/internal/core"
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // BrokerHeartbeat renews this broker's lease and returns the live broker set.
 // A standby control plane answers ErrUnavailable, so the call moves to the next
 // address.
-func (c *Client) BrokerHeartbeat(ctx context.Context, self core.BrokerAddr) ([]core.BrokerAddr, error) {
+func (c *Client) BrokerHeartbeat(ctx context.Context, self contract.BrokerAddr) ([]contract.BrokerAddr, error) {
 	return callRPC(ctx, c, "BrokerHeartbeat", cpv1.ControlPlaneClient.BrokerHeartbeat,
-		brokerHeartbeatFromCore(self), brokerHeartbeatRespToCore)
+		brokerHeartbeatFromContract(self), brokerHeartbeatRespToContract)
 }

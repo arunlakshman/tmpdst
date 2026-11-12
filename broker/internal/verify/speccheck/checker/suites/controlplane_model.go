@@ -6,6 +6,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/observation"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // controlPlaneModel is a second, naive model of the control plane. It is written from
@@ -15,19 +16,19 @@ import (
 // unlikely to repeat here.
 type controlPlaneModel struct {
 	segments map[string]controlPlaneModelSegment
-	runs     map[core.TopicPartition][]core.BatchRange
+	runs     map[core.TopicPartition][]contract.BatchRange
 	topics   map[string]int32
 }
 
 type controlPlaneModelSegment struct {
-	batches []core.PendingBatch
-	ranges  []core.BatchRange
+	batches []contract.PendingBatch
+	ranges  []contract.BatchRange
 }
 
 func newCPModel() *controlPlaneModel {
 	return &controlPlaneModel{
 		segments: map[string]controlPlaneModelSegment{},
-		runs:     map[core.TopicPartition][]core.BatchRange{},
+		runs:     map[core.TopicPartition][]contract.BatchRange{},
 		topics:   map[string]int32{},
 	}
 }
@@ -58,27 +59,27 @@ func (m *controlPlaneModel) partitions() []core.TopicPartition {
 }
 
 // topicList returns every topic sorted by name.
-func (m *controlPlaneModel) topicList() []core.TopicInfo {
-	var out []core.TopicInfo
+func (m *controlPlaneModel) topicList() []contract.TopicInfo {
+	var out []contract.TopicInfo
 	for name, n := range m.topics {
-		out = append(out, core.TopicInfo{Name: name, Partitions: n})
+		out = append(out, contract.TopicInfo{Name: name, Partitions: n})
 	}
-	slices.SortFunc(out, func(a, b core.TopicInfo) int { return cmp.Compare(a.Name, b.Name) })
+	slices.SortFunc(out, func(a, b contract.TopicInfo) int { return cmp.Compare(a.Name, b.Name) })
 	return out
 }
 
 // apply runs op on the model. It returns the result that the rules require and
 // whether the state may change. When the second value is false, the state hash of the
 // spec and of the subject must stay the same.
-func (m *controlPlaneModel) apply(operation core.ControlPlaneOperation) (observation.ControlPlaneResult, bool) {
+func (m *controlPlaneModel) apply(operation contract.Operation) (observation.ControlPlaneResult, bool) {
 	switch o := operation.(type) {
-	case core.CommitSegment:
+	case contract.CommitSegment:
 		return m.commit(o)
-	case core.FindSegments:
+	case contract.FindSegments:
 		return m.lookup(o), false
-	case core.DescribeTopics:
+	case contract.DescribeTopics:
 		return m.describe(o), false
-	case core.CreateTopic:
+	case contract.CreateTopic:
 		return m.createTopicCall(o)
 	}
 	return observation.ControlPlaneResult{Code: core.ErrInvalid}, false
@@ -87,7 +88,7 @@ func (m *controlPlaneModel) apply(operation core.ControlPlaneOperation) (observa
 // createTopicCall is a CreateTopic call. An OK answer has Outcome Applied, as
 // the spec gives. With FailIfExists, a topic that is already there is
 // ErrTopicExists and nothing changes.
-func (m *controlPlaneModel) createTopicCall(operation core.CreateTopic) (observation.ControlPlaneResult, bool) {
+func (m *controlPlaneModel) createTopicCall(operation contract.CreateTopic) (observation.ControlPlaneResult, bool) {
 	if operation.Name != "" && operation.Partitions > 0 && operation.FailIfExists {
 		if _, there := m.topics[operation.Name]; there {
 			return observation.ControlPlaneResult{Code: core.ErrTopicExists}, false
@@ -108,11 +109,11 @@ func (m *controlPlaneModel) createTopic(name string, partitions int32) (observat
 	return observation.ControlPlaneResult{Code: core.OK}, true
 }
 
-func sameBatches(a, b []core.PendingBatch) bool {
+func sameBatches(a, b []contract.PendingBatch) bool {
 	return slices.Equal(a, b)
 }
 
-func (m *controlPlaneModel) commit(operation core.CommitSegment) (observation.ControlPlaneResult, bool) {
+func (m *controlPlaneModel) commit(operation contract.CommitSegment) (observation.ControlPlaneResult, bool) {
 	if old, found := m.segments[operation.SegmentKey]; found {
 		if !sameBatches(old.batches, operation.Batches) {
 			return observation.ControlPlaneResult{Code: core.ErrConflict}, false
@@ -128,9 +129,9 @@ func (m *controlPlaneModel) commit(operation core.CommitSegment) (observation.Co
 			return invalid, false
 		}
 	}
-	var assigned []core.BatchRange
+	var assigned []contract.BatchRange
 	for _, b := range operation.Batches {
-		r := core.BatchRange{TopicPartition: b.TopicPartition, Base: core.Offset(m.end(b.TopicPartition)), Count: b.Records, Loc: b.Loc}
+		r := contract.BatchRange{TopicPartition: b.TopicPartition, Base: core.Offset(m.end(b.TopicPartition)), Count: b.Records, Loc: b.Loc}
 		m.runs[b.TopicPartition] = append(m.runs[b.TopicPartition], r)
 		m.topics[b.TopicPartition.Topic] = max(m.topics[b.TopicPartition.Topic], b.TopicPartition.Partition+1)
 		assigned = append(assigned, r)
@@ -139,7 +140,7 @@ func (m *controlPlaneModel) commit(operation core.CommitSegment) (observation.Co
 	return observation.ControlPlaneResult{Assigned: assigned, Outcome: core.Applied}, true
 }
 
-func (m *controlPlaneModel) lookup(operation core.FindSegments) observation.ControlPlaneResult {
+func (m *controlPlaneModel) lookup(operation contract.FindSegments) observation.ControlPlaneResult {
 	if operation.From < 0 {
 		return observation.ControlPlaneResult{Code: core.ErrInvalid}
 	}
@@ -158,7 +159,7 @@ func (m *controlPlaneModel) lookup(operation core.FindSegments) observation.Cont
 	return result
 }
 
-func (m *controlPlaneModel) describe(operation core.DescribeTopics) observation.ControlPlaneResult {
+func (m *controlPlaneModel) describe(operation contract.DescribeTopics) observation.ControlPlaneResult {
 	var result observation.ControlPlaneResult
 	for _, t := range m.topicList() {
 		if len(operation.Topics) == 0 || slices.Contains(operation.Topics, t.Name) {

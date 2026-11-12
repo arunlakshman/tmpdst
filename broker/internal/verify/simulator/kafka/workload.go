@@ -14,6 +14,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/trace"
@@ -55,7 +56,7 @@ func (o Opts) topicPartitions() []core.TopicPartition {
 	var out []core.TopicPartition
 	for _, t := range o.Topics {
 		for p := int32(0); p < o.Partitions; p++ {
-			out = append(out, core.NewTopicPartition(t, p))
+			out = append(out, contract.NewTopicPartition(t, p))
 		}
 	}
 	return out

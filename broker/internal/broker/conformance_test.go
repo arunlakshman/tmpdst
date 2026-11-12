@@ -13,6 +13,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/runsettings"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // Conformance C1 tests the REAL broker logic against SIMULATED fakes of the
@@ -21,8 +22,8 @@ import (
 // requests built with kafkawire. It compares every ack, fetch and ListOffsets
 // answer with one speccheck.Broker per topic partition.
 
-var c1TPs = []core.TopicPartition{core.NewTopicPartition("t", 0), core.NewTopicPartition("t", 1),
-	core.NewTopicPartition("u", 0), core.NewTopicPartition("u", 1), core.NewTopicPartition("u", 2)}
+var c1TPs = []core.TopicPartition{contract.NewTopicPartition("t", 0), contract.NewTopicPartition("t", 1),
+	contract.NewTopicPartition("u", 0), contract.NewTopicPartition("u", 1), contract.NewTopicPartition("u", 2)}
 
 // An Idem entry carries a producer id. The broker refuses these entries
 // (decision 41), so the test expects an error and no new record.

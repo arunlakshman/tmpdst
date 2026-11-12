@@ -7,6 +7,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -43,13 +44,13 @@ func (o ControlPlaneTestStep) Describe() string {
 		return "empty operation"
 	}
 	switch operation := o.Call.Op.(type) {
-	case core.CommitSegment:
+	case contract.CommitSegment:
 		return fmt.Sprintf("request %d: commit segment %q with %d batches", o.Call.Req, operation.SegmentKey, len(operation.Batches))
-	case core.FindSegments:
+	case contract.FindSegments:
 		return fmt.Sprintf("request %d: look up %v from offset %d with max bytes %d", o.Call.Req, operation.TopicPartition, operation.From, operation.MaxBytes)
-	case core.DescribeTopics:
+	case contract.DescribeTopics:
 		return fmt.Sprintf("request %d: describe topics %q", o.Call.Req, operation.Topics)
-	case core.CreateTopic:
+	case contract.CreateTopic:
 		return fmt.Sprintf("request %d: create topic %q with %d partitions, failing if it exists", o.Call.Req, operation.Name, operation.Partitions)
 	}
 	return fmt.Sprintf("request %d: %T", o.Call.Req, o.Call.Op)
@@ -82,7 +83,7 @@ func ControlPlaneOps(p InputProfile) func(r *checker.Rand, i int) ControlPlaneTe
 // name and count from genCreateTopic, so it also covers the invalid creates.
 func genExclusiveCreate(p InputProfile, r *checker.Rand, request machine.RequestID) ControlPlaneTestStep {
 	c := genCreateTopic(p, r).CreateTopic
-	return NewCall(core.ControlPlaneCall{Req: request, Op: core.CreateTopic{Name: c.Name, Partitions: c.Partitions, FailIfExists: true}})
+	return NewCall(core.ControlPlaneCall{Req: request, Op: contract.CreateTopic{Name: c.Name, Partitions: c.Partitions, FailIfExists: true}})
 }
 
 func genCreateTopic(p InputProfile, r *checker.Rand) ControlPlaneTestStep {
@@ -102,27 +103,27 @@ func poolKey(p InputProfile, r *checker.Rand) string {
 // genCommit picks one kind of commit. A pool key with variant 0 is a first
 // commit the first time and a replay every later time, because Batches gives
 // the same batches for the same key.
-func genCommit(p InputProfile, r *checker.Rand) core.CommitSegment {
+func genCommit(p InputProfile, r *checker.Rand) contract.CommitSegment {
 	roll := r.Intn(100)
 	switch {
 	case roll < p.InvalidPercent:
 		return genInvalidCommit(p, r)
 	case roll < p.InvalidPercent+p.ConflictPercent:
 		key := poolKey(p, r)
-		return core.CommitSegment{SegmentKey: key, Batches: Batches(p, key, key, 1+r.Intn(3))}
+		return contract.CommitSegment{SegmentKey: key, Batches: Batches(p, key, key, 1+r.Intn(3))}
 	case roll < p.InvalidPercent+p.ConflictPercent+p.RetryNewKeyPercent:
 		shape := poolKey(p, r)
 		key := fmt.Sprintf("retry%d", r.Intn(1000))
-		return core.CommitSegment{SegmentKey: key, Batches: Batches(p, shape, key, 0)}
+		return contract.CommitSegment{SegmentKey: key, Batches: Batches(p, shape, key, 0)}
 	}
 	key := poolKey(p, r)
-	return core.CommitSegment{SegmentKey: key, Batches: Batches(p, key, key, 0)}
+	return contract.CommitSegment{SegmentKey: key, Batches: Batches(p, key, key, 0)}
 }
 
 // genInvalidCommit returns a commit that the control plane must reject. It
 // uses a key from a separate "bad" pool, so the key is never committed and
 // the answer is always ErrInvalid and never ErrConflict.
-func genInvalidCommit(p InputProfile, r *checker.Rand) core.CommitSegment {
+func genInvalidCommit(p InputProfile, r *checker.Rand) contract.CommitSegment {
 	key := fmt.Sprintf("bad%d", r.Intn(4))
 	batches := Batches(p, key, key, 0)
 	at := r.Intn(len(batches))
@@ -138,11 +139,11 @@ func genInvalidCommit(p InputProfile, r *checker.Rand) core.CommitSegment {
 	default:
 		batches[at].TopicPartition.Topic = ""
 	}
-	return core.CommitSegment{SegmentKey: key, Batches: batches}
+	return contract.CommitSegment{SegmentKey: key, Batches: batches}
 }
 
-func genLookup(p InputProfile, r *checker.Rand) core.FindSegments {
-	topicPartition := core.NewTopicPartition(pick(r, p.Topics), int32(r.Intn(p.PartitionCount)))
+func genLookup(p InputProfile, r *checker.Rand) contract.FindSegments {
+	topicPartition := contract.NewTopicPartition(pick(r, p.Topics), int32(r.Intn(p.PartitionCount)))
 	from := int64(r.Intn(p.LookupShortSpan))
 	if percent(r, p.LookupLongPercent) {
 		from = int64(r.Intn(p.LookupLongSpan))
@@ -150,11 +151,11 @@ func genLookup(p InputProfile, r *checker.Rand) core.FindSegments {
 	if percent(r, p.LookupNegativeFromPercent) {
 		from = -1
 	}
-	return core.FindSegments{TopicPartition: topicPartition, From: core.Offset(from), MaxBytes: pick(r, p.MaxBytesChoices)}
+	return contract.FindSegments{TopicPartition: topicPartition, From: core.Offset(from), MaxBytes: pick(r, p.MaxBytesChoices)}
 }
 
-func genDescribe(p InputProfile, r *checker.Rand) core.DescribeTopics {
-	var d core.DescribeTopics
+func genDescribe(p InputProfile, r *checker.Rand) contract.DescribeTopics {
+	var d contract.DescribeTopics
 	for j := r.Intn(p.MaxDescribeNames + 1); j > 0; j-- {
 		name := pick(r, p.Topics)
 		if percent(r, p.UnknownTopicPercent) {
@@ -175,13 +176,13 @@ func genDescribe(p InputProfile, r *checker.Rand) core.DescribeTopics {
 // case. A variant above 0 always gives batches that differ from variant 0:
 // the first batch has more records, and an even variant also adds one batch.
 // This is the "same key, different request" case, which is a conflict.
-func Batches(p InputProfile, shape, segmentKey string, variant int) []core.PendingBatch {
+func Batches(p InputProfile, shape, segmentKey string, variant int) []contract.PendingBatch {
 	r := checker.NewRand(makeSeedShape(shape))
 	n := 1 + r.Intn(p.MaxBatches)
 	if percent(r, p.ManyBatchesPercent) {
 		n = p.ManyBatchesMin + r.Intn(p.ManyBatchesExtra+1)
 	}
-	out := make([]core.PendingBatch, 0, n+1)
+	out := make([]contract.PendingBatch, 0, n+1)
 	for range n {
 		out = append(out, genBatch(p, r, segmentKey))
 	}
@@ -204,10 +205,10 @@ func makeSeedShape(shape string) uint64 {
 	return h
 }
 
-func genBatch(p InputProfile, r *checker.Rand, segmentKey string) core.PendingBatch {
+func genBatch(p InputProfile, r *checker.Rand, segmentKey string) contract.PendingBatch {
 	topics := p.Topics[:min(p.BatchTopics, len(p.Topics))]
-	return core.PendingBatch{
-		TopicPartition: core.NewTopicPartition(pick(r, topics), int32(r.Intn(p.BatchPartitions))),
+	return contract.PendingBatch{
+		TopicPartition: contract.NewTopicPartition(pick(r, topics), int32(r.Intn(p.BatchPartitions))),
 		Records:        1 + int64(r.Intn(3)),
 		Loc:            core.SegmentRef{Key: segmentKey, Off: int64(r.Intn(4)) * 100, Len: int64(1 + r.Intn(3)*50)},
 	}
@@ -224,15 +225,15 @@ func MinimizeControlPlaneOp(operation ControlPlaneTestStep) []ControlPlaneTestSt
 		return nil
 	}
 	call := *operation.Call
-	var ops []core.ControlPlaneOperation
+	var ops []contract.Operation
 	switch o := call.Op.(type) {
-	case core.CommitSegment:
+	case contract.CommitSegment:
 		ops = minimizeCommit(o)
-	case core.FindSegments:
+	case contract.FindSegments:
 		ops = minimizeLookup(o)
-	case core.DescribeTopics:
+	case contract.DescribeTopics:
 		ops = minimizeDescribe(o)
-	case core.CreateTopic:
+	case contract.CreateTopic:
 		ops = minimizeExclusiveCreate(o)
 	}
 	out := make([]ControlPlaneTestStep, 0, len(ops))
@@ -254,18 +255,18 @@ func minimizeCreateTopic(c CreateTopic) []ControlPlaneTestStep {
 }
 
 // minimizeExclusiveCreate is minimizeCreateTopic for a call with FailIfExists.
-func minimizeExclusiveCreate(c core.CreateTopic) []core.ControlPlaneOperation {
-	var out []core.ControlPlaneOperation
+func minimizeExclusiveCreate(c contract.CreateTopic) []contract.Operation {
+	var out []contract.Operation
 	for _, m := range minimizeCreateTopic(CreateTopic{Name: c.Name, Partitions: c.Partitions}) {
-		out = append(out, core.CreateTopic{Name: m.CreateTopic.Name, Partitions: m.CreateTopic.Partitions, FailIfExists: true})
+		out = append(out, contract.CreateTopic{Name: m.CreateTopic.Name, Partitions: m.CreateTopic.Partitions, FailIfExists: true})
 	}
 	return out
 }
 
-func minimizeCommit(c core.CommitSegment) []core.ControlPlaneOperation {
-	var out []core.ControlPlaneOperation
-	add := func(key string, batches []core.PendingBatch) {
-		out = append(out, core.CommitSegment{SegmentKey: key, Batches: batches})
+func minimizeCommit(c contract.CommitSegment) []contract.Operation {
+	var out []contract.Operation
+	add := func(key string, batches []contract.PendingBatch) {
+		out = append(out, contract.CommitSegment{SegmentKey: key, Batches: batches})
 	}
 	if len(c.Batches) > 0 {
 		add(c.SegmentKey, nil)
@@ -288,8 +289,8 @@ func minimizeCommit(c core.CommitSegment) []core.ControlPlaneOperation {
 // simplifyBatches sets every record count above 1 to 1 and every location
 // offset and length to 0. It reports false when nothing changed. It does all
 // batches at once, so a commit of 40 batches costs one candidate, not 40.
-func simplifyBatches(batches []core.PendingBatch) ([]core.PendingBatch, bool) {
-	out := make([]core.PendingBatch, len(batches))
+func simplifyBatches(batches []contract.PendingBatch) ([]contract.PendingBatch, bool) {
+	out := make([]contract.PendingBatch, len(batches))
 	changed := false
 	for i, b := range batches {
 		out[i] = b
@@ -304,35 +305,35 @@ func simplifyBatches(batches []core.PendingBatch) ([]core.PendingBatch, bool) {
 	return out, changed
 }
 
-func minimizeLookup(l core.FindSegments) []core.ControlPlaneOperation {
-	var out []core.ControlPlaneOperation
+func minimizeLookup(l contract.FindSegments) []contract.Operation {
+	var out []contract.Operation
 	if l.MaxBytes != 0 {
-		out = append(out, core.FindSegments{TopicPartition: l.TopicPartition, From: l.From, MaxBytes: 0})
+		out = append(out, contract.FindSegments{TopicPartition: l.TopicPartition, From: l.From, MaxBytes: 0})
 	}
 	if l.From > 0 {
-		out = append(out, core.FindSegments{TopicPartition: l.TopicPartition, From: 0, MaxBytes: l.MaxBytes})
+		out = append(out, contract.FindSegments{TopicPartition: l.TopicPartition, From: 0, MaxBytes: l.MaxBytes})
 	}
 	if l.From > 1 {
-		out = append(out, core.FindSegments{TopicPartition: l.TopicPartition, From: l.From / 2, MaxBytes: l.MaxBytes})
+		out = append(out, contract.FindSegments{TopicPartition: l.TopicPartition, From: l.From / 2, MaxBytes: l.MaxBytes})
 	}
 	if l.TopicPartition.Partition > 0 {
-		out = append(out, core.FindSegments{TopicPartition: core.NewTopicPartition(l.TopicPartition.Topic, 0), From: l.From, MaxBytes: l.MaxBytes})
+		out = append(out, contract.FindSegments{TopicPartition: contract.NewTopicPartition(l.TopicPartition.Topic, 0), From: l.From, MaxBytes: l.MaxBytes})
 	}
 	for _, t := range shortenStrings(l.TopicPartition.Topic) {
-		out = append(out, core.FindSegments{TopicPartition: core.NewTopicPartition(t, l.TopicPartition.Partition), From: l.From, MaxBytes: l.MaxBytes})
+		out = append(out, contract.FindSegments{TopicPartition: contract.NewTopicPartition(t, l.TopicPartition.Partition), From: l.From, MaxBytes: l.MaxBytes})
 	}
 	return out
 }
 
-func minimizeDescribe(d core.DescribeTopics) []core.ControlPlaneOperation {
-	var out []core.ControlPlaneOperation
+func minimizeDescribe(d contract.DescribeTopics) []contract.Operation {
+	var out []contract.Operation
 	if len(d.Topics) > 0 {
-		out = append(out, core.DescribeTopics{})
+		out = append(out, contract.DescribeTopics{})
 	}
 	if len(d.Topics) > 1 {
 		for i := range d.Topics {
 			rest := slices.Concat(d.Topics[:i], d.Topics[i+1:])
-			out = append(out, core.DescribeTopics{Topics: rest})
+			out = append(out, contract.DescribeTopics{Topics: rest})
 		}
 	}
 	return out
@@ -350,32 +351,32 @@ func FormatControlPlaneOp(operation ControlPlaneTestStep) string {
 	return fmt.Sprintf("generator.NewCall(core.ControlPlaneCall{Req: %d, Op: %s})", operation.Call.Req, formatCPOp(operation.Call.Op))
 }
 
-func formatCPOp(operation core.ControlPlaneOperation) string {
+func formatCPOp(operation contract.Operation) string {
 	switch operation := operation.(type) {
-	case core.CreateTopic:
-		return fmt.Sprintf("core.CreateTopic{Name: %q, Partitions: %d, FailIfExists: %t}", operation.Name, operation.Partitions, operation.FailIfExists)
-	case core.CommitSegment:
-		return fmt.Sprintf("core.CommitSegment{SegmentKey: %q%s}", operation.SegmentKey, formatBatchesField(operation.Batches))
-	case core.FindSegments:
-		return fmt.Sprintf("core.FindSegments{TopicPartition: core.NewTopicPartition(%q, %d), From: %d, MaxBytes: %d}", operation.TopicPartition.Topic, operation.TopicPartition.Partition, operation.From, operation.MaxBytes)
-	case core.DescribeTopics:
+	case contract.CreateTopic:
+		return fmt.Sprintf("contract.CreateTopic{Name: %q, Partitions: %d, FailIfExists: %t}", operation.Name, operation.Partitions, operation.FailIfExists)
+	case contract.CommitSegment:
+		return fmt.Sprintf("contract.CommitSegment{SegmentKey: %q%s}", operation.SegmentKey, formatBatchesField(operation.Batches))
+	case contract.FindSegments:
+		return fmt.Sprintf("contract.FindSegments{TopicPartition: contract.NewTopicPartition(%q, %d), From: %d, MaxBytes: %d}", operation.TopicPartition.Topic, operation.TopicPartition.Partition, operation.From, operation.MaxBytes)
+	case contract.DescribeTopics:
 		if operation.Topics == nil {
-			return "core.DescribeTopics{}"
+			return "contract.DescribeTopics{}"
 		}
-		return fmt.Sprintf("core.DescribeTopics{Topics: []string{%s}}", quoteEach(operation.Topics))
+		return fmt.Sprintf("contract.DescribeTopics{Topics: []string{%s}}", quoteEach(operation.Topics))
 	}
 	return fmt.Sprintf("%#v", operation)
 }
 
-func formatBatchesField(batches []core.PendingBatch) string {
+func formatBatchesField(batches []contract.PendingBatch) string {
 	if batches == nil {
 		return ""
 	}
 	parts := make([]string, len(batches))
 	for i, b := range batches {
-		parts[i] = fmt.Sprintf("{TopicPartition: core.NewTopicPartition(%q, %d), Records: %d, Loc: %s}", b.TopicPartition.Topic, b.TopicPartition.Partition, b.Records, formatRef(b.Loc))
+		parts[i] = fmt.Sprintf("{TopicPartition: contract.NewTopicPartition(%q, %d), Records: %d, Loc: %s}", b.TopicPartition.Topic, b.TopicPartition.Partition, b.Records, formatRef(b.Loc))
 	}
-	return ", Batches: []core.PendingBatch{" + strings.Join(parts, ", ") + "}"
+	return ", Batches: []contract.PendingBatch{" + strings.Join(parts, ", ") + "}"
 }
 
 func quoteEach(items []string) string {

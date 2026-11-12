@@ -18,8 +18,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/manifesterio/mds/broker/internal/core"
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/shared/runinfo"
 )
 
@@ -202,7 +202,7 @@ func TestControlPlaneURLListFailsOver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := config.ControlPlane.Call(t.Context(), core.DescribeTopics{}); err != nil {
+	if _, err := config.ControlPlane.Call(t.Context(), contract.DescribeTopics{}); err != nil {
 		t.Fatalf("call through a dead url and a standby: %v", err)
 	}
 }

@@ -11,11 +11,13 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
-// scanCore maps each marker method (isEvent, isAction, ...) to the core types that
-// have it, so a new type that this test does not list fails the test.
+// scanCore maps each marker method (isEvent, isAction, ...) to the types that have it, so a
+// new type that this test does not list fails the test. It reads broker core, and for the
+// control plane operations and responses (isOperation, isResponse) package contract.
 func scanCore(t *testing.T) map[string][]string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -23,6 +25,14 @@ func scanCore(t *testing.T) map[string][]string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	more, err := filepath.Glob("../../../../controlplane/contract/*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(more) == 0 {
+		t.Fatal("no files found in controlplane/contract")
+	}
+	names = append(names, more...)
 	out := map[string][]string{}
 	for _, fname := range names {
 		if strings.HasSuffix(fname, "_test.go") {
@@ -58,14 +68,14 @@ var (
 	sampleInstance = machine.NodeInstance{Node: "n1", Inc: machine.BootNumber{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}}
 	sampleRef      = core.SegmentRef{Key: "seg/1", Off: 10, Len: -1}
 	sampleTP       = core.TopicPartition{Topic: "t", Partition: -2}
-	sampleRange    = core.BatchRange{TopicPartition: sampleTP, Base: 5, Count: 3, Loc: sampleRef}
-	samplePO       = core.PartitionOffset{TopicPartition: sampleTP, Offset: 9, LeaderEpoch: -1, Metadata: "m"}
-	sampleMember   = core.GroupMember{MemberID: "m1", ClientID: "c", ClientHost: "h", GroupInstanceID: "i", SessionTimeoutMs: 10, RebalanceTimeoutMs: -20, Metadata: []byte("md")}
-	sampleInfo     = core.GroupMemberInfo{GroupMember: sampleMember, JoinedTimeMs: 77, Assignment: []byte("as")}
-	sampleAssign   = []core.GroupAssignment{{Member: "m1", Bytes: []byte("x")}, {Member: "m2", Bytes: nil}}
-	sampleDescribe = core.DescribeGroupResp{
+	sampleRange    = contract.BatchRange{TopicPartition: sampleTP, Base: 5, Count: 3, Loc: sampleRef}
+	samplePO       = contract.PartitionOffset{TopicPartition: sampleTP, Offset: 9, LeaderEpoch: -1, Metadata: "m"}
+	sampleMember   = contract.GroupMember{MemberID: "m1", ClientID: "c", ClientHost: "h", GroupInstanceID: "i", SessionTimeoutMs: 10, RebalanceTimeoutMs: -20, Metadata: []byte("md")}
+	sampleInfo     = contract.GroupMemberInfo{GroupMember: sampleMember, JoinedTimeMs: 77, Assignment: []byte("as")}
+	sampleAssign   = []contract.GroupAssignment{{Member: "m1", Bytes: []byte("x")}, {Member: "m2", Bytes: nil}}
+	sampleDescribe = contract.DescribeGroupResp{
 		Exists: true, Generation: 4, ProtocolType: "consumer", Protocol: "range", Leader: "m1",
-		AssignedGeneration: 3, State: "Stable", Members: []core.GroupMemberInfo{sampleInfo},
+		AssignedGeneration: 3, State: "Stable", Members: []contract.GroupMemberInfo{sampleInfo},
 	}
 )
 
@@ -80,9 +90,9 @@ func sampleEvents() map[string]core.EventData {
 		"ObjectGetDone":    core.ObjectGetDone{Req: 9, Data: []byte("d"), Err: core.ErrNotFound},
 		"ObjectDeleteDone": core.ObjectDeleteDone{Req: 9, Err: core.ErrIO, Outcome: core.Applied},
 		"ObjectListDone":   core.ObjectListDone{Req: 9, Keys: []string{"a", "b"}, Err: core.ErrUnavailable},
-		"ControlPlaneDone": core.ControlPlaneDone{Req: 9, Resp: core.GroupSyncResp{Assignment: []byte("z")}, Err: core.OK, Outcome: core.Applied},
+		"ControlPlaneDone": core.ControlPlaneDone{Req: 9, Resp: contract.GroupSyncResp{Assignment: []byte("z")}, Err: core.OK, Outcome: core.Applied},
 		"ControlPlaneDeliver": core.ControlPlaneDeliver{
-			From: sampleInstance, Req: 11, Op: core.CreateTopic{Name: "t", Partitions: 3, FailIfExists: true},
+			From: sampleInstance, Req: 11, Op: contract.CreateTopic{Name: "t", Partitions: 3, FailIfExists: true},
 		},
 		"LiveBrokers": core.LiveBrokers{Brokers: []core.BrokerAddr{{NodeID: 1, Host: "h", Port: 9092}, {NodeID: -1}}},
 	}
@@ -97,9 +107,9 @@ func sampleActions() map[string]core.Action {
 		"Connect":   core.Connect{Req: 1, Addr: "a:1"},
 		"ObjectPut": core.ObjectPut{Req: 1, Key: "k", Data: []byte("v")}, "ObjectGet": core.ObjectGet{Req: 1, Ref: sampleRef},
 		"ObjectDelete": core.ObjectDelete{Req: 1, Key: "k"}, "ObjectList": core.ObjectList{Req: 1, Prefix: "p/"},
-		"ControlPlaneCall": core.ControlPlaneCall{Req: 1, Op: core.FindSegments{TopicPartition: sampleTP, From: 4, MaxBytes: -3}, Timeout: machine.Second},
+		"ControlPlaneCall": core.ControlPlaneCall{Req: 1, Op: contract.FindSegments{TopicPartition: sampleTP, From: 4, MaxBytes: -3}, Timeout: machine.Second},
 		"ControlPlaneReply": core.ControlPlaneReply{
-			To: sampleInstance, Done: core.ControlPlaneDone{Req: 2, Resp: core.ListGroupsResp{}, Err: core.OK, Outcome: core.Applied},
+			To: sampleInstance, Done: core.ControlPlaneDone{Req: 2, Resp: contract.ListGroupsResp{}, Err: core.OK, Outcome: core.Applied},
 		},
 		"RecordFact": core.RecordFact{Fact: machine.Fact{Name: "f"}}, "StopForRestart": core.StopForRestart{Cause: "why"},
 		"ShutdownDone": core.ShutdownDone{},
@@ -108,50 +118,50 @@ func sampleActions() map[string]core.Action {
 
 // sampleOperations has one value of every ControlPlaneOperation case, with every field set.
 // CreateTopic has two values, because its tag depends on FailIfExists.
-func sampleOperations() map[string]core.ControlPlaneOperation {
-	return map[string]core.ControlPlaneOperation{
-		"CommitSegment":        core.CommitSegment{SegmentKey: "s", Batches: []core.PendingBatch{{TopicPartition: sampleTP, Records: 4, Loc: sampleRef}}},
-		"FindSegments":         core.FindSegments{TopicPartition: sampleTP, From: 4, MaxBytes: -3},
-		"DescribeTopics":       core.DescribeTopics{Topics: []string{"a", "b"}},
-		"CreateTopic":          core.CreateTopic{Name: "t", Partitions: 3},
-		"CreateTopicExclusive": core.CreateTopic{Name: "t", Partitions: 3, FailIfExists: true},
-		"GroupInstall": core.GroupInstall{
+func sampleOperations() map[string]contract.Operation {
+	return map[string]contract.Operation{
+		"CommitSegment":        contract.CommitSegment{SegmentKey: "s", Batches: []contract.PendingBatch{{TopicPartition: sampleTP, Records: 4, Loc: sampleRef}}},
+		"FindSegments":         contract.FindSegments{TopicPartition: sampleTP, From: 4, MaxBytes: -3},
+		"DescribeTopics":       contract.DescribeTopics{Topics: []string{"a", "b"}},
+		"CreateTopic":          contract.CreateTopic{Name: "t", Partitions: 3},
+		"CreateTopicExclusive": contract.CreateTopic{Name: "t", Partitions: 3, FailIfExists: true},
+		"GroupInstall": contract.GroupInstall{
 			Group: "g", ProtocolType: "consumer", Protocol: "range", Generation: 2, Leader: "m1", TimeMs: 9,
-			Members: []core.GroupMember{sampleMember},
+			Members: []contract.GroupMember{sampleMember},
 		},
-		"GroupAssign":   core.GroupAssign{Group: "g", Generation: 2, Leader: "m1", TimeMs: 9, Assignments: sampleAssign},
-		"GroupRemove":   core.GroupRemove{Group: "g", Members: []string{"m1", "m2"}, TimeMs: 9, Reason: "leave"},
-		"OffsetCommit":  core.OffsetCommit{Group: "g", Member: "m1", Generation: -1, TimeMs: 9, Offsets: []core.PartitionOffset{samplePO}},
-		"OffsetFetch":   core.OffsetFetch{Group: "g", Partitions: []core.TopicPartition{sampleTP}},
-		"DescribeGroup": core.DescribeGroup{Group: "g"}, "ListGroups": core.ListGroups{},
-		"GroupJoin": core.GroupJoin{
+		"GroupAssign":   contract.GroupAssign{Group: "g", Generation: 2, Leader: "m1", TimeMs: 9, Assignments: sampleAssign},
+		"GroupRemove":   contract.GroupRemove{Group: "g", Members: []string{"m1", "m2"}, TimeMs: 9, Reason: "leave"},
+		"OffsetCommit":  contract.OffsetCommit{Group: "g", Member: "m1", Generation: -1, TimeMs: 9, Offsets: []contract.PartitionOffset{samplePO}},
+		"OffsetFetch":   contract.OffsetFetch{Group: "g", Partitions: []core.TopicPartition{sampleTP}},
+		"DescribeGroup": contract.DescribeGroup{Group: "g"}, "ListGroups": contract.ListGroups{},
+		"GroupJoin": contract.GroupJoin{
 			Group: "g", MemberID: "m1", GroupInstanceID: "i", ClientID: "c", ClientHost: "h", SessionTimeoutMs: 10,
-			RebalanceTimeoutMs: 20, ProtocolType: "consumer", Protocols: []core.GroupProtocol{{Name: "range", Metadata: []byte("q")}},
+			RebalanceTimeoutMs: 20, ProtocolType: "consumer", Protocols: []contract.GroupProtocol{{Name: "range", Metadata: []byte("q")}},
 		},
-		"GroupSync":      core.GroupSync{Group: "g", MemberID: "m1", Generation: 3, Assignments: sampleAssign},
-		"GroupHeartbeat": core.GroupHeartbeat{Group: "g", MemberID: "m1", Generation: 3},
-		"GroupLeave":     core.GroupLeave{Group: "g", Members: []string{"m1"}},
-		"DescribeGroups": core.DescribeGroups{Groups: []string{"g", "h"}},
+		"GroupSync":      contract.GroupSync{Group: "g", MemberID: "m1", Generation: 3, Assignments: sampleAssign},
+		"GroupHeartbeat": contract.GroupHeartbeat{Group: "g", MemberID: "m1", Generation: 3},
+		"GroupLeave":     contract.GroupLeave{Group: "g", Members: []string{"m1"}},
+		"DescribeGroups": contract.DescribeGroups{Groups: []string{"g", "h"}},
 	}
 }
 
 // sampleResponses has one value of every ControlPlaneResponse case, with every field set.
-func sampleResponses() map[string]core.ControlPlaneResponse {
-	return map[string]core.ControlPlaneResponse{
-		"CommitSegmentResp":  core.CommitSegmentResp{Assigned: []core.BatchRange{sampleRange}},
-		"FindSegmentsResp":   core.FindSegmentsResp{Ranges: []core.BatchRange{sampleRange}, End: 12},
-		"DescribeTopicsResp": core.DescribeTopicsResp{Topics: []core.TopicInfo{{Name: "t", Partitions: 3}}},
-		"OffsetCommitResp":   core.OffsetCommitResp{Errs: []core.ErrCode{core.OK, core.ErrUnknownPartition}},
-		"OffsetFetchResp":    core.OffsetFetchResp{Offsets: []core.PartitionOffset{samplePO}},
+func sampleResponses() map[string]contract.Response {
+	return map[string]contract.Response{
+		"CommitSegmentResp":  contract.CommitSegmentResp{Assigned: []contract.BatchRange{sampleRange}},
+		"FindSegmentsResp":   contract.FindSegmentsResp{Ranges: []contract.BatchRange{sampleRange}, End: 12},
+		"DescribeTopicsResp": contract.DescribeTopicsResp{Topics: []contract.TopicInfo{{Name: "t", Partitions: 3}}},
+		"OffsetCommitResp":   contract.OffsetCommitResp{Errs: []core.ErrCode{core.OK, core.ErrUnknownPartition}},
+		"OffsetFetchResp":    contract.OffsetFetchResp{Offsets: []contract.PartitionOffset{samplePO}},
 		"DescribeGroupResp":  sampleDescribe,
-		"ListGroupsResp":     core.ListGroupsResp{Groups: []core.GroupSummary{{Name: "g", ProtocolType: "consumer", State: "Stable"}}},
-		"GroupJoinResp": core.GroupJoinResp{
+		"ListGroupsResp":     contract.ListGroupsResp{Groups: []contract.GroupSummary{{Name: "g", ProtocolType: "consumer", State: "Stable"}}},
+		"GroupJoinResp": contract.GroupJoinResp{
 			Generation: 3, Protocol: "range", Leader: "m1", MemberID: "m2",
-			Members: []core.GroupJoinMember{{MemberID: "m1", GroupInstanceID: "i", Metadata: []byte("md")}},
+			Members: []contract.GroupJoinMember{{MemberID: "m1", GroupInstanceID: "i", Metadata: []byte("md")}},
 		},
-		"GroupSyncResp":      core.GroupSyncResp{Assignment: []byte("as")},
-		"GroupLeaveResp":     core.GroupLeaveResp{Errs: []core.ErrCode{core.OK, core.ErrUnknownMember}},
-		"DescribeGroupsResp": core.DescribeGroupsResp{Groups: []core.GroupDescription{{Name: "g", DescribeGroupResp: sampleDescribe}}},
+		"GroupSyncResp":      contract.GroupSyncResp{Assignment: []byte("as")},
+		"GroupLeaveResp":     contract.GroupLeaveResp{Errs: []core.ErrCode{core.OK, core.ErrUnknownMember}},
+		"DescribeGroupsResp": contract.DescribeGroupsResp{Groups: []contract.GroupDescription{{Name: "g", DescribeGroupResp: sampleDescribe}}},
 	}
 }
 
@@ -171,8 +181,8 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 	opNames := slices.DeleteFunc(names(ops), func(n string) bool { return n == "CreateTopicExclusive" })
 	src := scanCore(t)
 	for marker, have := range map[string][]string{
-		"isEvent": names(events), "isAction": names(actions), "isControlPlaneOperation": opNames,
-		"isControlPlaneResponse": names(resps),
+		"isEvent": names(events), "isAction": names(actions), "isOperation": opNames,
+		"isResponse": names(resps),
 	} {
 		if !eq(src[marker], have) {
 			t.Errorf("%s: core declares %v, tag test lists %v", marker, src[marker], have)

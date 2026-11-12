@@ -8,6 +8,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/trace"
 )
@@ -331,9 +332,9 @@ func (b *Broker) onPut(o *op, e core.ObjectPutDone) []core.Action {
 
 func (b *Broker) commit(o *op) []core.Action {
 	o.state, o.request = stateCommit, b.nextRequestID()
-	return []core.Action{core.ControlPlaneCall{Req: o.request, Op: core.CommitSegment{
+	return []core.Action{core.ControlPlaneCall{Req: o.request, Op: contract.CommitSegment{
 		SegmentKey: o.key,
-		Batches:    []core.PendingBatch{{TopicPartition: topicPartition(), Records: 1, Loc: o.ref}},
+		Batches:    []contract.PendingBatch{{TopicPartition: topicPartition(), Records: 1, Loc: o.ref}},
 	}}}
 }
 
@@ -354,7 +355,7 @@ func (b *Broker) onCP(e core.ControlPlaneDone) []core.Action {
 func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 	switch {
 	case e.Err == core.OK:
-		response, ok := e.Resp.(core.CommitSegmentResp)
+		response, ok := e.Resp.(contract.CommitSegmentResp)
 		okShape := ok && len(response.Assigned) == 1 && response.Assigned[0].TopicPartition == topicPartition() && response.Assigned[0].Loc == o.ref
 		b.env.Always(okShape, commitAssignsExactlyOneBatch)
 		if !okShape {
@@ -385,11 +386,11 @@ func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 
 func (b *Broker) lookup(o *op) []core.Action {
 	o.state, o.request = stateLookup, b.nextRequestID()
-	return []core.Action{core.ControlPlaneCall{Req: o.request, Op: core.FindSegments{TopicPartition: topicPartition(), From: o.offset}}}
+	return []core.Action{core.ControlPlaneCall{Req: o.request, Op: contract.FindSegments{TopicPartition: topicPartition(), From: o.offset}}}
 }
 
 func (b *Broker) onLookup(o *op, e core.ControlPlaneDone) []core.Action {
-	response, ok := e.Resp.(core.FindSegmentsResp)
+	response, ok := e.Resp.(contract.FindSegmentsResp)
 	if e.Err != core.OK || !ok {
 		return b.retryLater(o, stateLookup)
 	}

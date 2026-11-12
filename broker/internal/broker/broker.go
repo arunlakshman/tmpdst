@@ -19,6 +19,7 @@ package broker
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -45,9 +46,9 @@ type Broker struct {
 	exited            bool
 
 	conns  []*connection
-	dirty  []*connection     // connections whose queue head may be ready (drained at end of Step)
-	topics []core.TopicInfo  // topic cache, refreshed from DescribeTopics on a miss
-	live   []core.BrokerAddr // live brokers from LiveBrokers; nil means self only
+	dirty  []*connection        // connections whose queue head may be ready (drained at end of Step)
+	topics []contract.TopicInfo // topic cache, refreshed from DescribeTopics on a miss
+	live   []core.BrokerAddr    // live brokers from LiveBrokers; nil means self only
 
 	now        machine.NodeTime // At of the event being stepped (set by Step; not state)
 	open       openSegment

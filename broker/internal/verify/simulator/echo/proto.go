@@ -16,6 +16,7 @@ import (
 	"encoding/binary"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 const maxFrame = 1 << 20
@@ -23,7 +24,7 @@ const maxFrame = 1 << 20
 // Topic and partition of the one log the echo broker writes.
 const Topic = "echo"
 
-func topicPartition() core.TopicPartition { return core.NewTopicPartition(Topic, 0) }
+func topicPartition() core.TopicPartition { return contract.NewTopicPartition(Topic, 0) }
 
 func appendFrame(dst []byte, body string) []byte {
 	dst = binary.BigEndian.AppendUint32(dst, uint32(len(body)))

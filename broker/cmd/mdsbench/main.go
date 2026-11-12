@@ -39,7 +39,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	"github.com/manifesterio/mds/broker/internal/cpclient"
+	"github.com/manifesterio/mds/controlplane/client"
 )
 
 func main() { os.Exit(mainRun(os.Args[1:], os.Stdout, os.Stderr, newKgoClient)) }
@@ -131,7 +131,7 @@ func createTopic(ctx context.Context, addr, topic string, n int) error {
 	if addr == "" {
 		addr = "127.0.0.1:8080"
 	}
-	c := cpclient.New(addr, nil)
+	c := client.New(addr, nil)
 	defer func() { _ = c.Close() }()
 	return c.CreateTopic(ctx, topic, int32(n))
 }

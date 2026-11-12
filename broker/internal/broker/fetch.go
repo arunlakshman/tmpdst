@@ -5,6 +5,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -30,7 +31,7 @@ func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
 			rp := &response.Topics[i].Partitions[j]
-			topicPartition := core.NewTopicPartition(t.Topic, p.Partition)
+			topicPartition := contract.NewTopicPartition(t.Topic, p.Partition)
 			switch {
 			case !b.knows(topicPartition):
 				rp.ErrorCode = int16(errUnknownTopicOrPart)
@@ -64,7 +65,7 @@ func fillFetchSkeleton(response *kmsg.FetchResponse, r *kmsg.FetchRequest) {
 
 // onLookup picks the ranges that fit the partition limit (at least one) and
 // starts reading them.
-func (b *Broker) onLookup(o *operation, r core.FindSegmentsResp) []core.Action {
+func (b *Broker) onLookup(o *operation, r contract.FindSegmentsResp) []core.Action {
 	o.fpart.HighWatermark, o.fpart.LastStableOffset = int64(r.End), int64(r.End)
 	if o.from > r.End {
 		o.fpart.ErrorCode = int16(errOffsetOutOfRange)
@@ -184,14 +185,14 @@ func (b *Broker) onFetchGet(o *operation, e core.ObjectGetDone) []core.Action {
 	return b.acceptFetch(o, e.Data, rg)
 }
 
-func (b *Broker) retryCorrupt(o *operation, rg core.BatchRange) []core.Action {
+func (b *Broker) retryCorrupt(o *operation, rg contract.BatchRange) []core.Action {
 	b.env.Reachable(corruptGetDetected)
 	o.corrupt = true
 	acts := []core.Action{recordFact("corruption_detected", machine.Field{Key: "segment", Value: machine.StringValue(rg.Loc.Key)})}
 	return append(acts, b.retryOp(o)...)
 }
 
-func (b *Broker) acceptFetch(o *operation, data []byte, rg core.BatchRange) []core.Action {
+func (b *Broker) acceptFetch(o *operation, data []byte, rg contract.BatchRange) []core.Action {
 	base := int64(rg.Base)
 	if b.config.InjectedBug == InjectedBugWrongOffset {
 		base++
@@ -207,7 +208,7 @@ func (b *Broker) acceptFetch(o *operation, data []byte, rg core.BatchRange) []co
 }
 
 // isIntact reports whether data is the one valid batch that rg committed.
-func isIntact(data []byte, rg core.BatchRange) bool {
+func isIntact(data []byte, rg contract.BatchRange) bool {
 	bt, err := kafkawire.ParseBatch(data)
 	return err == nil && int64(len(data)) == rg.Loc.Len && int64(bt.NumRecords) == rg.Count
 }

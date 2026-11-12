@@ -1,120 +1,59 @@
 package core
 
-import (
-	"fmt"
-	"strconv"
-)
+import "github.com/manifesterio/mds/controlplane/contract"
 
 // The time types, ID, NodeID, BootNumber, RequestID, TimerID, TimerVersion and NodeInstance
 // are not defined here. They come from dst/machine, and the broker and the control plane
 // share them.
+//
+// The control plane call and reply types (CommitSegment, GroupJoin, and the others), and the
+// small value types they use, are defined once in controlplane/contract. The names below are
+// aliases of contract types, so that the broker keeps its short names. They are not copies.
 
-type (
-	// ConnID names a connection.
-	ConnID uint64 // a connection, as seen by one node
-	// Offset is a partition log offset.
-	Offset int64
-)
+// ConnID names a connection.
+type ConnID uint64 // a connection, as seen by one node
+
+// Offset is a partition log offset.
+type Offset = contract.Offset
 
 // TopicPartition names one partition of a topic.
-type TopicPartition struct {
-	Topic     string
-	Partition int32
-}
-
-// NewTopicPartition builds a TopicPartition.
-func NewTopicPartition(topic string, partition int32) TopicPartition {
-	return TopicPartition{Topic: topic, Partition: partition}
-}
-
-func (topicPartition TopicPartition) String() string {
-	return fmt.Sprintf("%s-%d", topicPartition.Topic, topicPartition.Partition)
-}
+type TopicPartition = contract.TopicPartition
 
 // SegmentRef is a byte range inside an object in the object store.
-type SegmentRef struct {
-	Key string
-	Off int64
-	Len int64 // <= 0 means to the end of the object
-}
+type SegmentRef = contract.SegmentRef
 
-// ErrCode is an error as plain data so events stay comparable and hashable.
-// It is folded into the hash: append-only from here on, never reordered.
-//
-// ErrNotFound and ErrConflict are always truthful; engines inject
-// only ErrTimeout, ErrUnavailable, ErrIO and ErrConnClosed. ErrCorrupt comes
-// only from the core's decoder, never from system.ErrorClassifier.
-type ErrCode uint16
+// BrokerAddr is one broker's advertised address, as Metadata lists it.
+type BrokerAddr = contract.BrokerAddr
 
-// ErrCode values.
+// ErrCode is an error as plain data. See contract.ErrCode.
+type ErrCode = contract.ErrCode
+
+// ErrCode values. They are the values of contract.
 const (
-	OK             ErrCode = iota
-	ErrTimeout             // deadline passed, or the response was lost; see Outcome (a lost response is ErrTimeout+MaybeApplied, never silence)
-	ErrUnavailable         // 503 / throttled / overloaded
-	ErrNotFound
-	ErrConflict   // idempotency-key mismatch (same SegmentKey, different request)
-	_             // retired: was ErrFenced (decision 44); keeps the numbers below stable
-	ErrConnClosed // connection lost
-	ErrTooLarge
-	ErrCorrupt
-	ErrInvalid // malformed request; never retried
-	ErrIO      // anything else from the outside world
-
-	ErrUnknownMember             // group member id or group leader is not a member
-	ErrIllegalGeneration         // group generation does not match the one asked for
-	ErrUnknownPartition          // topic or partition does not exist
-	ErrRebalanceInProgress       // group is rebalancing; rejoin (slice 4b)
-	ErrInconsistentGroupProtocol // members have no protocol in common, or a wrong protocol type (slice 4b)
-	ErrTopicExists               // CreateTopic with FailIfExists: the topic is already there
+	OK                           = contract.OK
+	ErrTimeout                   = contract.ErrTimeout
+	ErrUnavailable               = contract.ErrUnavailable
+	ErrNotFound                  = contract.ErrNotFound
+	ErrConflict                  = contract.ErrConflict
+	ErrConnClosed                = contract.ErrConnClosed
+	ErrTooLarge                  = contract.ErrTooLarge
+	ErrCorrupt                   = contract.ErrCorrupt
+	ErrInvalid                   = contract.ErrInvalid
+	ErrIO                        = contract.ErrIO
+	ErrUnknownMember             = contract.ErrUnknownMember
+	ErrIllegalGeneration         = contract.ErrIllegalGeneration
+	ErrUnknownPartition          = contract.ErrUnknownPartition
+	ErrRebalanceInProgress       = contract.ErrRebalanceInProgress
+	ErrInconsistentGroupProtocol = contract.ErrInconsistentGroupProtocol
+	ErrTopicExists               = contract.ErrTopicExists
 )
 
-// Outcome states what a completion proves about side effects (lesson 1).
-// Folded into the hash: append-only from here on. A LostResponse surfaces as
-// ErrTimeout+MaybeApplied, never as silence.
-type Outcome uint8
+// Outcome states what a completion proves about side effects. See contract.Outcome.
+type Outcome = contract.Outcome
 
-// Outcome values.
+// Outcome values. They are the values of contract.
 const (
-	NotApplied   Outcome = iota // provably no effect
-	MaybeApplied                // may have taken effect; retry only if idempotent
-	Applied                     // took effect (the reply itself may be unusable)
+	NotApplied   = contract.NotApplied
+	MaybeApplied = contract.MaybeApplied
+	Applied      = contract.Applied
 )
-
-// String returns the frozen spelling of e. Spellings are never changed.
-func (e ErrCode) String() string {
-	switch e {
-	case OK:
-		return "OK"
-	case ErrTimeout:
-		return "ErrTimeout"
-	case ErrUnavailable:
-		return "ErrUnavailable"
-	case ErrNotFound:
-		return "ErrNotFound"
-	case ErrConflict:
-		return "ErrConflict"
-	case ErrConnClosed:
-		return "ErrConnClosed"
-	case ErrTooLarge:
-		return "ErrTooLarge"
-	case ErrCorrupt:
-		return "ErrCorrupt"
-	case ErrInvalid:
-		return "ErrInvalid"
-	case ErrIO:
-		return "ErrIO"
-	case ErrUnknownMember:
-		return "ErrUnknownMember"
-	case ErrIllegalGeneration:
-		return "ErrIllegalGeneration"
-	case ErrUnknownPartition:
-		return "ErrUnknownPartition"
-	case ErrRebalanceInProgress:
-		return "ErrRebalanceInProgress"
-	case ErrInconsistentGroupProtocol:
-		return "ErrInconsistentGroupProtocol"
-	case ErrTopicExists:
-		return "ErrTopicExists"
-	}
-	return "ErrCode(" + strconv.FormatUint(uint64(e), 10) + ")"
-}

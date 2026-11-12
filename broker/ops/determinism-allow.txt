@@ -34,5 +34,11 @@ github.com/manifesterio/mds/dst/fault
 github.com/manifesterio/mds/dst/machine
 github.com/manifesterio/mds/dst/trace
 
+# The control plane contract (github.com/manifesterio/mds/controlplane/contract): plain data and
+# the Tag and Fold of the control plane operations and responses. It imports only dst and fmt, so
+# it is deterministic. First-party code in this repo, so it needs no audit record. Only this one
+# package of the control plane: no runtime, no server, no client.
+github.com/manifesterio/mds/controlplane/contract
+
 # audited third-party (see docs/dep-audits/)
 github.com/twmb/franz-go/pkg/kmsg

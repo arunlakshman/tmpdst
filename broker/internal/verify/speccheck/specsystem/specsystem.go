@@ -10,6 +10,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // Error is a spec failure as a Go error; Code is what a Classifier maps it to.
@@ -106,13 +107,13 @@ func (c *ControlPlane) CreateTopic(name string, partitions int32) error {
 }
 
 // Call executes op against the control-plane spec.
-func (c *ControlPlane) Call(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneResponse, error) {
-	return locked(ctx, &c.mu, func() (core.ControlPlaneResponse, core.ErrCode) {
+func (c *ControlPlane) Call(ctx context.Context, operation contract.Operation) (contract.Response, error) {
+	return locked(ctx, &c.mu, func() (contract.Response, core.ErrCode) {
 		return c.callResp(core.ControlPlaneCall{Op: operation})
 	})
 }
 
-func (c *ControlPlane) callResp(a core.ControlPlaneCall) (core.ControlPlaneResponse, core.ErrCode) {
+func (c *ControlPlane) callResp(a core.ControlPlaneCall) (contract.Response, core.ErrCode) {
 	d := c.spec.Exec(a).(core.ControlPlaneDone)
 	return d.Resp, d.Err
 }

@@ -6,20 +6,21 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // gBig is a byte string that makes a group command pass 256 KiB.
 var gBig = strings.Repeat("x", 300<<10)
 
-func gMember(id string) core.GroupMember {
-	return core.GroupMember{
+func gMember(id string) contract.GroupMember {
+	return contract.GroupMember{
 		MemberID: id, ClientID: "client-" + id, ClientHost: "/10.0.0.1",
 		SessionTimeoutMs: 10000, RebalanceTimeoutMs: 30000, Metadata: []byte("sub-" + id),
 	}
 }
 
-func gInstall(group string, gen int32, leader string, ids ...string) core.GroupInstall {
-	operation := core.GroupInstall{Group: group, ProtocolType: "consumer", Protocol: "range", Generation: gen, Leader: leader, TimeMs: 1000}
+func gInstall(group string, gen int32, leader string, ids ...string) contract.GroupInstall {
+	operation := contract.GroupInstall{Group: group, ProtocolType: "consumer", Protocol: "range", Generation: gen, Leader: leader, TimeMs: 1000}
 	for _, id := range ids {
 		operation.Members = append(operation.Members, gMember(id))
 	}
@@ -27,32 +28,32 @@ func gInstall(group string, gen int32, leader string, ids ...string) core.GroupI
 }
 
 // gAssign takes pairs of member id and assignment bytes.
-func gAssign(group string, gen int32, leader string, pairs ...string) core.GroupAssign {
-	operation := core.GroupAssign{Group: group, Generation: gen, Leader: leader, TimeMs: 2000}
+func gAssign(group string, gen int32, leader string, pairs ...string) contract.GroupAssign {
+	operation := contract.GroupAssign{Group: group, Generation: gen, Leader: leader, TimeMs: 2000}
 	for i := 0; i+1 < len(pairs); i += 2 {
-		operation.Assignments = append(operation.Assignments, core.GroupAssignment{Member: pairs[i], Bytes: []byte(pairs[i+1])})
+		operation.Assignments = append(operation.Assignments, contract.GroupAssignment{Member: pairs[i], Bytes: []byte(pairs[i+1])})
 	}
 	return operation
 }
 
-func gRemove(group, reason string, ids ...string) core.GroupRemove {
-	return core.GroupRemove{Group: group, Members: ids, TimeMs: 3000, Reason: reason}
+func gRemove(group, reason string, ids ...string) contract.GroupRemove {
+	return contract.GroupRemove{Group: group, Members: ids, TimeMs: 3000, Reason: reason}
 }
 
 // gPair is one offset of topic partition topic-p, with epoch 7 and metadata "m".
-func gPair(topic string, p int32, off int64) core.PartitionOffset {
-	return core.PartitionOffset{TopicPartition: tp(topic, p), Offset: off, LeaderEpoch: 7, Metadata: "m"}
+func gPair(topic string, p int32, off int64) contract.PartitionOffset {
+	return contract.PartitionOffset{TopicPartition: tp(topic, p), Offset: off, LeaderEpoch: 7, Metadata: "m"}
 }
 
-func gCommit(group, member string, gen int32, offs ...core.PartitionOffset) core.OffsetCommit {
-	return core.OffsetCommit{Group: group, Member: member, Generation: gen, TimeMs: 4000, Offsets: offs}
+func gCommit(group, member string, gen int32, offs ...contract.PartitionOffset) contract.OffsetCommit {
+	return contract.OffsetCommit{Group: group, Member: member, Generation: gen, TimeMs: 4000, Offsets: offs}
 }
 
 // newGroupControl is a control plane with one topic, "orders" with 2 partitions.
 func newGroupControl(t *testing.T) *ControlPlane {
 	t.Helper()
 	c := NewControlPlane()
-	if d := call(c, core.CreateTopic{Name: "orders", Partitions: 2}); d.Err != core.OK {
+	if d := call(c, contract.CreateTopic{Name: "orders", Partitions: 2}); d.Err != core.OK {
 		t.Fatalf("create topic: %+v", d)
 	}
 	return c
@@ -62,7 +63,7 @@ func newGroupControl(t *testing.T) *ControlPlane {
 // per-offset answer of an OffsetCommit.
 type gStep struct {
 	name      string
-	operation core.ControlPlaneOperation
+	operation contract.Operation
 	want      core.ErrCode
 	errs      []core.ErrCode
 }
@@ -78,7 +79,7 @@ func gRun(t *testing.T, c *ControlPlane, steps []gStep) {
 			t.Fatalf("%s: a refused call has outcome %v", s.name, d.Outcome)
 		}
 		if s.errs != nil {
-			got, _ := d.Resp.(core.OffsetCommitResp)
+			got, _ := d.Resp.(contract.OffsetCommitResp)
 			if !reflect.DeepEqual(got.Errs, s.errs) {
 				t.Fatalf("%s: per-offset errs %v, want %v", s.name, got.Errs, s.errs)
 			}
@@ -86,9 +87,9 @@ func gRun(t *testing.T, c *ControlPlane, steps []gStep) {
 	}
 }
 
-func gDescribe(t *testing.T, c *ControlPlane, group string) core.DescribeGroupResp {
+func gDescribe(t *testing.T, c *ControlPlane, group string) contract.DescribeGroupResp {
 	t.Helper()
-	return call(c, core.DescribeGroup{Group: group}).Resp.(core.DescribeGroupResp)
+	return call(c, contract.DescribeGroup{Group: group}).Resp.(contract.DescribeGroupResp)
 }
 
 func TestGroupInstallOracle(t *testing.T) {
@@ -191,12 +192,12 @@ func TestGroupRemoveEmptiesGroup(t *testing.T) {
 		{name: "remove the rest", operation: gRemove("g", "expire", "m2"), want: core.OK},
 	})
 	d := gDescribe(t, c, "g")
-	want := core.DescribeGroupResp{Exists: true, Generation: 1, ProtocolType: "consumer", Protocol: "range", State: "Empty"}
+	want := contract.DescribeGroupResp{Exists: true, Generation: 1, ProtocolType: "consumer", Protocol: "range", State: "Empty"}
 	if !reflect.DeepEqual(d, want) {
 		t.Fatalf("describe empty: %+v, want %+v", d, want)
 	}
-	ls := call(c, core.ListGroups{}).Resp.(core.ListGroupsResp)
-	if !reflect.DeepEqual(ls.Groups, []core.GroupSummary{{Name: "g", ProtocolType: "consumer", State: "Empty"}}) {
+	ls := call(c, contract.ListGroups{}).Resp.(contract.ListGroupsResp)
+	if !reflect.DeepEqual(ls.Groups, []contract.GroupSummary{{Name: "g", ProtocolType: "consumer", State: "Empty"}}) {
 		t.Fatalf("list: %+v", ls.Groups)
 	}
 }
@@ -239,15 +240,15 @@ func TestOffsetCommitOracle(t *testing.T) {
 		{name: "empty offset list", operation: gCommit("g", "m1", 1), want: core.OK},
 		{name: "too large", operation: big, want: core.ErrTooLarge},
 	})
-	got := call(c, core.OffsetFetch{Group: "g"}).Resp.(core.OffsetFetchResp)
-	want := []core.PartitionOffset{
+	got := call(c, contract.OffsetFetch{Group: "g"}).Resp.(contract.OffsetFetchResp)
+	want := []contract.PartitionOffset{
 		{TopicPartition: tp("orders", 0), Offset: 6, LeaderEpoch: 7, Metadata: "m"},
 		{TopicPartition: tp("orders", 1), Offset: 7, LeaderEpoch: 7, Metadata: "m"},
 	}
 	if !reflect.DeepEqual(got.Offsets, want) {
 		t.Fatalf("offsets: %+v", got.Offsets)
 	}
-	solo := call(c, core.OffsetFetch{Group: "solo"}).Resp.(core.OffsetFetchResp)
+	solo := call(c, contract.OffsetFetch{Group: "solo"}).Resp.(contract.OffsetFetchResp)
 	if len(solo.Offsets) != 1 || solo.Offsets[0].Offset != 9 {
 		t.Fatalf("solo: %+v", solo.Offsets)
 	}
@@ -285,15 +286,15 @@ func TestOffsetCommitOutcome(t *testing.T) {
 
 func TestOffsetFetchOracle(t *testing.T) {
 	c := newGroupControl(t)
-	if code := call(c, core.CreateTopic{Name: "beta", Partitions: 1}).Err; code != core.OK {
+	if code := call(c, contract.CreateTopic{Name: "beta", Partitions: 1}).Err; code != core.OK {
 		t.Fatalf("create beta: %v", code)
 	}
 	gRun(t, c, []gStep{
 		{name: "install", operation: gInstall("g", 1, "m1", "m1"), want: core.OK},
 		{name: "commit", operation: gCommit("g", "m1", 1, gPair("orders", 1, 3), gPair("orders", 0, 2), gPair("beta", 0, 4)), want: core.OK, errs: []core.ErrCode{core.OK, core.OK, core.OK}},
 	})
-	all := call(c, core.OffsetFetch{Group: "g"}).Resp.(core.OffsetFetchResp)
-	wantAll := []core.PartitionOffset{
+	all := call(c, contract.OffsetFetch{Group: "g"}).Resp.(contract.OffsetFetchResp)
+	wantAll := []contract.PartitionOffset{
 		{TopicPartition: tp("beta", 0), Offset: 4, LeaderEpoch: 7, Metadata: "m"},
 		{TopicPartition: tp("orders", 0), Offset: 2, LeaderEpoch: 7, Metadata: "m"},
 		{TopicPartition: tp("orders", 1), Offset: 3, LeaderEpoch: 7, Metadata: "m"},
@@ -301,20 +302,20 @@ func TestOffsetFetchOracle(t *testing.T) {
 	if !reflect.DeepEqual(all.Offsets, wantAll) {
 		t.Fatalf("all: %+v", all.Offsets)
 	}
-	listed := call(c, core.OffsetFetch{Group: "g", Partitions: []core.TopicPartition{tp("orders", 0), tp("zz", 0)}}).Resp.(core.OffsetFetchResp)
-	wantListed := []core.PartitionOffset{
+	listed := call(c, contract.OffsetFetch{Group: "g", Partitions: []core.TopicPartition{tp("orders", 0), tp("zz", 0)}}).Resp.(contract.OffsetFetchResp)
+	wantListed := []contract.PartitionOffset{
 		{TopicPartition: tp("orders", 0), Offset: 2, LeaderEpoch: 7, Metadata: "m"},
 		{TopicPartition: tp("zz", 0), Offset: -1, LeaderEpoch: -1},
 	}
 	if !reflect.DeepEqual(listed.Offsets, wantListed) {
 		t.Fatalf("listed: %+v", listed.Offsets)
 	}
-	none := call(c, core.OffsetFetch{Group: "nope"}).Resp.(core.OffsetFetchResp)
+	none := call(c, contract.OffsetFetch{Group: "nope"}).Resp.(contract.OffsetFetchResp)
 	if none.Offsets != nil {
 		t.Fatalf("unknown group, all: %+v", none.Offsets)
 	}
-	miss := call(c, core.OffsetFetch{Group: "nope", Partitions: []core.TopicPartition{tp("orders", 1)}}).Resp.(core.OffsetFetchResp)
-	if !reflect.DeepEqual(miss.Offsets, []core.PartitionOffset{{TopicPartition: tp("orders", 1), Offset: -1, LeaderEpoch: -1}}) {
+	miss := call(c, contract.OffsetFetch{Group: "nope", Partitions: []core.TopicPartition{tp("orders", 1)}}).Resp.(contract.OffsetFetchResp)
+	if !reflect.DeepEqual(miss.Offsets, []contract.PartitionOffset{{TopicPartition: tp("orders", 1), Offset: -1, LeaderEpoch: -1}}) {
 		t.Fatalf("unknown group, listed: %+v", miss.Offsets)
 	}
 }
@@ -347,8 +348,8 @@ func TestDescribeGroupStates(t *testing.T) {
 	if cc := gDescribe(t, c, "c"); cc.State != "Empty" || !cc.Exists {
 		t.Fatalf("c: %+v", cc)
 	}
-	ls := call(c, core.ListGroups{}).Resp.(core.ListGroupsResp)
-	want := []core.GroupSummary{
+	ls := call(c, contract.ListGroups{}).Resp.(contract.ListGroupsResp)
+	want := []contract.GroupSummary{
 		{Name: "a", ProtocolType: "consumer", State: "Stable"},
 		{Name: "b", ProtocolType: "consumer", State: "PreparingSync"},
 		{Name: "c", ProtocolType: "consumer", State: "Empty"},
@@ -360,7 +361,7 @@ func TestDescribeGroupStates(t *testing.T) {
 
 func TestListGroupsEmpty(t *testing.T) {
 	c := NewControlPlane()
-	if ls := call(c, core.ListGroups{}).Resp.(core.ListGroupsResp); ls.Groups != nil {
+	if ls := call(c, contract.ListGroups{}).Resp.(contract.ListGroupsResp); ls.Groups != nil {
 		t.Fatalf("no groups: %+v", ls.Groups)
 	}
 }

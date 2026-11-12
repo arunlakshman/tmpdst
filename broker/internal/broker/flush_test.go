@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -165,7 +166,7 @@ func TestCommitTooLargeFailsBatches(t *testing.T) {
 	c := h.open(1)
 	commits := 0
 	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
-		if _, ok := a.Op.(core.CommitSegment); ok {
+		if _, ok := a.Op.(contract.CommitSegment); ok {
 			commits++
 			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrTooLarge, Outcome: core.NotApplied}
 		}
@@ -188,7 +189,7 @@ func TestCommitTooLargeFailsBatches(t *testing.T) {
 	if h.b.bufBytes != 0 || len(h.b.segs) != 0 {
 		t.Fatalf("buffered %d, segments %d", h.b.bufBytes, len(h.b.segs))
 	}
-	if h.cp.End(core.NewTopicPartition("t", 0)) != 0 {
+	if h.cp.End(contract.NewTopicPartition("t", 0)) != 0 {
 		t.Fatal("refused segment changed the log")
 	}
 }

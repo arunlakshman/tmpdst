@@ -2,6 +2,7 @@ package simulator
 
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -110,7 +111,7 @@ type ObjectStoreRealState interface {
 
 // ControlPlaneRealState is what the control plane really committed.
 type ControlPlaneRealState interface {
-	Committed(topicPartition core.TopicPartition) []core.BatchRange
+	Committed(topicPartition core.TopicPartition) []contract.BatchRange
 	HighWatermark(topicPartition core.TopicPartition) core.Offset
 	// Gen bumps whenever anything applied changes.
 	Gen() uint64

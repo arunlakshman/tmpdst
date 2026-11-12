@@ -7,15 +7,15 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/broker"
-	"github.com/manifesterio/mds/broker/internal/cpclient"
 	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/broker/internal/system/production"
+	"github.com/manifesterio/mds/controlplane/client"
 )
 
 // stack is a control plane, an object store and any number of brokers.
 type stack struct {
 	t       *testing.T
-	cp      *cpclient.Client
+	cp      *client.Client
 	objs    system.ObjectStore
 	objCls  system.ErrorClassifier
 	nodes   []*production.Node
@@ -44,7 +44,7 @@ func (s *stack) addBroker() *production.Node {
 	n, err := production.Start(s.t.Context(), production.NodeConfig{
 		NodeID: "broker-" + string(rune('a'+len(s.nodes))), Broker: bc, Listener: ln,
 		Objects: s.objs, ObjClassify: s.objCls,
-		ControlPlane: s.cp, CPClassify: cpclient.Classifier{},
+		ControlPlane: s.cp, CPClassify: production.ControlPlaneClassifier{},
 		StopGrace: 5 * time.Second, FlushGrace: 5 * time.Second,
 	})
 	if err != nil {

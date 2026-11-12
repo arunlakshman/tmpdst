@@ -1,6 +1,9 @@
 package core
 
-import "github.com/manifesterio/mds/dst/machine"
+import (
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/machine"
+)
 
 // Event is the input to Step. The runtime (prod) or simulator stamps At and
 // Wall when the event is dequeued, so At never decreases in Step order.
@@ -123,7 +126,7 @@ type ObjectListDone struct {
 // core does not import grpc (decision 57).
 type ControlPlaneDone struct {
 	Req     machine.RequestID
-	Resp    ControlPlaneResponse
+	Resp    contract.Response
 	Err     ErrCode
 	Outcome Outcome
 }
@@ -133,17 +136,10 @@ type ControlPlaneDone struct {
 type ControlPlaneDeliver struct {
 	From machine.NodeInstance // broker that issued the ControlPlaneCall
 	Req  machine.RequestID
-	Op   ControlPlaneOperation
+	Op   contract.Operation
 }
 
 // ---- broker live set ----
-
-// BrokerAddr is one broker's advertised address, as Metadata lists it.
-type BrokerAddr struct {
-	NodeID int32
-	Host   string
-	Port   int32
-}
 
 // LiveBrokers gives the broker the live broker set from the control plane. The
 // production shell sends it after each heartbeat, and sends an empty list when

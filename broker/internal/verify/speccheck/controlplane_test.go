@@ -7,29 +7,30 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
-func tp(t string, p int32) core.TopicPartition { return core.NewTopicPartition(t, p) }
+func tp(t string, p int32) core.TopicPartition { return contract.NewTopicPartition(t, p) }
 
-func call(c *ControlPlane, operation core.ControlPlaneOperation) core.ControlPlaneDone {
+func call(c *ControlPlane, operation contract.Operation) core.ControlPlaneDone {
 	return c.Exec(core.ControlPlaneCall{Req: 9, Op: operation}).(core.ControlPlaneDone)
 }
 
-func commit(c *ControlPlane, key string, bs ...core.PendingBatch) core.ControlPlaneDone {
-	return call(c, core.CommitSegment{SegmentKey: key, Batches: bs})
+func commit(c *ControlPlane, key string, bs ...contract.PendingBatch) core.ControlPlaneDone {
+	return call(c, contract.CommitSegment{SegmentKey: key, Batches: bs})
 }
 
 // pb is a batch of recs records.
-func pb(t string, p int32, recs int64) core.PendingBatch {
-	return core.PendingBatch{TopicPartition: tp(t, p), Records: recs, Loc: core.SegmentRef{Key: "o", Off: 0, Len: recs * 10}}
+func pb(t string, p int32, recs int64) contract.PendingBatch {
+	return contract.PendingBatch{TopicPartition: tp(t, p), Records: recs, Loc: core.SegmentRef{Key: "o", Off: 0, Len: recs * 10}}
 }
 
-func assigned(t *testing.T, d core.ControlPlaneDone) []core.BatchRange {
+func assigned(t *testing.T, d core.ControlPlaneDone) []contract.BatchRange {
 	t.Helper()
 	if d.Err != core.OK {
 		t.Fatalf("commit: %+v", d)
 	}
-	return d.Resp.(core.CommitSegmentResp).Assigned
+	return d.Resp.(contract.CommitSegmentResp).Assigned
 }
 
 func TestCommitContiguousAcrossPartitions(t *testing.T) {
@@ -55,7 +56,7 @@ func TestInterleavedCommittersStayContiguous(t *testing.T) {
 		c := NewControlPlane()
 		total := map[core.TopicPartition]int64{}
 		for i := range 60 {
-			var bs []core.PendingBatch
+			var bs []contract.PendingBatch
 			for n := 0; n <= r.Intn(3); n++ {
 				p := cpTPs[r.Intn(3)]
 				recs := int64(1 + r.Intn(5))
@@ -65,7 +66,7 @@ func TestInterleavedCommittersStayContiguous(t *testing.T) {
 			assigned(t, commit(c, fmt.Sprintf("k%d", i), bs...))
 		}
 		for _, p := range cpTPs {
-			l := call(c, core.FindSegments{TopicPartition: p}).Resp.(core.FindSegmentsResp)
+			l := call(c, contract.FindSegments{TopicPartition: p}).Resp.(contract.FindSegmentsResp)
 			next := core.Offset(0)
 			for _, x := range l.Ranges {
 				if x.Base != next {
@@ -93,7 +94,7 @@ func TestCommitIdempotent(t *testing.T) {
 		t.Fatal("replay changed state")
 	}
 	// A different request under the same key is a conflict.
-	for name, bs := range map[string][]core.PendingBatch{
+	for name, bs := range map[string][]contract.PendingBatch{
 		"records":    {pb("t", 0, 4)},
 		"partition":  {pb("t", 1, 3)},
 		"extra":      {pb("t", 0, 3), pb("t", 1, 1)},
@@ -114,7 +115,7 @@ func TestCommitIdempotent(t *testing.T) {
 func TestManyBatchSegment(t *testing.T) {
 	c := NewControlPlane()
 	assigned(t, commit(c, "pre", pb("t", 1, 7)))
-	var bs []core.PendingBatch
+	var bs []contract.PendingBatch
 	next := map[int32]core.Offset{0: 0, 1: 7, 2: 0}
 	var want []core.Offset
 	for i := range 300 {
@@ -175,14 +176,14 @@ func TestLookup(t *testing.T) {
 	assigned(t, commit(c, "s1", pb("t", 0, 3)))
 	assigned(t, commit(c, "s2", pb("t", 0, 2), pb("t", 1, 1)))
 	assigned(t, commit(c, "s3", pb("t", 0, 4)))
-	look := func(p int32, from core.Offset, max int32) core.FindSegmentsResp {
-		d := call(c, core.FindSegments{TopicPartition: tp("t", p), From: from, MaxBytes: max})
+	look := func(p int32, from core.Offset, max int32) contract.FindSegmentsResp {
+		d := call(c, contract.FindSegments{TopicPartition: tp("t", p), From: from, MaxBytes: max})
 		if d.Err != core.OK {
 			t.Fatalf("lookup: %+v", d)
 		}
-		return d.Resp.(core.FindSegmentsResp)
+		return d.Resp.(contract.FindSegmentsResp)
 	}
-	bases := func(r core.FindSegmentsResp) []core.Offset {
+	bases := func(r contract.FindSegmentsResp) []core.Offset {
 		var out []core.Offset
 		for _, x := range r.Ranges {
 			out = append(out, x.Base)
@@ -210,7 +211,7 @@ func TestLookup(t *testing.T) {
 	if r := look(7, 0, 0); len(r.Ranges) != 0 || r.End != 0 {
 		t.Fatalf("unknown partition: %+v", r)
 	}
-	if d := call(c, core.FindSegments{TopicPartition: tp("t", 0), From: -1}); d.Err != core.ErrInvalid {
+	if d := call(c, contract.FindSegments{TopicPartition: tp("t", 0), From: -1}); d.Err != core.ErrInvalid {
 		t.Fatalf("negative from: %+v", d)
 	}
 }
@@ -221,10 +222,10 @@ func TestDescribeTopics(t *testing.T) {
 		t.Fatal("CreateTopic")
 	}
 	assigned(t, commit(c, "s1", pb("a", 4, 1), pb("b", 1, 1))) // a is created implicitly
-	desc := func(names ...string) []core.TopicInfo {
-		return call(c, core.DescribeTopics{Topics: names}).Resp.(core.DescribeTopicsResp).Topics
+	desc := func(names ...string) []contract.TopicInfo {
+		return call(c, contract.DescribeTopics{Topics: names}).Resp.(contract.DescribeTopicsResp).Topics
 	}
-	want := []core.TopicInfo{{Name: "a", Partitions: 5}, {Name: "b", Partitions: 3}}
+	want := []contract.TopicInfo{{Name: "a", Partitions: 5}, {Name: "b", Partitions: 3}}
 	if got := desc(); !slices.Equal(got, want) {
 		t.Fatalf("all: %+v", got)
 	}
@@ -253,8 +254,8 @@ type cpModel struct {
 }
 
 type modelSeg struct {
-	batches []core.PendingBatch
-	ranges  []core.BatchRange
+	batches []contract.PendingBatch
+	ranges  []contract.BatchRange
 }
 
 type cpState struct {
@@ -276,8 +277,8 @@ var cpTPs = []core.TopicPartition{tp("t", 0), tp("t", 1), tp("u", 0)}
 
 // segBatches is a fixed function of the segment index (and alt), so a replay
 // of a key carries the very same batches.
-func segBatches(segmentIndex int, alt bool) []core.PendingBatch {
-	var bs []core.PendingBatch
+func segBatches(segmentIndex int, alt bool) []contract.PendingBatch {
+	var bs []contract.PendingBatch
 	for i := range segmentIndex%3 + 1 {
 		p := cpTPs[(segmentIndex+i)%3]
 		n := int64(1 + (segmentIndex+i)%4)
@@ -305,7 +306,7 @@ func cpCheck(impl func() cpExec) checker.SpecChecker[*cpState, cpOp] {
 			return o
 		},
 		Step: func(s *cpState, o cpOp) error {
-			do := func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
+			do := func(operation contract.Operation) core.ControlPlaneDone {
 				return s.cp.Exec(core.ControlPlaneCall{Req: 1, Op: operation}).(core.ControlPlaneDone)
 			}
 			key := fmt.Sprintf("seg%d", o.Seg)
@@ -313,8 +314,8 @@ func cpCheck(impl func() cpExec) checker.SpecChecker[*cpState, cpOp] {
 			case 0, 1, 3:
 				return s.stepCommit(do, key, o)
 			case 2:
-				d := do(core.FindSegments{TopicPartition: cpTPs[o.TopicPartitionIndex], From: core.Offset(o.From)})
-				var want []core.BatchRange
+				d := do(contract.FindSegments{TopicPartition: cpTPs[o.TopicPartitionIndex], From: core.Offset(o.From)})
+				var want []contract.BatchRange
 				for _, k := range []string{"seg0", "seg1", "seg2", "seg3", "seg4"} {
 					for _, r := range s.m.segs[k].ranges {
 						if r.TopicPartition == cpTPs[o.TopicPartitionIndex] && int64(r.Base)+r.Count > o.From {
@@ -322,8 +323,8 @@ func cpCheck(impl func() cpExec) checker.SpecChecker[*cpState, cpOp] {
 						}
 					}
 				}
-				slices.SortFunc(want, func(a, b core.BatchRange) int { return int(a.Base - b.Base) })
-				got := d.Resp.(core.FindSegmentsResp)
+				slices.SortFunc(want, func(a, b contract.BatchRange) int { return int(a.Base - b.Base) })
+				got := d.Resp.(contract.FindSegmentsResp)
 				if d.Err != core.OK || !slices.Equal(got.Ranges, want) || int64(got.End) != s.m.end[cpTPs[o.TopicPartitionIndex]] {
 					return fmt.Errorf("lookup: %+v, want %+v", got, want)
 				}
@@ -332,8 +333,8 @@ func cpCheck(impl func() cpExec) checker.SpecChecker[*cpState, cpOp] {
 		},
 		Invariant: func(s *cpState) error {
 			for _, p := range cpTPs {
-				d := s.cp.Exec(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: p}}).(core.ControlPlaneDone)
-				l := d.Resp.(core.FindSegmentsResp)
+				d := s.cp.Exec(core.ControlPlaneCall{Op: contract.FindSegments{TopicPartition: p}}).(core.ControlPlaneDone)
+				l := d.Resp.(contract.FindSegmentsResp)
 				next, sum := core.Offset(0), int64(0)
 				for _, r := range l.Ranges {
 					if r.Base != next {
@@ -374,9 +375,9 @@ func cpCheck(impl func() cpExec) checker.SpecChecker[*cpState, cpOp] {
 
 // stepCommit applies a commit or replay op to the spec and the model and
 // compares them.
-func (s *cpState) stepCommit(do func(core.ControlPlaneOperation) core.ControlPlaneDone, key string, o cpOp) error {
+func (s *cpState) stepCommit(do func(contract.Operation) core.ControlPlaneDone, key string, o cpOp) error {
 	orig, committed := s.m.segs[key]
-	var batches []core.PendingBatch
+	var batches []contract.PendingBatch
 	switch {
 	case o.Kind == 1 && !committed:
 		return nil
@@ -386,10 +387,10 @@ func (s *cpState) stepCommit(do func(core.ControlPlaneOperation) core.ControlPla
 		batches = segBatches(o.Seg, o.Kind == 3)
 	}
 	before := s.cp.StateHash()
-	d := do(core.CommitSegment{SegmentKey: key, Batches: batches})
+	d := do(contract.CommitSegment{SegmentKey: key, Batches: batches})
 	if committed {
 		if slices.Equal(orig.batches, batches) {
-			if d.Err != core.OK || !slices.Equal(d.Resp.(core.CommitSegmentResp).Assigned, orig.ranges) {
+			if d.Err != core.OK || !slices.Equal(d.Resp.(contract.CommitSegmentResp).Assigned, orig.ranges) {
 				return fmt.Errorf("replay of %s: %+v, want %+v", key, d, orig.ranges)
 			}
 		} else if d.Err != core.ErrConflict {
@@ -400,13 +401,13 @@ func (s *cpState) stepCommit(do func(core.ControlPlaneOperation) core.ControlPla
 		}
 		return nil
 	}
-	var want []core.BatchRange
+	var want []contract.BatchRange
 	for _, b := range batches {
-		want = append(want, core.BatchRange{TopicPartition: b.TopicPartition, Base: core.Offset(s.m.end[b.TopicPartition]), Count: b.Records, Loc: b.Loc})
+		want = append(want, contract.BatchRange{TopicPartition: b.TopicPartition, Base: core.Offset(s.m.end[b.TopicPartition]), Count: b.Records, Loc: b.Loc})
 		s.m.end[b.TopicPartition] += b.Records
 	}
 	s.m.segs[key] = modelSeg{batches, want}
-	if d.Err != core.OK || !slices.Equal(d.Resp.(core.CommitSegmentResp).Assigned, want) {
+	if d.Err != core.OK || !slices.Equal(d.Resp.(contract.CommitSegmentResp).Assigned, want) {
 		return fmt.Errorf("commit %s: %+v, want %+v", key, d, want)
 	}
 	return nil
@@ -424,7 +425,7 @@ type nonIdempotent struct {
 
 func (b *nonIdempotent) Exec(a core.IOCall) core.IOResult {
 	if c, ok := a.(core.ControlPlaneCall); ok {
-		if cs, ok := c.Op.(core.CommitSegment); ok {
+		if cs, ok := c.Op.(contract.CommitSegment); ok {
 			b.n++
 			cs.SegmentKey = fmt.Sprintf("%s#%d", cs.SegmentKey, b.n)
 			c.Op = cs
@@ -451,17 +452,17 @@ func TestControlPlaneCheckShrinksInjectedBug(t *testing.T) {
 
 func TestCreateTopicOp(t *testing.T) {
 	c := NewControlPlane()
-	if d := call(c, core.CreateTopic{Name: "n", Partitions: 2}); d.Err != core.OK || d.Outcome != core.Applied {
+	if d := call(c, contract.CreateTopic{Name: "n", Partitions: 2}); d.Err != core.OK || d.Outcome != core.Applied {
 		t.Fatalf("create: %+v", d)
 	}
-	if d := call(c, core.CreateTopic{Name: "", Partitions: 1}); d.Err != core.ErrInvalid || d.Outcome != core.NotApplied {
+	if d := call(c, contract.CreateTopic{Name: "", Partitions: 1}); d.Err != core.ErrInvalid || d.Outcome != core.NotApplied {
 		t.Fatalf("empty name: %+v", d)
 	}
-	if d := call(c, core.CreateTopic{Name: "z", Partitions: 0}); d.Err != core.ErrInvalid {
+	if d := call(c, contract.CreateTopic{Name: "z", Partitions: 0}); d.Err != core.ErrInvalid {
 		t.Fatalf("zero partitions: %+v", d)
 	}
-	got := call(c, core.DescribeTopics{Topics: []string{"n", "z"}}).Resp.(core.DescribeTopicsResp).Topics
-	if len(got) != 1 || got[0] != (core.TopicInfo{Name: "n", Partitions: 2}) {
+	got := call(c, contract.DescribeTopics{Topics: []string{"n", "z"}}).Resp.(contract.DescribeTopicsResp).Topics
+	if len(got) != 1 || got[0] != (contract.TopicInfo{Name: "n", Partitions: 2}) {
 		t.Fatalf("topics %+v", got)
 	}
 }
@@ -470,23 +471,23 @@ func TestCreateTopicOp(t *testing.T) {
 // ErrTopicExists and nothing changes. Without it the create is idempotent.
 func TestCreateTopicExclusiveOp(t *testing.T) {
 	c := NewControlPlane()
-	if d := call(c, core.CreateTopic{Name: "n", Partitions: 2, FailIfExists: true}); d.Err != core.OK || d.Outcome != core.Applied {
+	if d := call(c, contract.CreateTopic{Name: "n", Partitions: 2, FailIfExists: true}); d.Err != core.OK || d.Outcome != core.Applied {
 		t.Fatalf("new topic: %+v", d)
 	}
 	h := c.StateHash()
-	if d := call(c, core.CreateTopic{Name: "n", Partitions: 5, FailIfExists: true}); d.Err != core.ErrTopicExists || d.Outcome != core.NotApplied {
+	if d := call(c, contract.CreateTopic{Name: "n", Partitions: 5, FailIfExists: true}); d.Err != core.ErrTopicExists || d.Outcome != core.NotApplied {
 		t.Fatalf("exists: %+v", d)
 	}
 	if c.StateHash() != h {
 		t.Fatal("a failed exclusive create changed the state")
 	}
-	if d := call(c, core.CreateTopic{Name: "n", Partitions: 3}); d.Err != core.OK {
+	if d := call(c, contract.CreateTopic{Name: "n", Partitions: 3}); d.Err != core.OK {
 		t.Fatalf("plain create of an existing topic: %+v", d)
 	}
-	if d := call(c, core.CreateTopic{Name: "", Partitions: 1, FailIfExists: true}); d.Err != core.ErrInvalid {
+	if d := call(c, contract.CreateTopic{Name: "", Partitions: 1, FailIfExists: true}); d.Err != core.ErrInvalid {
 		t.Fatalf("empty name with the flag: %+v", d)
 	}
-	got := call(c, core.DescribeTopics{Topics: []string{"n"}}).Resp.(core.DescribeTopicsResp).Topics
+	got := call(c, contract.DescribeTopics{Topics: []string{"n"}}).Resp.(contract.DescribeTopicsResp).Topics
 	if len(got) != 1 || got[0].Partitions != 3 {
 		t.Fatalf("topics %+v, want n with 3 partitions", got)
 	}

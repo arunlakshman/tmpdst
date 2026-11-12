@@ -6,6 +6,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -53,18 +54,18 @@ type operation struct {
 	ctopic         *kmsg.CreateTopicsResponseTopic
 	dresp          *kmsg.DescribeConfigsResponse
 
-	create       core.CreateTopic // opCreate: the topic to make
-	validateOnly bool             // opCreate: check, do not create
+	create       contract.CreateTopic // opCreate: the topic to make
+	validateOnly bool                 // opCreate: check, do not create
 	// maybeApplied: opCreate: an earlier try may have taken effect.
 	maybeApplied bool
 
-	ranges  []core.BatchRange
+	ranges  []contract.BatchRange
 	next    int
 	out     []byte
 	corrupt bool // the last failure was a corrupt GET
 	held    bool // Fetch part: has its data, waits for the Fetch to fill up (fetch.go)
 
-	gop      core.ControlPlaneOperation  // opGroup: the group call to make
+	gop      contract.Operation          // opGroup: the group call to make
 	gtimeout machine.Duration            // opGroup: the call's deadline (0: the default)
 	gfill    func(core.ControlPlaneDone) // opGroup: writes the answer into the response
 }
@@ -112,14 +113,14 @@ func (b *Broker) issue(o *operation) []core.Action {
 	if o.state == opGet {
 		return []core.Action{core.ObjectGet{Req: o.requestID, Ref: o.ranges[o.next].Loc}}
 	}
-	var cop core.ControlPlaneOperation
+	var cop contract.Operation
 	switch o.kind {
 	case opRefresh, opMetadata, opDescribeConfigs:
-		cop = core.DescribeTopics{Topics: o.names}
+		cop = contract.DescribeTopics{Topics: o.names}
 	case opList: // only the end offset is wanted: look past the end
-		cop = core.FindSegments{TopicPartition: o.topicPartition, From: core.Offset(1<<63 - 1), MaxBytes: 1}
+		cop = contract.FindSegments{TopicPartition: o.topicPartition, From: core.Offset(1<<63 - 1), MaxBytes: 1}
 	case opFetch:
-		cop = core.FindSegments{TopicPartition: o.topicPartition, From: o.from, MaxBytes: o.maxBytes}
+		cop = contract.FindSegments{TopicPartition: o.topicPartition, From: o.from, MaxBytes: o.maxBytes}
 	case opCreate:
 		cop = o.createCP()
 	case opGroup:
@@ -203,7 +204,7 @@ func (b *Broker) onOpCP(o *operation, e core.ControlPlaneDone) []core.Action {
 	if o.kind == opCreate {
 		return b.onCreateCP(o, e)
 	}
-	if r, ok := e.Resp.(core.DescribeTopicsResp); ok && o.kind == opDescribeConfigs && e.Err == core.OK {
+	if r, ok := e.Resp.(contract.DescribeTopicsResp); ok && o.kind == opDescribeConfigs && e.Err == core.OK {
 		return b.onDescribeConfigsCP(o, r.Topics)
 	}
 	if e.Err == core.ErrInvalid {
@@ -213,7 +214,7 @@ func (b *Broker) onOpCP(o *operation, e core.ControlPlaneDone) []core.Action {
 		return b.retryOp(o)
 	}
 	switch r := e.Resp.(type) {
-	case core.DescribeTopicsResp:
+	case contract.DescribeTopicsResp:
 		if o.kind == opRefresh || o.kind == opMetadata {
 			b.merge(r.Topics)
 			if o.kind == opRefresh {
@@ -222,7 +223,7 @@ func (b *Broker) onOpCP(o *operation, e core.ControlPlaneDone) []core.Action {
 			b.metaResp(o, r.Topics, errNone)
 			return b.endOp(o)
 		}
-	case core.FindSegmentsResp:
+	case contract.FindSegmentsResp:
 		switch o.kind {
 		case opList:
 			o.lpart.Offset = int64(r.End)
@@ -300,9 +301,9 @@ func (b *Broker) knows(topicPartition core.TopicPartition) bool {
 	return false
 }
 
-func (b *Broker) merge(infos []core.TopicInfo) {
+func (b *Broker) merge(infos []contract.TopicInfo) {
 	for _, in := range infos {
-		i := slices.IndexFunc(b.topics, func(t core.TopicInfo) bool { return t.Name == in.Name })
+		i := slices.IndexFunc(b.topics, func(t contract.TopicInfo) bool { return t.Name == in.Name })
 		if i < 0 {
 			b.topics = append(b.topics, in)
 			continue
@@ -330,19 +331,19 @@ func (b *Broker) missing(request core.Request) []string {
 		}
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				add(core.NewTopicPartition(t.Topic, p.Partition))
+				add(contract.NewTopicPartition(t.Topic, p.Partition))
 			}
 		}
 	case *kmsg.FetchRequest:
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				add(core.NewTopicPartition(t.Topic, p.Partition))
+				add(contract.NewTopicPartition(t.Topic, p.Partition))
 			}
 		}
 	case *kmsg.ListOffsetsRequest:
 		for _, t := range r.Topics {
 			for _, p := range t.Partitions {
-				add(core.NewTopicPartition(t.Topic, p.Partition))
+				add(contract.NewTopicPartition(t.Topic, p.Partition))
 			}
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakecompletions"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -52,7 +53,7 @@ type pendKey struct {
 
 type pending struct {
 	from      machine.NodeInstance
-	operation core.ControlPlaneOperation
+	operation contract.Operation
 	to        machine.NodeInstance
 	failover  bool
 	muted     bool
@@ -236,7 +237,7 @@ func (e *Engine) execReply(ctx simulator.FakeServiceContext, r core.ControlPlane
 	e.deliverAt(ctx, p.from, ctx.Now()+simulator.Time(lat), r.Done)
 }
 
-func (e *Engine) offer(ctx simulator.FakeServiceContext, cp, from machine.NodeInstance, request machine.RequestID, operation core.ControlPlaneOperation) {
+func (e *Engine) offer(ctx simulator.FakeServiceContext, cp, from machine.NodeInstance, request machine.RequestID, operation contract.Operation) {
 	lat := e.f.ApplyLatency.Sample(ctx.Rand())
 	at := ctx.Now() + simulator.Time(lat)
 	ctx.Deliver(cp, at, ctx.Lane("fakelogservice/offer/"+string(cp.Node)),

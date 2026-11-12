@@ -8,6 +8,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakecontrolplane"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -18,20 +19,20 @@ func base() simulator.ControlPlaneFaults {
 	return simulator.ControlPlaneFaults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}
 }
 
-var tp = core.NewTopicPartition("t", 0)
+var tp = contract.NewTopicPartition("t", 0)
 
 func setup(f simulator.ControlPlaneFaults, seed uint64) (*fakecontrolplane.Engine, *fakeservicetest.Ctx, machine.NodeInstance) {
 	e := fakecontrolplane.New(f)
 	return e, fakeservicetest.New(e, seed), fakeservicetest.Ref("a")
 }
 
-func call(e *fakecontrolplane.Engine, c *fakeservicetest.Ctx, from machine.NodeInstance, request machine.RequestID, operation core.ControlPlaneOperation) {
+func call(e *fakecontrolplane.Engine, c *fakeservicetest.Ctx, from machine.NodeInstance, request machine.RequestID, operation contract.Operation) {
 	e.Execute(c, from, core.ControlPlaneCall{Req: request, Op: operation})
 }
 
-func commit(key string) core.CommitSegment {
-	return core.CommitSegment{SegmentKey: key,
-		Batches: []core.PendingBatch{{TopicPartition: tp, Records: 5, Loc: core.SegmentRef{Key: key, Len: 10}}}}
+func commit(key string) contract.CommitSegment {
+	return contract.CommitSegment{SegmentKey: key,
+		Batches: []contract.PendingBatch{{TopicPartition: tp, Records: 5, Loc: core.SegmentRef{Key: key, Len: 10}}}}
 }
 
 func last(c *fakeservicetest.Ctx) core.ControlPlaneDone {
@@ -46,7 +47,7 @@ func TestNormalAndTruthful(t *testing.T) {
 	call(e, c, a, 3, commit("s1"))
 	c.Run()
 	d := last(c)
-	if d.Err != core.OK || d.Outcome != core.Applied || d.Resp.(core.CommitSegmentResp).Assigned[0].Base != 0 {
+	if d.Err != core.OK || d.Outcome != core.Applied || d.Resp.(contract.CommitSegmentResp).Assigned[0].Base != 0 {
 		t.Fatal(d)
 	}
 	if e.HighWatermark(tp) != 5 || len(e.Committed(tp)) != 1 {
@@ -55,7 +56,7 @@ func TestNormalAndTruthful(t *testing.T) {
 	different := commit("s1")
 	different.Batches[0].Records = 6
 	call(e, c, a, 4, different)
-	call(e, c, a, 5, core.FindSegments{TopicPartition: tp, From: -1})
+	call(e, c, a, 5, contract.FindSegments{TopicPartition: tp, From: -1})
 	c.Run()
 	if d := c.Find(4).(core.ControlPlaneDone); d.Err != core.ErrConflict {
 		t.Fatal("same key, different request:", d)
@@ -70,9 +71,9 @@ func TestCreateTopic(t *testing.T) {
 	if e.CreateTopic("x", 3) != core.OK || e.Gen() != 1 || e.CreateTopic("", 1) != core.ErrInvalid {
 		t.Fatal("create")
 	}
-	call(e, c, a, 1, core.DescribeTopics{})
+	call(e, c, a, 1, contract.DescribeTopics{})
 	c.Run()
-	if r := last(c).Resp.(core.DescribeTopicsResp); len(r.Topics) != 1 || r.Topics[0].Partitions != 3 {
+	if r := last(c).Resp.(contract.DescribeTopicsResp); len(r.Topics) != 1 || r.Topics[0].Partitions != 3 {
 		t.Fatal(r)
 	}
 }
@@ -155,7 +156,7 @@ func TestIdempotentRetryAfterLostResponse(t *testing.T) {
 	if d.Err != core.OK || r.Err != core.OK {
 		t.Fatal(d, r)
 	}
-	if !slices.Equal(d.Resp.(core.CommitSegmentResp).Assigned, r.Resp.(core.CommitSegmentResp).Assigned) {
+	if !slices.Equal(d.Resp.(contract.CommitSegmentResp).Assigned, r.Resp.(contract.CommitSegmentResp).Assigned) {
 		t.Fatal("retry assigned different offsets", d, r)
 	}
 	if e.HighWatermark(tp) != 10 {
@@ -177,7 +178,7 @@ func TestLostCommitThenRetryInSim(t *testing.T) {
 	e2.EnterRecovery()
 	call(e2, c2, a2, 3, commit("s"))
 	c2.Run()
-	got := last(c2).Resp.(core.CommitSegmentResp).Assigned
+	got := last(c2).Resp.(contract.CommitSegmentResp).Assigned
 	if len(want) != 1 || !slices.Equal(got, want) {
 		t.Fatal(got, want)
 	}
@@ -205,7 +206,7 @@ func TestRecoveryStopsFaults(t *testing.T) {
 	if d := c.Find(1).(core.ControlPlaneDone); d.Err != core.ErrUnavailable {
 		t.Fatal("in-flight plan must stand", d)
 	}
-	if d := c.Find(2).(core.ControlPlaneDone); d.Err != core.OK || d.Resp.(core.CommitSegmentResp).Assigned[0].Base != 0 {
+	if d := c.Find(2).(core.ControlPlaneDone); d.Err != core.OK || d.Resp.(contract.CommitSegmentResp).Assigned[0].Base != 0 {
 		t.Fatal(d)
 	}
 }
@@ -222,7 +223,7 @@ func TestDeterminism(t *testing.T) {
 			case 0:
 				call(e, c, a, machine.RequestID(i), commit(string(rune('a'+i%7))))
 			default:
-				call(e, c, a, machine.RequestID(i), core.FindSegments{TopicPartition: tp})
+				call(e, c, a, machine.RequestID(i), contract.FindSegments{TopicPartition: tp})
 			}
 		}
 		mid := e.StateHash()
@@ -247,14 +248,14 @@ func TestCommitSizeLimit(t *testing.T) {
 	f.MaxCommitItems = 4
 	e, c, a := setup(f, 1)
 	e.CreateTopic("t", 4)
-	many := func(key string, n int) core.CommitSegment {
+	many := func(key string, n int) contract.CommitSegment {
 		operation := commit(key)
 		for i := 1; i < n; i++ {
 			operation.Batches = append(operation.Batches, operation.Batches[0])
 		}
 		return operation
 	}
-	parts := func(key string, n int) core.CommitSegment {
+	parts := func(key string, n int) contract.CommitSegment {
 		operation := many(key, n)
 		for i := range operation.Batches {
 			operation.Batches[i].TopicPartition.Partition = int32(i)
@@ -286,14 +287,14 @@ func TestCommitSizeLimit(t *testing.T) {
 	// A grown topic counts: partition 5 of a 4-partition topic is 1 + 1 + 1 = 3
 	// (fits), but one batch each on "u" (new) and "t" partitions 0..1 is 1 + 3 + 1 = 5.
 	grow := commit("g")
-	grow.Batches[0].TopicPartition = core.NewTopicPartition("t", 5)
+	grow.Batches[0].TopicPartition = contract.NewTopicPartition("t", 5)
 	call(e, c, a, 6, grow)
 	c.Run()
 	if d := last(c); d.Err != core.OK {
 		t.Fatal(d)
 	}
 	mixed := parts("m", 2)
-	mixed.Batches = append(mixed.Batches, core.PendingBatch{TopicPartition: core.NewTopicPartition("u", 0), Records: 1})
+	mixed.Batches = append(mixed.Batches, contract.PendingBatch{TopicPartition: contract.NewTopicPartition("u", 0), Records: 1})
 	call(e, c, a, 7, mixed)
 	c.Run()
 	if d := last(c); d.Err != core.ErrTooLarge {

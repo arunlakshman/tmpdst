@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // PartitionEnd is one partition's next offset.
@@ -24,7 +25,7 @@ func (c *ControlPlane) Ends() []PartitionEnd {
 		}
 		slices.Sort(ps)
 		for _, p := range ps {
-			topicPartition := core.NewTopicPartition(t, p)
+			topicPartition := contract.NewTopicPartition(t, p)
 			out = append(out, PartitionEnd{TopicPartition: topicPartition, Offset: c.End(topicPartition)})
 		}
 	}

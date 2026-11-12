@@ -1,4 +1,4 @@
-package cpclient
+package client
 
 import (
 	"context"

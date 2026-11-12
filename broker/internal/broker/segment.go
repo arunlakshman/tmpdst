@@ -7,6 +7,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -162,7 +163,7 @@ func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
 	if err != nil {
 		b.env.Unreachable(admittedBatchCannotEncode)
 		for _, pb := range bs {
-			b.answerPart(pb, errUnknownServer, core.BatchRange{}, "")
+			b.answerPart(pb, errUnknownServer, contract.BatchRange{}, "")
 		}
 		return nil
 	}
@@ -197,7 +198,7 @@ func (b *Broker) onPutDone(s *segment, e core.ObjectPutDone) []core.Action {
 	if b.config.InjectedBug == InjectedBugEarlyAck {
 		for _, pb := range s.batches {
 			b.guess += uint64(pb.records)
-			b.answerPart(pb, errNone, core.BatchRange{TopicPartition: pb.topicPartition, Base: core.Offset(b.guess) - core.Offset(pb.records), Count: pb.records}, s.key)
+			b.answerPart(pb, errNone, contract.BatchRange{TopicPartition: pb.topicPartition, Base: core.Offset(b.guess) - core.Offset(pb.records), Count: pb.records}, s.key)
 		}
 	}
 	return append(acts, b.pump()...)
@@ -217,22 +218,22 @@ func (b *Broker) commit(s *segment) []core.Action {
 	if !s.commitStarted {
 		s.commitStarted, s.commitAt = true, b.now
 	}
-	pend := make([]core.PendingBatch, len(s.batches))
+	pend := make([]contract.PendingBatch, len(s.batches))
 	for i, pb := range s.batches {
-		pend[i] = core.PendingBatch{TopicPartition: pb.topicPartition, Records: pb.records, Loc: pb.loc}
+		pend[i] = contract.PendingBatch{TopicPartition: pb.topicPartition, Records: pb.records, Loc: pb.loc}
 	}
 	key := s.key
 	if b.config.InjectedBug == InjectedBugFreshKeyOnRetry && s.attempts > 0 {
 		key = segmentformat.SegmentKey(b.env.NewID())
 	}
-	return []core.Action{core.ControlPlaneCall{Req: s.request, Op: core.CommitSegment{
+	return []core.Action{core.ControlPlaneCall{Req: s.request, Op: contract.CommitSegment{
 		SegmentKey: key, Batches: pend}}}
 }
 
 func (b *Broker) onCommit(s *segment, e core.ControlPlaneDone) []core.Action {
 	switch e.Err {
 	case core.OK:
-		response, ok := e.Resp.(core.CommitSegmentResp)
+		response, ok := e.Resp.(contract.CommitSegmentResp)
 		shape := ok && len(response.Assigned) == len(s.batches)
 		for i := 0; shape && i < len(s.batches); i++ {
 			shape = response.Assigned[i].TopicPartition == s.batches[i].topicPartition
@@ -266,7 +267,7 @@ func (b *Broker) onCommit(s *segment, e core.ControlPlaneDone) []core.Action {
 // committed answers every batch of s from the control plane's verdicts.
 // Timing is in nanoseconds. put plus wait plus commit equals total. wait is
 // the time the uploaded segment queued behind earlier segments' commits.
-func (b *Broker) committed(s *segment, rs []core.BatchRange) []core.Action {
+func (b *Broker) committed(s *segment, rs []contract.BatchRange) []core.Action {
 	acts := []core.Action{recordFact("segment_committed",
 		machine.Field{Key: "segment", Value: machine.StringValue(s.key)},
 		machine.Field{Key: "batches", Value: machine.Int64Value(len(s.batches))},
@@ -310,7 +311,7 @@ func (b *Broker) failSegment(s *segment, code kafkaErrorCode) []core.Action {
 		machine.Field{Key: "inflight", Value: machine.Int64Value(len(b.segs) - 1)},
 		machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes - s.dataBytes())})}
 	for _, pb := range s.batches {
-		b.answerPart(pb, code, core.BatchRange{}, "")
+		b.answerPart(pb, code, contract.BatchRange{}, "")
 	}
 	return append(acts, b.endSegment(s)...)
 }
@@ -370,7 +371,7 @@ func (b *Broker) segmentTimer(s *segment, gen machine.TimerVersion) []core.Actio
 // answerPart answers pb once, with code or, on errNone, with success at range
 // r of segment key. A success also records the "produce_acked" fact that
 // drain emits right before the Send (decision 12).
-func (b *Broker) answerPart(pb *partitionBatch, code kafkaErrorCode, r core.BatchRange, key string) {
+func (b *Broker) answerPart(pb *partitionBatch, code kafkaErrorCode, r contract.BatchRange, key string) {
 	if pb.answered {
 		return
 	}

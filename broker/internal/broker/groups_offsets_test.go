@@ -6,6 +6,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 func commitRequest(group string, gen int32, member string, parts ...int32) *kmsg.OffsetCommitRequest {
@@ -20,8 +21,8 @@ func commitRequest(group string, gen int32, member string, parts ...int32) *kmsg
 }
 
 func TestOffsetCommitCodesPerPartition(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
-		return cpOK(core.OffsetCommitResp{Errs: []core.ErrCode{core.OK, core.ErrUnknownPartition, core.ErrInvalid}})
+	h, g := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone {
+		return cpOK(contract.OffsetCommitResp{Errs: []core.ErrCode{core.OK, core.ErrUnknownPartition, core.ErrInvalid}})
 	})
 	r := h.call(h.open(1), 8, commitRequest("g1", 4, "m-1", 0, 1, 2)).(*kmsg.OffsetCommitResponse)
 	want := []kafkaErrorCode{errNone, errUnknownTopicOrPart, errInvalidRequest}
@@ -30,7 +31,7 @@ func TestOffsetCommitCodesPerPartition(t *testing.T) {
 			t.Errorf("partition %d: %d, want %d", i, p.ErrorCode, want[i])
 		}
 	}
-	operation := g.calls[0].Op.(core.OffsetCommit)
+	operation := g.calls[0].Op.(contract.OffsetCommit)
 	if operation.Member != "m-1" || operation.Generation != 4 || len(operation.Offsets) != 3 || operation.Offsets[2].Offset != 12 {
 		t.Fatalf("commit call %+v", operation)
 	}
@@ -38,7 +39,7 @@ func TestOffsetCommitCodesPerPartition(t *testing.T) {
 }
 
 func TestOffsetCommitWholeCallErrorAndManual(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
+	h, g := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone {
 		return cpErr(core.ErrIllegalGeneration)
 	})
 	c := h.open(1)
@@ -50,14 +51,14 @@ func TestOffsetCommitWholeCallErrorAndManual(t *testing.T) {
 	}
 	// Version 0 has no generation: a manual commit, -1 with no member.
 	h.call(c, 0, commitRequest("g1", 0, "", 0))
-	if operation := g.calls[1].Op.(core.OffsetCommit); operation.Generation != -1 || operation.Member != "" {
+	if operation := g.calls[1].Op.(contract.OffsetCommit); operation.Generation != -1 || operation.Member != "" {
 		t.Fatalf("version 0 commit %+v, want manual", operation)
 	}
 	h.noViolations()
 }
 
 func TestOffsetCommitEmptyGroupIsInvalid(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone { return cpOK(nil) })
+	h, g := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone { return cpOK(nil) })
 	r := h.call(h.open(1), 8, commitRequest("", 1, "m", 0)).(*kmsg.OffsetCommitResponse)
 	if kafkaErrorCode(r.Topics[0].Partitions[0].ErrorCode) != errInvalidGroupID || len(g.calls) != 0 {
 		t.Fatalf("answer %+v, calls %d", r.Topics, len(g.calls))
@@ -73,10 +74,10 @@ func fetchRequest(group string, parts ...int32) *kmsg.OffsetFetchRequest {
 }
 
 func TestOffsetFetchExplicitKeepsRequestOrder(t *testing.T) {
-	h, _ := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
-		return cpOK(core.OffsetFetchResp{Offsets: []core.PartitionOffset{
-			{TopicPartition: core.NewTopicPartition("t", 2), Offset: 7, LeaderEpoch: 0},
-			{TopicPartition: core.NewTopicPartition("t", 0), Offset: -1, LeaderEpoch: -1},
+	h, _ := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone {
+		return cpOK(contract.OffsetFetchResp{Offsets: []contract.PartitionOffset{
+			{TopicPartition: contract.NewTopicPartition("t", 2), Offset: 7, LeaderEpoch: 0},
+			{TopicPartition: contract.NewTopicPartition("t", 0), Offset: -1, LeaderEpoch: -1},
 		}})
 	})
 	r := h.call(h.open(1), 7, fetchRequest("g1", 2, 0)).(*kmsg.OffsetFetchResponse)
@@ -88,17 +89,17 @@ func TestOffsetFetchExplicitKeepsRequestOrder(t *testing.T) {
 }
 
 func TestOffsetFetchAllCommitted(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
-		return cpOK(core.OffsetFetchResp{Offsets: []core.PartitionOffset{
-			{TopicPartition: core.NewTopicPartition("t", 0), Offset: 1}, {TopicPartition: core.NewTopicPartition("t", 3), Offset: 2},
-			{TopicPartition: core.NewTopicPartition("u", 1), Offset: 3},
+	h, g := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone {
+		return cpOK(contract.OffsetFetchResp{Offsets: []contract.PartitionOffset{
+			{TopicPartition: contract.NewTopicPartition("t", 0), Offset: 1}, {TopicPartition: contract.NewTopicPartition("t", 3), Offset: 2},
+			{TopicPartition: contract.NewTopicPartition("u", 1), Offset: 3},
 		}})
 	})
 	// An empty topic list (version 2 and up) asks for every committed offset.
 	all := kmsg.NewPtrOffsetFetchRequest()
 	all.Group = "g1"
 	r := h.call(h.open(1), 7, all).(*kmsg.OffsetFetchResponse)
-	if operation := g.calls[0].Op.(core.OffsetFetch); len(operation.Partitions) != 0 {
+	if operation := g.calls[0].Op.(contract.OffsetFetch); len(operation.Partitions) != 0 {
 		t.Fatalf("call %+v, want all", operation)
 	}
 	if len(r.Topics) != 2 || r.Topics[0].Topic != "t" || len(r.Topics[0].Partitions) != 2 || r.Topics[1].Topic != "u" {
@@ -108,7 +109,7 @@ func TestOffsetFetchAllCommitted(t *testing.T) {
 }
 
 func TestOffsetFetchVersion1EmptyListAnswersNothing(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone { return cpOK(nil) })
+	h, g := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone { return cpOK(nil) })
 	r := kmsg.NewPtrOffsetFetchRequest()
 	r.Group = "g1"
 	if got := h.call(h.open(1), 1, r).(*kmsg.OffsetFetchResponse); len(got.Topics) != 0 || len(g.calls) != 0 {
@@ -117,9 +118,9 @@ func TestOffsetFetchVersion1EmptyListAnswersNothing(t *testing.T) {
 }
 
 func TestOffsetFetchBatchedGroups(t *testing.T) {
-	h, _ := withGroupCP(t, DefaultConfig(), func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
-		if f := operation.(core.OffsetFetch); f.Group == "g2" {
-			return cpOK(core.OffsetFetchResp{Offsets: []core.PartitionOffset{{TopicPartition: core.NewTopicPartition("t", 0), Offset: 9}}})
+	h, _ := withGroupCP(t, DefaultConfig(), func(operation contract.Operation) core.ControlPlaneDone {
+		if f := operation.(contract.OffsetFetch); f.Group == "g2" {
+			return cpOK(contract.OffsetFetchResp{Offsets: []contract.PartitionOffset{{TopicPartition: contract.NewTopicPartition("t", 0), Offset: 9}}})
 		}
 		return cpErr(core.ErrUnavailable)
 	})
@@ -142,7 +143,7 @@ func TestOffsetFetchBatchedGroups(t *testing.T) {
 }
 
 func TestOffsetFetchEmptyGroupAndTimeout(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
+	h, g := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone {
 		return cpErr(core.ErrTimeout)
 	})
 	c := h.open(1)
@@ -165,11 +166,11 @@ func describeRequest(groups ...string) *kmsg.DescribeGroupsRequest {
 }
 
 func TestDescribeGroupsStatesAndDead(t *testing.T) {
-	h, _ := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
-		return cpOK(core.DescribeGroupsResp{Groups: []core.GroupDescription{
-			{Name: "g1", DescribeGroupResp: core.DescribeGroupResp{Exists: true, State: "PreparingSync",
-				ProtocolType: "consumer", Protocol: "range", Leader: "m-1", Members: []core.GroupMemberInfo{{
-					GroupMember: core.GroupMember{MemberID: "m-1", ClientID: "c1", ClientHost: "/h1", Metadata: []byte("sub")},
+	h, _ := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone {
+		return cpOK(contract.DescribeGroupsResp{Groups: []contract.GroupDescription{
+			{Name: "g1", DescribeGroupResp: contract.DescribeGroupResp{Exists: true, State: "PreparingSync",
+				ProtocolType: "consumer", Protocol: "range", Leader: "m-1", Members: []contract.GroupMemberInfo{{
+					GroupMember: contract.GroupMember{MemberID: "m-1", ClientID: "c1", ClientHost: "/h1", Metadata: []byte("sub")},
 					Assignment:  []byte("a1"),
 				}}}},
 			{Name: "nope"},
@@ -193,7 +194,7 @@ func TestDescribeGroupsStatesAndDead(t *testing.T) {
 }
 
 func TestDescribeGroupsTimeoutPerGroup(t *testing.T) {
-	h, _ := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone { return cpErr(core.ErrTimeout) })
+	h, _ := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone { return cpErr(core.ErrTimeout) })
 	r := h.call(h.open(1), 5, describeRequest("a", "b")).(*kmsg.DescribeGroupsResponse)
 	for _, g := range r.Groups {
 		if kafkaErrorCode(g.ErrorCode) != errCoordNotAvailable {

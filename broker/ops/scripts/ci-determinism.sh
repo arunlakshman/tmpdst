@@ -20,7 +20,7 @@ echo "== dependency audit records"
 # The generated gRPC API (api/controlplane/v1) is the input/output edge, so we
 # do not follow imports into it: grpc, protobuf and their dependencies are not
 # audited here. The packages still may import it for type definitions only
-# (decision 57). Broker-side wire conversion lives in internal/cpclient (not a
+# (decision 57). The wire conversion lives in controlplane/client (not a
 # determinism-scanned package).
 edge=github.com/manifesterio/mds/controlplane/api/controlplane/v1
 roots=$(go list "${pkgs[@]}" | tr '\n' ' ')

@@ -8,6 +8,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/generator"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/observation"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -168,7 +169,7 @@ func controlPlaneInvariant(p *ControlPlanePair) error {
 // checkRuns looks up a whole partition and checks that its runs have no gap
 // and no overlap and that the end offset equals the committed record count.
 func (p *ControlPlanePair) checkRuns(who string, subject ControlPlaneSubject, topicPartition core.TopicPartition) error {
-	result, err := subject.Do(generator.NewCall(core.ControlPlaneCall{Req: p.nextReq(), Op: core.FindSegments{TopicPartition: topicPartition}}))
+	result, err := subject.Do(generator.NewCall(core.ControlPlaneCall{Req: p.nextReq(), Op: contract.FindSegments{TopicPartition: topicPartition}}))
 	if err != nil {
 		return fmt.Errorf("the %s could not look up %v: %w", who, topicPartition, err)
 	}
@@ -192,7 +193,7 @@ func (p *ControlPlanePair) checkRuns(who string, subject ControlPlaneSubject, to
 }
 
 func (p *ControlPlanePair) checkTopics(who string, subject ControlPlaneSubject) error {
-	result, err := subject.Do(generator.NewCall(core.ControlPlaneCall{Req: p.nextReq(), Op: core.DescribeTopics{}}))
+	result, err := subject.Do(generator.NewCall(core.ControlPlaneCall{Req: p.nextReq(), Op: contract.DescribeTopics{}}))
 	if err != nil {
 		return fmt.Errorf("the %s could not describe the topics: %w", who, err)
 	}

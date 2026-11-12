@@ -6,6 +6,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -26,7 +27,7 @@ func longFetch(minBytes, maxWaitMillis int32, parts ...int32) *kmsg.FetchRequest
 func lookups(h *harness, topicPartition core.TopicPartition) int {
 	n := 0
 	for _, operation := range h.cpCalls {
-		if f, ok := operation.(core.FindSegments); ok && f.TopicPartition == topicPartition {
+		if f, ok := operation.(contract.FindSegments); ok && f.TopicPartition == topicPartition {
 			n++
 		}
 	}
@@ -74,7 +75,7 @@ func TestFetchAnswersAtOnce(t *testing.T) {
 }
 
 func TestFetchDataOnSecondPoll(t *testing.T) {
-	topicPartition := core.NewTopicPartition("t", 0)
+	topicPartition := contract.NewTopicPartition("t", 0)
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	w := h.open(2)
@@ -98,7 +99,7 @@ func TestFetchDataOnSecondPoll(t *testing.T) {
 }
 
 func TestFetchMaxWaitExpiresEmpty(t *testing.T) {
-	topicPartition := core.NewTopicPartition("t", 0)
+	topicPartition := contract.NewTopicPartition("t", 0)
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.send(c, verFetch, longFetch(1, 300, 0))
@@ -136,7 +137,7 @@ func TestFetchTwoPartitionsOneShort(t *testing.T) {
 // A part with data holds it while the Fetch is short of MinBytes. Only the
 // partition with no data is polled again.
 func TestFetchPollsOnlyShortPartition(t *testing.T) {
-	tp0, tp1 := core.NewTopicPartition("t", 0), core.NewTopicPartition("t", 1)
+	tp0, tp1 := contract.NewTopicPartition("t", 0), contract.NewTopicPartition("t", 1)
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	w := h.open(2)
@@ -167,7 +168,7 @@ func TestFetchPollsOnlyShortPartition(t *testing.T) {
 }
 
 func TestFetchParkedEndsOnClose(t *testing.T) {
-	topicPartition := core.NewTopicPartition("t", 0)
+	topicPartition := contract.NewTopicPartition("t", 0)
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.send(c, verFetch, longFetch(1, 500, 0))

@@ -182,6 +182,9 @@ func check(pkgs map[string]pkg) problems {
 		}
 	}
 
+	// The client is public (the broker uses it): it imports contract and the generated api, and no
+	// internal package. The broker is not in this module's reach (depguard forbids it too).
+	p.onlyImports(pkgs, "client", []string{contractPkg, "api/controlplane/v1", "api/controlplane/shared/v1"}, false)
 	// live is the production runner: it knows no control-plane type.
 	p.onlyImports(pkgs, "internal/system/live", nil, true)
 	// The log adapters import the port and little else of the module.
@@ -272,6 +275,7 @@ func TestImportRulesCanFail(t *testing.T) {
 		{"(d) runtime imports spec", with(real, rt, spec), rt, spec},
 		{"(e) contract imports runtime", with(real, contractPkg, rt), contractPkg, rt},
 		{"(e) contract imports an internal package", with(real, contractPkg, cp+"metadb"), contractPkg, cp + "metadb"},
+		{"(e) client imports runtime", with(real, "client", rt), "client", rt},
 		{"(e) spec imports runtime", with(real, spec, rt), spec, rt},
 	}
 	for _, c := range cases {

@@ -2,6 +2,7 @@ package simulator
 
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -47,9 +48,9 @@ func (noObjects) Gen() uint64                     { return 0 }
 
 type noControlPlane struct{}
 
-func (noControlPlane) Committed(core.TopicPartition) []core.BatchRange { return nil }
-func (noControlPlane) HighWatermark(core.TopicPartition) core.Offset   { return 0 }
-func (noControlPlane) Gen() uint64                                     { return 0 }
+func (noControlPlane) Committed(core.TopicPartition) []contract.BatchRange { return nil }
+func (noControlPlane) HighWatermark(core.TopicPartition) core.Offset       { return 0 }
+func (noControlPlane) Gen() uint64                                         { return 0 }
 
 var (
 	_ View                  = view{}

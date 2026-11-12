@@ -13,6 +13,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakecompletions"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -46,7 +47,7 @@ func New(f simulator.ControlPlaneFaults) *Engine {
 			return e.spec.Exec(a)
 		},
 		Mutating: func(a core.IOCall) bool {
-			_, ok := a.(core.ControlPlaneCall).Op.(core.CommitSegment)
+			_, ok := a.(core.ControlPlaneCall).Op.(contract.CommitSegment)
 			return ok
 		},
 		Fail: func(a core.IOCall, err core.ErrCode, o core.Outcome) core.IOResult {
@@ -80,12 +81,12 @@ func (e *Engine) Execute(ctx simulator.FakeServiceContext, from machine.NodeInst
 }
 
 // Committed returns the committed ranges of tp in offset order.
-func (e *Engine) Committed(topicPartition core.TopicPartition) []core.BatchRange {
-	d := e.spec.Exec(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: topicPartition}}).(core.ControlPlaneDone)
+func (e *Engine) Committed(topicPartition core.TopicPartition) []contract.BatchRange {
+	d := e.spec.Exec(core.ControlPlaneCall{Op: contract.FindSegments{TopicPartition: topicPartition}}).(core.ControlPlaneDone)
 	if d.Err != core.OK {
 		return nil
 	}
-	return d.Resp.(core.FindSegmentsResp).Ranges
+	return d.Resp.(contract.FindSegmentsResp).Ranges
 }
 
 // HighWatermark is the partition end: the next offset the spec assigns.
@@ -100,8 +101,8 @@ func (e *Engine) HighWatermark(topicPartition core.TopicPartition) core.Offset {
 // grows, taken as an upper bound, so it depends on the request and the topic
 // table only. The number of batches does not count. The spec stays
 // limit-free; a refusal reaches it never, so nothing changes.
-func (e *Engine) tooLarge(operation core.ControlPlaneOperation) bool {
-	c, ok := operation.(core.CommitSegment)
+func (e *Engine) tooLarge(operation contract.Operation) bool {
+	c, ok := operation.(contract.CommitSegment)
 	if !ok || e.maxItems <= 0 {
 		return false
 	}
@@ -109,11 +110,11 @@ func (e *Engine) tooLarge(operation core.ControlPlaneOperation) bool {
 }
 
 // commitItems is the item count of c: 1 + distinct partitions + grown topics.
-func (e *Engine) commitItems(c core.CommitSegment) int {
+func (e *Engine) commitItems(c contract.CommitSegment) int {
 	var tps []core.TopicPartition
 	grown := map[string]int32{} // keyed lookups only, never iterated for behaviour
 	topics := 0
-	known := e.spec.Exec(core.ControlPlaneCall{Op: core.DescribeTopics{}}).(core.ControlPlaneDone).Resp.(core.DescribeTopicsResp).Topics
+	known := e.spec.Exec(core.ControlPlaneCall{Op: contract.DescribeTopics{}}).(core.ControlPlaneDone).Resp.(contract.DescribeTopicsResp).Topics
 	for _, b := range c.Batches {
 		if !slices.Contains(tps, b.TopicPartition) {
 			tps = append(tps, b.TopicPartition)

@@ -1,4 +1,4 @@
-package cpclient
+package client
 
 import (
 	"context"
@@ -11,8 +11,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/manifesterio/mds/broker/internal/core"
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 func deadClient(t *testing.T) *Client {
@@ -35,14 +35,14 @@ func TestCallDialError(t *testing.T) {
 	}
 	addr := ln.Addr().String()
 	_ = ln.Close()
-	_, err = New(addr, nil).Call(t.Context(), core.CommitSegment{
-		SegmentKey: "k", Batches: []core.PendingBatch{{TopicPartition: core.NewTopicPartition("t", 0), Records: 1}},
+	_, err = New(addr, nil).Call(t.Context(), contract.CommitSegment{
+		SegmentKey: "k", Batches: []contract.PendingBatch{{TopicPartition: contract.NewTopicPartition("t", 0), Records: 1}},
 	})
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	code, out := Classifier{}.Classify(core.ControlPlaneCall{Op: core.CommitSegment{}}, err)
-	if code != core.ErrUnavailable && code != core.ErrIO {
+	code, out := Classify(contract.CommitSegment{}, err)
+	if code != contract.ErrUnavailable && code != contract.ErrIO {
 		t.Errorf("dial: %v %v (%v)", code, out, err)
 	}
 }
@@ -51,34 +51,34 @@ func TestCallCtxAndUnknownOp(t *testing.T) {
 	c := deadClient(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := c.Call(ctx, core.CommitSegment{}); !errors.Is(err, context.Canceled) {
+	if _, err := c.Call(ctx, contract.CommitSegment{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled ctx: %v", err)
 	}
 	_, err := c.Call(t.Context(), nil)
 	be, ok := errors.AsType[*Error](err)
-	if !ok || be.Code != core.ErrInvalid {
+	if !ok || be.Code != contract.ErrInvalid {
 		t.Fatalf("unknown op: %v", err)
 	}
 }
 
 func TestClassifyBusinessAndTimeout(t *testing.T) {
-	be := &Error{Code: core.ErrConflict}
-	code, out := Classifier{}.Classify(core.ControlPlaneCall{Op: core.CommitSegment{}}, be)
-	if code != core.ErrConflict || out != core.NotApplied {
+	be := &Error{Code: contract.ErrConflict}
+	code, out := Classify(contract.CommitSegment{}, be)
+	if code != contract.ErrConflict || out != contract.NotApplied {
 		t.Fatalf("business: %v %v", code, out)
 	}
 	ce := &CallError{Op: "CommitSegment", Sent: true, Code: codes.DeadlineExceeded, Err: context.DeadlineExceeded}
-	code, out = Classifier{}.Classify(core.ControlPlaneCall{Op: core.CommitSegment{}}, ce)
-	if code != core.ErrTimeout || out != core.MaybeApplied {
+	code, out = Classify(contract.CommitSegment{}, ce)
+	if code != contract.ErrTimeout || out != contract.MaybeApplied {
 		t.Fatalf("timeout: %v %v", code, out)
 	}
-	_, out = Classifier{}.Classify(core.ControlPlaneCall{Op: core.FindSegments{}}, ce)
-	if out != core.NotApplied {
+	_, out = Classify(contract.FindSegments{}, ce)
+	if out != contract.NotApplied {
 		t.Fatalf("read timeout outcome %v", out)
 	}
 	ce = &CallError{Op: "x", Sent: false, Err: syscall.ECONNREFUSED}
-	code, out = Classifier{}.Classify(core.ControlPlaneCall{Op: core.CommitSegment{}}, ce)
-	if code != core.ErrUnavailable || out != core.NotApplied {
+	code, out = Classify(contract.CommitSegment{}, ce)
+	if code != contract.ErrUnavailable || out != contract.NotApplied {
 		t.Fatalf("unsent: %v %v", code, out)
 	}
 }
@@ -93,7 +93,7 @@ func TestMapRPCErrDetail(t *testing.T) {
 	}
 	got := convertRPCError("CommitSegment", st.Err())
 	be, ok := errors.AsType[*Error](got)
-	if !ok || be.Code != core.ErrConflict {
+	if !ok || be.Code != contract.ErrConflict {
 		t.Fatalf("got %v", got)
 	}
 	if ce, ok := errors.AsType[*CallError](convertRPCError("x", errors.New("plain"))); !ok || !ce.Sent {
@@ -101,12 +101,12 @@ func TestMapRPCErrDetail(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		code codes.Code
-		want core.ErrCode
+		want contract.ErrCode
 	}{
-		{codes.Unavailable, core.ErrUnavailable},
-		{codes.InvalidArgument, core.ErrInvalid},
-		{codes.NotFound, core.ErrNotFound},
-		{codes.AlreadyExists, core.ErrConflict},
+		{codes.Unavailable, contract.ErrUnavailable},
+		{codes.InvalidArgument, contract.ErrInvalid},
+		{codes.NotFound, contract.ErrNotFound},
+		{codes.AlreadyExists, contract.ErrConflict},
 	} {
 		got := convertRPCError("op", status.Error(tc.code, "x"))
 		be, ok := errors.AsType[*Error](got)
@@ -129,23 +129,23 @@ func TestCallGroupTransportErrors(t *testing.T) {
 	c := deadClient(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
-	ops := []core.ControlPlaneOperation{
-		core.GroupJoin{Group: "g", ClientID: "c", ProtocolType: "consumer",
-			Protocols: []core.GroupProtocol{{Name: "range", Metadata: []byte("m")}}},
-		core.GroupSync{Group: "g", MemberID: "m", Generation: 1},
-		core.GroupHeartbeat{Group: "g", MemberID: "m", Generation: 1},
-		core.GroupLeave{Group: "g", Members: []string{"m"}},
-		core.OffsetCommit{Group: "g", Member: "m", Generation: 1},
-		core.OffsetFetch{Group: "g"},
-		core.DescribeGroups{Groups: []string{"g"}},
-		core.ListGroups{},
+	ops := []contract.Operation{
+		contract.GroupJoin{Group: "g", ClientID: "c", ProtocolType: "consumer",
+			Protocols: []contract.GroupProtocol{{Name: "range", Metadata: []byte("m")}}},
+		contract.GroupSync{Group: "g", MemberID: "m", Generation: 1},
+		contract.GroupHeartbeat{Group: "g", MemberID: "m", Generation: 1},
+		contract.GroupLeave{Group: "g", Members: []string{"m"}},
+		contract.OffsetCommit{Group: "g", Member: "m", Generation: 1},
+		contract.OffsetFetch{Group: "g"},
+		contract.DescribeGroups{Groups: []string{"g"}},
+		contract.ListGroups{},
 	}
 	for _, operation := range ops {
 		response, err := c.callGroup(ctx, operation)
 		if err == nil {
 			t.Fatalf("%T: no error, resp %+v", operation, response)
 		}
-		if code, _ := (Classifier{}).Classify(core.ControlPlaneCall{Op: operation}, err); code == core.OK {
+		if code, _ := Classify(operation, err); code == contract.OK {
 			t.Fatalf("%T: classified as OK: %v", operation, err)
 		}
 	}
@@ -153,9 +153,9 @@ func TestCallGroupTransportErrors(t *testing.T) {
 
 func TestCallGroupUnknownOp(t *testing.T) {
 	c := deadClient(t)
-	_, err := c.callGroup(t.Context(), core.CommitSegment{})
+	_, err := c.callGroup(t.Context(), contract.CommitSegment{})
 	be, ok := errors.AsType[*Error](err)
-	if !ok || be.Code != core.ErrInvalid {
+	if !ok || be.Code != contract.ErrInvalid {
 		t.Fatalf("unknown op: %v", err)
 	}
 }

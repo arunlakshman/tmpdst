@@ -11,6 +11,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -191,17 +192,17 @@ func classifyControlPlane(spec *speccheck.ControlPlane, committed map[string]boo
 	}
 	done := spec.Exec(*operation.Call).(core.ControlPlaneDone)
 	switch o := operation.Call.Op.(type) {
-	case core.CommitSegment:
+	case contract.CommitSegment:
 		return classifyCommit(committed, o, done)
-	case core.FindSegments:
+	case contract.FindSegments:
 		return classifyLookup(spec, o, done)
-	case core.DescribeTopics:
-		return classifyDescribe(o, done.Resp.(core.DescribeTopicsResp))
+	case contract.DescribeTopics:
+		return classifyDescribe(o, done.Resp.(contract.DescribeTopicsResp))
 	}
 	return nil
 }
 
-func classifyCommit(committed map[string]bool, o core.CommitSegment, done core.ControlPlaneDone) []string {
+func classifyCommit(committed map[string]bool, o contract.CommitSegment, done core.ControlPlaneDone) []string {
 	switch done.Err {
 	case core.ErrConflict:
 		return []string{"commit conflict"}
@@ -222,7 +223,7 @@ func classifyCommit(committed map[string]bool, o core.CommitSegment, done core.C
 	return out
 }
 
-func invalidCommitCase(o core.CommitSegment) string {
+func invalidCommitCase(o contract.CommitSegment) string {
 	if o.SegmentKey == "" {
 		return "commit invalid: empty key"
 	}
@@ -242,12 +243,12 @@ func invalidCommitCase(o core.CommitSegment) string {
 	return "commit invalid: other"
 }
 
-func classifyLookup(spec *speccheck.ControlPlane, o core.FindSegments, done core.ControlPlaneDone) []string {
+func classifyLookup(spec *speccheck.ControlPlane, o contract.FindSegments, done core.ControlPlaneDone) []string {
 	if done.Err != core.OK {
 		return []string{"lookup From = -1"}
 	}
 	out := []string{"lookup accepted"}
-	response := done.Resp.(core.FindSegmentsResp)
+	response := done.Resp.(contract.FindSegmentsResp)
 	if len(response.Ranges) == 0 {
 		return out
 	}
@@ -255,20 +256,20 @@ func classifyLookup(spec *speccheck.ControlPlane, o core.FindSegments, done core
 	if response.Ranges[0].Base < o.From {
 		out = append(out, "lookup From inside a run")
 	}
-	uncut := spec.Exec(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: o.TopicPartition, From: o.From}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
+	uncut := spec.Exec(core.ControlPlaneCall{Op: contract.FindSegments{TopicPartition: o.TopicPartition, From: o.From}}).(core.ControlPlaneDone).Resp.(contract.FindSegmentsResp)
 	if len(response.Ranges) < len(uncut.Ranges) {
 		out = append(out, "lookup MaxBytes cut")
 	}
 	return out
 }
 
-func classifyDescribe(o core.DescribeTopics, response core.DescribeTopicsResp) []string {
+func classifyDescribe(o contract.DescribeTopics, response contract.DescribeTopicsResp) []string {
 	if len(o.Topics) == 0 {
 		return []string{"describe all topics"}
 	}
 	var out []string
 	for _, name := range o.Topics {
-		known := slices.ContainsFunc(response.Topics, func(t core.TopicInfo) bool { return t.Name == name })
+		known := slices.ContainsFunc(response.Topics, func(t contract.TopicInfo) bool { return t.Name == name })
 		if known {
 			out = append(out, "describe known topic")
 		} else {
@@ -408,8 +409,8 @@ func TestFormatExamples(t *testing.T) {
 		{FormatObjectOp(core.ObjectList{Req: 3, Prefix: "a/"}), `core.ObjectList{Req: 3, Prefix: "a/"}`},
 		{FormatControlPlaneOp(NewCreateTopic("t1", 2)), `generator.NewCreateTopic("t1", 2)`},
 		{
-			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TopicPartition: core.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})),
-			`generator.NewCall(core.ControlPlaneCall{Req: 4, Op: core.FindSegments{TopicPartition: core.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})`,
+			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Req: 4, Op: contract.FindSegments{TopicPartition: contract.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})),
+			`generator.NewCall(core.ControlPlaneCall{Req: 4, Op: contract.FindSegments{TopicPartition: contract.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})`,
 		},
 	}
 	for _, c := range cases {
@@ -420,7 +421,7 @@ func TestFormatExamples(t *testing.T) {
 }
 
 func TestDescribeNamesTheOperation(t *testing.T) {
-	operation := NewCall(core.ControlPlaneCall{Req: 5, Op: core.CommitSegment{SegmentKey: "s", Batches: make([]core.PendingBatch, 2)}})
+	operation := NewCall(core.ControlPlaneCall{Req: 5, Op: contract.CommitSegment{SegmentKey: "s", Batches: make([]contract.PendingBatch, 2)}})
 	if got, want := operation.Describe(), `request 5: commit segment "s" with 2 batches`; got != want {
 		t.Errorf("Describe gave %q, want %q.", got, want)
 	}

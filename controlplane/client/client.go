@@ -1,6 +1,10 @@
-// Package cpclient is the broker-side adapter for the control plane: a
-// system.ControlPlane over the gRPC API and the system.ErrorClassifier for ControlPlaneCall.
-package cpclient
+// Package client is the gRPC client of the control plane. It speaks the types of package
+// contract: Call takes a contract.Operation and returns a contract.Response. The broker
+// uses it as its control plane adapter. Classify turns a failed call into an error code and
+// an outcome.
+//
+// This package imports no broker package.
+package client
 
 import (
 	"context"
@@ -15,16 +19,15 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/system"
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // Error is a business error answered by the control plane (non-OK status with
 // ErrorDetail).
 type Error struct {
-	Code    core.ErrCode
-	Outcome core.Outcome
+	Code    contract.ErrCode
+	Outcome contract.Outcome
 }
 
 func (e *Error) Error() string { return "cp: " + e.Code.String() }
@@ -46,7 +49,7 @@ func (e *CallError) Error() string {
 }
 func (e *CallError) Unwrap() error { return e.Err }
 
-// Client implements system.ControlPlane over plaintext gRPC.
+// Client calls the control plane over plaintext gRPC.
 type Client struct {
 	addrs []string
 	cur   atomic.Int32
@@ -59,8 +62,6 @@ type Client struct {
 
 // Observe sets a callback receiving, per exchange, the op name and duration.
 func (c *Client) Observe(f func(operation string, d time.Duration)) { c.obs = f }
-
-var _ system.ControlPlane = (*Client)(nil)
 
 // New returns a client for target. target may be a comma-separated list of
 // host:port addresses (decision 51 / Appendix E): calls go to the address that
@@ -91,26 +92,26 @@ func (c *Client) Close() error {
 }
 
 // Call performs op. A business error is *Error; other failures are *CallError.
-func (c *Client) Call(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneResponse, error) {
+func (c *Client) Call(ctx context.Context, operation contract.Operation) (contract.Response, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	switch operation.(type) {
-	case core.CommitSegment, core.FindSegments, core.DescribeTopics, core.CreateTopic:
+	case contract.CommitSegment, contract.FindSegments, contract.DescribeTopics, contract.CreateTopic:
 		return c.callTopic(ctx, operation)
-	case core.GroupJoin, core.GroupSync, core.GroupHeartbeat, core.GroupLeave, core.OffsetCommit,
-		core.OffsetFetch, core.DescribeGroups, core.ListGroups:
+	case contract.GroupJoin, contract.GroupSync, contract.GroupHeartbeat, contract.GroupLeave, contract.OffsetCommit,
+		contract.OffsetFetch, contract.DescribeGroups, contract.ListGroups:
 		return c.callGroup(ctx, operation)
 	}
-	return nil, &Error{Code: core.ErrInvalid}
+	return nil, &Error{Code: contract.ErrInvalid}
 }
 
-// callOp is callRPC for the calls that return a core.ControlPlaneResponse.
+// callOp is callRPC for the calls that return a contract.Response.
 // On error it returns a nil interface, not a typed zero value.
-func callOp[Req, Resp any, Out core.ControlPlaneResponse](ctx context.Context, c *Client, name string,
-	rpc func(cpv1.ControlPlaneClient, context.Context, Req, ...grpc.CallOption) (Resp, error), in Req, toCore func(Resp) Out,
-) (core.ControlPlaneResponse, error) {
-	r, err := callRPC(ctx, c, name, rpc, in, toCore)
+func callOp[Req, Resp any, Out contract.Response](ctx context.Context, c *Client, name string,
+	rpc func(cpv1.ControlPlaneClient, context.Context, Req, ...grpc.CallOption) (Resp, error), in Req, toContract func(Resp) Out,
+) (contract.Response, error) {
+	r, err := callRPC(ctx, c, name, rpc, in, toContract)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +121,7 @@ func callOp[Req, Resp any, Out core.ControlPlaneResponse](ctx context.Context, c
 // callRPC runs one RPC through do and converts the reply to the core type.
 // On error it returns the zero value and the error.
 func callRPC[Req, Resp, Out any](ctx context.Context, c *Client, name string,
-	rpc func(cpv1.ControlPlaneClient, context.Context, Req, ...grpc.CallOption) (Resp, error), in Req, toCore func(Resp) Out,
+	rpc func(cpv1.ControlPlaneClient, context.Context, Req, ...grpc.CallOption) (Resp, error), in Req, toContract func(Resp) Out,
 ) (Out, error) {
 	var zero Out
 	var out Resp
@@ -132,7 +133,7 @@ func callRPC[Req, Resp, Out any](ctx context.Context, c *Client, name string,
 	if err != nil {
 		return zero, err
 	}
-	return toCore(out), nil
+	return toContract(out), nil
 }
 
 func (c *Client) do(ctx context.Context, name string, fn func(context.Context, cpv1.ControlPlaneClient) error) error {
@@ -171,7 +172,7 @@ func shouldTryOtherNode(ctx context.Context, err error) bool {
 		return !ce.Sent || ce.Code == codes.Unavailable
 	}
 	if be, ok := errors.AsType[*Error](err); ok {
-		return be.Code == core.ErrUnavailable
+		return be.Code == contract.ErrUnavailable
 	}
 	st, ok := status.FromError(err)
 	return ok && st.Code() == codes.Unavailable
@@ -212,26 +213,26 @@ func convertRPCError(name string, err error) error {
 	for _, d := range st.Details() {
 		if ed, ok := d.(*cpv1.ErrorDetail); ok {
 			return &Error{
-				Code:    toCoreErr(ed.Code),
-				Outcome: toCoreOutcome(ed.Outcome),
+				Code:    toContractErr(ed.Code),
+				Outcome: toContractOutcome(ed.Outcome),
 			}
 		}
 	}
-	code := core.ErrIO
+	code := contract.ErrIO
 	switch st.Code() {
 	case codes.Unavailable:
-		code = core.ErrUnavailable
+		code = contract.ErrUnavailable
 	case codes.InvalidArgument:
-		code = core.ErrInvalid
+		code = contract.ErrInvalid
 	case codes.NotFound:
-		code = core.ErrNotFound
+		code = contract.ErrNotFound
 	case codes.AlreadyExists:
-		code = core.ErrConflict
+		code = contract.ErrConflict
 	case codes.DeadlineExceeded, codes.Canceled:
-		code = core.ErrTimeout
+		code = contract.ErrTimeout
 	}
 	// Prefer typed Error when the status maps cleanly so Classify sees business codes.
-	if code == core.ErrUnavailable || code == core.ErrInvalid || code == core.ErrNotFound || code == core.ErrConflict {
+	if code == contract.ErrUnavailable || code == contract.ErrInvalid || code == contract.ErrNotFound || code == contract.ErrConflict {
 		return &Error{Code: code}
 	}
 	return &CallError{Op: name, Sent: true, Code: st.Code(), Err: err}

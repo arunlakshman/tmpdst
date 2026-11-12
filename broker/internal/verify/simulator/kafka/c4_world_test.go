@@ -13,6 +13,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 )
@@ -61,7 +62,7 @@ type world struct {
 	now    simulator.Time
 
 	// What the oracle sees (mutable by faults).
-	ranges map[core.TopicPartition][]core.BatchRange
+	ranges map[core.TopicPartition][]contract.BatchRange
 	hwmAdj map[core.TopicPartition]int64
 	objs   map[string][]byte
 	ops    []simulator.HistoryOperation
@@ -102,7 +103,7 @@ func (o *objView) Gen() uint64                     { return o.gen }
 
 type controlPlaneView world
 
-func (c *controlPlaneView) Committed(topicPartition core.TopicPartition) []core.BatchRange {
+func (c *controlPlaneView) Committed(topicPartition core.TopicPartition) []contract.BatchRange {
 	return c.ranges[topicPartition]
 }
 func (c *controlPlaneView) Gen() uint64 { return c.gen }
@@ -143,14 +144,14 @@ func newWorld(seed uint64, live bool) *world {
 	r := rand.New(rand.NewPCG(seed, 0xc4)) //nolint:gosec // G404: deterministic test/sim PRNG
 	opts := kafka.DefaultOpts()
 	w := &world{opts: opts, cp: speccheck.NewControlPlane(), parts: map[core.TopicPartition]*speccheck.Broker{},
-		pos: map[[2]int]int64{}, ranges: map[core.TopicPartition][]core.BatchRange{},
+		pos: map[[2]int]int64{}, ranges: map[core.TopicPartition][]contract.BatchRange{},
 		hwmAdj: map[core.TopicPartition]int64{}, objs: map[string][]byte{}, tl: simulator.NewTimeline(), as: failures{}}
 	opts.Partitions = int32(1 + r.IntN(3))
 	w.opts = opts
 	for _, t := range opts.Topics {
 		w.cp.CreateTopic(t, opts.Partitions)
 		for p := int32(0); p < opts.Partitions; p++ {
-			topicPartition := core.NewTopicPartition(t, p)
+			topicPartition := contract.NewTopicPartition(t, p)
 			w.tps = append(w.tps, topicPartition)
 			w.parts[topicPartition] = &speccheck.Broker{}
 		}
@@ -195,7 +196,7 @@ type item struct {
 	p         *producer
 	fate      int
 	bytes     []byte
-	pb        core.PendingBatch
+	pb        contract.PendingBatch
 }
 
 const (
@@ -234,7 +235,7 @@ func (w *world) buildItem(r *rand.Rand, c int, topicPartition core.TopicPartitio
 	if it.fate == fIdem {
 		bp.ProducerID, bp.ProducerEpoch, bp.BaseSequence = 7, 0, 0
 	}
-	it.pb = core.PendingBatch{TopicPartition: topicPartition, Records: int64(n)}
+	it.pb = contract.PendingBatch{TopicPartition: topicPartition, Records: int64(n)}
 	var err error
 	if it.bytes, err = kafkawire.BuildBatch(bp, recs); err != nil {
 		panic(err)
@@ -247,27 +248,27 @@ func (w *world) pickBroker(r *rand.Rand) *broker { return w.brks[r.IntN(len(w.br
 
 // commit sends items (one segment, a fresh key) to the spec CP and mirrors
 // the result. Replaying the key must return the same answer and change nothing.
-func (w *world) commit(items []*item, replay bool) []core.BatchRange {
+func (w *world) commit(items []*item, replay bool) []contract.BatchRange {
 	w.nseg++
 	key := fmt.Sprintf("seg/%032x", w.nseg)
 	var obj []byte
-	var pbs []core.PendingBatch
+	var pbs []contract.PendingBatch
 	for _, it := range items {
 		it.pb.Loc = core.SegmentRef{Key: key, Off: int64(len(obj)), Len: int64(len(it.bytes))}
 		obj = append(obj, it.bytes...)
 		pbs = append(pbs, it.pb)
 	}
 	w.objs[key] = obj
-	operation := core.CommitSegment{SegmentKey: key, Batches: pbs}
+	operation := contract.CommitSegment{SegmentKey: key, Batches: pbs}
 	d := w.cp.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 	if d.Err != core.OK {
 		panic(fmt.Sprintf("spec CP refused a commit: %v", d.Err))
 	}
-	as := d.Resp.(core.CommitSegmentResp).Assigned
+	as := d.Resp.(contract.CommitSegmentResp).Assigned
 	if replay {
 		w.st.replays++
 		d2 := w.cp.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
-		if d2.Err != core.OK || !slices.Equal(d2.Resp.(core.CommitSegmentResp).Assigned, as) {
+		if d2.Err != core.OK || !slices.Equal(d2.Resp.(contract.CommitSegmentResp).Assigned, as) {
 			panic("spec CP: a replayed commit did not return the original answer")
 		}
 	}
@@ -284,7 +285,7 @@ func (w *world) commit(items []*item, replay bool) []core.BatchRange {
 		panic(fmt.Sprintf("spec CP assigned %d ranges for %d batches", len(as), len(items)))
 	}
 	for topicPartition := range touched { // map order is irrelevant: independent entries
-		lk := w.cp.Exec(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: topicPartition}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
+		lk := w.cp.Exec(core.ControlPlaneCall{Op: contract.FindSegments{TopicPartition: topicPartition}}).(core.ControlPlaneDone).Resp.(contract.FindSegmentsResp)
 		w.ranges[topicPartition] = lk.Ranges
 		if lk.End != w.parts[topicPartition].HighWatermark() {
 			panic("Broker end != CP end")
@@ -301,7 +302,7 @@ func valBytes(vs []string) [][]byte {
 	return out
 }
 
-func (w *world) ack(b *broker, rg core.BatchRange, it *item) {
+func (w *world) ack(b *broker, rg contract.BatchRange, it *item) {
 	w.emit(b.ref, machine.Fact{Name: "produce_acked", Fields: []machine.Field{
 		{Key: "topic", Value: machine.StringValue(rg.TopicPartition.Topic)}, {Key: "partition", Value: machine.Int64Value(rg.TopicPartition.Partition)},
 		{Key: "base_offset", Value: machine.Int64Value(rg.Base)}, {Key: "count", Value: machine.Int64Value(rg.Count)},

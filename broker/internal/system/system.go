@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -21,7 +22,7 @@ type ObjectStore interface {
 
 // ControlPlane is the HTTP client adapter for the control plane.
 type ControlPlane interface {
-	Call(ctx context.Context, operation core.ControlPlaneOperation) (core.ControlPlaneResponse, error)
+	Call(ctx context.Context, operation contract.Operation) (contract.Response, error)
 }
 
 // Connections writes to and closes accepted connections. Writes on one connection

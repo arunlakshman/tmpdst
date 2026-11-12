@@ -1,7 +1,7 @@
 # broker
 
 The Kafka-protocol broker (Go). It is a module of the MDS monorepo. It uses the control plane
-through the client in `internal/cpclient`. It imports `dst`, `shared` and `controlplane`.
+through the client in `controlplane/client`. It imports `dst`, `shared` and `controlplane`.
 
 ## Bootstrap
 

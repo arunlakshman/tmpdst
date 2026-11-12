@@ -10,6 +10,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/broker/internal/system/s3store"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specsystem"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -106,10 +107,10 @@ func TestClassifierRoutes(t *testing.T) {
 // slowCP answers after d, or with the call's context error.
 type slowCP struct{ d time.Duration }
 
-func (s slowCP) Call(ctx context.Context, _ core.ControlPlaneOperation) (core.ControlPlaneResponse, error) {
+func (s slowCP) Call(ctx context.Context, _ contract.Operation) (contract.Response, error) {
 	select {
 	case <-time.After(s.d):
-		return core.GroupLeaveResp{}, nil
+		return contract.GroupLeaveResp{}, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -122,12 +123,12 @@ func TestControlPlaneCallOwnTimeout(t *testing.T) {
 	cls := Classifier{Objects: MemoryErrorClassifier{}, CP: MemoryErrorClassifier{}}
 	e := NewExecutor(t.Context(), ExecConfig{CPTimeout: 10 * time.Millisecond}, nil, slowCP{d: 60 * time.Millisecond}, nilConns{}, cls, in)
 
-	e.Execute(core.ControlPlaneCall{Req: 1, Op: core.GroupLeave{Group: "g"}}) // default 10 ms: too slow
+	e.Execute(core.ControlPlaneCall{Req: 1, Op: contract.GroupLeave{Group: "g"}}) // default 10 ms: too slow
 	if d := wait(t, in).(core.ControlPlaneDone); d.Req != 1 || d.Err == core.OK {
 		t.Errorf("default deadline: %+v, want a failure", d)
 	}
 
-	e.Execute(core.ControlPlaneCall{Req: 2, Op: core.GroupLeave{Group: "g"}, Timeout: machine.Duration(time.Second)})
+	e.Execute(core.ControlPlaneCall{Req: 2, Op: contract.GroupLeave{Group: "g"}, Timeout: machine.Duration(time.Second)})
 	if d := wait(t, in).(core.ControlPlaneDone); d.Req != 2 || d.Err != core.OK {
 		t.Errorf("own deadline: %+v, want OK", d)
 	}

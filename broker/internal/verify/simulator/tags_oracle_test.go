@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -36,7 +37,7 @@ func (h *stateHasher) oldSegmentRef(s core.SegmentRef) {
 	h.Int64(s.Len)
 }
 
-func (h *stateHasher) oldBatchRange(b core.BatchRange) {
+func (h *stateHasher) oldBatchRange(b contract.BatchRange) {
 	h.String(b.TopicPartition.Topic)
 	h.Uint64(uint64(uint32(b.TopicPartition.Partition)))
 	h.Int64(int64(b.Base))
@@ -210,11 +211,11 @@ func (h *stateHasher) oldActionIO(a core.Action) {
 }
 
 // controlPlaneOperation folds an op; nil is tag 200.
-func (h *stateHasher) oldControlPlaneOperation(operation core.ControlPlaneOperation) {
+func (h *stateHasher) oldControlPlaneOperation(operation contract.Operation) {
 	switch x := operation.(type) {
 	case nil:
 		h.Uint64(200)
-	case core.CommitSegment:
+	case contract.CommitSegment:
 		h.Uint64(202)
 		h.String(x.SegmentKey)
 		h.Uint64(uint64(len(x.Batches)))
@@ -224,19 +225,19 @@ func (h *stateHasher) oldControlPlaneOperation(operation core.ControlPlaneOperat
 			h.Int64(b.Records)
 			h.oldSegmentRef(b.Loc)
 		}
-	case core.FindSegments:
+	case contract.FindSegments:
 		h.Uint64(203)
 		h.String(x.TopicPartition.Topic)
 		h.Uint64(uint64(uint32(x.TopicPartition.Partition)))
 		h.Int64(int64(x.From))
 		h.Uint64(uint64(uint32(x.MaxBytes)))
-	case core.DescribeTopics:
+	case contract.DescribeTopics:
 		h.Uint64(204)
 		h.Uint64(uint64(len(x.Topics)))
 		for _, t := range x.Topics {
 			h.String(t)
 		}
-	case core.CreateTopic:
+	case contract.CreateTopic:
 		tag := uint64(205) // an exclusive create has its own tag; plain creates keep theirs
 		if x.FailIfExists {
 			tag = 218
@@ -252,24 +253,24 @@ func (h *stateHasher) oldControlPlaneOperation(operation core.ControlPlaneOperat
 }
 
 // controlPlaneResponse folds a response; nil (an error completion) is tag 300.
-func (h *stateHasher) oldControlPlaneResponse(r core.ControlPlaneResponse) {
+func (h *stateHasher) oldControlPlaneResponse(r contract.Response) {
 	switch x := r.(type) {
 	case nil:
 		h.Uint64(300)
-	case core.CommitSegmentResp:
+	case contract.CommitSegmentResp:
 		h.Uint64(302)
 		h.Uint64(uint64(len(x.Assigned)))
 		for _, b := range x.Assigned {
 			h.oldBatchRange(b)
 		}
-	case core.FindSegmentsResp:
+	case contract.FindSegmentsResp:
 		h.Uint64(303)
 		h.Uint64(uint64(len(x.Ranges)))
 		for _, b := range x.Ranges {
 			h.oldBatchRange(b)
 		}
 		h.Int64(int64(x.End))
-	case core.DescribeTopicsResp:
+	case contract.DescribeTopicsResp:
 		h.Uint64(304)
 		h.Uint64(uint64(len(x.Topics)))
 		for _, t := range x.Topics {
@@ -316,7 +317,7 @@ func (h *stateHasher) oldFact(f machine.Fact) {
 }
 
 // partitionOffset folds one committed offset (a group write or read).
-func (h *stateHasher) oldPartitionOffset(o core.PartitionOffset) {
+func (h *stateHasher) oldPartitionOffset(o contract.PartitionOffset) {
 	h.String(o.TopicPartition.Topic)
 	h.Uint64(uint64(uint32(o.TopicPartition.Partition)))
 	h.Int64(o.Offset)
@@ -325,7 +326,7 @@ func (h *stateHasher) oldPartitionOffset(o core.PartitionOffset) {
 }
 
 // groupMember folds the fields of a member that a join or a describe both carry.
-func (h *stateHasher) oldGroupMember(m core.GroupMember) {
+func (h *stateHasher) oldGroupMember(m contract.GroupMember) {
 	h.String(m.MemberID)
 	h.String(m.ClientID)
 	h.String(m.ClientHost)
@@ -336,9 +337,9 @@ func (h *stateHasher) oldGroupMember(m core.GroupMember) {
 }
 
 // controlPlaneGroupOperation folds a group operation. It reports false for other operations.
-func (h *stateHasher) oldControlPlaneGroupOperation(operation core.ControlPlaneOperation) bool {
+func (h *stateHasher) oldControlPlaneGroupOperation(operation contract.Operation) bool {
 	switch x := operation.(type) {
-	case core.GroupInstall:
+	case contract.GroupInstall:
 		h.Uint64(206)
 		h.String(x.Group)
 		h.String(x.ProtocolType)
@@ -350,7 +351,7 @@ func (h *stateHasher) oldControlPlaneGroupOperation(operation core.ControlPlaneO
 		for _, m := range x.Members {
 			h.oldGroupMember(m)
 		}
-	case core.GroupAssign:
+	case contract.GroupAssign:
 		h.Uint64(207)
 		h.String(x.Group)
 		h.Int64(int64(x.Generation))
@@ -361,7 +362,7 @@ func (h *stateHasher) oldControlPlaneGroupOperation(operation core.ControlPlaneO
 			h.String(a.Member)
 			h.String(string(a.Bytes))
 		}
-	case core.GroupRemove:
+	case contract.GroupRemove:
 		h.Uint64(208)
 		h.String(x.Group)
 		h.Int64(x.TimeMs)
@@ -370,7 +371,7 @@ func (h *stateHasher) oldControlPlaneGroupOperation(operation core.ControlPlaneO
 		for _, m := range x.Members {
 			h.String(m)
 		}
-	case core.OffsetCommit:
+	case contract.OffsetCommit:
 		h.Uint64(209)
 		h.String(x.Group)
 		h.String(x.Member)
@@ -388,9 +389,9 @@ func (h *stateHasher) oldControlPlaneGroupOperation(operation core.ControlPlaneO
 
 // controlPlaneGroupCall folds a broker group call to the control plane (decision Q3).
 // It reports false for other operations.
-func (h *stateHasher) oldControlPlaneGroupCall(operation core.ControlPlaneOperation) bool {
+func (h *stateHasher) oldControlPlaneGroupCall(operation contract.Operation) bool {
 	switch x := operation.(type) {
-	case core.GroupJoin:
+	case contract.GroupJoin:
 		h.Uint64(213)
 		h.String(x.Group)
 		h.String(x.MemberID)
@@ -403,7 +404,7 @@ func (h *stateHasher) oldControlPlaneGroupCall(operation core.ControlPlaneOperat
 			h.String(p.Name)
 			h.String(string(p.Metadata))
 		}
-	case core.GroupSync:
+	case contract.GroupSync:
 		h.Uint64(214)
 		h.String(x.Group)
 		h.String(x.MemberID)
@@ -413,19 +414,19 @@ func (h *stateHasher) oldControlPlaneGroupCall(operation core.ControlPlaneOperat
 			h.String(a.Member)
 			h.String(string(a.Bytes))
 		}
-	case core.GroupHeartbeat:
+	case contract.GroupHeartbeat:
 		h.Uint64(215)
 		h.String(x.Group)
 		h.String(x.MemberID)
 		h.Int64(int64(x.Generation))
-	case core.GroupLeave:
+	case contract.GroupLeave:
 		h.Uint64(216)
 		h.String(x.Group)
 		h.Uint64(uint64(len(x.Members)))
 		for _, m := range x.Members {
 			h.String(m)
 		}
-	case core.DescribeGroups:
+	case contract.DescribeGroups:
 		h.Uint64(217)
 		h.Uint64(uint64(len(x.Groups)))
 		for _, g := range x.Groups {
@@ -438,9 +439,9 @@ func (h *stateHasher) oldControlPlaneGroupCall(operation core.ControlPlaneOperat
 }
 
 // controlPlaneGroupRead folds a group read. It reports false for other operations.
-func (h *stateHasher) oldControlPlaneGroupRead(operation core.ControlPlaneOperation) bool {
+func (h *stateHasher) oldControlPlaneGroupRead(operation contract.Operation) bool {
 	switch x := operation.(type) {
-	case core.OffsetFetch:
+	case contract.OffsetFetch:
 		h.Uint64(210)
 		h.String(x.Group)
 		h.Uint64(uint64(len(x.Partitions)))
@@ -448,10 +449,10 @@ func (h *stateHasher) oldControlPlaneGroupRead(operation core.ControlPlaneOperat
 			h.String(topicPartition.Topic)
 			h.Uint64(uint64(uint32(topicPartition.Partition)))
 		}
-	case core.DescribeGroup:
+	case contract.DescribeGroup:
 		h.Uint64(211)
 		h.String(x.Group)
-	case core.ListGroups:
+	case contract.ListGroups:
 		h.Uint64(212)
 	default:
 		return false
@@ -460,21 +461,21 @@ func (h *stateHasher) oldControlPlaneGroupRead(operation core.ControlPlaneOperat
 }
 
 // controlPlaneGroupResponse folds a group response. It reports false for other responses.
-func (h *stateHasher) oldControlPlaneGroupResponse(r core.ControlPlaneResponse) bool {
+func (h *stateHasher) oldControlPlaneGroupResponse(r contract.Response) bool {
 	switch x := r.(type) {
-	case core.OffsetCommitResp:
+	case contract.OffsetCommitResp:
 		h.Uint64(305)
 		h.Uint64(uint64(len(x.Errs)))
 		for _, c := range x.Errs {
 			h.Uint64(uint64(c))
 		}
-	case core.OffsetFetchResp:
+	case contract.OffsetFetchResp:
 		h.Uint64(306)
 		h.Uint64(uint64(len(x.Offsets)))
 		for _, o := range x.Offsets {
 			h.oldPartitionOffset(o)
 		}
-	case core.DescribeGroupResp:
+	case contract.DescribeGroupResp:
 		h.Uint64(307)
 		h.Uint64(map[bool]uint64{false: 0, true: 1}[x.Exists])
 		h.Int64(int64(x.Generation))
@@ -489,7 +490,7 @@ func (h *stateHasher) oldControlPlaneGroupResponse(r core.ControlPlaneResponse) 
 			h.Int64(m.JoinedTimeMs)
 			h.String(string(m.Assignment))
 		}
-	case core.ListGroupsResp:
+	case contract.ListGroupsResp:
 		h.Uint64(308)
 		h.Uint64(uint64(len(x.Groups)))
 		for _, g := range x.Groups {
@@ -505,9 +506,9 @@ func (h *stateHasher) oldControlPlaneGroupResponse(r core.ControlPlaneResponse) 
 
 // controlPlaneGroupCallResponse folds the answers of the broker group calls. It reports false
 // for other responses.
-func (h *stateHasher) oldControlPlaneGroupCallResponse(r core.ControlPlaneResponse) bool {
+func (h *stateHasher) oldControlPlaneGroupCallResponse(r contract.Response) bool {
 	switch x := r.(type) {
-	case core.GroupJoinResp:
+	case contract.GroupJoinResp:
 		h.Uint64(309)
 		h.Int64(int64(x.Generation))
 		h.String(x.Protocol)
@@ -519,16 +520,16 @@ func (h *stateHasher) oldControlPlaneGroupCallResponse(r core.ControlPlaneRespon
 			h.String(m.GroupInstanceID)
 			h.String(string(m.Metadata))
 		}
-	case core.GroupSyncResp:
+	case contract.GroupSyncResp:
 		h.Uint64(310)
 		h.String(string(x.Assignment))
-	case core.GroupLeaveResp:
+	case contract.GroupLeaveResp:
 		h.Uint64(311)
 		h.Uint64(uint64(len(x.Errs)))
 		for _, c := range x.Errs {
 			h.Uint64(uint64(c))
 		}
-	case core.DescribeGroupsResp:
+	case contract.DescribeGroupsResp:
 		h.Uint64(312)
 		h.Uint64(uint64(len(x.Groups)))
 		for _, g := range x.Groups {

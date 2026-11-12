@@ -4,32 +4,33 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // otherOp is an operation that Exec does not know. The embedded interface
 // gives it the marker method, and Exec never calls any method on it.
-type otherOp struct{ core.ControlPlaneOperation }
+type otherOp struct{ contract.Operation }
 
 // TestExecDispatch checks that Exec routes every operation kind to its rule.
 func TestExecDispatch(t *testing.T) {
 	c := newGroupControl(t)
 	cases := []struct {
 		name      string
-		operation core.ControlPlaneOperation
+		operation contract.Operation
 		want      core.ErrCode
 		outcome   core.Outcome
 	}{
-		{"commit", core.CommitSegment{SegmentKey: "s", Batches: []core.PendingBatch{pb("orders", 0, 2)}}, core.OK, core.Applied},
-		{"lookup", core.FindSegments{TopicPartition: tp("orders", 0), From: -1}, core.ErrInvalid, core.NotApplied},
-		{"describe topics", core.DescribeTopics{}, core.OK, core.NotApplied},
-		{"create topic", core.CreateTopic{Name: "n", Partitions: 1}, core.OK, core.Applied},
+		{"commit", contract.CommitSegment{SegmentKey: "s", Batches: []contract.PendingBatch{pb("orders", 0, 2)}}, core.OK, core.Applied},
+		{"lookup", contract.FindSegments{TopicPartition: tp("orders", 0), From: -1}, core.ErrInvalid, core.NotApplied},
+		{"describe topics", contract.DescribeTopics{}, core.OK, core.NotApplied},
+		{"create topic", contract.CreateTopic{Name: "n", Partitions: 1}, core.OK, core.Applied},
 		{"group install", gInstall("g", 1, "m1", "m1"), core.OK, core.Applied},
 		{"group assign with no group", gAssign("nope", 0, "m1", "m1", "a"), core.ErrUnknownMember, core.NotApplied},
 		{"group remove", gRemove("g", "leave", "m1"), core.OK, core.Applied},
 		{"offset commit with no group", gCommit("nope", "m1", 1, gPair("orders", 0, 1)), core.ErrUnknownMember, core.NotApplied},
-		{"offset fetch", core.OffsetFetch{Group: "g"}, core.OK, core.NotApplied},
-		{"describe group", core.DescribeGroup{Group: "g"}, core.OK, core.NotApplied},
-		{"list groups", core.ListGroups{}, core.OK, core.NotApplied},
+		{"offset fetch", contract.OffsetFetch{Group: "g"}, core.OK, core.NotApplied},
+		{"describe group", contract.DescribeGroup{Group: "g"}, core.OK, core.NotApplied},
+		{"list groups", contract.ListGroups{}, core.OK, core.NotApplied},
 		{"unknown operation", otherOp{}, core.ErrInvalid, core.NotApplied},
 	}
 	for _, tc := range cases {
@@ -38,7 +39,7 @@ func TestExecDispatch(t *testing.T) {
 			t.Fatalf("%s: err %v outcome %v, want %v %v", tc.name, d.Err, d.Outcome, tc.want, tc.outcome)
 		}
 	}
-	if d := call(c, core.DescribeTopics{}); d.Resp.(core.DescribeTopicsResp).Topics == nil {
+	if d := call(c, contract.DescribeTopics{}); d.Resp.(contract.DescribeTopicsResp).Topics == nil {
 		t.Fatal("describe topics lost its answer")
 	}
 }
@@ -48,30 +49,30 @@ func TestExecDispatch(t *testing.T) {
 // topic is OK and only grows the topic.
 func TestExecCreateTopicFailIfExists(t *testing.T) {
 	c := NewControlPlane()
-	if d := call(c, core.CreateTopic{Name: "t", Partitions: 2, FailIfExists: true}); d.Err != core.OK || d.Outcome != core.Applied {
+	if d := call(c, contract.CreateTopic{Name: "t", Partitions: 2, FailIfExists: true}); d.Err != core.OK || d.Outcome != core.Applied {
 		t.Fatalf("new topic: %+v", d)
 	}
 	h := c.StateHash()
-	if d := call(c, core.CreateTopic{Name: "t", Partitions: 4, FailIfExists: true}); d.Err != core.ErrTopicExists || d.Outcome != core.NotApplied {
+	if d := call(c, contract.CreateTopic{Name: "t", Partitions: 4, FailIfExists: true}); d.Err != core.ErrTopicExists || d.Outcome != core.NotApplied {
 		t.Fatalf("exists: %+v", d)
 	}
 	if c.StateHash() != h {
 		t.Fatal("a refused exclusive create changed the state")
 	}
-	if d := call(c, core.CreateTopic{Name: "t", Partitions: 4}); d.Err != core.OK || d.Outcome != core.Applied {
+	if d := call(c, contract.CreateTopic{Name: "t", Partitions: 4}); d.Err != core.OK || d.Outcome != core.Applied {
 		t.Fatalf("plain create of an existing topic: %+v", d)
 	}
-	if d := call(c, core.CreateTopic{Name: "t", Partitions: 3}); d.Err != core.OK {
+	if d := call(c, contract.CreateTopic{Name: "t", Partitions: 3}); d.Err != core.OK {
 		t.Fatalf("a smaller plain create: %+v", d)
 	}
-	if d := call(c, core.CreateTopic{Name: "", Partitions: 1, FailIfExists: true}); d.Err != core.ErrInvalid || d.Outcome != core.NotApplied {
+	if d := call(c, contract.CreateTopic{Name: "", Partitions: 1, FailIfExists: true}); d.Err != core.ErrInvalid || d.Outcome != core.NotApplied {
 		t.Fatalf("empty name with the flag: %+v", d)
 	}
-	if d := call(c, core.CreateTopic{Name: "t", Partitions: 0}); d.Err != core.ErrInvalid {
+	if d := call(c, contract.CreateTopic{Name: "t", Partitions: 0}); d.Err != core.ErrInvalid {
 		t.Fatalf("zero partitions: %+v", d)
 	}
-	got := call(c, core.DescribeTopics{Topics: []string{"t"}}).Resp.(core.DescribeTopicsResp).Topics
-	if len(got) != 1 || got[0] != (core.TopicInfo{Name: "t", Partitions: 4}) {
+	got := call(c, contract.DescribeTopics{Topics: []string{"t"}}).Resp.(contract.DescribeTopicsResp).Topics
+	if len(got) != 1 || got[0] != (contract.TopicInfo{Name: "t", Partitions: 4}) {
 		t.Fatalf("topics %+v, want t with 4 partitions", got)
 	}
 }

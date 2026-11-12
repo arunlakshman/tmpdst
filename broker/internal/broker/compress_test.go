@@ -7,8 +7,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)
@@ -72,7 +72,7 @@ func TestCompressedBatchesStoredVerbatimMixedSegment(t *testing.T) {
 		}
 		want += int64(bt.NumRecords)
 	}
-	p := fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)))
+	p := fetched(h.call(c, verFetch, fetchReq(contract.NewTopicPartition("t", 0), 0, 1<<20)))
 	got, err := kafkawire.SplitBatches(p.RecordBatches)
 	if err != nil || len(got) != len(batches) || p.HighWatermark != want {
 		t.Fatalf("fetch: %v, %d batches, hwm %d (want %d)", err, len(got), p.HighWatermark, want)
@@ -115,7 +115,7 @@ func TestCompressedBatchRejections(t *testing.T) {
 			t.Errorf("partition %d: error %d, want %d", i, ps[i].ErrorCode, w)
 		}
 	}
-	if end := h.cp.End(core.NewTopicPartition("t", 0)); end != 2 {
+	if end := h.cp.End(contract.NewTopicPartition("t", 0)); end != 2 {
 		t.Fatalf("end offset %d: a rejected batch was stored", end)
 	}
 	h.noViolations()
@@ -136,7 +136,7 @@ func TestFetchLimitsWithLargeCompressedBatches(t *testing.T) {
 	h.flush()
 	h.next(c)
 	count := func(max int32) int {
-		bs, err := kafkawire.SplitBatches(fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, max))).RecordBatches)
+		bs, err := kafkawire.SplitBatches(fetched(h.call(c, verFetch, fetchReq(contract.NewTopicPartition("t", 0), 0, max))).RecordBatches)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -151,7 +151,7 @@ func TestFetchLimitsWithLargeCompressedBatches(t *testing.T) {
 	if n := count(1 << 20); n != 3 {
 		t.Fatalf("no limit: %d", n)
 	}
-	r := fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)
+	r := fetchReq(contract.NewTopicPartition("t", 0), 0, 1<<20)
 	r.MaxBytes = 6000 // request limit: the first partition's data is kept whole
 	if p := fetched(h.call(c, verFetch, r)); len(p.RecordBatches) == 0 {
 		t.Fatal("first partition dropped by the request limit")
@@ -175,7 +175,7 @@ func TestLargeProduceRequest(t *testing.T) {
 	if ps[0].ErrorCode != 0 || ps[0].BaseOffset != 0 {
 		t.Fatalf("%+v", ps[0])
 	}
-	p := fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1)))
+	p := fetched(h.call(c, verFetch, fetchReq(contract.NewTopicPartition("t", 0), 0, 1)))
 	if len(p.RecordBatches) != len(big) || p.HighWatermark != 500000 || !sameButOffset(p.RecordBatches, big) {
 		t.Fatalf("fetched %d bytes, hwm %d", len(p.RecordBatches), p.HighWatermark)
 	}

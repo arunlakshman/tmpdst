@@ -10,6 +10,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/machine"
@@ -100,7 +101,7 @@ type harness struct {
 	paused  map[core.ConnID]bool
 	closed  map[core.ConnID]bool
 	exited  bool
-	cpCalls []core.ControlPlaneOperation
+	cpCalls []contract.Operation
 	puts    []string
 }
 
@@ -336,7 +337,7 @@ type ent struct {
 }
 
 func e(topic string, part int32, rec []byte) ent {
-	return ent{topicPartition: core.NewTopicPartition(topic, part), rec: rec}
+	return ent{topicPartition: contract.NewTopicPartition(topic, part), rec: rec}
 }
 
 func prodReq(acks int16, es ...ent) *kmsg.ProduceRequest {

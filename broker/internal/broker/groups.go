@@ -6,6 +6,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -52,7 +53,7 @@ func (b *Broker) dispatchGroup(s *slot, request core.Request) ([]core.Action, bo
 
 // groupCall starts one group call as a part of slot s. fill writes the answer
 // into the response when the control plane replies. timeout 0 takes the default.
-func (b *Broker) groupCall(s *slot, controlPlaneOperation core.ControlPlaneOperation, timeout machine.Duration, fill func(core.ControlPlaneDone)) []core.Action {
+func (b *Broker) groupCall(s *slot, controlPlaneOperation contract.Operation, timeout machine.Duration, fill func(core.ControlPlaneDone)) []core.Action {
 	return b.startOp(&operation{kind: opGroup, s: s, gop: controlPlaneOperation, gtimeout: timeout, gfill: fill})
 }
 
@@ -113,20 +114,20 @@ func (b *Broker) joinGroup(s *slot, r *kmsg.JoinGroupRequest) []core.Action {
 	if r.Version == 0 {
 		rebalance = r.SessionTimeoutMillis
 	}
-	call := core.GroupJoin{
+	call := contract.GroupJoin{
 		Group: r.Group, MemberID: r.MemberID, GroupInstanceID: derefOr(r.InstanceID),
 		ClientID: s.h.ClientID, ClientHost: s.conn.host,
 		SessionTimeoutMs: r.SessionTimeoutMillis, RebalanceTimeoutMs: rebalance, ProtocolType: r.ProtocolType,
 	}
 	for _, p := range r.Protocols {
-		call.Protocols = append(call.Protocols, core.GroupProtocol{Name: p.Name, Metadata: p.Metadata})
+		call.Protocols = append(call.Protocols, contract.GroupProtocol{Name: p.Name, Metadata: p.Metadata})
 	}
 	fill := func(e core.ControlPlaneDone) {
 		response.ErrorCode = int16(groupErrCode(e.Err))
 		if e.Err != core.OK {
 			return
 		}
-		j := core.ResponseAs[core.GroupJoinResp](e)
+		j := core.ResponseAs[contract.GroupJoinResp](e)
 		response.Generation, response.LeaderID, response.MemberID = j.Generation, j.Leader, j.MemberID
 		response.ProtocolType, response.Protocol = new(r.ProtocolType), new(j.Protocol)
 		for _, m := range j.Members {
@@ -147,14 +148,14 @@ func (b *Broker) syncGroup(s *slot, r *kmsg.SyncGroupRequest) []core.Action {
 		response.ErrorCode = int16(errInvalidGroupID)
 		return nil
 	}
-	call := core.GroupSync{Group: r.Group, MemberID: r.MemberID, Generation: r.Generation}
+	call := contract.GroupSync{Group: r.Group, MemberID: r.MemberID, Generation: r.Generation}
 	for _, a := range r.GroupAssignment {
-		call.Assignments = append(call.Assignments, core.GroupAssignment{Member: a.MemberID, Bytes: a.MemberAssignment})
+		call.Assignments = append(call.Assignments, contract.GroupAssignment{Member: a.MemberID, Bytes: a.MemberAssignment})
 	}
 	fill := func(e core.ControlPlaneDone) {
 		response.ErrorCode = int16(groupErrCode(e.Err))
 		if e.Err == core.OK {
-			response.MemberAssignment = core.ResponseAs[core.GroupSyncResp](e).Assignment
+			response.MemberAssignment = core.ResponseAs[contract.GroupSyncResp](e).Assignment
 			response.ProtocolType, response.Protocol = r.ProtocolType, r.Protocol
 		}
 	}
@@ -170,7 +171,7 @@ func (b *Broker) heartbeat(s *slot, r *kmsg.HeartbeatRequest) []core.Action {
 		response.ErrorCode = int16(errInvalidGroupID)
 		return nil
 	}
-	call := core.GroupHeartbeat{Group: r.Group, MemberID: r.MemberID, Generation: r.Generation}
+	call := contract.GroupHeartbeat{Group: r.Group, MemberID: r.MemberID, Generation: r.Generation}
 	fill := func(e core.ControlPlaneDone) { response.ErrorCode = int16(groupErrCode(e.Err)) }
 	return b.groupCall(s, call, 0, fill)
 }
@@ -197,9 +198,9 @@ func (b *Broker) leaveGroup(s *slot, r *kmsg.LeaveGroupRequest) []core.Action {
 	if len(names) == 0 {
 		return nil
 	}
-	call := core.GroupLeave{Group: r.Group, Members: names}
+	call := contract.GroupLeave{Group: r.Group, Members: names}
 	fill := func(e core.ControlPlaneDone) {
-		codes := core.ResponseAs[core.GroupLeaveResp](e).Errs
+		codes := core.ResponseAs[contract.GroupLeaveResp](e).Errs
 		for i := range response.Members {
 			response.Members[i].ErrorCode = int16(groupErrCode(leaveCode(e, codes, i)))
 		}

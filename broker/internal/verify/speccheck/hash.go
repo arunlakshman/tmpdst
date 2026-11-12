@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/trace"
 )
 
@@ -18,7 +19,7 @@ func hashTopicPartition(h *stateHasher, topicPartition core.TopicPartition) {
 	h.Uint64(uint64(topicPartition.Partition))
 }
 
-func hashBatchRanges(h *stateHasher, rs []core.BatchRange) {
+func hashBatchRanges(h *stateHasher, rs []contract.BatchRange) {
 	h.Uint64(uint64(len(rs)))
 	for _, r := range rs {
 		hashTopicPartition(h, r.TopicPartition)

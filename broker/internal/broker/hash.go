@@ -2,6 +2,7 @@ package broker
 
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/trace"
 )
 
@@ -68,7 +69,7 @@ func (b *Broker) hashScalars(h *stateHasher) {
 	h.u64(b.guess)
 }
 
-func (h *stateHasher) topics(topics []core.TopicInfo) {
+func (h *stateHasher) topics(topics []contract.TopicInfo) {
 	h.u64(uint64(len(topics)))
 	for _, t := range topics {
 		h.str(t.Name)

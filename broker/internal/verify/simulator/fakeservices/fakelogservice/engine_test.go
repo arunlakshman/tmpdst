@@ -7,6 +7,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakelogservice"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -47,7 +48,7 @@ func TestBridgeUnavailableWithoutCP(t *testing.T) {
 	c.Crash("cp-0")
 	c.Crash("cp-1")
 	broker := fakeservicetest.Ref("broker-0")
-	e.Execute(c, broker, core.ControlPlaneCall{Req: 1, Op: core.FindSegments{TopicPartition: core.NewTopicPartition("t", 0)}})
+	e.Execute(c, broker, core.ControlPlaneCall{Req: 1, Op: contract.FindSegments{TopicPartition: contract.NewTopicPartition("t", 0)}})
 	c.Run()
 	if len(c.Delivered) != 1 {
 		t.Fatalf("got %d %#v", len(c.Delivered), c.Delivered)
@@ -65,7 +66,7 @@ func TestBridgeOfferAndReply(t *testing.T) {
 	e := fakelogservice.New(f)
 	c := fakeservicetest.New(e, 2)
 	broker := fakeservicetest.Ref("broker-0")
-	e.Execute(c, broker, core.ControlPlaneCall{Req: 7, Op: core.DescribeTopics{}})
+	e.Execute(c, broker, core.ControlPlaneCall{Req: 7, Op: contract.DescribeTopics{}})
 	c.RunUntil(simulator.Time(10 * ms))
 	var offer core.ControlPlaneDeliver
 	found := false
@@ -100,7 +101,7 @@ func TestBridgeFaultCoins(t *testing.T) {
 	e := fakelogservice.New(f)
 	c := fakeservicetest.New(e, 3)
 	broker := fakeservicetest.Ref("b")
-	e.Execute(c, broker, core.ControlPlaneCall{Req: 1, Op: core.FindSegments{}})
+	e.Execute(c, broker, core.ControlPlaneCall{Req: 1, Op: contract.FindSegments{}})
 	c.Run()
 	d := c.Delivered[0].Body.(core.ControlPlaneDone)
 	if d.Err != core.ErrUnavailable || d.Outcome != core.NotApplied {
@@ -119,7 +120,7 @@ func TestBridgeLostReplyStillTimesOut(t *testing.T) {
 	e := fakelogservice.New(f)
 	c := fakeservicetest.New(e, 5)
 	broker := fakeservicetest.Ref("broker-0")
-	e.Execute(c, broker, core.ControlPlaneCall{Req: 9, Op: core.FindSegments{}})
+	e.Execute(c, broker, core.ControlPlaneCall{Req: 9, Op: contract.FindSegments{}})
 	c.RunUntil(simulator.Time(10 * ms))
 	c.Delivered = nil
 	e.Execute(c, fakeservicetest.Ref("cp-0"), core.ControlPlaneReply{
@@ -144,7 +145,7 @@ func TestBridgeFailoverOnUnavailable(t *testing.T) {
 	e := fakelogservice.New(f)
 	c := fakeservicetest.New(e, 4)
 	broker := fakeservicetest.Ref("broker-1")
-	e.Execute(c, broker, core.ControlPlaneCall{Req: 3, Op: core.FindSegments{}})
+	e.Execute(c, broker, core.ControlPlaneCall{Req: 3, Op: contract.FindSegments{}})
 	c.RunUntil(simulator.Time(10 * ms))
 	c.Delivered = nil
 	e.Execute(c, fakeservicetest.Ref("cp-0"), core.ControlPlaneReply{

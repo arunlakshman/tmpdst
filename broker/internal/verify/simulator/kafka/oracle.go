@@ -6,6 +6,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 )
@@ -124,7 +125,7 @@ func (o *expectedLogChecker) acks(v simulator.View) {
 		}
 		det := []assert.Pair{{Key: "tp", Value: string(topic) + "/" + strconv.Itoa(int(part))}, {Key: "base", Value: int64(base)},
 			{Key: "count", Value: int64(count)}, {Key: "node", Value: string(tf.Source.Node)}}
-		ti, known := o.idx[core.NewTopicPartition(string(topic), int32(part))]
+		ti, known := o.idx[contract.NewTopicPartition(string(topic), int32(part))]
 		bi, found := -1, false
 		if known {
 			bi, found = o.logs[ti].byBase[int64(base)]

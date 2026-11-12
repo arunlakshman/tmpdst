@@ -7,6 +7,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakeservicetest"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -99,7 +100,7 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 		Name: "cp", Prefix: "cp", Params: params(),
 		Spec: func(a core.IOCall) core.IOResult { return spec.Exec(a) },
 		Mutating: func(a core.IOCall) bool {
-			_, ok := a.(core.ControlPlaneCall).Op.(core.CommitSegment)
+			_, ok := a.(core.ControlPlaneCall).Op.(contract.CommitSegment)
 			return ok
 		},
 		Fail: func(a core.IOCall, err core.ErrCode, o core.Outcome) core.IOResult {
@@ -111,7 +112,7 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 	ctx := fakeservicetest.New(stub{c}, 6)
 	r := simulator.NewRand(77)
 	nodes := []machine.NodeInstance{fakeservicetest.Ref("a"), fakeservicetest.Ref("b"), fakeservicetest.Ref("c")}
-	tps := []core.TopicPartition{core.NewTopicPartition("t", 0), core.NewTopicPartition("t", 1)}
+	tps := []core.TopicPartition{contract.NewTopicPartition("t", 0), contract.NewTopicPartition("t", 1)}
 	for _, topicPartition := range tps[:1] {
 		if spec.CreateTopic(topicPartition.Topic, 2) == core.OK {
 			c.Bump()
@@ -127,12 +128,12 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 		switch r.Between(0, 2) {
 		case 0:
 			// Keys repeat (replays, and conflicts when the request differs).
-			c.Execute(ctx, n, core.ControlPlaneCall{Req: request, Op: core.CommitSegment{
+			c.Execute(ctx, n, core.ControlPlaneCall{Req: request, Op: contract.CommitSegment{
 				SegmentKey: string(rune('a' + r.Between(0, 8))),
-				Batches:    []core.PendingBatch{{TopicPartition: tps[r.Between(0, 2)], Records: 1 + r.Between(0, 3)}},
+				Batches:    []contract.PendingBatch{{TopicPartition: tps[r.Between(0, 2)], Records: 1 + r.Between(0, 3)}},
 			}})
 		default:
-			c.Execute(ctx, n, core.ControlPlaneCall{Req: request, Op: core.FindSegments{TopicPartition: tps[0]}})
+			c.Execute(ctx, n, core.ControlPlaneCall{Req: request, Op: contract.FindSegments{TopicPartition: tps[0]}})
 		}
 		if r.Chance(0.3) {
 			ctx.Run()

@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 func sample() []Batch {
 	return []Batch{
-		{core.NewTopicPartition("orders", 0), 3, []byte("hello")},
-		{core.NewTopicPartition("orders", 7), 1, []byte("x")},
-		{core.NewTopicPartition("t/\u00e9", 2), 9, bytes.Repeat([]byte{0xAB}, 40)},
+		{contract.NewTopicPartition("orders", 0), 3, []byte("hello")},
+		{contract.NewTopicPartition("orders", 7), 1, []byte("x")},
+		{contract.NewTopicPartition("t/\u00e9", 2), 9, bytes.Repeat([]byte{0xAB}, 40)},
 	}
 }
 
@@ -70,10 +71,10 @@ func TestVerifyBatchCorrupt(t *testing.T) {
 func TestEncodeInvalid(t *testing.T) {
 	bad := [][]Batch{
 		nil,
-		{{core.NewTopicPartition("", 0), 1, []byte("x")}},
-		{{core.NewTopicPartition("t", -1), 1, []byte("x")}},
-		{{core.NewTopicPartition("t", 0), 1, nil}},
-		{{core.NewTopicPartition(string(make([]byte, 70000)), 0), 1, []byte("x")}},
+		{{contract.NewTopicPartition("", 0), 1, []byte("x")}},
+		{{contract.NewTopicPartition("t", -1), 1, []byte("x")}},
+		{{contract.NewTopicPartition("t", 0), 1, nil}},
+		{{contract.NewTopicPartition(string(make([]byte, 70000)), 0), 1, []byte("x")}},
 	}
 	for i, b := range bad {
 		if _, _, err := Encode(b); !errors.Is(err, ErrInvalid) || Code(err) != core.ErrInvalid {

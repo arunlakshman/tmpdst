@@ -4,17 +4,18 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
 // ControlPlane is the spec of the control plane as a broker sees it.
 // Wire payloads are controlplane/api/v1 messages (decision 57); this oracle
-// still steps core.ControlPlaneOperation values via ControlPlaneCall so sim and brokers keep one bridge,
+// still steps contract.Operation values via ControlPlaneCall so sim and brokers keep one bridge,
 // with apiconv at the gRPC edge. Apply logic stays unshared (decision 21).
 // Sequential, fault-free; Outcome is Applied for a state change and NotApplied
 // for errors and reads. Rules:
 //
-//	Log            A partition's log is a list of runs (core.BatchRange), each
+//	Log            A partition's log is a list of runs (contract.BatchRange), each
 //	               [Base, Base+Count). Its end offset is the newest run's
 //	               Base+Count, 0 when empty. There is no separate counter.
 //	CommitSegment  1. SegmentKey already committed: the original ranges again
@@ -44,8 +45,8 @@ import (
 // Topics can also be made with CreateTopic. Exec panics on a non-ControlPlaneCall.
 type ControlPlane struct {
 	segs   map[string]segment
-	parts  map[string]map[int32][]core.BatchRange // topic -> partition -> runs
-	topics map[string]int32                       // topic -> partition count
+	parts  map[string]map[int32][]contract.BatchRange // topic -> partition -> runs
+	topics map[string]int32                           // topic -> partition count
 
 	// segKeys is every committed segment key, sorted. segPre[i] is the
 	// StateHash state after segKeys[:i]; segPre[0] is the empty state. A
@@ -58,15 +59,15 @@ type ControlPlane struct {
 }
 
 type segment struct {
-	batches []core.PendingBatch
-	ranges  []core.BatchRange
+	batches []contract.PendingBatch
+	ranges  []contract.BatchRange
 }
 
 // NewControlPlane returns an empty control plane.
 func NewControlPlane() *ControlPlane {
 	return &ControlPlane{
 		segs:   map[string]segment{},
-		parts:  map[string]map[int32][]core.BatchRange{},
+		parts:  map[string]map[int32][]contract.BatchRange{},
 		topics: map[string]int32{},
 	}
 }
@@ -108,33 +109,33 @@ func (c *ControlPlane) Exec(a core.IOCall) core.IOResult {
 		panic("speccheck.ControlPlane: not a CPCall")
 	}
 	switch operation := call.Op.(type) {
-	case core.CommitSegment:
+	case contract.CommitSegment:
 		return c.execCommit(call.Req, operation)
-	case core.FindSegments:
+	case contract.FindSegments:
 		return c.execLookup(call.Req, operation)
-	case core.DescribeTopics:
+	case contract.DescribeTopics:
 		return c.execDescribe(call.Req, operation)
-	case core.CreateTopic:
+	case contract.CreateTopic:
 		return c.execCreate(call.Req, operation)
-	case core.GroupInstall:
+	case contract.GroupInstall:
 		return groupDone(call.Req, c.groupInstall(operation))
-	case core.GroupAssign:
+	case contract.GroupAssign:
 		return groupDone(call.Req, c.groupAssign(operation))
-	case core.GroupRemove:
+	case contract.GroupRemove:
 		return groupDone(call.Req, c.groupRemove(operation))
-	case core.OffsetCommit:
+	case contract.OffsetCommit:
 		return c.offsetCommit(call.Req, operation)
-	case core.OffsetFetch:
+	case contract.OffsetFetch:
 		return core.ControlPlaneDone{Req: call.Req, Resp: c.offsetFetch(operation)}
-	case core.DescribeGroup:
+	case contract.DescribeGroup:
 		return core.ControlPlaneDone{Req: call.Req, Resp: c.describeGroup(operation)}
-	case core.ListGroups:
+	case contract.ListGroups:
 		return core.ControlPlaneDone{Req: call.Req, Resp: c.listGroups()}
 	}
 	return core.ControlPlaneDone{Req: call.Req, Err: core.ErrInvalid}
 }
 
-func (c *ControlPlane) execCreate(request machine.RequestID, operation core.CreateTopic) core.IOResult {
+func (c *ControlPlane) execCreate(request machine.RequestID, operation contract.CreateTopic) core.IOResult {
 	if code := c.CreateTopicIf(operation.Name, operation.Partitions, operation.FailIfExists); code != core.OK {
 		return core.ControlPlaneDone{Req: request, Err: code}
 	}
@@ -142,26 +143,26 @@ func (c *ControlPlane) execCreate(request machine.RequestID, operation core.Crea
 }
 
 // validBatch reports whether b is well formed on its own.
-func validBatch(b core.PendingBatch) bool {
+func validBatch(b contract.PendingBatch) bool {
 	return b.Records > 0 && b.TopicPartition.Topic != "" && b.TopicPartition.Partition >= 0
 }
 
-func (c *ControlPlane) execCommit(request machine.RequestID, operation core.CommitSegment) core.IOResult {
+func (c *ControlPlane) execCommit(request machine.RequestID, operation contract.CommitSegment) core.IOResult {
 	if committed, done := c.segs[operation.SegmentKey]; done {
 		return c.replayCommit(request, operation, committed)
 	}
 	return c.freshCommit(request, operation)
 }
 
-func (c *ControlPlane) replayCommit(request machine.RequestID, operation core.CommitSegment, committed segment) core.IOResult {
+func (c *ControlPlane) replayCommit(request machine.RequestID, operation contract.CommitSegment, committed segment) core.IOResult {
 	if !slices.Equal(committed.batches, operation.Batches) {
 		return core.ControlPlaneDone{Req: request, Err: core.ErrConflict}
 	}
-	response := core.CommitSegmentResp{Assigned: slices.Clone(committed.ranges)}
+	response := contract.CommitSegmentResp{Assigned: slices.Clone(committed.ranges)}
 	return core.ControlPlaneDone{Req: request, Resp: response, Outcome: core.Applied}
 }
 
-func (c *ControlPlane) freshCommit(request machine.RequestID, operation core.CommitSegment) core.IOResult {
+func (c *ControlPlane) freshCommit(request machine.RequestID, operation contract.CommitSegment) core.IOResult {
 	if operation.SegmentKey == "" || len(operation.Batches) == 0 {
 		return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 	}
@@ -172,7 +173,7 @@ func (c *ControlPlane) freshCommit(request machine.RequestID, operation core.Com
 	}
 	newSegment := segment{batches: slices.Clone(operation.Batches)}
 	for _, b := range operation.Batches {
-		r := core.BatchRange{TopicPartition: b.TopicPartition, Base: c.End(b.TopicPartition), Count: b.Records, Loc: b.Loc}
+		r := contract.BatchRange{TopicPartition: b.TopicPartition, Base: c.End(b.TopicPartition), Count: b.Records, Loc: b.Loc}
 		c.append(r)
 		newSegment.ranges = append(newSegment.ranges, r)
 	}
@@ -182,15 +183,15 @@ func (c *ControlPlane) freshCommit(request machine.RequestID, operation core.Com
 		c.segPre = c.segPre[:i+1]
 	}
 	c.segs[operation.SegmentKey] = newSegment
-	response := core.CommitSegmentResp{Assigned: slices.Clone(newSegment.ranges)}
+	response := contract.CommitSegmentResp{Assigned: slices.Clone(newSegment.ranges)}
 	return core.ControlPlaneDone{Req: request, Resp: response, Outcome: core.Applied}
 }
 
-func (c *ControlPlane) execLookup(request machine.RequestID, operation core.FindSegments) core.IOResult {
+func (c *ControlPlane) execLookup(request machine.RequestID, operation contract.FindSegments) core.IOResult {
 	if operation.From < 0 {
 		return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 	}
-	response := core.FindSegmentsResp{End: c.End(operation.TopicPartition)}
+	response := contract.FindSegmentsResp{End: c.End(operation.TopicPartition)}
 	var bytes int64
 	for _, r := range c.parts[operation.TopicPartition.Topic][operation.TopicPartition.Partition] {
 		if r.Base+core.Offset(r.Count) <= operation.From {
@@ -205,19 +206,19 @@ func (c *ControlPlane) execLookup(request machine.RequestID, operation core.Find
 	return core.ControlPlaneDone{Req: request, Resp: response}
 }
 
-func (c *ControlPlane) execDescribe(request machine.RequestID, operation core.DescribeTopics) core.IOResult {
-	var response core.DescribeTopicsResp
+func (c *ControlPlane) execDescribe(request machine.RequestID, operation contract.DescribeTopics) core.IOResult {
+	var response contract.DescribeTopicsResp
 	for _, name := range sortedKeys(c.topics) {
 		if len(operation.Topics) == 0 || slices.Contains(operation.Topics, name) {
-			response.Topics = append(response.Topics, core.TopicInfo{Name: name, Partitions: c.topics[name]})
+			response.Topics = append(response.Topics, contract.TopicInfo{Name: name, Partitions: c.topics[name]})
 		}
 	}
 	return core.ControlPlaneDone{Req: request, Resp: response}
 }
 
-func (c *ControlPlane) append(r core.BatchRange) {
+func (c *ControlPlane) append(r contract.BatchRange) {
 	if c.parts[r.TopicPartition.Topic] == nil {
-		c.parts[r.TopicPartition.Topic] = map[int32][]core.BatchRange{}
+		c.parts[r.TopicPartition.Topic] = map[int32][]contract.BatchRange{}
 	}
 	c.parts[r.TopicPartition.Topic][r.TopicPartition.Partition] = append(c.parts[r.TopicPartition.Topic][r.TopicPartition.Partition], r)
 	c.topics[r.TopicPartition.Topic] = max(c.topics[r.TopicPartition.Topic], r.TopicPartition.Partition+1)

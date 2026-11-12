@@ -8,6 +8,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/assert"
 )
 
@@ -98,7 +99,7 @@ func (o *expectedLogChecker) checkWhole(v simulator.View, vals []string, det []a
 
 // readRange returns the record values of one committed range, or nil after
 // reporting why it is unreadable.
-func (o *expectedLogChecker) readRange(v simulator.View, r core.BatchRange, det []assert.Pair) []string {
+func (o *expectedLogChecker) readRange(v simulator.View, r contract.BatchRange, det []assert.Pair) []string {
 	as := v.Assert()
 	obj, ok := v.Objects().Object(r.Loc.Key)
 	as.Always(ok, committedSegmentExistsObjectStore, det...)

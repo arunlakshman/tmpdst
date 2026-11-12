@@ -17,8 +17,8 @@ import (
 	"google.golang.org/grpc/status"
 	"pgregory.net/rapid"
 
-	sharedv1 "github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane/shared/v1"
-	cpv1 "github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane/v1"
+	sharedv1 "github.com/manifesterio/mds/controlplane/api/controlplane/shared/v1"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"

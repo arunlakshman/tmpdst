@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cpv1 "github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane/v1"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/internal/spec"

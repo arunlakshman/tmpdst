@@ -17,7 +17,7 @@ package server
 import (
 	"context"
 
-	cpv1 "github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane/v1"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/broker"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"

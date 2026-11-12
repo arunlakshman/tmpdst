@@ -26,7 +26,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	cpv1 "github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane/v1"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 	"github.com/manifesterio/mds/controlplane/internal/testinfra"
 )
 

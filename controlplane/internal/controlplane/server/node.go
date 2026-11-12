@@ -12,7 +12,7 @@ import (
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
-	cpv1 "github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane/v1"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/broker"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"

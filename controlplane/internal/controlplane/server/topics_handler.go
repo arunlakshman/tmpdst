@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	cpv1 "github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane/v1"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/wire"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"

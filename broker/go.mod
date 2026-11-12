@@ -9,6 +9,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/dynamodb v1.70.3
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.3
 	github.com/aws/smithy-go v1.28.5
+	github.com/manifesterio/mds/controlplane v0.0.0
+	github.com/manifesterio/mds/dst v0.0.0 // indirect
 	github.com/manifesterio/mds/shared v0.0.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/twmb/franz-go v1.20.7
@@ -19,6 +21,10 @@ require (
 	google.golang.org/grpc v1.69.2
 	google.golang.org/protobuf v1.35.2
 )
+
+replace github.com/manifesterio/mds/controlplane => ../controlplane
+
+replace github.com/manifesterio/mds/dst => ../dst
 
 replace github.com/manifesterio/mds/shared => ../shared
 

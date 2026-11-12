@@ -13,8 +13,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
-	sharedv1 "github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane/shared/v1"
-	cpv1 "github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane/v1"
+	sharedv1 "github.com/manifesterio/mds/controlplane/api/controlplane/shared/v1"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 )
 
 // client is a small test client over the generated gRPC client, with the

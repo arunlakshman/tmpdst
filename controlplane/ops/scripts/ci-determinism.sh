@@ -57,12 +57,12 @@ done
 
 echo "== dependency audit records"
 # Only code that the deterministic packages really run needs an audit record.
-# The generated API (internal/controlplane/api/controlplane: shared/v1 the shared
+# The generated API (api/controlplane: shared/v1 the shared
 # messages, v1 the gRPC service, log/v1 the log entries) is the input/output edge,
 # so we do not follow imports into it: grpc, protobuf and their dependencies are
 # not audited here.
 # The packages still may import it for type definitions only (decision 57).
-api=github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane
+api=github.com/manifesterio/mds/controlplane/api/controlplane
 edge="$api/shared/v1 $api/v1 $api/log/v1"
 roots=$(go list "${pkgs[@]}" "$sim" | tr '\n' ' ')
 missing=0

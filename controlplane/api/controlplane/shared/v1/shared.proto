@@ -2,8 +2,9 @@ syntax = "proto3";
 
 package controlplane.shared.v1;
 
+import "controlplane/options/v1/options.proto";
 
-option go_package = "github.com/manifesterio/mds/broker/api/controlplane/shared/v1;sharedv1";
+option go_package = "github.com/manifesterio/mds/controlplane/api/controlplane/shared/v1;sharedv1";
 
 // The messages in this file are the ones that the service (controlplane.v1) and
 // the log entries (controlplane.log.v1) both use. There is no service here, so
@@ -11,11 +12,13 @@ option go_package = "github.com/manifesterio/mds/broker/api/controlplane/shared/
 
 // TopicPartition names one partition of a topic.
 message TopicPartition {
+  option (controlplane.options.v1.go_struct) = "contract.TopicPartition";
   string topic = 1;
   int32 partition = 2;
 }
 
 message SegmentRef {
+  option (controlplane.options.v1.go_existing) = "runtime.SegmentRef";
   string key = 1;
   int64 off = 2;
   int64 len = 3;
@@ -23,7 +26,8 @@ message SegmentRef {
 
 // PendingBatch describes one uploaded batch awaiting offset assignment.
 message PendingBatch {
-  TopicPartition tp = 1;
+  option (controlplane.options.v1.go_struct) = "contract.PendingBatch";
+  TopicPartition tp = 1 [(controlplane.options.v1.go_name) = "TopicPartition"];
   int64 records = 2;
   SegmentRef loc = 3;
 }
@@ -31,14 +35,16 @@ message PendingBatch {
 // BatchRange is one batch of a partition's log: records [Base, Base+Count)
 // stored at Loc.
 message BatchRange {
-  TopicPartition tp = 1;
-  int64 base = 2;
+  option (controlplane.options.v1.go_struct) = "contract.BatchRange";
+  TopicPartition tp = 1 [(controlplane.options.v1.go_name) = "TopicPartition"];
+  int64 base = 2 [(controlplane.options.v1.go_type) = "contract.Offset"];
   int64 count = 3;
   SegmentRef loc = 4;
 }
 
 // TopicInfo describes one topic.
 message TopicInfo {
+  option (controlplane.options.v1.go_struct) = "contract.TopicInfo";
   string name = 1;
   int32 partitions = 2;
 }
@@ -46,7 +52,8 @@ message TopicInfo {
 // PartitionOffset is one committed offset of a group. A read of a partition
 // that has no commit gives Offset -1 and LeaderEpoch -1.
 message PartitionOffset {
-  TopicPartition tp = 1;
+  option (controlplane.options.v1.go_struct) = "contract.PartitionOffset";
+  TopicPartition tp = 1 [(controlplane.options.v1.go_name) = "TopicPartition"];
   int64 offset = 2;
   int32 leader_epoch = 3;
   string metadata = 4;
@@ -54,6 +61,7 @@ message PartitionOffset {
 
 // GroupSummary is one line of ListGroupsResp.
 message GroupSummary {
+  option (controlplane.options.v1.go_struct) = "contract.GroupSummary";
   string name = 1;
   string protocol_type = 2;
   string state = 3;

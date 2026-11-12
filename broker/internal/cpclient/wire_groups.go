@@ -3,9 +3,9 @@ package cpclient
 import (
 	"slices"
 
-	sharedv1 "github.com/manifesterio/mds/broker/api/controlplane/shared/v1"
-	cpv1 "github.com/manifesterio/mds/broker/api/controlplane/v1"
 	"github.com/manifesterio/mds/broker/internal/core"
+	sharedv1 "github.com/manifesterio/mds/controlplane/api/controlplane/shared/v1"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 )
 
 func joinGroupFromCore(r core.GroupJoin) *cpv1.JoinGroupRequest {

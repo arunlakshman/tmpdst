@@ -25,13 +25,6 @@ UNIT_PKGS = $(shell go list ./... | grep -vE '/verify/simulator(/|$$)|/test/inte
 
 export RISK_THRESHOLD
 
-# Proto plugins (pin versions; local buf, no BSR). Override via env if needed.
-# buf itself comes from mise (`mise install`); plugins still go-install.
-BUF            ?= buf
-PROTOC_GEN_GO  ?= protoc-gen-go
-PROTOC_GEN_GRPC ?= protoc-gen-go-grpc
-PROTO_GO_VER   ?= v1.35.2
-PROTO_GRPC_VER ?= v1.5.1
 # Image for make it-postgres (pinned; see ops/scripts/postgres-test.sh).
 POSTGRES_IMAGE ?= postgres:17.11-alpine
 # Extra go test args for make it-postgres (CP Postgres tests moved to mds-controlplane; see docs/cp-extraction.md).
@@ -39,25 +32,9 @@ PG_TEST_ARGS  ?=
 
 .PHONY: build compile test sim it-hermetic test-all sim-campaign \
 	ascii-check lint modernize-check modernize fmt-check vet risk risk-baseline risk-strict \
-	proto proto-tools e2e-kafka-cli it-postgres
+	e2e-kafka-cli it-postgres
 
-build: proto fmt-check ascii-check vet lint modernize-check compile test sim it-hermetic e2e-kafka-cli risk
-
-# Generate Go from api/controlplane/*.proto into ignored *.pb.go files.
-# Prefer mise-provided buf; plugins via `make proto-tools` (go install).
-proto: proto-tools
-	@if command -v mise >/dev/null 2>&1; then \
-		cd api && mise exec -- $(BUF) generate; \
-	elif command -v $(BUF) >/dev/null 2>&1; then \
-		cd api && $(BUF) generate; \
-	else \
-		echo "buf not found: run \`mise install\` (pins buf in mise.toml)" >&2; \
-		exit 1; \
-	fi
-
-proto-tools:
-	@command -v $(PROTOC_GEN_GO) >/dev/null || go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTO_GO_VER)
-	@command -v $(PROTOC_GEN_GRPC) >/dev/null || go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTO_GRPC_VER)
+build: fmt-check ascii-check vet lint modernize-check compile test sim it-hermetic e2e-kafka-cli risk
 
 compile:
 	go build ./...

@@ -7,7 +7,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
-	logv1 "github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane/log/v1"
+	logv1 "github.com/manifesterio/mds/controlplane/api/controlplane/log/v1"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine/memory"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"

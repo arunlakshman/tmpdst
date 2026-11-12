@@ -4,7 +4,7 @@ package controlplane.options.v1;
 
 import "google/protobuf/descriptor.proto";
 
-option go_package = "github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane/options/v1;optionsv1";
+option go_package = "github.com/manifesterio/mds/controlplane/api/controlplane/options/v1;optionsv1";
 
 // The options in this file tell the protoc plugin protoc-gen-mdswire
 // (ops/tools/protoc-gen-mdswire) which messages become plain Go value types and

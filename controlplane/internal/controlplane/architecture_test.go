@@ -142,7 +142,7 @@ func check(pkgs map[string]pkg) problems {
 	// It does not know the group protocol machine (rebalance), nor the broker.
 	metadb := cp + "metadb"
 	protobuf := []string{"google.golang.org/protobuf/proto", "google.golang.org/protobuf/reflect/protoreflect"}
-	p.onlyImports(pkgs, metadb, []string{cp + "api/controlplane/log/v1", cp + "api/controlplane/shared/v1", cp + "contract",
+	p.onlyImports(pkgs, metadb, []string{"api/controlplane/log/v1", "api/controlplane/shared/v1", cp + "contract",
 		cp + "domain/group", cp + "domain/topic", cp + "metadb/engine", cp + "metadb/engine/memory", rt}, false)
 	for _, imp := range pkgs[metadb].imports {
 		if thirdParty(imp) && !slices.Contains(protobuf, imp) {
@@ -187,9 +187,9 @@ func check(pkgs map[string]pkg) problems {
 	}
 	// The log entries and the shared messages do not pull in grpc: only the service package does.
 	// Every api package imports the options of protoc-gen-mdswire, which import no package of the module.
-	p.onlyImports(pkgs, cp+"api/controlplane/log/v1", []string{cp + "api/controlplane/shared/v1", cp + "api/controlplane/options/v1"}, false)
-	p.onlyImports(pkgs, cp+"api/controlplane/options/v1", nil, false)
-	for _, dir := range []string{cp + "api/controlplane/log/v1", cp + "api/controlplane/shared/v1"} {
+	p.onlyImports(pkgs, "api/controlplane/log/v1", []string{"api/controlplane/shared/v1", "api/controlplane/options/v1"}, false)
+	p.onlyImports(pkgs, "api/controlplane/options/v1", nil, false)
+	for _, dir := range []string{"api/controlplane/log/v1", "api/controlplane/shared/v1"} {
 		for _, imp := range pkgs[dir].imports {
 			if strings.HasPrefix(imp, "google.golang.org/grpc") {
 				p.add("%s imports %s: only the service package may use grpc", dir, imp)
@@ -199,7 +199,7 @@ func check(pkgs map[string]pkg) problems {
 	// runtime never imports contract, and neither imports the wire packages (tests included).
 	for _, dir := range []string{rt, cp + "contract"} {
 		for _, imp := range append(slices.Clone(pkgs[dir].imports), pkgs[dir].tests...) {
-			if rel := local(imp); strings.HasPrefix(rel, cp+"api/") || rel == cp+"wire" || (dir == rt && rel == cp+"contract") {
+			if rel := local(imp); strings.HasPrefix(rel, "api/") || rel == cp+"wire" || (dir == rt && rel == cp+"contract") {
 				p.add("%s imports %s: not allowed", dir, rel)
 			}
 		}

@@ -3,8 +3,8 @@ package cpclient
 import (
 	"slices"
 
-	cpv1 "github.com/manifesterio/mds/broker/api/controlplane/v1"
 	"github.com/manifesterio/mds/broker/internal/core"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 )
 
 func commitSegmentFromCore(operation core.CommitSegment) *cpv1.CommitSegmentRequest {

@@ -12,8 +12,8 @@ import (
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/status"
 
-	sharedv1 "github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane/shared/v1"
-	cpv1 "github.com/manifesterio/mds/controlplane/internal/controlplane/api/controlplane/v1"
+	sharedv1 "github.com/manifesterio/mds/controlplane/api/controlplane/shared/v1"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/server"

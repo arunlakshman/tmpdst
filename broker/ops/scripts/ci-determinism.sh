@@ -22,7 +22,7 @@ echo "== dependency audit records"
 # audited here. The packages still may import it for type definitions only
 # (decision 57). Broker-side wire conversion lives in internal/cpclient (not a
 # determinism-scanned package).
-edge=github.com/manifesterio/mds/broker/api/controlplane/v1
+edge=github.com/manifesterio/mds/controlplane/api/controlplane/v1
 roots=$(go list "${pkgs[@]}" | tr '\n' ' ')
 missing=0
 while read -r modver; do

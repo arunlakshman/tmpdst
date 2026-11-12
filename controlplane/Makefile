@@ -16,15 +16,15 @@ SIM_SEEDS       ?= 300
 
 build: generate fmt-check ascii-check vet lint modernize-check compile test determinism sim sim-campaign
 
-# Generate Go from internal/controlplane/api/**/*.proto (shared, service, log, options):
+# Generate Go from api/**/*.proto (shared, service, log, options):
 # the *.pb.go files next to them, and, by the plugin ops/tools/protoc-gen-mdswire
 # (buf runs it with go run), the contract value types and the wire converters.
 # None of it is in git.
 proto: proto-tools
 	@if command -v mise >/dev/null 2>&1; then \
-		cd internal/controlplane/api && mise exec -- $(BUF) generate; \
+		cd api && mise exec -- $(BUF) generate; \
 	elif command -v $(BUF) >/dev/null 2>&1; then \
-		cd internal/controlplane/api && $(BUF) generate; \
+		cd api && $(BUF) generate; \
 	else \
 		echo "buf not found: run \`mise install\` (pins buf in mise.toml)" >&2; \
 		exit 1; \

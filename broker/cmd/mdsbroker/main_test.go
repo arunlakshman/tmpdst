@@ -18,8 +18,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	cpv1 "github.com/manifesterio/mds/broker/api/controlplane/v1"
 	"github.com/manifesterio/mds/broker/internal/core"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 	"github.com/manifesterio/mds/shared/runinfo"
 )
 

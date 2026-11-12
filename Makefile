@@ -17,10 +17,9 @@ build:
 	cd controlplane && go build -o ../bin/mdscontrolplane ./cmd/mdscontrolplane
 	cd broker && go build -o ../bin/mdsbroker ./cmd/mdsbroker
 
-# dst has no generated files. The broker target that generates is called proto.
+# Only the control plane generates Go (the proto lives in controlplane/api). The broker imports it.
 generate:
 	$(MAKE) -C controlplane generate
-	$(MAKE) -C broker proto
 
 test:
 	$(MAKE) -C dst test

@@ -14,7 +14,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kgo"
 	"google.golang.org/grpc"
 
-	cpv1 "github.com/manifesterio/mds/broker/api/controlplane/v1"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 )
 
 type fakeProducer struct {

@@ -3,8 +3,8 @@ package cpclient
 import (
 	"context"
 
-	cpv1 "github.com/manifesterio/mds/broker/api/controlplane/v1"
 	"github.com/manifesterio/mds/broker/internal/core"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 )
 
 // Group calls (slice 4b). A JoinGroup or SyncGroup can block for a whole

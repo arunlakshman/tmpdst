@@ -3,7 +3,7 @@ package cpclient
 import (
 	"context"
 
-	cpv1 "github.com/manifesterio/mds/broker/api/controlplane/v1"
+	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 )
 
 // GetStatus calls GetStatus on the preferred address.

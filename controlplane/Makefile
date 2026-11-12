@@ -34,24 +34,6 @@ proto-tools:
 	@command -v $(PROTOC_GEN_GO) >/dev/null || go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTO_GO_VER)
 	@command -v $(PROTOC_GEN_GRPC) >/dev/null || go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTO_GRPC_VER)
 
-fmt-check:
-	@out=$$(gofmt -l .); if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
-
-vet:
-	go vet ./...
-
-lint:
-	golangci-lint run ./...
-
-modernize-check:
-	go fix -diff ./...
-
-modernize:
-	go fix ./...
-
-ascii-check:
-	@ops/scripts/ascii-check.sh
-
 # Determinism gate for internal/runtime, the contract and the deterministic domain packages.
 determinism:
 	bash ops/scripts/ci-determinism.sh
@@ -125,3 +107,5 @@ mutants:
 it:
 	@docker info >/dev/null 2>&1 || { echo "make it: Docker is not running (or DOCKER_HOST is wrong). Start Docker and run again; the integration tests are never skipped." >&2; exit 1; }
 	go test -tags integration -count=1 -timeout 15m ./...
+
+include ../make/common.mk

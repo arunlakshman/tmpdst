@@ -2,10 +2,11 @@
 #   dst, controlplane, broker  (a module may import only the modules before it).
 # `make build` is the full gate. It ends by building the two binaries into bin/.
 # Toolchain and commit hook: `mise install` (pins in mise.toml; postinstall runs make install-hooks).
+# Rules shared by the modules (fmt-check, vet, lint, modernize, ascii-check) are in make/common.mk.
 # The commit hook (ops/githooks/pre-commit) runs `make build`.
 # Bypass once: SKIP_BUILD_HOOK=1 git commit ...
 
-.PHONY: build generate test install-hooks
+.PHONY: build generate test sim sim-campaign determinism install-hooks
 
 build:
 	$(MAKE) -C dst build
@@ -24,6 +25,21 @@ test:
 	$(MAKE) -C dst test
 	$(MAKE) -C controlplane test
 	$(MAKE) -C broker test
+
+# Targets a module does not have are left out on purpose (the list below names each module).
+# dst has no sim and no sim-campaign. broker has no determinism target: it runs its script.
+sim:
+	$(MAKE) -C controlplane sim
+	$(MAKE) -C broker sim
+
+sim-campaign:
+	$(MAKE) -C controlplane sim-campaign
+	$(MAKE) -C broker sim-campaign
+
+determinism:
+	$(MAKE) -C dst determinism
+	$(MAKE) -C controlplane determinism
+	cd broker && bash ops/scripts/ci-determinism.sh
 
 # Symlink the hook into .git/hooks so every commit runs `make build`.
 # Does not change git config.

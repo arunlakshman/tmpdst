@@ -18,6 +18,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/internal/system/realclock"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Client is the DynamoDB surface Log needs. *dynamodb.Client
@@ -34,7 +35,7 @@ type Client interface {
 type Options struct {
 	TTL time.Duration
 	// Clock is the time source for the row TTL (default: the real clock).
-	Clock runtime.Clock
+	Clock machine.Clock
 }
 
 // Log stores opaque machine payloads in one DynamoDB partition

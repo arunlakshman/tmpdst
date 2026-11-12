@@ -6,6 +6,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Rebalance is the model of the classic consumer group protocol, with the
@@ -16,9 +17,9 @@ import (
 // model, keeps the logged half of the state.
 type Rebalance struct {
 	Store            *ControlPlane
-	Delay            runtime.Duration // the initial rebalance delay of a new group
-	NewMemberTimeout runtime.Duration // how long a new member may wait for its first round
-	now              runtime.NodeTime
+	Delay            machine.Duration // the initial rebalance delay of a new group
+	NewMemberTimeout machine.Duration // how long a new member may wait for its first round
+	now              machine.NodeTime
 	active           bool
 	groups           map[string]*rgroup
 }
@@ -114,7 +115,7 @@ const (
 	PhaseDead    = "Dead"
 	joinCall     = 0
 	syncCall     = 1
-	never        = runtime.NodeTime(1<<63 - 1)
+	never        = machine.NodeTime(1<<63 - 1)
 )
 
 // rgroup is one group in memory. end is the round end (PreparingRebalance) or
@@ -125,7 +126,7 @@ type rgroup struct {
 	protoType, protocol, leader string
 	members                     map[string]*rmember
 	joined                      int // members that ever joined, for the join order
-	start, end, delayEnd        runtime.NodeTime
+	start, end, delayEnd        machine.NodeTime
 }
 
 // rmember is one member, with its waiting join and sync (0 for none). A new
@@ -134,15 +135,15 @@ type rmember struct {
 	contract.GroupMember
 	order         int
 	protocols     []Protocol
-	expires       runtime.NodeTime
+	expires       machine.NodeTime
 	wait          [2]CallID
 	assignment    []byte
 	isNew, synced bool
 }
 
 // NewRebalance returns a model with an empty Store that does not serve yet.
-func NewRebalance(delay runtime.Duration) *Rebalance {
-	return &Rebalance{Store: New(), Delay: delay, NewMemberTimeout: 300 * runtime.Second, groups: map[string]*rgroup{}}
+func NewRebalance(delay machine.Duration) *Rebalance {
+	return &Rebalance{Store: New(), Delay: delay, NewMemberTimeout: 300 * machine.Second, groups: map[string]*rgroup{}}
 }
 
 // Phase is the phase of a group in memory, Dead when there is none.
@@ -154,7 +155,7 @@ func (r *Rebalance) Phase(group string) string {
 }
 
 // Step fires the deadlines up to now, then handles in (nil for none).
-func (r *Rebalance) Step(now runtime.NodeTime, in any) []Reply {
+func (r *Rebalance) Step(now machine.NodeTime, in any) []Reply {
 	var out []Reply
 	for at, fire := r.nextDeadline(now); fire != nil; at, fire = r.nextDeadline(now) {
 		r.now = at
@@ -203,7 +204,7 @@ func (r *Rebalance) handle(in any) []Reply {
 	return nil
 }
 
-func (r *Rebalance) ms() int64 { return int64(r.now) / int64(runtime.Millisecond) }
+func (r *Rebalance) ms() int64 { return int64(r.now) / int64(machine.Millisecond) }
 
 func (r *Rebalance) member(group, id string) *rmember {
 	if g := r.groups[group]; g != nil {
@@ -215,7 +216,7 @@ func (r *Rebalance) member(group, id string) *rmember {
 // touch starts the session of m again. A new member keeps its new member timeout.
 func (r *Rebalance) touch(m *rmember) {
 	if m != nil && !m.isNew {
-		m.expires = r.now + runtime.NodeTime(m.SessionTimeoutMs)*runtime.NodeTime(runtime.Millisecond)
+		m.expires = r.now + machine.NodeTime(m.SessionTimeoutMs)*machine.NodeTime(machine.Millisecond)
 	}
 }
 
@@ -260,9 +261,9 @@ func idsWhere(g *rgroup, keep func(*rmember) bool) []string {
 // nextDeadline returns the earliest deadline at or before now and what it
 // does. An existing member that waits in a join or a sync does not expire
 // (Kafka hasSatisfiedHeartbeat); a new member does.
-func (r *Rebalance) nextDeadline(now runtime.NodeTime) (runtime.NodeTime, func() []Reply) {
+func (r *Rebalance) nextDeadline(now machine.NodeTime) (machine.NodeTime, func() []Reply) {
 	best, found := now, (func() []Reply)(nil)
-	consider := func(at runtime.NodeTime, fire func() []Reply) {
+	consider := func(at machine.NodeTime, fire func() []Reply) {
 		if at <= now && (found == nil || at < best) {
 			best, found = at, fire
 		}
@@ -308,7 +309,7 @@ func (r *Rebalance) join(in Join) []Reply {
 			id = in.ClientID + "-" + in.NewID
 		}
 		g.joined++
-		m = &rmember{order: g.joined, isNew: true, expires: r.now + runtime.NodeTime(r.NewMemberTimeout)}
+		m = &rmember{order: g.joined, isNew: true, expires: r.now + machine.NodeTime(r.NewMemberTimeout)}
 		g.members[id] = m
 	}
 	m.GroupMember = contract.GroupMember{MemberID: id, ClientID: in.ClientID, ClientHost: in.ClientHost,
@@ -322,26 +323,26 @@ func (r *Rebalance) join(in Join) []Reply {
 		out = append(out, r.openRound(g, g.phase == PhaseEmpty)...)
 	} else {
 		if isNew && g.delayEnd > 0 {
-			g.delayEnd = min(r.now+runtime.NodeTime(r.Delay), g.end)
+			g.delayEnd = min(r.now+machine.NodeTime(r.Delay), g.end)
 		}
 		g.end = max(g.end, g.start+longestRebalance(g))
 	}
 	return append(out, r.complete(in.Group, g, false)...)
 }
 
-func longestRebalance(g *rgroup) runtime.NodeTime {
+func longestRebalance(g *rgroup) machine.NodeTime {
 	var ms int32
 	for _, id := range sortedKeys(g.members) {
 		ms = max(ms, g.members[id].RebalanceTimeoutMs)
 	}
-	return runtime.NodeTime(ms) * runtime.NodeTime(runtime.Millisecond)
+	return machine.NodeTime(ms) * machine.NodeTime(machine.Millisecond)
 }
 
 // openRound starts a join round. Waiting syncs get ErrRebalanceInProgress.
 func (r *Rebalance) openRound(g *rgroup, initial bool) []Reply {
 	g.phase, g.start, g.end, g.delayEnd = PhaseJoining, r.now, r.now+longestRebalance(g), 0
 	if initial && r.Delay > 0 {
-		g.delayEnd = min(r.now+runtime.NodeTime(r.Delay), g.end)
+		g.delayEnd = min(r.now+machine.NodeTime(r.Delay), g.end)
 	}
 	return r.answerAll(g, syncCall, Reply{Err: runtime.ErrRebalanceInProgress})
 }

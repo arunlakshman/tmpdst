@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // scanCore maps each marker method (isEvent, isAction, ...) to the core types that
@@ -91,13 +92,13 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 		"GroupJoinResp": core.GroupJoinResp{}, "GroupSyncResp": core.GroupSyncResp{},
 		"GroupLeaveResp": core.GroupLeaveResp{}, "DescribeGroupsResp": core.DescribeGroupsResp{},
 	}
-	fields := map[string]core.FieldValue{
-		"Int64Value": core.Int64Value(0), "Uint64Value": core.Uint64Value(0), "StringValue": core.StringValue(""), "Bool": core.Bool(false), "Bytes": core.Bytes(nil),
+	fields := map[string]machine.FieldValue{
+		"Int64Value": machine.Int64Value(0), "Uint64Value": machine.Uint64Value(0), "StringValue": machine.StringValue(""), "Bool": machine.Bool(false), "Bytes": machine.Bytes(nil),
 	}
 	src := scanCore(t)
 	for marker, have := range map[string][]string{
 		"isEvent": names(events), "isAction": names(actions), "isControlPlaneOperation": names(ops),
-		"isControlPlaneResponse": names(resps), "isFieldValue": names(fields),
+		"isControlPlaneResponse": names(resps),
 	} {
 		if !eq(src[marker], have) {
 			t.Errorf("%s: core declares %v, tag test lists %v", marker, src[marker], have)

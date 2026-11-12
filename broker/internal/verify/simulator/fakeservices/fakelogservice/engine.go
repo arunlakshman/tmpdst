@@ -12,6 +12,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakecompletions"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // The InjectedBug constants select a mutant (simulator.LogParams.Bug). Each is caught by a property.
@@ -45,14 +46,14 @@ type TopicSeed struct {
 // pendKey namespaces broker ReqIDs: each broker allocates ReqIDs from its own
 // counter, so Req alone collides across brokers.
 type pendKey struct {
-	node    core.NodeID
-	request core.RequestID
+	node    machine.NodeID
+	request machine.RequestID
 }
 
 type pending struct {
-	from      core.NodeInstance
+	from      machine.NodeInstance
 	operation core.ControlPlaneOperation
-	to        core.NodeInstance
+	to        machine.NodeInstance
 	failover  bool
 	muted     bool
 	deadline  simulator.EntryID
@@ -60,20 +61,20 @@ type pending struct {
 }
 
 type deadlineEv struct {
-	node    core.NodeID
-	request core.RequestID
+	node    machine.NodeID
+	request machine.RequestID
 }
 
 var _ simulator.FakeService = (*Engine)(nil)
 
 // DefaultParams are scaled-down production values for a 45 s run.
 func DefaultParams() simulator.LogParams {
-	milliseconds := core.Millisecond
+	milliseconds := machine.Millisecond
 	return simulator.LogParams{Enabled: true, GroupMax: 4, Tick: 10 * milliseconds,
 		TakeoverAfter: 600 * milliseconds, PutRetry: 80 * milliseconds, Heartbeat: 250 * milliseconds,
 		PutFail: 0.01, PutLost: 0.02, ReadFail: 0.05,
 		StallProb: 0.0002, CrashProb: 0.0001,
-		StallDur: [2]core.Duration{800 * milliseconds, 2500 * milliseconds}, DownDur: [2]core.Duration{300 * milliseconds, 1500 * milliseconds},
+		StallDur: [2]machine.Duration{800 * milliseconds, 2500 * milliseconds}, DownDur: [2]machine.Duration{300 * milliseconds, 1500 * milliseconds},
 		WindowSlots: 1 << 20, TrimStride: 16, CheckpointEvery: 24, KeepSlots: 8}
 }
 
@@ -149,7 +150,7 @@ func (e *Engine) StateHash() uint64 { return uint64(len(e.pending)) ^ uint64(len
 func (e *Engine) EnterRecovery() { e.recovery = true }
 
 // OnCrash is a no-op: replica crash is attrition on CP processes.
-func (e *Engine) OnCrash(simulator.FakeServiceContext, core.NodeInstance) {}
+func (e *Engine) OnCrash(simulator.FakeServiceContext, machine.NodeInstance) {}
 
 // OnInternal handles caller-timeout deadlines.
 func (e *Engine) OnInternal(ctx simulator.FakeServiceContext, body any) {
@@ -169,7 +170,7 @@ func (e *Engine) OnInternal(ctx simulator.FakeServiceContext, body any) {
 }
 
 // Execute starts a ControlPlaneCall or lands a ControlPlaneReply.
-func (e *Engine) Execute(ctx simulator.FakeServiceContext, from core.NodeInstance, a core.Action) {
+func (e *Engine) Execute(ctx simulator.FakeServiceContext, from machine.NodeInstance, a core.Action) {
 	e.now = ctx.Now()
 	switch a := a.(type) {
 	case core.ControlPlaneCall:
@@ -181,20 +182,20 @@ func (e *Engine) Execute(ctx simulator.FakeServiceContext, from core.NodeInstanc
 	}
 }
 
-func (e *Engine) execCall(ctx simulator.FakeServiceContext, from core.NodeInstance, call core.ControlPlaneCall) {
+func (e *Engine) execCall(ctx simulator.FakeServiceContext, from machine.NodeInstance, call core.ControlPlaneCall) {
 	k := e.plan(ctx)
 	if k == fakecompletions.ReplyUnavailable {
 		e.deliver(ctx, from, core.ControlPlaneDone{Req: call.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied})
 		return
 	}
-	cp, ok := e.pickCP(ctx, core.NodeInstance{})
+	cp, ok := e.pickCP(ctx, machine.NodeInstance{})
 	if !ok {
 		e.deliver(ctx, from, core.ControlPlaneDone{Req: call.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied})
 		return
 	}
 	key := pendKey{from.Node, call.Req}
 	p := &pending{from: from, operation: call.Op, to: cp, muted: k == fakecompletions.ReplyLost || k == fakecompletions.ReplyTimeout}
-	to := ctx.Now() + simulator.Time(max(e.f.CallerTimeout, 500*core.Millisecond))
+	to := ctx.Now() + simulator.Time(max(e.f.CallerTimeout, 500*machine.Millisecond))
 	p.deadline = ctx.Self(to, ctx.Lane("fakelogservice/deadline"), deadlineEv{node: from.Node, request: call.Req})
 	e.pending[key] = p
 	if k == fakecompletions.ReplyTimeout && ctx.Rand().Chance(0.5) {
@@ -235,14 +236,14 @@ func (e *Engine) execReply(ctx simulator.FakeServiceContext, r core.ControlPlane
 	e.deliverAt(ctx, p.from, ctx.Now()+simulator.Time(lat), r.Done)
 }
 
-func (e *Engine) offer(ctx simulator.FakeServiceContext, cp, from core.NodeInstance, request core.RequestID, operation core.ControlPlaneOperation) {
+func (e *Engine) offer(ctx simulator.FakeServiceContext, cp, from machine.NodeInstance, request machine.RequestID, operation core.ControlPlaneOperation) {
 	lat := e.f.ApplyLatency.Sample(ctx.Rand())
 	at := ctx.Now() + simulator.Time(lat)
 	ctx.Deliver(cp, at, ctx.Lane("fakelogservice/offer/"+string(cp.Node)),
 		core.ControlPlaneDeliver{From: from, Req: request, Op: operation})
 }
 
-func (e *Engine) pickCP(ctx simulator.FakeServiceContext, exclude core.NodeInstance) (core.NodeInstance, bool) {
+func (e *Engine) pickCP(ctx simulator.FakeServiceContext, exclude machine.NodeInstance) (machine.NodeInstance, bool) {
 	refs := e.liveCPs(ctx)
 	for _, ref := range refs {
 		if exclude.Node != "" && ref.Node == exclude.Node {
@@ -250,16 +251,16 @@ func (e *Engine) pickCP(ctx simulator.FakeServiceContext, exclude core.NodeInsta
 		}
 		return ref, true
 	}
-	return core.NodeInstance{}, false
+	return machine.NodeInstance{}, false
 }
 
-func (e *Engine) liveCPs(ctx simulator.FakeServiceContext) []core.NodeInstance {
+func (e *Engine) liveCPs(ctx simulator.FakeServiceContext) []machine.NodeInstance {
 	cur, ok := ctx.(simulator.NodeCurrent)
 	if !ok {
 		return nil
 	}
-	var out []core.NodeInstance
-	for _, name := range []core.NodeID{"cp-0", "cp-1"} {
+	var out []machine.NodeInstance
+	for _, name := range []machine.NodeID{"cp-0", "cp-1"} {
 		if ref, ok := cur.Current(name); ok {
 			out = append(out, ref)
 		}
@@ -275,10 +276,10 @@ func (e *Engine) plan(ctx simulator.FakeServiceContext) fakecompletions.Kind {
 	return p.Draw(ctx, "cp", &e.until)
 }
 
-func (e *Engine) deliver(ctx simulator.FakeServiceContext, to core.NodeInstance, c core.ControlPlaneDone) {
+func (e *Engine) deliver(ctx simulator.FakeServiceContext, to machine.NodeInstance, c core.ControlPlaneDone) {
 	e.deliverAt(ctx, to, ctx.Now(), c)
 }
 
-func (e *Engine) deliverAt(ctx simulator.FakeServiceContext, to core.NodeInstance, at simulator.Time, c core.ControlPlaneDone) {
+func (e *Engine) deliverAt(ctx simulator.FakeServiceContext, to machine.NodeInstance, at simulator.Time, c core.ControlPlaneDone) {
 	ctx.Deliver(to, at, ctx.Lane("fakelogservice/"+string(to.Node)), c)
 }

@@ -8,19 +8,20 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // DeliveredEvent is one completion handed to a node.
 type DeliveredEvent struct {
 	At   simulator.Time
-	To   core.NodeInstance
+	To   machine.NodeInstance
 	Body core.EventData
 }
 
 type entry struct {
 	at   simulator.Time
 	seq  int
-	to   core.NodeInstance // deliver when self is false
+	to   machine.NodeInstance // deliver when self is false
 	self bool
 	body any
 	dead bool
@@ -30,7 +31,7 @@ type entry struct {
 type Ctx struct {
 	R         simulator.CountedRand
 	T         simulator.Time
-	Down      map[core.NodeID]bool // test-only
+	Down      map[machine.NodeID]bool // test-only
 	Delivered []DeliveredEvent
 	Faults    []string
 	Reached   []string
@@ -44,7 +45,7 @@ type Ctx struct {
 
 // New returns a Ctx bound to eng.
 func New(eng simulator.FakeService, seed uint64) *Ctx {
-	return &Ctx{R: simulator.NewRand(seed), Down: map[core.NodeID]bool{}, eng: eng, lanes: map[string]simulator.DeliveryLane{}}
+	return &Ctx{R: simulator.NewRand(seed), Down: map[machine.NodeID]bool{}, eng: eng, lanes: map[string]simulator.DeliveryLane{}}
 }
 
 // Now returns the fake clock.
@@ -70,7 +71,7 @@ func (c *Ctx) add(e *entry) simulator.EntryID {
 }
 
 // Deliver queues an event for a node.
-func (c *Ctx) Deliver(to core.NodeInstance, at simulator.Time, _ simulator.DeliveryLane, b core.EventData) simulator.EntryID {
+func (c *Ctx) Deliver(to machine.NodeInstance, at simulator.Time, _ simulator.DeliveryLane, b core.EventData) simulator.EntryID {
 	return c.add(&entry{at: max(at, c.T), to: to, body: b})
 }
 
@@ -89,15 +90,15 @@ func (c *Ctx) Cancel(id simulator.EntryID) {
 }
 
 // Fault records an injected fault kind.
-func (c *Ctx) Fault(kind string, _ ...core.Field) { c.Faults = append(c.Faults, kind) }
+func (c *Ctx) Fault(kind string, _ ...machine.Field) { c.Faults = append(c.Faults, kind) }
 
 // Assert returns the assertion recorder.
 func (c *Ctx) Assert() core.Assertions { return checks{c} }
 
 // Current returns the live incarnation of n.
-func (c *Ctx) Current(n core.NodeID) (core.NodeInstance, bool) {
+func (c *Ctx) Current(n machine.NodeID) (machine.NodeInstance, bool) {
 	if c.Down[n] {
-		return core.NodeInstance{}, false
+		return machine.NodeInstance{}, false
 	}
 	return Ref(string(n)), true
 }
@@ -105,15 +106,15 @@ func (c *Ctx) Current(n core.NodeID) (core.NodeInstance, bool) {
 var _ simulator.NodeCurrent = (*Ctx)(nil)
 
 // Ref is the live incarnation of node n in tests.
-func Ref(n string) core.NodeInstance {
-	return core.NodeInstance{Node: core.NodeID(n), Inc: core.BootNumber{1}}
+func Ref(n string) machine.NodeInstance {
+	return machine.NodeInstance{Node: machine.NodeID(n), Inc: machine.BootNumber{1}}
 }
 
 // Crash marks n down and drops its pending deliveries (the scheduler's DropNode).
 func (c *Ctx) Crash(n string) {
-	c.Down[core.NodeID(n)] = true
+	c.Down[machine.NodeID(n)] = true
 	for _, e := range c.q {
-		if !e.self && e.to.Node == core.NodeID(n) {
+		if !e.self && e.to.Node == machine.NodeID(n) {
 			e.dead = true
 		}
 	}
@@ -205,7 +206,7 @@ func (a checks) Reachable(p core.PropertyID)                      { a.c.Reached 
 func (a checks) Unreachable(core.PropertyID, ...core.ContextPair) {}
 
 // Find returns the delivered completion for req (nil if none).
-func (c *Ctx) Find(request core.RequestID) core.IOResult {
+func (c *Ctx) Find(request machine.RequestID) core.IOResult {
 	for _, d := range c.Delivered {
 		if cp, ok := d.Body.(core.IOResult); ok && cp.RequestID() == request {
 			return cp

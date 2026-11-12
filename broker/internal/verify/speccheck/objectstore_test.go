@@ -9,6 +9,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 func put(s *ObjectStore, key, data string) core.ObjectPutDone {
@@ -194,7 +195,7 @@ func objCheck(impl func() objExec) checker.SpecChecker[*objPair, core.IOCall] {
 		Name: "core.IOCall",
 		New:  func() *objPair { return &objPair{impl(), &sliceStore{}} },
 		Gen: func(r *checker.Rand, i int) core.IOCall {
-			request, key := core.RequestID(i+1), keys[r.Intn(len(keys))]
+			request, key := machine.RequestID(i+1), keys[r.Intn(len(keys))]
 			switch r.Intn(7) {
 			case 0, 1, 2:
 				data := make([]byte, r.Intn(5))

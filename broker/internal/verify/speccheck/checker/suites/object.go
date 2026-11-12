@@ -10,6 +10,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/generator"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/observation"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 const (
@@ -20,17 +21,17 @@ const (
 	// extraReqBase is the first request number of the extra calls that the
 	// suites make for invariants. Generated operations use small numbers, so
 	// the two groups never share a request number.
-	extraReqBase core.RequestID = 1 << 30
+	extraReqBase machine.RequestID = 1 << 30
 )
 
 // ObjectPair is a fresh spec and a fresh subject of the object store suite.
 type ObjectPair struct {
 	spec    *speccheck.ObjectStore
 	subject ObjectSubject
-	extra   core.RequestID
+	extra   machine.RequestID
 }
 
-func (p *ObjectPair) nextReq() core.RequestID {
+func (p *ObjectPair) nextReq() machine.RequestID {
 	p.extra++
 	return extraReqBase + p.extra
 }

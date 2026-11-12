@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Env is the production core.Environment: crypto-seeded randomness, inert buggify and
@@ -46,8 +47,8 @@ func (e *Env) Intn(n int) int {
 }
 
 // NewID returns a random ID.
-func (e *Env) NewID() core.ID {
-	var id core.ID
+func (e *Env) NewID() machine.ID {
+	var id machine.ID
 	binary.LittleEndian.PutUint64(id[:8], e.Uint64())
 	binary.LittleEndian.PutUint64(id[8:], e.Uint64())
 	return id

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 func entry(at Time, lane DeliveryLane, tag uint64) Entry {
@@ -107,9 +108,9 @@ func TestSchedulerFIFOAfterLaterTime(t *testing.T) {
 
 func TestSchedulerCancelAndDropNode(t *testing.T) {
 	s := NewScheduler(NewRand(1))
-	ref := core.NodeInstance{Node: "n", Inc: core.BootNumber{1}}
-	other := core.NodeInstance{Node: "n", Inc: core.BootNumber{2}}
-	toNode := func(at Time, r core.NodeInstance) Entry {
+	ref := machine.NodeInstance{Node: "n", Inc: machine.BootNumber{1}}
+	other := machine.NodeInstance{Node: "n", Inc: machine.BootNumber{2}}
+	toNode := func(at Time, r machine.NodeInstance) Entry {
 		return Entry{At: at, Lane: 5, Kind: EntryDeliver, Target: Target{Node: r}, Body: core.TimerFired{}}
 	}
 	s.Schedule(toNode(10, ref))
@@ -123,7 +124,7 @@ func TestSchedulerCancelAndDropNode(t *testing.T) {
 	if n := s.DropNode(ref); n != 2 {
 		t.Fatalf("DropNode = %d", n)
 	}
-	if n := s.DropNode(core.NodeInstance{}); n != 0 {
+	if n := s.DropNode(machine.NodeInstance{}); n != 0 {
 		t.Fatal("zero ref must drop nothing")
 	}
 	if s.Len() != 2 {
@@ -138,12 +139,12 @@ func TestSchedulerCancelAndDropNode(t *testing.T) {
 func TestTimeline(t *testing.T) {
 	tl := NewTimeline()
 	var cur, cur2 Cursor
-	f := func(name string, v int64) core.Fact {
-		return core.Fact{Name: name, Fields: []core.Field{{Key: "v", Value: core.Int64Value(v)}}}
+	f := func(name string, v int64) machine.Fact {
+		return machine.Fact{Name: name, Fields: []machine.Field{{Key: "v", Value: machine.Int64Value(v)}}}
 	}
-	tl.Append(core.NodeInstance{}, 1, f("a", 1))
-	tl.Append(core.NodeInstance{}, 2, f("b", 2))
-	tl.Append(core.NodeInstance{}, 3, f("a", 3))
+	tl.Append(machine.NodeInstance{}, 1, f("a", 1))
+	tl.Append(machine.NodeInstance{}, 2, f("b", 2))
+	tl.Append(machine.NodeInstance{}, 3, f("a", 3))
 	got := tl.Since("a", &cur)
 	if len(got) != 2 || got[0].Seq != 1 || got[1].Seq != 3 || got[1].At != 3 {
 		t.Fatalf("%+v", got)
@@ -151,7 +152,7 @@ func TestTimeline(t *testing.T) {
 	if len(tl.Since("a", &cur)) != 0 {
 		t.Fatal("cursor must advance")
 	}
-	tl.Append(core.NodeInstance{}, 4, f("a", 4))
+	tl.Append(machine.NodeInstance{}, 4, f("a", 4))
 	if got := tl.Since("a", &cur); len(got) != 1 || got[0].Seq != 4 {
 		t.Fatalf("%+v", got)
 	}

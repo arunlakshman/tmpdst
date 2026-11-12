@@ -1,9 +1,9 @@
 package simulator
 
-import "github.com/manifesterio/mds/broker/internal/core"
+import "github.com/manifesterio/mds/dst/machine"
 
 // Time is global simulation time. Nodes never see it directly; they see their
-// own skewed core.NodeTime on each Event.
+// own skewed machine.NodeTime on each Event.
 type Time int64
 
 // DeliveryLane is an ordering domain. Entries on one lane at the same Time pop in FIFO
@@ -17,8 +17,8 @@ type EntryID uint64
 
 // Target says who consumes an entry: a node (by incarnation) or an engine.
 type Target struct {
-	Node   core.NodeInstance // set when delivering to a node's StateMachine
-	Engine string            // set when delivering an internal event to an engine
+	Node   machine.NodeInstance // set when delivering to a node's StateMachine
+	Engine string               // set when delivering an internal event to an engine
 }
 
 // EntryKind says what an entry is. Append-only (hashed). Crash, Restart, Stop,
@@ -60,7 +60,7 @@ type Scheduler interface {
 	// DropNode removes every pending entry addressed to that incarnation (crash)
 	// and returns how many. Engine-internal entries are not addressed to a node
 	// and survive.
-	DropNode(ref core.NodeInstance) int
+	DropNode(ref machine.NodeInstance) int
 	// Pop removes and returns the next entry, advancing Now. ok=false when empty.
 	Pop() (e Entry, ok bool)
 	Len() int

@@ -11,6 +11,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Oracle property names (the stable strings sim/kafka reports).
@@ -125,7 +126,7 @@ func (w *world) ackFacts() []int {
 func (w *world) setAck(i int, key string, add int64) {
 	for k, f := range w.raw[i].Fact.Fields {
 		if f.Key == key {
-			w.raw[i].Fact.Fields[k].Value = f.Value.(core.Int64Value) + core.Int64Value(add)
+			w.raw[i].Fact.Fields[k].Value = f.Value.(machine.Int64Value) + machine.Int64Value(add)
 		}
 	}
 	w.rebuildTL()

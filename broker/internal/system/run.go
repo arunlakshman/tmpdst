@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 var (
@@ -25,14 +26,14 @@ var (
 // once; if the machine has not emitted ShutdownDone by then, Run returns ErrKilledByRuntime and
 // the supervisor kills the process. It closes b.Inbox on return so late
 // completions are dropped. This goroutine alone owns the machine.
-func Run(ctx context.Context, b Dependencies, exec Executor, f core.MachineFactory, self core.NodeInstance) error {
+func Run(ctx context.Context, b Dependencies, exec Executor, f core.MachineFactory, self machine.NodeInstance) error {
 	in := b.Inbox
 	if in == nil {
 		// A private inbox would be unreachable by the Executor and readers.
 		return errors.New("system.Run: Bundle.Inbox is nil")
 	}
 	defer in.Close()
-	r := &eventLoop{b: b, in: in, exec: exec, timers: map[core.TimerID]*time.Timer{}}
+	r := &eventLoop{b: b, in: in, exec: exec, timers: map[machine.TimerID]*time.Timer{}}
 	defer func() {
 		for _, t := range r.timers {
 			t.Stop()
@@ -58,7 +59,7 @@ func Run(ctx context.Context, b Dependencies, exec Executor, f core.MachineFacto
 		select {
 		case <-shutdown:
 			shutdown = nil
-			in.DeliverControl(core.StopRequest{Deadline: b.Clock.Mono() + core.NodeTime(b.StopGrace)})
+			in.DeliverControl(core.StopRequest{Deadline: b.Clock.Mono() + machine.NodeTime(b.StopGrace)})
 			t := time.NewTimer(time.Duration(b.StopGrace))
 			defer t.Stop()
 			kill = t.C
@@ -91,7 +92,7 @@ type eventLoop struct {
 	b      Dependencies
 	in     *Inbox
 	exec   Executor
-	timers map[core.TimerID]*time.Timer // loop goroutine only
+	timers map[machine.TimerID]*time.Timer // loop goroutine only
 }
 
 // dispatch runs one Step's actions in order; done reports StopForRestart or ShutdownDone.
@@ -135,7 +136,7 @@ func (r *eventLoop) setTimer(a core.SetTimer) {
 	})
 }
 
-func (r *eventLoop) cancelTimer(id core.TimerID) {
+func (r *eventLoop) cancelTimer(id machine.TimerID) {
 	if t := r.timers[id]; t != nil {
 		t.Stop()
 		delete(r.timers, id)

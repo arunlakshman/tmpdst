@@ -7,6 +7,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // CreateTopic is the direct topic-creation call. It is not a ControlPlaneCall because
@@ -61,7 +62,7 @@ func (o ControlPlaneTestStep) Describe() string {
 // DescribeTopics covers known, unknown and all topics.
 func ControlPlaneOps(p InputProfile) func(r *checker.Rand, i int) ControlPlaneTestStep {
 	return func(r *checker.Rand, i int) ControlPlaneTestStep {
-		request := core.RequestID(i + 1)
+		request := machine.RequestID(i + 1)
 		switch chooseByWeight(r, p.CreateTopicWeight, p.CommitWeight, p.LookupWeight, p.DescribeWeight) {
 		case 0:
 			if r.Intn(2) == 0 {
@@ -79,7 +80,7 @@ func ControlPlaneOps(p InputProfile) func(r *checker.Rand, i int) ControlPlaneTe
 
 // genExclusiveCreate is a CreateTopic call with FailIfExists. It takes its
 // name and count from genCreateTopic, so it also covers the invalid creates.
-func genExclusiveCreate(p InputProfile, r *checker.Rand, request core.RequestID) ControlPlaneTestStep {
+func genExclusiveCreate(p InputProfile, r *checker.Rand, request machine.RequestID) ControlPlaneTestStep {
 	c := genCreateTopic(p, r).CreateTopic
 	return NewCall(core.ControlPlaneCall{Req: request, Op: core.CreateTopic{Name: c.Name, Partitions: c.Partitions, FailIfExists: true}})
 }

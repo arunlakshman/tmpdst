@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 type wrap struct{ Client }
@@ -12,7 +13,7 @@ func (w *wrap) session() *Client { return &w.Client }
 
 func TestRetryDelay(t *testing.T) {
 	t.Parallel()
-	if RetryWaitTime(1) != 100*core.Millisecond {
+	if RetryWaitTime(1) != 100*machine.Millisecond {
 		t.Fatalf("RetryDelay(1) = %d", RetryWaitTime(1))
 	}
 	if RetryWaitTime(99) != RetryWaitTime(4) {
@@ -25,7 +26,7 @@ func TestLoopDialFailAndReady(t *testing.T) {
 	c := &wrap{Client: Client{ID: 0}}
 	var ready, lost int
 	l := Loop[*wrap]{
-		Brokers:   []core.NodeID{"b0", "b1"},
+		Brokers:   []machine.NodeID{"b0", "b1"},
 		Clients:   []*wrap{c},
 		Connected: func(c *wrap) bool { return c.State == Connected },
 		Busy:      func(c *wrap) bool { return false },
@@ -73,7 +74,7 @@ func TestLoopRequestTimeout(t *testing.T) {
 	c := &wrap{Client: Client{ID: 1, State: Connected, Conn: 3}}
 	busy := true
 	l := Loop[*wrap]{
-		Brokers:   []core.NodeID{"b0"},
+		Brokers:   []machine.NodeID{"b0"},
 		Clients:   []*wrap{c},
 		Connected: func(*wrap) bool { return true },
 		Busy:      func(*wrap) bool { return busy },
@@ -82,7 +83,7 @@ func TestLoopRequestTimeout(t *testing.T) {
 		Bytes:     func(*wrap, []byte) []core.Action { return nil },
 		Lost:      func(*wrap, string) { busy = false },
 	}
-	acts := l.Request(c, []byte("x"), core.Second)
+	acts := l.Request(c, []byte("x"), machine.Second)
 	if len(acts) != 2 {
 		t.Fatalf("Request acts = %#v", acts)
 	}
@@ -98,7 +99,7 @@ func TestLoopIdleAndBytes(t *testing.T) {
 	c := &wrap{Client: Client{ID: 2, State: Connected, Conn: 9}}
 	var idle, bytes int
 	l := Loop[*wrap]{
-		Brokers:   []core.NodeID{"b0"},
+		Brokers:   []machine.NodeID{"b0"},
 		Clients:   []*wrap{c},
 		Connected: func(c *wrap) bool { return c.State == Connected },
 		Busy:      func(*wrap) bool { return false },

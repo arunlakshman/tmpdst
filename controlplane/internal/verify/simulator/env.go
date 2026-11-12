@@ -4,6 +4,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/fault"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/rng"
 )
 
@@ -35,8 +36,8 @@ func (e *env) Uint64() uint64 { return e.rand.Uint64() }
 func (e *env) Intn(n int) int { return e.rand.Intn(n) }
 
 // NewID implements runtime.Rand.
-func (e *env) NewID() runtime.ID {
-	var id runtime.ID
+func (e *env) NewID() machine.ID {
+	var id machine.ID
 	e.rand.Bytes(id[:])
 	return id
 }

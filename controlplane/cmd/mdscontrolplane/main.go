@@ -25,7 +25,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/server"
-	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/shared/httpconnections"
 	"github.com/manifesterio/mds/shared/runinfo"
 )
@@ -188,7 +188,7 @@ func openNode(ctx context.Context, f cpFlags, m *controlplanemetrics.Metrics, lo
 		Machine:        mcfg,
 		Log:            logStore,
 		Objects:        objs,
-		Self:           runtime.NodeInstance{Node: runtime.NodeID(nodeName(f.log))},
+		Self:           machine.NodeInstance{Node: machine.NodeID(nodeName(f.log))},
 		BrokerLeaseTTL: f.brokerLeaseTTL,
 	})
 	sctx, cancel := context.WithTimeout(ctx, f.log.startTimeout)
@@ -212,13 +212,13 @@ func machineConfig(f cpFlags) replica.Config {
 		OnCheckpointDecision: logCheckpointDecision,
 		// Short catch-up period so Ready (and health Serving) arrives quickly;
 		// subsequent rounds keep the same cadence.
-		CatchUpEvery:       runtime.Duration(5 * time.Millisecond),
+		CatchUpEvery:       machine.Duration(5 * time.Millisecond),
 		Rank:               f.log.rank,
-		Heartbeat:          runtime.Duration(f.log.heartbeat),
-		TakeoverAfter:      runtime.Duration(f.log.takeoverAfter),
-		TakeoverRankStep:   runtime.Duration(f.log.takeoverRankStep),
+		Heartbeat:          machine.Duration(f.log.heartbeat),
+		TakeoverAfter:      machine.Duration(f.log.takeoverAfter),
+		TakeoverRankStep:   machine.Duration(f.log.takeoverRankStep),
 		Writer:             nodeName(f.log),
-		CheckpointEvery:    runtime.Duration(f.log.checkpointEvery),
+		CheckpointEvery:    machine.Duration(f.log.checkpointEvery),
 		CheckpointMinSlots: f.log.checkpointMinSlots,
 		KeepSlots:          f.log.windowSlots / 8,
 		WindowSlots:        f.log.windowSlots,

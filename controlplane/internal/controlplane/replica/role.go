@@ -6,10 +6,11 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 const (
-	timerRole = runtime.TimerID(3)
+	timerRole = machine.TimerID(3)
 )
 
 // One node holds the write role at a time (docs/writer-fencing-design.md). A
@@ -71,7 +72,7 @@ func (m *Replica) canCommit() bool {
 	return true
 }
 
-func (m *Replica) roleEvery() runtime.Duration {
+func (m *Replica) roleEvery() machine.Duration {
 	a, b := m.config.Heartbeat, m.config.TakeoverAfter
 	switch {
 	case a > 0 && b > 0:
@@ -137,8 +138,8 @@ func (m *Replica) claimDue() bool {
 	if take <= 0 || !m.canClaim() {
 		return false
 	}
-	wait := runtime.NodeTime(take) + runtime.NodeTime(m.config.Rank)*runtime.NodeTime(m.config.TakeoverRankStep)
-	return m.now-m.lastOtherAt > wait && m.now-m.lastPullOK < runtime.NodeTime(take)
+	wait := machine.NodeTime(take) + machine.NodeTime(m.config.Rank)*machine.NodeTime(m.config.TakeoverRankStep)
+	return m.now-m.lastOtherAt > wait && m.now-m.lastPullOK < machine.NodeTime(take)
 }
 
 // claimNow claims at boot for rank 0 when the log has no writer epoch yet.
@@ -187,7 +188,7 @@ func (m *Replica) stepDown() []any {
 	m.refuseClients(runtime.ErrUnavailable, runtime.MaybeApplied)
 	m.dropRole()
 	m.queue = nil
-	m.inFlightAppends = map[runtime.RequestID]*inFlightAppend{}
+	m.inFlightAppends = map[machine.RequestID]*inFlightAppend{}
 	m.waiters = map[string][]waitingCommand{}
 	m.lastOtherAt = m.now
 	return nil
@@ -198,7 +199,7 @@ func (m *Replica) heartbeatDue() bool {
 	if !m.active || !m.ready || m.booting || hb <= 0 {
 		return false
 	}
-	if m.now-m.lastOwnAt <= runtime.NodeTime(hb) {
+	if m.now-m.lastOwnAt <= machine.NodeTime(hb) {
 		return false
 	}
 	return len(m.queue) == 0 && len(m.inFlightAppends) == 0 && m.pending == 0
@@ -211,7 +212,7 @@ func (m *Replica) maybeReplicaFault() []any {
 		return nil
 	}
 	if m.config.StallProb > 0 && m.env.Fault("logcp_stall", m.config.StallProb) {
-		m.stallUntil = m.now + runtime.NodeTime(betweenDur(m.env, m.config.StallDur))
+		m.stallUntil = m.now + machine.NodeTime(betweenDur(m.env, m.config.StallDur))
 		m.env.Reachable("logcp-sim: replica stalled")
 		return nil
 	}
@@ -221,11 +222,11 @@ func (m *Replica) maybeReplicaFault() []any {
 	return nil
 }
 
-func betweenDur(r interface{ Intn(int) int }, d [2]runtime.Duration) runtime.Duration {
+func betweenDur(r interface{ Intn(int) int }, d [2]machine.Duration) machine.Duration {
 	if d[1] <= d[0] {
 		return d[0]
 	}
-	return d[0] + runtime.Duration(r.Intn(int(d[1]-d[0])+1))
+	return d[0] + machine.Duration(r.Intn(int(d[1]-d[0])+1))
 }
 
 func (m *Replica) softCrash() []any {
@@ -235,7 +236,7 @@ func (m *Replica) softCrash() []any {
 	m.booting = true
 	m.crashed = true
 	m.timerGen++ // no catch-up while down
-	m.downUntil = m.now + runtime.NodeTime(betweenDur(m.env, m.config.DownDur))
+	m.downUntil = m.now + machine.NodeTime(betweenDur(m.env, m.config.DownDur))
 	m.answers = nil
 	m.clearLocal()
 	// Refuse client work until afterCrashRestart restores fold + catch-up.
@@ -268,7 +269,7 @@ func (m *Replica) hitTrimmed() []any {
 
 func (m *Replica) clearLocal() {
 	m.queue = nil
-	m.inFlightAppends = map[runtime.RequestID]*inFlightAppend{}
+	m.inFlightAppends = map[machine.RequestID]*inFlightAppend{}
 	m.waiters = map[string][]waitingCommand{}
 	m.buf = map[runtime.LogPosition][]byte{}
 	m.pending, m.pendingKind = 0, pendingNone
@@ -284,7 +285,7 @@ func (m *Replica) refuseClients(err runtime.ErrCode, o runtime.Outcome) {
 		})
 	}
 	// Sort map keys so answer order is stable across runs (TraceHash).
-	reqs := make([]runtime.RequestID, 0, len(m.inFlightAppends))
+	reqs := make([]machine.RequestID, 0, len(m.inFlightAppends))
 	for request := range m.inFlightAppends { //determinismcheck:ok keys are collected, then sorted before use
 		reqs = append(reqs, request)
 	}

@@ -10,6 +10,8 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // batch is one produce batch for one partition, retried unchanged until
@@ -18,7 +20,7 @@ import (
 // deliberately claims a producer id: the broker must reject it with
 // INVALID_REQUEST, per partition, and never commit it.
 type batch struct {
-	id        core.ID
+	id        machine.ID
 	tpIdx     int
 	vals      []string
 	data      []byte
@@ -61,18 +63,18 @@ func (b *batch) expect() int16 {
 	return 0
 }
 
-func (p *producer) hash(h *core.Hasher) {
-	h.Uint64Value(uint64(p.serial))
+func (p *producer) hash(h *trace.Hash) {
+	h.Uint64(uint64(p.serial))
 	h.Bool(p.noNew)
 	for _, b := range p.cur {
 		h.Bytes(b.id[:])
-		h.Uint64Value(uint64(b.tpIdx))
-		h.Uint64Value(uint64(b.attempts))
+		h.Uint64(uint64(b.tpIdx))
+		h.Uint64(uint64(b.attempts))
 		h.Bool(b.ambiguous)
 		h.Bool(b.idem)
 		h.Bool(b.corrupt)
-		h.Uint64Value(uint64(b.lastCode))
-		h.Uint64Value(b.dig)
+		h.Uint64(uint64(b.lastCode))
+		h.Uint64(b.dig)
 	}
 }
 
@@ -172,7 +174,7 @@ func (w *Workload) newBatches(c *client) {
 			data[len(data)-1] ^= 0x40
 		}
 		b.data = data
-		dh := core.NewHasher()
+		dh := trace.New()
 		dh.Bytes(data)
 		b.dig = uint64(dh)
 		if w.history != nil {
@@ -204,7 +206,7 @@ func (w *Workload) sendProduce(c *client) []core.Action {
 }
 
 func (w *Workload) think(c *client) core.Action {
-	return c.Wake(core.Duration(20+w.env.Intn(60)) * core.Millisecond)
+	return c.Wake(machine.Duration(20+w.env.Intn(60)) * machine.Millisecond)
 }
 
 // onProduce resolves each batch of the request from its partition's answer.

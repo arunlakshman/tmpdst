@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Consumer groups (slice 4a). The spec of the group commands and reads. Plain
@@ -144,7 +145,7 @@ func noEmpty(b []byte) []byte {
 }
 
 // groupDone is the answer to a group write that has no response.
-func groupDone(request core.RequestID, code core.ErrCode) core.ControlPlaneDone {
+func groupDone(request machine.RequestID, code core.ErrCode) core.ControlPlaneDone {
 	if code != core.OK {
 		return core.ControlPlaneDone{Req: request, Err: code}
 	}
@@ -258,7 +259,7 @@ func (c *ControlPlane) groupRemove(operation core.GroupRemove) core.ErrCode {
 	return core.OK
 }
 
-func (c *ControlPlane) offsetCommit(request core.RequestID, operation core.OffsetCommit) core.ControlPlaneDone {
+func (c *ControlPlane) offsetCommit(request machine.RequestID, operation core.OffsetCommit) core.ControlPlaneDone {
 	if sizeOffsetCommit(operation) > maxGroupCommand {
 		return core.ControlPlaneDone{Req: request, Err: core.ErrTooLarge}
 	}

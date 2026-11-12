@@ -1,5 +1,7 @@
 package core
 
+import "github.com/manifesterio/mds/dst/machine"
+
 // StateMachine is the shape of every stateful component (broker, sim workload).
 // Step is the only place state changes. It never blocks and never does I/O.
 // An IOResult with an unknown, already-finished or wrong-kind RequestID must leave
@@ -22,4 +24,4 @@ type Machine interface {
 
 // MachineFactory builds a fresh Machine for one boot. It is called on first boot
 // and after every crash, with a new BootNumber each time (lessons 4, 10).
-type MachineFactory func(env Environment, self NodeInstance) Machine
+type MachineFactory func(env Environment, self machine.NodeInstance) Machine

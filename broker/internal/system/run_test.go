@@ -9,13 +9,14 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 type fakeClock struct{}
 
-func (fakeClock) Mono() core.NodeTime { return 7 }
-func (fakeClock) Wall() core.RealTime { return 9 }
-func (fakeClock) AfterFunc(d core.Duration, f func()) core.Timer {
+func (fakeClock) Mono() machine.NodeTime { return 7 }
+func (fakeClock) Wall() machine.RealTime { return 9 }
+func (fakeClock) AfterFunc(d machine.Duration, f func()) machine.Timer {
 	return time.AfterFunc(time.Duration(d), f)
 }
 
@@ -59,7 +60,7 @@ func (m *fakeMachine) StateHash() uint64 { return 0 }
 func setup(m *fakeMachine) (Dependencies, *fakeExec, *fakeConns, core.MachineFactory) {
 	cn := &fakeConns{}
 	b := Dependencies{Clock: fakeClock{}, Connections: cn, Inbox: NewInbox(8)}
-	return b, &fakeExec{}, cn, func(core.Environment, core.NodeInstance) core.Machine { return m }
+	return b, &fakeExec{}, cn, func(core.Environment, machine.NodeInstance) core.Machine { return m }
 }
 
 func TestStartedFirstControlBeatsData(t *testing.T) {
@@ -74,7 +75,7 @@ func TestStartedFirstControlBeatsData(t *testing.T) {
 		}
 		return nil
 	}
-	if err := Run(t.Context(), b, ex, f, core.NodeInstance{}); err != nil {
+	if err := Run(t.Context(), b, ex, f, machine.NodeInstance{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := m.events[0].Body.(core.NodeStarted); !ok {
@@ -93,7 +94,7 @@ func TestTripRunsEarlierActions(t *testing.T) {
 		return []core.Action{core.ObjectPut{Req: 1}, core.PauseReads{Conn: 2}, core.StopForRestart{Cause: "x"}, core.ObjectPut{Req: 2}}
 	}}
 	b, ex, cn, f := setup(m)
-	err := Run(t.Context(), b, ex, f, core.NodeInstance{})
+	err := Run(t.Context(), b, ex, f, machine.NodeInstance{})
 	if !errors.Is(err, ErrStoppedForRestart) {
 		t.Fatalf("err = %v", err)
 	}
@@ -105,7 +106,7 @@ func TestTripRunsEarlierActions(t *testing.T) {
 func TestExitReturnsNilAndLateDeliveryDropped(t *testing.T) {
 	m := &fakeMachine{script: func(int, core.EventData) []core.Action { return []core.Action{core.ShutdownDone{}} }}
 	b, ex, _, f := setup(m)
-	if err := Run(t.Context(), b, ex, f, core.NodeInstance{}); err != nil {
+	if err := Run(t.Context(), b, ex, f, machine.NodeInstance{}); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan struct{})
@@ -133,7 +134,7 @@ func TestCtxCancelStops(t *testing.T) {
 	b, ex, _, f := setup(m)
 	ctx, cancel := context.WithCancel(t.Context())
 	res := make(chan error, 1)
-	go func() { res <- Run(ctx, b, ex, f, core.NodeInstance{}) }()
+	go func() { res <- Run(ctx, b, ex, f, machine.NodeInstance{}) }()
 	cancel()
 	select {
 	case err := <-res:
@@ -146,14 +147,14 @@ func TestCtxCancelStops(t *testing.T) {
 }
 
 func TestTimerFiresAndEmitFact(t *testing.T) {
-	var facts []core.Fact
+	var facts []machine.Fact
 	m := &fakeMachine{}
 	b, ex, _, f := setup(m)
-	b.Facts = func(f core.Fact) { facts = append(facts, f) }
+	b.Facts = func(f machine.Fact) { facts = append(facts, f) }
 	m.script = func(n int, body core.EventData) []core.Action {
 		switch n {
 		case 0:
-			return []core.Action{core.RecordFact{}, core.SetTimer{ID: 3, Gen: 4, After: core.Duration(time.Millisecond)}}
+			return []core.Action{core.RecordFact{}, core.SetTimer{ID: 3, Gen: 4, After: machine.Duration(time.Millisecond)}}
 		default:
 			if tf, ok := body.(core.TimerFired); ok && tf.ID == 3 && tf.Gen == 4 {
 				return []core.Action{core.ShutdownDone{}}
@@ -161,7 +162,7 @@ func TestTimerFiresAndEmitFact(t *testing.T) {
 		}
 		return nil
 	}
-	if err := Run(t.Context(), b, ex, f, core.NodeInstance{}); err != nil {
+	if err := Run(t.Context(), b, ex, f, machine.NodeInstance{}); err != nil {
 		t.Fatal(err)
 	}
 	if len(facts) != 1 {
@@ -177,8 +178,8 @@ func TestDispatchTimersAndConns(t *testing.T) {
 			return nil
 		}
 		return []core.Action{
-			core.SetTimer{ID: 1, After: core.Duration(time.Hour)},
-			core.SetTimer{ID: 1, After: core.Duration(time.Hour)}, // replace
+			core.SetTimer{ID: 1, After: machine.Duration(time.Hour)},
+			core.SetTimer{ID: 1, After: machine.Duration(time.Hour)}, // replace
 			core.CancelTimer{ID: 1},
 			core.CancelTimer{ID: 99}, // missing
 			core.CloseConn{Conn: 7, Abort: true},
@@ -187,7 +188,7 @@ func TestDispatchTimersAndConns(t *testing.T) {
 			core.ShutdownDone{},
 		}
 	}
-	if err := Run(t.Context(), b, ex, f, core.NodeInstance{}); err != nil {
+	if err := Run(t.Context(), b, ex, f, machine.NodeInstance{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(cn.log, ","); got != "close,resume" {
@@ -219,15 +220,15 @@ func TestShutdownStopThenExit(t *testing.T) {
 	}
 	b, ex, _, f := setup(m)
 	sd := make(chan struct{})
-	b.Shutdown, b.StopGrace = sd, core.Duration(time.Second)
+	b.Shutdown, b.StopGrace = sd, machine.Duration(time.Second)
 	res := make(chan error, 1)
-	go func() { res <- Run(t.Context(), b, ex, f, core.NodeInstance{}) }()
+	go func() { res <- Run(t.Context(), b, ex, f, machine.NodeInstance{}) }()
 	close(sd)
 	if err := <-res; err != nil {
 		t.Fatal(err)
 	}
 	n, s := stops(m)
-	if n != 1 || s.Deadline != 7+core.NodeTime(time.Second) {
+	if n != 1 || s.Deadline != 7+machine.NodeTime(time.Second) {
 		t.Fatalf("stops=%d deadline=%d", n, s.Deadline)
 	}
 }
@@ -236,9 +237,9 @@ func TestShutdownIgnoredKilled(t *testing.T) {
 	m := &fakeMachine{}
 	b, ex, _, f := setup(m)
 	sd := make(chan struct{})
-	b.Shutdown, b.StopGrace = sd, core.Duration(50*time.Millisecond)
+	b.Shutdown, b.StopGrace = sd, machine.Duration(50*time.Millisecond)
 	res := make(chan error, 1)
-	go func() { res <- Run(t.Context(), b, ex, f, core.NodeInstance{}) }()
+	go func() { res <- Run(t.Context(), b, ex, f, machine.NodeInstance{}) }()
 	close(sd)
 	start := time.Now()
 	if err := <-res; !errors.Is(err, ErrKilledByRuntime) {
@@ -258,12 +259,12 @@ func TestShutdownStopDeliveredOnce(t *testing.T) {
 	m := &fakeMachine{}
 	b, ex, _, f := setup(m)
 	sd := make(chan struct{})
-	b.Shutdown, b.StopGrace = sd, core.Duration(100*time.Millisecond)
+	b.Shutdown, b.StopGrace = sd, machine.Duration(100*time.Millisecond)
 	close(sd)
 	for i := range 5 {
-		b.Inbox.DeliverControl(core.TimerFired{ID: core.TimerID(i)})
+		b.Inbox.DeliverControl(core.TimerFired{ID: machine.TimerID(i)})
 	}
-	err := Run(t.Context(), b, ex, f, core.NodeInstance{})
+	err := Run(t.Context(), b, ex, f, machine.NodeInstance{})
 	if !errors.Is(err, ErrKilledByRuntime) {
 		t.Fatalf("err = %v", err)
 	}

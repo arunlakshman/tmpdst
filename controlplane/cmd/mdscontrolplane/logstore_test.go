@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/controlplanemetrics"
-	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/shared/runinfo"
 )
 
@@ -41,7 +41,7 @@ func TestLogFlags(t *testing.T) {
 			if f.log.takeoverRankStep != 250*time.Millisecond {
 				t.Fatalf("flag value: %v", f.log.takeoverRankStep)
 			}
-			if got := machineConfig(f).TakeoverRankStep; got != runtime.Duration(250*time.Millisecond) {
+			if got := machineConfig(f).TakeoverRankStep; got != machine.Duration(250*time.Millisecond) {
 				t.Fatalf("machine config: %v", got)
 			}
 		}},

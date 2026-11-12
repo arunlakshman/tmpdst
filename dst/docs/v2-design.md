@@ -1882,3 +1882,40 @@ written, and the smallest change that was made.
     "nondeterminism" and "never checked" appear only when they have content); the
     summary line lists the counters of the scenario by name; failure details use
     the broker words; the coverage line names both Sometimes and Reachable paths.
+
+### T1.6a (base types from dst/machine)
+
+1. **No aliases were left behind.** The plan says to use type aliases first. The
+   copies in `broker/internal/core` and `controlplane/internal/runtime` were removed
+   in one step instead: a small program rewrote every use (about 100 broker files and
+   70 control plane files, mostly import and type-name changes) from the type
+   information of the compiler, so no alias was needed to keep importers compiling.
+   What moved to `dst/machine`: `NodeTime`, `RealTime`, `Duration` and its units,
+   `ID`, `NodeID`, `BootNumber`, `RequestID`, `TimerID`, `TimerVersion`,
+   `NodeInstance`, `Clock`, `Timer`, and in the broker `Fact`, `Field`, `FieldValue`
+   with its five cases, and `InboxKind` (now `machine.Class`, with `machine.Control`
+   and `machine.Data`). `core.Hasher` and `runtime.Hasher` are `trace.Hash`; the method
+   names changed (`Uint64Value` is `Uint64`, `Int64Value` is `Int64`, `StringValue` is
+   `String`). The bytes are the same.
+2. **`Environment` and its parts stay in core and runtime until T1.6d.** Section 3.2
+   lists `Environment`, `Rand`, `FaultInjector` and `Assertions` as moving in T1.6.
+   They cannot move before the typed catalog handles exist (T1.6d): `machine.Faults`
+   takes `fault.NamedSite` and `machine.Assertions` takes the typed handles of
+   `assert`, while core and runtime still pass strings (`FaultPointID`,
+   `PropertyID`). `machine.Rand` also has `Between` and `Chance`, which the product
+   random types do not have yet. T1.6d moves them together with the call sites.
+3. **`StateMachine`, `Machine` and `MachineFactory` stay in core.** The v2 contract
+   is `Step(now Now, in In) []Out`. The broker machine is still
+   `Step(core.Event) []core.Action`, and `core.Event` goes away only when the
+   machines take the new contract (T1.11a for the control plane, T1.12b for the
+   broker). Changing the signature here would touch every machine and every test.
+4. **`broker/internal/broker` keeps its own `stateHasher`.** It is a `uint64` with
+   its own lower-case methods (`u64`, `str`, `bytes`) that about 40 call sites use.
+   Only its integer fold now calls `trace.Hash.Uint64` (it called `core.Fnv64Hash`).
+   The bytes are the same, so the state hash is the same.
+5. **Allow-lists.** `dst/machine` is added to `controlplane/ops/determinism-allow.txt`.
+   `dst/machine` and `dst/trace` are added to `broker/ops/determinism-allow.txt`.
+   `broker/go.mod` now requires `dst` directly (it was `// indirect`).
+6. **The broker determinism script already failed before this task.**
+   `broker/internal/core/operation_runner.go` imports `context`, which is not on the
+   allow-list. The script is not part of `make build`. This task adds no new finding.

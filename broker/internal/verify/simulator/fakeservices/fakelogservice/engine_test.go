@@ -7,9 +7,10 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakelogservice"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
-const ms = core.Duration(1_000_000)
+const ms = machine.Duration(1_000_000)
 
 func faults() simulator.ControlPlaneFaults {
 	ts := simulator.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms}
@@ -35,7 +36,7 @@ func TestBridgeHandlesAndDefaults(t *testing.T) {
 		t.Fatal(e.Topics())
 	}
 	e.EnterRecovery()
-	e.OnCrash(nil, core.NodeInstance{})
+	e.OnCrash(nil, machine.NodeInstance{})
 }
 
 func TestBridgeUnavailableWithoutCP(t *testing.T) {
@@ -60,7 +61,7 @@ func TestBridgeUnavailableWithoutCP(t *testing.T) {
 func TestBridgeOfferAndReply(t *testing.T) {
 	f := faults()
 	f.Unavailable503, f.Timeout, f.LostResponse, f.Outage.Prob = 0, 0, 0, 0
-	f.CallerTimeout = 10 * core.Second
+	f.CallerTimeout = 10 * machine.Second
 	e := fakelogservice.New(f)
 	c := fakeservicetest.New(e, 2)
 	broker := fakeservicetest.Ref("broker-0")
@@ -139,7 +140,7 @@ func TestBridgeLostReplyStillTimesOut(t *testing.T) {
 func TestBridgeFailoverOnUnavailable(t *testing.T) {
 	f := faults()
 	f.Unavailable503, f.Timeout, f.LostResponse, f.Outage.Prob = 0, 0, 0, 0
-	f.CallerTimeout = 10 * core.Second
+	f.CallerTimeout = 10 * machine.Second
 	e := fakelogservice.New(f)
 	c := fakeservicetest.New(e, 4)
 	broker := fakeservicetest.Ref("broker-1")

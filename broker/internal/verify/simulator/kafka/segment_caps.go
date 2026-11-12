@@ -6,11 +6,12 @@ import (
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // timerExtraTime is how late a flush may fire past its window: a node busy with a
 // paused Step (CostParams.Pause, up to 100 ms) runs its timer late.
-const timerExtraTime = 150 * core.Millisecond
+const timerExtraTime = 150 * machine.Millisecond
 
 // segmentCaps checks every sealed segment (the broker's segment_sealed fact)
 // against this seed's flush rule: at most MaxSegmentBatches batches and
@@ -77,9 +78,9 @@ func (i *segmentCaps) AtEnd(v simulator.View) {
 
 func (i *segmentCaps) Observe(v simulator.View) {
 	for _, tf := range v.Timeline().Since("segment_sealed", &i.seal) {
-		n := func(k string) int64 { x, _ := tf.Fact.Field(k).(core.Int64Value); return int64(x) }
+		n := func(k string) int64 { x, _ := tf.Fact.Field(k).(machine.Int64Value); return int64(x) }
 		a := v.Assert()
-		why, _ := tf.Fact.Field("reason").(core.StringValue)
+		why, _ := tf.Fact.Field("reason").(machine.StringValue)
 		d := core.ContextPair{Key: "reason", Value: string(why)}
 		a.Always(n("batches") <= int64(i.config.MaxSegmentBatches), "kafka: a sealed segment holds at most MaxSegmentBatches batches",
 			d, core.ContextPair{Key: "batches", Value: n("batches")}, core.ContextPair{Key: "cap", Value: i.config.MaxSegmentBatches})

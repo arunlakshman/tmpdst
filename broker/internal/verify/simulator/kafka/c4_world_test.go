@@ -13,6 +13,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // C4 world: a random correct at-least-once Kafka history generated against the
@@ -40,7 +41,7 @@ type stats struct{ retries, replays, indetLand, indetNo, rejected, multi int }
 
 type producer struct{ nb int }
 
-type broker struct{ ref core.NodeInstance }
+type broker struct{ ref machine.NodeInstance }
 
 // world is the fake simulator.View plus the spec-side truth it was built from.
 type world struct {
@@ -72,7 +73,7 @@ type world struct {
 func (w *world) Step() uint64                            { return uint64(len(w.raw)) }
 func (w *world) Now() simulator.Time                     { return w.now }
 func (w *world) Phase() simulator.Phase                  { return simulator.PhaseRecovering }
-func (w *world) Alive(core.NodeInstance) bool            { return true }
+func (w *world) Alive(machine.NodeInstance) bool         { return true }
 func (w *world) Timeline() simulator.Timeline            { return w.tl }
 func (w *world) History() simulator.History              { return (*hist)(w) }
 func (w *world) Objects() simulator.ObjectStoreRealState { return (*objView)(w) }
@@ -82,11 +83,13 @@ func (w *world) touch()                                  { w.gen++ }
 
 type hist world
 
-func (h *hist) Invoke(core.NodeInstance, core.ID, core.ID, any) {
+func (h *hist) Invoke(machine.NodeInstance, machine.ID, machine.ID, any) {
 	panic("C4: history is built directly")
 }
-func (h *hist) Return(core.ID, any, simulator.OpOutcome) bool { panic("C4: history is built directly") }
-func (h *hist) Ops() []simulator.HistoryOperation             { return h.ops }
+func (h *hist) Return(machine.ID, any, simulator.OpOutcome) bool {
+	panic("C4: history is built directly")
+}
+func (h *hist) Ops() []simulator.HistoryOperation { return h.ops }
 
 type objView world
 
@@ -116,7 +119,7 @@ func (w *world) rebuildTL() {
 	}
 }
 
-func (w *world) emit(src core.NodeInstance, f core.Fact) {
+func (w *world) emit(src machine.NodeInstance, f machine.Fact) {
 	tf := simulator.TimedFact{Seq: uint64(len(w.raw) + 1), At: w.now, Source: src, Fact: f}
 	w.raw = append(w.raw, tf)
 	w.tl.Append(src, w.now, f)
@@ -131,7 +134,7 @@ func (w *world) step() {
 	}
 }
 
-func nodeRef(s string) core.NodeInstance { return core.NodeInstance{Node: core.NodeID(s)} }
+func nodeRef(s string) machine.NodeInstance { return machine.NodeInstance{Node: machine.NodeID(s)} }
 
 func newWorld(seed uint64, live bool) *world {
 	r := rand.New(rand.NewPCG(seed, 0xc4)) //nolint:gosec // G404: deterministic test/sim PRNG
@@ -176,9 +179,9 @@ func newWorld(seed uint64, live bool) *world {
 	return w
 }
 
-func (w *world) newID() core.ID {
+func (w *world) newID() machine.ID {
 	w.nextID++
-	var id core.ID
+	var id machine.ID
 	binary.BigEndian.PutUint64(id[:], w.nextID)
 	return id
 }
@@ -296,10 +299,10 @@ func valBytes(vs []string) [][]byte {
 }
 
 func (w *world) ack(b *broker, rg core.BatchRange, it *item) {
-	w.emit(b.ref, core.Fact{Name: "produce_acked", Fields: []core.Field{
-		{Key: "topic", Value: core.StringValue(rg.TopicPartition.Topic)}, {Key: "partition", Value: core.Int64Value(rg.TopicPartition.Partition)},
-		{Key: "base_offset", Value: core.Int64Value(rg.Base)}, {Key: "count", Value: core.Int64Value(rg.Count)},
-		{Key: "segment", Value: core.StringValue(rg.Loc.Key)}}})
+	w.emit(b.ref, machine.Fact{Name: "produce_acked", Fields: []machine.Field{
+		{Key: "topic", Value: machine.StringValue(rg.TopicPartition.Topic)}, {Key: "partition", Value: machine.Int64Value(rg.TopicPartition.Partition)},
+		{Key: "base_offset", Value: machine.Int64Value(rg.Base)}, {Key: "count", Value: machine.Int64Value(rg.Count)},
+		{Key: "segment", Value: machine.StringValue(rg.Loc.Key)}}})
 }
 
 func (w *world) invoke(it *item, c int) {

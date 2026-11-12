@@ -45,7 +45,7 @@ func (p *Broker) Read(from core.Offset, max int) ([]StoredRecord, bool) {
 // StateHash folds every record in order.
 func (p *Broker) StateHash() uint64 {
 	h := newStateHasher()
-	h.Uint64Value(uint64(len(p.recs)))
+	h.Uint64(uint64(len(p.recs)))
 	for _, r := range p.recs {
 		h.Bytes(r)
 	}

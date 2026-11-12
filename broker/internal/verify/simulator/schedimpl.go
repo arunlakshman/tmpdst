@@ -1,6 +1,6 @@
 package simulator
 
-import "github.com/manifesterio/mds/broker/internal/core"
+import "github.com/manifesterio/mds/dst/machine"
 
 // queueItem is one pending entry. Cancel and DropNode mark it dead; dead items
 // are discarded lazily when they reach the top of the heap.
@@ -130,8 +130,8 @@ func (s *scheduler) Cancel(id EntryID) {
 	}
 }
 
-func (s *scheduler) DropNode(ref core.NodeInstance) int {
-	if ref == (core.NodeInstance{}) {
+func (s *scheduler) DropNode(ref machine.NodeInstance) int {
+	if ref == (machine.NodeInstance{}) {
 		return 0
 	}
 	n := 0

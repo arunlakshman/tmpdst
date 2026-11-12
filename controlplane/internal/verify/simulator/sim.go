@@ -10,6 +10,7 @@ import (
 	dstclock "github.com/manifesterio/mds/dst/clock"
 	"github.com/manifesterio/mds/dst/eng"
 	"github.com/manifesterio/mds/dst/fault"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/rng"
 	"github.com/manifesterio/mds/dst/sched"
 	dstsim "github.com/manifesterio/mds/dst/sim"
@@ -123,7 +124,7 @@ type traceLine struct {
 }
 
 func (t traceLine) String() string {
-	return fmt.Sprintf("step %d t=%dms %s <- %s (%d actions)", t.step, t.at/int64(runtime.Millisecond), t.who, bodyText(t.body), t.acts)
+	return fmt.Sprintf("step %d t=%dms %s <- %s (%d actions)", t.step, t.at/int64(machine.Millisecond), t.who, bodyText(t.body), t.acts)
 }
 
 // bodyText is a short text of an event. Long byte slices are cut.
@@ -139,7 +140,7 @@ func bodyText(b any) string {
 // tracef writes a note about something that is not a step (a crash, a partition).
 func (s *sim) tracef(format string, args ...any) {
 	if s.cfg.Trace != nil {
-		s.cfg.Trace(fmt.Sprintf("t=%dms %s", s.now()/int64(runtime.Millisecond), fmt.Sprintf(format, args...)))
+		s.cfg.Trace(fmt.Sprintf("t=%dms %s", s.now()/int64(machine.Millisecond), fmt.Sprintf(format, args...)))
 	}
 }
 
@@ -193,17 +194,17 @@ func newSim(cfg Config) (*sim, error) {
 }
 
 // wallStart is the virtual UTC time at the start of every run (2026-01-01).
-const wallStart = int64(1767225600) * int64(runtime.Second)
+const wallStart = int64(1767225600) * int64(machine.Second)
 
 // Time moves only when the scheduler takes an event. after queues on the heap
 // directly so a node's CancelTimer stays a local token check.
 
-func (s *sim) mono() runtime.NodeTime { return runtime.NodeTime(s.clock.Mono()) }
+func (s *sim) mono() machine.NodeTime { return machine.NodeTime(s.clock.Mono()) }
 func (s *sim) now() int64             { return int64(s.clock.Mono()) }
 func (s *sim) steps() int             { return s.sched.Steps() }
 
 // after queues run to happen d from now. A negative d counts as zero.
-func (s *sim) after(d runtime.Duration, label string, run func()) {
+func (s *sim) after(d machine.Duration, label string, run func()) {
 	s.sched.After(sched.TimeNs(d), label, run)
 }
 
@@ -213,7 +214,7 @@ func (s *sim) addFailure(property, detail string) {
 		return
 	}
 	s.byProp[property] = len(s.failures)
-	s.failures = append(s.failures, Failure{Property: property, Detail: detail, Step: s.steps(), TimeMs: s.now() / int64(runtime.Millisecond)})
+	s.failures = append(s.failures, Failure{Property: property, Detail: detail, Step: s.steps(), TimeMs: s.now() / int64(machine.Millisecond)})
 }
 
 // violation records a broken property. The run goes on.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // ---- test doubles ----
@@ -28,7 +29,7 @@ type entry struct {
 	at   simulator.Time
 	seq  uint64
 	id   simulator.EntryID
-	to   core.NodeInstance
+	to   machine.NodeInstance
 	self bool
 	body any
 }
@@ -42,7 +43,7 @@ type harness struct {
 	now    simulator.Time
 	q      []entry
 	seq    uint64
-	live   map[core.NodeID]core.NodeInstance
+	live   map[machine.NodeID]machine.NodeInstance
 	as     *asserts
 	faults []string
 	log    []string
@@ -50,15 +51,15 @@ type harness struct {
 	data   map[string][]byte
 	closed map[string]core.ConnClosed
 	opened map[string]core.ConnOpened
-	dials  map[core.RequestID]core.ConnectDone
-	sends  map[core.RequestID]core.SendDone
-	reqN   core.RequestID
+	dials  map[machine.RequestID]core.ConnectDone
+	sends  map[machine.RequestID]core.SendDone
+	reqN   machine.RequestID
 }
 
 func newHarness(t *testing.T, seed uint64, f simulator.NetworkFaults) *harness {
-	return &harness{t: t, eng: New(f), rnd: simulator.NewRand(seed), lanes: map[string]simulator.DeliveryLane{}, live: map[core.NodeID]core.NodeInstance{},
+	return &harness{t: t, eng: New(f), rnd: simulator.NewRand(seed), lanes: map[string]simulator.DeliveryLane{}, live: map[machine.NodeID]machine.NodeInstance{},
 		as: &asserts{some: map[core.PropertyID]bool{}}, data: map[string][]byte{}, closed: map[string]core.ConnClosed{},
-		opened: map[string]core.ConnOpened{}, dials: map[core.RequestID]core.ConnectDone{}, sends: map[core.RequestID]core.SendDone{}}
+		opened: map[string]core.ConnOpened{}, dials: map[machine.RequestID]core.ConnectDone{}, sends: map[machine.RequestID]core.SendDone{}}
 }
 
 func (h *harness) Now() simulator.Time         { return h.now }
@@ -81,7 +82,7 @@ func (h *harness) add(e entry) simulator.EntryID {
 	h.q = append(h.q, e)
 	return e.id
 }
-func (h *harness) Deliver(to core.NodeInstance, at simulator.Time, _ simulator.DeliveryLane, b core.EventData) simulator.EntryID {
+func (h *harness) Deliver(to machine.NodeInstance, at simulator.Time, _ simulator.DeliveryLane, b core.EventData) simulator.EntryID {
 	return h.add(entry{at: at, to: to, body: b})
 }
 func (h *harness) Self(at simulator.Time, _ simulator.DeliveryLane, b any) simulator.EntryID {
@@ -95,27 +96,27 @@ func (h *harness) Cancel(id simulator.EntryID) {
 		}
 	}
 }
-func (h *harness) Fault(kind string, f ...core.Field) { h.faults = append(h.faults, kind) }
-func (h *harness) Assert() core.Assertions            { return h.as }
-func (h *harness) Current(n core.NodeID) (core.NodeInstance, bool) {
+func (h *harness) Fault(kind string, f ...machine.Field) { h.faults = append(h.faults, kind) }
+func (h *harness) Assert() core.Assertions               { return h.as }
+func (h *harness) Current(n machine.NodeID) (machine.NodeInstance, bool) {
 	r, ok := h.live[n]
 	return r, ok
 }
 
 var _ simulator.NodeCurrent = (*harness)(nil)
 
-func (h *harness) boot(n string) core.NodeInstance {
-	r := core.NodeInstance{Node: core.NodeID(n), Inc: core.BootNumber(h.rnd.NewID())}
+func (h *harness) boot(n string) machine.NodeInstance {
+	r := machine.NodeInstance{Node: machine.NodeID(n), Inc: machine.BootNumber(h.rnd.NewID())}
 	h.live[r.Node] = r
 	return r
 }
 
-func (h *harness) crash(r core.NodeInstance) {
+func (h *harness) crash(r machine.NodeInstance) {
 	delete(h.live, r.Node)
 	h.eng.OnCrash(h, r)
 }
 
-func key(n core.NodeID, c core.ConnID) string { return fmt.Sprintf("%s/%d", n, c) }
+func key(n machine.NodeID, c core.ConnID) string { return fmt.Sprintf("%s/%d", n, c) }
 
 // step pops one entry; false when empty.
 func (h *harness) step() bool {
@@ -187,9 +188,9 @@ func (h *harness) runUntil(t simulator.Time) {
 	}
 }
 
-func (h *harness) nextRequestID() core.RequestID { h.reqN++; return h.reqN }
+func (h *harness) nextRequestID() machine.RequestID { h.reqN++; return h.reqN }
 
-func (h *harness) dial(from core.NodeInstance, addr string) (core.ConnectDone, bool) {
+func (h *harness) dial(from machine.NodeInstance, addr string) (core.ConnectDone, bool) {
 	r := h.nextRequestID()
 	h.eng.Execute(h, from, core.Connect{Req: r, Addr: addr})
 	h.run()
@@ -197,7 +198,7 @@ func (h *harness) dial(from core.NodeInstance, addr string) (core.ConnectDone, b
 	return d, ok
 }
 
-func (h *harness) send(from core.NodeInstance, c core.ConnID, data []byte) core.RequestID {
+func (h *harness) send(from machine.NodeInstance, c core.ConnID, data []byte) machine.RequestID {
 	r := h.nextRequestID()
 	h.eng.Execute(h, from, core.Send{Req: r, Conn: c, Data: data})
 	return r
@@ -206,7 +207,7 @@ func (h *harness) send(from core.NodeInstance, c core.ConnID, data []byte) core.
 var lat = simulator.FastWithRareSlow{FastMin: 1000, FastMax: 5000, SlowMin: 100000, SlowMax: 200000, SlowProb: 0.1}
 
 // connect dials a->b and returns both conn ids.
-func (h *harness) connect(a, b core.NodeInstance) (core.ConnID, core.ConnID) {
+func (h *harness) connect(a, b machine.NodeInstance) (core.ConnID, core.ConnID) {
 	d, ok := h.dial(a, string(b.Node))
 	if !ok || d.Err != core.OK {
 		h.t.Fatalf("dial failed: %+v %v", d, ok)
@@ -216,7 +217,7 @@ func (h *harness) connect(a, b core.NodeInstance) (core.ConnID, core.ConnID) {
 	return d.Conn, cb
 }
 
-func (h *harness) lastOpened(n core.NodeID) core.ConnID {
+func (h *harness) lastOpened(n machine.NodeID) core.ConnID {
 	var best core.ConnID
 	for k := range h.opened {
 		var name string
@@ -228,7 +229,7 @@ func (h *harness) lastOpened(n core.NodeID) core.ConnID {
 				break
 			}
 		}
-		if core.NodeID(name) == n && c > best {
+		if machine.NodeID(name) == n && c > best {
 			best = c
 		}
 	}
@@ -261,7 +262,7 @@ func TestDial(t *testing.T) {
 }
 
 func TestOrderedDeliveryProperty(t *testing.T) {
-	f := simulator.NetworkFaults{Latency: lat, PartialIOMax: 7, PairLatencyMax: 50000, ClogProb: 0.1, ClogDur: [2]core.Duration{1000, 300000}}
+	f := simulator.NetworkFaults{Latency: lat, PartialIOMax: 7, PairLatencyMax: 50000, ClogProb: 0.1, ClogDur: [2]machine.Duration{1000, 300000}}
 	for seed := uint64(1); seed <= 300; seed++ {
 		h := newHarness(t, seed, f)
 		a, b := h.boot("a"), h.boot("b")
@@ -395,7 +396,7 @@ func TestCrashClosesPeers(t *testing.T) {
 
 func TestPartitionFreezesThenHeals(t *testing.T) {
 	f := simulator.NetworkFaults{Latency: simulator.FastWithRareSlow{FastMin: 1000, FastMax: 2000}, PartitionProb: 1,
-		PartitionDur: [2]core.Duration{1_000_000, 1_000_001}}
+		PartitionDur: [2]machine.Duration{1_000_000, 1_000_001}}
 	h := newHarness(t, 6, simulator.NetworkFaults{Latency: f.Latency})
 	a, b := h.boot("a"), h.boot("b")
 	ca, cb := h.connect(a, b)
@@ -441,7 +442,7 @@ func TestBlackHoleAndRandomClose(t *testing.T) {
 
 func scenario(seed uint64) ([]string, uint64) {
 	f := simulator.NetworkFaults{Latency: lat, PartialIOMax: 5, PairLatencyMax: 20000, PartitionProb: 0.05,
-		PartitionDur: [2]core.Duration{10000, 400000}, ClogProb: 0.1, ClogDur: [2]core.Duration{1000, 100000},
+		PartitionDur: [2]machine.Duration{10000, 400000}, ClogProb: 0.1, ClogDur: [2]machine.Duration{1000, 100000},
 		RandomCloseProb: 0.02, BlackHoleProb: 0.02}
 	h := newHarness(&testing.T{}, seed, f)
 	a, b := h.boot("a"), h.boot("b")

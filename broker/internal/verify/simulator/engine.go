@@ -1,6 +1,9 @@
 package simulator
 
-import "github.com/manifesterio/mds/broker/internal/core"
+import (
+	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
+)
 
 // FakeService simulates one external system (object store, control plane, network).
 // It owns that system's state, draws only from the run's CountedRand, and never
@@ -19,14 +22,14 @@ type FakeService interface {
 	Handles(a core.Action) bool
 	// Execute starts an action issued by node `from`. Typical object-store PUT:
 	// schedule "apply" at t1 and "respond" at t2, or drop the response.
-	Execute(ctx FakeServiceContext, from core.NodeInstance, a core.Action)
+	Execute(ctx FakeServiceContext, from machine.NodeInstance, a core.Action)
 	// OnInternal consumes an entry this engine scheduled for itself.
 	OnInternal(ctx FakeServiceContext, body any)
 	// OnCrash is told that an incarnation died; effects already applied stand.
 	// DropNode removes only entries addressed to the node: engine-internal
 	// apply entries survive, so a PUT or commit already on the wire can land
 	// after the broker dies.
-	OnCrash(ctx FakeServiceContext, ref core.NodeInstance)
+	OnCrash(ctx FakeServiceContext, ref machine.NodeInstance)
 	// EnterRecovery stops generating new faults for actions issued after it;
 	// plans already in flight stand and existing damage is preserved.
 	EnterRecovery()
@@ -44,12 +47,12 @@ type FakeServiceContext interface {
 	// construct a Lane value. Key convention: "<engine>/<whatever>".
 	Lane(key string) DeliveryLane
 	// Deliver schedules a completion or inbound event to a node.
-	Deliver(to core.NodeInstance, at Time, lane DeliveryLane, body core.EventData) EntryID
+	Deliver(to machine.NodeInstance, at Time, lane DeliveryLane, body core.EventData) EntryID
 	// Self schedules an internal entry back to this engine.
 	Self(at Time, lane DeliveryLane, body any) EntryID
 	Cancel(id EntryID)
 	// Fault records an injected fault on the timeline as a "sim_fault" fact.
-	Fault(kind string, fields ...core.Field)
+	Fault(kind string, fields ...machine.Field)
 	// Assert records fault coverage ("lost CP response happened").
 	Assert() core.Assertions
 }
@@ -60,18 +63,18 @@ type FakeServiceContext interface {
 type NodeCurrent interface {
 	// Current returns the live incarnation of a node, ok=false while it is
 	// down. The network engine uses it to route Connect and deliver ConnOpened.
-	Current(node core.NodeID) (ref core.NodeInstance, ok bool)
+	Current(node machine.NodeID) (ref machine.NodeInstance, ok bool)
 }
 
 // Latency is a sampled delay distribution.
 type Latency interface {
-	Sample(r CountedRand) core.Duration
+	Sample(r CountedRand) machine.Duration
 }
 
 // FastWithRareSlow is mostly fast with a rare slow tail (decision D).
 type FastWithRareSlow struct {
-	FastMin, FastMax core.Duration
-	SlowMin, SlowMax core.Duration
+	FastMin, FastMax machine.Duration
+	SlowMin, SlowMax machine.Duration
 	SlowProb         float64
 }
 
@@ -79,7 +82,7 @@ type FastWithRareSlow struct {
 // lasts.
 type ServiceOutage struct {
 	Prob float64
-	Dur  [2]core.Duration
+	Dur  [2]machine.Duration
 }
 
 // ObjectStoreFaults are the fault families of the fake object store (decision D).
@@ -91,7 +94,7 @@ type ObjectStoreFaults struct {
 	LostResponse   float64          // applied, response never arrives (surfaces as timeout)
 	GetCorruptProb float64          // flip one bit in ObjectGetDone.Data; the stored object stays intact
 	Outage         ServiceOutage
-	CallerTimeout  core.Duration
+	CallerTimeout  machine.Duration
 }
 
 // ControlPlaneFaults are the fault families of the fake control plane.
@@ -102,7 +105,7 @@ type ControlPlaneFaults struct {
 	Timeout        float64
 	LostResponse   float64 // commit applied, response lost: retry must be idempotent
 	Outage         ServiceOutage
-	CallerTimeout  core.Duration
+	CallerTimeout  machine.Duration
 	// MaxCommitItems models a store that commits a segment in one bounded
 	// transaction (DynamoDB: DynamoMaxCommitItems). A CommitSegment that needs
 	// more items is refused with ErrTooLarge and changes nothing. The item
@@ -125,11 +128,11 @@ type LogParams struct {
 	// GroupMax commands per log entry.
 	GroupMax int
 	// Tick is the engine's polling period (tail reads, role checks, flushes).
-	Tick core.Duration
+	Tick machine.Duration
 	// TakeoverAfter without a slot from another writer before the standby
 	// becomes active; PutRetry before an unanswered Put is repeated; Heartbeat
 	// between no-op appends of an idle active node.
-	TakeoverAfter, PutRetry, Heartbeat core.Duration
+	TakeoverAfter, PutRetry, Heartbeat machine.Duration
 	// PutFail: a Put is refused (not applied). PutLost: a Put is applied, its
 	// answer is lost. ReadFail: a replica's tail read fails this tick.
 	PutFail, PutLost, ReadFail float64
@@ -137,7 +140,7 @@ type LogParams struct {
 	// replica does nothing for StallDur; a crashed one loses its memory and
 	// restarts from the latest checkpoint after DownDur.
 	StallProb, CrashProb float64
-	StallDur, DownDur    [2]core.Duration
+	StallDur, DownDur    [2]machine.Duration
 	// WindowSlots: a key is forgotten this many slots after its first slot,
 	// evaluated every TrimStride slots. CheckpointEvery slots between checkpoints;
 	// KeepSlots below a checkpoint stay untrimmed.
@@ -162,7 +165,7 @@ type LogStoreFaults struct {
 	Timeout        float64
 	LostResponse   float64
 	Outage         ServiceOutage
-	CallerTimeout  core.Duration
+	CallerTimeout  machine.Duration
 	// Bug selects a mutant of the store (fakelogservice.InjectedBugNoFloorCheck). Zero is none.
 	Bug uint8
 	// WindowSlots and TrimStride mirror LogParams for ControlPlaneRealState idempotency trim
@@ -175,11 +178,11 @@ type NetworkFaults struct {
 	Latency         FastWithRareSlow
 	PartialIOMax    int     // max bytes per delivered chunk / accepted write
 	PartitionProb   float64 // sustained, correlated; freezes in-flight bytes
-	PartitionDur    [2]core.Duration
+	PartitionDur    [2]machine.Duration
 	ClogProb        float64
-	ClogDur         [2]core.Duration
+	ClogDur         [2]machine.Duration
 	RandomCloseProb float64
 	BlackHoleProb   float64
-	PairLatencyMax  core.Duration // per-pair permanent extra latency, sampled once
-	ClockSkewMax    core.Duration // per-node skew applied to Event.At
+	PairLatencyMax  machine.Duration // per-pair permanent extra latency, sampled once
+	ClockSkewMax    machine.Duration // per-node skew applied to Event.At
 }

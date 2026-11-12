@@ -11,6 +11,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 const (
@@ -314,10 +315,10 @@ func controlPlaneSequence(p InputProfile, seed uint64) []string {
 func TestRequestIDsFollowPosition(t *testing.T) {
 	r, objects, plane := checker.NewRand(3), ObjectOps(Default()), ControlPlaneOps(Default())
 	for i := range 50 {
-		if got := objects(r, i).RequestID(); got != core.RequestID(i+1) {
+		if got := objects(r, i).RequestID(); got != machine.RequestID(i+1) {
 			t.Fatalf("object operation %d has request id %d, want %d.", i, got, i+1)
 		}
-		if operation := plane(r, i); operation.Call != nil && operation.Call.Req != core.RequestID(i+1) {
+		if operation := plane(r, i); operation.Call != nil && operation.Call.Req != machine.RequestID(i+1) {
 			t.Fatalf("control-plane operation %d has request id %d, want %d.", i, operation.Call.Req, i+1)
 		}
 	}

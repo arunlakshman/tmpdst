@@ -2,50 +2,12 @@ package runtime
 
 import "strconv"
 
-// NodeTime is a node-local monotonic instant in nanoseconds. In simulation it
-// includes the node's clock skew. Used for deadlines, leases and batch windows.
-type NodeTime int64
+// The time types, ID, NodeID, BootNumber, RequestID, TimerID, TimerVersion and NodeInstance
+// are not defined here. They come from dst/machine, and the broker and the control plane
+// share them.
 
-// RealTime is UTC, nanoseconds since the Unix epoch. Used for Kafka
-// LogAppendTime, credential expiry and anything persisted. Scripted in simulator.
-type RealTime int64
-
-// Duration is nanoseconds.
-type Duration int64
-
-// Duration units.
-const (
-	Nanosecond  Duration = 1
-	Microsecond          = 1000 * Nanosecond
-	Millisecond          = 1000 * Microsecond
-	Second               = 1000 * Millisecond
-)
-
-// ID is a 128-bit identifier drawn from the seeded stream (never uuid.New).
-type ID [16]byte
-
-type (
-	// NodeID names a node.
-	NodeID string // stable identity of a broker (or simulator workload)
-	// BootNumber identifies one boot of a node.
-	BootNumber ID // fresh per boot; names one run of a node in logs, facts and the runtime
-	// RequestID correlates an Action with its completion Event. Unique within one
-	// incarnation only; it must never reach a durable name (object keys come
-	// from Environment.NewID()).
-	RequestID uint64
-	// TimerID names a timer.
-	TimerID uint64
-	// TimerVersion is a timer generation.
-	TimerVersion uint64 // generation: a TimerFired whose Gen is stale is ignored
-	// LogPosition is a position in the replicated command log (loglet).
-	LogPosition int64
-)
-
-// NodeInstance names one specific boot of one node.
-type NodeInstance struct {
-	Node NodeID
-	Inc  BootNumber
-}
+// LogPosition is a position in the replicated command log (loglet).
+type LogPosition int64
 
 // SegmentRef is a byte range inside an object in the object store.
 type SegmentRef struct {

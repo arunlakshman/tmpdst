@@ -19,27 +19,28 @@ package broker
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Fixed timer ids; retry timers use the id of the segment or op they belong to
 // (ids >= firstID).
 const (
-	timerFlush = core.TimerID(2)
+	timerFlush = machine.TimerID(2)
 	firstID    = 16
 )
 
 // Broker is the machine. Build it with New.
 type Broker struct {
 	env    core.Environment
-	self   core.NodeInstance
+	self   machine.NodeInstance
 	config Config
 	codec  kafkawire.Codec
 
 	started bool
 
-	nextRequestNumber core.RequestID
+	nextRequestNumber machine.RequestID
 	nextID            uint64
-	timerGen          core.TimerVersion
+	timerGen          machine.TimerVersion
 	stopping          bool
 	exited            bool
 
@@ -48,28 +49,28 @@ type Broker struct {
 	topics []core.TopicInfo  // topic cache, refreshed from DescribeTopics on a miss
 	live   []core.BrokerAddr // live brokers from LiveBrokers; nil means self only
 
-	now        core.NodeTime // At of the event being stepped (set by Step; not state)
+	now        machine.NodeTime // At of the event being stepped (set by Step; not state)
 	open       openSegment
 	segs       []*segment // sealed segments in commit order
 	ops        []*operation
-	bufBytes   int           // produce bytes admitted and not yet answered
-	pressure   bool          // above MaxBufferedBytes, until back at ResumeBufferedBytes
-	pressureAt core.NodeTime // when pressure began (fact timing only, not state)
+	bufBytes   int              // produce bytes admitted and not yet answered
+	pressure   bool             // above MaxBufferedBytes, until back at ResumeBufferedBytes
+	pressureAt machine.NodeTime // when pressure began (fact timing only, not state)
 	guess      uint64
 }
 
 // New returns the core.MachineFactory of the broker.
 func New(config Config) core.MachineFactory {
 	config = config.withDefaults()
-	return func(env core.Environment, self core.NodeInstance) core.Machine {
+	return func(env core.Environment, self machine.NodeInstance) core.Machine {
 		return &Broker{env: env, self: self, config: config, nextID: firstID}
 	}
 }
 
-func (b *Broker) nextRequestID() core.RequestID { b.nextRequestNumber++; return b.nextRequestNumber }
-func (b *Broker) id() uint64                    { b.nextID++; return b.nextID }
+func (b *Broker) nextRequestID() machine.RequestID { b.nextRequestNumber++; return b.nextRequestNumber }
+func (b *Broker) id() uint64                       { b.nextID++; return b.nextID }
 
-func (b *Broker) backoff(n int) core.Duration {
+func (b *Broker) backoff(n int) machine.Duration {
 	d := b.config.RetryBase
 	for ; n > 1 && d < b.config.RetryMax; n-- {
 		d *= 2
@@ -77,7 +78,7 @@ func (b *Broker) backoff(n int) core.Duration {
 	return min(d, b.config.RetryMax)
 }
 
-func (b *Broker) timer(id core.TimerID, n int) (core.SetTimer, core.TimerVersion) {
+func (b *Broker) timer(id machine.TimerID, n int) (core.SetTimer, machine.TimerVersion) {
 	b.timerGen++
 	return core.SetTimer{ID: id, Gen: b.timerGen, After: b.backoff(n)}, b.timerGen
 }
@@ -171,13 +172,13 @@ func (b *Broker) updatePressure(acts []core.Action) []core.Action {
 		b.pressure, b.pressureAt = true, b.now
 		b.env.Reachable("broker: reads paused by backpressure")
 		acts = append(acts, recordFact("backpressure_on",
-			core.Field{Key: "buffered", Value: core.Int64Value(b.bufBytes)}))
+			machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes)}))
 	case b.pressure && b.bufBytes <= b.config.ResumeBufferedBytes:
 		b.pressure = false
 		b.env.Reachable("broker: reads resumed after backpressure")
 		acts = append(acts, recordFact("backpressure_off",
-			core.Field{Key: "buffered", Value: core.Int64Value(b.bufBytes)},
-			core.Field{Key: "paused_ns", Value: core.Int64Value(b.now - b.pressureAt)}))
+			machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes)},
+			machine.Field{Key: "paused_ns", Value: machine.Int64Value(b.now - b.pressureAt)}))
 	}
 	return acts
 }
@@ -222,16 +223,16 @@ func (b *Broker) onFlushTimer(e core.TimerFired) []core.Action {
 	return b.seal(closeOnTimer)
 }
 
-func (b *Broker) segmentByTimer(id core.TimerID) *segment {
+func (b *Broker) segmentByTimer(id machine.TimerID) *segment {
 	for _, s := range b.segs {
-		if core.TimerID(s.id) == id {
+		if machine.TimerID(s.id) == id {
 			return s
 		}
 	}
 	return nil
 }
 
-func (b *Broker) segmentByRequest(request core.RequestID, st segmentState) *segment {
+func (b *Broker) segmentByRequest(request machine.RequestID, st segmentState) *segment {
 	if request == 0 {
 		return nil
 	}
@@ -269,8 +270,8 @@ func (b *Broker) onGet(e core.ObjectGetDone) []core.Action {
 	return nil
 }
 
-func recordFact(name string, fs ...core.Field) core.RecordFact {
-	return core.RecordFact{Fact: core.Fact{Name: name, Fields: fs}}
+func recordFact(name string, fs ...machine.Field) core.RecordFact {
+	return core.RecordFact{Fact: machine.Fact{Name: name, Fields: fs}}
 }
 
 var _ core.Machine = (*Broker)(nil)

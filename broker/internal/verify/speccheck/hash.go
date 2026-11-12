@@ -4,28 +4,29 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // stateHasher is FNV-1a over a canonical byte stream. Every variable-length field
 // is length-prefixed so distinct states cannot collide by concatenation.
-type stateHasher = core.Hasher
+type stateHasher = trace.Hash
 
-func newStateHasher() stateHasher { return core.NewHasher() }
+func newStateHasher() stateHasher { return trace.New() }
 
 func hashTopicPartition(h *stateHasher, topicPartition core.TopicPartition) {
-	h.StringValue(topicPartition.Topic)
-	h.Uint64Value(uint64(topicPartition.Partition))
+	h.String(topicPartition.Topic)
+	h.Uint64(uint64(topicPartition.Partition))
 }
 
 func hashBatchRanges(h *stateHasher, rs []core.BatchRange) {
-	h.Uint64Value(uint64(len(rs)))
+	h.Uint64(uint64(len(rs)))
 	for _, r := range rs {
 		hashTopicPartition(h, r.TopicPartition)
-		h.Uint64Value(uint64(r.Base))
-		h.Uint64Value(uint64(r.Count))
-		h.StringValue(r.Loc.Key)
-		h.Uint64Value(uint64(r.Loc.Off))
-		h.Uint64Value(uint64(r.Loc.Len))
+		h.Uint64(uint64(r.Base))
+		h.Uint64(uint64(r.Count))
+		h.String(r.Loc.Key)
+		h.Uint64(uint64(r.Loc.Off))
+		h.Uint64(uint64(r.Loc.Len))
 	}
 }
 

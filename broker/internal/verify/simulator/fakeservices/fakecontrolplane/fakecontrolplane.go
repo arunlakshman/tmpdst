@@ -13,6 +13,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakecompletions"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Engine is the fake control plane. It is also the simulator.ControlPlaneRealState.
@@ -74,7 +75,7 @@ func (e *Engine) Handles(a core.Action) bool {
 }
 
 // Execute starts a, a core.ControlPlaneCall.
-func (e *Engine) Execute(ctx simulator.FakeServiceContext, from core.NodeInstance, a core.Action) {
+func (e *Engine) Execute(ctx simulator.FakeServiceContext, from machine.NodeInstance, a core.Action) {
 	e.CompletionCore.Execute(ctx, from, a.(core.IOCall))
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // groupMarker prefixes a multi-command commit entry so drain can tell it from a
@@ -19,29 +20,29 @@ const groupMarker byte = 0xC5
 // ClientOperation is one client command for the commit queue. Prod injects via
 // controlplane/server; sim delivers runtime.ControlPlaneDeliver which becomes Offer here.
 type ClientOperation struct {
-	Req  runtime.RequestID
+	Req  machine.RequestID
 	Cmd  metadb.Entry         // ID is assigned when the group is built
-	From runtime.NodeInstance // broker; empty skips ControlPlaneReply (unit tests)
+	From machine.NodeInstance // broker; empty skips ControlPlaneReply (unit tests)
 }
 
 // ReplyToClient is the apply-time result for one ClientOperation.Req. withReplies turns it
 // into a ControlPlaneReply for the broker in From.
 type ReplyToClient struct {
-	Req  runtime.RequestID
-	From runtime.NodeInstance
+	Req  machine.RequestID
+	From machine.NodeInstance
 	Done runtime.ControlPlaneDone
 }
 
 // waitingCommand is a queued or in-flight client command.
 type waitingCommand struct {
-	request runtime.RequestID
-	from    runtime.NodeInstance // broker; namespaces Req across brokers
+	request machine.RequestID
+	from    machine.NodeInstance // broker; namespaces Req across brokers
 	cmd     metadb.Entry
 }
 
 // inFlightAppend is one in-flight commit LogAppend (at most one).
 type inFlightAppend struct {
-	request runtime.RequestID
+	request machine.RequestID
 	slot    runtime.LogPosition
 	id      string
 	data    []byte
@@ -117,7 +118,7 @@ func (m *Replica) retargetCommit(operation ClientOperation) bool {
 			return true
 		}
 	}
-	reqs := make([]runtime.RequestID, 0, len(m.inFlightAppends))
+	reqs := make([]machine.RequestID, 0, len(m.inFlightAppends))
 	for request := range m.inFlightAppends { //determinismcheck:ok keys are collected, then sorted before use
 		reqs = append(reqs, request)
 	}

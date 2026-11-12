@@ -292,7 +292,7 @@ func extra(pkgs map[string]pkg, dir string) map[string]pkg {
 	return out
 }
 
-// All time comes from runtime.Clock: these packages never read the wall clock.
+// All time comes from machine.Clock: these packages never read the wall clock.
 var wallClock = regexp.MustCompile(`\btime\.(Now|Since|Until|AfterFunc|After|NewTimer|NewTicker|Tick|Sleep)\(`)
 
 func TestNoWallClockInTheDomain(t *testing.T) {
@@ -308,7 +308,7 @@ func TestNoWallClockInTheDomain(t *testing.T) {
 				t.Fatal(err)
 			}
 			if m := wallClock.Find(src); m != nil {
-				t.Errorf("%s calls %s: take a runtime.Clock instead", file, m)
+				t.Errorf("%s calls %s: take a machine.Clock instead", file, m)
 			}
 		}
 	}

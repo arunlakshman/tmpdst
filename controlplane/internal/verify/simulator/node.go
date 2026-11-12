@@ -8,6 +8,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/eng"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/sched"
 	dstsim "github.com/manifesterio/mds/dst/sim"
 )
@@ -22,7 +23,7 @@ type simNode struct {
 	s       *sim
 	idx     int
 	factory replica.Factory
-	inst    runtime.NodeInstance
+	inst    machine.NodeInstance
 	m       *replica.Replica
 
 	up     bool
@@ -66,7 +67,7 @@ func (s *sim) nodeOf(a eng.ActorID) *simNode {
 func newNode(s *sim, idx int, factory replica.Factory) *simNode {
 	return &simNode{
 		s: s, idx: idx, factory: factory,
-		inst: runtime.NodeInstance{Node: runtime.NodeID(fmt.Sprintf("cp-%d", idx))},
+		inst: machine.NodeInstance{Node: machine.NodeID(fmt.Sprintf("cp-%d", idx))},
 	}
 }
 
@@ -82,7 +83,7 @@ func (n *simNode) boot() { n.s.runner.Inject(ctlID, 0, bootNode{idx: n.idx}) }
 // one is gone. The controller calls it.
 func (n *simNode) start() {
 	n.boots++
-	n.inst.Inc = runtime.BootNumber(n.s.env.NewID())
+	n.inst.Inc = machine.BootNumber(n.s.env.NewID())
 	n.m = n.factory(n.s.env, n.inst)
 	n.up, n.paused, n.held = true, false, nil
 	if n.groups != nil {
@@ -108,7 +109,7 @@ func (n *simNode) down(why string) {
 // crash asks the controller to kill the node (the nemesis) and restart it
 // after d. The controller does it in one step, so a boot can not slip in
 // between the "down" and the runner's crash.
-func (n *simNode) crash(why string, d runtime.Duration) {
+func (n *simNode) crash(why string, d machine.Duration) {
 	if n.up {
 		n.s.runner.Inject(ctlID, 0, killNode{idx: n.idx, why: why, restartIn: d})
 	}
@@ -191,7 +192,7 @@ func (n *simNode) outbound(acts []any) ([]any, bool) {
 		case dstsim.SetTimer, dstsim.CancelTimer:
 			out = append(out, a) // the replica speaks dst already
 		case dstsim.Crash: // the replica tripped
-			d := runtime.Duration(n.s.rand.Between(int64(100*runtime.Millisecond), int64(500*runtime.Millisecond)))
+			d := machine.Duration(n.s.rand.Between(int64(100*machine.Millisecond), int64(500*machine.Millisecond)))
 			return append(append(out, a), n.crashGroups(dstsim.Send{To: ctlID, Body: tripped{idx: n.idx, cause: a.Cause, in: d}})...), true
 		case dstsim.Exit: // the replica ended on purpose
 			return append(append(out, a), n.crashGroups(dstsim.Send{To: ctlID, Body: shutDown{idx: n.idx}})...), true
@@ -227,13 +228,13 @@ type (
 	tripped  struct {
 		idx   int
 		cause string
-		in    runtime.Duration
+		in    machine.Duration
 	} // the node asked to be stopped for a restart; start it again after in
 	shutDown struct{ idx int } // the node ended on purpose
 	killNode struct {
 		idx       int
 		why       string
-		restartIn runtime.Duration
+		restartIn machine.Duration
 	} // the nemesis killed the node
 )
 

@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/manifesterio/mds/dst/machine"
+)
 
 func TestLogIOCallsAreIOCalls(t *testing.T) {
 	acts := []IOCall{
@@ -21,7 +25,7 @@ func TestLogIOCallsAreIOCalls(t *testing.T) {
 		LogDeleteOldDone{Req: 5, Outcome: Applied},
 	}
 	for _, d := range dones {
-		if InboxKindOf(d) != Control {
+		if InboxKindOf(d) != machine.Control {
 			t.Fatalf("%T: InboxKindOf = %v, want Control", d, InboxKindOf(d))
 		}
 		if d.RequestID() == 0 {
@@ -36,11 +40,11 @@ func TestCPCallAndCPDoneClassOf(t *testing.T) {
 		t.Fatalf("RequestID = %d", call.RequestID())
 	}
 	done := ControlPlaneDone{Req: 9, Outcome: NotApplied, Err: ErrUnavailable}
-	if InboxKindOf(done) != Control || done.RequestID() != 9 {
+	if InboxKindOf(done) != machine.Control || done.RequestID() != 9 {
 		t.Fatalf("CPDone class/req broken")
 	}
-	offer := ControlPlaneDeliver{From: NodeInstance{Node: "b-0"}, Req: 9, Op: call.Op}
-	if InboxKindOf(offer) != Control {
+	offer := ControlPlaneDeliver{From: machine.NodeInstance{Node: "b-0"}, Req: 9, Op: call.Op}
+	if InboxKindOf(offer) != machine.Control {
 		t.Fatalf("CPOffer class = %v", InboxKindOf(offer))
 	}
 	_ = ControlPlaneReply{To: offer.From, Done: done}

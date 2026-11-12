@@ -8,6 +8,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakenetwork"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakeobjectstore"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/campaign"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // brokerConfig is the sim-friendly broker: a short flush window so commits
@@ -15,7 +16,7 @@ import (
 // pinned to the pre-decision-35 default (4 MiB) and the batch cap to 8; a seed's
 // swarm overrides the segment knobs (see swarmBroker).
 func brokerConfig(bug broker.InjectedBug) broker.Config {
-	return broker.Config{BatchWindow: 5 * core.Millisecond, MaxSegmentBytes: 4 << 20, MaxSegmentBatches: 8,
+	return broker.Config{BatchWindow: 5 * machine.Millisecond, MaxSegmentBytes: 4 << 20, MaxSegmentBatches: 8,
 		MaxBufferedBytes: 3 << 10, ResumeBufferedBytes: 1 << 10, InjectedBug: bug}
 }
 
@@ -41,7 +42,7 @@ func configWith(seeds []uint64, bug broker.InjectedBug, opts Opts) simulator.Con
 		InvariantsFor: func(sc simulator.SeedConfig) []simulator.SafetyRule {
 			return []simulator.SafetyRule{newSegmentCaps(sc.Params.(broker.Config), sc.ControlPlane.MaxCommitItems, opts.topicPartitions()), &segmentTiming{}}
 		},
-		Workloads: []simulator.WorkloadFactory{func(env core.Environment, self core.NodeInstance, bs []core.NodeInstance) simulator.Workload {
+		Workloads: []simulator.WorkloadFactory{func(env core.Environment, self machine.NodeInstance, bs []machine.NodeInstance) simulator.Workload {
 			return NewWorkload(env, self, bs, opts)
 		}},
 		Invariants: []func() simulator.SafetyRule{
@@ -96,7 +97,7 @@ func swarm(_ uint64, r simulator.CountedRand, c *simulator.SeedConfig) {
 func swarmBroker(r simulator.CountedRand, c *simulator.SeedConfig) {
 	bc := c.Params.(broker.Config)
 	pick := func(menu ...int) int { return menu[r.Intn(len(menu))] }
-	window := func(menu ...int) core.Duration { return campaign.Millis(int64(pick(menu...))) }
+	window := func(menu ...int) machine.Duration { return campaign.Millis(int64(pick(menu...))) }
 	d := broker.DefaultConfig()
 	switch x := r.Float64(); {
 	case x < 0.2:

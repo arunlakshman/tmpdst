@@ -39,7 +39,7 @@ would disagree with Kafka during every round.
 ## 3. Inputs and outputs
 
 `Call` is a call id (uint64) that the host gives each RPC, unique in one run of the process. `Req` is
-a `runtime.RequestID` that the machine gives each submit, unique in one run of the process.
+a `machine.RequestID` that the machine gives each submit, unique in one run of the process.
 
 | Input | Fields |
 |---|---|

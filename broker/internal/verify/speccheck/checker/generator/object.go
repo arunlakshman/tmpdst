@@ -6,6 +6,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // ObjectOps returns a generator of object store operations for profile p.
@@ -14,7 +15,7 @@ import (
 // without a slash, because each of these is a place where stores differ.
 func ObjectOps(p InputProfile) func(r *checker.Rand, i int) core.IOCall {
 	return func(r *checker.Rand, i int) core.IOCall {
-		request := core.RequestID(i + 1)
+		request := machine.RequestID(i + 1)
 		key := pick(r, p.ObjectKeys)
 		if percent(r, p.EmptyKeyPercent) {
 			key = ""

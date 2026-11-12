@@ -6,6 +6,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 type operationKind uint8
@@ -36,8 +37,8 @@ type operation struct {
 	kind      operationKind
 	state     operationState
 	retry     operationState // state a backoff returns to
-	requestID core.RequestID
-	gen       core.TimerVersion
+	requestID machine.RequestID
+	gen       machine.TimerVersion
 	attempts  int
 	s         *slot
 
@@ -64,11 +65,11 @@ type operation struct {
 	held    bool // Fetch part: has its data, waits for the Fetch to fill up (fetch.go)
 
 	gop      core.ControlPlaneOperation  // opGroup: the group call to make
-	gtimeout core.Duration               // opGroup: the call's deadline (0: the default)
+	gtimeout machine.Duration            // opGroup: the call's deadline (0: the default)
 	gfill    func(core.ControlPlaneDone) // opGroup: writes the answer into the response
 }
 
-func (b *Broker) findOp(r core.RequestID) *operation {
+func (b *Broker) findOp(r machine.RequestID) *operation {
 	for _, o := range b.ops {
 		if o.requestID == r && o.requestID != 0 {
 			return o
@@ -88,9 +89,9 @@ func (b *Broker) dropOp(o *operation) {
 
 func (b *Broker) addOp(o *operation) { b.ops = append(b.ops, o) }
 
-func (b *Broker) opByTimer(id core.TimerID) *operation {
+func (b *Broker) opByTimer(id machine.TimerID) *operation {
 	for _, o := range b.ops {
-		if core.TimerID(o.id) == id {
+		if machine.TimerID(o.id) == id {
 			return o
 		}
 	}
@@ -138,7 +139,7 @@ func (b *Broker) retryOp(o *operation) []core.Action {
 		return b.failOp(o, b.exhaustCode(o))
 	}
 	o.retry, o.state, o.requestID = o.state, opBackoff, 0
-	t, g := b.timer(core.TimerID(o.id), o.attempts)
+	t, g := b.timer(machine.TimerID(o.id), o.attempts)
 	o.gen = g
 	return []core.Action{t}
 }
@@ -155,7 +156,7 @@ func (b *Broker) exhaustCode(o *operation) kafkaErrorCode {
 	return errRequestTimedOut
 }
 
-func (b *Broker) opTimer(o *operation, gen core.TimerVersion) []core.Action {
+func (b *Broker) opTimer(o *operation, gen machine.TimerVersion) []core.Action {
 	if o.gen != gen {
 		return nil
 	}

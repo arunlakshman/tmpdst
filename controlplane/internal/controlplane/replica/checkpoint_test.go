@@ -8,6 +8,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // ckptKey is the object key of the checkpoint taken at slot, under the test prefix.
@@ -28,10 +29,10 @@ func startRestore(t *testing.T, m *replica.Replica) runtime.ObjectList {
 func TestCheckpointPublishAndTrim(t *testing.T) {
 	m := newMachine(t, replica.Config{
 		Writer: "w", Rank: 0,
-		CatchUpEvery:       runtime.Millisecond,
-		Heartbeat:          runtime.Second,
-		TakeoverAfter:      runtime.Second,
-		CheckpointEvery:    10 * runtime.Millisecond,
+		CatchUpEvery:       machine.Millisecond,
+		Heartbeat:          machine.Second,
+		TakeoverAfter:      machine.Second,
+		CheckpointEvery:    10 * machine.Millisecond,
 		CheckpointMinSlots: 1,
 		KeepSlots:          2,
 		CheckpointPrefix:   "checkpoint/",
@@ -59,7 +60,7 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 	if !ok {
 		t.Fatalf("checkpoint timer missing in %v", acts)
 	}
-	acts = stepAt(m, runtime.NodeTime(20*runtime.Millisecond), runtime.TimerFired{
+	acts = stepAt(m, machine.NodeTime(20*machine.Millisecond), runtime.TimerFired{
 		ID: checkpoint.ID, Gen: checkpoint.Gen,
 	})
 	put, ok := acts[0].(runtime.ObjectPut)
@@ -87,7 +88,7 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 		t.Fatalf("Applied = %d, want 4", m.Applied())
 	}
 	// Re-arm checkpoint by firing a fresh gen (timer was re-armed in onCheckpointTimer).
-	acts = stepAt(m, runtime.NodeTime(40*runtime.Millisecond), runtime.TimerFired{
+	acts = stepAt(m, machine.NodeTime(40*machine.Millisecond), runtime.TimerFired{
 		ID: replica.TimerCheckpoint, Gen: checkpoint.Gen + 1,
 	})
 	put = acts[0].(runtime.ObjectPut)
@@ -114,7 +115,7 @@ func TestCheckpointPublishAndTrim(t *testing.T) {
 // A listed checkpoint can be deleted by the time it is read, because a newer
 // one replaced it. The node lists again instead of starting from slot 0.
 func TestVanishedCheckpointIsListedAgain(t *testing.T) {
-	m := newMachine(t, replica.Config{Writer: "w", CatchUpEvery: runtime.Millisecond, CheckpointPrefix: "checkpoint/"})
+	m := newMachine(t, replica.Config{Writer: "w", CatchUpEvery: machine.Millisecond, CheckpointPrefix: "checkpoint/"})
 	list := startRestore(t, m)
 	get := step(m, runtime.ObjectListDone{Req: list.Req, Keys: []string{ckptKey(5)}})[0].(runtime.ObjectGet)
 	acts := step(m, runtime.ObjectGetDone{Req: get.Req, Err: runtime.ErrNotFound})

@@ -15,6 +15,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/observation"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/runsettings"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/suites"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Conformance C2. The engines in this package are SIMULATED components. This
@@ -30,7 +31,7 @@ import (
 const seedBudget = 50
 
 // completionFor drains the engine queue and returns the completion of req.
-func completionFor(ctx *fakeservicetest.Ctx, request core.RequestID) (core.IOResult, error) {
+func completionFor(ctx *fakeservicetest.Ctx, request machine.RequestID) (core.IOResult, error) {
 	ctx.Run()
 	c := ctx.Find(request)
 	if c == nil {
@@ -43,7 +44,7 @@ func completionFor(ctx *fakeservicetest.Ctx, request core.RequestID) (core.IORes
 type engineObjectSubject struct {
 	engine *fakeobjectstore.Engine
 	ctx    *fakeservicetest.Ctx
-	from   core.NodeInstance
+	from   machine.NodeInstance
 }
 
 func newEngineObjectSubject() suites.ObjectSubject {
@@ -67,7 +68,7 @@ func (s *engineObjectSubject) StateHash() (uint64, bool) { return s.engine.SpecS
 type engineControlPlaneSubject struct {
 	engine *fakecontrolplane.Engine
 	ctx    *fakeservicetest.Ctx
-	from   core.NodeInstance
+	from   machine.NodeInstance
 }
 
 func newEngineControlPlaneSubject() suites.ControlPlaneSubject {

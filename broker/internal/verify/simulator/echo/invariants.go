@@ -7,6 +7,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/campaign"
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 type ackFact struct {
@@ -15,10 +16,10 @@ type ackFact struct {
 	payload []byte
 }
 
-func parseAck(f core.Fact) (ackFact, bool) {
-	o, ok1 := f.Field("offset").(core.Int64Value)
-	k, ok2 := f.Field("key").(core.StringValue)
-	p, ok3 := f.Field("payload").(core.Bytes)
+func parseAck(f machine.Fact) (ackFact, bool) {
+	o, ok1 := f.Field("offset").(machine.Int64Value)
+	k, ok2 := f.Field("key").(machine.StringValue)
+	p, ok3 := f.Field("payload").(machine.Bytes)
 	return ackFact{int64(o), string(k), p}, ok1 && ok2 && ok3
 }
 

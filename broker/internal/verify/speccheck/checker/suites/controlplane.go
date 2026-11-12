@@ -8,6 +8,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/generator"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/observation"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // ControlPlanePair is a fresh spec, a fresh subject and a naive model of the
@@ -17,10 +18,10 @@ type ControlPlanePair struct {
 	specSubject ControlPlaneSubject
 	subject     ControlPlaneSubject
 	model       *controlPlaneModel
-	extra       core.RequestID
+	extra       machine.RequestID
 }
 
-func (p *ControlPlanePair) nextReq() core.RequestID {
+func (p *ControlPlanePair) nextReq() machine.RequestID {
 	p.extra++
 	return extraReqBase + p.extra
 }

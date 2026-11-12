@@ -7,6 +7,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // partitionBatch is one admitted partition batch on its way to a segment.
@@ -27,11 +28,11 @@ type openSegment struct {
 	parts   []core.TopicPartition // distinct partitions buffered
 	// Flush timer generation matched by onTimer. 0 means none is armed, an
 	// empty buffer or one just sealed.
-	gen core.TimerVersion
+	gen machine.TimerVersion
 	// Time of the first batch, for the segment_sealed age fact and
 	// SegmentCaps. Not used to schedule. Does not move when
 	// InjectedBugTimerFromLastBatch re-arms gen.
-	since core.NodeTime
+	since machine.NodeTime
 }
 
 // Why a segment was sealed (the "reason" of the segment_sealed fact).
@@ -60,17 +61,17 @@ type segment struct {
 	key      string
 	data     []byte
 	state    segmentState
-	request  core.RequestID
-	gen      core.TimerVersion
+	request  machine.RequestID
+	gen      machine.TimerVersion
 	attempts int
 
 	// sealedAt and putDoneAt are facts only, and StateHash omits them.
 	// The PUT starts at the seal. commitAt is the time of the first
 	// CommitSegment, and commitStarted keeps that time fixed.
 	// retryCommit reads commitAt for the deadline. StateHash omits both.
-	sealedAt      core.NodeTime
-	putDoneAt     core.NodeTime
-	commitAt      core.NodeTime
+	sealedAt      machine.NodeTime
+	putDoneAt     machine.NodeTime
+	commitAt      machine.NodeTime
 	commitStarted bool
 }
 
@@ -140,14 +141,14 @@ func (b *Broker) seal(why string) []core.Action {
 		b.env.Reachable("broker: segment sealed by partition cap")
 	}
 	acts := []core.Action{core.CancelTimer{ID: timerFlush}, recordFact("segment_sealed",
-		core.Field{Key: "reason", Value: core.StringValue(why)},
-		core.Field{Key: "bytes", Value: core.Int64Value(b.open.bytes)},
-		core.Field{Key: "batches", Value: core.Int64Value(len(bs))},
-		core.Field{Key: "parts", Value: core.Int64Value(len(b.open.parts))},
-		core.Field{Key: "last", Value: core.Int64Value(len(bs[len(bs)-1].data))},
-		core.Field{Key: "age", Value: core.Int64Value(b.now - b.open.since)},
-		core.Field{Key: "inflight", Value: core.Int64Value(len(b.segs) + 1)},
-		core.Field{Key: "buffered", Value: core.Int64Value(b.bufBytes)})}
+		machine.Field{Key: "reason", Value: machine.StringValue(why)},
+		machine.Field{Key: "bytes", Value: machine.Int64Value(b.open.bytes)},
+		machine.Field{Key: "batches", Value: machine.Int64Value(len(bs))},
+		machine.Field{Key: "parts", Value: machine.Int64Value(len(b.open.parts))},
+		machine.Field{Key: "last", Value: machine.Int64Value(len(bs[len(bs)-1].data))},
+		machine.Field{Key: "age", Value: machine.Int64Value(b.now - b.open.since)},
+		machine.Field{Key: "inflight", Value: machine.Int64Value(len(b.segs) + 1)},
+		machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes)})}
 	b.open = openSegment{}
 	return append(acts, b.sealBatches(bs)...)
 }
@@ -189,10 +190,10 @@ func (b *Broker) onPutDone(s *segment, e core.ObjectPutDone) []core.Action {
 	attempts := s.attempts + 1
 	s.state, s.request, s.attempts, s.putDoneAt = segmentUploadDone, 0, 0, b.now
 	acts := []core.Action{recordFact("segment_put_done",
-		core.Field{Key: "segment", Value: core.StringValue(s.key)},
-		core.Field{Key: "bytes", Value: core.Int64Value(len(s.data))},
-		core.Field{Key: "put_ns", Value: core.Int64Value(b.now - s.sealedAt)},
-		core.Field{Key: "attempts", Value: core.Int64Value(attempts)})}
+		machine.Field{Key: "segment", Value: machine.StringValue(s.key)},
+		machine.Field{Key: "bytes", Value: machine.Int64Value(len(s.data))},
+		machine.Field{Key: "put_ns", Value: machine.Int64Value(b.now - s.sealedAt)},
+		machine.Field{Key: "attempts", Value: machine.Int64Value(attempts)})}
 	if b.config.InjectedBug == InjectedBugEarlyAck {
 		for _, pb := range s.batches {
 			b.guess += uint64(pb.records)
@@ -267,15 +268,15 @@ func (b *Broker) onCommit(s *segment, e core.ControlPlaneDone) []core.Action {
 // the time the uploaded segment queued behind earlier segments' commits.
 func (b *Broker) committed(s *segment, rs []core.BatchRange) []core.Action {
 	acts := []core.Action{recordFact("segment_committed",
-		core.Field{Key: "segment", Value: core.StringValue(s.key)},
-		core.Field{Key: "batches", Value: core.Int64Value(len(s.batches))},
-		core.Field{Key: "bytes", Value: core.Int64Value(len(s.data))},
-		core.Field{Key: "put_ns", Value: core.Int64Value(s.putDoneAt - s.sealedAt)},
-		core.Field{Key: "wait_ns", Value: core.Int64Value(s.commitAt - s.putDoneAt)},
-		core.Field{Key: "commit_ns", Value: core.Int64Value(b.now - s.commitAt)},
-		core.Field{Key: "total_ns", Value: core.Int64Value(b.now - s.sealedAt)},
-		core.Field{Key: "inflight", Value: core.Int64Value(len(b.segs) - 1)},
-		core.Field{Key: "buffered", Value: core.Int64Value(b.bufBytes - s.dataBytes())})}
+		machine.Field{Key: "segment", Value: machine.StringValue(s.key)},
+		machine.Field{Key: "batches", Value: machine.Int64Value(len(s.batches))},
+		machine.Field{Key: "bytes", Value: machine.Int64Value(len(s.data))},
+		machine.Field{Key: "put_ns", Value: machine.Int64Value(s.putDoneAt - s.sealedAt)},
+		machine.Field{Key: "wait_ns", Value: machine.Int64Value(s.commitAt - s.putDoneAt)},
+		machine.Field{Key: "commit_ns", Value: machine.Int64Value(b.now - s.commitAt)},
+		machine.Field{Key: "total_ns", Value: machine.Int64Value(b.now - s.sealedAt)},
+		machine.Field{Key: "inflight", Value: machine.Int64Value(len(b.segs) - 1)},
+		machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes - s.dataBytes())})}
 	for i, pb := range s.batches {
 		b.answerPart(pb, errNone, rs[i], s.key)
 	}
@@ -303,11 +304,11 @@ func (b *Broker) endSegment(s *segment) []core.Action {
 // failSegment answers every unanswered batch of s with code.
 func (b *Broker) failSegment(s *segment, code kafkaErrorCode) []core.Action {
 	acts := []core.Action{recordFact("segment_failed",
-		core.Field{Key: "segment", Value: core.StringValue(s.key)},
-		core.Field{Key: "code", Value: core.Int64Value(int64(code))},
-		core.Field{Key: "total_ns", Value: core.Int64Value(b.now - s.sealedAt)},
-		core.Field{Key: "inflight", Value: core.Int64Value(len(b.segs) - 1)},
-		core.Field{Key: "buffered", Value: core.Int64Value(b.bufBytes - s.dataBytes())})}
+		machine.Field{Key: "segment", Value: machine.StringValue(s.key)},
+		machine.Field{Key: "code", Value: machine.Int64Value(int64(code))},
+		machine.Field{Key: "total_ns", Value: machine.Int64Value(b.now - s.sealedAt)},
+		machine.Field{Key: "inflight", Value: machine.Int64Value(len(b.segs) - 1)},
+		machine.Field{Key: "buffered", Value: machine.Int64Value(b.bufBytes - s.dataBytes())})}
 	for _, pb := range s.batches {
 		b.answerPart(pb, code, core.BatchRange{}, "")
 	}
@@ -322,7 +323,7 @@ func (b *Broker) retryPut(s *segment) []core.Action {
 		return b.failSegment(s, errRequestTimedOut)
 	}
 	s.state, s.request = segmentUploadRetry, 0
-	t, g := b.timer(core.TimerID(s.id), s.attempts)
+	t, g := b.timer(machine.TimerID(s.id), s.attempts)
 	s.gen = g
 	return []core.Action{t}
 }
@@ -333,7 +334,7 @@ func (b *Broker) retryPut(s *segment) []core.Action {
 // limit. Past the deadline the segment fails; the write may still land later
 // (decision 15).
 func (b *Broker) retryCommit(s *segment) []core.Action {
-	left := b.config.CommitDeadline - core.Duration(b.now-s.commitAt)
+	left := b.config.CommitDeadline - machine.Duration(b.now-s.commitAt)
 	if left <= 0 {
 		b.env.Reachable("broker: commit deadline exceeded")
 		return b.failSegment(s, errRequestTimedOut)
@@ -344,15 +345,15 @@ func (b *Broker) retryCommit(s *segment) []core.Action {
 		d *= 2
 	}
 	d = min(d, b.config.CommitRetryMax)
-	d = d/2 + core.Duration(b.env.Intn(int(d/2)+1)) // jitter in [d/2, d]
+	d = d/2 + machine.Duration(b.env.Intn(int(d/2)+1)) // jitter in [d/2, d]
 	d = min(d, left)
 	s.state, s.request = segmentCommitRetry, 0
 	b.timerGen++
 	s.gen = b.timerGen
-	return []core.Action{core.SetTimer{ID: core.TimerID(s.id), Gen: b.timerGen, After: d}}
+	return []core.Action{core.SetTimer{ID: machine.TimerID(s.id), Gen: b.timerGen, After: d}}
 }
 
-func (b *Broker) segmentTimer(s *segment, gen core.TimerVersion) []core.Action {
+func (b *Broker) segmentTimer(s *segment, gen machine.TimerVersion) []core.Action {
 	if s.gen != gen {
 		return nil
 	}
@@ -377,12 +378,12 @@ func (b *Broker) answerPart(pb *partitionBatch, code kafkaErrorCode, r core.Batc
 	pb.part.ErrorCode, pb.part.BaseOffset = int16(code), -1
 	if code == errNone {
 		pb.part.BaseOffset = int64(r.Base)
-		pb.s.facts = append(pb.s.facts, core.Fact{Name: "produce_acked", Fields: []core.Field{
-			{Key: "topic", Value: core.StringValue(pb.topicPartition.Topic)},
-			{Key: "partition", Value: core.Int64Value(pb.topicPartition.Partition)},
-			{Key: "base_offset", Value: core.Int64Value(r.Base)},
-			{Key: "count", Value: core.Int64Value(pb.records)},
-			{Key: "segment", Value: core.StringValue(key)},
+		pb.s.facts = append(pb.s.facts, machine.Fact{Name: "produce_acked", Fields: []machine.Field{
+			{Key: "topic", Value: machine.StringValue(pb.topicPartition.Topic)},
+			{Key: "partition", Value: machine.Int64Value(pb.topicPartition.Partition)},
+			{Key: "base_offset", Value: machine.Int64Value(r.Base)},
+			{Key: "count", Value: machine.Int64Value(pb.records)},
+			{Key: "segment", Value: machine.StringValue(key)},
 		}})
 	}
 	b.finishPart(pb.s)

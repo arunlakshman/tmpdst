@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // SegmentLog writes one structured log line per segment lifecycle event, built
@@ -40,18 +41,20 @@ func NewSegmentLog(log *slog.Logger) *SegmentLog {
 
 func ms(nanoseconds int64) float64 { return float64(nanoseconds/10_000) / 100 } // 10 us resolution
 
-func fi(f core.Fact, k string) int64 {
+func fi(f machine.Fact, k string) int64 {
 	switch x := f.Field(k).(type) {
-	case core.Int64Value:
+	case machine.Int64Value:
 		return int64(x)
-	case core.Uint64Value:
+	case machine.Uint64Value:
 		return int64(x)
+	case machine.StringValue, machine.Bool, machine.Bytes:
+		return 0 // not a number
 	}
 	return 0
 }
 
-func fs(f core.Fact, k string) string {
-	s, _ := f.Field(k).(core.StringValue)
+func fs(f machine.Fact, k string) string {
+	s, _ := f.Field(k).(machine.StringValue)
 	return string(s)
 }
 
@@ -72,7 +75,7 @@ func (s *SegmentLog) IO(a core.IOCall) {
 }
 
 // Observe consumes one broker fact.
-func (s *SegmentLog) Observe(f core.Fact) {
+func (s *SegmentLog) Observe(f machine.Fact) {
 	switch f.Name {
 	case "segment_sealed":
 		if len(s.pending) < 4096 {

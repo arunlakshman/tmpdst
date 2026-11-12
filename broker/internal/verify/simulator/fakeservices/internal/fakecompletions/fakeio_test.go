@@ -7,15 +7,16 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakeservicetest"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
-const ms = core.Duration(1_000_000)
+const ms = machine.Duration(1_000_000)
 
 // stub is a minimal engine around a CompletionCore so fakeservicetest can drive it.
 type stub struct{ *CompletionCore }
 
 func (s stub) Handles(core.Action) bool { return true }
-func (s stub) Execute(ctx simulator.FakeServiceContext, f core.NodeInstance, a core.Action) {
+func (s stub) Execute(ctx simulator.FakeServiceContext, f machine.NodeInstance, a core.Action) {
 	s.CompletionCore.Execute(ctx, f, a.(core.IOCall))
 }
 
@@ -70,7 +71,7 @@ func TestSpecHashCacheObjectStore(t *testing.T) {
 	for i := range 400 {
 		ctx.T += simulator.Time(ms)
 		k := string(rune('a' + r.Between(0, 6)))
-		request := core.RequestID(i)
+		request := machine.RequestID(i)
 		switch r.Between(0, 4) {
 		case 0, 1:
 			c.Execute(ctx, from, core.ObjectPut{Req: request, Key: k, Data: []byte{byte(i)}})
@@ -109,7 +110,7 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 	})
 	ctx := fakeservicetest.New(stub{c}, 6)
 	r := simulator.NewRand(77)
-	nodes := []core.NodeInstance{fakeservicetest.Ref("a"), fakeservicetest.Ref("b"), fakeservicetest.Ref("c")}
+	nodes := []machine.NodeInstance{fakeservicetest.Ref("a"), fakeservicetest.Ref("b"), fakeservicetest.Ref("c")}
 	tps := []core.TopicPartition{core.NewTopicPartition("t", 0), core.NewTopicPartition("t", 1)}
 	for _, topicPartition := range tps[:1] {
 		if spec.CreateTopic(topicPartition.Topic, 2) == core.OK {
@@ -122,7 +123,7 @@ func TestSpecHashCacheControlPlane(t *testing.T) {
 	for i := range 400 {
 		ctx.T += simulator.Time(ms)
 		n := nodes[r.Between(0, 3)]
-		request := core.RequestID(i)
+		request := machine.RequestID(i)
 		switch r.Between(0, 2) {
 		case 0:
 			// Keys repeat (replays, and conflicts when the request differs).

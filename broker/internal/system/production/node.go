@@ -16,6 +16,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/broker/internal/system/realclock"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // NodeConfig is everything one broker process needs.
@@ -39,7 +40,7 @@ type NodeConfig struct {
 	DataInbox     int           // data queue capacity (1024)
 	Net           NetConfig
 	Exec          ExecConfig
-	Facts         func(core.Fact)
+	Facts         func(machine.Fact)
 	// OnIO, if set, sees every I/O action the broker issues, on the broker's
 	// loop goroutine, before it executes (used to pair segment keys with
 	// segment_sealed facts, see SegmentLog).
@@ -95,9 +96,9 @@ func Start(ctx context.Context, config NodeConfig) (*Node, error) {
 	b := system.Dependencies{
 		Clock: realclock.New(), Objects: config.Objects, ControlPlane: config.ControlPlane, Connections: nt,
 		Classifier: exec.class, Env: env, Inbox: in, Facts: config.Facts,
-		Shutdown: n.stop, StopGrace: core.Duration(config.StopGrace),
+		Shutdown: n.stop, StopGrace: machine.Duration(config.StopGrace),
 	}
-	self := core.NodeInstance{Node: core.NodeID(config.NodeID), Inc: core.BootNumber(env.NewID())}
+	self := machine.NodeInstance{Node: machine.NodeID(config.NodeID), Inc: machine.BootNumber(env.NewID())}
 	go n.run(rctx, b, ex, broker.New(bc), self, config.FlushGrace)
 	return n, nil
 }
@@ -157,7 +158,7 @@ func (n *Node) stopOn(shutdown <-chan struct{}) {
 }
 
 // run drives the broker to its end, then closes the network and marks done.
-func (n *Node) run(ctx context.Context, b system.Dependencies, ex system.Executor, br core.MachineFactory, self core.NodeInstance, flush time.Duration) {
+func (n *Node) run(ctx context.Context, b system.Dependencies, ex system.Executor, br core.MachineFactory, self machine.NodeInstance, flush time.Duration) {
 	defer close(n.done)
 	err := system.Run(ctx, b, ex, br, self)
 	grace := time.Duration(0)

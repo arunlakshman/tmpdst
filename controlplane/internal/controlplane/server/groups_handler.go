@@ -10,6 +10,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/wire"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/internal/system/live"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // The host (docs/rebalance.md section 11). The machine runs in a second
@@ -22,14 +23,14 @@ import (
 
 // rebalanceFrom is who the machine is when it talks to the replica: the
 // replica answers to it, and Node.reply hands the answer to the machine.
-var rebalanceFrom = runtime.NodeInstance{Node: "rebalance"}
+var rebalanceFrom = machine.NodeInstance{Node: "rebalance"}
 
 // groupsConfig is the run of the rebalance machine. It has no boot, no stop
 // request and no inject: Close ends it with the context. Its timers and the
 // sends to itself are handled by live.
 func (n *Node) groupsConfig() live.Config {
 	return live.Config{
-		Process: rebalance.New(rebalance.Config{InitialDelay: runtime.Duration(n.config.GroupInitialRebalanceDelay)}),
+		Process: rebalance.New(rebalance.Config{InitialDelay: machine.Duration(n.config.GroupInitialRebalanceDelay)}),
 		Clock:   liveClock{n.config.Clock},
 		Inbox:   n.groups,
 		Exec:    n.groupsExec,

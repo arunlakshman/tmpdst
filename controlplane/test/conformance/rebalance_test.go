@@ -18,6 +18,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/spec"
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/fault"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/rng"
 	"github.com/manifesterio/mds/dst/sched"
 	"github.com/manifesterio/mds/dst/sim"
@@ -46,9 +47,9 @@ import (
 // model drops its memory and loads again from a copy of the fake log.
 
 const (
-	rbDelay     = 1532 * runtime.Millisecond
-	rbNewMember = 20064 * runtime.Millisecond
-	rbWrite     = 2128 * runtime.Millisecond
+	rbDelay     = 1532 * machine.Millisecond
+	rbNewMember = 20064 * machine.Millisecond
+	rbWrite     = 2128 * machine.Millisecond
 )
 
 // The kinds of a write failure, for the next SubmitCommand.
@@ -82,7 +83,7 @@ type rbNext struct {
 
 type rbTimer struct {
 	id   uint64
-	at   runtime.NodeTime
+	at   machine.NodeTime
 	seq  int
 	body any
 }
@@ -93,7 +94,7 @@ type rbWorld struct {
 	model *spec.Rebalance
 	log   *spec.ControlPlane              // the fake log
 	cmds  []runtime.ControlPlaneOperation // what the fake log applied, to copy it
-	now   runtime.NodeTime
+	now   machine.NodeTime
 	rand  *rng.Rand
 	step  int
 	seen  map[string]int
@@ -105,7 +106,7 @@ type rbWorld struct {
 
 	fault     int                       // the failure of the next write
 	lost      []rebalance.SubmitCommand // writes never answered
-	lostUntil runtime.NodeTime          // the write timer of the last lost write fires by then
+	lostUntil machine.NodeTime          // the write timer of the last lost write fires by then
 	loose     bool                      // a failure happened in this operation
 	late      bool                      // a lost write was applied since the last load
 	broke     bool                      // the machine started a fresh load
@@ -197,7 +198,7 @@ var rbOps = []struct {
 		// Mostly short, so that members live to sync; sometimes past every session.
 		ms := rapid.SampledFrom([]int{100, 300, 600, 900, 1700, 100, 300, 600, 900, 1700, 3300, 100, 300, 600, 900, 1700,
 			100, 300, 600, 900, 1700, 3300, 100, 300, 600, 900, 1700, 5800, 100, 300, 9000, 26000}).Draw(w.t, "ms")
-		w.advance(w.now + runtime.NodeTime(ms)*runtime.NodeTime(runtime.Millisecond))
+		w.advance(w.now + machine.NodeTime(ms)*machine.NodeTime(machine.Millisecond))
 	}},
 	// A member does what its last answer asks: sync after a join, join again
 	// after ErrRebalanceInProgress, else heartbeat. A new one joins. This
@@ -462,7 +463,7 @@ func (w *rbWorld) sweep() {
 
 // finish lets every timer run out, then checks that every call got an answer.
 func (w *rbWorld) finish() {
-	w.op(func(w *rbWorld) { w.advance(w.now + 120*runtime.NodeTime(runtime.Second)) })
+	w.op(func(w *rbWorld) { w.advance(w.now + 120*machine.NodeTime(machine.Second)) })
 	if !w.tied && len(w.open) > 0 {
 		w.t.Fatalf("calls never answered: %v", slices.Sorted(maps.Keys(w.open)))
 	}
@@ -471,7 +472,7 @@ func (w *rbWorld) finish() {
 
 // advance moves the clock to at, firing the timers of the machine in time
 // order. The model runs to the time of each timer first.
-func (w *rbWorld) advance(at runtime.NodeTime) {
+func (w *rbWorld) advance(at machine.NodeTime) {
 	for {
 		i := -1
 		for j, a := range w.timers {
@@ -538,7 +539,7 @@ func (w *rbWorld) output(o any) {
 	case sim.SetTimer:
 		w.cancel(o.ID)
 		w.seq++
-		w.timers = append(w.timers, rbTimer{id: o.ID, at: w.now + runtime.NodeTime(o.After), seq: w.seq, body: o.Body})
+		w.timers = append(w.timers, rbTimer{id: o.ID, at: w.now + machine.NodeTime(o.After), seq: w.seq, body: o.Body})
 	case sim.CancelTimer:
 		w.cancel(o.ID)
 	case rebalance.SubmitRead:
@@ -572,11 +573,11 @@ func (w *rbWorld) write(o rebalance.SubmitCommand) {
 		w.inbox = append(w.inbox, w.answer(o.Req, runtime.ControlPlaneDone{Err: runtime.ErrTimeout, Outcome: runtime.MaybeApplied}))
 	case writeLost:
 		w.lost = append(w.lost, o)
-		w.lostUntil = w.now + runtime.NodeTime(rbWrite)
+		w.lostUntil = w.now + machine.NodeTime(rbWrite)
 	}
 }
 
-func (w *rbWorld) answer(req runtime.RequestID, d runtime.ControlPlaneDone) rebalance.ReplicaReply {
+func (w *rbWorld) answer(req machine.RequestID, d runtime.ControlPlaneDone) rebalance.ReplicaReply {
 	d.Req = req
 	return rebalance.ReplicaReply{Req: req, Done: d}
 }

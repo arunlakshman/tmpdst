@@ -3,7 +3,7 @@ package simulator
 import (
 	"math/bits"
 
-	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // splitMix is the run's counted stream: SplitMix64 with a draw counter. One
@@ -62,8 +62,8 @@ func (r *splitMix) Between(lo, hi int64) int64 {
 	return lo + int64(r.below(uint64(hi-lo)))
 }
 
-func (r *splitMix) NewID() core.ID {
-	var id core.ID
+func (r *splitMix) NewID() machine.ID {
+	var id machine.ID
 	a, b := r.Uint64(), r.Uint64()
 	for i := range 8 {
 		id[i] = byte(a >> (8 * i))
@@ -87,7 +87,7 @@ func (r *splitMix) Fingerprint() uint64 { return mixBits64(r.state ^ mixBits64(r
 
 // Sample draws one delay: a coin for the slow tail, then a uniform value in
 // the chosen inclusive range. Ranges with Max <= Min draw nothing.
-func (t FastWithRareSlow) Sample(r CountedRand) core.Duration {
+func (t FastWithRareSlow) Sample(r CountedRand) machine.Duration {
 	lo, hi := t.FastMin, t.FastMax
 	if r.Chance(t.SlowProb) {
 		lo, hi = t.SlowMin, t.SlowMax
@@ -95,7 +95,7 @@ func (t FastWithRareSlow) Sample(r CountedRand) core.Duration {
 	if hi <= lo {
 		return lo
 	}
-	return core.Duration(r.Between(int64(lo), int64(hi)+1))
+	return machine.Duration(r.Between(int64(lo), int64(hi)+1))
 }
 
 var (

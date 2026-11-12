@@ -20,19 +20,20 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/internal/system/live"
 	"github.com/manifesterio/mds/controlplane/internal/system/realclock"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/sched"
 )
 
 // Config wires a Node.
 type Config struct {
 	Machine replica.Config
-	Self    runtime.NodeInstance
+	Self    machine.NodeInstance
 	Env     runtime.Environment
-	Clock   runtime.Clock
+	Clock   machine.Clock
 	Log     executor.Log
 	Objects executor.ObjectStore
 	// StopGrace is how long the machine gets after Shutdown to exit.
-	StopGrace runtime.Duration
+	StopGrace machine.Duration
 	// BrokerLeaseTTL is how long a broker stays live after its last heartbeat
 	// (default 5s). Brokers send one every interval, so keep it 3x the interval.
 	BrokerLeaseTTL time.Duration
@@ -65,8 +66,8 @@ type Node struct {
 	active     atomic.Bool
 
 	mu        sync.Mutex
-	waiters   map[runtime.RequestID]chan runtime.ControlPlaneDone
-	nextReq   runtime.RequestID
+	waiters   map[machine.RequestID]chan runtime.ControlPlaneDone
+	nextReq   machine.RequestID
 	calls     map[rebalance.CallID]chan rebalance.Reply // group calls that wait for the machine
 	nextCall  rebalance.CallID
 	shutdown  chan struct{}
@@ -86,7 +87,7 @@ type Node struct {
 // New builds a Node. Call Start then serve gRPC with Register.
 func New(config Config) *Node {
 	if config.Self.Node == "" {
-		config.Self = runtime.NodeInstance{Node: "cp"}
+		config.Self = machine.NodeInstance{Node: "cp"}
 	}
 	if config.Clock == nil {
 		config.Clock = realclock.New()
@@ -98,7 +99,7 @@ func New(config Config) *Node {
 		config.Log = executor.NewMemoryLog()
 	}
 	if config.StopGrace <= 0 {
-		config.StopGrace = runtime.Duration(15e9) // 15s
+		config.StopGrace = machine.Duration(15e9) // 15s
 	}
 	if config.BrokerLeaseTTL <= 0 {
 		config.BrokerLeaseTTL = time.Duration(broker.DefaultTTL)
@@ -108,8 +109,8 @@ func New(config Config) *Node {
 		inbox:      live.NewInbox(),
 		inject:     make(chan live.InjectFunc, 64),
 		health:     health.NewServer(),
-		leases:     broker.New(runtime.Duration(config.BrokerLeaseTTL)),
-		waiters:    map[runtime.RequestID]chan runtime.ControlPlaneDone{},
+		leases:     broker.New(machine.Duration(config.BrokerLeaseTTL)),
+		waiters:    map[machine.RequestID]chan runtime.ControlPlaneDone{},
 		calls:      map[rebalance.CallID]chan rebalance.Reply{},
 		groups:     live.NewInbox(),
 		groupsDone: make(chan struct{}),
@@ -119,13 +120,13 @@ func New(config Config) *Node {
 	return n
 }
 
-// liveClock lets a runtime.Clock drive live.
-type liveClock struct{ runtime.Clock }
+// liveClock lets a machine.Clock drive live.
+type liveClock struct{ machine.Clock }
 
 func (c liveClock) Mono() sched.TimeNs { return sched.TimeNs(c.Clock.Mono()) }
 func (c liveClock) Wall() sched.TimeNs { return sched.TimeNs(c.Clock.Wall()) }
 func (c liveClock) AfterFunc(d sched.TimeNs, f func()) live.Timer {
-	return c.Clock.AfterFunc(runtime.Duration(d), f)
+	return c.Clock.AfterFunc(machine.Duration(d), f)
 }
 
 // Health returns the health server to register on the gRPC server.
@@ -143,7 +144,7 @@ func (n *Node) Start(ctx context.Context) error {
 	cfg := live.Config{
 		Process:   m,
 		Boot:      runtime.NodeStarted{Self: n.config.Self},
-		Stop:      func(deadline sched.TimeNs) any { return runtime.StopRequest{Deadline: runtime.NodeTime(deadline)} },
+		Stop:      func(deadline sched.TimeNs) any { return runtime.StopRequest{Deadline: machine.NodeTime(deadline)} },
 		StopGrace: time.Duration(n.config.StopGrace),
 		Clock:     liveClock{n.config.Clock},
 		Inbox:     n.inbox,
@@ -204,7 +205,7 @@ func (n *Node) waitReady(ctx context.Context, cancel context.CancelFunc) error {
 		return n.loopErr
 	}
 	timedOut := make(chan struct{})
-	deadline := n.config.Clock.AfterFunc(runtime.Duration(2*time.Minute), func() { close(timedOut) })
+	deadline := n.config.Clock.AfterFunc(machine.Duration(2*time.Minute), func() { close(timedOut) })
 	defer deadline.Stop()
 	for {
 		done := make(chan struct{})
@@ -262,7 +263,7 @@ func (n *Node) Close() error {
 	return n.closeErr
 }
 
-func (n *Node) allocReq() runtime.RequestID {
+func (n *Node) allocReq() machine.RequestID {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.nextReq++
@@ -295,12 +296,12 @@ func (n *Node) onLoop(ctx context.Context, fn func(m *replica.Replica) []any) er
 
 // serverFrom is who the node is when it talks to its own replica: the reply to
 // a request goes back to it, and the reply sink hands it to the waiting RPC.
-var serverFrom = runtime.NodeInstance{Node: "server"}
+var serverFrom = machine.NodeInstance{Node: "server"}
 
 // ask sends one request to the replica as an inbox value and waits for its
 // reply. A request that ends with its context may have been applied if it is a
 // command (maybeApplied), so its answer says MaybeApplied.
-func (n *Node) ask(ctx context.Context, maybeApplied bool, body func(request runtime.RequestID) runtime.EventData) (runtime.ControlPlaneDone, error) {
+func (n *Node) ask(ctx context.Context, maybeApplied bool, body func(request machine.RequestID) runtime.EventData) (runtime.ControlPlaneDone, error) {
 	request := n.allocReq()
 	ch := make(chan runtime.ControlPlaneDone, 1)
 	n.mu.Lock()

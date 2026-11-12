@@ -6,6 +6,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // expectedLogChecker is the invariant that owns the reconstructed logs and every check
@@ -112,10 +113,10 @@ func (o *expectedLogChecker) record(v simulator.View, pl *partitionLog, off int6
 func (o *expectedLogChecker) acks(v simulator.View) {
 	for _, tf := range v.Timeline().Since("produce_acked", &o.ackCur) {
 		f := tf.Fact
-		topic, _ := f.Field("topic").(core.StringValue)
-		part, ok1 := f.Field("partition").(core.Int64Value)
-		base, ok2 := f.Field("base_offset").(core.Int64Value)
-		count, ok3 := f.Field("count").(core.Int64Value)
+		topic, _ := f.Field("topic").(machine.StringValue)
+		part, ok1 := f.Field("partition").(machine.Int64Value)
+		base, ok2 := f.Field("base_offset").(machine.Int64Value)
+		count, ok3 := f.Field("count").(machine.Int64Value)
 		v.Assert().Always(ok1 && ok2 && ok3, "kafka: ack fact is well formed")
 		if !ok1 || !ok2 || !ok3 {
 			continue

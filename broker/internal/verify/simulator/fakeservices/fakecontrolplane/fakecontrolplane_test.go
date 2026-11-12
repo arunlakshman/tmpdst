@@ -8,9 +8,10 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakecontrolplane"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
-const ms = core.Duration(1_000_000)
+const ms = machine.Duration(1_000_000)
 
 func base() simulator.ControlPlaneFaults {
 	ts := simulator.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
@@ -19,12 +20,12 @@ func base() simulator.ControlPlaneFaults {
 
 var tp = core.NewTopicPartition("t", 0)
 
-func setup(f simulator.ControlPlaneFaults, seed uint64) (*fakecontrolplane.Engine, *fakeservicetest.Ctx, core.NodeInstance) {
+func setup(f simulator.ControlPlaneFaults, seed uint64) (*fakecontrolplane.Engine, *fakeservicetest.Ctx, machine.NodeInstance) {
 	e := fakecontrolplane.New(f)
 	return e, fakeservicetest.New(e, seed), fakeservicetest.Ref("a")
 }
 
-func call(e *fakecontrolplane.Engine, c *fakeservicetest.Ctx, from core.NodeInstance, request core.RequestID, operation core.ControlPlaneOperation) {
+func call(e *fakecontrolplane.Engine, c *fakeservicetest.Ctx, from machine.NodeInstance, request machine.RequestID, operation core.ControlPlaneOperation) {
 	e.Execute(c, from, core.ControlPlaneCall{Req: request, Op: operation})
 }
 
@@ -90,7 +91,7 @@ func TestFaultFamilies(t *testing.T) {
 		{"503", func(f *simulator.ControlPlaneFaults) { f.Unavailable503 = 1 }, "cp_503", core.ErrUnavailable, core.NotApplied, false, 0},
 		{"lost", func(f *simulator.ControlPlaneFaults) { f.LostResponse = 1 }, "cp_lost_response", core.ErrTimeout, core.MaybeApplied, true, simulator.Time(1000 * ms)},
 		{"outage", func(f *simulator.ControlPlaneFaults) {
-			f.Outage = simulator.ServiceOutage{Prob: 1, Dur: [2]core.Duration{ms, 2 * ms}}
+			f.Outage = simulator.ServiceOutage{Prob: 1, Dur: [2]machine.Duration{ms, 2 * ms}}
 		}, "cp_outage", core.ErrUnavailable, core.NotApplied, false, 0},
 	}
 	for _, tc := range cases {
@@ -195,7 +196,7 @@ func TestLandsAfterCrash(t *testing.T) {
 func TestRecoveryStopsFaults(t *testing.T) {
 	f := base()
 	f.Unavailable503, f.Timeout, f.LostResponse = 1, 1, 1
-	f.Outage = simulator.ServiceOutage{Prob: 1, Dur: [2]core.Duration{ms, 2 * ms}}
+	f.Outage = simulator.ServiceOutage{Prob: 1, Dur: [2]machine.Duration{ms, 2 * ms}}
 	e, c, a := setup(f, 1)
 	call(e, c, a, 1, commit("s"))
 	e.EnterRecovery()
@@ -212,16 +213,16 @@ func TestRecoveryStopsFaults(t *testing.T) {
 func TestDeterminism(t *testing.T) {
 	f := base()
 	f.Unavailable503, f.Timeout, f.LostResponse = 0.2, 0.2, 0.2
-	f.Outage = simulator.ServiceOutage{Prob: 0.05, Dur: [2]core.Duration{10 * ms, 20 * ms}}
+	f.Outage = simulator.ServiceOutage{Prob: 0.05, Dur: [2]machine.Duration{10 * ms, 20 * ms}}
 	run := func(seed uint64) (string, uint64, uint64) {
 		e, c, a := setup(f, seed)
 		for i := range 60 {
 			c.T += simulator.Time(ms)
 			switch i % 2 {
 			case 0:
-				call(e, c, a, core.RequestID(i), commit(string(rune('a'+i%7))))
+				call(e, c, a, machine.RequestID(i), commit(string(rune('a'+i%7))))
 			default:
-				call(e, c, a, core.RequestID(i), core.FindSegments{TopicPartition: tp})
+				call(e, c, a, machine.RequestID(i), core.FindSegments{TopicPartition: tp})
 			}
 		}
 		mid := e.StateHash()
@@ -265,7 +266,7 @@ func TestCommitSizeLimit(t *testing.T) {
 	call(e, c, a, 2, many("ok", 4))
 	call(e, c, a, 3, many("many", 400))
 	c.Run()
-	for _, request := range []core.RequestID{2, 3} {
+	for _, request := range []machine.RequestID{2, 3} {
 		if d := c.Find(request).(core.ControlPlaneDone); d.Err != core.OK {
 			t.Fatal(request, d)
 		}

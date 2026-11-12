@@ -6,6 +6,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // TestIncrementalStateHashMatchesFull drives random dials, sends, pauses,
@@ -14,17 +15,17 @@ import (
 // that forgets to invalidate its pair fails here.
 func TestIncrementalStateHashMatchesFull(t *testing.T) {
 	f := simulator.NetworkFaults{Latency: lat, PartialIOMax: 4, PairLatencyMax: 20000, PartitionProb: 0.1,
-		PartitionDur: [2]core.Duration{10000, 400000}, ClogProb: 0.1, ClogDur: [2]core.Duration{1000, 100000},
+		PartitionDur: [2]machine.Duration{10000, 400000}, ClogProb: 0.1, ClogDur: [2]machine.Duration{1000, 100000},
 		RandomCloseProb: 0.03, BlackHoleProb: 0.03}
 	for seed := uint64(1); seed <= 40; seed++ {
 		h := newHarness(t, seed, f)
-		nodes := map[string]core.NodeInstance{}
+		nodes := map[string]machine.NodeInstance{}
 		for _, n := range []string{"a", "b", "c"} {
 			nodes[n] = h.boot(n)
 		}
 		names := []string{"a", "b", "c"}
 		type cn struct {
-			ref  core.NodeInstance
+			ref  machine.NodeInstance
 			conn core.ConnID
 		}
 		var conns []cn

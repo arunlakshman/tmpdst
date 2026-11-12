@@ -6,6 +6,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Group APIs (decision Q3). The broker keeps no group state. Each call is one
@@ -18,11 +19,11 @@ import (
 
 // groupCallMargin is added to a rebalance timeout for the control plane deadline,
 // so the control plane answers (with its own timeout) before the broker gives up.
-const groupCallMargin = 10 * core.Second
+const groupCallMargin = 10 * machine.Second
 
 // syncWait is the wait a SyncGroup allows for the leader. The broker keeps no
 // group state, so it does not know the group's rebalance timeout and uses this.
-const syncWait = 60 * core.Second
+const syncWait = 60 * machine.Second
 
 // dispatchGroup routes the group APIs. It reports false for other requests.
 func (b *Broker) dispatchGroup(s *slot, request core.Request) ([]core.Action, bool) {
@@ -51,7 +52,7 @@ func (b *Broker) dispatchGroup(s *slot, request core.Request) ([]core.Action, bo
 
 // groupCall starts one group call as a part of slot s. fill writes the answer
 // into the response when the control plane replies. timeout 0 takes the default.
-func (b *Broker) groupCall(s *slot, controlPlaneOperation core.ControlPlaneOperation, timeout core.Duration, fill func(core.ControlPlaneDone)) []core.Action {
+func (b *Broker) groupCall(s *slot, controlPlaneOperation core.ControlPlaneOperation, timeout machine.Duration, fill func(core.ControlPlaneDone)) []core.Action {
 	return b.startOp(&operation{kind: opGroup, s: s, gop: controlPlaneOperation, gtimeout: timeout, gfill: fill})
 }
 
@@ -236,6 +237,6 @@ func optStr(s string) *string {
 	return new(s)
 }
 
-func millisDuration(milliseconds int32) core.Duration {
-	return core.Duration(milliseconds) * core.Millisecond
+func millisDuration(milliseconds int32) machine.Duration {
+	return machine.Duration(milliseconds) * machine.Millisecond
 }

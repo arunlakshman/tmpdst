@@ -7,6 +7,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // groupCP is a fake control plane for the group calls of one test. answer
@@ -79,7 +80,7 @@ func TestJoinGroupSuccess(t *testing.T) {
 	if operation.Group != "g1" || operation.ClientHost != "/test" || operation.RebalanceTimeoutMs != 30000 || len(operation.Protocols) != 1 {
 		t.Fatalf("join call %+v", operation)
 	}
-	if want := core.Duration(40 * time.Second); g.calls[0].Timeout != want {
+	if want := machine.Duration(40 * time.Second); g.calls[0].Timeout != want {
 		t.Fatalf("deadline %v, want 40s", time.Duration(g.calls[0].Timeout))
 	}
 	h.noViolations()
@@ -90,7 +91,7 @@ func TestJoinGroupVersion0UsesSessionTimeout(t *testing.T) {
 		return cpOK(core.GroupJoinResp{MemberID: "m-2", Leader: "m-2", Generation: 1})
 	})
 	h.call(h.open(1), 0, joinRequest("g1", 10000, 0))
-	if want := core.Duration(20 * time.Second); g.calls[0].Timeout != want { // session 10 s + margin
+	if want := machine.Duration(20 * time.Second); g.calls[0].Timeout != want { // session 10 s + margin
 		t.Fatalf("deadline %v, want 20s", time.Duration(g.calls[0].Timeout))
 	}
 	h.noViolations()
@@ -121,7 +122,7 @@ func TestSyncGroupLeaderAndFollower(t *testing.T) {
 	if got := g.calls[0].Op.(core.GroupSync); len(got.Assignments) != 2 || got.Assignments[1].Member != "m-2" {
 		t.Fatalf("leader call %+v", got)
 	}
-	if want := core.Duration(70 * time.Second); g.calls[0].Timeout != want {
+	if want := machine.Duration(70 * time.Second); g.calls[0].Timeout != want {
 		t.Fatalf("sync deadline %v, want 70s", time.Duration(g.calls[0].Timeout))
 	}
 	follower := syncRequest("g1", "m-2", 4)

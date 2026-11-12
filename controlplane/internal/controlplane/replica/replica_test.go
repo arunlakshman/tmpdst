@@ -10,6 +10,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 type alwaysHit struct {
@@ -33,8 +34,8 @@ func (e *testEnv) Intn(n int) int {
 	}
 	return int(e.Uint64() % uint64(n))
 }
-func (e *testEnv) NewID() runtime.ID {
-	var id runtime.ID
+func (e *testEnv) NewID() machine.ID {
+	var id machine.ID
 	u := e.Uint64()
 	for i := range id {
 		id[i] = byte(u >> (8 * (i % 8)))
@@ -55,9 +56,9 @@ func (e *testEnv) Unreachable(runtime.PropertyID, ...runtime.ContextPair)       
 // timerView is what a test reads from a timer request: which timer, its
 // generation, and when it fires.
 type timerView struct {
-	ID    runtime.TimerID
-	Gen   runtime.TimerVersion
-	After runtime.Duration
+	ID    machine.TimerID
+	Gen   machine.TimerVersion
+	After machine.Duration
 }
 
 // asTimer reads a timer request.
@@ -67,7 +68,7 @@ func asTimer(a any) (timerView, bool) {
 		return timerView{}, false
 	}
 	fired, _ := st.Body.(runtime.TimerFired)
-	return timerView{ID: fired.ID, Gen: fired.Gen, After: runtime.Duration(st.After)}, true
+	return timerView{ID: fired.ID, Gen: fired.Gen, After: machine.Duration(st.After)}, true
 }
 
 func mustTimer(t *testing.T, a any) timerView {
@@ -88,7 +89,7 @@ func newMachine(t *testing.T, config replica.Config) *replica.Replica {
 func newMachineEnv(t *testing.T, config replica.Config) (*replica.Replica, *testEnv) {
 	t.Helper()
 	env := &testEnv{}
-	return replica.New(config)(env, runtime.NodeInstance{Node: "cp-0"}), env
+	return replica.New(config)(env, machine.NodeInstance{Node: "cp-0"}), env
 }
 
 // testContext is the sim.Context of a unit test. The replica only reads the time from it.
@@ -101,7 +102,7 @@ func (testContext) Faults() *fault.Injector { return fault.New(rng.New(1)) }
 func (testContext) Assert() *assert.Log     { return assert.New(nil) }
 
 // stepAt gives body to the replica at time at.
-func stepAt(m *replica.Replica, at runtime.NodeTime, body runtime.EventData) []any {
+func stepAt(m *replica.Replica, at machine.NodeTime, body runtime.EventData) []any {
 	return m.Step(testContext{now: sched.TimeNs(at)}, body)
 }
 

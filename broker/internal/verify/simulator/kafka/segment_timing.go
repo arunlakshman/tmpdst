@@ -3,6 +3,7 @@ package kafka
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // segmentTiming checks the timing facts that the production metrics are built
@@ -18,7 +19,7 @@ func (*segmentTiming) Name() string         { return "SegmentTiming" }
 func (*segmentTiming) AtEnd(simulator.View) {}
 
 func (i *segmentTiming) Observe(v simulator.View) {
-	n := func(f core.Fact, k string) int64 { x, _ := f.Field(k).(core.Int64Value); return int64(x) }
+	n := func(f machine.Fact, k string) int64 { x, _ := f.Field(k).(machine.Int64Value); return int64(x) }
 	a := v.Assert()
 	tl := v.Timeline()
 	for _, tf := range tl.Since("segment_put_done", &i.put) {

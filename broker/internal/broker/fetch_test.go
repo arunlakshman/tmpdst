@@ -6,6 +6,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // longFetch is a Fetch of offset 0 on topic t, for the partitions given.
@@ -105,7 +106,7 @@ func TestFetchMaxWaitExpiresEmpty(t *testing.T) {
 	fireUntilAnswer(t, h, c)
 	// The answer comes at MaxWait, not a poll interval later: the last poll
 	// waits only until the deadline.
-	if elapsed := h.now - start; elapsed < core.NodeTime(300*core.Millisecond) || elapsed > core.NodeTime(310*core.Millisecond) {
+	if elapsed := h.now - start; elapsed < machine.NodeTime(300*machine.Millisecond) || elapsed > machine.NodeTime(310*machine.Millisecond) {
 		t.Fatalf("answered after %d ns, want about 300 ms", elapsed)
 	}
 	if p := fetched(h.next(c)); len(p.RecordBatches) != 0 || p.ErrorCode != 0 {
@@ -147,7 +148,7 @@ func TestFetchPollsOnlyShortPartition(t *testing.T) {
 	h.produceOne(w, e("t", 1, plain(t, "b")))
 	start := h.now
 	fireUntilAnswer(t, h, c)
-	if elapsed := h.now - start; elapsed < core.NodeTime(300*core.Millisecond) {
+	if elapsed := h.now - start; elapsed < machine.NodeTime(300*machine.Millisecond) {
 		t.Fatalf("answered before MaxWait with %d ns to go, MinBytes not met", elapsed)
 	}
 	if lookups(h, tp0) != 1 {
@@ -188,7 +189,7 @@ func TestFetchParkedAnswersOnStop(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.send(c, verFetch, longFetch(1, 500, 0))
-	h.do(core.StopRequest{Deadline: h.now + core.NodeTime(core.Second)})
+	h.do(core.StopRequest{Deadline: h.now + machine.NodeTime(machine.Second)})
 	if !h.exited {
 		t.Fatal("a parked fetch held up the stop")
 	}

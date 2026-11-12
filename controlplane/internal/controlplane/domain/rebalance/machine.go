@@ -13,6 +13,7 @@ package rebalance
 import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/sched"
 	"github.com/manifesterio/mds/dst/sim"
 )
@@ -22,13 +23,13 @@ type Config struct {
 	// ID is the process id (default "rebalance").
 	ID sim.ProcessID
 	// InitialDelay is how long a new group waits for more members (default 3 s).
-	InitialDelay runtime.Duration
+	InitialDelay machine.Duration
 	// NewMemberTimeout is how long a new member may wait for its first round (default 5 min).
-	NewMemberTimeout runtime.Duration
+	NewMemberTimeout machine.Duration
 	// WriteTimeout bounds one log write (default 10 s).
-	WriteTimeout runtime.Duration
+	WriteTimeout machine.Duration
 	// LoadRetry is the wait before a refused load read is sent again (default 100 ms).
-	LoadRetry runtime.Duration
+	LoadRetry machine.Duration
 	// Faults are the buggify sites (sites.go). Nil means none fire: production
 	// passes nil, the simulator passes its fault injector.
 	Faults runtime.FaultInjector
@@ -38,12 +39,12 @@ type Config struct {
 type Machine struct {
 	cfg       Config
 	state     any // *standby, *loading or *serving
-	nextReq   runtime.RequestID
-	nextTimer runtime.TimerID
+	nextReq   machine.RequestID
+	nextTimer machine.TimerID
 
 	// Set for the length of one Step only.
 	cx  sim.Context
-	now runtime.NodeTime
+	now machine.NodeTime
 	out []any
 }
 
@@ -54,8 +55,8 @@ type standby struct{}
 type serving struct {
 	groups    map[string]*group
 	names     []string // the group names, sorted
-	reqs      map[runtime.RequestID]any
-	owners    map[runtime.TimerID]timerRef
+	reqs      map[machine.RequestID]any
+	owners    map[machine.TimerID]timerRef
 	where     map[CallID]string // the group of each parked, queued or writing group call
 	describes []*describe
 	commits   []*commit
@@ -69,16 +70,16 @@ func New(cfg Config) *Machine {
 		cfg.ID = defaultProcess
 	}
 	if cfg.InitialDelay <= 0 {
-		cfg.InitialDelay = 3 * runtime.Second
+		cfg.InitialDelay = 3 * machine.Second
 	}
 	if cfg.NewMemberTimeout <= 0 {
-		cfg.NewMemberTimeout = 300 * runtime.Second
+		cfg.NewMemberTimeout = 300 * machine.Second
 	}
 	if cfg.WriteTimeout <= 0 {
-		cfg.WriteTimeout = 10 * runtime.Second
+		cfg.WriteTimeout = 10 * machine.Second
 	}
 	if cfg.LoadRetry <= 0 {
-		cfg.LoadRetry = 100 * runtime.Millisecond
+		cfg.LoadRetry = 100 * machine.Millisecond
 	}
 	return &Machine{cfg: cfg, state: &standby{}}
 }
@@ -88,7 +89,7 @@ func (m *Machine) ID() sim.ProcessID { return m.cfg.ID }
 
 // Step implements sim.Process: it takes one input and returns the outputs.
 func (m *Machine) Step(cx sim.Context, inbox any) []any {
-	m.cx, m.now, m.out = cx, runtime.NodeTime(cx.Now()), nil
+	m.cx, m.now, m.out = cx, machine.NodeTime(cx.Now()), nil
 	switch s := m.state.(type) {
 	case *serving:
 		m.serve(s, inbox)
@@ -219,21 +220,21 @@ func (m *Machine) reply(call CallID, err runtime.ErrCode, body Answer) {
 }
 
 // submit sends a command to the log and returns its request id.
-func (m *Machine) submit(op runtime.ControlPlaneOperation) runtime.RequestID {
+func (m *Machine) submit(op runtime.ControlPlaneOperation) machine.RequestID {
 	m.nextReq++
 	m.out = append(m.out, SubmitCommand{Req: m.nextReq, Op: op})
 	return m.nextReq
 }
 
 // read sends a read to the log and returns its request id.
-func (m *Machine) read(op runtime.ControlPlaneOperation, fresh bool) runtime.RequestID {
+func (m *Machine) read(op runtime.ControlPlaneOperation, fresh bool) machine.RequestID {
 	m.nextReq++
 	m.out = append(m.out, SubmitRead{Req: m.nextReq, Op: op, Fresh: fresh})
 	return m.nextReq
 }
 
 // wallMs is the wall clock in milliseconds, for TimeMs in logged commands.
-func (m *Machine) wallMs() int64 { return int64(m.cx.Wall()) / int64(runtime.Millisecond) }
+func (m *Machine) wallMs() int64 { return int64(m.cx.Wall()) / int64(machine.Millisecond) }
 
 // send delivers body to the machine itself, as a later input.
 func (m *Machine) send(body any) {
@@ -244,8 +245,8 @@ func (m *Machine) send(body any) {
 func newServing() *serving {
 	return &serving{
 		groups: map[string]*group{},
-		reqs:   map[runtime.RequestID]any{},
-		owners: map[runtime.TimerID]timerRef{},
+		reqs:   map[machine.RequestID]any{},
+		owners: map[machine.TimerID]timerRef{},
 		where:  map[CallID]string{},
 	}
 }
@@ -270,15 +271,15 @@ func (m *Machine) newMember(s *serving, g *group, id string) *member {
 }
 
 // ms is a duration of n milliseconds.
-func ms(n int32) runtime.Duration { return runtime.Duration(n) * runtime.Millisecond }
+func ms(n int32) machine.Duration { return machine.Duration(n) * machine.Millisecond }
 
 // after is the time from now until at, never below zero.
-func (m *Machine) after(at runtime.NodeTime) runtime.Duration {
-	return runtime.Duration(max(at-m.now, 0))
+func (m *Machine) after(at machine.NodeTime) machine.Duration {
+	return machine.Duration(max(at-m.now, 0))
 }
 
 // timeNs converts a duration for sim.SetTimer.
-func timeNs(d runtime.Duration) sched.TimeNs { return sched.TimeNs(d) }
+func timeNs(d machine.Duration) sched.TimeNs { return sched.TimeNs(d) }
 
 // describeOp is the read of one group.
 func describeOp(name string) contract.DescribeGroup { return contract.DescribeGroup{Group: name} }

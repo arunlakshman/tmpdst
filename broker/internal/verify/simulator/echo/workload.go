@@ -9,6 +9,8 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // PutOp and GetOp are the History ops. A PUT result is the reply text, or ""
@@ -31,7 +33,7 @@ type Opts struct {
 }
 
 const (
-	requestTimeout = 3 * core.Second
+	requestTimeout = 3 * machine.Second
 	keepAcked      = 16 // GET candidates per client
 )
 
@@ -47,7 +49,7 @@ type acked struct {
 }
 
 type pending struct {
-	id      core.ID
+	id      machine.ID
 	get     bool
 	seq     int
 	payload string
@@ -60,7 +62,7 @@ type client struct {
 	seq     int
 	recycle bool
 	acked   []acked
-	digest  core.Hasher // every ack ever recorded
+	digest  trace.Hash // every ack ever recorded
 	nacked  uint64
 	pend    *pending
 }
@@ -68,7 +70,7 @@ type client struct {
 // Workload is N closed-loop clients speaking the echo protocol.
 type Workload struct {
 	env     core.Environment
-	self    core.NodeInstance
+	self    machine.NodeInstance
 	opts    Opts
 	history simulator.History
 
@@ -77,7 +79,7 @@ type Workload struct {
 }
 
 // NewWorkload builds the workload machine.
-func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.NodeInstance, o Opts) *Workload {
+func NewWorkload(env core.Environment, self machine.NodeInstance, brokers []machine.NodeInstance, o Opts) *Workload {
 	w := &Workload{env: env, self: self, opts: o}
 	w.loop = session.Loop[*client]{
 		Connected: func(c *client) bool { return c.State == clientReady || c.State == clientBusy },
@@ -91,7 +93,7 @@ func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.No
 		w.loop.Brokers = append(w.loop.Brokers, b.Node)
 	}
 	for i := range o.Clients {
-		w.loop.Clients = append(w.loop.Clients, &client{Client: session.Client{ID: i}, digest: core.NewHasher()})
+		w.loop.Clients = append(w.loop.Clients, &client{Client: session.Client{ID: i}, digest: trace.New()})
 	}
 	return w
 }
@@ -117,7 +119,7 @@ func (w *Workload) Step(event core.Event) []core.Action { return w.loop.Step(eve
 
 func (w *Workload) onReady(c *client) []core.Action {
 	c.Fails, c.fr = 0, framer{}
-	return []core.Action{c.Wake(core.Millisecond)}
+	return []core.Action{c.Wake(machine.Millisecond)}
 }
 
 // OnPhase implements simulator.PhaseAware. Entering Settling every client drops its
@@ -206,14 +208,14 @@ func (w *Workload) reply(c *client, text string) []core.Action {
 	if w.history != nil {
 		w.history.Return(p.id, text, out)
 	}
-	think := core.Duration(200+w.env.Intn(600)) * core.Millisecond
+	think := machine.Duration(200+w.env.Intn(600)) * machine.Millisecond
 	return []core.Action{c.Answered(), c.Wake(think)}
 }
 
 func (c *client) record(off int64, payload string) {
 	c.nacked++
-	c.digest.Uint64Value(uint64(off))
-	c.digest.StringValue(payload)
+	c.digest.Uint64(uint64(off))
+	c.digest.String(payload)
 	c.acked = append(c.acked, acked{off, payload})
 	if len(c.acked) > keepAcked {
 		c.acked = slices.Clone(c.acked[1:])
@@ -236,31 +238,31 @@ func (w *Workload) lost(c *client, why string) {
 
 // StateHash folds all state.
 func (w *Workload) StateHash() uint64 {
-	h := core.NewHasher()
+	h := trace.New()
 	h.Bool(w.stopped)
-	h.Uint64Value(uint64(w.loop.NextReq))
+	h.Uint64(uint64(w.loop.NextReq))
 	for _, c := range w.loop.Clients {
-		h.Uint64Value(uint64(c.State))
-		h.Uint64Value(uint64(c.Conn))
-		h.Uint64Value(uint64(c.DialReq))
-		h.Uint64Value(uint64(c.SendReq))
-		h.Uint64Value(uint64(c.Dials))
-		h.Uint64Value(uint64(c.Fails))
-		h.Uint64Value(uint64(c.WakeGen))
-		h.Uint64Value(uint64(c.ReqGen))
+		h.Uint64(uint64(c.State))
+		h.Uint64(uint64(c.Conn))
+		h.Uint64(uint64(c.DialReq))
+		h.Uint64(uint64(c.SendReq))
+		h.Uint64(uint64(c.Dials))
+		h.Uint64(uint64(c.Fails))
+		h.Uint64(uint64(c.WakeGen))
+		h.Uint64(uint64(c.ReqGen))
 		h.Bytes(c.fr.buf)
-		h.Uint64Value(uint64(c.seq))
+		h.Uint64(uint64(c.seq))
 		h.Bool(c.recycle)
-		h.Uint64Value(uint64(len(c.acked)))
-		h.Uint64Value(uint64(c.digest))
-		h.Uint64Value(c.nacked)
+		h.Uint64(uint64(len(c.acked)))
+		h.Uint64(uint64(c.digest))
+		h.Uint64(c.nacked)
 		h.Bool(c.pend != nil)
 		if p := c.pend; p != nil {
 			h.Bytes(p.id[:])
 			h.Bool(p.get)
-			h.Uint64Value(uint64(p.seq))
-			h.StringValue(p.payload)
-			h.Uint64Value(uint64(p.off))
+			h.Uint64(uint64(p.seq))
+			h.String(p.payload)
+			h.Uint64(uint64(p.off))
 		}
 	}
 	return uint64(h)

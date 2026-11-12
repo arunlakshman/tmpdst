@@ -6,10 +6,11 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 const (
-	timerCheckpoint = runtime.TimerID(4)
+	timerCheckpoint = machine.TimerID(4)
 
 	defaultCheckpointPrefix = "checkpoint/"
 )
@@ -216,7 +217,7 @@ func (m *Replica) onObjGetDone(d runtime.ObjectGetDone) []any {
 func (m *Replica) armCheckpointRetry() []any {
 	after := m.config.Heartbeat
 	if after <= 0 {
-		after = 250 * runtime.Millisecond
+		after = 250 * machine.Millisecond
 	}
 	m.checkpointGen++
 	return []any{arm(timerCheckpoint, m.checkpointGen, after)}

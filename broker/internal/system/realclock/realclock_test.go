@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system/realclock"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 func TestMonoGoesForwardAndWallIsNow(t *testing.T) {
@@ -23,13 +23,13 @@ func TestMonoGoesForwardAndWallIsNow(t *testing.T) {
 func TestAfterFuncFiresAndStops(t *testing.T) {
 	c := realclock.New()
 	fired := make(chan struct{})
-	c.AfterFunc(core.Duration(1), func() { close(fired) })
+	c.AfterFunc(machine.Duration(1), func() { close(fired) })
 	select {
 	case <-fired:
 	case <-time.After(5 * time.Second):
 		t.Fatal("timer did not fire")
 	}
-	never := c.AfterFunc(core.Duration(time.Hour), func() { t.Error("a stopped timer fired") })
+	never := c.AfterFunc(machine.Duration(time.Hour), func() { t.Error("a stopped timer fired") })
 	if !never.Stop() {
 		t.Fatal("Stop of a pending timer must report true")
 	}

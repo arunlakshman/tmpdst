@@ -14,6 +14,8 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // Opts configures the workload.
@@ -25,7 +27,7 @@ type Opts struct {
 	MaxAttempts int
 	// ReqTimeout is how long a non-fetch request waits before the client drops
 	// the connection. Zero means 1500 ms.
-	ReqTimeout core.Duration
+	ReqTimeout machine.Duration
 }
 
 // DefaultOpts is 3 at-least-once producers and 2 consumers over 2 topics x 3
@@ -41,7 +43,7 @@ func (o Opts) maxAttempts() int {
 	return maxAttempts
 }
 
-func (o Opts) requestTimeout() core.Duration {
+func (o Opts) requestTimeout() machine.Duration {
 	if o.ReqTimeout > 0 {
 		return o.ReqTimeout
 	}
@@ -59,9 +61,9 @@ func (o Opts) topicPartitions() []core.TopicPartition {
 }
 
 const (
-	requestTimeout = 1500 * core.Millisecond // a request with no answer: drop the connection (Kafka does)
-	fetchWait      = 10 * core.Second        // a fetch reads a batch at a time from S3: it is slow on a long log
-	maxAttempts    = 3                       // sends of one produce batch before it is abandoned
+	requestTimeout = 1500 * machine.Millisecond // a request with no answer: drop the connection (Kafka does)
+	fetchWait      = 10 * machine.Second        // a fetch reads a batch at a time from S3: it is slow on a long log
+	maxAttempts    = 3                          // sends of one produce batch before it is abandoned
 	maxFrame       = 8 << 20
 )
 
@@ -108,7 +110,7 @@ type client struct {
 // built, so the oracle can check that acked offsets follow send order.
 type Workload struct {
 	env     core.Environment
-	self    core.NodeInstance
+	self    machine.NodeInstance
 	opts    Opts
 	tps     []core.TopicPartition
 	history simulator.History
@@ -117,7 +119,7 @@ type Workload struct {
 }
 
 // NewWorkload builds the workload machine.
-func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.NodeInstance, o Opts) *Workload {
+func NewWorkload(env core.Environment, self machine.NodeInstance, brokers []machine.NodeInstance, o Opts) *Workload {
 	w := &Workload{env: env, self: self, opts: o, tps: o.topicPartitions()}
 	w.loop = session.Loop[*client]{
 		Connected: func(c *client) bool { return c.State == session.Connected },
@@ -336,29 +338,29 @@ func (w *Workload) lost(c *client, why string) {
 
 // StateHash folds all state.
 func (w *Workload) StateHash() uint64 {
-	h := core.NewHasher()
-	h.Uint64Value(uint64(w.loop.NextReq))
+	h := trace.New()
+	h.Uint64(uint64(w.loop.NextReq))
 	for _, c := range w.loop.Clients {
-		h.Uint64Value(uint64(c.State))
-		h.Uint64Value(uint64(c.stage))
-		h.Uint64Value(uint64(c.Conn))
-		h.Uint64Value(uint64(c.DialReq))
-		h.Uint64Value(uint64(c.SendReq))
-		h.Uint64Value(uint64(c.Dials))
-		h.Uint64Value(uint64(c.Fails))
-		h.Uint64Value(uint64(c.WakeGen))
-		h.Uint64Value(uint64(c.ReqGen))
-		h.Uint64Value(uint64(c.corr))
+		h.Uint64(uint64(c.State))
+		h.Uint64(uint64(c.stage))
+		h.Uint64(uint64(c.Conn))
+		h.Uint64(uint64(c.DialReq))
+		h.Uint64(uint64(c.SendReq))
+		h.Uint64(uint64(c.Dials))
+		h.Uint64(uint64(c.Fails))
+		h.Uint64(uint64(c.WakeGen))
+		h.Uint64(uint64(c.ReqGen))
+		h.Uint64(uint64(c.corr))
 		for _, v := range c.ver {
-			h.Uint64Value(uint64(v))
+			h.Uint64(uint64(v))
 		}
 		if c.fr != nil {
-			h.Uint64Value(uint64(c.fr.Buffered()))
+			h.Uint64(uint64(c.fr.Buffered()))
 		}
 		h.Bool(c.out != nil)
 		if c.out != nil {
-			h.Uint64Value(uint64(c.out.kind))
-			h.Uint64Value(uint64(c.out.h.CorrelationID))
+			h.Uint64(uint64(c.out.kind))
+			h.Uint64(uint64(c.out.h.CorrelationID))
 		}
 		c.p.hash(&h)
 		c.c.hash(&h)

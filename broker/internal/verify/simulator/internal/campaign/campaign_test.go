@@ -5,6 +5,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 type stubAssert struct{ sometimes []string }
@@ -31,9 +32,9 @@ func (stubTruth) HighWatermark(core.TopicPartition) core.Offset { return 0 }
 
 type stubHist struct{}
 
-func (stubHist) Invoke(core.NodeInstance, core.ID, core.ID, any) {}
-func (stubHist) Return(core.ID, any, simulator.OpOutcome) bool   { return false }
-func (stubHist) Ops() []simulator.HistoryOperation               { return nil }
+func (stubHist) Invoke(machine.NodeInstance, machine.ID, machine.ID, any) {}
+func (stubHist) Return(machine.ID, any, simulator.OpOutcome) bool         { return false }
+func (stubHist) Ops() []simulator.HistoryOperation                        { return nil }
 
 type stubView struct {
 	tl simulator.Timeline
@@ -55,13 +56,13 @@ func TestNewAndPhases(t *testing.T) {
 	if p.Phases != Phases() {
 		t.Fatalf("New phases = %+v, want %+v", p.Phases, Phases())
 	}
-	if p.CheckDeterminism != 10 || p.QuiesceEvery != core.Second {
+	if p.CheckDeterminism != 10 || p.QuiesceEvery != machine.Second {
 		t.Fatalf("New defaults CheckDeterminism=%d QuiesceEvery=%d", p.CheckDeterminism, p.QuiesceEvery)
 	}
-	if Millis(5) != 5*core.Millisecond {
+	if Millis(5) != 5*machine.Millisecond {
 		t.Fatalf("Millis(5) = %d", Millis(5))
 	}
-	if ProgressGraceTime != 6*core.Second {
+	if ProgressGraceTime != 6*machine.Second {
 		t.Fatalf("LivenessGrace = %d", ProgressGraceTime)
 	}
 }
@@ -86,9 +87,9 @@ func TestSwarm(t *testing.T) {
 func TestPhaseStart(t *testing.T) {
 	t.Parallel()
 	tl := simulator.NewTimeline()
-	tl.Append(core.NodeInstance{}, 10, core.Fact{
+	tl.Append(machine.NodeInstance{}, 10, machine.Fact{
 		Name:   "sim_phase",
-		Fields: []core.Field{{Key: "phase", Value: core.Uint64Value(uint64(simulator.PhaseRecovering))}},
+		Fields: []machine.Field{{Key: "phase", Value: machine.Uint64Value(uint64(simulator.PhaseRecovering))}},
 	})
 	v := stubView{tl: tl, as: &stubAssert{}}
 	at, ok := PhaseStart(v, simulator.PhaseRecovering)
@@ -109,11 +110,11 @@ func TestFaultCoverage(t *testing.T) {
 	inv.Observe(stubView{tl: simulator.NewTimeline(), as: &stubAssert{}})
 
 	tl := simulator.NewTimeline()
-	tl.Append(core.NodeInstance{}, 1, core.Fact{
+	tl.Append(machine.NodeInstance{}, 1, machine.Fact{
 		Name:   "sim_crashed",
-		Fields: []core.Field{{Key: "cause", Value: core.StringValue("attrition")}},
+		Fields: []machine.Field{{Key: "cause", Value: machine.StringValue("attrition")}},
 	})
-	tl.Append(core.NodeInstance{}, 2, core.Fact{Name: "sim_exited"})
+	tl.Append(machine.NodeInstance{}, 2, machine.Fact{Name: "sim_exited"})
 	as := &stubAssert{}
 	inv.AtEnd(stubView{tl: tl, as: as})
 	if len(as.sometimes) != 2 {

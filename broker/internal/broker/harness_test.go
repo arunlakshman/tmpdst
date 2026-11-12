@@ -10,6 +10,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // testEnv is a seeded core.Environment that records assertion violations. It keeps its
@@ -31,8 +32,8 @@ func (e *testEnv) Uint64() uint64 {
 	return z ^ z>>31
 }
 func (e *testEnv) Intn(n int) int { return int(e.Uint64() % uint64(n)) }
-func (e *testEnv) NewID() core.ID {
-	var id core.ID
+func (e *testEnv) NewID() machine.ID {
+	var id machine.ID
 	for i := 0; i < 16; i += 8 {
 		v := e.Uint64()
 		for j := range 8 {
@@ -77,8 +78,8 @@ type harness struct {
 	store  *speccheck.ObjectStore
 	cp     *speccheck.ControlPlane
 	config Config
-	self   core.NodeInstance
-	now    core.NodeTime
+	self   machine.NodeInstance
+	now    machine.NodeTime
 
 	// cpHook/objHook may replace an I/O action's outcome; exec runs the spec.
 	cpHook  func(a core.ControlPlaneCall, exec func() core.IOResult) core.IOResult
@@ -88,8 +89,8 @@ type harness struct {
 	held    []core.IOResult
 
 	queue   []core.IOResult
-	timers  map[core.TimerID]core.TimerVersion
-	due     map[core.TimerID]core.NodeTime // when each armed timer is due (fireNext)
+	timers  map[machine.TimerID]machine.TimerVersion
+	due     map[machine.TimerID]machine.NodeTime // when each armed timer is due (fireNext)
 	clients map[core.ConnID]*client
 	all     []core.Action // every action emitted, in order
 	paused  map[core.ConnID]bool
@@ -101,11 +102,11 @@ type harness struct {
 
 func newHarness(t *testing.T, config Config) *harness {
 	h := &harness{t: t, env: &testEnv{state: 7}, store: speccheck.NewObjectStore(), cp: speccheck.NewControlPlane(),
-		config: config, timers: map[core.TimerID]core.TimerVersion{}, due: map[core.TimerID]core.NodeTime{},
+		config: config, timers: map[machine.TimerID]machine.TimerVersion{}, due: map[machine.TimerID]machine.NodeTime{},
 		clients: map[core.ConnID]*client{},
 		paused:  map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}
 	h.cp.CreateTopic("t", 2)
-	h.self = core.NodeInstance{Node: "b1", Inc: core.BootNumber{1}}
+	h.self = machine.NodeInstance{Node: "b1", Inc: machine.BootNumber{1}}
 	h.b = New(config)(h.env, h.self).(*Broker)
 	return h
 }
@@ -118,8 +119,8 @@ func startedHarness(t *testing.T, config Config) *harness {
 }
 
 func (h *harness) step(body core.EventData) []core.Action {
-	h.now += core.NodeTime(core.Millisecond)
-	acts := h.b.Step(core.Event{At: h.now, Wall: core.RealTime(h.now), Body: body})
+	h.now += machine.NodeTime(machine.Millisecond)
+	acts := h.b.Step(core.Event{At: h.now, Wall: machine.RealTime(h.now), Body: body})
 	h.all = append(h.all, acts...)
 	for _, a := range acts {
 		h.exec(a)
@@ -179,7 +180,7 @@ func (h *harness) exec(a core.Action) {
 		}
 	case core.SetTimer:
 		h.timers[a.ID] = a.Gen
-		h.due[a.ID] = h.now + core.NodeTime(a.After)
+		h.due[a.ID] = h.now + machine.NodeTime(a.After)
 	case core.CancelTimer:
 		delete(h.timers, a.ID)
 	case core.Send:
@@ -211,7 +212,7 @@ func (h *harness) objDone(a core.IOCall, run func() core.IOResult) core.IOResult
 }
 
 // fire delivers the current generation of timer id.
-func (h *harness) fire(id core.TimerID) {
+func (h *harness) fire(id machine.TimerID) {
 	g, ok := h.timers[id]
 	if !ok {
 		h.t.Fatalf("timer %d not armed", id)
@@ -233,7 +234,7 @@ func (h *harness) fireAll() {
 // fireNext moves the clock to the earliest armed timer and fires it. Ties go
 // to the lower id, so the order is the same on every run.
 func (h *harness) fireNext() {
-	var first core.TimerID
+	var first machine.TimerID
 	found := false
 	for id := range h.timers {
 		if !found || h.due[id] < h.due[first] || (h.due[id] == h.due[first] && id < first) {
@@ -375,8 +376,8 @@ func (h *harness) produceOne(c *client, e ent) kmsg.ProduceResponseTopicPartitio
 	return produced(h.next(c))[0]
 }
 
-func factsNamed(all []core.Action, name string) []core.Fact {
-	var out []core.Fact
+func factsNamed(all []core.Action, name string) []machine.Fact {
+	var out []machine.Fact
 	for _, a := range all {
 		if e, ok := a.(core.RecordFact); ok && e.Fact.Name == name {
 			out = append(out, e.Fact)

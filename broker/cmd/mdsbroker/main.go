@@ -19,12 +19,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/manifesterio/mds/broker/internal/broker"
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/cpclient"
 	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/broker/internal/system/production"
 	"github.com/manifesterio/mds/broker/internal/system/s3store"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specsystem"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/shared/awsmetrics"
 	"github.com/manifesterio/mds/shared/runinfo"
 )
@@ -132,10 +132,10 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 	config.Broker.BrokerID = int32(f.brokerID)
 	config.Exec.ObjTimeout = f.objTimeout
 	if f.commitDeadline > 0 {
-		config.Broker.CommitDeadline = core.Duration(f.commitDeadline)
+		config.Broker.CommitDeadline = machine.Duration(f.commitDeadline)
 	}
 	if f.fetchPollInterval > 0 {
-		config.Broker.FetchPollInterval = core.Duration(f.fetchPollInterval)
+		config.Broker.FetchPollInterval = machine.Duration(f.fetchPollInterval)
 	}
 	var m *production.Metrics
 	if f.metricsAddr != "" {
@@ -146,7 +146,7 @@ func nodeConfig(f brokerFlags, log *slog.Logger, info runinfo.Info, shutdown <-c
 	}
 	segLog := production.NewSegmentLog(log)
 	prev := config.Facts
-	config.Facts = func(f core.Fact) {
+	config.Facts = func(f machine.Fact) {
 		if prev != nil {
 			prev(f)
 		}

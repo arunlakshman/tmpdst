@@ -7,17 +7,18 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // These tests check the rebalance model against the rules of
 // docs/rebalance.md, so that the machine can later be checked against it.
 
-const sec = runtime.NodeTime(runtime.Second)
+const sec = machine.NodeTime(machine.Second)
 
 type rb struct {
 	t         *testing.T
 	r         *Rebalance
-	now       runtime.NodeTime
+	now       machine.NodeTime
 	calls     CallID
 	ids       int
 	session   int32
@@ -26,7 +27,7 @@ type rb struct {
 
 // newRB starts a serving model with the default initial delay of 3s.
 func newRB(t *testing.T) *rb {
-	h := &rb{t: t, r: NewRebalance(3 * runtime.Second), session: 10000}
+	h := &rb{t: t, r: NewRebalance(3 * machine.Second), session: 10000}
 	h.r.Step(0, RoleChanged{Active: true})
 	return h
 }
@@ -43,7 +44,7 @@ func (h *rb) step(in any) map[CallID]Reply {
 	return out
 }
 
-func (h *rb) wait(d runtime.NodeTime) map[CallID]Reply { h.now += d; return h.step(nil) }
+func (h *rb) wait(d machine.NodeTime) map[CallID]Reply { h.now += d; return h.step(nil) }
 
 func (h *rb) call() CallID { h.calls++; return h.calls }
 
@@ -282,7 +283,7 @@ func TestRebalanceNewMemberExpires(t *testing.T) {
 	h := newRB(t)
 	h.rebalance = 20000
 	h.stableTwo()
-	h.r.NewMemberTimeout = 4 * runtime.Second
+	h.r.NewMemberTimeout = 4 * machine.Second
 	c3, _, _ := h.join("g", "")
 	c1, _, _ := h.join("g", "m1")
 	var out map[CallID]Reply
@@ -449,7 +450,7 @@ func TestRebalanceRoleChange(t *testing.T) {
 	if h.heartbeat("g", "m1", 2) != runtime.OK {
 		t.Fatal("m1 expired in the grace window")
 	}
-	h.wait(1500 * runtime.NodeTime(runtime.Millisecond))
+	h.wait(1500 * machine.NodeTime(machine.Millisecond))
 	if h.r.Phase("g") != PhaseJoining || len(h.logged("g")) != 1 {
 		t.Fatalf("silent m2 kept: %v", h.logged("g"))
 	}

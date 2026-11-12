@@ -8,6 +8,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakecompletions"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Engine is the fake object store. It is also the simulator.ObjectTruth.
@@ -56,7 +57,7 @@ func New(f simulator.ObjectStoreFaults) *Engine {
 			}
 			bit := p.Bits % uint64(len(g.Data)*8)
 			g.Data[bit/8] ^= 1 << (bit % 8) // Data is the spec's copy
-			ctx.Fault("obj_get_corrupt", core.Field{Key: "req", Value: core.Uint64Value(g.Req)}, core.Field{Key: "bit", Value: core.Uint64Value(bit)})
+			ctx.Fault("obj_get_corrupt", machine.Field{Key: "req", Value: machine.Uint64Value(g.Req)}, machine.Field{Key: "bit", Value: machine.Uint64Value(bit)})
 			ctx.Assert().Reachable("obj get corrupted")
 			return g
 		},
@@ -98,7 +99,7 @@ func (e *Engine) Handles(a core.Action) bool {
 }
 
 // Execute starts a; a must be an IOCall (Handles guarantees it).
-func (e *Engine) Execute(ctx simulator.FakeServiceContext, from core.NodeInstance, a core.Action) {
+func (e *Engine) Execute(ctx simulator.FakeServiceContext, from machine.NodeInstance, a core.Action) {
 	e.CompletionCore.Execute(ctx, from, a.(core.IOCall))
 }
 

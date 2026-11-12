@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
-	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 const (
@@ -41,7 +41,7 @@ func Run(cfg Config) (Result, error) {
 // boot starts the nodes a few milliseconds apart, the clients, and the node faults.
 func (s *sim) boot() {
 	for _, n := range s.nodes {
-		s.after(runtime.Duration(s.rand.Between(0, int64(30*runtime.Millisecond))), "boot", n.boot)
+		s.after(machine.Duration(s.rand.Between(0, int64(30*machine.Millisecond))), "boot", n.boot)
 	}
 	s.clients.start()
 	if s.consumers != nil {
@@ -89,10 +89,10 @@ func (s *sim) quietPhase() {
 	}
 	start := s.now()
 	s.runUntil(func() bool {
-		waited := runtime.Duration(s.now() - start)
+		waited := machine.Duration(s.now() - start)
 		return waited >= maxQuiet || (waited >= minQuiet && !s.clients.busy() && s.converged() && s.groupsSettled())
 	})
-	s.stats.QuietMs = (s.now() - start) / int64(runtime.Millisecond)
+	s.stats.QuietMs = (s.now() - start) / int64(machine.Millisecond)
 	s.verdict(s.converged(), "live replicas converge", "after %dms of quiet the replicas did not reach the end of the log together: %s", s.stats.QuietMs, s.describeNodes())
 	if s.consumers != nil {
 		s.oracle.checkGroupsSettled(s.consumers)
@@ -147,7 +147,7 @@ func (s *sim) finalPhase() {
 		}
 		start := s.now()
 		s.runUntil(func() bool {
-			return runtime.Duration(s.now()-start) >= maxQuiet || (!s.groupsWriting() && s.converged())
+			return machine.Duration(s.now()-start) >= maxQuiet || (!s.groupsWriting() && s.converged())
 		})
 	}
 	s.clients.startFinal()
@@ -176,7 +176,7 @@ func (s *sim) checkSameState() {
 func (s *sim) result() Result {
 	r := Result{
 		Seed: s.cfg.Seed, Scenario: s.cfg.Scenario, Hash: s.finalHash(), Steps: s.steps(),
-		EndMs: s.now() / int64(runtime.Millisecond), Failures: s.failures, Stats: s.stats, Coverage: s.env.log.Coverage(),
+		EndMs: s.now() / int64(machine.Millisecond), Failures: s.failures, Stats: s.stats, Coverage: s.env.log.Coverage(),
 		Sites: s.env.inj.Sites(),
 	}
 	if len(s.failures) > 0 {

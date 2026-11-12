@@ -1,6 +1,9 @@
 package simulator
 
-import "github.com/manifesterio/mds/broker/internal/core"
+import (
+	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
+)
 
 // inboxQueue is one inbox: a FIFO slice implementing core.Inbox.
 type inboxQueue struct{ q []core.EventData }
@@ -33,7 +36,7 @@ func (n *nodeInbox) BusyUntil() Time     { return n.busy }
 
 // Push routes body with core.InboxKindOf.
 func (n *nodeInbox) Push(body core.EventData) {
-	if core.InboxKindOf(body) == core.Control {
+	if core.InboxKindOf(body) == machine.Control {
 		n.ctrl.q = append(n.ctrl.q, body)
 	} else {
 		n.data.q = append(n.data.q, body)
@@ -49,10 +52,10 @@ type defaultCost struct{ p CostParams }
 // draw nothing, so a step is instantaneous.
 func NewCostModel(p CostParams) CostModel { return defaultCost{p} }
 
-func (c defaultCost) Sample(body core.EventData, r CountedRand) core.Duration {
+func (c defaultCost) Sample(body core.EventData, r CountedRand) machine.Duration {
 	d := c.p.PerEvent
 	if b, ok := body.(core.BytesReceived); ok {
-		d += c.p.PerByte * core.Duration(len(b.Data))
+		d += c.p.PerByte * machine.Duration(len(b.Data))
 	}
 	if r.Chance(c.p.PauseProb) {
 		d += c.p.Pause.Sample(r)

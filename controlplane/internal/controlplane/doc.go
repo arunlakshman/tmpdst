@@ -93,7 +93,7 @@
 //   - internal/spec shares types with the code (contract, runtime) and never
 //     logic: it imports none of domain, metadb or engine.
 //
-// Time: all time comes from one interface, runtime.Clock, or from the step
+// Time: all time comes from one interface, machine.Clock, or from the step
 // context of a dst process. system/realclock is the production clock and
 // system/fakeclock the test one. The domain and server packages may not call
 // time.Now, time.AfterFunc and the like.

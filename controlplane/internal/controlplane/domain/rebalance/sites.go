@@ -1,6 +1,9 @@
 package rebalance
 
-import "github.com/manifesterio/mds/controlplane/internal/runtime"
+import (
+	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
+)
 
 // The buggify sites of the machine. Each takes a path that is valid but rare
 // in a real run, so the simulator reaches it often. A site never makes a
@@ -25,7 +28,7 @@ const (
 )
 
 // lateMax is the most a SiteTimerLate delay adds.
-const lateMax = 50 * runtime.Millisecond
+const lateMax = 50 * machine.Millisecond
 
 // SiteNames returns the names of all buggify sites of the machine, in order.
 func SiteNames() []string {

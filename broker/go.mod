@@ -10,7 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.3
 	github.com/aws/smithy-go v1.28.5
 	github.com/manifesterio/mds/controlplane v0.0.0
-	github.com/manifesterio/mds/dst v0.0.0 // indirect
+	github.com/manifesterio/mds/dst v0.0.0
 	github.com/manifesterio/mds/shared v0.0.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/twmb/franz-go v1.20.7

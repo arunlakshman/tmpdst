@@ -27,5 +27,10 @@ unicode/utf8
 # this module
 github.com/manifesterio/mds/broker/...
 
+# Deterministic base types and the trace hash (github.com/manifesterio/mds/dst). They are
+# first-party code in this repo, so they need no audit record. Listed one by one on purpose.
+github.com/manifesterio/mds/dst/machine
+github.com/manifesterio/mds/dst/trace
+
 # audited third-party (see docs/dep-audits/)
 github.com/twmb/franz-go/pkg/kmsg

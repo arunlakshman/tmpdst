@@ -11,6 +11,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/spec"
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/fault"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/rng"
 	"github.com/manifesterio/mds/dst/sched"
 	"github.com/manifesterio/mds/dst/sim"
@@ -23,15 +24,15 @@ import (
 
 const (
 	seed  = 7
-	wall0 = 1000 * runtime.Second
-	sec   = runtime.Second
-	msec  = runtime.Millisecond
-	delay = 3 * runtime.Second // the default initial delay
+	wall0 = 1000 * machine.Second
+	sec   = machine.Second
+	msec  = machine.Millisecond
+	delay = 3 * machine.Second // the default initial delay
 )
 
 // testCx is the sim.Context of one step.
 type testCx struct {
-	now  runtime.NodeTime
+	now  machine.NodeTime
 	rand *rng.Rand
 }
 
@@ -44,7 +45,7 @@ func (c *testCx) Assert() *assert.Log     { return nil }
 // armed is one timer the machine set.
 type armed struct {
 	id   uint64
-	at   runtime.NodeTime
+	at   machine.NodeTime
 	seq  int
 	body any
 }
@@ -106,7 +107,7 @@ func (h *harness) output(o any) {
 	case sim.SetTimer:
 		h.cancel(o.ID)
 		h.seq++
-		h.timers = append(h.timers, armed{id: o.ID, at: h.cx.now + runtime.NodeTime(o.After), seq: h.seq, body: o.Body})
+		h.timers = append(h.timers, armed{id: o.ID, at: h.cx.now + machine.NodeTime(o.After), seq: h.seq, body: o.Body})
 	case sim.CancelTimer:
 		h.cancel(o.ID)
 	case sim.Send:
@@ -128,7 +129,7 @@ func (h *harness) cancel(id uint64) {
 
 // apply runs a submit on the log and returns the answer as an input.
 func (h *harness) apply(o any) ReplicaReply {
-	var req runtime.RequestID
+	var req machine.RequestID
 	var op runtime.ControlPlaneOperation
 	switch o := o.(type) {
 	case SubmitCommand:
@@ -153,7 +154,7 @@ func (h *harness) answer(i int, err runtime.ErrCode) []string {
 	return h.step(ReplicaReply{Req: req, Done: runtime.ControlPlaneDone{Req: req, Err: err, Outcome: runtime.MaybeApplied}})
 }
 
-func reqOf(o any) runtime.RequestID {
+func reqOf(o any) machine.RequestID {
 	switch o := o.(type) {
 	case SubmitCommand:
 		return o.Req
@@ -165,9 +166,9 @@ func reqOf(o any) runtime.RequestID {
 
 // until moves the clock to at (from the start), firing every due timer in
 // time order, and returns the replies.
-func (h *harness) until(at runtime.Duration) []string {
+func (h *harness) until(at machine.Duration) []string {
 	h.t.Helper()
-	target := runtime.NodeTime(at)
+	target := machine.NodeTime(at)
 	if target < h.cx.now {
 		h.t.Fatalf("time goes back: %d < %d", target, h.cx.now)
 	}
@@ -186,7 +187,7 @@ func (h *harness) until(at runtime.Duration) []string {
 	return out
 }
 
-func (h *harness) due(target runtime.NodeTime) int {
+func (h *harness) due(target machine.NodeTime) int {
 	best := -1
 	for i, a := range h.timers {
 		if a.at <= target && (best < 0 || a.at < h.timers[best].at || (a.at == h.timers[best].at && a.seq < h.timers[best].seq)) {
@@ -209,7 +210,7 @@ func (h *harness) take() []string {
 // step is one line of a table: move the clock to at, then deliver in (nil:
 // none), and expect exactly want (in any order) from both.
 type step struct {
-	at   runtime.Duration
+	at   machine.Duration
 	in   any
 	want []string
 }
@@ -371,7 +372,7 @@ func (h *harness) check(what string, got, want any) {
 // stableTwo makes group Stable with two members at generation 2, from t0.
 // m<k> is the leader and m<k+1> the follower; it returns their ids. The
 // clock ends at t0 + 3 s.
-func (h *harness) stableTwo(group string, t0 runtime.Duration, k int, call CallID) (string, string) {
+func (h *harness) stableTwo(group string, t0 machine.Duration, k int, call CallID) (string, string) {
 	h.t.Helper()
 	a, b := h.id(k), h.id(k+1)
 	sa, sb := fmt.Sprintf("m%d", k), fmt.Sprintf("m%d", k+1)

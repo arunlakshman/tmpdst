@@ -49,6 +49,7 @@ github.com/manifesterio/mds/dst/clock
 github.com/manifesterio/mds/dst/eng
 github.com/manifesterio/mds/dst/fault
 github.com/manifesterio/mds/dst/golden
+github.com/manifesterio/mds/dst/machine
 github.com/manifesterio/mds/dst/mutant
 github.com/manifesterio/mds/dst/rng
 github.com/manifesterio/mds/dst/sim

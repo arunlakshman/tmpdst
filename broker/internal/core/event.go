@@ -1,10 +1,12 @@
 package core
 
+import "github.com/manifesterio/mds/dst/machine"
+
 // Event is the input to Step. The runtime (prod) or simulator stamps At and
 // Wall when the event is dequeued, so At never decreases in Step order.
 type Event struct {
-	At   NodeTime // node-local monotonic now
-	Wall RealTime // UTC now
+	At   machine.NodeTime // node-local monotonic now
+	Wall machine.RealTime // UTC now
 	Body EventData
 }
 
@@ -16,7 +18,7 @@ type EventData interface{ isEvent() }
 // no state change (StateHash is unchanged).
 type IOResult interface {
 	EventData
-	RequestID() RequestID
+	RequestID() machine.RequestID
 }
 
 // ---- lifecycle ----
@@ -24,12 +26,12 @@ type IOResult interface {
 // NodeStarted is the first event of every boot, and always the first Step of every
 // incarnation. The node rebuilds what it needs from the control plane and
 // object store; nothing in memory survived.
-type NodeStarted struct{ Self NodeInstance }
+type NodeStarted struct{ Self machine.NodeInstance }
 
 // StopRequest asks the node to shut down gracefully by Deadline (node-local time):
 // stop admitting, finish or hand off in-flight work, then emit ShutdownDone. If the
 // deadline passes first the runtime kills the node. InboxKind: Control.
-type StopRequest struct{ Deadline NodeTime }
+type StopRequest struct{ Deadline machine.NodeTime }
 
 // ---- network (inbound) ----
 
@@ -54,14 +56,14 @@ type ConnClosed struct {
 
 // SendDone completes a Send. Err != OK means the bytes may be partially sent.
 type SendDone struct {
-	Req  RequestID
+	Req  machine.RequestID
 	Conn ConnID
 	Err  ErrCode
 }
 
 // ConnectDone completes a Connect. Conn is valid only when Err == OK.
 type ConnectDone struct {
-	Req  RequestID
+	Req  machine.RequestID
 	Conn ConnID
 	Err  ErrCode
 }
@@ -71,15 +73,15 @@ type ConnectDone struct {
 // TimerFired is ignored by the receiver if Gen is not the current generation
 // for ID. Timers are matched by generation, not cancelled.
 type TimerFired struct {
-	ID  TimerID
-	Gen TimerVersion
+	ID  machine.TimerID
+	Gen machine.TimerVersion
 }
 
 // ---- object store completions ----
 
 // ObjectPutDone reports that an object PUT finished.
 type ObjectPutDone struct {
-	Req     RequestID
+	Req     machine.RequestID
 	Key     string
 	Err     ErrCode
 	Outcome Outcome
@@ -87,21 +89,21 @@ type ObjectPutDone struct {
 
 // ObjectGetDone reports that an object GET finished.
 type ObjectGetDone struct {
-	Req  RequestID
+	Req  machine.RequestID
 	Data []byte
 	Err  ErrCode
 }
 
 // ObjectDeleteDone reports that an object DELETE finished.
 type ObjectDeleteDone struct {
-	Req     RequestID
+	Req     machine.RequestID
 	Err     ErrCode
 	Outcome Outcome
 }
 
 // ObjectListDone reports that an object LIST finished.
 type ObjectListDone struct {
-	Req  RequestID
+	Req  machine.RequestID
 	Keys []string // sorted
 	Err  ErrCode
 }
@@ -113,7 +115,7 @@ type ObjectListDone struct {
 // controlplane/wireboundary; typed *Response fields wait for the gRPC cutover so
 // core does not import grpc (decision 57).
 type ControlPlaneDone struct {
-	Req     RequestID
+	Req     machine.RequestID
 	Resp    ControlPlaneResponse
 	Err     ErrCode
 	Outcome Outcome
@@ -122,8 +124,8 @@ type ControlPlaneDone struct {
 // ControlPlaneDeliver delivers one broker ControlPlaneCall to a control-plane replica process. The
 // simulator bridge engine issues this; the machine answers with ControlPlaneReply actions.
 type ControlPlaneDeliver struct {
-	From NodeInstance // broker that issued the ControlPlaneCall
-	Req  RequestID
+	From machine.NodeInstance // broker that issued the ControlPlaneCall
+	Req  machine.RequestID
 	Op   ControlPlaneOperation
 }
 
@@ -138,7 +140,7 @@ type LogEntry struct {
 // LogAppendDone reports that a LogAppend finished. Taken means the slot was
 // already held; Existing is the winner's bytes when Taken is true.
 type LogAppendDone struct {
-	Req      RequestID
+	Req      machine.RequestID
 	Slot     LogPosition
 	Taken    bool
 	Existing []byte
@@ -148,7 +150,7 @@ type LogAppendDone struct {
 
 // LogReadDone reports that a LogRead finished. Entries are in slot order.
 type LogReadDone struct {
-	Req     RequestID
+	Req     machine.RequestID
 	Entries []LogEntry
 	Err     ErrCode
 	Outcome Outcome
@@ -156,7 +158,7 @@ type LogReadDone struct {
 
 // LogGetEndDone reports the log tail (next slot to write).
 type LogGetEndDone struct {
-	Req     RequestID
+	Req     machine.RequestID
 	Tail    LogPosition
 	Err     ErrCode
 	Outcome Outcome
@@ -164,7 +166,7 @@ type LogGetEndDone struct {
 
 // LogDeleteOldDone reports that a LogDeleteOld finished.
 type LogDeleteOldDone struct {
-	Req     RequestID
+	Req     machine.RequestID
 	Err     ErrCode
 	Outcome Outcome
 }
@@ -174,7 +176,7 @@ type LogDeleteOldDone struct {
 // the owner stored with that epoch, so a node whose claim timed out can see
 // that the claim had landed (same Owner, Epoch == Expect+1).
 type LogClaimEpochDone struct {
-	Req     RequestID
+	Req     machine.RequestID
 	Epoch   uint64
 	Owner   string
 	Won     bool
@@ -226,40 +228,40 @@ func (LogClaimEpochDone) isEvent()   {}
 func (LiveBrokers) isEvent()         {}
 
 // RequestID returns the request this completion answers.
-func (e SendDone) RequestID() RequestID { return e.Req }
+func (e SendDone) RequestID() machine.RequestID { return e.Req }
 
 // RequestID returns the request this completion answers.
-func (e ConnectDone) RequestID() RequestID { return e.Req }
+func (e ConnectDone) RequestID() machine.RequestID { return e.Req }
 
 // RequestID returns the request this completion answers.
-func (e ObjectPutDone) RequestID() RequestID { return e.Req }
+func (e ObjectPutDone) RequestID() machine.RequestID { return e.Req }
 
 // RequestID returns the request this completion answers.
-func (e ObjectGetDone) RequestID() RequestID { return e.Req }
+func (e ObjectGetDone) RequestID() machine.RequestID { return e.Req }
 
 // RequestID returns the request this completion answers.
-func (e ObjectDeleteDone) RequestID() RequestID { return e.Req }
+func (e ObjectDeleteDone) RequestID() machine.RequestID { return e.Req }
 
 // RequestID returns the request this completion answers.
-func (e ObjectListDone) RequestID() RequestID { return e.Req }
+func (e ObjectListDone) RequestID() machine.RequestID { return e.Req }
 
 // RequestID returns the request this completion answers.
-func (e ControlPlaneDone) RequestID() RequestID { return e.Req }
+func (e ControlPlaneDone) RequestID() machine.RequestID { return e.Req }
 
 // RequestID returns the request this completion answers.
-func (e LogAppendDone) RequestID() RequestID { return e.Req }
+func (e LogAppendDone) RequestID() machine.RequestID { return e.Req }
 
 // RequestID returns the request this completion answers.
-func (e LogReadDone) RequestID() RequestID { return e.Req }
+func (e LogReadDone) RequestID() machine.RequestID { return e.Req }
 
 // RequestID returns the request this completion answers.
-func (e LogGetEndDone) RequestID() RequestID { return e.Req }
+func (e LogGetEndDone) RequestID() machine.RequestID { return e.Req }
 
 // RequestID returns the request this completion answers.
-func (e LogDeleteOldDone) RequestID() RequestID { return e.Req }
+func (e LogDeleteOldDone) RequestID() machine.RequestID { return e.Req }
 
 // RequestID returns the request this completion answers.
-func (e LogClaimEpochDone) RequestID() RequestID { return e.Req }
+func (e LogClaimEpochDone) RequestID() machine.RequestID { return e.Req }
 
 //nolint:dupl // compile-time IOResult assertions; parallel list lives on IOCalls
 var (

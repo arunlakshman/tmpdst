@@ -18,6 +18,8 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // Params is the fault and timing config common to both engines.
@@ -27,7 +29,7 @@ type Params struct {
 	PTimeout       float64
 	PLost          float64
 	Outage         simulator.ServiceOutage
-	CallerTimeout  core.Duration
+	CallerTimeout  machine.Duration
 }
 
 // CompletionHooks is what an engine plugs into the core.
@@ -68,7 +70,7 @@ const (
 // CompletionPlan is one in-flight op.
 type CompletionPlan struct {
 	ID     uint64
-	From   core.NodeInstance
+	From   machine.NodeInstance
 	Act    core.IOCall
 	Kind   Kind
 	T1, T2 simulator.Time
@@ -122,21 +124,21 @@ func (c *CompletionCore) EnterRecovery() { c.recovery = true }
 
 // OnCrash does nothing: effects stand and landings stay scheduled; deliveries to the dead
 // incarnation are dropped by the scheduler or skipped at landing.
-func (c *CompletionCore) OnCrash(simulator.FakeServiceContext, core.NodeInstance) {}
+func (c *CompletionCore) OnCrash(simulator.FakeServiceContext, machine.NodeInstance) {}
 
 // Draw draws the boundary fault coins (outage, 503, timeout, lost, in that
 // order) and emits the matching fault named pre+"_...". until is the end of
 // the outage window and is extended when one starts. fields lead the
 // 503/timeout/lost fault fields.
-func (p Params) Draw(ctx simulator.FakeServiceContext, pre string, until *simulator.Time, fields ...core.Field) Kind {
+func (p Params) Draw(ctx simulator.FakeServiceContext, pre string, until *simulator.Time, fields ...machine.Field) Kind {
 	r, now := ctx.Rand(), ctx.Now()
 	if now >= *until && r.Chance(p.Outage.Prob) {
 		d := p.Outage.Dur[0]
 		if p.Outage.Dur[1] > d {
-			d = core.Duration(r.Between(int64(p.Outage.Dur[0]), int64(p.Outage.Dur[1])))
+			d = machine.Duration(r.Between(int64(p.Outage.Dur[0]), int64(p.Outage.Dur[1])))
 		}
 		*until = now + simulator.Time(d)
-		ctx.Fault(pre+"_outage", core.Field{Key: "dur", Value: core.Int64Value(d)})
+		ctx.Fault(pre+"_outage", machine.Field{Key: "dur", Value: machine.Int64Value(d)})
 		ctx.Assert().Reachable(core.PropertyID(pre + " outage started"))
 	}
 	inOutage := now < *until
@@ -147,7 +149,7 @@ func (p Params) Draw(ctx simulator.FakeServiceContext, pre string, until *simula
 		if inOutage {
 			cause = "outage"
 		}
-		ctx.Fault(pre+"_503", append(fields, core.Field{Key: "cause", Value: core.StringValue(cause)})...)
+		ctx.Fault(pre+"_503", append(fields, machine.Field{Key: "cause", Value: machine.StringValue(cause)})...)
 		ctx.Assert().Reachable(core.PropertyID(pre + " 503 injected"))
 		return ReplyUnavailable
 	case isTimeout:
@@ -164,9 +166,9 @@ func (p Params) Draw(ctx simulator.FakeServiceContext, pre string, until *simula
 
 // Execute plans an op. Draw order: fault coins (Draw), apply latency, respond
 // latency, extra.
-func (c *CompletionCore) Execute(ctx simulator.FakeServiceContext, from core.NodeInstance, a core.IOCall) {
+func (c *CompletionCore) Execute(ctx simulator.FakeServiceContext, from machine.NodeInstance, a core.IOCall) {
 	r, now, p := ctx.Rand(), ctx.Now(), c.h.Params
-	request := core.Field{Key: "req", Value: core.Uint64Value(a.RequestID())}
+	request := machine.Field{Key: "req", Value: machine.Uint64Value(a.RequestID())}
 	kind := ReplyNormal
 	if !c.recovery {
 		kind = p.Draw(ctx, c.h.Prefix, &c.until, request)
@@ -245,8 +247,8 @@ func (c *CompletionCore) OnInternal(ctx simulator.FakeServiceContext, body any) 
 // StateHash folds the spec hash, outage window, recovery flag and pending
 // plans in issue order.
 func (c *CompletionCore) StateHash() uint64 {
-	h := core.NewHasher()
-	mix := h.Uint64Value
+	h := trace.New()
+	mix := h.Uint64
 	mix(c.specStateHash())
 	mix(uint64(c.until))
 	h.Bool(c.recovery)

@@ -24,6 +24,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/server"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // The gRPC target: the real server and replica in one process, on the memory
@@ -175,10 +176,10 @@ func newGRPCNode(rt grpcT) *grpcNode {
 // newGRPCNodeDelay is newGRPCNode with an initial rebalance delay.
 func newGRPCNodeDelay(rt grpcT, groupDelay time.Duration) *grpcNode {
 	cfg := replica.Config{
-		CatchUpEvery: runtime.Duration(time.Millisecond), Rank: 0, Writer: "cp-0",
-		Heartbeat:       runtime.Duration(time.Second),
-		TakeoverAfter:   runtime.Duration(20 * time.Millisecond), // a restarted node claims the write role after this
-		CheckpointEvery: runtime.Duration(3 * time.Millisecond), CheckpointMinSlots: 1, CheckpointPrefix: grpcCheckpointPrefix,
+		CatchUpEvery: machine.Duration(time.Millisecond), Rank: 0, Writer: "cp-0",
+		Heartbeat:       machine.Duration(time.Second),
+		TakeoverAfter:   machine.Duration(20 * time.Millisecond), // a restarted node claims the write role after this
+		CheckpointEvery: machine.Duration(3 * time.Millisecond), CheckpointMinSlots: 1, CheckpointPrefix: grpcCheckpointPrefix,
 		KeepSlots: 2,
 	}
 	n := &grpcNode{t: rt, cfg: cfg, groupDelay: groupDelay, disk: &grpcDisk{log: executor.NewMemoryLog(), objs: executor.NewMemoryObjects()}}
@@ -191,7 +192,7 @@ func (n *grpcNode) start() {
 	n.proc = &grpcProcess{disk: n.disk, armed: map[int]int{}}
 	n.node = server.New(server.Config{
 		Machine: n.cfg, Log: n.proc, Objects: n.proc,
-		Self: runtime.NodeInstance{Node: "cp-0"}, StopGrace: runtime.Duration(50 * time.Millisecond),
+		Self: machine.NodeInstance{Node: "cp-0"}, StopGrace: machine.Duration(50 * time.Millisecond),
 		GroupInitialRebalanceDelay: n.groupDelay,
 	})
 	ctx, cancel := context.WithTimeout(n.t.Context(), 10*time.Second)

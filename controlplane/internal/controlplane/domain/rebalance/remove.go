@@ -5,6 +5,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // leave handles a LeaveGroup call (rule 26): one code per listed member, and
@@ -96,7 +97,7 @@ func (m *Machine) removeRefused(s *serving, g *group, w *write, k removeWrite, c
 			m.touch(mm)
 		}
 	case causeSyncDeadline:
-		m.arm(&g.round, runtime.Duration(g.longest()))
+		m.arm(&g.round, machine.Duration(g.longest()))
 	}
 }
 

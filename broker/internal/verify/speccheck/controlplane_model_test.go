@@ -9,6 +9,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // This file checks the ControlPlane spec against a second, naive model. The
@@ -69,7 +70,7 @@ func (m *naiveControlPlane) createTopic(name string, parts int32) core.ErrCode {
 	return core.OK
 }
 
-func (m *naiveControlPlane) commit(request core.RequestID, operation core.CommitSegment) core.ControlPlaneDone {
+func (m *naiveControlPlane) commit(request machine.RequestID, operation core.CommitSegment) core.ControlPlaneDone {
 	if old, found := m.segs[operation.SegmentKey]; found {
 		if !sameBatches(old.batches, operation.Batches) {
 			return core.ControlPlaneDone{Req: request, Err: core.ErrConflict}
@@ -100,7 +101,7 @@ func (m *naiveControlPlane) commit(request core.RequestID, operation core.Commit
 	return core.ControlPlaneDone{Req: request, Resp: response, Outcome: core.Applied}
 }
 
-func (m *naiveControlPlane) lookup(request core.RequestID, operation core.FindSegments) core.ControlPlaneDone {
+func (m *naiveControlPlane) lookup(request machine.RequestID, operation core.FindSegments) core.ControlPlaneDone {
 	if operation.From < 0 {
 		return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 	}
@@ -119,7 +120,7 @@ func (m *naiveControlPlane) lookup(request core.RequestID, operation core.FindSe
 	return core.ControlPlaneDone{Req: request, Resp: response}
 }
 
-func (m *naiveControlPlane) describe(request core.RequestID, operation core.DescribeTopics) core.ControlPlaneDone {
+func (m *naiveControlPlane) describe(request machine.RequestID, operation core.DescribeTopics) core.ControlPlaneDone {
 	names := slices.Sorted(maps.Keys(m.topics))
 	var response core.DescribeTopicsResp
 	for _, name := range names {
@@ -216,7 +217,7 @@ func genCPModelOp(r *checker.Rand, _ int) cpModelOp {
 }
 
 func stepCPModel(s cpModelPair, operation cpModelOp) error {
-	const request = core.RequestID(5)
+	const request = machine.RequestID(5)
 	var got, want core.ControlPlaneDone
 	switch operation.Kind {
 	case "create":

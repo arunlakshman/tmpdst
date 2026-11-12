@@ -1,6 +1,10 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/manifesterio/mds/dst/machine"
+)
 
 func TestClassOfCoversEveryEvent(t *testing.T) {
 	control := []EventData{
@@ -10,12 +14,12 @@ func TestClassOfCoversEveryEvent(t *testing.T) {
 	}
 	data := []EventData{ConnOpened{}, BytesReceived{}, ConnClosed{}}
 	for _, b := range control {
-		if InboxKindOf(b) != Control {
+		if InboxKindOf(b) != machine.Control {
 			t.Errorf("%T: want Control", b)
 		}
 	}
 	for _, b := range data {
-		if InboxKindOf(b) != Data {
+		if InboxKindOf(b) != machine.Data {
 			t.Errorf("%T: want Data", b)
 		}
 	}

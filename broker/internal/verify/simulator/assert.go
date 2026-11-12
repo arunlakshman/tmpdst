@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Assertion kinds as recorded in AssertionStat.Kind. Frozen spellings.
@@ -140,17 +141,17 @@ type env struct {
 // numbers, stamped with simulation time.
 type history struct {
 	ops []HistoryOperation
-	idx map[core.ID]int
+	idx map[machine.ID]int
 	seq uint64
 	now func() Time
 	bad func(msg string)
 }
 
 func newHistory(now func() Time, bad func(string)) *history {
-	return &history{idx: map[core.ID]int{}, now: now, bad: bad}
+	return &history{idx: map[machine.ID]int{}, now: now, bad: bad}
 }
 
-func (h *history) Invoke(client core.NodeInstance, id, value core.ID, operation any) {
+func (h *history) Invoke(client machine.NodeInstance, id, value machine.ID, operation any) {
 	if _, dup := h.idx[id]; dup {
 		h.bad("history: duplicate invoke of an op id")
 		return
@@ -160,7 +161,7 @@ func (h *history) Invoke(client core.NodeInstance, id, value core.ID, operation 
 	h.ops = append(h.ops, HistoryOperation{ID: id, Value: value, Client: client, Op: operation, InvSeq: h.seq, Invoke: h.now(), Outcome: OpPending})
 }
 
-func (h *history) Return(id core.ID, result any, o OpOutcome) bool {
+func (h *history) Return(id machine.ID, result any, o OpOutcome) bool {
 	i, ok := h.idx[id]
 	if !ok || h.ops[i].Outcome != OpPending {
 		h.bad("history: return of an unknown or already completed op id")

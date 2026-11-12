@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/broker"
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // sealStats counts sealed segments by reason across a campaign.
@@ -23,8 +23,8 @@ func (*sealInv) Name() string         { return "SealStats" }
 func (*sealInv) AtEnd(simulator.View) {}
 func (i *sealInv) Observe(v simulator.View) {
 	for _, tf := range v.Timeline().Since("segment_sealed", &i.seal) {
-		n, _ := tf.Fact.Field("parts").(core.Int64Value)
-		why, _ := tf.Fact.Field("reason").(core.StringValue)
+		n, _ := tf.Fact.Field("parts").(machine.Int64Value)
+		why, _ := tf.Fact.Field("reason").(machine.StringValue)
 		i.st.segments.Add(1)
 		i.st.parts.Add(int64(n))
 		switch string(why) {

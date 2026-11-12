@@ -9,6 +9,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine/memory"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // trackedStore is an in-memory store that remembers whether it was closed.
@@ -39,8 +40,8 @@ func (s *storeSource) open() (engine.Engine, error) {
 
 func tombConfig(src *storeSource) replica.Config {
 	return replica.Config{
-		CatchUpEvery: runtime.Millisecond, Writer: "w",
-		CheckpointPrefix: "checkpoint/t/", CheckpointEvery: runtime.Second, Rank: 1,
+		CatchUpEvery: machine.Millisecond, Writer: "w",
+		CheckpointPrefix: "checkpoint/t/", CheckpointEvery: machine.Second, Rank: 1,
 		OpenStore: src.open,
 	}
 }

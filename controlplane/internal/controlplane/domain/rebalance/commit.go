@@ -5,13 +5,14 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // commit is an offset commit whose write is in flight. It does not wait in
 // a group queue (rule 31).
 type commit struct {
 	call  CallID
-	req   runtime.RequestID
+	req   machine.RequestID
 	timer timer
 }
 

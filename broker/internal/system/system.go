@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // ObjectStore is the S3 adapter.
@@ -66,14 +67,14 @@ type Executor interface {
 
 // Dependencies is everything nondeterministic a production broker process needs.
 type Dependencies struct {
-	Clock        core.Clock
+	Clock        machine.Clock
 	Objects      ObjectStore
 	ControlPlane ControlPlane
 	Connections  Connections
 	Classifier   ErrorClassifier
-	Env          core.Environment // crypto-seeded Rand, inert FaultInjector, logging Assertions
-	Inbox        *Inbox           // shared with the Executor and readers; Run closes it on return
-	Facts        func(core.Fact)  // optional: receives RecordFact facts (tracing)
-	Shutdown     <-chan struct{}  // optional: closing it asks Run for a graceful stop (see StopOnSignal)
-	StopGrace    core.Duration    // time the machine gets after Shutdown to emit ShutdownDone
+	Env          core.Environment   // crypto-seeded Rand, inert FaultInjector, logging Assertions
+	Inbox        *Inbox             // shared with the Executor and readers; Run closes it on return
+	Facts        func(machine.Fact) // optional: receives RecordFact facts (tracing)
+	Shutdown     <-chan struct{}    // optional: closing it asks Run for a graceful stop (see StopOnSignal)
+	StopGrace    machine.Duration   // time the machine gets after Shutdown to emit ShutdownDone
 }

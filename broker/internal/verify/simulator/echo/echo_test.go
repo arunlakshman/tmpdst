@@ -6,6 +6,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/campaign"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 func seeds(from uint64, n int) []uint64 {
@@ -83,7 +84,7 @@ func firstCatch(config simulator.Config, n int, prop core.PropertyID) uint64 {
 }
 
 func mutantFactory(m mutation) core.MachineFactory {
-	return func(env core.Environment, self core.NodeInstance) core.Machine {
+	return func(env core.Environment, self machine.NodeInstance) core.Machine {
 		return &Broker{env: env, self: self, mut: m}
 	}
 }

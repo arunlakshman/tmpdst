@@ -7,6 +7,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakenetwork"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakeobjectstore"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/campaign"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Config is the echo campaign preset: 3 brokers, 1 workload of 4 clients, all
@@ -19,7 +20,7 @@ func config(seeds []uint64, brokers core.MachineFactory) simulator.Config {
 	return simulator.Config{
 		Seeds:     seeds,
 		Processes: []simulator.Process{{Name: "broker", Count: 3, Factory: brokers}},
-		Workloads: []simulator.WorkloadFactory{func(env core.Environment, self core.NodeInstance, bs []core.NodeInstance) simulator.Workload {
+		Workloads: []simulator.WorkloadFactory{func(env core.Environment, self machine.NodeInstance, bs []machine.NodeInstance) simulator.Workload {
 			return NewWorkload(env, self, bs, Opts{Clients: 4})
 		}},
 		Invariants: []func() simulator.SafetyRule{

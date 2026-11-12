@@ -10,6 +10,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/broker/internal/system/s3store"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specsystem"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 type slowObjs struct {
@@ -126,7 +127,7 @@ func TestControlPlaneCallOwnTimeout(t *testing.T) {
 		t.Errorf("default deadline: %+v, want a failure", d)
 	}
 
-	e.Execute(core.ControlPlaneCall{Req: 2, Op: core.GroupLeave{Group: "g"}, Timeout: core.Duration(time.Second)})
+	e.Execute(core.ControlPlaneCall{Req: 2, Op: core.GroupLeave{Group: "g"}, Timeout: machine.Duration(time.Second)})
 	if d := wait(t, in).(core.ControlPlaneDone); d.Req != 2 || d.Err != core.OK {
 		t.Errorf("own deadline: %+v, want OK", d)
 	}

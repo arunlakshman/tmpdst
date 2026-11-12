@@ -2,7 +2,7 @@ package simulator
 
 import "slices"
 
-import "github.com/manifesterio/mds/broker/internal/core"
+import "github.com/manifesterio/mds/dst/machine"
 
 // MemTimeline is the in-memory append-only Timeline: one log in append order
 // plus a per-name index, so an invariant reading one fact name never scans the
@@ -17,7 +17,7 @@ type MemTimeline struct {
 func NewTimeline() *MemTimeline { return &MemTimeline{byName: map[string][]TimedFact{}} }
 
 // Append stamps and records a fact, returning its sequence number (from 1).
-func (t *MemTimeline) Append(source core.NodeInstance, at Time, f core.Fact) uint64 {
+func (t *MemTimeline) Append(source machine.NodeInstance, at Time, f machine.Fact) uint64 {
 	t.seq++
 	t.n++
 	t.byName[f.Name] = append(t.byName[f.Name], TimedFact{Seq: t.seq, At: at, Source: source, Fact: f})

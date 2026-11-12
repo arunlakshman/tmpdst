@@ -1,6 +1,9 @@
 package simulator
 
-import "github.com/manifesterio/mds/broker/internal/core"
+import (
+	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
+)
 
 // Process describes a system-under-test role (the broker). Built fresh from the
 // factory on every boot; nothing in memory survives a crash.
@@ -50,7 +53,7 @@ type ReceivesPhaseChange interface {
 }
 
 // WorkloadFactory builds a fresh workload per seed (never reuse instances).
-type WorkloadFactory func(env core.Environment, self core.NodeInstance, brokers []core.NodeInstance) Workload
+type WorkloadFactory func(env core.Environment, self machine.NodeInstance, brokers []machine.NodeInstance) Workload
 
 // SafetyRule checks one property (lesson 10). Config.Invariants builds a fresh
 // instance per seed, so there is no Reset. Violations go through View.Assert.
@@ -93,7 +96,7 @@ type View interface {
 // so the invariant surface stays within eight methods.
 type NodeAlive interface {
 	// Alive reports whether ref is the live incarnation of its node.
-	Alive(ref core.NodeInstance) bool
+	Alive(ref machine.NodeInstance) bool
 }
 
 // ObjectStoreRealState is what the object store really holds, as builtin types only
@@ -133,9 +136,9 @@ const (
 // write's identity and is shared by its retries (idempotent-producer retries
 // are two requests with one Value).
 type HistoryOperation struct {
-	ID             core.ID
-	Value          core.ID
-	Client         core.NodeInstance
+	ID             machine.ID
+	Value          machine.ID
+	Client         machine.NodeInstance
 	Op             any
 	InvSeq, RetSeq uint64 // logical order; virtual time ties
 	Invoke, Return Time
@@ -145,10 +148,10 @@ type HistoryOperation struct {
 
 // History is the workload's append-only record of ops.
 type History interface {
-	Invoke(client core.NodeInstance, id, value core.ID, operation any)
+	Invoke(client machine.NodeInstance, id, value machine.ID, operation any)
 	// Return completes id. It reports false for an unknown or duplicate id
 	// (a protocol failure).
-	Return(id core.ID, result any, o OpOutcome) bool
+	Return(id machine.ID, result any, o OpOutcome) bool
 	Ops() []HistoryOperation
 }
 
@@ -166,6 +169,6 @@ type Timeline interface {
 type TimedFact struct {
 	Seq    uint64
 	At     Time
-	Source core.NodeInstance // zero for engine facts ("sim_fault")
-	Fact   core.Fact
+	Source machine.NodeInstance // zero for engine facts ("sim_fault")
+	Fact   machine.Fact
 }

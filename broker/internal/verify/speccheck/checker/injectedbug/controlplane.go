@@ -9,6 +9,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/generator"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/observation"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/suites"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // ControlPlaneBug is an injected bug for a control plane. Wrap returns a subject
@@ -172,7 +173,7 @@ func PartialApplyOnInvalidBatch() ControlPlaneBug {
 	return beforeControlPlane("PartialApplyOnInvalidBatch",
 		"A commit with an invalid batch applies the valid batches before it, instead of nothing.",
 		func() func(suites.ControlPlaneSubject, generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
-			n := core.RequestID(0)
+			n := machine.RequestID(0)
 			return func(inner suites.ControlPlaneSubject, operation generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
 				call, commit, ok := commitOf(operation)
 				if ok && commit.SegmentKey != "" {

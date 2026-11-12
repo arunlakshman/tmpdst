@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // ControlPlane is the spec of the control plane as a broker sees it.
@@ -133,7 +134,7 @@ func (c *ControlPlane) Exec(a core.IOCall) core.IOResult {
 	return core.ControlPlaneDone{Req: call.Req, Err: core.ErrInvalid}
 }
 
-func (c *ControlPlane) execCreate(request core.RequestID, operation core.CreateTopic) core.IOResult {
+func (c *ControlPlane) execCreate(request machine.RequestID, operation core.CreateTopic) core.IOResult {
 	if code := c.CreateTopicIf(operation.Name, operation.Partitions, operation.FailIfExists); code != core.OK {
 		return core.ControlPlaneDone{Req: request, Err: code}
 	}
@@ -145,14 +146,14 @@ func validBatch(b core.PendingBatch) bool {
 	return b.Records > 0 && b.TopicPartition.Topic != "" && b.TopicPartition.Partition >= 0
 }
 
-func (c *ControlPlane) execCommit(request core.RequestID, operation core.CommitSegment) core.IOResult {
+func (c *ControlPlane) execCommit(request machine.RequestID, operation core.CommitSegment) core.IOResult {
 	if committed, done := c.segs[operation.SegmentKey]; done {
 		return c.replayCommit(request, operation, committed)
 	}
 	return c.freshCommit(request, operation)
 }
 
-func (c *ControlPlane) replayCommit(request core.RequestID, operation core.CommitSegment, committed segment) core.IOResult {
+func (c *ControlPlane) replayCommit(request machine.RequestID, operation core.CommitSegment, committed segment) core.IOResult {
 	if !slices.Equal(committed.batches, operation.Batches) {
 		return core.ControlPlaneDone{Req: request, Err: core.ErrConflict}
 	}
@@ -160,7 +161,7 @@ func (c *ControlPlane) replayCommit(request core.RequestID, operation core.Commi
 	return core.ControlPlaneDone{Req: request, Resp: response, Outcome: core.Applied}
 }
 
-func (c *ControlPlane) freshCommit(request core.RequestID, operation core.CommitSegment) core.IOResult {
+func (c *ControlPlane) freshCommit(request machine.RequestID, operation core.CommitSegment) core.IOResult {
 	if operation.SegmentKey == "" || len(operation.Batches) == 0 {
 		return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 	}
@@ -185,7 +186,7 @@ func (c *ControlPlane) freshCommit(request core.RequestID, operation core.Commit
 	return core.ControlPlaneDone{Req: request, Resp: response, Outcome: core.Applied}
 }
 
-func (c *ControlPlane) execLookup(request core.RequestID, operation core.FindSegments) core.IOResult {
+func (c *ControlPlane) execLookup(request machine.RequestID, operation core.FindSegments) core.IOResult {
 	if operation.From < 0 {
 		return core.ControlPlaneDone{Req: request, Err: core.ErrInvalid}
 	}
@@ -204,7 +205,7 @@ func (c *ControlPlane) execLookup(request core.RequestID, operation core.FindSeg
 	return core.ControlPlaneDone{Req: request, Resp: response}
 }
 
-func (c *ControlPlane) execDescribe(request core.RequestID, operation core.DescribeTopics) core.IOResult {
+func (c *ControlPlane) execDescribe(request machine.RequestID, operation core.DescribeTopics) core.IOResult {
 	var response core.DescribeTopicsResp
 	for _, name := range sortedKeys(c.topics) {
 		if len(operation.Topics) == 0 || slices.Contains(operation.Topics, name) {
@@ -226,7 +227,7 @@ func (c *ControlPlane) append(r core.BatchRange) {
 // topics (sorted by name).
 func (c *ControlPlane) StateHash() uint64 {
 	c.segPre = nextPrefix(c.segPre, len(c.segKeys), func(i int, h stateHasher) stateHasher {
-		h.StringValue(c.segKeys[i])
+		h.String(c.segKeys[i])
 		hashBatchRanges(&h, c.segs[c.segKeys[i]].ranges)
 		return h
 	})
@@ -237,7 +238,7 @@ func (c *ControlPlane) StateHash() uint64 {
 func (c *ControlPlane) fullStateHash() uint64 {
 	h := newStateHasher()
 	for _, k := range sortedKeys(c.segs) {
-		h.StringValue(k)
+		h.String(k)
 		hashBatchRanges(&h, c.segs[k].ranges)
 	}
 	return c.tailHash(h)
@@ -246,8 +247,8 @@ func (c *ControlPlane) fullStateHash() uint64 {
 // tailHash folds topics into h.
 func (c *ControlPlane) tailHash(h stateHasher) uint64 {
 	for _, t := range sortedKeys(c.topics) {
-		h.StringValue(t)
-		h.Uint64Value(uint64(c.topics[t]))
+		h.String(t)
+		h.Uint64(uint64(c.topics[t]))
 	}
 	return uint64(h)
 }

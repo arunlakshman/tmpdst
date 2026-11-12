@@ -12,6 +12,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 func seeds(from uint64, n int) []uint64 {
@@ -203,9 +204,9 @@ type fakeEnv struct{ n uint64 }
 
 func (e *fakeEnv) Uint64() uint64 { e.n++; return e.n }
 func (e *fakeEnv) Intn(n int) int { e.n++; return int(e.n % uint64(n)) }
-func (e *fakeEnv) NewID() core.ID {
+func (e *fakeEnv) NewID() machine.ID {
 	e.n++
-	var id core.ID
+	var id machine.ID
 	id[0], id[1] = byte(e.n), byte(e.n>>8)
 	return id
 }
@@ -220,10 +221,10 @@ func (*fakeEnv) Unreachable(core.PropertyID, ...core.ContextPair)               
 
 type fakeHist struct{ ops []simulator.HistoryOperation }
 
-func (h *fakeHist) Invoke(c core.NodeInstance, id, v core.ID, operation any) {
+func (h *fakeHist) Invoke(c machine.NodeInstance, id, v machine.ID, operation any) {
 	h.ops = append(h.ops, simulator.HistoryOperation{ID: id, Value: v, Client: c, Op: operation})
 }
-func (h *fakeHist) Return(id core.ID, res any, o simulator.OpOutcome) bool {
+func (h *fakeHist) Return(id machine.ID, res any, o simulator.OpOutcome) bool {
 	for i := range h.ops {
 		if h.ops[i].ID == id {
 			h.ops[i].Result, h.ops[i].Outcome = res, o
@@ -239,7 +240,7 @@ func (h *fakeHist) Ops() []simulator.HistoryOperation { return h.ops }
 // ambiguous attempt makes it indeterminate.
 func TestFatalProduceErrorGivesUp(t *testing.T) {
 	for _, ambiguous := range []bool{false, true} {
-		w := NewWorkload(&fakeEnv{}, core.NodeInstance{Node: "w"}, []core.NodeInstance{{Node: "b"}}, DefaultOpts())
+		w := NewWorkload(&fakeEnv{}, machine.NodeInstance{Node: "w"}, []machine.NodeInstance{{Node: "b"}}, DefaultOpts())
 		h := &fakeHist{}
 		w.SetHistory(h)
 		c := w.loop.Clients[0]
@@ -281,7 +282,7 @@ func produceResp(w *Workload, c *client, code int16) *kmsg.ProduceResponse {
 // (even after an ambiguous earlier attempt) and the producer carries on.
 func TestIdemBatchRejectedIsAbandoned(t *testing.T) {
 	for _, ambiguous := range []bool{false, true} {
-		w := NewWorkload(&fakeEnv{}, core.NodeInstance{Node: "w"}, []core.NodeInstance{{Node: "b"}}, DefaultOpts())
+		w := NewWorkload(&fakeEnv{}, machine.NodeInstance{Node: "w"}, []machine.NodeInstance{{Node: "b"}}, DefaultOpts())
 		h := &fakeHist{}
 		w.SetHistory(h)
 		c := w.loop.Clients[0]
@@ -319,7 +320,7 @@ func (e *rngEnv) Intn(n int) int {
 
 // Only the batches built with idem set carry a producer id on the wire.
 func TestBatchesCarryProducerIDOnlyWhenIdem(t *testing.T) {
-	w := NewWorkload(&rngEnv{x: 88172645463325252}, core.NodeInstance{Node: "w"}, []core.NodeInstance{{Node: "b"}}, DefaultOpts())
+	w := NewWorkload(&rngEnv{x: 88172645463325252}, machine.NodeInstance{Node: "w"}, []machine.NodeInstance{{Node: "b"}}, DefaultOpts())
 	w.SetHistory(&fakeHist{})
 	c := w.loop.Clients[0]
 	idem, plain := 0, 0
@@ -477,7 +478,7 @@ func (i *widestInv) AtEnd(v simulator.View) {
 // The workload sends every codec id (compressed payloads are opaque to the
 // broker but decodable by the simulated consumer), plus damaged batches.
 func TestWorkloadBuildsEveryCodecAndCorruptBatches(t *testing.T) {
-	w := NewWorkload(&rngEnv{x: 88172645463325252}, core.NodeInstance{Node: "w"}, []core.NodeInstance{{Node: "b"}}, DefaultOpts())
+	w := NewWorkload(&rngEnv{x: 88172645463325252}, machine.NodeInstance{Node: "w"}, []machine.NodeInstance{{Node: "b"}}, DefaultOpts())
 	h := &fakeHist{}
 	w.SetHistory(h)
 	c := w.loop.Clients[0]
@@ -523,7 +524,7 @@ func TestWorkloadBuildsEveryCodecAndCorruptBatches(t *testing.T) {
 // A damaged batch answered CORRUPT_MESSAGE is abandoned as rejected; the same
 // code for a good batch stays fatal.
 func TestCorruptBatchRejectedIsAbandoned(t *testing.T) {
-	w := NewWorkload(&fakeEnv{}, core.NodeInstance{Node: "w"}, []core.NodeInstance{{Node: "b"}}, DefaultOpts())
+	w := NewWorkload(&fakeEnv{}, machine.NodeInstance{Node: "w"}, []machine.NodeInstance{{Node: "b"}}, DefaultOpts())
 	h := &fakeHist{}
 	w.SetHistory(h)
 	c := w.loop.Clients[0]

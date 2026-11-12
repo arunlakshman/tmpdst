@@ -1,6 +1,10 @@
 package runtime
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/manifesterio/mds/dst/machine"
+)
 
 // testOp is a minimal ControlPlaneOperation. The real ones are in the contract package.
 type testOp struct{}
@@ -41,6 +45,6 @@ func TestCPCallAndCPDone(t *testing.T) {
 	if done.RequestID() != 9 {
 		t.Fatalf("CPDone request id broken")
 	}
-	offer := ControlPlaneDeliver{From: NodeInstance{Node: "b-0"}, Req: 9, Op: call.Op}
+	offer := ControlPlaneDeliver{From: machine.NodeInstance{Node: "b-0"}, Req: 9, Op: call.Op}
 	_ = ControlPlaneReply{To: offer.From, Done: done}
 }

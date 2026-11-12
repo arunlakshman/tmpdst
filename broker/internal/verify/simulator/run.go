@@ -1,17 +1,20 @@
 package simulator
 
-import "github.com/manifesterio/mds/broker/internal/core"
+import (
+	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
+)
 
 // Phases bound fault generation (lesson 8).
 type Phases struct {
-	Chaos core.Duration // faults injected
+	Chaos machine.Duration // faults injected
 	// Settling is recovery mode with nodes alive: liveness/convergence. Liveness
 	// rule: no ErrUnavailable or timeout for ops invoked in Settling. Faults
 	// planned in Chaos may still land there.
-	Settling core.Duration
-	Settle   core.Duration // drain remaining events, then AtEnd
+	Settling machine.Duration
+	Settle   machine.Duration // drain remaining events, then AtEnd
 	// MaxQuietLatency bounds how long an op invoked in Settling may take.
-	MaxQuietLatency core.Duration
+	MaxQuietLatency machine.Duration
 }
 
 // NodeKills kills and restarts broker processes during the chaos window.
@@ -23,12 +26,12 @@ type NodeKills struct {
 	CrashWeight float64
 	// GracefulWeight drives core.StopRequest: a graceful shutdown that ends in core.ShutdownDone.
 	GracefulWeight float64
-	RecoveryDelay  [2]core.Duration
+	RecoveryDelay  [2]machine.Duration
 	// FreezeProb is evaluated like CrashProb during Chaos. A freeze pauses one
 	// process that has Process.Freezable set for a time in FreezeDur: it takes no
 	// Step, its inbox keeps filling, and its earlier sends still land. Zero is off.
 	FreezeProb float64
-	FreezeDur  [2]core.Duration
+	FreezeDur  [2]machine.Duration
 }
 
 // SeedConfig holds the per-seed knobs a RandomSettingsPicker may change.
@@ -53,7 +56,7 @@ type RandomSettingsPicker func(seed uint64, r CountedRand, c *SeedConfig)
 // crash at a specific point.
 type PlannedFault struct {
 	At   Time
-	Node core.NodeID
+	Node machine.NodeID
 	Kind EntryKind
 }
 
@@ -88,7 +91,7 @@ type Config struct {
 	HaltOnFirst bool
 	// QuiesceEvery is the interval between quiesce points, where oracles may
 	// close a window.
-	QuiesceEvery core.Duration
+	QuiesceEvery machine.Duration
 	Scripted     []PlannedFault
 	// ExpectReachable lists Reachable properties that must be reached at least
 	// once across the campaign. A Reachable only records when it executes, so

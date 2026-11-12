@@ -7,6 +7,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // loading reads every group from the log (section 9). It answers every call
@@ -17,7 +18,7 @@ type loading struct {
 	listed bool     // the ListGroups read is back
 	names  []string // the groups to read, from ListGroups
 	descs  map[string]contract.DescribeGroupResp
-	reqs   map[runtime.RequestID]loadRead
+	reqs   map[machine.RequestID]loadRead
 	again  []loadRead // refused reads, sent again when retry fires (rule 39)
 	retry  timer
 }
@@ -30,7 +31,7 @@ type loadRead struct {
 
 // startLoad drops into Loading and reads the list of groups.
 func (m *Machine) startLoad(fresh bool) {
-	l := &loading{fresh: fresh, descs: map[string]contract.DescribeGroupResp{}, reqs: map[runtime.RequestID]loadRead{}, retry: m.newTimer()}
+	l := &loading{fresh: fresh, descs: map[string]contract.DescribeGroupResp{}, reqs: map[machine.RequestID]loadRead{}, retry: m.newTimer()}
 	m.state = l
 	m.sendLoadRead(l, loadRead{list: true})
 }

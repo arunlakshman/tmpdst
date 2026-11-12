@@ -6,9 +6,10 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
-func ns(f core.Fact, k string) int64 { return int64(f.Field(k).(core.Int64Value)) }
+func ns(f machine.Fact, k string) int64 { return int64(f.Field(k).(machine.Int64Value)) }
 
 // A segment's timing facts add up: put + queue wait + commit = seal-to-commit.
 // The second of two segments uploaded together waits for the first one's commit.
@@ -21,7 +22,7 @@ func TestSegmentTimingFacts(t *testing.T) {
 	h.holdPut = true
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.send(c, verProduce, prodReq(-1, e("t", 1, plain(t, "b"))))
-	h.now += core.NodeTime(40 * core.Millisecond) // the PUTs take a while
+	h.now += machine.NodeTime(40 * machine.Millisecond) // the PUTs take a while
 	h.holdPut = false
 	h.releaseHeld()
 	produced(h.next(c))
@@ -34,7 +35,7 @@ func TestSegmentTimingFacts(t *testing.T) {
 	}
 	for i, f := range cs {
 		put, wait, com, total := ns(f, "put_ns"), ns(f, "wait_ns"), ns(f, "commit_ns"), ns(f, "total_ns")
-		if put < int64(40*core.Millisecond) || com <= 0 || wait < 0 || put+wait+com != total {
+		if put < int64(40*machine.Millisecond) || com <= 0 || wait < 0 || put+wait+com != total {
 			t.Fatalf("segment %d: put %d wait %d commit %d total %d", i, put, wait, com, total)
 		}
 		if ns(puts[i], "put_ns") != put || ns(puts[i], "attempts") != 1 || ns(f, "bytes") != ns(puts[i], "bytes") {
@@ -83,12 +84,12 @@ func TestBackpressureFacts(t *testing.T) {
 	h.holdCP = true
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.flush()
-	h.now += core.NodeTime(30 * core.Millisecond)
+	h.now += machine.NodeTime(30 * machine.Millisecond)
 	h.holdCP = false
 	h.releaseHeld()
 	produced(h.next(c))
 	on, off := factsNamed(h.all, "backpressure_on"), factsNamed(h.all, "backpressure_off")
-	if len(on) != 1 || len(off) != 1 || ns(on[0], "buffered") < int64(n) || ns(off[0], "paused_ns") < int64(30*core.Millisecond) {
+	if len(on) != 1 || len(off) != 1 || ns(on[0], "buffered") < int64(n) || ns(off[0], "paused_ns") < int64(30*machine.Millisecond) {
 		t.Fatalf("on %+v off %+v", on, off)
 	}
 }

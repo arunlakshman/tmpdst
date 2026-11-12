@@ -9,21 +9,22 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakeobjectstore"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakeservicetest"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
-const ms = core.Duration(1_000_000)
+const ms = machine.Duration(1_000_000)
 
 func base() simulator.ObjectStoreFaults {
 	ts := simulator.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
 	return simulator.ObjectStoreFaults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}
 }
 
-func setup(f simulator.ObjectStoreFaults, seed uint64) (*fakeobjectstore.Engine, *fakeservicetest.Ctx, core.NodeInstance) {
+func setup(f simulator.ObjectStoreFaults, seed uint64) (*fakeobjectstore.Engine, *fakeservicetest.Ctx, machine.NodeInstance) {
 	e := fakeobjectstore.New(f)
 	return e, fakeservicetest.New(e, seed), fakeservicetest.Ref("a")
 }
 
-func put(e *fakeobjectstore.Engine, c *fakeservicetest.Ctx, from core.NodeInstance, request core.RequestID, key, data string) {
+func put(e *fakeobjectstore.Engine, c *fakeservicetest.Ctx, from machine.NodeInstance, request machine.RequestID, key, data string) {
 	e.Execute(c, from, core.ObjectPut{Req: request, Key: key, Data: []byte(data)})
 }
 
@@ -77,7 +78,7 @@ func Test503(t *testing.T) {
 
 func TestOutageWindow(t *testing.T) {
 	f := base()
-	f.Outage = simulator.ServiceOutage{Prob: 1, Dur: [2]core.Duration{100 * ms, 200 * ms}}
+	f.Outage = simulator.ServiceOutage{Prob: 1, Dur: [2]machine.Duration{100 * ms, 200 * ms}}
 	e, c, a := setup(f, 1)
 	put(e, c, a, 1, "k", "x")
 	c.T = 50 * simulator.Time(ms) // still inside
@@ -171,7 +172,7 @@ func TestLandsAfterCrash(t *testing.T) {
 func TestRecoveryStopsFaults(t *testing.T) {
 	f := base()
 	f.Unavailable503, f.Timeout, f.LostResponse, f.GetCorruptProb = 1, 1, 1, 1
-	f.Outage = simulator.ServiceOutage{Prob: 1, Dur: [2]core.Duration{ms, 2 * ms}}
+	f.Outage = simulator.ServiceOutage{Prob: 1, Dur: [2]machine.Duration{ms, 2 * ms}}
 	e, c, a := setup(f, 1)
 	put(e, c, a, 1, "k", "x") // faulted, in flight
 	e.EnterRecovery()
@@ -251,7 +252,7 @@ func TestTruthAndGen(t *testing.T) {
 func TestDeterminism(t *testing.T) {
 	f := base()
 	f.Unavailable503, f.Timeout, f.LostResponse, f.GetCorruptProb = 0.2, 0.2, 0.2, 0.3
-	f.Outage = simulator.ServiceOutage{Prob: 0.05, Dur: [2]core.Duration{10 * ms, 20 * ms}}
+	f.Outage = simulator.ServiceOutage{Prob: 0.05, Dur: [2]machine.Duration{10 * ms, 20 * ms}}
 	run := func(seed uint64) (string, uint64, uint64) {
 		e, c, a := setup(f, seed)
 		for i := range 60 {
@@ -259,11 +260,11 @@ func TestDeterminism(t *testing.T) {
 			k := string(rune('a' + i%5))
 			switch i % 3 {
 			case 0:
-				put(e, c, a, core.RequestID(i), k, "data-"+k)
+				put(e, c, a, machine.RequestID(i), k, "data-"+k)
 			case 1:
-				e.Execute(c, a, core.ObjectGet{Req: core.RequestID(i), Ref: core.SegmentRef{Key: k}})
+				e.Execute(c, a, core.ObjectGet{Req: machine.RequestID(i), Ref: core.SegmentRef{Key: k}})
 			default:
-				e.Execute(c, a, core.ObjectDelete{Req: core.RequestID(i), Key: k})
+				e.Execute(c, a, core.ObjectDelete{Req: machine.RequestID(i), Key: k})
 			}
 		}
 		mid := e.StateHash() // pending plans folded in

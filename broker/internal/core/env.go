@@ -1,5 +1,7 @@
 package core
 
+import "github.com/manifesterio/mds/dst/machine"
+
 // Environment is injected into every StateMachine at construction. It is the only way
 // nondeterminism enters the core. Time is NOT here: it arrives on each Event.
 type Environment interface {
@@ -14,7 +16,7 @@ type Rand interface {
 	// Intn returns a value in [0, n). n > 0.
 	Intn(n int) int
 	// NewID returns a fresh 128-bit ID (segment keys, incarnations, request IDs).
-	NewID() ID
+	NewID() machine.ID
 }
 
 // FaultPointID is the stable identity of a buggify point. Never interpolate values.

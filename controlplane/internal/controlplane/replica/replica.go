@@ -5,18 +5,20 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/sched"
 	"github.com/manifesterio/mds/dst/sim"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 const (
-	timerCatchUp = runtime.TimerID(1)
+	timerCatchUp = machine.TimerID(1)
 )
 
 // Replica is the control-plane DSM. Build it with New.
 type Replica struct {
 	env    runtime.Environment
-	self   runtime.NodeInstance
+	self   machine.NodeInstance
 	config Config
 
 	openErr error // the first store could not open; NodeStarted stops the machine
@@ -30,19 +32,19 @@ type Replica struct {
 
 	meta *metadb.DB
 
-	now           runtime.NodeTime
-	timerGen      runtime.TimerVersion
-	roleGen       runtime.TimerVersion
-	checkpointGen runtime.TimerVersion
-	nextReq       runtime.RequestID
+	now           machine.NodeTime
+	timerGen      machine.TimerVersion
+	roleGen       machine.TimerVersion
+	checkpointGen machine.TimerVersion
+	nextReq       machine.RequestID
 	seq           uint64
 	applied       runtime.LogPosition // next slot to apply
 	goalTail      runtime.LogPosition // CheckTail answer for the current round
 	high          runtime.LogPosition // next slot to allocate for commit appends
 	buf           map[runtime.LogPosition][]byte
-	pending       runtime.RequestID
+	pending       machine.RequestID
 	epoch         uint64            // writer epoch this node holds; zero when it is not the writer
-	claimReq      runtime.RequestID // in-flight LogClaimEpoch; 0 means none
+	claimReq      machine.RequestID // in-flight LogClaimEpoch; 0 means none
 	claimExpect   uint64            // epoch that claim expected to find
 	fencedFlag    bool              // a newer epoch was seen while applying; step down after the drain
 	stepDowns     uint64            // times this node stopped being the writer because of a newer epoch
@@ -51,28 +53,28 @@ type Replica struct {
 	restoreKey    string            // checkpoint object being read
 	pendingKind   pendingKind
 
-	lastPullOK  runtime.NodeTime
-	lastOtherAt runtime.NodeTime
-	lastOwnAt   runtime.NodeTime
+	lastPullOK  machine.NodeTime
+	lastOtherAt machine.NodeTime
+	lastOwnAt   machine.NodeTime
 
 	checkpointSlot    runtime.LogPosition // newest checkpoint slot (written or restored)
-	checkpointAt      runtime.NodeTime
+	checkpointAt      machine.NodeTime
 	checkpointPending runtime.LogPosition // slot of in-flight ObjectPut snapshot
 	checkpointData    []byte
 	// The checkpoint lane: the snapshot upload, then the log trim, one request at
 	// a time, on its own request id. It never uses pending, so a slow upload
 	// cannot block catch-up and catch-up cannot block the checkpoint.
-	checkpointRequest runtime.RequestID // in-flight request of the lane; 0 means idle
+	checkpointRequest machine.RequestID // in-flight request of the lane; 0 means idle
 	checkpointStage   checkpointStage
 	trimThrough       runtime.LogPosition // Through of the in-flight trim
 
 	queue           []waitingCommand                      // client ops waiting for a commit slot
-	inFlightAppends map[runtime.RequestID]*inFlightAppend // in-flight commit LogAppends (at most one)
+	inFlightAppends map[machine.RequestID]*inFlightAppend // in-flight commit LogAppends (at most one)
 	waiters         map[string][]waitingCommand
 	answers         []ReplyToClient
 	trimFloor       runtime.LogPosition // slots below are trimmed
-	stallUntil      runtime.NodeTime
-	downUntil       runtime.NodeTime
+	stallUntil      machine.NodeTime
+	downUntil       machine.NodeTime
 	crashed         bool
 	needsCheckpoint bool // fell behind a trim; must restore before catch-up from zero
 	checkpointRetry bool // the last checkpoint read failed; read again before catch-up
@@ -107,14 +109,14 @@ const (
 )
 
 // Factory builds a replica for one incarnation of a node.
-type Factory func(env runtime.Environment, self runtime.NodeInstance) *Replica
+type Factory func(env runtime.Environment, self machine.NodeInstance) *Replica
 
 // New returns the Factory of the control-plane machine. A factory
 // cannot return an error, so a store that cannot open (Config.OpenStore) is
 // remembered and the machine stops with Crash on NodeStarted: the
 // process cannot serve without its state.
 func New(config Config) Factory {
-	return func(env runtime.Environment, self runtime.NodeInstance) *Replica {
+	return func(env runtime.Environment, self machine.NodeInstance) *Replica {
 		meta, err := config.openMetadata()
 		if err != nil {
 			meta = metadb.NewMem() // placeholder; NodeStarted stops the machine
@@ -123,7 +125,7 @@ func New(config Config) Factory {
 			env: env, self: self, config: config, openErr: err,
 			meta:            meta,
 			buf:             map[runtime.LogPosition][]byte{},
-			inFlightAppends: map[runtime.RequestID]*inFlightAppend{},
+			inFlightAppends: map[machine.RequestID]*inFlightAppend{},
 			waiters:         map[string][]waitingCommand{},
 		}
 	}
@@ -164,7 +166,7 @@ func (m *Replica) Step(cx sim.Context, inbox any) []any {
 	if m.exited {
 		return nil
 	}
-	m.now = runtime.NodeTime(cx.Now())
+	m.now = machine.NodeTime(cx.Now())
 	var acts []any
 	switch body := inbox.(type) {
 	case runtime.NodeStarted:
@@ -383,7 +385,7 @@ func (m *Replica) armCatchUp() []any {
 
 // arm returns the dst value that starts timer id. The generation goes back to
 // the machine inside the TimerFired value, so a stale timer is ignored.
-func arm(id runtime.TimerID, gen runtime.TimerVersion, after runtime.Duration) sim.SetTimer {
+func arm(id machine.TimerID, gen machine.TimerVersion, after machine.Duration) sim.SetTimer {
 	return sim.SetTimer{ID: uint64(id), After: sched.TimeNs(after), Body: runtime.TimerFired{ID: id, Gen: gen}}
 }
 
@@ -408,48 +410,48 @@ func (m *Replica) stop() []any {
 // StateHash folds every field that influences behaviour, including the applied
 // metadb digest (comparable across machines that folded the same prefix).
 func (m *Replica) StateHash() uint64 {
-	h := runtime.NewHasher()
+	h := trace.New()
 	h.Bool(m.started)
 	h.Bool(m.stopping)
 	h.Bool(m.exited)
 	h.Bool(m.booting)
 	h.Bool(m.ready)
 	h.Bool(m.active)
-	h.Uint64Value(uint64(m.timerGen))
-	h.Uint64Value(uint64(m.roleGen))
-	h.Uint64Value(uint64(m.checkpointGen))
-	h.Uint64Value(uint64(m.nextReq))
-	h.Uint64Value(uint64(m.seq))
-	h.Uint64Value(uint64(m.applied))
-	h.Uint64Value(uint64(m.goalTail))
-	h.Uint64Value(uint64(m.high))
-	h.Uint64Value(uint64(m.pending))
-	h.Uint64Value(uint64(m.pendingKind))
-	h.StringValue(m.restoreKey)
+	h.Uint64(uint64(m.timerGen))
+	h.Uint64(uint64(m.roleGen))
+	h.Uint64(uint64(m.checkpointGen))
+	h.Uint64(uint64(m.nextReq))
+	h.Uint64(uint64(m.seq))
+	h.Uint64(uint64(m.applied))
+	h.Uint64(uint64(m.goalTail))
+	h.Uint64(uint64(m.high))
+	h.Uint64(uint64(m.pending))
+	h.Uint64(uint64(m.pendingKind))
+	h.String(m.restoreKey)
 	h.Bool(m.checkpointRetry)
-	h.Uint64Value(m.epoch)
-	h.Uint64Value(m.maxEpochSeen)
-	h.Uint64Value(uint64(m.claimReq))
+	h.Uint64(m.epoch)
+	h.Uint64(m.maxEpochSeen)
+	h.Uint64(uint64(m.claimReq))
 	h.Bool(m.fencedFlag)
-	h.Uint64Value(m.stepDowns)
+	h.Uint64(m.stepDowns)
 	h.Bool(m.tailChecked)
-	h.Uint64Value(uint64(m.checkpointSlot))
-	h.Uint64Value(uint64(m.checkpointRequest))
-	h.Uint64Value(uint64(len(m.queue)))
-	h.Uint64Value(uint64(len(m.inFlightAppends)))
-	h.Uint64Value(uint64(len(m.waiters)))
-	h.Uint64Value(uint64(len(m.readWaiters)))
-	h.Uint64Value(m.tailsStarted)
-	h.Uint64Value(uint64(m.config.CatchUpEvery))
-	h.Uint64Value(uint64(m.config.ReadLimit))
-	h.Uint64Value(uint64(m.config.MaxCmdsPerSlot))
-	h.Uint64Value(uint64(m.config.QueueMax))
-	h.Uint64Value(uint64(m.config.Rank))
-	h.Uint64Value(uint64(m.config.Heartbeat))
-	h.Uint64Value(uint64(m.config.TakeoverAfter))
-	h.Uint64Value(uint64(m.config.CheckpointEvery))
-	h.Uint64Value(uint64(m.config.CheckpointMinSlots))
-	h.Uint64Value(uint64(m.config.KeepSlots))
-	h.Uint64Value(m.meta.StateHash())
+	h.Uint64(uint64(m.checkpointSlot))
+	h.Uint64(uint64(m.checkpointRequest))
+	h.Uint64(uint64(len(m.queue)))
+	h.Uint64(uint64(len(m.inFlightAppends)))
+	h.Uint64(uint64(len(m.waiters)))
+	h.Uint64(uint64(len(m.readWaiters)))
+	h.Uint64(m.tailsStarted)
+	h.Uint64(uint64(m.config.CatchUpEvery))
+	h.Uint64(uint64(m.config.ReadLimit))
+	h.Uint64(uint64(m.config.MaxCmdsPerSlot))
+	h.Uint64(uint64(m.config.QueueMax))
+	h.Uint64(uint64(m.config.Rank))
+	h.Uint64(uint64(m.config.Heartbeat))
+	h.Uint64(uint64(m.config.TakeoverAfter))
+	h.Uint64(uint64(m.config.CheckpointEvery))
+	h.Uint64(uint64(m.config.CheckpointMinSlots))
+	h.Uint64(uint64(m.config.KeepSlots))
+	h.Uint64(m.meta.StateHash())
 	return h.Sum()
 }

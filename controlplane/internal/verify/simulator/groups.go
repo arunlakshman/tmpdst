@@ -6,6 +6,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 	dstsim "github.com/manifesterio/mds/dst/sim"
 )
 
@@ -36,7 +37,7 @@ import (
 
 // rebalanceFrom is who the machine is when it talks to the replica, as in
 // server/groups_handler.go.
-func rebalanceFrom() runtime.NodeInstance { return runtime.NodeInstance{Node: "rebalance"} }
+func rebalanceFrom() machine.NodeInstance { return machine.NodeInstance{Node: "rebalance"} }
 
 // groupsID is the process id of the rebalance machine of node idx.
 func groupsID(idx int) dstsim.ProcessID { return dstsim.ProcessID(fmt.Sprintf("rb-%d", idx)) }
@@ -47,9 +48,9 @@ func groupsID(idx int) dstsim.ProcessID { return dstsim.ProcessID(fmt.Sprintf("r
 func machineConfig(idx int, faults runtime.FaultInjector) rebalance.Config {
 	return rebalance.Config{
 		ID:               groupsID(idx),
-		InitialDelay:     300 * runtime.Millisecond,
-		NewMemberTimeout: 4 * runtime.Second,
-		WriteTimeout:     2 * runtime.Second,
+		InitialDelay:     300 * machine.Millisecond,
+		NewMemberTimeout: 4 * machine.Second,
+		WriteTimeout:     2 * machine.Second,
 		Faults:           faults,
 	}
 }
@@ -98,13 +99,13 @@ type groupHost struct {
 
 	lastToReplica any // the last value the replica took from toReplica (for the trace)
 
-	writes   map[runtime.RequestID]sentWrite // commands sent to the replica and not answered yet
+	writes   map[machine.RequestID]sentWrite // commands sent to the replica and not answered yet
 	terms    int                             // the terms of the machine that ended: a break, or a role loss
 	calls    map[rebalance.CallID]*groupCall // calls that wait for a reply
 	gone     map[rebalance.CallID]bool       // calls that were abandoned
 	nextCall rebalance.CallID
-	reads    map[runtime.RequestID]readNote // reads of the machine not answered yet
-	sent     map[runtime.RequestID]bool     // every request id the machine of this boot used
+	reads    map[machine.RequestID]readNote // reads of the machine not answered yet
+	sent     map[machine.RequestID]bool     // every request id the machine of this boot used
 	timers   map[uint64]bool                // write timers: the timer that the machine sets with each command
 }
 
@@ -146,12 +147,12 @@ func newGroupHost(s *sim, n *simNode) *groupHost { return &groupHost{s: s, n: n}
 func (h *groupHost) start() {
 	h.proc = &groupProc{h: h, m: rebalance.New(machineConfig(h.n.idx, h.s.env))}
 	h.role, h.told = false, false
-	h.sent = map[runtime.RequestID]bool{}
+	h.sent = map[machine.RequestID]bool{}
 	h.timers = map[uint64]bool{}
 	h.calls = map[rebalance.CallID]*groupCall{}
 	h.gone = map[rebalance.CallID]bool{}
-	h.reads = map[runtime.RequestID]readNote{}
-	h.writes = map[runtime.RequestID]sentWrite{}
+	h.reads = map[machine.RequestID]readNote{}
+	h.writes = map[machine.RequestID]sentWrite{}
 	h.terms = 0
 	h.nextCall = 0
 }
@@ -305,7 +306,7 @@ func (h *groupHost) outbound(outs []any) []any {
 }
 
 // newRequest notes a request id of the machine. It must be new in this boot.
-func (h *groupHost) newRequest(req runtime.RequestID) {
+func (h *groupHost) newRequest(req machine.RequestID) {
 	if h.sent[req] {
 		h.s.violation("request ids never repeat", "%s: the machine sent request %d twice in one run", h.n.name(), req)
 	}
@@ -357,7 +358,7 @@ func (h *groupHost) deadline(call rebalance.CallID, gc *groupCall) {
 	h.deliver(rebalance.CallAbandoned{Call: call})
 	if !gc.try.onPurpose && gc.try.quiet {
 		h.s.violation("every call gets an answer", "%s: %s sent call %d in the quiet tail and had no answer after %dms",
-			h.n.name(), gc.try.c.name, call, gc.try.deadline/runtime.Millisecond)
+			h.n.name(), gc.try.c.name, call, gc.try.deadline/machine.Millisecond)
 	}
 	gc.try.answered(runtime.ErrTimeout, nil)
 }
@@ -384,7 +385,7 @@ func (h *groupHost) answer(r rebalance.Reply) {
 
 // fetch is the OffsetFetch handler: behind the role bit, a LocalRead of the
 // replica. The reply comes back to the consumer as a client reply.
-func (h *groupHost) fetch(t *callTry, req runtime.RequestID) {
+func (h *groupHost) fetch(t *callTry, req machine.RequestID) {
 	if !h.n.up || !h.role {
 		h.refuse(t)
 		return

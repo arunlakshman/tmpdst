@@ -8,6 +8,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 func commitCmd(key string, records int64) metadb.Entry {
@@ -41,7 +42,7 @@ func TestGroupPackingCapsAtMaxCmdsPerSlot(t *testing.T) {
 	first := onlyAppend(t, m.Offer(replica.ClientOperation{Req: 1, Cmd: commitCmd("g0", 1)}))
 	for i := 2; i <= 6; i++ {
 		if acts := m.Offer(replica.ClientOperation{
-			Req: runtime.RequestID(i),
+			Req: machine.RequestID(i),
 			Cmd: commitCmd("g"+string(rune('0'+i-1)), 1),
 		}); len(acts) != 0 {
 			t.Fatalf("Offer while in-flight returned %v", acts)
@@ -66,7 +67,7 @@ func TestGroupPackingCapsAtMaxCmdsPerSlot(t *testing.T) {
 		t.Fatalf("packed answers = %d, want 3", len(ans))
 	}
 	for i, a := range ans {
-		if a.Req != runtime.RequestID(i+2) || a.Done.Err != runtime.OK {
+		if a.Req != machine.RequestID(i+2) || a.Done.Err != runtime.OK {
 			t.Fatalf("answer[%d] = %+v", i, a)
 		}
 	}
@@ -121,7 +122,7 @@ func TestOfferRetargetsInFlightCommit(t *testing.T) {
 func TestWindowForgetsKeysOnlyOnLogStride(t *testing.T) {
 	m := newMachine(t, replica.Config{MaxCmdsPerSlot: 1, Writer: "w", WindowSlots: 4, TrimStride: 8})
 	var last runtime.LogPosition
-	req := runtime.RequestID(0)
+	req := machine.RequestID(0)
 	commit := func(key string) {
 		req++
 		ap := onlyAppend(t, m.Offer(replica.ClientOperation{Req: req, Cmd: commitCmd(key, 1)}))

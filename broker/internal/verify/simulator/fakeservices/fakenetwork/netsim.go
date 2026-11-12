@@ -47,6 +47,8 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // Engine is the network engine. Not safe for concurrent use.
@@ -54,7 +56,7 @@ type Engine struct {
 	f        simulator.NetworkFaults
 	recovery bool
 	nextPair uint64
-	nextConn map[core.NodeID]core.ConnID
+	nextConn map[machine.NodeID]core.ConnID
 	pairs    []*connectionPair // ascending id
 	ends     map[connectionEndKey]connectionEndRef
 	links    []*link // sorted by (a, b), a <= b
@@ -62,11 +64,11 @@ type Engine struct {
 
 // New returns a network engine with the given fault menu.
 func New(f simulator.NetworkFaults) *Engine {
-	return &Engine{f: f, nextConn: map[core.NodeID]core.ConnID{}, ends: map[connectionEndKey]connectionEndRef{}}
+	return &Engine{f: f, nextConn: map[machine.NodeID]core.ConnID{}, ends: map[connectionEndKey]connectionEndRef{}}
 }
 
 type connectionEndKey struct {
-	node core.NodeID
+	node machine.NodeID
 	id   core.ConnID
 }
 
@@ -76,7 +78,7 @@ type connectionEndRef struct {
 }
 
 type connectionEnd struct {
-	ref    core.NodeInstance
+	ref    machine.NodeInstance
 	id     core.ConnID
 	closed bool // closed locally, reset, or crashed: no more sends or delivery
 	eof    bool // saw peer FIN
@@ -124,8 +126,8 @@ type connectionPair struct {
 
 // link is per unordered node pair: permanent extra latency and partition state.
 type link struct {
-	a, b     core.NodeID
-	extra    core.Duration
+	a, b     machine.NodeID
+	extra    machine.Duration
 	healAt   simulator.Time
 	everCut  bool
 	hasExtra bool
@@ -143,7 +145,7 @@ type resetData struct {
 	Dir  int
 	Seq  uint64
 }
-type networkHealData struct{ A, B core.NodeID }
+type networkHealData struct{ A, B machine.NodeID }
 
 // Name implements simulator.Engine.
 func (e *Engine) Name() string { return "fakenetwork" }
@@ -168,14 +170,14 @@ func connectionPairKey(pair uint64, what string) string {
 	return "net/" + strconv.FormatUint(pair, 10) + "/" + what
 }
 
-func timeSpan(r simulator.CountedRand, lo, hi core.Duration) core.Duration {
+func timeSpan(r simulator.CountedRand, lo, hi machine.Duration) machine.Duration {
 	if hi <= lo {
 		return lo
 	}
-	return core.Duration(r.Between(int64(lo), int64(hi)))
+	return machine.Duration(r.Between(int64(lo), int64(hi)))
 }
 
-func (e *Engine) sample(r simulator.CountedRand) core.Duration {
+func (e *Engine) sample(r simulator.CountedRand) machine.Duration {
 	return e.f.Latency.Sample(r)
 }
 
@@ -190,7 +192,7 @@ func (e *Engine) findPair(id uint64) *connectionPair {
 	return nil
 }
 
-func (e *Engine) lookup(n core.NodeID, c core.ConnID) (*connectionPair, int) {
+func (e *Engine) lookup(n machine.NodeID, c core.ConnID) (*connectionPair, int) {
 	r, ok := e.ends[connectionEndKey{n, c}]
 	if !ok {
 		return nil, 0
@@ -215,7 +217,7 @@ func (e *Engine) maybeRemove(p *connectionPair) {
 	}
 }
 
-func (e *Engine) link(a, b core.NodeID) *link {
+func (e *Engine) link(a, b machine.NodeID) *link {
 	a, b = min(a, b), max(a, b)
 	i := sort.Search(len(e.links), func(i int) bool {
 		l := e.links[i]
@@ -232,7 +234,7 @@ func (e *Engine) link(a, b core.NodeID) *link {
 }
 
 // pairExtra is the per-pair permanent extra latency, sampled once on first use.
-func (e *Engine) pairExtra(ctx simulator.FakeServiceContext, a, b core.NodeID) core.Duration {
+func (e *Engine) pairExtra(ctx simulator.FakeServiceContext, a, b machine.NodeID) machine.Duration {
 	l := e.link(a, b)
 	if !l.hasExtra {
 		l.hasExtra = true
@@ -243,7 +245,7 @@ func (e *Engine) pairExtra(ctx simulator.FakeServiceContext, a, b core.NodeID) c
 	return l.extra
 }
 
-func (e *Engine) partitioned(ctx simulator.FakeServiceContext, a, b core.NodeID) bool {
+func (e *Engine) partitioned(ctx simulator.FakeServiceContext, a, b machine.NodeID) bool {
 	l := e.link(a, b)
 	return l.everCut && ctx.Now() < l.healAt
 }
@@ -266,7 +268,7 @@ func (e *Engine) clearDir(ctx simulator.FakeServiceContext, d *dir) {
 
 // arrival returns the next arrival time on d for something issued now with
 // latency lat: monotone, and not before an active clog ends.
-func (d *dir) arrival(now simulator.Time, lat core.Duration) simulator.Time {
+func (d *dir) arrival(now simulator.Time, lat machine.Duration) simulator.Time {
 	at := now + simulator.Time(lat)
 	if d.clogUntil > now && d.clogUntil+simulator.Time(lat) > at {
 		at = d.clogUntil + simulator.Time(lat)
@@ -279,7 +281,7 @@ func (d *dir) arrival(now simulator.Time, lat core.Duration) simulator.Time {
 }
 
 // enqueue puts a data or FIN item in flight on direction di of p.
-func (e *Engine) enqueue(ctx simulator.FakeServiceContext, p *connectionPair, di int, it item, lat core.Duration) {
+func (e *Engine) enqueue(ctx simulator.FakeServiceContext, p *connectionPair, di int, it item, lat machine.Duration) {
 	d := &p.dirs[di]
 	d.seq++
 	it.seq = d.seq
@@ -291,7 +293,7 @@ func (e *Engine) enqueue(ctx simulator.FakeServiceContext, p *connectionPair, di
 
 // sendRst schedules an RST toward side `to` of p (carried on direction 1-to).
 // It lands after anything already in flight on that direction.
-func (e *Engine) sendRst(ctx simulator.FakeServiceContext, p *connectionPair, to int, net bool, lat core.Duration) {
+func (e *Engine) sendRst(ctx simulator.FakeServiceContext, p *connectionPair, to int, net bool, lat machine.Duration) {
 	di := 1 - to
 	d := &p.dirs[di]
 	d.seq++
@@ -300,7 +302,7 @@ func (e *Engine) sendRst(ctx simulator.FakeServiceContext, p *connectionPair, to
 	d.flight = append(d.flight, item{kind: kindReset, seq: d.seq, net: net, id: id})
 }
 
-func (e *Engine) ack(ctx simulator.FakeServiceContext, to core.NodeInstance, p *connectionPair, side int, request core.RequestID, conn core.ConnID, err core.ErrCode) {
+func (e *Engine) ack(ctx simulator.FakeServiceContext, to machine.NodeInstance, p *connectionPair, side int, request machine.RequestID, conn core.ConnID, err core.ErrCode) {
 	var lane simulator.DeliveryLane
 	if p != nil {
 		lane = ctx.Lane(connectionPairKey(p.id, "ack"+strconv.Itoa(side)))
@@ -310,8 +312,8 @@ func (e *Engine) ack(ctx simulator.FakeServiceContext, to core.NodeInstance, p *
 	ctx.Deliver(to, ctx.Now()+simulator.Time(e.sample(ctx.Rand())), lane, core.SendDone{Req: request, Conn: conn, Err: err})
 }
 
-func (e *Engine) fault(ctx simulator.FakeServiceContext, kind string, a, b core.NodeID, extra ...core.Field) {
-	fields := append([]core.Field{{Key: "a", Value: core.StringValue(a)}, {Key: "b", Value: core.StringValue(b)}}, extra...)
+func (e *Engine) fault(ctx simulator.FakeServiceContext, kind string, a, b machine.NodeID, extra ...machine.Field) {
+	fields := append([]machine.Field{{Key: "a", Value: machine.StringValue(a)}, {Key: "b", Value: machine.StringValue(b)}}, extra...)
 	ctx.Fault(kind, fields...)
 	ctx.Assert().Sometimes(true, core.PropertyID("net: "+kind))
 	ctx.Assert().Reachable(core.PropertyID("net: " + kind + " injected"))
@@ -320,7 +322,7 @@ func (e *Engine) fault(ctx simulator.FakeServiceContext, kind string, a, b core.
 // ---- Execute ----
 
 // Execute applies a network action issued by node from.
-func (e *Engine) Execute(ctx simulator.FakeServiceContext, from core.NodeInstance, a core.Action) {
+func (e *Engine) Execute(ctx simulator.FakeServiceContext, from machine.NodeInstance, a core.Action) {
 	switch a := a.(type) {
 	case core.Connect:
 		e.dial(ctx, from, a)
@@ -340,8 +342,8 @@ func (e *Engine) Execute(ctx simulator.FakeServiceContext, from core.NodeInstanc
 	}
 }
 
-func (e *Engine) dial(ctx simulator.FakeServiceContext, from core.NodeInstance, a core.Connect) {
-	target := core.NodeID(a.Addr)
+func (e *Engine) dial(ctx simulator.FakeServiceContext, from machine.NodeInstance, a core.Connect) {
+	target := machine.NodeID(a.Addr)
 	// Partition coin first: it applies to this dial.
 	e.maybePartition(ctx, from.Node, target)
 	lat := e.sample(ctx.Rand()) + e.pairExtra(ctx, from.Node, target)
@@ -371,7 +373,7 @@ func (e *Engine) dial(ctx simulator.FakeServiceContext, from core.NodeInstance, 
 	ctx.Deliver(ref, at, p.dirs[0].lane, core.ConnOpened{Conn: p.end[1].id, Peer: string(from.Node)})
 }
 
-func (e *Engine) maybePartition(ctx simulator.FakeServiceContext, a, b core.NodeID) {
+func (e *Engine) maybePartition(ctx simulator.FakeServiceContext, a, b machine.NodeID) {
 	if e.recovery || e.f.PartitionProb <= 0 || a == b {
 		return
 	}
@@ -386,10 +388,10 @@ func (e *Engine) maybePartition(ctx simulator.FakeServiceContext, a, b core.Node
 	l.everCut = true
 	l.healAt = ctx.Now() + simulator.Time(dur)
 	ctx.Self(l.healAt, ctx.Lane("net/heal"), networkHealData{l.a, l.b})
-	e.fault(ctx, "partition", l.a, l.b, core.Field{Key: "dur", Value: core.Int64Value(dur)})
+	e.fault(ctx, "partition", l.a, l.b, machine.Field{Key: "dur", Value: machine.Int64Value(dur)})
 }
 
-func (e *Engine) send(ctx simulator.FakeServiceContext, from core.NodeInstance, a core.Send) {
+func (e *Engine) send(ctx simulator.FakeServiceContext, from machine.NodeInstance, a core.Send) {
 	p, s := e.lookup(from.Node, a.Conn)
 	if p == nil || p.end[s].ref != from || p.end[s].closed || p.dirs[s].aborted {
 		e.ack(ctx, from, p, s, a.Req, a.Conn, core.ErrConnClosed)
@@ -413,7 +415,7 @@ func (e *Engine) send(ctx simulator.FakeServiceContext, from core.NodeInstance, 
 		if r.Chance(e.f.ClogProb) {
 			dur := timeSpan(r, e.f.ClogDur[0], e.f.ClogDur[1])
 			d.clogUntil = ctx.Now() + simulator.Time(dur)
-			e.fault(ctx, "clog", from.Node, peer, core.Field{Key: "dur", Value: core.Int64Value(dur)})
+			e.fault(ctx, "clog", from.Node, peer, machine.Field{Key: "dur", Value: machine.Int64Value(dur)})
 		}
 	}
 	extra := e.pairExtra(ctx, from.Node, peer)
@@ -430,7 +432,7 @@ func (e *Engine) send(ctx simulator.FakeServiceContext, from core.NodeInstance, 
 	e.ack(ctx, from, p, s, a.Req, a.Conn, core.OK)
 }
 
-func (e *Engine) closeConn(ctx simulator.FakeServiceContext, from core.NodeInstance, a core.CloseConn) {
+func (e *Engine) closeConn(ctx simulator.FakeServiceContext, from machine.NodeInstance, a core.CloseConn) {
 	p, s := e.lookup(from.Node, a.Conn)
 	if p == nil || p.end[s].ref != from || p.end[s].closed {
 		return
@@ -545,7 +547,7 @@ func (e *Engine) flush(ctx simulator.FakeServiceContext, p *connectionPair, di i
 }
 
 // OnCrash retires every open end at ref; survivors get an RST.
-func (e *Engine) OnCrash(ctx simulator.FakeServiceContext, ref core.NodeInstance) {
+func (e *Engine) OnCrash(ctx simulator.FakeServiceContext, ref machine.NodeInstance) {
 	// Snapshot: maybeRemove edits e.pairs.
 	ps := slices.Clone(e.pairs)
 	for _, p := range ps {
@@ -570,14 +572,14 @@ func (e *Engine) OnCrash(ctx simulator.FakeServiceContext, ref core.NodeInstance
 
 // ---- hash ----
 
-type hasher = core.Hasher
+type hasher = trace.Hash
 
 func hashItems(h *hasher, its []item) {
-	h.Uint64Value(uint64(len(its)))
+	h.Uint64(uint64(len(its)))
 	for _, it := range its {
-		h.Uint64Value(uint64(it.kind))
-		h.Uint64Value(uint64(len(it.data)))
-		h.Uint64Value(uint64(it.crc))
+		h.Uint64(uint64(it.kind))
+		h.Uint64(uint64(len(it.data)))
+		h.Uint64(uint64(it.crc))
 		h.Bool(it.net)
 	}
 }
@@ -587,8 +589,8 @@ func hashItems(h *hasher, its []item) {
 // fold is reused only while the state it starts from is unchanged: a changed
 // pair rehashes itself and the pairs after it.
 func (e *Engine) StateHash() uint64 {
-	h := core.NewHasher()
-	h.Uint64Value(uint64(len(e.pairs)))
+	h := trace.New()
+	h.Uint64(uint64(len(e.pairs)))
 	for _, p := range e.pairs {
 		if p.ok && p.in == uint64(h) {
 			h = hasher(p.out)
@@ -603,8 +605,8 @@ func (e *Engine) StateHash() uint64 {
 
 // fullStateHash is StateHash without the per-pair cache.
 func (e *Engine) fullStateHash() uint64 {
-	h := core.NewHasher()
-	h.Uint64Value(uint64(len(e.pairs)))
+	h := trace.New()
+	h.Uint64(uint64(len(e.pairs)))
 	for _, p := range e.pairs {
 		p.in = uint64(h)
 		hashConnectionPair(&h, p)
@@ -614,34 +616,34 @@ func (e *Engine) fullStateHash() uint64 {
 }
 
 func (e *Engine) finishHash(h hasher) uint64 {
-	h.Uint64Value(uint64(len(e.links)))
+	h.Uint64(uint64(len(e.links)))
 	for _, l := range e.links {
-		h.StringValue(string(l.a))
-		h.StringValue(string(l.b))
-		h.Uint64Value(uint64(l.extra))
+		h.String(string(l.a))
+		h.String(string(l.b))
+		h.Uint64(uint64(l.extra))
 		h.Bool(l.everCut)
-		h.Uint64Value(uint64(l.healAt))
+		h.Uint64(uint64(l.healAt))
 	}
 	h.Bool(e.recovery)
 	return uint64(h)
 }
 
 func hashConnectionPair(h *hasher, p *connectionPair) {
-	h.Uint64Value(p.id)
+	h.Uint64(p.id)
 	for s := range 2 {
 		en := &p.end[s]
-		h.StringValue(string(en.ref.Node))
-		h.Uint64Value(uint64(len(en.ref.Inc)))
+		h.String(string(en.ref.Node))
+		h.Uint64(uint64(len(en.ref.Inc)))
 		for _, c := range en.ref.Inc {
-			h.Uint64Value(uint64(c))
+			h.Uint64(uint64(c))
 		}
-		h.Uint64Value(uint64(en.id))
+		h.Uint64(uint64(en.id))
 		h.Bool(en.closed)
 		h.Bool(en.eof)
 		h.Bool(en.paused)
 		d := &p.dirs[s]
-		h.Uint64Value(uint64(d.lastArr))
-		h.Uint64Value(uint64(d.clogUntil))
+		h.Uint64(uint64(d.lastArr))
+		h.Uint64(uint64(d.clogUntil))
 		h.Bool(d.aborted)
 		h.Bool(d.blackhole)
 		hashItems(h, d.flight)

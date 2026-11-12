@@ -3,7 +3,7 @@ package broker
 import (
 	"cmp"
 
-	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // InjectedBug selects a deliberately broken behaviour for mutant tests. TEST ONLY: the
@@ -57,8 +57,8 @@ type Config struct {
 	// MaxSegmentBytes of batch data, or BatchWindow after its first batch
 	// arrived (a fixed timer, not extended by later batches), or when it hits
 	// one of the count caps below.
-	BatchWindow     core.Duration // flush timer, armed by the first batch of a segment
-	MaxSegmentBytes int           // flush at once when the open segment holds this many batch bytes
+	BatchWindow     machine.Duration // flush timer, armed by the first batch of a segment
+	MaxSegmentBytes int              // flush at once when the open segment holds this many batch bytes
 
 	// MaxSegmentPartitions and MaxSegmentBatches cap the open segment so the
 	// control plane can commit it. The cap is a per-store setting (decision 52):
@@ -73,9 +73,9 @@ type Config struct {
 	MaxSegmentPartitions int // seal at this many distinct partitions
 	MaxSegmentBatches    int // seal at this many batches
 
-	MaxAttempts int           // tries per PUT, commit or read before giving up
-	RetryBase   core.Duration // backoff of the first retry; doubles each time
-	RetryMax    core.Duration // backoff ceiling
+	MaxAttempts int              // tries per PUT, commit or read before giving up
+	RetryBase   machine.Duration // backoff of the first retry; doubles each time
+	RetryMax    machine.Duration // backoff ceiling
 
 	// CommitDeadline bounds how long one segment's commit is retried (audit
 	// item 8). A CP outage (restart, host replacement) must not fail every
@@ -85,8 +85,8 @@ type Config struct {
 	// segment's batches fail with REQUEST_TIMED_OUT and its buffer is
 	// released. Keep it under the producers' delivery.timeout.ms. Meanwhile
 	// the buffer stays held, so backpressure pauses client reads as usual.
-	CommitDeadline core.Duration
-	CommitRetryMax core.Duration
+	CommitDeadline machine.Duration
+	CommitRetryMax machine.Duration
 
 	MaxBufferedBytes    int // pause client reads at or above this many unacked produce bytes
 	ResumeBufferedBytes int // resume at or below this (hysteresis)
@@ -95,7 +95,7 @@ type Config struct {
 
 	// FetchPollInterval is how often a Fetch part that found no data asks the
 	// control plane again, until the Fetch has MinBytes or MaxWait ends (decision 29, Q8).
-	FetchPollInterval core.Duration
+	FetchPollInterval machine.Duration
 
 	// InjectedBug is test-only; see InjectedBug.
 	InjectedBug InjectedBug
@@ -106,19 +106,19 @@ func DefaultConfig() Config {
 	return Config{
 		BrokerID: 1, Host: "localhost", Port: 9092,
 		MaxFrame:             100 << 20,
-		BatchWindow:          200 * core.Millisecond,
+		BatchWindow:          200 * machine.Millisecond,
 		MaxSegmentBytes:      16 << 20,
 		MaxSegmentPartitions: 4096,
 		MaxSegmentBatches:    256,
 		MaxAttempts:          6,
-		RetryBase:            20 * core.Millisecond,
-		RetryMax:             640 * core.Millisecond,
-		CommitDeadline:       120 * core.Second,
-		CommitRetryMax:       2 * core.Second,
+		RetryBase:            20 * machine.Millisecond,
+		RetryMax:             640 * machine.Millisecond,
+		CommitDeadline:       120 * machine.Second,
+		CommitRetryMax:       2 * machine.Second,
 		MaxBufferedBytes:     64 << 20,
 		ResumeBufferedBytes:  32 << 20,
 		DefaultFetchBytes:    1 << 20,
-		FetchPollInterval:    200 * core.Millisecond,
+		FetchPollInterval:    200 * machine.Millisecond,
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 )
 
 // Forbidden I/O and adapter imports for the replica package (decision 56). It runs on a
-// runtime.Clock and an engine only; the production adapters and the reference model stay out.
+// machine.Clock and an engine only; the production adapters and the reference model stay out.
 var forbiddenImportPrefixes = []string{
 	"github.com/manifesterio/mds/controlplane/internal/system",
 	"github.com/manifesterio/mds/controlplane/cmd",

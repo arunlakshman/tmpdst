@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 func flushTimers(h *harness) []core.SetTimer {
@@ -19,14 +20,14 @@ func flushTimers(h *harness) []core.SetTimer {
 func sealReasons(h *harness) []string {
 	var out []string
 	for _, f := range factsNamed(h.all, "segment_sealed") {
-		out = append(out, string(f.Field("reason").(core.StringValue)))
+		out = append(out, string(f.Field("reason").(machine.StringValue)))
 	}
 	return out
 }
 
 func TestDefaultFlushRule(t *testing.T) {
 	d := DefaultConfig()
-	if d.MaxSegmentBytes != 16<<20 || d.BatchWindow != 200*core.Millisecond || d.MaxSegmentBatches != 256 || d.MaxSegmentPartitions != 4096 {
+	if d.MaxSegmentBytes != 16<<20 || d.BatchWindow != 200*machine.Millisecond || d.MaxSegmentBatches != 256 || d.MaxSegmentPartitions != 4096 {
 		t.Fatalf("%+v", d)
 	}
 	z := Config{}.withDefaults()
@@ -79,7 +80,7 @@ func TestTimerRuleFromFirstBatch(t *testing.T) {
 	h.send(c, verProduce, prodReq(-1, e("t", 1, plain(t, "b"))))
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "c"))))
 	ts := flushTimers(h)
-	if len(ts) != 1 || ts[0].After != 200*core.Millisecond {
+	if len(ts) != 1 || ts[0].After != 200*machine.Millisecond {
 		t.Fatalf("flush timers %+v (want one of 200ms)", ts)
 	}
 	if len(h.puts) != 0 {
@@ -90,10 +91,10 @@ func TestTimerRuleFromFirstBatch(t *testing.T) {
 		t.Fatalf("%d puts after the timer", len(h.puts))
 	}
 	f := factsNamed(h.all, "segment_sealed")
-	if len(f) != 1 || f[0].Field("reason").(core.StringValue) != "timer" || f[0].Field("batches").(core.Int64Value) != 3 {
+	if len(f) != 1 || f[0].Field("reason").(machine.StringValue) != "timer" || f[0].Field("batches").(machine.Int64Value) != 3 {
 		t.Fatalf("%+v", f)
 	}
-	if age := f[0].Field("age").(core.Int64Value); age <= 0 {
+	if age := f[0].Field("age").(machine.Int64Value); age <= 0 {
 		t.Fatalf("age %d", age)
 	}
 	for range 3 {
@@ -108,7 +109,7 @@ func TestFlushTimerRearms(t *testing.T) {
 	h.produceOne(c, e("t", 0, plain(t, "a")))
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "b"))))
 	ts := flushTimers(h)
-	if len(ts) != 2 || ts[1].Gen == ts[0].Gen || ts[1].After != 200*core.Millisecond {
+	if len(ts) != 2 || ts[1].Gen == ts[0].Gen || ts[1].After != 200*machine.Millisecond {
 		t.Fatalf("%+v", ts)
 	}
 	if _, ok := h.timers[timerFlush]; !ok {
@@ -237,10 +238,10 @@ func TestManySmallBatchesSealAtByteCapNotBatchCap(t *testing.T) {
 		t.Fatalf("reasons %v puts %d", r, len(h.puts))
 	}
 	f := factsNamed(h.all, "segment_sealed")[0]
-	if b := f.Field("batches").(core.Int64Value); b != 200 {
+	if b := f.Field("batches").(machine.Int64Value); b != 200 {
 		t.Fatalf("%d batches in the segment", b)
 	}
-	if n := f.Field("parts").(core.Int64Value); n != 2 {
+	if n := f.Field("parts").(machine.Int64Value); n != 2 {
 		t.Fatalf("%d partitions in the segment, want 2", n)
 	}
 	h.next(c)

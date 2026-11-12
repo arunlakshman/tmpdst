@@ -4,6 +4,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/fault"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/rng"
 )
 
@@ -27,7 +28,7 @@ const (
 // slowAnswer is the extra delay of the reply to call: zero, or (when the site
 // for the log or the object store fires) the same range as the Slow fault. The
 // call has taken effect already, so this only moves the reply later.
-func (st *storage) slowAnswer(r *rng.Rand, call runtime.IOCall) runtime.Duration {
+func (st *storage) slowAnswer(r *rng.Rand, call runtime.IOCall) machine.Duration {
 	site := SiteObjectsSlowAnswer
 	if isLogCall(call) {
 		site = SiteLogSlowAnswer
@@ -35,7 +36,7 @@ func (st *storage) slowAnswer(r *rng.Rand, call runtime.IOCall) runtime.Duration
 	if !st.s.env.inj.Maybe(fault.Site(site)) {
 		return 0
 	}
-	return runtime.Duration(r.Between(int64(slowMin), int64(slowMax)))
+	return machine.Duration(r.Between(int64(slowMin), int64(slowMax)))
 }
 
 // shortPage may cut a page of log entries to a shorter one that still has the

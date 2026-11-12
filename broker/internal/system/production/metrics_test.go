@@ -6,20 +6,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
-func fact(name string, keyValue ...any) core.Fact {
-	f := core.Fact{Name: name}
+func fact(name string, keyValue ...any) machine.Fact {
+	f := machine.Fact{Name: name}
 	for i := 0; i+1 < len(keyValue); i += 2 {
-		var v core.FieldValue
+		var v machine.FieldValue
 		switch x := keyValue[i+1].(type) {
 		case string:
-			v = core.StringValue(x)
+			v = machine.StringValue(x)
 		case int:
-			v = core.Int64Value(x)
+			v = machine.Int64Value(x)
 		}
-		f.Fields = append(f.Fields, core.Field{Key: keyValue[i].(string), Value: v})
+		f.Fields = append(f.Fields, machine.Field{Key: keyValue[i].(string), Value: v})
 	}
 	return f
 }

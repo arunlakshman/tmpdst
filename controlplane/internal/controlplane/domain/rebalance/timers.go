@@ -2,6 +2,7 @@ package rebalance
 
 import (
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/sim"
 )
 
@@ -9,8 +10,8 @@ import (
 // TimerFired of an older arm (already in the inbox when the timer was set
 // again or cancelled) is ignored (section 7).
 type timer struct {
-	id  runtime.TimerID
-	gen runtime.TimerVersion
+	id  machine.TimerID
+	gen machine.TimerVersion
 	on  bool
 }
 
@@ -39,9 +40,9 @@ func (m *Machine) newTimer() timer {
 }
 
 // arm sets t to fire after d. An armed t is replaced.
-func (m *Machine) arm(t *timer, d runtime.Duration) {
+func (m *Machine) arm(t *timer, d machine.Duration) {
 	if m.maybe(SiteTimerLate) {
-		d += runtime.Duration(m.cx.Rand().Between(int64(runtime.Millisecond), int64(lateMax)))
+		d += machine.Duration(m.cx.Rand().Between(int64(machine.Millisecond), int64(lateMax)))
 	}
 	if t.on && m.maybe(SiteStaleTimer) {
 		// The old arm fires anyway, as in live when it fired just before it was replaced.

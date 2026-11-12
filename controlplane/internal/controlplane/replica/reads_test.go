@@ -6,14 +6,15 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // A read that arrives while a tail check is in flight waits for the NEXT check.
 func TestReadWaitsForFreshTail(t *testing.T) {
 	m := newMachine(t, replica.Config{
 		Writer: "s1", Rank: 1,
-		CatchUpEvery:  runtime.Millisecond,
-		TakeoverAfter: 10 * runtime.Second,
+		CatchUpEvery:  machine.Millisecond,
+		TakeoverAfter: 10 * machine.Second,
 	})
 	acts := bootEmpty(t, m, 0)
 	timer, ok := findTimer(acts, 1)
@@ -22,7 +23,7 @@ func TestReadWaitsForFreshTail(t *testing.T) {
 	}
 	tailA := stepAt(m, 1, runtime.TimerFired{ID: timer.ID, Gen: timer.Gen})[0].(runtime.LogGetEnd)
 	got := stepAt(m, 2, runtime.ControlPlaneDeliver{
-		From: runtime.NodeInstance{Node: "b"}, Req: 7, Op: contract.DescribeTopics{},
+		From: machine.NodeInstance{Node: "b"}, Req: 7, Op: contract.DescribeTopics{},
 	})
 	if len(got) != 0 {
 		t.Fatalf("read answered at once: %v", got)
@@ -49,10 +50,10 @@ func TestReadWaitsForFreshTail(t *testing.T) {
 
 // A node that is not Ready refuses a read at once, so the bridge can fail over.
 func TestReadRefusedWhenNotReady(t *testing.T) {
-	m := newMachine(t, replica.Config{Writer: "s1", CatchUpEvery: runtime.Millisecond})
+	m := newMachine(t, replica.Config{Writer: "s1", CatchUpEvery: machine.Millisecond})
 	step(m, runtime.NodeStarted{})
 	acts := stepAt(m, 1, runtime.ControlPlaneDeliver{
-		From: runtime.NodeInstance{Node: "b"}, Req: 8, Op: contract.DescribeTopics{},
+		From: machine.NodeInstance{Node: "b"}, Req: 8, Op: contract.DescribeTopics{},
 	})
 	if len(acts) != 1 {
 		t.Fatalf("want one reply, got %v", acts)

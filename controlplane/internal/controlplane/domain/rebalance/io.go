@@ -3,6 +3,7 @@ package rebalance
 import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // CallID names one RPC. The host gives each call its own id, unique in one
@@ -76,7 +77,7 @@ type (
 	}
 	// ReplicaReply is the replica's answer to a SubmitCommand or a SubmitRead.
 	ReplicaReply struct {
-		Req  runtime.RequestID
+		Req  machine.RequestID
 		Done runtime.ControlPlaneDone
 	}
 )
@@ -86,14 +87,14 @@ type (
 	// SubmitCommand asks the replica to log Op: GroupInstall, GroupAssign,
 	// GroupRemove or OffsetCommit. The answer comes back as a ReplicaReply.
 	SubmitCommand struct {
-		Req runtime.RequestID
+		Req machine.RequestID
 		Op  runtime.ControlPlaneOperation
 	}
 	// SubmitRead asks the replica to read Op: ListGroups or DescribeGroup.
 	// Fresh false is a LocalRead. Fresh true is a read that waits for a fresh
 	// check of the log tail (a ControlPlaneDeliver read).
 	SubmitRead struct {
-		Req   runtime.RequestID
+		Req   machine.RequestID
 		Op    runtime.ControlPlaneOperation
 		Fresh bool
 	}

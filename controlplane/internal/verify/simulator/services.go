@@ -11,6 +11,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/check"
 	"github.com/manifesterio/mds/dst/eng"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/rng"
 	"github.com/manifesterio/mds/dst/sched"
 )
@@ -42,11 +43,11 @@ const (
 )
 
 const (
-	callTimeoutAfter = 1 * runtime.Second
-	netMin           = 1 * runtime.Millisecond
-	netMax           = 4 * runtime.Millisecond
-	slowMin          = 50 * runtime.Millisecond // extra delay of a slow call or a slow answer
-	slowMax          = 400 * runtime.Millisecond
+	callTimeoutAfter = 1 * machine.Second
+	netMin           = 1 * machine.Millisecond
+	netMax           = 4 * machine.Millisecond
+	slowMin          = 50 * machine.Millisecond // extra delay of a slow call or a slow answer
+	slowMax          = 400 * machine.Millisecond
 )
 
 // storage is the shared fake log and the fake object store. Calls reach it
@@ -75,10 +76,10 @@ func newStorage(s *sim) *storage {
 	}
 }
 
-func (st *storage) netDelay(r *rng.Rand) runtime.Duration {
-	d := runtime.Duration(r.Between(int64(netMin), int64(netMax)))
+func (st *storage) netDelay(r *rng.Rand) machine.Duration {
+	d := machine.Duration(r.Between(int64(netMin), int64(netMax)))
 	if r.Chance(st.s.faults.Slow) {
-		d += runtime.Duration(r.Between(int64(slowMin), int64(slowMax)))
+		d += machine.Duration(r.Between(int64(slowMin), int64(slowMax)))
 	}
 	return d
 }
@@ -137,9 +138,9 @@ func (st *storage) OnSelf(cx eng.Context, body any) {
 
 // execute takes the effect of call (or not) and returns the reply with the
 // delay after which it arrives.
-func (st *storage) execute(cx eng.Context, call runtime.IOCall) (runtime.IOResult, runtime.Duration) {
+func (st *storage) execute(cx eng.Context, call runtime.IOCall) (runtime.IOResult, machine.Duration) {
 	n := st.s.nodeOf(cx.From())
-	timeoutReply := func() (runtime.IOResult, runtime.Duration) {
+	timeoutReply := func() (runtime.IOResult, machine.Duration) {
 		out := runtime.NotApplied
 		if isWrite(call) {
 			out = runtime.MaybeApplied

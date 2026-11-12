@@ -5,10 +5,11 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // maxFetchWait caps MaxWait, so one Fetch cannot hold a connection for long.
-const maxFetchWait = 30 * core.Second
+const maxFetchWait = 30 * machine.Second
 
 // fetch serves each partition independently: FindSegments, then one ranged GET per
 // committed batch, verified and patched to its committed offset (decision 30).
@@ -23,7 +24,7 @@ func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 	}
 	s.fetchMax = r.MaxBytes
 	s.fetchMin = r.MinBytes
-	s.fetchUntil = b.now + core.NodeTime(fetchWait(r.MaxWaitMillis))
+	s.fetchUntil = b.now + machine.NodeTime(fetchWait(r.MaxWaitMillis))
 	fillFetchSkeleton(response, r)
 	var acts []core.Action
 	for i, t := range r.Topics {
@@ -85,11 +86,11 @@ func (b *Broker) onLookup(o *operation, r core.FindSegmentsResp) []core.Action {
 }
 
 // fetchWait is how long a Fetch may wait: MaxWait, capped. Zero means answer at once.
-func fetchWait(maxWaitMillis int32) core.Duration {
+func fetchWait(maxWaitMillis int32) machine.Duration {
 	if maxWaitMillis <= 0 {
 		return 0
 	}
-	return min(core.Duration(maxWaitMillis)*core.Millisecond, maxFetchWait)
+	return min(machine.Duration(maxWaitMillis)*machine.Millisecond, maxFetchWait)
 }
 
 // fetchOver reports whether a Fetch must answer now: it has MinBytes, its
@@ -130,10 +131,10 @@ func (b *Broker) fetchPartData(o *operation) []core.Action {
 // MaxWait if that comes first.
 func (b *Broker) park(o *operation) []core.Action {
 	o.state, o.attempts = opWait, 0
-	after := min(b.config.FetchPollInterval, core.Duration(o.s.fetchUntil-b.now))
+	after := min(b.config.FetchPollInterval, machine.Duration(o.s.fetchUntil-b.now))
 	b.timerGen++
 	o.gen = b.timerGen
-	return []core.Action{core.SetTimer{ID: core.TimerID(o.id), Gen: o.gen, After: after}}
+	return []core.Action{core.SetTimer{ID: machine.TimerID(o.id), Gen: o.gen, After: after}}
 }
 
 // pollOp runs when a parked part's timer fires. A part that holds data only
@@ -186,7 +187,7 @@ func (b *Broker) onFetchGet(o *operation, e core.ObjectGetDone) []core.Action {
 func (b *Broker) retryCorrupt(o *operation, rg core.BatchRange) []core.Action {
 	b.env.Reachable("broker: corrupt GET detected")
 	o.corrupt = true
-	acts := []core.Action{recordFact("corruption_detected", core.Field{Key: "segment", Value: core.StringValue(rg.Loc.Key)})}
+	acts := []core.Action{recordFact("corruption_detected", machine.Field{Key: "segment", Value: machine.StringValue(rg.Loc.Key)})}
 	return append(acts, b.retryOp(o)...)
 }
 

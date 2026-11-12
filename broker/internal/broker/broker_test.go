@@ -13,6 +13,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 func TestApiVersions(t *testing.T) {
@@ -303,7 +304,7 @@ func TestFactImmediatelyBeforeSend(t *testing.T) {
 			t.Fatalf("ack fact not followed by Send: %T", h.all[i+1])
 		}
 		f := e.Fact
-		if f.Field("topic") != core.StringValue("t") || f.Field("base_offset") != core.Int64Value(0) || f.Field("count") != core.Int64Value(2) {
+		if f.Field("topic") != machine.StringValue("t") || f.Field("base_offset") != machine.Int64Value(0) || f.Field("count") != machine.Int64Value(2) {
 			t.Fatalf("fields %v", f.Fields)
 		}
 	}
@@ -319,7 +320,7 @@ func TestGracefulStop(t *testing.T) {
 	if len(h.puts) != 0 {
 		t.Fatal("flushed early")
 	}
-	h.do(core.StopRequest{Deadline: h.now + core.NodeTime(core.Second)})
+	h.do(core.StopRequest{Deadline: h.now + machine.NodeTime(machine.Second)})
 	if !h.exited || !h.paused[1] {
 		t.Fatalf("exited=%v paused=%v", h.exited, h.paused[1])
 	}
@@ -775,15 +776,15 @@ func TestCommitSurvivesLongCPOutage(t *testing.T) {
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.flush()
 	start := h.now
-	for h.now-start < core.NodeTime(10*core.Second) {
+	for h.now-start < machine.NodeTime(10*machine.Second) {
 		if len(h.timers) != 1 {
 			t.Fatalf("want one backoff timer, have %d", len(h.timers))
 		}
-		var id core.TimerID
+		var id machine.TimerID
 		for k := range h.timers {
 			id = k
 		}
-		h.now += core.NodeTime(2 * core.Second)
+		h.now += machine.NodeTime(2 * machine.Second)
 		h.fire(id)
 	}
 	if len(c.out) != 0 {
@@ -791,7 +792,7 @@ func TestCommitSurvivesLongCPOutage(t *testing.T) {
 	}
 	down = false
 	for id := range h.timers {
-		h.now += core.NodeTime(2 * core.Second)
+		h.now += machine.NodeTime(2 * machine.Second)
 		h.fire(id)
 		break
 	}
@@ -809,7 +810,7 @@ func TestCommitSurvivesLongCPOutage(t *testing.T) {
 // is released.
 func TestCommitDeadlineFailsSegmentAndReleasesBuffer(t *testing.T) {
 	config := DefaultConfig()
-	config.CommitDeadline = 5 * core.Second
+	config.CommitDeadline = 5 * machine.Second
 	h := startedHarness(t, config)
 	c := h.open(1)
 	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
@@ -824,11 +825,11 @@ func TestCommitDeadlineFailsSegmentAndReleasesBuffer(t *testing.T) {
 		if i > 100 {
 			t.Fatal("never gave up")
 		}
-		var id core.TimerID
+		var id machine.TimerID
 		for k := range h.timers {
 			id = k
 		}
-		h.now += core.NodeTime(core.Second)
+		h.now += machine.NodeTime(machine.Second)
 		h.fire(id)
 	}
 	ps := produced(h.next(c))

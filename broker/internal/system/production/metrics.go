@@ -8,7 +8,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Metrics turns the broker's timing facts into Prometheus collectors. The
@@ -109,15 +109,15 @@ func (m *Metrics) setLevels(n func(string) int64) {
 }
 
 // Observe consumes one broker fact; facts it does not know are ignored.
-func (m *Metrics) Observe(f core.Fact) {
+func (m *Metrics) Observe(f machine.Fact) {
 	n := func(k string) int64 {
-		v, _ := f.Field(k).(core.Int64Value)
+		v, _ := f.Field(k).(machine.Int64Value)
 		return int64(v)
 	}
 	switch f.Name {
 	case "segment_sealed":
 		reason := "unknown"
-		if s, ok := f.Field("reason").(core.StringValue); ok {
+		if s, ok := f.Field("reason").(machine.StringValue); ok {
 			reason = string(s)
 		}
 		m.sealed.WithLabelValues(reason).Inc()

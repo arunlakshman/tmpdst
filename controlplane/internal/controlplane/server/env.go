@@ -2,6 +2,7 @@ package server
 
 import (
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // productionEnvironment is a minimal runtime.Environment for production mdscontrolplane (no buggify).
@@ -17,8 +18,8 @@ func (e *productionEnvironment) Intn(n int) int {
 	}
 	return int(e.Uint64() % uint64(n))
 }
-func (e *productionEnvironment) NewID() runtime.ID {
-	var id runtime.ID
+func (e *productionEnvironment) NewID() machine.ID {
+	var id machine.ID
 	u := e.Uint64()
 	for i := range id {
 		id[i] = byte(u >> (8 * (i % 8)))

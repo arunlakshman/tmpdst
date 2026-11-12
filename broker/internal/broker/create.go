@@ -6,6 +6,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // createTopics answers CreateTopics (Kafka key 19, decision Q10). Each topic is
@@ -43,8 +44,8 @@ func (b *Broker) createTopics(s *slot, r *kmsg.CreateTopicsRequest) []core.Actio
 		acts = append(acts, b.startOp(o)...)
 	}
 	if withConfigs > 0 {
-		s.facts = append(s.facts, core.Fact{Name: "create_topics_configs_ignored", Fields: []core.Field{
-			{Key: "topics", Value: core.Int64Value(withConfigs)},
+		s.facts = append(s.facts, machine.Fact{Name: "create_topics_configs_ignored", Fields: []machine.Field{
+			{Key: "topics", Value: machine.Int64Value(withConfigs)},
 		}})
 	}
 	return acts

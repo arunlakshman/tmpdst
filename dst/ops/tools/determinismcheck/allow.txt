@@ -1,0 +1,26 @@
+# Exact import paths the deterministic packages listed in ops/scripts/ci-determinism.sh may import.
+# Matching is EXACT. A trailing "/..." also allows every subpackage.
+# Adding a line needs a review that the package is deterministic.
+#
+# Deliberately absent: time, math/rand, math/rand/v2, crypto/rand, os, os/exec,
+# net, net/..., sync, sync/atomic, runtime, unsafe, reflect, maps (iterators in
+# random order), hash/maphash, context, io/fs, plugin, syscall.
+
+# standard library
+bytes
+cmp
+encoding/binary
+encoding/hex
+errors
+fmt
+hash/crc32
+math
+math/bits
+slices
+sort
+strconv
+strings
+unicode/utf8
+
+# this module
+github.com/manifesterio/mds/dst/...

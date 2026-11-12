@@ -1,0 +1,12 @@
+go 1.26.0
+
+use (
+	./dst
+	./controlplane
+	./broker
+)
+
+// Some modules still see an old google.golang.org/genproto that has the same packages as the
+// split genproto modules. Workspace mode does not prune it, so the import becomes ambiguous.
+// This pin is only for the workspace. The go.mod files are not changed.
+replace google.golang.org/genproto => google.golang.org/genproto v0.0.0-20241015192408-796eee8c2d53

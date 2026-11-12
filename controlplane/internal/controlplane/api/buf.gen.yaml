@@ -1,0 +1,16 @@
+version: v2
+plugins:
+  - local: protoc-gen-go
+    out: .
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: .
+    opt:
+      - paths=source_relative
+      - require_unimplemented_servers=false
+  # The plain value types and the wire converters (ops/tools/protoc-gen-mdswire).
+  # It writes contract/, domain/rebalance/ and wire/ under internal/controlplane, and it needs
+  # every file in one run. go run builds it from this tree, so it is never stale.
+  - local: ["go", "run", "../../../ops/tools/protoc-gen-mdswire"]
+    out: ..
+    strategy: all

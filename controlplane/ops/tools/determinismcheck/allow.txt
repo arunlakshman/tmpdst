@@ -1,0 +1,56 @@
+# Exact import paths the deterministic packages (internal/runtime, internal/controlplane/contract,
+# and the control-plane domain packages listed in ops/scripts/ci-determinism.sh) may import.
+# Matching is EXACT. A trailing "/..." also allows every subpackage.
+# Adding a line requires a dependency audit (scripts/audit-dep.sh) and, for a
+# third-party module, a record under docs/dep-audits/.
+#
+# Deliberately absent: time, math/rand, math/rand/v2, crypto/rand, os, os/exec,
+# net, net/..., sync, sync/atomic, runtime, unsafe, reflect, maps (iterators in
+# random order), hash/maphash, context, io/fs, plugin, syscall.
+
+# standard library
+bytes
+cmp
+# crypto/sha256: a pure function of its input (no randomness, no state, no time). The
+# topic context (internal/controlplane/domain/topic) uses it for the request digest of
+# the idempotency window.
+crypto/sha256
+encoding/binary
+encoding/hex
+errors
+fmt
+hash/crc32
+math
+math/bits
+slices
+sort
+strconv
+strings
+unicode/utf8
+
+# this module
+github.com/manifesterio/mds/controlplane/...
+
+# protobuf, for the log entry codec in internal/controlplane/metadb (Encode marshals with
+# Deterministic: true; Decode refuses unknown fields). Audited in
+# docs/dep-audits/google.golang.org/protobuf@v1.35.2.md. Only these two packages.
+google.golang.org/protobuf/proto
+google.golang.org/protobuf/reflect/protoreflect
+
+# Deterministic simulation primitives (github.com/manifesterio/mds/dst). They are first-party
+# code in this repo, so they need no audit record. Listed one by one on purpose.
+# Deliberately absent: realclock (reads the real clock), syncclock (uses sync; goroutine
+# callers race, so timer order is not reproducible), model and examples
+# (not audited for determinism).
+github.com/manifesterio/mds/dst/assert
+github.com/manifesterio/mds/dst/campaign
+github.com/manifesterio/mds/dst/check
+github.com/manifesterio/mds/dst/clock
+github.com/manifesterio/mds/dst/eng
+github.com/manifesterio/mds/dst/fault
+github.com/manifesterio/mds/dst/golden
+github.com/manifesterio/mds/dst/mutant
+github.com/manifesterio/mds/dst/rng
+github.com/manifesterio/mds/dst/sim
+github.com/manifesterio/mds/dst/sched
+github.com/manifesterio/mds/dst/trace

@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package controlplane.shared.v1;
+
+
+option go_package = "github.com/manifesterio/mds/broker/api/controlplane/shared/v1;sharedv1";
+
+// The messages in this file are the ones that the service (controlplane.v1) and
+// the log entries (controlplane.log.v1) both use. There is no service here, so
+// code that reads log entries does not pull in grpc.
+
+// TopicPartition names one partition of a topic.
+message TopicPartition {
+  string topic = 1;
+  int32 partition = 2;
+}
+
+message SegmentRef {
+  string key = 1;
+  int64 off = 2;
+  int64 len = 3;
+}
+
+// PendingBatch describes one uploaded batch awaiting offset assignment.
+message PendingBatch {
+  TopicPartition tp = 1;
+  int64 records = 2;
+  SegmentRef loc = 3;
+}
+
+// BatchRange is one batch of a partition's log: records [Base, Base+Count)
+// stored at Loc.
+message BatchRange {
+  TopicPartition tp = 1;
+  int64 base = 2;
+  int64 count = 3;
+  SegmentRef loc = 4;
+}
+
+// TopicInfo describes one topic.
+message TopicInfo {
+  string name = 1;
+  int32 partitions = 2;
+}
+
+// PartitionOffset is one committed offset of a group. A read of a partition
+// that has no commit gives Offset -1 and LeaderEpoch -1.
+message PartitionOffset {
+  TopicPartition tp = 1;
+  int64 offset = 2;
+  int32 leader_epoch = 3;
+  string metadata = 4;
+}
+
+// GroupSummary is one line of ListGroupsResp.
+message GroupSummary {
+  string name = 1;
+  string protocol_type = 2;
+  string state = 3;
+}

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 )
 
@@ -116,7 +116,7 @@ func TestOffsetCommitChecks(t *testing.T) {
 		// "fresh" is not in memory, so List does not show it.
 		{delay, List{Call: 15}, []string{"15 OK g:consumer:Stable"}},
 	})
-	f := runtime.ResponseAs[contract.OffsetFetchResp](h.log.Apply(contract.OffsetFetch{Group: "g", Partitions: []contract.TopicPartition{tp0}}))
+	f := contract.ResponseAs[contract.OffsetFetchResp](h.log.Apply(contract.OffsetFetch{Group: "g", Partitions: []contract.TopicPartition{tp0}}))
 	h.check("fetch", f.Offsets[0].Offset, 5)
 	// New (rule 31): PreparingRebalance takes a commit, CompletingRebalance does not.
 	h.run([]step{

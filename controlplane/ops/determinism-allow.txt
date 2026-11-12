@@ -1,4 +1,4 @@
-# Exact import paths the deterministic packages (internal/runtime, internal/controlplane/contract,
+# Exact import paths the deterministic packages (internal/runtime, contract,
 # and the control-plane domain packages listed in ops/scripts/ci-determinism.sh) may import.
 # Matching is EXACT. A trailing "/..." also allows every subpackage.
 # Adding a line requires a dependency audit (scripts/audit-dep.sh) and, for a

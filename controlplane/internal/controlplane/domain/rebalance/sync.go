@@ -3,7 +3,7 @@ package rebalance
 import (
 	"slices"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 )
 

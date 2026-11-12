@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/spec"
+	"github.com/manifesterio/mds/controlplane/spec"
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/machine"
@@ -20,7 +20,7 @@ import (
 // The tests drive the machine with inputs at explicit times and look at its
 // replies. The harness plays the host: it keeps the timers the machine sets,
 // fires them when the test moves the clock, and answers each submit from a
-// fake log (the metadata model of internal/spec), at once unless hold is set.
+// fake log (the metadata model of spec), at once unless hold is set.
 
 const (
 	seed  = 7
@@ -138,8 +138,7 @@ func (h *harness) apply(o any) ReplicaReply {
 		req, op = o.Req, o.Op
 	}
 	done := h.log.Apply(op)
-	done.Req = req
-	return ReplicaReply{Req: req, Done: done}
+	return ReplicaReply{Req: req, Done: runtime.ControlPlaneDone{Req: req, Resp: done.Resp, Err: done.Err, Outcome: done.Outcome}}
 }
 
 // answer answers the i-th held submit and removes it. With err OK the log
@@ -354,7 +353,7 @@ func (h *harness) parked(group string) []string {
 
 // stored lists the members in the log, shown short and sorted.
 func (h *harness) stored(group string) []string {
-	d := runtime.ResponseAs[contract.DescribeGroupResp](h.log.Apply(contract.DescribeGroup{Group: group}))
+	d := contract.ResponseAs[contract.DescribeGroupResp](h.log.Apply(contract.DescribeGroup{Group: group}))
 	var out []string
 	for _, mm := range d.Members {
 		out = append(out, h.short(mm.MemberID))

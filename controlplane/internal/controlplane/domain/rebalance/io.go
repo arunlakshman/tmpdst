@@ -1,7 +1,7 @@
 package rebalance
 
 import (
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/machine"
 )

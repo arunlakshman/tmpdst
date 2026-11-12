@@ -18,7 +18,7 @@ import (
 	"context"
 
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/broker"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/wire"

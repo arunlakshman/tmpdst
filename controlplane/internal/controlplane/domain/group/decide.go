@@ -1,7 +1,7 @@
 package group
 
 import (
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 )
 
@@ -10,7 +10,7 @@ import (
 // answer. It writes nothing: Apply writes the events. So a test can call it
 // with a plain View, and the answer depends only on the state before the
 // command and on the command. Every command is checked first and written
-// after, so an error makes no event. The rules are in internal/spec
+// after, so an error makes no event. The rules are in spec
 // (groups.go), which is the reference model.
 
 // maxGroupCommand is the largest group command, by the size rule below.

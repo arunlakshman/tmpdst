@@ -4,8 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
-	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // Rules for consumer groups. An empty byte field is reported as nil.
@@ -139,22 +138,22 @@ func (c *ControlPlane) generation(group string) int32 {
 	return 0
 }
 
-func (c *ControlPlane) groupInstall(op contract.GroupInstall) runtime.ErrCode {
+func (c *ControlPlane) groupInstall(op contract.GroupInstall) contract.ErrCode {
 	if installSize(op) > maxGroupCommand {
-		return runtime.ErrTooLarge
+		return contract.ErrTooLarge
 	}
 	ids := map[string]bool{}
 	for _, m := range op.Members {
 		if m.MemberID == "" || ids[m.MemberID] {
-			return runtime.ErrInvalid
+			return contract.ErrInvalid
 		}
 		ids[m.MemberID] = true
 	}
 	if op.Group == "" || len(op.Members) == 0 || !ids[op.Leader] {
-		return runtime.ErrInvalid
+		return contract.ErrInvalid
 	}
 	if op.Generation != c.generation(op.Group)+1 {
-		return runtime.ErrIllegalGeneration
+		return contract.ErrIllegalGeneration
 	}
 	g := &groupState{
 		generation: op.Generation,
@@ -168,27 +167,27 @@ func (c *ControlPlane) groupInstall(op contract.GroupInstall) runtime.ErrCode {
 		g.members[m.MemberID] = &groupMember{GroupMember: m, joined: op.TimeMs}
 	}
 	c.groups[op.Group] = g
-	return runtime.OK
+	return contract.OK
 }
 
-func (c *ControlPlane) groupAssign(op contract.GroupAssign) runtime.ErrCode {
+func (c *ControlPlane) groupAssign(op contract.GroupAssign) contract.ErrCode {
 	if assignSize(op) > maxGroupCommand {
-		return runtime.ErrTooLarge
+		return contract.ErrTooLarge
 	}
 	if op.Generation != c.generation(op.Group) {
-		return runtime.ErrIllegalGeneration
+		return contract.ErrIllegalGeneration
 	}
 	g := c.groups[op.Group]
 	if g == nil || op.Leader != g.leader || g.members[op.Leader] == nil {
-		return runtime.ErrUnknownMember
+		return contract.ErrUnknownMember
 	}
 	seen := map[string]bool{}
 	for _, a := range op.Assignments {
 		if g.members[a.Member] == nil {
-			return runtime.ErrUnknownMember
+			return contract.ErrUnknownMember
 		}
 		if seen[a.Member] {
-			return runtime.ErrInvalid
+			return contract.ErrInvalid
 		}
 		seen[a.Member] = true
 	}
@@ -199,16 +198,16 @@ func (c *ControlPlane) groupAssign(op contract.GroupAssign) runtime.ErrCode {
 		g.members[a.Member].assignment = nonEmpty(a.Bytes)
 	}
 	g.assignedGen = op.Generation
-	return runtime.OK
+	return contract.OK
 }
 
-func (c *ControlPlane) groupRemove(op contract.GroupRemove) runtime.ErrCode {
+func (c *ControlPlane) groupRemove(op contract.GroupRemove) contract.ErrCode {
 	if removeSize(op) > maxGroupCommand {
-		return runtime.ErrTooLarge
+		return contract.ErrTooLarge
 	}
 	g := c.groups[op.Group]
 	if g == nil {
-		return runtime.OK
+		return contract.OK
 	}
 	for _, id := range op.Members {
 		delete(g.members, id)
@@ -219,35 +218,35 @@ func (c *ControlPlane) groupRemove(op contract.GroupRemove) runtime.ErrCode {
 	if len(g.members) == 0 {
 		g.assignedGen = 0
 	}
-	return runtime.OK
+	return contract.OK
 }
 
-func (c *ControlPlane) offsetCommit(op contract.OffsetCommit) runtime.ControlPlaneDone {
+func (c *ControlPlane) offsetCommit(op contract.OffsetCommit) contract.Done {
 	if commitSize(op) > maxGroupCommand {
-		return runtime.ControlPlaneDone{Err: runtime.ErrTooLarge}
+		return contract.Done{Err: contract.ErrTooLarge}
 	}
 	g := c.groups[op.Group]
 	switch {
 	case op.Generation >= 0:
 		if g == nil || g.members[op.Member] == nil {
-			return runtime.ControlPlaneDone{Err: runtime.ErrUnknownMember}
+			return contract.Done{Err: contract.ErrUnknownMember}
 		}
 		if op.Generation != g.generation {
-			return runtime.ControlPlaneDone{Err: runtime.ErrIllegalGeneration}
+			return contract.Done{Err: contract.ErrIllegalGeneration}
 		}
 	case op.Generation == -1 && op.Member == "":
 		if g != nil && len(g.members) > 0 {
-			return runtime.ControlPlaneDone{Err: runtime.ErrIllegalGeneration}
+			return contract.Done{Err: contract.ErrIllegalGeneration}
 		}
 	default:
-		return runtime.ControlPlaneDone{Err: runtime.ErrIllegalGeneration}
+		return contract.Done{Err: contract.ErrIllegalGeneration}
 	}
-	var errs []runtime.ErrCode
-	done := runtime.ControlPlaneDone{}
+	var errs []contract.ErrCode
+	done := contract.Done{}
 	for _, o := range op.Offsets {
 		code := c.storeOffset(op.Group, o)
-		if code == runtime.OK {
-			done.Outcome = runtime.Applied
+		if code == contract.OK {
+			done.Outcome = contract.Applied
 		}
 		errs = append(errs, code)
 	}
@@ -255,18 +254,18 @@ func (c *ControlPlane) offsetCommit(op contract.OffsetCommit) runtime.ControlPla
 	return done
 }
 
-func (c *ControlPlane) storeOffset(group string, o contract.PartitionOffset) runtime.ErrCode {
+func (c *ControlPlane) storeOffset(group string, o contract.PartitionOffset) contract.ErrCode {
 	if o.TopicPartition.Partition < 0 || o.TopicPartition.Partition >= c.topics[o.TopicPartition.Topic] {
-		return runtime.ErrUnknownPartition
+		return contract.ErrUnknownPartition
 	}
 	if o.Offset < 0 {
-		return runtime.ErrInvalid
+		return contract.ErrInvalid
 	}
 	if c.offsets[group] == nil {
 		c.offsets[group] = map[contract.TopicPartition]committedOffset{}
 	}
 	c.offsets[group][o.TopicPartition] = committedOffset{offset: o.Offset, epoch: o.LeaderEpoch, meta: o.Metadata}
-	return runtime.OK
+	return contract.OK
 }
 
 func (c *ControlPlane) offsetFetch(op contract.OffsetFetch) contract.OffsetFetchResp {

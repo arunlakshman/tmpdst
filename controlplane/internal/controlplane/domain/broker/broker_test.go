@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/broker"
 	"github.com/manifesterio/mds/dst/machine"
 )

@@ -12,8 +12,7 @@ package spec
 import (
 	"slices"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
-	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // Model is anything that answers control plane operations. The real code and
@@ -21,7 +20,7 @@ import (
 type Model interface {
 	// Apply runs one operation (a write or a read) and returns its answer.
 	// Outcome is Applied when the state changed, else NotApplied.
-	Apply(op runtime.ControlPlaneOperation) runtime.ControlPlaneDone
+	Apply(op contract.Operation) contract.Done
 }
 
 // ControlPlane is the model of topics, segments and consumer groups.
@@ -79,7 +78,7 @@ func New() *ControlPlane {
 var _ Model = (*ControlPlane)(nil)
 
 // Apply implements Model.
-func (c *ControlPlane) Apply(op runtime.ControlPlaneOperation) runtime.ControlPlaneDone {
+func (c *ControlPlane) Apply(op contract.Operation) contract.Done {
 	switch op := op.(type) {
 	case contract.CommitSegment:
 		return c.commit(op)
@@ -104,31 +103,31 @@ func (c *ControlPlane) Apply(op runtime.ControlPlaneOperation) runtime.ControlPl
 	case contract.ListGroups:
 		return answer(c.listGroups())
 	}
-	return runtime.ControlPlaneDone{Err: runtime.ErrInvalid}
+	return contract.Done{Err: contract.ErrInvalid}
 }
 
 // written is the answer to a write that has no response data.
-func written(code runtime.ErrCode) runtime.ControlPlaneDone {
-	if code != runtime.OK {
-		return runtime.ControlPlaneDone{Err: code}
+func written(code contract.ErrCode) contract.Done {
+	if code != contract.OK {
+		return contract.Done{Err: code}
 	}
-	return runtime.ControlPlaneDone{Outcome: runtime.Applied}
+	return contract.Done{Outcome: contract.Applied}
 }
 
 // answer is the answer to a read.
-func answer(resp runtime.ControlPlaneResponse) runtime.ControlPlaneDone {
-	return runtime.ControlPlaneDone{Resp: resp}
+func answer(resp contract.Response) contract.Done {
+	return contract.Done{Resp: resp}
 }
 
-func (c *ControlPlane) createTopic(op contract.CreateTopic) runtime.ErrCode {
+func (c *ControlPlane) createTopic(op contract.CreateTopic) contract.ErrCode {
 	if op.Name == "" || op.Partitions <= 0 {
-		return runtime.ErrInvalid
+		return contract.ErrInvalid
 	}
 	if _, there := c.topics[op.Name]; there && op.FailIfExists {
-		return runtime.ErrTopicExists
+		return contract.ErrTopicExists
 	}
 	c.topics[op.Name] = max(c.topics[op.Name], op.Partitions)
-	return runtime.OK
+	return contract.OK
 }
 
 // end is the next offset of a partition.
@@ -141,19 +140,19 @@ func (c *ControlPlane) end(tp contract.TopicPartition) contract.Offset {
 	return last.Base + contract.Offset(last.Count)
 }
 
-func (c *ControlPlane) commit(op contract.CommitSegment) runtime.ControlPlaneDone {
+func (c *ControlPlane) commit(op contract.CommitSegment) contract.Done {
 	if old, done := c.segments[op.SegmentKey]; done {
 		if !slices.Equal(old.batches, op.Batches) {
-			return runtime.ControlPlaneDone{Err: runtime.ErrConflict}
+			return contract.Done{Err: contract.ErrConflict}
 		}
 		return commitDone(old.ranges)
 	}
 	if op.SegmentKey == "" || len(op.Batches) == 0 {
-		return runtime.ControlPlaneDone{Err: runtime.ErrInvalid}
+		return contract.Done{Err: contract.ErrInvalid}
 	}
 	for _, b := range op.Batches {
 		if b.Records <= 0 || b.TopicPartition.Topic == "" || b.TopicPartition.Partition < 0 {
-			return runtime.ControlPlaneDone{Err: runtime.ErrInvalid}
+			return contract.Done{Err: contract.ErrInvalid}
 		}
 	}
 	seg := segment{batches: slices.Clone(op.Batches)}
@@ -168,14 +167,14 @@ func (c *ControlPlane) commit(op contract.CommitSegment) runtime.ControlPlaneDon
 	return commitDone(seg.ranges)
 }
 
-func commitDone(ranges []contract.BatchRange) runtime.ControlPlaneDone {
+func commitDone(ranges []contract.BatchRange) contract.Done {
 	resp := contract.CommitSegmentResp{Assigned: slices.Clone(ranges)}
-	return runtime.ControlPlaneDone{Resp: resp, Outcome: runtime.Applied}
+	return contract.Done{Resp: resp, Outcome: contract.Applied}
 }
 
-func (c *ControlPlane) find(op contract.FindSegments) runtime.ControlPlaneDone {
+func (c *ControlPlane) find(op contract.FindSegments) contract.Done {
 	if op.From < 0 {
-		return runtime.ControlPlaneDone{Err: runtime.ErrInvalid}
+		return contract.Done{Err: contract.ErrInvalid}
 	}
 	resp := contract.FindSegmentsResp{End: c.end(op.TopicPartition)}
 	var bytes int64
@@ -192,7 +191,7 @@ func (c *ControlPlane) find(op contract.FindSegments) runtime.ControlPlaneDone {
 	return answer(resp)
 }
 
-func (c *ControlPlane) describeTopics(op contract.DescribeTopics) runtime.ControlPlaneDone {
+func (c *ControlPlane) describeTopics(op contract.DescribeTopics) contract.Done {
 	var resp contract.DescribeTopicsResp
 	for _, name := range sortedKeys(c.topics) {
 		if len(op.Topics) == 0 || slices.Contains(op.Topics, name) {

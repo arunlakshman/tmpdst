@@ -1,5 +1,5 @@
 // Package conformance checks that the control plane answers like the model in
-// internal/spec. It follows Bornholt et al., "Using Lightweight Formal Methods
+// spec. It follows Bornholt et al., "Using Lightweight Formal Methods
 // to Validate a Key-Value Storage Node in Amazon S3" (SOSP 2021), sections 4
 // and 5: rapid draws a list of operations (ops_test.go), each one goes to the
 // model and to the target, and the answers must be equal. After a restart the
@@ -19,9 +19,9 @@ import (
 
 	"pgregory.net/rapid"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/spec"
+	"github.com/manifesterio/mds/controlplane/spec"
 )
 
 // Target is a system under test. Exec is needed. Each other function is an
@@ -171,7 +171,7 @@ func (w *world) call(op runtime.ControlPlaneOperation) (runtime.ControlPlaneDone
 // compared with the model. An error is allowed, a wrong answer never is. The
 // paper also allows "no data" after a failure. Our log does not lose data, so
 // this rule is stricter.
-func (w *world) ask(op runtime.ControlPlaneOperation) runtime.ControlPlaneDone {
+func (w *world) ask(op runtime.ControlPlaneOperation) contract.Done {
 	d, err := w.call(op)
 	for try := 0; transient(d, err) && w.hasFailed && try < 300; try++ {
 		w.target.Inject(-1)
@@ -181,7 +181,7 @@ func (w *world) ask(op runtime.ControlPlaneOperation) runtime.ControlPlaneDone {
 	if err != nil {
 		w.t.Fatalf("step %d: %s: the target returned an error: %v", w.step, describe(op), err)
 	}
-	return d
+	return d.Answer()
 }
 
 // do sends op to the model and to the target, compares the answers and
@@ -225,14 +225,14 @@ func (w *world) afterRestart(property string) {
 
 // sameAnswer compares the code and the response. A nil slice and an empty slice
 // print the same, and that difference is not a bug.
-func sameAnswer(a, b runtime.ControlPlaneDone) bool {
+func sameAnswer(a, b contract.Done) bool {
 	return a.Err == b.Err && fmt.Sprintf("%+v", a.Resp) == fmt.Sprintf("%+v", b.Resp)
 }
 
 // badAnswer checks the invariants of one answer alone, without the model: the
 // runs of a partition follow each other with no gap, the end offset is not
 // before the end of the last run, and topics are sorted with no repeats.
-func badAnswer(d runtime.ControlPlaneDone) string {
+func badAnswer(d contract.Done) string {
 	switch r := d.Resp.(type) {
 	case contract.FindSegmentsResp:
 		for i, x := range r.Ranges {
@@ -253,6 +253,6 @@ func badAnswer(d runtime.ControlPlaneDone) string {
 	return ""
 }
 
-func show(d runtime.ControlPlaneDone) string { return fmt.Sprintf("err=%v resp=%+v", d.Err, d.Resp) }
+func show(d contract.Done) string { return fmt.Sprintf("err=%v resp=%+v", d.Err, d.Resp) }
 
 func describe(op runtime.ControlPlaneOperation) string { return fmt.Sprintf("%T%+v", op, op) }

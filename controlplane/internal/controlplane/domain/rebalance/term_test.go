@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/spec"
+	"github.com/manifesterio/mds/controlplane/spec"
 	"github.com/manifesterio/mds/dst/rng"
 	"github.com/manifesterio/mds/dst/sim"
 )

@@ -12,10 +12,10 @@ import (
 
 	"pgregory.net/rapid"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/spec"
+	"github.com/manifesterio/mds/controlplane/spec"
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/machine"
@@ -276,7 +276,7 @@ var rbOps = []struct {
 		w.late = true
 		w.seen["late"]++
 		w.model.Store.Apply(o.Op)
-		w.deliver(w.answer(o.Req, w.apply(o.Op))) // its request id is old: no answer
+		w.deliver(w.answerOf(o.Req, w.apply(o.Op))) // its request id is old: no answer
 	}},
 	// The role is lost: every call is answered and every timer is stopped.
 	// Mostly the role comes back in the same operation.
@@ -409,7 +409,7 @@ func (w *rbWorld) generation(group string) int32 {
 }
 
 func (w *rbWorld) describe(group string) contract.DescribeGroupResp {
-	return runtime.ResponseAs[contract.DescribeGroupResp](w.log.Apply(contract.DescribeGroup{Group: group}))
+	return contract.ResponseAs[contract.DescribeGroupResp](w.log.Apply(contract.DescribeGroup{Group: group}))
 }
 
 func (w *rbWorld) describeCall(group string) {
@@ -544,7 +544,7 @@ func (w *rbWorld) output(o any) {
 		w.cancel(o.ID)
 	case rebalance.SubmitRead:
 		w.broke = w.broke || o.Fresh
-		w.inbox = append(w.inbox, w.answer(o.Req, w.log.Apply(o.Op)))
+		w.inbox = append(w.inbox, w.answerOf(o.Req, w.log.Apply(o.Op)))
 	case rebalance.SubmitCommand:
 		w.write(o)
 	default:
@@ -565,7 +565,7 @@ func (w *rbWorld) write(o rebalance.SubmitCommand) {
 	}
 	switch kind {
 	case writeOK:
-		w.inbox = append(w.inbox, w.answer(o.Req, w.apply(o.Op)))
+		w.inbox = append(w.inbox, w.answerOf(o.Req, w.apply(o.Op)))
 	case writeRefused:
 		w.inbox = append(w.inbox, w.answer(o.Req, runtime.ControlPlaneDone{Err: runtime.ErrUnavailable}))
 	case writeLostAnswer:
@@ -582,7 +582,12 @@ func (w *rbWorld) answer(req machine.RequestID, d runtime.ControlPlaneDone) reba
 	return rebalance.ReplicaReply{Req: req, Done: d}
 }
 
-func (w *rbWorld) apply(op runtime.ControlPlaneOperation) runtime.ControlPlaneDone {
+// answerOf turns the answer of the model into the reply of the replica.
+func (w *rbWorld) answerOf(req machine.RequestID, d contract.Done) rebalance.ReplicaReply {
+	return w.answer(req, runtime.ControlPlaneDone{Resp: d.Resp, Err: d.Err, Outcome: d.Outcome})
+}
+
+func (w *rbWorld) apply(op runtime.ControlPlaneOperation) contract.Done {
 	if r, ok := op.(contract.GroupRemove); ok {
 		w.seen["remove/"+r.Reason]++
 	}

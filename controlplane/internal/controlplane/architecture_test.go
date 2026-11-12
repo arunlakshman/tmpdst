@@ -22,8 +22,10 @@ const (
 	dst    = "github.com/manifesterio/mds/dst"
 	cp     = "internal/controlplane/"
 	rt     = "internal/runtime"
-	spec   = "internal/spec"
-	infra  = "internal/testinfra"
+	// contract and spec are public: the broker imports them. They are in the module root, not under internal/.
+	contractPkg = "contract"
+	spec        = "spec"
+	infra       = "internal/testinfra"
 )
 
 type pkg struct {
@@ -83,7 +85,7 @@ var domains = []string{cp + "domain/broker", cp + "domain/group", cp + "domain/r
 var domainEdges = map[string][]string{}
 
 // The verification side is test infrastructure, so it may import the reference model
-// (internal/spec). "Outside tests" in the rule means: no non-test file of any other
+// (spec). "Outside tests" in the rule means: no non-test file of any other
 // package, production or not, imports it. Test files may import both packages.
 // internal/testinfra is for test files and for the integration tests only.
 var (
@@ -122,14 +124,15 @@ func check(pkgs map[string]pkg) problems {
 		}
 	}
 	for _, dir := range domains {
-		allowed := append([]string{cp + "contract", cp + "metadb/engine", rt}, domainEdges[dir]...)
+		allowed := append([]string{contractPkg, cp + "metadb/engine", rt}, domainEdges[dir]...)
 		p.onlyImports(pkgs, dir, allowed, true)
 	}
 	// The other inner packages.
 	layers := map[string][]string{
-		cp + "contract":      {rt},
-		cp + "metadb/engine": {cp + "contract", rt},
-		cp + "replica":       {cp + "contract", cp + "metadb/engine", cp + "metadb", rt},
+		contractPkg:          nil,           // contract is public and imports only dst
+		spec:                 {contractPkg}, // so is the reference model, and it takes nothing else of the module
+		cp + "metadb/engine": {contractPkg, rt},
+		cp + "replica":       {contractPkg, cp + "metadb/engine", cp + "metadb", rt},
 		cp + "executor":      {rt},
 	}
 	for dir, allowed := range layers {
@@ -142,7 +145,7 @@ func check(pkgs map[string]pkg) problems {
 	// It does not know the group protocol machine (rebalance), nor the broker.
 	metadb := cp + "metadb"
 	protobuf := []string{"google.golang.org/protobuf/proto", "google.golang.org/protobuf/reflect/protoreflect"}
-	p.onlyImports(pkgs, metadb, []string{"api/controlplane/log/v1", "api/controlplane/shared/v1", cp + "contract",
+	p.onlyImports(pkgs, metadb, []string{"api/controlplane/log/v1", "api/controlplane/shared/v1", contractPkg,
 		cp + "domain/group", cp + "domain/topic", cp + "metadb/engine", cp + "metadb/engine/memory", rt}, false)
 	for _, imp := range pkgs[metadb].imports {
 		if thirdParty(imp) && !slices.Contains(protobuf, imp) {
@@ -166,7 +169,7 @@ func check(pkgs map[string]pkg) problems {
 		}
 	}
 
-	// (d) Nothing outside tests imports internal/spec or internal/testinfra: only the verifiers
+	// (d) Nothing outside tests imports spec or internal/testinfra: only the verifiers
 	// listed above do, in their non-test files.
 	for dir, pk := range pkgs {
 		for _, imp := range pk.imports {
@@ -197,7 +200,7 @@ func check(pkgs map[string]pkg) problems {
 		}
 	}
 	// runtime never imports contract, and neither imports the wire packages (tests included).
-	for _, dir := range []string{rt, cp + "contract"} {
+	for _, dir := range []string{rt, contractPkg} {
 		for _, imp := range append(slices.Clone(pkgs[dir].imports), pkgs[dir].tests...) {
 			if rel := local(imp); strings.HasPrefix(rel, "api/") || rel == cp+"wire" || (dir == rt && rel == cp+"contract") {
 				p.add("%s imports %s: not allowed", dir, rel)
@@ -267,6 +270,9 @@ func TestImportRulesCanFail(t *testing.T) {
 		{"(d) the simulator imports testinfra", with(real, "internal/verify/simulator", infra), "internal/verify/simulator", infra},
 		{"(d) the conformance suite imports testinfra", with(real, "test/conformance", infra), "test/conformance", infra},
 		{"(d) runtime imports spec", with(real, rt, spec), rt, spec},
+		{"(e) contract imports runtime", with(real, contractPkg, rt), contractPkg, rt},
+		{"(e) contract imports an internal package", with(real, contractPkg, cp+"metadb"), contractPkg, cp + "metadb"},
+		{"(e) spec imports runtime", with(real, spec, rt), spec, rt},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

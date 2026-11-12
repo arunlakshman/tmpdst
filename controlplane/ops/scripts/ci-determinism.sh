@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # CI gate for the deterministic packages of the control plane:
-#   internal/runtime, internal/controlplane/contract, the engine interface
+#   internal/runtime, contract, the engine interface
 #   (metadb/engine), every domain package (domain/topic, domain/group,
 #   domain/rebalance, domain/broker), the replica machine (replica),
-#   and the reference model (internal/spec). Test code is not in the gate, so
+#   and the reference model (spec). Test code is not in the gate, so
 #   the property-based tests (pgregory.net/rapid) are not either.
 # The simulator engine (internal/verify/simulator) is checked too, with one more
 # allowed import: context, because the in-memory log API takes a context. Its
@@ -20,14 +20,14 @@ cd "$(dirname "$0")/../.."
 
 pkgs=(
   ./internal/runtime/...
-  ./internal/controlplane/contract/...
+  ./contract/...
   ./internal/controlplane/metadb/engine
   ./internal/controlplane/domain/topic
   ./internal/controlplane/domain/group
   ./internal/controlplane/domain/broker
   ./internal/controlplane/domain/rebalance
   ./internal/controlplane/replica
-  ./internal/spec
+  ./spec
 )
 
 sim=./internal/verify/simulator

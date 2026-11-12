@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine"
 )
 

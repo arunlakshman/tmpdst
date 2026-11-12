@@ -5,8 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
-	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -74,12 +73,12 @@ func (h *rb) sync(group, member string, gen int32, assigns ...string) (CallID, m
 	return in.Call, h.step(in)
 }
 
-func (h *rb) heartbeat(group, member string, gen int32) runtime.ErrCode {
+func (h *rb) heartbeat(group, member string, gen int32) contract.ErrCode {
 	c := h.call()
 	return h.step(Heartbeat{Call: c, Group: group, MemberID: member, Generation: gen})[c].Err
 }
 
-func (h *rb) commit(group, member string, gen int32) runtime.ErrCode {
+func (h *rb) commit(group, member string, gen int32) contract.ErrCode {
 	c := h.call()
 	op := contract.OffsetCommit{Group: group, Member: member, Generation: gen, Offsets: []contract.PartitionOffset{{TopicPartition: contract.NewTopicPartition("t", 0), Offset: 5}}}
 	return h.step(Commit{Call: c, Op: op})[c].Err
@@ -105,7 +104,7 @@ func (h *rb) logged(group string) []string {
 func joined(t *testing.T, r Reply, gen int32, leader string, members int) {
 	t.Helper()
 	j, _ := r.Body.(JoinResult)
-	if r.Err != runtime.OK || j.Generation != gen || j.Leader != leader || len(j.Members) != members {
+	if r.Err != contract.OK || j.Generation != gen || j.Leader != leader || len(j.Members) != members {
 		t.Fatalf("join reply %+v, want generation %d, leader %s, %d members", r, gen, leader, members)
 	}
 }
@@ -174,12 +173,12 @@ func TestRebalanceChecksMemberAndGeneration(t *testing.T) {
 	for _, tc := range []struct {
 		group, member string
 		gen           int32
-		want          runtime.ErrCode
+		want          contract.ErrCode
 	}{
-		{"nope", "m1", 2, runtime.ErrUnknownMember},
-		{"g", "zz", 2, runtime.ErrUnknownMember},
-		{"g", "m1", 1, runtime.ErrIllegalGeneration},
-		{"g", "m1", 2, runtime.OK},
+		{"nope", "m1", 2, contract.ErrUnknownMember},
+		{"g", "zz", 2, contract.ErrUnknownMember},
+		{"g", "m1", 1, contract.ErrIllegalGeneration},
+		{"g", "m1", 2, contract.OK},
 	} {
 		if got := h.heartbeat(tc.group, tc.member, tc.gen); got != tc.want {
 			t.Errorf("heartbeat %+v: got %v", tc, got)
@@ -190,14 +189,14 @@ func TestRebalanceChecksMemberAndGeneration(t *testing.T) {
 	}
 	// The round is open: sync is refused; the leader's assignment is checked.
 	h.join("g", "m1")
-	if c, out := h.sync("g", "m1", 2); out[c].Err != runtime.ErrRebalanceInProgress {
+	if c, out := h.sync("g", "m1", 2); out[c].Err != contract.ErrRebalanceInProgress {
 		t.Fatalf("sync in a round: %+v", out)
 	}
 	h.join("g", "m2")
-	if c, out := h.sync("g", "m1", 3, "zz", "x"); out[c].Err != runtime.ErrUnknownMember {
+	if c, out := h.sync("g", "m1", 3, "zz", "x"); out[c].Err != contract.ErrUnknownMember {
 		t.Fatalf("assignment to an unknown member: %+v", out)
 	}
-	if c, out := h.sync("g", "m1", 3, "m1", "x", "m1", "y"); out[c].Err != runtime.ErrInvalid {
+	if c, out := h.sync("g", "m1", 3, "m1", "x", "m1", "y"); out[c].Err != contract.ErrInvalid {
 		t.Fatalf("member assigned twice: %+v", out)
 	}
 }
@@ -207,19 +206,19 @@ func TestRebalanceChecksMemberAndGeneration(t *testing.T) {
 func TestRebalanceHeartbeatByState(t *testing.T) {
 	h := newRB(t)
 	h.stableTwo()
-	if code := h.heartbeat("g", "m1", 2); code != runtime.OK {
+	if code := h.heartbeat("g", "m1", 2); code != contract.OK {
 		t.Fatalf("Stable: %v", code)
 	}
 	h.join("g", "m1")
-	if code := h.heartbeat("g", "m2", 2); code != runtime.ErrRebalanceInProgress || h.r.Phase("g") != PhaseJoining {
+	if code := h.heartbeat("g", "m2", 2); code != contract.ErrRebalanceInProgress || h.r.Phase("g") != PhaseJoining {
 		t.Fatalf("PreparingRebalance: %v", code)
 	}
 	h.join("g", "m2")
-	if code := h.heartbeat("g", "m2", 3); code != runtime.OK || h.r.Phase("g") != PhaseSyncing {
+	if code := h.heartbeat("g", "m2", 3); code != contract.OK || h.r.Phase("g") != PhaseSyncing {
 		t.Fatalf("CompletingRebalance: %v", code)
 	}
 	h.step(Leave{Call: h.call(), Group: "g", Members: []string{"m1", "m2"}})
-	if code := h.heartbeat("g", "m2", 3); code != runtime.ErrUnknownMember || h.r.Phase("g") != PhaseEmpty {
+	if code := h.heartbeat("g", "m2", 3); code != contract.ErrUnknownMember || h.r.Phase("g") != PhaseEmpty {
 		t.Fatalf("Empty: %v", code)
 	}
 }
@@ -228,7 +227,7 @@ func TestRebalanceLeave(t *testing.T) {
 	h := newRB(t)
 	h.stableTwo()
 	c := h.call()
-	if codes := h.step(Leave{Call: c, Group: "g", Members: []string{"m2", "nobody"}})[c].Body.([]runtime.ErrCode); !slices.Equal(codes, []runtime.ErrCode{runtime.OK, runtime.ErrUnknownMember}) {
+	if codes := h.step(Leave{Call: c, Group: "g", Members: []string{"m2", "nobody"}})[c].Body.([]contract.ErrCode); !slices.Equal(codes, []contract.ErrCode{contract.OK, contract.ErrUnknownMember}) {
 		t.Fatalf("leave codes: %v", codes)
 	}
 	c1, _, out := h.join("g", "m1")
@@ -248,7 +247,7 @@ func TestRebalanceSessionExpiry(t *testing.T) {
 		h.heartbeat("g", "m1", 2)
 	}
 	h.wait(sec)
-	if h.r.Phase("g") != PhaseJoining || len(h.logged("g")) != 1 || h.heartbeat("g", "m2", 2) != runtime.ErrUnknownMember {
+	if h.r.Phase("g") != PhaseJoining || len(h.logged("g")) != 1 || h.heartbeat("g", "m2", 2) != contract.ErrUnknownMember {
 		t.Fatalf("silent m2 not removed: %s %v", h.r.Phase("g"), h.logged("g"))
 	}
 }
@@ -291,7 +290,7 @@ func TestRebalanceNewMemberExpires(t *testing.T) {
 		out = h.wait(sec)
 		h.heartbeat("g", "m2", 2)
 	}
-	if out[c3].Err != runtime.ErrUnknownMember || h.r.Phase("g") != PhaseJoining {
+	if out[c3].Err != contract.ErrUnknownMember || h.r.Phase("g") != PhaseJoining {
 		t.Fatalf("new member not removed: %+v", out)
 	}
 	c2, _, out := h.join("g", "m2")
@@ -312,7 +311,7 @@ func TestRebalanceJoinTimeoutRemovesSilentMembers(t *testing.T) {
 		h.heartbeat("g", "m2", 2)
 	}
 	joined(t, out[c1], 3, "m1", 1)
-	if got := h.logged("g"); !slices.Equal(got, []string{"m1"}) || h.heartbeat("g", "m2", 2) != runtime.ErrUnknownMember {
+	if got := h.logged("g"); !slices.Equal(got, []string{"m1"}) || h.heartbeat("g", "m2", 2) != contract.ErrUnknownMember {
 		t.Fatalf("m2 kept: %v", got)
 	}
 }
@@ -328,12 +327,12 @@ func TestRebalanceSyncTimeout(t *testing.T) {
 	cs, _ := h.sync("g", "m2", 1)
 	var out map[CallID]Reply
 	for range 5 { // the leader m1 beats in CompletingRebalance but never syncs
-		if code := h.heartbeat("g", "m1", 1); code != runtime.OK {
+		if code := h.heartbeat("g", "m1", 1); code != contract.OK {
 			t.Fatalf("leader heartbeat: %v", code)
 		}
 		out = h.wait(sec)
 	}
-	if out[cs].Err != runtime.ErrRebalanceInProgress || h.r.Phase("g") != PhaseJoining || !slices.Equal(h.logged("g"), []string{"m2"}) {
+	if out[cs].Err != contract.ErrRebalanceInProgress || h.r.Phase("g") != PhaseJoining || !slices.Equal(h.logged("g"), []string{"m2"}) {
 		t.Fatalf("leader that never synced: %+v %s %v", out, h.r.Phase("g"), h.logged("g"))
 	}
 	c2, _, out := h.join("g", "m2")
@@ -348,7 +347,7 @@ func TestRebalanceSyncTimeout(t *testing.T) {
 		h.wait(sec)
 		h.heartbeat("g", m4, 3)
 	}
-	if h.r.Phase("g") != PhaseJoining || h.heartbeat("g", m4, 3) != runtime.ErrUnknownMember {
+	if h.r.Phase("g") != PhaseJoining || h.heartbeat("g", m4, 3) != contract.ErrUnknownMember {
 		t.Fatalf("follower that never synced: %s %v", h.r.Phase("g"), h.logged("g"))
 	}
 }
@@ -376,26 +375,26 @@ func TestRebalanceOffsetCommit(t *testing.T) {
 	for _, tc := range []struct {
 		member string
 		gen    int32
-		want   runtime.ErrCode
+		want   contract.ErrCode
 	}{
-		{"m1", 3, runtime.ErrRebalanceInProgress},
-		{"zz", 3, runtime.ErrUnknownMember},
-		{"m1", 2, runtime.ErrIllegalGeneration},
-		{"", -1, runtime.ErrUnknownMember},
+		{"m1", 3, contract.ErrRebalanceInProgress},
+		{"zz", 3, contract.ErrUnknownMember},
+		{"m1", 2, contract.ErrIllegalGeneration},
+		{"", -1, contract.ErrUnknownMember},
 	} {
 		if got := h.commit("g", tc.member, tc.gen); got != tc.want {
 			t.Errorf("CompletingRebalance commit %+v: %v", tc, got)
 		}
 	}
 	h.sync("g", "m1", 3)
-	if got := h.commit("g", "m1", 3); got != runtime.OK {
+	if got := h.commit("g", "m1", 3); got != contract.OK {
 		t.Fatalf("Stable commit: %v", got)
 	}
 	h.step(Leave{Call: h.call(), Group: "g", Members: []string{"m1", "m2", "m3"}})
-	if got, gen := h.commit("g", "", -1), h.commit("g", "m1", 3); got != runtime.OK || gen != runtime.ErrUnknownMember {
+	if got, gen := h.commit("g", "", -1), h.commit("g", "m1", 3); got != contract.OK || gen != contract.ErrUnknownMember {
 		t.Fatalf("Empty group: generation -1 %v, member %v", got, gen)
 	}
-	if got := h.commit("fresh", "", -1); got != runtime.OK {
+	if got := h.commit("fresh", "", -1); got != contract.OK {
 		t.Fatalf("a group with no memory: %v", got)
 	}
 	f, _ := h.r.Store.Apply(contract.OffsetFetch{Group: "fresh"}).Resp.(contract.OffsetFetchResp)
@@ -410,7 +409,7 @@ func TestRebalanceProtocolsAndBadJoins(t *testing.T) {
 	h := newRB(t)
 	ca, _, _ := h.join("q", "", "range")
 	cb, _, _ := h.join("q", "", "roundrobin")
-	if out := h.wait(3 * sec); out[ca].Err != runtime.ErrInconsistentGroupProtocol || out[cb].Err != runtime.ErrInconsistentGroupProtocol {
+	if out := h.wait(3 * sec); out[ca].Err != contract.ErrInconsistentGroupProtocol || out[cb].Err != contract.ErrInconsistentGroupProtocol {
 		t.Fatalf("no common protocol: %+v", out)
 	}
 	h.join("q", "m1", "range", "roundrobin")
@@ -418,14 +417,14 @@ func TestRebalanceProtocolsAndBadJoins(t *testing.T) {
 	if j, _ := out[cb].Body.(JoinResult); j.Protocol != "roundrobin" || j.Generation != 1 {
 		t.Fatalf("retry: %+v", out)
 	}
-	if _, _, out := h.join("q", "nobody"); out[h.calls].Err != runtime.ErrUnknownMember {
+	if _, _, out := h.join("q", "nobody"); out[h.calls].Err != contract.ErrUnknownMember {
 		t.Fatalf("unknown member id: %+v", out)
 	}
 	c := h.call()
-	if out := h.step(Join{Call: c, Group: "q", ProtocolType: "connect", SessionMs: 1, Protocols: []Protocol{{Name: "x"}}}); out[c].Err != runtime.ErrInconsistentGroupProtocol {
+	if out := h.step(Join{Call: c, Group: "q", ProtocolType: "connect", SessionMs: 1, Protocols: []Protocol{{Name: "x"}}}); out[c].Err != contract.ErrInconsistentGroupProtocol {
 		t.Fatalf("other protocol type: %+v", out)
 	}
-	if out := h.step(Join{Call: c + 1, Group: "q", ProtocolType: "consumer", Protocols: []Protocol{{Name: "x"}}}); out[c+1].Err != runtime.ErrInvalid {
+	if out := h.step(Join{Call: c + 1, Group: "q", ProtocolType: "consumer", Protocols: []Protocol{{Name: "x"}}}); out[c+1].Err != contract.ErrInvalid {
 		t.Fatalf("zero session: %+v", out)
 	}
 }
@@ -435,10 +434,10 @@ func TestRebalanceRoleChange(t *testing.T) {
 	h.session = 5000
 	h.stableTwo()
 	c, _, _ := h.join("p", "")
-	if out := h.step(RoleChanged{Active: false}); out[c].Err != runtime.ErrUnavailable {
+	if out := h.step(RoleChanged{Active: false}); out[c].Err != contract.ErrUnavailable {
 		t.Fatalf("waiting join after the role is lost: %+v", out)
 	}
-	if code := h.heartbeat("g", "m1", 2); code != runtime.ErrUnavailable {
+	if code := h.heartbeat("g", "m1", 2); code != contract.ErrUnavailable {
 		t.Fatalf("call while not active: %v", code)
 	}
 	h.wait(60 * sec)
@@ -447,7 +446,7 @@ func TestRebalanceRoleChange(t *testing.T) {
 		t.Fatalf("after takeover: g %s, p %s", h.r.Phase("g"), h.r.Phase("p"))
 	}
 	h.wait(4 * sec) // the sessions start at the takeover
-	if h.heartbeat("g", "m1", 2) != runtime.OK {
+	if h.heartbeat("g", "m1", 2) != contract.OK {
 		t.Fatal("m1 expired in the grace window")
 	}
 	h.wait(1500 * machine.NodeTime(machine.Millisecond))

@@ -14,9 +14,9 @@ import (
 	"google.golang.org/grpc/status"
 
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/spec"
+	"github.com/manifesterio/mds/controlplane/spec"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -370,8 +370,8 @@ func (w *rbgWorld) fetch() {
 	op := contract.OffsetFetch{Group: rbgGroup}
 	d, err := w.n.send(w.t.Context(), op)
 	want := w.model.Store.Apply(op)
-	if err != nil || !sameAnswer(d, want) {
-		w.t.Fatalf("offset fetch\n  model: %s\n  node:  %s %v", show(want), show(d), err)
+	if err != nil || !sameAnswer(d.Answer(), want) {
+		w.t.Fatalf("offset fetch\n  model: %s\n  node:  %s %v", show(want), show(d.Answer()), err)
 	}
 }
 

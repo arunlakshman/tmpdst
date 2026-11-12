@@ -10,7 +10,7 @@
 // # Generated files
 //
 // The .proto files in api/ are the source. make generate (buf, with the plugin
-// ops/tools/protoc-gen-mdswire) writes the *.pb.go files, contract/wire_types_gen.go,
+// ops/tools/protoc-gen-mdswire) writes the *.pb.go files, ../../contract/wire_types_gen.go,
 // domain/rebalance/wire_types_gen.go and wire/wire_gen.go. None of them is in
 // git, and the module does not compile without them. make build runs it first.
 //
@@ -21,8 +21,9 @@
 //   - api/controlplane/log/v1: the log entry.
 //   - api/controlplane/options/v1: custom options that say how a message becomes
 //     a contract value type (read by the plugin).
-//   - contract: the plain value types of every command, read and answer (mostly
-//     generated), and a few hand-written helpers.
+//   - ../../contract (outside this tree, public because the broker imports it): the
+//     plain value types of every command, read and answer (mostly generated), the
+//     sealed sums Operation and Response with their Tag and Fold, and ErrCode.
 //   - wire: the only place that converts contract types to and from the api
 //     messages. Nearly all generated (wire_gen.go). By hand: the error code table
 //     (errcode.go), the gRPC error of a failed call (rpcerror.go) and the group
@@ -50,7 +51,7 @@
 //   - controlplanemetrics: Prometheus instrumentation.
 //   - outside this tree: internal/runtime (event and value types, Clock),
 //     internal/system/live (the production runner of a dst process),
-//     internal/spec (the independent model), internal/verify/simulator (the
+//     spec (the independent model), internal/verify/simulator (the
 //     deterministic simulation, run by cmd/cpsim).
 //
 // # Mental model
@@ -90,7 +91,7 @@
 //   - executor imports only runtime. dynamolog and sqllog import executor.
 //   - domain/rebalance imports contract and runtime, and the dst packages. It
 //     does not import replica or metadb.
-//   - internal/spec shares types with the code (contract, runtime) and never
+//   - spec (a public package) shares types with the code (contract) and never
 //     logic: it imports none of domain, metadb or engine.
 //
 // Time: all time comes from one interface, machine.Clock, or from the step

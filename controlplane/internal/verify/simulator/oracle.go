@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
@@ -203,11 +203,11 @@ func (o *oracle) checkRanges(q contract.FindSegments, r contract.FindSegmentsRes
 
 // sameAnswer compares two answers by error code and response. Nil and empty
 // slices print the same with %+v, and that difference is not a bug.
-func sameAnswer(a, b runtime.ControlPlaneDone) bool {
+func sameAnswer(a, b contract.Done) bool {
 	return a.Err == b.Err && fmt.Sprintf("%+v", a.Resp) == fmt.Sprintf("%+v", b.Resp)
 }
 
-func describeAnswer(d runtime.ControlPlaneDone) string {
+func describeAnswer(d contract.Done) string {
 	return fmt.Sprintf("err=%v resp=%+v", d.Err, d.Resp)
 }
 
@@ -225,7 +225,7 @@ func (o *oracle) verify() {
 			next++
 		}
 	}
-	committed := map[string]runtime.ControlPlaneDone{}
+	committed := map[string]contract.Done{}
 	logged := newGroupLog()
 	decode := func(entry []byte) ([]runtime.ControlPlaneOperation, error) {
 		cmds, err := replica.EntryCommands(entry)
@@ -269,12 +269,12 @@ func (o *oracle) judgeRead(spec specModel, r readRec, end runtime.LogPosition) {
 		s.verdict(s.store.quietAfter(r.prefix), liveReplicasConverge, "a final read of %T was answered at slot %d, but the log has %d slots", r.op, r.prefix, end)
 	}
 	want := spec.Apply(r.op)
-	s.verdict(sameAnswer(want, r.done), readsAgreeWithSpec, "at t=%dms after slot %d, %T: spec says %s, node says %s",
-		r.at/int64(machine.Millisecond), r.prefix, r.op, describeAnswer(want), describeAnswer(r.done))
+	s.verdict(sameAnswer(want, r.done.Answer()), readsAgreeWithSpec, "at t=%dms after slot %d, %T: spec says %s, node says %s",
+		r.at/int64(machine.Millisecond), r.prefix, r.op, describeAnswer(want), describeAnswer(r.done.Answer()))
 }
 
 // judgeAcks checks that every acked write is in the log, and gave the answer that the spec gives.
-func (o *oracle) judgeAcks(spec specModel, committed map[string]runtime.ControlPlaneDone) {
+func (o *oracle) judgeAcks(spec specModel, committed map[string]contract.Done) {
 	s := o.s
 	for _, a := range o.acks {
 		switch w := a.op.(type) {
@@ -283,7 +283,7 @@ func (o *oracle) judgeAcks(spec specModel, committed map[string]runtime.ControlP
 			if !s.verdict(in, ackedWriteInLog, "commit %q was acked at t=%dms, but it is not in the log", w.SegmentKey, a.at/int64(machine.Millisecond)) {
 				continue
 			}
-			s.verdict(sameAnswer(want, a.done), ackedWriteHasSpecAnswer, "commit %q: spec says %s, the ack says %s", w.SegmentKey, describeAnswer(want), describeAnswer(a.done))
+			s.verdict(sameAnswer(want, a.done.Answer()), ackedWriteHasSpecAnswer, "commit %q: spec says %s, the ack says %s", w.SegmentKey, describeAnswer(want), describeAnswer(a.done.Answer()))
 		case contract.CreateTopic:
 			got := spec.Apply(contract.DescribeTopics{Topics: []string{w.Name}})
 			r, _ := got.Resp.(contract.DescribeTopicsResp)
@@ -490,7 +490,7 @@ func newGroupLog() *groupLog {
 }
 
 // note takes one op of the log and the answer of the spec to it.
-func (l *groupLog) note(op runtime.ControlPlaneOperation, d runtime.ControlPlaneDone) {
+func (l *groupLog) note(op runtime.ControlPlaneOperation, d contract.Done) {
 	if d.Err != runtime.OK {
 		return
 	}

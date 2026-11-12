@@ -6,11 +6,11 @@
 // The custom options of api/controlplane/options/v1/options.proto
 // say which messages it writes and how, and the leading comment of a message is
 // the doc comment of its struct. buf runs the plugin (see buf.gen.yaml) with the
-// output directory internal/controlplane, and it writes:
+// output directory controlplane (the module root), and it writes:
 //
 //	contract/wire_types_gen.go   the structs of package contract (no wire import)
-//	domain/rebalance/wire_types_gen.go  the structs of package rebalance (no wire import)
-//	wire/wire_gen.go             <Message>ToCore and <Message>FromCore
+//	internal/controlplane/domain/rebalance/wire_types_gen.go  the structs of package rebalance (no wire import)
+//	internal/controlplane/wire/wire_gen.go             <Message>ToCore and <Message>FromCore
 //
 // The value types stay plain: they are compared, hashed and used as map keys by
 // the deterministic core, which must not import protobuf.
@@ -41,19 +41,18 @@ const module = "github.com/manifesterio/mds/controlplane"
 
 // goPackages are the Go packages that the options may name, with their import paths.
 var goPackages = map[string]string{
-	"contract":  module + "/internal/controlplane/contract",
+	"contract":  module + "/contract",
 	"rebalance": module + "/internal/controlplane/domain/rebalance",
-	"runtime":   module + "/internal/runtime",
 }
 
 // structFiles are the files that hold the structs of each package, under the
 // output directory.
 var structFiles = map[string]string{
 	"contract":  "contract/wire_types_gen.go",
-	"rebalance": "domain/rebalance/wire_types_gen.go",
+	"rebalance": "internal/controlplane/domain/rebalance/wire_types_gen.go",
 }
 
-const wireFile = "wire/wire_gen.go"
+const wireFile = "internal/controlplane/wire/wire_gen.go"
 
 // goKinds are the field kinds the plugin knows, with their Go types. An enum
 // field takes its Go type from go_type.

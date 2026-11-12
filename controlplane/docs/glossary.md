@@ -63,7 +63,7 @@ One line per term. Plain words. For the layout of the code see
 - **trace hash**: the digest of every step of a run. Equal seeds must give equal hashes.
 - **golden hash**: a trace hash pinned in a test (`internal/verify/simulator/golden_test.go`), or printed by `make sim-campaign`. A change that moves one is a change of behaviour and must be re-pinned on purpose.
 - **determinism gate**: `make determinism` (`dst/cmd/determinismcheck`): the deterministic packages may import only an allow-list, and use no goroutines, wall clock or map ranges.
-- **model / spec**: `internal/spec`: the small independent reference program that gives the correct answer. It shares types with the code, never logic.
+- **model / spec**: `spec`: the small independent reference program that gives the correct answer. It shares types with the code, never logic.
 - **conformance**: tests in `test/conformance` that draw random operations (rapid), send them to the model and to the real code, and require equal answers.
 - **mutant**: a bug planted by one exact text replacement in the real code (`ops/mutants.txt`). `make mutants` requires that a named test fails for each.
 - **test double**: a fault of the environment, not of the code (a crash that loses answered writes). A test wraps the target with it and expects the harness to fail.

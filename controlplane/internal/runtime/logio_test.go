@@ -3,13 +3,9 @@ package runtime
 import (
 	"testing"
 
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
-
-// testOp is a minimal ControlPlaneOperation. The real ones are in the contract package.
-type testOp struct{}
-
-func (testOp) IsControlPlaneOperation() {}
 
 func TestLogIOCallsAreIOCalls(t *testing.T) {
 	acts := []IOCall{
@@ -37,7 +33,7 @@ func TestLogIOCallsAreIOCalls(t *testing.T) {
 }
 
 func TestCPCallAndCPDone(t *testing.T) {
-	call := ControlPlaneCall{Req: 9, Op: testOp{}}
+	call := ControlPlaneCall{Req: 9, Op: contract.ListGroups{}}
 	if call.RequestID() != 9 {
 		t.Fatalf("RequestID = %d", call.RequestID())
 	}

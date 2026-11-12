@@ -7,7 +7,7 @@ Status: design note for phase P6 (task T6.1), revised to the user's decisions. T
 `domain/rebalance` replaced the old coordinator in `groups/` (deleted in T6.6). It is a `sim.Process`-shaped machine,
 `Step(cx, input) -> outputs`, with no locks, goroutines, channels or clock; time and randomness come
 from `cx`. It runs in production (a second `live.Run`) and in the simulator (a second dst process per
-node). The independent model is `internal/spec/rebalance.go` (section 12).
+node). The independent model is `spec/rebalance.go` (section 12).
 
 Principle: do what the open-source Apache Kafka classic group coordinator does (`GroupMetadataManager`,
 `ClassicGroup`, `ClassicGroupMember` on trunk). Classic protocol only: no static membership (the

@@ -169,8 +169,8 @@ message OffsetCommit {
 // OffsetCommitResponse has one error per request offset, in request order.
 message OffsetCommitResponse {
   option (controlplane.options.v1.go_struct) = "contract.OffsetCommitResp";
-  // The codes are runtime error codes (the wire message carries them as an enum).
-  repeated int32 errs = 1 [(controlplane.options.v1.go_type) = "runtime.ErrCode"];
+  // The codes are contract error codes (the wire message carries them as an enum).
+  repeated int32 errs = 1 [(controlplane.options.v1.go_type) = "contract.ErrCode"];
 }
 
 // OffsetFetch reads committed offsets of a group. Empty Partitions means

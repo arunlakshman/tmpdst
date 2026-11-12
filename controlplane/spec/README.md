@@ -21,7 +21,7 @@ SOSP 2021).
 
 ## The independence rule
 
-The model shares types with the code (`contract`, `runtime`), and never logic.
+The model shares types with the code (`contract`), and never logic.
 It imports none of `domain`, `metadb`, `engine` or `replica`, and no program of
 the product imports it: `go list -deps ./cmd/mdscontrolplane` does not list it.
 A test that compared the code with itself would prove nothing. Only tests and

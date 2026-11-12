@@ -5,8 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
-	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // These tests check the rules of the model one by one, with small examples.
@@ -17,14 +16,14 @@ func tp(topic string, p int32) contract.TopicPartition { return contract.NewTopi
 
 // batch is a batch of n records with a segment location of 10 bytes a record.
 func batch(topic string, p int32, n int64) contract.PendingBatch {
-	return contract.PendingBatch{TopicPartition: tp(topic, p), Records: n, Loc: runtime.SegmentRef{Key: "o", Len: n * 10}}
+	return contract.PendingBatch{TopicPartition: tp(topic, p), Records: n, Loc: contract.SegmentRef{Key: "o", Len: n * 10}}
 }
 
-func commit(m *ControlPlane, key string, batches ...contract.PendingBatch) runtime.ControlPlaneDone {
+func commit(m *ControlPlane, key string, batches ...contract.PendingBatch) contract.Done {
 	return m.Apply(contract.CommitSegment{SegmentKey: key, Batches: batches})
 }
 
-func bases(d runtime.ControlPlaneDone) []contract.Offset {
+func bases(d contract.Done) []contract.Offset {
 	var out []contract.Offset
 	switch r := d.Resp.(type) {
 	case contract.CommitSegmentResp:
@@ -56,13 +55,13 @@ func TestCommitReplayAndConflict(t *testing.T) {
 	m := New()
 	first := commit(m, "s1", batch("t", 0, 3))
 	commit(m, "s2", batch("t", 0, 2)) // moves the end on
-	if again := commit(m, "s1", batch("t", 0, 3)); again.Err != runtime.OK || !slices.Equal(bases(again), bases(first)) || m.end(tp("t", 0)) != 5 {
+	if again := commit(m, "s1", batch("t", 0, 3)); again.Err != contract.OK || !slices.Equal(bases(again), bases(first)) || m.end(tp("t", 0)) != 5 {
 		t.Fatalf("replay %+v changed the answer or the state", again)
 	}
 	for name, bs := range map[string][]contract.PendingBatch{
 		"records": {batch("t", 0, 4)}, "partition": {batch("t", 1, 3)}, "extra": {batch("t", 0, 3), batch("t", 1, 1)}, "none": nil,
 	} {
-		if d := commit(m, "s1", bs...); d.Err != runtime.ErrConflict || d.Outcome != runtime.NotApplied {
+		if d := commit(m, "s1", bs...); d.Err != contract.ErrConflict || d.Outcome != contract.NotApplied {
 			t.Fatalf("%s: %+v", name, d)
 		}
 	}
@@ -70,19 +69,19 @@ func TestCommitReplayAndConflict(t *testing.T) {
 
 func TestCommitInvalidChangesNothing(t *testing.T) {
 	m := New()
-	for _, d := range []runtime.ControlPlaneDone{
+	for _, d := range []contract.Done{
 		commit(m, ""), commit(m, "", batch("t", 0, 1)), commit(m, "k"),
 		commit(m, "k", batch("t", 0, 0)), commit(m, "k", batch("", 0, 1)), commit(m, "k", batch("t", -1, 1)),
 		commit(m, "k", batch("t", 0, 1), batch("t", 1, 0)), // the first batch is fine, the second is not
 	} {
-		if d.Err != runtime.ErrInvalid {
+		if d.Err != contract.ErrInvalid {
 			t.Fatalf("%+v", d)
 		}
 	}
 	if len(m.topics) != 0 || len(m.runs) != 0 || len(m.segments) != 0 {
 		t.Fatal("an invalid commit changed the state")
 	}
-	if d := commit(m, "k", batch("t", 0, 1)); d.Err != runtime.OK {
+	if d := commit(m, "k", batch("t", 0, 1)); d.Err != contract.OK {
 		t.Fatalf("the key of a failed commit can be used again: %+v", d)
 	}
 }
@@ -92,12 +91,12 @@ func TestFindSegments(t *testing.T) {
 	commit(m, "s1", batch("t", 0, 3))
 	commit(m, "s2", batch("t", 0, 2), batch("t", 1, 1))
 	commit(m, "s3", batch("t", 0, 4))
-	find := func(p int32, from contract.Offset, maxBytes int32) runtime.ControlPlaneDone {
+	find := func(p int32, from contract.Offset, maxBytes int32) contract.Done {
 		return m.Apply(contract.FindSegments{TopicPartition: tp("t", p), From: from, MaxBytes: maxBytes})
 	}
 	for _, c := range []struct {
 		name string
-		got  runtime.ControlPlaneDone
+		got  contract.Done
 		want []contract.Offset
 	}{
 		{"from 0", find(0, 0, 0), []contract.Offset{0, 3, 5}},
@@ -114,20 +113,20 @@ func TestFindSegments(t *testing.T) {
 	if r := find(0, 0, 0).Resp.(contract.FindSegmentsResp); r.End != 9 {
 		t.Fatalf("end %d, want 9", r.End)
 	}
-	if d := find(0, -1, 0); d.Err != runtime.ErrInvalid {
+	if d := find(0, -1, 0); d.Err != contract.ErrInvalid {
 		t.Fatalf("negative From: %+v", d)
 	}
 }
 
 func TestTopics(t *testing.T) {
 	m := New()
-	create := func(name string, parts int32, exclusive bool) runtime.ErrCode {
+	create := func(name string, parts int32, exclusive bool) contract.ErrCode {
 		return m.Apply(contract.CreateTopic{Name: name, Partitions: parts, FailIfExists: exclusive}).Err
 	}
-	if create("b", 3, false) != runtime.OK || create("", 1, false) != runtime.ErrInvalid || create("x", 0, false) != runtime.ErrInvalid {
+	if create("b", 3, false) != contract.OK || create("", 1, false) != contract.ErrInvalid || create("x", 0, false) != contract.ErrInvalid {
 		t.Fatal("create rules")
 	}
-	if create("b", 1, true) != runtime.ErrTopicExists || create("c", 1, true) != runtime.OK {
+	if create("b", 1, true) != contract.ErrTopicExists || create("c", 1, true) != contract.OK {
 		t.Fatal("FailIfExists rule")
 	}
 	commit(m, "s1", batch("a", 4, 1), batch("b", 1, 1)) // a is made by the commit
@@ -148,7 +147,7 @@ func member(id string) contract.GroupMember {
 	return contract.GroupMember{MemberID: id, ClientID: "c-" + id, SessionTimeoutMs: 1000, Metadata: []byte("m")}
 }
 
-func install(m *ControlPlane, group string, gen int32, ids ...string) runtime.ControlPlaneDone {
+func install(m *ControlPlane, group string, gen int32, ids ...string) contract.Done {
 	op := contract.GroupInstall{Group: group, Generation: gen, Leader: ids[0], ProtocolType: "consumer", Protocol: "range", TimeMs: 5}
 	for _, id := range ids {
 		op.Members = append(op.Members, member(id))
@@ -162,34 +161,34 @@ func describeGroup(m *ControlPlane, group string) contract.DescribeGroupResp {
 
 func TestGroupInstallAssignRemove(t *testing.T) {
 	m := New()
-	if d := install(m, "g", 2, "a"); d.Err != runtime.ErrIllegalGeneration {
+	if d := install(m, "g", 2, "a"); d.Err != contract.ErrIllegalGeneration {
 		t.Fatalf("a new group starts at generation 1: %+v", d)
 	}
-	if d := install(m, "g", 1, "a", "b"); d.Err != runtime.OK || d.Outcome != runtime.Applied {
+	if d := install(m, "g", 1, "a", "b"); d.Err != contract.OK || d.Outcome != contract.Applied {
 		t.Fatalf("install: %+v", d)
 	}
 	if got := describeGroup(m, "g"); got.State != "PreparingSync" || got.Leader != "a" || len(got.Members) != 2 {
 		t.Fatalf("after install: %+v", got)
 	}
-	assign := func(gen int32, leader string, members ...string) runtime.ErrCode {
+	assign := func(gen int32, leader string, members ...string) contract.ErrCode {
 		op := contract.GroupAssign{Group: "g", Generation: gen, Leader: leader}
 		for _, id := range members {
 			op.Assignments = append(op.Assignments, contract.GroupAssignment{Member: id, Bytes: []byte("x-" + id)})
 		}
 		return m.Apply(op).Err
 	}
-	if assign(2, "a", "a") != runtime.ErrIllegalGeneration || assign(1, "b", "a") != runtime.ErrUnknownMember ||
-		assign(1, "a", "z") != runtime.ErrUnknownMember || assign(1, "a", "a", "a") != runtime.ErrInvalid {
+	if assign(2, "a", "a") != contract.ErrIllegalGeneration || assign(1, "b", "a") != contract.ErrUnknownMember ||
+		assign(1, "a", "z") != contract.ErrUnknownMember || assign(1, "a", "a", "a") != contract.ErrInvalid {
 		t.Fatal("assign rules")
 	}
-	if assign(1, "a", "a") != runtime.OK {
+	if assign(1, "a", "a") != contract.OK {
 		t.Fatal("assign")
 	}
 	got := describeGroup(m, "g")
 	if got.State != "Stable" || string(got.Members[0].Assignment) != "x-a" || got.Members[1].Assignment != nil {
 		t.Fatalf("after assign: %+v", got)
 	}
-	if d := install(m, "g", 2, "b"); d.Err != runtime.OK || describeGroup(m, "g").State != "PreparingSync" {
+	if d := install(m, "g", 2, "b"); d.Err != contract.OK || describeGroup(m, "g").State != "PreparingSync" {
 		t.Fatal("a new generation clears the assignments")
 	}
 	m.Apply(contract.GroupRemove{Group: "g", Members: []string{"b", "nobody"}})
@@ -211,7 +210,7 @@ func TestGroupInstallInvalid(t *testing.T) {
 		"repeated member":        dup,
 		"empty member id":        {Group: "g", Generation: 1, Leader: "", Members: []contract.GroupMember{member("")}},
 	} {
-		if d := m.Apply(op); d.Err != runtime.ErrInvalid {
+		if d := m.Apply(op); d.Err != contract.ErrInvalid {
 			t.Errorf("%s: %+v", name, d)
 		}
 	}
@@ -224,16 +223,16 @@ func TestOffsetCommitAndFetch(t *testing.T) {
 	offsets := func(topic string, p int32, off int64) []contract.PartitionOffset {
 		return []contract.PartitionOffset{{TopicPartition: tp(topic, p), Offset: off, LeaderEpoch: 3, Metadata: "meta"}}
 	}
-	commitOffsets := func(gen int32, member string, offs []contract.PartitionOffset) runtime.ControlPlaneDone {
+	commitOffsets := func(gen int32, member string, offs []contract.PartitionOffset) contract.Done {
 		return m.Apply(contract.OffsetCommit{Group: "g", Generation: gen, Member: member, Offsets: offs})
 	}
-	if commitOffsets(1, "z", offsets("t", 0, 5)).Err != runtime.ErrUnknownMember ||
-		commitOffsets(2, "a", offsets("t", 0, 5)).Err != runtime.ErrIllegalGeneration ||
-		commitOffsets(-1, "", offsets("t", 0, 5)).Err != runtime.ErrIllegalGeneration { // the group has a member
+	if commitOffsets(1, "z", offsets("t", 0, 5)).Err != contract.ErrUnknownMember ||
+		commitOffsets(2, "a", offsets("t", 0, 5)).Err != contract.ErrIllegalGeneration ||
+		commitOffsets(-1, "", offsets("t", 0, 5)).Err != contract.ErrIllegalGeneration { // the group has a member
 		t.Fatal("offset commit checks")
 	}
 	d := commitOffsets(1, "a", append(offsets("t", 0, 5), append(offsets("t", 9, 1), offsets("t", 1, -1)...)...))
-	if want := (contract.OffsetCommitResp{Errs: []runtime.ErrCode{runtime.OK, runtime.ErrUnknownPartition, runtime.ErrInvalid}}); !slices.Equal(d.Resp.(contract.OffsetCommitResp).Errs, want.Errs) || d.Outcome != runtime.Applied {
+	if want := (contract.OffsetCommitResp{Errs: []contract.ErrCode{contract.OK, contract.ErrUnknownPartition, contract.ErrInvalid}}); !slices.Equal(d.Resp.(contract.OffsetCommitResp).Errs, want.Errs) || d.Outcome != contract.Applied {
 		t.Fatalf("per offset codes: %+v", d)
 	}
 	fetch := func(ps ...contract.TopicPartition) []contract.PartitionOffset {
@@ -246,7 +245,7 @@ func TestOffsetCommitAndFetch(t *testing.T) {
 		t.Fatalf("fetch all: %+v", got)
 	}
 	m.Apply(contract.GroupRemove{Group: "g", Members: []string{"a"}})
-	if d := commitOffsets(-1, "", offsets("t", 1, 2)); d.Err != runtime.OK {
+	if d := commitOffsets(-1, "", offsets("t", 1, 2)); d.Err != contract.OK {
 		t.Fatalf("a manual commit is allowed when the group has no member: %+v", d)
 	}
 }
@@ -255,26 +254,26 @@ func TestGroupCommandTooLarge(t *testing.T) {
 	m := New()
 	big := bytes.Repeat([]byte("x"), maxGroupCommand)
 	install(m, "g", 1, "a")
-	if d := m.Apply(contract.GroupAssign{Group: "g", Generation: 1, Leader: "a", Assignments: []contract.GroupAssignment{{Member: "a", Bytes: big}}}); d.Err != runtime.ErrTooLarge {
+	if d := m.Apply(contract.GroupAssign{Group: "g", Generation: 1, Leader: "a", Assignments: []contract.GroupAssignment{{Member: "a", Bytes: big}}}); d.Err != contract.ErrTooLarge {
 		t.Fatalf("assign: %+v", d)
 	}
-	if d := m.Apply(contract.GroupRemove{Group: "g", Reason: string(big)}); d.Err != runtime.ErrTooLarge {
+	if d := m.Apply(contract.GroupRemove{Group: "g", Reason: string(big)}); d.Err != contract.ErrTooLarge {
 		t.Fatalf("remove: %+v", d)
 	}
 	// The limit is on the size: 16 + (4 + 1) group + (4 + 1) leader + 30 numbers + 4 + 1 member + 4 + n bytes.
 	n := maxGroupCommand - (16 + 5 + 5 + 30 + 5 + 4)
 	op := contract.GroupAssign{Group: "g", Generation: 1, Leader: "a", Assignments: []contract.GroupAssignment{{Member: "a", Bytes: bytes.Repeat([]byte("x"), n)}}}
-	if d := m.Apply(op); d.Err != runtime.OK {
+	if d := m.Apply(op); d.Err != contract.OK {
 		t.Fatalf("a command of exactly the limit is allowed: %+v", d)
 	}
 	op.Assignments[0].Bytes = append(op.Assignments[0].Bytes, 'x')
-	if d := m.Apply(op); d.Err != runtime.ErrTooLarge {
+	if d := m.Apply(op); d.Err != contract.ErrTooLarge {
 		t.Fatalf("one byte more is too large: %+v", d)
 	}
 }
 
 func TestUnknownOperation(t *testing.T) {
-	if d := New().Apply(nil); d.Err != runtime.ErrInvalid {
+	if d := New().Apply(nil); d.Err != contract.ErrInvalid {
 		t.Fatalf("%+v", d)
 	}
 }

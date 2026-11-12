@@ -14,7 +14,8 @@
 //   - inbox values and calls are plain data; byte slices are immutable once sent.
 //
 // The control plane's own request and response types are not here. They are in
-// internal/controlplane/contract, which imports this package, never the reverse.
+// contract (a public package that the broker also imports). This package imports
+// contract, never the reverse.
 //
 // See docs/lessons.md and docs/decisions.md.
 package runtime

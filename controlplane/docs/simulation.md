@@ -157,7 +157,7 @@ property name.
 
 Because the log is the truth about the order of writes, an operation whose
 answer was lost ("maybe applied") needs no special case: it is in the log or it
-is not. The model (`internal/spec`) lives behind a one-method interface (`spec.Model`).
+is not. The model (`spec`) lives behind a one-method interface (`spec.Model`).
 `spec.go` in the simulator is the only file that imports it.
 
 Coverage: a campaign prints which replica and rebalance paths no seed reached

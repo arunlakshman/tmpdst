@@ -4,8 +4,7 @@ import (
 	"cmp"
 	"slices"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
-	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -85,7 +84,7 @@ type (
 // one code per member (Leave), a contract response (Commit, Describe, List), or nil.
 type Reply struct {
 	Call CallID
-	Err  runtime.ErrCode
+	Err  contract.ErrCode
 	Body any
 }
 
@@ -169,10 +168,10 @@ func (r *Rebalance) handle(in any) []Reply {
 	if c, ok := in.(interface{ callID() CallID }); ok {
 		j, isJoin := in.(Join)
 		if isJoin && (j.Group == "" || j.ProtocolType == "" || len(j.Protocols) == 0 || j.SessionMs <= 0) {
-			return []Reply{{Call: j.Call, Err: runtime.ErrInvalid}}
+			return []Reply{{Call: j.Call, Err: contract.ErrInvalid}}
 		}
 		if !r.active {
-			return []Reply{{Call: c.callID(), Err: runtime.ErrUnavailable}}
+			return []Reply{{Call: c.callID(), Err: contract.ErrUnavailable}}
 		}
 	}
 	switch in := in.(type) {
@@ -241,7 +240,7 @@ func (r *Rebalance) answerAll(g *rgroup, k int, reply Reply) []Reply {
 func (r *Rebalance) park(m *rmember, k int, call CallID) []Reply {
 	var out []Reply
 	if m.wait[k] != 0 {
-		out = append(out, r.answer(m, k, Reply{Err: runtime.ErrRebalanceInProgress}))
+		out = append(out, r.answer(m, k, Reply{Err: contract.ErrRebalanceInProgress}))
 	}
 	m.wait[k] = call
 	return out
@@ -293,9 +292,9 @@ func (r *Rebalance) join(in Join) []Reply {
 	g, m := r.groups[in.Group], r.member(in.Group, in.MemberID)
 	switch {
 	case g != nil && len(g.members) > 0 && in.ProtocolType != g.protoType:
-		return []Reply{{Call: in.Call, Err: runtime.ErrInconsistentGroupProtocol}}
+		return []Reply{{Call: in.Call, Err: contract.ErrInconsistentGroupProtocol}}
 	case in.MemberID != "" && m == nil:
-		return []Reply{{Call: in.Call, Err: runtime.ErrUnknownMember}}
+		return []Reply{{Call: in.Call, Err: contract.ErrUnknownMember}}
 	case g == nil:
 		g = &rgroup{phase: PhaseEmpty, members: map[string]*rmember{}}
 		r.groups[in.Group] = g
@@ -344,7 +343,7 @@ func (r *Rebalance) openRound(g *rgroup, initial bool) []Reply {
 	if initial && r.Delay > 0 {
 		g.delayEnd = min(r.now+machine.NodeTime(r.Delay), g.end)
 	}
-	return r.answerAll(g, syncCall, Reply{Err: runtime.ErrRebalanceInProgress})
+	return r.answerAll(g, syncCall, Reply{Err: contract.ErrRebalanceInProgress})
 }
 
 // complete ends a join round when every member waits in a join and no initial
@@ -377,11 +376,11 @@ func (r *Rebalance) complete(name string, g *rgroup, timeout bool) []Reply {
 			break
 		}
 	}
-	code := runtime.ErrInconsistentGroupProtocol
+	code := contract.ErrInconsistentGroupProtocol
 	if install.Members != nil {
 		code = r.Store.Apply(install).Err
 	}
-	if code != runtime.OK {
+	if code != contract.OK {
 		return append(out, r.answerAll(g, joinCall, Reply{Err: code})...)
 	}
 	g.phase, g.generation, g.protocol, g.leader = PhaseSyncing, install.Generation, install.Protocol, leader.MemberID
@@ -422,7 +421,7 @@ func drop(g *rgroup, ids []string) []Reply {
 	for _, id := range ids {
 		for _, call := range g.members[id].wait {
 			if call != 0 {
-				out = append(out, Reply{Call: call, Err: runtime.ErrUnknownMember})
+				out = append(out, Reply{Call: call, Err: contract.ErrUnknownMember})
 			}
 		}
 		delete(g.members, id)
@@ -435,11 +434,11 @@ func drop(g *rgroup, ids []string) []Reply {
 
 // remove logs that members left and drops them. Then an open round may end,
 // or a Stable or CompletingRebalance group opens a round.
-func (r *Rebalance) remove(name string, g *rgroup, ids []string, reason string) ([]Reply, runtime.ErrCode) {
+func (r *Rebalance) remove(name string, g *rgroup, ids []string, reason string) ([]Reply, contract.ErrCode) {
 	if len(ids) == 0 {
-		return nil, runtime.OK
+		return nil, contract.OK
 	}
-	if code := r.Store.Apply(contract.GroupRemove{Group: name, Members: ids, TimeMs: r.ms(), Reason: reason}).Err; code != runtime.OK {
+	if code := r.Store.Apply(contract.GroupRemove{Group: name, Members: ids, TimeMs: r.ms(), Reason: reason}).Err; code != contract.OK {
 		return nil, code
 	}
 	out := drop(g, ids)
@@ -449,22 +448,22 @@ func (r *Rebalance) remove(name string, g *rgroup, ids []string, reason string) 
 	case PhaseSyncing, PhaseStable:
 		out = append(out, r.openRound(g, false)...)
 	}
-	return out, runtime.OK
+	return out, contract.OK
 }
 
 func (r *Rebalance) leave(in Leave) []Reply {
-	codes := make([]runtime.ErrCode, len(in.Members))
+	codes := make([]contract.ErrCode, len(in.Members))
 	var gone []string
 	for i, id := range in.Members {
 		if r.member(in.Group, id) == nil {
-			codes[i] = runtime.ErrUnknownMember
+			codes[i] = contract.ErrUnknownMember
 		} else if !slices.Contains(gone, id) {
 			gone = append(gone, id)
 		}
 	}
 	out, code := r.remove(in.Group, r.groups[in.Group], gone, "leave")
 	for i := range codes {
-		if codes[i] == runtime.OK {
+		if codes[i] == contract.OK {
 			codes[i] = code
 		}
 	}
@@ -472,29 +471,29 @@ func (r *Rebalance) leave(in Leave) []Reply {
 }
 
 // check is the member and generation check of sync, heartbeat and commit.
-func (r *Rebalance) check(group, id string, generation int32) (*rgroup, *rmember, runtime.ErrCode) {
+func (r *Rebalance) check(group, id string, generation int32) (*rgroup, *rmember, contract.ErrCode) {
 	g, m := r.groups[group], r.member(group, id)
 	switch {
 	case m == nil:
-		return g, nil, runtime.ErrUnknownMember
+		return g, nil, contract.ErrUnknownMember
 	case generation != g.generation:
-		return g, m, runtime.ErrIllegalGeneration
+		return g, m, contract.ErrIllegalGeneration
 	}
-	return g, m, runtime.OK
+	return g, m, contract.OK
 }
 
 // heartbeat is Kafka's: after the check, PreparingRebalance is
 // ErrRebalanceInProgress, else OK. Both start the session again.
-func (r *Rebalance) heartbeat(group, id string, generation int32) runtime.ErrCode {
+func (r *Rebalance) heartbeat(group, id string, generation int32) contract.ErrCode {
 	g, m, code := r.check(group, id, generation)
-	if code != runtime.OK {
+	if code != contract.OK {
 		return code
 	}
 	r.touch(m)
 	if g.phase == PhaseJoining {
-		return runtime.ErrRebalanceInProgress
+		return contract.ErrRebalanceInProgress
 	}
-	return runtime.OK
+	return contract.OK
 }
 
 // commit checks the commit against memory as Kafka does (a generation below
@@ -504,10 +503,10 @@ func (r *Rebalance) commit(in Commit) Reply {
 	c := in.Op
 	if g := r.groups[c.Group]; g != nil && (c.Generation >= 0 || len(g.members) > 0) {
 		_, m, code := r.check(c.Group, c.Member, c.Generation)
-		if code == runtime.OK && g.phase == PhaseSyncing {
-			code = runtime.ErrRebalanceInProgress
+		if code == contract.OK && g.phase == PhaseSyncing {
+			code = contract.ErrRebalanceInProgress
 		}
-		if code != runtime.OK {
+		if code != contract.OK {
 			return Reply{Call: in.Call, Err: code}
 		}
 		r.touch(m) // the group is PreparingRebalance or Stable here
@@ -522,10 +521,10 @@ func (r *Rebalance) commit(in Commit) Reply {
 func (r *Rebalance) syncGroup(in Sync) []Reply {
 	g, m, code := r.check(in.Group, in.MemberID, in.Generation)
 	switch {
-	case code != runtime.OK:
+	case code != contract.OK:
 		return []Reply{{Call: in.Call, Err: code}}
 	case g.phase == PhaseJoining:
-		return []Reply{{Call: in.Call, Err: runtime.ErrRebalanceInProgress}}
+		return []Reply{{Call: in.Call, Err: contract.ErrRebalanceInProgress}}
 	case g.phase == PhaseStable: // Kafka does not start the session again here
 		m.synced = true
 		return []Reply{{Call: in.Call, Body: m.assignment}}
@@ -534,7 +533,7 @@ func (r *Rebalance) syncGroup(in Sync) []Reply {
 		return r.park(m, syncCall, in.Call)
 	}
 	assign := contract.GroupAssign{Group: in.Group, Generation: g.generation, Leader: g.leader, TimeMs: r.ms(), Assignments: in.Assignments}
-	if code := r.Store.Apply(assign).Err; code != runtime.OK {
+	if code := r.Store.Apply(assign).Err; code != contract.OK {
 		return []Reply{{Call: in.Call, Err: code}}
 	}
 	g.phase, m.synced = PhaseStable, true
@@ -579,8 +578,8 @@ func (r *Rebalance) roleChanged(active bool) []Reply {
 	r.active = active
 	var out []Reply
 	for _, name := range sortedKeys(r.groups) {
-		out = append(out, r.answerAll(r.groups[name], joinCall, Reply{Err: runtime.ErrUnavailable})...)
-		out = append(out, r.answerAll(r.groups[name], syncCall, Reply{Err: runtime.ErrUnavailable})...)
+		out = append(out, r.answerAll(r.groups[name], joinCall, Reply{Err: contract.ErrUnavailable})...)
+		out = append(out, r.answerAll(r.groups[name], syncCall, Reply{Err: contract.ErrUnavailable})...)
 	}
 	r.groups = map[string]*rgroup{}
 	if !active {

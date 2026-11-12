@@ -176,7 +176,7 @@ apply seconds, window keys, blocked, rejected, checkpoint slot/age/bytes/seconds
 
 Seeded X2 on the real service: 3 nodes, lost/late answers, read and tail failures, crashes, restarts from checkpoint,
 takeover, split brain, small windows with trim (the failback part is superseded by decision 63). 20,000 seeds, 0 failures (`LOGCP_SEEDS=20000`). Checks:
-nodes agree and equal an independent model and (large window) the reference model (`internal/spec`; it was called speccheck when this was measured); every client answer matches the
+nodes agree and equal an independent model and (large window) the reference model (`spec`; it was called speccheck when this was measured); every client answer matches the
 model for a slot holding that command; fresh reads after an ack see it on any node. Real goroutines (3 nodes, DynamoDB-like faults), controlplanetest conformance
 (store, HTTP, fakedb), unit tests for every loop.
 

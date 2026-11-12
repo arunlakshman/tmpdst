@@ -1,6 +1,9 @@
 package runtime
 
-import "github.com/manifesterio/mds/dst/machine"
+import (
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/machine"
+)
 
 // EventData is a closed set of plain-data structs.
 type EventData interface{ isEvent() }
@@ -155,6 +158,12 @@ type LogClaimEpochDone struct {
 func ResponseAs[T any](d ControlPlaneDone) T {
 	r, _ := d.Resp.(T)
 	return r
+}
+
+// Answer returns the answer of the call without the request id: the plain
+// contract.Done that the reference model (package spec) also gives.
+func (e ControlPlaneDone) Answer() contract.Done {
+	return contract.Done{Resp: e.Resp, Err: e.Err, Outcome: e.Outcome}
 }
 
 func (NodeStarted) isEvent()         {}

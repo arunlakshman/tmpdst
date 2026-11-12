@@ -25,8 +25,8 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
-	"github.com/manifesterio/mds/broker/internal/system/awsmetrics"
-	"github.com/manifesterio/mds/broker/internal/system/httpconnections"
+	"github.com/manifesterio/mds/shared/awsmetrics"
+	"github.com/manifesterio/mds/shared/httpconnections"
 )
 
 // Config selects the bucket and endpoint. An empty Endpoint is AWS itself.

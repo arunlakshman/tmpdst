@@ -1,5 +1,5 @@
 # Root build of the monorepo. It only calls the Makefile of each module, in this order:
-#   dst, controlplane, broker  (a module may import only the modules before it).
+#   dst, shared, controlplane, broker  (a module may import only the modules before it).
 # `make build` is the full gate. It ends by building the two binaries into bin/.
 # Toolchain and commit hook: `mise install` (pins in mise.toml; postinstall runs make install-hooks).
 # Rules shared by the modules (fmt-check, vet, lint, modernize, ascii-check) are in make/common.mk.
@@ -10,6 +10,7 @@
 
 build:
 	$(MAKE) -C dst build
+	$(MAKE) -C shared build
 	$(MAKE) -C controlplane build
 	$(MAKE) -C broker build
 	mkdir -p bin
@@ -23,6 +24,7 @@ generate:
 
 test:
 	$(MAKE) -C dst test
+	$(MAKE) -C shared test
 	$(MAKE) -C controlplane test
 	$(MAKE) -C broker test
 

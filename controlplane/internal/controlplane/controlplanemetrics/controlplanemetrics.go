@@ -24,7 +24,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/manifesterio/mds/controlplane/internal/system/awsmetrics"
+	"github.com/manifesterio/mds/shared/awsmetrics"
 )
 
 // Metrics holds the collectors, all prefixed mdscontrolplane_.

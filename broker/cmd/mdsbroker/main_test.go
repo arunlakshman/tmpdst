@@ -20,7 +20,7 @@ import (
 
 	cpv1 "github.com/manifesterio/mds/broker/api/controlplane/v1"
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/system/runinfo"
+	"github.com/manifesterio/mds/shared/runinfo"
 )
 
 func freeAddr(t *testing.T) string {

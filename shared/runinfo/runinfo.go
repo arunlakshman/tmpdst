@@ -23,7 +23,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
-// Overridable at link time: -ldflags "-X github.com/manifesterio/mds/controlplane/internal/system/runinfo.GitCommit=abc123".
+// Overridable at link time: -ldflags "-X github.com/manifesterio/mds/shared/runinfo.GitCommit=abc123".
 var (
 	GitCommit = ""
 	Version   = ""
@@ -153,4 +153,10 @@ func ServeMetrics(ctx context.Context, log *slog.Logger, service, addr string, h
 	go func() { _ = srv.Serve(ln) }()
 	log.Info(service+" metrics", "addr", ln.Addr().String())
 	return nil
+}
+
+// LogAndExit logs err and exits 1.
+func LogAndExit(log *slog.Logger, err error) {
+	log.Error("fatal", "err", err.Error())
+	os.Exit(1)
 }

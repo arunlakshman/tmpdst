@@ -26,8 +26,8 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/server"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/system/httpconnections"
-	"github.com/manifesterio/mds/controlplane/internal/system/runinfo"
+	"github.com/manifesterio/mds/shared/httpconnections"
+	"github.com/manifesterio/mds/shared/runinfo"
 )
 
 func main() {

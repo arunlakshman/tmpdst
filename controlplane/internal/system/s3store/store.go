@@ -25,8 +25,8 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/internal/system"
-	"github.com/manifesterio/mds/controlplane/internal/system/awsmetrics"
-	"github.com/manifesterio/mds/controlplane/internal/system/httpconnections"
+	"github.com/manifesterio/mds/shared/awsmetrics"
+	"github.com/manifesterio/mds/shared/httpconnections"
 )
 
 // Config selects the bucket and endpoint. An empty Endpoint is AWS itself.

@@ -12,8 +12,8 @@ require (
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/manifesterio/mds/dst v0.0.0
+	github.com/manifesterio/mds/shared v0.0.0
 	github.com/prometheus/client_golang v1.20.5
-	github.com/prometheus/client_model v0.6.1
 	github.com/testcontainers/testcontainers-go v0.44.0
 	golang.org/x/tools v0.52.0
 	google.golang.org/grpc v1.69.2
@@ -89,6 +89,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
+	github.com/prometheus/client_model v0.6.1 // indirect
 	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
@@ -115,3 +116,5 @@ require (
 )
 
 replace github.com/manifesterio/mds/dst => ../dst
+
+replace github.com/manifesterio/mds/shared => ../shared

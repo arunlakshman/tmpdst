@@ -10,7 +10,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/controlplanemetrics"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/system/runinfo"
+	"github.com/manifesterio/mds/shared/runinfo"
 )
 
 // The tests here need no service. The runs against real DynamoDB, PostgreSQL

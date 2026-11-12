@@ -22,11 +22,11 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/cpclient"
 	"github.com/manifesterio/mds/broker/internal/system"
-	"github.com/manifesterio/mds/broker/internal/system/awsmetrics"
 	"github.com/manifesterio/mds/broker/internal/system/production"
-	"github.com/manifesterio/mds/broker/internal/system/runinfo"
 	"github.com/manifesterio/mds/broker/internal/system/s3store"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specsystem"
+	"github.com/manifesterio/mds/shared/awsmetrics"
+	"github.com/manifesterio/mds/shared/runinfo"
 )
 
 func main() {

@@ -19,8 +19,8 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor/sqllog"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/internal/system"
-	"github.com/manifesterio/mds/controlplane/internal/system/runinfo"
 	"github.com/manifesterio/mds/controlplane/internal/system/s3store"
+	"github.com/manifesterio/mds/shared/runinfo"
 )
 
 const (

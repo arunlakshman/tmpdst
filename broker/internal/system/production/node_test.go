@@ -26,7 +26,7 @@ func startNode(t *testing.T, mod func(*NodeConfig)) (*Node, NodeConfig) {
 	config := NodeConfig{
 		NodeID: "n1", Broker: broker.DefaultConfig(), Listener: ln,
 		Objects: specsystem.NewObjectStore(), ObjClassify: MemoryErrorClassifier{},
-		ControlPlane: specsystem.NewControlPlane(), CPClassify: MemoryErrorClassifier{},
+		ControlPlane: specsystem.NewControlPlane(), CPClassify: memoryCP{},
 		StopGrace: time.Second, FlushGrace: 50 * time.Millisecond,
 	}
 	if mod != nil {

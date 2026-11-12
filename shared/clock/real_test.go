@@ -1,15 +1,14 @@
-package realclock_test
+package clock
 
 import (
 	"testing"
 	"time"
 
-	"github.com/manifesterio/mds/broker/internal/system/realclock"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
 func TestMonoGoesForwardAndWallIsNow(t *testing.T) {
-	c := realclock.New()
+	c := NewReal()
 	a := c.Mono()
 	time.Sleep(2 * time.Millisecond)
 	if b := c.Mono(); b <= a {
@@ -21,7 +20,7 @@ func TestMonoGoesForwardAndWallIsNow(t *testing.T) {
 }
 
 func TestAfterFuncFiresAndStops(t *testing.T) {
-	c := realclock.New()
+	c := NewReal()
 	fired := make(chan struct{})
 	c.AfterFunc(machine.Duration(1), func() { close(fired) })
 	select {

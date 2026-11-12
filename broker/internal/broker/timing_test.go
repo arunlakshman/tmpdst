@@ -7,6 +7,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 func ns(f machine.Fact, k string) int64 { return int64(f.Field(k).(machine.Int64Value)) }
@@ -57,9 +58,9 @@ func TestPutDoneCountsAttempts(t *testing.T) {
 	c := h.open(1)
 	failed := false
 	h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
-		if p, ok := a.(core.ObjectPut); ok && !failed {
+		if p, ok := putCall(a); ok && !failed {
 			failed = true
-			return core.ObjectPutDone{Req: p.Req, Err: core.ErrUnavailable}
+			return core.ObjectDone{Result: objectstore.PutDone{Req: p.Req, Err: core.ErrUnavailable}}
 		}
 		return run()
 	}

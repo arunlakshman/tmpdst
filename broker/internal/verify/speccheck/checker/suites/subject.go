@@ -7,17 +7,18 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/generator"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/observation"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // ObjectSubject is an object store under test. Do runs one operation and
 // returns its result. A completion for a Put or a Delete must carry the same
 // Outcome as the spec (Applied or NotApplied). The error is for broken test
 // plumbing, such as a missing completion, and never for a wrong answer.
-// StateHash returns the same hash as speccheck.ObjectStore.StateHash would for
+// StateHash returns the same hash as objectstore.Spec.StateHash would for
 // the same content. It returns ok = false when the subject has no spec hash,
 // for example real S3.
 type ObjectSubject interface {
-	Do(operation core.IOCall) (observation.ObjectResult, error)
+	Do(operation objectstore.Call) (observation.ObjectResult, error)
 	StateHash() (hash uint64, ok bool)
 }
 
@@ -41,17 +42,17 @@ type BrokerSubject interface {
 	StateHash() (hash uint64, ok bool)
 }
 
-type specObjectSubject struct{ store *speccheck.ObjectStore }
+type specObjectSubject struct{ store *objectstore.Spec }
 
-// NewSpecObjectSubject returns a fresh speccheck.ObjectStore as a subject. Use it
+// NewSpecObjectSubject returns a fresh objectstore.Spec as a subject. Use it
 // to run a suite spec against spec, and as the correct subject that an injected
 // bug wraps.
 func NewSpecObjectSubject() ObjectSubject {
-	return &specObjectSubject{store: speccheck.NewObjectStore()}
+	return &specObjectSubject{store: objectstore.NewSpec()}
 }
 
-func (s *specObjectSubject) Do(operation core.IOCall) (observation.ObjectResult, error) {
-	return observation.FromObjectCompletion(s.store.Exec(operation)), nil
+func (s *specObjectSubject) Do(operation objectstore.Call) (observation.ObjectResult, error) {
+	return observation.FromObjectResult(s.store.Exec(operation)), nil
 }
 
 func (s *specObjectSubject) StateHash() (uint64, bool) { return s.store.StateHash(), true }

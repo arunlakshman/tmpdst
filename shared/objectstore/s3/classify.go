@@ -1,4 +1,4 @@
-package s3store
+package s3
 
 import (
 	"context"
@@ -10,11 +10,11 @@ import (
 
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 
-	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/system"
+	"github.com/manifesterio/mds/shared/objectstore"
+	"github.com/manifesterio/mds/shared/status"
 )
 
-// Classifier is the system.ErrorClassifier for Obj* actions (lesson 1). Only PUT and
+// Classifier is the objectstore.Classifier for the object store calls (lesson 1). Only PUT and
 // DELETE mutate; GET and LIST never leave side effects.
 //
 //	*Error (truthful business error)          its code          NotApplied
@@ -27,45 +27,47 @@ import (
 // GET and LIST failures are always NotApplied with the same codes.
 type Classifier struct{}
 
-var _ system.ErrorClassifier = Classifier{}
+var _ objectstore.Classifier = Classifier{}
 
 // Classify maps an S3 error to an error code and outcome.
-func (Classifier) Classify(a runtime.IOCall, err error) (runtime.ErrCode, runtime.Outcome) {
+func (Classifier) Classify(a objectstore.Call, err error) (status.ErrCode, status.Outcome) {
 	code, out := classify(a, err)
 	slog.Debug("object call failed", "action", a, "err", err, "code", code, "outcome", out)
 	return code, out
 }
 
-func classify(a runtime.IOCall, err error) (runtime.ErrCode, runtime.Outcome) {
-	maybe := runtime.NotApplied
+func classify(a objectstore.Call, err error) (status.ErrCode, status.Outcome) {
+	maybe := status.NotApplied
 	switch a.(type) {
-	case runtime.ObjectPut, runtime.ObjectDelete:
-		maybe = runtime.MaybeApplied
+	case objectstore.Put, objectstore.Delete:
+		maybe = status.MaybeApplied
+	case objectstore.Get, objectstore.List:
+		// A failed read leaves no side effect, so maybe stays NotApplied.
 	}
 	if se, ok := errors.AsType[*Error](err); ok {
-		return se.Code, runtime.NotApplied
+		return se.Code, status.NotApplied
 	}
 	if isDial(err) {
-		return runtime.ErrUnavailable, runtime.NotApplied
+		return status.ErrUnavailable, status.NotApplied
 	}
 	switch apiCode(err) {
 	case "SlowDown", "ServiceUnavailable", "RequestLimitExceeded", "Throttling", "ThrottlingException":
-		return runtime.ErrUnavailable, runtime.NotApplied
+		return status.ErrUnavailable, status.NotApplied
 	}
 	if re, ok := errors.AsType[*awshttp.ResponseError](err); ok {
 		switch st := re.HTTPStatusCode(); {
 		case st == http.StatusServiceUnavailable || st == http.StatusTooManyRequests:
-			return runtime.ErrUnavailable, runtime.NotApplied
+			return status.ErrUnavailable, status.NotApplied
 		case st >= 400 && st < 500:
-			return runtime.ErrIO, runtime.NotApplied
+			return status.ErrIO, status.NotApplied
 		}
-		return runtime.ErrIO, maybe
+		return status.ErrIO, maybe
 	}
 	ne, isNet := errors.AsType[net.Error](err)
 	if errors.Is(err, context.DeadlineExceeded) || (isNet && ne.Timeout()) {
-		return runtime.ErrTimeout, maybe
+		return status.ErrTimeout, maybe
 	}
-	return runtime.ErrIO, maybe
+	return status.ErrIO, maybe
 }
 
 // isDial reports a failure to establish a connection (nothing was sent).

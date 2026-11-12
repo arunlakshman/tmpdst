@@ -9,6 +9,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // ObjectResult is what an object store call answered. Only the fields that
@@ -140,21 +141,20 @@ func diffSentence(field, expected, actual string) string {
 		", but the actual result has " + actual + "."
 }
 
-// FromObjectCompletion converts an object store completion into a result. It
-// panics on any other completion type, because that is a mistake in the test.
-func FromObjectCompletion(c core.IOResult) ObjectResult {
-	switch d := c.(type) {
-	case core.ObjectPutDone:
+// FromObjectResult converts an object store result into an ObjectResult. A Result
+// is always one of the four cases, so there is no error case.
+func FromObjectResult(r objectstore.Result) ObjectResult {
+	switch d := r.(type) {
+	case objectstore.PutDone:
 		return ObjectResult{Code: d.Err, Outcome: d.Outcome}
-	case core.ObjectGetDone:
+	case objectstore.GetDone:
 		return ObjectResult{Code: d.Err, Data: d.Data}
-	case core.ObjectDeleteDone:
+	case objectstore.DeleteDone:
 		return ObjectResult{Code: d.Err, Outcome: d.Outcome}
-	case core.ObjectListDone:
+	case objectstore.ListDone:
 		return ObjectResult{Code: d.Err, Keys: d.Keys}
 	}
-	panic("observation: FromObjectCompletion needs an object store completion, but got " +
-		reflect.TypeOf(c).String())
+	panic("observation: FromObjectResult got an unknown result type")
 }
 
 // FromControlPlaneDone converts a control-plane completion into a result. A

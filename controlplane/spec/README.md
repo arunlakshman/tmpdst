@@ -98,7 +98,7 @@ with `FailIfExists`.
 
 Concurrency and interleavings are not tested here. The simulator
 (`internal/verify/simulator`, `make sim`) does that. The object store has no
-model: its rules are a plain table in `internal/system/s3store/conform_test.go`.
+model: its rules are a plain table in `test/s3store/conform_test.go`.
 
 ## More checks, and replaying a failure
 

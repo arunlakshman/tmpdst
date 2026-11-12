@@ -10,6 +10,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakeobjectstore"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakeservicetest"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 const ms = machine.Duration(1_000_000)
@@ -25,35 +26,36 @@ func setup(f simulator.ObjectStoreFaults, seed uint64) (*fakeobjectstore.Engine,
 }
 
 func put(e *fakeobjectstore.Engine, c *fakeservicetest.Ctx, from machine.NodeInstance, request machine.RequestID, key, data string) {
-	e.Execute(c, from, core.ObjectPut{Req: request, Key: key, Data: []byte(data)})
+	e.Execute(c, from, core.ObjectCall{Call: objectstore.Put{Req: request, Key: key, Data: []byte(data)}})
 }
 
-func only[T core.EventData](t *testing.T, c *fakeservicetest.Ctx) T {
+// only returns the one result that was delivered, as the object store result type T.
+func only[T objectstore.Result](t *testing.T, c *fakeservicetest.Ctx) T {
 	t.Helper()
 	if len(c.Delivered) != 1 {
 		t.Fatalf("want 1 delivery, got %d", len(c.Delivered))
 	}
-	return c.Delivered[0].Body.(T)
+	return c.Delivered[0].Body.(core.ObjectDone).Result.(T)
 }
 
 func TestNormalPutGet(t *testing.T) {
 	e, c, a := setup(base(), 1)
 	put(e, c, a, 1, "k", "hello")
 	c.Run()
-	d := only[core.ObjectPutDone](t, c)
+	d := only[objectstore.PutDone](t, c)
 	if d.Err != core.OK || d.Outcome != core.Applied {
 		t.Fatal(d)
 	}
-	e.Execute(c, a, core.ObjectGet{Req: 2, Ref: core.SegmentRef{Key: "k"}})
-	e.Execute(c, a, core.ObjectGet{Req: 3, Ref: core.SegmentRef{Key: "nope"}})
+	e.Execute(c, a, core.ObjectCall{Call: objectstore.Get{Req: 2, Ref: core.SegmentRef{Key: "k"}}})
+	e.Execute(c, a, core.ObjectCall{Call: objectstore.Get{Req: 3, Ref: core.SegmentRef{Key: "nope"}}})
 	c.Run()
-	if g := c.Find(2).(core.ObjectGetDone); string(g.Data) != "hello" {
+	if g := c.Find(2).(core.ObjectDone).Result.(objectstore.GetDone); string(g.Data) != "hello" {
 		t.Fatal(g)
 	}
-	if g := c.Find(3).(core.ObjectGetDone); g.Err != core.ErrNotFound {
+	if g := c.Find(3).(core.ObjectDone).Result.(objectstore.GetDone); g.Err != core.ErrNotFound {
 		t.Fatal(g)
 	}
-	if !e.Handles(core.ObjectList{}) || e.Handles(core.ControlPlaneCall{}) {
+	if !e.Handles(core.ObjectCall{Call: objectstore.List{}}) || e.Handles(core.ControlPlaneCall{}) {
 		t.Fatal("Handles")
 	}
 }
@@ -64,7 +66,7 @@ func Test503(t *testing.T) {
 	e, c, a := setup(f, 1)
 	put(e, c, a, 1, "k", "x")
 	c.Run()
-	d := only[core.ObjectPutDone](t, c)
+	d := only[objectstore.PutDone](t, c)
 	if d.Err != core.ErrUnavailable || d.Outcome != core.NotApplied {
 		t.Fatal(d)
 	}
@@ -85,7 +87,7 @@ func TestOutageWindow(t *testing.T) {
 	put(e, c, a, 2, "k", "x")
 	c.Run()
 	for _, d := range c.Delivered {
-		if p := d.Body.(core.ObjectPutDone); p.Err != core.ErrUnavailable || p.Outcome != core.NotApplied {
+		if p := d.Body.(core.ObjectDone).Result.(objectstore.PutDone); p.Err != core.ErrUnavailable || p.Outcome != core.NotApplied {
 			t.Fatal(p)
 		}
 	}
@@ -96,7 +98,7 @@ func TestOutageWindow(t *testing.T) {
 	c.T = 10_000 * simulator.Time(ms)
 	put(e, c, a, 3, "k", "x")
 	c.Run()
-	if p := c.Delivered[2].Body.(core.ObjectPutDone); p.Err != core.OK {
+	if p := c.Delivered[2].Body.(core.ObjectDone).Result.(objectstore.PutDone); p.Err != core.OK {
 		t.Fatal(p)
 	}
 }
@@ -109,7 +111,7 @@ func TestTimeoutAppliesOrNot(t *testing.T) {
 		e, c, a := setup(f, seed)
 		put(e, c, a, 1, "k", "x")
 		c.Run()
-		d := only[core.ObjectPutDone](t, c)
+		d := only[objectstore.PutDone](t, c)
 		if d.Err != core.ErrTimeout || d.Outcome != core.MaybeApplied || c.Delivered[0].At != simulator.Time(f.CallerTimeout) {
 			t.Fatal(d, c.Delivered[0].At)
 		}
@@ -130,7 +132,7 @@ func TestLostResponseStillApplies(t *testing.T) {
 	e, c, a := setup(f, 1)
 	put(e, c, a, 1, "k", "x")
 	c.Run()
-	d := only[core.ObjectPutDone](t, c)
+	d := only[objectstore.PutDone](t, c)
 	if d.Err != core.ErrTimeout || d.Outcome != core.MaybeApplied {
 		t.Fatal(d)
 	}
@@ -138,9 +140,9 @@ func TestLostResponseStillApplies(t *testing.T) {
 		t.Fatal("not applied")
 	}
 	// A lost read still answers exactly once.
-	e.Execute(c, a, core.ObjectGet{Req: 2, Ref: core.SegmentRef{Key: "k"}})
+	e.Execute(c, a, core.ObjectCall{Call: objectstore.Get{Req: 2, Ref: core.SegmentRef{Key: "k"}}})
 	c.Run()
-	if g := c.Delivered[1].Body.(core.ObjectGetDone); g.Err != core.ErrTimeout {
+	if g := c.Delivered[1].Body.(core.ObjectDone).Result.(objectstore.GetDone); g.Err != core.ErrTimeout {
 		t.Fatal(g)
 	}
 }
@@ -178,15 +180,15 @@ func TestRecoveryStopsFaults(t *testing.T) {
 	e.EnterRecovery()
 	put(e, c, a, 2, "j", "y")
 	c.Run()
-	if p := c.Find(1).(core.ObjectPutDone); p.Err != core.ErrUnavailable {
+	if p := c.Find(1).(core.ObjectDone).Result.(objectstore.PutDone); p.Err != core.ErrUnavailable {
 		t.Fatal(p)
 	}
-	if p := c.Find(2).(core.ObjectPutDone); p.Err != core.OK || p.Outcome != core.Applied {
+	if p := c.Find(2).(core.ObjectDone).Result.(objectstore.PutDone); p.Err != core.OK || p.Outcome != core.Applied {
 		t.Fatal(p)
 	}
-	e.Execute(c, a, core.ObjectGet{Req: 3, Ref: core.SegmentRef{Key: "j"}})
+	e.Execute(c, a, core.ObjectCall{Call: objectstore.Get{Req: 3, Ref: core.SegmentRef{Key: "j"}}})
 	c.Run()
-	if g := c.Find(3).(core.ObjectGetDone); g.Err != core.OK || string(g.Data) != "y" {
+	if g := c.Find(3).(core.ObjectDone).Result.(objectstore.GetDone); g.Err != core.OK || string(g.Data) != "y" {
 		t.Fatal(g)
 	}
 }
@@ -197,9 +199,9 @@ func TestGetCorrupt(t *testing.T) {
 	e, c, a := setup(f, 1)
 	put(e, c, a, 1, "k", "hello world")
 	c.Run()
-	e.Execute(c, a, core.ObjectGet{Req: 2, Ref: core.SegmentRef{Key: "k"}})
+	e.Execute(c, a, core.ObjectCall{Call: objectstore.Get{Req: 2, Ref: core.SegmentRef{Key: "k"}}})
 	c.Run()
-	g := c.Delivered[1].Body.(core.ObjectGetDone)
+	g := c.Delivered[1].Body.(core.ObjectDone).Result.(objectstore.GetDone)
 	if g.Err != core.OK || bytes.Equal(g.Data, []byte("hello world")) || len(g.Data) != 11 {
 		t.Fatal(g)
 	}
@@ -237,12 +239,12 @@ func TestTruthAndGen(t *testing.T) {
 	if !slices.Equal(keys, []string{"a", "b"}) {
 		t.Fatal(keys)
 	}
-	e.Execute(c, a, core.ObjectGet{Req: 3, Ref: core.SegmentRef{Key: "a"}})
+	e.Execute(c, a, core.ObjectCall{Call: objectstore.Get{Req: 3, Ref: core.SegmentRef{Key: "a"}}})
 	c.Run()
 	if e.Gen() != g {
 		t.Fatal("read bumped Gen")
 	}
-	e.Execute(c, a, core.ObjectDelete{Req: 4, Key: "a"})
+	e.Execute(c, a, core.ObjectCall{Call: objectstore.Delete{Req: 4, Key: "a"}})
 	c.Run()
 	if e.Gen() != g+1 {
 		t.Fatal("delete did not bump Gen")
@@ -262,9 +264,9 @@ func TestDeterminism(t *testing.T) {
 			case 0:
 				put(e, c, a, machine.RequestID(i), k, "data-"+k)
 			case 1:
-				e.Execute(c, a, core.ObjectGet{Req: machine.RequestID(i), Ref: core.SegmentRef{Key: k}})
+				e.Execute(c, a, core.ObjectCall{Call: objectstore.Get{Req: machine.RequestID(i), Ref: core.SegmentRef{Key: k}}})
 			default:
-				e.Execute(c, a, core.ObjectDelete{Req: machine.RequestID(i), Key: k})
+				e.Execute(c, a, core.ObjectCall{Call: objectstore.Delete{Req: machine.RequestID(i), Key: k}})
 			}
 		}
 		mid := e.StateHash() // pending plans folded in

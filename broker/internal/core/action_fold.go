@@ -1,7 +1,10 @@
 //nolint:dupl // Fold methods are flat lists of fields. They look alike on purpose.
 package core
 
-import "github.com/manifesterio/mds/dst/trace"
+import (
+	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/shared/objectstore"
+)
 
 // Tag and Fold of every Action case. The tag numbers are frozen (see fold.go).
 
@@ -74,45 +77,41 @@ func (a Connect) Fold(h *trace.Hash) {
 	h.String(a.Addr)
 }
 
-// Tag returns the frozen trace-hash number of this action.
-func (ObjectPut) Tag() uint64 { return 108 }
-
-// Fold writes the action into the trace hash.
-func (a ObjectPut) Fold(h *trace.Hash) {
-	h.Uint64(a.Tag())
-	h.Uint64(uint64(a.Req))
-	h.String(a.Key)
-	h.Bytes(a.Data)
+// Tag returns the frozen trace-hash number of this action: 108 for a Put, 109 for a Get,
+// 110 for a Delete and 111 for a List.
+func (a ObjectCall) Tag() uint64 {
+	switch a.Call.(type) {
+	case objectstore.Put:
+		return 108
+	case objectstore.Get:
+		return 109
+	case objectstore.Delete:
+		return 110
+	case objectstore.List:
+		return 111
+	}
+	panic("core.ObjectCall: unknown object store call")
 }
 
-// Tag returns the frozen trace-hash number of this action.
-func (ObjectGet) Tag() uint64 { return 109 }
-
-// Fold writes the action into the trace hash.
-func (a ObjectGet) Fold(h *trace.Hash) {
+// Fold writes the action into the trace hash. Each case writes the bytes that the
+// separate action of that case wrote before the wrapper existed.
+func (a ObjectCall) Fold(h *trace.Hash) {
 	h.Uint64(a.Tag())
-	h.Uint64(uint64(a.Req))
-	foldSegmentRef(h, a.Ref)
-}
-
-// Tag returns the frozen trace-hash number of this action.
-func (ObjectDelete) Tag() uint64 { return 110 }
-
-// Fold writes the action into the trace hash.
-func (a ObjectDelete) Fold(h *trace.Hash) {
-	h.Uint64(a.Tag())
-	h.Uint64(uint64(a.Req))
-	h.String(a.Key)
-}
-
-// Tag returns the frozen trace-hash number of this action.
-func (ObjectList) Tag() uint64 { return 111 }
-
-// Fold writes the action into the trace hash.
-func (a ObjectList) Fold(h *trace.Hash) {
-	h.Uint64(a.Tag())
-	h.Uint64(uint64(a.Req))
-	h.String(a.Prefix)
+	switch c := a.Call.(type) {
+	case objectstore.Put:
+		h.Uint64(uint64(c.Req))
+		h.String(c.Key)
+		h.Bytes(c.Data)
+	case objectstore.Get:
+		h.Uint64(uint64(c.Req))
+		foldSegmentRef(h, c.Ref)
+	case objectstore.Delete:
+		h.Uint64(uint64(c.Req))
+		h.String(c.Key)
+	case objectstore.List:
+		h.Uint64(uint64(c.Req))
+		h.String(c.Prefix)
+	}
 }
 
 // Tag returns the frozen trace-hash number of this action.

@@ -10,6 +10,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakeservicetest"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 const ms = machine.Duration(1_000_000)
@@ -41,7 +42,7 @@ func last(c *fakeservicetest.Ctx) core.ControlPlaneDone {
 
 func TestNormalAndTruthful(t *testing.T) {
 	e, c, a := setup(base(), 1)
-	if !e.Handles(core.ControlPlaneCall{}) || e.Handles(core.ObjectPut{}) {
+	if !e.Handles(core.ControlPlaneCall{}) || e.Handles(core.ObjectCall{Call: objectstore.Put{}}) {
 		t.Fatal("Handles")
 	}
 	call(e, c, a, 3, commit("s1"))

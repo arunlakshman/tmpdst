@@ -1,91 +1,47 @@
 package contract
 
-import "strconv"
-
-// SegmentRef is a byte range inside an object in the object store.
-type SegmentRef struct {
-	Key string
-	Off int64
-	Len int64 // <= 0 means to the end of the object
-}
-
-// ErrCode is an error as plain data so events stay comparable and hashable.
-// It is folded into the hash: append-only from here on, never reordered.
-//
-// ErrNotFound and ErrConflict are always truthful; engines inject
-// only ErrTimeout, ErrUnavailable, ErrIO and ErrConnClosed. ErrCorrupt comes
-// only from a module's decoder, never from system.ErrorClassifier.
-type ErrCode uint16
-
-// ErrCode values.
-const (
-	OK             ErrCode = iota
-	ErrTimeout             // deadline passed, or the response was lost; see Outcome (a lost response is ErrTimeout+MaybeApplied, never silence)
-	ErrUnavailable         // 503 / throttled / overloaded
-	ErrNotFound
-	ErrConflict   // idempotency-key mismatch (same SegmentKey, different request)
-	_             // retired: was ErrFenced (decision 44); keeps the numbers below stable
-	ErrConnClosed // connection lost
-	ErrTooLarge
-	ErrCorrupt
-	ErrInvalid // malformed request; never retried
-	ErrIO      // anything else from the outside world
-
-	ErrUnknownMember             // group member id or group leader is not a member
-	ErrIllegalGeneration         // group generation does not match the one asked for
-	ErrUnknownPartition          // topic or partition does not exist
-	ErrRebalanceInProgress       // group is rebalancing; rejoin
-	ErrInconsistentGroupProtocol // members have no protocol in common, or a wrong protocol type
-	ErrTopicExists               // CreateTopic with FailIfExists: the topic is already there
+import (
+	"github.com/manifesterio/mds/shared/objectstore"
+	"github.com/manifesterio/mds/shared/status"
 )
 
-// Outcome states what a completion proves about side effects (lesson 1).
-// Folded into the hash: append-only from here on. A LostResponse surfaces as
-// ErrTimeout+MaybeApplied, never as silence.
-type Outcome uint8
+// SegmentRef is a byte range inside an object in the object store. It is defined in
+// shared/objectstore, because the shared object store code uses it. This name stays so
+// that the contract reads the same.
+type SegmentRef = objectstore.SegmentRef
 
-// Outcome values.
+// ErrCode is an error as plain data so events stay comparable and hashable. It is
+// defined in shared/status (see there for the rules and the values). This name stays so
+// that the contract reads the same.
+type ErrCode = status.ErrCode
+
+// Outcome states what a completion proves about side effects. It is defined in
+// shared/status. This name stays so that the contract reads the same.
+type Outcome = status.Outcome
+
+// ErrCode values. They are the values of shared/status.
 const (
-	NotApplied   Outcome = iota // provably no effect
-	MaybeApplied                // may have taken effect; retry only if idempotent
-	Applied                     // took effect (the reply itself may be unusable)
+	OK                           = status.OK
+	ErrTimeout                   = status.ErrTimeout
+	ErrUnavailable               = status.ErrUnavailable
+	ErrNotFound                  = status.ErrNotFound
+	ErrConflict                  = status.ErrConflict
+	ErrConnClosed                = status.ErrConnClosed
+	ErrTooLarge                  = status.ErrTooLarge
+	ErrCorrupt                   = status.ErrCorrupt
+	ErrInvalid                   = status.ErrInvalid
+	ErrIO                        = status.ErrIO
+	ErrUnknownMember             = status.ErrUnknownMember
+	ErrIllegalGeneration         = status.ErrIllegalGeneration
+	ErrUnknownPartition          = status.ErrUnknownPartition
+	ErrRebalanceInProgress       = status.ErrRebalanceInProgress
+	ErrInconsistentGroupProtocol = status.ErrInconsistentGroupProtocol
+	ErrTopicExists               = status.ErrTopicExists
 )
 
-// String returns the frozen spelling of e. Spellings are never changed.
-func (e ErrCode) String() string {
-	switch e {
-	case OK:
-		return "OK"
-	case ErrTimeout:
-		return "ErrTimeout"
-	case ErrUnavailable:
-		return "ErrUnavailable"
-	case ErrNotFound:
-		return "ErrNotFound"
-	case ErrConflict:
-		return "ErrConflict"
-	case ErrConnClosed:
-		return "ErrConnClosed"
-	case ErrTooLarge:
-		return "ErrTooLarge"
-	case ErrCorrupt:
-		return "ErrCorrupt"
-	case ErrInvalid:
-		return "ErrInvalid"
-	case ErrIO:
-		return "ErrIO"
-	case ErrUnknownMember:
-		return "ErrUnknownMember"
-	case ErrIllegalGeneration:
-		return "ErrIllegalGeneration"
-	case ErrUnknownPartition:
-		return "ErrUnknownPartition"
-	case ErrRebalanceInProgress:
-		return "ErrRebalanceInProgress"
-	case ErrInconsistentGroupProtocol:
-		return "ErrInconsistentGroupProtocol"
-	case ErrTopicExists:
-		return "ErrTopicExists"
-	}
-	return "ErrCode(" + strconv.FormatUint(uint64(e), 10) + ")"
-}
+// Outcome values. They are the values of shared/status.
+const (
+	NotApplied   = status.NotApplied
+	MaybeApplied = status.MaybeApplied
+	Applied      = status.Applied
+)

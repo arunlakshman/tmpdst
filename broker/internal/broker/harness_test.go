@@ -14,6 +14,7 @@ import (
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // testEnv is a seeded core.Environment that records assertion violations. It keeps its
@@ -80,7 +81,7 @@ type harness struct {
 	t      *testing.T
 	b      *Broker
 	env    *testEnv
-	store  *speccheck.ObjectStore
+	store  *objectstore.Spec
 	cp     *speccheck.ControlPlane
 	config Config
 	self   machine.NodeInstance
@@ -106,7 +107,7 @@ type harness struct {
 }
 
 func newHarness(t *testing.T, config Config) *harness {
-	h := &harness{t: t, env: &testEnv{state: 7}, store: speccheck.NewObjectStore(), cp: speccheck.NewControlPlane(),
+	h := &harness{t: t, env: &testEnv{state: 7}, store: objectstore.NewSpec(), cp: speccheck.NewControlPlane(),
 		config: config, timers: map[machine.TimerID]machine.TimerVersion{}, due: map[machine.TimerID]machine.NodeTime{},
 		clients: map[core.ConnID]*client{},
 		paused:  map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}
@@ -150,7 +151,10 @@ func (h *harness) run() {
 
 func (h *harness) deliver(c core.IOResult) {
 	_, isCP := c.(core.ControlPlaneDone)
-	_, isPut := c.(core.ObjectPutDone)
+	isPut := false
+	if d, ok := c.(core.ObjectDone); ok {
+		_, isPut = d.Result.(objectstore.PutDone)
+	}
 	if (isCP && h.holdCP) || (isPut && h.holdPut) {
 		h.held = append(h.held, c)
 		return
@@ -168,12 +172,11 @@ func (h *harness) releaseHeld() {
 
 func (h *harness) exec(a core.Action) {
 	switch a := a.(type) {
-	case core.ObjectPut:
-		h.puts = append(h.puts, a.Key)
-		run := func() core.IOResult { return h.store.Exec(a) }
-		h.deliver(h.objDone(a, run))
-	case core.ObjectGet:
-		run := func() core.IOResult { return h.store.Exec(a) }
+	case core.ObjectCall:
+		if put, ok := a.Call.(objectstore.Put); ok {
+			h.puts = append(h.puts, put.Key)
+		}
+		run := func() core.IOResult { return core.ObjectDone{Result: h.store.Exec(a.Call)} }
 		h.deliver(h.objDone(a, run))
 	case core.ControlPlaneCall:
 		h.cpCalls = append(h.cpCalls, a.Op)
@@ -207,6 +210,24 @@ func (h *harness) exec(a core.Action) {
 	case core.ShutdownDone:
 		h.exited = true
 	}
+}
+
+// putCall returns the Put inside an action, if the action is an object store Put.
+func putCall(a core.IOCall) (objectstore.Put, bool) {
+	if oc, ok := a.(core.ObjectCall); ok {
+		put, isPut := oc.Call.(objectstore.Put)
+		return put, isPut
+	}
+	return objectstore.Put{}, false
+}
+
+// getDone returns the GetDone inside a completion, if the completion is an object store GetDone.
+func getDone(r core.IOResult) (objectstore.GetDone, bool) {
+	if d, ok := r.(core.ObjectDone); ok {
+		g, isGet := d.Result.(objectstore.GetDone)
+		return g, isGet
+	}
+	return objectstore.GetDone{}, false
 }
 
 func (h *harness) objDone(a core.IOCall, run func() core.IOResult) core.IOResult {

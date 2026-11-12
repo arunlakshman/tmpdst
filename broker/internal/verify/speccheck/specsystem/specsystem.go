@@ -11,6 +11,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // Error is a spec failure as a Go error; Code is what a Classifier maps it to.
@@ -37,14 +38,14 @@ func locked[T any](ctx context.Context, mu *sync.Mutex, fn func() (T, core.ErrCo
 	return v, fail(code)
 }
 
-// ObjectStore is a system.ObjectStore over speccheck.ObjectStore.
+// ObjectStore is a system.ObjectStore over objectstore.Spec.
 type ObjectStore struct {
 	mu   sync.Mutex
-	spec *speccheck.ObjectStore
+	spec *objectstore.Spec
 }
 
 // NewObjectStore returns an empty store.
-func NewObjectStore() *ObjectStore { return &ObjectStore{spec: speccheck.NewObjectStore()} }
+func NewObjectStore() *ObjectStore { return &ObjectStore{spec: objectstore.NewSpec()} }
 
 // Put stores data under key.
 func (s *ObjectStore) Put(ctx context.Context, key string, data []byte) error {
@@ -53,18 +54,18 @@ func (s *ObjectStore) Put(ctx context.Context, key string, data []byte) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return fail(s.spec.Exec(core.ObjectPut{Key: key, Data: data}).(core.ObjectPutDone).Err)
+	return fail(s.spec.Exec(objectstore.Put{Key: key, Data: data}).(objectstore.PutDone).Err)
 }
 
 // Get returns the bytes referenced by ref.
-func (s *ObjectStore) Get(ctx context.Context, ref core.SegmentRef) ([]byte, error) {
+func (s *ObjectStore) Get(ctx context.Context, ref objectstore.SegmentRef) ([]byte, error) {
 	return locked(ctx, &s.mu, func() ([]byte, core.ErrCode) {
-		return s.objectBytes(core.ObjectGet{Ref: ref})
+		return s.objectBytes(objectstore.Get{Ref: ref})
 	})
 }
 
-func (s *ObjectStore) objectBytes(a core.ObjectGet) ([]byte, core.ErrCode) {
-	d := s.spec.Exec(a).(core.ObjectGetDone)
+func (s *ObjectStore) objectBytes(a objectstore.Get) ([]byte, core.ErrCode) {
+	d := s.spec.Exec(a).(objectstore.GetDone)
 	return d.Data, d.Err
 }
 
@@ -75,18 +76,18 @@ func (s *ObjectStore) Delete(ctx context.Context, key string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return fail(s.spec.Exec(core.ObjectDelete{Key: key}).(core.ObjectDeleteDone).Err)
+	return fail(s.spec.Exec(objectstore.Delete{Key: key}).(objectstore.DeleteDone).Err)
 }
 
 // List returns the keys that start with prefix.
 func (s *ObjectStore) List(ctx context.Context, prefix string) ([]string, error) {
 	return locked(ctx, &s.mu, func() ([]string, core.ErrCode) {
-		return s.objectKeys(core.ObjectList{Prefix: prefix})
+		return s.objectKeys(objectstore.List{Prefix: prefix})
 	})
 }
 
-func (s *ObjectStore) objectKeys(a core.ObjectList) ([]string, core.ErrCode) {
-	d := s.spec.Exec(a).(core.ObjectListDone)
+func (s *ObjectStore) objectKeys(a objectstore.List) ([]string, core.ErrCode) {
+	d := s.spec.Exec(a).(objectstore.ListDone)
 	return d.Keys, d.Err
 }
 

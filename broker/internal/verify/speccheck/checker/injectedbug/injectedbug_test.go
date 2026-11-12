@@ -5,11 +5,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/generator"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/injectedbug"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/observation"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/suites"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 const seedBudget = 60
@@ -87,7 +87,7 @@ type noHashObject struct{ suites.ObjectSubject }
 
 func (noHashObject) StateHash() (uint64, bool) { return 0, false }
 
-func (n noHashObject) Do(operation core.IOCall) (observation.ObjectResult, error) {
+func (n noHashObject) Do(operation objectstore.Call) (observation.ObjectResult, error) {
 	return n.ObjectSubject.Do(operation)
 }
 

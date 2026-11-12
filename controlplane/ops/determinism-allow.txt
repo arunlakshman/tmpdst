@@ -55,3 +55,9 @@ github.com/manifesterio/mds/dst/rng
 github.com/manifesterio/mds/dst/sim
 github.com/manifesterio/mds/dst/sched
 github.com/manifesterio/mds/dst/trace
+
+# Shared code of this repo (github.com/manifesterio/mds/shared). First-party, so no audit record.
+# objectstore: the object store calls, results and spec as plain types (no I/O). status: ErrCode
+# and Outcome. Deliberately absent: clock (real time), objectstore/s3 (the AWS SDK).
+github.com/manifesterio/mds/shared/objectstore
+github.com/manifesterio/mds/shared/status

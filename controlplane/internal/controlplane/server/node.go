@@ -19,9 +19,9 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/internal/system/live"
-	"github.com/manifesterio/mds/controlplane/internal/system/realclock"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/sched"
+	"github.com/manifesterio/mds/shared/clock"
 )
 
 // Config wires a Node.
@@ -90,7 +90,7 @@ func New(config Config) *Node {
 		config.Self = machine.NodeInstance{Node: "cp"}
 	}
 	if config.Clock == nil {
-		config.Clock = realclock.New()
+		config.Clock = clock.NewReal()
 	}
 	if config.Env == nil {
 		config.Env = &productionEnvironment{}

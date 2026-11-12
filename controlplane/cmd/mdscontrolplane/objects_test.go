@@ -6,12 +6,12 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/system"
-	"github.com/manifesterio/mds/controlplane/internal/system/s3store"
+	"github.com/manifesterio/mds/shared/objectstore"
+	s3store "github.com/manifesterio/mds/shared/objectstore/s3"
 )
 
 // missingObjectStore answers every Get like a real S3 bucket with no such key.
-type missingObjectStore struct{ system.ObjectStore }
+type missingObjectStore struct{ objectstore.Store }
 
 func (missingObjectStore) Get(context.Context, runtime.SegmentRef) ([]byte, error) {
 	return nil, &s3store.Error{Code: runtime.ErrNotFound}

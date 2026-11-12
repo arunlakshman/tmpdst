@@ -1,12 +1,13 @@
-// Package speccheck holds the specs of the outside world: the object store
-// (ObjectStore), the control plane (ControlPlane) and the broker (Broker).
+// Package speccheck holds the specs of the outside world: the control plane (ControlPlane)
+// and the broker (Broker). The spec of the object store is objectstore.Spec in
+// shared/objectstore, because the control plane uses the same object store.
 // A spec is a small program that shows the correct behavior. It
 // has no faults, it runs one operation at a time, and it keeps plain data. It
 // is short so that a reader can see that it is correct.
 //
-// ObjectStore and ControlPlane answer a core.IOCall with a core.IOResult
-// through Exec. Broker has Append and Read, for one Kafka partition. All three
-// have a StateHash.
+// ControlPlane answers a core.IOCall with a core.IOResult through Exec, and
+// objectstore.Spec answers an objectstore.Call with an objectstore.Result. Broker
+// has Append and Read, for one Kafka partition. All three have a StateHash.
 //
 // A spec is also used as a test fake (the adapters over the specs are in
 // speccheck/specsystem). The main use is as an oracle: a checker we trust to say if a
@@ -26,7 +27,8 @@
 //	    against ObjectStore. Control-plane store conformance (mem, gRPC, applier)
 //	    moved to mds-controlplane with the CP extraction (docs/cp-extraction.md).
 //	    The S3 test needs MDS_S3_ENDPOINT.
-//	    Test: internal/system/s3store/conform_test.go.
+//	    Test: internal/verify/speccheck/s3conform/conform_test.go (the adapter is
+//	    shared/objectstore/s3).
 //	C4  The Kafka oracle (in sim/kafka) is compared with Broker and
 //	    ControlPlane. The oracle must accept the histories built from the
 //	    specs and must reject every fault that the test plants in a history.
@@ -47,7 +49,8 @@
 //	      | rejects histories)                | ControlPlane         | specs are the reference
 //
 // The specs themselves are checked in this package. The unit tests check each
-// rule. ObjectStore is compared with a sorted-slice model. ControlPlane is
+// rule. objectstore.Spec is compared with a sorted-slice model (in shared/objectstore,
+// spec_test.go). ControlPlane is
 // compared with a naive model made of maps and loops (controlplane_model_test.go)
 // and its invariants are checked: offsets are contiguous, the end offset equals
 // the committed counts, and a repeated commit gives the same answer. Broker

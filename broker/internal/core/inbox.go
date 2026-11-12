@@ -23,7 +23,7 @@ import (
 func InboxKindOf(b EventData) machine.Class {
 	switch b.(type) {
 	case NodeStarted, StopRequest, TimerFired, ConnectDone,
-		ObjectPutDone, ObjectGetDone, ObjectDeleteDone, ObjectListDone,
+		ObjectDone,
 		ControlPlaneDone, ControlPlaneDeliver,
 		LiveBrokers, SendDone:
 		return machine.Control

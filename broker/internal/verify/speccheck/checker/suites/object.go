@@ -6,11 +6,11 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/generator"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/observation"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 const (
@@ -26,7 +26,7 @@ const (
 
 // ObjectPair is a fresh spec and a fresh subject of the object store suite.
 type ObjectPair struct {
-	spec    *speccheck.ObjectStore
+	spec    *objectstore.Spec
 	subject ObjectSubject
 	extra   machine.RequestID
 }
@@ -45,10 +45,10 @@ func (p *ObjectPair) nextReq() machine.RequestID {
 // empty prefix returns the sorted keys of the spec. The suite gives the
 // subject its own copy of the data of a Put and writes over that copy after the
 // call, so a subject that keeps the caller's slice returns wrong data later.
-func ObjectStoreComparator(p generator.InputProfile, newSubject func() ObjectSubject) checker.SpecChecker[*ObjectPair, core.IOCall] {
-	return checker.SpecChecker[*ObjectPair, core.IOCall]{
-		Name:          "core.IOCall",
-		New:           func() *ObjectPair { return &ObjectPair{spec: speccheck.NewObjectStore(), subject: newSubject()} },
+func ObjectStoreComparator(p generator.InputProfile, newSubject func() ObjectSubject) checker.SpecChecker[*ObjectPair, objectstore.Call] {
+	return checker.SpecChecker[*ObjectPair, objectstore.Call]{
+		Name:          "objectstore.Call",
+		New:           func() *ObjectPair { return &ObjectPair{spec: objectstore.NewSpec(), subject: newSubject()} },
 		Gen:           generator.ObjectOps(p),
 		Step:          objectStep,
 		Invariant:     objectInvariant,
@@ -66,8 +66,8 @@ func ObjectStore(t checker.Reporter, p generator.InputProfile, newSubject func()
 	checker.Run(t, ObjectStoreComparator(p, newSubject), opts)
 }
 
-func objectStep(p *ObjectPair, operation core.IOCall) error {
-	specResult := observation.FromObjectCompletion(p.spec.Exec(operation))
+func objectStep(p *ObjectPair, operation objectstore.Call) error {
+	specResult := observation.FromObjectResult(p.spec.Exec(operation))
 	subjectOp, overwrite := objectOpForSubject(operation)
 	subjectResult, err := p.subject.Do(subjectOp)
 	overwrite()
@@ -90,8 +90,8 @@ func objectStep(p *ObjectPair, operation core.IOCall) error {
 // objectOpForSubject returns op with its own copy of the Put data, and a
 // function that writes over that copy. The copy keeps the generated sequence
 // intact for replay while still testing that the subject copies its input.
-func objectOpForSubject(operation core.IOCall) (core.IOCall, func()) {
-	put, ok := operation.(core.ObjectPut)
+func objectOpForSubject(operation objectstore.Call) (objectstore.Call, func()) {
+	put, ok := operation.(objectstore.Put)
 	if !ok {
 		return operation, func() {}
 	}
@@ -104,7 +104,7 @@ func objectOpForSubject(operation core.IOCall) (core.IOCall, func()) {
 }
 
 func objectInvariant(p *ObjectPair) error {
-	result, err := p.subject.Do(core.ObjectList{Req: p.nextReq()})
+	result, err := p.subject.Do(objectstore.List{Req: p.nextReq()})
 	if err != nil {
 		return fmt.Errorf("the subject could not list all keys: %w", err)
 	}

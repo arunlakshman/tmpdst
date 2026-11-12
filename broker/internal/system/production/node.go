@@ -15,8 +15,9 @@ import (
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
-	"github.com/manifesterio/mds/broker/internal/system/realclock"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/clock"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // NodeConfig is everything one broker process needs.
@@ -26,7 +27,7 @@ type NodeConfig struct {
 	Listener net.Listener
 
 	Objects      system.ObjectStore
-	ObjClassify  system.ErrorClassifier
+	ObjClassify  objectstore.Classifier
 	ControlPlane system.ControlPlane
 	CPClassify   system.ErrorClassifier
 
@@ -94,7 +95,7 @@ func Start(ctx context.Context, config NodeConfig) (*Node, error) {
 		go n.stopOn(config.Shutdown)
 	}
 	b := system.Dependencies{
-		Clock: realclock.New(), Objects: config.Objects, ControlPlane: config.ControlPlane, Connections: nt,
+		Clock: clock.NewReal(), Objects: config.Objects, ControlPlane: config.ControlPlane, Connections: nt,
 		Classifier: exec.class, Env: env, Inbox: in, Facts: config.Facts,
 		Shutdown: n.stop, StopGrace: machine.Duration(config.StopGrace),
 	}

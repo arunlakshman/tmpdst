@@ -11,6 +11,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // mutation injects a bug for the mutant tests; zero is the real broker.
@@ -150,14 +151,8 @@ func (b *Broker) Step(event core.Event) []core.Action {
 		}
 	case core.TimerFired:
 		acts = b.onTimer(e)
-	case core.ObjectPutDone:
-		if o := b.findReq(e.Req); o != nil && o.state == statePut {
-			acts = b.onPut(o, e)
-		}
-	case core.ObjectGetDone:
-		if o := b.findReq(e.Req); o != nil && o.state == stateGet {
-			acts = b.onGet(o, e)
-		}
+	case core.ObjectDone:
+		acts = b.onObject(e.Result)
 	case core.ControlPlaneDone:
 		acts = b.onCP(e)
 	}
@@ -315,10 +310,26 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 
 func (b *Broker) put(o *op) []core.Action {
 	o.state, o.request = statePut, b.nextRequestID()
-	return []core.Action{core.ObjectPut{Req: o.request, Key: o.key, Data: o.segment}}
+	return []core.Action{core.ObjectCall{Call: objectstore.Put{Req: o.request, Key: o.key, Data: o.segment}}}
 }
 
-func (b *Broker) onPut(o *op, e core.ObjectPutDone) []core.Action {
+// onObject routes an object store result to the operation that waits for it.
+func (b *Broker) onObject(result objectstore.Result) []core.Action {
+	switch r := result.(type) {
+	case objectstore.PutDone:
+		if o := b.findReq(r.Req); o != nil && o.state == statePut {
+			return b.onPut(o, r)
+		}
+	case objectstore.GetDone:
+		if o := b.findReq(r.Req); o != nil && o.state == stateGet {
+			return b.onGet(o, r)
+		}
+	case objectstore.DeleteDone, objectstore.ListDone:
+	}
+	return nil
+}
+
+func (b *Broker) onPut(o *op, e objectstore.PutDone) []core.Action {
 	if e.Err != core.OK {
 		return b.retryLater(o, statePut)
 	}
@@ -405,10 +416,10 @@ func (b *Broker) onLookup(o *op, e core.ControlPlaneDone) []core.Action {
 
 func (b *Broker) get(o *op) []core.Action {
 	o.state, o.request = stateGet, b.nextRequestID()
-	return []core.Action{core.ObjectGet{Req: o.request, Ref: core.SegmentRef{Key: o.ref.Key}}}
+	return []core.Action{core.ObjectCall{Call: objectstore.Get{Req: o.request, Ref: core.SegmentRef{Key: o.ref.Key}}}}
 }
 
-func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
+func (b *Broker) onGet(o *op, e objectstore.GetDone) []core.Action {
 	if e.Err != core.OK {
 		if e.Err == core.ErrNotFound { // committed segments are never deleted
 			b.env.Unreachable(committedSegmentMissing)

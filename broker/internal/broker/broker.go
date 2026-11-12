@@ -21,6 +21,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // Fixed timer ids; retry timers use the id of the segment or op they belong to
@@ -104,10 +105,8 @@ func (b *Broker) Step(event core.Event) []core.Action {
 		acts = b.onClosed(e)
 	case core.TimerFired:
 		acts = b.onTimer(e)
-	case core.ObjectPutDone:
-		acts = b.onPut(e)
-	case core.ObjectGetDone:
-		acts = b.onGet(e)
+	case core.ObjectDone:
+		acts = b.onObject(e.Result)
 	case core.ControlPlaneDone:
 		acts = b.onControlPlane(e)
 	case core.LiveBrokers:
@@ -257,14 +256,28 @@ func (b *Broker) onControlPlane(e core.ControlPlaneDone) []core.Action {
 	return nil
 }
 
-func (b *Broker) onPut(e core.ObjectPutDone) []core.Action {
+// onObject routes an object store result. The broker sends only Put and Get, so a
+// DeleteDone or a ListDone is not expected and is ignored.
+func (b *Broker) onObject(result objectstore.Result) []core.Action {
+	switch r := result.(type) {
+	case objectstore.PutDone:
+		return b.onPut(r)
+	case objectstore.GetDone:
+		return b.onGet(r)
+	case objectstore.DeleteDone, objectstore.ListDone:
+		return nil
+	}
+	return nil
+}
+
+func (b *Broker) onPut(e objectstore.PutDone) []core.Action {
 	if s := b.segmentByRequest(e.Req, segmentUpload); s != nil {
 		return b.onPutDone(s, e)
 	}
 	return nil
 }
 
-func (b *Broker) onGet(e core.ObjectGetDone) []core.Action {
+func (b *Broker) onGet(e objectstore.GetDone) []core.Action {
 	if o := b.findOp(e.Req); o != nil && o.state == opGet {
 		return b.onFetchGet(o, e)
 	}

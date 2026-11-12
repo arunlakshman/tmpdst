@@ -1,4 +1,7 @@
-package s3store
+// Package fakes3 is a small fake of the S3 service for tests. It speaks the path-style
+// requests that the S3 adapter needs, and runs in the process (net/http/httptest), so a
+// test needs no network and no container. It is test support code, not production code.
+package fakes3
 
 import (
 	"encoding/xml"
@@ -13,25 +16,34 @@ import (
 	"testing"
 )
 
-// fakeS3 is the minimal path-style S3 the store needs: bucket create, object
-// PUT/GET (with Range)/HEAD/DELETE and ListObjectsV2. inject, if set, may
+// Server is the minimal path-style S3 the store needs: bucket create, object
+// PUT/GET (with Range)/HEAD/DELETE and ListObjectsV2. Inject, if set, may
 // answer a request with an error before it is served.
-type fakeS3 struct {
+type Server struct {
 	mu      sync.Mutex
-	objs    map[string][]byte // "bucket/key"
+	Objs    map[string][]byte // "bucket/key". Read it only when no request is running.
 	buckets map[string]bool
-	inject  func(r *http.Request) (status int, code string)
-	srv     *httptest.Server
-	calls   int
+	// Inject answers a request with an HTTP status and an S3 error code. Return status 0
+	// to serve the request as usual. Set it only when no request is running.
+	Inject func(r *http.Request) (status int, code string)
+	// URL is the address of the server, for the Endpoint of the adapter.
+	URL   string
+	srv   *httptest.Server
+	Calls int // the number of requests so far. Read it only when no request is running.
 }
 
-func newFakeS3(t *testing.T) *fakeS3 {
+// New starts a fake S3 server. It stops when the test ends.
+func New(t testing.TB) *Server {
 	t.Helper()
-	f := &fakeS3{objs: map[string][]byte{}, buckets: map[string]bool{}}
+	f := &Server{Objs: map[string][]byte{}, buckets: map[string]bool{}}
 	f.srv = httptest.NewServer(f)
+	f.URL = f.srv.URL
 	t.Cleanup(f.srv.Close)
 	return f
 }
+
+// Close stops the server before the test ends (a test of a dead endpoint).
+func (f *Server) Close() { f.srv.Close() }
 
 func s3Error(w http.ResponseWriter, r *http.Request, status int, code string) {
 	w.Header().Set("Content-Type", "application/xml")
@@ -41,12 +53,12 @@ func s3Error(w http.ResponseWriter, r *http.Request, status int, code string) {
 	}
 }
 
-func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (f *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.calls++
-	if f.inject != nil {
-		if st, code := f.inject(r); st != 0 {
+	f.Calls++
+	if f.Inject != nil {
+		if st, code := f.Inject(r); st != 0 {
 			_, _ = io.Copy(io.Discard, r.Body)
 			s3Error(w, r, st, code)
 			return
@@ -65,9 +77,9 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.list(w, r, bucket)
 	case r.Method == http.MethodPut:
 		data, _ := io.ReadAll(r.Body)
-		f.objs[path] = data
+		f.Objs[path] = data
 	case r.Method == http.MethodDelete:
-		delete(f.objs, path)
+		delete(f.Objs, path)
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodGet || r.Method == http.MethodHead:
 		f.get(w, r, path)
@@ -76,8 +88,8 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (f *fakeS3) get(w http.ResponseWriter, r *http.Request, path string) {
-	data, ok := f.objs[path]
+func (f *Server) get(w http.ResponseWriter, r *http.Request, path string) {
+	data, ok := f.Objs[path]
 	if !ok {
 		s3Error(w, r, 404, "NoSuchKey")
 		return
@@ -105,10 +117,10 @@ func (f *fakeS3) get(w http.ResponseWriter, r *http.Request, path string) {
 	}
 }
 
-func (f *fakeS3) list(w http.ResponseWriter, r *http.Request, bucket string) {
+func (f *Server) list(w http.ResponseWriter, r *http.Request, bucket string) {
 	prefix := r.URL.Query().Get("prefix")
 	var keys []string
-	for p := range f.objs {
+	for p := range f.Objs {
 		if k, ok := strings.CutPrefix(p, bucket+"/"); ok && strings.HasPrefix(k, prefix) {
 			keys = append(keys, k)
 		}
@@ -128,8 +140,8 @@ func (f *fakeS3) list(w http.ResponseWriter, r *http.Request, bucket string) {
 	_ = xml.NewEncoder(w).Encode(res)
 }
 
-// newSlow is an endpoint that never answers until release is closed.
-func newSlow(release chan struct{}) *httptest.Server {
+// NewSlow is an endpoint that never answers until release is closed.
+func NewSlow(release chan struct{}) *httptest.Server {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():

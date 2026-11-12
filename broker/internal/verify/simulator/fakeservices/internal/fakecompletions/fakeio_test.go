@@ -9,6 +9,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 const ms = machine.Duration(1_000_000)
@@ -32,35 +33,44 @@ func fresh(c *CompletionCore) uint64 {
 	return c.StateHash()
 }
 
+// objectCall returns the object store call inside an action.
+func objectCall(a core.IOCall) objectstore.Call { return a.(core.ObjectCall).Call }
+
 func TestSpecHashCacheObjectStore(t *testing.T) {
-	spec := speccheck.NewObjectStore()
+	spec := objectstore.NewSpec()
 	c := New(CompletionHooks{
 		Name: "o", Prefix: "obj", Params: params(),
-		Spec: func(a core.IOCall) core.IOResult { return spec.Exec(a) },
+		Spec: func(a core.IOCall) core.IOResult { return core.ObjectDone{Result: spec.Exec(objectCall(a))} },
 		Mutating: func(a core.IOCall) bool {
-			switch a.(type) {
-			case core.ObjectPut, core.ObjectDelete:
+			switch objectCall(a).(type) {
+			case objectstore.Put, objectstore.Delete:
 				return true
+			case objectstore.Get, objectstore.List:
+				return false
 			}
 			return false
 		},
 		Fail: func(a core.IOCall, e core.ErrCode, o core.Outcome) core.IOResult {
-			switch a := a.(type) {
-			case core.ObjectPut:
-				return core.ObjectPutDone{Req: a.Req, Err: e, Outcome: o}
-			case core.ObjectDelete:
-				return core.ObjectDeleteDone{Req: a.Req, Err: e, Outcome: o}
-			case core.ObjectGet:
-				return core.ObjectGetDone{Req: a.Req, Err: e}
+			switch a := objectCall(a).(type) {
+			case objectstore.Put:
+				return core.ObjectDone{Result: objectstore.PutDone{Req: a.Req, Err: e, Outcome: o}}
+			case objectstore.Delete:
+				return core.ObjectDone{Result: objectstore.DeleteDone{Req: a.Req, Err: e, Outcome: o}}
+			case objectstore.Get:
+				return core.ObjectDone{Result: objectstore.GetDone{Req: a.Req, Err: e}}
+			case objectstore.List:
+				return core.ObjectDone{Result: objectstore.ListDone{Req: a.Req, Err: e}}
 			}
-			return core.ObjectListDone{Req: a.RequestID(), Err: e}
+			panic("not an object store call")
 		},
 		Changed: func(c core.IOResult) bool {
-			switch c := c.(type) {
-			case core.ObjectPutDone:
+			switch c := c.(core.ObjectDone).Result.(type) {
+			case objectstore.PutDone:
 				return c.Outcome == core.Applied
-			case core.ObjectDeleteDone:
+			case objectstore.DeleteDone:
 				return c.Outcome == core.Applied
+			case objectstore.GetDone, objectstore.ListDone:
+				return false
 			}
 			return false
 		},
@@ -75,11 +85,11 @@ func TestSpecHashCacheObjectStore(t *testing.T) {
 		request := machine.RequestID(i)
 		switch r.Between(0, 4) {
 		case 0, 1:
-			c.Execute(ctx, from, core.ObjectPut{Req: request, Key: k, Data: []byte{byte(i)}})
+			c.Execute(ctx, from, core.ObjectCall{Call: objectstore.Put{Req: request, Key: k, Data: []byte{byte(i)}}})
 		case 2:
-			c.Execute(ctx, from, core.ObjectDelete{Req: request, Key: k})
+			c.Execute(ctx, from, core.ObjectCall{Call: objectstore.Delete{Req: request, Key: k}})
 		default:
-			c.Execute(ctx, from, core.ObjectGet{Req: request, Ref: core.SegmentRef{Key: k}})
+			c.Execute(ctx, from, core.ObjectCall{Call: objectstore.Get{Req: request, Ref: core.SegmentRef{Key: k}}})
 		}
 		if r.Chance(0.3) {
 			ctx.Run()

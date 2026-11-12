@@ -20,6 +20,7 @@ import (
 const (
 	module = "github.com/manifesterio/mds/controlplane/"
 	dst    = "github.com/manifesterio/mds/dst"
+	shared = "github.com/manifesterio/mds/shared"
 	cp     = "internal/controlplane/"
 	rt     = "internal/runtime"
 	// contract and spec are public: the broker imports them. They are in the module root, not under internal/.
@@ -71,9 +72,9 @@ func local(path string) string {
 	return ""
 }
 
-// thirdParty tells whether a path is a package of another module (not std, not dst).
+// thirdParty tells whether a path is a package of another module (not std, not dst, not shared: both are first-party modules of this repo).
 func thirdParty(path string) bool {
-	return local(path) == "" && strings.Contains(strings.Split(path, "/")[0], ".") && !strings.HasPrefix(path, dst)
+	return local(path) == "" && strings.Contains(strings.Split(path, "/")[0], ".") && !strings.HasPrefix(path, dst) && !strings.HasPrefix(path, shared)
 }
 
 // The domain packages. Each is one bounded piece of the control plane, and the
@@ -189,7 +190,7 @@ func check(pkgs map[string]pkg) problems {
 	p.onlyImports(pkgs, "internal/system/live", nil, true)
 	// The log adapters import the port and little else of the module.
 	for _, a := range []string{"dynamolog", "sqllog"} {
-		p.onlyImports(pkgs, cp+"executor/"+a, []string{cp + "executor", rt, "internal/system/realclock"}, false)
+		p.onlyImports(pkgs, cp+"executor/"+a, []string{cp + "executor", rt}, false)
 	}
 	// The log entries and the shared messages do not pull in grpc: only the service package does.
 	// Every api package imports the options of protoc-gen-mdswire, which import no package of the module.
@@ -269,7 +270,7 @@ func TestImportRulesCanFail(t *testing.T) {
 		{"(c) spec imports the engine", with(real, spec, cp+"metadb/engine"), spec, cp + "metadb/engine"},
 		{"(d) the server imports spec", with(real, cp+"server", spec), cp + "server", spec},
 		{"(d) the binary imports testinfra", with(real, "cmd/mdscontrolplane", infra), "cmd/mdscontrolplane", infra},
-		{"(d) a system package imports testinfra", with(real, "internal/system/s3store", infra), "internal/system/s3store", infra},
+		{"(d) a system package imports testinfra", with(real, "internal/system/live", infra), "internal/system/live", infra},
 		{"(d) the simulator imports testinfra", with(real, "internal/verify/simulator", infra), "internal/verify/simulator", infra},
 		{"(d) the conformance suite imports testinfra", with(real, "test/conformance", infra), "test/conformance", infra},
 		{"(d) runtime imports spec", with(real, rt, spec), rt, spec},

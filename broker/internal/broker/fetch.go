@@ -7,6 +7,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // maxFetchWait caps MaxWait, so one Fetch cannot hold a connection for long.
@@ -169,7 +170,7 @@ func (b *Broker) endParked(match func(*operation) bool) {
 // onFetchGet verifies one batch read from the object store. A corrupt GET is
 // never returned: it is retried (the object itself is intact; S3 checksums
 // cover whole objects but not byte ranges, decision 27).
-func (b *Broker) onFetchGet(o *operation, e core.ObjectGetDone) []core.Action {
+func (b *Broker) onFetchGet(o *operation, e objectstore.GetDone) []core.Action {
 	rg := o.ranges[o.next]
 	if e.Err == core.ErrNotFound { // committed segments are never deleted
 		b.env.Unreachable(committedSegmentMissing)

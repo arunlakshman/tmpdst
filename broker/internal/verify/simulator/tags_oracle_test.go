@@ -7,6 +7,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // This file is the check for the Fold methods of the core values.
@@ -86,30 +87,8 @@ func (h *stateHasher) oldEvent(b core.EventData) {
 
 func (h *stateHasher) oldEventDone(b core.EventData) {
 	switch e := b.(type) {
-	case core.ObjectPutDone:
-		h.Uint64(9)
-		h.Uint64(uint64(e.Req))
-		h.String(e.Key)
-		h.Uint64(uint64(e.Err))
-		h.Uint64(uint64(e.Outcome))
-	case core.ObjectGetDone:
-		h.Uint64(10)
-		h.Uint64(uint64(e.Req))
-		h.Bytes(e.Data)
-		h.Uint64(uint64(e.Err))
-	case core.ObjectDeleteDone:
-		h.Uint64(11)
-		h.Uint64(uint64(e.Req))
-		h.Uint64(uint64(e.Err))
-		h.Uint64(uint64(e.Outcome))
-	case core.ObjectListDone:
-		h.Uint64(12)
-		h.Uint64(uint64(e.Req))
-		h.Uint64(uint64(e.Err))
-		h.Uint64(uint64(len(e.Keys)))
-		for _, k := range e.Keys {
-			h.String(k)
-		}
+	case core.ObjectDone:
+		h.oldObjectResult(e.Result)
 	case core.ControlPlaneDone:
 		h.Uint64(13)
 		h.Uint64(uint64(e.Req))
@@ -131,6 +110,37 @@ func (h *stateHasher) oldEventDone(b core.EventData) {
 		}
 	default:
 		panic(fmt.Sprintf("sim: trace hash: untagged event %T", b))
+	}
+}
+
+// oldObjectResult writes the four object store results with the numbers 9 to 12, as the
+// four separate events were written before the wrapper existed.
+func (h *stateHasher) oldObjectResult(r objectstore.Result) {
+	switch e := r.(type) {
+	case objectstore.PutDone:
+		h.Uint64(9)
+		h.Uint64(uint64(e.Req))
+		h.String(e.Key)
+		h.Uint64(uint64(e.Err))
+		h.Uint64(uint64(e.Outcome))
+	case objectstore.GetDone:
+		h.Uint64(10)
+		h.Uint64(uint64(e.Req))
+		h.Bytes(e.Data)
+		h.Uint64(uint64(e.Err))
+	case objectstore.DeleteDone:
+		h.Uint64(11)
+		h.Uint64(uint64(e.Req))
+		h.Uint64(uint64(e.Err))
+		h.Uint64(uint64(e.Outcome))
+	case objectstore.ListDone:
+		h.Uint64(12)
+		h.Uint64(uint64(e.Req))
+		h.Uint64(uint64(e.Err))
+		h.Uint64(uint64(len(e.Keys)))
+		for _, k := range e.Keys {
+			h.String(k)
+		}
 	}
 }
 
@@ -168,25 +178,34 @@ func (h *stateHasher) oldAction(a core.Action) {
 	}
 }
 
-func (h *stateHasher) oldActionIO(a core.Action) {
-	switch x := a.(type) {
-	case core.ObjectPut:
+// oldObjectCall writes the four object store calls with the numbers 108 to 111, as the
+// four separate actions were written before the wrapper existed.
+func (h *stateHasher) oldObjectCall(c objectstore.Call) {
+	switch x := c.(type) {
+	case objectstore.Put:
 		h.Uint64(108)
 		h.Uint64(uint64(x.Req))
 		h.String(x.Key)
 		h.Bytes(x.Data)
-	case core.ObjectGet:
+	case objectstore.Get:
 		h.Uint64(109)
 		h.Uint64(uint64(x.Req))
 		h.oldSegmentRef(x.Ref)
-	case core.ObjectDelete:
+	case objectstore.Delete:
 		h.Uint64(110)
 		h.Uint64(uint64(x.Req))
 		h.String(x.Key)
-	case core.ObjectList:
+	case objectstore.List:
 		h.Uint64(111)
 		h.Uint64(uint64(x.Req))
 		h.String(x.Prefix)
+	}
+}
+
+func (h *stateHasher) oldActionIO(a core.Action) {
+	switch x := a.(type) {
+	case core.ObjectCall:
+		h.oldObjectCall(x.Call)
 	case core.ControlPlaneCall:
 		h.Uint64(112) // Timeout is not folded: the simulator never sets it
 		h.Uint64(uint64(x.Req))

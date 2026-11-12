@@ -1,16 +1,15 @@
-package fakeclock_test
+package clock
 
 import (
 	"slices"
 	"testing"
 	"time"
 
-	"github.com/manifesterio/mds/controlplane/internal/system/fakeclock"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
 func TestTimersFireInTimeOrderOnAdvance(t *testing.T) {
-	c := fakeclock.New(time.Unix(1000, 0))
+	c := NewFake(time.Unix(1000, 0))
 	var order []string
 	c.AfterFunc(machine.Duration(3*time.Second), func() { order = append(order, "c") })
 	c.AfterFunc(machine.Duration(1*time.Second), func() {
@@ -32,7 +31,7 @@ func TestTimersFireInTimeOrderOnAdvance(t *testing.T) {
 }
 
 func TestStopAndTimeMoves(t *testing.T) {
-	c := fakeclock.New(time.Unix(1000, 0))
+	c := NewFake(time.Unix(1000, 0))
 	mono, wall := c.Mono(), c.Wall()
 	tm := c.AfterFunc(machine.Duration(time.Second), func() { t.Error("a stopped timer fired") })
 	if !tm.Stop() || tm.Stop() {

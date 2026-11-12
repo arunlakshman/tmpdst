@@ -5,6 +5,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // SegmentLog writes one structured log line per segment lifecycle event, built
@@ -60,8 +61,12 @@ func fs(f machine.Fact, k string) string {
 
 // IO notes an action the broker issued (wire to NodeConfig.OnIO).
 func (s *SegmentLog) IO(a core.IOCall) {
-	p, ok := a.(core.ObjectPut)
+	call, ok := a.(core.ObjectCall)
 	if !ok || len(s.pending) == 0 {
+		return
+	}
+	p, ok := call.Call.(objectstore.Put)
+	if !ok {
 		return
 	}
 	if _, seen := s.segs[p.Key]; seen { // a retry of the same PUT

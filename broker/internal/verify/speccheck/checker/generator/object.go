@@ -4,17 +4,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // ObjectOps returns a generator of object store operations for profile p.
 // Operation i carries RequestID i+1. The mix includes the empty key, reads past
 // the end of an object, Len <= 0 (read to the end), and prefixes with and
 // without a slash, because each of these is a place where stores differ.
-func ObjectOps(p InputProfile) func(r *checker.Rand, i int) core.IOCall {
-	return func(r *checker.Rand, i int) core.IOCall {
+func ObjectOps(p InputProfile) func(r *checker.Rand, i int) objectstore.Call {
+	return func(r *checker.Rand, i int) objectstore.Call {
 		request := machine.RequestID(i + 1)
 		key := pick(r, p.ObjectKeys)
 		if percent(r, p.EmptyKeyPercent) {
@@ -22,14 +22,14 @@ func ObjectOps(p InputProfile) func(r *checker.Rand, i int) core.IOCall {
 		}
 		switch chooseByWeight(r, p.PutWeight, p.GetWeight, p.DeleteWeight, p.ListWeight) {
 		case 0:
-			return core.ObjectPut{Req: request, Key: key, Data: randomData(r, p.MaxDataLen)}
+			return objectstore.Put{Req: request, Key: key, Data: randomData(r, p.MaxDataLen)}
 		case 1:
-			ref := core.SegmentRef{Key: key, Off: int64(r.Intn(p.RangeSpan) - 1), Len: int64(r.Intn(p.RangeSpan) - 1)}
-			return core.ObjectGet{Req: request, Ref: ref}
+			ref := objectstore.SegmentRef{Key: key, Off: int64(r.Intn(p.RangeSpan) - 1), Len: int64(r.Intn(p.RangeSpan) - 1)}
+			return objectstore.Get{Req: request, Ref: ref}
 		case 2:
-			return core.ObjectDelete{Req: request, Key: key}
+			return objectstore.Delete{Req: request, Key: key}
 		}
-		return core.ObjectList{Req: request, Prefix: pick(r, p.ObjectPrefixes)}
+		return objectstore.List{Req: request, Prefix: pick(r, p.ObjectPrefixes)}
 	}
 }
 
@@ -46,59 +46,59 @@ func randomData(r *checker.Rand, maxLen int) []byte {
 // MinimizeObjectOp returns simpler versions of op, simplest first: less data, a
 // range that starts at 0 and reads to the end, and a shorter key or prefix.
 // It never returns op itself, so a caller that keeps shrinking always ends.
-func MinimizeObjectOp(operation core.IOCall) []core.IOCall {
+func MinimizeObjectOp(operation objectstore.Call) []objectstore.Call {
 	switch operation := operation.(type) {
-	case core.ObjectPut:
+	case objectstore.Put:
 		return minimizePut(operation)
-	case core.ObjectGet:
+	case objectstore.Get:
 		return minimizeGet(operation)
-	case core.ObjectDelete:
-		var out []core.IOCall
+	case objectstore.Delete:
+		var out []objectstore.Call
 		for _, k := range shortenStrings(operation.Key) {
-			out = append(out, core.ObjectDelete{Req: operation.Req, Key: k})
+			out = append(out, objectstore.Delete{Req: operation.Req, Key: k})
 		}
 		return out
-	case core.ObjectList:
-		var out []core.IOCall
+	case objectstore.List:
+		var out []objectstore.Call
 		for _, p := range shortenStrings(operation.Prefix) {
-			out = append(out, core.ObjectList{Req: operation.Req, Prefix: p})
+			out = append(out, objectstore.List{Req: operation.Req, Prefix: p})
 		}
 		return out
 	}
 	return nil
 }
 
-func minimizePut(operation core.ObjectPut) []core.IOCall {
-	var out []core.IOCall
+func minimizePut(operation objectstore.Put) []objectstore.Call {
+	var out []objectstore.Call
 	if len(operation.Data) > 0 {
-		out = append(out, core.ObjectPut{Req: operation.Req, Key: operation.Key, Data: nil})
+		out = append(out, objectstore.Put{Req: operation.Req, Key: operation.Key, Data: nil})
 	}
 	if len(operation.Data) > 1 {
-		out = append(out, core.ObjectPut{Req: operation.Req, Key: operation.Key, Data: operation.Data[:len(operation.Data)/2]})
-		out = append(out, core.ObjectPut{Req: operation.Req, Key: operation.Key, Data: operation.Data[:len(operation.Data)-1]})
+		out = append(out, objectstore.Put{Req: operation.Req, Key: operation.Key, Data: operation.Data[:len(operation.Data)/2]})
+		out = append(out, objectstore.Put{Req: operation.Req, Key: operation.Key, Data: operation.Data[:len(operation.Data)-1]})
 	}
 	for _, k := range shortenStrings(operation.Key) {
-		out = append(out, core.ObjectPut{Req: operation.Req, Key: k, Data: operation.Data})
+		out = append(out, objectstore.Put{Req: operation.Req, Key: k, Data: operation.Data})
 	}
 	return out
 }
 
-func minimizeGet(operation core.ObjectGet) []core.IOCall {
-	var out []core.IOCall
+func minimizeGet(operation objectstore.Get) []objectstore.Call {
+	var out []objectstore.Call
 	if operation.Ref.Len != 0 {
 		ref := operation.Ref
 		ref.Len = 0
-		out = append(out, core.ObjectGet{Req: operation.Req, Ref: ref})
+		out = append(out, objectstore.Get{Req: operation.Req, Ref: ref})
 	}
 	if operation.Ref.Off != 0 {
 		ref := operation.Ref
 		ref.Off = 0
-		out = append(out, core.ObjectGet{Req: operation.Req, Ref: ref})
+		out = append(out, objectstore.Get{Req: operation.Req, Ref: ref})
 	}
 	for _, k := range shortenStrings(operation.Ref.Key) {
 		ref := operation.Ref
 		ref.Key = k
-		out = append(out, core.ObjectGet{Req: operation.Req, Ref: ref})
+		out = append(out, objectstore.Get{Req: operation.Req, Ref: ref})
 	}
 	return out
 }
@@ -119,16 +119,16 @@ func shortenStrings(s string) []string {
 
 // FormatObjectOp returns op as a Go expression that you can paste into a
 // regression test.
-func FormatObjectOp(operation core.IOCall) string {
+func FormatObjectOp(operation objectstore.Call) string {
 	switch operation := operation.(type) {
-	case core.ObjectPut:
-		return fmt.Sprintf("core.ObjectPut{Req: %d, Key: %q%s}", operation.Req, operation.Key, formatDataField(operation.Data))
-	case core.ObjectGet:
-		return fmt.Sprintf("core.ObjectGet{Req: %d, Ref: %s}", operation.Req, formatRef(operation.Ref))
-	case core.ObjectDelete:
-		return fmt.Sprintf("core.ObjectDelete{Req: %d, Key: %q}", operation.Req, operation.Key)
-	case core.ObjectList:
-		return fmt.Sprintf("core.ObjectList{Req: %d, Prefix: %q}", operation.Req, operation.Prefix)
+	case objectstore.Put:
+		return fmt.Sprintf("objectstore.Put{Req: %d, Key: %q%s}", operation.Req, operation.Key, formatDataField(operation.Data))
+	case objectstore.Get:
+		return fmt.Sprintf("objectstore.Get{Req: %d, Ref: %s}", operation.Req, formatRef(operation.Ref))
+	case objectstore.Delete:
+		return fmt.Sprintf("objectstore.Delete{Req: %d, Key: %q}", operation.Req, operation.Key)
+	case objectstore.List:
+		return fmt.Sprintf("objectstore.List{Req: %d, Prefix: %q}", operation.Req, operation.Prefix)
 	}
 	return fmt.Sprintf("%#v", operation)
 }
@@ -145,8 +145,8 @@ func formatDataField(data []byte) string {
 	return fmt.Sprintf(", Data: []byte(%q)", string(data))
 }
 
-func formatRef(ref core.SegmentRef) string {
+func formatRef(ref objectstore.SegmentRef) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "core.SegmentRef{Key: %q, Off: %d, Len: %d}", ref.Key, ref.Off, ref.Len)
+	fmt.Fprintf(&b, "objectstore.SegmentRef{Key: %q, Off: %d, Len: %d}", ref.Key, ref.Off, ref.Len)
 	return b.String()
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakeservicetest"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 const ms = machine.Duration(1_000_000)
@@ -26,7 +27,7 @@ func TestBridgeHandlesAndDefaults(t *testing.T) {
 	if e.Name() != "fakelogservice" || !e.Handles(core.ControlPlaneCall{}) || !e.Handles(core.ControlPlaneReply{}) {
 		t.Fatal(e.Name(), e.Handles(core.ControlPlaneCall{}))
 	}
-	if e.Handles(core.ObjectPut{}) {
+	if e.Handles(core.ObjectCall{Call: objectstore.Put{}}) {
 		t.Fatal("must not handle object IO")
 	}
 	p := e.Params()

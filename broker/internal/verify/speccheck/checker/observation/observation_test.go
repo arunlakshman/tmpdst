@@ -6,6 +6,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 var allCodes = []core.ErrCode{
@@ -89,32 +90,21 @@ func TestEveryCodeAndOutcomeIsCompared(t *testing.T) {
 func TestObjectConverters(t *testing.T) {
 	tests := []struct {
 		name string
-		in   core.IOResult
+		in   objectstore.Result
 		want ObjectResult
 	}{
-		{"put", core.ObjectPutDone{Err: core.ErrTimeout, Outcome: core.MaybeApplied}, ObjectResult{Code: core.ErrTimeout, Outcome: core.MaybeApplied}},
-		{"get", core.ObjectGetDone{Data: []byte("x")}, ObjectResult{Data: []byte("x")}},
-		{"get not found", core.ObjectGetDone{Err: core.ErrNotFound}, ObjectResult{Code: core.ErrNotFound}},
-		{"delete", core.ObjectDeleteDone{Outcome: core.Applied}, ObjectResult{Outcome: core.Applied}},
-		{"list", core.ObjectListDone{Keys: []string{"a", "b"}}, ObjectResult{Keys: []string{"a", "b"}}},
+		{"put", objectstore.PutDone{Err: core.ErrTimeout, Outcome: core.MaybeApplied}, ObjectResult{Code: core.ErrTimeout, Outcome: core.MaybeApplied}},
+		{"get", objectstore.GetDone{Data: []byte("x")}, ObjectResult{Data: []byte("x")}},
+		{"get not found", objectstore.GetDone{Err: core.ErrNotFound}, ObjectResult{Code: core.ErrNotFound}},
+		{"delete", objectstore.DeleteDone{Outcome: core.Applied}, ObjectResult{Outcome: core.Applied}},
+		{"list", objectstore.ListDone{Keys: []string{"a", "b"}}, ObjectResult{Keys: []string{"a", "b"}}},
 	}
 	for _, tc := range tests {
-		got := FromObjectCompletion(tc.in)
+		got := FromObjectResult(tc.in)
 		if msg := Diff(tc.want, got); msg != "" {
 			t.Errorf("%s: %s", tc.name, msg)
 		}
 	}
-}
-
-func TestObjectConverterPanicsOnOtherType(t *testing.T) {
-	defer func() {
-		r := recover()
-		msg, _ := r.(string)
-		if !strings.Contains(msg, "needs an object store completion") {
-			t.Errorf("The panic message was %v, which does not explain the mistake.", r)
-		}
-	}()
-	FromObjectCompletion(core.SendDone{})
 }
 
 func TestControlPlaneConverter(t *testing.T) {

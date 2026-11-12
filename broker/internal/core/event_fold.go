@@ -1,7 +1,10 @@
 //nolint:dupl // Fold methods are flat lists of fields. They look alike on purpose.
 package core
 
-import "github.com/manifesterio/mds/dst/trace"
+import (
+	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/shared/objectstore"
+)
 
 // Tag and Fold of every EventData case. The tag numbers are frozen (see fold.go).
 // Fold writes the tag, then the fields in the order that is written here. Both
@@ -87,51 +90,47 @@ func (e TimerFired) Fold(h *trace.Hash) {
 	h.Uint64(uint64(e.Gen))
 }
 
-// Tag returns the frozen trace-hash number of this event.
-func (ObjectPutDone) Tag() uint64 { return 9 }
-
-// Fold writes the event into the trace hash.
-func (e ObjectPutDone) Fold(h *trace.Hash) {
-	h.Uint64(e.Tag())
-	h.Uint64(uint64(e.Req))
-	h.String(e.Key)
-	h.Uint64(uint64(e.Err))
-	h.Uint64(uint64(e.Outcome))
+// Tag returns the frozen trace-hash number of this event: 9 for a PutDone, 10 for a
+// GetDone, 11 for a DeleteDone and 12 for a ListDone.
+func (e ObjectDone) Tag() uint64 {
+	switch e.Result.(type) {
+	case objectstore.PutDone:
+		return 9
+	case objectstore.GetDone:
+		return 10
+	case objectstore.DeleteDone:
+		return 11
+	case objectstore.ListDone:
+		return 12
+	}
+	panic("core.ObjectDone: unknown object store result")
 }
 
-// Tag returns the frozen trace-hash number of this event.
-func (ObjectGetDone) Tag() uint64 { return 10 }
-
-// Fold writes the event into the trace hash.
-func (e ObjectGetDone) Fold(h *trace.Hash) {
+// Fold writes the event into the trace hash. Each case writes the bytes that the
+// separate event of that case wrote before the wrapper existed.
+func (e ObjectDone) Fold(h *trace.Hash) {
 	h.Uint64(e.Tag())
-	h.Uint64(uint64(e.Req))
-	h.Bytes(e.Data)
-	h.Uint64(uint64(e.Err))
-}
-
-// Tag returns the frozen trace-hash number of this event.
-func (ObjectDeleteDone) Tag() uint64 { return 11 }
-
-// Fold writes the event into the trace hash.
-func (e ObjectDeleteDone) Fold(h *trace.Hash) {
-	h.Uint64(e.Tag())
-	h.Uint64(uint64(e.Req))
-	h.Uint64(uint64(e.Err))
-	h.Uint64(uint64(e.Outcome))
-}
-
-// Tag returns the frozen trace-hash number of this event.
-func (ObjectListDone) Tag() uint64 { return 12 }
-
-// Fold writes the event into the trace hash.
-func (e ObjectListDone) Fold(h *trace.Hash) {
-	h.Uint64(e.Tag())
-	h.Uint64(uint64(e.Req))
-	h.Uint64(uint64(e.Err))
-	h.Uint64(uint64(len(e.Keys)))
-	for _, k := range e.Keys {
-		h.String(k)
+	switch r := e.Result.(type) {
+	case objectstore.PutDone:
+		h.Uint64(uint64(r.Req))
+		h.String(r.Key)
+		h.Uint64(uint64(r.Err))
+		h.Uint64(uint64(r.Outcome))
+	case objectstore.GetDone:
+		h.Uint64(uint64(r.Req))
+		h.Bytes(r.Data)
+		h.Uint64(uint64(r.Err))
+	case objectstore.DeleteDone:
+		h.Uint64(uint64(r.Req))
+		h.Uint64(uint64(r.Err))
+		h.Uint64(uint64(r.Outcome))
+	case objectstore.ListDone:
+		h.Uint64(uint64(r.Req))
+		h.Uint64(uint64(r.Err))
+		h.Uint64(uint64(len(r.Keys)))
+		for _, k := range r.Keys {
+			h.String(k)
+		}
 	}
 }
 

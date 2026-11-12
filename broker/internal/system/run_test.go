@@ -10,6 +10,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 type fakeClock struct{}
@@ -91,7 +92,7 @@ func TestStartedFirstControlBeatsData(t *testing.T) {
 
 func TestTripRunsEarlierActions(t *testing.T) {
 	m := &fakeMachine{script: func(n int, _ core.EventData) []core.Action {
-		return []core.Action{core.ObjectPut{Req: 1}, core.PauseReads{Conn: 2}, core.StopForRestart{Cause: "x"}, core.ObjectPut{Req: 2}}
+		return []core.Action{core.ObjectCall{Call: objectstore.Put{Req: 1}}, core.PauseReads{Conn: 2}, core.StopForRestart{Cause: "x"}, core.ObjectCall{Call: objectstore.Put{Req: 2}}}
 	}}
 	b, ex, cn, f := setup(m)
 	err := Run(t.Context(), b, ex, f, machine.NodeInstance{})

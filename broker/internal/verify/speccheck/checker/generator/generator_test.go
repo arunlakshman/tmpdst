@@ -13,6 +13,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 const (
@@ -96,7 +97,7 @@ func objectCoverage(p InputProfile) map[string]int {
 	hits := map[string]int{}
 	gen := ObjectOps(p)
 	for seed := uint64(1); seed <= coverageSeeds; seed++ {
-		r, spec := checker.NewRand(seed), speccheck.NewObjectStore()
+		r, spec := checker.NewRand(seed), objectstore.NewSpec()
 		for i := range coverageOps {
 			operation := gen(r, i)
 			for _, c := range classifyObject(spec, operation) {
@@ -108,31 +109,31 @@ func objectCoverage(p InputProfile) map[string]int {
 }
 
 // classifyObject runs op on the spec and names the cases that it reached.
-func classifyObject(spec *speccheck.ObjectStore, operation core.IOCall) []string {
+func classifyObject(spec *objectstore.Spec, operation objectstore.Call) []string {
 	done := spec.Exec(operation)
 	switch operation := operation.(type) {
-	case core.ObjectPut:
-		if done.(core.ObjectPutDone).Err == core.ErrInvalid {
+	case objectstore.Put:
+		if done.(objectstore.PutDone).Err == core.ErrInvalid {
 			return []string{"put empty key"}
 		}
 		if len(operation.Data) == 0 {
 			return []string{"put accepted", "put empty data"}
 		}
 		return []string{"put accepted"}
-	case core.ObjectGet:
-		return classifyGet(operation, done.(core.ObjectGetDone))
-	case core.ObjectDelete:
-		if done.(core.ObjectDeleteDone).Err == core.ErrNotFound {
+	case objectstore.Get:
+		return classifyGet(operation, done.(objectstore.GetDone))
+	case objectstore.Delete:
+		if done.(objectstore.DeleteDone).Err == core.ErrNotFound {
 			return []string{"delete missing key"}
 		}
 		return []string{"delete accepted"}
-	case core.ObjectList:
-		return classifyList(operation, done.(core.ObjectListDone))
+	case objectstore.List:
+		return classifyList(operation, done.(objectstore.ListDone))
 	}
 	return nil
 }
 
-func classifyGet(operation core.ObjectGet, done core.ObjectGetDone) []string {
+func classifyGet(operation objectstore.Get, done objectstore.GetDone) []string {
 	var out []string
 	if operation.Ref.Key == "" {
 		out = append(out, "get empty key")
@@ -150,7 +151,7 @@ func classifyGet(operation core.ObjectGet, done core.ObjectGetDone) []string {
 	return out
 }
 
-func classifyList(operation core.ObjectList, done core.ObjectListDone) []string {
+func classifyList(operation objectstore.List, done objectstore.ListDone) []string {
 	var out []string
 	switch {
 	case operation.Prefix == "":
@@ -295,9 +296,9 @@ func TestSameSeedGivesSameSequence(t *testing.T) {
 	}
 }
 
-func objectSequence(p InputProfile, seed uint64) []core.IOCall {
+func objectSequence(p InputProfile, seed uint64) []objectstore.Call {
 	r, gen := checker.NewRand(seed), ObjectOps(p)
-	var out []core.IOCall
+	var out []objectstore.Call
 	for i := range coverageOps {
 		out = append(out, gen(r, i))
 	}
@@ -357,7 +358,7 @@ func TestShrinkMakesProgressAndEnds(t *testing.T) {
 // shrinkObjectToEnd always takes the first candidate. The loop ends only if
 // every candidate is simpler, so a candidate equal to its parent hangs the
 // test, and the step limit turns that hang into a failure.
-func shrinkObjectToEnd(t *testing.T, operation core.IOCall) {
+func shrinkObjectToEnd(t *testing.T, operation objectstore.Call) {
 	t.Helper()
 	for range 1000 {
 		next := MinimizeObjectOp(operation)
@@ -404,9 +405,9 @@ func TestFormatIsAGoExpression(t *testing.T) {
 
 func TestFormatExamples(t *testing.T) {
 	cases := []struct{ got, want string }{
-		{FormatObjectOp(core.ObjectPut{Req: 1, Key: "a", Data: []byte("hi")}), `core.ObjectPut{Req: 1, Key: "a", Data: []byte("hi")}`},
-		{FormatObjectOp(core.ObjectPut{Req: 2, Key: "", Data: []byte{}}), `core.ObjectPut{Req: 2, Key: "", Data: []byte{}}`},
-		{FormatObjectOp(core.ObjectList{Req: 3, Prefix: "a/"}), `core.ObjectList{Req: 3, Prefix: "a/"}`},
+		{FormatObjectOp(objectstore.Put{Req: 1, Key: "a", Data: []byte("hi")}), `objectstore.Put{Req: 1, Key: "a", Data: []byte("hi")}`},
+		{FormatObjectOp(objectstore.Put{Req: 2, Key: "", Data: []byte{}}), `objectstore.Put{Req: 2, Key: "", Data: []byte{}}`},
+		{FormatObjectOp(objectstore.List{Req: 3, Prefix: "a/"}), `objectstore.List{Req: 3, Prefix: "a/"}`},
 		{FormatControlPlaneOp(NewCreateTopic("t1", 2)), `generator.NewCreateTopic("t1", 2)`},
 		{
 			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Req: 4, Op: contract.FindSegments{TopicPartition: contract.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})),

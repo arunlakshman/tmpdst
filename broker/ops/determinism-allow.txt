@@ -35,10 +35,15 @@ github.com/manifesterio/mds/dst/machine
 github.com/manifesterio/mds/dst/trace
 
 # The control plane contract (github.com/manifesterio/mds/controlplane/contract): plain data and
-# the Tag and Fold of the control plane operations and responses. It imports only dst and fmt, so
-# it is deterministic. First-party code in this repo, so it needs no audit record. Only this one
+# the Tag and Fold of the control plane operations and responses. It imports only dst, shared/objectstore,
+# shared/status and fmt, so it is deterministic. First-party code in this repo, so it needs no audit record. Only this one
 # package of the control plane: no runtime, no server, no client.
 github.com/manifesterio/mds/controlplane/contract
+# Shared code of this repo (github.com/manifesterio/mds/shared). First-party, so no audit record.
+# objectstore: the object store calls, results and spec as plain types (no I/O). status: ErrCode
+# and Outcome. Deliberately absent: clock (real time) and objectstore/s3 (the AWS SDK).
+github.com/manifesterio/mds/shared/objectstore
+github.com/manifesterio/mds/shared/status
 
 # audited third-party (see docs/dep-audits/)
 github.com/twmb/franz-go/pkg/kmsg

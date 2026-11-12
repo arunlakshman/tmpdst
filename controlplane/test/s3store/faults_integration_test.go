@@ -1,6 +1,6 @@
 //go:build integration
 
-package s3store
+package s3store_test
 
 import (
 	"fmt"
@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/controlplane/internal/testinfra"
+	s3store "github.com/manifesterio/mds/shared/objectstore/s3"
 )
 
 // faultTransport wraps the transport of the HTTP client that the S3 SDK uses.
@@ -57,11 +58,11 @@ func s3ErrorResponse(r *http.Request, status int, code string) *http.Response {
 // newTestStore returns a store on a fresh SeaweedFS bucket. Its HTTP client goes
 // through the returned faultTransport, which passes everything to SeaweedFS until
 // a test calls set.
-func newTestStore(t *testing.T, prefix string) (*Store, *faultTransport, testinfra.S3Info) {
+func newTestStore(t *testing.T, prefix string) (*s3store.Store, *faultTransport, testinfra.S3Info) {
 	t.Helper()
 	info := testinfra.S3(t)
 	ft := &faultTransport{base: http.DefaultTransport}
-	s, err := New(t.Context(), Config{
+	s, err := s3store.New(t.Context(), s3store.Config{
 		Endpoint: info.Endpoint, Region: info.Region, Bucket: info.Bucket, Prefix: prefix,
 		PathStyle: true, HTTP: &http.Client{Transport: ft},
 	})

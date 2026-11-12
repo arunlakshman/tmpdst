@@ -3,6 +3,7 @@ package core
 import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // Action is output of Step: a request for the outside world to do something.
@@ -73,30 +74,11 @@ type Connect struct {
 
 // ---- object store ----
 
-// ObjectPut uploads Data under Key.
-type ObjectPut struct {
-	Req  machine.RequestID
-	Key  string // unique per upload, so a MaybeApplied PUT is safe to retry
-	Data []byte
-}
-
-// ObjectGet reads the byte range Ref.
-type ObjectGet struct {
-	Req machine.RequestID
-	Ref SegmentRef
-}
-
-// ObjectDelete removes the object at Key.
-type ObjectDelete struct {
-	Req machine.RequestID
-	Key string
-}
-
-// ObjectList lists the keys under Prefix.
-type ObjectList struct {
-	Req    machine.RequestID
-	Prefix string
-}
+// ObjectCall is one request to the object store. Call is one of objectstore.Put,
+// Get, Delete or List. The case is a wrapper because a sealed sum cannot get a case
+// from another package. The trace hash gets the same bytes as the four separate
+// actions had before (tags 108 to 111).
+type ObjectCall struct{ Call objectstore.Call }
 
 // ---- control plane (gRPC wire contract: controlplane/api/v1) ----
 
@@ -146,10 +128,7 @@ func (CloseConn) isAction()         {}
 func (PauseReads) isAction()        {}
 func (ResumeReads) isAction()       {}
 func (Connect) isAction()           {}
-func (ObjectPut) isAction()         {}
-func (ObjectGet) isAction()         {}
-func (ObjectDelete) isAction()      {}
-func (ObjectList) isAction()        {}
+func (ObjectCall) isAction()        {}
 func (ControlPlaneCall) isAction()  {}
 func (ControlPlaneReply) isAction() {}
 func (RecordFact) isAction()        {}
@@ -163,16 +142,7 @@ func (a Send) RequestID() machine.RequestID { return a.Req }
 func (a Connect) RequestID() machine.RequestID { return a.Req }
 
 // RequestID returns the request this action carries.
-func (a ObjectPut) RequestID() machine.RequestID { return a.Req }
-
-// RequestID returns the request this action carries.
-func (a ObjectGet) RequestID() machine.RequestID { return a.Req }
-
-// RequestID returns the request this action carries.
-func (a ObjectDelete) RequestID() machine.RequestID { return a.Req }
-
-// RequestID returns the request this action carries.
-func (a ObjectList) RequestID() machine.RequestID { return a.Req }
+func (a ObjectCall) RequestID() machine.RequestID { return a.Call.RequestID() }
 
 // RequestID returns the request this action carries.
 func (a ControlPlaneCall) RequestID() machine.RequestID { return a.Req }
@@ -180,9 +150,6 @@ func (a ControlPlaneCall) RequestID() machine.RequestID { return a.Req }
 var (
 	_ IOCall = Send{}
 	_ IOCall = Connect{}
-	_ IOCall = ObjectPut{}
-	_ IOCall = ObjectGet{}
-	_ IOCall = ObjectDelete{}
-	_ IOCall = ObjectList{}
+	_ IOCall = ObjectCall{}
 	_ IOCall = ControlPlaneCall{}
 )

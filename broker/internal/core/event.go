@@ -3,6 +3,7 @@ package core
 import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // Event is the input to Step. The runtime (prod) or simulator stamps At and
@@ -89,34 +90,11 @@ type TimerFired struct {
 
 // ---- object store completions ----
 
-// ObjectPutDone reports that an object PUT finished.
-type ObjectPutDone struct {
-	Req     machine.RequestID
-	Key     string
-	Err     ErrCode
-	Outcome Outcome
-}
-
-// ObjectGetDone reports that an object GET finished.
-type ObjectGetDone struct {
-	Req  machine.RequestID
-	Data []byte
-	Err  ErrCode
-}
-
-// ObjectDeleteDone reports that an object DELETE finished.
-type ObjectDeleteDone struct {
-	Req     machine.RequestID
-	Err     ErrCode
-	Outcome Outcome
-}
-
-// ObjectListDone reports that an object LIST finished.
-type ObjectListDone struct {
-	Req  machine.RequestID
-	Keys []string // sorted
-	Err  ErrCode
-}
+// ObjectDone reports that an object store call finished. Result is one of
+// objectstore.PutDone, GetDone, DeleteDone or ListDone. The case is a wrapper
+// because a sealed sum cannot get a case from another package. The trace hash gets
+// the same bytes as the four separate events had before (tags 9 to 12).
+type ObjectDone struct{ Result objectstore.Result }
 
 // ---- control plane completions ----
 
@@ -162,10 +140,7 @@ func (BytesReceived) isEvent()       {}
 func (ConnClosed) isEvent()          {}
 func (SendDone) isEvent()            {}
 func (TimerFired) isEvent()          {}
-func (ObjectPutDone) isEvent()       {}
-func (ObjectGetDone) isEvent()       {}
-func (ObjectDeleteDone) isEvent()    {}
-func (ObjectListDone) isEvent()      {}
+func (ObjectDone) isEvent()          {}
 func (ControlPlaneDone) isEvent()    {}
 func (ControlPlaneDeliver) isEvent() {}
 func (LiveBrokers) isEvent()         {}
@@ -177,16 +152,7 @@ func (e SendDone) RequestID() machine.RequestID { return e.Req }
 func (e ConnectDone) RequestID() machine.RequestID { return e.Req }
 
 // RequestID returns the request this completion answers.
-func (e ObjectPutDone) RequestID() machine.RequestID { return e.Req }
-
-// RequestID returns the request this completion answers.
-func (e ObjectGetDone) RequestID() machine.RequestID { return e.Req }
-
-// RequestID returns the request this completion answers.
-func (e ObjectDeleteDone) RequestID() machine.RequestID { return e.Req }
-
-// RequestID returns the request this completion answers.
-func (e ObjectListDone) RequestID() machine.RequestID { return e.Req }
+func (e ObjectDone) RequestID() machine.RequestID { return e.Result.RequestID() }
 
 // RequestID returns the request this completion answers.
 func (e ControlPlaneDone) RequestID() machine.RequestID { return e.Req }
@@ -194,9 +160,6 @@ func (e ControlPlaneDone) RequestID() machine.RequestID { return e.Req }
 var (
 	_ IOResult = SendDone{}
 	_ IOResult = ConnectDone{}
-	_ IOResult = ObjectPutDone{}
-	_ IOResult = ObjectGetDone{}
-	_ IOResult = ObjectDeleteDone{}
-	_ IOResult = ObjectListDone{}
+	_ IOResult = ObjectDone{}
 	_ IOResult = ControlPlaneDone{}
 )

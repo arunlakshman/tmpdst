@@ -1,6 +1,6 @@
 //go:build integration
 
-package s3store
+package s3store_test
 
 import (
 	"testing"

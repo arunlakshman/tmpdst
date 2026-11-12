@@ -17,8 +17,8 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/system/realclock"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/clock"
 )
 
 // Client is the DynamoDB surface Log needs. *dynamodb.Client
@@ -61,7 +61,7 @@ const (
 // New returns a byte log over table.
 func New(db Client, table string, o Options) *Log {
 	if o.Clock == nil {
-		o.Clock = realclock.New()
+		o.Clock = clock.NewReal()
 	}
 	return &Log{db: db, table: table, o: o}
 }

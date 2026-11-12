@@ -9,6 +9,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // partitionBatch is one admitted partition batch on its way to a segment.
@@ -178,10 +179,10 @@ func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
 
 func (b *Broker) put(s *segment) []core.Action {
 	s.state, s.request = segmentUpload, b.nextRequestID()
-	return []core.Action{core.ObjectPut{Req: s.request, Key: s.key, Data: s.data}}
+	return []core.Action{core.ObjectCall{Call: objectstore.Put{Req: s.request, Key: s.key, Data: s.data}}}
 }
 
-func (b *Broker) onPutDone(s *segment, e core.ObjectPutDone) []core.Action {
+func (b *Broker) onPutDone(s *segment, e objectstore.PutDone) []core.Action {
 	if e.Err == core.ErrInvalid {
 		return b.failSegment(s, errUnknownServer)
 	}

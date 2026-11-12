@@ -45,7 +45,7 @@ checking, and proofs of the specs themselves. Like the paper, we can miss bugs.
 
 | Spec | File | What it models | Real code it checks |
 | --- | --- | --- | --- |
-| `ObjectStore` | `objectstore.go` | S3: put, get a byte range, delete, list | S3 adapter, simulated object store |
+| `ObjectStore` | `shared/objectstore/spec.go` (type `objectstore.Spec`; moved out of this package) | S3: put, get a byte range, delete, list | S3 adapter, simulated object store |
 | `ControlPlane` | `controlplane.go` | commit a segment, lookup, describe topics | applier, memstore, gRPC client, simulated control plane |
 | `Broker` | `broker.go` | one Kafka partition: append, read | the broker |
 
@@ -65,7 +65,7 @@ The rules of each spec are in the comment above its type. Read that first.
 ```bash
 go test ./internal/verify/speccheck/... -count=1            # specs and framework
 go test ./internal/broker ./internal/verify/simulator/fakeservices \
-        ./internal/system/s3store ./internal/controlplane/... -count=1   # C1, C2, C3
+        ./internal/verify/speccheck/s3conform ./internal/controlplane/... -count=1   # C1, C2, C3
 go test ./internal/verify/simulator/kafka -run C4 -count=1      # C4
 ```
 

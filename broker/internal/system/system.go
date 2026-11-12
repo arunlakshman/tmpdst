@@ -10,15 +10,11 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
-// ObjectStore is the S3 adapter.
-type ObjectStore interface {
-	Put(ctx context.Context, key string, data []byte) error
-	Get(ctx context.Context, ref core.SegmentRef) ([]byte, error)
-	Delete(ctx context.Context, key string) error
-	List(ctx context.Context, prefix string) ([]string, error)
-}
+// ObjectStore is the S3 adapter. The interface is defined in shared/objectstore.
+type ObjectStore = objectstore.Store
 
 // ControlPlane is the HTTP client adapter for the control plane.
 type ControlPlane interface {

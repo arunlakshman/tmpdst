@@ -1,8 +1,8 @@
-// Package s3store is the S3 adapter: a system.ObjectStore over the AWS SDK and
-// the system.ErrorClassifier for Obj* actions. It behaves like speccheck.ObjectStore
-// (conformance C3), so a range outside the object is ErrInvalid and deleting
-// an absent key is ErrNotFound.
-package s3store
+// Package s3 is the S3 adapter: an objectstore.Store over the AWS SDK and the
+// objectstore.Classifier for the object store calls. It follows the rules of
+// objectstore.Spec, so a range outside the object is ErrInvalid and deleting
+// an absent key is ErrNotFound. The broker and the control plane both use it.
+package s3
 
 import (
 	"bytes"
@@ -19,14 +19,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
+	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
 
-	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/shared/awsmetrics"
 	"github.com/manifesterio/mds/shared/httpconnections"
+	"github.com/manifesterio/mds/shared/objectstore"
+	"github.com/manifesterio/mds/shared/status"
 )
 
 // Config selects the bucket and endpoint. An empty Endpoint is AWS itself.
@@ -44,20 +44,20 @@ type Config struct {
 }
 
 // Error is a truthful failure of the store, as plain data.
-type Error struct{ Code core.ErrCode }
+type Error struct{ Code status.ErrCode }
 
 func (e *Error) Error() string { return "s3store: " + e.Code.String() }
 
-func fail(c core.ErrCode) error { return &Error{c} }
+func fail(c status.ErrCode) error { return &Error{c} }
 
-// Store implements system.ObjectStore.
+// Store implements objectstore.Store.
 type Store struct {
-	c      *s3.Client
+	c      *awss3.Client
 	bucket string
 	prefix string
 }
 
-var _ system.ObjectStore = (*Store)(nil)
+var _ objectstore.Store = (*Store)(nil)
 
 // New builds a store. With a custom endpoint and no AWS credentials in the
 // environment it uses a static dummy key (SeaweedFS runs without auth).
@@ -71,7 +71,7 @@ func New(ctx context.Context, storeConfig Config) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{c: s3.NewFromConfig(ac, clientOptions(storeConfig)), bucket: storeConfig.Bucket, prefix: storeConfig.Prefix}, nil
+	return &Store{c: awss3.NewFromConfig(ac, clientOptions(storeConfig)), bucket: storeConfig.Bucket, prefix: storeConfig.Prefix}, nil
 }
 
 func loadOptions(storeConfig Config) []func(*config.LoadOptions) error {
@@ -86,8 +86,8 @@ func loadOptions(storeConfig Config) []func(*config.LoadOptions) error {
 	return opts
 }
 
-func clientOptions(storeConfig Config) func(*s3.Options) {
-	return func(o *s3.Options) {
+func clientOptions(storeConfig Config) func(*awss3.Options) {
+	return func(o *awss3.Options) {
 		o.UsePathStyle = storeConfig.PathStyle
 		o.Retryer = aws.NopRetryer{} // the broker owns retries
 		o.APIOptions = append(o.APIOptions, storeConfig.Obs.APIOptions()...)
@@ -101,7 +101,7 @@ func clientOptions(storeConfig Config) func(*s3.Options) {
 
 // EnsureBucket creates the bucket if it does not exist (dev and tests).
 func (s *Store) EnsureBucket(ctx context.Context) error {
-	_, err := s.c.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &s.bucket})
+	_, err := s.c.CreateBucket(ctx, &awss3.CreateBucketInput{Bucket: &s.bucket})
 	_, own := errors.AsType[*s3types.BucketAlreadyOwnedByYou](err)
 	_, exists := errors.AsType[*s3types.BucketAlreadyExists](err)
 	if own || exists {
@@ -115,9 +115,9 @@ func (s *Store) key(k string) *string { return new(s.prefix + k) }
 // Put writes data under key.
 func (s *Store) Put(ctx context.Context, key string, data []byte) error {
 	if key == "" {
-		return fail(core.ErrInvalid)
+		return fail(status.ErrInvalid)
 	}
-	_, err := s.c.PutObject(ctx, &s3.PutObjectInput{
+	_, err := s.c.PutObject(ctx, &awss3.PutObjectInput{
 		Bucket: &s.bucket, Key: s.key(key),
 		Body: bytes.NewReader(data), ContentLength: new(int64(len(data))),
 	})
@@ -125,14 +125,14 @@ func (s *Store) Put(ctx context.Context, key string, data []byte) error {
 }
 
 // Get reads the bytes referenced by ref.
-func (s *Store) Get(ctx context.Context, ref core.SegmentRef) ([]byte, error) {
+func (s *Store) Get(ctx context.Context, ref objectstore.SegmentRef) ([]byte, error) {
 	if ref.Key == "" {
-		return nil, fail(core.ErrNotFound) // never stored: Put refuses it
+		return nil, fail(status.ErrNotFound) // never stored: Put refuses it
 	}
 	if ref.Off < 0 {
 		return nil, s.badRange(ctx, ref)
 	}
-	in := &s3.GetObjectInput{Bucket: &s.bucket, Key: s.key(ref.Key), Range: rangeHeader(ref)}
+	in := &awss3.GetObjectInput{Bucket: &s.bucket, Key: s.key(ref.Key), Range: rangeHeader(ref)}
 	out, err := s.c.GetObject(ctx, in)
 	if err != nil {
 		return s.getFailed(ctx, ref, in.Range != nil, err)
@@ -141,7 +141,7 @@ func (s *Store) Get(ctx context.Context, ref core.SegmentRef) ([]byte, error) {
 	return readBody(out.Body, ref.Len)
 }
 
-func rangeHeader(ref core.SegmentRef) *string {
+func rangeHeader(ref objectstore.SegmentRef) *string {
 	switch {
 	case ref.Len > 0:
 		return new(fmt.Sprintf("bytes=%d-%d", ref.Off, ref.Off+ref.Len-1))
@@ -153,9 +153,9 @@ func rangeHeader(ref core.SegmentRef) *string {
 
 // getFailed maps a failed GetObject; reading exactly at the end of the
 // object is an empty result, not an error.
-func (s *Store) getFailed(ctx context.Context, ref core.SegmentRef, ranged bool, err error) ([]byte, error) {
+func (s *Store) getFailed(ctx context.Context, ref objectstore.SegmentRef, ranged bool, err error) ([]byte, error) {
 	if notFound(err) && !ranged {
-		return nil, fail(core.ErrNotFound)
+		return nil, fail(status.ErrNotFound)
 	}
 	// Some servers answer a range past the end of an empty object with 404.
 	if apiCode(err) == "InvalidRange" || notFound(err) {
@@ -173,25 +173,25 @@ func readBody(body io.Reader, want int64) ([]byte, error) {
 		return nil, err
 	}
 	if want > 0 && int64(len(data)) != want {
-		return nil, fail(core.ErrInvalid) // the range ran past the end
+		return nil, fail(status.ErrInvalid) // the range ran past the end
 	}
 	return data, nil
 }
 
 // badRange resolves a 416: reading from exactly the end is empty, anything
 // else past the end is invalid.
-func (s *Store) badRange(ctx context.Context, ref core.SegmentRef) error {
-	h, err := s.c.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &s.bucket, Key: s.key(ref.Key)})
+func (s *Store) badRange(ctx context.Context, ref objectstore.SegmentRef) error {
+	h, err := s.c.HeadObject(ctx, &awss3.HeadObjectInput{Bucket: &s.bucket, Key: s.key(ref.Key)})
 	if err != nil {
 		if notFound(err) {
-			return fail(core.ErrNotFound)
+			return fail(status.ErrNotFound)
 		}
 		return err
 	}
 	if ref.Len <= 0 && aws.ToInt64(h.ContentLength) == ref.Off {
 		return errEmpty
 	}
-	return fail(core.ErrInvalid)
+	return fail(status.ErrInvalid)
 }
 
 var errEmpty = errors.New("empty range")
@@ -199,22 +199,22 @@ var errEmpty = errors.New("empty range")
 // Delete removes the object under key.
 func (s *Store) Delete(ctx context.Context, key string) error {
 	if key == "" {
-		return fail(core.ErrNotFound)
+		return fail(status.ErrNotFound)
 	}
-	if _, err := s.c.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &s.bucket, Key: s.key(key)}); err != nil {
+	if _, err := s.c.HeadObject(ctx, &awss3.HeadObjectInput{Bucket: &s.bucket, Key: s.key(key)}); err != nil {
 		if notFound(err) {
-			return fail(core.ErrNotFound)
+			return fail(status.ErrNotFound)
 		}
 		return err
 	}
-	_, err := s.c.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &s.bucket, Key: s.key(key)})
+	_, err := s.c.DeleteObject(ctx, &awss3.DeleteObjectInput{Bucket: &s.bucket, Key: s.key(key)})
 	return err
 }
 
 // List returns the keys that start with prefix.
 func (s *Store) List(ctx context.Context, prefix string) ([]string, error) {
 	var keys []string
-	p := s3.NewListObjectsV2Paginator(s.c, &s3.ListObjectsV2Input{Bucket: &s.bucket, Prefix: new(s.prefix + prefix)})
+	p := awss3.NewListObjectsV2Paginator(s.c, &awss3.ListObjectsV2Input{Bucket: &s.bucket, Prefix: new(s.prefix + prefix)})
 	for p.HasMorePages() {
 		page, err := p.NextPage(ctx)
 		if err != nil {

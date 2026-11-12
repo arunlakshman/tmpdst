@@ -8,6 +8,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/observation"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/suites"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // ObjectBug is an injected bug for an object store. Wrap returns a subject that
@@ -35,11 +36,11 @@ func (b ObjectBug) Wrap(correct suites.ObjectSubject) suites.ObjectSubject { ret
 // objectSubject is a subject made from a function. do may call inner.
 type objectSubject struct {
 	inner suites.ObjectSubject
-	do    func(operation core.IOCall) (observation.ObjectResult, error)
+	do    func(operation objectstore.Call) (observation.ObjectResult, error)
 	hash  func() (uint64, bool)
 }
 
-func (s *objectSubject) Do(operation core.IOCall) (observation.ObjectResult, error) {
+func (s *objectSubject) Do(operation objectstore.Call) (observation.ObjectResult, error) {
 	return s.do(operation)
 }
 
@@ -52,18 +53,18 @@ func (s *objectSubject) StateHash() (uint64, bool) {
 
 // afterObject makes a bug that changes the result after the correct subject has
 // answered. change gets the operation and the correct result.
-func afterObject(name, doc string, change func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult) ObjectBug {
-	return stateful(name, doc, func(suites.ObjectSubject) func(core.IOCall, observation.ObjectResult) observation.ObjectResult {
+func afterObject(name, doc string, change func(operation objectstore.Call, r observation.ObjectResult) observation.ObjectResult) ObjectBug {
+	return stateful(name, doc, func(suites.ObjectSubject) func(objectstore.Call, observation.ObjectResult) observation.ObjectResult {
 		return change
 	})
 }
 
 // stateful makes a bug whose change function keeps state. newChange is called
 // once for each fresh subject.
-func stateful(name, doc string, newChange func(suites.ObjectSubject) func(core.IOCall, observation.ObjectResult) observation.ObjectResult) ObjectBug {
+func stateful(name, doc string, newChange func(suites.ObjectSubject) func(objectstore.Call, observation.ObjectResult) observation.ObjectResult) ObjectBug {
 	return NewObjectBug(name, doc, func(inner suites.ObjectSubject) suites.ObjectSubject {
 		change := newChange(inner)
-		return &objectSubject{inner: inner, do: func(operation core.IOCall) (observation.ObjectResult, error) {
+		return &objectSubject{inner: inner, do: func(operation objectstore.Call) (observation.ObjectResult, error) {
 			r, err := inner.Do(operation)
 			if err != nil {
 				return r, err
@@ -94,19 +95,19 @@ func ObjectBugs() []ObjectBug {
 func PutKeepsCallerSlice() ObjectBug {
 	return stateful("PutKeepsCallerSlice",
 		"Put keeps the caller's slice instead of a copy, so a later change by the caller changes the stored data.",
-		func(suites.ObjectSubject) func(core.IOCall, observation.ObjectResult) observation.ObjectResult {
+		func(suites.ObjectSubject) func(objectstore.Call, observation.ObjectResult) observation.ObjectResult {
 			kept := map[string][]byte{}
-			return func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult {
+			return func(operation objectstore.Call, r observation.ObjectResult) observation.ObjectResult {
 				switch operation := operation.(type) {
-				case core.ObjectPut:
+				case objectstore.Put:
 					if r.Code == core.OK {
 						kept[operation.Key] = operation.Data
 					}
-				case core.ObjectDelete:
+				case objectstore.Delete:
 					if r.Code == core.OK {
 						delete(kept, operation.Key)
 					}
-				case core.ObjectGet:
+				case objectstore.Get:
 					data, ok := kept[operation.Ref.Key]
 					if !ok || r.Code != core.OK {
 						return r
@@ -118,6 +119,7 @@ func PutKeepsCallerSlice() ObjectBug {
 					if operation.Ref.Off >= 0 && operation.Ref.Off <= end && end <= int64(len(data)) {
 						r.Data = slices.Clone(data[operation.Ref.Off:end])
 					}
+				case objectstore.List:
 				}
 				return r
 			}
@@ -129,8 +131,8 @@ func GetRangeEndOffByOne() ObjectBug {
 	return NewObjectBug("GetRangeEndOffByOne",
 		"Get with a length reads one byte past the end of the range.",
 		func(inner suites.ObjectSubject) suites.ObjectSubject {
-			return &objectSubject{inner: inner, do: func(operation core.IOCall) (observation.ObjectResult, error) {
-				if get, ok := operation.(core.ObjectGet); ok && get.Ref.Len > 0 {
+			return &objectSubject{inner: inner, do: func(operation objectstore.Call) (observation.ObjectResult, error) {
+				if get, ok := operation.(objectstore.Get); ok && get.Ref.Len > 0 {
 					get.Ref.Len++
 					operation = get
 				}
@@ -143,8 +145,8 @@ func GetRangeEndOffByOne() ObjectBug {
 func GetOutOfRangeReturnsOK() ObjectBug {
 	return afterObject("GetOutOfRangeReturnsOK",
 		"Get with a range outside the object returns OK and no data instead of ErrInvalid.",
-		func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult {
-			if _, ok := operation.(core.ObjectGet); ok && r.Code == core.ErrInvalid {
+		func(operation objectstore.Call, r observation.ObjectResult) observation.ObjectResult {
+			if _, ok := operation.(objectstore.Get); ok && r.Code == core.ErrInvalid {
 				return observation.ObjectResult{}
 			}
 			return r
@@ -155,8 +157,8 @@ func GetOutOfRangeReturnsOK() ObjectBug {
 func ListUnsorted() ObjectBug {
 	return afterObject("ListUnsorted",
 		"List returns the keys in reverse order instead of sorted order.",
-		func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult {
-			if _, ok := operation.(core.ObjectList); ok {
+		func(operation objectstore.Call, r observation.ObjectResult) observation.ObjectResult {
+			if _, ok := operation.(objectstore.List); ok {
 				r.Keys = slices.Clone(r.Keys)
 				slices.Reverse(r.Keys)
 			}
@@ -168,19 +170,19 @@ func ListUnsorted() ObjectBug {
 func ListPrefixAsSubstring() ObjectBug {
 	return stateful("ListPrefixAsSubstring",
 		"List matches the prefix anywhere in the key instead of only at the start.",
-		func(suites.ObjectSubject) func(core.IOCall, observation.ObjectResult) observation.ObjectResult {
+		func(suites.ObjectSubject) func(objectstore.Call, observation.ObjectResult) observation.ObjectResult {
 			keys := map[string]bool{}
-			return func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult {
+			return func(operation objectstore.Call, r observation.ObjectResult) observation.ObjectResult {
 				switch operation := operation.(type) {
-				case core.ObjectPut:
+				case objectstore.Put:
 					if r.Code == core.OK {
 						keys[operation.Key] = true
 					}
-				case core.ObjectDelete:
+				case objectstore.Delete:
 					if r.Code == core.OK {
 						delete(keys, operation.Key)
 					}
-				case core.ObjectList:
+				case objectstore.List:
 					var found []string
 					for k := range keys {
 						if strings.Contains(k, operation.Prefix) {
@@ -189,6 +191,7 @@ func ListPrefixAsSubstring() ObjectBug {
 					}
 					slices.Sort(found)
 					r.Keys = found
+				case objectstore.Get:
 				}
 				return r
 			}
@@ -199,8 +202,8 @@ func ListPrefixAsSubstring() ObjectBug {
 func DeleteMissingReturnsOK() ObjectBug {
 	return afterObject("DeleteMissingReturnsOK",
 		"Delete of a missing key returns OK instead of ErrNotFound.",
-		func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult {
-			if _, ok := operation.(core.ObjectDelete); ok && r.Code == core.ErrNotFound {
+		func(operation objectstore.Call, r observation.ObjectResult) observation.ObjectResult {
+			if _, ok := operation.(objectstore.Delete); ok && r.Code == core.ErrNotFound {
 				return observation.ObjectResult{Outcome: core.Applied}
 			}
 			return r
@@ -211,8 +214,8 @@ func DeleteMissingReturnsOK() ObjectBug {
 func PutEmptyKeyAccepted() ObjectBug {
 	return afterObject("PutEmptyKeyAccepted",
 		"Put with the empty key returns OK instead of ErrInvalid.",
-		func(operation core.IOCall, r observation.ObjectResult) observation.ObjectResult {
-			if put, ok := operation.(core.ObjectPut); ok && put.Key == "" && r.Code == core.ErrInvalid {
+		func(operation objectstore.Call, r observation.ObjectResult) observation.ObjectResult {
+			if put, ok := operation.(objectstore.Put); ok && put.Key == "" && r.Code == core.ErrInvalid {
 				return observation.ObjectResult{Outcome: core.Applied}
 			}
 			return r
@@ -225,17 +228,18 @@ func PutOverwriteIgnored() ObjectBug {
 		"Put on an existing key answers OK but keeps the old value.",
 		func(inner suites.ObjectSubject) suites.ObjectSubject {
 			exists := map[string]bool{}
-			return &objectSubject{inner: inner, do: func(operation core.IOCall) (observation.ObjectResult, error) {
+			return &objectSubject{inner: inner, do: func(operation objectstore.Call) (observation.ObjectResult, error) {
 				switch operation := operation.(type) {
-				case core.ObjectPut:
+				case objectstore.Put:
 					if exists[operation.Key] {
 						return observation.ObjectResult{Outcome: core.Applied}, nil
 					}
-				case core.ObjectDelete:
+				case objectstore.Delete:
 					delete(exists, operation.Key)
+				case objectstore.Get, objectstore.List:
 				}
 				r, err := inner.Do(operation)
-				if put, ok := operation.(core.ObjectPut); ok && err == nil && r.Code == core.OK {
+				if put, ok := operation.(objectstore.Put); ok && err == nil && r.Code == core.OK {
 					exists[put.Key] = true
 				}
 				return r, err

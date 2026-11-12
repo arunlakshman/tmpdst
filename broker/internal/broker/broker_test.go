@@ -15,6 +15,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 func TestApiVersions(t *testing.T) {
@@ -370,11 +371,11 @@ func TestCorruptGetRetried(t *testing.T) {
 		corrupt := true
 		h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
 			d := run()
-			if g, ok := d.(core.ObjectGetDone); ok && corrupt {
+			if g, ok := getDone(d); ok && corrupt {
 				corrupt = false
 				g.Data = bytes.Clone(g.Data)
 				g.Data[len(g.Data)-1] ^= 0x55
-				return g
+				return core.ObjectDone{Result: g}
 			}
 			return d
 		}
@@ -406,10 +407,10 @@ func TestFetchGetsExhausted(t *testing.T) {
 	h.produceOne(c, e("t", 0, plain(t, "hello")))
 	h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
 		d := run()
-		if g, ok := d.(core.ObjectGetDone); ok {
+		if g, ok := getDone(d); ok {
 			g.Data = bytes.Clone(g.Data)
 			g.Data[len(g.Data)-1] ^= 1
-			return g
+			return core.ObjectDone{Result: g}
 		}
 		return d
 	}
@@ -577,8 +578,8 @@ func TestIgnoresStrayIOResults(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	before := h.b.StateHash()
 	h.step(core.ControlPlaneDone{Req: 999})
-	h.step(core.ObjectPutDone{Req: 999})
-	h.step(core.ObjectGetDone{Req: 999})
+	h.step(core.ObjectDone{Result: objectstore.PutDone{Req: 999}})
+	h.step(core.ObjectDone{Result: objectstore.GetDone{Req: 999}})
 	h.step(core.SendDone{Req: 1})
 	h.step(core.TimerFired{ID: 77, Gen: 3})
 	if h.b.StateHash() != before {

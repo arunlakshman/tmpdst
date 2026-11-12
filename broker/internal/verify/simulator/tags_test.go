@@ -13,6 +13,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // scanCore maps each marker method (isEvent, isAction, ...) to the types that have it, so a
@@ -62,6 +63,23 @@ func names[T any](m map[string]T) []string {
 	return slices.Sorted(maps.Keys(m))
 }
 
+// caseNames lists the names of the Go types that the samples stand for, once each. The four
+// object store results are samples of the one wrapper type core.ObjectDone, and the four
+// object store calls are samples of core.ObjectCall.
+func caseNames[T any](m map[string]T) []string {
+	set := map[string]bool{}
+	for n := range m {
+		switch n {
+		case "ObjectPutDone", "ObjectGetDone", "ObjectDeleteDone", "ObjectListDone":
+			n = "ObjectDone"
+		case "ObjectPut", "ObjectGet", "ObjectDelete", "ObjectList":
+			n = "ObjectCall"
+		}
+		set[n] = true
+	}
+	return slices.Sorted(maps.Keys(set))
+}
+
 func eq(a, b []string) bool { return strings.Join(a, ",") == strings.Join(b, ",") }
 
 var (
@@ -86,10 +104,10 @@ func sampleEvents() map[string]core.EventData {
 		"ConnOpened": core.ConnOpened{Conn: 3, Peer: "p"}, "BytesReceived": core.BytesReceived{Conn: 3, Data: []byte("abc")},
 		"ConnClosed": core.ConnClosed{Conn: 4, Abort: true}, "SendDone": core.SendDone{Req: 5, Conn: 6, Err: core.ErrIO},
 		"ConnectDone": core.ConnectDone{Req: 5, Conn: 6, Err: core.ErrConnClosed}, "TimerFired": core.TimerFired{ID: 7, Gen: 8},
-		"ObjectPutDone":    core.ObjectPutDone{Req: 9, Key: "k", Err: core.ErrTimeout, Outcome: core.MaybeApplied},
-		"ObjectGetDone":    core.ObjectGetDone{Req: 9, Data: []byte("d"), Err: core.ErrNotFound},
-		"ObjectDeleteDone": core.ObjectDeleteDone{Req: 9, Err: core.ErrIO, Outcome: core.Applied},
-		"ObjectListDone":   core.ObjectListDone{Req: 9, Keys: []string{"a", "b"}, Err: core.ErrUnavailable},
+		"ObjectPutDone":    core.ObjectDone{Result: objectstore.PutDone{Req: 9, Key: "k", Err: core.ErrTimeout, Outcome: core.MaybeApplied}},
+		"ObjectGetDone":    core.ObjectDone{Result: objectstore.GetDone{Req: 9, Data: []byte("d"), Err: core.ErrNotFound}},
+		"ObjectDeleteDone": core.ObjectDone{Result: objectstore.DeleteDone{Req: 9, Err: core.ErrIO, Outcome: core.Applied}},
+		"ObjectListDone":   core.ObjectDone{Result: objectstore.ListDone{Req: 9, Keys: []string{"a", "b"}, Err: core.ErrUnavailable}},
 		"ControlPlaneDone": core.ControlPlaneDone{Req: 9, Resp: contract.GroupSyncResp{Assignment: []byte("z")}, Err: core.OK, Outcome: core.Applied},
 		"ControlPlaneDeliver": core.ControlPlaneDeliver{
 			From: sampleInstance, Req: 11, Op: contract.CreateTopic{Name: "t", Partitions: 3, FailIfExists: true},
@@ -105,8 +123,8 @@ func sampleActions() map[string]core.Action {
 		"Send": core.Send{Req: 1, Conn: 2, Data: []byte("s")}, "CloseConn": core.CloseConn{Conn: 2, Abort: true},
 		"PauseReads": core.PauseReads{Conn: 2}, "ResumeReads": core.ResumeReads{Conn: 3},
 		"Connect":   core.Connect{Req: 1, Addr: "a:1"},
-		"ObjectPut": core.ObjectPut{Req: 1, Key: "k", Data: []byte("v")}, "ObjectGet": core.ObjectGet{Req: 1, Ref: sampleRef},
-		"ObjectDelete": core.ObjectDelete{Req: 1, Key: "k"}, "ObjectList": core.ObjectList{Req: 1, Prefix: "p/"},
+		"ObjectPut": core.ObjectCall{Call: objectstore.Put{Req: 1, Key: "k", Data: []byte("v")}}, "ObjectGet": core.ObjectCall{Call: objectstore.Get{Req: 1, Ref: sampleRef}},
+		"ObjectDelete": core.ObjectCall{Call: objectstore.Delete{Req: 1, Key: "k"}}, "ObjectList": core.ObjectCall{Call: objectstore.List{Req: 1, Prefix: "p/"}},
 		"ControlPlaneCall": core.ControlPlaneCall{Req: 1, Op: contract.FindSegments{TopicPartition: sampleTP, From: 4, MaxBytes: -3}, Timeout: machine.Second},
 		"ControlPlaneReply": core.ControlPlaneReply{
 			To: sampleInstance, Done: core.ControlPlaneDone{Req: 2, Resp: contract.ListGroupsResp{}, Err: core.OK, Outcome: core.Applied},
@@ -181,7 +199,7 @@ func TestEveryCoreTypeHasATag(t *testing.T) {
 	opNames := slices.DeleteFunc(names(ops), func(n string) bool { return n == "CreateTopicExclusive" })
 	src := scanCore(t)
 	for marker, have := range map[string][]string{
-		"isEvent": names(events), "isAction": names(actions), "isOperation": opNames,
+		"isEvent": caseNames(events), "isAction": caseNames(actions), "isOperation": opNames,
 		"isResponse": names(resps),
 	} {
 		if !eq(src[marker], have) {

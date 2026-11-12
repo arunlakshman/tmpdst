@@ -8,6 +8,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 type operationKind uint8
@@ -111,7 +112,7 @@ func (b *Broker) startOp(o *operation) []core.Action {
 func (b *Broker) issue(o *operation) []core.Action {
 	o.requestID = b.nextRequestID()
 	if o.state == opGet {
-		return []core.Action{core.ObjectGet{Req: o.requestID, Ref: o.ranges[o.next].Loc}}
+		return []core.Action{core.ObjectCall{Call: objectstore.Get{Req: o.requestID, Ref: o.ranges[o.next].Loc}}}
 	}
 	var cop contract.Operation
 	switch o.kind {

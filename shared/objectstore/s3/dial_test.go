@@ -1,4 +1,4 @@
-package s3store
+package s3
 
 import (
 	"net"
@@ -6,12 +6,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/shared/objectstore"
+	"github.com/manifesterio/mds/shared/status"
 )
 
-// TestStoreDialAndHTTPClient needs no server: the endpoint is a port that
+// TestStoreDialRefusedNoServer needs no server: the endpoint is a port that
 // nothing listens on.
-func TestStoreDialAndHTTPClient(t *testing.T) {
+func TestStoreDialRefusedNoServer(t *testing.T) {
 	l, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -23,8 +24,8 @@ func TestStoreDialAndHTTPClient(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = s.Put(t.Context(), "k", nil)
-	code, out := Classifier{}.Classify(runtime.ObjectPut{}, err)
-	if code != runtime.ErrUnavailable || out != runtime.NotApplied {
+	code, out := Classifier{}.Classify(objectstore.Put{}, err)
+	if code != status.ErrUnavailable || out != status.NotApplied {
 		t.Errorf("dial: %v %v (%v)", code, out, err)
 	}
 	if err := s.EnsureBucket(t.Context()); err == nil {

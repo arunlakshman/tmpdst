@@ -21,11 +21,11 @@ import (
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/broker/internal/system/production"
-	"github.com/manifesterio/mds/broker/internal/system/s3store"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specsystem"
 	"github.com/manifesterio/mds/controlplane/client"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/shared/awsmetrics"
+	s3store "github.com/manifesterio/mds/shared/objectstore/s3"
 	"github.com/manifesterio/mds/shared/runinfo"
 )
 

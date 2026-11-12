@@ -16,6 +16,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/runsettings"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/suites"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // Conformance C2. The engines in this package are SIMULATED components. This
@@ -52,13 +53,17 @@ func newEngineObjectSubject() suites.ObjectSubject {
 	return &engineObjectSubject{engine: e, ctx: fakeservicetest.New(e, 1), from: fakeservicetest.Ref("a")}
 }
 
-func (s *engineObjectSubject) Do(operation core.IOCall) (observation.ObjectResult, error) {
-	s.engine.Execute(s.ctx, s.from, operation)
+func (s *engineObjectSubject) Do(operation objectstore.Call) (observation.ObjectResult, error) {
+	s.engine.Execute(s.ctx, s.from, core.ObjectCall{Call: operation})
 	c, err := completionFor(s.ctx, operation.RequestID())
 	if err != nil {
 		return observation.ObjectResult{}, err
 	}
-	return observation.FromObjectCompletion(c), nil
+	done, ok := c.(core.ObjectDone)
+	if !ok {
+		return observation.ObjectResult{}, fmt.Errorf("request %d: the engine answered with %T, not an object store result", operation.RequestID(), c)
+	}
+	return observation.FromObjectResult(done.Result), nil
 }
 
 func (s *engineObjectSubject) StateHash() (uint64, bool) { return s.engine.SpecStateHash(), true }

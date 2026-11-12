@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 func TestClassOfCoversEveryEvent(t *testing.T) {
 	control := []EventData{
 		NodeStarted{}, StopRequest{}, TimerFired{}, SendDone{}, ConnectDone{},
-		ObjectPutDone{}, ObjectGetDone{}, ObjectDeleteDone{}, ObjectListDone{}, ControlPlaneDone{},
+		ObjectDone{Result: objectstore.PutDone{}}, ObjectDone{Result: objectstore.GetDone{}}, ObjectDone{Result: objectstore.DeleteDone{}}, ObjectDone{Result: objectstore.ListDone{}}, ControlPlaneDone{},
 	}
 	data := []EventData{ConnOpened{}, BytesReceived{}, ConnClosed{}}
 	for _, b := range control {

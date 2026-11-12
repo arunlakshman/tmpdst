@@ -10,6 +10,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/broker/internal/system/production"
 	"github.com/manifesterio/mds/controlplane/client"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // stack is a control plane, an object store and any number of brokers.
@@ -17,14 +18,14 @@ type stack struct {
 	t       *testing.T
 	cp      *client.Client
 	objs    system.ObjectStore
-	objCls  system.ErrorClassifier
+	objCls  objectstore.Classifier
 	nodes   []*production.Node
 	brokers broker.Config
 }
 
 // newStack used to boot an in-process gRPC control plane. That server now lives
 // in mds-controlplane; hermetic IT that needs it skips until reconnect.
-func newStack(t *testing.T, objs system.ObjectStore, cls system.ErrorClassifier) *stack {
+func newStack(t *testing.T, objs system.ObjectStore, cls objectstore.Classifier) *stack {
 	t.Helper()
 	t.Skip("control plane extracted to mds-controlplane; reconnect later")
 	_ = objs

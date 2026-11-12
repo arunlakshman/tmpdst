@@ -6,6 +6,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // ---- test-only machine: a scriptable state machine ----
@@ -72,9 +73,19 @@ type echo struct {
 
 func (e *echo) StateHash() uint64          { return e.applied*1000003 + e.lost*7919 + e.crashes }
 func (e *echo) Name() string               { return "echo" }
-func (e *echo) Handles(a core.Action) bool { _, ok := a.(core.ObjectPut); return ok }
+func (e *echo) Handles(a core.Action) bool { _, ok := putOf(a); return ok }
+
+// putOf returns the Put inside an action, if the action is an object store Put.
+func putOf(a core.Action) (objectstore.Put, bool) {
+	if oc, ok := a.(core.ObjectCall); ok {
+		put, isPut := oc.Call.(objectstore.Put)
+		return put, isPut
+	}
+	return objectstore.Put{}, false
+}
+
 func (e *echo) Execute(ctx FakeServiceContext, from machine.NodeInstance, a core.Action) {
-	put := a.(core.ObjectPut)
+	put, _ := putOf(a)
 	lost := !e.recovered && ctx.Rand().Chance(e.lostProb)
 	if lost {
 		ctx.Fault("echo_response_lost")
@@ -85,12 +96,12 @@ func (e *echo) Execute(ctx FakeServiceContext, from machine.NodeInstance, a core
 func (e *echo) OnInternal(ctx FakeServiceContext, body any) {
 	a := body.(echoApply)
 	e.applied++
-	done := core.ObjectPutDone{Req: a.request, Outcome: core.Applied}
+	done := objectstore.PutDone{Req: a.request, Outcome: core.Applied}
 	if a.lost {
 		e.lost++
 		done.Err, done.Outcome = core.ErrTimeout, core.MaybeApplied
 	}
-	ctx.Deliver(a.from, ctx.Now()+Time(machine.Millisecond), 2, done)
+	ctx.Deliver(a.from, ctx.Now()+Time(machine.Millisecond), 2, core.ObjectDone{Result: done})
 }
 func (e *echo) OnCrash(ctx FakeServiceContext, ref machine.NodeInstance) { e.crashes++ }
 func (e *echo) EnterRecovery()                                           { e.recovered = true }
@@ -112,11 +123,13 @@ func putter(m *scriptM, event core.Event) []core.Action {
 		}
 		m.gen++
 		return []core.Action{
-			core.ObjectPut{Req: machine.RequestID(m.n), Key: fmt.Sprint("k", m.n), Data: []byte{byte(m.n)}},
+			core.ObjectCall{Call: objectstore.Put{Req: machine.RequestID(m.n), Key: fmt.Sprint("k", m.n), Data: []byte{byte(m.n)}}},
 			core.SetTimer{ID: 1, Gen: m.gen, After: 5 * machine.Millisecond},
 		}
-	case core.ObjectPutDone:
-		return []core.Action{fact("put_done", int64(b.Err))}
+	case core.ObjectDone:
+		if put, ok := b.Result.(objectstore.PutDone); ok {
+			return []core.Action{fact("put_done", int64(put.Err))}
+		}
 	case core.StopRequest:
 		return []core.Action{core.ShutdownDone{}}
 	}
@@ -413,7 +426,7 @@ func TestPanicRecovery(t *testing.T) {
 func TestEngineRouting(t *testing.T) {
 	f := scripted(func(m *scriptM, event core.Event) []core.Action {
 		if _, ok := event.Body.(core.NodeStarted); ok {
-			return []core.Action{core.ObjectDelete{Req: 1, Key: "k"}}
+			return []core.Action{core.ObjectCall{Call: objectstore.Delete{Req: 1, Key: "k"}}}
 		}
 		return nil
 	})
@@ -436,9 +449,15 @@ func TestEngineRouting(t *testing.T) {
 
 type echoDel struct{ n string }
 
-func (e *echoDel) StateHash() uint64                                             { return 0 }
-func (e *echoDel) Name() string                                                  { return e.n }
-func (e *echoDel) Handles(a core.Action) bool                                    { _, ok := a.(core.ObjectDelete); return ok }
+func (e *echoDel) StateHash() uint64 { return 0 }
+func (e *echoDel) Name() string      { return e.n }
+func (e *echoDel) Handles(a core.Action) bool {
+	if oc, ok := a.(core.ObjectCall); ok {
+		_, isDelete := oc.Call.(objectstore.Delete)
+		return isDelete
+	}
+	return false
+}
 func (e *echoDel) Execute(FakeServiceContext, machine.NodeInstance, core.Action) {}
 func (e *echoDel) OnInternal(FakeServiceContext, any)                            {}
 func (e *echoDel) OnCrash(FakeServiceContext, machine.NodeInstance)              {}

@@ -1,4 +1,16 @@
-// Package campaign runs many independent seeds in parallel and folds the results.
+// Package campaign runs many independent seeds in parallel, folds the results
+// and prints one report. A product registers its scenarios in a Registry and
+// calls Main. The standard flags, the environment variables, the report, the
+// until-stable mode and the determinism re-run are all here.
+//
+// Files:
+//
+//   - campaign.go: Result, Summary and RunSeeds (the parallel fold)
+//   - registry.go: Scenario, RunOptions and Registry
+//   - kernel.go: FromKernel
+//   - options.go: Config, Options and ParseOptions (flags and variables)
+//   - run.go: RunCampaign, Replay and Main
+//   - report.go: Report, its text and JSON
 package campaign
 
 import (
@@ -28,17 +40,36 @@ type SiteTotal struct {
 	Fired   uint64
 }
 
+// Failure is one failed property of one seed.
+type Failure struct {
+	Kind     string `json:"kind"` // violation, protocol, panic, max_steps, nondeterminism
+	Property string `json:"property"`
+	Detail   string `json:"detail"`
+	Step     uint64 `json:"step"`
+	AtMs     int64  `json:"at_ms"` // virtual time of the failure, in milliseconds
+	Repeats  int    `json:"repeats,omitempty"`
+}
+
 // Result is the outcome of one seed.
 type Result struct {
-	Seed      uint64
-	Hash      uint64
-	OK        bool
+	Seed uint64
+	Hash uint64
+	// Steps and RandCalls, with Hash, are what the determinism re-run compares.
+	Steps, RandCalls uint64
+	OK               bool
+	// Reproduce is the command that runs this seed again. When it is empty,
+	// the campaign makes one from Options.Tool.
 	Reproduce string
+	Failures  []Failure
 	Coverage  map[string]Coverage
-	// Counters are named totals of the run (steps, writes, ...). Run sums them.
+	// Counters are named totals of the run (steps, writes, ...). RunSeeds sums them.
 	Counters map[string]uint64
 	// Sites are the counts of the run's Maybe sites (fault.Injector.Sites).
 	Sites map[string]fault.SiteCount
+	// Tail holds the last step lines of a failed run. Log holds every step
+	// line, only when RunOptions.Log was set.
+	Tail []string
+	Log  []string
 }
 
 // Counts summarizes how many seeds ran and how many failed.
@@ -116,10 +147,16 @@ func NeverFired(sites map[string]SiteTotal, expected []string) []string {
 	return out
 }
 
-// Run executes seeds first, first+1, ... for seeds count, using workers goroutines.
+// Run is the old name of RunSeeds. It stays until the control plane command
+// moves to Main (plan task T1.11). Then it is deleted.
+func Run(first uint64, seeds int, workers int, run func(seed uint64) Result) Summary {
+	return RunSeeds(first, seeds, workers, run)
+}
+
+// RunSeeds executes seeds first, first+1, ... for seeds count, using workers goroutines.
 // When workers <= 0, GOMAXPROCS is used. Each run is independent; results are
 // folded in seed order. Coverage maps are merged by summing Checks and Passes.
-func Run(first uint64, seeds int, workers int, run func(seed uint64) Result) Summary {
+func RunSeeds(first uint64, seeds int, workers int, run func(seed uint64) Result) Summary {
 	if seeds <= 0 {
 		return Summary{Coverage: map[string]Coverage{}, Counters: map[string]uint64{}, Sites: map[string]SiteTotal{}}
 	}

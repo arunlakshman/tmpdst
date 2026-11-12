@@ -41,8 +41,12 @@ type Result struct {
 }
 
 // Run runs one seed.
-func Run(seed uint64) Result {
-	w := kernel.New(kernel.Config{Seed: seed})
+func Run(seed uint64) Result { return RunWith(kernel.Config{Seed: seed}) }
+
+// RunWith is Run with a kernel config. A campaign uses it to switch on the
+// step log or HaltOnFirst. These do not change the hash of a passing seed.
+func RunWith(cfg kernel.Config) Result {
+	w := kernel.New(cfg)
 	store := kernel.AddService[storeReq, serverIn](w, &store{data: map[string]string{}})
 	var server kernel.Addr[serverIn]
 	var client kernel.Addr[clientIn]

@@ -1834,3 +1834,51 @@ written, and the smallest change that was made.
      `Boot`. `RunUntil` calls `Start` if it was not called;
    - a pause ends with the incarnation (as the control plane pause does today);
    - `machine.End` has a `String` method for log lines.
+
+### T1.4 (campaign)
+
+1. **`Run` keeps its old form until T1.11.** Section 12 renames the old
+   `Run(first, seeds, workers, run)` to `RunSeeds` and gives the name `Run` to the
+   new `Run(reg, o)`. Go has no overloads, and `controlplane/cmd/cpsim` still calls
+   the old one (it is deleted in T1.11, and T1.4 may not touch it). So: the old
+   function is now `RunSeeds`, `Run` stays as a thin wrapper with the old
+   signature, and the new campaign runner is `RunCampaign(reg, o) (Report, error)`.
+   T1.11 deletes the wrapper `Run` and may rename `RunCampaign` to `Run`.
+2. **`RunCampaign` also returns an error.** An unknown scenario name is a user
+   mistake, not a programming error, so it is returned (Main prints it and exits
+   with 2). Section 12 has no error result.
+3. **`Report.Failed() bool` is `Report.HasFailed()`.** The report keeps the field
+   `Failed int` (it is in the cpsim JSON), and Go does not allow a field and a
+   method with one name.
+4. **`Options.JSONPath string` is `Options.JSON bool`.** The cpsim flag `-json`
+   is a switch that prints the report as JSON and nothing else. The plan says to
+   keep the cpsim format.
+5. **Fields added to the types of section 12**, all small and all needed by a
+   command to work:
+   - `Failure.Kind` (the broker words "violation", "protocol", "panic",
+     "max_steps", "nondeterminism"), because the broker text prints them;
+   - `Result.Log` (every step line, for `Replay`);
+   - `Options`: `Duration` (`MDS_CAMPAIGN` and `-campaign`), `HasSeed` and `Seed`
+     (`MDS_SEED` and `-seed`), `Verbose` (the broker `-v`), `Tool` and `Out`;
+   - `Config.Defaults` (the flag defaults: the broker needs 10 for `CheckEvery`, 100
+     for `MinSeedsForCoverage` and the scenario "kafka") and `Config.ExtraFlags` (the
+     product flags such as `-nodes` of cpsim);
+   - new flags `-campaign`, `-check-every`, `-v`; `-first` and `-start` are two
+     names of one flag.
+6. **`-seed` default.** cpsim used `-seed 0` for "run a campaign" and the broker
+   used `-seed -1`. The one tool uses -1, so `-seed 0` now replays seed 0.
+7. **`golden.Lines` is not built in T1.4.** Section 12 asks for it, but the T1.4
+   card allows changes only in `dst/campaign`, `dst/examples`, `dst/docs` and
+   `dst/README.md`. It is a small helper for T1.12 (the broker golden file); build
+   it there, or in a task that may touch `dst/golden`.
+8. **`kv.RunWith` and `kvchaos.RunWith`.** The examples only had `Run(seed)`.
+   `RunWith(kernel.Config)` lets a scenario pass `Log` and `HaltOnFirst`. `Run`
+   calls it with the same config as before, so the golden hashes did not move.
+9. **Single scenario and `-seed`.** With `-scenario all` and one registered
+   scenario, `-seed` replays that scenario. With more than one, it is an error
+   (as in cpsim).
+10. **Text of the one tool, against the old formats.** See the T1.4 report for the
+    list. In short: the cpsim report text is kept as it was (new sections
+    "nondeterminism" and "never checked" appear only when they have content); the
+    summary line lists the counters of the scenario by name; failure details use
+    the broker words; the coverage line names both Sometimes and Reachable paths.

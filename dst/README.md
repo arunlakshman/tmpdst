@@ -40,7 +40,7 @@ a concrete case, convert it to the sum type: `kernel.Send(r, server, serverIn(pu
 write the type: `kernel.Inject[tin](w, a, 0, note{"x"})`.
 
 `examples/v2/kv` and `examples/v2/kvchaos` are the two examples on v2 (new copies of the old
-examples, with golden hashes).
+examples, with golden hashes). `examples/v2/kvsim` runs both through the campaign tool.
 
 Assertions and buggify sites are declared once, in package-level var blocks:
 `var oneWriter = assert.NewAlways("sim: one writer per epoch")`,
@@ -80,12 +80,12 @@ The runner handles control types first, then tries engines in register order unt
 | `trace` | Running FNV-1a `Hash`, optional `Ring[T]` |
 | `assert` | Always / AlwaysOrUnreachable / Sometimes / Reachable / Unreachable with coverage; typed handles and the catalog |
 | `fault` | Maybe / MaybeP / Fault with per-site latch and Quiet; declared sites (`NewSite`) and the catalog |
-| `campaign` | Parallel seed runner. Folds per-seed hashes in seed order and merges coverage. |
+| `campaign` | The one campaign tool: scenario `Registry`, parallel seeds folded in seed order, one `Report` (text and JSON), until-stable mode, the determinism re-run, the standard flags and `<PREFIX>_SEEDS` / `_SEED` / `_CAMPAIGN` variables, and `Main` for a product command |
 | `check` | The log oracle of a simulator (`Replay`, `NoHole`, `Holders`, `Prefixes`, `Monotonic`, `Converged`) and the crash checks by hand (`Persistence`, `ForwardProgress`, `DirtyReboot`) |
 | `check/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |
 | `mutant` | Old name of the planted-bug helpers; now calls `check/spectest`. Deleted in T1.16 |
 | `model` | Old lockstep on rapid; `spectest.Lockstep` replaces it. Deleted in T1.14 / T1.16 |
-| `golden` | Fixed seedtohash asserts plus optional golden file Load/Save |
+| `golden` | Fixed seed-to-hash asserts plus optional golden file Load/Save |
 
 ## Docs
 
@@ -94,19 +94,45 @@ The runner handles control types first, then tries engines in register order unt
 
 ## How to run campaigns
 
-Use `campaign.Run` for a parallel seed sweep, or keep a plain loop in the test.
+A product simulator command is a few lines. It registers its scenarios and calls `campaign.Main`.
+`examples/v2/kvsim` is a full example (it runs `kv` and `kvchaos`).
 
 ```go
-sum := campaign.Run(1, 100, 0, func(seed uint64) campaign.Result {
-    r, err := myScenario.Run(seed) // product code
-    return campaign.Result{Hash: r.Hash, OK: err == nil && len(r.Failures) == 0, Coverage: toCampaign(r.Coverage)}
-})
-if len(sum.Failed) > 0 {
-    t.Fatalf("%d failed; first seed %d: %s", len(sum.Failed), sum.Failed[0].Seed, sum.Failed[0].Reproduce)
-}
+reg := &campaign.Registry{}
+reg.Add(campaign.Scenario{Name: "kv", Detail: "a store with no faults",
+    Run: func(seed uint64, o campaign.RunOptions) campaign.Result {
+        r := kv.RunWith(kernel.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst, Tail: 20})
+        return campaign.FromKernel(r, "") // "": the replay command is made from Config.Tool
+    }})
+cfg := campaign.Config{Tool: "kvsim", EnvPrefix: "MDS", Defaults: campaign.Options{CheckEvery: 10}}
+os.Exit(campaign.Main(cfg, reg, os.Args[1:], os.Stdout, os.Stderr))
 ```
 
-`campaign.Run` stamps `Result.Seed`, folds hashes with `trace` in seed order, and merges coverage by summing `Checks`/`Passes`. Same seed must still replay to the same hash. Cross-seed hash collisions are normal and not signal.
+```bash
+go run ./examples/v2/kvsim -seeds 200 -report         # both scenarios, 200 seeds each, with the report
+go run ./examples/v2/kvsim -scenario kvchaos -seed 7  # one seed, with its step log
+go run ./examples/v2/kvsim -until-stable              # more seeds until no new assertion appears
+go run ./examples/v2/kvsim -json                      # the report as JSON, nothing else
+MDS_CAMPAIGN=30s go run ./examples/v2/kvsim           # seeds until 30 seconds have passed
+```
+
+Flags: `-seeds`, `-first` (or `-start`), `-seed` (replay one seed), `-scenario` (a name, a list with
+commas, or `all`), `-j`, `-report`, `-json`, `-v`, `-until-stable`, `-stable-after`, `-max-seeds`,
+`-campaign` (a time limit), `-check-every`. The variables are `<EnvPrefix>_SEEDS`, `<EnvPrefix>_SEED`
+and `<EnvPrefix>_CAMPAIGN`. A flag wins over its variable. `ParseOptions` is the one place that reads both.
+
+The report lists: counts, failed runs with the command that replays them, every assertion with its
+checks and passes, the paths that were never reached, the Always properties that were never checked,
+the buggify sites (asked, on, calls, fired), the sites that never fired, and the coverage curve.
+"Never reached", "never checked" and "never fired" come from the catalog (`assert.Catalog`,
+`fault.Sites`), so a path that never ran is still named. Every `CheckEvery`-th seed runs twice with the
+step log switched, and a different hash, step count or number of random calls fails the seed
+("nondeterminism"). A campaign of `MinSeedsForCoverage` seeds or more also fails on a coverage gap.
+
+`campaign.RunSeeds` is the parallel fold under it. It stamps `Result.Seed`, folds hashes in seed
+order, and merges coverage by summing `Checks` and `Passes`. A test can call it directly. (`Run`, the
+old name, stays until the control plane command moves to `Main`.) Same seed must still replay to the
+same hash. Cross-seed hash collisions are normal and not signal.
 
 For planted bugs, use `spectest.RequireCaught` so each bug fails at least once in seeds `1..budget`, and `spectest.RequireClean` so the same budget raises no false alarms. With a `spectest.Lockstep`, `RunSeed(seed)` runs one seed and returns the shrunk failure.
 
@@ -115,6 +141,7 @@ A failed `spectest.Lockstep` prints the seed, the shrunk steps as Go code, and t
 ```bash
 go test ./examples/kv -run TestCampaign -count=1
 go test ./examples/kvchaos -run TestCampaign -count=1
+go test ./examples/v2/kvsim -count=1
 go test ./campaign ./mutant ./...
 ```
 

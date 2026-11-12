@@ -46,7 +46,7 @@ func TestCommitAssignsContiguousOffsets(t *testing.T) {
 	if got := bases(commit(m, "s2", batch("t", 0, 1), batch("u", 0, 5))); !slices.Equal(got, []contract.Offset{7, 0}) {
 		t.Fatalf("s2 bases %v", got)
 	}
-	if end := m.end(tp("t", 0)); end != 8 {
+	if end := m.End(tp("t", 0)); end != 8 {
 		t.Fatalf("end %d, want 8", end)
 	}
 }
@@ -55,7 +55,7 @@ func TestCommitReplayAndConflict(t *testing.T) {
 	m := New()
 	first := commit(m, "s1", batch("t", 0, 3))
 	commit(m, "s2", batch("t", 0, 2)) // moves the end on
-	if again := commit(m, "s1", batch("t", 0, 3)); again.Err != contract.OK || !slices.Equal(bases(again), bases(first)) || m.end(tp("t", 0)) != 5 {
+	if again := commit(m, "s1", batch("t", 0, 3)); again.Err != contract.OK || !slices.Equal(bases(again), bases(first)) || m.End(tp("t", 0)) != 5 {
 		t.Fatalf("replay %+v changed the answer or the state", again)
 	}
 	for name, bs := range map[string][]contract.PendingBatch{

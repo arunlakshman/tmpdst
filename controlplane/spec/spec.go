@@ -13,6 +13,7 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // Model is anything that answers control plane operations. The real code and
@@ -57,6 +58,11 @@ type ControlPlane struct {
 	topics   map[string]int32 // topic -> partition count
 	groups   map[string]*groupState
 	offsets  map[string]map[contract.TopicPartition]committedOffset // by group
+
+	// segKeys is every committed segment key, sorted. segPre[i] is the hash
+	// state after segKeys[:i] (see hash.go).
+	segKeys []string
+	segPre  []trace.Hash
 }
 
 type segment struct {
@@ -130,8 +136,9 @@ func (c *ControlPlane) createTopic(op contract.CreateTopic) contract.ErrCode {
 	return contract.OK
 }
 
-// end is the next offset of a partition.
-func (c *ControlPlane) end(tp contract.TopicPartition) contract.Offset {
+// End is the next offset of a partition: the end of its newest run, 0 if it
+// has none.
+func (c *ControlPlane) End(tp contract.TopicPartition) contract.Offset {
 	runs := c.runs[tp]
 	if len(runs) == 0 {
 		return 0
@@ -158,11 +165,12 @@ func (c *ControlPlane) commit(op contract.CommitSegment) contract.Done {
 	seg := segment{batches: slices.Clone(op.Batches)}
 	for _, b := range op.Batches {
 		tp := b.TopicPartition
-		r := contract.BatchRange{TopicPartition: tp, Base: c.end(tp), Count: b.Records, Loc: b.Loc}
+		r := contract.BatchRange{TopicPartition: tp, Base: c.End(tp), Count: b.Records, Loc: b.Loc}
 		c.runs[tp] = append(c.runs[tp], r)
 		c.topics[tp.Topic] = max(c.topics[tp.Topic], tp.Partition+1)
 		seg.ranges = append(seg.ranges, r)
 	}
+	c.addSegmentKey(op.SegmentKey)
 	c.segments[op.SegmentKey] = seg
 	return commitDone(seg.ranges)
 }
@@ -176,7 +184,7 @@ func (c *ControlPlane) find(op contract.FindSegments) contract.Done {
 	if op.From < 0 {
 		return contract.Done{Err: contract.ErrInvalid}
 	}
-	resp := contract.FindSegmentsResp{End: c.end(op.TopicPartition)}
+	resp := contract.FindSegmentsResp{End: c.End(op.TopicPartition)}
 	var bytes int64
 	for _, r := range c.runs[op.TopicPartition] {
 		if r.Base+contract.Offset(r.Count) <= op.From {

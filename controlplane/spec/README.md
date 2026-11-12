@@ -13,11 +13,14 @@ SOSP 2021).
   and segments.
 - `groups.go`: the rules for the logged half of consumer groups (`GroupInstall`,
   `GroupAssign`, `GroupRemove`, `OffsetCommit`, `OffsetFetch`, describe, list).
+- `hash.go`: `StateHash`, a hash of the committed segments and the topics. The
+  broker simulator compares it with the hash of its simulated control plane.
+  It keeps a prefix cache, so a commit near the end of the key order is cheap.
 - `rebalance.go`: `spec.Rebalance`, the model of the classic group protocol
   (join, sync, heartbeat, leave, timers, role changes). It holds a
   `ControlPlane` as its `Store` for the logged half. The rules are in
   `docs/rebalance.md`.
-- `spec_test.go`, `rebalance_test.go`: small examples of each rule.
+- `spec_test.go`, `hash_test.go`, `rebalance_test.go`: small examples of each rule.
 
 ## The independence rule
 
@@ -25,8 +28,11 @@ The model shares types with the code (`contract`), and never logic.
 It imports none of `domain`, `metadb`, `engine` or `replica`, and no program of
 the product imports it: `go list -deps ./cmd/mdscontrolplane` does not list it.
 A test that compared the code with itself would prove nothing. Only tests and
-the simulator import the model. The simulator reaches it through one file,
-`internal/verify/simulator/spec.go`.
+the simulators import the model. The control plane simulator reaches it through
+one file, `internal/verify/simulator/spec.go`. The broker reaches it through
+`broker/internal/verify/speccheck/specbridge` (checks C1, C2 and C4, and the
+broker simulator) and `speccheck/specsystem` (in-memory runs). This is the one
+control plane spec of the repo.
 
 The model is deterministic: no clock, network, goroutines or files, and no map
 order reaches an answer. It is in the determinism gate (`make determinism`).

@@ -1,7 +1,7 @@
 # Host tools for `make build` and the pre-commit hook (all modules).
 # Bootstrap: install https://mise.jdx.dev then run  mise install
 # Java and minio are only for the broker e2e script (make -C broker e2e-kafka-cli).
-# make it (in controlplane) and make it-postgres (in broker) need Docker on the host;
+# make it (in controlplane) and make it-postgres (in broker) need Podman on the host (the docker command is an alias);
 # mise cannot install it.
 
 [tools]

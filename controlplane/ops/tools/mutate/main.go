@@ -120,12 +120,13 @@ func check(m mutant) error {
 // try runs one mutant. It returns the line that shows the kill, or "" when the
 // mutant survived.
 func try(m mutant, timeout time.Duration) (string, error) {
-	dir, err := os.MkdirTemp("", "mutate-")
+	root, err := os.MkdirTemp("", "mutate-")
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = os.RemoveAll(dir) }()
-	if err := copyTree(".", dir); err != nil {
+	defer func() { _ = os.RemoveAll(root) }()
+	dir, err := setupWorkTree(root)
+	if err != nil {
 		return "", err
 	}
 	path := filepath.Join(dir, m.file)
@@ -153,6 +154,42 @@ func try(m mutant, timeout time.Duration) (string, error) {
 		}
 	}
 	return "a failing command", nil
+}
+
+// setupWorkTree copies this module into root, in a folder with the same name.
+// The go.mod file of this module has "replace" lines with paths like ../dst. So
+// every sibling module of the real repo is linked next to the copy, and those
+// paths still work. It returns the folder of the copy.
+func setupWorkTree(root string) (string, error) {
+	here, err := filepath.Abs(".")
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(root, filepath.Base(here))
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", err
+	}
+	if err := copyTree(".", dir); err != nil {
+		return "", err
+	}
+	parent := filepath.Dir(here)
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		sibling := filepath.Join(parent, e.Name())
+		if sibling == here || !e.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(sibling, "go.mod")); err != nil {
+			continue
+		}
+		if err := os.Symlink(sibling, filepath.Join(root, e.Name())); err != nil {
+			return "", err
+		}
+	}
+	return dir, nil
 }
 
 // runCommand runs the command in dir without a shell and returns its output.

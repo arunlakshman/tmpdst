@@ -1,8 +1,14 @@
-// Package check holds the generic oracle checks of a simulator: replay a log
-// into a reference model and judge, one writer per epoch, no hole in the log,
-// per-slot state agreement, monotonic floors, and the
-// convergence predicate. Every check records through assert.Log, so a failure
-// never panics and the run goes on.
+// Package check is the spec toolkit of dst. This package holds the parts that
+// may run inside a simulation. Its subpackage spectest holds the parts that
+// run in tests on rapid (Spec, Lockstep, SelfCheck, planted bugs, Rerun).
+//
+// The log oracle of a simulator: replay a log into a reference model and
+// judge, one writer per epoch, no hole in the log, per-slot state agreement,
+// monotonic floors, and the convergence predicate. Every check records
+// through assert.Log, so a failure never panics and the run goes on.
+//
+// The crash checks by hand (Persistence, ForwardProgress, DirtyReboot), for a
+// test that does not use spectest.Lockstep.
 //
 // The package knows no product types. A product gives it a Log (what its log
 // fake exposes), callbacks that decode and apply entries, and the reference

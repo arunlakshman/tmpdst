@@ -5,12 +5,21 @@
 // Prefer simplest ops first when building a generator. SimplestFirst wraps
 // rapid.OneOf so earlier generators shrink first. Put reads and no-ops ahead
 // of writes, and crash/reboot ops last.
+//
+// This package moved to dst/check: spectest.Lockstep replaces Step and
+// CheckGen, SimplestFirst is in spectest, and Write and the crash helpers are
+// in check. It stays
+// here only until its last user moves (plan task T1.14 or T1.16 deletes it).
+// New code uses dst/check and dst/check/spectest.
 package model
 
 import (
 	"fmt"
 
 	"pgregory.net/rapid"
+
+	"github.com/manifesterio/mds/dst/check"
+	"github.com/manifesterio/mds/dst/check/spectest"
 )
 
 // Model is the sequential reference. Apply is fault-free.
@@ -112,58 +121,35 @@ func (s Step[Op, Obs]) CheckGen(t *rapid.T, gen *rapid.Generator[Op], failed fun
 }
 
 // SimplestFirst builds a generator that picks among gens. Earlier gens are
-// simpler for shrink: rapid.OneOf shrinks toward lower indices.
+// simpler for shrink: rapid.OneOf shrinks toward lower indices. It is
+// spectest.SimplestFirst.
 func SimplestFirst[V any](gens ...*rapid.Generator[V]) *rapid.Generator[V] {
-	return rapid.OneOf(gens...)
+	return spectest.SimplestFirst(gens...)
 }
 
-// Write is one answered key/value pair used by CheckPersistence.
-type Write[K, V any] struct {
-	Key   K
-	Value V
-}
+// Write is one answered key/value pair used by CheckPersistence. It is
+// check.Write.
+type Write[K, V any] = check.Write[K, V]
 
 // CheckPersistence verifies that every answered write is still present after
-// a subject crash and recover. present(key, value) reports whether durable
-// state contains that write. answered is the set of writes the client
-// observed as successful before the crash.
+// a subject crash and recover. It is check.Persistence.
 func CheckPersistence[K, V any](answered []Write[K, V], present func(K, V) bool) error {
-	for i, w := range answered {
-		if !present(w.Key, w.Value) {
-			return fmt.Errorf("persistence: answered write %d missing", i)
-		}
-	}
-	return nil
+	return check.Persistence(answered, present)
 }
 
 // CheckForwardProgress compares a clean model observation to the subject's
-// observation after a clean restart. Both callbacks produce observations;
-// equal reports mismatch.
+// observation after a clean restart. It is check.ForwardProgress.
 func CheckForwardProgress[Obs any](modelClean, subjectRestart func() (Obs, error), equal func(want, got Obs) error) error {
-	want, err := modelClean()
-	if err != nil {
-		return fmt.Errorf("model clean: %w", err)
-	}
-	got, err := subjectRestart()
-	if err != nil {
-		return fmt.Errorf("subject restart: %w", err)
-	}
-	if err := equal(want, got); err != nil {
-		return fmt.Errorf("forward progress: %w", err)
-	}
-	return nil
+	return check.ForwardProgress(modelClean, subjectRestart, equal)
 }
 
 // DirtyReboot runs the paper crash checks: answered writes remain, then a
-// clean restart matches the model again.
+// clean restart matches the model again. It is check.DirtyReboot.
 func DirtyReboot[K, V, Obs any](
 	answered []Write[K, V],
 	present func(K, V) bool,
 	modelClean, subjectRestart func() (Obs, error),
 	equal func(want, got Obs) error,
 ) error {
-	if err := CheckPersistence(answered, present); err != nil {
-		return err
-	}
-	return CheckForwardProgress(modelClean, subjectRestart, equal)
+	return check.DirtyReboot(answered, present, modelClean, subjectRestart, equal)
 }

@@ -38,7 +38,7 @@ Not done on purpose:
 
 Do not rename these, because the outside world defines them:
 
-- Generated code in `internal/controlplane/api` (made from the `.proto` files).
+- Generated code in `api` (made from the `.proto` files).
 - Kafka words: `Produce`, `Fetch`, `ListOffsets`, `Metadata`, `ApiVersions`, `DescribeTopics`.
 - AWS words: `DynamoDB`, `S3`, `IMDS`, `Healthz`.
 - Go words: `ctx`, `err`, `mu`, `Reader`, `Writer`.
@@ -89,7 +89,7 @@ Historical: `speccheck`, `speccheck/checker` and `specsystem` were removed. The 
 | `applier/pebblekv` | `metadb/engine/pebble` |
 | `wire/format` | `wire/segmentformat` |
 | `wire/kwire` | `wire/kafkawire` |
-| `ops/tools/detcheck` | `ops/tools/determinismcheck` |
+| `ops/tools/detcheck` | `dst/cmd/determinismcheck` |
 | `cmd/crapscore` | `cmd/riskscore` |
 | `test/it` | `test/integrationtest` |
 

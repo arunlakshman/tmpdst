@@ -4,11 +4,11 @@
 - Requires Go: 1.21 (go.mod of the module). The repo is on 1.26, so nothing moves.
 - Verdict: **ACCEPTED WITH RULES**, for the log entry codec in `internal/controlplane/metadb`
   (`entry.go`, `entry_codec.go`) only.
-- Import paths allowed (`ops/tools/determinismcheck/allow.txt`): `google.golang.org/protobuf/proto` and
+- Import paths allowed (`ops/determinism-allow.txt`): `google.golang.org/protobuf/proto` and
   `google.golang.org/protobuf/reflect/protoreflect`. `internal/controlplane/architecture_test.go` lets
   `metadb` import these two and no other third-party package.
 
-Why a record now: before T4.4 only the generated API (`internal/controlplane/api`) used protobuf, and the
+Why a record now: before T4.4 only the generated API (`controlplane/api`) used protobuf, and the
 gate does not follow imports into the API (the input/output edge). Now `metadb.Encode` and `metadb.Decode`
 call `proto` on every log entry, on every replica, inside the simulator. `metadb` is reached from the
 simulator root, so `ops/scripts/ci-determinism.sh` asks for this record.
@@ -66,7 +66,7 @@ map, 2 reflect map iterations, 225 package-level variables, and the imports `os`
 
 ## Evidence
 
-- `go run ./ops/tools/determinismcheck` over the packages above: the findings counted at the top, each one
+- `go run github.com/manifesterio/mds/dst/cmd/determinismcheck` over the packages above: the findings counted at the top, each one
   read and listed in the table. No goroutine, channel, time or random number on the path.
 - Probe (a temporary `main` in the repo, not committed): six builds with a different `-ldflags -X` string,
   one `-trimpath` build and one `-race` build, each run twice (16 processes). Each process encoded one entry

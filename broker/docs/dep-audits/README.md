@@ -6,7 +6,7 @@ depend on needs a reviewed record here, at exactly
 CI when one is missing, so a version bump forces a re-audit.
 
 Only modules that the deterministic packages really run are checked. The script does not
-follow imports into the generated gRPC API (`internal/controlplane/api/v1`), because that is
+follow imports into the generated gRPC API (`controlplane/api`), because that is
 the input/output edge. So grpc, protobuf, genproto and golang.org/x/{net,sys,text} need no
 record here. Deterministic packages may use the generated API for type definitions only
 (decision 57).
@@ -20,7 +20,7 @@ How to produce one: run `ops/scripts/audit-dep.sh <module>@<version>` and follow
 - Date / auditor:
 - Requires Go:
 - Verdict: ACCEPTED | ACCEPTED WITH RULES | REJECTED
-- Import paths allowed (ops/tools/determinismcheck/allow.txt):
+- Import paths allowed (ops/determinism-allow.txt):
 
 ## Findings
 | Finding (file:line) | Matters? | Why |

@@ -35,7 +35,7 @@ Not done on purpose:
 
 Do not rename these, because the outside world defines them:
 
-- Generated code in `internal/controlplane/api/v1` (made from the `.proto` file).
+- Generated code in `controlplane/api` (made from the `.proto` file).
 - Kafka words: `Produce`, `Fetch`, `ListOffsets`, `Metadata`, `ApiVersions`, `DescribeTopics`.
 - AWS words: `DynamoDB`, `S3`, `IMDS`, `Healthz`.
 - Go words: `ctx`, `err`, `mu`, `Reader`, `Writer`.
@@ -84,7 +84,7 @@ Rules used for the right column:
 | `applier/pebblekv` | `kv/pebblestore` |
 | `wire/format` | `wire/segmentformat` |
 | `wire/kwire` | `wire/kafkawire` |
-| `ops/tools/detcheck` | `ops/tools/determinismcheck` |
+| `ops/tools/detcheck` | `dst/cmd/determinismcheck` |
 | `cmd/crapscore` | `cmd/riskscore` |
 | `test/it` | `test/integrationtest` |
 

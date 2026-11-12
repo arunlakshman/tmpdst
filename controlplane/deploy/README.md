@@ -1,6 +1,7 @@
 # Deploy the control plane to a local kind cluster
 
-Needs docker, kind and helm. The Dockerfile makes the generated files itself (they are
+Needs podman, kind and helm. This repo uses Podman: follow "Using podman instead of docker"
+below. The block here is the same with the `docker` command. The Dockerfile makes the generated files itself (they are
 not in git). `dst` is a folder of this repo (go.mod has a replace to it). Run the
 commands below from the root of the repo.
 
@@ -51,7 +52,7 @@ helm v4.1.0 and kubectl client v1.30.2. The commands above ran as written.
   `--tmpfs /tmp` the same command got past that point (it then retried the unreachable
   Dynamo endpoint, as expected).
 
-## Using podman instead of docker
+## Using podman instead of docker (the way to use in this repo)
 
 Checked on 2026-11-07 with podman 6.1.4 (machine: rootless, 2 CPUs, 2 GiB), kind v0.31.0
 and helm v4.1.0. The same Dockerfile and chart work. Three things differ from the docker

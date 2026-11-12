@@ -5,7 +5,7 @@
 - Requires Go: 1.22.0
 - Verdict: **REJECTED for the deterministic packages** (`internal/runtime/`, `internal/verify/simulator/`, `internal/spec/`, ...); **ACCEPTED at the edge**
   (`internal/controlplane/metadb/engine/pebble` only, decision 49).
-- Import paths allowed (ops/tools/determinismcheck/allow.txt): **none**. Deliberately not added.
+- Import paths allowed (ops/determinism-allow.txt): **none**. Deliberately not added.
 
 ## Findings
 | Finding (file:line, from the script's determinismcheck report) | Matters? | Why |

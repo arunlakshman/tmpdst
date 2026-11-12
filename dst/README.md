@@ -2,13 +2,14 @@
 
 Deterministic simulation tools for single-threaded Go tests. A product implements `sim.Process` and `eng.Engine`; the runner owns one seeded `rng`, virtual-time `sched`, cooperative `fault` injector, record-and-continue `assert` log, and `trace` fingerprint per run.
 
-Module: `github.com/manifesterio/dst`
+Module: `github.com/manifesterio/mds/dst`
 
-## Install
+This module is a folder of the MDS monorepo. It imports no other module of the repo.
 
-```bash
-go get github.com/manifesterio/dst@latest
-```
+## Build
+
+From the repo root: `make -C dst build`. It runs format, ASCII, vet, lint, modernize, the tests and the
+determinism check. The determinism tool is in `cmd/determinismcheck`.
 
 ## Contract packages
 
@@ -46,12 +47,12 @@ The runner handles control types first, then tries engines in register order unt
 | `campaign` | Parallel seed runner. Folds per-seed hashes in seed order and merges coverage. |
 | `mutant` | `Require` / `RequireClean` helpers for planted-bug and false-alarm checks |
 | `model` | Lockstep `Model`/`System` on rapid: `SimplestFirst`, `CheckGen`, `DirtyReboot` |
-| `golden` | Fixed seed→hash asserts plus optional golden file Load/Save |
+| `golden` | Fixed seedtohash asserts plus optional golden file Load/Save |
 
 ## Docs
 
-- [docs/lessons.md](docs/lessons.md) — one RNG, virtual time, issue-time faults, phases, record-and-continue, Go sans-I/O
-- [docs/paper.md](docs/paper.md) — SOSP'21 ShardStore ideas mapped onto dst
+- [docs/lessons.md](docs/lessons.md) - one RNG, virtual time, issue-time faults, phases, record-and-continue, Go sans-I/O
+- [docs/paper.md](docs/paper.md) - SOSP'21 ShardStore ideas mapped onto dst
 
 ## How to run campaigns
 

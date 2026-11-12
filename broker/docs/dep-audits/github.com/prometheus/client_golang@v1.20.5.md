@@ -5,7 +5,7 @@
   before stopping were read by hand.
 - Requires Go: 1.22.0
 - Verdict: **REJECTED for the deterministic packages**; **ACCEPTED at the edge** (`internal/system/production` only).
-- Import paths allowed (ops/tools/determinismcheck/allow.txt): **none**. Deliberately not added.
+- Import paths allowed (ops/determinism-allow.txt): **none**. Deliberately not added.
 
 ## Findings
 | Finding | Matters? | Why |

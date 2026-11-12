@@ -53,7 +53,7 @@ One line per term. Plain words. For the layout of the code see
 ## Simulation and tests
 
 - **sim.Process**: the dst interface of a thing that does no IO: `Step(cx, inbox)` returns outputs. The replica and the rebalance machine have this shape.
-- **dst**: the deterministic simulation testing library (module `github.com/manifesterio/dst`). It has the scheduler, the random stream, fault injection and the runner.
+- **dst**: the deterministic simulation testing library (module `github.com/manifesterio/mds/dst`). It has the scheduler, the random stream, fault injection and the runner.
 - **simulator**: `internal/verify/simulator`: runs replicas and consumers on a virtual clock with a fake log and fake objects, one seed per run. `cmd/cpsim` runs campaigns of it.
 - **seed**: the one number that decides a whole run. Same seed, same run.
 - **scenario**: a named fault set for the simulator (basic, log-faults, crash-restart, leader-fencing, chaos).
@@ -62,7 +62,7 @@ One line per term. Plain words. For the layout of the code see
 - **buggify site**: a named place where a fake or the machine may do something odd now and then (a late reply, a short page). It is on in about half of the runs. Reports count how often it fired.
 - **trace hash**: the digest of every step of a run. Equal seeds must give equal hashes.
 - **golden hash**: a trace hash pinned in a test (`internal/verify/simulator/golden_test.go`), or printed by `make sim-campaign`. A change that moves one is a change of behaviour and must be re-pinned on purpose.
-- **determinism gate**: `make determinism` (`ops/tools/determinismcheck`): the deterministic packages may import only an allow-list, and use no goroutines, wall clock or map ranges.
+- **determinism gate**: `make determinism` (`dst/cmd/determinismcheck`): the deterministic packages may import only an allow-list, and use no goroutines, wall clock or map ranges.
 - **model / spec**: `internal/spec`: the small independent reference program that gives the correct answer. It shares types with the code, never logic.
 - **conformance**: tests in `test/conformance` that draw random operations (rapid), send them to the model and to the real code, and require equal answers.
 - **mutant**: a bug planted by one exact text replacement in the real code (`ops/mutants.txt`). `make mutants` requires that a named test fails for each.

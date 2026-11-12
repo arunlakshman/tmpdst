@@ -31,10 +31,10 @@ type ControlPlaneSubject interface {
 	StateHash() (hash uint64, ok bool)
 }
 
-// PartitionSubject is a partition log under test. The methods have the same
-// rules as speccheck.Partition. StateHash returns ok = false when the subject
+// BrokerSubject is a log under test: the log of one Kafka partition. The methods have the same
+// rules as speccheck.Broker. StateHash returns ok = false when the subject
 // has no spec hash.
-type PartitionSubject interface {
+type BrokerSubject interface {
 	Append(batch [][]byte) core.Offset
 	Read(from core.Offset, max int) ([]speccheck.StoredRecord, bool)
 	HighWatermark() core.Offset
@@ -80,22 +80,22 @@ func (s *specControlPlaneSubject) Do(operation generator.ControlPlaneTestStep) (
 
 func (s *specControlPlaneSubject) StateHash() (uint64, bool) { return s.cp.StateHash(), true }
 
-type specPartitionSubject struct{ p *speccheck.Partition }
+type specBrokerSubject struct{ p *speccheck.Broker }
 
-// NewSpecPartitionSubject returns a fresh speccheck.Partition as a subject.
-func NewSpecPartitionSubject() PartitionSubject {
-	return &specPartitionSubject{p: &speccheck.Partition{}}
+// NewSpecBrokerSubject returns a fresh speccheck.Broker as a subject.
+func NewSpecBrokerSubject() BrokerSubject {
+	return &specBrokerSubject{p: &speccheck.Broker{}}
 }
 
-func (s *specPartitionSubject) Append(batch [][]byte) core.Offset { return s.p.Append(batch) }
+func (s *specBrokerSubject) Append(batch [][]byte) core.Offset { return s.p.Append(batch) }
 
-func (s *specPartitionSubject) Read(from core.Offset, max int) ([]speccheck.StoredRecord, bool) {
+func (s *specBrokerSubject) Read(from core.Offset, max int) ([]speccheck.StoredRecord, bool) {
 	return s.p.Read(from, max)
 }
 
-func (s *specPartitionSubject) HighWatermark() core.Offset { return s.p.HighWatermark() }
+func (s *specBrokerSubject) HighWatermark() core.Offset { return s.p.HighWatermark() }
 
-func (s *specPartitionSubject) StateHash() (uint64, bool) { return s.p.StateHash(), true }
+func (s *specBrokerSubject) StateHash() (uint64, bool) { return s.p.StateHash(), true }
 
 // AllObjectProfiles returns every generator profile. A caller runs the object
 // store suite once for each profile, as a subtest named after the profile.

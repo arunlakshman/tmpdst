@@ -13,7 +13,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
 )
 
-// C4 (speccheck/doc.go): the at-least-once Kafka oracle against the speccheck.Partition and
+// C4 (speccheck/doc.go): the at-least-once Kafka oracle against the speccheck.Broker and
 // speccheck.ControlPlane specs. The oracle never imports speccheck (decision 21);
 // this external test package may, because determinismcheck does not read _test.go
 // files and only export_test.go (package kafka, no speccheck) reaches into the
@@ -51,7 +51,7 @@ func verdict(w *world) (failures, simulator.SafetyRule) {
 }
 
 // sameAsSpec: the oracle's reconstructed log of every partition is exactly
-// what speccheck.Partition holds.
+// what speccheck.Broker holds.
 func sameAsSpec(t *testing.T, seed uint64, w *world, inv simulator.SafetyRule) {
 	t.Helper()
 	for _, topicPartition := range w.tps {
@@ -61,7 +61,7 @@ func sameAsSpec(t *testing.T, seed uint64, w *world, inv simulator.SafetyRule) {
 			want[i] = string(r.Value)
 		}
 		if got := kafka.OracleLog(inv, topicPartition); !slices.Equal(got, want) {
-			t.Fatalf("seed %d %v: oracle log %v, Partition %v", seed, topicPartition, got, want)
+			t.Fatalf("seed %d %v: oracle log %v, Broker %v", seed, topicPartition, got, want)
 		}
 	}
 }

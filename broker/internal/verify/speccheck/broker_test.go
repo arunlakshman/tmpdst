@@ -6,8 +6,8 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 )
 
-func TestPartition(t *testing.T) {
-	var p Partition
+func TestBroker(t *testing.T) {
+	var p Broker
 	if p.HighWatermark() != 0 {
 		t.Fatal("not empty")
 	}

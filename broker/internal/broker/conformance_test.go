@@ -19,7 +19,7 @@ import (
 // world. The fakes are the speccheck spec object store and the speccheck spec
 // control plane, and the harness runs without faults. The test sends client
 // requests built with kafkawire. It compares every ack, fetch and ListOffsets
-// answer with one speccheck.Partition per topic partition.
+// answer with one speccheck.Broker per topic partition.
 
 var c1TPs = []core.TopicPartition{core.NewTopicPartition("t", 0), core.NewTopicPartition("t", 1),
 	core.NewTopicPartition("u", 0), core.NewTopicPartition("u", 1), core.NewTopicPartition("u", 2)}
@@ -46,7 +46,7 @@ type c1 struct {
 	t       *testing.T
 	h       *harness
 	conns   []*client
-	model   map[core.TopicPartition]*speccheck.Partition
+	model   map[core.TopicPartition]*speccheck.Broker
 	corrupt bool
 }
 
@@ -59,9 +59,9 @@ func newC1(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) *c1 
 	h := newHarness(t, config)
 	h.cp.CreateTopic("u", 3)
 	h.do(core.NodeStarted{Self: h.self})
-	s := &c1{t: t, h: h, model: map[core.TopicPartition]*speccheck.Partition{}, corrupt: corrupt}
+	s := &c1{t: t, h: h, model: map[core.TopicPartition]*speccheck.Broker{}, corrupt: corrupt}
 	for _, topicPartition := range c1TPs {
-		s.model[topicPartition] = &speccheck.Partition{}
+		s.model[topicPartition] = &speccheck.Broker{}
 	}
 	s.conns = []*client{h.open(1), h.open(2)}
 	if corrupt { // every third GET comes back with a flipped byte
@@ -359,7 +359,7 @@ func TestConformanceBroker(t *testing.T) {
 }
 
 // Small segment caps make every seal rule fire during the generated runs. The
-// log must still match the Partition spec after each seal.
+// log must still match the Broker spec after each seal.
 func TestConformanceBrokerSmallSegments(t *testing.T) {
 	caps := map[string]func(*Config){
 		"bytes":      func(c *Config) { c.MaxSegmentBytes = 120 },

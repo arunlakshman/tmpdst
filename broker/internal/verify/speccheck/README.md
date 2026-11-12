@@ -47,7 +47,7 @@ checking, and proofs of the specs themselves. Like the paper, we can miss bugs.
 | --- | --- | --- | --- |
 | `ObjectStore` | `objectstore.go` | S3: put, get a byte range, delete, list | S3 adapter, simulated object store |
 | `ControlPlane` | `controlplane.go` | commit a segment, lookup, describe topics | applier, memstore, gRPC client, simulated control plane |
-| `Partition` | `partition.go` | one Kafka partition: append, read | the broker |
+| `Broker` | `broker.go` | one Kafka partition: append, read | the broker |
 
 The rules of each spec are in the comment above its type. Read that first.
 
@@ -55,10 +55,10 @@ The rules of each spec are in the comment above its type. Read that first.
 
 | Check | What is tested | Compared with | Real or simulated |
 | --- | --- | --- | --- |
-| C1 | broker answers: produce, fetch, ListOffsets | `Partition` | broker is real; storage and control plane are specs |
+| C1 | broker answers: produce, fetch, ListOffsets | `Broker` | broker is real; storage and control plane are specs |
 | C2 | simulated object store and control plane, faults off | `ObjectStore`, `ControlPlane` | simulated |
 | C3 | S3 adapter and control-plane stores | `ObjectStore`, `ControlPlane` | real |
-| C4 | the Kafka oracle in `sim/kafka` | `Partition`, `ControlPlane` | simulation side |
+| C4 | the Kafka oracle in `sim/kafka` | `Broker`, `ControlPlane` | simulation side |
 
 ## Run the tests
 

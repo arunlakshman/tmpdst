@@ -17,7 +17,7 @@ import (
 
 // C4 world: a random correct at-least-once Kafka history generated against the
 // speccheck specs (ControlPlane assigns offsets and replays a committed key,
-// Partition is the expected log; a retried batch is committed again, so it is
+// Broker is the expected log; a retried batch is committed again, so it is
 // in the log twice), exposed to the oracle through a fake simulator.View. Faults
 // mutate the finished world (c4_faults_test.go).
 
@@ -47,7 +47,7 @@ type world struct {
 	opts   kafka.Opts
 	tps    []core.TopicPartition
 	cp     *speccheck.ControlPlane
-	parts  map[core.TopicPartition]*speccheck.Partition
+	parts  map[core.TopicPartition]*speccheck.Broker
 	prods  []*producer
 	brks   []*broker
 	pos    map[[2]int]int64 // (consumer, tp index) -> next offset
@@ -136,7 +136,7 @@ func nodeRef(s string) core.NodeInstance { return core.NodeInstance{Node: core.N
 func newWorld(seed uint64, live bool) *world {
 	r := rand.New(rand.NewPCG(seed, 0xc4)) //nolint:gosec // G404: deterministic test/sim PRNG
 	opts := kafka.DefaultOpts()
-	w := &world{opts: opts, cp: speccheck.NewControlPlane(), parts: map[core.TopicPartition]*speccheck.Partition{},
+	w := &world{opts: opts, cp: speccheck.NewControlPlane(), parts: map[core.TopicPartition]*speccheck.Broker{},
 		pos: map[[2]int]int64{}, ranges: map[core.TopicPartition][]core.BatchRange{},
 		hwmAdj: map[core.TopicPartition]int64{}, objs: map[string][]byte{}, tl: simulator.NewTimeline(), as: failures{}}
 	opts.Partitions = int32(1 + r.IntN(3))
@@ -146,7 +146,7 @@ func newWorld(seed uint64, live bool) *world {
 		for p := int32(0); p < opts.Partitions; p++ {
 			topicPartition := core.NewTopicPartition(t, p)
 			w.tps = append(w.tps, topicPartition)
-			w.parts[topicPartition] = &speccheck.Partition{}
+			w.parts[topicPartition] = &speccheck.Broker{}
 		}
 	}
 	for i := range 3 {
@@ -270,7 +270,7 @@ func (w *world) commit(items []*item, replay bool) []core.BatchRange {
 		if i < len(items) {
 			base := w.parts[rg.TopicPartition].Append(valBytes(items[i].po.Vals))
 			if base != rg.Base {
-				panic(fmt.Sprintf("Partition base %d != CP base %d", base, rg.Base))
+				panic(fmt.Sprintf("Broker base %d != CP base %d", base, rg.Base))
 			}
 			touched[rg.TopicPartition] = true
 			continue
@@ -281,7 +281,7 @@ func (w *world) commit(items []*item, replay bool) []core.BatchRange {
 		lk := w.cp.Exec(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: topicPartition}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
 		w.ranges[topicPartition] = lk.Ranges
 		if lk.End != w.parts[topicPartition].HighWatermark() {
-			panic("Partition end != CP end")
+			panic("Broker end != CP end")
 		}
 	}
 	return as
@@ -384,7 +384,7 @@ func (w *world) readStep(r *rand.Rand) {
 }
 
 // read is one Fetch of consumer c over the partition indexes tis: a prefix of
-// what the Partition spec holds from the consumer's position.
+// what the Broker spec holds from the consumer's position.
 func (w *world) read(r *rand.Rand, c int, tis []int) {
 	ro := kafka.ReadOp{Client: c}
 	var res kafka.ReadRes
@@ -394,7 +394,7 @@ func (w *world) read(r *rand.Rand, c int, tis []int) {
 		ro.Parts = append(ro.Parts, kafka.ReadFrom{TopicPartition: topicPartition, Off: from})
 		recs, ok := w.parts[topicPartition].Read(core.Offset(from), 1+r.IntN(4))
 		if !ok {
-			panic("spec Partition refused a read")
+			panic("spec Broker refused a read")
 		}
 		rp := kafka.ReadPart{HWM: int64(w.parts[topicPartition].HighWatermark())}
 		for _, x := range recs {

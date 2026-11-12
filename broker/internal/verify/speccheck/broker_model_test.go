@@ -9,23 +9,23 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
 )
 
-// This file checks Partition against a naive model: a plain slice of values.
+// This file checks Broker against a naive model: a plain slice of values.
 // The model has no high watermark field. The high watermark is the length.
 
-type partitionModelOp struct {
+type brokerModelOp struct {
 	Kind  string // append, read, hwm
 	Batch [][]byte
 	From  int64
 	Max   int
 }
 
-type partitionPair struct {
-	spec  *Partition
-	twin  *Partition // receives the same appends, so the state hashes must match
+type brokerPair struct {
+	spec  *Broker
+	twin  *Broker // receives the same appends, so the state hashes must match
 	model [][]byte
 }
 
-func genPartitionModelOp(r *checker.Rand, _ int) partitionModelOp {
+func genBrokerModelOp(r *checker.Rand, _ int) brokerModelOp {
 	switch r.Intn(5) {
 	case 0, 1:
 		var batch [][]byte
@@ -36,15 +36,15 @@ func genPartitionModelOp(r *checker.Rand, _ int) partitionModelOp {
 			}
 			batch = append(batch, v)
 		}
-		return partitionModelOp{Kind: "append", Batch: batch}
+		return brokerModelOp{Kind: "append", Batch: batch}
 	case 2, 3:
 		// From is chosen around the edges: negative, inside, at the end and past it.
-		return partitionModelOp{Kind: "read", From: int64(r.Intn(14)) - 2, Max: r.Intn(6) - 1}
+		return brokerModelOp{Kind: "read", From: int64(r.Intn(14)) - 2, Max: r.Intn(6) - 1}
 	}
-	return partitionModelOp{Kind: "hwm"}
+	return brokerModelOp{Kind: "hwm"}
 }
 
-func stepPartitionModel(s *partitionPair, operation partitionModelOp) error {
+func stepBrokerModel(s *brokerPair, operation brokerModelOp) error {
 	switch operation.Kind {
 	case "append":
 		wantBase := core.Offset(len(s.model))
@@ -68,12 +68,12 @@ func stepPartitionModel(s *partitionPair, operation partitionModelOp) error {
 			return fmt.Errorf("HighWatermark is %d, the model expected %d", got, want)
 		}
 	default:
-		return checkPartitionRead(s, operation)
+		return checkBrokerRead(s, operation)
 	}
 	return nil
 }
 
-func checkPartitionRead(s *partitionPair, operation partitionModelOp) error {
+func checkBrokerRead(s *brokerPair, operation brokerModelOp) error {
 	recs, ok := s.spec.Read(core.Offset(operation.From), operation.Max)
 	wantOK := operation.From >= 0 && operation.From <= int64(len(s.model))
 	if ok != wantOK {
@@ -108,7 +108,7 @@ func checkPartitionRead(s *partitionPair, operation partitionModelOp) error {
 	return nil
 }
 
-func checkPartitionState(s *partitionPair) error {
+func checkBrokerState(s *brokerPair) error {
 	if g, w := s.spec.HighWatermark(), core.Offset(len(s.model)); g != w {
 		return fmt.Errorf("HighWatermark is %d, the model expected %d", g, w)
 	}
@@ -118,14 +118,14 @@ func checkPartitionState(s *partitionPair) error {
 	return nil
 }
 
-func TestPartitionMatchesNaiveModel(t *testing.T) {
-	c := checker.SpecChecker[*partitionPair, partitionModelOp]{
-		Name:      "partitionModelOp",
-		New:       func() *partitionPair { return &partitionPair{spec: &Partition{}, twin: &Partition{}} },
-		Gen:       genPartitionModelOp,
-		Step:      stepPartitionModel,
-		Invariant: checkPartitionState,
-		Format:    func(o partitionModelOp) string { return fmt.Sprintf("%#v", o) },
+func TestBrokerMatchesNaiveModel(t *testing.T) {
+	c := checker.SpecChecker[*brokerPair, brokerModelOp]{
+		Name:      "brokerModelOp",
+		New:       func() *brokerPair { return &brokerPair{spec: &Broker{}, twin: &Broker{}} },
+		Gen:       genBrokerModelOp,
+		Step:      stepBrokerModel,
+		Invariant: checkBrokerState,
+		Format:    func(o brokerModelOp) string { return fmt.Sprintf("%#v", o) },
 		Ops:       80,
 	}
 	checker.Run(t, c, checker.Options{

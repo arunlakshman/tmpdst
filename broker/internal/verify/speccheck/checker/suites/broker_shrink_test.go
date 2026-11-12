@@ -8,34 +8,34 @@ import (
 // The shrinker must give simpler operations, never the same one again. If it
 // returned the same operation, the shrink loop would think it made progress
 // forever.
-func TestShrinkPartitionOp(t *testing.T) {
+func TestShrinkBrokerOp(t *testing.T) {
 	cases := []struct {
 		name      string
-		operation PartitionOp
-		want      []PartitionOp
+		operation BrokerOp
+		want      []BrokerOp
 	}{
 		{"append with two batches",
-			PartitionOp{Kind: "append", Batch: [][]byte{[]byte("a"), []byte("b")}},
-			[]PartitionOp{
+			BrokerOp{Kind: "append", Batch: [][]byte{[]byte("a"), []byte("b")}},
+			[]BrokerOp{
 				{Kind: "append"},
 				{Kind: "append", Batch: [][]byte{[]byte("a")}},
 			}},
 		{"append with one batch",
-			PartitionOp{Kind: "append", Batch: [][]byte{[]byte("a")}},
-			[]PartitionOp{{Kind: "append"}}},
-		{"append that is already empty", PartitionOp{Kind: "append"}, nil},
+			BrokerOp{Kind: "append", Batch: [][]byte{[]byte("a")}},
+			[]BrokerOp{{Kind: "append"}}},
+		{"append that is already empty", BrokerOp{Kind: "append"}, nil},
 		{"read with a limit and a start",
-			PartitionOp{Kind: "read", From: 5, Max: 3},
-			[]PartitionOp{
+			BrokerOp{Kind: "read", From: 5, Max: 3},
+			[]BrokerOp{
 				{Kind: "read", From: 5},
 				{Kind: "read", From: 0, Max: 3},
 			}},
-		{"read that is already simple", PartitionOp{Kind: "read"}, nil},
-		{"high watermark has nothing to shrink", PartitionOp{Kind: "hwm"}, nil},
+		{"read that is already simple", BrokerOp{Kind: "read"}, nil},
+		{"high watermark has nothing to shrink", BrokerOp{Kind: "hwm"}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := minimizePartitionOp(c.operation)
+			got := minimizeBrokerOp(c.operation)
 			if !reflect.DeepEqual(got, c.want) {
 				t.Fatalf("the shrink of %#v gave %#v, but the test expected %#v", c.operation, got, c.want)
 			}

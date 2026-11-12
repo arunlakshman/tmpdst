@@ -1,31 +1,66 @@
-package suites
+package spec
 
 import (
 	"bytes"
 	"fmt"
 
-	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
-// BrokerOp is one operation of the broker suite. Kind is "append",
+// SuiteOp is one operation of the broker suite. The suite runs the same random
+// appends and reads on a subject (the code under test) and on a fresh Broker,
+// and compares every answer, the high watermark and the state hash. Spec
+// against spec is the test that the suite itself is right (suite_test.go). Kind is "append",
 // "read" or "hwm" (high watermark). Batch is used by append. From and Max are
 // used by read.
-type BrokerOp struct {
+type SuiteOp struct {
 	Kind  string
 	Batch [][]byte
 	From  int64
 	Max   int
 }
 
-// BrokerPair is a fresh spec and a fresh subject of the broker suite.
-type BrokerPair struct {
-	spec    *speccheck.Broker
-	subject BrokerSubject
+// SuitePair is a fresh spec and a fresh subject of the broker suite.
+type SuitePair struct {
+	spec    *Broker
+	subject Subject
 }
 
-func genBrokerOp(r *checker.Rand, _ int) BrokerOp {
+const (
+	// suiteOps is the number of operations in each generated sequence.
+	suiteOps = 120
+	// suiteMinimizeRuns is the most sequences that shrinking may run.
+	suiteMinimizeRuns = 300
+)
+
+// Subject is a log under test: the log of one Kafka partition. The methods have
+// the same rules as Broker. StateHash returns ok = false when the subject has
+// no spec hash.
+type Subject interface {
+	Append(batch [][]byte) contract.Offset
+	Read(from contract.Offset, max int) ([]StoredRecord, bool)
+	HighWatermark() contract.Offset
+	StateHash() (hash uint64, ok bool)
+}
+
+type specSubject struct{ p *Broker }
+
+// NewSpecSubject returns a fresh Broker as a subject. Use it to run the suite
+// spec against spec, and as the correct subject that an injected bug wraps.
+func NewSpecSubject() Subject { return &specSubject{p: &Broker{}} }
+
+func (s *specSubject) Append(batch [][]byte) contract.Offset { return s.p.Append(batch) }
+
+func (s *specSubject) Read(from contract.Offset, max int) ([]StoredRecord, bool) {
+	return s.p.Read(from, max)
+}
+
+func (s *specSubject) HighWatermark() contract.Offset { return s.p.HighWatermark() }
+
+func (s *specSubject) StateHash() (uint64, bool) { return s.p.StateHash(), true }
+
+func genSuiteOp(r *checker.Rand, _ int) SuiteOp {
 	switch r.Intn(5) {
 	case 0, 1:
 		var batch [][]byte
@@ -36,30 +71,30 @@ func genBrokerOp(r *checker.Rand, _ int) BrokerOp {
 			}
 			batch = append(batch, value)
 		}
-		return BrokerOp{Kind: "append", Batch: batch}
+		return SuiteOp{Kind: "append", Batch: batch}
 	case 2, 3:
 		// From is chosen around the edges: negative, inside, at the end, past it.
-		return BrokerOp{Kind: "read", From: int64(r.Intn(14)) - 2, Max: r.Intn(6) - 1}
+		return SuiteOp{Kind: "read", From: int64(r.Intn(14)) - 2, Max: r.Intn(6) - 1}
 	}
-	return BrokerOp{Kind: "hwm"}
+	return SuiteOp{Kind: "hwm"}
 }
 
-func minimizeBrokerOp(operation BrokerOp) []BrokerOp {
-	var out []BrokerOp
+func minimizeSuiteOp(operation SuiteOp) []SuiteOp {
+	var out []SuiteOp
 	switch operation.Kind {
 	case "append":
 		if len(operation.Batch) > 0 {
-			out = append(out, BrokerOp{Kind: "append"})
+			out = append(out, SuiteOp{Kind: "append"})
 		}
 		if len(operation.Batch) > 1 {
-			out = append(out, BrokerOp{Kind: "append", Batch: operation.Batch[:1]})
+			out = append(out, SuiteOp{Kind: "append", Batch: operation.Batch[:1]})
 		}
 	case "read":
 		if operation.Max != 0 {
-			out = append(out, BrokerOp{Kind: "read", From: operation.From})
+			out = append(out, SuiteOp{Kind: "read", From: operation.From})
 		}
 		if operation.From > 0 {
-			out = append(out, BrokerOp{Kind: "read", From: 0, Max: operation.Max})
+			out = append(out, SuiteOp{Kind: "read", From: 0, Max: operation.Max})
 		}
 	}
 	return out
@@ -76,29 +111,29 @@ func cloneBatch(batch [][]byte) [][]byte {
 	return out
 }
 
-// BrokerComparator returns the comparator of the broker suite. Checks:
+// SuiteComparator returns the comparator of the broker suite. Checks:
 // the base offset of Append, whether Read is in range, every record offset and
 // value, the high watermark, and the state hash when the subject has one. The
 // suite writes over the batch after Append and over the records after Read, so
 // a subject that shares memory with the caller fails.
-func BrokerComparator(newSubject func() BrokerSubject) checker.SpecChecker[*BrokerPair, BrokerOp] {
-	return checker.SpecChecker[*BrokerPair, BrokerOp]{
-		Name:          "suites.BrokerOp",
-		New:           func() *BrokerPair { return &BrokerPair{spec: &speccheck.Broker{}, subject: newSubject()} },
-		Gen:           genBrokerOp,
-		Step:          brokerStep,
-		Invariant:     brokerInvariant,
-		Shrink:        minimizeBrokerOp,
-		Format:        func(operation BrokerOp) string { return fmt.Sprintf("%#v", operation) },
+func SuiteComparator(newSubject func() Subject) checker.SpecChecker[*SuitePair, SuiteOp] {
+	return checker.SpecChecker[*SuitePair, SuiteOp]{
+		Name:          "suites.SuiteOp",
+		New:           func() *SuitePair { return &SuitePair{spec: &Broker{}, subject: newSubject()} },
+		Gen:           genSuiteOp,
+		Step:          suiteStep,
+		Invariant:     suiteInvariant,
+		Shrink:        minimizeSuiteOp,
+		Format:        func(operation SuiteOp) string { return fmt.Sprintf("%#v", operation) },
 		Ops:           suiteOps,
 		MaxShrinkRuns: suiteMinimizeRuns,
 	}
 }
 
-// Broker runs the broker suite on the seeds that opts chooses.
-func Broker(t checker.Reporter, newSubject func() BrokerSubject, opts checker.Options) {
+// RunSuite runs the broker suite on the seeds that opts chooses.
+func RunSuite(t checker.Reporter, newSubject func() Subject, opts checker.Options) {
 	t.Helper()
-	checker.Run(t, BrokerComparator(newSubject), opts)
+	checker.Run(t, SuiteComparator(newSubject), opts)
 }
 
 func overwriteWithJunk(value []byte) {
@@ -107,7 +142,7 @@ func overwriteWithJunk(value []byte) {
 	}
 }
 
-func brokerStep(p *BrokerPair, operation BrokerOp) error {
+func suiteStep(p *SuitePair, operation SuiteOp) error {
 	switch operation.Kind {
 	case "append":
 		specBatch, subjectBatch := cloneBatch(operation.Batch), cloneBatch(operation.Batch)
@@ -125,13 +160,13 @@ func brokerStep(p *BrokerPair, operation BrokerOp) error {
 			return fmt.Errorf("the high watermark is %d, but the spec says %d", a, s)
 		}
 	default:
-		return brokerRead(p, operation)
+		return suiteRead(p, operation)
 	}
 	return nil
 }
 
-func brokerRead(p *BrokerPair, operation BrokerOp) error {
-	from := core.Offset(operation.From)
+func suiteRead(p *SuitePair, operation SuiteOp) error {
+	from := contract.Offset(operation.From)
 	specRecords, specOK := p.spec.Read(from, operation.Max)
 	records, ok := p.subject.Read(from, operation.Max)
 	defer func() {
@@ -157,7 +192,7 @@ func brokerRead(p *BrokerPair, operation BrokerOp) error {
 	return nil
 }
 
-func brokerInvariant(p *BrokerPair) error {
+func suiteInvariant(p *SuitePair) error {
 	if s, a := p.spec.HighWatermark(), p.subject.HighWatermark(); s != a {
 		return fmt.Errorf("the high watermark is %d, but the spec says %d", a, s)
 	}

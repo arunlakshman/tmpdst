@@ -1,5 +1,6 @@
-// Package suites holds one conformance suite for each spec in package
-// speccheck: ObjectStore, ControlPlane and Broker. A suite takes a subject,
+// Package suites holds the conformance suites for the object store spec
+// (shared/objectstore) and the control plane spec (controlplane/spec). The suite
+// for the broker spec is in broker/spec (suite.go). A suite takes a subject,
 // which is the code under test, and a generator profile. It runs the same
 // random operations on the subject and on a fresh spec, compares every result
 // and the state hash after every step, and checks the invariants of the spec.

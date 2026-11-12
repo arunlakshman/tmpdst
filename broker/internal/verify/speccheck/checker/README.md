@@ -117,7 +117,7 @@ into a normal test to keep the case forever.
 
 | Check | Real component | Simulated component or spec |
 | --- | --- | --- |
-| C1 broker vs Broker spec | The broker state machine (`internal/broker`). | The object store and the control plane are the specs `objectstore.Spec` (in shared) and `speccheck.ControlPlane`. The reference is `speccheck.Broker`. |
+| C1 broker vs Broker spec | The broker state machine (`internal/broker`). | The object store and the control plane are the specs `objectstore.Spec` (in shared) and `controlplane/spec.ControlPlane`. The reference is `spec.Broker` (in `broker/spec`). |
 | C2 simulated engines vs specs | None. | The simulated engines (`simulator/fakeservices`) run with all faults off. The reference is the spec. |
 | C3 adapters vs specs | The S3 adapter and the control-plane stores (in-memory store, gRPC client, applier on MemKV and on Pebble). The S3 test needs `MDS_S3_ENDPOINT`. | The reference is the spec. |
 | C4 Kafka oracle vs specs | None. | The oracle in `sim/kafka` is checked with histories built from `Broker` and `ControlPlane`. |

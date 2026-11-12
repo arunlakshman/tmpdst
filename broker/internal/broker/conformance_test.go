@@ -9,10 +9,10 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/runsettings"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	brokerspec "github.com/manifesterio/mds/broker/spec"
 	"github.com/manifesterio/mds/controlplane/contract"
 )
 
@@ -20,7 +20,7 @@ import (
 // world. The fakes are the speccheck spec object store and the speccheck spec
 // control plane, and the harness runs without faults. The test sends client
 // requests built with kafkawire. It compares every ack, fetch and ListOffsets
-// answer with one speccheck.Broker per topic partition.
+// answer with one brokerspec.Broker per topic partition.
 
 var c1TPs = []core.TopicPartition{contract.NewTopicPartition("t", 0), contract.NewTopicPartition("t", 1),
 	contract.NewTopicPartition("u", 0), contract.NewTopicPartition("u", 1), contract.NewTopicPartition("u", 2)}
@@ -47,7 +47,7 @@ type c1 struct {
 	t       *testing.T
 	h       *harness
 	conns   []*client
-	model   map[core.TopicPartition]*speccheck.Broker
+	model   map[core.TopicPartition]*brokerspec.Broker
 	corrupt bool
 }
 
@@ -60,9 +60,9 @@ func newC1(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) *c1 
 	h := newHarness(t, config)
 	h.cp.CreateTopic("u", 3)
 	h.do(core.NodeStarted{Self: h.self})
-	s := &c1{t: t, h: h, model: map[core.TopicPartition]*speccheck.Broker{}, corrupt: corrupt}
+	s := &c1{t: t, h: h, model: map[core.TopicPartition]*brokerspec.Broker{}, corrupt: corrupt}
 	for _, topicPartition := range c1TPs {
-		s.model[topicPartition] = &speccheck.Broker{}
+		s.model[topicPartition] = &brokerspec.Broker{}
 	}
 	s.conns = []*client{h.open(1), h.open(2)}
 	if corrupt { // every third GET comes back with a flipped byte

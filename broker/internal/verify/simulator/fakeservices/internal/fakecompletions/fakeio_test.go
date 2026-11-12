@@ -6,7 +6,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakeservicetest"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
+	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
@@ -105,7 +105,7 @@ func TestSpecHashCacheObjectStore(t *testing.T) {
 }
 
 func TestSpecHashCacheControlPlane(t *testing.T) {
-	spec := speccheck.NewControlPlane()
+	spec := specbridge.New()
 	c := New(CompletionHooks{
 		Name: "cp", Prefix: "cp", Params: params(),
 		Spec: func(a core.IOCall) core.IOResult { return spec.Exec(a) },

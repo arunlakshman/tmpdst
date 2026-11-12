@@ -1,23 +1,16 @@
-package speccheck
+package spec
 
 import (
 	"bytes"
 	"fmt"
 	"testing"
 
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // This file checks Broker against a naive model: a plain slice of values.
 // The model has no high watermark field. The high watermark is the length.
-
-type brokerModelOp struct {
-	Kind  string // append, read, hwm
-	Batch [][]byte
-	From  int64
-	Max   int
-}
 
 type brokerPair struct {
 	spec  *Broker
@@ -25,29 +18,10 @@ type brokerPair struct {
 	model [][]byte
 }
 
-func genBrokerModelOp(r *checker.Rand, _ int) brokerModelOp {
-	switch r.Intn(5) {
-	case 0, 1:
-		var batch [][]byte
-		for n := r.Intn(4); n > 0; n-- { // a batch can be empty
-			v := make([]byte, r.Intn(4))
-			for i := range v {
-				v[i] = byte('a' + r.Intn(26))
-			}
-			batch = append(batch, v)
-		}
-		return brokerModelOp{Kind: "append", Batch: batch}
-	case 2, 3:
-		// From is chosen around the edges: negative, inside, at the end and past it.
-		return brokerModelOp{Kind: "read", From: int64(r.Intn(14)) - 2, Max: r.Intn(6) - 1}
-	}
-	return brokerModelOp{Kind: "hwm"}
-}
-
-func stepBrokerModel(s *brokerPair, operation brokerModelOp) error {
+func stepBrokerModel(s *brokerPair, operation SuiteOp) error {
 	switch operation.Kind {
 	case "append":
-		wantBase := core.Offset(len(s.model))
+		wantBase := contract.Offset(len(s.model))
 		input := make([][]byte, len(operation.Batch))
 		for i, v := range operation.Batch {
 			input[i] = bytes.Clone(v)
@@ -64,7 +38,7 @@ func stepBrokerModel(s *brokerPair, operation brokerModelOp) error {
 			}
 		}
 	case "hwm":
-		if got, want := s.spec.HighWatermark(), core.Offset(len(s.model)); got != want {
+		if got, want := s.spec.HighWatermark(), contract.Offset(len(s.model)); got != want {
 			return fmt.Errorf("HighWatermark is %d, the model expected %d", got, want)
 		}
 	default:
@@ -73,8 +47,8 @@ func stepBrokerModel(s *brokerPair, operation brokerModelOp) error {
 	return nil
 }
 
-func checkBrokerRead(s *brokerPair, operation brokerModelOp) error {
-	recs, ok := s.spec.Read(core.Offset(operation.From), operation.Max)
+func checkBrokerRead(s *brokerPair, operation SuiteOp) error {
+	recs, ok := s.spec.Read(contract.Offset(operation.From), operation.Max)
 	wantOK := operation.From >= 0 && operation.From <= int64(len(s.model))
 	if ok != wantOK {
 		return fmt.Errorf("Read(from %d, max %d): ok is %v, the model expected %v (high watermark %d)", operation.From, operation.Max, ok, wantOK, len(s.model))
@@ -96,7 +70,7 @@ func checkBrokerRead(s *brokerPair, operation brokerModelOp) error {
 		return fmt.Errorf("Read(from %d, max %d): got %d records, the model expected %d", operation.From, operation.Max, len(recs), len(want))
 	}
 	for i, r := range recs {
-		if r.Offset != core.Offset(operation.From)+core.Offset(i) || !bytes.Equal(r.Value, want[i]) {
+		if r.Offset != contract.Offset(operation.From)+contract.Offset(i) || !bytes.Equal(r.Value, want[i]) {
 			return fmt.Errorf("Read(from %d, max %d): record %d is offset %d value %q, the model expected offset %d value %q",
 				operation.From, operation.Max, i, r.Offset, r.Value, operation.From+int64(i), want[i])
 		}
@@ -109,7 +83,7 @@ func checkBrokerRead(s *brokerPair, operation brokerModelOp) error {
 }
 
 func checkBrokerState(s *brokerPair) error {
-	if g, w := s.spec.HighWatermark(), core.Offset(len(s.model)); g != w {
+	if g, w := s.spec.HighWatermark(), contract.Offset(len(s.model)); g != w {
 		return fmt.Errorf("HighWatermark is %d, the model expected %d", g, w)
 	}
 	if g, w := s.spec.StateHash(), s.twin.StateHash(); g != w {
@@ -119,20 +93,20 @@ func checkBrokerState(s *brokerPair) error {
 }
 
 func TestBrokerMatchesNaiveModel(t *testing.T) {
-	c := checker.SpecChecker[*brokerPair, brokerModelOp]{
-		Name:      "brokerModelOp",
+	c := checker.SpecChecker[*brokerPair, SuiteOp]{
+		Name:      "SuiteOp",
 		New:       func() *brokerPair { return &brokerPair{spec: &Broker{}, twin: &Broker{}} },
-		Gen:       genBrokerModelOp,
+		Gen:       genSuiteOp,
 		Step:      stepBrokerModel,
 		Invariant: checkBrokerState,
-		Format:    func(o brokerModelOp) string { return fmt.Sprintf("%#v", o) },
+		Format:    func(o SuiteOp) string { return fmt.Sprintf("%#v", o) },
 		Ops:       80,
 	}
 	checker.Run(t, c, checker.Options{
 		Seeds: 300,
 		Seed:  -1,
 		Replay: func(seed uint64) string {
-			return fmt.Sprintf("go test ./internal/verify/speccheck -run %s (seed %d)", t.Name(), seed)
+			return fmt.Sprintf("go test ./spec -run %s (seed %d)", t.Name(), seed)
 		},
 	})
 }

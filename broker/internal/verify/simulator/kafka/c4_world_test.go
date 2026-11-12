@@ -11,16 +11,17 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
+	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	brokerspec "github.com/manifesterio/mds/broker/spec"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
 // C4 world: a random correct at-least-once Kafka history generated against the
-// speccheck specs (ControlPlane assigns offsets and replays a committed key,
-// Broker is the expected log; a retried batch is committed again, so it is
+// specs (controlplane/spec assigns offsets and replays a committed key,
+// broker/spec is the expected log; a retried batch is committed again, so it is
 // in the log twice), exposed to the oracle through a fake simulator.View. Faults
 // mutate the finished world (c4_faults_test.go).
 
@@ -51,8 +52,8 @@ type broker struct{ ref machine.NodeInstance }
 type world struct {
 	opts   kafka.Opts
 	tps    []core.TopicPartition
-	cp     *speccheck.ControlPlane
-	parts  map[core.TopicPartition]*speccheck.Broker
+	cp     *specbridge.ControlPlane
+	parts  map[core.TopicPartition]*brokerspec.Broker
 	prods  []*producer
 	brks   []*broker
 	pos    map[[2]int]int64 // (consumer, tp index) -> next offset
@@ -143,7 +144,7 @@ func nodeRef(s string) machine.NodeInstance { return machine.NodeInstance{Node: 
 func newWorld(seed uint64, live bool) *world {
 	r := rand.New(rand.NewPCG(seed, 0xc4)) //nolint:gosec // G404: deterministic test/sim PRNG
 	opts := kafka.DefaultOpts()
-	w := &world{opts: opts, cp: speccheck.NewControlPlane(), parts: map[core.TopicPartition]*speccheck.Broker{},
+	w := &world{opts: opts, cp: specbridge.New(), parts: map[core.TopicPartition]*brokerspec.Broker{},
 		pos: map[[2]int]int64{}, ranges: map[core.TopicPartition][]contract.BatchRange{},
 		hwmAdj: map[core.TopicPartition]int64{}, objs: map[string][]byte{}, tl: simulator.NewTimeline(), as: failures{}}
 	opts.Partitions = int32(1 + r.IntN(3))
@@ -153,7 +154,7 @@ func newWorld(seed uint64, live bool) *world {
 		for p := int32(0); p < opts.Partitions; p++ {
 			topicPartition := contract.NewTopicPartition(t, p)
 			w.tps = append(w.tps, topicPartition)
-			w.parts[topicPartition] = &speccheck.Broker{}
+			w.parts[topicPartition] = &brokerspec.Broker{}
 		}
 	}
 	for i := range 3 {

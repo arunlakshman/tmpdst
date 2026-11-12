@@ -1,4 +1,4 @@
-// Package specsystem adapts the speccheck specs to the production seams in sys, so a
+// Package specsystem adapts the specs (controlplane/spec and shared/objectstore) to the production seams in sys, so a
 // production Executor can run against them with no network. Unlike speccheck it
 // is not deterministic (context, sync): calls are serialized by a mutex.
 package specsystem
@@ -9,8 +9,8 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/spec"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -91,32 +91,30 @@ func (s *ObjectStore) objectKeys(a objectstore.List) ([]string, core.ErrCode) {
 	return d.Keys, d.Err
 }
 
-// ControlPlane is a system.ControlPlane over speccheck.ControlPlane.
+// ControlPlane is a system.ControlPlane over the control plane spec
+// (controlplane/spec). It takes contract operations and gives contract
+// responses, so no conversion is needed.
 type ControlPlane struct {
 	mu   sync.Mutex
-	spec *speccheck.ControlPlane
+	spec *spec.ControlPlane
 }
 
 // NewControlPlane returns an empty control plane.
-func NewControlPlane() *ControlPlane { return &ControlPlane{spec: speccheck.NewControlPlane()} }
+func NewControlPlane() *ControlPlane { return &ControlPlane{spec: spec.New()} }
 
-// CreateTopic is speccheck.ControlPlane.CreateTopic, serialized.
+// CreateTopic makes a topic (or grows it), serialized.
 func (c *ControlPlane) CreateTopic(name string, partitions int32) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return fail(c.spec.CreateTopic(name, partitions))
+	return fail(c.spec.Apply(contract.CreateTopic{Name: name, Partitions: partitions}).Err)
 }
 
 // Call executes op against the control-plane spec.
 func (c *ControlPlane) Call(ctx context.Context, operation contract.Operation) (contract.Response, error) {
 	return locked(ctx, &c.mu, func() (contract.Response, core.ErrCode) {
-		return c.callResp(core.ControlPlaneCall{Op: operation})
+		done := c.spec.Apply(operation)
+		return done.Resp, done.Err
 	})
-}
-
-func (c *ControlPlane) callResp(a core.ControlPlaneCall) (contract.Response, core.ErrCode) {
-	d := c.spec.Exec(a).(core.ControlPlaneDone)
-	return d.Resp, d.Err
 }
 
 var (

@@ -8,7 +8,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
+	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/assert"
@@ -82,7 +82,7 @@ type harness struct {
 	b      *Broker
 	env    *testEnv
 	store  *objectstore.Spec
-	cp     *speccheck.ControlPlane
+	cp     *specbridge.ControlPlane
 	config Config
 	self   machine.NodeInstance
 	now    machine.NodeTime
@@ -107,7 +107,7 @@ type harness struct {
 }
 
 func newHarness(t *testing.T, config Config) *harness {
-	h := &harness{t: t, env: &testEnv{state: 7}, store: objectstore.NewSpec(), cp: speccheck.NewControlPlane(),
+	h := &harness{t: t, env: &testEnv{state: 7}, store: objectstore.NewSpec(), cp: specbridge.New(),
 		config: config, timers: map[machine.TimerID]machine.TimerVersion{}, due: map[machine.TimerID]machine.NodeTime{},
 		clients: map[core.ConnID]*client{},
 		paused:  map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}

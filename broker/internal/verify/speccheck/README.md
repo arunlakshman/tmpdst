@@ -1,8 +1,11 @@
-# speccheck: the answer key for the outside world
+# speccheck: the tools that compare the broker with its specs
 
-This package holds small, correct models of the things our code talks to. We
-call each model a **spec**. Real code and simulated code are compared with the
-specs, to prove that they behave the same.
+A **spec** is a small, correct model of a thing our code talks to. Real code
+and simulated code are compared with the specs, to prove that they behave the
+same. The specs are not in this folder. Each one lives with the thing it
+describes (see the table below). This folder holds the tools: the checker, the
+suites, the bridge from broker calls to the control plane spec, and the
+adapters that run production code on top of the specs.
 
 Terms: a **spec** is a short, fault-free program that shows the correct
 behavior. An **oracle** is a checker we trust to say if a result is correct.
@@ -20,7 +23,7 @@ https://www.amazon.science/publications/using-lightweight-formal-methods-to-vali
 
 - A spec is a small program in the same language as the code (the paper calls
   it a reference model). The paper's models are about 1% of the implementation.
-  Our three specs are about 400 lines of Go.
+  Our specs are small.
 - Property-based testing: make random operations, run each on the spec and on
   the subject, compare the results, check invariants (`checker.SpecChecker`).
 - Split "correct" into separate checks, each with its own tool (C1 to C4 below).
@@ -34,7 +37,7 @@ https://www.amazon.science/publications/using-lightweight-formal-methods-to-vali
 - A pass is not a proof. Use small limits so that every code path is reached.
 
 **What we added:** injected bugs that every suite must catch, a second checker
-(the Kafka oracle) that never imports this package, and a whole-system
+(the Kafka oracle) that never imports a spec, and a whole-system
 simulator.
 
 **What we did not do yet:** failure injection in the comparison (see section 8
@@ -43,11 +46,15 @@ checking, and proofs of the specs themselves. Like the paper, we can miss bugs.
 
 ## The three specs
 
-| Spec | File | What it models | Real code it checks |
+| Spec | Where | What it models | Real code it checks |
 | --- | --- | --- | --- |
-| `ObjectStore` | `shared/objectstore/spec.go` (type `objectstore.Spec`; moved out of this package) | S3: put, get a byte range, delete, list | S3 adapter, simulated object store |
-| `ControlPlane` | `controlplane.go` | commit a segment, lookup, describe topics | applier, memstore, gRPC client, simulated control plane |
-| `Broker` | `broker.go` | one Kafka partition: append, read | the broker |
+| `objectstore.Spec` | `shared/objectstore/spec.go` | S3: put, get a byte range, delete, list | S3 adapter, simulated object store |
+| `spec.ControlPlane` | `controlplane/spec` | topics, segments (commit, find), consumer groups | the control plane, the simulated control plane |
+| `spec.Broker` | `broker/spec/broker.go` | one Kafka partition: append, read | the broker |
+
+There is one control plane spec in the repo. The broker kernel speaks
+`core.IOCall`; `specbridge` converts a call to a `contract.Operation`, asks the
+spec, and converts the answer back. It has no rule of its own.
 
 The rules of each spec are in the comment above its type. Read that first.
 
@@ -55,17 +62,18 @@ The rules of each spec are in the comment above its type. Read that first.
 
 | Check | What is tested | Compared with | Real or simulated |
 | --- | --- | --- | --- |
-| C1 | broker answers: produce, fetch, ListOffsets | `Broker` | broker is real; storage and control plane are specs |
-| C2 | simulated object store and control plane, faults off | `ObjectStore`, `ControlPlane` | simulated |
-| C3 | S3 adapter and control-plane stores | `ObjectStore`, `ControlPlane` | real |
-| C4 | the Kafka oracle in `sim/kafka` | `Broker`, `ControlPlane` | simulation side |
+| C1 | broker answers: produce, fetch, ListOffsets | `spec.Broker` | broker is real; storage and control plane are specs |
+| C2 | simulated object store and control plane, faults off | `objectstore.Spec`, `spec.ControlPlane` | simulated |
+| C3 | S3 adapter (control-plane stores: `controlplane/test/conformance`) | `objectstore.Spec`, `spec.ControlPlane` | real |
+| C4 | the Kafka oracle in `internal/verify/simulator/kafka` | `spec.Broker`, `spec.ControlPlane` | simulation side |
 
 ## Run the tests
 
 ```bash
-go test ./internal/verify/speccheck/... -count=1            # specs and framework
+go test ./spec ./internal/verify/speccheck/... -count=1     # broker spec and framework
+(cd ../controlplane && go test ./spec -count=1)             # control plane spec
 go test ./internal/broker ./internal/verify/simulator/fakeservices \
-        ./internal/verify/speccheck/s3conform ./internal/controlplane/... -count=1   # C1, C2, C3
+        ./internal/verify/speccheck/s3conform -count=1   # C1, C2, C3
 go test ./internal/verify/simulator/kafka -run C4 -count=1      # C4
 ```
 
@@ -90,7 +98,9 @@ failing sequence as a Go list. To add a new spec, follow `checker/README.md`.
 | `checker/suites/` | shared tests for each spec; they accept any subject |
 | `checker/injectedbug/` | known bugs that every suite must catch |
 | `checker/runsettings/` | reads the variables above |
+| `specbridge/` | the control plane spec behind `core.IOCall` |
 | `specsystem/` | adapters that run production code on top of the specs |
+| `../../../spec/` (`broker/spec`) | the broker spec, its naive-model test and its suite |
 
 A spec never lets the order of a Go map decide a result, and it uses no clock,
 network, goroutines or files.

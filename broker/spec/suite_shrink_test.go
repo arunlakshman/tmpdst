@@ -1,4 +1,4 @@
-package suites
+package spec
 
 import (
 	"reflect"
@@ -11,31 +11,31 @@ import (
 func TestShrinkBrokerOp(t *testing.T) {
 	cases := []struct {
 		name      string
-		operation BrokerOp
-		want      []BrokerOp
+		operation SuiteOp
+		want      []SuiteOp
 	}{
 		{"append with two batches",
-			BrokerOp{Kind: "append", Batch: [][]byte{[]byte("a"), []byte("b")}},
-			[]BrokerOp{
+			SuiteOp{Kind: "append", Batch: [][]byte{[]byte("a"), []byte("b")}},
+			[]SuiteOp{
 				{Kind: "append"},
 				{Kind: "append", Batch: [][]byte{[]byte("a")}},
 			}},
 		{"append with one batch",
-			BrokerOp{Kind: "append", Batch: [][]byte{[]byte("a")}},
-			[]BrokerOp{{Kind: "append"}}},
-		{"append that is already empty", BrokerOp{Kind: "append"}, nil},
+			SuiteOp{Kind: "append", Batch: [][]byte{[]byte("a")}},
+			[]SuiteOp{{Kind: "append"}}},
+		{"append that is already empty", SuiteOp{Kind: "append"}, nil},
 		{"read with a limit and a start",
-			BrokerOp{Kind: "read", From: 5, Max: 3},
-			[]BrokerOp{
+			SuiteOp{Kind: "read", From: 5, Max: 3},
+			[]SuiteOp{
 				{Kind: "read", From: 5},
 				{Kind: "read", From: 0, Max: 3},
 			}},
-		{"read that is already simple", BrokerOp{Kind: "read"}, nil},
-		{"high watermark has nothing to shrink", BrokerOp{Kind: "hwm"}, nil},
+		{"read that is already simple", SuiteOp{Kind: "read"}, nil},
+		{"high watermark has nothing to shrink", SuiteOp{Kind: "hwm"}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := minimizeBrokerOp(c.operation)
+			got := minimizeSuiteOp(c.operation)
 			if !reflect.DeepEqual(got, c.want) {
 				t.Fatalf("the shrink of %#v gave %#v, but the test expected %#v", c.operation, got, c.want)
 			}

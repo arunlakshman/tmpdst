@@ -40,10 +40,6 @@ func TestControlPlaneSpecVsSpec(t *testing.T) {
 	}
 }
 
-func TestBrokerSpecVsSpec(t *testing.T) {
-	suites.Broker(t, suites.NewSpecBrokerSubject, options(t, 60))
-}
-
 // recorder is a Reporter that keeps what the suite prints.
 type recorder struct{ errors, logs []string }
 

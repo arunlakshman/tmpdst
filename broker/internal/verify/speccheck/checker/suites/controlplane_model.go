@@ -10,7 +10,7 @@ import (
 )
 
 // controlPlaneModel is a second, naive model of the control plane. It is written from
-// the rules in the speccheck.ControlPlane comment and shares no code with the
+// the rules in the controlplane/spec.ControlPlane comment and shares no code with the
 // spec: it keeps plain lists and adds up counts to find an end offset. The
 // suite uses it as an oracle for the invariants, so a mistake in the spec is
 // unlikely to repeat here.

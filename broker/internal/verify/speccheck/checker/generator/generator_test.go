@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
+	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
@@ -171,7 +171,7 @@ func controlPlaneCoverage(p InputProfile) map[string]int {
 	hits := map[string]int{}
 	gen := ControlPlaneOps(p)
 	for seed := uint64(1); seed <= coverageSeeds; seed++ {
-		r, spec, committed := checker.NewRand(seed), speccheck.NewControlPlane(), map[string]bool{}
+		r, spec, committed := checker.NewRand(seed), specbridge.New(), map[string]bool{}
 		for i := range coverageOps {
 			operation := gen(r, i)
 			for _, c := range classifyControlPlane(spec, committed, operation) {
@@ -184,7 +184,7 @@ func controlPlaneCoverage(p InputProfile) map[string]int {
 
 // classifyControlPlane runs op on the spec and names the cases that it
 // reached. The committed map holds the segment keys the spec has accepted.
-func classifyControlPlane(spec *speccheck.ControlPlane, committed map[string]bool, operation ControlPlaneTestStep) []string {
+func classifyControlPlane(spec *specbridge.ControlPlane, committed map[string]bool, operation ControlPlaneTestStep) []string {
 	if operation.CreateTopic != nil {
 		if spec.CreateTopic(operation.CreateTopic.Name, operation.CreateTopic.Partitions) == core.OK {
 			return []string{"create topic accepted"}
@@ -244,7 +244,7 @@ func invalidCommitCase(o contract.CommitSegment) string {
 	return "commit invalid: other"
 }
 
-func classifyLookup(spec *speccheck.ControlPlane, o contract.FindSegments, done core.ControlPlaneDone) []string {
+func classifyLookup(spec *specbridge.ControlPlane, o contract.FindSegments, done core.ControlPlaneDone) []string {
 	if done.Err != core.OK {
 		return []string{"lookup From = -1"}
 	}

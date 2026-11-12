@@ -1,5 +1,5 @@
 // Package fakecontrolplane is the simulated control plane (decisions 3, 14, 23):
-// speccheck.ControlPlane as the state core, plus injected faults and timing.
+// controlplane/spec (through specbridge) as the state core, plus injected faults and timing.
 // ErrConflict and ErrInvalid come only from the spec; ErrTooLarge
 // only from the engine's optional commit-size limit (ControlPlaneFaults.
 // MaxCommitItems), applied before the spec; a retry of a
@@ -12,7 +12,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/fakecompletions"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
+	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
@@ -20,7 +20,7 @@ import (
 // Engine is the fake control plane. It is also the simulator.ControlPlaneRealState.
 type Engine struct {
 	*fakecompletions.CompletionCore
-	spec     *speccheck.ControlPlane
+	spec     *specbridge.ControlPlane
 	maxItems int // simulator.ControlPlaneFaults.MaxCommitItems; 0 = unlimited
 }
 
@@ -31,7 +31,7 @@ var (
 
 // New returns an empty control plane with the given faults.
 func New(f simulator.ControlPlaneFaults) *Engine {
-	e := &Engine{spec: speccheck.NewControlPlane(), maxItems: f.MaxCommitItems}
+	e := &Engine{spec: specbridge.New(), maxItems: f.MaxCommitItems}
 	e.CompletionCore = fakecompletions.New(fakecompletions.CompletionHooks{
 		Name:   "fakecontrolplane",
 		Prefix: "cp",

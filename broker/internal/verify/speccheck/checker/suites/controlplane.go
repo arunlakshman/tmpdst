@@ -4,10 +4,10 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/generator"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/observation"
+	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
 )
@@ -15,7 +15,7 @@ import (
 // ControlPlanePair is a fresh spec, a fresh subject and a naive model of the
 // control plane suite.
 type ControlPlanePair struct {
-	spec        *speccheck.ControlPlane
+	spec        *specbridge.ControlPlane
 	specSubject ControlPlaneSubject
 	subject     ControlPlaneSubject
 	model       *controlPlaneModel
@@ -56,7 +56,7 @@ func ControlPlaneComparator(p generator.InputProfile, newSubject func() ControlP
 	return checker.SpecChecker[*ControlPlanePair, generator.ControlPlaneTestStep]{
 		Name: "generator.ControlPlaneTestStep",
 		New: func() *ControlPlanePair {
-			spec := speccheck.NewControlPlane()
+			spec := specbridge.New()
 			return &ControlPlanePair{
 				spec:        spec,
 				specSubject: &specControlPlaneSubject{cp: spec},

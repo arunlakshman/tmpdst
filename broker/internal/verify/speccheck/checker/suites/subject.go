@@ -4,9 +4,9 @@ import (
 	"errors"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/generator"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/observation"
+	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -25,20 +25,10 @@ type ObjectSubject interface {
 // ControlPlaneSubject is a control plane under test. Do runs one operation.
 // For CreateTopic the suite compares only Code, because the direct call has no
 // Outcome in every layer. The error is for broken test plumbing only.
-// StateHash is like ObjectSubject.StateHash, with speccheck.ControlPlane as the
+// StateHash is like ObjectSubject.StateHash, with controlplane/spec.ControlPlane as the
 // spec.
 type ControlPlaneSubject interface {
 	Do(operation generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error)
-	StateHash() (hash uint64, ok bool)
-}
-
-// BrokerSubject is a log under test: the log of one Kafka partition. The methods have the same
-// rules as speccheck.Broker. StateHash returns ok = false when the subject
-// has no spec hash.
-type BrokerSubject interface {
-	Append(batch [][]byte) core.Offset
-	Read(from core.Offset, max int) ([]speccheck.StoredRecord, bool)
-	HighWatermark() core.Offset
 	StateHash() (hash uint64, ok bool)
 }
 
@@ -57,11 +47,11 @@ func (s *specObjectSubject) Do(operation objectstore.Call) (observation.ObjectRe
 
 func (s *specObjectSubject) StateHash() (uint64, bool) { return s.store.StateHash(), true }
 
-type specControlPlaneSubject struct{ cp *speccheck.ControlPlane }
+type specControlPlaneSubject struct{ cp *specbridge.ControlPlane }
 
-// NewSpecControlPlaneSubject returns a fresh speccheck.ControlPlane as a subject.
+// NewSpecControlPlaneSubject returns a fresh controlplane/spec.ControlPlane as a subject.
 func NewSpecControlPlaneSubject() ControlPlaneSubject {
-	return &specControlPlaneSubject{cp: speccheck.NewControlPlane()}
+	return &specControlPlaneSubject{cp: specbridge.New()}
 }
 
 func (s *specControlPlaneSubject) Do(operation generator.ControlPlaneTestStep) (observation.ControlPlaneResult, error) {
@@ -80,23 +70,6 @@ func (s *specControlPlaneSubject) Do(operation generator.ControlPlaneTestStep) (
 }
 
 func (s *specControlPlaneSubject) StateHash() (uint64, bool) { return s.cp.StateHash(), true }
-
-type specBrokerSubject struct{ p *speccheck.Broker }
-
-// NewSpecBrokerSubject returns a fresh speccheck.Broker as a subject.
-func NewSpecBrokerSubject() BrokerSubject {
-	return &specBrokerSubject{p: &speccheck.Broker{}}
-}
-
-func (s *specBrokerSubject) Append(batch [][]byte) core.Offset { return s.p.Append(batch) }
-
-func (s *specBrokerSubject) Read(from core.Offset, max int) ([]speccheck.StoredRecord, bool) {
-	return s.p.Read(from, max)
-}
-
-func (s *specBrokerSubject) HighWatermark() core.Offset { return s.p.HighWatermark() }
-
-func (s *specBrokerSubject) StateHash() (uint64, bool) { return s.p.StateHash(), true }
 
 // AllObjectProfiles returns every generator profile. A caller runs the object
 // store suite once for each profile, as a subtest named after the profile.

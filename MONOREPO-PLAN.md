@@ -222,7 +222,7 @@ answers the user gave during the work. Commit the file with each merge.
 | `build` | `make build` | Root build: runs dst, shared, controlplane, broker in order. Before T0.2 there is no root build; use each repo's own `make build`. |
 | `golden` | part of `make build` (broker `kafka` golden test, control plane simulator golden test) | Must not move except in `RE-PIN` tasks. |
 | `campaign` | `cd controlplane && go run ./cmd/cpsim -seeds 2000 -scenario all -report` and `cd broker && go run ./cmd/mdssimulator -scenario kafka -seeds 2000` | Stage gates. After T1.9 both run through the one campaign tool. |
-| `mutants` | `cd controlplane && make mutants` and `cd broker && go test ./internal/verify/speccheck/... ./internal/broker -run 'Injected|Conformance' -count=1` | Every planted bug must be caught. After T1.12 the broker command changes; the card says to what. |
+| `mutants` | `cd controlplane && make mutants` and `cd broker && go test ./spec ./internal/verify/speccheck/... ./internal/broker ./internal/verify/simulator/fakeservices -run 'Planted\|Conformance\|NoFalseAlarm' -count=1` | Every planted bug must be caught, and a run with no bug must not fail. Changed in T1.14: the broker bug tests are named `Planted...`, and the C2 bug tests in `fakeservices` are now part of the command. |
 | `race` | `cd controlplane && make test-race RACE_RUNS=3` and `cd dst && make test` (dst tests already run with `-race`) | Stage gates. |
 | `determinism` | each module's determinism gate (`make determinism` or `ops/scripts/ci-determinism.sh`) | Part of `make build` in dst and controlplane. Broker: `bash ops/scripts/ci-determinism.sh`. |
 | `it` | `cd controlplane && make it` | Needs Docker. Never skips; if Docker is off, report NOT RUN. |

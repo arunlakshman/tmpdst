@@ -1142,7 +1142,7 @@ they are. New parts are built in T1.3.
 
     // Replay builds the rerun command. EnvPrefix is set by the product (for
     // example "MDS"), because dst has no product words. The variables are
-    // <prefix>_SEED, <prefix>_SEEDS and <prefix>_CAMPAIGN (broker runsettings).
+    // <prefix>_SEED, <prefix>_SEEDS and <prefix>_CAMPAIGN (read by campaign.ReadEnv).
     type Replay struct {
         EnvPrefix string
         Command   func(seed uint64, test string) string
@@ -1166,8 +1166,8 @@ they are. New parts are built in T1.3.
 Note on `args ...any` in `Verdict`: it is a format argument list, read only by
 `fmt.Sprintf` when the check fails. It is not a stored value and not a product path.
 
-Shrinking is rapid's. The broker generator, shrinker and comparator are deleted in
-T1.14 (plan).
+Shrinking is rapid's. The broker generator, shrinker and comparator were deleted in
+T1.14 (see section 19, T1.14).
 
 ## 12. Point 10: the campaign API (`dst/campaign`)
 
@@ -2410,3 +2410,48 @@ T1.12d.
 8. **The broker determinism script has a real-time guard now** (like the control plane one): no
    gated package may depend on `dst/live`, `shared/clock`, `dst/realclock` or `dst/syncclock`.
    The script is still red for the old reason (`context` in `core/operation_runner.go`, ISSUES.md).
+
+### T1.14 (the broker spec checks on spectest.Lockstep)
+
+1. **`speccheck/checker` is gone.** Deleted: `comparator.go` (the shrinker and runner),
+   `rand.go`, `generator/`, `observation/`, `runsettings/` and their tests. What the broker
+   needs from them is in two product packages under `speccheck/`: `conformance` (generators with
+   their profiles, result values, subjects, the naive control plane model, the Lockstep
+   builders `ObjectStoreLockstep`, `ControlPlaneLockstep`, `BrokerLockstep`) and `injectedbug`
+   (the planted bugs). The old `suites/` is `conformance`.
+2. **Rapid's integer generators are not fair, on purpose.** `rapid.IntRange` favors small and
+   edge values, so a profile weight written with it would not be the chance that the profile
+   says. The generators draw fair bits (`rapid.Bool`) and reject numbers that are too big
+   (`conformance.Rand`, `Custom`); `TestDrawsFollowTheWeights` checks the chances. The coverage
+   numbers of the old test came out the same (the batches of a key keep the old shape).
+3. **Spectest got two small additions.** `Lockstep.Checks` (checks for each `Check`) and
+   `Lockstep.StepsPerCheck`. The second one is needed because rapid ends a check after about 30
+   steps (`-rapid.steps`), while the old suites ran 120 operations (80 for C1). `Check` and
+   `RunSeed` both set the flag. A check is random in length (geometric), so the average is the
+   old length, not the exact length.
+4. **The environment variables have one parser.** `campaign.ReadEnv(prefix, getenv)` reads
+   `<P>_SEEDS`, `<P>_SEED`, `<P>_CAMPAIGN`; `ParseOptions` and `spectest.Lockstep.Check` both use
+   it. `Check`: `_SEED` runs one rapid seed, `_CAMPAIGN` runs seeds 1, 2, 3, ... one check each
+   until the time ends, `_SEEDS` is the number of checks. The order is the old one (SEED, then
+   CAMPAIGN, then SEEDS). `MDS_SEED=0` is an error here (rapid takes seed 0 to mean "random");
+   the old broker parser allowed it. `MDS_SEEDS=n` now means n random checks, not the seeds 1
+   to n: `Check` uses rapid's random seed. `RunSeed(1..budget)` is still fixed, and the planted
+   bug tests use it.
+5. **The run numbers the calls.** A generated operation has no request id (and C1 has no tag).
+   The subject side (`ObjectPair`, `ControlPlanePair`, `c1`) gives the call at position i the id
+   i+1, so a printed list of operations has no `Req:` field.
+6. **A lockstep subject is a pair.** `Lockstep` gives `Invariant` only the subject, but the object
+   and control plane checks need the spec (the keys, the naive model). So the subject of a run
+   holds its own mirror of the spec. A rule that breaks inside `Apply` (the spec against the
+   naive model, a hash that changed on a call that must not change it) is kept in the pair and
+   reported by the invariant of the same step. For a subject with no state hash the pair gives
+   the hash of its mirror, so there is nothing to compare.
+7. **`broker/spec/suite.go` moved to `conformance/broker.go`.** `broker/spec` must stay free of
+   rapid (it is in the determinism gate), so its suite, its subject interface and its
+   generator are in `conformance` (`BrokerLockstep`), and the tests of `broker/spec` are in the
+   package `spec_test`.
+8. **Deleted without a replacement test:** the tests of the shrinker (`TestShrink*`,
+   `TestShrinkAll`, `TestShrinkMakesProgressAndEnds`, `TestShrinkBrokerOp`), of `Rand`
+   (`TestRand`, `TestRandMatchesDstStream`) and the `RequireDetected` test: the code they
+   test is gone. Shrinking is rapid's, and `spectest` tests that a planted bug shrinks to at
+   most 3 steps. The list of every deleted test and its new place is in the T1.14 report.

@@ -9,10 +9,8 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/injectedbug"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/observation"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/runsettings"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/suites"
+	"github.com/manifesterio/mds/broker/internal/verify/speccheck/conformance"
+	"github.com/manifesterio/mds/broker/internal/verify/speccheck/injectedbug"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specsystem"
 	"github.com/manifesterio/mds/shared/objectstore"
 	s3store "github.com/manifesterio/mds/shared/objectstore/s3"
@@ -38,10 +36,10 @@ func codeOf(err error) core.ErrCode {
 }
 
 // storeSubject makes a objectstore.Store usable as a suite subject. Neither the
-// fake nor real S3 can give the hash of the spec, so StateHash says no.
+// fake nor real S3 can give the hash of the spec, so it has no StateHash method.
 type storeSubject struct{ store objectstore.Store }
 
-func (s storeSubject) Do(operation objectstore.Call) (observation.ObjectResult, error) {
+func (s storeSubject) Apply(operation objectstore.Call) (conformance.ObjectResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	switch call := operation.(type) {
@@ -50,38 +48,40 @@ func (s storeSubject) Do(operation objectstore.Call) (observation.ObjectResult, 
 	case objectstore.Get:
 		data, err := s.store.Get(ctx, call.Ref)
 		if err != nil {
-			return observation.ObjectResult{Code: codeOf(err)}, nil
+			return conformance.ObjectResult{Code: codeOf(err)}, nil
 		}
-		return observation.ObjectResult{Data: data}, nil
+		return conformance.ObjectResult{Data: data}, nil
 	case objectstore.Delete:
 		return writeResult(s.store.Delete(ctx, call.Key)), nil
 	case objectstore.List:
 		keys, err := s.store.List(ctx, call.Prefix)
 		if err != nil {
-			return observation.ObjectResult{Code: codeOf(err)}, nil
+			return conformance.ObjectResult{Code: codeOf(err)}, nil
 		}
-		return observation.ObjectResult{Keys: keys}, nil
+		return conformance.ObjectResult{Keys: keys}, nil
 	}
-	return observation.ObjectResult{}, fmt.Errorf("the operation type %T is not an object store operation", operation)
+	return conformance.ObjectResult{}, fmt.Errorf("the operation type %T is not an object store operation", operation)
 }
 
 // writeResult follows the spec: a write that succeeds is Applied, and a write
 // that fails is NotApplied.
-func writeResult(err error) observation.ObjectResult {
+func writeResult(err error) conformance.ObjectResult {
 	if err != nil {
-		return observation.ObjectResult{Code: codeOf(err), Outcome: core.NotApplied}
+		return conformance.ObjectResult{Code: codeOf(err), Outcome: core.NotApplied}
 	}
-	return observation.ObjectResult{Code: core.OK, Outcome: core.Applied}
+	return conformance.ObjectResult{Code: core.OK, Outcome: core.Applied}
 }
 
-func (storeSubject) StateHash() (uint64, bool) { return 0, false }
+func newFake() conformance.ObjectSubject { return storeSubject{specsystem.NewObjectStore()} }
 
-func newFake() suites.ObjectSubject { return storeSubject{specsystem.NewObjectStore()} }
-
-func runProfiles(t *testing.T, newSubject func() suites.ObjectSubject, defaultSeeds int) {
-	for _, profile := range suites.AllObjectProfiles() {
+// runProfiles runs the object store suite on every profile. checks is the
+// number of checks (random lists of steps) for each profile.
+func runProfiles(t *testing.T, newSubject func() conformance.ObjectSubject, checks int) {
+	for _, profile := range conformance.InputProfiles() {
 		t.Run(profile.Name, func(t *testing.T) {
-			suites.ObjectStore(t, profile, newSubject, runsettings.Options(t, defaultSeeds))
+			l := conformance.ObjectStoreLockstep(profile, newSubject)
+			l.Checks = checks
+			l.Check(t)
 		})
 	}
 }
@@ -90,8 +90,8 @@ func TestConformanceMem(t *testing.T) { runProfiles(t, newFake, 100) }
 
 // newFakeS3Subject returns the S3 adapter on the in-process fake S3 server.
 // It runs without a network, so it always runs.
-func newFakeS3Subject(t *testing.T) func() suites.ObjectSubject {
-	return func() suites.ObjectSubject {
+func newFakeS3Subject(t *testing.T) func() conformance.ObjectSubject {
+	return func() conformance.ObjectSubject {
 		f := fakes3.New(t)
 		s, err := s3store.New(t.Context(), s3store.Config{Endpoint: f.URL, Bucket: "b", Prefix: "c3/", PathStyle: true})
 		if err != nil {
@@ -112,7 +112,7 @@ func TestConformanceS3(t *testing.T) {
 	}
 	base := s3store.UniqueBucket()
 	n := 0
-	runProfiles(t, func() suites.ObjectSubject {
+	runProfiles(t, func() conformance.ObjectSubject {
 		s, err := s3store.New(t.Context(), s3store.Config{Endpoint: ep, Bucket: base, Prefix: fmt.Sprintf("c3-%d/", n), PathStyle: true})
 		if err != nil {
 			t.Fatal(err)
@@ -127,14 +127,14 @@ func TestConformanceS3(t *testing.T) {
 	}, 50)
 }
 
-// TestInjectedBugsCaught proves that the suite fails when the adapter on the
+// TestPlantedBugsCaught proves that the suite fails when the adapter on the
 // fake S3 server has a known bug, so a pass of TestConformanceFake means
 // something.
-func TestInjectedBugsCaught(t *testing.T) {
-	injectedbug.RequireAllObjectBugsDetected(t, newFakeS3Subject(t), 100)
+func TestPlantedBugsCaught(t *testing.T) {
+	injectedbug.ObjectBugsCaught(t, newFakeS3Subject(t), 100)
 }
 
-// TestInjectedBugsCaughtMem does the same for the in-process fake store.
-func TestInjectedBugsCaughtMem(t *testing.T) {
-	injectedbug.RequireAllObjectBugsDetected(t, newFake, 100)
+// TestPlantedBugsCaughtMem does the same for the in-process fake store.
+func TestPlantedBugsCaughtMem(t *testing.T) {
+	injectedbug.ObjectBugsCaught(t, newFake, 100)
 }

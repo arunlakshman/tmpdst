@@ -18,10 +18,9 @@ import (
 )
 
 // testEnv is a seeded core.Environment that records assertion violations. It keeps its
-// own SplitMix64 copy and not checker.Rand, for two reasons. Uint64 gives
-// the same values as checker.Rand, but Intn here uses a plain modulo and
-// checker.Rand uses Lemire, so the seeds would change their streams. Also,
-// broker_test.go sets the state field directly to reseed the environment.
+// own SplitMix64 copy and not dst/rng, for two reasons. Intn here uses a plain
+// modulo and dst/rng uses Lemire, so the streams of the seeds would change.
+// Also, broker_test.go sets the state field directly to reseed the environment.
 type testEnv struct {
 	state uint64
 	viol  []string
@@ -65,6 +64,15 @@ func (e *testEnv) Unreachable(p assert.Unreachable, _ ...assert.Pair) {
 	e.viol = append(e.viol, p.Name())
 }
 
+// testT is the part of testing.TB that the harness uses. The conformance test
+// runs the harness inside a rapid run, where the test handle is a *rapid.T and
+// not a *testing.T.
+type testT interface {
+	Helper()
+	Fatal(args ...any)
+	Fatalf(format string, args ...any)
+}
+
 // client is the test's view of one connection.
 type client struct {
 	id   core.ConnID
@@ -78,7 +86,7 @@ type client struct {
 // are computed when the I/O action is issued and delivered through a queue, so
 // tests can hold them back (holdCP, holdPut) or fault them (cpHook, objHook).
 type harness struct {
-	t      *testing.T
+	t      testT
 	b      *Broker
 	env    *testEnv
 	store  *objectstore.Spec
@@ -106,7 +114,7 @@ type harness struct {
 	puts    []string
 }
 
-func newHarness(t *testing.T, config Config) *harness {
+func newHarness(t testT, config Config) *harness {
 	h := &harness{t: t, env: &testEnv{state: 7}, store: objectstore.NewSpec(), cp: specbridge.New(),
 		config: config, timers: map[machine.TimerID]machine.TimerVersion{}, due: map[machine.TimerID]machine.NodeTime{},
 		clients: map[core.ConnID]*client{},
@@ -335,7 +343,7 @@ const (
 var params = kafkawire.BatchParams{FirstTimestamp: 1000, MaxTimestamp: 1000}
 
 // mkBatch builds a batch of len(vals) records; pid -1 means non-idempotent.
-func mkBatch(t testing.TB, pid int64, epoch int16, seq int32, vals ...string) []byte {
+func mkBatch(t testT, pid int64, epoch int16, seq int32, vals ...string) []byte {
 	t.Helper()
 	var recs []kmsg.Record
 	for _, v := range vals {
@@ -350,7 +358,7 @@ func mkBatch(t testing.TB, pid int64, epoch int16, seq int32, vals ...string) []
 	return b
 }
 
-func plain(t testing.TB, vals ...string) []byte { return mkBatch(t, -1, -1, -1, vals...) }
+func plain(t testT, vals ...string) []byte { return mkBatch(t, -1, -1, -1, vals...) }
 
 type ent struct {
 	topicPartition core.TopicPartition

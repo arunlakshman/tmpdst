@@ -16,7 +16,9 @@
 // spec speaks contract.Operation and contract.Done. The package specbridge
 // converts between the two and adds no rule. The package specsystem puts the
 // specs behind the production seams, so a production Executor can run against
-// them. The packages under checker compare a subject with a spec, step by step.
+// them. The package conformance compares a subject with a spec, step by step, with
+// spectest.Lockstep (dst/check/spectest); the package injectedbug holds the
+// planted bugs that prove that it can fail.
 //
 // A spec is also used as a test fake. The main use is as an oracle: a checker
 // we trust to say if a result is correct. There are four checks:
@@ -24,7 +26,7 @@
 //	C1  The broker state machine runs with no faults, over the object store
 //	    spec and the control plane spec. Its answers to produce, fetch and
 //	    ListOffsets are compared with the broker spec. The test also checks
-//	    that the injected bugs InjectedBugWrongOffset and
+//	    that the planted bugs InjectedBugWrongOffset and
 //	    InjectedBugServeCorrupt are caught.
 //	    Test: internal/broker/conformance_test.go.
 //	C2  Each simulated engine (object store, control plane) runs with all

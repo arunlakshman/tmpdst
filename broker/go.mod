@@ -20,6 +20,7 @@ require (
 	golang.org/x/tools v0.52.0
 	google.golang.org/grpc v1.69.2
 	google.golang.org/protobuf v1.35.2
+	pgregory.net/rapid v1.3.0
 )
 
 replace github.com/manifesterio/mds/controlplane => ../controlplane

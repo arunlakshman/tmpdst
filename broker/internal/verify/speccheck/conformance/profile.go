@@ -1,11 +1,10 @@
-package generator
+package conformance
 
-import "github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
-
-// InputProfile holds the weights and value ranges of both generators. A weight is
-// a relative chance, so a weight of 0 turns that kind of operation off. A
-// percent is a chance out of 100. The named constructors below are the normal
-// way to get a InputProfile; change a field only to build a new named profile.
+// InputProfile holds the weights and value ranges of the generators of the
+// object store and the control plane. A weight is a relative chance, so a
+// weight of 0 turns that kind of operation off. A percent is a chance out of
+// 100. The named constructors below are the normal way to get an InputProfile;
+// change a field only to build a new named profile.
 type InputProfile struct {
 	// Name is the profile name. Suites use it as the subtest name.
 	Name string
@@ -192,26 +191,3 @@ func LookupCuts() InputProfile {
 	p.MaxBytesChoices = []int32{0, 1, 51, 52, 101, 102, 152, 153, 202, 300}
 	return p
 }
-
-// chooseByWeight returns the index of one weight, chosen with a chance in
-// proportion to the weights. The weights must not all be zero.
-func chooseByWeight(r *checker.Rand, weights ...int) int {
-	total := 0
-	for _, w := range weights {
-		total += w
-	}
-	n := r.Intn(total)
-	for i, w := range weights {
-		if n < w {
-			return i
-		}
-		n -= w
-	}
-	return len(weights) - 1
-}
-
-// percent returns true with a chance of p out of 100.
-func percent(r *checker.Rand, p int) bool { return r.Intn(100) < p }
-
-// pick returns one element of items.
-func pick[T any](r *checker.Rand, items []T) T { return items[r.Intn(len(items))] }

@@ -1,4 +1,4 @@
-package observation
+package conformance
 
 import (
 	"strings"

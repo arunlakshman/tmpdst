@@ -1,4 +1,4 @@
-package generator
+package conformance
 
 import (
 	"fmt"
@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"pgregory.net/rapid"
+
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/dst/machine"
@@ -93,13 +94,19 @@ func reportCoverage(t *testing.T, title string, cases []string, table map[string
 	}
 }
 
+// sequence returns the coverageOps operations that a generator draws for seed.
+// The same seed always gives the same list, so the coverage numbers are the
+// same on every run.
+func sequence[V any](gen *rapid.Generator[V], seed int) []V {
+	return rapid.SliceOfN(gen, coverageOps, coverageOps).Example(seed)
+}
+
 func objectCoverage(p InputProfile) map[string]int {
 	hits := map[string]int{}
 	gen := ObjectOps(p)
-	for seed := uint64(1); seed <= coverageSeeds; seed++ {
-		r, spec := checker.NewRand(seed), objectstore.NewSpec()
-		for i := range coverageOps {
-			operation := gen(r, i)
+	for seed := 1; seed <= coverageSeeds; seed++ {
+		spec := objectstore.NewSpec()
+		for _, operation := range sequence(gen, seed) {
 			for _, c := range classifyObject(spec, operation) {
 				hits[c]++
 			}
@@ -170,10 +177,9 @@ func classifyList(operation objectstore.List, done objectstore.ListDone) []strin
 func controlPlaneCoverage(p InputProfile) map[string]int {
 	hits := map[string]int{}
 	gen := ControlPlaneOps(p)
-	for seed := uint64(1); seed <= coverageSeeds; seed++ {
-		r, spec, committed := checker.NewRand(seed), specbridge.New(), map[string]bool{}
-		for i := range coverageOps {
-			operation := gen(r, i)
+	for seed := 1; seed <= coverageSeeds; seed++ {
+		spec, committed := specbridge.New(), map[string]bool{}
+		for _, operation := range sequence(gen, seed) {
 			for _, c := range classifyControlPlane(spec, committed, operation) {
 				hits[c]++
 			}
@@ -280,6 +286,9 @@ func classifyDescribe(o contract.DescribeTopics, response contract.DescribeTopic
 	return out
 }
 
+// The generators take all their numbers from rapid, so one seed must always
+// give one list. A hidden source of chance (a map order, the clock) would break
+// this and make a failure impossible to replay.
 func TestSameSeedGivesSameSequence(t *testing.T) {
 	for _, p := range InputProfiles() {
 		objA, objB := objectSequence(p, 7), objectSequence(p, 7)
@@ -296,33 +305,63 @@ func TestSameSeedGivesSameSequence(t *testing.T) {
 	}
 }
 
-func objectSequence(p InputProfile, seed uint64) []objectstore.Call {
-	r, gen := checker.NewRand(seed), ObjectOps(p)
-	var out []objectstore.Call
-	for i := range coverageOps {
-		out = append(out, gen(r, i))
-	}
-	return out
+func objectSequence(p InputProfile, seed int) []objectstore.Call {
+	return sequence(ObjectOps(p), seed)
 }
 
-func controlPlaneSequence(p InputProfile, seed uint64) []string {
-	r, gen := checker.NewRand(seed), ControlPlaneOps(p)
+func controlPlaneSequence(p InputProfile, seed int) []string {
 	var out []string
-	for i := range coverageOps {
-		out = append(out, FormatControlPlaneOp(gen(r, i)))
+	for _, operation := range sequence(ControlPlaneOps(p), seed) {
+		out = append(out, FormatControlPlaneOp(operation))
 	}
 	return out
 }
 
+// recordingObject keeps the request number of every call it gets.
+type recordingObject struct{ reqs []machine.RequestID }
+
+func (r *recordingObject) Apply(operation objectstore.Call) (ObjectResult, error) {
+	r.reqs = append(r.reqs, operation.RequestID())
+	return ObjectResult{}, nil
+}
+
+type recordingControlPlane struct{ reqs []machine.RequestID }
+
+func (r *recordingControlPlane) Apply(operation ControlPlaneTestStep) (ControlPlaneResult, error) {
+	if operation.Call != nil {
+		r.reqs = append(r.reqs, operation.Call.Req)
+	}
+	return ControlPlaneResult{}, nil
+}
+
+// The generators make operations with no request id. The pair of the suite
+// must give the call at position i the id i+1, and no other id.
 func TestRequestIDsFollowPosition(t *testing.T) {
-	r, objects, plane := checker.NewRand(3), ObjectOps(Default()), ControlPlaneOps(Default())
-	for i := range 50 {
-		if got := objects(r, i).RequestID(); got != machine.RequestID(i+1) {
+	objects := &recordingObject{}
+	pair := &ObjectPair{mirror: objectstore.NewSpec(), subject: objects}
+	for _, operation := range objectSequence(Default(), 3)[:50] {
+		if _, err := pair.Apply(operation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i, got := range objects.reqs {
+		if got != machine.RequestID(i+1) {
 			t.Fatalf("object operation %d has request id %d, want %d.", i, got, i+1)
 		}
-		if operation := plane(r, i); operation.Call != nil && operation.Call.Req != machine.RequestID(i+1) {
-			t.Fatalf("control-plane operation %d has request id %d, want %d.", i, operation.Call.Req, i+1)
+	}
+	plane := &recordingControlPlane{}
+	cpPair := &ControlPlanePair{mirror: NewSpecControlPlaneSubject(), subject: plane, model: newCPModel()}
+	var callPositions []machine.RequestID
+	for i, operation := range sequence(ControlPlaneOps(Default()), 3)[:50] {
+		if _, err := cpPair.Apply(operation); err != nil {
+			t.Fatal(err)
 		}
+		if operation.Call != nil {
+			callPositions = append(callPositions, machine.RequestID(i+1))
+		}
+	}
+	if !slices.Equal(plane.reqs, callPositions) {
+		t.Fatalf("the request ids of the control-plane calls are %v, want %v.", plane.reqs, callPositions)
 	}
 }
 
@@ -345,56 +384,11 @@ func TestBatchesReplayAndConflict(t *testing.T) {
 	}
 }
 
-func TestShrinkMakesProgressAndEnds(t *testing.T) {
-	for _, p := range InputProfiles() {
-		r, objects, plane := checker.NewRand(5), ObjectOps(p), ControlPlaneOps(p)
-		for i := range coverageOps {
-			shrinkObjectToEnd(t, objects(r, i))
-			shrinkPlaneToEnd(t, plane(r, i))
-		}
-	}
-}
-
-// shrinkObjectToEnd always takes the first candidate. The loop ends only if
-// every candidate is simpler, so a candidate equal to its parent hangs the
-// test, and the step limit turns that hang into a failure.
-func shrinkObjectToEnd(t *testing.T, operation objectstore.Call) {
-	t.Helper()
-	for range 1000 {
-		next := MinimizeObjectOp(operation)
-		if len(next) == 0 {
-			return
-		}
-		if reflect.DeepEqual(next[0], operation) {
-			t.Fatalf("shrinking %s gave the same operation.", FormatObjectOp(operation))
-		}
-		operation = next[0]
-	}
-	t.Fatalf("shrinking %s did not end.", FormatObjectOp(operation))
-}
-
-func shrinkPlaneToEnd(t *testing.T, operation ControlPlaneTestStep) {
-	t.Helper()
-	for range 1000 {
-		next := MinimizeControlPlaneOp(operation)
-		for _, c := range next {
-			if reflect.DeepEqual(c, operation) {
-				t.Fatalf("shrinking %s gave the same operation.", FormatControlPlaneOp(operation))
-			}
-		}
-		if len(next) == 0 {
-			return
-		}
-		operation = next[0]
-	}
-	t.Fatalf("shrinking %s did not end.", FormatControlPlaneOp(operation))
-}
-
 func TestFormatIsAGoExpression(t *testing.T) {
 	for _, p := range InputProfiles() {
-		r, objects, plane := checker.NewRand(9), ObjectOps(p), ControlPlaneOps(p)
+		objects, plane := objectSequence(p, 9), sequence(ControlPlaneOps(p), 9)
 		for i := range coverageOps {
-			for _, text := range []string{FormatObjectOp(objects(r, i)), FormatControlPlaneOp(plane(r, i))} {
+			for _, text := range []string{FormatObjectOp(objects[i]), FormatControlPlaneOp(plane[i])} {
 				if _, err := parser.ParseExpr(text); err != nil {
 					t.Fatalf("the text %q is not a Go expression: %v", text, err)
 				}
@@ -405,13 +399,13 @@ func TestFormatIsAGoExpression(t *testing.T) {
 
 func TestFormatExamples(t *testing.T) {
 	cases := []struct{ got, want string }{
-		{FormatObjectOp(objectstore.Put{Req: 1, Key: "a", Data: []byte("hi")}), `objectstore.Put{Req: 1, Key: "a", Data: []byte("hi")}`},
-		{FormatObjectOp(objectstore.Put{Req: 2, Key: "", Data: []byte{}}), `objectstore.Put{Req: 2, Key: "", Data: []byte{}}`},
-		{FormatObjectOp(objectstore.List{Req: 3, Prefix: "a/"}), `objectstore.List{Req: 3, Prefix: "a/"}`},
-		{FormatControlPlaneOp(NewCreateTopic("t1", 2)), `generator.NewCreateTopic("t1", 2)`},
+		{FormatObjectOp(objectstore.Put{Key: "a", Data: []byte("hi")}), `objectstore.Put{Key: "a", Data: []byte("hi")}`},
+		{FormatObjectOp(objectstore.Put{Key: "", Data: []byte{}}), `objectstore.Put{Key: "", Data: []byte{}}`},
+		{FormatObjectOp(objectstore.List{Prefix: "a/"}), `objectstore.List{Prefix: "a/"}`},
+		{FormatControlPlaneOp(NewCreateTopic("t1", 2)), `conformance.NewCreateTopic("t1", 2)`},
 		{
-			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Req: 4, Op: contract.FindSegments{TopicPartition: contract.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})),
-			`generator.NewCall(core.ControlPlaneCall{Req: 4, Op: contract.FindSegments{TopicPartition: contract.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})`,
+			FormatControlPlaneOp(NewCall(core.ControlPlaneCall{Op: contract.FindSegments{TopicPartition: contract.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})),
+			`conformance.NewCall(core.ControlPlaneCall{Op: contract.FindSegments{TopicPartition: contract.NewTopicPartition("t1", 1), From: -1, MaxBytes: 60}})`,
 		},
 	}
 	for _, c := range cases {
@@ -425,5 +419,34 @@ func TestDescribeNamesTheOperation(t *testing.T) {
 	operation := NewCall(core.ControlPlaneCall{Req: 5, Op: contract.CommitSegment{SegmentKey: "s", Batches: make([]contract.PendingBatch, 2)}})
 	if got, want := operation.Describe(), `request 5: commit segment "s" with 2 batches`; got != want {
 		t.Errorf("Describe gave %q, want %q.", got, want)
+	}
+}
+
+// The profile weights are chances. The integer generators of rapid favor small
+// values on purpose, so the generators here draw fair bits. This test draws
+// many numbers and checks that each value comes up as often as its weight says.
+func TestDrawsFollowTheWeights(t *testing.T) {
+	const draws = 20000
+	weights := []int{3, 2, 1, 1}
+	gen := Custom(func(r Rand) int { return chooseByWeight(r, weights...) })
+	counts := make([]int, len(weights))
+	for seed := 1; seed <= draws; seed++ {
+		counts[gen.Example(seed)]++
+	}
+	for i, w := range weights {
+		want := float64(draws) * float64(w) / 7
+		if got := float64(counts[i]); got < want*0.93 || got > want*1.07 {
+			t.Errorf("kind %d (weight %d) came up %d times in %d draws, want about %.0f.", i, w, counts[i], draws, want)
+		}
+	}
+	percentGen := Custom(func(r Rand) bool { return percent(r, 12) })
+	hits := 0
+	for seed := 1; seed <= draws; seed++ {
+		if percentGen.Example(seed) {
+			hits++
+		}
+	}
+	if want := float64(draws) * 0.12; float64(hits) < want*0.93 || float64(hits) > want*1.07 {
+		t.Errorf("a chance of 12 percent came up %d times in %d draws, want about %.0f.", hits, draws, want)
 	}
 }

@@ -1,112 +1,139 @@
-package spec
+package spec_test
 
 import (
 	"bytes"
 	"fmt"
 	"testing"
 
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
+	"pgregory.net/rapid"
+
+	"github.com/manifesterio/mds/broker/internal/verify/speccheck/conformance"
+	"github.com/manifesterio/mds/broker/spec"
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/check/spectest"
 )
 
-// This file checks Broker against a naive model: a plain slice of values.
-// The model has no high watermark field. The high watermark is the length.
+// This file checks spec.Broker against a naive model: a plain slice of values.
+// The model has no high watermark field. The high watermark is the length. The
+// check is a spectest.Lockstep in which the naive model is the spec, and
+// spec.Broker is the subject.
 
-type brokerPair struct {
-	spec  *Broker
-	twin  *Broker // receives the same appends, so the state hashes must match
-	model [][]byte
-}
+// naiveBroker is the naive model. It is the spec of the lockstep run.
+type naiveBroker struct{ model [][]byte }
 
-func stepBrokerModel(s *brokerPair, operation SuiteOp) error {
+// Apply gives the answer that the rules require, from the plain slice.
+func (n *naiveBroker) Apply(operation conformance.BrokerOp) conformance.BrokerResult {
 	switch operation.Kind {
 	case "append":
-		wantBase := contract.Offset(len(s.model))
+		result := conformance.BrokerResult{Kind: "append", Base: contract.Offset(len(n.model))}
+		for _, v := range operation.Batch {
+			n.model = append(n.model, bytes.Clone(v))
+		}
+		return result
+	case "hwm":
+		return conformance.BrokerResult{Kind: "hwm", HWM: contract.Offset(len(n.model))}
+	}
+	result := conformance.BrokerResult{Kind: "read", OK: operation.From >= 0 && operation.From <= int64(len(n.model))}
+	if !result.OK {
+		return result
+	}
+	for i := operation.From; i < int64(len(n.model)); i++ {
+		if operation.Max > 0 && len(result.Records) == operation.Max {
+			break
+		}
+		result.Records = append(result.Records, spec.StoredRecord{Offset: contract.Offset(i), Value: n.model[i]})
+	}
+	return result
+}
+
+// StateHash is not used: the model and the spec keep their state in different
+// shapes, so the lockstep compares no hash.
+func (n *naiveBroker) StateHash() uint64 { return 0 }
+
+// brokerUnderTest runs spec.Broker as the subject. It also keeps a twin that
+// gets the same appends, so the state hashes of the two must match.
+type brokerUnderTest struct {
+	spec     *spec.Broker
+	twin     *spec.Broker
+	appended int // records appended so far: the high watermark must be this
+}
+
+// Apply runs the operation on the spec. The caller changes its own bytes after
+// Append and after Read. The spec must not see it.
+func (b *brokerUnderTest) Apply(operation conformance.BrokerOp) (conformance.BrokerResult, error) {
+	switch operation.Kind {
+	case "append":
 		input := make([][]byte, len(operation.Batch))
 		for i, v := range operation.Batch {
 			input[i] = bytes.Clone(v)
-			s.model = append(s.model, bytes.Clone(v))
 		}
-		if got := s.spec.Append(input); got != wantBase {
-			return fmt.Errorf("Append returned base offset %d, the model expected %d", got, wantBase)
-		}
-		s.twin.Append(operation.Batch)
-		// The caller changes its own bytes after Append. The spec must not see it.
+		result := conformance.BrokerResult{Kind: "append", Base: b.spec.Append(input)}
+		b.twin.Append(operation.Batch)
+		b.appended += len(operation.Batch)
 		for _, v := range input {
 			for i := range v {
 				v[i] = '!'
 			}
 		}
+		return result, nil
 	case "hwm":
-		if got, want := s.spec.HighWatermark(), contract.Offset(len(s.model)); got != want {
-			return fmt.Errorf("HighWatermark is %d, the model expected %d", got, want)
-		}
-	default:
-		return checkBrokerRead(s, operation)
+		return conformance.BrokerResult{Kind: "hwm", HWM: b.spec.HighWatermark()}, nil
 	}
-	return nil
-}
-
-func checkBrokerRead(s *brokerPair, operation SuiteOp) error {
-	recs, ok := s.spec.Read(contract.Offset(operation.From), operation.Max)
-	wantOK := operation.From >= 0 && operation.From <= int64(len(s.model))
-	if ok != wantOK {
-		return fmt.Errorf("Read(from %d, max %d): ok is %v, the model expected %v (high watermark %d)", operation.From, operation.Max, ok, wantOK, len(s.model))
+	records, ok := b.spec.Read(contract.Offset(operation.From), operation.Max)
+	result := conformance.BrokerResult{Kind: "read", OK: ok}
+	if !ok && records != nil {
+		return result, fmt.Errorf("Read(from %d, max %d): ok is false but %d records came back", operation.From, operation.Max, len(records))
 	}
-	if !ok {
-		if recs != nil {
-			return fmt.Errorf("Read(from %d, max %d): ok is false but %d records came back", operation.From, operation.Max, len(recs))
-		}
-		return nil
-	}
-	var want [][]byte
-	for i := operation.From; i < int64(len(s.model)); i++ {
-		if operation.Max > 0 && len(want) == operation.Max {
-			break
-		}
-		want = append(want, s.model[i])
-	}
-	if len(recs) != len(want) {
-		return fmt.Errorf("Read(from %d, max %d): got %d records, the model expected %d", operation.From, operation.Max, len(recs), len(want))
-	}
-	for i, r := range recs {
-		if r.Offset != contract.Offset(operation.From)+contract.Offset(i) || !bytes.Equal(r.Value, want[i]) {
-			return fmt.Errorf("Read(from %d, max %d): record %d is offset %d value %q, the model expected offset %d value %q",
-				operation.From, operation.Max, i, r.Offset, r.Value, operation.From+int64(i), want[i])
-		}
-		// The caller changes the returned bytes. The log must not change.
+	for _, r := range records {
+		result.Records = append(result.Records, spec.StoredRecord{Offset: r.Offset, Value: bytes.Clone(r.Value)})
 		for j := range r.Value {
 			r.Value[j] = '?'
 		}
 	}
-	return nil
+	return result, nil
 }
 
-func checkBrokerState(s *brokerPair) error {
-	if g, w := s.spec.HighWatermark(), contract.Offset(len(s.model)); g != w {
+func (b *brokerUnderTest) invariant() error {
+	if g, w := b.spec.HighWatermark(), contract.Offset(b.appended); g != w {
 		return fmt.Errorf("HighWatermark is %d, the model expected %d", g, w)
 	}
-	if g, w := s.spec.StateHash(), s.twin.StateHash(); g != w {
+	if g, w := b.spec.StateHash(), b.twin.StateHash(); g != w {
 		return fmt.Errorf("two partitions with the same appends have different state hashes: %d and %d", g, w)
 	}
 	return nil
 }
 
 func TestBrokerMatchesNaiveModel(t *testing.T) {
-	c := checker.SpecChecker[*brokerPair, SuiteOp]{
-		Name:      "SuiteOp",
-		New:       func() *brokerPair { return &brokerPair{spec: &Broker{}, twin: &Broker{}} },
-		Gen:       genSuiteOp,
-		Step:      stepBrokerModel,
-		Invariant: checkBrokerState,
-		Format:    func(o SuiteOp) string { return fmt.Sprintf("%#v", o) },
-		Ops:       80,
+	l := spectest.Lockstep[conformance.BrokerOp, conformance.BrokerResult, *brokerUnderTest]{
+		Name:          "conformance.BrokerOp",
+		NewSpec:       func() spectest.Spec[conformance.BrokerOp, conformance.BrokerResult] { return &naiveBroker{} },
+		NewSubject:    func(*rapid.T) *brokerUnderTest { return &brokerUnderTest{spec: &spec.Broker{}, twin: &spec.Broker{}} },
+		Ops:           conformance.BrokerOps(),
+		Equal:         equalNaive,
+		Invariant:     (*brokerUnderTest).invariant,
+		Format:        func(operation conformance.BrokerOp) string { return fmt.Sprintf("%#v", operation) },
+		Rerun:         spectest.Rerun{EnvPrefix: conformance.EnvPrefix},
+		Checks:        300,
+		StepsPerCheck: 80,
 	}
-	checker.Run(t, c, checker.Options{
-		Seeds: 300,
-		Seed:  -1,
-		Replay: func(seed uint64) string {
-			return fmt.Sprintf("go test ./spec -run %s (seed %d)", t.Name(), seed)
-		},
-	})
+	l.Check(t)
+}
+
+// equalNaive compares the answer of the naive model with the answer of the
+// spec.
+func equalNaive(want, got conformance.BrokerResult) error {
+	if want.Kind != got.Kind || want.Base != got.Base || want.HWM != got.HWM || want.OK != got.OK {
+		return fmt.Errorf("the spec answered %+v, but the naive model expected %+v", got, want)
+	}
+	if len(got.Records) != len(want.Records) {
+		return fmt.Errorf("the spec returned %d records, but the naive model expected %d", len(got.Records), len(want.Records))
+	}
+	for i, r := range got.Records {
+		w := want.Records[i]
+		if r.Offset != w.Offset || !bytes.Equal(r.Value, w.Value) {
+			return fmt.Errorf("record %d is offset %d value %q, but the naive model expected offset %d value %q",
+				i, r.Offset, r.Value, w.Offset, w.Value)
+		}
+	}
+	return nil
 }

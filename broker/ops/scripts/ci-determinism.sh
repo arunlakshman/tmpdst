@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CI gate for the deterministic packages (internal/core, internal/verify/simulator (the tree on dst/kernel), internal/wire/segmentformat, the broker spec in
-# spec, internal/verify/speccheck (the spec bridge and the checker) except its system adapters in internal/verify/speccheck/specsystem,
+# spec, internal/verify/speccheck (the spec bridge) except its system adapters in internal/verify/speccheck/specsystem,
 # plus internal/wire/kafkawire and internal/broker).
 # Control-plane replica moved to mds-controlplane; see docs/cp-extraction.md and docs/decisions.md (I, 55, 56).
 #   1. determinismcheck: exact-path import allow-list plus banned constructs.
@@ -11,7 +11,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-pkgs=(./internal/core/... ./internal/verify/simulator/... ./internal/wire/segmentformat/... ./internal/wire/kafkawire ./internal/broker/... ./spec ./internal/verify/speccheck ./internal/verify/speccheck/specbridge ./internal/verify/speccheck/checker)
+pkgs=(./internal/core/... ./internal/verify/simulator/... ./internal/wire/segmentformat/... ./internal/wire/kafkawire ./internal/broker/... ./spec ./internal/verify/speccheck ./internal/verify/speccheck/specbridge)
 
 echo "== determinismcheck"
 go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ops/determinism-allow.txt "${pkgs[@]}"

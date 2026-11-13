@@ -5,17 +5,14 @@ import (
 	"strings"
 )
 
-// NamedSite is a declared buggify site: a named place in the code where a
+// Site is a declared buggify site: a named place in the code where a
 // fault may be injected on purpose. Make it only with NewSite, in a
 // package-level var block. The declaration puts the name in the catalog (see
 // Sites), so a campaign can list the sites that never fired.
-//
-// The old string type Site stays until the products move to NamedSite (plan
-// task T1.16 deletes it; NamedSite may then take the name Site).
-type NamedSite struct{ name string }
+type Site struct{ name string }
 
 // Name returns the name given to NewSite.
-func (s NamedSite) Name() string { return s.name }
+func (s Site) Name() string { return s.name }
 
 // sites is the catalog of every name made by NewSite or NewFaultSite. The value
 // is true for a site that the injector counts (NewSite). NewSite is called only
@@ -27,7 +24,7 @@ var sites = map[string]bool{}
 
 // NewSite declares a buggify site. Call it only in a package-level var block.
 // A name declared twice, or an empty name, panics at program start.
-func NewSite(name string) NamedSite {
+func NewSite(name string) Site {
 	return declareSite(name, true)
 }
 
@@ -35,11 +32,11 @@ func NewSite(name string) NamedSite {
 // injector does not count a Fault site (see Injector.Sites), so it can never
 // show as fired. Sites leaves it out, and a campaign does not list it as
 // "never fired". Call it only in a package-level var block.
-func NewFaultSite(name string) NamedSite {
+func NewFaultSite(name string) Site {
 	return declareSite(name, false)
 }
 
-func declareSite(name string, counted bool) NamedSite {
+func declareSite(name string, counted bool) Site {
 	if strings.TrimSpace(name) == "" {
 		panic("fault: a site name must not be empty") //nolint:forbidigo // a bad declaration must stop the program at start
 	}
@@ -47,7 +44,7 @@ func declareSite(name string, counted bool) NamedSite {
 		panic("fault: the site " + name + " is declared twice") //nolint:forbidigo // a bad declaration must stop the program at start
 	}
 	sites[name] = counted
-	return NamedSite{name: name}
+	return Site{name: name}
 }
 
 // Sites returns the name of every declared site that the injector counts,

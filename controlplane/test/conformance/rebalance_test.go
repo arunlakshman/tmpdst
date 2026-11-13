@@ -137,9 +137,9 @@ func (e rbEnv) Uint64() uint64                             { return e.w.rand.Uin
 func (e rbEnv) Intn(n int) int                             { return e.w.rand.Intn(n) }
 func (e rbEnv) Between(lo, hi int64) int64                 { return e.w.rand.Between(lo, hi) }
 func (e rbEnv) Chance(p float64) bool                      { return e.w.rand.Chance(p) }
-func (e rbEnv) Maybe(fault.NamedSite) bool                 { return false }
-func (e rbEnv) MaybeP(fault.NamedSite, float64) bool       { return false }
-func (e rbEnv) Fault(fault.NamedSite, float64) bool        { return false }
+func (e rbEnv) Maybe(fault.Site) bool                      { return false }
+func (e rbEnv) MaybeP(fault.Site, float64) bool            { return false }
+func (e rbEnv) Fault(fault.Site, float64) bool             { return false }
 func (e rbEnv) Always(bool, assert.Always, ...assert.Pair) {}
 func (e rbEnv) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {
 }

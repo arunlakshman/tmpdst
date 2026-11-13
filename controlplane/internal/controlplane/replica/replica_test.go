@@ -46,9 +46,9 @@ func (e *testEnv) NewID() machine.ID {
 	}
 	return id
 }
-func (e *testEnv) Maybe(fault.NamedSite) bool           { return false }
-func (e *testEnv) MaybeP(fault.NamedSite, float64) bool { return false }
-func (e *testEnv) Fault(fault.NamedSite, float64) bool  { return false }
+func (e *testEnv) Maybe(fault.Site) bool           { return false }
+func (e *testEnv) MaybeP(fault.Site, float64) bool { return false }
+func (e *testEnv) Fault(fault.Site, float64) bool  { return false }
 func (e *testEnv) Always(cond bool, p assert.Always, details ...assert.Pair) {
 	e.always = append(e.always, alwaysHit{cond: cond, prop: p.Name(), details: details})
 }

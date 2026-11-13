@@ -41,9 +41,9 @@ func (e *productionEnvironment) NewID() machine.ID {
 	}
 	return id
 }
-func (productionEnvironment) Maybe(fault.NamedSite) bool                                           { return false }
-func (productionEnvironment) MaybeP(fault.NamedSite, float64) bool                                 { return false }
-func (productionEnvironment) Fault(fault.NamedSite, float64) bool                                  { return false }
+func (productionEnvironment) Maybe(fault.Site) bool                                                { return false }
+func (productionEnvironment) MaybeP(fault.Site, float64) bool                                      { return false }
+func (productionEnvironment) Fault(fault.Site, float64) bool                                       { return false }
 func (productionEnvironment) Always(bool, assert.Always, ...assert.Pair)                           {}
 func (productionEnvironment) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {}
 func (productionEnvironment) Sometimes(bool, assert.Sometimes)                                     {}

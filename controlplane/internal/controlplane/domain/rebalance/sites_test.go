@@ -15,7 +15,7 @@ type everyOther struct {
 	fired map[string]int
 }
 
-func newEveryOther(sites ...fault.NamedSite) *everyOther {
+func newEveryOther(sites ...fault.Site) *everyOther {
 	f := &everyOther{on: map[string]bool{}, calls: map[string]int{}, fired: map[string]int{}}
 	for _, s := range sites {
 		f.on[s.Name()] = true
@@ -23,7 +23,7 @@ func newEveryOther(sites ...fault.NamedSite) *everyOther {
 	return f
 }
 
-func (f *everyOther) Maybe(site fault.NamedSite) bool {
+func (f *everyOther) Maybe(site fault.Site) bool {
 	s := site.Name()
 	if !f.on[s] {
 		return false
@@ -36,8 +36,8 @@ func (f *everyOther) Maybe(site fault.NamedSite) bool {
 	return false
 }
 
-func (f *everyOther) MaybeP(site fault.NamedSite, _ float64) bool { return f.Maybe(site) }
-func (f *everyOther) Fault(fault.NamedSite, float64) bool         { return false }
+func (f *everyOther) MaybeP(site fault.Site, _ float64) bool { return f.Maybe(site) }
+func (f *everyOther) Fault(fault.Site, float64) bool         { return false }
 
 // The sites that do not move time must not change any reply.
 func TestSitesKeepTheReplies(t *testing.T) {
@@ -72,7 +72,7 @@ func TestSitesKeepTheReplies(t *testing.T) {
 		{sec + delay + 5*sec, nil, nil}, // both sessions end: both are removed
 	})
 	h.check("expired", h.phase("g"), stateEmpty)
-	for _, site := range []fault.NamedSite{SiteStaleTimer, SiteDuplicateReply, SiteLateDrain, SiteLoadRetry} {
+	for _, site := range []fault.Site{SiteStaleTimer, SiteDuplicateReply, SiteLateDrain, SiteLoadRetry} {
 		if f.fired[site.Name()] == 0 {
 			t.Errorf("site %s never fired", site.Name())
 		}

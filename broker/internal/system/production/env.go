@@ -85,13 +85,13 @@ func (e *Env) NewID() machine.ID {
 }
 
 // Maybe never takes the optional branch in production.
-func (*Env) Maybe(fault.NamedSite) bool { return false }
+func (*Env) Maybe(fault.Site) bool { return false }
 
 // MaybeP never takes the optional branch in production.
-func (*Env) MaybeP(fault.NamedSite, float64) bool { return false }
+func (*Env) MaybeP(fault.Site, float64) bool { return false }
 
 // Fault never injects a fault in production.
-func (*Env) Fault(fault.NamedSite, float64) bool { return false }
+func (*Env) Fault(fault.Site, float64) bool { return false }
 
 // Sometimes is a no-op in production.
 func (*Env) Sometimes(bool, assert.Sometimes) {}

@@ -119,11 +119,11 @@ type Rand interface {
 type Faults interface {
 	// Maybe switches the site on for the run on first use (probability 0.5),
 	// then fires with probability 0.05 when it is on.
-	Maybe(site fault.NamedSite) bool
+	Maybe(site fault.Site) bool
 	// MaybeP is Maybe with fire probability p.
-	MaybeP(site fault.NamedSite, p float64) bool
+	MaybeP(site fault.Site, p float64) bool
 	// Fault fires with probability p. It never fires outside the fault phase.
-	Fault(site fault.NamedSite, p float64) bool
+	Fault(site fault.Site, p float64) bool
 }
 
 // Assertions record properties. A failed safety property is reported and the

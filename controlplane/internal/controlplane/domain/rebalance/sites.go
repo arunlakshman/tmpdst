@@ -31,6 +31,6 @@ var (
 const lateMax = 50 * machine.Millisecond
 
 // maybe reports whether site fires now. The env of production never fires a site.
-func (m *Machine) maybe(site fault.NamedSite) bool {
+func (m *Machine) maybe(site fault.Site) bool {
 	return m.env.Maybe(site)
 }

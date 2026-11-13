@@ -263,9 +263,9 @@ func (e *fakeEnv) NewID() machine.ID {
 	id[0], id[1] = byte(e.n), byte(e.n>>8)
 	return id
 }
-func (*fakeEnv) Maybe(fault.NamedSite) bool                                           { return false }
-func (*fakeEnv) MaybeP(fault.NamedSite, float64) bool                                 { return false }
-func (*fakeEnv) Fault(fault.NamedSite, float64) bool                                  { return false }
+func (*fakeEnv) Maybe(fault.Site) bool                                                { return false }
+func (*fakeEnv) MaybeP(fault.Site, float64) bool                                      { return false }
+func (*fakeEnv) Fault(fault.Site, float64) bool                                       { return false }
 func (*fakeEnv) Always(bool, assert.Always, ...assert.Pair)                           {}
 func (*fakeEnv) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {}
 func (*fakeEnv) Sometimes(bool, assert.Sometimes)                                     {}

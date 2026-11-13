@@ -2487,3 +2487,22 @@ T1.12d.
    bugs guarded (the service must give the spec's answers and the spec's hash) is guarded by the
    fault tests of Faulty and by the parity files. The old fake tests were ported (list in the
    T1.15 report); the generic fault tests are in `dst/check/faulty/faulty_test.go`.
+
+### T1.16b (old string fault API deleted; NamedSite is Site)
+
+1. **The fault API takes declared sites only.** `fault.Site` (the old string type) is gone.
+   `Injector.Maybe`, `MaybeP` and `Fault` take the declared handle `fault.Site` (made by
+   `fault.NewSite` or `fault.NewFaultSite`). The kernel passes its handle straight through, so
+   the decisions, the draws, the order and the recorded names are the same. The old
+   `NamedSite` name is now `Site` in every module (a rename only, found by the compiler).
+2. **Assertion string methods: kept.** The `assert.Log` methods that take a `Property` are
+   still needed, so none was deleted. `Always` is called with run-time names by
+   `check.Checker.Verdict` (`dst/check/check.go`, names are `Prefix + name`), which is not a
+   declared handle. The other four (`AlwaysOrUnreachable`, `Sometimes`, `Reachable`,
+   `Unreachable`) are called only by `dst/kernel/env.go`, with `assert.Property(p.Name())`.
+   Taking the handle there needs a Log method with the same name and a different parameter
+   type, which Go does not allow next to the Property version. Removing them would mean a new
+   name for the Checker method (for example `AlwaysNamed`). That is an API rename, not a
+   mechanical change, so it is left for a later task.
+3. **Names, draws and goldens did not change.** The test sites in `dst/fault` are declared
+   handles now. The gates are in the T1.16b report.

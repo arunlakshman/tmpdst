@@ -49,14 +49,14 @@ func newTestEnv(faults machine.Faults) *testEnv {
 	return &testEnv{rand: rng.New(seed), faults: faults}
 }
 
-func (e *testEnv) Uint64() uint64                      { return e.rand.Uint64() }
-func (e *testEnv) Intn(n int) int                      { return e.rand.Intn(n) }
-func (e *testEnv) Between(lo, hi int64) int64          { return e.rand.Between(lo, hi) }
-func (e *testEnv) Chance(p float64) bool               { return e.rand.Chance(p) }
-func (e *testEnv) NewID() machine.ID                   { return newID(e.rand) }
-func (e *testEnv) Maybe(s fault.NamedSite) bool        { return e.faults != nil && e.faults.Maybe(s) }
-func (e *testEnv) Fault(fault.NamedSite, float64) bool { return false }
-func (e *testEnv) MaybeP(s fault.NamedSite, p float64) bool {
+func (e *testEnv) Uint64() uint64                 { return e.rand.Uint64() }
+func (e *testEnv) Intn(n int) int                 { return e.rand.Intn(n) }
+func (e *testEnv) Between(lo, hi int64) int64     { return e.rand.Between(lo, hi) }
+func (e *testEnv) Chance(p float64) bool          { return e.rand.Chance(p) }
+func (e *testEnv) NewID() machine.ID              { return newID(e.rand) }
+func (e *testEnv) Maybe(s fault.Site) bool        { return e.faults != nil && e.faults.Maybe(s) }
+func (e *testEnv) Fault(fault.Site, float64) bool { return false }
+func (e *testEnv) MaybeP(s fault.Site, p float64) bool {
 	return e.faults != nil && e.faults.MaybeP(s, p)
 }
 func (*testEnv) Always(bool, assert.Always, ...assert.Pair)                           {}

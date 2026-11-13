@@ -16,7 +16,7 @@ func (e env) Uint64() uint64               { return e.w.rand.Uint64() }
 func (e env) Intn(n int) int               { return e.w.rand.Intn(n) }
 func (e env) Between(lo, hi int64) int64   { return e.w.rand.Between(lo, hi) }
 func (e env) Chance(p float64) bool        { return e.w.rand.Chance(p) }
-func (e env) Maybe(s fault.NamedSite) bool { return e.w.faults.Maybe(fault.Site(s.Name())) }
+func (e env) Maybe(s fault.Site) bool      { return e.w.faults.Maybe(s) }
 func (e env) Reachable(p assert.Reachable) { e.w.asserts.Reachable(assert.Property(p.Name())) }
 func (e env) Sometimes(c bool, p assert.Sometimes) {
 	e.w.asserts.Sometimes(c, assert.Property(p.Name()))
@@ -29,12 +29,12 @@ func (e env) NewID() machine.ID {
 	return id
 }
 
-func (e env) MaybeP(s fault.NamedSite, p float64) bool {
-	return e.w.faults.MaybeP(fault.Site(s.Name()), p)
+func (e env) MaybeP(s fault.Site, p float64) bool {
+	return e.w.faults.MaybeP(s, p)
 }
 
-func (e env) Fault(s fault.NamedSite, p float64) bool {
-	return e.w.faults.Fault(fault.Site(s.Name()), p)
+func (e env) Fault(s fault.Site, p float64) bool {
+	return e.w.faults.Fault(s, p)
 }
 
 func (e env) Always(c bool, p assert.Always, d ...assert.Pair) {

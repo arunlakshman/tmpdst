@@ -7,8 +7,9 @@
 //     var oneWriter = assert.NewAlways("sim: one writer per epoch").
 //     The declaration puts the name in the catalog (see Catalog). New code uses
 //     handles.
-//   - A plain Property string. This is the old way. It stays until the products
-//     move to handles (plan task T1.16 deletes it).
+//   - A plain Property string. Only check.Checker uses it, because its names are
+//     built at run time (a prefix plus a name). The Log methods that take a
+//     Property are used by the kernel for handles too, so they stay (T1.16b).
 package assert
 
 import (

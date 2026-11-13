@@ -3,8 +3,7 @@
 #   internal/runtime, contract, the engine interface
 #   (metadb/engine), every domain package (domain/topic, domain/group,
 #   domain/rebalance, domain/broker), the replica machine (replica),
-#   the adapter that runs the machines as dst processes (system/simadapter,
-#   temporary), and the reference model (spec). Test code is not in the gate, so
+#   and the reference model (spec). Test code is not in the gate, so
 #   the property-based tests (pgregory.net/rapid) are not either.
 # The simulator engine (internal/verify/simulator) is checked too, with one more
 # allowed import: context, because the in-memory log API takes a context. Its
@@ -28,7 +27,6 @@ pkgs=(
   ./internal/controlplane/domain/broker
   ./internal/controlplane/domain/rebalance
   ./internal/controlplane/replica
-  ./internal/system/simadapter
   ./spec
 )
 

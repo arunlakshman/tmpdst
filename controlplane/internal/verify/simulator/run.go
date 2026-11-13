@@ -2,11 +2,12 @@ package simulator
 
 import (
 	"fmt"
-	"github.com/manifesterio/mds/dst/check"
 	"slices"
 	"strings"
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
+	"github.com/manifesterio/mds/dst/check"
+	"github.com/manifesterio/mds/dst/kernel"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
@@ -41,7 +42,7 @@ func Run(cfg Config) (Result, error) {
 // boot starts the nodes a few milliseconds apart, the clients, and the node faults.
 func (s *sim) boot() {
 	for _, n := range s.nodes {
-		s.after(machine.Duration(s.rand.Between(0, int64(30*machine.Millisecond))), "boot", n.boot)
+		s.after(machine.Duration(s.rand.Between(0, int64(30*machine.Millisecond))), n.boot)
 	}
 	s.clients.start()
 	if s.consumers != nil {
@@ -52,7 +53,7 @@ func (s *sim) boot() {
 
 // runUntil takes events until stop says so, the queue is empty or the run is too long.
 func (s *sim) runUntil(stop func() bool) {
-	s.runner.RunUntil(func() bool {
+	s.w.RunUntil(func() bool {
 		if stop() {
 			return true
 		}
@@ -76,13 +77,11 @@ func (s *sim) faultPhase() {
 func (s *sim) quietPhase() {
 	s.tracef("quiet tail begins")
 	s.quiet, s.faults = true, Faults{}
-	s.env.setQuiet(true)
+	s.w.SetPhase(kernel.PhaseRecovering) // buggify Fault sites go quiet
 	for _, n := range s.nodes {
 		n.cut = false
 		n.resume()
-		if !n.up {
-			n.boot()
-		}
+		n.boot() // does nothing when the node is up
 	}
 	if s.consumers != nil {
 		s.consumers.watch()
@@ -103,7 +102,7 @@ func (s *sim) quietPhase() {
 func (s *sim) converged() bool {
 	nodes := make([]check.Node, len(s.nodes))
 	for i, n := range s.nodes {
-		if r := n.replica(); n.up && r != nil {
+		if r := n.replica(); r != nil {
 			nodes[i] = check.Node{Up: true, Ready: r.Ready(), Applied: check.Slot(r.Applied())}
 		}
 	}
@@ -116,7 +115,7 @@ func (s *sim) describeNodes() string {
 	fmt.Fprintf(&b, "log has %d slots;", end)
 	for _, n := range s.nodes {
 		r := n.replica()
-		if !n.up || r == nil {
+		if r == nil {
 			fmt.Fprintf(&b, " %s down;", n.name())
 			continue
 		}
@@ -167,33 +166,23 @@ func (s *sim) finish() {
 // same slot have the same state: checkNode already checks that on every step.
 func (s *sim) checkSameState() {
 	for _, n := range s.nodes {
-		if r := n.replica(); n.up && r != nil {
+		if r := n.replica(); r != nil {
 			s.verdict(s.store.quietAfter(r.Applied()), liveReplicasConverge, "%s is at slot %d and misses commands of the log", n.name(), r.Applied())
 		}
 	}
 }
 
+// result ends the run. The numbers that the oracle saw go into the trace hash
+// as a fact, so two runs that only differ in what the oracle saw also differ in
+// the hash.
 func (s *sim) result() Result {
-	r := Result{
-		Seed: s.cfg.Seed, Scenario: s.cfg.Scenario, Hash: s.finalHash(), Steps: s.steps(),
-		EndMs: s.now() / int64(machine.Millisecond), Failures: s.failures, Stats: s.stats, Coverage: s.env.log.Coverage(),
-		Sites: s.env.inj.Sites(),
-	}
-	if len(s.failures) > 0 {
-		r.Tail = s.tail()
-	}
-	return r
-}
-
-// finalHash adds the end of the run to the trace hash, so two runs that only
-// differ in what the oracle saw also differ in the hash.
-func (s *sim) finalHash() uint64 {
-	h := s.hash
-	h.Uint64(uint64(s.steps()))
-	h.Uint64(uint64(s.stats.Acked))
-	h.Uint64(uint64(s.stats.LogSlots))
-	h.Uint64(s.rand.Calls())
-	return h.Sum()
+	s.w.Fact(machine.Fact{Name: "sim_end", Fields: []machine.Field{
+		{Key: "steps", Value: machine.Uint64Value(s.w.Steps())},
+		{Key: "acked", Value: machine.Uint64Value(s.stats.Acked)},
+		{Key: "log_slots", Value: machine.Uint64Value(s.stats.LogSlots)},
+		{Key: "rand_calls", Value: machine.Uint64Value(s.rand.Calls())},
+	}})
+	return Result{Result: s.w.Finish(), Scenario: s.cfg.Scenario, EndMs: s.now() / int64(machine.Millisecond), Stats: s.stats}
 }
 
 // Report is a text for a person: the result, the failures with the command to
@@ -213,14 +202,14 @@ func Report(r Result) string {
 		return b.String()
 	}
 	for _, f := range r.Failures {
-		fmt.Fprintf(&b, "FAIL seed=%d scenario=%s step=%d t=%dms: %s: %s", r.Seed, r.Scenario, f.Step, f.TimeMs, f.Property, f.Detail)
+		fmt.Fprintf(&b, "FAIL seed=%d scenario=%s step=%d t=%dms: %s: %s", r.Seed, r.Scenario, f.Step, int64(f.At)/int64(machine.Millisecond), f.Property, f.Detail)
 		if f.Repeats > 0 {
 			fmt.Fprintf(&b, " (and %d more)", f.Repeats)
 		}
 		b.WriteByte('\n')
 	}
 	b.WriteString("last steps:\n")
-	for _, l := range r.Tail {
+	for _, l := range logLines(r.Tail) {
 		b.WriteString("  " + l + "\n")
 	}
 	b.WriteString("reproduce: " + r.Reproduce())

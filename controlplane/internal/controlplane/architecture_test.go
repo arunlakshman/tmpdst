@@ -268,7 +268,6 @@ func TestImportRulesCanFail(t *testing.T) {
 		{"(c) spec imports the engine", with(real, spec, cp+"metadb/engine"), spec, cp + "metadb/engine"},
 		{"(d) the server imports spec", with(real, cp+"server", spec), cp + "server", spec},
 		{"(d) the binary imports testinfra", with(real, "cmd/mdscontrolplane", infra), "cmd/mdscontrolplane", infra},
-		{"(d) a system package imports testinfra", with(real, "internal/system/simadapter", infra), "internal/system/simadapter", infra},
 		{"(d) the simulator imports testinfra", with(real, "internal/verify/simulator", infra), "internal/verify/simulator", infra},
 		{"(d) the conformance suite imports testinfra", with(real, "test/conformance", infra), "test/conformance", infra},
 		{"(d) runtime imports spec", with(real, rt, spec), rt, spec},

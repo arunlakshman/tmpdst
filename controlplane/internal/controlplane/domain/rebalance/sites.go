@@ -30,13 +30,6 @@ var (
 // lateMax is the most a SiteTimerLate delay adds.
 const lateMax = 50 * machine.Millisecond
 
-// SiteNames returns the names of all buggify sites of the machine, in order.
-func SiteNames() []string {
-	return []string{
-		SiteTimerLate.Name(), SiteStaleTimer.Name(), SiteDuplicateReply.Name(), SiteLateDrain.Name(), SiteLoadRetry.Name(),
-	}
-}
-
 // maybe reports whether site fires now. The env of production never fires a site.
 func (m *Machine) maybe(site fault.NamedSite) bool {
 	return m.env.Maybe(site)

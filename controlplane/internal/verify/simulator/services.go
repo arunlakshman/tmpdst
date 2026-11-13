@@ -10,10 +10,9 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/check"
-	"github.com/manifesterio/mds/dst/eng"
+	"github.com/manifesterio/mds/dst/kernel"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/rng"
-	"github.com/manifesterio/mds/dst/sched"
 )
 
 // Bug names one planted fault. The tests use it to prove that the simulator
@@ -109,37 +108,43 @@ func (st *storage) decide(r *rng.Rand, call runtime.IOCall) callMode {
 	return callOK
 }
 
-// storage is a dst engine (eng.Engine). A process hands it an IOCall as an
-// outbound value. The call reaches the storage after a delay, takes effect at
-// one instant, and the reply goes back to the caller with another delay.
-var _ eng.Engine = (*storage)(nil)
+// storage is a kernel service. A node hands it an IOCall in its route function.
+// The call reaches the storage after a delay, takes effect at one instant, and
+// the reply goes back to the caller with another delay.
+var _ kernel.Service[runtime.IOCall, runtime.EventData] = (*storage)(nil)
 
-// ID implements eng.Engine.
-func (st *storage) ID() eng.ID { return "storage" }
+// Name implements kernel.Service.
+func (st *storage) Name() string { return "storage" }
 
-// StateHash implements eng.Engine. The oracle reads the history, not the hash.
+// StateHash implements kernel.Service. The oracle reads the history, not the hash.
 func (st *storage) StateHash() uint64 { return 0 }
 
-// Handle implements eng.Engine: it takes an IOCall and queues its effect.
-func (st *storage) Handle(cx eng.Context, act any) error {
-	call, ok := act.(runtime.IOCall)
-	if !ok {
-		return eng.ErrNotMine
-	}
-	cx.Self(sched.TimeNs(st.netDelay(cx.Rand())), call)
-	return nil
+// Handle implements kernel.Service: it queues the arrival of the call at the
+// storage after the network delay. The faults and the effect are drawn when the
+// call arrives, as the delay of the way back is.
+func (st *storage) Handle(cx *kernel.ServiceContext[runtime.EventData], from kernel.Ref[runtime.EventData], call runtime.IOCall) {
+	at := cx.Now() + kernel.Time(st.netDelay(cx.Rand()))
+	cx.Later(at, kernel.NoLane, func(cx *kernel.ServiceContext[runtime.EventData]) { st.arrive(cx, from, call) })
 }
 
-// OnSelf implements eng.Engine: the call arrives at the storage.
-func (st *storage) OnSelf(cx eng.Context, body any) {
-	res, back := st.execute(cx, body.(runtime.IOCall))
-	cx.Deliver(cx.From(), sched.TimeNs(back), res)
+// OnCrash implements kernel.Service. A call on the wire still lands after its
+// caller died; the reply to a dead incarnation is dropped by the kernel.
+func (st *storage) OnCrash(*kernel.ServiceContext[runtime.EventData], machine.NodeInstance) {}
+
+// EnterRecovery implements kernel.Service. The storage reads the quiet flag of the run.
+func (st *storage) EnterRecovery() {}
+
+// arrive is the call arriving at the storage: it takes effect (or not) and the
+// reply is queued for the caller.
+func (st *storage) arrive(cx *kernel.ServiceContext[runtime.EventData], from kernel.Ref[runtime.EventData], call runtime.IOCall) {
+	res, back := st.execute(cx, from, call)
+	cx.Deliver(from, cx.Now()+kernel.Time(back), kernel.NoLane, res)
 }
 
 // execute takes the effect of call (or not) and returns the reply with the
 // delay after which it arrives.
-func (st *storage) execute(cx eng.Context, call runtime.IOCall) (runtime.IOResult, machine.Duration) {
-	n := st.s.nodeOf(cx.From())
+func (st *storage) execute(cx *kernel.ServiceContext[runtime.EventData], from kernel.Ref[runtime.EventData], call runtime.IOCall) (runtime.IOResult, machine.Duration) {
+	n := st.s.byName[from.Instance().Node]
 	timeoutReply := func() (runtime.IOResult, machine.Duration) {
 		out := runtime.NotApplied
 		if isWrite(call) {

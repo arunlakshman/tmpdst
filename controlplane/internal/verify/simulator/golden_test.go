@@ -10,20 +10,20 @@ import (
 // goldenHashes pins named scenario/seed traces. An accidental determinism
 // change fails this test in review; bump a pin only after intentional review.
 var goldenHashes = map[string]uint64{
-	"basic/17": 0xb8160450304fcc49,
-	"chaos/42": 0xfe0e8c6763239d00,
+	"basic/17": 0x337ae38013d6ceff,
+	"chaos/42": 0x7d8e4e6f2cc72b2f,
 }
 
-// goldenWithoutGroups are the pins of the same seeds from before the consumer
-// groups ran in the simulator (T6.5). With the rebalance machines and the
-// consumers left out, a run is the old run step for step, so these do not move.
+// goldenWithoutGroups are the pins of the same seeds with the rebalance machines
+// and the consumers left out (the run of before the consumer groups were added,
+// T6.5). They moved once, with the others, when the host code moved to the dst
+// kernel (T1.11c).
 var goldenWithoutGroups = map[string]uint64{
-	"basic/17": 0x08bfa86385d8e8ae,
-	"chaos/42": 0x45d210abda0e2bed,
+	"basic/17": 0x798ef51af00c8c5f,
+	"chaos/42": 0xef9a9a341d46a6ca,
 }
 
-// TestGoldenWithoutGroups shows that the consumer groups are the only change
-// to the trace: with them left out, the old hashes come back.
+// TestGoldenWithoutGroups pins the run with the consumer groups left out.
 func TestGoldenWithoutGroups(t *testing.T) {
 	for _, c := range []struct {
 		scenario string

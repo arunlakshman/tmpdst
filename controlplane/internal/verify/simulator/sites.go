@@ -1,7 +1,6 @@
 package simulator
 
 import (
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/machine"
@@ -33,7 +32,7 @@ func (st *storage) slowAnswer(r *rng.Rand, call runtime.IOCall) machine.Duration
 	if isLogCall(call) {
 		site = SiteLogSlowAnswer
 	}
-	if !st.s.env.inj.Maybe(fault.Site(site.Name())) {
+	if !st.s.env.Maybe(site) {
 		return 0
 	}
 	return machine.Duration(r.Between(int64(slowMin), int64(slowMax)))
@@ -42,7 +41,7 @@ func (st *storage) slowAnswer(r *rng.Rand, call runtime.IOCall) machine.Duration
 // shortPage may cut a page of log entries to a shorter one that still has the
 // first entry. The reader asks again from where the page ended.
 func (st *storage) shortPage(ents []runtime.LogEntry) []runtime.LogEntry {
-	if len(ents) < 2 || !st.s.env.inj.Maybe(fault.Site(SiteLogShortPage.Name())) {
+	if len(ents) < 2 || !st.s.env.Maybe(SiteLogShortPage) {
 		return ents
 	}
 	return ents[:1+st.s.rand.Intn(len(ents)-1)]
@@ -54,11 +53,4 @@ func isLogCall(call runtime.IOCall) bool {
 		return true
 	}
 	return false
-}
-
-// SiteNames returns the names of all buggify sites that a run can reach, in
-// order: the sites of the simulator, then the sites of the rebalance machine
-// (domain/rebalance sites.go), which gets the fault injector of the run.
-func SiteNames() []string {
-	return append([]string{SiteLogSlowAnswer.Name(), SiteLogShortPage.Name(), SiteObjectsSlowAnswer.Name()}, rebalance.SiteNames()...)
 }

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/mutant"
 )
 
@@ -81,7 +82,7 @@ func TestSitesFire(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range SiteNames() {
+	for _, name := range fault.Sites() {
 		if fired[name] == 0 {
 			t.Errorf("site %q never fired", name)
 		}
@@ -161,6 +162,21 @@ func TestCleanRunHasNoFalseAlarm(t *testing.T) {
 		}
 		return false
 	})
+}
+
+// TestCachedStateHashesAreRight: the kernel keeps the state hash of a node until
+// it calls the node again. With verifyHashes it recomputes every hash at every
+// step, and a hash that changed without a call fails the seed. Host code that
+// changes a machine outside a Step would show here.
+func TestCachedStateHashesAreRight(t *testing.T) {
+	for _, sc := range ScenarioNames() {
+		for seed := uint64(1); seed <= uint64(seedCount(2, 5)); seed++ {
+			res := mustRun(t, Config{Scenario: sc, Seed: seed, verifyHashes: true})
+			if !res.OK() {
+				t.Fatal(Report(res))
+			}
+		}
+	}
 }
 
 func TestUnknownScenario(t *testing.T) {

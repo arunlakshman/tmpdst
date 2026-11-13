@@ -4,10 +4,10 @@ Status: design note for phase P6 (task T6.1), revised to the user's decisions. T
 
 ## 1. Purpose and scope
 
-`domain/rebalance` replaced the old coordinator in `groups/` (deleted in T6.6). It is a `sim.Process`-shaped machine,
-`Step(cx, input) -> outputs`, with no locks, goroutines, channels or clock; time and randomness come
-from `cx`. It runs in production (a second `live.Run`) and in the simulator (a second dst process per
-node). The independent model is `spec/rebalance.go` (section 12).
+`domain/rebalance` replaced the old coordinator in `groups/` (deleted in T6.6). It is a `machine.Machine[Input, Output]`,
+`Step(now, input) -> outputs`, with no locks, goroutines, channels or clock; time comes with each
+`Step` and randomness from its `machine.Env`. It runs in production (a second `live.Run`) and in the
+simulator (a second `dst/kernel` node per node). The independent model is `spec/rebalance.go` (section 12).
 
 Principle: do what the open-source Apache Kafka classic group coordinator does (`GroupMetadataManager`,
 `ClassicGroup`, `ClassicGroupMember` on trunk). Classic protocol only: no static membership (the
@@ -227,9 +227,10 @@ Production (`replica` and `live` do not change):
   ends it delivers `CallAbandoned` and answers ErrTimeout with MaybeApplied, as today.
 - OffsetFetch: the handler answers ErrUnavailable when the role bit is off, else does a LocalRead.
 
-Simulator: each node gets a second dst process that crashes and restarts with the replica. `simNode`
-sends `RoleChanged` after each replica step; a small wrapper turns submits into sends to the replica
-and routes replies with `To: rebalance` back.
+Simulator: each node gets a second kernel node that crashes and restarts with the replica. `simNode`
+sends `RoleChanged` after each replica step; the route function of the machine (a copy of
+`routeGroups`) turns submits into sends to the replica, and the route function of the replica
+sends replies with `To: rebalance` back.
 
 ## 12. The model
 

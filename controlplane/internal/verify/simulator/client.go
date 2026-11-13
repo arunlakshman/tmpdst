@@ -62,7 +62,7 @@ func (p *clientPool) add(name string) *client {
 func (p *clientPool) start() {
 	for _, c := range p.all {
 		d := machine.Duration(p.s.rand.Between(int64(20*machine.Millisecond), int64(200*machine.Millisecond)))
-		p.s.after(d, "client-start", c.issue)
+		p.s.after(d, c.issue)
 	}
 }
 
@@ -115,7 +115,7 @@ func (p *clientPool) reply(n *simNode, a runtime.ControlPlaneReply) {
 		return
 	}
 	prefix := n.replica().Applied()
-	p.s.after(p.s.store.netDelay(p.s.rand), "client-reply", func() { c.receive(a.Done, prefix) })
+	p.s.after(p.s.store.netDelay(p.s.rand), func() { c.receive(a.Done, prefix) })
 }
 
 // issue starts the next random operation, unless the quiet tail has started.
@@ -129,7 +129,7 @@ func (c *client) issue() {
 	op, write := c.pool.w.next(nowMs)
 	c.begin(&opState{op: op, write: write, node: -1, then: func() {
 		think := machine.Duration(s.rand.Between(int64(10*machine.Millisecond), int64(120*machine.Millisecond)))
-		s.after(think, "client-think", c.issue)
+		s.after(think, c.issue)
 	}})
 }
 
@@ -153,8 +153,8 @@ func (c *client) attempt() {
 	op.snap = p.s.oracle.snapshotFor(op.op)
 	node := p.s.nodes[op.node]
 	deliver := runtime.ControlPlaneDeliver{From: c.from, Req: req, Op: op.op}
-	p.s.after(p.s.store.netDelay(p.s.rand), "client-request", func() { node.deliverNow(deliver) })
-	p.s.after(clientTimeout, "client-timeout", func() {
+	p.s.after(p.s.store.netDelay(p.s.rand), func() { node.deliverNow(deliver) })
+	p.s.after(clientTimeout, func() {
 		if c.cur == op && op.req == req {
 			c.answered(runtime.ControlPlaneDone{Req: req, Err: runtime.ErrTimeout, Outcome: runtime.MaybeApplied}, 0)
 		}
@@ -198,7 +198,7 @@ func (c *client) answered(d runtime.ControlPlaneDone, prefix runtime.LogPosition
 	}
 	s.stats.Retries++
 	backoff := machine.Duration(op.attempts) * 60 * machine.Millisecond
-	s.after(backoff, "client-retry", func() {
+	s.after(backoff, func() {
 		if c.cur == op {
 			c.attempt()
 		}

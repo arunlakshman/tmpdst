@@ -108,13 +108,13 @@ func (s *sim) gap(mean machine.Duration) machine.Duration {
 // startNemesis begins the node faults that the scenario asks for.
 func (s *sim) startNemesis() {
 	f := s.faults
-	s.every(f.CrashEvery, "nemesis-crash", s.crashOne)
-	s.every(f.PauseEvery, "nemesis-pause", s.pauseOne)
-	s.every(f.PartitionEvery, "nemesis-partition", s.partitionOne)
+	s.every(f.CrashEvery, s.crashOne)
+	s.every(f.PauseEvery, s.pauseOne)
+	s.every(f.PartitionEvery, s.partitionOne)
 }
 
 // every runs fn about every mean, until the quiet tail starts.
-func (s *sim) every(mean machine.Duration, label string, fn func()) {
+func (s *sim) every(mean machine.Duration, fn func()) {
 	if mean <= 0 {
 		return
 	}
@@ -124,9 +124,9 @@ func (s *sim) every(mean machine.Duration, label string, fn func()) {
 			return
 		}
 		fn()
-		s.after(s.gap(mean), label, tick)
+		s.after(s.gap(mean), tick)
 	}
-	s.after(s.gap(mean), label, tick)
+	s.after(s.gap(mean), tick)
 }
 
 // victim picks the node for a fault: the writer if the scenario aims at it and
@@ -134,7 +134,7 @@ func (s *sim) every(mean machine.Duration, label string, fn func()) {
 func (s *sim) victim() *simNode {
 	if s.faults.TargetLeader {
 		for _, n := range s.nodes {
-			if r := n.replica(); n.up && r != nil && r.Epoch() > 0 {
+			if r := n.replica(); r != nil && r.Epoch() > 0 {
 				return n
 			}
 		}
@@ -144,7 +144,7 @@ func (s *sim) victim() *simNode {
 
 func (s *sim) crashOne() {
 	n := s.victim()
-	if !n.up {
+	if !n.up() {
 		return
 	}
 	n.crash("nemesis", machine.Duration(s.rand.Between(int64(200*machine.Millisecond), int64(3*second))))
@@ -152,12 +152,12 @@ func (s *sim) crashOne() {
 
 func (s *sim) pauseOne() {
 	n := s.victim()
-	if !n.up || n.paused {
+	if !n.up() || n.paused {
 		return
 	}
 	n.pause()
 	s.tracef("%s paused", n.name())
-	s.after(machine.Duration(s.rand.Between(int64(100*machine.Millisecond), int64(2*second))), "resume", n.resume)
+	s.after(machine.Duration(s.rand.Between(int64(100*machine.Millisecond), int64(2*second))), n.resume)
 }
 
 func (s *sim) partitionOne() {
@@ -168,5 +168,5 @@ func (s *sim) partitionOne() {
 	n.cut = true
 	s.stats.Partitions++
 	s.tracef("%s is cut off from storage", n.name())
-	s.after(machine.Duration(s.rand.Between(int64(2*second), int64(5*second))), "heal", func() { n.cut = false })
+	s.after(machine.Duration(s.rand.Between(int64(2*second), int64(5*second))), func() { n.cut = false })
 }

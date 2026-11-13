@@ -2104,3 +2104,35 @@ written, and the smallest change that was made.
    scenario ("%7d slots", "%6d acked writes"). `Result.Text` is the own text of a product for one
    seed: a failed seed prints it in place of the standard failure lines, and `Replay` prints it
    after the step lines. cpsim uses it for `simulator.Report`.
+4. **The host code is on the kernel as 14.5 and 14.6 say, with these small choices.**
+   - `World.Start()` is called before the nodes are spawned. `Start` boots every node it finds,
+     and the simulator boots each node at a random time of 0 to 30 ms (a host task), so the nodes
+     must be spawned after `Start`. Section 19 T1.2 note 7 allows a node spawned later: it stays down
+     until `Boot`.
+   - `simNode.route` and `groupHost.route` are copies of `routeReplica` and `routeGroups` of the
+     server. A reply to the rebalance machine goes with `kernel.SendOn` on the lane of the machine.
+     Values from host code (a client call, a `RoleChanged`, `CallAbandoned`) use `kernel.InjectOn`
+     on the same lane. A machine timer is `Router.SetTimer` with the machine's own `TimerFired`, and
+     `SendSelf` is `Router.SendSelf`, as before: only host values use a lane.
+   - The rebalance machine is wrapped by a small `groupMachine` in the simulator. Its `Step` does
+     the host bookkeeping that the old host did around the Step: the role the machine is told
+     (before) and the coverage notes (after). It changes no input and no output.
+   - The storage service draws the network delay in `Handle` and does the rest (fault coins, the
+     effect, the delay back) in a `Later` step when the call arrives, as the old engine did. It is a
+     `kernel.Service[runtime.IOCall, runtime.EventData]`.
+   - Pause is `World.Pause` of the replica and of its machine together; the final-phase freeze of the
+     machine is a `Pause` with no `Resume`. The inputs wait in the inbox of the kernel, in order.
+   - A trip ends the replica with `Router.End(Trip)` after the host crashed the machine; the host
+     boots both again with a host task. `NodeSpec.Restart` is nil.
+   - `simulator.Result` embeds `kernel.Result`; `simulator.Failure`, `Config.Trace`,
+     `SiteNames()` (also `rebalance.SiteNames()`), `env.go`, `controlplane/internal/system/simadapter`
+     and the files `cmd/cpsim/campaign.go` and `report.go` are deleted. `Config.Log` and
+     `Config.HaltOnFirst` replace `Config.Trace`.
+5. **`-seed` in cpsim.** The default is -1 now (the one tool of section 12). `-seed 0` replays seed
+   0; it no longer means "run a campaign". A replay stops at the first failure
+   (`HaltOnFirst`), so the report of a failing seed ends there. The step lines have the form
+   `#step t=Nms text`.
+6. **RE-PIN.** The hashes moved because the kernel folds the trace by its own rule (inputs and
+   outputs, node state, inbox lengths, lane order, the "sim_end" fact) and because the wake tokens
+   are gone. The values are in the message of the RE-PIN commit. Steps per run are about the same
+   as before (300 seeds of basic: 1688636 steps, before 1707413).

@@ -1178,6 +1178,7 @@ T1.14 (plan).
         Name   string
         Detail string
         Run    func(seed uint64, o RunOptions) Result
+        Owns   func(name string) bool // NEW (T1.12c): the catalog names of this scenario; nil: all
     }
 
     type RunOptions struct {
@@ -2283,3 +2284,73 @@ The new tree is `broker/internal/verify/simulation/...`. The old tree
     The old copy (`simulator/fakeservices/fakelogservice`, `LogParams`) is deleted with the old tree in
     T1.12d. The core action `ControlPlaneReply` stays in `core` (production code): the route function of
     `cluster` has a case for it that fails the seed, because no service in this run takes it.
+
+### T1.12c (cmd/mdssimulator on dst/campaign; the broker RE-PIN)
+
+`broker/cmd/mdssimulator` is now a thin main over `dst/campaign`: `main.go` has the config, the
+registry (scenarios `kafka` and `echo`, built with `campaign.FromKernel(kafka.Run(...))`) and
+the `Owns` rules. `merge.go` (the shard merge) and the old report code are deleted: the campaign
+does both. The command imports only the new tree `internal/verify/simulation`. No package of the
+broker links both trees (checked with `go list -test -f '{{.Deps}}'` for every package), so the
+assert catalog has no duplicate name. The old tree still compiles and keeps its own tests until
+T1.12d.
+
+1. **One catalog, two scenarios: `Scenario.Owns`.** The catalog of `dst/assert` is for the whole
+   program. With both scenarios linked in one command, `-scenario kafka` called the echo-only
+   Sometimes and Reachable names "never reached" and the echo-only Always names "never checked"
+   (and the same the other way round). The smallest fix is a field on the scenario:
+   `Owns func(name string) bool`. A campaign keeps, in the expected set, only the declared names
+   that at least one of its scenarios owns (`catalog.forScenarios`, applied in `runCampaign`). A
+   scenario with `Owns == nil` owns every name, so one such scenario in the campaign switches the
+   filter off (cpsim does not set it, so it is unchanged). Sites are not filtered (the broker has
+   none, design 8.2). The filter touches only the expected set: what a seed recorded is always
+   reported. The broker rules are in `cmd/mdssimulator/main.go` and are a rule on the first words
+   of a name: echo owns every name except `kafka: ` and `broker: `; kafka owns every name except
+   `echo: `. The names of the fakes (`obj `, `cp `, `net: `) belong to both. Two tests keep the rules
+   honest: every declared name has an owner, and a seed records only names that its scenario owns.
+   `dst/campaign/owns_test.go` tests the mechanism. `dst` has no product word in it.
+2. **Three declared names that no seed reaches (decision 5: a gap stays a gap).** The old report
+   did not list them, because it listed only the Sometimes names that had been checked and the
+   hand list of Reachable names. The catalog lists every declared name, so they would have shown:
+   - "broker: commit deadline exceeded" is `assert.NewReachableNotExpected` (it is declared in
+     `internal/broker/assertions.go`: one word changed in a declaration, the machine is not
+     changed);
+   - "kafka: a produce still running in Settling is acked" is `assert.NewAlwaysOnFailure`;
+   - "echo: an offset is acked with one payload" is `assert.NewAlwaysOnFailure`. T1.12b did not
+     list this one, because it ran only kafka. It has 0 checks in the old tree too (300 echo seeds).
+   They have 0 checks in 2000 kafka seeds and 300 echo seeds, in both trees. `ISSUES.md` item 7
+   records them. No scenario, fault or check was added.
+3. **Result: the report lists what the old tool listed.** `-scenario kafka` says "all 47
+   expected paths were reached", `-scenario echo` says "all 28". With both trees' check counts side
+   by side (2000 kafka seeds: 90 names; 300 echo seeds: 37 names) the name sets are equal and no
+   name lost its checks.
+4. **The campaign is stricter in one way than the old tool.** The old verdict failed on a Sometimes
+   that was never satisfied and on names of the hand list. The shared rule also fails (from 100
+   seeds, `MinSeedsForCoverage`) on a declared Always with no check. After note 2 no such name
+   exists in the two scenarios, so no seed range changes its verdict. A new Always that is never
+   checked will now fail a campaign of 100 seeds or more; that is the intended use of the catalog.
+5. **Flags and text, against the old tool.** Kept: `-scenario` (default `kafka`), `-seeds`
+   (default 100), `-start` (also `-first`), `-seed` (default -1), `-v`, `-j`. New from the shared
+   tool: `MDS_SEEDS`, `MDS_SEED`, `MDS_CAMPAIGN` (the old command had none; they were in the
+   speccheck tests only), `-campaign`, `-check-every` (default 10, as the old
+   `CheckDeterminism`), `-report`, `-json`, `-until-stable`. The `-v` line is
+   `kafka seed N: steps= rand= hash= failures=` (the old line had no scenario word and also
+   `crashes= exits=`); crashes and exits are now counters of the scenario in its summary line, which
+   the old command did not print. The failure lines are `FAIL kafka seed N: kind (property)
+   step= at=: detail` plus `repro:` and the last steps; the old `VIOLATED`, `coverage gap` and
+   `NONDETERMINISM` lines are replaced by the report sections (`nondeterminism`, `never reached`,
+   `never checked`), which is the format decided in T1.4 (the cpsim form). The last line of a
+   campaign `N seeds from F: X failing, S steps, T` is replaced by the summary line of the
+   scenario. Replay lines are the same as before (`step time text`); its last line has no crashes,
+   trips and exits. `-scenario kafka-log` gives the general "unknown scenario" error with exit
+   code 2, not the special text. The exit codes are the same (0, 1, 2).
+6. **RE-PIN of the kafka seeds 1..5.** The new tree has its own pins in
+   `simulation/kafka/testdata/golden_hashes.txt` and `TestGoldenTraceHashes` (same shape as the old
+   test, same `-update-golden` flag, taken from `kafka.Run(kafka.Config{Seed: s})`). The helper
+   `golden.Lines` of T1.4 note 7 was not built: the test keeps the small local code of the old one
+   (the dst card does not allow a change in `dst/golden` here). The old file is deleted in T1.12d.
+   The old and new lines are in the message of the RE-PIN commit.
+7. **Makefile.** `make sim` of the broker runs `go test -coverprofile` for the new tree and the old
+   tree, then `sim-campaign` (`mdssimulator -scenario kafka -seeds $(SIM_SEEDS)`, the new tool). The
+   new tree is taken out of `UNIT_PKGS` (`make test`) and runs in `sim`, as the old tree did, so it
+   does not run twice. No step of `build` was dropped.

@@ -90,6 +90,28 @@ func declaredCatalog() catalog {
 	return catalog{asserts: assert.Catalog(), sites: fault.Sites()}
 }
 
+// forScenarios keeps the declared assertions that belong to at least one of
+// the scenarios in names (see Scenario.Owns). A scenario without an Owns
+// function owns every name, so then nothing is left out. The buggify sites are
+// not filtered.
+func (c catalog) forScenarios(reg *Registry, names []string) catalog {
+	owners := make([]func(string) bool, 0, len(names))
+	for _, n := range names {
+		sc, _ := reg.Get(n)
+		if sc.Owns == nil {
+			return c
+		}
+		owners = append(owners, sc.Owns)
+	}
+	out := catalog{sites: c.sites}
+	for _, a := range c.asserts {
+		if slices.ContainsFunc(owners, func(owns func(string) bool) bool { return owns(a.Name) }) {
+			out.asserts = append(out.asserts, a)
+		}
+	}
+	return out
+}
+
 // campaignData is what buildReport folds.
 type campaignData struct {
 	first       uint64

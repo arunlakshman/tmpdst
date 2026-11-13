@@ -53,6 +53,7 @@ func runCampaign(reg *Registry, o Options, cat catalog, now func() time.Time) (R
 	if err != nil {
 		return Report{}, err
 	}
+	cat = cat.forScenarios(reg, names)
 	c := &runner{reg: reg, o: o, names: names, cat: cat, now: now}
 	var st state
 	hitLimit := c.loop(&st)

@@ -12,7 +12,7 @@ var (
 	ackedOffsetCommitted             = assert.NewAlways("echo: acked offset is committed")                        //determinismcheck:ok catalog handle, set once at start
 	ackedSegmentExistsObjectStore    = assert.NewAlways("echo: acked segment exists in the object store")         //determinismcheck:ok catalog handle, set once at start
 	ackedSegmentHoldsAckedPayload    = assert.NewAlways("echo: acked segment holds the acked payload")            //determinismcheck:ok catalog handle, set once at start
-	offsetAckedOnePayload            = assert.NewAlways("echo: an offset is acked with one payload")              //determinismcheck:ok catalog handle, set once at start
+	offsetAckedOnePayload            = assert.NewAlwaysOnFailure("echo: an offset is acked with one payload")     //determinismcheck:ok catalog handle, set once at start
 	commitAssignsExactlyOneBatch     = assert.NewAlways("echo: commit assigns exactly the one batch")             //determinismcheck:ok catalog handle, set once at start
 	commitKeyReusedDifferentRequest  = assert.NewUnreachable("echo: commit key reused with a different request")  //determinismcheck:ok catalog handle, set once at start
 	commitRetriedAfterMaybeApplied   = assert.NewReachable("echo: commit retried after MaybeApplied")             //determinismcheck:ok catalog handle, set once at start

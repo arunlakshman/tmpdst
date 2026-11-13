@@ -34,8 +34,8 @@ after the other modules and writes `bin/mdsbroker`. The control plane proto is i
 | vet | `go vet ./...` |
 | lint | `golangci-lint run ./...` (see `.golangci.yml`) |
 | compile | `go build ./...` |
-| test | unit packages (not `internal/verify/simulator`, not `test/integrationtest`) |
-| sim | `go test ./internal/verify/simulator/...` |
+| test | unit packages (not the simulation trees `internal/verify/simulation` and `internal/verify/simulator`, not `test/integrationtest`) |
+| sim | `go test ./internal/verify/simulation/... ./internal/verify/simulator/...`, then `go run ./cmd/mdssimulator -scenario kafka -seeds 300` |
 | it-hermetic | `go test ./test/integrationtest/` (in-process memstore) |
 | risk | change risk score <= 20 (`docs/risk-gate.md`) |
 

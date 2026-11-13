@@ -9,7 +9,7 @@ import "github.com/manifesterio/mds/dst/assert"
 var (
 	admittedBatchCannotEncode          = assert.NewUnreachable("broker: admitted batches cannot be encoded")              //determinismcheck:ok catalog handle, set once at start
 	commitAnswersEveryBatchOrder       = assert.NewAlwaysOrUnreachable("broker: commit answers every batch in order")     //determinismcheck:ok catalog handle, set once at start
-	commitDeadlineExceeded             = assert.NewReachable("broker: commit deadline exceeded")                          //determinismcheck:ok catalog handle, set once at start
+	commitDeadlineExceeded             = assert.NewReachableNotExpected("broker: commit deadline exceeded")               //determinismcheck:ok catalog handle, set once at start
 	commitKeyReusedDifferentRequest    = assert.NewUnreachable("broker: commit key reused with a different request")      //determinismcheck:ok catalog handle, set once at start
 	commitRetried                      = assert.NewReachable("broker: commit retried")                                    //determinismcheck:ok catalog handle, set once at start
 	commitSucceededAfterOldRetryBudget = assert.NewReachable("broker: commit succeeded after the old retry budget")       //determinismcheck:ok catalog handle, set once at start

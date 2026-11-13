@@ -22,6 +22,15 @@ type Scenario struct {
 	Name   string
 	Detail string // one line for the usage text
 	Run    func(seed uint64, o RunOptions) Result
+
+	// Owns, when it is set, says which names of the assertion catalog belong
+	// to this scenario. The catalog is the one of the whole program, so when
+	// two scenarios are linked into one command, each would otherwise be
+	// blamed for the names of the other ("never reached", "never checked").
+	// A campaign looks for the declared names that belong to the scenarios it
+	// runs. When it is nil, the scenario owns every name (the usual case with
+	// one scenario, or scenarios that share all their names).
+	Owns func(name string) bool
 }
 
 // Registry holds the scenarios of one product, in the order they were added.

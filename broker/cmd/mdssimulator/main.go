@@ -1,184 +1,100 @@
 // Command mdssimulator runs a scenario campaign (the Kafka broker by default, or
-// the echo smoke test) through the deterministic simulator. It is not a
-// deterministic package: it reads flags and the clock, and it shards a
-// campaign's seeds over goroutines (seeds are independent; see merge.go).
+// the echo smoke test) through the deterministic simulator. It is a thin main
+// over dst/campaign: the flags, the environment variables (MDS_SEEDS, MDS_SEED,
+// MDS_CAMPAIGN), the report and the determinism check come from there. It reads
+// flags and the clock and runs seeds on many goroutines, so it is not a
+// deterministic package.
+//
+//	go run ./cmd/mdssimulator -scenario kafka -seeds 300   # a campaign
+//	go run ./cmd/mdssimulator -scenario echo -seed 17      # one seed, with a step log
 package main
 
 import (
-	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
-	"runtime"
-	"time"
+	"strings"
 
-	"github.com/manifesterio/mds/broker/internal/verify/simulator"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/echo"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
+	"github.com/manifesterio/mds/broker/internal/verify/simulation/echo"
+	"github.com/manifesterio/mds/broker/internal/verify/simulation/kafka"
+	"github.com/manifesterio/mds/dst/campaign"
+	"github.com/manifesterio/mds/dst/kernel"
 )
-
-// minimumCoverage is the campaign size from which a never-satisfied Sometimes
-// property counts as a failure (smaller runs cannot be expected to reach it).
-const minimumCoverage = 100
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
-// options are the parsed command-line flags.
-type options struct {
-	seeds    int
-	start    uint64
-	one      int64
-	verbose  bool
-	scenario string
-	jobs     int
-}
-
-func parseOptions(args []string, stderr io.Writer) (options, error) {
-	var o options
-	fs := flag.NewFlagSet("mdssimulator", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.IntVar(&o.seeds, "seeds", 100, "number of seeds to run")
-	fs.Uint64Var(&o.start, "start", 1, "first seed")
-	fs.Int64Var(&o.one, "seed", -1, "replay this one seed with its log printed")
-	fs.BoolVar(&o.verbose, "v", false, "print one line per seed")
-	fs.StringVar(&o.scenario, "scenario", "kafka", "scenario: kafka or echo (kafka-log deferred: control plane extracted to mds-controlplane)")
-	fs.IntVar(&o.jobs, "j", runtime.NumCPU(), "seed shards to run in parallel")
-	err := fs.Parse(args)
-	return o, err
-}
-
-// scenarioConfig maps a -scenario name to its config builder.
-func scenarioConfig(name string) (func([]uint64) simulator.Config, bool) {
-	switch name {
-	case "kafka":
-		return kafka.Config, true
-	case "kafka-log", "kafka-log-freeze":
-		return nil, false
-	case "echo":
-		return echo.Config, true
-	}
-	return nil, false
-}
-
 func run(args []string, stdout, stderr io.Writer) int {
-	o, err := parseOptions(args, stderr)
-	if err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
-	}
-	config, ok := scenarioConfig(o.scenario)
-	if !ok {
-		if o.scenario == "kafka-log" || o.scenario == "kafka-log-freeze" {
-			_, _ = fmt.Fprintf(stderr, "mdssimulator: scenario %q needs external mds-controlplane (kafka-log sim deferred; see docs/cp-extraction.md)\n", o.scenario)
-			return 2
-		}
-		_, _ = fmt.Fprintf(stderr, "mdssimulator: unknown scenario %q (want kafka or echo)\n", o.scenario)
-		return 2
-	}
-	if o.one >= 0 {
-		return rerunSeed(stdout, stderr, config, uint64(o.one))
-	}
-	list := make([]uint64, o.seeds)
-	for i := range list {
-		list[i] = o.start + uint64(i)
-	}
-	t0 := time.Now()
-	rep, err := runInParts(config, list, o.jobs)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, "mdssimulator:", err)
-		return 2
-	}
-	bad, steps := printSeeds(stdout, rep, o)
-	printCampaign(stdout, rep, o.scenario)
-	_, _ = fmt.Fprintf(stdout, "%d seeds from %d: %d failing, %d steps, %v\n", len(rep.Seeds), o.start, bad, steps, time.Since(t0).Round(time.Millisecond))
-	if failed(rep, bad) {
-		return 1
-	}
-	return 0
+	return campaign.Main(config(), registry(), args, stdout, stderr)
 }
 
-// failed is the campaign verdict: any failing seed, violated Always property,
-// nondeterminism, or (in a big enough campaign) a coverage gap.
-func failed(rep simulator.Report, bad int) bool {
-	return bad > 0 || len(rep.Always) > 0 || len(rep.Nondeterminism) > 0 || (len(rep.Coverage) > 0 && len(rep.Seeds) >= minimumCoverage)
-}
+// checkEvery is the determinism check: every Nth seed runs twice, and the two
+// runs must give the same hash, steps and random calls.
+const checkEvery = 10
 
-// printSeeds prints the per-seed lines and failures; it returns the number of
-// failing seeds and the total steps.
-func printSeeds(w io.Writer, rep simulator.Report, o options) (int, uint64) {
-	var bad int
-	var steps uint64
-	for _, s := range rep.Seeds {
-		steps += s.Steps
-		if o.verbose {
-			_, _ = fmt.Fprintf(w, "seed %d: steps=%d rand=%d hash=%016x crashes=%d exits=%d failures=%d\n",
-				s.Seed, s.Steps, s.RandCalls, s.TraceHash, s.Crashes, s.Exits, len(s.Failures))
-		}
-		if len(s.Failures) == 0 {
-			continue
-		}
-		bad++
-		for _, f := range s.Failures {
-			_, _ = fmt.Fprintf(w, "FAIL seed %d: %s\n", s.Seed, failureText(f))
-		}
-		_, _ = fmt.Fprintf(w, "  repro: go run ./cmd/mdssimulator -scenario %s -seed %d\n", o.scenario, s.Seed)
-	}
-	return bad, steps
-}
+// minimumCoverage is the campaign size from which a path that no seed reached
+// counts as a failure (a smaller campaign cannot be expected to reach it).
+const minimumCoverage = 100
 
-// printCampaign prints the campaign-wide findings.
-func printCampaign(w io.Writer, rep simulator.Report, scenario string) {
-	for _, a := range rep.Always {
-		_, _ = fmt.Fprintf(w, "VIOLATED %q first at seed %d step %d (%d seeds)\n", a.Prop, a.FirstSeed, a.FirstStep, len(a.Seeds))
-	}
-	for _, a := range rep.Coverage {
-		_, _ = fmt.Fprintf(w, "coverage gap: %q (%s) never satisfied\n", a.Prop, a.Kind)
-	}
-	for _, s := range rep.Nondeterminism {
-		_, _ = fmt.Fprintf(w, "NONDETERMINISM seed %d: two runs diverged\n  repro: go run ./cmd/mdssimulator -scenario %s -seed %d\n", s, scenario, s)
+// config is what mdssimulator gives the standard main. The default scenario is
+// kafka.
+func config() campaign.Config {
+	return campaign.Config{
+		Tool:      "mdssimulator",
+		EnvPrefix: "MDS",
+		Defaults: campaign.Options{
+			Scenarios:           []string{"kafka"},
+			CheckEvery:          checkEvery,
+			MinSeedsForCoverage: minimumCoverage,
+		},
 	}
 }
 
-func rerunSeed(stdout, stderr io.Writer, config func([]uint64) simulator.Config, seed uint64) int {
-	res, err := simulator.NewRunner().Replay(config([]uint64{seed}), seed)
-	if err != nil {
-		_, _ = fmt.Fprintln(stderr, "mdssimulator:", err)
-		return 2
-	}
-	for _, l := range res.Log {
-		_, _ = fmt.Fprintf(stdout, "%6d %12v  %s\n", l.Step, time.Duration(l.At), l.Text)
-	}
-	_, _ = fmt.Fprintf(stdout, "seed %d: steps=%d rand=%d hash=%016x crashes=%d trips=%d exits=%d\n",
-		seed, res.Steps, res.RandCalls, res.TraceHash, res.Crashes, res.Trips, res.Exits)
-	for _, f := range res.Failures {
-		_, _ = fmt.Fprintf(stdout, "FAIL %s\n", failureText(f))
-	}
-	if len(res.Failures) > 0 {
-		return 1
-	}
-	return 0
+// registry has the two scenarios: kafka (the broker under a Kafka workload) and
+// echo (a small smoke test).
+func registry() *campaign.Registry {
+	var reg campaign.Registry
+	add(&reg, "kafka", "the broker under a Kafka workload", ownsKafka,
+		func(seed uint64, o campaign.RunOptions) kernel.Result {
+			return kafka.Run(kafka.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst})
+		})
+	add(&reg, "echo", "the echo smoke test", ownsEcho,
+		func(seed uint64, o campaign.RunOptions) kernel.Result {
+			return echo.Run(echo.Config{Seed: seed, Log: o.Log, HaltOnFirst: o.HaltOnFirst})
+		})
+	return &reg
 }
 
-var failureKindNames = map[simulator.FailKind]string{
-	simulator.FailViolation:     "violation",
-	simulator.FailUndecided:     "inconclusive",
-	simulator.FailProtocol:      "protocol",
-	simulator.FailPanic:         "panic",
-	simulator.FailMaxSteps:      "max_steps",
-	simulator.FailNotRepeatable: "nondeterminism",
+// add registers a scenario that runs one seed with run.
+func add(reg *campaign.Registry, name, detail string, owns func(string) bool, run func(uint64, campaign.RunOptions) kernel.Result) {
+	reg.Add(campaign.Scenario{
+		Name:   name,
+		Detail: detail,
+		Owns:   owns,
+		Run: func(seed uint64, o campaign.RunOptions) campaign.Result {
+			return fromKernel(name, run(seed, o))
+		},
+	})
 }
 
-func kind(k simulator.FailKind) string {
-	if n, ok := failureKindNames[k]; ok {
-		return n
-	}
-	return fmt.Sprintf("kind(%d)", k)
+// fromKernel turns the result of one seed into a campaign result. It adds the
+// replay command and the two counters (crashes and exits) that the old tool
+// printed for each seed.
+func fromKernel(scenario string, r kernel.Result) campaign.Result {
+	out := campaign.FromKernel(r, fmt.Sprintf("go run ./cmd/mdssimulator -scenario %s -seed %d", scenario, r.Seed))
+	out.Counters["crashes"] = uint64(r.Crashes)
+	out.Counters["exits"] = uint64(r.Exits)
+	return out
 }
 
-// failureText is the part of a FAIL line after the word FAIL (and after the seed, if printed).
-func failureText(f simulator.Failure) string {
-	return fmt.Sprintf("%s (%s) step=%d at=%v: %s", kind(f.Kind), f.Prop, f.Step, time.Duration(f.At), f.Msg)
+// The assertion catalog is for the whole program, and the two scenarios are
+// linked into it together. Without a rule, a campaign of one scenario would
+// call the names of the other "never reached" or "never checked". A name that
+// starts with "echo: " belongs to echo; a name that starts with "kafka: " or
+// "broker: " belongs to kafka. The other names are the fake services (object
+// store, control plane, network), which both scenarios use.
+// TestEveryDeclaredNameHasAnOwner keeps these rules honest.
+func ownsKafka(name string) bool { return !strings.HasPrefix(name, "echo: ") }
+
+func ownsEcho(name string) bool {
+	return !strings.HasPrefix(name, "kafka: ") && !strings.HasPrefix(name, "broker: ")
 }

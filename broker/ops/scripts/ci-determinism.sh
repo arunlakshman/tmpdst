@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CI gate for the deterministic packages (internal/core, internal/verify/simulation (the tree on dst/kernel), internal/wire/segmentformat, the broker spec in
+# CI gate for the deterministic packages (internal/core, internal/verify/simulator (the tree on dst/kernel), internal/wire/segmentformat, the broker spec in
 # spec, internal/verify/speccheck (the spec bridge and the checker) except its system adapters in internal/verify/speccheck/specsystem,
 # plus internal/wire/kafkawire and internal/broker).
 # Control-plane replica moved to mds-controlplane; see docs/cp-extraction.md and docs/decisions.md (I, 55, 56).
@@ -7,11 +7,11 @@
 #   2. Every third-party module they depend on has a reviewed audit record
 #      for the exact version in go.mod (so a version bump forces a re-audit).
 #   3. Determinism canary: each seed runs twice and must match, in every
-#      simulator package that implements TestDeterminismCanary (internal/verify/simulation).
+#      simulator package that implements TestDeterminismCanary (internal/verify/simulator).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-pkgs=(./internal/core/... ./internal/verify/simulation/... ./internal/wire/segmentformat/... ./internal/wire/kafkawire ./internal/broker/... ./spec ./internal/verify/speccheck ./internal/verify/speccheck/specbridge ./internal/verify/speccheck/checker)
+pkgs=(./internal/core/... ./internal/verify/simulator/... ./internal/wire/segmentformat/... ./internal/wire/kafkawire ./internal/broker/... ./spec ./internal/verify/speccheck ./internal/verify/speccheck/specbridge ./internal/verify/speccheck/checker)
 
 echo "== determinismcheck"
 go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ops/determinism-allow.txt "${pkgs[@]}"
@@ -62,7 +62,7 @@ if [[ $missing != 0 ]]; then
 fi
 
 echo "== determinism canary"
-for simpkg in ./internal/verify/simulation/...; do
+for simpkg in ./internal/verify/simulator/...; do
   # Capture first: piping into grep -q would SIGPIPE go test under pipefail.
   tests=$(go list "$simpkg" 2>/dev/null | xargs -r go test -list 'TestDeterminismCanary' 2>/dev/null || true)
   if grep -q '^TestDeterminismCanary$' <<<"$tests"; then

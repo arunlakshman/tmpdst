@@ -1,4 +1,4 @@
-# Exact import paths the deterministic packages (internal/core, internal/verify/simulation, internal/broker, internal/wire/kafkawire,
+# Exact import paths the deterministic packages (internal/core, internal/verify/simulator, internal/broker, internal/wire/kafkawire,
 # internal/wire/segmentformat, spec, internal/verify/speccheck) may import.
 # Matching is EXACT. A trailing "/..." also allows every subpackage.
 # Adding a line requires a dependency audit (scripts/audit-dep.sh) and, for a
@@ -34,7 +34,7 @@ github.com/manifesterio/mds/dst/fault
 github.com/manifesterio/mds/dst/machine
 github.com/manifesterio/mds/dst/trace
 # The dst v2 kernel and the seeded random stream. The new simulation tree
-# (internal/verify/simulation) runs on the kernel. Both are first-party and have their own determinism gate in dst.
+# (internal/verify/simulator) runs on the kernel. Both are first-party and have their own determinism gate in dst.
 github.com/manifesterio/mds/dst/kernel
 github.com/manifesterio/mds/dst/rng
 

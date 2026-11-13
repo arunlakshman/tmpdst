@@ -15,8 +15,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/manifesterio/mds/broker/internal/verify/simulation/echo"
-	"github.com/manifesterio/mds/broker/internal/verify/simulation/kafka"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/echo"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
 	"github.com/manifesterio/mds/dst/campaign"
 	"github.com/manifesterio/mds/dst/kernel"
 )

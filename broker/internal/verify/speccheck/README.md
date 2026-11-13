@@ -65,16 +65,16 @@ The rules of each spec are in the comment above its type. Read that first.
 | C1 | broker answers: produce, fetch, ListOffsets | `spec.Broker` | broker is real; storage and control plane are specs |
 | C2 | simulated object store and control plane, faults off | `objectstore.Spec`, `spec.ControlPlane` | simulated |
 | C3 | S3 adapter (control-plane stores: `controlplane/test/conformance`) | `objectstore.Spec`, `spec.ControlPlane` | real |
-| C4 | the Kafka oracle in `internal/verify/simulation/kafka` | `spec.Broker`, `spec.ControlPlane` | simulation side |
+| C4 | the Kafka oracle in `internal/verify/simulator/kafka` | `spec.Broker`, `spec.ControlPlane` | simulation side |
 
 ## Run the tests
 
 ```bash
 go test ./spec ./internal/verify/speccheck/... -count=1     # broker spec and framework
 (cd ../controlplane && go test ./spec -count=1)             # control plane spec
-go test ./internal/broker ./internal/verify/simulation/fakeservices \
+go test ./internal/broker ./internal/verify/simulator/fakeservices \
         ./internal/verify/speccheck/s3conform -count=1   # C1, C2, C3
-go test ./internal/verify/simulation/kafka -run C4 -count=1      # C4
+go test ./internal/verify/simulator/kafka -run C4 -count=1      # C4
 ```
 
 The S3 test in C3 needs `MDS_S3_ENDPOINT`; without it, it skips.

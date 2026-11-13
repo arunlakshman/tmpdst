@@ -7,52 +7,48 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakecontrolplane"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakenetwork"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakeobjectstore"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/servicetest"
+	"github.com/manifesterio/mds/dst/check/faulty"
 	"github.com/manifesterio/mds/dst/kernel"
 )
 
-// Parity with the old fakes (plan task T1.12a).
+// Parity of Faulty with the hand-written fakes (plan tasks T1.12a and T1.15).
 //
 // Each case below is a scripted run (servicetest.ObjectCases and the like). The same
-// case was run against the OLD fake (driven by the paritygen generator, deleted in T1.12d,
-// through a small adapter) and its
-// transcript was saved in ../../testdata/parity_*.txt. A transcript holds the number of
-// steps and of random draws, the counters, the assertion coverage, samples of the
-// state hash, the faults and a digest of every reply. Here the NEW fake runs the
-// same case, and its transcript must be equal. So with one seed and one request
-// sequence, the new fake gives the same replies, the same faults and the same
-// number of random draws, in the same order.
+// case was run against the hand-written fakes (driven by the paritygen generator,
+// deleted in T1.12d, through a small adapter) and its transcript was saved in
+// ../../testdata/parity_*.txt. A transcript holds the number of steps and of random
+// draws, the counters, the assertion coverage, samples of the state hash, the faults
+// and a digest of every reply. In T1.15 the hand-written object store and control
+// plane were replaced by dst/check/faulty around their specs. The files were NOT
+// changed: Faulty runs the same case and its transcript must still be equal. So
+// with one seed and one request sequence, Faulty gives the same replies, the same
+// faults and the same number of random draws, in the same order, as the fakes did.
+// The network (fakenetwork) is still hand-written and is compared in the same way.
 //
 // If a change of the kernel (queue, ties) moves these files, the old fakes can no
-// longer make them again after they are deleted (plan task T1.12d). Then a kernel
-// change that is meant must re-pin them by hand, with a note in the commit.
+// longer make them again. Then a kernel change that is meant must re-pin them by
+// hand, with a note in the commit.
 
 func timing(t servicetest.Timing) kernel.FastWithRareSlow {
 	return kernel.FastWithRareSlow{FastMin: t.FastMin, FastMax: t.FastMax, SlowMin: t.SlowMin, SlowMax: t.SlowMax, SlowProb: t.SlowProb}
 }
 
-func outage(m servicetest.Mix) fakeobjectstore.ServiceOutage {
-	return fakeobjectstore.ServiceOutage{Prob: m.OutageProb, Dur: m.OutageDur}
-}
-
-func cpFaults(m servicetest.Mix) fakecontrolplane.Faults {
-	return fakecontrolplane.Faults{
+// faults turns the plain fault knobs of a case into the faults of Faulty.
+func faults(m servicetest.Mix) faulty.Faults {
+	return faulty.Faults{
 		ApplyLatency: timing(m.Apply), RespondLatency: timing(m.Respond),
 		Unavailable503: m.P503, Timeout: m.Timeout, LostResponse: m.Lost,
-		Outage: outage(m), CallerTimeout: m.CallerTimeout, MaxCommitItems: m.MaxCommitItems,
+		Outage:        faulty.Outage{Prob: m.OutageProb, Dur: m.OutageDur},
+		CallerTimeout: m.CallerTimeout,
 	}
 }
 
-// newObjectStore installs the fake object store in a world for a case.
+// newObjectStore installs the simulated object store in a world for a case.
 func newObjectStore(h *servicetest.Harness, c servicetest.Case) servicetest.Subject {
-	e := fakeobjectstore.New(h.W, fakeobjectstore.Faults{
-		ApplyLatency: timing(c.Mix.Apply), RespondLatency: timing(c.Mix.Respond),
-		Unavailable503: c.Mix.P503, Timeout: c.Mix.Timeout, LostResponse: c.Mix.Lost, GetCorruptProb: c.Mix.Corrupt,
-		Outage: outage(c.Mix), CallerTimeout: c.Mix.CallerTimeout,
-	})
+	e := fakeservices.NewObjectStore(h.W, fakeservices.ObjectStoreFaults{Faults: faults(c.Mix), GetCorruptProb: c.Mix.Corrupt})
 	svc := kernel.AddService[core.ObjectCall, core.EventData](h.W, e)
 	h.Route = func(r *servicetest.Router, out core.Action) {
 		if x, ok := out.(core.ObjectCall); ok {
@@ -63,7 +59,7 @@ func newObjectStore(h *servicetest.Harness, c servicetest.Case) servicetest.Subj
 }
 
 func newControlPlane(h *servicetest.Harness, c servicetest.Case) servicetest.Subject {
-	e := fakecontrolplane.New(h.W, cpFaults(c.Mix))
+	e := fakeservices.NewControlPlane(h.W, fakeservices.ControlPlaneFaults{Faults: faults(c.Mix), MaxCommitItems: c.Mix.MaxCommitItems})
 	svc := kernel.AddService[core.ControlPlaneCall, core.EventData](h.W, e)
 	h.Route = func(r *servicetest.Router, out core.Action) {
 		if x, ok := out.(core.ControlPlaneCall); ok {
@@ -99,7 +95,7 @@ func newNetwork(h *servicetest.Harness, c servicetest.Case) servicetest.Subject 
 	return servicetest.Subject{StateHash: e.StateHash, AddNode: e.AddNode}
 }
 
-// transcripts runs every case against the new fake and returns the transcripts
+// transcripts runs every case against the current service and returns the transcripts
 // by case name.
 func transcripts(t *testing.T, cases []servicetest.Case, install func(*servicetest.Harness, servicetest.Case) servicetest.Subject) map[string]string {
 	t.Helper()
@@ -144,7 +140,7 @@ func checkParity(t *testing.T, file string, cases []servicetest.Case, install fu
 	}
 	for _, c := range cases {
 		if want[c.Name] != got[c.Name] {
-			t.Errorf("case %s differs from the old fake.\n--- old fake\n%s--- new fake\n%s", c.Name, want[c.Name], got[c.Name])
+			t.Errorf("case %s differs from the saved transcript.\n--- saved\n%s--- now\n%s", c.Name, want[c.Name], got[c.Name])
 		}
 	}
 }

@@ -17,6 +17,7 @@ pkgs=(
   ./fault
   ./clock
   ./check
+  ./check/faulty
   ./machine
   ./kernel
 )

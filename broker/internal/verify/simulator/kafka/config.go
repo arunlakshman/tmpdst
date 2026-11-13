@@ -4,7 +4,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakecontrolplane"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/preset"
 	"github.com/manifesterio/mds/dst/kernel"
@@ -56,7 +56,7 @@ func Run(cfg Config) kernel.Result {
 	}
 	p := preset.New()
 	p.Settings.Network.PartialIOMax = 1024
-	p.Settings.ControlPlane.MaxCommitItems = fakecontrolplane.DynamoMaxCommitItems
+	p.Settings.ControlPlane.MaxCommitItems = fakeservices.DynamoMaxCommitItems
 	set := Settings{Settings: p.Settings, Broker: brokerConfig(cfg.Bug)}
 	swarm(rng.New(cfg.Seed).Derive("swarm"), &set)
 	if cfg.Tune != nil {
@@ -126,7 +126,7 @@ func swarmBroker(r *rng.Rand, s *Settings) {
 	bc.MaxBufferedBytes = pick(3<<10, 3<<10, 16<<10, 64<<10, 1<<20)
 	bc.ResumeBufferedBytes = bc.MaxBufferedBytes / 3
 	if r.Chance(0.5) {
-		s.ControlPlane.MaxCommitItems = min(1+bc.MaxSegmentPartitions, fakecontrolplane.DynamoMaxCommitItems)
+		s.ControlPlane.MaxCommitItems = min(1+bc.MaxSegmentPartitions, fakeservices.DynamoMaxCommitItems)
 	}
 	s.Broker = bc
 }

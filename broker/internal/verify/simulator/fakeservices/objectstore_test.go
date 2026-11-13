@@ -1,4 +1,4 @@
-package fakeobjectstore_test
+package fakeservices_test
 
 import (
 	"bytes"
@@ -6,8 +6,9 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakeobjectstore"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/servicetest"
+	"github.com/manifesterio/mds/dst/check/faulty"
 	"github.com/manifesterio/mds/dst/kernel"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
@@ -15,16 +16,16 @@ import (
 
 const ms = machine.Duration(1_000_000)
 
-func base() fakeobjectstore.Faults {
+func objectBase() fakeservices.ObjectStoreFaults {
 	ts := kernel.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
-	return fakeobjectstore.Faults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}
+	return fakeservices.ObjectStoreFaults{Faults: faulty.Faults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}}
 }
 
-// setup makes a world with one caller "a" and the fake object store.
-func setup(t *testing.T, f fakeobjectstore.Faults, seed uint64) (*fakeobjectstore.Engine, *servicetest.Harness) {
+// objectSetup makes a world with one caller "a" and the fake object store.
+func objectSetup(t *testing.T, f fakeservices.ObjectStoreFaults, seed uint64) (*fakeservices.ObjectStore, *servicetest.Harness) {
 	t.Helper()
 	h := servicetest.New(t, seed, "a")
-	e := fakeobjectstore.New(h.W, f)
+	e := fakeservices.NewObjectStore(h.W, f)
 	svc := kernel.AddService[core.ObjectCall, core.EventData](h.W, e)
 	h.Route = func(r *servicetest.Router, out core.Action) {
 		if oc, ok := out.(core.ObjectCall); ok {
@@ -51,8 +52,8 @@ func only[T objectstore.Result](t *testing.T, h *servicetest.Harness) T {
 	return h.Delivered[0].Body.(core.ObjectDone).Result.(T)
 }
 
-func TestNormalPutGet(t *testing.T) {
-	e, h := setup(t, base(), 1)
+func TestObjectStoreNormalPutGet(t *testing.T) {
+	e, h := objectSetup(t, objectBase(), 1)
 	put(h, 1, "k", "hello")
 	h.Run()
 	d := only[objectstore.PutDone](t, h)
@@ -73,10 +74,10 @@ func TestNormalPutGet(t *testing.T) {
 	}
 }
 
-func Test503(t *testing.T) {
-	f := base()
+func TestObjectStoreRefusedAppliesNothing(t *testing.T) {
+	f := objectBase()
 	f.Unavailable503 = 1
-	e, h := setup(t, f, 1)
+	e, h := objectSetup(t, f, 1)
 	put(h, 1, "k", "x")
 	h.Run()
 	d := only[objectstore.PutDone](t, h)
@@ -91,10 +92,10 @@ func Test503(t *testing.T) {
 	}
 }
 
-func TestOutageWindow(t *testing.T) {
-	f := base()
-	f.Outage = fakeobjectstore.ServiceOutage{Prob: 1, Dur: [2]machine.Duration{100 * ms, 200 * ms}}
-	_, h := setup(t, f, 1)
+func TestObjectStoreOutageWindow(t *testing.T) {
+	f := objectBase()
+	f.Outage = faulty.Outage{Prob: 1, Dur: [2]machine.Duration{100 * ms, 200 * ms}}
+	_, h := objectSetup(t, f, 1)
 	put(h, 1, "k", "x")
 	h.RunTo(50 * kernel.Time(ms)) // still inside
 	put(h, 2, "k", "x")
@@ -117,12 +118,12 @@ func TestOutageWindow(t *testing.T) {
 	}
 }
 
-func TestTimeoutAppliesOrNot(t *testing.T) {
-	f := base()
+func TestObjectStoreTimeoutAppliesOrNot(t *testing.T) {
+	f := objectBase()
 	f.Timeout = 1
 	applied, notApplied := 0, 0
 	for seed := uint64(1); seed <= 40; seed++ {
-		e, h := setup(t, f, seed)
+		e, h := objectSetup(t, f, seed)
 		put(h, 1, "k", "x")
 		h.Run()
 		d := only[objectstore.PutDone](t, h)
@@ -142,10 +143,10 @@ func TestTimeoutAppliesOrNot(t *testing.T) {
 	}
 }
 
-func TestLostResponseStillApplies(t *testing.T) {
-	f := base()
+func TestObjectStoreLostResponseStillApplies(t *testing.T) {
+	f := objectBase()
 	f.LostResponse = 1
-	e, h := setup(t, f, 1)
+	e, h := objectSetup(t, f, 1)
 	put(h, 1, "k", "x")
 	h.Run()
 	d := only[objectstore.PutDone](t, h)
@@ -165,8 +166,8 @@ func TestLostResponseStillApplies(t *testing.T) {
 
 // The caller dies after the call was issued: the effect lands, and nothing is
 // delivered to the dead caller.
-func TestLandsAfterCrash(t *testing.T) {
-	e, h := setup(t, base(), 1)
+func TestObjectStoreLandsAfterCrash(t *testing.T) {
+	e, h := objectSetup(t, objectBase(), 1)
 	put(h, 1, "k", "x")
 	h.Step() // the caller issues the call
 	h.Crash("a")
@@ -181,8 +182,8 @@ func TestLandsAfterCrash(t *testing.T) {
 
 // The caller dies between the landing and the response: the effect stands, and
 // the response is not delivered to the dead incarnation, nor to the next one.
-func TestCrashBetweenLandingAndResponse(t *testing.T) {
-	e, h := setup(t, base(), 2)
+func TestObjectStoreCrashBetweenLandingAndResponse(t *testing.T) {
+	e, h := objectSetup(t, objectBase(), 2)
 	put(h, 1, "k", "x")
 	h.Step()
 	for _, ok := e.Object("k"); !ok; _, ok = e.Object("k") {
@@ -201,11 +202,11 @@ func TestCrashBetweenLandingAndResponse(t *testing.T) {
 	}
 }
 
-func TestRecoveryStopsFaults(t *testing.T) {
-	f := base()
+func TestObjectStoreRecoveryStopsFaults(t *testing.T) {
+	f := objectBase()
 	f.Unavailable503, f.Timeout, f.LostResponse, f.GetCorruptProb = 1, 1, 1, 1
-	f.Outage = fakeobjectstore.ServiceOutage{Prob: 1, Dur: [2]machine.Duration{ms, 2 * ms}}
-	_, h := setup(t, f, 1)
+	f.Outage = faulty.Outage{Prob: 1, Dur: [2]machine.Duration{ms, 2 * ms}}
+	_, h := objectSetup(t, f, 1)
 	put(h, 1, "k", "x") // faulted, in flight
 	h.Run()
 	h.Recover()
@@ -225,10 +226,10 @@ func TestRecoveryStopsFaults(t *testing.T) {
 }
 
 // A plan made before EnterRecovery stands (it is not redrawn).
-func TestInFlightPlanStandsAfterRecovery(t *testing.T) {
-	f := base()
+func TestObjectStoreInFlightPlanStandsAfterRecovery(t *testing.T) {
+	f := objectBase()
 	f.Unavailable503 = 1
-	_, h := setup(t, f, 1)
+	_, h := objectSetup(t, f, 1)
 	put(h, 1, "k", "x")
 	h.Step() // issued: the plan is a 503
 	h.Recover()
@@ -242,10 +243,10 @@ func TestInFlightPlanStandsAfterRecovery(t *testing.T) {
 	}
 }
 
-func TestGetCorrupt(t *testing.T) {
-	f := base()
+func TestObjectStoreGetCorrupt(t *testing.T) {
+	f := objectBase()
 	f.GetCorruptProb = 1
-	e, h := setup(t, f, 1)
+	e, h := objectSetup(t, f, 1)
 	put(h, 1, "k", "hello world")
 	h.Run()
 	get(h, 2, "k")
@@ -277,8 +278,8 @@ func TestGetCorrupt(t *testing.T) {
 	}
 }
 
-func TestTruthAndGen(t *testing.T) {
-	e, h := setup(t, base(), 1)
+func TestObjectStoreTruthAndGen(t *testing.T) {
+	e, h := objectSetup(t, objectBase(), 1)
 	put(h, 1, "b", "2")
 	put(h, 2, "a", "1")
 	h.Run()
@@ -303,12 +304,12 @@ func TestTruthAndGen(t *testing.T) {
 	}
 }
 
-func TestDeterminism(t *testing.T) {
-	f := base()
+func TestObjectStoreDeterminism(t *testing.T) {
+	f := objectBase()
 	f.Unavailable503, f.Timeout, f.LostResponse, f.GetCorruptProb = 0.2, 0.2, 0.2, 0.3
-	f.Outage = fakeobjectstore.ServiceOutage{Prob: 0.05, Dur: [2]machine.Duration{10 * ms, 20 * ms}}
+	f.Outage = faulty.Outage{Prob: 0.05, Dur: [2]machine.Duration{10 * ms, 20 * ms}}
 	run := func(seed uint64) (string, uint64, uint64) {
-		e, h := setup(t, f, seed)
+		e, h := objectSetup(t, f, seed)
 		for i := range 60 {
 			after := machine.Duration(i) * ms
 			k := string(rune('a' + i%5))

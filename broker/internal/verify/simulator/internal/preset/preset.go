@@ -4,10 +4,10 @@ package preset
 
 import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakecontrolplane"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakenetwork"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakeobjectstore"
 	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/check/faulty"
 	"github.com/manifesterio/mds/dst/kernel"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/rng"
@@ -38,19 +38,24 @@ func Phases() kernel.Phases {
 func New() Preset {
 	return Preset{
 		Settings: cluster.Settings{
-			ObjectStore: fakeobjectstore.Faults{
-				ApplyLatency:   slowTail(1, 5, 50, 200, 0.05),
-				RespondLatency: slowTail(1, 3, 20, 100, 0.05),
-				Unavailable503: 0.03, Timeout: 0.02, LostResponse: 0.02, GetCorruptProb: 0.03,
-				Outage:        fakeobjectstore.ServiceOutage{Prob: 0.002, Dur: [2]machine.Duration{ms(200), 2 * machine.Second}},
-				CallerTimeout: ms(500),
+			ObjectStore: fakeservices.ObjectStoreFaults{
+				Faults: faulty.Faults{
+					ApplyLatency:   slowTail(1, 5, 50, 200, 0.05),
+					RespondLatency: slowTail(1, 3, 20, 100, 0.05),
+					Unavailable503: 0.03, Timeout: 0.02, LostResponse: 0.02,
+					Outage:        faulty.Outage{Prob: 0.002, Dur: [2]machine.Duration{ms(200), 2 * machine.Second}},
+					CallerTimeout: ms(500),
+				},
+				GetCorruptProb: 0.03,
 			},
-			ControlPlane: fakecontrolplane.Faults{
-				ApplyLatency:   slowTail(1, 5, 50, 200, 0.05),
-				RespondLatency: slowTail(1, 3, 20, 100, 0.05),
-				Unavailable503: 0.03, Timeout: 0.02, LostResponse: 0.03,
-				Outage:        fakecontrolplane.ServiceOutage{Prob: 0.002, Dur: [2]machine.Duration{ms(200), 2 * machine.Second}},
-				CallerTimeout: ms(500),
+			ControlPlane: fakeservices.ControlPlaneFaults{
+				Faults: faulty.Faults{
+					ApplyLatency:   slowTail(1, 5, 50, 200, 0.05),
+					RespondLatency: slowTail(1, 3, 20, 100, 0.05),
+					Unavailable503: 0.03, Timeout: 0.02, LostResponse: 0.03,
+					Outage:        faulty.Outage{Prob: 0.002, Dur: [2]machine.Duration{ms(200), 2 * machine.Second}},
+					CallerTimeout: ms(500),
+				},
 			},
 			Network: fakenetwork.Faults{
 				Latency: kernel.FastWithRareSlow{

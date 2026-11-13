@@ -15,9 +15,8 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakecontrolplane"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakenetwork"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakeobjectstore"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/span"
 	"github.com/manifesterio/mds/dst/kernel"
 	"github.com/manifesterio/mds/dst/machine"
@@ -33,8 +32,8 @@ const tailLines = 48
 // Settings are the knobs of one run. A scenario starts from the defaults of
 // internal/preset, and its swarm changes them for each seed.
 type Settings struct {
-	ObjectStore  fakeobjectstore.Faults
-	ControlPlane fakecontrolplane.Faults
+	ObjectStore  fakeservices.ObjectStoreFaults
+	ControlPlane fakeservices.ControlPlaneFaults
 	Network      fakenetwork.Faults
 	// ClockSkewMax is the largest fixed clock skew of one node. It is drawn once
 	// for each node when the node is spawned.
@@ -85,8 +84,8 @@ type Cluster struct {
 	World *kernel.World
 	// Objects, ControlPlane and Network are the fake services. A rule reads the
 	// ground truth from the first two (see package truth).
-	Objects      *fakeobjectstore.Engine
-	ControlPlane *fakecontrolplane.Engine
+	Objects      *fakeservices.ObjectStore
+	ControlPlane *fakeservices.ControlPlane
 	Network      *fakenetwork.Engine
 
 	plan      Plan
@@ -110,8 +109,8 @@ func New(p Plan) *Cluster {
 		Log: p.Log, Tail: tailLines, HaltOnFirst: p.HaltOnFirst, VerifyHashes: p.VerifyHashes,
 	})
 	c := &Cluster{World: w, plan: p}
-	c.Objects = fakeobjectstore.New(w, p.Settings.ObjectStore)
-	c.ControlPlane = fakecontrolplane.New(w, p.Settings.ControlPlane)
+	c.Objects = fakeservices.NewObjectStore(w, p.Settings.ObjectStore)
+	c.ControlPlane = fakeservices.NewControlPlane(w, p.Settings.ControlPlane)
 	c.Network = fakenetwork.New(w, p.Settings.Network)
 	c.svc = services{
 		world:        w,

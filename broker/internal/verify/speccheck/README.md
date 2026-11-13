@@ -62,12 +62,12 @@ spec, and converts the answer back. It has no rule of its own.
 
 The rules of each spec are in the comment above its type. Read that first.
 
-## The four checks
+## The checks (C2 was deleted in T1.15)
 
 | Check | What is tested | Compared with | Real or simulated |
 | --- | --- | --- | --- |
 | C1 | broker answers: produce, fetch, ListOffsets | `spec.Broker` | broker is real; storage and control plane are specs |
-| C2 | simulated object store and control plane, faults off | `objectstore.Spec`, `spec.ControlPlane` | simulated |
+| C2 | deleted: the simulated object store and control plane are `dst/check/faulty` around the spec itself, so there is nothing to compare | - | - |
 | C3 | S3 adapter (control-plane stores: `controlplane/test/conformance`) | `objectstore.Spec`, `spec.ControlPlane` | real |
 | C4 | the Kafka oracle in `internal/verify/simulator/kafka` | `spec.Broker`, `spec.ControlPlane` | simulation side |
 
@@ -76,8 +76,8 @@ The rules of each spec are in the comment above its type. Read that first.
 ```bash
 go test ./spec ./internal/verify/speccheck/... -count=1     # broker spec and suites
 (cd ../controlplane && go test ./spec -count=1)             # control plane spec
-go test ./internal/broker ./internal/verify/simulator/fakeservices \
-        ./internal/verify/speccheck/s3conform -count=1   # C1, C2, C3
+go test ./internal/broker ./internal/verify/speccheck/s3conform -count=1   # C1, C3
+go test ./internal/verify/simulator/fakeservices/... -count=1   # fault tests of the simulated services
 go test ./internal/verify/simulator/kafka -run C4 -count=1      # C4
 ```
 

@@ -37,6 +37,9 @@ github.com/manifesterio/mds/dst/trace
 # (internal/verify/simulator) runs on the kernel. Both are first-party and have their own determinism gate in dst.
 github.com/manifesterio/mds/dst/kernel
 github.com/manifesterio/mds/dst/rng
+# Faulty: a fault-free spec with timing and faults around it (the simulated object store and
+# control plane are built on it). Deterministic, and it has its own determinism gate in dst.
+github.com/manifesterio/mds/dst/check/faulty
 
 # The control plane contract (github.com/manifesterio/mds/controlplane/contract): plain data and
 # the Tag and Fold of the control plane operations and responses. It imports only dst, shared/objectstore,

@@ -74,6 +74,7 @@ All packages are in the `dst` module. None of them has a product word.
                    real IO.
       check/       EXTENDED. Spec[Op, Res], Lockstep, SelfCheck, planted bugs, and the
                    log Replay helpers that exist today. dst/model merges into it.
+                   check/faulty (T1.15): a fault-free spec plus faults, as a kernel service.
       campaign/    EXTENDED. Scenario registry, seed runs, until-stable, determinism
                    canary, report (text and JSON), replay one seed.
       rng/         KEPT, plus Derive.
@@ -559,9 +560,9 @@ nemesis) uses host tasks (`World.At`, `World.After`, section 6.4). The control
 plane `replyEngine` is deleted: the replica route calls the client pool directly
 for a `ControlPlaneReply`, in the same step, as the engine does today.
 
-A later `Faulty(spec, faults)` (T1.15, stretch) fits this shape: it is a
-`Service[Req, In]` built from a `check.Spec[Op, Res]` and a function that turns
-(Res, error code, outcome) into the caller's `In`. This design does not define it.
+`Faulty(spec, faults)` (T1.15) fits this shape: it is a `Service[Req, In]` built from a
+`Spec[Op, Res]` and a `Shape` that turns a request into an op and (Res, failure) into the
+caller's `In`. It is the package `dst/check/faulty`. See section 19, T1.15.
 
 ## 6. Point 4: ordering
 
@@ -1317,7 +1318,7 @@ in (or moves to) product code, not dst.
 |---|---|---|
 | broker-simulator | AssertionStat | `campaign.Report.Assertions` rows; per seed `assert.Coverage`; FirstStep is recorded by `assert.Log` (10.1) |
 | broker-simulator | Config | split: kernel knobs to `kernel.Config` (Seed, MaxSteps, Log, HaltOnFirst, VerifyHashes, Attrition, Phases via `SchedulePhases`); Processes and Workloads to `kernel.Spawn` calls; Invariants and InvariantsFor to `World.AddRule`; Engines to `kernel.AddService`; fault knobs, Swarm, Params to product scenario code; ExpectReachable deleted (catalog, 10.3); Scripted deleted (see PlannedFault); CheckDeterminism to `campaign.Options.CheckEvery`; QuiesceEvery to broker host task (7.4); Cost to `NodeSpec.Cost` |
-| broker-simulator | ControlPlaneFaults | product: broker `fakecontrolplane` package (its config) |
+| broker-simulator | ControlPlaneFaults | product: broker `fakeservices.ControlPlaneFaults` (T1.15: `faulty.Faults` plus `MaxCommitItems`) |
 | broker-simulator | ControlPlaneRealState | deleted from the kernel: rules get a typed pointer to the fake control plane (9.4) |
 | broker-simulator | ControlPlaneRealState.Committed | stays a method of the broker fake control plane, called directly |
 | broker-simulator | ControlPlaneRealState.Gen | stays a method of the broker fake control plane, called directly |
@@ -1405,7 +1406,7 @@ in (or moves to) product code, not dst.
 | broker-simulator | NodeInbox.Data | internal; class from `NodeSpec.Class` |
 | broker-simulator | NodeInbox.Push | internal; delivery puts the input in its inbox |
 | broker-simulator | NodeKills | `kernel.Attrition` (MaxDead, CrashProb, CrashWeight, GracefulWeight); RecoveryDelay to `NodeSpec.Restart`; FreezeProb and FreezeDur deleted (no scenario sets them; `Pause` covers it) |
-| broker-simulator | ObjectStoreFaults | product: broker `fakeobjectstore` package |
+| broker-simulator | ObjectStoreFaults | product: broker `fakeservices.ObjectStoreFaults` (T1.15: `faulty.Faults` plus `GetCorruptProb`) |
 | broker-simulator | ObjectStoreRealState | deleted from the kernel: rules get a typed pointer to the fake object store |
 | broker-simulator | ObjectStoreRealState.EachObject | stays a method of the fake object store, called directly |
 | broker-simulator | ObjectStoreRealState.Gen | stays a method of the fake object store, called directly |
@@ -1443,7 +1444,7 @@ in (or moves to) product code, not dst.
 | broker-simulator | Scheduler.Schedule | internal; public ways in: `Inject`, `Send`, `SetTimer`, `Deliver`, `Later`, `At`, `After` |
 | broker-simulator | SeedConfig | deleted: the product keeps typed per-seed params; no `Params any` |
 | broker-simulator | SeedResult | `kernel.Result` (same counters; plus `campaign.FromKernel`) |
-| broker-simulator | ServiceOutage | product: broker `fakeservices/internal/fakecompletions` |
+| broker-simulator | ServiceOutage | `faulty.Outage` (T1.15) |
 | broker-simulator | Target | internal entry target |
 | broker-simulator | Time | `kernel.Time` |
 | broker-simulator | TimedFact | `kernel.TimedFact` |
@@ -2455,3 +2456,34 @@ T1.12d.
    (`TestRand`, `TestRandMatchesDstStream`) and the `RequireDetected` test: the code they
    test is gone. Shrinking is rapid's, and `spectest` tests that a planted bug shrinks to at
    most 3 steps. The list of every deleted test and its new place is in the T1.14 report.
+
+### T1.15 (Faulty(spec) replaces the hand-written fakes)
+
+1. **Where it is.** `dst/check/faulty`: `New(w, spec, faults, shape) *Service` where `spec` has
+   `Apply(op) res` and `StateHash()` (the same two methods as `spectest.Spec`; `faulty` has its
+   own small `Spec` interface because `spectest` imports rapid and `testing`, and the package
+   must pass the determinism gate). It is in the dst determinism list. It has no product words.
+2. **The fault kinds are exactly the old ones.** Slow reply, error with nothing applied (the
+   "503"), timeout (applied or not by a fair coin at landing), applied with the reply lost,
+   outage window. Two optional hooks of `Shape` carry the two other things the old fakes had:
+   `Limit` (the control plane commit size limit: refuse before the spec) and `Corrupt` (the bit
+   flip in a Get answer). No kind was added or removed.
+3. **The draws are the same, in the same order**, so no golden pin moved. The order is: outage
+   coin (then the outage length, with the old half-open rule `lo + Intn(hi-lo)`), the three
+   coins 503, timeout, lost (always all three), apply delay, respond delay, corruption coin
+   (then the bit); at landing, the timeout coin 0.5. After `EnterRecovery` only the two delays.
+   The parity files `fakeservices/testdata/parity_objectstore.txt` and `parity_controlplane.txt`
+   were NOT changed, and the parity test now runs Faulty against them: equal steps, `rand_calls`,
+   counters, assertion coverage, hash samples, faults and reply digests.
+4. **The product glue** is in `broker/internal/verify/simulator/fakeservices` (package
+   `fakeservices`): `NewObjectStore` and `NewControlPlane`. They hold the maps from `core` values
+   to spec ops and back, the error codes for the two failures, the bit flip and the commit size
+   limit. The assertion handles stay package level there (the catalog needs that), and are
+   passed to Faulty as `faulty.Asserts`. The packages `fakeobjectstore`, `fakecontrolplane` and
+   `internal/fakecompletions` are deleted. The service names (`fakeobjectstore`,
+   `fakecontrolplane`) and all fault fact kinds (`obj_503`, `cp_lost_response`, ...) are kept.
+5. **Check C2 is deleted** (`fakeservices/conformance_test.go` and its planted-bug tests). The
+   service is the spec plus faults, so there is nothing left to compare. What the C2 planted
+   bugs guarded (the service must give the spec's answers and the spec's hash) is guarded by the
+   fault tests of Faulty and by the parity files. The old fake tests were ported (list in the
+   T1.15 report); the generic fault tests are in `dst/check/faulty/faulty_test.go`.

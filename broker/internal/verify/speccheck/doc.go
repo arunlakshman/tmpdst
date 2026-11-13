@@ -21,7 +21,8 @@
 // planted bugs that prove that it can fail.
 //
 // A spec is also used as a test fake. The main use is as an oracle: a checker
-// we trust to say if a result is correct. There are four checks:
+// we trust to say if a result is correct. There are three checks (C1, C3, C4;
+// C2 was deleted, see below):
 //
 //	C1  The broker state machine runs with no faults, over the object store
 //	    spec and the control plane spec. Its answers to produce, fetch and
@@ -29,10 +30,11 @@
 //	    that the planted bugs InjectedBugWrongOffset and
 //	    InjectedBugServeCorrupt are caught.
 //	    Test: internal/broker/conformance_test.go.
-//	C2  Each simulated engine (object store, control plane) runs with all
-//	    faults off. It must give the same completion and the same StateHash
-//	    as its spec after every operation.
-//	    Test: internal/verify/simulator/fakeservices/conformance_test.go.
+//	C2  (deleted in T1.15) The simulated object store and control plane ran
+//	    with all faults off and were compared with their specs. They are now
+//	    dst/check/faulty around the spec itself, so there is nothing left to
+//	    compare: the service IS the spec plus faults. Each fault kind has its
+//	    own test in dst/check/faulty and in internal/verify/simulator/fakeservices.
 //	C3  The real adapters are compared with the specs: the S3 object store
 //	    against the object store spec. Control-plane store conformance (mem,
 //	    gRPC, applier) lives in controlplane/test/conformance.
@@ -53,9 +55,7 @@
 //	check | what is tested                    | compared with        | real or simulated
 //	C1    | broker answers (produce, fetch,   | broker spec          | broker code is real;
 //	      | ListOffsets)                      |                      | storage and control plane are specs
-//	C2    | simulated object store and        | object store spec    | engines are simulated;
-//	      | control plane, faults off         | and control plane    | specs are the reference
-//	      |                                   | spec                 |
+//	C2    | (deleted, see above)              |                      |
 //	C3    | S3 adapter; control-plane stores  | object store spec    | adapters are real code (S3 needs
 //	      |                                   | and control plane    | a live endpoint); specs are the reference
 //	      |                                   | spec                 |

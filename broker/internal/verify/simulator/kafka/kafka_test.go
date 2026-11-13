@@ -10,7 +10,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakecontrolplane"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
@@ -432,7 +432,7 @@ func wideCampaign(t *testing.T, capParts, batches int) int64 {
 	prod.MaxSegmentPartitions, prod.MaxSegmentBatches = capParts, batches
 	prod.MaxBufferedBytes, prod.ResumeBufferedBytes = 64<<20, 32<<20
 	opts := Opts{Producers: 128, Consumers: 1, Topics: []string{"a", "b"}, Partitions: 64}
-	items := fakecontrolplane.DynamoMaxCommitItems
+	items := fakeservices.DynamoMaxCommitItems
 	var widest atomic.Int64
 	results := runSeeds(t, seeds(1, 2), func(seed uint64) Config {
 		return Config{
@@ -454,8 +454,8 @@ func wideCampaign(t *testing.T, capParts, batches int) int64 {
 // or the test proves nothing.
 func TestProductionCapsFitDynamoLimit(t *testing.T) {
 	const capParts = 96
-	if 1+capParts > fakecontrolplane.DynamoMaxCommitItems || fakecontrolplane.DynamoMaxCommitItems-1-capParts < 3 {
-		t.Fatalf("1 + %d partitions leaves no spare items under %d", capParts, fakecontrolplane.DynamoMaxCommitItems)
+	if 1+capParts > fakeservices.DynamoMaxCommitItems || fakeservices.DynamoMaxCommitItems-1-capParts < 3 {
+		t.Fatalf("1 + %d partitions leaves no spare items under %d", capParts, fakeservices.DynamoMaxCommitItems)
 	}
 	w := wideCampaign(t, capParts, 256)
 	t.Logf("old store: widest committed segment %d partitions (cap %d)", w, capParts)

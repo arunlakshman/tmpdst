@@ -1,31 +1,30 @@
-package fakecontrolplane_test
+package fakeservices_test
 
 import (
 	"slices"
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakecontrolplane"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/internal/servicetest"
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/check/faulty"
 	"github.com/manifesterio/mds/dst/kernel"
 	"github.com/manifesterio/mds/dst/machine"
 )
 
-const ms = machine.Duration(1_000_000)
-
-func base() fakecontrolplane.Faults {
+func planeBase() fakeservices.ControlPlaneFaults {
 	ts := kernel.FastWithRareSlow{FastMin: ms, FastMax: 2 * ms, SlowMin: 50 * ms, SlowMax: 60 * ms}
-	return fakecontrolplane.Faults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}
+	return fakeservices.ControlPlaneFaults{Faults: faulty.Faults{ApplyLatency: ts, RespondLatency: ts, CallerTimeout: 1000 * ms}}
 }
 
 var tp = contract.NewTopicPartition("t", 0)
 
-// setup makes a world with one caller "a" and the fake control plane.
-func setup(t *testing.T, f fakecontrolplane.Faults, seed uint64) (*fakecontrolplane.Engine, *servicetest.Harness) {
+// planeSetup makes a world with one caller "a" and the fake control plane.
+func planeSetup(t *testing.T, f fakeservices.ControlPlaneFaults, seed uint64) (*fakeservices.ControlPlane, *servicetest.Harness) {
 	t.Helper()
 	h := servicetest.New(t, seed, "a")
-	e := fakecontrolplane.New(h.W, f)
+	e := fakeservices.NewControlPlane(h.W, f)
 	svc := kernel.AddService[core.ControlPlaneCall, core.EventData](h.W, e)
 	h.Route = func(r *servicetest.Router, out core.Action) {
 		if c, ok := out.(core.ControlPlaneCall); ok {
@@ -48,8 +47,8 @@ func last(h *servicetest.Harness) core.ControlPlaneDone {
 	return h.Delivered[len(h.Delivered)-1].Body.(core.ControlPlaneDone)
 }
 
-func TestNormalAndTruthful(t *testing.T) {
-	e, h := setup(t, base(), 1)
+func TestControlPlaneNormalAndTruthful(t *testing.T) {
+	e, h := planeSetup(t, planeBase(), 1)
 	if e.Name() != "fakecontrolplane" {
 		t.Fatal(e.Name())
 	}
@@ -75,8 +74,8 @@ func TestNormalAndTruthful(t *testing.T) {
 	}
 }
 
-func TestCreateTopic(t *testing.T) {
-	e, h := setup(t, base(), 1)
+func TestControlPlaneCreateTopic(t *testing.T) {
+	e, h := planeSetup(t, planeBase(), 1)
 	if e.CreateTopic("x", 3) != core.OK || e.Gen() != 1 || e.CreateTopic("", 1) != core.ErrInvalid {
 		t.Fatal("create")
 	}
@@ -87,26 +86,26 @@ func TestCreateTopic(t *testing.T) {
 	}
 }
 
-func TestFaultFamilies(t *testing.T) {
+func TestControlPlaneFaultFamilies(t *testing.T) {
 	cases := []struct {
 		name    string
-		f       func(*fakecontrolplane.Faults)
+		f       func(*fakeservices.ControlPlaneFaults)
 		fault   string
 		err     core.ErrCode
 		outcome core.Outcome
 		applied bool
 		at      kernel.Time
 	}{
-		{"503", func(f *fakecontrolplane.Faults) { f.Unavailable503 = 1 }, "cp_503", core.ErrUnavailable, core.NotApplied, false, 0},
-		{"lost", func(f *fakecontrolplane.Faults) { f.LostResponse = 1 }, "cp_lost_response", core.ErrTimeout, core.MaybeApplied, true, kernel.Time(1000 * ms)},
-		{"outage", func(f *fakecontrolplane.Faults) {
-			f.Outage = fakecontrolplane.ServiceOutage{Prob: 1, Dur: [2]machine.Duration{ms, 2 * ms}}
+		{"503", func(f *fakeservices.ControlPlaneFaults) { f.Unavailable503 = 1 }, "cp_503", core.ErrUnavailable, core.NotApplied, false, 0},
+		{"lost", func(f *fakeservices.ControlPlaneFaults) { f.LostResponse = 1 }, "cp_lost_response", core.ErrTimeout, core.MaybeApplied, true, kernel.Time(1000 * ms)},
+		{"outage", func(f *fakeservices.ControlPlaneFaults) {
+			f.Outage = faulty.Outage{Prob: 1, Dur: [2]machine.Duration{ms, 2 * ms}}
 		}, "cp_outage", core.ErrUnavailable, core.NotApplied, false, 0},
 	}
 	for _, tc := range cases {
-		f := base()
+		f := planeBase()
 		tc.f(&f)
-		e, h := setup(t, f, 1)
+		e, h := planeSetup(t, f, 1)
 		call(h, 1, commit("s1"))
 		h.Run()
 		d := last(h)
@@ -124,11 +123,11 @@ func TestFaultFamilies(t *testing.T) {
 		}
 	}
 	// Timeout: applies or not.
-	f := base()
+	f := planeBase()
 	f.Timeout = 1
 	yes, no := 0, 0
 	for seed := uint64(1); seed <= 40; seed++ {
-		e, h := setup(t, f, seed)
+		e, h := planeSetup(t, f, seed)
 		call(h, 1, commit("s1"))
 		h.Run()
 		if d := last(h); d.Err != core.ErrTimeout || d.Outcome != core.MaybeApplied {
@@ -145,10 +144,10 @@ func TestFaultFamilies(t *testing.T) {
 	}
 }
 
-func TestIdempotentRetryAfterLostResponse(t *testing.T) {
-	f := base()
+func TestControlPlaneIdempotentRetryAfterLostResponse(t *testing.T) {
+	f := planeBase()
 	f.LostResponse = 1
-	e, h := setup(t, f, 1)
+	e, h := planeSetup(t, f, 1)
 	call(h, 1, commit("s1"))
 	h.Run() // applied, caller saw timeout
 	h.Recover()
@@ -172,11 +171,11 @@ func TestIdempotentRetryAfterLostResponse(t *testing.T) {
 	}
 }
 
-func TestLostCommitThenRetryInSim(t *testing.T) {
+func TestControlPlaneLostCommitThenRetry(t *testing.T) {
 	// Commit response lost (applied), retry in recovery returns the same offsets.
-	f := base()
+	f := planeBase()
 	f.LostResponse = 1
-	e, h := setup(t, f, 1)
+	e, h := planeSetup(t, f, 1)
 	call(h, 2, commit("s")) // lost but applied
 	h.Run()
 	if d := h.Delivered[0].Body.(core.ControlPlaneDone); d.Err != core.ErrTimeout || d.Outcome != core.MaybeApplied {
@@ -192,8 +191,8 @@ func TestLostCommitThenRetryInSim(t *testing.T) {
 	}
 }
 
-func TestLandsAfterCrash(t *testing.T) {
-	e, h := setup(t, base(), 1)
+func TestControlPlaneLandsAfterCrash(t *testing.T) {
+	e, h := planeSetup(t, planeBase(), 1)
 	call(h, 1, commit("s"))
 	h.Step() // the caller issues the call
 	h.Crash("a")
@@ -203,11 +202,11 @@ func TestLandsAfterCrash(t *testing.T) {
 	}
 }
 
-func TestRecoveryStopsFaults(t *testing.T) {
-	f := base()
+func TestControlPlaneRecoveryStopsFaults(t *testing.T) {
+	f := planeBase()
 	f.Unavailable503, f.Timeout, f.LostResponse = 1, 1, 1
-	f.Outage = fakecontrolplane.ServiceOutage{Prob: 1, Dur: [2]machine.Duration{ms, 2 * ms}}
-	_, h := setup(t, f, 1)
+	f.Outage = faulty.Outage{Prob: 1, Dur: [2]machine.Duration{ms, 2 * ms}}
+	_, h := planeSetup(t, f, 1)
 	call(h, 1, commit("s"))
 	h.Step() // issued: the plan is a 503
 	h.Recover()
@@ -221,12 +220,12 @@ func TestRecoveryStopsFaults(t *testing.T) {
 	}
 }
 
-func TestDeterminism(t *testing.T) {
-	f := base()
+func TestControlPlaneDeterminism(t *testing.T) {
+	f := planeBase()
 	f.Unavailable503, f.Timeout, f.LostResponse = 0.2, 0.2, 0.2
-	f.Outage = fakecontrolplane.ServiceOutage{Prob: 0.05, Dur: [2]machine.Duration{10 * ms, 20 * ms}}
+	f.Outage = faulty.Outage{Prob: 0.05, Dur: [2]machine.Duration{10 * ms, 20 * ms}}
 	run := func(seed uint64) (string, uint64, uint64) {
-		e, h := setup(t, f, seed)
+		e, h := planeSetup(t, f, seed)
 		for i := range 60 {
 			after := machine.Duration(i) * ms
 			switch i % 2 {
@@ -254,10 +253,10 @@ func TestDeterminism(t *testing.T) {
 	}
 }
 
-func TestCommitSizeLimit(t *testing.T) {
-	f := base()
+func TestControlPlaneCommitSizeLimit(t *testing.T) {
+	f := planeBase()
 	f.MaxCommitItems = 4
-	e, h := setup(t, f, 1)
+	e, h := planeSetup(t, f, 1)
 	e.CreateTopic("t", 4)
 	many := func(key string, n int) contract.CommitSegment {
 		operation := commit(key)

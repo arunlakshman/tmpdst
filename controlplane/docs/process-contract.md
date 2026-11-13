@@ -15,7 +15,7 @@ differences from the first proposal.
 - `Event` is gone. `Replica` is a `sim.Process`; `Step(cx, inbox)` reads the time
   from `cx.Now()`.
 - Pause and resume stayed in the simulator (one user).
-- `live` is in `internal/system/live`, not in dst.
+- `live` first lived in `internal/system/live`. It now lives in `dst/live` (generic).
 - A request from gRPC is an inbox value: `ControlPlaneDeliver` for a command, and
   the new `LocalRead` for a read that answers at once from local state (it does not
   wait for a fresh tail, so production reads keep today's behaviour). The answer is
@@ -106,11 +106,13 @@ and `internal/system/run.go`.
 
 ## Where does `live` go?
 
-In this repo: `internal/system/live` (no control-plane types in its API). Why:
+Now: `dst/live`, generic over the input and output types of a machine (moved from
+`internal/system/live` in T1.11b). Before the move it was in this repo
+(`internal/system/live`, no control-plane types in its API). Why:
 dst stays small and fully deterministic (rule from the `fakes` decision: no API
 with one user). Only `live` and the production adapters read real time, so
 `live` is NOT on the determinism allow-list; the gate fails if a gated package
-imports it. When the broker adopts dst, `live` moves to `dst/live` unchanged.
+imports it. The move to `dst/live` is done, so that the broker can use it too.
 
 `live` owns: the goroutine, the inbox, real timers, the urgent stop lane,
 StopGrace and the kill, `ErrStoppedForRestart`, `ErrStopped`, `ErrKilled`.

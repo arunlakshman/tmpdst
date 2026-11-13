@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Config bounds each kind of I/O. Zero fields take the defaults.
@@ -35,8 +36,8 @@ type Executor struct {
 
 // Sink takes the results. The run loop's inbox is the sink.
 type Sink interface {
-	// Deliver queues one result for the process. It must not block.
-	Deliver(body any)
+	// Deliver queues one result for the process, in the queue of class c. It must not block.
+	Deliver(c machine.Class, body runtime.EventData)
 	// Closed is closed when the process has ended; results are then dropped.
 	Closed() <-chan struct{}
 }
@@ -55,7 +56,7 @@ func (e *Executor) deliver(c runtime.IOResult) {
 		return
 	default:
 	}
-	e.sink.Deliver(c)
+	e.sink.Deliver(machine.Data, c)
 }
 
 // Execute never blocks: it starts a goroutine per action.

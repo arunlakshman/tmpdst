@@ -6,7 +6,7 @@ Note: this is a historical design record. Package names in it are old (`controlp
 this repo. The log, slot, epoch and takeover ideas still hold. For the code as it is, read
 `internal/controlplane/doc.go`, `docs/glossary.md` and `docs/simulation.md`.
 
-Status: production path is `internal/controlplane/replica` + `internal/system/live` + gRPC (`mdscontrolplane -store dynamolog`,
+Status: production path is `internal/controlplane/replica` + `dst/live` + gRPC (`mdscontrolplane -store dynamolog`,
 decision 55-58). Sim `kafka-log` uses the same state machine as CP processes plus `logstore` (CP-DSM-8,
 `docs/sim-log-engine.md`). The goroutine `internal/controlplane/logcp` twin is deleted; DynamoLog/table helpers
 live in `internal/controlplane/executor`. Decisions 48-52, `docs/design-a-prototype.md` section 8,

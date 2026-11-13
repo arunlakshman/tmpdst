@@ -1,6 +1,6 @@
 // Package controlplane is the control-plane service tree. The binary
 // cmd/mdscontrolplane serves gRPC through server, which runs the replica and the
-// rebalance machine on internal/system/live. Brokers call the gRPC API
+// rebalance machine on dst/live. Brokers call the gRPC API
 // (api/controlplane/v1) with their own client.
 //
 // Tests sit next to the code they test. Two exceptions: the model conformance
@@ -50,7 +50,7 @@
 //     status_handler.go.
 //   - controlplanemetrics: Prometheus instrumentation.
 //   - outside this tree: internal/runtime (event and value types, Clock),
-//     internal/system/live (the production runner of a dst process),
+//     dst/live (the production loop of a dst machine; it is in the dst module),
 //     spec (the independent model), internal/verify/simulator (the
 //     deterministic simulation, run by cmd/cpsim).
 //

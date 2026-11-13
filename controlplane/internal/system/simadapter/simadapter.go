@@ -2,14 +2,14 @@
 // rebalance machine) as dst sim.Process values.
 //
 // The machines take the dst v2 contract (machine.Machine with typed input and output).
-// The simulator host code and the old production loop (internal/system/live) still speak
-// the old contract, sim.Process: one Step takes an inbox value of type any and returns
-// values of type any. This package is the bridge between the two. It changes the form of
-// the values and nothing else: the same inputs reach the machine in the same order, the
+// The simulator host code still speaks the old contract, sim.Process: one Step takes an
+// inbox value of type any and returns values of type any. This package is the bridge
+// between the two. It changes the form of the values and nothing else: the same inputs reach the machine in the same order, the
 // outputs come back in the same order, and no random number is drawn here.
 //
-// This is a temporary package. It is deleted when the simulator and the production loop
-// both run the machines on the v2 contract (plan T1.11 step c).
+// This is a temporary package. The production server does not use it any more (it runs the
+// machines on dst/live). It is deleted when the simulator host code moves to the dst
+// kernel (plan T1.11 step c).
 package simadapter
 
 import (

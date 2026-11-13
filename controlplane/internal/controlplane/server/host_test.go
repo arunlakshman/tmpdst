@@ -34,7 +34,7 @@ func TestAbandonedCallDropsLateReply(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	errs := make(chan error, 1)
 	go func() {
-		_, err := n.call(ctx, false, func(call rebalance.CallID) any { return rebalance.Heartbeat{Call: call, Group: "g"} })
+		_, err := n.call(ctx, false, func(call rebalance.CallID) rebalance.Input { return rebalance.Heartbeat{Call: call, Group: "g"} })
 		errs <- err
 	}()
 	in, ok := popGroups(t, n).(rebalance.Heartbeat)
@@ -65,7 +65,7 @@ func TestReplyReachesItsCall(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		r, err := n.call(t.Context(), true, func(call rebalance.CallID) any { return rebalance.List{Call: call} })
+		r, err := n.call(t.Context(), true, func(call rebalance.CallID) rebalance.Input { return rebalance.List{Call: call} })
 		done <- result{r, err}
 	}()
 	in := popGroups(t, n).(rebalance.List)

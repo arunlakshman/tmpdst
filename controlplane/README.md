@@ -38,7 +38,7 @@ See `internal/controlplane/doc.go` for the package map and the mental model, and
 - `contract` - the public vocabulary: operations, responses, `ErrCode` (the broker imports it)
 - `internal/controlplane` - the control plane: `wire`, `domain/{topic,group,rebalance,broker}`, `metadb` (with `engine`), `replica`, `executor`, `server`
 - `internal/runtime` - the event and value types and the clock interface
-- `internal/system` - system adapters (clock, S3, `live` run loop)
+- `internal/system` - `simadapter`, the temporary bridge that runs the replica and the rebalance machine as dst processes in the simulator (the production run loop is `dst/live`)
 - `spec` - the small independent model of the control plane, used by tests and by the simulator (public: the broker will import it)
 - `internal/verify/simulator` - deterministic simulation of the replicated control plane
 - `internal/testinfra` - containers for the integration tests

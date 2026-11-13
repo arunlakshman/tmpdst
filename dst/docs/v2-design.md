@@ -2053,3 +2053,28 @@ written, and the smallest change that was made.
    (`handle`, `callOf`, `loadStep` and the test helpers). No rule changed.
 8. **`runtime.SetTimer` carries `Gen`.** The old replica put the generation in the body of
    the dst timer. The adapter builds the same body from the action.
+
+### T1.11b (live moves to dst/live)
+
+1. **`dst/live` is the design of 3.3, with these small changes.** `Config.Inject` is
+   `<-chan func() []Out` (the old `InjectFunc` type is gone). `Config.StopMsg` may be nil: a
+   graceful stop then sends no input and only the kill timer ends the run (the old `Stop`
+   was optional too). `Run` also refuses a nil `New`, `Route` or `Clock`, not only a nil
+   `Inbox`. `End(machine.Crash, ...)` is not allowed in production and ends the run with a
+   plain error (the old loop refused `sim.Restart` the same way). `Pop` is exported on
+   `Inbox`, because the executor tests read results from it.
+2. **`Inbox.Deliver` has two arguments, `(class, msg)`.** Outside code picks the queue. The
+   control plane puts everything in Data except the stop request, which the loop puts in
+   Control itself. So `executor.Sink` changed to `Deliver(c machine.Class, body
+   runtime.EventData)`. This is a forced signature change in `executor` (outside the card's
+   Touch list); the executor sends every result as Data, as before.
+3. **No `Seed` and no `Assert` in the config.** The old loop made the random stream and the
+   assertion log for the process. Now the caller gives a `machine.Env`. The server gives the
+   replica its old counter env and the rebalance machine `randomEnvironment` (note T1.11a.5).
+4. **The `live` rule of the architecture test is gone.** It said that `internal/system/live`
+   imports nothing of the module. The module has no such package now. The real-time guard of
+   `ops/scripts/ci-determinism.sh` now names `dst/live`.
+5. **`dst/live` is not in the dst determinism gate** (it uses goroutines, channels, a
+   mutex and the real clock). The header of the dst gate script says so.
+6. **The server no longer uses `simadapter`.** Only the simulator host code does, until step
+   c.

@@ -186,8 +186,6 @@ func check(pkgs map[string]pkg) problems {
 	// The client is public (the broker uses it): it imports contract and the generated api, and no
 	// internal package. The broker is not in this module's reach (depguard forbids it too).
 	p.onlyImports(pkgs, "client", []string{contractPkg, "api/controlplane/v1", "api/controlplane/shared/v1"}, false)
-	// live is the production runner: it knows no control-plane type.
-	p.onlyImports(pkgs, "internal/system/live", nil, true)
 	// The log adapters import the port and little else of the module.
 	for _, a := range []string{"dynamolog", "sqllog"} {
 		p.onlyImports(pkgs, cp+"executor/"+a, []string{cp + "executor", rt}, false)
@@ -270,7 +268,7 @@ func TestImportRulesCanFail(t *testing.T) {
 		{"(c) spec imports the engine", with(real, spec, cp+"metadb/engine"), spec, cp + "metadb/engine"},
 		{"(d) the server imports spec", with(real, cp+"server", spec), cp + "server", spec},
 		{"(d) the binary imports testinfra", with(real, "cmd/mdscontrolplane", infra), "cmd/mdscontrolplane", infra},
-		{"(d) a system package imports testinfra", with(real, "internal/system/live", infra), "internal/system/live", infra},
+		{"(d) a system package imports testinfra", with(real, "internal/system/simadapter", infra), "internal/system/simadapter", infra},
 		{"(d) the simulator imports testinfra", with(real, "internal/verify/simulator", infra), "internal/verify/simulator", infra},
 		{"(d) the conformance suite imports testinfra", with(real, "test/conformance", infra), "test/conformance", infra},
 		{"(d) runtime imports spec", with(real, rt, spec), rt, spec},

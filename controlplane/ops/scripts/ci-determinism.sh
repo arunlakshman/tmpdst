@@ -48,7 +48,7 @@ echo "== real time stays out of the gated packages"
 # Only live and the production adapters may read real time or real randomness.
 # The import allow-list lets every package of this module in, so check the
 # whole dependency tree of each gated package for the real-time packages.
-realtime='internal/system/live$|manifesterio/mds/shared/clock$|manifesterio/mds/dst/(realclock|syncclock)$'
+realtime='manifesterio/mds/dst/live$|manifesterio/mds/shared/clock$|manifesterio/mds/dst/(realclock|syncclock)$'
 for p in "${pkgs[@]}" "$sim"; do
   if bad=$(go list -deps "$p" | grep -E "$realtime"); then
     echo "gated package $p depends on a real-time package:" >&2

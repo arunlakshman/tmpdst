@@ -21,6 +21,7 @@ deleted.
 |---|---|
 | `machine` | The machine contract: `Machine[In, Out]` (`Step(now, in) []Out`, `StateHash`), `Factory`, `Env` (random stream, buggify, assertions), time types, node names, boot numbers, `Fact`. Product machine code imports only this package. |
 | `kernel` | The simulation world: `Spawn` nodes, `AddService` services, typed `Addr[In]` and `Ref[In]`, a `Router[In]` per Step, `Send` / `SendOn` / `Call`, timers, lanes (`Lanes[K]`), two inboxes per node, the cost model, phases, incarnations, crash / restart / stop / pause, attrition, rules, the fact timeline and the trace hash. |
+| `live` | The production loop for the same machines: one goroutine, a two-queue `Inbox[In]` (Control before Data, Data may be bounded), real timers, a `Route` function of the product for the outputs. Real time and goroutines: it is not in the determinism gate. |
 
 ### How to run a machine on the kernel
 

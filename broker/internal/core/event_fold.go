@@ -8,7 +8,7 @@ import (
 
 // Tag and Fold of every EventData case. The tag numbers are frozen (see fold.go).
 // Fold writes the tag, then the fields in the order that is written here. Both
-// were hand-written tables in the simulator (verify/simulator/tags.go) before.
+// were hand-written tables in the simulator (the old tags.go, deleted in T1.12d) before.
 
 // Tag returns the frozen trace-hash number of this event.
 func (NodeStarted) Tag() uint64 { return 1 }

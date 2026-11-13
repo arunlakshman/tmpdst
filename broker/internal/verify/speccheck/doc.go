@@ -30,7 +30,7 @@
 //	C2  Each simulated engine (object store, control plane) runs with all
 //	    faults off. It must give the same completion and the same StateHash
 //	    as its spec after every operation.
-//	    Test: internal/verify/simulator/fakeservices/conformance_test.go.
+//	    Test: internal/verify/simulation/fakeservices/conformance_test.go.
 //	C3  The real adapters are compared with the specs: the S3 object store
 //	    against the object store spec. Control-plane store conformance (mem,
 //	    gRPC, applier) lives in controlplane/test/conformance.
@@ -43,7 +43,7 @@
 //	    history. The oracle never imports a spec package. C4 keeps the two
 //	    independent. A test and a linter rule (depguard, kafka-oracle-no-spec
 //	    in .golangci.yml) both check it.
-//	    Test: internal/verify/simulator/kafka/c4_test.go and c4_faults_test.go.
+//	    Test: internal/verify/simulation/kafka/c4_test.go and c4_faults_test.go.
 //
 // The table below shows, for each check, what is compared and which side is
 // real code and which side is simulated or a spec.

@@ -33,7 +33,7 @@ import (
 // tags 200 and 300, for a missing value.
 //
 // The interfaces include Fold, so a new case without it does not compile. Before,
-// the simulator had a table of 600 lines (verify/simulator/tags.go) that gave the
+// the simulator had a table of 600 lines (the old tags.go, deleted in T1.12d) that gave the
 // same numbers, and it panicked for a case without a row.
 
 // foldInstance folds the node name and the boot number.

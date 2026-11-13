@@ -383,7 +383,7 @@ func TestConformanceBrokerSmallSegments(t *testing.T) {
 // changes something the harness can observe, so C1 must catch it.
 //
 // C1 cannot catch the other injected bugs, because the client cannot see them
-// in a fault-free run. The simulator tests in internal/verify/simulator/kafka catch
+// in a fault-free run. The simulator tests in internal/verify/simulation/kafka catch
 // them: TestMutantsAreCaught in kafka_test.go runs every InjectedBug value and names
 // the invariant that must fail.
 //   - InjectedBugNoBatchCap, InjectedBugNoPartitionCap, InjectedBugSealOffByOne change only where the

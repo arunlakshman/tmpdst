@@ -49,8 +49,7 @@ linters:
     # must list every case. A default branch does not count as listing them.
     gochecksumtype:
       default-signifies-exhaustive: false
-    # The Kafka oracle (internal/verify/simulator/kafka and the new tree
-    # internal/verify/simulation/kafka) must stay independent of
+    # The Kafka oracle (internal/verify/simulation/kafka) must stay independent of
     # the specs it is tested against (decision 21). Only its own tests (the C4
     # check) may import a spec.
     depguard:
@@ -58,7 +57,6 @@ linters:
         kafka-oracle-no-spec:
           list-mode: lax
           files:
-            - "**/internal/verify/simulator/kafka/**"
             - "**/internal/verify/simulation/kafka/**"
             - "!$test"
           deny:
@@ -77,7 +75,7 @@ linters:
       analyze-types: true
       forbid:
         - pattern: ^panic$
-          msg: "return an error; panic is for impossible state in internal/core, internal/verify/simulator and internal/verify/simulation only (Effective Go, Panic)"
+          msg: "return an error; panic is for impossible state in internal/core and internal/verify/simulation only (Effective Go, Panic)"
     funlen:
       lines: 80
       statements: 50
@@ -114,7 +112,7 @@ linters:
     rules:
       - linters: [forbidigo]
         text: 'panic'
-        path: '^(internal/core|internal/verify/simulator|internal/verify/simulation|ops/tools|internal/verify/speccheck)/|_test\.go$'
+        path: '^(internal/core|internal/verify/simulation|ops/tools|internal/verify/speccheck)/|_test\.go$'
       - linters: [funlen, gocognit, nestif, dupl, interfacebloat]
         path: '_test\.go$'
 formatters:

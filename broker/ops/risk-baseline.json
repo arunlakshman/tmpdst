@@ -1,7 +1,5 @@
 {
   "threshold": 20,
   "note": "Ratchet baseline for cmd/riskscore. Regenerate: go run ./cmd/riskscore -profile \u003ccover.out\u003e -update-baseline   (or: make risk-baseline); review and commit the diff of ops/risk-baseline.json",
-  "functions": {
-    "internal/verify/simulator/fakeservices/fakelogservice.withDefaults": 20.94
-  }
+  "functions": {}
 }

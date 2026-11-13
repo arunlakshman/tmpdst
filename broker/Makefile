@@ -20,10 +20,9 @@ RISK_FLAGS    ?=
 # Seeds per scenario for the sim campaign.
 SIM_SEEDS     ?= 300
 
-# Everything except the two simulation trees and test/integrationtest (those have their own targets).
-# internal/verify/simulation is the tree on dst/kernel. internal/verify/simulator is the old tree;
-# it is deleted in step T1.12d of the monorepo plan.
-UNIT_PKGS = $(shell go list ./... | grep -vE '/verify/(simulator|simulation)(/|$$)|/test/integrationtest$$')
+# Everything except the simulation tree and test/integrationtest (those have their own targets).
+# internal/verify/simulation is the tree on dst/kernel. (The old tree was deleted in T1.12d.)
+UNIT_PKGS = $(shell go list ./... | grep -vE '/verify/simulation(/|$$)|/test/integrationtest$$')
 
 export RISK_THRESHOLD
 
@@ -48,10 +47,10 @@ $(COVER_DIR)/.gitignore:
 test: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_UNIT) $(UNIT_PKGS)
 
-# Deterministic simulation packages (the new tree and the old tree), then a seed campaign
+# Deterministic simulation packages (the tree on dst/kernel), then a seed campaign
 # for the broker (scenario kafka). kafka-log lives in mds-controlplane after CP extraction.
 sim: $(COVER_DIR)/.gitignore
-	go test -coverprofile=$(COVER_SIM) ./internal/verify/simulation/... ./internal/verify/simulator/...
+	go test -coverprofile=$(COVER_SIM) ./internal/verify/simulation/...
 	@$(MAKE) --no-print-directory sim-campaign
 
 # Seed campaigns through cmd/mdssimulator (the new tree, on dst/campaign). The echo scenario

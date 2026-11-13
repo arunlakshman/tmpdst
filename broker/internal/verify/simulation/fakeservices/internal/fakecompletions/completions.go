@@ -12,7 +12,7 @@
 // Unavailable503 (NotApplied). Windows never overlap and are re-rolled only
 // after the last one ends.
 //
-// The draws are the same as in the old tree (internal/verify/simulator/fakeservices/internal/fakecompletions),
+// The draws are the same as in the old tree (deleted in T1.12d),
 // in the same order. A parity test proves it.
 package fakecompletions
 

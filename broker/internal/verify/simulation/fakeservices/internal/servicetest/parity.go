@@ -16,8 +16,8 @@ import (
 )
 
 // This file holds the parity cases: scripted runs of a fake service that are
-// run once against the old fake (internal/verify/simulator, in a throwaway
-// generator) and once against the new fake. Both runs use this harness and this
+// run once against the old fake (in a throwaway generator, deleted in T1.12d)
+// and once against the new fake. Both runs use this harness and this
 // kernel, so the same seed and the same requests must give the same transcript,
 // including the number of random draws. The old runs are saved in
 // testdata/parity_*.txt. The case lists and the scripts are shared, so the two

@@ -2354,3 +2354,23 @@ T1.12d.
    tree, then `sim-campaign` (`mdssimulator -scenario kafka -seeds $(SIM_SEEDS)`, the new tool). The
    new tree is taken out of `UNIT_PKGS` (`make test`) and runs in `sim`, as the old tree did, so it
    does not run twice. No step of `build` was dropped.
+
+### T1.12d (old tree deleted)
+
+1. **The old tag oracle is gone (accepted loss).** `tags_oracle_test.go` compared the
+   Fold bytes of every case with the old table, including the cases no scenario
+   makes. It was a one-time proof at T1.6b. The golden pins are re-pinned, so its
+   loss is accepted. Its place is `broker/internal/core/tags_test.go`: every sum case
+   has a tag in its range, the tags are unique, and Fold writes the same non-empty
+   bytes each time. `tags_test.go` (the scan of `core/`) is replaced by the same file
+   (section 9.2).
+2. **The rand guard is kept.** `rand_test.go` checked that `checker.Rand` gives the
+   simulator stream. It is now `speccheck/checker/rand_test.go`, against `dst/rng`
+   (plain stream). `checker.Rand` has no `Derive`, so Derive is not compared. The
+   guard lasts until T1.14 deletes the checker copy.
+3. **Deleted:** `broker/internal/verify/simulator` (kernel, kafka, echo, fake
+   services, `fakelogservice`, `internal/campaign`, `internal/session`, the old
+   kafka golden test and pins) and `simulation/fakeservices/paritygen`. The parity
+   files in `simulation/fakeservices/testdata` stay.
+4. **Names:** the tree is still `simulation` after this step. The rename back to
+   `simulator` is the next commit.

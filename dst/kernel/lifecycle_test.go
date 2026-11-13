@@ -8,7 +8,7 @@ import (
 	"github.com/manifesterio/mds/dst/machine"
 )
 
-// Ports of the broker kernel tests (broker/internal/verify/simulator/kernel_test.go)
+// Ports of the broker kernel tests (the old broker kernel_test.go, deleted in T1.12d)
 // about boots, ends and stops.
 
 func TestBootInputIsFirstStep(t *testing.T) {

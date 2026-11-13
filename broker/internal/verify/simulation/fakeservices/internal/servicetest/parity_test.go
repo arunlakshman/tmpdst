@@ -17,8 +17,8 @@ import (
 // Parity with the old fakes (plan task T1.12a).
 //
 // Each case below is a scripted run (servicetest.ObjectCases and the like). The same
-// case was run against the OLD fake (internal/verify/simulator/fakeservices, driven
-// by the generator in the paritygen directory through a small adapter) and its
+// case was run against the OLD fake (driven by the paritygen generator, deleted in T1.12d,
+// through a small adapter) and its
 // transcript was saved in ../../testdata/parity_*.txt. A transcript holds the number of
 // steps and of random draws, the counters, the assertion coverage, samples of the
 // state hash, the faults and a digest of every reply. Here the NEW fake runs the

@@ -197,7 +197,7 @@ func (c *runner) print(name string, n int, results []Result, sum Summary) {
 		}
 	}
 	if !c.o.UntilStable { // the lines that make build prints
-		_, _ = fmt.Fprintln(w, summaryLine(name, n, sum))
+		_, _ = fmt.Fprintln(w, summaryLine(name, n, sum, c.o.SummaryCounters))
 	}
 	for _, r := range results {
 		if !r.OK {
@@ -208,22 +208,28 @@ func (c *runner) print(name string, n int, results []Result, sum Summary) {
 
 // summaryLine is the one-line summary of the batch of one scenario. After the
 // steps it lists the other counters, by name.
-func summaryLine(name string, seeds int, sum Summary) string {
+func summaryLine(name string, seeds int, sum Summary, columns []SummaryCounter) string {
 	status := "ok"
 	if sum.Counts.Failed > 0 {
 		status = fmt.Sprintf("FAILED %d of %d seeds", sum.Counts.Failed, seeds)
 	}
 	var line strings.Builder
 	fmt.Fprintf(&line, "%-15s %4d seeds  %9d steps", name, seeds, sum.Counters["steps"])
-	others := make([]string, 0, len(sum.Counters))
-	for k := range sum.Counters {
-		if k != "steps" {
-			others = append(others, k)
+	if len(columns) > 0 {
+		for _, col := range columns {
+			fmt.Fprintf(&line, "  "+col.Format, sum.Counters[col.Key])
 		}
-	}
-	slices.Sort(others)
-	for _, k := range others {
-		fmt.Fprintf(&line, "  %7d %s", sum.Counters[k], k)
+	} else {
+		others := make([]string, 0, len(sum.Counters))
+		for k := range sum.Counters {
+			if k != "steps" {
+				others = append(others, k)
+			}
+		}
+		slices.Sort(others)
+		for _, k := range others {
+			fmt.Fprintf(&line, "  %7d %s", sum.Counters[k], k)
+		}
 	}
 	fmt.Fprintf(&line, "  %5.1fs  hash %08x  %s", sum.Elapsed.Seconds(), uint32(sum.Hash), status)
 	return line.String()
@@ -244,6 +250,13 @@ func Replay(reg *Registry, scenario string, seed uint64, w io.Writer) int {
 	r := sc.Run(seed, RunOptions{Log: true, HaltOnFirst: true})
 	for _, l := range r.Log {
 		_, _ = fmt.Fprintln(w, l)
+	}
+	if r.Text != "" {
+		_, _ = fmt.Fprintln(w, r.Text)
+		if !r.OK {
+			return 1
+		}
+		return 0
 	}
 	_, _ = fmt.Fprintf(w, "seed %d: steps=%d rand=%d hash=%016x\n", seed, r.Steps, r.RandCalls, r.Hash)
 	for _, f := range r.Failures {

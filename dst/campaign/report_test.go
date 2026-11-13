@@ -232,3 +232,29 @@ func TestWriteFailure(t *testing.T) {
 		t.Fatalf("got:\n%s\nwant:\n%s", b.String(), want)
 	}
 }
+
+// TestCatalogFlags: an Always that is recorded only on failure is not "never
+// checked", and a Reachable that is not expected is not "never reached" and is
+// not counted as expected.
+func TestCatalogFlags(t *testing.T) {
+	cat := catalog{asserts: []assert.Declared{
+		{Name: "t: reached", Kind: assert.KindReachable},
+		{Name: "t: optional", Kind: assert.KindReachable, NotExpected: true},
+		{Name: "t: violation", Kind: assert.KindAlways, FailureOnly: true},
+		{Name: "t: checked always", Kind: assert.KindAlways},
+	}}
+	cov := map[string]Coverage{
+		"t: reached":        {Kind: "reachable", Checks: 1, Passes: 1},
+		"t: checked always": {Kind: "always", Checks: 2, Passes: 2},
+	}
+	rep := buildReport(campaignData{first: 1, seen: [][]string{{"x"}}, total: Summary{Coverage: cov}, runs: 1}, cat)
+	if len(rep.NeverReached) != 0 || len(rep.NeverChecked) != 0 {
+		t.Fatalf("never reached %v, never checked %v", rep.NeverReached, rep.NeverChecked)
+	}
+	if rep.expectedPaths != 1 {
+		t.Fatalf("expected paths %d, want 1", rep.expectedPaths)
+	}
+	if text := rep.coverageText(); text != "coverage: all 1 expected paths were reached" {
+		t.Fatalf("coverage text %q", text)
+	}
+}

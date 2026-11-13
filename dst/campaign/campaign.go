@@ -70,6 +70,10 @@ type Result struct {
 	// line, only when RunOptions.Log was set.
 	Tail []string
 	Log  []string
+	// Text is the own text of the product for this seed. When it is set, a
+	// failed seed prints it in place of the standard failure lines, and Replay
+	// prints it after the step lines in place of the standard last lines.
+	Text string
 }
 
 // Counts summarizes how many seeds ran and how many failed.

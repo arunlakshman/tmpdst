@@ -414,10 +414,43 @@ func TestSummaryLine(t *testing.T) {
 		Counters: map[string]uint64{"steps": 480, "writes": 12, "acked": 3},
 		Hash:     0x1234abcd5678, Counts: Counts{Seeds: 4, Failed: 1}, Elapsed: 1500 * time.Millisecond,
 	}
-	got := summaryLine("kv", 4, sum)
+	got := summaryLine("kv", 4, sum, nil)
 	want := "kv                 4 seeds        480 steps        3 acked       12 writes    1.5s  hash abcd5678  FAILED 1 of 4 seeds"
 	if got != want {
 		t.Fatalf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+// TestSummaryLineColumns: the columns of Options.SummaryCounters set the order,
+// the width and the label of the counters.
+func TestSummaryLineColumns(t *testing.T) {
+	sum := Summary{
+		Counters: map[string]uint64{"steps": 480, "writes": 12, "acked": 3},
+		Hash:     0x1234abcd5678, Counts: Counts{Seeds: 4}, Elapsed: 1500 * time.Millisecond,
+	}
+	cols := []SummaryCounter{{Key: "writes", Format: "%4d slots"}, {Key: "acked", Format: "%3d acked writes"}}
+	got := summaryLine("kv", 4, sum, cols)
+	want := "kv                 4 seeds        480 steps    12 slots    3 acked writes    1.5s  hash abcd5678  ok"
+	if got != want {
+		t.Fatalf("got:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+// TestResultTextReplacesTheStandardFailureLines: a seed with its own Text
+// prints that text, for a failed campaign seed and for a replay.
+func TestResultTextReplacesTheStandardFailureLines(t *testing.T) {
+	r := Result{Seed: 3, OK: false, Reproduce: "again", Text: "OWN TEXT",
+		Failures: []Failure{{Kind: "violation", Property: "p", Detail: "d"}}}
+	var b bytes.Buffer
+	writeFailure(&b, "sc", r)
+	if b.String() != "OWN TEXT\n" {
+		t.Fatalf("got %q", b.String())
+	}
+	var reg Registry
+	reg.Add(Scenario{Name: "sc", Run: func(uint64, RunOptions) Result { return r }})
+	b.Reset()
+	if code := Replay(&reg, "sc", 3, &b); code != 1 || b.String() != "OWN TEXT\n" {
+		t.Fatalf("code %d, got %q", code, b.String())
 	}
 }
 

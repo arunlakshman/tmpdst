@@ -36,6 +36,12 @@ type Options struct {
 	// Below it, or when it is 0, a gap is only reported.
 	MinSeedsForCoverage int
 
+	// SummaryCounters says which counters the summary line of a scenario
+	// shows after the steps, in this order, and how. A Format has one number
+	// verb and the label, for example "%7d slots". When it is empty, the line
+	// shows every counter, sorted by name, as "%7d name".
+	SummaryCounters []SummaryCounter
+
 	Report  bool // print the report after the campaign
 	JSON    bool // print the report as JSON and nothing else
 	Verbose bool // print one line for each seed
@@ -53,6 +59,12 @@ type Options struct {
 	// summary line for each scenario and batch, and the details of each failed
 	// seed. Main sets it. It is not read from flags.
 	Out io.Writer
+}
+
+// SummaryCounter is one column of the summary line of a scenario.
+type SummaryCounter struct {
+	Key    string // the name of the counter in Result.Counters
+	Format string // for example "%7d slots"
 }
 
 // Config is what a product gives the standard main.

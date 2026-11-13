@@ -118,7 +118,7 @@ func buildReport(d campaignData, cat catalog) Report {
 	r.NeverReached = neverReached(d.total.Coverage, cat.asserts)
 	r.NeverChecked = neverChecked(d.total.Coverage, cat.asserts)
 	for _, a := range cat.asserts {
-		if a.Kind == assert.KindSometimes || a.Kind == assert.KindReachable {
+		if (a.Kind == assert.KindSometimes || a.Kind == assert.KindReachable) && !a.NotExpected {
 			r.expectedPaths++
 		}
 	}
@@ -142,7 +142,8 @@ func assertRows(cov map[string]Coverage) []AssertRow {
 
 // neverReached lists the paths that no seed passed. A path that never ran
 // has no coverage entry at all, so the declared catalog is the only thing
-// that can name it.
+// that can name it. A path declared as not expected (Declared.NotExpected) is
+// left out.
 func neverReached(cov map[string]Coverage, declared []assert.Declared) []string {
 	out := []string{}
 	for n, c := range cov {
@@ -152,7 +153,7 @@ func neverReached(cov map[string]Coverage, declared []assert.Declared) []string 
 	}
 	for _, d := range declared {
 		isPath := d.Kind == assert.KindSometimes || d.Kind == assert.KindReachable
-		if isPath && cov[d.Name].Passes == 0 && !slices.Contains(out, d.Name) {
+		if isPath && !d.NotExpected && cov[d.Name].Passes == 0 && !slices.Contains(out, d.Name) {
 			out = append(out, d.Name)
 		}
 	}
@@ -160,11 +161,12 @@ func neverReached(cov map[string]Coverage, declared []assert.Declared) []string 
 	return out
 }
 
-// neverChecked lists the declared Always properties that no seed checked.
+// neverChecked lists the declared Always properties that no seed checked. An
+// Always that is recorded only on failure (Declared.FailureOnly) is left out.
 func neverChecked(cov map[string]Coverage, declared []assert.Declared) []string {
 	var out []string
 	for _, d := range declared {
-		if d.Kind == assert.KindAlways && cov[d.Name].Checks == 0 {
+		if d.Kind == assert.KindAlways && !d.FailureOnly && cov[d.Name].Checks == 0 {
 			out = append(out, d.Name)
 		}
 	}
@@ -295,6 +297,10 @@ func writeList(p func(string, ...any), title string, names []string, always bool
 // writeFailure prints the details of one failed seed: one line for each
 // failure, the replay command, and the last step lines of the run.
 func writeFailure(w io.Writer, scenario string, r Result) {
+	if r.Text != "" {
+		_, _ = fmt.Fprintln(w, r.Text)
+		return
+	}
 	for _, f := range r.Failures {
 		more := ""
 		if f.Repeats > 0 {

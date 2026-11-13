@@ -13,7 +13,25 @@ var (
 	catSometimes   = assert.NewSometimes("assert test: sometimes")
 	catReachable   = assert.NewReachable("assert test: reachable")
 	catUnreachable = assert.NewUnreachable("assert test: unreachable")
+	catOnFailure   = assert.NewAlwaysOnFailure("assert test: on failure")
+	catNotExpected = assert.NewReachableNotExpected("assert test: not expected")
 )
+
+func TestCatalogFlags(t *testing.T) {
+	flags := map[string]assert.Declared{}
+	for _, d := range assert.Catalog() {
+		flags[d.Name] = d
+	}
+	if d := flags[catOnFailure.Name()]; d.Kind != assert.KindAlways || !d.FailureOnly || d.NotExpected {
+		t.Fatalf("on failure: %+v", d)
+	}
+	if d := flags[catNotExpected.Name()]; d.Kind != assert.KindReachable || !d.NotExpected || d.FailureOnly {
+		t.Fatalf("not expected: %+v", d)
+	}
+	if d := flags[catAlways.Name()]; d.FailureOnly || d.NotExpected {
+		t.Fatalf("plain always: %+v", d)
+	}
+}
 
 func TestCatalogListsEveryDeclaration(t *testing.T) {
 	want := map[string]assert.Kind{

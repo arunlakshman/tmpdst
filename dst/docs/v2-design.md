@@ -2078,3 +2078,29 @@ written, and the smallest change that was made.
    mutex and the real clock). The header of the dst gate script says so.
 6. **The server no longer uses `simadapter`.** Only the simulator host code does, until step
    c.
+
+### T1.11c (the control plane host code moves to dst/kernel)
+
+1. **Catalog options for three kinds of declaration (answer to T1.6d notes 7 and 8, and to
+   decision D5).** The cpsim report text must stay as it is, so the catalog needs three small
+   flags. They are on the declaration, not in a campaign list:
+   - `assert.NewAlwaysOnFailure(name)`: an Always that the code records only when it fails (the
+     15 `violation` names of the control plane simulator, such as "sim: run ends"). It is an
+     `assert.Always` in every other way. `Declared.FailureOnly` is true, and the campaign does
+     not list it under "never checked".
+   - `assert.NewReachableNotExpected(name)`: a Reachable that a campaign may miss.
+     `Declared.NotExpected` is true. It is not listed under "never reached" and not counted in
+     "all N expected paths were reached".
+   - `fault.NewFaultSite(name)`: a site that the code asks with `Injector.Fault`. The injector
+     does not count a Fault site, so `fault.Sites()` leaves it out, and it is not listed under
+     "never fired" (`logcp_stall`, `logcp_crash`).
+2. **D5 changed by the user.** The three extra Reachable names ("idempotent replay after
+   takeover", "put refused at or below the floor", "replayed key answered from the window") are
+   declared with `NewReachableNotExpected`. The expected set is the old hand list of 27 names.
+   "idempotent replay after takeover" is never reached by cpsim (0 hits in 2000 seeds of every
+   scenario and in 10000 more chaos seeds); it is recorded in `ISSUES.md`.
+3. **Two options for cpsim text in `dst/campaign`.** `Options.SummaryCounters` (set through
+   `Config.Defaults`) gives the order, width and label of the counters in the summary line of a
+   scenario ("%7d slots", "%6d acked writes"). `Result.Text` is the own text of a product for one
+   seed: a failed seed prints it in place of the standard failure lines, and `Replay` prints it
+   after the step lines. cpsim uses it for `simulator.Report`.

@@ -6,10 +6,11 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 const (
-	timerCheckpoint = runtime.TimerID(4)
+	timerCheckpoint = machine.TimerID(4)
 
 	defaultCheckpointPrefix = "checkpoint/"
 )
@@ -33,15 +34,15 @@ func (m *Replica) checkpointEnabled() bool {
 	return m.config.CheckpointEvery > 0 || m.config.CheckpointPrefix != ""
 }
 
-func (m *Replica) armCheckpoint() []any {
+func (m *Replica) armCheckpoint() []runtime.Action {
 	if m.config.CheckpointEvery <= 0 || m.exited {
 		return nil
 	}
 	m.checkpointGen++
-	return []any{arm(timerCheckpoint, m.checkpointGen, m.config.CheckpointEvery)}
+	return []runtime.Action{arm(timerCheckpoint, m.checkpointGen, m.config.CheckpointEvery)}
 }
 
-func (m *Replica) onCheckpointTimer(e runtime.TimerFired) []any {
+func (m *Replica) onCheckpointTimer(e runtime.TimerFired) []runtime.Action {
 	if e.Gen != m.checkpointGen {
 		return nil
 	}
@@ -92,7 +93,7 @@ func (m *Replica) decide(written bool, reason string) {
 	})
 }
 
-func (m *Replica) maybeCheckpoint() []any {
+func (m *Replica) maybeCheckpoint() []runtime.Action {
 	switch {
 	case m.checkpointRequest != 0:
 		m.decide(false, "checkpoint_in_flight")
@@ -133,26 +134,26 @@ func (m *Replica) maybeCheckpoint() []any {
 	m.checkpointPending = slot
 	m.nextReq++
 	m.checkpointRequest, m.checkpointStage = m.nextReq, stageUpload
-	return []any{runtime.ObjectPut{Req: m.checkpointRequest, Key: m.checkpointKeyFor(slot), Data: m.checkpointData}}
+	return []runtime.Action{runtime.ObjectPut{Req: m.checkpointRequest, Key: m.checkpointKeyFor(slot), Data: m.checkpointData}}
 }
 
 // emitCheckpointList starts a restore: find the newest checkpoint object.
-func (m *Replica) emitCheckpointList() []any {
+func (m *Replica) emitCheckpointList() []runtime.Action {
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingObjList
-	return []any{runtime.ObjectList{Req: m.pending, Prefix: m.checkpointPrefix()}}
+	return []runtime.Action{runtime.ObjectList{Req: m.pending, Prefix: m.checkpointPrefix()}}
 }
 
-func (m *Replica) emitCheckpointGet(key string) []any {
+func (m *Replica) emitCheckpointGet(key string) []runtime.Action {
 	m.restoreKey = key
 	m.nextReq++
 	m.pending = m.nextReq
 	m.pendingKind = pendingObjGet
-	return []any{runtime.ObjectGet{Req: m.pending, Ref: runtime.SegmentRef{Key: key}}}
+	return []runtime.Action{runtime.ObjectGet{Req: m.pending, Ref: runtime.SegmentRef{Key: key}}}
 }
 
-func (m *Replica) onObjListDone(d runtime.ObjectListDone) []any {
+func (m *Replica) onObjListDone(d runtime.ObjectListDone) []runtime.Action {
 	if d.Req != m.pending || m.pendingKind != pendingObjList {
 		return nil
 	}
@@ -170,7 +171,7 @@ func (m *Replica) onObjListDone(d runtime.ObjectListDone) []any {
 }
 
 // noCheckpointFound handles a restore that found no checkpoint object.
-func (m *Replica) noCheckpointFound() []any {
+func (m *Replica) noCheckpointFound() []runtime.Action {
 	m.checkpointRetry = false
 	if m.needsCheckpoint {
 		// The log was trimmed under us but no snapshot is there (yet). Retry;
@@ -180,7 +181,7 @@ func (m *Replica) noCheckpointFound() []any {
 	return m.afterRestore()
 }
 
-func (m *Replica) onObjGetDone(d runtime.ObjectGetDone) []any {
+func (m *Replica) onObjGetDone(d runtime.ObjectGetDone) []runtime.Action {
 	if d.Req != m.pending || m.pendingKind != pendingObjGet {
 		return nil
 	}
@@ -196,7 +197,7 @@ func (m *Replica) onObjGetDone(d runtime.ObjectGetDone) []any {
 	m.checkpointRetry = false
 	if len(d.Data) > 0 && metadb.CheckSnapshot(d.Data) != nil {
 		// A changed byte in the read: the stored object may be fine. Read it again.
-		m.env.Reachable("logcp-sim: checkpoint read had a bad CRC, read again")
+		m.env.Reachable(checkpointReadBadCRC)
 		return m.emitCheckpointGet(m.restoreKey)
 	}
 	if len(d.Data) > 0 {
@@ -207,22 +208,22 @@ func (m *Replica) onObjGetDone(d runtime.ObjectGetDone) []any {
 		m.startAt(runtime.LogPosition(slot))
 		m.checkpointSlot = runtime.LogPosition(slot)
 		m.needsCheckpoint = false
-		m.env.Reachable("logcp-sim: replica restored from a checkpoint")
+		m.env.Reachable(replicaRestoredFromCheckpoint)
 		return m.afterRestore()
 	}
 	return m.noCheckpointFound()
 }
 
-func (m *Replica) armCheckpointRetry() []any {
+func (m *Replica) armCheckpointRetry() []runtime.Action {
 	after := m.config.Heartbeat
 	if after <= 0 {
-		after = 250 * runtime.Millisecond
+		after = 250 * machine.Millisecond
 	}
 	m.checkpointGen++
-	return []any{arm(timerCheckpoint, m.checkpointGen, after)}
+	return []runtime.Action{arm(timerCheckpoint, m.checkpointGen, after)}
 }
 
-func (m *Replica) onObjPutDone(d runtime.ObjectPutDone) []any {
+func (m *Replica) onObjPutDone(d runtime.ObjectPutDone) []runtime.Action {
 	if m.checkpointRequest == 0 || d.Req != m.checkpointRequest || m.checkpointStage != stageUpload {
 		return nil
 	}
@@ -246,7 +247,7 @@ func (m *Replica) onObjPutDone(d runtime.ObjectPutDone) []any {
 	return acts
 }
 
-func (m *Replica) emitTrim(checkpointSlot runtime.LogPosition) []any {
+func (m *Replica) emitTrim(checkpointSlot runtime.LogPosition) []runtime.Action {
 	keep := m.config.KeepSlots
 	if keep <= 0 {
 		return nil
@@ -259,10 +260,10 @@ func (m *Replica) emitTrim(checkpointSlot runtime.LogPosition) []any {
 	m.nextReq++
 	m.checkpointRequest, m.checkpointStage = m.nextReq, stageTrim
 	m.trimThrough = through
-	return []any{runtime.LogDeleteOld{Req: m.checkpointRequest, Through: through}}
+	return []runtime.Action{runtime.LogDeleteOld{Req: m.checkpointRequest, Through: through}}
 }
 
-func (m *Replica) onTrimDone(d runtime.LogDeleteOldDone) []any {
+func (m *Replica) onTrimDone(d runtime.LogDeleteOldDone) []runtime.Action {
 	if m.checkpointRequest == 0 || d.Req != m.checkpointRequest || m.checkpointStage != stageTrim {
 		return nil
 	}
@@ -270,7 +271,7 @@ func (m *Replica) onTrimDone(d runtime.LogDeleteOldDone) []any {
 	m.checkpointRequest, m.checkpointStage, m.trimThrough = 0, 0, 0
 	if d.Err == runtime.OK && d.Outcome == runtime.Applied {
 		m.trimFloor = through + 1
-		m.env.Reachable("logcp-sim: log trimmed below a checkpoint")
+		m.env.Reachable(logTrimmedBelowCheckpoint)
 	}
 	return nil
 }

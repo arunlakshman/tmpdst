@@ -4,8 +4,9 @@ import (
 	"cmp"
 	"slices"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // join handles a JoinGroup call (rules 3 to 11). The call parks until its round ends.
@@ -31,7 +32,7 @@ func (m *Machine) join(s *serving, in Join) {
 	}
 	isNew := mm == nil
 	if isNew {
-		mm = m.newMember(s, g, newMemberID(in.ClientID, m.cx.Rand()))
+		mm = m.newMember(s, g, newMemberID(in.ClientID, m.env.NewID()))
 		mm.isNew = true
 		m.arm(&mm.session, m.cfg.NewMemberTimeout)
 	}
@@ -63,7 +64,7 @@ func (m *Machine) join(s *serving, in Join) {
 // rebalance timeout moves the round end later (rule 10).
 func (m *Machine) joinRound(g *group, jn *joining, mm *member, isNew bool) {
 	if isNew && jn.delay {
-		m.arm(&g.delay, m.after(min(m.now+runtime.NodeTime(m.cfg.InitialDelay), jn.end)))
+		m.arm(&g.delay, m.after(min(m.now+machine.NodeTime(m.cfg.InitialDelay), jn.end)))
 	}
 	if until := jn.start + g.longest(); !jn.ended && until > jn.end {
 		jn.end = until
@@ -86,7 +87,7 @@ func (m *Machine) openRound(g *group, initial bool) *joining {
 	m.arm(&g.round, m.after(jn.end))
 	if initial {
 		jn.delay = true
-		m.arm(&g.delay, m.after(min(m.now+runtime.NodeTime(m.cfg.InitialDelay), jn.end)))
+		m.arm(&g.delay, m.after(min(m.now+machine.NodeTime(m.cfg.InitialDelay), jn.end)))
 	} else {
 		m.stop(&g.delay)
 	}
@@ -181,7 +182,7 @@ func (m *Machine) installed(g *group, op contract.GroupInstall) {
 	g.generation, g.protocol, g.leader = op.Generation, op.Protocol, op.Leader
 	g.phase = &syncing{syncs: map[string]CallID{}}
 	m.stop(&g.delay)
-	m.arm(&g.round, runtime.Duration(g.longest())) // the sync deadline (rule 24)
+	m.arm(&g.round, machine.Duration(g.longest())) // the sync deadline (rule 24)
 	list := make([]Member, 0, len(op.Members))
 	for _, gm := range op.Members {
 		list = append(list, Member{ID: gm.MemberID, InstanceID: gm.GroupInstanceID, Metadata: gm.Metadata})

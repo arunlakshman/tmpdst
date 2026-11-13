@@ -7,6 +7,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // metadata answers Metadata (decision 29): this broker is the leader of every
@@ -31,7 +32,7 @@ func (b *Broker) metadata(s *slot, r *kmsg.MetadataRequest) []core.Action {
 
 // metaResp builds the Metadata response of o from the control plane's topics.
 // A non-zero code (the call failed) marks every requested topic with it.
-func (b *Broker) metaResp(o *operation, infos []core.TopicInfo, code kafkaErrorCode) {
+func (b *Broker) metaResp(o *operation, infos []contract.TopicInfo, code kafkaErrorCode) {
 	r := o.creq.(*kmsg.MetadataRequest)
 	response := kmsg.NewPtrMetadataResponse()
 	response.ClusterID, response.ControllerID = new("mds"), b.config.BrokerID
@@ -82,7 +83,7 @@ func (b *Broker) liveList() []core.BrokerAddr {
 	return all
 }
 
-func (b *Broker) metaTopic(name string, infos []core.TopicInfo, code kafkaErrorCode) kmsg.MetadataResponseTopic {
+func (b *Broker) metaTopic(name string, infos []contract.TopicInfo, code kafkaErrorCode) kmsg.MetadataResponseTopic {
 	t := kmsg.NewMetadataResponseTopic()
 	t.Topic = new(name)
 	for _, in := range infos {
@@ -113,7 +114,7 @@ func (b *Broker) listOffsets(s *slot, r *kmsg.ListOffsetsRequest) []core.Action 
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
 			rp := &response.Topics[i].Partitions[j]
-			acts = append(acts, b.listOne(s, core.NewTopicPartition(t.Topic, p.Partition), p.Timestamp, rp)...)
+			acts = append(acts, b.listOne(s, contract.NewTopicPartition(t.Topic, p.Partition), p.Timestamp, rp)...)
 		}
 	}
 	return acts

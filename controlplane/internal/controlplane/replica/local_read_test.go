@@ -3,20 +3,21 @@ package replica_test
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // brokerFrom is the sender of the requests in these tests.
-var brokerFrom = runtime.NodeInstance{Node: "b1"}
+var brokerFrom = machine.NodeInstance{Node: "b1"}
 
 func readyMachine(t *testing.T) *replica.Replica {
 	t.Helper()
 	m := newMachine(t, replica.Config{
 		Writer: "s1", Rank: 1,
-		CatchUpEvery:  runtime.Millisecond,
-		TakeoverAfter: 10 * runtime.Second,
+		CatchUpEvery:  machine.Millisecond,
+		TakeoverAfter: 10 * machine.Second,
 	})
 	bootEmpty(t, m, 0)
 	if !m.Ready() {
@@ -25,7 +26,7 @@ func readyMachine(t *testing.T) *replica.Replica {
 	return m
 }
 
-func onlyReply(t *testing.T, acts []any) runtime.ControlPlaneReply {
+func onlyReply(t *testing.T, acts []runtime.Action) runtime.ControlPlaneReply {
 	t.Helper()
 	if len(acts) != 1 {
 		t.Fatalf("want one reply, got %v", acts)
@@ -52,7 +53,7 @@ func TestLocalReadAnswersAtOnce(t *testing.T) {
 
 // A node that is not Ready refuses at once.
 func TestLocalReadRefusedWhenNotReady(t *testing.T) {
-	m := newMachine(t, replica.Config{Writer: "s1", CatchUpEvery: runtime.Millisecond})
+	m := newMachine(t, replica.Config{Writer: "s1", CatchUpEvery: machine.Millisecond})
 	step(m, runtime.NodeStarted{})
 	r := onlyReply(t, step(m, runtime.LocalRead{From: brokerFrom, Req: 3, Op: contract.DescribeTopics{}}))
 	if r.Done.Err != runtime.ErrUnavailable || r.Done.Req != 3 {

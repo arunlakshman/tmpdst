@@ -1,7 +1,7 @@
 # broker
 
 The Kafka-protocol broker (Go). It is a module of the MDS monorepo. It uses the control plane
-through the client in `internal/cpclient`. It imports `dst`, `shared` and `controlplane`.
+through the client in `controlplane/client`. It imports `dst`, `shared` and `controlplane`.
 
 ## Bootstrap
 
@@ -34,8 +34,8 @@ after the other modules and writes `bin/mdsbroker`. The control plane proto is i
 | vet | `go vet ./...` |
 | lint | `golangci-lint run ./...` (see `.golangci.yml`) |
 | compile | `go build ./...` |
-| test | unit packages (not `internal/verify/simulator`, not `test/integrationtest`) |
-| sim | `go test ./internal/verify/simulator/...` |
+| test | unit packages (not the simulation tree `internal/verify/simulator`, not `test/integrationtest`) |
+| sim | `go test ./internal/verify/simulator/...`, then `go run ./cmd/mdssimulator -scenario kafka -seeds 300` |
 | it-hermetic | `go test ./test/integrationtest/` (in-process memstore) |
 | risk | change risk score <= 20 (`docs/risk-gate.md`) |
 

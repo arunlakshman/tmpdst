@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"strings"
 
-	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Segment keys are "seg/<id hex>": one flat name (decision 43). The ID is a
@@ -17,24 +17,24 @@ import (
 const keyPrefix = "seg/"
 
 // SegmentKey names the object of one segment upload.
-func SegmentKey(id core.ID) string {
+func SegmentKey(id machine.ID) string {
 	return keyPrefix + hex.EncodeToString(id[:])
 }
 
 // ParseSegmentKey inverts SegmentKey. ok is false for any string SegmentKey
 // could not have produced, including the old nested "seg/<node>/<inc>/<id>".
-func ParseSegmentKey(key string) (core.ID, bool) {
-	var id core.ID
+func ParseSegmentKey(key string) (machine.ID, bool) {
+	var id machine.ID
 	rest, found := strings.CutPrefix(key, keyPrefix)
 	if !found {
 		return id, false
 	}
 	if _, err := hex.Decode(id[:], []byte(rest)); err != nil {
-		return core.ID{}, false
+		return machine.ID{}, false
 	}
 	// hex.Decode accepts upper case; only the canonical spelling is a key.
 	if SegmentKey(id) != key {
-		return core.ID{}, false
+		return machine.ID{}, false
 	}
 	return id, true
 }

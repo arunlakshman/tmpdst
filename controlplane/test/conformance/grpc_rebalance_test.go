@@ -14,9 +14,10 @@ import (
 	"google.golang.org/grpc/status"
 
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/spec"
+	"github.com/manifesterio/mds/controlplane/spec"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // The group calls over the wire, against the rebalance model. The real node
@@ -50,7 +51,7 @@ type rbgWorld struct {
 	t     *testing.T
 	n     *grpcNode
 	model *spec.Rebalance
-	now   runtime.NodeTime
+	now   machine.NodeTime
 
 	queue []rbgInput // inputs for the model, given at the next check
 	last  spec.CallID
@@ -65,14 +66,14 @@ type rbgWorld struct {
 // rbgInput is one input of the model, at its time. newName names a new member
 // whose id the answer of the node gives.
 type rbgInput struct {
-	at      runtime.NodeTime
+	at      machine.NodeTime
 	in      any
 	newName string
 }
 
 // TestGRPCRebalance runs the script.
 func TestGRPCRebalance(t *testing.T) {
-	w := &rbgWorld{t: t, n: newGRPCNodeDelay(t, rbgDelay), model: spec.NewRebalance(runtime.Duration(rbgDelay)),
+	w := &rbgWorld{t: t, n: newGRPCNodeDelay(t, rbgDelay), model: spec.NewRebalance(machine.Duration(rbgDelay)),
 		got: map[spec.CallID]string{}, abandoned: map[spec.CallID]bool{}, ids: map[string]string{}}
 	topic := contract.CreateTopic{Name: "t", Partitions: 2}
 	if d, err := w.n.Exec(t.Context(), topic); err != nil || d.Err != runtime.OK {
@@ -154,12 +155,12 @@ func TestGRPCRebalance(t *testing.T) {
 	w.fetch()
 }
 
-func (w *rbgWorld) tick(d time.Duration) { w.now += runtime.NodeTime(d) }
+func (w *rbgWorld) tick(d time.Duration) { w.now += machine.NodeTime(d) }
 
 // input queues one input of the model and returns its call id.
 func (w *rbgWorld) input(newName string, in func(spec.CallID) any) spec.CallID {
 	w.last++
-	w.now += runtime.NodeTime(runtime.Millisecond)
+	w.now += machine.NodeTime(machine.Millisecond)
 	w.queue = append(w.queue, rbgInput{at: w.now, in: in(w.last), newName: newName})
 	return w.last
 }
@@ -369,8 +370,8 @@ func (w *rbgWorld) fetch() {
 	op := contract.OffsetFetch{Group: rbgGroup}
 	d, err := w.n.send(w.t.Context(), op)
 	want := w.model.Store.Apply(op)
-	if err != nil || !sameAnswer(d, want) {
-		w.t.Fatalf("offset fetch\n  model: %s\n  node:  %s %v", show(want), show(d), err)
+	if err != nil || !sameAnswer(d.Answer(), want) {
+		w.t.Fatalf("offset fetch\n  model: %s\n  node:  %s %v", show(want), show(d.Answer()), err)
 	}
 }
 

@@ -11,7 +11,7 @@ option go_package = "github.com/manifesterio/mds/controlplane/api/controlplane/o
 // how. buf runs the plugin with the other plugins (see buf.gen.yaml), and it
 // writes three files that are not in git:
 //
-//   internal/controlplane/contract/wire_types_gen.go  the structs of package contract
+//   contract/wire_types_gen.go  the structs of package contract
 //   internal/controlplane/domain/rebalance/wire_types_gen.go  the structs of package rebalance
 //   internal/controlplane/wire/wire_gen.go            <Message>ToCore and <Message>FromCore
 //
@@ -23,7 +23,7 @@ option go_package = "github.com/manifesterio/mds/controlplane/api/controlplane/o
 // in its place. Field comments are not copied.
 //
 // Go types are always written with their package, such as "contract.Offset". The
-// plugin knows the packages contract, rebalance and runtime.
+// plugin knows the packages contract and rebalance.
 
 extend google.protobuf.FileOptions {
   // no_converters gives the messages of the file a struct but no converters,
@@ -36,7 +36,7 @@ extend google.protobuf.MessageOptions {
   // "contract.CommitSegment". Its package is contract or rebalance.
   string go_struct = 51001;
   // go_existing is a Go type that is declared somewhere else, by hand or by the
-  // go_struct of another message, such as "runtime.SegmentRef". The plugin
+  // go_struct of another message, such as "contract.SegmentRef". The plugin
   // writes only the converters to and from it.
   string go_existing = 51002;
 }
@@ -46,7 +46,7 @@ extend google.protobuf.FieldOptions {
   // field name in Go style: member_id becomes MemberID.
   string go_name = 51001;
   // go_type is a named Go type for an integer or enum field, such as
-  // "contract.Offset" or "runtime.ErrCode". An enum field must have it.
+  // "contract.Offset" or "contract.ErrCode". An enum field must have it.
   string go_type = 51002;
   // go_embed makes the field an embedded field of the struct.
   bool go_embed = 51003;

@@ -2,46 +2,37 @@ package simulator
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/check"
-	dstclock "github.com/manifesterio/mds/dst/clock"
-	"github.com/manifesterio/mds/dst/eng"
-	"github.com/manifesterio/mds/dst/fault"
+	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/rng"
-	"github.com/manifesterio/mds/dst/sched"
-	dstsim "github.com/manifesterio/mds/dst/sim"
-	"github.com/manifesterio/mds/dst/trace"
 )
 
 // Config is one run.
 type Config struct {
-	Seed     uint64
-	Scenario string            // a name from ScenarioNames; empty means "basic"
-	Nodes    int               // number of replicas; zero means 3
-	Steps    int               // events in the fault phase; zero means DefaultSteps
-	Bug      Bug               // a planted bug; normally BugNone
-	Trace    func(line string) // when set, every step is passed to it
+	Seed        uint64
+	Scenario    string // a name from ScenarioNames; empty means "basic"
+	Nodes       int    // number of replicas; zero means 3
+	Steps       int    // events in the fault phase; zero means DefaultSteps
+	Bug         Bug    // a planted bug; normally BugNone
+	Log         bool   // keep every step line in Result.Log
+	HaltOnFirst bool   // stop the run at the first failure (a replay)
 
 	// noGroups leaves out the rebalance machines and the consumers. A run is
-	// then the run of before they were added, step for step: a test uses it
-	// to show that the old trace hashes come back.
+	// then the run of before they were added: a test uses it to show that the
+	// groups are the only change to the trace.
 	noGroups bool
+
+	// verifyHashes makes the kernel check every step that a cached state hash
+	// is still right (a test turns it on).
+	verifyHashes bool
 }
 
-// DefaultSteps is the length of the fault phase of a run, in scheduler events.
+// DefaultSteps is the length of the fault phase of a run, in queue events.
 const DefaultSteps = 4000
-
-// Failure is one broken property.
-type Failure struct {
-	Property string
-	Detail   string
-	Step     int
-	TimeMs   int64
-	Repeats  int // later hits of the same property in the same run
-}
 
 // Stats counts what happened in a run.
 type Stats struct {
@@ -53,22 +44,15 @@ type Stats struct {
 	GroupCalls, GroupOK                            int // tries of consumer calls, and the ones answered OK
 }
 
-// Result is the outcome of one run.
+// Result is the outcome of one run: the result of the kernel (hash, steps,
+// failures, coverage, buggify sites, the last step lines of a failed run) and
+// the numbers of the product.
 type Result struct {
-	Seed     uint64
+	kernel.Result
 	Scenario string
-	Hash     uint64 // the trace hash: same seed, same hash
-	Steps    int
 	EndMs    int64
-	Failures []Failure
 	Stats    Stats
-	Coverage map[string]assert.Coverage
-	Sites    map[string]fault.SiteCount // the buggify sites the run reached: on, asked, fired
-	Tail     []string                   // the last trace lines, kept when the run fails
 }
-
-// OK reports that no property was broken.
-func (r Result) OK() bool { return len(r.Failures) == 0 }
 
 // Reproduce is the command that runs this seed again, with a trace.
 func (r Result) Reproduce() string {
@@ -81,13 +65,14 @@ func nodeWriter(idx int) string { return fmt.Sprintf("cp-%d", idx) }
 type sim struct {
 	cfg       Config
 	scenario  Scenario
-	runner    *dstsim.Runner // runs the node processes and the storage engine
+	w         *kernel.World // the nodes, the storage service, the queue and the hash
+	env       machine.Env   // the Env of the world: the random stream, buggify and assertions
 	rand      *rng.Rand
-	sched     *sched.Scheduler // shares its event heap with clock
-	clock     *dstclock.Clock
-	env       *env
+	lanes     *kernel.Lanes[groupLane]
 	store     *storage
+	storeAddr kernel.ServiceAddr[runtime.IOCall, runtime.EventData]
 	nodes     []*simNode
+	byName    map[machine.NodeID]*simNode
 	clients   *clientPool
 	consumers *consumerPool // nil in a run with no consumer groups
 	oracle    *oracle
@@ -96,61 +81,21 @@ type sim struct {
 	quiet  bool
 	bug    Bug
 
-	hash     trace.Hash
-	stats    Stats
-	failures []Failure
-	byProp   map[string]int // property -> index in failures
+	stats Stats
 
 	holders  check.Holders[int]    // writer epoch -> node that held it
 	prefixes check.Prefixes[int]   // log prefix -> first state hash that a node showed
 	applied  []runtime.LogPosition // last applied slot seen for each node
 	fresh    []bool                // the node has a new incarnation, so its hash must be checked again
-
-	ring [traceRing]traceLine
-	rpos int
 }
 
 // traceRing is how many of the last steps a run keeps for a failure report.
 const traceRing = 48
 
-// traceLine is one step, kept as plain data and formatted only when needed.
-type traceLine struct {
-	step int
-	at   int64
-	who  dstsim.ProcessID
-	body any
-	acts int
-}
-
-func (t traceLine) String() string {
-	return fmt.Sprintf("step %d t=%dms %s <- %s (%d actions)", t.step, t.at/int64(runtime.Millisecond), t.who, bodyText(t.body), t.acts)
-}
-
-// bodyText is a short text of an event. Long byte slices are cut.
-func bodyText(b any) string {
-	s := fmt.Sprintf("%T%+v", b, b)
-	const limit = 160
-	if len(s) > limit {
-		s = s[:limit] + "..."
-	}
-	return s
-}
-
-// tracef writes a note about something that is not a step (a crash, a partition).
+// tracef writes a note about something that is not a step (a crash, a
+// partition). A note is never hashed.
 func (s *sim) tracef(format string, args ...any) {
-	if s.cfg.Trace != nil {
-		s.cfg.Trace(fmt.Sprintf("t=%dms %s", s.now()/int64(runtime.Millisecond), fmt.Sprintf(format, args...)))
-	}
-}
-
-// tail returns the kept trace lines, oldest first.
-func (s *sim) tail() []string {
-	first := max(0, s.rpos-traceRing)
-	out := make([]string, 0, s.rpos-first)
-	for i := first; i < s.rpos; i++ {
-		out = append(out, s.ring[i%traceRing].String())
-	}
-	return out
+	s.w.Note(fmt.Sprintf(format, args...))
 }
 
 func newSim(cfg Config) (*sim, error) {
@@ -167,21 +112,26 @@ func newSim(cfg Config) (*sim, error) {
 	cfg.Scenario = sc.Name
 	s := &sim{
 		cfg: cfg, scenario: sc, faults: sc.Faults, bug: cfg.Bug,
-		byProp: map[string]int{}, applied: make([]runtime.LogPosition, cfg.Nodes), fresh: make([]bool, cfg.Nodes),
-		hash: trace.New(),
+		applied: make([]runtime.LogPosition, cfg.Nodes), fresh: make([]bool, cfg.Nodes),
+		byName: map[machine.NodeID]*simNode{},
 	}
-	s.runner = dstsim.New(dstsim.Config{Seed: cfg.Seed, WallStart: sched.TimeNs(wallStart), MaxPops: maxSteps + 1, OnStep: s.onStep})
-	s.rand, s.sched = s.runner.Rand(), s.runner.Sched()
-	s.clock = dstclock.New(s.sched, sched.TimeNs(wallStart))
-	s.env = newEnv(s.rand, s.addFailure)
+	s.w = kernel.New(kernel.Config{
+		Seed: cfg.Seed, WallStart: machine.RealTime(wallStart), MaxSteps: maxSteps + 1,
+		Log: cfg.Log, Tail: traceRing, HaltOnFirst: cfg.HaltOnFirst, VerifyHashes: cfg.verifyHashes,
+	})
+	s.env, s.rand = s.w.Env(), s.w.Rand()
+	// Start before the nodes are spawned: Start boots the nodes it finds, and
+	// here every node boots at a random time (run.go boot).
+	s.w.Start()
+	s.lanes = kernel.NewLanes[groupLane](s.w)
 	s.store = newStorage(s)
-	s.runner.Register(s.store)
-	s.runner.Register(replyEngine{s})
-	s.runner.Spawn(controller{s})
+	s.storeAddr = kernel.AddService[runtime.IOCall, runtime.EventData](s.w, s.store)
 	s.oracle = newOracle(s)
 	s.clients = newClientPool(s, 3)
 	for i := range cfg.Nodes {
-		s.nodes = append(s.nodes, newNode(s, i, replicaFactory(i, sc.Faults, cfg.Bug)))
+		n := newNode(s, i, replicaFactory(i, sc.Faults, cfg.Bug))
+		s.nodes = append(s.nodes, n)
+		s.byName[n.id] = n
 	}
 	if sc.Consumers > 0 && !cfg.noGroups {
 		for _, n := range s.nodes {
@@ -193,41 +143,35 @@ func newSim(cfg Config) (*sim, error) {
 }
 
 // wallStart is the virtual UTC time at the start of every run (2026-01-01).
-const wallStart = int64(1767225600) * int64(runtime.Second)
+const wallStart = int64(1767225600) * int64(machine.Second)
 
-// Time moves only when the scheduler takes an event. after queues on the heap
-// directly so a node's CancelTimer stays a local token check.
+// Time moves only when the kernel takes an event from the queue.
 
-func (s *sim) mono() runtime.NodeTime { return runtime.NodeTime(s.clock.Mono()) }
-func (s *sim) now() int64             { return int64(s.clock.Mono()) }
-func (s *sim) steps() int             { return s.sched.Steps() }
+func (s *sim) mono() machine.NodeTime { return machine.NodeTime(s.w.Now()) }
+func (s *sim) now() int64             { return int64(s.w.Now()) }
+func (s *sim) steps() int             { return int(s.w.Steps()) }
 
-// after queues run to happen d from now. A negative d counts as zero.
-func (s *sim) after(d runtime.Duration, label string, run func()) {
-	s.sched.After(sched.TimeNs(d), label, run)
-}
-
-func (s *sim) addFailure(property, detail string) {
-	if i, seen := s.byProp[property]; seen {
-		s.failures[i].Repeats++
-		return
-	}
-	s.byProp[property] = len(s.failures)
-	s.failures = append(s.failures, Failure{Property: property, Detail: detail, Step: s.steps(), TimeMs: s.now() / int64(runtime.Millisecond)})
-}
+// after runs run as a host task d from now. A negative d counts as zero.
+func (s *sim) after(d machine.Duration, run func()) { s.w.After(d, run) }
 
 // violation records a broken property. The run goes on.
-func (s *sim) violation(property, format string, args ...any) {
-	s.env.Always(false, runtime.PropertyID("sim: "+property), runtime.ContextPair{Key: "detail", Value: fmt.Sprintf(format, args...)})
+func (s *sim) violation(property assert.Always, format string, args ...any) {
+	s.env.Always(false, property, assert.Pair{Key: "detail", Value: fmt.Sprintf(format, args...)})
 }
 
-// check returns the checker that records verdicts as "sim: ..." properties.
-func (s *sim) check() check.Checker { return check.Checker{Log: s.env.log, Prefix: "sim: "} }
+// check returns the checker of dst/check. It records its own verdicts (a log with
+// no hole, log entries that decode) as "sim: ..." properties.
+func (s *sim) check() check.Checker { return check.Checker{Log: s.w.Assert(), Prefix: "sim: "} }
 
 // verdict records a check. It returns ok, so the caller can skip work after a failure.
 // Callers on a hot path test the condition first and call violation themselves.
-func (s *sim) verdict(ok bool, property, format string, args ...any) bool {
-	return s.check().Verdict(ok, property, format, args...)
+func (s *sim) verdict(ok bool, property assert.Always, format string, args ...any) bool {
+	if ok {
+		s.env.Always(true, property)
+		return true
+	}
+	s.env.Always(false, property, assert.Pair{Key: "detail", Value: fmt.Sprintf(format, args...)})
+	return false
 }
 
 func (s *sim) noteBoot(n *simNode) {
@@ -236,71 +180,17 @@ func (s *sim) noteBoot(n *simNode) {
 	s.tracef("%s boots (boot %d)", n.name(), n.boots)
 }
 
-// onStep is dst's Config.OnStep hook. It runs after every Step of a node or
-// of a rebalance machine: it folds the state into the trace hash, keeps the
-// trace ring, and checks the properties that can be checked on one node. A
-// step that did not run the machine (the node is down or paused and keeps the
-// value) is not observed.
-func (s *sim) onStep(info dstsim.StepInfo) {
-	if info.Who == ctlID {
-		return
-	}
-	if strings.HasPrefix(string(info.Who), "rb-") {
-		s.onGroupsStep(info)
-		return
-	}
-	n := s.nodeOf(eng.ActorID(info.Who))
-	if !n.ran {
-		return
-	}
-	body := info.Inbox
-	if _, ok := body.(replicaWake); ok {
-		body = n.groups.lastToReplica
-	}
-	acts := info.Out
-	h := &s.hash
-	h.Uint64(uint64(s.now()))
-	h.Uint64(uint64(n.idx))
-	h.Uint64(n.m.StateHash())
-	h.Uint64(uint64(len(acts)))
-	s.observe(info.Who, body, len(acts))
-	s.checkNode(n)
-}
-
-// onGroupsStep folds a step of a rebalance machine into the trace hash.
-func (s *sim) onGroupsStep(info dstsim.StepInfo) {
-	n := s.nodeOf(eng.ActorID("cp-" + strings.TrimPrefix(string(info.Who), "rb-")))
-	g := n.groups
-	if !g.ran {
-		return
-	}
-	h := &s.hash
-	h.Uint64(uint64(s.now()))
-	h.Uint64(uint64(len(s.nodes) + n.idx))
-	h.Uint64(g.proc.m.StateHash())
-	h.Uint64(uint64(len(info.Out)))
-	s.observe(info.Who, g.last, len(info.Out))
-}
-
-// observe keeps one step in the trace ring, and prints it when tracing.
-func (s *sim) observe(who dstsim.ProcessID, body any, acts int) {
-	s.ring[s.rpos%traceRing] = traceLine{step: s.steps(), at: s.now(), who: who, body: body, acts: acts}
-	s.rpos++
-	if s.cfg.Trace != nil {
-		s.cfg.Trace(s.ring[(s.rpos-1)%traceRing].String())
-	}
-}
-
 // checkNode checks the epoch and the state of one node. An epoch has one
 // holder. After the same number of applied slots, all nodes have the same state.
+// The node calls it after each Step.
 func (s *sim) checkNode(n *simNode) {
-	r := n.replica()
+	r := n.m
 	if r == nil {
 		return
 	}
 	if e := r.Epoch(); e > 0 {
 		if first, ok := s.holders.Note(e, n.idx); !ok {
-			s.violation("one writer per epoch", "epoch %d is held by cp-%d and by cp-%d", e, first, n.idx)
+			s.violation(oneWriterPerEpoch, "epoch %d is held by cp-%d and by cp-%d", e, first, n.idx)
 		}
 	}
 	applied := r.Applied()
@@ -310,6 +200,15 @@ func (s *sim) checkNode(n *simNode) {
 	s.applied[n.idx], s.fresh[n.idx] = applied, false
 	h := r.Metadata().StateHash()
 	if prevHash, prevNode, ok := s.prefixes.Note(check.Slot(applied), h, n.idx); !ok {
-		s.violation("replicas agree on every slot", "after %d slots, cp-%d has state %x but cp-%d had %x", applied, n.idx, h, prevNode, prevHash)
+		s.violation(replicasAgreeEverySlot, "after %d slots, cp-%d has state %x but cp-%d had %x", applied, n.idx, h, prevNode, prevHash)
 	}
+}
+
+// logLines formats step lines of the kernel for a person.
+func logLines(in []kernel.LogEntry) []string {
+	out := make([]string, 0, len(in))
+	for _, l := range in {
+		out = append(out, fmt.Sprintf("#%d t=%dms %s", l.Step, int64(l.At)/int64(machine.Millisecond), l.Text))
+	}
+	return out
 }

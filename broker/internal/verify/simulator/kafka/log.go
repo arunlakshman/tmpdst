@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/kernel"
 )
 
 // The oracle's model of one partition's committed log: the control plane's
@@ -48,13 +50,13 @@ func parseVal(v string) (int, int, int, bool) {
 // ingest reads the committed ranges of pl that it has not seen yet and
 // appends them to the log. Every structural problem is a violation: the log
 // must be contiguous, every segment readable, every batch intact.
-func (o *expectedLogChecker) ingest(v simulator.View, pl *partitionLog) {
-	rs := v.CP().Committed(pl.topicPartition)
+func (o *expectedLogChecker) ingest(v kernel.View, pl *partitionLog) {
+	rs := o.cp.Committed(pl.topicPartition)
 	for ; pl.ranges < len(rs); pl.ranges++ {
 		r := rs[pl.ranges]
-		det := []core.ContextPair{{Key: "tp", Value: pl.topicPartition.Topic + "/" + strconv.Itoa(int(pl.topicPartition.Partition))},
+		det := []assert.Pair{{Key: "tp", Value: pl.topicPartition.Topic + "/" + strconv.Itoa(int(pl.topicPartition.Partition))},
 			{Key: "base", Value: int64(r.Base)}, {Key: "segment", Value: r.Loc.Key}}
-		v.Assert().Always(int64(r.Base) == int64(len(pl.vals)), "kafka: committed offsets are contiguous", det...)
+		v.Assert().Always(int64(r.Base) == int64(len(pl.vals)), committedOffsetsContiguous, det...)
 		vals := o.readRange(v, r, det)
 		if vals == nil { // unreadable: keep offsets aligned
 			vals = make([]string, r.Count)
@@ -64,8 +66,8 @@ func (o *expectedLogChecker) ingest(v simulator.View, pl *partitionLog) {
 		}
 		start := int64(len(pl.vals))
 		prev, again := o.locs[r.Loc]
-		v.Assert().Always(!again, "kafka: a stored batch is committed at most once",
-			append(slices.Clip(det), core.ContextPair{Key: "first_offset", Value: prev})...)
+		v.Assert().Always(!again, storedBatchCommittedAtMostOnce,
+			append(slices.Clip(det), assert.Pair{Key: "first_offset", Value: prev})...)
 		o.locs[r.Loc] = start
 		pl.byBase[start] = len(pl.bats)
 		pl.bats = append(pl.bats, loggedBatch{base: start, count: len(vals)})
@@ -75,14 +77,14 @@ func (o *expectedLogChecker) ingest(v simulator.View, pl *partitionLog) {
 		o.checkWhole(v, vals, det)
 		pl.vals = append(pl.vals, vals...)
 	}
-	v.Assert().Always(int64(v.CP().HighWatermark(pl.topicPartition)) == int64(len(pl.vals)),
-		"kafka: the high watermark is the end of the committed log", core.ContextPair{Key: "tp", Value: pl.topicPartition.Topic + "/" + strconv.Itoa(int(pl.topicPartition.Partition))})
+	v.Assert().Always(int64(o.cp.HighWatermark(pl.topicPartition)) == int64(len(pl.vals)),
+		highWatermarkIsLogEnd, assert.Pair{Key: "tp", Value: pl.topicPartition.Topic + "/" + strconv.Itoa(int(pl.topicPartition.Partition))})
 }
 
 // checkWhole: a committed range is one produced batch, whole: it starts at
 // record 0 and holds all of the batch's records (a retry duplicates a batch,
 // never part of one).
-func (o *expectedLogChecker) checkWhole(v simulator.View, vals []string, det []core.ContextPair) {
+func (o *expectedLogChecker) checkWhole(v kernel.View, vals []string, det []assert.Pair) {
 	if len(vals) == 0 || vals[0] == "?" {
 		return
 	}
@@ -91,32 +93,32 @@ func (o *expectedLogChecker) checkWhole(v simulator.View, vals []string, det []c
 	if !ok || !known {
 		return // record() reports it
 	}
-	po := v.History().Ops()[hi].Op.(ProduceOp)
-	v.Assert().Always(ri == 0 && len(vals) == len(po.Vals), "kafka: a committed range is one whole produced batch", det...)
+	po := o.hist.Ops()[hi].Op.(ProduceOp)
+	v.Assert().Always(ri == 0 && len(vals) == len(po.Vals), committedRangeIsOneProducedBatch, det...)
 }
 
 // readRange returns the record values of one committed range, or nil after
 // reporting why it is unreadable.
-func (o *expectedLogChecker) readRange(v simulator.View, r core.BatchRange, det []core.ContextPair) []string {
+func (o *expectedLogChecker) readRange(v kernel.View, r contract.BatchRange, det []assert.Pair) []string {
 	as := v.Assert()
-	obj, ok := v.Objects().Object(r.Loc.Key)
-	as.Always(ok, "kafka: committed segment exists in the object store", det...)
+	obj, ok := o.objs.Object(r.Loc.Key)
+	as.Always(ok, committedSegmentExistsObjectStore, det...)
 	if !ok {
 		return nil
 	}
 	end := r.Loc.Off + r.Loc.Len
 	in := r.Loc.Off >= 0 && r.Loc.Len > 0 && end <= int64(len(obj))
-	as.Always(in, "kafka: committed range lies inside its segment", det...)
+	as.Always(in, committedRangeLiesInsideSegment, det...)
 	if !in {
 		return nil
 	}
 	bt, err := kafkawire.ParseBatch(obj[r.Loc.Off:end])
-	as.Always(err == nil, "kafka: committed batch is intact", det...)
+	as.Always(err == nil, committedBatchIntact, det...)
 	if err != nil {
 		return nil
 	}
 	recs, err := batchRecords(bt)
-	as.Always(err == nil && int64(len(recs)) == r.Count, "kafka: committed range holds its record count", det...)
+	as.Always(err == nil && int64(len(recs)) == r.Count, committedRangeHoldsRecordCount, det...)
 	if err != nil || int64(len(recs)) != r.Count {
 		return nil
 	}

@@ -1,4 +1,4 @@
-# Exact import paths the deterministic packages (internal/runtime, internal/controlplane/contract,
+# Exact import paths the deterministic packages (internal/runtime, contract,
 # and the control-plane domain packages listed in ops/scripts/ci-determinism.sh) may import.
 # Matching is EXACT. A trailing "/..." also allows every subpackage.
 # Adding a line requires a dependency audit (scripts/audit-dep.sh) and, for a
@@ -45,12 +45,15 @@ google.golang.org/protobuf/reflect/protoreflect
 github.com/manifesterio/mds/dst/assert
 github.com/manifesterio/mds/dst/campaign
 github.com/manifesterio/mds/dst/check
-github.com/manifesterio/mds/dst/clock
-github.com/manifesterio/mds/dst/eng
 github.com/manifesterio/mds/dst/fault
 github.com/manifesterio/mds/dst/golden
-github.com/manifesterio/mds/dst/mutant
+github.com/manifesterio/mds/dst/kernel
+github.com/manifesterio/mds/dst/machine
 github.com/manifesterio/mds/dst/rng
-github.com/manifesterio/mds/dst/sim
-github.com/manifesterio/mds/dst/sched
 github.com/manifesterio/mds/dst/trace
+
+# Shared code of this repo (github.com/manifesterio/mds/shared). First-party, so no audit record.
+# objectstore: the object store calls, results and spec as plain types (no I/O). status: ErrCode
+# and Outcome. Deliberately absent: clock (real time), objectstore/s3 (the AWS SDK).
+github.com/manifesterio/mds/shared/objectstore
+github.com/manifesterio/mds/shared/status

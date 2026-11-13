@@ -8,15 +8,19 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
+	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/fault"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // testEnv is a seeded core.Environment that records assertion violations. It keeps its
-// own SplitMix64 copy and not checker.Rand, for two reasons. Uint64 gives
-// the same values as checker.Rand, but Intn here uses a plain modulo and
-// checker.Rand uses Lemire, so the seeds would change their streams. Also,
-// broker_test.go sets the state field directly to reseed the environment.
+// own SplitMix64 copy and not dst/rng, for two reasons. Intn here uses a plain
+// modulo and dst/rng uses Lemire, so the streams of the seeds would change.
+// Also, broker_test.go sets the state field directly to reseed the environment.
 type testEnv struct {
 	state uint64
 	viol  []string
@@ -31,8 +35,8 @@ func (e *testEnv) Uint64() uint64 {
 	return z ^ z>>31
 }
 func (e *testEnv) Intn(n int) int { return int(e.Uint64() % uint64(n)) }
-func (e *testEnv) NewID() core.ID {
-	var id core.ID
+func (e *testEnv) NewID() machine.ID {
+	var id machine.ID
 	for i := 0; i < 16; i += 8 {
 		v := e.Uint64()
 		for j := range 8 {
@@ -41,21 +45,32 @@ func (e *testEnv) NewID() core.ID {
 	}
 	return id
 }
-func (e *testEnv) Maybe(core.FaultPointID) bool           { return false }
-func (e *testEnv) MaybeP(core.FaultPointID, float64) bool { return false }
-func (e *testEnv) Fault(core.FaultPointID, float64) bool  { return false }
-func (e *testEnv) Always(c bool, p core.PropertyID, _ ...core.ContextPair) {
+func (e *testEnv) Maybe(fault.Site) bool           { return false }
+func (e *testEnv) MaybeP(fault.Site, float64) bool { return false }
+func (e *testEnv) Fault(fault.Site, float64) bool  { return false }
+func (e *testEnv) Always(c bool, p assert.Always, _ ...assert.Pair) {
 	if !c {
-		e.viol = append(e.viol, string(p))
+		e.viol = append(e.viol, p.Name())
 	}
 }
-func (e *testEnv) AlwaysOrUnreachable(c bool, p core.PropertyID, d ...core.ContextPair) {
-	e.Always(c, p, d...)
+func (e *testEnv) AlwaysOrUnreachable(c bool, p assert.AlwaysOrUnreachable, _ ...assert.Pair) {
+	if !c {
+		e.viol = append(e.viol, p.Name())
+	}
 }
-func (e *testEnv) Sometimes(bool, core.PropertyID) {}
-func (e *testEnv) Reachable(p core.PropertyID)     { e.reach = append(e.reach, string(p)) }
-func (e *testEnv) Unreachable(p core.PropertyID, _ ...core.ContextPair) {
-	e.viol = append(e.viol, string(p))
+func (e *testEnv) Sometimes(bool, assert.Sometimes) {}
+func (e *testEnv) Reachable(p assert.Reachable)     { e.reach = append(e.reach, p.Name()) }
+func (e *testEnv) Unreachable(p assert.Unreachable, _ ...assert.Pair) {
+	e.viol = append(e.viol, p.Name())
+}
+
+// testT is the part of testing.TB that the harness uses. The conformance test
+// runs the harness inside a rapid run, where the test handle is a *rapid.T and
+// not a *testing.T.
+type testT interface {
+	Helper()
+	Fatal(args ...any)
+	Fatalf(format string, args ...any)
 }
 
 // client is the test's view of one connection.
@@ -71,14 +86,14 @@ type client struct {
 // are computed when the I/O action is issued and delivered through a queue, so
 // tests can hold them back (holdCP, holdPut) or fault them (cpHook, objHook).
 type harness struct {
-	t      *testing.T
+	t      testT
 	b      *Broker
 	env    *testEnv
-	store  *speccheck.ObjectStore
-	cp     *speccheck.ControlPlane
+	store  *objectstore.Spec
+	cp     *specbridge.ControlPlane
 	config Config
-	self   core.NodeInstance
-	now    core.NodeTime
+	self   machine.NodeInstance
+	now    machine.NodeTime
 
 	// cpHook/objHook may replace an I/O action's outcome; exec runs the spec.
 	cpHook  func(a core.ControlPlaneCall, exec func() core.IOResult) core.IOResult
@@ -88,24 +103,24 @@ type harness struct {
 	held    []core.IOResult
 
 	queue   []core.IOResult
-	timers  map[core.TimerID]core.TimerVersion
-	due     map[core.TimerID]core.NodeTime // when each armed timer is due (fireNext)
+	timers  map[machine.TimerID]machine.TimerVersion
+	due     map[machine.TimerID]machine.NodeTime // when each armed timer is due (fireNext)
 	clients map[core.ConnID]*client
 	all     []core.Action // every action emitted, in order
 	paused  map[core.ConnID]bool
 	closed  map[core.ConnID]bool
 	exited  bool
-	cpCalls []core.ControlPlaneOperation
+	cpCalls []contract.Operation
 	puts    []string
 }
 
-func newHarness(t *testing.T, config Config) *harness {
-	h := &harness{t: t, env: &testEnv{state: 7}, store: speccheck.NewObjectStore(), cp: speccheck.NewControlPlane(),
-		config: config, timers: map[core.TimerID]core.TimerVersion{}, due: map[core.TimerID]core.NodeTime{},
+func newHarness(t testT, config Config) *harness {
+	h := &harness{t: t, env: &testEnv{state: 7}, store: objectstore.NewSpec(), cp: specbridge.New(),
+		config: config, timers: map[machine.TimerID]machine.TimerVersion{}, due: map[machine.TimerID]machine.NodeTime{},
 		clients: map[core.ConnID]*client{},
 		paused:  map[core.ConnID]bool{}, closed: map[core.ConnID]bool{}}
 	h.cp.CreateTopic("t", 2)
-	h.self = core.NodeInstance{Node: "b1", Inc: core.BootNumber{1}}
+	h.self = machine.NodeInstance{Node: "b1", Inc: machine.BootNumber{1}}
 	h.b = New(config)(h.env, h.self).(*Broker)
 	return h
 }
@@ -118,8 +133,8 @@ func startedHarness(t *testing.T, config Config) *harness {
 }
 
 func (h *harness) step(body core.EventData) []core.Action {
-	h.now += core.NodeTime(core.Millisecond)
-	acts := h.b.Step(core.Event{At: h.now, Wall: core.RealTime(h.now), Body: body})
+	h.now += machine.NodeTime(machine.Millisecond)
+	acts := h.b.Step(core.Event{At: h.now, Wall: machine.RealTime(h.now), Body: body})
 	h.all = append(h.all, acts...)
 	for _, a := range acts {
 		h.exec(a)
@@ -144,7 +159,10 @@ func (h *harness) run() {
 
 func (h *harness) deliver(c core.IOResult) {
 	_, isCP := c.(core.ControlPlaneDone)
-	_, isPut := c.(core.ObjectPutDone)
+	isPut := false
+	if d, ok := c.(core.ObjectDone); ok {
+		_, isPut = d.Result.(objectstore.PutDone)
+	}
 	if (isCP && h.holdCP) || (isPut && h.holdPut) {
 		h.held = append(h.held, c)
 		return
@@ -162,12 +180,11 @@ func (h *harness) releaseHeld() {
 
 func (h *harness) exec(a core.Action) {
 	switch a := a.(type) {
-	case core.ObjectPut:
-		h.puts = append(h.puts, a.Key)
-		run := func() core.IOResult { return h.store.Exec(a) }
-		h.deliver(h.objDone(a, run))
-	case core.ObjectGet:
-		run := func() core.IOResult { return h.store.Exec(a) }
+	case core.ObjectCall:
+		if put, ok := a.Call.(objectstore.Put); ok {
+			h.puts = append(h.puts, put.Key)
+		}
+		run := func() core.IOResult { return core.ObjectDone{Result: h.store.Exec(a.Call)} }
 		h.deliver(h.objDone(a, run))
 	case core.ControlPlaneCall:
 		h.cpCalls = append(h.cpCalls, a.Op)
@@ -179,7 +196,7 @@ func (h *harness) exec(a core.Action) {
 		}
 	case core.SetTimer:
 		h.timers[a.ID] = a.Gen
-		h.due[a.ID] = h.now + core.NodeTime(a.After)
+		h.due[a.ID] = h.now + machine.NodeTime(a.After)
 	case core.CancelTimer:
 		delete(h.timers, a.ID)
 	case core.Send:
@@ -203,6 +220,24 @@ func (h *harness) exec(a core.Action) {
 	}
 }
 
+// putCall returns the Put inside an action, if the action is an object store Put.
+func putCall(a core.IOCall) (objectstore.Put, bool) {
+	if oc, ok := a.(core.ObjectCall); ok {
+		put, isPut := oc.Call.(objectstore.Put)
+		return put, isPut
+	}
+	return objectstore.Put{}, false
+}
+
+// getDone returns the GetDone inside a completion, if the completion is an object store GetDone.
+func getDone(r core.IOResult) (objectstore.GetDone, bool) {
+	if d, ok := r.(core.ObjectDone); ok {
+		g, isGet := d.Result.(objectstore.GetDone)
+		return g, isGet
+	}
+	return objectstore.GetDone{}, false
+}
+
 func (h *harness) objDone(a core.IOCall, run func() core.IOResult) core.IOResult {
 	if h.objHook != nil {
 		return h.objHook(a, run)
@@ -211,7 +246,7 @@ func (h *harness) objDone(a core.IOCall, run func() core.IOResult) core.IOResult
 }
 
 // fire delivers the current generation of timer id.
-func (h *harness) fire(id core.TimerID) {
+func (h *harness) fire(id machine.TimerID) {
 	g, ok := h.timers[id]
 	if !ok {
 		h.t.Fatalf("timer %d not armed", id)
@@ -233,7 +268,7 @@ func (h *harness) fireAll() {
 // fireNext moves the clock to the earliest armed timer and fires it. Ties go
 // to the lower id, so the order is the same on every run.
 func (h *harness) fireNext() {
-	var first core.TimerID
+	var first machine.TimerID
 	found := false
 	for id := range h.timers {
 		if !found || h.due[id] < h.due[first] || (h.due[id] == h.due[first] && id < first) {
@@ -308,7 +343,7 @@ const (
 var params = kafkawire.BatchParams{FirstTimestamp: 1000, MaxTimestamp: 1000}
 
 // mkBatch builds a batch of len(vals) records; pid -1 means non-idempotent.
-func mkBatch(t testing.TB, pid int64, epoch int16, seq int32, vals ...string) []byte {
+func mkBatch(t testT, pid int64, epoch int16, seq int32, vals ...string) []byte {
 	t.Helper()
 	var recs []kmsg.Record
 	for _, v := range vals {
@@ -323,7 +358,7 @@ func mkBatch(t testing.TB, pid int64, epoch int16, seq int32, vals ...string) []
 	return b
 }
 
-func plain(t testing.TB, vals ...string) []byte { return mkBatch(t, -1, -1, -1, vals...) }
+func plain(t testT, vals ...string) []byte { return mkBatch(t, -1, -1, -1, vals...) }
 
 type ent struct {
 	topicPartition core.TopicPartition
@@ -331,7 +366,7 @@ type ent struct {
 }
 
 func e(topic string, part int32, rec []byte) ent {
-	return ent{topicPartition: core.NewTopicPartition(topic, part), rec: rec}
+	return ent{topicPartition: contract.NewTopicPartition(topic, part), rec: rec}
 }
 
 func prodReq(acks int16, es ...ent) *kmsg.ProduceRequest {
@@ -375,8 +410,8 @@ func (h *harness) produceOne(c *client, e ent) kmsg.ProduceResponseTopicPartitio
 	return produced(h.next(c))[0]
 }
 
-func factsNamed(all []core.Action, name string) []core.Fact {
-	var out []core.Fact
+func factsNamed(all []core.Action, name string) []machine.Fact {
+	var out []machine.Fact
 	for _, a := range all {
 		if e, ok := a.(core.RecordFact); ok && e.Fact.Name == name {
 			out = append(out, e.Fact)

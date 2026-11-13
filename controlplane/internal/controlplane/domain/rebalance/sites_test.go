@@ -4,8 +4,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/spec"
-	"github.com/manifesterio/mds/dst/rng"
+	"github.com/manifesterio/mds/dst/fault"
 )
 
 // everyOther is a fault injector for tests: each site that is on fires on
@@ -16,16 +15,16 @@ type everyOther struct {
 	fired map[string]int
 }
 
-func newEveryOther(sites ...string) *everyOther {
+func newEveryOther(sites ...fault.Site) *everyOther {
 	f := &everyOther{on: map[string]bool{}, calls: map[string]int{}, fired: map[string]int{}}
 	for _, s := range sites {
-		f.on[s] = true
+		f.on[s.Name()] = true
 	}
 	return f
 }
 
-func (f *everyOther) Maybe(site runtime.FaultPointID) bool {
-	s := string(site)
+func (f *everyOther) Maybe(site fault.Site) bool {
+	s := site.Name()
 	if !f.on[s] {
 		return false
 	}
@@ -37,17 +36,14 @@ func (f *everyOther) Maybe(site runtime.FaultPointID) bool {
 	return false
 }
 
-func (f *everyOther) MaybeP(site runtime.FaultPointID, _ float64) bool { return f.Maybe(site) }
-func (f *everyOther) Fault(runtime.FaultPointID, float64) bool         { return false }
+func (f *everyOther) MaybeP(site fault.Site, _ float64) bool { return f.Maybe(site) }
+func (f *everyOther) Fault(fault.Site, float64) bool         { return false }
 
 // The sites that do not move time must not change any reply.
 func TestSitesKeepTheReplies(t *testing.T) {
 	f := newEveryOther(SiteStaleTimer, SiteDuplicateReply, SiteLateDrain, SiteLoadRetry)
-	h := &harness{t: t, m: New(Config{Faults: f}), cx: &testCx{rand: rng.New(seed)}, log: spec.New(), session: 5000}
-	shadow := rng.New(seed)
-	for range 64 {
-		h.suffix = append(h.suffix, newMemberID("", shadow))
-	}
+	h := newBareHarness(t, Config{}, f)
+	h.session = 5000
 	h.step(RoleChanged{Active: true})
 	h.check("loading", h.phase("g"), "loading")
 	h.until(100 * msec)
@@ -76,9 +72,9 @@ func TestSitesKeepTheReplies(t *testing.T) {
 		{sec + delay + 5*sec, nil, nil}, // both sessions end: both are removed
 	})
 	h.check("expired", h.phase("g"), stateEmpty)
-	for _, site := range []string{SiteStaleTimer, SiteDuplicateReply, SiteLateDrain, SiteLoadRetry} {
-		if f.fired[site] == 0 {
-			t.Errorf("site %s never fired", site)
+	for _, site := range []fault.Site{SiteStaleTimer, SiteDuplicateReply, SiteLateDrain, SiteLoadRetry} {
+		if f.fired[site.Name()] == 0 {
+			t.Errorf("site %s never fired", site.Name())
 		}
 	}
 }
@@ -86,11 +82,11 @@ func TestSitesKeepTheReplies(t *testing.T) {
 // SiteTimerLate: a timer fires up to 50 ms late.
 func TestSiteTimerLate(t *testing.T) {
 	f := newEveryOther(SiteTimerLate)
-	h := newHarness(t, Config{Faults: f})
+	h := newHarnessFaults(t, Config{}, f)
 	h.run([]step{
 		{0, h.join(1, "g", ""), nil},
 		{delay, nil, nil},
 		{delay + lateMax, nil, []string{"1 OK gen=1 proto=range leader=m1 id=m1 members=[m1:meta-range]"}},
 	})
-	h.check("fired", f.fired[SiteTimerLate] > 0, true)
+	h.check("fired", f.fired[SiteTimerLate.Name()] > 0, true)
 }

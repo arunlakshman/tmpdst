@@ -5,7 +5,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/manifesterio/mds/dst/mutant"
+	"github.com/manifesterio/mds/dst/check/spectest"
+	"github.com/manifesterio/mds/dst/fault"
 )
 
 func mustRun(t *testing.T, cfg Config) Result {
@@ -81,7 +82,7 @@ func TestSitesFire(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range SiteNames() {
+	for _, name := range fault.Sites() {
 		if fired[name] == 0 {
 			t.Errorf("site %q never fired", name)
 		}
@@ -131,15 +132,15 @@ func TestFaultsAreInjected(t *testing.T) {
 // TestPlantedBugsAreFound is why we can trust the simulator: when one known bug
 // is planted, some seed in a few hundred must fail. Both bugs are in the fake log.
 func TestPlantedBugsAreFound(t *testing.T) {
-	scenario := map[mutant.Bug]string{
-		mutant.Bug(BugLogOverwrite):    "chaos",
-		mutant.Bug(BugClaimAlwaysWins): "leader-fencing",
+	scenario := map[spectest.Bug]string{
+		spectest.Bug(BugLogOverwrite):    "chaos",
+		spectest.Bug(BugClaimAlwaysWins): "leader-fencing",
 	}
-	bugs := []mutant.Bug{
-		mutant.Bug(BugLogOverwrite),
-		mutant.Bug(BugClaimAlwaysWins),
+	bugs := []spectest.Bug{
+		spectest.Bug(BugLogOverwrite),
+		spectest.Bug(BugClaimAlwaysWins),
 	}
-	mutant.Require(t, bugs, 300, func(bug mutant.Bug, seed uint64) bool {
+	spectest.RequireCaught(t, bugs, 300, func(bug spectest.Bug, seed uint64) bool {
 		res := mustRun(t, Config{Scenario: scenario[bug], Seed: seed, Bug: Bug(bug)})
 		if res.OK() {
 			return false
@@ -152,7 +153,7 @@ func TestPlantedBugsAreFound(t *testing.T) {
 // TestCleanRunHasNoFalseAlarm is the other side of the planted bug test: with no
 // bug, the same seeds that find a bug must pass.
 func TestCleanRunHasNoFalseAlarm(t *testing.T) {
-	mutant.RequireClean(t, seedCount(10, 60), func(seed uint64) bool {
+	spectest.RequireClean(t, seedCount(10, 60), func(seed uint64) bool {
 		for _, sc := range []string{"chaos", "leader-fencing"} {
 			if res := mustRun(t, Config{Scenario: sc, Seed: seed}); !res.OK() {
 				t.Log(Report(res))
@@ -161,6 +162,21 @@ func TestCleanRunHasNoFalseAlarm(t *testing.T) {
 		}
 		return false
 	})
+}
+
+// TestCachedStateHashesAreRight: the kernel keeps the state hash of a node until
+// it calls the node again. With verifyHashes it recomputes every hash at every
+// step, and a hash that changed without a call fails the seed. Host code that
+// changes a machine outside a Step would show here.
+func TestCachedStateHashesAreRight(t *testing.T) {
+	for _, sc := range ScenarioNames() {
+		for seed := uint64(1); seed <= uint64(seedCount(2, 5)); seed++ {
+			res := mustRun(t, Config{Scenario: sc, Seed: seed, verifyHashes: true})
+			if !res.OK() {
+				t.Fatal(Report(res))
+			}
+		}
+	}
 }
 
 func TestUnknownScenario(t *testing.T) {

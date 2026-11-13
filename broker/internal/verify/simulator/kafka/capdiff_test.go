@@ -5,8 +5,9 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/broker"
-	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
+	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // sealStats counts sealed segments by reason across a campaign.
@@ -14,17 +15,17 @@ type sealStats struct {
 	segments, parts, byCap, bySize, byTimer, byBatches atomic.Int64
 }
 
-type sealInv struct {
+type sealRule struct {
 	st   *sealStats
-	seal simulator.Cursor
+	seal kernel.Cursor
 }
 
-func (*sealInv) Name() string         { return "SealStats" }
-func (*sealInv) AtEnd(simulator.View) {}
-func (i *sealInv) Observe(v simulator.View) {
+func (*sealRule) Name() string      { return "SealStats" }
+func (*sealRule) AtEnd(kernel.View) {}
+func (i *sealRule) Observe(v kernel.View) {
 	for _, tf := range v.Timeline().Since("segment_sealed", &i.seal) {
-		n, _ := tf.Fact.Field("parts").(core.Int64Value)
-		why, _ := tf.Fact.Field("reason").(core.StringValue)
+		n, _ := tf.Fact.Field("parts").(machine.Int64Value)
+		why, _ := tf.Fact.Field("reason").(machine.StringValue)
 		i.st.segments.Add(1)
 		i.st.parts.Add(int64(n))
 		switch string(why) {
@@ -50,20 +51,17 @@ func capCampaign(t *testing.T, capParts int) *sealStats {
 	// Fetch long poll (slice 3) changed the timing, so the cap binds on fewer
 	// segments. More seeds keep it in the sample.
 	opts := Opts{Producers: 128, Consumers: 1, Topics: []string{"a", "b"}, Partitions: 128}
-	config := configWith(seeds(1, 6), broker.InjectedBugNone, opts)
-	inner := config.Swarm
-	config.Swarm = func(seed uint64, r simulator.CountedRand, c *simulator.SeedConfig) {
-		inner(seed, r, c)
-		c.Params, c.ControlPlane.MaxCommitItems = prod, 0
-	}
 	st := &sealStats{}
-	config.Invariants = append(config.Invariants, func() simulator.SafetyRule { return &sealInv{st: st} })
-	rep, err := simulator.NewRunner().Run(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rep.Coverage = nil
-	report(t, rep)
+	results := runSeeds(t, seeds(1, 6), func(seed uint64) Config {
+		return Config{
+			Seed: seed, Opts: opts,
+			Tune: func(s *Settings) { s.Broker, s.ControlPlane.MaxCommitItems = prod, 0 },
+			ExtraRules: func(*cluster.Cluster, *History) []kernel.Rule {
+				return []kernel.Rule{&sealRule{st: st}}
+			},
+		}
+	})
+	report(t, results, false)
 	return st
 }
 

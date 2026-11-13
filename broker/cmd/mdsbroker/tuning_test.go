@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/broker"
-	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 func defaults() tuning {
@@ -19,7 +19,7 @@ func TestTuningDefaults(t *testing.T) {
 	if err := defaults().apply(&bc, 8<<30); err != nil {
 		t.Fatal(err)
 	}
-	if bc.MaxSegmentBytes != 16<<20 || bc.BatchWindow != 200*core.Millisecond || bc.MaxSegmentPartitions != 4096 || bc.MaxSegmentBatches != 256 {
+	if bc.MaxSegmentBytes != 16<<20 || bc.BatchWindow != 200*machine.Millisecond || bc.MaxSegmentPartitions != 4096 || bc.MaxSegmentBatches != 256 {
 		t.Fatalf("%+v", bc)
 	}
 	if bc.MaxBufferedBytes != 512<<20 || bc.ResumeBufferedBytes != 256<<20 { // 8 GiB / 16
@@ -43,7 +43,7 @@ func TestTuningOverrides(t *testing.T) {
 	if err := tn.apply(&bc, 64<<30); err != nil {
 		t.Fatal(err)
 	}
-	if bc.MaxSegmentBytes != 4_000_000 || bc.BatchWindow != 50*core.Millisecond || bc.MaxSegmentPartitions != 3 || bc.MaxSegmentBatches != 5 ||
+	if bc.MaxSegmentBytes != 4_000_000 || bc.BatchWindow != 50*machine.Millisecond || bc.MaxSegmentPartitions != 3 || bc.MaxSegmentBatches != 5 ||
 		bc.MaxBufferedBytes != 256<<20 || bc.ResumeBufferedBytes != 64<<20 {
 		t.Fatalf("%+v", bc)
 	}

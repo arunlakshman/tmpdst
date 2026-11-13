@@ -24,4 +24,4 @@ An assertion failure should record and keep running when you still want coverage
 
 ## Go sans I/O
 
-Keep the subject free of real network, disk, and wall clocks inside the sim. Product machines implement typed step handlers; `sim` / `eng` is the teaching host that owns rng, sched, faults, assert, and trace. Products bring their own typed Machine and domain messages. This module stays the host, not the product vocabulary.
+Keep the subject free of real network, disk, and wall clocks inside the sim. `kernel` runs the typed `machine.Machine` values; it owns rng, sched, faults, assert, and trace. Products bring their own typed Machine and domain messages. This module stays the host, not the product vocabulary.

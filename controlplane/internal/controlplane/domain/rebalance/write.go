@@ -3,14 +3,15 @@ package rebalance
 import (
 	"slices"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // write is the one log write a group has in flight. The group is busy until
 // its ReplicaReply, or until its write timer ends the term (section 8).
 type write struct {
-	req     runtime.RequestID
+	req     machine.RequestID
 	timer   timer
 	kind    any  // installWrite, assignWrite or removeWrite: what to do with the answer
 	dropped bool // the caller abandoned the call: apply the answer, but send no reply

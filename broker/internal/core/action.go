@@ -1,11 +1,24 @@
 package core
 
+import (
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
+)
+
 // Action is output of Step: a request for the outside world to do something.
 // Every I/O action carries a RequestID; its result returns as a completion event.
 //
 // Actions in one slice start in slice order; I/O among them may complete in
 // any order.
-type Action interface{ isAction() }
+//
+// Every case has Tag and Fold (action_fold.go): they write the case into the trace hash.
+type Action interface {
+	isAction()
+	// Tag is the frozen number of the case in the trace hash.
+	Tag() uint64
+	machine.Message
+}
 
 // IOCall is an Action the outside world executes and answers with exactly one
 // IOResult carrying the same RequestID. A live incarnation always gets that
@@ -13,26 +26,26 @@ type Action interface{ isAction() }
 // silence. IOResults addressed to a dead incarnation are dropped.
 type IOCall interface {
 	Action
-	RequestID() RequestID
+	RequestID() machine.RequestID
 }
 
 // ---- timers ----
 
 // SetTimer asks for TimerFired{ID, Gen} after the given duration of node-local time.
 type SetTimer struct {
-	ID    TimerID
-	Gen   TimerVersion
-	After Duration
+	ID    machine.TimerID
+	Gen   machine.TimerVersion
+	After machine.Duration
 }
 
 // CancelTimer is an optimization only; correctness relies on Gen.
-type CancelTimer struct{ ID TimerID }
+type CancelTimer struct{ ID machine.TimerID }
 
 // ---- network (outbound) ----
 
 // Send writes bytes to a connection, in order with earlier Sends on it.
 type Send struct {
-	Req  RequestID
+	Req  machine.RequestID
 	Conn ConnID
 	Data []byte
 }
@@ -55,36 +68,17 @@ type ResumeReads struct{ Conn ConnID }
 // Connect opens an outbound connection (used by simulator workloads; brokers reach the
 // control plane through ControlPlaneCall, not raw dials).
 type Connect struct {
-	Req  RequestID
+	Req  machine.RequestID
 	Addr string
 }
 
 // ---- object store ----
 
-// ObjectPut uploads Data under Key.
-type ObjectPut struct {
-	Req  RequestID
-	Key  string // unique per upload, so a MaybeApplied PUT is safe to retry
-	Data []byte
-}
-
-// ObjectGet reads the byte range Ref.
-type ObjectGet struct {
-	Req RequestID
-	Ref SegmentRef
-}
-
-// ObjectDelete removes the object at Key.
-type ObjectDelete struct {
-	Req RequestID
-	Key string
-}
-
-// ObjectList lists the keys under Prefix.
-type ObjectList struct {
-	Req    RequestID
-	Prefix string
-}
+// ObjectCall is one request to the object store. Call is one of objectstore.Put,
+// Get, Delete or List. The case is a wrapper because a sealed sum cannot get a case
+// from another package. The trace hash gets the same bytes as the four separate
+// actions had before (tags 108 to 111).
+type ObjectCall struct{ Call objectstore.Call }
 
 // ---- control plane (gRPC wire contract: controlplane/api/v1) ----
 
@@ -95,57 +89,18 @@ type ObjectList struct {
 // importing the generated package would pull grpc into core's dep closure and
 // fail the determinism audit.
 type ControlPlaneCall struct {
-	Req RequestID
-	Op  ControlPlaneOperation
+	Req machine.RequestID
+	Op  contract.Operation
 	// Timeout is the call's deadline. Zero takes the executor's default. Group
 	// joins and syncs wait for a rebalance, so they set a long one.
-	Timeout Duration
+	Timeout machine.Duration
 }
-
-// ---- shared command log (Dynamo loglet; engine lands in a later PR) ----
 
 // ControlPlaneReply asks the simulator CP bridge to deliver Done to To (the broker that
 // issued the matching ControlPlaneCall). Production uses gRPC waiters instead.
 type ControlPlaneReply struct {
-	To   NodeInstance
+	To   machine.NodeInstance
 	Done ControlPlaneDone
-}
-
-// LogAppend is an if-absent put of Data at Slot.
-type LogAppend struct {
-	Req  RequestID
-	Slot LogPosition
-	Data []byte
-}
-
-// LogRead reads up to Limit entries at or after From, in slot order.
-type LogRead struct {
-	Req   RequestID
-	From  LogPosition
-	Limit int32
-}
-
-// LogGetEnd reports the highest contiguous written slot plus one (the tail).
-type LogGetEnd struct{ Req RequestID }
-
-// LogClaimEpoch asks the log to make a node the one writer. The log keeps one
-// writer epoch. The claim succeeds only if the stored epoch still equals
-// Expect (zero when none was stored yet). Then the stored epoch becomes
-// Expect+1 and Owner is recorded. A claim that loses reports the epoch that is
-// stored now. Nothing is written to a log slot.
-type LogClaimEpoch struct {
-	Req    RequestID
-	Expect uint64
-	Owner  string
-}
-
-// LogDeleteOld removes every slot at or below Through. The log first raises its
-// floor to Through, and only then deletes the slots. A LogAppend that puts into
-// a slot at or below the floor is not a commit: the log answers it as a
-// conflict with no existing entry.
-type LogDeleteOld struct {
-	Req     RequestID
-	Through LogPosition
 }
 
 // ---- lifecycle ----
@@ -164,7 +119,7 @@ type ShutdownDone struct{}
 // ---- observability ----
 
 // RecordFact appends a fact to the timeline (simulator: invariants read it; prod: tracing).
-type RecordFact struct{ Fact Fact }
+type RecordFact struct{ Fact machine.Fact }
 
 func (SetTimer) isAction()          {}
 func (CancelTimer) isAction()       {}
@@ -173,69 +128,28 @@ func (CloseConn) isAction()         {}
 func (PauseReads) isAction()        {}
 func (ResumeReads) isAction()       {}
 func (Connect) isAction()           {}
-func (ObjectPut) isAction()         {}
-func (ObjectGet) isAction()         {}
-func (ObjectDelete) isAction()      {}
-func (ObjectList) isAction()        {}
+func (ObjectCall) isAction()        {}
 func (ControlPlaneCall) isAction()  {}
 func (ControlPlaneReply) isAction() {}
-func (LogAppend) isAction()         {}
-func (LogRead) isAction()           {}
-func (LogGetEnd) isAction()         {}
-func (LogDeleteOld) isAction()      {}
-func (LogClaimEpoch) isAction()     {}
 func (RecordFact) isAction()        {}
 func (StopForRestart) isAction()    {}
 func (ShutdownDone) isAction()      {}
 
 // RequestID returns the request this action carries.
-func (a Send) RequestID() RequestID { return a.Req }
+func (a Send) RequestID() machine.RequestID { return a.Req }
 
 // RequestID returns the request this action carries.
-func (a Connect) RequestID() RequestID { return a.Req }
+func (a Connect) RequestID() machine.RequestID { return a.Req }
 
 // RequestID returns the request this action carries.
-func (a ObjectPut) RequestID() RequestID { return a.Req }
+func (a ObjectCall) RequestID() machine.RequestID { return a.Call.RequestID() }
 
 // RequestID returns the request this action carries.
-func (a ObjectGet) RequestID() RequestID { return a.Req }
+func (a ControlPlaneCall) RequestID() machine.RequestID { return a.Req }
 
-// RequestID returns the request this action carries.
-func (a ObjectDelete) RequestID() RequestID { return a.Req }
-
-// RequestID returns the request this action carries.
-func (a ObjectList) RequestID() RequestID { return a.Req }
-
-// RequestID returns the request this action carries.
-func (a ControlPlaneCall) RequestID() RequestID { return a.Req }
-
-// RequestID returns the request this action carries.
-func (a LogAppend) RequestID() RequestID { return a.Req }
-
-// RequestID returns the request this action carries.
-func (a LogRead) RequestID() RequestID { return a.Req }
-
-// RequestID returns the request this action carries.
-func (a LogGetEnd) RequestID() RequestID { return a.Req }
-
-// RequestID returns the request this action carries.
-func (a LogDeleteOld) RequestID() RequestID { return a.Req }
-
-// RequestID returns the request this action carries.
-func (a LogClaimEpoch) RequestID() RequestID { return a.Req }
-
-//nolint:dupl // compile-time IOCall assertions; parallel list lives on IOResults
 var (
 	_ IOCall = Send{}
 	_ IOCall = Connect{}
-	_ IOCall = ObjectPut{}
-	_ IOCall = ObjectGet{}
-	_ IOCall = ObjectDelete{}
-	_ IOCall = ObjectList{}
+	_ IOCall = ObjectCall{}
 	_ IOCall = ControlPlaneCall{}
-	_ IOCall = LogAppend{}
-	_ IOCall = LogRead{}
-	_ IOCall = LogGetEnd{}
-	_ IOCall = LogDeleteOld{}
-	_ IOCall = LogClaimEpoch{}
 )

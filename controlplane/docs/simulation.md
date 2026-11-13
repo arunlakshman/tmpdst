@@ -46,11 +46,11 @@ What the report holds:
 2. Failed runs, first, each with the command that replays it.
 3. Every assertion by name: kind (`always`, `sometimes` or `reachable`), how
    many times it was checked and how many times it held.
-4. Never reached: `sometimes` assertions that never held, and the paths in
-   `expectedReachable` (`cmd/cpsim/campaign.go`) that no seed reached.
+4. Never reached: `sometimes` assertions that never held, and the `reachable`
+   paths declared with `assert.NewReachable` that no seed reached.
 5. Buggify sites by name: in how many runs the site was asked and switched on,
    how many calls it saw and how many times it fired. Never fired: the sites
-   that fired in no run, and the names in `simulator.SiteNames()` that no run
+   that fired in no run, and the sites declared with `fault.NewSite` that no run
    asked. A site that never fires tests nothing, so it is worth a look.
 6. The coverage curve: for each seed number that saw an assertion for the first
    time, how many different assertions had been seen by then. The last line
@@ -58,9 +58,14 @@ What the report holds:
    at the end means the campaign is too short.
 
 An assertion that is never evaluated leaves no trace in the counts. That is why
-the hand-kept `expectedReachable` list stays: only a list can name a path that
-no seed reached. When a path is added or removed in the replica or in the group
-host (`groups.go`), change the list.
+every assertion is declared once, as a value (`assert.NewReachable` and the
+other `assert.New...` functions): the catalog of `dst/assert` names a path that
+no seed reached. Three declarations carry a flag: `assert.NewAlwaysOnFailure`
+(an Always that the code records only when it fails, so it is not "never
+checked"), `assert.NewReachableNotExpected` (a path that cpsim may miss, so it
+is not "never reached"; "idempotent replay after takeover" is one, see
+`ISSUES.md`) and `fault.NewFaultSite` (a site asked with `Fault`, which the
+injector does not count, so it is not "never fired").
 
 ## What a run does
 
@@ -88,8 +93,9 @@ host (`groups.go`), change the list.
 5. Judgement: the oracle checks everything (next section) and the run returns
    its result with the trace hash.
 
-Time, order and chance: the scheduler keeps a queue ordered by (virtual time,
-random tie, sequence number). Events at the same virtual time run in an order
+Time, order and chance: the kernel (`dst/kernel`) keeps one queue ordered by
+(virtual time, random tie, sequence number). An entry on a lane takes the tie of
+an entry on the same lane at the same time, so one lane is first in, first out. Events at the same virtual time run in an order
 that the seed decides, so races between a timer, a reply and a client request
 are explored. Every random choice (latency, fault, workload, node choice) draws
 from one stream (`Rand`, SplitMix64). The replicas draw their ids from the same
@@ -99,13 +105,13 @@ stream through `runtime.Environment`.
 
 | Real thing | In the simulator |
 |---|---|
-| Run loop | `simNode`: stamps `At` and `Wall` on every event, runs the returned actions, handles `SetTimer`, `StopForRestart`. |
-| Log (`executor.Log`) | The real `executor.MemoryLog` behind a fault layer. Calls take effect at one instant; the reply comes later. |
+| Run loop | `simNode`: a kernel node. The kernel stamps `Now` on every step; `simNode.route` (a copy of `routeReplica` of the server) runs the returned actions. |
+| Log (`executor.Log`) | The real `executor.MemoryLog` behind a fault layer (`storage`, a kernel service). Calls take effect at one instant; the reply comes later. |
 | Object store | The real `executor.MemoryObjects`, with `List` sorted like S3 (the memory store returns unsorted keys). |
 | Executor error mapping | `executor.Classify` for errors, and the same completions as `Executor.logIO`. |
 | Timers | `SetTimer` and `CancelTimer` on the virtual clock, matched by token, like the run loop. |
 | gRPC server | Not used. The client sends `runtime.ControlPlaneDeliver` and gets `ControlPlaneReply`, the simulator bridge path of the replica. |
-| Rebalance loop of `server.Node` | A second dst process per node (`rb-0` beside `cp-0`, `groups.go`) that hosts `rebalance.Machine` as `server.Node` does. |
+| Rebalance loop of `server.Node` | A second kernel node per node (`rb-0` beside `cp-0`, `groups.go`) that hosts `rebalance.Machine` as `server.Node` does. |
 | gRPC group handlers | The group host in `groups.go`: a call id per call, the wait for the reply, `CallAbandoned` at the deadline, and `OffsetFetch` behind the role bit. |
 
 Faults:
@@ -157,7 +163,7 @@ property name.
 
 Because the log is the truth about the order of writes, an operation whose
 answer was lost ("maybe applied") needs no special case: it is in the log or it
-is not. The model (`internal/spec`) lives behind a one-method interface (`spec.Model`).
+is not. The model (`spec`) lives behind a one-method interface (`spec.Model`).
 `spec.go` in the simulator is the only file that imports it.
 
 Coverage: a campaign prints which replica and rebalance paths no seed reached
@@ -170,7 +176,7 @@ is a hint, not a failure.
 The rebalance machine (`domain/rebalance`, docs/rebalance.md) runs in the
 simulator beside each replica, and a few consumers use it.
 
-The rebalance process. Each node gets a second dst process, `rb-N`, that
+The rebalance machine. Each node gets a second kernel node, `rb-N`, that
 crashes, pauses and restarts with the replica `cp-N`. A restart takes a new
 machine, so it starts with no memory, in Standby. The host (`groups.go`) does
 what `server.Node` does in production, and nothing else:
@@ -191,10 +197,12 @@ what `server.Node` does in production, and nothing else:
   of the replica, and the answer is judged against the spec like any read.
 - The machine gets the fault injector of the run, so its buggify sites fire.
 
-A real inbox keeps the order in which values were put in it, but the dst
-scheduler breaks ties of the same instant at random. So the host keeps a queue
-for the machine and one for the replica, and sends a wake token for each value:
-a token takes the value at the head of its queue, whatever token comes first.
+A real inbox keeps the order in which values were put in it, but the kernel
+breaks ties of the same instant at random. So the host sends the values that
+come from outside the machine on two lanes of each node, one for the machine and
+one for the replica (`kernel.Lanes`): on one lane, values of one instant keep
+their order. Pausing a node is `World.Pause` on the replica and on its machine:
+their inputs wait in the inbox of the kernel, in order.
 The times are scaled down like the replica config: initial delay 300 ms, write
 timeout 2 s, new member timeout 4 s.
 
@@ -265,27 +273,28 @@ and the wall clock only to print the duration; it is not in the gate.
 
 Golden pins. `TestGoldenTraceHashes` pins the hash of `basic/17` and
 `chaos/42` (`golden_test.go`), and `TestGoldenWithoutGroups` pins the same seeds
-with the rebalance processes left out. The campaign line of `make sim-campaign`
+with the rebalance machines left out. The campaign line of `make sim-campaign`
 is a third pin: the hash of 300 seeds of each scenario. A change that moves any
 of them changed the behaviour of a run. That is allowed only on purpose: say
-why, and re-pin in a commit of its own. At 300 seeds (`-seeds 300`, first seed 1)
-the hashes are: basic `aaf01c86`, log-faults `4032d6fb`, crash-restart
-`f1e59c13`, leader-fencing `0609269d`, chaos `951ef86c`.
+why, and re-pin in a commit of its own. They were re-pinned when the host code moved
+to the dst kernel (T1.11c). At 300 seeds (`-seeds 300`, first seed 1) the hashes
+are: basic `7bfbd3a5`, log-faults `5a4c1bdf`, crash-restart `4f7c8c5f`,
+leader-fencing `35d9306b`, chaos `92361886`.
 
 ## Read a failure
 
     FAIL seed=7 scenario=chaos step=2123 t=19133ms: sim: replicas agree on every slot: detail=after 22 slots, cp-1 has state b2243c2c93cc1170 but cp-0 had 515376c0e35c0fae (and 3 more)
     last steps:
-      step 2119 t=19130ms cp-1 <- runtime.LogReadDone{...} (2 actions)
+      #2119 t=19130ms step cp-1 runtime.LogReadDone{...}
       ...
     reproduce: go run ./cmd/cpsim -scenario chaos -seed 7
 
 - `seed` and `scenario` are all you need to run it again. The command on the last
   line does it, with a line for every step on the output.
-- `step` is the scheduler event count and `t` the virtual time when the
+- `step` is the queue event count and `t` the virtual time when the
   property first broke. `(and N more)` counts later hits of the same property.
 - `last steps` are the last 48 steps before the end of the run: event, node,
-  and how many actions the node returned.
+  and the input it took.
 - The first failure is usually the cause. Later ones (for example a read that
   disagrees with the spec) often follow from it.
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# CI gate for the deterministic packages (internal/core, internal/verify/simulator, internal/wire/segmentformat, internal/verify/speccheck except
-# its system adapters in internal/verify/speccheck/specsystem, plus internal/wire/kafkawire and internal/broker).
+# CI gate for the deterministic packages (internal/core, internal/verify/simulator (the tree on dst/kernel), internal/wire/segmentformat, the broker spec in
+# spec, internal/verify/speccheck (the spec bridge) except its system adapters in internal/verify/speccheck/specsystem,
+# plus internal/wire/kafkawire and internal/broker).
 # Control-plane replica moved to mds-controlplane; see docs/cp-extraction.md and docs/decisions.md (I, 55, 56).
 #   1. determinismcheck: exact-path import allow-list plus banned constructs.
 #   2. Every third-party module they depend on has a reviewed audit record
@@ -10,17 +11,30 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-pkgs=(./internal/core/... ./internal/verify/simulator/... ./internal/wire/segmentformat/... ./internal/wire/kafkawire ./internal/broker/... ./internal/verify/speccheck ./internal/verify/speccheck/checker)
+pkgs=(./internal/core/... ./internal/verify/simulator/... ./internal/wire/segmentformat/... ./internal/wire/kafkawire ./internal/broker/... ./spec ./internal/verify/speccheck ./internal/verify/speccheck/specbridge)
 
 echo "== determinismcheck"
 go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ops/determinism-allow.txt "${pkgs[@]}"
+
+echo "== real time stays out of the gated packages"
+# Only dst/live (the production loop) and the production adapters may read real time
+# or real randomness. The import allow-list lets every package of this module in, so
+# check the whole dependency tree of each gated package for the real-time packages.
+realtime='manifesterio/mds/dst/live$|manifesterio/mds/shared/clock$|manifesterio/mds/dst/(realclock|syncclock)$'
+for p in "${pkgs[@]}"; do
+  if bad=$(go list -deps "$p" | grep -E "$realtime"); then
+    echo "gated package $p depends on a real-time package:" >&2
+    echo "$bad" >&2
+    exit 1
+  fi
+done
 
 echo "== dependency audit records"
 # Only code that the deterministic packages really run needs an audit record.
 # The generated gRPC API (api/controlplane/v1) is the input/output edge, so we
 # do not follow imports into it: grpc, protobuf and their dependencies are not
 # audited here. The packages still may import it for type definitions only
-# (decision 57). Broker-side wire conversion lives in internal/cpclient (not a
+# (decision 57). The wire conversion lives in controlplane/client (not a
 # determinism-scanned package).
 edge=github.com/manifesterio/mds/controlplane/api/controlplane/v1
 roots=$(go list "${pkgs[@]}" | tr '\n' ' ')

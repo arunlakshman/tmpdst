@@ -4,9 +4,10 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // The consumer workload. A consumer is a client that uses the group protocol
@@ -30,15 +31,15 @@ const (
 	consumerType       = "consumer"
 	consumerProtocol   = "range"
 
-	groupCallTimeout = 5 * runtime.Second // deadline of a heartbeat, commit, leave, describe, list or fetch
-	parkedCallSlack  = 6 * runtime.Second // a join or sync may wait its rebalance timeout, plus this
+	groupCallTimeout = 5 * machine.Second // deadline of a heartbeat, commit, leave, describe, list or fetch
+	parkedCallSlack  = 6 * machine.Second // a join or sync may wait its rebalance timeout, plus this
 	maxGroupAttempts = 8
 	maxSilences      = 3    // silent consumers in one run; each gets a new consumer in its place
 	silenceChance    = 0.01 // per action of a consumer in its group
 	skipSyncChance   = 0.02 // go silent after the join, before the sync
 	leaveChance      = 0.02
 	abandonChance    = 0.04
-	watchEvery       = 300 * runtime.Millisecond
+	watchEvery       = 300 * machine.Millisecond
 )
 
 func consumerGroupName(i int) string { return fmt.Sprintf("cg%d", i) }
@@ -69,9 +70,9 @@ const (
 // groupOp is one call of a consumer, with its tries.
 type groupOp struct {
 	kind     callKind
-	input    func(rebalance.CallID) any // the input of the machine; nil for a fetch
+	input    func(rebalance.CallID) rebalance.Input // the input of the machine; nil for a fetch
 	fetch    contract.OffsetFetch
-	deadline runtime.Duration
+	deadline machine.Duration
 	attempts int
 
 	member  string                     // join: the member id sent ("" for a new member)
@@ -85,13 +86,13 @@ type callTry struct {
 	c         *consumer
 	op        *groupOp
 	node      int
-	deadline  runtime.Duration
+	deadline  machine.Duration
 	onPurpose bool // the consumer abandons the call on purpose: its deadline is short
 	quiet     bool // sent in the quiet tail
-	req       runtime.RequestID
+	req       machine.RequestID
 }
 
-func (t *callTry) input(call rebalance.CallID) any { return t.op.input(call) }
+func (t *callTry) input(call rebalance.CallID) rebalance.Input { return t.op.input(call) }
 
 // answered is the end of the try: a reply, a timeout or a closed connection.
 func (t *callTry) answered(code runtime.ErrCode, body rebalance.Answer) { t.c.result(t, code, body) }
@@ -100,7 +101,7 @@ func (t *callTry) answered(code runtime.ErrCode, body rebalance.Answer) { t.c.re
 type consumer struct {
 	pool                   *consumerPool
 	name                   string
-	from                   runtime.NodeInstance
+	from                   machine.NodeInstance
 	group                  string
 	sessionMs, rebalanceMs int32
 
@@ -125,9 +126,9 @@ type consumer struct {
 type consumerPool struct {
 	s        *sim
 	all      []*consumer
-	byName   map[runtime.NodeID]*consumer
+	byName   map[machine.NodeID]*consumer
 	byMember map[string]*consumer // member id -> the consumer that got it
-	nextReq  runtime.RequestID
+	nextReq  machine.RequestID
 	nextOff  int64
 	silences int
 
@@ -136,7 +137,7 @@ type consumerPool struct {
 }
 
 func newConsumerPool(s *sim, count int) *consumerPool {
-	p := &consumerPool{s: s, byName: map[runtime.NodeID]*consumer{}, byMember: map[string]*consumer{}}
+	p := &consumerPool{s: s, byName: map[machine.NodeID]*consumer{}, byMember: map[string]*consumer{}}
 	for i := range count {
 		p.add(consumerGroupName(i % consumerGroupCount))
 	}
@@ -152,7 +153,7 @@ func (p *consumerPool) add(group string) *consumer {
 		rebalanceMs: int32(s.rand.Between(2000, 3000)),
 		node:        s.rand.Intn(len(s.nodes)),
 	}
-	c.from = runtime.NodeInstance{Node: runtime.NodeID(c.name)}
+	c.from = machine.NodeInstance{Node: machine.NodeID(c.name)}
 	p.all = append(p.all, c)
 	p.byName[c.from.Node] = c
 	return c
@@ -161,7 +162,7 @@ func (p *consumerPool) add(group string) *consumer {
 func (p *consumerPool) start() {
 	for _, c := range p.all {
 		c.idle = false
-		c.later(runtime.Duration(p.s.rand.Between(int64(20*runtime.Millisecond), int64(300*runtime.Millisecond))))
+		c.later(machine.Duration(p.s.rand.Between(int64(20*machine.Millisecond), int64(300*machine.Millisecond))))
 	}
 }
 
@@ -212,7 +213,7 @@ func consumerGroups() []string {
 	return names
 }
 
-func (p *consumerPool) newReq() runtime.RequestID {
+func (p *consumerPool) newReq() machine.RequestID {
 	p.nextReq++
 	return p.nextReq
 }
@@ -230,9 +231,9 @@ func (p *consumerPool) expiring(rm contract.GroupRemove) {
 			continue
 		}
 		if c.silentIn == needSync {
-			p.s.env.Reachable("rebalance-sim: a member that never synced is removed")
+			p.s.env.Reachable(memberNeverSyncedRemoved)
 		} else {
-			p.s.env.Reachable("rebalance-sim: a silent member is removed")
+			p.s.env.Reachable(silentMemberRemoved)
 		}
 	}
 }
@@ -244,7 +245,7 @@ func (p *consumerPool) fetched(n *simNode, a runtime.ControlPlaneReply) bool {
 		return false
 	}
 	prefix := n.replica().Applied()
-	p.s.after(p.s.store.netDelay(p.s.rand), "consumer-fetch-reply", func() {
+	p.s.after(p.s.store.netDelay(p.s.rand), func() {
 		t := c.cur
 		if t == nil || t.op.kind != callFetch || t.req != a.Done.Req {
 			return
@@ -263,19 +264,19 @@ func (p *consumerPool) fetched(n *simNode, a runtime.ControlPlaneReply) bool {
 }
 
 // later runs the next step of c after d.
-func (c *consumer) later(d runtime.Duration) {
-	c.pool.s.after(d, "consumer-think", c.next)
+func (c *consumer) later(d machine.Duration) {
+	c.pool.s.after(d, c.next)
 }
 
 // gap is the wait between two calls of a consumer in its group: about a
 // quarter of its session timeout.
-func (c *consumer) gap() runtime.Duration {
-	q := int64(c.sessionMs) * int64(runtime.Millisecond) / 4
-	return runtime.Duration(c.pool.s.rand.Between(q*2/3, q*4/3))
+func (c *consumer) gap() machine.Duration {
+	q := int64(c.sessionMs) * int64(machine.Millisecond) / 4
+	return machine.Duration(c.pool.s.rand.Between(q*2/3, q*4/3))
 }
 
-func (c *consumer) think() runtime.Duration {
-	return runtime.Duration(c.pool.s.rand.Between(int64(10*runtime.Millisecond), int64(80*runtime.Millisecond)))
+func (c *consumer) think() machine.Duration {
+	return machine.Duration(c.pool.s.rand.Between(int64(10*machine.Millisecond), int64(80*machine.Millisecond)))
 }
 
 // next makes the next call.
@@ -342,13 +343,13 @@ func (c *consumer) goSilent() {
 	p.s.tracef("%s goes silent (member %q of %s)", c.name, c.member, c.group)
 	n := p.add(c.group)
 	n.idle = false
-	n.later(runtime.Duration(p.s.rand.Between(int64(2500*runtime.Millisecond), int64(5*runtime.Second))))
+	n.later(machine.Duration(p.s.rand.Between(int64(2500*machine.Millisecond), int64(5*machine.Second))))
 }
 
 func (c *consumer) join() {
 	member := c.member
 	op := &groupOp{kind: callJoin, member: member, deadline: c.parkedDeadline()}
-	op.input = func(call rebalance.CallID) any {
+	op.input = func(call rebalance.CallID) rebalance.Input {
 		return rebalance.Join{
 			Call: call, Group: c.group, MemberID: member, ClientID: c.name, ClientHost: "/10.0.0.1",
 			SessionTimeoutMs: c.sessionMs, RebalanceTimeoutMs: c.rebalanceMs, ProtocolType: consumerType,
@@ -358,8 +359,8 @@ func (c *consumer) join() {
 	c.send(op)
 }
 
-func (c *consumer) parkedDeadline() runtime.Duration {
-	return runtime.Duration(c.rebalanceMs)*runtime.Millisecond + parkedCallSlack
+func (c *consumer) parkedDeadline() machine.Duration {
+	return machine.Duration(c.rebalanceMs)*machine.Millisecond + parkedCallSlack
 }
 
 // sync sends the assignment when the consumer leads: each member gets bytes
@@ -372,7 +373,7 @@ func (c *consumer) sync() {
 		}
 	}
 	member, gen, assign := c.member, c.gen, op.assign
-	op.input = func(call rebalance.CallID) any {
+	op.input = func(call rebalance.CallID) rebalance.Input {
 		return rebalance.Sync{Call: call, Group: c.group, MemberID: member, Generation: gen, Assignments: assign}
 	}
 	c.send(op)
@@ -381,7 +382,7 @@ func (c *consumer) sync() {
 func (c *consumer) heartbeat() {
 	member, gen := c.member, c.gen
 	op := &groupOp{kind: callHeartbeat, member: member, gen: gen, deadline: groupCallTimeout}
-	op.input = func(call rebalance.CallID) any {
+	op.input = func(call rebalance.CallID) rebalance.Input {
 		return rebalance.Heartbeat{Call: call, Group: c.group, MemberID: member, Generation: gen}
 	}
 	c.send(op)
@@ -398,7 +399,7 @@ func (c *consumer) commit() {
 		op.offsets = append(op.offsets, contract.PartitionOffset{TopicPartition: tp, Offset: p.nextOff, LeaderEpoch: -1})
 	}
 	commit := contract.OffsetCommit{Group: c.group, Member: c.member, Generation: c.gen, Offsets: op.offsets}
-	op.input = func(call rebalance.CallID) any { return rebalance.OffsetCommit{Call: call, Op: commit} }
+	op.input = func(call rebalance.CallID) rebalance.Input { return rebalance.OffsetCommit{Call: call, Op: commit} }
 	c.send(op)
 }
 
@@ -409,26 +410,30 @@ func (c *consumer) fetchOffsets() {
 
 func (c *consumer) describe() {
 	op := &groupOp{kind: callDescribe, deadline: groupCallTimeout}
-	op.input = func(call rebalance.CallID) any { return rebalance.Describe{Call: call, Groups: []string{c.group}} }
+	op.input = func(call rebalance.CallID) rebalance.Input {
+		return rebalance.Describe{Call: call, Groups: []string{c.group}}
+	}
 	c.send(op)
 }
 
 func (c *consumer) describeAll() {
 	op := &groupOp{kind: callDescribe, deadline: groupCallTimeout}
-	op.input = func(call rebalance.CallID) any { return rebalance.Describe{Call: call, Groups: consumerGroups()} }
+	op.input = func(call rebalance.CallID) rebalance.Input {
+		return rebalance.Describe{Call: call, Groups: consumerGroups()}
+	}
 	c.send(op)
 }
 
 func (c *consumer) list() {
 	op := &groupOp{kind: callList, deadline: groupCallTimeout}
-	op.input = func(call rebalance.CallID) any { return rebalance.List{Call: call} }
+	op.input = func(call rebalance.CallID) rebalance.Input { return rebalance.List{Call: call} }
 	c.send(op)
 }
 
 func (c *consumer) leave() {
 	member := c.member
 	op := &groupOp{kind: callLeave, member: member, deadline: groupCallTimeout}
-	op.input = func(call rebalance.CallID) any {
+	op.input = func(call rebalance.CallID) rebalance.Input {
 		return rebalance.Leave{Call: call, Group: c.group, Members: []string{member}}
 	}
 	c.send(op)
@@ -442,11 +447,11 @@ func (c *consumer) send(op *groupOp) {
 	t := &callTry{c: c, op: op, node: c.node, deadline: op.deadline}
 	if !s.quiet && !c.watcher && s.rand.Chance(abandonChance) {
 		t.onPurpose = true
-		t.deadline = runtime.Duration(s.rand.Between(int64(runtime.Millisecond), int64(300*runtime.Millisecond)))
+		t.deadline = machine.Duration(s.rand.Between(int64(machine.Millisecond), int64(300*machine.Millisecond)))
 	}
 	c.cur = t
 	n := s.nodes[t.node]
-	s.after(s.store.netDelay(s.rand), "consumer-call", func() {
+	s.after(s.store.netDelay(s.rand), func() {
 		if op.kind == callFetch {
 			n.groups.fetch(t, c.pool.newReq())
 			return
@@ -454,7 +459,7 @@ func (c *consumer) send(op *groupOp) {
 		n.groups.startCall(t)
 	})
 	if op.kind == callFetch {
-		s.after(t.deadline, "consumer-fetch-timeout", func() {
+		s.after(t.deadline, func() {
 			if c.cur == t {
 				c.result(t, runtime.ErrTimeout, nil)
 			}
@@ -491,8 +496,8 @@ func (c *consumer) retry(op *groupOp, code runtime.ErrCode) {
 	s := c.pool.s
 	c.node = c.pool.otherNode(c.node)
 	if op.attempts < maxGroupAttempts && !c.stopping {
-		backoff := runtime.Duration(op.attempts) * 50 * runtime.Millisecond
-		s.after(backoff, "consumer-retry", func() { c.send(op) })
+		backoff := machine.Duration(op.attempts) * 50 * machine.Millisecond
+		s.after(backoff, func() { c.send(op) })
 		return
 	}
 	c.later(c.think())
@@ -549,10 +554,10 @@ func (c *consumer) handle(op *groupOp, code runtime.ErrCode, body rebalance.Answ
 		}
 	case callLeave:
 		if a, ok := body.(rebalance.LeaveAnswer); ok && code == runtime.OK && len(a.Errs) == 1 && a.Errs[0] == runtime.OK {
-			c.pool.s.env.Reachable("rebalance-sim: a leave removes a member")
+			c.pool.s.env.Reachable(leaveRemovesMember)
 		}
 		c.member, c.stage = "", needJoin
-		c.later(runtime.Duration(c.pool.s.rand.Between(int64(200*runtime.Millisecond), int64(runtime.Second))))
+		c.later(machine.Duration(c.pool.s.rand.Between(int64(200*machine.Millisecond), int64(machine.Second))))
 		return
 	case callDescribe:
 		if c.watcher {
@@ -578,7 +583,7 @@ func (c *consumer) handle(op *groupOp, code runtime.ErrCode, body rebalance.Answ
 // code means the group is in a new round.
 func (c *consumer) rejoin(kind callKind, code runtime.ErrCode) {
 	if kind == callHeartbeat && code == runtime.ErrRebalanceInProgress {
-		c.pool.s.env.Reachable("rebalance-sim: a heartbeat is told to join again")
+		c.pool.s.env.Reachable(heartbeatToldJoinAgain)
 	}
 	if code == runtime.ErrUnknownMember {
 		c.member = ""

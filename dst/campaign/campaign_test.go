@@ -18,7 +18,7 @@ func TestRunFoldsHashesInSeedOrder(t *testing.T) {
 		want.Uint64(seed * 1000)
 	}
 
-	got := campaign.Run(first, seeds, 4, func(seed uint64) campaign.Result {
+	got := campaign.RunSeeds(first, seeds, 4, func(seed uint64) campaign.Result {
 		// Finish later seeds first so a buggy fold would scramble order.
 		time.Sleep(time.Duration(seeds-int(seed-first)) * time.Millisecond)
 		return campaign.Result{Hash: seed * 1000, OK: true}
@@ -36,7 +36,7 @@ func TestRunFoldsHashesInSeedOrder(t *testing.T) {
 }
 
 func TestRunCollectsFailuresAndMergesCoverage(t *testing.T) {
-	got := campaign.Run(1, 4, 2, func(seed uint64) campaign.Result {
+	got := campaign.RunSeeds(1, 4, 2, func(seed uint64) campaign.Result {
 		ok := seed%2 == 0
 		return campaign.Result{
 			Hash: seed,
@@ -65,7 +65,7 @@ func TestRunCollectsFailuresAndMergesCoverage(t *testing.T) {
 
 func TestRunFoldsSitesAndNeverFired(t *testing.T) {
 	run := func(first uint64) campaign.Summary {
-		return campaign.Run(first, 4, 2, func(seed uint64) campaign.Result {
+		return campaign.RunSeeds(first, 4, 2, func(seed uint64) campaign.Result {
 			sites := map[string]fault.SiteCount{
 				"fires": {On: seed%2 == 0, Calls: 10},
 				"quiet": {On: true, Calls: 5},
@@ -94,7 +94,7 @@ func TestRunFoldsSitesAndNeverFired(t *testing.T) {
 
 func TestRunZeroSeeds(t *testing.T) {
 	var calls atomic.Int32
-	got := campaign.Run(1, 0, 2, func(uint64) campaign.Result {
+	got := campaign.RunSeeds(1, 0, 2, func(uint64) campaign.Result {
 		calls.Add(1)
 		return campaign.Result{OK: true}
 	})
@@ -107,7 +107,7 @@ func TestRunZeroSeeds(t *testing.T) {
 }
 
 func TestRunStampsSeedOnFailedResults(t *testing.T) {
-	got := campaign.Run(7, 3, 1, func(seed uint64) campaign.Result {
+	got := campaign.RunSeeds(7, 3, 1, func(seed uint64) campaign.Result {
 		return campaign.Result{Hash: seed, OK: seed != 8}
 	})
 	if len(got.Failed) != 1 || got.Failed[0].Seed != 8 {
@@ -117,7 +117,7 @@ func TestRunStampsSeedOnFailedResults(t *testing.T) {
 
 func TestRunSumsCountersAndMergeAndMissing(t *testing.T) {
 	run := func(first uint64) campaign.Summary {
-		return campaign.Run(first, 3, 2, func(seed uint64) campaign.Result {
+		return campaign.RunSeeds(first, 3, 2, func(seed uint64) campaign.Result {
 			return campaign.Result{
 				OK:       true,
 				Counters: map[string]uint64{"steps": 10},

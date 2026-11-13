@@ -1,0 +1,61 @@
+package conformance
+
+import (
+	"fmt"
+	"testing"
+
+	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
+)
+
+// TestDescribeEveryOperationKind checks the text Describe gives for each kind
+// of control-plane operation, and for the empty operation.
+func TestDescribeEveryOperationKind(t *testing.T) {
+	topic := contract.NewTopicPartition("t1", 2)
+	cases := []struct {
+		name      string
+		operation ControlPlaneTestStep
+		want      string
+	}{
+		{
+			name:      "direct topic create",
+			operation: NewCreateTopic("orders", 3),
+			want:      `create topic "orders" with 3 partitions`,
+		},
+		{
+			name:      "commit",
+			operation: NewCall(core.ControlPlaneCall{Req: 5, Op: contract.CommitSegment{SegmentKey: "s", Batches: make([]contract.PendingBatch, 2)}}),
+			want:      `request 5: commit segment "s" with 2 batches`,
+		},
+		{
+			name:      "lookup",
+			operation: NewCall(core.ControlPlaneCall{Req: 4, Op: contract.FindSegments{TopicPartition: topic, From: 7, MaxBytes: 60}}),
+			want:      fmt.Sprintf("request 4: look up %v from offset 7 with max bytes 60", topic),
+		},
+		{
+			name:      "describe topics",
+			operation: NewCall(core.ControlPlaneCall{Req: 6, Op: contract.DescribeTopics{Topics: []string{"a", "b"}}}),
+			want:      `request 6: describe topics ["a" "b"]`,
+		},
+		{
+			name:      "exclusive create",
+			operation: NewCall(core.ControlPlaneCall{Req: 7, Op: contract.CreateTopic{Name: "n", Partitions: 3, FailIfExists: true}}),
+			want:      `request 7: create topic "n" with 3 partitions, failing if it exists`,
+		},
+		{
+			name:      "group operation falls back to its type",
+			operation: NewCall(core.ControlPlaneCall{Req: 8, Op: contract.ListGroups{}}),
+			want:      "request 8: contract.ListGroups",
+		},
+		{
+			name:      "empty operation",
+			operation: ControlPlaneTestStep{},
+			want:      "empty operation",
+		},
+	}
+	for _, tc := range cases {
+		if got := tc.operation.Describe(); got != tc.want {
+			t.Errorf("%s: Describe gave %q, want %q.", tc.name, got, tc.want)
+		}
+	}
+}

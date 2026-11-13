@@ -7,6 +7,17 @@ import (
 	"github.com/manifesterio/mds/dst/rng"
 )
 
+var (
+	siteDrop     = fault.NewFaultSite("fault test: drop")
+	siteSite     = fault.NewSite("fault test: quiet site")
+	siteLatchA   = fault.NewSite("fault test: latch a")
+	siteLatchB   = fault.NewSite("fault test: latch b")
+	siteMaybeP   = fault.NewSite("fault test: maybe p")
+	siteCounted  = fault.NewSite("fault test: counted")
+	siteSameSeed = fault.NewSite("fault test: same seed")
+	siteLatchP   = fault.NewSite("fault test: latch p")
+)
+
 func TestQuietSilencesFaultOnly(t *testing.T) {
 	r := rng.New(42)
 	inj := fault.New(r)
@@ -15,14 +26,14 @@ func TestQuietSilencesFaultOnly(t *testing.T) {
 		t.Fatal("Quiet not set")
 	}
 	before := r.Calls()
-	if inj.Fault("drop", 1.0) {
+	if inj.Fault(siteDrop, 1.0) {
 		t.Fatal("Fault fired while quiet")
 	}
 	if r.Calls() != before {
 		t.Fatal("quiet Fault must not draw")
 	}
 	// Maybe still draws (activate 0.5, then fire 0.05).
-	_ = inj.Maybe("site")
+	_ = inj.Maybe(siteSite)
 	if r.Calls() <= before {
 		t.Fatal("Maybe drew nothing while quiet")
 	}
@@ -35,17 +46,17 @@ func TestMaybeLatchesPerSite(t *testing.T) {
 		r := rng.New(seed)
 		inj := fault.New(r)
 		c0 := r.Calls()
-		_ = inj.Maybe("A")
+		_ = inj.Maybe(siteLatchA)
 		if r.Calls()-c0 != 2 {
 			continue
 		}
 		c1 := r.Calls()
-		_ = inj.Maybe("A")
+		_ = inj.Maybe(siteLatchA)
 		if r.Calls()-c1 != 1 {
 			t.Fatalf("seed %d: second Maybe drew %d, want 1 (latch)", seed, r.Calls()-c1)
 		}
 		c2 := r.Calls()
-		_ = inj.Maybe("B")
+		_ = inj.Maybe(siteLatchB)
 		delta := r.Calls() - c2
 		if delta != 1 && delta != 2 {
 			t.Fatalf("seed %d: new site drew %d", seed, delta)
@@ -60,7 +71,7 @@ func TestMaybePIgnoresQuiet(t *testing.T) {
 	inj := fault.New(r)
 	inj.SetQuiet(true)
 	before := r.Calls()
-	_ = inj.MaybeP("x", 0.5)
+	_ = inj.MaybeP(siteMaybeP, 0.5)
 	if r.Calls() == before {
 		t.Fatal("MaybeP must draw while quiet")
 	}
@@ -73,11 +84,11 @@ func TestSitesCountCallsAndFires(t *testing.T) {
 	}
 	var fired uint64
 	for range 400 {
-		if inj.MaybeP("a", 0.5) {
+		if inj.MaybeP(siteCounted, 0.5) {
 			fired++
 		}
 	}
-	got := inj.Sites()["a"]
+	got := inj.Sites()[siteCounted.Name()]
 	if got.Calls != 400 || got.Fired != fired {
 		t.Fatalf("counts %+v, want 400 calls and %d fired", got, fired)
 	}
@@ -85,14 +96,14 @@ func TestSitesCountCallsAndFires(t *testing.T) {
 		t.Fatalf("an off site fired: %+v", got)
 	}
 	// Fault is not a site.
-	_ = inj.Fault("drop", 1.0)
-	if _, ok := inj.Sites()["drop"]; ok {
+	_ = inj.Fault(siteDrop, 1.0)
+	if _, ok := inj.Sites()[siteDrop.Name()]; ok {
 		t.Fatal("Fault must not be counted as a site")
 	}
 	// The result is a copy.
 	s := inj.Sites()
-	s["a"] = fault.SiteCount{}
-	if inj.Sites()["a"].Calls != 400 {
+	s[siteCounted.Name()] = fault.SiteCount{}
+	if inj.Sites()[siteCounted.Name()].Calls != 400 {
 		t.Fatal("Sites returned the live map")
 	}
 }
@@ -102,7 +113,7 @@ func TestSitesCountCallsAndFires(t *testing.T) {
 func TestSiteCountsDoNotMoveTheStream(t *testing.T) {
 	a, b := fault.New(rng.New(9)), fault.New(rng.New(9))
 	for range 100 {
-		if a.Maybe("x") != b.Maybe("x") {
+		if a.Maybe(siteSameSeed) != b.Maybe(siteSameSeed) {
 			t.Fatal("same seed, different answers")
 		}
 		_ = b.Sites()
@@ -114,12 +125,12 @@ func TestMaybePLatchesPerSite(t *testing.T) {
 		r := rng.New(seed)
 		inj := fault.New(r)
 		c0 := r.Calls()
-		_ = inj.MaybeP("A", 0.05)
+		_ = inj.MaybeP(siteLatchP, 0.05)
 		if r.Calls()-c0 != 2 {
 			continue
 		}
 		c1 := r.Calls()
-		_ = inj.MaybeP("A", 0.05)
+		_ = inj.MaybeP(siteLatchP, 0.05)
 		if r.Calls()-c1 != 1 {
 			t.Fatalf("seed %d: second MaybeP drew %d, want 1 (latch)", seed, r.Calls()-c1)
 		}

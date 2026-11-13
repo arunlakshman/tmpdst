@@ -7,6 +7,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // DescribeGroups (key 15) and ListGroups (key 16). Admin tools read them. Each
@@ -31,7 +32,7 @@ func (b *Broker) describeGroups(s *slot, r *kmsg.DescribeGroupsRequest) []core.A
 		response.Groups[i].AuthorizedOperations = authOpsOmitted
 	}
 	fill := func(e core.ControlPlaneDone) {
-		ds := core.ResponseAs[core.DescribeGroupsResp](e).Groups
+		ds := core.ResponseAs[contract.DescribeGroupsResp](e).Groups
 		for i := range response.Groups {
 			g := &response.Groups[i]
 			switch {
@@ -42,11 +43,11 @@ func (b *Broker) describeGroups(s *slot, r *kmsg.DescribeGroupsRequest) []core.A
 			}
 		}
 	}
-	return b.groupCall(s, core.DescribeGroups{Groups: r.Groups}, 0, fill)
+	return b.groupCall(s, contract.DescribeGroups{Groups: r.Groups}, 0, fill)
 }
 
 // describedGroup writes one group of a DescribeGroups answer.
-func describedGroup(g *kmsg.DescribeGroupsResponseGroup, d core.GroupDescription) {
+func describedGroup(g *kmsg.DescribeGroupsResponseGroup, d contract.GroupDescription) {
 	if !d.Exists {
 		g.State = "Dead"
 		return
@@ -85,7 +86,7 @@ func (b *Broker) listGroups(s *slot, r *kmsg.ListGroupsRequest) []core.Action {
 		if e.Err != core.OK {
 			return
 		}
-		for _, g := range core.ResponseAs[core.ListGroupsResp](e).Groups {
+		for _, g := range core.ResponseAs[contract.ListGroupsResp](e).Groups {
 			state := kafkaGroupState(g.State)
 			if !b.coordinatorIsSelf(g.Name) || !inStates(r.StatesFilter, state) {
 				continue
@@ -93,5 +94,5 @@ func (b *Broker) listGroups(s *slot, r *kmsg.ListGroupsRequest) []core.Action {
 			response.Groups = append(response.Groups, kmsg.ListGroupsResponseGroup{Group: g.Name, ProtocolType: g.ProtocolType, GroupState: state})
 		}
 	}
-	return b.groupCall(s, core.ListGroups{}, 0, fill)
+	return b.groupCall(s, contract.ListGroups{}, 0, fill)
 }

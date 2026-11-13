@@ -43,7 +43,12 @@ linters:
     - gosec
     - modernize
     - perfsprint
+    - gochecksumtype
   settings:
+    # A type switch over a sealed sum (an interface marked //sumtype:decl)
+    # must list every case. A default branch does not count as listing them.
+    gochecksumtype:
+      default-signifies-exhaustive: false
     depguard:
       rules:
         main:

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 )
 
@@ -116,7 +116,7 @@ func TestOffsetCommitChecks(t *testing.T) {
 		// "fresh" is not in memory, so List does not show it.
 		{delay, List{Call: 15}, []string{"15 OK g:consumer:Stable"}},
 	})
-	f := runtime.ResponseAs[contract.OffsetFetchResp](h.log.Apply(contract.OffsetFetch{Group: "g", Partitions: []contract.TopicPartition{tp0}}))
+	f := contract.ResponseAs[contract.OffsetFetchResp](h.log.Apply(contract.OffsetFetch{Group: "g", Partitions: []contract.TopicPartition{tp0}}))
 	h.check("fetch", f.Offsets[0].Offset, 5)
 	// New (rule 31): PreparingRebalance takes a commit, CompletingRebalance does not.
 	h.run([]step{
@@ -172,7 +172,7 @@ func TestRebuildKeepsMembersAndExpiresSilent(t *testing.T) {
 	// Failover: the old machine loses the role, a new one takes over from the log.
 	h.check("losing the role", h.step(RoleChanged{Active: false}), []string(nil))
 	h.check("timers left", len(h.timers), 0)
-	h.m = New(Config{})
+	h.m = New(Config{}, h.env)
 	h.step(RoleChanged{Active: true})
 	h.check("rebuilt g", []any{h.phase("g"), h.group("g").generation, h.members("g")}, []any{stateStable, 2, []string{"m1", "m2"}})
 	h.check("rebuilt unsynced", []any{h.phase("unsynced"), h.members("unsynced")}, []any{stateJoining, []string{"m3"}})
@@ -229,6 +229,8 @@ func heldOps(h *harness) string {
 				name += " fresh"
 			}
 			out = append(out, name)
+		case Reply, SetTimer, CancelTimer, SendSelf:
+			// Not a submit: held holds only submits.
 		}
 	}
 	return fmt.Sprint(out)
@@ -284,7 +286,7 @@ func TestConcurrentJoinsOneRound(t *testing.T) {
 	}
 }
 
-func repliesIn(outs []any) []Reply {
+func repliesIn(outs []Output) []Reply {
 	var out []Reply
 	for _, o := range outs {
 		if r, ok := o.(Reply); ok && r.Err == runtime.OK {

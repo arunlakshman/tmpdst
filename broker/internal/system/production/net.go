@@ -13,6 +13,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // ErrNoConn reports a Write or Close on a connection that is gone.
@@ -98,7 +99,7 @@ func (n *Net) accept() {
 			continue
 		default:
 		}
-		n.sink.DeliverData(core.ConnOpened{Conn: c.id, Peer: nc.RemoteAddr().String()})
+		n.sink.Deliver(machine.Data, core.ConnOpened{Conn: c.id, Peer: nc.RemoteAddr().String()})
 		n.wg.Go(c.readLoop)
 		n.wg.Go(c.writeLoop)
 	}
@@ -249,7 +250,7 @@ func (c *conn) report(abort bool) {
 	c.told = true
 	c.mu.Unlock()
 	if !skip {
-		c.n.sink.DeliverData(core.ConnClosed{Conn: c.id, Abort: abort})
+		c.n.sink.Deliver(machine.Data, core.ConnClosed{Conn: c.id, Abort: abort})
 	}
 }
 
@@ -302,7 +303,7 @@ func (c *conn) readLoop() {
 			local := c.local
 			c.mu.Unlock()
 			if !local {
-				c.n.sink.DeliverData(core.BytesReceived{Conn: c.id, Data: buf[:k:k]})
+				c.n.sink.Deliver(machine.Data, core.BytesReceived{Conn: c.id, Data: buf[:k:k]})
 			}
 		}
 		if err != nil {

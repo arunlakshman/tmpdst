@@ -5,7 +5,7 @@ Production control plane now lives in the sibling repo **mds-controlplane**.
 
 ## What stays here
 
-- **Client:** `internal/cpclient` — broker-side gRPC adapter (`system.ControlPlane`).
+- **Client:** `controlplane/client` (module controlplane) — the gRPC client; the broker plugs it in as `system.ControlPlane`.
 - **Protos:** `api/controlplane` — vendored from mds-controlplane with a
   broker-owned `go_package` (`github.com/manifesterio/mds/api/controlplane/...`).
   Regenerate with `make proto`. Sync from the CP repo when the wire API changes.

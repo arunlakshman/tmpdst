@@ -4,10 +4,11 @@ import (
 	"fmt"
 
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 const (
-	clientTimeout = 2 * runtime.Second
+	clientTimeout = 2 * machine.Second
 	maxAttempts   = 8
 	finalAttempts = 40
 )
@@ -17,7 +18,7 @@ type opState struct {
 	op       runtime.ControlPlaneOperation
 	write    bool
 	attempts int
-	req      runtime.RequestID
+	req      machine.RequestID
 	node     int // node of the current attempt
 	snap     *snapshot
 	final    bool   // a read of the final check: one node, retried there
@@ -29,7 +30,7 @@ type opState struct {
 // operation is sent every time, so a commit keeps its segment key.
 type client struct {
 	pool *clientPool
-	from runtime.NodeInstance
+	from machine.NodeInstance
 	cur  *opState
 	idle bool
 }
@@ -39,12 +40,12 @@ type clientPool struct {
 	s       *sim
 	w       *workload
 	all     []*client
-	byName  map[runtime.NodeID]*client
-	nextReq runtime.RequestID
+	byName  map[machine.NodeID]*client
+	nextReq machine.RequestID
 }
 
 func newClientPool(s *sim, count int) *clientPool {
-	p := &clientPool{s: s, w: &workload{rand: s.rand}, byName: map[runtime.NodeID]*client{}}
+	p := &clientPool{s: s, w: &workload{rand: s.rand}, byName: map[machine.NodeID]*client{}}
 	for i := range count {
 		p.add(fmt.Sprintf("client-%d", i))
 	}
@@ -52,7 +53,7 @@ func newClientPool(s *sim, count int) *clientPool {
 }
 
 func (p *clientPool) add(name string) *client {
-	c := &client{pool: p, idle: true, from: runtime.NodeInstance{Node: runtime.NodeID(name)}}
+	c := &client{pool: p, idle: true, from: machine.NodeInstance{Node: machine.NodeID(name)}}
 	p.all = append(p.all, c)
 	p.byName[c.from.Node] = c
 	return c
@@ -60,8 +61,8 @@ func (p *clientPool) add(name string) *client {
 
 func (p *clientPool) start() {
 	for _, c := range p.all {
-		d := runtime.Duration(p.s.rand.Between(int64(20*runtime.Millisecond), int64(200*runtime.Millisecond)))
-		p.s.after(d, "client-start", c.issue)
+		d := machine.Duration(p.s.rand.Between(int64(20*machine.Millisecond), int64(200*machine.Millisecond)))
+		p.s.after(d, c.issue)
 	}
 }
 
@@ -114,7 +115,7 @@ func (p *clientPool) reply(n *simNode, a runtime.ControlPlaneReply) {
 		return
 	}
 	prefix := n.replica().Applied()
-	p.s.after(p.s.store.netDelay(p.s.rand), "client-reply", func() { c.receive(a.Done, prefix) })
+	p.s.after(p.s.store.netDelay(p.s.rand), func() { c.receive(a.Done, prefix) })
 }
 
 // issue starts the next random operation, unless the quiet tail has started.
@@ -124,11 +125,11 @@ func (c *client) issue() {
 		c.idle = true
 		return
 	}
-	nowMs := int64(s.mono()) / int64(runtime.Millisecond)
+	nowMs := int64(s.mono()) / int64(machine.Millisecond)
 	op, write := c.pool.w.next(nowMs)
 	c.begin(&opState{op: op, write: write, node: -1, then: func() {
-		think := runtime.Duration(s.rand.Between(int64(10*runtime.Millisecond), int64(120*runtime.Millisecond)))
-		s.after(think, "client-think", c.issue)
+		think := machine.Duration(s.rand.Between(int64(10*machine.Millisecond), int64(120*machine.Millisecond)))
+		s.after(think, c.issue)
 	}})
 }
 
@@ -152,8 +153,8 @@ func (c *client) attempt() {
 	op.snap = p.s.oracle.snapshotFor(op.op)
 	node := p.s.nodes[op.node]
 	deliver := runtime.ControlPlaneDeliver{From: c.from, Req: req, Op: op.op}
-	p.s.after(p.s.store.netDelay(p.s.rand), "client-request", func() { node.deliverNow(deliver) })
-	p.s.after(clientTimeout, "client-timeout", func() {
+	p.s.after(p.s.store.netDelay(p.s.rand), func() { node.deliverNow(deliver) })
+	p.s.after(clientTimeout, func() {
 		if c.cur == op && op.req == req {
 			c.answered(runtime.ControlPlaneDone{Req: req, Err: runtime.ErrTimeout, Outcome: runtime.MaybeApplied}, 0)
 		}
@@ -190,14 +191,14 @@ func (c *client) answered(d runtime.ControlPlaneDone, prefix runtime.LogPosition
 	if op.attempts >= limit {
 		s.stats.GaveUp++
 		if op.final {
-			s.violation("final reads are answered", "node cp-%d did not answer %T in the quiet tail (last error %v)", op.node, op.op, d.Err)
+			s.violation(finalReadsAnswered, "node cp-%d did not answer %T in the quiet tail (last error %v)", op.node, op.op, d.Err)
 		}
 		c.finish()
 		return
 	}
 	s.stats.Retries++
-	backoff := runtime.Duration(op.attempts) * 60 * runtime.Millisecond
-	s.after(backoff, "client-retry", func() {
+	backoff := machine.Duration(op.attempts) * 60 * machine.Millisecond
+	s.after(backoff, func() {
 		if c.cur == op {
 			c.attempt()
 		}

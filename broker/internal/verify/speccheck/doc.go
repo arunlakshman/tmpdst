@@ -1,57 +1,72 @@
-// Package speccheck holds the specs of the outside world: the object store
-// (ObjectStore), the control plane (ControlPlane) and the broker (Broker).
-// A spec is a small program that shows the correct behavior. It
-// has no faults, it runs one operation at a time, and it keeps plain data. It
-// is short so that a reader can see that it is correct.
+// Package speccheck holds the tools that compare the broker with the specs of
+// the outside world. It holds no spec itself. There is one spec for each
+// thing, and each lives with the thing it describes:
 //
-// ObjectStore and ControlPlane answer a core.IOCall with a core.IOResult
-// through Exec. Broker has Append and Read, for one Kafka partition. All three
-// have a StateHash.
+//	control plane   controlplane/spec    (the one spec of the control plane)
+//	object store    shared/objectstore   (objectstore.Spec)
+//	broker          broker/spec          (spec.Broker, one Kafka partition)
 //
-// A spec is also used as a test fake (the adapters over the specs are in
-// speccheck/specsystem). The main use is as an oracle: a checker we trust to say if a
-// result is correct. Each real component is compared with its spec, step by
-// step, using the helpers in checker. There are four checks:
+// A spec is a small program that shows the correct behavior. It has no
+// faults, it runs one operation at a time, and it keeps plain data. It is
+// short so that a reader can see that it is correct. A spec shares types with
+// the code and never shares logic, and it never imports the package it is the
+// spec of.
 //
-//	C1  The broker state machine runs with no faults, over the ObjectStore
-//	    and ControlPlane specs. Its answers to produce, fetch and ListOffsets
-//	    are compared with Broker. The test also checks that the injected
-//	    bugs InjectedBugWrongOffset and InjectedBugServeCorrupt are caught.
+// The broker kernel speaks core.IOCall and core.IOResult. The control plane
+// spec speaks contract.Operation and contract.Done. The package specbridge
+// converts between the two and adds no rule. The package specsystem puts the
+// specs behind the production seams, so a production Executor can run against
+// them. The package conformance compares a subject with a spec, step by step, with
+// spectest.Lockstep (dst/check/spectest); the package injectedbug holds the
+// planted bugs that prove that it can fail.
+//
+// A spec is also used as a test fake. The main use is as an oracle: a checker
+// we trust to say if a result is correct. There are three checks (C1, C3, C4;
+// C2 was deleted, see below):
+//
+//	C1  The broker state machine runs with no faults, over the object store
+//	    spec and the control plane spec. Its answers to produce, fetch and
+//	    ListOffsets are compared with the broker spec. The test also checks
+//	    that the planted bugs InjectedBugWrongOffset and
+//	    InjectedBugServeCorrupt are caught.
 //	    Test: internal/broker/conformance_test.go.
-//	C2  Each simulated engine (object store, control plane) runs with all
-//	    faults off. It must give the same completion and the same StateHash
-//	    as its spec after every operation.
-//	    Test: internal/verify/simulator/fakeservices/conformance_test.go.
+//	C2  (deleted in T1.15) The simulated object store and control plane ran
+//	    with all faults off and were compared with their specs. They are now
+//	    dst/check/faulty around the spec itself, so there is nothing left to
+//	    compare: the service IS the spec plus faults. Each fault kind has its
+//	    own test in dst/check/faulty and in internal/verify/simulator/fakeservices.
 //	C3  The real adapters are compared with the specs: the S3 object store
-//	    against ObjectStore. Control-plane store conformance (mem, gRPC, applier)
-//	    moved to mds-controlplane with the CP extraction (docs/cp-extraction.md).
+//	    against the object store spec. Control-plane store conformance (mem,
+//	    gRPC, applier) lives in controlplane/test/conformance.
 //	    The S3 test needs MDS_S3_ENDPOINT.
-//	    Test: internal/system/s3store/conform_test.go.
-//	C4  The Kafka oracle (in sim/kafka) is compared with Broker and
-//	    ControlPlane. The oracle must accept the histories built from the
-//	    specs and must reject every fault that the test plants in a history.
-//	    The oracle never imports this package. C4 keeps the two independent.
+//	    Test: internal/verify/speccheck/s3conform/conform_test.go (the adapter is
+//	    shared/objectstore/s3).
+//	C4  The Kafka oracle (in simulator/kafka) is compared with the broker spec
+//	    and the control plane spec. The oracle must accept the histories built
+//	    from the specs and must reject every fault that the test plants in a
+//	    history. The oracle never imports a spec package. C4 keeps the two
+//	    independent. A test and a linter rule (depguard, kafka-oracle-no-spec
+//	    in .golangci.yml) both check it.
 //	    Test: internal/verify/simulator/kafka/c4_test.go and c4_faults_test.go.
 //
 // The table below shows, for each check, what is compared and which side is
 // real code and which side is simulated or a spec.
 //
 //	check | what is tested                    | compared with        | real or simulated
-//	C1    | broker answers (produce, fetch,   | Broker               | broker code is real;
+//	C1    | broker answers (produce, fetch,   | broker spec          | broker code is real;
 //	      | ListOffsets)                      |                      | storage and control plane are specs
-//	C2    | simulated object store and        | ObjectStore and      | engines are simulated;
-//	      | control plane, faults off         | ControlPlane         | specs are the reference
-//	C3    | S3 adapter; control-plane stores  | ObjectStore and      | adapters are real code (S3 needs
-//	      |                                   | ControlPlane         | a live endpoint); specs are the reference
-//	C4    | Kafka oracle (accepts and         | Broker and           | oracle is simulation-side code;
-//	      | rejects histories)                | ControlPlane         | specs are the reference
+//	C2    | (deleted, see above)              |                      |
+//	C3    | S3 adapter; control-plane stores  | object store spec    | adapters are real code (S3 needs
+//	      |                                   | and control plane    | a live endpoint); specs are the reference
+//	      |                                   | spec                 |
+//	C4    | Kafka oracle (accepts and         | broker spec and      | oracle is simulation-side code;
+//	      | rejects histories)                | control plane spec   | specs are the reference
 //
-// The specs themselves are checked in this package. The unit tests check each
-// rule. ObjectStore is compared with a sorted-slice model. ControlPlane is
-// compared with a naive model made of maps and loops (controlplane_model_test.go)
-// and its invariants are checked: offsets are contiguous, the end offset equals
-// the committed counts, and a repeated commit gives the same answer. Broker
-// is compared with a slice model (broker_model_test.go).
+// Each spec is checked in its own package. The unit tests check each rule. The
+// object store spec is compared with a sorted-slice model (shared/objectstore,
+// spec_test.go). The control plane spec is checked by its unit tests and by the
+// conformance tests of the control plane, which compare the real code with it.
+// The broker spec is compared with a slice model (broker/spec/broker_model_test.go).
 //
 // Terms:
 //

@@ -7,6 +7,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // produce admits one batch per partition into the open segment. Acks 1 and -1
@@ -18,7 +19,7 @@ func (b *Broker) produce(s *slot, r *kmsg.ProduceRequest) []core.Action {
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
 			rp := &response.Topics[i].Partitions[j]
-			topicPartition := core.NewTopicPartition(t.Topic, p.Partition)
+			topicPartition := contract.NewTopicPartition(t.Topic, p.Partition)
 			pb, code := b.admit(s, r, topicPartition, p.Records, rp)
 			if code != errNone {
 				rp.ErrorCode = int16(code)
@@ -97,7 +98,7 @@ func (b *Broker) batchParseCode(err error) kafkaErrorCode {
 	case errors.Is(err, kafkawire.ErrUnsupportedBatch):
 		return errUnsupportedForFormat
 	default:
-		b.env.Reachable("broker: corrupt produce batch rejected")
+		b.env.Reachable(corruptProduceBatchRejected)
 		return errCorruptMessage
 	}
 }
@@ -112,7 +113,7 @@ func (b *Broker) batchPolicy(bt kafkawire.Batch) kafkaErrorCode {
 		// Idempotent producers are unsupported (decision 41): without the
 		// sequence checks a retry would duplicate records, so refuse rather
 		// than silently weaken the guarantee. INVALID_REQUEST is not retriable.
-		b.env.Reachable("broker: idempotent batch rejected")
+		b.env.Reachable(idempotentBatchRejected)
 		return errInvalidRequest
 	default:
 		return errNone
@@ -124,12 +125,12 @@ func (b *Broker) batchPolicy(bt kafkawire.Batch) kafkaErrorCode {
 func (b *Broker) reachCodec(c int) {
 	switch c {
 	case kafkawire.CodecGzip:
-		b.env.Reachable("broker: gzip batch admitted")
+		b.env.Reachable(gzipBatchAdmitted)
 	case kafkawire.CodecSnappy:
-		b.env.Reachable("broker: snappy batch admitted")
+		b.env.Reachable(snappyBatchAdmitted)
 	case kafkawire.CodecLZ4:
-		b.env.Reachable("broker: lz4 batch admitted")
+		b.env.Reachable(lz4BatchAdmitted)
 	case kafkawire.CodecZstd:
-		b.env.Reachable("broker: zstd batch admitted")
+		b.env.Reachable(zstdBatchAdmitted)
 	}
 }

@@ -1,7 +1,7 @@
 // Package awsmetrics measures AWS SDK v2 calls with smithy middleware: one
 // observation per HTTP attempt (so retries the SDK hides are visible), one per
 // operation, retries, request bytes and throttling. It lives at the
-// non-deterministic edge and is shared by system/s3store (mdsbroker_s3_*) and
+// non-deterministic edge and is shared by objectstore/s3 (mdsbroker_s3_*) and
 // mdscontrolplane's DynamoDB client (mdscontrolplane_dynamo_*).
 //
 // Every method is safe on a nil *Recorder.

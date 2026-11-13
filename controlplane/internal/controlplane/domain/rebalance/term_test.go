@@ -4,11 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/spec"
-	"github.com/manifesterio/mds/dst/rng"
-	"github.com/manifesterio/mds/dst/sim"
 )
 
 // Tests of log writes, the queue, the term and the load (sections 8 and 9).
@@ -33,7 +30,8 @@ func TestWriteTimerEndsTerm(t *testing.T) {
 
 // Rule 39: a load read refused with ErrUnavailable is sent again after 100 ms.
 func TestLoadRetry(t *testing.T) {
-	h := &harness{t: t, m: New(Config{}), cx: &testCx{rand: rng.New(seed)}, log: spec.New(), session: 10000, hold: true}
+	h := newBareHarness(t, Config{}, nil)
+	h.session, h.hold = 10000, true
 	h.step(RoleChanged{Active: true})
 	h.check("list read", heldOps(h), "[ListGroups]")
 	h.answer(0, runtime.ErrUnavailable)
@@ -150,10 +148,10 @@ func TestStaleTimerAndDuplicateReply(t *testing.T) {
 	h := newHarness(t, Config{})
 	h.hold = true
 	h.run([]step{{0, h.join(1, "g", ""), nil}, {0, h.join(2, "g", ""), nil}})
-	var delays []runtime.TimerFired
+	var delays []TimerFired
 	for _, o := range h.outs {
-		if st, ok := o.(sim.SetTimer); ok && st.ID == uint64(h.group("g").delay.id) {
-			delays = append(delays, st.Body.(runtime.TimerFired))
+		if st, ok := o.(SetTimer); ok && st.ID == h.group("g").delay.id {
+			delays = append(delays, TimerFired{ID: st.ID, Gen: st.Gen})
 		}
 	}
 	h.check("delay set twice", len(delays), 2)
@@ -170,7 +168,7 @@ func TestStaleTimerAndDuplicateReply(t *testing.T) {
 
 // The machine is deterministic: the same inputs give the same outputs and hash.
 func TestSameInputsSameRun(t *testing.T) {
-	run := func() ([]any, uint64) {
+	run := func() ([]Output, uint64) {
 		h := newHarness(t, Config{})
 		h.stableTwo("g", 0, 1, 1)
 		h.step(h.join(20, "g", ""))

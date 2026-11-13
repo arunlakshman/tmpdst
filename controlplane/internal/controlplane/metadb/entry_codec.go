@@ -5,7 +5,7 @@ import (
 
 	logv1 "github.com/manifesterio/mds/controlplane/api/controlplane/log/v1"
 	sharedv1 "github.com/manifesterio/mds/controlplane/api/controlplane/shared/v1"
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 )
 

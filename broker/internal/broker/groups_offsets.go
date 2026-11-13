@@ -4,6 +4,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // OffsetCommit (key 8) and OffsetFetch (key 9). Offsets live in the control
@@ -16,7 +17,7 @@ import (
 func (b *Broker) offsetCommit(s *slot, r *kmsg.OffsetCommitRequest) []core.Action {
 	response := kmsg.NewPtrOffsetCommitResponse()
 	s.response = response
-	call := core.OffsetCommit{Group: r.Group, Generation: -1}
+	call := contract.OffsetCommit{Group: r.Group, Generation: -1}
 	if r.Version >= 1 {
 		call.Member, call.Generation = r.MemberID, r.Generation
 	}
@@ -24,8 +25,8 @@ func (b *Broker) offsetCommit(s *slot, r *kmsg.OffsetCommitRequest) []core.Actio
 		rt := kmsg.OffsetCommitResponseTopic{Topic: t.Topic}
 		for _, p := range t.Partitions {
 			rt.Partitions = append(rt.Partitions, kmsg.OffsetCommitResponseTopicPartition{Partition: p.Partition})
-			call.Offsets = append(call.Offsets, core.PartitionOffset{
-				TopicPartition: core.NewTopicPartition(t.Topic, p.Partition), Offset: p.Offset,
+			call.Offsets = append(call.Offsets, contract.PartitionOffset{
+				TopicPartition: contract.NewTopicPartition(t.Topic, p.Partition), Offset: p.Offset,
 				LeaderEpoch: leaderEpochOf(r.Version, p.LeaderEpoch), Metadata: derefOr(p.Metadata),
 			})
 		}
@@ -44,7 +45,7 @@ func (b *Broker) offsetCommit(s *slot, r *kmsg.OffsetCommitRequest) []core.Actio
 			setCommitCodes(parts, groupErrCode(e.Err))
 			return
 		}
-		errs := core.ResponseAs[core.OffsetCommitResp](e).Errs
+		errs := core.ResponseAs[contract.OffsetCommitResp](e).Errs
 		for i, p := range parts {
 			code := core.ErrIO // the control plane gave no code for this partition
 			if i < len(errs) {
@@ -100,7 +101,7 @@ func newFetchAsk(version int16, name string, topics []askTopic) fetchAsk {
 	a := fetchAsk{name: name, all: len(topics) == 0 && version >= 2}
 	for _, t := range topics {
 		for _, p := range t.parts {
-			a.want = append(a.want, core.NewTopicPartition(t.topic, p))
+			a.want = append(a.want, contract.NewTopicPartition(t.topic, p))
 		}
 	}
 	return a
@@ -173,9 +174,9 @@ func (b *Broker) fetchGroup(s *slot, set rowSetter, idx int, a fetchAsk) []core.
 			set(idx, errRows(a, code), code)
 			return
 		}
-		set(idx, fetchRows(a, core.ResponseAs[core.OffsetFetchResp](e).Offsets), errNone)
+		set(idx, fetchRows(a, core.ResponseAs[contract.OffsetFetchResp](e).Offsets), errNone)
 	}
-	return b.groupCall(s, core.OffsetFetch{Group: a.name, Partitions: a.want}, 0, fill)
+	return b.groupCall(s, contract.OffsetFetch{Group: a.name, Partitions: a.want}, 0, fill)
 }
 
 // errRows lists the partitions of a failed answer with the code. An "all"
@@ -195,7 +196,7 @@ func unknownRow(topicPartition core.TopicPartition, code kafkaErrorCode) fetchRo
 
 // fetchRows turns the control plane answer into rows. A list of partitions
 // keeps the request order. An "all" answer keeps the control plane order.
-func fetchRows(a fetchAsk, got []core.PartitionOffset) []fetchRow {
+func fetchRows(a fetchAsk, got []contract.PartitionOffset) []fetchRow {
 	if a.all {
 		rows := make([]fetchRow, 0, len(got))
 		for _, o := range got {
@@ -214,7 +215,7 @@ func fetchRows(a fetchAsk, got []core.PartitionOffset) []fetchRow {
 	return rows
 }
 
-func rowOf(o core.PartitionOffset) fetchRow {
+func rowOf(o contract.PartitionOffset) fetchRow {
 	return fetchRow{topicPartition: o.TopicPartition, offset: o.Offset, epoch: o.LeaderEpoch, meta: new(o.Metadata)}
 }
 

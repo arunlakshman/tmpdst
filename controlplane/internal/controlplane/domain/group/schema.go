@@ -14,7 +14,7 @@
 //
 // Each write is checked before it writes anything. A group command over
 // 256 KiB is ErrTooLarge; the size is counted from the fields, so it is an
-// upper bound of the stored bytes. The rules are in internal/spec (groups.go),
+// upper bound of the stored bytes. The rules are in spec (groups.go),
 // which is the reference model.
 //
 // Nothing here knows about topics. An offset commit asks how many partitions a
@@ -23,7 +23,7 @@
 package group
 
 import (
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 )

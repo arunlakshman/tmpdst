@@ -4,8 +4,12 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/campaign"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/preset"
+	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 func seeds(from uint64, n int) []uint64 {
@@ -16,21 +20,64 @@ func seeds(from uint64, n int) []uint64 {
 	return s
 }
 
-func report(t *testing.T, rep simulator.Report) {
+// expectedReachable is the coverage contract of the campaign: every fault family
+// and every recovery path must be reached by some seed.
+var expectedReachable = []string{
+	"obj 503 injected", "obj timeout injected", "obj lost response injected", "obj outage started", "obj get corrupted",
+	"cp 503 injected", "cp timeout injected", "cp lost response injected", "cp outage started",
+	"net: partition injected", "net: clog injected", "net: random_close injected", "net: black_hole injected",
+	"echo: commit retried after MaybeApplied",
+	"echo: corruption detected on read",
+}
+
+// runSeeds runs the seeds one after another. Like the campaign, it runs every 10th
+// seed a second time with Log flipped, and the two runs must give the same hash,
+// steps and random calls.
+func runSeeds(t *testing.T, ss []uint64, cfgFor func(seed uint64) Config) []kernel.Result {
 	t.Helper()
-	for _, a := range rep.Always {
-		t.Errorf("violated %q kind=%s first seed %d step %d (%d seeds)", a.Prop, a.Kind, a.FirstSeed, a.FirstStep, len(a.Seeds))
+	var out []kernel.Result
+	for i, seed := range ss {
+		cfg := cfgFor(seed)
+		res := Run(cfg)
+		if i%10 == 0 {
+			cfg.Log = !cfg.Log
+			again := Run(cfg)
+			if again.Hash != res.Hash || again.RandCalls != res.RandCalls || again.Steps != res.Steps {
+				t.Errorf("seed %d: the second run of the seed diverged", seed)
+			}
+		}
+		out = append(out, res)
 	}
-	for _, a := range rep.Coverage {
-		t.Errorf("never satisfied: %q (%s)", a.Prop, a.Kind)
-	}
-	for _, s := range rep.Seeds {
-		for _, f := range s.Failures {
-			t.Errorf("seed %d: kind=%d %s step=%d at=%d: %s", s.Seed, f.Kind, f.Prop, f.Step, f.At, f.Msg)
+	return out
+}
+
+// report fails the test for each failure of a seed, and, when coverage is true, for each
+// path that no seed reached.
+func report(t *testing.T, results []kernel.Result, coverage bool) {
+	t.Helper()
+	total := map[string]assert.Coverage{}
+	for _, r := range results {
+		for _, f := range r.Failures {
+			t.Errorf("seed %d: kind=%d %s step=%d at=%d: %s", r.Seed, f.Kind, f.Property, f.Step, f.At, f.Detail)
+		}
+		for name, c := range r.Coverage {
+			x := total[name]
+			x.Kind, x.Checks, x.Passes = c.Kind, x.Checks+c.Checks, x.Passes+c.Passes
+			total[name] = x
 		}
 	}
-	if len(rep.Nondeterminism) > 0 {
-		t.Errorf("nondeterministic seeds: %v", rep.Nondeterminism)
+	if !coverage {
+		return
+	}
+	for name, c := range total {
+		if (c.Kind == assert.KindSometimes || c.Kind == assert.KindReachable) && c.Passes == 0 {
+			t.Errorf("never satisfied: %q (%s)", name, c.Kind)
+		}
+	}
+	for _, name := range expectedReachable {
+		if total[name].Passes == 0 {
+			t.Errorf("never reached: %q", name)
+		}
 	}
 }
 
@@ -39,28 +86,22 @@ func TestEchoCampaign(t *testing.T) {
 	if testing.Short() {
 		n = 30
 	}
-	rep, err := simulator.NewRunner().Run(Config(seeds(1, n)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	report(t, rep)
+	results := runSeeds(t, seeds(1, n), func(seed uint64) Config { return Config{Seed: seed} })
+	report(t, results, true)
 	var crashes, exits, trips int
-	for _, s := range rep.Seeds {
-		crashes, exits, trips = crashes+s.Crashes, exits+s.Exits, trips+s.Trips
+	for _, r := range results {
+		crashes, exits, trips = crashes+r.Crashes, exits+r.Exits, trips+r.Trips
 	}
 	t.Logf("%d seeds: crashes=%d exits=%d trips=%d", n, crashes, exits, trips)
 }
 
 func TestDeterminismCanary(t *testing.T) {
-	config := Config(nil)
 	for seed := uint64(1); seed <= 8; seed++ {
-		a, b := simulator.RunSeed(config, seed), simulator.RunSeed(config, seed)
-		if a.TraceHash != b.TraceHash || a.RandCalls != b.RandCalls || a.Steps != b.Steps {
-			t.Fatalf("seed %d diverged: %x/%d/%d vs %x/%d/%d", seed, a.TraceHash, a.RandCalls, a.Steps, b.TraceHash, b.RandCalls, b.Steps)
+		a, b := Run(Config{Seed: seed}), Run(Config{Seed: seed})
+		if a.Hash != b.Hash || a.RandCalls != b.RandCalls || a.Steps != b.Steps {
+			t.Fatalf("seed %d diverged: %x/%d/%d vs %x/%d/%d", seed, a.Hash, a.RandCalls, a.Steps, b.Hash, b.RandCalls, b.Steps)
 		}
-		logged := config
-		logged.Log = true
-		if c := simulator.RunSeed(logged, seed); c.TraceHash != a.TraceHash || c.RandCalls != a.RandCalls || c.Steps != a.Steps {
+		if c := Run(Config{Seed: seed, Log: true}); c.Hash != a.Hash || c.RandCalls != a.RandCalls || c.Steps != a.Steps {
 			t.Fatalf("seed %d: logging changed the run", seed)
 		}
 		if len(a.Failures) != 0 {
@@ -71,10 +112,10 @@ func TestDeterminismCanary(t *testing.T) {
 
 // firstCatch runs seeds from 1 and returns the first seed where prop is
 // violated, or 0.
-func firstCatch(config simulator.Config, n int, prop core.PropertyID) uint64 {
+func firstCatch(brokers core.MachineFactory, n int, prop string) uint64 {
 	for s := uint64(1); s <= uint64(n); s++ {
-		for _, f := range simulator.RunSeed(config, s).Failures {
-			if f.Kind == simulator.FailViolation && f.Prop == prop {
+		for _, f := range Run(Config{Seed: s, Brokers: brokers}).Failures {
+			if f.Kind == kernel.FailViolation && f.Property == prop {
 				return s
 			}
 		}
@@ -83,7 +124,7 @@ func firstCatch(config simulator.Config, n int, prop core.PropertyID) uint64 {
 }
 
 func mutantFactory(m mutation) core.MachineFactory {
-	return func(env core.Environment, self core.NodeInstance) core.Machine {
+	return func(env core.Environment, self machine.NodeInstance) core.Machine {
 		return &Broker{env: env, self: self, mut: m}
 	}
 }
@@ -93,21 +134,21 @@ func TestMutantsAreCaught(t *testing.T) {
 	cases := []struct {
 		name string
 		m    mutation
-		prop core.PropertyID
+		prop string
 	}{
 		{"ack before CommitSegment", bugEarlyAck, "echo: acked offset is committed"},
 		{"ack when a commit times out", bugAckOnMaybe, "echo: acked offset is committed"},
 		{"GET returns a different payload", bugBadRead, "echo: GET of an acked offset returns the acked payload"},
 	}
 	for _, c := range cases {
-		s := firstCatch(config(nil, mutantFactory(c.m)), budget, c.prop)
+		s := firstCatch(mutantFactory(c.m), budget, c.prop)
 		if s == 0 {
 			t.Errorf("mutant %q not caught in %d seeds", c.name, budget)
 			continue
 		}
 		t.Logf("mutant %q first caught by seed %d", c.name, s)
 	}
-	if s := firstCatch(config(nil, mutantFactory(bugNone)), 10, "echo: acked offset is committed"); s != 0 {
+	if s := firstCatch(mutantFactory(bugNone), 10, "echo: acked offset is committed"); s != 0 {
 		t.Errorf("real broker violated AckedIsCommitted at seed %d", s)
 	}
 }
@@ -116,17 +157,18 @@ type tally struct {
 	puts, gets, acks, vals, window, indet, errs, corrupt int
 }
 
-type tallyInv struct {
-	ph simulator.Phases
-	t  *tally
+type tallyRule struct {
+	ph   kernel.Phases
+	t    *tally
+	hist history.Reader[Op, string]
 }
 
-func (*tallyInv) Name() string           { return "tally" }
-func (*tallyInv) Observe(simulator.View) {}
-func (i *tallyInv) AtEnd(v simulator.View) {
+func (*tallyRule) Name() string        { return "tally" }
+func (*tallyRule) Observe(kernel.View) {}
+func (i *tallyRule) AtEnd(v kernel.View) {
 	i.t.acks += len(v.Timeline().Snapshot("echo_acked"))
-	for _, operation := range v.History().Ops() {
-		res, _ := operation.Result.(string)
+	for _, operation := range i.hist.Ops() {
+		res := operation.Result
 		switch operation.Op.(type) {
 		case PutOp:
 			i.t.puts++
@@ -139,13 +181,13 @@ func (i *tallyInv) AtEnd(v simulator.View) {
 		if res == "ERR corrupt" {
 			i.t.corrupt++
 		}
-		if operation.Outcome == simulator.OpResultUnknown {
+		if operation.Outcome == history.ResultUnknown {
 			i.t.indet++
 		}
 		if len(res) >= 3 && res[:3] == "ERR" {
 			i.t.errs++
 		}
-		if operation.Invoke >= simulator.Time(i.ph.Chaos+campaign.ProgressGraceTime) {
+		if operation.Invoke >= kernel.Time(i.ph.Chaos+preset.ProgressGraceTime) {
 			i.t.window++
 		}
 	}
@@ -154,11 +196,11 @@ func (i *tallyInv) AtEnd(v simulator.View) {
 // The campaign must actually exercise the system: acks, reads, ambiguity,
 // errors and requests inside the liveness window.
 func TestCampaignIsNotVacuous(t *testing.T) {
-	config := Config(nil)
 	var tl tally
-	config.Invariants = append(config.Invariants, func() simulator.SafetyRule { return &tallyInv{ph: config.Phases, t: &tl} })
 	for s := uint64(1); s <= 20; s++ {
-		simulator.RunSeed(config, s)
+		Run(Config{Seed: s, ExtraRules: func(_ *cluster.Cluster, h *History) []kernel.Rule {
+			return []kernel.Rule{&tallyRule{ph: preset.Phases(), t: &tl, hist: h}}
+		}})
 	}
 	t.Logf("20 seeds: %+v", tl)
 	if tl.acks < 500 || tl.vals < 100 || tl.indet == 0 || tl.errs == 0 || tl.corrupt == 0 || tl.window < 200 {
@@ -193,9 +235,8 @@ func TestFramerReassemblesSplitFrames(t *testing.T) {
 
 // Brokers are stateless (decision 44): nothing fences or trips an echo broker.
 func TestNoTripsWithoutFencing(t *testing.T) {
-	config := Config(nil)
 	for s := uint64(1); s <= 40; s++ {
-		res := simulator.RunSeed(config, s)
+		res := Run(Config{Seed: s})
 		if res.Trips != 0 || len(res.Failures) != 0 {
 			t.Fatalf("seed %d: trips=%d failures=%+v", s, res.Trips, res.Failures)
 		}
@@ -209,14 +250,6 @@ func TestCachedStateHashMatchesFull(t *testing.T) {
 	if testing.Short() {
 		n = 10
 	}
-	config := Config(seeds(1, n))
-	config.VerifyHashes = true
-	rep, err := simulator.NewRunner().Run(config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if testing.Short() {
-		rep.Coverage = nil
-	}
-	report(t, rep)
+	results := runSeeds(t, seeds(1, n), func(seed uint64) Config { return Config{Seed: seed, VerifyHashes: true} })
+	report(t, results, !testing.Short())
 }

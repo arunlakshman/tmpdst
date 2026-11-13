@@ -8,6 +8,10 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/trace"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // mutation injects a bug for the mutant tests; zero is the real broker.
@@ -51,8 +55,8 @@ type op struct {
 	kind     opKind
 	state    opState
 	retry    opState // what a backoff restarts
-	request  core.RequestID
-	gen      core.TimerVersion
+	request  machine.RequestID
+	gen      machine.TimerVersion
 	attempts int
 	maybe    bool // a commit may have applied
 	replied  bool // mutants only: already acked early
@@ -67,12 +71,12 @@ type op struct {
 // to the control plane, GET reads it back.
 type Broker struct {
 	env  core.Environment
-	self core.NodeInstance
+	self machine.NodeInstance
 	mut  mutation
 
-	nextReq  core.RequestID
+	nextReq  machine.RequestID
 	nextOp   uint64
-	timerGen core.TimerVersion
+	timerGen machine.TimerVersion
 	stopping bool
 	acked    uint64
 
@@ -81,18 +85,18 @@ type Broker struct {
 }
 
 // NewBroker is the core.MachineFactory of the echo broker.
-func NewBroker(env core.Environment, self core.NodeInstance) core.Machine {
+func NewBroker(env core.Environment, self machine.NodeInstance) core.Machine {
 	return &Broker{env: env, self: self}
 }
 
-func (b *Broker) nextRequestID() core.RequestID { b.nextReq++; return b.nextReq }
+func (b *Broker) nextRequestID() machine.RequestID { b.nextReq++; return b.nextReq }
 
-func backoff(n int) core.Duration {
+func backoff(n int) machine.Duration {
 	n = min(n, 5)
-	return 20 * core.Millisecond << n
+	return 20 * machine.Millisecond << n
 }
 
-func (b *Broker) timer(id core.TimerID, n int) (core.SetTimer, core.TimerVersion) {
+func (b *Broker) timer(id machine.TimerID, n int) (core.SetTimer, machine.TimerVersion) {
 	b.timerGen++
 	return core.SetTimer{ID: id, Gen: b.timerGen, After: backoff(n)}, b.timerGen
 }
@@ -106,7 +110,7 @@ func (b *Broker) findConn(id core.ConnID) int {
 	return -1
 }
 
-func (b *Broker) findReq(r core.RequestID) *op {
+func (b *Broker) findReq(r machine.RequestID) *op {
 	for _, o := range b.ops {
 		if o.request == r && o.request != 0 {
 			return o
@@ -147,14 +151,8 @@ func (b *Broker) Step(event core.Event) []core.Action {
 		}
 	case core.TimerFired:
 		acts = b.onTimer(e)
-	case core.ObjectPutDone:
-		if o := b.findReq(e.Req); o != nil && o.state == statePut {
-			acts = b.onPut(o, e)
-		}
-	case core.ObjectGetDone:
-		if o := b.findReq(e.Req); o != nil && o.state == stateGet {
-			acts = b.onGet(o, e)
-		}
+	case core.ObjectDone:
+		acts = b.onObject(e.Result)
 	case core.ControlPlaneDone:
 		acts = b.onCP(e)
 	}
@@ -269,9 +267,9 @@ func (b *Broker) fail(o *op) []core.Action {
 func (b *Broker) ack(o *op, off core.Offset) []core.Action {
 	b.acked++
 	acts := []core.Action{emit("echo_acked",
-		core.Field{Key: "offset", Value: core.Int64Value(off)},
-		core.Field{Key: "key", Value: core.StringValue(o.key)},
-		core.Field{Key: "payload", Value: core.Bytes(o.payload)})}
+		machine.Field{Key: "offset", Value: machine.Int64Value(off)},
+		machine.Field{Key: "key", Value: machine.StringValue(o.key)},
+		machine.Field{Key: "payload", Value: machine.Bytes(o.payload)})}
 	return append(acts, b.send(o.conn, "OK "+strconv.FormatInt(int64(off), 10))...)
 }
 
@@ -280,14 +278,14 @@ func (b *Broker) retryLater(o *op, again opState) []core.Action {
 		return b.fail(o)
 	}
 	o.state, o.retry, o.request = stateRetryWait, again, 0
-	t, g := b.timer(core.TimerID(o.id), o.attempts)
+	t, g := b.timer(machine.TimerID(o.id), o.attempts)
 	o.gen = g
 	return []core.Action{t}
 }
 
 func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 	for _, o := range b.ops {
-		if core.TimerID(o.id) != e.ID {
+		if machine.TimerID(o.id) != e.ID {
 			continue
 		}
 		if o.state != stateRetryWait || o.gen != e.Gen {
@@ -297,8 +295,8 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 		case statePut:
 			return b.put(o)
 		case stateCommit:
-			b.env.Reachable("echo: commit retried after MaybeApplied")
-			return append([]core.Action{emit("echo_commit_retried", core.Field{Key: "key", Value: core.StringValue(o.key)})}, b.commit(o)...)
+			b.env.Reachable(commitRetriedAfterMaybeApplied)
+			return append([]core.Action{emit("echo_commit_retried", machine.Field{Key: "key", Value: machine.StringValue(o.key)})}, b.commit(o)...)
 		case stateLookup:
 			return b.lookup(o)
 		default:
@@ -312,10 +310,26 @@ func (b *Broker) onTimer(e core.TimerFired) []core.Action {
 
 func (b *Broker) put(o *op) []core.Action {
 	o.state, o.request = statePut, b.nextRequestID()
-	return []core.Action{core.ObjectPut{Req: o.request, Key: o.key, Data: o.segment}}
+	return []core.Action{core.ObjectCall{Call: objectstore.Put{Req: o.request, Key: o.key, Data: o.segment}}}
 }
 
-func (b *Broker) onPut(o *op, e core.ObjectPutDone) []core.Action {
+// onObject routes an object store result to the operation that waits for it.
+func (b *Broker) onObject(result objectstore.Result) []core.Action {
+	switch r := result.(type) {
+	case objectstore.PutDone:
+		if o := b.findReq(r.Req); o != nil && o.state == statePut {
+			return b.onPut(o, r)
+		}
+	case objectstore.GetDone:
+		if o := b.findReq(r.Req); o != nil && o.state == stateGet {
+			return b.onGet(o, r)
+		}
+	case objectstore.DeleteDone, objectstore.ListDone:
+	}
+	return nil
+}
+
+func (b *Broker) onPut(o *op, e objectstore.PutDone) []core.Action {
 	if e.Err != core.OK {
 		return b.retryLater(o, statePut)
 	}
@@ -329,9 +343,9 @@ func (b *Broker) onPut(o *op, e core.ObjectPutDone) []core.Action {
 
 func (b *Broker) commit(o *op) []core.Action {
 	o.state, o.request = stateCommit, b.nextRequestID()
-	return []core.Action{core.ControlPlaneCall{Req: o.request, Op: core.CommitSegment{
+	return []core.Action{core.ControlPlaneCall{Req: o.request, Op: contract.CommitSegment{
 		SegmentKey: o.key,
-		Batches:    []core.PendingBatch{{TopicPartition: topicPartition(), Records: 1, Loc: o.ref}},
+		Batches:    []contract.PendingBatch{{TopicPartition: topicPartition(), Records: 1, Loc: o.ref}},
 	}}}
 }
 
@@ -352,9 +366,9 @@ func (b *Broker) onCP(e core.ControlPlaneDone) []core.Action {
 func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 	switch {
 	case e.Err == core.OK:
-		response, ok := e.Resp.(core.CommitSegmentResp)
+		response, ok := e.Resp.(contract.CommitSegmentResp)
 		okShape := ok && len(response.Assigned) == 1 && response.Assigned[0].TopicPartition == topicPartition() && response.Assigned[0].Loc == o.ref
-		b.env.Always(okShape, "echo: commit assigns exactly the one batch")
+		b.env.Always(okShape, commitAssignsExactlyOneBatch)
 		if !okShape {
 			return b.reply(o, "ERR maybe")
 		}
@@ -366,7 +380,7 @@ func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 		return b.ack(o, off)
 	case e.Err == core.ErrConflict:
 		// The same key with a different request: a broker bug, not a race.
-		b.env.Unreachable("echo: commit key reused with a different request")
+		b.env.Unreachable(commitKeyReusedDifferentRequest)
 		return b.reply(o, "ERR")
 	case e.Outcome == core.MaybeApplied:
 		o.maybe = true
@@ -383,11 +397,11 @@ func (b *Broker) onCommit(o *op, e core.ControlPlaneDone) []core.Action {
 
 func (b *Broker) lookup(o *op) []core.Action {
 	o.state, o.request = stateLookup, b.nextRequestID()
-	return []core.Action{core.ControlPlaneCall{Req: o.request, Op: core.FindSegments{TopicPartition: topicPartition(), From: o.offset}}}
+	return []core.Action{core.ControlPlaneCall{Req: o.request, Op: contract.FindSegments{TopicPartition: topicPartition(), From: o.offset}}}
 }
 
 func (b *Broker) onLookup(o *op, e core.ControlPlaneDone) []core.Action {
-	response, ok := e.Resp.(core.FindSegmentsResp)
+	response, ok := e.Resp.(contract.FindSegmentsResp)
 	if e.Err != core.OK || !ok {
 		return b.retryLater(o, stateLookup)
 	}
@@ -402,13 +416,13 @@ func (b *Broker) onLookup(o *op, e core.ControlPlaneDone) []core.Action {
 
 func (b *Broker) get(o *op) []core.Action {
 	o.state, o.request = stateGet, b.nextRequestID()
-	return []core.Action{core.ObjectGet{Req: o.request, Ref: core.SegmentRef{Key: o.ref.Key}}}
+	return []core.Action{core.ObjectCall{Call: objectstore.Get{Req: o.request, Ref: core.SegmentRef{Key: o.ref.Key}}}}
 }
 
-func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
+func (b *Broker) onGet(o *op, e objectstore.GetDone) []core.Action {
 	if e.Err != core.OK {
 		if e.Err == core.ErrNotFound { // committed segments are never deleted
-			b.env.Unreachable("echo: committed segment missing")
+			b.env.Unreachable(committedSegmentMissing)
 			return b.reply(o, "ERR")
 		}
 		return b.retryLater(o, stateGet)
@@ -427,8 +441,8 @@ func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
 		}
 	}
 	if err != nil {
-		b.env.Reachable("echo: corruption detected on read")
-		acts := []core.Action{emit("corruption_detected", core.Field{Key: "key", Value: core.StringValue(o.ref.Key)})}
+		b.env.Reachable(corruptionDetectedRead)
+		acts := []core.Action{emit("corruption_detected", machine.Field{Key: "key", Value: machine.StringValue(o.ref.Key)})}
 		return append(acts, b.reply(o, "ERR corrupt")...)
 	}
 	if b.mut == bugBadRead {
@@ -437,43 +451,43 @@ func (b *Broker) onGet(o *op, e core.ObjectGetDone) []core.Action {
 	return b.reply(o, "VAL "+string(data))
 }
 
-func emit(name string, fields ...core.Field) core.RecordFact {
-	return core.RecordFact{Fact: core.Fact{Name: name, Fields: fields}}
+func emit(name string, fields ...machine.Field) core.RecordFact {
+	return core.RecordFact{Fact: machine.Fact{Name: name, Fields: fields}}
 }
 
 // StateHash folds all state in a fixed order.
 func (b *Broker) StateHash() uint64 {
-	h := core.NewHasher()
-	h.Uint64Value(uint64(b.nextReq))
-	h.Uint64Value(b.nextOp)
-	h.Uint64Value(uint64(b.timerGen))
+	h := trace.New()
+	h.Uint64(uint64(b.nextReq))
+	h.Uint64(b.nextOp)
+	h.Uint64(uint64(b.timerGen))
 	h.Bool(b.stopping)
-	h.Uint64Value(b.acked)
-	h.Uint64Value(uint64(b.mut))
-	h.Uint64Value(uint64(len(b.conns)))
+	h.Uint64(b.acked)
+	h.Uint64(uint64(b.mut))
+	h.Uint64(uint64(len(b.conns)))
 	for _, c := range b.conns {
-		h.Uint64Value(uint64(c.id))
+		h.Uint64(uint64(c.id))
 		h.Bytes(c.fr.buf)
 	}
-	h.Uint64Value(uint64(len(b.ops)))
+	h.Uint64(uint64(len(b.ops)))
 	for _, o := range b.ops {
-		h.Uint64Value(o.id)
-		h.Uint64Value(uint64(o.conn))
-		h.Uint64Value(uint64(o.kind))
-		h.Uint64Value(uint64(o.state))
-		h.Uint64Value(uint64(o.retry))
-		h.Uint64Value(uint64(o.request))
-		h.Uint64Value(uint64(o.gen))
-		h.Uint64Value(uint64(o.attempts))
+		h.Uint64(o.id)
+		h.Uint64(uint64(o.conn))
+		h.Uint64(uint64(o.kind))
+		h.Uint64(uint64(o.state))
+		h.Uint64(uint64(o.retry))
+		h.Uint64(uint64(o.request))
+		h.Uint64(uint64(o.gen))
+		h.Uint64(uint64(o.attempts))
 		h.Bool(o.maybe)
 		h.Bool(o.replied)
 		h.Bytes(o.payload)
-		h.Uint64Value(uint64(len(o.segment)))
-		h.StringValue(o.key)
-		h.StringValue(o.ref.Key)
-		h.Uint64Value(uint64(o.ref.Off))
-		h.Uint64Value(uint64(o.ref.Len))
-		h.Uint64Value(uint64(o.offset))
+		h.Uint64(uint64(len(o.segment)))
+		h.String(o.key)
+		h.String(o.ref.Key)
+		h.Uint64(uint64(o.ref.Off))
+		h.Uint64(uint64(o.ref.Len))
+		h.Uint64(uint64(o.offset))
 	}
 	return uint64(h)
 }

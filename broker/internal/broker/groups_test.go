@@ -7,13 +7,15 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // groupCP is a fake control plane for the group calls of one test. answer
 // gives the answer to each call. Every call is recorded, with its deadline.
 type groupCP struct {
 	calls  []core.ControlPlaneCall
-	answer func(operation core.ControlPlaneOperation) core.ControlPlaneDone
+	answer func(operation contract.Operation) core.ControlPlaneDone
 }
 
 func (g *groupCP) hook(a core.ControlPlaneCall, _ func() core.IOResult) core.IOResult {
@@ -24,13 +26,13 @@ func (g *groupCP) hook(a core.ControlPlaneCall, _ func() core.IOResult) core.IOR
 }
 
 // cpOK is a successful answer. cpErr is a failed one.
-func cpOK(response core.ControlPlaneResponse) core.ControlPlaneDone {
+func cpOK(response contract.Response) core.ControlPlaneDone {
 	return core.ControlPlaneDone{Resp: response}
 }
 func cpErr(code core.ErrCode) core.ControlPlaneDone { return core.ControlPlaneDone{Err: code} }
 
 // withGroupCP starts a broker whose group calls are answered by answer.
-func withGroupCP(t *testing.T, config Config, answer func(core.ControlPlaneOperation) core.ControlPlaneDone) (*harness, *groupCP) {
+func withGroupCP(t *testing.T, config Config, answer func(contract.Operation) core.ControlPlaneDone) (*harness, *groupCP) {
 	t.Helper()
 	h := startedHarness(t, config)
 	g := &groupCP{answer: answer}
@@ -58,9 +60,9 @@ func heartbeatRequest(group, member string, gen int32) *kmsg.HeartbeatRequest {
 }
 
 func TestJoinGroupSuccess(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
-		return cpOK(core.GroupJoinResp{Generation: 4, Protocol: "range", Leader: "m-1", MemberID: "m-1",
-			Members: []core.GroupJoinMember{{MemberID: "m-1", Metadata: []byte("sub")}}})
+	h, g := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone {
+		return cpOK(contract.GroupJoinResp{Generation: 4, Protocol: "range", Leader: "m-1", MemberID: "m-1",
+			Members: []contract.GroupJoinMember{{MemberID: "m-1", Metadata: []byte("sub")}}})
 	})
 	c := h.open(1)
 	r := h.call(c, 7, joinRequest("g1", 10000, 30000)).(*kmsg.JoinGroupResponse)
@@ -75,29 +77,29 @@ func TestJoinGroupSuccess(t *testing.T) {
 	}
 	// The call is the join, with the client host from the peer and the
 	// rebalance timeout plus the margin as its deadline.
-	operation := g.calls[0].Op.(core.GroupJoin)
+	operation := g.calls[0].Op.(contract.GroupJoin)
 	if operation.Group != "g1" || operation.ClientHost != "/test" || operation.RebalanceTimeoutMs != 30000 || len(operation.Protocols) != 1 {
 		t.Fatalf("join call %+v", operation)
 	}
-	if want := core.Duration(40 * time.Second); g.calls[0].Timeout != want {
+	if want := machine.Duration(40 * time.Second); g.calls[0].Timeout != want {
 		t.Fatalf("deadline %v, want 40s", time.Duration(g.calls[0].Timeout))
 	}
 	h.noViolations()
 }
 
 func TestJoinGroupVersion0UsesSessionTimeout(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
-		return cpOK(core.GroupJoinResp{MemberID: "m-2", Leader: "m-2", Generation: 1})
+	h, g := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone {
+		return cpOK(contract.GroupJoinResp{MemberID: "m-2", Leader: "m-2", Generation: 1})
 	})
 	h.call(h.open(1), 0, joinRequest("g1", 10000, 0))
-	if want := core.Duration(20 * time.Second); g.calls[0].Timeout != want { // session 10 s + margin
+	if want := machine.Duration(20 * time.Second); g.calls[0].Timeout != want { // session 10 s + margin
 		t.Fatalf("deadline %v, want 20s", time.Duration(g.calls[0].Timeout))
 	}
 	h.noViolations()
 }
 
 func TestJoinGroupEmptyGroupIsInvalid(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone { return cpOK(nil) })
+	h, g := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone { return cpOK(nil) })
 	r := h.call(h.open(1), 7, joinRequest("", 10000, 30000)).(*kmsg.JoinGroupResponse)
 	if kafkaErrorCode(r.ErrorCode) != errInvalidGroupID || len(g.calls) != 0 {
 		t.Fatalf("answer %d, calls %d", r.ErrorCode, len(g.calls))
@@ -105,11 +107,11 @@ func TestJoinGroupEmptyGroupIsInvalid(t *testing.T) {
 }
 
 func TestSyncGroupLeaderAndFollower(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
-		if s, ok := operation.(core.GroupSync); ok && s.MemberID == "m-1" {
-			return cpOK(core.GroupSyncResp{})
+	h, g := withGroupCP(t, DefaultConfig(), func(operation contract.Operation) core.ControlPlaneDone {
+		if s, ok := operation.(contract.GroupSync); ok && s.MemberID == "m-1" {
+			return cpOK(contract.GroupSyncResp{})
 		}
-		return cpOK(core.GroupSyncResp{Assignment: []byte("for-m-2")})
+		return cpOK(contract.GroupSyncResp{Assignment: []byte("for-m-2")})
 	})
 	c := h.open(1)
 	leader := syncRequest("g1", "m-1", 4,
@@ -118,10 +120,10 @@ func TestSyncGroupLeaderAndFollower(t *testing.T) {
 	if r := h.call(c, 5, leader).(*kmsg.SyncGroupResponse); r.ErrorCode != 0 {
 		t.Fatalf("leader answer %d", r.ErrorCode)
 	}
-	if got := g.calls[0].Op.(core.GroupSync); len(got.Assignments) != 2 || got.Assignments[1].Member != "m-2" {
+	if got := g.calls[0].Op.(contract.GroupSync); len(got.Assignments) != 2 || got.Assignments[1].Member != "m-2" {
 		t.Fatalf("leader call %+v", got)
 	}
-	if want := core.Duration(70 * time.Second); g.calls[0].Timeout != want {
+	if want := machine.Duration(70 * time.Second); g.calls[0].Timeout != want {
 		t.Fatalf("sync deadline %v, want 70s", time.Duration(g.calls[0].Timeout))
 	}
 	follower := syncRequest("g1", "m-2", 4)
@@ -133,12 +135,12 @@ func TestSyncGroupLeaderAndFollower(t *testing.T) {
 }
 
 func TestHeartbeatAnswers(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone { return cpOK(nil) })
+	h, g := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone { return cpOK(nil) })
 	c := h.open(1)
 	if r := h.call(c, 4, heartbeatRequest("g1", "m-1", 4)).(*kmsg.HeartbeatResponse); r.ErrorCode != 0 {
 		t.Fatalf("heartbeat %d", r.ErrorCode)
 	}
-	if operation := g.calls[0].Op.(core.GroupHeartbeat); operation.Group != "g1" || operation.Generation != 4 || g.calls[0].Timeout != 0 {
+	if operation := g.calls[0].Op.(contract.GroupHeartbeat); operation.Group != "g1" || operation.Generation != 4 || g.calls[0].Timeout != 0 {
 		t.Fatalf("heartbeat call %+v timeout %d", operation, g.calls[0].Timeout)
 	}
 	h.noViolations()
@@ -165,7 +167,7 @@ var groupErrorTable = []struct {
 func TestGroupErrorCodesOnEveryCall(t *testing.T) {
 	for _, tt := range groupErrorTable {
 		t.Run(tt.code.String(), func(t *testing.T) {
-			h, _ := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone { return cpErr(tt.code) })
+			h, _ := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone { return cpErr(tt.code) })
 			c := h.open(1)
 			if r := h.call(c, 7, joinRequest("g1", 10000, 30000)).(*kmsg.JoinGroupResponse); kafkaErrorCode(r.ErrorCode) != tt.want {
 				t.Errorf("join: %d, want %d", r.ErrorCode, tt.want)
@@ -182,8 +184,8 @@ func TestGroupErrorCodesOnEveryCall(t *testing.T) {
 }
 
 func TestLeaveGroupVersion3CodesPerMember(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
-		return cpOK(core.GroupLeaveResp{Errs: []core.ErrCode{core.OK, core.ErrUnknownMember}})
+	h, g := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone {
+		return cpOK(contract.GroupLeaveResp{Errs: []core.ErrCode{core.OK, core.ErrUnknownMember}})
 	})
 	r := kmsg.NewPtrLeaveGroupRequest()
 	r.Group = "g1"
@@ -192,15 +194,15 @@ func TestLeaveGroupVersion3CodesPerMember(t *testing.T) {
 	if got.ErrorCode != 0 || len(got.Members) != 2 || got.Members[0].ErrorCode != 0 || got.Members[1].ErrorCode != 25 {
 		t.Fatalf("leave answer %+v", got.Members)
 	}
-	if names := g.calls[0].Op.(core.GroupLeave).Members; len(names) != 2 || names[1] != "m-9" {
+	if names := g.calls[0].Op.(contract.GroupLeave).Members; len(names) != 2 || names[1] != "m-9" {
 		t.Fatalf("leave call %v", names)
 	}
 	h.noViolations()
 }
 
 func TestLeaveGroupVersion0SingleMember(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
-		return cpOK(core.GroupLeaveResp{Errs: []core.ErrCode{core.ErrUnknownMember}})
+	h, g := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone {
+		return cpOK(contract.GroupLeaveResp{Errs: []core.ErrCode{core.ErrUnknownMember}})
 	})
 	r := kmsg.NewPtrLeaveGroupRequest()
 	r.Group, r.MemberID = "g1", "m-1"
@@ -208,14 +210,14 @@ func TestLeaveGroupVersion0SingleMember(t *testing.T) {
 	if got.ErrorCode != 25 {
 		t.Fatalf("top level error %d, want 25", got.ErrorCode)
 	}
-	if names := g.calls[0].Op.(core.GroupLeave).Members; len(names) != 1 || names[0] != "m-1" {
+	if names := g.calls[0].Op.(contract.GroupLeave).Members; len(names) != 1 || names[0] != "m-1" {
 		t.Fatalf("leave call %v", names)
 	}
 	h.noViolations()
 }
 
 func TestLeaveGroupWithNoMemberSendsNothing(t *testing.T) {
-	h, g := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone { return cpOK(nil) })
+	h, g := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone { return cpOK(nil) })
 	r := kmsg.NewPtrLeaveGroupRequest()
 	r.Group = "g1"
 	if got := h.call(h.open(1), 3, r).(*kmsg.LeaveGroupResponse); got.ErrorCode != 0 || len(g.calls) != 0 {

@@ -25,7 +25,7 @@ Run: `go run ./cmd/mdscontrolplane`. From the repo root, `make build` also write
 - `make sim-campaign` - the simulation campaign, 300 seeds of each scenario (`SIM_SEEDS=5000` for more). See `docs/simulation.md`.
 - `make mutants` - plant each bug of `ops/mutants.txt` and require that a test fails.
 - `make fuzz` - fuzz the decoders (`FUZZTIME=10s` each).
-- `make spec-long` - the conformance tests with 2000 checks each. See `internal/spec/README.md`.
+- `make spec-long` - the conformance tests with 2000 checks each. See `spec/README.md`.
 - `make it` - the end-to-end tests on the real binary, against DynamoDB Local, PostgreSQL and SeaweedFS (S3) in Podman. It needs Podman, fails without it, and never skips.
 
 ## Layout
@@ -35,10 +35,10 @@ See `internal/controlplane/doc.go` for the package map and the mental model, and
 - `cmd/mdscontrolplane` - the binary
 - `cmd/cpsim` - the simulation campaign runner
 - `api` - the .proto files and the generated Go (the broker imports it)
-- `internal/controlplane` - the control plane: `contract`, `wire`, `domain/{topic,group,rebalance,broker}`, `metadb` (with `engine`), `replica`, `executor`, `server`
+- `contract` - the public vocabulary: operations, responses, `ErrCode` (the broker imports it)
+- `internal/controlplane` - the control plane: `wire`, `domain/{topic,group,rebalance,broker}`, `metadb` (with `engine`), `replica`, `executor`, `server`
 - `internal/runtime` - the event and value types and the clock interface
-- `internal/system` - system adapters (clock, S3, `live` run loop)
-- `internal/spec` - the small independent model of the control plane, used by tests and by the simulator
+- `spec` - the small independent model of the control plane, used by tests and by the simulator (public: the broker will import it)
 - `internal/verify/simulator` - deterministic simulation of the replicated control plane
 - `internal/testinfra` - containers for the integration tests
 - `test/conformance` - the model conformance tests

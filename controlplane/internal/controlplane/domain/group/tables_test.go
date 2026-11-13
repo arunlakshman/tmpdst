@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine/memory"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"

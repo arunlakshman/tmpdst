@@ -4,7 +4,10 @@
 // the connection belongs to the scenario, through the Loop hooks.
 package session
 
-import "github.com/manifesterio/mds/broker/internal/core"
+import (
+	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
+)
 
 // State is a client's connection state. A scenario may define connected
 // substates of its own at Connected and above.
@@ -22,21 +25,21 @@ type Client struct {
 	ID      int
 	State   State
 	Conn    core.ConnID
-	DialReq core.RequestID
-	SendReq core.RequestID
+	DialReq machine.RequestID
+	SendReq machine.RequestID
 	Dials   int
 	Fails   int // consecutive dial/connection failures
-	WakeGen core.TimerVersion
-	ReqGen  core.TimerVersion
+	WakeGen machine.TimerVersion
+	ReqGen  machine.TimerVersion
 }
 
 func (c *Client) session() *Client { return c }
 
-func (c *Client) wakeID() core.TimerID    { return core.TimerID(1 + c.ID*2) }
-func (c *Client) requestID() core.TimerID { return core.TimerID(2 + c.ID*2) }
+func (c *Client) wakeID() machine.TimerID    { return machine.TimerID(1 + c.ID*2) }
+func (c *Client) requestID() machine.TimerID { return machine.TimerID(2 + c.ID*2) }
 
 // Wake arms the client's wake timer, replacing any pending one.
-func (c *Client) Wake(d core.Duration) core.Action {
+func (c *Client) Wake(d machine.Duration) core.Action {
 	c.WakeGen++
 	return core.SetTimer{ID: c.wakeID(), Gen: c.WakeGen, After: d}
 }
@@ -54,9 +57,9 @@ func (c *Client) backoff() core.Action {
 }
 
 // RetryWaitTime is the backoff after n consecutive failures.
-func RetryWaitTime(n int) core.Duration {
+func RetryWaitTime(n int) machine.Duration {
 	n = min(n, 4)
-	return 50 * core.Millisecond << n
+	return 50 * machine.Millisecond << n
 }
 
 type member interface{ session() *Client }
@@ -64,9 +67,9 @@ type member interface{ session() *Client }
 // Loop drives Clients over Brokers. C is the scenario's client, which embeds
 // Client. The hooks are the scenario's protocol and must all be set.
 type Loop[C member] struct {
-	Brokers []core.NodeID
+	Brokers []machine.NodeID
 	Clients []C
-	NextReq core.RequestID
+	NextReq machine.RequestID
 
 	// Connected reports that c's connection delivers its events to c.
 	Connected func(c C) bool
@@ -83,7 +86,7 @@ type Loop[C member] struct {
 	Lost func(c C, why string)
 }
 
-func (l *Loop[C]) nextRequestID() core.RequestID { l.NextReq++; return l.NextReq }
+func (l *Loop[C]) nextRequestID() machine.RequestID { l.NextReq++; return l.NextReq }
 
 // Step handles the connection events of ev.
 func (l *Loop[C]) Step(event core.Event) []core.Action {
@@ -172,7 +175,7 @@ func (l *Loop[C]) onTimer(e core.TimerFired) []core.Action {
 }
 
 // Request sends data on c's connection and starts its timeout.
-func (l *Loop[C]) Request(c C, data []byte, timeout core.Duration) []core.Action {
+func (l *Loop[C]) Request(c C, data []byte, timeout machine.Duration) []core.Action {
 	s := c.session()
 	s.SendReq = l.nextRequestID()
 	s.ReqGen++

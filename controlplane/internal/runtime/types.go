@@ -1,136 +1,50 @@
 package runtime
 
-import "strconv"
+import "github.com/manifesterio/mds/controlplane/contract"
 
-// NodeTime is a node-local monotonic instant in nanoseconds. In simulation it
-// includes the node's clock skew. Used for deadlines, leases and batch windows.
-type NodeTime int64
+// The time types, ID, NodeID, BootNumber, RequestID, TimerID, TimerVersion and NodeInstance
+// are not defined here. They come from dst/machine, and the broker and the control plane
+// share them.
+//
+// ErrCode, Outcome and SegmentRef are public (the broker uses them), so they are defined in
+// contract. The names below are aliases of them, so that the code of this module keeps its
+// short names.
 
-// RealTime is UTC, nanoseconds since the Unix epoch. Used for Kafka
-// LogAppendTime, credential expiry and anything persisted. Scripted in simulator.
-type RealTime int64
-
-// Duration is nanoseconds.
-type Duration int64
-
-// Duration units.
-const (
-	Nanosecond  Duration = 1
-	Microsecond          = 1000 * Nanosecond
-	Millisecond          = 1000 * Microsecond
-	Second               = 1000 * Millisecond
-)
-
-// ID is a 128-bit identifier drawn from the seeded stream (never uuid.New).
-type ID [16]byte
-
-type (
-	// NodeID names a node.
-	NodeID string // stable identity of a broker (or simulator workload)
-	// BootNumber identifies one boot of a node.
-	BootNumber ID // fresh per boot; names one run of a node in logs, facts and the runtime
-	// RequestID correlates an Action with its completion Event. Unique within one
-	// incarnation only; it must never reach a durable name (object keys come
-	// from Environment.NewID()).
-	RequestID uint64
-	// TimerID names a timer.
-	TimerID uint64
-	// TimerVersion is a timer generation.
-	TimerVersion uint64 // generation: a TimerFired whose Gen is stale is ignored
-	// LogPosition is a position in the replicated command log (loglet).
-	LogPosition int64
-)
-
-// NodeInstance names one specific boot of one node.
-type NodeInstance struct {
-	Node NodeID
-	Inc  BootNumber
-}
+// LogPosition is a position in the replicated command log (loglet).
+type LogPosition int64
 
 // SegmentRef is a byte range inside an object in the object store.
-type SegmentRef struct {
-	Key string
-	Off int64
-	Len int64 // <= 0 means to the end of the object
-}
+type SegmentRef = contract.SegmentRef
 
-// ErrCode is an error as plain data so events stay comparable and hashable.
-// It is folded into the hash: append-only from here on, never reordered.
-//
-// ErrNotFound and ErrConflict are always truthful; engines inject
-// only ErrTimeout, ErrUnavailable, ErrIO and ErrConnClosed. ErrCorrupt comes
-// only from a module's decoder, never from system.ErrorClassifier.
-type ErrCode uint16
+// ErrCode is an error as plain data. See contract.ErrCode.
+type ErrCode = contract.ErrCode
 
-// ErrCode values.
+// ErrCode values. They are the values of contract.
 const (
-	OK             ErrCode = iota
-	ErrTimeout             // deadline passed, or the response was lost; see Outcome (a lost response is ErrTimeout+MaybeApplied, never silence)
-	ErrUnavailable         // 503 / throttled / overloaded
-	ErrNotFound
-	ErrConflict   // idempotency-key mismatch (same SegmentKey, different request)
-	_             // retired: was ErrFenced (decision 44); keeps the numbers below stable
-	ErrConnClosed // connection lost
-	ErrTooLarge
-	ErrCorrupt
-	ErrInvalid // malformed request; never retried
-	ErrIO      // anything else from the outside world
-
-	ErrUnknownMember             // group member id or group leader is not a member
-	ErrIllegalGeneration         // group generation does not match the one asked for
-	ErrUnknownPartition          // topic or partition does not exist
-	ErrRebalanceInProgress       // group is rebalancing; rejoin
-	ErrInconsistentGroupProtocol // members have no protocol in common, or a wrong protocol type
-	ErrTopicExists               // CreateTopic with FailIfExists: the topic is already there
+	OK                           = contract.OK
+	ErrTimeout                   = contract.ErrTimeout
+	ErrUnavailable               = contract.ErrUnavailable
+	ErrNotFound                  = contract.ErrNotFound
+	ErrConflict                  = contract.ErrConflict
+	ErrConnClosed                = contract.ErrConnClosed
+	ErrTooLarge                  = contract.ErrTooLarge
+	ErrCorrupt                   = contract.ErrCorrupt
+	ErrInvalid                   = contract.ErrInvalid
+	ErrIO                        = contract.ErrIO
+	ErrUnknownMember             = contract.ErrUnknownMember
+	ErrIllegalGeneration         = contract.ErrIllegalGeneration
+	ErrUnknownPartition          = contract.ErrUnknownPartition
+	ErrRebalanceInProgress       = contract.ErrRebalanceInProgress
+	ErrInconsistentGroupProtocol = contract.ErrInconsistentGroupProtocol
+	ErrTopicExists               = contract.ErrTopicExists
 )
 
-// Outcome states what a completion proves about side effects (lesson 1).
-// Folded into the hash: append-only from here on. A LostResponse surfaces as
-// ErrTimeout+MaybeApplied, never as silence.
-type Outcome uint8
+// Outcome states what a completion proves about side effects. See contract.Outcome.
+type Outcome = contract.Outcome
 
-// Outcome values.
+// Outcome values. They are the values of contract.
 const (
-	NotApplied   Outcome = iota // provably no effect
-	MaybeApplied                // may have taken effect; retry only if idempotent
-	Applied                     // took effect (the reply itself may be unusable)
+	NotApplied   = contract.NotApplied
+	MaybeApplied = contract.MaybeApplied
+	Applied      = contract.Applied
 )
-
-// String returns the frozen spelling of e. Spellings are never changed.
-func (e ErrCode) String() string {
-	switch e {
-	case OK:
-		return "OK"
-	case ErrTimeout:
-		return "ErrTimeout"
-	case ErrUnavailable:
-		return "ErrUnavailable"
-	case ErrNotFound:
-		return "ErrNotFound"
-	case ErrConflict:
-		return "ErrConflict"
-	case ErrConnClosed:
-		return "ErrConnClosed"
-	case ErrTooLarge:
-		return "ErrTooLarge"
-	case ErrCorrupt:
-		return "ErrCorrupt"
-	case ErrInvalid:
-		return "ErrInvalid"
-	case ErrIO:
-		return "ErrIO"
-	case ErrUnknownMember:
-		return "ErrUnknownMember"
-	case ErrIllegalGeneration:
-		return "ErrIllegalGeneration"
-	case ErrUnknownPartition:
-		return "ErrUnknownPartition"
-	case ErrRebalanceInProgress:
-		return "ErrRebalanceInProgress"
-	case ErrInconsistentGroupProtocol:
-		return "ErrInconsistentGroupProtocol"
-	case ErrTopicExists:
-		return "ErrTopicExists"
-	}
-	return "ErrCode(" + strconv.FormatUint(uint64(e), 10) + ")"
-}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // connection is one client connection. Kafka answers a connection's requests in
@@ -33,13 +34,13 @@ type slot struct {
 	pending  int  // parts still outstanding, plus 1 while the handler runs
 	ready    bool // resp is complete
 	silent   bool // no response is sent (acks=0)
-	facts    []core.Fact
+	facts    []machine.Fact
 	// fetchMax is the Fetch request's total byte limit (<= 0: none).
 	fetchMax int32
 	// Fetch long poll (fetch.go): the Fetch waits for fetchMin bytes until
 	// fetchUntil. fetchGot counts the bytes its ended parts returned.
 	fetchMin   int32
-	fetchUntil core.NodeTime
+	fetchUntil machine.NodeTime
 	fetchGot   int
 }
 

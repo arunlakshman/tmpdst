@@ -9,7 +9,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/system/live"
+	"github.com/manifesterio/mds/dst/live"
 )
 
 func TestMemLogRoundTrip(t *testing.T) {
@@ -123,7 +123,7 @@ func (timeoutError) Temporary() bool { return true }
 
 func TestExecutorIOResults(t *testing.T) {
 	ctx := t.Context()
-	in := live.NewInbox()
+	in := live.NewInbox[runtime.EventData](0)
 	ex := executor.New(ctx, executor.Config{LogTimeout: time.Second, ObjTimeout: time.Second}, executor.NewMemoryLog(), executor.NewMemoryObjects(), in)
 	ex.Execute(runtime.LogAppend{Req: 1, Slot: 0, Data: []byte("a")})
 	ex.Execute(runtime.ObjectPut{Req: 2, Key: "k", Data: []byte("v")})

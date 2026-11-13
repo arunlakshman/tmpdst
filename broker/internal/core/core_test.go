@@ -1,21 +1,25 @@
 package core
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
+)
 
 func TestClassOfCoversEveryEvent(t *testing.T) {
 	control := []EventData{
 		NodeStarted{}, StopRequest{}, TimerFired{}, SendDone{}, ConnectDone{},
-		ObjectPutDone{}, ObjectGetDone{}, ObjectDeleteDone{}, ObjectListDone{}, ControlPlaneDone{},
-		LogAppendDone{}, LogReadDone{}, LogGetEndDone{}, LogDeleteOldDone{},
+		ObjectDone{Result: objectstore.PutDone{}}, ObjectDone{Result: objectstore.GetDone{}}, ObjectDone{Result: objectstore.DeleteDone{}}, ObjectDone{Result: objectstore.ListDone{}}, ControlPlaneDone{},
 	}
 	data := []EventData{ConnOpened{}, BytesReceived{}, ConnClosed{}}
 	for _, b := range control {
-		if InboxKindOf(b) != Control {
+		if InboxKindOf(b) != machine.Control {
 			t.Errorf("%T: want Control", b)
 		}
 	}
 	for _, b := range data {
-		if InboxKindOf(b) != Data {
+		if InboxKindOf(b) != machine.Data {
 			t.Errorf("%T: want Data", b)
 		}
 	}

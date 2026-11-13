@@ -9,84 +9,83 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
+	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specbridge"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	brokerspec "github.com/manifesterio/mds/broker/spec"
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // C4 world: a random correct at-least-once Kafka history generated against the
-// speccheck specs (ControlPlane assigns offsets and replays a committed key,
-// Broker is the expected log; a retried batch is committed again, so it is
-// in the log twice), exposed to the oracle through a fake simulator.View. Faults
+// specs (controlplane/spec assigns offsets and replays a committed key,
+// broker/spec is the expected log; a retried batch is committed again, so it is
+// in the log twice), exposed to the oracle through a fake kernel.View. Faults
 // mutate the finished world (c4_faults_test.go).
 
-// failures counts violated Always props (the fake core.Assertions).
-type failures map[core.PropertyID]int
+// failures counts violated Always props (the fake machine.Assertions).
+type failures map[string]int
 
-func (f failures) Always(c bool, p core.PropertyID, _ ...core.ContextPair) {
+func (f failures) Always(c bool, p assert.Always, _ ...assert.Pair) {
 	if !c {
-		f[p]++
+		f[p.Name()]++
 	}
 }
-func (f failures) AlwaysOrUnreachable(c bool, p core.PropertyID, d ...core.ContextPair) {
-	f.Always(c, p, d...)
+func (f failures) AlwaysOrUnreachable(c bool, p assert.AlwaysOrUnreachable, _ ...assert.Pair) {
+	if !c {
+		f[p.Name()]++
+	}
 }
-func (f failures) Sometimes(bool, core.PropertyID)                      {}
-func (f failures) Reachable(core.PropertyID)                            {}
-func (f failures) Unreachable(p core.PropertyID, _ ...core.ContextPair) { f[p]++ }
+func (f failures) Sometimes(bool, assert.Sometimes)                   {}
+func (f failures) Reachable(assert.Reachable)                         {}
+func (f failures) Unreachable(p assert.Unreachable, _ ...assert.Pair) { f[p.Name()]++ }
 
 type stats struct{ retries, replays, indetLand, indetNo, rejected, multi int }
 
 type producer struct{ nb int }
 
-type broker struct{ ref core.NodeInstance }
+type broker struct{ ref machine.NodeInstance }
 
-// world is the fake simulator.View plus the spec-side truth it was built from.
+// world is the fake kernel.View plus the spec-side truth it was built from.
 type world struct {
 	opts   kafka.Opts
 	tps    []core.TopicPartition
-	cp     *speccheck.ControlPlane
-	parts  map[core.TopicPartition]*speccheck.Broker
+	cp     *specbridge.ControlPlane
+	parts  map[core.TopicPartition]*brokerspec.Broker
 	prods  []*producer
 	brks   []*broker
 	pos    map[[2]int]int64 // (consumer, tp index) -> next offset
 	st     stats
 	nextID uint64
 	nseg   int
-	now    simulator.Time
+	now    kernel.Time
 
 	// What the oracle sees (mutable by faults).
-	ranges map[core.TopicPartition][]core.BatchRange
+	ranges map[core.TopicPartition][]contract.BatchRange
 	hwmAdj map[core.TopicPartition]int64
 	objs   map[string][]byte
-	ops    []simulator.HistoryOperation
-	raw    []simulator.TimedFact
-	tl     *simulator.MemTimeline
+	ops    []kafka.Operation
+	raw    []kernel.TimedFact
+	tl     *kernel.Timeline
 	gen    uint64
 	as     failures
 
-	invs []simulator.SafetyRule // live observers, nil in one-shot mode
+	invs []kernel.Rule // live observers, nil in one-shot mode
 }
 
-func (w *world) Step() uint64                            { return uint64(len(w.raw)) }
-func (w *world) Now() simulator.Time                     { return w.now }
-func (w *world) Phase() simulator.Phase                  { return simulator.PhaseRecovering }
-func (w *world) Alive(core.NodeInstance) bool            { return true }
-func (w *world) Timeline() simulator.Timeline            { return w.tl }
-func (w *world) History() simulator.History              { return (*hist)(w) }
-func (w *world) Objects() simulator.ObjectStoreRealState { return (*objView)(w) }
-func (w *world) CP() simulator.ControlPlaneRealState     { return (*controlPlaneView)(w) }
-func (w *world) Assert() core.Assertions                 { return w.as }
-func (w *world) touch()                                  { w.gen++ }
+func (w *world) Step() uint64               { return uint64(len(w.raw)) }
+func (w *world) Now() kernel.Time           { return w.now }
+func (w *world) Phase() kernel.Phase        { return kernel.PhaseRecovering }
+func (w *world) Timeline() *kernel.Timeline { return w.tl }
+func (w *world) Assert() machine.Assertions { return w.as }
+func (w *world) touch()                     { w.gen++ }
 
 type hist world
 
-func (h *hist) Invoke(core.NodeInstance, core.ID, core.ID, any) {
-	panic("C4: history is built directly")
-}
-func (h *hist) Return(core.ID, any, simulator.OpOutcome) bool { panic("C4: history is built directly") }
-func (h *hist) Ops() []simulator.HistoryOperation             { return h.ops }
+func (h *hist) Ops() []kafka.Operation { return h.ops }
 
 type objView world
 
@@ -96,7 +95,7 @@ func (o *objView) Gen() uint64                     { return o.gen }
 
 type controlPlaneView world
 
-func (c *controlPlaneView) Committed(topicPartition core.TopicPartition) []core.BatchRange {
+func (c *controlPlaneView) Committed(topicPartition core.TopicPartition) []contract.BatchRange {
 	return c.ranges[topicPartition]
 }
 func (c *controlPlaneView) Gen() uint64 { return c.gen }
@@ -110,14 +109,14 @@ func (c *controlPlaneView) HighWatermark(topicPartition core.TopicPartition) cor
 }
 
 func (w *world) rebuildTL() {
-	w.tl = simulator.NewTimeline()
+	w.tl = kernel.NewTimeline()
 	for _, tf := range w.raw {
 		w.tl.Append(tf.Source, tf.At, tf.Fact)
 	}
 }
 
-func (w *world) emit(src core.NodeInstance, f core.Fact) {
-	tf := simulator.TimedFact{Seq: uint64(len(w.raw) + 1), At: w.now, Source: src, Fact: f}
+func (w *world) emit(src machine.NodeInstance, f machine.Fact) {
+	tf := kernel.TimedFact{Seq: uint64(len(w.raw) + 1), At: w.now, Source: src, Fact: f}
 	w.raw = append(w.raw, tf)
 	w.tl.Append(src, w.now, f)
 }
@@ -131,22 +130,22 @@ func (w *world) step() {
 	}
 }
 
-func nodeRef(s string) core.NodeInstance { return core.NodeInstance{Node: core.NodeID(s)} }
+func nodeRef(s string) machine.NodeInstance { return machine.NodeInstance{Node: machine.NodeID(s)} }
 
 func newWorld(seed uint64, live bool) *world {
 	r := rand.New(rand.NewPCG(seed, 0xc4)) //nolint:gosec // G404: deterministic test/sim PRNG
 	opts := kafka.DefaultOpts()
-	w := &world{opts: opts, cp: speccheck.NewControlPlane(), parts: map[core.TopicPartition]*speccheck.Broker{},
-		pos: map[[2]int]int64{}, ranges: map[core.TopicPartition][]core.BatchRange{},
-		hwmAdj: map[core.TopicPartition]int64{}, objs: map[string][]byte{}, tl: simulator.NewTimeline(), as: failures{}}
+	w := &world{opts: opts, cp: specbridge.New(), parts: map[core.TopicPartition]*brokerspec.Broker{},
+		pos: map[[2]int]int64{}, ranges: map[core.TopicPartition][]contract.BatchRange{},
+		hwmAdj: map[core.TopicPartition]int64{}, objs: map[string][]byte{}, tl: kernel.NewTimeline(), as: failures{}}
 	opts.Partitions = int32(1 + r.IntN(3))
 	w.opts = opts
 	for _, t := range opts.Topics {
 		w.cp.CreateTopic(t, opts.Partitions)
 		for p := int32(0); p < opts.Partitions; p++ {
-			topicPartition := core.NewTopicPartition(t, p)
+			topicPartition := contract.NewTopicPartition(t, p)
 			w.tps = append(w.tps, topicPartition)
-			w.parts[topicPartition] = &speccheck.Broker{}
+			w.parts[topicPartition] = &brokerspec.Broker{}
 		}
 	}
 	for i := range 3 {
@@ -156,7 +155,7 @@ func newWorld(seed uint64, live bool) *world {
 		w.prods = append(w.prods, &producer{})
 	}
 	if live {
-		w.invs = []simulator.SafetyRule{kafka.NewOracle(opts)}
+		w.invs = []kernel.Rule{kafka.NewOracle(opts, (*hist)(w), (*objView)(w), (*controlPlaneView)(w))}
 	}
 	steps := 20 + r.IntN(30)
 	for range steps {
@@ -176,9 +175,9 @@ func newWorld(seed uint64, live bool) *world {
 	return w
 }
 
-func (w *world) newID() core.ID {
+func (w *world) newID() machine.ID {
 	w.nextID++
-	var id core.ID
+	var id machine.ID
 	binary.BigEndian.PutUint64(id[:], w.nextID)
 	return id
 }
@@ -189,7 +188,7 @@ type item struct {
 	p         *producer
 	fate      int
 	bytes     []byte
-	pb        core.PendingBatch
+	pb        contract.PendingBatch
 }
 
 const (
@@ -228,7 +227,7 @@ func (w *world) buildItem(r *rand.Rand, c int, topicPartition core.TopicPartitio
 	if it.fate == fIdem {
 		bp.ProducerID, bp.ProducerEpoch, bp.BaseSequence = 7, 0, 0
 	}
-	it.pb = core.PendingBatch{TopicPartition: topicPartition, Records: int64(n)}
+	it.pb = contract.PendingBatch{TopicPartition: topicPartition, Records: int64(n)}
 	var err error
 	if it.bytes, err = kafkawire.BuildBatch(bp, recs); err != nil {
 		panic(err)
@@ -241,27 +240,27 @@ func (w *world) pickBroker(r *rand.Rand) *broker { return w.brks[r.IntN(len(w.br
 
 // commit sends items (one segment, a fresh key) to the spec CP and mirrors
 // the result. Replaying the key must return the same answer and change nothing.
-func (w *world) commit(items []*item, replay bool) []core.BatchRange {
+func (w *world) commit(items []*item, replay bool) []contract.BatchRange {
 	w.nseg++
 	key := fmt.Sprintf("seg/%032x", w.nseg)
 	var obj []byte
-	var pbs []core.PendingBatch
+	var pbs []contract.PendingBatch
 	for _, it := range items {
 		it.pb.Loc = core.SegmentRef{Key: key, Off: int64(len(obj)), Len: int64(len(it.bytes))}
 		obj = append(obj, it.bytes...)
 		pbs = append(pbs, it.pb)
 	}
 	w.objs[key] = obj
-	operation := core.CommitSegment{SegmentKey: key, Batches: pbs}
+	operation := contract.CommitSegment{SegmentKey: key, Batches: pbs}
 	d := w.cp.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
 	if d.Err != core.OK {
 		panic(fmt.Sprintf("spec CP refused a commit: %v", d.Err))
 	}
-	as := d.Resp.(core.CommitSegmentResp).Assigned
+	as := d.Resp.(contract.CommitSegmentResp).Assigned
 	if replay {
 		w.st.replays++
 		d2 := w.cp.Exec(core.ControlPlaneCall{Op: operation}).(core.ControlPlaneDone)
-		if d2.Err != core.OK || !slices.Equal(d2.Resp.(core.CommitSegmentResp).Assigned, as) {
+		if d2.Err != core.OK || !slices.Equal(d2.Resp.(contract.CommitSegmentResp).Assigned, as) {
 			panic("spec CP: a replayed commit did not return the original answer")
 		}
 	}
@@ -278,7 +277,7 @@ func (w *world) commit(items []*item, replay bool) []core.BatchRange {
 		panic(fmt.Sprintf("spec CP assigned %d ranges for %d batches", len(as), len(items)))
 	}
 	for topicPartition := range touched { // map order is irrelevant: independent entries
-		lk := w.cp.Exec(core.ControlPlaneCall{Op: core.FindSegments{TopicPartition: topicPartition}}).(core.ControlPlaneDone).Resp.(core.FindSegmentsResp)
+		lk := w.cp.Exec(core.ControlPlaneCall{Op: contract.FindSegments{TopicPartition: topicPartition}}).(core.ControlPlaneDone).Resp.(contract.FindSegmentsResp)
 		w.ranges[topicPartition] = lk.Ranges
 		if lk.End != w.parts[topicPartition].HighWatermark() {
 			panic("Broker end != CP end")
@@ -295,20 +294,20 @@ func valBytes(vs []string) [][]byte {
 	return out
 }
 
-func (w *world) ack(b *broker, rg core.BatchRange, it *item) {
-	w.emit(b.ref, core.Fact{Name: "produce_acked", Fields: []core.Field{
-		{Key: "topic", Value: core.StringValue(rg.TopicPartition.Topic)}, {Key: "partition", Value: core.Int64Value(rg.TopicPartition.Partition)},
-		{Key: "base_offset", Value: core.Int64Value(rg.Base)}, {Key: "count", Value: core.Int64Value(rg.Count)},
-		{Key: "segment", Value: core.StringValue(rg.Loc.Key)}}})
+func (w *world) ack(b *broker, rg contract.BatchRange, it *item) {
+	w.emit(b.ref, machine.Fact{Name: "produce_acked", Fields: []machine.Field{
+		{Key: "topic", Value: machine.StringValue(rg.TopicPartition.Topic)}, {Key: "partition", Value: machine.Int64Value(rg.TopicPartition.Partition)},
+		{Key: "base_offset", Value: machine.Int64Value(rg.Base)}, {Key: "count", Value: machine.Int64Value(rg.Count)},
+		{Key: "segment", Value: machine.StringValue(rg.Loc.Key)}}})
 }
 
 func (w *world) invoke(it *item, c int) {
-	w.ops = append(w.ops, simulator.HistoryOperation{ID: w.newID(), Value: w.newID(), Client: nodeRef(fmt.Sprintf("c%d", c)), Op: it.po,
-		InvSeq: uint64(len(w.ops)*2 + 1), Invoke: w.now, Outcome: simulator.OpPending})
+	w.ops = append(w.ops, kafka.Operation{ID: w.newID(), Value: w.newID(), Client: nodeRef(fmt.Sprintf("c%d", c)), Op: it.po,
+		InvSeq: uint64(len(w.ops)*2 + 1), Invoke: w.now, Outcome: history.Pending})
 	it.operation = len(w.ops) - 1
 }
 
-func (w *world) ret(it *item, res kafka.ProduceRes, o simulator.OpOutcome) {
+func (w *world) ret(it *item, res kafka.ProduceRes, o history.Outcome) {
 	operation := &w.ops[it.operation]
 	operation.Result, operation.Outcome, operation.Return, operation.RetSeq = res, o, w.now, operation.InvSeq+1
 }
@@ -344,7 +343,7 @@ func (w *world) produceStep(r *rand.Rand) {
 				if r.IntN(2) == 0 {
 					w.ack(b, rg, it)
 				}
-				w.ret(it, kafka.ProduceRes{Base: -1, Code: 7, Attempts: 3}, simulator.OpResultUnknown)
+				w.ret(it, kafka.ProduceRes{Base: -1, Code: 7, Attempts: 3}, history.ResultUnknown)
 			case fRetry: // the answer was lost: the client resends below
 				if r.IntN(2) == 0 {
 					w.ack(b, rg, it)
@@ -352,7 +351,7 @@ func (w *world) produceStep(r *rand.Rand) {
 				again = append(again, it)
 			default:
 				w.ack(b, rg, it)
-				w.ret(it, kafka.ProduceRes{Base: int64(rg.Base), Attempts: 1}, simulator.OpResultKnown)
+				w.ret(it, kafka.ProduceRes{Base: int64(rg.Base), Attempts: 1}, history.ResultKnown)
 			}
 		}
 		w.step()
@@ -360,7 +359,7 @@ func (w *world) produceStep(r *rand.Rand) {
 			w.st.retries++
 			rg := w.commit([]*item{it}, false)[0]
 			w.ack(b, rg, it)
-			w.ret(it, kafka.ProduceRes{Base: int64(rg.Base), Attempts: 2}, simulator.OpResultKnown)
+			w.ret(it, kafka.ProduceRes{Base: int64(rg.Base), Attempts: 2}, history.ResultKnown)
 			w.step()
 		}
 	}
@@ -368,10 +367,10 @@ func (w *world) produceStep(r *rand.Rand) {
 		switch it.fate {
 		case fIndetNo:
 			w.st.indetNo++
-			w.ret(it, kafka.ProduceRes{Base: -1, Code: 7, Attempts: 3}, simulator.OpResultUnknown)
+			w.ret(it, kafka.ProduceRes{Base: -1, Code: 7, Attempts: 3}, history.ResultUnknown)
 		case fIdem:
 			w.st.rejected++
-			w.ret(it, kafka.ProduceRes{Base: -1, Code: 42, Why: "rejected", Attempts: 1}, simulator.OpGivenUp)
+			w.ret(it, kafka.ProduceRes{Base: -1, Code: 42, Why: "rejected", Attempts: 1}, history.GivenUp)
 		}
 	}
 	w.step()
@@ -403,10 +402,10 @@ func (w *world) read(r *rand.Rand, c int, tis []int) {
 		w.pos[[2]int{c, ti}] = from + int64(len(recs))
 		res.Parts = append(res.Parts, rp)
 	}
-	w.ops = append(w.ops, simulator.HistoryOperation{ID: w.newID(), Value: w.newID(), Client: nodeRef(fmt.Sprintf("c%d", c)), Op: ro,
-		InvSeq: uint64(len(w.ops)*2 + 1), Invoke: w.now, Outcome: simulator.OpPending})
+	w.ops = append(w.ops, kafka.Operation{ID: w.newID(), Value: w.newID(), Client: nodeRef(fmt.Sprintf("c%d", c)), Op: ro,
+		InvSeq: uint64(len(w.ops)*2 + 1), Invoke: w.now, Outcome: history.Pending})
 	w.step()
 	operation := &w.ops[len(w.ops)-1]
-	operation.Result, operation.Outcome, operation.Return, operation.RetSeq = res, simulator.OpResultKnown, w.now, operation.InvSeq+1
+	operation.Result, operation.Outcome, operation.Return, operation.RetSeq = res, history.ResultKnown, w.now, operation.InvSeq+1
 	w.step()
 }

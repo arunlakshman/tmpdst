@@ -13,7 +13,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/broker"
-	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 func memStack(t *testing.T, brokers int) *stack {
@@ -266,7 +266,7 @@ func runKill(t *testing.T, s *stack) {
 // and the broker exits cleanly.
 func TestGracefulStopFlushesProduce(t *testing.T) {
 	s := newStack(t, nil, nil)
-	s.brokers.BatchWindow = core.Duration(3 * time.Second)
+	s.brokers.BatchWindow = machine.Duration(3 * time.Second)
 	s.addBrokers(1)
 	create(s)
 	cl := newClient(t, s.seeds())

@@ -4,8 +4,10 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // consumer reads every partition from offset 0 with one multi-partition Fetch
@@ -13,14 +15,14 @@ import (
 type consumer struct {
 	pos       []int64
 	listed    bool
-	operation core.ID // outstanding ReadOp, zero when none
-	drain     bool    // PhaseSettle began: stop once a fetch finds the end of every partition
+	operation machine.ID // outstanding ReadOp, zero when none
+	drain     bool       // PhaseSettle began: stop once a fetch finds the end of every partition
 	done      bool
 }
 
-func (c *consumer) hash(h *core.Hasher) {
+func (c *consumer) hash(h *trace.Hash) {
 	for _, p := range c.pos {
-		h.Int64Value(p)
+		h.Int64(p)
 	}
 	h.Bool(c.listed)
 	h.Bytes(c.operation[:])
@@ -122,9 +124,9 @@ func (w *Workload) onFetch(c *client, r *kmsg.FetchResponse) []core.Action {
 		atEnd = atEnd && part.Code == 0 && !part.Corrupt && cs.pos[i] >= part.HWM
 	}
 	operation := cs.operation
-	cs.operation = core.ID{}
+	cs.operation = machine.ID{}
 	if w.history != nil {
-		w.history.Return(operation, res, simulator.OpResultKnown)
+		w.history.Return(operation, res, history.ResultKnown)
 	}
 	d := 100 + w.env.Intn(200)
 	if got {
@@ -135,7 +137,7 @@ func (w *Workload) onFetch(c *client, r *kmsg.FetchResponse) []core.Action {
 		cs.done = true
 		return nil
 	}
-	return []core.Action{c.Wake(core.Duration(d) * core.Millisecond)}
+	return []core.Action{c.Wake(machine.Duration(d) * machine.Millisecond)}
 }
 
 func (w *Workload) readPart(p kmsg.FetchResponseTopicPartition, pos int64) ReadPart {
@@ -168,8 +170,8 @@ func (w *Workload) readPart(p kmsg.FetchResponseTopicPartition, pos int64) ReadP
 
 // abandonFetch closes the outstanding read: it had no effect.
 func (w *Workload) abandonFetch(c *client, why string) {
-	if c.c.operation != (core.ID{}) && w.history != nil {
-		w.history.Return(c.c.operation, ReadRes{Why: why}, simulator.OpGivenUp)
+	if c.c.operation != (machine.ID{}) && w.history != nil {
+		w.history.Return(c.c.operation, ReadRes{Why: why}, history.GivenUp)
 	}
-	c.c.operation = core.ID{}
+	c.c.operation = machine.ID{}
 }

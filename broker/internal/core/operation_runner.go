@@ -1,6 +1,10 @@
 package core
 
-import "context"
+import (
+	"context"
+
+	"github.com/manifesterio/mds/controlplane/contract"
+)
 
 // OperationRunner runs one control-plane operation and returns its answer. It is
 // the one shape that the group coordinator's store, the control-plane node and
@@ -12,5 +16,5 @@ import "context"
 // Err of the answer; the error result is for infrastructure only (the context,
 // the log, the store).
 type OperationRunner interface {
-	Exec(ctx context.Context, operation ControlPlaneOperation) (ControlPlaneDone, error)
+	Exec(ctx context.Context, operation contract.Operation) (ControlPlaneDone, error)
 }

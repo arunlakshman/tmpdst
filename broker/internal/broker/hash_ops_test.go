@@ -5,7 +5,7 @@ import (
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
-	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // heldHash runs do on a started broker whose control-plane replies are held,
@@ -51,7 +51,7 @@ func TestStateHashInFlightOps(t *testing.T) {
 	fetchOf := func(max int32) func(h *harness) {
 		return func(h *harness) {
 			c := h.open(1)
-			h.send(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, max))
+			h.send(c, verFetch, fetchReq(contract.NewTopicPartition("t", 0), 0, max))
 		}
 	}
 

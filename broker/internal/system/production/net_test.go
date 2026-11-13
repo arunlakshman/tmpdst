@@ -10,26 +10,26 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/system"
+	"github.com/manifesterio/mds/dst/live"
 )
 
-func newTestNet(t *testing.T) (*Net, *system.Inbox) {
+func newTestNet(t *testing.T) (*Net, *live.Inbox[core.EventData]) {
 	t.Helper()
 	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := system.NewInbox(64)
+	in := live.NewInbox[core.EventData](64)
 	n := NewNet(ln, in, NetConfig{LingerRead: 200 * time.Millisecond})
 	t.Cleanup(func() { n.Shutdown(time.Second); in.Close() })
 	return n, in
 }
 
 // next pops the next data event, waiting up to a second.
-func next(t *testing.T, in *system.Inbox) core.EventData {
+func next(t *testing.T, in *live.Inbox[core.EventData]) core.EventData {
 	t.Helper()
 	for end := time.Now().Add(time.Second); time.Now().Before(end); time.Sleep(time.Millisecond) {
-		if b, ok := in.Data().Pop(); ok {
+		if b, ok := in.Pop(); ok {
 			return b
 		}
 	}
@@ -90,12 +90,12 @@ func TestNetPauseParksReader(t *testing.T) {
 	// The Read already blocked when we paused may return once more.
 	_, _ = c.Write([]byte("b"))
 	time.Sleep(100 * time.Millisecond)
-	for in.Data().Len() > 0 {
-		in.Data().Pop()
+	for in.Len() > 0 {
+		in.Pop()
 	}
 	_, _ = c.Write([]byte("c"))
 	time.Sleep(100 * time.Millisecond)
-	if in.Data().Len() != 0 {
+	if in.Len() != 0 {
 		t.Fatal("reader kept reading while paused")
 	}
 	n.ResumeReads(operation.Conn)

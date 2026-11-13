@@ -6,6 +6,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // resourceTopic is Kafka's config resource type for topics.
@@ -36,7 +37,7 @@ func (b *Broker) describeConfigs(s *slot, r *kmsg.DescribeConfigsRequest) []core
 
 // onDescribeConfigsCP fills the answer of a DescribeConfigs op from the topics the
 // control plane knows. Resources refused earlier keep their error.
-func (b *Broker) onDescribeConfigsCP(o *operation, infos []core.TopicInfo) []core.Action {
+func (b *Broker) onDescribeConfigsCP(o *operation, infos []contract.TopicInfo) []core.Action {
 	for i := range o.dresp.Resources {
 		rr := &o.dresp.Resources[i]
 		if rr.ErrorCode != 0 {
@@ -67,8 +68,8 @@ func setResourceError(rr *kmsg.DescribeConfigsResponseResource, code kafkaErrorC
 	}
 }
 
-func hasTopic(infos []core.TopicInfo, name string) bool {
-	return slices.ContainsFunc(infos, func(in core.TopicInfo) bool {
+func hasTopic(infos []contract.TopicInfo, name string) bool {
+	return slices.ContainsFunc(infos, func(in contract.TopicInfo) bool {
 		return in.Name == name
 	})
 }

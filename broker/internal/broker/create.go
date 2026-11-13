@@ -6,6 +6,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // createTopics answers CreateTopics (Kafka key 19, decision Q10). Each topic is
@@ -39,12 +41,12 @@ func (b *Broker) createTopics(s *slot, r *kmsg.CreateTopicsRequest) []core.Actio
 			continue
 		}
 		o := &operation{kind: opCreate, s: s, ctopic: rt, validateOnly: r.ValidateOnly,
-			create: core.CreateTopic{Name: t.Topic, Partitions: partitionsOf(t), FailIfExists: !r.ValidateOnly}}
+			create: contract.CreateTopic{Name: t.Topic, Partitions: partitionsOf(t), FailIfExists: !r.ValidateOnly}}
 		acts = append(acts, b.startOp(o)...)
 	}
 	if withConfigs > 0 {
-		s.facts = append(s.facts, core.Fact{Name: "create_topics_configs_ignored", Fields: []core.Field{
-			{Key: "topics", Value: core.Int64Value(withConfigs)},
+		s.facts = append(s.facts, machine.Fact{Name: "create_topics_configs_ignored", Fields: []machine.Field{
+			{Key: "topics", Value: machine.Int64Value(withConfigs)},
 		}})
 	}
 	return acts
@@ -98,9 +100,9 @@ func setTopicError(rt *kmsg.CreateTopicsResponseTopic, code kafkaErrorCode, msg 
 
 // createCP is the control plane call of a create op. A real create is one
 // exclusive CreateTopic. validateOnly only reads, so it asks DescribeTopics.
-func (o *operation) createCP() core.ControlPlaneOperation {
+func (o *operation) createCP() contract.Operation {
 	if o.validateOnly {
-		return core.DescribeTopics{Topics: []string{o.create.Name}}
+		return contract.DescribeTopics{Topics: []string{o.create.Name}}
 	}
 	return o.create
 }
@@ -125,7 +127,7 @@ func (b *Broker) onCreateCP(o *operation, e core.ControlPlaneDone) []core.Action
 		}
 		return b.retryOp(o)
 	case o.validateOnly:
-		if hasTopic(core.ResponseAs[core.DescribeTopicsResp](e).Topics, o.create.Name) {
+		if hasTopic(core.ResponseAs[contract.DescribeTopicsResp](e).Topics, o.create.Name) {
 			setTopicError(o.ctopic, errTopicExists, "topic already exists")
 			return b.endOp(o)
 		}

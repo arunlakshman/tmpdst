@@ -1,0 +1,459 @@
+case network/clean/seed1 seed 1
+steps 200
+rand_calls 358
+counter node_steps 124
+counter engine_steps 31
+counter sim_steps 45
+counter deliveries 124
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: crash reset a peer checks 2 passes 2
+sample net-mid 210b9ca5233f6d25
+sample net-end b05ae5623a58885d
+faults 0 a8c7f832281a39c5
+deliveries 70 55bad145675b959c
+  2142 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  2142 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  2002744 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  2002744 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  4001263 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+  4001263 c core.ConnOpened{Conn:0x2, Peer:"a"}
+
+case network/clean/seed2 seed 2
+steps 212
+rand_calls 374
+counter node_steps 134
+counter engine_steps 33
+counter sim_steps 45
+counter deliveries 134
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: crash reset a peer checks 2 passes 2
+sample net-mid 54bc8ef532edefce
+sample net-end 01d2327f8ff8f656
+faults 0 a8c7f832281a39c5
+deliveries 80 6e0da87df916fa59
+  2001 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  2001 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  2004728 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  2004728 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  4001192 c core.ConnOpened{Conn:0x2, Peer:"a"}
+  4001192 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+
+case network/clean/seed3 seed 3
+steps 217
+rand_calls 385
+counter node_steps 136
+counter engine_steps 36
+counter sim_steps 45
+counter deliveries 136
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: crash reset a peer checks 2 passes 2
+sample net-mid 334b1a5f3dcabf22
+sample net-end d74df3a125e5187f
+faults 0 a8c7f832281a39c5
+deliveries 82 14ccc10ff1b1f9a1
+  2964 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  2964 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  2003870 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  2003870 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  4004278 c core.ConnOpened{Conn:0x2, Peer:"a"}
+  4004278 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+
+case network/partial/seed1 seed 1
+steps 406
+rand_calls 909
+counter node_steps 216
+counter engine_steps 145
+counter sim_steps 45
+counter deliveries 216
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: crash reset a peer checks 2 passes 2
+sample net-mid e42e61df1cd0b22c
+sample net-end 207ec173aa332362
+faults 0 a8c7f832281a39c5
+deliveries 162 ec8e59aebda454dd
+  18022 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  18022 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  2014575 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  2014575 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  4152050 c core.ConnOpened{Conn:0x2, Peer:"a"}
+  4152050 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+
+case network/partial/seed2 seed 2
+steps 476
+rand_calls 1040
+counter node_steps 265
+counter engine_steps 166
+counter sim_steps 45
+counter deliveries 265
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: crash reset a peer checks 2 passes 2
+sample net-mid bee8cdf66c88ac53
+sample net-end 937c000d9bca2786
+faults 0 a8c7f832281a39c5
+deliveries 211 3678e536cc069555
+  16554 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  16554 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  2005815 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  2005815 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  4009138 c core.ConnOpened{Conn:0x2, Peer:"a"}
+  4009138 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+
+case network/partial/seed3 seed 3
+steps 454
+rand_calls 999
+counter node_steps 251
+counter engine_steps 158
+counter sim_steps 45
+counter deliveries 251
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: crash reset a peer checks 2 passes 2
+sample net-mid 7644c137fd0a9d5e
+sample net-end 0fa427f9acfa30f5
+faults 0 a8c7f832281a39c5
+deliveries 197 b864e5f13d17d78e
+  20735 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  20735 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  2010317 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  2010317 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  4007501 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+  4007501 c core.ConnOpened{Conn:0x2, Peer:"a"}
+
+case network/partition/seed1 seed 1
+steps 333
+rand_calls 728
+counter node_steps 182
+counter engine_steps 106
+counter sim_steps 45
+counter deliveries 182
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 7
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: crash reset a peer checks 2 passes 2
+cover net: partition checks 7 passes 7
+cover net: partition healed checks 7 passes 7
+cover net: partition injected checks 7 passes 7
+sample net-mid 68f3ab019d7f154d
+sample net-end 13d0027391e5a8a4
+faults 7 42087e2247ff66be
+deliveries 128 eba17cdc38ff883b
+  4176 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  4176 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  2003581 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  2003581 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  4204584 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+  4204584 c core.ConnOpened{Conn:0x2, Peer:"a"}
+
+case network/partition/seed2 seed 2
+steps 398
+rand_calls 861
+counter node_steps 223
+counter engine_steps 130
+counter sim_steps 45
+counter deliveries 223
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 7
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: crash reset a peer checks 2 passes 2
+cover net: partition checks 7 passes 7
+cover net: partition healed checks 7 passes 7
+cover net: partition injected checks 7 passes 7
+sample net-mid d5f212892f27a112
+sample net-end d6d95610e7fed75e
+faults 7 42087e2247ff66be
+deliveries 169 82823ef637456fa6
+  3911 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  3911 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  2001800 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  2001800 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  4002323 c core.ConnOpened{Conn:0x2, Peer:"a"}
+  4002323 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+
+case network/partition/seed3 seed 3
+steps 388
+rand_calls 848
+counter node_steps 215
+counter engine_steps 128
+counter sim_steps 45
+counter deliveries 215
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 6
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: crash reset a peer checks 2 passes 2
+cover net: partition checks 6 passes 6
+cover net: partition healed checks 6 passes 6
+cover net: partition injected checks 6 passes 6
+sample net-mid 5a659b768b52519a
+sample net-end 453b7f97888dc97b
+faults 6 f46ef9868ee36efe
+deliveries 161 9d4618e2de6c1e74
+  4555 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  4555 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  2002224 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  2002224 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  4001764 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+  4001764 c core.ConnOpened{Conn:0x2, Peer:"a"}
+
+case network/chaos/seed1 seed 1
+steps 332
+rand_calls 818
+counter node_steps 176
+counter engine_steps 111
+counter sim_steps 45
+counter deliveries 176
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 4
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: black_hole checks 1 passes 1
+cover net: black_hole injected checks 1 passes 1
+cover net: clog checks 1 passes 1
+cover net: clog injected checks 1 passes 1
+cover net: crash reset a peer checks 2 passes 2
+cover net: partition checks 1 passes 1
+cover net: partition healed checks 1 passes 1
+cover net: partition injected checks 1 passes 1
+cover net: random_close checks 1 passes 1
+cover net: random_close injected checks 1 passes 1
+sample net-mid 15ebb27fb541c777
+sample net-end 585aaa161dea8047
+faults 4 88b3a37b5b8bdc54
+deliveries 122 24c11ccc86b48360
+  12259 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  12259 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  2017896 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  2017896 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  4011501 c core.ConnOpened{Conn:0x2, Peer:"a"}
+  4011501 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+
+case network/chaos/seed2 seed 2
+steps 470
+rand_calls 1128
+counter node_steps 260
+counter engine_steps 165
+counter sim_steps 45
+counter deliveries 260
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 5
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: black_hole checks 1 passes 1
+cover net: black_hole injected checks 1 passes 1
+cover net: clog checks 3 passes 3
+cover net: clog injected checks 3 passes 3
+cover net: crash reset a peer checks 2 passes 2
+cover net: partition checks 1 passes 1
+cover net: partition healed checks 1 passes 1
+cover net: partition injected checks 1 passes 1
+sample net-mid 17f9ed92421f09f5
+sample net-end 6cef43748eb6ae8b
+faults 5 d0cc4aaa6180cffb
+deliveries 206 8fdc05afd5806374
+  10700 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  10700 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  2010013 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  2010013 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  4014466 c core.ConnOpened{Conn:0x2, Peer:"a"}
+  4014466 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+
+case network/chaos/seed3 seed 3
+steps 445
+rand_calls 1077
+counter node_steps 245
+counter engine_steps 155
+counter sim_steps 45
+counter deliveries 245
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 3
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: clog checks 2 passes 2
+cover net: clog injected checks 2 passes 2
+cover net: crash reset a peer checks 2 passes 2
+cover net: partition checks 1 passes 1
+cover net: partition healed checks 1 passes 1
+cover net: partition injected checks 1 passes 1
+sample net-mid d601167748ce61c8
+sample net-end e1dc2aa89847d34f
+faults 3 984745fec9f4305a
+deliveries 191 245223fd1c007dea
+  18524 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  18524 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  2004875 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  2004875 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  4008876 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+  4008876 c core.ConnOpened{Conn:0x2, Peer:"a"}
+
+case network/narrow-partition/seed1 seed 1
+steps 211
+rand_calls 397
+counter node_steps 121
+counter engine_steps 45
+counter sim_steps 45
+counter deliveries 121
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 14
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: crash reset a peer checks 2 passes 2
+cover net: partition checks 14 passes 14
+cover net: partition healed checks 14 passes 14
+cover net: partition injected checks 14 passes 14
+sample net-mid bd8aecbb560afa47
+sample net-end fa4e12c171e57395
+faults 14 0d439b60e85dca4e
+deliveries 67 cb91d9d0bbd6ddb9
+  1003422 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  1003422 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  3001263 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  3001263 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  5199775 c core.ConnOpened{Conn:0x2, Peer:"a"}
+  5199775 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+
+case network/narrow-partition/seed2 seed 2
+steps 226
+rand_calls 416
+counter node_steps 134
+counter engine_steps 47
+counter sim_steps 45
+counter deliveries 134
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 14
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: crash reset a peer checks 2 passes 2
+cover net: partition checks 14 passes 14
+cover net: partition healed checks 14 passes 14
+cover net: partition injected checks 14 passes 14
+sample net-mid a1379c0f4b0be06d
+sample net-end 129a42ba7c78fcd5
+faults 14 0d439b60e85dca4e
+deliveries 80 e485f7e9c468ccd0
+  1002751 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  1002751 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  3001192 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  3001192 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  5130088 c core.ConnOpened{Conn:0x2, Peer:"a"}
+  5130088 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+
+case network/narrow-partition/seed3 seed 3
+steps 228
+rand_calls 422
+counter node_steps 134
+counter engine_steps 49
+counter sim_steps 45
+counter deliveries 134
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 13
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover net: crash reset a peer checks 2 passes 2
+cover net: partition checks 13 passes 13
+cover net: partition healed checks 13 passes 13
+cover net: partition injected checks 13 passes 13
+sample net-mid b60cb3be8250ff89
+sample net-end c5b12fbfe72937b5
+faults 13 feee217002f17882
+deliveries 80 97704f21845de90d
+  1003848 b core.ConnOpened{Conn:0x1, Peer:"a"}
+  1003848 a core.ConnectDone{Req:0x1, Conn:0x1, Err:0x0}
+  3004278 c core.ConnOpened{Conn:0x1, Peer:"b"}
+  3004278 b core.ConnectDone{Req:0x2, Conn:0x2, Err:0x0}
+  5004488 a core.ConnectDone{Req:0x3, Conn:0x2, Err:0x0}
+  5004488 c core.ConnOpened{Conn:0x2, Peer:"a"}
+

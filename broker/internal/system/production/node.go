@@ -15,7 +15,10 @@ import (
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
-	"github.com/manifesterio/mds/broker/internal/system/realclock"
+	"github.com/manifesterio/mds/dst/live"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/clock"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // NodeConfig is everything one broker process needs.
@@ -25,7 +28,7 @@ type NodeConfig struct {
 	Listener net.Listener
 
 	Objects      system.ObjectStore
-	ObjClassify  system.ErrorClassifier
+	ObjClassify  objectstore.Classifier
 	ControlPlane system.ControlPlane
 	CPClassify   system.ErrorClassifier
 
@@ -39,7 +42,7 @@ type NodeConfig struct {
 	DataInbox     int           // data queue capacity (1024)
 	Net           NetConfig
 	Exec          ExecConfig
-	Facts         func(core.Fact)
+	Facts         func(machine.Fact)
 	// OnIO, if set, sees every I/O action the broker issues, on the broker's
 	// loop goroutine, before it executes (used to pair segment keys with
 	// segment_sealed facts, see SegmentLog).
@@ -59,7 +62,7 @@ type Node struct {
 }
 
 // Start wires the broker to its adapters and runs it until Stop, Kill or a
-// failure. The returned Node's Wait gives system.Run's error.
+// failure. The returned Node's Wait gives live.Run's error.
 func Start(ctx context.Context, config NodeConfig) (*Node, error) {
 	if config.Listener == nil || config.Objects == nil || config.ControlPlane == nil {
 		return nil, errors.New("prod.Start: Listener, Objects and ControlPlane are required")
@@ -74,7 +77,7 @@ func Start(ctx context.Context, config NodeConfig) (*Node, error) {
 		return nil, err
 	}
 	rctx, kill := context.WithCancel(ctx)
-	in := system.NewInbox(config.DataInbox)
+	in := live.NewInbox[core.EventData](config.DataInbox)
 	if config.Lease != nil {
 		self := core.BrokerAddr{NodeID: bc.BrokerID, Host: bc.Host, Port: bc.Port}
 		go leaseLoop(rctx, in, config.Lease, self, config.LeaseInterval, config.Log)
@@ -92,13 +95,21 @@ func Start(ctx context.Context, config NodeConfig) (*Node, error) {
 	if config.Shutdown != nil {
 		go n.stopOn(config.Shutdown)
 	}
-	b := system.Dependencies{
-		Clock: realclock.New(), Objects: config.Objects, ControlPlane: config.ControlPlane, Connections: nt,
-		Classifier: exec.class, Env: env, Inbox: in, Facts: config.Facts,
-		Shutdown: n.stop, StopGrace: core.Duration(config.StopGrace),
+	self := machine.NodeInstance{Node: machine.NodeID(config.NodeID), Inc: machine.BootNumber(env.NewID())}
+	cfg := live.Config[core.EventData, core.Action]{
+		Self:      self,
+		New:       core.ContractFactory(broker.New(bc)),
+		Env:       env,
+		Boot:      func(self machine.NodeInstance) core.EventData { return core.NodeStarted{Self: self} },
+		StopMsg:   func(deadline machine.NodeTime) core.EventData { return core.StopRequest{Deadline: deadline} },
+		StopGrace: machine.Duration(config.StopGrace),
+		Clock:     clock.NewReal(),
+		Inbox:     in,
+		Class:     core.InboxKindOf,
+		Route:     system.Route(system.Host{Exec: ex, Connections: nt, Facts: config.Facts}),
+		Shutdown:  n.stop,
 	}
-	self := core.NodeInstance{Node: core.NodeID(config.NodeID), Inc: core.BootNumber(env.NewID())}
-	go n.run(rctx, b, ex, broker.New(bc), self, config.FlushGrace)
+	go n.run(rctx, cfg, config.FlushGrace)
 	return n, nil
 }
 
@@ -157,9 +168,9 @@ func (n *Node) stopOn(shutdown <-chan struct{}) {
 }
 
 // run drives the broker to its end, then closes the network and marks done.
-func (n *Node) run(ctx context.Context, b system.Dependencies, ex system.Executor, br core.MachineFactory, self core.NodeInstance, flush time.Duration) {
+func (n *Node) run(ctx context.Context, cfg live.Config[core.EventData, core.Action], flush time.Duration) {
 	defer close(n.done)
-	err := system.Run(ctx, b, ex, br, self)
+	err := live.Run(ctx, cfg)
 	grace := time.Duration(0)
 	if err == nil {
 		grace = flush // graceful exit: let the last answers reach the clients
@@ -181,9 +192,9 @@ func (n *Node) Kill() { n.kill() }
 // Done is closed when the broker has fully stopped.
 func (n *Node) Done() <-chan struct{} { return n.done }
 
-// Wait blocks until the broker has stopped and returns system.Run's result: nil
-// after a graceful exit, system.ErrStopped after Kill, system.ErrStoppedForRestart or
-// system.ErrKilledByRuntime otherwise.
+// Wait blocks until the broker has stopped and returns live.Run's result: nil
+// after a graceful exit, live.ErrStopped after Kill, live.ErrStoppedForRestart or
+// live.ErrKilled otherwise.
 func (n *Node) Wait() error {
 	<-n.done
 	return n.err

@@ -1,6 +1,6 @@
 // Package controlplane is the control-plane service tree. The binary
 // cmd/mdscontrolplane serves gRPC through server, which runs the replica and the
-// rebalance machine on internal/system/live. Brokers call the gRPC API
+// rebalance machine on dst/live. Brokers call the gRPC API
 // (api/controlplane/v1) with their own client.
 //
 // Tests sit next to the code they test. Two exceptions: the model conformance
@@ -10,7 +10,7 @@
 // # Generated files
 //
 // The .proto files in api/ are the source. make generate (buf, with the plugin
-// ops/tools/protoc-gen-mdswire) writes the *.pb.go files, contract/wire_types_gen.go,
+// ops/tools/protoc-gen-mdswire) writes the *.pb.go files, ../../contract/wire_types_gen.go,
 // domain/rebalance/wire_types_gen.go and wire/wire_gen.go. None of them is in
 // git, and the module does not compile without them. make build runs it first.
 //
@@ -21,8 +21,9 @@
 //   - api/controlplane/log/v1: the log entry.
 //   - api/controlplane/options/v1: custom options that say how a message becomes
 //     a contract value type (read by the plugin).
-//   - contract: the plain value types of every command, read and answer (mostly
-//     generated), and a few hand-written helpers.
+//   - ../../contract (outside this tree, public because the broker imports it): the
+//     plain value types of every command, read and answer (mostly generated), the
+//     sealed sums Operation and Response with their Tag and Fold, and ErrCode.
 //   - wire: the only place that converts contract types to and from the api
 //     messages. Nearly all generated (wire_gen.go). By hand: the error code table
 //     (errcode.go), the gRPC error of a failed call (rpcerror.go) and the group
@@ -40,7 +41,7 @@
 //   - metadb/engine: the ordered key-value interface under metadb.
 //     metadb/engine/memory and metadb/engine/pebble implement it.
 //   - replica: one node's copy of the replicated log: writer or standby,
-//     catch-up, checkpoint and restore. A dst sim.Process.
+//     catch-up, checkpoint and restore. A dst machine.Machine.
 //   - executor: runs the log and object-store calls that replica asks for. It
 //     owns the Log and ObjectStore ports. executor/dynamolog and executor/sqllog
 //     are the DynamoDB and Postgres logs; executor/logtest is their shared tests.
@@ -49,8 +50,8 @@
 //     status_handler.go.
 //   - controlplanemetrics: Prometheus instrumentation.
 //   - outside this tree: internal/runtime (event and value types, Clock),
-//     internal/system/live (the production runner of a dst process),
-//     internal/spec (the independent model), internal/verify/simulator (the
+//     dst/live (the production loop of a dst machine; it is in the dst module),
+//     spec (the independent model), internal/verify/simulator (the
 //     deterministic simulation, run by cmd/cpsim).
 //
 // # Mental model
@@ -75,7 +76,7 @@
 // are never stored. A writer that decides outcomes before it appends works from
 // stale state: that is the planted bug writer-offsets.
 //
-// The rebalance machine is a pure sim.Process-shaped state machine (Step takes
+// The rebalance machine is a pure dst machine.Machine state machine (Step takes
 // one input and returns outputs; time and chance come from the step context).
 // server.Node hosts it in a second live.Run loop beside the replica. Its log
 // writes and reads go to the replica as inputs, and the answers come back as
@@ -90,12 +91,12 @@
 //   - executor imports only runtime. dynamolog and sqllog import executor.
 //   - domain/rebalance imports contract and runtime, and the dst packages. It
 //     does not import replica or metadb.
-//   - internal/spec shares types with the code (contract, runtime) and never
+//   - spec (a public package) shares types with the code (contract) and never
 //     logic: it imports none of domain, metadb or engine.
 //
-// Time: all time comes from one interface, runtime.Clock, or from the step
-// context of a dst process. system/realclock is the production clock and
-// system/fakeclock the test one. The domain and server packages may not call
+// Time: all time comes from one interface, machine.Clock, or from the step
+// context of a dst process. shared/clock has the production
+// clock (Real) and the test clock (Fake). The domain and server packages may not call
 // time.Now, time.AfterFunc and the like.
 // The import rules are checked by architecture_test.go in this folder. The
 // deterministic packages are checked by ops/tools/determinismcheck

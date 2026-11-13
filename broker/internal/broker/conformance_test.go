@@ -4,25 +4,34 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
+	"pgregory.net/rapid"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker"
-	"github.com/manifesterio/mds/broker/internal/verify/speccheck/checker/runsettings"
+	"github.com/manifesterio/mds/broker/internal/verify/speccheck/conformance"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	brokerspec "github.com/manifesterio/mds/broker/spec"
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/check/spectest"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // Conformance C1 tests the REAL broker logic against SIMULATED fakes of the
 // world. The fakes are the speccheck spec object store and the speccheck spec
 // control plane, and the harness runs without faults. The test sends client
 // requests built with kafkawire. It compares every ack, fetch and ListOffsets
-// answer with one speccheck.Broker per topic partition.
+// answer with one brokerspec.Broker per topic partition.
+//
+// The check is a spectest.Lockstep. The spec side (c1Spec) keeps one
+// brokerspec.Broker for each topic partition and gives the answer that a correct
+// broker gives. The subject side (c1) sends the request to the real broker and
+// reads the answer. Both give a c1result, and equalC1 compares them.
 
-var c1TPs = []core.TopicPartition{core.NewTopicPartition("t", 0), core.NewTopicPartition("t", 1),
-	core.NewTopicPartition("u", 0), core.NewTopicPartition("u", 1), core.NewTopicPartition("u", 2)}
+var c1TPs = []core.TopicPartition{contract.NewTopicPartition("t", 0), contract.NewTopicPartition("t", 1),
+	contract.NewTopicPartition("u", 0), contract.NewTopicPartition("u", 1), contract.NewTopicPartition("u", 2)}
 
 // An Idem entry carries a producer id. The broker refuses these entries
 // (decision 41), so the test expects an error and no new record.
@@ -31,9 +40,11 @@ type c1ent struct {
 	Idem                   bool
 }
 
+// c1op is one operation. It has no tag: both sides count the operations, and
+// the n-th operation makes its record values from the number n (so every
+// value is unique).
 type c1op struct {
 	Kind                string // produce, fetch, list
-	Tag                 int    // makes values unique
 	Conn                int
 	Ents                []c1ent
 	TopicPartitionIndex int
@@ -42,15 +53,234 @@ type c1op struct {
 	Last                bool // list: latest, else earliest
 }
 
-type c1 struct {
-	t       *testing.T
-	h       *harness
-	conns   []*client
-	model   map[core.TopicPartition]*speccheck.Broker
-	corrupt bool
+// c1produced is the answer to one entry of a produce request.
+type c1produced struct {
+	TopicPartition core.TopicPartition
+	Err            kafkaErrorCode
+	Base           core.Offset
 }
 
-func newC1(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) *c1 {
+// c1record is one record of a fetch answer.
+type c1record struct {
+	Offset core.Offset
+	Value  string
+}
+
+// c1result is the answer to one operation. Only the fields of its Kind are
+// used.
+type c1result struct {
+	Kind string
+
+	// produce: one answer for each entry, in request order.
+	Produced []c1produced
+
+	// fetch. The spec side fills Log with the value of every record of the
+	// partition (by offset). The subject side fills Records with the records
+	// of the batches it got, and Batches, and Problem when the batches are not
+	// well formed (a bad CRC, a gap, or a first batch that does not hold From).
+	TopicPartition core.TopicPartition
+	From           core.Offset
+	Small          bool
+	HWM            int64
+	LSO            int64
+	LogStart       int64
+	Err            kafkaErrorCode
+	Log            []string
+	Batches        int
+	Records        []c1record
+	Problem        string
+
+	// list: the offset that ListOffsets gave.
+	ListOffset int64
+}
+
+// c1entry is one entry of a produce request: a topic partition and values.
+type c1entry struct {
+	index int // into c1TPs
+	vals  []string
+	idem  bool
+}
+
+// c1entries makes the entries of a produce operation. A topic partition that
+// comes twice is used once. n is the number of the operation.
+func c1entries(operation c1op, n int) []c1entry {
+	var out []c1entry
+	seen := map[int]bool{}
+	for j, ce := range operation.Ents {
+		ti := ce.TopicPartitionIndex % len(c1TPs)
+		if seen[ti] {
+			continue
+		}
+		seen[ti] = true
+		var vals []string
+		for k := range ce.N%3 + 1 {
+			vals = append(vals, fmt.Sprintf("%d.%d.%d", n, j, k))
+		}
+		out = append(out, c1entry{index: ti, vals: vals, idem: ce.Idem})
+	}
+	return out
+}
+
+// c1Spec is the spec side of C1.
+type c1Spec struct {
+	model map[core.TopicPartition]*brokerspec.Broker
+	calls int
+}
+
+func newC1Spec() *c1Spec {
+	s := &c1Spec{model: map[core.TopicPartition]*brokerspec.Broker{}}
+	for _, topicPartition := range c1TPs {
+		s.model[topicPartition] = &brokerspec.Broker{}
+	}
+	return s
+}
+
+// StateHash folds the state hash of every partition.
+func (s *c1Spec) StateHash() uint64 {
+	h := trace.New()
+	for _, topicPartition := range c1TPs {
+		h.Uint64(s.model[topicPartition].StateHash())
+	}
+	return uint64(h)
+}
+
+// Apply gives the answer of a correct broker, and updates the model.
+func (s *c1Spec) Apply(operation c1op) c1result {
+	n := s.calls
+	s.calls++
+	switch operation.Kind {
+	case "produce":
+		return s.produce(operation, n)
+	case "fetch":
+		return s.fetch(operation)
+	}
+	return s.list(operation)
+}
+
+func (s *c1Spec) produce(operation c1op, n int) c1result {
+	result := c1result{Kind: "produce"}
+	for _, e := range c1entries(operation, n) {
+		topicPartition := c1TPs[e.index]
+		m := s.model[topicPartition]
+		if e.idem {
+			result.Produced = append(result.Produced, c1produced{TopicPartition: topicPartition, Err: errInvalidRequest, Base: -1})
+			continue
+		}
+		result.Produced = append(result.Produced, c1produced{TopicPartition: topicPartition, Base: m.HighWatermark()})
+		for _, v := range e.vals {
+			m.Append([][]byte{[]byte(v)})
+		}
+	}
+	return result
+}
+
+func (s *c1Spec) fetch(operation c1op) c1result {
+	topicPartition := c1TPs[operation.TopicPartitionIndex%len(c1TPs)]
+	m := s.model[topicPartition]
+	hwm := m.HighWatermark()
+	from := core.Offset(operation.From % int(hwm+2)) // hwm+1 is out of range
+	result := c1result{Kind: "fetch", TopicPartition: topicPartition, From: from, Small: operation.Small, HWM: int64(hwm)}
+	if from > hwm {
+		result.Err = errOffsetOutOfRange
+		return result
+	}
+	result.LSO = int64(hwm)
+	records, _ := m.Read(0, 0)
+	for _, r := range records {
+		result.Log = append(result.Log, string(r.Value))
+	}
+	return result
+}
+
+func (s *c1Spec) list(operation c1op) c1result {
+	topicPartition := c1TPs[operation.TopicPartitionIndex%len(c1TPs)]
+	result := c1result{Kind: "list", TopicPartition: topicPartition}
+	if operation.Last {
+		result.ListOffset = int64(s.model[topicPartition].HighWatermark())
+	}
+	return result
+}
+
+// equalC1 compares the answer of the spec with the answer of the broker.
+func equalC1(want, got c1result) error {
+	if want.Kind != got.Kind {
+		return fmt.Errorf("the answer is a %s answer, but a %s answer was expected", got.Kind, want.Kind)
+	}
+	switch want.Kind {
+	case "produce":
+		if !slices.Equal(want.Produced, got.Produced) {
+			return fmt.Errorf("produce: the acks are %+v, want %+v", got.Produced, want.Produced)
+		}
+		return nil
+	case "fetch":
+		return equalFetch(want, got)
+	}
+	if want.ListOffset != got.ListOffset || want.Err != got.Err {
+		return fmt.Errorf("list %v: error %d offset %d, want error %d offset %d",
+			want.TopicPartition, got.Err, got.ListOffset, want.Err, want.ListOffset)
+	}
+	return nil
+}
+
+// equalFetch compares two fetch answers. The broker may return fewer records
+// than the spec has (a fetch with a small partition limit returns one batch),
+// but the records it returns must be the right ones.
+func equalFetch(want, got c1result) error {
+	where := fmt.Sprintf("fetch %v@%d", want.TopicPartition, want.From)
+	if got.From != want.From {
+		return fmt.Errorf("%s: the test asked for the offset %d", where, got.From)
+	}
+	if got.HWM != want.HWM {
+		return fmt.Errorf("%s: hwm %d, want %d", where, got.HWM, want.HWM)
+	}
+	if got.Err != want.Err {
+		return fmt.Errorf("%s: error %d, want %d (hwm %d)", where, got.Err, want.Err, want.HWM)
+	}
+	if want.Err != errNone {
+		return nil
+	}
+	if got.LSO != want.LSO || got.LogStart != want.LogStart {
+		return fmt.Errorf("%s: lso %d log start %d, want lso %d log start 0", where, got.LSO, got.LogStart, want.LSO)
+	}
+	if got.Problem != "" {
+		return fmt.Errorf("%s: %s", where, got.Problem)
+	}
+	if int64(want.From) == want.HWM {
+		if got.Batches != 0 {
+			return fmt.Errorf("%s: returned %d batches at the hwm", where, got.Batches)
+		}
+		return nil
+	}
+	if got.Batches == 0 || want.Small && got.Batches != 1 || len(got.Records) == 0 {
+		return fmt.Errorf("%s small=%v: %d batches with %d records", where, want.Small, got.Batches, len(got.Records))
+	}
+	for _, r := range got.Records {
+		if int(r.Offset) >= len(want.Log) {
+			return fmt.Errorf("%s: offset %d is beyond the spec hwm %d", where, r.Offset, want.HWM)
+		}
+		if w := want.Log[r.Offset]; r.Value != w {
+			return fmt.Errorf("%s: offset %d value %q, want %q", where, r.Offset, r.Value, w)
+		}
+	}
+	if last := got.Records[len(got.Records)-1].Offset + 1; !want.Small && int64(last) != want.HWM {
+		return fmt.Errorf("%s: stopped at %d, hwm %d", where, last, want.HWM)
+	}
+	return nil
+}
+
+// c1 is the subject side of C1: the real broker in the harness.
+type c1 struct {
+	t       testT
+	h       *harness
+	conns   []*client
+	corrupt bool
+	calls   int
+	// seen is the end offset of each partition, from the acks of the broker.
+	// The test needs it to choose the offset of a fetch.
+	seen map[core.TopicPartition]core.Offset
+}
+
+func newC1(t testT, bug InjectedBug, corrupt bool, tune func(*Config)) *c1 {
 	config := DefaultConfig()
 	config.InjectedBug = bug
 	if tune != nil {
@@ -59,20 +289,17 @@ func newC1(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) *c1 
 	h := newHarness(t, config)
 	h.cp.CreateTopic("u", 3)
 	h.do(core.NodeStarted{Self: h.self})
-	s := &c1{t: t, h: h, model: map[core.TopicPartition]*speccheck.Broker{}, corrupt: corrupt}
-	for _, topicPartition := range c1TPs {
-		s.model[topicPartition] = &speccheck.Broker{}
-	}
+	s := &c1{t: t, h: h, corrupt: corrupt, seen: map[core.TopicPartition]core.Offset{}}
 	s.conns = []*client{h.open(1), h.open(2)}
 	if corrupt { // every third GET comes back with a flipped byte
 		gets := 0
 		h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
 			d := run()
-			if g, ok := d.(core.ObjectGetDone); ok && g.Err == core.OK && len(g.Data) > 0 {
+			if g, ok := getDone(d); ok && g.Err == core.OK && len(g.Data) > 0 {
 				if gets++; gets%3 == 0 {
 					g.Data = bytes.Clone(g.Data)
 					g.Data[len(g.Data)-1] ^= 0x55
-					return g
+					return core.ObjectDone{Result: g}
 				}
 			}
 			return d
@@ -95,165 +322,123 @@ func (s *c1) await(c *client) (kmsg.Response, error) {
 	return s.h.next(c), nil
 }
 
-func (s *c1) step(operation c1op) error {
-	c := s.conns[operation.Conn%len(s.conns)]
-	switch operation.Kind {
-	case "produce":
-		return s.produce(c, operation)
-	case "fetch":
-		return s.fetch(c, operation)
-	}
-	return s.list(c, operation)
-}
-
 // await2 sends req and awaits the response.
 func (s *c1) await2(c *client, ver int16, request kmsg.Request) (kmsg.Response, error) {
 	s.h.send(c, ver, request)
 	return s.await(c)
 }
 
-type expect struct {
-	err  kafkaErrorCode
-	base core.Offset
-	add  [][]byte // appended to the model on success
-	ti   int
+// Apply sends the operation to the broker and returns the answer. The error
+// means that no answer came back.
+func (s *c1) Apply(operation c1op) (c1result, error) {
+	n := s.calls
+	s.calls++
+	c := s.conns[operation.Conn%len(s.conns)]
+	switch operation.Kind {
+	case "produce":
+		return s.produce(c, operation, n)
+	case "fetch":
+		return s.fetch(c, operation)
+	}
+	return s.list(c, operation)
 }
 
-func (s *c1) produce(c *client, operation c1op) error {
+func (s *c1) produce(c *client, operation c1op, n int) (c1result, error) {
 	var ents []ent
-	var exps []expect
-	seen := map[int]bool{}
-	for j, ce := range operation.Ents {
-		ti := ce.TopicPartitionIndex % len(c1TPs)
-		if seen[ti] {
-			continue
+	entries := c1entries(operation, n)
+	for _, e := range entries {
+		topicPartition := c1TPs[e.index]
+		raw := plain(s.t, e.vals...)
+		if e.idem {
+			raw = mkBatch(s.t, int64(1000+e.index), 0, 0, e.vals...)
 		}
-		seen[ti] = true
-		topicPartition := c1TPs[ti]
-		m := s.model[topicPartition]
-		var vals []string
-		for k := range ce.N%3 + 1 {
-			vals = append(vals, fmt.Sprintf("%d.%d.%d", operation.Tag, j, k))
-		}
-		x := expect{ti: ti}
-		raw := plain(s.t, vals...)
-		if ce.Idem {
-			raw = mkBatch(s.t, int64(1000+j), 0, 0, vals...)
-			x.err, x.base = errInvalidRequest, -1
-		} else {
-			x.base = m.HighWatermark()
-			for _, v := range vals {
-				x.add = append(x.add, []byte(v))
-			}
-		}
-		ents = append(ents, e(topicPartition.Topic, topicPartition.Partition, raw))
-		exps = append(exps, x)
+		ents = append(ents, ent{topicPartition: topicPartition, rec: raw})
 	}
+	result := c1result{Kind: "produce"}
 	if len(ents) == 0 {
-		return nil
+		return result, nil
 	}
 	r, err := s.await2(c, verProduce, prodReq(-1, ents...))
 	if err != nil {
-		return err
+		return result, err
 	}
-	got := produced(r)
-	if len(got) != len(exps) {
-		return fmt.Errorf("produce: %d results for %d entries", len(got), len(exps))
-	}
-	for i, x := range exps {
-		topicPartition := c1TPs[x.ti]
-		if kafkaErrorCode(got[i].ErrorCode) != x.err || got[i].BaseOffset != int64(x.base) {
-			return fmt.Errorf("produce %v: error %d base %d, want error %d base %d (model hwm %d)",
-				topicPartition, got[i].ErrorCode, got[i].BaseOffset, x.err, x.base, s.model[topicPartition].HighWatermark())
+	for i, got := range produced(r) {
+		answer := c1produced{Err: kafkaErrorCode(got.ErrorCode), Base: core.Offset(got.BaseOffset)}
+		if i < len(entries) {
+			answer.TopicPartition = c1TPs[entries[i].index]
+			if got.ErrorCode == 0 {
+				s.seen[answer.TopicPartition] = answer.Base + core.Offset(len(entries[i].vals))
+			}
 		}
-		if len(x.add) > 0 {
-			s.model[topicPartition].Append(x.add)
-		}
+		result.Produced = append(result.Produced, answer)
 	}
-	return nil
+	return result, nil
 }
 
-func (s *c1) fetch(c *client, operation c1op) error {
+func (s *c1) fetch(c *client, operation c1op) (c1result, error) {
 	topicPartition := c1TPs[operation.TopicPartitionIndex%len(c1TPs)]
-	m := s.model[topicPartition]
-	hwm := m.HighWatermark()
-	from := core.Offset(operation.From % int(hwm+2)) // hwm+1 is out of range
+	from := core.Offset(operation.From % int(s.seen[topicPartition]+2))
 	max := int32(1 << 20)
 	if operation.Small {
 		max = 1
 	}
 	r, err := s.await2(c, verFetch, fetchReq(topicPartition, int64(from), max))
 	if err != nil {
-		return err
+		return c1result{}, err
 	}
 	p := fetched(r)
-	if p.HighWatermark != int64(hwm) {
-		return fmt.Errorf("fetch %v@%d: hwm %d, want %d", topicPartition, from, p.HighWatermark, hwm)
+	result := c1result{Kind: "fetch", TopicPartition: topicPartition, From: from, Small: operation.Small,
+		HWM: p.HighWatermark, LSO: p.LastStableOffset, LogStart: p.LogStartOffset, Err: kafkaErrorCode(p.ErrorCode)}
+	if result.Err == errNone {
+		s.readBatches(&result, p.RecordBatches)
 	}
-	if from > hwm {
-		if kafkaErrorCode(p.ErrorCode) != errOffsetOutOfRange {
-			return fmt.Errorf("fetch %v@%d beyond hwm %d: error %d", topicPartition, from, hwm, p.ErrorCode)
-		}
-		return nil
-	}
-	if p.ErrorCode != 0 || p.LastStableOffset != int64(hwm) || p.LogStartOffset != 0 {
-		return fmt.Errorf("fetch %v@%d: error %d lso %d log start %d", topicPartition, from, p.ErrorCode, p.LastStableOffset, p.LogStartOffset)
-	}
-	bs, err := kafkawire.SplitBatches(p.RecordBatches)
+	return result, nil
+}
+
+// readBatches reads the batches of a fetch answer into result.
+func (s *c1) readBatches(result *c1result, data []byte) {
+	bs, err := kafkawire.SplitBatches(data)
 	if err != nil {
-		return fmt.Errorf("fetch %v@%d: %w", topicPartition, from, err)
+		result.Problem = err.Error()
+		return
 	}
-	if from == hwm {
-		if len(bs) != 0 {
-			return fmt.Errorf("fetch %v@hwm %d returned %d batches", topicPartition, hwm, len(bs))
-		}
-		return nil
-	}
-	if len(bs) == 0 || operation.Small && len(bs) != 1 {
-		return fmt.Errorf("fetch %v@%d small=%v: %d batches", topicPartition, from, operation.Small, len(bs))
-	}
+	result.Batches = len(bs)
 	next := core.Offset(-1)
 	for _, b := range bs {
 		bt, err := kafkawire.ParseBatch(b) // verifies the CRC
 		if err != nil {
-			return fmt.Errorf("fetch %v@%d: %w", topicPartition, from, err)
+			result.Problem = err.Error()
+			return
 		}
 		recs, err := bt.Records()
 		if err != nil {
-			return fmt.Errorf("fetch %v@%d: %w", topicPartition, from, err)
+			result.Problem = err.Error()
+			return
 		}
 		base := core.Offset(bt.BaseOffset)
 		if next < 0 { // the first batch is the one containing from
 			next = base
-			if base > from || base+core.Offset(len(recs)) <= from {
-				return fmt.Errorf("fetch %v@%d: first batch is [%d,%d)", topicPartition, from, base, base+core.Offset(len(recs)))
+			if base > result.From || base+core.Offset(len(recs)) <= result.From {
+				result.Problem = fmt.Sprintf("first batch is [%d,%d)", base, base+core.Offset(len(recs)))
+				return
 			}
 		}
 		if base != next {
-			return fmt.Errorf("fetch %v@%d: batch at %d, want %d (offsets not contiguous)", topicPartition, from, base, next)
-		}
-		want, _ := m.Read(base, len(recs))
-		if len(want) != len(recs) {
-			return fmt.Errorf("fetch %v@%d: batch [%d,+%d) beyond model hwm %d", topicPartition, from, base, len(recs), hwm)
+			result.Problem = fmt.Sprintf("batch at %d, want %d (offsets not contiguous)", base, next)
+			return
 		}
 		for i, rec := range recs {
-			if string(rec.Value) != string(want[i].Value) {
-				return fmt.Errorf("fetch %v@%d: offset %d value %q, want %q", topicPartition, from, base+core.Offset(i), rec.Value, want[i].Value)
-			}
+			result.Records = append(result.Records, c1record{Offset: base + core.Offset(i), Value: string(rec.Value)})
 		}
 		next = base + core.Offset(len(recs))
 	}
-	if !operation.Small && next != hwm {
-		return fmt.Errorf("fetch %v@%d: stopped at %d, hwm %d", topicPartition, from, next, hwm)
-	}
-	return nil
 }
 
-func (s *c1) list(c *client, operation c1op) error {
+func (s *c1) list(c *client, operation c1op) (c1result, error) {
 	topicPartition := c1TPs[operation.TopicPartitionIndex%len(c1TPs)]
-	ts, want := int64(-2), core.Offset(0)
+	ts := int64(-2)
 	if operation.Last {
-		ts, want = -1, s.model[topicPartition].HighWatermark()
+		ts = -1
 	}
 	q := kmsg.NewPtrListOffsetsRequest()
 	q.ReplicaID = -1
@@ -261,13 +446,10 @@ func (s *c1) list(c *client, operation c1op) error {
 		{Partition: topicPartition.Partition, Timestamp: ts, CurrentLeaderEpoch: -1}}}}
 	r, err := s.await2(c, verList, q)
 	if err != nil {
-		return err
+		return c1result{}, err
 	}
 	p := r.(*kmsg.ListOffsetsResponse).Topics[0].Partitions[0]
-	if p.ErrorCode != 0 || p.Offset != int64(want) {
-		return fmt.Errorf("list %v ts %d: error %d offset %d, want %d", topicPartition, ts, p.ErrorCode, p.Offset, want)
-	}
-	return nil
+	return c1result{Kind: "list", TopicPartition: topicPartition, Err: kafkaErrorCode(p.ErrorCode), ListOffset: p.Offset}, nil
 }
 
 func (s *c1) invariant() error {
@@ -282,78 +464,50 @@ func (s *c1) invariant() error {
 	return nil
 }
 
-func genC1(r *checker.Rand, i int) c1op {
-	operation := c1op{Tag: i, Conn: r.Intn(2), TopicPartitionIndex: r.Intn(len(c1TPs)), From: r.Intn(1 << 10), Small: r.Intn(4) == 0, Last: r.Intn(2) == 0}
-	switch k := r.Intn(20); {
-	case k < 12:
-		operation.Kind = "produce"
-		for n := 1 + r.Intn(2); n > 0; n-- {
-			e := c1ent{TopicPartitionIndex: r.Intn(len(c1TPs)), N: r.Intn(3), Idem: r.Intn(5) == 0}
-			operation.Ents = append(operation.Ents, e)
-		}
-	case k < 17:
-		operation.Kind = "fetch"
-	default:
-		operation.Kind = "list"
-	}
-	return operation
-}
-
-func shrinkC1(operation c1op) []c1op {
-	var out []c1op
-	if len(operation.Ents) > 1 {
-		c := operation
-		c.Ents = operation.Ents[:1]
-		out = append(out, c)
-	}
-	return out
-}
-
-func c1Check(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config)) checker.SpecChecker[*c1, c1op] {
-	return checker.SpecChecker[*c1, c1op]{
-		Name: "c1op", Ops: 80, MaxShrinkRuns: 300,
-		New:       func() *c1 { return newC1(t, bug, corrupt, tune) },
-		Gen:       genC1,
-		Step:      func(s *c1, operation c1op) error { return s.step(operation) },
-		Invariant: func(s *c1) error { return s.invariant() },
-		Shrink:    shrinkC1,
-		Format:    func(operation c1op) string { return fmt.Sprintf("%#v", operation) },
-	}
-}
-
-// c1Fail runs the seeds that o chooses and returns the first failure, or nil
-// if every seed passes. An injected-bug test needs the failure as a value, so it
-// cannot use checker.Run, which reports the failure to the test itself.
-func c1Fail(t *testing.T, bug InjectedBug, corrupt bool, tune func(*Config), o checker.Options) *checker.Failure[c1op] {
-	c := c1Check(t, bug, corrupt, tune)
-	try := func(seed uint64) *checker.Failure[c1op] {
-		f := c.RunSeed(seed)
-		if f != nil {
-			replay := ""
-			if o.Replay != nil {
-				replay = o.Replay(seed)
+// genC1 draws one operation. The kinds have the weights 12 : 5 : 3 (produce,
+// fetch, list). It uses the fair draws of the conformance package, so the
+// weights are the real chances.
+func genC1() *rapid.Generator[c1op] {
+	return conformance.Custom(func(r conformance.Rand) c1op {
+		operation := c1op{Conn: r.Intn(2), TopicPartitionIndex: r.Intn(len(c1TPs)), From: r.Intn(1 << 10), Small: r.Intn(4) == 0, Last: r.Intn(2) == 0}
+		switch k := r.Intn(20); {
+		case k < 12:
+			operation.Kind = "produce"
+			for n := 1 + r.Intn(2); n > 0; n-- {
+				e := c1ent{TopicPartitionIndex: r.Intn(len(c1TPs)), N: r.Intn(3), Idem: r.Intn(5) == 0}
+				operation.Ents = append(operation.Ents, e)
 			}
-			t.Log(c.Report(f, replay))
+		case k < 17:
+			operation.Kind = "fetch"
+		default:
+			operation.Kind = "list"
 		}
-		return f
-	}
-	if o.Seed >= 0 {
-		return try(uint64(o.Seed))
-	}
-	for seed := uint64(1); ; seed++ {
-		if o.Stop != nil && o.Stop() || o.Stop == nil && seed > uint64(o.Seeds) {
-			return nil
-		}
-		if f := try(seed); f != nil {
-			return f
-		}
+		return operation
+	})
+}
+
+// c1Lockstep builds the C1 check. bug is the planted bug of the broker (none
+// for the real one). corrupt makes every third GET of the fake object store
+// return a flipped byte. checks is the number of checks.
+func c1Lockstep(bug InjectedBug, corrupt bool, tune func(*Config), checks int) spectest.Lockstep[c1op, c1result, *c1] {
+	return spectest.Lockstep[c1op, c1result, *c1]{
+		Name:          "c1op",
+		NewSpec:       func() spectest.Spec[c1op, c1result] { return newC1Spec() },
+		NewSubject:    func(t *rapid.T) *c1 { return newC1(t, bug, corrupt, tune) },
+		Ops:           genC1(),
+		Equal:         equalC1,
+		Invariant:     (*c1).invariant,
+		Format:        func(operation c1op) string { return fmt.Sprintf("%#v", operation) },
+		Rerun:         spectest.Rerun{EnvPrefix: conformance.EnvPrefix},
+		Checks:        checks,
+		StepsPerCheck: 80,
 	}
 }
 
 func TestConformanceBroker(t *testing.T) {
 	for _, corrupt := range []bool{false, true} {
 		t.Run(fmt.Sprintf("corruptGets=%v", corrupt), func(t *testing.T) {
-			checker.Run(t, c1Check(t, InjectedBugNone, corrupt, nil), runsettings.Options(t, 100))
+			c1Lockstep(InjectedBugNone, corrupt, nil, 100).Check(t)
 		})
 	}
 }
@@ -372,14 +526,15 @@ func TestConformanceBrokerSmallSegments(t *testing.T) {
 	for _, name := range []string{"bytes", "batches", "partitions", "all"} {
 		for _, corrupt := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/corruptGets=%v", name, corrupt), func(t *testing.T) {
-				checker.Run(t, c1Check(t, InjectedBugNone, corrupt, caps[name]), runsettings.Options(t, 50))
+				c1Lockstep(InjectedBugNone, corrupt, caps[name], 50).Check(t)
 			})
 		}
 	}
 }
 
-// This test shows that the C1 comparison can fail. Each injected bug below
-// changes something the harness can observe, so C1 must catch it.
+// This test shows that the C1 comparison can fail. Each planted bug below
+// changes something the harness can observe, so C1 must catch it. A run with no
+// bug must not fail on the same seeds.
 //
 // C1 cannot catch the other injected bugs, because the client cannot see them
 // in a fault-free run. The simulator tests in internal/verify/simulator/kafka catch
@@ -396,20 +551,28 @@ func TestConformanceBrokerSmallSegments(t *testing.T) {
 //   - InjectedBugSkipProduceCRC matters only for a corrupt produce batch, and the C1
 //     generator sends only valid batches. TestSkipProduceCRCMutantAcksCorruptBatch
 //     and the sim invariant "committed batch is intact" must catch it.
-func TestConformanceBrokerCatchesMutants(t *testing.T) {
-	for _, m := range []struct {
-		name    string
+func TestConformanceBrokerCatchesPlantedBugs(t *testing.T) {
+	const budget = 20
+	planted := map[spectest.Bug]struct {
 		bug     InjectedBug
 		corrupt bool
 	}{
-		{"BugWrongOffset", InjectedBugWrongOffset, false},
-		{"BugServeCorrupt", InjectedBugServeCorrupt, true},
-		{"BugEarlyAck", InjectedBugEarlyAck, false},
-	} {
-		t.Run(m.name, func(t *testing.T) {
-			if c1Fail(t, m.bug, m.corrupt, nil, runsettings.Options(t, 20)) == nil {
-				t.Fatalf("the C1 comparison did not catch %s in 20 seeds.", m.name)
-			}
+		"BugWrongOffset":  {InjectedBugWrongOffset, false},
+		"BugServeCorrupt": {InjectedBugServeCorrupt, true},
+		"BugEarlyAck":     {InjectedBugEarlyAck, false},
+	}
+	bugs := []spectest.Bug{"BugWrongOffset", "BugServeCorrupt", "BugEarlyAck"}
+	spectest.RequireCaught(t, bugs, budget, func(name spectest.Bug, seed uint64) bool {
+		m := planted[name]
+		f := c1Lockstep(m.bug, m.corrupt, nil, 0).RunSeed(seed)
+		if f != nil {
+			t.Logf("%s, seed %d, shrunk to %d steps: %s", name, seed, len(f.Steps), f.Message)
+		}
+		return f != nil
+	})
+	for _, corrupt := range []bool{false, true} {
+		spectest.RequireClean(t, budget, func(seed uint64) bool {
+			return c1Lockstep(InjectedBugNone, corrupt, nil, 0).RunSeed(seed) != nil
 		})
 	}
 }

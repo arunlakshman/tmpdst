@@ -1,0 +1,590 @@
+case controlplane/clean/seed1 seed 1
+steps 210
+rand_calls 476
+counter node_steps 128
+counter engine_steps 65
+counter sim_steps 2
+counter deliveries 128
+counter dropped_stale 15
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+sample topics b07bd3d174b10384
+sample mid c232be966272a664
+sample recovering f285080638d1e45d
+sample end 376d3b4c76944a98
+sample spec 7e2c827f64f6acbd
+faults 0 a8c7f832281a39c5
+deliveries 63 4e1abf34f598ad85
+  4514423 b core.ControlPlaneDone{Req:0x1, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:3, Count:1, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  4969204 a core.ControlPlaneDone{Req:0x2, Resp:contract.DescribeTopicsResp{Topics:[]contract.TopicInfo{contract.TopicInfo{Name:"t", Partitions:2}, contract.TopicInfo{Name:"u", Partitions:1}}}, Err:0x0, Outcome:0x0}
+  6828007 b core.ControlPlaneDone{Req:0x3, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+  7126197 a core.ControlPlaneDone{Req:0x4, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+  7937710 b core.ControlPlaneDone{Req:0x5, Resp:contract.DescribeTopicsResp{Topics:[]contract.TopicInfo{contract.TopicInfo{Name:"t", Partitions:2}, contract.TopicInfo{Name:"u", Partitions:1}}}, Err:0x0, Outcome:0x0}
+  9072320 a core.ControlPlaneDone{Req:0x6, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}, End:2}, Err:0x0, Outcome:0x0}
+
+case controlplane/clean/seed2 seed 2
+steps 206
+rand_calls 475
+counter node_steps 124
+counter engine_steps 65
+counter sim_steps 2
+counter deliveries 124
+counter dropped_stale 15
+counter dropped_by_crash 3
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+sample topics b07bd3d174b10384
+sample mid 152710fd80dab84a
+sample recovering ecb890fa3cd03c1a
+sample end 64d9a289f1ca641b
+sample spec b7d1f7ba40b554b5
+faults 0 a8c7f832281a39c5
+deliveries 59 821d196af9f5f45d
+  3178813 a core.ControlPlaneDone{Req:0x0, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  4030335 b core.ControlPlaneDone{Req:0x1, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  5134338 a core.ControlPlaneDone{Req:0x2, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  5553371 b core.ControlPlaneDone{Req:0x3, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  7794728 a core.ControlPlaneDone{Req:0x4, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:2, Count:1, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  8303872 b core.ControlPlaneDone{Req:0x5, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+
+case controlplane/clean/seed3 seed 3
+steps 206
+rand_calls 475
+counter node_steps 124
+counter engine_steps 65
+counter sim_steps 2
+counter deliveries 124
+counter dropped_stale 15
+counter dropped_by_crash 3
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+sample topics b07bd3d174b10384
+sample mid fc4f96213ea69c0f
+sample recovering cf58643798639294
+sample end d42f8f09d9e1484f
+sample spec 844a3cef34318326
+faults 0 a8c7f832281a39c5
+deliveries 59 f31a92f8e78f78c6
+  3239766 a core.ControlPlaneDone{Req:0x0, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:2, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  3516721 b core.ControlPlaneDone{Req:0x1, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  4997646 a core.ControlPlaneDone{Req:0x2, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  6107069 b core.ControlPlaneDone{Req:0x3, Resp:contract.DescribeTopicsResp{Topics:[]contract.TopicInfo{contract.TopicInfo{Name:"t", Partitions:2}, contract.TopicInfo{Name:"u", Partitions:1}}}, Err:0x0, Outcome:0x0}
+  7162600 a core.ControlPlaneDone{Req:0x4, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+  8389046 a core.ControlPlaneDone{Req:0x6, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+
+case controlplane/faulty/seed1 seed 1
+steps 181
+rand_calls 617
+counter node_steps 125
+counter engine_steps 39
+counter sim_steps 2
+counter deliveries 125
+counter dropped_stale 15
+counter dropped_by_crash 5
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 32
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp 503 injected checks 24 passes 24
+cover cp lost response injected checks 3 passes 3
+cover cp outage started checks 1 passes 1
+cover cp timed-out op applied checks 2 passes 1
+cover cp timed-out op not applied checks 2 passes 1
+cover cp timeout injected checks 4 passes 4
+sample topics b07bd3d174b10384
+sample mid f36546d6a8d445f6
+sample recovering 9bb3c438f71241c7
+sample end b606c4e1b38d81f3
+sample spec 2141bcec933de6e4
+faults 32 8bb9f1a26faada45
+deliveries 60 e5b3b81b4cd7ef9c
+  3134405 a core.ControlPlaneDone{Req:0x0, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  3329821 b core.ControlPlaneDone{Req:0x1, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:1, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  4957386 a core.ControlPlaneDone{Req:0x2, Resp:contract.DescribeTopicsResp{Topics:[]contract.TopicInfo{contract.TopicInfo{Name:"t", Partitions:2}, contract.TopicInfo{Name:"u", Partitions:1}}}, Err:0x0, Outcome:0x0}
+  8663864 b core.ControlPlaneDone{Req:0x5, Resp:contract.DescribeTopicsResp{Topics:[]contract.TopicInfo{contract.TopicInfo{Name:"t", Partitions:2}, contract.TopicInfo{Name:"u", Partitions:1}}}, Err:0x0, Outcome:0x0}
+  8842714 a core.ControlPlaneDone{Req:0x6, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  11076729 a core.ControlPlaneDone{Req:0x8, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:1, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}, End:1}, Err:0x0, Outcome:0x0}
+
+case controlplane/faulty/seed2 seed 2
+steps 190
+rand_calls 643
+counter node_steps 122
+counter engine_steps 51
+counter sim_steps 2
+counter deliveries 122
+counter dropped_stale 15
+counter dropped_by_crash 6
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 17
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp 503 injected checks 5 passes 5
+cover cp lost response injected checks 5 passes 5
+cover cp timed-out op applied checks 1 passes 0
+cover cp timed-out op not applied checks 1 passes 1
+cover cp timeout injected checks 7 passes 7
+sample topics b07bd3d174b10384
+sample mid f9ec659fe81901e8
+sample recovering 9912b897085566d5
+sample end e7e2ad910c11d523
+sample spec a81818e1ce9361fc
+faults 17 442e94c0eaf29098
+deliveries 57 58a8db9825171ba7
+  4129103 b core.ControlPlaneDone{Req:0x1, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  5080573 a core.ControlPlaneDone{Req:0x2, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  5821563 b core.ControlPlaneDone{Req:0x3, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  6716033 a core.ControlPlaneDone{Req:0x4, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:2, Count:1, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  8872766 a core.ControlPlaneDone{Req:0x6, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  14498242 b core.ControlPlaneDone{Req:0xb, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:2, Count:1, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:3, Count:3, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}, End:6}, Err:0x0, Outcome:0x0}
+
+case controlplane/faulty/seed3 seed 3
+steps 166
+rand_calls 597
+counter node_steps 122
+counter engine_steps 27
+counter sim_steps 2
+counter deliveries 122
+counter dropped_stale 15
+counter dropped_by_crash 8
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 43
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp 503 injected checks 37 passes 37
+cover cp lost response injected checks 1 passes 1
+cover cp outage started checks 2 passes 2
+cover cp timed-out op applied checks 2 passes 1
+cover cp timed-out op not applied checks 2 passes 1
+cover cp timeout injected checks 3 passes 3
+sample topics b07bd3d174b10384
+sample mid 28ba181022af0857
+sample recovering dfa0ea34421b8391
+sample end 2ffca5b938dd2d1d
+sample spec 731b26e179d37bdc
+faults 43 1ba1b9f00903196b
+deliveries 57 01e8736dcf3abb89
+  4104972 b core.ControlPlaneDone{Req:0x1, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  6672914 a core.ControlPlaneDone{Req:0x4, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  8108643 b core.ControlPlaneDone{Req:0x5, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  8566984 a core.ControlPlaneDone{Req:0x6, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  10505553 b core.ControlPlaneDone{Req:0x7, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  11187903 a core.ControlPlaneDone{Req:0x8, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+
+case controlplane/outage/seed1 seed 1
+steps 163
+rand_calls 439
+counter node_steps 126
+counter engine_steps 20
+counter sim_steps 2
+counter deliveries 126
+counter dropped_stale 15
+counter dropped_by_crash 4
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 48
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp 503 injected checks 45 passes 45
+cover cp outage started checks 3 passes 3
+sample topics b07bd3d174b10384
+sample mid 87f1e6bc6a992d8b
+sample recovering 86a56a23ed05b663
+sample end d361056510784bca
+sample spec acc77126e98bfe0c
+faults 48 5362cfc8fc8f9917
+deliveries 61 85dd2f473e7fc6aa
+  4161676 b core.ControlPlaneDone{Req:0x1, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  5455335 a core.ControlPlaneDone{Req:0x2, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  6828007 b core.ControlPlaneDone{Req:0x3, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  6957386 a core.ControlPlaneDone{Req:0x4, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  8736244 a core.ControlPlaneDone{Req:0x6, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  10473764 b core.ControlPlaneDone{Req:0x7, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+
+case controlplane/outage/seed2 seed 2
+steps 164
+rand_calls 439
+counter node_steps 127
+counter engine_steps 20
+counter sim_steps 2
+counter deliveries 127
+counter dropped_stale 15
+counter dropped_by_crash 3
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 48
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp 503 injected checks 45 passes 45
+cover cp outage started checks 3 passes 3
+sample topics b07bd3d174b10384
+sample mid c7a87fe5634b0256
+sample recovering 01c859773c11055d
+sample end c5b47412662aa92c
+sample spec 4fcf62125af463d9
+faults 48 a1ebfb95831d394b
+deliveries 62 1573fcd9ec2f1f03
+  2828079 a core.ControlPlaneDone{Req:0x0, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  4125071 b core.ControlPlaneDone{Req:0x1, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  5361711 a core.ControlPlaneDone{Req:0x2, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  5553371 b core.ControlPlaneDone{Req:0x3, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  7080573 a core.ControlPlaneDone{Req:0x4, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  7563819 b core.ControlPlaneDone{Req:0x5, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+
+case controlplane/outage/seed3 seed 3
+steps 163
+rand_calls 437
+counter node_steps 126
+counter engine_steps 20
+counter sim_steps 2
+counter deliveries 126
+counter dropped_stale 15
+counter dropped_by_crash 4
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 47
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp 503 injected checks 45 passes 45
+cover cp outage started checks 2 passes 2
+sample topics b07bd3d174b10384
+sample mid 1284942f472d8cab
+sample recovering caf03401d2efa79e
+sample end ce10d6489634ddf5
+sample spec 6d87e8dca8ab166b
+faults 47 50429efeaf54cafc
+deliveries 61 401a5e7990519f1c
+  3026408 a core.ControlPlaneDone{Req:0x0, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  3534980 b core.ControlPlaneDone{Req:0x1, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  5199199 a core.ControlPlaneDone{Req:0x2, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  6107069 b core.ControlPlaneDone{Req:0x3, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  7359910 a core.ControlPlaneDone{Req:0x4, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  9389192 b core.ControlPlaneDone{Req:0x7, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+
+case controlplane/slow/seed1 seed 1
+steps 195
+rand_calls 558
+counter node_steps 118
+counter engine_steps 60
+counter sim_steps 2
+counter deliveries 118
+counter dropped_stale 15
+counter dropped_by_crash 6
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 10
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp lost response injected checks 7 passes 7
+cover cp timed-out op applied checks 1 passes 1
+cover cp timed-out op not applied checks 1 passes 0
+cover cp timeout injected checks 3 passes 3
+sample topics b07bd3d174b10384
+sample mid c65d42d1f34cbc8d
+sample recovering d986edd1fc511a13
+sample end 8d13598242201343
+sample spec fb506043441b207e
+faults 10 1c2187e0c2c3f78b
+deliveries 53 266d13b6023dfe4e
+  10694720 b core.ControlPlaneDone{Req:0x7, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+  26716463 b core.ControlPlaneDone{Req:0x3, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  27078345 b core.ControlPlaneDone{Req:0x17, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+  29600563 a core.ControlPlaneDone{Req:0x6, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}, End:2}, Err:0x0, Outcome:0x0}
+  30000000 a core.ControlPlaneDone{Req:0x0, Resp:contract.Response(nil), Err:0x1, Outcome:0x1}
+  31531738 a core.ControlPlaneDone{Req:0x1c, Resp:contract.DescribeTopicsResp{Topics:[]contract.TopicInfo{contract.TopicInfo{Name:"t", Partitions:2}, contract.TopicInfo{Name:"u", Partitions:1}}}, Err:0x0, Outcome:0x0}
+
+case controlplane/slow/seed2 seed 2
+steps 196
+rand_calls 558
+counter node_steps 119
+counter engine_steps 60
+counter sim_steps 2
+counter deliveries 119
+counter dropped_stale 15
+counter dropped_by_crash 6
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 10
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp lost response injected checks 8 passes 8
+cover cp timeout injected checks 2 passes 2
+sample topics b07bd3d174b10384
+sample mid 84f34e7d85a3b243
+sample recovering 5156a79b48d53ed6
+sample end 9e64d4178f1e2103
+sample spec 1ba92e6f765f5271
+faults 10 360f02e6f38a633c
+deliveries 54 91dddcc57f599c2f
+  6090081 b core.ControlPlaneDone{Req:0x3, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  18216655 b core.ControlPlaneDone{Req:0xf, Resp:contract.DescribeTopicsResp{Topics:[]contract.TopicInfo{contract.TopicInfo{Name:"t", Partitions:2}, contract.TopicInfo{Name:"u", Partitions:1}}}, Err:0x0, Outcome:0x0}
+  24092551 b core.ControlPlaneDone{Req:0x15, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  29042005 a core.ControlPlaneDone{Req:0x1a, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  29719083 b core.ControlPlaneDone{Req:0x1, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  33123123 a core.ControlPlaneDone{Req:0x0, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+
+case controlplane/slow/seed3 seed 3
+steps 196
+rand_calls 561
+counter node_steps 118
+counter engine_steps 61
+counter sim_steps 2
+counter deliveries 118
+counter dropped_stale 15
+counter dropped_by_crash 6
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 7
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp lost response injected checks 3 passes 3
+cover cp timed-out op applied checks 3 passes 2
+cover cp timed-out op not applied checks 3 passes 1
+cover cp timeout injected checks 4 passes 4
+sample topics b07bd3d174b10384
+sample mid 06905ebc465b2485
+sample recovering d6051e367e32897b
+sample end 02bff20710fbccd3
+sample spec 5c348f9a9e38445e
+faults 7 b8075460193a7895
+deliveries 53 3268db9c8878eccd
+  12551622 b core.ControlPlaneDone{Req:0x9, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+  16067973 a core.ControlPlaneDone{Req:0xc, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, Base:0, Count:3, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}, End:3}, Err:0x0, Outcome:0x0}
+  23990217 b core.ControlPlaneDone{Req:0x1, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}, End:2}, Err:0x0, Outcome:0x0}
+  24365255 b core.ControlPlaneDone{Req:0x15, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, Base:3, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  27784564 a core.ControlPlaneDone{Req:0x0, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:2, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  29176363 a core.ControlPlaneDone{Req:0x2, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+
+case controlplane/limited/seed1 seed 1
+steps 210
+rand_calls 476
+counter node_steps 128
+counter engine_steps 65
+counter sim_steps 2
+counter deliveries 128
+counter dropped_stale 15
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+sample topics b07bd3d174b10384
+sample mid c232be966272a664
+sample recovering f285080638d1e45d
+sample end 376d3b4c76944a98
+sample spec 7e2c827f64f6acbd
+faults 0 a8c7f832281a39c5
+deliveries 63 4e1abf34f598ad85
+  4514423 b core.ControlPlaneDone{Req:0x1, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:3, Count:1, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  4969204 a core.ControlPlaneDone{Req:0x2, Resp:contract.DescribeTopicsResp{Topics:[]contract.TopicInfo{contract.TopicInfo{Name:"t", Partitions:2}, contract.TopicInfo{Name:"u", Partitions:1}}}, Err:0x0, Outcome:0x0}
+  6828007 b core.ControlPlaneDone{Req:0x3, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+  7126197 a core.ControlPlaneDone{Req:0x4, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+  7937710 b core.ControlPlaneDone{Req:0x5, Resp:contract.DescribeTopicsResp{Topics:[]contract.TopicInfo{contract.TopicInfo{Name:"t", Partitions:2}, contract.TopicInfo{Name:"u", Partitions:1}}}, Err:0x0, Outcome:0x0}
+  9072320 a core.ControlPlaneDone{Req:0x6, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}, End:2}, Err:0x0, Outcome:0x0}
+
+case controlplane/limited/seed2 seed 2
+steps 206
+rand_calls 475
+counter node_steps 124
+counter engine_steps 65
+counter sim_steps 2
+counter deliveries 124
+counter dropped_stale 15
+counter dropped_by_crash 3
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+sample topics b07bd3d174b10384
+sample mid 152710fd80dab84a
+sample recovering ecb890fa3cd03c1a
+sample end 64d9a289f1ca641b
+sample spec b7d1f7ba40b554b5
+faults 0 a8c7f832281a39c5
+deliveries 59 821d196af9f5f45d
+  3178813 a core.ControlPlaneDone{Req:0x0, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  4030335 b core.ControlPlaneDone{Req:0x1, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  5134338 a core.ControlPlaneDone{Req:0x2, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  5553371 b core.ControlPlaneDone{Req:0x3, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  7794728 a core.ControlPlaneDone{Req:0x4, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:2, Count:1, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  8303872 b core.ControlPlaneDone{Req:0x5, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+
+case controlplane/limited/seed3 seed 3
+steps 206
+rand_calls 475
+counter node_steps 124
+counter engine_steps 65
+counter sim_steps 2
+counter deliveries 124
+counter dropped_stale 15
+counter dropped_by_crash 3
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+sample topics b07bd3d174b10384
+sample mid fc4f96213ea69c0f
+sample recovering cf58643798639294
+sample end d42f8f09d9e1484f
+sample spec 844a3cef34318326
+faults 0 a8c7f832281a39c5
+deliveries 59 f31a92f8e78f78c6
+  3239766 a core.ControlPlaneDone{Req:0x0, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:2, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  3516721 b core.ControlPlaneDone{Req:0x1, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  4997646 a core.ControlPlaneDone{Req:0x2, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  6107069 b core.ControlPlaneDone{Req:0x3, Resp:contract.DescribeTopicsResp{Topics:[]contract.TopicInfo{contract.TopicInfo{Name:"t", Partitions:2}, contract.TopicInfo{Name:"u", Partitions:1}}}, Err:0x0, Outcome:0x0}
+  7162600 a core.ControlPlaneDone{Req:0x4, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+  8389046 a core.ControlPlaneDone{Req:0x6, Resp:contract.Response(nil), Err:0x4, Outcome:0x0}
+
+case controlplane/limited-faulty/seed1 seed 1
+steps 181
+rand_calls 617
+counter node_steps 125
+counter engine_steps 39
+counter sim_steps 2
+counter deliveries 125
+counter dropped_stale 15
+counter dropped_by_crash 5
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 32
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp 503 injected checks 24 passes 24
+cover cp lost response injected checks 3 passes 3
+cover cp outage started checks 1 passes 1
+cover cp timed-out op applied checks 2 passes 1
+cover cp timed-out op not applied checks 2 passes 1
+cover cp timeout injected checks 4 passes 4
+sample topics b07bd3d174b10384
+sample mid f36546d6a8d445f6
+sample recovering 9bb3c438f71241c7
+sample end b606c4e1b38d81f3
+sample spec 2141bcec933de6e4
+faults 32 8bb9f1a26faada45
+deliveries 60 e5b3b81b4cd7ef9c
+  3134405 a core.ControlPlaneDone{Req:0x0, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  3329821 b core.ControlPlaneDone{Req:0x1, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:1, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  4957386 a core.ControlPlaneDone{Req:0x2, Resp:contract.DescribeTopicsResp{Topics:[]contract.TopicInfo{contract.TopicInfo{Name:"t", Partitions:2}, contract.TopicInfo{Name:"u", Partitions:1}}}, Err:0x0, Outcome:0x0}
+  8663864 b core.ControlPlaneDone{Req:0x5, Resp:contract.DescribeTopicsResp{Topics:[]contract.TopicInfo{contract.TopicInfo{Name:"t", Partitions:2}, contract.TopicInfo{Name:"u", Partitions:1}}}, Err:0x0, Outcome:0x0}
+  8842714 a core.ControlPlaneDone{Req:0x6, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  11076729 a core.ControlPlaneDone{Req:0x8, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:1, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}, End:1}, Err:0x0, Outcome:0x0}
+
+case controlplane/limited-faulty/seed2 seed 2
+steps 190
+rand_calls 643
+counter node_steps 122
+counter engine_steps 51
+counter sim_steps 2
+counter deliveries 122
+counter dropped_stale 15
+counter dropped_by_crash 6
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 17
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp 503 injected checks 5 passes 5
+cover cp lost response injected checks 5 passes 5
+cover cp timed-out op applied checks 1 passes 0
+cover cp timed-out op not applied checks 1 passes 1
+cover cp timeout injected checks 7 passes 7
+sample topics b07bd3d174b10384
+sample mid f9ec659fe81901e8
+sample recovering 9912b897085566d5
+sample end e7e2ad910c11d523
+sample spec a81818e1ce9361fc
+faults 17 442e94c0eaf29098
+deliveries 57 58a8db9825171ba7
+  4129103 b core.ControlPlaneDone{Req:0x1, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  5080573 a core.ControlPlaneDone{Req:0x2, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  5821563 b core.ControlPlaneDone{Req:0x3, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"t", Partition:1}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  6716033 a core.ControlPlaneDone{Req:0x4, Resp:contract.CommitSegmentResp{Assigned:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:2, Count:1, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}}, Err:0x0, Outcome:0x2}
+  8872766 a core.ControlPlaneDone{Req:0x6, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange(nil), End:0}, Err:0x0, Outcome:0x0}
+  14498242 b core.ControlPlaneDone{Req:0xb, Resp:contract.FindSegmentsResp{Ranges:[]contract.BatchRange{contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:0, Count:2, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:2, Count:1, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}, contract.BatchRange{TopicPartition:contract.TopicPartition{Topic:"u", Partition:0}, Base:3, Count:3, Loc:objectstore.SegmentRef{Key:"", Off:0, Len:0}}}, End:6}, Err:0x0, Outcome:0x0}
+
+case controlplane/limited-faulty/seed3 seed 3
+steps 166
+rand_calls 597
+counter node_steps 122
+counter engine_steps 27
+counter sim_steps 2
+counter deliveries 122
+counter dropped_stale 15
+counter dropped_by_crash 8
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 43
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp 503 injected checks 37 passes 37
+cover cp lost response injected checks 1 passes 1
+cover cp outage started checks 2 passes 2
+cover cp timed-out op applied checks 2 passes 1
+cover cp timed-out op not applied checks 2 passes 1
+cover cp timeout injected checks 3 passes 3
+sample topics b07bd3d174b10384
+sample mid 28ba181022af0857
+sample recovering dfa0ea34421b8391
+sample end 2ffca5b938dd2d1d
+sample spec 731b26e179d37bdc
+faults 43 1ba1b9f00903196b
+deliveries 57 01e8736dcf3abb89
+  4104972 b core.ControlPlaneDone{Req:0x1, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  6672914 a core.ControlPlaneDone{Req:0x4, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  8108643 b core.ControlPlaneDone{Req:0x5, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  8566984 a core.ControlPlaneDone{Req:0x6, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  10505553 b core.ControlPlaneDone{Req:0x7, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+  11187903 a core.ControlPlaneDone{Req:0x8, Resp:contract.Response(nil), Err:0x2, Outcome:0x0}
+

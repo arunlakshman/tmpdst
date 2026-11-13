@@ -1,11 +1,9 @@
-// Package simulator declares the deterministic simulator's contracts: one goroutine,
-// one counted RNG, one global queue, engines for every external system, and the
-// Process / Workload / SafetyRule roles (docs/lessons.md). The kernel implements
-// them: NewRand, NewScheduler, NewTimeline, NewNodeInbox, NewCostModel,
-// NewRunner and RunSeed. Engines live in sim/engines/....
+// Package simulator is the broker simulation on dst/kernel (dst v2).
 //
-// Lanes at or above 1<<62 are reserved for the kernel. Engines never construct
-// a Lane: they obtain each one from FakeServiceContext.Lane(key), with keys named
-// "<engine>/<whatever>". The kernel allocates lanes sequentially in first-use
-// order, so distinct keys never collide and one key keeps one lane per seed.
+// The old tree with this name was deleted in plan task T1.12d. This tree has the
+// name "simulator" again (it was named "simulation" during T1.12).
+//
+// It holds the fake services (fakeservices), the cluster host (cluster), the history
+// and the truth views, and the two scenarios: kafka and echo. The command
+// cmd/mdssimulator runs both through dst/campaign and imports only this tree.
 package simulator

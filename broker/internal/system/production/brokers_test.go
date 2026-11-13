@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/system"
+	"github.com/manifesterio/mds/dst/live"
 )
 
 // fakeLease answers the first beats with live and then fails, or always fails.
@@ -27,11 +27,11 @@ func (f *fakeLease) BrokerHeartbeat(context.Context, core.BrokerAddr) ([]core.Br
 }
 
 // nextEvent waits for the next control event in in.
-func nextEvent(t *testing.T, in *system.Inbox) core.EventData {
+func nextEvent(t *testing.T, in *live.Inbox[core.EventData]) core.EventData {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if body, ok := in.Control().Pop(); ok {
+		if body, ok := in.Pop(); ok {
 			return body
 		}
 		time.Sleep(time.Millisecond)
@@ -41,7 +41,7 @@ func nextEvent(t *testing.T, in *system.Inbox) core.EventData {
 }
 
 func TestLeaseLoopDeliversLiveSet(t *testing.T) {
-	in := system.NewInbox(8)
+	in := live.NewInbox[core.EventData](8)
 	b1 := core.BrokerAddr{NodeID: 1, Host: "h1", Port: 9092}
 	b2 := core.BrokerAddr{NodeID: 2, Host: "h2", Port: 9092}
 	lease := &fakeLease{live: []core.BrokerAddr{b1, b2}, okFor: 1 << 30}
@@ -58,7 +58,7 @@ func TestLeaseLoopDeliversLiveSet(t *testing.T) {
 }
 
 func TestLeaseLoopEmptiesSetWhenStale(t *testing.T) {
-	in := system.NewInbox(8)
+	in := live.NewInbox[core.EventData](8)
 	b1 := core.BrokerAddr{NodeID: 1, Host: "h1", Port: 9092}
 	// One good beat, then the control plane is down for good.
 	lease := &fakeLease{live: []core.BrokerAddr{b1}, okFor: 1}
@@ -75,13 +75,13 @@ func TestLeaseLoopEmptiesSetWhenStale(t *testing.T) {
 	if !ok || len(got.Brokers) != 0 {
 		t.Fatalf("stale event %+v", got)
 	}
-	if body, ok := in.Control().Pop(); ok {
+	if body, ok := in.Pop(); ok {
 		t.Fatalf("extra event %+v", body)
 	}
 }
 
 func TestLeaseLoopStopsWithContext(t *testing.T) {
-	in := system.NewInbox(8)
+	in := live.NewInbox[core.EventData](8)
 	b1 := core.BrokerAddr{NodeID: 1, Host: "h1", Port: 9092}
 	lease := &fakeLease{okFor: 1 << 30}
 	ctx, cancel := context.WithCancel(t.Context())

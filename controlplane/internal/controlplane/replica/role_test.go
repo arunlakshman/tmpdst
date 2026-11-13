@@ -6,9 +6,10 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
-func findTimer(acts []any, id runtime.TimerID) (timerView, bool) {
+func findTimer(acts []runtime.Action, id machine.TimerID) (timerView, bool) {
 	for _, a := range acts {
 		if st, ok := asTimer(a); ok && st.ID == id {
 			return st, true
@@ -17,7 +18,7 @@ func findTimer(acts []any, id runtime.TimerID) (timerView, bool) {
 	return timerView{}, false
 }
 
-func findAppend(acts []any) (runtime.LogAppend, bool) {
+func findAppend(acts []runtime.Action) (runtime.LogAppend, bool) {
 	for _, a := range acts {
 		if ap, ok := a.(runtime.LogAppend); ok {
 			return ap, true
@@ -26,7 +27,7 @@ func findAppend(acts []any) (runtime.LogAppend, bool) {
 	return runtime.LogAppend{}, false
 }
 
-func findClaim(acts []any) (runtime.LogClaimEpoch, bool) {
+func findClaim(acts []runtime.Action) (runtime.LogClaimEpoch, bool) {
 	for _, a := range acts {
 		if c, ok := a.(runtime.LogClaimEpoch); ok {
 			return c, true
@@ -37,7 +38,7 @@ func findClaim(acts []any) (runtime.LogClaimEpoch, bool) {
 
 // bootEmpty boots a machine on an empty log and returns the actions of the
 // last step (the tail check that makes the node Ready).
-func bootEmpty(t *testing.T, m *replica.Replica, at runtime.NodeTime) []any {
+func bootEmpty(t *testing.T, m *replica.Replica, at machine.NodeTime) []runtime.Action {
 	t.Helper()
 	acts := stepAt(m, at, runtime.NodeStarted{})
 	timer, ok := asTimer(acts[0])
@@ -57,7 +58,7 @@ func bootEmpty(t *testing.T, m *replica.Replica, at runtime.NodeTime) []any {
 
 // winClaim answers the claim in acts as won with the given epoch, checks that
 // the node writes a fence entry before it is the writer, and applies the fence.
-func winClaim(t *testing.T, m *replica.Replica, acts []any, epoch uint64, at runtime.NodeTime) (runtime.LogAppend, []any) {
+func winClaim(t *testing.T, m *replica.Replica, acts []runtime.Action, epoch uint64, at machine.NodeTime) (runtime.LogAppend, []runtime.Action) {
 	t.Helper()
 	claim, ok := findClaim(acts)
 	if !ok {
@@ -86,7 +87,7 @@ func winClaim(t *testing.T, m *replica.Replica, acts []any, epoch uint64, at run
 
 func TestFencedByNewerEpochEntry(t *testing.T) {
 	m := newMachine(t, replica.Config{
-		Writer: "w", Rank: 0, CatchUpEvery: runtime.Millisecond, Heartbeat: runtime.Second, MaxCmdsPerSlot: 1,
+		Writer: "w", Rank: 0, CatchUpEvery: machine.Millisecond, Heartbeat: machine.Second, MaxCmdsPerSlot: 1,
 	})
 	acts := bootEmpty(t, m, 0)
 	winClaim(t, m, acts, 1, 0)

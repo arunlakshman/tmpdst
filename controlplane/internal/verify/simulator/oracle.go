@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/check"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // oracle judges the answers that clients see. It has two parts.
@@ -165,7 +166,7 @@ func (o *oracle) checkRead(op *opState, d runtime.ControlPlaneDone) {
 	case contract.FindSegments:
 		r, _ := d.Resp.(contract.FindSegmentsResp)
 		if r.End < snap.end {
-			s.violation("offsets never go backwards", "%v: end offset %d is below %d, which was known before the read was sent", q.TopicPartition, r.End, snap.end)
+			s.violation(offsetsNeverGoBackwards, "%v: end offset %d is below %d, which was known before the read was sent", q.TopicPartition, r.End, snap.end)
 		}
 		if q.MaxBytes == 0 {
 			o.checkRanges(q, r, snap)
@@ -175,13 +176,13 @@ func (o *oracle) checkRead(op *opState, d runtime.ControlPlaneDone) {
 		for _, want := range snap.topics {
 			i := slices.IndexFunc(r.Topics, func(t contract.TopicInfo) bool { return t.Name == want.Name })
 			if i < 0 || r.Topics[i].Partitions < want.Partitions {
-				s.violation("acked write is visible", "topic %q with %d partitions was acked before the read, but describe shows %+v", want.Name, want.Partitions, r.Topics)
+				s.violation(ackedWriteVisible, "topic %q with %d partitions was acked before the read, but describe shows %+v", want.Name, want.Partitions, r.Topics)
 			}
 		}
 	case contract.DescribeGroup:
 		r, _ := d.Resp.(contract.DescribeGroupResp)
 		if snap.gen > 0 && (!r.Exists || r.Generation < snap.gen) {
-			s.violation("acked write is visible", "group %q generation %d was acked before the read, but describe shows exists=%v generation=%d", q.Group, snap.gen, r.Exists, r.Generation)
+			s.violation(ackedWriteVisible, "group %q generation %d was acked before the read, but describe shows exists=%v generation=%d", q.Group, snap.gen, r.Exists, r.Generation)
 		}
 	}
 }
@@ -194,7 +195,7 @@ func (o *oracle) checkRanges(q contract.FindSegments, r contract.FindSegmentsRes
 			continue
 		}
 		if !slices.Contains(r.Ranges, want) {
-			o.s.violation("segment lists never go backwards", "%v from %d: range %+v was acked before the read, but it is not in %+v", q.TopicPartition, q.From, want, r.Ranges)
+			o.s.violation(segmentListsNeverGoBackwards, "%v from %d: range %+v was acked before the read, but it is not in %+v", q.TopicPartition, q.From, want, r.Ranges)
 			return
 		}
 	}
@@ -202,11 +203,11 @@ func (o *oracle) checkRanges(q contract.FindSegments, r contract.FindSegmentsRes
 
 // sameAnswer compares two answers by error code and response. Nil and empty
 // slices print the same with %+v, and that difference is not a bug.
-func sameAnswer(a, b runtime.ControlPlaneDone) bool {
+func sameAnswer(a, b contract.Done) bool {
 	return a.Err == b.Err && fmt.Sprintf("%+v", a.Resp) == fmt.Sprintf("%+v", b.Resp)
 }
 
-func describeAnswer(d runtime.ControlPlaneDone) string {
+func describeAnswer(d contract.Done) string {
 	return fmt.Sprintf("err=%v resp=%+v", d.Err, d.Resp)
 }
 
@@ -224,7 +225,7 @@ func (o *oracle) verify() {
 			next++
 		}
 	}
-	committed := map[string]runtime.ControlPlaneDone{}
+	committed := map[string]contract.Done{}
 	logged := newGroupLog()
 	decode := func(entry []byte) ([]runtime.ControlPlaneOperation, error) {
 		cmds, err := replica.EntryCommands(entry)
@@ -261,36 +262,36 @@ func (o *oracle) verify() {
 // judgeRead checks that a read equals the spec after the prefix that the node had applied.
 func (o *oracle) judgeRead(spec specModel, r readRec, end runtime.LogPosition) {
 	s := o.s
-	if !s.verdict(r.prefix <= end, "reads agree with the spec", "a node answered %T at slot %d, but the log has only %d slots", r.op, r.prefix, end) {
+	if !s.verdict(r.prefix <= end, readsAgreeWithSpec, "a node answered %T at slot %d, but the log has only %d slots", r.op, r.prefix, end) {
 		return
 	}
 	if r.final {
-		s.verdict(s.store.quietAfter(r.prefix), "live replicas converge", "a final read of %T was answered at slot %d, but the log has %d slots", r.op, r.prefix, end)
+		s.verdict(s.store.quietAfter(r.prefix), liveReplicasConverge, "a final read of %T was answered at slot %d, but the log has %d slots", r.op, r.prefix, end)
 	}
 	want := spec.Apply(r.op)
-	s.verdict(sameAnswer(want, r.done), "reads agree with the spec", "at t=%dms after slot %d, %T: spec says %s, node says %s",
-		r.at/int64(runtime.Millisecond), r.prefix, r.op, describeAnswer(want), describeAnswer(r.done))
+	s.verdict(sameAnswer(want, r.done.Answer()), readsAgreeWithSpec, "at t=%dms after slot %d, %T: spec says %s, node says %s",
+		r.at/int64(machine.Millisecond), r.prefix, r.op, describeAnswer(want), describeAnswer(r.done.Answer()))
 }
 
 // judgeAcks checks that every acked write is in the log, and gave the answer that the spec gives.
-func (o *oracle) judgeAcks(spec specModel, committed map[string]runtime.ControlPlaneDone) {
+func (o *oracle) judgeAcks(spec specModel, committed map[string]contract.Done) {
 	s := o.s
 	for _, a := range o.acks {
 		switch w := a.op.(type) {
 		case contract.CommitSegment:
 			want, in := committed[w.SegmentKey]
-			if !s.verdict(in, "acked write is in the log", "commit %q was acked at t=%dms, but it is not in the log", w.SegmentKey, a.at/int64(runtime.Millisecond)) {
+			if !s.verdict(in, ackedWriteInLog, "commit %q was acked at t=%dms, but it is not in the log", w.SegmentKey, a.at/int64(machine.Millisecond)) {
 				continue
 			}
-			s.verdict(sameAnswer(want, a.done), "acked write has the spec answer", "commit %q: spec says %s, the ack says %s", w.SegmentKey, describeAnswer(want), describeAnswer(a.done))
+			s.verdict(sameAnswer(want, a.done.Answer()), ackedWriteHasSpecAnswer, "commit %q: spec says %s, the ack says %s", w.SegmentKey, describeAnswer(want), describeAnswer(a.done.Answer()))
 		case contract.CreateTopic:
 			got := spec.Apply(contract.DescribeTopics{Topics: []string{w.Name}})
 			r, _ := got.Resp.(contract.DescribeTopicsResp)
-			s.verdict(len(r.Topics) == 1 && r.Topics[0].Partitions >= w.Partitions, "acked write is in the log", "create topic %q (%d partitions) was acked, but the spec has %+v", w.Name, w.Partitions, r.Topics)
+			s.verdict(len(r.Topics) == 1 && r.Topics[0].Partitions >= w.Partitions, ackedWriteInLog, "create topic %q (%d partitions) was acked, but the spec has %+v", w.Name, w.Partitions, r.Topics)
 		case contract.GroupInstall:
 			got := spec.Apply(contract.DescribeGroup{Group: w.Group})
 			r, _ := got.Resp.(contract.DescribeGroupResp)
-			s.verdict(r.Exists && r.Generation >= w.Generation, "acked write is in the log", "install of group %q generation %d was acked, but the spec has exists=%v generation=%d", w.Group, w.Generation, r.Exists, r.Generation)
+			s.verdict(r.Exists && r.Generation >= w.Generation, ackedWriteInLog, "install of group %q generation %d was acked, but the spec has exists=%v generation=%d", w.Group, w.Generation, r.Exists, r.Generation)
 		}
 	}
 }
@@ -360,22 +361,22 @@ type commitRec struct {
 func (o *oracle) joinAnswered(c *consumer, op *groupOp, a rebalance.JoinAnswer) {
 	s, g := o.s, &o.groups
 	if op.member != "" && a.MemberID != op.member {
-		s.violation("a known member keeps its id", "%s joined %s as %q and was answered as %q", c.name, c.group, op.member, a.MemberID)
+		s.violation(knownMemberKeepsID, "%s joined %s as %q and was answered as %q", c.name, c.group, op.member, a.MemberID)
 	}
 	key := groupGen{c.group, a.Generation}
 	if first, ok := g.leaders[key]; !ok {
 		g.leaders[key] = a.Leader
 	} else if first != a.Leader {
-		s.violation("no two leaders of one generation", "group %s generation %d was answered with leader %q and with leader %q", c.group, a.Generation, first, a.Leader)
+		s.violation(noTwoLeadersInGeneration, "group %s generation %d was answered with leader %q and with leader %q", c.group, a.Generation, first, a.Leader)
 	}
 	if last, ok := g.lastGen[a.MemberID]; ok && a.Generation < last {
-		s.violation("a generation never goes down", "member %q of %s was answered generation %d after %d", a.MemberID, c.group, a.Generation, last)
+		s.violation(generationNeverGoesDown, "member %q of %s was answered generation %d after %d", a.MemberID, c.group, a.Generation, last)
 	}
 	g.lastGen[a.MemberID] = max(g.lastGen[a.MemberID], a.Generation)
 	g.joins = append(g.joins, joinRec{group: c.group, member: a.MemberID, leader: a.Leader, gen: a.Generation, at: int64(s.mono())})
-	s.env.Reachable("rebalance-sim: a join round completes")
+	s.env.Reachable(joinRoundCompletes)
 	if len(a.Members) > 1 {
-		s.env.Reachable("rebalance-sim: a round completes with many members")
+		s.env.Reachable(roundCompletesManyMembers)
 	}
 }
 
@@ -383,21 +384,21 @@ func (o *oracle) joinAnswered(c *consumer, op *groupOp, a rebalance.JoinAnswer) 
 func (o *oracle) syncAnswered(c *consumer, op *groupOp, a rebalance.SyncAnswer) {
 	o.groups.syncs = append(o.groups.syncs, syncRec{group: c.group, member: op.member, gen: op.gen, bytes: a.Assignment, at: int64(o.s.mono())})
 	if len(a.Assignment) > 0 {
-		o.s.env.Reachable("rebalance-sim: a member gets its assignment")
+		o.s.env.Reachable(memberGetsAssignment)
 	}
 }
 
 // commitAnswered keeps the offsets of a commit that were acked.
 func (o *oracle) commitAnswered(c *consumer, op *groupOp, a rebalance.CommitAnswer) {
 	s := o.s
-	if !s.verdict(len(a.Errs) == len(op.offsets), "a commit answer has one code per offset",
+	if !s.verdict(len(a.Errs) == len(op.offsets), commitAnswerHasOneCode,
 		"%s committed %d offsets to %s and got %d codes", c.name, len(op.offsets), c.group, len(a.Errs)) {
 		return
 	}
 	for i, code := range a.Errs {
 		if code == runtime.OK {
 			o.groups.commits = append(o.groups.commits, commitRec{group: c.group, offset: op.offsets[i], at: int64(s.mono())})
-			s.env.Reachable("rebalance-sim: an offset commit is acked")
+			s.env.Reachable(offsetCommitAcked)
 		}
 	}
 }
@@ -408,7 +409,7 @@ func (o *oracle) commitAnswered(c *consumer, op *groupOp, a rebalance.CommitAnsw
 // (groupsUnsettled).
 func (o *oracle) checkGroupsSettled(p *consumerPool) {
 	s, a := o.s, p.last
-	if !s.verdict(p.lastOK, "consumer groups settle", "no machine answered a read of the groups in %dms of quiet", s.stats.QuietMs) {
+	if !s.verdict(p.lastOK, consumerGroupsSettle, "no machine answered a read of the groups in %dms of quiet", s.stats.QuietMs) {
 		return
 	}
 	for _, c := range p.all {
@@ -417,11 +418,11 @@ func (o *oracle) checkGroupsSettled(p *consumerPool) {
 		}
 		i := slices.IndexFunc(a.Groups, func(d rebalance.GroupDescription) bool { return d.Name == c.group })
 		left := i >= 0 && slices.ContainsFunc(a.Groups[i].Members, func(m contract.GroupMemberInfo) bool { return m.MemberID == c.lastMember })
-		s.verdict(!left, "a silent member is removed", "%s went silent as member %q of %s, which is still a member after %dms of quiet",
+		s.verdict(!left, silentMemberRemovedCheck, "%s went silent as member %q of %s, which is still a member after %dms of quiet",
 			c.name, c.lastMember, c.group, s.stats.QuietMs)
 	}
 	why := groupsUnsettled(p, a)
-	s.verdict(why == "", "consumer groups settle", "after %dms of quiet, %s", s.stats.QuietMs, why)
+	s.verdict(why == "", consumerGroupsSettle, "after %dms of quiet, %s", s.stats.QuietMs, why)
 }
 
 // groupsUnsettled says why the consumer groups in a read are not settled, or
@@ -489,7 +490,7 @@ func newGroupLog() *groupLog {
 }
 
 // note takes one op of the log and the answer of the spec to it.
-func (l *groupLog) note(op runtime.ControlPlaneOperation, d runtime.ControlPlaneDone) {
+func (l *groupLog) note(op runtime.ControlPlaneOperation, d contract.Done) {
 	if d.Err != runtime.OK {
 		return
 	}
@@ -517,9 +518,9 @@ func (o *oracle) judgeGroups(spec specModel, l *groupLog) {
 	for _, j := range g.joins {
 		in, ok := l.installs[groupGen{j.group, j.gen}]
 		isMember := slices.ContainsFunc(in.Members, func(m contract.GroupMember) bool { return m.MemberID == j.member })
-		s.verdict(ok && in.Leader == j.leader && isMember, "an answered generation is in the log",
+		s.verdict(ok && in.Leader == j.leader && isMember, answeredGenerationInLog,
 			"at t=%dms %q got generation %d of %s with leader %q, but the log has it %v (leader %q, member %v)",
-			j.at/int64(runtime.Millisecond), j.member, j.gen, j.group, j.leader, ok, in.Leader, isMember)
+			j.at/int64(machine.Millisecond), j.member, j.gen, j.group, j.leader, ok, in.Leader, isMember)
 	}
 	for _, y := range g.syncs {
 		assigns := l.assigns[groupGen{y.group, y.gen}]
@@ -530,14 +531,14 @@ func (o *oracle) judgeGroups(spec specModel, l *groupLog) {
 			}
 			return string(a.Assignments[i].Bytes) == string(y.bytes)
 		})
-		s.verdict(match, "a sync answer is the logged assignment", "at t=%dms %q of %s generation %d got %q, but the log assigns %+v",
-			y.at/int64(runtime.Millisecond), y.member, y.group, y.gen, y.bytes, assigns)
+		s.verdict(match, syncAnswerIsLoggedAssignment, "at t=%dms %q of %s generation %d got %q, but the log assigns %+v",
+			y.at/int64(machine.Millisecond), y.member, y.group, y.gen, y.bytes, assigns)
 	}
 	for _, c := range g.commits {
 		pk := partitionKey{c.group, c.offset.TopicPartition}
 		slot, in := l.offsets[offsetKey{pk, c.offset.Offset}]
-		if !s.verdict(in, "an acked offset commit is in the log", "offset %d of %s %v was acked at t=%dms, but it is not in the log",
-			c.offset.Offset, c.group, c.offset.TopicPartition, c.at/int64(runtime.Millisecond)) {
+		if !s.verdict(in, ackedOffsetCommitInLog, "offset %d of %s %v was acked at t=%dms, but it is not in the log",
+			c.offset.Offset, c.group, c.offset.TopicPartition, c.at/int64(machine.Millisecond)) {
 			continue
 		}
 		got := spec.Apply(contract.OffsetFetch{Group: c.group, Partitions: []contract.TopicPartition{c.offset.TopicPartition}})
@@ -547,7 +548,7 @@ func (o *oracle) judgeGroups(spec specModel, l *groupLog) {
 			final = r.Offsets[0].Offset
 		}
 		last, lastIn := l.offsets[offsetKey{pk, final}]
-		s.verdict(lastIn && last >= slot && l.latest[pk].Offset == final, "an acked offset commit survives",
+		s.verdict(lastIn && last >= slot && l.latest[pk].Offset == final, ackedOffsetCommitSurvives,
 			"offset %d of %s %v was acked (slot %d), but the final offset is %d (slot %d, found %v)",
 			c.offset.Offset, c.group, c.offset.TopicPartition, slot, final, last, lastIn)
 	}

@@ -30,3 +30,18 @@
 - Set `TESTCONTAINERS_RYUK_DISABLED=true`. Without it the test library looks for a network named `bridge`, and Podman calls its default network `podman`.
 - Pull the images first (dynamodb-local 3.1.0, seaweedfs 4.48, postgres 17.11-alpine): the first pull is slow and the tests give up after 300 seconds.
 - Later: make this work without these settings, and change the "Docker" words in the Makefile messages to Podman.
+
+## 6. cpsim never reaches one declared path
+
+- cpsim never reaches "logcp-sim: idempotent replay after takeover". It needs a client retry that is answered after a takeover. Result on 2026-11-13: 0 hits in 2000 seeds of every scenario, and 0 hits in 10000 more `chaos` seeds.
+- It stays declared in the code but is not expected (`assert.NewReachableNotExpected`), so the cpsim report still says "all 27 expected paths were reached", as before. "put refused at or below the floor" and "replayed key answered from the window" are reached but are also not expected, to keep the expected set equal to the old hand list of 27 names.
+- A gap stays a gap (decision 5): no scenario or fault was added for it. Later: a scenario that retries a write after the writer changed.
+
+## 7. The broker simulation never reaches three declared names
+
+- Result on 2026-11-13, 2000 seeds of `kafka` and 300 seeds of `echo`, in the old tree and in the new tree: these names have 0 checks.
+  - "broker: commit deadline exceeded" (Reachable, `kafka`): the commit never runs past its deadline in the preset.
+  - "kafka: a produce still running in Settling is acked" (Always, `kafka`): no produce returns after Settling starts.
+  - "echo: an offset is acked with one payload" (Always, `echo`): no offset is acked twice.
+- The old report never listed them (it listed only the Sometimes and Reachable names in its hand list). To keep the new report equal, they are declared with `assert.NewReachableNotExpected` and `assert.NewAlwaysOnFailure`, so the report does not call them "never reached" or "never checked". The code and the rules are unchanged.
+- A gap stays a gap (decision 5): no scenario, fault or check was added. Later: a preset where the commit is slow enough to pass its deadline, and a workload that sends the same offset twice.

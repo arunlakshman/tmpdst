@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 func code(err error) core.ErrCode {
@@ -50,13 +51,13 @@ func TestObjectStore(t *testing.T) {
 func TestControlPlaneConcurrent(t *testing.T) {
 	ctx := t.Context()
 	c := NewControlPlane()
-	topicPartition := core.NewTopicPartition("t", 0)
+	topicPartition := contract.NewTopicPartition("t", 0)
 	var wg sync.WaitGroup
 	for i := range 8 {
 		wg.Go(func() {
-			_, err := c.Call(ctx, core.CommitSegment{
+			_, err := c.Call(ctx, contract.CommitSegment{
 				SegmentKey: string(rune('a' + i)),
-				Batches:    []core.PendingBatch{{TopicPartition: topicPartition, Records: 2}},
+				Batches:    []contract.PendingBatch{{TopicPartition: topicPartition, Records: 2}},
 			})
 			if err != nil {
 				t.Error(err)
@@ -64,21 +65,21 @@ func TestControlPlaneConcurrent(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	response, _ := c.Call(ctx, core.FindSegments{TopicPartition: topicPartition})
-	if end := response.(core.FindSegmentsResp).End; end != 16 {
+	response, _ := c.Call(ctx, contract.FindSegments{TopicPartition: topicPartition})
+	if end := response.(contract.FindSegmentsResp).End; end != 16 {
 		t.Fatalf("end %d", end)
 	}
-	if got := len(response.(core.FindSegmentsResp).Ranges); got != 8 {
+	if got := len(response.(contract.FindSegmentsResp).Ranges); got != 8 {
 		t.Fatalf("%d ranges", got)
 	}
 	next := core.Offset(0)
-	for _, r := range response.(core.FindSegmentsResp).Ranges {
+	for _, r := range response.(contract.FindSegmentsResp).Ranges {
 		if r.Base != next {
 			t.Fatalf("gap or overlap at %d, want %d", r.Base, next)
 		}
 		next += core.Offset(r.Count)
 	}
-	_, err := c.Call(ctx, core.CommitSegment{SegmentKey: "a", Batches: []core.PendingBatch{{TopicPartition: topicPartition, Records: 1}}})
+	_, err := c.Call(ctx, contract.CommitSegment{SegmentKey: "a", Batches: []contract.PendingBatch{{TopicPartition: topicPartition, Records: 1}}})
 	if code(err) != core.ErrConflict {
 		t.Fatalf("different request under a used key: %v", err)
 	}

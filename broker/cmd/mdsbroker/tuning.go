@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/broker"
-	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system/production"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // tuning is the flag values that shape the segment flush rule and the produce
@@ -31,7 +31,7 @@ func (t tuning) apply(bc *broker.Config, memLimit uint64) error {
 	if segment <= 0 || t.window <= 0 || t.parts <= 0 || t.batches <= 0 {
 		return errors.New("-segment-bytes, -segment-window, -max-segment-partitions and -max-segment-batches must be positive")
 	}
-	bc.MaxSegmentBytes, bc.BatchWindow = int(segment), core.Duration(t.window)
+	bc.MaxSegmentBytes, bc.BatchWindow = int(segment), machine.Duration(t.window)
 	bc.MaxSegmentPartitions, bc.MaxSegmentBatches = t.parts, t.batches
 
 	if strings.EqualFold(t.maxBuffered, "auto") {

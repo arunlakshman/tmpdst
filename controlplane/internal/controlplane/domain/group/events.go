@@ -1,6 +1,6 @@
 package group
 
-import "github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+import "github.com/manifesterio/mds/controlplane/contract"
 
 // Event is a fact that a command made. The log holds commands, not events: an
 // event is made when its command is applied, on every replica, and is never

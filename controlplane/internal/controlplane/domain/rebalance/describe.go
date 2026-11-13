@@ -3,8 +3,9 @@ package rebalance
 import (
 	"slices"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // describe is a Describe call whose reads are in flight: one LocalRead per
@@ -13,7 +14,7 @@ type describe struct {
 	call CallID
 	out  []GroupDescription
 	left int
-	reqs []runtime.RequestID
+	reqs []machine.RequestID
 }
 
 // describeRead marks a request id as the read of name i of a describe.

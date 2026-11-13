@@ -2,13 +2,13 @@ package replica_test
 
 import (
 	"errors"
-	"github.com/manifesterio/mds/dst/sim"
 	"testing"
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine/memory"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // trackedStore is an in-memory store that remembers whether it was closed.
@@ -39,8 +39,8 @@ func (s *storeSource) open() (engine.Engine, error) {
 
 func tombConfig(src *storeSource) replica.Config {
 	return replica.Config{
-		CatchUpEvery: runtime.Millisecond, Writer: "w",
-		CheckpointPrefix: "checkpoint/t/", CheckpointEvery: runtime.Second, Rank: 1,
+		CatchUpEvery: machine.Millisecond, Writer: "w",
+		CheckpointPrefix: "checkpoint/t/", CheckpointEvery: machine.Second, Rank: 1,
 		OpenStore: src.open,
 	}
 }
@@ -48,8 +48,8 @@ func tombConfig(src *storeSource) replica.Config {
 func TestOpenStoreFailureAtBuildStopsOnStart(t *testing.T) {
 	m := newMachine(t, tombConfig(&storeSource{failOn: 1}))
 	acts := step(m, runtime.NodeStarted{})
-	stop, ok := acts[0].(sim.Crash)
+	stop, ok := acts[0].(runtime.StopForRestart)
 	if !ok || stop.Cause != "disk is full" {
-		t.Fatalf("acts = %#v, want Crash with the open error", acts)
+		t.Fatalf("acts = %#v, want StopForRestart with the open error", acts)
 	}
 }

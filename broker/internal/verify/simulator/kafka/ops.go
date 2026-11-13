@@ -1,9 +1,34 @@
 package kafka
 
-import "github.com/manifesterio/mds/broker/internal/core"
+import (
+	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
+)
 
-// History ops. One ProduceOp covers a batch and all its retries (HistOp.ID and
-// Value are the batch's id); one ReadOp is one Fetch request.
+// History ops. One ProduceOp covers a batch and all its retries (the id and
+// the value of the history operation are the batch's id); one ReadOp is one
+// Fetch request.
+
+// Op is the sum of the operations the clients record in the history.
+//
+//sumtype:decl
+type Op interface{ isOp() }
+
+// Res is the sum of the results of the operations.
+//
+//sumtype:decl
+type Res interface{ isRes() }
+
+func (ProduceOp) isOp()   {}
+func (ReadOp) isOp()      {}
+func (ProduceRes) isRes() {}
+func (ReadRes) isRes()    {}
+
+// History is the history of the Kafka scenario.
+type History = history.History[Op, Res]
+
+// Operation is one operation of the history of the Kafka scenario.
+type Operation = history.Operation[Op, Res]
 
 // ProduceOp is one record batch for one partition. Vals are the record values,
 // unique across the run ("c<client>.b<batch>.r<i>|pad"). Every retry resends

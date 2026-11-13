@@ -8,37 +8,39 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // Oracle property names (the stable strings sim/kafka reports).
 const (
-	pLocTwice   core.PropertyID = "kafka: a stored batch is committed at most once"
-	pPerSend    core.PropertyID = "kafka: a batch is committed at most once per send"
-	pOneBatch   core.PropertyID = "kafka: a committed range is one whole produced batch"
-	pAckOrder   core.PropertyID = "kafka: a client's acked batches for a partition are at increasing offsets"
-	pOrder      core.PropertyID = "kafka: records of a batch keep their order"
-	pProduced   core.PropertyID = "kafka: every committed record was produced"
-	pAsProduced core.PropertyID = "kafka: a record is committed where and as it was produced"
-	pRejected   core.PropertyID = "kafka: a definitely rejected batch is never committed"
-	pAckInCP    core.PropertyID = "kafka: acked range is committed in the control plane"
-	pContig     core.PropertyID = "kafka: committed offsets are contiguous"
-	pSegment    core.PropertyID = "kafka: committed segment exists in the object store"
-	pInside     core.PropertyID = "kafka: committed range lies inside its segment"
-	pIntact     core.PropertyID = "kafka: committed batch is intact"
-	pCount      core.PropertyID = "kafka: committed range holds its record count"
-	pHWM        core.PropertyID = "kafka: the high watermark is the end of the committed log"
-	pAckedAt    core.PropertyID = "kafka: an acked record is in the log at its acked offset"
-	pCaughtUp   core.PropertyID = "kafka: every consumer caught up with the final log"
-	pCorrupt    core.PropertyID = "kafka: a consumer never receives a corrupt batch"
-	pRange      core.PropertyID = "kafka: a consumer's fetch is never out of range"
-	pHWMAbove   core.PropertyID = "kafka: a fetch never reports a high watermark above the committed log"
-	pResume     core.PropertyID = "kafka: a consumer resumes exactly where its last read ended"
-	pSkipped    core.PropertyID = "kafka: a consumer sees every offset in order, none skipped"
-	pPastHWM    core.PropertyID = "kafka: a consumer never reads past the high watermark"
-	pReadValue  core.PropertyID = "kafka: a consumer reads the committed value at each offset"
+	pLocTwice   string = "kafka: a stored batch is committed at most once"
+	pPerSend    string = "kafka: a batch is committed at most once per send"
+	pOneBatch   string = "kafka: a committed range is one whole produced batch"
+	pAckOrder   string = "kafka: a client's acked batches for a partition are at increasing offsets"
+	pOrder      string = "kafka: records of a batch keep their order"
+	pProduced   string = "kafka: every committed record was produced"
+	pAsProduced string = "kafka: a record is committed where and as it was produced"
+	pRejected   string = "kafka: a definitely rejected batch is never committed"
+	pAckInCP    string = "kafka: acked range is committed in the control plane"
+	pContig     string = "kafka: committed offsets are contiguous"
+	pSegment    string = "kafka: committed segment exists in the object store"
+	pInside     string = "kafka: committed range lies inside its segment"
+	pIntact     string = "kafka: committed batch is intact"
+	pCount      string = "kafka: committed range holds its record count"
+	pHWM        string = "kafka: the high watermark is the end of the committed log"
+	pAckedAt    string = "kafka: an acked record is in the log at its acked offset"
+	pCaughtUp   string = "kafka: every consumer caught up with the final log"
+	pCorrupt    string = "kafka: a consumer never receives a corrupt batch"
+	pRange      string = "kafka: a consumer's fetch is never out of range"
+	pHWMAbove   string = "kafka: a fetch never reports a high watermark above the committed log"
+	pResume     string = "kafka: a consumer resumes exactly where its last read ended"
+	pSkipped    string = "kafka: a consumer sees every offset in order, none skipped"
+	pPastHWM    string = "kafka: a consumer never reads past the high watermark"
+	pReadValue  string = "kafka: a consumer reads the committed value at each offset"
 )
 
 // fault is one corruption of a finished world. apply reports false when the
@@ -47,7 +49,7 @@ const (
 type fault struct {
 	name  string
 	apply func(w *world, r *rand.Rand) bool
-	want  []core.PropertyID
+	want  []string
 	anyOf bool
 }
 
@@ -62,7 +64,7 @@ func pick[T any](r *rand.Rand, xs []T) (T, bool) {
 // definiteAt: an acked (OpDefinite) produce landed at base of tp.
 func (w *world) definiteAt(topicPartition core.TopicPartition, base int64) bool {
 	for _, operation := range w.ops {
-		if po, ok := operation.Op.(kafka.ProduceOp); ok && operation.Outcome == simulator.OpResultKnown && po.TopicPartition == topicPartition {
+		if po, ok := operation.Op.(kafka.ProduceOp); ok && operation.Outcome == history.ResultKnown && po.TopicPartition == topicPartition {
 			if res := operation.Result.(kafka.ProduceRes); res.Base == base {
 				return true
 			}
@@ -125,7 +127,7 @@ func (w *world) ackFacts() []int {
 func (w *world) setAck(i int, key string, add int64) {
 	for k, f := range w.raw[i].Fact.Fields {
 		if f.Key == key {
-			w.raw[i].Fact.Fields[k].Value = f.Value.(core.Int64Value) + core.Int64Value(add)
+			w.raw[i].Fact.Fields[k].Value = f.Value.(machine.Int64Value) + machine.Int64Value(add)
 		}
 	}
 	w.rebuildTL()
@@ -134,7 +136,7 @@ func (w *world) setAck(i int, key string, add int64) {
 func (w *world) definiteOps() []int {
 	var out []int
 	for i, operation := range w.ops {
-		if _, ok := operation.Op.(kafka.ProduceOp); ok && operation.Outcome == simulator.OpResultKnown {
+		if _, ok := operation.Op.(kafka.ProduceOp); ok && operation.Outcome == history.ResultKnown {
 			out = append(out, i)
 		}
 	}
@@ -151,7 +153,7 @@ func (w *world) swapAdj(topicPartition core.TopicPartition, i int) {
 }
 
 // adjPairs lists (tp, i) with entries i, i+1 passing ok.
-func (w *world) adjPairs(ok func(topicPartition core.TopicPartition, a, b core.BatchRange) bool) ([]partRef, []core.TopicPartition) {
+func (w *world) adjPairs(ok func(topicPartition core.TopicPartition, a, b contract.BatchRange) bool) ([]partRef, []core.TopicPartition) {
 	var out []partRef
 	var tps []core.TopicPartition
 	for _, topicPartition := range w.tps {
@@ -180,7 +182,7 @@ func recsOf(vals ...string) []kmsg.Record {
 	return out
 }
 
-func lastRange(w *world, topicPartition core.TopicPartition) core.BatchRange {
+func lastRange(w *world, topicPartition core.TopicPartition) contract.BatchRange {
 	rs := w.ranges[topicPartition]
 	return rs[len(rs)-1]
 }
@@ -196,7 +198,7 @@ func faults() []fault {
 			d.Base = core.Offset(w.cp0(topicPartition))
 			w.ranges[topicPartition] = append(w.ranges[topicPartition], d)
 			return true
-		}, []core.PropertyID{pLocTwice}, false},
+		}, []string{pLocTwice}, false},
 
 		{"duplicated record in another partition", func(w *world, r *rand.Rand) bool {
 			a, ok := pick(r, w.tpsWith(1))
@@ -208,7 +210,7 @@ func faults() []fault {
 			d.TopicPartition, d.Base = b, core.Offset(w.cp0(b))
 			w.ranges[b] = append(w.ranges[b], d)
 			return true
-		}, []core.PropertyID{pLocTwice, pAsProduced}, false},
+		}, []string{pLocTwice, pAsProduced}, false},
 
 		{"acked record missing (last range dropped)", func(w *world, r *rand.Rand) bool {
 			var c []core.TopicPartition
@@ -222,7 +224,7 @@ func faults() []fault {
 				w.ranges[topicPartition] = w.ranges[topicPartition][:len(w.ranges[topicPartition])-1]
 			}
 			return ok
-		}, []core.PropertyID{pAckInCP, pAckedAt}, false},
+		}, []string{pAckInCP, pAckedAt}, false},
 
 		{"acked record missing (middle range dropped, offsets closed up)", func(w *world, r *rand.Rand) bool {
 			var c []partRef
@@ -247,7 +249,7 @@ func faults() []fault {
 			}
 			w.ranges[topicPartition] = rs
 			return true
-		}, []core.PropertyID{pAckedAt}, false},
+		}, []string{pAckedAt}, false},
 
 		{"record at the wrong offset (acked offset off by one)", func(w *world, r *rand.Rand) bool {
 			i, ok := pick(r, w.definiteOps())
@@ -257,10 +259,10 @@ func faults() []fault {
 				w.ops[i].Result = res
 			}
 			return ok
-		}, []core.PropertyID{pAckedAt}, false},
+		}, []string{pAckedAt}, false},
 
 		{"records swapped in the log", func(w *world, r *rand.Rand) bool {
-			ps, tps := w.adjPairs(func(topicPartition core.TopicPartition, a, b core.BatchRange) bool {
+			ps, tps := w.adjPairs(func(topicPartition core.TopicPartition, a, b contract.BatchRange) bool {
 				return w.definiteAt(topicPartition, int64(a.Base))
 			})
 			i, ok := pick(r, seq(len(ps)))
@@ -268,7 +270,7 @@ func faults() []fault {
 				w.swapAdj(tps[i], ps[i].part)
 			}
 			return ok
-		}, []core.PropertyID{pAckedAt}, false},
+		}, []string{pAckedAt}, false},
 
 		{"offset gap", func(w *world, r *rand.Rand) bool {
 			topicPartition, ok := pick(r, w.tpsWith(1))
@@ -280,7 +282,7 @@ func faults() []fault {
 				rs[j].Base++
 			}
 			return true
-		}, []core.PropertyID{pContig}, false},
+		}, []string{pContig}, false},
 
 		{"acked range not in the control plane", func(w *world, r *rand.Rand) bool {
 			i, ok := pick(r, w.ackFacts())
@@ -288,7 +290,7 @@ func faults() []fault {
 				w.setAck(i, "base_offset", 1000)
 			}
 			return ok
-		}, []core.PropertyID{pAckInCP}, false},
+		}, []string{pAckInCP}, false},
 
 		{"consumer read value differs from the log", func(w *world, r *rand.Rand) bool {
 			ps := w.readParts(func(_ core.TopicPartition, p kafka.ReadPart, _ int64) bool { return len(p.Recs) > 0 })
@@ -298,7 +300,7 @@ func faults() []fault {
 				rp.Recs[r.IntN(len(rp.Recs))].Val += "x"
 			}
 			return ok
-		}, []core.PropertyID{pReadValue}, false},
+		}, []string{pReadValue}, false},
 
 		{"consumer skips an offset inside a read", func(w *world, r *rand.Rand) bool {
 			ps := w.readParts(func(_ core.TopicPartition, p kafka.ReadPart, _ int64) bool { return len(p.Recs) >= 2 })
@@ -307,7 +309,7 @@ func faults() []fault {
 				w.part(p).Recs = w.part(p).Recs[1:]
 			}
 			return ok
-		}, []core.PropertyID{pSkipped}, false},
+		}, []string{pSkipped}, false},
 
 		{"consumer skips an offset between reads", func(w *world, r *rand.Rand) bool {
 			var c []partRef
@@ -327,7 +329,7 @@ func faults() []fault {
 				w.part(p).Recs = w.part(p).Recs[:len(w.part(p).Recs)-1]
 			}
 			return ok
-		}, []core.PropertyID{pResume}, false},
+		}, []string{pResume}, false},
 
 		{"consumer reads past the reported high watermark", func(w *world, r *rand.Rand) bool {
 			ps := w.readParts(func(_ core.TopicPartition, p kafka.ReadPart, _ int64) bool { return p.Code == 0 && len(p.Recs) > 0 })
@@ -337,7 +339,7 @@ func faults() []fault {
 				rp.HWM = rp.Recs[len(rp.Recs)-1].Off
 			}
 			return ok
-		}, []core.PropertyID{pPastHWM}, false},
+		}, []string{pPastHWM}, false},
 
 		{"consumer reads beyond the end of the log", func(w *world, r *rand.Rand) bool {
 			p, ok := pick(r, w.finalParts())
@@ -346,7 +348,7 @@ func faults() []fault {
 				rp.Recs = append(rp.Recs, kafka.Rec{Off: rp.HWM, Val: "c0.b1.r0|x"})
 			}
 			return ok
-		}, []core.PropertyID{pPastHWM}, false},
+		}, []string{pPastHWM}, false},
 
 		{"fetch reports a high watermark above the log", func(w *world, r *rand.Rand) bool {
 			p, ok := pick(r, w.finalParts())
@@ -354,7 +356,7 @@ func faults() []fault {
 				w.part(p).HWM++
 			}
 			return ok
-		}, []core.PropertyID{pHWMAbove}, false},
+		}, []string{pHWMAbove}, false},
 
 		{"fetch answers out of range", func(w *world, r *rand.Rand) bool {
 			p, ok := pick(r, w.anyParts())
@@ -362,7 +364,7 @@ func faults() []fault {
 				w.part(p).Code = 1
 			}
 			return ok
-		}, []core.PropertyID{pRange}, false},
+		}, []string{pRange}, false},
 
 		{"consumer receives a corrupt batch", func(w *world, r *rand.Rand) bool {
 			p, ok := pick(r, w.anyParts())
@@ -370,7 +372,7 @@ func faults() []fault {
 				w.part(p).Corrupt = true
 			}
 			return ok
-		}, []core.PropertyID{pCorrupt}, false},
+		}, []string{pCorrupt}, false},
 
 		{"consumer never catches up (last read emptied)", func(w *world, r *rand.Rand) bool {
 			var c []partRef
@@ -389,7 +391,7 @@ func faults() []fault {
 				w.part(p).Recs = nil
 			}
 			return ok
-		}, []core.PropertyID{pCaughtUp}, false},
+		}, []string{pCaughtUp}, false},
 
 		{"batch committed more often than it was sent", func(w *world, r *rand.Rand) bool {
 			var c []int
@@ -414,7 +416,7 @@ func faults() []fault {
 				}
 			}
 			return false
-		}, []core.PropertyID{pPerSend}, false},
+		}, []string{pPerSend}, false},
 
 		{"offsets overlap", func(w *world, r *rand.Rand) bool {
 			topicPartition, ok := pick(r, w.tpsWith(2))
@@ -426,7 +428,7 @@ func faults() []fault {
 				rs[j].Base--
 			}
 			return true
-		}, []core.PropertyID{pContig}, false},
+		}, []string{pContig}, false},
 
 		{"a client's acked offsets go backwards", func(w *world, r *rand.Rand) bool {
 			var c [][2]int // pairs of definite ops of one client and partition, in history order
@@ -447,7 +449,7 @@ func faults() []fault {
 			a.Base, b.Base = b.Base, a.Base
 			w.ops[p[0]].Result, w.ops[p[1]].Result = a, b
 			return true
-		}, []core.PropertyID{pAckOrder, pAckedAt}, false},
+		}, []string{pAckOrder, pAckedAt}, false},
 
 		{"phantom record never produced", func(w *world, r *rand.Rand) bool {
 			topicPartition, _ := pick(r, w.tps)
@@ -455,18 +457,18 @@ func faults() []fault {
 			if err != nil {
 				panic(err)
 			}
-			rg := core.BatchRange{TopicPartition: topicPartition, Base: core.Offset(w.cp0(topicPartition)), Count: 1, Loc: w.put(b)}
+			rg := contract.BatchRange{TopicPartition: topicPartition, Base: core.Offset(w.cp0(topicPartition)), Count: 1, Loc: w.put(b)}
 			w.ranges[topicPartition] = append(w.ranges[topicPartition], rg)
 			return true
-		}, []core.PropertyID{pProduced}, false},
+		}, []string{pProduced}, false},
 
 		{"record of a definitely rejected batch is present", func(w *world, r *rand.Rand) bool {
 			i, ok := pick(r, w.definiteOps())
 			if ok {
-				w.ops[i].Outcome = simulator.OpGivenUp
+				w.ops[i].Outcome = history.GivenUp
 			}
 			return ok
-		}, []core.PropertyID{pRejected}, false},
+		}, []string{pRejected}, false},
 
 		{"records of a batch out of order", func(w *world, r *rand.Rand) bool {
 			var c []partRef
@@ -497,7 +499,7 @@ func faults() []fault {
 			}
 			rg.Loc = w.put(nb)
 			return true
-		}, []core.PropertyID{pOrder}, false},
+		}, []string{pOrder}, false},
 
 		{"a retry commits only part of a batch", func(w *world, r *rand.Rand) bool {
 			var c []partRef
@@ -529,7 +531,7 @@ func faults() []fault {
 				rs[j].Base -= core.Offset(gone)
 			}
 			return true
-		}, []core.PropertyID{pOneBatch}, false},
+		}, []string{pOneBatch}, false},
 
 		{"corrupt batch bytes in a segment", func(w *world, r *rand.Rand) bool {
 			topicPartition, ok := pick(r, w.tpsWith(1))
@@ -538,7 +540,7 @@ func faults() []fault {
 				w.objs[rg.Loc.Key][rg.Loc.Off+rg.Loc.Len-1] ^= 0xff
 			}
 			return ok
-		}, []core.PropertyID{pIntact}, false},
+		}, []string{pIntact}, false},
 
 		{"segment object missing", func(w *world, r *rand.Rand) bool {
 			topicPartition, ok := pick(r, w.tpsWith(1))
@@ -546,7 +548,7 @@ func faults() []fault {
 				delete(w.objs, lastRange(w, topicPartition).Loc.Key)
 			}
 			return ok
-		}, []core.PropertyID{pSegment}, false},
+		}, []string{pSegment}, false},
 
 		{"committed range runs past its segment", func(w *world, r *rand.Rand) bool {
 			topicPartition, ok := pick(r, w.tpsWith(1))
@@ -559,7 +561,7 @@ func faults() []fault {
 				return true
 			}
 			return false
-		}, []core.PropertyID{pInside}, false},
+		}, []string{pInside}, false},
 
 		{"committed count differs from the batch", func(w *world, r *rand.Rand) bool {
 			topicPartition, ok := pick(r, w.tpsWith(1))
@@ -567,13 +569,13 @@ func faults() []fault {
 				w.ranges[topicPartition][len(w.ranges[topicPartition])-1].Count++
 			}
 			return ok
-		}, []core.PropertyID{pCount}, false},
+		}, []string{pCount}, false},
 
 		{"high watermark above the log", func(w *world, r *rand.Rand) bool {
 			topicPartition, _ := pick(r, w.tps)
 			w.hwmAdj[topicPartition] = 1
 			return true
-		}, []core.PropertyID{pHWM}, false},
+		}, []string{pHWM}, false},
 
 		{"high watermark below the log", func(w *world, r *rand.Rand) bool {
 			topicPartition, ok := pick(r, w.tpsWith(1))
@@ -581,7 +583,7 @@ func faults() []fault {
 				w.hwmAdj[topicPartition] = -1
 			}
 			return ok
-		}, []core.PropertyID{pHWM}, false},
+		}, []string{pHWM}, false},
 	}
 }
 

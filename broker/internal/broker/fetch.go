@@ -5,10 +5,13 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // maxFetchWait caps MaxWait, so one Fetch cannot hold a connection for long.
-const maxFetchWait = 30 * core.Second
+const maxFetchWait = 30 * machine.Second
 
 // fetch serves each partition independently: FindSegments, then one ranged GET per
 // committed batch, verified and patched to its committed offset (decision 30).
@@ -23,13 +26,13 @@ func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
 	}
 	s.fetchMax = r.MaxBytes
 	s.fetchMin = r.MinBytes
-	s.fetchUntil = b.now + core.NodeTime(fetchWait(r.MaxWaitMillis))
+	s.fetchUntil = b.now + machine.NodeTime(fetchWait(r.MaxWaitMillis))
 	fillFetchSkeleton(response, r)
 	var acts []core.Action
 	for i, t := range r.Topics {
 		for j, p := range t.Partitions {
 			rp := &response.Topics[i].Partitions[j]
-			topicPartition := core.NewTopicPartition(t.Topic, p.Partition)
+			topicPartition := contract.NewTopicPartition(t.Topic, p.Partition)
 			switch {
 			case !b.knows(topicPartition):
 				rp.ErrorCode = int16(errUnknownTopicOrPart)
@@ -63,7 +66,7 @@ func fillFetchSkeleton(response *kmsg.FetchResponse, r *kmsg.FetchRequest) {
 
 // onLookup picks the ranges that fit the partition limit (at least one) and
 // starts reading them.
-func (b *Broker) onLookup(o *operation, r core.FindSegmentsResp) []core.Action {
+func (b *Broker) onLookup(o *operation, r contract.FindSegmentsResp) []core.Action {
 	o.fpart.HighWatermark, o.fpart.LastStableOffset = int64(r.End), int64(r.End)
 	if o.from > r.End {
 		o.fpart.ErrorCode = int16(errOffsetOutOfRange)
@@ -85,11 +88,11 @@ func (b *Broker) onLookup(o *operation, r core.FindSegmentsResp) []core.Action {
 }
 
 // fetchWait is how long a Fetch may wait: MaxWait, capped. Zero means answer at once.
-func fetchWait(maxWaitMillis int32) core.Duration {
+func fetchWait(maxWaitMillis int32) machine.Duration {
 	if maxWaitMillis <= 0 {
 		return 0
 	}
-	return min(core.Duration(maxWaitMillis)*core.Millisecond, maxFetchWait)
+	return min(machine.Duration(maxWaitMillis)*machine.Millisecond, maxFetchWait)
 }
 
 // fetchOver reports whether a Fetch must answer now: it has MinBytes, its
@@ -104,7 +107,7 @@ func (b *Broker) waitOrEnd(o *operation) []core.Action {
 	if b.fetchOver(o.s) {
 		return b.endOp(o)
 	}
-	b.env.Reachable("broker: fetch parked for a poll")
+	b.env.Reachable(fetchParkedForPoll)
 	return b.park(o)
 }
 
@@ -130,10 +133,10 @@ func (b *Broker) fetchPartData(o *operation) []core.Action {
 // MaxWait if that comes first.
 func (b *Broker) park(o *operation) []core.Action {
 	o.state, o.attempts = opWait, 0
-	after := min(b.config.FetchPollInterval, core.Duration(o.s.fetchUntil-b.now))
+	after := min(b.config.FetchPollInterval, machine.Duration(o.s.fetchUntil-b.now))
 	b.timerGen++
 	o.gen = b.timerGen
-	return []core.Action{core.SetTimer{ID: core.TimerID(o.id), Gen: o.gen, After: after}}
+	return []core.Action{core.SetTimer{ID: machine.TimerID(o.id), Gen: o.gen, After: after}}
 }
 
 // pollOp runs when a parked part's timer fires. A part that holds data only
@@ -167,10 +170,10 @@ func (b *Broker) endParked(match func(*operation) bool) {
 // onFetchGet verifies one batch read from the object store. A corrupt GET is
 // never returned: it is retried (the object itself is intact; S3 checksums
 // cover whole objects but not byte ranges, decision 27).
-func (b *Broker) onFetchGet(o *operation, e core.ObjectGetDone) []core.Action {
+func (b *Broker) onFetchGet(o *operation, e objectstore.GetDone) []core.Action {
 	rg := o.ranges[o.next]
 	if e.Err == core.ErrNotFound { // committed segments are never deleted
-		b.env.Unreachable("broker: committed segment missing")
+		b.env.Unreachable(committedSegmentMissing)
 		return b.failOp(o, errKafkaStorage)
 	}
 	if e.Err != core.OK {
@@ -183,14 +186,14 @@ func (b *Broker) onFetchGet(o *operation, e core.ObjectGetDone) []core.Action {
 	return b.acceptFetch(o, e.Data, rg)
 }
 
-func (b *Broker) retryCorrupt(o *operation, rg core.BatchRange) []core.Action {
-	b.env.Reachable("broker: corrupt GET detected")
+func (b *Broker) retryCorrupt(o *operation, rg contract.BatchRange) []core.Action {
+	b.env.Reachable(corruptGetDetected)
 	o.corrupt = true
-	acts := []core.Action{recordFact("corruption_detected", core.Field{Key: "segment", Value: core.StringValue(rg.Loc.Key)})}
+	acts := []core.Action{recordFact("corruption_detected", machine.Field{Key: "segment", Value: machine.StringValue(rg.Loc.Key)})}
 	return append(acts, b.retryOp(o)...)
 }
 
-func (b *Broker) acceptFetch(o *operation, data []byte, rg core.BatchRange) []core.Action {
+func (b *Broker) acceptFetch(o *operation, data []byte, rg contract.BatchRange) []core.Action {
 	base := int64(rg.Base)
 	if b.config.InjectedBug == InjectedBugWrongOffset {
 		base++
@@ -206,7 +209,7 @@ func (b *Broker) acceptFetch(o *operation, data []byte, rg core.BatchRange) []co
 }
 
 // isIntact reports whether data is the one valid batch that rg committed.
-func isIntact(data []byte, rg core.BatchRange) bool {
+func isIntact(data []byte, rg contract.BatchRange) bool {
 	bt, err := kafkawire.ParseBatch(data)
 	return err == nil && int64(len(data)) == rg.Loc.Len && int64(bt.NumRecords) == rg.Count
 }

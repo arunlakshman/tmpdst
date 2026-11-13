@@ -85,7 +85,7 @@ These are not wire-answer differences (except where said). They are worth knowin
   read. Installs stay safe, because the log checks generation + 1. A late `GroupRemove` or `GroupAssign`
   is seen at the next term. The simulator oracle allows a late write (it marks the group "late" and
   skips member comparison for it). Kafka has no such window; not applicable.
-- The conformance model (`internal/spec/rebalance.go`) and the machine disagree in one corner: an
+- The conformance model (`spec/rebalance.go`) and the machine disagree in one corner: an
   assignment that is both over 256 KiB and breaks R21. The model says ErrTooLarge (size first); the
   machine says ErrInvalid (R21 first). The machine is right per the note. Not fixed.
 - Not drawn by the conformance test: rebalance timeout 0, too-large mixed with R21 errors,
@@ -95,7 +95,7 @@ These are not wire-answer differences (except where said). They are worth knowin
 
 | Change | Touch |
 |---|---|
-| R9 answer an unchanged follower at once | `join.go` (join in Stable and Syncing), R9 in `docs/rebalance.md`, the model `internal/spec/rebalance.go`, `coordinator_test.go` |
+| R9 answer an unchanged follower at once | `join.go` (join in Stable and Syncing), R9 in `docs/rebalance.md`, the model `spec/rebalance.go`, `coordinator_test.go` |
 | R13 raise the generation on an empty round | `join.go`, `domain/group` (install of an empty group), the model, R13 test in `coordinator_test.go` |
 | R14, R15 vote and early refusal | `join.go`, the model, `rules_test.go` TestProtocolMismatch |
 | R21 drop the assignment check | `sync.go`, the model, `rules_test.go` TestSyncRules |

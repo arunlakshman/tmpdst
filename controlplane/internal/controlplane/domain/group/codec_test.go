@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // TestRecordBytesPinned pins the bytes of the three state records. They are

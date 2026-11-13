@@ -3,9 +3,6 @@ package fault
 
 import "github.com/manifesterio/mds/dst/rng"
 
-// Site is a stable cooperative fault point id. Do not interpolate values into it.
-type Site string
-
 // Default rates for Maybe activation and fire.
 const (
 	MaybeActivateRate = 0.5
@@ -55,11 +52,12 @@ func (i *Injector) MaybeP(site Site, p float64) bool {
 }
 
 func (i *Injector) maybe(site Site, fire float64) bool {
-	c, known := i.sites[string(site)]
+	name := site.Name()
+	c, known := i.sites[name]
 	if !known {
 		c = &SiteCount{On: i.rand.Chance(MaybeActivateRate)}
-		i.sites[string(site)] = c
-		i.order = append(i.order, string(site))
+		i.sites[name] = c
+		i.order = append(i.order, name)
 	}
 	c.Calls++
 	if c.On && i.rand.Chance(fire) {

@@ -18,6 +18,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/server"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // The real replica in one process, on the in-memory log and object store. The
@@ -143,9 +144,9 @@ type replicaNode struct {
 // the log.
 func newReplicaNode(rt *rapid.T, trim bool) *replicaNode {
 	n := &replicaNode{rt: rt, log: executor.NewMemoryLog(), objs: executor.NewMemoryObjects(), cfg: replica.Config{
-		Rank: 0, Writer: "cp-0", CatchUpEvery: runtime.Duration(time.Millisecond), Heartbeat: runtime.Duration(time.Second),
-		TakeoverAfter:   runtime.Duration(20 * time.Millisecond), // a restarted node takes the write role after this
-		CheckpointEvery: runtime.Duration(3 * time.Millisecond), CheckpointMinSlots: 1, CheckpointPrefix: checkpointPrefix,
+		Rank: 0, Writer: "cp-0", CatchUpEvery: machine.Duration(time.Millisecond), Heartbeat: machine.Duration(time.Second),
+		TakeoverAfter:   machine.Duration(20 * time.Millisecond), // a restarted node takes the write role after this
+		CheckpointEvery: machine.Duration(3 * time.Millisecond), CheckpointMinSlots: 1, CheckpointPrefix: checkpointPrefix,
 	}}
 	if trim {
 		n.cfg.KeepSlots = 2
@@ -162,7 +163,7 @@ func newReplicaNode(rt *rapid.T, trim bool) *replicaNode {
 func (n *replicaNode) start() {
 	n.proc = &process{log: n.log, objs: n.objs}
 	n.node = server.New(server.Config{Machine: n.cfg, Log: n.proc, Objects: n.proc,
-		Self: runtime.NodeInstance{Node: "cp-0"}, StopGrace: runtime.Duration(50 * time.Millisecond)})
+		Self: machine.NodeInstance{Node: "cp-0"}, StopGrace: machine.Duration(50 * time.Millisecond)})
 	ctx, cancel := context.WithTimeout(n.rt.Context(), 10*time.Second)
 	defer cancel()
 	if err := n.node.Start(ctx); err != nil {

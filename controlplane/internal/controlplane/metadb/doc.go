@@ -1,7 +1,7 @@
 // Package metadb is the kernel of the replicated control-plane state. It has
-// the same rules as the reference model in internal/spec, but it keeps the
+// the same rules as the reference model in spec, but it keeps the
 // state in an embedded ordered key-value store instead of in-memory maps.
-// internal/spec stays the independent reference; this package is tested
+// spec stays the independent reference; this package is tested
 // against it.
 //
 // The kernel holds one table built from the schemas of the contexts

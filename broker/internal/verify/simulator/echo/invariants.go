@@ -4,9 +4,13 @@ import (
 	"strings"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/campaign"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/preset"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/truth"
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
+	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 type ackFact struct {
@@ -15,39 +19,43 @@ type ackFact struct {
 	payload []byte
 }
 
-func parseAck(f core.Fact) (ackFact, bool) {
-	o, ok1 := f.Field("offset").(core.Int64Value)
-	k, ok2 := f.Field("key").(core.StringValue)
-	p, ok3 := f.Field("payload").(core.Bytes)
+func parseAck(f machine.Fact) (ackFact, bool) {
+	o, ok1 := f.Field("offset").(machine.Int64Value)
+	k, ok2 := f.Field("key").(machine.StringValue)
+	p, ok3 := f.Field("payload").(machine.Bytes)
 	return ackFact{int64(o), string(k), p}, ok1 && ok2 && ok3
 }
 
 // ackedMeansCommitted: on the Step that acks, the offset is committed in the
 // control plane to a segment that exists in the object store and decodes to
 // the acked payload.
-type ackedMeansCommitted struct{ cur simulator.Cursor }
+type ackedMeansCommitted struct {
+	cur  kernel.Cursor
+	objs truth.ObjectStore
+	cp   truth.ControlPlane
+}
 
-func (*ackedMeansCommitted) Name() string         { return "AckedIsCommitted" }
-func (*ackedMeansCommitted) AtEnd(simulator.View) {}
+func (*ackedMeansCommitted) Name() string      { return "AckedIsCommitted" }
+func (*ackedMeansCommitted) AtEnd(kernel.View) {}
 
-func (i *ackedMeansCommitted) Observe(v simulator.View) {
+func (i *ackedMeansCommitted) Observe(v kernel.View) {
 	for _, tf := range v.Timeline().Since("echo_acked", &i.cur) {
 		a, ok := parseAck(tf.Fact)
-		v.Assert().Always(ok, "echo: ack fact is well formed")
+		v.Assert().Always(ok, ackFactWellFormed)
 		if !ok {
 			continue
 		}
-		det := []core.ContextPair{{Key: "offset", Value: a.off}, {Key: "key", Value: a.key}}
+		det := []assert.Pair{{Key: "offset", Value: a.off}, {Key: "key", Value: a.key}}
 		var loc core.SegmentRef
 		found := false
-		for _, r := range v.CP().Committed(topicPartition()) {
+		for _, r := range i.cp.Committed(topicPartition()) {
 			if int64(r.Base) == a.off && r.Count == 1 && r.Loc.Key == a.key {
 				loc, found = r.Loc, true
 			}
 		}
-		v.Assert().Always(found, "echo: acked offset is committed", det...)
-		obj, have := v.Objects().Object(a.key)
-		v.Assert().Always(have, "echo: acked segment exists in the object store", det...)
+		v.Assert().Always(found, ackedOffsetCommitted, det...)
+		obj, have := i.objs.Object(a.key)
+		v.Assert().Always(have, ackedSegmentExistsObjectStore, det...)
 		if !found || !have {
 			continue
 		}
@@ -59,70 +67,71 @@ func (i *ackedMeansCommitted) Observe(v simulator.View) {
 				}
 			}
 		}
-		v.Assert().Always(same, "echo: acked segment holds the acked payload", det...)
+		v.Assert().Always(same, ackedSegmentHoldsAckedPayload, det...)
 	}
 }
 
 // readWhatWasAcked: a GET of an acked offset returns the acked payload or an error,
 // never a different payload.
 type readWhatWasAcked struct {
-	cur     simulator.Cursor
+	hist    history.Reader[Op, string]
+	cur     kernel.Cursor
 	acked   map[int64][]byte
 	checked []bool
 }
 
-func (*readWhatWasAcked) Name() string         { return "ReadYourAck" }
-func (*readWhatWasAcked) AtEnd(simulator.View) {}
+func (*readWhatWasAcked) Name() string      { return "ReadYourAck" }
+func (*readWhatWasAcked) AtEnd(kernel.View) {}
 
-func (i *readWhatWasAcked) Observe(v simulator.View) {
+func (i *readWhatWasAcked) Observe(v kernel.View) {
 	for _, tf := range v.Timeline().Since("echo_acked", &i.cur) {
 		a, ok := parseAck(tf.Fact)
 		if !ok {
 			continue
 		}
 		if prev, dup := i.acked[a.off]; dup {
-			v.Assert().Always(string(prev) == string(a.payload), "echo: an offset is acked with one payload", core.ContextPair{Key: "offset", Value: a.off})
+			v.Assert().Always(string(prev) == string(a.payload), offsetAckedOnePayload, assert.Pair{Key: "offset", Value: a.off})
 		}
 		i.acked[a.off] = a.payload
 	}
-	ops := v.History().Ops()
+	ops := i.hist.Ops()
 	for len(i.checked) < len(ops) {
 		i.checked = append(i.checked, false)
 	}
 	for j, operation := range ops {
-		if i.checked[j] || operation.Outcome == simulator.OpPending {
+		if i.checked[j] || operation.Outcome == history.Pending {
 			continue
 		}
 		i.checked[j] = true
 		g, ok := operation.Op.(GetOp)
-		res, isStr := operation.Result.(string)
-		if !ok || !isStr {
+		res := operation.Result
+		if !ok {
 			continue
 		}
 		if rest, has := strings.CutPrefix(res, "VAL "); has {
 			want, acked := i.acked[g.Offset]
-			v.Assert().Always(acked && rest == string(want), "echo: GET of an acked offset returns the acked payload",
-				core.ContextPair{Key: "offset", Value: g.Offset}, core.ContextPair{Key: "got", Value: rest})
+			v.Assert().Always(acked && rest == string(want), getReturnsAckedPayload,
+				assert.Pair{Key: "offset", Value: g.Offset}, assert.Pair{Key: "got", Value: rest})
 		}
 	}
 }
 
-type liveness struct{}
+type liveness struct{ hist history.Reader[Op, string] }
 
-func (*liveness) Name() string           { return "Liveness" }
-func (*liveness) Observe(simulator.View) {}
+func (*liveness) Name() string        { return "Liveness" }
+func (*liveness) Observe(kernel.View) {}
 
-func (l *liveness) AtEnd(v simulator.View) {
-	settling, ok1 := campaign.PhaseStart(v, simulator.PhaseRecovering)
-	settle, ok2 := campaign.PhaseStart(v, simulator.PhaseRecover)
-	v.Assert().Always(ok1 && ok2, "echo: the kernel announced Settling and Settle")
-	from, to := settling+simulator.Time(campaign.ProgressGraceTime), settle
-	for _, operation := range v.History().Ops() {
-		v.Assert().Always(operation.Outcome != simulator.OpPending, "echo: no request pending at end", core.ContextPair{Key: "op", Value: operation.Op})
+func (l *liveness) AtEnd(v kernel.View) {
+	settling, ok1 := preset.PhaseStart(v, kernel.PhaseRecovering)
+	settle, ok2 := preset.PhaseStart(v, kernel.PhaseRecover)
+	v.Assert().Always(ok1 && ok2, kernelAnnouncedSettlingAndSettle)
+	from, to := settling+kernel.Time(preset.ProgressGraceTime), settle
+	for _, operation := range l.hist.Ops() {
+		v.Assert().Always(operation.Outcome != history.Pending, noRequestPendingAtEnd, assert.Pair{Key: "op", Value: operation.Op})
 		if !ok1 || !ok2 || operation.Invoke < from || operation.Invoke >= to {
 			continue
 		}
-		res, _ := operation.Result.(string)
+		res := operation.Result
 		good := false
 		switch operation.Op.(type) {
 		case PutOp:
@@ -130,22 +139,8 @@ func (l *liveness) AtEnd(v simulator.View) {
 		case GetOp:
 			good = strings.HasPrefix(res, "VAL ") || res == "ERR corrupt"
 		}
-		v.Assert().Always(good, "echo: request invoked in Settling succeeds",
-			core.ContextPair{Key: "op", Value: operation.Op}, core.ContextPair{Key: "result", Value: res}, core.ContextPair{Key: "invoke", Value: operation.Invoke})
+		v.Assert().Always(good, requestInSettlingSucceeds,
+			assert.Pair{Key: "op", Value: operation.Op}, assert.Pair{Key: "result", Value: res}, assert.Pair{Key: "invoke", Value: operation.Invoke})
 	}
-	v.Assert().Sometimes(len(v.History().Ops()) > 0, "echo: workload issued requests")
-}
-
-// expectReachable is the campaign's coverage contract (Config.ExpectReachable):
-// every fault family and recovery path must fire somewhere in the campaign.
-// The engines and the broker declare these props where the event happens; the
-// list lives here because only the campaign knows what it must see.
-func expectReachable() []core.PropertyID {
-	return []core.PropertyID{
-		"obj 503 injected", "obj timeout injected", "obj lost response injected", "obj outage started", "obj get corrupted",
-		"cp 503 injected", "cp timeout injected", "cp lost response injected", "cp outage started",
-		"net: partition injected", "net: clog injected", "net: random_close injected", "net: black_hole injected",
-		"echo: commit retried after MaybeApplied",
-		"echo: corruption detected on read",
-	}
+	v.Assert().Sometimes(len(l.hist.Ops()) > 0, workloadIssuedRequests)
 }

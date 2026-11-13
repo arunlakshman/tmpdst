@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/controlplane/contract"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // corruptOrValue runs a state-record decoder. These decoders panic with

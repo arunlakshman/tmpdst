@@ -9,15 +9,27 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/kafka"
+	"github.com/manifesterio/mds/dst/kernel"
 )
 
-// C4 (speccheck/doc.go): the at-least-once Kafka oracle against the speccheck.Broker and
-// speccheck.ControlPlane specs. The oracle never imports speccheck (decision 21);
-// this external test package may, because determinismcheck does not read _test.go
-// files and only export_test.go (package kafka, no speccheck) reaches into the
-// oracle. Run: go test ./sim/kafka -run C4
+// C4 (speccheck/doc.go): the at-least-once Kafka oracle against the broker spec
+// (broker/spec) and the control plane spec (controlplane/spec). The oracle never
+// imports a spec package (decision 21); this external test package may, because
+// determinismcheck does not read _test.go files and only export_test.go
+// (package kafka, no spec) reaches into the oracle. The linter rule in
+// .golangci.yml (depguard, kafka-oracle-no-spec) says the same.
+// Run: go test ./internal/verify/simulator/kafka -run C4
+
+// isSpecImport reports whether an import path is a spec package: the broker
+// spec, the control plane spec, or the speccheck tree (the bridge, the
+// checker, the suites).
+func isSpecImport(path string) bool {
+	path = strings.Trim(path, `"`)
+	return strings.HasSuffix(path, "/broker/spec") ||
+		strings.HasSuffix(path, "/controlplane/spec") ||
+		strings.Contains(path, "/speccheck")
+}
 
 func TestC4OracleDoesNotImportSpecCheck(t *testing.T) {
 	fset := token.NewFileSet()
@@ -34,7 +46,7 @@ func TestC4OracleDoesNotImportSpecCheck(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, imp := range f.Imports {
-			if strings.Contains(imp.Path.Value, "speccheck") {
+			if isSpecImport(imp.Path.Value) {
 				t.Errorf("%s imports %s", name, imp.Path.Value)
 			}
 		}
@@ -42,17 +54,17 @@ func TestC4OracleDoesNotImportSpecCheck(t *testing.T) {
 }
 
 // verdict runs a fresh oracle over the finished world: one Observe, AtEnd.
-func verdict(w *world) (failures, simulator.SafetyRule) {
+func verdict(w *world) (failures, kernel.Rule) {
 	w.as = failures{}
-	inv := kafka.NewOracle(w.opts)
+	inv := kafka.NewOracle(w.opts, (*hist)(w), (*objView)(w), (*controlPlaneView)(w))
 	inv.Observe(w)
 	inv.AtEnd(w)
 	return w.as, inv
 }
 
 // sameAsSpec: the oracle's reconstructed log of every partition is exactly
-// what speccheck.Broker holds.
-func sameAsSpec(t *testing.T, seed uint64, w *world, inv simulator.SafetyRule) {
+// what the broker spec holds.
+func sameAsSpec(t *testing.T, seed uint64, w *world, inv kernel.Rule) {
 	t.Helper()
 	for _, topicPartition := range w.tps {
 		recs, _ := w.parts[topicPartition].Read(0, 0)

@@ -11,8 +11,8 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specsystem"
+	"github.com/manifesterio/mds/dst/live"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 )
@@ -26,7 +26,7 @@ func startNode(t *testing.T, mod func(*NodeConfig)) (*Node, NodeConfig) {
 	config := NodeConfig{
 		NodeID: "n1", Broker: broker.DefaultConfig(), Listener: ln,
 		Objects: specsystem.NewObjectStore(), ObjClassify: MemoryErrorClassifier{},
-		ControlPlane: specsystem.NewControlPlane(), CPClassify: MemoryErrorClassifier{},
+		ControlPlane: specsystem.NewControlPlane(), CPClassify: memoryCP{},
 		StopGrace: time.Second, FlushGrace: 50 * time.Millisecond,
 	}
 	if mod != nil {
@@ -125,7 +125,7 @@ func TestStartGracefulStop(t *testing.T) {
 func TestStartKill(t *testing.T) {
 	n, _ := startNode(t, nil)
 	n.Kill()
-	if err := waitDone(t, n); !errors.Is(err, system.ErrStopped) && !errors.Is(err, system.ErrKilledByRuntime) {
+	if err := waitDone(t, n); !errors.Is(err, live.ErrStopped) && !errors.Is(err, live.ErrKilled) {
 		t.Errorf("kill: %v", err)
 	}
 }

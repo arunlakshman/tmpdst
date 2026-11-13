@@ -2,15 +2,22 @@ package broker
 
 import (
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
-// stateHasher is FNV-1a; hash/fnv is off the deterministic allow-list.
+// stateHasher is FNV-1a; hash/fnv is off the deterministic allow-list. The integer fold
+// is the one of dst/trace, so the broker and the simulator write the same bytes.
 type stateHasher uint64
 
 func newStateHasher() stateHasher { return 14695981039346656037 }
 
-func (h *stateHasher) byte(b byte)  { *h = (*h ^ stateHasher(b)) * 1099511628211 }
-func (h *stateHasher) u64(v uint64) { *h = stateHasher(core.Fnv64Hash(uint64(*h), v)) }
+func (h *stateHasher) byte(b byte) { *h = (*h ^ stateHasher(b)) * 1099511628211 }
+func (h *stateHasher) u64(v uint64) {
+	t := trace.Hash(*h)
+	t.Uint64(v)
+	*h = stateHasher(t)
+}
 func (h *stateHasher) bool(b bool) {
 	if b {
 		h.u64(1)
@@ -62,7 +69,7 @@ func (b *Broker) hashScalars(h *stateHasher) {
 	h.u64(b.guess)
 }
 
-func (h *stateHasher) topics(topics []core.TopicInfo) {
+func (h *stateHasher) topics(topics []contract.TopicInfo) {
 	h.u64(uint64(len(topics)))
 	for _, t := range topics {
 		h.str(t.Name)

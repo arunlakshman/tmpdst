@@ -3,7 +3,7 @@
 // and deterministic (determinismcheck-clean) and never panics, whatever the input.
 //
 // One segment object is one upload holding batches for many partitions (see
-// core.CommitSegment). All integers are big-endian.
+// contract.CommitSegment). All integers are big-endian.
 //
 //	object = header body
 //
@@ -48,6 +48,7 @@ import (
 	"math"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 const (
@@ -291,7 +292,7 @@ func readIndexEntry(body []byte, p int, i uint64) (segmentIndexEntry, int, error
 	}
 	return segmentIndexEntry{
 		Entry: Entry{
-			TopicPartition: core.NewTopicPartition(topic, part),
+			TopicPartition: contract.NewTopicPartition(topic, part),
 			Records:        binary.BigEndian.Uint32(body[q+entryRecords:]),
 			CRC:            binary.BigEndian.Uint32(body[q+entryCRC:]),
 		},

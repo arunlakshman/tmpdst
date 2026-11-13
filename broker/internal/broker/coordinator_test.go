@@ -7,6 +7,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // liveTrio is a live set with brokers 2 and 3. Broker 1 is the test broker
@@ -114,12 +115,12 @@ func TestFindCoordinatorKeysAndTypes(t *testing.T) {
 }
 
 // listGroupsFrom asks broker id for its groups (version 4, no filter).
-func listGroupsFrom(t *testing.T, id int32, live []core.BrokerAddr, groups []core.GroupSummary) map[string]int {
+func listGroupsFrom(t *testing.T, id int32, live []core.BrokerAddr, groups []contract.GroupSummary) map[string]int {
 	t.Helper()
 	config := DefaultConfig()
 	config.BrokerID = id
-	h, _ := withGroupCP(t, config, func(core.ControlPlaneOperation) core.ControlPlaneDone {
-		return cpOK(core.ListGroupsResp{Groups: groups})
+	h, _ := withGroupCP(t, config, func(contract.Operation) core.ControlPlaneDone {
+		return cpOK(contract.ListGroupsResp{Groups: groups})
 	})
 	h.do(core.LiveBrokers{Brokers: live})
 	r := h.call(h.open(1), 4, kmsg.NewPtrListGroupsRequest()).(*kmsg.ListGroupsResponse)
@@ -132,9 +133,9 @@ func listGroupsFrom(t *testing.T, id int32, live []core.BrokerAddr, groups []cor
 }
 
 func TestListGroupsEachBrokerListsItsOwn(t *testing.T) {
-	var groups []core.GroupSummary
+	var groups []contract.GroupSummary
 	for i := range 30 {
-		groups = append(groups, core.GroupSummary{Name: "g" + strconv.Itoa(i), ProtocolType: "consumer", State: "Stable"})
+		groups = append(groups, contract.GroupSummary{Name: "g" + strconv.Itoa(i), ProtocolType: "consumer", State: "Stable"})
 	}
 	live := []core.BrokerAddr{{NodeID: 1, Host: "localhost", Port: 9092}, {NodeID: 2, Host: "h2", Port: 9092}, {NodeID: 3, Host: "h3", Port: 9093}}
 	seen := map[string]int{}
@@ -154,7 +155,7 @@ func TestListGroupsEachBrokerListsItsOwn(t *testing.T) {
 }
 
 func TestListGroupsFallsBackToAllWithNoLiveSet(t *testing.T) {
-	groups := []core.GroupSummary{{Name: "a", State: "Empty"}, {Name: "b", State: "Stable"}}
+	groups := []contract.GroupSummary{{Name: "a", State: "Empty"}, {Name: "b", State: "Stable"}}
 	got := listGroupsFrom(t, 1, nil, groups)
 	if len(got) != 2 || got["a"] != 1 || got["b"] != 1 {
 		t.Fatalf("no live set: %v, want both groups", got)
@@ -162,9 +163,9 @@ func TestListGroupsFallsBackToAllWithNoLiveSet(t *testing.T) {
 }
 
 func TestListGroupsStatesFilter(t *testing.T) {
-	groups := []core.GroupSummary{{Name: "a", State: "Empty"}, {Name: "b", State: "Stable"}, {Name: "c", State: "PreparingSync"}}
-	h, _ := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
-		return cpOK(core.ListGroupsResp{Groups: groups})
+	groups := []contract.GroupSummary{{Name: "a", State: "Empty"}, {Name: "b", State: "Stable"}, {Name: "c", State: "PreparingSync"}}
+	h, _ := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone {
+		return cpOK(contract.ListGroupsResp{Groups: groups})
 	})
 	c := h.open(1)
 	r := kmsg.NewPtrListGroupsRequest()

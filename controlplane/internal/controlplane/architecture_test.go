@@ -20,10 +20,13 @@ import (
 const (
 	module = "github.com/manifesterio/mds/controlplane/"
 	dst    = "github.com/manifesterio/mds/dst"
+	shared = "github.com/manifesterio/mds/shared"
 	cp     = "internal/controlplane/"
 	rt     = "internal/runtime"
-	spec   = "internal/spec"
-	infra  = "internal/testinfra"
+	// contract and spec are public: the broker imports them. They are in the module root, not under internal/.
+	contractPkg = "contract"
+	spec        = "spec"
+	infra       = "internal/testinfra"
 )
 
 type pkg struct {
@@ -69,9 +72,9 @@ func local(path string) string {
 	return ""
 }
 
-// thirdParty tells whether a path is a package of another module (not std, not dst).
+// thirdParty tells whether a path is a package of another module (not std, not dst, not shared: both are first-party modules of this repo).
 func thirdParty(path string) bool {
-	return local(path) == "" && strings.Contains(strings.Split(path, "/")[0], ".") && !strings.HasPrefix(path, dst)
+	return local(path) == "" && strings.Contains(strings.Split(path, "/")[0], ".") && !strings.HasPrefix(path, dst) && !strings.HasPrefix(path, shared)
 }
 
 // The domain packages. Each is one bounded piece of the control plane, and the
@@ -83,7 +86,7 @@ var domains = []string{cp + "domain/broker", cp + "domain/group", cp + "domain/r
 var domainEdges = map[string][]string{}
 
 // The verification side is test infrastructure, so it may import the reference model
-// (internal/spec). "Outside tests" in the rule means: no non-test file of any other
+// (spec). "Outside tests" in the rule means: no non-test file of any other
 // package, production or not, imports it. Test files may import both packages.
 // internal/testinfra is for test files and for the integration tests only.
 var (
@@ -122,14 +125,15 @@ func check(pkgs map[string]pkg) problems {
 		}
 	}
 	for _, dir := range domains {
-		allowed := append([]string{cp + "contract", cp + "metadb/engine", rt}, domainEdges[dir]...)
+		allowed := append([]string{contractPkg, cp + "metadb/engine", rt}, domainEdges[dir]...)
 		p.onlyImports(pkgs, dir, allowed, true)
 	}
 	// The other inner packages.
 	layers := map[string][]string{
-		cp + "contract":      {rt},
-		cp + "metadb/engine": {cp + "contract", rt},
-		cp + "replica":       {cp + "contract", cp + "metadb/engine", cp + "metadb", rt},
+		contractPkg:          nil,           // contract is public and imports only dst
+		spec:                 {contractPkg}, // so is the reference model, and it takes nothing else of the module
+		cp + "metadb/engine": {contractPkg, rt},
+		cp + "replica":       {contractPkg, cp + "metadb/engine", cp + "metadb", rt},
 		cp + "executor":      {rt},
 	}
 	for dir, allowed := range layers {
@@ -142,7 +146,7 @@ func check(pkgs map[string]pkg) problems {
 	// It does not know the group protocol machine (rebalance), nor the broker.
 	metadb := cp + "metadb"
 	protobuf := []string{"google.golang.org/protobuf/proto", "google.golang.org/protobuf/reflect/protoreflect"}
-	p.onlyImports(pkgs, metadb, []string{"api/controlplane/log/v1", "api/controlplane/shared/v1", cp + "contract",
+	p.onlyImports(pkgs, metadb, []string{"api/controlplane/log/v1", "api/controlplane/shared/v1", contractPkg,
 		cp + "domain/group", cp + "domain/topic", cp + "metadb/engine", cp + "metadb/engine/memory", rt}, false)
 	for _, imp := range pkgs[metadb].imports {
 		if thirdParty(imp) && !slices.Contains(protobuf, imp) {
@@ -166,7 +170,7 @@ func check(pkgs map[string]pkg) problems {
 		}
 	}
 
-	// (d) Nothing outside tests imports internal/spec or internal/testinfra: only the verifiers
+	// (d) Nothing outside tests imports spec or internal/testinfra: only the verifiers
 	// listed above do, in their non-test files.
 	for dir, pk := range pkgs {
 		for _, imp := range pk.imports {
@@ -179,11 +183,12 @@ func check(pkgs map[string]pkg) problems {
 		}
 	}
 
-	// live is the production runner: it knows no control-plane type.
-	p.onlyImports(pkgs, "internal/system/live", nil, true)
+	// The client is public (the broker uses it): it imports contract and the generated api, and no
+	// internal package. The broker is not in this module's reach (depguard forbids it too).
+	p.onlyImports(pkgs, "client", []string{contractPkg, "api/controlplane/v1", "api/controlplane/shared/v1"}, false)
 	// The log adapters import the port and little else of the module.
 	for _, a := range []string{"dynamolog", "sqllog"} {
-		p.onlyImports(pkgs, cp+"executor/"+a, []string{cp + "executor", rt, "internal/system/realclock"}, false)
+		p.onlyImports(pkgs, cp+"executor/"+a, []string{cp + "executor", rt}, false)
 	}
 	// The log entries and the shared messages do not pull in grpc: only the service package does.
 	// Every api package imports the options of protoc-gen-mdswire, which import no package of the module.
@@ -197,7 +202,7 @@ func check(pkgs map[string]pkg) problems {
 		}
 	}
 	// runtime never imports contract, and neither imports the wire packages (tests included).
-	for _, dir := range []string{rt, cp + "contract"} {
+	for _, dir := range []string{rt, contractPkg} {
 		for _, imp := range append(slices.Clone(pkgs[dir].imports), pkgs[dir].tests...) {
 			if rel := local(imp); strings.HasPrefix(rel, "api/") || rel == cp+"wire" || (dir == rt && rel == cp+"contract") {
 				p.add("%s imports %s: not allowed", dir, rel)
@@ -263,10 +268,13 @@ func TestImportRulesCanFail(t *testing.T) {
 		{"(c) spec imports the engine", with(real, spec, cp+"metadb/engine"), spec, cp + "metadb/engine"},
 		{"(d) the server imports spec", with(real, cp+"server", spec), cp + "server", spec},
 		{"(d) the binary imports testinfra", with(real, "cmd/mdscontrolplane", infra), "cmd/mdscontrolplane", infra},
-		{"(d) a system package imports testinfra", with(real, "internal/system/s3store", infra), "internal/system/s3store", infra},
 		{"(d) the simulator imports testinfra", with(real, "internal/verify/simulator", infra), "internal/verify/simulator", infra},
 		{"(d) the conformance suite imports testinfra", with(real, "test/conformance", infra), "test/conformance", infra},
 		{"(d) runtime imports spec", with(real, rt, spec), rt, spec},
+		{"(e) contract imports runtime", with(real, contractPkg, rt), contractPkg, rt},
+		{"(e) contract imports an internal package", with(real, contractPkg, cp+"metadb"), contractPkg, cp + "metadb"},
+		{"(e) client imports runtime", with(real, "client", rt), "client", rt},
+		{"(e) spec imports runtime", with(real, spec, rt), spec, rt},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -292,7 +300,7 @@ func extra(pkgs map[string]pkg, dir string) map[string]pkg {
 	return out
 }
 
-// All time comes from runtime.Clock: these packages never read the wall clock.
+// All time comes from machine.Clock: these packages never read the wall clock.
 var wallClock = regexp.MustCompile(`\btime\.(Now|Since|Until|AfterFunc|After|NewTimer|NewTicker|Tick|Sleep)\(`)
 
 func TestNoWallClockInTheDomain(t *testing.T) {
@@ -308,7 +316,7 @@ func TestNoWallClockInTheDomain(t *testing.T) {
 				t.Fatal(err)
 			}
 			if m := wallClock.Find(src); m != nil {
-				t.Errorf("%s calls %s: take a runtime.Clock instead", file, m)
+				t.Errorf("%s calls %s: take a machine.Clock instead", file, m)
 			}
 		}
 	}

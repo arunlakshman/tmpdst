@@ -7,12 +7,29 @@ import (
 	"strings"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
+	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
+// Op is the sum of the operations the clients record in the history. The result
+// of an operation is the reply text. For a PUT it is "" when the client lost the
+// answer.
+//
+//sumtype:decl
+type Op interface{ isOp() }
+
+func (PutOp) isOp() {}
+func (GetOp) isOp() {}
+
+// History is the history of the echo scenario. A result is the reply text.
+type History = history.History[Op, string]
+
 // PutOp and GetOp are the History ops. A PUT result is the reply text, or ""
-// when the client lost the answer (OpIndeterminate).
+// when the client lost the answer (a result of unknown outcome).
 type PutOp struct {
 	Client, Seq int
 	Payload     string
@@ -25,13 +42,13 @@ type GetOp struct {
 }
 
 // Opts configures the workload. Phase behavior is not configured: the workload
-// is simulator.PhaseAware (see OnPhase).
+// hears the phase changes (see OnPhase).
 type Opts struct {
 	Clients int
 }
 
 const (
-	requestTimeout = 3 * core.Second
+	requestTimeout = 3 * machine.Second
 	keepAcked      = 16 // GET candidates per client
 )
 
@@ -47,7 +64,7 @@ type acked struct {
 }
 
 type pending struct {
-	id      core.ID
+	id      machine.ID
 	get     bool
 	seq     int
 	payload string
@@ -60,7 +77,7 @@ type client struct {
 	seq     int
 	recycle bool
 	acked   []acked
-	digest  core.Hasher // every ack ever recorded
+	digest  trace.Hash // every ack ever recorded
 	nacked  uint64
 	pend    *pending
 }
@@ -68,17 +85,18 @@ type client struct {
 // Workload is N closed-loop clients speaking the echo protocol.
 type Workload struct {
 	env     core.Environment
-	self    core.NodeInstance
+	self    machine.NodeInstance
 	opts    Opts
-	history simulator.History
+	history *History
 
 	stopped bool // PhaseSettle began: no new requests
 	loop    session.Loop[*client]
 }
 
-// NewWorkload builds the workload machine.
-func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.NodeInstance, o Opts) *Workload {
-	w := &Workload{env: env, self: self, opts: o}
+// NewWorkload builds the workload machine. It records its operations in h. A nil h
+// records nothing.
+func NewWorkload(env core.Environment, self machine.NodeInstance, brokers []machine.NodeID, h *History, o Opts) *Workload {
+	w := &Workload{env: env, self: self, opts: o, history: h}
 	w.loop = session.Loop[*client]{
 		Connected: func(c *client) bool { return c.State == clientReady || c.State == clientBusy },
 		Busy:      func(c *client) bool { return c.State == clientBusy },
@@ -87,20 +105,15 @@ func NewWorkload(env core.Environment, self core.NodeInstance, brokers []core.No
 		Bytes:     w.onBytes,
 		Lost:      w.lost,
 	}
-	for _, b := range brokers {
-		w.loop.Brokers = append(w.loop.Brokers, b.Node)
-	}
+	w.loop.Brokers = slices.Clone(brokers)
 	for i := range o.Clients {
-		w.loop.Clients = append(w.loop.Clients, &client{Client: session.Client{ID: i}, digest: core.NewHasher()})
+		w.loop.Clients = append(w.loop.Clients, &client{Client: session.Client{ID: i}, digest: trace.New()})
 	}
 	return w
 }
 
-// Name implements simulator.Workload.
+// Name is the name of the workload.
 func (w *Workload) Name() string { return "echo" }
-
-// SetHistory is called by the kernel.
-func (w *Workload) SetHistory(h simulator.History) { w.history = h }
 
 // Quiescent reports that no request is outstanding.
 func (w *Workload) Quiescent() bool {
@@ -117,24 +130,24 @@ func (w *Workload) Step(event core.Event) []core.Action { return w.loop.Step(eve
 
 func (w *Workload) onReady(c *client) []core.Action {
 	c.Fails, c.fr = 0, framer{}
-	return []core.Action{c.Wake(core.Millisecond)}
+	return []core.Action{c.Wake(machine.Millisecond)}
 }
 
-// OnPhase implements simulator.PhaseAware. Entering Settling every client drops its
+// OnPhase is called when the phase changes. Entering Settling every client drops its
 // connection at its next op boundary (idle ones now), so a connection damaged
 // in Chaos (black-holed, clogged) cannot starve it. Entering Settle (the drain)
 // clients issue nothing new; outstanding requests finish.
-func (w *Workload) OnPhase(p simulator.Phase) []core.Action {
+func (w *Workload) OnPhase(p kernel.Phase) []core.Action {
 	var acts []core.Action
 	switch p {
-	case simulator.PhaseRecovering:
+	case kernel.PhaseRecovering:
 		for _, c := range w.loop.Clients {
 			c.recycle = true
 			if c.State == clientReady { // idle: recycle now
 				acts = append(acts, w.next(c)...)
 			}
 		}
-	case simulator.PhaseRecover:
+	case kernel.PhaseRecover:
 		w.stopped = true
 	}
 	return acts
@@ -154,7 +167,7 @@ func (w *Workload) next(c *client) []core.Action {
 		return append(acts, w.loop.Dial(c)...)
 	}
 	p := &pending{id: w.env.NewID()}
-	var operation any
+	var operation Op
 	var body string
 	if w.env.Intn(3) == 0 && len(c.acked) > 0 {
 		a := c.acked[w.env.Intn(len(c.acked))]
@@ -193,27 +206,27 @@ func (w *Workload) onBytes(c *client, data []byte) []core.Action {
 func (w *Workload) reply(c *client, text string) []core.Action {
 	p := c.pend
 	c.pend, c.State = nil, clientReady
-	out := simulator.OpResultKnown
+	out := history.ResultKnown
 	if !p.get {
 		if rest, ok := strings.CutPrefix(text, "OK "); ok {
 			if off, err := strconv.ParseInt(rest, 10, 64); err == nil {
 				c.record(off, p.payload)
 			}
 		} else if text == "ERR maybe" {
-			out = simulator.OpResultUnknown
+			out = history.ResultUnknown
 		}
 	}
 	if w.history != nil {
 		w.history.Return(p.id, text, out)
 	}
-	think := core.Duration(200+w.env.Intn(600)) * core.Millisecond
+	think := machine.Duration(200+w.env.Intn(600)) * machine.Millisecond
 	return []core.Action{c.Answered(), c.Wake(think)}
 }
 
 func (c *client) record(off int64, payload string) {
 	c.nacked++
-	c.digest.Uint64Value(uint64(off))
-	c.digest.StringValue(payload)
+	c.digest.Uint64(uint64(off))
+	c.digest.String(payload)
 	c.acked = append(c.acked, acked{off, payload})
 	if len(c.acked) > keepAcked {
 		c.acked = slices.Clone(c.acked[1:])
@@ -223,9 +236,9 @@ func (c *client) record(off int64, payload string) {
 // lost settles the outstanding request, whose fate is unknown.
 func (w *Workload) lost(c *client, why string) {
 	if p := c.pend; p != nil {
-		out := simulator.OpResultUnknown
+		out := history.ResultUnknown
 		if p.get {
-			out = simulator.OpGivenUp
+			out = history.GivenUp
 		}
 		if w.history != nil {
 			w.history.Return(p.id, why, out)
@@ -236,37 +249,34 @@ func (w *Workload) lost(c *client, why string) {
 
 // StateHash folds all state.
 func (w *Workload) StateHash() uint64 {
-	h := core.NewHasher()
+	h := trace.New()
 	h.Bool(w.stopped)
-	h.Uint64Value(uint64(w.loop.NextReq))
+	h.Uint64(uint64(w.loop.NextReq))
 	for _, c := range w.loop.Clients {
-		h.Uint64Value(uint64(c.State))
-		h.Uint64Value(uint64(c.Conn))
-		h.Uint64Value(uint64(c.DialReq))
-		h.Uint64Value(uint64(c.SendReq))
-		h.Uint64Value(uint64(c.Dials))
-		h.Uint64Value(uint64(c.Fails))
-		h.Uint64Value(uint64(c.WakeGen))
-		h.Uint64Value(uint64(c.ReqGen))
+		h.Uint64(uint64(c.State))
+		h.Uint64(uint64(c.Conn))
+		h.Uint64(uint64(c.DialReq))
+		h.Uint64(uint64(c.SendReq))
+		h.Uint64(uint64(c.Dials))
+		h.Uint64(uint64(c.Fails))
+		h.Uint64(uint64(c.WakeGen))
+		h.Uint64(uint64(c.ReqGen))
 		h.Bytes(c.fr.buf)
-		h.Uint64Value(uint64(c.seq))
+		h.Uint64(uint64(c.seq))
 		h.Bool(c.recycle)
-		h.Uint64Value(uint64(len(c.acked)))
-		h.Uint64Value(uint64(c.digest))
-		h.Uint64Value(c.nacked)
+		h.Uint64(uint64(len(c.acked)))
+		h.Uint64(uint64(c.digest))
+		h.Uint64(c.nacked)
 		h.Bool(c.pend != nil)
 		if p := c.pend; p != nil {
 			h.Bytes(p.id[:])
 			h.Bool(p.get)
-			h.Uint64Value(uint64(p.seq))
-			h.StringValue(p.payload)
-			h.Uint64Value(uint64(p.off))
+			h.Uint64(uint64(p.seq))
+			h.String(p.payload)
+			h.Uint64(uint64(p.off))
 		}
 	}
 	return uint64(h)
 }
 
-var (
-	_ simulator.Workload            = (*Workload)(nil)
-	_ simulator.ReceivesPhaseChange = (*Workload)(nil)
-)
+var _ cluster.Workload = (*Workload)(nil)

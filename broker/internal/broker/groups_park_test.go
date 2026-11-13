@@ -6,15 +6,16 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 // A JoinGroup waits at the control plane (holdCP). It parks its own
 // connection only: another connection is answered at once, and the answers
 // of one connection keep their request order.
 func TestParkedJoinDoesNotBlockOtherConnections(t *testing.T) {
-	h, _ := withGroupCP(t, DefaultConfig(), func(operation core.ControlPlaneOperation) core.ControlPlaneDone {
-		if _, ok := operation.(core.GroupJoin); ok {
-			return cpOK(core.GroupJoinResp{MemberID: "m-1", Leader: "m-1", Generation: 1})
+	h, _ := withGroupCP(t, DefaultConfig(), func(operation contract.Operation) core.ControlPlaneDone {
+		if _, ok := operation.(contract.GroupJoin); ok {
+			return cpOK(contract.GroupJoinResp{MemberID: "m-1", Leader: "m-1", Generation: 1})
 		}
 		return cpOK(nil)
 	})
@@ -46,8 +47,8 @@ func TestParkedJoinDoesNotBlockOtherConnections(t *testing.T) {
 // A client that closes while its join is parked gets no answer, and the
 // broker does not fail. The late control plane answer is dropped.
 func TestJoinAnsweredAfterConnectionCloseIsDropped(t *testing.T) {
-	h, _ := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
-		return cpOK(core.GroupJoinResp{MemberID: "m-1", Leader: "m-1"})
+	h, _ := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone {
+		return cpOK(contract.GroupJoinResp{MemberID: "m-1", Leader: "m-1"})
 	})
 	h.holdCP = true
 	c := h.open(1)
@@ -66,8 +67,8 @@ func TestJoinAnsweredAfterConnectionCloseIsDropped(t *testing.T) {
 // A stop answers the group calls still at the control plane as unavailable,
 // and the broker exits. The late answer from the control plane is ignored.
 func TestStopAnswersParkedGroupCalls(t *testing.T) {
-	h, _ := withGroupCP(t, DefaultConfig(), func(core.ControlPlaneOperation) core.ControlPlaneDone {
-		return cpOK(core.GroupJoinResp{MemberID: "m-1"})
+	h, _ := withGroupCP(t, DefaultConfig(), func(contract.Operation) core.ControlPlaneDone {
+		return cpOK(contract.GroupJoinResp{MemberID: "m-1"})
 	})
 	h.holdCP = true
 	c := h.open(1)

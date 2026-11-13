@@ -6,6 +6,8 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // longFetch is a Fetch of offset 0 on topic t, for the partitions given.
@@ -25,7 +27,7 @@ func longFetch(minBytes, maxWaitMillis int32, parts ...int32) *kmsg.FetchRequest
 func lookups(h *harness, topicPartition core.TopicPartition) int {
 	n := 0
 	for _, operation := range h.cpCalls {
-		if f, ok := operation.(core.FindSegments); ok && f.TopicPartition == topicPartition {
+		if f, ok := operation.(contract.FindSegments); ok && f.TopicPartition == topicPartition {
 			n++
 		}
 	}
@@ -73,7 +75,7 @@ func TestFetchAnswersAtOnce(t *testing.T) {
 }
 
 func TestFetchDataOnSecondPoll(t *testing.T) {
-	topicPartition := core.NewTopicPartition("t", 0)
+	topicPartition := contract.NewTopicPartition("t", 0)
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	w := h.open(2)
@@ -97,7 +99,7 @@ func TestFetchDataOnSecondPoll(t *testing.T) {
 }
 
 func TestFetchMaxWaitExpiresEmpty(t *testing.T) {
-	topicPartition := core.NewTopicPartition("t", 0)
+	topicPartition := contract.NewTopicPartition("t", 0)
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.send(c, verFetch, longFetch(1, 300, 0))
@@ -105,7 +107,7 @@ func TestFetchMaxWaitExpiresEmpty(t *testing.T) {
 	fireUntilAnswer(t, h, c)
 	// The answer comes at MaxWait, not a poll interval later: the last poll
 	// waits only until the deadline.
-	if elapsed := h.now - start; elapsed < core.NodeTime(300*core.Millisecond) || elapsed > core.NodeTime(310*core.Millisecond) {
+	if elapsed := h.now - start; elapsed < machine.NodeTime(300*machine.Millisecond) || elapsed > machine.NodeTime(310*machine.Millisecond) {
 		t.Fatalf("answered after %d ns, want about 300 ms", elapsed)
 	}
 	if p := fetched(h.next(c)); len(p.RecordBatches) != 0 || p.ErrorCode != 0 {
@@ -135,7 +137,7 @@ func TestFetchTwoPartitionsOneShort(t *testing.T) {
 // A part with data holds it while the Fetch is short of MinBytes. Only the
 // partition with no data is polled again.
 func TestFetchPollsOnlyShortPartition(t *testing.T) {
-	tp0, tp1 := core.NewTopicPartition("t", 0), core.NewTopicPartition("t", 1)
+	tp0, tp1 := contract.NewTopicPartition("t", 0), contract.NewTopicPartition("t", 1)
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	w := h.open(2)
@@ -147,7 +149,7 @@ func TestFetchPollsOnlyShortPartition(t *testing.T) {
 	h.produceOne(w, e("t", 1, plain(t, "b")))
 	start := h.now
 	fireUntilAnswer(t, h, c)
-	if elapsed := h.now - start; elapsed < core.NodeTime(300*core.Millisecond) {
+	if elapsed := h.now - start; elapsed < machine.NodeTime(300*machine.Millisecond) {
 		t.Fatalf("answered before MaxWait with %d ns to go, MinBytes not met", elapsed)
 	}
 	if lookups(h, tp0) != 1 {
@@ -166,7 +168,7 @@ func TestFetchPollsOnlyShortPartition(t *testing.T) {
 }
 
 func TestFetchParkedEndsOnClose(t *testing.T) {
-	topicPartition := core.NewTopicPartition("t", 0)
+	topicPartition := contract.NewTopicPartition("t", 0)
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.send(c, verFetch, longFetch(1, 500, 0))
@@ -188,7 +190,7 @@ func TestFetchParkedAnswersOnStop(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	c := h.open(1)
 	h.send(c, verFetch, longFetch(1, 500, 0))
-	h.do(core.StopRequest{Deadline: h.now + core.NodeTime(core.Second)})
+	h.do(core.StopRequest{Deadline: h.now + machine.NodeTime(machine.Second)})
 	if !h.exited {
 		t.Fatal("a parked fetch held up the stop")
 	}

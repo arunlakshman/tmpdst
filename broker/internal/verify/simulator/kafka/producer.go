@@ -7,9 +7,12 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/session"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
+	"github.com/manifesterio/mds/dst/assert"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/trace"
 )
 
 // batch is one produce batch for one partition, retried unchanged until
@@ -18,7 +21,7 @@ import (
 // deliberately claims a producer id: the broker must reject it with
 // INVALID_REQUEST, per partition, and never commit it.
 type batch struct {
-	id        core.ID
+	id        machine.ID
 	tpIdx     int
 	vals      []string
 	data      []byte
@@ -61,18 +64,18 @@ func (b *batch) expect() int16 {
 	return 0
 }
 
-func (p *producer) hash(h *core.Hasher) {
-	h.Uint64Value(uint64(p.serial))
+func (p *producer) hash(h *trace.Hash) {
+	h.Uint64(uint64(p.serial))
 	h.Bool(p.noNew)
 	for _, b := range p.cur {
 		h.Bytes(b.id[:])
-		h.Uint64Value(uint64(b.tpIdx))
-		h.Uint64Value(uint64(b.attempts))
+		h.Uint64(uint64(b.tpIdx))
+		h.Uint64(uint64(b.attempts))
 		h.Bool(b.ambiguous)
 		h.Bool(b.idem)
 		h.Bool(b.corrupt)
-		h.Uint64Value(uint64(b.lastCode))
-		h.Uint64Value(b.dig)
+		h.Uint64(uint64(b.lastCode))
+		h.Uint64(b.dig)
 	}
 }
 
@@ -164,7 +167,7 @@ func (w *Workload) newBatches(c *client) {
 		}
 		data, err := buildBatch(pp, recs, w.pickCodec())
 		if err != nil {
-			w.env.Unreachable("kafka: client batch builds", core.ContextPair{Key: "err", Value: err.Error()})
+			w.env.Unreachable(clientBatchBuilds, assert.Pair{Key: "err", Value: err.Error()})
 			continue
 		}
 		b.corrupt = !b.idem && w.env.Intn(corruptEvery) == 0
@@ -172,7 +175,7 @@ func (w *Workload) newBatches(c *client) {
 			data[len(data)-1] ^= 0x40
 		}
 		b.data = data
-		dh := core.NewHasher()
+		dh := trace.New()
 		dh.Bytes(data)
 		b.dig = uint64(dh)
 		if w.history != nil {
@@ -204,7 +207,7 @@ func (w *Workload) sendProduce(c *client) []core.Action {
 }
 
 func (w *Workload) think(c *client) core.Action {
-	return c.Wake(core.Duration(20+w.env.Intn(60)) * core.Millisecond)
+	return c.Wake(machine.Duration(20+w.env.Intn(60)) * machine.Millisecond)
 }
 
 // onProduce resolves each batch of the request from its partition's answer.
@@ -229,15 +232,15 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 			keep = append(keep, b)
 		case b.expect() != 0 && code == b.expect():
 			// Rejected at admission, however many earlier attempts were lost.
-			w.resolve(b, simulator.OpGivenUp, ProduceRes{Base: -1, Code: code, Why: "rejected", Attempts: b.attempts})
+			w.resolve(b, history.GivenUp, ProduceRes{Base: -1, Code: code, Why: "rejected", Attempts: b.attempts})
 		case b.idem && code == 0:
-			w.env.Unreachable("kafka: a batch with a producer id is accepted")
-			w.resolve(b, simulator.OpResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
+			w.env.Unreachable(batchWithProducerIDAccepted)
+			w.resolve(b, history.ResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
 		case b.corrupt && code == 0:
-			w.env.Unreachable("kafka: a batch with a bad CRC is accepted")
-			w.resolve(b, simulator.OpResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
+			w.env.Unreachable(batchWithBadCRCAccepted)
+			w.resolve(b, history.ResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
 		case code == 0:
-			w.resolve(b, simulator.OpResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
+			w.resolve(b, history.ResultKnown, ProduceRes{Base: base, Attempts: b.attempts})
 		case unclearResultCode(code):
 			b.ambiguous = true
 			keep = append(keep, b)
@@ -259,7 +262,7 @@ func (w *Workload) onProduce(c *client, r *kmsg.ProduceResponse) []core.Action {
 	return []core.Action{w.think(c)}
 }
 
-func (w *Workload) resolve(b *batch, out simulator.OpOutcome, res ProduceRes) {
+func (w *Workload) resolve(b *batch, out history.Outcome, res ProduceRes) {
 	if w.history != nil {
 		w.history.Return(b.id, res, out)
 	}
@@ -270,9 +273,9 @@ func (w *Workload) resolve(b *batch, out simulator.OpOutcome, res ProduceRes) {
 func (w *Workload) giveUp(c *client, why string) []core.Action {
 	p := &c.p
 	for _, b := range p.cur {
-		out := simulator.OpGivenUp
+		out := history.GivenUp
 		if b.ambiguous {
-			out = simulator.OpResultUnknown
+			out = history.ResultUnknown
 		}
 		w.resolve(b, out, ProduceRes{Base: -1, Code: b.lastCode, Why: why, Attempts: b.attempts})
 	}

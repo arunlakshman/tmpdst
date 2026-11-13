@@ -27,7 +27,7 @@ service ControlPlane {
   rpc ListGroups(ListGroupsRequest) returns (ListGroupsResponse);
 }
 
-// ErrCode mirrors runtime.ErrCode spellings for the wire. Numbers are stable.
+// ErrCode mirrors contract.ErrCode spellings for the wire. Numbers are stable.
 enum ErrCode {
   ERR_CODE_OK = 0;
   ERR_CODE_TIMEOUT = 1;
@@ -48,7 +48,7 @@ enum ErrCode {
   ERR_CODE_TOPIC_EXISTS = 16;
 }
 
-// Outcome mirrors runtime.Outcome.
+// Outcome mirrors contract.Outcome.
 enum Outcome {
   OUTCOME_NOT_APPLIED = 0;
   OUTCOME_MAYBE_APPLIED = 1;
@@ -253,7 +253,7 @@ message LeaveGroupRequest {
 // LeaveGroupResponse has one code per request member, in request order.
 message LeaveGroupResponse {
   option (controlplane.options.v1.go_struct) = "rebalance.LeaveAnswer";
-  repeated ErrCode errs = 1 [(controlplane.options.v1.go_type) = "runtime.ErrCode"];
+  repeated ErrCode errs = 1 [(controlplane.options.v1.go_type) = "contract.ErrCode"];
 }
 
 message PartitionOffsetCommit {
@@ -275,7 +275,7 @@ message OffsetCommitRequest {
 // OffsetCommitResponse has one code per request partition, in request order.
 message OffsetCommitResponse {
   option (controlplane.options.v1.go_existing) = "contract.OffsetCommitResp";
-  repeated ErrCode errs = 1 [(controlplane.options.v1.go_type) = "runtime.ErrCode"];
+  repeated ErrCode errs = 1 [(controlplane.options.v1.go_type) = "contract.ErrCode"];
 }
 
 message OffsetFetchRequest {

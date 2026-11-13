@@ -8,6 +8,7 @@ import (
 	"github.com/twmb/franz-go/pkg/kmsg"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/controlplane/contract"
 )
 
 const verCreate = 7
@@ -25,7 +26,7 @@ func newTopic(name string, parts int32, rf int16) kmsg.CreateTopicsRequestTopic 
 // cpTopics is the topic table of the control plane spec.
 func cpTopics(h *harness) map[string]int32 {
 	out := map[string]int32{}
-	for _, t := range h.cp.Exec(core.ControlPlaneCall{Req: 1, Op: core.DescribeTopics{}}).(core.ControlPlaneDone).Resp.(core.DescribeTopicsResp).Topics {
+	for _, t := range h.cp.Exec(core.ControlPlaneCall{Req: 1, Op: contract.DescribeTopics{}}).(core.ControlPlaneDone).Resp.(contract.DescribeTopicsResp).Topics {
 		out[t.Name] = t.Partitions
 	}
 	return out
@@ -175,7 +176,7 @@ func TestCreateTopicsRetriesControlPlaneErrors(t *testing.T) {
 	c := h.open(1)
 	fails := 2
 	h.cpHook = func(a core.ControlPlaneCall, exec func() core.IOResult) core.IOResult {
-		if _, ok := a.Op.(core.CreateTopic); ok && fails > 0 {
+		if _, ok := a.Op.(contract.CreateTopic); ok && fails > 0 {
 			fails--
 			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied}
 		}
@@ -234,7 +235,7 @@ func TestCreateTopicsOneControlPlaneCall(t *testing.T) {
 	if len(h.cpCalls) != 1 {
 		t.Fatalf("%d control plane calls, want 1: %v", len(h.cpCalls), h.cpCalls)
 	}
-	if operation, ok := h.cpCalls[0].(core.CreateTopic); !ok || !operation.FailIfExists || operation.Name != "once" {
+	if operation, ok := h.cpCalls[0].(contract.CreateTopic); !ok || !operation.FailIfExists || operation.Name != "once" {
 		t.Fatalf("control plane call %#v, want an exclusive CreateTopic of once", h.cpCalls[0])
 	}
 	h.cpCalls = nil
@@ -242,7 +243,7 @@ func TestCreateTopicsOneControlPlaneCall(t *testing.T) {
 	if len(h.cpCalls) != 1 {
 		t.Fatalf("validate only: %d control plane calls, want 1", len(h.cpCalls))
 	}
-	if _, ok := h.cpCalls[0].(core.DescribeTopics); !ok {
+	if _, ok := h.cpCalls[0].(contract.DescribeTopics); !ok {
 		t.Fatalf("validate only sent %#v, want a DescribeTopics", h.cpCalls[0])
 	}
 	h.noViolations()
@@ -256,7 +257,7 @@ func TestCreateTopicsRetryAfterLostReply(t *testing.T) {
 	c := h.open(1)
 	lost := true
 	h.cpHook = func(a core.ControlPlaneCall, exec func() core.IOResult) core.IOResult {
-		if _, ok := a.Op.(core.CreateTopic); ok && lost {
+		if _, ok := a.Op.(contract.CreateTopic); ok && lost {
 			lost = false
 			exec() // the create takes effect
 			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}

@@ -13,6 +13,9 @@ import (
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/wire/kafkawire"
 	"github.com/manifesterio/mds/broker/internal/wire/segmentformat"
+	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 func TestApiVersions(t *testing.T) {
@@ -70,7 +73,7 @@ func TestMetadata(t *testing.T) {
 	if len(r.Topics) != 2 || kafkaErrorCode(r.Topics[0].ErrorCode) != errUnknownTopicOrPart || r.Topics[1].ErrorCode != 0 {
 		t.Fatalf("topics %+v", r.Topics)
 	}
-	for _, cmd := range h.cp.Exec(core.ControlPlaneCall{Req: 1, Op: core.DescribeTopics{Topics: []string{"nope"}}}).(core.ControlPlaneDone).Resp.(core.DescribeTopicsResp).Topics {
+	for _, cmd := range h.cp.Exec(core.ControlPlaneCall{Req: 1, Op: contract.DescribeTopics{Topics: []string{"nope"}}}).(core.ControlPlaneDone).Resp.(contract.DescribeTopicsResp).Topics {
 		t.Fatalf("topic auto-created: %v", cmd)
 	}
 	q.Topics = []kmsg.MetadataRequestTopic{}
@@ -147,7 +150,7 @@ func TestProduceFetchRoundTrip(t *testing.T) {
 	if ps[0].BaseOffset != 0 || ps[1].BaseOffset != 0 || ps[2].BaseOffset != 2 || ps[0].ErrorCode+ps[1].ErrorCode+ps[2].ErrorCode != 0 {
 		t.Fatalf("results %+v", ps)
 	}
-	p := fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)))
+	p := fetched(h.call(c, verFetch, fetchReq(contract.NewTopicPartition("t", 0), 0, 1<<20)))
 	bs, err := kafkawire.SplitBatches(p.RecordBatches)
 	if err != nil || len(bs) != 2 || p.HighWatermark != 5 || p.LastStableOffset != 5 || p.LogStartOffset != 0 {
 		t.Fatalf("fetch: %v %d batches hwm %d", err, len(bs), p.HighWatermark)
@@ -159,25 +162,25 @@ func TestProduceFetchRoundTrip(t *testing.T) {
 		}
 	}
 	// From the middle: the containing batch is returned whole.
-	p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 3, 1<<20)))
+	p = fetched(h.call(c, verFetch, fetchReq(contract.NewTopicPartition("t", 0), 3, 1<<20)))
 	if bs, _ := kafkawire.SplitBatches(p.RecordBatches); len(bs) != 1 {
 		t.Fatalf("mid fetch %d batches", len(bs))
 	}
 	// Partition limit: at least one batch, no more than fits.
-	p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1)))
+	p = fetched(h.call(c, verFetch, fetchReq(contract.NewTopicPartition("t", 0), 0, 1)))
 	if bs, _ := kafkawire.SplitBatches(p.RecordBatches); len(bs) != 1 {
 		t.Fatalf("limited fetch %d batches", len(bs))
 	}
 	// MaxWait 0: an empty fetch answers at once (the long poll is tested in fetch_test.go).
-	atEnd := fetchReq(core.NewTopicPartition("t", 0), 5, 1<<20)
+	atEnd := fetchReq(contract.NewTopicPartition("t", 0), 5, 1<<20)
 	atEnd.MaxWaitMillis = 0
 	if p = fetched(h.call(c, verFetch, atEnd)); len(p.RecordBatches) != 0 || p.ErrorCode != 0 || p.HighWatermark != 5 {
 		t.Fatalf("at HWM: %+v", p)
 	}
-	if p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 6, 1<<20))); kafkaErrorCode(p.ErrorCode) != errOffsetOutOfRange {
+	if p = fetched(h.call(c, verFetch, fetchReq(contract.NewTopicPartition("t", 0), 6, 1<<20))); kafkaErrorCode(p.ErrorCode) != errOffsetOutOfRange {
 		t.Fatalf("beyond HWM: %d", p.ErrorCode)
 	}
-	if p = fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("zz", 0), 0, 1<<20))); kafkaErrorCode(p.ErrorCode) != errUnknownTopicOrPart {
+	if p = fetched(h.call(c, verFetch, fetchReq(contract.NewTopicPartition("zz", 0), 0, 1<<20))); kafkaErrorCode(p.ErrorCode) != errUnknownTopicOrPart {
 		t.Fatalf("unknown topic: %d", p.ErrorCode)
 	}
 	h.noViolations()
@@ -221,7 +224,7 @@ func TestTopicCacheRefresh(t *testing.T) {
 	n := len(h.cpCalls)
 	h.produceOne(c, e("late", 0, plain(t, "y")))
 	for _, operation := range h.cpCalls[n:] {
-		if _, ok := operation.(core.DescribeTopics); ok {
+		if _, ok := operation.(contract.DescribeTopics); ok {
 			t.Fatal("cache not used")
 		}
 	}
@@ -264,7 +267,7 @@ func TestPipelinedResponsesInOrder(t *testing.T) {
 	var chunk []byte
 	chunk = append(chunk, h.frame(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))...)
 	chunk = append(chunk, h.frame(c, 3, kmsg.NewPtrApiVersionsRequest())...)
-	pipelined := fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)
+	pipelined := fetchReq(contract.NewTopicPartition("t", 0), 0, 1<<20)
 	pipelined.MaxWaitMillis = 0 // answer at once, so the three responses come out in one flush
 	chunk = append(chunk, h.frame(c, verFetch, pipelined)...)
 	h.do(core.BytesReceived{Conn: 1, Data: chunk})
@@ -303,7 +306,7 @@ func TestFactImmediatelyBeforeSend(t *testing.T) {
 			t.Fatalf("ack fact not followed by Send: %T", h.all[i+1])
 		}
 		f := e.Fact
-		if f.Field("topic") != core.StringValue("t") || f.Field("base_offset") != core.Int64Value(0) || f.Field("count") != core.Int64Value(2) {
+		if f.Field("topic") != machine.StringValue("t") || f.Field("base_offset") != machine.Int64Value(0) || f.Field("count") != machine.Int64Value(2) {
 			t.Fatalf("fields %v", f.Fields)
 		}
 	}
@@ -319,7 +322,7 @@ func TestGracefulStop(t *testing.T) {
 	if len(h.puts) != 0 {
 		t.Fatal("flushed early")
 	}
-	h.do(core.StopRequest{Deadline: h.now + core.NodeTime(core.Second)})
+	h.do(core.StopRequest{Deadline: h.now + machine.NodeTime(machine.Second)})
 	if !h.exited || !h.paused[1] {
 		t.Fatalf("exited=%v paused=%v", h.exited, h.paused[1])
 	}
@@ -329,7 +332,7 @@ func TestGracefulStop(t *testing.T) {
 	if r := produced(h.next(c))[0]; r.ErrorCode != 0 || r.BaseOffset != 0 {
 		t.Fatalf("%+v", r)
 	}
-	if h.cp.End(core.NewTopicPartition("t", 0)) != 1 {
+	if h.cp.End(contract.NewTopicPartition("t", 0)) != 1 {
 		t.Fatal("not flushed")
 	}
 	// Idle broker exits at once.
@@ -368,15 +371,15 @@ func TestCorruptGetRetried(t *testing.T) {
 		corrupt := true
 		h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
 			d := run()
-			if g, ok := d.(core.ObjectGetDone); ok && corrupt {
+			if g, ok := getDone(d); ok && corrupt {
 				corrupt = false
 				g.Data = bytes.Clone(g.Data)
 				g.Data[len(g.Data)-1] ^= 0x55
-				return g
+				return core.ObjectDone{Result: g}
 			}
 			return d
 		}
-		h.send(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20))
+		h.send(c, verFetch, fetchReq(contract.NewTopicPartition("t", 0), 0, 1<<20))
 		if bug == InjectedBugNone {
 			if len(c.out) != 0 {
 				t.Fatal("corrupt data served")
@@ -404,14 +407,14 @@ func TestFetchGetsExhausted(t *testing.T) {
 	h.produceOne(c, e("t", 0, plain(t, "hello")))
 	h.objHook = func(a core.IOCall, run func() core.IOResult) core.IOResult {
 		d := run()
-		if g, ok := d.(core.ObjectGetDone); ok {
+		if g, ok := getDone(d); ok {
 			g.Data = bytes.Clone(g.Data)
 			g.Data[len(g.Data)-1] ^= 1
-			return g
+			return core.ObjectDone{Result: g}
 		}
 		return d
 	}
-	h.send(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20))
+	h.send(c, verFetch, fetchReq(contract.NewTopicPartition("t", 0), 0, 1<<20))
 	h.fireAll()
 	if p := fetched(h.next(c)); kafkaErrorCode(p.ErrorCode) != errKafkaStorage || len(p.RecordBatches) != 0 {
 		t.Fatalf("%+v", p.ErrorCode)
@@ -424,7 +427,7 @@ func TestWrongOffsetMutant(t *testing.T) {
 	h := startedHarness(t, config)
 	c := h.open(1)
 	h.produceOne(c, e("t", 0, plain(t, "a")))
-	p := fetched(h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 1<<20)))
+	p := fetched(h.call(c, verFetch, fetchReq(contract.NewTopicPartition("t", 0), 0, 1<<20)))
 	if bt, err := kafkawire.ParseBatch(p.RecordBatches); err != nil || bt.BaseOffset != 1 {
 		t.Fatalf("mutant base %v %v", bt.BaseOffset, err)
 	}
@@ -508,7 +511,7 @@ func TestBadInputClosesConnection(t *testing.T) {
 		if !h.closed[1] || len(c.out) != 0 {
 			t.Errorf("%s: closed=%v out=%d", name, h.closed[1], len(c.out))
 		}
-		if h.cp.End(core.NewTopicPartition("t", 0)) != 0 || len(h.puts) != 0 {
+		if h.cp.End(contract.NewTopicPartition("t", 0)) != 0 || len(h.puts) != 0 {
 			t.Errorf("%s: data written", name)
 		}
 	}
@@ -528,7 +531,7 @@ func TestPeerCloseDuringProduce(t *testing.T) {
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.do(core.ConnClosed{Conn: 1, Abort: true})
 	h.flush()
-	if h.cp.End(core.NewTopicPartition("t", 0)) != 1 || len(c.out) != 0 {
+	if h.cp.End(contract.NewTopicPartition("t", 0)) != 1 || len(c.out) != 0 {
 		t.Fatal("write must land, response must not be sent")
 	}
 	if len(factsNamed(h.all, "produce_acked")) != 0 {
@@ -546,7 +549,7 @@ func TestStateHash(t *testing.T) {
 		hs = append(hs, h.b.StateHash())
 		h.flush()
 		hs = append(hs, h.b.StateHash())
-		h.call(c, verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 100))
+		h.call(c, verFetch, fetchReq(contract.NewTopicPartition("t", 0), 0, 100))
 		return append(hs, h.b.StateHash())
 	}
 	a, b := run(), run()
@@ -575,8 +578,8 @@ func TestIgnoresStrayIOResults(t *testing.T) {
 	h := startedHarness(t, DefaultConfig())
 	before := h.b.StateHash()
 	h.step(core.ControlPlaneDone{Req: 999})
-	h.step(core.ObjectPutDone{Req: 999})
-	h.step(core.ObjectGetDone{Req: 999})
+	h.step(core.ObjectDone{Result: objectstore.PutDone{Req: 999}})
+	h.step(core.ObjectDone{Result: objectstore.GetDone{Req: 999}})
 	h.step(core.SendDone{Req: 1})
 	h.step(core.TimerFired{ID: 77, Gen: 3})
 	if h.b.StateHash() != before {
@@ -617,7 +620,7 @@ func mustFrames(t testing.TB) [][]byte {
 	}
 	return [][]byte{
 		enc(verProduce, prodReq(-1, e("t", 0, mkBatch(t, -1, -1, -1, "a")), e("t", 1, mkBatch(t, 1000, 0, 0, "b")))),
-		enc(verFetch, fetchReq(core.NewTopicPartition("t", 0), 0, 100)),
+		enc(verFetch, fetchReq(contract.NewTopicPartition("t", 0), 0, 100)),
 		enc(verMetadata, kmsg.NewPtrMetadataRequest()),
 		enc(3, kmsg.NewPtrApiVersionsRequest()),
 	}
@@ -639,16 +642,16 @@ func TestIdempotentBatchRejected(t *testing.T) {
 		ps[1].ErrorCode != 0 || ps[3].ErrorCode != 0 || ps[3].BaseOffset != 0 {
 		t.Fatalf("%+v", ps)
 	}
-	if h.cp.End(core.NewTopicPartition("t", 0)) != 1 {
+	if h.cp.End(contract.NewTopicPartition("t", 0)) != 1 {
 		t.Fatal("rejected batch was stored")
 	}
 	h.noViolations()
 }
 
-func commitOps(h *harness) []core.CommitSegment {
-	var out []core.CommitSegment
+func commitOps(h *harness) []contract.CommitSegment {
+	var out []contract.CommitSegment
 	for _, operation := range h.cpCalls {
-		if cs, ok := operation.(core.CommitSegment); ok {
+		if cs, ok := operation.(contract.CommitSegment); ok {
 			out = append(out, cs)
 		}
 	}
@@ -662,7 +665,7 @@ func TestCommitRetryAfterMaybeAppliedResendsIdenticalRequest(t *testing.T) {
 	c := h.open(1)
 	lose := 2
 	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
-		if _, ok := a.Op.(core.CommitSegment); ok && lose > 0 {
+		if _, ok := a.Op.(contract.CommitSegment); ok && lose > 0 {
 			lose--
 			run() // applied, response lost
 			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrTimeout, Outcome: core.MaybeApplied}
@@ -677,7 +680,7 @@ func TestCommitRetryAfterMaybeAppliedResendsIdenticalRequest(t *testing.T) {
 	h.fireAll()
 	ps := produced(h.next(c))
 	if ps[0].ErrorCode != 0 || ps[0].BaseOffset != 0 || ps[1].ErrorCode != 0 || ps[1].BaseOffset != 0 ||
-		h.cp.End(core.NewTopicPartition("t", 0)) != 2 {
+		h.cp.End(contract.NewTopicPartition("t", 0)) != 2 {
 		t.Fatalf("%+v", ps)
 	}
 	cs := commitOps(h)
@@ -767,7 +770,7 @@ func TestCommitSurvivesLongCPOutage(t *testing.T) {
 	c := h.open(1)
 	down := true
 	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
-		if _, ok := a.Op.(core.CommitSegment); ok && down {
+		if _, ok := a.Op.(contract.CommitSegment); ok && down {
 			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied}
 		}
 		return run()
@@ -775,15 +778,15 @@ func TestCommitSurvivesLongCPOutage(t *testing.T) {
 	h.send(c, verProduce, prodReq(-1, e("t", 0, plain(t, "a"))))
 	h.flush()
 	start := h.now
-	for h.now-start < core.NodeTime(10*core.Second) {
+	for h.now-start < machine.NodeTime(10*machine.Second) {
 		if len(h.timers) != 1 {
 			t.Fatalf("want one backoff timer, have %d", len(h.timers))
 		}
-		var id core.TimerID
+		var id machine.TimerID
 		for k := range h.timers {
 			id = k
 		}
-		h.now += core.NodeTime(2 * core.Second)
+		h.now += machine.NodeTime(2 * machine.Second)
 		h.fire(id)
 	}
 	if len(c.out) != 0 {
@@ -791,7 +794,7 @@ func TestCommitSurvivesLongCPOutage(t *testing.T) {
 	}
 	down = false
 	for id := range h.timers {
-		h.now += core.NodeTime(2 * core.Second)
+		h.now += machine.NodeTime(2 * machine.Second)
 		h.fire(id)
 		break
 	}
@@ -809,11 +812,11 @@ func TestCommitSurvivesLongCPOutage(t *testing.T) {
 // is released.
 func TestCommitDeadlineFailsSegmentAndReleasesBuffer(t *testing.T) {
 	config := DefaultConfig()
-	config.CommitDeadline = 5 * core.Second
+	config.CommitDeadline = 5 * machine.Second
 	h := startedHarness(t, config)
 	c := h.open(1)
 	h.cpHook = func(a core.ControlPlaneCall, run func() core.IOResult) core.IOResult {
-		if _, ok := a.Op.(core.CommitSegment); ok {
+		if _, ok := a.Op.(contract.CommitSegment); ok {
 			return core.ControlPlaneDone{Req: a.Req, Err: core.ErrUnavailable, Outcome: core.NotApplied}
 		}
 		return run()
@@ -824,11 +827,11 @@ func TestCommitDeadlineFailsSegmentAndReleasesBuffer(t *testing.T) {
 		if i > 100 {
 			t.Fatal("never gave up")
 		}
-		var id core.TimerID
+		var id machine.TimerID
 		for k := range h.timers {
 			id = k
 		}
-		h.now += core.NodeTime(core.Second)
+		h.now += machine.NodeTime(machine.Second)
 		h.fire(id)
 	}
 	ps := produced(h.next(c))

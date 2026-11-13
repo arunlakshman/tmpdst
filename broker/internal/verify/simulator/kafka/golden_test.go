@@ -6,33 +6,22 @@ import (
 	"os"
 	"strings"
 	"testing"
-
-	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 )
 
 var updateGolden = flag.Bool("update-golden", false, "rewrite testdata/golden_hashes.txt from the current code")
 
 const goldenFile = "testdata/golden_hashes.txt"
 
-// goldenSeeds is how many seeds, from seed 1, are pinned for each scenario.
+// goldenSeeds is how many seeds, from seed 1, are pinned.
 const goldenSeeds = 5
 
-// goldenLines runs the pinned seeds of the broker scenario (kafka) and returns
-// one line per seed. kafka-log golden lines are deferred until CP reconnect
-// (docs/cp-extraction.md).
+// goldenLines runs the pinned seeds of the kafka scenario and returns one line
+// per seed.
 func goldenLines() []string {
-	scenarios := []struct {
-		name   string
-		config simulator.Config
-	}{
-		{"kafka", Config(nil)},
-	}
 	var out []string
-	for _, sc := range scenarios {
-		for seed := uint64(1); seed <= goldenSeeds; seed++ {
-			r := simulator.RunSeed(sc.config, seed)
-			out = append(out, fmt.Sprintf("%s seed=%d steps=%d rand=%d hash=%016x", sc.name, seed, r.Steps, r.RandCalls, r.TraceHash))
-		}
+	for seed := uint64(1); seed <= goldenSeeds; seed++ {
+		r := Run(Config{Seed: seed})
+		out = append(out, fmt.Sprintf("kafka seed=%d steps=%d rand=%d hash=%016x", seed, r.Steps, r.RandCalls, r.Hash))
 	}
 	return out
 }

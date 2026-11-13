@@ -13,14 +13,14 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/server"
-	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 func newClosingNode() *server.Node {
 	return server.New(server.Config{
-		Machine: replica.Config{CatchUpEvery: runtime.Duration(time.Millisecond)},
+		Machine: replica.Config{CatchUpEvery: machine.Duration(time.Millisecond)},
 		Log:     executor.NewMemoryLog(), Objects: executor.NewMemoryObjects(),
-		Self: runtime.NodeInstance{Node: "cp-0"},
+		Self: machine.NodeInstance{Node: "cp-0"},
 	})
 }
 
@@ -68,9 +68,9 @@ func TestCloseAfterStartStopsTheLoop(t *testing.T) {
 func TestCloseAnswersParkedGroupCall(t *testing.T) {
 	before := goruntime.NumGoroutine()
 	n := server.New(server.Config{
-		Machine: replica.Config{CatchUpEvery: runtime.Duration(time.Millisecond), Heartbeat: runtime.Duration(time.Second)},
+		Machine: replica.Config{CatchUpEvery: machine.Duration(time.Millisecond), Heartbeat: machine.Duration(time.Second)},
 		Log:     executor.NewMemoryLog(), Objects: executor.NewMemoryObjects(),
-		Self:                       runtime.NodeInstance{Node: "cp-0"},
+		Self:                       machine.NodeInstance{Node: "cp-0"},
 		GroupInitialRebalanceDelay: time.Hour,
 	})
 	if err := n.Start(t.Context()); err != nil {

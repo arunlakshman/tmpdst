@@ -6,7 +6,7 @@ Note: this is a historical design record. Package names in it are old (`controlp
 this repo. The log, slot, epoch and takeover ideas still hold. For the code as it is, read
 `internal/controlplane/doc.go`, `docs/glossary.md` and `docs/simulation.md`.
 
-Status: production path is `internal/controlplane/replica` + `internal/system/live` + gRPC (`mdscontrolplane -store dynamolog`,
+Status: production path is `internal/controlplane/replica` + `dst/live` + gRPC (`mdscontrolplane -store dynamolog`,
 decision 55-58). Sim `kafka-log` uses the same state machine as CP processes plus `logstore` (CP-DSM-8,
 `docs/sim-log-engine.md`). The goroutine `internal/controlplane/logcp` twin is deleted; DynamoLog/table helpers
 live in `internal/controlplane/executor`. Decisions 48-52, `docs/design-a-prototype.md` section 8,
@@ -176,7 +176,7 @@ apply seconds, window keys, blocked, rejected, checkpoint slot/age/bytes/seconds
 
 Seeded X2 on the real service: 3 nodes, lost/late answers, read and tail failures, crashes, restarts from checkpoint,
 takeover, split brain, small windows with trim (the failback part is superseded by decision 63). 20,000 seeds, 0 failures (`LOGCP_SEEDS=20000`). Checks:
-nodes agree and equal an independent model and (large window) the reference model (`internal/spec`; it was called speccheck when this was measured); every client answer matches the
+nodes agree and equal an independent model and (large window) the reference model (`spec`; it was called speccheck when this was measured); every client answer matches the
 model for a slot holding that command; fresh reads after an ack see it on any node. Real goroutines (3 nodes, DynamoDB-like faults), controlplanetest conformance
 (store, HTTP, fakedb), unit tests for every loop.
 

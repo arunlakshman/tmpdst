@@ -3,11 +3,13 @@ package kafka
 import (
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakecontrolplane"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakenetwork"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakeobjectstore"
-	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/campaign"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/cluster"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/history"
+	"github.com/manifesterio/mds/broker/internal/verify/simulator/internal/preset"
+	"github.com/manifesterio/mds/dst/kernel"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/rng"
 )
 
 // brokerConfig is the sim-friendly broker: a short flush window so commits
@@ -15,88 +17,94 @@ import (
 // pinned to the pre-decision-35 default (4 MiB) and the batch cap to 8; a seed's
 // swarm overrides the segment knobs (see swarmBroker).
 func brokerConfig(bug broker.InjectedBug) broker.Config {
-	return broker.Config{BatchWindow: 5 * core.Millisecond, MaxSegmentBytes: 4 << 20, MaxSegmentBatches: 8,
+	return broker.Config{BatchWindow: 5 * machine.Millisecond, MaxSegmentBytes: 4 << 20, MaxSegmentBatches: 8,
 		MaxBufferedBytes: 3 << 10, ResumeBufferedBytes: 1 << 10, InjectedBug: bug}
 }
 
-// Config is the Kafka campaign preset: 3 brokers, 1 workload of 3 at-least-once
-// producers and 2 consumers over 2 topics x 3 partitions, all three engines,
-// attrition and a swarm over the fault families.
-func Config(seeds []uint64) simulator.Config { return config(seeds, broker.InjectedBugNone) }
-
-func config(seeds []uint64, bug broker.InjectedBug) simulator.Config {
-	return configWith(seeds, bug, DefaultOpts())
+// Settings are the knobs of one seed after the swarm: the knobs of the cluster
+// and the configuration of the broker.
+type Settings struct {
+	cluster.Settings
+	Broker broker.Config
 }
 
-func configWith(seeds []uint64, bug broker.InjectedBug, opts Opts) simulator.Config {
-	p := campaign.New()
-	p.Network.PartialIOMax = 1024
-	p.ControlPlane.MaxCommitItems = simulator.DynamoMaxCommitItems
-	return simulator.Config{
-		Seeds:  seeds,
-		Params: brokerConfig(bug),
-		Processes: []simulator.Process{{Name: "broker", Count: 3, FactoryFor: func(sc simulator.SeedConfig) core.MachineFactory {
-			return broker.New(sc.Params.(broker.Config))
-		}}},
-		InvariantsFor: func(sc simulator.SeedConfig) []simulator.SafetyRule {
-			return []simulator.SafetyRule{newSegmentCaps(sc.Params.(broker.Config), sc.ControlPlane.MaxCommitItems, opts.topicPartitions()), &segmentTiming{}}
-		},
-		Workloads: []simulator.WorkloadFactory{func(env core.Environment, self core.NodeInstance, bs []core.NodeInstance) simulator.Workload {
-			return NewWorkload(env, self, bs, opts)
-		}},
-		Invariants: []func() simulator.SafetyRule{
-			func() simulator.SafetyRule { return newOracle(opts) },
-			func() simulator.SafetyRule { return &progressCheck{} },
-			func() simulator.SafetyRule { return campaign.FaultCoverageCheck("kafka:") },
-		},
-		Engines: func(sc simulator.SeedConfig) []simulator.FakeService {
-			return []simulator.FakeService{fakeobjectstore.New(sc.ObjectStore), controlPlane(sc, opts), fakenetwork.New(sc.Network)}
-		},
-		ObjectStore:      p.ObjectStore,
-		ControlPlane:     p.ControlPlane,
-		Network:          p.Network,
-		Attrition:        p.Attrition,
-		Cost:             p.Cost,
-		ExpectReachable:  expectReachable(),
-		Swarm:            swarm,
-		Phases:           p.Phases,
-		QuiesceEvery:     p.QuiesceEvery,
-		CheckDeterminism: p.CheckDeterminism,
+// Config says how to run one seed of the Kafka scenario: 3 brokers, 1 workload of
+// 3 at-least-once producers and 2 consumers over 2 topics x 3 partitions, all
+// three fake services, attrition and a swarm over the fault families. A zero
+// Config is the scenario as the campaign runs it.
+type Config struct {
+	Seed uint64
+	// Log keeps every step line. HaltOnFirst stops at the first failure.
+	// VerifyHashes recomputes every cached state hash at each step.
+	Log, HaltOnFirst, VerifyHashes bool
+	// Bug plants a bug in the broker (a test proves that the rules catch it).
+	Bug broker.InjectedBug
+	// Opts is the workload. A zero Opts is DefaultOpts.
+	Opts Opts
+	// Tune, when it is set, changes the knobs of the seed after the swarm.
+	Tune func(s *Settings)
+	// ExtraRules, when it is set, gives more rules. They run after the rules of
+	// the scenario. A test uses them to count what a campaign did.
+	ExtraRules func(c *cluster.Cluster, h *History) []kernel.Rule
+}
+
+// Run builds and runs one seed of the Kafka scenario.
+func Run(cfg Config) kernel.Result {
+	opts := cfg.Opts
+	if opts.Producers+opts.Consumers == 0 {
+		opts = DefaultOpts()
 	}
-}
-
-// topicMaker is a control plane engine that topics can be created in before the run.
-type topicMaker interface {
-	simulator.FakeService
-	CreateTopic(name string, partitions int32) core.ErrCode
-}
-
-// controlPlane builds this seed's control plane engine with the workload's topics.
-// Log-backed kafka-log (replica + fakelogstore) moved to mds-controlplane; see docs/cp-extraction.md.
-func controlPlane(sc simulator.SeedConfig, opts Opts) simulator.FakeService {
-	cp := topicMaker(fakecontrolplane.New(sc.ControlPlane))
+	p := preset.New()
+	p.Settings.Network.PartialIOMax = 1024
+	p.Settings.ControlPlane.MaxCommitItems = fakeservices.DynamoMaxCommitItems
+	set := Settings{Settings: p.Settings, Broker: brokerConfig(cfg.Bug)}
+	swarm(rng.New(cfg.Seed).Derive("swarm"), &set)
+	if cfg.Tune != nil {
+		cfg.Tune(&set)
+	}
+	c := cluster.New(cluster.Plan{
+		Seed: cfg.Seed, Settings: set.Settings, Phases: p.Phases, QuiesceEvery: p.QuiesceEvery,
+		Log: cfg.Log, HaltOnFirst: cfg.HaltOnFirst, VerifyHashes: cfg.VerifyHashes,
+	})
 	for _, t := range opts.Topics {
-		cp.CreateTopic(t, opts.Partitions)
+		c.ControlPlane.CreateTopic(t, opts.Partitions)
 	}
-	return cp
+	c.AddBrokers(3, broker.New(set.Broker))
+	w := c.World
+	h := history.New[Op, Res](w.Now, func(msg string) { w.Fail(kernel.FailProtocol, "history", msg) })
+	c.AddWorkload(func(env core.Environment, self machine.NodeInstance, brokers []machine.NodeID) cluster.Workload {
+		return NewWorkload(env, self, brokers, h, opts)
+	})
+	w.AddRule(newOracle(opts, h, c.Objects, c.ControlPlane))
+	w.AddRule(&progressCheck{hist: h})
+	w.AddRule(preset.FaultCoverageCheck(preset.KafkaFaultCoverage))
+	w.AddRule(newSegmentCaps(set.Broker, set.ControlPlane.MaxCommitItems, opts.topicPartitions(), c.ControlPlane))
+	w.AddRule(&segmentTiming{})
+	if cfg.ExtraRules != nil {
+		for _, r := range cfg.ExtraRules(c, h) {
+			w.AddRule(r)
+		}
+	}
+	return c.Run()
 }
 
-func swarm(_ uint64, r simulator.CountedRand, c *simulator.SeedConfig) {
-	campaign.Swarm(r, c, func() {
+// swarm draws the knobs of one seed from the swarm stream of the seed.
+func swarm(r *rng.Rand, s *Settings) {
+	preset.Swarm(r, &s.Settings, func() {
 		switch x := r.Intn(20); {
 		case x < 2:
-			c.Network.PartialIOMax = 48
+			s.Network.PartialIOMax = 48
 		case x < 8:
-			c.Network.PartialIOMax = 256
+			s.Network.PartialIOMax = 256
 		}
 	})
-	swarmBroker(r, c)
+	swarmBroker(r, s)
 }
 
-func swarmBroker(r simulator.CountedRand, c *simulator.SeedConfig) {
-	bc := c.Params.(broker.Config)
+func swarmBroker(r *rng.Rand, s *Settings) {
+	bc := s.Broker
 	pick := func(menu ...int) int { return menu[r.Intn(len(menu))] }
-	window := func(menu ...int) core.Duration { return campaign.Millis(int64(pick(menu...))) }
+	window := func(menu ...int) machine.Duration { return machine.Duration(pick(menu...)) * machine.Millisecond }
 	d := broker.DefaultConfig()
 	switch x := r.Float64(); {
 	case x < 0.2:
@@ -118,7 +126,7 @@ func swarmBroker(r simulator.CountedRand, c *simulator.SeedConfig) {
 	bc.MaxBufferedBytes = pick(3<<10, 3<<10, 16<<10, 64<<10, 1<<20)
 	bc.ResumeBufferedBytes = bc.MaxBufferedBytes / 3
 	if r.Chance(0.5) {
-		c.ControlPlane.MaxCommitItems = min(1+bc.MaxSegmentPartitions, simulator.DynamoMaxCommitItems)
+		s.ControlPlane.MaxCommitItems = min(1+bc.MaxSegmentPartitions, fakeservices.DynamoMaxCommitItems)
 	}
-	c.Params = bc
+	s.Broker = bc
 }

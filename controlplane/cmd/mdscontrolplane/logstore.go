@@ -18,8 +18,8 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor/dynamolog"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor/sqllog"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/system"
-	"github.com/manifesterio/mds/controlplane/internal/system/s3store"
+	"github.com/manifesterio/mds/shared/objectstore"
+	s3store "github.com/manifesterio/mds/shared/objectstore/s3"
 	"github.com/manifesterio/mds/shared/runinfo"
 )
 
@@ -226,8 +226,8 @@ func hideDSN(m runinfo.Manifest, dsn string) runinfo.Manifest {
 	return m
 }
 
-// sysObjects adapts system.ObjectStore to executor.ObjectStore.
-type sysObjects struct{ s system.ObjectStore }
+// sysObjects adapts objectstore.Store to executor.ObjectStore.
+type sysObjects struct{ s objectstore.Store }
 
 func (a sysObjects) Put(ctx context.Context, key string, data []byte) error {
 	return a.s.Put(ctx, key, data)

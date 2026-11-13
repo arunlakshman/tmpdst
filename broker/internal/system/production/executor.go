@@ -9,6 +9,8 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
+	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/shared/objectstore"
 )
 
 // AsyncConnections is the connection set the Executor writes to: system.Connections plus a
@@ -74,7 +76,7 @@ func (e *Executor) deliver(c core.IOResult) {
 		return
 	default:
 	}
-	e.sink.DeliverControl(c)
+	e.sink.Deliver(machine.Control, c)
 }
 
 // Execute never blocks: it queues a write or starts a goroutine.
@@ -84,8 +86,8 @@ func (e *Executor) Execute(a core.IOCall) {
 		e.send(a)
 	case core.Connect:
 		go e.deliver(core.ConnectDone{Req: a.Req, Err: core.ErrInvalid}) // brokers reach the CP through ControlPlaneCall
-	case core.ObjectPut, core.ObjectGet, core.ObjectDelete, core.ObjectList:
-		go func() { e.deliver(e.object(a)) }()
+	case core.ObjectCall:
+		go func() { e.deliver(core.ObjectDone{Result: e.object(a)}) }()
 	case core.ControlPlaneCall:
 		go func() { e.deliver(e.control(a)) }()
 	default:
@@ -128,40 +130,42 @@ func failCode(err error, fail func(error) (core.ErrCode, core.Outcome)) (core.Er
 	return c, true
 }
 
-func (e *Executor) object(a core.IOCall) core.IOResult {
+func (e *Executor) object(a core.ObjectCall) objectstore.Result {
 	var n int64
-	switch a := a.(type) {
-	case core.ObjectPut:
-		n = int64(len(a.Data))
-	case core.ObjectGet:
-		n = a.Ref.Len
+	switch c := a.Call.(type) {
+	case objectstore.Put:
+		n = int64(len(c.Data))
+	case objectstore.Get:
+		n = c.Ref.Len
+	case objectstore.Delete, objectstore.List:
 	}
 	ctx, cancel := context.WithTimeout(e.ctx, e.config.objTimeout(n))
 	defer cancel()
+	// The classifier gets the whole action, so it routes by action type.
 	fail := func(err error) (core.ErrCode, core.Outcome) { return e.class.Classify(a, err) }
-	switch a := a.(type) {
-	case core.ObjectPut:
-		c, o := mutateOutcome(e.objs.Put(ctx, a.Key, a.Data), fail)
-		return core.ObjectPutDone{Req: a.Req, Key: a.Key, Err: c, Outcome: o}
-	case core.ObjectGet:
-		data, err := e.objs.Get(ctx, a.Ref)
-		if c, bad := failCode(err, fail); bad {
-			return core.ObjectGetDone{Req: a.Req, Err: c}
+	switch c := a.Call.(type) {
+	case objectstore.Put:
+		code, outcome := mutateOutcome(e.objs.Put(ctx, c.Key, c.Data), fail)
+		return objectstore.PutDone{Req: c.Req, Key: c.Key, Err: code, Outcome: outcome}
+	case objectstore.Get:
+		data, err := e.objs.Get(ctx, c.Ref)
+		if code, bad := failCode(err, fail); bad {
+			return objectstore.GetDone{Req: c.Req, Err: code}
 		}
-		return core.ObjectGetDone{Req: a.Req, Data: data}
-	case core.ObjectDelete:
-		c, o := mutateOutcome(e.objs.Delete(ctx, a.Key), fail)
-		return core.ObjectDeleteDone{Req: a.Req, Err: c, Outcome: o}
-	case core.ObjectList:
-		keys, err := e.objs.List(ctx, a.Prefix)
-		c, bad := failCode(err, fail)
+		return objectstore.GetDone{Req: c.Req, Data: data}
+	case objectstore.Delete:
+		code, outcome := mutateOutcome(e.objs.Delete(ctx, c.Key), fail)
+		return objectstore.DeleteDone{Req: c.Req, Err: code, Outcome: outcome}
+	case objectstore.List:
+		keys, err := e.objs.List(ctx, c.Prefix)
+		code, bad := failCode(err, fail)
 		if !bad {
-			return core.ObjectListDone{Req: a.Req, Keys: keys}
+			return objectstore.ListDone{Req: c.Req, Keys: keys}
 		}
-		return core.ObjectListDone{Req: a.Req, Err: c}
-	default:
-		return core.ObjectPutDone{Req: a.RequestID(), Err: core.ErrInvalid}
+		return objectstore.ListDone{Req: c.Req, Err: code}
 	}
+	//nolint:forbidigo // impossible: Call is a sealed sum and the switch lists every case
+	panic("production: unknown object store call")
 }
 
 func (e *Executor) control(a core.ControlPlaneCall) core.IOResult {

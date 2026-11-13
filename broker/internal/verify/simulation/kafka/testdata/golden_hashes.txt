@@ -1,0 +1,5 @@
+kafka seed=1 steps=11479 rand=53421 hash=52e139eecdf7f3b7
+kafka seed=2 steps=9233 rand=40827 hash=588ae08eec2274f5
+kafka seed=3 steps=20157 rand=78687 hash=574317d01e299e95
+kafka seed=4 steps=12085 rand=50914 hash=0a9820cecf3b9698
+kafka seed=5 steps=16937 rand=69042 hash=c8e48b7a27da1631

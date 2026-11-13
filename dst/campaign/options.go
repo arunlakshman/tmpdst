@@ -102,16 +102,18 @@ func ParseOptions(c Config, args []string, getenv func(string) string, stderr io
 	d := withBuiltInDefaults(c.Defaults)
 	seedDefault := int64(-1)
 	if c.EnvPrefix != "" {
-		e := envReader{prefix: c.EnvPrefix, getenv: getenv}
-		var err error
-		if d.Seeds, err = e.seeds(d.Seeds); err != nil {
+		e, err := ReadEnv(c.EnvPrefix, getenv)
+		if err != nil {
 			return Options{}, err
 		}
-		if d.Duration, err = e.campaign(d.Duration); err != nil {
-			return Options{}, err
+		if e.Seeds > 0 {
+			d.Seeds = e.Seeds
 		}
-		if seedDefault, err = e.seed(seedDefault); err != nil {
-			return Options{}, err
+		if e.Duration > 0 {
+			d.Duration = e.Duration
+		}
+		if e.HasSeed {
+			seedDefault = int64(e.Seed)
 		}
 	}
 
@@ -184,9 +186,46 @@ func splitNames(s string) []string {
 	return out
 }
 
-// envReader reads the variables <prefix>_SEEDS, <prefix>_SEED and
-// <prefix>_CAMPAIGN. An empty value counts as not set, so that "VAR=" in a
-// shell is not a bad value.
+// EnvSettings are the values of the three variables <prefix>_SEEDS,
+// <prefix>_SEED and <prefix>_CAMPAIGN. A variable that is not set (or is
+// empty) leaves its field at the zero value.
+type EnvSettings struct {
+	// Seeds is the value of <prefix>_SEEDS: the number of seeds (1 or more).
+	// 0: not set.
+	Seeds int
+	// HasSeed is true when <prefix>_SEED is set. Seed is its value (0 or more).
+	HasSeed bool
+	Seed    uint64
+	// Duration is the value of <prefix>_CAMPAIGN, for example 30s. 0: not set.
+	Duration time.Duration
+}
+
+// ReadEnv reads the variables of prefix with getenv. A bad value is an error,
+// because a silent fallback would hide a typing mistake. An empty value counts
+// as not set, so that "VAR=" in a shell is not a bad value. This is the one
+// place that parses these variables: ParseOptions uses it, and so does the
+// spec toolkit (dst/check/spectest) for its tests.
+func ReadEnv(prefix string, getenv func(string) string) (EnvSettings, error) {
+	e := envReader{prefix: prefix, getenv: getenv}
+	var out EnvSettings
+	var err error
+	if out.Seeds, err = e.seeds(0); err != nil {
+		return EnvSettings{}, err
+	}
+	if out.Duration, err = e.campaign(0); err != nil {
+		return EnvSettings{}, err
+	}
+	seed, err := e.seed(-1)
+	if err != nil {
+		return EnvSettings{}, err
+	}
+	if seed >= 0 {
+		out.HasSeed, out.Seed = true, uint64(seed)
+	}
+	return out, nil
+}
+
+// envReader reads one variable of a prefix.
 type envReader struct {
 	prefix string
 	getenv func(string) string

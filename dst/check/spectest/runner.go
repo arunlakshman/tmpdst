@@ -1,6 +1,7 @@
 package spectest
 
 import (
+	"cmp"
 	"flag"
 	"fmt"
 	"os"
@@ -8,50 +9,105 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/manifesterio/mds/dst/campaign"
 	"pgregory.net/rapid"
 )
 
 // Check runs the lockstep check with rapid.Check. On a failure it prints the
 // seed, the shrunk steps as Go code, and the command that runs it again.
 //
-// When Rerun.EnvPrefix is set and the variable <EnvPrefix>_SEED is set, Check
-// runs only that seed (it sets the flags -rapid.seed and -rapid.checks for
-// this test). Do not use it with t.Parallel: the rapid flags are global.
+// When Rerun.EnvPrefix is set, Check reads three environment variables. The
+// parser is campaign.ReadEnv, the same one that the simulation tools use. With
+// the prefix "P" they are:
+//
+//   - P_SEED=<n>: run only the rapid seed n (it sets the flags -rapid.seed and
+//     -rapid.checks for this test). The strongest setting.
+//   - P_CAMPAIGN=<duration>: run the seeds 1, 2, 3 and so on, one check for
+//     each seed, until the time has passed, for example 30s.
+//   - P_SEEDS=<n>: run n checks (random lists of steps). Without it, Check runs
+//     Lockstep.Checks checks, or the rapid default (100) when that is 0.
+//
+// Do not use Check with t.Parallel: the rapid flags are global.
 func (l Lockstep[Op, Res, S]) Check(t *testing.T) {
 	t.Helper()
-	seed, ok, err := l.Rerun.seedFromEnv()
+	env, err := l.Rerun.env()
 	if err != nil {
 		t.Fatalf("%v", err)
 		return
 	}
-	if ok {
-		restore, err := setRapidFlags(seed, false)
+	switch {
+	case env.HasSeed:
+		if env.Seed == 0 {
+			t.Fatalf("%s", errSeedZero(l.Rerun.SeedVar()))
+			return
+		}
+		restore, err := setRapidFlags(env.Seed, false)
 		if err != nil {
 			t.Fatalf("%v", err)
 			return
 		}
 		defer restore()
+	case env.Duration > 0:
+		l.runFor(t, env.Duration)
+		return
+	default:
+		checks := cmp.Or(env.Seeds, l.Checks)
+		if checks > 0 {
+			restore, err := setRapidChecks(checks)
+			if err != nil {
+				t.Fatalf("%v", err)
+				return
+			}
+			defer restore()
+		}
 	}
 	l.check(t)
+}
+
+// runFor runs the seeds 1, 2, 3 and so on, one check for each seed, until d has
+// passed. It stops at the first failure.
+func (l Lockstep[Op, Res, S]) runFor(t *testing.T, d time.Duration) {
+	t.Helper()
+	end := time.Now().Add(d)
+	n := 0
+	for seed := uint64(1); time.Now().Before(end); seed++ {
+		n++
+		if f := l.RunSeed(seed); f != nil {
+			t.Fatalf("%s", l.Report(f, t.Name()))
+			return
+		}
+	}
+	t.Logf("%d seeds passed in %s", n, d)
+}
+
+// errSeedZero is the message for a seed variable with the value 0. Rapid takes
+// the seed 0 to mean "choose a random seed", so it cannot replay anything.
+func errSeedZero(name string) error {
+	return fmt.Errorf("%s has the value \"0\". A rapid seed must be a whole number of 1 or more, for example 17", name)
+}
+
+// env reads the three variables of the prefix. With no prefix it returns the
+// zero value.
+func (r Rerun) env() (campaign.EnvSettings, error) {
+	if r.EnvPrefix == "" {
+		return campaign.EnvSettings{}, nil
+	}
+	return campaign.ReadEnv(r.EnvPrefix, os.Getenv)
 }
 
 // seedFromEnv reads the seed variable (SeedVar). ok is false when there is no
 // prefix or the variable is not set. An empty value counts as not set.
 func (r Rerun) seedFromEnv() (uint64, bool, error) {
-	name := r.SeedVar()
-	if name == "" {
-		return 0, false, nil
+	env, err := r.env()
+	if err != nil || !env.HasSeed {
+		return 0, false, err
 	}
-	v, ok := os.LookupEnv(name)
-	if !ok || v == "" {
-		return 0, false, nil
+	if env.Seed == 0 {
+		return 0, false, errSeedZero(r.SeedVar())
 	}
-	seed, err := strconv.ParseUint(v, 10, 64)
-	if err != nil || seed == 0 {
-		return 0, false, fmt.Errorf("%s has the value %q. It must be a whole number of 1 or more, for example 17", name, v)
-	}
-	return seed, true, nil
+	return env.Seed, true, nil
 }
 
 // check is Check without the environment, so a test can give a fake t.
@@ -79,6 +135,13 @@ func (l Lockstep[Op, Res, S]) RunSeed(seed uint64) *Failure[Op] {
 // find runs rapid.Check with t wrapped in a recorder, and returns the
 // failure, or nil.
 func (l *Lockstep[Op, Res, S]) find(t rapid.TB) *Failure[Op] {
+	if l.StepsPerCheck > 0 {
+		restore, err := setFlags([][2]string{{"rapid.steps", strconv.Itoa(l.StepsPerCheck)}})
+		if err != nil {
+			return &Failure[Op]{Message: err.Error()}
+		}
+		defer restore()
+	}
 	rec := &recorder{out: t}
 	var steps []Step[Op]
 	var message string
@@ -127,6 +190,18 @@ func setRapidFlags(seed uint64, quiet bool) (func(), error) {
 	if quiet {
 		values = append(values, [2]string{"rapid.nofailfile", "true"})
 	}
+	return setFlags(values)
+}
+
+// setRapidChecks makes rapid run n checks from a random seed. It returns a
+// func that puts the old flag value back.
+func setRapidChecks(n int) (func(), error) {
+	return setFlags([][2]string{{"rapid.checks", strconv.Itoa(n)}})
+}
+
+// setFlags sets the named flags and returns a func that puts the old values
+// back.
+func setFlags(values [][2]string) (func(), error) {
 	var old [][2]string
 	restore := func() {
 		for _, o := range slices.Backward(old) {

@@ -74,8 +74,18 @@ type Lockstep[Op, Res any, S Subject[Op, Res]] struct {
 	HasFailed func(s S) bool
 	// Format prints one op as Go code. Nil: fmt "%#v".
 	Format func(op Op) string
-	// Rerun builds the command that runs a failing seed again.
+	// Rerun builds the command that runs a failing seed again. It also names
+	// the prefix of the environment variables that Check reads.
 	Rerun Rerun
+	// Checks is the number of checks (random lists of steps) that Check runs.
+	// 0: the rapid default, 100 (or the flag -rapid.checks). The variable
+	// <prefix>_SEEDS wins over this field.
+	Checks int
+	// StepsPerCheck is the average number of steps in one check. The length of a check
+	// is random (rapid stops after each step with the same chance), so some
+	// checks are much shorter and some much longer. 0: the rapid default, 30 (or
+	// the flag -rapid.steps). It is used by Check and by RunSeed.
+	StepsPerCheck int
 }
 
 // run is the state of one Lockstep run.

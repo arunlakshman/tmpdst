@@ -517,6 +517,34 @@ func TestParseOptionsVariablesAndFlagsWin(t *testing.T) {
 	}
 }
 
+func TestDescribeSettingsNamesAllVariables(t *testing.T) {
+	d := DescribeSettings("XY")
+	for _, name := range []string{"XY_SEED", "XY_SEEDS", "XY_CAMPAIGN"} {
+		if !strings.Contains(d, name) {
+			t.Fatalf("the help text does not name %s: %q", name, d)
+		}
+	}
+}
+
+func TestReadEnv(t *testing.T) {
+	got, err := ReadEnv("MDS", env())
+	if err != nil || got != (EnvSettings{}) {
+		t.Fatalf("nothing set: %+v err %v", got, err)
+	}
+	got, err = ReadEnv("MDS", env("MDS_SEEDS", "40", "MDS_SEED", "0", "MDS_CAMPAIGN", "30s", "OTHER_SEEDS", "9"))
+	want := EnvSettings{Seeds: 40, HasSeed: true, Seed: 0, Duration: 30 * time.Second}
+	if err != nil || got != want {
+		t.Fatalf("all set: %+v err %v", got, err)
+	}
+	got, err = ReadEnv("MDS", env("MDS_SEEDS", "", "MDS_SEED", "", "MDS_CAMPAIGN", ""))
+	if err != nil || got != (EnvSettings{}) {
+		t.Fatalf("empty values are not set: %+v err %v", got, err)
+	}
+	if _, err = ReadEnv("MDS", env("MDS_SEED", "-1")); err == nil || !strings.Contains(err.Error(), "MDS_SEED has the value") {
+		t.Fatalf("bad seed: %v", err)
+	}
+}
+
 func TestParseOptionsBadVariable(t *testing.T) {
 	c := Config{Tool: "t", EnvPrefix: "MDS"}
 	for _, kv := range [][2]string{{"MDS_SEEDS", "0"}, {"MDS_SEEDS", "x"}, {"MDS_SEED", "-1"}, {"MDS_CAMPAIGN", "soon"}, {"MDS_CAMPAIGN", "0s"}} {

@@ -85,7 +85,7 @@ The runner handles control types first, then tries engines in register order unt
 | `check` | The log oracle of a simulator (`Replay`, `NoHole`, `Holders`, `Prefixes`, `Monotonic`, `Converged`) and the crash checks by hand (`Persistence`, `ForwardProgress`, `DirtyReboot`) |
 | `check/spectest` | The spec toolkit for tests, on rapid: `Spec`, `Lockstep` (ops, reboots, crashes, checkpoints), `SimplestFirst`, `SelfCheck`, planted bugs (`Bug`, `RequireCaught`, `RequireClean`), `Rerun` |
 | `mutant` | Old name of the planted-bug helpers; now calls `check/spectest`. Deleted in T1.16 |
-| `model` | Old lockstep on rapid; `spectest.Lockstep` replaces it. Deleted in T1.14 / T1.16 |
+| `model` | Old lockstep on rapid; `spectest.Lockstep` replaces it. Deleted in T1.16 |
 | `golden` | Fixed seed-to-hash asserts plus optional golden file Load/Save |
 
 ## Docs
@@ -137,7 +137,7 @@ same hash. Cross-seed hash collisions are normal and not signal.
 
 For planted bugs, use `spectest.RequireCaught` so each bug fails at least once in seeds `1..budget`, and `spectest.RequireClean` so the same budget raises no false alarms. With a `spectest.Lockstep`, `RunSeed(seed)` runs one seed and returns the shrunk failure.
 
-A failed `spectest.Lockstep` prints the seed, the shrunk steps as Go code, and the command that runs it again. The product sets `Rerun.EnvPrefix` (for example `P`); then `P_SEED=<n> go test -run '^TestX$' -count=1 -v .` runs only seed n.
+A failed `spectest.Lockstep` prints the seed, the shrunk steps as Go code, and the command that runs it again. The product sets `Rerun.EnvPrefix` (for example `P`); then `P_SEED=<n> go test -run '^TestX$' -count=1 -v .` runs only seed n. `Check` reads the same three variables as the campaign tool, with the same parser (`campaign.ReadEnv`): `P_SEED` (one seed), `P_CAMPAIGN` (seeds until a time has passed) and `P_SEEDS` (the number of checks). `Lockstep.Checks` and `Lockstep.StepsPerCheck` set the number of checks and the average number of steps in a check.
 
 ```bash
 go test ./examples/kv -run TestCampaign -count=1

@@ -17,7 +17,9 @@
 //     seeds), and that a run with no bug does not fail.
 //
 // The product gives the prefix of its environment variables (Rerun.EnvPrefix),
-// so dst has no product words.
+// so dst has no product words. Check reads <prefix>_SEED, <prefix>_SEEDS and
+// <prefix>_CAMPAIGN with campaign.ReadEnv, the same parser that the campaign
+// tool uses.
 //
 // This package is separate from check on purpose: check is imported by
 // simulation code, which must not depend on rapid, testing, os or flag.

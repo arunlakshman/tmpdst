@@ -16,6 +16,19 @@ pkgs=(./internal/core/... ./internal/verify/simulator/... ./internal/wire/segmen
 echo "== determinismcheck"
 go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ops/determinism-allow.txt "${pkgs[@]}"
 
+echo "== real time stays out of the gated packages"
+# Only dst/live (the production loop) and the production adapters may read real time
+# or real randomness. The import allow-list lets every package of this module in, so
+# check the whole dependency tree of each gated package for the real-time packages.
+realtime='manifesterio/mds/dst/live$|manifesterio/mds/shared/clock$|manifesterio/mds/dst/(realclock|syncclock)$'
+for p in "${pkgs[@]}"; do
+  if bad=$(go list -deps "$p" | grep -E "$realtime"); then
+    echo "gated package $p depends on a real-time package:" >&2
+    echo "$bad" >&2
+    exit 1
+  fi
+done
+
 echo "== dependency audit records"
 # Only code that the deterministic packages really run needs an audit record.
 # The generated gRPC API (api/controlplane/v1) is the input/output edge, so we

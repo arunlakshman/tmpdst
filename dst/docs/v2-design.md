@@ -2374,3 +2374,39 @@ T1.12d.
    files in `simulation/fakeservices/testdata` stay.
 4. **Names:** the tree is still `simulation` after this step. The rename back to
    `simulator` is the next commit.
+
+### T1.12e (the broker production loop moves to dst/live; decision D2)
+
+1. **`internal/system/run.go` and `inbox.go` are deleted.** `production.Start` builds a
+   `live.Config[core.EventData, core.Action]` and calls `live.Run`. Boot is `NodeStarted`, the
+   stop message is `StopRequest`, the clock is `shared/clock`, `Class` is `core.InboxKindOf`
+   (so a timer that fired goes to Control, as before), and the inbox is
+   `live.NewInbox[core.EventData](DataInbox)` (default 1024, so the bound is never zero).
+   `dst/live` needed no change: the broker loop had no feature that `live` lacks.
+2. **`system.Route(system.Host{Exec, Connections, Facts})` is the Route function.** One switch
+   lists every case of `core.Action`: the four `IOCall` cases go to the executor, `RecordFact`
+   to `Facts`, `SetTimer` and `CancelTimer` to the loop, `CloseConn`, `PauseReads` and
+   `ResumeReads` to the connections, `StopForRestart` is `End(Trip, cause)` and
+   `ShutdownDone` is `End(Exit)`. `ControlPlaneReply` (simulator only) and anything else
+   end the run with the old error text `system: unknown action ...`.
+3. **`InboxWriter` is `Deliver(class, body)` plus `Closed()`.** It replaces `DeliverControl` and
+   `DeliverData`. The executor and the lease loop use `machine.Control`; the
+   connection reader uses `machine.Data`; the same classes as before. `system.ErrStopped`,
+   `ErrStoppedForRestart` and `ErrKilledByRuntime` are `live.ErrStopped`,
+   `live.ErrStoppedForRestart` and `live.ErrKilled` (same texts). `StopOnSignal` stays in `system`.
+4. **The core machine adapter is shared.** `core.OnContract` and `core.ContractFactory`
+   (the old `cluster.machineAdapter`) turn `Step(core.Event)` into `Step(now, in)`.
+   The simulator and the production loop use the same code. `cluster.adaptFactory` calls it.
+5. **The production `Env` is a `machine.Env`.** It got `Between` (both ends included) and
+   `Chance`, and `Intn(n <= 0)` returns 0 (before it divided by zero). The broker core does not
+   call them; the contract needs them.
+6. **`core.ControlFirstPicker`, `core.InboxPicker` and `core.Inbox` are deleted.** Nothing used
+   them after the old loop and the old kernel were gone. Their rule (Control first, each queue
+   first in, first out) is `live.Inbox.Pop`.
+7. **The marker `//sumtype:decl` on `core.Action` and `core.EventData` is still not added.**
+   It was tried: the route switch has no finding, but 13 other switches report missing
+   cases (`broker.go`, `session.go`, `echo/broker.go` and tests handle only some cases on
+   purpose). It was reverted.
+8. **The broker determinism script has a real-time guard now** (like the control plane one): no
+   gated package may depend on `dst/live`, `shared/clock`, `dst/realclock` or `dst/syncclock`.
+   The script is still red for the old reason (`context` in `core/operation_runner.go`, ISSUES.md).

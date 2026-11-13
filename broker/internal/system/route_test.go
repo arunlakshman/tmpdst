@@ -1,4 +1,4 @@
-package system
+package system_test
 
 import (
 	"context"
@@ -9,9 +9,14 @@ import (
 	"time"
 
 	"github.com/manifesterio/mds/broker/internal/core"
+	"github.com/manifesterio/mds/broker/internal/system"
+	"github.com/manifesterio/mds/dst/live"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
+
+// These tests run the broker loop as production does: dst/live with system.Route
+// and the core inbox classes. They are the tests of the old system.Run, on the new loop.
 
 type fakeClock struct{}
 
@@ -58,25 +63,48 @@ func (m *fakeMachine) Step(e core.Event) []core.Action {
 }
 func (m *fakeMachine) StateHash() uint64 { return 0 }
 
-func setup(m *fakeMachine) (Dependencies, *fakeExec, *fakeConns, core.MachineFactory) {
-	cn := &fakeConns{}
-	b := Dependencies{Clock: fakeClock{}, Connections: cn, Inbox: NewInbox(8)}
-	return b, &fakeExec{}, cn, func(core.Environment, machine.NodeInstance) core.Machine { return m }
+// rig is one loop with its fakes.
+type rig struct {
+	m     *fakeMachine
+	ex    *fakeExec
+	conns *fakeConns
+	facts []machine.Fact
+	cfg   live.Config[core.EventData, core.Action]
 }
+
+func newRig(m *fakeMachine) *rig {
+	r := &rig{m: m, ex: &fakeExec{}, conns: &fakeConns{}}
+	r.cfg = live.Config[core.EventData, core.Action]{
+		New: core.ContractFactory(func(core.Environment, machine.NodeInstance) core.Machine { return m }),
+		Boot: func(self machine.NodeInstance) core.EventData {
+			return core.NodeStarted{Self: self}
+		},
+		StopMsg: func(deadline machine.NodeTime) core.EventData {
+			return core.StopRequest{Deadline: deadline}
+		},
+		Clock: fakeClock{},
+		Inbox: live.NewInbox[core.EventData](8),
+		Class: core.InboxKindOf,
+		Route: system.Route(system.Host{Exec: r.ex, Connections: r.conns, Facts: func(f machine.Fact) { r.facts = append(r.facts, f) }}),
+	}
+	return r
+}
+
+func (r *rig) run(ctx context.Context) error { return live.Run(ctx, r.cfg) }
 
 func TestStartedFirstControlBeatsData(t *testing.T) {
 	m := &fakeMachine{}
-	b, ex, _, f := setup(m)
+	r := newRig(m)
 	// Preload both queues before Run: data first, then control.
-	b.Inbox.DeliverData(core.ConnOpened{Conn: 1})
-	b.Inbox.DeliverControl(core.TimerFired{ID: 1})
+	r.cfg.Inbox.Deliver(machine.Data, core.ConnOpened{Conn: 1})
+	r.cfg.Inbox.Deliver(machine.Control, core.TimerFired{ID: 1})
 	m.script = func(n int, body core.EventData) []core.Action {
 		if n == 2 {
 			return []core.Action{core.ShutdownDone{}}
 		}
 		return nil
 	}
-	if err := Run(t.Context(), b, ex, f, machine.NodeInstance{}); err != nil {
+	if err := r.run(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := m.events[0].Body.(core.NodeStarted); !ok {
@@ -94,27 +122,30 @@ func TestTripRunsEarlierActions(t *testing.T) {
 	m := &fakeMachine{script: func(n int, _ core.EventData) []core.Action {
 		return []core.Action{core.ObjectCall{Call: objectstore.Put{Req: 1}}, core.PauseReads{Conn: 2}, core.StopForRestart{Cause: "x"}, core.ObjectCall{Call: objectstore.Put{Req: 2}}}
 	}}
-	b, ex, cn, f := setup(m)
-	err := Run(t.Context(), b, ex, f, machine.NodeInstance{})
-	if !errors.Is(err, ErrStoppedForRestart) {
+	r := newRig(m)
+	err := r.run(t.Context())
+	if !errors.Is(err, live.ErrStoppedForRestart) {
 		t.Fatalf("err = %v", err)
 	}
-	if len(ex.got) != 1 || ex.got[0].RequestID() != 1 || len(cn.log) != 1 {
-		t.Fatalf("got %v %v", ex.got, cn.log)
+	if !strings.Contains(err.Error(), "tripped: x") {
+		t.Fatalf("the cause is lost: %v", err)
+	}
+	if len(r.ex.got) != 1 || r.ex.got[0].RequestID() != 1 || len(r.conns.log) != 1 {
+		t.Fatalf("got %v %v", r.ex.got, r.conns.log)
 	}
 }
 
 func TestExitReturnsNilAndLateDeliveryDropped(t *testing.T) {
 	m := &fakeMachine{script: func(int, core.EventData) []core.Action { return []core.Action{core.ShutdownDone{}} }}
-	b, ex, _, f := setup(m)
-	if err := Run(t.Context(), b, ex, f, machine.NodeInstance{}); err != nil {
+	r := newRig(m)
+	if err := r.run(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan struct{})
 	go func() {
-		b.Inbox.DeliverControl(core.SendDone{Req: 1})
+		r.cfg.Inbox.Deliver(machine.Control, core.SendDone{Req: 1})
 		for range 100 { // would block on a full data queue if not dropped
-			b.Inbox.DeliverData(core.ConnOpened{})
+			r.cfg.Inbox.Deliver(machine.Data, core.ConnOpened{})
 		}
 		close(done)
 	}()
@@ -124,22 +155,21 @@ func TestExitReturnsNilAndLateDeliveryDropped(t *testing.T) {
 		t.Fatal("delivery after Run blocked")
 	}
 	select {
-	case <-b.Inbox.Closed():
+	case <-r.cfg.Inbox.Closed():
 	default:
 		t.Fatal("sink not closed")
 	}
 }
 
 func TestCtxCancelStops(t *testing.T) {
-	m := &fakeMachine{}
-	b, ex, _, f := setup(m)
+	r := newRig(&fakeMachine{})
 	ctx, cancel := context.WithCancel(t.Context())
 	res := make(chan error, 1)
-	go func() { res <- Run(ctx, b, ex, f, machine.NodeInstance{}) }()
+	go func() { res <- r.run(ctx) }()
 	cancel()
 	select {
 	case err := <-res:
-		if !errors.Is(err, ErrStopped) {
+		if !errors.Is(err, live.ErrStopped) {
 			t.Fatalf("err = %v", err)
 		}
 	case <-time.After(2 * time.Second):
@@ -148,10 +178,8 @@ func TestCtxCancelStops(t *testing.T) {
 }
 
 func TestTimerFiresAndEmitFact(t *testing.T) {
-	var facts []machine.Fact
 	m := &fakeMachine{}
-	b, ex, _, f := setup(m)
-	b.Facts = func(f machine.Fact) { facts = append(facts, f) }
+	r := newRig(m)
 	m.script = func(n int, body core.EventData) []core.Action {
 		switch n {
 		case 0:
@@ -163,17 +191,55 @@ func TestTimerFiresAndEmitFact(t *testing.T) {
 		}
 		return nil
 	}
-	if err := Run(t.Context(), b, ex, f, machine.NodeInstance{}); err != nil {
+	if err := r.run(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(facts) != 1 {
-		t.Fatalf("facts = %v", facts)
+	if len(r.facts) != 1 {
+		t.Fatalf("facts = %v", r.facts)
+	}
+}
+
+// A timer that fired goes to the Control queue, so it is taken before the Data that
+// waits. The first Data step is slow, so the timer fires while it runs.
+func TestTimerFiredIsControl(t *testing.T) {
+	m := &fakeMachine{}
+	r := newRig(m)
+	for i := range 5 {
+		r.cfg.Inbox.Deliver(machine.Data, core.ConnOpened{Conn: core.ConnID(i)})
+	}
+	m.script = func(n int, body core.EventData) []core.Action {
+		switch body.(type) {
+		case core.NodeStarted:
+			return []core.Action{core.SetTimer{ID: 3, Gen: 4, After: machine.Duration(time.Millisecond)}}
+		case core.ConnOpened:
+			time.Sleep(30 * time.Millisecond)
+		case core.TimerFired:
+			return []core.Action{core.ShutdownDone{}}
+		}
+		return nil
+	}
+	if err := r.run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, e := range m.events {
+		switch e.Body.(type) {
+		case core.NodeStarted:
+			order = append(order, "boot")
+		case core.ConnOpened:
+			order = append(order, "data")
+		case core.TimerFired:
+			order = append(order, "timer")
+		}
+	}
+	if got := strings.Join(order, ","); got != "boot,data,timer" {
+		t.Fatalf("order = %s, want boot,data,timer", got)
 	}
 }
 
 func TestDispatchTimersAndConns(t *testing.T) {
 	m := &fakeMachine{}
-	b, ex, cn, f := setup(m)
+	r := newRig(m)
 	m.script = func(n int, _ core.EventData) []core.Action {
 		if n != 0 {
 			return nil
@@ -189,11 +255,45 @@ func TestDispatchTimersAndConns(t *testing.T) {
 			core.ShutdownDone{},
 		}
 	}
-	if err := Run(t.Context(), b, ex, f, machine.NodeInstance{}); err != nil {
+	r.cfg.Route = system.Route(system.Host{Exec: r.ex, Connections: r.conns}) // Facts is nil
+	if err := r.run(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(cn.log, ","); got != "close,resume" {
-		t.Fatalf("conns = %v", cn.log)
+	if got := strings.Join(r.conns.log, ","); got != "close,resume" {
+		t.Fatalf("conns = %v", r.conns.log)
+	}
+}
+
+// Every IOCall case goes to the executor, in output order.
+func TestIOCallsGoToTheExecutor(t *testing.T) {
+	m := &fakeMachine{script: func(int, core.EventData) []core.Action {
+		return []core.Action{
+			core.Send{Req: 1}, core.Connect{Req: 2}, core.ObjectCall{Call: objectstore.Get{Req: 3}},
+			core.ControlPlaneCall{Req: 4}, core.ShutdownDone{},
+		}
+	}}
+	r := newRig(m)
+	if err := r.run(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var reqs []machine.RequestID
+	for _, a := range r.ex.got {
+		reqs = append(reqs, a.RequestID())
+	}
+	if len(reqs) != 4 || reqs[0] != 1 || reqs[1] != 2 || reqs[2] != 3 || reqs[3] != 4 {
+		t.Fatalf("executor saw %v", reqs)
+	}
+}
+
+// ControlPlaneReply is for the simulator. A production process refuses it.
+func TestUnknownActionEndsTheRun(t *testing.T) {
+	m := &fakeMachine{script: func(int, core.EventData) []core.Action {
+		return []core.Action{core.ControlPlaneReply{}}
+	}}
+	r := newRig(m)
+	err := r.run(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "unknown action core.ControlPlaneReply") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
@@ -219,11 +319,11 @@ func TestShutdownStopThenExit(t *testing.T) {
 		}
 		return nil
 	}
-	b, ex, _, f := setup(m)
+	r := newRig(m)
 	sd := make(chan struct{})
-	b.Shutdown, b.StopGrace = sd, machine.Duration(time.Second)
+	r.cfg.Shutdown, r.cfg.StopGrace = sd, machine.Duration(time.Second)
 	res := make(chan error, 1)
-	go func() { res <- Run(t.Context(), b, ex, f, machine.NodeInstance{}) }()
+	go func() { res <- r.run(t.Context()) }()
 	close(sd)
 	if err := <-res; err != nil {
 		t.Fatal(err)
@@ -235,22 +335,21 @@ func TestShutdownStopThenExit(t *testing.T) {
 }
 
 func TestShutdownIgnoredKilled(t *testing.T) {
-	m := &fakeMachine{}
-	b, ex, _, f := setup(m)
+	r := newRig(&fakeMachine{})
 	sd := make(chan struct{})
-	b.Shutdown, b.StopGrace = sd, machine.Duration(50*time.Millisecond)
+	r.cfg.Shutdown, r.cfg.StopGrace = sd, machine.Duration(50*time.Millisecond)
 	res := make(chan error, 1)
-	go func() { res <- Run(t.Context(), b, ex, f, machine.NodeInstance{}) }()
+	go func() { res <- r.run(t.Context()) }()
 	close(sd)
 	start := time.Now()
-	if err := <-res; !errors.Is(err, ErrKilledByRuntime) {
+	if err := <-res; !errors.Is(err, live.ErrKilled) {
 		t.Fatalf("err = %v", err)
 	}
 	if time.Since(start) < 40*time.Millisecond {
 		t.Fatal("killed before grace elapsed")
 	}
 	select {
-	case <-b.Inbox.Closed():
+	case <-r.cfg.Inbox.Closed():
 	default:
 		t.Fatal("inbox not closed")
 	}
@@ -258,15 +357,15 @@ func TestShutdownIgnoredKilled(t *testing.T) {
 
 func TestShutdownStopDeliveredOnce(t *testing.T) {
 	m := &fakeMachine{}
-	b, ex, _, f := setup(m)
+	r := newRig(m)
 	sd := make(chan struct{})
-	b.Shutdown, b.StopGrace = sd, machine.Duration(100*time.Millisecond)
+	r.cfg.Shutdown, r.cfg.StopGrace = sd, machine.Duration(100*time.Millisecond)
 	close(sd)
 	for i := range 5 {
-		b.Inbox.DeliverControl(core.TimerFired{ID: machine.TimerID(i)})
+		r.cfg.Inbox.Deliver(machine.Control, core.TimerFired{ID: machine.TimerID(i)})
 	}
-	err := Run(t.Context(), b, ex, f, machine.NodeInstance{})
-	if !errors.Is(err, ErrKilledByRuntime) {
+	err := r.run(t.Context())
+	if !errors.Is(err, live.ErrKilled) {
 		t.Fatalf("err = %v", err)
 	}
 	if n, _ := stops(m); n != 1 {

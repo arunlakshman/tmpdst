@@ -16,6 +16,9 @@ import (
 //
 // Data is the class of everything a connection sends, one ordered stream per connection.
 // Bounded; real backpressure is PauseReads.
+//
+// The pick between the two queues is the rule of dst/live.Inbox.Pop in production and of
+// dst/kernel in simulation: Control first, then Data, and a queue is first in, first out.
 
 // InboxKindOf is the fixed classification table. Events that must stay ordered
 // relative to each other share a queue: ConnClosed is Data so a client's EOF
@@ -33,25 +36,4 @@ func InboxKindOf(b EventData) machine.Class {
 		// A new EventData type without a row here is a programming error.
 		panic(fmt.Sprintf("core.InboxKindOf: unclassified event %T", b))
 	}
-}
-
-// Inbox is one inbox as seen by an InboxPicker. Production backs it with a
-// channel (non-blocking receive); the simulator backs it with a slice.
-type Inbox interface {
-	Len() int
-	// Pop removes and returns the head. ok=false when empty.
-	Pop() (body EventData, ok bool)
-}
-
-// InboxPicker picks the next event for Step. It must be a pure function of the
-// two queues' contents and its own counters, and is the SAME code in
-// production and simulation (docs/flow-control.md sec. 3.3):
-//
-//  1. control non-empty -> take head of control (always);
-//  2. else data non-empty -> take head of data;
-//  3. else ok=false (the caller sleeps until either queue is non-empty).
-//
-// Go's select must never decide priority.
-type InboxPicker interface {
-	Next(control, data Inbox) (body EventData, ok bool)
 }

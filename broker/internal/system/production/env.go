@@ -22,7 +22,10 @@ type Env struct {
 	log *slog.Logger
 }
 
-var _ core.Environment = (*Env)(nil)
+var (
+	_ core.Environment = (*Env)(nil)
+	_ machine.Env      = (*Env)(nil)
+)
 
 // NewEnv returns a production Env that logs to log.
 func NewEnv(log *slog.Logger) (*Env, error) {
@@ -43,9 +46,34 @@ func (e *Env) Uint64() uint64 {
 	return e.rnd.Uint64()
 }
 
-// Intn returns a random int in [0, n).
+// Intn returns a random int in [0, n). It returns 0 when n <= 0 (the contract of
+// machine.Rand).
 func (e *Env) Intn(n int) int {
+	if n <= 0 {
+		return 0
+	}
 	return int(e.Uint64() % uint64(n))
+}
+
+// Between returns a random value in [lo, hi]: both ends are included. It returns lo
+// when hi <= lo.
+func (e *Env) Between(lo, hi int64) int64 {
+	if hi <= lo {
+		return lo
+	}
+	span := uint64(hi-lo) + 1 // zero when the range is every int64 value
+	if span == 0 {
+		return int64(e.Uint64())
+	}
+	return lo + int64(e.Uint64()%span)
+}
+
+// Chance is true with probability p. It draws nothing when p <= 0.
+func (e *Env) Chance(p float64) bool {
+	if p <= 0 {
+		return false
+	}
+	return float64(e.Uint64()>>11)/(1<<53) < p
 }
 
 // NewID returns a random ID.

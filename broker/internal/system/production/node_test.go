@@ -11,8 +11,8 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specsystem"
+	"github.com/manifesterio/mds/dst/live"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 )
@@ -125,7 +125,7 @@ func TestStartGracefulStop(t *testing.T) {
 func TestStartKill(t *testing.T) {
 	n, _ := startNode(t, nil)
 	n.Kill()
-	if err := waitDone(t, n); !errors.Is(err, system.ErrStopped) && !errors.Is(err, system.ErrKilledByRuntime) {
+	if err := waitDone(t, n); !errors.Is(err, live.ErrStopped) && !errors.Is(err, live.ErrKilled) {
 		t.Errorf("kill: %v", err)
 	}
 }

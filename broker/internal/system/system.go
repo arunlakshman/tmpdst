@@ -1,7 +1,8 @@
 // Package system is the production seam: narrow interfaces over real I/O that the
 // production Executor calls from goroutines. SDK and HTTP types never leak past
 // an adapter. The simulator does NOT implement these; it implements simulator.Engine
-// over the same Action/Event vocabulary (docs/lessons.md, section 0).
+// over the same Action/Event vocabulary (docs/lessons.md, section 0). The production
+// loop is dst/live; this package has its Route function.
 package system
 
 import (
@@ -9,6 +10,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/live"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
@@ -39,39 +41,27 @@ type ErrorClassifier interface {
 	Classify(a core.IOCall, err error) (core.ErrCode, core.Outcome)
 }
 
-// InboxWriter is the node's pair of inboxes (docs/flow-control.md sec. 3). Callers route
-// with core.InboxKindOf. The loop picks with core.InboxPicker and stamps At/Wall
-// when it dequeues.
+// InboxWriter is where completions and bytes go. It is the Deliver side of a
+// live.Inbox[core.EventData]: the caller picks the queue (docs/flow-control.md sec. 3).
 type InboxWriter interface {
-	// DeliverControl is used by timer callbacks and I/O completion goroutines.
-	// It never blocks: the control queue is bounded by construction.
-	DeliverControl(body core.EventData)
-	// DeliverData is used by connection reader goroutines. It blocks when the
-	// data queue is full (a safety net; real backpressure is PauseReads).
-	DeliverData(body core.EventData)
+	// Deliver queues body in the queue of class c. Timer callbacks and I/O
+	// completion goroutines use machine.Control, which never blocks (the queue is
+	// bounded by construction). Connection reader goroutines use machine.Data,
+	// which blocks when the data queue is full (a safety net; real backpressure is
+	// PauseReads).
+	Deliver(c machine.Class, body core.EventData)
 	// Closed is closed when the incarnation ends. Later deliveries are dropped,
 	// never block, and never reach the next incarnation.
 	Closed() <-chan struct{}
 }
 
-// Executor runs I/O only. The loop handles RecordFact, timers, StopForRestart, ShutdownDone and
-// returns an error on an unknown action. Exactly one IOResult per IOCall, with the
-// same RequestID, delivered to the InboxWriter and never on the caller's goroutine.
-// Execute MUST NOT block: it hands work to goroutines/queues.
+var _ InboxWriter = (*live.Inbox[core.EventData])(nil)
+
+// Executor runs I/O only. The route function (Route) handles RecordFact, timers,
+// StopForRestart, ShutdownDone and the connection actions, and returns an error on an
+// unknown action. Exactly one IOResult per IOCall, with the same RequestID, delivered
+// to the InboxWriter and never on the caller's goroutine. Execute MUST NOT block: it
+// hands work to goroutines/queues.
 type Executor interface {
 	Execute(a core.IOCall)
-}
-
-// Dependencies is everything nondeterministic a production broker process needs.
-type Dependencies struct {
-	Clock        machine.Clock
-	Objects      ObjectStore
-	ControlPlane ControlPlane
-	Connections  Connections
-	Classifier   ErrorClassifier
-	Env          core.Environment   // crypto-seeded Rand, inert FaultInjector, logging Assertions
-	Inbox        *Inbox             // shared with the Executor and readers; Run closes it on return
-	Facts        func(machine.Fact) // optional: receives RecordFact facts (tracing)
-	Shutdown     <-chan struct{}    // optional: closing it asks Run for a graceful stop (see StopOnSignal)
-	StopGrace    machine.Duration   // time the machine gets after Shutdown to emit ShutdownDone
 }

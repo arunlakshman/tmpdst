@@ -10,6 +10,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
+	"github.com/manifesterio/mds/dst/machine"
 )
 
 // LeaseClient is the control plane call behind a broker's heartbeat (Q4). It
@@ -45,7 +46,7 @@ func leaseLoop(ctx context.Context, in system.InboxWriter, lease LeaseClient, se
 				log.Info("lease: heartbeat works again")
 			}
 			failing, stale, last = false, false, time.Now()
-			in.DeliverControl(core.LiveBrokers{Brokers: live})
+			in.Deliver(machine.Control, core.LiveBrokers{Brokers: live})
 		} else {
 			if !failing {
 				log.Warn("lease: heartbeat failed", "err", err)
@@ -53,7 +54,7 @@ func leaseLoop(ctx context.Context, in system.InboxWriter, lease LeaseClient, se
 			failing = true
 			if !stale && time.Since(last) > staleBeats*every {
 				stale = true
-				in.DeliverControl(core.LiveBrokers{})
+				in.Deliver(machine.Control, core.LiveBrokers{})
 			}
 		}
 		select {

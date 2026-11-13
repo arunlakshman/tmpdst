@@ -74,9 +74,9 @@ func TestRestartDelayWithOneValueStillDrawsOnce(t *testing.T) {
 	}
 }
 
-func TestMachineAdapterPassesTheTimeInTheEvent(t *testing.T) {
+func TestOnContractPassesTheTimeInTheEvent(t *testing.T) {
 	var seen []stepRecord
-	a := machineAdapter{&stubMachine{seen: &seen}}
+	a := core.OnContract(&stubMachine{seen: &seen})
 	now := machine.Now{Mono: 5, Wall: 7}
 	a.Step(now, core.NodeStarted{})
 	if len(seen) != 1 || seen[0].now != now {

@@ -1,6 +1,6 @@
 // Package broker is the Kafka broker state machine: stateless, pure and
 // deterministic (core.Machine), with S3 as the data plane and the control
-// plane assigning offsets. The simulator and system.Run drive the same code.
+// plane assigning offsets. The simulator and the production loop (dst/live) drive the same code.
 //
 // Pipeline of a produce: the batch joins the open segment buffer; a flush
 // (BatchWindow timer or MaxSegmentBytes) encodes it with format.Encode,

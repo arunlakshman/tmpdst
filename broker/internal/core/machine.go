@@ -25,3 +25,33 @@ type Machine interface {
 // MachineFactory builds a fresh Machine for one boot. It is called on first boot
 // and after every crash, with a new BootNumber each time (lessons 4, 10).
 type MachineFactory func(env Environment, self machine.NodeInstance) Machine
+
+// A core machine takes one Event, with the time inside it. The dst contract
+// (machine.Machine) is Step(now, in). OnContract and ContractFactory change the form
+// of the call and nothing else. The simulator and the production loop (dst/live) both
+// use them, so a broker runs the same code in both.
+
+type contractMachine struct{ m Machine }
+
+var _ machine.Machine[EventData, Action] = contractMachine{}
+
+func (a contractMachine) Step(now machine.Now, in EventData) []Action {
+	return a.m.Step(Event{At: now.Mono, Wall: now.Wall, Body: in})
+}
+
+func (a contractMachine) StateHash() uint64 { return a.m.StateHash() }
+
+// OnContract runs m on the dst contract.
+func OnContract(m Machine) machine.Machine[EventData, Action] { return contractMachine{m} }
+
+// ContractFactory turns a core machine factory into a dst factory. A nil machine
+// stays nil, so the caller can report it.
+func ContractFactory(f MachineFactory) machine.Factory[EventData, Action] {
+	return func(env machine.Env, self machine.NodeInstance) machine.Machine[EventData, Action] {
+		m := f(env, self)
+		if m == nil {
+			return nil
+		}
+		return contractMachine{m}
+	}
+}

@@ -7,31 +7,15 @@ import (
 )
 
 // The core machines (the broker, the workloads) take one core.Event, with the
-// time inside it. The dst v2 contract is Step(now, in). These adapters change
-// the form of the call and nothing else. The product code of core and broker is
+// time inside it. The dst v2 contract is Step(now, in). The adapters (core.OnContract
+// for a broker, driverAdapter for a workload) change the form of the call and nothing else. The product code of core and broker is
 // the same as in production.
 
-// machineAdapter runs a core machine on the dst v2 contract.
-type machineAdapter struct{ m core.Machine }
-
-var _ machine.Machine[core.EventData, core.Action] = machineAdapter{}
-
-func (a machineAdapter) Step(now machine.Now, in core.EventData) []core.Action {
-	return a.m.Step(core.Event{At: now.Mono, Wall: now.Wall, Body: in})
-}
-
-func (a machineAdapter) StateHash() uint64 { return a.m.StateHash() }
-
 // adaptFactory turns a core machine factory into a dst v2 factory. A nil
-// machine stays nil, so the kernel reports it.
+// machine stays nil, so the kernel reports it. It is core.ContractFactory, the
+// same adapter that the production loop uses.
 func adaptFactory(f core.MachineFactory) machine.Factory[core.EventData, core.Action] {
-	return func(env machine.Env, self machine.NodeInstance) machine.Machine[core.EventData, core.Action] {
-		m := f(env, self)
-		if m == nil {
-			return nil
-		}
-		return machineAdapter{m}
-	}
+	return core.ContractFactory(f)
 }
 
 // phaseTimer is the timer id that carries a phase change to a workload. The kernel

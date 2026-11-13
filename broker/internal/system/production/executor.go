@@ -9,6 +9,7 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/system"
+	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
 )
 
@@ -75,7 +76,7 @@ func (e *Executor) deliver(c core.IOResult) {
 		return
 	default:
 	}
-	e.sink.DeliverControl(c)
+	e.sink.Deliver(machine.Control, c)
 }
 
 // Execute never blocks: it queues a write or starts a goroutine.

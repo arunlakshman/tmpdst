@@ -10,6 +10,7 @@ import (
 	"github.com/manifesterio/mds/broker/internal/system"
 	"github.com/manifesterio/mds/broker/internal/verify/speccheck/specsystem"
 	"github.com/manifesterio/mds/controlplane/contract"
+	"github.com/manifesterio/mds/dst/live"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/shared/objectstore"
 	"github.com/manifesterio/mds/shared/objectstore/s3"
@@ -41,10 +42,10 @@ type nilConns struct{ *Net }
 
 func (nilConns) WriteAsync(core.ConnID, []byte, func(error)) error { return ErrNoConn }
 
-func wait(t *testing.T, in *system.Inbox) core.EventData {
+func wait(t *testing.T, in *live.Inbox[core.EventData]) core.EventData {
 	t.Helper()
 	for end := time.Now().Add(2 * time.Second); time.Now().Before(end); time.Sleep(time.Millisecond) {
-		if b, ok := in.Control().Pop(); ok {
+		if b, ok := in.Pop(); ok {
 			return b
 		}
 	}
@@ -53,7 +54,7 @@ func wait(t *testing.T, in *system.Inbox) core.EventData {
 }
 
 func TestExecutorCompletesOnceAndNeverBlocks(t *testing.T) {
-	in := system.NewInbox(8)
+	in := live.NewInbox[core.EventData](8)
 	objs := slowObjs{ObjectStore: specsystem.NewObjectStore(), block: make(chan struct{})}
 	cls := Classifier{Objects: MemoryErrorClassifier{}, CP: memoryCP{}}
 	e := NewExecutor(t.Context(), ExecConfig{ObjTimeout: 50 * time.Millisecond}, objs, nil, nilConns{}, cls, in)
@@ -80,7 +81,7 @@ func TestExecutorCompletesOnceAndNeverBlocks(t *testing.T) {
 	if send.Req != 8 || send.Err != core.ErrConnClosed {
 		t.Errorf("send %+v", send)
 	}
-	if _, ok := in.Control().Pop(); ok {
+	if _, ok := in.Pop(); ok {
 		t.Fatal("more than one completion per action")
 	}
 
@@ -91,13 +92,13 @@ func TestExecutorCompletesOnceAndNeverBlocks(t *testing.T) {
 }
 
 func TestExecutorDropsAfterClose(t *testing.T) {
-	in := system.NewInbox(8)
+	in := live.NewInbox[core.EventData](8)
 	e := NewExecutor(t.Context(), ExecConfig{}, specsystem.NewObjectStore(), nil, nilConns{},
 		Classifier{Objects: MemoryErrorClassifier{}}, in)
 	in.Close()
 	e.Execute(core.ObjectCall{Call: objectstore.List{Req: 1}})
 	time.Sleep(30 * time.Millisecond)
-	if _, ok := in.Control().Pop(); ok {
+	if _, ok := in.Pop(); ok {
 		t.Fatal("delivered after close")
 	}
 }
@@ -127,7 +128,7 @@ func (s slowCP) Call(ctx context.Context, _ contract.Operation) (contract.Respon
 // A control plane call takes its own Timeout when it has one (group joins wait
 // for a rebalance), and the executor's default otherwise.
 func TestControlPlaneCallOwnTimeout(t *testing.T) {
-	in := system.NewInbox(8)
+	in := live.NewInbox[core.EventData](8)
 	cls := Classifier{Objects: MemoryErrorClassifier{}, CP: memoryCP{}}
 	e := NewExecutor(t.Context(), ExecConfig{CPTimeout: 10 * time.Millisecond}, nil, slowCP{d: 60 * time.Millisecond}, nilConns{}, cls, in)
 

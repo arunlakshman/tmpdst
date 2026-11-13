@@ -285,7 +285,7 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 		},
 	)
 	if err := n.Wait(); err != nil {
-		return err // system.ErrStoppedForRestart, system.ErrKilledByRuntime, ...
+		return err // live.ErrStoppedForRestart, live.ErrKilled, ...
 	}
 	log.Info("mdsbroker stopped")
 	return nil

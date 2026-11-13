@@ -1,11 +1,11 @@
-// Command kvsim runs the two v2 examples (kv and kvchaos) through the standard
+// Command kvsim runs the two examples (kv and kvchaos) through the standard
 // campaign tool of dst/campaign. It shows how small a product simulator command
 // is: build a registry, give a Config, call campaign.Main.
 //
-//	go run ./examples/v2/kvsim -seeds 200 -report      # both scenarios, 200 seeds each
-//	go run ./examples/v2/kvsim -scenario kvchaos -seed 7 # one seed, with its step log
-//	go run ./examples/v2/kvsim -until-stable -scenario kv
-//	MDS_CAMPAIGN=5s go run ./examples/v2/kvsim          # seeds until 5 seconds have passed
+//	go run ./examples/kvsim -seeds 200 -report      # both scenarios, 200 seeds each
+//	go run ./examples/kvsim -scenario kvchaos -seed 7 # one seed, with its step log
+//	go run ./examples/kvsim -until-stable -scenario kv
+//	MDS_CAMPAIGN=5s go run ./examples/kvsim          # seeds until 5 seconds have passed
 package main
 
 import (
@@ -13,8 +13,8 @@ import (
 	"os"
 
 	"github.com/manifesterio/mds/dst/campaign"
-	"github.com/manifesterio/mds/dst/examples/v2/kv"
-	"github.com/manifesterio/mds/dst/examples/v2/kvchaos"
+	"github.com/manifesterio/mds/dst/examples/kv"
+	"github.com/manifesterio/mds/dst/examples/kvchaos"
 	"github.com/manifesterio/mds/dst/kernel"
 )
 
@@ -58,5 +58,5 @@ func newRegistry() *campaign.Registry {
 }
 
 func reproduce(scenario string, seed uint64) string {
-	return fmt.Sprintf("go run ./examples/v2/kvsim -scenario %s -seed %d", scenario, seed)
+	return fmt.Sprintf("go run ./examples/kvsim -scenario %s -seed %d", scenario, seed)
 }

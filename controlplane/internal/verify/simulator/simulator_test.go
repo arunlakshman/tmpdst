@@ -5,8 +5,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/manifesterio/mds/dst/check/spectest"
 	"github.com/manifesterio/mds/dst/fault"
-	"github.com/manifesterio/mds/dst/mutant"
 )
 
 func mustRun(t *testing.T, cfg Config) Result {
@@ -132,15 +132,15 @@ func TestFaultsAreInjected(t *testing.T) {
 // TestPlantedBugsAreFound is why we can trust the simulator: when one known bug
 // is planted, some seed in a few hundred must fail. Both bugs are in the fake log.
 func TestPlantedBugsAreFound(t *testing.T) {
-	scenario := map[mutant.Bug]string{
-		mutant.Bug(BugLogOverwrite):    "chaos",
-		mutant.Bug(BugClaimAlwaysWins): "leader-fencing",
+	scenario := map[spectest.Bug]string{
+		spectest.Bug(BugLogOverwrite):    "chaos",
+		spectest.Bug(BugClaimAlwaysWins): "leader-fencing",
 	}
-	bugs := []mutant.Bug{
-		mutant.Bug(BugLogOverwrite),
-		mutant.Bug(BugClaimAlwaysWins),
+	bugs := []spectest.Bug{
+		spectest.Bug(BugLogOverwrite),
+		spectest.Bug(BugClaimAlwaysWins),
 	}
-	mutant.Require(t, bugs, 300, func(bug mutant.Bug, seed uint64) bool {
+	spectest.RequireCaught(t, bugs, 300, func(bug spectest.Bug, seed uint64) bool {
 		res := mustRun(t, Config{Scenario: scenario[bug], Seed: seed, Bug: Bug(bug)})
 		if res.OK() {
 			return false
@@ -153,7 +153,7 @@ func TestPlantedBugsAreFound(t *testing.T) {
 // TestCleanRunHasNoFalseAlarm is the other side of the planted bug test: with no
 // bug, the same seeds that find a bug must pass.
 func TestCleanRunHasNoFalseAlarm(t *testing.T) {
-	mutant.RequireClean(t, seedCount(10, 60), func(seed uint64) bool {
+	spectest.RequireClean(t, seedCount(10, 60), func(seed uint64) bool {
 		for _, sc := range []string{"chaos", "leader-fencing"} {
 			if res := mustRun(t, Config{Scenario: sc, Seed: seed}); !res.OK() {
 				t.Log(Report(res))

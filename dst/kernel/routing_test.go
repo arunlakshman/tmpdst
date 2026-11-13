@@ -9,7 +9,7 @@ import (
 	"github.com/manifesterio/mds/dst/trace"
 )
 
-// Ports of the dst/sim runner tests and of the broker kernel tests about
+// Ports of the old runner tests and of the broker kernel tests about
 // routing, timers, services, time and the cost model.
 
 func TestServiceCallRouting(t *testing.T) {

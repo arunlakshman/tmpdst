@@ -2,7 +2,7 @@ package check
 
 import "fmt"
 
-// The helpers in this file came from dst/model. They check the two crash
+// The helpers in this file came from the old model package. They check the two crash
 // properties of the Bornholt et al. paper (SOSP 2021, section 5) by hand,
 // for a test that does not use Lockstep:
 //

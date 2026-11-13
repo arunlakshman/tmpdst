@@ -3,7 +3,7 @@
 # ranges, package-level state, or imports outside ops/determinism-allow.txt.
 # Not in the gate (they use goroutines, wall time or files on purpose):
 #   campaign (parallel seeds), live (the production loop: real time, goroutines,
-#   channels), syncclock, realclock, golden (files), model and mutant (testing),
+#   channels), syncclock, realclock, golden (files), mutant (testing),
 #   examples.
 # The dst v2 packages machine and kernel are in the gate.
 set -euo pipefail

@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/dst/campaign"
-	"github.com/manifesterio/mds/dst/examples/v2/kv"
-	"github.com/manifesterio/mds/dst/examples/v2/kvchaos"
+	"github.com/manifesterio/mds/dst/examples/kv"
+	"github.com/manifesterio/mds/dst/examples/kvchaos"
 )
 
 func run(t *testing.T, args ...string) (int, string, string) {

@@ -49,7 +49,6 @@ github.com/manifesterio/mds/dst/fault
 github.com/manifesterio/mds/dst/golden
 github.com/manifesterio/mds/dst/kernel
 github.com/manifesterio/mds/dst/machine
-github.com/manifesterio/mds/dst/mutant
 github.com/manifesterio/mds/dst/rng
 github.com/manifesterio/mds/dst/trace
 

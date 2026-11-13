@@ -3,7 +3,7 @@ package span_test
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/broker/internal/verify/simulation/fakeservices/internal/span"
+	"github.com/manifesterio/mds/broker/internal/verify/simulation/internal/span"
 	"github.com/manifesterio/mds/dst/rng"
 )
 

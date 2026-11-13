@@ -20,7 +20,7 @@ import (
 	"slices"
 
 	"github.com/manifesterio/mds/broker/internal/core"
-	"github.com/manifesterio/mds/broker/internal/verify/simulation/fakeservices/internal/span"
+	"github.com/manifesterio/mds/broker/internal/verify/simulation/internal/span"
 	"github.com/manifesterio/mds/dst/assert"
 	"github.com/manifesterio/mds/dst/kernel"
 	"github.com/manifesterio/mds/dst/machine"

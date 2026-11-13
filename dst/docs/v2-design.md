@@ -2205,3 +2205,81 @@ tree `broker/internal/verify/simulator` and its goldens are not changed (decisio
 11. **Gates.** `internal/verify/simulation/...` is in `broker/ops/scripts/ci-determinism.sh` (and its canary loop),
     `dst/kernel` and `dst/rng` are in `broker/ops/determinism-allow.txt`, and the `forbidigo` panic exclusion of
     `broker/.golangci.yml` names the new tree.
+
+### T1.12b (the broker machine, the workloads, the rules and the oracle on dst/kernel)
+
+The new tree is `broker/internal/verify/simulation/...`. The old tree
+`broker/internal/verify/simulator` and its goldens are not changed (decision D3). `core` and
+`broker` are not changed at all.
+
+1. **The broker machine needs no change in `core` or `broker`.** The v2 contract is `Step(now,
+   in) []Out`. The core machines (the broker, the echo broker, the workloads) keep `Step(core.Event)
+   []core.Action`. `simulation/cluster` wraps each one in a small adapter (`machineAdapter`,
+   `driverAdapter`) that builds the `core.Event` from `machine.Now` and the input. So the production
+   binary and the old simulator tree work as before, and `core.Event` stays until T1.12d.
+2. **Where the host code is.** `simulation/cluster` is the new host (it replaces `kernel.go`,
+   `engine.go`, `roles.go` and `run.go` of the old tree). `cluster.New(Plan)` makes the world and the
+   three services in the old order (object store, control plane, network). `AddBrokers`, `AddWorkload`
+   and `Run` do the rest. The workload and the brokers share one route function. The shared knobs of
+   one seed are `cluster.Settings` (the fake service faults, clock skew, attrition, recovery delay and
+   the cost model). Section 14.1 asked for `kernel.Attrition`; the recovery delay is not in it, so it
+   is `Settings.RecoveryDelay` and becomes `NodeSpec.Restart`. Nothing else was added to dst.
+3. **The route function is one exhaustive switch over `core.Action`, but the sum is not marked yet.**
+   `//sumtype:decl` on `core.Action` makes `gochecksumtype` report 13 other switches (the production
+   `internal/system/run.go`, the old kernel, the old fake services, the fake log bridge and several
+   tests). That is more than a forced change. The marker was tried and removed; with it the route
+   function of `cluster` has no finding. T1.12d (or T1.12e) can add the marker when the old tree is
+   gone and the production loop is fixed. `core.EventData` is the same. Section 19 T1.6b note 2 said
+   the same.
+4. **A phase change reaches the workload as a `core.TimerFired`.** The kernel gives a driver the phase
+   as one input of its input type, and `core.EventData` cannot get a new case from `cluster`. The
+   input is `core.TimerFired{ID: 1<<62, Gen: phase}`. `driverAdapter` turns it into
+   `Workload.OnPhase(phase)`. The workloads use small timer ids, so there is no clash. If a
+   `core.PhaseChanged` event is added later, only `phaseEvent` and `driverAdapter` change. The trace
+   hash folds the kernel's own "on phase" tag (903) and the phase, as before.
+5. **A driver has the cost model too.** The old kernel sampled the cost after every Step of every node,
+   also of the workload. So `cluster` gives `Settings.Cost` to the workload node as well. Zero params
+   draw nothing (`CostParams.Sample`).
+6. **The 7 `Between` call sites.** Four are in the fake services (T1.12a). The skew and the
+   `FastWithRareSlow` sample are in `dst/kernel` (both ends included: the same values as the old
+   `Between(0, max+1)`). The restart delay is `cluster.restart`, which uses `span.Between`, the old
+   half-open formula that draws once even when `hi == lo+1` (a test shows it). The freeze site is gone
+   with freeze (D6). `internal/span` moved from `fakeservices/internal` to `simulation/internal`
+   because `cluster` needs it too.
+7. **The swarm stream is the same.** `rng.New(seed).Derive("swarm")` gives the same values as the old
+   `NewRand(seed).Derive("swarm")` (checked for 2000 seeds with 60 draws each), so a seed has the
+   same swarmed knobs as before. The product keeps its typed per-seed knobs: `kafka.Settings` is
+   `cluster.Settings` plus `broker.Config`. There is no `Params any`.
+8. **History is generic.** `history.History[Op, Res]`. Kafka uses two sealed sums (`kafka.Op` with
+   `ProduceOp` and `ReadOp`, `kafka.Res` with `ProduceRes` and `ReadRes`). Echo uses `echo.Op` and a
+   `string` result. `history.Reader` is the read side that the rules take.
+9. **Rules get typed truth.** `simulation/truth` has `ObjectStore` and `ControlPlane` (the two
+   anti-corruption interfaces of the old `View`). The fake object store and the fake control plane have
+   these methods. The oracle and the rules take them at construction, with the history. The C4 test
+   (the oracle against the specs) builds its own fake values of these interfaces. The oracle still
+   imports no spec package: the `kafka-oracle-no-spec` rule of `.golangci.yml` names the new path, and
+   `TestC4OracleDoesNotImportSpecCheck` checks the imports of the new package (an import of
+   `broker/spec` was tried and the linter reported it).
+10. **Entry points for T1.12c.** `kafka.Run(kafka.Config{Seed, Log, HaltOnFirst, ...}) kernel.Result`
+    and `echo.Run(echo.Config{...}) kernel.Result`. They do not import `dst/campaign`, because the
+    determinism gate scans the packages. `cmd/mdssimulator` wraps them with `campaign.FromKernel`.
+    `kafka.Config` also has the hooks that the tests use (`Bug`, `Opts`, `Tune`, `ExtraRules`,
+    `VerifyHashes`); a zero Config is the campaign scenario.
+11. **`ExpectReachable` is gone; the test files keep the list.** `expectedReachable` is now a variable in
+    `kafka_test.go` and `echo_test.go` (the old lists, word for word) and the tests check it. The
+    catalog of dst/assert has the names of both scenarios, so a kafka-only campaign in a binary that
+    has both would list the echo-only Sometimes and Reachable names as never reached. T1.12c must
+    decide how (see its notes in the report of T1.12b).
+12. **No golden pin in the new tree.** `kafka/testdata/golden_hashes.txt` and its test are not copied.
+    T1.12c writes them from `kafka.Run(kafka.Config{Seed: s})` (`Steps`, `RandCalls`, `Hash`).
+13. **Counters and sizes.** 2000 kafka seeds: 42189252 steps now, 42105567 before (0.2 percent more);
+    the counter names are the old ones without `freezes`. `timers_cancelled` is 26 percent lower:
+    the kernel forgets a timer when it fires, so a `CancelTimer` of a timer that already fired is not
+    counted (decision D7). `deadline_kills` was 3 in 2000 old seeds and 0 in 2000 new seeds (3107 graceful
+    stops); no assertion depends on it.
+14. **`fakelogservice` is deleted from the new tree (decision D4, approved).** No scenario uses it. The
+    package, its test, `testdata/parity_logservice.txt`, the `LogCases` of `servicetest`, the parity test
+    and the `paritygen` entry are gone. The note T1.12a.7 (ported as the card asks) is replaced by this.
+    The old copy (`simulator/fakeservices/fakelogservice`, `LogParams`) is deleted with the old tree in
+    T1.12d. The core action `ControlPlaneReply` stays in `core` (production code): the route function of
+    `cluster` has a case for it that fails the seed, because no service in this run takes it.

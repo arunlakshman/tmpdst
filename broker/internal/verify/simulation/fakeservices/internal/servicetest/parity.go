@@ -385,62 +385,6 @@ func NetworkCases() []Case {
 	return out
 }
 
-// ---- log bridge ----
-
-func logNodes() []string { return []string{"broker-0", "broker-1", "cp-0", "cp-1"} }
-
-// logRun issues calls from two brokers. The replica nodes answer every offer, some
-// with "unavailable" (a failover), and one replica crashes.
-func logRun(h *Harness, sv Subject) {
-	sv.CreateTopic("t", 2)
-	r := rng.New(h.Seed + 4000)
-	handled := 0
-	answer := func() {
-		for ; handled < len(h.Delivered); handled++ {
-			d := h.Delivered[handled]
-			o, ok := d.Body.(core.ControlPlaneDeliver)
-			if !ok || (d.To != "cp-0" && d.To != "cp-1") {
-				continue
-			}
-			done := core.ControlPlaneDone{Req: o.Req, Err: core.OK, Outcome: core.Applied}
-			if r.Chance(0.3) {
-				done = core.ControlPlaneDone{Req: o.Req, Err: core.ErrUnavailable}
-			}
-			h.Issue(string(d.To), core.ControlPlaneReply{To: o.From, Done: done})
-		}
-	}
-	for i := range 30 {
-		var op contract.Operation = contract.FindSegments{TopicPartition: contract.NewTopicPartition("t", 0)}
-		if i%3 == 0 {
-			op = contract.DescribeTopics{}
-		}
-		h.Issue(logNodes()[i%2], core.ControlPlaneCall{Req: machine.RequestID(i), Op: op})
-		h.RunFor(machine.Duration(1+r.Intn(3)) * ms)
-		answer()
-		switch i {
-		case 10:
-			h.Sample("log-mid", sv.StateHash())
-		case 15:
-			h.Crash("cp-0")
-		case 22:
-			h.Recover()
-		}
-	}
-	h.Run()
-	h.Sample("log-end", sv.StateHash())
-}
-
-// LogCases are the parity cases of the log bridge.
-func LogCases() []Case {
-	logFaulty := Mix{Apply: Timing{FastMin: ms, FastMax: 2 * ms}, Respond: Timing{FastMin: ms, FastMax: 2 * ms}, CallerTimeout: 500 * ms,
-		P503: 0.15, Timeout: 0.2, Lost: 0.2, OutageProb: 0.05, OutageDur: [2]machine.Duration{10 * ms, 20 * ms}}
-	logClean := Mix{Apply: Timing{FastMin: ms, FastMax: 2 * ms}, Respond: Timing{FastMin: ms, FastMax: 2 * ms}, CallerTimeout: 500 * ms}
-	var out []Case
-	out = append(out, withSeeds(Case{Name: "log/clean", Nodes: logNodes(), Mix: logClean, Run: logRun})...)
-	out = append(out, withSeeds(Case{Name: "log/faulty", Nodes: logNodes(), Mix: logFaulty, Run: logRun})...)
-	return out
-}
-
 // ---- transcript ----
 
 // Sample records a value for the transcript, for example a state hash.

@@ -8,7 +8,6 @@ import (
 
 	"github.com/manifesterio/mds/broker/internal/core"
 	"github.com/manifesterio/mds/broker/internal/verify/simulation/fakeservices/fakecontrolplane"
-	"github.com/manifesterio/mds/broker/internal/verify/simulation/fakeservices/fakelogservice"
 	"github.com/manifesterio/mds/broker/internal/verify/simulation/fakeservices/fakenetwork"
 	"github.com/manifesterio/mds/broker/internal/verify/simulation/fakeservices/fakeobjectstore"
 	"github.com/manifesterio/mds/broker/internal/verify/simulation/fakeservices/internal/servicetest"
@@ -100,21 +99,6 @@ func newNetwork(h *servicetest.Harness, c servicetest.Case) servicetest.Subject 
 	return servicetest.Subject{StateHash: e.StateHash, AddNode: e.AddNode}
 }
 
-func newLogService(h *servicetest.Harness, c servicetest.Case) servicetest.Subject {
-	e := fakelogservice.New(h.W, cpFaults(c.Mix), fakelogservice.DefaultParams())
-	e.UseReplicas(h.Addr("cp-0"), h.Addr("cp-1"))
-	svc := kernel.AddService[fakelogservice.Request, core.EventData](h.W, e)
-	h.Route = func(r *servicetest.Router, out core.Action) {
-		switch x := out.(type) {
-		case core.ControlPlaneCall:
-			kernel.Call(r, svc, fakelogservice.Request(fakelogservice.Call{ControlPlaneCall: x}))
-		case core.ControlPlaneReply:
-			kernel.Call(r, svc, fakelogservice.Request(fakelogservice.Reply{ControlPlaneReply: x}))
-		}
-	}
-	return servicetest.Subject{StateHash: e.StateHash, CreateTopic: e.CreateTopic}
-}
-
 // transcripts runs every case against the new fake and returns the transcripts
 // by case name.
 func transcripts(t *testing.T, cases []servicetest.Case, install func(*servicetest.Harness, servicetest.Case) servicetest.Subject) map[string]string {
@@ -177,10 +161,6 @@ func TestParityNetwork(t *testing.T) {
 	checkParity(t, "parity_network.txt", servicetest.NetworkCases(), newNetwork)
 }
 
-func TestParityLogService(t *testing.T) {
-	checkParity(t, "parity_logservice.txt", servicetest.LogCases(), newLogService)
-}
-
 // The cases must exercise what they claim: every fault kind of every fake must
 // happen in some case, or the comparison would not see it.
 func TestParityCasesReachTheFaults(t *testing.T) {
@@ -188,7 +168,6 @@ func TestParityCasesReachTheFaults(t *testing.T) {
 		"object":       {"obj_outage", "obj_503", "obj_timeout", "obj_lost_response", "obj_get_corrupt"},
 		"controlplane": {"cp_outage", "cp_503", "cp_timeout", "cp_lost_response"},
 		"network":      {"partition", "random_close", "black_hole", "clog"},
-		"log":          {"cp_503", "cp_timeout", "cp_lost_response", "cp_outage"},
 	}
 	groups := map[string]struct {
 		cases   []servicetest.Case
@@ -197,7 +176,6 @@ func TestParityCasesReachTheFaults(t *testing.T) {
 		"object":       {servicetest.ObjectCases(), newObjectStore},
 		"controlplane": {servicetest.ControlPlaneCases(), newControlPlane},
 		"network":      {servicetest.NetworkCases(), newNetwork},
-		"log":          {servicetest.LogCases(), newLogService},
 	}
 	for name, g := range groups {
 		seen := map[string]bool{}

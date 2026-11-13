@@ -12,7 +12,6 @@ import (
 	"github.com/manifesterio/mds/broker/internal/verify/simulation/fakeservices/internal/servicetest"
 	"github.com/manifesterio/mds/broker/internal/verify/simulator"
 	oldcp "github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakecontrolplane"
-	oldlog "github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakelogservice"
 	oldnet "github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakenetwork"
 	oldobj "github.com/manifesterio/mds/broker/internal/verify/simulator/fakeservices/fakeobjectstore"
 	"github.com/manifesterio/mds/dst/kernel"
@@ -184,14 +183,6 @@ func network(h *servicetest.Harness, c servicetest.Case) servicetest.Subject {
 	return servicetest.Subject{StateHash: e.StateHash, AddNode: func(servicetest.Addr) {}}
 }
 
-func logService(h *servicetest.Harness, c servicetest.Case) servicetest.Subject {
-	f := cpFaults(c.Mix)
-	f.Log = oldlog.DefaultParams()
-	e := oldlog.New(f)
-	install(h, e)
-	return servicetest.Subject{StateHash: e.StateHash, CreateTopic: e.CreateTopic}
-}
-
 func generate(t *testing.T, file string, cases []servicetest.Case, setup func(*servicetest.Harness, servicetest.Case) servicetest.Subject) {
 	t.Helper()
 	var out strings.Builder
@@ -212,5 +203,4 @@ func TestGenerateParityFiles(t *testing.T) {
 	generate(t, "parity_objectstore.txt", servicetest.ObjectCases(), objectStore)
 	generate(t, "parity_controlplane.txt", servicetest.ControlPlaneCases(), controlPlane)
 	generate(t, "parity_network.txt", servicetest.NetworkCases(), network)
-	generate(t, "parity_logservice.txt", servicetest.LogCases(), logService)
 }

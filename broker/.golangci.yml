@@ -49,7 +49,8 @@ linters:
     # must list every case. A default branch does not count as listing them.
     gochecksumtype:
       default-signifies-exhaustive: false
-    # The Kafka oracle (internal/verify/simulator/kafka) must stay independent of
+    # The Kafka oracle (internal/verify/simulator/kafka and the new tree
+    # internal/verify/simulation/kafka) must stay independent of
     # the specs it is tested against (decision 21). Only its own tests (the C4
     # check) may import a spec.
     depguard:
@@ -58,6 +59,7 @@ linters:
           list-mode: lax
           files:
             - "**/internal/verify/simulator/kafka/**"
+            - "**/internal/verify/simulation/kafka/**"
             - "!$test"
           deny:
             - pkg: "github.com/manifesterio/mds/broker/spec"

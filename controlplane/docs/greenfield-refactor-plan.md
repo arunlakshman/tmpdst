@@ -440,7 +440,7 @@ covers it.
 
 The design, which T6.1 turns into a short note:
 
-- `domain/rebalance` is a `sim.Process`-shaped pure machine with no locks, goroutines, channels or clock.
+- `domain/rebalance` is a pure `machine.Machine` with no locks with no locks, goroutines, channels or clock.
 - Input values: `Join`, `Sync`, `Heartbeat`, `Leave`, `OffsetCommit`, `OffsetFetch`, `Describe`, `List`,
   `CallAbandoned` (the RPC context ended), `TimerFired`, `RoleChanged`, `CommandDone`, `ReadDone`.
 - Output values: `SubmitCommand`, `SubmitRead`, `Reply`, `sim.SetTimer`, `sim.CancelTimer`.

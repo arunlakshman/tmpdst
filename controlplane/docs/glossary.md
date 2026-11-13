@@ -27,7 +27,7 @@ One line per term. Plain words. For the layout of the code see
 
 ## The nodes
 
-- **replica**: one node's copy of the log: it reads, applies, checkpoints, and writes when it is the writer. A `sim.Process`.
+- **replica**: one node's copy of the log: it reads, applies, checkpoints, and writes when it is the writer. A dst `machine.Machine`.
 - **role**: writer (the active appender) or standby. Only the writer appends. A standby still reads and serves reads.
 - **epoch**: the number of the current writer. A node claims a new epoch by compare-and-swap (`LogClaimEpoch`). Every entry carries it.
 - **fence**: how an old writer is stopped. A put into a taken slot fails, or it sees a newer epoch, and it steps down to standby.
@@ -52,7 +52,7 @@ One line per term. Plain words. For the layout of the code see
 
 ## Simulation and tests
 
-- **sim.Process**: the dst interface of a thing that does no IO: `Step(cx, inbox)` returns outputs. The replica and the rebalance machine have this shape.
+- **machine.Machine**: the dst interface of a thing that does no IO: `Step(now, in)` returns outputs. The replica and the rebalance machine have this shape.
 - **dst**: the deterministic simulation testing library (module `github.com/manifesterio/mds/dst`). It has the scheduler, the random stream, fault injection and the runner.
 - **simulator**: `internal/verify/simulator`: runs replicas and consumers on a virtual clock with a fake log and fake objects, one seed per run. `cmd/cpsim` runs campaigns of it.
 - **seed**: the one number that decides a whole run. Same seed, same run.

@@ -1,0 +1,173 @@
+case log/clean/seed1 seed 1
+steps 158
+rand_calls 258
+counter node_steps 127
+counter engine_steps 1
+counter sim_steps 30
+counter deliveries 127
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 0
+counter graceful_stops 0
+counter deadline_kills 0
+sample log-mid 0000000000000000
+sample log-end 0000000000000001
+faults 0 a8c7f832281a39c5
+deliveries 64 d9a910151e5b140b
+  1404142 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xc1, 0x5c, 0x2, 0x89, 0xec, 0x2d, 0xa, 0x91, 0x67, 0xec, 0x8e, 0x65, 0xa1, 0x8d, 0xeb, 0xbe}}, Req:0x0, Op:contract.DescribeTopics{Topics:[]string(nil)}}
+  3435965 broker-0 core.ControlPlaneDone{Req:0x0, Resp:contract.Response(nil), Err:0x0, Outcome:0x2}
+  3681705 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-1", Inc:machine.BootNumber{0x5e, 0x55, 0x32, 0xfb, 0xee, 0xa2, 0x93, 0xf8, 0xb, 0xc9, 0x42, 0xee, 0x90, 0x86, 0xc1, 0x71}}, Req:0x1, Op:contract.FindSegments{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, From:0, MaxBytes:0}}
+  5495880 broker-1 core.ControlPlaneDone{Req:0x1, Resp:contract.Response(nil), Err:0x0, Outcome:0x2}
+  5515520 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xc1, 0x5c, 0x2, 0x89, 0xec, 0x2d, 0xa, 0x91, 0x67, 0xec, 0x8e, 0x65, 0xa1, 0x8d, 0xeb, 0xbe}}, Req:0x2, Op:contract.FindSegments{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, From:0, MaxBytes:0}}
+  8253273 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-1", Inc:machine.BootNumber{0x5e, 0x55, 0x32, 0xfb, 0xee, 0xa2, 0x93, 0xf8, 0xb, 0xc9, 0x42, 0xee, 0x90, 0x86, 0xc1, 0x71}}, Req:0x3, Op:contract.DescribeTopics{Topics:[]string(nil)}}
+
+case log/clean/seed2 seed 2
+steps 160
+rand_calls 261
+counter node_steps 129
+counter engine_steps 1
+counter sim_steps 30
+counter deliveries 129
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 0
+counter graceful_stops 0
+counter deadline_kills 0
+sample log-mid 0000000000000003
+sample log-end 0000000000000001
+faults 0 a8c7f832281a39c5
+deliveries 65 abd9ea167f699903
+  1339481 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xce, 0x56, 0x97, 0x1c, 0xde, 0x35, 0x58, 0x97, 0x42, 0x1e, 0xfc, 0xb, 0x10, 0x46, 0xc8, 0xbf}}, Req:0x0, Op:contract.DescribeTopics{Topics:[]string(nil)}}
+  2203391 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-1", Inc:machine.BootNumber{0x2f, 0x53, 0x7e, 0xdd, 0xbf, 0xbc, 0x7b, 0x98, 0x64, 0xf6, 0xe7, 0xff, 0x7a, 0x82, 0xf2, 0xc3}}, Req:0x1, Op:contract.FindSegments{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, From:0, MaxBytes:0}}
+  4210188 broker-0 core.ControlPlaneDone{Req:0x0, Resp:contract.Response(nil), Err:0x0, Outcome:0x2}
+  4381007 cp-1 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-1", Inc:machine.BootNumber{0x2f, 0x53, 0x7e, 0xdd, 0xbf, 0xbc, 0x7b, 0x98, 0x64, 0xf6, 0xe7, 0xff, 0x7a, 0x82, 0xf2, 0xc3}}, Req:0x1, Op:contract.FindSegments{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, From:0, MaxBytes:0}}
+  4525236 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xce, 0x56, 0x97, 0x1c, 0xde, 0x35, 0x58, 0x97, 0x42, 0x1e, 0xfc, 0xb, 0x10, 0x46, 0xc8, 0xbf}}, Req:0x2, Op:contract.FindSegments{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, From:0, MaxBytes:0}}
+  6010709 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-1", Inc:machine.BootNumber{0x2f, 0x53, 0x7e, 0xdd, 0xbf, 0xbc, 0x7b, 0x98, 0x64, 0xf6, 0xe7, 0xff, 0x7a, 0x82, 0xf2, 0xc3}}, Req:0x3, Op:contract.DescribeTopics{Topics:[]string(nil)}}
+
+case log/clean/seed3 seed 3
+steps 158
+rand_calls 260
+counter node_steps 128
+counter engine_steps 0
+counter sim_steps 30
+counter deliveries 128
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 0
+counter graceful_stops 0
+counter deadline_kills 0
+sample log-mid 0000000000000001
+sample log-end 0000000000000001
+faults 0 a8c7f832281a39c5
+deliveries 64 9d9539b94d059c05
+  1698436 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xed, 0x8f, 0x1, 0xdb, 0xe4, 0x14, 0xb, 0x1d, 0x89, 0xa9, 0x81, 0x7b, 0x8a, 0x6f, 0x46, 0xb3}}, Req:0x0, Op:contract.DescribeTopics{Topics:[]string(nil)}}
+  4173025 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-1", Inc:machine.BootNumber{0x1, 0xdd, 0x50, 0xd0, 0xa6, 0xe8, 0xeb, 0x9c, 0xcf, 0xc9, 0xab, 0x66, 0xfb, 0x64, 0xa7, 0x12}}, Req:0x1, Op:contract.FindSegments{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, From:0, MaxBytes:0}}
+  4717384 cp-1 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xed, 0x8f, 0x1, 0xdb, 0xe4, 0x14, 0xb, 0x1d, 0x89, 0xa9, 0x81, 0x7b, 0x8a, 0x6f, 0x46, 0xb3}}, Req:0x0, Op:contract.DescribeTopics{Topics:[]string(nil)}}
+  7669645 broker-1 core.ControlPlaneDone{Req:0x1, Resp:contract.Response(nil), Err:0x0, Outcome:0x2}
+  7871931 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xed, 0x8f, 0x1, 0xdb, 0xe4, 0x14, 0xb, 0x1d, 0x89, 0xa9, 0x81, 0x7b, 0x8a, 0x6f, 0x46, 0xb3}}, Req:0x2, Op:contract.FindSegments{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, From:0, MaxBytes:0}}
+  7890139 broker-0 core.ControlPlaneDone{Req:0x0, Resp:contract.Response(nil), Err:0x0, Outcome:0x2}
+
+case log/faulty/seed1 seed 1
+steps 129
+rand_calls 275
+counter node_steps 95
+counter engine_steps 4
+counter sim_steps 30
+counter deliveries 95
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 19
+counter wakes 0
+counter restarts 0
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp 503 injected checks 10 passes 10
+cover cp lost response injected checks 3 passes 3
+cover cp outage started checks 1 passes 1
+cover cp timeout injected checks 5 passes 5
+sample log-mid 0000000000000002
+sample log-end 0000000000000001
+faults 19 dad5a6a8d9d70888
+deliveries 48 080a08876bd47122
+  1435965 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xc1, 0x5c, 0x2, 0x89, 0xec, 0x2d, 0xa, 0x91, 0x67, 0xec, 0x8e, 0x65, 0xa1, 0x8d, 0xeb, 0xbe}}, Req:0x0, Op:contract.DescribeTopics{Topics:[]string(nil)}}
+  3681705 broker-0 core.ControlPlaneDone{Req:0x0, Resp:contract.Response(nil), Err:0x0, Outcome:0x2}
+  3713771 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-1", Inc:machine.BootNumber{0x5e, 0x55, 0x32, 0xfb, 0xee, 0xa2, 0x93, 0xf8, 0xb, 0xc9, 0x42, 0xee, 0x90, 0x86, 0xc1, 0x71}}, Req:0x1, Op:contract.FindSegments{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, From:0, MaxBytes:0}}
+  4000000 broker-1 core.ControlPlaneDone{Req:0x1, Resp:contract.Response(nil), Err:0x1, Outcome:0x1}
+  5818034 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xc1, 0x5c, 0x2, 0x89, 0xec, 0x2d, 0xa, 0x91, 0x67, 0xec, 0x8e, 0x65, 0xa1, 0x8d, 0xeb, 0xbe}}, Req:0x2, Op:contract.FindSegments{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, From:0, MaxBytes:0}}
+  8236360 broker-0 core.ControlPlaneDone{Req:0x2, Resp:contract.Response(nil), Err:0x0, Outcome:0x2}
+
+case log/faulty/seed2 seed 2
+steps 123
+rand_calls 263
+counter node_steps 90
+counter engine_steps 3
+counter sim_steps 30
+counter deliveries 90
+counter dropped_stale 0
+counter dropped_by_crash 1
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 18
+counter wakes 0
+counter restarts 0
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp 503 injected checks 12 passes 12
+cover cp lost response injected checks 1 passes 1
+cover cp outage started checks 1 passes 1
+cover cp timeout injected checks 4 passes 4
+sample log-mid 0000000000000000
+sample log-end 0000000000000001
+faults 18 2bc6dd9bc5315492
+deliveries 45 66888b300055e64d
+  1932001 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xce, 0x56, 0x97, 0x1c, 0xde, 0x35, 0x58, 0x97, 0x42, 0x1e, 0xfc, 0xb, 0x10, 0x46, 0xc8, 0xbf}}, Req:0x0, Op:contract.DescribeTopics{Topics:[]string(nil)}}
+  4525236 broker-0 core.ControlPlaneDone{Req:0x0, Resp:contract.Response(nil), Err:0x0, Outcome:0x2}
+  4883562 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xce, 0x56, 0x97, 0x1c, 0xde, 0x35, 0x58, 0x97, 0x42, 0x1e, 0xfc, 0xb, 0x10, 0x46, 0xc8, 0xbf}}, Req:0x2, Op:contract.FindSegments{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, From:0, MaxBytes:0}}
+  5678112 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-1", Inc:machine.BootNumber{0x2f, 0x53, 0x7e, 0xdd, 0xbf, 0xbc, 0x7b, 0x98, 0x64, 0xf6, 0xe7, 0xff, 0x7a, 0x82, 0xf2, 0xc3}}, Req:0x3, Op:contract.DescribeTopics{Topics:[]string(nil)}}
+  6000000 broker-1 core.ControlPlaneDone{Req:0x3, Resp:contract.Response(nil), Err:0x1, Outcome:0x1}
+  7356073 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xce, 0x56, 0x97, 0x1c, 0xde, 0x35, 0x58, 0x97, 0x42, 0x1e, 0xfc, 0xb, 0x10, 0x46, 0xc8, 0xbf}}, Req:0x4, Op:contract.FindSegments{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, From:0, MaxBytes:0}}
+
+case log/faulty/seed3 seed 3
+steps 145
+rand_calls 317
+counter node_steps 108
+counter engine_steps 7
+counter sim_steps 30
+counter deliveries 108
+counter dropped_stale 0
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 10
+counter wakes 0
+counter restarts 0
+counter graceful_stops 0
+counter deadline_kills 0
+cover cp 503 injected checks 2 passes 2
+cover cp lost response injected checks 1 passes 1
+cover cp timeout injected checks 7 passes 7
+sample log-mid 0000000000000003
+sample log-end 0000000000000001
+faults 10 fe8e32905a7af479
+deliveries 54 6d41aa7e943428e5
+  1717384 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xed, 0x8f, 0x1, 0xdb, 0xe4, 0x14, 0xb, 0x1d, 0x89, 0xa9, 0x81, 0x7b, 0x8a, 0x6f, 0x46, 0xb3}}, Req:0x0, Op:contract.DescribeTopics{Topics:[]string(nil)}}
+  4173025 cp-1 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xed, 0x8f, 0x1, 0xdb, 0xe4, 0x14, 0xb, 0x1d, 0x89, 0xa9, 0x81, 0x7b, 0x8a, 0x6f, 0x46, 0xb3}}, Req:0x0, Op:contract.DescribeTopics{Topics:[]string(nil)}}
+  7669609 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-0", Inc:machine.BootNumber{0xed, 0x8f, 0x1, 0xdb, 0xe4, 0x14, 0xb, 0x1d, 0x89, 0xa9, 0x81, 0x7b, 0x8a, 0x6f, 0x46, 0xb3}}, Req:0x2, Op:contract.FindSegments{TopicPartition:contract.TopicPartition{Topic:"t", Partition:0}, From:0, MaxBytes:0}}
+  7871931 broker-0 core.ControlPlaneDone{Req:0x0, Resp:contract.Response(nil), Err:0x0, Outcome:0x2}
+  9155126 cp-0 core.ControlPlaneDeliver{From:machine.NodeInstance{Node:"broker-1", Inc:machine.BootNumber{0x1, 0xdd, 0x50, 0xd0, 0xa6, 0xe8, 0xeb, 0x9c, 0xcf, 0xc9, 0xab, 0x66, 0xfb, 0x64, 0xa7, 0x12}}, Req:0x3, Op:contract.DescribeTopics{Topics:[]string(nil)}}
+  9508001 broker-0 core.ControlPlaneDone{Req:0x2, Resp:contract.Response(nil), Err:0x0, Outcome:0x2}
+

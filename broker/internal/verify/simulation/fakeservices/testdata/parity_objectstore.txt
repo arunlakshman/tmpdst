@@ -1,0 +1,384 @@
+case object/clean/seed1 seed 1
+steps 210
+rand_calls 476
+counter node_steps 128
+counter engine_steps 65
+counter sim_steps 2
+counter deliveries 128
+counter dropped_stale 15
+counter dropped_by_crash 0
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+sample mid f0e1d2c0a7008c94
+sample recovering 30e08418463e62e1
+sample end bdb0e5860aa42856
+sample spec da247876b91582a6
+faults 0 a8c7f832281a39c5
+deliveries 63 1e54ef17cf35d928
+  4514423 b core.ObjectDone{Result:objectstore.GetDone{Req:0x1, Data:[]uint8{0x64, 0x61, 0x74, 0x61, 0x2d, 0x62, 0x30}, Err:0x0}}
+  4969204 a core.ObjectDone{Result:objectstore.DeleteDone{Req:0x2, Err:0x3, Outcome:0x0}}
+  6828007 b core.ObjectDone{Result:objectstore.GetDone{Req:0x3, Data:[]uint8(nil), Err:0x3}}
+  7126197 a core.ObjectDone{Result:objectstore.ListDone{Req:0x4, Keys:[]string{"b"}, Err:0x0}}
+  7937710 b core.ObjectDone{Result:objectstore.DeleteDone{Req:0x5, Err:0x3, Outcome:0x0}}
+  9072320 a core.ObjectDone{Result:objectstore.PutDone{Req:0x6, Key:"e", Err:0x0, Outcome:0x2}}
+
+case object/clean/seed2 seed 2
+steps 206
+rand_calls 475
+counter node_steps 124
+counter engine_steps 65
+counter sim_steps 2
+counter deliveries 124
+counter dropped_stale 15
+counter dropped_by_crash 3
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+sample mid 343eb987609778f3
+sample recovering 4dce1699f47372ef
+sample end e6613542405246b3
+sample spec ee6a589c86566e05
+faults 0 a8c7f832281a39c5
+deliveries 59 7f52e79d7d010762
+  3178813 a core.ObjectDone{Result:objectstore.GetDone{Req:0x0, Data:[]uint8(nil), Err:0x3}}
+  4030335 b core.ObjectDone{Result:objectstore.ListDone{Req:0x1, Keys:[]string(nil), Err:0x0}}
+  5134338 a core.ObjectDone{Result:objectstore.ListDone{Req:0x2, Keys:[]string(nil), Err:0x0}}
+  5553371 b core.ObjectDone{Result:objectstore.PutDone{Req:0x3, Key:"b", Err:0x0, Outcome:0x2}}
+  7794728 a core.ObjectDone{Result:objectstore.GetDone{Req:0x4, Data:[]uint8(nil), Err:0x3}}
+  8303872 b core.ObjectDone{Result:objectstore.DeleteDone{Req:0x5, Err:0x3, Outcome:0x0}}
+
+case object/clean/seed3 seed 3
+steps 206
+rand_calls 475
+counter node_steps 124
+counter engine_steps 65
+counter sim_steps 2
+counter deliveries 124
+counter dropped_stale 15
+counter dropped_by_crash 3
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 0
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+sample mid cb5d7a5f59b24305
+sample recovering f68256cbf3568b21
+sample end 4fc1f5b953a9a39b
+sample spec b4266c7c51f442b8
+faults 0 a8c7f832281a39c5
+deliveries 59 6ef95c27e4ab1626
+  3239766 a core.ObjectDone{Result:objectstore.GetDone{Req:0x0, Data:[]uint8(nil), Err:0x3}}
+  3516721 b core.ObjectDone{Result:objectstore.PutDone{Req:0x1, Key:"c", Err:0x0, Outcome:0x2}}
+  4997646 a core.ObjectDone{Result:objectstore.ListDone{Req:0x2, Keys:[]string{"c"}, Err:0x0}}
+  6107069 b core.ObjectDone{Result:objectstore.PutDone{Req:0x3, Key:"c", Err:0x0, Outcome:0x2}}
+  7162600 a core.ObjectDone{Result:objectstore.GetDone{Req:0x4, Data:[]uint8(nil), Err:0x3}}
+  8389046 a core.ObjectDone{Result:objectstore.ListDone{Req:0x6, Keys:[]string{"c"}, Err:0x0}}
+
+case object/faulty/seed1 seed 1
+steps 174
+rand_calls 634
+counter node_steps 123
+counter engine_steps 34
+counter sim_steps 2
+counter deliveries 123
+counter dropped_stale 15
+counter dropped_by_crash 7
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 40
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover obj 503 injected checks 27 passes 27
+cover obj lost response injected checks 3 passes 3
+cover obj outage started checks 3 passes 3
+cover obj timed-out op applied checks 5 passes 3
+cover obj timed-out op not applied checks 5 passes 2
+cover obj timeout injected checks 7 passes 7
+sample mid 19e02b5f534ebc00
+sample recovering f5846df94d0ce54a
+sample end 1e8de93118274444
+sample spec da247876b91582a6
+faults 40 e83913cc0b304edc
+deliveries 58 18dfe5770b8e74af
+  3134405 a core.ObjectDone{Result:objectstore.PutDone{Req:0x0, Key:"b", Err:0x2, Outcome:0x0}}
+  3329821 b core.ObjectDone{Result:objectstore.GetDone{Req:0x1, Data:[]uint8(nil), Err:0x3}}
+  8302791 b core.ObjectDone{Result:objectstore.DeleteDone{Req:0x5, Err:0x2, Outcome:0x0}}
+  10762023 a core.ObjectDone{Result:objectstore.PutDone{Req:0x8, Key:"b", Err:0x0, Outcome:0x2}}
+  11162851 b core.ObjectDone{Result:objectstore.ListDone{Req:0x9, Keys:[]string{"b"}, Err:0x0}}
+  14797193 a core.ObjectDone{Result:objectstore.DeleteDone{Req:0xc, Err:0x0, Outcome:0x2}}
+
+case object/faulty/seed2 seed 2
+steps 191
+rand_calls 666
+counter node_steps 123
+counter engine_steps 51
+counter sim_steps 2
+counter deliveries 123
+counter dropped_stale 15
+counter dropped_by_crash 6
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 23
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover obj 503 injected checks 6 passes 6
+cover obj get corrupted checks 1 passes 1
+cover obj lost response injected checks 8 passes 8
+cover obj timed-out op applied checks 2 passes 2
+cover obj timed-out op not applied checks 2 passes 0
+cover obj timeout injected checks 8 passes 8
+sample mid 98453a55ea3caa15
+sample recovering 7f979fe7774a1387
+sample end feea3107c20d589f
+sample spec 536551d9b45cf441
+faults 23 959ba7227c00c103
+deliveries 58 69382a7b490766e5
+  3985251 b core.ObjectDone{Result:objectstore.ListDone{Req:0x1, Keys:[]string(nil), Err:0x0}}
+  5794728 a core.ObjectDone{Result:objectstore.ListDone{Req:0x2, Keys:[]string(nil), Err:0x0}}
+  6475435 b core.ObjectDone{Result:objectstore.PutDone{Req:0x3, Key:"b", Err:0x0, Outcome:0x2}}
+  9338766 a core.ObjectDone{Result:objectstore.ListDone{Req:0x6, Keys:[]string{"b"}, Err:0x0}}
+  10253231 b core.ObjectDone{Result:objectstore.DeleteDone{Req:0x7, Err:0x2, Outcome:0x0}}
+  11473698 b core.ObjectDone{Result:objectstore.PutDone{Req:0x9, Key:"e", Err:0x2, Outcome:0x0}}
+
+case object/faulty/seed3 seed 3
+steps 178
+rand_calls 635
+counter node_steps 125
+counter engine_steps 36
+counter sim_steps 2
+counter deliveries 125
+counter dropped_stale 15
+counter dropped_by_crash 5
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 34
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover obj 503 injected checks 24 passes 24
+cover obj lost response injected checks 4 passes 4
+cover obj outage started checks 1 passes 1
+cover obj timed-out op applied checks 2 passes 1
+cover obj timed-out op not applied checks 2 passes 1
+cover obj timeout injected checks 5 passes 5
+sample mid 8c737aeba7458bc2
+sample recovering 16ee0aa28630a7b7
+sample end 67b44becfa3fdcce
+sample spec 940ac7687d44adc1
+faults 34 d98bb401177df6e0
+deliveries 60 c3a1e831a1d1f28e
+  4123654 b core.ObjectDone{Result:objectstore.PutDone{Req:0x1, Key:"c", Err:0x0, Outcome:0x2}}
+  5349829 a core.ObjectDone{Result:objectstore.ListDone{Req:0x2, Keys:[]string(nil), Err:0x2}}
+  6672914 a core.ObjectDone{Result:objectstore.GetDone{Req:0x4, Data:[]uint8(nil), Err:0x2}}
+  7665268 b core.ObjectDone{Result:objectstore.DeleteDone{Req:0x5, Err:0x3, Outcome:0x0}}
+  9520000 a core.ObjectDone{Result:objectstore.ListDone{Req:0x6, Keys:[]string{"c"}, Err:0x0}}
+  12451049 b core.ObjectDone{Result:objectstore.PutDone{Req:0x9, Key:"a", Err:0x0, Outcome:0x2}}
+
+case object/outage/seed1 seed 1
+steps 163
+rand_calls 439
+counter node_steps 126
+counter engine_steps 20
+counter sim_steps 2
+counter deliveries 126
+counter dropped_stale 15
+counter dropped_by_crash 4
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 48
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover obj 503 injected checks 45 passes 45
+cover obj outage started checks 3 passes 3
+sample mid 3e97215925170df3
+sample recovering afea5049b2e814fb
+sample end 04e3fb185bdfcf93
+sample spec da280776b918ab7a
+faults 48 4402cdff6e4bb3a5
+deliveries 61 51b2382585240a87
+  4161676 b core.ObjectDone{Result:objectstore.GetDone{Req:0x1, Data:[]uint8(nil), Err:0x2}}
+  5455335 a core.ObjectDone{Result:objectstore.DeleteDone{Req:0x2, Err:0x2, Outcome:0x0}}
+  6828007 b core.ObjectDone{Result:objectstore.GetDone{Req:0x3, Data:[]uint8(nil), Err:0x2}}
+  6957386 a core.ObjectDone{Result:objectstore.ListDone{Req:0x4, Keys:[]string(nil), Err:0x2}}
+  8736244 a core.ObjectDone{Result:objectstore.PutDone{Req:0x6, Key:"e", Err:0x2, Outcome:0x0}}
+  10473764 b core.ObjectDone{Result:objectstore.PutDone{Req:0x7, Key:"c", Err:0x2, Outcome:0x0}}
+
+case object/outage/seed2 seed 2
+steps 164
+rand_calls 439
+counter node_steps 127
+counter engine_steps 20
+counter sim_steps 2
+counter deliveries 127
+counter dropped_stale 15
+counter dropped_by_crash 3
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 48
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover obj 503 injected checks 45 passes 45
+cover obj outage started checks 3 passes 3
+sample mid f6bf446083e5c24e
+sample recovering 675031f979b15415
+sample end f66207013470c1cf
+sample spec 3e58d369d8c89489
+faults 48 9a61fc90b84d8fa1
+deliveries 62 5271819ae48cd526
+  2828079 a core.ObjectDone{Result:objectstore.GetDone{Req:0x0, Data:[]uint8(nil), Err:0x2}}
+  4125071 b core.ObjectDone{Result:objectstore.ListDone{Req:0x1, Keys:[]string(nil), Err:0x2}}
+  5361711 a core.ObjectDone{Result:objectstore.ListDone{Req:0x2, Keys:[]string(nil), Err:0x2}}
+  5553371 b core.ObjectDone{Result:objectstore.PutDone{Req:0x3, Key:"b", Err:0x2, Outcome:0x0}}
+  7080573 a core.ObjectDone{Result:objectstore.GetDone{Req:0x4, Data:[]uint8(nil), Err:0x2}}
+  7563819 b core.ObjectDone{Result:objectstore.DeleteDone{Req:0x5, Err:0x2, Outcome:0x0}}
+
+case object/outage/seed3 seed 3
+steps 163
+rand_calls 437
+counter node_steps 126
+counter engine_steps 20
+counter sim_steps 2
+counter deliveries 126
+counter dropped_stale 15
+counter dropped_by_crash 4
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 47
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover obj 503 injected checks 45 passes 45
+cover obj outage started checks 2 passes 2
+sample mid 9d695f8d7de85363
+sample recovering eeb23a45f569ba36
+sample end e0d291366ab26c5b
+sample spec 4ce382fd3a55795c
+faults 47 1cabb7e598ba17ab
+deliveries 61 fcc131510d3fc2c9
+  3026408 a core.ObjectDone{Result:objectstore.GetDone{Req:0x0, Data:[]uint8(nil), Err:0x2}}
+  3534980 b core.ObjectDone{Result:objectstore.PutDone{Req:0x1, Key:"c", Err:0x2, Outcome:0x0}}
+  5199199 a core.ObjectDone{Result:objectstore.ListDone{Req:0x2, Keys:[]string(nil), Err:0x2}}
+  6107069 b core.ObjectDone{Result:objectstore.PutDone{Req:0x3, Key:"c", Err:0x2, Outcome:0x0}}
+  7359910 a core.ObjectDone{Result:objectstore.GetDone{Req:0x4, Data:[]uint8(nil), Err:0x2}}
+  9389192 b core.ObjectDone{Result:objectstore.GetDone{Req:0x7, Data:[]uint8(nil), Err:0x2}}
+
+case object/slow/seed1 seed 1
+steps 195
+rand_calls 561
+counter node_steps 117
+counter engine_steps 61
+counter sim_steps 2
+counter deliveries 117
+counter dropped_stale 15
+counter dropped_by_crash 8
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 9
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover obj lost response injected checks 4 passes 4
+cover obj timed-out op applied checks 2 passes 1
+cover obj timed-out op not applied checks 2 passes 1
+cover obj timeout injected checks 5 passes 5
+sample mid 32370aa81428db37
+sample recovering 165da0e64ba23779
+sample end ff11e29e9c38bf92
+sample spec 2e255a63591dac96
+faults 9 daa4338f1581e247
+deliveries 52 92a4df48c15537a1
+  26716463 b core.ObjectDone{Result:objectstore.GetDone{Req:0x3, Data:[]uint8(nil), Err:0x3}}
+  27078345 b core.ObjectDone{Result:objectstore.ListDone{Req:0x17, Keys:[]string{"a", "d"}, Err:0x0}}
+  30000000 a core.ObjectDone{Result:objectstore.PutDone{Req:0x0, Key:"b", Err:0x1, Outcome:0x1}}
+  31531738 a core.ObjectDone{Result:objectstore.ListDone{Req:0x1c, Keys:[]string{"a", "d"}, Err:0x0}}
+  34000000 a core.ObjectDone{Result:objectstore.ListDone{Req:0x4, Keys:[]string(nil), Err:0x1}}
+  39272638 a core.ObjectDone{Result:objectstore.GetDone{Req:0x10, Data:[]uint8(nil), Err:0x3}}
+
+case object/slow/seed2 seed 2
+steps 195
+rand_calls 561
+counter node_steps 119
+counter engine_steps 59
+counter sim_steps 2
+counter deliveries 119
+counter dropped_stale 15
+counter dropped_by_crash 5
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 13
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover obj lost response injected checks 7 passes 7
+cover obj timed-out op applied checks 5 passes 3
+cover obj timed-out op not applied checks 5 passes 2
+cover obj timeout injected checks 6 passes 6
+sample mid 3c13b69573b84909
+sample recovering 424254e5e841b722
+sample end 8188926ac6ce809f
+sample spec 6dc9ac90f62367a1
+faults 13 8b1ae6a59aaf26c6
+deliveries 54 cfc3ef7a0424a2d6
+  6090081 b core.ObjectDone{Result:objectstore.PutDone{Req:0x3, Key:"b", Err:0x0, Outcome:0x2}}
+  14299366 a core.ObjectDone{Result:objectstore.GetDone{Req:0xa, Data:[]uint8(nil), Err:0x3}}
+  17913683 b core.ObjectDone{Result:objectstore.ListDone{Req:0xf, Keys:[]string{"b"}, Err:0x0}}
+  18021336 a core.ObjectDone{Result:objectstore.ListDone{Req:0xe, Keys:[]string{"b"}, Err:0x0}}
+  22242525 b core.ObjectDone{Result:objectstore.GetDone{Req:0x13, Data:[]uint8(nil), Err:0x3}}
+  29719083 b core.ObjectDone{Result:objectstore.ListDone{Req:0x1, Keys:[]string(nil), Err:0x0}}
+
+case object/slow/seed3 seed 3
+steps 195
+rand_calls 562
+counter node_steps 117
+counter engine_steps 61
+counter sim_steps 2
+counter deliveries 117
+counter dropped_stale 15
+counter dropped_by_crash 9
+counter timers_set 0
+counter timers_cancelled 0
+counter faults 7
+counter wakes 0
+counter restarts 1
+counter graceful_stops 0
+counter deadline_kills 0
+cover obj lost response injected checks 3 passes 3
+cover obj timed-out op applied checks 2 passes 2
+cover obj timed-out op not applied checks 2 passes 0
+cover obj timeout injected checks 4 passes 4
+sample mid d22801bf6a1fc16d
+sample recovering 61010d5dc76d8ae1
+sample end 192f206d52f84992
+sample spec 3c5c9fe17fbbb587
+faults 7 687f975e2ace5242
+deliveries 52 eb383acb9ceac476
+  13085556 b core.ObjectDone{Result:objectstore.PutDone{Req:0x9, Key:"a", Err:0x0, Outcome:0x2}}
+  19167773 a core.ObjectDone{Result:objectstore.ListDone{Req:0x10, Keys:[]string{"a", "c"}, Err:0x0}}
+  20428729 a core.ObjectDone{Result:objectstore.DeleteDone{Req:0x12, Err:0x0, Outcome:0x2}}
+  23990217 b core.ObjectDone{Result:objectstore.PutDone{Req:0x1, Key:"c", Err:0x0, Outcome:0x2}}
+  27784564 a core.ObjectDone{Result:objectstore.GetDone{Req:0x0, Data:[]uint8(nil), Err:0x3}}
+  29176363 a core.ObjectDone{Result:objectstore.ListDone{Req:0x2, Keys:[]string{"c"}, Err:0x0}}
+

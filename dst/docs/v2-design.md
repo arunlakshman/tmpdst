@@ -2136,3 +2136,72 @@ written, and the smallest change that was made.
    outputs, node state, inbox lengths, lane order, the "sim_end" fact) and because the wake tokens
    are gone. The values are in the message of the RE-PIN commit. Steps per run are about the same
    as before (300 seeds of basic: 1688636 steps, before 1707413).
+
+### T1.12a (the broker fake services on dst/kernel)
+
+The fake services are in the new tree `broker/internal/verify/simulation/fakeservices/...`. The old
+tree `broker/internal/verify/simulator` and its goldens are not changed (decision D3).
+
+1. **The request types.** Each fake is a `kernel.Service[Req, core.EventData]`:
+   `fakeobjectstore.Engine` takes `core.ObjectCall`, `fakecontrolplane.Engine` takes
+   `core.ControlPlaneCall`. The network and the log bridge take more than one case of
+   `core`, and a sealed sum cannot get a case from another package. Section 4.2 writes
+   `core.NetCall(x)`. That needs a new type in `core`, and T1.12a may not change product
+   code. So the sum is in the fake: `fakenetwork.Call` with the cases `Dial`, `Write`,
+   `Close`, `Pause`, `Resume`, and `fakelogservice.Request` with `Call` and `Reply`. Each
+   case embeds the core action (`fakenetwork.Write{Send: x}`), so it has the `Fold` of the core
+   action: the same bytes. T1.12b may move `Call` into `core` as `core.NetCall`; no behavior changes.
+2. **Constructors take the world.** `New(w *kernel.World, faults)`. A `ServiceContext` has no way to
+   make lanes, and `kernel.NewLanes` needs the world. Lanes are made in first-use order, so the
+   lane numbers are the old ones. Typed keys: `fakenetwork.laneKey{pair, kind}`,
+   `fakelogservice.laneKey{kind, node}`, and `machine.NodeID` for the completion core (one
+   `Lanes` per core, shared counter).
+3. **Where the config types went** (rows of section 14.1): `ObjectStoreFaults` is
+   `fakeobjectstore.Faults`, `ControlPlaneFaults` is `fakecontrolplane.Faults` (with
+   `DynamoMaxCommitItems`), `NetworkFaults` is `fakenetwork.Faults`, `LogParams` is
+   `fakelogservice.Params`. `ServiceOutage` is in `fakecompletions`; `fakeobjectstore` and
+   `fakecontrolplane` export an alias so that presets outside `fakeservices` can name it.
+   `FastWithRareSlow` is `kernel.FastWithRareSlow`. `NetworkFaults.ClockSkewMax` is gone (it is
+   `kernel.Config.ClockSkewMax`). `ControlPlaneFaults.Log` is gone: `fakelogservice.New(w,
+   faults, params)` takes the log knobs as a second value, so that `fakecontrolplane` does not
+   import `fakelogservice`. `LogStoreFaults` is not ported (nothing reads it).
+4. **`Between` has one edge that differs.** The old `Between(lo, hi)` leaves out `hi`, and with
+   `hi == lo+1` it still draws once. `rng.Between(lo, hi-1)` draws nothing there. The fakes use
+   `internal/span.Between`, which is the old formula (`lo + Intn(hi-lo)`), for the outage
+   duration, the partition and clog duration, the pair latency and the partial IO size. The
+   parity case "narrow-partition" (`PartitionDur = {1000000, 1000001}`) fails if a fake uses
+   `rng.Between(lo, hi-1)`. T1.12b: the same rule holds for the 7 call sites of the broker. A
+   call site where `hi == lo+1` is possible needs `span.Between`, or a test that shows that it cannot happen.
+   `kernel.FastWithRareSlow.Sample` draws exactly like the old one.
+5. **Nodes are found by name through the host.** The network service looks up the target of a `Dial` by
+   name, but `ServiceContext.Current` needs a typed address. The host calls `fakenetwork.Engine.AddNode(addr)`
+   for each node that may be dialed. A name that was not added is a down node (as before). The log bridge
+   looked up the names `cp-0` and `cp-1`; now the host calls `fakelogservice.Engine.UseReplicas(cp0, cp1)`.
+6. **The caller check at landing stays.** `Deliver` already drops a message for a dead incarnation, but the
+   old completion core also skipped the `Finish` hook (the corruption fault and its assertion) when the caller
+   was dead. The new core keeps this with `cx.Current(from.Addr())`.
+7. **`fakelogservice` is not used by any scenario.** Decision D4 says to delete it; T1.6c note 2 says that the kafka
+   scenario uses it. The kafka and echo presets use only the object store, the control plane and the network
+   (`kafka/config.go`, `echo/config.go`); only its own test imports it. It is ported as the card asks. The field
+   `now` of the old engine (set, never read) is dropped.
+8. **The fault fact key** for the service name is `service` (the kernel's), not `engine`.
+9. **Two trees cannot be linked into one test binary.** The catalog of `dst/assert` panics at start on a name
+   declared twice, and the old and the new fakes declare the same names (as the task asks). So the parity
+   test cannot run an old and a new fake in one process. The parity is by files:
+   `fakeservices/paritygen` (tag `paritygen`) runs the old fakes inside a `kernel.World`, through a small
+   adapter that implements the old `FakeServiceContext` on `kernel.ServiceContext`, and writes
+   `fakeservices/testdata/parity_*.txt`. `internal/servicetest/parity_test.go` runs the new fakes on the same
+   cases and compares. A transcript has the steps, `rand_calls`, the kernel counters, the assertion coverage, samples of
+   the state hash, the faults and a digest of every reply. The cases and the scripts are shared
+   (`internal/servicetest/parity.go`); only the config conversion is written twice. Both sides run in the same
+   kernel, so the ties of the queue are drawn in the same way, and equal `rand_calls` mean equal draws by the
+   service. T1.12d deletes `paritygen` with the old tree; the files stay. If a later kernel change moves
+   them, they must be re-pinned by hand, with a note in the commit.
+10. **The test world.** `internal/servicetest` replaces the hand-written queue `fakeservicetest.Ctx`: a
+    `kernel.World` with caller nodes whose machine issues the requests a test asks for (`Do`, `DoAfter`,
+    `Issue`) and records everything delivered to it. A command is a `core.TimerFired` with a magic
+    generation, because a sealed `core.EventData` cannot get a test case. The package does not import
+    `testing` (the determinism gate scans it); a test gives a small `TB`.
+11. **Gates.** `internal/verify/simulation/...` is in `broker/ops/scripts/ci-determinism.sh` (and its canary loop),
+    `dst/kernel` and `dst/rng` are in `broker/ops/determinism-allow.txt`, and the `forbidigo` panic exclusion of
+    `broker/.golangci.yml` names the new tree.

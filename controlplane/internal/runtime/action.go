@@ -7,7 +7,16 @@ import "github.com/manifesterio/mds/dst/machine"
 //
 // Actions in one slice start in slice order; I/O among them may complete in
 // any order.
-type Action interface{ isAction() }
+//
+// Action is a sealed sum. Every case has a Tag and a Fold method (action_fold.go).
+//
+//sumtype:decl
+type Action interface {
+	machine.Message
+	// Tag is the frozen trace-hash number of the case.
+	Tag() uint64
+	isAction()
+}
 
 // IOCall is an Action the outside world executes and answers with exactly one
 // IOResult carrying the same RequestID. A live incarnation always gets that
@@ -17,6 +26,30 @@ type IOCall interface {
 	Action
 	RequestID() machine.RequestID
 }
+
+// ---- timers and the end of the incarnation ----
+
+// SetTimer asks for TimerFired{ID, Gen} after After of node-local time. A pending timer
+// with the same ID is replaced: the old one never fires. The machine compares Gen with
+// its own counter, so a late TimerFired of an old arm is ignored.
+type SetTimer struct {
+	ID    machine.TimerID
+	Gen   machine.TimerVersion
+	After machine.Duration
+}
+
+// CancelTimer removes the pending timer ID. It is only an optimization: correctness
+// relies on Gen.
+type CancelTimer struct{ ID machine.TimerID }
+
+// StopForRestart asks the runtime to end this incarnation: the memory of the machine can
+// not be trusted any more, so a new incarnation must start. It is the last action of a
+// Step. Cause says why.
+type StopForRestart struct{ Cause string }
+
+// ShutdownDone is the last action of a graceful stop (see StopRequest). Like
+// StopForRestart it ends the incarnation, but nothing is wrong and no restart is wanted.
+type ShutdownDone struct{}
 
 // ---- object store ----
 
@@ -106,6 +139,10 @@ type LogDeleteOld struct {
 	Through LogPosition
 }
 
+func (SetTimer) isAction()          {}
+func (CancelTimer) isAction()       {}
+func (StopForRestart) isAction()    {}
+func (ShutdownDone) isAction()      {}
 func (ObjectPut) isAction()         {}
 func (ObjectGet) isAction()         {}
 func (ObjectDelete) isAction()      {}

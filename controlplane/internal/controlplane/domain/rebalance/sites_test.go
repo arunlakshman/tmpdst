@@ -4,9 +4,7 @@ import (
 	"testing"
 
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/spec"
 	"github.com/manifesterio/mds/dst/fault"
-	"github.com/manifesterio/mds/dst/rng"
 )
 
 // everyOther is a fault injector for tests: each site that is on fires on
@@ -44,11 +42,8 @@ func (f *everyOther) Fault(fault.NamedSite, float64) bool         { return false
 // The sites that do not move time must not change any reply.
 func TestSitesKeepTheReplies(t *testing.T) {
 	f := newEveryOther(SiteStaleTimer, SiteDuplicateReply, SiteLateDrain, SiteLoadRetry)
-	h := &harness{t: t, m: New(Config{Faults: f}), cx: &testCx{rand: rng.New(seed)}, log: spec.New(), session: 5000}
-	shadow := rng.New(seed)
-	for range 64 {
-		h.suffix = append(h.suffix, newMemberID("", shadow))
-	}
+	h := newBareHarness(t, Config{}, f)
+	h.session = 5000
 	h.step(RoleChanged{Active: true})
 	h.check("loading", h.phase("g"), "loading")
 	h.until(100 * msec)
@@ -87,7 +82,7 @@ func TestSitesKeepTheReplies(t *testing.T) {
 // SiteTimerLate: a timer fires up to 50 ms late.
 func TestSiteTimerLate(t *testing.T) {
 	f := newEveryOther(SiteTimerLate)
-	h := newHarness(t, Config{Faults: f})
+	h := newHarnessFaults(t, Config{}, f)
 	h.run([]step{
 		{0, h.join(1, "g", ""), nil},
 		{delay, nil, nil},

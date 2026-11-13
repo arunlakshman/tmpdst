@@ -1,0 +1,194 @@
+//nolint:dupl // Fold methods are flat lists of fields. They look alike on purpose.
+package runtime
+
+import "github.com/manifesterio/mds/dst/trace"
+
+// Tag and Fold of every EventData case. Fold writes the tag, then the fields in the
+// order that is written here. See fold.go for the tag ranges.
+
+// Tag returns the trace-hash number of this event.
+func (NodeStarted) Tag() uint64 { return 1 }
+
+// Fold writes the event into the trace hash.
+func (e NodeStarted) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	foldInstance(h, e.Self)
+}
+
+// Tag returns the trace-hash number of this event.
+func (StopRequest) Tag() uint64 { return 2 }
+
+// Fold writes the event into the trace hash.
+func (e StopRequest) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	h.Int64(int64(e.Deadline))
+}
+
+// Tag returns the trace-hash number of this event.
+func (TimerFired) Tag() uint64 { return 8 }
+
+// Fold writes the event into the trace hash.
+func (e TimerFired) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	h.Uint64(uint64(e.ID))
+	h.Uint64(uint64(e.Gen))
+}
+
+// Tag returns the trace-hash number of this event.
+func (ObjectPutDone) Tag() uint64 { return 9 }
+
+// Fold writes the event into the trace hash.
+func (e ObjectPutDone) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	h.Uint64(uint64(e.Req))
+	h.String(e.Key)
+	h.Uint64(uint64(e.Err))
+	h.Uint64(uint64(e.Outcome))
+}
+
+// Tag returns the trace-hash number of this event.
+func (ObjectGetDone) Tag() uint64 { return 10 }
+
+// Fold writes the event into the trace hash.
+func (e ObjectGetDone) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	h.Uint64(uint64(e.Req))
+	h.Bytes(e.Data)
+	h.Uint64(uint64(e.Err))
+}
+
+// Tag returns the trace-hash number of this event.
+func (ObjectDeleteDone) Tag() uint64 { return 11 }
+
+// Fold writes the event into the trace hash.
+func (e ObjectDeleteDone) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	h.Uint64(uint64(e.Req))
+	h.Uint64(uint64(e.Err))
+	h.Uint64(uint64(e.Outcome))
+}
+
+// Tag returns the trace-hash number of this event.
+func (ObjectListDone) Tag() uint64 { return 12 }
+
+// Fold writes the event into the trace hash.
+func (e ObjectListDone) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	h.Uint64(uint64(e.Req))
+	h.Uint64(uint64(e.Err))
+	h.Uint64(uint64(len(e.Keys)))
+	for _, k := range e.Keys {
+		h.String(k)
+	}
+}
+
+// Tag returns the trace-hash number of this event.
+func (ControlPlaneDone) Tag() uint64 { return 13 }
+
+// Fold writes the event into the trace hash.
+func (e ControlPlaneDone) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	e.foldBody(h)
+}
+
+// foldBody writes the fields of the completion. ControlPlaneReply uses it too.
+func (e ControlPlaneDone) foldBody(h *trace.Hash) {
+	h.Uint64(uint64(e.Req))
+	h.Uint64(uint64(e.Err))
+	h.Uint64(uint64(e.Outcome))
+	foldResponse(h, e.Resp)
+}
+
+// FoldBody writes the fields of the completion without a tag. A machine that carries a
+// completion inside its own value uses it.
+func (e ControlPlaneDone) FoldBody(h *trace.Hash) { e.foldBody(h) }
+
+// Tag returns the trace-hash number of this event.
+func (LogAppendDone) Tag() uint64 { return 14 }
+
+// Fold writes the event into the trace hash.
+func (e LogAppendDone) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	h.Uint64(uint64(e.Req))
+	h.Int64(int64(e.Slot))
+	h.Bool(e.Taken)
+	h.Bytes(e.Existing)
+	h.Uint64(uint64(e.Err))
+	h.Uint64(uint64(e.Outcome))
+}
+
+// Tag returns the trace-hash number of this event.
+func (LogReadDone) Tag() uint64 { return 15 }
+
+// Fold writes the event into the trace hash.
+func (e LogReadDone) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	h.Uint64(uint64(e.Req))
+	h.Uint64(uint64(len(e.Entries)))
+	for _, ent := range e.Entries {
+		h.Int64(int64(ent.Slot))
+		h.Bytes(ent.Data)
+	}
+	h.Uint64(uint64(e.Err))
+	h.Uint64(uint64(e.Outcome))
+}
+
+// Tag returns the trace-hash number of this event.
+func (LogGetEndDone) Tag() uint64 { return 16 }
+
+// Fold writes the event into the trace hash.
+func (e LogGetEndDone) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	h.Uint64(uint64(e.Req))
+	h.Int64(int64(e.Tail))
+	h.Uint64(uint64(e.Err))
+	h.Uint64(uint64(e.Outcome))
+}
+
+// Tag returns the trace-hash number of this event.
+func (LogDeleteOldDone) Tag() uint64 { return 17 }
+
+// Fold writes the event into the trace hash.
+func (e LogDeleteOldDone) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	h.Uint64(uint64(e.Req))
+	h.Uint64(uint64(e.Err))
+	h.Uint64(uint64(e.Outcome))
+}
+
+// Tag returns the trace-hash number of this event.
+func (ControlPlaneDeliver) Tag() uint64 { return 18 }
+
+// Fold writes the event into the trace hash.
+func (e ControlPlaneDeliver) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	foldInstance(h, e.From)
+	h.Uint64(uint64(e.Req))
+	foldOperation(h, e.Op)
+}
+
+// Tag returns the trace-hash number of this event.
+func (LogClaimEpochDone) Tag() uint64 { return 20 }
+
+// Fold writes the event into the trace hash.
+func (e LogClaimEpochDone) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	h.Uint64(uint64(e.Req))
+	h.Uint64(e.Epoch)
+	h.String(e.Owner)
+	h.Bool(e.Won)
+	h.Uint64(uint64(e.Err))
+	h.Uint64(uint64(e.Outcome))
+}
+
+// Tag returns the trace-hash number of this event. The broker has no LocalRead, so
+// the number is new.
+func (LocalRead) Tag() uint64 { return 21 }
+
+// Fold writes the event into the trace hash.
+func (e LocalRead) Fold(h *trace.Hash) {
+	h.Uint64(e.Tag())
+	foldInstance(h, e.From)
+	h.Uint64(uint64(e.Req))
+	foldOperation(h, e.Op)
+}

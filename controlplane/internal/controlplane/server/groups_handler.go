@@ -10,7 +10,9 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/wire"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/internal/system/live"
+	"github.com/manifesterio/mds/controlplane/internal/system/simadapter"
 	"github.com/manifesterio/mds/dst/machine"
+	"github.com/manifesterio/mds/dst/sim"
 )
 
 // The host (docs/rebalance.md section 11). The machine runs in a second
@@ -25,12 +27,17 @@ import (
 // replica answers to it, and Node.reply hands the answer to the machine.
 var rebalanceFrom = machine.NodeInstance{Node: "rebalance"}
 
+// groupsProcessID is the process id of the rebalance machine. The machine sends to itself
+// with this id.
+const groupsProcessID sim.ProcessID = "rebalance"
+
 // groupsConfig is the run of the rebalance machine. It has no boot, no stop
 // request and no inject: Close ends it with the context. Its timers and the
 // sends to itself are handled by live.
-func (n *Node) groupsConfig() live.Config {
+func (n *Node) groupsConfig(env machine.Env) live.Config {
+	machineConfig := rebalance.Config{InitialDelay: machine.Duration(n.config.GroupInitialRebalanceDelay)}
 	return live.Config{
-		Process: rebalance.New(rebalance.Config{InitialDelay: machine.Duration(n.config.GroupInitialRebalanceDelay)}),
+		Process: simadapter.NewRebalance(groupsProcessID, rebalance.New(machineConfig, env)),
 		Clock:   liveClock{n.config.Clock},
 		Inbox:   n.groups,
 		Exec:    n.groupsExec,

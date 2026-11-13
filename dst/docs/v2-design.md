@@ -2014,3 +2014,42 @@ written, and the smallest change that was made.
    this when it replaces `SiteNames()` with the catalog.
 9. **The broker has no buggify site.** No broker code calls `Maybe`, `MaybeP` or `Fault`
    (section 8.2), so the broker catalog has none.
+
+### T1.11a (the replica and the rebalance machine take the v2 contract)
+
+1. **The adapter is not in the simulator.** Section 16.2 puts a small adapter in the control
+   plane simulator. The old production loop (`internal/system/live`) also takes a
+   `sim.Process`, and the server cannot import the simulator. So the adapter is the small
+   package `controlplane/internal/system/simadapter` (`Replica` and `Rebalance`). The
+   simulator and the server both use it. It changes only the form of the values (typed
+   action to dst control value, and back). Step b removes the server from it, and step c
+   deletes the package. It is on the determinism gate list.
+2. **`rebalance.TimerFired` is a case of the rebalance sum.** A sealed sum can only hold
+   types of its own package, so the machine cannot use `runtime.TimerFired` as an input
+   any more. The adapter turns a `runtime.TimerFired` from the host into
+   `rebalance.TimerFired`, and a `rebalance.SetTimer` into a dst `SetTimer` whose body is
+   a `runtime.TimerFired`. The host code sees the same values as before.
+3. **`runtime.Rand` is gone; `runtime.Environment` is `machine.Env`.** Section 3.2 moves
+   `Rand` with the kernels (note T1.6d.1). The control plane has no `Between` problem (the
+   machines only use the dst meaning, both ends included), so the move is done here. The
+   simulator env, the server env and the test envs got `Between` and `Chance`.
+4. **The rebalance machine takes `New(cfg, env)`.** `Config.ID` and `Config.Faults` are
+   deleted: the id belongs to the host (the adapter), and the sites come from `env`. A new
+   member id is made from `env.NewID()`, which is 16 bytes of the run stream, the same
+   bytes as `rng.Bytes` of 16 bytes. The random delay of `SiteTimerLate` uses
+   `env.Between`. So the draws and their order are the same as with `cx.Rand()`.
+5. **Production draws member ids from an OS-seeded stream.** Before, the loop of the
+   rebalance machine gave it the stream of `live` (seeded from the OS). Now the server
+   gives it `randomEnvironment` (also seeded from the OS). The replica keeps the old
+   counter env. Step b gives the machine its env through `dst/live` config.
+6. **Tags.** `runtime` events and actions use the broker numbers (events 1 to 21, actions
+   101 to 121; the retired Log* numbers are used again here, because the replica still
+   has those values; `LocalRead` is 21). The rebalance sums use 1001 to 1012 (inputs),
+   1101 to 1106 (outputs) and 1200 to 1206 (answers). No hash reads them yet, so no
+   golden moved.
+7. **`//sumtype:decl` is on `EventData`, `Action`, `Input`, `Output` and `Answer`.** The
+   switch in `replica.Step` lost its `default` (it lists the two cases it ignores). Five
+   switches over `Input` got a case that lists the inputs they do not handle
+   (`handle`, `callOf`, `loadStep` and the test helpers). No rule changed.
+8. **`runtime.SetTimer` carries `Gen`.** The old replica put the generation in the body of
+   the dst timer. The adapter builds the same body from the action.

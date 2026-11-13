@@ -91,7 +91,7 @@ func TestHeartbeatTable(t *testing.T) {
 	h.run([]step{{0, h.join(1, "g", ""), nil}, {delay, nil, []string{"1 OK gen=1 proto=range leader=m1 id=m1 members=[m1:meta-range]"}}})
 	cases := []struct {
 		name  string
-		setup any // an input before the heartbeat, nil for none
+		setup Input // an input before the heartbeat, nil for none
 		group string
 		id    string
 		gen   int32

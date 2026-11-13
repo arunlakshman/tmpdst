@@ -20,8 +20,6 @@ import (
 	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/rng"
-	"github.com/manifesterio/mds/dst/sched"
-	"github.com/manifesterio/mds/dst/sim"
 )
 
 // The rebalance machine (domain/rebalance) against the rebalance model
@@ -82,10 +80,10 @@ type rbNext struct {
 }
 
 type rbTimer struct {
-	id   uint64
+	id   machine.TimerID
 	at   machine.NodeTime
 	seq  int
-	body any
+	body rebalance.Input
 }
 
 type rbWorld struct {
@@ -101,7 +99,7 @@ type rbWorld struct {
 
 	timers []rbTimer
 	seq    int
-	inbox  []any
+	inbox  []rebalance.Input
 	active bool // the last role sent
 
 	fault     int                       // the failure of the next write
@@ -126,24 +124,43 @@ type rbWorld struct {
 	logGens  map[string]int32    // the last generation in the log, per group
 }
 
-// rbCx is the step context: Wall is Now, so TimeMs is the same as in the model.
-type rbCx struct{ w *rbWorld }
+// at is the time of a step: Wall is Now, so TimeMs is the same as in the model.
+func (w *rbWorld) at() machine.Now {
+	return machine.Now{Mono: w.now, Wall: machine.RealTime(w.now)}
+}
 
-func (c rbCx) Now() sched.TimeNs       { return sched.TimeNs(c.w.now) }
-func (c rbCx) Wall() sched.TimeNs      { return sched.TimeNs(c.w.now) }
-func (c rbCx) Rand() *rng.Rand         { return c.w.rand }
-func (c rbCx) Faults() *fault.Injector { return nil }
-func (c rbCx) Assert() *assert.Log     { return nil }
+// rbEnv is the machine.Env of the test. Random numbers come from w.rand, which the test
+// sets before a join, so that it can predict the member id. No buggify site fires.
+type rbEnv struct{ w *rbWorld }
+
+func (e rbEnv) Uint64() uint64                             { return e.w.rand.Uint64() }
+func (e rbEnv) Intn(n int) int                             { return e.w.rand.Intn(n) }
+func (e rbEnv) Between(lo, hi int64) int64                 { return e.w.rand.Between(lo, hi) }
+func (e rbEnv) Chance(p float64) bool                      { return e.w.rand.Chance(p) }
+func (e rbEnv) Maybe(fault.NamedSite) bool                 { return false }
+func (e rbEnv) MaybeP(fault.NamedSite, float64) bool       { return false }
+func (e rbEnv) Fault(fault.NamedSite, float64) bool        { return false }
+func (e rbEnv) Always(bool, assert.Always, ...assert.Pair) {}
+func (e rbEnv) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {
+}
+func (e rbEnv) Sometimes(bool, assert.Sometimes)               {}
+func (e rbEnv) Reachable(assert.Reachable)                     {}
+func (e rbEnv) Unreachable(assert.Unreachable, ...assert.Pair) {}
+func (e rbEnv) NewID() machine.ID {
+	var id machine.ID
+	e.w.rand.Bytes(id[:])
+	return id
+}
 
 func newRBWorld(t *rapid.T, seen map[string]int) *rbWorld {
 	w := &rbWorld{
 		t: t, seen: seen, rand: rng.New(0), log: spec.New(),
-		m:      rebalance.New(rebalance.Config{InitialDelay: rbDelay, NewMemberTimeout: rbNewMember, WriteTimeout: rbWrite}),
 		model:  spec.NewRebalance(rbDelay),
 		inputs: map[rebalance.CallID]any{}, sent: map[rebalance.CallID]int{}, open: map[rebalance.CallID]bool{},
 		got: map[rebalance.CallID]string{}, want: map[rebalance.CallID]string{}, pool: map[string][]string{}, next: map[string]rbNext{}, sessions: map[string]int32{"ghost": 5000},
 		leaders: map[string]string{}, gens: map[string]int32{}, logGens: map[string]int32{},
 	}
+	w.m = rebalance.New(rebalance.Config{InitialDelay: rbDelay, NewMemberTimeout: rbNewMember, WriteTimeout: rbWrite}, rbEnv{w})
 	w.model.NewMemberTimeout = rbNewMember
 	w.apply(contract.CreateTopic{Name: "t", Partitions: 2})
 	w.model.Store = w.copyLog()
@@ -437,7 +454,7 @@ func (w *rbWorld) op(run func(w *rbWorld)) {
 }
 
 // call sends one call to the model and to the machine.
-func (w *rbWorld) call(in, model any) {
+func (w *rbWorld) call(in rebalance.Input, model any) {
 	call, _, _ := rbOf(in)
 	w.inputs[call], w.sent[call], w.open[call] = in, w.step, true
 	w.modelStep(model)
@@ -509,12 +526,12 @@ func (w *rbWorld) modelStep(in any) {
 }
 
 // deliver gives in to the machine, with every input that follows from it.
-func (w *rbWorld) deliver(in any) {
+func (w *rbWorld) deliver(in rebalance.Input) {
 	w.inbox = append(w.inbox, in)
 	for len(w.inbox) > 0 {
 		next := w.inbox[0]
 		w.inbox = w.inbox[1:]
-		for _, o := range w.m.Step(rbCx{w}, next) {
+		for _, o := range w.m.Step(w.at(), next) {
 			w.output(o)
 		}
 	}
@@ -532,27 +549,27 @@ func (w *rbWorld) deliver(in any) {
 	w.modelStep(spec.RoleChanged{Active: true})
 }
 
-func (w *rbWorld) output(o any) {
+func (w *rbWorld) output(o rebalance.Output) {
 	switch o := o.(type) {
 	case rebalance.Reply:
 		w.answered(o)
-	case sim.SetTimer:
+	case rebalance.SetTimer:
 		w.cancel(o.ID)
 		w.seq++
-		w.timers = append(w.timers, rbTimer{id: o.ID, at: w.now + machine.NodeTime(o.After), seq: w.seq, body: o.Body})
-	case sim.CancelTimer:
+		w.timers = append(w.timers, rbTimer{id: o.ID, at: w.now + machine.NodeTime(o.After), seq: w.seq, body: rebalance.TimerFired{ID: o.ID, Gen: o.Gen}})
+	case rebalance.CancelTimer:
 		w.cancel(o.ID)
+	case rebalance.SendSelf:
+		w.inbox = append(w.inbox, o.Msg)
 	case rebalance.SubmitRead:
 		w.broke = w.broke || o.Fresh
 		w.inbox = append(w.inbox, w.answerOf(o.Req, w.log.Apply(o.Op)))
 	case rebalance.SubmitCommand:
 		w.write(o)
-	default:
-		w.t.Fatalf("unknown output %T", o)
 	}
 }
 
-func (w *rbWorld) cancel(id uint64) {
+func (w *rbWorld) cancel(id machine.TimerID) {
 	w.timers = slices.DeleteFunc(w.timers, func(a rbTimer) bool { return a.id == id })
 }
 
@@ -655,6 +672,8 @@ func (w *rbWorld) answered(r rebalance.Reply) {
 		if !w.late && (d.AssignedGeneration != s.Generation || i < 0 || !bytes.Equal(d.Members[i].Assignment, a.Assignment)) {
 			w.t.Fatalf("step %d: sync answer %s of %s is not in the log: %+v", w.step, w.got[r.Call], s.MemberID, d)
 		}
+	case rebalance.LeaveAnswer, rebalance.CommitAnswer, rebalance.DescribeAnswer, rebalance.ListAnswer:
+		// The model comparison in compare checks these answers.
 	}
 }
 

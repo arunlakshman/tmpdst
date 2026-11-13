@@ -2,7 +2,6 @@ package replica_test
 
 import (
 	"errors"
-	"github.com/manifesterio/mds/dst/sim"
 	"testing"
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/metadb/engine"
@@ -49,8 +48,8 @@ func tombConfig(src *storeSource) replica.Config {
 func TestOpenStoreFailureAtBuildStopsOnStart(t *testing.T) {
 	m := newMachine(t, tombConfig(&storeSource{failOn: 1}))
 	acts := step(m, runtime.NodeStarted{})
-	stop, ok := acts[0].(sim.Crash)
+	stop, ok := acts[0].(runtime.StopForRestart)
 	if !ok || stop.Cause != "disk is full" {
-		t.Fatalf("acts = %#v, want Crash with the open error", acts)
+		t.Fatalf("acts = %#v, want StopForRestart with the open error", acts)
 	}
 }

@@ -35,11 +35,11 @@ func (m *Replica) noteTail(round uint64, tail runtime.LogPosition) {
 }
 
 // serveReads answers every waiter whose goal slot is applied.
-func (m *Replica) serveReads() []any {
+func (m *Replica) serveReads() []runtime.Action {
 	if len(m.readWaiters) == 0 || !m.ready {
 		return nil
 	}
-	var acts []any
+	var acts []runtime.Action
 	keep := m.readWaiters[:0]
 	for _, w := range m.readWaiters {
 		if !w.have || m.applied < w.goal {
@@ -54,8 +54,8 @@ func (m *Replica) serveReads() []any {
 
 // refuseReads answers every waiting read with Unavailable so the bridge can
 // try the other replica at once.
-func (m *Replica) refuseReads() []any {
-	var acts []any
+func (m *Replica) refuseReads() []runtime.Action {
+	var acts []runtime.Action
 	for _, w := range m.readWaiters {
 		acts = append(acts, runtime.ControlPlaneReply{To: w.from, Done: runtime.ControlPlaneDone{Req: w.request, Err: runtime.ErrUnavailable}})
 	}

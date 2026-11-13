@@ -5,8 +5,17 @@ import (
 	"github.com/manifesterio/mds/dst/machine"
 )
 
-// EventData is a closed set of plain-data structs.
-type EventData interface{ isEvent() }
+// EventData is the input of the replica machine: a closed set of plain-data structs.
+// It is a sealed sum. Every case has a Tag and a Fold method (event_fold.go), so a new
+// case without them does not compile.
+//
+//sumtype:decl
+type EventData interface {
+	machine.Message
+	// Tag is the frozen trace-hash number of the case.
+	Tag() uint64
+	isEvent()
+}
 
 // IOResult is the EventData that answers an IOCall, matched by RequestID. A
 // completion with an unknown, already-finished or wrong-kind RequestID is ignored:

@@ -13,8 +13,6 @@ import (
 	"github.com/manifesterio/mds/dst/fault"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/rng"
-	"github.com/manifesterio/mds/dst/sched"
-	"github.com/manifesterio/mds/dst/sim"
 )
 
 // The tests drive the machine with inputs at explicit times and look at its
@@ -30,24 +28,56 @@ const (
 	delay = 3 * machine.Second // the default initial delay
 )
 
-// testCx is the sim.Context of one step.
+// testCx is the clock of the tests: the time that the next step sees.
 type testCx struct {
-	now  machine.NodeTime
-	rand *rng.Rand
+	now machine.NodeTime
 }
 
-func (c *testCx) Now() sched.TimeNs       { return sched.TimeNs(c.now) }
-func (c *testCx) Wall() sched.TimeNs      { return sched.TimeNs(wall0) + sched.TimeNs(c.now) }
-func (c *testCx) Rand() *rng.Rand         { return c.rand }
-func (c *testCx) Faults() *fault.Injector { return nil }
-func (c *testCx) Assert() *assert.Log     { return nil }
+// at is the time of the next step. The wall clock is the node clock plus wall0.
+func (c *testCx) at() machine.Now {
+	return machine.Now{Mono: c.now, Wall: machine.RealTime(wall0) + machine.RealTime(c.now)}
+}
+
+// testEnv is the machine.Env of the tests. Random numbers come from the seeded stream;
+// a buggify site fires only if faults says so (nil: never). Assertions are not recorded.
+type testEnv struct {
+	rand   *rng.Rand
+	faults machine.Faults
+}
+
+func newTestEnv(faults machine.Faults) *testEnv {
+	return &testEnv{rand: rng.New(seed), faults: faults}
+}
+
+func (e *testEnv) Uint64() uint64                      { return e.rand.Uint64() }
+func (e *testEnv) Intn(n int) int                      { return e.rand.Intn(n) }
+func (e *testEnv) Between(lo, hi int64) int64          { return e.rand.Between(lo, hi) }
+func (e *testEnv) Chance(p float64) bool               { return e.rand.Chance(p) }
+func (e *testEnv) NewID() machine.ID                   { return newID(e.rand) }
+func (e *testEnv) Maybe(s fault.NamedSite) bool        { return e.faults != nil && e.faults.Maybe(s) }
+func (e *testEnv) Fault(fault.NamedSite, float64) bool { return false }
+func (e *testEnv) MaybeP(s fault.NamedSite, p float64) bool {
+	return e.faults != nil && e.faults.MaybeP(s, p)
+}
+func (*testEnv) Always(bool, assert.Always, ...assert.Pair)                           {}
+func (*testEnv) AlwaysOrUnreachable(bool, assert.AlwaysOrUnreachable, ...assert.Pair) {}
+func (*testEnv) Sometimes(bool, assert.Sometimes)                                     {}
+func (*testEnv) Reachable(assert.Reachable)                                           {}
+func (*testEnv) Unreachable(assert.Unreachable, ...assert.Pair)                       {}
+
+// newID draws an id from r the way the simulator does: 16 bytes of the stream.
+func newID(r *rng.Rand) machine.ID {
+	var id machine.ID
+	r.Bytes(id[:])
+	return id
+}
 
 // armed is one timer the machine set.
 type armed struct {
-	id   uint64
+	id   machine.TimerID
 	at   machine.NodeTime
 	seq  int
-	body any
+	body Input
 }
 
 type harness struct {
@@ -55,13 +85,14 @@ type harness struct {
 	m         *Machine
 	cx        *testCx
 	log       *spec.ControlPlane
+	env       *testEnv
 	timers    []armed
 	seq       int
-	inbox     []any
-	hold      bool  // keep submits in held for the test to answer
-	held      []any // SubmitCommand and SubmitRead not answered yet
+	inbox     []Input
+	hold      bool     // keep submits in held for the test to answer
+	held      []Output // SubmitCommand and SubmitRead not answered yet
 	got       []Reply
-	outs      []any // every output of every step
+	outs      []Output // every output of every step
 	suffix    []string
 	session   int32 // session timeout of the joins the harness makes
 	rebalance int32 // rebalance timeout; 0 means the session timeout
@@ -70,14 +101,29 @@ type harness struct {
 // newHarness starts a machine over an empty log and makes it serve.
 func newHarness(t *testing.T, cfg Config) *harness {
 	t.Helper()
-	h := &harness{t: t, m: New(cfg), cx: &testCx{rand: rng.New(seed)}, log: spec.New(), session: 10000}
-	shadow := rng.New(seed)
-	for range 64 {
-		h.suffix = append(h.suffix, newMemberID("", shadow))
-	}
+	return newHarnessFaults(t, cfg, nil)
+}
+
+// newHarnessFaults is newHarness with a fault source for the buggify sites.
+func newHarnessFaults(t *testing.T, cfg Config, faults machine.Faults) *harness {
+	t.Helper()
+	h := newBareHarness(t, cfg, faults)
+	h.session = 10000
 	h.step(RoleChanged{Active: true})
 	if h.phase("x") != stateDead {
 		t.Fatal("the machine does not serve after the load")
+	}
+	return h
+}
+
+// newBareHarness makes a harness and its machine. The machine has not taken any input yet.
+func newBareHarness(t *testing.T, cfg Config, faults machine.Faults) *harness {
+	t.Helper()
+	env := newTestEnv(faults)
+	h := &harness{t: t, m: New(cfg, env), env: env, cx: &testCx{}, log: spec.New()}
+	shadow := rng.New(seed)
+	for range 64 {
+		h.suffix = append(h.suffix, newMemberID("", newID(shadow)))
 	}
 	return h
 }
@@ -87,48 +133,46 @@ func (h *harness) id(k int) string { return h.suffix[k-1] }
 
 // step delivers one input and every input that follows from it (answers of
 // the log, sends to itself), and returns the replies, shown short.
-func (h *harness) step(in any) []string {
+func (h *harness) step(in Input) []string {
 	h.inbox = append(h.inbox, in)
 	for len(h.inbox) > 0 {
 		next := h.inbox[0]
 		h.inbox = h.inbox[1:]
-		for _, o := range h.m.Step(h.cx, next) {
+		for _, o := range h.m.Step(h.cx.at(), next) {
 			h.output(o)
 		}
 	}
 	return h.take()
 }
 
-func (h *harness) output(o any) {
+func (h *harness) output(o Output) {
 	h.outs = append(h.outs, o)
 	switch o := o.(type) {
 	case Reply:
 		h.got = append(h.got, o)
-	case sim.SetTimer:
+	case SetTimer:
 		h.cancel(o.ID)
 		h.seq++
-		h.timers = append(h.timers, armed{id: o.ID, at: h.cx.now + machine.NodeTime(o.After), seq: h.seq, body: o.Body})
-	case sim.CancelTimer:
+		h.timers = append(h.timers, armed{id: o.ID, at: h.cx.now + machine.NodeTime(o.After), seq: h.seq, body: TimerFired{ID: o.ID, Gen: o.Gen}})
+	case CancelTimer:
 		h.cancel(o.ID)
-	case sim.Send:
-		h.inbox = append(h.inbox, o.Body)
+	case SendSelf:
+		h.inbox = append(h.inbox, o.Msg)
 	case SubmitCommand, SubmitRead:
 		if h.hold {
 			h.held = append(h.held, o)
 			return
 		}
 		h.inbox = append(h.inbox, h.apply(o))
-	default:
-		h.t.Fatalf("unknown output %T", o)
 	}
 }
 
-func (h *harness) cancel(id uint64) {
+func (h *harness) cancel(id machine.TimerID) {
 	h.timers = slices.DeleteFunc(h.timers, func(a armed) bool { return a.id == id })
 }
 
 // apply runs a submit on the log and returns the answer as an input.
-func (h *harness) apply(o any) ReplicaReply {
+func (h *harness) apply(o Output) ReplicaReply {
 	var req machine.RequestID
 	var op runtime.ControlPlaneOperation
 	switch o := o.(type) {
@@ -136,6 +180,8 @@ func (h *harness) apply(o any) ReplicaReply {
 		req, op = o.Req, o.Op
 	case SubmitRead:
 		req, op = o.Req, o.Op
+	case Reply, SetTimer, CancelTimer, SendSelf:
+		h.t.Fatalf("%T is not a submit", o)
 	}
 	done := h.log.Apply(op)
 	return ReplicaReply{Req: req, Done: runtime.ControlPlaneDone{Req: req, Resp: done.Resp, Err: done.Err, Outcome: done.Outcome}}
@@ -153,12 +199,14 @@ func (h *harness) answer(i int, err runtime.ErrCode) []string {
 	return h.step(ReplicaReply{Req: req, Done: runtime.ControlPlaneDone{Req: req, Err: err, Outcome: runtime.MaybeApplied}})
 }
 
-func reqOf(o any) machine.RequestID {
+func reqOf(o Output) machine.RequestID {
 	switch o := o.(type) {
 	case SubmitCommand:
 		return o.Req
 	case SubmitRead:
 		return o.Req
+	case Reply, SetTimer, CancelTimer, SendSelf:
+		return 0
 	}
 	return 0
 }
@@ -210,7 +258,7 @@ func (h *harness) take() []string {
 // none), and expect exactly want (in any order) from both.
 type step struct {
 	at   machine.Duration
-	in   any
+	in   Input
 	want []string
 }
 

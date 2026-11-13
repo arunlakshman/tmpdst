@@ -37,7 +37,7 @@ func SiteNames() []string {
 	}
 }
 
-// maybe reports whether site fires now. With no fault injector none does.
+// maybe reports whether site fires now. The env of production never fires a site.
 func (m *Machine) maybe(site fault.NamedSite) bool {
-	return m.cfg.Faults != nil && m.cfg.Faults.Maybe(site)
+	return m.env.Maybe(site)
 }

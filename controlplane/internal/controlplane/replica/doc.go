@@ -3,8 +3,9 @@
 // leader or standby, catch-up, checkpoint and restore. Each log entry is applied
 // to the metadb.
 //
-// It is a dst sim.Process, so one Step runs under dst's simulator runner and
-// under the production runner (internal/system/live). This package is an extractable unit under
+// It is a machine of the dst v2 contract (machine.Machine with runtime.EventData as input and
+// runtime.Action as output), so one Step runs under the simulator and under the production
+// loop. This package is an extractable unit under
 // controlplane/ autonomy (decision 56): it may import github.com/manifesterio/mds/controlplane/internal/runtime and
 // other controlplane packages, but not broker, simulator, system, cmd, spec, kafkawire,
 // format, net/http, Pebble, or the Dynamo SDK.

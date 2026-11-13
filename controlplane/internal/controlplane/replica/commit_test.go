@@ -23,7 +23,7 @@ func commitCmd(key string, records int64) metadb.Entry {
 	}
 }
 
-func onlyAppend(t *testing.T, acts []any) runtime.LogAppend {
+func onlyAppend(t *testing.T, acts []runtime.Action) runtime.LogAppend {
 	t.Helper()
 	if len(acts) != 1 {
 		t.Fatalf("actions = %v, want one LogAppend", acts)

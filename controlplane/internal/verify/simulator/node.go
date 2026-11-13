@@ -7,6 +7,7 @@ import (
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/controlplane/internal/system/simadapter"
 	"github.com/manifesterio/mds/dst/eng"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/sched"
@@ -25,6 +26,7 @@ type simNode struct {
 	factory replica.Factory
 	inst    machine.NodeInstance
 	m       *replica.Replica
+	proc    *simadapter.Replica // m as a dst process
 
 	up     bool
 	paused bool
@@ -85,6 +87,7 @@ func (n *simNode) start() {
 	n.boots++
 	n.inst.Inc = machine.BootNumber(n.s.env.NewID())
 	n.m = n.factory(n.s.env, n.inst)
+	n.proc = simadapter.NewReplica(nodeID(n.idx), n.m)
 	n.up, n.paused, n.held = true, false, nil
 	if n.groups != nil {
 		n.groups.start()
@@ -100,7 +103,7 @@ func (n *simNode) down(why string) {
 	}
 	n.s.stats.Crashes++
 	n.s.tracef("%s crashes (%s)", n.name(), why)
-	n.up, n.paused, n.held, n.m = false, false, nil, nil
+	n.up, n.paused, n.held, n.m, n.proc = false, false, nil, nil, nil
 	if n.groups != nil {
 		n.groups.stop()
 	}
@@ -165,7 +168,7 @@ func (n *simNode) step(cx dstsim.Context, body any) []any {
 		body, n.groups.lastToReplica = next, next
 	}
 	n.ran = true
-	acts := n.m.Step(cx, body)
+	acts := n.proc.Step(cx, body)
 	out, ended := n.outbound(acts)
 	if n.groups != nil && !ended {
 		out = n.groups.afterStep(out)

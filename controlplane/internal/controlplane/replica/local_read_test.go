@@ -26,7 +26,7 @@ func readyMachine(t *testing.T) *replica.Replica {
 	return m
 }
 
-func onlyReply(t *testing.T, acts []any) runtime.ControlPlaneReply {
+func onlyReply(t *testing.T, acts []runtime.Action) runtime.ControlPlaneReply {
 	t.Helper()
 	if len(acts) != 1 {
 		t.Fatalf("want one reply, got %v", acts)

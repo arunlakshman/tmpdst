@@ -4,7 +4,7 @@ import (
 	"github.com/manifesterio/mds/dst/trace"
 )
 
-// StateHash implements sim.Process. It folds the state that decides what the
+// StateHash implements machine.Machine. It folds the state that decides what the
 // machine does next, in a fixed order.
 func (m *Machine) StateHash() uint64 {
 	h := trace.New()

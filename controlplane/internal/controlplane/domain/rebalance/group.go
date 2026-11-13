@@ -9,14 +9,13 @@ import (
 
 // The Kafka names of the group states (Dead is a group the machine does not have).
 const (
-	stateEmpty     = "Empty"
-	stateJoining   = "PreparingRebalance"
-	stateSyncing   = "CompletingRebalance"
-	stateStable    = "Stable"
-	stateDead      = "Dead"
-	reasonLeave    = "leave"
-	reasonExpire   = "expire"
-	defaultProcess = "rebalance"
+	stateEmpty   = "Empty"
+	stateJoining = "PreparingRebalance"
+	stateSyncing = "CompletingRebalance"
+	stateStable  = "Stable"
+	stateDead    = "Dead"
+	reasonLeave  = "leave"
+	reasonExpire = "expire"
 )
 
 // group is one group in memory. The fields here are the same in every phase.
@@ -33,8 +32,8 @@ type group struct {
 	round      timer // the round end in Joining, the sync deadline in Syncing and Stable
 	delay      timer // the initial delay
 	write      *write
-	draining   bool  // a buggify site moved the drain of the queue to a later step
-	queue      []any // inputs that wait for the write, in order
+	draining   bool    // a buggify site moved the drain of the queue to a later step
+	queue      []Input // inputs that wait for the write, in order
 }
 
 // member is one member of a group.

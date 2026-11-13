@@ -32,7 +32,7 @@ func (m *Machine) join(s *serving, in Join) {
 	}
 	isNew := mm == nil
 	if isNew {
-		mm = m.newMember(s, g, newMemberID(in.ClientID, m.cx.Rand()))
+		mm = m.newMember(s, g, newMemberID(in.ClientID, m.env.NewID()))
 		mm.isNew = true
 		m.arm(&mm.session, m.cfg.NewMemberTimeout)
 	}

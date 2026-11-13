@@ -1,9 +1,7 @@
 package rebalance
 
 import (
-	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/dst/machine"
-	"github.com/manifesterio/mds/dst/sim"
 )
 
 // timer is one timer slot. Its id stays the same; each arm raises gen, so a
@@ -42,15 +40,15 @@ func (m *Machine) newTimer() timer {
 // arm sets t to fire after d. An armed t is replaced.
 func (m *Machine) arm(t *timer, d machine.Duration) {
 	if m.maybe(SiteTimerLate) {
-		d += machine.Duration(m.cx.Rand().Between(int64(machine.Millisecond), int64(lateMax)))
+		d += machine.Duration(m.env.Between(int64(machine.Millisecond), int64(lateMax)))
 	}
 	if t.on && m.maybe(SiteStaleTimer) {
 		// The old arm fires anyway, as in live when it fired just before it was replaced.
-		m.send(runtime.TimerFired{ID: t.id, Gen: t.gen})
+		m.send(TimerFired{ID: t.id, Gen: t.gen})
 	}
 	t.gen++
 	t.on = true
-	m.out = append(m.out, sim.SetTimer{ID: uint64(t.id), After: timeNs(d), Body: runtime.TimerFired{ID: t.id, Gen: t.gen}})
+	m.out = append(m.out, SetTimer{ID: t.id, Gen: t.gen, After: d})
 }
 
 // stop cancels t if it is armed.
@@ -59,11 +57,11 @@ func (m *Machine) stop(t *timer) {
 		return
 	}
 	t.on = false
-	m.out = append(m.out, sim.CancelTimer{ID: uint64(t.id)})
+	m.out = append(m.out, CancelTimer{ID: t.id})
 }
 
 // fired reports whether f is the current arm of t, and marks t as not armed.
-func (t *timer) fired(f runtime.TimerFired) bool {
+func (t *timer) fired(f TimerFired) bool {
 	if !t.on || t.gen != f.Gen || t.id != f.ID {
 		return false
 	}
@@ -80,7 +78,7 @@ func (m *Machine) touch(mm *member) {
 }
 
 // timerFired routes a timer. The timers of a busy group wait in its queue.
-func (m *Machine) timerFired(s *serving, f runtime.TimerFired) {
+func (m *Machine) timerFired(s *serving, f TimerFired) {
 	ref, ok := s.owners[f.ID]
 	if !ok {
 		return
@@ -107,7 +105,7 @@ func (m *Machine) timerFired(s *serving, f runtime.TimerFired) {
 }
 
 // groupTimer runs a session, round or delay timer on a group that is not busy.
-func (m *Machine) groupTimer(s *serving, f runtime.TimerFired) {
+func (m *Machine) groupTimer(s *serving, f TimerFired) {
 	ref, ok := s.owners[f.ID]
 	if !ok {
 		return // the member is gone

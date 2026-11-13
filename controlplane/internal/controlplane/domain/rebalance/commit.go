@@ -54,7 +54,7 @@ func (m *Machine) commitDone(s *serving, c *commit, done runtime.ControlPlaneDon
 }
 
 // commitTimeout answers a commit whose write timer fired. Its late answer is ignored.
-func (m *Machine) commitTimeout(s *serving, c *commit, f runtime.TimerFired) {
+func (m *Machine) commitTimeout(s *serving, c *commit, f TimerFired) {
 	if !c.timer.fired(f) {
 		return
 	}

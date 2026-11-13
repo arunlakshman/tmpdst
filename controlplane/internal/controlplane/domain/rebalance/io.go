@@ -16,7 +16,30 @@ type CallID uint64
 // into wire_types_gen.go. The inputs below carry a call id, so they are written
 // by hand.
 
-// The inputs (docs/rebalance.md section 3). TimerFired is runtime.TimerFired.
+// Input is the input of the machine: a sealed sum of the cases below (docs/rebalance.md
+// section 3), TimerFired and the private drainLater. Every case has a Tag and a Fold method
+// (fold.go), so a new case without them does not compile.
+//
+//sumtype:decl
+type Input interface {
+	machine.Message
+	// Tag is the trace-hash number of the case.
+	Tag() uint64
+	isInput()
+}
+
+// Output is what the machine returns from a Step: a sealed sum of the cases below. The
+// host turns each case into real work. Every case has a Tag and a Fold method.
+//
+//sumtype:decl
+type Output interface {
+	machine.Message
+	// Tag is the trace-hash number of the case.
+	Tag() uint64
+	isOutput()
+}
+
+// The inputs (docs/rebalance.md section 3).
 type (
 	// Join is a JoinGroup call. An empty MemberID asks for a new member.
 	// RebalanceTimeoutMs 0 means the session timeout.
@@ -80,10 +103,32 @@ type (
 		Req  machine.RequestID
 		Done runtime.ControlPlaneDone
 	}
+	// TimerFired says that the timer ID fired. The machine ignores it when Gen is not the
+	// current generation of that timer. The host makes it from a SetTimer.
+	TimerFired struct {
+		ID  machine.TimerID
+		Gen machine.TimerVersion
+	}
 )
 
-// The outputs other than sim.SetTimer and sim.CancelTimer.
+// The outputs.
 type (
+	// SetTimer asks the host for a TimerFired{ID, Gen} after After. A pending timer with the
+	// same ID is replaced.
+	SetTimer struct {
+		ID    machine.TimerID
+		Gen   machine.TimerVersion
+		After machine.Duration
+	}
+	// CancelTimer removes the pending timer ID. It is only an optimization: the machine
+	// ignores a TimerFired of an old Gen.
+	CancelTimer struct {
+		ID machine.TimerID
+	}
+	// SendSelf asks the host to give Msg back to the machine as a later input.
+	SendSelf struct {
+		Msg Input
+	}
 	// SubmitCommand asks the replica to log Op: GroupInstall, GroupAssign,
 	// GroupRemove or OffsetCommit. The answer comes back as a ReplicaReply.
 	SubmitCommand struct {
@@ -108,6 +153,8 @@ type (
 
 // Answer is the body of a Reply: JoinAnswer, SyncAnswer, LeaveAnswer,
 // CommitAnswer, DescribeAnswer or ListAnswer.
+//
+//sumtype:decl
 type Answer interface{ isAnswer() }
 
 type (

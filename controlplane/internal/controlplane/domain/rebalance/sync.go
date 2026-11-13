@@ -137,7 +137,7 @@ func (m *Machine) abandon(s *serving, call CallID) {
 		m.abandonParked(s, call)
 		return
 	}
-	if i := slices.IndexFunc(g.queue, func(in any) bool { c, ok := callOf(in); return ok && c == call }); i >= 0 {
+	if i := slices.IndexFunc(g.queue, func(in Input) bool { c, ok := callOf(in); return ok && c == call }); i >= 0 {
 		g.queue = slices.Delete(g.queue, i, i+1)
 		delete(s.where, call)
 		return

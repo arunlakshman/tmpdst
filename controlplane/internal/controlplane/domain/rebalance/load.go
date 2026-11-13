@@ -44,7 +44,7 @@ func (m *Machine) sendLoadRead(l *loading, r loadRead) {
 	l.reqs[m.read(op, l.fresh)] = r
 }
 
-func (m *Machine) loadStep(l *loading, inbox any) {
+func (m *Machine) loadStep(l *loading, inbox Input) {
 	switch in := inbox.(type) {
 	case RoleChanged:
 		if !in.Active {
@@ -53,7 +53,7 @@ func (m *Machine) loadStep(l *loading, inbox any) {
 		}
 	case ReplicaReply:
 		m.loadReply(l, in)
-	case runtime.TimerFired:
+	case TimerFired:
 		if in.ID == l.retry.id && l.retry.fired(in) {
 			again := l.again
 			l.again = nil
@@ -61,7 +61,7 @@ func (m *Machine) loadStep(l *loading, inbox any) {
 				m.sendLoadRead(l, r)
 			}
 		}
-	default:
+	case Join, Sync, Heartbeat, Leave, OffsetCommit, Describe, List, CallAbandoned, drainLater:
 		m.refuse(inbox)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/contract"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/controlplane/internal/system/simadapter"
 	"github.com/manifesterio/mds/dst/machine"
 	dstsim "github.com/manifesterio/mds/dst/sim"
 )
@@ -42,16 +43,14 @@ func rebalanceFrom() machine.NodeInstance { return machine.NodeInstance{Node: "r
 // groupsID is the process id of the rebalance machine of node idx.
 func groupsID(idx int) dstsim.ProcessID { return dstsim.ProcessID(fmt.Sprintf("rb-%d", idx)) }
 
-// machineConfig is the machine config of node idx, with the times scaled down
-// like replicaConfig. faults is the fault injector of the run, so the buggify
-// sites of the machine fire and are counted (production passes nil).
-func machineConfig(idx int, faults machine.Faults) rebalance.Config {
+// machineConfig is the machine config, with the times scaled down like replicaConfig.
+// The buggify sites of the machine come from the env of the run, so they fire and are
+// counted (production has an env where none fires).
+func machineConfig() rebalance.Config {
 	return rebalance.Config{
-		ID:               groupsID(idx),
 		InitialDelay:     300 * machine.Millisecond,
 		NewMemberTimeout: 4 * machine.Second,
 		WriteTimeout:     2 * machine.Second,
-		Faults:           faults,
 	}
 }
 
@@ -132,6 +131,7 @@ type readNote struct {
 type groupProc struct {
 	h *groupHost
 	m *rebalance.Machine
+	a *simadapter.Rebalance // m as a dst process
 }
 
 func (p *groupProc) ID() dstsim.ProcessID { return groupsID(p.h.n.idx) }
@@ -145,7 +145,8 @@ func newGroupHost(s *sim, n *simNode) *groupHost { return &groupHost{s: s, n: n}
 // start makes the machine of a new boot. It has no memory: it is in
 // Standby until the replica becomes active and Ready.
 func (h *groupHost) start() {
-	h.proc = &groupProc{h: h, m: rebalance.New(machineConfig(h.n.idx, h.s.env))}
+	m := rebalance.New(machineConfig(), h.s.env)
+	h.proc = &groupProc{h: h, m: m, a: simadapter.NewRebalance(groupsID(h.n.idx), m)}
 	h.role, h.told = false, false
 	h.sent = map[machine.RequestID]bool{}
 	h.timers = map[uint64]bool{}
@@ -221,7 +222,7 @@ func (h *groupHost) step(p *groupProc, cx dstsim.Context, inbox any) []any {
 			h.endTerm()
 		}
 	}
-	outs := p.m.Step(cx, inbox)
+	outs := p.a.Step(cx, inbox)
 	h.note(inbox, outs)
 	return h.outbound(outs)
 }

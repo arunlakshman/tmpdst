@@ -172,7 +172,7 @@ func TestRebuildKeepsMembersAndExpiresSilent(t *testing.T) {
 	// Failover: the old machine loses the role, a new one takes over from the log.
 	h.check("losing the role", h.step(RoleChanged{Active: false}), []string(nil))
 	h.check("timers left", len(h.timers), 0)
-	h.m = New(Config{})
+	h.m = New(Config{}, h.env)
 	h.step(RoleChanged{Active: true})
 	h.check("rebuilt g", []any{h.phase("g"), h.group("g").generation, h.members("g")}, []any{stateStable, 2, []string{"m1", "m2"}})
 	h.check("rebuilt unsynced", []any{h.phase("unsynced"), h.members("unsynced")}, []any{stateJoining, []string{"m3"}})
@@ -229,6 +229,8 @@ func heldOps(h *harness) string {
 				name += " fresh"
 			}
 			out = append(out, name)
+		case Reply, SetTimer, CancelTimer, SendSelf:
+			// Not a submit: held holds only submits.
 		}
 	}
 	return fmt.Sprint(out)
@@ -284,7 +286,7 @@ func TestConcurrentJoinsOneRound(t *testing.T) {
 	}
 }
 
-func repliesIn(outs []any) []Reply {
+func repliesIn(outs []Output) []Reply {
 	var out []Reply
 	for _, o := range outs {
 		if r, ok := o.(Reply); ok && r.Err == runtime.OK {

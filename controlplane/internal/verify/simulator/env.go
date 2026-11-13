@@ -8,7 +8,7 @@ import (
 	"github.com/manifesterio/mds/dst/rng"
 )
 
-// env is the runtime.Environment of a run: the random stream, the fault
+// env is the machine.Env of a run: the random stream, the fault
 // points, and the assertions. Assertions never panic: a false Always is
 // recorded as a failure and the run goes on.
 type env struct {
@@ -29,13 +29,19 @@ var _ runtime.Environment = (*env)(nil)
 
 func (e *env) setQuiet(q bool) { e.inj.SetQuiet(q) }
 
-// Uint64 implements runtime.Rand.
+// Uint64 implements machine.Rand.
 func (e *env) Uint64() uint64 { return e.rand.Uint64() }
 
-// Intn implements runtime.Rand.
+// Intn implements machine.Rand.
 func (e *env) Intn(n int) int { return e.rand.Intn(n) }
 
-// NewID implements runtime.Rand.
+// Between implements machine.Rand.
+func (e *env) Between(lo, hi int64) int64 { return e.rand.Between(lo, hi) }
+
+// Chance implements machine.Rand.
+func (e *env) Chance(p float64) bool { return e.rand.Chance(p) }
+
+// NewID implements machine.Rand.
 func (e *env) NewID() machine.ID {
 	var id machine.ID
 	e.rand.Bytes(id[:])

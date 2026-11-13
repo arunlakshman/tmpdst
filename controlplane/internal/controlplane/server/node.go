@@ -19,8 +19,10 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 	"github.com/manifesterio/mds/controlplane/internal/system/live"
+	"github.com/manifesterio/mds/controlplane/internal/system/simadapter"
 	"github.com/manifesterio/mds/dst/machine"
 	"github.com/manifesterio/mds/dst/sched"
+	"github.com/manifesterio/mds/dst/sim"
 	"github.com/manifesterio/mds/shared/clock"
 )
 
@@ -135,6 +137,10 @@ func (n *Node) Health() *health.Server { return n.health }
 // Start launches the run loops. Ready flips health to Serving.
 // ctx bounds only the Ready wait; the loops run until Close (or the replica returns Crash or Exit).
 func (n *Node) Start(ctx context.Context) error {
+	groupsEnv, err := newRandomEnvironment()
+	if err != nil {
+		return err
+	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	n.cancel = cancel
 	groupsCtx, stopGroups := context.WithCancel(runCtx)
@@ -142,7 +148,7 @@ func (n *Node) Start(ctx context.Context) error {
 	m := replica.New(n.config.Machine)(n.config.Env, n.config.Self)
 	n.m.Store(m)
 	cfg := live.Config{
-		Process:   m,
+		Process:   simadapter.NewReplica(sim.ProcessID(n.config.Self.Node), m),
 		Boot:      runtime.NodeStarted{Self: n.config.Self},
 		Stop:      func(deadline sched.TimeNs) any { return runtime.StopRequest{Deadline: machine.NodeTime(deadline)} },
 		StopGrace: time.Duration(n.config.StopGrace),
@@ -171,7 +177,7 @@ func (n *Node) Start(ctx context.Context) error {
 	n.started = true
 	n.mu.Unlock()
 	go func() {
-		err := live.Run(groupsCtx, n.groupsConfig())
+		err := live.Run(groupsCtx, n.groupsConfig(groupsEnv))
 		n.groupsErr = err
 		close(n.groupsDone)
 	}()

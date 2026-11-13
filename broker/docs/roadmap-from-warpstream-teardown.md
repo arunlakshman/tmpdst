@@ -124,8 +124,8 @@ Checklist. Status: OK / TODO / BLOCKER.
 
 | Item | Status | Finding |
 |---|---|---|
-| LICENSE | BLOCKER | None at repo root. `build/omb/src/LICENSE` is the Apache-2.0 OMB checkout (git-ignored; our `ops/deploy/aws/bench/omb/patches/*` are derivatives and must keep its notice) |
-| README, quickstart | BLOCKER | No root `README.md` (only deploy and api READMEs). Need: what it is, alpha status, "produce-only, no consumer groups", docker-compose quickstart (`ops/deploy/docker-compose.yml` exists), supported APIs |
+| LICENSE | BLOCKER | None at repo root. `build/omb/src/LICENSE` is the Apache-2.0 OMB checkout (git-ignored; our `deploy/aws/bench/omb/patches/*` are derivatives and must keep its notice) |
+| README, quickstart | BLOCKER | No root `README.md` (only deploy and api READMEs). Need: what it is, alpha status, "produce-only, no consumer groups", docker-compose quickstart (`deploy/container/broker-compose.yml` exists), supported APIs |
 | CONTRIBUTING, SECURITY.md, CODEOWNERS, issue templates | TODO | None exist. Pick DCO (sign-off) over a CLA for an alpha |
 | Public CI | TODO | Workflow lives at `build/ci/determinism.workflow.yml`, not `.github/workflows`, so it is not running. It uses only `go vet`, `go test`, determinism script: no AWS creds needed. Docker-backed `test/integrationtest/` tests skip without Docker; add a service-container job. `make build` includes the risk gate (`docs/risk-gate.md`) |
 | Module path | DONE | Renamed from `mds` to `github.com/manifesterio/mds`; every import updated; nothing hashes the path |
@@ -175,7 +175,7 @@ Checklist. Status: OK / TODO / BLOCKER.
   symmetric figures; avoid "WarpStream clone/alternative" in the repo description. Rename `vanity` workloads.
 
 ### Reproducibility for outsiders
-- Terraform stack (`ops/deploy/aws/terraform`, region has no default, good) plus runbook and OMB patches at a pinned commit.
+- Terraform stack (`deploy/aws/terraform`, region has no default, good) plus runbook and OMB patches at a pinned commit.
   Needs an AWS account, ap-south-2 availability of m6in, a Grafana Cloud stack (SSM parameters) and SSO. Cost about
   $12.3/h fixed; w4 was about 37 min, estimated $10 to $13 (billing not checked). A realistic 3-run plus soak is $150 to
   $300 (estimate).

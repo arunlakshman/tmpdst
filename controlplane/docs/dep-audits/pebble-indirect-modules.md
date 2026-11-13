@@ -10,7 +10,7 @@ reach them (`ops/scripts/ci-determinism.sh` is green), so none needs a per-modul
 ## The 16 modules
 
 "Linked" is from `go version -m` of the release build (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath ./cmd/mdscontrolplane`,
-the build `ops/deploy/aws/terraform/scripts/build-and-upload.sh` makes). None is linked into `mdsbroker`.
+the build `deploy/aws/scripts/build-and-upload.sh` makes). None is linked into `mdsbroker`.
 
 | module | version | license (module cache LICENSE) | size in cache / non-test go files | linked in release mdscontrolplane |
 |---|---|---|---|---|
@@ -75,7 +75,7 @@ bbolt alternative recorded in `docs/applier-bakeoff.md`; neither is worth it now
 - Release toolchain: the newest 1.24 patch, go1.24.13, still shows 25 stdlib findings (1.24 is end of life; fixes are
   only in 1.25.13 and 1.26.9). Building the same code with `GOTOOLCHAIN=go1.26.10` (go.mod unchanged, still `go 1.24.0`)
   and `govulncheck -mode=binary` on linux/amd64 and linux/arm64 gives: mdsbroker, no vulnerabilities; mdscontrolplane, one
-  finding, GO-2026-5970 (x/text v0.34.0, see above). `ops/deploy/aws/terraform/scripts/build-and-upload.sh` now defaults
+  finding, GO-2026-5970 (x/text v0.34.0, see above). `deploy/aws/scripts/build-and-upload.sh` now defaults
   `GOTOOLCHAIN` to go1.26.10 (override with the environment).
 
 ## Recommendation

@@ -197,7 +197,7 @@ Touch: `server/`. `topics.go`, `groups.go`, `brokers.go` and `status.go` become 
 tests follow. `node.go` stays. Fix the comments that name these files. Gate: `build`.
 
 **T0.4 Stop committing generated files.** Needs: T0.1. Group A. Model: sonnet. Touch: `Makefile`,
-`.gitignore`, `deploy/docker/`, `.github/workflows/`, `ops/scripts/`, the three `*_gen.go` files.
+`.gitignore`, `deploy/container/`, `.github/workflows/`, `ops/scripts/`, the three `*_gen.go` files.
 Remove `contract/wire_types_gen.go`, `groups/wire_types_gen.go` and `wire/wire_gen.go` from git and ignore
 them. Add `make generate` (proto, then wiregen). Remove `wire-check`. Make `make build`, the Dockerfile
 and the CI job run generation first, because they cannot compile without it. CI stays a determinism

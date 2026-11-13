@@ -1,0 +1,33 @@
+# OMB Kafka driver for mdsbroker: the stock OMB Kafka driver, with WarpStream's published client settings
+# (https://www.warpstream.com/blog/warpstream-benchmarks-and-tco). Do NOT edit the generated copy;
+# render it with render-driver.sh (run-omb.sh does), which substitutes:
+#   @@BOOTSTRAP@@    comma list ip:9092 of all brokers (or the NLB)
+#   @@COMPRESSION@@  lz4 | none     lz4 is the default (as WarpStream). none is NOT apples-to-apples; run-omb.sh warns loudly.
+name: Kafka
+driverClass: io.openmessaging.benchmark.driver.kafka.KafkaBenchmarkDriver
+
+# Object storage is the replication; the broker ignores both (CreateTopics keeps only the partition count).
+replicationFactor: 1
+topicConfig: |
+
+commonConfig: |
+  bootstrap.servers=@@BOOTSTRAP@@
+  # WarpStream docs: refresh metadata often so clients notice a broker change.
+  metadata.max.age.ms=60000
+
+# enable.idempotence=false is REQUIRED (decision 41; Kafka 3.8 clients default to true and are rejected).
+# acks=all is the OMB default and what WarpStream's OMB runs use.
+producerConfig: |
+  acks=all
+  enable.idempotence=false
+  linger.ms=25
+  batch.size=100000
+  buffer.memory=128000000
+  max.request.size=64000000
+  compression.type=@@COMPRESSION@@
+
+consumerConfig: |
+  auto.offset.reset=earliest
+  enable.auto.commit=true
+  max.partition.fetch.bytes=100485760
+  fetch.max.bytes=100485760

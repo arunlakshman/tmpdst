@@ -101,11 +101,11 @@ MUTANT ?=
 mutants:
 	go run ./ops/tools/mutate $(if $(MUTANT),-only $(MUTANT))
 
-# Integration tests: real DynamoDB Local, PostgreSQL and SeaweedFS (S3) in Docker, started by
+# Integration tests: real DynamoDB Local, PostgreSQL and SeaweedFS (S3) in Podman, started by
 # internal/testinfra. test/integration builds the mdscontrolplane binary once and runs it as
-# child processes against them. It fails when Docker is not running and never skips. Not part of build.
+# child processes against them. It fails when Podman is not running and never skips. Not part of build.
 it:
-	@docker info >/dev/null 2>&1 || { echo "make it: Docker is not running (or DOCKER_HOST is wrong). Start Docker and run again; the integration tests are never skipped." >&2; exit 1; }
+	@podman info >/dev/null 2>&1 || { echo "make it: Podman is not running (or the Podman socket is not reachable). Start Podman and run again; the integration tests are never skipped." >&2; exit 1; }
 	go test -tags integration -count=1 -timeout 15m ./...
 
 include ../make/common.mk

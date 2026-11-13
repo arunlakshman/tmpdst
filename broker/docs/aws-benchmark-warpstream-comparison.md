@@ -6,11 +6,11 @@ Goal: run the benchmark WarpStream published ("WarpStream benchmarks and TCO",
 https://www.warpstream.com/blog/warpstream-benchmarks-and-tco, and the client guidance in
 https://docs.warpstream.com/warpstream/kafka/benchmarking and `.../configure-kafka-client/tuning-for-performance`)
 as closely as this system allows, and say exactly where it differs. The run is driven by
-`ops/deploy/aws/bench/run-omb.sh` (flow in `docs/aws-benchmark-runbook.md`), summarised by `ops/deploy/aws/bench/summarize.py`.
+`deploy/aws/bench/run-omb.sh` (flow in `docs/aws-benchmark-runbook.md`), summarised by `deploy/aws/bench/summarize.py`.
 
 Sources of their figures: the post and the two docs pages above. WarpStream does not publish OMB driver or workload
 files (the workload YAML is inline in the post, the driver settings are listed as prose); the files in
-`ops/deploy/aws/bench/omb/` are our reconstruction of those settings.
+`deploy/aws/bench/omb/` are our reconstruction of those settings.
 
 ## 1. Setup mapping
 
@@ -51,7 +51,7 @@ Client tool notes that matter for fairness:
   behaviour): records may be duplicated (decision 41) and also reordered within a partition. OMB does not check order, so
   the run is unaffected, but state it next to any claim about ordering. Where order matters set
   `max.in.flight.requests.per.connection=1` (at a throughput cost) or accept the reordering.
-- The Kafka driver the repo builds is OMB's, plus `ops/deploy/aws/bench/omb/patches/0001`: (a) every logical topic maps
+- The Kafka driver the repo builds is OMB's, plus `deploy/aws/bench/omb/patches/0001`: (a) every logical topic maps
   to one topic created beforehand through mdscontrolplane (the broker has no CreateTopics); (b) consumers `assign()` partitions
   statically and never commit; (c) the consumer list is not shuffled so the static split is deterministic;
   (d) optional round-robin pinning of each client to one broker (`--bootstrap-mode balanced`, section 3.5).

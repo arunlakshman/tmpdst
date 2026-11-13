@@ -1,5 +1,4 @@
 .DS_Store
 /bin/
 /build/
-# Local untracked state of the old broker repo (terraform files). Not part of the repo.
-/ops/deploy/
+__pycache__/

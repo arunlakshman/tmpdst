@@ -34,7 +34,7 @@ New growth since the earlier proposal:
 - **Observers.** `internal/system/production/metrics.go` (155 lines), `seglog.go` (132), `cp/cpobs` (346), `internal/system/awsmetrics` (244),
   `internal/system/runinfo` (4 files, about 470). Prometheus names are literals at the construction site
   (`metricsNS`/`"mdscontrolplane"` plus a `Name:` string; 17 `Name:` literals in the observers and 19 more in `internal/system/`
-  and `cp/`). The same names are re-typed in Python and JSON: `ops/deploy/aws/observability/gen/gen_dashboards.py`
+  and `cp/`). The same names are re-typed in Python and JSON: `deploy/aws/observability/gen/gen_dashboards.py`
   (28 mentions), `bench/summarize.py` (15), `docs/observability.md` (46), dashboards JSON. There is no test
   tying them together.
 - **Command wiring.** `cmd/mdsbroker/main.go` is 206 lines; `main()` is 160 lines, the longest function in the

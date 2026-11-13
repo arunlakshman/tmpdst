@@ -1,7 +1,7 @@
 # Project build. `make` / `make build` is the full gate:
 #   fmt, ascii, vet, lint, modernize-check, compile, unit tests, sim, hermetic it,
 #   Kafka CLI e2e, change risk score.
-# Docker fullstack test/integrationtest tests still Skip unless MDS_*_ENDPOINT are set.
+# Podman fullstack test/integrationtest tests still Skip unless MDS_*_ENDPOINT are set.
 # The import check for deterministic packages is the determinismcheck tool:
 # go run ./ops/tools/determinismcheck <packages>
 # Toolchain: `mise install` at the repo root (pins in the root mise.toml). The commit hook is
@@ -12,7 +12,7 @@ COVER_UNIT    ?= $(COVER_DIR)/cover-unit.out
 COVER_SIM     ?= $(COVER_DIR)/cover-sim.out
 COVER_IT      ?= $(COVER_DIR)/cover-it.out
 # Optional extra coverprofile(s), comma separated, merged into the risk score input
-# (e.g. coverage from Docker-backed integration tests).
+# (e.g. coverage from Podman-backed integration tests).
 RISK_MERGE    ?=
 # Fail threshold; also settable as RISK_THRESHOLD in the environment.
 RISK_THRESHOLD ?= 20
@@ -58,12 +58,12 @@ sim: $(COVER_DIR)/.gitignore
 sim-campaign:
 	go run ./cmd/mdssimulator -scenario kafka -seeds $(SIM_SEEDS)
 
-# Hermetic integration tests (in-process memstore). Fullstack Docker tests
+# Hermetic integration tests (in-process memstore). Fullstack Podman tests
 # in the same package Skip unless MDS_DYNAMO_ENDPOINT + MDS_S3_ENDPOINT are set.
 it-hermetic: $(COVER_DIR)/.gitignore
 	go test -coverprofile=$(COVER_IT) ./test/integrationtest/
 
-# Log tests against a real PostgreSQL in Docker (needs Docker). Not part of build: the Postgres cases skip when MDS_TEST_POSTGRES_DSN is unset.
+# Log tests against a real PostgreSQL in Podman (needs Podman). Not part of build: the Postgres cases skip when MDS_TEST_POSTGRES_DSN is unset.
 it-postgres:
 	POSTGRES_IMAGE=$(POSTGRES_IMAGE) bash ops/scripts/postgres-test.sh $(PG_TEST_ARGS)
 

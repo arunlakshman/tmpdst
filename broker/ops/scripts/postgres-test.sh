@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs Postgres-backed tests against a throwaway PostgreSQL in Docker.
+# Runs Postgres-backed tests against a throwaway PostgreSQL in Podman.
 # Control-plane executor Postgres tests moved to mds-controlplane
 # (docs/cp-extraction.md). Pass package paths explicitly, e.g.:
 #   make it-postgres PG_TEST_ARGS='./path/to/pkg/'
@@ -7,7 +7,7 @@
 # sets MDS_TEST_POSTGRES_DSN, runs go test, and then removes the container.
 # The container is removed even when a test fails or you press Ctrl+C.
 #
-# Needs Docker (Docker Desktop or Engine). Not part of `make build`: run it with
+# Needs Podman (Podman). Not part of `make build`: run it with
 # `make it-postgres`. The Postgres tests skip when MDS_TEST_POSTGRES_DSN is not set.
 #
 # Environment variables:
@@ -22,7 +22,7 @@ usage() {
 Usage: ops/scripts/postgres-test.sh [go test args...]
        ops/scripts/postgres-test.sh -h
 
-Starts a throwaway PostgreSQL in Docker, runs go test with MDS_TEST_POSTGRES_DSN
+Starts a throwaway PostgreSQL in Podman, runs go test with MDS_TEST_POSTGRES_DSN
 set to that server, then removes the container.
 
 With no arguments it prints a note and exits 0 (CP Postgres tests live in
@@ -32,7 +32,7 @@ Environment:
   POSTGRES_IMAGE   Image to run (default postgres:17.11-alpine)
   POSTGRES_KEEP=1  Keep the container after the run and print its name and DSN.
 
-Exit status: the exit status of go test, 3 if Docker is missing or not running.
+Exit status: the exit status of go test, 3 if Podman is missing or not running.
 EOF
 }
 
@@ -66,13 +66,13 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# (a) Docker must exist and the daemon must answer.
+# (a) Podman must exist and the daemon must answer.
 if ! command -v docker >/dev/null 2>&1; then
-  echo "postgres-test: docker is not installed. Install Docker Desktop or Engine first." >&2
+  echo "postgres-test: docker is not installed. Install Podman first." >&2
   exit 3
 fi
 if ! docker info >/dev/null 2>&1; then
-  echo "postgres-test: the Docker daemon does not answer. Start Docker and try again." >&2
+  echo "postgres-test: the Podman daemon does not answer. Start Podman and try again." >&2
   exit 3
 fi
 

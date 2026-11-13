@@ -228,7 +228,7 @@ Failover budget and the broker backoff interplay: runbook A11 (takeover 5 s + ab
 
 Done (decision 52 note). `broker.Config.MaxSegmentPartitions` and `mdsbroker -max-segment-partitions` default to 4096;
 the old transaction store needs `-max-segment-partitions 96` (documented in `internal/broker/config.go`, `cp/doc.go`, the flag help,
-the runbook; `ops/deploy/aws/terraform` defaults `broker_extra_args` to it because it still runs `mdscontrolplane -store dynamo`), and
+the runbook; `deploy/aws/terraform` defaults `broker_extra_args` to it because it still runs `mdscontrolplane -store dynamo`), and
 refuses a wider segment with `ErrTooLarge` and no write (tested at 4096 partitions in `cp/dynamo`). The broker does not
 learn the limit from the CP: that needs a new endpoint and a contract field, and the CP URL list of stage 4 is the better
 place. `internal/verify/simulator/fakeservices/fakelogservice` is the sim log CP (`docs/sim-log-engine.md`); `mdssimulator -scenario kafka-log` runs the whole

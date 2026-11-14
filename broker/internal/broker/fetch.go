@@ -13,8 +13,9 @@ import (
 // maxFetchWait caps MaxWait, so one Fetch cannot hold a connection for long.
 const maxFetchWait = 30 * machine.Second
 
-// fetch serves each partition independently: FindSegments, then one ranged GET per
-// committed batch, verified and patched to its committed offset (decision 30).
+// fetch serves each partition independently: FindSegments, then ranged GETs (one
+// per run of adjacent batches in a segment), verified and patched to each
+// batch's committed offset (decision 30).
 // A part that finds no data is parked and polled again (long poll, decision 29
 // and Q8): the Fetch answers once it has MinBytes, or when MaxWait ends.
 func (b *Broker) fetch(s *slot, r *kmsg.FetchRequest) []core.Action {
@@ -167,11 +168,39 @@ func (b *Broker) endParked(match func(*operation) bool) {
 	}
 }
 
-// onFetchGet verifies one batch read from the object store. A corrupt GET is
-// never returned: it is retried (the object itself is intact; S3 checksums
-// cover whole objects but not byte ranges, decision 27).
+// readRanges returns the ranges that the next GET reads, from o.next on. They
+// are the ranges that follow each other in one segment object, so one GET
+// reads them all. The ranges were already cut to the partition limit.
+func (o *operation) readRanges() []contract.BatchRange {
+	end := o.next + 1
+	for end < len(o.ranges) && adjacent(o.ranges[end-1], o.ranges[end]) {
+		end++
+	}
+	return o.ranges[o.next:end]
+}
+
+// adjacent reports whether next starts where prev ends, in the same object.
+// Lengths are positive: a length of 0 or less means "to the end" (SegmentRef).
+func adjacent(prev, next contract.BatchRange) bool {
+	return prev.Loc.Len > 0 && next.Loc.Len > 0 &&
+		prev.Loc.Key == next.Loc.Key && prev.Loc.Off+prev.Loc.Len == next.Loc.Off
+}
+
+// readRef is one ranged GET that covers rgs. rgs must be adjacent.
+func readRef(rgs []contract.BatchRange) contract.SegmentRef {
+	ref := rgs[0].Loc
+	for _, rg := range rgs[1:] {
+		ref.Len += rg.Loc.Len
+	}
+	return ref
+}
+
+// onFetchGet verifies one read from the object store. A read holds one or
+// more batches (see readRanges). A corrupt read is never returned: the whole
+// read is retried (the object itself is intact; S3 checksums cover whole
+// objects but not byte ranges, decision 27).
 func (b *Broker) onFetchGet(o *operation, e objectstore.GetDone) []core.Action {
-	rg := o.ranges[o.next]
+	rgs := o.readRanges()
 	if e.Err == core.ErrNotFound { // committed segments are never deleted
 		b.env.Unreachable(committedSegmentMissing)
 		return b.failOp(o, errKafkaStorage)
@@ -180,10 +209,11 @@ func (b *Broker) onFetchGet(o *operation, e objectstore.GetDone) []core.Action {
 		o.corrupt = false
 		return b.retryOp(o)
 	}
-	if b.config.InjectedBug != InjectedBugServeCorrupt && !isIntact(e.Data, rg) {
-		return b.retryCorrupt(o, rg)
+	parts := splitRead(e.Data, rgs)
+	if b.config.InjectedBug != InjectedBugServeCorrupt && !allIntact(e.Data, parts, rgs) {
+		return b.retryCorrupt(o, rgs[0])
 	}
-	return b.acceptFetch(o, e.Data, rg)
+	return b.acceptFetch(o, parts, rgs)
 }
 
 func (b *Broker) retryCorrupt(o *operation, rg contract.BatchRange) []core.Action {
@@ -193,19 +223,52 @@ func (b *Broker) retryCorrupt(o *operation, rg contract.BatchRange) []core.Actio
 	return append(acts, b.retryOp(o)...)
 }
 
-func (b *Broker) acceptFetch(o *operation, data []byte, rg contract.BatchRange) []core.Action {
-	base := int64(rg.Base)
-	if b.config.InjectedBug == InjectedBugWrongOffset {
-		base++
+// acceptFetch takes the batches of one read, patches each one to its
+// committed offset, and moves on to the next read.
+func (b *Broker) acceptFetch(o *operation, parts [][]byte, rgs []contract.BatchRange) []core.Action {
+	for i, rg := range rgs {
+		base := int64(rg.Base)
+		if b.config.InjectedBug == InjectedBugWrongOffset {
+			base++
+		}
+		o.out = append(o.out, kafkawire.ChangeBatchOffset(parts[i], base, 0)...)
 	}
-	o.out = append(o.out, kafkawire.ChangeBatchOffset(data, base, 0)...)
-	o.next++
+	o.next += len(rgs)
 	o.attempts, o.corrupt = 0, false
 	if o.next < len(o.ranges) {
 		return b.issue(o)
 	}
 	o.fpart.RecordBatches = o.out
 	return b.fetchPartData(o)
+}
+
+// splitRead cuts the bytes of one read into one part per range, by Loc.Len.
+// A short read gives short parts, so the checks below fail on it.
+func splitRead(data []byte, rgs []contract.BatchRange) [][]byte {
+	parts := make([][]byte, len(rgs))
+	for i, rg := range rgs {
+		n := min(rg.Loc.Len, int64(len(data)))
+		parts[i], data = data[:n], data[n:]
+	}
+	return parts
+}
+
+// allIntact reports whether data is exactly the batches of rgs, and each part
+// is the one valid batch that its range committed.
+func allIntact(data []byte, parts [][]byte, rgs []contract.BatchRange) bool {
+	var total int64
+	for _, rg := range rgs {
+		total += rg.Loc.Len
+	}
+	if int64(len(data)) != total {
+		return false
+	}
+	for i, rg := range rgs {
+		if !isIntact(parts[i], rg) {
+			return false
+		}
+	}
+	return true
 }
 
 // isIntact reports whether data is the one valid batch that rg committed.

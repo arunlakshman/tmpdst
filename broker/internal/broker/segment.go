@@ -1,7 +1,9 @@
 package broker
 
 import (
+	"cmp"
 	"slices"
+	"strings"
 
 	"github.com/twmb/franz-go/pkg/kmsg"
 
@@ -156,6 +158,10 @@ func (b *Broker) seal(why string) []core.Action {
 }
 
 func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
+	// Sort by topic and partition, so each partition's batches sit next to
+	// each other in the object. The sort is stable: batches of one partition
+	// keep their arrival order, and so do their offsets.
+	slices.SortStableFunc(bs, comparePartitionBatch)
 	fb := make([]segmentformat.Batch, len(bs))
 	for i, pb := range bs {
 		fb[i] = segmentformat.Batch{TopicPartition: pb.topicPartition, Records: uint32(pb.records), Data: pb.data}
@@ -175,6 +181,14 @@ func (b *Broker) sealBatches(bs []*partitionBatch) []core.Action {
 	}
 	b.segs = append(b.segs, s)
 	return b.put(s)
+}
+
+// comparePartitionBatch orders batches by topic, then partition.
+func comparePartitionBatch(x, y *partitionBatch) int {
+	if c := strings.Compare(x.topicPartition.Topic, y.topicPartition.Topic); c != 0 {
+		return c
+	}
+	return cmp.Compare(x.topicPartition.Partition, y.topicPartition.Partition)
 }
 
 func (b *Broker) put(s *segment) []core.Action {

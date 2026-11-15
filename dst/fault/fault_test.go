@@ -16,7 +16,55 @@ var (
 	siteCounted  = fault.NewSite("fault test: counted")
 	siteSameSeed = fault.NewSite("fault test: same seed")
 	siteLatchP   = fault.NewSite("fault test: latch p")
+	siteFaultCnt = fault.NewFaultSite("fault test: fault counts")
+	siteFaultQt  = fault.NewFaultSite("fault test: fault quiet counts")
+	siteFaultDr  = fault.NewFaultSite("fault test: fault draws")
 )
+
+func TestFaultCountsCallsAndFires(t *testing.T) {
+	inj := fault.New(rng.New(3))
+	_ = inj.Fault(siteFaultCnt, 1.0)
+	_ = inj.Fault(siteFaultCnt, 1.0)
+	got, ok := inj.Sites()[siteFaultCnt.Name()]
+	if !ok {
+		t.Fatal("Fault site is not in Sites")
+	}
+	want := fault.SiteCount{On: true, Calls: 2, Fired: 2}
+	if got != want {
+		t.Fatalf("counts %+v, want %+v", got, want)
+	}
+}
+
+func TestFaultQuietCountsButDoesNotFire(t *testing.T) {
+	inj := fault.New(rng.New(4))
+	inj.SetQuiet(true)
+	if inj.Fault(siteFaultQt, 1.0) {
+		t.Fatal("Fault fired while quiet")
+	}
+	got := inj.Sites()[siteFaultQt.Name()]
+	want := fault.SiteCount{On: true, Calls: 1, Fired: 0}
+	if got != want {
+		t.Fatalf("counts %+v, want %+v", got, want)
+	}
+}
+
+// TestFaultDrawsLikeChance: Fault must use exactly one draw per call, the same
+// as Rand.Chance, so the streams stay in step.
+func TestFaultDrawsLikeChance(t *testing.T) {
+	const n = 500
+	a, b := rng.New(77), rng.New(77)
+	inj := fault.New(a)
+	for k := range n {
+		got := inj.Fault(siteFaultDr, 0.5)
+		want := b.Chance(0.5)
+		if got != want {
+			t.Fatalf("call %d: Fault=%v, Chance=%v", k, got, want)
+		}
+	}
+	if a.Uint64() != b.Uint64() {
+		t.Fatal("streams differ after Fault calls")
+	}
+}
 
 func TestQuietSilencesFaultOnly(t *testing.T) {
 	r := rng.New(42)
@@ -94,11 +142,6 @@ func TestSitesCountCallsAndFires(t *testing.T) {
 	}
 	if !got.On && got.Fired != 0 {
 		t.Fatalf("an off site fired: %+v", got)
-	}
-	// Fault is not a site.
-	_ = inj.Fault(siteDrop, 1.0)
-	if _, ok := inj.Sites()[siteDrop.Name()]; ok {
-		t.Fatal("Fault must not be counted as a site")
 	}
 	// The result is a copy.
 	s := inj.Sites()
